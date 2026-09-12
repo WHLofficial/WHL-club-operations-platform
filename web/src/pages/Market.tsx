@@ -1,15 +1,19 @@
-// 转会市场（增量 3）：挂牌板（卡柜）+ 单卡详情与出价历史 + 我的出价（冻结章）+ 挂牌表单。
+// 转会市场（增量 3 + 激活切片）：挂牌板（卡柜）+ 单卡详情与出价历史 + 我的出价（冻结章）
+// + 挂牌表单 + 激活别队训练营球员（规则 4.4.2）。
 // 家族口径：mono 数字、口语化文案、操作 toast 反馈、两段式 busy 态。
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import {
   api,
   apiPost,
+  type ActivatableTrainee,
+  type ActivationResult,
   type MarketListing,
   type MarketListingDetail,
   type MarketListings,
   type MyBidRow,
   type SquadOverview,
+  type TraineesResponse,
 } from '../lib/api.ts';
 import { useToast } from '../lib/toast.tsx';
 
@@ -47,10 +51,10 @@ function money(x: number | null | undefined): string {
   return x === null || x === undefined ? '—' : x.toFixed(2);
 }
 
-function deadlineText(iso: string | null): string {
+function deadlineText(iso: string | null, suffix = ' 判定'): string {
   if (!iso) return '—';
   const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 判定`;
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}${suffix}`;
 }
 
 export default function Market() {
@@ -142,6 +146,10 @@ export default function Market() {
 
       {myClub?.isCoach && (
         <ListSection squad={squad} onDone={(msg) => { show(msg); afterBidOrList(); }} onError={(m) => show(m, true)} />
+      )}
+
+      {myClub?.isCoach && (
+        <ActivateSection onDone={(msg) => { show(msg); afterBidOrList(); }} onError={(m) => show(m, true)} />
       )}
 
       <section className="card">
@@ -290,6 +298,93 @@ function ListSection({
           规则价：下限 {bounds.min.toFixed(2)} m（违约金/身价五折取低，不低于 1m）、上限 {bounds.max.toFixed(2)} m（违约金 1.5 倍）。
         </p>
       )}
+      <p className="hint">训练营里的孩子不能自己挂出去——他们只能被别队激活带走（见下方「激活训练营球员」）。</p>
+    </section>
+  );
+}
+
+/* ---------- 激活别队训练营球员（规则 4.4.2） ---------- */
+
+function ActivateSection({ onDone, onError }: { onDone: (msg: string) => void; onError: (msg: string) => void }) {
+  const [data, setData] = useState<TraineesResponse | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  useEffect(() => {
+    api<TraineesResponse>('/api/market/trainees')
+      .then(setData)
+      .catch(() => setData(null));
+  }, []);
+
+  async function activate(t: ActivatableTrainee) {
+    if (busyId !== null) return;
+    setBusyId(t.id);
+    try {
+      const res = await apiPost<ActivationResult>('/api/market/activations', { playerId: t.id });
+      onDone(
+        `已激活 ${t.name}：挂牌 ${res.askPrice.toFixed(2)} m。你要在 ${deadlineText(res.firstBidDeadline, '')} 前落首价，逾期激活作废（还占本窗激活额度）。`,
+      );
+      setData(await api<TraineesResponse>('/api/market/trainees'));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : '激活失败');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="card admin-section">
+      <h3>激活训练营球员</h3>
+      {data === null ? (
+        <p className="muted">训练营名单还没加载出来…</p>
+      ) : data.trainees.length === 0 ? (
+        <p className="hint">
+          别家训练营暂时没有可激活的小将。训练营球员不能自行挂牌，只能走激活转会：激活后按固定{' '}
+          <span className="mono">5.00</span> m 强制挂牌，激活方须在 5 分钟内落首价（期间别队出价无效），此后大家正常竞价。
+        </p>
+      ) : (
+        <>
+          <p className="hint">
+            激活按固定 <span className="mono">5.00</span> m 强制挂牌（规则 4.4.2.3）。激活后你要在 5 分钟内落首价，期间别队出价无效；
+            逾期激活作废，且同一球员一个窗口只能被激活一次。
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>球员</th>
+                  <th>所属俱乐部</th>
+                  <th className="num">年龄</th>
+                  <th className="num">CA / PA</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.trainees.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      <Link to={`/players/${t.id}`}>{t.name}</Link>
+                    </td>
+                    <td>{t.club.name}</td>
+                    <td className="num mono">{t.age ?? '—'}</td>
+                    <td className="num mono">
+                      {t.ca ?? '—'} / {t.pa ?? '—'}
+                    </td>
+                    <td>
+                      {t.activatedThisWindow ? (
+                        <span className="stamp-inline">本窗已激活</span>
+                      ) : (
+                        <button className="btn btn-sm" type="button" disabled={busyId !== null} onClick={() => activate(t)}>
+                          {busyId === t.id ? '激活中…' : '激活（5m）'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -313,8 +408,11 @@ function MarketCard({
         <Link to={`/players/${listing.player.id}`} onClick={(e) => e.stopPropagation()}>
           {listing.player.name}
         </Link>
-        <span className={`badge ${LISTING_STATUS_BADGE[listing.status] ?? 'gray'}`}>
-          {LISTING_STATUS_LABEL[listing.status] ?? listing.status}
+        <span className="badge-stack">
+          {listing.type === 'activation' && <span className="badge purple">激活</span>}
+          <span className={`badge ${LISTING_STATUS_BADGE[listing.status] ?? 'gray'}`}>
+            {LISTING_STATUS_LABEL[listing.status] ?? listing.status}
+          </span>
         </span>
       </div>
       <div className="market-card-sub">
@@ -322,7 +420,7 @@ function MarketCard({
         <span className="mono">{listing.player.pa ?? '—'}</span>
       </div>
       <div className="market-card-price">
-        <span className="stat-label">挂牌价</span>
+        <span className="stat-label">{listing.type === 'activation' ? '激活价' : '挂牌价'}</span>
         <span className="mono">{money(listing.askPrice)} m</span>
       </div>
       <div className="market-card-price">
@@ -330,8 +428,18 @@ function MarketCard({
         <span className="mono gold-text">{money(listing.highestBid)} m</span>
       </div>
       <div className="market-card-foot">
-        <span>{listing.bidCount > 0 ? `${listing.bidCount} 次出价` : '还没人出价'}</span>
-        {listing.status === 'bidding' && <span className="mono">{deadlineText(listing.deadlineAt)}</span>}
+        <span>
+          {listing.firstBidPending
+            ? '等激活方落首价'
+            : listing.bidCount > 0
+              ? `${listing.bidCount} 次出价`
+              : '还没人出价'}
+        </span>
+        {listing.firstBidPending ? (
+          <span className="mono">{deadlineText(listing.activationDeadline, '')} 前须落价</span>
+        ) : (
+          listing.status === 'bidding' && <span className="mono">{deadlineText(listing.deadlineAt)}</span>
+        )}
       </div>
       <div className="market-card-club">{listing.sellerClub.name}</div>
     </button>
@@ -354,8 +462,11 @@ function DetailSection({
   const l = detail.listing;
   const [amount, setAmount] = useState<string>(String(l.nextMinBid));
   const [busy, setBusy] = useState(false);
-  const canBid =
+  const isActivator = myClub !== null && l.activatedBy === myClub.id;
+  const baseCanBid =
     myClub !== null && myClub.isCoach && myClub.id !== l.sellerClub.id && (l.status === 'listed' || l.status === 'bidding') && l.windowOpen;
+  // 激活首价窗：只有激活方能落价，且金额固定为挂牌价
+  const canBid = baseCanBid && !(l.firstBidPending && !isActivator);
   const bidHint = !l.windowOpen
     ? '这单所属的转会窗口已经关了。'
     : l.status === 'pending_review'
@@ -364,13 +475,15 @@ function DetailSection({
         ? '这单已经下架。'
         : myClub?.id === l.sellerClub.id
           ? '自家的挂牌，等别人来出价。'
-          : null;
+          : l.firstBidPending && !isActivator
+            ? `激活首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价（${deadlineText(l.activationDeadline, '')} 前须落价）。`
+            : null;
 
   async function submit() {
     if (busy) return;
     setBusy(true);
     try {
-      await onBid(Number(amount));
+      await onBid(l.firstBidPending && isActivator ? l.askPrice : Number(amount));
     } finally {
       setBusy(false);
     }
@@ -380,15 +493,37 @@ function DetailSection({
     <section className="card">
       <h3>
         {l.player.name} · 挂牌详情
+        {l.type === 'activation' && <span className="badge purple">激活</span>}
         <span className={`badge ${LISTING_STATUS_BADGE[l.status] ?? 'gray'}`}>{LISTING_STATUS_LABEL[l.status] ?? l.status}</span>
       </h3>
       <p className="hint">
-        卖方 {l.sellerClub.name} · 挂牌价 {money(l.askPrice)} m · 违约金 {money(l.releaseFee)} m ·{' '}
-        {l.status === 'bidding' ? <>截止判定 <span className="mono">{deadlineText(l.deadlineAt)}</span></> : (l.deadlineNote ?? '尚未进入竞价')}
+        卖方 {l.sellerClub.name} · {l.type === 'activation' ? `激活价 ${money(l.askPrice)} m（${l.activatorName ?? '激活方'} 发起）` : `挂牌价 ${money(l.askPrice)} m`} ·
+        违约金 {money(l.releaseFee)} m ·{' '}
+        {l.firstBidPending
+          ? <>激活首价窗 <span className="mono">{deadlineText(l.activationDeadline, '')}</span> 前须落价</>
+          : l.status === 'bidding'
+            ? <>截止判定 <span className="mono">{deadlineText(l.deadlineAt)}</span></>
+            : (l.deadlineNote ?? '尚未进入竞价')}
       </p>
+      {l.type === 'activation' && (
+        <p className="hint">
+          激活转会的孩子仍持训练营合同（固定 0.75m / 违约金 5m），过户后照旧在买方训练营。
+        </p>
+      )}
       {bidHint && <p className="hint">{bidHint}</p>}
 
-      {canBid && (
+      {canBid && l.firstBidPending && isActivator && (
+        <div className="inline-form">
+          <button className="btn" type="button" disabled={busy} onClick={submit}>
+            {busy ? '出价中…' : `落激活首价（${money(l.askPrice)} m）`}
+          </button>
+          <span className="hint">
+            激活金额固定，出价即冻结；{deadlineText(l.activationDeadline, '')} 前不落价，激活作废还占本窗额度。
+          </span>
+        </div>
+      )}
+
+      {canBid && !l.firstBidPending && (
         <div className="inline-form">
           <div className="field">
             <label htmlFor="bid-amount">出价（m）</label>

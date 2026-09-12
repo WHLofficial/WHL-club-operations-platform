@@ -291,6 +291,9 @@ export interface MarketListing {
   lastBidAt: string | null;
   highestBid: number | null;
   bidCount: number;
+  activatedBy: number | null;
+  activationDeadline: string | null;
+  firstBidPending: boolean;
   deadlineAt: string | null;
   deadlineNote: string | null;
 }
@@ -306,8 +309,33 @@ export interface MarketListingDetail {
     windowOpen: boolean;
     nextMinBid: number;
     bidStepMin: number;
+    activatorName: string | null;
   };
   bids: { id: number; clubId: number; clubName: string; amount: number; createdAt: string; status: string }[];
+}
+
+export interface ActivatableTrainee {
+  id: number;
+  name: string;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  club: { id: number; name: string };
+  activationFee: number;
+  activatedThisWindow: boolean;
+}
+
+export interface TraineesResponse {
+  club: { id: number; name: string } | null;
+  trainees: ActivatableTrainee[];
+}
+
+export interface ActivationResult {
+  ok: boolean;
+  listingId: number;
+  askPrice: number;
+  firstBidDeadline: string;
 }
 
 export interface BidPlaceResult {

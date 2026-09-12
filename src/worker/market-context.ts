@@ -13,6 +13,7 @@ export interface MarketContext {
   calendar: TradeCalendar;
   taxRates: { r1: number; r2: number; r3: number };
   auctionTaxRate: number;
+  activationWindowMin: number;
 }
 
 function num(v: number | null, fallback: number): number {
@@ -21,7 +22,7 @@ function num(v: number | null, fallback: number): number {
 
 export async function loadMarketContext(db: D1Database): Promise<MarketContext> {
   const config = createConfigService(db);
-  const [floorCoefs, capCoef, bidStep, delistRate, deadline, silence, calendarRaw, taxRatesRaw, auctionRate] = await Promise.all([
+  const [floorCoefs, capCoef, bidStep, delistRate, deadline, silence, calendarRaw, taxRatesRaw, auctionRate, activationMin] = await Promise.all([
     config.getNumberList('listing_floor_coefs'),
     config.getNumber('listing_cap_coef'),
     config.getNumber('bid_step_min'),
@@ -31,6 +32,7 @@ export async function loadMarketContext(db: D1Database): Promise<MarketContext> 
     config.get('trade_calendar'),
     config.getNumberList('tax_rates'),
     config.getNumber('auction_tax_rate'),
+    config.getNumber('activation_window_min'),
   ]);
   const rates = taxRatesRaw && taxRatesRaw.length === 3 ? taxRatesRaw : [0.1, 0.2, 0.4];
   return {
@@ -47,5 +49,6 @@ export async function loadMarketContext(db: D1Database): Promise<MarketContext> 
     calendar: parseTradeCalendar(calendarRaw),
     taxRates: { r1: rates[0], r2: rates[1], r3: rates[2] },
     auctionTaxRate: num(auctionRate, 0.5),
+    activationWindowMin: num(activationMin, 5),
   };
 }

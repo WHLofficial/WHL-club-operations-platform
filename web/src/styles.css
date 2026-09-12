@@ -354,6 +354,12 @@ a.card:hover {
   color: var(--gold-deep);
 }
 
+.badge-stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* ---- 提示条 ---- */
 
 .banner {

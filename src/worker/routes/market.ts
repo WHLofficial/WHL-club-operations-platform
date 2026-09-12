@@ -12,6 +12,7 @@ import {
   shanghaiDateStr,
   validateBidAmount,
   round2,
+  TRAINEE_ACTIVATION_FEE,
 } from '../../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from '../seasons.ts';
 import { loadMarketContext } from '../market-context.ts';
@@ -40,6 +41,9 @@ interface ListingRow {
   deadline_note: string | null;
   season: number | null;
   window_seq: number | null;
+  activated_by: number | null;
+  activation_deadline: string | null;
+  activator_name?: string | null;
   player_name: string;
   position: string | null;
   age: number | null;
@@ -79,7 +83,7 @@ app.get('/market/listings', async (c) => {
   const ph = statuses.map(() => '?').join(', ');
   const rows = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
-            l.listed_day, l.deadline_note, l.season, l.window_seq,
+            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline,
             p.name AS player_name, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name
      FROM listings l
@@ -132,6 +136,9 @@ app.get('/market/listings', async (c) => {
         lastBidAt: r.last_bid_at,
         highestBid: a?.highest ?? null,
         bidCount: a?.count ?? 0,
+        activatedBy: r.activated_by,
+        activationDeadline: r.activation_deadline,
+        firstBidPending: r.type === 'activation' && (a?.count ?? 0) === 0 && r.activated_by !== null,
         deadlineAt,
         deadlineNote: r.deadline_note,
       };
@@ -162,13 +169,28 @@ app.post('/market/listings', async (c) => {
   if (!player) throw new HttpError(404, '球员不存在');
   if (player.club_id !== club.id) throw new HttpError(400, '只能挂牌自己队里的球员');
   if (player.status !== 'normal') {
-    throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '当前状态不能挂牌（训练营球员走激活/转正路径，暂不开放挂牌）');
+    throw new HttpError(
+      400,
+      player.status === 'listed'
+        ? '这名球员已经在挂牌流程里了'
+        : player.status === 'trainee'
+          ? '训练营球员不挂牌：只能被其他球队按激活转会带走（固定 5m）'
+          : '当前状态不能挂牌',
+    );
   }
 
   const dup = await c.env.DB.prepare(`SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'pending_review') LIMIT 1`)
     .bind(playerId)
     .first<{ id: number }>();
   if (dup) throw new HttpError(400, '这名球员已经有一单在市场里了，等它结束再挂');
+
+  // 训练营球员不可自行挂牌（4.3.4 合同固定、4.4.2 只走激活转会），唯一出口是激活挂牌
+  const trainee = await c.env.DB.prepare(`SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1`)
+    .bind(playerId)
+    .first<{ contract_type: string }>();
+  if (trainee?.contract_type === 'trainee') {
+    throw new HttpError(400, '训练营球员不挂牌：只能被其他球队按激活转会带走（固定 5m）');
+  }
 
   const contract = await c.env.DB.prepare('SELECT release_fee FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(playerId)
@@ -214,6 +236,165 @@ app.post('/market/listings', async (c) => {
   );
 });
 
+// GET /api/market/trainees —— 各队训练营球员（可被激活名单，教练侧）
+app.get('/market/trainees', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw);
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) return c.json({ club: null, trainees: [] });
+
+  const win = await getOpenWindow(c.env.DB);
+  const rows = await c.env.DB.prepare(
+    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa, p.club_id, cl.name AS club_name
+     FROM players p JOIN clubs cl ON cl.id = p.club_id
+     WHERE p.status = 'trainee' AND p.club_id IS NOT NULL AND p.club_id != ?
+     ORDER BY cl.name, p.id LIMIT 50`,
+  )
+    .bind(club.id)
+    .all<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_id: number; club_name: string }>();
+
+  // 本窗口已被激活过的标记（4.4.2.1 一窗一次；失效激活也占额）
+  const activated = new Set<number>();
+  if (win) {
+    const used = await c.env.DB.prepare(
+      `SELECT player_id FROM listings WHERE type = 'activation' AND season = ? AND window_seq = ? AND player_id IN (${rows.results.map(() => '?').join(', ') || 'NULL'})`,
+    )
+      .bind(win.season, win.windowSeq, ...rows.results.map((r) => r.id))
+      .all<{ player_id: number }>();
+    for (const r of used.results) activated.add(r.player_id);
+  }
+
+  return c.json({
+    club: { id: club.id, name: club.name },
+    trainees: rows.results.map((r) => ({
+      id: r.id,
+      name: r.name,
+      position: r.position,
+      age: r.age,
+      ca: r.ca,
+      pa: r.pa,
+      club: { id: r.club_id, name: r.club_name },
+      activationFee: TRAINEE_ACTIVATION_FEE,
+      activatedThisWindow: activated.has(r.id),
+    })),
+  });
+});
+
+// POST /api/market/activations —— 激活挂牌（4.4.2）：对别队训练营球员按固定 5m 强制挂牌，
+// 激活方须在出价窗内落首价（期间他队出价无效），否则激活无效。
+app.post('/market/activations', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw);
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+
+  const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown } | null;
+  if (!body) throw new HttpError(400, '请求格式不对');
+  const playerId = Number(body.playerId);
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
+
+  const win = await getOpenWindow(c.env.DB);
+  if (!win) throw new HttpError(409, '转会窗口没开，现在不能激活', 'no_window');
+
+  const player = await c.env.DB.prepare('SELECT id, club_id, status FROM players WHERE id = ?')
+    .bind(playerId)
+    .first<{ id: number; club_id: number | null; status: string }>();
+  if (!player || player.club_id === null) throw new HttpError(404, '球员不存在或没有归属');
+  if (player.club_id === club.id) throw new HttpError(400, '不能激活自己队里的球员');
+  if (player.status !== 'trainee') {
+    throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '只有训练营球员走激活转会');
+  }
+
+  const contract = await c.env.DB.prepare(
+    'SELECT contract_type, effective_from FROM contracts WHERE player_id = ? AND is_active = 1',
+  )
+    .bind(playerId)
+    .first<{ contract_type: string; effective_from: string | null }>();
+  if (!contract || contract.contract_type !== 'trainee') {
+    throw new HttpError(400, '找不到这名球员的训练营合同，先让管理组核对合同');
+  }
+
+  // 效力校验（4.4.2.1）：本窗口刚签约（效力起点不早于窗口开启）的球员不可被激活。
+  // 合同没写效力起点时无法判定，放行（导入数据补齐后自然生效）。
+  const winRow = await c.env.DB.prepare('SELECT opened_at FROM season_windows WHERE season = ? AND window_seq = ?')
+    .bind(win.season, win.windowSeq)
+    .first<{ opened_at: string | null }>();
+  if (
+    contract.effective_from !== null &&
+    winRow?.opened_at != null &&
+    Date.parse(contract.effective_from) >= Date.parse(winRow.opened_at)
+  ) {
+    throw new HttpError(409, '本窗口刚签约的球员不可被激活（效力未满一窗）');
+  }
+
+  // 一窗一次（4.4.2.1）：失效激活也占额（§6.2 假设口径）
+  const prior = await c.env.DB.prepare(
+    `SELECT id FROM listings WHERE player_id = ? AND type = 'activation' AND season = ? AND window_seq = ? LIMIT 1`,
+  )
+    .bind(playerId, win.season, win.windowSeq)
+    .first<{ id: number }>();
+  if (prior) throw new HttpError(409, '这名球员本窗口已经被激活过了');
+
+  // 激活方必须在出价窗内落价，否则激活作废还占一窗一次额度——创建时就挡掉明显付不起的
+  const available = await availableBalance(c.env.DB, club.id);
+  if (round2(available) < TRAINEE_ACTIVATION_FEE) {
+    throw new HttpError(
+      400,
+      `可用资金不足：激活后要在出价窗内出价 ${TRAINEE_ACTIVATION_FEE} m，当前可支配 ${round2(available)} m`,
+    );
+  }
+
+  const ctx = await loadMarketContext(c.env.DB);
+  const listedAt = new Date();
+  const deadline = new Date(listedAt.getTime() + ctx.activationWindowMin * 60_000);
+  const audit = createAuditStatement(c.env.DB);
+  const statements = [
+    c.env.DB.prepare(
+      `UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'trainee'`,
+    ).bind(playerId, player.club_id),
+    c.env.DB.prepare(
+      `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, activated_by, activation_deadline, season, window_seq)
+       VALUES (?, ?, 'activation', ?, 'listed', ${nowSql()}, ?, ?, ?, ?, ?)`,
+    ).bind(
+      playerId,
+      player.club_id,
+      TRAINEE_ACTIVATION_FEE,
+      shanghaiDateStr(listedAt.getTime()),
+      club.id,
+      deadline.toISOString(),
+      win.season,
+      win.windowSeq,
+    ),
+    audit({
+      actor: user.id,
+      action: 'activation_create',
+      targetType: 'listing',
+      targetId: null,
+      after: { playerId, sellerClubId: player.club_id, byClubId: club.id, fee: TRAINEE_ACTIVATION_FEE, season: win.season, windowSeq: win.windowSeq },
+    }),
+  ];
+  let results: { meta: { changes: number; last_row_id: number } }[];
+  try {
+    results = await c.env.DB.batch(statements);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('UNIQUE')) {
+      throw new HttpError(409, '这名球员刚好被别人抢先激活了');
+    }
+    throw err;
+  }
+  if ((results[0].meta.changes ?? 0) === 0 || (results[1].meta.changes ?? 0) === 0) {
+    throw new HttpError(409, '激活没落库，球员状态可能刚被改过，刷新再试');
+  }
+
+  return c.json(
+    {
+      ok: true,
+      listingId: Number(results[1].meta.last_row_id),
+      askPrice: TRAINEE_ACTIVATION_FEE,
+      firstBidDeadline: deadline.toISOString(),
+    },
+    201,
+  );
+});
+
 // GET /api/market/listings/:id —— 详情 + 出价历史
 app.get('/market/listings/:id', async (c) => {
   await settleOverdue(c.env);
@@ -221,12 +402,13 @@ app.get('/market/listings/:id', async (c) => {
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
   const listing = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
-            l.listed_day, l.deadline_note, l.season, l.window_seq,
+            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline,
             p.name AS player_name, p.position, p.age, p.ca, p.pa,
-            cl.name AS seller_name
+            cl.name AS seller_name, ca2.name AS activator_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
      JOIN clubs cl ON cl.id = l.seller_club_id
+     LEFT JOIN clubs ca2 ON ca2.id = l.activated_by
      WHERE l.id = ?`,
   )
     .bind(id)
@@ -284,6 +466,10 @@ app.get('/market/listings/:id', async (c) => {
       windowOpen,
       nextMinBid,
       bidStepMin: ctx.bidStepMin,
+      activatedBy: listing.activated_by,
+      activatorName: listing.activator_name ?? null,
+      activationDeadline: listing.activation_deadline,
+      firstBidPending: listing.type === 'activation' && bids.results.length === 0 && listing.activated_by !== null,
     },
     bids: bids.results.map((b) => ({
       id: b.id,
@@ -312,9 +498,21 @@ app.post('/market/listings/:id/bids', async (c) => {
   // 惰性结算先跑：可能这单刚好截止，出价要被拒
   await settleOverdue(c.env);
 
-  const listing = await c.env.DB.prepare('SELECT id, seller_club_id, ask_price, status, season, window_seq FROM listings WHERE id = ?')
+  const listing = await c.env.DB.prepare(
+    'SELECT id, seller_club_id, type, ask_price, status, activated_by, activation_deadline, season, window_seq FROM listings WHERE id = ?',
+  )
     .bind(id)
-    .first<{ id: number; seller_club_id: number; ask_price: number; status: string; season: number | null; window_seq: number | null }>();
+    .first<{
+      id: number;
+      seller_club_id: number;
+      type: string;
+      ask_price: number;
+      status: string;
+      activated_by: number | null;
+      activation_deadline: string | null;
+      season: number | null;
+      window_seq: number | null;
+    }>();
   if (!listing) throw new HttpError(404, '这单挂牌不存在');
   if (listing.seller_club_id === club.id) throw new HttpError(403, '不能对自己俱乐部的挂牌出价');
   if (listing.status !== 'listed' && listing.status !== 'bidding') {
@@ -324,10 +522,22 @@ app.post('/market/listings/:id/bids', async (c) => {
     throw new HttpError(409, '这单所属的转会窗口已经关了');
   }
 
-  const highestRow = await c.env.DB.prepare(`SELECT MAX(amount) AS highest FROM bids WHERE listing_id = ? AND status = 'active'`)
+  const bidStats = await c.env.DB.prepare(`SELECT MAX(amount) AS highest, COUNT(*) AS total FROM bids WHERE listing_id = ?`)
     .bind(id)
-    .first<{ highest: number | null }>();
-  const bidError = validateBidAmount(amount, highestRow?.highest ?? null, listing.ask_price);
+    .first<{ highest: number | null; total: number }>();
+  const highest = bidStats?.highest ?? null;
+  const firstBidPending = listing.type === 'activation' && (bidStats?.total ?? 0) === 0;
+  if (firstBidPending) {
+    // 4.4.2.2：出价窗内只有激活方能落首价，他队出价无效；出价窗已过则该单已被惰性结算作废
+    if (listing.activated_by !== club.id) {
+      throw new HttpError(403, '激活挂牌的首价窗内只有激活方可以出价，等激活方落价后再竞价');
+    }
+    if (amount !== TRAINEE_ACTIVATION_FEE) {
+      throw new HttpError(400, `激活出价固定为 ${TRAINEE_ACTIVATION_FEE} m（激活金额不受竞价规则调整）`);
+    }
+  }
+
+  const bidError = validateBidAmount(amount, highest, listing.ask_price);
   if (bidError) throw new HttpError(400, bidError);
 
   // 可用余额预检（触发器 0005 在事务内兜底同一公式，这里给可读报错）
@@ -362,9 +572,10 @@ app.post('/market/listings/:id/bids', async (c) => {
        WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'
          AND id NOT IN (SELECT hold_id FROM bids WHERE listing_id = ? AND status = 'active' AND hold_id IS NOT NULL)`,
     ).bind(id, id),
-    // 5) 挂牌进入竞价态，静默计时重置
+    // 5) 挂牌进入竞价态，静默计时重置；激活首价落定即清出价窗（他队此后可正常竞价）
     c.env.DB.prepare(
-      `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()} WHERE id = ? AND status IN ('listed', 'bidding')`,
+      `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}${firstBidPending ? ', activation_deadline = NULL' : ''}
+       WHERE id = ? AND status IN ('listed', 'bidding')`,
     ).bind(id),
     audit({
       actor: user.id,

@@ -4,6 +4,9 @@
 
 export const LISTING_ABSOLUTE_FLOOR = 1;
 
+// 训练营球员激活金额（4.4.2.3(3)：固定 5m，不受挂牌价上下限规则限制；训练营合同违约金同为固定 5m，4.3.4(1)）
+export const TRAINEE_ACTIVATION_FEE = 5;
+
 export interface ListingPriceBounds {
   min: number;
   max: number;

@@ -66,11 +66,13 @@ export async function completeTransfer(
 
   const ctx = await loadMarketContext(db);
   const contract = await db
-    .prepare('SELECT release_fee FROM contracts WHERE player_id = ? AND is_active = 1')
+    .prepare('SELECT release_fee, contract_type FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(transfer.player_id)
-    .first<{ release_fee: number | null }>();
+    .first<{ release_fee: number | null; contract_type: string }>();
   const rc = contract?.release_fee ?? 0;
   const tax = transferTax(transfer.fee, rc, ctx.taxRates);
+  // 训练营球员经激活转会后仍是训练营球员（合同原样过户）；普通转会落一线队
+  const playerStatus = contract?.contract_type === 'trainee' ? 'trainee' : 'normal';
 
   const guard = { sql: `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'`, params: [transferId] };
   const audit = createAuditStatement(db);
@@ -132,10 +134,10 @@ export async function completeTransfer(
   statements.push(
     db
       .prepare(
-        `UPDATE players SET club_id = ?, status = 'normal', updated_at = ${nowSql()}
+        `UPDATE players SET club_id = ?, status = ?, updated_at = ${nowSql()}
          WHERE id = ? AND (club_id IS ? OR club_id = ?)`,
       )
-      .bind(transfer.to_club_id, transfer.player_id, transfer.from_club_id, transfer.from_club_id),
+      .bind(transfer.to_club_id, playerStatus, transfer.player_id, transfer.from_club_id, transfer.from_club_id),
     db
       .prepare(`UPDATE contracts SET club_id = ? WHERE player_id = ? AND is_active = 1 AND club_id IS ?`)
       .bind(transfer.to_club_id, transfer.player_id, transfer.from_club_id),
@@ -185,6 +187,12 @@ export async function rejectTransfer(
   if (transfer.status === 'rejected') return { status: 'already' };
   if (transfer.status !== 'pending_review') throw new HttpError(409, `转会单当前状态是 ${transfer.status}，不能驳回`);
   const listingId = listingIdFromTransfer(transfer);
+  // 球员还原状态按合同类型：激活挂牌还原回训练营，普通挂牌还原回一线队
+  const contract = await db
+    .prepare('SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1')
+    .bind(transfer.player_id)
+    .first<{ contract_type: string }>();
+  const playerStatus = contract?.contract_type === 'trainee' ? 'trainee' : 'normal';
 
   const audit = createAuditStatement(db);
   const statements: D1PreparedStatement[] = [
@@ -198,8 +206,8 @@ export async function rejectTransfer(
       .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '审核驳回' WHERE id = ? AND status = 'pending_review'`)
       .bind(listingId),
     db
-      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
-      .bind(transfer.player_id),
+      .prepare(`UPDATE players SET status = ?, updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
+      .bind(playerStatus, transfer.player_id),
   ];
   const statusStmtIndex = statements.length;
   statements.push(

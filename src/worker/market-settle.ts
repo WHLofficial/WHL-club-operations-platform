@@ -1,7 +1,8 @@
 // 惰性结算（TECH_DESIGN §6.5）：任何挂牌相关请求与 cron tick 都先跑一遍 settleOverdue。
 // 1) bidding 且交易时段静默满 3h → pending_review（transfer + 审核任务一并建好，UNIQUE 幂等）
 // 2) 挂牌所属窗口已 closed：listed（无人出价）→ delisted + 下架费；bidding → 强制进入待审
-// 3) pending_review 缺单据的自愈（结算与建单非原子崩溃后补齐）
+// 3) 激活挂牌（4.4.2.2）出价窗已过而激活方未落价 → 激活无效（不收费，球员还原训练营态）
+// 4) pending_review 缺单据的自愈（结算与建单非原子崩溃后补齐）
 // 全部幂等：状态迁移走守卫 UPDATE，重复执行无副作用。
 import type { Env } from './env.ts';
 import { bidDeadline, delistFee, type TradeCalendar } from '../core/market-rules.ts';
@@ -16,6 +17,7 @@ function nowSql() {
 export interface SettleSummary {
   settled: number;
   delisted: number;
+  voided: number;
   notesUpdated: number;
   healed: number;
 }
@@ -24,6 +26,7 @@ interface ActiveListingRow {
   id: number;
   player_id: number;
   seller_club_id: number;
+  type: string;
   ask_price: number;
   status: string;
   listed_day: string | null;
@@ -37,9 +40,15 @@ export interface ListingCore {
   id: number;
   player_id: number;
   seller_club_id: number;
+  type?: string;
   ask_price: number;
   season: number | null;
   window_seq: number | null;
+}
+
+// listings.type → transfers.type 词汇映射（激活挂牌成单记 activation，其余按普通转会）
+export function transferTypeFor(listingType: string | null | undefined): string {
+  return listingType === 'activation' ? 'activation' : 'transfer';
 }
 
 // bidding → pending_review：transfer（idempotency_key = listing:{id}，UNIQUE 幂等）+ 审核任务
@@ -57,7 +66,8 @@ export async function settleListingForReview(
     db
       .prepare(
         `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
-         SELECT 'transfer', l.player_id, l.seller_club_id,
+         SELECT CASE l.type WHEN 'activation' THEN 'activation' ELSE 'transfer' END,
+                l.player_id, l.seller_club_id,
                 (SELECT club_id FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
                 (SELECT amount FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
                 'pending_review', l.season, l.window_seq, ?, ${nowSql()}
@@ -105,32 +115,43 @@ export async function settleListingForReview(
   }
 }
 
-// 无人出价的挂牌在窗尾下架（4.4.7）：挂牌方付下架费（流水幂等闸防重复扣）
+// 无人出价的挂牌在窗尾下架（4.4.7）：挂牌方付下架费（流水幂等闸防重复扣）。
+// 激活挂牌例外：卖家没主动挂牌，激活失效/窗尾收口都不收下架费，球员还原训练营态。
 export async function delistUnbid(
   db: D1Database,
   listing: ListingCore,
   ctx: MarketContext,
   actor: number | null,
 ): Promise<'delisted' | 'already'> {
-  const fee = delistFee(listing.ask_price, ctx.delistFeeRate);
+  const isActivation = listing.type === 'activation';
+  const fee = isActivation ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
   const audit = createAuditStatement(db);
   const statements = [
     db
-      .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '窗口结束无人出价' WHERE id = ? AND status = 'listed'`)
-      .bind(listing.id),
+      .prepare(
+        `UPDATE listings SET status = 'delisted', deadline_note = ? WHERE id = ? AND status = 'listed'`,
+      )
+      .bind(isActivation ? '窗口结束激活方仍未落价，激活无效' : '窗口结束无人出价', listing.id),
     db
-      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
-      .bind(listing.player_id),
-    ...ledgerMovement(db, {
-      clubId: listing.seller_club_id,
-      delta: -fee,
-      kind: 'delist_fee',
-      refType: 'listing',
-      refId: listing.id,
-      memo: '无人出价下架费',
-      guardSql: `(SELECT status FROM listings WHERE id = ?) = 'delisted'`,
-      guardParams: [listing.id],
-    }),
+      .prepare(
+        `UPDATE players SET status = CASE WHEN (
+           SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1
+         ) = 'trainee' THEN 'trainee' ELSE 'normal' END, updated_at = ${nowSql()}
+         WHERE id = ? AND status = 'listed'`,
+      )
+      .bind(listing.player_id, listing.player_id),
+    ...(fee > 0
+      ? ledgerMovement(db, {
+          clubId: listing.seller_club_id,
+          delta: -fee,
+          kind: 'delist_fee',
+          refType: 'listing',
+          refId: listing.id,
+          memo: '无人出价下架费',
+          guardSql: `(SELECT status FROM listings WHERE id = ?) = 'delisted'`,
+          guardParams: [listing.id],
+        })
+      : []),
     db
       .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`)
       .bind(listing.id),
@@ -139,11 +160,35 @@ export async function delistUnbid(
       action: 'listing_delist',
       targetType: 'listing',
       targetId: listing.id,
-      after: { fee, reason: 'window_end_no_bid' },
+      after: { fee, reason: isActivation ? 'activation_invalid' : 'window_end_no_bid' },
     }),
   ];
   const results = await db.batch(statements);
   return (results[0]?.meta.changes ?? 0) > 0 ? 'delisted' : 'already';
+}
+
+// 激活出价窗失效（4.4.2.2）：激活方未在窗口内落价 → 激活无效。卖家没收下架费，
+// 球员还原训练营态；一窗一次额度已消耗（§6.2 假设，文档定稿口径）。
+export async function voidExpiredActivation(db: D1Database, listingId: number, playerId: number, actor: number | null): Promise<boolean> {
+  const audit = createAuditStatement(db);
+  const statements = [
+    db
+      .prepare(
+        `UPDATE listings SET status = 'delisted', deadline_note = '激活方未在出价窗内落价，激活无效', activation_deadline = NULL
+         WHERE id = ? AND status = 'listed'`,
+      )
+      .bind(listingId),
+    db.prepare(`UPDATE players SET status = 'trainee', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`).bind(playerId),
+    audit({
+      actor,
+      action: 'activation_void',
+      targetType: 'listing',
+      targetId: listingId,
+      after: { playerId, reason: 'activator_no_bid' },
+    }),
+  ];
+  const results = await db.batch(statements);
+  return (results[0]?.meta.changes ?? 0) > 0;
 }
 
 function noteText(day: string, hours: [number, number], calendar: TradeCalendar): string {
@@ -158,11 +203,26 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
   const ctx = await loadMarketContext(db);
   const now = opts.now ?? new Date();
   const actor = opts.actor ?? null;
-  const summary: SettleSummary = { settled: 0, delisted: 0, notesUpdated: 0, healed: 0 };
+  const summary: SettleSummary = { settled: 0, delisted: 0, voided: 0, notesUpdated: 0, healed: 0 };
+
+  // 激活首价窗失效（4.4.2.2）：先于窗尾收口处理，避免给卖家误收下架费
+  const expired = await db
+    .prepare(
+      `SELECT l.id, l.player_id FROM listings l
+       WHERE l.type = 'activation' AND l.status = 'listed'
+         AND l.activated_by IS NOT NULL AND l.activation_deadline IS NOT NULL AND l.activation_deadline < ?
+         AND NOT EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id)
+       ORDER BY l.id LIMIT 100`,
+    )
+    .bind(now.toISOString())
+    .all<{ id: number; player_id: number }>();
+  for (const row of expired.results) {
+    if (await voidExpiredActivation(db, row.id, row.player_id, actor)) summary.voided++;
+  }
 
   const active = await db
     .prepare(
-      `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.status, l.listed_day, l.last_bid_at, l.season, l.window_seq,
+      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_day, l.last_bid_at, l.season, l.window_seq,
               sw.status AS window_status
        FROM listings l
        LEFT JOIN season_windows sw ON sw.season = l.season AND sw.window_seq = l.window_seq
@@ -176,6 +236,7 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
       id: row.id,
       player_id: row.player_id,
       seller_club_id: row.seller_club_id,
+      type: row.type,
       ask_price: row.ask_price,
       season: row.season,
       window_seq: row.window_seq,
