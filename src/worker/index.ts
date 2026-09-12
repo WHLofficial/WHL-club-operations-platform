@@ -5,13 +5,16 @@ import { getAuthUser } from '../lib/session.ts';
 import clubsRoutes from './routes/clubs.ts';
 import playersRoutes from './routes/players.ts';
 import registrationRoutes from './routes/registration.ts';
+import marketRoutes from './routes/market.ts';
 import adminRoutes from './routes/admin.ts';
+import { settleOverdue } from './market-settle.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.route('/api', clubsRoutes);
 app.route('/api', playersRoutes);
 app.route('/api', registrationRoutes);
+app.route('/api', marketRoutes);
 app.route('/api/admin', adminRoutes);
 
 app.onError((err, c) => {
@@ -58,12 +61,30 @@ app.get('/api/me', async (c) => {
   return c.json({ user });
 });
 
+// 手动触发惰性结算（附录 A 内部端点）：X-Cron-Key 对不上 403；本地未配 secret 时放行便于联调
+app.post('/api/cron/tick', async (c) => {
+  const expected = c.env.CRON_KEY;
+  if (expected) {
+    const provided = c.req.header('X-Cron-Key') ?? c.req.query('key');
+    if (provided !== expected) throw new HttpError(403, 'cron 密钥不对');
+  }
+  return c.json(await runSettleTick(c.env));
+});
+
 app.notFound((c) => c.json({ error: '接口不存在' }, 404));
 
 export { app };
 
+// 惰性结算统一入口（§6.5）：cron 与手动 tick 共用；幂等可重入
+async function runSettleTick(env: Env) {
+  const summary = await settleOverdue(env);
+  return { ok: true, ...summary };
+}
+
 export default {
   fetch: app.fetch,
-  // 惰性结算 cron 兜底（§6.5）：扫描/结算随增量 3+ 落地，当前为占位
-  scheduled() {},
+  // cron 兜底（wrangler.jsonc triggers */5）：扫描/结算全部挂牌状态机
+  scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
+    ctx.waitUntil(runSettleTick(env));
+  },
 };

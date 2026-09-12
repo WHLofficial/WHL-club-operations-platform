@@ -11,6 +11,7 @@ import { confirmContractsImport, previewContractsImport } from '../contracts-imp
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
+import { completeTransfer, rejectTransfer } from '../transfers.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -539,6 +540,116 @@ app.get('/compliance', async (c) => {
     }),
   );
   return c.json({ season, clubs: report });
+});
+
+// ---- 审核队列（附录 A〔3〕：转会成交确认；关键节点人工审） ----
+
+interface ReviewTaskRow {
+  id: number;
+  status: string;
+  payload: string | null;
+  decided_by: number | null;
+  decided_at: string | null;
+  note: string | null;
+  transfer_id: number;
+  transfer_status: string;
+  transfer_type: string;
+  fee: number | null;
+  tax: number | null;
+  player_id: number;
+  player_name: string;
+  position: string | null;
+  ca: number | null;
+  pa: number | null;
+  from_name: string | null;
+  to_name: string | null;
+}
+
+// GET /api/admin/reviews?status=open —— 成交确认队列
+app.get('/reviews', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const status = c.req.query('status') ?? 'open';
+  if (!['open', 'approved', 'rejected', 'all'].includes(status)) throw new HttpError(400, 'status 只能是 open / approved / rejected / all');
+  const where = status === 'all' ? "rt.type = 'transfer_confirm'" : `rt.type = 'transfer_confirm' AND rt.status = ?`;
+  const rows = await c.env.DB.prepare(
+    `SELECT rt.id, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
+            t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax,
+            t.player_id, p.name AS player_name, p.position, p.ca, p.pa,
+            cf.name AS from_name, ct.name AS to_name
+     FROM review_tasks rt
+     JOIN transfers t ON t.id = rt.ref_id
+     JOIN players p ON p.id = t.player_id
+     LEFT JOIN clubs cf ON cf.id = t.from_club_id
+     LEFT JOIN clubs ct ON ct.id = t.to_club_id
+     WHERE ${where}
+     ORDER BY rt.id DESC LIMIT 100`,
+  )
+    .bind(...(status === 'all' ? [] : [status]))
+    .all<ReviewTaskRow>();
+  return c.json({
+    reviews: rows.results.map((r) => ({
+      id: r.id,
+      status: r.status,
+      payload: r.payload ? (JSON.parse(r.payload) as Record<string, unknown>) : null,
+      note: r.note,
+      decidedAt: r.decided_at,
+      transfer: {
+        id: r.transfer_id,
+        type: r.transfer_type,
+        status: r.transfer_status,
+        fee: r.fee,
+        tax: r.tax,
+        player: { id: r.player_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
+        fromClubName: r.from_name,
+        toClubName: r.to_name,
+      },
+    })),
+  });
+});
+
+async function loadOpenReviewTask(db: D1Database, taskId: number) {
+  const task = await db
+    .prepare(`SELECT id, ref_id, status FROM review_tasks WHERE id = ? AND type = 'transfer_confirm'`)
+    .bind(taskId)
+    .first<{ id: number; ref_id: number; status: string }>();
+  if (!task) throw new HttpError(404, '审核任务不存在');
+  if (task.status !== 'open') throw new HttpError(409, '这条审核已经处理过了');
+  return task;
+}
+
+// POST /api/admin/reviews/:id/approve —— 批准成交
+// 增量 3 桥接：批准即过户（划款+税+过户一步到位）；增量 4 起改为开启签约谈判，成约才过户。
+app.post('/reviews/:id/approve', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const taskId = Number(c.req.param('id'));
+  if (!Number.isInteger(taskId)) throw new HttpError(400, '审核任务 ID 不对');
+  const body = (await readJson(c)) as { note?: unknown } | null;
+  const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
+  const task = await loadOpenReviewTask(c.env.DB, taskId);
+  const result = await completeTransfer(c.env, task.ref_id, user.id, {
+    taskId,
+    decidedBy: user.id,
+    decision: 'approved',
+    note: note ?? undefined,
+  });
+  return c.json({ ok: true, ...result });
+});
+
+// POST /api/admin/reviews/:id/reject —— 驳回（解冻资金，挂牌下架不收费）
+app.post('/reviews/:id/reject', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const taskId = Number(c.req.param('id'));
+  if (!Number.isInteger(taskId)) throw new HttpError(400, '审核任务 ID 不对');
+  const body = (await readJson(c)) as { note?: unknown } | null;
+  const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
+  const task = await loadOpenReviewTask(c.env.DB, taskId);
+  const result = await rejectTransfer(c.env, task.ref_id, user.id, {
+    taskId,
+    decidedBy: user.id,
+    decision: 'rejected',
+    note: note ?? undefined,
+  });
+  return c.json({ ok: true, ...result });
 });
 
 export default app;

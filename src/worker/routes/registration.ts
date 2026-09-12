@@ -8,25 +8,12 @@ import { createAuditStatement } from '../../lib/audit.ts';
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
+import { getBoundClub } from '../binding.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
-}
-
-interface BoundClub {
-  id: number;
-  name: string;
-  league_tier: string | null;
-}
-
-async function getBoundClub(env: Env, userId: number): Promise<BoundClub | null> {
-  return env.DB.prepare(
-    `SELECT c.id, c.name, c.league_tier FROM club_bindings b JOIN clubs c ON c.id = b.club_id WHERE b.user_id = ?`,
-  )
-    .bind(userId)
-    .first<BoundClub>();
 }
 
 interface OwnedPlayerRow {
@@ -41,11 +28,12 @@ interface OwnedPlayerRow {
   is_future_star: number;
   china_plan: number;
   status: string;
+  market_value: number | null;
 }
 
 async function loadOwnedPlayers(env: Env, clubId: number): Promise<OwnedPlayerRow[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, name, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status
+    `SELECT id, name, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
      FROM players WHERE club_id = ? ORDER BY id LIMIT 500`,
   )
     .bind(clubId)
@@ -55,16 +43,19 @@ async function loadOwnedPlayers(env: Env, clubId: number): Promise<OwnedPlayerRo
 
 interface ContractInfo {
   wage: number;
+  releaseFee: number | null;
   contractType: string;
 }
 
 async function loadContractMap(env: Env, clubId: number): Promise<Map<number, ContractInfo>> {
   const rows = await env.DB.prepare(
-    `SELECT player_id, wage, contract_type FROM contracts WHERE club_id = ? AND is_active = 1 LIMIT 500`,
+    `SELECT player_id, wage, release_fee, contract_type FROM contracts WHERE club_id = ? AND is_active = 1 LIMIT 500`,
   )
     .bind(clubId)
-    .all<{ player_id: number; wage: number | null; contract_type: string }>();
-  return new Map(rows.results.map((r) => [r.player_id, { wage: r.wage ?? 0, contractType: r.contract_type }]));
+    .all<{ player_id: number; wage: number | null; release_fee: number | null; contract_type: string }>();
+  return new Map(
+    rows.results.map((r) => [r.player_id, { wage: r.wage ?? 0, releaseFee: r.release_fee, contractType: r.contract_type }]),
+  );
 }
 
 function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadPlayer {
@@ -127,7 +118,9 @@ app.get('/club/squad', async (c) => {
         isFutureStar: p.is_future_star === 1,
         chinaPlan: p.china_plan === 1,
         status: p.status,
+        marketValue: p.market_value,
         wage: contract?.wage ?? null,
+        releaseFee: contract?.releaseFee ?? null,
         contractType: contract?.contractType ?? null,
         hasContract: contract !== null,
         squad: squadByPlayer.get(p.id) ?? null,
