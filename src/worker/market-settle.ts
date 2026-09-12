@@ -172,7 +172,7 @@ export async function delistUnbid(
 }
 
 // 激活出价窗失效（4.4.2.2）：激活方未在窗口内落价 → 激活无效。卖家没收下架费，
-// 球员还原训练营态；一窗一次额度已消耗（§6.2 假设，文档定稿口径）。
+// 球员按合同类型还原（训练营→trainee、正式→normal）；一窗一次额度已消耗（§6.2 假设，文档定稿口径）。
 export async function voidExpiredActivation(db: D1Database, listingId: number, playerId: number, actor: number | null): Promise<boolean> {
   const audit = createAuditStatement(db);
   const statements = [
@@ -182,7 +182,14 @@ export async function voidExpiredActivation(db: D1Database, listingId: number, p
          WHERE id = ? AND status = 'listed'`,
       )
       .bind(listingId),
-    db.prepare(`UPDATE players SET status = 'trainee', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`).bind(playerId),
+    db
+      .prepare(
+        `UPDATE players SET status = CASE WHEN (
+           SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1
+         ) = 'trainee' THEN 'trainee' ELSE 'normal' END, updated_at = ${nowSql()}
+         WHERE id = ? AND status = 'listed'`,
+      )
+      .bind(playerId, playerId),
     audit({
       actor,
       action: 'activation_void',

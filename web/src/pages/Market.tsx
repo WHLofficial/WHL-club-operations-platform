@@ -198,6 +198,7 @@ export default function Market() {
 
       {detail && (
         <DetailSection
+          key={detail.listing.id}
           detail={detail}
           myClub={myClub}
           available={available}

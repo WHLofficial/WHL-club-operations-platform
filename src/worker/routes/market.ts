@@ -28,7 +28,7 @@ function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
 
-const LISTING_STATUSES = ['listed', 'bidding', 'pending_review', 'delisted'] as const;
+const LISTING_STATUSES = ['listed', 'bidding', 'matched_pending', 'pending_review', 'delisted'] as const;
 
 interface ListingRow {
   id: number;
@@ -60,7 +60,7 @@ function statusFilter(raw: string | undefined): string[] {
     case undefined:
     case '':
     case 'active':
-      return ['listed', 'bidding'];
+      return ['listed', 'bidding', 'matched_pending'];
     case 'pending_review':
       return ['pending_review'];
     case 'ended':

@@ -249,6 +249,25 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect(fees).toHaveLength(0); // 卖家没挂牌，不收下架费
   });
 
+  it('正式球员激活失效 → 还原一线队态（不得错标训练营）', async () => {
+    const fx = await seedTrainee(freshEnv());
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
+         (21, 'fc21', '成年队', ${fx.ownerClub}, 'CM', 27, 82, 82, 25, 'normal');
+       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
+         (2, 21, ${fx.ownerClub}, 20, 2, 'formal', 1, '2026-06-01');`,
+    );
+    const formal = await post('/api/market/activations', { playerId: 21 }, 'tok-coach2', fx.env);
+    expect(formal.status).toBe(201);
+    const { listingId } = (await formal.json()) as { listingId: number };
+    await expireActivationWindow(fx, listingId);
+
+    const listing = sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId);
+    expect(listing!.status).toBe('delisted');
+    const player = sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 21');
+    expect(player!.status).toBe('normal');
+  });
+
   it('一窗一次（4.4.2.1）：失效激活也占额', async () => {
     const fx = await seedTrainee(freshEnv());
     const first = await activateTrainee(fx);

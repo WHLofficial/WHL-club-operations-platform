@@ -50,7 +50,8 @@ async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void
   if (pending) throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
 }
 
-// 旁路附加费扣收：流水幂等闸（kind+ref 只记一次）+ 单据守卫，审核重试不会重复扣费
+// 旁路附加费扣收：流水幂等闸（kind+ref 只记一次）+ 单据守卫 + 批内可用余额守卫
+//（预检与扣费之间的并发动用由批内守卫兜底），审核重试不会重复扣费
 async function chargeBypassFee(
   env: Env,
   transferId: number,
@@ -64,7 +65,7 @@ async function chargeBypassFee(
   if (round2(available) < amount) {
     throw new HttpError(409, `俱乐部可用资金不足：这笔费用要 ${round2(amount)} m，当前可支配 ${round2(available)} m`);
   }
-  await db.batch([
+  const results = await db.batch([
     ...ledgerMovement(db, {
       clubId,
       delta: -amount,
@@ -72,13 +73,24 @@ async function chargeBypassFee(
       refType: 'transfer',
       refId: transferId,
       memo,
-      guardSql: `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'`,
-      guardParams: [transferId],
+      guardSql:
+        `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'` +
+        ` AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
+        ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0) >= ?`,
+      guardParams: [transferId, clubId, clubId, amount],
     }),
     db
       .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'pending_review' AND extra_fee IS NULL`)
       .bind(amount, transferId),
   ]);
+  // 流水没落：要么这笔已收过（幂等重试，静默返回），要么批内余额/状态守卫没过（资金刚被并发动用）
+  if ((results[1]?.meta.changes ?? 0) === 0) {
+    const already = await db
+      .prepare(`SELECT id FROM ledger_entries WHERE kind = ? AND ref_type IS 'transfer' AND ref_id IS ?`)
+      .bind(kind, transferId)
+      .first<{ id: number }>();
+    if (!already) throw new HttpError(409, '资金刚被其他操作占用，费用没收上，稍后重试审核');
+  }
 }
 
 // 旁路单建单批：transfer + 审核任务一个 batch（审核任务 ref_id 用 last_insert_rowid()
@@ -276,6 +288,12 @@ export async function createTermination(
 
   const fee = terminationFee(contract.release_fee, contract.effective_from, Date.now());
   if (fee === null) throw new HttpError(409, '合同缺效力起点，算不了解约费，先让管理组补合同数据');
+  if (fee > 0) {
+    const available = await availableBalance(db, clubId);
+    if (round2(available) < fee) {
+      throw new HttpError(400, `可用资金不足：解约费要 ${fee} m（审核通过时销毁），当前可支配 ${round2(available)} m`);
+    }
+  }
 
   const { transferId } = await createBypassTransfer(env, {
     actor,
@@ -566,9 +584,10 @@ export interface RollbackTrigger {
 
 /**
  * 回滚该球员本窗全部已完成的续约单：RC 与保护期还原到本窗第一张续约单之前，
- * 已收续约费合并退还（退款流水以触发单为幂等 ref，同一触发单只退一次）。
- * 仅当球员仍归属原续约俱乐部时回滚合同与退款（若同窗已被卖掉，新合同是新东家
- * 谈判的产物，回滚只留审计不留改）。工资不回滚（假设口径见 TECH_DESIGN 假设表）。
+ * 已收续约费逐单退还（退款流水 ref = 续约单本身，幂等闸使任何触发序列下每单只退一次——
+ * 同窗可能被多个触发单先后命中回滚）。仅当球员仍归属原续约俱乐部时回滚合同与退款
+ * （若同窗已被卖掉，新合同是新东家谈判的产物，回滚只留审计不留改）。
+ * 工资不回滚（假设口径见 TECH_DESIGN 假设表）。
  */
 export async function rollbackRcChangeForPlayer(
   env: Env,
@@ -581,12 +600,12 @@ export async function rollbackRcChangeForPlayer(
   if (!win) return false;
   const rows = await db
     .prepare(
-      `SELECT id FROM transfers
+      `SELECT id, extra_fee FROM transfers
        WHERE player_id = ? AND type = 'rc_change' AND status = 'completed' AND season = ? AND window_seq = ?
        ORDER BY id ASC`,
     )
     .bind(playerId, win.season, win.windowSeq)
-    .all<{ id: number }>();
+    .all<{ id: number; extra_fee: number | null }>();
   if (rows.results.length === 0) return false;
 
   const first = await loadTransfer(db, rows.results[0].id);
@@ -600,17 +619,9 @@ export async function rollbackRcChangeForPlayer(
     .first<{ club_id: number | null }>();
   const stillOwned = contract !== null && contract.club_id === clubId;
 
-  const feeRows = await db
-    .prepare(
-      `SELECT COALESCE(SUM(extra_fee), 0) AS refund FROM transfers
-       WHERE player_id = ? AND type = 'rc_change' AND status = 'completed' AND season = ? AND window_seq = ?`,
-    )
-    .bind(playerId, win.season, win.windowSeq)
-    .first<{ refund: number }>();
-  const refund = stillOwned ? Math.round((feeRows?.refund ?? 0) * 100) / 100 : 0;
-
   const audit = createAuditStatement(db);
   const statements: D1PreparedStatement[] = [];
+  const refundable = stillOwned && clubId !== null ? rows.results.filter((r) => (r.extra_fee ?? 0) > 0) : [];
   if (stillOwned) {
     statements.push(
       db
@@ -618,15 +629,15 @@ export async function rollbackRcChangeForPlayer(
         .bind(ev.oldReleaseFee, ev.oldProtectedUntil, playerId),
     );
   }
-  if (refund > 0 && clubId !== null) {
+  for (const r of refundable) {
     statements.push(
       ...ledgerMovement(db, {
-        clubId,
-        delta: refund,
+        clubId: clubId as number,
+        delta: r.extra_fee as number,
         kind: 'rc_change_refund',
-        refType: trigger.refType,
-        refId: trigger.refId,
-        memo: '窗内更改违约金回滚退款（4.4.10）',
+        refType: 'transfer',
+        refId: r.id,
+        memo: `窗内更改违约金回滚退款（4.4.10，续约单 #${r.id}）`,
       }),
     );
   }
@@ -639,7 +650,8 @@ export async function rollbackRcChangeForPlayer(
       after: {
         restoredReleaseFee: stillOwned ? ev.oldReleaseFee : null,
         restoredProtectedUntil: stillOwned ? ev.oldProtectedUntil : null,
-        refund,
+        refund: refundable.reduce((s, r) => s + (r.extra_fee ?? 0), 0),
+        refundedTransfers: refundable.map((r) => r.id),
         stillOwned,
         trigger: trigger.refType,
         rcChangeTransfers: rows.results.map((r) => r.id),

@@ -444,7 +444,7 @@ describe('窗内回滚（4.4.10）', () => {
     return { ...fx, transferId };
   }
 
-  it('续约后被挂牌 → RC/保护期还原 + 续约费退还（ref=挂牌单）', async () => {
+  it('续约后被挂牌 → RC/保护期还原 + 续约费退还（ref=续约单本身）', async () => {
     const fx = await seedCompletedRcChange();
     expect((await post('/api/market/listings', { playerId: 20, askPrice: 11 }, 'tok-coach', fx.env)).status).toBe(201);
     const contract = sqlGet<{ release_fee: number; protected_until: string | null }>(
@@ -458,8 +458,8 @@ describe('窗内回滚（4.4.10）', () => {
       `SELECT amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'rc_change_refund' AND club_id = ${fx.clubA}`,
     );
     expect(refund?.amount).toBe(1.5);
-    expect(refund?.ref_type).toBe('listing');
-    expect(refund?.ref_id).toBe(1);
+    expect(refund?.ref_type).toBe('transfer');
+    expect(refund?.ref_id).toBe(fx.transferId);
     const audit = sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'rc_change_rollback'");
     expect(audit?.action).toBe('rc_change_rollback');
   });
@@ -485,11 +485,23 @@ describe('窗内回滚（4.4.10）', () => {
     expect(player?.status).toBe('free');
   });
 
-  it('回滚不重复退款（同一触发单只退一次）', async () => {
+  it('回滚不重复退款（多个不同触发单也只退一次）', async () => {
     const fx = await seedCompletedRcChange();
+    // 触发单 A：挂牌（触发回滚退款）
     expect((await post('/api/market/listings', { playerId: 20, askPrice: 11 }, 'tok-coach', fx.env)).status).toBe(201);
-    // 幂等闸按 (kind, ref) 查重：重复触发同一 listing 不再退款
-    const refundsBefore = sqlAll<{ id: number }>(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind = 'rc_change_refund'");
-    expect(refundsBefore.length).toBe(1);
+    expect(sqlAll<{ id: number }>(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind = 'rc_change_refund'")).toHaveLength(1);
+    // 挂牌收口（模拟下架）：球员还原 normal，仍归属原队
+    fx.sqlite.exec(`UPDATE listings SET status = 'delisted' WHERE player_id = 20 AND status = 'listed'`);
+    fx.sqlite.exec(`UPDATE players SET status = 'normal' WHERE id = 20`);
+    // 触发单 B：解约（再次触发回滚——触发单不同，但退款 ref 是续约单本身，幂等闸挡住）
+    expect((await post('/api/transfers/termination', { playerId: 20 }, 'tok-coach', fx.env)).status).toBe(201);
+    const refunds = sqlAll<{ amount: number }>(fx.sqlite, "SELECT amount FROM ledger_entries WHERE kind = 'rc_change_refund'");
+    expect(refunds.length).toBe(1); // 两个不同触发单，退款仍然只有一笔
+    expect(refunds[0]?.amount).toBe(1.5);
+    const contract = sqlGet<{ release_fee: number }>(
+      fx.sqlite,
+      'SELECT release_fee FROM contracts WHERE player_id = 20 AND is_active = 1',
+    );
+    expect(contract?.release_fee).toBe(10);
   });
 });
