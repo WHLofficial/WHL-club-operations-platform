@@ -438,6 +438,15 @@ async function settleActiveSession(
   return {};
 }
 
+// 窗口推进强制结算（§6.4-6）：把活跃会话按 E 快照强约成约（成约即过户）。
+// 没提交过新 RC（E 为 null）的会话返回 false，由调用方挡下关窗。
+export async function forceSettleAtExpected(env: Env, sessionId: number, actor: number | null): Promise<boolean> {
+  const session = await loadSession(env.DB, sessionId);
+  if (!session || session.status !== 'active' || session.expected_wage === null) return false;
+  await settleActiveSession(env, session, session.expected_wage, 'forced', actor, null);
+  return true;
+}
+
 // 我的谈判列表（§6.10-2：只出 结局/剩余次数/满意度文案/风险布尔/E 数值；eff/p/阈值不出服务端）
 export async function listMySessions(env: Env, clubId: number): Promise<unknown[]> {
   const db = env.DB;

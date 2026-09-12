@@ -13,6 +13,7 @@ import { getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { loadTransfer, rejectTransfer } from '../transfers.ts';
 import { approveTransferDeal, createForcedAuction, cancelForcedAuction } from '../bypass.ts';
+import { listWindows, openWindow, closeWindow } from '../window-machine.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -654,6 +655,28 @@ app.post('/reviews/:id/reject', async (c) => {
     note: note ?? undefined,
   });
   return c.json({ ok: true, ...result });
+});
+
+// ---- 窗口状态机（§11/§6.4-6，增量 5） ----
+
+// GET /api/admin/windows —— 赛季与窗口列表
+app.get('/windows', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  return c.json(await listWindows(c.env.DB));
+});
+
+// POST /api/admin/windows/open —— 开新窗（前置：无在开窗口；全球员经纪人档位重掷）
+app.post('/windows/open', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { season?: unknown; windowSeq?: unknown } | null;
+  return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq), 201);
+});
+
+// POST /api/admin/windows/close —— 关窗（前置校验；force 需 window_force_settle=true）
+app.post('/windows/close', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { force?: unknown } | null;
+  return c.json(await closeWindow(c.env, user.id, body?.force));
 });
 
 // ---- 强制拍卖（规则 4.4.5，附录 A〔5〕） ----
