@@ -1,4 +1,4 @@
-// 球队中心（增量 2）：球队头 + 注册工作台（一线队/训练营分配、合规校验、提交）
+// 球队中心（增量 2 + 增量 5 旁路）：球队头 + 注册工作台 + 续约/解约（规则 4.4.3/4.4.4）
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import {
@@ -6,10 +6,12 @@ import {
   api,
   apiPost,
   type MyClubOverview,
+  type RcChangeResult,
   type RegistrationResult,
   type SquadIssue,
   type SquadOverview,
   type SquadPlayerRow,
+  type TerminationResult,
 } from '../lib/api.ts';
 import { CONTRACT_TYPE_LABEL, LEAGUE_TIER_LABEL } from '../lib/ref.ts';
 import { useToast } from '../lib/toast.tsx';
@@ -115,6 +117,13 @@ export default function Club() {
       </section>
 
       {squad && <RegistrationSection squad={squad} onRefresh={() => api<SquadOverview>('/api/club/squad').then(setSquad)} />}
+
+      {squad && (
+        <BypassSection
+          squad={squad}
+          onRefresh={() => api<SquadOverview>('/api/club/squad').then(setSquad)}
+        />
+      )}
     </div>
   );
 }
@@ -364,5 +373,161 @@ function SquadRow({
         {value === 'trainee' && traineeBlocked && <span className="error-msg">不可成长</span>}
       </td>
     </tr>
+  );
+}
+
+/* ---------- 续约与解约（增量 5 旁路，规则 4.4.3 / 4.4.4） ---------- */
+
+function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: () => void }) {
+  const { show, toastNode } = useToast();
+  const [rcPlayerId, setRcPlayerId] = useState('');
+  const [newFee, setNewFee] = useState('');
+  const [rcBusy, setRcBusy] = useState(false);
+  const [termPlayerId, setTermPlayerId] = useState('');
+  const [termArmed, setTermArmed] = useState(false);
+  const [termBusy, setTermBusy] = useState(false);
+
+  const formal = useMemo(
+    () => squad.players.filter((p) => p.hasContract && p.contractType === 'formal' && p.status === 'normal'),
+    [squad.players],
+  );
+  const rcPlayer = formal.find((p) => String(p.id) === rcPlayerId) ?? null;
+  const termPlayer = formal.find((p) => String(p.id) === termPlayerId) ?? null;
+
+  const rcBounds = useMemo(() => {
+    if (!rcPlayer) return null;
+    const rc = rcPlayer.releaseFee ?? 0;
+    return rc <= 20
+      ? { lo: Math.max(0, rc - 10), hi: rc + 10, label: '±10 m' }
+      : { lo: rc * 0.5, hi: rc * 1.5, label: '±50%' };
+  }, [rcPlayer]);
+
+  async function submitRcChange() {
+    if (rcBusy || !rcPlayer) return;
+    setRcBusy(true);
+    try {
+      const res = await apiPost<RcChangeResult>('/api/transfers/rc-change', {
+        playerId: rcPlayer.id,
+        newReleaseFee: Number(newFee),
+      });
+      show(
+        res.changeFee > 0
+          ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)} m，加价部分 30% 共 ${res.changeFee.toFixed(2)} m 待审核时收。`
+          : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)} m，降价免费，保护期重新收口到审核通过那刻。`,
+      );
+      setRcPlayerId('');
+      setNewFee('');
+      onRefresh();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '续约提交失败', true);
+    } finally {
+      setRcBusy(false);
+    }
+  }
+
+  async function submitTermination() {
+    if (termBusy || !termPlayer) return;
+    setTermBusy(true);
+    try {
+      const res = await apiPost<TerminationResult>('/api/transfers/termination', { playerId: termPlayer.id });
+      show(
+        res.terminationFee > 0
+          ? `解约申请已提交：${termPlayer.name}，解约费 ${res.terminationFee.toFixed(2)} m 待审核时销毁。他本窗内全联盟禁签。`
+          : `解约申请已提交：${termPlayer.name}，效力满三年免费解约。他本窗内全联盟禁签。`,
+      );
+      setTermPlayerId('');
+      setTermArmed(false);
+      onRefresh();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '解约提交失败', true);
+    } finally {
+      setTermBusy(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h3>续约与解约</h3>
+      {toastNode}
+      <p className="hint">
+        两条旁路都直接开单送管理组审核：续约改违约金（RC ≤ 20 m 幅度 ±10 m、超过 20 m 幅度 ±50%；提高付差额的 30%，降低免费，
+        保护期重新收口）；解约效力满三年免费，不足三年按 RC ×（3 − 效力年数）× 10% 销毁解约费，被解约球员本窗全联盟禁签。
+      </p>
+      {formal.length === 0 ? (
+        <p className="muted">队里还没有带正式合同的球员，这两条操作都做不了。</p>
+      ) : (
+        <>
+          <div className="inline-form">
+            <div className="field grow">
+              <label htmlFor="rc-player">续约球员</label>
+              <select id="rc-player" value={rcPlayerId} onChange={(e) => { setRcPlayerId(e.target.value); setNewFee(''); }}>
+                <option value="">选一名球员…</option>
+                {formal.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}（RC {(p.releaseFee ?? 0).toFixed(2)} m）
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="rc-new">新违约金（m）</label>
+              <input
+                id="rc-new"
+                className="mono"
+                type="number"
+                min="0"
+                step="0.5"
+                value={newFee}
+                onChange={(e) => setNewFee(e.target.value)}
+                placeholder={rcBounds ? rcBounds.lo.toFixed(2) : ''}
+                disabled={!rcPlayer}
+              />
+            </div>
+            <button
+              className="btn"
+              type="button"
+              disabled={rcBusy || !rcPlayer || newFee === ''}
+              onClick={submitRcChange}
+            >
+              {rcBusy ? '提交中…' : '提交续约'}
+            </button>
+          </div>
+          {rcPlayer && rcBounds && (
+            <p className="hint">
+              {rcPlayer.name} 现违约金 {(rcPlayer.releaseFee ?? 0).toFixed(2)} m，允许幅度 {rcBounds.label}：
+              {' '}{rcBounds.lo.toFixed(2)} – {rcBounds.hi.toFixed(2)} m。提高要付差额的 30%，降低免费。
+            </p>
+          )}
+
+          <div className="inline-form">
+            <div className="field grow">
+              <label htmlFor="term-player">解约球员</label>
+              <select id="term-player" value={termPlayerId} onChange={(e) => { setTermPlayerId(e.target.value); setTermArmed(false); }}>
+                <option value="">选一名球员…</option>
+                {formal.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              className={`btn btn-danger${termArmed ? ' btn-armed' : ''}`}
+              type="button"
+              disabled={termBusy || !termPlayer}
+              onClick={() => (termArmed ? submitTermination() : setTermArmed(true))}
+              onBlur={() => setTermArmed(false)}
+            >
+              {termBusy ? '提交中…' : termArmed ? '再点一次确认解约' : '提交解约'}
+            </button>
+          </div>
+          {termPlayer && (
+            <p className="hint">
+              解约 {termPlayer.name} 后他将进入自由球员名单，本窗内全联盟（包括你家）都不能再签他。
+            </p>
+          )}
+        </>
+      )}
+    </section>
   );
 }

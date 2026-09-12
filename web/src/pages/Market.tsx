@@ -1,5 +1,5 @@
-// 转会市场（增量 3 + 激活切片）：挂牌板（卡柜）+ 单卡详情与出价历史 + 我的出价（冻结章）
-// + 挂牌表单 + 激活别队训练营球员（规则 4.4.2）。
+// 转会市场（增量 3 + 激活切片 + 增量 5 旁路）：挂牌板（卡柜）+ 单卡详情与出价历史 + 我的出价（冻结章）
+// + 挂牌表单 + 激活别队训练营球员（规则 4.4.2）+ 匹配决定（24h 窗）+ 海捞自由球员（4.4.4）。
 // 家族口径：mono 数字、口语化文案、操作 toast 反馈、两段式 busy 态。
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
@@ -8,9 +8,14 @@ import {
   apiPost,
   type ActivatableTrainee,
   type ActivationResult,
+  type BidPlaceResult,
+  type FreeAgentsResponse,
+  type FreeAgentResult,
+  type FreeAgentRow,
   type MarketListing,
   type MarketListingDetail,
   type MarketListings,
+  type MatchDecisionResult,
   type MyBidRow,
   type SquadOverview,
   type TraineesResponse,
@@ -29,6 +34,7 @@ const FILTER_LABEL: Record<ListingFilter, string> = {
 const LISTING_STATUS_LABEL: Record<string, string> = {
   listed: '挂牌中',
   bidding: '竞价中',
+  matched_pending: '匹配等待期',
   pending_review: '待审核',
   delisted: '已下架',
 };
@@ -36,6 +42,7 @@ const LISTING_STATUS_LABEL: Record<string, string> = {
 const LISTING_STATUS_BADGE: Record<string, string> = {
   listed: 'sky',
   bidding: 'gold',
+  matched_pending: 'purple',
   pending_review: 'purple',
   delisted: 'gray',
 };
@@ -152,6 +159,10 @@ export default function Market() {
         <ActivateSection onDone={(msg) => { show(msg); afterBidOrList(); }} onError={(m) => show(m, true)} />
       )}
 
+      {myClub?.isCoach && (
+        <FreeAgentSection onDone={(msg) => show(msg)} onError={(m) => show(m, true)} />
+      )}
+
       <section className="card">
         <h3>挂牌板</h3>
         <div className="seg" role="radiogroup" aria-label="按状态筛选挂牌">
@@ -192,13 +203,23 @@ export default function Market() {
           available={available}
           onBid={async (amount) => {
             try {
-              const res = await apiPost<{ ok: boolean }>(`/api/market/listings/${detail.listing.id}/bids`, { amount });
-              if (res.ok) show(`出价 ${money(amount)} m 已提交，资金冻结中。`);
+              const res = await apiPost<BidPlaceResult>(`/api/market/listings/${detail.listing.id}/bids`, { amount });
+              if (res.ok) {
+                if (res.matchPhase === 'review') {
+                  show(`首价 ${money(amount)} m 已落定：训练营球员成交，单子已送管理组审核。`);
+                } else if (res.matchPhase === 'matching') {
+                  show(`首价 ${money(amount)} m 已落定：进入 24 小时匹配窗，等 ${detail.listing.sellerClub.name} 决定是否匹配。`);
+                } else {
+                  show(`出价 ${money(amount)} m 已提交，资金冻结中。`);
+                }
+              }
               await afterBidOrList();
             } catch (err) {
               show(err instanceof Error ? err.message : '出价失败', true);
             }
           }}
+          onDecided={(msg) => { show(msg); afterBidOrList(); }}
+          onError={(m) => show(m, true)}
         />
       )}
 
@@ -321,7 +342,9 @@ function ActivateSection({ onDone, onError }: { onDone: (msg: string) => void; o
     try {
       const res = await apiPost<ActivationResult>('/api/market/activations', { playerId: t.id });
       onDone(
-        `已激活 ${t.name}：挂牌 ${res.askPrice.toFixed(2)} m。你要在 ${deadlineText(res.firstBidDeadline, '')} 前落首价，逾期激活作废（还占本窗激活额度）。`,
+        res.kind === 'trainee'
+          ? `已激活 ${t.name}：挂牌 ${res.askPrice.toFixed(2)} m。请在 ${deadlineText(res.firstBidDeadline, '')} 前落首价，落价即成交（训练营球员直进审核）。逾期激活作废（还占本窗激活额度）。`
+          : `已激活 ${t.name}：挂牌 ${res.askPrice.toFixed(2)} m。请在 ${deadlineText(res.firstBidDeadline, '')} 前落首价；落价后进 24 小时匹配窗，等原属俱乐部决定是否匹配。逾期激活作废（还占本窗激活额度）。`,
       );
       setData(await api<TraineesResponse>('/api/market/trainees'));
     } catch (err) {
@@ -338,13 +361,14 @@ function ActivateSection({ onDone, onError }: { onDone: (msg: string) => void; o
         <p className="muted">训练营名单还没加载出来…</p>
       ) : data.trainees.length === 0 ? (
         <p className="hint">
-          别家训练营暂时没有可激活的小将。训练营球员不能自行挂牌，只能走激活转会：激活后按固定{' '}
-          <span className="mono">5.00</span> m 强制挂牌，激活方须在 5 分钟内落首价（期间别队出价无效），此后大家正常竞价。
+          别家训练营暂时没有可激活的小将。训练营球员不能自行挂牌，只能走激活转会：激活后按规则定价强制挂牌
+          （训练营球员固定 <span className="mono">5.00</span> m），激活方须在 5 分钟内落首价（期间别队出价无效），首价即成交价。
         </p>
       ) : (
         <>
           <p className="hint">
-            激活按固定 <span className="mono">5.00</span> m 强制挂牌（规则 4.4.2.3）。激活后你要在 5 分钟内落首价，期间别队出价无效；
+            激活后按规则定价强制挂牌（训练营球员固定 <span className="mono">5.00</span> m，正式球员按保护期倍数）。
+            激活方要在 5 分钟内落首价，期间别队出价无效；落价后训练营球员直进审核、正式球员进 24 小时匹配窗。
             逾期激活作废，且同一球员一个窗口只能被激活一次。
           </p>
           <div className="table-wrap">
@@ -429,13 +453,17 @@ function MarketCard({
       </div>
       <div className="market-card-foot">
         <span>
-          {listing.firstBidPending
-            ? '等激活方落首价'
-            : listing.bidCount > 0
-              ? `${listing.bidCount} 次出价`
-              : '还没人出价'}
+          {listing.matchPhase === 'matching'
+            ? '等被激活方决定是否匹配'
+            : listing.firstBidPending
+              ? '等激活方落首价'
+              : listing.bidCount > 0
+                ? `${listing.bidCount} 次出价`
+                : '还没人出价'}
         </span>
-        {listing.firstBidPending ? (
+        {listing.matchPhase === 'matching' ? (
+          <span className="mono">{deadlineText(listing.matchDeadline)} 前决定</span>
+        ) : listing.firstBidPending ? (
           <span className="mono">{deadlineText(listing.activationDeadline, '')} 前须落价</span>
         ) : (
           listing.status === 'bidding' && <span className="mono">{deadlineText(listing.deadlineAt)}</span>
@@ -453,16 +481,24 @@ function DetailSection({
   myClub,
   available,
   onBid,
+  onDecided,
+  onError,
 }: {
   detail: MarketListingDetail;
   myClub: { id: number; name: string; isCoach: boolean } | null;
   available: number | null;
   onBid: (amount: number) => Promise<void>;
+  onDecided: (msg: string) => void;
+  onError: (msg: string) => void;
 }) {
   const l = detail.listing;
   const [amount, setAmount] = useState<string>(String(l.nextMinBid));
   const [busy, setBusy] = useState(false);
+  const [matchFee, setMatchFee] = useState<string>('');
+  const [matchBusy, setMatchBusy] = useState(false);
+  const [passArmed, setPassArmed] = useState(false);
   const isActivator = myClub !== null && l.activatedBy === myClub.id;
+  const isSeller = myClub !== null && myClub.id === l.sellerClub.id;
   const baseCanBid =
     myClub !== null && myClub.isCoach && myClub.id !== l.sellerClub.id && (l.status === 'listed' || l.status === 'bidding') && l.windowOpen;
   // 激活首价窗：只有激活方能落价，且金额固定为挂牌价
@@ -471,13 +507,15 @@ function DetailSection({
     ? '这单所属的转会窗口已经关了。'
     : l.status === 'pending_review'
       ? '这单已截止，正在等管理组审核。'
-      : l.status === 'delisted'
-        ? '这单已经下架。'
-        : myClub?.id === l.sellerClub.id
-          ? '自家的挂牌，等别人来出价。'
-          : l.firstBidPending && !isActivator
-            ? `激活首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价（${deadlineText(l.activationDeadline, '')} 前须落价）。`
-            : null;
+      : l.status === 'matched_pending'
+        ? `首价已落定，24 小时匹配窗内等 ${l.sellerClub.name} 决定是否匹配（${deadlineText(l.matchDeadline)} 截止）。`
+        : l.status === 'delisted'
+          ? '这单已经下架。'
+          : myClub?.id === l.sellerClub.id
+            ? '自家的挂牌，等别人来出价。'
+            : l.firstBidPending && !isActivator
+              ? `激活首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价（${deadlineText(l.activationDeadline, '')} 前须落价）。`
+              : null;
 
   async function submit() {
     if (busy) return;
@@ -489,6 +527,32 @@ function DetailSection({
     }
   }
 
+  // 被激活方的匹配决定：新 RC 必须高于首价（整数 m），差额在审核通过时销毁
+  async function decideMatch(newFee: number | null) {
+    if (matchBusy) return;
+    setMatchBusy(true);
+    try {
+      const res = await apiPost<MatchDecisionResult>(`/api/transfers/match`, {
+        listingId: l.id,
+        ...(newFee === null ? {} : { newReleaseFee: newFee }),
+      });
+      onDecided(
+        res.decision === 'pass'
+          ? '已放行：按激活价成交，转管理组审核。'
+          : `已提交匹配：新违约金 ${(res.newReleaseFee ?? 0).toFixed(2)} m，差额 ${(res.diff ?? 0).toFixed(2)} m 待审核时销毁，球员留队。`,
+      );
+      setPassArmed(false);
+      setMatchFee('');
+    } catch (err) {
+      onError(err instanceof Error ? err.message : '提交失败');
+    } finally {
+      setMatchBusy(false);
+    }
+  }
+
+  const oldRc = l.releaseFee ?? 0;
+  const matchDiff = matchFee === '' ? null : Math.max(0, Number(matchFee) - oldRc);
+
   return (
     <section className="card">
       <h3>
@@ -499,15 +563,18 @@ function DetailSection({
       <p className="hint">
         卖方 {l.sellerClub.name} · {l.type === 'activation' ? `激活价 ${money(l.askPrice)} m（${l.activatorName ?? '激活方'} 发起）` : `挂牌价 ${money(l.askPrice)} m`} ·
         违约金 {money(l.releaseFee)} m ·{' '}
-        {l.firstBidPending
-          ? <>激活首价窗 <span className="mono">{deadlineText(l.activationDeadline, '')}</span> 前须落价</>
-          : l.status === 'bidding'
-            ? <>截止判定 <span className="mono">{deadlineText(l.deadlineAt)}</span></>
-            : (l.deadlineNote ?? '尚未进入竞价')}
+        {l.matchPhase === 'matching'
+          ? <>匹配窗截止 <span className="mono">{deadlineText(l.matchDeadline)}</span></>
+          : l.firstBidPending
+            ? <>激活首价窗 <span className="mono">{deadlineText(l.activationDeadline, '')}</span> 前须落价</>
+            : l.status === 'bidding'
+              ? <>截止判定 <span className="mono">{deadlineText(l.deadlineAt)}</span></>
+              : (l.deadlineNote ?? '尚未进入竞价')}
       </p>
       {l.type === 'activation' && (
         <p className="hint">
-          激活成交和普通成交一样要走签约谈判：买方可以直签训练营合同（固定 0.75m / 违约金 5m，不占下放名额），也可以谈一份正式合同。
+          激活价落定首价即成交价（激活挂牌不开放后续竞价）：训练营合同直进待审；正式合同进 24 小时匹配窗，
+          由 {l.sellerClub.name} 决定匹配（球员留队）还是放行。买方签约时可直签训练营合同（不占下放名额）或谈正式合同。
         </p>
       )}
       {bidHint && <p className="hint">{bidHint}</p>}
@@ -523,7 +590,7 @@ function DetailSection({
         </div>
       )}
 
-      {canBid && !l.firstBidPending && (
+      {canBid && !l.firstBidPending && l.matchPhase === null && (
         <div className="inline-form">
           <div className="field">
             <label htmlFor="bid-amount">出价（m）</label>
@@ -543,6 +610,55 @@ function DetailSection({
           <span className="hint">
             出价即冻结资金{available !== null ? <>，当前可支配 {money(available)} m</> : null}。
           </span>
+        </div>
+      )}
+
+      {isSeller && l.matchPhase === 'matching' && (
+        <div className="admin-section">
+          <h4>匹配决定（被激活方）</h4>
+          <p className="hint">
+            匹配：给球员一份新违约金（整数 m，须高于首价 {money(l.highestBid)} m，不受幅度限制），审核通过时销毁新旧差额
+            {oldRc > 0 ? <>（现 RC {money(oldRc)} m）</> : null}，球员留队且本球员生涯只能被匹配这一次。
+            放行：按激活价成交送管理组审核。
+          </p>
+          <div className="inline-form">
+            <div className="field">
+              <label htmlFor="match-fee">匹配新 RC（m）</label>
+              <input
+                id="match-fee"
+                className="mono"
+                type="number"
+                min={Math.floor((l.highestBid ?? 0) + 1)}
+                step="1"
+                value={matchFee}
+                onChange={(e) => setMatchFee(e.target.value)}
+                placeholder={String(Math.floor((l.highestBid ?? 0) + 1))}
+              />
+            </div>
+            <button
+              className="btn"
+              type="button"
+              disabled={matchBusy || matchFee === '' || !Number.isInteger(Number(matchFee)) || Number(matchFee) <= (l.highestBid ?? 0)}
+              onClick={() => decideMatch(Number(matchFee))}
+            >
+              {matchBusy ? '提交中…' : '提交匹配'}
+            </button>
+            <button
+              className={`btn btn-ghost${passArmed ? ' btn-armed' : ''}`}
+              type="button"
+              disabled={matchBusy}
+              onClick={() => (passArmed ? decideMatch(null) : setPassArmed(true))}
+              onBlur={() => setPassArmed(false)}
+            >
+              {passArmed ? '再点一次确认放行' : '放行（不匹配）'}
+            </button>
+          </div>
+          {matchDiff !== null && matchDiff > 0 && (
+            <p className="hint">
+              预估差额销毁 <span className="mono">{matchDiff.toFixed(2)}</span> m（新 RC {Number(matchFee).toFixed(2)} − 现违约金{' '}
+              {oldRc.toFixed(2)}），审核通过时从账户销毁。
+            </p>
+          )}
         </div>
       )}
 
@@ -576,6 +692,121 @@ function DetailSection({
             </tbody>
           </table>
         </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------- 海捞自由球员（规则 4.4.4） ---------- */
+
+function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; onError: (msg: string) => void }) {
+  const [data, setData] = useState<FreeAgentsResponse | null>(null);
+  const [feeById, setFeeById] = useState<Record<number, string>>({});
+  const [armedId, setArmedId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  useEffect(() => {
+    api<FreeAgentsResponse>('/api/market/free-agents')
+      .then(setData)
+      .catch(() => setData(null));
+  }, []);
+
+  async function sign(p: FreeAgentRow) {
+    if (busyId !== null) return;
+    setBusyId(p.id);
+    try {
+      const newFee = Number(feeById[p.id]);
+      const res = await apiPost<FreeAgentResult>('/api/transfers/free-agent', { playerId: p.id, newReleaseFee: newFee });
+      onDone(
+        `海捞申请已提交：${p.name} 以新违约金 ${res.newReleaseFee.toFixed(2)} m 签入，签入费 ${res.signFee.toFixed(2)} m（新 RC 的 30%）待审核时收，等管理组批准。`,
+      );
+      setFeeById((prev) => ({ ...prev, [p.id]: '' }));
+      setArmedId(null);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : '海捞失败');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="card admin-section">
+      <h3>海捞自由球员</h3>
+      {data === null ? (
+        <p className="muted">自由球员名单还没加载出来…</p>
+      ) : data.freeAgents.length === 0 ? (
+        <p className="hint">
+          现在没人待业。解约或合同到期的球员会出现在这里：给他一份新违约金（不设上下限），签入费按新 RC 的 30% 在审核通过时收。
+          本窗被解约的球员全联盟禁签。
+        </p>
+      ) : (
+        <>
+          <p className="hint">
+            给自由球员一份新违约金（不设上下限，整数 m），签入费按新 RC 的 30% 待审核时收。
+            注意：本窗被解约的球员全联盟禁签。
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>球员</th>
+                  <th>位置</th>
+                  <th className="num">年龄</th>
+                  <th className="num">CA / PA</th>
+                  <th className="num">新违约金（m）</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.freeAgents.map((p) => {
+                  const fee = Number(feeById[p.id] ?? 0);
+                  const valid = Number.isInteger(fee) && fee > 0;
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <Link to={`/players/${p.id}`}>{p.name}</Link>
+                        {p.bannedThisWindow && <span className="badge red">本窗禁签</span>}
+                      </td>
+                      <td>{p.position ?? '—'}</td>
+                      <td className="num mono">{p.age ?? '—'}</td>
+                      <td className="num mono">
+                        {p.ca ?? '—'} / {p.pa ?? '—'}
+                      </td>
+                      <td className="num">
+                        <input
+                          className="mono"
+                          type="number"
+                          min="1"
+                          step="1"
+                          aria-label={`${p.name} 的新违约金`}
+                          value={feeById[p.id] ?? ''}
+                          disabled={p.bannedThisWindow}
+                          onChange={(e) => setFeeById((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                        />
+                        {valid && <span className="hint"> 签入费 {(fee * 0.3).toFixed(2)} m</span>}
+                      </td>
+                      <td>
+                        {p.bannedThisWindow ? (
+                          <span className="muted">他被解约后本窗谁都签不了</span>
+                        ) : (
+                          <button
+                            className={`btn btn-sm${armedId === p.id ? ' btn-armed' : ''}`}
+                            type="button"
+                            disabled={busyId !== null || !valid}
+                            onClick={() => (armedId === p.id ? sign(p) : setArmedId(p.id))}
+                            onBlur={() => setArmedId(null)}
+                          >
+                            {busyId === p.id ? '提交中…' : armedId === p.id ? '再点一次确认签入' : '海捞签入'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </section>
   );

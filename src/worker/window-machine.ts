@@ -23,10 +23,10 @@ function defaultRng(): number {
 
 export interface WindowRow {
   season: number;
-  window_seq: number;
+  windowSeq: number;
   status: string;
-  opened_at: string | null;
-  closed_at: string | null;
+  openedAt: string | null;
+  closedAt: string | null;
 }
 
 export async function listWindows(db: D1Database): Promise<{ seasons: { season: number; status: string }[]; windows: WindowRow[] }> {
@@ -35,8 +35,18 @@ export async function listWindows(db: D1Database): Promise<{ seasons: { season: 
     .all<{ season: number; status: string }>();
   const windows = await db
     .prepare('SELECT season, window_seq, status, opened_at, closed_at FROM season_windows ORDER BY season DESC, window_seq DESC LIMIT 100')
-    .all<WindowRow>();
-  return { seasons: seasons.results, windows: windows.results };
+    .all<{ season: number; window_seq: number; status: string; opened_at: string | null; closed_at: string | null }>();
+  // DTO 冻结 camelCase（附录 A），在此层统一映射
+  return {
+    seasons: seasons.results,
+    windows: windows.results.map((r) => ({
+      season: r.season,
+      windowSeq: r.window_seq,
+      status: r.status,
+      openedAt: r.opened_at,
+      closedAt: r.closed_at,
+    })),
+  };
 }
 
 /**

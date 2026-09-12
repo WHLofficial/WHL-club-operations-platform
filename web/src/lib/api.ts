@@ -278,7 +278,9 @@ export interface ComplianceReport {
 
 // ---- 增量 3 DTO（附录 A〔3〕：转会市场挂牌竞价链）----
 
-export type ListingStatus = 'listed' | 'bidding' | 'pending_review' | 'delisted';
+export type ListingStatus = 'listed' | 'bidding' | 'matched_pending' | 'pending_review' | 'delisted';
+
+export type MatchPhase = 'first_bid' | 'matching' | null;
 
 export interface MarketListing {
   id: number;
@@ -293,6 +295,8 @@ export interface MarketListing {
   bidCount: number;
   activatedBy: number | null;
   activationDeadline: string | null;
+  matchDeadline: string | null;
+  matchPhase: MatchPhase;
   firstBidPending: boolean;
   deadlineAt: string | null;
   deadlineNote: string | null;
@@ -335,12 +339,17 @@ export interface ActivationResult {
   ok: boolean;
   listingId: number;
   askPrice: number;
+  kind: 'trainee' | 'normal';
   firstBidDeadline: string;
 }
 
 export interface BidPlaceResult {
   ok: boolean;
   bid: { id: number; amount: number; createdAt: string };
+  /** 激活单落首价后的去向：review=训练营直进待审，matching=正式合同进 24h 匹配窗 */
+  matchPhase?: 'review' | 'matching';
+  matchDeadline?: string | null;
+  settledForReview?: boolean;
 }
 
 export interface MyBidRow {
@@ -387,6 +396,7 @@ export interface AdminReviewRow {
     status: string;
     fee: number | null;
     tax: number | null;
+    extraFee: number | null;
     player: { id: number; name: string; position: string | null; ca: number | null; pa: number | null };
     fromClubName: string | null;
     toClubName: string | null;
@@ -444,4 +454,82 @@ export interface TraineeSignResult {
   result: 'trainee';
   wage: number;
   message: string;
+}
+
+// ---- 增量 5 DTO（附录 A〔5〕：旁路转会 + 匹配 + 窗口 + 强制拍卖）----
+
+export interface FreeAgentRow {
+  id: number;
+  name: string;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  bannedThisWindow: boolean;
+}
+
+export interface FreeAgentsResponse {
+  club: { id: number; name: string } | null;
+  freeAgents: FreeAgentRow[];
+}
+
+export interface RcChangeResult {
+  ok: boolean;
+  transferId: number;
+  oldReleaseFee: number;
+  newReleaseFee: number;
+  changeFee: number;
+}
+
+export interface TerminationResult {
+  ok: boolean;
+  transferId: number;
+  terminationFee: number;
+}
+
+export interface FreeAgentResult {
+  ok: boolean;
+  transferId: number;
+  newReleaseFee: number;
+  signFee: number;
+}
+
+export interface MatchDecisionResult {
+  ok: boolean;
+  decision: 'match' | 'pass';
+  newReleaseFee?: number;
+  diff?: number;
+}
+
+export interface WindowRow {
+  season: number;
+  windowSeq: number;
+  status: string;
+  openedAt: string | null;
+  closedAt: string | null;
+}
+
+export interface WindowsResponse {
+  seasons: { season: number; status: string }[];
+  windows: WindowRow[];
+}
+
+export interface OpenWindowResult {
+  ok: boolean;
+  season: number;
+  windowSeq: number;
+  rerolled: number;
+}
+
+export interface CloseWindowResult {
+  ok: boolean;
+  season: number;
+  windowSeq: number;
+  forceSettled: number;
+}
+
+export interface ForcedAuctionResult {
+  ok: boolean;
+  listingId: number;
+  askPrice: number;
 }

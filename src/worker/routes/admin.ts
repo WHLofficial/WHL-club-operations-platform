@@ -558,6 +558,7 @@ interface ReviewTaskRow {
   transfer_type: string;
   fee: number | null;
   tax: number | null;
+  extra_fee: number | null;
   player_id: number;
   player_name: string;
   position: string | null;
@@ -575,7 +576,7 @@ app.get('/reviews', async (c) => {
   const where = status === 'all' ? "rt.type = 'transfer_confirm'" : `rt.type = 'transfer_confirm' AND rt.status = ?`;
   const rows = await c.env.DB.prepare(
     `SELECT rt.id, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
-            t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax,
+            t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax, t.extra_fee,
             t.player_id, p.name AS player_name, p.position, p.ca, p.pa,
             cf.name AS from_name, ct.name AS to_name
      FROM review_tasks rt
@@ -601,6 +602,7 @@ app.get('/reviews', async (c) => {
         status: r.transfer_status,
         fee: r.fee,
         tax: r.tax,
+        extraFee: r.extra_fee,
         player: { id: r.player_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
         fromClubName: r.from_name,
         toClubName: r.to_name,
