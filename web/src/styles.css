@@ -1075,6 +1075,18 @@ tbody tr:hover td {
   color: var(--muted);
 }
 
+/* 谈判会话：违约金与预期工资并排展示 */
+.stat-pair {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.stat-pair .market-card-price {
+  min-width: 180px;
+}
+
 .market-card-price {
   display: flex;
   align-items: baseline;

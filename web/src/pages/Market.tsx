@@ -507,7 +507,7 @@ function DetailSection({
       </p>
       {l.type === 'activation' && (
         <p className="hint">
-          激活转会的孩子仍持训练营合同（固定 0.75m / 违约金 5m），过户后照旧在买方训练营。
+          激活成交和普通成交一样要走签约谈判：买方可以直签训练营合同（固定 0.75m / 违约金 5m，不占下放名额），也可以谈一份正式合同。
         </p>
       )}
       {bidHint && <p className="hint">{bidHint}</p>}

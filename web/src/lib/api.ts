@@ -399,5 +399,49 @@ export interface AdminReviews {
 
 export interface ReviewDecisionResult {
   ok: boolean;
-  status: 'completed' | 'already' | 'rejected';
+  status: 'completed' | 'signing' | 'already' | 'rejected';
+}
+
+export interface NegotiationSession {
+  id: number;
+  transferId: number;
+  status: 'active' | 'settled' | 'cancelled';
+  transfer: { type: string; status: string; fee: number | null };
+  fromClubName: string | null;
+  toClubName: string | null;
+  player: { id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
+  agentTier: number;
+  agentTierLabel: string;
+  releaseFee: number | null;
+  rcBounds: [number, number] | null;
+  expectedWage: number | null;
+  attemptsUsed: number;
+  remaining: number;
+  lastSatisfaction: string | null;
+  lastRisk: boolean;
+  attempts: { attemptNo: number; offeredWage: number; result: string }[];
+  settled: { wage: number | null; source: string; message: string } | null;
+}
+
+export interface ReleaseFeeResult {
+  ok: boolean;
+  releaseFee: number;
+  expectedWage: number;
+}
+
+export interface OfferResult {
+  result: 'success' | 'fail' | 'direct' | 'forced';
+  attemptNo: number;
+  remaining: number;
+  wage?: number;
+  satisfaction?: string;
+  risk?: boolean;
+  message?: string;
+}
+
+export interface TraineeSignResult {
+  ok: boolean;
+  result: 'trainee';
+  wage: number;
+  message: string;
 }

@@ -21,6 +21,9 @@ export default function TopBar({ user }: { user: MeUser | null | undefined }) {
           <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             转会市场
           </NavLink>
+          <NavLink to="/negotiations" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
+            签约谈判
+          </NavLink>
           <NavLink to="/ledger" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             财政账本
           </NavLink>

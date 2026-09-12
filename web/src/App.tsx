@@ -7,6 +7,7 @@ import Club from './pages/Club.tsx';
 import Player from './pages/Player.tsx';
 import Bind from './pages/Bind.tsx';
 import Market from './pages/Market.tsx';
+import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
 import Admin from './pages/Admin.tsx';
 
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/bind" element={<Bind />} />
         <Route path="/players/:id" element={<Player />} />
         <Route path="/market" element={<Market />} />
+        <Route path="/negotiations" element={<Negotiations />} />
         <Route path="/ledger" element={<Ledger />} />
         <Route path="/admin" element={<Admin user={user} />} />
       </Routes>

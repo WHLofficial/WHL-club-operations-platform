@@ -1018,7 +1018,9 @@ function ReviewsSection() {
       });
       show(
         action === 'approve'
-          ? `已批准：${row.transfer.player.name} → ${row.transfer.toClubName}，划款过户完成（${res.status === 'already' ? '此前已完成' : 'completed'}）。`
+          ? res.status === 'signing' || res.status === 'already'
+            ? `已批准：${row.transfer.player.name} → ${row.transfer.toClubName}，签约谈判已开启，等买方谈妥合同后过户。`
+            : `已批准：${row.transfer.player.name} → ${row.transfer.toClubName}，划款过户完成。`
           : `已驳回：${row.transfer.player.name} 的转会，资金已解冻。`,
       );
       await load(status);
@@ -1034,8 +1036,8 @@ function ReviewsSection() {
       <h2>审核队列</h2>
       {toastNode}
       <p className="hint">
-        转会截止后最高价成交单在这里人工确认：批准即划款、收交易税、球员过户一步到位；驳回则解冻全部资金、挂牌下架（不收下架费）。
-        签约工资谈判（增量 4）上线后，批准会先开启谈判会话，成约才过户。
+        转会截止后最高价成交单在这里人工确认：批准即开启签约谈判（解约类直接过户），由买方谈妥合同后成约过户；
+        驳回则解冻全部资金、挂牌下架（不收下架费）。
       </p>
       <div className="seg" role="radiogroup" aria-label="审核任务状态">
         {(['open', 'approved', 'rejected', 'all'] as const).map((s) => (
@@ -1075,8 +1077,14 @@ function ReviewsSection() {
                   </td>
                   <td className="num mono">{r.transfer.fee?.toFixed(2) ?? '—'}</td>
                   <td>
-                    <span className={`badge ${r.transfer.status === 'completed' ? 'gold' : r.transfer.status === 'rejected' ? 'red' : 'sky'}`}>
-                      {r.transfer.status}
+                    <span className={`badge ${r.transfer.status === 'completed' ? 'gold' : r.transfer.status === 'rejected' ? 'red' : r.transfer.status === 'signing' ? 'purple' : 'sky'}`}>
+                      {r.transfer.status === 'completed'
+                        ? '已过户'
+                        : r.transfer.status === 'rejected'
+                          ? '已驳回'
+                          : r.transfer.status === 'signing'
+                            ? '签约谈判中'
+                            : '待审核'}
                     </span>
                   </td>
                   <td>
@@ -1090,7 +1098,7 @@ function ReviewsSection() {
                           onChange={(e) => setNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
                         />
                         <button className="btn btn-sm" type="button" disabled={busyId === r.id} onClick={() => decide(r, 'approve')}>
-                          {busyId === r.id ? '处理中…' : '批准成约'}
+                          {busyId === r.id ? '处理中…' : '批准成交'}
                         </button>
                         <button className="btn btn-sm btn-danger" type="button" disabled={busyId === r.id} onClick={() => decide(r, 'reject')}>
                           驳回
