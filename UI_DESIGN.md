@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | v1.0（四裁决定稿：徽章色系 / 复古档案室 / emoji 克制白名单 / 品牌名「WHL 经理办公室」） |
+| 版本 | v1.0.1（v1.0 四裁决定稿 + 实现阶段徽章原图量化校色落定，§3 令牌为准值） |
 | 日期 | 2026-09-12 |
 | 状态 | 设计定稿，实现属开发阶段（本轮不写前端代码） |
 | 参照系 | 赛事系统 `WHL-tournament-management-system/src/styles.css`、竞猜系统 `WHL-Daily-Activities-System/public/style.css` |
@@ -35,23 +35,25 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 
 ## 3. 令牌表（`:root`）
 
-> 下列色值为**视觉估读**，实现阶段第一步须对徽章原图做色彩量化（PIL quantize）精调 4 个主令牌（terracotta / cocoa / paper / sky），以量化结果为准。
+> v1.0 的色值为视觉估读；实现阶段已对徽章原图（2048×2048）做 PIL quantize 校色（`scripts/calibrate_tokens.py`），下表为**校色后准值**。主色焦橙原图实测 `#db813a` 白字对比仅 2.91，按「加深不换色」规则压至 `#a4612c`（对比 4.86 ≥ 4.5）；金/银作正文字时用加深档 `--gold-deep`/`--silver-deep` 保证可读，`--gold`/`--silver` 保留作徽章底与线条。
 
-| 令牌 | 值（约） | 来源 / 用途 |
+| 令牌 | 校色后值 | 来源 / 用途 |
 |---|---|---|
-| `--paper` | `#f9f4e8` | 奶油纸页面底（徽章贴纸白），家族最暖一站 |
+| `--paper` | `#fdf4e3` | 奶油纸页面底（徽章贴纸白，量化主色），家族最暖一站 |
 | `--card` | `#fffdf7` | 卡片底（贴纸白） |
-| `--ink` | `#2b1d12` | 棕墨正文 |
-| `--muted` | `#8a7a6a` | 暖灰次要文字 |
-| `--terracotta` | `#c8752c` | **主色**：主按钮底、选中态、tab 激活（白字对比需 ≥4.5:1，精调时保底） |
-| `--terracotta-deep` | `#9c5212` | 主按钮 hover / 顶栏描边备选 |
+| `--ink` | `#2b1d12` | 棕墨正文（对 paper 对比 14.9） |
+| `--muted` | `#7a6a5a` | 暖灰次要文字（加深至对 paper 4.76 ≥ 4.5） |
+| `--terracotta` | `#a4612c` | **主色**：主按钮底、选中态、tab 激活（白字对比 4.86） |
+| `--terracotta-deep` | `#8e5426` | 主按钮 hover（白字对比 6.09） |
 | `--terracotta-tint` | `#f7e3cd` | 浅焦橙底：信息条、选中底、行情条 |
-| `--cocoa` | `#7c3e16` | 徽章字母棕：**顶栏底**、brand 字、档案卷宗描边 |
-| `--cocoa-deep` | `#4a2708` | 顶栏底部 3px 描边、印章深线 |
-| `--sky` | `#a5cfe2` | 徽章浅蓝点缀：**挂牌中/进行中徽章底**、链接强调（家族 live 橙在本站让位给品牌，见下） |
-| `--sky-deep` | `#4a86a3` | 浅蓝徽章深字 |
-| `--gold` | `#c99b3f` | 金：金徽章、身价数字强调、印章金线 |
-| `--silver` | `#9aa0a6` | 银：银徽章 |
+| `--cocoa` | `#87451c` | 徽章字母棕（量化）：**顶栏底**、brand 字、档案卷宗描边；顶栏奶油字对比 6.6 |
+| `--cocoa-deep` | `#4b2610` | 顶栏底部 3px 描边、印章深线 |
+| `--sky` | `#b0c8d0` | 徽章浅蓝衬底（量化）：**挂牌中/进行中徽章底**、链接强调（家族 live 橙在本站让位给品牌，见下） |
+| `--sky-deep` | `#37505e` | 浅蓝徽章深字（对 sky 对比 4.86） |
+| `--gold` | `#c99b3f` | 金：金徽章底、印章金线 |
+| `--gold-deep` | `#8f6a1e` | 金色正文字（身价数字等，对 paper 4.53） |
+| `--silver` | `#9aa0a6` | 银：银徽章底 |
+| `--silver-deep` | `#6e747b` | 银色正文字（对 card 4.64） |
 | `--ok / --bad / --warn` | `#0f9960 / #dc2626 / #d97706` | 状态色沿家族原值（warn 仅 banner，避免与主色橙混淆） |
 | `--border` | `#e6dcc8` | 边框（暖调，替代家族冷灰线） |
 | `--mono` | 沿赛事栈 `ui-monospace, "JetBrains Mono", …` | **一切数字**（CA/PA/身价/工资/余额/截止倒计时）mono + `tabular-nums` |
@@ -68,7 +70,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 | 顶栏 | `.topbar .brand .nav-links .nav-tab.is-active .userbox .role-badge` | 底 `--cocoa`、描边 `--cocoa-deep`、字奶油白；**brand = 徽章图（圆裁 24px）+ 「WHL 经理办公室」** |
 | 卡片 | `.card / a.card` | 白底 `--card`、1px `--border`、radius 12px、无阴影；hover 才浮起（边框变 `--terracotta` + `0 2px 10px rgba(74,39,8,.12)`） |
 | 按钮 | `.btn / .btn-ghost / .btn-danger / .btn-sm` | 实心 `--terracotta` 白字、hover `--terracotta-deep`；不可逆操作两段式确认（「再点一次确认」） |
-| 表单 | `label.field / .error-msg / .hint` | input focus 焦橙边 + `0 0 0 3px rgba(200,117,44,.15)` 光环 |
+| 表单 | `label.field / .error-msg / .hint` | input focus 焦橙边 + `0 0 0 3px rgba(164,97,44,.15)` 光环 |
 | 徽章 | `.badge.{green|orange|blue|purple|gray|red}` | 胶囊 999px 浅底深字六色对（沿竞猜模式）；**live/挂牌中用新增 `.badge.sky`（--sky 底 / --sky-deep 字）** |
 | 分段 | `.seg label.on` | 选中焦橙底白字 |
 | 表格 | `.table-wrap th td.num` | 表头米黄 `#f3ead9`、行 hover 奶油 `#f7f0e0`、数字列右对齐 mono |
@@ -126,7 +128,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 
 ## 6. 实现阶段校色与待办
 
-1. **量化校色（第一件事）**：对徽章原图 PIL quantize，精调 `--terracotta / --cocoa / --paper / --sky` 四令牌；主按钮白字对比 ≥4.5:1 不达标时加深 `--terracotta` 而非换色。
+1. ~~量化校色~~ **已完成（v1.0.1）**：`scripts/calibrate_tokens.py` 对徽章原图 quantize，四主令牌已按量化结果落定（见 §3 表）；主按钮白字对比 4.86 达标。
 2. 徽章图拷入仓库（`public/` 或 `src/assets/`，原图 1500×1500 需出 48/72/96px 圆裁变体或 CSS 圆裁）。
 3. 挂牌板顶部「市场快讯 ticker」为**可选件**（赛事 portal 已有母题，是否复用到市场页开发时定）。
 4. 除盖章 scale-in 外不新增任何 keyframe；所有动效过 reduced-motion。

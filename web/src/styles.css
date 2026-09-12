@@ -1,0 +1,525 @@
+/* WHL 经理办公室 · 全局样式（UI_DESIGN.md v1.0）
+   家族定位「同构不同色」：结构类名照抄赛事/竞猜，本站主色 = 徽章焦橙 + 巧克力棕 + 奶油纸。
+   令牌为徽章原图 PIL 量化校色结果（UI_DESIGN §6-1），主按钮白字对比 ≥4.5:1。 */
+
+:root {
+  --paper: #fdf4e3;         /* 徽章贴纸白（奶油纸） */
+  --card: #fffdf7;
+  --ink: #2b1d12;
+  --muted: #7a6a5a;
+  --terracotta: #a4612c;    /* 主色：徽章焦橙加深至白字对比 4.86 */
+  --terracotta-deep: #8e5426;
+  --terracotta-tint: #f7e3cd;
+  --cocoa: #87451c;         /* 徽章字母棕：顶栏底 */
+  --cocoa-deep: #4b2610;
+  --sky: #b0c8d0;           /* 徽章浅蓝衬底：挂牌中/进行中 */
+  --sky-deep: #37505e;
+  --gold: #c99b3f;          /* 金：徽章底/金线；正文字用 --gold-deep */
+  --gold-deep: #8f6a1e;
+  --silver: #9aa0a6;
+  --silver-deep: #6e747b;
+  --ok: #0f9960;
+  --bad: #dc2626;
+  --warn: #d97706;
+  --border: #e6dcc8;
+  --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--paper);
+  /* 纸张噪点（feTurbulence data-uri，≤4% 透明度，UI_DESIGN §2） */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  color: var(--ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--terracotta-deep);
+}
+
+h1 {
+  font-size: 22px;
+  margin: 8px 0 16px;
+}
+
+h3 {
+  margin: 0 0 6px;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 16px 56px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* ---- 顶栏（家族结构：整条色底 + inset 底部描边） ---- */
+
+.topbar {
+  background: var(--cocoa);
+  box-shadow: inset 0 -3px 0 var(--cocoa-deep);
+  color: #fdf4e3;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #fdf4e3;
+  text-decoration: none;
+  font-weight: 800;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.brand-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: block;
+}
+
+.nav-links {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.nav-tab {
+  color: rgba(253, 244, 227, 0.82);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+}
+
+.nav-tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-tab.is-active {
+  background: var(--terracotta);
+  color: #fff;
+  font-weight: 600;
+}
+
+.userbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.userbox-name {
+  font-weight: 600;
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.role-admin {
+  background: var(--gold);
+  color: var(--cocoa-deep);
+}
+
+.role-coach {
+  background: var(--terracotta-tint);
+  color: var(--terracotta-deep);
+}
+
+.role-viewer {
+  background: rgba(253, 244, 227, 0.18);
+  color: rgba(253, 244, 227, 0.85);
+}
+
+/* ---- 卡片 ---- */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  text-decoration: none;
+  color: inherit;
+}
+
+a.card {
+  display: block;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+a.card:hover {
+  border-color: var(--terracotta);
+  box-shadow: 0 2px 10px rgba(75, 38, 16, 0.12);
+}
+
+.nav-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.nav-card h3 {
+  color: var(--cocoa-deep);
+}
+
+.nav-card p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.home-hero h1 {
+  margin: 0 0 8px;
+  letter-spacing: 2px;
+}
+
+.home-hero p {
+  margin: 0 0 8px;
+}
+
+.home-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+
+.empty-state {
+  padding: 44px 24px;
+  text-align: center;
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+/* ---- 按钮 ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--terracotta);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1.5;
+}
+
+.btn:hover {
+  background: var(--terracotta-deep);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--terracotta-deep);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:hover {
+  background: var(--card);
+  border-color: var(--terracotta);
+}
+
+.btn-danger {
+  background: var(--bad);
+}
+
+.btn-danger:hover {
+  background: #b91c1c;
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+/* 家族互敬：跨站按钮（→赛事草纹绿 / →竞猜品牌蓝） */
+.cross-tour {
+  background: linear-gradient(180deg, #128a51, #0e7a46);
+}
+
+.cross-tour:hover {
+  background: linear-gradient(180deg, #0e7a46, #0a5f37);
+}
+
+.cross-guess {
+  background: linear-gradient(180deg, #2f66ff, #1652f0);
+}
+
+.cross-guess:hover {
+  background: linear-gradient(180deg, #1652f0, #0f3fc4);
+}
+
+/* ---- 胶囊徽章 ---- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.badge.green {
+  background: #e2f3ea;
+  color: #0b7a47;
+}
+
+.badge.orange {
+  background: var(--terracotta-tint);
+  color: var(--terracotta-deep);
+}
+
+.badge.blue {
+  background: #e3ecfa;
+  color: #1d4fd7;
+}
+
+.badge.sky {
+  background: var(--sky);
+  color: var(--sky-deep);
+}
+
+.badge.purple {
+  background: #efe6f7;
+  color: #6d3fa8;
+}
+
+.badge.gray {
+  background: #efe9dd;
+  color: var(--muted);
+}
+
+.badge.red {
+  background: #fbe3e3;
+  color: #b91c1c;
+}
+
+.badge.gold {
+  background: #f5e8cf;
+  color: var(--gold-deep);
+}
+
+/* ---- 提示条 ---- */
+
+.banner {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  margin: 12px 0;
+}
+
+.banner.info {
+  background: var(--terracotta-tint);
+  color: var(--cocoa-deep);
+  border: 1px solid #ecd3b2;
+}
+
+.banner.warn {
+  background: #fdf0dc;
+  color: #92510a;
+  border: 1px solid #f0d9ae;
+}
+
+.banner.bad {
+  background: #fbe3e3;
+  color: #b91c1c;
+  border: 1px solid #f3c6c6;
+}
+
+/* ---- 表单 ---- */
+
+label.field {
+  display: block;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+label.field input,
+label.field select,
+label.field textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+}
+
+label.field input:focus,
+label.field select:focus,
+label.field textarea:focus {
+  outline: none;
+  border-color: var(--terracotta);
+  box-shadow: 0 0 0 3px rgba(164, 97, 44, 0.15);
+}
+
+.error-msg {
+  color: var(--bad);
+  font-size: 13px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 登录/登记卡（家族 auth-card：窄卡 + 主色顶边） */
+.auth-card {
+  max-width: 380px;
+  margin: 48px auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--terracotta);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+/* ---- 表格 ---- */
+
+.table-wrap {
+  overflow-x: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th {
+  text-align: left;
+  background: #f3ead9;
+  color: var(--cocoa-deep);
+  font-size: 13px;
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+
+td {
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+}
+
+td.num {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+tbody tr:hover td {
+  background: #f7f0e0;
+}
+
+/* ---- Toast（家族：底部胶囊） ---- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: #fdf4e3;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  z-index: 100;
+  box-shadow: 0 6px 18px rgba(43, 29, 18, 0.25);
+  white-space: nowrap;
+}
+
+.toast.err {
+  background: var(--bad);
+  color: #fff;
+}
+
+/* ---- 移动端（640px 单断点，家族硬惯例） ---- */
+
+@media (max-width: 640px) {
+  .topbar-inner {
+    gap: 8px;
+  }
+
+  .nav-links {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+  }
+
+  .nav-tab {
+    white-space: nowrap;
+  }
+
+  .nav-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .btn,
+  .nav-tab {
+    min-height: 36px;
+  }
+}
