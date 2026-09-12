@@ -38,7 +38,8 @@ export function ledgerMovement(db: D1Database, input: MovementInput): D1Prepared
   const where = guardParts.join(' AND ');
 
   return [
-    // 1) 账户差额 upsert：INSERT 分支与 UPDATE 分支都挂幂等闸，重放时整段不动
+    // 1) 账户差额 upsert：INSERT 分支与 UPDATE 分支都挂幂等闸，重放时整段不动。
+    //    守卫在语句里出现两次，占位符也按两次绑定（node:sqlite/D1 缺位绑定会静默落 NULL）。
     db
       .prepare(
         `INSERT INTO ledger_accounts (club_id, balance, updated_at)
@@ -46,7 +47,7 @@ export function ledgerMovement(db: D1Database, input: MovementInput): D1Prepared
          ON CONFLICT(club_id) DO UPDATE SET balance = balance + excluded.balance, updated_at = excluded.updated_at
          WHERE ${where}`,
       )
-      .bind(input.clubId, input.delta, ...guardParams),
+      .bind(input.clubId, input.delta, ...guardParams, ...guardParams),
     // 2) 流水：balance_after 读同事务内更新后的余额，防错账（§7.4）
     db
       .prepare(

@@ -161,8 +161,8 @@ app.post('/market/listings', async (c) => {
     .first<{ id: number; name: string; club_id: number | null; status: string; market_value: number | null }>();
   if (!player) throw new HttpError(404, '球员不存在');
   if (player.club_id !== club.id) throw new HttpError(400, '只能挂牌自己队里的球员');
-  if (player.status !== 'normal' && player.status !== 'trainee') {
-    throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : `当前状态（${player.status}）不能挂牌`);
+  if (player.status !== 'normal') {
+    throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '当前状态不能挂牌（训练营球员走激活/转正路径，暂不开放挂牌）');
   }
 
   const dup = await c.env.DB.prepare(`SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'pending_review') LIMIT 1`)
@@ -192,7 +192,7 @@ app.post('/market/listings', async (c) => {
       `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, season, window_seq)
        VALUES (?, ?, 'normal', ?, 'listed', ${nowSql()}, ?, ?, ?)`,
     ).bind(playerId, club.id, round2(askPrice), shanghaiDateStr(Date.parse(listedAt)), win.season, win.windowSeq),
-    c.env.DB.prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status IN ('normal', 'trainee')`).bind(
+    c.env.DB.prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`).bind(
       playerId,
       club.id,
     ),

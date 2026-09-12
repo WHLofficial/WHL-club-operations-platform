@@ -197,6 +197,9 @@ export async function rejectTransfer(
     db
       .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '审核驳回' WHERE id = ? AND status = 'pending_review'`)
       .bind(listingId),
+    db
+      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
+      .bind(transfer.player_id),
   ];
   const statusStmtIndex = statements.length;
   statements.push(

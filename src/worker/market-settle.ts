@@ -118,6 +118,9 @@ export async function delistUnbid(
     db
       .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '窗口结束无人出价' WHERE id = ? AND status = 'listed'`)
       .bind(listing.id),
+    db
+      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
+      .bind(listing.player_id),
     ...ledgerMovement(db, {
       clubId: listing.seller_club_id,
       delta: -fee,
