@@ -1,6 +1,7 @@
 // §13 可配置参数总表：D1 config 表唯一来源，代码内 defaults 兜底。
 // Worker isolate 内存缓存 TTL 60s（读多写少，管理端改后 ≤60s 生效）；
 // 数值键解析失败回退默认；涉密键（§6.10）对外只出掩码，值不进前端、不进审计。
+import { DEFAULT_CA_PA_LIMITS } from './squad-rules.ts';
 
 export const CONFIG_TTL_MS = 60_000;
 export const CONFIG_MASK = '（内部参数，已隐藏）';
@@ -81,6 +82,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   squad_max: '30',
   gk_min: '1',
   trainee_max: '7',
+  ca_pa_limits: JSON.stringify(DEFAULT_CA_PA_LIMITS), // 规则 4.2.2 梯度原文，config 表可覆盖
   luxury_cash_threshold: '125',
   luxury_cash_rate: '0.20',
   luxury_value_threshold: '700',

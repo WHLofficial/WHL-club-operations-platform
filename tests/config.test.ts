@@ -27,11 +27,14 @@ describe('config 服务（§13）', () => {
     await expect(service.getNumber('auction_tax_rate')).resolves.toBe(0.5);
   });
 
-  it('json/待定键缺省为 null', async () => {
+  it('json/待定键缺省为 null（ca_pa_limits 除外，规则 4.2.2 有原文默认）', async () => {
     const { service } = setup();
-    await expect(service.get('ca_pa_limits')).resolves.toBeNull();
     await expect(service.get('wage_cap')).resolves.toBeNull();
     await expect(service.getJson<object>('prize_table')).resolves.toBeNull();
+    await expect(service.getJson<object>('ca_pa_limits')).resolves.toEqual({
+      premier: { ge90: 1, ge87: 4, growthPa87: 6 },
+      second: { ge90: 1, ge87: 3, growthPa87: 6 },
+    });
   });
 
   it('库里有的值优先于默认', async () => {
