@@ -69,7 +69,7 @@ web/          React SPA（挂牌板/球队中心/球员卡/管理端/审核队�
 
 ### 3.2 俱乐部绑定
 
-照抄比赛系统 coach/bind 模式：管理组建俱乐部 → 生成 8 位一次性认证码 → 教练网页提交认证码 → 写 `club_bindings(club_id, user_id UNIQUE)`，一账号一队。
+照抄比赛系统 coach/bind 模式：管理组建俱乐部 → 生成 8 位一次性认证码 → 教练网页提交认证码 → 写 `club_bindings(club_id, user_id UNIQUE)`，一账号一队。认证码存 `club_bind_code` 表（sha256 哈希入库、明码只在生成响应里出现一次、条件烧码防并发复用、按 IP 限尝试次数），与比赛系统 `auth_code` 同构。
 
 ### 3.3 QQ 桥（P1）
 
@@ -810,10 +810,12 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 系统 | GET `/api/health` | 🌐 | 三资源可达性 |
 | 系统 | GET `/api/me` | 🌐 | 登录态（null=未登录） |
 | 俱乐部 | POST `/api/admin/clubs` | 🛡 | 建队〔1〕 |
+| 俱乐部 | GET `/api/admin/clubs` | 🛡 | 俱乐部列表（含绑定状态/最近认证码）〔1〕 |
 | 俱乐部 | POST `/api/admin/clubs/:id/bindcode` | 🛡 | 生成 8 位认证码〔1〕 |
 | 俱乐部 | POST `/api/clubs/bind` | 👤 | 认证码绑队〔1〕 |
 | 俱乐部 | GET `/api/me/club` | 👤 | 我的球队概览（余额/名单数/窗口态）〔1〕 |
 | 俱乐部 | POST `/api/admin/bindings/unbind` | 🛡 | 解绑〔1〕 |
+| 系统 | GET `/api/admin/config` | 🛡 | config 键注册表（涉密键掩码，§13）〔1〕 |
 | 球员 | POST `/api/admin/players/import/preview` · `/confirm` | 🛡 | 导入管线两段式（§5.4）〔1〕 |
 | 球员 | GET `/api/players/:id` | 🌐 | 球员卡（档案卡数据）〔1〕 |
 | 球员 | GET `/api/players?club_id=&status=&cursor=` | 🌐 | 球员列表〔1〕 |
@@ -836,6 +838,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 赛季 | POST `/api/admin/seasons` · `/advance-window` · `/:id/bind-tournament` | 🛡 | 赛季管理〔6〕 |
 | 赛果 | GET `/api/admin/results/queue` · POST `/:id/confirm` | 🛡 | 赛果确认（触发奖金/XP）〔6〕 |
 | 财政 | GET `/api/club/ledger?cursor=` · GET `/api/club/balance` | 👤 | 流水账〔6〕 |
+| 财政 | POST `/api/admin/ledger/opening-import` | 🛡 | 期初余额导入（§14.1，kind=opening_import）〔1〕 |
 | 财政 | POST `/api/admin/ledger/manual` | 🛡 | 手动记账兜底〔6〕 |
 | 成长 | GET `/api/players/:id/growth` | 🌐 | XP 事件与成长史〔6〕 |
 | 成长 | POST `/api/admin/growth/events` | 🛡 | 补录（评分/扑救/夺权）〔6〕 |
