@@ -5,7 +5,7 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { releaseFeeBounds } from '../core/negotiation-rules.ts';
-import { rcChangeFee, terminationFee } from '../core/bypass-rules.ts';
+import { rcChangeFee, terminationFee, freeAgentFee } from '../core/bypass-rules.ts';
 import { round2 } from '../core/market-rules.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
@@ -304,6 +304,81 @@ export async function createTermination(
   return { ok: true, transferId, terminationFee: fee };
 }
 
+// ---- 海捞（规则 4.4.3：签入自由球员，签入费 = 新违约金 × 30%，新 RC 不设上下限） ----
+
+export interface FreeAgentResult {
+  ok: true;
+  transferId: number;
+  newReleaseFee: number;
+  signFee: number;
+}
+
+export async function createFreeAgent(
+  env: Env,
+  clubId: number,
+  actor: number,
+  playerIdInput: unknown,
+  newFeeInput: unknown,
+): Promise<FreeAgentResult> {
+  const db = env.DB;
+  const playerId = Number(playerIdInput);
+  const newFee = Number(newFeeInput);
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
+  if (!Number.isInteger(newFee) || newFee <= 0) throw new HttpError(400, '新违约金须为正整数（单位 m，海捞不设上下限）');
+
+  const win = await getOpenWindow(db);
+  if (!win) throw new HttpError(409, '转会窗口没开，现在不能海捞', 'no_window');
+
+  const player = await db
+    .prepare('SELECT id, name, club_id, status FROM players WHERE id = ?')
+    .bind(playerId)
+    .first<OwnPlayerRow>();
+  if (!player) throw new HttpError(404, '球员不存在');
+  if (player.club_id !== null) throw new HttpError(400, '海捞只能签无归属的球员（这名球员有东家）');
+  if (player.status === 'retired' || player.status === 'listed') throw new HttpError(400, '当前状态不能海捞');
+  // 4.4.4：本转会窗被解约的球员，所有球队本窗都无法签入
+  const banned = await db
+    .prepare(
+      `SELECT id FROM transfers WHERE player_id = ? AND type = 'termination' AND status = 'completed'
+         AND season = ? AND window_seq = ? LIMIT 1`,
+    )
+    .bind(playerId, win.season, win.windowSeq)
+    .first<{ id: number }>();
+  if (banned) throw new HttpError(409, '这名球员本窗口被解约过，本窗口所有球队都不能签他');
+  await ensureNotInFlight(db, playerId);
+
+  const signFee = freeAgentFee(newFee);
+  const available = await availableBalance(db, clubId);
+  if (round2(available) < signFee) {
+    throw new HttpError(400, `可用资金不足：海捞签入费是新违约金的 30%（${signFee} m），当前可支配 ${round2(available)} m`);
+  }
+
+  const { transferId } = await createBypassTransfer(env, {
+    actor,
+    type: 'free_agent',
+    playerId,
+    fromClubId: null,
+    toClubId: clubId,
+    fee: newFee,
+    extraFee: null,
+    season: win.season,
+    windowSeq: win.windowSeq,
+    evidence: { signFee },
+    payload: {
+      kind: 'free_agent',
+      playerId,
+      playerName: player.name,
+      clubId,
+      newReleaseFee: newFee,
+      signFee,
+      season: win.season,
+      windowSeq: win.windowSeq,
+    },
+    action: 'bypass_free_agent',
+  });
+  return { ok: true, transferId, newReleaseFee: newFee, signFee };
+}
+
 // ---- 审核通过分流（approve → 按单据类型走各自成约路径） ----
 
 export async function approveTransferDeal(
@@ -337,7 +412,16 @@ export async function approveTransferDeal(
       });
       return { status: opened.status };
     }
-    // match / free_agent 分支随增量 5 后续提交接入
+    case 'free_agent': {
+      const f = transfer.fee ?? 0;
+      if (f > 0 && transfer.to_club_id !== null) {
+        await chargeBypassFee(env, transferId, transfer.to_club_id, freeAgentFee(f), 'free_agent_fee', `海捞签入费（新违约金 ${f}m × 30%，销毁）`);
+      }
+      // F 提交时已定死：开会即快照 E（不乘续约加薪）
+      const opened = await openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: f || undefined });
+      return { status: opened.status };
+    }
+    // match 分支随增量 5 后续提交接入
     default:
       return openNegotiationSession(env, transferId, actor, review);
   }

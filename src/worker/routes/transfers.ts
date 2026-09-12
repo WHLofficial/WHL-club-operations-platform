@@ -9,7 +9,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach, type SessionUser } from '../../lib/session.ts';
 import { getBoundClub } from '../binding.ts';
-import { createRcChange, createTermination } from '../bypass.ts';
+import { createRcChange, createTermination, createFreeAgent } from '../bypass.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -35,6 +35,13 @@ app.post('/transfers/termination', async (c) => {
   const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
   const body = await readJson(c);
   const result = await createTermination(c.env, clubId, user.id, body?.playerId);
+  return c.json(result, 201);
+});
+
+app.post('/transfers/free-agent', async (c) => {
+  const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
+  const body = await readJson(c);
+  const result = await createFreeAgent(c.env, clubId, user.id, body?.playerId, body?.newReleaseFee);
   return c.json(result, 201);
 });
 

@@ -199,13 +199,19 @@ export async function completeTransfer(
     );
   }
   if (terms && freeAgent) {
-    // 海捞：球员无现行合同，落新合同（带保护期）
+    // 海捞：落新合同（带保护期）。contracts.player_id 全局唯一（解约只是 is_active=0），
+    // 复签走 ON CONFLICT UPSERT 把旧合同行整体翻新
     statements.push(
       db
         .prepare(
           `INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, protected_until, is_active)
            VALUES (?, ?, ?, ?, ?, ?, ${nowSql()}, strftime('%Y-%m-%d', 'now'),
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+${PROTECTION_DAYS} days'), 1)`,
+                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+${PROTECTION_DAYS} days'), 1)
+           ON CONFLICT(player_id) DO UPDATE SET
+             club_id = excluded.club_id, release_fee = excluded.release_fee, wage = excluded.wage,
+             contract_type = excluded.contract_type, source = excluded.source,
+             signed_at = excluded.signed_at, effective_from = excluded.effective_from,
+             protected_until = excluded.protected_until, is_active = 1`,
         )
         .bind(transfer.player_id, transfer.to_club_id, terms.releaseFee, terms.wage, terms.contractType, terms.source),
     );

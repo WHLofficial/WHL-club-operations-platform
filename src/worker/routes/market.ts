@@ -238,6 +238,50 @@ app.post('/market/listings', async (c) => {
   return c.json({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);
 });
 
+// GET /api/market/free-agents —— 自由球员（可海捞名单，教练侧）；本窗被解约的标禁签
+app.get('/market/free-agents', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw);
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) return c.json({ club: null, freeAgents: [] });
+
+  const win = await getOpenWindow(c.env.DB);
+  const rows = await c.env.DB.prepare(
+    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa
+     FROM players p
+     WHERE p.club_id IS NULL AND p.status IN ('free', 'normal')
+     ORDER BY p.ca DESC, p.id LIMIT 100`,
+  ).all<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null }>();
+
+  const banned = new Set<number>();
+  if (win && rows.results.length > 0) {
+    const ids = rows.results.map((r) => r.id);
+    for (let i = 0; i < ids.length; i += 90) {
+      const slice = ids.slice(i, i + 90);
+      const rowsBanned = await c.env.DB.prepare(
+        `SELECT DISTINCT player_id FROM transfers
+         WHERE type = 'termination' AND status = 'completed' AND season = ? AND window_seq = ?
+           AND player_id IN (${slice.map(() => '?').join(', ')})`,
+      )
+        .bind(win.season, win.windowSeq, ...slice)
+        .all<{ player_id: number }>();
+      for (const r of rowsBanned.results) banned.add(r.player_id);
+    }
+  }
+
+  return c.json({
+    club: { id: club.id, name: club.name },
+    freeAgents: rows.results.map((r) => ({
+      id: r.id,
+      name: r.name,
+      position: r.position,
+      age: r.age,
+      ca: r.ca,
+      pa: r.pa,
+      bannedThisWindow: banned.has(r.id),
+    })),
+  });
+});
+
 // GET /api/market/trainees —— 各队训练营球员（可被激活名单，教练侧）
 app.get('/market/trainees', async (c) => {
   const user = await requireCoach(c.env, c.req.raw);
