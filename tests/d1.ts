@@ -70,6 +70,7 @@ const MIGRATION_FILES = [
   '0005_market_bid_guard.sql',
   '0006_activation_negotiation.sql',
   '0007_negotiation_settle.sql',
+  '0008_activation_match.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync): void {

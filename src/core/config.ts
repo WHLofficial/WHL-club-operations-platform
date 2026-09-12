@@ -58,6 +58,7 @@ export const CONFIG_KEYS = [
   'max_attempts',
   'young_blend_age',
   'renewal_raise',
+  'window_force_settle',
   'review_amount_threshold',
   'bid_pattern_alert',
 ] as const;
@@ -109,6 +110,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   max_attempts: '3',
   young_blend_age: '25',
   renewal_raise: '0.05,0.15',
+  window_force_settle: 'false',
 };
 
 export const CONFIG_SECRET_KEYS: ReadonlySet<string> = new Set([
