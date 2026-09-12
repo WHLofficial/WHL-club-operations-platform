@@ -51,18 +51,19 @@ export function transferTypeFor(listingType: string | null | undefined): string 
   return listingType === 'activation' ? 'activation' : 'transfer';
 }
 
-// bidding → pending_review：transfer（idempotency_key = listing:{id}，UNIQUE 幂等）+ 审核任务
+// → pending_review：transfer（idempotency_key = listing:{id}，UNIQUE 幂等）+ 审核任务
 // 成交买方/价格在 batch 执行时用子查询取「当时的活跃最高出价」，与并发出价请求在 D1 单写者下
-// 天然串行，不会漏掉刚落库的更高价。
+// 天然串行，不会漏掉刚落库的更高价。fromStatus 允许从 matched_pending（匹配放行/到期）收口。
 export async function settleListingForReview(
   db: D1Database,
   listing: ListingCore,
   actor: number | null,
+  fromStatus: 'bidding' | 'matched_pending' | 'listed' = 'bidding',
 ): Promise<'settled' | 'already'> {
   const audit = createAuditStatement(db);
   const key = `listing:${listing.id}`;
   const statements = [
-    db.prepare(`UPDATE listings SET status = 'pending_review' WHERE id = ? AND status = 'bidding'`).bind(listing.id),
+    db.prepare(`UPDATE listings SET status = 'pending_review', match_deadline = NULL WHERE id = ? AND status = ?`).bind(listing.id, fromStatus),
     db
       .prepare(
         `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
@@ -218,6 +219,41 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
     .all<{ id: number; player_id: number }>();
   for (const row of expired.results) {
     if (await voidExpiredActivation(db, row.id, row.player_id, actor)) summary.voided++;
+  }
+
+  // 激活首价已落但未收口（收口前崩溃的残留）：listed 已过期且带出价、或 bidding → 直接进待审
+  const remnants = await db
+    .prepare(
+      `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.status, l.season, l.window_seq
+       FROM listings l
+       WHERE l.type = 'activation' AND (
+         (l.status = 'listed' AND l.activation_deadline IS NOT NULL AND l.activation_deadline < ?
+           AND EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id))
+         OR l.status = 'bidding'
+       )
+       ORDER BY l.id LIMIT 100`,
+    )
+    .bind(now.toISOString())
+    .all<ListingCore & { status: string }>();
+  for (const row of remnants.results) {
+    if ((await settleListingForReview(db, row, actor, row.status === 'bidding' ? 'bidding' : 'listed')) === 'settled') {
+      summary.settled++;
+    }
+  }
+
+  // 匹配窗到期（4.4.2.4）：被激活方 24h 内未提交匹配 → 按激活价（首价）成交进待审
+  const matchExpired = await db
+    .prepare(
+      `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.season, l.window_seq
+       FROM listings l
+       WHERE l.type = 'activation' AND l.status = 'matched_pending'
+         AND l.match_deadline IS NOT NULL AND l.match_deadline < ?
+       ORDER BY l.id LIMIT 100`,
+    )
+    .bind(now.toISOString())
+    .all<ListingCore>();
+  for (const row of matchExpired.results) {
+    if ((await settleListingForReview(db, row, actor, 'matched_pending')) === 'settled') summary.settled++;
   }
 
   const active = await db

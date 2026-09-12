@@ -5,7 +5,7 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { releaseFeeBounds } from '../core/negotiation-rules.ts';
-import { rcChangeFee, terminationFee, freeAgentFee } from '../core/bypass-rules.ts';
+import { rcChangeFee, terminationFee, freeAgentFee, matchDiff } from '../core/bypass-rules.ts';
 import { round2 } from '../core/market-rules.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
@@ -421,7 +421,21 @@ export async function approveTransferDeal(
       const opened = await openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: f || undefined });
       return { status: opened.status };
     }
-    // match 分支随增量 5 后续提交接入
+    case 'match': {
+      interface MatchEvidence {
+        oldReleaseFee: number;
+        previousBid: number;
+      }
+      const ev = transferEvidence<MatchEvidence>(transfer);
+      const f = transfer.fee ?? 0;
+      const diff = matchDiff(ev?.oldReleaseFee ?? 0, f);
+      if (transfer.to_club_id !== null) {
+        await chargeBypassFee(env, transferId, transfer.to_club_id, diff, 'match_diff_burn', `匹配差额（违约金 ${ev?.oldReleaseFee ?? '?'}m → ${f}m，销毁）`);
+      }
+      // F 提交时已定死：开会即快照 E（匹配不乘续约加薪）
+      const opened = await openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: f || undefined });
+      return { status: opened.status };
+    }
     default:
       return openNegotiationSession(env, transferId, actor, review);
   }

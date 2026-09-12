@@ -157,7 +157,7 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect(trainees).toHaveLength(0);
   });
 
-  it('自己队的球员、正式球员、无合同都不可激活', async () => {
+  it('自己队的球员不可激活；无合同的训练营球员不可激活；正式球员现在可按倍数价激活', async () => {
     const fx = await seedTrainee(freshEnv());
     const own = await post('/api/market/activations', { playerId: 20 }, 'tok-coach', fx.env);
     expect(own.status).toBe(400);
@@ -166,14 +166,16 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
       `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
          (21, 'fc21', '成年队', ${fx.ownerClub}, 'CM', 27, 82, 82, 25, 'normal');
        INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
-         (2, 21, ${fx.ownerClub}, 20, 2, 'formal', 1, '2026-07-01');
+         (2, 21, ${fx.ownerClub}, 20, 2, 'formal', 1, '2026-06-01');
        INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
          (22, 'fc22', '没合同', ${fx.ownerClub}, 'GK', 19, 60, 80, 8, 'trainee');`,
     );
-    const formal = await post('/api/market/activations', { playerId: 21 }, 'tok-coach2', fx.env);
-    expect(formal.status).toBe(400);
     const noContract = await post('/api/market/activations', { playerId: 22 }, 'tok-coach2', fx.env);
     expect(noContract.status).toBe(400);
+    // §6.2：正式球员同样可被激活（无 signed_at/protected_until 记录 → 保护期外 1 倍价 20m）
+    const formal = await post('/api/market/activations', { playerId: 21 }, 'tok-coach2', fx.env);
+    expect(formal.status).toBe(201);
+    expect(((await formal.json()) as { askPrice: number }).askPrice).toBe(20);
   });
 
   it('本窗口刚签约（效力起点在窗口开启后）不可被激活', async () => {
@@ -191,7 +193,7 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect((body as { error?: string }).error).toContain('可用资金不足');
   });
 
-  it('出价窗内他队出价无效，激活方首价必须恰好 5m', async () => {
+  it('出价窗内他队出价无效，激活方首价必须恰好 5m，落价即收口进待审（训练营无匹配）', async () => {
     const fx = await seedTrainee(freshEnv());
     const { body } = await activateTrainee(fx);
     const listingId = body.listingId!;
@@ -206,13 +208,19 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     const ok = await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env);
     expect(ok.status).toBe(201);
 
-    // 首价落定：出价窗清空、进入竞价态、冻结 5m，他队此后可正常抬价
+    // 首价落定：训练营合同无匹配可言，直接收口进待审（transfer + 审核任务），出价窗清空
     const after = sqlGet<{ status: string; activation_deadline: string | null }>(
       fx.sqlite,
       'SELECT status, activation_deadline FROM listings WHERE id = ?',
       listingId,
     );
-    expect(after).toEqual({ status: 'bidding', activation_deadline: null });
+    expect(after).toEqual({ status: 'pending_review', activation_deadline: null });
+    const transfer = sqlGet<{ type: string; status: string; fee: number; to_club_id: number }>(
+      fx.sqlite,
+      'SELECT type, status, fee, to_club_id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    expect(transfer).toMatchObject({ type: 'activation', status: 'pending_review', fee: 5, to_club_id: fx.buyerClub });
     const hold = sqlGet<{ amount: number; status: string }>(
       fx.sqlite,
       `SELECT amount, status FROM fund_holds WHERE club_id = ? AND ref_type = 'listing' AND ref_id = ? AND status = 'held'`,
@@ -221,8 +229,9 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     );
     expect(hold).toEqual({ amount: 5, status: 'held' });
 
+    // 激活挂牌不开放后续竞价（首价即成交价）
     const outbid = await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach3', fx.env);
-    expect(outbid.status).toBe(201);
+    expect(outbid.status).toBe(409);
   });
 
   it('出价窗过了激活方没落价 → 激活无效：下架不收费、球员还原训练营态', async () => {
