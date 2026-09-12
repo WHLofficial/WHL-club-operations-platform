@@ -1,0 +1,54 @@
+{
+  // 部署前置见 TECH_DESIGN §14.0：
+  //   1) npx wrangler d1 create whl-club  ->  替换下方 database_id 占位
+  //   2) 部署域必须是 .whleague.win 子域（共享 cookie whl_session 由赛事系统种在主域，平台自己不种任何 cookie）
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "whl-club",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "whl-club",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "src/db/migrations"
+    },
+    {
+      // 比赛系统 D1 只读绑定：账号与会话真源（TECH_DESIGN §3.1/§4），平台不写 user 表
+      "binding": "TOUR_DB",
+      "database_name": "whl",
+      "database_id": "ec3cc695-70bc-47ab-a454-5ca62ec22dd6"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      // 共享会话 KV（与赛事/竞猜同一命名空间）：平台只读 sess:{token}
+      "binding": "SESSION_KV",
+      "id": "87e2d78308bc47e9b36dc6de53be0458"
+    }
+  ],
+  "r2_buckets": [
+    {
+      // 队徽/媒体复用比赛系统桶 whl-media；本地 dev 自动模拟
+      "binding": "MEDIA",
+      "bucket_name": "whl-media"
+    }
+  ],
+  // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑随增量 3+ 落地
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "observability": {
+    "enabled": true
+  },
+  // Smart Placement：靠近 D1（亚太）削减跨洋查询往返；部署后 ~15 分钟热身
+  "placement": {
+    "mode": "smart"
+  }
+}
