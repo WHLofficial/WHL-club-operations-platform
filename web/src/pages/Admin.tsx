@@ -1,11 +1,15 @@
-// 管理端（增量 1）：建队与认证码、球员导入管线（两段式）、期初余额导入、config 查看
+// 管理端（增量 1+2）：建队与认证码、球员导入管线（两段式）、名单合同模板导入、期初余额、注册体检、config 查看
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
   apiPost,
   TOUR_SITE_URL,
   type AdminClubRow,
+  type AdminRegistrations,
+  type ComplianceReport,
   type ConfigRow,
+  type ContractImportConfirm,
+  type ContractImportPreview,
   type ImportConfirm,
   type ImportPreview,
   type OpeningImportResult,
@@ -18,17 +22,50 @@ import { useToast } from '../lib/toast.tsx';
 const IMPORT_SLICE = 1000;
 const REQUIRED_A = ['ID', 'Name', 'Age', 'CA', 'PA', 'naID', 'PosID1', 'FootID'];
 const REQUIRED_B = ['playerid', 'overallrating', 'potential', 'Position', 'preferredfoot'];
+const REQUIRED_C = ['uid', 'releaseFee', 'wage', 'effectiveFrom', 'contractType'];
 
-async function parseXlsx(file: File, channel: 'A' | 'B'): Promise<Record<string, unknown>[]> {
+// 通道 C 的 CSV 表头别名（文档口径：uid/RC/工资/效力起点/类型）→ 规范键
+const C_HEADER_ALIASES: Record<string, string> = {
+  uid: 'uid',
+  id: 'uid',
+  fc_id: 'uid',
+  playerid: 'uid',
+  rc: 'releaseFee',
+  release_fee: 'releaseFee',
+  releasefee: 'releaseFee',
+  违约金: 'releaseFee',
+  wage: 'wage',
+  工资: 'wage',
+  effective_from: 'effectiveFrom',
+  effectivefrom: 'effectiveFrom',
+  效力起点: 'effectiveFrom',
+  contract_type: 'contractType',
+  contracttype: 'contractType',
+  合同类型: 'contractType',
+  类型: 'contractType',
+};
+
+type Channel = 'A' | 'B' | 'C';
+
+function toCanonicalContractRow(raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const key = C_HEADER_ALIASES[k.trim().toLowerCase()];
+    if (key) out[key] = v;
+  }
+  return out;
+}
+
+async function parseXlsx(file: File, channel: Channel): Promise<Record<string, unknown>[]> {
   const XLSX = await import('xlsx');
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
+  const wb = XLSX.read(buf, { type: 'array', raw: false });
   const sheetName = channel === 'A' && wb.SheetNames.includes('Base') ? 'Base' : wb.SheetNames[0];
   return XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], { defval: null });
 }
 
-function requiredColumns(channel: 'A' | 'B'): string[] {
-  return channel === 'A' ? REQUIRED_A : REQUIRED_B;
+function requiredColumns(channel: Channel): string[] {
+  return channel === 'A' ? REQUIRED_A : channel === 'B' ? REQUIRED_B : REQUIRED_C;
 }
 
 export default function Admin({ user }: { user: MeUser | null | undefined }) {
@@ -39,6 +76,8 @@ export default function Admin({ user }: { user: MeUser | null | undefined }) {
         <>
           <ClubsSection />
           <ImportSection />
+          <ContractsSection />
+          <RegistrationsSection />
           <OpeningBalanceSection />
           <ConfigSection />
         </>
@@ -498,6 +537,449 @@ function parseStarIds(text: string): number[] {
     .split(/[\s,，、]+/)
     .map((s) => Number(s))
     .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+/* ---------- 名单合同模板导入（通道 C） ---------- */
+
+const C_OUTCOME_LABEL: Record<ContractImportPreview['samples'][number]['outcome'], string> = {
+  create: '新建',
+  update: '覆盖',
+  claim: '认领',
+};
+
+function ContractsSection() {
+  const { show, toastNode } = useToast();
+  const [clubs, setClubs] = useState<AdminClubRow[]>([]);
+  const [clubId, setClubId] = useState('');
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [fileName, setFileName] = useState('');
+  const [preview, setPreview] = useState<ContractImportPreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [result, setResult] = useState<ContractImportConfirm | null>(null);
+  const [progress, setProgress] = useState('');
+
+  useEffect(() => {
+    api<{ clubs: AdminClubRow[] }>('/api/admin/clubs')
+      .then((d) => setClubs(d.clubs))
+      .catch(() => undefined);
+  }, []);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setResult(null);
+    setPreview(null);
+    setArmed(false);
+    try {
+      const parsed = await parseXlsx(file, 'C');
+      if (parsed.length === 0) {
+        show('文件里没有数据行，检查一下内容。', true);
+        return;
+      }
+      const canonical = parsed.map(toCanonicalContractRow);
+      const missing = REQUIRED_C.filter((col) => !(col in canonical[0]));
+      if (missing.length > 0) {
+        show(`表头对不上，缺：${missing.join('、')}。可用列名：uid、RC（或违约金）、工资、效力起点、类型（或合同类型）。`, true);
+        return;
+      }
+      setRows(canonical);
+      setFileName(file.name);
+      show(`解析完成：${canonical.length} 行。先跑预览看归属分类。`);
+    } catch {
+      show('文件解析失败，确认是 CSV 或 xlsx 文件。', true);
+    }
+  }
+
+  async function runPreview() {
+    if (previewBusy || rows.length === 0 || !clubId) return;
+    setPreviewBusy(true);
+    setResult(null);
+    setArmed(false);
+    setPreview(null);
+    try {
+      let agg: ContractImportPreview | null = null;
+      for (let i = 0; i < rows.length; i += IMPORT_SLICE) {
+        const slice = rows.slice(i, i + IMPORT_SLICE);
+        const res = await apiPost<ContractImportPreview>('/api/admin/players/import/preview', {
+          channel: 'C',
+          clubId: Number(clubId),
+          rows: slice,
+        });
+        if (agg === null) agg = res;
+        else {
+          agg.stats.total += res.stats.total;
+          agg.stats.valid += res.stats.valid;
+          agg.stats.error += res.stats.error;
+          agg.stats.insertEstimate += res.stats.insertEstimate;
+          agg.stats.updateEstimate += res.stats.updateEstimate;
+          agg.errors.push(...res.errors);
+          if (agg.samples.length < 5) agg.samples.push(...res.samples.slice(0, 5 - agg.samples.length));
+        }
+        setProgress(`预览 ${Math.min(i + IMPORT_SLICE, rows.length)} / ${rows.length} 行`);
+      }
+      setPreview(agg);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '预览失败', true);
+    } finally {
+      setPreviewBusy(false);
+      setProgress('');
+    }
+  }
+
+  async function runConfirm() {
+    if (!armed || confirmBusy || !clubId) return;
+    setConfirmBusy(true);
+    try {
+      let agg: ContractImportConfirm | null = null;
+      for (let i = 0; i < rows.length; i += IMPORT_SLICE) {
+        const slice = rows.slice(i, i + IMPORT_SLICE);
+        const res = await apiPost<ContractImportConfirm>('/api/admin/players/import/confirm', {
+          channel: 'C',
+          clubId: Number(clubId),
+          rows: slice,
+        });
+        if (agg === null) agg = res;
+        else agg.written += res.written;
+        setProgress(`落库 ${Math.min(i + IMPORT_SLICE, rows.length)} / ${rows.length} 行`);
+      }
+      setResult(agg);
+      setArmed(false);
+      setPreview(null);
+      setRows([]);
+      setFileName('');
+      show(`合同落库完成：${agg?.written ?? 0} 行已写入。`);
+    } catch (err) {
+      setArmed(false);
+      show(err instanceof Error ? err.message : '落库失败', true);
+    } finally {
+      setConfirmBusy(false);
+      setProgress('');
+    }
+  }
+
+  const hasErrors = (preview?.stats.error ?? 0) > 0;
+
+  return (
+    <section className="card admin-section">
+      <h2>名单合同模板导入（通道 C）</h2>
+      {toastNode}
+      <p className="hint">
+        每队一份 CSV（列：uid、RC、工资、效力起点、类型）。合同落库的同时，无归属的球员会认领到所选俱乐部——
+        队壳归属以平台合同为准。训练营合同工资固定 0.75 m/半赛季。
+      </p>
+      <label className="field">
+        目标俱乐部
+        <select value={clubId} onChange={(e) => { setClubId(e.target.value); setResult(null); setPreview(null); setArmed(false); }}>
+          <option value="">选择俱乐部…</option>
+          {clubs.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}（{LEAGUE_TIER_LABEL[c.leagueTier] ?? c.leagueTier}）
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        合同模板（CSV / xlsx）
+        <input type="file" accept=".csv,.xlsx,.xls" onChange={onFile} />
+      </label>
+      {fileName && (
+        <p className="hint">
+          已解析 <b>{fileName}</b>，共 {rows.length} 行。
+        </p>
+      )}
+
+      <div className="btn-row">
+        <button className="btn" type="button" disabled={rows.length === 0 || !clubId || previewBusy} onClick={runPreview}>
+          {previewBusy ? progress || '预览中…' : '第一步 · 预览'}
+        </button>
+        <button
+          className={`btn${armed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={preview === null || hasErrors || confirmBusy || rows.length === 0 || !clubId}
+          onClick={() => (armed ? runConfirm() : setArmed(true))}
+          onBlur={() => setArmed(false)}
+        >
+          {confirmBusy ? progress || '落库中…' : armed ? '再点一次确认落库' : '第二步 · 确认落库'}
+        </button>
+      </div>
+
+      {result && (
+        <div className="banner info">
+          落库完成：写入 {result.written} 行（新建/认领约 {result.insertedEstimate}、覆盖约 {result.updatedEstimate}），分 {result.batches} 批。
+          重复导入安全，现行合同按球员唯一键覆盖。
+        </div>
+      )}
+
+      {preview && (
+        <>
+          <div className="preview-stats">
+            <div className="club-stat">
+              <span className="stat-label">总行数</span>
+              <span className="stat-value mono">{preview.stats.total}</span>
+            </div>
+            <div className="club-stat">
+              <span className="stat-label">有效</span>
+              <span className="stat-value mono">{preview.stats.valid}</span>
+            </div>
+            <div className="club-stat">
+              <span className="stat-label">错误</span>
+              <span className={`stat-value mono${hasErrors ? ' bad-text' : ''}`}>{preview.stats.error}</span>
+            </div>
+            <div className="club-stat">
+              <span className="stat-label">新建/认领</span>
+              <span className="stat-value mono">{preview.stats.insertEstimate}</span>
+            </div>
+            <div className="club-stat">
+              <span className="stat-label">覆盖</span>
+              <span className="stat-value mono">{preview.stats.updateEstimate}</span>
+            </div>
+          </div>
+          {hasErrors && <div className="banner bad">还有 {preview.stats.error} 行没通过校验，修正源文件后再来。</div>}
+          {preview.errors.length > 0 && (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="num">行号</th>
+                    <th>字段</th>
+                    <th>问题</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.errors.slice(0, 50).map((e, i) => (
+                    <tr key={`${e.row}-${e.field}-${i}`}>
+                      <td className="num mono">{e.row}</td>
+                      <td className="mono">{e.field}</td>
+                      <td>{e.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {preview.samples.length > 0 && (
+            <>
+              <h3>抽样</h3>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="num">uid</th>
+                      <th>球员</th>
+                      <th className="num">违约金</th>
+                      <th className="num">工资</th>
+                      <th>类型</th>
+                      <th>效力起点</th>
+                      <th>动作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.samples.map((s) => (
+                      <tr key={s.uid}>
+                        <td className="num mono">{s.uid}</td>
+                        <td>{s.playerName ?? '—'}</td>
+                        <td className="num mono">{s.releaseFee}</td>
+                        <td className="num mono">{s.wage}</td>
+                        <td>{s.contractType === 'trainee' ? '训练营' : '正式'}</td>
+                        <td>{s.effectiveFrom}</td>
+                        <td>{C_OUTCOME_LABEL[s.outcome]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/* ---------- 注册快照与准入体检 ---------- */
+
+function RegistrationsSection() {
+  const { show, toastNode } = useToast();
+  const [seasonInput, setSeasonInput] = useState('');
+  const [snapshot, setSnapshot] = useState<AdminRegistrations | null>(null);
+  const [report, setReport] = useState<ComplianceReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [checkBusy, setCheckBusy] = useState(false);
+
+  const seasonQuery = (season?: string) => (season ? `?season=${encodeURIComponent(season)}` : '');
+
+  async function loadSnapshot(season?: string) {
+    setBusy(true);
+    try {
+      setSnapshot(await api<AdminRegistrations>(`/api/admin/registrations${seasonQuery(season)}`));
+      setReport(null);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '注册快照加载失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runCheck(season?: string) {
+    setCheckBusy(true);
+    try {
+      setReport(await api<ComplianceReport>(`/api/admin/compliance${seasonQuery(season)}`));
+    } catch (err) {
+      show(err instanceof Error ? err.message : '体检失败', true);
+    } finally {
+      setCheckBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    loadSnapshot();
+  }, []);
+
+  const season = seasonInput.trim();
+
+  return (
+    <section className="card admin-section">
+      <h2>注册与体检</h2>
+      {toastNode}
+      <p className="hint">
+        注册快照按赛季存档，供准入体检对账。体检用当前属性对快照重跑合规引擎——注册后属性或合同漂移的违规会在赛前被抓出来。
+        失败项触发强制拍卖的流程在转会增量落地，现在只报告。
+      </p>
+      <form
+        className="inline-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          loadSnapshot(season || undefined);
+        }}
+      >
+        <label className="field">
+          赛季
+          <input
+            type="number"
+            min={1}
+            value={seasonInput}
+            onChange={(e) => setSeasonInput(e.target.value)}
+            placeholder="留空=最新"
+          />
+        </label>
+        <button className="btn" type="submit" disabled={busy}>
+          {busy ? '读取中…' : '查快照'}
+        </button>
+        <button className="btn" type="button" disabled={checkBusy} onClick={() => runCheck(season || undefined)}>
+          {checkBusy ? '体检中…' : '跑一遍体检'}
+        </button>
+      </form>
+
+      {snapshot === null ? null : snapshot.season === null ? (
+        <div className="empty-state">
+          <p className="muted">还没有任何注册快照。等教练在球队中心提交名单。</p>
+        </div>
+      ) : (
+        <>
+          <h3>
+            第 {snapshot.season} 赛季注册快照（{snapshot.clubs.length} 支俱乐部）
+          </h3>
+          {snapshot.clubs.length === 0 ? (
+            <div className="empty-state">
+              <p className="muted">这个赛季还没有俱乐部提交注册。</p>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>俱乐部</th>
+                    <th>级别</th>
+                    <th className="num">一线队</th>
+                    <th className="num">训练营</th>
+                    <th className="num">工资合计</th>
+                    <th>注册明细</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshot.clubs.map((club) => (
+                    <tr key={club.clubId}>
+                      <td>
+                        {club.clubName} <span className="muted">#{club.clubId}</span>
+                      </td>
+                      <td>{club.leagueTier ? LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier : '—'}</td>
+                      <td className="num mono">{club.firstTeam}</td>
+                      <td className="num mono">{club.trainee}</td>
+                      <td className="num mono">{club.wageTotal.toFixed(2)} m</td>
+                      <td>
+                        <details>
+                          <summary className="muted">{club.players.length} 人</summary>
+                          <div className="detail-list">
+                            {club.players.map((p) => (
+                              <span key={p.playerId} className={p.squad === 'trainee' ? 'trainee-name' : undefined}>
+                                {p.name}
+                                {p.squad === 'trainee' ? '（训）' : ''}
+                              </span>
+                            ))}
+                          </div>
+                        </details>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {report && (
+        <>
+          <h3>
+            准入体检报告{report.season !== null ? `（第 ${report.season} 赛季）` : ''}
+          </h3>
+          {report.clubs.length === 0 ? (
+            <div className="empty-state">
+              <p className="muted">没有可体检的俱乐部。</p>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>俱乐部</th>
+                    <th>结果</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.clubs.map((club) => (
+                    <tr key={club.clubId}>
+                      <td>{club.clubName}</td>
+                      <td>
+                        <span className={`badge ${club.pass ? 'gold' : 'red'}`}>{club.pass ? '通过' : '未过'}</span>
+                      </td>
+                      <td>
+                        {club.pass ? (
+                          <span className="muted">
+                            一线队 {club.stats?.firstTeam} 人 · 训练营 {club.stats?.trainee} 人 · 工资{' '}
+                            {(club.stats?.wageTotal ?? 0).toFixed(2)} m
+                          </span>
+                        ) : (
+                          <ul className="issue-list">
+                            {club.issues.map((issue, i) => (
+                              <li key={`${issue.rule}-${i}`}>{issue.message}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
 }
 
 /* ---------- 期初余额 ---------- */

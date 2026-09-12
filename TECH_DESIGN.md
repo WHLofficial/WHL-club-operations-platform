@@ -686,7 +686,7 @@ seasons(season=N, status: preparing → running → settled)
 | `squad_min` / `squad_max` | `20` / `30` | 一线队人数 |
 | `gk_min` | `1` | 门将下限 |
 | `trainee_max` | `7` | 训练营上限 |
-| `ca_pa_limits` | json | CA/PA 限额梯度（premier/second 两套） |
+| `ca_pa_limits` | json（premier:1/4/6；second:1/3/6，规则 4.2.2 原文） | CA/PA 限额梯度（premier/second 两套） |
 | `wage_cap` | `null` | 工资帽（m/半赛季，随赛季大名单填入） |
 | `prize_table` | json | 赛事奖金表（§9.1） |
 | `luxury_cash_threshold` / `luxury_cash_rate` | `125` / `0.20` | 富人税（资金） |
@@ -823,6 +823,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 球员 | POST `/api/admin/players/attributes-batch` | 🛡 | 属性批量维护（P1）〔7+〕 |
 | 注册 | GET `/api/club/squad` · POST `/api/club/registrations` | 👤 | 名单与提交校验〔2〕 |
 | 注册 | GET `/api/admin/registrations?season=` | 🛡 | 注册快照查询〔2〕 |
+| 注册 | GET `/api/admin/compliance?season=` | 🛡 | 准入体检报告（P1 首版：对快照重跑合规引擎，只报告不触发强制拍卖）〔2〕 |
 | 市场 | GET `/api/market/listings?status=&cursor=` | 🌐 | 挂牌板（卡柜）〔3〕 |
 | 市场 | POST `/api/market/listings` | 👤 | 挂牌（价格校验+冻结检查）〔3〕 |
 | 市场 | GET `/api/market/listings/:id` | 🌐 | 详情+出价历史〔3〕 |

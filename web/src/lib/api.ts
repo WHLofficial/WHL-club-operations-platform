@@ -154,3 +154,119 @@ export interface ConfigRow {
   value: string | null;
   secret: boolean;
 }
+
+// ---- 增量 2 DTO（附录 A〔2〕：注册与体检；通道 C 合同导入）----
+
+export interface SquadRules {
+  squadMin: number;
+  squadMax: number;
+  gkMin: number;
+  traineeMax: number;
+  wageCap: number | null;
+  limits: { ge90: number; ge87: number; growthPa87: number };
+  tier: 'premier' | 'second' | null;
+}
+
+export interface SquadIssue {
+  rule: string;
+  message: string;
+  playerIds: number[];
+}
+
+export interface SquadCompliance {
+  pass: boolean;
+  issues: SquadIssue[];
+  stats: {
+    firstTeam: number;
+    trainee: number;
+    goalkeepers: number;
+    ge90: number;
+    ge87: number;
+    growthPa87: number;
+    wageTotal: number;
+  };
+}
+
+export interface SquadPlayerRow {
+  id: number;
+  name: string;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  growable: boolean;
+  isFutureStar: boolean;
+  chinaPlan: boolean;
+  status: string;
+  wage: number | null;
+  contractType: string | null;
+  hasContract: boolean;
+  squad: 'first_team' | 'trainee' | null;
+}
+
+export interface SquadOverview {
+  club: { id: number; name: string; leagueTier: string | null } | null;
+  season: number | null;
+  players: SquadPlayerRow[];
+  registration: { firstTeam: number[]; trainee: number[] } | null;
+  compliance: SquadCompliance | null;
+  rules: SquadRules | null;
+}
+
+export interface RegistrationResult {
+  ok: boolean;
+  season: number;
+  firstTeam: number;
+  trainee: number;
+  wageTotal: number;
+}
+
+export interface ContractImportPreview {
+  channel: 'C';
+  clubId: number;
+  stats: { total: number; valid: number; error: number; insertEstimate: number; updateEstimate: number };
+  errors: { row: number; field: string; message: string }[];
+  samples: {
+    uid: string;
+    playerName: string | null;
+    releaseFee: number;
+    wage: number;
+    contractType: string;
+    effectiveFrom: string;
+    outcome: 'create' | 'update' | 'claim';
+  }[];
+}
+
+export interface ContractImportConfirm {
+  written: number;
+  insertedEstimate: number;
+  updatedEstimate: number;
+  batches: number;
+  channel: 'C';
+  clubId: number;
+}
+
+export interface AdminRegistrations {
+  season: number | null;
+  clubs: {
+    clubId: number;
+    clubName: string;
+    leagueTier: string | null;
+    firstTeam: number;
+    trainee: number;
+    wageTotal: number;
+    players: { playerId: number; name: string; squad: string }[];
+  }[];
+}
+
+export interface ComplianceReport {
+  season: number | null;
+  clubs: {
+    clubId: number;
+    clubName: string;
+    leagueTier: string | null;
+    pass: boolean;
+    issues: SquadIssue[];
+    stats: SquadCompliance['stats'] | null;
+  }[];
+}

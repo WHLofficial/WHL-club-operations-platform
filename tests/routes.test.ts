@@ -777,7 +777,7 @@ describe('注册名单提交与校验（附录 A〔2〕）', () => {
     expect(((await overlap.json()) as { error: string }).error).toContain('同一球员不能同时进一线队和训练营：2');
     const dupe = await post('/api/club/registrations', regBody([1, 1], []), 'tok-coach', fx.env);
     expect(((await dupe.json()) as { error: string }).error).toContain('一线队名单里出现了重复球员：1');
-    expect((await post('/api/club/registrations', regBody([1, 'x'], []), 'tok-coach', fx.env)).status).toBe(400);
+    expect((await post('/api/club/registrations', regBody([1, 'x' as unknown as number], []), 'tok-coach', fx.env)).status).toBe(400);
   });
 
   it('无备赛期赛季 409 no_season；赛季开跑后不能再提交', async () => {

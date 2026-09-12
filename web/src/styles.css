@@ -381,6 +381,12 @@ a.card:hover {
   border: 1px solid #f3c6c6;
 }
 
+.banner.ok {
+  background: #e5f3e8;
+  color: #1d7a3a;
+  border: 1px solid #c4e3cd;
+}
+
 /* ---- 表单 ---- */
 
 label.field {
@@ -948,5 +954,64 @@ tbody tr:hover td {
   .code-display {
     font-size: 24px;
     letter-spacing: 5px;
+  }
+}
+
+/* ---- 注册工作台（增量 2） ---- */
+
+.seg-mini {
+  display: inline-flex;
+}
+
+.seg-mini button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.row-trainee td {
+  background: #f6effa;
+}
+
+.cap-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #efe4d0;
+  border: 1px solid #e2d1b4;
+  overflow: hidden;
+  margin: 6px 0 12px;
+}
+
+.cap-bar-fill {
+  height: 100%;
+  background: var(--gold);
+  transition: width 0.2s ease;
+}
+
+.cap-bar-fill.over {
+  background: var(--bad);
+}
+
+.issue-list {
+  margin: 6px 0 2px;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.detail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 2px;
+  font-size: 13px;
+}
+
+.trainee-name {
+  color: var(--purple, #7c5cbf);
+}
+
+@media (max-width: 640px) {
+  .preview-stats {
+    grid-template-columns: 1fr 1fr;
   }
 }
