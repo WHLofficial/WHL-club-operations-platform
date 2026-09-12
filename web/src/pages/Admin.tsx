@@ -1,4 +1,4 @@
-// 管理端（增量 1+2）：建队与认证码、球员导入管线（两段式）、名单合同模板导入、期初余额、注册体检、config 查看
+// 管理端（增量 1+2+3）：建队与认证码、球员导入管线（两段式）、名单合同模板导入、期初余额、注册体检、审核队列、config 查看
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
@@ -6,6 +6,8 @@ import {
   TOUR_SITE_URL,
   type AdminClubRow,
   type AdminRegistrations,
+  type AdminReviewRow,
+  type AdminReviews,
   type ComplianceReport,
   type ConfigRow,
   type ContractImportConfirm,
@@ -78,6 +80,7 @@ export default function Admin({ user }: { user: MeUser | null | undefined }) {
           <ImportSection />
           <ContractsSection />
           <RegistrationsSection />
+          <ReviewsSection />
           <OpeningBalanceSection />
           <ConfigSection />
         </>
@@ -983,6 +986,129 @@ function RegistrationsSection() {
 }
 
 /* ---------- 期初余额 ---------- */
+
+/* ---------- 审核队列（增量 3：转会成交确认） ---------- */
+
+function ReviewsSection() {
+  const { show, toastNode } = useToast();
+  const [status, setStatus] = useState<'open' | 'approved' | 'rejected' | 'all'>('open');
+  const [reviews, setReviews] = useState<AdminReviewRow[] | null>(null);
+  const [notes, setNotes] = useState<Record<number, string>>({});
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(async (s: 'open' | 'approved' | 'rejected' | 'all') => {
+    try {
+      const data = await api<AdminReviews>(`/api/admin/reviews?status=${s}`);
+      setReviews(data.reviews);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '审核队列加载失败', true);
+    }
+  }, [show]);
+
+  useEffect(() => {
+    load(status);
+  }, [status, load]);
+
+  async function decide(row: AdminReviewRow, action: 'approve' | 'reject') {
+    if (busyId !== null) return;
+    setBusyId(row.id);
+    try {
+      const res = await apiPost<{ ok: boolean; status: string }>(`/api/admin/reviews/${row.id}/${action}`, {
+        note: notes[row.id] ?? undefined,
+      });
+      show(
+        action === 'approve'
+          ? `已批准：${row.transfer.player.name} → ${row.transfer.toClubName}，划款过户完成（${res.status === 'already' ? '此前已完成' : 'completed'}）。`
+          : `已驳回：${row.transfer.player.name} 的转会，资金已解冻。`,
+      );
+      await load(status);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '操作失败', true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="card admin-section">
+      <h2>审核队列</h2>
+      {toastNode}
+      <p className="hint">
+        转会截止后最高价成交单在这里人工确认：批准即划款、收交易税、球员过户一步到位；驳回则解冻全部资金、挂牌下架（不收下架费）。
+        签约工资谈判（增量 4）上线后，批准会先开启谈判会话，成约才过户。
+      </p>
+      <div className="seg" role="radiogroup" aria-label="审核任务状态">
+        {(['open', 'approved', 'rejected', 'all'] as const).map((s) => (
+          <button key={s} type="button" className={status === s ? 'on' : ''} onClick={() => setStatus(s)}>
+            {{ open: '待审', approved: '已批准', rejected: '已驳回', all: '全部' }[s]}
+          </button>
+        ))}
+      </div>
+
+      {reviews === null ? (
+        <p className="muted">正在翻审核夹…</p>
+      ) : reviews.length === 0 ? (
+        <div className="empty-state">
+          <p className="muted">{status === 'open' ? '没有待审的成交单。市场很平静。' : '这一栏暂时没有记录。'}</p>
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>球员</th>
+                <th>流向</th>
+                <th className="num">成交价（m）</th>
+                <th>单据</th>
+                <th>{status === 'open' ? '操作' : '结果'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviews.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    {r.transfer.player.name}
+                    <span className="muted">（CA {r.transfer.player.ca ?? '—'}）</span>
+                  </td>
+                  <td>
+                    {r.transfer.fromClubName ?? '—'} → <b>{r.transfer.toClubName ?? '—'}</b>
+                  </td>
+                  <td className="num mono">{r.transfer.fee?.toFixed(2) ?? '—'}</td>
+                  <td>
+                    <span className={`badge ${r.transfer.status === 'completed' ? 'gold' : r.transfer.status === 'rejected' ? 'red' : 'sky'}`}>
+                      {r.transfer.status}
+                    </span>
+                  </td>
+                  <td>
+                    {r.status === 'open' ? (
+                      <div className="inline-form">
+                        <input
+                          className="field"
+                          type="text"
+                          placeholder="备注（可空）"
+                          value={notes[r.id] ?? ''}
+                          onChange={(e) => setNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                        />
+                        <button className="btn btn-sm" type="button" disabled={busyId === r.id} onClick={() => decide(r, 'approve')}>
+                          {busyId === r.id ? '处理中…' : '批准成约'}
+                        </button>
+                        <button className="btn btn-sm btn-danger" type="button" disabled={busyId === r.id} onClick={() => decide(r, 'reject')}>
+                          驳回
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="muted">{r.note ?? '—'}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function OpeningBalanceSection() {
   const { show, toastNode } = useToast();

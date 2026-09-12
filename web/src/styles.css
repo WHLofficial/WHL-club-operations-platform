@@ -1015,3 +1015,97 @@ tbody tr:hover td {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ---------- 转会市场（增量 3）：卡柜 ---------- */
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.market-card {
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line, #d8cbb4);
+  border-radius: 10px;
+  padding: 12px 14px 10px;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(43, 29, 18, 0.06);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.market-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(43, 29, 18, 0.12);
+}
+
+.market-card.on {
+  border-color: var(--cocoa);
+  box-shadow: 0 0 0 1.5px var(--cocoa), 0 4px 10px rgba(43, 29, 18, 0.12);
+}
+
+.market-card.mine {
+  border-style: dashed;
+}
+
+.market-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.market-card-head a {
+  color: var(--ink);
+}
+
+.market-card-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.market-card-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.market-card-price .stat-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.market-card-price .mono {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.market-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px dashed var(--line, #d8cbb4);
+  padding-top: 6px;
+}
+
+.market-card-club {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.market-card-club::before {
+  content: '卖方 ';
+}
+
+@media (max-width: 640px) {
+  .market-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -201,7 +201,9 @@ export interface SquadPlayerRow {
   isFutureStar: boolean;
   chinaPlan: boolean;
   status: string;
+  marketValue: number | null;
   wage: number | null;
+  releaseFee: number | null;
   contractType: string | null;
   hasContract: boolean;
   squad: 'first_team' | 'trainee' | null;
@@ -272,4 +274,102 @@ export interface ComplianceReport {
     issues: SquadIssue[];
     stats: SquadCompliance['stats'] | null;
   }[];
+}
+
+// ---- 增量 3 DTO（附录 A〔3〕：转会市场挂牌竞价链）----
+
+export type ListingStatus = 'listed' | 'bidding' | 'pending_review' | 'delisted';
+
+export interface MarketListing {
+  id: number;
+  player: { id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
+  sellerClub: { id: number; name: string };
+  type: string;
+  askPrice: number;
+  status: ListingStatus;
+  listedAt: string;
+  lastBidAt: string | null;
+  highestBid: number | null;
+  bidCount: number;
+  deadlineAt: string | null;
+  deadlineNote: string | null;
+}
+
+export interface MarketListings {
+  listings: MarketListing[];
+  cursor: number | null;
+}
+
+export interface MarketListingDetail {
+  listing: MarketListing & {
+    releaseFee: number | null;
+    windowOpen: boolean;
+    nextMinBid: number;
+    bidStepMin: number;
+  };
+  bids: { id: number; clubId: number; clubName: string; amount: number; createdAt: string; status: string }[];
+}
+
+export interface BidPlaceResult {
+  ok: boolean;
+  bid: { id: number; amount: number; createdAt: string };
+}
+
+export interface MyBidRow {
+  id: number;
+  listingId: number;
+  amount: number;
+  createdAt: string;
+  status: string;
+  holdStatus: 'held' | 'released' | 'settled' | null;
+  listingStatus: ListingStatus;
+  askPrice: number;
+  player: { id: number; name: string; position: string | null; ca: number | null; pa: number | null };
+  sellerClubName: string;
+}
+
+export interface TransferDetail {
+  transfer: {
+    id: number;
+    type: string;
+    status: string;
+    player: { id: number; name: string };
+    fromClub: { id: number; name: string } | null;
+    toClub: { id: number; name: string } | null;
+    fee: number | null;
+    tax: number | null;
+    extraFee: number | null;
+    matched: boolean;
+    season: number | null;
+    windowSeq: number | null;
+    createdAt: string | null;
+    completedAt: string | null;
+  };
+}
+
+export interface AdminReviewRow {
+  id: number;
+  status: string;
+  payload: Record<string, unknown> | null;
+  note: string | null;
+  decidedAt: string | null;
+  transfer: {
+    id: number;
+    type: string;
+    status: string;
+    fee: number | null;
+    tax: number | null;
+    player: { id: number; name: string; position: string | null; ca: number | null; pa: number | null };
+    fromClubName: string | null;
+    toClubName: string | null;
+  };
+}
+
+export interface AdminReviews {
+  reviews: AdminReviewRow[];
+}
+
+export interface ReviewDecisionResult {
+  ok: boolean;
+  status: 'completed' | 'already' | 'rejected';
 }
