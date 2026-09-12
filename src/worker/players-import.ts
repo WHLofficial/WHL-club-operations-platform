@@ -100,12 +100,13 @@ export async function previewImport(env: Env, body: unknown) {
 }
 
 function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStatement {
-  // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star 是运营列（管理组终审），冲突时不更新
+  // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、base_ca（初始CA定格）、
+  // growable（4.1.1 年龄判定，后续由赛季结算重判）只在首次插入写，重导入不碰。
   return db
     .prepare(
       `INSERT INTO players
-         (uid, name, ca, pa, age, foot, position, prestige, china_plan, is_future_star, fc_id, game_attrs, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         (uid, name, ca, pa, age, foot, position, prestige, china_plan, is_future_star, fc_id, base_ca, growable, game_attrs, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(fc_id) DO UPDATE SET
          uid = excluded.uid, name = excluded.name, ca = excluded.ca, pa = excluded.pa, age = excluded.age,
          foot = excluded.foot, position = excluded.position, prestige = excluded.prestige,
@@ -123,6 +124,8 @@ function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStateme
       p.chinaPlan,
       p.futureStarSuggestion ? 1 : 0,
       p.fcId,
+      p.ca,
+      p.growableSuggestion ? 1 : 0,
       JSON.stringify(p.gameAttrs),
     );
 }

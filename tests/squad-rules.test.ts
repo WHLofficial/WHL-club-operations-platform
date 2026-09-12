@@ -9,6 +9,7 @@ function player(overrides: Partial<SquadPlayer> = {}): SquadPlayer {
     position: 'CM',
     ca: 80,
     pa: 85,
+    initialCa: 80,
     growable: true,
     hasContract: true,
     wage: 1,
@@ -85,45 +86,56 @@ describe('阵容注册合规引擎（规则 4.2）', () => {
     expect(res.issues[0].playerIds).toEqual([102, 103]);
   });
 
-  it('CA≥90 超过 1 名被拒（顶级）', () => {
+  it('初始CA≥90 超过 1 名被拒（顶级）', () => {
     const team = firstTeam(20);
-    team[1] = player({ playerId: 2, name: '巨星甲', position: 'ST', ca: 91, pa: 95 });
-    team[2] = player({ playerId: 3, name: '巨星乙', position: 'CAM', ca: 90, pa: 93 });
+    team[1] = player({ playerId: 2, name: '巨星甲', position: 'ST', initialCa: 91, ca: 91, pa: 95 });
+    team[2] = player({ playerId: 3, name: '巨星乙', position: 'CAM', initialCa: 90, ca: 90, pa: 93 });
     const res = checkSquad(team, [], ctx());
     const caIssue = res.issues.filter((i) => i.rule === 'ca_pa');
     expect(caIssue).toHaveLength(1); // ≥87 只有 2 名，没超
-    expect(caIssue[0].message).toContain('顶级联赛一线队 CA≥90 的球员最多 1 名，当前 2 名');
+    expect(caIssue[0].message).toContain('顶级联赛一线队初始CA≥90 的球员最多 1 名，当前 2 名');
     expect(caIssue[0].playerIds).toEqual([2, 3]);
   });
 
-  it('CA≥87 梯度：顶级 4 名上限，次级 3 名（计数含 ≥90）', () => {
+  it('梯度按初始CA计：入会后长到 90 的球员不占 ≥90 档，仍占 ＜87 高潜档', () => {
     const team = firstTeam(20);
-    team[1] = player({ playerId: 2, name: '球员2', position: 'ST', ca: 89, pa: 92 });
-    team[2] = player({ playerId: 3, name: '球员3', position: 'CAM', ca: 88, pa: 90 });
-    team[3] = player({ playerId: 4, name: '球员4', position: 'CB', ca: 87, pa: 89 });
-    team[4] = player({ playerId: 5, name: '球员5', position: 'GK', ca: 91, pa: 93 });
-    team[5] = player({ playerId: 6, name: '球员6', position: 'CM', ca: 87, pa: 88 });
+    // 入会时 86，已长到 92：不占 ≥90/≥87 档；PA 92≥87 且可成长 → 占第三档
+    team[1] = player({ playerId: 2, name: '成长股', initialCa: 86, ca: 92, pa: 92 });
+    const res = checkSquad(team, [], ctx());
+    expect(res.stats.ge90).toBe(0);
+    expect(res.stats.ge87).toBe(0);
+    expect(res.stats.growthPa87).toBe(1);
+    expect(res.issues).toHaveLength(0);
+  });
+
+  it('初始CA≥87 梯度：顶级 4 名上限，次级 3 名（计数含 ≥90）', () => {
+    const team = firstTeam(20);
+    team[1] = player({ playerId: 2, name: '球员2', position: 'ST', initialCa: 89, ca: 89, pa: 92 });
+    team[2] = player({ playerId: 3, name: '球员3', position: 'CAM', initialCa: 88, ca: 88, pa: 90 });
+    team[3] = player({ playerId: 4, name: '球员4', position: 'CB', initialCa: 87, ca: 87, pa: 89 });
+    team[4] = player({ playerId: 5, name: '球员5', position: 'GK', initialCa: 91, ca: 91, pa: 93 });
+    team[5] = player({ playerId: 6, name: '球员6', position: 'CM', initialCa: 87, ca: 87, pa: 88 });
     // 顶级：≥90=1 没超，≥87=5 > 4 → 一条
     const premier = checkSquad(team, [], ctx({ tier: 'premier', limits: DEFAULT_CA_PA_LIMITS.premier }));
     expect(premier.issues.map((i) => i.message)).toEqual([
-      '一线队 CA≥87 的球员最多 4 名（含 CA≥90），当前 5 名：球员2、球员3、球员4、球员5、球员6',
+      '一线队初始CA≥87 的球员最多 4 名（含初始CA≥90），当前 5 名：球员2、球员3、球员4、球员5、球员6',
     ]);
     // 次级：≥87=5 > 3 → 同样一条，幅度不同
     const second = checkSquad(team, [], ctx({ tier: 'second', limits: DEFAULT_CA_PA_LIMITS.second }));
     expect(second.issues.map((i) => i.message)).toEqual([
-      '一线队 CA≥87 的球员最多 3 名（含 CA≥90），当前 5 名：球员2、球员3、球员4、球员5、球员6',
+      '一线队初始CA≥87 的球员最多 3 名（含初始CA≥90），当前 5 名：球员2、球员3、球员4、球员5、球员6',
     ]);
   });
 
-  it('CA＜87 且 PA≥87 的可成长球员超过 6 名被拒', () => {
+  it('初始CA＜87 且 PA≥87 的可成长球员超过 6 名被拒', () => {
     const team = firstTeam(20);
-    for (let i = 1; i <= 7; i++) team[i] = player({ playerId: i + 1, name: `高潜${i}`, ca: 80, pa: 88 });
+    for (let i = 1; i <= 7; i++) team[i] = player({ playerId: i + 1, name: `高潜${i}`, initialCa: 80, ca: 80, pa: 88 });
     const res = checkSquad(team, [], ctx());
     expect(res.issues).toHaveLength(1);
-    expect(res.issues[0].message).toContain('CA＜87 且 PA≥87 的可成长球员最多 6 名，当前 7 名');
+    expect(res.issues[0].message).toContain('初始CA＜87 且 PA≥87 的可成长球员最多 6 名，当前 7 名');
     // 不可成长的不计入该档
     const withStub = [...team];
-    withStub[1] = player({ playerId: 2, growable: false, ca: 80, pa: 88 });
+    withStub[1] = player({ playerId: 2, growable: false, initialCa: 80, ca: 80, pa: 88 });
     expect(checkSquad(withStub, [], ctx()).issues).toHaveLength(0);
   });
 

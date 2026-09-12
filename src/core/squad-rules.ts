@@ -1,8 +1,11 @@
 // 阵容注册合规引擎（规则 4.2 + PRD §4.3）：纯函数，注册提交校验与管理端体检共用。
 // 口径：一线队 squad_min-squad_max 人含 ≥gk_min 门将；训练营 ≤trainee_max 人且可成长（PA−CA＞0）；
-// CA/PA 梯度按俱乐部级别，CA≥87 计数含 CA≥90；工资帽按半赛季（P1，null=未配置跳过）。
+// CA/PA 梯度按俱乐部级别，以**初始CA**计（规则 4.2.2 原文；= players.base_ca，导入时定格，
+// 成长/换版不动它），CA≥87 计数含 CA≥90；工资帽按半赛季（P1，null=未配置跳过）。
 
 export const TRAINEE_WAGE = 0.75; // 训练营合同固定工资（m/半赛季，规则 4.3.4）
+export const TRAINEE_RC = 5; // 训练营合同固定违约金（m，规则 4.3.4：激活倍数固定 1 倍与其对齐）
+export const S1_GROWABLE_AGE_CAP = 25; // 规则 4.1.1：第一赛季 ≤25 岁为可成长球员（S2≤24/S3+≤23 由赛季结算重判）
 
 export interface SquadLimits {
   ge90: number;
@@ -22,6 +25,8 @@ export interface SquadPlayer {
   position: string | null;
   ca: number | null;
   pa: number | null;
+  /** 初始CA（base_ca；缺省回退当前 CA）。规则 4.2.2 的梯度口径 */
+  initialCa: number | null;
   growable: boolean;
   hasContract: boolean;
   wage: number | null;
@@ -120,10 +125,12 @@ export function checkSquad(firstTeam: SquadPlayer[], trainee: SquadPlayer[], ctx
   }
 
   if (ctx.tier !== null) {
-    const ge90 = firstTeam.filter((p) => p.ca !== null && p.ca >= 90);
-    const ge87 = firstTeam.filter((p) => p.ca !== null && p.ca >= 87);
+    const ge90 = firstTeam.filter((p) => p.initialCa !== null && p.initialCa >= 90);
+    const ge87 = firstTeam.filter((p) => p.initialCa !== null && p.initialCa >= 87);
+    // 「可成长球员」按 4.1.1 的正式定义（年龄判定，赛季结算冻结为 growable 标记）；
+    // 训练营条款才额外要求 PA−CA＞0，第三档不要求——长满的球员仍占坑
     const growth = firstTeam.filter(
-      (p) => p.ca !== null && p.pa !== null && p.ca < 87 && p.pa >= 87 && p.growable,
+      (p) => p.initialCa !== null && p.pa !== null && p.initialCa < 87 && p.pa >= 87 && p.growable,
     );
     stats.ge90 = ge90.length;
     stats.ge87 = ge87.length;
@@ -131,21 +138,21 @@ export function checkSquad(firstTeam: SquadPlayer[], trainee: SquadPlayer[], ctx
     if (ge90.length > ctx.limits.ge90) {
       issues.push({
         rule: 'ca_pa',
-        message: `${TIER_LABEL[ctx.tier]}一线队 CA≥90 的球员最多 ${ctx.limits.ge90} 名，当前 ${ge90.length} 名：${nameList(ge90)}`,
+        message: `${TIER_LABEL[ctx.tier]}一线队初始CA≥90 的球员最多 ${ctx.limits.ge90} 名，当前 ${ge90.length} 名：${nameList(ge90)}`,
         playerIds: ge90.map((p) => p.playerId),
       });
     }
     if (ge87.length > ctx.limits.ge87) {
       issues.push({
         rule: 'ca_pa',
-        message: `一线队 CA≥87 的球员最多 ${ctx.limits.ge87} 名（含 CA≥90），当前 ${ge87.length} 名：${nameList(ge87)}`,
+        message: `一线队初始CA≥87 的球员最多 ${ctx.limits.ge87} 名（含初始CA≥90），当前 ${ge87.length} 名：${nameList(ge87)}`,
         playerIds: ge87.map((p) => p.playerId),
       });
     }
     if (growth.length > ctx.limits.growthPa87) {
       issues.push({
         rule: 'ca_pa',
-        message: `一线队 CA＜87 且 PA≥87 的可成长球员最多 ${ctx.limits.growthPa87} 名，当前 ${growth.length} 名：${nameList(growth)}`,
+        message: `一线队初始CA＜87 且 PA≥87 的可成长球员最多 ${ctx.limits.growthPa87} 名，当前 ${growth.length} 名：${nameList(growth)}`,
         playerIds: growth.map((p) => p.playerId),
       });
     }

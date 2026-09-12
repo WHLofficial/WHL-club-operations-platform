@@ -298,6 +298,21 @@ describe('球员管理 PATCH（审计留痕）', () => {
     expect(JSON.parse(audit!.after)).toEqual({ market_value: 30.5, status: 'trainee' });
   });
 
+  it('改初始CA/属性留痕，越界值被拒', async () => {
+    const fx = freshEnv();
+    await seedOne(fx);
+    const res = await patch('/api/admin/players/1', { baseCa: 79, ca: 81 }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    const row = sqlGet<{ base_ca: number; ca: number }>(fx.sqlite, 'SELECT base_ca, ca FROM players WHERE id = 1');
+    expect(row).toMatchObject({ base_ca: 79, ca: 81 });
+    const audit = sqlGet<{ before: string; after: string }>(
+      fx.sqlite,
+      "SELECT before, after FROM audit_log WHERE action = 'player_patch' AND after LIKE '%base_ca%'",
+    );
+    expect(JSON.parse(audit!.after)).toEqual({ base_ca: 79, ca: 81 });
+    expect((await patch('/api/admin/players/1', { baseCa: 0 }, 'tok-admin', fx.env)).status).toBe(400);
+  });
+
   it('越界值与未知字段被拒', async () => {
     const fx = freshEnv();
     await seedOne(fx);
@@ -372,7 +387,10 @@ describe('导入管线（§5.4）', () => {
 
   it('确认落库 → 运营列不被覆盖 → 重跑幂等', async () => {
     const fx = freshEnv();
-    const rows = [channelARow(), channelARow({ ID: 277226, Name: 'China Player', naID: 155, FootID: 2, PosID1: 0 })];
+    const rows = [
+      channelARow(),
+      channelARow({ ID: 277226, Name: 'China Player', naID: 155, FootID: 2, PosID1: 0, Age: 30 }),
+    ];
     const first = await post(
       '/api/admin/players/import/confirm',
       { channel: 'A', rows, futureStarIds: [277225] },
@@ -389,14 +407,27 @@ describe('导入管线（§5.4）', () => {
       china_plan: number;
       status: string;
       club_id: number | null;
+      base_ca: number | null;
+      growable: number;
       game_attrs: string;
-    }>(fx.sqlite, 'SELECT uid, ca, is_future_star, china_plan, status, club_id, game_attrs FROM players WHERE fc_id = 277225');
-    expect(p1).toMatchObject({ uid: 'fc277225', ca: 76, is_future_star: 1, china_plan: 0, status: 'normal', club_id: null });
+    }>(fx.sqlite, 'SELECT uid, ca, is_future_star, china_plan, status, club_id, base_ca, growable, game_attrs FROM players WHERE fc_id = 277225');
+    expect(p1).toMatchObject({
+      uid: 'fc277225',
+      ca: 76,
+      is_future_star: 1,
+      china_plan: 0,
+      status: 'normal',
+      club_id: null,
+      base_ca: 76, // 初始CA = 导入时 CA
+      growable: 1, // 19 岁 ≤25，可成长（规则 4.1.1）
+    });
     expect(JSON.parse(p1!.game_attrs)).toMatchObject({ PosID1: 5, finishing: 74 });
     expect(JSON.parse(p1!.game_attrs)).not.toHaveProperty('Name');
     expect(JSON.parse(p1!.game_attrs)).not.toHaveProperty('FootID');
+    const p2age = sqlGet<{ growable: number }>(fx.sqlite, 'SELECT growable FROM players WHERE fc_id = 277226');
+    expect(p2age?.growable).toBe(0); // 30 岁不可成长
 
-    // 运营列赋值后重导：FC 源列更新，运营列原样
+    // 运营列赋值后重导：FC 源列更新，运营列原样；base_ca 定格不随重导漂移
     fx.sqlite
       .prepare("UPDATE players SET market_value = 55, status = 'listed', badges_gold = 2, growth_tier = 3 WHERE fc_id = 277225")
       .run();
@@ -408,11 +439,11 @@ describe('导入管线（§5.4）', () => {
     );
     expect(second.status).toBe(200);
     expect(((await second.json()) as { updatedEstimate: number }).updatedEstimate).toBe(1);
-    const p2 = sqlGet<{ ca: number; market_value: number; status: string; badges_gold: number; growth_tier: number }>(
+    const p2 = sqlGet<{ ca: number; base_ca: number; market_value: number; status: string; badges_gold: number; growth_tier: number }>(
       fx.sqlite,
-      'SELECT ca, market_value, status, badges_gold, growth_tier FROM players WHERE fc_id = 277225',
+      'SELECT ca, base_ca, market_value, status, badges_gold, growth_tier FROM players WHERE fc_id = 277225',
     );
-    expect(p2).toMatchObject({ ca: 78, market_value: 55, status: 'listed', badges_gold: 2, growth_tier: 3 });
+    expect(p2).toMatchObject({ ca: 78, base_ca: 76, market_value: 55, status: 'listed', badges_gold: 2, growth_tier: 3 });
   });
 
   it('通道 B：队壳名单归一化（姓名/出生日期/惯用脚/位置文本）', async () => {
@@ -561,6 +592,7 @@ describe('通道 C · 名单合同模板导入（§5.4）', () => {
       { uid: 'fc3', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' },
       { uid: 'fc999', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' },
       { uid: 'fc4', releaseFee: 30, wage: 2, effectiveFrom: '2026-07-01', contractType: 'trainee' },
+      { uid: 'fc5', releaseFee: 30, wage: 0.75, effectiveFrom: '2026-07-01', contractType: 'trainee' },
     ];
     const res = await post('/api/admin/players/import/preview', { channel: 'C', clubId: 1, rows }, 'tok-admin', fx.env);
     expect(res.status).toBe(200);
@@ -571,11 +603,12 @@ describe('通道 C · 名单合同模板导入（§5.4）', () => {
       samples: { playerName: string; outcome: string }[];
     };
     expect(body.channel).toBe('C');
-    expect(body.stats).toMatchObject({ total: 5, valid: 2, error: 3, insertEstimate: 2 });
+    expect(body.stats).toMatchObject({ total: 6, valid: 2, error: 4, insertEstimate: 2 });
     expect(body.errors.map((e) => e.message)).toEqual([
       '球员「球员三」已归属 曼城',
       'uid 没有对应的球员（先跑球员导入）：fc999',
       '训练营合同工资固定为 0.75 m/半赛季',
+      '训练营合同违约金固定为 5 m',
     ]);
     expect(body.samples.map((s) => s.outcome)).toEqual(['create', 'claim']);
   });
@@ -857,9 +890,9 @@ describe('注册快照与准入体检（管理端）', () => {
     const fx = freshEnv();
     await seedRegistrationWorld(fx);
     await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
-    // 注册后属性漂移：又长出两位 CA≥90（原上限 1 名）
-    fx.sqlite.prepare('UPDATE players SET ca = 91 WHERE id = 2').run();
-    fx.sqlite.prepare('UPDATE players SET ca = 92 WHERE id = 3').run();
+    // 注册后属性漂移：又长出两位初始CA≥90（原上限 1 名）——体检用初始CA口径抓漂移
+    fx.sqlite.prepare('UPDATE players SET base_ca = 91 WHERE id = 2').run();
+    fx.sqlite.prepare('UPDATE players SET base_ca = 92 WHERE id = 3').run();
     const res = await get('/api/admin/compliance', 'tok-admin', fx.env);
     const body = (await res.json()) as {
       season: number;

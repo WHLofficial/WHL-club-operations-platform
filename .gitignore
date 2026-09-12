@@ -5,3 +5,4 @@ dist/
 *.log
 .zcode/
 __pycache__/
+.smoke/

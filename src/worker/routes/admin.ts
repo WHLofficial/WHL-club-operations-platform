@@ -212,6 +212,22 @@ app.patch('/players/:id', async (c) => {
     if (v !== 0 && v !== 1) errors.push('未来之星只能是 0 或 1');
     else updates.is_future_star = v;
   }
+  if ('ca' in body) {
+    const v = body.ca;
+    if (v !== null && (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 99)) errors.push('CA 须在 1-99 之间');
+    else updates.ca = v;
+  }
+  if ('baseCa' in body) {
+    const v = body.baseCa;
+    // 初始CA（规则 4.2.2 限额口径）：导入时定格，管理端修正走这里（留审计）
+    if (v !== null && (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 99)) errors.push('初始CA 须在 1-99 之间');
+    else updates.base_ca = v;
+  }
+  if ('pa' in body) {
+    const v = body.pa;
+    if (v !== null && (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 99)) errors.push('PA 须在 1-99 之间');
+    else updates.pa = v;
+  }
   if ('growable' in body) {
     const v = Number(body.growable);
     if (v !== 0 && v !== 1) errors.push('可成长标记只能是 0 或 1');
@@ -241,6 +257,9 @@ app.patch('/players/:id', async (c) => {
     'prestige',
     'badgesSilver',
     'badgesGold',
+    'ca',
+    'baseCa',
+    'pa',
   ];
   const unknown = Object.keys(body).filter((k) => !known.includes(k));
   if (unknown.length > 0) errors.push(`不支持的字段：${unknown.join('、')}`);
@@ -248,7 +267,7 @@ app.patch('/players/:id', async (c) => {
   if (Object.keys(updates).length === 0) throw new HttpError(400, '没有可更新的字段');
 
   const current = await c.env.DB.prepare(
-    'SELECT id, market_value, status, growth_tier, is_future_star, growable, prestige, badges_silver, badges_gold FROM players WHERE id = ?',
+    'SELECT id, market_value, status, growth_tier, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id = ?',
   )
     .bind(id)
     .first<{
@@ -261,6 +280,9 @@ app.patch('/players/:id', async (c) => {
       prestige: number | null;
       badges_silver: number;
       badges_gold: number;
+      ca: number | null;
+      base_ca: number | null;
+      pa: number | null;
     }>();
   if (!current) throw new HttpError(404, '球员不存在');
 
@@ -456,7 +478,7 @@ app.get('/compliance', async (c) => {
     league_tier: string | null;
   }>();
   const regRows = await c.env.DB.prepare(
-    `SELECT r.club_id, r.player_id, r.squad, p.name, p.position, p.ca, p.pa, p.growable,
+    `SELECT r.club_id, r.player_id, r.squad, p.name, p.position, p.ca, p.pa, p.base_ca, p.growable,
             ct.player_id AS contract_player_id, ct.wage
      FROM registrations r
      JOIN players p ON p.id = r.player_id
@@ -472,6 +494,7 @@ app.get('/compliance', async (c) => {
       position: string | null;
       ca: number | null;
       pa: number | null;
+      base_ca: number | null;
       growable: number;
       contract_player_id: number | null;
       wage: number | null;
@@ -496,6 +519,7 @@ app.get('/compliance', async (c) => {
         position: r.position,
         ca: r.ca,
         pa: r.pa,
+        initialCa: r.base_ca ?? r.ca,
         growable: r.growable === 1,
         hasContract: r.contract_player_id !== null,
         wage: r.contract_player_id !== null ? r.wage ?? 0 : null,

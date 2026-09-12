@@ -10,7 +10,7 @@ import {
   POSITION_BY_ID,
   POSITION_NAMES,
 } from './fc26.ts';
-import { TRAINEE_WAGE } from './squad-rules.ts';
+import { S1_GROWABLE_AGE_CAP, TRAINEE_RC, TRAINEE_WAGE } from './squad-rules.ts';
 
 export type ImportChannel = 'A' | 'B';
 
@@ -32,6 +32,8 @@ export interface NormalizedPlayer {
   prestige: number | null;
   chinaPlan: 0 | 1;
   futureStarSuggestion: boolean;
+  /** 可成长初始判定（规则 4.1.1：第一赛季 ≤25 岁）；之后由赛季结算重判 */
+  growableSuggestion: boolean;
   gameAttrs: Record<string, unknown>;
 }
 
@@ -127,6 +129,7 @@ export function normalizeImportBatch(
         prestige,
         chinaPlan: naId === CHINA_NA_ID ? 1 : 0,
         futureStarSuggestion: futureStarIds.has(fcId),
+        growableSuggestion: age !== null && age <= S1_GROWABLE_AGE_CAP,
         gameAttrs,
       });
       return;
@@ -178,6 +181,7 @@ export function normalizeImportBatch(
       prestige: null, // FC Editor 无国际声望列
       chinaPlan: toNum(raw['nationality']) === CHINA_NA_ID ? 1 : 0,
       futureStarSuggestion: futureStarIds.has(fcId),
+      growableSuggestion: age !== null && age <= S1_GROWABLE_AGE_CAP,
       gameAttrs,
     });
   });
@@ -263,8 +267,10 @@ export function normalizeContractBatch(rows: Record<string, unknown>[]): Contrac
     const contractType: 'formal' | 'trainee' | null =
       typeText === 'formal' || typeText === '正式' ? 'formal' : typeText === 'trainee' || typeText === '训练营' ? 'trainee' : null;
     if (contractType === null) return fail('contractType', '类型只能是 formal（正式）或 trainee（训练营）');
-    if (contractType === 'trainee' && wage !== TRAINEE_WAGE) {
-      return fail('wage', `训练营合同工资固定为 ${TRAINEE_WAGE} m/半赛季`);
+    if (contractType === 'trainee') {
+      // 规则 4.3.4：训练营合同工资固定 0.75m/半赛季、违约金固定 5m
+      if (wage !== TRAINEE_WAGE) return fail('wage', `训练营合同工资固定为 ${TRAINEE_WAGE} m/半赛季`);
+      if (releaseFee !== TRAINEE_RC) return fail('releaseFee', `训练营合同违约金固定为 ${TRAINEE_RC} m`);
     }
 
     const fromText = toStr(raw['effectiveFrom']);

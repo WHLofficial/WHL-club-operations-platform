@@ -36,6 +36,7 @@ interface OwnedPlayerRow {
   age: number | null;
   ca: number | null;
   pa: number | null;
+  base_ca: number | null;
   growable: number;
   is_future_star: number;
   china_plan: number;
@@ -44,7 +45,7 @@ interface OwnedPlayerRow {
 
 async function loadOwnedPlayers(env: Env, clubId: number): Promise<OwnedPlayerRow[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, name, position, age, ca, pa, growable, is_future_star, china_plan, status
+    `SELECT id, name, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status
      FROM players WHERE club_id = ? ORDER BY id LIMIT 500`,
   )
     .bind(clubId)
@@ -73,6 +74,7 @@ function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadP
     position: p.position,
     ca: p.ca,
     pa: p.pa,
+    initialCa: p.base_ca ?? p.ca,
     growable: p.growable === 1,
     hasContract: contract !== null,
     wage: contract?.wage ?? null,
