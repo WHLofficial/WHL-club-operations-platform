@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import {
+  ApiError,
   api,
   apiPost,
   type MyClubOverview,
@@ -176,11 +177,10 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
       show(`注册名单已提交：一线队 ${res.firstTeam} 人、训练营 ${res.trainee} 人。`);
       onRefresh();
     } catch (err) {
-      const apiErr = err as { status?: number; code?: string; issues?: SquadIssue[]; message: string };
-      if (apiErr.status === 422 && Array.isArray(apiErr.issues)) {
-        setIssues(apiErr.issues);
+      if (err instanceof ApiError && err.status === 422 && Array.isArray(err.issues)) {
+        setIssues(err.issues);
       }
-      show(apiErr.message || '提交失败', true);
+      show(err instanceof Error ? err.message : '提交失败', true);
     } finally {
       setBusy(false);
     }
@@ -199,7 +199,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
         <>
           <p className="hint">
             一线队 {rules.squadMin}-{rules.squadMax} 人、至少 {rules.gkMin} 名门将；训练营 ≤{rules.traineeMax} 人且须可成长（PA−CA＞0）。
-            {rules.tier && <>CA 限额：≥90 最多 {rules.limits.ge90} 名、≥87 最多 {rules.limits.ge87} 名、＜87 且 PA≥87 可成长最多 {rules.limits.growthPa87} 名。</>}
+            {rules.tier && <>初始CA 限额：≥90 最多 {rules.limits.ge90} 名、≥87 最多 {rules.limits.ge87} 名、＜87 且 PA≥87 可成长最多 {rules.limits.growthPa87} 名。</>}
             工资帽以半赛季计{wageCap === null ? '（本季度未配置，暂不校验）' : `，上限 ${wageCap} m`}。
           </p>
 

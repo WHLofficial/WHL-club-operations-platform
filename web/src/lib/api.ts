@@ -10,11 +10,14 @@ export interface MeUser {
 export class ApiError extends Error {
   status: number;
   code?: string;
+  /** 422 校验类错误的明细（如注册合规 issues），由响应体透传 */
+  issues?: SquadIssue[];
 
-  constructor(status: number, message: string, code?: string) {
+  constructor(status: number, message: string, code?: string, issues?: SquadIssue[]) {
     super(message);
     this.status = status;
     this.code = code;
+    this.issues = issues;
   }
 }
 
@@ -35,7 +38,7 @@ export async function apiSend<T>(method: 'POST' | 'PATCH', path: string, body?: 
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new ApiError(res.status, data?.error ?? '请求失败', data?.code);
+    throw new ApiError(res.status, data?.error ?? '请求失败', data?.code, Array.isArray(data?.issues) ? data.issues : undefined);
   }
   return data as T;
 }
