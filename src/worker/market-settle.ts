@@ -46,9 +46,12 @@ export interface ListingCore {
   window_seq: number | null;
 }
 
-// listings.type → transfers.type 词汇映射（激活挂牌成单记 activation，其余按普通转会）
+// listings.type → transfers.type 词汇映射（激活挂牌成单记 activation、强制拍卖记 forced_auction，
+// 其余按普通转会）
 export function transferTypeFor(listingType: string | null | undefined): string {
-  return listingType === 'activation' ? 'activation' : 'transfer';
+  if (listingType === 'activation') return 'activation';
+  if (listingType === 'forced') return 'forced_auction';
+  return 'transfer';
 }
 
 // → pending_review：transfer（idempotency_key = listing:{id}，UNIQUE 幂等）+ 审核任务
@@ -67,7 +70,7 @@ export async function settleListingForReview(
     db
       .prepare(
         `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
-         SELECT CASE l.type WHEN 'activation' THEN 'activation' ELSE 'transfer' END,
+         SELECT CASE l.type WHEN 'activation' THEN 'activation' WHEN 'forced' THEN 'forced_auction' ELSE 'transfer' END,
                 l.player_id, l.seller_club_id,
                 (SELECT club_id FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
                 (SELECT amount FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),

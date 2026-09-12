@@ -5,8 +5,8 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { releaseFeeBounds } from '../core/negotiation-rules.ts';
-import { rcChangeFee, terminationFee, freeAgentFee, matchDiff } from '../core/bypass-rules.ts';
-import { round2 } from '../core/market-rules.ts';
+import { rcChangeFee, terminationFee, freeAgentFee, matchDiff, FORCED_AUCTION_PRICE } from '../core/bypass-rules.ts';
+import { round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
 import { createAuditStatement } from '../lib/audit.ts';
@@ -377,6 +377,122 @@ export async function createFreeAgent(
     action: 'bypass_free_agent',
   });
   return { ok: true, transferId, newReleaseFee: newFee, signFee };
+}
+
+// ---- 强制拍卖（规则 4.4.5）：准入失败触发，管理方以 1m 挂牌，整单税 50% ----
+
+export interface ForcedAuctionResult {
+  ok: true;
+  listingId: number;
+  askPrice: number;
+}
+
+/**
+ * 管理方建强制拍卖：人选必须是该俱乐部阵容 CA 前六（含并列、不含门将）的正式球员；
+ * 挂牌价固定 1m，之后走普通挂牌链（首价 ≥1m、正常竞价、成交税整单 50%）。
+ */
+export async function createForcedAuction(
+  env: Env,
+  actor: number,
+  playerIdInput: unknown,
+): Promise<ForcedAuctionResult> {
+  const db = env.DB;
+  const playerId = Number(playerIdInput);
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
+
+  const win = await getOpenWindow(db);
+  if (!win) throw new HttpError(409, '转会窗口没开，现在不能发起强制拍卖', 'no_window');
+
+  const player = await db
+    .prepare('SELECT id, name, club_id, status, position, ca FROM players WHERE id = ?')
+    .bind(playerId)
+    .first<{ id: number; name: string; club_id: number | null; status: string; position: string | null; ca: number | null }>();
+  if (!player || player.club_id === null) throw new HttpError(404, '球员不存在或没有归属');
+  if (player.position === 'GK') throw new HttpError(400, '强制拍卖人选不含门将（4.4.5）');
+  if (player.ca === null) throw new HttpError(409, '球员缺 CA 数据，无法核验前六资格');
+  if (player.status !== 'normal') {
+    throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '当前状态不能强制拍卖');
+  }
+
+  // CA 前六（含并列）：严格高于其 CA 的非门将队友数 < 6
+  const rankRow = await db
+    .prepare(
+      `SELECT COUNT(*) + 1 AS rank FROM players
+       WHERE club_id = ? AND position != 'GK' AND ca > ?`,
+    )
+    .bind(player.club_id, player.ca)
+    .first<{ rank: number }>();
+  if ((rankRow?.rank ?? 99) > 6) {
+    throw new HttpError(409, '拍卖人选必须是阵容 CA 前六（含并列、不含门将）');
+  }
+  await ensureNotInFlight(db, playerId);
+
+  const audit = createAuditStatement(db);
+  const statements = [
+    db
+      .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`)
+      .bind(playerId, player.club_id),
+    db
+      .prepare(
+        `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, season, window_seq)
+         VALUES (?, ?, 'forced', ?, 'listed', ${nowSql()}, ?, ?, ?)`,
+      )
+      .bind(playerId, player.club_id, FORCED_AUCTION_PRICE, shanghaiDateStr(Date.now()), win.season, win.windowSeq),
+    audit({
+      actor,
+      action: 'forced_auction_create',
+      targetType: 'listing',
+      targetId: null,
+      after: { playerId, sellerClubId: player.club_id, askPrice: FORCED_AUCTION_PRICE, season: win.season, windowSeq: win.windowSeq },
+    }),
+  ];
+  const results = await db.batch(statements);
+  if ((results[0].meta.changes ?? 0) === 0 || (results[1].meta.changes ?? 0) === 0) {
+    throw new HttpError(409, '拍卖单没落库，球员状态可能刚被改过，刷新再试');
+  }
+  const listingId = Number(results[1].meta.last_row_id);
+
+  // 4.4.10：强制拍卖属挂牌，提交即触发本窗续约回滚
+  await rollbackRcChangeForPlayer(env, playerId, actor, { refType: 'listing', refId: listingId });
+
+  return { ok: true, listingId, askPrice: FORCED_AUCTION_PRICE };
+}
+
+// 管理方取消强制拍卖（未成交前）：解冻出价、球员还原，不收下架费
+export async function cancelForcedAuction(env: Env, actor: number, listingIdInput: unknown): Promise<{ ok: true }> {
+  const db = env.DB;
+  const listingId = Number(listingIdInput);
+  if (!Number.isInteger(listingId) || listingId <= 0) throw new HttpError(400, 'listingId 应为挂牌 ID');
+  const listing = await db
+    .prepare('SELECT id, player_id, status, type FROM listings WHERE id = ?')
+    .bind(listingId)
+    .first<{ id: number; player_id: number; status: string; type: string }>();
+  if (!listing || listing.type !== 'forced') throw new HttpError(404, '强制拍卖单不存在');
+  if (listing.status !== 'listed' && listing.status !== 'bidding') {
+    throw new HttpError(409, '这单拍卖已经截止进审核，走审核驳回流程');
+  }
+
+  const audit = createAuditStatement(db);
+  await db.batch([
+    db
+      .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '管理组取消强制拍卖' WHERE id = ? AND type = 'forced' AND status IN ('listed', 'bidding')`)
+      .bind(listingId),
+    db
+      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
+      .bind(listing.player_id),
+    db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
+    db
+      .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`)
+      .bind(listingId),
+    audit({
+      actor,
+      action: 'forced_auction_cancel',
+      targetType: 'listing',
+      targetId: listingId,
+      after: { playerId: listing.player_id },
+    }),
+  ]);
+  return { ok: true };
 }
 
 // ---- 审核通过分流（approve → 按单据类型走各自成约路径） ----

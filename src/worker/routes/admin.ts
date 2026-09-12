@@ -12,7 +12,7 @@ import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { loadTransfer, rejectTransfer } from '../transfers.ts';
-import { approveTransferDeal } from '../bypass.ts';
+import { approveTransferDeal, createForcedAuction, cancelForcedAuction } from '../bypass.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -654,6 +654,23 @@ app.post('/reviews/:id/reject', async (c) => {
     note: note ?? undefined,
   });
   return c.json({ ok: true, ...result });
+});
+
+// ---- 强制拍卖（规则 4.4.5，附录 A〔5〕） ----
+
+// POST /api/admin/forced-auctions —— 建强制拍卖（1m 挂牌，CA 前六不含门将，整单税 50%）
+app.post('/forced-auctions', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { playerId?: unknown } | null;
+  const result = await createForcedAuction(c.env, user.id, body?.playerId);
+  return c.json(result, 201);
+});
+
+// POST /api/admin/forced-auctions/:id/cancel —— 取消（未成交前）
+app.post('/forced-auctions/:id/cancel', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const result = await cancelForcedAuction(c.env, user.id, c.req.param('id'));
+  return c.json(result);
 });
 
 export default app;
