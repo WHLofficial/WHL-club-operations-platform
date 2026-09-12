@@ -29,7 +29,7 @@ export default function Home({ user }: { user: MeUser | null | undefined }) {
           </div>
         )}
         {user?.role === 'viewer' && (
-          <div className="banner info">观众视角：市场与球员资料都能看，转会操作要等绑定俱乐部之后。</div>
+          <div className="banner info">观众视角：市场与球员资料都能看，转会操作需要教练账号。</div>
         )}
       </section>
 
@@ -49,7 +49,7 @@ export default function Home({ user }: { user: MeUser | null | undefined }) {
         {user?.role === 'admin' && (
           <NavLink to="/admin" className="card nav-card">
             <h3>管理端</h3>
-            <p className="muted">建队、导入球员、审核转会——管理组的工具台。</p>
+            <p className="muted">建队、导入球员、审核转会，管理组的工具台。</p>
           </NavLink>
         )}
       </div>

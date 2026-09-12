@@ -254,7 +254,9 @@ CREATE INDEX idx_listings_status_listed ON listings (status, listed_at DESC);
 CREATE INDEX idx_listings_status_last_bid ON listings (status, last_bid_at);
 CREATE INDEX idx_bids_listing_amount ON bids (listing_id, amount DESC);
 CREATE INDEX idx_bids_club ON bids (club_id, id);
+CREATE INDEX idx_bids_hold ON bids (hold_id);
 CREATE INDEX idx_review_tasks_status ON review_tasks (status, id);
+CREATE INDEX idx_review_tasks_ref ON review_tasks (type, ref_id);
 CREATE INDEX idx_notifications_status ON notifications (status, id);
 
 -- §17.1-3 外键列全配索引
@@ -268,6 +270,7 @@ CREATE INDEX idx_fund_holds_ref ON fund_holds (ref_type, ref_id);
 CREATE INDEX idx_transfers_player ON transfers (player_id);
 CREATE INDEX idx_transfers_from ON transfers (from_club_id);
 CREATE INDEX idx_transfers_to ON transfers (to_club_id);
+CREATE INDEX idx_transfers_review_task ON transfers (review_task_id);
 CREATE INDEX idx_negotiation_sessions_player ON negotiation_sessions (player_id);
 CREATE INDEX idx_negotiation_sessions_club ON negotiation_sessions (club_id);
 CREATE INDEX idx_season_windows_tournament ON season_windows (tournament_id);

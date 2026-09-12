@@ -16,11 +16,11 @@ export interface SessionUser {
   mustChangePw: boolean;
 }
 
-// 角色沿用比赛系统：admin/superadmin→管理组，coach→教练；
-// locked=1 是「未解锁绑队」的观众号（不是封禁），放行只读（§3.1-4）。
+// 角色沿用比赛系统：admin/superadmin→管理组（不受 locked 影响，防管理端被锁），
+// coach→教练；locked=1 是「未解锁绑队」的观众号（不是封禁），放行只读（§3.1-4）。
 export function mapRole(tour: { role: string; locked: number }): Role {
-  if (tour.locked === 1) return 'viewer';
   if (tour.role === 'admin' || tour.role === 'superadmin') return 'admin';
+  if (tour.locked === 1) return 'viewer';
   if (tour.role === 'coach') return 'coach';
   return 'viewer';
 }
