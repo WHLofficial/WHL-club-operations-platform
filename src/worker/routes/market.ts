@@ -18,6 +18,7 @@ import { getOpenWindow, isWindowOpen } from '../seasons.ts';
 import { loadMarketContext } from '../market-context.ts';
 import { availableBalance } from '../ledger.ts';
 import { settleOverdue } from '../market-settle.ts';
+import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { getBoundClub } from '../binding.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -229,11 +230,12 @@ app.post('/market/listings', async (c) => {
   const results = await c.env.DB.batch(statements);
   const inserted = results[0].meta.changes > 0;
   if (!inserted) throw new HttpError(409, '挂牌没落库，球员状态可能刚被改过，刷新再试');
+  const listingId = Number(results[0].meta.last_row_id);
 
-  return c.json(
-    { ok: true, listingId: Number(results[0].meta.last_row_id), min: bounds.min, max: bounds.max },
-    201,
-  );
+  // 4.4.10：挂牌提交即触发本窗续约回滚（触发 ref = 挂牌单）
+  await rollbackRcChangeForPlayer(c.env, playerId, user.id, { refType: 'listing', refId: listingId });
+
+  return c.json({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);
 });
 
 // GET /api/market/trainees —— 各队训练营球员（可被激活名单，教练侧）
@@ -383,11 +385,15 @@ app.post('/market/activations', async (c) => {
   if ((results[0].meta.changes ?? 0) === 0 || (results[1].meta.changes ?? 0) === 0) {
     throw new HttpError(409, '激活没落库，球员状态可能刚被改过，刷新再试');
   }
+  const activationListingId = Number(results[1].meta.last_row_id);
+
+  // 4.4.10：激活挂牌提交即触发本窗续约回滚（触发 ref = 挂牌单）
+  await rollbackRcChangeForPlayer(c.env, playerId, user.id, { refType: 'listing', refId: activationListingId });
 
   return c.json(
     {
       ok: true,
-      listingId: Number(results[1].meta.last_row_id),
+      listingId: activationListingId,
       askPrice: TRAINEE_ACTIVATION_FEE,
       firstBidDeadline: deadline.toISOString(),
     },

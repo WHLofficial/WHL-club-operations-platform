@@ -1,0 +1,437 @@
+// 旁路操作服务（TECH_DESIGN §6.3，规则 4.4.3/4.4.4/4.4.6）：不走竞价的直接单据入口。
+// 提交（教练）→ transfer 单 pending_review + 审核任务；审核通过 → approveTransferDeal 分流：
+// 解约直接过户；续约/匹配/海捞先收附加费（幂等闸 + 守卫，重试不重复扣）再自动开签约谈判。
+// 窗内回滚（4.4.10）：续约完成后同窗被挂牌/激活/解约 → 违约金更改无效回滚（RC 与保护期还原、费用退还）。
+import type { Env } from './env.ts';
+import { HttpError } from '../lib/http.ts';
+import { releaseFeeBounds } from '../core/negotiation-rules.ts';
+import { rcChangeFee, terminationFee } from '../core/bypass-rules.ts';
+import { round2 } from '../core/market-rules.ts';
+import { availableBalance, ledgerMovement } from './ledger.ts';
+import { getOpenWindow } from './seasons.ts';
+import { createAuditStatement } from '../lib/audit.ts';
+import {
+  completeTermination,
+  loadTransfer,
+  transferEvidence,
+  type ReviewDecision,
+} from './transfers.ts';
+import { openNegotiationSession } from './negotiations.ts';
+
+function nowSql() {
+  return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+}
+
+interface RcChangeEvidence {
+  oldReleaseFee: number;
+  oldProtectedUntil: string | null;
+}
+
+interface OwnPlayerRow {
+  id: number;
+  name: string;
+  club_id: number | null;
+  status: string;
+}
+
+// 球员已在市场/审核流程里的一票否决（4.4.10「正在被挂牌、解约的球员不可更改违约金」同源）
+async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void> {
+  const listing = await db
+    .prepare(
+      `SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'matched_pending', 'pending_review') LIMIT 1`,
+    )
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (listing) throw new HttpError(400, '这名球员已经有一单在市场流程里了，等它结束再操作');
+  const pending = await db
+    .prepare(`SELECT id FROM transfers WHERE player_id = ? AND status = 'pending_review' LIMIT 1`)
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (pending) throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
+}
+
+// 旁路附加费扣收：流水幂等闸（kind+ref 只记一次）+ 单据守卫，审核重试不会重复扣费
+async function chargeBypassFee(
+  env: Env,
+  transferId: number,
+  clubId: number,
+  amount: number,
+  kind: string,
+  memo: string,
+): Promise<void> {
+  const db = env.DB;
+  const available = await availableBalance(db, clubId);
+  if (round2(available) < amount) {
+    throw new HttpError(409, `俱乐部可用资金不足：这笔费用要 ${round2(amount)} m，当前可支配 ${round2(available)} m`);
+  }
+  await db.batch([
+    ...ledgerMovement(db, {
+      clubId,
+      delta: -amount,
+      kind,
+      refType: 'transfer',
+      refId: transferId,
+      memo,
+      guardSql: `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'`,
+      guardParams: [transferId],
+    }),
+    db
+      .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'pending_review' AND extra_fee IS NULL`)
+      .bind(amount, transferId),
+  ]);
+}
+
+// 旁路单建单批：transfer + 审核任务一个 batch（审核任务 ref_id 用 last_insert_rowid()
+// 指回同批前一句刚插入的 transfer）；回链与审计在拿到 transferId 后补一个小批。
+async function createBypassTransfer(
+  env: Env,
+  opts: {
+    actor: number;
+    type: string;
+    playerId: number;
+    fromClubId: number | null;
+    toClubId: number | null;
+    fee: number;
+    extraFee: number | null;
+    season: number;
+    windowSeq: number;
+    evidence: Record<string, unknown>;
+    payload: Record<string, unknown>;
+    action: string;
+  },
+): Promise<{ transferId: number }> {
+  const db = env.DB;
+  const results = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, extra_fee, status, season, window_seq, evidence, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ${nowSql()})`,
+      )
+      .bind(
+        opts.type,
+        opts.playerId,
+        opts.fromClubId,
+        opts.toClubId,
+        opts.fee,
+        opts.extraFee,
+        opts.season,
+        opts.windowSeq,
+        JSON.stringify(opts.evidence),
+      ),
+    db
+      .prepare(
+        `INSERT INTO review_tasks (type, ref_id, payload, status)
+         SELECT 'transfer_confirm', last_insert_rowid(), ?, 'open'`,
+      )
+      .bind(JSON.stringify(opts.payload)),
+  ]);
+  const transferId = Number(results[0].meta.last_row_id);
+  const audit = createAuditStatement(db);
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE transfers SET review_task_id = (SELECT MAX(id) FROM review_tasks WHERE ref_id = ? AND type = 'transfer_confirm')
+         WHERE id = ?`,
+      )
+      .bind(transferId, transferId),
+    audit({
+      actor: opts.actor,
+      action: opts.action,
+      targetType: 'transfer',
+      targetId: transferId,
+      after: { ...opts.payload },
+    }),
+  ]);
+  return { transferId };
+}
+
+// ---- 续约（规则 4.4.6 合同期内更改违约金；平台展示名「续约」） ----
+
+export interface RcChangeResult {
+  ok: true;
+  transferId: number;
+  oldReleaseFee: number;
+  newReleaseFee: number;
+  changeFee: number;
+}
+
+export async function createRcChange(
+  env: Env,
+  clubId: number,
+  actor: number,
+  playerIdInput: unknown,
+  newFeeInput: unknown,
+): Promise<RcChangeResult> {
+  const db = env.DB;
+  const playerId = Number(playerIdInput);
+  const newFee = Number(newFeeInput);
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
+  if (!Number.isInteger(newFee) || newFee <= 0) throw new HttpError(400, '新违约金须为正整数（单位 m）');
+
+  const win = await getOpenWindow(db);
+  if (!win) throw new HttpError(409, '转会窗口没开，现在不能续约', 'no_window');
+
+  const player = await db
+    .prepare('SELECT id, name, club_id, status FROM players WHERE id = ?')
+    .bind(playerId)
+    .first<OwnPlayerRow>();
+  if (!player) throw new HttpError(404, '球员不存在');
+  if (player.club_id !== clubId) throw new HttpError(400, '只能续约自己队里的球员');
+  if (player.status !== 'normal') {
+    throw new HttpError(400, player.status === 'listed' ? '这名球员在挂牌流程里，不能续约' : '当前状态不能续约');
+  }
+  const contract = await db
+    .prepare('SELECT release_fee, contract_type, protected_until FROM contracts WHERE player_id = ? AND is_active = 1')
+    .bind(playerId)
+    .first<{ release_fee: number | null; contract_type: string; protected_until: string | null }>();
+  if (!contract || contract.release_fee === null || contract.release_fee <= 0) {
+    throw new HttpError(409, '球员没有含违约金的现行合同，先让管理组补合同');
+  }
+  if (contract.contract_type === 'trainee') {
+    throw new HttpError(400, '训练营合同是固定条款（0.75m / 5m），不能改违约金');
+  }
+  await ensureNotInFlight(db, playerId);
+
+  const oldRc = contract.release_fee;
+  const [low, high] = releaseFeeBounds(oldRc);
+  if (newFee < low || newFee > high) {
+    throw new HttpError(400, `新违约金需在 ${low}~${high} 之间（整数 m，原违约金 ${oldRc} m）`);
+  }
+  const changeFee = rcChangeFee(oldRc, newFee);
+  if (changeFee > 0) {
+    const available = await availableBalance(db, clubId);
+    if (round2(available) < changeFee) {
+      throw new HttpError(400, `可用资金不足：提高违约金要付差额 30%（${changeFee} m），当前可支配 ${round2(available)} m`);
+    }
+  }
+
+  const { transferId } = await createBypassTransfer(env, {
+    actor,
+    type: 'rc_change',
+    playerId,
+    fromClubId: clubId,
+    toClubId: clubId,
+    fee: newFee,
+    extraFee: null,
+    season: win.season,
+    windowSeq: win.windowSeq,
+    evidence: { oldReleaseFee: oldRc, oldProtectedUntil: contract.protected_until },
+    payload: {
+      kind: 'rc_change',
+      playerId,
+      playerName: player.name,
+      clubId,
+      oldReleaseFee: oldRc,
+      newReleaseFee: newFee,
+      changeFee,
+      season: win.season,
+      windowSeq: win.windowSeq,
+    },
+    action: 'bypass_rc_change',
+  });
+  return { ok: true, transferId, oldReleaseFee: oldRc, newReleaseFee: newFee, changeFee };
+}
+
+// ---- 解约（规则 4.4.4） ----
+
+export interface TerminationResult {
+  ok: true;
+  transferId: number;
+  terminationFee: number;
+}
+
+export async function createTermination(
+  env: Env,
+  clubId: number,
+  actor: number,
+  playerIdInput: unknown,
+): Promise<TerminationResult> {
+  const db = env.DB;
+  const playerId = Number(playerIdInput);
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
+
+  const win = await getOpenWindow(db);
+  if (!win) throw new HttpError(409, '转会窗口没开，现在不能解约', 'no_window');
+
+  const player = await db
+    .prepare('SELECT id, name, club_id, status FROM players WHERE id = ?')
+    .bind(playerId)
+    .first<OwnPlayerRow>();
+  if (!player) throw new HttpError(404, '球员不存在');
+  if (player.club_id !== clubId) throw new HttpError(400, '只能解约自己队里的球员');
+  if (player.status !== 'normal' && player.status !== 'trainee') {
+    throw new HttpError(400, player.status === 'listed' ? '这名球员在挂牌流程里，不能解约' : '当前状态不能解约');
+  }
+  const contract = await db
+    .prepare('SELECT release_fee, effective_from FROM contracts WHERE player_id = ? AND is_active = 1')
+    .bind(playerId)
+    .first<{ release_fee: number | null; effective_from: string | null }>();
+  if (!contract || contract.release_fee === null || contract.release_fee <= 0) {
+    throw new HttpError(409, '球员没有含违约金的现行合同，先让管理组补合同');
+  }
+  if (contract.effective_from === null) {
+    throw new HttpError(409, '合同缺效力起点，算不了解约费，先让管理组补合同数据');
+  }
+  await ensureNotInFlight(db, playerId);
+
+  const fee = terminationFee(contract.release_fee, contract.effective_from, Date.now());
+  if (fee === null) throw new HttpError(409, '合同缺效力起点，算不了解约费，先让管理组补合同数据');
+
+  const { transferId } = await createBypassTransfer(env, {
+    actor,
+    type: 'termination',
+    playerId,
+    fromClubId: clubId,
+    toClubId: null,
+    fee: 0,
+    extraFee: fee,
+    season: win.season,
+    windowSeq: win.windowSeq,
+    evidence: { oldReleaseFee: contract.release_fee, effectiveFrom: contract.effective_from },
+    payload: {
+      kind: 'termination',
+      playerId,
+      playerName: player.name,
+      clubId,
+      terminationFee: fee,
+      season: win.season,
+      windowSeq: win.windowSeq,
+    },
+    action: 'bypass_termination',
+  });
+  // 4.4.10：解约提交即触发本窗续约回滚（触发 ref = 解约单）
+  await rollbackRcChangeForPlayer(env, playerId, actor, { refType: 'transfer', refId: transferId });
+  return { ok: true, transferId, terminationFee: fee };
+}
+
+// ---- 审核通过分流（approve → 按单据类型走各自成约路径） ----
+
+export async function approveTransferDeal(
+  env: Env,
+  transferId: number,
+  actor: number | null,
+  review: ReviewDecision,
+): Promise<{ status: string }> {
+  const transfer = await loadTransfer(env.DB, transferId);
+  if (!transfer) throw new HttpError(404, '转会单不存在');
+  switch (transfer.type) {
+    case 'termination':
+      return completeTermination(env, transferId, actor, review);
+    case 'rc_change': {
+      const ev = transferEvidence<RcChangeEvidence>(transfer);
+      const fee = rcChangeFee(ev?.oldReleaseFee ?? 0, transfer.fee ?? 0);
+      if (fee > 0 && transfer.to_club_id !== null) {
+        await chargeBypassFee(
+          env,
+          transferId,
+          transfer.to_club_id,
+          fee,
+          'rc_change_fee',
+          `续约费（违约金 ${ev?.oldReleaseFee ?? '?'}m → ${transfer.fee}m 差额 30%，销毁）`,
+        );
+      }
+      // F 提交时已定死：开会即快照 E（× 续约加薪区间，规则 4.3.3）
+      const opened = await openNegotiationSession(env, transferId, actor, review, {
+        fixedReleaseFee: transfer.fee ?? undefined,
+        renewalRaise: true,
+      });
+      return { status: opened.status };
+    }
+    // match / free_agent 分支随增量 5 后续提交接入
+    default:
+      return openNegotiationSession(env, transferId, actor, review);
+  }
+}
+
+// ---- 窗内回滚（4.4.10）：续约完成后同窗被挂牌/激活/解约 → 更改无效 ----
+
+export interface RollbackTrigger {
+  refType: string;
+  refId: number;
+}
+
+/**
+ * 回滚该球员本窗全部已完成的续约单：RC 与保护期还原到本窗第一张续约单之前，
+ * 已收续约费合并退还（退款流水以触发单为幂等 ref，同一触发单只退一次）。
+ * 仅当球员仍归属原续约俱乐部时回滚合同与退款（若同窗已被卖掉，新合同是新东家
+ * 谈判的产物，回滚只留审计不留改）。工资不回滚（假设口径见 TECH_DESIGN 假设表）。
+ */
+export async function rollbackRcChangeForPlayer(
+  env: Env,
+  playerId: number,
+  actor: number | null,
+  trigger: RollbackTrigger,
+): Promise<boolean> {
+  const db = env.DB;
+  const win = await getOpenWindow(db);
+  if (!win) return false;
+  const rows = await db
+    .prepare(
+      `SELECT id FROM transfers
+       WHERE player_id = ? AND type = 'rc_change' AND status = 'completed' AND season = ? AND window_seq = ?
+       ORDER BY id ASC`,
+    )
+    .bind(playerId, win.season, win.windowSeq)
+    .all<{ id: number }>();
+  if (rows.results.length === 0) return false;
+
+  const first = await loadTransfer(db, rows.results[0].id);
+  const ev = first ? transferEvidence<RcChangeEvidence>(first) : null;
+  if (!first || !ev || !Number.isFinite(ev.oldReleaseFee)) return false;
+  const clubId = first.from_club_id;
+
+  const contract = await db
+    .prepare('SELECT club_id FROM contracts WHERE player_id = ? AND is_active = 1')
+    .bind(playerId)
+    .first<{ club_id: number | null }>();
+  const stillOwned = contract !== null && contract.club_id === clubId;
+
+  const feeRows = await db
+    .prepare(
+      `SELECT COALESCE(SUM(extra_fee), 0) AS refund FROM transfers
+       WHERE player_id = ? AND type = 'rc_change' AND status = 'completed' AND season = ? AND window_seq = ?`,
+    )
+    .bind(playerId, win.season, win.windowSeq)
+    .first<{ refund: number }>();
+  const refund = stillOwned ? Math.round((feeRows?.refund ?? 0) * 100) / 100 : 0;
+
+  const audit = createAuditStatement(db);
+  const statements: D1PreparedStatement[] = [];
+  if (stillOwned) {
+    statements.push(
+      db
+        .prepare(`UPDATE contracts SET release_fee = ?, protected_until = ? WHERE player_id = ? AND is_active = 1`)
+        .bind(ev.oldReleaseFee, ev.oldProtectedUntil, playerId),
+    );
+  }
+  if (refund > 0 && clubId !== null) {
+    statements.push(
+      ...ledgerMovement(db, {
+        clubId,
+        delta: refund,
+        kind: 'rc_change_refund',
+        refType: trigger.refType,
+        refId: trigger.refId,
+        memo: '窗内更改违约金回滚退款（4.4.10）',
+      }),
+    );
+  }
+  statements.push(
+    audit({
+      actor,
+      action: 'rc_change_rollback',
+      targetType: 'player',
+      targetId: playerId,
+      after: {
+        restoredReleaseFee: stillOwned ? ev.oldReleaseFee : null,
+        restoredProtectedUntil: stillOwned ? ev.oldProtectedUntil : null,
+        refund,
+        stillOwned,
+        trigger: trigger.refType,
+        rcChangeTransfers: rows.results.map((r) => r.id),
+      },
+    }),
+  );
+  await db.batch(statements);
+  return true;
+}

@@ -20,6 +20,7 @@ export interface NegotiationContext {
   wageMax: number;
   maxAttempts: number;
   youngBlendAge: number;
+  renewalRaise: [number, number];
 }
 
 function num(v: number | null, fallback: number): number {
@@ -47,7 +48,7 @@ function parseTiers(raw: unknown): [AgentTierParams, AgentTierParams, AgentTierP
 
 export async function loadNegotiationContext(db: D1Database): Promise<NegotiationContext> {
   const config = createConfigService(db);
-  const [a, b, c, decay, slope, mid, satisfaction, tiersRaw, wageMin, wageMax, maxAttempts, youngBlendAge] = await Promise.all([
+  const [a, b, c, decay, slope, mid, satisfaction, tiersRaw, wageMin, wageMax, maxAttempts, youngBlendAge, renewalRaiseRaw] = await Promise.all([
     config.getNumber('wage_param_a'),
     config.getNumber('wage_param_b'),
     config.getNumber('wage_param_c'),
@@ -60,8 +61,10 @@ export async function loadNegotiationContext(db: D1Database): Promise<Negotiatio
     config.getNumber('wage_max'),
     config.getNumber('max_attempts'),
     config.getNumber('young_blend_age'),
+    config.getNumberList('renewal_raise'),
   ]);
   const sat = satisfaction && satisfaction.length === 3 ? satisfaction : [0.25, 0.6, 0.9];
+  const raise = renewalRaiseRaw && renewalRaiseRaw.length === 2 ? renewalRaiseRaw : [0.05, 0.15];
   return {
     wageParamA: num(a, 0.02),
     wageParamB: num(b, 1.9),
@@ -75,5 +78,6 @@ export async function loadNegotiationContext(db: D1Database): Promise<Negotiatio
     wageMax: num(wageMax, 20),
     maxAttempts: Math.max(1, Math.trunc(num(maxAttempts, 3))),
     youngBlendAge: num(youngBlendAge, 25),
+    renewalRaise: [num(raise[0], 0.05), num(raise[1], 0.15)],
   };
 }

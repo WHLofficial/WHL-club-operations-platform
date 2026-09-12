@@ -11,8 +11,8 @@ import { confirmContractsImport, previewContractsImport } from '../contracts-imp
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
-import { completeTransfer, loadTransfer, rejectTransfer } from '../transfers.ts';
-import { openNegotiationSession } from '../negotiations.ts';
+import { loadTransfer, rejectTransfer } from '../transfers.ts';
+import { approveTransferDeal } from '../bypass.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -618,9 +618,9 @@ async function loadOpenReviewTask(db: D1Database, taskId: number) {
   return task;
 }
 
-// POST /api/admin/reviews/:id/approve —— 批准成交（§6.7）
-// 解约类：无工资谈判，批准即过户；其余（普通/激活成交等）：进入签约谈判，
-// 由签入方谈成合同条款后成约过户（成约即过户）。
+// POST /api/admin/reviews/:id/approve —— 批准成交（§6.3/§6.7）
+// 解约：无工资谈判，批准即过户；续约/匹配/海捞：先收附加费再进签约谈判（F 已定死）；
+// 普通成交/激活成交：进入签约谈判，由签入方谈成合同条款后成约过户（成约即过户）。
 app.post('/reviews/:id/approve', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const taskId = Number(c.req.param('id'));
@@ -630,16 +630,12 @@ app.post('/reviews/:id/approve', async (c) => {
   const task = await loadOpenReviewTask(c.env.DB, taskId);
   const transfer = await loadTransfer(c.env.DB, task.ref_id);
   if (!transfer) throw new HttpError(404, '转会单不存在');
-  const review = {
+  const result = await approveTransferDeal(c.env, task.ref_id, user.id, {
     taskId,
     decidedBy: user.id,
-    decision: 'approved' as const,
+    decision: 'approved',
     note: note ?? undefined,
-  };
-  const result =
-    transfer.type === 'termination'
-      ? await completeTransfer(c.env, task.ref_id, user.id, review)
-      : await openNegotiationSession(c.env, task.ref_id, user.id, review);
+  });
   return c.json({ ok: true, ...result });
 });
 

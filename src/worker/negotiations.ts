@@ -90,6 +90,8 @@ function loadPlayerFacts(db: D1Database, playerId: number): Promise<PlayerFactsR
     .bind(playerId)
     .first<PlayerFactsRow>();
 }
+export { loadPlayerFacts };
+export type { PlayerFactsRow };
 
 function tierParamsOf(ctx: { agentTiers: [AgentTierParams, AgentTierParams, AgentTierParams] }, tier: number): AgentTierParams {
   return ctx.agentTiers[tier - 1] ?? ctx.agentTiers[1];
@@ -97,12 +99,20 @@ function tierParamsOf(ctx: { agentTiers: [AgentTierParams, AgentTierParams, Agen
 
 // 审核通过 → 开会话：transfer → signing + 会话 + 审核表 + 审计，一个 batch；
 // transfer_id UNIQUE 兜底重复开会（竞态/重放），整批回滚后按「已开过」处理。
+// fixedReleaseFee：F 在提交时已定死（续约/匹配/海捞——附加费按它收），开会即快照 E，
+// 之后 submitReleaseFee 拒绝改 F；renewalRaise：续约单 E × U(加薪区间)（规则 4.3.3）。
+export interface OpenSessionOptions {
+  fixedReleaseFee?: number;
+  renewalRaise?: boolean;
+}
+
 export async function openNegotiationSession(
   env: Env,
   transferId: number,
   actor: number | null,
   review?: ReviewDecision,
-): Promise<{ status: 'signing' | 'already' }> {
+  opts: OpenSessionOptions = {},
+): Promise<{ status: 'signing' | 'already'; expectedWage?: number }> {
   const db = env.DB;
   const transfer = await loadTransfer(db, transferId);
   if (!transfer) throw new HttpError(404, '转会单不存在');
@@ -110,15 +120,32 @@ export async function openNegotiationSession(
   if (transfer.status !== 'pending_review') throw new HttpError(409, `转会单当前状态是 ${transfer.status}，不能进入签约谈判`);
   if (transfer.to_club_id === null) throw new HttpError(409, '转会单缺签入方，数据不完整');
 
+  let seededE: number | null = null;
+  if (opts.fixedReleaseFee !== undefined) {
+    const player = await loadPlayerFacts(db, transfer.player_id);
+    if (!player || player.ca === null || player.pa === null || player.age === null) {
+      throw new HttpError(409, '球员能力数据不完整，无法计算预期工资');
+    }
+    const ctx = await loadNegotiationContext(db);
+    const level = abilityLevel(player.ca, player.pa, player.age, ctx.youngBlendAge);
+    let e = expectedWage(level, opts.fixedReleaseFee, ctx.wageParamA, ctx.wageParamB, ctx.wageParamC);
+    if (opts.renewalRaise) {
+      const [lo, hi] = ctx.renewalRaise;
+      const roll = env.rng ?? defaultRng;
+      e = Math.round(e * (1 + lo + (hi - lo) * roll()) * 100) / 100;
+    }
+    seededE = e;
+  }
+
   const audit = createAuditStatement(db);
   const statements: D1PreparedStatement[] = [
     db.prepare(`UPDATE transfers SET status = 'signing' WHERE id = ? AND status = 'pending_review'`).bind(transferId),
     db
       .prepare(
-        `INSERT INTO negotiation_sessions (transfer_id, player_id, club_id, attempt_count, status, created_at)
-         VALUES (?, ?, ?, 0, 'active', ${nowSql()})`,
+        `INSERT INTO negotiation_sessions (transfer_id, player_id, club_id, release_fee, expected_wage, attempt_count, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 0, 'active', ${nowSql()})`,
       )
-      .bind(transferId, transfer.player_id, transfer.to_club_id),
+      .bind(transferId, transfer.player_id, transfer.to_club_id, opts.fixedReleaseFee ?? null, seededE),
   ];
   if (review) {
     statements.push(
@@ -133,13 +160,17 @@ export async function openNegotiationSession(
       action: 'negotiation_open',
       targetType: 'negotiation',
       targetId: transferId,
-      after: { playerId: transfer.player_id, clubId: transfer.to_club_id },
+      after: {
+        playerId: transfer.player_id,
+        clubId: transfer.to_club_id,
+        ...(opts.fixedReleaseFee !== undefined ? { fixedReleaseFee: opts.fixedReleaseFee, expectedWage: seededE } : {}),
+      },
     }),
   );
   try {
     const results = await db.batch(statements);
     const statusChange = results[0]?.meta.changes ?? 0;
-    return { status: statusChange > 0 ? 'signing' : 'already' };
+    return { status: statusChange > 0 ? 'signing' : 'already', expectedWage: seededE ?? undefined };
   } catch (err) {
     if (String(err).includes('UNIQUE')) return { status: 'already' };
     throw err;
@@ -185,6 +216,9 @@ async function requireMyActiveSession(
   return { session, transfer };
 }
 
+// F 在提交时已定死的成约路径（续约/匹配/海捞）：附加费按 F 收，谈判中不得再改
+export const FIXED_FEE_TYPES: ReadonlySet<string> = new Set(['rc_change', 'match', 'free_agent']);
+
 // 提交新违约金（整数 m）：±10/±50% 区间按球员现行 RC 校验；重算并快照 E（重设允许）
 export async function submitReleaseFee(
   env: Env,
@@ -198,6 +232,9 @@ export async function submitReleaseFee(
   if (!transfer) throw new HttpError(404, '转会单不存在');
   if (transfer.status === 'completed') throw new HttpError(409, '这单转会已经完成了');
   if (transfer.status !== 'signing') throw new HttpError(409, '这单转会还没进入签约谈判');
+  if (FIXED_FEE_TYPES.has(transfer.type)) {
+    throw new HttpError(400, '这单的新违约金在提交时已经定死了（附加费按它结算），直接报价即可');
+  }
   const session = await loadSessionByTransfer(db, transferId);
   if (!session) throw new HttpError(404, '谈判会话不存在');
   if (session.club_id !== clubId) throw new HttpError(403, '只有签约方可以操作这次谈判');
@@ -321,7 +358,8 @@ export async function offerWage(
   return { result: 'fail', attemptNo, remaining: ctx.maxAttempts - attemptNo, satisfaction, risk };
 }
 
-// 直签训练营：固定条款立即成约（需求方裁决，不占 4.3.4(3) 下放名额）
+// 直签训练营：固定条款立即成约（需求方裁决，不占 4.3.4(3) 下放名额）。
+// 续约/匹配是本队留人操作，不存在「签入」，不能借道把自家球员转进训练营（下放名额闸不被绕过）。
 export async function chooseTrainee(
   env: Env,
   sessionId: number,
@@ -329,7 +367,10 @@ export async function chooseTrainee(
   actor: number | null,
 ): Promise<{ ok: true; result: 'trainee'; wage: number; message: string }> {
   const db = env.DB;
-  const { session } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
+  const { session, transfer } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
+  if (transfer.type === 'rc_change' || transfer.type === 'match') {
+    throw new HttpError(400, '续约和匹配是留人操作，球员本来就在队里，不能转进训练营');
+  }
   await settleActiveSession(env, session, TRAINEE_WAGE, 'trainee', actor, null);
   return { ok: true, result: 'trainee', wage: TRAINEE_WAGE, message: settleMessage('trainee') };
 }

@@ -119,7 +119,7 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 52 键，与 §13 一致', () => {
-    expect(CONFIG_KEYS.length).toBe(52);
+  it('注册表 53 键，与 §13 一致', () => {
+    expect(CONFIG_KEYS.length).toBe(53);
   });
 });
