@@ -2,8 +2,15 @@ import { Hono } from 'hono';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { getAuthUser } from '../lib/session.ts';
+import clubsRoutes from './routes/clubs.ts';
+import playersRoutes from './routes/players.ts';
+import adminRoutes from './routes/admin.ts';
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.route('/api', clubsRoutes);
+app.route('/api', playersRoutes);
+app.route('/api/admin', adminRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {
@@ -50,6 +57,8 @@ app.get('/api/me', async (c) => {
 });
 
 app.notFound((c) => c.json({ error: '接口不存在' }, 404));
+
+export { app };
 
 export default {
   fetch: app.fetch,

@@ -194,7 +194,7 @@ export function createConfigService(db: D1Database, opts: { now?: () => number }
       return parts;
     },
 
-    async getJson<T>(key) {
+    async getJson<T>(key: ConfigKey) {
       const raw = await fetchRaw(key);
       const source = raw === null ? CONFIG_DEFAULTS[key] : raw;
       if (source === undefined || source === null) return null;

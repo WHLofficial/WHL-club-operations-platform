@@ -2,6 +2,7 @@
 // 只实现平台代码用到的面：prepare/bind/first/all/run + batch（隐式事务）。
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export interface TestKV {
   get(key: string): Promise<string | null>;
@@ -33,13 +34,13 @@ export function createTestD1(sqlite: DatabaseSync): D1Database {
           return stmt;
         },
         async first<T = Record<string, unknown>>(): Promise<T | null> {
-          return (sqlite.prepare(sql).get(...args) ?? null) as T | null;
+          return (sqlite.prepare(sql).get(...(args as never[])) ?? null) as T | null;
         },
         async all<T = Record<string, unknown>>(): Promise<{ results: T[] }> {
-          return { results: sqlite.prepare(sql).all(...args) as T[] };
+          return { results: sqlite.prepare(sql).all(...(args as never[])) as T[] };
         },
         async run() {
-          const r = sqlite.prepare(sql).run(...args);
+          const r = sqlite.prepare(sql).run(...(args as never[]));
           return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } };
         },
       };
@@ -63,11 +64,26 @@ export function createTestD1(sqlite: DatabaseSync): D1Database {
 
 const MIGRATION_FILES = ['0001_init.sql', '0002_club_bind_code.sql'];
 
-export function createTestDb(): { sqlite: DatabaseSync; db: D1Database } {
-  const sqlite = new DatabaseSync(':memory:');
+export function applyMigrations(sqlite: DatabaseSync): void {
   const dir = new URL('../src/db/migrations/', import.meta.url);
   for (const file of MIGRATION_FILES) {
-    sqlite.exec(readFileSync(new URL(file, dir), 'utf8'));
+    sqlite.exec(readFileSync(fileURLToPath(new URL(file, dir).href), 'utf8'));
   }
+}
+
+export function createTestDb(): { sqlite: DatabaseSync; db: D1Database } {
+  const sqlite = new DatabaseSync(':memory:');
+  applyMigrations(sqlite);
   return { sqlite, db: createTestD1(sqlite) };
+}
+
+// node:sqlite StatementSync 的 get/all 不带泛型，包一层方便断言取行
+type SqlParam = string | number | bigint | Uint8Array | null;
+
+export function sqlGet<T>(sqlite: DatabaseSync, sql: string, ...params: SqlParam[]): T | undefined {
+  return sqlite.prepare(sql).get(...params) as T | undefined;
+}
+
+export function sqlAll<T>(sqlite: DatabaseSync, sql: string, ...params: SqlParam[]): T[] {
+  return sqlite.prepare(sql).all(...params) as T[];
 }
