@@ -48,7 +48,11 @@ export function positionName(id: unknown): string | null {
 
 export function roleChs(id: unknown): string | null {
   const n = Number(id);
-  return Number.isFinite(n) ? roleById.get(n)?.chs ?? null : null;
+  if (!Number.isFinite(n)) return null;
+  const row = roleById.get(n);
+  // 0 / '-' 是源表里的「无角色」占位
+  if (!row || row.en === '-' || row.chs === '-') return null;
+  return row.chs ?? row.en ?? null;
 }
 
 // 金段徽章 = 基础 ID+100（§5.2）；槽位口径：1-7 银槽、13 起金槽

@@ -255,6 +255,22 @@ describe('球员查询（附录 A〔1〕）', () => {
     const fx = freshEnv();
     expect((await get('/api/players/999', undefined, fx.env)).status).toBe(404);
   });
+
+  it('status 过滤与非法值拒绝', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(
+      "INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active')",
+    );
+    const stmt = fx.sqlite.prepare(
+      "INSERT INTO players (uid, name, club_id, ca, pa, fc_id, status) VALUES (?, ?, 1, 80, 85, ?, ?)",
+    );
+    stmt.run('fc1', '甲', 1, 'normal');
+    stmt.run('fc2', '乙', 2, 'trainee');
+    const res = await get('/api/players?status=trainee', undefined, fx.env);
+    const body = (await res.json()) as { players: { name: string }[] };
+    expect(body.players.map((p) => p.name)).toEqual(['乙']);
+    expect((await get('/api/players?status=oops', undefined, fx.env)).status).toBe(400);
+  });
 });
 
 describe('球员管理 PATCH（审计留痕）', () => {

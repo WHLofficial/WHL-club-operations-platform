@@ -316,6 +316,7 @@ function ImportSection() {
     try {
       const futureStars = parseStarIds(starText);
       let result: ImportConfirm | null = null;
+      let done = 0;
       for (let i = 0; i < state.rows.length; i += IMPORT_SLICE) {
         const slice = state.rows.slice(i, i + IMPORT_SLICE);
         const res = await apiPost<ImportConfirm>('/api/admin/players/import/confirm', {
@@ -325,11 +326,13 @@ function ImportSection() {
         });
         if (result === null) result = res;
         else result.written += res.written;
+        done += slice.length;
+        patch({ progress: `落库 ${done} / ${state.rows.length} 行` });
       }
-      patch({ result, armed: false, preview: null, rows: [], fileName: '', confirmBusy: false });
+      patch({ result, armed: false, preview: null, rows: [], fileName: '', confirmBusy: false, progress: '' });
       show(`落库完成：${result?.written ?? 0} 行已写入。`);
     } catch (err) {
-      patch({ armed: false, confirmBusy: false });
+      patch({ armed: false, confirmBusy: false, progress: '' });
       show(err instanceof Error ? err.message : '落库失败', true);
     }
   }
@@ -389,7 +392,7 @@ function ImportSection() {
           onClick={() => (state.armed ? runConfirm() : patch({ armed: true }))}
           onBlur={() => patch({ armed: false })}
         >
-          {state.confirmBusy ? '落库中…' : state.armed ? '再点一次确认落库' : '第二步 · 确认落库'}
+          {state.confirmBusy ? state.progress || '落库中…' : state.armed ? '再点一次确认落库' : '第二步 · 确认落库'}
         </button>
       </div>
 
