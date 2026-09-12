@@ -62,7 +62,13 @@ export function createTestD1(sqlite: DatabaseSync): D1Database {
   return d1 as unknown as D1Database;
 }
 
-const MIGRATION_FILES = ['0001_init.sql', '0002_club_bind_code.sql', '0003_players_status_index.sql', '0004_backfill_base_ca.sql'];
+const MIGRATION_FILES = [
+  '0001_init.sql',
+  '0002_club_bind_code.sql',
+  '0003_players_status_index.sql',
+  '0004_backfill_base_ca.sql',
+  '0005_market_bid_guard.sql',
+];
 
 export function applyMigrations(sqlite: DatabaseSync): void {
   const dir = new URL('../src/db/migrations/', import.meta.url);
