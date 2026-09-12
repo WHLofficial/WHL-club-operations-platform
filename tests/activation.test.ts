@@ -257,7 +257,7 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect((second.body as { error?: string }).error).toContain('本窗口已经被激活过');
   });
 
-  it('激活成交全链：待审单 type=activation，批准后过户、训练营态保留、税 10%', async () => {
+  it('激活成交全链：批准进谈判、直签训练营过户、训练营态保留、税 10%', async () => {
     const fx = await seedTrainee(freshEnv());
     const { body } = await activateTrainee(fx);
     const listingId = body.listingId!;
@@ -277,16 +277,30 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect(transfer).toMatchObject({ type: 'activation', status: 'pending_review', to_club_id: fx.buyerClub, fee: 5 });
 
     const task = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM review_tasks WHERE ref_id = ? AND status = ' + "'open'", transfer!.id);
+    // 激活成交与普通成交一样走谈判（需求方裁决 2026-09）
     const approve = await post(`/api/admin/reviews/${task!.id}/approve`, { note: '激活成交确认' }, 'tok-admin', fx.env);
     expect(approve.status).toBe(200);
+    expect(((await approve.json()) as { status: string }).status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transfer!.id)?.status).toBe('signing');
+
+    // 会话分配给买方；卖方不可操作
+    const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
+    const session = ((await mine.json()) as { sessions: { id: number; status: string }[] }).sessions[0];
+    expect(session.status).toBe('active');
+    expect((await post(`/api/negotiations/${session.id}/trainee`, {}, 'tok-coach', fx.env)).status).toBe(403);
+
+    // 买方直签训练营合同（双固定，不占下放名额）
+    const trainee = await post(`/api/negotiations/${session.id}/trainee`, {}, 'tok-coach2', fx.env);
+    expect(trainee.status).toBe(200);
+    expect(((await trainee.json()) as { result: string; wage: number; message: string })).toMatchObject({ result: 'trainee', wage: 0.75 });
 
     const player = sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 20');
     expect(player).toEqual({ club_id: fx.buyerClub, status: 'trainee' });
-    const contract = sqlGet<{ club_id: number; contract_type: string; wage: number }>(
+    const contract = sqlGet<{ club_id: number; contract_type: string; wage: number; release_fee: number; source: string }>(
       fx.sqlite,
-      'SELECT club_id, contract_type, wage FROM contracts WHERE player_id = 20 AND is_active = 1',
+      'SELECT club_id, contract_type, wage, release_fee, source FROM contracts WHERE player_id = 20 AND is_active = 1',
     );
-    expect(contract).toEqual({ club_id: fx.buyerClub, contract_type: 'trainee', wage: 0.75 });
+    expect(contract).toEqual({ club_id: fx.buyerClub, contract_type: 'trainee', wage: 0.75, release_fee: 5, source: 'trainee' });
 
     const balances = sqlAll<{ club_id: number; balance: number }>(
       fx.sqlite,

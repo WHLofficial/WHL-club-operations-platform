@@ -359,7 +359,7 @@ describe('截止惰性结算与窗尾收口（§6.5 / 4.4.7）', () => {
 });
 
 describe('审核队列与过户单点（§6.4-2）', () => {
-  it('批准 → 划款+税+过户一步到位，账本可查，重复处理被挡', async () => {
+  it('批准 → 进签约谈判（成约才过户）：会话建立、交 RC 出 E、直败结算过户、重复处理被挡', async () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);
     await listPlayer(mf, 10, 15);
@@ -374,20 +374,61 @@ describe('审核队列与过户单点（§6.4-2）', () => {
 
     const approve = await post(`/api/admin/reviews/${taskId}/approve`, { note: '成交确认' }, 'tok-admin', fx.env);
     expect(approve.status).toBe(200);
-    expect(((await approve.json()) as { status: string }).status).toBe('completed');
+    expect(((await approve.json()) as { status: string }).status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM review_tasks WHERE id = ?', taskId)?.status).toBe('approved');
+    // 谈判期间资金仍冻结、账本未动
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM fund_holds')?.status).toBe('held');
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE ref_type = 'transfer'")?.n).toBe(0);
+
+    // 只有签约方（买方）能动会话
+    expect((await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach', fx.env)).status).toBe(403);
+
+    // 新 RC 区间（旧 RC 20 → [10, 30]）
+    expect((await post('/api/negotiations/1/release-fee', { fee: 31 }, 'tok-coach2', fx.env)).status).toBe(400);
+    expect((await post('/api/negotiations/1/release-fee', { fee: 9 }, 'tok-coach2', fx.env)).status).toBe(400);
+    const fee = await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    expect(fee.status).toBe(200);
+    expect(((await fee.json()) as { releaseFee: number; expectedWage: number }).expectedWage).toBe(3.11); // L7·F20
+
+    // 低报价 fail（rng=0.9 躲开直败）：满意度文案 + 风险布尔，响应无判定参数（§6.10-2）
+    fx.env.rng = () => 0.9;
+    const low = await post('/api/negotiations/1/offer', { wage: 0.5 }, 'tok-coach2', fx.env);
+    expect(low.status).toBe(200);
+    const lowBody = (await low.json()) as Record<string, unknown> & { result: string; remaining: number; risk: boolean; satisfaction: string };
+    expect(lowBody.result).toBe('fail');
+    expect(lowBody.remaining).toBe(2);
+    expect(lowBody.risk).toBe(true);
+    expect(lowBody.satisfaction).toContain('😠');
+    expect(Object.keys(lowBody).sort()).toEqual(['attemptNo', 'remaining', 'result', 'risk', 'satisfaction']);
+
+    // 单调性：低于上次被拒，不耗次数
+    expect((await post('/api/negotiations/1/offer', { wage: 0.4 }, 'tok-coach2', fx.env)).status).toBe(400);
+    expect(sqlGet<{ attempt_count: number }>(fx.sqlite, 'SELECT attempt_count FROM negotiation_sessions WHERE id = 1')?.attempt_count).toBe(1);
+
+    // 第 2 次直败（rng=0.1 < 档位 2 直败概率 0.5）→ 按 eff（E×0.95）结算成约过户
+    fx.env.rng = () => 0.1;
+    const direct = await post('/api/negotiations/1/offer', { wage: 0.6 }, 'tok-coach2', fx.env);
+    expect(direct.status).toBe(200);
+    expect(((await direct.json()) as { result: string; wage: number })).toMatchObject({ result: 'direct', wage: 2.95 });
 
     const t = sqlGet<{ status: string; tax: number; completed_at: string | null }>(
       fx.sqlite,
       'SELECT status, tax, completed_at FROM transfers WHERE id = 1',
     );
     expect(t?.status).toBe('completed');
-    expect(t?.tax).toBe(1.5); // 全部在 RC 内：15 × 10%
+    expect(t?.tax).toBe(1.5); // 成交价 15 全在 RC 内：15 × 10%
     expect(t?.completed_at).not.toBeNull();
     expect(sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 10')).toMatchObject({
       club_id: mf.bidderClub,
       status: 'normal',
     });
-    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM contracts WHERE player_id = 10')?.club_id).toBe(mf.bidderClub);
+    expect(
+      sqlGet<{ wage: number; release_fee: number; source: string; contract_type: string; signed_at: string | null }>(
+        fx.sqlite,
+        'SELECT wage, release_fee, source, contract_type, signed_at FROM contracts WHERE player_id = 10 AND is_active = 1',
+      ),
+    ).toEqual({ wage: 2.95, release_fee: 20, source: 'direct', contract_type: 'formal', signed_at: expect.any(String) });
     expect(
       sqlAll<{ club_id: number; kind: string; amount: number }>(
         fx.sqlite,
@@ -402,6 +443,10 @@ describe('审核队列与过户单点（§6.4-2）', () => {
     expect(sqlGet<{ balance: number }>(fx.sqlite, `SELECT balance FROM ledger_accounts WHERE club_id = ${mf.sellerClub}`)?.balance).toBe(113.5);
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM fund_holds')?.status).toBe('settled');
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM bids')?.status).toBe('won');
+    expect(sqlGet<{ status: string; settled_wage: number; settle_source: string }>(
+      fx.sqlite,
+      'SELECT status, settled_wage, settle_source FROM negotiation_sessions WHERE id = 1',
+    )).toEqual({ status: 'settled', settled_wage: 2.95, settle_source: 'direct' });
 
     const again = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
     expect(again.status).toBe(409);
