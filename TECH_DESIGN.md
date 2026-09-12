@@ -450,6 +450,10 @@ E_base = round(a × L^b × F^c, 2)          # a=0.02, b=1.9, c=0.45（wage_param
 5. 原成功率 roll；未成且 attempt_no ≥ 3 → 按基础 E 强制成约 source=forced（规则 4.3.3「3 轮未谈拢直接满足预期工资」）
 ```
 
+**直签训练营出口（需求方裁决 2026-09-12）**：所有谈判会话（普通成交/激活成交/匹配/海捞/拍卖）在成约前均可选择「直接签训练营合同」——条款固定 0.75m/半赛季、违约金 5m（规则 4.3.4(1)），**不占 4.3.4(3) 每窗 2 名正式转训练营的名额**（该名额只约束「正式合同转训练营」的下放操作，签约时直接选训练营是另一条路径）。落库 source=trainee、contract_type=trainee，球员落训练营状态。激活成交与普通成交一样走谈判（同日裁决：撤销「激活成交直接过户」的临时口径——训练营合同双固定不构成谈判豁免，买方仍可在谈判中改签正式合同）。
+
+**结算与过户的崩溃自愈**：成约分两个 batch——① 会话侧（attempt 流水 + attempt_count + `settled_wage`/`settle_source` 快照）；② `completeTransfer` 过户单点（幂等，守卫放宽到 signing 态，携带 ContractTerms 写新合同：wage/新 RC/source/contract_type/signed_at）。两批之间崩溃时，下次触碰（GET 列表 / 报价 / 直签）检测「会话已结算但 transfer 仍 signing」即按会话快照重放过户；反向（次数已满但会话未结算）沿插件模式补强约自愈。
+
 ### 6.8 经纪人档位（公开属性，玩家可见）
 
 - `players.agent_tier`：1 温和 / 2 普通 / 3 苛刻，默认 2；导入不设列，全部默认普通。
@@ -468,7 +472,7 @@ E_base = round(a × L^b × F^c, 2)          # a=0.02, b=1.9, c=0.45（wage_param
 | [0.25, 0.6) | 😐 经纪人不太满意 |
 | < 0.25 | 😠 经纪人很不满意 |
 
-p 低于该球员档位阈值时文案附加「（报价过低，有谈崩风险）」。谈判结果文案：直败=「❌ 报价过低，谈判直接失败，已按该次预期工资结算」；强约=「已按预期工资强制成约（3 轮未谈拢）」。
+p 低于该球员档位阈值时文案附加「（报价过低，有谈崩风险）」。谈判结果文案：直败=「❌ 报价过低，谈判直接失败，已按该次预期工资结算」；强约=「已按预期工资强制成约（3 轮未谈拢）」；直签训练营=「已按训练营合同签入（工资 0.75m/半赛季、违约金 5m，不占本窗下放名额）」。
 
 ### 6.10 判定保密开发规约（强制性，开发与代码评审逐条对照）
 
@@ -835,6 +839,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 谈判 | GET `/api/negotiations?mine=1` | 👤 | 我的活跃签约谈判〔4〕 |
 | 谈判 | POST `/api/negotiations/:transferId/release-fee` | 👤 | 提交新 RC（E 快照）〔4〕 |
 | 谈判 | POST `/api/negotiations/:sessionId/offer` | 👤 | 报价（满意度文案返回）〔4〕 |
+| 谈判 | POST `/api/negotiations/:sessionId/trainee` | 👤 | 直签训练营合同（0.75/5 双固定，不占下放名额；2026-09 裁决）〔4〕 |
 | 赛季 | GET `/api/seasons/current` | 🌐 | 当前赛季/窗口〔6〕 |
 | 赛季 | POST `/api/admin/seasons` · `/advance-window` · `/:id/bind-tournament` | 🛡 | 赛季管理〔6〕 |
 | 赛果 | GET `/api/admin/results/queue` · POST `/:id/confirm` | 🛡 | 赛果确认（触发奖金/XP）〔6〕 |

@@ -201,7 +201,11 @@ export async function submitReleaseFee(
   const session = await loadSessionByTransfer(db, transferId);
   if (!session) throw new HttpError(404, '谈判会话不存在');
   if (session.club_id !== clubId) throw new HttpError(403, '只有签约方可以操作这次谈判');
-  if (session.status !== 'active') throw new HttpError(409, '这场谈判已经结束了');
+  if (session.status !== 'active') {
+    // 崩溃窗口（会话已结算、过户未跟上）也要在这里补过户，不留僵死单
+    await healSettlement(env, session, actor);
+    throw new HttpError(409, '这场谈判已经结束了');
+  }
 
   const fee = Number(feeInput);
   if (!Number.isInteger(fee) || fee <= 0) throw new HttpError(400, '新违约金须为正整数（单位 m）');
@@ -401,10 +405,14 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
     .prepare(
       `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source,
               t.type AS transfer_type, t.status AS transfer_status, t.fee,
+              cf.name AS from_name, ct.name AS to_name, c_cur.release_fee AS current_rc,
               p.id AS player_id, p.name AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier
        FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
        JOIN players p ON p.id = s.player_id
+       LEFT JOIN clubs cf ON cf.id = t.from_club_id
+       LEFT JOIN clubs ct ON ct.id = t.to_club_id
+       LEFT JOIN contracts c_cur ON c_cur.player_id = s.player_id AND c_cur.is_active = 1
        WHERE s.club_id = ? ORDER BY s.id DESC LIMIT 50`,
     )
     .bind(clubId)
@@ -420,6 +428,9 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       transfer_type: string;
       transfer_status: string;
       fee: number | null;
+      from_name: string | null;
+      to_name: string | null;
+      current_rc: number | null;
       player_id: number;
       player_name: string;
       position: string | null;
@@ -486,10 +497,14 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       transferId: r.transfer_id,
       status: r.status,
       transfer: { type: r.transfer_type, status: r.transfer_status, fee: r.fee },
+      fromClubName: r.from_name,
+      toClubName: r.to_name,
       player: { id: r.player_id, name: r.player_name, position: r.position, age: r.age, ca: r.ca, pa: r.pa },
       agentTier: r.agent_tier,
       agentTierLabel: AGENT_TIER_LABELS[r.agent_tier] ?? '普通',
       releaseFee: r.release_fee,
+      // 新 RC 合法区间是公开规则（4.3.1 ±10/±50%），给前端做表单提示
+      rcBounds: r.current_rc !== null && r.status === 'active' ? releaseFeeBounds(r.current_rc) : null,
       expectedWage: r.expected_wage,
       attemptsUsed: r.attempt_count,
       remaining: Math.max(0, ctx.maxAttempts - r.attempt_count),
