@@ -357,25 +357,29 @@ draft ──挂牌(价格校验)──→ listed ──首笔出价──→ bid
 
 ```
 listed（挂牌中或任意球员）──激活(校验：一窗一球员一次、效力>0、保护期倍数)──→ activation_opened
-   │  5 分钟出价窗（秒级惰性结算；激活方须出价，他人出价无效）
-   ├─ 出价 → matched_pending（被激活方 24h 匹配窗）
-   │     ├─ 匹配：新 RC > 当前最高价（匹配时即定 F）→ 付新旧 RC 差额（销毁）→ 保护期结束 → pending_review → signing
-   │     └─ 不匹配 → 按激活价成交 → pending_review → signing
-   └─ 5 分钟内未出价 → invalid（激活无效；假设：已消耗一窗一次额度）
+   │  5 分钟首价窗（秒级惰性结算；只有激活方能出价、金额恰等于激活价，他人出价无效）
+   ├─ 激活方落首价 → 首价即成交价（激活挂牌永不开放后续竞价）
+   │     ├─ 训练营球员 → pending_review（固定条款无匹配）→ 直签训练营/谈判
+   │     └─ 正式球员 → matched_pending（被激活方 24h 匹配窗）
+   │           ├─ 匹配：新 RC > 首价（不受 4.4.6 幅度约束，假设 16）→ 差额审核时销毁 → 球员留队（挂牌落 delisted 终态）→ match 单 → signing
+   │           └─ 放行/到期 → 按激活价成交 → pending_review → signing
+   └─ 5 分钟内未落价 → invalid（激活作废；假设：已消耗一窗一次额度）
 ```
 
 与插件的关键差异：谈判插件由管理员手动 `/创建谈判` 建案例；平台在审核通过后**状态机自动创建谈判会话**并分配签入方，E 在会话创建或重设新 RC 时快照。signing 态统一走 §6.7；只有解约（termination）无工资谈判、审核通过直接 completed。
 
-激活倍数（改 RC 用）：保护期内 RC≤20m→2 倍、>20m→1.5 倍；保护期外 1 倍；刚签约（效力 0）不可激活。
+激活金额（挂牌价）：训练营球员固定 5m（4.3.4）；正式球员 = RC × 倍数——保护期内 RC≤20m→2 倍、>20m→1.5 倍，保护期外 1 倍（保护期判定见假设 13）；刚签约（效力 0）不可激活。
 
 ### 6.3 旁路操作（不走竞价，直接生成 transfer 单；除解约外审核通过后自动进入 signing，见 §6.7）
 
 | 操作 | 关键校验 | 费用 |
 |---|---|---|
-| 海捞 | 目标球员无归属；**新违约金不设上下限**（裁决：自平衡——定得低签入费与工资都便宜，但球员随时可被激活撬走；定得高则签入费贵。原「定价人工审」取消） | 新 RC × 30% |
-| 解约 | — | 效力 ≥3 年免费；否则 RC×(3−效力)×0.1；本窗禁签该球员；属性恢复原始。**无工资谈判，审核通过直接 completed** |
-| 续约（=规则 4.4.6 合同期内更改违约金，内部枚举 rc_change 不变） | 合同期内、未挂牌/未解约；幅度：RC≤20m→±10m、RC>20m→±50% | 提高=差额×30%；降低=免费；保护期结束、工资重谈（预期工资加薪 5%-15%，见 §6.7） |
+| 海捞 | 目标球员无归属（解约禁签名单内的本窗不可签）；**新违约金不设上下限**（裁决：自平衡——定得低签入费与工资都便宜，但球员随时可被激活撬走；定得高则签入费贵。原「定价人工审」取消）；复签翻新历史合同行（contracts.player_id 全局唯一，UPSERT） | 新 RC × 30% |
+| 解约 | 有合同、未挂牌/未激活挂牌/未在解约流程中 | 效力 ≥3 年（365.25 天/年）免费；否则 RC×(3−效力)×0.1；本窗被解约球员全联盟禁签；CA 恢复 base_ca。**无工资谈判，审核通过直接 completed** |
+| 续约（=规则 4.4.6 合同期内更改违约金，内部枚举 rc_change 不变） | 合同期内、未挂牌/未解约；幅度：RC≤20m→±10m、RC>20m→±50% | 提高=差额×30%；降低=免费；保护期重新收口到审核通过当下（效力起点不动）；工资重谈（预期工资加薪 5%-15%，见 §6.7） |
 | 强制拍卖 | 准入体检失败触发；管理方 1m 挂牌；人选 CA 前六（含并列、不含门将） | 交易税率 50%（特例）。走挂牌链，成交后同样进 signing |
+
+旁路单据与市场成交共用审核队列与 approveTransferDeal 链：批准后除解约直接 completed 外，续约/海捞/匹配按 F 定死条款自动开签约谈判（续约/匹配禁直签训练营——留人操作必须有工资重谈）。**附加费时点（假设 15）**：续约费/解约费/海捞签入费/匹配差额在审核通过时收（(kind, ref) 幂等闸防重），提交时只做可用余额预检。**窗内回滚（4.4.10，假设 18）**：续约完成后同窗内被挂牌/激活挂牌/解约/强制拍卖 → RC+保护期还原（仍归属原队时）+ 续约费退还（rc_change_refund）；匹配不触发回滚。
 
 ### 6.4 不变式（全状态机通用）
 
@@ -498,6 +502,7 @@ p 低于该球员档位阈值时文案附加「（报价过低，有谈崩风险
 | `ticket` / `commercial` / `broadcast` | + | P1 主场收入 |
 | `transfer_out`（卖方净得）/ `transfer_in`（买方付款） | ± | P0 |
 | `transfer_tax` / `delist_fee` / `termination_fee` / `rc_change_fee`（续约费，枚举名不变） | −（销毁） | P0 |
+| `rc_change_refund`（4.4.10 窗内回滚退还续约费） | + | P0 |
 | `match_diff_burn`（匹配差额） | −（销毁） | P0 |
 | `free_agent_fee`（海捞签入费=新 RC×30%） | −（销毁） | P0 |
 | `wage` | −（销毁） | P1 每半赛季按注册名单扣 |
@@ -763,6 +768,13 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 10 | 已解决 | 徽章闭环定稿：映射 银=PSID 1-7 槽、金=金槽（PS+ ID=基础+100，§5.2）；台账只记计数 badges_silver/gold（CHECK 上限 15/3）；**比赛效果由 FC 游戏引擎原生承担，平台无效果逻辑**（比赛在真实 FC 中进行，平台只读赛果）；发放时选具体 PlayStyle 属管理组操作（发放界面可给选择器生成落地清单，操作辅助非数值计算）；前端按 PlayStyleID 静态参考表渲染名称与小图标（`assets/icons/playstyles/{id}.webp` 约定，资产包实现阶段补，缺图降级 🥇🥈） |
 | 11 | 已解决 | 国籍代码表：FC26db 内嵌 NationID 219 国（中国=155 China PR），导入工具随源消费（§5.2） |
 | 12 | 假设 | 窗口推进遇活跃谈判会话默认阻塞，管理组可强制按 E 结算/取消后推进（§6.4 不变式 6），开关可配置 |
+| 13 | 已定 | 保护期判定：protected_until 优先，缺省 = signed_at + 548 天（18 个月，config 键 protection_days）；激活倍数按此判保护期内/外（§6.2） |
+| 14 | 已定 | 效力年数 = 实际天数 ÷ 365.25（解约费阶梯、激活效力校验用；不足 1 年按 0 计） |
+| 15 | 已定 | 旁路附加费（续约费/解约费/海捞签入费/匹配差额）在审核通过时收，不随提交扣款；提交时只做可用余额预检；收费以 (kind, ref) 幂等闸防重试重复扣（§7.4） |
+| 16 | 已定 | 匹配新 RC 不受 4.4.6 幅度约束（新 RC 须 > 首价即可，差额销毁本身是代价）；生涯每名球员只能被匹配一次 |
+| 17 | 已定 | 激活挂牌无公开竞价段（§6.2 修正定稿）：5 分钟首价窗内激活方落价即成交价，首价后训练营球员直进待审、正式球员进 24h 匹配窗；激活挂牌永不开放后续竞价 |
+| 18 | 已定 | 4.4.10 窗内回滚口径：还原 RC 与保护期（仍归属原队时）+ 退还续约费（rc_change_refund）；工资不随回滚（已谈成的工资是谈判终局，恢复会破坏谈判快照口径） |
+| 19 | 已定 | 解约属性恢复：CA 恢复 base_ca（players.base_ca 缺省时保持现 CA）；合同行 is_active=0 留档（复签海捞走 UPSERT 翻新，contracts.player_id 全局唯一） |
 
 ## 16. 测试策略
 
@@ -828,12 +840,19 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 注册 | GET `/api/club/squad` · POST `/api/club/registrations` | 👤 | 名单与提交校验〔2〕 |
 | 注册 | GET `/api/admin/registrations?season=` | 🛡 | 注册快照查询〔2〕 |
 | 注册 | GET `/api/admin/compliance?season=` | 🛡 | 准入体检报告（P1 首版：对快照重跑合规引擎，只报告不触发强制拍卖）〔2〕 |
-| 市场 | GET `/api/market/listings?status=&cursor=` | 🌐 | 挂牌板（卡柜）〔3〕 |
+| 市场 | GET `/api/market/listings?status=&cursor=` | 🌐 | 挂牌板（卡柜；含匹配窗字段 matchDeadline/matchPhase）〔3〕 |
 | 市场 | POST `/api/market/listings` | 👤 | 挂牌（价格校验+冻结检查）〔3〕 |
 | 市场 | GET `/api/market/listings/:id` | 🌐 | 详情+出价历史〔3〕 |
-| 市场 | POST `/api/market/listings/:id/bids` | 👤 | 出价（冻结先行）〔3〕 |
+| 市场 | POST `/api/market/listings/:id/bids` | 👤 | 出价（冻结先行；激活首价响应带 matchPhase/matchDeadline/settledForReview）〔3〕 |
+| 市场 | GET `/api/market/trainees` | 👤 | 可激活训练营名单（含本窗已激活标记）〔3〕 |
+| 市场 | POST `/api/market/activations` | 👤 | 激活挂牌（`/api/transfers/activation` 的同义早期路径）〔3〕 |
+| 市场 | GET `/api/market/free-agents` | 👤 | 自由球员名单（海捞候选；标记本窗禁签）〔5〕 |
 | 市场 | GET `/api/me/bids` | 👤 | 我的出价（冻结状态章）〔3〕 |
-| 审核 | GET `/api/admin/reviews?status=open` · POST `/:id/approve` · `/reject` | 🛡 | 审核队列〔3〕 |
+| 审核 | GET `/api/admin/reviews?status=open` · POST `/:id/approve` · `/reject` | 🛡 | 审核队列（市场成交+旁路单据统一入口，payload 按 kind 渲染）〔3〕 |
+| 窗口 | GET `/api/admin/windows` | 🛡 | 赛季与窗口台账〔5〕 |
+| 窗口 | POST `/api/admin/windows/open` | 🛡 | 开窗（无在开窗口前置；全球员经纪人档位重掷）〔5〕 |
+| 窗口 | POST `/api/admin/windows/close` | 🛡 | 关窗（惰性结算→前置校验→closed→窗尾收口；force 需 window_force_settle=true）〔5〕 |
+| 拍卖 | POST `/api/admin/forced-auctions` · POST `/:id/cancel` | 🛡 | 强制拍卖建单/取消（1m 挂牌、CA 前六不含门将、整单税 50%）〔5〕 |
 | 转会 | POST `/api/transfers/activation` · `/match` · `/free-agent` · `/termination` · `/rc-change` | 👤 | 五类旁路/分支入口〔5〕 |
 | 转会 | GET `/api/transfers/:id` | 🌐 | 单据详情〔3〕 |
 | 谈判 | GET `/api/negotiations?mine=1` | 👤 | 我的活跃签约谈判〔4〕 |
