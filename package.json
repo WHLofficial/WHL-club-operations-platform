@@ -16,7 +16,8 @@
     "hono": "^4.6.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router": "^7.1.0"
+    "react-router": "^7.1.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260903.0",
