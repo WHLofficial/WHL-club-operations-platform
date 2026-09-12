@@ -11,7 +11,8 @@ import { confirmContractsImport, previewContractsImport } from '../contracts-imp
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
-import { completeTransfer, rejectTransfer } from '../transfers.ts';
+import { completeTransfer, loadTransfer, rejectTransfer } from '../transfers.ts';
+import { openNegotiationSession } from '../negotiations.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -617,8 +618,9 @@ async function loadOpenReviewTask(db: D1Database, taskId: number) {
   return task;
 }
 
-// POST /api/admin/reviews/:id/approve —— 批准成交
-// 增量 3 桥接：批准即过户（划款+税+过户一步到位）；增量 4 起改为开启签约谈判，成约才过户。
+// POST /api/admin/reviews/:id/approve —— 批准成交（§6.7）
+// 解约类：无工资谈判，批准即过户；其余（普通/激活成交等）：进入签约谈判，
+// 由签入方谈成合同条款后成约过户（成约即过户）。
 app.post('/reviews/:id/approve', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const taskId = Number(c.req.param('id'));
@@ -626,12 +628,18 @@ app.post('/reviews/:id/approve', async (c) => {
   const body = (await readJson(c)) as { note?: unknown } | null;
   const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
   const task = await loadOpenReviewTask(c.env.DB, taskId);
-  const result = await completeTransfer(c.env, task.ref_id, user.id, {
+  const transfer = await loadTransfer(c.env.DB, task.ref_id);
+  if (!transfer) throw new HttpError(404, '转会单不存在');
+  const review = {
     taskId,
     decidedBy: user.id,
-    decision: 'approved',
+    decision: 'approved' as const,
     note: note ?? undefined,
-  });
+  };
+  const result =
+    transfer.type === 'termination'
+      ? await completeTransfer(c.env, task.ref_id, user.id, review)
+      : await openNegotiationSession(c.env, task.ref_id, user.id, review);
   return c.json({ ok: true, ...result });
 });
 

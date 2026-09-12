@@ -5,4 +5,5 @@ export interface Env {
   MEDIA: R2Bucket;
   ASSETS: Fetcher;
   CRON_KEY?: string;
+  rng?: () => number;
 }

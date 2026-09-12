@@ -6,6 +6,7 @@ import clubsRoutes from './routes/clubs.ts';
 import playersRoutes from './routes/players.ts';
 import registrationRoutes from './routes/registration.ts';
 import marketRoutes from './routes/market.ts';
+import negotiationRoutes from './routes/negotiations.ts';
 import adminRoutes from './routes/admin.ts';
 import { settleOverdue } from './market-settle.ts';
 
@@ -15,6 +16,7 @@ app.route('/api', clubsRoutes);
 app.route('/api', playersRoutes);
 app.route('/api', registrationRoutes);
 app.route('/api', marketRoutes);
+app.route('/api/negotiations', negotiationRoutes);
 app.route('/api/admin', adminRoutes);
 
 app.onError((err, c) => {
