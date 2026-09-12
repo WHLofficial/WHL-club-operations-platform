@@ -10,6 +10,7 @@ import {
   POSITION_BY_ID,
   POSITION_NAMES,
 } from './fc26.ts';
+import { TRAINEE_WAGE } from './squad-rules.ts';
 
 export type ImportChannel = 'A' | 'B';
 
@@ -206,4 +207,83 @@ function ageFromBirthdate(text: string): number | null {
     (now.getUTCMonth() === month - 1 && now.getUTCDate() < day);
   if (beforeBirthday) age -= 1;
   return age;
+}
+
+// ---- 通道 C · 名单合同模板（管理组 CSV → contracts 初建，§5.4） ----
+// 前端把 CSV 表头（uid/RC/工资/效力起点/类型 及别名）映射成下列规范键再提交。
+
+export const CONTRACT_REQUIRED_COLUMNS = ['uid', 'releaseFee', 'wage', 'effectiveFrom', 'contractType'] as const;
+
+export interface NormalizedContract {
+  rowNo: number; // 数据行号（1 起，不含表头），分类报错用
+  fcId: number;
+  uid: string;
+  releaseFee: number;
+  wage: number;
+  contractType: 'formal' | 'trainee';
+  effectiveFrom: string; // YYYY-MM-DD
+}
+
+export interface ContractNormalizeOutcome {
+  contracts: NormalizedContract[];
+  errors: ImportRowError[];
+}
+
+export const CONTRACT_ROW_LIMIT = 2000; // 一队名单 ≤37 人，整联赛一批也用不满，给足余量即可
+
+export function normalizeContractBatch(rows: Record<string, unknown>[]): ContractNormalizeOutcome {
+  const contracts: NormalizedContract[] = [];
+  const errors: ImportRowError[] = [];
+
+  const absent = CONTRACT_REQUIRED_COLUMNS.filter((col) => rows.length > 0 && !(col in rows[0]));
+  if (absent.length > 0) throw new RangeError(`缺少必需列：${absent.join('、')}`);
+  if (rows.length > CONTRACT_ROW_LIMIT) throw new RangeError(`单批最多 ${CONTRACT_ROW_LIMIT} 行`);
+
+  const seen = new Set<number>();
+  rows.forEach((raw, i) => {
+    const rowNo = i + 1;
+    const fail = (field: string, message: string) => errors.push({ row: rowNo, field, message });
+
+    const uidText = toStr(raw['uid']);
+    const m = /^(?:fc)?(\d+)$/i.exec(uidText);
+    if (!m) return fail('uid', 'uid 应为球员 ID 数字或 fc{ID}');
+    const fcId = Number(m[1]);
+    if (seen.has(fcId)) return fail('uid', `同批重复 uid：${uidText}`);
+    seen.add(fcId);
+
+    const releaseFee = toNum(raw['releaseFee']);
+    if (releaseFee === null || releaseFee <= 0 || releaseFee > 1000) {
+      return fail('releaseFee', '违约金 RC 须为 0-1000 之间的数值（m）');
+    }
+
+    const wage = toNum(raw['wage']);
+    if (wage === null || wage < 0 || wage > 100) return fail('wage', '工资须为 0-100 之间的数值（m/半赛季）');
+
+    const typeText = toStr(raw['contractType']).toLowerCase();
+    const contractType: 'formal' | 'trainee' | null =
+      typeText === 'formal' || typeText === '正式' ? 'formal' : typeText === 'trainee' || typeText === '训练营' ? 'trainee' : null;
+    if (contractType === null) return fail('contractType', '类型只能是 formal（正式）或 trainee（训练营）');
+    if (contractType === 'trainee' && wage !== TRAINEE_WAGE) {
+      return fail('wage', `训练营合同工资固定为 ${TRAINEE_WAGE} m/半赛季`);
+    }
+
+    const fromText = toStr(raw['effectiveFrom']);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromText)) return fail('effectiveFrom', '效力起点格式应为 YYYY-MM-DD');
+    const d = new Date(`${fromText}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== fromText) {
+      return fail('effectiveFrom', `效力起点不是有效日期：${fromText}`);
+    }
+
+    contracts.push({
+      rowNo,
+      fcId,
+      uid: `fc${fcId}`,
+      releaseFee: releaseFee!,
+      wage: wage!,
+      contractType,
+      effectiveFrom: fromText,
+    });
+  });
+
+  return { contracts, errors };
 }

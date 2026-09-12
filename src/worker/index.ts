@@ -4,12 +4,14 @@ import { HttpError } from '../lib/http.ts';
 import { getAuthUser } from '../lib/session.ts';
 import clubsRoutes from './routes/clubs.ts';
 import playersRoutes from './routes/players.ts';
+import registrationRoutes from './routes/registration.ts';
 import adminRoutes from './routes/admin.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.route('/api', clubsRoutes);
 app.route('/api', playersRoutes);
+app.route('/api', registrationRoutes);
 app.route('/api/admin', adminRoutes);
 
 app.onError((err, c) => {

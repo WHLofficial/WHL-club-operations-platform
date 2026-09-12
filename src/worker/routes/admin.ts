@@ -7,6 +7,10 @@ import { generateCode, sha256Hex } from '../../lib/crypto.ts';
 import { createAuditStatement, writeAudit } from '../../lib/audit.ts';
 import { createConfigService } from '../../core/config.ts';
 import { confirmImport, previewImport } from '../players-import.ts';
+import { confirmContractsImport, previewContractsImport } from '../contracts-import.ts';
+import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
+import { getVisibleSeason } from '../seasons.ts';
+import { loadSquadContext } from '../squad-context.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -278,17 +282,23 @@ app.patch('/players/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// ---- 导入管线两段式（§5.4） ----
+// ---- 导入管线两段式（§5.4：通道 A/B 球员，通道 C 名单合同模板） ----
 
 app.post('/players/import/preview', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const body = await readJson(c);
+  if ((body as { channel?: unknown } | null)?.channel === 'C') {
+    return c.json(await previewContractsImport(c.env, body));
+  }
   return c.json(await previewImport(c.env, body));
 });
 
 app.post('/players/import/confirm', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const body = await readJson(c);
+  if ((body as { channel?: unknown } | null)?.channel === 'C') {
+    return c.json(await confirmContractsImport(c.env, user.id, body));
+  }
   return c.json(await confirmImport(c.env, user.id, body));
 });
 
@@ -364,6 +374,147 @@ app.post('/ledger/opening-import', async (c) => {
     await c.env.DB.batch(statements); // 流水 + 余额 + 审计一个 batch 提交（§7.4-1）
   }
   return c.json({ written: todo.length, skipped: parsed.length - todo.length });
+});
+
+// ---- 注册快照与准入体检（附录 A〔2〕） ----
+
+// GET /api/admin/registrations?season= —— 注册快照按俱乐部分组；season 缺省取最新有快照的赛季
+app.get('/registrations', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const seasonParam = c.req.query('season');
+  let season: number | null = null;
+  if (seasonParam !== undefined) {
+    const n = Number(seasonParam);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'season 应为正整数');
+    season = n;
+  } else {
+    const latest = await c.env.DB.prepare('SELECT MAX(season) AS s FROM registrations').first<{ s: number | null }>();
+    season = latest?.s ?? null;
+  }
+  if (season === null) return c.json({ season: null, clubs: [] });
+
+  const rows = await c.env.DB.prepare(
+    `SELECT r.club_id, r.player_id, r.squad, p.name AS player_name,
+            c.name AS club_name, c.league_tier, ct.wage
+     FROM registrations r
+     JOIN players p ON p.id = r.player_id
+     JOIN clubs c ON c.id = r.club_id
+     LEFT JOIN contracts ct ON ct.player_id = r.player_id AND ct.is_active = 1 AND ct.club_id = r.club_id
+     WHERE r.season = ? ORDER BY r.club_id, r.squad, p.name LIMIT 2000`,
+  )
+    .bind(season)
+    .all<{
+      club_id: number;
+      player_id: number;
+      squad: string;
+      player_name: string;
+      club_name: string;
+      league_tier: string | null;
+      wage: number | null;
+    }>();
+
+  const byClub = new Map<number, { clubId: number; clubName: string; leagueTier: string | null; players: { playerId: number; name: string; squad: string }[]; wageTotal: number }>();
+  for (const r of rows.results) {
+    let club = byClub.get(r.club_id);
+    if (!club) {
+      club = { clubId: r.club_id, clubName: r.club_name, leagueTier: r.league_tier, players: [], wageTotal: 0 };
+      byClub.set(r.club_id, club);
+    }
+    club.players.push({ playerId: r.player_id, name: r.player_name, squad: r.squad });
+    club.wageTotal += r.wage ?? 0;
+  }
+  const clubs = [...byClub.values()].map((club) => ({
+    clubId: club.clubId,
+    clubName: club.clubName,
+    leagueTier: club.leagueTier,
+    firstTeam: club.players.filter((p) => p.squad === 'first_team').length,
+    trainee: club.players.filter((p) => p.squad === 'trainee').length,
+    wageTotal: Math.round(club.wageTotal * 100) / 100,
+    players: club.players.map((p) => ({ playerId: p.playerId, name: p.name, squad: p.squad })),
+  }));
+  return c.json({ season, clubs });
+});
+
+// GET /api/admin/compliance?season= —— 准入体检报告（P1 首版：只报告，不触发强制拍卖）
+// 用当前 CA/PA/合同对快照重跑合规引擎，抓「注册后属性/合同漂移」导致的违规。
+app.get('/compliance', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const seasonParam = c.req.query('season');
+  let season: number | null;
+  if (seasonParam !== undefined) {
+    const n = Number(seasonParam);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'season 应为正整数');
+    season = n;
+  } else {
+    season = await getVisibleSeason(c.env.DB);
+  }
+  if (season === null) return c.json({ season: null, clubs: [] });
+
+  const clubs = await c.env.DB.prepare('SELECT id, name, league_tier FROM clubs ORDER BY id LIMIT 200').all<{
+    id: number;
+    name: string;
+    league_tier: string | null;
+  }>();
+  const regRows = await c.env.DB.prepare(
+    `SELECT r.club_id, r.player_id, r.squad, p.name, p.position, p.ca, p.pa, p.growable,
+            ct.player_id AS contract_player_id, ct.wage
+     FROM registrations r
+     JOIN players p ON p.id = r.player_id
+     LEFT JOIN contracts ct ON ct.player_id = r.player_id AND ct.is_active = 1 AND ct.club_id = r.club_id
+     WHERE r.season = ? ORDER BY r.club_id LIMIT 2000`,
+  )
+    .bind(season)
+    .all<{
+      club_id: number;
+      player_id: number;
+      squad: string;
+      name: string;
+      position: string | null;
+      ca: number | null;
+      pa: number | null;
+      growable: number;
+      contract_player_id: number | null;
+      wage: number | null;
+    }>();
+
+  const report = await Promise.all(
+    clubs.results.map(async (club) => {
+      const mine = regRows.results.filter((r) => r.club_id === club.id);
+      if (mine.length === 0) {
+        return {
+          clubId: club.id,
+          clubName: club.name,
+          leagueTier: club.league_tier,
+          pass: false,
+          issues: [{ rule: 'not_registered', message: '本赛季还没提交注册名单', playerIds: [] }],
+          stats: null,
+        };
+      }
+      const toSp = (r: (typeof mine)[number]): SquadPlayer => ({
+        playerId: r.player_id,
+        name: r.name,
+        position: r.position,
+        ca: r.ca,
+        pa: r.pa,
+        growable: r.growable === 1,
+        hasContract: r.contract_player_id !== null,
+        wage: r.contract_player_id !== null ? r.wage ?? 0 : null,
+      });
+      const firstTeam = mine.filter((r) => r.squad === 'first_team').map(toSp);
+      const trainee = mine.filter((r) => r.squad === 'trainee').map(toSp);
+      const rules = await loadSquadContext(c.env.DB, club.league_tier);
+      const result = checkSquad(firstTeam, trainee, rules);
+      return {
+        clubId: club.id,
+        clubName: club.name,
+        leagueTier: club.league_tier,
+        pass: result.pass,
+        issues: result.issues,
+        stats: result.stats,
+      };
+    }),
+  );
+  return c.json({ season, clubs: report });
 });
 
 export default app;
