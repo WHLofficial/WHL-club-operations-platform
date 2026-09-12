@@ -1,9 +1,11 @@
-// 路由层测试（§16：内存 D1 跑迁移与断言）——绑定流程、球员查询、导入幂等、期初余额。
+// 路由层测试（§16：内存 D1 跑迁移与断言）——绑定流程、球员查询、导入幂等、期初余额、注册合规。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { TRAINEE_WAGE } from '../src/core/squad-rules.ts';
+import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
   env: Env;
@@ -13,6 +15,7 @@ interface Fixture {
 }
 
 function freshEnv(): Fixture {
+  resetConfigCache(); // config 服务是 module 级缓存，跨用例必须清场
   const sqlite = new DatabaseSync(':memory:');
   applyMigrations(sqlite);
   const tour = new DatabaseSync(':memory:');
@@ -533,3 +536,348 @@ describe('config 管理端点（§13）', () => {
     expect(coach.status).toBe(403);
   });
 });
+
+/* ---------- 增量 2：通道 C 合同导入 ---------- */
+
+describe('通道 C · 名单合同模板导入（§5.4）', () => {
+  async function seedContractWorld(fx: Fixture) {
+    fx.sqlite.exec(
+      "INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active'), (2, '曼城', 'premier', 'active')",
+    );
+    const stmt = fx.sqlite.prepare(
+      "INSERT INTO players (uid, name, club_id, position, ca, pa, fc_id) VALUES (?, ?, ?, 'CM', 80, 85, ?)",
+    );
+    stmt.run('fc1', '球员一', 1, 1);
+    stmt.run('fc2', '球员二', null, 2);
+    stmt.run('fc3', '球员三', 2, 3);
+  }
+
+  it('预览分类：create/claim/归属冲突/无球员/训练营工资', async () => {
+    const fx = freshEnv();
+    await seedContractWorld(fx);
+    const rows = [
+      { uid: 'fc1', releaseFee: 40, wage: 2, effectiveFrom: '2026-07-01', contractType: 'formal' },
+      { uid: 'fc2', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' },
+      { uid: 'fc3', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' },
+      { uid: 'fc999', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' },
+      { uid: 'fc4', releaseFee: 30, wage: 2, effectiveFrom: '2026-07-01', contractType: 'trainee' },
+    ];
+    const res = await post('/api/admin/players/import/preview', { channel: 'C', clubId: 1, rows }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      channel: string;
+      stats: { total: number; valid: number; error: number; insertEstimate: number };
+      errors: { row: number; message: string }[];
+      samples: { playerName: string; outcome: string }[];
+    };
+    expect(body.channel).toBe('C');
+    expect(body.stats).toMatchObject({ total: 5, valid: 2, error: 3, insertEstimate: 2 });
+    expect(body.errors.map((e) => e.message)).toEqual([
+      '球员「球员三」已归属 曼城',
+      'uid 没有对应的球员（先跑球员导入）：fc999',
+      '训练营合同工资固定为 0.75 m/半赛季',
+    ]);
+    expect(body.samples.map((s) => s.outcome)).toEqual(['create', 'claim']);
+  });
+
+  it('确认落库：合同写入 + 无归属认领 + 审计；重跑幂等', async () => {
+    const fx = freshEnv();
+    await seedContractWorld(fx);
+    const rows = [
+      { uid: 'fc1', releaseFee: 40, wage: 2, effectiveFrom: '2026-07-01', contractType: 'formal' },
+      { uid: 'fc2', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' },
+    ];
+    const res = await post('/api/admin/players/import/confirm', { channel: 'C', clubId: 1, rows }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { written: number; insertedEstimate: number }).toMatchObject({ written: 2, insertedEstimate: 2 });
+
+    const claimed = sqlGet<{ club_id: number | null }>(fx.sqlite, 'SELECT club_id FROM players WHERE fc_id = 2');
+    expect(claimed?.club_id).toBe(1);
+    const contracts = sqlAll<{ player_id: number; release_fee: number; source: string; is_active: number }>(
+      fx.sqlite,
+      'SELECT player_id, release_fee, source, is_active FROM contracts ORDER BY player_id',
+    );
+    expect(contracts).toHaveLength(2);
+    expect(contracts[1]).toMatchObject({ player_id: 2, release_fee: 30, source: 'import', is_active: 1 });
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'contracts_import'")!.n,
+    ).toBe(1);
+
+    const rerun = await post('/api/admin/players/import/confirm', { channel: 'C', clubId: 1, rows }, 'tok-admin', fx.env);
+    expect((await rerun.json()) as { updatedEstimate: number }).toMatchObject({ updatedEstimate: 2 });
+    expect(sqlAll(fx.sqlite, 'SELECT id FROM contracts').length).toBe(2); // UNIQUE(player_id)，无重复行
+  });
+
+  it('带错确认 422；归属冲突的球员不会被改队', async () => {
+    const fx = freshEnv();
+    await seedContractWorld(fx);
+    const bad = await post(
+      '/api/admin/players/import/confirm',
+      { channel: 'C', clubId: 1, rows: [{ uid: 'fc3', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' }] },
+      'tok-admin',
+      fx.env,
+    );
+    expect(bad.status).toBe(422);
+    expect(((await bad.json()) as { code: string }).code).toBe('contract_import_invalid');
+    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM players WHERE fc_id = 3')?.club_id).toBe(2);
+    expect(
+      (await post('/api/admin/players/import/confirm', { channel: 'C', clubId: 1, rows: [] }, 'tok-admin', fx.env)).status,
+    ).toBe(400);
+    expect(
+      (await post('/api/admin/players/import/confirm', { channel: 'C', clubId: 1, rows: [{ uid: 'fc1' }] }, 'tok-coach', fx.env))
+        .status,
+    ).toBe(403);
+  });
+});
+
+/* ---------- 增量 2：阵容注册与合规（规则 4.2） ---------- */
+
+function regBody(firstTeam: number[], trainee: number[]) {
+  return { firstTeam, trainee };
+}
+
+// 一支默认合规的顶级联赛球队：一线 20 人（1 号是门将）、训练营 3 人，全员有合同
+async function seedRegistrationWorld(fx: Fixture, seasonStatus = 'preparing') {
+  fx.sqlite.exec("INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active')");
+  fx.sqlite.prepare('INSERT INTO seasons (season, status) VALUES (1, ?)').run(seasonStatus);
+  const player = fx.sqlite.prepare(
+    "INSERT INTO players (id, uid, name, club_id, position, ca, pa, growable, status, fc_id) VALUES (?, ?, ?, 1, ?, ?, ?, 1, 'normal', ?)",
+  );
+  const contract = fx.sqlite.prepare(
+    "INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, effective_from, is_active) VALUES (?, 1, 50, ?, ?, 'import', '2026-07-01', 1)",
+  );
+  for (let i = 1; i <= 20; i++) {
+    player.run(i, `fc${i}`, `一线${i}`, i === 1 ? 'GK' : 'CM', 80, 85, i);
+    contract.run(i, 1, 'formal');
+  }
+  for (let i = 101; i <= 103; i++) {
+    player.run(i, `fc${i}`, `青训${i - 100}`, 'CM', 60, 75, i);
+    contract.run(i, TRAINEE_WAGE, 'trainee');
+  }
+  fx.sqlite.exec("INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 2, '2026-01-01T00:00:00Z')");
+}
+
+const FULL_FIRST = Array.from({ length: 20 }, (_, i) => i + 1);
+const FULL_TRAINEE = [101, 102, 103];
+
+describe('注册名单提交与校验（附录 A〔2〕）', () => {
+  it('合规名单提交成功：快照/状态/审计齐全，重复提交替换快照', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    const res = await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { season: number; firstTeam: number; trainee: number; wageTotal: number }).toMatchObject({
+      ok: true,
+      season: 1,
+      firstTeam: 20,
+      trainee: 3,
+      wageTotal: 20 + 3 * TRAINEE_WAGE,
+    });
+
+    const squads = sqlAll<{ player_id: number; squad: string }>(
+      fx.sqlite,
+      'SELECT player_id, squad FROM registrations ORDER BY player_id',
+    );
+    expect(squads.filter((r) => r.squad === 'first_team')).toHaveLength(20);
+    expect(squads.filter((r) => r.squad === 'trainee').map((r) => r.player_id)).toEqual(FULL_TRAINEE);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 101')?.status).toBe('trainee');
+    expect(
+      sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'registration_submit'")!.after,
+    ).toContain('"season":1');
+
+    // 重提交：101 转一线队，102/103 移出 → 状态回 normal；快照整体替换无重复
+    const again = await post('/api/club/registrations', regBody([...FULL_FIRST, 101], []), 'tok-coach', fx.env);
+    expect(again.status).toBe(200);
+    const statuses = sqlAll<{ id: number; status: string }>(
+      fx.sqlite,
+      'SELECT id, status FROM players WHERE id IN (101, 102, 103) ORDER BY id',
+    );
+    expect(statuses).toEqual([
+      { id: 101, status: 'normal' },
+      { id: 102, status: 'normal' },
+      { id: 103, status: 'normal' },
+    ]);
+    expect(sqlAll(fx.sqlite, 'SELECT player_id FROM registrations').length).toBe(21);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action = 'registration_submit'").length).toBe(2);
+  });
+
+  it('三种违规名单各被拒且报错可读，快照不落库', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+
+    // 违规一：人数不足（19 人）
+    const few = await post('/api/club/registrations', regBody(FULL_FIRST.slice(1), FULL_TRAINEE), 'tok-coach', fx.env);
+    expect(few.status).toBe(422);
+    const fewBody = (await few.json()) as { code: string; issues: { rule: string; message: string }[] };
+    expect(fewBody.code).toBe('squad_invalid');
+    expect(fewBody.issues[0]).toMatchObject({ rule: 'squad_size', message: '一线队注册人数须在 20-30 人之间，当前 19 人' });
+
+    // 违规二：没有门将（补一个非门将球员凑满 20）
+    fx.sqlite
+      .prepare(
+        "INSERT INTO players (id, uid, name, club_id, position, ca, pa, growable, status, fc_id) VALUES (21, 'fc21', '一线21', 1, 'CM', 80, 85, 1, 'normal', 21)",
+      )
+      .run();
+    fx.sqlite
+      .prepare(
+        "INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, effective_from, is_active) VALUES (21, 1, 50, 1, 'formal', 'import', '2026-07-01', 1)",
+      )
+      .run();
+    const noGk = await post('/api/club/registrations', regBody(Array.from({ length: 20 }, (_, i) => i + 2), []), 'tok-coach', fx.env);
+    expect(noGk.status).toBe(422);
+    expect(((await noGk.json()) as { issues: { rule: string; message: string }[] }).issues[0]).toMatchObject({
+      rule: 'gk',
+      message: '一线队须至少注册 1 名门将，当前 0 名',
+    });
+
+    // 违规三：CA≥90 超过 1 名
+    fx.sqlite.prepare('UPDATE players SET ca = 91 WHERE id = 2').run();
+    fx.sqlite.prepare('UPDATE players SET ca = 90 WHERE id = 3').run();
+    const stars = await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    expect(stars.status).toBe(422);
+    const starBody = (await stars.json()) as { issues: { rule: string; message: string }[] };
+    expect(starBody.issues.some((i) => i.rule === 'ca_pa' && i.message.includes('CA≥90 的球员最多 1 名，当前 2 名'))).toBe(true);
+
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM registrations')!.n).toBe(0);
+  });
+
+  it('训练营可成长与缺合同也会被点名', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    fx.sqlite.prepare('UPDATE players SET pa = 60 WHERE id = 103').run(); // PA−CA = 0
+    fx.sqlite.prepare('DELETE FROM contracts WHERE player_id = 5').run();
+    const res = await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { issues: { rule: string; message: string }[] };
+    expect(body.issues.find((i) => i.rule === 'trainee_growth')?.message).toContain('青训3');
+    expect(body.issues.find((i) => i.rule === 'contract')?.message).toContain('一线5');
+  });
+
+  it('工资帽配置后超限被拒（P1 占位，未配置时跳过）', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    fx.sqlite.prepare("INSERT INTO config (key, value, updated_at) VALUES ('wage_cap', '20', '2026-01-01T00:00:00Z')").run();
+    const res = await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { issues: { rule: string; message: string }[] };
+    expect(body.issues[0].rule).toBe('wage_cap');
+    expect(body.issues[0].message).toContain('超出工资帽 20 m');
+  });
+
+  it('请求形状校验：非本队球员/退役/跨名单重复/格式', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    const foreign = await post('/api/club/registrations', regBody([1, 999], []), 'tok-coach', fx.env);
+    expect((await foreign.json()) as { error: string }).toEqual({ error: '这些球员不在你的队里：999' });
+    fx.sqlite.prepare("UPDATE players SET status = 'retired' WHERE id = 7").run();
+    const retired = await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    expect(retired.status).toBe(400);
+    expect(((await retired.json()) as { error: string }).error).toContain('退役球员不能注册');
+    const overlap = await post('/api/club/registrations', regBody([1, 2], [2]), 'tok-coach', fx.env);
+    expect(((await overlap.json()) as { error: string }).error).toContain('同一球员不能同时进一线队和训练营：2');
+    const dupe = await post('/api/club/registrations', regBody([1, 1], []), 'tok-coach', fx.env);
+    expect(((await dupe.json()) as { error: string }).error).toContain('一线队名单里出现了重复球员：1');
+    expect((await post('/api/club/registrations', regBody([1, 'x'], []), 'tok-coach', fx.env)).status).toBe(400);
+  });
+
+  it('无备赛期赛季 409 no_season；赛季开跑后不能再提交', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx, 'running');
+    const res = await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { code: string }).toMatchObject({ code: 'no_season' });
+  });
+
+  it('GET /club/squad：未绑返回空壳；绑后带名单/规则回显/快照体检', async () => {
+    const fxE = freshEnv();
+    expect(((await (await get('/api/club/squad', 'tok-coach2', fxE.env)).json()) as { club: null }).club).toBeNull();
+
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    const empty = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
+      season: number;
+      players: unknown[];
+      registration: null;
+      compliance: null;
+      rules: { squadMin: number; wageCap: number | null };
+    };
+    expect(empty.season).toBe(1);
+    expect(empty.players).toHaveLength(23);
+    expect(empty.registration).toBeNull();
+    expect(empty.compliance).toBeNull();
+    expect(empty.rules).toMatchObject({ squadMin: 20, wageCap: null });
+
+    await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    const filled = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
+      registration: { firstTeam: number[]; trainee: number[] };
+      compliance: { pass: boolean };
+      players: { id: number; squad: string | null; wage: number | null; contractType: string | null }[];
+    };
+    expect(filled.registration?.firstTeam).toHaveLength(20);
+    expect(filled.compliance?.pass).toBe(true);
+    const p1 = filled.players.find((p) => p.id === 1)!;
+    expect(p1).toMatchObject({ squad: 'first_team', wage: 1, contractType: 'formal' });
+  });
+
+  it('观众号不能提交注册', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    expect((await post('/api/club/registrations', regBody(FULL_FIRST, []), 'tok-viewer', fx.env)).status).toBe(403);
+  });
+});
+
+describe('注册快照与准入体检（管理端）', () => {
+  it('快照按俱乐部分组；缺省取最新赛季；教练 403', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    const res = await get('/api/admin/registrations', 'tok-admin', fx.env);
+    const body = (await res.json()) as {
+      season: number | null;
+      clubs: { clubId: number; clubName: string; firstTeam: number; trainee: number; wageTotal: number; players: { playerId: number; squad: string }[] }[];
+    };
+    expect(body.season).toBe(1);
+    expect(body.clubs).toHaveLength(1);
+    expect(body.clubs[0]).toMatchObject({
+      clubId: 1,
+      clubName: '阿森纳',
+      firstTeam: 20,
+      trainee: 3,
+      wageTotal: 20 + 3 * TRAINEE_WAGE,
+    });
+    expect((await get('/api/admin/registrations', 'tok-coach', fx.env)).status).toBe(403);
+    const empty = (await (await get('/api/admin/registrations?season=9', 'tok-admin', fx.env)).json()) as {
+      season: number;
+      clubs: unknown[];
+    };
+    expect(empty).toMatchObject({ season: 9, clubs: [] });
+  });
+
+  it('体检：合规通过；CA 漂移后失败；未注册俱乐部被点名', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
+    // 注册后属性漂移：又长出两位 CA≥90（原上限 1 名）
+    fx.sqlite.prepare('UPDATE players SET ca = 91 WHERE id = 2').run();
+    fx.sqlite.prepare('UPDATE players SET ca = 92 WHERE id = 3').run();
+    const res = await get('/api/admin/compliance', 'tok-admin', fx.env);
+    const body = (await res.json()) as {
+      season: number;
+      clubs: { clubId: number; pass: boolean; issues: { rule: string; message: string }[] }[];
+    };
+    expect(body.season).toBe(1);
+    const mine = body.clubs.find((c) => c.clubId === 1)!;
+    expect(mine.pass).toBe(false);
+    expect(mine.issues[0].message).toContain('CA≥90 的球员最多 1 名，当前 2 名');
+
+    // 未注册的第二家俱乐部
+    fx.sqlite.exec("INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '曼城', 'second', 'active')");
+    const res2 = await get('/api/admin/compliance', 'tok-admin', fx.env);
+    const body2 = (await res2.json()) as { clubs: { clubId: number; pass: boolean; issues: { rule: string; message: string }[] }[] };
+    expect(body2.clubs.find((c) => c.clubId === 2)!.issues[0]).toMatchObject({
+      rule: 'not_registered',
+      message: '本赛季还没提交注册名单',
+    });
+  });
+});
+
