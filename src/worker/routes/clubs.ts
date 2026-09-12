@@ -6,6 +6,7 @@ import { requireCoach } from '../../lib/session.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 import { sha256Hex } from '../../lib/crypto.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
+import { getBoundClub } from '../binding.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -102,6 +103,80 @@ app.get('/me/club', async (c) => {
     balance: account?.balance ?? 0,
     squadCount: roster?.n ?? 0,
     window: win ? { season: win.season, windowSeq: win.window_seq } : null,
+  });
+});
+
+// 财政余额（附录 A〔6〕）：余额 / 冻结 / 可支配，口径与出价校验一致（§7.4）
+app.get('/club/balance', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw);
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) return c.json({ club: null, balance: null, held: null, available: null });
+  const row = await c.env.DB.prepare(
+    `SELECT (SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) AS balance,
+            (SELECT COALESCE(SUM(amount), 0) FROM fund_holds WHERE club_id = ? AND status = 'held') AS held`,
+  )
+    .bind(club.id, club.id)
+    .first<{ balance: number; held: number }>();
+  const balance = row?.balance ?? 0;
+  const held = row?.held ?? 0;
+  return c.json({ club: { id: club.id, name: club.name }, balance, held, available: balance - held });
+});
+
+// 流水账（附录 A〔6〕）：新→旧倒序翻页，cursor=上一页最后一条的 id；hard LIMIT+1 探下一页
+const LEDGER_PAGE_SIZE = 30;
+
+app.get('/club/ledger', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw);
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) return c.json({ club: null, entries: [], nextCursor: null });
+
+  const conditions = ['club_id = ?'];
+  const args: unknown[] = [club.id];
+  const kind = c.req.query('kind');
+  if (kind !== undefined && kind !== '') {
+    if (!/^[a-z_]+$/.test(kind)) throw new HttpError(400, '流水类型不对');
+    conditions.push('kind = ?');
+    args.push(kind);
+  }
+  const cursor = c.req.query('cursor');
+  if (cursor !== undefined) {
+    const n = Number(cursor);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'cursor 不对');
+    conditions.push('id < ?');
+    args.push(n);
+  }
+  args.push(LEDGER_PAGE_SIZE + 1);
+  const rows = await c.env.DB.prepare(
+    `SELECT id, kind, amount, balance_after, ref_type, ref_id, memo, created_at
+     FROM ledger_entries WHERE ${conditions.join(' AND ')}
+     ORDER BY id DESC LIMIT ?`,
+  )
+    .bind(...args)
+    .all<{
+      id: number;
+      kind: string;
+      amount: number;
+      balance_after: number;
+      ref_type: string | null;
+      ref_id: number | null;
+      memo: string | null;
+      created_at: string;
+    }>();
+  const hasMore = rows.results.length > LEDGER_PAGE_SIZE;
+  const page = hasMore ? rows.results.slice(0, LEDGER_PAGE_SIZE) : rows.results;
+  return c.json({
+    club: { id: club.id, name: club.name },
+    entries: page.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      amount: r.amount,
+      balanceAfter: r.balance_after,
+      refType: r.ref_type,
+      refId: r.ref_id,
+      memo: r.memo,
+      createdAt: r.created_at,
+    })),
+    nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
   });
 });
 

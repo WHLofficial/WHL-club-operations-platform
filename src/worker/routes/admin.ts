@@ -10,6 +10,7 @@ import { confirmImport, previewImport } from '../players-import.ts';
 import { confirmContractsImport, previewContractsImport } from '../contracts-import.ts';
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
+import { ledgerMovement } from '../ledger.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { loadTransfer, rejectTransfer } from '../transfers.ts';
 import { approveTransferDeal, createForcedAuction, cancelForcedAuction } from '../bypass.ts';
@@ -399,6 +400,55 @@ app.post('/ledger/opening-import', async (c) => {
     await c.env.DB.batch(statements); // 流水 + 余额 + 审计一个 batch 提交（§7.4-1）
   }
   return c.json({ written: todo.length, skipped: parsed.length - todo.length });
+});
+
+// ---- 手动记账兜底（§7.1 manual_adjust / prize_*，P0 奖金模板入口；§9.1） ----
+
+const MANUAL_KIND_RE = /^(manual_adjust|prize_[a-z_]+)$/;
+
+app.post('/ledger/manual', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { clubId?: unknown; kind?: unknown; amount?: unknown; memo?: unknown } | null;
+  const clubId = Number(body?.clubId);
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const kind = typeof body?.kind === 'string' ? body.kind.trim() : '';
+  if (!MANUAL_KIND_RE.test(kind)) throw new HttpError(400, '流水类型只能是 manual_adjust 或 prize_*');
+  const amount = Number(body?.amount);
+  if (!Number.isFinite(amount) || amount === 0) throw new HttpError(400, '金额要是不为 0 的数字（正入账负出账）');
+  if (kind !== 'manual_adjust' && amount < 0) {
+    throw new HttpError(400, '奖金只能入账，要冲账请选「手动调整」走负数');
+  }
+  const memo = typeof body?.memo === 'string' ? body.memo.trim() : '';
+  if (!memo) throw new HttpError(400, '备注要写清楚这笔钱的来由，方便以后对账');
+  if (memo.length > 200) throw new HttpError(400, '备注最多 200 字');
+
+  const club = await c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
+  if (!club) throw new HttpError(404, '找不到这支俱乐部');
+
+  // manual 允许重复记（兜底工具，审计逐笔留痕），不走 (kind, ref) 幂等闸
+  const audit = createAuditStatement(c.env.DB);
+  await c.env.DB.batch([
+    ...ledgerMovement(c.env.DB, {
+      clubId,
+      delta: amount,
+      kind,
+      refType: 'manual',
+      refId: null,
+      memo,
+      idempotent: false,
+    }),
+    audit({
+      actor: user.id,
+      action: 'ledger_manual',
+      targetType: 'club',
+      targetId: clubId,
+      after: { kind, amount, memo },
+    }),
+  ]);
+  const acct = await c.env.DB.prepare('SELECT balance FROM ledger_accounts WHERE club_id = ?')
+    .bind(clubId)
+    .first<{ balance: number }>();
+  return c.json({ ok: true, balance: acct?.balance ?? 0 }, 201);
 });
 
 // ---- 注册快照与准入体检（附录 A〔2〕） ----

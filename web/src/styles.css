@@ -1127,3 +1127,88 @@ tbody tr:hover td {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- 财政流水账（增量 6）：手账本 ---------- */
+
+.ledger-book {
+  display: grid;
+  gap: 14px;
+  max-width: 960px;
+}
+
+.ledger-balance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  border-left: 4px solid var(--terracotta);
+}
+
+.ledger-balance-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ledger-balance-num {
+  font-size: 30px;
+  font-weight: 700;
+  display: block;
+}
+
+.ledger-balance-sub {
+  font-size: 13px;
+}
+
+/* 手账格线：行间淡棕横线（UI_DESIGN §4.2） */
+.ledger-book table tbody tr {
+  border-bottom: 1px solid #e8dcc6;
+}
+
+.ledger-side {
+  display: inline-block;
+  width: 22px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 0;
+}
+
+.ledger-side.in {
+  color: var(--ok);
+  border: 1px solid currentColor;
+}
+
+.ledger-side.out {
+  color: var(--bad);
+  border: 1px solid currentColor;
+}
+
+.ledger-memo {
+  margin-left: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ledger-in {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.ledger-out {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+.ledger-time {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .ledger-balance-num {
+    font-size: 24px;
+  }
+}

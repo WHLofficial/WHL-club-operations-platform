@@ -533,3 +533,90 @@ export interface ForcedAuctionResult {
   listingId: number;
   askPrice: number;
 }
+
+// ---- 增量 6 DTO（附录 A〔6〕：财政/赛季/赛果/成长/通知/监管）----
+
+export interface ClubBalance {
+  club: { id: number; name: string } | null;
+  balance: number | null;
+  held: number | null;
+  available: number | null;
+}
+
+export interface LedgerEntryRow {
+  id: number;
+  kind: string;
+  amount: number;
+  balanceAfter: number;
+  refType: string | null;
+  refId: number | null;
+  memo: string | null;
+  createdAt: string;
+}
+
+export interface LedgerPage {
+  club: { id: number; name: string } | null;
+  entries: LedgerEntryRow[];
+  nextCursor: number | null;
+}
+
+export interface ManualLedgerResult {
+  ok: boolean;
+  balance: number;
+}
+
+/** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
+export const LEDGER_KIND_LABELS: Record<string, string> = {
+  opening_import: '期初导入',
+  manual_adjust: '手动调整',
+  transfer_in: '买入付款',
+  transfer_out: '卖出所得',
+  transfer_tax: '转会税',
+  delist_fee: '下架费',
+  termination_fee: '解约费',
+  rc_change_fee: '续约费',
+  rc_change_refund: '续约回滚退款',
+  match_diff_burn: '匹配差额',
+  free_agent_fee: '海捞签入费',
+  wage: '工资',
+  ticket: '门票',
+  commercial: '商业收入',
+  broadcast: '转播分成',
+  facility_build: '设施建设',
+  facility_maintenance: '设施维护',
+  luxury_tax: '富人税',
+};
+
+export function ledgerKindLabel(kind: string): string {
+  return LEDGER_KIND_LABELS[kind] ?? kind;
+}
+
+export interface ManualLedgerKind {
+  value: string;
+  label: string;
+  /** §9.1 奖金模板参考值（m）；manual_adjust 无 */
+  reference?: number;
+}
+
+/** P0 奖金模板（§9.1）+ 手动调整；POST /api/admin/ledger/manual 的 kind 白名单与之对齐 */
+export const MANUAL_LEDGER_KINDS: ManualLedgerKind[] = [
+  { value: 'manual_adjust', label: '手动调整（冲账 / 纠错）' },
+  { value: 'prize_premier_entry', label: '顶级联赛 · 入场奖金', reference: 20 },
+  { value: 'prize_premier_win', label: '顶级联赛 · 单场胜', reference: 8.5 },
+  { value: 'prize_premier_draw', label: '顶级联赛 · 单场平', reference: 6.6 },
+  { value: 'prize_premier_loss', label: '顶级联赛 · 单场负', reference: 4.7 },
+  { value: 'prize_second_entry', label: '次级联赛 · 入场奖金', reference: 7.5 },
+  { value: 'prize_second_win', label: '次级联赛 · 单场胜', reference: 6.7 },
+  { value: 'prize_second_draw', label: '次级联赛 · 单场平', reference: 4.8 },
+  { value: 'prize_second_loss', label: '次级联赛 · 单场负', reference: 2.9 },
+  { value: 'prize_qualifying', label: '冠军杯 · 资格赛止步保底', reference: 7.5 },
+  { value: 'prize_champions_entry', label: '冠军杯 · 小组赛入场', reference: 15 },
+  { value: 'prize_champions_win', label: '冠军杯 · 小组赛单场胜', reference: 7.0 },
+  { value: 'prize_champions_draw', label: '冠军杯 · 小组赛单场平', reference: 2.5 },
+  { value: 'prize_champions_r8', label: '冠军杯 · 八强', reference: 7.5 },
+  { value: 'prize_champions_r4', label: '冠军杯 · 四强', reference: 10 },
+  { value: 'prize_champions_final', label: '冠军杯 · 决赛', reference: 12.5 },
+  { value: 'prize_champions_title', label: '冠军杯 · 夺冠', reference: 5 },
+  { value: 'prize_super_win', label: '超级杯 · 胜', reference: 4.0 },
+  { value: 'prize_super_loss', label: '超级杯 · 负', reference: 2.0 },
+];
