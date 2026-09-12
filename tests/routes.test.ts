@@ -427,7 +427,7 @@ describe('导入管线（§5.4）', () => {
     const p2age = sqlGet<{ growable: number }>(fx.sqlite, 'SELECT growable FROM players WHERE fc_id = 277226');
     expect(p2age?.growable).toBe(0); // 30 岁不可成长
 
-    // 运营列赋值后重导：FC 源列更新，运营列原样；base_ca 定格不随重导漂移
+    // 运营列赋值后重导：FC 源列更新，运营列原样；base_ca 随源刷新（裁决：跟随 FC 源）
     fx.sqlite
       .prepare("UPDATE players SET market_value = 55, status = 'listed', badges_gold = 2, growth_tier = 3 WHERE fc_id = 277225")
       .run();
@@ -443,7 +443,7 @@ describe('导入管线（§5.4）', () => {
       fx.sqlite,
       'SELECT ca, base_ca, market_value, status, badges_gold, growth_tier FROM players WHERE fc_id = 277225',
     );
-    expect(p2).toMatchObject({ ca: 78, base_ca: 76, market_value: 55, status: 'listed', badges_gold: 2, growth_tier: 3 });
+    expect(p2).toMatchObject({ ca: 78, base_ca: 78, market_value: 55, status: 'listed', badges_gold: 2, growth_tier: 3 });
   });
 
   it('通道 B：队壳名单归一化（姓名/出生日期/惯用脚/位置文本）', async () => {

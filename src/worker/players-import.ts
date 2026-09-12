@@ -100,8 +100,8 @@ export async function previewImport(env: Env, body: unknown) {
 }
 
 function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStatement {
-  // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、base_ca（初始CA定格）、
-  // growable（4.1.1 年龄判定，后续由赛季结算重判）只在首次插入写，重导入不碰。
+  // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、growable（赛季结算重判）冲突时不更新。
+  // base_ca = 非平台成长所得 CA（§10.4）：随每次导入刷新到源文件值，平台成长不加在它上面。
   return db
     .prepare(
       `INSERT INTO players
@@ -110,7 +110,7 @@ function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStateme
        ON CONFLICT(fc_id) DO UPDATE SET
          uid = excluded.uid, name = excluded.name, ca = excluded.ca, pa = excluded.pa, age = excluded.age,
          foot = excluded.foot, position = excluded.position, prestige = excluded.prestige,
-         china_plan = excluded.china_plan, game_attrs = excluded.game_attrs, updated_at = excluded.updated_at`,
+         china_plan = excluded.china_plan, base_ca = excluded.ca, game_attrs = excluded.game_attrs, updated_at = excluded.updated_at`,
     )
     .bind(
       p.uid,
