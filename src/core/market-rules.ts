@@ -116,7 +116,7 @@ export function bidDeadline(input: BidDeadlineInput): BidDeadlineResult {
   const fallbackDay = shanghaiDateStr(baseDayMs + 90 * 86_400_000);
   return {
     met: false,
-    deadlineAt: dayWindowMs(fallbackDay, endHour).toISOString(),
+    deadlineAt: new Date(dayWindowMs(fallbackDay, endHour)).toISOString(),
     deadlineDay: fallbackDay,
   };
 }
