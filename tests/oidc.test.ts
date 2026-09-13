@@ -1,7 +1,8 @@
-// 统一认证接入测试（迁移步骤②，auth 项目 PRD P0-5）：
-// in-process 伪认证服务器——stub 全局 fetch 提供 jwks/token 两端点，用 jose 现签
+// 统一认证接入测试（迁移步骤②③收口，auth 项目 PRD P0-5 / TECH_DESIGN §6.3）：
+// in-process 伪认证服务器——stub 全局 fetch 提供 jwks/token/userinfo 三端点，用 jose 现签
 // id_token / logout_token（独立密钥对，challenge/verifier 哈希用 node:crypto 独立实现），
-// 驱动 RP 全流程：发起登录 → 回调建会话 → 登出吊销 → back-channel 通知；
+// 驱动 RP 全流程：发起登录 → 回调验签拉 userinfo 存 claims → 判定点按权限点正反例
+// → 登出吊销 → back-channel 通知 → 收口探针（tour user 表删光端点照常）；
 // 兼容模式（未配 OIDC_*）回归旧行为。
 import { beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
@@ -51,7 +52,46 @@ interface StubState {
   idToken?: string; // 覆盖默认现签（伪造签名 / nonce 不符用）
   tokenStatus?: number; // 强制换票失败
   tokenCalls: URLSearchParams[];
+  userinfoStatus?: number; // 强制 userinfo 拉取失败
+  userinfo?: unknown; // 覆盖默认 userinfo 载荷（缺字段负例用）
 }
+
+// 收口后的 userinfo 形状（auth 侧按 aud 下发，TECH_DESIGN §6.3）：
+// sub 1=管理组甲（club.admin 六管理点）、2=教练乙（club.coach 两教练点）、
+// 3=丙丙 locked 观众号（注册即发教练点，靠 locked 在判定前清空——与旧 viewer 行为等价）
+const USERINFO_BY_SUB: Record<string, Record<string, unknown>> = {
+  '1': {
+    sub: '1',
+    name: '管理组甲',
+    locked: false,
+    must_change_pw: false,
+    roles: ['club.admin'],
+    permissions: [
+      'club.clubs.manage',
+      'club.bindings.unbind',
+      'club.players.import',
+      'club.ledger.manage',
+      'club.registrations.manage',
+      'club.compliance.view',
+    ],
+  },
+  '2': {
+    sub: '2',
+    name: '教练乙',
+    locked: false,
+    must_change_pw: false,
+    roles: ['club.coach'],
+    permissions: ['club.squad.manage', 'club.registrations.submit'],
+  },
+  '3': {
+    sub: '3',
+    name: '丙丙',
+    locked: true,
+    must_change_pw: false,
+    roles: ['club.coach'],
+    permissions: ['club.squad.manage', 'club.registrations.submit'],
+  },
+};
 
 let stub: StubState;
 
@@ -61,6 +101,18 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
     return new Response(JSON.stringify({ keys: [signing.jwk] }), {
       headers: { 'content-type': 'application/json' },
     });
+  }
+  if (url.pathname.endsWith('/userinfo')) {
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    if (!/^Bearer\s+fake-at$/i.test(headers.authorization ?? '')) {
+      return new Response(JSON.stringify({ error: 'invalid_token' }), { status: 401 });
+    }
+    if (stub.userinfoStatus) {
+      return new Response(JSON.stringify({ error: 'server_error' }), { status: stub.userinfoStatus });
+    }
+    const payload = stub.userinfo ?? USERINFO_BY_SUB[stub.sub];
+    if (!payload) return new Response(JSON.stringify({ error: 'no user' }), { status: 401 });
+    return new Response(JSON.stringify(payload), { headers: { 'content-type': 'application/json' } });
   }
   if (url.pathname.endsWith('/token')) {
     const form = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams(String(init?.body ?? ''));
@@ -92,7 +144,7 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
         token_type: 'Bearer',
         expires_in: 1800,
         refresh_token: 'fake-rt',
-        scope: 'openid',
+        scope: 'openid profile',
         id_token: idToken,
       }),
       { headers: { 'content-type': 'application/json' } },
@@ -110,6 +162,7 @@ afterEach(() => {
 interface Fixture {
   env: Env;
   sqlite: DatabaseSync;
+  tour: DatabaseSync;
 }
 
 function freshEnv(oidc: boolean): Fixture {
@@ -136,7 +189,7 @@ function freshEnv(oidc: boolean): Fixture {
     ASSETS: {} as never,
     ...(oidc ? { OIDC_ISSUER: ISSUER, OIDC_CLIENT_ID: CLIENT_ID } : {}),
   };
-  return { env, sqlite };
+  return { env, sqlite, tour };
 }
 
 function cookieOf(res: Response, name: string): string | undefined {
@@ -200,7 +253,7 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     expect(u.searchParams.get('response_type')).toBe('code');
     expect(u.searchParams.get('client_id')).toBe(CLIENT_ID);
     expect(u.searchParams.get('redirect_uri')).toBe('http://localhost/api/auth/callback');
-    expect(u.searchParams.get('scope')).toBe('openid');
+    expect(u.searchParams.get('scope')).toBe('openid profile');
     expect(u.searchParams.get('code_challenge_method')).toBe('S256');
     // S256 challenge 恒 43 位 base64url（auth 侧逐字校验这个形态）
     expect(u.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -231,23 +284,33 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     expect(sc).toContain('Max-Age=604800');
     expect(sc).toContain('Secure');
 
-    // 会话行：token_hash 是会话 cookie 的 sha256（独立实现核对），sub/sid 来自 id_token
-    const row = sqlGet<{ token_hash: string; sub: string; auth_sid: string; revoked_at: null }>(
+    // 会话行：token_hash 是会话 cookie 的 sha256（独立实现核对），sub/sid 来自 id_token，
+    // claims 为回调拉取并规整存档的 userinfo（parseOidcClaims 只留五个字段，sub 落在行上）
+    const { sub: _sub, ...coachClaims } = USERINFO_BY_SUB['2'];
+    const row = sqlGet<{ token_hash: string; sub: string; auth_sid: string; claims: string; revoked_at: null }>(
       sqlite,
-      'SELECT token_hash, sub, auth_sid, revoked_at FROM oidc_session',
+      'SELECT token_hash, sub, auth_sid, claims, revoked_at FROM oidc_session',
     );
     expect(row).toEqual({
       token_hash: createHash('sha256').update(session!).digest('hex'),
       sub: '2',
       auth_sid: 'sid-1',
+      claims: JSON.stringify(coachClaims),
       revoked_at: null,
     });
 
-    // /api/me 用会话 cookie 认人（姓名/角色现查 tour 库，不信任令牌声明）
+    // /api/me 用会话 cookie 认人（只读 claims 存档，不再查 tour 库）
     const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
     expect(me.status).toBe(200);
     expect(await me.json()).toEqual({
-      user: { id: 2, name: '教练乙', role: 'coach', locked: false, mustChangePw: false },
+      user: {
+        id: 2,
+        name: '教练乙',
+        role: 'coach',
+        locked: false,
+        mustChangePw: false,
+        permissions: ['club.squad.manage', 'club.registrations.submit'],
+      },
       authMode: 'oidc',
       authHome: ISSUER,
     });
@@ -304,7 +367,7 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     };
     expect((await bad(`code=CODE-2&state=${state}&iss=${encodeURIComponent(ISSUER)}`, temp)).status).toBe(502);
 
-    // sub 不是数字串（过渡期必须是 tour user id）→ 502
+    // sub 不是数字串（必须是 auth 账号 id）→ 502
     stub = {
       ...stub,
       idToken: await mint(signing, { iss: ISSUER, aud: CLIENT_ID, sub: 'not-a-number', sid: 'sid-1', nonce: stub.nonce, iat: nowSec(), exp: nowSec() + 600 }),
@@ -391,5 +454,97 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
       "SELECT revoked_at FROM oidc_session WHERE auth_sid = 'sid-bc-2'",
     );
     expect(alive?.revoked_at).toBeNull();
+  });
+
+  it('判定点（OIDC 模式按权限点）：教练过教练端点/挡管理端点，管理组两头都过，locked 观众号两头被挡', async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    const { env } = freshEnv(true);
+    const loginAs = async (sub: string) => {
+      const { session } = await oidcLogin(env, { sub });
+      return `__Host-club_session=${session}`;
+    };
+    const admin = await loginAs('1');
+    const coach = await loginAs('2');
+    const viewer = await loginAs('3');
+
+    // 教练端点（requireCoach('club.squad.manage')）：教练与管理组都过——管理组凭
+    // 「任一管理权限点」放行（旧 requireCoach = admin OR coach 的行为保留）；
+    // locked 观众号旧模式投影 viewer 被挡，收口后 perms 含教练点，locked 闸必须显式生效
+    expect((await app.request('/api/club/balance', { method: 'GET', headers: { Cookie: coach } }, env)).status).toBe(200);
+    expect((await app.request('/api/club/balance', { method: 'GET', headers: { Cookie: admin } }, env)).status).toBe(200);
+    expect((await app.request('/api/club/balance', { method: 'GET', headers: { Cookie: viewer } }, env)).status).toBe(403);
+
+    // 管理端点按语义权限点：club.clubs.manage 持有人过；教练无任一管理点 → 403
+    expect((await app.request('/api/admin/clubs', { method: 'GET', headers: { Cookie: admin } }, env)).status).toBe(200);
+    expect((await app.request('/api/admin/clubs', { method: 'GET', headers: { Cookie: coach } }, env)).status).toBe(403);
+    expect((await app.request('/api/admin/m0', { method: 'GET', headers: { Cookie: coach } }, env)).status).toBe(403);
+  });
+
+  it('收口：会话解析只读 claims——tour user 表删光后 /api/me 与判定点照常；旧行 claims NULL 视为未登录', async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    const { env, sqlite, tour } = freshEnv(true);
+    const { session } = await oidcLogin(env, { sub: '1' });
+
+    // 本地夹具造一条带 user_name 的新式绑定行，然后删光赛事库 user 表 = 收口后新账号无行
+    sqlite.exec(
+      "INSERT INTO clubs (id, name, league_tier, status, created_at) VALUES (1, '测试俱乐部', 'premier', 'active', '2026-01-01T00:00:00Z');" +
+        "INSERT INTO club_bindings (club_id, user_id, user_name, bound_at) VALUES (1, 1, '管理组甲', '2026-01-01T00:00:00Z');",
+    );
+    tour.exec('DELETE FROM user');
+
+    const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
+    expect(((await me.json()) as { user: { name: string } }).user.name).toBe('管理组甲');
+
+    // 管理列表：绑定人名字本地 user_name 命中，全程不碰 tour user 表（已空）
+    const admin = await app.request('/api/admin/clubs', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
+    expect(admin.status).toBe(200);
+    const list = (await admin.json()) as { clubs: { binding: { userName: string | null } | null }[] };
+    expect(list.clubs[0].binding?.userName).toBe('管理组甲');
+
+    // 旧格式会话行（claims NULL）视为未登录——重走一次 OIDC 登录即恢复
+    sqlite.exec(
+      `INSERT INTO oidc_session (token_hash, sub, auth_sid, created_at, expires_at)
+       VALUES ('${createHash('sha256').update('legacy').digest('hex')}', '2', 'sid-old', '2026-01-01T00:00:00Z', '2027-01-01T00:00:00Z')`,
+    );
+    const stale = await app.request('/api/me', { method: 'GET', headers: { Cookie: '__Host-club_session=legacy' } }, env);
+    expect(((await stale.json()) as { user: unknown }).user).toBeNull();
+  });
+
+  it('userinfo 拉取失败/缺字段 → 502 不建会话；恢复后重登即用上新 claims', async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    const { env, sqlite } = freshEnv(true);
+    const login = await app.request('/api/auth/login', { method: 'GET' }, env);
+    const authUrl = new URL(login.headers.get('Location')!);
+    const temp = cookieOf(login, '__Host-club_oidc')!;
+    const state = authUrl.searchParams.get('state')!;
+    const cb = () =>
+      app.request(
+        `/api/auth/callback?code=CODE-1&state=${state}&iss=${encodeURIComponent(ISSUER)}`,
+        { method: 'GET', headers: { Cookie: `__Host-club_oidc=${temp}` } },
+        env,
+      );
+    stub = {
+      code: 'CODE-1',
+      challenge: authUrl.searchParams.get('code_challenge')!,
+      nonce: authUrl.searchParams.get('nonce')!,
+      sub: '2',
+      sid: 'sid-1',
+      tokenCalls: [],
+      userinfoStatus: 500,
+    };
+
+    // userinfo 500 → 502；缺 name 字段（shape 不完整）同样 502；两条路都不落会话行
+    expect((await cb()).status).toBe(502);
+    stub.userinfoStatus = undefined;
+    stub.userinfo = { sub: '2', locked: false, must_change_pw: false, roles: ['club.coach'], permissions: ['club.squad.manage'] };
+    expect((await cb()).status).toBe(502);
+    expect(sqlGet(sqlite, 'SELECT token_hash FROM oidc_session')).toBeUndefined();
+
+    // userinfo 恢复后重新登录即恢复（重登刷新 claims 与 guess/tour 同款语义）
+    stub.userinfo = undefined;
+    const retried = await oidcLogin(env);
+    expect(retried.cb.status).toBe(302);
+    const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${retried.session}` } }, env);
+    expect(((await me.json()) as { user: { name: string } }).user.name).toBe('教练乙');
   });
 });

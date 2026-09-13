@@ -1,14 +1,14 @@
-// 双服务本地联调冒烟（统一认证迁移步骤②，auth 项目 PRD P0-5）：
+// 双服务本地联调冒烟（统一认证迁移步骤②③收口，auth 项目 PRD P0-5 / TECH_DESIGN §6.3）：
 //   club 8795（OIDC 模式，dev:oidc）× auth 8792（真认证中心，非 mock）。
 // 全链路手推浏览器跳转（redirect: manual + 手写 cookie jar）：
-//   club 发起 authorize → auth 登录 → 回跳建 club 会话 → /api/me 认人
-//   → auth 主动登出推 back-channel 吊销 club 会话 → club RP 登出走 end_session。
+//   club 发起 authorize → auth 登录 → 回跳建 club 会话（回调拉 userinfo 存 claims，
+//   本地不再查赛事库 user 表）→ /api/me 认人 → auth 主动登出推 back-channel 吊销
+//   club 会话 → club RP 登出走 end_session。
 // 前置（顺序无关）：
 //   1) auth 项目：node scripts/seed-local-users.mjs && node scripts/seed-local-oidc.mjs，
 //      并起 wrangler dev --port 8792
-//   2) club 项目：npm run db:migrate:local，本地 TOUR_DB（whl 库）需有
-//      id=7/8 的 user 行（oidctest5/oidctest6，与 auth 本地账号同 id），
-//      然后起 npm run dev:oidc
+//   2) club 项目：npm run db:migrate:local，然后起 npm run dev:oidc
+//      （收口后 club 会话只读 claims，赛事库无需夹具行）
 // 注意：auth 登录限流 5 次/15 分钟/账号（成功也计数），脚本开头会顺手清掉
 // auth 本地 RL_KV 的限流键（跨项目调用 wrangler，失败只提示不阻断）。
 import { execFileSync } from 'node:child_process';
@@ -136,14 +136,23 @@ ok(me0Body.user === null && me0Body.authMode === 'oidc', '未登录 /api/me：us
 const u1 = await rpLogin({ name: 'oidctest5', password: 'TestPass123' });
 ok(u1.start.status === 302, 'club /auth/login 302 到认证中心 authorize');
 ok(u1.authzUrl.origin + u1.authzUrl.pathname === `${AUTH}/authorize`, 'authorize 指向 auth 8792', u1.authzUrl.href);
-ok(u1.authzUrl.searchParams.get('client_id') === 'club' && u1.authzUrl.searchParams.get('scope') === 'openid', 'client_id=club，scope=openid');
+ok(u1.authzUrl.searchParams.get('client_id') === 'club' && u1.authzUrl.searchParams.get('scope') === 'openid profile', 'client_id=club，scope=openid profile');
 ok(u1.authzUrl.searchParams.get('code_challenge_method') === 'S256' && /^[A-Za-z0-9_-]{43}$/.test(u1.authzUrl.searchParams.get('code_challenge') ?? ''), 'PKCE S256 challenge（43 位 base64url）');
 ok(u1.doLogin.status === 303, `auth 登录成功（${u1.doLogin.status} → 登录页/改密页）`);
 ok(u1.back.status === 303 && (u1.cbUrl.origin + u1.cbUrl.pathname) === `${CLUB}/api/auth/callback`, 'authorize 303 跳回 club callback');
 ok(u1.cbUrl.searchParams.get('iss') === AUTH && !!u1.cbUrl.searchParams.get('code'), '回跳带 code 与 iss（RFC 9207）');
 ok(u1.cb.status === 302 && u1.cb.headers.get('location') === '/', 'club 回调 302 回首页');
 const me1Body = await u1.me.json();
-ok(me1Body.authMode === 'oidc' && me1Body.user?.name === 'oidctest5' && me1Body.user?.role === 'admin', '登录后 /api/me 认出 oidctest5（admin）', JSON.stringify(me1Body));
+ok(
+  me1Body.authMode === 'oidc' && me1Body.user?.name === 'oidctest5' && me1Body.user?.role === 'admin',
+  '登录后 /api/me 认出 oidctest5（admin）',
+  JSON.stringify(me1Body),
+);
+ok(
+  Array.isArray(me1Body.user?.permissions) && me1Body.user.permissions.includes('club.clubs.manage'),
+  'claims 存档生效：/api/me 带权限点（club.clubs.manage）',
+  JSON.stringify(me1Body.user?.permissions),
+);
 
 // 2) 用户二（oidctest6）并发登录（独立 cookie jar = 独立浏览器）
 const u2 = await rpLogin({ name: 'oidctest6', password: 'TestPass123' });

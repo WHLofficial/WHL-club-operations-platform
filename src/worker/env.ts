@@ -9,4 +9,8 @@ export interface Env {
   SYNC_BASE_URL?: string;
   SYNC_SECRET?: string;
   rng?: () => number;
+  // 统一认证迁移步骤②（auth 项目 PRD P0-5）：配置即切换 OIDC 登录；
+  // 未配置 = 兼容模式（共享 cookie 透传）——回滚开关就是撤掉这两个变量
+  OIDC_ISSUER?: string;
+  OIDC_CLIENT_ID?: string;
 }
