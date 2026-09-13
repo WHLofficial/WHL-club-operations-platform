@@ -1,7 +1,15 @@
 import { NavLink } from 'react-router';
-import { TOUR_SITE_URL, type MeUser } from '../lib/api.ts';
+import { TOUR_SITE_URL, type AuthMode, type MeUser } from '../lib/api.ts';
 
-export default function Home({ user }: { user: MeUser | null | undefined }) {
+export default function Home({
+  user,
+  authMode,
+  authHome,
+}: {
+  user: MeUser | null | undefined;
+  authMode: AuthMode;
+  authHome: string | null;
+}) {
   return (
     <div className="container">
       <section className="card home-hero">
@@ -9,6 +17,12 @@ export default function Home({ user }: { user: MeUser | null | undefined }) {
         {user === undefined ? null : user ? (
           <p>
             欢迎回来，<b>{user.name}</b>。今天也是经营俱乐部的一天。
+          </p>
+        ) : authMode === 'oidc' ? (
+          <p>
+            这里是 WHL 俱乐部运营平台。
+            <a href="/api/auth/login">登录</a>
+            统一认证账号，再回来打理你的球队。
           </p>
         ) : (
           <p>
@@ -21,11 +35,22 @@ export default function Home({ user }: { user: MeUser | null | undefined }) {
         )}
         {user?.mustChangePw && (
           <div className="banner warn">
-            密码刚被赛事系统重置，请先到
-            <a href={TOUR_SITE_URL} target="_blank" rel="noreferrer">
-              赛事系统
-            </a>
-            设置新密码，再回来继续。
+            {authMode === 'oidc' ? (
+              <>
+                密码刚被重置，请先到
+                {/* 直链认证中心改密页：走 /api/auth/login 会绕回本页成环 */}
+                <a href={authHome ? `${authHome}/password` : '/api/auth/login'}>认证中心</a>
+                设置新密码，再回来继续。
+              </>
+            ) : (
+              <>
+                密码刚被赛事系统重置，请先到
+                <a href={TOUR_SITE_URL} target="_blank" rel="noreferrer">
+                  赛事系统
+                </a>
+                设置新密码，再回来继续。
+              </>
+            )}
           </div>
         )}
         {user?.role === 'viewer' && (

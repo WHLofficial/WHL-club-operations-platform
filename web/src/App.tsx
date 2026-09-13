@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router';
 import TopBar from './components/TopBar.tsx';
-import { api, type MeUser } from './lib/api.ts';
+import { api, type AuthMode, type MeUser } from './lib/api.ts';
 import Home from './pages/Home.tsx';
 import Club from './pages/Club.tsx';
 import Player from './pages/Player.tsx';
@@ -13,18 +13,25 @@ import Admin from './pages/Admin.tsx';
 
 export default function App() {
   const [user, setUser] = useState<MeUser | null | undefined>(undefined);
+  const [authMode, setAuthMode] = useState<AuthMode>('shared');
+  const [authHome, setAuthHome] = useState<string | null>(null);
 
   useEffect(() => {
-    api<{ user: MeUser | null }>('/api/me')
-      .then((d) => setUser(d.user))
+    api<{ user: MeUser | null; authMode?: AuthMode; authHome?: string | null }>('/api/me')
+      .then((d) => {
+        setUser(d.user);
+        // 旧后端（未发版）不回 authMode：维持 shared 旧行为，前端不因部署顺序而坏
+        setAuthMode(d.authMode ?? 'shared');
+        setAuthHome(d.authHome ?? null);
+      })
       .catch(() => setUser(null));
   }, []);
 
   return (
     <>
-      <TopBar user={user} />
+      <TopBar user={user} authMode={authMode} />
       <Routes>
-        <Route path="/" element={<Home user={user} />} />
+        <Route path="/" element={<Home user={user} authMode={authMode} authHome={authHome} />} />
         <Route path="/club" element={<Club />} />
         <Route path="/bind" element={<Bind />} />
         <Route path="/players/:id" element={<Player />} />

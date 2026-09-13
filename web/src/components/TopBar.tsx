@@ -1,9 +1,9 @@
 import { NavLink } from 'react-router';
-import type { MeUser } from '../lib/api.ts';
+import { TOUR_SITE_URL, type AuthMode, type MeUser } from '../lib/api.ts';
 
 const ROLE_LABEL: Record<MeUser['role'], string> = { admin: '管理组', coach: '教练', viewer: '观众' };
 
-export default function TopBar({ user }: { user: MeUser | null | undefined }) {
+export default function TopBar({ user, authMode }: { user: MeUser | null | undefined; authMode: AuthMode }) {
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -38,14 +38,24 @@ export default function TopBar({ user }: { user: MeUser | null | undefined }) {
             <>
               <span className="userbox-name">{user.name}</span>
               <span className={`role-badge role-${user.role}`}>{ROLE_LABEL[user.role]}</span>
+              {/* 登出仅 OIDC 模式提供：兼容模式的会话真源在赛事系统，club 无从登出。
+                  原生表单整页跳转：302 链（club→认证中心→回 club）由浏览器跟随，
+                  后端顺带吊销本地会话并清 cookie */}
+              {authMode === 'oidc' && (
+                <form action="/api/auth/logout" method="post">
+                  <button className="btn btn-sm btn-ghost" type="submit">
+                    退出登录
+                  </button>
+                </form>
+              )}
             </>
+          ) : authMode === 'oidc' ? (
+            // OIDC 模式：本站发起 authorize 跳认证中心，需同页导航（回跳状态存 cookie，新开窗口会丢）
+            <a className="btn btn-sm" href="/api/auth/login">
+              登录
+            </a>
           ) : (
-            <a
-              className="btn btn-sm cross-tour"
-              href="https://whleague.win/"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <a className="btn btn-sm cross-tour" href={TOUR_SITE_URL} target="_blank" rel="noreferrer">
               去赛事系统登录
             </a>
           )}

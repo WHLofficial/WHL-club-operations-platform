@@ -7,6 +7,16 @@ export interface MeUser {
   mustChangePw: boolean;
 }
 
+/** 登录入口模式（统一认证步骤②）：oidc=认证中心，shared=赛事系统共享会话（旧行为） */
+export type AuthMode = 'oidc' | 'shared';
+
+export interface MeResponse {
+  user: MeUser | null;
+  authMode: AuthMode;
+  /** 认证中心地址（OIDC 模式才有；改密等引导直链用） */
+  authHome?: string | null;
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
