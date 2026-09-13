@@ -11,6 +11,7 @@ import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
 import growthRoutes from './routes/growth.ts';
 import adminRoutes from './routes/admin.ts';
+import authRoutes from './routes/auth.ts';
 import { settleOverdue } from './market-settle.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -23,6 +24,7 @@ app.route('/api', marketRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
 app.route('/api', growthRoutes);
+app.route('/api', authRoutes);
 app.route('/api/admin', adminRoutes);
 
 app.onError((err, c) => {
@@ -63,10 +65,12 @@ app.get('/api/health', async (c) => {
   return c.json({ ok, checks }, ok ? 200 : 503);
 });
 
-// 登录态（附录 A）：user=null 即未登录；must_change_pw 照常返回此人，由前端引导回赛事系统
+// 登录态（附录 A）：user=null 即未登录；must_change_pw 照常返回此人，由前端引导改密。
+// authMode 告知前端登录入口走哪条路（oidc=认证中心 /auth/login，shared=跳赛事系统）；
+// authHome 是认证中心地址（改密横幅直链用），兼容模式为 null
 app.get('/api/me', async (c) => {
   const user = await getAuthUser(c.env, c.req.raw);
-  return c.json({ user });
+  return c.json({ user, authMode: c.env.OIDC_ISSUER ? 'oidc' : 'shared', authHome: c.env.OIDC_ISSUER ?? null });
 });
 
 // 手动触发惰性结算（附录 A 内部端点）：X-Cron-Key 对不上 403；本地未配 secret 时放行便于联调
