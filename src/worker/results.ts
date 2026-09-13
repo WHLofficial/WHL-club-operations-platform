@@ -1,9 +1,10 @@
 // 赛果只读同步与确认（TECH_DESIGN §11）：平台跨库（TOUR_DB）读比赛系统完赛场次 →
 // 管理组确认 → 比分快照落 result_confirmations（此后比赛系统改判不影响已确认记录）。
-// 奖金 P0 手动记账；确认钩子（XP 事件/通知）在 confirmResult 尾部按增量接入。
+// 确认钩子：自动 XP 事件（§10.1，growth.ts）+ 后续 bot 通知（d4）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
+import { recordGrowthEventStatements, defensivePositionsForClub, type GrowthEventInput } from './growth.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -13,6 +14,9 @@ interface TourMatchRow {
   id: number;
   status: string;
   tournament_id: number;
+  stage_kind: string | null;
+  home_team_id: number | null;
+  away_team_id: number | null;
   round: number | null;
   stage_name: string | null;
   home_team: string | null;
@@ -28,7 +32,9 @@ interface TourMatchRow {
 
 // match→stage 两跳到 tournament；队名/胜者经 entry→team 解析（比赛系统只存 ID）
 const MATCH_SELECT = `
-  SELECT m.id, m.status, s.tournament_id, m.round, s.name AS stage_name,
+  SELECT m.id, m.status, s.tournament_id, s.kind AS stage_kind,
+         eh.team_id AS home_team_id, ea.team_id AS away_team_id,
+         m.round, s.name AS stage_name,
          th.name AS home_team, ta.name AS away_team,
          m.score_home, m.score_away, m.pen_home, m.pen_away,
          m.walkover_side, tw.name AS winner_team, m.finished_at
@@ -167,7 +173,7 @@ export async function confirmResult(
   env: Env,
   actor: number,
   matchIdInput: unknown,
-): Promise<ConfirmedResultItem> {
+): Promise<{ result: ConfirmedResultItem; xp: XpHookSummary }> {
   const matchId = Number(matchIdInput);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(400, '比赛 ID 不对');
 
@@ -231,6 +237,162 @@ export async function confirmResult(
   }
 
   const row = await env.DB.prepare('SELECT * FROM result_confirmations WHERE match_id = ?').bind(matchId).first();
-  // 确认钩子接入点：XP 事件（增量 6-d3）→ bot 通知（增量 6-d4）
-  return toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]);
+  // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知随 d4 接入
+  const xp = await recordAutoXpForMatch(env, matchId, m, binding);
+  return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp };
 }
+
+// ---- 确认钩子：自动 XP 事件（§10.1）----
+
+interface XpHookSummary {
+  granted: number;
+  unresolved: string[];
+}
+
+/**
+ * 从比赛系统 match_event 生成出场/进球/助攻/零封事件（growth_events 去重锚防重复）。
+ * 限制口径（§15 假设 20-22）：仅联赛与冠军杯小组赛计 XP；弃权场不计；训练营球员不按场次
+ * （走结算固定 XP）。球员匹配按「队名=俱乐部名 → 球员名=名单名」，解不开的进 unresolved 由管理组补录。
+ */
+async function recordAutoXpForMatch(
+  env: Env,
+  matchId: number,
+  m: TourMatchRow,
+  binding: { season: number; window_seq: number; competition_type: string | null },
+): Promise<XpHookSummary> {
+  const comp = binding.competition_type;
+  const xpEligible = comp === 'league_premier' || comp === 'league_second' || (comp === 'champions_cup' && m.stage_kind === 'group');
+  const walkover = !!m.walkover_side && m.walkover_side !== '';
+  const unresolved: string[] = [];
+  if (!xpEligible || walkover) return { granted: 0, unresolved };
+
+  const events = await env.TOUR_DB.prepare(
+    `SELECT me.type, me.player_id, me.assist_player_id,
+            p.name AS player_name, p.team_id AS player_team_id, pt.name AS player_team_name,
+            ap.name AS assist_name, ap.team_id AS assist_team_id, apt.name AS assist_team_name
+     FROM match_event me
+     LEFT JOIN player p ON p.id = me.player_id
+     LEFT JOIN team pt ON pt.id = p.team_id
+     LEFT JOIN player ap ON ap.id = me.assist_player_id
+     LEFT JOIN team apt ON apt.id = ap.team_id
+     WHERE me.match_id = ?`,
+  )
+    .bind(matchId)
+    .all<{
+      type: string;
+      player_id: number | null;
+      assist_player_id: number | null;
+      player_name: string | null;
+      player_team_id: number | null;
+      player_team_name: string | null;
+      assist_name: string | null;
+      assist_team_id: number | null;
+      assist_team_name: string | null;
+    }>();
+
+  // 出场名单 = 有事件记录的球员 + 助攻者（都必然登过场）
+  const seen = new Map<number, { name: string | null; teamId: number | null; teamName: string | null }>();
+  for (const ev of events.results) {
+    if (ev.player_id !== null) seen.set(ev.player_id, { name: ev.player_name, teamId: ev.player_team_id, teamName: ev.player_team_name });
+    if (ev.assist_player_id !== null) seen.set(ev.assist_player_id, { name: ev.assist_name, teamId: ev.assist_team_id, teamName: ev.assist_team_name });
+  }
+
+  // 队名 → 平台俱乐部 → 名单内同名球员（带 position/status 供零封判定与训练营排除）
+  const clubCache = new Map<string, { clubId: number; defensive: Set<string> } | null>();
+  const rosterCache = new Map<string, { id: number; position: string | null; status: string } | null>();
+  async function resolve(teamName: string | null, playerName: string | null) {
+    if (!teamName || !playerName) return null;
+    let club = clubCache.get(teamName);
+    if (club === undefined) {
+      const row = await env.DB.prepare('SELECT id FROM clubs WHERE name = ?').bind(teamName).first<{ id: number }>();
+      club = row ? { clubId: row.id, defensive: await defensivePositionsForClub(env.DB, row.id) } : null;
+      clubCache.set(teamName, club);
+    }
+    if (!club) {
+      if (!unresolved.includes(`俱乐部「${teamName}」`)) unresolved.push(`俱乐部「${teamName}」`);
+      return null;
+    }
+    const key = `${club.clubId}:${playerName}`;
+    let player = rosterCache.get(key);
+    if (player === undefined) {
+      player =
+        (await env.DB.prepare('SELECT id, position, status FROM players WHERE club_id = ? AND name = ? ORDER BY id LIMIT 1')
+          .bind(club.clubId, playerName)
+          .first<{ id: number; position: string | null; status: string }>()) ?? null;
+      rosterCache.set(key, player);
+    }
+    if (!player) {
+      const label = `${teamName}·${playerName}`;
+      if (!unresolved.includes(label)) unresolved.push(label);
+      return null;
+    }
+    return { club, player };
+  }
+
+  const statements: D1PreparedStatement[] = [];
+  function push(e: Omit<GrowthEventInput, 'source' | 'season' | 'windowSeq'>) {
+    statements.push(
+      ...recordGrowthEventStatements(env.DB, {
+        ...e,
+        season: binding.season,
+        windowSeq: binding.window_seq,
+        source: 'auto',
+      }),
+    );
+  }
+
+  const resolved = new Map<number, Awaited<ReturnType<typeof resolve>>>();
+  for (const [tourPlayerId, info] of seen) {
+    const r = await resolve(info.teamName, info.name);
+    resolved.set(tourPlayerId, r);
+    if (!r || r.player.status === 'trainee') continue; // 训练营不按场次（§10.1）
+    push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'appearance', value: 1, xp: 1, recordedBy: null });
+  }
+  // 进球/助攻按「球员×类型」聚合成一条事件：growth_events 去重锚是
+  // UNIQUE(player_id, match_ref, event_type)，一场一类型只容一行，value 记球/助攻数
+  const goalCount = new Map<number, number>();
+  const assistCount = new Map<number, number>();
+  for (const ev of events.results) {
+    if (ev.type !== 'goal' && ev.type !== 'pen_goal') continue; // own_goal/牌/伤停不记 XP（§15 假设）
+    if (ev.player_id !== null) goalCount.set(ev.player_id, (goalCount.get(ev.player_id) ?? 0) + 1);
+    if (ev.assist_player_id !== null) assistCount.set(ev.assist_player_id, (assistCount.get(ev.assist_player_id) ?? 0) + 1);
+  }
+  for (const [tourPlayerId, count] of goalCount) {
+    const r = resolved.get(tourPlayerId);
+    if (!r || r.player.status === 'trainee') continue;
+    push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'goal', value: count, xp: 0.5 * count, recordedBy: null });
+  }
+  for (const [tourPlayerId, count] of assistCount) {
+    const r = resolved.get(tourPlayerId);
+    if (!r || r.player.status === 'trainee') continue;
+    push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'assist', value: count, xp: 0.5 * count, recordedBy: null });
+  }
+  // 零封：一侧净吞 0 蛋 → 该侧登场的防守位置球员各 0.5（位置宽松链见 defensivePositionsForClub）
+  if (m.score_away === 0 && m.home_team_id !== null) {
+    await pushCleanSheets(m.home_team_id);
+  }
+  if (m.score_home === 0 && m.away_team_id !== null) {
+    await pushCleanSheets(m.away_team_id);
+  }
+
+  async function pushCleanSheets(sideTeamId: number) {
+    for (const [tourPlayerId, info] of seen) {
+      if (info.teamId !== sideTeamId) continue;
+      const r = resolved.get(tourPlayerId);
+      if (!r || r.player.status === 'trainee') continue;
+      if (!r.club.defensive.has(r.player.position ?? '')) continue;
+      push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'clean_sheet', value: 1, xp: 0.5, recordedBy: null });
+    }
+  }
+
+  let granted = 0;
+  if (statements.length > 0) {
+    const results = await env.DB.batch(statements);
+    // 每条事件两条语句（先 UPDATE 后 INSERT），奇数位 changes=1 表示新入账
+    for (let i = 0; i < statements.length; i += 2) {
+      if ((results[i + 1]?.meta.changes ?? 0) === 1) granted++;
+    }
+  }
+  return { granted, unresolved };
+}
+

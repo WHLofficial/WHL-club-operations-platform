@@ -19,6 +19,8 @@ const TOUR_SCHEMA = `
   CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT);
   CREATE TABLE entry (id INTEGER PRIMARY KEY, tournament_id INTEGER, team_id INTEGER, seed INTEGER);
   CREATE TABLE team (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE player (id INTEGER PRIMARY KEY, team_id INTEGER, name TEXT, number INTEGER);
+  CREATE TABLE match_event (id INTEGER PRIMARY KEY, match_id INTEGER, player_id INTEGER, assist_player_id INTEGER, type TEXT, minute INTEGER);
   CREATE TABLE match (
     id INTEGER PRIMARY KEY, stage_id INTEGER, round INTEGER, slot INTEGER,
     home_entry_id INTEGER, away_entry_id INTEGER,

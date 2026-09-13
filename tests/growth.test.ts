@@ -1,0 +1,404 @@
+// 成长引擎（§10）：XP 补录、赛果确认钩子自动事件、赛季结算（训练营/中国计划/里程碑）、
+// 升级方案二选一、档位核定。幂等锚 = UNIQUE(player_id, match_ref, event_type)。
+import { describe, expect, it } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
+import { app } from '../src/worker/index.ts';
+import type { Env } from '../src/worker/env.ts';
+import { createTestD1, applyMigrations, sqlGet } from './d1.ts';
+import { resetConfigCache } from '../src/core/config.ts';
+import { xpForEvent, milestoneThresholds, milestoneXp } from '../src/worker/growth.ts';
+
+interface Fixture {
+  env: Env;
+  sqlite: DatabaseSync;
+  tour: DatabaseSync;
+  kv: Map<string, string>;
+}
+
+// 比赛系统库表（照 WHL-tournament-management-system 迁移裁剪）：比赛事件含球员/助工者
+const TOUR_SCHEMA = `
+  CREATE TABLE tournament (id INTEGER PRIMARY KEY, name TEXT, status TEXT);
+  CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT);
+  CREATE TABLE entry (id INTEGER PRIMARY KEY, tournament_id INTEGER, team_id INTEGER, seed INTEGER);
+  CREATE TABLE team (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE player (id INTEGER PRIMARY KEY, team_id INTEGER, name TEXT, number INTEGER);
+  CREATE TABLE match_event (id INTEGER PRIMARY KEY, match_id INTEGER, player_id INTEGER, assist_player_id INTEGER, type TEXT, minute INTEGER);
+  CREATE TABLE match (
+    id INTEGER PRIMARY KEY, stage_id INTEGER, round INTEGER, slot INTEGER,
+    home_entry_id INTEGER, away_entry_id INTEGER,
+    score_home INTEGER, score_away INTEGER, pen_home INTEGER, pen_away INTEGER,
+    status TEXT, winner_entry_id INTEGER, finished_at TEXT, walkover_side TEXT DEFAULT ''
+  );`;
+
+function freshEnv(): Fixture {
+  resetConfigCache();
+  const sqlite = new DatabaseSync(':memory:');
+  applyMigrations(sqlite);
+  const tour = new DatabaseSync(':memory:');
+  tour.exec(
+    `${TOUR_SCHEMA}
+     CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
+     INSERT INTO user (id, name, role, locked, must_change_pw) VALUES
+       (1, '管理组甲', 'admin', 0, 0),
+       (2, '教练乙', 'coach', 0, 0);`,
+  );
+  const kv = new Map<string, string>();
+  const env: Env = {
+    DB: createTestD1(sqlite),
+    TOUR_DB: createTestD1(tour),
+    SESSION_KV: {
+      get: async (k: string) => kv.get(k) ?? null,
+      put: async (k: string, v: string) => void kv.set(k, v),
+      delete: async (k: string) => void kv.delete(k),
+    } as unknown as KVNamespace,
+    MEDIA: {} as never,
+    ASSETS: {} as never,
+  };
+  kv.set('sess:tok-admin', JSON.stringify({ userId: 1 }));
+  kv.set('sess:tok-coach', JSON.stringify({ userId: 2 }));
+  return { env, sqlite, tour, kv };
+}
+
+function get(path: string, token: string, env: Env) {
+  return app.request(path, { method: 'GET', headers: { Cookie: `whl_session=${token}` } }, env);
+}
+
+function post(path: string, body: unknown, token: string, env: Env) {
+  return app.request(
+    path,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Cookie: `whl_session=${token}` },
+      body: JSON.stringify(body),
+    },
+    env,
+  );
+}
+
+// 平台侧种子：两家俱乐部六名球员；王五=训练营（不按场次），孙八=中国计划
+function seedPlatform(fx: Fixture): void {
+  fx.sqlite.exec(`
+    INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active'), (2, '曼城', 'premier', 'active');
+    INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, china_plan, ca) VALUES
+      (10, 'p10', '张三', 1, 'ST', 'normal', 3, 0, 0, 80),
+      (11, 'p11', '李四', 1, 'GK', 'normal', 1, 0, 0, 75),
+      (12, 'p12', '王五', 1, 'CM', 'trainee', 1, 0, 0, 60),
+      (20, 'p20', '赵六', 2, 'ST', 'normal', 1, 0, 0, 78),
+      (21, 'p21', '钱七', 2, 'GK', 'normal', 1, 0, 0, 74),
+      (22, 'p22', '孙八', 2, 'CM', 'normal', 2, 0, 1, 70);
+    INSERT INTO contracts (player_id, club_id, contract_type, is_active) VALUES (12, 1, 'trainee', 1);
+    INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (2, 2, '2026-01-01T00:00:00Z');
+  `);
+}
+
+// 比赛系统种子：联赛 900/901 完赛、冠军杯淘汰赛 905 完赛、弃权 903、未完赛 902
+function seedTour(fx: Fixture): void {
+  fx.tour.exec(`
+    INSERT INTO tournament (id, name, status) VALUES (5, 'S3 顶级联赛', 'running'), (6, 'S3 冠军杯', 'running');
+    INSERT INTO stage (id, tournament_id, kind, sort_order, name) VALUES (50, 5, 'round_robin', 1, '常规赛'), (60, 6, 'elim', 1, NULL);
+    INSERT INTO team (id, name) VALUES (1, '阿森纳'), (2, '曼城'), (3, '切尔西');
+    INSERT INTO entry (id, tournament_id, team_id, seed) VALUES (11, 5, 1, 1), (12, 5, 2, 2), (13, 6, 3, 1);
+    INSERT INTO player (id, team_id, name, number) VALUES
+      (101, 1, '张三', 9), (102, 1, '李四', 1), (103, 1, '王五', 8),
+      (201, 2, '赵六', 9), (202, 2, '钱七', 1), (203, 2, '孙九', 7), (301, 3, '孙九', 7);
+    INSERT INTO match (id, stage_id, round, slot, home_entry_id, away_entry_id, score_home, score_away, status, winner_entry_id, finished_at)
+      VALUES (900, 50, 1, 1, 11, 12, 2, 1, 'finished', 11, '2026-07-03T21:00:00Z'),
+             (901, 50, 1, 2, 12, 11, 0, 3, 'finished', 11, '2026-07-04T21:00:00Z'),
+             (902, 50, 2, 1, 11, 12, NULL, NULL, 'pending', NULL, NULL);
+    INSERT INTO match (id, stage_id, round, slot, home_entry_id, away_entry_id, score_home, score_away, status, walkover_side, finished_at)
+      VALUES (903, 60, 1, 1, 13, NULL, 0, 3, 'finished', 'home', '2026-07-05T21:00:00Z');
+    INSERT INTO match (id, stage_id, round, slot, home_entry_id, away_entry_id, score_home, score_away, status, winner_entry_id, finished_at)
+      VALUES (905, 60, 1, 2, 11, 12, 1, 0, 'finished', 11, '2026-07-06T21:00:00Z');
+    INSERT INTO match_event (match_id, player_id, assist_player_id, type, minute) VALUES
+      (900, 101, NULL, 'goal', 10), (900, 101, 103, 'goal', 30), (900, 201, NULL, 'goal', 40),
+      (900, 203, NULL, 'goal', 50), (900, 301, NULL, 'goal', 60),
+      (901, 101, NULL, 'goal', 15), (901, 102, NULL, 'yellow', 70),
+      (905, 201, NULL, 'goal', 25);
+  `);
+}
+
+async function bindSeason(fx: Fixture): Promise<void> {
+  await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
+  await post('/api/admin/windows/open', { season: 3, windowSeq: 1 }, 'tok-admin', fx.env);
+  await post(
+    '/api/admin/seasons/3/bind-tournament',
+    { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+    'tok-admin',
+    fx.env,
+  );
+  // 冠军杯要第二个窗口（一次只能开一个窗）
+  await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+  await post('/api/admin/windows/open', { season: 3, windowSeq: 2 }, 'tok-admin', fx.env);
+  await post(
+    '/api/admin/seasons/3/bind-tournament',
+    { windowSeq: 2, tournamentId: 6, competitionType: 'champions_cup' },
+    'tok-admin',
+    fx.env,
+  );
+}
+
+function xpOf(fx: Fixture, playerId: number): number {
+  return sqlGet<{ growth_xp: number }>(fx.sqlite, 'SELECT growth_xp FROM players WHERE id = ?', playerId)?.growth_xp ?? 0;
+}
+
+describe('XP 计算函数（§10.1 表）', () => {
+  it('评分 7-10 分档；进球/助攻/零封 0.5；夺权每 12 次；扑救每 8 次 + 单场超 8 额外 1', () => {
+    expect(xpForEvent('appearance', 1)).toBe(1);
+    expect(xpForEvent('rating', 6.9)).toBe(0);
+    expect(xpForEvent('rating', 7)).toBe(1);
+    expect(xpForEvent('rating', 7.9)).toBe(1);
+    expect(xpForEvent('rating', 8)).toBe(2);
+    expect(xpForEvent('rating', 9.5)).toBe(3);
+    expect(xpForEvent('rating', 10)).toBe(4);
+    expect(xpForEvent('goal', 1)).toBe(0.5);
+    expect(xpForEvent('clean_sheet', 1)).toBe(0.5);
+    expect(xpForEvent('duels_won', 24)).toBe(2);
+    expect(xpForEvent('saves', 8)).toBe(1);
+    expect(xpForEvent('saves', 9)).toBe(2);
+  });
+
+  it('里程碑阈值 5/10/15/20 之后每 +5（无上限，去重锚保证每档只发一次）', () => {
+    expect(milestoneThresholds(4)).toEqual([]);
+    expect(milestoneThresholds(17)).toEqual([5, 10, 15]);
+    expect(milestoneThresholds(26)).toEqual([5, 10, 15, 20, 25]);
+    const far = milestoneThresholds(999);
+    expect(far).toHaveLength(199); // 5, 10, …, 995
+    expect(far.at(-1)).toBe(995);
+    expect(milestoneXp(5)).toBe(1);
+    expect(milestoneXp(10)).toBe(2);
+    expect(milestoneXp(15)).toBe(3);
+    expect(milestoneXp(25)).toBe(4);
+  });
+});
+
+describe('XP 补录（附录 A〔6〕）', () => {
+  it('评分/夺权/扑救/出场按表入账；XP 服务端算；审计留痕', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+
+    const rating = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 8.5, matchRef: 'manual:r1' }, 'tok-admin', fx.env);
+    expect(rating.status).toBe(201);
+    expect(((await rating.json()) as { xp: number }).xp).toBe(2);
+    expect(xpOf(fx, 10)).toBe(2);
+
+    const duels = await post('/api/admin/growth/events', { playerId: 10, eventType: 'duels_won', value: 25, matchRef: 'manual:d1' }, 'tok-admin', fx.env);
+    expect(((await duels.json()) as { xp: number }).xp).toBe(2);
+    const saves = await post('/api/admin/growth/events', { playerId: 21, eventType: 'saves', value: 9, matchRef: 'manual:s1' }, 'tok-admin', fx.env);
+    expect(((await saves.json()) as { xp: number }).xp).toBe(2);
+    const appearance = await post('/api/admin/growth/events', { playerId: 20, eventType: 'appearance' }, 'tok-admin', fx.env);
+    expect(((await appearance.json()) as { xp: number }).xp).toBe(1);
+    expect(xpOf(fx, 20)).toBe(1);
+
+    expect(sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'growth_manual_event'")?.action).toBe('growth_manual_event');
+  });
+
+  it('重复补录（同 matchRef+事件）标记 duplicate 且 XP 不重复加；越界/非法/教练全拒', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+
+    const first = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 9, matchRef: 'manual:x' }, 'tok-admin', fx.env);
+    expect(first.status).toBe(201);
+    const again = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 9, matchRef: 'manual:x' }, 'tok-admin', fx.env);
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { duplicate: boolean }).duplicate).toBe(true);
+    expect(xpOf(fx, 10)).toBe(3);
+
+    const lowRating = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 6.5 }, 'tok-admin', fx.env);
+    expect(lowRating.status).toBe(400);
+    const badType = await post('/api/admin/growth/events', { playerId: 10, eventType: 'goal' }, 'tok-admin', fx.env);
+    expect(badType.status).toBe(400);
+    const badCount = await post('/api/admin/growth/events', { playerId: 10, eventType: 'saves', value: -3 }, 'tok-admin', fx.env);
+    expect(badCount.status).toBe(400);
+    const noPlayer = await post('/api/admin/growth/events', { playerId: 999, eventType: 'appearance' }, 'tok-admin', fx.env);
+    expect(noPlayer.status).toBe(404);
+    const coach = await post('/api/admin/growth/events', { playerId: 10, eventType: 'appearance' }, 'tok-coach', fx.env);
+    expect(coach.status).toBe(403);
+  });
+});
+
+describe('赛果确认钩子：自动 XP（§15 假设 20-22）', () => {
+  it('按队名+球员名匹配入出场/进球/助攻/零封；训练营不记；解不开进 unresolved', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    seedTour(fx);
+    await bindSeason(fx);
+
+    // 900 阿森纳 2:1 曼城：张三 2 球、王五(训练营)助攻、赵六 1 球；孙九(曼城)/孙九(切尔西)解不开
+    const c900 = await post('/api/admin/results/900/confirm', {}, 'tok-admin', fx.env);
+    expect(c900.status).toBe(201);
+    const xp900 = ((await c900.json()) as { xp: { granted: number; unresolved: string[] } }).xp;
+    expect(xp900.granted).toBe(4); // 出场 2 + 张三两球合成一条(value2) + 赵六一球
+    expect(xp900.unresolved).toEqual(expect.arrayContaining(['曼城·孙九', '俱乐部「切尔西」']));
+    expect(xpOf(fx, 10)).toBe(2); // 出场 1 + 两球 1（0.5×2）
+    expect(sqlGet<{ value: number; xp: number }>(fx.sqlite, "SELECT value, xp FROM growth_events WHERE player_id = 10 AND event_type = 'goal'")).toMatchObject({
+      value: 2,
+      xp: 1,
+    });
+    expect(xpOf(fx, 20)).toBe(1.5); // 出场 1 + 一球 0.5
+    expect(xpOf(fx, 12)).toBe(0); // 训练营不按场次
+
+    // 901 曼城 0:3 阿森纳：张三 1 球 + 李四(GK，黄牌在场)；阿森纳零封 → 李四 出场+零封
+    const c901 = await post('/api/admin/results/901/confirm', {}, 'tok-admin', fx.env);
+    expect(c901.status).toBe(201);
+    expect((((await c901.json()) as { xp: { granted: number } }).xp).granted).toBe(4); // 出场 2 + 张三进球 1 + 零封 1
+    expect(xpOf(fx, 10)).toBe(3.5); // 再 + 出场 1 + 一球 0.5
+    expect(xpOf(fx, 11)).toBe(1.5); // 出场 1 + 零封 0.5
+
+    const events = sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE event_type = 'clean_sheet'")?.n;
+    expect(events).toBe(1);
+  });
+
+  it('冠军杯淘汰赛与弃权场不计 XP（限联赛与冠军杯小组赛）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    seedTour(fx);
+    await bindSeason(fx);
+
+    const knockout = await post('/api/admin/results/905/confirm', {}, 'tok-admin', fx.env);
+    expect(knockout.status).toBe(201);
+    expect((((await knockout.json()) as { xp: { granted: number } }).xp).granted).toBe(0);
+
+    const walkover = await post('/api/admin/results/903/confirm', {}, 'tok-admin', fx.env);
+    expect(walkover.status).toBe(201);
+    expect((((await walkover.json()) as { xp: { granted: number } }).xp).granted).toBe(0);
+
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM growth_events')?.n).toBe(0);
+    expect(xpOf(fx, 20)).toBe(0);
+  });
+});
+
+describe('赛季结算（§10.1）：训练营/中国计划/里程碑', () => {
+  it('训练营 40、中国计划 +20、进+攻 5 球补发里程碑；重放幂等不重复加', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 哈兰德已入 6 球事件（xp 3）→ 结算补发 milestone:5（+1）
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca) VALUES (30, 'p30', '哈兰德', 1, 'ST', 'normal', 2, 3, 85);
+      INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES
+        (30, 'ms1', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'), (30, 'ms2', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'),
+        (30, 'ms3', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'), (30, 'ms4', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'),
+        (30, 'ms5', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'), (30, 'ms6', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z');
+    `);
+
+    const run1 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(run1.status).toBe(200);
+    const s1 = (await run1.json()) as {
+      traineeCount: number;
+      traineeXp: number;
+      chinaCount: number;
+      milestonesGranted: number;
+      pendingLevelUps: { playerId: number; pending: number }[];
+    };
+    expect(s1.traineeCount).toBe(1);
+    expect(s1.traineeXp).toBe(40);
+    expect(s1.chinaCount).toBe(1);
+    expect(s1.milestonesGranted).toBe(1);
+    expect(s1.pendingLevelUps).toEqual(expect.arrayContaining([{ playerId: 12, name: '王五', growthTier: 1, pending: 4 }]));
+    expect(s1.pendingLevelUps.find((p) => p.playerId === 30)).toBeUndefined(); // 4 XP 不到一级
+
+    expect(xpOf(fx, 12)).toBe(40);
+    expect(xpOf(fx, 22)).toBe(20);
+    expect(xpOf(fx, 30)).toBe(4);
+    expect(sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'growth_settlement'")?.action).toBe('growth_settlement');
+
+    // 重放：全部命中去重锚，XP 与计数不再变
+    const run2 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    const s2 = (await run2.json()) as typeof s1;
+    expect(s2.traineeCount).toBe(1);
+    expect(s2.milestonesGranted).toBe(0);
+    expect(xpOf(fx, 12)).toBe(40);
+    expect(xpOf(fx, 22)).toBe(20);
+    expect(xpOf(fx, 30)).toBe(4);
+  });
+
+  it('season 非法 400', async () => {
+    const fx = freshEnv();
+    const bad = await post('/api/admin/growth/settlement/run', { season: 0 }, 'tok-admin', fx.env);
+    expect(bad.status).toBe(400);
+  });
+});
+
+describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
+  it('档 3 两方案逐次消费；CA/银徽章按方案落账；待办清零后 409；越界 400', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec("UPDATE players SET growth_xp = 25 WHERE id = 10"); // 待办 2
+
+    const lv1 = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    expect(lv1.status).toBe(200);
+    const r1 = (await lv1.json()) as { plan: { ca: number }; levelsApplied: number; pendingLeft: number };
+    expect(r1.plan).toEqual({ ca: 3, silver: 0, gold: 0 });
+    expect(r1.levelsApplied).toBe(1);
+    expect(r1.pendingLeft).toBe(1);
+    expect(sqlGet<{ ca: number }>(fx.sqlite, 'SELECT ca FROM players WHERE id = 10')?.ca).toBe(83);
+
+    const outOfRange = await post('/api/growth/levelup/10', { planIndex: 5 }, 'tok-admin', fx.env); // 有待办但方案号越界
+    expect(outOfRange.status).toBe(400);
+
+    const lv2 = await post('/api/growth/levelup/10', { planIndex: 1 }, 'tok-admin', fx.env);
+    const r2 = (await lv2.json()) as { plan: { ca: number; silver: number }; levelsApplied: number };
+    expect(r2.plan).toEqual({ ca: 2, silver: 1, gold: 0 });
+    expect(r2.levelsApplied).toBe(2);
+    expect(sqlGet<{ ca: number; badges_silver: number }>(fx.sqlite, 'SELECT ca, badges_silver FROM players WHERE id = 10')).toMatchObject({ ca: 85, badges_silver: 1 });
+
+    const drained = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    expect(drained.status).toBe(409);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE event_type = 'levelup'")?.n).toBe(2);
+
+    const growth = (await (await get('/api/players/10/growth', 'tok-admin', fx.env)).json()) as {
+      player: { pendingLevelUps: number; growthXp: number; upgradePlans: unknown[] };
+      events: { eventType: string; matchRef: string | null }[];
+    };
+    expect(growth.player.pendingLevelUps).toBe(0);
+    expect(growth.player.growthXp).toBe(25);
+    expect(growth.player.upgradePlans).toHaveLength(2);
+    expect(growth.events.map((e) => e.matchRef)).toEqual(expect.arrayContaining(['levelup:1', 'levelup:2']));
+  });
+
+  it('徽章封顶：银 15/金 3 到帽后不再加，CA 照加', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca, badges_silver, badges_gold) VALUES
+        (40, 'p40', '老将', 1, 'ST', 'normal', 5, 10, 90, 15, 3);
+    `);
+
+    const lv = await post('/api/growth/levelup/40', { planIndex: 2 }, 'tok-admin', fx.env); // [3CA+2银]
+    expect(lv.status).toBe(200);
+    expect(sqlGet<{ ca: number; badges_silver: number; badges_gold: number }>(fx.sqlite, 'SELECT ca, badges_silver, badges_gold FROM players WHERE id = 40')).toMatchObject({
+      ca: 93,
+      badges_silver: 15,
+      badges_gold: 3,
+    });
+  });
+
+  it('非管理组只能给自己俱乐部球员升级；未登录 401', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec("UPDATE players SET growth_xp = 12 WHERE id = 20");
+
+    const other = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach', fx.env); // 张三属阿森纳
+    expect(other.status).toBe(403);
+    const mine = await post('/api/growth/levelup/20', { planIndex: 0 }, 'tok-coach', fx.env); // 赵六属曼城
+    expect(mine.status).toBe(200);
+    expect(sqlGet<{ ca: number }>(fx.sqlite, 'SELECT ca FROM players WHERE id = 20')?.ca).toBe(79); // 档1 方案 +1CA
+
+    const anon = await app.request('/api/growth/levelup/20', { method: 'POST', body: JSON.stringify({ planIndex: 0 }) }, fx.env);
+    expect(anon.status).toBe(401);
+  });
+
+  it('档位核定 1-5 落库+审计；越界 400', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+
+    const ok = await post('/api/admin/growth/10/tier', { tier: 5 }, 'tok-admin', fx.env);
+    expect(ok.status).toBe(200);
+    expect(sqlGet<{ growth_tier: number }>(fx.sqlite, 'SELECT growth_tier FROM players WHERE id = 10')?.growth_tier).toBe(5);
+    expect(sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'growth_tier_set'")?.action).toBe('growth_tier_set');
+
+    const bad = await post('/api/admin/growth/10/tier', { tier: 6 }, 'tok-admin', fx.env);
+    expect(bad.status).toBe(400);
+    const coach = await post('/api/admin/growth/10/tier', { tier: 3 }, 'tok-coach', fx.env);
+    expect(coach.status).toBe(403);
+  });
+});

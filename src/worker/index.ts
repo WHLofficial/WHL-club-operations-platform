@@ -9,6 +9,7 @@ import seasonsRoutes from './routes/seasons.ts';
 import marketRoutes from './routes/market.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
+import growthRoutes from './routes/growth.ts';
 import adminRoutes from './routes/admin.ts';
 import { settleOverdue } from './market-settle.ts';
 
@@ -21,6 +22,7 @@ app.route('/api', seasonsRoutes);
 app.route('/api', marketRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
+app.route('/api', growthRoutes);
 app.route('/api/admin', adminRoutes);
 
 app.onError((err, c) => {

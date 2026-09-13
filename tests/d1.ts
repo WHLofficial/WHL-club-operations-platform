@@ -72,6 +72,7 @@ const MIGRATION_FILES = [
   '0007_negotiation_settle.sql',
   '0008_activation_match.sql',
   '0009_results.sql',
+  '0010_growth.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync): void {
