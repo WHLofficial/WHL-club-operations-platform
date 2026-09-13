@@ -444,7 +444,7 @@ function GrowthBlock({
                   <td className="mono">{e.createdAt.slice(0, 10)}</td>
                   <td>
                     {GROWTH_EVENT_LABEL[e.eventType] ?? e.eventType}
-                    {e.eventType === 'milestone' ? `（${e.value} 球）` : ''}
+                    {e.eventType === 'milestone' ? `（进+攻 ${e.value}）` : ''}
                   </td>
                   <td className="mono">{e.value}</td>
                   <td className="mono">+{e.xp}</td>

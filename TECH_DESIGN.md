@@ -775,6 +775,10 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 17 | 已定 | 激活挂牌无公开竞价段（§6.2 修正定稿）：5 分钟首价窗内激活方落价即成交价，首价后训练营球员直进待审、正式球员进 24h 匹配窗；激活挂牌永不开放后续竞价 |
 | 18 | 已定 | 4.4.10 窗内回滚口径：还原 RC 与保护期（仍归属原队时）+ 退还续约费（rc_change_refund）；工资不随回滚（已谈成的工资是谈判终局，恢复会破坏谈判快照口径） |
 | 19 | 已定 | 解约属性恢复：CA 恢复 base_ca（players.base_ca 缺省时保持现 CA）；合同行 is_active=0 留档（复签海捞走 UPSERT 翻新，contracts.player_id 全局唯一） |
+| 20 | 已定 | 自动 XP 球员匹配：比赛系统队名 = 平台俱乐部名 → 比赛系统球员名 = 平台名单名（clubs 无 tour team 键、tour player.id 与平台 uid/fc_id 无关，不建映射表）；解不开的进 confirm 响应 `xp.unresolved` 由管理组补录兜底 |
+| 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
+| 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
+| 23 | 假设 | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮（/api/me/notifications）延后 P1，MVP 只走 QQ 推送 |
 
 ## 16. 测试策略
 
@@ -868,9 +872,10 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 成长 | GET `/api/players/:id/growth` | 🌐 | XP 事件与成长史〔6〕 |
 | 成长 | POST `/api/admin/growth/events` | 🛡 | 补录（评分/扑救/夺权）〔6〕 |
 | 成长 | POST `/api/admin/growth/settlement/run` | 🛡 | 赛季结算（XP/升级待办/忠诚奖金 P1）〔6〕 |
-| 成长 | POST `/api/growth/levelup/:playerId` | 👤 | 升级方案二选一〔6〕 |
-| 通知 | GET `/api/me/notifications?cursor=` | 👤 | 收件篮〔6〕 |
-| 监管 | GET `/api/admin/m0` | 🛡 | M0 报表〔6〕 |
+| 成长 | POST `/api/growth/levelup/:playerId` | 👤 | 升级方案二选一（本队教练或管理组）〔6〕 |
+| 成长 | POST `/api/admin/growth/:playerId/tier` | 🛡 | 档位核定 1-5（§10.3）〔6〕 |
+| 通知 | bot 投递（无 web 端点）：cron 每 5 分钟扫 notifications pending → HMAC POST 到 AstrBot 插件（§12；MVP 写入点=赛果确认/升级，假设 23） | 内部 | QQ 推送〔6〕；web 收件篮 P1 |
+| 监管 | GET `/api/admin/m0` | 🛡 | M0 报表（Σ余额/冻结/kind 分解/俱乐部明细）〔6〕 |
 | 监管 | POST `/api/cron/tick`（X-Cron-Key） | 内部 | 手动触发惰性结算（与 scheduled 等价）〔3〕 |
 
 > 契约细节（出入参 schema）随各增量实现时在前端 api 层与 Vitest 契约测试中冻结；本表只冻结路径/权限/时点，防范围漂移。

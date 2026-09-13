@@ -237,7 +237,13 @@ export async function confirmResult(
     throw err;
   }
 
-  const row = await env.DB.prepare('SELECT * FROM result_confirmations WHERE match_id = ?').bind(matchId).first();
+  const row = await env.DB.prepare(
+    `SELECT id, match_id, season, window_seq, competition_type, stage_name, round,
+            home_team, away_team, score_home, score_away, winner_team, confirmed_at
+     FROM result_confirmations WHERE match_id = ?`,
+  )
+    .bind(matchId)
+    .first();
   // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知（§12，尽力而为不阻塞确认）
   const xp = await recordAutoXpForMatch(env, matchId, m, binding);
   await queueResultNotifications(env, binding, m);

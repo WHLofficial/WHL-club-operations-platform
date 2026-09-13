@@ -568,7 +568,7 @@ app.post('/growth/events', async (c) => {
   } else if (eventType === 'duels_won' || eventType === 'saves') {
     if (!Number.isInteger(value) || value <= 0) throw new HttpError(400, '次数要是正整数');
   }
-  const xp = xpForEvent(eventType as 'rating', value);
+  const xp = xpForEvent(eventType as GrowthEventType, value);
   if (xp <= 0) throw new HttpError(400, '这个数值达不到记 XP 的标准');
 
   const matchRef = typeof body?.matchRef === 'string' && body.matchRef.trim() !== '' ? body.matchRef.trim().slice(0, 40) : `manual:${Date.now()}`;

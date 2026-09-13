@@ -1769,8 +1769,12 @@ function ResultsSection() {
     if (armedId !== matchId || busyId !== null) return;
     setBusyId(matchId);
     try {
-      await apiPost<ConfirmResultResult>(`/api/admin/results/${matchId}/confirm`, {});
-      show('赛果已确认入档。');
+      const r = await apiPost<ConfirmResultResult>(`/api/admin/results/${matchId}/confirm`, {});
+      const unresolvedNote =
+        r.xp.unresolved.length > 0
+          ? `有 ${r.xp.unresolved.length} 个球员没匹配上（${r.xp.unresolved.join('、')}），请到「成长引擎」补录。`
+          : '';
+      show(`赛果已确认入档${r.xp.granted > 0 ? `，自动记了 ${r.xp.granted} 条 XP 事件` : ''}。${unresolvedNote}`);
       setArmedId(null);
       reload();
     } catch (err) {
