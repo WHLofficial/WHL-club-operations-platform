@@ -797,3 +797,18 @@ export const MANUAL_GROWTH_TYPES: { type: string; label: string; hint: string; n
   { type: 'duels_won', label: '夺回球权', hint: '每 12 次 1 XP', needsValue: true },
   { type: 'saves', label: '扑救', hint: '每 8 次 1 XP，单场超 8 额外 +1', needsValue: true },
 ];
+
+// ---- M0 货币监控（PRD：Σ俱乐部余额报表，观察通胀） ----
+
+export interface M0Report {
+  /** 货币总量：Σ ledger_accounts.balance */
+  m0: number;
+  /** 冻结中资金（fund_holds held） */
+  held: number;
+  /** 可流动 = M0 − 冻结 */
+  available: number;
+  /** 各记账 kind 净额（收入为正、支出为负），观察通胀来源 */
+  byKind: { kind: string; total: number; n: number }[];
+  /** 按余额降序的俱乐部明细 */
+  byClub: { id: number; name: string; balance: number }[];
+}

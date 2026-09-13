@@ -214,3 +214,52 @@ describe('手动记账兜底（§7.1 manual_adjust / prize_*，§9.1）', () => 
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM ledger_entries')?.n).toBe(0);
   });
 });
+
+describe('M0 货币监控（PRD：Σ俱乐部余额报表）', () => {
+  it('总量=Σ俱乐部余额，冻结单列，kind 分解与俱乐部明细；教练 403', async () => {
+    const fx = freshEnv();
+    const clubId = await bindCoach(fx);
+    await seedOpening(fx, clubId, 100);
+
+    // 出账 12.5 进冻结（held），再解冻 3 → 余额不变、held=9.5
+    const hold = await post(`/api/club/ledger/hold`, {}, 'tok-coach', fx.env);
+    expect(hold.status).toBe(404); // 平台没有直接 hold 端点：冻结经出价产生，这里只校验报表口径
+    await fx.sqlite.exec(
+      `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+       VALUES (${clubId}, 9.5, 'held', 'bid', 1, '2026-01-01T00:00:00Z')`,
+    );
+    // 手动记账出账 5 → M0 相应减少
+    await post('/api/admin/ledger/manual', { clubId, kind: 'manual_adjust', amount: -5, memo: '校准扣减' }, 'tok-admin', fx.env);
+
+    const res = await get('/api/admin/m0', 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    const report = (await res.json()) as {
+      m0: number;
+      held: number;
+      available: number;
+      byKind: { kind: string; total: number; n: number }[];
+      byClub: { id: number; name: string; balance: number }[];
+    };
+    expect(report.m0).toBeCloseTo(95, 6); // 100 − 5
+    expect(report.held).toBeCloseTo(9.5, 6);
+    expect(report.available).toBeCloseTo(85.5, 6);
+    expect(report.byClub).toHaveLength(1);
+    expect(report.byClub[0]).toMatchObject({ id: clubId, name: '阿森纳', balance: 95 });
+    const kinds = Object.fromEntries(report.byKind.map((k) => [k.kind, k]));
+    expect(kinds.opening_import?.total).toBeCloseTo(100, 6);
+    expect(kinds.manual_adjust?.total).toBeCloseTo(-5, 6);
+
+    const forbidden = await get('/api/admin/m0', 'tok-coach', fx.env);
+    expect(forbidden.status).toBe(403);
+  });
+
+  it('空库：M0=0，明细为空', async () => {
+    const fx = freshEnv();
+    const res = await get('/api/admin/m0', 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    const report = (await res.json()) as { m0: number; byKind: unknown[]; byClub: unknown[] };
+    expect(report.m0).toBe(0);
+    expect(report.byKind).toEqual([]);
+    expect(report.byClub).toEqual([]);
+  });
+});

@@ -623,6 +623,33 @@ app.post('/growth/:playerId/tier', async (c) => {
   return c.json({ ok: true, tier });
 });
 
+// ---- M0 货币监控（PRD：M0 = Σ俱乐部余额报表，观察通胀；附录 A〔6〕🛡） ----
+
+app.get('/m0', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const [m0, held, kinds, clubs] = await Promise.all([
+    c.env.DB.prepare('SELECT COALESCE(SUM(balance), 0) AS m0 FROM ledger_accounts').first<{ m0: number }>(),
+    c.env.DB.prepare("SELECT COALESCE(SUM(amount), 0) AS held FROM fund_holds WHERE status = 'held'").first<{ held: number }>(),
+    c.env.DB.prepare('SELECT kind, SUM(amount) AS total, COUNT(*) AS n FROM ledger_entries GROUP BY kind ORDER BY total LIMIT 30').all<{
+      kind: string;
+      total: number;
+      n: number;
+    }>(),
+    c.env.DB.prepare(
+      `SELECT c.id, c.name, COALESCE(a.balance, 0) AS balance
+       FROM clubs c LEFT JOIN ledger_accounts a ON a.club_id = c.id
+       ORDER BY a.balance DESC, c.id LIMIT 200`,
+    ).all<{ id: number; name: string; balance: number }>(),
+  ]);
+  return c.json({
+    m0: m0?.m0 ?? 0,
+    held: held?.held ?? 0,
+    available: (m0?.m0 ?? 0) - (held?.held ?? 0),
+    byKind: kinds.results,
+    byClub: clubs.results,
+  });
+});
+
 // ---- 注册快照与准入体检（附录 A〔2〕） ----
 
 // GET /api/admin/registrations?season= —— 注册快照按俱乐部分组；season 缺省取最新有快照的赛季
