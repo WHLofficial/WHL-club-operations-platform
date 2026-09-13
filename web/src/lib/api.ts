@@ -620,3 +620,87 @@ export const MANUAL_LEDGER_KINDS: ManualLedgerKind[] = [
   { value: 'prize_super_win', label: '超级杯 · 胜', reference: 4.0 },
   { value: 'prize_super_loss', label: '超级杯 · 负', reference: 2.0 },
 ];
+
+export interface SeasonCurrent {
+  season: { season: number; status: string } | null;
+  window: {
+    season: number;
+    windowSeq: number;
+    status: string;
+    tournamentId: number | null;
+    competitionType: string | null;
+    openedAt: string | null;
+    closedAt: string | null;
+  } | null;
+}
+
+export interface TournamentRow {
+  id: number;
+  name: string;
+  status: string;
+}
+
+export interface BindTournamentResult {
+  ok: boolean;
+  tournament: { id: number; name: string };
+}
+
+export interface ResultQueueRow {
+  matchId: number;
+  season: number;
+  windowSeq: number;
+  competitionType: string | null;
+  stageName: string | null;
+  round: number | null;
+  homeTeam: string | null;
+  awayTeam: string | null;
+  scoreHome: number | null;
+  scoreAway: number | null;
+  penHome: number | null;
+  penAway: number | null;
+  walkoverSide: string | null;
+  winnerTeam: string | null;
+  finishedAt: string | null;
+}
+
+export interface ConfirmedResultRow {
+  id: number;
+  matchId: number;
+  season: number;
+  windowSeq: number;
+  competitionType: string | null;
+  stageName: string | null;
+  round: number | null;
+  homeTeam: string | null;
+  awayTeam: string | null;
+  scoreHome: number | null;
+  scoreAway: number | null;
+  winnerTeam: string | null;
+  confirmedAt: string;
+}
+
+export interface ResultsQueue {
+  queue: ResultQueueRow[];
+  confirmed: ConfirmedResultRow[];
+}
+
+export interface ConfirmResultResult {
+  ok: boolean;
+  result: ConfirmedResultRow;
+}
+
+/** season_windows.competition_type 中文标签（§11） */
+export const COMPETITION_TYPE_LABEL: Record<string, string> = {
+  league_premier: '顶级联赛',
+  league_second: '次级联赛',
+  champions_cup: '冠军杯',
+  super_cup: '超级杯',
+  qualifying: '资格赛',
+};
+
+export const TOUR_STATUS_LABEL: Record<string, string> = {
+  draft: '筹备中',
+  registering: '报名中',
+  running: '进行中',
+  archived: '已归档',
+};

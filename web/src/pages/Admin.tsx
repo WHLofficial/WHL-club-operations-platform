@@ -1,20 +1,24 @@
 // 管理端（增量 1+2+3+5+6）：建队与认证码、球员导入管线（两段式）、名单合同模板导入、期初余额、手动记账、
-// 注册体检、审核队列（含旁路单据）、转会窗口状态机、强制拍卖、config 查看
+// 注册体检、审核队列（含旁路单据）、转会窗口状态机、赛季与赛事绑定、赛果确认、强制拍卖、config 查看
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
   apiPost,
+  COMPETITION_TYPE_LABEL,
   MANUAL_LEDGER_KINDS,
   TOUR_SITE_URL,
+  TOUR_STATUS_LABEL,
   type AdminClubRow,
   type AdminRegistrations,
   type AdminReviewRow,
   type AdminReviews,
+  type BindTournamentResult,
   type CloseWindowResult,
   type ComplianceReport,
   type ConfigRow,
   type ContractImportConfirm,
   type ContractImportPreview,
+  type ConfirmResultResult,
   type ForcedAuctionResult,
   type ImportConfirm,
   type ImportPreview,
@@ -23,6 +27,10 @@ import {
   type MeUser,
   type OpenWindowResult,
   type OpeningImportResult,
+  type ResultsQueue,
+  type SeasonCurrent,
+  type TournamentRow,
+  type WindowRow,
   type WindowsResponse,
 } from '../lib/api.ts';
 import { LEAGUE_TIER_LABEL } from '../lib/ref.ts';
@@ -84,6 +92,7 @@ export default function Admin({ user }: { user: MeUser | null | undefined }) {
       <h1>管理端</h1>
       {user?.role === 'admin' ? (
         <>
+          <SeasonsSection />
           <WindowsSection />
           <ClubsSection />
           <ImportSection />
@@ -91,6 +100,7 @@ export default function Admin({ user }: { user: MeUser | null | undefined }) {
           <RegistrationsSection />
           <ForcedAuctionSection />
           <ReviewsSection />
+          <ResultsSection />
           <OpeningBalanceSection />
           <ManualLedgerSection />
           <ConfigSection />
@@ -1542,6 +1552,314 @@ function OpeningBalanceSection() {
       <button className="btn" type="button" disabled={busy || !valid || parsed.length === 0 || text.trim() === ''} onClick={runImport}>
         {busy ? '入账中…' : '导入期初余额'}
       </button>
+    </section>
+  );
+}
+
+/* ---------- 赛季与赛事绑定（§11） ---------- */
+
+function SeasonsSection() {
+  const { show, toastNode } = useToast();
+  const [current, setCurrent] = useState<SeasonCurrent | null>(null);
+  const [windows, setWindows] = useState<WindowRow[]>([]);
+  const [tournaments, setTournaments] = useState<TournamentRow[]>([]);
+  const [newSeason, setNewSeason] = useState('');
+  const [seasonArmed, setSeasonArmed] = useState(false);
+  const [bindWindow, setBindWindow] = useState('');
+  const [bindTournament, setBindTournament] = useState('');
+  const [bindType, setBindType] = useState('league_premier');
+  const [bindArmed, setBindArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(() => {
+    api<SeasonCurrent>('/api/seasons/current').then(setCurrent).catch(() => undefined);
+    api<WindowsResponse>('/api/admin/windows')
+      .then((d) => setWindows(d.windows))
+      .catch(() => undefined);
+    api<{ tournaments: TournamentRow[] }>('/api/admin/tournaments')
+      .then((d) => setTournaments(d.tournaments))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const newSeasonValid = Number.isInteger(Number(newSeason)) && Number(newSeason) > 0;
+  const bindValid = bindWindow !== '' && bindTournament !== '';
+
+  async function createSeason() {
+    if (busy || !seasonArmed || !newSeasonValid) return;
+    setBusy(true);
+    try {
+      await apiPost<{ ok: boolean }>('/api/admin/seasons', { season: Number(newSeason) });
+      show(`赛季 ${Number(newSeason)} 已建档，进入备赛期。`);
+      setNewSeason('');
+      setSeasonArmed(false);
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '建档失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function bind() {
+    if (busy || !bindArmed || !bindValid) return;
+    setBusy(true);
+    try {
+      const [season, windowSeq] = bindWindow.split(':').map(Number);
+      const res = await apiPost<BindTournamentResult>(`/api/admin/seasons/${season}/bind-tournament`, {
+        windowSeq,
+        tournamentId: Number(bindTournament),
+        competitionType: bindType,
+      });
+      show(`已把「${res.tournament.name}」绑到这个窗口，完赛场次会进赛果确认队列。`);
+      setBindArmed(false);
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '绑定失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const SEASON_STATUS: Record<string, string> = { preparing: '备赛期', running: '进行中', settled: '已结算' };
+  const win = current?.window ?? null;
+
+  return (
+    <section className="card admin-section">
+      <h2>赛季与赛事绑定</h2>
+      {toastNode}
+      {current && (
+        <p className="hint">
+          当前赛季：
+          {current.season ? (
+            <>
+              S{current.season.season}（{SEASON_STATUS[current.season.status] ?? current.season.status}）
+            </>
+          ) : (
+            '还没建赛季'
+          )}
+          ；最新窗口：
+          {win ? (
+            <>
+              S{win.season}·窗{win.windowSeq}（{win.status === 'open' ? '开放中' : '已关闭'}）
+              {win.tournamentId ? `，已绑赛事 #${win.tournamentId} · ${COMPETITION_TYPE_LABEL[win.competitionType ?? ''] ?? win.competitionType}` : '，未绑定赛事'}
+            </>
+          ) : (
+            '还没开过窗'
+          )}
+          。
+        </p>
+      )}
+      <div className="inline-form">
+        <label className="field">
+          新建赛季（编号）
+          <input
+            value={newSeason}
+            onChange={(e) => {
+              setNewSeason(e.target.value);
+              setSeasonArmed(false);
+            }}
+            placeholder="4"
+          />
+        </label>
+        <button
+          className={`btn${seasonArmed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={busy || !newSeasonValid}
+          onClick={() => (seasonArmed ? createSeason() : setSeasonArmed(true))}
+        >
+          {seasonArmed ? '确认建档（再点一次）' : '建档'}
+        </button>
+      </div>
+      <div className="inline-form">
+        <label className="field">
+          窗口
+          <select
+            value={bindWindow}
+            onChange={(e) => {
+              setBindWindow(e.target.value);
+              setBindArmed(false);
+            }}
+          >
+            <option value="">选窗口…</option>
+            {windows.map((w) => (
+              <option key={`${w.season}:${w.windowSeq}`} value={`${w.season}:${w.windowSeq}`}>
+                S{w.season}·窗{w.windowSeq}（{w.status === 'open' ? '开放中' : '已关闭'}）
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          赛事（比赛系统）
+          <select
+            value={bindTournament}
+            onChange={(e) => {
+              setBindTournament(e.target.value);
+              setBindArmed(false);
+            }}
+          >
+            <option value="">选赛事…</option>
+            {tournaments.map((t) => (
+              <option key={t.id} value={t.id}>
+                #{t.id} {t.name}（{TOUR_STATUS_LABEL[t.status] ?? t.status}）
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          竞赛类型
+          <select
+            value={bindType}
+            onChange={(e) => {
+              setBindType(e.target.value);
+              setBindArmed(false);
+            }}
+          >
+            {Object.entries(COMPETITION_TYPE_LABEL).map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className={`btn${bindArmed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={busy || !bindValid}
+          onClick={() => (bindArmed ? bind() : setBindArmed(true))}
+        >
+          {bindArmed ? '确认绑定（再点一次）' : '绑定赛事'}
+        </button>
+      </div>
+      <p className="hint">一座赛事只能绑一个窗口；确认赛果时按当时比分定格快照，之后比赛系统改判不影响已入档记录。</p>
+    </section>
+  );
+}
+
+/* ---------- 赛果确认（附录 A〔6〕，确认钩子触发 XP/通知） ---------- */
+
+function resultScoreLine(r: { homeTeam: string | null; awayTeam: string | null; scoreHome: number | null; scoreAway: number | null }): string {
+  return `${r.homeTeam ?? '—'} ${r.scoreHome ?? '-'} : ${r.scoreAway ?? '-'} ${r.awayTeam ?? '—'}`;
+}
+
+function ResultsSection() {
+  const { show, toastNode } = useToast();
+  const [data, setData] = useState<ResultsQueue | null>(null);
+  const [armedId, setArmedId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const reload = useCallback(() => {
+    api<ResultsQueue>('/api/admin/results/queue')
+      .then(setData)
+      .catch(() => setData({ queue: [], confirmed: [] }));
+  }, []);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  async function confirm(matchId: number) {
+    if (armedId !== matchId || busyId !== null) return;
+    setBusyId(matchId);
+    try {
+      await apiPost<ConfirmResultResult>(`/api/admin/results/${matchId}/confirm`, {});
+      show('赛果已确认入档。');
+      setArmedId(null);
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '确认失败', true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="card admin-section">
+      <h2>赛果确认</h2>
+      {toastNode}
+      <p className="hint">从比赛系统同步的完赛场次在这里确认；确认只入档赛果，奖金到「手动记账」按模板发。</p>
+      {data === null ? (
+        <p className="muted">读取中…</p>
+      ) : data.queue.length === 0 ? (
+        <p className="muted">没有待确认的赛果。绑好赛事之后，比完的场次会出现在这里。</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>赛事</th>
+                <th>阶段</th>
+                <th>对阵与比分</th>
+                <th>完赛时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.queue.map((r) => (
+                <tr key={r.matchId}>
+                  <td>
+                    {r.competitionType ? (COMPETITION_TYPE_LABEL[r.competitionType] ?? r.competitionType) : '—'}
+                    <span className="muted"> S{r.season}·窗{r.windowSeq}</span>
+                  </td>
+                  <td>
+                    {r.stageName ?? '—'}
+                    {r.round !== null && <span className="muted"> 第{r.round}轮</span>}
+                  </td>
+                  <td className="mono">
+                    {resultScoreLine(r)}
+                    {r.penHome !== null && r.penAway !== null && <span className="muted">（点球 {r.penHome}:{r.penAway}）</span>}
+                    {r.walkoverSide && r.walkoverSide !== '' && <span className="badge">弃权</span>}
+                    {r.winnerTeam && <span className="muted">，胜者 {r.winnerTeam}</span>}
+                  </td>
+                  <td className="mono">{r.finishedAt?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                  <td>
+                    <button
+                      className={`btn btn-sm${armedId === r.matchId ? ' btn-armed' : ''}`}
+                      type="button"
+                      disabled={busyId !== null}
+                      onClick={() => (armedId === r.matchId ? confirm(r.matchId) : setArmedId(r.matchId))}
+                    >
+                      {busyId === r.matchId ? '确认中…' : armedId === r.matchId ? '确认入档（再点一次）' : '确认'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {data !== null && data.confirmed.length > 0 && (
+        <details>
+          <summary>最近已确认（{data.confirmed.length}）</summary>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>赛事</th>
+                  <th>对阵与比分</th>
+                  <th>确认时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.confirmed.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      {r.competitionType ? (COMPETITION_TYPE_LABEL[r.competitionType] ?? r.competitionType) : '—'}
+                      <span className="muted"> S{r.season}·窗{r.windowSeq}</span>
+                    </td>
+                    <td className="mono">
+                      {resultScoreLine(r)}
+                      {r.winnerTeam && <span className="muted">，胜者 {r.winnerTeam}</span>}
+                    </td>
+                    <td className="mono">{r.confirmedAt.slice(0, 16).replace('T', ' ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </section>
   );
 }
