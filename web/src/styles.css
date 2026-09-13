@@ -1212,3 +1212,94 @@ tbody tr:hover td {
     font-size: 24px;
   }
 }
+
+/* ---- 成长档案（§10，UI_DESIGN §4.2 档案卡扩展）：XP 进度条 + 升级方案卡 ---- */
+
+.growth-block {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+
+.growth-xp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.growth-xp-num {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.growth-bar {
+  flex: 1;
+  min-width: 120px;
+  height: 8px;
+  background: var(--terracotta-tint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.growth-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--terracotta);
+}
+
+.upgrade-plans {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.upgrade-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.upgrade-plan-card:hover {
+  border-color: var(--terracotta);
+}
+
+.upgrade-plan-card.armed {
+  border-color: var(--terracotta);
+  background: var(--terracotta-tint);
+  box-shadow: inset 0 0 0 1px var(--terracotta);
+}
+
+.upgrade-plan-card:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.upgrade-plan-ca {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--terracotta);
+}
+
+.upgrade-plan-badges {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .upgrade-plan-card {
+    min-width: 100%;
+  }
+}

@@ -1,7 +1,8 @@
 // 球员档案卡（UI_DESIGN §4.2 .dossier：左球员卡 + 右合同卷宗；FC 细分属性收进折叠 details）
-import { useEffect, useState } from 'react';
+// 成长档案区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { api, type PlayerDetail } from '../lib/api.ts';
+import { api, apiPost, GROWTH_EVENT_LABEL, type GrowthDetail, type LevelUpResult, type PlayerDetail } from '../lib/api.ts';
 import {
   AGENT_TIER_LABEL,
   CONTRACT_TYPE_LABEL,
@@ -15,6 +16,7 @@ import {
   roleChs,
   teamName,
 } from '../lib/ref.ts';
+import { useToast } from '../lib/toast.tsx';
 
 const ATTR_LABELS: Record<string, string> = {
   sprintspeed: '冲刺速度',
@@ -114,14 +116,51 @@ function PlaystyleBadge({ psid, slot }: { psid: number; slot: number }) {
 export default function Player() {
   const { id } = useParams();
   const [data, setData] = useState<PlayerDetail | null>(null);
+  const [growth, setGrowth] = useState<GrowthDetail | null>(null);
   const [error, setError] = useState('');
+  const { show, toastNode } = useToast();
+  const [armedPlan, setArmedPlan] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const loadAll = useCallback(() => {
     if (!id) return;
     api<PlayerDetail>(`/api/players/${id}`)
       .then(setData)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '加载球员档案失败'));
+    api<GrowthDetail>(`/api/players/${id}/growth`)
+      .then(setGrowth)
+      .catch(() => setGrowth(null));
   }, [id]);
+
+  useEffect(() => {
+    setError('');
+    setGrowth(null);
+    setArmedPlan(null);
+    loadAll();
+  }, [loadAll]);
+
+  async function choosePlan(planIndex: number) {
+    if (busy || !growth) return;
+    if (armedPlan !== planIndex) {
+      setArmedPlan(planIndex);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await apiPost<LevelUpResult>(`/api/growth/levelup/${growth.player.id}`, { planIndex });
+      const parts = [`+${r.plan.ca} CA`];
+      if (r.plan.silver > 0) parts.push(`银徽章 +${r.plan.silver}`);
+      if (r.plan.gold > 0) parts.push(`金徽章 +${r.plan.gold}`);
+      show(`升级完成：${parts.join('，')}。还剩 ${r.pendingLeft} 次待升级。`);
+      setArmedPlan(null);
+      loadAll();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '升级失败', true);
+      setArmedPlan(null);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (error) {
     return (
@@ -165,6 +204,7 @@ export default function Player() {
 
   return (
     <div className="container">
+      {toastNode}
       <p className="crumb">
         {club ? (
           <>
@@ -261,6 +301,8 @@ export default function Player() {
             </div>
           )}
 
+          {growth && <GrowthBlock growth={growth} armedPlan={armedPlan} busy={busy} onChoosePlan={choosePlan} />}
+
           {player.gameAttrs && (
             <details className="fc-archive">
               <summary>FC 存档（当季源数据）</summary>
@@ -326,6 +368,95 @@ export default function Player() {
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+// 成长档案块（§10）：放合同卷宗下方，FC 存档之前
+function GrowthBlock({
+  growth,
+  armedPlan,
+  busy,
+  onChoosePlan,
+}: {
+  growth: GrowthDetail;
+  armedPlan: number | null;
+  busy: boolean;
+  onChoosePlan: (planIndex: number) => void;
+}) {
+  const p = growth.player;
+  const xpInLevel = Math.floor(p.growthXp) % p.xpPerLevel;
+  const pct = Math.min(100, Math.round((xpInLevel / p.xpPerLevel) * 100));
+  const toNext = p.xpPerLevel - xpInLevel;
+  return (
+    <div className="growth-block">
+      <h3>成长档案</h3>
+      <p className="growth-xp-row">
+        <span className="mono growth-xp-num">{Math.floor(p.growthXp)} XP</span>
+        <span className="growth-bar" aria-hidden="true">
+          <span style={{ width: `${pct}%` }} />
+        </span>
+        <span className="muted">{toNext} XP 升一级</span>
+        {p.pendingLevelUps > 0 && <span className="badge orange">{p.pendingLevelUps} 次待升级</span>}
+      </p>
+      {p.status === 'trainee' && (
+        <p className="hint">训练营球员按赛季固定经验结算（训练营赛季那行），不按场次累计。</p>
+      )}
+      {p.pendingLevelUps > 0 && p.upgradePlans.length > 0 && (
+        <div className="upgrade-plans">
+          {p.upgradePlans.map((plan, i) => (
+            <button
+              key={i}
+              type="button"
+              className={`upgrade-plan-card${armedPlan === i ? ' armed' : ''}`}
+              disabled={busy}
+              onClick={() => onChoosePlan(i)}
+            >
+              <b>方案 {i + 1}{armedPlan === i ? '（再点一次确认）' : ''}</b>
+              <span className="mono upgrade-plan-ca">+{plan.ca} CA</span>
+              <span className="upgrade-plan-badges">
+                {plan.silver > 0 && <span>🥈 ×{plan.silver}</span>}
+                {plan.gold > 0 && <span>🥇 ×{plan.gold}</span>}
+                {plan.silver === 0 && plan.gold === 0 && <span className="muted">不加徽章</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="hint">
+        徽章墙：🥇 {p.badgesGold}/3 · 🥈 {p.badgesSilver}/15（徽章到帽后选带徽章的方案也不再涨）
+      </p>
+      {growth.events.length > 0 ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>事件</th>
+                <th>数值</th>
+                <th>XP</th>
+                <th>来源</th>
+              </tr>
+            </thead>
+            <tbody>
+              {growth.events.map((e) => (
+                <tr key={e.id}>
+                  <td className="mono">{e.createdAt.slice(0, 10)}</td>
+                  <td>
+                    {GROWTH_EVENT_LABEL[e.eventType] ?? e.eventType}
+                    {e.eventType === 'milestone' ? `（${e.value} 球）` : ''}
+                  </td>
+                  <td className="mono">{e.value}</td>
+                  <td className="mono">+{e.xp}</td>
+                  <td>{e.source === 'manual' ? '管理组补录' : '赛果同步'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted">还没有成长记录。出场比赛、赛果确认之后会自动入账。</p>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   api,
   apiPost,
   COMPETITION_TYPE_LABEL,
+  MANUAL_GROWTH_TYPES,
   MANUAL_LEDGER_KINDS,
   TOUR_SITE_URL,
   TOUR_STATUS_LABEL,
@@ -20,6 +21,7 @@ import {
   type ContractImportPreview,
   type ConfirmResultResult,
   type ForcedAuctionResult,
+  type GrowthSettlementResult,
   type ImportConfirm,
   type ImportPreview,
   type ManualLedgerResult,
@@ -101,6 +103,7 @@ export default function Admin({ user }: { user: MeUser | null | undefined }) {
           <ForcedAuctionSection />
           <ReviewsSection />
           <ResultsSection />
+          <GrowthSection />
           <OpeningBalanceSection />
           <ManualLedgerSection />
           <ConfigSection />
@@ -1860,6 +1863,284 @@ function ResultsSection() {
           </div>
         </details>
       )}
+    </section>
+  );
+}
+
+/* ---------- 成长引擎管理（§10）：XP 补录 / 赛季结算 / 档位核定 ---------- */
+
+function GrowthSection() {
+  const { show, toastNode } = useToast();
+  const [playerId, setPlayerId] = useState('');
+  const [eventType, setEventType] = useState(MANUAL_GROWTH_TYPES[1]!.type);
+  const [value, setValue] = useState('');
+  const [matchRef, setMatchRef] = useState('');
+  const [eventArmed, setEventArmed] = useState(false);
+  const [settleSeason, setSettleSeason] = useState('');
+  const [half, setHalf] = useState(false);
+  const [runArmed, setRunArmed] = useState(false);
+  const [summary, setSummary] = useState<GrowthSettlementResult | null>(null);
+  const [tierPlayerId, setTierPlayerId] = useState('');
+  const [tier, setTier] = useState('1');
+  const [tierArmed, setTierArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<SeasonCurrent>('/api/seasons/current')
+      .then((d) => {
+        if (d.season) setSettleSeason(String(d.season.season));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const pid = Number(playerId);
+  const eventValid = Number.isInteger(pid) && pid > 0;
+  const selectedType = MANUAL_GROWTH_TYPES.find((t) => t.type === eventType);
+  const settleValid = Number.isInteger(Number(settleSeason)) && Number(settleSeason) > 0;
+  const tierValid = Number.isInteger(Number(tierPlayerId)) && Number(tierPlayerId) > 0;
+
+  function resetArm() {
+    setEventArmed(false);
+    setRunArmed(false);
+    setTierArmed(false);
+  }
+
+  async function recordEvent() {
+    if (busy || !eventArmed || !eventValid) return;
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = { playerId: pid, eventType };
+      if (selectedType?.needsValue) body.value = Number(value);
+      if (matchRef.trim() !== '') body.matchRef = matchRef.trim();
+      const r = await apiPost<{ ok: boolean; xp: number; duplicate: boolean }>('/api/admin/growth/events', body);
+      show(
+        r.duplicate
+          ? '这笔之前记过（同一球员同一场次同一事件），没有重复入账。'
+          : `已补录，+${r.xp} XP。`,
+      );
+      setEventArmed(false);
+      setValue('');
+      setMatchRef('');
+    } catch (err) {
+      show(err instanceof Error ? err.message : '补录失败', true);
+      resetArm();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runSettlement() {
+    if (busy || !runArmed || !settleValid) return;
+    setBusy(true);
+    try {
+      const r = await apiPost<GrowthSettlementResult>('/api/admin/growth/settlement/run', {
+        season: Number(settleSeason),
+        half,
+      });
+      setSummary(r);
+      show(
+        `结算完成：训练营 ${r.traineeCount} 人 ×${r.traineeXp} XP，中国计划 ${r.chinaCount} 人，里程碑补发 ${r.milestonesGranted} 条。`,
+      );
+      setRunArmed(false);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '结算失败', true);
+      resetArm();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmTier() {
+    if (busy || !tierArmed || !tierValid) return;
+    setBusy(true);
+    try {
+      await apiPost<{ ok: boolean }>(`/api/admin/growth/${Number(tierPlayerId)}/tier`, { tier: Number(tier) });
+      show(`档位已核定：球员 #${Number(tierPlayerId)} → 档 ${tier}。`);
+      setTierArmed(false);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '核定失败', true);
+      resetArm();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card admin-section">
+      <h2>成长引擎（XP / 升级 / 档位）</h2>
+      {toastNode}
+
+      <h3>补录 XP 事件</h3>
+      <p className="hint">比赛系统没有的数据（评分、扑救、夺回球权）或漏记的兜底；XP 按规则表自动折算。赛果确认时已自动入账的不用补。</p>
+      <div className="inline-form">
+        <label className="field">
+          球员 ID
+          <input
+            value={playerId}
+            onChange={(e) => {
+              setPlayerId(e.target.value);
+              resetArm();
+            }}
+            placeholder="如 12"
+          />
+        </label>
+        <label className="field">
+          事件类型
+          <select
+            value={eventType}
+            onChange={(e) => {
+              setEventType(e.target.value);
+              resetArm();
+            }}
+          >
+            {MANUAL_GROWTH_TYPES.map((t) => (
+              <option key={t.type} value={t.type}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {selectedType?.needsValue && (
+          <label className="field">
+            数值
+            <input
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                resetArm();
+              }}
+              placeholder={eventType === 'rating' ? '8.5' : '次数'}
+            />
+          </label>
+        )}
+        <label className="field">
+          关联场次（可选）
+          <input
+            value={matchRef}
+            onChange={(e) => {
+              setMatchRef(e.target.value);
+              resetArm();
+            }}
+            placeholder="比赛 ID，同场同事件靠它去重"
+          />
+        </label>
+        <button
+          className={`btn${eventArmed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={busy || !eventValid || (selectedType?.needsValue === true && value.trim() === '')}
+          onClick={() => (eventArmed ? recordEvent() : setEventArmed(true))}
+        >
+          {eventArmed ? '确认补录（再点一次）' : '补录'}
+        </button>
+      </div>
+      {selectedType && <p className="hint">折算口径：{selectedType.hint}。</p>}
+
+      <h3>赛季结算</h3>
+      <p className="hint">按 §10.1 结算：训练营球员固定经验、中国计划加成、进+攻里程碑补发；重放安全，重复运行不会重复入账。升级在球员档案页选方案。</p>
+      <div className="inline-form">
+        <label className="field">
+          赛季编号
+          <input
+            value={settleSeason}
+            onChange={(e) => {
+              setSettleSeason(e.target.value);
+              resetArm();
+            }}
+            placeholder="4"
+          />
+        </label>
+        <label className="field field-check">
+          <input
+            type="checkbox"
+            checked={half}
+            onChange={(e) => {
+              setHalf(e.target.checked);
+              resetArm();
+            }}
+          />
+          半赛季训练营（15 XP，整赛季 40）
+        </label>
+        <button
+          className={`btn${runArmed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={busy || !settleValid}
+          onClick={() => (runArmed ? runSettlement() : setRunArmed(true))}
+        >
+          {runArmed ? '确认结算（再点一次）' : '运行结算'}
+        </button>
+      </div>
+      {summary && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>球员</th>
+                <th>成长档位</th>
+                <th>待升级次数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.pendingLevelUps.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="muted">
+                    没有待升级的球员。
+                  </td>
+                </tr>
+              ) : (
+                summary.pendingLevelUps.map((p) => (
+                  <tr key={p.playerId}>
+                    <td>
+                      {p.name} <span className="muted">#{p.playerId}</span>
+                    </td>
+                    <td>档 {p.growthTier}</td>
+                    <td className="mono">{p.pending}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h3>档位核定（§10.3）</h3>
+      <p className="hint">条件叠加（效力 +1 / 国籍 +1 / 中国籍 +1 / 未来之星 +2 / ≤18 岁 +1）由管理组按现实资料判断，这里只落核定结果。</p>
+      <div className="inline-form">
+        <label className="field">
+          球员 ID
+          <input
+            value={tierPlayerId}
+            onChange={(e) => {
+              setTierPlayerId(e.target.value);
+              resetArm();
+            }}
+            placeholder="如 10"
+          />
+        </label>
+        <label className="field">
+          核定档位
+          <select
+            value={tier}
+            onChange={(e) => {
+              setTier(e.target.value);
+              resetArm();
+            }}
+          >
+            {[1, 2, 3, 4, 5].map((t) => (
+              <option key={t} value={String(t)}>
+                档 {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className={`btn${tierArmed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={busy || !tierValid}
+          onClick={() => (tierArmed ? confirmTier() : setTierArmed(true))}
+        >
+          {tierArmed ? '确认核定（再点一次）' : '核定'}
+        </button>
+      </div>
     </section>
   );
 }

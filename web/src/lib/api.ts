@@ -687,6 +687,8 @@ export interface ResultsQueue {
 export interface ConfirmResultResult {
   ok: boolean;
   result: ConfirmedResultRow;
+  /** 确认钩子自动 XP：granted=入账事件数，unresolved=没匹配上的俱乐部/球员名（补录用） */
+  xp: { granted: number; unresolved: string[] };
 }
 
 /** season_windows.competition_type 中文标签（§11） */
@@ -704,3 +706,84 @@ export const TOUR_STATUS_LABEL: Record<string, string> = {
   running: '进行中',
   archived: '已归档',
 };
+
+// ---- 成长引擎（§10，增量 6） ----
+
+export interface GrowthEventRow {
+  id: number;
+  matchRef: string | null;
+  season: number | null;
+  windowSeq: number | null;
+  eventType: string;
+  value: number;
+  xp: number;
+  source: string;
+  createdAt: string;
+}
+
+export interface UpgradePlanDto {
+  ca: number;
+  silver: number;
+  gold: number;
+}
+
+export interface GrowthDetail {
+  player: {
+    id: number;
+    name: string;
+    ca: number;
+    growthTier: number;
+    growthXp: number;
+    levelsApplied: number;
+    badgesSilver: number;
+    badgesGold: number;
+    growable: boolean;
+    status: string;
+    xpPerLevel: number;
+    pendingLevelUps: number;
+    upgradePlans: UpgradePlanDto[];
+  };
+  events: GrowthEventRow[];
+}
+
+export interface LevelUpResult {
+  ok: boolean;
+  plan: UpgradePlanDto;
+  levelsApplied: number;
+  pendingLeft: number;
+}
+
+export interface GrowthSettlementResult {
+  ok: boolean;
+  season: number;
+  half: boolean;
+  traineeXp: number;
+  traineeCount: number;
+  chinaCount: number;
+  milestonesGranted: number;
+  pendingLevelUps: { playerId: number; name: string; growthTier: number; pending: number }[];
+}
+
+/** growth_events.event_type 中文标签 */
+export const GROWTH_EVENT_LABEL: Record<string, string> = {
+  appearance: '出场',
+  rating: '评分',
+  goal: '进球',
+  assist: '助攻',
+  clean_sheet: '零封',
+  duels_won: '夺回球权',
+  saves: '扑救',
+  milestone: '进+攻里程碑',
+  trainee_season: '训练营赛季',
+  china_plan: '中国计划',
+  levelup: '升级',
+};
+
+/** 管理组可补录的事件类型（比赛系统没有的数据或漏记兜底），hint 是 §10.1 折算口径 */
+export const MANUAL_GROWTH_TYPES: { type: string; label: string; hint: string; needsValue: boolean }[] = [
+  { type: 'appearance', label: '出场', hint: '固定 1 XP', needsValue: false },
+  { type: 'rating', label: '评分', hint: '7.0-10.0：7 档 1 · 8 档 2 · 9 档 3 · 10 档 4', needsValue: true },
+  { type: 'clean_sheet', label: '零封', hint: '固定 0.5 XP', needsValue: false },
+  { type: 'duels_won', label: '夺回球权', hint: '每 12 次 1 XP', needsValue: true },
+  { type: 'saves', label: '扑救', hint: '每 8 次 1 XP，单场超 8 额外 +1', needsValue: true },
+];
