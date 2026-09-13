@@ -1,0 +1,27 @@
+{
+  "notify_enabled": {
+    "description": "总开关：开启且 sync_secret 非空才启动 HTTP 服务",
+    "type": "bool",
+    "default": false
+  },
+  "sync_secret": {
+    "description": "与平台 SYNC_SECRET（wrangler secret）一致的共享密钥",
+    "type": "string",
+    "default": ""
+  },
+  "notify_listen_host": {
+    "description": "HTTP 监听地址（只收平台签名请求，经 Tunnel 穿透）",
+    "type": "string",
+    "default": "127.0.0.1"
+  },
+  "notify_listen_port": {
+    "description": "HTTP 监听端口；平台 SYNC_BASE_URL 指向这里",
+    "type": "int",
+    "default": 9992
+  },
+  "notify_platform_id": {
+    "description": "发消息用的平台实例 id，留空自动取第一个平台",
+    "type": "string",
+    "default": ""
+  }
+}

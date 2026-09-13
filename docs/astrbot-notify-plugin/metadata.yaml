@@ -1,0 +1,5 @@
+name: astrbot_plugin_whl_club_notify
+desc: WHL 俱乐部运营平台 bot 通知接收（验签 + QQ 私信推送）
+version: v1.0.0
+author: WHL
+repo: https://github.com/WHLofficial/WHL-club-operations-platform

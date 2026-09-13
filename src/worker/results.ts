@@ -5,6 +5,7 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { recordGrowthEventStatements, defensivePositionsForClub, type GrowthEventInput } from './growth.ts';
+import { queueClubNotification } from './notify.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -237,9 +238,35 @@ export async function confirmResult(
   }
 
   const row = await env.DB.prepare('SELECT * FROM result_confirmations WHERE match_id = ?').bind(matchId).first();
-  // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知随 d4 接入
+  // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知（§12，尽力而为不阻塞确认）
   const xp = await recordAutoXpForMatch(env, matchId, m, binding);
+  await queueResultNotifications(env, binding, m);
   return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp };
+}
+
+// 确认通知：给主客两队绑了 QQ 的教练各排一条（队名 → 平台俱乐部按名匹配，同 XP 匹配口径）
+async function queueResultNotifications(
+  env: Env,
+  binding: { season: number; window_seq: number; competition_type: string | null },
+  m: TourMatchRow,
+): Promise<void> {
+  const score = `${m.score_home ?? '?'}:${m.score_away ?? '?'}`;
+  const data = {
+    season: binding.season,
+    windowSeq: binding.window_seq,
+    competition: binding.competition_type,
+    score,
+  };
+  for (const teamName of new Set([m.home_team, m.away_team])) {
+    if (!teamName) continue;
+    const club = await env.DB.prepare('SELECT id FROM clubs WHERE name = ?').bind(teamName).first<{ id: number }>();
+    if (!club) continue;
+    await queueClubNotification(env.DB, club.id, 'result_confirmed', {
+      ...data,
+      home: m.home_team,
+      away: m.away_team,
+    });
+  }
 }
 
 // ---- 确认钩子：自动 XP 事件（§10.1）----

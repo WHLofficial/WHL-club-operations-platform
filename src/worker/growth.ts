@@ -4,6 +4,7 @@
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement, type AuditEntry } from '../lib/audit.ts';
 import { createConfigService } from '../core/config.ts';
+import { queueClubNotification } from './notify.ts';
 import type { Env } from './env.ts';
 
 // §10.1 事件类型（growth_events.event_type）
@@ -385,6 +386,13 @@ export async function applyLevelUp(env: Env, actor: number, playerId: number, pl
     targetType: 'player',
     targetId: playerId,
     after: { tier: player.growth_tier, planIndex, plan },
+  });
+  // 通知教练（§12；尽力而为，没绑 QQ 静默跳过）
+  await queueClubNotification(db, player.club_id, 'levelup', {
+    player: player.name,
+    ca: plan.ca,
+    silver: plan.silver,
+    gold: plan.gold,
   });
   return { ok: true, plan, levelsApplied: nextLevelNo, pendingLeft: pending - 1 };
 }
