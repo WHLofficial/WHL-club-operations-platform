@@ -15,6 +15,7 @@ import { loadSquadContext } from '../squad-context.ts';
 import { loadTransfer, rejectTransfer } from '../transfers.ts';
 import { approveTransferDeal, createForcedAuction, cancelForcedAuction } from '../bypass.ts';
 import { listWindows, openWindow, closeWindow } from '../window-machine.ts';
+import { queueResults, confirmResult } from '../results.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -449,6 +450,98 @@ app.post('/ledger/manual', async (c) => {
     .bind(clubId)
     .first<{ balance: number }>();
   return c.json({ ok: true, balance: acct?.balance ?? 0 }, 201);
+});
+
+// ---- 赛季管理与赛果确认（附录 A〔6〕，§11） ----
+
+const COMPETITION_TYPES = ['league_premier', 'league_second', 'champions_cup', 'super_cup', 'qualifying'] as const;
+
+app.post('/seasons', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { season?: unknown } | null;
+  const season = Number(body?.season);
+  if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
+  const audit = createAuditStatement(c.env.DB);
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare(`INSERT INTO seasons (season, status, created_at) VALUES (?, 'preparing', ${nowSql()})`).bind(season),
+      audit({ actor: user.id, action: 'season_create', targetType: 'season', targetId: season }),
+    ]);
+  } catch (err) {
+    if (String(err).includes('UNIQUE')) throw new HttpError(409, '这个赛季已经存在');
+    throw err;
+  }
+  return c.json({ ok: true, season }, 201);
+});
+
+// 绑定赛事到窗口：一座赛事只绑一个窗口（库上唯一索引）；赛季已结算后不得再绑
+app.post('/seasons/:id/bind-tournament', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const season = Number(c.req.param('id'));
+  if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
+  const body = (await readJson(c)) as { windowSeq?: unknown; tournamentId?: unknown; competitionType?: unknown } | null;
+  const windowSeq = Number(body?.windowSeq);
+  if (!Number.isInteger(windowSeq) || windowSeq <= 0) throw new HttpError(400, 'windowSeq 应为正整数');
+  const tournamentId = Number(body?.tournamentId);
+  if (!Number.isInteger(tournamentId) || tournamentId <= 0) throw new HttpError(400, 'tournamentId 应为正整数');
+  const competitionType = body?.competitionType;
+  if (typeof competitionType !== 'string' || !(COMPETITION_TYPES as readonly string[]).includes(competitionType)) {
+    throw new HttpError(400, '竞赛类型只能是 league_premier / league_second / champions_cup / super_cup / qualifying');
+  }
+
+  const tournament = await c.env.TOUR_DB.prepare('SELECT id, name FROM tournament WHERE id = ?')
+    .bind(tournamentId)
+    .first<{ id: number; name: string }>();
+  if (!tournament) throw new HttpError(404, '比赛系统里找不到这座赛事');
+
+  const seasonRow = await c.env.DB.prepare('SELECT status FROM seasons WHERE season = ?').bind(season).first<{ status: string }>();
+  if (seasonRow?.status === 'settled') throw new HttpError(409, '这个赛季已经结算，不能再绑赛事');
+  const win = await c.env.DB.prepare('SELECT id FROM season_windows WHERE season = ? AND window_seq = ?')
+    .bind(season, windowSeq)
+    .first<{ id: number }>();
+  if (!win) throw new HttpError(404, '这个窗口不存在，先开窗再绑定');
+
+  const audit = createAuditStatement(c.env.DB);
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        'UPDATE season_windows SET tournament_id = ?, competition_type = ? WHERE season = ? AND window_seq = ?',
+      ).bind(tournamentId, competitionType, season, windowSeq),
+      audit({
+        actor: user.id,
+        action: 'season_bind_tournament',
+        targetType: 'season_window',
+        targetId: win.id,
+        after: { season, windowSeq, tournamentId, competitionType },
+      }),
+    ]);
+  } catch (err) {
+    if (String(err).includes('UNIQUE')) throw new HttpError(409, '这座赛事已经绑到别的窗口了');
+    throw err;
+  }
+  return c.json({ ok: true, tournament: { id: tournament.id, name: tournament.name } });
+});
+
+// 赛事下拉：比赛系统赛事列表（只读跨库）
+app.get('/tournaments', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const rows = await c.env.TOUR_DB.prepare('SELECT id, name, status FROM tournament ORDER BY id DESC LIMIT 100').all<{
+    id: number;
+    name: string;
+    status: string;
+  }>();
+  return c.json({ tournaments: rows.results });
+});
+
+app.get('/results/queue', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  return c.json(await queueResults(c.env));
+});
+
+app.post('/results/:id/confirm', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const result = await confirmResult(c.env, user.id, c.req.param('id'));
+  return c.json({ ok: true, result }, 201);
 });
 
 // ---- 注册快照与准入体检（附录 A〔2〕） ----

@@ -134,6 +134,8 @@ export async function openWindow(
            ON CONFLICT(season) DO NOTHING`,
         )
         .bind(season),
+      // 赛季生命周期（§11）：备赛期开窗即进入进行中
+      db.prepare(`UPDATE seasons SET status = 'running' WHERE season = ? AND status = 'preparing'`).bind(season),
       db
         .prepare(
           `INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (?, ?, 'open', ${nowSql()})`,
