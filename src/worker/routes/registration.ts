@@ -74,7 +74,7 @@ function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadP
 
 // GET /api/club/squad —— 注册工作台数据：全队名单 + 现行合同 + 当前快照 + 快照体检
 app.get('/club/squad', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.registrations.submit');
   const club = await getBoundClub(c.env, user.id);
   if (!club) {
     return c.json({ club: null, season: null, players: [], registration: null, compliance: null, rules: null });
@@ -161,7 +161,7 @@ function parseIdList(raw: unknown, label: string): number[] {
 
 // POST /api/club/registrations —— 提交注册名单（快照整体替换，重复提交安全）
 app.post('/club/registrations', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.registrations.submit');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
 

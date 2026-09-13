@@ -31,7 +31,7 @@ async function readJson(c: { req: { raw: Request } }): Promise<unknown> {
 // ---- 建队与认证码（§3.2） ----
 
 app.post('/clubs', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const body = (await readJson(c)) as { name?: unknown; leagueTier?: unknown } | null;
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
   const leagueTier = body?.leagueTier;
@@ -71,19 +71,19 @@ app.post('/clubs', async (c) => {
 });
 
 app.get('/clubs', async (c) => {
-  await requireAdmin(c.env, c.req.raw);
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const clubs = await c.env.DB.prepare(
     'SELECT id, name, league_tier, status, created_at FROM clubs ORDER BY id LIMIT 200',
   ).all<{ id: number; name: string; league_tier: string; status: string; created_at: string }>();
   const bindings = await c.env.DB.prepare(
-    'SELECT club_id, user_id, bound_at FROM club_bindings LIMIT 200',
-  ).all<{ club_id: number; user_id: number; bound_at: string }>();
+    'SELECT club_id, user_id, user_name, bound_at FROM club_bindings LIMIT 200',
+  ).all<{ club_id: number; user_id: number; user_name: string | null; bound_at: string }>();
   const codes = await c.env.DB.prepare(
     'SELECT club_id, expires_at, used_by, used_at, created_at FROM club_bind_code ORDER BY id DESC LIMIT 200',
   ).all<{ club_id: number; expires_at: string | null; used_by: number | null; used_at: string | null; created_at: string }>();
 
-  const byClub = new Map<number, { userId: number; boundAt: string }>();
-  for (const b of bindings.results) byClub.set(b.club_id, { userId: b.user_id, boundAt: b.bound_at });
+  const byClub = new Map<number, { userId: number; userName: string | null; boundAt: string }>();
+  for (const b of bindings.results) byClub.set(b.club_id, { userId: b.user_id, userName: b.user_name, boundAt: b.bound_at });
   const latestCode = new Map<number, { expiresAt: string | null; usedBy: number | null; usedAt: string | null; createdAt: string }>();
   for (const code of codes.results) {
     if (!latestCode.has(code.club_id)) {
@@ -95,8 +95,9 @@ app.get('/clubs', async (c) => {
       });
     }
   }
-  // 绑定人名字来自赛事系统 user 表（跨绑定只读，§4）
-  const userIds = [...new Set(bindings.results.map((b) => b.user_id))];
+  // 绑定人名字：本地 user_name 优先（收口后绑定即落库，不再依赖赛事库）；
+  // 旧行回退赛事库 user 表只读兜底（账号真源已收口 auth 库，历史行随重新绑定自然补全）
+  const userIds = [...new Set(bindings.results.filter((b) => !b.user_name).map((b) => b.user_id))];
   const userNames = new Map<number, string>();
   for (let i = 0; i < userIds.length; i += 90) {
     const slice = userIds.slice(i, i + 90);
@@ -116,7 +117,7 @@ app.get('/clubs', async (c) => {
         leagueTier: r.league_tier,
         status: r.status,
         createdAt: r.created_at,
-        binding: binding ? { userId: binding.userId, userName: userNames.get(binding.userId) ?? null, boundAt: binding.boundAt } : null,
+        binding: binding ? { userId: binding.userId, userName: binding.userName ?? userNames.get(binding.userId) ?? null, boundAt: binding.boundAt } : null,
         latestCode: latestCode.get(r.id) ?? null,
       };
     }),
@@ -124,7 +125,7 @@ app.get('/clubs', async (c) => {
 });
 
 app.post('/clubs/:id/bindcode', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const clubId = Number(c.req.param('id'));
   if (!Number.isInteger(clubId)) throw new HttpError(400, '俱乐部 ID 不对');
   const club = await c.env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
@@ -155,7 +156,7 @@ app.post('/clubs/:id/bindcode', async (c) => {
 });
 
 app.post('/bindings/unbind', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.bindings.unbind');
   const body = (await readJson(c)) as { userId?: unknown } | null;
   const userId = Number(body?.userId);
   if (!Number.isInteger(userId) || userId <= 0) throw new HttpError(400, '要解绑的用户 ID 不对');
@@ -180,7 +181,7 @@ app.post('/bindings/unbind', async (c) => {
 // ---- config 键注册表（§13，涉密键掩码） ----
 
 app.get('/config', async (c) => {
-  await requireAdmin(c.env, c.req.raw);
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const service = createConfigService(c.env.DB);
   return c.json({ config: await service.listMasked() });
 });
@@ -190,7 +191,7 @@ app.get('/config', async (c) => {
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 
 app.patch('/players/:id', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.players.import');
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');
   const body = (await readJson(c)) as Record<string, unknown> | null;
@@ -313,7 +314,7 @@ app.patch('/players/:id', async (c) => {
 // ---- 导入管线两段式（§5.4：通道 A/B 球员，通道 C 名单合同模板） ----
 
 app.post('/players/import/preview', async (c) => {
-  await requireAdmin(c.env, c.req.raw);
+  await requireAdmin(c.env, c.req.raw, 'club.players.import');
   const body = await readJson(c);
   if ((body as { channel?: unknown } | null)?.channel === 'C') {
     return c.json(await previewContractsImport(c.env, body));
@@ -322,7 +323,7 @@ app.post('/players/import/preview', async (c) => {
 });
 
 app.post('/players/import/confirm', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.players.import');
   const body = await readJson(c);
   if ((body as { channel?: unknown } | null)?.channel === 'C') {
     return c.json(await confirmContractsImport(c.env, user.id, body));
@@ -333,7 +334,7 @@ app.post('/players/import/confirm', async (c) => {
 // ---- 期初余额导入（§14.1，kind=opening_import；幂等：已导入的俱乐部跳过） ----
 
 app.post('/ledger/opening-import', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.ledger.manage');
   const body = (await readJson(c)) as { rows?: unknown } | null;
   const rows = body?.rows;
   if (!Array.isArray(rows) || rows.length === 0) throw new HttpError(400, 'rows 应为非空数组');
@@ -409,7 +410,7 @@ app.post('/ledger/opening-import', async (c) => {
 const MANUAL_KIND_RE = /^(manual_adjust|prize_[a-z_]+)$/;
 
 app.post('/ledger/manual', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.ledger.manage');
   const body = (await readJson(c)) as { clubId?: unknown; kind?: unknown; amount?: unknown; memo?: unknown } | null;
   const clubId = Number(body?.clubId);
   if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
@@ -458,7 +459,7 @@ app.post('/ledger/manual', async (c) => {
 const COMPETITION_TYPES = ['league_premier', 'league_second', 'champions_cup', 'super_cup', 'qualifying'] as const;
 
 app.post('/seasons', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const body = (await readJson(c)) as { season?: unknown } | null;
   const season = Number(body?.season);
   if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
@@ -477,7 +478,7 @@ app.post('/seasons', async (c) => {
 
 // 绑定赛事到窗口：一座赛事只绑一个窗口（库上唯一索引）；赛季已结算后不得再绑
 app.post('/seasons/:id/bind-tournament', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const season = Number(c.req.param('id'));
   if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
   const body = (await readJson(c)) as { windowSeq?: unknown; tournamentId?: unknown; competitionType?: unknown } | null;
@@ -525,7 +526,7 @@ app.post('/seasons/:id/bind-tournament', async (c) => {
 
 // 赛事下拉：比赛系统赛事列表（只读跨库）
 app.get('/tournaments', async (c) => {
-  await requireAdmin(c.env, c.req.raw);
+  await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const rows = await c.env.TOUR_DB.prepare('SELECT id, name, status FROM tournament ORDER BY id DESC LIMIT 100').all<{
     id: number;
     name: string;
@@ -654,7 +655,7 @@ app.get('/m0', async (c) => {
 
 // GET /api/admin/registrations?season= —— 注册快照按俱乐部分组；season 缺省取最新有快照的赛季
 app.get('/registrations', async (c) => {
-  await requireAdmin(c.env, c.req.raw);
+  await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const seasonParam = c.req.query('season');
   let season: number | null = null;
   if (seasonParam !== undefined) {
@@ -712,7 +713,7 @@ app.get('/registrations', async (c) => {
 // GET /api/admin/compliance?season= —— 准入体检报告（P1 首版：只报告，不触发强制拍卖）
 // 用当前 CA/PA/合同对快照重跑合规引擎，抓「注册后属性/合同漂移」导致的违规。
 app.get('/compliance', async (c) => {
-  await requireAdmin(c.env, c.req.raw);
+  await requireAdmin(c.env, c.req.raw, 'club.compliance.view');
   const seasonParam = c.req.query('season');
   let season: number | null;
   if (seasonParam !== undefined) {
@@ -912,20 +913,20 @@ app.post('/reviews/:id/reject', async (c) => {
 
 // GET /api/admin/windows —— 赛季与窗口列表
 app.get('/windows', async (c) => {
-  await requireAdmin(c.env, c.req.raw);
+  await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   return c.json(await listWindows(c.env.DB));
 });
 
 // POST /api/admin/windows/open —— 开新窗（前置：无在开窗口；全球员经纪人档位重掷）
 app.post('/windows/open', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const body = (await readJson(c)) as { season?: unknown; windowSeq?: unknown } | null;
   return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq), 201);
 });
 
 // POST /api/admin/windows/close —— 关窗（前置校验；force 需 window_force_settle=true）
 app.post('/windows/close', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const body = (await readJson(c)) as { force?: unknown } | null;
   return c.json(await closeWindow(c.env, user.id, body?.force));
 });

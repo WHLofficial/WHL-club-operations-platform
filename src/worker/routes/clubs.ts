@@ -11,7 +11,7 @@ import { getBoundClub } from '../binding.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 app.post('/clubs/bind', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   // 按 IP 限尝试次数：10 分钟窗口 5 次（正常输入一次就成功，够防爆破）
   const ip = c.req.header('CF-Connecting-IP') ?? 'local';
   const ok = await rateLimit(c.env.SESSION_KV, `bindfail:${ip}`, 5, 600);
@@ -51,9 +51,10 @@ app.post('/clubs/bind', async (c) => {
   try {
     const audit = createAuditStatement(c.env.DB);
     await c.env.DB.batch([
+      // 绑定人姓名随行落库（0013）：管理端列表本地可读，收口后不必回查赛事库 user 表
       c.env.DB.prepare(
-        `INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      ).bind(row.club_id, user.id),
+        `INSERT INTO club_bindings (club_id, user_id, user_name, bound_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      ).bind(row.club_id, user.id, user.name),
       audit({
         actor: user.id,
         action: 'club_bind',
@@ -70,7 +71,7 @@ app.post('/clubs/bind', async (c) => {
 
 // 我的球队概览（余额/名单数/窗口态）；窗口态在增量 6 落地，此前恒为 null
 app.get('/me/club', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await c.env.DB.prepare(
     `SELECT c.id, c.name, c.league_tier, c.logo_key, c.status
      FROM club_bindings b JOIN clubs c ON c.id = b.club_id
@@ -108,7 +109,7 @@ app.get('/me/club', async (c) => {
 
 // 财政余额（附录 A〔6〕）：余额 / 冻结 / 可支配，口径与出价校验一致（§7.4）
 app.get('/club/balance', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) return c.json({ club: null, balance: null, held: null, available: null });
   const row = await c.env.DB.prepare(
@@ -126,7 +127,7 @@ app.get('/club/balance', async (c) => {
 const LEDGER_PAGE_SIZE = 30;
 
 app.get('/club/ledger', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) return c.json({ club: null, entries: [], nextCursor: null });
 

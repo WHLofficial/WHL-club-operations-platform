@@ -161,7 +161,7 @@ app.get('/market/listings', async (c) => {
 
 // POST /api/market/listings —— 挂牌（价格校验 4.4.1.1）
 app.post('/market/listings', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
 
@@ -251,7 +251,7 @@ app.post('/market/listings', async (c) => {
 
 // GET /api/market/free-agents —— 自由球员（可海捞名单，教练侧）；本窗被解约的标禁签
 app.get('/market/free-agents', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) return c.json({ club: null, freeAgents: [] });
 
@@ -295,7 +295,7 @@ app.get('/market/free-agents', async (c) => {
 
 // GET /api/market/trainees —— 各队训练营球员（可被激活名单，教练侧）
 app.get('/market/trainees', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) return c.json({ club: null, trainees: [] });
 
@@ -340,7 +340,7 @@ app.get('/market/trainees', async (c) => {
 // 倍数价；激活方须在出价窗内落首价（期间他队出价无效），否则激活无效。
 // 与 POST /api/transfers/activation 同源（见 activations.ts）。
 app.post('/market/activations', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
 
@@ -447,7 +447,7 @@ app.get('/market/listings/:id', async (c) => {
 
 // POST /api/market/listings/:id/bids —— 出价（资金冻结先行，§6.4-1）
 app.post('/market/listings/:id/bids', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
 
@@ -613,7 +613,7 @@ app.post('/market/listings/:id/bids', async (c) => {
 
 // GET /api/me/bids —— 我的出价（含冻结状态章）
 app.get('/me/bids', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw);
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) return c.json({ club: null, bids: [] });
   const rows = await c.env.DB.prepare(
