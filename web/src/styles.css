@@ -1307,3 +1307,17 @@ tbody tr:hover td {
     min-width: 100%;
   }
 }
+
+/* 赛季绑定列表（增量 6.1：赛事绑赛季，一赛季多座） */
+.bind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.bind-row:first-child {
+  border-top: none;
+}

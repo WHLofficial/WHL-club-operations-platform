@@ -476,6 +476,15 @@ app.post('/seasons', async (c) => {
   return c.json({ ok: true, season }, 201);
 });
 
+app.get('/seasons', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  const rows = await c.env.DB.prepare('SELECT season, status FROM seasons ORDER BY season DESC').all<{
+    season: number;
+    status: string;
+  }>();
+  return c.json({ seasons: rows.results });
+});
+
 // 绑定赛事到赛季（增量 6.1 层级修订：赛季是上级，赛事与窗口并列——赛事绑赛季、窗口只管转会准入）。
 // 一座赛事只进一个赛季（库上唯一约束，防同一场比赛双份进赛果队列）；赛季已结算后不得再绑
 app.post('/seasons/:id/bind-tournament', async (c) => {

@@ -116,11 +116,11 @@ describe('赛季与赛事绑定（§11，增量 6.1 层级修订：赛事绑赛�
     const body = (await current.json()) as {
       season: { season: number; status: string } | null;
       window: { season: number; windowSeq: number; status: string } | null;
-      tournaments: { tournamentId: number; competitionType: string }[];
+      tournaments: { id: number; tournamentId: number; competitionType: string }[];
     };
     expect(body.season).toEqual({ season: 3, status: 'running' });
     expect(body.window).toMatchObject({ season: 3, windowSeq: 1 });
-    expect(body.tournaments).toEqual([{ tournamentId: 5, competitionType: 'league_premier' }]);
+    expect(body.tournaments).toEqual([{ id: 1, tournamentId: 5, competitionType: 'league_premier' }]);
   });
 
   it('不用先开窗就能绑赛事（绑定不再依赖窗口）', async () => {

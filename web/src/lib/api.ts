@@ -631,17 +631,35 @@ export const MANUAL_LEDGER_KINDS: ManualLedgerKind[] = [
   { value: 'prize_super_loss', label: '超级杯 · 负', reference: 2.0 },
 ];
 
+export interface SeasonBinding {
+  id: number;
+  tournamentId: number;
+  competitionType: string | null;
+}
+
 export interface SeasonCurrent {
   season: { season: number; status: string } | null;
   window: {
     season: number;
     windowSeq: number;
     status: string;
-    tournamentId: number | null;
-    competitionType: string | null;
     openedAt: string | null;
     closedAt: string | null;
   } | null;
+  tournaments: SeasonBinding[];
+}
+
+export interface SeasonRow {
+  season: number;
+  status: string;
+}
+
+export interface SeasonsResponse {
+  seasons: SeasonRow[];
+}
+
+export interface SeasonBindingsResponse {
+  bindings: SeasonBinding[];
 }
 
 export interface TournamentRow {

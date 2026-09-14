@@ -32,9 +32,12 @@ import {
   type OpenWindowResult,
   type OpeningImportResult,
   type ResultsQueue,
+  type SeasonBinding,
+  type SeasonBindingsResponse,
   type SeasonCurrent,
+  type SeasonRow,
+  type SeasonsResponse,
   type TournamentRow,
-  type WindowRow,
   type WindowsResponse,
 } from '../lib/api.ts';
 import { LEAGUE_TIER_LABEL } from '../lib/ref.ts';
@@ -1562,25 +1565,29 @@ function OpeningBalanceSection() {
   );
 }
 
-/* ---------- 赛季与赛事绑定（§11） ---------- */
+/* ---------- 赛季与赛事绑定（§11，增量 6.1 层级：赛事绑赛季，窗口只管转会准入） ---------- */
 
 function SeasonsSection() {
   const { show, toastNode } = useToast();
   const [current, setCurrent] = useState<SeasonCurrent | null>(null);
-  const [windows, setWindows] = useState<WindowRow[]>([]);
+  const [seasons, setSeasons] = useState<SeasonRow[]>([]);
   const [tournaments, setTournaments] = useState<TournamentRow[]>([]);
+  const [selectedSeason, setSelectedSeason] = useState('');
+  const [bindings, setBindings] = useState<SeasonBinding[]>([]);
   const [newSeason, setNewSeason] = useState('');
   const [seasonArmed, setSeasonArmed] = useState(false);
-  const [bindWindow, setBindWindow] = useState('');
   const [bindTournament, setBindTournament] = useState('');
   const [bindType, setBindType] = useState('league_premier');
   const [bindArmed, setBindArmed] = useState(false);
+  const [unbindArmedId, setUnbindArmedId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const seasonNo = Number(selectedSeason);
 
   const reload = useCallback(() => {
     api<SeasonCurrent>('/api/seasons/current').then(setCurrent).catch(() => undefined);
-    api<WindowsResponse>('/api/admin/windows')
-      .then((d) => setWindows(d.windows))
+    api<SeasonsResponse>('/api/admin/seasons')
+      .then((d) => setSeasons(d.seasons))
       .catch(() => undefined);
     api<{ tournaments: TournamentRow[] }>('/api/admin/tournaments')
       .then((d) => setTournaments(d.tournaments))
@@ -1590,8 +1597,27 @@ function SeasonsSection() {
     reload();
   }, [reload]);
 
+  // 默认选中当前赛季（还没建档时不选）
+  useEffect(() => {
+    if (!selectedSeason && seasons.length > 0) {
+      setSelectedSeason(String(current?.season?.season ?? seasons[0]?.season ?? ''));
+    }
+  }, [seasons, current, selectedSeason]);
+
+  const loadBindings = useCallback((season: number) => {
+    api<SeasonBindingsResponse>(`/api/admin/seasons/${season}/tournaments`)
+      .then((d) => setBindings(d.bindings))
+      .catch(() => setBindings([]));
+  }, []);
+  useEffect(() => {
+    setUnbindArmedId(null);
+    setBindArmed(false);
+    if (seasonNo) loadBindings(seasonNo);
+    else setBindings([]);
+  }, [seasonNo, loadBindings]);
+
   const newSeasonValid = Number.isInteger(Number(newSeason)) && Number(newSeason) > 0;
-  const bindValid = bindWindow !== '' && bindTournament !== '';
+  const tournamentName = (id: number) => tournaments.find((t) => t.id === id)?.name;
 
   async function createSeason() {
     if (busy || !seasonArmed || !newSeasonValid) return;
@@ -1610,20 +1636,37 @@ function SeasonsSection() {
   }
 
   async function bind() {
-    if (busy || !bindArmed || !bindValid) return;
+    if (busy || !bindArmed || !seasonNo || bindTournament === '') return;
     setBusy(true);
     try {
-      const [season, windowSeq] = bindWindow.split(':').map(Number);
-      const res = await apiPost<BindTournamentResult>(`/api/admin/seasons/${season}/bind-tournament`, {
-        windowSeq,
+      const res = await apiPost<BindTournamentResult>(`/api/admin/seasons/${seasonNo}/bind-tournament`, {
         tournamentId: Number(bindTournament),
         competitionType: bindType,
       });
-      show(`已把「${res.tournament.name}」绑到这个窗口，完赛场次会进赛果确认队列。`);
+      show(`已把「${res.tournament.name}」绑进 S${seasonNo}，完赛场次会进赛果确认队列。`);
+      setBindTournament('');
       setBindArmed(false);
+      loadBindings(seasonNo);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '绑定失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unbind(b: SeasonBinding) {
+    if (busy || !seasonNo || unbindArmedId !== b.id) return;
+    setBusy(true);
+    try {
+      await apiPost<{ ok: boolean }>(`/api/admin/seasons/${seasonNo}/unbind-tournament`, { tournamentId: b.tournamentId });
+      show(`已把「${tournamentName(b.tournamentId) ?? `#${b.tournamentId}`}」从 S${seasonNo} 解绑。`);
+      setUnbindArmedId(null);
+      loadBindings(seasonNo);
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '解绑失败', true);
+      setUnbindArmedId(null);
     } finally {
       setBusy(false);
     }
@@ -1636,6 +1679,9 @@ function SeasonsSection() {
     <section className="card admin-section">
       <h2>赛季与赛事绑定</h2>
       {toastNode}
+      <p className="hint">
+        结构：赛季是上集，窗口（只管转会准入）和赛事（赛果来源）是并列的下级。一座赛事只进一个赛季，一个赛季可以绑多座赛事；绑定不依赖窗口。
+      </p>
       {current && (
         <p className="hint">
           当前赛季：
@@ -1647,15 +1693,7 @@ function SeasonsSection() {
             '还没建赛季'
           )}
           ；最新窗口：
-          {win ? (
-            <>
-              S{win.season}·窗{win.windowSeq}（{win.status === 'open' ? '开放中' : '已关闭'}）
-              {win.tournamentId ? `，已绑赛事 #${win.tournamentId} · ${COMPETITION_TYPE_LABEL[win.competitionType ?? ''] ?? win.competitionType}` : '，未绑定赛事'}
-            </>
-          ) : (
-            '还没开过窗'
-          )}
-          。
+          {win ? <>S{win.season}·窗{win.windowSeq}（{win.status === 'open' ? '开放中' : '已关闭'}）</> : '还没开过窗'}。
         </p>
       )}
       <div className="inline-form">
@@ -1681,18 +1719,14 @@ function SeasonsSection() {
       </div>
       <div className="inline-form">
         <label className="field">
-          窗口
+          赛季
           <select
-            value={bindWindow}
-            onChange={(e) => {
-              setBindWindow(e.target.value);
-              setBindArmed(false);
-            }}
+            value={selectedSeason}
+            onChange={(e) => setSelectedSeason(e.target.value)}
           >
-            <option value="">选窗口…</option>
-            {windows.map((w) => (
-              <option key={`${w.season}:${w.windowSeq}`} value={`${w.season}:${w.windowSeq}`}>
-                S{w.season}·窗{w.windowSeq}（{w.status === 'open' ? '开放中' : '已关闭'}）
+            {seasons.map((s) => (
+              <option key={s.season} value={s.season}>
+                S{s.season}（{SEASON_STATUS[s.status] ?? s.status}）
               </option>
             ))}
           </select>
@@ -1733,13 +1767,39 @@ function SeasonsSection() {
         <button
           className={`btn${bindArmed ? ' btn-armed' : ''}`}
           type="button"
-          disabled={busy || !bindValid}
+          disabled={busy || !seasonNo || bindTournament === ''}
           onClick={() => (bindArmed ? bind() : setBindArmed(true))}
         >
           {bindArmed ? '确认绑定（再点一次）' : '绑定赛事'}
         </button>
       </div>
-      <p className="hint">一座赛事只能绑一个窗口；确认赛果时按当时比分定格快照，之后比赛系统改判不影响已入档记录。</p>
+      <div>
+        {!seasonNo ? (
+          <p className="hint">先建档赛季，再往这里绑赛事。</p>
+        ) : bindings.length === 0 ? (
+          <p className="hint">S{seasonNo} 还没绑任何赛事；不绑赛事就没有赛果可确认。</p>
+        ) : (
+          bindings.map((b) => (
+            <div key={b.id} className="bind-row">
+              <span>
+                #{b.tournamentId} {tournamentName(b.tournamentId) ?? '（比赛系统里找不到这座赛事）'} ·{' '}
+                {COMPETITION_TYPE_LABEL[b.competitionType ?? ''] ?? b.competitionType ?? '类型未标'}
+              </span>
+              <button
+                className={`btn btn-sm${unbindArmedId === b.id ? ' btn-armed' : ''}`}
+                type="button"
+                disabled={busy}
+                onClick={() => (unbindArmedId === b.id ? unbind(b) : setUnbindArmedId(b.id))}
+              >
+                {unbindArmedId === b.id ? '确认解绑（再点一次）' : '解绑'}
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      <p className="hint">
+        赛季已结算后不能再绑赛事；已经有确认入档赛果的赛事不能解绑。确认赛果时按当时比分定格快照，之后比赛系统改判不影响已入档记录。
+      </p>
     </section>
   );
 }

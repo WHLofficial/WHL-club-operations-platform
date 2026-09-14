@@ -27,10 +27,10 @@ app.get('/seasons/current', async (c) => {
     }>();
   const bindings = season
     ? await db
-        .prepare('SELECT tournament_id, competition_type FROM season_tournaments WHERE season = ?')
+        .prepare('SELECT id, tournament_id, competition_type FROM season_tournaments WHERE season = ?')
         .bind(season.season)
-        .all<{ tournament_id: number; competition_type: string | null }>()
-    : { results: [] as { tournament_id: number; competition_type: string | null }[] };
+        .all<{ id: number; tournament_id: number; competition_type: string | null }>()
+    : { results: [] as { id: number; tournament_id: number; competition_type: string | null }[] };
   return c.json({
     season: season ? { season: season.season, status: season.status } : null,
     window: win
@@ -42,7 +42,7 @@ app.get('/seasons/current', async (c) => {
           closedAt: win.closed_at,
         }
       : null,
-    tournaments: bindings.results.map((t) => ({ tournamentId: t.tournament_id, competitionType: t.competition_type })),
+    tournaments: bindings.results.map((t) => ({ id: t.id, tournamentId: t.tournament_id, competitionType: t.competition_type })),
   });
 });
 
