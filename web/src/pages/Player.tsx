@@ -87,6 +87,55 @@ function starText(n: number): string {
   return '★'.repeat(Math.min(n, 5)) + '☆'.repeat(Math.max(0, 5 - n));
 }
 
+// 雷达轴（增量 6.1 d11，四裁决：外场 PAC/SHO/PAS/DRI/DEF/PHY；门将换轴 DIV/HAN/KIC/REF/POS/SPD，SPD=均(冲刺,加速)）
+const GK_RADAR = [
+  { key: 'DIV', label: '扑救', keys: ['gkdiving'] },
+  { key: 'HAN', label: '手型', keys: ['gkhandling'] },
+  { key: 'KIC', label: '开球', keys: ['gkkicking'] },
+  { key: 'REF', label: '反应', keys: ['gkreflexes'] },
+  { key: 'POS', label: '站位', keys: ['gkpositioning'] },
+  { key: 'SPD', label: '速度', keys: ['sprintspeed', 'acceleration'] },
+] as const;
+
+function groupAverage(keys: readonly string[], attrs: Record<string, unknown>): number | null {
+  const vals = keys.map((k) => Number(attrs[k])).filter((v) => Number.isFinite(v));
+  return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+}
+
+// 六维雷达（静态 SVG，无动画）：组值=组内平均，归一到 99
+function AttrRadar({ values }: { values: { key: string; label: string; value: number | null }[] }) {
+  const cx = 100;
+  const cy = 100;
+  const R = 70;
+  const n = values.length;
+  const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
+  const pt = (i: number, r: number) => `${(cx + r * Math.cos(angle(i))).toFixed(2)},${(cy + r * Math.sin(angle(i))).toFixed(2)}`;
+  const dataPts = values
+    .map((v, i) => pt(i, (R * Math.min(Math.max(v.value ?? 0, 0), 99)) / 99))
+    .join(' ');
+  return (
+    <svg className="attr-radar-svg" viewBox="0 0 200 200" role="img" aria-label="六维雷达">
+      {[0.25, 0.5, 0.75, 1].map((f) => (
+        <polygon key={f} className="radar-grid" points={values.map((_, i) => pt(i, R * f)).join(' ')} />
+      ))}
+      {values.map((v, i) => {
+        const x = cx + (R + 13) * Math.cos(angle(i));
+        const y = cy + (R + 13) * Math.sin(angle(i));
+        const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? 'middle' : Math.cos(angle(i)) > 0 ? 'start' : 'end';
+        return (
+          <g key={v.key}>
+            <line className="radar-axis" x1={cx} y1={cy} x2={cx + R * Math.cos(angle(i))} y2={cy + R * Math.sin(angle(i))} />
+            <text className="radar-label" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">
+              {v.key}
+            </text>
+          </g>
+        );
+      })}
+      {values.some((v) => (v.value ?? 0) > 0) && <polygon className="radar-data" points={dataPts} />}
+    </svg>
+  );
+}
+
 function PlaystyleBadge({ psid, slot }: { psid: number; slot: number }) {
   const gold = playstyleIsGold(psid, slot);
   const row = playstyleById.get(psid);
@@ -339,6 +388,8 @@ function AttrSheet({
   const skillmoves = Number(attrs['skillmoves']);
   const isGk = position === 'GK';
   const groups = ATTR_GROUPS.filter((g) => isGk || g.key !== 'GKP');
+  const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
+  const radarValues = radarAxes.map((g) => ({ key: g.key, label: g.label, value: groupAverage(g.keys, attrs) }));
   return (
     <>
       <h3>FC 属性（当季源数据）</h3>
@@ -390,8 +441,7 @@ function AttrSheet({
       </div>
       <div className="attr-group-grid">
         {groups.map((g) => {
-          const vals = g.keys.map((k) => Number(attrs[k])).filter((v) => Number.isFinite(v));
-          const avg = vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+          const avg = groupAverage(g.keys, attrs);
           return (
             <div key={g.key} className="attr-group-card">
               <div className="attr-group-head">
@@ -414,6 +464,19 @@ function AttrSheet({
             </div>
           );
         })}
+      </div>
+      <div className="attr-radar">
+        <AttrRadar values={radarValues} />
+        <div className="radar-legend">
+          <h4>{isGk ? '门将六维' : '外场六维'}</h4>
+          {radarValues.map((v) => (
+            <div key={v.key} className="radar-legend-row">
+              <span className="mono radar-legend-key">{v.key}</span>
+              <span className="attr-name">{v.label}</span>
+              <span className={`mono ${v.value !== null ? attrClass(v.value) : ''}`}>{v.value ?? '—'}</span>
+            </div>
+          ))}
+        </div>
       </div>
       {playstyles.length > 0 && (
         <>

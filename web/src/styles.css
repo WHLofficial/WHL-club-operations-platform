@@ -1471,3 +1471,52 @@ tbody tr:hover td {
 .attr-low {
   color: var(--bad);
 }
+
+/* 六维雷达（增量 6.1 d11）：静态 SVG，无动画 */
+.attr-radar {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.attr-radar-svg {
+  width: 200px;
+  height: 200px;
+  flex: none;
+}
+.radar-grid {
+  fill: none;
+  stroke: var(--border);
+}
+.radar-axis {
+  stroke: var(--border);
+}
+.radar-data {
+  fill: rgba(55, 80, 94, 0.16);
+  stroke: var(--sky-deep);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.radar-label {
+  font-size: 10px;
+  fill: var(--muted);
+}
+.radar-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.radar-legend h4 {
+  margin-bottom: 4px;
+}
+.radar-legend-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 170px;
+}
+.radar-legend-key {
+  font-weight: 700;
+}
