@@ -814,6 +814,10 @@ tbody tr:hover td {
   color: var(--bad);
 }
 
+.low-text {
+  color: var(--sky-deep);
+}
+
 /* ---- 管理端 ---- */
 
 .admin-section {

@@ -215,13 +215,13 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
           <div className="preview-stats">
             <div className="club-stat">
               <span className="stat-label">一线队</span>
-              <span className={`stat-value mono${stats.firstTeam < rules.squadMin || stats.firstTeam > rules.squadMax ? ' bad-text' : ''}`}>
-                {stats.firstTeam}/{rules.squadMin}-{rules.squadMax}
+              <span className={`stat-value mono${stats.firstTeam > rules.squadMax ? ' bad-text' : stats.firstTeam < rules.squadMin ? ' low-text' : ''}`}>
+                {stats.firstTeam}/{rules.squadMax}
               </span>
             </div>
             <div className="club-stat">
               <span className="stat-label">门将</span>
-              <span className={`stat-value mono${stats.goalkeepers < rules.gkMin ? ' bad-text' : ''}`}>{stats.goalkeepers}</span>
+              <span className={`stat-value mono${stats.goalkeepers < rules.gkMin ? ' low-text' : ''}`}>{stats.goalkeepers}</span>
             </div>
             <div className="club-stat">
               <span className="stat-label">训练营</span>
@@ -230,9 +230,9 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
               </span>
             </div>
             <div className="club-stat">
-              <span className="stat-label">工资合计</span>
+              <span className="stat-label">工资</span>
               <span className={`stat-value mono${capLeft !== null && capLeft < 0 ? ' bad-text' : ' gold-text'}`}>
-                {stats.wageTotal.toFixed(2)} m
+                {wageCap !== null ? `${stats.wageTotal.toFixed(2)}/${wageCap} m` : `${stats.wageTotal.toFixed(2)} m`}
               </span>
             </div>
           </div>
@@ -301,12 +301,12 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             </div>
           )}
           {issues === null && squad.compliance?.pass && lastResult === null && (
-            <div className="banner ok">当前快照体检通过，可以安心开赛。</div>
+            <div className="banner ok">资格检查通过，可以安心开赛。</div>
           )}
           {lastResult !== null && (
             <div className="banner ok">
-              第 {lastResult.season} 赛季注册完成：一线队 {lastResult.firstTeam} 人、训练营 {lastResult.trainee} 人，工资合计{' '}
-              {lastResult.wageTotal.toFixed(2)} m。
+              第 {lastResult.season} 赛季注册完成：一线队 {lastResult.firstTeam} 人、训练营 {lastResult.trainee} 人，工资{' '}
+              {wageCap !== null ? `${lastResult.wageTotal.toFixed(2)}/${wageCap}` : lastResult.wageTotal.toFixed(2)} m。
               <span className="stamp stamp-ok stamp-inline">注册完成</span>
             </div>
           )}
@@ -315,7 +315,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             <button className="btn" type="button" disabled={!editable || busy} onClick={submit}>
               {busy ? '提交中…' : squad.registration ? '重新提交注册名单' : '提交注册名单'}
             </button>
-            {squad.registration && <span className="hint">重复提交会整体替换本赛季快照，放心改。</span>}
+            {squad.registration && <span className="hint">重复提交会整体替换本赛季注册名单，放心改。</span>}
           </div>
         </>
       )}
@@ -413,7 +413,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       show(
         res.changeFee > 0
           ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)} m，加价部分 30% 共 ${res.changeFee.toFixed(2)} m 待审核时收。`
-          : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)} m，降价免费，保护期重新收口到审核通过那刻。`,
+          : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)} m，降价免费，保护期从审核通过那一刻重新起算。`,
       );
       setRcPlayerId('');
       setNewFee('');
@@ -432,7 +432,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       const res = await apiPost<TerminationResult>('/api/transfers/termination', { playerId: termPlayer.id });
       show(
         res.terminationFee > 0
-          ? `解约申请已提交：${termPlayer.name}，解约费 ${res.terminationFee.toFixed(2)} m 待审核时销毁。他本窗内全联盟禁签。`
+          ? `解约申请已提交：${termPlayer.name}，解约费 ${res.terminationFee.toFixed(2)} m 待审核时回收。他本窗内全联盟禁签。`
           : `解约申请已提交：${termPlayer.name}，效力满三年免费解约。他本窗内全联盟禁签。`,
       );
       setTermPlayerId('');
@@ -450,8 +450,8 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       <h3>续约与解约</h3>
       {toastNode}
       <p className="hint">
-        两条旁路都直接开单送管理组审核：续约改违约金（RC ≤ 20 m 幅度 ±10 m、超过 20 m 幅度 ±50%；提高付差额的 30%，降低免费，
-        保护期重新收口）；解约效力满三年免费，不足三年按 RC ×（3 − 效力年数）× 10% 销毁解约费，被解约球员本窗全联盟禁签。
+        两种方式都直接开单送管理组审核：续约改违约金（违约金 ≤ 20 m 时幅度 ±10 m、超过 20 m 时幅度 ±50%；提高付差额的 30%，降低免费，
+        保护期从审核通过重新起算）；解约效力满三年免费，不足三年按违约金 ×（3 − 效力年数）× 10% 回收解约费，被解约球员本窗全联盟禁签。
       </p>
       {formal.length === 0 ? (
         <p className="muted">队里还没有带正式合同的球员，这两条操作都做不了。</p>
@@ -464,7 +464,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
                 <option value="">选一名球员…</option>
                 {formal.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name}（RC {(p.releaseFee ?? 0).toFixed(2)} m）
+                    {p.name}（违约金 {(p.releaseFee ?? 0).toFixed(2)} m）
                   </option>
                 ))}
               </select>
