@@ -27,7 +27,7 @@ app.get('/seasons/current', async (c) => {
     }>();
   const bindings = season
     ? await db
-        .prepare('SELECT id, tournament_id, competition_type FROM season_tournaments WHERE season = ?')
+        .prepare('SELECT id, tournament_id, competition_type FROM season_tournaments WHERE season = ? ORDER BY id')
         .bind(season.season)
         .all<{ id: number; tournament_id: number; competition_type: string | null }>()
     : { results: [] as { id: number; tournament_id: number; competition_type: string | null }[] };

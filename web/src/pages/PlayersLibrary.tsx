@@ -1,7 +1,7 @@
 // 球员库（增量 6.1 d8）：全联盟公开名册。当前视图=现在的归属与能力；初始视图=导入时的底册
 // （归属打建档俱乐部、CA 取建档值、PA 取导入上限，TECH_DESIGN §15 假设 24）。
 // 筛选 + keyset 游标分页（游标栈支持往回翻）；不显示工资——那是合同卷宗里的事。
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { api, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
 
@@ -57,7 +57,11 @@ export default function PlayersLibrary() {
 
   const cursor = cursorStack[cursorStack.length - 1]!;
 
+  // 请求序号守卫：筛选/翻页连点时，旧请求晚归不得覆盖新状态（review 修复，增量 6.1 d12）
+  const seqRef = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++seqRef.current;
     setBusy(true);
     setLoadError('');
     try {
@@ -73,12 +77,14 @@ export default function PlayersLibrary() {
       }
       if (cursor) params.set('cursor', cursor);
       const res = await api<PlayersLibraryResponse>(`/api/players?${params.toString()}`);
+      if (seq !== seqRef.current) return;
       setRows(res.players);
       setNextCursor(res.nextCursor);
     } catch (e) {
+      if (seq !== seqRef.current) return;
       setLoadError(e instanceof Error ? e.message : '加载失败');
     } finally {
-      setBusy(false);
+      if (seq === seqRef.current) setBusy(false);
     }
   }, [view, position, status, growable, name, sort, order, cursor]);
 
