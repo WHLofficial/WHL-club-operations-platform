@@ -177,7 +177,7 @@ function WindowsSection() {
       show(
         res.forceSettled > 0
           ? `第 ${res.season} 赛季窗口 ${res.windowSeq} 已关闭：${res.forceSettled} 场签约谈判按已定条款强制成约。`
-          : `第 ${res.season} 赛季窗口 ${res.windowSeq} 已关闭，窗尾收口完成。`,
+          : `第 ${res.season} 赛季窗口 ${res.windowSeq} 已关闭，窗尾截止处理完成。`,
       );
       setCloseArmed(false);
       setForceArmed(false);
@@ -194,7 +194,7 @@ function WindowsSection() {
       <h2>转会窗口</h2>
       {toastNode}
       <p className="hint">
-        同一时刻只有一个窗口开着。开窗会给全联盟球员重掷经纪人档位；关窗前先收口市场截止单，
+        同一时刻只有一个窗口开着。开窗会给全联盟球员重掷经纪人档位；关窗前先处理完市场截止单，
         并要求没有待审单、没有等待匹配的激活单、没有进行中的签约谈判——除非开了 window_force_settle 参数并用强制关窗，
         未谈完的谈判会按买方已提交的条款强制成约。
       </p>
@@ -339,7 +339,7 @@ function ForcedAuctionSection() {
       <h2>强制拍卖</h2>
       {toastNode}
       <p className="hint">
-        体检未过的处置手段：按 1m 挂牌强拍（只有本队 CA 前六、不含门将的球员可拍），成交整单税 50%。
+        资格检查未过的处置手段：按 1m 挂牌强拍（只有本队 CA 前六、不含门将的球员可拍），成交整单税 50%。
         未成交前可以取消。
       </p>
       <div className="inline-form">
@@ -1119,7 +1119,7 @@ function RegistrationsSection() {
       setSnapshot(await api<AdminRegistrations>(`/api/admin/registrations${seasonQuery(season)}`));
       setReport(null);
     } catch (err) {
-      show(err instanceof Error ? err.message : '注册快照加载失败', true);
+      show(err instanceof Error ? err.message : '注册名单加载失败', true);
     } finally {
       setBusy(false);
     }
@@ -1130,7 +1130,7 @@ function RegistrationsSection() {
     try {
       setReport(await api<ComplianceReport>(`/api/admin/compliance${seasonQuery(season)}`));
     } catch (err) {
-      show(err instanceof Error ? err.message : '体检失败', true);
+      show(err instanceof Error ? err.message : '资格检查失败', true);
     } finally {
       setCheckBusy(false);
     }
@@ -1144,10 +1144,10 @@ function RegistrationsSection() {
 
   return (
     <section className="card admin-section">
-      <h2>注册与体检</h2>
+      <h2>注册与资格检查</h2>
       {toastNode}
       <p className="hint">
-        注册快照按赛季存档，供准入体检对账。体检用当前属性对快照重跑合规引擎——注册后属性或合同漂移的违规会在赛前被抓出来。
+        注册名单按赛季存档，供资格检查对账。资格检查用当前属性对名单重跑合规引擎——注册后属性或合同漂移的违规会在赛前被抓出来。
         失败项触发强制拍卖的流程在转会增量落地，现在只报告。
       </p>
       <form
@@ -1168,21 +1168,21 @@ function RegistrationsSection() {
           />
         </label>
         <button className="btn" type="submit" disabled={busy}>
-          {busy ? '读取中…' : '查快照'}
+          {busy ? '读取中…' : '查名单'}
         </button>
         <button className="btn" type="button" disabled={checkBusy} onClick={() => runCheck(season || undefined)}>
-          {checkBusy ? '体检中…' : '跑一遍体检'}
+          {checkBusy ? '检查中…' : '跑一遍资格检查'}
         </button>
       </form>
 
       {snapshot === null ? null : snapshot.season === null ? (
         <div className="empty-state">
-          <p className="muted">还没有任何注册快照。等教练在球队中心提交名单。</p>
+          <p className="muted">还没有任何注册名单。等教练在球队中心提交名单。</p>
         </div>
       ) : (
         <>
           <h3>
-            第 {snapshot.season} 赛季注册快照（{snapshot.clubs.length} 支俱乐部）
+            第 {snapshot.season} 赛季注册名单（{snapshot.clubs.length} 支俱乐部）
           </h3>
           {snapshot.clubs.length === 0 ? (
             <div className="empty-state">
@@ -1197,7 +1197,7 @@ function RegistrationsSection() {
                     <th>级别</th>
                     <th className="num">一线队</th>
                     <th className="num">训练营</th>
-                    <th className="num">工资合计</th>
+                    <th className="num">工资</th>
                     <th>注册明细</th>
                   </tr>
                 </thead>
@@ -1236,11 +1236,11 @@ function RegistrationsSection() {
       {report && (
         <>
           <h3>
-            准入体检报告{report.season !== null ? `（第 ${report.season} 赛季）` : ''}
+            资格检查报告{report.season !== null ? `（第 ${report.season} 赛季）` : ''}
           </h3>
           {report.clubs.length === 0 ? (
             <div className="empty-state">
-              <p className="muted">没有可体检的俱乐部。</p>
+              <p className="muted">没有可检查的俱乐部。</p>
             </div>
           ) : (
             <div className="table-wrap">
@@ -1301,7 +1301,7 @@ function bypassSummary(r: AdminReviewRow): string | null {
     case 'free_agent':
       return `新违约金 ${num('newReleaseFee')} m，签入费 ${num('signFee')} m（30%）`;
     case 'match':
-      return `匹配留队：新违约金 ${num('newReleaseFee')} m > 出价 ${num('previousBid')} m，销毁差额 ${num('diff')} m`;
+      return `匹配留队：新违约金 ${num('newReleaseFee')} m > 出价 ${num('previousBid')} m，回收差额 ${num('diff')} m`;
     default:
       return null;
   }
@@ -1310,13 +1310,13 @@ function bypassSummary(r: AdminReviewRow): string | null {
 function completedMessage(r: AdminReviewRow): string {
   switch (r.transfer.type) {
     case 'rc_change':
-      return `已批准：${r.transfer.player.name} 的合同违约金已更新，保护期重新收口。`;
+      return `已批准：${r.transfer.player.name} 的合同违约金已更新，保护期重新起算。`;
     case 'termination':
       return `已批准：${r.transfer.player.name} 合同解除，进入自由球员名单（本窗禁签）。`;
     case 'free_agent':
       return `已批准：${r.transfer.player.name} 签入 ${r.transfer.toClubName ?? '—'}，签入费已收。`;
     case 'match':
-      return `已批准：${r.transfer.player.name} 留在 ${r.transfer.fromClubName ?? '—'}，匹配差额已销毁。`;
+      return `已批准：${r.transfer.player.name} 留在 ${r.transfer.fromClubName ?? '—'}，匹配差额已回收。`;
     default:
       return `已批准：${r.transfer.player.name} → ${r.transfer.toClubName ?? '—'}，划款过户完成。`;
   }
@@ -1371,8 +1371,8 @@ function ReviewsSection() {
       <h2>审核队列</h2>
       {toastNode}
       <p className="hint">
-        市场成交单与旁路单据（续约、解约、海捞、匹配）都在这里盖章：转会成交批准后开启签约谈判，由买方谈妥合同后成约过户；
-        旁路单据批准即落合同、收附加费。驳回则解冻全部资金、挂牌下架（不收下架费）。
+        市场成交单与方式单据（续约、解约、海捞、匹配）都在这里盖章：转会成交批准后开启签约谈判，由买方谈妥合同后成约过户；
+        方式单据批准即落合同、收附加费。驳回则解冻全部资金、挂牌下架（不收下架费）。
       </p>
       <div className="seg" role="radiogroup" aria-label="审核任务状态">
         {(['open', 'approved', 'rejected', 'all'] as const).map((s) => (

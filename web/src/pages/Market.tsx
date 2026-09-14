@@ -292,7 +292,7 @@ function ListSection({
               <option value="">选一名球员…</option>
               {listable.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}（RC {(p.releaseFee ?? 0).toFixed(2)} m）
+                  {p.name}（违约金 {(p.releaseFee ?? 0).toFixed(2)} m）
                 </option>
               ))}
             </select>
@@ -540,7 +540,7 @@ function DetailSection({
       onDecided(
         res.decision === 'pass'
           ? '已放行：按激活价成交，转管理组审核。'
-          : `已提交匹配：新违约金 ${(res.newReleaseFee ?? 0).toFixed(2)} m，差额 ${(res.diff ?? 0).toFixed(2)} m 待审核时销毁，球员留队。`,
+          : `已提交匹配：新违约金 ${(res.newReleaseFee ?? 0).toFixed(2)} m，差额 ${(res.diff ?? 0).toFixed(2)} m 待审核时回收，球员留队。`,
       );
       setPassArmed(false);
       setMatchFee('');
@@ -618,13 +618,13 @@ function DetailSection({
         <div className="admin-section">
           <h4>匹配决定（被激活方）</h4>
           <p className="hint">
-            匹配：给球员一份新违约金（整数 m，须高于首价 {money(l.highestBid)} m，不受幅度限制），审核通过时销毁新旧差额
-            {oldRc > 0 ? <>（现 RC {money(oldRc)} m）</> : null}，球员留队且本球员生涯只能被匹配这一次。
+            匹配：给球员一份新违约金（整数 m，须高于首价 {money(l.highestBid)} m，不受幅度限制），审核通过时回收新旧差额
+            {oldRc > 0 ? <>（现违约金 {money(oldRc)} m）</> : null}，球员留队且本球员生涯只能被匹配这一次。
             放行：按激活价成交送管理组审核。
           </p>
           <div className="inline-form">
             <div className="field">
-              <label htmlFor="match-fee">匹配新 RC（m）</label>
+              <label htmlFor="match-fee">匹配新违约金（m）</label>
               <input
                 id="match-fee"
                 className="mono"
@@ -656,8 +656,8 @@ function DetailSection({
           </div>
           {matchDiff !== null && matchDiff > 0 && (
             <p className="hint">
-              预估差额销毁 <span className="mono">{matchDiff.toFixed(2)}</span> m（新 RC {Number(matchFee).toFixed(2)} − 现违约金{' '}
-              {oldRc.toFixed(2)}），审核通过时从账户销毁。
+              预估差额回收 <span className="mono">{matchDiff.toFixed(2)}</span> m（新违约金 {Number(matchFee).toFixed(2)} − 现违约金{' '}
+              {oldRc.toFixed(2)}），审核通过时从账户回收。
             </p>
           )}
         </div>
@@ -719,7 +719,7 @@ function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; 
       const newFee = Number(feeById[p.id]);
       const res = await apiPost<FreeAgentResult>('/api/transfers/free-agent', { playerId: p.id, newReleaseFee: newFee });
       onDone(
-        `海捞申请已提交：${p.name} 以新违约金 ${res.newReleaseFee.toFixed(2)} m 签入，签入费 ${res.signFee.toFixed(2)} m（新 RC 的 30%）待审核时收，等管理组批准。`,
+        `海捞申请已提交：${p.name} 以新违约金 ${res.newReleaseFee.toFixed(2)} m 签入，签入费 ${res.signFee.toFixed(2)} m（新违约金的 30%）待审核时收，等管理组批准。`,
       );
       setFeeById((prev) => ({ ...prev, [p.id]: '' }));
       setArmedId(null);
@@ -737,13 +737,13 @@ function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; 
         <p className="muted">自由球员名单还没加载出来…</p>
       ) : data.freeAgents.length === 0 ? (
         <p className="hint">
-          现在没人待业。解约或合同到期的球员会出现在这里：给他一份新违约金（不设上下限），签入费按新 RC 的 30% 在审核通过时收。
+          现在没人待业。解约或合同到期的球员会出现在这里：给他一份新违约金（不设上下限），签入费按新违约金的 30% 在审核通过时收。
           本窗被解约的球员全联盟禁签。
         </p>
       ) : (
         <>
           <p className="hint">
-            给自由球员一份新违约金（不设上下限，整数 m），签入费按新 RC 的 30% 待审核时收。
+            给自由球员一份新违约金（不设上下限，整数 m），签入费按新违约金的 30% 待审核时收。
             注意：本窗被解约的球员全联盟禁签。
           </p>
           <div className="table-wrap">
