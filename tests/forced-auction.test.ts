@@ -71,10 +71,12 @@ async function createClub(fx: Fixture, name: string): Promise<number> {
 }
 
 // 被拍卖队（8 人：CA 90..76 非门将 7 人 + 门将；并列 CA84 两名）+ 竞买队（50m）
-async function seedAuction(): Promise<Fixture & { club: number; buyer: number }> {
+// + 豪门队（7 名高 CA 非门将）：若按联盟口径，受罚队第六（CA 82）会被压出前六——201 断言据此钉死队内语义
+async function seedAuction(): Promise<Fixture & { club: number; buyer: number; rich: number }> {
   const fx = freshEnv();
   const club = await createClub(fx, '受罚队');
   const buyer = await createClub(fx, '接盘队');
+  const rich = await createClub(fx, '豪门队');
   for (const [clubId, token] of [
     [club, 'tok-coach'],
     [buyer, 'tok-coach2'],
@@ -99,13 +101,21 @@ async function seedAuction(): Promise<Fixture & { club: number; buyer: number }>
        (44, 'fc44', '并列乙', ${club}, 'RB', 25, 84, 84, 'normal'),
        (45, 'fc45', '第六', ${club}, 'LM', 24, 82, 82, 'normal'),
        (46, 'fc46', '第七', ${club}, 'RM', 24, 80, 80, 'normal'),
-       (47, 'fc47', '门神', ${club}, 'GK', 28, 91, 91, 'normal');
+       (47, 'fc47', '门神', ${club}, 'GK', 28, 91, 91, 'normal'),
+       (50, 'fc50', '豪门一', ${rich}, 'ST', 26, 95, 95, 'normal'),
+       (51, 'fc51', '豪门二', ${rich}, 'CM', 26, 93, 93, 'normal'),
+       (52, 'fc52', '豪门三', ${rich}, 'CB', 27, 92, 92, 'normal'),
+       (53, 'fc53', '豪门四', ${rich}, 'CM', 25, 91, 91, 'normal'),
+       (54, 'fc54', '豪门五', ${rich}, 'RB', 25, 90, 90, 'normal'),
+       (55, 'fc55', '豪门六', ${rich}, 'LM', 24, 89, 89, 'normal'),
+       (56, 'fc56', '豪门七', ${rich}, 'RM', 24, 88, 88, 'normal'),
+       (57, 'fc57', '豪门门神', ${rich}, 'GK', 28, 96, 96, 'normal');
      INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
        (1, 45, ${club}, 20, 2, 'formal', 1, '2026-06-01'),
        (2, 46, ${club}, 20, 2, 'formal', 1, '2026-06-01'),
        (3, 47, ${club}, 20, 2, 'formal', 1, '2026-06-01');`,
   );
-  return { ...fx, club, buyer };
+  return { ...fx, club, buyer, rich };
 }
 
 async function openReviewTaskId(fx: Fixture): Promise<number> {
@@ -118,7 +128,8 @@ async function openReviewTaskId(fx: Fixture): Promise<number> {
 describe('强制拍卖（4.4.5）', () => {
   it('人选校验：前六（含并列）可拍、第七与门将不可拍', async () => {
     const fx = await seedAuction();
-    // CA 82 是非门将第六（84 并列占四、五）
+    // CA 82 是本队非门将第六（84 并列占四、五）；豪门队 7 名非门将 CA 均 > 82，
+    // 若按联盟口径这里会排到第 13 名而 409——201 即钉死「队内前六」语义
     const ok = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
     expect(ok.status).toBe(201);
     const okBody = (await ok.json()) as { askPrice: number; listingId: number };
@@ -131,6 +142,9 @@ describe('强制拍卖（4.4.5）', () => {
     expect(seventh.status).toBe(409);
     const gk = await post('/api/admin/forced-auctions', { playerId: 47 }, 'tok-admin', fx.env);
     expect(gk.status).toBe(400);
+    // 队内口径对豪门队同样生效：CA 88 是豪门队非门将第七
+    const richSeventh = await post('/api/admin/forced-auctions', { playerId: 56 }, 'tok-admin', fx.env);
+    expect(richSeventh.status).toBe(409);
   });
 
   it('成交链：1m 挂牌 → 竞价 → 待审 → 批准进谈判 → 成约按整单 50% 税过户', async () => {

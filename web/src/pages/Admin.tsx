@@ -339,7 +339,7 @@ function ForcedAuctionSection() {
       <h2>强制拍卖</h2>
       {toastNode}
       <p className="hint">
-        体检未过的处置手段：按 1m 挂牌强拍（只有 CA 联盟前六、不含门将的球员可拍），成交整单税 50%。
+        体检未过的处置手段：按 1m 挂牌强拍（只有本队 CA 前六、不含门将的球员可拍），成交整单税 50%。
         未成交前可以取消。
       </p>
       <div className="inline-form">
