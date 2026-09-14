@@ -76,6 +76,7 @@ const MIGRATION_FILES = [
   '0011_oidc_session.sql',
   '0012_oidc_claims.sql',
   '0013_binding_user_name.sql',
+  '0014_season_tournaments.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync): void {

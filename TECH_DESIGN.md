@@ -643,15 +643,18 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 
 ## 11. 赛程绑定与窗口状态机
 
+增量 6.1 层级裁决：**赛季是上集，赛事和窗口是并列的下级**。赛事绑赛季（一赛季多座赛事，一座赛事只进一个赛季），窗口只管转会准入，不再挂赛事。
+
 ```
 seasons(season=N, status: preparing → running → settled)
-  └─ season_windows(window_seq, status: open → closed)
-        └─ tournament_id + competition_type（每赛季由管理组从比赛系统赛事列表选择绑定）
+  ├─ season_tournaments(tournament_id UNIQUE + competition_type，赛果来源，一赛季多座)
+  └─ season_windows(window_seq, status: open → closed，只驱动转会准入)
 ```
 
-- 绑定后平台跨库拉取该 tournament 的 schedule/matches（只读），赛果 finished 后出现在「赛果确认」队列 → 管理组确认 → 触发奖金（P0 手动/P1 自动）、主场收入、XP 事件。
+- 绑定后平台跨库拉取该 tournament 的 schedule/matches（只读），赛果 finished 后出现在「赛果确认」队列 → 管理组确认 → 触发奖金（P0 手动/P1 自动）、主场收入、XP 事件；确认时点记录窗口号（确认时刻的开放窗，否则最近一窗，否则 0，见假设 25）。
 - 窗口状态机驱动一切准入：窗口 open 才允许转会操作；窗口 closed 触发结算（富人税、维护费、工资）。
 - 赛季结算：忠诚奖金 → 富人税 → 死忠演化 → 年龄+1 → 可成长年龄检查 → 下赛季注册重置。
+- 存量迁移（0014）：旧 season_windows.tournament_id 的绑定回填进 season_tournaments，窗口上两列休眠保留。
 
 ## 12. 通知系统
 
@@ -779,6 +782,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
 | 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
 | 23 | 假设 | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮（/api/me/notifications）延后 P1，MVP 只走 QQ 推送 |
+| 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
 
 ## 16. 测试策略
 
@@ -864,7 +868,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 谈判 | POST `/api/negotiations/:sessionId/offer` | 👤 | 报价（满意度文案返回）〔4〕 |
 | 谈判 | POST `/api/negotiations/:sessionId/trainee` | 👤 | 直签训练营合同（0.75/5 双固定，不占下放名额；2026-09 裁决）〔4〕 |
 | 赛季 | GET `/api/seasons/current` | 🌐 | 当前赛季/窗口〔6〕 |
-| 赛季 | POST `/api/admin/seasons` · `/advance-window` · `/:id/bind-tournament` | 🛡 | 赛季管理〔6〕 |
+| 赛季 | POST `/api/admin/seasons` · `/advance-window` · `/:id/bind-tournament` · `/:id/unbind-tournament` · GET `/:id/tournaments` | 🛡 | 赛季管理〔6〕 |
 | 赛果 | GET `/api/admin/results/queue` · POST `/:id/confirm` | 🛡 | 赛果确认（触发奖金/XP）〔6〕 |
 | 财政 | GET `/api/club/ledger?cursor=` · GET `/api/club/balance` | 👤 | 流水账〔6〕 |
 | 财政 | POST `/api/admin/ledger/opening-import` | 🛡 | 期初余额导入（§14.1，kind=opening_import）〔1〕 |

@@ -91,7 +91,7 @@ async function openWindowFor(fx: Fixture, season: number, windowSeq: number): Pr
   expect(res.status).toBe(201);
 }
 
-describe('赛季与赛事绑定（§11）', () => {
+describe('赛季与赛事绑定（§11，增量 6.1 层级修订：赛事绑赛季、窗口只管转会准入）', () => {
   it('建赛季 → 开窗 → 绑赛事 → 公开端点可见；开窗把备赛期推进到进行中', async () => {
     const fx = freshEnv();
     seedTournament(fx);
@@ -104,7 +104,7 @@ describe('赛季与赛事绑定（§11）', () => {
 
     const bind = await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+      { tournamentId: 5, competitionType: 'league_premier' },
       'tok-admin',
       fx.env,
     );
@@ -115,34 +115,44 @@ describe('赛季与赛事绑定（§11）', () => {
     expect(current.status).toBe(200);
     const body = (await current.json()) as {
       season: { season: number; status: string } | null;
-      window: { season: number; windowSeq: number; tournamentId: number; competitionType: string } | null;
+      window: { season: number; windowSeq: number; status: string } | null;
+      tournaments: { tournamentId: number; competitionType: string }[];
     };
     expect(body.season).toEqual({ season: 3, status: 'running' });
-    expect(body.window).toMatchObject({ season: 3, windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' });
+    expect(body.window).toMatchObject({ season: 3, windowSeq: 1 });
+    expect(body.tournaments).toEqual([{ tournamentId: 5, competitionType: 'league_premier' }]);
   });
 
-  it('重复建赛季 409；一座赛事绑两个窗口 409；类型/赛事/窗口非法全 400/404', async () => {
+  it('不用先开窗就能绑赛事（绑定不再依赖窗口）', async () => {
+    const fx = freshEnv();
+    seedTournament(fx);
+    await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
+    const bind = await post(
+      '/api/admin/seasons/3/bind-tournament',
+      { tournamentId: 5, competitionType: 'league_premier' },
+      'tok-admin',
+      fx.env,
+    );
+    expect(bind.status).toBe(200);
+  });
+
+  it('重复建赛季 409；一座赛事绑两次 409；类型/赛事/赛季非法 400/404；解绑后可重绑', async () => {
     const fx = freshEnv();
     seedTournament(fx);
     await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
     const dup = await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
     expect(dup.status).toBe(409);
 
-    await openWindowFor(fx, 3, 1);
     const ok = await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+      { tournamentId: 5, competitionType: 'league_premier' },
       'tok-admin',
       fx.env,
     );
     expect(ok.status).toBe(200);
-    // 一次只能开一个窗：关窗 1 开窗 2，再试把同一赛事绑过去
-    const closed = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
-    expect(closed.status).toBe(200);
-    await openWindowFor(fx, 3, 2);
     const doubleBind = await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 2, tournamentId: 5, competitionType: 'league_premier' },
+      { tournamentId: 5, competitionType: 'league_premier' },
       'tok-admin',
       fx.env,
     );
@@ -150,25 +160,45 @@ describe('赛季与赛事绑定（§11）', () => {
 
     const badType = await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 2, tournamentId: 5, competitionType: 'fa_cup' },
+      { tournamentId: 5, competitionType: 'fa_cup' },
       'tok-admin',
       fx.env,
     );
     expect(badType.status).toBe(400);
     const noTour = await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 2, tournamentId: 777, competitionType: 'super_cup' },
+      { tournamentId: 777, competitionType: 'super_cup' },
       'tok-admin',
       fx.env,
     );
     expect(noTour.status).toBe(404);
-    const noWindow = await post(
-      '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 9, tournamentId: 5, competitionType: 'super_cup' },
+    const noSeason = await post(
+      '/api/admin/seasons/9/bind-tournament',
+      { tournamentId: 6, competitionType: 'super_cup' },
       'tok-admin',
       fx.env,
     );
-    expect(noWindow.status).toBe(404);
+    expect(noSeason.status).toBe(404);
+
+    const list1 = (await (await get('/api/admin/seasons/3/tournaments', 'tok-admin', fx.env)).json()) as {
+      bindings: { tournamentId: number }[];
+    };
+    expect(list1.bindings.map((b) => b.tournamentId)).toEqual([5]);
+    const unbind = await post('/api/admin/seasons/3/unbind-tournament', { tournamentId: 5 }, 'tok-admin', fx.env);
+    expect(unbind.status).toBe(200);
+    const unbindAgain = await post('/api/admin/seasons/3/unbind-tournament', { tournamentId: 5 }, 'tok-admin', fx.env);
+    expect(unbindAgain.status).toBe(404);
+    const list2 = (await (await get('/api/admin/seasons/3/tournaments', 'tok-admin', fx.env)).json()) as {
+      bindings: { tournamentId: number }[];
+    };
+    expect(list2.bindings).toEqual([]);
+    const rebind = await post(
+      '/api/admin/seasons/3/bind-tournament',
+      { tournamentId: 5, competitionType: 'league_premier' },
+      'tok-admin',
+      fx.env,
+    );
+    expect(rebind.status).toBe(200);
   });
 });
 
@@ -180,7 +210,7 @@ describe('赛果只读同步与确认（附录 A〔6〕）', () => {
     await openWindowFor(fx, 3, 1);
     await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+      { tournamentId: 5, competitionType: 'league_premier' },
       'tok-admin',
       fx.env,
     );
@@ -211,6 +241,26 @@ describe('赛果只读同步与确认（附录 A〔6〕）', () => {
     expect(sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'result_confirm'")?.action).toBe('result_confirm');
   });
 
+  it('多赛事绑定：队列聚合全部绑定赛事；有确认赛果的赛事不能解绑', async () => {
+    const fx = freshEnv();
+    seedTournament(fx);
+    await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
+    await post('/api/admin/seasons/3/bind-tournament', { tournamentId: 5, competitionType: 'league_premier' }, 'tok-admin', fx.env);
+    await post('/api/admin/seasons/3/bind-tournament', { tournamentId: 6, competitionType: 'champions_cup' }, 'tok-admin', fx.env);
+
+    const q1 = (await (await get('/api/admin/results/queue', 'tok-admin', fx.env)).json()) as {
+      queue: { matchId: number }[];
+    };
+    // tournament 5 的 900/901 + tournament 6 的 903（弃权场也进队列，确认时才不计 XP）
+    expect(q1.queue.map((r) => r.matchId).sort()).toEqual([900, 901, 903]);
+
+    await openWindowFor(fx, 3, 1);
+    const confirm = await post('/api/admin/results/900/confirm', {}, 'tok-admin', fx.env);
+    expect(confirm.status).toBe(201);
+    const unbind = await post('/api/admin/seasons/3/unbind-tournament', { tournamentId: 5 }, 'tok-admin', fx.env);
+    expect(unbind.status).toBe(409);
+  });
+
   it('未完赛不能确认；未绑定赛事不能确认；找不到比赛 404', async () => {
     const fx = freshEnv();
     seedTournament(fx);
@@ -218,7 +268,7 @@ describe('赛果只读同步与确认（附录 A〔6〕）', () => {
     await openWindowFor(fx, 3, 1);
     await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+      { tournamentId: 5, competitionType: 'league_premier' },
       'tok-admin',
       fx.env,
     );
@@ -238,7 +288,7 @@ describe('赛果只读同步与确认（附录 A〔6〕）', () => {
     await openWindowFor(fx, 3, 1);
     const res = await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+      { tournamentId: 5, competitionType: 'league_premier' },
       'tok-admin',
       fx.env,
     );

@@ -212,7 +212,7 @@ describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
     await post('/api/admin/windows/open', { season: 3, windowSeq: 1 }, 'tok-admin', fx.env);
     await post(
       '/api/admin/seasons/3/bind-tournament',
-      { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+      { tournamentId: 5, competitionType: 'league_premier' },
       'tok-admin',
       fx.env,
     );

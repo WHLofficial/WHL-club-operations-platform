@@ -476,14 +476,13 @@ app.post('/seasons', async (c) => {
   return c.json({ ok: true, season }, 201);
 });
 
-// 绑定赛事到窗口：一座赛事只绑一个窗口（库上唯一索引）；赛季已结算后不得再绑
+// 绑定赛事到赛季（增量 6.1 层级修订：赛季是上级，赛事与窗口并列——赛事绑赛季、窗口只管转会准入）。
+// 一座赛事只进一个赛季（库上唯一约束，防同一场比赛双份进赛果队列）；赛季已结算后不得再绑
 app.post('/seasons/:id/bind-tournament', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const season = Number(c.req.param('id'));
   if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
-  const body = (await readJson(c)) as { windowSeq?: unknown; tournamentId?: unknown; competitionType?: unknown } | null;
-  const windowSeq = Number(body?.windowSeq);
-  if (!Number.isInteger(windowSeq) || windowSeq <= 0) throw new HttpError(400, 'windowSeq 应为正整数');
+  const body = (await readJson(c)) as { tournamentId?: unknown; competitionType?: unknown } | null;
   const tournamentId = Number(body?.tournamentId);
   if (!Number.isInteger(tournamentId) || tournamentId <= 0) throw new HttpError(400, 'tournamentId 应为正整数');
   const competitionType = body?.competitionType;
@@ -497,31 +496,75 @@ app.post('/seasons/:id/bind-tournament', async (c) => {
   if (!tournament) throw new HttpError(404, '比赛系统里找不到这座赛事');
 
   const seasonRow = await c.env.DB.prepare('SELECT status FROM seasons WHERE season = ?').bind(season).first<{ status: string }>();
-  if (seasonRow?.status === 'settled') throw new HttpError(409, '这个赛季已经结算，不能再绑赛事');
-  const win = await c.env.DB.prepare('SELECT id FROM season_windows WHERE season = ? AND window_seq = ?')
-    .bind(season, windowSeq)
-    .first<{ id: number }>();
-  if (!win) throw new HttpError(404, '这个窗口不存在，先开窗再绑定');
+  if (!seasonRow) throw new HttpError(404, '赛季不存在，先建档再绑赛事');
+  if (seasonRow.status === 'settled') throw new HttpError(409, '这个赛季已经结算，不能再绑赛事');
 
   const audit = createAuditStatement(c.env.DB);
   try {
     await c.env.DB.batch([
       c.env.DB.prepare(
-        'UPDATE season_windows SET tournament_id = ?, competition_type = ? WHERE season = ? AND window_seq = ?',
-      ).bind(tournamentId, competitionType, season, windowSeq),
+        `INSERT INTO season_tournaments (season, tournament_id, competition_type, created_at) VALUES (?, ?, ?, ${nowSql()})`,
+      ).bind(season, tournamentId, competitionType),
       audit({
         actor: user.id,
         action: 'season_bind_tournament',
-        targetType: 'season_window',
-        targetId: win.id,
-        after: { season, windowSeq, tournamentId, competitionType },
+        targetType: 'season',
+        targetId: season,
+        after: { season, tournamentId, competitionType },
       }),
     ]);
   } catch (err) {
-    if (String(err).includes('UNIQUE')) throw new HttpError(409, '这座赛事已经绑到别的窗口了');
+    if (String(err).includes('UNIQUE')) throw new HttpError(409, '这座赛事已经绑过赛季了（一座赛事只进一个赛季）');
     throw err;
   }
   return c.json({ ok: true, tournament: { id: tournament.id, name: tournament.name } });
+});
+
+// 某赛季的赛事绑定列表（管理端「赛季与赛事绑定」用；赛事名前端经 /tournaments 下拉映射）
+app.get('/seasons/:id/tournaments', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  const season = Number(c.req.param('id'));
+  if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
+  const rows = await c.env.DB.prepare(
+    'SELECT id, tournament_id, competition_type FROM season_tournaments WHERE season = ? ORDER BY id',
+  )
+    .bind(season)
+    .all<{ id: number; tournament_id: number; competition_type: string | null }>();
+  return c.json({
+    bindings: rows.results.map((r) => ({ id: r.id, tournamentId: r.tournament_id, competitionType: r.competition_type })),
+  });
+});
+
+// 解绑：该赛事还没有任何确认入档赛果时才允许（防结算后改账）
+app.post('/seasons/:id/unbind-tournament', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  const season = Number(c.req.param('id'));
+  if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
+  const body = (await readJson(c)) as { tournamentId?: unknown } | null;
+  const tournamentId = Number(body?.tournamentId);
+  if (!Number.isInteger(tournamentId) || tournamentId <= 0) throw new HttpError(400, 'tournamentId 应为正整数');
+
+  const binding = await c.env.DB.prepare('SELECT id FROM season_tournaments WHERE season = ? AND tournament_id = ?')
+    .bind(season, tournamentId)
+    .first<{ id: number }>();
+  if (!binding) throw new HttpError(404, '这座赛事没有绑在这个赛季上');
+  const confirmed = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM result_confirmations WHERE tournament_id = ?')
+    .bind(tournamentId)
+    .first<{ n: number }>();
+  if ((confirmed?.n ?? 0) > 0) throw new HttpError(409, '这座赛事已经有确认入档的赛果，不能解绑');
+
+  const audit = createAuditStatement(c.env.DB);
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM season_tournaments WHERE id = ?').bind(binding.id),
+    audit({
+      actor: user.id,
+      action: 'season_unbind_tournament',
+      targetType: 'season',
+      targetId: season,
+      after: { season, tournamentId },
+    }),
+  ]);
+  return c.json({ ok: true });
 });
 
 // 赛事下拉：比赛系统赛事列表（只读跨库）

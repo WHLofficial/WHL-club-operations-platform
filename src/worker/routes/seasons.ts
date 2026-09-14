@@ -1,4 +1,4 @@
-// 赛季公开端点（附录 A〔6〕，🌐 无需登录）：当前赛季与最新窗口，MVP 闭环走查用
+// 赛季公开端点（附录 A〔6〕，🌐 无需登录）：当前赛季 + 最新窗口 + 本赛季绑定赛事（增量 6.1：赛事绑赛季）
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 
@@ -15,18 +15,22 @@ app.get('/seasons/current', async (c) => {
     .first<{ season: number; status: string }>();
   const win = await db
     .prepare(
-      `SELECT season, window_seq, status, tournament_id, competition_type, opened_at, closed_at
+      `SELECT season, window_seq, status, opened_at, closed_at
        FROM season_windows ORDER BY season DESC, window_seq DESC LIMIT 1`,
     )
     .first<{
       season: number;
       window_seq: number;
       status: string;
-      tournament_id: number | null;
-      competition_type: string | null;
       opened_at: string | null;
       closed_at: string | null;
     }>();
+  const bindings = season
+    ? await db
+        .prepare('SELECT tournament_id, competition_type FROM season_tournaments WHERE season = ?')
+        .bind(season.season)
+        .all<{ tournament_id: number; competition_type: string | null }>()
+    : { results: [] as { tournament_id: number; competition_type: string | null }[] };
   return c.json({
     season: season ? { season: season.season, status: season.status } : null,
     window: win
@@ -34,12 +38,11 @@ app.get('/seasons/current', async (c) => {
           season: win.season,
           windowSeq: win.window_seq,
           status: win.status,
-          tournamentId: win.tournament_id,
-          competitionType: win.competition_type,
           openedAt: win.opened_at,
           closedAt: win.closed_at,
         }
       : null,
+    tournaments: bindings.results.map((t) => ({ tournamentId: t.tournament_id, competitionType: t.competition_type })),
   });
 });
 

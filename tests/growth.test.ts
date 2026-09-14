@@ -122,16 +122,16 @@ async function bindSeason(fx: Fixture): Promise<void> {
   await post('/api/admin/windows/open', { season: 3, windowSeq: 1 }, 'tok-admin', fx.env);
   await post(
     '/api/admin/seasons/3/bind-tournament',
-    { windowSeq: 1, tournamentId: 5, competitionType: 'league_premier' },
+    { tournamentId: 5, competitionType: 'league_premier' },
     'tok-admin',
     fx.env,
   );
-  // 冠军杯要第二个窗口（一次只能开一个窗）
+  // 绑定已不依赖窗口（增量 6.1：赛事绑赛季）；仍开出窗口 2，让冠军杯场次的确认时点落在窗 2
   await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
   await post('/api/admin/windows/open', { season: 3, windowSeq: 2 }, 'tok-admin', fx.env);
   await post(
     '/api/admin/seasons/3/bind-tournament',
-    { windowSeq: 2, tournamentId: 6, competitionType: 'champions_cup' },
+    { tournamentId: 6, competitionType: 'champions_cup' },
     'tok-admin',
     fx.env,
   );

@@ -51,7 +51,6 @@ const MATCH_SELECT = `
 export interface ResultQueueItem {
   matchId: number;
   season: number;
-  windowSeq: number;
   competitionType: string | null;
   stageName: string | null;
   round: number | null;
@@ -114,12 +113,12 @@ function toConfirmedItem(r: {
   };
 }
 
-// 待确认队列：所有绑了赛事的窗口 → 该赛事 finished 场次，剔除已确认；每窗硬 LIMIT（§17）
+// 待确认队列：绑定的全部赛事（赛季级绑定，增量 6.1 修订）→ 该赛事 finished 场次，剔除已确认；每赛事硬 LIMIT（§17）
 export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]; confirmed: ConfirmedResultItem[] }> {
   const bound = await env.DB.prepare(
-    `SELECT season, window_seq, tournament_id, competition_type FROM season_windows
-     WHERE tournament_id IS NOT NULL ORDER BY season DESC, window_seq DESC LIMIT 20`,
-  ).all<{ season: number; window_seq: number; tournament_id: number; competition_type: string | null }>();
+    `SELECT season, tournament_id, competition_type FROM season_tournaments
+     ORDER BY season DESC, tournament_id DESC LIMIT 20`,
+  ).all<{ season: number; tournament_id: number; competition_type: string | null }>();
 
   const confirmedRows = await env.DB.prepare(
     'SELECT match_id FROM result_confirmations ORDER BY id DESC LIMIT 500',
@@ -139,7 +138,6 @@ export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]
       queue.push({
         matchId: r.id,
         season: w.season,
-        windowSeq: w.window_seq,
         competitionType: w.competition_type,
         stageName: r.stage_name,
         round: r.round,
@@ -169,7 +167,9 @@ export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]
   };
 }
 
-// 确认一场比赛：完赛校验 → 窗口绑定解析 → 快照落库 + 审计（幂等：match_id 唯一，重复确认 409）
+// 确认一场比赛：完赛校验 → 赛季绑定解析 → 快照落库 + 审计（幂等：match_id 唯一，重复确认 409）。
+// 窗口号盖确认时刻的全局开放窗口（§15 假设 25：窗口只管转会准入，赛果归属赛季不归属窗口）；
+// 没有开放窗口（关窗后补确认）取最近一窗，一次窗口都没开过则记 0。
 export async function confirmResult(
   env: Env,
   actor: number,
@@ -183,11 +183,20 @@ export async function confirmResult(
   if (m.status !== 'finished') throw new HttpError(409, '这场比赛还没完赛，只有完赛的场次能确认');
 
   const binding = await env.DB.prepare(
-    'SELECT season, window_seq, competition_type FROM season_windows WHERE tournament_id = ?',
+    'SELECT season, competition_type FROM season_tournaments WHERE tournament_id = ?',
   )
     .bind(m.tournament_id)
-    .first<{ season: number; window_seq: number; competition_type: string | null }>();
-  if (!binding) throw new HttpError(409, '这场比赛所属赛事还没绑定到任何窗口，先到「赛季与赛事绑定」里绑');
+    .first<{ season: number; competition_type: string | null }>();
+  if (!binding) throw new HttpError(409, '这场比赛所属赛事还没绑定到任何赛季，先到「赛季与赛事绑定」里绑');
+
+  const win =
+    (await env.DB.prepare(
+      "SELECT window_seq FROM season_windows WHERE status = 'open' ORDER BY season DESC, window_seq DESC LIMIT 1",
+    ).first<{ window_seq: number }>()) ??
+    (await env.DB.prepare('SELECT window_seq FROM season_windows ORDER BY season DESC, window_seq DESC LIMIT 1').first<{
+      window_seq: number;
+    }>());
+  const ctx = { season: binding.season, window_seq: win?.window_seq ?? 0, competition_type: binding.competition_type };
 
   const audit = createAuditStatement(env.DB);
   try {
@@ -199,8 +208,8 @@ export async function confirmResult(
             winner_team, finished_at, confirmed_by, confirmed_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${nowSql()})`,
       ).bind(
-        binding.season,
-        binding.window_seq,
+        ctx.season,
+        ctx.window_seq,
         m.tournament_id,
         matchId,
         binding.competition_type,
@@ -223,8 +232,8 @@ export async function confirmResult(
         targetType: 'match',
         targetId: matchId,
         after: {
-          season: binding.season,
-          windowSeq: binding.window_seq,
+          season: ctx.season,
+          windowSeq: ctx.window_seq,
           homeTeam: m.home_team,
           awayTeam: m.away_team,
           scoreHome: m.score_home,
@@ -245,8 +254,8 @@ export async function confirmResult(
     .bind(matchId)
     .first();
   // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知（§12，尽力而为不阻塞确认）
-  const xp = await recordAutoXpForMatch(env, matchId, m, binding);
-  await queueResultNotifications(env, binding, m);
+  const xp = await recordAutoXpForMatch(env, matchId, m, ctx);
+  await queueResultNotifications(env, ctx, m);
   return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp };
 }
 
