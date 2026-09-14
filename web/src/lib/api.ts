@@ -113,11 +113,28 @@ export interface PlayerDetail {
     growable: boolean;
     growthXp: number;
     gameAttrs: Record<string, unknown> | null;
+    initialClubId: number | null;
     createdAt: string;
     updatedAt: string;
   };
   club: { id: number; name: string } | null;
+  /** 初始归属（导入时数据，增量 6.1 d7）：仅供展示与成长「本队」判断口径 */
+  initialClub: { id: number; name: string } | null;
   contract: ContractDto | null;
+}
+
+// ---- 增量 6.1 d8：球员库（公开 /api/players，keyset 游标分页）----
+
+export interface PlayerLibraryRow extends PlayerListItem {
+  growable: boolean;
+  clubName: string | null;
+  /** 初始归属名（view=initial 时主显示列） */
+  initialClubName: string | null;
+}
+
+export interface PlayersLibraryResponse {
+  players: PlayerLibraryRow[];
+  nextCursor: string | null;
 }
 
 export interface AdminClubRow {

@@ -5,6 +5,7 @@ import { api, type AuthMode, type MeUser } from './lib/api.ts';
 import Home from './pages/Home.tsx';
 import Club from './pages/Club.tsx';
 import Player from './pages/Player.tsx';
+import PlayersLibrary from './pages/PlayersLibrary.tsx';
 import Bind from './pages/Bind.tsx';
 import Market from './pages/Market.tsx';
 import Negotiations from './pages/Negotiations.tsx';
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/" element={<Home user={user} authMode={authMode} authHome={authHome} />} />
         <Route path="/club" element={<Club />} />
         <Route path="/bind" element={<Bind />} />
+        <Route path="/players" element={<PlayersLibrary />} />
         <Route path="/players/:id" element={<Player />} />
         <Route path="/market" element={<Market />} />
         <Route path="/negotiations" element={<Negotiations />} />

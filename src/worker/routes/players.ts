@@ -16,12 +16,12 @@ type SortKey = keyof typeof SORT_KEYS;
 const SORT_FIELD = { id: 'id', ca: 'sort_ca', pa: 'sort_pa', age: 'age', market_value: 'market_value' } as const;
 
 const RANGE_PARAMS = {
-  ca_min: { col: 'ca', op: '>=' },
-  ca_max: { col: 'ca', op: '<=' },
-  pa_min: { col: 'pa', op: '>=' },
-  pa_max: { col: 'pa', op: '<=' },
-  age_min: { col: 'age', op: '>=' },
-  age_max: { col: 'age', op: '<=' },
+  ca_min: { col: 'players.ca', op: '>=' },
+  ca_max: { col: 'players.ca', op: '<=' },
+  pa_min: { col: 'players.pa', op: '>=' },
+  pa_max: { col: 'players.pa', op: '<=' },
+  age_min: { col: 'players.age', op: '>=' },
+  age_max: { col: 'players.age', op: '<=' },
 } as const;
 
 function decodeNumericCursor(raw: string): { v: number; id: number } {
@@ -38,24 +38,24 @@ app.get('/players', async (c) => {
   const viewRaw = c.req.query('view');
   if (viewRaw !== undefined && viewRaw !== 'initial') throw new HttpError(400, 'view 只能是 initial');
   const initial = viewRaw === 'initial';
-  const clubCol = initial ? 'initial_club_id' : 'club_id';
-  const caExpr = initial ? 'COALESCE(base_ca, ca)' : 'ca';
-  const paExpr = initial ? "COALESCE(json_extract(game_attrs, '$.PA'), pa)" : 'pa';
+  const clubCol = initial ? 'players.initial_club_id' : 'players.club_id';
+  const caExpr = initial ? 'COALESCE(players.base_ca, players.ca)' : 'players.ca';
+  const paExpr = initial ? "COALESCE(json_extract(players.game_attrs, '$.PA'), players.pa)" : 'players.pa';
   // keyset 比较表达式（WHERE/ORDER BY 同源，保证全序一致）
   const SORT_EXPRS: Record<SortKey, string> = initial
     ? {
-        id: 'id',
-        ca: 'COALESCE(base_ca, 0)',
-        pa: "COALESCE(json_extract(game_attrs, '$.PA'), 0)",
-        age: 'COALESCE(age, 0)',
-        market_value: 'COALESCE(market_value, 0)',
+        id: 'players.id',
+        ca: 'COALESCE(players.base_ca, 0)',
+        pa: "COALESCE(json_extract(players.game_attrs, '$.PA'), 0)",
+        age: 'COALESCE(players.age, 0)',
+        market_value: 'COALESCE(players.market_value, 0)',
       }
     : {
-        id: 'id',
-        ca: 'COALESCE(ca, 0)',
-        pa: 'COALESCE(pa, 0)',
-        age: 'COALESCE(age, 0)',
-        market_value: 'COALESCE(market_value, 0)',
+        id: 'players.id',
+        ca: 'COALESCE(players.ca, 0)',
+        pa: 'COALESCE(players.pa, 0)',
+        age: 'COALESCE(players.age, 0)',
+        market_value: 'COALESCE(players.market_value, 0)',
       };
 
   const conditions: string[] = [];
@@ -73,27 +73,27 @@ app.get('/players', async (c) => {
     if (!(PLAYER_STATUS as readonly string[]).includes(status)) {
       throw new HttpError(400, 'status 只能是 normal / listed / trainee / free / retired');
     }
-    conditions.push('status = ?');
+    conditions.push('players.status = ?');
     args.push(status);
   }
   const position = c.req.query('position');
   if (position !== undefined) {
     const p = position.trim();
     if (p === '') throw new HttpError(400, 'position 不能为空');
-    conditions.push('position = ?');
+    conditions.push('players.position = ?');
     args.push(p);
   }
   const name = c.req.query('name');
   if (name !== undefined) {
     const q = name.trim();
     if (q === '') throw new HttpError(400, 'name 不能为空');
-    conditions.push(`name LIKE ? ESCAPE '\\'`);
+    conditions.push(`players.name LIKE ? ESCAPE '\\'`);
     args.push(`%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
   }
   const growable = c.req.query('growable');
   if (growable !== undefined) {
     if (growable !== '1' && growable !== '0') throw new HttpError(400, 'growable 只能是 1 或 0');
-    conditions.push('growable = ?');
+    conditions.push('players.growable = ?');
     args.push(Number(growable));
   }
   for (const [param, spec] of Object.entries(RANGE_PARAMS)) {
@@ -116,34 +116,40 @@ app.get('/players', async (c) => {
     if (cursor !== undefined) {
       const n = Number(cursor);
       if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'cursor 不对');
-      conditions.push('id > ?');
+      conditions.push('players.id > ?');
       args.push(n);
     }
-    orderBy = 'ORDER BY id ASC';
+    orderBy = 'ORDER BY players.id ASC';
   } else {
     const keyExpr = SORT_EXPRS[sort];
     const cursor = c.req.query('cursor');
     if (cursor !== undefined) {
       const { v, id } = decodeNumericCursor(cursor);
       if (order === 'desc') {
-        conditions.push(`(${keyExpr} < ? OR (${keyExpr} = ? AND id < ?))`);
+        conditions.push(`(${keyExpr} < ? OR (${keyExpr} = ? AND players.id < ?))`);
       } else {
-        conditions.push(`(${keyExpr} > ? OR (${keyExpr} = ? AND id > ?))`);
+        conditions.push(`(${keyExpr} > ? OR (${keyExpr} = ? AND players.id > ?))`);
       }
       args.push(v, v, id);
     }
     const dir = order === 'asc' ? 'ASC' : 'DESC';
-    orderBy = `ORDER BY ${keyExpr} ${dir}, id ${dir}`;
+    orderBy = `ORDER BY ${keyExpr} ${dir}, players.id ${dir}`;
   }
   const limitRaw = Number(c.req.query('limit') ?? 50);
   const limit = Math.min(Math.max(Number.isInteger(limitRaw) ? limitRaw : 50, 1), 100);
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await c.env.DB.prepare(
-    `SELECT id, uid, name, ${clubCol} AS club_id, position, age, ${caExpr} AS ca, ${paExpr} AS pa, prestige, market_value, status,
-            growth_tier, growable, is_future_star, china_plan, agent_tier, badges_silver, badges_gold,
+    `SELECT players.id, players.uid, players.name, ${clubCol} AS club_id, players.position, players.age,
+            ${caExpr} AS ca, ${paExpr} AS pa, players.prestige, players.market_value, players.status,
+            players.growth_tier, players.growable, players.is_future_star, players.china_plan, players.agent_tier,
+            players.badges_silver, players.badges_gold,
+            cc.name AS club_name, ic.name AS initial_club_name,
             ${caExpr} AS sort_ca, ${paExpr} AS sort_pa
-     FROM players ${where} ${orderBy} LIMIT ?`,
+     FROM players
+     LEFT JOIN clubs cc ON cc.id = players.club_id
+     LEFT JOIN clubs ic ON ic.id = players.initial_club_id
+     ${where} ${orderBy} LIMIT ?`,
   )
     .bind(...args, limit + 1)
     .all<{
@@ -165,6 +171,8 @@ app.get('/players', async (c) => {
       agent_tier: number;
       badges_silver: number;
       badges_gold: number;
+      club_name: string | null;
+      initial_club_name: string | null;
       sort_ca: number;
       sort_pa: number;
     }>();
@@ -174,6 +182,8 @@ app.get('/players', async (c) => {
     uid: r.uid,
     name: r.name,
     clubId: r.club_id,
+    clubName: r.club_name,
+    initialClubName: r.initial_club_name,
     position: r.position,
     age: r.age,
     ca: r.ca,

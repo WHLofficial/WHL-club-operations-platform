@@ -1321,3 +1321,44 @@ tbody tr:hover td {
 .bind-row:first-child {
   border-top: none;
 }
+
+/* 球员库（增量 6.1 d8）：筛选条、搜索框、翻页 */
+.library-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.library-controls .field {
+  margin: 0;
+}
+
+.library-controls .field select {
+  min-width: 96px;
+}
+
+.library-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.library-search input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  min-width: 140px;
+}
+
+.library-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 14px;
+}

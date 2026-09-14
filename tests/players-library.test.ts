@@ -35,7 +35,18 @@ function get(path: string, env: Env) {
 }
 
 interface ListBody {
-  players: { id: number; name: string; position: string | null; age: number | null; ca: number; pa: number; growable: boolean; marketValue: number | null }[];
+  players: {
+    id: number;
+    name: string;
+    position: string | null;
+    age: number | null;
+    ca: number;
+    pa: number;
+    growable: boolean;
+    marketValue: number | null;
+    clubName: string | null;
+    initialClubName: string | null;
+  }[];
   nextCursor: string | null;
 }
 
@@ -48,6 +59,10 @@ async function list(path: string, env: Env): Promise<ListBody> {
 // 种子：6 名外场 + 2 名门将 + 1 名无身价球员，CA/PA/年龄/身价互相错开，保证每种排序有唯一序
 function seedPlayers(sqlite: DatabaseSync): void {
   sqlite.exec(`
+    INSERT INTO clubs (id, name, league_tier, status) VALUES
+      (1, '老东家 FC', 'premier', 'active'),
+      (2, '蓝月亮', 'premier', 'active'),
+      (3, '雾都联', 'second', 'active');
     INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, market_value, status) VALUES
       (1, 'u1', '阿尔法',   1, 'ST',  18, 60, 92, 1, 40.5, 'normal'),
       (2, 'u2', '布拉沃',   1, 'GK',  29, 85, 86, 0, 120,  'normal'),
@@ -86,6 +101,35 @@ describe('球员库列表（增量 6.1 d6）', () => {
     seedPlayers(fx.sqlite);
     const res = await list('/api/players?name=%25', fx.env);
     expect(res.players).toEqual([]);
+  });
+
+  it('列表回俱乐部名（d8）：当前视图打归属名，无归属显示 null；初始视图打初始归属名', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    // 给 1 号挂一条归属变更：老东家 1 → 蓝月亮 2，初始回填为 1
+    fx.sqlite.exec(
+      `INSERT INTO transfers (player_id, type, from_club_id, to_club_id, created_at) VALUES (1, 'transfer', 1, 2, '2026-01-01T00:00:00Z')`,
+    );
+    fx.sqlite.exec(`UPDATE players SET club_id = 2, initial_club_id = 1 WHERE id = 1`);
+
+    const current = await list('/api/players?club_id=2', fx.env);
+    // 3、4 号种子现属就是蓝月亮；1 号转会后也归 2
+    expect(current.players.map((p) => p.id)).toEqual([1, 3, 4]);
+    expect(current.players[0]!.clubName).toBe('蓝月亮');
+    expect(current.players[0]!.initialClubName).toBe('老东家 FC');
+
+    const elsewhere = await list('/api/players?club_id=3', fx.env);
+    expect(elsewhere.players.map((p) => p.id)).toEqual([8]);
+    expect(elsewhere.players[0]!.clubName).toBe('雾都联');
+
+    const unowned = await list('/api/players?name=狐步舞', fx.env);
+    expect(unowned.players[0]!.clubName).toBeNull();
+    expect(unowned.players[0]!.initialClubName).toBeNull();
+
+    const initial = await list('/api/players?view=initial&club_id=1', fx.env);
+    expect(initial.players.map((p) => p.id)).toEqual([1]);
+    expect(initial.players[0]!.clubName).toBe('蓝月亮');
+    expect(initial.players[0]!.initialClubName).toBe('老东家 FC');
   });
 
   it('sort=ca 默认降序 + keyset 翻页：两页拼出全量且不重不漏', async () => {

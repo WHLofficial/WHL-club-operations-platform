@@ -18,6 +18,9 @@ export default function TopBar({ user, authMode }: { user: MeUser | null | undef
           <NavLink to="/club" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             球队中心
           </NavLink>
+          <NavLink to="/players" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
+            球员库
+          </NavLink>
           <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             转会市场
           </NavLink>
