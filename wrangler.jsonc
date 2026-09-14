@@ -1,7 +1,7 @@
 {
-  // 部署前置见 TECH_DESIGN §14.0：
-  //   1) npx wrangler d1 create whl-club  ->  替换下方 database_id 占位
-  //   2) 部署域必须是 .whleague.win 子域（共享 cookie whl_session 由赛事系统种在主域，平台自己不种任何 cookie）
+  // 生产资源（2026-09-14 已建）：D1 whl-club + 自定义域 club.whleague.win（TECH_DESIGN §14.0）
+  //   OIDC 模式由下方 vars（OIDC_ISSUER/OIDC_CLIENT_ID）开启；撤掉这两个变量重新部署即回兼容模式
+  //   部署域必须是 .whleague.win 子域（认证中心与各系统同主域，Cookie 才有意义）
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "whl-club",
   "main": "src/worker/index.ts",
@@ -16,7 +16,7 @@
     {
       "binding": "DB",
       "database_name": "whl-club",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "73154873-d5ae-42b0-a630-25f5ef60053d",
       "migrations_dir": "src/db/migrations"
     },
     {
@@ -40,6 +40,11 @@
       "bucket_name": "whl-media"
     }
   ],
+  // 统一认证中心（生产）：配了这两项即走 OIDC 模式，会话与 claims 由 auth 侧签发
+  "vars": {
+    "OIDC_ISSUER": "https://auth.whleague.win",
+    "OIDC_CLIENT_ID": "club"
+  },
   // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑随增量 3+ 落地
   "triggers": {
     "crons": ["*/5 * * * *"]
@@ -50,5 +55,9 @@
   // Smart Placement：靠近 D1（亚太）削减跨洋查询往返；部署后 ~15 分钟热身
   "placement": {
     "mode": "smart"
-  }
+  },
+  // 生产自定义域：club.whleague.win（DNS 与边缘证书由 Cloudflare 自动签发）
+  "routes": [
+    { "pattern": "club.whleague.win", "custom_domain": true }
+  ]
 }
