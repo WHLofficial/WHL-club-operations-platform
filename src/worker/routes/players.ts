@@ -7,7 +7,29 @@ const app = new Hono<{ Bindings: Env }>();
 
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 
-// GET /api/players?club_id=&status=&cursor=&limit=
+// 球员库排序键（增量 6.1 d6）：id 沿旧整数游标 ASC（既有调用兼容）；数值键走 COALESCE 双向 keyset，NULL 当 0 排尾
+const SORT_KEYS = { id: 'id', ca: 'ca', pa: 'pa', age: 'age', market_value: 'market_value' } as const;
+type SortKey = keyof typeof SORT_KEYS;
+
+const RANGE_PARAMS = {
+  ca_min: { col: 'ca', op: '>=' },
+  ca_max: { col: 'ca', op: '<=' },
+  pa_min: { col: 'pa', op: '>=' },
+  pa_max: { col: 'pa', op: '<=' },
+  age_min: { col: 'age', op: '>=' },
+  age_max: { col: 'age', op: '<=' },
+} as const;
+
+function decodeNumericCursor(raw: string): { v: number; id: number } {
+  const sep = raw.lastIndexOf('~');
+  if (sep <= 0) throw new HttpError(400, 'cursor 不对');
+  const v = Number(raw.slice(0, sep));
+  const id = Number(raw.slice(sep + 1));
+  if (!Number.isFinite(v) || !Number.isInteger(id) || id < 0) throw new HttpError(400, 'cursor 不对');
+  return { v, id };
+}
+
+// GET /api/players?club_id=&status=&position=&name=&growable=&ca_min=&ca_max=&pa_min=&pa_max=&age_min=&age_max=&sort=&order=&cursor=&limit=
 app.get('/players', async (c) => {
   const conditions: string[] = [];
   const args: unknown[] = [];
@@ -27,12 +49,64 @@ app.get('/players', async (c) => {
     conditions.push('status = ?');
     args.push(status);
   }
-  const cursor = c.req.query('cursor');
-  if (cursor !== undefined) {
-    const n = Number(cursor);
-    if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'cursor 不对');
-    conditions.push('id > ?');
+  const position = c.req.query('position');
+  if (position !== undefined) {
+    const p = position.trim();
+    if (p === '') throw new HttpError(400, 'position 不能为空');
+    conditions.push('position = ?');
+    args.push(p);
+  }
+  const name = c.req.query('name');
+  if (name !== undefined) {
+    const q = name.trim();
+    if (q === '') throw new HttpError(400, 'name 不能为空');
+    conditions.push(`name LIKE ? ESCAPE '\\'`);
+    args.push(`%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
+  }
+  const growable = c.req.query('growable');
+  if (growable !== undefined) {
+    if (growable !== '1' && growable !== '0') throw new HttpError(400, 'growable 只能是 1 或 0');
+    conditions.push('growable = ?');
+    args.push(Number(growable));
+  }
+  for (const [param, spec] of Object.entries(RANGE_PARAMS)) {
+    const raw = c.req.query(param);
+    if (raw === undefined) continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${param} 应为非负数`);
+    conditions.push(`${spec.col} ${spec.op} ?`);
     args.push(n);
+  }
+
+  const sortRaw = c.req.query('sort') ?? 'id';
+  if (!(sortRaw in SORT_KEYS)) throw new HttpError(400, 'sort 只能是 id / ca / pa / age / market_value');
+  const sort = sortRaw as SortKey;
+  const order = sort === 'id' || c.req.query('order') === 'asc' ? 'asc' : 'desc';
+
+  let orderBy: string;
+  if (sort === 'id') {
+    const cursor = c.req.query('cursor');
+    if (cursor !== undefined) {
+      const n = Number(cursor);
+      if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'cursor 不对');
+      conditions.push('id > ?');
+      args.push(n);
+    }
+    orderBy = 'ORDER BY id ASC';
+  } else {
+    const keyExpr = `COALESCE(${SORT_KEYS[sort]}, 0)`;
+    const cursor = c.req.query('cursor');
+    if (cursor !== undefined) {
+      const { v, id } = decodeNumericCursor(cursor);
+      if (order === 'desc') {
+        conditions.push(`(${keyExpr} < ? OR (${keyExpr} = ? AND id < ?))`);
+      } else {
+        conditions.push(`(${keyExpr} > ? OR (${keyExpr} = ? AND id > ?))`);
+      }
+      args.push(v, v, id);
+    }
+    const dir = order === 'asc' ? 'ASC' : 'DESC';
+    orderBy = `ORDER BY ${keyExpr} ${dir}, id ${dir}`;
   }
   const limitRaw = Number(c.req.query('limit') ?? 50);
   const limit = Math.min(Math.max(Number.isInteger(limitRaw) ? limitRaw : 50, 1), 100);
@@ -40,8 +114,8 @@ app.get('/players', async (c) => {
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await c.env.DB.prepare(
     `SELECT id, uid, name, club_id, position, age, ca, pa, prestige, market_value, status,
-            growth_tier, is_future_star, china_plan, agent_tier, badges_silver, badges_gold
-     FROM players ${where} ORDER BY id LIMIT ?`,
+            growth_tier, growable, is_future_star, china_plan, agent_tier, badges_silver, badges_gold
+     FROM players ${where} ${orderBy} LIMIT ?`,
   )
     .bind(...args, limit + 1)
     .all<{
@@ -57,6 +131,7 @@ app.get('/players', async (c) => {
       market_value: number | null;
       status: string;
       growth_tier: number;
+      growable: number;
       is_future_star: number;
       china_plan: number;
       agent_tier: number;
@@ -73,6 +148,7 @@ app.get('/players', async (c) => {
     age: r.age,
     ca: r.ca,
     pa: r.pa,
+    growable: r.growable === 1,
     prestige: r.prestige,
     marketValue: r.market_value,
     status: r.status,
@@ -83,10 +159,13 @@ app.get('/players', async (c) => {
     badgesSilver: r.badges_silver,
     badgesGold: r.badges_gold,
   }));
-  return c.json({
-    players,
-    nextCursor: rows.results.length > limit ? players[players.length - 1].id : null,
-  });
+
+  let nextCursor: string | null = null;
+  if (rows.results.length > limit) {
+    const last = rows.results[limit - 1]!;
+    nextCursor = sort === 'id' ? String(last.id) : `${Number(last[SORT_KEYS[sort]] ?? 0)}~${last.id}`;
+  }
+  return c.json({ players, nextCursor });
 });
 
 // GET /api/players/:id —— 档案卡数据（球员 + 俱乐部 + 现行合同 + FC 存档）

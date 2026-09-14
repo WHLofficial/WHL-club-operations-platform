@@ -220,12 +220,12 @@ describe('球员查询（附录 A〔1〕）', () => {
     seedPlayers(fx);
     const res = await get('/api/players?club_id=1&limit=1', undefined, fx.env);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { players: { id: number; name: string }[]; nextCursor: number | null };
+    const body = (await res.json()) as { players: { id: number; name: string }[]; nextCursor: string | null };
     expect(body.players).toHaveLength(1);
     expect(body.players[0].name).toBe('球员一');
-    expect(body.nextCursor).toBe(body.players[0].id);
+    expect(body.nextCursor).toBe(String(body.players[0].id));
     const page2 = await get(`/api/players?club_id=1&limit=1&cursor=${body.nextCursor}`, undefined, fx.env);
-    const body2 = (await page2.json()) as { players: { name: string }[]; nextCursor: number | null };
+    const body2 = (await page2.json()) as { players: { name: string }[]; nextCursor: string | null };
     expect(body2.players[0].name).toBe('球员二');
     expect(body2.nextCursor).toBeNull();
   });
