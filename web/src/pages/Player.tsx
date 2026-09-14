@@ -64,42 +64,28 @@ const ATTR_LABELS: Record<string, string> = {
   gkreflexes: '反应扑救',
 };
 
-const ATTR_ORDER = [
-  'sprintspeed',
-  'acceleration',
-  'finishing',
-  'positioning',
-  'shotpower',
-  'longshots',
-  'penalties',
-  'volleys',
-  'vision',
-  'crossing',
-  'freekickaccuracy',
-  'longpassing',
-  'shortpassing',
-  'curve',
-  'agility',
-  'balance',
-  'reactions',
-  'composure',
-  'ballcontrol',
-  'dribbling',
-  'interceptions',
-  'headingaccuracy',
-  'defensiveawareness',
-  'standingtackle',
-  'slidingtackle',
-  'jumping',
-  'stamina',
-  'strength',
-  'aggression',
-  'gkdiving',
-  'gkhandling',
-  'gkkicking',
-  'gkpositioning',
-  'gkreflexes',
-];
+// 属性组（增量 6.1 d10，四裁决：六组速查卡；门将追加 GKP 共七组；组值=组内平均）
+const ATTR_GROUPS = [
+  { key: 'PAC', label: '速度', keys: ['sprintspeed', 'acceleration'] },
+  { key: 'SHO', label: '射门', keys: ['finishing', 'positioning', 'shotpower', 'longshots', 'penalties', 'volleys'] },
+  { key: 'PAS', label: '传球', keys: ['vision', 'crossing', 'freekickaccuracy', 'longpassing', 'shortpassing', 'curve'] },
+  { key: 'DRI', label: '盘带', keys: ['agility', 'balance', 'reactions', 'composure', 'ballcontrol', 'dribbling'] },
+  { key: 'DEF', label: '防守', keys: ['interceptions', 'headingaccuracy', 'defensiveawareness', 'standingtackle', 'slidingtackle'] },
+  { key: 'PHY', label: '体格', keys: ['jumping', 'stamina', 'strength', 'aggression'] },
+  { key: 'GKP', label: '门将', keys: ['gkdiving', 'gkhandling', 'gkkicking', 'gkpositioning', 'gkreflexes'] },
+] as const;
+
+// 细分色阶（四裁决：绿>=70 / 橙 50-69 / 红<50）
+function attrClass(v: number): string {
+  if (v >= 70) return 'attr-good';
+  if (v >= 50) return 'attr-mid';
+  return 'attr-low';
+}
+
+function starText(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  return '★'.repeat(Math.min(n, 5)) + '☆'.repeat(Math.max(0, 5 - n));
+}
 
 function PlaystyleBadge({ psid, slot }: { psid: number; slot: number }) {
   const gold = playstyleIsGold(psid, slot);
@@ -309,7 +295,9 @@ export default function Player() {
             </>
           )}
 
-          {tab === 'attrs' && player.gameAttrs && <AttrSheet attrs={attrs} prestige={player.prestige} />}
+          {tab === 'attrs' && player.gameAttrs && (
+            <AttrSheet attrs={attrs} position={player.position} prestige={player.prestige} />
+          )}
 
           {tab === 'growth' && growth && <GrowthBlock growth={growth} armedPlan={armedPlan} busy={busy} onChoosePlan={choosePlan} />}
           {tab === 'growth' && !growth && (
@@ -323,10 +311,18 @@ export default function Player() {
   );
 }
 
-// 属性页签（d9 过渡版：FC 存档平铺；d10 重排为六组卡/位置矩阵/星级行/角色带，d11 加六维雷达）
-function AttrSheet({ attrs, prestige }: { attrs: Record<string, unknown>; prestige: number | null }) {
+// 属性页签（增量 6.1 d10）：位置矩阵 + 角色带 + 星级行 + 六组细分卡（门将七组）；d11 加六维雷达
+function AttrSheet({
+  attrs,
+  position,
+  prestige,
+}: {
+  attrs: Record<string, unknown>;
+  position: string | null;
+  prestige: number | null;
+}) {
   const team = teamName(attrs['TeamID']);
-  const posList = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
+  const posChips = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
     .map((k) => positionName(attrs[k]))
     .filter((v): v is string => v !== null);
   const roles = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5']
@@ -341,9 +337,84 @@ function AttrSheet({ attrs, prestige }: { attrs: Record<string, unknown>; presti
     .filter((v): v is { psid: number; slot: number } => v !== null);
   const weakfoot = Number(attrs['weakfoot']);
   const skillmoves = Number(attrs['skillmoves']);
+  const isGk = position === 'GK';
+  const groups = ATTR_GROUPS.filter((g) => isGk || g.key !== 'GKP');
   return (
     <>
       <h3>FC 属性（当季源数据）</h3>
+      <div className="pos-row">
+        <div className="pos-chips">
+          {posChips.length > 0 ? (
+            posChips.map((p, i) => (
+              <span key={p} className={i === 0 ? 'pos-chip pos-chip-main' : 'pos-chip'}>
+                {p}
+              </span>
+            ))
+          ) : (
+            <span className="pos-chip">—</span>
+          )}
+        </div>
+        {team && <span className="pos-team">效力球队 {team}</span>}
+      </div>
+      {roles.length > 0 && (
+        <div className="role-chips">
+          {roles.map((r, i) => (
+            <span
+              key={`${r}-${i}`}
+              className={r.includes('++') ? 'role-chip role-plusplus' : /\+\s*$/.test(r) ? 'role-chip role-plus' : 'role-chip'}
+            >
+              {r}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="star-line">
+        <div className="star-cell">
+          <span className="attr-name">花式</span>
+          <span className="mono">{starText(skillmoves)}</span>
+        </div>
+        <div className="star-cell">
+          <span className="attr-name">逆足</span>
+          <span className="mono">{starText(weakfoot)}</span>
+        </div>
+        <div className="star-cell">
+          <span className="attr-name">国际声望</span>
+          <span className="mono">{starText(prestige ?? NaN)}</span>
+        </div>
+        <div className="star-cell">
+          <span className="attr-name">身高 / 体重</span>
+          <span className="mono">
+            {String(attrs['height'] ?? '—')} cm / {String(attrs['weight'] ?? '—')} kg
+          </span>
+        </div>
+      </div>
+      <div className="attr-group-grid">
+        {groups.map((g) => {
+          const vals = g.keys.map((k) => Number(attrs[k])).filter((v) => Number.isFinite(v));
+          const avg = vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+          return (
+            <div key={g.key} className="attr-group-card">
+              <div className="attr-group-head">
+                <span className="attr-group-key">{g.key}</span>
+                <span className="attr-name">{g.label}</span>
+                <span className={`mono attr-group-avg ${avg !== null ? attrClass(avg) : ''}`}>{avg ?? '—'}</span>
+              </div>
+              <div className="attr-group-detail">
+                {g.keys.map((k) => {
+                  const v = Number(attrs[k]);
+                  if (!Number.isFinite(v)) return null;
+                  return (
+                    <div key={k} className="attr-cell">
+                      <span className="attr-name">{ATTR_LABELS[k] ?? k}</span>
+                      <span className={`mono attr-value ${attrClass(v)}`}>{v}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
       {playstyles.length > 0 && (
         <>
           <h4>PlayStyles</h4>
@@ -354,54 +425,6 @@ function AttrSheet({ attrs, prestige }: { attrs: Record<string, unknown>; presti
           </div>
         </>
       )}
-      {roles.length > 0 && (
-        <>
-          <h4>场上角色</h4>
-          <p>{roles.join(' · ')}</p>
-        </>
-      )}
-      <div className="attr-grid">
-        {ATTR_ORDER.map((key) => {
-          const v = Number(attrs[key]);
-          if (!Number.isFinite(v)) return null;
-          return (
-            <div key={key} className="attr-cell">
-              <span className="attr-name">{ATTR_LABELS[key] ?? key}</span>
-              <span className="mono attr-value">{v}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="table-wrap">
-        <table>
-          <tbody>
-            <tr>
-              <th>场上位置</th>
-              <td>{posList.length > 0 ? posList.join(' / ') : '—'}</td>
-            </tr>
-            <tr>
-              <th>效力球队（FC 源）</th>
-              <td>{team ?? '—'}</td>
-            </tr>
-            <tr>
-              <th>逆足 / 花式</th>
-              <td>
-                {Number.isFinite(weakfoot) ? weakfoot : '—'} 星 / {Number.isFinite(skillmoves) ? skillmoves : '—'} 星
-              </td>
-            </tr>
-            <tr>
-              <th>身高 / 体重</th>
-              <td>
-                {String(attrs['height'] ?? '—')} cm / {String(attrs['weight'] ?? '—')} kg
-              </td>
-            </tr>
-            <tr>
-              <th>国际声望</th>
-              <td>{prestige ?? '—'} / 5</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
     </>
   );
 }

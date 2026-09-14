@@ -1367,3 +1367,107 @@ tbody tr:hover td {
 .dossier-tabs {
   margin-bottom: 14px;
 }
+
+/* 属性页签（增量 6.1 d10）：位置矩阵、角色带、星级行、六组细分卡 */
+.pos-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.pos-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pos-chip {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pos-chip-main {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.pos-team {
+  color: var(--muted);
+  font-size: 13px;
+}
+.role-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.role-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.role-plus {
+  border-color: var(--sky-deep, #0369a1);
+  color: var(--sky-deep, #0369a1);
+}
+.role-plusplus {
+  border-color: var(--gold-deep);
+  background: rgba(201, 155, 63, 0.12);
+  color: var(--gold-deep);
+}
+.star-line {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px 16px;
+  margin-bottom: 14px;
+}
+.star-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.star-cell .mono {
+  font-size: 14px;
+}
+.attr-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.attr-group-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.attr-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.attr-group-key {
+  font-weight: 700;
+}
+.attr-group-avg {
+  margin-left: auto;
+  font-size: 18px;
+}
+.attr-group-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.attr-good {
+  color: var(--ok);
+}
+.attr-mid {
+  color: var(--warn);
+}
+.attr-low {
+  color: var(--bad);
+}
