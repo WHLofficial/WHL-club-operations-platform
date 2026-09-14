@@ -782,6 +782,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
 | 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
 | 23 | 假设 | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮（/api/me/notifications）延后 P1，MVP 只走 QQ 推送 |
+| 24 | 已定 | 球员初始归属（initial_club_id）= 导入时数据：首次名单认领写入（COALESCE 保解约重签不覆盖），存量按最早归属变更的 from_club_id 回填，只海捞过（free_agent）= 导入时无归属留 NULL；仅供成长「本队」判断与球员库初始视图展示，XP 场次匹配仍按当前归属名单（§8 口径不变） |
 | 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
 
 ## 16. 测试策略

@@ -77,13 +77,21 @@ const MIGRATION_FILES = [
   '0012_oidc_claims.sql',
   '0013_binding_user_name.sql',
   '0014_season_tournaments.sql',
+  '0015_initial_club.sql',
 ];
 
-export function applyMigrations(sqlite: DatabaseSync): void {
+export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {
   const dir = new URL('../src/db/migrations/', import.meta.url);
   for (const file of MIGRATION_FILES) {
     sqlite.exec(readFileSync(fileURLToPath(new URL(file, dir).href), 'utf8'));
+    if (file === upTo) return;
   }
+}
+
+// 单独补跑某个迁移（测存量回填时：先 applyMigrations(sqlite, 前一个文件) → 造存量数据 → 再跑这个）
+export function runMigration(sqlite: DatabaseSync, file: string): void {
+  const dir = new URL('../src/db/migrations/', import.meta.url);
+  sqlite.exec(readFileSync(fileURLToPath(new URL(file, dir).href), 'utf8'));
 }
 
 export function createTestDb(): { sqlite: DatabaseSync; db: D1Database } {

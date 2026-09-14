@@ -201,8 +201,11 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
     if (claimIds.length > 0) {
       const ph = claimIds.map(() => '?').join(', ');
       statements.push(
-        // 认领只作用于仍无归属的行：分类与落库之间被人抢走也不会错绑
-        env.DB.prepare(`UPDATE players SET club_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id IN (${ph}) AND club_id IS NULL`).bind(payload.clubId, ...claimIds),
+        // 认领只作用于仍无归属的行：分类与落库之间被人抢走也不会错绑。
+        // initial_club_id（增量 6.1 裁决 2）= 首次认领时的归属即导入时数据；COALESCE 保证解约重签认领不覆盖最初值
+        env.DB.prepare(
+          `UPDATE players SET club_id = ?, initial_club_id = COALESCE(initial_club_id, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id IN (${ph}) AND club_id IS NULL`,
+        ).bind(payload.clubId, payload.clubId, ...claimIds),
       );
     }
     statements.push(

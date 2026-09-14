@@ -8,8 +8,12 @@ const app = new Hono<{ Bindings: Env }>();
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 
 // 球员库排序键（增量 6.1 d6）：id 沿旧整数游标 ASC（既有调用兼容）；数值键走 COALESCE 双向 keyset，NULL 当 0 排尾
+// view=initial（增量 6.1 d7）：初始球员库=导入时数据——归属打 initial_club_id、CA=base_ca、PA=导入 json 值
 const SORT_KEYS = { id: 'id', ca: 'ca', pa: 'pa', age: 'age', market_value: 'market_value' } as const;
 type SortKey = keyof typeof SORT_KEYS;
+
+// 编 cursor 用的行内字段：排序表达式在 SELECT 里以 sort_ca/sort_pa 别名带出
+const SORT_FIELD = { id: 'id', ca: 'sort_ca', pa: 'sort_pa', age: 'age', market_value: 'market_value' } as const;
 
 const RANGE_PARAMS = {
   ca_min: { col: 'ca', op: '>=' },
@@ -29,8 +33,31 @@ function decodeNumericCursor(raw: string): { v: number; id: number } {
   return { v, id };
 }
 
-// GET /api/players?club_id=&status=&position=&name=&growable=&ca_min=&ca_max=&pa_min=&pa_max=&age_min=&age_max=&sort=&order=&cursor=&limit=
+// GET /api/players?view=&club_id=&status=&position=&name=&growable=&ca_min=&ca_max=&pa_min=&pa_max=&age_min=&age_max=&sort=&order=&cursor=&limit=
 app.get('/players', async (c) => {
+  const viewRaw = c.req.query('view');
+  if (viewRaw !== undefined && viewRaw !== 'initial') throw new HttpError(400, 'view 只能是 initial');
+  const initial = viewRaw === 'initial';
+  const clubCol = initial ? 'initial_club_id' : 'club_id';
+  const caExpr = initial ? 'COALESCE(base_ca, ca)' : 'ca';
+  const paExpr = initial ? "COALESCE(json_extract(game_attrs, '$.PA'), pa)" : 'pa';
+  // keyset 比较表达式（WHERE/ORDER BY 同源，保证全序一致）
+  const SORT_EXPRS: Record<SortKey, string> = initial
+    ? {
+        id: 'id',
+        ca: 'COALESCE(base_ca, 0)',
+        pa: "COALESCE(json_extract(game_attrs, '$.PA'), 0)",
+        age: 'COALESCE(age, 0)',
+        market_value: 'COALESCE(market_value, 0)',
+      }
+    : {
+        id: 'id',
+        ca: 'COALESCE(ca, 0)',
+        pa: 'COALESCE(pa, 0)',
+        age: 'COALESCE(age, 0)',
+        market_value: 'COALESCE(market_value, 0)',
+      };
+
   const conditions: string[] = [];
   const args: unknown[] = [];
 
@@ -38,7 +65,7 @@ app.get('/players', async (c) => {
   if (clubId !== undefined) {
     const n = Number(clubId);
     if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'club_id 不对');
-    conditions.push('club_id = ?');
+    conditions.push(`${clubCol} = ?`);
     args.push(n);
   }
   const status = c.req.query('status');
@@ -94,7 +121,7 @@ app.get('/players', async (c) => {
     }
     orderBy = 'ORDER BY id ASC';
   } else {
-    const keyExpr = `COALESCE(${SORT_KEYS[sort]}, 0)`;
+    const keyExpr = SORT_EXPRS[sort];
     const cursor = c.req.query('cursor');
     if (cursor !== undefined) {
       const { v, id } = decodeNumericCursor(cursor);
@@ -113,8 +140,9 @@ app.get('/players', async (c) => {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await c.env.DB.prepare(
-    `SELECT id, uid, name, club_id, position, age, ca, pa, prestige, market_value, status,
-            growth_tier, growable, is_future_star, china_plan, agent_tier, badges_silver, badges_gold
+    `SELECT id, uid, name, ${clubCol} AS club_id, position, age, ${caExpr} AS ca, ${paExpr} AS pa, prestige, market_value, status,
+            growth_tier, growable, is_future_star, china_plan, agent_tier, badges_silver, badges_gold,
+            ${caExpr} AS sort_ca, ${paExpr} AS sort_pa
      FROM players ${where} ${orderBy} LIMIT ?`,
   )
     .bind(...args, limit + 1)
@@ -137,6 +165,8 @@ app.get('/players', async (c) => {
       agent_tier: number;
       badges_silver: number;
       badges_gold: number;
+      sort_ca: number;
+      sort_pa: number;
     }>();
 
   const players = rows.results.slice(0, limit).map((r) => ({
@@ -163,7 +193,7 @@ app.get('/players', async (c) => {
   let nextCursor: string | null = null;
   if (rows.results.length > limit) {
     const last = rows.results[limit - 1]!;
-    nextCursor = sort === 'id' ? String(last.id) : `${Number(last[SORT_KEYS[sort]] ?? 0)}~${last.id}`;
+    nextCursor = sort === 'id' ? String(last.id) : `${Number(last[SORT_FIELD[sort]] ?? 0)}~${last.id}`;
   }
   return c.json({ players, nextCursor });
 });
@@ -174,7 +204,7 @@ app.get('/players/:id', async (c) => {
   if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');
 
   const p = await c.env.DB.prepare(
-    `SELECT id, uid, name, club_id, position, foot, age, ca, pa, growable, prestige, market_value,
+    `SELECT id, uid, name, club_id, initial_club_id, position, foot, age, ca, pa, growable, prestige, market_value,
             status, growth_tier, growth_xp, is_future_star, china_plan, agent_tier,
             badges_silver, badges_gold, game_attrs, created_at, updated_at
      FROM players WHERE id = ?`,
@@ -185,6 +215,7 @@ app.get('/players/:id', async (c) => {
       uid: string;
       name: string;
       club_id: number | null;
+      initial_club_id: number | null;
       position: string | null;
       foot: number;
       age: number | null;
@@ -207,9 +238,12 @@ app.get('/players/:id', async (c) => {
     }>();
   if (!p) throw new HttpError(404, '球员不存在');
 
-  const [club, contract] = await Promise.all([
+  const [club, initialClub, contract] = await Promise.all([
     p.club_id
       ? c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(p.club_id).first<{ id: number; name: string }>()
+      : Promise.resolve(null),
+    p.initial_club_id
+      ? c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(p.initial_club_id).first<{ id: number; name: string }>()
       : Promise.resolve(null),
     c.env.DB.prepare(
       `SELECT id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, protected_until
@@ -244,6 +278,7 @@ app.get('/players/:id', async (c) => {
       uid: p.uid,
       name: p.name,
       clubId: p.club_id,
+      initialClubId: p.initial_club_id,
       position: p.position,
       foot: p.foot,
       age: p.age,
@@ -265,6 +300,7 @@ app.get('/players/:id', async (c) => {
       updatedAt: p.updated_at,
     },
     club,
+    initialClub,
     contract: contract
       ? {
           id: contract.id,
