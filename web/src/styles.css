@@ -1362,3 +1362,8 @@ tbody tr:hover td {
   gap: 16px;
   margin-top: 14px;
 }
+
+/* 球员页页签（增量 6.1 d9：档案/属性/成长，左卡常驻） */
+.dossier-tabs {
+  margin-bottom: 14px;
+}

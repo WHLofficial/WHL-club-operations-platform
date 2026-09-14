@@ -1,4 +1,5 @@
-// 球员档案卡（UI_DESIGN §4.2 .dossier：左球员卡 + 右合同卷宗；FC 细分属性收进折叠 details）
+// 球员档案卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，增量 6.1 d9 改 E2 页内页签：
+// 档案=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 档案与升级）
 // 成长档案区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -17,6 +18,14 @@ import {
   teamName,
 } from '../lib/ref.ts';
 import { useToast } from '../lib/toast.tsx';
+
+type PlayerTab = 'profile' | 'attrs' | 'growth';
+
+const TAB_LABEL: Record<PlayerTab, string> = {
+  profile: '档案',
+  attrs: '属性',
+  growth: '成长',
+};
 
 const ATTR_LABELS: Record<string, string> = {
   sprintspeed: '冲刺速度',
@@ -118,6 +127,7 @@ export default function Player() {
   const [data, setData] = useState<PlayerDetail | null>(null);
   const [growth, setGrowth] = useState<GrowthDetail | null>(null);
   const [error, setError] = useState('');
+  const [tab, setTab] = useState<PlayerTab>('profile');
   const { show, toastNode } = useToast();
   const [armedPlan, setArmedPlan] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -182,25 +192,9 @@ export default function Player() {
     );
   }
 
-  const { player, club, contract } = data;
+  const { player, club, contract, initialClub } = data;
   const attrs = player.gameAttrs ?? {};
   const nation = nationName(attrs['naID']);
-  const team = teamName(attrs['TeamID']);
-  const posList = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
-    .map((k) => positionName(attrs[k]))
-    .filter((v): v is string => v !== null);
-  const roles = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5']
-    .map((k) => roleChs(attrs[k]))
-    .filter((v): v is string => v !== null);
-  const playstyles = (['PSID1', 'PSID2', 'PSID3', 'PSID4', 'PSID5', 'PSID6', 'PSID7', 'PSID13', 'PSID14', 'PSID15'] as const)
-    .map((key, i) => {
-      const slot = i < 7 ? i + 1 : 13 + (i - 7);
-      const psid = Number(attrs[key]);
-      return Number.isFinite(psid) && psid !== null && psid > 0 ? { psid, slot } : null;
-    })
-    .filter((v): v is { psid: number; slot: number } => v !== null);
-  const weakfoot = Number(attrs['weakfoot']);
-  const skillmoves = Number(attrs['skillmoves']);
 
   return (
     <div className="container">
@@ -247,128 +241,168 @@ export default function Player() {
             <span className={`badge ${player.status === 'listed' ? 'sky' : player.status === 'trainee' ? 'purple' : 'gray'}`}>
               {STATUS_LABEL[player.status] ?? player.status}
             </span>
+            {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">到顶</span>}
             {player.isFutureStar && <span className="badge gold">未来之星</span>}
             {player.chinaPlan && <span className="badge red">中国计划</span>}
             {player.growthTier > 1 && <span className="badge gray">成长档位 {player.growthTier}</span>}
           </div>
           <p className="player-card-agent">经纪人档位 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
+          <p className="player-card-agent">初始归属 {initialClub ? initialClub.name : '无（海捞入行）'}</p>
         </section>
 
         <section className="dossier-file">
-          <h3>合同卷宗</h3>
-          {contract ? (
-            <div className="table-wrap">
-              <table>
-                <tbody>
-                  <tr>
-                    <th>违约金</th>
-                    <td className="num mono">{contract.releaseFee === null ? '—' : `${contract.releaseFee.toFixed(2)} m`}</td>
-                  </tr>
-                  <tr>
-                    <th>工资</th>
-                    <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)} m / 半赛季`}</td>
-                  </tr>
-                  <tr>
-                    <th>效力起点</th>
-                    <td className="mono">{contract.effectiveFrom ?? '—'}</td>
-                  </tr>
-                  <tr>
-                    <th>保护期至</th>
-                    <td className="mono">{contract.protectedUntil ?? '—'}</td>
-                  </tr>
-                  <tr>
-                    <th>合同类型</th>
-                    <td>{CONTRACT_TYPE_LABEL[contract.contractType] ?? contract.contractType}</td>
-                  </tr>
-                  <tr>
-                    <th>成约方式</th>
-                    <td>
-                      {contract.source ? (
-                        <span className={`stamp-inline ${contract.source === 'forced' || contract.source === 'direct' ? 'stamp-inline-force' : 'stamp-inline-ok'}`}>
-                          {SOURCE_LABEL[contract.source] ?? contract.source}
-                        </span>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="empty-state">
-              <p className="muted">卷宗里还没有合同。签约、续约之后，条款都会收录在这里。</p>
-            </div>
+          <div className="seg dossier-tabs" role="radiogroup" aria-label="球员页签">
+            {(Object.keys(TAB_LABEL) as PlayerTab[]).map((t) => (
+              <button key={t} type="button" className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+                {TAB_LABEL[t]}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'profile' && (
+            <>
+              <h3>合同卷宗</h3>
+              {contract ? (
+                <div className="table-wrap">
+                  <table>
+                    <tbody>
+                      <tr>
+                        <th>违约金</th>
+                        <td className="num mono">{contract.releaseFee === null ? '—' : `${contract.releaseFee.toFixed(2)} m`}</td>
+                      </tr>
+                      <tr>
+                        <th>工资</th>
+                        <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)} m / 半赛季`}</td>
+                      </tr>
+                      <tr>
+                        <th>效力起点</th>
+                        <td className="mono">{contract.effectiveFrom ?? '—'}</td>
+                      </tr>
+                      <tr>
+                        <th>保护期至</th>
+                        <td className="mono">{contract.protectedUntil ?? '—'}</td>
+                      </tr>
+                      <tr>
+                        <th>合同类型</th>
+                        <td>{CONTRACT_TYPE_LABEL[contract.contractType] ?? contract.contractType}</td>
+                      </tr>
+                      <tr>
+                        <th>成约方式</th>
+                        <td>
+                          {contract.source ? (
+                            <span className={`stamp-inline ${contract.source === 'forced' || contract.source === 'direct' ? 'stamp-inline-force' : 'stamp-inline-ok'}`}>
+                              {SOURCE_LABEL[contract.source] ?? contract.source}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <p className="muted">卷宗里还没有合同。签约、续约之后，条款都会收录在这里。</p>
+                </div>
+              )}
+            </>
           )}
 
-          {growth && <GrowthBlock growth={growth} armedPlan={armedPlan} busy={busy} onChoosePlan={choosePlan} />}
+          {tab === 'attrs' && player.gameAttrs && <AttrSheet attrs={attrs} prestige={player.prestige} />}
 
-          {player.gameAttrs && (
-            <details className="fc-archive">
-              <summary>FC 存档（当季源数据）</summary>
-              {playstyles.length > 0 && (
-                <>
-                  <h4>PlayStyles</h4>
-                  <div className="ps-list">
-                    {playstyles.map(({ psid, slot }) => (
-                      <PlaystyleBadge key={`${slot}-${psid}`} psid={psid} slot={slot} />
-                    ))}
-                  </div>
-                </>
-              )}
-              {roles.length > 0 && (
-                <>
-                  <h4>场上角色</h4>
-                  <p>{roles.join(' · ')}</p>
-                </>
-              )}
-              <div className="attr-grid">
-                {ATTR_ORDER.map((key) => {
-                  const v = Number(attrs[key]);
-                  if (!Number.isFinite(v)) return null;
-                  return (
-                    <div key={key} className="attr-cell">
-                      <span className="attr-name">{ATTR_LABELS[key] ?? key}</span>
-                      <span className="mono attr-value">{v}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <tbody>
-                    <tr>
-                      <th>场上位置</th>
-                      <td>{posList.length > 0 ? posList.join(' / ') : '—'}</td>
-                    </tr>
-                    <tr>
-                      <th>效力球队（FC 源）</th>
-                      <td>{team ?? '—'}</td>
-                    </tr>
-                    <tr>
-                      <th>逆足 / 花式</th>
-                      <td>
-                        {Number.isFinite(weakfoot) ? weakfoot : '—'} 星 / {Number.isFinite(skillmoves) ? skillmoves : '—'} 星
-                      </td>
-                    </tr>
-                    <tr>
-                      <th>身高 / 体重</th>
-                      <td>
-                        {String(attrs['height'] ?? '—')} cm / {String(attrs['weight'] ?? '—')} kg
-                      </td>
-                    </tr>
-                    <tr>
-                      <th>国际声望</th>
-                      <td>{player.prestige ?? '—'} / 5</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </details>
+          {tab === 'growth' && growth && <GrowthBlock growth={growth} armedPlan={armedPlan} busy={busy} onChoosePlan={choosePlan} />}
+          {tab === 'growth' && !growth && (
+            <div className="empty-state">
+              <p className="muted">成长档案还没就绪。</p>
+            </div>
           )}
         </section>
       </div>
     </div>
+  );
+}
+
+// 属性页签（d9 过渡版：FC 存档平铺；d10 重排为六组卡/位置矩阵/星级行/角色带，d11 加六维雷达）
+function AttrSheet({ attrs, prestige }: { attrs: Record<string, unknown>; prestige: number | null }) {
+  const team = teamName(attrs['TeamID']);
+  const posList = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
+    .map((k) => positionName(attrs[k]))
+    .filter((v): v is string => v !== null);
+  const roles = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5']
+    .map((k) => roleChs(attrs[k]))
+    .filter((v): v is string => v !== null);
+  const playstyles = (['PSID1', 'PSID2', 'PSID3', 'PSID4', 'PSID5', 'PSID6', 'PSID7', 'PSID13', 'PSID14', 'PSID15'] as const)
+    .map((key, i) => {
+      const slot = i < 7 ? i + 1 : 13 + (i - 7);
+      const psid = Number(attrs[key]);
+      return Number.isFinite(psid) && psid > 0 ? { psid, slot } : null;
+    })
+    .filter((v): v is { psid: number; slot: number } => v !== null);
+  const weakfoot = Number(attrs['weakfoot']);
+  const skillmoves = Number(attrs['skillmoves']);
+  return (
+    <>
+      <h3>FC 属性（当季源数据）</h3>
+      {playstyles.length > 0 && (
+        <>
+          <h4>PlayStyles</h4>
+          <div className="ps-list">
+            {playstyles.map(({ psid, slot }) => (
+              <PlaystyleBadge key={`${slot}-${psid}`} psid={psid} slot={slot} />
+            ))}
+          </div>
+        </>
+      )}
+      {roles.length > 0 && (
+        <>
+          <h4>场上角色</h4>
+          <p>{roles.join(' · ')}</p>
+        </>
+      )}
+      <div className="attr-grid">
+        {ATTR_ORDER.map((key) => {
+          const v = Number(attrs[key]);
+          if (!Number.isFinite(v)) return null;
+          return (
+            <div key={key} className="attr-cell">
+              <span className="attr-name">{ATTR_LABELS[key] ?? key}</span>
+              <span className="mono attr-value">{v}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="table-wrap">
+        <table>
+          <tbody>
+            <tr>
+              <th>场上位置</th>
+              <td>{posList.length > 0 ? posList.join(' / ') : '—'}</td>
+            </tr>
+            <tr>
+              <th>效力球队（FC 源）</th>
+              <td>{team ?? '—'}</td>
+            </tr>
+            <tr>
+              <th>逆足 / 花式</th>
+              <td>
+                {Number.isFinite(weakfoot) ? weakfoot : '—'} 星 / {Number.isFinite(skillmoves) ? skillmoves : '—'} 星
+              </td>
+            </tr>
+            <tr>
+              <th>身高 / 体重</th>
+              <td>
+                {String(attrs['height'] ?? '—')} cm / {String(attrs['weight'] ?? '—')} kg
+              </td>
+            </tr>
+            <tr>
+              <th>国际声望</th>
+              <td>{prestige ?? '—'} / 5</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
