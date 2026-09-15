@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
@@ -62,9 +62,11 @@ function post(path: string, body: unknown, token: string, env: Env) {
 }
 
 async function bindCoach(fx: Fixture): Promise<number> {
+  const auth = attachAuthChannel(fx.env);
   const res = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'premier' }, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   const { club } = (await res.json()) as { club: { id: number } };
+  authRegisterClubTeam(auth, club.id, club.id, '阿森纳');
   const codeRes = await post(`/api/admin/clubs/${club.id}/bindcode`, {}, 'tok-admin', fx.env);
   const { code } = (await codeRes.json()) as { code: string };
   const bind = await post('/api/clubs/bind', { code }, 'tok-coach', fx.env);

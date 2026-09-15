@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
@@ -77,10 +77,13 @@ async function seedAuction(): Promise<Fixture & { club: number; buyer: number; r
   const club = await createClub(fx, '受罚队');
   const buyer = await createClub(fx, '接盘队');
   const rich = await createClub(fx, '豪门队');
+  const auth = attachAuthChannel(fx.env);
   for (const [clubId, token] of [
     [club, 'tok-coach'],
     [buyer, 'tok-coach2'],
   ] as const) {
+    authRegisterClubTeam(auth, clubId, clubId, `队${clubId}`);
+    
     const res = await post(`/api/admin/clubs/${clubId}/bindcode`, {}, 'tok-admin', fx.env);
     const code = ((await res.json()) as { code: string }).code;
     expect((await post('/api/clubs/bind', { code }, token, fx.env)).status).toBe(201);

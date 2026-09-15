@@ -5,7 +5,7 @@ import { createHmac } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlAll, sqlGet } from './d1.ts';
+import { createTestD1, createAuthDb, applyMigrations, sqlAll, sqlGet } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 const SECRET = 'testsecret';
@@ -93,7 +93,7 @@ describe('通知排队（§12）', () => {
       -- user 22（曼城教练）没绑 QQ
     `);
     const { queueClubNotification } = await import('../src/worker/notify.ts');
-    const n1 = await queueClubNotification(fx.env.DB, 1, 'result_confirmed', {
+    const n1 = await queueClubNotification(fx.env, 1, 'result_confirmed', {
       season: 3,
       windowSeq: 1,
       competition: 'league_premier',
@@ -102,7 +102,7 @@ describe('通知排队（§12）', () => {
       away: '曼城',
     });
     expect(n1).toBe(1);
-    const n2 = await queueClubNotification(fx.env.DB, 2, 'result_confirmed', { season: 3, windowSeq: 1, score: '0:0' });
+    const n2 = await queueClubNotification(fx.env, 2, 'result_confirmed', { season: 3, windowSeq: 1, score: '0:0' });
     expect(n2).toBe(0);
 
     const rows = sqlAll<{ template: string; payload: string; status: string }>(
@@ -115,6 +115,28 @@ describe('通知排队（§12）', () => {
       qq: '10001',
       text: '📋 赛果已确认：阿森纳 2:1 曼城（S3·窗1 · league_premier）。',
     });
+  });
+
+  it('增量 7：绑定为真源在 AUTH_DB——按 club_id 派生绑定账号再查本地 qq_links', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active');
+      INSERT INTO qq_links (user_id, qq, verified_at) VALUES (11, '10001', '2026-01-01T00:00:00Z'), (22, '20002', '2026-01-01T00:00:00Z');
+    `);
+    const { sqlite: authSqlite, d1 } = createAuthDb();
+    authSqlite.exec(`
+      INSERT INTO account (id, name, created_at) VALUES (11, '教练乙', '2026-01-01T00:00:00Z'), (22, '教练戊', '2026-01-01T00:00:00Z');
+      INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 100, 1, '百年豪门', '2026-01-01T00:00:00Z');
+      INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES
+        (11, 1, 'tour', '2026-01-01T00:00:00Z'), (22, 1, 'club', '2026-01-01T00:00:00Z');
+    `);
+    fx.env.AUTH_DB = d1;
+
+    const { queueClubNotification } = await import('../src/worker/notify.ts');
+    const n = await queueClubNotification(fx.env, 1, 'levelup', { player: '球员一', ca: 2, silver: 0, gold: 0 });
+    expect(n).toBe(2);
+    const rows = sqlAll<{ payload: string }>(fx.sqlite, "SELECT payload FROM notifications WHERE template = 'levelup' ORDER BY id");
+    expect(rows.map((r) => JSON.parse(r.payload).qq)).toEqual(['10001', '20002']);
   });
 });
 

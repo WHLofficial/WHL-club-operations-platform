@@ -6,6 +6,7 @@
 // 来自登录回调存档的 claims，不再查 TOUR_DB user 表（账号真源在 auth 库，收口后新账号在
 // 赛事库无行）。claims 缺失/损坏的旧会话视为未登录，重新走一次 OIDC 登录即恢复。
 import type { Env } from '../worker/env.ts';
+import { hasTeamBinding } from '../worker/binding.ts';
 import { HttpError } from './http.ts';
 import { sha256Hex } from './crypto.ts';
 import { OIDC_SESSION_COOKIE } from './oidc.ts';
@@ -197,10 +198,15 @@ export async function requireUser(env: Env, request: Request): Promise<SessionUs
 export async function requireCoach(env: Env, request: Request, perm?: (typeof COACH_PERMS)[number]): Promise<SessionUser> {
   const user = await requireUser(env, request);
   if (isOidc(env)) {
+    // 教练判定（增量 7）：auth 对所有新账号自动发 club.coach，权限点无区分度，
+    // 改以认证中心绑定为准——绑定了球队即教练；权限点保留为旁路，让未绑定的
+    // 准教练也能进 /clubs/bind 这类绑前端点。管理点照旧先行。
     const perms = user.locked ? [] : user.permissions;
+    if (ADMIN_PERMS.some((p) => perms.includes(p))) return user;
+    const bound = !user.locked && (await hasTeamBinding(env, user.id));
     const ok = perm
-      ? perms.includes(perm) || ADMIN_PERMS.some((p) => perms.includes(p))
-      : [...ADMIN_PERMS, ...COACH_PERMS].some((p) => perms.includes(p));
+      ? perms.includes(perm) || bound
+      : COACH_PERMS.some((p) => perms.includes(p)) || bound;
     if (!ok) throw new HttpError(403, '没有权限进行此操作');
     return user;
   }

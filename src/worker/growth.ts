@@ -388,7 +388,7 @@ export async function applyLevelUp(env: Env, actor: number, playerId: number, pl
     after: { tier: player.growth_tier, planIndex, plan },
   });
   // 通知教练（§12；尽力而为，没绑 QQ 静默跳过）
-  await queueClubNotification(db, player.club_id, 'levelup', {
+  await queueClubNotification(env, player.club_id, 'levelup', {
     player: player.name,
     ca: plan.ca,
     silver: plan.silver,

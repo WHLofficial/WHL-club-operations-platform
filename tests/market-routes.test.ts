@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
@@ -89,7 +89,10 @@ async function seedMarket(fx: Fixture): Promise<MarketFixture> {
     [bidderClub, 'tok-coach2'],
     [poorClub, 'tok-coach3'],
   ];
+  const auth = attachAuthChannel(fx.env);
   for (const [clubId, token] of binds) {
+    authRegisterClubTeam(auth, clubId, clubId, `队${clubId}`);
+    
     const res = await post(`/api/admin/clubs/${clubId}/bindcode`, {}, 'tok-admin', fx.env);
     const code = ((await res.json()) as { code: string }).code;
     const bind = await post('/api/clubs/bind', { code }, token, fx.env);

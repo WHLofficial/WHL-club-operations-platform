@@ -1,9 +1,13 @@
 // 路由层测试（§16：内存 D1 跑迁移与断言）——绑定流程、球员查询、导入幂等、期初余额、注册合规。
-import { describe, expect, it } from 'vitest';
+// 增量 7：绑定真源上收 auth——freshEnv 带只读 AUTH_DB 镜像库，stub fetch 仿真 auth 机器端点
+// （HMAC 契约与 auth machine.ts 同构），本地 club_bindings/club_bind_code 只走回滚分支。
+import { afterEach, describe, expect, it } from 'vitest';
+import { createHmac, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { createTestD1, createAuthDb, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { generateCode } from '../src/lib/crypto.ts';
 import { TRAINEE_WAGE } from '../src/core/squad-rules.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
@@ -11,6 +15,7 @@ interface Fixture {
   env: Env;
   sqlite: DatabaseSync;
   tour: DatabaseSync;
+  auth?: DatabaseSync; // 增量 7：AUTH_DB 镜像库，withAuth 按需创建（其余用例走本地回滚分支）
   kv: Map<string, string>;
 }
 
@@ -52,6 +57,97 @@ function freshEnv(): Fixture {
   return { env, sqlite, tour, kv };
 }
 
+const AUTH_SECRET = 'test-bind-secret';
+const AUTH_BASE = 'http://auth.test';
+
+// 增量 7：给用例挂上认证中心通道——AUTH_DB 镜像库（account 1-5 与 tour user 同值同名）+
+// 机器通道密钥/基地址（只配 ISSUER 不配 CLIENT_ID，保持兼容模式）+ fetch 仿真 auth 机器端点。
+// 绑定/发码/解绑流程用例开头调用；其余用例不挂，本地表走回滚分支照旧。
+function withAuth(fx: Fixture): Fixture {
+  if (!fx.auth) {
+    const db = createAuthDb();
+    db.sqlite.exec(
+      `INSERT INTO account (id, name, created_at) VALUES
+         (1, '管理组甲', '2026-01-01T00:00:00Z'), (2, '教练乙', '2026-01-01T00:00:00Z'),
+         (3, '丙丙', '2026-01-01T00:00:00Z'), (4, '教练丁', '2026-01-01T00:00:00Z'),
+         (5, '教练戊', '2026-01-01T00:00:00Z');`,
+    );
+    fx.auth = db.sqlite;
+    fx.env.AUTH_DB = db.d1;
+    fx.env.AUTH_BIND_SECRET = AUTH_SECRET;
+    fx.env.OIDC_ISSUER = AUTH_BASE;
+  }
+  stubAuthMachine(fx);
+  return fx;
+}
+
+// auth 机器端点最小仿真（与 auth machine.ts 同构）：验 HMAC 签名，码表/绑定写 AUTH_DB 镜像。
+// 只仿真 club 侧用到的三条：bindcode（按 club_id）/ bind / unbind。
+function stubAuthMachine(fx: Fixture): void {
+  const auth = fx.auth as DatabaseSync;
+  const impl = async (url: unknown, init?: { headers?: Record<string, string>; body?: string }) => {
+    const u = String(url);
+    if (!u.startsWith(`${AUTH_BASE}/api/team/`)) {
+      return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
+    }
+    const path = u.slice(AUTH_BASE.length);
+    const raw = init?.body ?? '';
+    const ts = init?.headers?.['x-timestamp'] ?? '';
+    const sign = createHmac('sha256', AUTH_SECRET).update(`POST|${path}|${ts}|${raw}`).digest('hex');
+    if (init?.headers?.['x-sign'] !== sign) {
+      return new Response(JSON.stringify({ error: 'bad_signature' }), { status: 401 });
+    }
+    const body = JSON.parse(raw) as Record<string, unknown>;
+    const now = new Date().toISOString();
+    if (path === '/api/team/bindcode') {
+      const team = auth.prepare('SELECT id FROM team WHERE club_id = ?').get(Number(body.club_id)) as
+        | { id: number }
+        | undefined;
+      if (!team) return new Response(JSON.stringify({ error: 'team_not_found' }), { status: 404 });
+      const code = generateCode(8);
+      const hours = Number(body.ttl_hours ?? 24);
+      const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
+      auth
+        .prepare("INSERT INTO team_bind_code (team_id, code_hash, via, expires_at, created_at) VALUES (?, ?, 'club', ?, ?)")
+        .run(team.id, createHash('sha256').update(code).digest('hex'), expiresAt, now);
+      return new Response(JSON.stringify({ ok: true, code, expires_at: expiresAt }), { status: 200 });
+    }
+    if (path === '/api/team/bind') {
+      const code = String(body.code ?? '').trim().toUpperCase();
+      const row = auth
+        .prepare('SELECT id, team_id, expires_at, used_by FROM team_bind_code WHERE code_hash = ?')
+        .get(createHash('sha256').update(code).digest('hex')) as
+        | { id: number; team_id: number; expires_at: string | null; used_by: number | null }
+        | undefined;
+      if (!row || row.used_by !== null || (row.expires_at !== null && row.expires_at <= now)) {
+        return new Response(JSON.stringify({ error: 'invalid_code' }), { status: 400 });
+      }
+      const accountId = Number(body.account_id);
+      const already = auth.prepare('SELECT team_id FROM team_binding WHERE account_id = ?').get(accountId);
+      if (already) return new Response(JSON.stringify({ error: 'already_bound' }), { status: 409 });
+      auth
+        .prepare("INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES (?, ?, 'club', ?)")
+        .run(accountId, row.team_id, now);
+      auth.prepare('UPDATE team_bind_code SET used_by = ?, used_at = ? WHERE id = ?').run(accountId, now, row.id);
+      return new Response(JSON.stringify({ ok: true, teamId: row.team_id }), { status: 200 });
+    }
+    if (path === '/api/team/unbind') {
+      const row = auth.prepare('SELECT team_id FROM team_binding WHERE account_id = ?').get(Number(body.account_id)) as
+        | { team_id: number }
+        | undefined;
+      if (!row) return new Response(JSON.stringify({ error: 'not_bound' }), { status: 404 });
+      auth.prepare('DELETE FROM team_binding WHERE account_id = ?').run(Number(body.account_id));
+      return new Response(JSON.stringify({ ok: true, teamId: row.team_id }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
+  };
+  (globalThis as { fetch: unknown }).fetch = impl;
+}
+
+afterEach(() => {
+  (globalThis as { fetch: unknown }).fetch = undefined;
+});
+
 function get(path: string, token: string | undefined, env: Env) {
   return app.request(
     path,
@@ -92,6 +188,18 @@ async function createClub(fx: Fixture, name: string, leagueTier = 'premier'): Pr
 }
 
 async function issueCode(fx: Fixture, clubId: number): Promise<string> {
+  // 增量 7：auth 目录须有该俱乐部的行才能发码——测试仿真直接补登记
+  // （生产对应 tour 侧发码自愈 register；team_not_found 负例用例绕开本助手直调端点）
+  const club = fx.sqlite.prepare('SELECT name FROM clubs WHERE id = ?').get(clubId) as { name: string } | undefined;
+  const has = fx.auth!.prepare('SELECT id FROM team WHERE club_id = ?').get(clubId);
+  if (!has) {
+    fx.auth!.prepare('INSERT INTO team (tour_team_id, club_id, name, created_at) VALUES (?, ?, ?, ?)').run(
+      clubId,
+      clubId,
+      club?.name ?? `队${clubId}`,
+      '2026-01-01T00:00:00Z',
+    );
+  }
   const res = await post(`/api/admin/clubs/${clubId}/bindcode`, {}, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   const body = (await res.json()) as { code: string };
@@ -109,7 +217,7 @@ describe('建队与认证码绑定（§3.2）', () => {
   });
 
   it('绑队走通：建队→发码→绑定→概览，明码只出现一次', async () => {
-    const fx = freshEnv();
+    const fx = withAuth(freshEnv());
     const clubId = await createClub(fx, '阿森纳');
     // 绑定前概览为空
     const empty = await get('/api/me/club', 'tok-coach', fx.env);
@@ -135,7 +243,7 @@ describe('建队与认证码绑定（§3.2）', () => {
   });
 
   it('一账号一队：已绑定的账号再绑被拒且不烧码', async () => {
-    const fx = freshEnv();
+    const fx = withAuth(freshEnv());
     const c1 = await createClub(fx, '阿森纳');
     const c2 = await createClub(fx, '曼城');
     const code1 = await issueCode(fx, c1);
@@ -148,13 +256,13 @@ describe('建队与认证码绑定（§3.2）', () => {
   });
 
   it('格式错误与无效码', async () => {
-    const fx = freshEnv();
+    const fx = withAuth(freshEnv());
     expect((await post('/api/clubs/bind', { code: 'ABC' }, 'tok-coach', fx.env)).status).toBe(400);
     expect((await post('/api/clubs/bind', { code: 'ZZZZZZZZ' }, 'tok-coach', fx.env)).status).toBe(400);
   });
 
   it('观众号（locked=1 映射 viewer）不能绑队', async () => {
-    const fx = freshEnv();
+    const fx = withAuth(freshEnv());
     const clubId = await createClub(fx, '阿森纳');
     const code = await issueCode(fx, clubId);
     const res = await post('/api/clubs/bind', { code }, 'tok-locked', fx.env);
@@ -164,7 +272,7 @@ describe('建队与认证码绑定（§3.2）', () => {
   });
 
   it('连续失败触发限流（5 次/10 分钟）', async () => {
-    const fx = freshEnv();
+    const fx = withAuth(freshEnv());
     for (let i = 0; i < 5; i++) {
       await post('/api/clubs/bind', { code: 'WRONGWRG' }, 'tok-coach', fx.env);
     }
@@ -173,7 +281,7 @@ describe('建队与认证码绑定（§3.2）', () => {
   });
 
   it('管理端解绑后可重绑', async () => {
-    const fx = freshEnv();
+    const fx = withAuth(freshEnv());
     const clubId = await createClub(fx, '阿森纳');
     const code = await issueCode(fx, clubId);
     await post('/api/clubs/bind', { code }, 'tok-coach', fx.env);
@@ -189,7 +297,7 @@ describe('建队与认证码绑定（§3.2）', () => {
   });
 
   it('管理端俱乐部列表带绑定状态与人名', async () => {
-    const fx = freshEnv();
+    const fx = withAuth(freshEnv());
     const clubId = await createClub(fx, '阿森纳');
     const code = await issueCode(fx, clubId);
     await post('/api/clubs/bind', { code }, 'tok-coach', fx.env);
@@ -198,6 +306,16 @@ describe('建队与认证码绑定（§3.2）', () => {
     const club = body.clubs.find((c) => c.id === clubId)!;
     expect(club.binding).toMatchObject({ userId: 2, userName: '教练乙' });
     expect(club.latestCode?.usedBy).toBe(2);
+  });
+
+  it('目录缺行：发码被拒提示先登记关联（auth team_not_found）', async () => {
+    const fx = withAuth(freshEnv());
+    const clubId = await createClub(fx, '阿森纳');
+    const res = await post(`/api/admin/clubs/${clubId}/bindcode`, {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      '该俱乐部没有关联的比赛球队，请先在认证中心登记目录并关联后再发码',
+    );
   });
 });
 

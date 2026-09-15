@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
@@ -84,11 +84,13 @@ async function seedTrainee(fx: Fixture): Promise<ActivationFixture> {
   const ownerClub = await createClub(fx, '青训营');
   const buyerClub = await createClub(fx, '激活队');
   const rivalClub = await createClub(fx, '抬价队');
+  const auth = attachAuthChannel(fx.env);
   for (const [clubId, token] of [
     [ownerClub, 'tok-coach'],
     [buyerClub, 'tok-coach2'],
     [rivalClub, 'tok-coach3'],
   ] as const) {
+    authRegisterClubTeam(auth, clubId, clubId, `队${clubId}`);
     const res = await post(`/api/admin/clubs/${clubId}/bindcode`, {}, 'tok-admin', fx.env);
     const code = ((await res.json()) as { code: string }).code;
     const bind = await post('/api/clubs/bind', { code }, token, fx.env);

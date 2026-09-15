@@ -3,8 +3,9 @@ import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireAdmin } from '../../lib/session.ts';
-import { generateCode, sha256Hex } from '../../lib/crypto.ts';
 import { createAuditStatement, writeAudit } from '../../lib/audit.ts';
+import { authIssueTeamCode, authUnbindTeam, AuthApiError } from '../authClient.ts';
+import { getBoundClub } from '../binding.ts';
 import { createConfigService } from '../../core/config.ts';
 import { confirmImport, previewImport } from '../players-import.ts';
 import { confirmContractsImport, previewContractsImport } from '../contracts-import.ts';
@@ -75,12 +76,26 @@ app.get('/clubs', async (c) => {
   const clubs = await c.env.DB.prepare(
     'SELECT id, name, league_tier, status, created_at FROM clubs ORDER BY id LIMIT 200',
   ).all<{ id: number; name: string; league_tier: string; status: string; created_at: string }>();
-  const bindings = await c.env.DB.prepare(
-    'SELECT club_id, user_id, user_name, bound_at FROM club_bindings LIMIT 200',
-  ).all<{ club_id: number; user_id: number; user_name: string | null; bound_at: string }>();
-  const codes = await c.env.DB.prepare(
-    'SELECT club_id, expires_at, used_by, used_at, created_at FROM club_bind_code ORDER BY id DESC LIMIT 200',
-  ).all<{ club_id: number; expires_at: string | null; used_by: number | null; used_at: string | null; created_at: string }>();
+  // 绑定与认证码真源在 auth 库（增量 7）；AUTH_DB 未配置回落本地休眠表（回滚通道）。
+  // 绑定人名字取 auth account.name，不再回查赛事库 user 表。
+  const bindings = c.env.AUTH_DB
+    ? await c.env.AUTH_DB.prepare(
+        `SELECT t.club_id, b.account_id AS user_id, a.name AS user_name, b.bound_at
+         FROM team_binding b JOIN team t ON t.id = b.team_id JOIN account a ON a.id = b.account_id
+         WHERE t.club_id IS NOT NULL ORDER BY b.account_id LIMIT 200`,
+      ).all<{ club_id: number; user_id: number; user_name: string | null; bound_at: string }>()
+    : await c.env.DB.prepare(
+        'SELECT club_id, user_id, user_name, bound_at FROM club_bindings LIMIT 200',
+      ).all<{ club_id: number; user_id: number; user_name: string | null; bound_at: string }>();
+  const codes = c.env.AUTH_DB
+    ? await c.env.AUTH_DB.prepare(
+        `SELECT t.club_id, bc.expires_at, bc.used_by, bc.used_at, bc.created_at
+         FROM team_bind_code bc JOIN team t ON t.id = bc.team_id
+         WHERE t.club_id IS NOT NULL ORDER BY bc.id DESC LIMIT 200`,
+      ).all<{ club_id: number; expires_at: string | null; used_by: number | null; used_at: string | null; created_at: string }>()
+    : await c.env.DB.prepare(
+        'SELECT club_id, expires_at, used_by, used_at, created_at FROM club_bind_code ORDER BY id DESC LIMIT 200',
+      ).all<{ club_id: number; expires_at: string | null; used_by: number | null; used_at: string | null; created_at: string }>();
 
   const byClub = new Map<number, { userId: number; userName: string | null; boundAt: string }>();
   for (const b of bindings.results) byClub.set(b.club_id, { userId: b.user_id, userName: b.user_name, boundAt: b.bound_at });
@@ -95,19 +110,6 @@ app.get('/clubs', async (c) => {
       });
     }
   }
-  // 绑定人名字：本地 user_name 优先（收口后绑定即落库，不再依赖赛事库）；
-  // 旧行回退赛事库 user 表只读兜底（账号真源已收口 auth 库，历史行随重新绑定自然补全）
-  const userIds = [...new Set(bindings.results.filter((b) => !b.user_name).map((b) => b.user_id))];
-  const userNames = new Map<number, string>();
-  for (let i = 0; i < userIds.length; i += 90) {
-    const slice = userIds.slice(i, i + 90);
-    const placeholders = slice.map(() => '?').join(', ');
-    const users = await c.env.TOUR_DB.prepare(`SELECT id, name FROM user WHERE id IN (${placeholders})`)
-      .bind(...slice)
-      .all<{ id: number; name: string }>();
-    for (const u of users.results) userNames.set(u.id, u.name);
-  }
-
   return c.json({
     clubs: clubs.results.map((r) => {
       const binding = byClub.get(r.id) ?? null;
@@ -117,7 +119,7 @@ app.get('/clubs', async (c) => {
         leagueTier: r.league_tier,
         status: r.status,
         createdAt: r.created_at,
-        binding: binding ? { userId: binding.userId, userName: binding.userName ?? userNames.get(binding.userId) ?? null, boundAt: binding.boundAt } : null,
+        binding: binding ? { userId: binding.userId, userName: binding.userName ?? null, boundAt: binding.boundAt } : null,
         latestCode: latestCode.get(r.id) ?? null,
       };
     }),
@@ -136,23 +138,29 @@ app.post('/clubs/:id/bindcode', async (c) => {
   if (!Number.isFinite(hours) || hours <= 0 || hours > 24 * 30) {
     throw new HttpError(400, '有效时长须在 1 小时到 30 天之间');
   }
-  const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
-  const code = generateCode(8);
-  await c.env.DB.prepare(
-    `INSERT INTO club_bind_code (club_id, code_hash, expires_at, created_by, created_at)
-     VALUES (?, ?, ?, ?, ${nowSql()})`,
-  )
-    .bind(clubId, await sha256Hex(code), expiresAt, user.id)
-    .run();
+  // 发码走 auth 机器 API（增量 7 中央码表 team_bind_code，按 club_id 解析目录行）
+  let issued: { code: string; expiresAt: string };
+  try {
+    issued = await authIssueTeamCode(c.env, { clubId, hours });
+  } catch (e) {
+    if (e instanceof AuthApiError) {
+      if (e.code === 'team_not_found') {
+        throw new HttpError(400, '该俱乐部没有关联的比赛球队，请先在认证中心登记目录并关联后再发码');
+      }
+      if (e.code === 'unconfigured') throw new HttpError(500, '认证中心通道未配置，请联系管理组');
+      throw new HttpError(502, '认证中心暂不可用，请稍后再试');
+    }
+    throw e;
+  }
   // 明码只在这一次响应里出现，审计只记事实不记码
   await writeAudit(c.env.DB, {
     actor: user.id,
     action: 'club_bindcode_create',
     targetType: 'club',
     targetId: clubId,
-    after: { expiresAt },
+    after: { expiresAt: issued.expiresAt },
   });
-  return c.json({ code, expiresAt }, 201);
+  return c.json({ code: issued.code, expiresAt: issued.expiresAt }, 201);
 });
 
 app.post('/bindings/unbind', async (c) => {
@@ -160,21 +168,26 @@ app.post('/bindings/unbind', async (c) => {
   const body = (await readJson(c)) as { userId?: unknown } | null;
   const userId = Number(body?.userId);
   if (!Number.isInteger(userId) || userId <= 0) throw new HttpError(400, '要解绑的用户 ID 不对');
-  const row = await c.env.DB.prepare('SELECT club_id FROM club_bindings WHERE user_id = ?')
-    .bind(userId)
-    .first<{ club_id: number }>();
-  if (!row) throw new HttpError(404, '该账号没有绑定俱乐部');
-  const audit = createAuditStatement(c.env.DB);
-  await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM club_bindings WHERE user_id = ?').bind(userId),
-    audit({
-      actor: user.id,
-      action: 'club_unbind',
-      targetType: 'club',
-      targetId: row.club_id,
-      before: { userId },
-    }),
-  ]);
+  // 预查绑定（真源 auth 库）：既做 404 判定，也把目标俱乐部记进本地审计
+  const club = await getBoundClub(c.env, userId);
+  if (!club) throw new HttpError(404, '该账号没有绑定俱乐部');
+  try {
+    await authUnbindTeam(c.env, userId);
+  } catch (e) {
+    if (e instanceof AuthApiError) {
+      if (e.code === 'not_bound') throw new HttpError(404, '该账号没有绑定俱乐部');
+      if (e.code === 'unconfigured') throw new HttpError(500, '认证中心通道未配置，请联系管理组');
+      throw new HttpError(502, '认证中心暂不可用，请稍后再试');
+    }
+    throw e;
+  }
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'club_unbind',
+    targetType: 'club',
+    targetId: club.id,
+    before: { userId },
+  });
   return c.json({ ok: true });
 });
 

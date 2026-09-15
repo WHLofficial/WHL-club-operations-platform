@@ -4,8 +4,8 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
-import { sha256Hex } from '../../lib/crypto.ts';
-import { createAuditStatement } from '../../lib/audit.ts';
+import { writeAudit } from '../../lib/audit.ts';
+import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -23,61 +23,45 @@ app.post('/clubs/bind', async (c) => {
     throw new HttpError(400, '认证码格式不对，应为 8 位字母数字');
   }
 
-  const hash = await sha256Hex(code);
-  const row = await c.env.DB.prepare(
-    `SELECT id, club_id FROM club_bind_code
-     WHERE code_hash = ? AND used_by IS NULL
-       AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-  )
-    .bind(hash)
-    .first<{ id: number; club_id: number }>();
-  if (!row) throw new HttpError(400, '认证码无效或已过期');
-
-  // 一账号一队先查再插：查不出已绑时不烧码，提示更友好
-  const existing = await c.env.DB.prepare('SELECT club_id FROM club_bindings WHERE user_id = ?')
-    .bind(user.id)
-    .first<{ club_id: number }>();
-  if (existing) throw new HttpError(409, '该账号已经绑定了俱乐部，解绑需联系管理组');
-
-  // 条件烧码防并发重复使用（两个请求同码竞速，只有一个能改到行）
-  const burn = await c.env.DB.prepare(
-    `UPDATE club_bind_code SET used_by = ?, used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-     WHERE id = ? AND used_by IS NULL`,
-  )
-    .bind(user.id, row.id)
-    .run();
-  if ((burn.meta.changes ?? 0) !== 1) throw new HttpError(400, '认证码无效或已过期');
-
+  // 烧码在 auth 认证中心单事务原子完成（增量 7：中央码表 team_bind_code + team_binding）；
+  // 本地 club_bind_code 表休眠（保留防回滚，不再读写）
   try {
-    const audit = createAuditStatement(c.env.DB);
-    await c.env.DB.batch([
-      // 绑定人姓名随行落库（0013）：管理端列表本地可读，收口后不必回查赛事库 user 表
-      c.env.DB.prepare(
-        `INSERT INTO club_bindings (club_id, user_id, user_name, bound_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      ).bind(row.club_id, user.id, user.name),
-      audit({
-        actor: user.id,
-        action: 'club_bind',
-        targetType: 'club',
-        targetId: row.club_id,
-        after: { userId: user.id },
-      }),
-    ]);
-  } catch {
-    throw new HttpError(409, '该账号已经绑定了俱乐部，解绑需联系管理组');
+    await authBindTeam(c.env, { code, accountId: user.id });
+  } catch (e) {
+    if (e instanceof AuthApiError) {
+      if (e.code === 'invalid_code') throw new HttpError(400, '认证码无效或已过期');
+      if (e.code === 'already_bound') throw new HttpError(409, '该账号已经绑定了俱乐部，解绑需联系管理组');
+      throw new HttpError(502, '认证中心暂不可用，请稍后再试');
+    }
+    throw e;
   }
-  return c.json({ ok: true, clubId: row.club_id }, 201);
+
+  // 绑定成功后按目录解析本侧俱乐部（目录行在发码时已按 club_id 关联）
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(502, '绑定已完成，但俱乐部目录尚未关联，请联系管理组');
+
+  // 本地审计只记事实（绑定真源在 auth 库）
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'club_bind',
+    targetType: 'club',
+    targetId: club.id,
+    after: { userId: user.id },
+  });
+  return c.json({ ok: true, clubId: club.id }, 201);
 });
 
 // 我的球队概览（余额/名单数/窗口态）；窗口态在增量 6 落地，此前恒为 null
 app.get('/me/club', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const bound = await getBoundClub(c.env, user.id);
+  if (!bound) {
+    return c.json({ club: null, balance: null, squadCount: null, window: null });
+  }
   const club = await c.env.DB.prepare(
-    `SELECT c.id, c.name, c.league_tier, c.logo_key, c.status
-     FROM club_bindings b JOIN clubs c ON c.id = b.club_id
-     WHERE b.user_id = ?`,
+    `SELECT id, name, league_tier, logo_key, status FROM clubs WHERE id = ?`,
   )
-    .bind(user.id)
+    .bind(bound.id)
     .first<{ id: number; name: string; league_tier: string; logo_key: string | null; status: string }>();
   if (!club) {
     return c.json({ club: null, balance: null, squadCount: null, window: null });

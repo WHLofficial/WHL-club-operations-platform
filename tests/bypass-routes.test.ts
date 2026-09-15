@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { expectedWage } from '../src/worker/negotiation-secret.ts';
 import { terminationFee } from '../src/core/bypass-rules.ts';
@@ -85,10 +85,13 @@ async function seedBypass(): Promise<BypassFixture> {
   const fx = freshEnv();
   const clubA = await createClub(fx, '甲队');
   const clubB = await createClub(fx, '乙队');
+  const auth = attachAuthChannel(fx.env);
   for (const [clubId, token] of [
     [clubA, 'tok-coach'],
     [clubB, 'tok-coach2'],
   ] as const) {
+    authRegisterClubTeam(auth, clubId, clubId, `队${clubId}`);
+    
     const res = await post(`/api/admin/clubs/${clubId}/bindcode`, {}, 'tok-admin', fx.env);
     const code = ((await res.json()) as { code: string }).code;
     expect((await post('/api/clubs/bind', { code }, token, fx.env)).status).toBe(201);

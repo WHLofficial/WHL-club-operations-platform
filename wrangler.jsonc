@@ -24,6 +24,14 @@
       "binding": "TOUR_DB",
       "database_name": "whl",
       "database_id": "ec3cc695-70bc-47ab-a454-5ca62ec22dd6"
+    },
+    {
+      // 认证中心 D1 只读绑定（增量 7）：球队绑定真源（team/team_binding），平台不写；
+      // 发码/烧码/解绑走 auth 机器 API（AUTH_BIND_SECRET 为 secret：
+      // npx wrangler secret put AUTH_BIND_SECRET，与 auth 仓 BIND_SECRET 同值）
+      "binding": "AUTH_DB",
+      "database_name": "whl-auth",
+      "database_id": "b76d1129-77ae-4844-931c-1c7b00a9b048"
     }
   ],
   "kv_namespaces": [

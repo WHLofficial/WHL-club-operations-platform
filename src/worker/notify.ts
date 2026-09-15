@@ -53,20 +53,38 @@ export function renderNotification(template: string, data: Record<string, unknow
 /**
  * 给一个俱乐部排通知（尽力而为：俱乐部没绑教练/教练没绑 QQ 就静默跳过，§12-2）。
  * 排队失败不抛——通知绝不阻塞主流程（确认/升级先行）。
+ * 绑定真源在 auth 库（增量 7）：先按 club_id 从 AUTH_DB 取绑定账号，再查本地 qq_links；
+ * AUTH_DB 未配置回落本地休眠表（回滚通道）。
  */
 export async function queueClubNotification(
-  db: D1Database,
+  env: Env,
   clubId: number | null,
   template: string,
   data: Record<string, unknown>,
 ): Promise<number> {
   if (clubId === null) return 0;
+  const db = env.DB;
   try {
-    const qqs = await db
-      .prepare(
-        `SELECT q.qq FROM club_bindings b JOIN qq_links q ON q.user_id = b.user_id WHERE b.club_id = ? ORDER BY q.user_id LIMIT 5`,
+    let accountIds: number[];
+    if (env.AUTH_DB) {
+      const bound = await env.AUTH_DB.prepare(
+        `SELECT b.account_id AS user_id FROM team_binding b JOIN team t ON t.id = b.team_id
+         WHERE t.club_id = ? ORDER BY b.account_id LIMIT 5`,
       )
-      .bind(clubId)
+        .bind(clubId)
+        .all<{ user_id: number }>();
+      accountIds = bound.results.map((r) => r.user_id);
+    } else {
+      const bound = await db.prepare('SELECT user_id FROM club_bindings WHERE club_id = ? ORDER BY user_id LIMIT 5')
+        .bind(clubId)
+        .all<{ user_id: number }>();
+      accountIds = bound.results.map((r) => r.user_id);
+    }
+    if (accountIds.length === 0) return 0;
+    const placeholders = accountIds.map(() => '?').join(', ');
+    const qqs = await db
+      .prepare(`SELECT qq FROM qq_links WHERE user_id IN (${placeholders}) ORDER BY user_id LIMIT 5`)
+      .bind(...accountIds)
       .all<{ qq: string }>();
     if (qqs.results.length === 0) return 0;
     const text = renderNotification(template, data);

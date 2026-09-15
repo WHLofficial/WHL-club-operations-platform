@@ -276,7 +276,7 @@ async function queueResultNotifications(
     if (!teamName) continue;
     const club = await env.DB.prepare('SELECT id FROM clubs WHERE name = ?').bind(teamName).first<{ id: number }>();
     if (!club) continue;
-    await queueClubNotification(env.DB, club.id, 'result_confirmed', {
+    await queueClubNotification(env, club.id, 'result_confirmed', {
       ...data,
       home: m.home_team,
       away: m.away_team,
