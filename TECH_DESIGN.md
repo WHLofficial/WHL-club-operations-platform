@@ -67,9 +67,9 @@ web/          React SPA（挂牌板/球队中心/球员卡/管理端/审核队�
 4. 角色沿用：`coach`→教练，`admin`/`superadmin`→管理组，locked→只读。
 5. 平台库镜像最小用户信息（user_id、显示名），不写比赛系统 user 表。
 
-### 3.2 俱乐部绑定
+### 3.2 俱乐部绑定（增量 7 改判：真源上收认证中心）
 
-照抄比赛系统 coach/bind 模式：管理组建俱乐部 → 生成 8 位一次性认证码 → 教练网页提交认证码 → 写 `club_bindings(club_id, user_id UNIQUE)`，一账号一队。认证码存 `club_bind_code` 表（sha256 哈希入库、明码只在生成响应里出现一次、条件烧码防并发复用、按 IP 限尝试次数），与比赛系统 `auth_code` 同构。
+**增量 7 起绑定真源在 auth 库**（tour 与 club 的球队认证本不相通，裁决上收统一，见 auth TECH_DESIGN §5.3 改判）：auth 0008 三表——`team`（tour team ↔ club club 的目录，`tour_team_id`/`club_id` 唯一可空）、`team_bind_code`（中央码表）、`team_binding`（UNIQUE(account_id) 一账号一队，一队可多账号）。本侧流程不变：管理组建俱乐部 → 生成 8 位一次性认证码 → 教练网页提交 → 绑定；但发码/烧码/解绑都改走 auth 机器 API（`src/worker/authClient.ts`，HMAC X-Sign = hex(SHA-256(BIND_SECRET, "POST|path|ts|raw"))，错误映射 invalid_code→400 / already_bound→409 / 其余 502）；烧码在 auth 单事务原子。绑定关系经只读 `AUTH_DB` D1 绑定派生读（`binding.ts` 两跳：team_binding → team.club_id → 本地 clubs 补名）。OIDC 教练判定改「**绑定即教练**」（auth 对所有新账号自动发 club.coach，权限点无区分度；管理点仍走权限点，未绑定的准教练凭权限点保留旁路进绑前端点）。本地 `club_bind_code`/`club_bindings` 表**休眠保留防回滚**（代码不再读写；AUTH_DB 未配置时回落本地表即回滚通道）。管理端列表的绑定/最新码改读 AUTH_DB（绑定人姓名取 auth account.name）。通知收件人（§12）同步改两跳派生。存量迁移见 auth 仓 `scripts/migrate-team-bindings.mjs`（以 tour team_member 为基准，club 绑定校对，冲突/单边人工裁决）。
 
 ### 3.3 QQ 桥（P1）
 
@@ -80,6 +80,7 @@ web/          React SPA（挂牌板/球队中心/球员卡/管理端/审核队�
 | 数据 | 谁写 | 谁读 | 说明 |
 |---|---|---|---|
 | user / 会话（比赛系统 D1 + 共享 KV） | 比赛系统 | 平台跨绑定只读 | 平台不写 user 表 |
+| **球队绑定（auth 库，增量 7）** | **auth（机器 API 写：发码/烧码/解绑/登记/关联）** | **平台 AUTH_DB 只读派生** | **平台不写 auth 库；写通道=机器端点** |
 | 平台业务库（球员/合同/转会/账本/窗口/成长） | 平台 | 平台 | 唯一事实源 |
 | 赛程赛果 | 比赛系统 | 平台跨绑定只读（仅已绑定赛事） | 平台不回写 |
 | 赛果衍生数据（奖金/门票收入/XP） | 平台 | — | 赛果确认钩子生成，存平台库 |
@@ -164,7 +165,7 @@ CREATE TABLE clubs (
   league_tier TEXT,                 -- premier/second
   logo_key TEXT, status TEXT, created_at TEXT
 );
-CREATE TABLE club_bindings (
+CREATE TABLE club_bindings (        -- 增量 7 起休眠（真源 auth team_binding；保留防回滚，AUTH_DB 未配置时回落读此表）
   club_id INTEGER REFERENCES clubs, user_id INTEGER UNIQUE,  -- 一账号一队
   bound_at TEXT
 );
@@ -784,6 +785,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 23 | 假设 | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮（/api/me/notifications）延后 P1，MVP 只走 QQ 推送 |
 | 24 | 已定 | 球员初始归属（initial_club_id）= 导入时数据：首次名单认领写入（COALESCE 保解约重签不覆盖），存量按最早归属变更的 from_club_id 回填，只海捞过（free_agent）= 导入时无归属留 NULL；仅供成长「本队」判断与球员库初始视图展示，XP 场次匹配仍按当前归属名单（§8 口径不变） |
 | 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
+| 26 | 已定（增量 7） | 球队绑定真源上收 auth（三表 team/team_bind_code/team_binding；机器端点五条 HMAC）；本侧旧表 club_bind_code/club_bindings 休眠保留防回滚，AUTH_DB 未配置时回落读本地表（回滚通道）；发码 team_not_found 不自动登记目录（提示先登记关联，与 tour 侧自愈 register 不同）；OIDC 教练判定=绑定即教练（管理点仍走权限点；未绑定的准教练凭 club.* 权限点保留旁路进绑前端点） |
 
 ## 16. 测试策略
 

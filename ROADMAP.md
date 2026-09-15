@@ -75,9 +75,17 @@
 
 **状态**：完成（12 commits：63d92db…b651278，259 测试）。裁决与口径落 TECH_DESIGN §11/§15 假设 24-25、PRD 4.7、UI_DESIGN §4.4/§5；review 修复球员库请求竞态与绑定列表排序。推送与部署待需求方确认。
 
-## 增量 7+ · P1/P2 展望（按 PRD 优先级另排）
+## 增量 7 · 球队绑定上收认证中心（auth + tour + club 三仓）
 
-主场收入（revenue 公式移植）、富人税、忠诚奖金、设施扩建、交易日历完善、预算看板、球员卡成长曲线 → P1；LLM 随机事件文案、冠名/档期、成交行情、换版工具、积分兑换口 → P2。UI 复古档案室主题随各增量页面同步铺（印章/流水账等签名组件按页面就近实现）。
+**交付**：球队绑定真源上收 auth（推翻 auth TECH_DESIGN §5.3「球队不进 auth」旧裁定并改判记录）——auth 0008 迁移三表（team 目录 / team_bind_code 中央码表 / team_binding 绑定）+ 机器端点五条 HMAC；tour/club 双入口发码烧码写同一张中央表（烧码 auth 单事务原子），两侧旧绑定表休眠保留防回滚、经只读 AUTH_DB 派生读；club 教练判定改「绑定即教练」（auth 对新账号自动发 club.coach，权限点无区分度）；存量迁移脚本 `migrate-team-bindings.mjs` 以 tour team_member 为基准（目录按队名精确匹配，冲突/单边出报告人工裁决）。
+
+**验收**：tour 与 club 绑定/发码互通指向同一绑定关系；一账号一队全生态生效；三仓测试全绿（auth 96 / tour 16 / club 263）。
+
+**状态**：代码与文档完成（club 8824c42、auth 32405a6+e5a94d1+47bd100、tour 31850c6），code review 待做；推送与部署（auth→tour→club 顺序 + AUTH_BIND_SECRET secret + 迁移执行）待需求方确认。
+
+## 增量 8 · 球员库统一（已立项，随增量 7 收口后另排）
+
+方向已裁决：以 club 球员库为准、tour 只读取（tour 侧不再独立维护球员库）；本次增量 7 只把 auth team 目录（tour_team_id ↔ club_id）建好留路。XP 名字匹配不动。
 
 ---
 
