@@ -81,7 +81,7 @@
 
 **验收**：tour 与 club 绑定/发码互通指向同一绑定关系；一账号一队全生态生效；三仓测试全绿（auth 96 / tour 16 / club 263）。
 
-**状态**：代码与文档完成（club 8824c42、auth 32405a6+e5a94d1+47bd100、tour 31850c6），code review 待做；推送与部署（auth→tour→club 顺序 + AUTH_BIND_SECRET secret + 迁移执行）待需求方确认。
+**状态**：完成（club 8824c42+123846c、auth 32405a6+e5a94d1+47bd100+1eebbb1+726415b、tour 31850c6+471797e；三仓测试全绿 auth 97 / tour 16 / club 263）。code review（code-review-skill）通过并修复两处：烧码同码两账号并发竞速可产生双绑定（改条件 INSERT...SELECT 原子闸）+ register/link 审计同批化。推送与部署（auth→tour→club 顺序 + AUTH_BIND_SECRET secret + 迁移执行）待需求方确认。
 
 ## 增量 8 · 球员库统一（已立项，随增量 7 收口后另排）
 
