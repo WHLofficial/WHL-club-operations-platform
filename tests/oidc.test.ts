@@ -11,7 +11,7 @@ import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from 'jose';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { applyMigrations, createTestD1, sqlGet } from './d1.ts';
-import { BACKCHANNEL_LOGOUT_EVENT } from '../src/lib/oidc.ts';
+import { BACKCHANNEL_LOGOUT_EVENT, b64urlDecode } from '../src/lib/oidc.ts';
 
 const ISSUER = 'https://auth.example';
 const CLIENT_ID = 'club';
@@ -547,4 +547,54 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${retried.session}` } }, env);
     expect(((await me.json()) as { user: { name: string } }).user.name).toBe('教练乙');
   });
+
+  it('静默同步探测：me 下发 syncProbe，sync 带 prompt=none，error 回来源页，冷却生效', async () => {
+    const { env } = freshEnv(true);
+    // 匿名 + oidc + 无冷却 → syncProbe=true
+    const me = await app.request('/api/me', { method: 'GET' }, env);
+    expect(((await me.json()) as { syncProbe?: boolean }).syncProbe).toBe(true);
+
+    // sync：prompt=none + returnTo 存 temp + 冷却标记
+    const sync = await app.request('/api/auth/sync?back=%2Fledger', { method: 'GET' }, env);
+    expect(sync.status).toBe(302);
+    const authUrl = new URL(sync.headers.get('Location')!);
+    expect(authUrl.origin).toBe(ISSUER);
+    expect(authUrl.searchParams.get('prompt')).toBe('none');
+    expect(authUrl.searchParams.get('redirect_uri')).toBe('http://localhost/api/auth/callback');
+    const temp = cookieOf(sync, '__Host-club_oidc');
+    expect(JSON.parse(b64urlDecode(temp!)).returnTo).toBe('/ledger');
+    expect(cookieOf(sync, '__Host-club_probe')).toBe('1');
+    // 冷却中的 me：syncProbe 不再下发
+    const meCooling = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_probe=${cookieOf(sync, '__Host-club_probe')}` } }, env);
+    expect(((await meCooling.json()) as { syncProbe?: boolean }).syncProbe).toBeUndefined();
+
+    // auth 无会话回 error=login_required → 原路回 /ledger，不出错页不建会话
+    const cbErr = await app.request(
+      `/api/auth/callback?error=login_required&state=${authUrl.searchParams.get('state')}&iss=${encodeURIComponent(ISSUER)}`,
+      { method: 'GET', headers: { Cookie: `__Host-club_oidc=${temp}` } },
+      env,
+    );
+    expect(cbErr.status).toBe(302);
+    expect(cbErr.headers.get('Location')).toBe('/ledger');
+    expect(cookieOf(cbErr, '__Host-club_session')).toBeUndefined();
+  });
+
+  it('静默同步探测：auth 有会话则静默登录且回跳来源页；back 非法归一化为 /', async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    const { env } = freshEnv(true);
+    const sync = await app.request('/api/auth/sync?back=https://evil.example/x', { method: 'GET' }, env);
+    const authUrl = new URL(sync.headers.get('Location')!);
+    const temp = cookieOf(sync, '__Host-club_oidc');
+    expect(JSON.parse(b64urlDecode(temp!)).returnTo).toBe('/');
+    stub = { code: 'CODE-1', challenge: authUrl.searchParams.get('code_challenge')!, nonce: authUrl.searchParams.get('nonce')!, sub: '2', sid: 'sid-1', tokenCalls: [] };
+    const cb = await app.request(
+      `/api/auth/callback?code=${stub.code}&state=${authUrl.searchParams.get('state')}&iss=${encodeURIComponent(ISSUER)}`,
+      { method: 'GET', headers: { Cookie: `__Host-club_oidc=${temp}` } },
+      env,
+    );
+    expect(cb.status).toBe(302);
+    expect(cb.headers.get('Location')).toBe('/');
+    expect(cookieOf(cb, '__Host-club_session')).toBeTruthy();
+  });
 });
+

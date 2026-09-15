@@ -14,14 +14,17 @@ import { sha256Hex } from '../../lib/crypto.ts';
 import { parseOidcClaims } from '../../lib/session.ts';
 import {
   BACKCHANNEL_LOGOUT_EVENT,
+  OIDC_PROBE_COOKIE,
   OIDC_SESSION_COOKIE,
   OIDC_TEMP_COOKIE,
+  PROBE_COOLDOWN_SECONDS,
   SESSION_TTL_SECONDS,
   b64urlDecode,
   b64urlEncode,
   jwksFor,
   pkceChallenge,
   randomB64url,
+  safeReturn,
   timingSafeEq,
 } from '../../lib/oidc.ts';
 
@@ -70,9 +73,46 @@ authRoutes.get('/auth/login', async (c) => {
   return c.redirect(`${c.env.OIDC_ISSUER}/authorize?${q}`, 302);
 });
 
+// ---------- 静默同步探测（进站即探测，auth 支持 prompt=none 后启用） ----------
+
+// 前端 /api/me 拿到 user=null 且 syncProbe=true 时跳这里，带 prompt=none 去 auth——
+// 认证中心有会话即静默拿码自动登录；没有则 auth 原路回 error，callback 分支原样送回
+// 来源页继续匿名。冷却标记 10 分钟，防无会话访客被反复拽去认证中心（防循环关键闸）。
+authRoutes.get('/auth/sync', async (c) => {
+  if (!isOidcMode(c.env)) return c.redirect(TOUR_HOME, 302);
+  const state = randomB64url(16);
+  const nonce = randomB64url(16);
+  const verifier = randomB64url(32);
+  setCookie(
+    c,
+    OIDC_TEMP_COOKIE,
+    b64urlEncode(JSON.stringify({ state, nonce, verifier, returnTo: safeReturn(c.req.query('back')) })),
+    { httpOnly: true, sameSite: 'Lax', path: '/', maxAge: 600, secure: true },
+  );
+  setCookie(c, OIDC_PROBE_COOKIE, '1', {
+    httpOnly: true,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: PROBE_COOLDOWN_SECONDS,
+    secure: true,
+  });
+  const q = new URLSearchParams({
+    response_type: 'code',
+    client_id: c.env.OIDC_CLIENT_ID,
+    redirect_uri: callbackUri(c),
+    scope: 'openid profile',
+    state,
+    nonce,
+    code_challenge: await pkceChallenge(verifier),
+    code_challenge_method: 'S256',
+    prompt: 'none',
+  });
+  return c.redirect(`${c.env.OIDC_ISSUER}/authorize?${q}`, 302);
+});
+
 // ---------- 回调建会话 ----------
 
-type TempState = { state: string; nonce: string; verifier: string };
+type TempState = { state: string; nonce: string; verifier: string; returnTo?: unknown };
 
 function parseTemp(raw: string): TempState | null {
   try {
@@ -109,6 +149,11 @@ authRoutes.get('/auth/callback', async (c) => {
   }
 
   const code = c.req.query('code');
+  // prompt=none 静默探测的预期分支：auth 无会话回 error，不出错页、原路送回来源页继续匿名
+  if (!code && c.req.query('error')) {
+    deleteCookie(c, OIDC_TEMP_COOKIE, { path: '/', secure: true });
+    return c.redirect(safeReturn(temp.returnTo), 302);
+  }
   if (!code) throw new HttpError(400, '登录被取消或未完成，请重试', 'oidc_no_code');
 
   // code 换票（公开 client，无 secret，凭 PKCE 自证）；非 200 一律 502，不向用户区分细节。
@@ -189,7 +234,7 @@ authRoutes.get('/auth/callback', async (c) => {
     secure: true, // __Host- 前缀强制；本地 127.0.0.1 属可信源
   });
   deleteCookie(c, OIDC_TEMP_COOKIE, { path: '/', secure: true });
-  return c.redirect('/', 302);
+  return c.redirect(safeReturn(temp.returnTo), 302);
 });
 
 // ---------- 登出：先吊销本地行，浏览器再跳认证中心 end_session ----------

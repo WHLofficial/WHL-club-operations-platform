@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
+import { getCookie } from 'hono/cookie';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { getAuthUser } from '../lib/session.ts';
+import { OIDC_PROBE_COOKIE } from '../lib/oidc.ts';
 import clubsRoutes from './routes/clubs.ts';
 import playersRoutes from './routes/players.ts';
 import registrationRoutes from './routes/registration.ts';
@@ -68,10 +70,18 @@ app.get('/api/health', async (c) => {
 
 // 登录态（附录 A）：user=null 即未登录；must_change_pw 照常返回此人，由前端引导改密。
 // authMode 告知前端登录入口走哪条路（oidc=认证中心 /auth/login，shared=跳赛事系统）；
-// authHome 是认证中心地址（改密横幅直链用），兼容模式为 null
+// authHome 是认证中心地址（改密横幅直链用），兼容模式为 null。
+// syncProbe：匿名 + oidc 模式 + 不在探测冷却期 → 前端自动跳 /api/auth/sync 无感同步登录态
+// （进站即探测；SPA 页面请求直达静态资源，探测只能由前端发起，冷却标记防循环）
 app.get('/api/me', async (c) => {
   const user = await getAuthUser(c.env, c.req.raw);
-  return c.json({ user, authMode: c.env.OIDC_ISSUER ? 'oidc' : 'shared', authHome: c.env.OIDC_ISSUER ?? null });
+  const probeCooling = Boolean(getCookie(c, OIDC_PROBE_COOKIE));
+  return c.json({
+    user,
+    authMode: c.env.OIDC_ISSUER ? 'oidc' : 'shared',
+    authHome: c.env.OIDC_ISSUER ?? null,
+    syncProbe: !user && c.env.OIDC_ISSUER && !probeCooling ? true : undefined,
+  });
 });
 
 // 手动触发惰性结算（附录 A 内部端点）：X-Cron-Key 对不上 403；本地未配 secret 时放行便于联调
