@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import { getCookie } from 'hono/cookie';
+import { deleteCookie, getCookie } from 'hono/cookie';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { getAuthUser } from '../lib/session.ts';
-import { OIDC_PROBE_COOKIE } from '../lib/oidc.ts';
+import { getAuthUser, isStaleOidcSession } from '../lib/session.ts';
+import { OIDC_PROBE_COOKIE, OIDC_SESSION_COOKIE } from '../lib/oidc.ts';
 import clubsRoutes from './routes/clubs.ts';
 import playersRoutes from './routes/players.ts';
 import registrationRoutes from './routes/registration.ts';
@@ -76,6 +76,10 @@ app.get('/api/health', async (c) => {
 app.get('/api/me', async (c) => {
   const user = await getAuthUser(c.env, c.req.raw);
   const probeCooling = Boolean(getCookie(c, OIDC_PROBE_COOKIE));
+  // stale 会话 cookie（行已撤销/过期）：顺手清掉，浏览器侧同步瘦身
+  if (!user && (await isStaleOidcSession(c.env, c.req.raw))) {
+    deleteCookie(c, OIDC_SESSION_COOKIE, { path: '/', secure: true });
+  }
   return c.json({
     user,
     authMode: c.env.OIDC_ISSUER ? 'oidc' : 'shared',

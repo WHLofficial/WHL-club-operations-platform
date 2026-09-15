@@ -579,6 +579,27 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     expect(cookieOf(cbErr, '__Host-club_session')).toBeUndefined();
   });
 
+  it('stale 会话：me 认不出人（行已撤销）→ 下发 syncProbe + 清掉无效会话 cookie', async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    const { env, sqlite } = freshEnv(true);
+    const { session } = await oidcLogin(env);
+    // 正常会话：me 认人，无 syncProbe，不清 cookie
+    const meLive = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
+    const liveJson = (await meLive.json()) as { user: unknown; syncProbe?: boolean };
+    expect(liveJson.user).toBeTruthy();
+    expect(liveJson.syncProbe).toBeUndefined();
+    expect(meLive.headers.getSetCookie().find((l) => l.startsWith('__Host-club_session='))).toBeUndefined();
+    // 撤销后（back-channel 登出撤行的浏览器侧后果）：cookie 还在但行没了 → 清 cookie + 照常探测
+    sqlite.prepare("UPDATE oidc_session SET revoked_at = '2020-01-01T00:00:00.000Z'").run();
+    const meStale = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
+    const staleJson = (await meStale.json()) as { user: unknown; syncProbe?: boolean };
+    expect(staleJson.user).toBeNull();
+    expect(staleJson.syncProbe).toBe(true);
+    const sc = meStale.headers.getSetCookie().find((l) => l.startsWith('__Host-club_session='));
+    expect(sc).toMatch(/^__Host-club_session=;/);
+    expect(sc).toContain('Max-Age=0');
+  });
+
   it('静默同步探测：auth 有会话则静默登录且回跳来源页；back 非法归一化为 /', async () => {
     vi.stubGlobal('fetch', fakeFetch);
     const { env } = freshEnv(true);

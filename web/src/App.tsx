@@ -34,6 +34,16 @@ export default function App() {
       .catch(() => setUser(null));
   }, []);
 
+  // 登录态在途（me 未回来）：不渲染任何内容防「匿名→登录态」跳变闪屏；
+  // me 带 syncProbe 时整页跳探测，看到的只是一瞬「加载中」
+  if (user === undefined) {
+    return (
+      <div className="page-loading" role="status" aria-label="加载中">
+        <p>加载中…</p>
+      </div>
+    );
+  }
+
   return (
     <>
       <TopBar user={user} authMode={authMode} />

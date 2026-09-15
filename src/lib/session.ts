@@ -118,6 +118,20 @@ async function resolveKvUserId(env: Env, request: Request): Promise<number | nul
   }
 }
 
+/** stale 会话判定（OIDC 模式）：会话 cookie 在、oidc_session 行已不在
+ *  （back-channel 登出撤行 / 过期）——cookie 该清了，别让浏览器再白带 7 天 */
+export async function isStaleOidcSession(env: Env, request: Request): Promise<boolean> {
+  if (!isOidc(env)) return false;
+  const token = getCookie(request, OIDC_SESSION_COOKIE);
+  if (!token) return false;
+  const row = await env.DB.prepare(
+    'SELECT 1 AS ok FROM oidc_session WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?',
+  )
+    .bind(await sha256Hex(token), new Date().toISOString())
+    .first();
+  return !row;
+}
+
 async function resolveOidcUser(env: Env, request: Request): Promise<SessionUser | null> {
   const token = getCookie(request, OIDC_SESSION_COOKIE);
   if (!token) return null;
