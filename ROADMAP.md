@@ -81,7 +81,7 @@
 
 **验收**：tour 与 club 绑定/发码互通指向同一绑定关系；一账号一队全生态生效；三仓测试全绿（auth 96 / tour 16 / club 263）。
 
-**状态**：完成（club 8824c42+123846c、auth 32405a6+e5a94d1+47bd100+1eebbb1+726415b、tour 31850c6+471797e；三仓测试全绿 auth 97 / tour 16 / club 263）。code review（code-review-skill）通过并修复两处：烧码同码两账号并发竞速可产生双绑定（改条件 INSERT...SELECT 原子闸）+ register/link 审计同批化。推送与部署（auth→tour→club 顺序 + AUTH_BIND_SECRET secret + 迁移执行）待需求方确认。
+**状态**：已上线（2026-09-15 部署）。三仓推送（club 8824c42+123846c+7f513ce、auth 32405a6+e5a94d1+47bd100+1eebbb1+726415b、tour 31850c6+471797e）+ code review 通过（修复烧码并发竞速双绑定——条件 INSERT...SELECT 原子闸；register/link 审计同批化）。生产：auth 0008 远端迁移 + 迁移 SQL 已执行（目录 20 队/绑定 10 条/冲突 0/单边 0，club 侧目录关联待 clubs 表有数据后用 /api/team/link 补）；BIND_SECRET 已轮换（AstrBot 插件 bind_secret 需同步，否则 QQ 绑定验签失败）；auth 94cf8114 / tour efc97d59 / club 0303622e，机器端点验签烟测通过（正确密钥进业务层、错密钥 401）。
 
 ## 增量 8 · 球员库统一（已立项，随增量 7 收口后另排）
 
