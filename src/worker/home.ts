@@ -276,7 +276,9 @@ export async function matchAttendanceStatements(
     const awayStadium = await env.DB.prepare('SELECT shell_influence, bonus_points FROM stadiums WHERE club_id = ?').bind(awayClubId).first<{ shell_influence: number; bonus_points: number }>();
     if (awayStadium) awayInfluence = teamInfluence(awayStadium, await playerInfluenceSum(env, awayClubId, model));
   }
-  const opp = 1 + 0.05 * (awayInfluence / Math.max(teamInfluence(stadium, await playerInfluenceSum(env, clubId, model)), 1e-9));
+  // 对手系数（revenue 口径）：主队影响力 ≤0 时取 1.0（不放大需求）
+  const homeInfluence = teamInfluence(stadium, await playerInfluenceSum(env, clubId, model));
+  const opp = homeInfluence <= 0 ? 1 : 1 + 0.05 * (awayInfluence / homeInfluence);
 
   const demand =
     stadium.fans *
