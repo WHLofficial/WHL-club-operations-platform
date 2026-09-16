@@ -80,6 +80,7 @@ const MIGRATION_FILES = [
   '0013_binding_user_name.sql',
   '0014_season_tournaments.sql',
   '0015_initial_club.sql',
+  '0016_transfer_ban.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

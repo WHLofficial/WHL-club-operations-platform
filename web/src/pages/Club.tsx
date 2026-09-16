@@ -85,6 +85,11 @@ export default function Club() {
   return (
     <div className="container">
       <h1>球队中心</h1>
+      {club.transferBanned && (
+        <section className="card banner banner-bad" role="alert">
+          ⛔ 本俱乐部的转会权限已被管理组冻结：挂牌、出价、海捞、激活、议价等新操作都会被拦下。请联系管理组处理相关事项。
+        </section>
+      )}
       <section className="card club-head">
         <div className="club-head-main">
           <h2>{club.name}</h2>

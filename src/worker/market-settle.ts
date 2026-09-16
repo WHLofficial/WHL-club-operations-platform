@@ -9,6 +9,7 @@ import { bidDeadline, delistFee, type TradeCalendar } from '../core/market-rules
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext, type MarketContext } from './market-context.ts';
 import { createAuditStatement } from '../lib/audit.ts';
+import { detectBidAlerts } from './bid-alerts.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -65,6 +66,9 @@ export async function settleListingForReview(
 ): Promise<'settled' | 'already'> {
   const audit = createAuditStatement(db);
   const key = `listing:${listing.id}`;
+  // 增量 10：成交前异常出价打标（大额/连续抬价/最小步长拉锯）——只进审核单与审计，不拦结算
+  const alerts = await detectBidAlerts(db, listing.id);
+  const alertsJson = JSON.stringify(alerts);
   const statements = [
     db.prepare(`UPDATE listings SET status = 'pending_review', match_deadline = NULL WHERE id = ? AND status = ?`).bind(listing.id, fromStatus),
     db
@@ -86,12 +90,12 @@ export async function settleListingForReview(
          SELECT 'transfer_confirm', t.id,
                 json_object('listingId', CAST(substr(t.idempotency_key, 9) AS INTEGER), 'playerId', t.player_id,
                             'sellerClubId', t.from_club_id, 'buyerClubId', t.to_club_id, 'amount', t.fee,
-                            'season', t.season, 'windowSeq', t.window_seq),
+                            'season', t.season, 'windowSeq', t.window_seq, 'alerts', json(?)),
                 'open'
          FROM transfers t
          WHERE t.idempotency_key = ? AND t.status = 'pending_review'`,
       )
-      .bind(key),
+      .bind(alertsJson, key),
     db
       .prepare(
         `UPDATE transfers SET review_task_id =
@@ -107,6 +111,17 @@ export async function settleListingForReview(
       targetId: listing.id,
       after: { playerId: listing.player_id, season: listing.season, windowSeq: listing.window_seq },
     }),
+    ...(alerts.length > 0
+      ? [
+          audit({
+            actor,
+            action: 'bid_pattern_alert',
+            targetType: 'listing',
+            targetId: listing.id,
+            after: { alerts },
+          }),
+        ]
+      : []),
   ];
   try {
     const results = await db.batch(statements);

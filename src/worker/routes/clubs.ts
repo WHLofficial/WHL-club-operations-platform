@@ -61,10 +61,10 @@ app.get('/me/club', async (c) => {
     return c.json({ club: null, balance: null, squadCount: null, window: null });
   }
   const club = await c.env.DB.prepare(
-    `SELECT id, name, logo_key, status FROM clubs WHERE id = ?`,
+    `SELECT id, name, logo_key, status, transfer_banned FROM clubs WHERE id = ?`,
   )
     .bind(bound.id)
-    .first<{ id: number; name: string; logo_key: string | null; status: string }>();
+    .first<{ id: number; name: string; logo_key: string | null; status: string; transfer_banned: number }>();
   if (!club) {
     return c.json({ club: null, balance: null, squadCount: null, window: null });
   }
@@ -88,6 +88,7 @@ app.get('/me/club', async (c) => {
       leagueTier: tier,
       logoKey: club.logo_key,
       status: club.status,
+      transferBanned: club.transfer_banned === 1,
     },
     balance: account?.balance ?? 0,
     squadCount: roster?.n ?? 0,

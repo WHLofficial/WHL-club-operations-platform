@@ -447,6 +447,71 @@ describe('球员管理 PATCH（审计留痕）', () => {
   });
 });
 
+describe('球员批量维护（增量 10）', () => {
+  function seedTwo(fx: Fixture) {
+    const stmt = fx.sqlite.prepare("INSERT INTO players (uid, name, ca, pa, fc_id) VALUES (?, ?, ?, ?, ?)");
+    stmt.run('fc1', '球员一', 80, 90, 1);
+    stmt.run('fc2', '球员二', 70, 88, 2);
+  }
+
+  it('批量改两名球员，逐人 before/after 进审计', async () => {
+    const fx = freshEnv();
+    seedTwo(fx);
+    const res = await post(
+      '/api/admin/players/batch',
+      {
+        items: [
+          { id: 1, marketValue: 30.5, ca: 82 },
+          { id: 2, status: 'trainee', badgesGold: 1 },
+        ],
+      },
+      'tok-admin',
+      fx.env,
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { updated: number }).toMatchObject({ ok: true, updated: 2 });
+    expect(sqlGet<{ market_value: number }>(fx.sqlite, 'SELECT market_value FROM players WHERE id = 1')).toMatchObject({ market_value: 30.5 });
+    expect(sqlGet<{ status: string; badges_gold: number }>(fx.sqlite, 'SELECT status, badges_gold FROM players WHERE id = 2')).toMatchObject({ status: 'trainee', badges_gold: 1 });
+    const audits = sqlAll<{ target_id: number; before: string; after: string }>(
+      fx.sqlite,
+      "SELECT target_id, before, after FROM audit_log WHERE action = 'player_batch' ORDER BY target_id",
+    );
+    expect(audits.length).toBe(2);
+    expect(JSON.parse(audits[0]!.before)).toEqual({ market_value: null, ca: 80 });
+    expect(JSON.parse(audits[0]!.after)).toEqual({ market_value: 30.5, ca: 82 });
+    expect(JSON.parse(audits[1]!.before)).toEqual({ status: 'normal', badges_gold: 0 });
+    expect(JSON.parse(audits[1]!.after)).toEqual({ status: 'trainee', badges_gold: 1 });
+  });
+
+  it('任一项出错整批拒绝（400 带项号），不落库', async () => {
+    const fx = freshEnv();
+    seedTwo(fx);
+    const res = await post(
+      '/api/admin/players/batch',
+      { items: [{ id: 1, marketValue: 12 }, { id: 2, ca: 0 }] },
+      'tok-admin',
+      fx.env,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('第 2 项：CA 须在 1-99 之间');
+    expect(sqlGet<{ market_value: number | null }>(fx.sqlite, 'SELECT market_value FROM players WHERE id = 1')).toMatchObject({ market_value: null });
+    expect(sqlGet<{ before: string }>(fx.sqlite, "SELECT before FROM audit_log WHERE action = 'player_batch'")).toBeUndefined();
+  });
+
+  it('不存在的球员整批拒绝；空批/超限/格式不对 400', async () => {
+    const fx = freshEnv();
+    seedTwo(fx);
+    const res = await post('/api/admin/players/batch', { items: [{ id: 9, marketValue: 1 }] }, 'tok-admin', fx.env);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('球员不存在：9');
+    expect((await post('/api/admin/players/batch', { items: [] }, 'tok-admin', fx.env)).status).toBe(400);
+    expect((await post('/api/admin/players/batch', {}, 'tok-admin', fx.env)).status).toBe(400);
+    const big = Array.from({ length: 201 }, (_, i) => ({ id: (i % 2) + 1, marketValue: i }));
+    expect((await post('/api/admin/players/batch', { items: big }, 'tok-admin', fx.env)).status).toBe(400);
+  });
+});
+
 // 通道 A 样例行（对照 FC26db Base 真实表头）
 function channelARow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

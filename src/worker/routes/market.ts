@@ -20,7 +20,7 @@ import { availableBalance } from '../ledger.ts';
 import { settleOverdue, settleListingForReview } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { createActivation } from '../activations.ts';
-import { getBoundClub } from '../binding.ts';
+import { getBoundClub, assertTradable } from '../binding.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -164,6 +164,7 @@ app.post('/market/listings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+  assertTradable(club);
 
   const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown; askPrice?: unknown } | null;
   if (!body) throw new HttpError(400, '请求格式不对');
@@ -343,6 +344,7 @@ app.post('/market/activations', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+  assertTradable(club);
 
   const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown } | null;
   if (!body) throw new HttpError(400, '请求格式不对');
@@ -450,6 +452,7 @@ app.post('/market/listings/:id/bids', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+  assertTradable(club);
 
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');

@@ -11,6 +11,7 @@ import { confirmImport, previewImport } from '../players-import.ts';
 import { confirmContractsImport, previewContractsImport } from '../contracts-import.ts';
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
+import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminCancelSigning, requireReason } from '../market-intervene.ts';
 import { ledgerMovement } from '../ledger.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { loadTransfer, rejectTransfer } from '../transfers.ts';
@@ -78,8 +79,8 @@ app.post('/clubs', async (c) => {
 app.get('/clubs', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const clubs = await c.env.DB.prepare(
-    'SELECT id, name, league_tier, status, created_at FROM clubs ORDER BY id LIMIT 200',
-  ).all<{ id: number; name: string; league_tier: string; status: string; created_at: string }>();
+    'SELECT id, name, league_tier, status, transfer_banned, created_at FROM clubs ORDER BY id LIMIT 200',
+  ).all<{ id: number; name: string; league_tier: string; status: string; transfer_banned: number; created_at: string }>();
   // 绑定与认证码真源在 auth 库（增量 7）；AUTH_DB 未配置回落本地休眠表（回滚通道）。
   // 绑定人名字取 auth account.name，不再回查赛事库 user 表。
   const bindings = c.env.AUTH_DB
@@ -126,6 +127,7 @@ app.get('/clubs', async (c) => {
           name: r.name,
           leagueTier: await deriveClubTier(c.env, season, r.id, cache),
           status: r.status,
+          transferBanned: r.transfer_banned === 1,
           createdAt: r.created_at,
           binding: binding ? { userId: binding.userId, userName: binding.userName ?? null, boundAt: binding.boundAt } : null,
           latestCode: latestCode.get(r.id) ?? null,
@@ -133,6 +135,41 @@ app.get('/clubs', async (c) => {
       }),
     ),
   });
+});
+
+// 转会禁令（增量 10）：冻结/解冻俱乐部转会权限。只拦新动作，既有市场单据走审核面板处置
+app.post('/clubs/:id/transfer-ban', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId)) throw new HttpError(400, '俱乐部 ID 不对');
+  const body = (await readJson(c)) as { reason?: unknown } | null;
+  const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+  if (reason.length < 2) throw new HttpError(400, '请填写禁令原因（至少 2 个字，会进审计）');
+  const result = await c.env.DB.prepare('UPDATE clubs SET transfer_banned = 1 WHERE id = ?').bind(clubId).run();
+  if ((result.meta.changes ?? 0) !== 1) throw new HttpError(404, '俱乐部不存在');
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'transfer_ban',
+    targetType: 'club',
+    targetId: clubId,
+    after: { reason },
+  });
+  return c.json({ ok: true });
+});
+
+app.delete('/clubs/:id/transfer-ban', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId)) throw new HttpError(400, '俱乐部 ID 不对');
+  const result = await c.env.DB.prepare('UPDATE clubs SET transfer_banned = 0 WHERE id = ? AND transfer_banned = 1').bind(clubId).run();
+  if ((result.meta.changes ?? 0) !== 1) throw new HttpError(404, '俱乐部不存在或本就未冻结');
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'transfer_unban',
+    targetType: 'club',
+    targetId: clubId,
+  });
+  return c.json({ ok: true });
 });
 
 app.post('/clubs/:id/bindcode', async (c) => {
@@ -212,13 +249,22 @@ app.get('/config', async (c) => {
 
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 
-app.patch('/players/:id', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw, 'club.players.import');
-  const id = Number(c.req.param('id'));
-  if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');
-  const body = (await readJson(c)) as Record<string, unknown> | null;
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, '请求格式不对');
+const PLAYER_PATCH_FIELDS = [
+  'marketValue',
+  'status',
+  'growthTier',
+  'isFutureStar',
+  'growable',
+  'prestige',
+  'badgesSilver',
+  'badgesGold',
+  'ca',
+  'baseCa',
+  'pa',
+] as const;
 
+// PATCH /players/:id 与 /players/batch 共用的字段校验（增量 10 批量维护）
+function parsePlayerUpdates(body: Record<string, unknown>): { updates: Record<string, unknown>; errors: string[] } {
   const updates: Record<string, unknown> = {};
   const errors: string[] = [];
   if ('marketValue' in body) {
@@ -277,21 +323,21 @@ app.patch('/players/:id', async (c) => {
     if (!Number.isInteger(v) || v < 0 || v > 3) errors.push('金徽章数须在 0-3 之间');
     else updates.badges_gold = v;
   }
-  const known = [
-    'marketValue',
-    'status',
-    'growthTier',
-    'isFutureStar',
-    'growable',
-    'prestige',
-    'badgesSilver',
-    'badgesGold',
-    'ca',
-    'baseCa',
-    'pa',
-  ];
-  const unknown = Object.keys(body).filter((k) => !known.includes(k));
+  const unknown = Object.keys(body).filter((k) => !(PLAYER_PATCH_FIELDS as readonly string[]).includes(k));
   if (unknown.length > 0) errors.push(`不支持的字段：${unknown.join('、')}`);
+  return { updates, errors };
+}
+
+const PLAYER_BATCH_MAX = 200;
+
+app.patch('/players/:id', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.players.import');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');
+  const body = (await readJson(c)) as Record<string, unknown> | null;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, '请求格式不对');
+
+  const { updates, errors } = parsePlayerUpdates(body);
   if (errors.length > 0) throw new HttpError(400, errors[0]);
   if (Object.keys(updates).length === 0) throw new HttpError(400, '没有可更新的字段');
 
@@ -331,6 +377,79 @@ app.patch('/players/:id', async (c) => {
     }),
   ]);
   return c.json({ ok: true });
+});
+
+// 批量维护（PRD 4.8）：一次原子批改多球员的任意 PATCH 白名单字段；任一项出错则整批不落库
+app.post('/players/batch', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.players.import');
+  const body = (await readJson(c)) as { items?: unknown } | null;
+  if (!body || !Array.isArray(body.items)) throw new HttpError(400, '请求格式不对：需要 items 数组');
+  if (body.items.length === 0) throw new HttpError(400, 'items 不能为空');
+  if (body.items.length > PLAYER_BATCH_MAX) throw new HttpError(400, `单批最多 ${PLAYER_BATCH_MAX} 名球员`);
+
+  const items = body.items as { id?: unknown }[];
+  const updatesList: { id: number; updates: Record<string, unknown> }[] = [];
+  const errors: string[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const id = Number(item?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      errors.push(`第 ${i + 1} 项：球员 ID 不对`);
+      continue;
+    }
+    const { id: _ignored, ...fields } = item as Record<string, unknown>;
+    const { updates, errors: itemErrors } = parsePlayerUpdates(fields);
+    if (itemErrors.length > 0) errors.push(`第 ${i + 1} 项：${itemErrors[0]}`);
+    else if (Object.keys(updates).length === 0) errors.push(`第 ${i + 1} 项：没有可更新的字段`);
+    else updatesList.push({ id, updates });
+  }
+  if (errors.length > 0) throw new HttpError(400, errors.join('；'));
+
+  const ids = updatesList.map((u) => u.id);
+  const placeholders = ids.map(() => '?').join(',');
+  type PlayerCurrent = {
+    id: number;
+    market_value: number | null;
+    status: string;
+    growth_tier: number;
+    is_future_star: number;
+    growable: number;
+    prestige: number | null;
+    badges_silver: number;
+    badges_gold: number;
+    ca: number | null;
+    base_ca: number | null;
+    pa: number | null;
+  };
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, market_value, status, growth_tier, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id IN (${placeholders})`,
+  )
+    .bind(...ids)
+    .all<PlayerCurrent>();
+  const currentById = new Map(results.map((r) => [r.id, r]));
+  const missing = ids.filter((id) => !currentById.has(id));
+  if (missing.length > 0) throw new HttpError(400, `球员不存在：${missing.join('、')}`);
+
+  const audit = createAuditStatement(c.env.DB);
+  const statements = updatesList.map((u) => {
+    const cur = currentById.get(u.id)!;
+    const cols = Object.keys(u.updates);
+    return [
+      c.env.DB.prepare(
+        `UPDATE players SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ${nowSql()} WHERE id = ?`,
+      ).bind(...cols.map((k) => u.updates[k]), u.id),
+      audit({
+        actor: user.id,
+        action: 'player_batch',
+        targetType: 'player',
+        targetId: u.id,
+        before: Object.fromEntries(cols.map((k) => [k, cur[k as keyof PlayerCurrent]])),
+        after: u.updates,
+      }),
+    ];
+  });
+  await c.env.DB.batch(statements.flat());
+  return c.json({ ok: true, updated: updatesList.length });
 });
 
 // ---- 导入管线两段式（§5.4：通道 A/B 球员，通道 C 名单合同模板） ----
@@ -966,20 +1085,42 @@ async function loadOpenReviewTask(db: D1Database, taskId: number) {
 // POST /api/admin/reviews/:id/approve —— 批准成交（§6.3/§6.7）
 // 解约：无工资谈判，批准即过户；续约/匹配/海捞：先收附加费再进签约谈判（F 已定死）；
 // 普通成交/激活成交：进入签约谈判，由签入方谈成合同条款后成约过户（成约即过户）。
+// 增量 10 裁定扩权：普通成交/激活成交可在批准时改成交价（body.fee），税在过户时按新价重算，留审计。
 app.post('/reviews/:id/approve', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const taskId = Number(c.req.param('id'));
   if (!Number.isInteger(taskId)) throw new HttpError(400, '审核任务 ID 不对');
-  const body = (await readJson(c)) as { note?: unknown } | null;
+  const body = (await readJson(c)) as { note?: unknown; fee?: unknown } | null;
   const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
   const task = await loadOpenReviewTask(c.env.DB, taskId);
   const transfer = await loadTransfer(c.env.DB, task.ref_id);
   if (!transfer) throw new HttpError(404, '转会单不存在');
+  let feeAdjusted: number | null = null;
+  if (body?.fee !== undefined) {
+    if (transfer.type !== 'transfer' && transfer.type !== 'activation') {
+      throw new HttpError(400, '改价裁定只适用于普通成交与激活成交单');
+    }
+    const fee = Number(body.fee);
+    if (!Number.isFinite(fee) || fee <= 0) throw new HttpError(400, '成交价须为正数（单位 m）');
+    const result = await c.env.DB
+      .prepare(`UPDATE transfers SET fee = ? WHERE id = ? AND status = 'pending_review'`)
+      .bind(fee, task.ref_id)
+      .run();
+    if ((result.meta.changes ?? 0) !== 1) throw new HttpError(409, '转会单不在待审状态，改价失败');
+    feeAdjusted = fee;
+    await writeAudit(c.env.DB, {
+      actor: user.id,
+      action: 'admin_fee_adjust',
+      targetType: 'transfer',
+      targetId: task.ref_id,
+      after: { reason: note, oldFee: transfer.fee, newFee: fee },
+    });
+  }
   const result = await approveTransferDeal(c.env, task.ref_id, user.id, {
     taskId,
     decidedBy: user.id,
     decision: 'approved',
-    note: note ?? undefined,
+    note: feeAdjusted !== null ? `${note ?? ''}（管理组裁定成交价 ${transfer.fee} → ${feeAdjusted} m）`.trim() : note ?? undefined,
   });
   return c.json({ ok: true, ...result });
 });
@@ -999,6 +1140,48 @@ app.post('/reviews/:id/reject', async (c) => {
     note: note ?? undefined,
   });
   return c.json({ ok: true, ...result });
+});
+
+// ---- 市场干预（增量 10：管理介入扩权，撤/关/裁定工具） ----
+
+app.post('/market/bids/:id/void', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as Record<string, unknown> | null;
+  const reason = await requireReason(body);
+  const status = await adminVoidBid(c.env, Number(c.req.param('id')), user.id, reason);
+  return c.json({ ok: true, status });
+});
+
+app.post('/market/listings/:id/force-settle', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as Record<string, unknown> | null;
+  const reason = await requireReason(body);
+  const status = await adminForceSettle(c.env, Number(c.req.param('id')), user.id, reason);
+  return c.json({ ok: true, status });
+});
+
+app.post('/market/listings/:id/force-void', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as Record<string, unknown> | null;
+  const reason = await requireReason(body);
+  const status = await adminForceVoid(c.env, Number(c.req.param('id')), user.id, reason);
+  return c.json({ ok: true, status });
+});
+
+app.post('/negotiations/:id/force-sign', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as Record<string, unknown> | null;
+  const reason = await requireReason(body);
+  const status = await adminForceSign(c.env, Number(c.req.param('id')), user.id, reason);
+  return c.json({ ok: true, status });
+});
+
+app.post('/negotiations/:id/void', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as Record<string, unknown> | null;
+  const reason = await requireReason(body);
+  const status = await adminCancelSigning(c.env, Number(c.req.param('id')), user.id, reason);
+  return c.json({ ok: true, status });
 });
 
 // ---- 窗口状态机（§11/§6.4-6，增量 5） ----

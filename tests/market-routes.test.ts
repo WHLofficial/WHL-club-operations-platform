@@ -509,3 +509,194 @@ describe('我的出价（冻结状态章）', () => {
     expect(body.bids[1]).toMatchObject({ amount: 15, status: 'superseded', holdStatus: 'released' });
   });
 });
+
+// ---------- 转会禁令（增量 10） ----------
+
+function del(path: string, token: string | undefined, env: Env) {
+  return app.request(path, { method: 'DELETE', headers: token ? { Cookie: `whl_session=${token}` } : {} }, env);
+}
+
+describe('转会禁令（增量 10）', () => {
+  it('封禁后出价/海捞 403，谈判列表可看但报价 403；审计带原因；解封恢复出价', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    const ban = await post(`/api/admin/clubs/${mf.bidderClub}/transfer-ban`, { reason: '测试违规' }, 'tok-admin', fx.env);
+    expect(ban.status).toBe(200);
+    const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'transfer_ban'");
+    expect(JSON.parse(audit!.after)).toMatchObject({ reason: '测试违规' });
+
+    await listPlayer(mf, 10, 15); // 卖方不受影响
+    const bid = await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
+    expect(bid.status).toBe(403);
+    expect(((await bid.json()) as { error: string }).error).toContain('冻结');
+    const freeAgent = await post('/api/transfers/free-agent', { playerId: 999 }, 'tok-coach2', fx.env);
+    expect(freeAgent.status).toBe(403);
+    const negotiationList = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
+    expect(negotiationList.status).toBe(200); // 看自己会话不受禁令影响
+    const releaseFee = await post('/api/negotiations/999/release-fee', { fee: 25 }, 'tok-coach2', fx.env);
+    expect(releaseFee.status).toBe(403);
+
+    const unban = await del(`/api/admin/clubs/${mf.bidderClub}/transfer-ban`, 'tok-admin', fx.env);
+    expect(unban.status).toBe(200);
+    const rebid = await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
+    expect(rebid.status).toBe(201);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'transfer_unban'")?.n).toBe(1);
+  });
+
+  it('封禁理由过短 400；未封禁解封 404；禁令不拦卖方挂牌与解约旁路对照（管理端不受限）', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    expect(
+      (await post(`/api/admin/clubs/${mf.bidderClub}/transfer-ban`, { reason: 'x' }, 'tok-admin', fx.env)).status,
+    ).toBe(400);
+    expect((await del(`/api/admin/clubs/${mf.bidderClub}/transfer-ban`, 'tok-admin', fx.env)).status).toBe(404);
+    // 管理端旁路（bypass）不受禁令影响：卖方正常挂牌
+    expect((await listPlayer(mf, 10, 15)).status).toBe(201);
+  });
+});
+
+// ---------- 异常出价告警（增量 10） ----------
+
+describe('异常出价告警（增量 10）', () => {
+  it('大额阈值 + 短窗连续抬价同时命中：审核单带 alerts、审计 bid_pattern_alert', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    fx.sqlite.prepare("INSERT INTO config (key, value) VALUES ('review_amount_threshold', '12')").run();
+    await listPlayer(mf, 10, 15);
+    for (const amount of [15, 16, 17, 18]) {
+      const res = await post('/api/market/listings/1/bids', { amount }, 'tok-coach2', fx.env);
+      expect(res.status).toBe(201);
+    }
+    await ageListingForDeadline(fx);
+    const task = sqlGet<{ payload: string }>(fx.sqlite, "SELECT payload FROM review_tasks WHERE type = 'transfer_confirm'");
+    const payload = JSON.parse(task!.payload) as { alerts: { kind: string; text: string }[] };
+    const kinds = payload.alerts.map((a) => a.kind);
+    expect(kinds).toContain('large_amount');
+    expect(kinds).toContain('rapid_raise');
+    expect(kinds).not.toContain('minimal_raise_pattern');
+    const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'bid_pattern_alert'");
+    expect(JSON.parse(audit!.after).alerts.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('最小步长拉锯 ≥6 轮触发关联判据（从宽打标）', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    fx.sqlite.prepare("INSERT INTO config (key, value) VALUES ('review_amount_threshold', '100')").run();
+    await listPlayer(mf, 10, 15);
+    for (const amount of [15, 16, 17, 18, 19, 20, 21]) {
+      await post('/api/market/listings/1/bids', { amount }, 'tok-coach2', fx.env);
+    }
+    await ageListingForDeadline(fx);
+    const payload = JSON.parse(sqlGet<{ payload: string }>(fx.sqlite, "SELECT payload FROM review_tasks WHERE type = 'transfer_confirm'")!.payload) as { alerts: { kind: string }[] };
+    expect(payload.alerts.map((a) => a.kind)).toContain('minimal_raise_pattern');
+  });
+
+  it('正常单笔成交不打标，alerts 为空数组', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    await ageListingForDeadline(fx);
+    const payload = JSON.parse(sqlGet<{ payload: string }>(fx.sqlite, "SELECT payload FROM review_tasks WHERE type = 'transfer_confirm'")!.payload) as { alerts: unknown[] };
+    expect(payload.alerts).toEqual([]);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'bid_pattern_alert'")?.n).toBe(0);
+  });
+});
+
+// ---------- 管理介入扩权（增量 10） ----------
+
+function adminPost(path: string, body: unknown, token: string | undefined, env: Env) {
+  return post(path, body, token, env);
+}
+
+describe('管理介入扩权（增量 10）', () => {
+  it('撤销活跃出价：资金解冻、出价 withdrawn、撤空后挂牌回 listed、审计带原因', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    expect((await post('/api/market/listings/1/bids', { amount: 16 }, 'tok-coach2', fx.env)).status).toBe(201);
+    const bidId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM bids WHERE status = 'active'")!.id;
+    const res = await adminPost('/api/admin/market/bids/2/void', { reason: '误价撤销' }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, `SELECT status FROM bids WHERE id = ${bidId}`)).toMatchObject({ status: 'withdrawn' });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM fund_holds WHERE status = 'held'")?.n).toBe(0);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')).toMatchObject({ status: 'listed' });
+    const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'admin_bid_void'");
+    expect(JSON.parse(audit!.after)).toMatchObject({ reason: '误价撤销' });
+  });
+
+  it('强制送审：bidding 直接进审核队列，transfer+review task 一次建齐', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    const res = await adminPost('/api/admin/market/listings/1/force-settle', { reason: '窗尾截停' }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')).toMatchObject({ status: 'pending_review' });
+    const task = sqlGet<{ id: number; status: string }>(fx.sqlite, "SELECT id, status FROM review_tasks WHERE type = 'transfer_confirm'");
+    expect(task).toMatchObject({ status: 'open' });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'admin_force_settle'")?.n).toBe(1);
+  });
+
+  it('强制作废：listed 下架不收费、球员还原、解冻；已送审单据拒绝作废', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 10')).toMatchObject({ status: 'listed' });
+    const res = await adminPost('/api/admin/market/listings/1/force-void', { reason: '数据异常下架' }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    expect(sqlGet<{ status: string; note: string | null }>(fx.sqlite, 'SELECT status, deadline_note AS note FROM listings WHERE id = 1')).toMatchObject({
+      status: 'delisted',
+      note: '管理组作废：数据异常下架',
+    });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 10')).toMatchObject({ status: 'normal' });
+    // 再送审失败（已下架）
+    expect((await adminPost('/api/admin/market/listings/1/force-settle', { reason: '再试' }, 'tok-admin', fx.env)).status).toBe(409);
+  });
+
+  it('审核批准带裁定价：transfers.fee 更新、admin_fee_adjust 审计、谈判按新 RC 开会', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    await ageListingForDeadline(fx);
+    const taskId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE type = 'transfer_confirm'")!.id;
+    const res = await adminPost(`/api/admin/reviews/${taskId}/approve`, { fee: 12, note: '议价核实' }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    expect(sqlGet<{ fee: number }>(fx.sqlite, 'SELECT fee FROM transfers WHERE id = 1')).toMatchObject({ fee: 12 });
+    const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'admin_fee_adjust'");
+    expect(JSON.parse(audit!.after)).toMatchObject({ oldFee: 15, newFee: 12 });
+    const session = sqlGet<{ status: string; expected_wage: number }>(fx.sqlite, 'SELECT status, expected_wage FROM negotiation_sessions WHERE transfer_id = 1');
+    expect(session).toMatchObject({ status: 'active' });
+  });
+
+  it('谈判强制成交与作废：强制成约 settle_source=forced；作废则转会驳回、资金解冻', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    // 成交路径一：强制成交
+    await listPlayer(mf, 10, 15);
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    await ageListingForDeadline(fx);
+    const task1 = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE type = 'transfer_confirm' ORDER BY id")!.id;
+    await adminPost(`/api/admin/reviews/${task1}/approve`, {}, 'tok-admin', fx.env);
+    const sess1 = sqlGet<{ id: number; expected_wage: number | null }>(fx.sqlite, 'SELECT id, expected_wage FROM negotiation_sessions WHERE transfer_id = 1')!;
+    expect(sess1.expected_wage).toBeNull(); // 开会即快照只针对固定 RC 单，普通成交等买方提交新 RC
+    expect((await post('/api/negotiations/1/release-fee', { fee: 25 }, 'tok-coach2', fx.env)).status).toBe(200);
+    expect((await adminPost(`/api/admin/negotiations/${sess1.id}/force-sign`, { reason: '久拖不决' }, 'tok-admin', fx.env)).status).toBe(200);
+    const sessRow = fx.sqlite.prepare('SELECT status, settle_source FROM negotiation_sessions WHERE id = ?').get(sess1.id) as { status: string; settle_source: string };
+    expect(sessRow).toMatchObject({ status: 'settled', settle_source: 'forced' });
+    // 成交路径二：作废谈判
+    const p2 = await seedSecondPlayer(fx, mf.sellerClub);
+    await listPlayer(mf, p2, 5);
+    expect((await post(`/api/market/listings/2/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
+    await ageListingForDeadline(fx, 2);
+    const task2 = fx.sqlite.prepare("SELECT id FROM review_tasks WHERE type = 'transfer_confirm' ORDER BY id DESC LIMIT 1").get() as { id: number };
+    await adminPost(`/api/admin/reviews/${task2.id}/approve`, {}, 'tok-admin', fx.env);
+    const sess2 = fx.sqlite.prepare('SELECT id FROM negotiation_sessions WHERE transfer_id = 2').get() as { id: number };
+    expect((await adminPost(`/api/admin/negotiations/${sess2.id}/void`, { reason: '交易破裂' }, 'tok-admin', fx.env)).status).toBe(200);
+    expect((fx.sqlite.prepare('SELECT status FROM transfers WHERE id = 2').get() as { status: string }).status).toBe('rejected');
+    expect((fx.sqlite.prepare("SELECT COUNT(*) AS n FROM fund_holds WHERE status = 'held'").get() as { n: number }).n).toBe(0);
+    expect((fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'admin_negotiation_void'").get() as { n: number }).n).toBe(1);
+  });
+});

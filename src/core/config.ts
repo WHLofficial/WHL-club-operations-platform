@@ -88,6 +88,9 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   luxury_cash_rate: '0.20',
   luxury_value_threshold: '700',
   luxury_value_rate: '0.05',
+  // 增量 10：异常出价告警阈值（大额强制审 40m；短窗连续抬价/最小步长拉锯判据，JSON 可覆盖）
+  review_amount_threshold: '40',
+  bid_pattern_alert: '{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}',
   voucher_refund: '0.25',
   xp_per_level: '10',
   trainee_xp_full: '40',

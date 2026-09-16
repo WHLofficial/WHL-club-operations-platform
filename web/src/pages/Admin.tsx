@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
+  apiDelete,
   apiPost,
   COMPETITION_TYPE_LABEL,
   ledgerKindLabel,
@@ -103,6 +104,7 @@ export default function Admin({ user }: { user: MeUser | null | undefined }) {
           <WindowsSection />
           <ClubsSection />
           <ImportSection />
+          <PlayerBatchSection />
           <ContractsSection />
           <RegistrationsSection />
           <ForcedAuctionSection />
@@ -459,6 +461,23 @@ function ClubsSection() {
     }
   }
 
+  async function toggleBan(club: AdminClubRow) {
+    try {
+      if (club.transferBanned) {
+        await apiDelete(`/api/admin/clubs/${club.id}/transfer-ban`);
+        show(`${club.name} 已解冻转会权限。`);
+      } else {
+        const reason = window.prompt(`冻结「${club.name}」转会权限——原因（至少两个字，会进审计）：`);
+        if (!reason || reason.trim().length < 2) return;
+        await apiPost(`/api/admin/clubs/${club.id}/transfer-ban`, { reason: reason.trim() });
+        show(`${club.name} 转会权限已冻结，挂单/出价/海捞/议价全被拦下。`);
+      }
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '操作失败', true);
+    }
+  }
+
   return (
     <section className="card admin-section">
       <h2>俱乐部管理</h2>
@@ -497,6 +516,7 @@ function ClubsSection() {
                 <tr key={club.id}>
                   <td>
                     {club.name} <span className="muted">#{club.id}</span>
+                    {club.transferBanned && <span className="badge red" title="挂单/出价/海捞/议价已被拦下">转会冻结</span>}
                   </td>
                   <td>{club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : <span className="muted">未定级</span>}</td>
                   <td>
@@ -526,6 +546,13 @@ function ClubsSection() {
                   <td>
                     <button className="btn btn-ghost btn-sm" type="button" onClick={() => issueCode(club)}>
                       发认证码
+                    </button>
+                    <button
+                      className={`btn btn-sm ${club.transferBanned ? 'btn' : 'btn-ghost btn-danger'}`}
+                      type="button"
+                      onClick={() => toggleBan(club)}
+                    >
+                      {club.transferBanned ? '解冻转会' : '冻结转会'}
                     </button>
                   </td>
                 </tr>
@@ -835,6 +862,115 @@ function parseStarIds(text: string): number[] {
     .split(/[\s,，、]+/)
     .map((s) => Number(s))
     .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+/* ---------- 球员批量维护（增量 10） ---------- */
+
+// 每行一名球员：`id key=value ...`，key 与单改接口一致；marketValue/ca/baseCa/pa/prestige 可填 null
+const PLAYER_BATCH_KEYS = ['marketValue', 'status', 'growthTier', 'isFutureStar', 'growable', 'prestige', 'badgesSilver', 'badgesGold', 'ca', 'baseCa', 'pa'];
+
+interface PlayerBatchRow {
+  id: number;
+  fields: Record<string, unknown>;
+  error?: string;
+}
+
+function parsePlayerBatchText(text: string): PlayerBatchRow[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const parts = line.split(/\s+/);
+      const id = Number(parts[0]);
+      if (!Number.isInteger(id) || id <= 0) return { id: NaN, fields: {}, error: 'ID 不对' };
+      const fields: Record<string, unknown> = {};
+      let error: string | undefined;
+      for (const part of parts.slice(1)) {
+        const eq = part.indexOf('=');
+        const key = eq > 0 ? part.slice(0, eq) : part;
+        const raw = eq > 0 ? part.slice(eq + 1) : '';
+        if (!PLAYER_BATCH_KEYS.includes(key)) {
+          error = `不支持的字段 ${key}`;
+          break;
+        }
+        if (raw === '' && eq < 0) {
+          error = `${key} 缺值`;
+          break;
+        }
+        if (raw === 'null') {
+          fields[key] = null;
+        } else if (key === 'status') {
+          fields[key] = raw;
+        } else {
+          const v = Number(raw);
+          if (raw === '' || !Number.isFinite(v)) {
+            error = `${key} 值不对`;
+            break;
+          }
+          fields[key] = v;
+        }
+      }
+      return { id, fields, error };
+    });
+}
+
+function PlayerBatchSection() {
+  const { show, toastNode } = useToast();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const rows = parsePlayerBatchText(text);
+  const badCount = rows.filter((r) => r.error).length;
+  const goodCount = rows.length - badCount;
+
+  async function runBatch() {
+    const good = parsePlayerBatchText(text).filter((r) => !r.error);
+    if (busy || good.length === 0) return;
+    setBusy(true);
+    try {
+      let done = 0;
+      for (let i = 0; i < good.length; i += 200) {
+        const slice = good.slice(i, i + 200);
+        const res = await apiPost<{ ok: boolean; updated: number }>('/api/admin/players/batch', {
+          items: slice.map((r) => ({ id: r.id, ...r.fields })),
+        });
+        done += res.updated;
+      }
+      show(`批量维护完成：${done} 名球员已更新（审计留痕）。`);
+      setText('');
+    } catch (err) {
+      show(err instanceof Error ? err.message : '批量维护失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card admin-section">
+      <h2>球员批量维护</h2>
+      {toastNode}
+      <p className="hint">
+        每行一名球员：<code className="mono">球员ID 字段=值 字段=值…</code>。字段与单改接口一致（marketValue / status /
+        growthTier / isFutureStar / growable / prestige / badgesSilver / badgesGold / ca / baseCa / pa）；
+        marketValue、ca、baseCa、pa、prestige 可填 null 表示清空。任一行有错则整批不落库，一次最多 200 行。
+      </p>
+      <textarea
+        className="mono"
+        rows={6}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={'1 marketValue=30.5 ca=82\n2 status=trainee badgesGold=1\n3 ca=null'}
+      />
+      <div className="row-gap" style={{ marginTop: '0.5rem' }}>
+        <span className="hint">
+          解析 {goodCount} 行可提交{badCount > 0 ? `，${badCount} 行有错（不拦截提交，服务端整批校验）` : ''}
+        </span>
+        <button className="primary" disabled={busy || goodCount === 0} onClick={runBatch}>
+          {busy ? '提交中…' : `批量更新 ${goodCount} 名球员`}
+        </button>
+      </div>
+    </section>
+  );
 }
 
 /* ---------- 名单合同模板导入（通道 C） ---------- */
@@ -1322,7 +1458,9 @@ function ReviewsSection() {
   const [status, setStatus] = useState<'open' | 'approved' | 'rejected' | 'all'>('open');
   const [reviews, setReviews] = useState<AdminReviewRow[] | null>(null);
   const [notes, setNotes] = useState<Record<number, string>>({});
+  const [feeDrafts, setFeeDrafts] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [interveneId, setInterveneId] = useState('');
 
   const load = useCallback(async (s: 'open' | 'approved' | 'rejected' | 'all') => {
     try {
@@ -1341,18 +1479,24 @@ function ReviewsSection() {
     if (busyId !== null) return;
     setBusyId(row.id);
     try {
+      const feeRaw = feeDrafts[row.id];
+      const fee = action === 'approve' && feeRaw && Number(feeRaw) > 0 ? Number(feeRaw) : undefined;
       const res = await apiPost<{ ok: boolean; status: string }>(`/api/admin/reviews/${row.id}/${action}`, {
         note: notes[row.id] ?? undefined,
+        ...(fee !== undefined ? { fee } : {}),
       });
       show(
         action === 'approve'
-          ? res.status === 'signing'
-            ? `已批准：${row.transfer.player.name} → ${row.transfer.toClubName ?? '—'}，签约谈判已开启，等买方谈妥合同后过户。`
-            : res.status === 'already'
-              ? '这单刚批过了。'
-              : completedMessage(row)
+          ? fee !== undefined
+            ? `已按裁定价 ${fee} m 批准：${row.transfer.player.name}（原价 ${row.transfer.fee ?? '—'} m）。`
+            : res.status === 'signing'
+              ? `已批准：${row.transfer.player.name} → ${row.transfer.toClubName ?? '—'}，签约谈判已开启，等买方谈妥合同后过户。`
+              : res.status === 'already'
+                ? '这单刚批过了。'
+                : completedMessage(row)
           : `已驳回：${row.transfer.player.name} 的单子，资金已解冻。`,
       );
+      setFeeDrafts((prev) => ({ ...prev, [row.id]: '' }));
       await load(status);
     } catch (err) {
       show(err instanceof Error ? err.message : '操作失败', true);
@@ -1399,6 +1543,7 @@ function ReviewsSection() {
             <tbody>
               {reviews.map((r) => {
                 const summary = bypassSummary(r);
+                const alerts = Array.isArray(r.payload?.alerts) ? ((r.payload!.alerts) as { kind: string; text: string }[]) : [];
                 return (
                   <tr key={r.id}>
                     <td>
@@ -1409,6 +1554,11 @@ function ReviewsSection() {
                       <span className={`badge ${r.transfer.type === 'forced_auction' ? 'red' : summary ? 'purple' : 'sky'}`}>
                         {TRANSFER_TYPE_LABEL[r.transfer.type] ?? r.transfer.type}
                       </span>
+                      {alerts.length > 0 && (
+                        <span className="badge red" title={alerts.map((a) => a.text).join('；')}>
+                          ⚠️ 异常出价 ×{alerts.length}
+                        </span>
+                      )}
                     </td>
                     <td>
                       {summary ?? (
@@ -1444,8 +1594,19 @@ function ReviewsSection() {
                             value={notes[r.id] ?? ''}
                             onChange={(e) => setNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
                           />
+                          {(r.transfer.type === 'transfer' || r.transfer.type === 'activation') && (
+                            <input
+                              className="field mono"
+                              type="number"
+                              step="0.01"
+                              style={{ width: '7rem' }}
+                              placeholder={`裁定价 ${r.transfer.fee ?? '—'}`}
+                              value={feeDrafts[r.id] ?? ''}
+                              onChange={(e) => setFeeDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                            />
+                          )}
                           <button className="btn btn-sm" type="button" disabled={busyId === r.id} onClick={() => decide(r, 'approve')}>
-                            {busyId === r.id ? '处理中…' : '批准'}
+                            {busyId === r.id ? '处理中…' : feeDrafts[r.id] ? '按裁定价批准' : '批准'}
                           </button>
                           <button className="btn btn-sm btn-danger" type="button" disabled={busyId === r.id} onClick={() => decide(r, 'reject')}>
                             驳回
@@ -1462,6 +1623,48 @@ function ReviewsSection() {
           </table>
         </div>
       )}
+
+      <div className="market-intervene">
+        <h3>市场干预</h3>
+        <p className="hint">
+          对卡在竞价/匹配窗或签约谈判的单据直接处置：撤出价、强制送审、强制作废（解冻资金、球员还原）、
+          谈判强制按预期工资成交或作废谈判。所有动作都要求填原因并进审计。
+        </p>
+        <div className="inline-form">
+          <label className="field">
+            ID
+            <input className="mono" type="number" value={interveneId} onChange={(e) => setInterveneId(e.target.value)} placeholder="出价/挂牌/谈判 ID" />
+          </label>
+          {[
+            ['撤销出价', '/api/admin/market/bids/', '/void', '出价'],
+            ['强制送审', '/api/admin/market/listings/', '/force-settle', '挂牌'],
+            ['强制作废', '/api/admin/market/listings/', '/force-void', '挂牌'],
+            ['谈判强制成交', '/api/admin/negotiations/', '/force-sign', '谈判会话'],
+            ['作废谈判', '/api/admin/negotiations/', '/void', '谈判会话'],
+          ].map(([label, base, suffix, kind]) => (
+            <button
+              key={label}
+              className="btn btn-sm"
+              type="button"
+              disabled={!Number.isInteger(Number(interveneId)) || Number(interveneId) <= 0}
+              onClick={async () => {
+                const id = Number(interveneId);
+                const reason = window.prompt(`处置原因（${kind} #${id}，会进审计）：`);
+                if (!reason || reason.trim().length < 2) return;
+                try {
+                  const res = await apiPost<{ ok: boolean; status: string }>(`${base}${id}${suffix}`, { reason: reason.trim() });
+                  show(`${label}：${kind} #${id} → ${res.status === 'done' || res.status === 'settled' ? '已执行' : '状态没变（已是目标状态）'}。`);
+                  await load(status);
+                } catch (err) {
+                  show(err instanceof Error ? err.message : '处置失败', true);
+                }
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }

@@ -8,7 +8,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach, type SessionUser } from '../../lib/session.ts';
-import { getBoundClub } from '../binding.ts';
+import { getBoundClub, assertTradable } from '../binding.ts';
 import { createRcChange, createTermination, createFreeAgent } from '../bypass.ts';
 import { createActivation, submitMatch } from '../activations.ts';
 
@@ -18,6 +18,7 @@ async function requireCoachClub(env: Env, request: Request): Promise<{ user: Ses
   const user = await requireCoach(env, request, 'club.squad.manage');
   const club = await getBoundClub(env, user.id);
   if (!club) throw new HttpError(403, '你还没有绑定俱乐部，先找管理组拿认证码');
+  assertTradable(club);
   return { user, clubId: club.id };
 }
 

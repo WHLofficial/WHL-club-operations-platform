@@ -40,7 +40,7 @@ export async function api<T>(path: string): Promise<T> {
   return body as T;
 }
 
-export async function apiSend<T>(method: 'POST' | 'PATCH', path: string, body?: unknown): Promise<T> {
+export async function apiSend<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: { 'content-type': 'application/json' },
@@ -55,6 +55,7 @@ export async function apiSend<T>(method: 'POST' | 'PATCH', path: string, body?: 
 
 export const apiPost = <T,>(path: string, body?: unknown) => apiSend<T>('POST', path, body);
 export const apiPatch = <T,>(path: string, body?: unknown) => apiSend<T>('PATCH', path, body);
+export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELETE', path, body);
 
 export const TOUR_SITE_URL = 'https://whleague.win/';
 
@@ -69,7 +70,7 @@ export interface ClubDto {
 }
 
 export interface MyClubOverview {
-  club: { id: number; name: string; leagueTier: string; logoKey: string | null; status: string } | null;
+  club: { id: number; name: string; leagueTier: string | null; logoKey: string | null; status: string; transferBanned?: boolean } | null;
   balance: number | null;
   squadCount: number | null;
   window: { season: number; windowSeq: number } | null;
@@ -142,6 +143,7 @@ export interface AdminClubRow {
   name: string;
   leagueTier: string;
   status: string;
+  transferBanned?: boolean;
   createdAt: string;
   binding: { userId: number; userName: string | null; boundAt: string } | null;
   latestCode: { expiresAt: string | null; usedBy: number | null; usedAt: string | null; createdAt: string } | null;
