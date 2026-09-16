@@ -581,6 +581,10 @@ p 低于该球员档位阈值时文案附加「（报价过低，有谈崩风险
 
 P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待确认）；P1：绑定赛事赛果自动计算入账（资格赛/小组赛/淘汰赛状态由比赛系统 tournament→stage 结构判断）。
 
+**增量 11 实现状态（P1 已落地）**：config 键 `prize_table`（JSON，默认=上表原文）+ `worker/prizes.ts`。分界裁决（2026-09-16）：单场可定值的**逐场即时入账**（联赛胜平负/超级杯胜负/小组赛每胜平/淘汰赛晋级），随赛果确认钩子入俱乐部账；一次性项（入场奖金/资格赛止步保底/小组赛剩余池）走「赛事完结结算」按钮一次结清。tour 队 id → club_id 经 AUTH_DB 目录映射（`clubIdByTourTeam`），AUTH_DB 未配置不发奖金（回滚通道口径）；入账一律经 `ledgerMovement` 幂等闸，`ref_type='match_home'/'match_away'`、`ref_id=matchId`（同场重确认/重放不双发）；淘汰赛晋级按「赢下该场后所在轮的队伍数」推档（stage.config_json entry_count，8→7.5/4→10/2→12.5/1→champion+5，征程逐场各领各档）。
+
+**赛事完结结算**：`POST /api/admin/season-bindings/:id/stage-settle`（`settleTournamentStage`）。按绑定 competition_type 发：联赛=每参赛队入场奖金；qualifying=确认赛果里输过至少一场的队各得保底（假设 29）；champions_cup=仅当有过小组赛确认赛果时，剩余池=200−已即时发放（胜 7/平 2.5）按胜场占比分；super_cup 无一次性项只盖结算戳。幂等闸=`season_tournaments.stage_settled_at`（UPDATE NULL→now 原子闸，闸 0 行=并发重复，409）。
+
 ### 9.2 富人税（每窗口结束，P1 自动）
 
 ```
@@ -591,6 +595,8 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 ```
 
 平台可全量自动算（RC 在 contracts、资金在 ledger_accounts），窗口关闭时由窗口结算流程执行并入账。
+
+**增量 11 实现**：`worker/window-payroll.ts`，关窗批（closeWindow）并入：工资=Σ现行合同 wage 全额（一窗=半赛季扣全额）先扣，富人税税基=扣完工资后的余额（同批资金流水顺序自然衔接）；`ref_type='window'`、`ref_id=season*100+windowSeq` 幂等闸（关窗状态 UPDATE 行数做原子闸，重放不双扣）；余额可扣成负（欠账下窗自然补扣）。维护费归增量 12（设施模型就位后插本批）。富人税只在窗末收，赛季结算不重复收（假设 28）。
 
 ### 9.3 其他约束
 
@@ -654,7 +660,8 @@ seasons(season=N, status: preparing → running → settled)
 
 - 绑定后平台跨库拉取该 tournament 的 schedule/matches（只读），赛果 finished 后出现在「赛果确认」队列 → 管理组确认 → 触发奖金（P0 手动/P1 自动）、主场收入、XP 事件；确认时点记录窗口号（确认时刻的开放窗，否则最近一窗，否则 0，见假设 25）。
 - 窗口状态机驱动一切准入：窗口 open 才允许转会操作；窗口 closed 触发结算（富人税、维护费、工资）。
-- 赛季结算：忠诚奖金 → 富人税 → 死忠演化 → 年龄+1 → 可成长年龄检查 → 下赛季注册重置。
+- 赛季结算（增量 11 已实现按钮化）：前置体检（硬阻断：窗口未关/审核未清/谈判 active/市场未收尾；软警示：未确认完赛果需 acknowledged=true）→ 忠诚奖金（现合同 effective_from 起算到结算时点，`loyalty_tiers` 取满足的最高档，入俱乐部账逐合同审计）→ growable 重判（本季 seasons.age_cap，规则 4.1.1）→ seasons.status='settled'（UPDATE 原子闸，重复 409）。富人税/工资在窗末收不重复（假设 28）；死忠演化留位增量 12；年龄+1/下季注册重置由「按季独立」天然承载（growable 在下季建档时按新上限重判）。
+- 赛事完结结算（增量 11）：绑定赛事全部赛果确认完后，管理组按绑定行点「完结结算」发放一次性项（§9.1），stage_settled_at 幂等。
 - 存量迁移（0014）：旧 season_windows.tournament_id 的绑定回填进 season_tournaments，窗口上两列休眠保留。
 
 ## 12. 通知系统
@@ -702,6 +709,7 @@ seasons(season=N, status: preparing → running → settled)
 | `ca_pa_limits` | json（premier:1/4/6；second:1/3/6，规则 4.2.2 原文） | CA/PA 限额梯度（premier/second 两套） |
 | `wage_cap` | `null` | 工资帽（m/半赛季，随赛季大名单填入） |
 | `prize_table` | json | 赛事奖金表（§9.1） |
+| `loyalty_tiers` | `[[0.5,0.05],[1.5,0.10],[2.5,0.20]]` | 忠诚奖金档位 [起效年限, RC 比例]，取满足的最高档（§11） |
 | `luxury_cash_threshold` / `luxury_cash_rate` | `125` / `0.20` | 富人税（资金） |
 | `luxury_value_threshold` / `luxury_value_rate` | `700` / `0.05` | 富人税（球队价值） |
 | `attendance_model` | json | 上座/票房/商业/转播全套系数（revenue 移植，§8） |
@@ -786,6 +794,8 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 24 | 已定 | 球员初始归属（initial_club_id）= 导入时数据：首次名单认领写入（COALESCE 保解约重签不覆盖），存量按最早归属变更的 from_club_id 回填，只海捞过（free_agent）= 导入时无归属留 NULL；仅供成长「本队」判断与球员库初始视图展示，XP 场次匹配仍按当前归属名单（§8 口径不变） |
 | 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
 | 26 | 已定（增量 7） | 球队绑定真源上收 auth（三表 team/team_bind_code/team_binding；机器端点五条 HMAC）；本侧旧表 club_bind_code/club_bindings 休眠保留防回滚，AUTH_DB 未配置时回落读本地表（回滚通道）；发码 team_not_found 不自动登记目录（提示先登记关联，与 tour 侧自愈 register 不同）；OIDC 教练判定=绑定即教练（管理点仍走权限点；未绑定的准教练凭 club.* 权限点保留旁路进绑前端点） |
+| 28 | 已定（增量 11） | 富人税/工资只在窗末（closeWindow 批）收，赛季结算不重复收（§11 结算顺序里「富人税」步即窗末已收项，结算按钮不再扣）；工资=Σ现行合同 wage 全额、一窗=半赛季扣全额 |
+| 29 | 已定（增量 11） | 资格赛止步保底口径：确认赛果里输过至少一场的队各得保底 7.5，多轮晋级失败口径一致（不区分止步轮次）；赢家不发 | 
 | 27 | 已定（增量 9） | 俱乐部分级不再建队时定死（clubs.league_tier 休眠）：当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（worker/tier.ts）；注册提交派生不到级别一律 400 拦下（tier_pending「尚未在赛事平台报名，请等待赛事平台管理员确认报名」），注册页带报名状态探测（红=未报名/绿=已报名）；同时报两座定级赛事视为数据异常 500；AUTH_DB 未配置时回落读休眠列（回滚通道）；升降级=换季报名哪座定级赛事就在哪级，club 库零人工写入 |
 
 ## 16. 测试策略
