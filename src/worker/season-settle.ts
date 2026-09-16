@@ -7,7 +7,7 @@ import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
-import { clubIdByTourTeam } from './prizes.ts';
+import { clubIdByTourTeam, loadPrizeTable } from './prizes.ts';
 
 function nowSql(): string {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -101,15 +101,13 @@ export async function settleTournamentStage(env: Env, actor: number, stageIdInpu
   if (clubMap.size === 0) throw new HttpError(409, '认证中心目录里找不到这些球队的俱乐部映射（AUTH_DB 未配置或目录缺行），先补目录再结算');
 
   const records = aggregateRecords(rows.results, clubMap);
-  const config = createConfigService(db);
-  const tableRaw = await config.get('prize_table');
-  const table = tableRaw ? (JSON.parse(tableRaw) as Record<string, any>) : null;
+  const table = await loadPrizeTable(db);
   if (!table) throw new HttpError(409, '奖金表（prize_table）未配置');
 
   const type = binding.competition_type;
   const movements: { clubId: number; amount: number; memo: string }[] = [];
   if (type === 'league_premier' || type === 'league_second') {
-    const entry = table[type].entry as number;
+    const entry = table[type].entry;
     for (const r of records.values()) movements.push({ clubId: r.clubId, amount: entry, memo: `联赛入场奖金（S${binding.season}）` });
   } else if (type === 'qualifying') {
     const losers = new Set<number>();
@@ -163,14 +161,20 @@ export async function settleTournamentStage(env: Env, actor: number, stageIdInpu
   return { ok: true, items: movements.length };
 }
 
-/** growable 重判（规则 4.1.1）：growable = CA<PA 且 age ≤ 本季上限；上限由 seasons.age_cap 提供 */
+/** growable 重判语句（规则 4.1.1）：growable = CA<PA 且 age ≤ 本季上限；只改有变化的行 */
+export function growableStatement(db: Env['DB'], ageCap: number) {
+  return db
+    .prepare(
+      `UPDATE players SET growable = CASE WHEN ca IS NOT NULL AND pa IS NOT NULL AND ca < pa AND age IS NOT NULL AND age <= ? THEN 1 ELSE 0 END,
+       updated_at = ${nowSql()}
+       WHERE growable != CASE WHEN ca IS NOT NULL AND pa IS NOT NULL AND ca < pa AND age IS NOT NULL AND age <= ? THEN 1 ELSE 0 END`,
+    )
+    .bind(ageCap, ageCap);
+}
+
+/** growable 重判（规则 4.1.1）：建档/建季时即按新上限全量重算 */
 export async function rejudgeGrowable(env: Env, ageCap: number): Promise<number> {
-  const result = await env.DB.prepare(
-    `UPDATE players SET growable = CASE WHEN ca IS NOT NULL AND pa IS NOT NULL AND ca < pa AND age IS NOT NULL AND age <= ? THEN 1 ELSE 0 END,
-     updated_at = ${nowSql()} WHERE growable != CASE WHEN ca IS NOT NULL AND pa IS NOT NULL AND ca < pa AND age IS NOT NULL AND age <= ? THEN 1 ELSE 0 END`,
-  )
-    .bind(ageCap, ageCap)
-    .run();
+  const result = await growableStatement(env.DB, ageCap).run();
   return result.meta.changes ?? 0;
 }
 
@@ -248,6 +252,7 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
   const config = createConfigService(db);
   const tiersRaw = await config.get('loyalty_tiers');
   const tiers = (tiersRaw ? JSON.parse(tiersRaw) : [[0.5, 0.05], [1.5, 0.1], [2.5, 0.2]]) as [number, number][];
+  tiers.sort((a, b) => a[0] - b[0]); // 配置可能乱序，按起效年限升序后「取满足的最高档」才成立
   const HALF_YEAR_DAYS = 365.25 / 2;
 
   const contracts = await db
@@ -256,7 +261,7 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
        FROM contracts ct WHERE ct.is_active = 1 AND ct.club_id IS NOT NULL AND ct.release_fee IS NOT NULL AND ct.effective_from IS NOT NULL`,
     )
     .all<{ id: number; club_id: number; release_fee: number; effective_from: string; contract_type: string }>();
-  const startMs = Date.parse(row.settled_at ?? '') || Date.now();
+  const startMs = Date.now(); // 忠诚起算=本次结算时点（settled_at 在本批才写入，读取必为 NULL）
   const loyaltyMovements: { clubId: number; amount: number; memo: string; contractId: number }[] = [];
   for (const ct of contracts.results) {
     const start = Date.parse(ct.effective_from);
@@ -264,7 +269,7 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
     const years = (startMs - start) / (365.25 * 24 * 3600_000);
     let rate = 0;
     for (const [minYears, r] of tiers) if (years >= minYears) rate = r; // 取满足的最高档
-    if (rate <= 0) continue;
+    if (rate <= 0 || ct.release_fee <= 0) continue;
     loyaltyMovements.push({ clubId: ct.club_id, amount: Math.round(ct.release_fee * rate * 100) / 100, memo: `忠诚奖金（效力 ${years.toFixed(1)} 年 × ${Math.round(rate * 100)}% RC）`, contractId: ct.id });
   }
 
@@ -283,16 +288,7 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
   // growable 重判并入主批（规则 4.1.1：按本季 age_cap 全量重算，只改有变化的行）
   const ageCapRow = await db.prepare('SELECT age_cap FROM seasons WHERE season = ?').bind(season).first<{ age_cap: number | null }>();
   const cap = ageCapRow?.age_cap ?? null;
-  const growableStmt =
-    cap !== null
-      ? db
-          .prepare(
-            `UPDATE players SET growable = CASE WHEN ca IS NOT NULL AND pa IS NOT NULL AND ca < pa AND age IS NOT NULL AND age <= ? THEN 1 ELSE 0 END,
-             updated_at = ${nowSql()}
-             WHERE growable != CASE WHEN ca IS NOT NULL AND pa IS NOT NULL AND ca < pa AND age IS NOT NULL AND age <= ? THEN 1 ELSE 0 END`,
-          )
-          .bind(cap, cap)
-      : null;
+  const growableStmt = cap !== null ? growableStatement(db, cap) : null;
 
   const batchResults = await db.batch([
     ...statements,
