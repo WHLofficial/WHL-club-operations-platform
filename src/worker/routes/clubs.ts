@@ -8,6 +8,7 @@ import { writeAudit } from '../../lib/audit.ts';
 import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier } from '../tier.ts';
+import { loadAttendanceModel, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { getVisibleSeason } from '../seasons.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -81,6 +82,38 @@ app.get('/me/club', async (c) => {
     // 增量 9：级别由报名派生（§3.2 改判），休眠列不再回显
     deriveClubTier(c.env, await getVisibleSeason(c.env.DB), club.id),
   ]);
+  // 增量 12：主场档案（球场/设施/影响力构成）随 /me/club 一并下发（无球场行=null）
+  const stadium = await c.env.DB
+    .prepare('SELECT name, capacity, tier, shell_influence, bonus_points, fans FROM stadiums WHERE club_id = ?')
+    .bind(club.id)
+    .first<{ name: string | null; capacity: number; tier: number; shell_influence: number; bonus_points: number; fans: number }>();
+  let home: {
+    name: string | null;
+    capacity: number;
+    tier: number;
+    tierName: string | null;
+    fans: number;
+    influence: { players: number; shell: number; bonus: number; total: number };
+    facilities: { key: string; level: number }[];
+  } | null = null;
+  if (stadium) {
+    const model = await loadAttendanceModel(c.env.DB);
+    const playerSum = await playerInfluenceSum(c.env, club.id, model);
+    const facilities = await c.env.DB
+      .prepare('SELECT facility_key, level FROM club_facilities WHERE club_id = ? ORDER BY facility_key')
+      .bind(club.id)
+      .all<{ facility_key: string; level: number }>();
+    const tierTable = await loadTierTable(c.env.DB);
+    home = {
+      name: stadium.name,
+      capacity: stadium.capacity,
+      tier: stadium.tier,
+      tierName: tierTable[String(stadium.tier)]?.name ?? null,
+      fans: stadium.fans,
+      influence: { players: playerSum, shell: stadium.shell_influence, bonus: stadium.bonus_points, total: teamInfluence(stadium, playerSum) },
+      facilities: facilities.results.map((f) => ({ key: f.facility_key, level: f.level })),
+    };
+  }
   return c.json({
     club: {
       id: club.id,
@@ -93,6 +126,7 @@ app.get('/me/club', async (c) => {
     balance: account?.balance ?? 0,
     squadCount: roster?.n ?? 0,
     window: win ? { season: win.season, windowSeq: win.window_seq } : null,
+    home,
   });
 });
 

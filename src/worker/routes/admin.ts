@@ -12,6 +12,7 @@ import { confirmContractsImport, previewContractsImport } from '../contracts-imp
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
 import { settleTournamentStage, settleSeason, checkSeasonSettle, rejudgeGrowable } from '../season-settle.ts';
+import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminCancelSigning, requireReason } from '../market-intervene.ts';
 import { ledgerMovement } from '../ledger.ts';
 import { loadSquadContext } from '../squad-context.ts';
@@ -169,6 +170,97 @@ app.delete('/clubs/:id/transfer-ban', async (c) => {
     action: 'transfer_unban',
     targetType: 'club',
     targetId: clubId,
+  });
+  return c.json({ ok: true });
+});
+
+// 主场域管理（增量 12）：球场档案查看 + 队壳影响力/奖励分/容量/档位维护（球员影响力按规则公式即时算，不落库）
+app.get('/clubs/:id/stadium', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const stadium = await c.env.DB
+    .prepare('SELECT club_id, name, capacity, tier, shell_influence, bonus_points, fans FROM stadiums WHERE club_id = ?')
+    .bind(clubId)
+    .first<{ club_id: number; name: string | null; capacity: number; tier: number; shell_influence: number; bonus_points: number; fans: number }>();
+  if (!stadium) throw new HttpError(404, '该俱乐部还没有球场档案（存量导入后自动生成）');
+  const model = await loadAttendanceModel(c.env.DB);
+  const playerSum = await playerInfluenceSum(c.env, clubId, model);
+  const facilities = await c.env.DB
+    .prepare('SELECT facility_key, level FROM club_facilities WHERE club_id = ? ORDER BY facility_key')
+    .bind(clubId)
+    .all<{ facility_key: string; level: number }>();
+  const tierTable = await loadTierTable(c.env.DB);
+  return c.json({
+    stadium: {
+      clubId,
+      name: stadium.name,
+      capacity: stadium.capacity,
+      tier: stadium.tier,
+      shellInfluence: stadium.shell_influence,
+      bonusPoints: stadium.bonus_points,
+      fans: stadium.fans,
+    },
+    tier: tierTable[String(stadium.tier)] ?? null,
+    facilities: facilities.results.map((f) => ({ key: f.facility_key, level: f.level })),
+    influence: { players: playerSum, shell: stadium.shell_influence, bonus: stadium.bonus_points, total: teamInfluence(stadium, playerSum) },
+  });
+});
+
+app.post('/clubs/:id/stadium', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const body = (await readJson(c)) as {
+    name?: unknown;
+    capacity?: unknown;
+    tier?: unknown;
+    shellInfluence?: unknown;
+    bonusPoints?: unknown;
+  } | null;
+  const stadium = await c.env.DB.prepare('SELECT club_id FROM stadiums WHERE club_id = ?').bind(clubId).first();
+  if (!stadium) throw new HttpError(404, '该俱乐部还没有球场档案');
+  const updates: string[] = [];
+  const params: unknown[] = [];
+  if (body?.name !== undefined) {
+    updates.push('name = ?');
+    params.push(String(body.name).slice(0, 60));
+  }
+  if (body?.capacity !== undefined) {
+    const cap = Number(body.capacity);
+    if (!Number.isInteger(cap) || cap < 5000 || cap > 120000) throw new HttpError(400, '容量应为 5000-120000 的整数');
+    updates.push('capacity = ?');
+    params.push(cap);
+  }
+  if (body?.tier !== undefined) {
+    const tier = Number(body.tier);
+    if (!Number.isInteger(tier) || tier < 0 || tier > 4) throw new HttpError(400, '球场档位应为 0-4');
+    const tierTable = await loadTierTable(c.env.DB);
+    if (!tierTable[String(tier)]) throw new HttpError(400, '球场档位表里没有这一档');
+    updates.push('tier = ?');
+    params.push(tier);
+  }
+  if (body?.shellInfluence !== undefined) {
+    const v = Number(body.shellInfluence);
+    if (!Number.isFinite(v) || v < 0 || v > 10000) throw new HttpError(400, '队壳影响力应为 0-10000 的数值');
+    updates.push('shell_influence = ?');
+    params.push(v);
+  }
+  if (body?.bonusPoints !== undefined) {
+    const v = Number(body.bonusPoints);
+    if (!Number.isFinite(v) || v < 0 || v > 10000) throw new HttpError(400, '奖励分应为 0-10000 的数值');
+    updates.push('bonus_points = ?');
+    params.push(v);
+  }
+  if (updates.length === 0) throw new HttpError(400, '没有可更新字段（name/capacity/tier/shellInfluence/bonusPoints）');
+  updates.push(`updated_at = ${nowSql()}`);
+  await c.env.DB.prepare(`UPDATE stadiums SET ${updates.join(', ')} WHERE club_id = ?`).bind(...params, clubId).run();
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'stadium_update',
+    targetType: 'stadium',
+    targetId: clubId,
+    after: body as Record<string, unknown>,
   });
   return c.json({ ok: true });
 });

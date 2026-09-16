@@ -74,6 +74,26 @@ export interface MyClubOverview {
   balance: number | null;
   squadCount: number | null;
   window: { season: number; windowSeq: number } | null;
+  // 增量 12：主场档案（球场/设施/影响力构成）；无球场行 = null
+  home: StadiumInfo | null;
+}
+
+export interface StadiumInfo {
+  name: string | null;
+  capacity: number;
+  tier: number;
+  tierName: string | null;
+  fans: number;
+  influence: { players: number; shell: number; bonus: number; total: number };
+  facilities: { key: string; level: number }[];
+}
+
+// 增量 12：管理端球场档案（GET /clubs/:id/stadium）
+export interface StadiumAdmin {
+  stadium: { clubId: number; name: string | null; capacity: number; tier: number; shellInfluence: number; bonusPoints: number; fans: number };
+  tier: { name: string; min_seats: number; max_seats: number; base_maintenance: number; per_10k_rate: number; attend_coef: number; upgrade_cost: number } | null;
+  facilities: { key: string; level: number }[];
+  influence: { players: number; shell: number; bonus: number; total: number };
 }
 
 export interface PlayerListItem {

@@ -7,6 +7,7 @@ import { createAuditStatement } from '../lib/audit.ts';
 import { recordGrowthEventStatements, defensivePositionsForClub, type GrowthEventInput } from './growth.ts';
 import { queueClubNotification } from './notify.ts';
 import { matchPrizeStatements } from './prizes.ts';
+import { matchAttendanceStatements } from './home.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -177,7 +178,7 @@ export async function confirmResult(
   env: Env,
   actor: number,
   matchIdInput: unknown,
-): Promise<{ result: ConfirmedResultItem; xp: XpHookSummary; prizeError: string | null }> {
+): Promise<{ result: ConfirmedResultItem; xp: XpHookSummary; prizeError: string | null; revenueError: string | null }> {
   const matchId = Number(matchIdInput);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(400, '比赛 ID 不对');
 
@@ -285,7 +286,21 @@ export async function confirmResult(
   } catch (err) {
     prizeError = String(err);
   }
-  return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp, prizeError };
+  // 钩子④比赛日收入即时入账（增量 12，吞错不阻塞确认——快照 match_id 主键幂等，重确认安全）
+  let revenueError: string | null = null;
+  try {
+    const home = await matchAttendanceStatements(env, {
+      matchId,
+      season: ctx.season,
+      windowSeq: ctx.window_seq,
+      homeTeamId: m.home_team_id,
+      awayTeamId: m.away_team_id,
+    });
+    if (home.statements.length > 0) await env.DB.batch(home.statements);
+  } catch (err) {
+    revenueError = String(err);
+  }
+  return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp, prizeError, revenueError };
 }
 
 /** elim 阶段 config_json 里的入场队数（晋级轮次推算用；解析失败按未知处理=不发晋级奖金） */

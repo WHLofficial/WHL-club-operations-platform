@@ -12,6 +12,7 @@ import {
   TOUR_SITE_URL,
   TOUR_STATUS_LABEL,
   type AdminClubRow,
+  type StadiumAdmin,
   type AdminRegistrations,
   type AdminReviewRow,
   type AdminReviews,
@@ -416,6 +417,7 @@ function ClubsSection() {
   const [creating, setCreating] = useState(false);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
   const [unbinding, setUnbinding] = useState<number | null>(null);
+  const [stadium, setStadium] = useState<{ club: string; clubId: number; form: StadiumForm; tierName: string | null; fans: number; influence: StadiumAdmin['influence'] } | null>(null);
 
   const reload = useCallback(() => {
     api<{ clubs: AdminClubRow[] }>('/api/admin/clubs')
@@ -461,6 +463,53 @@ function ClubsSection() {
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '解绑失败', true);
+    }
+  }
+
+  interface StadiumForm {
+    name: string;
+    capacity: string;
+    tier: string;
+    shellInfluence: string;
+    bonusPoints: string;
+  }
+
+  async function openStadium(club: AdminClubRow) {
+    try {
+      const res = await api<StadiumAdmin>(`/api/admin/clubs/${club.id}/stadium`);
+      setStadium({
+        club: club.name,
+        clubId: club.id,
+        form: {
+          name: res.stadium.name ?? '',
+          capacity: String(res.stadium.capacity),
+          tier: String(res.stadium.tier),
+          shellInfluence: String(res.stadium.shellInfluence),
+          bonusPoints: String(res.stadium.bonusPoints),
+        },
+        tierName: res.tier?.name ?? null,
+        fans: res.stadium.fans,
+        influence: res.influence,
+      });
+    } catch (err) {
+      show(err instanceof Error ? err.message : '主场档案加载失败', true);
+    }
+  }
+
+  async function saveStadium() {
+    if (!stadium) return;
+    try {
+      await apiPost(`/api/admin/clubs/${stadium.clubId}/stadium`, {
+        name: stadium.form.name,
+        capacity: Number(stadium.form.capacity),
+        tier: Number(stadium.form.tier),
+        shellInfluence: Number(stadium.form.shellInfluence),
+        bonusPoints: Number(stadium.form.bonusPoints),
+      });
+      show(`${stadium.club} 的主场档案已更新。`);
+      setStadium(null);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '主场档案保存失败', true);
     }
   }
 
@@ -557,11 +606,53 @@ function ClubsSection() {
                     >
                       {club.transferBanned ? '解冻转会' : '冻结转会'}
                     </button>
+                    <button className="btn btn-ghost btn-sm" type="button" onClick={() => openStadium(club)}>
+                      主场
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {stadium && (
+        <div className="code-card">
+          <p>
+            <b>{stadium.club}</b> 的主场档案 —— 死忠 <span className="mono">{Math.round(stadium.fans).toLocaleString()}</span>，影响力{' '}
+            <span className="mono">{stadium.influence.total.toFixed(1)}</span>（球员 {stadium.influence.players.toFixed(1)} + 队壳 {stadium.influence.shell.toFixed(1)} + 奖励分 {stadium.influence.bonus.toFixed(1)}，球员项按规则公式自动算）
+          </p>
+          <div className="import-grid">
+            <label className="field">
+              球场名
+              <input value={stadium.form.name} onChange={(e) => setStadium({ ...stadium, form: { ...stadium.form, name: e.target.value } })} placeholder="未冠名可留空" />
+            </label>
+            <label className="field">
+              容量（座）
+              <input className="mono" value={stadium.form.capacity} onChange={(e) => setStadium({ ...stadium, form: { ...stadium.form, capacity: e.target.value } })} />
+            </label>
+            <label className="field">
+              档位（0-4{stadium.tierName ? `，当前 ${stadium.tierName}` : ''}）
+              <input className="mono" value={stadium.form.tier} onChange={(e) => setStadium({ ...stadium, form: { ...stadium.form, tier: e.target.value } })} />
+            </label>
+            <label className="field">
+              队壳影响力
+              <input className="mono" value={stadium.form.shellInfluence} onChange={(e) => setStadium({ ...stadium, form: { ...stadium.form, shellInfluence: e.target.value } })} />
+            </label>
+            <label className="field">
+              奖励分
+              <input className="mono" value={stadium.form.bonusPoints} onChange={(e) => setStadium({ ...stadium, form: { ...stadium.form, bonusPoints: e.target.value } })} />
+            </label>
+          </div>
+          <div className="actions">
+            <button className="btn" type="button" onClick={saveStadium}>
+              保存主场档案
+            </button>
+            <button className="btn btn-ghost" type="button" onClick={() => setStadium(null)}>
+              取消
+            </button>
+          </div>
         </div>
       )}
 

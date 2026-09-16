@@ -63,6 +63,8 @@ export const CONFIG_KEYS = [
   'bid_pattern_alert',
   'prize_table',
   'loyalty_tiers',
+  'attendance_model',
+  'tier_table',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -103,6 +105,39 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     super_cup: { win: 4.0, loss: 2.0 },
   }),
   loyalty_tiers: '[[0.5,0.05],[1.5,0.10],[2.5,0.20]]',
+  // 增量 12：主场收入引擎全套系数（revenue 插件移植，TECH_DESIGN §8；天气概率 40/30/20/10 用户裁决 2026-09-16；
+  // 影响力系数=规则 4.1.3 原文可成长 0.25/非成长 0.13）
+  attendance_model: JSON.stringify({
+    weather_probabilities: { 晴: 0.4, 多云: 0.3, 雨: 0.2, 雪: 0.1 },
+    weather_ranges: { 晴: [1.05, 1.25], 多云: [0.9, 1.04], 雨: [0.8, 0.89], 雪: [0.75, 0.79] },
+    form_coef_table: { 0: 0.7, 1: 0.74, 2: 0.85, 3: 0.94, 4: 1.0, 5: 1.04, 6: 1.1, 7: 1.19, 8: 1.22, 9: 1.25 },
+    attendance_multiplier_base: 4.0,
+    attendance_multiplier_per_tier: 0.35,
+    ticket_revenue_per_10k: 1.5,
+    commercial_per_10k_per_level: 0.1,
+    broadcast_per_match_per_level: 0.3,
+    sell_out_fill: [0.985, 0.999],
+    perturbation: [0.97, 1.03],
+    neutral_form_pts: 4,
+    default_influence: 90,
+    fans_target_table: { bands: [{ max_influence: 120, slope: 26 }, { max_influence: 160, slope: 22 }, { max_influence: 200, slope: 15 }, { max_influence: 0, slope: 12 }] },
+    fans_cap: 10000,
+    fans_grow_rate: 0.5,
+    fans_grow_heat_base: 0.6,
+    fans_grow_heat_span: 0.4,
+    fans_drop_rate: 0.5,
+    fans_drop_heat_extra: 0.8,
+    influence_coef_growable: 0.25,
+    influence_coef_static: 0.13,
+  }),
+  // 球场档位 0-4（座位区间/维护费/上座系数/升级费；远期扩建校验用）
+  tier_table: JSON.stringify({
+    0: { name: '社区级', min_seats: 12000, max_seats: 25000, base_maintenance: 2.0, per_10k_rate: 0.8, attend_coef: 1.0, upgrade_cost: 3.0 },
+    1: { name: '地区级', min_seats: 20000, max_seats: 35000, base_maintenance: 5.0, per_10k_rate: 0.55, attend_coef: 1.1, upgrade_cost: 4.5 },
+    2: { name: '大区级', min_seats: 25000, max_seats: 45000, base_maintenance: 8.0, per_10k_rate: 0.35, attend_coef: 1.2, upgrade_cost: 6.0 },
+    3: { name: '国家级', min_seats: 35000, max_seats: 60000, base_maintenance: 11.0, per_10k_rate: 0.28, attend_coef: 1.3, upgrade_cost: 10.0 },
+    4: { name: '国际级', min_seats: 50000, max_seats: 100000, base_maintenance: 14.0, per_10k_rate: 0.2, attend_coef: 1.4, upgrade_cost: 0.0 },
+  }),
   voucher_refund: '0.25',
   xp_per_level: '10',
   trainee_xp_full: '40',

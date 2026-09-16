@@ -10,6 +10,7 @@ import {
   type RegistrationResult,
   type SquadIssue,
   type SquadOverview,
+  type StadiumInfo,
   type SquadPlayerRow,
   type TerminationResult,
 } from '../lib/api.ts';
@@ -80,7 +81,7 @@ export default function Club() {
     );
   }
 
-  const { club, balance, squadCount, window: win } = overview;
+  const { club, balance, squadCount, window: win, home } = overview;
 
   return (
     <div className="container">
@@ -121,6 +122,8 @@ export default function Club() {
         {!win && <p className="hint">转会窗口还没开。窗口开了之后，这里会挂出市场与注册入口。</p>}
       </section>
 
+      {home && <StadiumCard home={home} />}
+
       {squad && <RegistrationSection squad={squad} onRefresh={() => api<SquadOverview>('/api/club/squad').then(setSquad)} />}
 
       {squad && (
@@ -130,6 +133,45 @@ export default function Club() {
         />
       )}
     </div>
+  );
+}
+
+/* ---------- 主场档案（增量 12，只读） ---------- */
+
+const FACILITY_LABEL: Record<string, string> = {
+  commercial: '商业区',
+  broadcast: '灯光转播',
+  pitch: '草皮',
+  youth: '青训中心',
+  medical: '医疗中心',
+};
+
+function StadiumCard({ home }: { home: StadiumInfo }) {
+  return (
+    <section className="card">
+      <h3>主场档案</h3>
+      <p>
+        <b>{home.name || '未冠名'}</b> · {home.tierName ?? `档位 ${home.tier}`}（{home.tier} 级） · 容量{' '}
+        <span className="mono">{home.capacity.toLocaleString()}</span> 座 · 死忠球迷{' '}
+        <span className="mono">{Math.round(home.fans).toLocaleString()}</span>
+      </p>
+      <p className="hint">
+        球队影响力 <span className="mono">{home.influence.total.toFixed(1)}</span>（球员{' '}
+        <span className="mono">{home.influence.players.toFixed(1)}</span> + 队壳{' '}
+        <span className="mono">{home.influence.shell.toFixed(1)}</span> + 奖励分{' '}
+        <span className="mono">{home.influence.bonus.toFixed(1)}</span>）——影响上座率与比赛日收入
+      </p>
+      {home.facilities.length > 0 && (
+        <p className="hint">
+          设施：
+          {home.facilities.map((f) => (
+            <span key={f.key} className="badge gray" style={{ marginLeft: 6 }}>
+              {FACILITY_LABEL[f.key] ?? f.key} {f.level} 级
+            </span>
+          ))}
+        </p>
+      )}
+    </section>
   );
 }
 
