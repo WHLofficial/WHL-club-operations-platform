@@ -239,6 +239,8 @@ export interface SquadPlayerRow {
 export interface SquadOverview {
   club: { id: number; name: string; leagueTier: string | null } | null;
   season: number | null;
+  // 报名状态探测（增量 9）：true=已报定级赛事（leagueTier 非空）；false=未报名，提交会被 400 拦下
+  registeredInTournament: boolean;
   players: SquadPlayerRow[];
   registration: { firstTeam: number[]; trainee: number[] } | null;
   compliance: SquadCompliance | null;

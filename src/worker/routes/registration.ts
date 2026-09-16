@@ -9,6 +9,7 @@ import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { getBoundClub } from '../binding.ts';
+import { deriveClubTier, tierCache } from '../tier.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -80,6 +81,8 @@ app.get('/club/squad', async (c) => {
     return c.json({ club: null, season: null, players: [], registration: null, compliance: null, rules: null });
   }
   const season = await getVisibleSeason(c.env.DB);
+  const cache = tierCache();
+  const tier = await deriveClubTier(c.env, season, club.id, cache);
   const [players, contractMap, regRows, rules] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
@@ -88,7 +91,8 @@ app.get('/club/squad', async (c) => {
           .bind(season, club.id)
           .all<{ player_id: number; squad: string }>()
       : Promise.resolve({ results: [] as { player_id: number; squad: string }[] }),
-    loadSquadContext(c.env.DB, club.league_tier),
+    // 增量 9：未报名定级赛事时 rules 置空，前端挂红色「未报名」状态条
+    tier !== null ? loadSquadContext(c.env.DB, tier) : Promise.resolve(null),
   ]);
 
   const squadByPlayer = new Map(regRows.results.map((r) => [r.player_id, r.squad]));
@@ -100,11 +104,14 @@ app.get('/club/squad', async (c) => {
     if (squad === 'first_team') firstTeam.push(sp);
     else if (squad === 'trainee') trainee.push(sp);
   }
-  const compliance = regRows.results.length > 0 ? checkSquad(firstTeam, trainee, rules) : null;
+  const compliance =
+    tier !== null && regRows.results.length > 0 ? checkSquad(firstTeam, trainee, rules!) : null;
 
   return c.json({
-    club: { id: club.id, name: club.name, leagueTier: club.league_tier },
+    club: { id: club.id, name: club.name, leagueTier: tier },
     season,
+    // 报名状态探测（增量 9）：registeredInTournament=已报定级赛事（tier 非 null）
+    registeredInTournament: tier !== null,
     players: players.map((p) => {
       const contract = contractMap.get(p.id) ?? null;
       return {
@@ -133,15 +140,17 @@ app.get('/club/squad', async (c) => {
         }
       : null,
     compliance,
-    rules: {
-      squadMin: rules.squadMin,
-      squadMax: rules.squadMax,
-      gkMin: rules.gkMin,
-      traineeMax: rules.traineeMax,
-      wageCap: rules.wageCap,
-      limits: rules.limits,
-      tier: rules.tier,
-    },
+    rules: rules === null
+      ? null
+      : {
+          squadMin: rules.squadMin,
+          squadMax: rules.squadMax,
+          gkMin: rules.gkMin,
+          traineeMax: rules.traineeMax,
+          wageCap: rules.wageCap,
+          limits: rules.limits,
+          tier: rules.tier,
+        },
   });
 });
 
@@ -178,10 +187,16 @@ app.post('/club/registrations', async (c) => {
     throw new HttpError(409, '当前没有开放注册的赛季（只有备赛期能提交名单）', 'no_season');
   }
 
+  // 增量 9：级别由赛事报名派生——没报定级赛事不许提交，规则 4.2 的合规梯度无从谈起
+  const tier = await deriveClubTier(c.env, season, club.id, tierCache());
+  if (tier === null) {
+    throw new HttpError(400, '尚未在赛事平台报名，请等待赛事平台管理员确认报名', 'tier_pending');
+  }
+
   const [players, contractMap, rules] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
-    loadSquadContext(c.env.DB, club.league_tier),
+    loadSquadContext(c.env.DB, tier),
   ]);
   const byId = new Map(players.map((p) => [p.id, p]));
   const allRequested = [...firstTeamIds, ...traineeIds];

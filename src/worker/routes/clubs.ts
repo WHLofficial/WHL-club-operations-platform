@@ -7,6 +7,8 @@ import { rateLimit } from '../../lib/ratelimit.ts';
 import { writeAudit } from '../../lib/audit.ts';
 import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
+import { deriveClubTier } from '../tier.ts';
+import { getVisibleSeason } from '../seasons.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -59,14 +61,14 @@ app.get('/me/club', async (c) => {
     return c.json({ club: null, balance: null, squadCount: null, window: null });
   }
   const club = await c.env.DB.prepare(
-    `SELECT id, name, league_tier, logo_key, status FROM clubs WHERE id = ?`,
+    `SELECT id, name, logo_key, status FROM clubs WHERE id = ?`,
   )
     .bind(bound.id)
-    .first<{ id: number; name: string; league_tier: string; logo_key: string | null; status: string }>();
+    .first<{ id: number; name: string; logo_key: string | null; status: string }>();
   if (!club) {
     return c.json({ club: null, balance: null, squadCount: null, window: null });
   }
-  const [account, roster, win] = await Promise.all([
+  const [account, roster, win, tier] = await Promise.all([
     c.env.DB.prepare('SELECT balance FROM ledger_accounts WHERE club_id = ?')
       .bind(club.id)
       .first<{ balance: number }>(),
@@ -76,12 +78,14 @@ app.get('/me/club', async (c) => {
     c.env.DB.prepare(
       "SELECT season, window_seq FROM season_windows WHERE status = 'open' ORDER BY id DESC LIMIT 1",
     ).first<{ season: number; window_seq: number }>(),
+    // 增量 9：级别由报名派生（§3.2 改判），休眠列不再回显
+    deriveClubTier(c.env, await getVisibleSeason(c.env.DB), club.id),
   ]);
   return c.json({
     club: {
       id: club.id,
       name: club.name,
-      leagueTier: club.league_tier,
+      leagueTier: tier,
       logoKey: club.logo_key,
       status: club.status,
     },

@@ -6,7 +6,6 @@ import type { Env } from './env.ts';
 export interface BoundClub {
   id: number;
   name: string;
-  league_tier: string | null;
 }
 
 async function boundClubId(env: Env, userId: number): Promise<number | null> {
@@ -27,7 +26,8 @@ async function boundClubId(env: Env, userId: number): Promise<number | null> {
 export async function getBoundClub(env: Env, userId: number): Promise<BoundClub | null> {
   const clubId = await boundClubId(env, userId);
   if (clubId === null) return null;
-  return env.DB.prepare('SELECT id, name, league_tier FROM clubs WHERE id = ?').bind(clubId).first<BoundClub>();
+  // 增量 9：league_tier 由报名派生（tier.ts），不再随绑定查询返回
+  return env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(clubId).first<BoundClub>();
 }
 
 // OIDC 教练判定用：账号在认证中心是否绑定过球队（不看 club_id 是否已关联目录）

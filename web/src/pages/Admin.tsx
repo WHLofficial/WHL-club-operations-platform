@@ -408,7 +408,6 @@ function ClubsSection() {
   const { show, toastNode } = useToast();
   const [clubs, setClubs] = useState<AdminClubRow[] | null>(null);
   const [name, setName] = useState('');
-  const [tier, setTier] = useState<'premier' | 'second'>('premier');
   const [creating, setCreating] = useState(false);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
   const [unbinding, setUnbinding] = useState<number | null>(null);
@@ -428,7 +427,7 @@ function ClubsSection() {
     if (creating) return;
     setCreating(true);
     try {
-      await apiPost('/api/admin/clubs', { name: name.trim(), leagueTier: tier });
+      await apiPost('/api/admin/clubs', { name: name.trim() });
       setName('');
       show('俱乐部建好了，登记册上多了一页。');
       reload();
@@ -469,18 +468,11 @@ function ClubsSection() {
           俱乐部名字
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="比如：阿森纳" maxLength={40} />
         </label>
-        <div className="seg" role="radiogroup" aria-label="联赛级别">
-          <button type="button" className={tier === 'premier' ? 'on' : ''} onClick={() => setTier('premier')}>
-            顶级
-          </button>
-          <button type="button" className={tier === 'second' ? 'on' : ''} onClick={() => setTier('second')}>
-            次级
-          </button>
-        </div>
         <button className="btn" type="submit" disabled={creating || !name.trim()}>
           {creating ? '建队中…' : '建俱乐部'}
         </button>
       </form>
+      <p className="hint">联赛级别不再建队时定死：由各队在本赛季报名的定级赛事（顶级/次级联赛）自动派生。</p>
 
       {clubs === null ? (
         <p className="muted">正在翻登记册…</p>
@@ -506,7 +498,7 @@ function ClubsSection() {
                   <td>
                     {club.name} <span className="muted">#{club.id}</span>
                   </td>
-                  <td>{LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier}</td>
+                  <td>{club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : <span className="muted">未定级</span>}</td>
                   <td>
                     {club.binding ? (
                       <>
@@ -981,7 +973,7 @@ function ContractsSection() {
           <option value="">选择俱乐部…</option>
           {clubs.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name}（{LEAGUE_TIER_LABEL[c.leagueTier] ?? c.leagueTier}）
+              {c.name}（{c.leagueTier ? (LEAGUE_TIER_LABEL[c.leagueTier] ?? c.leagueTier) : '未定级'}）
             </option>
           ))}
         </select>
@@ -1210,7 +1202,7 @@ function RegistrationsSection() {
                       <td>
                         {club.clubName} <span className="muted">#{club.clubId}</span>
                       </td>
-                      <td>{club.leagueTier ? LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier : '—'}</td>
+                      <td>{club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : <span className="muted">未定级</span>}</td>
                       <td className="num mono">{club.firstTeam}</td>
                       <td className="num mono">{club.trainee}</td>
                       <td className="num mono">{club.wageTotal.toFixed(2)} m</td>

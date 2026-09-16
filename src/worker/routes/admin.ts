@@ -18,6 +18,7 @@ import { approveTransferDeal, createForcedAuction, cancelForcedAuction } from '.
 import { listWindows, openWindow, closeWindow } from '../window-machine.ts';
 import { queueResults, confirmResult } from '../results.ts';
 import { xpForEvent, recordGrowthEvent, runGrowthSettlement, type GrowthEventType } from '../growth.ts';
+import { deriveClubTier, tierCache } from '../tier.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -38,15 +39,18 @@ app.post('/clubs', async (c) => {
   const leagueTier = body?.leagueTier;
   if (!name) throw new HttpError(400, '俱乐部名字不能为空');
   if (name.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
-  if (leagueTier !== 'premier' && leagueTier !== 'second') {
+  // 增量 9：级别由赛事报名派生（worker/tier.ts），建队不再定级； AUTH_DB 未配置的
+  // 回滚通道下仍接受显式定级写休眠列（与旧行为一致），派生通道忽略该参数。
+  if (leagueTier !== undefined && leagueTier !== null && leagueTier !== 'premier' && leagueTier !== 'second') {
     throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
   }
+  const writeTier = c.env.AUTH_DB ? null : (leagueTier ?? null);
   const club = await c.env.DB.prepare(
     `INSERT INTO clubs (name, league_tier, status, created_at)
      VALUES (?, ?, 'active', ${nowSql()})
      RETURNING id, name, league_tier, status, created_at`,
   )
-    .bind(name, leagueTier)
+    .bind(name, writeTier)
     .first<{ id: number; name: string; league_tier: string; status: string; created_at: string }>()
     .catch(() => null);
   if (!club) throw new HttpError(409, '俱乐部名字已存在');
@@ -55,7 +59,7 @@ app.post('/clubs', async (c) => {
     action: 'club_create',
     targetType: 'club',
     targetId: club.id,
-    after: { name, leagueTier },
+    after: { name, leagueTier: writeTier },
   });
   return c.json(
     {
@@ -110,19 +114,24 @@ app.get('/clubs', async (c) => {
       });
     }
   }
+  // 增量 9：级别改报名派生（按当前可见赛季），休眠列不再回显
+  const season = await getVisibleSeason(c.env.DB);
+  const cache = tierCache();
   return c.json({
-    clubs: clubs.results.map((r) => {
-      const binding = byClub.get(r.id) ?? null;
-      return {
-        id: r.id,
-        name: r.name,
-        leagueTier: r.league_tier,
-        status: r.status,
-        createdAt: r.created_at,
-        binding: binding ? { userId: binding.userId, userName: binding.userName ?? null, boundAt: binding.boundAt } : null,
-        latestCode: latestCode.get(r.id) ?? null,
-      };
-    }),
+    clubs: await Promise.all(
+      clubs.results.map(async (r) => {
+        const binding = byClub.get(r.id) ?? null;
+        return {
+          id: r.id,
+          name: r.name,
+          leagueTier: await deriveClubTier(c.env, season, r.id, cache),
+          status: r.status,
+          createdAt: r.created_at,
+          binding: binding ? { userId: binding.userId, userName: binding.userName ?? null, boundAt: binding.boundAt } : null,
+          latestCode: latestCode.get(r.id) ?? null,
+        };
+      }),
+    ),
   });
 });
 
@@ -735,7 +744,7 @@ app.get('/registrations', async (c) => {
 
   const rows = await c.env.DB.prepare(
     `SELECT r.club_id, r.player_id, r.squad, p.name AS player_name,
-            c.name AS club_name, c.league_tier, ct.wage
+            c.name AS club_name, ct.wage
      FROM registrations r
      JOIN players p ON p.id = r.player_id
      JOIN clubs c ON c.id = r.club_id
@@ -749,15 +758,21 @@ app.get('/registrations', async (c) => {
       squad: string;
       player_name: string;
       club_name: string;
-      league_tier: string | null;
       wage: number | null;
     }>();
+
+  // 增量 9：级别改报名派生，不再读 clubs.league_tier 休眠列
+  const cache = tierCache();
+  const tiers = new Map<number, 'premier' | 'second' | null>();
+  for (const r of rows.results) {
+    if (!tiers.has(r.club_id)) tiers.set(r.club_id, await deriveClubTier(c.env, season, r.club_id, cache));
+  }
 
   const byClub = new Map<number, { clubId: number; clubName: string; leagueTier: string | null; players: { playerId: number; name: string; squad: string }[]; wageTotal: number }>();
   for (const r of rows.results) {
     let club = byClub.get(r.club_id);
     if (!club) {
-      club = { clubId: r.club_id, clubName: r.club_name, leagueTier: r.league_tier, players: [], wageTotal: 0 };
+      club = { clubId: r.club_id, clubName: r.club_name, leagueTier: tiers.get(r.club_id) ?? null, players: [], wageTotal: 0 };
       byClub.set(r.club_id, club);
     }
     club.players.push({ playerId: r.player_id, name: r.player_name, squad: r.squad });
@@ -790,10 +805,9 @@ app.get('/compliance', async (c) => {
   }
   if (season === null) return c.json({ season: null, clubs: [] });
 
-  const clubs = await c.env.DB.prepare('SELECT id, name, league_tier FROM clubs ORDER BY id LIMIT 200').all<{
+  const clubs = await c.env.DB.prepare('SELECT id, name FROM clubs ORDER BY id LIMIT 200').all<{
     id: number;
     name: string;
-    league_tier: string | null;
   }>();
   const regRows = await c.env.DB.prepare(
     `SELECT r.club_id, r.player_id, r.squad, p.name, p.position, p.ca, p.pa, p.base_ca, p.growable,
@@ -818,16 +832,29 @@ app.get('/compliance', async (c) => {
       wage: number | null;
     }>();
 
+  const cache = tierCache();
   const report = await Promise.all(
     clubs.results.map(async (club) => {
       const mine = regRows.results.filter((r) => r.club_id === club.id);
+      // 增量 9：级别报名派生；派生不到（未报名定级赛事）标 tier_missing，不再静默当 premier
+      const tier = await deriveClubTier(c.env, season, club.id, cache);
       if (mine.length === 0) {
         return {
           clubId: club.id,
           clubName: club.name,
-          leagueTier: club.league_tier,
+          leagueTier: tier,
           pass: false,
           issues: [{ rule: 'not_registered', message: '本赛季还没提交注册名单', playerIds: [] }],
+          stats: null,
+        };
+      }
+      if (tier === null) {
+        return {
+          clubId: club.id,
+          clubName: club.name,
+          leagueTier: null,
+          pass: false,
+          issues: [{ rule: 'tier_missing', message: '未定级：本赛季没有报名任何定级赛事（顶级/次级联赛）', playerIds: [] }],
           stats: null,
         };
       }
@@ -844,12 +871,12 @@ app.get('/compliance', async (c) => {
       });
       const firstTeam = mine.filter((r) => r.squad === 'first_team').map(toSp);
       const trainee = mine.filter((r) => r.squad === 'trainee').map(toSp);
-      const rules = await loadSquadContext(c.env.DB, club.league_tier);
+      const rules = await loadSquadContext(c.env.DB, tier);
       const result = checkSquad(firstTeam, trainee, rules);
       return {
         clubId: club.id,
         clubName: club.name,
-        leagueTier: club.league_tier,
+        leagueTier: tier,
         pass: result.pass,
         issues: result.issues,
         stats: result.stats,

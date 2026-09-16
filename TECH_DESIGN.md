@@ -162,7 +162,7 @@ CREATE TABLE players (
 ```sql
 CREATE TABLE clubs (
   id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
-  league_tier TEXT,                 -- premier/second
+  league_tier TEXT,                 -- 增量 9 起休眠：级别由赛季定级赛事报名派生（worker/tier.ts）；AUTH_DB 未配置时回落读此列（回滚通道）
   logo_key TEXT, status TEXT, created_at TEXT
 );
 CREATE TABLE club_bindings (        -- 增量 7 起休眠（真源 auth team_binding；保留防回滚，AUTH_DB 未配置时回落读此表）
@@ -786,6 +786,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 24 | 已定 | 球员初始归属（initial_club_id）= 导入时数据：首次名单认领写入（COALESCE 保解约重签不覆盖），存量按最早归属变更的 from_club_id 回填，只海捞过（free_agent）= 导入时无归属留 NULL；仅供成长「本队」判断与球员库初始视图展示，XP 场次匹配仍按当前归属名单（§8 口径不变） |
 | 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
 | 26 | 已定（增量 7） | 球队绑定真源上收 auth（三表 team/team_bind_code/team_binding；机器端点五条 HMAC）；本侧旧表 club_bind_code/club_bindings 休眠保留防回滚，AUTH_DB 未配置时回落读本地表（回滚通道）；发码 team_not_found 不自动登记目录（提示先登记关联，与 tour 侧自愈 register 不同）；OIDC 教练判定=绑定即教练（管理点仍走权限点；未绑定的准教练凭 club.* 权限点保留旁路进绑前端点） |
+| 27 | 已定（增量 9） | 俱乐部分级不再建队时定死（clubs.league_tier 休眠）：当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（worker/tier.ts）；注册提交派生不到级别一律 400 拦下（tier_pending「尚未在赛事平台报名，请等待赛事平台管理员确认报名」），注册页带报名状态探测（红=未报名/绿=已报名）；同时报两座定级赛事视为数据异常 500；AUTH_DB 未配置时回落读休眠列（回滚通道）；升降级=换季报名哪座定级赛事就在哪级，club 库零人工写入 |
 
 ## 16. 测试策略
 

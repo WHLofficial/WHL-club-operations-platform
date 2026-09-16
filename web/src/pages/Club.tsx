@@ -90,7 +90,7 @@ export default function Club() {
           <h2>{club.name}</h2>
           <div className="club-head-badges">
             <span className={`badge ${club.leagueTier === 'premier' ? 'gold' : 'gray'}`}>
-              {LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier}
+              {club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : '未定级'}
             </span>
             {win && (
               <span className="badge sky">
@@ -202,8 +202,20 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
     <section className="card">
       <h3>注册名单{squad.season !== null ? ` · 第 ${squad.season} 赛季` : ''}</h3>
       {toastNode}
+      {!squad.registeredInTournament ? (
+        <div className="banner bad">
+          尚未在赛事平台报名，请等待赛事平台管理员确认报名。名单可以在下面先排，但报名完成前提交不了注册。
+        </div>
+      ) : squad.rules?.tier && (
+        <div className="banner ok">
+          报名状态：<span className={`badge ${squad.rules.tier === 'premier' ? 'gold' : 'gray'}`}>
+            {LEAGUE_TIER_LABEL[squad.rules.tier] ?? squad.rules.tier}
+          </span>{' '}
+          已由赛事报名派生，可正常提交注册。
+        </div>
+      )}
       {!rules ? (
-        <p className="muted">正在加载注册规则…</p>
+        <p className="muted">{squad.registeredInTournament ? '正在加载注册规则…' : '报名完成后这里会挂出注册规则。'}</p>
       ) : (
         <>
           <p className="hint">
@@ -312,7 +324,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
           )}
 
           <div className="btn-row">
-            <button className="btn" type="button" disabled={!editable || busy} onClick={submit}>
+            <button className="btn" type="button" disabled={!editable || busy || !squad.registeredInTournament} onClick={submit}>
               {busy ? '提交中…' : squad.registration ? '重新提交注册名单' : '提交注册名单'}
             </button>
             {squad.registration && <span className="hint">重复提交会整体替换本赛季注册名单，放心改。</span>}
