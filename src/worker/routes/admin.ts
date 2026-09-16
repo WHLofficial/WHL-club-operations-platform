@@ -11,6 +11,7 @@ import { confirmImport, previewImport } from '../players-import.ts';
 import { confirmContractsImport, previewContractsImport } from '../contracts-import.ts';
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
 import { getVisibleSeason } from '../seasons.ts';
+import { settleTournamentStage, settleSeason, checkSeasonSettle, rejudgeGrowable } from '../season-settle.ts';
 import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminCancelSigning, requireReason } from '../market-intervene.ts';
 import { ledgerMovement } from '../ledger.ts';
 import { loadSquadContext } from '../squad-context.ts';
@@ -601,20 +602,49 @@ const COMPETITION_TYPES = ['league_premier', 'league_second', 'champions_cup', '
 
 app.post('/seasons', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
-  const body = (await readJson(c)) as { season?: unknown } | null;
+  const body = (await readJson(c)) as { season?: unknown; ageCap?: unknown } | null;
   const season = Number(body?.season);
   if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
+  // 可成长年龄上限（规则 4.1.1：大版本第 1/2/3+ 季 25/24/23 递减；建季时管理组直接填本季上限）
+  const ageCap = body?.ageCap === undefined || body?.ageCap === null ? null : Number(body?.ageCap);
+  if (ageCap !== null && (!Number.isInteger(ageCap) || ageCap < 15 || ageCap > 40)) throw new HttpError(400, '可成长年龄上限应为 15-40 的整数（规则参考 25/24/23）');
   const audit = createAuditStatement(c.env.DB);
   try {
     await c.env.DB.batch([
-      c.env.DB.prepare(`INSERT INTO seasons (season, status, created_at) VALUES (?, 'preparing', ${nowSql()})`).bind(season),
-      audit({ actor: user.id, action: 'season_create', targetType: 'season', targetId: season }),
+      c.env.DB.prepare(`INSERT INTO seasons (season, status, age_cap, created_at) VALUES (?, 'preparing', ?, ${nowSql()})`).bind(season, ageCap),
+      audit({ actor: user.id, action: 'season_create', targetType: 'season', targetId: season, after: ageCap !== null ? { ageCap } : undefined }),
     ]);
   } catch (err) {
     if (String(err).includes('UNIQUE')) throw new HttpError(409, '这个赛季已经存在');
     throw err;
   }
-  return c.json({ ok: true, season }, 201);
+  // 建档即按新上限重判全球员 growable（规则 4.1.1 季切口径）
+  const growable = ageCap !== null ? await rejudgeGrowable(c.env, ageCap) : 0;
+  return c.json({ ok: true, season, growable }, 201);
+});
+
+// 赛季结算前置检查（增量 11）：硬阻断清单 + 软警示清单
+app.get('/seasons/:id/settle-check', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  const season = Number(c.req.param('id'));
+  if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
+  if (!(await c.env.DB.prepare('SELECT season FROM seasons WHERE season = ?').bind(season).first())) throw new HttpError(404, '赛季不存在');
+  const check = await checkSeasonSettle(c.env, season);
+  return c.json({ ok: true, season, ...check });
+});
+
+// 赛季结算（增量 11）：手动按钮——忠诚奖金 → growable 重判 → seasons.status='settled'。
+// 硬阻断 409；软警示需 acknowledged=true 确认后继续（返回体带提示清单）
+app.post('/seasons/:id/settle-season', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  const body = (await readJson(c)) as { acknowledged?: unknown } | null;
+  return c.json(await settleSeason(c.env, user.id, c.req.param('id'), body?.acknowledged === true));
+});
+
+// 赛事完结结算（增量 11）：入场奖金/资格赛保底/小组赛剩余池一次性发放，stage_settled_at 幂等
+app.post('/season-bindings/:id/stage-settle', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  return c.json(await settleTournamentStage(c.env, user.id, c.req.param('id')));
 });
 
 app.get('/seasons', async (c) => {
@@ -676,12 +706,12 @@ app.get('/seasons/:id/tournaments', async (c) => {
   const season = Number(c.req.param('id'));
   if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
   const rows = await c.env.DB.prepare(
-    'SELECT id, tournament_id, competition_type FROM season_tournaments WHERE season = ? ORDER BY id',
+    'SELECT id, tournament_id, competition_type, stage_settled_at FROM season_tournaments WHERE season = ? ORDER BY id',
   )
     .bind(season)
-    .all<{ id: number; tournament_id: number; competition_type: string | null }>();
+    .all<{ id: number; tournament_id: number; competition_type: string | null; stage_settled_at: string | null }>();
   return c.json({
-    bindings: rows.results.map((r) => ({ id: r.id, tournamentId: r.tournament_id, competitionType: r.competition_type })),
+    bindings: rows.results.map((r) => ({ id: r.id, tournamentId: r.tournament_id, competitionType: r.competition_type, stageSettledAt: r.stage_settled_at })),
   });
 });
 

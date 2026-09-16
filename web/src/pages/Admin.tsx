@@ -38,6 +38,9 @@ import {
   type SeasonCurrent,
   type SeasonRow,
   type SeasonsResponse,
+  type SeasonSettleResult,
+  type SettleCheckResult,
+  type StageSettleResult,
   type TournamentRow,
   type WindowsResponse,
 } from '../lib/api.ts';
@@ -1770,6 +1773,9 @@ function SeasonsSection() {
   const [selectedSeason, setSelectedSeason] = useState('');
   const [bindings, setBindings] = useState<SeasonBinding[]>([]);
   const [newSeason, setNewSeason] = useState('');
+  const [newAgeCap, setNewAgeCap] = useState('');
+  const [settleArmed, setSettleArmed] = useState(false);
+  const [settleCheck, setSettleCheck] = useState<SettleCheckResult | null>(null);
   const [seasonArmed, setSeasonArmed] = useState(false);
   const [bindTournament, setBindTournament] = useState('');
   const [bindType, setBindType] = useState('league_premier');
@@ -1812,19 +1818,75 @@ function SeasonsSection() {
   }, [seasonNo, loadBindings]);
 
   const newSeasonValid = Number.isInteger(Number(newSeason)) && Number(newSeason) > 0;
+  const newAgeCapValid = newAgeCap.trim() === '' || (Number.isInteger(Number(newAgeCap)) && Number(newAgeCap) >= 15 && Number(newAgeCap) <= 40);
   const tournamentName = (id: number) => tournaments.find((t) => t.id === id)?.name;
 
   async function createSeason() {
     if (busy || !seasonArmed || !newSeasonValid) return;
     setBusy(true);
     try {
-      await apiPost<{ ok: boolean }>('/api/admin/seasons', { season: Number(newSeason) });
-      show(`赛季 ${Number(newSeason)} 已建档，进入备赛期。`);
+      const cap = newAgeCap.trim() === '' ? null : Number(newAgeCap);
+      const res = await apiPost<{ ok: boolean; growable: number }>('/api/admin/seasons', { season: Number(newSeason), ageCap: cap });
+      show(`赛季 ${Number(newSeason)} 已建档，进入备赛期${cap !== null ? `（可成长年龄上限 ${cap}，重判 growable ${res.growable} 人）` : ''}。`);
       setNewSeason('');
+      setNewAgeCap('');
       setSeasonArmed(false);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '建档失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runSeasonSettleCheck() {
+    if (busy || !seasonNo) return;
+    setBusy(true);
+    try {
+      const res = await api<SettleCheckResult>(`/api/admin/seasons/${seasonNo}/settle-check`);
+      setSettleCheck(res);
+      show(res.blockers.length > 0 ? `结算前置不满足：${res.blockers.join('；')}` : '硬前置全部满足，可结算。');
+    } catch (err) {
+      show(err instanceof Error ? err.message : '体检失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runSeasonSettle(acknowledged: boolean) {
+    if (busy || !seasonNo) return;
+    setBusy(true);
+    try {
+      const res = await apiPost<SeasonSettleResult>(`/api/admin/seasons/${seasonNo}/settle-season`, { acknowledged });
+      show(`赛季 ${seasonNo} 已结算：忠诚奖金 ${res.loyalty} 份、growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。`);
+      setSettleArmed(false);
+      setSettleCheck(null);
+      reload();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '结算失败';
+      if (msg.includes('待确认提示') && !acknowledged) {
+        if (window.confirm(`${msg}
+
+忽略警示并继续结算？`)) await runSeasonSettle(true);
+        else setSettleArmed(false);
+      } else {
+        show(msg, true);
+        setSettleArmed(false);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runStageSettle(b: SeasonBinding) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await apiPost<StageSettleResult>(`/api/admin/season-bindings/${b.id}/stage-settle`, {});
+      show(`赛事完结结算完成：${res.items} 笔入账。`);
+      loadBindings(seasonNo);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '完结结算失败', true);
     } finally {
       setBusy(false);
     }
@@ -1903,15 +1965,48 @@ function SeasonsSection() {
             placeholder="4"
           />
         </label>
+        <label className="field">
+          可成长年龄上限（规则 4.1.1，可选）
+          <input
+            value={newAgeCap}
+            onChange={(e) => {
+              setNewAgeCap(e.target.value);
+              setSeasonArmed(false);
+            }}
+            placeholder="25 / 24 / 23…"
+            className="mono"
+          />
+        </label>
         <button
           className={`btn${seasonArmed ? ' btn-armed' : ''}`}
           type="button"
-          disabled={busy || !newSeasonValid}
+          disabled={busy || !newSeasonValid || !newAgeCapValid}
           onClick={() => (seasonArmed ? createSeason() : setSeasonArmed(true))}
         >
           {seasonArmed ? '确认建档（再点一次）' : '建档'}
         </button>
+        <button className="btn btn-ghost" type="button" disabled={busy || !seasonNo} onClick={() => runSeasonSettleCheck()}>
+          结算体检
+        </button>
+        <button
+          className={`btn${settleArmed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={busy || !seasonNo}
+          onClick={() => (settleArmed ? runSeasonSettle(false) : setSettleArmed(true))}
+        >
+          {settleArmed ? '确认结算（再点一次）' : '结算赛季'}
+        </button>
       </div>
+      {settleCheck && (
+        <div className="hint">
+          {settleCheck.blockers.length > 0 ? (
+            <p className="badge red">硬阻断：{settleCheck.blockers.join('；')}</p>
+          ) : (
+            <p className="badge ok">硬前置全部满足</p>
+          )}
+          {settleCheck.warnings.length > 0 && <p>⚠️ {settleCheck.warnings.join('；')}</p>}
+        </div>
+      )}
       <div className="inline-form">
         <label className="field">
           赛季
@@ -1988,6 +2083,15 @@ function SeasonsSection() {
               >
                 {unbindArmedId === b.id ? '确认解绑（再点一次）' : '解绑'}
               </button>
+              {b.stageSettledAt ? (
+                <span className="badge" title="入场/保底/剩余池已一次性发放">
+                  已完结结算 {b.stageSettledAt.slice(0, 10)}
+                </span>
+              ) : (
+                <button className="btn btn-sm" type="button" disabled={busy} onClick={() => runStageSettle(b)}>
+                  完结结算
+                </button>
+              )}
             </div>
           ))
         )}

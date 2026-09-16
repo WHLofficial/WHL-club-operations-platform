@@ -61,6 +61,8 @@ export const CONFIG_KEYS = [
   'window_force_settle',
   'review_amount_threshold',
   'bid_pattern_alert',
+  'prize_table',
+  'loyalty_tiers',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -91,6 +93,16 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   // 增量 10：异常出价告警阈值（大额强制审 40m；短窗连续抬价/最小步长拉锯判据，JSON 可覆盖）
   review_amount_threshold: '40',
   bid_pattern_alert: '{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}',
+  // 增量 11：奖金表（TECH_DESIGN §9.1 原文，JSON 可覆盖）+ 忠诚奖金档位 [起效年限, RC 比例]
+  prize_table: JSON.stringify({
+    league_premier: { entry: 20, win: 8.5, draw: 6.6, loss: 4.7 },
+    league_second: { entry: 7.5, win: 6.7, draw: 4.8, loss: 2.9 },
+    qualifying: { fallback: 7.5 },
+    champions_group: { entry: 15, pool: 200, win: 7.0, draw: 2.5 },
+    champions_ko: { quarterfinal: 7.5, semifinal: 10, final: 12.5, champion: 5 },
+    super_cup: { win: 4.0, loss: 2.0 },
+  }),
+  loyalty_tiers: '[[0.5,0.05],[1.5,0.10],[2.5,0.20]]',
   voucher_refund: '0.25',
   xp_per_level: '10',
   trainee_xp_full: '40',

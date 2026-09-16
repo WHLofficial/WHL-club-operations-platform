@@ -212,7 +212,7 @@ describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
     `);
     fx.tour.exec(`
       CREATE TABLE tournament (id INTEGER PRIMARY KEY, name TEXT, status TEXT);
-      CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT);
+      CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT, config_json TEXT DEFAULT '{}');
       CREATE TABLE entry (id INTEGER PRIMARY KEY, tournament_id INTEGER, team_id INTEGER, seed INTEGER);
       CREATE TABLE team (id INTEGER PRIMARY KEY, name TEXT);
       CREATE TABLE player (id INTEGER PRIMARY KEY, team_id INTEGER, name TEXT, number INTEGER);

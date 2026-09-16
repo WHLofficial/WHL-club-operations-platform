@@ -656,6 +656,7 @@ export interface SeasonBinding {
   id: number;
   tournamentId: number;
   competitionType: string | null;
+  stageSettledAt?: string | null;
 }
 
 export interface SeasonCurrent {
@@ -673,6 +674,7 @@ export interface SeasonCurrent {
 export interface SeasonRow {
   season: number;
   status: string;
+  ageCap?: number | null;
 }
 
 export interface SeasonsResponse {
@@ -692,6 +694,25 @@ export interface TournamentRow {
 export interface BindTournamentResult {
   ok: boolean;
   tournament: { id: number; name: string };
+}
+
+export interface SettleCheckResult {
+  ok: boolean;
+  season: number;
+  blockers: string[];
+  warnings: string[];
+}
+
+export interface SeasonSettleResult {
+  ok: boolean;
+  loyalty: number;
+  growable: number;
+  warnings: string[];
+}
+
+export interface StageSettleResult {
+  ok: boolean;
+  items: number;
 }
 
 export interface ResultQueueRow {

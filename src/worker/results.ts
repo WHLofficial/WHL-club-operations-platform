@@ -6,6 +6,7 @@ import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { recordGrowthEventStatements, defensivePositionsForClub, type GrowthEventInput } from './growth.ts';
 import { queueClubNotification } from './notify.ts';
+import { matchPrizeStatements } from './prizes.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -20,6 +21,7 @@ interface TourMatchRow {
   away_team_id: number | null;
   round: number | null;
   stage_name: string | null;
+  stage_config: string | null;
   home_team: string | null;
   away_team: string | null;
   score_home: number | null;
@@ -28,6 +30,7 @@ interface TourMatchRow {
   pen_away: number | null;
   walkover_side: string | null;
   winner_team: string | null;
+  winner_team_id: number | null;
   finished_at: string | null;
 }
 
@@ -35,10 +38,10 @@ interface TourMatchRow {
 const MATCH_SELECT = `
   SELECT m.id, m.status, s.tournament_id, s.kind AS stage_kind,
          eh.team_id AS home_team_id, ea.team_id AS away_team_id,
-         m.round, s.name AS stage_name,
+         m.round, s.name AS stage_name, s.config_json AS stage_config,
          th.name AS home_team, ta.name AS away_team,
          m.score_home, m.score_away, m.pen_home, m.pen_away,
-         m.walkover_side, tw.name AS winner_team, m.finished_at
+         m.walkover_side, tw.name AS winner_team, tw.id AS winner_team_id, m.finished_at
   FROM match m
   JOIN stage s ON s.id = m.stage_id
   LEFT JOIN entry eh ON eh.id = m.home_entry_id
@@ -174,7 +177,7 @@ export async function confirmResult(
   env: Env,
   actor: number,
   matchIdInput: unknown,
-): Promise<{ result: ConfirmedResultItem; xp: XpHookSummary }> {
+): Promise<{ result: ConfirmedResultItem; xp: XpHookSummary; prizeError: string | null }> {
   const matchId = Number(matchIdInput);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(400, '比赛 ID 不对');
 
@@ -203,10 +206,10 @@ export async function confirmResult(
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO result_confirmations
-           (season, window_seq, tournament_id, match_id, competition_type, stage_name, round,
-            home_team, away_team, score_home, score_away, pen_home, pen_away, walkover_side,
-            winner_team, finished_at, confirmed_by, confirmed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${nowSql()})`,
+           (season, window_seq, tournament_id, match_id, competition_type, stage_name, stage_kind, round,
+            home_team_id, away_team_id, home_team, away_team, score_home, score_away, pen_home, pen_away,
+            walkover_side, winner_team, finished_at, confirmed_by, confirmed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${nowSql()})`,
       ).bind(
         ctx.season,
         ctx.window_seq,
@@ -214,7 +217,10 @@ export async function confirmResult(
         matchId,
         binding.competition_type,
         m.stage_name,
+        m.stage_kind,
         m.round,
+        m.home_team_id,
+        m.away_team_id,
         m.home_team,
         m.away_team,
         m.score_home,
@@ -253,10 +259,48 @@ export async function confirmResult(
   )
     .bind(matchId)
     .first();
-  // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知（§12，尽力而为不阻塞确认）
+  // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知（§12，尽力而为不阻塞确认）；
+  // 钩子③赛事奖金即时入账（增量 11，吞错不阻塞确认——奖金失败可重确认同 match 幂等重放）
   const xp = await recordAutoXpForMatch(env, matchId, m, ctx);
   await queueResultNotifications(env, ctx, m);
-  return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp };
+  let prizeError: string | null = null;
+  try {
+    const prizeStatements = await matchPrizeStatements(env, {
+      matchId,
+      season: ctx.season,
+      competitionType: binding.competition_type,
+      stageKind: m.stage_kind,
+      round: m.round,
+      homeTeamId: m.home_team_id,
+      awayTeamId: m.away_team_id,
+      scoreHome: m.score_home,
+      scoreAway: m.score_away,
+      penHome: m.pen_home,
+      penAway: m.pen_away,
+      walkoverSide: m.walkover_side,
+      winnerTeamId: m.winner_team_id,
+      stageEntryCount: stageEntryCount(m.stage_config),
+    });
+    if (prizeStatements.length > 0) await env.DB.batch(prizeStatements);
+  } catch (err) {
+    prizeError = String(err);
+  }
+  return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp, prizeError };
+}
+
+/** elim 阶段 config_json 里的入场队数（晋级轮次推算用；解析失败按未知处理=不发晋级奖金） */
+function stageEntryCount(configJson: string | null): number | null {
+  if (!configJson) return null;
+  try {
+    const cfg = JSON.parse(configJson) as Record<string, unknown>;
+    for (const key of ['entry_count', 'entryCount', 'bracket_size', 'bracketSize', 'size']) {
+      const v = cfg[key];
+      if (typeof v === 'number' && v > 1) return v;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // 确认通知：给主客两队绑了 QQ 的教练各排一条（队名 → 平台俱乐部按名匹配，同 XP 匹配口径）

@@ -4,12 +4,14 @@
 // ——活跃谈判会话（force 且 window_force_settle=true 时按 E 强制成约）、匹配等待单、
 // 待审队列全空——然后落 closed 并做窗尾收口（无人出价下架收费、竞价转待审）。
 import type { Env } from './env.ts';
+import type { PayrollSummary } from './window-payroll.ts';
 import { HttpError } from '../lib/http.ts';
 import { createConfigService } from '../core/config.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { getOpenWindow } from './seasons.ts';
 import { settleOverdue } from './market-settle.ts';
 import { forceSettleAtExpected } from './negotiations.ts';
+import { windowPayrollStatements } from './window-payroll.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -165,7 +167,7 @@ export async function closeWindow(
   env: Env,
   actor: number,
   forceInput: unknown,
-): Promise<{ ok: true; season: number; windowSeq: number; forceSettled: number }> {
+): Promise<{ ok: true; season: number; windowSeq: number; forceSettled: number; payroll: PayrollSummary }> {
   const db = env.DB;
   const win = await getOpenWindow(db);
   if (!win) throw new HttpError(409, '当前没有开着的窗口');
@@ -206,6 +208,8 @@ export async function closeWindow(
   }
 
   const audit = createAuditStatement(db);
+  // 窗末扣款（增量 11）：工资+富人税并入关窗批（窗口状态 UPDATE 行数=原子闸；失败整批回滚含关窗）
+  const payroll = await windowPayrollStatements(env, win.season, win.windowSeq);
   const results = await db.batch([
     db
       .prepare(`UPDATE season_windows SET status = 'closed', closed_at = ${nowSql()} WHERE season = ? AND window_seq = ? AND status = 'open'`)
@@ -217,9 +221,10 @@ export async function closeWindow(
       targetId: null,
       after: { season: win.season, windowSeq: win.windowSeq, forceSettled },
     }),
+    ...payroll.statements,
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '窗口刚被关过了');
   // 窗尾收口（4.4.7）：无人出价下架收费、仍在竞价的强制进待审
   await settleOverdue(env, { actor });
-  return { ok: true, season: win.season, windowSeq: win.windowSeq, forceSettled };
+  return { ok: true, season: win.season, windowSeq: win.windowSeq, forceSettled, payroll: payroll.summary };
 }

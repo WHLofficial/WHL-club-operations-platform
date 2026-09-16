@@ -18,7 +18,7 @@ interface Fixture {
 // 比赛系统库表（照 WHL-tournament-management-system 迁移裁剪）：比赛事件含球员/助工者
 const TOUR_SCHEMA = `
   CREATE TABLE tournament (id INTEGER PRIMARY KEY, name TEXT, status TEXT);
-  CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT);
+  CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT, config_json TEXT DEFAULT '{}');
   CREATE TABLE entry (id INTEGER PRIMARY KEY, tournament_id INTEGER, team_id INTEGER, seed INTEGER);
   CREATE TABLE team (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE player (id INTEGER PRIMARY KEY, team_id INTEGER, name TEXT, number INTEGER);
