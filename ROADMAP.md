@@ -89,12 +89,12 @@
 
 **FC26 ID 对齐（2026-09-16 已执行）**：球员/球队真源改挂 FC26 数据库 id（用户四裁决：①club `clubs.id` 换 EA id；②tour `team.id` 整体换 id 级联历史；③球员库 18408 人**暂缓导入**，成熟后经 agent 导入；④tour 570 球员同步换 EA id）。执行与验证：
 
-- 匹配：tour 570 球员对 FC26db 18408 人——516 自动匹配 / 54 歧义暂留本地 id / 0 未中（`player-match.json`）。
+- 匹配：tour 570 球员对 FC26db 18408 人——516 自动匹配 / 54 歧义 / 0 未中（`player-match.json`）；54 歧义后经 s901 阵容表复核全解（`s901-resolve.json`，52 同名唯一命中+2 队籍收窄，`rekey-fc26-s901.sql` 227 句补键已执行），570/570 均 EA id。
 - tour 全库重键：team/player 两阶段 temp 中转（`rekey-fc26.sql` 574 句），team_member/entry/auth_code/tactic_submission.slots_json（110 处）/tactic.roster_json（91 处）/match_event/motm_vote 级联；本地彩排（生产快照 `fc26-test-dump.sql`，未提交）FK 违规 0 后生产经 D1 REST `/query` 单事务执行 567 句成功——**`--file` import 通道 defer_foreign_keys 会失效致 FK 回滚，必须走 `--command`/REST 通道**。
 - 跨库目录同步：club `clubs.id` 重键 EA、auth `team.tour_team_id`+`team.club_id` 重键（`rekey-cross-auth.sql`，同为两阶段）；终验三库 0 孤儿、auth↔tour↔club 名称 0 不符，里昂 66/66。
 - 脚本归档 tour 仓 `scripts/fc26-id-rekey/`。club 仓 `seed-clubs.sql` 已过时（id 已重键，勿再执行）。
 
-**遗留**：54 歧义球员人工裁决；`clubs.league_tier` 待需求方给分级（建表语句 tier 仅建时可定）；球员库导入（18408 人）暂缓。
+**遗留**：`clubs.league_tier` 待需求方给分级（建表语句 tier 仅建时可定）；球员库导入（18408 人）暂缓。
 
 ---
 
