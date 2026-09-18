@@ -4,7 +4,7 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
-import { recordGrowthEventStatements, defensivePositionsForClub, type GrowthEventInput } from './growth.ts';
+import { recordGrowthEventStatements, defensivePositionsForClub, isCpuTeam, type GrowthEventInput } from './growth.ts';
 import { queueClubNotification } from './notify.ts';
 import { matchPrizeStatements } from './prizes.ts';
 import { matchAttendanceStatements } from './home.ts';
@@ -333,6 +333,7 @@ async function queueResultNotifications(
   };
   for (const teamName of new Set([m.home_team, m.away_team])) {
     if (!teamName) continue;
+    if (isCpuTeam(teamName)) continue; // CPU 队不是平台俱乐部（无绑定教练），不发通知
     const club = await env.DB.prepare('SELECT id FROM clubs WHERE name = ?').bind(teamName).first<{ id: number }>();
     if (!club) continue;
     await queueClubNotification(env, club.id, 'result_confirmed', {
@@ -353,7 +354,8 @@ interface XpHookSummary {
 /**
  * 从比赛系统 match_event 生成出场/进球/助攻/零封事件（growth_events 去重锚防重复）。
  * 限制口径（§15 假设 20-22）：仅联赛与冠军杯小组赛计 XP；弃权场不计；训练营球员不按场次
- * （走结算固定 XP）。球员匹配按「队名=俱乐部名 → 球员名=名单名」，解不开的进 unresolved 由管理组补录。
+ * （走结算固定 XP）。球员匹配按「队名=俱乐部名 → 球员名=名单名」，解不开的进 unresolved 由管理组补录；
+ * CPU 队（队名带 (CPU)）整队静默跳过，不计 XP 也不进 unresolved（用户规则 2026-09-18）。
  */
 async function recordAutoXpForMatch(
   env: Env,
@@ -403,6 +405,8 @@ async function recordAutoXpForMatch(
   const rosterCache = new Map<string, { id: number; position: string | null; status: string } | null>();
   async function resolve(teamName: string | null, playerName: string | null) {
     if (!teamName || !playerName) return null;
+    // CPU 队（队名带 (CPU)）球员无成长：整队静默跳过，不进 unresolved 提示（用户规则 2026-09-18）
+    if (isCpuTeam(teamName)) return null;
     let club = clubCache.get(teamName);
     if (club === undefined) {
       const row = await env.DB.prepare('SELECT id FROM clubs WHERE name = ?').bind(teamName).first<{ id: number }>();

@@ -254,6 +254,17 @@ export async function defensivePositionsForClub(db: D1Database, clubId: number):
   return defensive;
 }
 
+// ---- CPU 队判定（用户规则 2026-09-18）----
+
+/**
+ * 比赛系统里队名以半角「(CPU)」结尾的队 = CPU 队。严格匹配，不做全角括号/大小写/空格容错：
+ * 队名即口径，改名即重新判定。CPU 队球员无成长，且视同海里球员——平台不为这些队建俱乐部行，
+ * 其球员归属/合同/成长一律按无归属处理（可海捞）。
+ */
+export function isCpuTeam(teamName: string | null | undefined): boolean {
+  return typeof teamName === 'string' && teamName.endsWith('(CPU)');
+}
+
 // ---- 赛季结算（§10.1 结算行 + 里程碑；生成升级待办）----
 
 export interface SettlementSummary {

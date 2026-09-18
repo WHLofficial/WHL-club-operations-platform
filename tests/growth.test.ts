@@ -6,7 +6,7 @@ import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
-import { xpForEvent, milestoneThresholds, milestoneXp } from '../src/worker/growth.ts';
+import { xpForEvent, milestoneThresholds, milestoneXp, isCpuTeam } from '../src/worker/growth.ts';
 
 interface Fixture {
   env: Env;
@@ -264,6 +264,39 @@ describe('赛果确认钩子：自动 XP（§15 假设 20-22）', () => {
 
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM growth_events')?.n).toBe(0);
     expect(xpOf(fx, 20)).toBe(0);
+  });
+
+  it('CPU 队（队名带 (CPU)）整队静默跳过：不计 XP，也不进「没匹配上」提示', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    seedTour(fx);
+    await bindSeason(fx);
+    // 906 阿森纳 1:2 巴塞罗那(CPU)：CPU 队球员视同海里球员（平台无俱乐部行、无合同）
+    fx.tour.exec(`
+      INSERT INTO team (id, name) VALUES (4, '巴塞罗那(CPU)');
+      INSERT INTO entry (id, tournament_id, team_id, seed) VALUES (14, 5, 4, 3);
+      INSERT INTO player (id, team_id, name, number) VALUES (401, 4, 'CPU前锋', 9);
+      INSERT INTO match (id, stage_id, round, slot, home_entry_id, away_entry_id, score_home, score_away, status, winner_entry_id, finished_at)
+        VALUES (906, 50, 3, 1, 11, 14, 1, 2, 'finished', 14, '2026-07-10T21:00:00Z');
+      INSERT INTO match_event (match_id, player_id, assist_player_id, type, minute) VALUES
+        (906, 101, NULL, 'goal', 20), (906, 401, NULL, 'goal', 30), (906, 401, NULL, 'goal', 35);
+    `);
+
+    const res = await post('/api/admin/results/906/confirm', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    const xp = ((await res.json()) as { xp: { granted: number; unresolved: string[] } }).xp;
+    expect(xp.granted).toBe(2); // 只有阿森纳张三：出场 1 + 进球 1
+    expect(xp.unresolved).toEqual([]); // CPU 队不再提示补录，也不牵扯它的球员名
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '906'")?.n).toBe(2);
+    expect(xpOf(fx, 10)).toBe(1.5); // 张三：出场 1 + 一球 0.5（CPU 队两名 CPU 球员的进球一分不记）
+
+    // 严格匹配：只有半角「(CPU)」后缀算 CPU 队，全角/大小写/中间位置都不算
+    expect(isCpuTeam('巴塞罗那(CPU)')).toBe(true);
+    expect(isCpuTeam('（CPU）巴塞罗那')).toBe(false);
+    expect(isCpuTeam('巴塞罗那（CPU）')).toBe(false);
+    expect(isCpuTeam('巴塞罗那(cpu)')).toBe(false);
+    expect(isCpuTeam('CPU')).toBe(false);
+    expect(isCpuTeam(null)).toBe(false);
   });
 });
 
