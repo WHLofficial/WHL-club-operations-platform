@@ -134,13 +134,10 @@ export interface PlayerDetail {
     growable: boolean;
     growthXp: number;
     gameAttrs: Record<string, unknown> | null;
-    initialClubId: number | null;
     createdAt: string;
     updatedAt: string;
   };
   club: { id: number; name: string } | null;
-  /** 初始归属（导入时数据，增量 6.1 d7）：仅供展示与成长「本队」判断口径 */
-  initialClub: { id: number; name: string } | null;
   contract: ContractDto | null;
 }
 
@@ -149,8 +146,6 @@ export interface PlayerDetail {
 export interface PlayerLibraryRow extends PlayerListItem {
   growable: boolean;
   clubName: string | null;
-  /** 初始归属名（view=initial 时主显示列） */
-  initialClubName: string | null;
 }
 
 export interface PlayersLibraryResponse {
@@ -516,6 +511,8 @@ export interface FreeAgentRow {
   age: number | null;
   ca: number | null;
   pa: number | null;
+  /** 现东家（增量 14：CPU 队球员可被海捞，名单里要能看出他为什么在海捞池） */
+  clubName: string | null;
   bannedThisWindow: boolean;
 }
 

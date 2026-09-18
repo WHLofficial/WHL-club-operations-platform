@@ -103,8 +103,6 @@ export default function PlayersLibrary() {
   const canPrev = page > 1;
   const canNext = nextCursor !== null && !busy;
 
-  const clubHeader = view === 'initial' ? '初始归属' : '归属';
-
   return (
     <div className="container">
       <h2>球员库</h2>
@@ -204,7 +202,7 @@ export default function PlayersLibrary() {
         </div>
 
         {view === 'initial' && (
-          <p className="hint">初始视图是导入时的底册：归属打建档俱乐部，CA 取建档值，PA 取导入的上限值。</p>
+          <p className="hint">初始视图是导入时的底册：CA 取建档值，PA 取导入的上限值。归属列给的是当前归属。</p>
         )}
 
         {loadError && <div className="banner warn">{loadError}</div>}
@@ -222,7 +220,7 @@ export default function PlayersLibrary() {
                 <tr>
                   <th>UID</th>
                   <th>姓名</th>
-                  <th>{clubHeader}</th>
+                  <th>归属</th>
                   <th>位置</th>
                   <th className="num">年龄</th>
                   <th className="num">CA</th>
@@ -241,7 +239,7 @@ export default function PlayersLibrary() {
                     <td>
                       <Link to={`/players/${p.id}`}>{p.name}</Link>
                     </td>
-                    <td>{(view === 'initial' ? p.initialClubName : p.clubName) ?? '自由身'}</td>
+                    <td>{p.clubName ?? '自由身'}</td>
                     <td>{p.position ?? '—'}</td>
                     <td className="num mono">{p.age ?? '—'}</td>
                     <td className="num mono">{p.ca}</td>

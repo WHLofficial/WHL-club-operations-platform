@@ -227,7 +227,7 @@ export default function Player() {
     );
   }
 
-  const { player, club, contract, initialClub } = data;
+  const { player, club, contract } = data;
   const attrs = player.gameAttrs ?? {};
   const nation = nationName(attrs['naID']);
 
@@ -282,7 +282,6 @@ export default function Player() {
             {player.growthTier > 1 && <span className="badge gray">成长档位 {player.growthTier}</span>}
           </div>
           <p className="player-card-agent">经纪人档位 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
-          <p className="player-card-agent">初始归属 {initialClub ? initialClub.name : '无（海捞入行）'}</p>
         </section>
 
         <section className="dossier-file">

@@ -17,6 +17,16 @@ import openpyxl
 DEFAULT_SOURCE = r"E:\Downloads\FC26db20251217_fixed.xlsx"
 OUT_DIR = Path(__file__).resolve().parent.parent / "web" / "assets" / "ref"
 
+# 增量 14 裁决 3：EA 未授权俱乐部在游戏里用假名 + 新 id（EAFC 26 IDs 表里 39/44/46/47 整段不存在）。
+# 平台统一走「游戏真 id + 真名」，所以这儿补 4 条真名条目；老 id 条目保留不动——
+# 数据库里历史 game_attrs.TeamID 还可能是它们，删了会让属性页签显示不出队名。
+TEAM_NAME_OVERRIDES = {
+    131681: "AC Milan",  # 游戏名 Milano FC
+    131682: "Inter",  # 游戏名 Lombardia FC
+    115841: "Lazio",  # 游戏名 Latium
+    115845: "Atalanta",  # 游戏名 Bergamo Calcio
+}
+
 
 def rows_of(ws):
     it = ws.iter_rows(values_only=True)
@@ -43,6 +53,14 @@ def simple_rows(ws, id_keys, name_keys):
     return out
 
 
+def merge_team_overrides(teams):
+    """把 TEAM_NAME_OVERRIDES 合进队名表（覆盖同 id，按 id 升序输出，与 team.json 既有排序一致）"""
+    by_id = {t["id"]: t for t in teams}
+    for tid, name in TEAM_NAME_OVERRIDES.items():
+        by_id[tid] = {"id": tid, "name": name}
+    return [by_id[tid] for tid in sorted(by_id)]
+
+
 def main():
     source = Path(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_SOURCE)
     wb = openpyxl.load_workbook(source, read_only=True, data_only=True)
@@ -66,7 +84,7 @@ def main():
         for r in rows_of(wb["RoleID"])
         if col(r, "ID") is not None
     ]
-    teams = simple_rows(wb["TeamID"], ("ID",), ("Name",))
+    teams = merge_team_overrides(simple_rows(wb["TeamID"], ("ID",), ("Name",)))
 
     outputs = {
         "nation.json": nations,

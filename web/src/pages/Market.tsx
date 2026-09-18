@@ -766,6 +766,7 @@ function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; 
                     <tr key={p.id}>
                       <td>
                         <Link to={`/players/${p.id}`}>{p.name}</Link>
+                        {p.clubName && <span className="badge gray">{p.clubName}</span>}
                         {p.bannedThisWindow && <span className="badge red">本窗禁签</span>}
                       </td>
                       <td>{p.position ?? '—'}</td>
