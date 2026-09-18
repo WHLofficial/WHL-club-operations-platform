@@ -25,6 +25,7 @@ import {
   type ConfirmResultResult,
   type ForcedAuctionResult,
   type GrowthSettlementResult,
+  type GrowthPeriodsResponse,
   type ImportConfirm,
   type ImportPreview,
   type ManualLedgerResult,
@@ -145,6 +146,7 @@ function WindowsSection() {
   const [season, setSeason] = useState('');
   const [seq, setSeq] = useState('');
   const [openBusy, setOpenBusy] = useState(false);
+  const [declarePeriod, setDeclarePeriod] = useState(false);
   const [closeArmed, setCloseArmed] = useState(false);
   const [forceArmed, setForceArmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -166,10 +168,15 @@ function WindowsSection() {
       const res = await apiPost<OpenWindowResult>('/api/admin/windows/open', {
         ...(season.trim() === '' ? {} : { season: Number(season) }),
         ...(seq.trim() === '' ? {} : { windowSeq: Number(seq) }),
+        ...(declarePeriod ? { declareGrowthPeriod: true } : {}),
       });
-      show(`窗口已开：第 ${res.season} 赛季 · 窗口 ${res.windowSeq}。全联盟经纪人档位重掷了 ${res.rerolled} 名球员。`);
+      show(
+        `窗口已开：第 ${res.season} 赛季 · 窗口 ${res.windowSeq}。全联盟经纪人档位重掷了 ${res.rerolled} 名球员。` +
+          (res.growthPeriodDeclared ? ' 已同时宣告新成长期，里程碑重新起算。' : ''),
+      );
       setSeason('');
       setSeq('');
+      setDeclarePeriod(false);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '开窗失败', true);
@@ -205,7 +212,7 @@ function WindowsSection() {
       <p className="hint">
         同一时刻只有一个窗口开着。开窗会给全联盟球员重掷经纪人档位；关窗前先处理完市场截止单，
         并要求没有待审单、没有等待匹配的激活单、没有进行中的签约谈判——除非开了 window_force_settle 参数并用强制关窗，
-        未谈完的谈判会按买方已提交的条款强制成约。
+        未谈完的谈判会按买方已提交的条款强制成约。勾选「同时宣告新成长期」会在开窗同一批里画一条里程碑起算线。
       </p>
       <div className="inline-form">
         <div className="field">
@@ -220,6 +227,10 @@ function WindowsSection() {
           {openBusy ? '开窗中…' : '开新窗'}
         </button>
       </div>
+      <label className="field field-check">
+        <input type="checkbox" checked={declarePeriod} onChange={(e) => setDeclarePeriod(e.target.checked)} />
+        同时宣告新成长期（里程碑从开窗时点重新累计；成长期不绑窗口，之后也可以手动宣告）
+      </label>
       <div className="inline-form">
         <button
           className={`btn${closeArmed ? ' btn-armed' : ''}`}
@@ -2340,7 +2351,20 @@ function GrowthSection() {
   const [tierPlayerId, setTierPlayerId] = useState('');
   const [tier, setTier] = useState('1');
   const [tierArmed, setTierArmed] = useState(false);
+  const [periods, setPeriods] = useState<GrowthPeriodsResponse | null>(null);
+  const [periodNote, setPeriodNote] = useState('');
+  const [periodArmed, setPeriodArmed] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const reloadPeriods = useCallback(() => {
+    api<GrowthPeriodsResponse>('/api/admin/growth/periods')
+      .then(setPeriods)
+      .catch((err: unknown) => show(err instanceof Error ? err.message : '成长期加载失败', true));
+  }, [show]);
+
+  useEffect(() => {
+    reloadPeriods();
+  }, [reloadPeriods]);
 
   useEffect(() => {
     api<SeasonCurrent>('/api/seasons/current')
@@ -2360,6 +2384,26 @@ function GrowthSection() {
     setEventArmed(false);
     setRunArmed(false);
     setTierArmed(false);
+    setPeriodArmed(false);
+  }
+
+  async function declarePeriod() {
+    if (busy || !periodArmed) return;
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = {};
+      if (periodNote.trim() !== '') body.note = periodNote.trim();
+      const r = await apiPost<{ ok: boolean; id: number; startEventId: number }>('/api/admin/growth/periods', body);
+      show(`新成长期已宣告（第 ${r.id} 期）：里程碑从这个时点之后的进+攻重新累计。`);
+      setPeriodNote('');
+      setPeriodArmed(false);
+      reloadPeriods();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '宣告失败', true);
+      resetArm();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function recordEvent() {
@@ -2396,7 +2440,7 @@ function GrowthSection() {
       });
       setSummary(r);
       show(
-        `结算完成：训练营 ${r.traineeCount} 人 ×${r.traineeXp} XP，中国计划 ${r.chinaCount} 人，里程碑补发 ${r.milestonesGranted} 条。`,
+        `结算完成（成长期 ${r.growthPeriodId === 0 ? '未宣告' : `第 ${r.growthPeriodId} 期`}）：训练营 ${r.traineeCount} 人 ×${r.traineeXp} XP，中国计划 ${r.chinaCount} 人，里程碑补发 ${r.milestonesGranted} 条。`,
       );
       setRunArmed(false);
     } catch (err) {
@@ -2492,8 +2536,76 @@ function GrowthSection() {
       </div>
       {selectedType && <p className="hint">折算口径：{selectedType.hint}。</p>}
 
+      <h3>成长期</h3>
+      <p className="hint">
+        一个赛季可以有多个成长期（通常夹在两个窗口之间 = 半赛季，也可能临时改变，所以不绑窗口）。里程碑（进+攻 5/10/15/20…）
+        只累计当前成长期内的进球与助攻；球员被解约时还会单独划断一条线。宣告只是画一条线，不改任何球员数据，可以随时宣告。
+      </p>
+      <p className="hint">
+        当前成长期：
+        {periods?.current ? (
+          <>
+            <strong className="mono"> 第 {periods.current.id} 期</strong>
+            <span className="muted">
+              （{periods.current.source === 'window_open' ? '开窗自动宣告' : '手动宣告'}
+              {periods.current.declaredAt ? ` · ${periods.current.declaredAt.slice(0, 10)}` : ''}
+              {periods.current.note ? ` · ${periods.current.note}` : ''}）
+            </span>
+          </>
+        ) : (
+          <span className="muted"> 还没宣告过（里程碑按全生涯累计；宣告第一期后只算当期）</span>
+        )}
+      </p>
+      <div className="inline-form">
+        <label className="field">
+          备注（可选）
+          <input
+            value={periodNote}
+            onChange={(e) => {
+              setPeriodNote(e.target.value);
+              resetArm();
+            }}
+            placeholder="如：半赛季换血期"
+          />
+        </label>
+        <button
+          className={`btn${periodArmed ? ' btn-armed' : ''}`}
+          type="button"
+          disabled={busy}
+          onClick={() => (periodArmed ? declarePeriod() : setPeriodArmed(true))}
+        >
+          {periodArmed ? '确认宣告（再点一次）' : '宣告新成长期'}
+        </button>
+      </div>
+      {periods && periods.periods.length > 1 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>期号</th>
+                <th>赛季</th>
+                <th>来源</th>
+                <th>备注</th>
+                <th>宣告时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {periods.periods.map((p) => (
+                <tr key={p.id}>
+                  <td className="num mono">#{p.id}</td>
+                  <td className="mono">{p.season ?? '—'}</td>
+                  <td>{p.source === 'window_open' ? '开窗自动' : '手动'}</td>
+                  <td>{p.note ?? <span className="muted">—</span>}</td>
+                  <td className="mono muted">{p.declaredAt?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <h3>赛季结算</h3>
-      <p className="hint">按 §10.1 结算：训练营球员固定经验、中国计划加成、进+攻里程碑补发；重放安全，重复运行不会重复入账。升级在球员档案页选方案。</p>
+      <p className="hint">按 §10.1 结算：训练营球员固定经验、中国计划加成、进+攻里程碑补发（只算当前成长期内）；重放安全，重复运行不会重复入账。升级在球员档案页选方案。</p>
       <div className="inline-form">
         <label className="field">
           赛季编号

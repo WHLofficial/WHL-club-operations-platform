@@ -570,6 +570,8 @@ export interface OpenWindowResult {
   season: number;
   windowSeq: number;
   rerolled: number;
+  /** 开窗时勾选了「同时宣告新成长期」 */
+  growthPeriodDeclared: boolean;
 }
 
 export interface CloseWindowResult {
@@ -847,11 +849,29 @@ export interface GrowthSettlementResult {
   ok: boolean;
   season: number;
   half: boolean;
+  /** 本次结算依据的成长期（0 = 还没宣告过，全生涯口径） */
+  growthPeriodId: number;
   traineeXp: number;
   traineeCount: number;
   chinaCount: number;
   milestonesGranted: number;
   pendingLevelUps: { playerId: number; name: string; growthTier: number; pending: number }[];
+}
+
+/** 成长期（一个赛季可有多个，通常夹在两个窗口之间） */
+export interface GrowthPeriodRow {
+  id: number;
+  season: number | null;
+  startEventId: number;
+  source: string;
+  note: string | null;
+  declaredBy: number | null;
+  declaredAt: string | null;
+}
+
+export interface GrowthPeriodsResponse {
+  current: GrowthPeriodRow | null;
+  periods: GrowthPeriodRow[];
 }
 
 /** growth_events.event_type 中文标签 */
@@ -867,6 +887,7 @@ export const GROWTH_EVENT_LABEL: Record<string, string> = {
   trainee_season: '训练营赛季',
   china_plan: '中国计划',
   levelup: '升级',
+  reset: '解约重置', // 解约清零的划断标记（值/XP 都是 0）：成长史里说明为什么累计从头开始
 };
 
 /** 管理组可补录的事件类型（比赛系统没有的数据或漏记兜底），hint 是 §10.1 折算口径 */
