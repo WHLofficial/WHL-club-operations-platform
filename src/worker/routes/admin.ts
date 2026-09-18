@@ -20,7 +20,7 @@ import { loadTransfer, rejectTransfer } from '../transfers.ts';
 import { approveTransferDeal, createForcedAuction, cancelForcedAuction } from '../bypass.ts';
 import { listWindows, openWindow, closeWindow } from '../window-machine.ts';
 import { queueResults, confirmResult } from '../results.ts';
-import { xpForEvent, recordGrowthEvent, runGrowthSettlement, type GrowthEventType } from '../growth.ts';
+import { xpForEvent, recordGrowthEvent, runGrowthSettlement, listGrowthPeriods, loadGrowthPeriod, growthPeriodStatements, type GrowthEventType } from '../growth.ts';
 import { deriveClubTier, tierCache } from '../tier.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -916,6 +916,38 @@ app.post('/growth/settlement/run', async (c) => {
   return c.json({ ok: true, ...summary });
 });
 
+// 成长期宣告（用户规则 2026-09-18）：里程碑只累计当前成长期内的进+攻。
+// 与窗口解耦：管理端随时可以宣告新一期；开窗时也能勾选自动宣告（window-machine.ts 的 declareGrowthPeriod）。
+// 宣告只是画一条线（界 = 当前事件序号），不改任何球员数据，因此可反复宣告、可连续宣告。
+app.get('/growth/periods', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  return c.json(await listGrowthPeriods(c.env.DB));
+});
+
+app.post('/growth/periods', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { season?: unknown; note?: unknown } | null;
+  let season: number | null;
+  if (body?.season === undefined || body?.season === null || body?.season === '') {
+    season = await getVisibleSeason(c.env.DB);
+  } else {
+    season = Number(body.season);
+    if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
+  }
+  const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim().slice(0, 60) : null;
+  await c.env.DB.batch([
+    ...growthPeriodStatements(c.env.DB, { season, source: 'manual', note, declaredBy: user.id }),
+    createAuditStatement(c.env.DB)({
+      actor: user.id,
+      action: 'growth_period_declared',
+      targetType: 'growth_period',
+      targetId: null,
+      after: { season, note, source: 'manual' },
+    }),
+  ]);
+  return c.json({ ok: true, ...(await loadGrowthPeriod(c.env.DB)) }, 201);
+});
+
 // 档位核定（§10.3）：条件叠加由管理组按现实资料判断，平台只落核定结果与审计
 app.post('/growth/:playerId/tier', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
@@ -1315,10 +1347,11 @@ app.get('/windows', async (c) => {
 });
 
 // POST /api/admin/windows/open —— 开新窗（前置：无在开窗口；全球员经纪人档位重掷）
+// declareGrowthPeriod=true 时同批宣告新成长期（勾选框；成长期本身不与窗口绑定）
 app.post('/windows/open', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
-  const body = (await readJson(c)) as { season?: unknown; windowSeq?: unknown } | null;
-  return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq), 201);
+  const body = (await readJson(c)) as { season?: unknown; windowSeq?: unknown; declareGrowthPeriod?: unknown } | null;
+  return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq, body?.declareGrowthPeriod), 201);
 });
 
 // POST /api/admin/windows/close —— 关窗（前置校验；force 需 window_force_settle=true）

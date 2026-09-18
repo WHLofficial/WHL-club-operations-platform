@@ -12,6 +12,7 @@ import { getOpenWindow } from './seasons.ts';
 import { settleOverdue } from './market-settle.ts';
 import { forceSettleAtExpected } from './negotiations.ts';
 import { windowPayrollStatements } from './window-payroll.ts';
+import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 
 function nowSql() {
@@ -56,13 +57,16 @@ export async function listWindows(db: D1Database): Promise<{ seasons: { season: 
  * 开窗：无在开窗口（一次只有一个窗）；season 缺省取最新赛季、windowSeq 缺省顺延；
  * 赛季行不存在时自动按 running 建档（完整赛季管理随增量 6）。
  * 全球员经纪人档位重掷：roll < prob → 三档等概率（会话存续期档位恒定，E 已快照）。
+ * declareGrowthPeriod=true（管理端勾选复选框）时同批宣告新成长期——不再与窗口绑定，
+ * 只是把「开窗」当成一个常用时点；管理端也可以随时手动宣告（见 routes/admin.ts 的 /growth/periods）。
  */
 export async function openWindow(
   env: Env,
   actor: number,
   seasonInput: unknown,
   windowSeqInput: unknown,
-): Promise<{ ok: true; season: number; windowSeq: number; rerolled: number }> {
+  declareGrowthPeriodInput?: unknown,
+): Promise<{ ok: true; season: number; windowSeq: number; rerolled: number; growthPeriodDeclared: boolean }> {
   const db = env.DB;
   const config = createConfigService(db);
 
@@ -129,34 +133,60 @@ export async function openWindow(
   if (statements.length > 0) await db.batch(statements);
 
   const audit = createAuditStatement(db);
-  try {
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO seasons (season, status, created_at) VALUES (?, 'running', ${nowSql()})
+  const declarePeriod = declareGrowthPeriodInput === true;
+  const openBatch = [
+    db
+      .prepare(
+        `INSERT INTO seasons (season, status, created_at) VALUES (?, 'running', ${nowSql()})
            ON CONFLICT(season) DO NOTHING`,
-        )
-        .bind(season),
-      // 赛季生命周期（§11）：备赛期开窗即进入进行中
-      db.prepare(`UPDATE seasons SET status = 'running' WHERE season = ? AND status = 'preparing'`).bind(season),
-      db
-        .prepare(
-          `INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (?, ?, 'open', ${nowSql()})`,
-        )
-        .bind(season, windowSeq),
-      audit({
-        actor,
-        action: 'window_open',
-        targetType: 'season_window',
-        targetId: null,
-        after: { season, windowSeq, playersScanned: scanned, rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0) },
+      )
+      .bind(season),
+    // 赛季生命周期（§11）：备赛期开窗即进入进行中
+    db.prepare(`UPDATE seasons SET status = 'running' WHERE season = ? AND status = 'preparing'`).bind(season),
+    db
+      .prepare(
+        `INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (?, ?, 'open', ${nowSql()})`,
+      )
+      .bind(season, windowSeq),
+  ];
+  if (declarePeriod) {
+    openBatch.push(
+      ...growthPeriodStatements(db, {
+        season,
+        source: 'window_open',
+        note: `S${season} 第 ${windowSeq} 窗开窗时勾选自动宣告`,
+        declaredBy: actor,
       }),
-    ]);
+    );
+  }
+  openBatch.push(
+    audit({
+      actor,
+      action: 'window_open',
+      targetType: 'season_window',
+      targetId: null,
+      after: {
+        season,
+        windowSeq,
+        growthPeriodDeclared: declarePeriod,
+        playersScanned: scanned,
+        rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0),
+      },
+    }),
+  );
+  try {
+    await db.batch(openBatch);
   } catch (err) {
     if (String(err).includes('UNIQUE')) throw new HttpError(409, '这个窗口已经存在');
     throw err;
   }
-  return { ok: true, season, windowSeq, rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0) };
+  return {
+    ok: true,
+    season,
+    windowSeq,
+    rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0),
+    growthPeriodDeclared: declarePeriod,
+  };
 }
 
 /**

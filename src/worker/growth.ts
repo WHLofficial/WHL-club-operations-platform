@@ -19,6 +19,7 @@ export const GROWTH_EVENT_TYPES = [
   'milestone', // 进+攻里程碑
   'trainee_season', // 训练营赛季结算
   'china_plan', // 中国球员计划
+  'reset', // 解约清零标记（不是 XP 事件：里程碑只累计它之后的事件）
 ] as const;
 
 export type GrowthEventType = (typeof GROWTH_EVENT_TYPES)[number] | 'levelup';
@@ -149,6 +150,89 @@ export async function recordGrowthEvent(db: D1Database, e: GrowthEventInput): Pr
   return (results[0]?.meta.changes ?? 0) === 1;
 }
 
+/**
+ * 解约清零的划断标记（与数值清零同一批写入）：值/XP 都是 0，只是给里程碑统计画一条线
+ * ——里程碑只累计最后一次 reset 之后的进球/助攻事件，解约后回来的球员重新攒、重新补发。
+ * 事件行本身留档，成长史里作为「解约重置」展示（历史不清空）。
+ */
+export function growthResetStatements(db: D1Database, playerId: number, ref: string, season: number | null, windowSeq: number | null): D1PreparedStatement[] {
+  return recordGrowthEventStatements(db, {
+    playerId,
+    matchRef: ref,
+    season,
+    windowSeq,
+    eventType: 'reset',
+    value: 0,
+    xp: 0,
+    source: 'auto',
+    recordedBy: null,
+  });
+}
+
+// ---- 成长期（用户规则 2026-09-18）----
+// 一个赛季可以有多个成长期，通常夹在两个窗口之间（半赛季），但可能临时改变，所以不与窗口绑定：
+// 由管理端手动宣告，或在开窗时勾选复选框自动宣告。里程碑只算当前成长期内的进+攻。
+
+export interface GrowthPeriod {
+  id: number;
+  startEventId: number;
+}
+
+/** 当前成长期 = id 最大的一行；没有行时返回 { id: 0, startEventId: 0 }（全生涯口径，等于成长期功能上线前的行为） */
+export async function loadGrowthPeriod(db: D1Database): Promise<GrowthPeriod> {
+  const row = await db
+    .prepare('SELECT id, start_event_id FROM growth_periods ORDER BY id DESC LIMIT 1')
+    .first<{ id: number; start_event_id: number }>();
+  return row ? { id: row.id, startEventId: row.start_event_id } : { id: 0, startEventId: 0 };
+}
+
+/** 成长期档案行（管理端展示用；DTO 冻结 camelCase） */
+export interface GrowthPeriodRow {
+  id: number;
+  season: number | null;
+  startEventId: number;
+  source: string;
+  note: string | null;
+  declaredBy: number | null;
+  declaredAt: string | null;
+}
+
+/** 成长期列表（倒序）+ 当前期；管理端面板与结算提示用 */
+export async function listGrowthPeriods(db: D1Database, limit = 20): Promise<{ current: GrowthPeriodRow | null; periods: GrowthPeriodRow[] }> {
+  const rows = await db
+    .prepare(
+      `SELECT id, season, start_event_id, source, note, declared_by, declared_at
+       FROM growth_periods ORDER BY id DESC LIMIT ?`,
+    )
+    .bind(limit)
+    .all<{ id: number; season: number | null; start_event_id: number; source: string; note: string | null; declared_by: number | null; declared_at: string | null }>();
+  const periods: GrowthPeriodRow[] = rows.results.map((r) => ({
+    id: r.id,
+    season: r.season,
+    startEventId: r.start_event_id,
+    source: r.source,
+    note: r.note,
+    declaredBy: r.declared_by,
+    declaredAt: r.declared_at,
+  }));
+  return { current: periods[0] ?? null, periods };
+}
+
+/** 宣告新成长期：界取宣告时点的事件序号（子查询与 INSERT 同批执行，不用先读一次） */
+export function growthPeriodStatements(
+  db: D1Database,
+  input: { season: number | null; source: 'manual' | 'window_open'; note?: string | null; declaredBy: number | null },
+): D1PreparedStatement[] {
+  return [
+    db
+      .prepare(
+        `INSERT INTO growth_periods (season, start_event_id, source, note, declared_by, declared_at)
+         VALUES (?, (SELECT COALESCE(MAX(id), 0) FROM growth_events), ?, ?, ?, ${nowSql()})`,
+      )
+      .bind(input.season, input.source, input.note ?? null, input.declaredBy),
+  ];
+}
+
 // ---- 防守位置判定（§10.1 零封/夺权：CDM/LB/CB/RB/GK；无 CDM 则 CM、无边卫则 LM/RM）----
 
 const BASE_DEFENSIVE = new Set(['GK', 'CB', 'LB', 'RB', 'CDM']);
@@ -175,6 +259,7 @@ export async function defensivePositionsForClub(db: D1Database, clubId: number):
 export interface SettlementSummary {
   season: number;
   half: boolean;
+  growthPeriodId: number; // 本次结算所依据的成长期（0 = 还没宣告过，全生涯口径）
   traineeXp: number;
   traineeCount: number;
   chinaCount: number;
@@ -219,7 +304,15 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
   }
 
   // 中国球员计划：每赛季额外 XP（china_plan=1）
-  const china = await scanRows<{ id: number }>(db, 'SELECT t.id FROM players t WHERE t.china_plan = 1', 't.id', []);
+  // 中国球员计划：只看在玩家队的中国球员——必须有现行合同（用户规则 2026-09-18：只有在玩家队的
+  // 球员才有成长；CPU 队名单在比赛系统侧、自由身/无归属球员没有平台合同，不再每季白拿 20 XP）
+  const china = await scanRows<{ id: number }>(
+    db,
+    `SELECT t.id FROM players t JOIN contracts c ON c.player_id = t.id AND c.is_active = 1
+     WHERE t.china_plan = 1`,
+    't.id',
+    [],
+  );
   for (const p of china) {
     statements.push(
       ...recordGrowthEventStatements(db, {
@@ -236,22 +329,46 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
     );
   }
 
-  // 里程碑：生涯进+攻累计（进球/助攻事件 value 合计），结算时补发已到达而未发的档
+  // 里程碑：只累计当前成长期内的进+攻（进球/助攻事件 value 合计），结算时补发已到达而未发的档。
+  // 边界取两者较晚的一个：成长期的 start_event_id（见 loadGrowthPeriod），与这名球员最后一次
+  // 解约清零的 reset 划断（见 growthResetStatements）。
+  // 去重锚带上期号与划断序号：换新成长期 / 解约后重新攒够，都要能再补发（否则老行会一直挡住）。
+  const period = await loadGrowthPeriod(db);
+  // 同样必须外层套一层：聚合查询的游标列要落在最外层（且 GROUP BY 不能缺——漏掉就只剩一行，
+  // 只有一名球员能拿到自己的划断序号，别的球员会退回 0 而补发不出新里程碑）
+  const resets = await scanRows<{ id: number; reset_id: number | null }>(
+    db,
+    `SELECT x.id AS id, x.reset_id AS reset_id FROM (
+       SELECT player_id AS id, MAX(id) AS reset_id FROM growth_events
+       WHERE event_type = 'reset' GROUP BY player_id
+     ) x WHERE x.id > 0`,
+    'x.id',
+    [],
+  );
+  const resetIds = new Map(resets.map((r) => [r.id, r.reset_id ?? 0]));
+  // 外层再套一层 SELECT：scanRows 的游标条件是拼在 baseSql 末尾的 AND，必须落在最外层 WHERE 上
+  // （直接拼在 GROUP BY 后面会被解析成分组表达式——曾把全表折成一组，且游标来回跳）
   const totals = await scanRows<{ id: number; total: number }>(
     db,
-    `SELECT ge.player_id AS id, SUM(ge.value) AS total FROM growth_events ge
-     WHERE ge.event_type IN ('goal', 'assist') GROUP BY ge.player_id`,
-    'ge.player_id',
-    [],
+    `SELECT x.id AS id, x.total AS total FROM (
+       SELECT ge.player_id AS id, SUM(ge.value) AS total FROM growth_events ge
+       WHERE ge.event_type IN ('goal', 'assist')
+         AND ge.id > ?
+         AND ge.id > COALESCE((SELECT MAX(r.id) FROM growth_events r WHERE r.player_id = ge.player_id AND r.event_type = 'reset'), 0)
+       GROUP BY ge.player_id
+     ) x WHERE x.id > 0`,
+    'x.id',
+    [period.startEventId],
   );
   let milestonesGranted = 0;
   const milestoneStatements: D1PreparedStatement[] = [];
   for (const row of totals) {
+    const generation = resetIds.get(row.id) ?? 0;
     for (const t of milestoneThresholds(row.total)) {
       milestoneStatements.push(
         ...recordGrowthEventStatements(db, {
           playerId: row.id,
-          matchRef: `milestone:${t}`,
+          matchRef: `milestone:${period.id}:${generation}:${t}`,
           season,
           windowSeq: null,
           eventType: 'milestone',
@@ -287,12 +404,13 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
     action: 'growth_settlement',
     targetType: 'season',
     targetId: season,
-    after: { half, traineeCount: trainees.length, chinaCount: china.length, milestonesGranted },
+    after: { half, growthPeriodId: period.id, traineeCount: trainees.length, chinaCount: china.length, milestonesGranted },
   });
 
   return {
     season,
     half,
+    growthPeriodId: period.id,
     traineeXp,
     traineeCount: trainees.length,
     chinaCount: china.length,

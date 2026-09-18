@@ -18,6 +18,7 @@ import { round2 } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement } from '../lib/audit.ts';
+import { growthResetStatements } from './growth.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -329,14 +330,19 @@ export async function completeTermination(
           guardParams: guard.params,
         })
       : []),
-    // 属性恢复原始（4.4.4）：CA 回 base_ca；成长 XP 徽章等其余属性随增量 6 成长结算细化
+    // 属性恢复初始（4.4.4）：CA 回 base_ca；成长所得同时数值归零（XP/已消费级数/徽章）——
+    // 解约即回初始态，重签后从零重新成长。历史留档：合同行只置 is_active=0、growth_events 一行不删，
+    // 另写一条 reset 划断事件（见 growthResetStatements）供里程碑统计从解约后重新累计。
+    // 重放安全：players UPDATE 有 club_id 闸，reset 事件靠 UNIQUE(player_id, match_ref, event_type) 去重。
     db
       .prepare(
-        `UPDATE players SET club_id = NULL, status = 'free', ca = COALESCE(base_ca, ca), updated_at = ${nowSql()}
+        `UPDATE players SET club_id = NULL, status = 'free', ca = COALESCE(base_ca, ca),
+           growth_xp = 0, levels_applied = 0, badges_silver = 0, badges_gold = 0, updated_at = ${nowSql()}
          WHERE id = ? AND club_id = ?`,
       )
       .bind(transfer.player_id, transfer.from_club_id),
     db.prepare(`UPDATE contracts SET is_active = 0 WHERE player_id = ? AND is_active = 1`).bind(transfer.player_id),
+    ...growthResetStatements(db, transfer.player_id, `termination:${transferId}`, transfer.season, transfer.window_seq),
   ];
   const statusStmtIndex = statements.length;
   statements.push(
