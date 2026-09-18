@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { xpForEvent, milestoneThresholds, milestoneXp } from '../src/worker/growth.ts';
 
@@ -272,8 +272,13 @@ describe('赛季结算（§10.1）：训练营/中国计划/里程碑', () => {
     const fx = freshEnv();
     seedPlatform(fx);
     // 哈兰德已入 6 球事件（xp 3）→ 结算补发 milestone:5（+1）
+    // 中国计划 XP 只认在玩家队的球员（用户规则 2026-09-18）：孙八补一份现行合同才吃得到；
+    // 周九同样 china_plan=1 但没有合同（CPU 队/自由身口径）→ 一分不加。
     fx.sqlite.exec(`
-      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca) VALUES (30, 'p30', '哈兰德', 1, 'ST', 'normal', 2, 3, 85);
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, china_plan, ca) VALUES
+        (30, 'p30', '哈兰德', 1, 'ST', 'normal', 2, 3, 0, 85),
+        (23, 'p23', '周九', 2, 'CM', 'normal', 1, 0, 1, 70);
+      INSERT INTO contracts (player_id, club_id, contract_type, is_active) VALUES (22, 2, 'standard', 1);
       INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES
         (30, 'ms1', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'), (30, 'ms2', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'),
         (30, 'ms3', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'), (30, 'ms4', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'),
@@ -291,13 +296,15 @@ describe('赛季结算（§10.1）：训练营/中国计划/里程碑', () => {
     };
     expect(s1.traineeCount).toBe(1);
     expect(s1.traineeXp).toBe(40);
-    expect(s1.chinaCount).toBe(1);
+    expect(s1.chinaCount).toBe(1); // 只有有合同的孙八；无合同的周九不算
     expect(s1.milestonesGranted).toBe(1);
     expect(s1.pendingLevelUps).toEqual(expect.arrayContaining([{ playerId: 12, name: '王五', growthTier: 1, pending: 4 }]));
     expect(s1.pendingLevelUps.find((p) => p.playerId === 30)).toBeUndefined(); // 4 XP 不到一级
 
     expect(xpOf(fx, 12)).toBe(40);
     expect(xpOf(fx, 22)).toBe(20);
+    expect(xpOf(fx, 23)).toBe(0); // 中国计划但无现行合同：不入账
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM growth_events WHERE player_id = 23')?.n).toBe(0);
     expect(xpOf(fx, 30)).toBe(4);
     expect(sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'growth_settlement'")?.action).toBe('growth_settlement');
 
@@ -305,10 +312,45 @@ describe('赛季结算（§10.1）：训练营/中国计划/里程碑', () => {
     const run2 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
     const s2 = (await run2.json()) as typeof s1;
     expect(s2.traineeCount).toBe(1);
+    expect(s2.chinaCount).toBe(1);
     expect(s2.milestonesGranted).toBe(0);
     expect(xpOf(fx, 12)).toBe(40);
     expect(xpOf(fx, 22)).toBe(20);
     expect(xpOf(fx, 30)).toBe(4);
+  });
+
+  it('里程碑只算成长期内的进+攻：解约划断后重新累计、可再次补发', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 姆巴佩：6 球后遭解约（reset 划断）——按「解约即回初始」，划断前那 6 球不再算
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca) VALUES (31, 'p31', '姆巴佩', 1, 'ST', 'normal', 2, 0, 85);
+      INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES
+        (31, 'm1', 'goal', 1, 0, 'auto', '2026-05-01T00:00:00Z'), (31, 'm2', 'goal', 1, 0, 'auto', '2026-05-01T00:00:00Z'),
+        (31, 'm3', 'goal', 1, 0, 'auto', '2026-05-01T00:00:00Z'), (31, 'm4', 'goal', 1, 0, 'auto', '2026-05-01T00:00:00Z'),
+        (31, 'm5', 'goal', 1, 0, 'auto', '2026-05-01T00:00:00Z'), (31, 'm6', 'goal', 1, 0, 'auto', '2026-05-01T00:00:00Z'),
+        (31, 'term1', 'reset', 0, 0, 'auto', '2026-06-01T00:00:00Z');
+    `);
+    const run1 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(run1.status).toBe(200);
+    expect(((await run1.json()) as { milestonesGranted: number }).milestonesGranted).toBe(0); // 划断前 6 球不算
+
+    // 新成长期（解约后）再攒 5 球 → 补发 milestone:5，去重锚带上划断序号
+    fx.sqlite.exec(`
+      INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES
+        (31, 'n1', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z'), (31, 'n2', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z'),
+        (31, 'n3', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z'), (31, 'n4', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z'),
+        (31, 'n5', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z');
+    `);
+    const run2 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(((await run2.json()) as { milestonesGranted: number }).milestonesGranted).toBe(1);
+    expect(
+      sqlGet<{ match_ref: string }>(fx.sqlite, "SELECT match_ref FROM growth_events WHERE player_id = 31 AND event_type = 'milestone'")?.match_ref,
+    ).toMatch(/^milestone:\d+:\d+:5$/); // 锚带期号+划断序号
+
+    // 重放：同一成长期内不再重复补发
+    const run3 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(((await run3.json()) as { milestonesGranted: number }).milestonesGranted).toBe(0);
   });
 
   it('season 非法 400', async () => {
@@ -399,6 +441,159 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     const bad = await post('/api/admin/growth/10/tier', { tier: 6 }, 'tok-admin', fx.env);
     expect(bad.status).toBe(400);
     const coach = await post('/api/admin/growth/10/tier', { tier: 3 }, 'tok-coach', fx.env);
+    expect(coach.status).toBe(403);
+  });
+});
+
+describe('成长期（用户规则 2026-09-18）：里程碑只算当期，宣告与窗口解耦', () => {
+  it('多名球员各自累计补发（回归：分组游标曾把全表折成一组并来回跳）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 甲 5 球 → 只到档 5；乙 10 球 → 到档 5、10。两人都要各自补发，且统计不能卡住。
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca) VALUES
+        (31, 'p31', '甲', 1, 'ST', 'normal', 2, 0, 85),
+        (32, 'p32', '乙', 2, 'ST', 'normal', 2, 0, 85);
+    `);
+    for (let i = 1; i <= 6; i++) {
+      fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (31, 'a${i}', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z')`);
+    }
+    for (let i = 1; i <= 11; i++) {
+      fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (32, 'b${i}', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z')`);
+    }
+
+    const run = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(run.status).toBe(200);
+    expect(((await run.json()) as { milestonesGranted: number }).milestonesGranted).toBe(3); // 甲 5；乙 5、10
+
+    const granted = sqlAll<{ player_id: number; match_ref: string; xp: number }>(
+      fx.sqlite,
+      "SELECT player_id, match_ref, xp FROM growth_events WHERE event_type = 'milestone' ORDER BY player_id, id",
+    );
+    expect(granted.map((g) => `${g.player_id}:${g.match_ref}`)).toEqual([
+      '31:milestone:0:0:5',
+      '32:milestone:0:0:5',
+      '32:milestone:0:0:10',
+    ]);
+    expect(granted.map((g) => g.xp)).toEqual([1, 1, 2]); // 档 5→1 XP；档 10→2 XP
+  });
+
+  it('多名球员各自有解约划断时，里程碑锚各按各的划断序号（回归：reset 查询漏 GROUP BY 只剩一行）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca) VALUES
+        (34, 'p34', '丁', 1, 'ST', 'normal', 2, 0, 85),
+        (35, 'p35', '戊', 2, 'ST', 'normal', 2, 0, 85);
+    `);
+    // 各自先被解约划断，再在解约之后攒进+攻：丁 6 球、戊 11 球
+    fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (34, 'r34', 'reset', 0, 0, 'auto', '2026-07-01T00:00:00Z')`);
+    for (let i = 1; i <= 6; i++) {
+      fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (34, 'a${i}', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z')`);
+    }
+    fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (35, 'r35', 'reset', 0, 0, 'auto', '2026-07-01T00:00:00Z')`);
+    for (let i = 1; i <= 11; i++) {
+      fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (35, 'b${i}', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z')`);
+    }
+    const resetOf = (playerId: number) =>
+      sqlGet<{ id: number }>(fx.sqlite, `SELECT id FROM growth_events WHERE player_id = ${playerId} AND event_type = 'reset'`)?.id ?? 0;
+
+    const run = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(run.status).toBe(200);
+    expect(((await run.json()) as { milestonesGranted: number }).milestonesGranted).toBe(3);
+
+    const granted = sqlAll<{ player_id: number; match_ref: string }>(
+      fx.sqlite,
+      "SELECT player_id, match_ref FROM growth_events WHERE event_type = 'milestone' ORDER BY player_id, id",
+    );
+    expect(granted.map((g) => `${g.player_id}:${g.match_ref}`)).toEqual([
+      `34:milestone:0:${resetOf(34)}:5`,
+      `35:milestone:0:${resetOf(35)}:5`,
+      `35:milestone:0:${resetOf(35)}:10`,
+    ]);
+
+    // 重放：同一划断世代内不再补发
+    const again = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(((await again.json()) as { milestonesGranted: number }).milestonesGranted).toBe(0);
+  });
+
+  it('管理端手动宣告新成长期：宣告前的事件不再计入，宣告后可再次补发', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca) VALUES (33, 'p33', '丙', 1, 'ST', 'normal', 2, 0, 85);
+    `);
+    for (let i = 1; i <= 6; i++) {
+      fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (33, 'c${i}', 'goal', 1, 0, 'auto', '2026-07-01T00:00:00Z')`);
+    }
+
+    const run1 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(((await run1.json()) as { growthPeriodId: number; milestonesGranted: number })).toMatchObject({
+      growthPeriodId: 0, // 还没宣告过：全生涯口径
+      milestonesGranted: 1,
+    });
+
+    // 宣告：界取宣告时点的事件序号（此时 growth_events 有 6 条 goal）
+    const maxEventId = sqlGet<{ max_id: number }>(fx.sqlite, 'SELECT COALESCE(MAX(id), 0) AS max_id FROM growth_events')?.max_id ?? 0;
+    const declared = await post('/api/admin/growth/periods', { note: '半赛季换血期' }, 'tok-admin', fx.env);
+    expect(declared.status).toBe(201);
+    const d = (await declared.json()) as { id: number; startEventId: number };
+    expect(d.id).toBe(1);
+    expect(d.startEventId).toBe(maxEventId);
+    expect(sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'growth_period_declared'")?.action).toBe('growth_period_declared');
+
+    // 宣告之后没有新事件 → 不再补发；老的那条 milestone 行留着（历史不删）
+    const run2 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(((await run2.json()) as { growthPeriodId: number; milestonesGranted: number })).toMatchObject({
+      growthPeriodId: 1,
+      milestonesGranted: 0,
+    });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE event_type = 'milestone'")?.n).toBe(1);
+
+    // 新成长期内再攒 10 球 → 档 5、10 重新补发（去重锚带期号，不被老行挡住）
+    for (let i = 1; i <= 10; i++) {
+      fx.sqlite.exec(`INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES (33, 'd${i}', 'goal', 1, 0, 'auto', '2026-08-01T00:00:00Z')`);
+    }
+    const run3 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(((await run3.json()) as { milestonesGranted: number }).milestonesGranted).toBe(2);
+    expect(
+      sqlAll<{ match_ref: string }>(fx.sqlite, "SELECT match_ref FROM growth_events WHERE event_type = 'milestone' AND player_id = 33 ORDER BY id").map(
+        (r) => r.match_ref,
+      ),
+    ).toEqual(['milestone:0:0:5', 'milestone:1:0:5', 'milestone:1:0:10']);
+  });
+
+  it('开窗勾选「同时宣告新成长期」：同批宣告；不勾选不宣告', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+
+    const noFlag = await post('/api/admin/windows/open', { season: 3, windowSeq: 1 }, 'tok-admin', fx.env);
+    expect(((await noFlag.json()) as { growthPeriodDeclared: boolean }).growthPeriodDeclared).toBe(false);
+
+    await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+    const flagged = await post('/api/admin/windows/open', { season: 3, windowSeq: 2, declareGrowthPeriod: true }, 'tok-admin', fx.env);
+    expect(flagged.status).toBe(201);
+    expect(((await flagged.json()) as { growthPeriodDeclared: boolean }).growthPeriodDeclared).toBe(true);
+
+    const list = await get('/api/admin/growth/periods', 'tok-admin', fx.env);
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      current: { id: number; season: number | null; source: string; note: string | null; declaredAt: string | null } | null;
+      periods: { id: number }[];
+    };
+    expect(body.periods.length).toBe(1);
+    expect(body.current).toMatchObject({ id: 1, season: 3, source: 'window_open' });
+    expect(body.current?.note).toContain('第 2 窗');
+    expect(body.current?.declaredAt).toBeTruthy();
+
+    // 开窗审计里带上是否宣告（成长期本身不改窗口状态）
+    const audit = sqlGet<{ after: string }>(
+      fx.sqlite,
+      "SELECT after FROM audit_log WHERE action = 'window_open' ORDER BY id DESC LIMIT 1",
+    );
+    expect(audit?.after).toContain('"growthPeriodDeclared":true');
+
+    const coach = await post('/api/admin/growth/periods', {}, 'tok-coach', fx.env);
     expect(coach.status).toBe(403);
   });
 });

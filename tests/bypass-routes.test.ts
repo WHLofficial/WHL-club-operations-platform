@@ -238,8 +238,14 @@ describe('续约（rc_change）', () => {
 });
 
 describe('解约（termination）', () => {
-  it('效力 ≥3 年免费解约：批准即过户，球员去归属、CA 回初始、合同失效', async () => {
+  it('效力 ≥3 年免费解约：批准即过户，球员去归属、CA 回初始、成长数值清零（历史留档）', async () => {
     const fx = await seedBypass();
+    // 解约前攒点成长：XP/已消费级数/徽章 + 两条进球历史 —— 解约后数值全零、历史一行不删
+    fx.sqlite.exec(`
+      UPDATE players SET growth_xp = 52, levels_applied = 2, badges_silver = 4, badges_gold = 1 WHERE id = 20;
+      INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES
+        (20, 'g1', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'), (20, 'g2', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z');
+    `);
     const submit = await post('/api/transfers/termination', { playerId: 20 }, 'tok-coach', fx.env);
     expect(submit.status).toBe(201);
     expect(((await submit.json()) as { terminationFee: number }).terminationFee).toBe(0);
@@ -248,11 +254,25 @@ describe('解约（termination）', () => {
     expect(approve.status).toBe(200);
     expect(((await approve.json()) as { status: string }).status).toBe('completed');
 
-    const player = sqlGet<{ club_id: number | null; status: string; ca: number | null }>(
-      fx.sqlite,
-      'SELECT club_id, status, ca FROM players WHERE id = 20',
-    );
-    expect(player).toEqual({ club_id: null, status: 'free', ca: 72 }); // 属性恢复原始（base_ca）
+    const player = sqlGet<{
+      club_id: number | null;
+      status: string;
+      ca: number | null;
+      growth_xp: number;
+      levels_applied: number;
+      badges_silver: number;
+      badges_gold: number;
+    }>(fx.sqlite, 'SELECT club_id, status, ca, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = 20');
+    // 恢复初始：CA 回 base_ca，成长所得（XP/已消费级数/徽章）一并归零
+    expect(player).toEqual({
+      club_id: null,
+      status: 'free',
+      ca: 72,
+      growth_xp: 0,
+      levels_applied: 0,
+      badges_silver: 0,
+      badges_gold: 0,
+    });
     const contract = sqlGet<{ is_active: number }>(fx.sqlite, 'SELECT is_active FROM contracts WHERE player_id = 20');
     expect(contract?.is_active).toBe(0);
     const t = sqlGet<{ status: string; tax: number; extra_fee: number }>(
@@ -264,6 +284,17 @@ describe('解约（termination）', () => {
     expect(t?.extra_fee).toBe(0);
     const fees = sqlAll<{ kind: string }>(fx.sqlite, `SELECT kind FROM ledger_entries WHERE kind = 'termination_fee'`);
     expect(fees).toEqual([]);
+
+    // 历史留档：进球事件一行不删，另写一条 0 值 reset 划断（里程碑从解约后重新累计）
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE player_id = 20 AND event_type = 'goal'")?.n).toBe(2);
+    const reset = sqlGet<{ n: number; xp: number }>(
+      fx.sqlite,
+      "SELECT COUNT(*) AS n, COALESCE(SUM(xp), 0) AS xp FROM growth_events WHERE player_id = 20 AND event_type = 'reset'",
+    );
+    expect(reset).toEqual({ n: 1, xp: 0 });
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE player_id = 20 AND event_type = 'reset' AND match_ref LIKE 'termination:%'")?.n,
+    ).toBe(1);
   });
 
   it('未满 3 年收解约费：RC×(3−效力)×0.1 销毁', async () => {
