@@ -136,11 +136,13 @@
 
 **裁决**（2026-09-18，用户逐条给规则）：①只有在玩家队的球员才有成长；②解约立刻恢复初始，口径=**数值归零、历史留档**（用户追问确认）；③里程碑的「累计」只算**当前成长期内**的进+攻——成长期**可手动宣告，也可在开窗时勾选复选框自动宣告**，且**不与窗口绑定**（用户原话：一个赛季可以有多个成长期，通常是两个窗口之间，但有时可能改变）；④中国球员计划 XP 需**在册现行合同**；⑤tour 平台队名带「(CPU)」后缀的队伍自动识别为 CPU 队，其球员无成长。
 
-**交付**：迁移 0019（`growth_periods`：id/season/start_event_id/source/note/declared_by/declared_at）；`worker/growth.ts` 新增 `loadGrowthPeriod`/`listGrowthPeriods`/`growthPeriodStatements`/`growthResetStatements`，里程碑改「当期内 + 最后一次 reset 之后」累计、去重锚改 `milestone:{期号}:{划断序号}:{阈值}`；`worker/transfers.ts` 解约批内清零（`ca=COALESCE(base_ca,ca)`、growth_xp/levels_applied/badges_silver/badges_gold=0）+ reset 划断行；中国计划查询加在册合同 JOIN；`window-machine.ts` `openWindow` 第 5 参 `declareGrowthPeriod` 同批宣告（返回 `growthPeriodDeclared`）；管理端 `GET/POST /api/admin/growth/periods`（审计 `growth_period_declared`）+ `/windows/open` 透传；前端管理端「成长期」面板 + 开窗复选框 + 成长史 `reset` 标签（「解约重置」）。
+**交付**：迁移 0019（`growth_periods`：id/season/start_event_id/source/note/declared_by/declared_at）；`worker/growth.ts` 新增 `loadGrowthPeriod`/`listGrowthPeriods`/`growthPeriodStatements`/`growthResetStatements`，里程碑改「当期内 + 最后一次 reset 之后」累计、去重锚改 `milestone:{期号}:{划断序号}:{阈值}`；`worker/transfers.ts` 解约批内清零（`ca=COALESCE(base_ca,ca)`、growth_xp/levels_applied/badges_silver/badges_gold=0）+ reset 划断行；中国计划查询加在册合同 JOIN；`window-machine.ts` `openWindow` 第 5 参 `declareGrowthPeriod` 同批宣告（返回 `growthPeriodDeclared`）；管理端 `GET/POST /api/admin/growth/periods`（审计 `growth_period_declared`）+ `/windows/open` 透传；前端管理端「成长期」面板 + 开窗复选框 + 成长史 `reset` 标签（「解约重置」）。CPU 队规则：`growth.ts` 新增 `isCpuTeam()`（严格半角「(CPU)」后缀），`results.ts` 的队名→俱乐部解析（XP 匹配 `resolve()` 与确认通知 `queueResultNotifications()`）对 CPU 队静默跳过——不计 XP 也不进 `xp.unresolved`（用户裁决：严格匹配，且 CPU 队球员视同海里球员）。
 
-**验收**：成长期三用例（划断后重新累计、手动宣告、开窗勾选同批宣告）+ 多球员里程碑分组回归；**修掉一个 P0 潜伏 bug**——里程碑 totals 查询的 `GROUP BY ge.player_id` 与 `scanRows` 的游标条件拼在同一层，`GROUP BY` 后接 `AND ge.player_id > ?` 会被解析成分组表达式：游标为 0 时全表折成一组、非 0 时在两行间来回跳 → 两名以上有进/助攻事件的球员会**死循环（生产会挂住 worker）**，修法=外层再套一层 `SELECT … FROM (…GROUP BY…) x WHERE x.id > 0`。回归用例已实测能抓住该 bug（换回坏写法即失败）。**307 测试绿 + tsc ✓ + build ✓**。
+**验收**：成长期三用例（划断后重新累计、手动宣告、开窗勾选同批宣告）+ 多球员里程碑分组回归；**修掉一个 P0 潜伏 bug**——里程碑 totals 查询的 `GROUP BY ge.player_id` 与 `scanRows` 的游标条件拼在同一层，`GROUP BY` 后接 `AND ge.player_id > ?` 会被解析成分组表达式：游标为 0 时全表折成一组、非 0 时在两行间来回跳 → 两名以上有进/助攻事件的球员会**死循环（生产会挂住 worker）**，修法=外层再套一层 `SELECT … FROM (…GROUP BY…) x WHERE x.id > 0`。回归用例已实测能抓住该 bug（换回坏写法即失败）；CPU 队用例（阿森纳 vs 巴塞罗那(CPU)：只记玩家队 XP、CPU 队不进未匹配提示，撤掉守卫即失败）。**309 测试绿 + tsc ✓ + build ✓**。
 
-**待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）；CPU 队判定容错口径与豁免范围（问题清单 3-5）待用户确认，当前靠「名称匹配不上」的现状巧合生效；4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）是否建平台 clubs 行待定。
+**待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）。
+
+**CPU 口径（2026-09-18 已定）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员视同海里球员——不为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建平台 clubs 行，其球员 `club_id` 保持 NULL、`status='normal'`，照常出现在海捞池。
 
 ---
 

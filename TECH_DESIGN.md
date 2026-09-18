@@ -807,7 +807,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 17 | 已定 | 激活挂牌无公开竞价段（§6.2 修正定稿）：5 分钟首价窗内激活方落价即成交价，首价后训练营球员直进待审、正式球员进 24h 匹配窗；激活挂牌永不开放后续竞价 |
 | 18 | 已定 | 4.4.10 窗内回滚口径：还原 RC 与保护期（仍归属原队时）+ 退还续约费（rc_change_refund）；工资不随回滚（已谈成的工资是谈判终局，恢复会破坏谈判快照口径） |
 | 19 | 已定（增量 13 补全「恢复初始」= 数值归零 + 历史留档） | 解约属性恢复：CA 恢复 base_ca（players.base_ca 缺省时保持现 CA），growth_xp / levels_applied / badges_silver / badges_gold 全部清零；同时写一条 `event_type='reset'`（value/xp=0，match_ref `termination:{id}`）作划断行，历史 growth_events 行保留供成长史展示，里程碑只累计最后一次 reset 之后的事件；合同行 is_active=0 留档（复签海捞走 UPSERT 翻新，contracts.player_id 全局唯一） |
-| 20 | 已定 | 自动 XP 球员匹配：比赛系统队名 = 平台俱乐部名 → 比赛系统球员名 = 平台名单名（clubs 无 tour team 键、tour player.id 与平台 uid/fc_id 无关，不建映射表）；解不开的进 confirm 响应 `xp.unresolved` 由管理组补录兜底 |
+| 20 | 已定（增量 13 补 CPU 例外） | 自动 XP 球员匹配：比赛系统队名 = 平台俱乐部名 → 比赛系统球员名 = 平台名单名（clubs 无 tour team 键、tour player.id 与平台 uid/fc_id 无关，不建映射表）；解不开的进 confirm 响应 `xp.unresolved` 由管理组补录兜底；**CPU 队（队名带 (CPU)）例外：整队静默跳过，不进 unresolved**（假设 36） |
 | 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
 | 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
 | 23 | 假设 | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮（/api/me/notifications）延后 P1，MVP 只走 QQ 推送 |
@@ -823,7 +823,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 33 | 已定（增量 12） | 维护费 = 档位基础(2.0-14) + 每万座费率(0.8-0.2)×容量(万) × 本窗已确认主场场次，并入关窗批，`kind='maintenance' ref='window'` 幂等 |
 | 34 | 已定（增量 13） | 成长期 = 里程碑累计边界（用户裁决 2026-09-18）：由管理组手动宣告或开窗时勾选自动宣告，**不与窗口绑定**（一个赛季可有多个成长期，通常落在两个窗口之间，也可能变）；界 = `growth_periods.start_event_id`（只累计其后事件），无宣告行时按全生涯口径 |
 | 35 | 已定（增量 13） | 中国球员计划 XP（每季 +20）闸门 = `china_plan=1` **且在册现行合同**（与训练营同口径，用户裁决 2026-09-18）；无归属/已解约的中国球员不发 XP |
-| 36 | 待定（增量 13，判定口径待用户确认） | CPU 队球员无成长（用户规则 2026-09-18：tour 平台上队名以「(CPU)」结尾的队伍自动识别为 CPU 队）：现状**无显式识别代码**——CPU 队名匹配不到平台俱乐部名，比赛 XP 自然跳过（副作用是进 confirm 响应 `xp.unresolved`）；容错口径（全角括号/大小写/首尾空格）与豁免范围（比赛 XP 是否静默跳过、中国计划 XP、主场收入）、以及 4 支 CPU 队是否建平台 clubs 行均待用户确认（问题清单 3-5） |
+| 36 | 已定（增量 13） | CPU 队判定 = 比赛系统队名以半角「(CPU)」结尾（**严格匹配**，不做全角括号/大小写/首尾空格容错：队名即口径，改名即重新判定）。CPU 队球员无成长，且**视同海里球员**——平台不为 CPU 队建 clubs 行，其球员归属/合同/成长一律按无归属处理（`club_id IS NULL` + `status='normal'`，天然在海捞池 `GET /api/market/free-agents`）。豁免范围：赛果确认钩子整队静默跳过（不计 XP，也不进 `xp.unresolved`）；中国计划 XP 因无平台合同不发（假设 35）；主场收入/奖金/确认通知因无俱乐部行、无球场行天然不发；管理组手工补录不受限（人工判断）。实现：`growth.ts` `isCpuTeam()`（严格后缀）+ `results.ts` 的 `resolve()`/`queueResultNotifications()` 两处队名→俱乐部解析。用户裁决 2026-09-18：「严格匹配，而且 CPU 队球员视同海里球员」 |
 
 ## 16. 测试策略
 
