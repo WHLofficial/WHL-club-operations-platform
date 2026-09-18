@@ -142,11 +142,21 @@
 
 **待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）。
 
-**CPU 口径（2026-09-18）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员无成长（赛果整队静默跳过，已实现）。**2026-09-18 用户更正语义**：CPU 队球员「视同海里球员」只指**转会上视同**（即可海捞）——平台仍要为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建 clubs 行、其球员要带 `club_id`，并且海捞名单查询条件必须相应改造。本节先前的「不建行、按无归属留在海捞池」记载作废。待裁决细则见下。
+**CPU 口径（2026-09-18）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员无成长（赛果整队静默跳过，已实现）。**2026-09-18 用户更正语义**：CPU 队球员「视同海里球员」只指**转会上视同**（即可海捞）——平台仍要为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建 clubs 行、其球员要带 `club_id`，并且海捞名单查询条件必须相应改造。本节先前的「不建行、按无归属留在海捞池」记载作废。六问细则已全部裁决并落地，见「增量 14」。
 
-**CPU 待办与问题清单（2026-09-18 探查后，等用户逐条裁决）**：
-- 已查明的事实：①「海里球员」在代码里就等于 `club_id IS NULL`，共 3 处闸门——海捞名单 `src/worker/routes/market.ts:263`、海捞签入 `src/worker/bypass.ts:356`（`海捞只能签无归属的球员（这名球员有东家）`）、通道 C 合同导入认领 `src/worker/contracts-import.ts:116/130/207`（已归属报错 / claim 分支 / `AND club_id IS NULL` 落库闸）。②平台 `clubs.id` = **FC26 TeamID**、`clubs.name` = tour 中文队名（16 支联盟队逐条对上）；tour `team.id` 是另一套内部编号 1–21（快照 `scripts/fc26-id-rekey/prod-snapshot-20260916.sql:85-104`），4 支 CPU 队在 tour 侧是 id **6/16/19/21**，而 FC26 源里是 TeamID **241/10/47/112172**（Barcelona 28 人、Man City 26、AC Milan 24、RB Leipzig 29，去重后仍是 **107 人**，无人被校验拦下）；注意 tour id 21 = AC米兰(CPU) 与平台 club 21（拜仁慕尼黑）**撞号**，故 CPU 队 clubs 行只能用 FC26 TeamID。③`clubs` 表无 CPU 标记列（`id/name/league_tier/logo_key/status/created_at`），`status` 在 src 里只写不读。④现有 `isCpuTeam()`（`src/worker/growth.ts:257`，严格 `endsWith('(CPU)')`）吃的是 tour 队名，不受 clubs 行影响。
-- 待裁决问题（一问一题）：1) CPU 队 clubs 行的 name 是否带「(CPU)」后缀、CPU 判定用队名后缀还是给 `clubs` 加显式标记列（要不要迁移）；2) 存量 107 人的 `club_id` 回填方式（一次性 SQL 还是写进导入逻辑）；3) 海上三闸门的改造口径；4) 首次认领时 `initial_club_id` 写认领方还是回填成 CPU 队（影响球员库 `view=initial` 显示）；5) 被海捞签下后的 CPU 球员，其 tour 赛果事件是否开始计 XP（现被 `isCpuTeam` 整队跳过）；6) CPU 队是否登记进 auth 目录 `team (tour_team_id, club_id)`（决定奖金/主场收入是否会给 CPU 队记账）。
+**CPU 六问的裁决记录（2026-09-18 逐条，来自本节原先的问题清单）**：1) 队名带「(CPU)」后缀、判定沿用 `isCpuTeam` 队名口径（**不加列、不做迁移**）；2) 存量 107 人 `club_id` = **导入逻辑写 + 一次性 SQL 回填**；3) 队 id 用**游戏真 id**（米兰 `131681`/国米 `131682`/拉齐奥 `115841`/亚特兰大 `115845`）+ 对外显示真名；4) `initial_club_id` **删除**（用户裁定「无意义」）；5) CPU 队球员代表 CPU 队出场**维持整队跳过、不计 XP**；6) auth 目录**补 4 行 club_id 但平台入账侧禁止 CPU 队入账**。原「已查明的事实」四条（三处「海里球员 = `club_id IS NULL`」闸门、平台 club id 与 tour 编号两套体系、clubs 无 CPU 标记列、`isCpuTeam` 吃队名）仍然有效，细节见 TECH_DESIGN 假设 36/37。
+
+**六问之前的两项关键澄清**：①平台 `clubs.id` = **FC26 TeamID**（16 支联盟队逐条对上），tour `team.id` 是另一套内部编号 1–21；4 支 CPU 队在 tour 侧是 id **6/16/19/21**（注意 tour 21 与平台 club 21 拜仁慕尼黑**撞号**，故 CPU 队 clubs 行只能用 FC 队 id）。②第三方 fixed 快照里 CPU 队与 4 支 EA 未授权队的编号（241/10/112172/47 与 39/44/46/47）与游戏真表不一致，本轮查清后统一到游戏真 id。
+
+## 增量 14 · CPU 队与队籍口径（代码已完成，未推送；数据侧待令）
+
+**裁决**（2026-09-18，承接增量 13 的 CPU 六问）：①CPU 队 clubs 行 name = `巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)`（与 tour 队名逐字一致），CPU 判定沿用 `isCpuTeam` 的队名半角「(CPU)」后缀口径——**不加列、不做迁移**；②存量 107 名 CPU 队球员的 `club_id` = **导入逻辑写 + 一次性 SQL 回填**；③4 支 EA 未授权队的队 id 用**游戏真 id**（米兰 `131681`、国米 `131682`、拉齐奥 `115841`、亚特兰大 `115845`）+ **对外显示真名**（用户原话：「球队名仍要是AC Milan。国米，拉齐奥，亚特兰大也是这样的情况，一并解决」）；④`initial_club_id` **删除**（用户：「所以这个无意义，可以去掉这一字段了」）；⑤被海捞签下的 CPU 球员，其代表 CPU 队出场的赛果**维持整队跳过（不计 XP）**；⑥auth 目录**补上 4 行 club_id 但平台入账侧禁止 CPU 队入账**。
+
+**交付**：迁移 0020（`ALTER TABLE players DROP COLUMN initial_club_id`）。`core/fc26.ts` 加 `FC26_TEAM_ID_ALIASES`（39→115845 / 44→131682 / 46→115841 / 47→131681）+ `normalizeTeamId`（legacy 号一次换真号）+ `FC26_CPU_TEAM_IDS`（10/241/112172/131681）；`core/import.ts` 的 `NormalizedPlayer` 增 `clubId`（`clubIdForTeam`：只有 4 支 CPU 队写，其余 NULL），两通道的 `gameAttrs.TeamID`/`teamid` 走归一化；`players-import.ts` 的 `upsertStatement` INSERT 加 `club_id`（`ON CONFLICT DO UPDATE` 不含它，免覆盖认领/解约后的事实归属）。三处「海里球员 = `club_id IS NULL`」闸门放行 CPU 队：海捞名单（`routes/market.ts`，全员附东家名、上限 100→300）、海捞签入（`bypass.ts` `createFreeAgent` 放行并把 `fromClubId` 记成 CPU 队 id——原为 null 时过户守卫 `club_id IS ?` 会更新 0 行、球员摘不走）、通道 C 认领（`contracts-import.ts`，classify 与落库闸同步）。CPU 队不入账：`prizes.ts` 的 `clubIdByTourTeam` 用 `cpuClubIds` 过滤（auth 目录里 club_id 照补，奖金/主场收入不发）、强制拍卖拒绝 CPU 队球员（`bypass.ts` `createForcedAuction`，理由=成交价会记到 CPU 队头上）。`growth.ts` 加 `CPU_CLUB_IDS_SQL`/`cpuClubIds`（SQL 侧 `substr(name, -5) = '(CPU)'`，与 `isCpuTeam` 逐字对齐）。删列出口：`routes/players.ts`（`view=initial` 保留 CA=base_ca、PA=导入值的口径；归属列两视图都打当前归属）+ 前端 `web/src/lib/api.ts`、`pages/{PlayersLibrary,Player,Market}.tsx`；`web/assets/ref/team.json` 补 4 条「真 id → 真名」+ `scripts/gen_ref_json.py` 的 `TEAM_NAME_OVERRIDES`（再生成不丢，旧 id 条目保留给未重键的历史 `game_attrs`）。
+
+**验收**：**316 测试绿 + 三份 tsc 干净 + vite build 通过**。新增 6 组用例：队籍与别名（通道 A 三行落 241/131681/null、通道 B 只换 `game_attrs.teamid` 不写 club_id——最初写错断言即被抓住）、通道 C 认领 CPU 球员（预览 claim、确认后归属）、海捞 CPU 球员全链（名单带东家 → 成约后从 CPU 队摘出 → `ledger_entries` 里 CPU 队 0 流水）、强制拍卖拒绝、平台队打 CPU 队只发平台侧奖金、`clubIdByTourTeam` 过滤；`tests/players-library.test.ts` 四处改造（0015 回填用例保留 + 新增 0020 删列用例）。code review 自查修掉两项：①SQL 侧原用 `LIKE '%(CPU)'`（SQLite 对 ASCII 不区分大小写，会与 `isCpuTeam` 的严格口径分叉）→ 改 `substr(name, -5)`；②海捞名单 `LIMIT 100` 在池里多了 107 名 CPU 球员后会藏掉低 CA 那半截 → 改 300。
+
+**待办**：数据侧动作待用户下令——①4 支 CPU 队 clubs 行；②107 人 `club_id` 回填 + 105 人 `game_attrs.TeamID` 重键（两集合只在米兰 24 人重叠）；③auth 目录补 4 行 club_id（tour 6→241、16→10、19→112172、21→131681）；④apply 迁移 0019+0020、部署 worker（与 `/me/club` 500 修复同批）。
 
 ---
 

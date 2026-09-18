@@ -111,7 +111,7 @@ CREATE TABLE players (
   id INTEGER PRIMARY KEY,
   uid TEXT UNIQUE NOT NULL,          -- 与现行球员 uid 体系一致
   name TEXT NOT NULL,
-  club_id INTEGER,                   -- NULL = 无归属（可海捞）
+  club_id INTEGER,                   -- NULL = 无归属（可海捞）；CPU 队球员建档即带 CPU 队 id，且同样可海捞（增量 14）
   position TEXT,                     -- GK/CB/LB/RB/CDM/CM/LM/RM/...（防守位置判定用）
   foot INTEGER DEFAULT 1,            -- 惯用脚 0=左脚 1=右脚（导入归一化：FC26db FootID 1右/2左、FC Editor preferredfoot 文本）
   age INTEGER,
@@ -333,7 +333,7 @@ CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);  -- 全
 | `is_future_star` | Growth+ 名单上传 → 预置建议值，**管理组核定后生效**（核定写 audit） | — |
 | `game_attrs` | §5.2 ID-only 口径全量 | 原文归档（role/playstyles 文本无反查表） |
 
-**upsert 幂等**（关键约束）：`ON CONFLICT(fc_id) DO UPDATE` **只写 FC 源列**（上表 + height/weight/weakfoot/skillmoves 等）；**绝不触碰运营列**——club_id、status、contracts、badges_silver/gold、growth_tier/xp、market_value、agent_tier、registrations。重复导入安全，运营数据零风险。
+**upsert 幂等**（关键约束）：`ON CONFLICT(fc_id) DO UPDATE` **只写 FC 源列**（上表 + height/weight/weakfoot/skillmoves 等）；**绝不触碰运营列**——status、contracts、badges_silver/gold、growth_tier/xp、market_value、agent_tier、registrations。`club_id` 是唯一例外且只在**新插入**时写（增量 14，用户裁决：CPU 队球员的队籍，4 支 CPU 队之外的球员落 NULL）；冲突时不更新，免得覆盖认领/解约/转会后的事实归属。重复导入安全，运营数据零风险。
 
 **参考表静态 JSON**：导入工具顺带从源文件生成 NationID/PlayStyleID(含图标键)/PositionID/RoleID/TeamID 五张 JSON 进 `web/assets/ref/`，随 SPA 版本发布（前端渲染名称与徽章小图标的数据源，换赛季重新生成）。
 
@@ -381,7 +381,7 @@ listed（挂牌中或任意球员）──激活(校验：一窗一球员一次�
 
 | 操作 | 关键校验 | 费用 |
 |---|---|---|
-| 海捞 | 目标球员无归属（解约禁签名单内的本窗不可签）；**新违约金不设上下限**（裁决：自平衡——定得低签入费与工资都便宜，但球员随时可被激活撬走；定得高则签入费贵。原「定价人工审」取消）；复签翻新历史合同行（contracts.player_id 全局唯一，UPSERT） | 新 RC × 30% |
+| 海捞 | 目标球员无归属**或挂在 CPU 队名下**（增量 14；解约禁签名单内的本窗不可签）；**新违约金不设上下限**（裁决：自平衡——定得低签入费与工资都便宜，但球员随时可被激活撬走；定得高则签入费贵。原「定价人工审」取消）；复签翻新历史合同行（contracts.player_id 全局唯一，UPSERT） | 新 RC × 30% |
 | 解约 | 有合同、未挂牌/未激活挂牌/未在解约流程中 | 效力 ≥3 年（365.25 天/年）免费；否则 RC×(3−效力)×0.1；本窗被解约球员全联盟禁签；CA 恢复 base_ca，成长数值（XP/已升级数/徽章计数）清零并写 reset 划断行（增量 13，假设 19）。**无工资谈判，审核通过直接 completed** |
 | 续约（=规则 4.4.6 合同期内更改违约金，内部枚举 rc_change 不变） | 合同期内、未挂牌/未解约；幅度：RC≤20m→±10m、RC>20m→±50% | 提高=差额×30%；降低=免费；保护期重新收口到审核通过当下（效力起点不动）；工资重谈（预期工资加薪 5%-15%，见 §6.7） |
 | 强制拍卖 | 准入体检失败触发；管理方 1m 挂牌；人选队内 CA 前六（含并列、不含门将） | 交易税率 50%（特例）。走挂牌链，成交后同样进 signing |
@@ -811,7 +811,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
 | 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
 | 23 | 假设 | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮（/api/me/notifications）延后 P1，MVP 只走 QQ 推送 |
-| 24 | 已定 | 球员初始归属（initial_club_id）= 导入时数据：首次名单认领写入（COALESCE 保解约重签不覆盖），存量按最早归属变更的 from_club_id 回填，只海捞过（free_agent）= 导入时无归属留 NULL；仅供成长「本队」判断与球员库初始视图展示，XP 场次匹配仍按当前归属名单（§8 口径不变） |
+| 24 | **已撤销**（增量 14 裁决 4） | 球员初始归属 `initial_club_id`（0015 立）**已删除**（迁移 0020 `DROP COLUMN`）：它从不参与成长判定（「本队」一律看 `players.club_id`），只是球员库初始视图一列 + 档案卡一行字，用户裁定「无意义，去掉」。球员库 `view=initial` 保留 CA=base_ca、PA=导入值的口径；归属列两种视图都显示**当前**归属 |
 | 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
 | 26 | 已定（增量 7） | 球队绑定真源上收 auth（三表 team/team_bind_code/team_binding；机器端点五条 HMAC）；本侧旧表 club_bind_code/club_bindings 休眠保留防回滚，AUTH_DB 未配置时回落读本地表（回滚通道）；发码 team_not_found 不自动登记目录（提示先登记关联，与 tour 侧自愈 register 不同）；OIDC 教练判定=绑定即教练（管理点仍走权限点；未绑定的准教练凭 club.* 权限点保留旁路进绑前端点） |
 | 28 | 已定（增量 11） | 富人税/工资只在窗末（closeWindow 批）收，赛季结算不重复收（§11 结算顺序里「富人税」步即窗末已收项，结算按钮不再扣）；工资=Σ现行合同 wage 全额、一窗=半赛季扣全额 |
@@ -823,7 +823,11 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 33 | 已定（增量 12） | 维护费 = 档位基础(2.0-14) + 每万座费率(0.8-0.2)×容量(万) × 本窗已确认主场场次，并入关窗批，`kind='maintenance' ref='window'` 幂等 |
 | 34 | 已定（增量 13） | 成长期 = 里程碑累计边界（用户裁决 2026-09-18）：由管理组手动宣告或开窗时勾选自动宣告，**不与窗口绑定**（一个赛季可有多个成长期，通常落在两个窗口之间，也可能变）；界 = `growth_periods.start_event_id`（只累计其后事件），无宣告行时按全生涯口径 |
 | 35 | 已定（增量 13） | 中国球员计划 XP（每季 +20）闸门 = `china_plan=1` **且在册现行合同**（与训练营同口径，用户裁决 2026-09-18）；无归属/已解约的中国球员不发 XP |
-| 36 | 已定（增量 13；2026-09-18 用户更正语义） | CPU 队判定 = 比赛系统队名以半角「(CPU)」结尾（**严格匹配**，不做全角括号/大小写/首尾空格容错：队名即口径，改名即重新判定）。CPU 队球员无成长；其在**转会意义上视同海里球员**（可被海捞）——但平台仍须为这 4 支 CPU 队建 clubs 行、其球员须带 club_id（用户 2026-09-18 更正，先前「不建行 / 按无归属处理」的记载作废）。因此三处「海里球员 = `club_id IS NULL`」闸门须一并改造：海捞名单 `GET /api/market/free-agents`（`src/worker/routes/market.ts:263`）、海捞签入校验（`src/worker/bypass.ts:356` `海捞只能签无归属的球员`）、通道 C 合同导入认领（`src/worker/contracts-import.ts:116` 已归属报错 / `:130` claim 分支 / `:207` `AND club_id IS NULL` 落库闸）；建行 id/名与判定口径待裁决。豁免范围：赛果确认钩子整队静默跳过（不计 XP，也不进 `xp.unresolved`）；中国计划 XP 因无平台合同不发（假设 35）；主场收入因无球场行天然不发、奖金因 auth 目录未登记 CPU 队（`src/worker/prizes.ts:56` `clubIdByTourTeam`）天然不发（是否登记待裁决）；管理组手工补录不受限（人工判断）。实现：`growth.ts` `isCpuTeam()`（严格后缀）+ `results.ts` 的 `resolve()`/`queueResultNotifications()` 两处队名→俱乐部解析。用户裁决 2026-09-18：「严格匹配，而且 CPU 队球员视同海里球员」 |
+| 36 | 已定（增量 13 立、增量 14 收口） | CPU 队判定 = 比赛系统队名以半角「(CPU)」结尾（**严格匹配**，不做全角括号/大小写/首尾空格容错：队名即口径，改名即重新判定）。CPU 队球员**无成长**（`results.ts` 的 `resolve()` / `queueResultNotifications()` 两处队名→俱乐部解析整队静默跳过：不计 XP，也不进 `xp.unresolved`），但在**转会意义上视同海里球员**（可被海捞、可被认领）。增量 14 落地（用户裁决 2026-09-18 六问逐条）：①平台为 4 支 CPU 队建 clubs 行——`巴塞罗那(CPU)`/`曼城(CPU)`/`RB莱比锡(CPU)`/`AC米兰(CPU)`，name 与 tour 队名逐字一致，id = 游戏真队 id `241/10/112172/131681`；判定复用 `isCpuTeam` 的队名后缀口径（不加列、无迁移）。②其球员建档即带 `club_id`（建档导入只给 `FC26_CPU_TEAM_IDS` 写，见 §5.4），三处「海里球员 = `club_id IS NULL`」闸门放行：海捞名单 `GET /api/market/free-agents`（`src/worker/routes/market.ts:267`，全员附东家名）、海捞签入 `createFreeAgent`（`src/worker/bypass.ts:359`，且 `fromClubId` 记 CPU 队 id，过户守卫才摘得走人）、通道 C 合同导入认领（`src/worker/contracts-import.ts:122/135/212`）。③CPU 队**一律不入账**：`clubIdByTourTeam` 白名单过滤（`src/worker/prizes.ts:70`，auth 目录里 club_id 照补、但奖金与主场收入不发）、强制拍卖拒绝 CPU 队球员（`src/worker/bypass.ts:435`）；中国计划 XP 因无平台合同不发（假设 35），主场收入因无球场行天然不发，管理组手工补录不受限（人工判断）。实现：`growth.ts` 的 `isCpuTeam()` + `CPU_CLUB_IDS_SQL` + `cpuClubIds(db)`（SQL 侧用 `substr(name, -5) = '(CPU)'`，与 `isCpuTeam` 逐字对齐，避免 LIKE 的大小写不敏感造成两种口径分叉） |
+| 37 | 已定（增量 14 裁决 3） | 队 id 口径 = **游戏真 id**：EA 未授权的 4 支俱乐部在游戏里用假名 + 新号（AC Milan → `131681` Milano FC、Inter → `131682` Lombardia FC、Lazio → `115841` Latium、Atalanta → `115845` Bergamo Calcio），而第三方 fixed 快照（`FC26db20251217_fixed.xlsx`，即导入源与 `scripts/gen_ref_json.py` 的源）仍带旧 FIFA 号（`39/44/46/47`）——EAFC 26 IDs 表的 1..199 段里这 4 个号整段不存在（假名↔真身对应关系靠 FC Editor 的 `player_tables/{id} - {Team}.xlsx` 球员名单逐队核对确认）。口径：`clubs.id` 与 `players.club_id` 都落游戏真 id；`src/core/fc26.ts` 的 `FC26_TEAM_ID_ALIASES`（39→115845 / 44→131682 / 46→115841 / 47→131681）在导入归一化时一次性换号（同时写进 `game_attrs.TeamID`），保证**重跑导入落在同一 id 空间**；**对外显示名仍是真名**——`web/assets/ref/team.json` 补 4 条「真 id → 真名」，`scripts/gen_ref_json.py` 的 `TEAM_NAME_OVERRIDES` 保证再生成不丢，旧 id 条目刻意保留（未重键的历史 `game_attrs` 仍要显示得出队名）。受影响面：游戏表 1..199 段缺失号 ∩ 平台实际出现的号 = `{39,44,46,47}`。计数口径务必区分：**107 人** = 4 支 CPU 队球员（巴萨 28 + 曼城 26 + 莱比锡 29 + 米兰 24，假设 36）；**105 人** = 4 支游戏假名队球员（亚特兰大 27 + 国米 24 + 拉齐奥 30 + 米兰 24），两集合只在米兰 24 人重叠 |
+| 38 | 待办（数据侧，待用户下令） | 增量 14 的生产动作（代码已就绪，未执行）：①建 4 支 CPU 队 clubs 行（id `241/10/112172/131681`，name 如上）；②107 名 CPU 队球员 `club_id` 回填 + 105 名假名队球员 `game_attrs.TeamID` 重键；③auth 目录 `team` 补 4 行 club_id（tour 6→241、16→10、19→112172、21→131681；补链端点 `POST /api/team/link`）；④apply 迁移 0019（成长期）+ 0020（删列）、部署 worker（与 `/me/club` 500 修复同批）。注意 tour id 21 = AC米兰(CPU) 与平台 club 21（拜仁慕尼黑）撞号——CPU 队一律用 FC 队 id |
+
+**增量 14 实现状态（CPU 队与队籍口径，代码已落地未推送）**：迁移 0020（删 `initial_club_id`）；`core/fc26.ts` 加 `FC26_TEAM_ID_ALIASES`/`normalizeTeamId`/`FC26_CPU_TEAM_IDS`；`core/import.ts` 的 `NormalizedPlayer` 增 `clubId`（`clubIdForTeam`：只有 4 支 CPU 队写）与两通道的 `gameAttrs.TeamID`/`teamid` 归一化；`players-import.ts` 的 `upsertStatement` INSERT 加 `club_id`（DO UPDATE 不含）；`growth.ts` 加 `CPU_CLUB_IDS_SQL`/`cpuClubIds`；`routes/market.ts` 海捞名单放行 CPU 队并返回 `clubName`（上限 100→300：池里多了 107 名 CPU 球员）；`bypass.ts` 海捞放行 + `fromClubId` 记原队、强制拍卖拒绝 CPU 队球员；`contracts-import.ts` 认领放行；`prizes.ts` 入账过滤；`routes/players.ts` 删 `initial_club_id` 出口（`view=initial` 保留 CA/PA 口径，归属列两视图都打当前归属）；前端 `web/src/lib/api.ts`、`pages/{PlayersLibrary,Player,Market}.tsx` 同步；`web/assets/ref/team.json` + `scripts/gen_ref_json.py` 补 4 条真名。测试：新增 6 组用例（队籍与别名、通道 C 认领 CPU 球员、海捞 CPU 球员全链、强制拍卖拒绝、CPU 侧不入奖金、`clubIdByTourTeam` 过滤）+ `players-library` 四处改造；**316 测试绿 + 三份 tsc 干净 + vite build 通过**。
 
 ## 16. 测试策略
 
