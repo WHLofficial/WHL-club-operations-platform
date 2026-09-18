@@ -81,7 +81,7 @@
 
 **验收**：tour 与 club 绑定/发码互通指向同一绑定关系；一账号一队全生态生效；三仓测试全绿（auth 96 / tour 16 / club 263）。
 
-**状态**：已上线（2026-09-15 部署）。三仓推送（club 8824c42+123846c+7f513ce、auth 32405a6+e5a94d1+47bd100+1eebbb1+726415b、tour 31850c6+471797e）+ code review 通过（修复烧码并发竞速双绑定——条件 INSERT...SELECT 原子闸；register/link 审计同批化）。生产：auth 0008 远端迁移 + 迁移 SQL 已执行（目录 20 队/绑定 10 条/冲突 0/单边 0，club 侧目录关联待 clubs 表有数据后用 /api/team/link 补）；BIND_SECRET 已轮换（AstrBot 插件 bind_secret 需同步，否则 QQ 绑定验签失败）；auth 94cf8114 / tour efc97d59 / club 0303622e，机器端点验签烟测通过（正确密钥进业务层、错密钥 401）。生产补数据：16 支真实俱乐部已建（id=tour team id，CPU 4 队不入平台；`seed-clubs.sql` 存档未提交）并经 /api/team/link 全部关联目录（linked 16/16，里昂→club 2 已验）。
+**状态**：已上线（2026-09-15 部署）。三仓推送（club 8824c42+123846c+7f513ce、auth 32405a6+e5a94d1+47bd100+1eebbb1+726415b、tour 31850c6+471797e）+ code review 通过（修复烧码并发竞速双绑定——条件 INSERT...SELECT 原子闸；register/link 审计同批化）。生产：auth 0008 远端迁移 + 迁移 SQL 已执行（目录 20 队/绑定 10 条/冲突 0/单边 0，club 侧目录关联待 clubs 表有数据后用 /api/team/link 补）；BIND_SECRET 已轮换（AstrBot 插件 bind_secret 需同步，否则 QQ 绑定验签失败）；auth 94cf8114 / tour efc97d59 / club 0303622e，机器端点验签烟测通过（正确密钥进业务层、错密钥 401）。生产补数据：16 支真实俱乐部已建（id=**FC26 TeamID**、name=tour 中文队名，2026-09-18 核对 16/16；原文误记为 tour team id；CPU 4 队当时未建——2026-09-18 更正为应建，见增量13 CPU 待办；`seed-clubs.sql` 存档未提交）并经 /api/team/link 全部关联目录（linked 16/16，里昂→club 2 已验）。
 
 ## 增量 8 · 球员库统一 + FC26 ID 对齐（进行中）
 
@@ -142,7 +142,11 @@
 
 **待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）。
 
-**CPU 口径（2026-09-18 已定）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员视同海里球员——不为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建平台 clubs 行，其球员 `club_id` 保持 NULL、`status='normal'`，照常出现在海捞池。
+**CPU 口径（2026-09-18）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员无成长（赛果整队静默跳过，已实现）。**2026-09-18 用户更正语义**：CPU 队球员「视同海里球员」只指**转会上视同**（即可海捞）——平台仍要为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建 clubs 行、其球员要带 `club_id`，并且海捞名单查询条件必须相应改造。本节先前的「不建行、按无归属留在海捞池」记载作废。待裁决细则见下。
+
+**CPU 待办与问题清单（2026-09-18 探查后，等用户逐条裁决）**：
+- 已查明的事实：①「海里球员」在代码里就等于 `club_id IS NULL`，共 3 处闸门——海捞名单 `src/worker/routes/market.ts:263`、海捞签入 `src/worker/bypass.ts:356`（`海捞只能签无归属的球员（这名球员有东家）`）、通道 C 合同导入认领 `src/worker/contracts-import.ts:116/130/207`（已归属报错 / claim 分支 / `AND club_id IS NULL` 落库闸）。②平台 `clubs.id` = **FC26 TeamID**、`clubs.name` = tour 中文队名（16 支联盟队逐条对上）；tour `team.id` 是另一套内部编号 1–21（快照 `scripts/fc26-id-rekey/prod-snapshot-20260916.sql:85-104`），4 支 CPU 队在 tour 侧是 id **6/16/19/21**，而 FC26 源里是 TeamID **241/10/47/112172**（Barcelona 28 人、Man City 26、AC Milan 24、RB Leipzig 29，去重后仍是 **107 人**，无人被校验拦下）；注意 tour id 21 = AC米兰(CPU) 与平台 club 21（拜仁慕尼黑）**撞号**，故 CPU 队 clubs 行只能用 FC26 TeamID。③`clubs` 表无 CPU 标记列（`id/name/league_tier/logo_key/status/created_at`），`status` 在 src 里只写不读。④现有 `isCpuTeam()`（`src/worker/growth.ts:257`，严格 `endsWith('(CPU)')`）吃的是 tour 队名，不受 clubs 行影响。
+- 待裁决问题（一问一题）：1) CPU 队 clubs 行的 name 是否带「(CPU)」后缀、CPU 判定用队名后缀还是给 `clubs` 加显式标记列（要不要迁移）；2) 存量 107 人的 `club_id` 回填方式（一次性 SQL 还是写进导入逻辑）；3) 海上三闸门的改造口径；4) 首次认领时 `initial_club_id` 写认领方还是回填成 CPU 队（影响球员库 `view=initial` 显示）；5) 被海捞签下后的 CPU 球员，其 tour 赛果事件是否开始计 XP（现被 `isCpuTeam` 整队跳过）；6) CPU 队是否登记进 auth 目录 `team (tour_team_id, club_id)`（决定奖金/主场收入是否会给 CPU 队记账）。
 
 ---
 
