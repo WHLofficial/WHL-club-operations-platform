@@ -1,5 +1,5 @@
 // 增量 12：主场收入域——影响力公式（规则 4.1.2/4.1.3）、上座三分收入、确认钩子④、窗末维护费+死忠演化、管理端点
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam } from './d1.ts';
 import type { Env } from '../src/worker/env.ts';
@@ -15,7 +15,6 @@ import {
   diehardTarget,
   evolveFans,
   loadAttendanceModel,
-  matchAttendanceStatements,
   windowHomeStatements,
 } from '../src/worker/home.ts';
 import { app } from '../src/worker/index.ts';
@@ -49,7 +48,7 @@ function seedTourSchema(tour: DatabaseSync) {
   `);
 }
 
-function seedClubWithTeam(env: Env, auth: DatabaseSync, sqlite: DatabaseSync, clubId: number, tourTeamId: number) {
+function seedClubWithTeam(auth: DatabaseSync, sqlite: DatabaseSync, clubId: number, tourTeamId: number) {
   sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (?, ?, 'active')`).run(clubId, `俱乐部${clubId}`);
   sqlite.prepare(`INSERT INTO ledger_accounts (club_id, balance) VALUES (?, 0)`).run(clubId);
   authRegisterClubTeam(auth, tourTeamId, clubId, `队${tourTeamId}`);
@@ -198,8 +197,8 @@ describe('确认钩子④：三分收入即时入账（增量 12）', () => {
   it('主场确认→比赛日收入 ledger + 上座快照（rng=0.5 确定值）；无球场行跳过', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 2, 12);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
     // 主队球场：队壳 90 → 影响力 90（无球员）→ 对手系数 1+0.05×90/90=1.05
     seedStadium(fx.sqlite, 1, { shell: 90 });
     fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (1, 'commercial', 2), (1, 'broadcast', 3)`).run();
@@ -240,8 +239,8 @@ describe('确认钩子④：三分收入即时入账（增量 12）', () => {
     // 反向：无球场行的俱乐部作主场 → 跳过（无 revenue 流水）
     const fx2 = freshEnv();
     seedTourSchema(fx2.tour);
-    seedClubWithTeam(fx2.env, fx2.auth, fx2.sqlite, 3, 13);
-    seedClubWithTeam(fx2.env, fx2.auth, fx2.sqlite, 4, 12);
+    seedClubWithTeam(fx2.auth, fx2.sqlite, 3, 13);
+    seedClubWithTeam(fx2.auth, fx2.sqlite, 4, 12);
     insertMatch(fx2.tour, { matchId: 9, tournamentId: 5, stageId: 50, homeTeamId: 12, awayTeamId: 11, scoreHome: 1, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx2.sqlite, 1, 5, 'league_premier');
     const res2 = await confirmResult(fx2.env, 1, 9);
@@ -253,7 +252,7 @@ describe('确认钩子④：三分收入即时入账（增量 12）', () => {
 describe('窗末主场结算：维护费+死忠演化（增量 12）', () => {
   it('维护费=基础+每万座费率×容量万×主场场次；死忠向上座率与影响力目标靠拢', async () => {
     const fx = freshEnv();
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
     seedPlayer(fx.sqlite, 1, 1, { ca: 80, pa: 92, prestige: 4, growable: 1 }); // 影响力 7.5
     seedStadium(fx.sqlite, 1, { shell: 90, fans: 1800 }); // 总影响力 97.5 → 目标 97.5×26=2535
     // 本窗 1 场主场：上座 7333 → 上座率 0.36665

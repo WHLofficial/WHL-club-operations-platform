@@ -253,7 +253,6 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
   const tiersRaw = await config.get('loyalty_tiers');
   const tiers = (tiersRaw ? JSON.parse(tiersRaw) : [[0.5, 0.05], [1.5, 0.1], [2.5, 0.2]]) as [number, number][];
   tiers.sort((a, b) => a[0] - b[0]); // 配置可能乱序，按起效年限升序后「取满足的最高档」才成立
-  const HALF_YEAR_DAYS = 365.25 / 2;
 
   const contracts = await db
     .prepare(

@@ -5,7 +5,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, attachAuthChannel, sqlGet, sqlAll, type TestKV } from './d1.ts';
+import { createTestD1, applyMigrations, attachAuthChannel, sqlGet } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
@@ -34,7 +34,7 @@ function freshEnv(): Fixture {
       get: async (k: string) => kv.get(k) ?? null,
       put: async (k: string, v: string) => void kv.set(k, v),
       delete: async (k: string) => void kv.delete(k),
-    } as unknown as TestKV,
+    } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
   };

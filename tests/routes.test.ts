@@ -242,6 +242,48 @@ describe('建队与认证码绑定（§3.2）', () => {
     expect(body.window).toBeNull();
   });
 
+  it('主场档案随概览下发：有球场行时带档位名/设施/影响力构成（增量 12 回归：曾漏 loadTierTable 导入）', async () => {
+    const fx = withAuth(freshEnv());
+    const clubId = await createClub(fx, '阿森纳');
+    const code = await issueCode(fx, clubId);
+    expect((await post('/api/clubs/bind', { code }, 'tok-coach', fx.env)).status).toBe(201);
+    fx.sqlite
+      .prepare(
+        `INSERT INTO stadiums (club_id, name, capacity, tier, shell_influence, bonus_points, fans, created_at, updated_at)
+         VALUES (?, '酋长球场', 22000, 1, 40, 5, 2000, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run(clubId);
+    fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (?, 'commercial', 2)`).run(clubId);
+
+    const res = await get('/api/me/club', 'tok-coach', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      home: {
+        name: string;
+        capacity: number;
+        tier: number;
+        tierName: string | null;
+        fans: number;
+        influence: { players: number; shell: number; bonus: number; total: number };
+        facilities: { key: string; level: number }[];
+      } | null;
+    };
+    expect(body.home).toMatchObject({ name: '酋长球场', capacity: 22000, tier: 1, tierName: '地区级', fans: 2000 });
+    expect(body.home?.influence).toEqual({ players: 0, shell: 40, bonus: 5, total: 45 });
+    expect(body.home?.facilities).toEqual([{ key: 'commercial', level: 2 }]);
+  });
+
+  it('无球场行时主场档案为 null（不报错）', async () => {
+    const fx = withAuth(freshEnv());
+    const clubId = await createClub(fx, '阿森纳');
+    const code = await issueCode(fx, clubId);
+    expect((await post('/api/clubs/bind', { code }, 'tok-coach', fx.env)).status).toBe(201);
+
+    const res = await get('/api/me/club', 'tok-coach', fx.env);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { home: null }).home).toBeNull();
+  });
+
   it('一账号一队：已绑定的账号再绑被拒且不烧码', async () => {
     const fx = withAuth(freshEnv());
     const c1 = await createClub(fx, '阿森纳');

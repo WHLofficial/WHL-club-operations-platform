@@ -1,7 +1,6 @@
 // 增量 11：奖金自动入账 + 赛事完结结算 + 窗末扣款 + 赛季结算
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { createHash } from 'node:crypto';
 import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam } from './d1.ts';
 import type { Env } from '../src/worker/env.ts';
 import { resetConfigCache } from '../src/core/config.ts';
@@ -21,10 +20,6 @@ function freshEnv() {
     rng: () => 0.5,
   } as unknown as Env;
   return { env, sqlite, auth: authSqlite, tour };
-}
-
-function sqlGet<T>(db: DatabaseSync, sql: string): T | undefined {
-  return db.prepare(sql).get() as T | undefined;
 }
 
 // 最小 tour schema（与 results.ts MATCH_SELECT 对齐，含 config_json/winner id）
@@ -95,7 +90,7 @@ function insertBinding(sqlite: DatabaseSync, season: number, tournamentId: numbe
   sqlite.prepare(`INSERT INTO season_tournaments (season, tournament_id, competition_type, created_at) VALUES (?, ?, ?, '2026-09-16T00:00:00Z')`).run(season, tournamentId, competitionType);
 }
 
-function seedClubWithTeam(env: Env, auth: DatabaseSync, sqlite: DatabaseSync, clubId: number, tourTeamId: number) {
+function seedClubWithTeam(auth: DatabaseSync, sqlite: DatabaseSync, clubId: number, tourTeamId: number) {
   sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (?, ?, 'active')`).run(clubId, `俱乐部${clubId}`);
   sqlite.prepare(`INSERT INTO ledger_accounts (club_id, balance) VALUES (?, 0)`).run(clubId);
   authRegisterClubTeam(auth, tourTeamId, clubId, `队${tourTeamId}`);
@@ -107,8 +102,8 @@ describe('赛果确认即时入账（增量 11 §9.1）', () => {
   it('联赛主胜：主 8.5 / 客 4.7（kind=prize，ref_type 分侧幂等键）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 101);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 2, 102);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 101);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 102);
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 101, awayTeamId: 102, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
     const res = await confirmResult(fx.env, 1, 1);
@@ -125,8 +120,8 @@ describe('赛果确认即时入账（增量 11 §9.1）', () => {
   it('平局双 6.6；冠军杯小组赛每胜 7.0；淘汰赛晋级按所进轮次给（决赛胜=+5）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 2, 12);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
     // 平局
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 1, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_second');
@@ -163,8 +158,8 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
   it('联赛入场：每参赛队 20；二次结算 409', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 2, 12);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 1, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
     await confirmResult(fx.env, 1, 1);
@@ -181,8 +176,8 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
   it('资格赛止步保底：输家 7.5，赢家不领；小组赛剩余池按胜场占比', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 2, 12);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
     // 资格赛：主队胜 → 客队止步
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 0, stageKind: 'elim', entryCount: 4 });
     insertBinding(fx.sqlite, 1, 5, 'qualifying');
@@ -194,8 +189,8 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
     // 小组赛剩余池：总池 200，已发 7.0（一胜）→ 剩 193，单队两胜全拿
     const fx2 = freshEnv();
     seedTourSchema(fx2.tour);
-    seedClubWithTeam(fx2.env, fx2.auth, fx2.sqlite, 1, 11);
-    seedClubWithTeam(fx2.env, fx2.auth, fx2.sqlite, 2, 12);
+    seedClubWithTeam(fx2.auth, fx2.sqlite, 1, 11);
+    seedClubWithTeam(fx2.auth, fx2.sqlite, 2, 12);
     insertMatch(fx2.tour, { matchId: 1, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 1, stageKind: 'group' });
     insertMatch(fx2.tour, { matchId: 2, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 12, scoreHome: 3, scoreAway: 0, stageKind: 'group' });
     insertBinding(fx2.sqlite, 1, 6, 'champions_cup');
@@ -211,7 +206,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
   it('工资全额扣；富人税 = max(资金档, 价值档)；税基取扣完工资后的余额', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
     fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24)`).run();
     fx.sqlite.prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES (1, 1, 1, 500, 3, '2026-01-01T00:00:00Z', 1)`).run();
     // 余额 130：扣工资 3 后 127>125 → 税1=25.4；价值 127+500=627≤700 → 税2=0 → 25.4
@@ -236,7 +231,7 @@ describe('赛季结算（忠诚奖金+growable 重判+settled）', () => {
   it('硬阻断（开窗未关）409；忠诚分档+入俱乐部账；growable 按 age_cap 重判；重复结算 409', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
     fx.sqlite.prepare(`INSERT INTO seasons (season, status, age_cap, created_at) VALUES (1, 'running', 24, '2026-01-01T00:00:00Z')`).run();
     fx.sqlite.prepare(`INSERT INTO season_windows (season, window_seq, status) VALUES (1, 1, 'open')`).run();
     const check = await checkSeasonSettle(fx.env, 1);
@@ -260,7 +255,7 @@ describe('赛季结算（忠诚奖金+growable 重判+settled）', () => {
   it('软警示（未确认完赛果）需 acknowledged；age_cap 缺失跳过 growable 重判', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
-    seedClubWithTeam(fx.env, fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
     fx.sqlite.prepare(`INSERT INTO seasons (season, status, created_at) VALUES (1, 'running', '2026-01-01T00:00:00Z')`).run(); // 无 age_cap
     insertMatch(fx.tour, { matchId: 9, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');

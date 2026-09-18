@@ -8,7 +8,7 @@ import { writeAudit } from '../../lib/audit.ts';
 import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier } from '../tier.ts';
-import { loadAttendanceModel, playerInfluenceSum, teamInfluence } from '../home.ts';
+import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { getVisibleSeason } from '../seasons.ts';
 
 const app = new Hono<{ Bindings: Env }>();
