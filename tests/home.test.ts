@@ -18,6 +18,7 @@ import {
   windowHomeStatements,
 } from '../src/worker/home.ts';
 import { app } from '../src/worker/index.ts';
+import { clubIdByTourTeam } from '../src/worker/prizes.ts';
 
 function freshEnv() {
   const sqlite = new DatabaseSync(':memory:');
@@ -357,5 +358,19 @@ describe('管理端主场域端点（增量 12）', () => {
     expect(bad2.status).toBe(400);
     const bad3 = await post('/api/admin/clubs/2/stadium', { shellInfluence: 1 }, 'tok-admin', fx.env);
     expect(bad3.status).toBe(404);
+  });
+});
+
+describe('CPU 队不入账（增量 14 裁决 6）', () => {
+  it('目录里 club_id 照样补上，但 clubIdByTourTeam 不返回 CPU 队（奖金/主场收入都发不出）', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 7);
+    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (241, '巴塞罗那(CPU)', 'active')`).run();
+    authRegisterClubTeam(fx.auth, 6, 241, '巴塞罗那(CPU)');
+
+    const map = await clubIdByTourTeam(fx.env, [6, 7]);
+    expect(map.size).toBe(1);
+    expect(map.get(7)).toBe(1);
+    expect(map.has(6)).toBe(false);
   });
 });

@@ -150,6 +150,18 @@ describe('强制拍卖（4.4.5）', () => {
     expect(richSeventh.status).toBe(409);
   });
 
+  it('CPU 队球员不参与强制拍卖（增量 14：CPU 队不入账）', async () => {
+    const fx = await seedAuction();
+    fx.sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active');
+       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
+    );
+    const res = await post('/api/admin/forced-auctions', { playerId: 60 }, 'tok-admin', fx.env);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('CPU 队球员不参与强制拍卖');
+  });
+
   it('成交链：1m 挂牌 → 竞价 → 待审 → 批准进谈判 → 成约按整单 50% 税过户', async () => {
     const fx = await seedAuction();
     const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);

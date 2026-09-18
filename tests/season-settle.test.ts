@@ -117,6 +117,21 @@ describe('赛果确认即时入账（增量 11 §9.1）', () => {
     await expect(confirmResult(fx.env, 1, 1)).rejects.toThrow();
   });
 
+  it('CPU 队一侧不入账：平台队打 CPU 队只发平台侧奖金（增量 14 裁决 6）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 101);
+    // CPU 队：clubs 行与目录 club_id 都补齐（赛程/展示要用），但奖金与主场收入不发
+    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (241, '巴塞罗那(CPU)', 'active')`).run();
+    authRegisterClubTeam(fx.auth, 6, 241, '巴塞罗那(CPU)');
+    insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 101, awayTeamId: 6, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
+    insertBinding(fx.sqlite, 1, 5, 'league_premier');
+    const res = await confirmResult(fx.env, 1, 1);
+    expect(res.prizeError).toBeNull();
+    const rows = fx.sqlite.prepare('SELECT club_id, amount, ref_type FROM ledger_entries WHERE kind = ?').all('prize') as { club_id: number; amount: number; ref_type: string }[];
+    expect(rows).toEqual([{ club_id: 1, amount: 8.5, ref_type: 'match_home' }]);
+  });
+
   it('平局双 6.6；冠军杯小组赛每胜 7.0；淘汰赛晋级按所进轮次给（决赛胜=+5）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);

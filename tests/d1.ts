@@ -84,6 +84,7 @@ const MIGRATION_FILES = [
   '0017_season_settle.sql',
   '0018_home.sql',
   '0019_growth_periods.sql',
+  '0020_drop_initial_club.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

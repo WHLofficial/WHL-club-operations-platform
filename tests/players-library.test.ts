@@ -1,5 +1,5 @@
 // 球员库列表（增量 6.1 d6）：筛选（position/name/growable/CA·PA·年龄区间）、数值键 keyset 排序翻页、参数校验
-// + 初始归属（d7）：0015 存量回填、view=initial 导入时口径、详情 initialClub
+// + view=initial 的导入时口径（CA=base_ca、PA=导入值）；initial_club_id 已在增量 14 裁决 4 删除
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -45,7 +45,6 @@ interface ListBody {
     growable: boolean;
     marketValue: number | null;
     clubName: string | null;
-    initialClubName: string | null;
   }[];
   nextCursor: string | null;
 }
@@ -103,20 +102,19 @@ describe('球员库列表（增量 6.1 d6）', () => {
     expect(res.players).toEqual([]);
   });
 
-  it('列表回俱乐部名（d8）：当前视图打归属名，无归属显示 null；初始视图打初始归属名', async () => {
+  it('列表回俱乐部名（d8）：两种视图都打现行归属名，无归属显示 null', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
-    // 给 1 号挂一条归属变更：老东家 1 → 蓝月亮 2，初始回填为 1
+    // 给 1 号挂一条归属变更：老东家 1 → 蓝月亮 2
     fx.sqlite.exec(
       `INSERT INTO transfers (player_id, type, from_club_id, to_club_id, created_at) VALUES (1, 'transfer', 1, 2, '2026-01-01T00:00:00Z')`,
     );
-    fx.sqlite.exec(`UPDATE players SET club_id = 2, initial_club_id = 1 WHERE id = 1`);
+    fx.sqlite.exec(`UPDATE players SET club_id = 2 WHERE id = 1`);
 
     const current = await list('/api/players?club_id=2', fx.env);
     // 3、4 号种子现属就是蓝月亮；1 号转会后也归 2
     expect(current.players.map((p) => p.id)).toEqual([1, 3, 4]);
     expect(current.players[0]!.clubName).toBe('蓝月亮');
-    expect(current.players[0]!.initialClubName).toBe('老东家 FC');
 
     const elsewhere = await list('/api/players?club_id=3', fx.env);
     expect(elsewhere.players.map((p) => p.id)).toEqual([8]);
@@ -124,12 +122,11 @@ describe('球员库列表（增量 6.1 d6）', () => {
 
     const unowned = await list('/api/players?name=狐步舞', fx.env);
     expect(unowned.players[0]!.clubName).toBeNull();
-    expect(unowned.players[0]!.initialClubName).toBeNull();
 
+    // 初始视图只改 CA/PA 口径，归属仍看 players.club_id（增量 14 裁决 4 删掉 initial_club_id）
     const initial = await list('/api/players?view=initial&club_id=1', fx.env);
-    expect(initial.players.map((p) => p.id)).toEqual([1]);
-    expect(initial.players[0]!.clubName).toBe('蓝月亮');
-    expect(initial.players[0]!.initialClubName).toBe('老东家 FC');
+    expect(initial.players.map((p) => p.id)).toEqual([2, 7]);
+    expect(initial.players[0]!.clubName).toBe('老东家 FC');
   });
 
   it('sort=ca 默认降序 + keyset 翻页：两页拼出全量且不重不漏', async () => {
@@ -186,7 +183,7 @@ describe('球员库列表（增量 6.1 d6）', () => {
   });
 });
 
-describe('初始归属（增量 6.1 d7）', () => {
+describe('初始归属字段的兴废（增量 6.1 d7 加、增量 14 裁决 4 删）', () => {
   // 0015 回填测存量：先建到 0014 → 造历史归属数据 → 补跑 0015
   function freshEnvWithHistory(): Fixture {
     resetConfigCache();
@@ -238,13 +235,30 @@ describe('初始归属（增量 6.1 d7）', () => {
     ]);
   });
 
-  it('view=initial：归属/CA/PA 显示导入时口径，club_id 筛选与 ca 排序都打初始值', async () => {
+  it('0020 删列：列里有值也能删掉，删后 players 不再有 initial_club_id', async () => {
+    const fx = freshEnvWithHistory();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id) VALUES (10, 'h1', '转了两队', 2);
+      INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id) VALUES (1, 'transfer', 10, 3, 2);
+    `);
+    runMigration(fx.sqlite, '0015_initial_club.sql');
+    const filled = fx.sqlite.prepare(`SELECT initial_club_id FROM players WHERE id = 10`).get() as {
+      initial_club_id: number | null;
+    };
+    expect(filled.initial_club_id).toBe(3);
+
+    runMigration(fx.sqlite, '0020_drop_initial_club.sql');
+    const cols = (fx.sqlite.prepare(`PRAGMA table_info(players)`).all() as { name: string }[]).map((r) => r.name);
+    expect(cols).not.toContain('initial_club_id');
+  });
+
+  it('view=initial：CA/PA 显示导入时口径，club_id 筛选与 ca 排序都打现值', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`
       INSERT INTO clubs (id, name) VALUES (1, '老东家'), (2, '新东家');
-      INSERT INTO players (id, uid, name, club_id, initial_club_id, position, age, ca, pa, base_ca, market_value, game_attrs, growable) VALUES
-        (20, 'i1', '甲', 2, 1, 'ST', 24, 88, 90, 61, 99, '{"PA":80}', 1),
-        (21, 'i2', '乙', 2, 2, 'CM', 27, 84, 86, 70, 88, '{"PA":72}', 0);
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, base_ca, market_value, game_attrs, growable) VALUES
+        (20, 'i1', '甲', 1, 'ST', 24, 88, 90, 61, 99, '{"PA":80}', 1),
+        (21, 'i2', '乙', 2, 'CM', 27, 84, 86, 70, 88, '{"PA":72}', 0);
     `);
 
     const body = await list('/api/players?view=initial&sort=ca', fx.env);
@@ -253,30 +267,31 @@ describe('初始归属（增量 6.1 d7）', () => {
       expect.objectContaining({ id: 20, clubId: 1, ca: 61, pa: 80 }),
     ]);
 
+    // 归属没有「初始」维度了：club_id 在两种视图下都按 players.club_id 过滤
     const oldTeamOnly = await list('/api/players?view=initial&club_id=1', fx.env);
     expect(oldTeamOnly.players.map((p) => p.id)).toEqual([20]);
+    expect(oldTeamOnly.players[0]!.clubName).toBe('老东家');
     const currentView = await list('/api/players?club_id=1', fx.env);
-    expect(currentView.players.map((p) => p.id)).toEqual([]);
+    expect(currentView.players.map((p) => p.id)).toEqual([20]);
   });
 
-  it('详情返回 initialClub（初始俱乐部名）；view 参数非法 400', async () => {
+  it('详情只回现行归属：不再有 initialClubId / initialClub；view 参数非法 400', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`
       INSERT INTO clubs (id, name) VALUES (1, '老东家'), (2, '新东家');
-      INSERT INTO players (id, uid, name, club_id, initial_club_id) VALUES (30, 'd1', '丙', 2, 1);
+      INSERT INTO players (id, uid, name, club_id) VALUES (30, 'd1', '丙', 2);
     `);
 
     const res = await get('/api/players/30', fx.env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      player: { clubId: number | null; initialClubId: number | null };
+      player: Record<string, unknown> & { clubId: number | null };
       club: { id: number; name: string } | null;
-      initialClub: { id: number; name: string } | null;
-    };
+    } & Record<string, unknown>;
     expect(body.player.clubId).toBe(2);
-    expect(body.player.initialClubId).toBe(1);
     expect(body.club?.name).toBe('新东家');
-    expect(body.initialClub?.name).toBe('老东家');
+    expect('initialClubId' in body.player).toBe(false);
+    expect('initialClub' in body).toBe(false);
 
     expect((await get('/api/players?view=nope', fx.env)).status).toBe(400);
   });

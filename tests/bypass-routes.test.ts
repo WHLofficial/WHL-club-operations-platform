@@ -367,6 +367,47 @@ describe('海捞（free_agent）', () => {
     expect((await post('/api/transfers/free-agent', { playerId: 20, newReleaseFee: 7 }, 'tok-coach', fx.env)).status).toBe(400);
   });
 
+  it('CPU 队球员可海捞：名单带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（增量 14）', async () => {
+    const fx = await seedBypass();
+    const cpuClubId = 131681; // AC米兰(CPU)
+    fx.sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status) VALUES (${cpuClubId}, 'AC米兰(CPU)', 'premier', 'active');
+       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (26, 'fc26', '米兰人', ${cpuClubId}, 'ST', 27, 78, 80, 'normal');`,
+    );
+
+    const listed = await get('/api/market/free-agents', 'tok-coach', fx.env);
+    expect(listed.status).toBe(200);
+    const pool = (await listed.json()) as { freeAgents: { id: number; clubName: string | null }[] };
+    expect(pool.freeAgents.find((r) => r.id === 26)?.clubName).toBe('AC米兰(CPU)');
+
+    fx.env.rng = () => 0.9;
+    const submit = await post('/api/transfers/free-agent', { playerId: 26, newReleaseFee: 6 }, 'tok-coach2', fx.env);
+    expect(submit.status).toBe(201);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    // 原队记 CPU 队：过户守卫要靠它把球员从 CPU 队名下摘出来（账务仍整块跳过）
+    expect(
+      sqlGet<{ from_club_id: number | null }>(fx.sqlite, 'SELECT from_club_id FROM transfers WHERE id = ?', transferId)
+        ?.from_club_id,
+    ).toBe(cpuClubId);
+
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    const eBase = expectedWage(5, 6, 0.02, 1.9, 0.45); // 27 岁 CA78 → 等级 5，与无归属海捞同式
+    const offer = await post(
+      `/api/negotiations/${sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)?.id}/offer`,
+      { wage: eBase },
+      'tok-coach2',
+      fx.env,
+    );
+    expect(((await offer.json()) as { result: string }).result).toBe('success');
+
+    const moved = sqlGet<{ club_id: number | null; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 26');
+    expect(moved).toEqual({ club_id: fx.clubB, status: 'normal' });
+    // CPU 队不入账：签入费只销毁签入方，CPU 队一行流水都不该有
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries WHERE club_id = ${cpuClubId}`)?.n).toBe(0);
+  });
+
   it('本窗被解约的球员全联盟禁签（4.4.4）', async () => {
     const fx = await seedBypass();
     // 乡贤免费解约走完整链

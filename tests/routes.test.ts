@@ -671,6 +671,61 @@ describe('导入管线（§5.4）', () => {
     expect(p2).toMatchObject({ ca: 78, base_ca: 78, market_value: 55, status: 'listed', badges_gold: 2, growth_tier: 3 });
   });
 
+  it('队籍：CPU 队球员落队籍、老队 id 走别名，其余队导入不留归属（增量 14）', async () => {
+    const fx = freshEnv();
+    const rows = [
+      channelARow({ ID: 277300, Name: '巴塞人', TeamID: 241 }), // 巴塞罗那(CPU)
+      channelARow({ ID: 277301, Name: '米兰人', TeamID: 47 }), // 第三方表的老 id：游戏里 AC 米兰是 131681
+      channelARow({ ID: 277302, Name: '枪手', TeamID: 1 }), // 平台内普通队：归属由交易/合同决定，导入不写
+    ];
+    const res = await post('/api/admin/players/import/confirm', { channel: 'A', rows }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    const clubOf = (fcId: number) =>
+      sqlGet<{ club_id: number | null }>(fx.sqlite, 'SELECT club_id FROM players WHERE fc_id = ?', fcId)?.club_id;
+    expect(clubOf(277300)).toBe(241);
+    expect(clubOf(277301)).toBe(131681); // 别名：47 → 131681
+    expect(clubOf(277302)).toBeNull();
+    const attrs = sqlGet<{ game_attrs: string }>(fx.sqlite, 'SELECT game_attrs FROM players WHERE fc_id = 277301');
+    expect((JSON.parse(attrs!.game_attrs) as { TeamID: number }).TeamID).toBe(131681);
+
+    // 通道 B（FC Editor 队壳名单）同一套别名
+    const bRes = await post(
+      '/api/admin/players/import/confirm',
+      {
+        channel: 'B',
+        rows: [
+          {
+            playerid: 300002,
+            firstname: 'Inter',
+            lastname: 'Boy',
+            commonname: '',
+            Position: 'CB',
+            Position2: 'None',
+            teamid: 44, // 第三方表的老 id：游戏里国际米兰是 131682
+            overallrating: 76,
+            potential: 84,
+            birthdate: '01/01/2000',
+            nationality: 45,
+            preferredfoot: 'Left',
+            role1: 'CB Stopper +',
+            Playstyles: 'Aerial Fortress',
+            finishing: 21,
+          },
+        ],
+      },
+      'tok-admin',
+      fx.env,
+    );
+    expect(bRes.status).toBe(200);
+    const bPlayer = sqlGet<{ club_id: number | null; game_attrs: string }>(
+      fx.sqlite,
+      'SELECT club_id, game_attrs FROM players WHERE fc_id = 300002',
+    );
+    // 国际米兰不在联盟里（不是 CPU 队）→ 没有队籍；但老 id 仍要过别名，属性页签才打得开游戏真名
+    expect(bPlayer?.club_id).toBeNull();
+    expect((JSON.parse(bPlayer!.game_attrs) as { teamid: number }).teamid).toBe(131682);
+  });
+
   it('通道 B：队壳名单归一化（姓名/出生日期/惯用脚/位置文本）', async () => {
     const fx = freshEnv();
     const year = new Date().getUTCFullYear();
@@ -864,6 +919,24 @@ describe('通道 C · 名单合同模板导入（§5.4）', () => {
     const rerun = await post('/api/admin/players/import/confirm', { channel: 'C', clubId: 1, rows }, 'tok-admin', fx.env);
     expect((await rerun.json()) as { updatedEstimate: number }).toMatchObject({ updatedEstimate: 2 });
     expect(sqlAll(fx.sqlite, 'SELECT id FROM contracts').length).toBe(2); // UNIQUE(player_id)，无重复行
+  });
+
+  it('CPU 队球员可被认领：预览 claim，确认后归属俱乐部（增量 14）', async () => {
+    const fx = freshEnv();
+    await seedContractWorld(fx);
+    fx.sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active');
+       INSERT INTO players (uid, name, club_id, position, ca, pa, fc_id) VALUES ('fc4', '米兰人', 131681, 'ST', 78, 80, 4);`,
+    );
+    const rows = [{ uid: 'fc4', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' }];
+    const preview = await post('/api/admin/players/import/preview', { channel: 'C', clubId: 1, rows }, 'tok-admin', fx.env);
+    expect(preview.status).toBe(200);
+    const pv = (await preview.json()) as { stats: { valid: number; error: number }; samples: { outcome: string }[] };
+    expect(pv.stats).toMatchObject({ valid: 1, error: 0 });
+    expect(pv.samples.map((s) => s.outcome)).toEqual(['claim']);
+
+    expect((await post('/api/admin/players/import/confirm', { channel: 'C', clubId: 1, rows }, 'tok-admin', fx.env)).status).toBe(200);
+    expect(sqlGet<{ club_id: number | null }>(fx.sqlite, "SELECT club_id FROM players WHERE uid = 'fc4'")?.club_id).toBe(1);
   });
 
   it('带错确认 422；归属冲突的球员不会被改队', async () => {
