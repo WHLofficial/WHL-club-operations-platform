@@ -99,7 +99,9 @@ export async function previewImport(env: Env, body: unknown) {
   };
 }
 
-function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStatement {
+// 导出供 scripts/players-import/generate-sql.ts 复用：离线导入脚本靠它取到与网页导入逐字相同的
+// SQL 文本与参数顺序，避免手抄一份 SQL 后与生产口径漂移。
+export function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStatement {
   // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、growable（赛季结算重判）冲突时不更新。
   // base_ca = 非平台成长所得 CA（§10.4）：随每次导入刷新到源文件值，平台成长不加在它上面。
   return db
