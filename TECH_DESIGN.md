@@ -277,10 +277,16 @@ CREATE TABLE growth_events (                      -- XP 事件（自动+补录�
   id INTEGER PRIMARY KEY,
   player_id INTEGER, match_ref TEXT,              -- 比赛系统 match id
   season INTEGER, window_seq INTEGER,
-  event_type TEXT, value REAL, xp REAL,           -- 出场/评分/进球/助攻/零封/夺权/扑救/里程碑
+  event_type TEXT, value REAL, xp REAL,           -- 出场/评分/进球/助攻/零封/夺权/扑救/里程碑/reset(解约划断)
   source TEXT,                                    -- auto(比赛系统事件)/manual(管理组补录)
   recorded_by INTEGER, created_at TEXT,
   UNIQUE (player_id, match_ref, event_type)       -- 防重复记 XP
+);
+CREATE TABLE growth_periods (                      -- 成长期（增量 13）：里程碑只累计当期事件
+  id INTEGER PRIMARY KEY,
+  season INTEGER, start_event_id INTEGER NOT NULL, -- 界：只累计 growth_events.id > start_event_id
+  source TEXT NOT NULL DEFAULT 'manual',           -- manual(管理组宣告)/window_open(开窗勾选)
+  note TEXT, declared_by INTEGER, declared_at TEXT
 );
 CREATE TABLE notifications (
   id INTEGER PRIMARY KEY, club_id INTEGER, user_id INTEGER,
@@ -376,7 +382,7 @@ listed（挂牌中或任意球员）──激活(校验：一窗一球员一次�
 | 操作 | 关键校验 | 费用 |
 |---|---|---|
 | 海捞 | 目标球员无归属（解约禁签名单内的本窗不可签）；**新违约金不设上下限**（裁决：自平衡——定得低签入费与工资都便宜，但球员随时可被激活撬走；定得高则签入费贵。原「定价人工审」取消）；复签翻新历史合同行（contracts.player_id 全局唯一，UPSERT） | 新 RC × 30% |
-| 解约 | 有合同、未挂牌/未激活挂牌/未在解约流程中 | 效力 ≥3 年（365.25 天/年）免费；否则 RC×(3−效力)×0.1；本窗被解约球员全联盟禁签；CA 恢复 base_ca。**无工资谈判，审核通过直接 completed** |
+| 解约 | 有合同、未挂牌/未激活挂牌/未在解约流程中 | 效力 ≥3 年（365.25 天/年）免费；否则 RC×(3−效力)×0.1；本窗被解约球员全联盟禁签；CA 恢复 base_ca，成长数值（XP/已升级数/徽章计数）清零并写 reset 划断行（增量 13，假设 19）。**无工资谈判，审核通过直接 completed** |
 | 续约（=规则 4.4.6 合同期内更改违约金，内部枚举 rc_change 不变） | 合同期内、未挂牌/未解约；幅度：RC≤20m→±10m、RC>20m→±50% | 提高=差额×30%；降低=免费；保护期重新收口到审核通过当下（效力起点不动）；工资重谈（预期工资加薪 5%-15%，见 §6.7） |
 | 强制拍卖 | 准入体检失败触发；管理方 1m 挂牌；人选队内 CA 前六（含并列、不含门将） | 交易税率 50%（特例）。走挂牌链，成交后同样进 signing |
 
@@ -621,14 +627,18 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 | 出场 | 1/次 | 比赛系统自动 | 一线队，仅联赛与冠军杯小组赛 |
 | 评分 | 7.0-7.9→1；8.0-8.9→2；9.0-9.9→3；10.0→4 | 管理组补录 | 同上 |
 | 进球 / 助攻 | 各 0.5 | 比赛系统自动（match_event goal/assist） | 同上 |
-| 进+攻里程碑 | 5→+1；10→+2；15→+3；20→+4；之后每+5→+4 | 自动（累计计算） | 同上 |
+| 进+攻里程碑 | 5→+1；10→+2；15→+3；20→+4；之后每+5→+4 | 自动（累计计算） | 同上；**只累计当前成长期内**（增量 13） |
 | 零封 | 0.5/次 | 自动/补录 | 仅防守球员：CDM/LB/CB/RB/GK；无 CDM 则 CM、无边卫则 LM/RM |
 | 夺回球权 | 每 12 次 1 | 管理组补录 | 仅防守球员 |
 | 扑救 | 每 8 次 1；单场 >8 次额外 1 | 管理组补录 | 仅门将 |
 | 训练营球员 | 固定 40/完整赛季；15/半赛季 | 结算时生成 | 不按场次 |
-| 中国球员计划 | 每赛季额外 20 | 结算时生成 | china_plan=1 |
+| 中国球员计划 | 每赛季额外 20 | 结算时生成 | china_plan=1 **且在册现行合同**（增量 13） |
 
 去重：`UNIQUE(player_id, match_ref, event_type)`；自动事件由赛果确认钩子生成，补录走管理组界面并留痕。
+
+**成长期（增量 13，用户裁决 2026-09-18）**：里程碑的「累计」只算**当前成长期内**的进+攻。当前成长期 = `growth_periods` 里 id 最大的一行，界 = `start_event_id`（只累计 `growth_events.id > start_event_id` 的事件；**不读 window_seq——成长期与窗口解耦**）；一行都没有时退回全生涯口径（期号 0、界 0，兼容增量 13 之前的行为）。宣告方式两种：管理组在成长引擎「成长期」面板手动宣告（`source='manual'`，审计 `growth_period_declared`），或开窗时勾选「同时宣告新成长期」由 `openWindow` 同批宣告（`source='window_open'`，审计 `window_open` 的 after 带 `growthPeriodDeclared`）。里程碑去重锚 = `milestone:{期号}:{划断序号}:{阈值}`。
+
+**解约重置（增量 13）**：解约（termination）批准时把 players 当前状态归零——`ca = COALESCE(base_ca, ca)`、`growth_xp = 0`、`levels_applied = 0`、`badges_silver = 0`、`badges_gold = 0`（= 恢复初始），同批写一条 `event_type='reset'`、value/xp 皆 0 的划断行（match_ref `termination:{transferId}`）。历史 `growth_events` 一行不删（成长史展示用）；里程碑只累计该球员**最后一次** reset 之后的事件，`reset_id` 进里程碑去重锚。
 
 ### 10.2 升级与方案选择
 
@@ -796,7 +806,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 16 | 已定 | 匹配新 RC 不受 4.4.6 幅度约束（新 RC 须 > 首价即可，差额销毁本身是代价）；生涯每名球员只能被匹配一次 |
 | 17 | 已定 | 激活挂牌无公开竞价段（§6.2 修正定稿）：5 分钟首价窗内激活方落价即成交价，首价后训练营球员直进待审、正式球员进 24h 匹配窗；激活挂牌永不开放后续竞价 |
 | 18 | 已定 | 4.4.10 窗内回滚口径：还原 RC 与保护期（仍归属原队时）+ 退还续约费（rc_change_refund）；工资不随回滚（已谈成的工资是谈判终局，恢复会破坏谈判快照口径） |
-| 19 | 已定 | 解约属性恢复：CA 恢复 base_ca（players.base_ca 缺省时保持现 CA）；合同行 is_active=0 留档（复签海捞走 UPSERT 翻新，contracts.player_id 全局唯一） |
+| 19 | 已定（增量 13 补全「恢复初始」= 数值归零 + 历史留档） | 解约属性恢复：CA 恢复 base_ca（players.base_ca 缺省时保持现 CA），growth_xp / levels_applied / badges_silver / badges_gold 全部清零；同时写一条 `event_type='reset'`（value/xp=0，match_ref `termination:{id}`）作划断行，历史 growth_events 行保留供成长史展示，里程碑只累计最后一次 reset 之后的事件；合同行 is_active=0 留档（复签海捞走 UPSERT 翻新，contracts.player_id 全局唯一） |
 | 20 | 已定 | 自动 XP 球员匹配：比赛系统队名 = 平台俱乐部名 → 比赛系统球员名 = 平台名单名（clubs 无 tour team 键、tour player.id 与平台 uid/fc_id 无关，不建映射表）；解不开的进 confirm 响应 `xp.unresolved` 由管理组补录兜底 |
 | 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
 | 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
@@ -807,6 +817,13 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 28 | 已定（增量 11） | 富人税/工资只在窗末（closeWindow 批）收，赛季结算不重复收（§11 结算顺序里「富人税」步即窗末已收项，结算按钮不再扣）；工资=Σ现行合同 wage 全额、一窗=半赛季扣全额 |
 | 29 | 已定（增量 11） | 资格赛止步保底口径：确认赛果里输过至少一场的队各得保底 7.5，多轮晋级失败口径一致（不区分止步轮次）；赢家不发 | 
 | 27 | 已定（增量 9） | 俱乐部分级不再建队时定死（clubs.league_tier 休眠）：当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（worker/tier.ts）；注册提交派生不到级别一律 400 拦下（tier_pending「尚未在赛事平台报名，请等待赛事平台管理员确认报名」），注册页带报名状态探测（红=未报名/绿=已报名）；同时报两座定级赛事视为数据异常 500；AUTH_DB 未配置时回落读休眠列（回滚通道）；升降级=换季报名哪座定级赛事就在哪级，club 库零人工写入 |
+| 30 | 已定（增量 12） | 比赛日天气在赛果确认时按概率掷出并固化（晴 40/多云 30/雨 20/雪 10），同场不重掷（§8 上座公式天气系数；确认即入账的输入之一） |
+| 31 | 已定（增量 12） | 近 3 场战绩口径 = 平台已确认赛果（不含本场）：胜 3 平 1 负 0，**点球决胜按平局计**（用户裁决 2026-09-16），弃权按 winner 记胜负，不足 3 场取中性 4 分 |
+| 32 | 已定（增量 12） | 球员影响力闸门 = 在册现行合同（`contracts.is_active=1 AND contracts.club_id = players.club_id`），**不看 players.club_id**；无合同/已解约不计入球队影响力 |
+| 33 | 已定（增量 12） | 维护费 = 档位基础(2.0-14) + 每万座费率(0.8-0.2)×容量(万) × 本窗已确认主场场次，并入关窗批，`kind='maintenance' ref='window'` 幂等 |
+| 34 | 已定（增量 13） | 成长期 = 里程碑累计边界（用户裁决 2026-09-18）：由管理组手动宣告或开窗时勾选自动宣告，**不与窗口绑定**（一个赛季可有多个成长期，通常落在两个窗口之间，也可能变）；界 = `growth_periods.start_event_id`（只累计其后事件），无宣告行时按全生涯口径 |
+| 35 | 已定（增量 13） | 中国球员计划 XP（每季 +20）闸门 = `china_plan=1` **且在册现行合同**（与训练营同口径，用户裁决 2026-09-18）；无归属/已解约的中国球员不发 XP |
+| 36 | 待定（增量 13，判定口径待用户确认） | CPU 队球员无成长（用户规则 2026-09-18：tour 平台上队名以「(CPU)」结尾的队伍自动识别为 CPU 队）：现状**无显式识别代码**——CPU 队名匹配不到平台俱乐部名，比赛 XP 自然跳过（副作用是进 confirm 响应 `xp.unresolved`）；容错口径（全角括号/大小写/首尾空格）与豁免范围（比赛 XP 是否静默跳过、中国计划 XP、主场收入）、以及 4 支 CPU 队是否建平台 clubs 行均待用户确认（问题清单 3-5） |
 
 ## 16. 测试策略
 
