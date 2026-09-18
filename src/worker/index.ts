@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { deleteCookie, getCookie } from 'hono/cookie';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { getAuthUser, isStaleOidcSession } from '../lib/session.ts';
+import { getAuthUser, isOidc, isStaleOidcSession } from '../lib/session.ts';
 import { OIDC_PROBE_COOKIE, OIDC_SESSION_COOKIE } from '../lib/oidc.ts';
 import clubsRoutes from './routes/clubs.ts';
 import playersRoutes from './routes/players.ts';
@@ -82,9 +82,9 @@ app.get('/api/me', async (c) => {
   }
   return c.json({
     user,
-    authMode: c.env.OIDC_ISSUER ? 'oidc' : 'shared',
-    authHome: c.env.OIDC_ISSUER ?? null,
-    syncProbe: !user && c.env.OIDC_ISSUER && !probeCooling ? true : undefined,
+    authMode: isOidc(c.env) ? 'oidc' : 'shared',
+    authHome: isOidc(c.env) ? c.env.OIDC_ISSUER : null,
+    syncProbe: !user && isOidc(c.env) && !probeCooling ? true : undefined,
   });
 });
 

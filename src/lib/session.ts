@@ -37,8 +37,11 @@ const ADMIN_PERMS = [
 ] as const;
 const COACH_PERMS = ['club.squad.manage', 'club.registrations.submit'] as const;
 
-function isOidc(env: Env): env is Env & { OIDC_ISSUER: string; OIDC_CLIENT_ID: string } {
-  return Boolean(env.OIDC_ISSUER && env.OIDC_CLIENT_ID);
+// OIDC 模式 = AUTH_MODE 显式配 "oidc"（增量 9 显式化）+ 两项连接变量齐备；未配 AUTH_MODE =
+// 兼容模式。不再靠 OIDC_ISSUER 的有无隐式判定——vars 随 wrangler.jsonc 一起部署，
+// 杜绝「忘配/半配悄悄改行为」。
+export function isOidc(env: Env): env is Env & { AUTH_MODE: string; OIDC_ISSUER: string; OIDC_CLIENT_ID: string } {
+  return Boolean(env.AUTH_MODE === 'oidc' && env.OIDC_ISSUER && env.OIDC_CLIENT_ID);
 }
 
 // 角色沿用比赛系统：admin/superadmin→管理组（不受 locked 影响，防管理端被锁），

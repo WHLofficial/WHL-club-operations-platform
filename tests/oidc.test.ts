@@ -187,7 +187,7 @@ function freshEnv(oidc: boolean): Fixture {
     } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
-    ...(oidc ? { OIDC_ISSUER: ISSUER, OIDC_CLIENT_ID: CLIENT_ID } : {}),
+    ...(oidc ? { AUTH_MODE: 'oidc', OIDC_ISSUER: ISSUER, OIDC_CLIENT_ID: CLIENT_ID } : {}),
   };
   return { env, sqlite, tour };
 }

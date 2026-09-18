@@ -48,8 +48,10 @@
       "bucket_name": "whl-media"
     }
   ],
-  // 统一认证中心（生产）：配了这两项即走 OIDC 模式，会话与 claims 由 auth 侧签发
+  // 统一认证中心（生产）：AUTH_MODE="oidc" 显式开启 RP 模式（增量 9 显式化），
+  // 会话与 claims 由 auth 侧签发；撤掉 AUTH_MODE 重新部署即回兼容模式
   "vars": {
+    "AUTH_MODE": "oidc",
     "OIDC_ISSUER": "https://auth.whleague.win",
     "OIDC_CLIENT_ID": "club"
   },

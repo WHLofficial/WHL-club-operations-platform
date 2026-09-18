@@ -11,8 +11,10 @@ export interface Env {
   SYNC_BASE_URL?: string;
   SYNC_SECRET?: string;
   rng?: () => number;
-  // 统一认证迁移步骤②（auth 项目 PRD P0-5）：配置即切换 OIDC 登录；
-  // 未配置 = 兼容模式（共享 cookie 透传）——回滚开关就是撤掉这两个变量
+  // 统一认证迁移步骤②（auth 项目 PRD P0-5）：AUTH_MODE="oidc" 显式开启 RP 模式（增量 9
+  // 显式化），OIDC_ISSUER/OIDC_CLIENT_ID 为连接变量；未配 AUTH_MODE = 兼容模式（共享
+  // cookie 透传）——回滚开关就是撤掉 AUTH_MODE 重新部署
+  AUTH_MODE?: string;
   OIDC_ISSUER?: string;
   OIDC_CLIENT_ID?: string;
   // 增量 7 机器通道（发码/烧码/解绑走 auth 机器 API）：与 auth 仓 BIND_SECRET 同值
