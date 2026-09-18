@@ -22,6 +22,28 @@ export const POSITION_BY_ID: Record<number, string> = {
 
 export const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
 
+// 队 id 归一化（增量 14，用户裁决 2026-09-18）：游戏内必须用假名的 4 支俱乐部，第三方 fixed 快照
+// （gen_ref_json.py 的源）仍带旧 FIFA 号，游戏真表（EAFC 26 IDs.xlsx）用新号。平台统一以游戏真 id
+// 为口径——clubs.id 与 players.club_id 都落真号，显示名由 web/assets/ref/team.json 给真名。
+export const FC26_TEAM_ID_ALIASES: Record<number, number> = {
+  39: 115845, // Atalanta → 游戏内 Bergamo Calcio
+  44: 131682, // Inter → 游戏内 Lombardia FC
+  46: 115841, // Lazio → 游戏内 Latium
+  47: 131681, // AC Milan → 游戏内 Milano FC
+};
+
+/** 归一化队 id：legacy 假名队号换成游戏真号，其余原样；非整数返回 null（= 无队籍/自由身）。 */
+export function normalizeTeamId(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : Number.NaN;
+  if (!Number.isInteger(n)) return null;
+  return FC26_TEAM_ID_ALIASES[n] ?? n;
+}
+
+// 比赛系统里的 4 支 CPU 队（tour 侧 6 巴塞罗那(CPU)/16 曼城(CPU)/19 RB莱比锡(CPU)/21 AC米兰(CPU)）
+// 对应的游戏真队 id。只有这些队在建档导入时写 players.club_id——其余球队的球员保持无归属，
+// 队籍靠合同认领流程建立。
+export const FC26_CPU_TEAM_IDS: ReadonlySet<number> = new Set([10, 241, 112172, 131681]);
+
 // 通道 A（FC26db Base）必需列；值域：CA/PA 1-99、Age 14-50（§5.4 列校验）
 export const FC26_REQUIRED_COLUMNS = ['ID', 'Name', 'Age', 'CA', 'PA', 'naID', 'PosID1', 'FootID'] as const;
 

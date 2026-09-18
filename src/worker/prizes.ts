@@ -6,6 +6,7 @@
 import type { Env } from './env.ts';
 import { createConfigService } from '../core/config.ts';
 import { ledgerMovement } from './ledger.ts';
+import { cpuClubIds } from './growth.ts';
 
 export interface PrizeTable {
   league_premier: { entry: number; win: number; draw: number; loss: number };
@@ -52,7 +53,7 @@ export async function loadPrizeTable(db: Env['DB']): Promise<PrizeTable | null> 
   }
 }
 
-/** tour team id → club_id（AUTH_DB team 目录；未配置或目录缺行 → 不入账） */
+/** tour team id → club_id（AUTH_DB team 目录；未配置或目录缺行 → 不入账；CPU 队一律不入账） */
 export async function clubIdByTourTeam(env: Env, tourTeamIds: number[]): Promise<Map<number, number>> {
   const map = new Map<number, number>();
   if (!env.AUTH_DB || tourTeamIds.length === 0) return map;
@@ -63,8 +64,10 @@ export async function clubIdByTourTeam(env: Env, tourTeamIds: number[]): Promise
   )
     .bind(...ids)
     .all<{ tour_team_id: number; club_id: number | null }>();
+  // CPU 队禁止入账（增量 14，用户裁决）：目录里的 club_id 照样补上（赛程/展示要用），但奖金与主场收入不发。
+  const cpuIds = await cpuClubIds(env.DB);
   for (const r of results) {
-    if (r.club_id !== null) map.set(r.tour_team_id, r.club_id);
+    if (r.club_id !== null && !cpuIds.has(r.club_id)) map.set(r.tour_team_id, r.club_id);
   }
   return map;
 }

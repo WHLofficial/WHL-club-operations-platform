@@ -1,12 +1,15 @@
 // 球员导入管线（TECH_DESIGN §5.4）：前端 SheetJS 解析出「表头→值」行，本模块在
 // Worker 侧做 schema 校验与归一化——预览与确认走同一函数，确认前必再校验一遍。
-// upsert 幂等只写 FC 源列（route 层），绝不触碰运营列（club_id/status/contracts/badges/growth/market_value/agent_tier）。
+// upsert 幂等只写 FC 源列（route 层），绝不触碰运营列（status/contracts/badges/growth/market_value/agent_tier）；
+// club_id 是唯一例外——新插入时写 CPU 队球员的队籍（增量 14），冲突时不更新，免得覆盖认领/解约后的归属。
 import {
   CHINA_NA_ID,
+  FC26_CPU_TEAM_IDS,
   FC26_GAME_ATTR_COLUMNS,
   FC26_REQUIRED_COLUMNS,
   FC_EDITOR_GAME_ATTR_COLUMNS,
   FC_EDITOR_REQUIRED_COLUMNS,
+  normalizeTeamId,
   POSITION_BY_ID,
   POSITION_NAMES,
 } from './fc26.ts';
@@ -29,6 +32,8 @@ export interface NormalizedPlayer {
   age: number | null;
   foot: 0 | 1;
   position: string | null;
+  /** CPU 队球员的队籍（游戏真队 id，增量 14）；其余导入行 null——队籍由合同认领流程建立 */
+  clubId: number | null;
   prestige: number | null;
   chinaPlan: 0 | 1;
   futureStarSuggestion: boolean;
@@ -60,6 +65,12 @@ function toStr(v: unknown): string {
 function missingColumns(rows: Record<string, unknown>[], required: readonly string[]): string[] {
   if (rows.length === 0) return [];
   return required.filter((col) => !(col in rows[0]));
+}
+
+/** 导入时只给 CPU 队球员写队籍（增量 14）：4 支 CPU 队在平台有 clubs 行，其球员带 club_id。 */
+function clubIdForTeam(teamId: unknown): number | null {
+  const id = normalizeTeamId(teamId);
+  return id !== null && FC26_CPU_TEAM_IDS.has(id) ? id : null;
 }
 
 export function normalizeImportBatch(
@@ -116,6 +127,7 @@ export function normalizeImportBatch(
 
       const gameAttrs: Record<string, unknown> = {};
       for (const col of FC26_GAME_ATTR_COLUMNS) gameAttrs[col] = raw[col] ?? null;
+      gameAttrs['TeamID'] = normalizeTeamId(raw['TeamID']);
 
       players.push({
         fcId,
@@ -126,6 +138,7 @@ export function normalizeImportBatch(
         age,
         foot: footId === 2 ? 0 : 1,
         position,
+        clubId: clubIdForTeam(raw['TeamID']),
         prestige,
         chinaPlan: naId === CHINA_NA_ID ? 1 : 0,
         futureStarSuggestion: futureStarIds.has(fcId),
@@ -168,6 +181,7 @@ export function normalizeImportBatch(
 
     const gameAttrs: Record<string, unknown> = {};
     for (const col of FC_EDITOR_GAME_ATTR_COLUMNS) gameAttrs[col] = raw[col] ?? null;
+    gameAttrs['teamid'] = normalizeTeamId(raw['teamid']);
 
     players.push({
       fcId,
@@ -178,6 +192,7 @@ export function normalizeImportBatch(
       age,
       foot: footText === 'left' ? 0 : 1,
       position,
+      clubId: clubIdForTeam(raw['teamid']),
       prestige: null, // FC Editor 无国际声望列
       chinaPlan: toNum(raw['nationality']) === CHINA_NA_ID ? 1 : 0,
       futureStarSuggestion: futureStarIds.has(fcId),

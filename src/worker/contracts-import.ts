@@ -10,6 +10,7 @@ import {
   type ImportRowError,
   type NormalizedContract,
 } from '../core/import.ts';
+import { CPU_CLUB_IDS_SQL, cpuClubIds } from './growth.ts';
 
 const CHUNK_ROWS = 200; // 每 db.batch 一个事务批次
 
@@ -70,6 +71,8 @@ interface ClassifyResult {
 // 归一化结果 → 按库内归属/现行合同分类：create=新建合同，update=覆盖本队现行合同，
 // claim=新建合同并认领无归属球员。归属冲突进 errors。
 async function classify(db: D1Database, clubId: number, contracts: NormalizedContract[]): Promise<ClassifyResult> {
+  // CPU 队球员带 club_id 但照旧可被认领（增量 14，用户裁决）：认领 = 从 CPU 队转入本队
+  const cpuIds = await cpuClubIds(db);
   const idRows = await lookupIn<{ id: number; fc_id: number; club_id: number | null; name: string }>(
     db,
     contracts.map((c) => c.fcId),
@@ -92,7 +95,9 @@ async function classify(db: D1Database, clubId: number, contracts: NormalizedCon
 
   const conflictClubIds = [
     ...new Set(
-      idRows.filter((p) => p.club_id !== null && p.club_id !== clubId).map((p) => p.club_id as number),
+      idRows
+        .filter((p) => p.club_id !== null && p.club_id !== clubId && !cpuIds.has(p.club_id as number))
+        .map((p) => p.club_id as number),
     ),
   ];
   const clubNames = new Map<number, string>();
@@ -114,7 +119,7 @@ async function classify(db: D1Database, clubId: number, contracts: NormalizedCon
       errors.push({ row: contract.rowNo, field: 'uid', message: `uid 没有对应的球员（先跑球员导入）：${contract.uid}` });
       continue;
     }
-    if (player.club_id !== null && player.club_id !== clubId) {
+    if (player.club_id !== null && player.club_id !== clubId && !cpuIds.has(player.club_id)) {
       const other = clubNames.get(player.club_id) ?? `#${player.club_id}`;
       errors.push({ row: contract.rowNo, field: 'uid', message: `球员「${player.name}」已归属 ${other}` });
       continue;
@@ -127,7 +132,7 @@ async function classify(db: D1Database, clubId: number, contracts: NormalizedCon
       continue;
     } else if (existing) {
       outcome = 'update';
-    } else if (player.club_id === null) {
+    } else if (player.club_id === null || cpuIds.has(player.club_id)) {
       outcome = 'claim';
     } else {
       outcome = 'create';
@@ -201,11 +206,11 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
     if (claimIds.length > 0) {
       const ph = claimIds.map(() => '?').join(', ');
       statements.push(
-        // 认领只作用于仍无归属的行：分类与落库之间被人抢走也不会错绑。
-        // initial_club_id（增量 6.1 裁决 2）= 首次认领时的归属即导入时数据；COALESCE 保证解约重签认领不覆盖最初值
+        // 认领只作用于仍无归属、或仍挂 CPU 队的行：分类与落库之间被人抢走也不会错绑
         env.DB.prepare(
-          `UPDATE players SET club_id = ?, initial_club_id = COALESCE(initial_club_id, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id IN (${ph}) AND club_id IS NULL`,
-        ).bind(payload.clubId, payload.clubId, ...claimIds),
+          `UPDATE players SET club_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE id IN (${ph}) AND (club_id IS NULL OR club_id IN ${CPU_CLUB_IDS_SQL})`,
+        ).bind(payload.clubId, ...claimIds),
       );
     }
     statements.push(

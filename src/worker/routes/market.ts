@@ -21,6 +21,7 @@ import { settleOverdue, settleListingForReview } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { createActivation } from '../activations.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
+import { CPU_CLUB_IDS_SQL } from '../growth.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -257,12 +258,15 @@ app.get('/market/free-agents', async (c) => {
   if (!club) return c.json({ club: null, freeAgents: [] });
 
   const win = await getOpenWindow(c.env.DB);
+  // 名单 = 真无归属的球员 + CPU 队球员（增量 14：CPU 队有 clubs 行、其球员带 club_id，但照旧可海捞）
+  // 上限 300：海捞池现在含 4 支 CPU 队约 107 人，加上待业球员约 190+，100 会把低 CA 那半截藏起来
   const rows = await c.env.DB.prepare(
-    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa
+    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa, cl.name AS club_name
      FROM players p
-     WHERE p.club_id IS NULL AND p.status IN ('free', 'normal')
-     ORDER BY p.ca DESC, p.id LIMIT 100`,
-  ).all<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null }>();
+     LEFT JOIN clubs cl ON cl.id = p.club_id
+     WHERE (p.club_id IS NULL OR p.club_id IN ${CPU_CLUB_IDS_SQL}) AND p.status IN ('free', 'normal')
+     ORDER BY p.ca DESC, p.id LIMIT 300`,
+  ).all<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_name: string | null }>();
 
   const banned = new Set<number>();
   if (win && rows.results.length > 0) {
@@ -289,6 +293,7 @@ app.get('/market/free-agents', async (c) => {
       age: r.age,
       ca: r.ca,
       pa: r.pa,
+      clubName: r.club_name,
       bannedThisWindow: banned.has(r.id),
     })),
   });

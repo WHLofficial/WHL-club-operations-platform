@@ -17,6 +17,7 @@ import {
   type ReviewDecision,
 } from './transfers.ts';
 import { openNegotiationSession } from './negotiations.ts';
+import { cpuClubIds } from './growth.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -352,7 +353,12 @@ export async function createFreeAgent(
     .bind(playerId)
     .first<OwnPlayerRow>();
   if (!player) throw new HttpError(404, '球员不存在');
-  if (player.club_id !== null) throw new HttpError(400, '海捞只能签无归属的球员（这名球员有东家）');
+  // 海捞 = 签无归属的球员（4.4.4）。CPU 队球员带 club_id 但仍是海里人（增量 14，用户裁决）：
+  // 出账与落位都按「从 CPU 队签走」处理（fromClubId 记 CPU 队 id），不给 CPU 队记任何账。
+  const cpuIds = await cpuClubIds(db);
+  if (player.club_id !== null && !cpuIds.has(player.club_id)) {
+    throw new HttpError(400, '海捞只能签无归属的球员（这名球员有东家）');
+  }
   if (player.status === 'retired' || player.status === 'listed') throw new HttpError(400, '当前状态不能海捞');
   // 4.4.4：本转会窗被解约的球员，所有球队本窗都无法签入
   const banned = await db
@@ -375,7 +381,7 @@ export async function createFreeAgent(
     actor,
     type: 'free_agent',
     playerId,
-    fromClubId: null,
+    fromClubId: player.club_id, // CPU 队球员记原队，过户守卫才能把球员从 CPU 队名下摘走；真无归属仍是 null
     toClubId: clubId,
     fee: newFee,
     extraFee: null,
@@ -426,6 +432,11 @@ export async function createForcedAuction(
     .bind(playerId)
     .first<{ id: number; name: string; club_id: number | null; status: string; position: string | null; ca: number | null }>();
   if (!player || player.club_id === null) throw new HttpError(404, '球员不存在或没有归属');
+  // CPU 队不入账（增量 14，用户裁决）：CPU 队球员即整队都是「海里的」，不参与强制拍卖
+  // （否则拍卖成交会把成交价记到 CPU 队头上；其前六资格也本是按 CPU 队阵容算的）
+  if ((await cpuClubIds(db)).has(player.club_id)) {
+    throw new HttpError(400, 'CPU 队球员不参与强制拍卖（CPU 队不入账）');
+  }
   if (player.position === 'GK') throw new HttpError(400, '强制拍卖人选不含门将（4.4.5）');
   if (player.ca === null) throw new HttpError(409, '球员缺 CA 数据，无法核验前六资格');
   if (player.status !== 'normal') {

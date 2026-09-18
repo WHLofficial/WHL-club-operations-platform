@@ -104,11 +104,12 @@ export async function previewImport(env: Env, body: unknown) {
 export function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStatement {
   // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、growable（赛季结算重判）冲突时不更新。
   // base_ca = 非平台成长所得 CA（§10.4）：随每次导入刷新到源文件值，平台成长不加在它上面。
+  // club_id 只在新插入时写（CPU 队球员的队籍，增量 14）；冲突时不更新，免得覆盖认领/解约后的归属。
   return db
     .prepare(
       `INSERT INTO players
-         (uid, name, ca, pa, age, foot, position, prestige, china_plan, is_future_star, fc_id, base_ca, growable, game_attrs, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         (uid, name, ca, pa, age, foot, position, club_id, prestige, china_plan, is_future_star, fc_id, base_ca, growable, game_attrs, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(fc_id) DO UPDATE SET
          uid = excluded.uid, name = excluded.name, ca = excluded.ca, pa = excluded.pa, age = excluded.age,
          foot = excluded.foot, position = excluded.position, prestige = excluded.prestige,
@@ -122,6 +123,7 @@ export function upsertStatement(db: D1Database, p: NormalizedPlayer): D1Prepared
       p.age,
       p.foot,
       p.position,
+      p.clubId,
       p.prestige,
       p.chinaPlan,
       p.futureStarSuggestion ? 1 : 0,

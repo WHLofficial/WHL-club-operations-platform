@@ -254,15 +254,27 @@ export async function defensivePositionsForClub(db: D1Database, clubId: number):
   return defensive;
 }
 
-// ---- CPU 队判定（用户规则 2026-09-18）----
+// ---- CPU 队判定（用户规则 2026-09-18，队籍口径修订 增量 14）----
 
 /**
  * 比赛系统里队名以半角「(CPU)」结尾的队 = CPU 队。严格匹配，不做全角括号/大小写/空格容错：
- * 队名即口径，改名即重新判定。CPU 队球员无成长，且视同海里球员——平台不为这些队建俱乐部行，
- * 其球员归属/合同/成长一律按无归属处理（可海捞）。
+ * 队名即口径，改名即重新判定。CPU 队在平台有 clubs 行，其球员带 club_id（可被海捞、可被认领），
+ * 但代表 CPU 队出场的比赛不计成长（results.ts 整队跳过），CPU 队也不入账（奖金/主场收入/拍卖）。
  */
 export function isCpuTeam(teamName: string | null | undefined): boolean {
   return typeof teamName === 'string' && teamName.endsWith('(CPU)');
+}
+
+// 与 isCpuTeam 逐字对齐：严格取末 5 字符（LIKE 在 SQLite 里对 ASCII 不区分大小写，会与队名口径分叉）
+const CPU_CLUB_NAME_MATCH = "substr(name, -5) = '(CPU)'";
+
+/** 同上的 SQL 谓词形态——在 WHERE 子句里当集合用（如 club_id IN (SELECT ...)）。 */
+export const CPU_CLUB_IDS_SQL = `(SELECT id FROM clubs WHERE ${CPU_CLUB_NAME_MATCH})`;
+
+/** CPU 队的俱乐部 id 集合（队名带 (CPU) 后缀）——入账与落位前的白名单判定用（增量 14）。 */
+export async function cpuClubIds(db: D1Database): Promise<Set<number>> {
+  const rows = await db.prepare(`SELECT id FROM clubs WHERE ${CPU_CLUB_NAME_MATCH}`).all<{ id: number }>();
+  return new Set(rows.results.map((r) => r.id));
 }
 
 // ---- 赛季结算（§10.1 结算行 + 里程碑；生成升级待办）----
