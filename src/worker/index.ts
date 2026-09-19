@@ -12,6 +12,7 @@ import marketRoutes from './routes/market.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
 import growthRoutes from './routes/growth.ts';
+import notificationsRoutes from './routes/notifications.ts';
 import adminRoutes from './routes/admin/index.ts';
 import authRoutes from './routes/auth.ts';
 import { settleOverdue } from './market-settle.ts';
@@ -27,6 +28,7 @@ app.route('/api', marketRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
 app.route('/api', growthRoutes);
+app.route('/api', notificationsRoutes);
 app.route('/api', authRoutes);
 app.route('/api/admin', adminRoutes);
 

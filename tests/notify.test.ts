@@ -83,8 +83,8 @@ afterEach(() => {
   (globalThis as { fetch: unknown }).fetch = undefined;
 });
 
-describe('通知排队（§12）', () => {
-  it('俱乐部绑了 QQ 的教练各排一条 pending；没绑 QQ 的静默跳过', async () => {
+describe('通知排队（§12 + 增量 18 双通道）', () => {
+  it('每个绑定账号一条 web 行（收件篮）；绑了 QQ 的另加一条 pending 投递行', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`
       INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active'), (2, '曼城', 'premier', 'active');
@@ -101,20 +101,22 @@ describe('通知排队（§12）', () => {
       home: '阿森纳',
       away: '曼城',
     });
-    expect(n1).toBe(1);
+    expect(n1).toBe(2); // 1 web + 1 qq
     const n2 = await queueClubNotification(fx.env, 2, 'result_confirmed', { season: 3, windowSeq: 1, score: '0:0' });
-    expect(n2).toBe(0);
+    expect(n2).toBe(1); // 只有 web 行
 
-    const rows = sqlAll<{ template: string; payload: string; status: string }>(
+    const rows = sqlAll<{ channel: string; user_id: number | null; payload: string; status: string }>(
       fx.sqlite,
-      'SELECT template, payload, status FROM notifications ORDER BY id',
+      'SELECT channel, user_id, payload, status FROM notifications ORDER BY id',
     );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ template: 'result_confirmed', status: 'pending' });
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({ channel: 'web', user_id: 11, status: 'sent' });
     expect(JSON.parse(rows[0]!.payload)).toMatchObject({
-      qq: '10001',
       text: '📋 赛果已确认：阿森纳 2:1 曼城（S3·窗1 · league_premier）。',
     });
+    expect(rows[1]).toMatchObject({ channel: 'qq', user_id: 11, status: 'pending' });
+    expect(JSON.parse(rows[1]!.payload)).toMatchObject({ qq: '10001' });
+    expect(rows[2]).toMatchObject({ channel: 'web', user_id: 22, status: 'sent' });
   });
 
   it('增量 7：绑定为真源在 AUTH_DB——按 club_id 派生绑定账号再查本地 qq_links', async () => {
@@ -134,9 +136,17 @@ describe('通知排队（§12）', () => {
 
     const { queueClubNotification } = await import('../src/worker/notify.ts');
     const n = await queueClubNotification(fx.env, 1, 'levelup', { player: '球员一', ca: 2, silver: 0, gold: 0 });
-    expect(n).toBe(2);
-    const rows = sqlAll<{ payload: string }>(fx.sqlite, "SELECT payload FROM notifications WHERE template = 'levelup' ORDER BY id");
-    expect(rows.map((r) => JSON.parse(r.payload).qq)).toEqual(['10001', '20002']);
+    expect(n).toBe(4); // 2 web + 2 qq
+    const qqRows = sqlAll<{ payload: string }>(
+      fx.sqlite,
+      "SELECT payload FROM notifications WHERE template = 'levelup' AND channel = 'qq' ORDER BY id",
+    );
+    expect(qqRows.map((r) => JSON.parse(r.payload).qq)).toEqual(['10001', '20002']);
+    const webRows = sqlAll<{ user_id: number }>(
+      fx.sqlite,
+      "SELECT user_id FROM notifications WHERE template = 'levelup' AND channel = 'web' ORDER BY id",
+    );
+    expect(webRows.map((r) => r.user_id)).toEqual([11, 22]);
   });
 });
 
@@ -241,23 +251,26 @@ describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
 
     const confirm = await post('/api/admin/results/900/confirm', {}, 'tok-admin', fx.env);
     expect(confirm.status).toBe(201);
-    const rows = sqlAll<{ template: string; payload: string; status: string }>(
+    const rows = sqlAll<{ channel: string; payload: string; status: string }>(
       fx.sqlite,
-      'SELECT template, payload, status FROM notifications ORDER BY id',
+      'SELECT channel, payload, status FROM notifications ORDER BY id',
     );
-    expect(rows).toHaveLength(2);
-    const texts = rows.map((r) => (JSON.parse(r.payload) as { qq: string; text: string }).text);
+    expect(rows).toHaveLength(4); // 双方教练各 1 web + 1 qq
+    const texts = rows.map((r) => (JSON.parse(r.payload) as { qq?: string; text: string }).text);
     expect(texts[0]).toBe('📋 赛果已确认：阿森纳 2:1 曼城（S3·窗1 · league_premier）。');
-    expect(texts[1]).toBe(texts[0]);
-    expect(new Set(rows.map((r) => (JSON.parse(r.payload) as { qq: string }).qq))).toEqual(new Set(['10001', '20002']));
+    expect(texts.every((t) => t === texts[0])).toBe(true);
+    expect(new Set(rows.filter((r) => r.channel === 'qq').map((r) => (JSON.parse(r.payload) as { qq: string }).qq))).toEqual(
+      new Set(['10001', '20002']),
+    );
+    expect(rows.filter((r) => r.channel === 'web').every((r) => r.status === 'sent')).toBe(true);
 
     const calls: FetchCall[] = [];
     mockFetch(200, calls);
     const tick = await post('/api/cron/tick', {}, 'tok-admin', fx.env);
     expect(tick.status).toBe(200);
-    expect(((await tick.json()) as { notify: { sent: number } }).notify.sent).toBe(2);
+    expect(((await tick.json()) as { notify: { sent: number } }).notify.sent).toBe(2); // web 行不进投递
     expect(calls).toHaveLength(2);
-    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE status = 'sent'")?.n).toBe(2);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE status = 'sent'")?.n).toBe(4);
   });
 
   it('升级 → 教练收升级通知', async () => {
@@ -277,10 +290,109 @@ describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
     `);
     const lv = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
     expect(lv.status).toBe(200);
-    const rows = sqlAll<{ payload: string; status: string }>(fx.sqlite, 'SELECT payload, status FROM notifications');
-    expect(rows).toHaveLength(2); // 两个绑定账号各一条
+    const rows = sqlAll<{ channel: string; status: string; payload: string }>(
+      fx.sqlite,
+      'SELECT channel, status, payload FROM notifications',
+    );
+    expect(rows).toHaveLength(4); // 两个绑定账号各 1 web + 1 qq
     const texts = rows.map((r) => (JSON.parse(r.payload) as { text: string }).text);
     expect(texts.every((t) => t === '🎉 张三 升级完成：+1 CA。')).toBe(true);
-    expect(rows.every((r) => r.status === 'pending')).toBe(true);
+    expect(rows.filter((r) => r.channel === 'qq').every((r) => r.status === 'pending')).toBe(true);
+    expect(rows.filter((r) => r.channel === 'web').every((r) => r.status === 'sent')).toBe(true);
+  });
+});
+
+describe('站内信收件篮（增量 18）', () => {
+  function seedInbox(sqlite: DatabaseSync) {
+    sqlite.exec(`
+      INSERT INTO notifications (id, club_id, user_id, channel, template, payload, status, created_at) VALUES
+        (1, 1, 1, 'web', 'result_confirmed', '{"text":"第一条"}', 'sent', '2026-07-01T10:00:00Z'),
+        (2, 1, 1, 'web', 'levelup', '{"text":"第二条"}', 'sent', '2026-07-02T10:00:00Z'),
+        (3, 1, 1, 'web', 'levelup', '{"text":"第三条（已读）"}', 'sent', '2026-07-03T10:00:00Z'),
+        (4, 1, 2, 'web', 'levelup', '{"text":"别人的"}', 'sent', '2026-07-04T10:00:00Z'),
+        (5, 1, 1, 'qq', 'levelup', '{"text":"QQ 行不进收件篮"}', 'pending', '2026-07-05T10:00:00Z');
+      UPDATE notifications SET read_at = '2026-07-03T11:00:00Z' WHERE id = 3;
+    `);
+  }
+
+  it('列表只看本人 web 行（id 倒序 + 未读数），qq 行与别人的行不可见', async () => {
+    const fx = freshEnv();
+    seedInbox(fx.sqlite);
+    const res = await app.request('/api/notifications', { headers: { Cookie: 'whl_session=tok-admin' } }, fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { id: number; template: string; text: string; readAt: string | null }[];
+      nextCursor: number | null;
+      unread: number;
+    };
+    expect(body.items.map((i) => i.id)).toEqual([3, 2, 1]);
+    expect(body.items[0]).toMatchObject({ template: 'levelup', text: '第三条（已读）', readAt: '2026-07-03T11:00:00Z' });
+    expect(body.items[2]!.readAt).toBeNull();
+    expect(body.nextCursor).toBeNull();
+    expect(body.unread).toBe(2);
+  });
+
+  it('游标分页：31 条翻到第二页拿余量，nextCursor 到底为 null', async () => {
+    const fx = freshEnv();
+    const values = Array.from({ length: 31 }, (_, i) => `(${100 + i}, 1, 1, 'web', 'levelup', '{"text":"第${i}条"}', 'sent', '2026-07-01T10:00:00Z')`).join(', ');
+    fx.sqlite.exec(`INSERT INTO notifications (id, club_id, user_id, channel, template, payload, status, created_at) VALUES ${values};`);
+    const get = (cursor?: string) =>
+      app.request(`/api/notifications${cursor ? `?cursor=${cursor}` : ''}`, { headers: { Cookie: 'whl_session=tok-admin' } }, fx.env);
+
+    const p1 = (await (await get()).json()) as { items: { id: number }[]; nextCursor: number | null };
+    expect(p1.items).toHaveLength(30);
+    expect(p1.items[0]!.id).toBe(130);
+    expect(p1.nextCursor).toBe(p1.items[29]!.id);
+    const p2 = (await (await get(String(p1.nextCursor))).json()) as { items: { id: number }[]; nextCursor: number | null };
+    expect(p2.items.map((i) => i.id)).toEqual([100]);
+    expect(p2.nextCursor).toBeNull();
+  });
+
+  it('未读数端点；标已读只动本人 web 行且幂等，ids/all 双模式', async () => {
+    const fx = freshEnv();
+    seedInbox(fx.sqlite);
+    fx.tour.exec(`INSERT INTO user (id, name, role, locked, must_change_pw) VALUES (2, '教练乙', 'coach', 0, 0);`);
+    fx.kv.set('sess:tok-other', JSON.stringify({ userId: 2 }));
+    const get = (path: string, token = 'tok-admin') =>
+      app.request(path, { headers: { Cookie: `whl_session=${token}` } }, fx.env);
+    const postRead = (body: unknown, token = 'tok-admin') =>
+      app.request(
+        '/api/notifications/read',
+        { method: 'POST', headers: { 'content-type': 'application/json', Cookie: `whl_session=${token}` }, body: JSON.stringify(body) },
+        fx.env,
+      );
+
+    expect(((await (await get('/api/notifications/unread-count')).json()) as { unread: number }).unread).toBe(2);
+
+    // 单条标已读 + 幂等
+    const r1 = (await (await postRead({ ids: [1] })).json()) as { marked: number };
+    expect(r1.marked).toBe(1);
+    expect(((await (await get('/api/notifications/unread-count')).json()) as { unread: number }).unread).toBe(1);
+    expect(((await (await postRead({ ids: [1] })).json()) as { marked: number }).marked).toBe(0);
+
+    // 别人的行标不动；教练乙看到的是自己那条（id 4），不是管理组的
+    expect(((await (await postRead({ ids: [1] }, 'tok-other')).json()) as { marked: number }).marked).toBe(0);
+    expect(((await (await get('/api/notifications/unread-count', 'tok-other')).json()) as { unread: number }).unread).toBe(1);
+
+    // all 模式 + 空请求 400
+    expect(((await (await postRead({ all: true })).json()) as { marked: number }).marked).toBe(1);
+    expect(((await (await get('/api/notifications/unread-count')).json()) as { unread: number }).unread).toBe(0);
+    expect((await postRead({})).status).toBe(400);
+  });
+
+  it('投递通道只认 channel=qq：pending 的 web 行不会被 cron 投递', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO notifications (id, user_id, channel, template, payload, status, created_at) VALUES
+        (1, 1, 'web', 'x', '{"text":"站内"}', 'pending', '2026-07-01T10:00:00Z'),
+        (2, 1, 'qq', 'x', '{"qq":"10001","text":"QQ"}', 'pending', '2026-07-01T10:00:00Z');
+    `);
+    const calls: FetchCall[] = [];
+    mockFetch(200, calls);
+    const { dispatchPendingNotifications } = await import('../src/worker/notify.ts');
+    const r = await dispatchPendingNotifications(fx.env);
+    expect(r).toMatchObject({ checked: 1, sent: 1 });
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0]!.body).text).toBe('QQ');
   });
 });

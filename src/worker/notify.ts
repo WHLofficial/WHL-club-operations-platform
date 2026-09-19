@@ -51,10 +51,10 @@ export function renderNotification(template: string, data: Record<string, unknow
 }
 
 /**
- * 给一个俱乐部排通知（尽力而为：俱乐部没绑教练/教练没绑 QQ 就静默跳过，§12-2）。
- * 排队失败不抛——通知绝不阻塞主流程（确认/升级先行）。
- * 绑定真源在 auth 库（增量 7）：先按 club_id 从 AUTH_DB 取绑定账号，再查本地 qq_links；
- * AUTH_DB 未配置回落本地休眠表（回滚通道）。
+ * 给一个俱乐部排通知（尽力而为：排队失败不抛——通知绝不阻塞主流程，§12-2）。
+ * 双通道（增量 18 站内信）：web 行按绑定账号逐人写（status='sent' 免投递，收件篮读）；
+ * QQ 行照旧只写给 qq_links 命中的账号。绑定真源在 auth 库（增量 7）：先按 club_id 从
+ * AUTH_DB 取绑定账号，再查本地 qq_links；AUTH_DB 未配置回落本地休眠表（回滚通道）。
  */
 export async function queueClubNotification(
   env: Env,
@@ -83,22 +83,31 @@ export async function queueClubNotification(
     if (accountIds.length === 0) return 0;
     const placeholders = accountIds.map(() => '?').join(', ');
     const qqs = await db
-      .prepare(`SELECT qq FROM qq_links WHERE user_id IN (${placeholders}) ORDER BY user_id LIMIT 5`)
+      .prepare(`SELECT user_id, qq FROM qq_links WHERE user_id IN (${placeholders}) ORDER BY user_id LIMIT 5`)
       .bind(...accountIds)
-      .all<{ qq: string }>();
-    if (qqs.results.length === 0) return 0;
+      .all<{ user_id: number; qq: string }>();
     const text = renderNotification(template, data);
-    await db.batch(
-      qqs.results.map((r) =>
+    // 每个绑定账号都有一条 web 行（收件篮，status='sent' 免投递）；绑了 QQ 的账号另有一条
+    // QQ 投递行（status='pending'，cron 投递），两通道互不挤占
+    await db.batch([
+      ...accountIds.map((userId) =>
         db
           .prepare(
-            `INSERT INTO notifications (club_id, channel, template, payload, status, created_at)
-             VALUES (?, 'qq', ?, ?, 'pending', ${nowSql()})`,
+            `INSERT INTO notifications (club_id, user_id, channel, template, payload, status, created_at)
+             VALUES (?, ?, 'web', ?, ?, 'sent', ${nowSql()})`,
           )
-          .bind(clubId, template, JSON.stringify({ qq: r.qq, text })),
+          .bind(clubId, userId, template, JSON.stringify({ text })),
       ),
-    );
-    return qqs.results.length;
+      ...qqs.results.map((r) =>
+        db
+          .prepare(
+            `INSERT INTO notifications (club_id, user_id, channel, template, payload, status, created_at)
+             VALUES (?, ?, 'qq', ?, ?, 'pending', ${nowSql()})`,
+          )
+          .bind(clubId, r.user_id, template, JSON.stringify({ qq: r.qq, text })),
+      ),
+    ]);
+    return accountIds.length + qqs.results.length;
   } catch {
     return 0;
   }
@@ -118,7 +127,7 @@ export async function dispatchPendingNotifications(env: Env): Promise<{
     return { checked: 0, sent: 0, failed: 0, skipped: 'unconfigured' };
   }
   const rows = await env.DB.prepare(
-    `SELECT id, template, payload FROM notifications WHERE status = 'pending' ORDER BY id LIMIT ${DISPATCH_LIMIT}`,
+    `SELECT id, template, payload FROM notifications WHERE status = 'pending' AND channel = 'qq' ORDER BY id LIMIT ${DISPATCH_LIMIT}`,
   ).all<{ id: number; template: string; payload: string }>();
 
   let sent = 0;
