@@ -5,6 +5,15 @@ export interface MeUser {
   role: 'admin' | 'coach' | 'viewer';
   locked: boolean;
   mustChangePw: boolean;
+  /** 权限点随 /api/me 原样下发（增量 15）：超管凭 club.config.manage.super 判定 */
+  permissions?: string[];
+}
+
+/** 超管独立权限点（与 src/lib/session.ts 保持一致）：平台参数全开 */
+export const SUPER_ADMIN_PERM = 'club.config.manage.super';
+
+export function isSuperAdmin(user: MeUser | null | undefined): boolean {
+  return Boolean(user?.permissions?.includes(SUPER_ADMIN_PERM));
 }
 
 /** 登录入口模式（统一认证步骤②）：oidc=认证中心，shared=赛事系统共享会话（旧行为） */
@@ -40,7 +49,7 @@ export async function api<T>(path: string): Promise<T> {
   return body as T;
 }
 
-export async function apiSend<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+export async function apiSend<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: { 'content-type': 'application/json' },
@@ -54,6 +63,7 @@ export async function apiSend<T>(method: 'POST' | 'PATCH' | 'DELETE', path: stri
 }
 
 export const apiPost = <T,>(path: string, body?: unknown) => apiSend<T>('POST', path, body);
+export const apiPut = <T,>(path: string, body?: unknown) => apiSend<T>('PUT', path, body);
 export const apiPatch = <T,>(path: string, body?: unknown) => apiSend<T>('PATCH', path, body);
 export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELETE', path, body);
 
@@ -200,6 +210,36 @@ export interface ConfigRow {
   key: string;
   value: string | null;
   secret: boolean;
+}
+
+export interface ConfigResponse {
+  config: ConfigRow[];
+  /** 超管=true：明文 + 可编辑（PUT /api/admin/config） */
+  editable: boolean;
+}
+
+export interface AdminOverview {
+  openReviews: number;
+  resultQueue: number;
+  activeListings: number;
+  clubs: number;
+  players: number;
+  at: string;
+}
+
+export interface AuditEntryRow {
+  id: number;
+  actor: number | null;
+  action: string;
+  targetType: string;
+  targetId: number | null;
+  before: string | null;
+  after: string | null;
+  at: string;
+}
+
+export interface AuditLogResponse {
+  entries: AuditEntryRow[];
 }
 
 // ---- 增量 2 DTO（附录 A〔2〕：注册与体检；通道 C 合同导入）----

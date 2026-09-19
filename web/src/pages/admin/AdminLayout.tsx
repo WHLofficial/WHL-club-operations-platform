@@ -33,7 +33,7 @@ export default function AdminLayout({ user }: { user: MeUser | null | undefined 
             ))}
           </nav>
           <main className="admin-main">
-            <Outlet />
+            <Outlet context={user} />
           </main>
         </div>
       ) : (

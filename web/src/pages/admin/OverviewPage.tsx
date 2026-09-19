@@ -1,12 +1,90 @@
-// 管理端 · 总览（原 Admin.tsx M0 货币监控；增量 15 拆分，commit 3 数据层转 TanStack Query）
-import { useQuery } from '@tanstack/react-query';
-import { api, ledgerKindLabel, type M0Report } from '../../lib/api.ts';
+// 管理端 · 总览（增量 15）：轻计数卡（待审/赛果队列/活跃挂牌/俱乐部/球员，commit 6 新增）
+// + M0 货币监控（原 Admin.tsx M0Section）；数据层 TanStack Query（commit 3）
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router';
+import { api, ledgerKindLabel, type AdminOverview, type M0Report } from '../../lib/api.ts';
 
 export default function OverviewPage() {
   return (
     <div className="admin-page">
+      <OverviewCountsSection />
       <M0Section />
     </div>
+  );
+}
+
+const COUNT_CARDS: { key: keyof Omit<AdminOverview, 'at'>; label: string; hint: string; to?: string }[] = [
+  { key: 'openReviews', label: '待审核成交', hint: '等管理组盖章的成交单', to: '/admin/market' },
+  { key: 'resultQueue', label: '赛果队列', hint: '已结束未确认给 XP 的比赛', to: '/admin/seasons' },
+  { key: 'activeListings', label: '活跃挂牌', hint: '在架 / 竞价 / 匹配中的挂牌', to: '/market' },
+  { key: 'clubs', label: '俱乐部', hint: '注册俱乐部总数', to: '/admin/clubs' },
+  { key: 'players', label: '球员', hint: '球员库总人数', to: '/players' },
+];
+
+function OverviewCountsSection() {
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const { data: overview, error } = useQuery({
+    queryKey: ['admin', 'overview'],
+    queryFn: () => api<AdminOverview>('/api/admin/overview'),
+  });
+
+  async function refresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    // ?fresh=1 绕过服务端 60s isolate 缓存强拉
+    queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    try {
+      await api<AdminOverview>('/api/admin/overview?fresh=1');
+      await queryClient.refetchQueries({ queryKey: ['admin', 'overview'] });
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  if (error) {
+    return (
+      <section className="card admin-section">
+        <h2>今日概览</h2>
+        <div className="banner bad">{error instanceof Error ? error.message : '加载总览失败'}</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card admin-section">
+      <h2>今日概览</h2>
+      <p className="hint">
+        一眼扫积压：先看待审与赛果队列有没有涨，再决定去哪个子页。数据 {overview ? `截至 ${overview.at.slice(11, 19)}` : '加载中…'}
+        （服务端缓存 60 秒）。
+      </p>
+      {overview === undefined ? (
+        <p className="muted">正在点数…</p>
+      ) : (
+        <div className="inline-form" style={{ alignItems: 'stretch' }}>
+          {COUNT_CARDS.map((c) => (
+            <div key={c.key} className="field" style={{ minWidth: '9rem' }}>
+              <span>{c.label}</span>
+              {c.to ? (
+                <Link to={c.to} className="ledger-balance-num mono" style={{ fontSize: '1.5rem' }}>
+                  {overview[c.key]}
+                </Link>
+              ) : (
+                <span className="ledger-balance-num mono" style={{ fontSize: '1.5rem' }}>
+                  {overview[c.key]}
+                </span>
+              )}
+              <span className="muted">{c.hint}</span>
+            </div>
+          ))}
+          <button className="btn btn-sm" type="button" disabled={refreshing} onClick={refresh}>
+            {refreshing ? '刷新中…' : '刷新'}
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

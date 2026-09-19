@@ -36,6 +36,9 @@ const ADMIN_PERMS = [
   'club.compliance.view',
 ] as const;
 const COACH_PERMS = ['club.squad.manage', 'club.registrations.submit'] as const;
+// 超管独立权限点（增量 15）：不进 ADMIN_PERMS any 判定集——普通管理组六点不附带，
+// 只有认证中心 superadmin 角色（OIDC）或赛事库 superadmin 角色（兼容）才持有。
+export const SUPER_ADMIN_PERM = 'club.config.manage.super';
 
 // OIDC 模式 = AUTH_MODE 显式配 "oidc"（增量 9 显式化）+ 两项连接变量齐备；未配 AUTH_MODE =
 // 兼容模式。不再靠 OIDC_ISSUER 的有无隐式判定——vars 随 wrangler.jsonc 一起部署，
@@ -154,7 +157,7 @@ async function resolveOidcUser(env: Env, request: Request): Promise<SessionUser 
     role: roleFromClaims(claims),
     locked: claims.locked,
     mustChangePw: claims.must_change_pw,
-    permissions: claims.permissions,
+    permissions: claims.roles.includes('superadmin') ? [...claims.permissions, SUPER_ADMIN_PERM] : claims.permissions,
   };
 }
 
@@ -169,7 +172,7 @@ async function loadTourUser(env: Env, userId: number): Promise<SessionUser | nul
     role: mapRole(tour),
     locked: tour.locked === 1,
     mustChangePw: tour.must_change_pw === 1,
-    permissions: [], // 兼容模式无权限点声明，判定回落角色
+    permissions: tour.role === 'superadmin' ? [SUPER_ADMIN_PERM] : [], // 兼容模式无权限点声明，判定回落角色；超管按角色附点
   };
 }
 
@@ -242,5 +245,13 @@ export async function requireAdmin(env: Env, request: Request, perm?: (typeof AD
     return user;
   }
   if (user.role !== 'admin') throw new HttpError(403, '没有权限进行此操作');
+  return user;
+}
+
+// 超管端点（平台参数全开，增量 15）：两模式统一按 permissions 判定——
+// 两种登录路径各自在会话解析时把 superadmin 角色投影成 SUPER_ADMIN_PERM
+export async function requireSuperAdmin(env: Env, request: Request): Promise<SessionUser> {
+  const user = await requireUser(env, request);
+  if (!user.permissions.includes(SUPER_ADMIN_PERM)) throw new HttpError(403, '没有权限进行此操作');
   return user;
 }

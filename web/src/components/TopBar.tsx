@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router';
-import { TOUR_SITE_URL, type AuthMode, type MeUser } from '../lib/api.ts';
+import { isSuperAdmin, TOUR_SITE_URL, type AuthMode, type MeUser } from '../lib/api.ts';
 
 const ROLE_LABEL: Record<MeUser['role'], string> = { admin: '管理组', coach: '教练', viewer: '观众' };
 
@@ -40,6 +40,7 @@ export default function TopBar({ user, authMode }: { user: MeUser | null | undef
           {user === undefined ? null : user ? (
             <>
               <span className="userbox-name">{user.name}</span>
+              {isSuperAdmin(user) && <span className="badge red">超管</span>}
               <span className={`role-badge role-${user.role}`}>{ROLE_LABEL[user.role]}</span>
               {/* 登出仅 OIDC 模式提供：兼容模式的会话真源在赛事系统，club 无从登出。
                   原生表单整页跳转：302 链（club→认证中心→回 club）由浏览器跟随，

@@ -207,6 +207,8 @@ export interface ConfigService {
   set(key: ConfigKey, value: string | null): Promise<void>;
   /** 管理端视图：涉密键只给掩码 */
   listMasked(): Promise<{ key: string; value: string | null; secret: boolean }[]>;
+  /** 超管视图（增量 15）：全键明文，secret 标记保留供前端提示 */
+  listRaw(): Promise<{ key: string; value: string | null; secret: boolean }[]>;
 }
 
 export function createConfigService(db: D1Database, opts: { now?: () => number } = {}): ConfigService {
@@ -287,6 +289,16 @@ export function createConfigService(db: D1Database, opts: { now?: () => number }
       return CONFIG_KEYS.map((key) => ({
         key,
         value: maskIfSecret(key, stored.get(key) ?? CONFIG_DEFAULTS[key] ?? null),
+        secret: isSecretKey(key),
+      }));
+    },
+
+    async listRaw() {
+      const rows = await db.prepare('SELECT key, value FROM config').all<{ key: string; value: string | null }>();
+      const stored = new Map(rows.results.map((r) => [r.key, r.value]));
+      return CONFIG_KEYS.map((key) => ({
+        key,
+        value: stored.get(key) ?? CONFIG_DEFAULTS[key] ?? null,
         secret: isSecretKey(key),
       }));
     },
