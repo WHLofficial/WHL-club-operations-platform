@@ -85,6 +85,8 @@ export function useListingDetail(id: number | null) {
     queryKey: qk.listing(id ?? 0),
     queryFn: () => api<MarketListingDetail>(`/api/market/listings/${id}`),
     enabled: id !== null,
+    // 切换别的挂牌时保留旧详情展示（旧行为：新详情到达前旧卡不清空）
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -54,7 +54,8 @@ export default function Ledger() {
       return api<LedgerPage>(`/api/club/ledger${qs.size > 0 ? `?${qs}` : ''}`);
     },
     initialPageParam: null as number | null,
-    getNextPageParam: (last) => last.nextCursor,
+    // nextCursor 到底时是 null；v5 里 null 仍是合法游标，必须转 undefined 才算「没有下一页」
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const entries = ledgerQuery.data ? ledgerQuery.data.pages.flatMap((p) => p.entries) : [];
   const lastPage = ledgerQuery.data?.pages[ledgerQuery.data.pages.length - 1] ?? null;

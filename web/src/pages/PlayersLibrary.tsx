@@ -1,7 +1,7 @@
 // 球员库（增量 6.1 d8）：全联盟公开名册。当前视图=现在的归属与能力；初始视图=导入时的底册
 // （归属打建档俱乐部、CA 取建档值、PA 取导入上限，TECH_DESIGN §15 假设 24）。
 // 筛选 + keyset 游标分页（useInfiniteQuery 双向翻页，增量 16 起）；不显示工资——那是合同卷宗里的事。
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { api, type PlayersLibraryResponse } from '../lib/api.ts';
@@ -68,21 +68,37 @@ export default function PlayersLibrary() {
       return api<PlayersLibraryResponse>(`/api/players?${params.toString()}`);
     },
     initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.nextCursor,
-    getPreviousPageParam: (_first, _all, firstPageParam) => firstPageParam,
+    // nextCursor 到底时是 null；v5 里 null 仍是合法游标，必须转 undefined 才算「没有下一页」
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 
-  const rows = libQuery.data ? libQuery.data.pages[libQuery.data.pages.length - 1]!.players : null;
+  // 页码语义照搬旧游标栈：显示第 pageIdx 页 = 已翻到的页，上一页回退、下一页前进（缓存命中不重拉）。
+  // v5 的 fetchPreviousPage 是往前补页不是回退，不能直接用。
+  const [pageIdx, setPageIdx] = useState(1);
+  useEffect(() => {
+    setPageIdx(1);
+  }, [view, position, status, growable, name, sort, order]);
+  const pageCount = libQuery.data?.pages.length ?? 0;
+  const rows = libQuery.data ? libQuery.data.pages[Math.min(pageIdx, pageCount) - 1]!.players : null;
   const loadError = libQuery.isError ? (libQuery.error instanceof Error ? libQuery.error.message : '加载失败') : '';
   const busy = libQuery.isFetching;
-  const page = libQuery.data?.pages.length ?? 1;
-  const canPrev = libQuery.hasPreviousPage && !busy;
-  const canNext = libQuery.hasNextPage && !busy;
+  const canPrev = pageIdx > 1 && !busy;
+  const canNext = pageIdx < pageCount || (libQuery.hasNextPage && !busy);
+
+  function goNext() {
+    if (pageIdx < pageCount) {
+      setPageIdx(pageIdx + 1);
+      return;
+    }
+    if (libQuery.hasNextPage && !busy) {
+      setPageIdx(pageIdx + 1);
+      void libQuery.fetchNextPage();
+    }
+  }
 
   const changeFilter = <T,>(setter: (v: T) => void) => (v: T) => {
     setter(v);
   };
-
   return (
     <div className="container">
       <h2>球员库</h2>
@@ -249,11 +265,11 @@ export default function PlayersLibrary() {
         )}
 
         <div className="library-pager">
-          <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => void libQuery.fetchPreviousPage()}>
+          <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => setPageIdx((p) => p - 1)}>
             上一页
           </button>
-          <span className="muted">第 {page} 页</span>
-          <button className="btn btn-sm" type="button" disabled={!canNext} onClick={() => void libQuery.fetchNextPage()}>
+          <span className="muted">第 {pageIdx} 页</span>
+          <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
             下一页
           </button>
         </div>
