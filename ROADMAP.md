@@ -194,6 +194,16 @@
 
 ---
 
+## 增量 18 · 站内信 web 收件篮（2026-09-20 本地完成，push/部署等令）
+
+**裁决**：原增量 17 顺延至此（增量 17 插队批顶替）；写入点不扩——赛果确认与升级两处照旧调 `queueClubNotification`，内部改双通道；未读判定独立列 `read_at`，不复用投递状态 `status`。
+
+**交付**（3 个 commit）：`14af2f3` 服务端——迁移 0022（`notifications.read_at`）；`queueClubNotification` 双通道：每个绑定账号一条 `channel='web'` 行（`status='sent'` 免投递，进收件篮），绑了 QQ 的另加一条 `qq` 投递行（两通道互不挤占，qq_links 未命中的教练也有站内信了）；`dispatchPendingNotifications` 加 `channel='qq'` 过滤双保险；新 `routes/notifications.ts` 三端点（列表 id 倒序游标 30/页 + 未读数、`unread-count`、`read` ids/all 双模式只动本人 web 行幂等）。`104fa97` 前端——`/notifications` 收件篮页（mono 时间 + 模板徽章摘要、未读 sky 蓝点加粗、点行标已读、全部已读、游标「再看 30 条」）+ TopBar 用户区收件篮入口与未读蓝点（60s 轮询 + 聚焦拉取）+ 顺手修 `--cream` 未定义变量（52bc412 潜伏 bug）。`999068d` review 修复——`read` 的 ids 超 D1 单查询绑定参数上限 100 会 500，改按 100 分块 `db.batch`（150 条用例）。
+
+**验收**：**347 测试绿 + 三份 tsc 干净 + build 过**（notify.test.ts 期望全面升级 + 收件篮 5 新用例：本人隔离/游标分页/标已读幂等与他人不可动/分块/投递通道只认 qq）。本地 8791 冒烟：双通道落行、三端点、headless CDP cookie 注入截页——顶栏蓝点、未读徽章、蓝点加粗行逐项目视确认。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
