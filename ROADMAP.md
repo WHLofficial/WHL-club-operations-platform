@@ -96,6 +96,8 @@
 
 **遗留**：`clubs.league_tier` 待需求方给分级（建表语句 tier 仅建时可定）；球员库导入（18408 人）暂缓。
 
+**球员库首灌（2026-09-18 已执行）**：`E:/Downloads/FC26db20251217_fixed.xlsx` 的 `Base` 表（实际 **18407** 数据行，文档旧记 18408 含表头）+ Growth+ 名单，复用端上归一化代码（`src/core/import.ts` 的 `normalizeImportBatch`，按 1000 行切片，与 `web/src/pages/Admin.tsx` 同口径）离线产 SQL 后 `wrangler d1 execute --file` 逐片直写生产（19 片）；**入库 18301 人**，被校验拦下 30 行（源值缺 `naID`=`#N/A` 与 `FootID`=`Not Found` 两列，本地与在线源均无源可补 → 搁置，生产至今 18301）。工具与报告在 `scripts/players-import/`（`generate-sql.ts` 产片、`overlay-missing.ts` 增量补录、`missing-fields-30.csv` 填值模板、`nation-id-reference.csv` 218 国、`players-import-report.md`），口径见该目录 README。另：主场存量（`scripts/revenue-import/`）16 球场 + 80 设施行同批直写生产；按 `name` 匹配俱乐部的旧脚本 `stadium-import.sql` 已删除（会给 4 支平台无档案球队造 NULL `club_id` 脏行），生产版只剩 `stadium-import-prod.sql`（显式 `club_id`，2026-09-18 执行）。
+
 ## 增量 9 · 分级派生（报名定级，club 单仓）
 
 **交付**：联赛级别不再建队时定死（`clubs.league_tier` 休眠）——当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（`src/worker/tier.ts`，同 request memo）；注册提交派生不到级别 400 拦下（tier_pending），注册页报名状态条（红=未报名提示等待/绿=已报名+级别徽章）；管理端建队删定级单选、列表/注册快照/准入体检改派生显示（体检未报名标 tier_missing），clubs 概览徽章空显「未定级」；建队端点双模（AUTH_DB 未配置回滚通道照旧写休眠列）。
@@ -140,15 +142,15 @@
 
 **验收**：成长期三用例（划断后重新累计、手动宣告、开窗勾选同批宣告）+ 多球员里程碑分组回归；**修掉一个 P0 潜伏 bug**——里程碑 totals 查询的 `GROUP BY ge.player_id` 与 `scanRows` 的游标条件拼在同一层，`GROUP BY` 后接 `AND ge.player_id > ?` 会被解析成分组表达式：游标为 0 时全表折成一组、非 0 时在两行间来回跳 → 两名以上有进/助攻事件的球员会**死循环（生产会挂住 worker）**，修法=外层再套一层 `SELECT … FROM (…GROUP BY…) x WHERE x.id > 0`。回归用例已实测能抓住该 bug（换回坏写法即失败）；CPU 队用例（阿森纳 vs 巴塞罗那(CPU)：只记玩家队 XP、CPU 队不进未匹配提示，撤掉守卫即失败）。**309 测试绿 + tsc ✓ + build ✓**。
 
-**待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）。
+**待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）。→ **2026-09-19 已办**：0019 已 apply 生产（`d1_migrations` 记到 0020），worker 已由同一批部署上线（线上 `/api/players` 已回 `clubId`/`clubName`、`/api/admin/growth/periods` 有路由被 401 拦下＝增量13 路由在线上）。
 
 **CPU 口径（2026-09-18）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员无成长（赛果整队静默跳过，已实现）。**2026-09-18 用户更正语义**：CPU 队球员「视同海里球员」只指**转会上视同**（即可海捞）——平台仍要为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建 clubs 行、其球员要带 `club_id`，并且海捞名单查询条件必须相应改造。本节先前的「不建行、按无归属留在海捞池」记载作废。六问细则已全部裁决并落地，见「增量 14」。
 
 **CPU 六问的裁决记录（2026-09-18 逐条，来自本节原先的问题清单）**：1) 队名带「(CPU)」后缀、判定沿用 `isCpuTeam` 队名口径（**不加列、不做迁移**）；2) 存量 107 人 `club_id` = **导入逻辑写 + 一次性 SQL 回填**；3) 队 id 用**游戏真 id**（米兰 `131681`/国米 `131682`/拉齐奥 `115841`/亚特兰大 `115845`）+ 对外显示真名；4) `initial_club_id` **删除**（用户裁定「无意义」）；5) CPU 队球员代表 CPU 队出场**维持整队跳过、不计 XP**；6) auth 目录**补 4 行 club_id 但平台入账侧禁止 CPU 队入账**。原「已查明的事实」四条（三处「海里球员 = `club_id IS NULL`」闸门、平台 club id 与 tour 编号两套体系、clubs 无 CPU 标记列、`isCpuTeam` 吃队名）仍然有效，细节见 TECH_DESIGN 假设 36/37。
 
-**六问之前的两项关键澄清**：①平台 `clubs.id` = **FC26 TeamID**（16 支联盟队逐条对上），tour `team.id` 是另一套内部编号 1–21；4 支 CPU 队在 tour 侧是 id **6/16/19/21**（注意 tour 21 与平台 club 21 拜仁慕尼黑**撞号**，故 CPU 队 clubs 行只能用 FC 队 id）。②第三方 fixed 快照里 CPU 队与 4 支 EA 未授权队的编号（241/10/112172/47 与 39/44/46/47）与游戏真表不一致，本轮查清后统一到游戏真 id。
+**六问之前的两项关键澄清**：①平台 `clubs.id` = **FC26 TeamID**（16 支联盟队逐条对上）。**2026-09-19 更正**：原写「tour `team.id` 是另一套内部编号 1–21、4 支 CPU 队在 tour 侧是 id 6/16/19/21」与生产不符——tour 库与 auth 库的 `team` 表实测都已统一到 FC 队 id 空间（20 行：16 支联盟队 `id`/`tour_team_id` 逐条等于平台 `clubs.id`；4 支 CPU 队为 `10`/`47`/`241`/`112172`，其中**只有米兰还带着 legacy 号 47**，须跨号映射到平台 `clubs.id 131681`；国米/拉齐奥/亚特兰大 131682/115841/115845 在目录里没有行，仅存在于球员 `game_attrs.TeamID`）。②第三方 fixed 快照里 CPU 队与 4 支 EA 未授权队的编号（241/10/112172/47 与 39/44/46/47）与游戏真表不一致，本轮查清后统一到游戏真 id。
 
-## 增量 14 · CPU 队与队籍口径（代码已完成，未推送；数据侧待令）
+## 增量 14 · CPU 队与队籍口径（代码已推送，生产数据侧 2026-09-19 已执行）
 
 **裁决**（2026-09-18，承接增量 13 的 CPU 六问）：①CPU 队 clubs 行 name = `巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)`（与 tour 队名逐字一致），CPU 判定沿用 `isCpuTeam` 的队名半角「(CPU)」后缀口径——**不加列、不做迁移**；②存量 107 名 CPU 队球员的 `club_id` = **导入逻辑写 + 一次性 SQL 回填**；③4 支 EA 未授权队的队 id 用**游戏真 id**（米兰 `131681`、国米 `131682`、拉齐奥 `115841`、亚特兰大 `115845`）+ **对外显示真名**（用户原话：「球队名仍要是AC Milan。国米，拉齐奥，亚特兰大也是这样的情况，一并解决」）；④`initial_club_id` **删除**（用户：「所以这个无意义，可以去掉这一字段了」）；⑤被海捞签下的 CPU 球员，其代表 CPU 队出场的赛果**维持整队跳过（不计 XP）**；⑥auth 目录**补上 4 行 club_id 但平台入账侧禁止 CPU 队入账**。
 
@@ -156,7 +158,7 @@
 
 **验收**：**316 测试绿 + 三份 tsc 干净 + vite build 通过**。新增 6 组用例：队籍与别名（通道 A 三行落 241/131681/null、通道 B 只换 `game_attrs.teamid` 不写 club_id——最初写错断言即被抓住）、通道 C 认领 CPU 球员（预览 claim、确认后归属）、海捞 CPU 球员全链（名单带东家 → 成约后从 CPU 队摘出 → `ledger_entries` 里 CPU 队 0 流水）、强制拍卖拒绝、平台队打 CPU 队只发平台侧奖金、`clubIdByTourTeam` 过滤；`tests/players-library.test.ts` 四处改造（0015 回填用例保留 + 新增 0020 删列用例）。code review 自查修掉两项：①SQL 侧原用 `LIKE '%(CPU)'`（SQLite 对 ASCII 不区分大小写，会与 `isCpuTeam` 的严格口径分叉）→ 改 `substr(name, -5)`；②海捞名单 `LIMIT 100` 在池里多了 107 名 CPU 球员后会藏掉低 CA 那半截 → 改 300。
 
-**待办**：数据侧动作待用户下令——①4 支 CPU 队 clubs 行；②107 人 `club_id` 回填 + 105 人 `game_attrs.TeamID` 重键（两集合只在米兰 24 人重叠）；③auth 目录补 4 行 club_id（tour 6→241、16→10、19→112172、21→131681）；④apply 迁移 0019+0020、部署 worker（与 `/me/club` 500 修复同批）。
+**生产执行（2026-09-19，全部逐条复查通过）**：①**补迁移账目**——0016/0017/0018 当初是 `--file` 直跑、`d1_migrations` 只记到 0015，先插回三条记账（`scripts/prod-20260919-increment14/00-migration-bookkeeping.sql`）再 `migrations apply --remote` 走完 0019+0020（复查 `growth_periods` 表在、`players.initial_club_id` 列已无、`d1_migrations` 20 行）；②**4 支 CPU 队 clubs 行**（`01-cpu-clubs.sql`：`10 曼城(CPU)`/`241 巴塞罗那(CPU)`/`112172 RB莱比锡(CPU)`/`131681 AC米兰(CPU)`，status='active'）；③**107 人 `club_id` 回填**（`02-backfill-cpu-club-id.sql`，幂等护栏 `club_id IS NULL`，复查分布 10→26/241→28/112172→29/131681→24）；④**105 人 `game_attrs.TeamID` 重键到游戏真号**（`03-rekey-teamid.sql`，须在 ②③ 之后跑，复查 115841→30/115845→27/131681→24/131682→24、旧号 39/44/46/47 清零）；⑤**auth 目录 4 行 `club_id`**（`04-auth-team-links.sql`，在 auth 仓执行；**注意跨号映射 `tour_team_id 47 → club_id 131681`**，写 47 会绕开 `cpuClubIds` 过滤＝给不存在的俱乐部记账）。worker 与前端由同批 `wrangler deploy` 上线（线上 `/api/players` 已回 `clubId`/`clubName`、无 `initialClubName` ⇒ 0019/0020 删列安全）。五个工件都带回滚语句写在头注释里。
 
 ---
 
