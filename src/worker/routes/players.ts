@@ -34,6 +34,8 @@ const RANGE_PARAMS = {
   age_max: { col: 'players.age', op: '<=' },
   prestige_min: { col: 'players.prestige', op: '>=' },
   prestige_max: { col: 'players.prestige', op: '<=' },
+  market_value_min: { col: 'players.market_value', op: '>=' },
+  market_value_max: { col: 'players.market_value', op: '<=' },
   base_ca_min: { col: 'COALESCE(players.base_ca, players.ca)', op: '>=' },
   base_ca_max: { col: 'COALESCE(players.base_ca, players.ca)', op: '<=' },
 } as const;
@@ -132,10 +134,15 @@ app.get('/players', async (c) => {
 
   const clubId = c.req.query('club_id');
   if (clubId !== undefined) {
-    const n = Number(clubId);
-    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'club_id 不对');
-    filters.push('players.club_id = ?');
-    filterArgs.push(n);
+    if (clubId === 'free') {
+      // 自由身：无归属（球员库「俱乐部」下拉的「自由身」项）
+      filters.push('players.club_id IS NULL');
+    } else {
+      const n = Number(clubId);
+      if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'club_id 不对');
+      filters.push('players.club_id = ?');
+      filterArgs.push(n);
+    }
   }
   const status = c.req.query('status');
   if (status !== undefined) {
@@ -268,11 +275,13 @@ app.get('/players', async (c) => {
     filters.push(`${inflExpr} ${op} ?`);
     filterArgs.push(n);
   }
-  // 细分属性区间：attr + attr_min/attr_max（键在白名单内才放行）
+  // 细分属性区间：attr + attr_min/attr_max（键在白名单内才放行）；命中行的属性值随响应带回（前端自动加列用）
+  let attrValueExpr: string | null = null;
   const attr = c.req.query('attr');
   if (attr !== undefined) {
     if (!(ATTR_KEYS as readonly string[]).includes(attr)) throw new HttpError(400, 'attr 不是可筛选的属性键');
     const attrExpr = `json_extract(players.game_attrs, '$.${attr}')`;
+    attrValueExpr = attrExpr;
     const minRaw = c.req.query('attr_min');
     const maxRaw = c.req.query('attr_max');
     if (minRaw === undefined && maxRaw === undefined) throw new HttpError(400, 'attr 需要搭配 attr_min / attr_max');
@@ -287,6 +296,23 @@ app.get('/players', async (c) => {
       filters.push(`${attrExpr} ${op} ?`);
       filterArgs.push(n);
     }
+  }
+  // PlayStyle 多选：PSID1-15 任一槽命中即入册；金徽存基础 ID+100（§5.2），两种形态都算。
+  // 命中时 15 个槽位原值随行带回（psIds），前端列联动渲染 PlayStyle 名用
+  const psRaw = c.req.query('ps');
+  let psSlotSelects = '';
+  if (psRaw !== undefined) {
+    const list = psRaw
+      .split(',')
+      .map((p) => Number(p.trim()))
+      .filter((p) => p !== 0);
+    if (list.length === 0) throw new HttpError(400, 'ps 不能为空');
+    if (list.some((n) => !Number.isInteger(n) || n < 1 || n > 99)) throw new HttpError(400, 'ps 应为基础 PlayStyle ID（1-99）');
+    const marks = list.flatMap((n) => [n, n + 100]).map(() => '?').join(',');
+    const psSlots = Array.from({ length: 15 }, (_, i) => `json_extract(players.game_attrs, '$.PSID${i + 1}')`);
+    filters.push(`(${psSlots.map((s) => `${s} IN (${marks})`).join(' OR ')})`);
+    for (let i = 0; i < psSlots.length; i++) filterArgs.push(...list.flatMap((n) => [n, n + 100]));
+    psSlotSelects = psSlots.map((s, i) => `, ${s} AS ps${i + 1}`).join('');
   }
   // 合同维度（现行合同：player_id UNIQUE 不产生重复行）
   const hasContract = c.req.query('has_contract');
@@ -383,6 +409,7 @@ app.get('/players', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT players.id, players.uid, players.name, players.club_id, players.position, players.age, players.foot,
             ${caExpr} AS ca, ${paExpr} AS pa, players.ca AS cur_ca, players.pa AS cur_pa,
+            players.base_ca, players.fc_id,
             players.prestige, players.market_value, players.status,
             players.growth_tier, players.growable, players.is_future_star, players.china_plan, players.agent_tier,
             players.badges_silver, players.badges_gold,
@@ -391,7 +418,8 @@ app.get('/players', async (c) => {
             json_extract(players.game_attrs, '$.PosID3') AS pos3,
             json_extract(players.game_attrs, '$.PosID4') AS pos4,
             ct.wage AS ct_wage, ct.release_fee AS ct_release_fee, ct.contract_type AS ct_contract_type,
-            cc.name AS club_name${needSortKey ? `, ${SORT_EXPRS[sort]} AS sort_key` : ''}
+            ct.source AS ct_source, ct.protected_until AS ct_protected_until, ct.effective_from AS ct_effective_from,
+            cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${SORT_EXPRS[sort]} AS sort_key` : ''}
      FROM players
      LEFT JOIN clubs cc ON cc.id = players.club_id
      LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1
@@ -410,6 +438,8 @@ app.get('/players', async (c) => {
       pa: number;
       cur_ca: number | null;
       cur_pa: number | null;
+      base_ca: number | null;
+      fc_id: number | null;
       prestige: number | null;
       market_value: number | null;
       status: string;
@@ -427,7 +457,26 @@ app.get('/players', async (c) => {
       ct_wage: number | null;
       ct_release_fee: number | null;
       ct_contract_type: string | null;
+      ct_source: string | null;
+      ct_protected_until: string | null;
+      ct_effective_from: string | null;
       club_name: string | null;
+      attr_value?: number | null;
+      ps1?: number | null;
+      ps2?: number | null;
+      ps3?: number | null;
+      ps4?: number | null;
+      ps5?: number | null;
+      ps6?: number | null;
+      ps7?: number | null;
+      ps8?: number | null;
+      ps9?: number | null;
+      ps10?: number | null;
+      ps11?: number | null;
+      ps12?: number | null;
+      ps13?: number | null;
+      ps14?: number | null;
+      ps15?: number | null;
       sort_key?: number;
     }>();
 
@@ -458,6 +507,9 @@ app.get('/players', async (c) => {
     age: r.age,
     ca: r.ca,
     pa: r.pa,
+    foot: r.foot,
+    baseCa: r.base_ca,
+    fcId: r.fc_id,
     growable: r.growable === 1,
     prestige: r.prestige,
     influence: influenceOf(coefs, r.cur_ca, r.cur_pa, r.growable === 1, r.prestige),
@@ -472,6 +524,15 @@ app.get('/players', async (c) => {
     wage: r.ct_wage,
     releaseFee: r.ct_release_fee,
     contractType: r.ct_contract_type,
+    source: r.ct_source,
+    protectedUntil: r.ct_protected_until,
+    effectiveFrom: r.ct_effective_from,
+    attrValue: attrValueExpr ? (r.attr_value ?? null) : undefined,
+    psIds: psSlotSelects
+      ? Array.from({ length: 15 }, (_, i) => (r as Record<string, unknown>)[`ps${i + 1}`])
+          .filter((v): v is number => v !== null && v !== undefined && Number.isFinite(Number(v)))
+          .map(Number)
+      : undefined,
   }));
 
   let nextCursor: string | null = null;

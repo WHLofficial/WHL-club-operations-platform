@@ -13,6 +13,14 @@ import { getVisibleSeason } from '../seasons.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// 俱乐部目录（🌐 公开）：球员库筛选下拉用，只出 id/名称/级别，不含经营数据
+app.get('/clubs/directory', async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT id, name, league_tier FROM clubs WHERE status = 'active' ORDER BY name`,
+  ).all<{ id: number; name: string; league_tier: string }>();
+  return c.json({ clubs: rows.results });
+});
+
 app.post('/clubs/bind', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   // 按 IP 限尝试次数：10 分钟窗口 5 次（正常输入一次就成功，够防爆破）

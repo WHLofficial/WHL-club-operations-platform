@@ -455,6 +455,32 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     expect(withContract.players[0]!.contractType).toBe('formal');
   });
 
+  it('PlayStyle 多选：银槽基础 ID 与金槽 ID+100 都命中；非法值 400', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, game_attrs) VALUES
+        (51, 's1', '银槽搓射', '{"PSID1":1,"PSID2":5}'),
+        (52, 's2', '金槽吊射', '{"PSID13":102}'),
+        (53, 's3', '无徽', NULL);
+    `);
+    expect((await list17('/api/players?ps=1', fx.env)).players.map((p) => p.id)).toEqual([51]);
+    expect((await list17('/api/players?ps=2', fx.env)).players.map((p) => p.id)).toEqual([52]); // 102=2+100
+    expect((await list17('/api/players?ps=1,5', fx.env)).players.map((p) => p.id)).toEqual([51]);
+    expect((await list17('/api/players?ps=9', fx.env)).players.map((p) => p.id)).toEqual([]);
+    expect((await get('/api/players?ps=0', fx.env)).status).toBe(400);
+    expect((await get('/api/players?ps=abc', fx.env)).status).toBe(400);
+  });
+
+  it('club_id=free 筛无归属球员；market_value 区间', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    expect((await list17('/api/players?club_id=free', fx.env)).players.map((p) => p.id)).toEqual([5, 6]);
+    expect((await get('/api/players?club_id=0', fx.env)).status).toBe(400);
+    const mv = await list17('/api/players?market_value_min=50&market_value_max=100', fx.env);
+    expect(mv.players.map((p) => p.id)).toEqual([3, 4, 5]); // 6 号 NULL 身价不命中
+    expect((await get('/api/players?market_value_min=-1', fx.env)).status).toBe(400);
+  });
+
   it('参数校验：foot / growth_tier / agent_tier / has_contract / protected 400', async () => {
     const fx = freshEnv();
     expect((await get('/api/players?foot=2', fx.env)).status).toBe(400);

@@ -162,12 +162,29 @@ export interface PlayerLibraryRow extends PlayerListItem {
   wage: number | null;
   releaseFee: number | null;
   contractType: string | null;
+  // 增量 17 列联动：筛什么就带什么字段回来（foot/baseCa/fcId 恒回，attrValue 只在 attr 筛选时出现）
+  foot: number;
+  baseCa: number | null;
+  fcId: number | null;
+  source: string | null;
+  protectedUntil: string | null;
+  effectiveFrom: string | null;
+  attrValue?: number;
+  // ps 筛选时带回的 PSID1-15 槽位原值（槽位序；金徽=基础 ID+100）
+  psIds?: number[];
 }
 
 export interface PlayersLibraryResponse {
   players: PlayerLibraryRow[];
   total: number;
   nextCursor: string | null;
+}
+
+// 俱乐部目录（公开，球员库筛选下拉用）
+export interface ClubDirectoryRow {
+  id: number;
+  name: string;
+  leagueTier: string;
 }
 
 export interface AdminClubRow {
