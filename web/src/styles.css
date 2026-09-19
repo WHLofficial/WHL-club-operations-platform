@@ -59,7 +59,7 @@ h3 {
 }
 
 .container {
-  max-width: 960px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 20px 16px 56px;
 }
@@ -80,13 +80,13 @@ h3 {
 }
 
 .topbar-inner {
-  max-width: 960px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 10px 16px;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
 }
 
 .brand {
@@ -110,8 +110,18 @@ h3 {
 .nav-links {
   display: flex;
   gap: 4px;
-  flex: 1;
-  flex-wrap: wrap;
+  grid-column: 2;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* 关键：导航的固有最小内容宽（tab 总宽）会把 grid 轨道撑到 ~490px，
+     把用户区推出窄视口右缘——inline-size 容器化让固有宽度归零，内部照常横滑 */
+  contain: inline-size;
+}
+
+.nav-links::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-tab {
@@ -120,6 +130,7 @@ h3 {
   padding: 6px 12px;
   border-radius: 999px;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .nav-tab:hover {
@@ -138,10 +149,14 @@ h3 {
   align-items: center;
   gap: 8px;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .userbox-name {
   font-weight: 600;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .role-badge {
@@ -523,16 +538,37 @@ tbody tr:hover td {
 /* ---- 移动端（640px 单断点，家族硬惯例） ---- */
 
 @media (max-width: 640px) {
+  /* 两行布局：第一行品牌 + 用户区（两端对齐），第二行导航横滑 */
   .topbar-inner {
     gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'brand userbox'
+      'nav nav';
+  }
+
+  .brand {
+    grid-area: brand;
+  }
+
+  .userbox {
+    grid-area: userbox;
+    justify-self: end;
+  }
+
+  .userbox .role-badge {
+    display: none;
+  }
+
+  .userbox-name {
+    max-width: 72px;
   }
 
   .nav-links {
-    order: 3;
-    width: 100%;
+    grid-area: nav;
     overflow-x: auto;
-    flex-wrap: nowrap;
     padding-bottom: 2px;
+    scrollbar-width: none;
   }
 
   .nav-tab {
