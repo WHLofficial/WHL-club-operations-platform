@@ -39,9 +39,10 @@ export function normalizeTeamId(v: unknown): number | null {
   return FC26_TEAM_ID_ALIASES[n] ?? n;
 }
 
-// 比赛系统里的 4 支 CPU 队（tour 侧 6 巴塞罗那(CPU)/16 曼城(CPU)/19 RB莱比锡(CPU)/21 AC米兰(CPU)）
-// 对应的游戏真队 id。只有这些队在建档导入时写 players.club_id——其余球队的球员保持无归属，
-// 队籍靠合同认领流程建立。
+// 比赛系统里的 4 支 CPU 队。2026-09-19 起 tour 的 team.id 与 auth 的 tour_team_id 都已是游戏真号
+// （10 曼城 / 241 巴塞罗那 / 112172 RB莱比锡 / 131681 AC米兰），这里就是真号本身；
+// 早先「tour 内编号 16/6/19/21」的口径已作废。只有这些队在建档导入时写 players.club_id——
+// 其余球队的球员保持无归属，队籍靠合同认领流程建立。
 export const FC26_CPU_TEAM_IDS: ReadonlySet<number> = new Set([10, 241, 112172, 131681]);
 
 // 通道 A（FC26db Base）必需列；值域：CA/PA 1-99、Age 14-50（§5.4 列校验）
