@@ -297,12 +297,32 @@ app.post('/club/facilities/upgrade', async (c) => {
 });
 
 // 冠名市场（增量 20）：报价按本队队况逐品牌现算；合同费用条款签约时快照锁定
+function namingContractDto(row: NonNullable<Awaited<ReturnType<typeof getActiveNaming>>>) {
+  return {
+    id: row.id,
+    clubId: row.club_id,
+    brand: row.brand,
+    baseFee: row.base_fee,
+    packageNo: row.package_no,
+    pkgName: row.pkg_name,
+    feePerWindow: row.fee_per_window,
+    windowsTotal: row.windows_total,
+    windowsRemaining: row.windows_remaining,
+    bonusAmount: row.bonus_amount,
+    betAttend: row.bet_attend,
+    betFans: row.bet_fans,
+    status: row.status,
+    startedSeason: row.started_season,
+    startedWindow: row.started_window,
+  };
+}
+
 app.get('/club/naming/quote', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const contract = await getActiveNaming(c.env.DB, club.id);
-  if (contract) return c.json({ contract });
+  if (contract) return c.json({ contract: namingContractDto(contract) });
   const stadium = await c.env.DB
     .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
     .bind(club.id)
@@ -319,7 +339,7 @@ app.post('/club/naming/sign', async (c) => {
   const body = (await c.req.raw.json().catch(() => null)) as { brand?: unknown; packageNo?: unknown } | null;
   if (typeof body?.brand !== 'string') throw new HttpError(400, '缺品牌');
   const contract = await signNaming(c.env, club.id, body.brand, Number(body?.packageNo));
-  return c.json({ contract }, 201);
+  return c.json({ contract: namingContractDto(contract) }, 201);
 });
 
 app.post('/club/naming/terminate', async (c) => {
