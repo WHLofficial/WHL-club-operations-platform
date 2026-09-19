@@ -1,6 +1,6 @@
 // 账本原语（TECH_DESIGN §7.4，仿 revenue 插件 claim_* 模式）：
 // 余额变更 = 账户 upsert（按差额）+ 流水（balance_after 在同一 batch 内读更新后余额），
-// 两条语句必须进同一个 D1 batch 才是原子的。流水自带幂等闸：同一 (kind, ref) 只记一次，
+// 两条语句必须进同一个 D1 batch 才是原子的。流水自带幂等闸：同一 (club, kind, ref) 只记一次，
 // 并发重放时第二条的 NOT EXISTS 闸不通过，整段不落账（完成过户/下架费等自动路径靠它防重复记账）。
 export interface MovementInput {
   clubId: number;
@@ -11,8 +11,9 @@ export interface MovementInput {
   refId: number | null;
   memo: string;
   /**
-   * 幂等闸：默认按 (kind, ref_type, ref_id) 查重，已有流水则整段跳过。
-   * 人工记账等允许重复的类型传 false。
+   * 幂等闸：默认按 (club_id, kind, ref_type, ref_id) 查重，已有流水则整段跳过。
+   * 人工记账等允许重复的类型传 false。闸必须带 club 维度：窗末结算多队共用
+   * 同一 (kind, 'window', refId)，全局查重会把第 2 队起的流水全部闸掉。
    */
   idempotent?: boolean;
   /** 额外守卫 SQL（布尔表达式，追加在两条语句的 WHERE 后，参数跟在 params 之后） */
@@ -28,8 +29,8 @@ export function ledgerMovement(db: D1Database, input: MovementInput): D1Prepared
   const guardParts = ['1=1'];
   const guardParams: unknown[] = [];
   if (input.idempotent !== false) {
-    guardParts.push('NOT EXISTS (SELECT 1 FROM ledger_entries WHERE kind = ? AND ref_type IS ? AND ref_id IS ?)');
-    guardParams.push(input.kind, input.refType, input.refId);
+    guardParts.push('NOT EXISTS (SELECT 1 FROM ledger_entries WHERE kind = ? AND ref_type IS ? AND ref_id IS ? AND club_id = ?)');
+    guardParams.push(input.kind, input.refType, input.refId, input.clubId);
   }
   if (input.guardSql) {
     guardParts.push(`(${input.guardSql})`);

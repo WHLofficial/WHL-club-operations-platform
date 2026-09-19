@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
+import { ledgerMovement } from '../src/worker/ledger.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
@@ -216,6 +217,32 @@ describe('手动记账兜底（§7.1 manual_adjust / prize_*，§9.1）', () => 
     );
     expect(forbidden.status).toBe(403);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM ledger_entries')?.n).toBe(0);
+  });
+});
+
+describe('ledgerMovement 幂等闸（club 维度）', () => {
+  it('两俱乐部共用同 (kind, ref) 各记各的；同队重放整段跳过', async () => {
+    const fx = freshEnv();
+    const refId = 20261;
+    const mk = (clubId: number) =>
+      ledgerMovement(fx.env.DB, { clubId, delta: -2, kind: 'maintenance', refType: 'window', refId, memo: `维护费 club${clubId}` });
+    await fx.env.DB.batch(mk(1));
+    await fx.env.DB.batch(mk(2));
+    await fx.env.DB.batch(mk(1)); // 同队重放：闸生效不重复记账
+
+    const rows = sqlAll<{ club_id: number; amount: number }>(
+      fx.sqlite,
+      "SELECT club_id, amount FROM ledger_entries WHERE kind = 'maintenance' ORDER BY club_id",
+    );
+    expect(rows).toEqual([
+      { club_id: 1, amount: -2 },
+      { club_id: 2, amount: -2 },
+    ]);
+    const balances = sqlAll<{ club_id: number; balance: number }>(fx.sqlite, 'SELECT club_id, balance FROM ledger_accounts ORDER BY club_id');
+    expect(balances).toEqual([
+      { club_id: 1, balance: -2 },
+      { club_id: 2, balance: -2 },
+    ]);
   });
 });
 
