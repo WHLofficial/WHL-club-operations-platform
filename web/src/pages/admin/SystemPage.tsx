@@ -193,7 +193,7 @@ function AuditLogSection() {
               {entries.map((e) => (
                 <tr key={e.id}>
                   <td className="mono">{e.at.slice(0, 19).replace('T', ' ')}</td>
-                  <td className="num mono">{e.actor ?? '—'}</td>
+                  <td className="num mono">{e.actor === null ? '—' : e.actor === 0 ? '系统' : e.actor}</td>
                   <td className="mono">{e.action}</td>
                   <td className="mono">
                     {e.targetType}

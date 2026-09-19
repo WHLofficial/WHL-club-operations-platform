@@ -390,11 +390,28 @@ function ResultsSection() {
     }
   }
 
+  // 钩子重放（增量 21）：修完数据（补录球员等）后从这里补账，三钩子皆幂等
+  async function replay(matchId: number) {
+    if (busyId !== null) return;
+    setBusyId(matchId);
+    try {
+      await apiPost<{ ok: true }>(`/api/admin/results/${matchId}/replay-hooks`, {});
+      show(`已重放 #${matchId} 的确认钩子；标记已按最新结果重算。`);
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '重放失败', true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <section className="card admin-section">
       <h2>赛果确认</h2>
       {toastNode}
-      <p className="hint">从比赛系统同步的完赛场次在这里确认；确认只入档赛果，奖金到「手动记账」按模板发。</p>
+      <p className="hint">
+        从比赛系统同步的完赛场次在这里确认；cron 会每 5 分钟自动确认干净场次（钩子异常或球员没解析到的标「待复核」），确认只入档赛果，奖金到「手动记账」按模板发。
+      </p>
       {data === undefined ? (
         <p className="muted">读取中…</p>
       ) : data.queue.length === 0 ? (
@@ -456,6 +473,7 @@ function ResultsSection() {
                   <th>赛事</th>
                   <th>对阵与比分</th>
                   <th>确认时间</th>
+                  <th>复核</th>
                 </tr>
               </thead>
               <tbody>
@@ -470,6 +488,27 @@ function ResultsSection() {
                       {r.winnerTeam && <span className="muted">，胜者 {r.winnerTeam}</span>}
                     </td>
                     <td className="mono">{r.confirmedAt.slice(0, 16).replace('T', ' ')}</td>
+                    <td>
+                      {r.needsReview ? (
+                        <span className="badge" title={r.reviewNote ?? undefined}>
+                          待复核
+                        </span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                      {r.needsReview && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          type="button"
+                          disabled={busyId !== null}
+                          style={{ marginLeft: 6 }}
+                          title={r.reviewNote ?? '重放确认钩子（XP/奖金/上座，皆幂等）'}
+                          onClick={() => void replay(r.matchId)}
+                        >
+                          重放钩子
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -921,6 +921,8 @@ export interface ConfirmedResultRow {
   scoreAway: number | null;
   winnerTeam: string | null;
   confirmedAt: string;
+  needsReview: boolean;
+  reviewNote: string | null;
 }
 
 export interface ResultsQueue {
