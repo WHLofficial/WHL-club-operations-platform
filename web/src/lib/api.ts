@@ -156,10 +156,17 @@ export interface PlayerDetail {
 export interface PlayerLibraryRow extends PlayerListItem {
   growable: boolean;
   clubName: string | null;
+  // 增量 17：多位置槽（PosID1-4 槽位序去重）、球员影响力（规则 4.1.3 现值口径）、现行合同速览
+  positions: string[];
+  influence: number;
+  wage: number | null;
+  releaseFee: number | null;
+  contractType: string | null;
 }
 
 export interface PlayersLibraryResponse {
   players: PlayerLibraryRow[];
+  total: number;
   nextCursor: string | null;
 }
 

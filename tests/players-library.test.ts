@@ -296,3 +296,172 @@ describe('初始归属字段的兴废（增量 6.1 d7 加、增量 14 裁决 4 �
     expect((await get('/api/players?view=nope', fx.env)).status).toBe(400);
   });
 });
+
+// ---- 增量 17：total 计数、影响力、多位置、属性/徽章/合同维度筛选 ----
+
+interface ListBody17 {
+  players: {
+    id: number;
+    positions: string[];
+    influence: number;
+    wage: number | null;
+    releaseFee: number | null;
+    contractType: string | null;
+  }[];
+  total: number;
+  nextCursor: string | null;
+}
+
+async function list17(path: string, env: Env): Promise<ListBody17> {
+  const res = await get(path, env);
+  expect(res.status).toBe(200);
+  return (await res.json()) as ListBody17;
+}
+
+// 影响力手算依据（规则 4.1.2 十档 + 4.1.3 系数 0.25/0.13）：
+//   tier: >=93→10 >=90→9 >=87→8 >=84→7 >=80→6 >=75→5 >=70→4 >=65→3 >=60→2 else 1
+//   可成长=(CA档+PA档)/2×0.25×声望；非成长=CA档×0.13×声望
+describe('球员库 total 与新筛选（增量 17）', () => {
+  it('total 返回筛选后的总数，不随 cursor 变', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    expect((await list17('/api/players', fx.env)).total).toBe(8);
+    expect((await list17('/api/players?position=GK', fx.env)).total).toBe(2);
+    const paged = await list17('/api/players?limit=3', fx.env);
+    expect(paged.total).toBe(8);
+    expect(paged.players.length).toBe(3);
+    const next = await list17(`/api/players?limit=3&cursor=${paged.nextCursor}`, fx.env);
+    expect(next.total).toBe(8);
+  });
+
+  it('影响力：可成长=(CA档+PA档)/2×0.25×声望、非成长=CA档×0.13×声望，响应值与手算一致', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, ca, pa, growable, prestige) VALUES
+        (21, 'if1', '可成长高双围', 85, 93, 1, 2),
+        (22, 'if2', '可成长中围',   70, 90, 1, 3),
+        (23, 'if3', '非成长顶CA',   93, 95, 0, 1),
+        (24, 'if4', '可成长低围',   65, 80, 1, 2),
+        (25, 'if5', '非成长中CA',   78, 78, 0, 4);
+    `);
+    const body = await list17('/api/players?sort=influence', fx.env);
+    expect(body.players.map((p) => [p.id, p.influence])).toEqual([
+      [22, 4.88], // (4档+9档)/2=6.5 ×0.25×3 = 4.875 → 4.88
+      [21, 4.25], // (7+10)/2=8.5 ×0.25×2 = 4.25
+      [25, 2.6], // 5档 ×0.13×4 = 2.6
+      [24, 2.25], // (3+6)/2=4.5 ×0.25×2 = 2.25
+      [23, 1.3], // 10档 ×0.13×1 = 1.3
+    ]);
+  });
+
+  it('sort=influence keyset 翻页不重不漏；influence 区间过滤', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, ca, pa, growable, prestige) VALUES
+        (21, 'i1', '甲', 85, 93, 1, 2),
+        (22, 'i2', '乙', 70, 90, 1, 3),
+        (23, 'i3', '丙', 93, 95, 0, 1),
+        (24, 'i4', '丁', 65, 80, 1, 2),
+        (25, 'i5', '戊', 78, 78, 0, 4);
+    `);
+    const page1 = await list17('/api/players?sort=influence&limit=2', fx.env);
+    expect(page1.players.map((p) => p.id)).toEqual([22, 21]);
+    const page2 = await list17(`/api/players?sort=influence&limit=2&cursor=${page1.nextCursor}`, fx.env);
+    expect(page2.players.map((p) => p.id)).toEqual([25, 24]);
+    const page3 = await list17(`/api/players?sort=influence&limit=2&cursor=${page2.nextCursor}`, fx.env);
+    expect(page3.players.map((p) => p.id)).toEqual([23]);
+    expect(page3.nextCursor).toBeNull();
+
+    const gated = await list17('/api/players?influence_min=2.6', fx.env);
+    expect(gated.players.map((p) => p.id)).toEqual([21, 22, 25]); // 默认 sort=id 升序
+    expect(gated.total).toBe(3);
+  });
+
+  it('多位置：positions 按槽位序去重；position 多值筛含 PosID2-4 槽', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, position, game_attrs) VALUES
+        (26, 'p1', '登贝型', 'ST', '{"PosID1":25,"PosID2":23,"PosID3":18}'),
+        (27, 'p2', '纯中卫', 'CB', '{"PosID1":5}');
+    `);
+    const body = await list17('/api/players?name=登贝型', fx.env);
+    expect(body.players[0]!.positions).toEqual(['ST', 'RW', 'CAM']);
+
+    const stOnly = await list17('/api/players?position=ST', fx.env);
+    expect(stOnly.players.map((p) => p.id)).toEqual([26]);
+    const multi = await list17('/api/players?position=RW,CAM', fx.env);
+    expect(multi.players.map((p) => p.id)).toEqual([26]);
+    const cbOnly = await list17('/api/players?position=CB', fx.env);
+    expect(cbOnly.players.map((p) => p.id)).toEqual([27]);
+
+    expect((await get('/api/players?position=ZZ', fx.env)).status).toBe(400);
+  });
+
+  it('细分属性区间：白名单键走 json_extract，黑名单键 400', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, game_attrs) VALUES
+        (28, 'a1', '射手', '{"finishing":88,"vision":70}'),
+        (29, 'a2', '中场', '{"finishing":62,"vision":91}');
+    `);
+    const finishers = await list17('/api/players?attr=finishing&attr_min=80', fx.env);
+    expect(finishers.players.map((p) => p.id)).toEqual([28]);
+    expect(finishers.total).toBe(1);
+    const vision = await list17('/api/players?attr=vision&attr_max=80', fx.env);
+    expect(vision.players.map((p) => p.id)).toEqual([28]);
+    expect((await get('/api/players?attr=nosuchkey&attr_min=1', fx.env)).status).toBe(400);
+    expect((await get('/api/players?attr=finishing', fx.env)).status).toBe(400);
+  });
+
+  it('徽章/惯用脚/fc_id 筛选', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, foot, badges_silver, badges_gold, fc_id) VALUES
+        (31, 'b1', '金徽右脚', 1, 5, 2, 9001),
+        (32, 'b2', '无徽左脚', 0, 0, 0, 9002);
+    `);
+    expect((await list17('/api/players?badges_gold_min=1', fx.env)).players.map((p) => p.id)).toEqual([31]);
+    expect((await list17('/api/players?badges_none=1', fx.env)).players.map((p) => p.id)).toEqual([32]);
+    expect((await list17('/api/players?foot=0', fx.env)).players.map((p) => p.id)).toEqual([32]);
+    expect((await list17('/api/players?fc_id=9001', fx.env)).players.map((p) => p.id)).toEqual([31]);
+    expect((await get('/api/players?badges_gold_min=9', fx.env)).status).toBe(400);
+  });
+
+  it('合同维度：has_contract / 工资 / 无RC / 类型 / 成约方式 / 保护期 / 效力年限', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name) VALUES (1, '老东家');
+      INSERT INTO players (id, uid, name, club_id) VALUES
+        (41, 'c1', '有合同', 1),
+        (42, 'c2', '无合同', 1),
+        (43, 'c3', '训练营', 1);
+      INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, protected_until, is_active) VALUES
+        (41, 1, NULL, 5.5, 'formal', 'negotiation', '2023-01-01T00:00:00Z', '2023-01-01T00:00:00Z', '2027-06-30T00:00:00Z', 1),
+        (43, 1, 10, 0.75, 'trainee', 'import', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL, 1);
+    `);
+    expect((await list17('/api/players?has_contract=1', fx.env)).players.map((p) => p.id)).toEqual([41, 43]);
+    expect((await list17('/api/players?has_contract=0', fx.env)).players.map((p) => p.id)).toEqual([42]);
+    expect((await list17('/api/players?wage_min=5', fx.env)).players.map((p) => p.id)).toEqual([41]);
+    expect((await list17('/api/players?release_fee_none=1', fx.env)).players.map((p) => p.id)).toEqual([41]);
+    expect((await list17('/api/players?contract_type=trainee', fx.env)).players.map((p) => p.id)).toEqual([43]);
+    expect((await list17('/api/players?source=negotiation', fx.env)).players.map((p) => p.id)).toEqual([41]);
+    expect((await list17('/api/players?protected=in', fx.env)).players.map((p) => p.id)).toEqual([41]);
+    expect((await list17('/api/players?protected=out', fx.env)).players.map((p) => p.id)).toEqual([42, 43]);
+    expect((await list17('/api/players?effective_years_min=3', fx.env)).players.map((p) => p.id)).toEqual([41]);
+    // 响应带现行合同速览
+    const withContract = await list17('/api/players?name=有合同', fx.env);
+    expect(withContract.players[0]!.wage).toBe(5.5);
+    expect(withContract.players[0]!.releaseFee).toBeNull();
+    expect(withContract.players[0]!.contractType).toBe('formal');
+  });
+
+  it('参数校验：foot / growth_tier / agent_tier / has_contract / protected 400', async () => {
+    const fx = freshEnv();
+    expect((await get('/api/players?foot=2', fx.env)).status).toBe(400);
+    expect((await get('/api/players?growth_tier=9', fx.env)).status).toBe(400);
+    expect((await get('/api/players?agent_tier=7', fx.env)).status).toBe(400);
+    expect((await get('/api/players?has_contract=yes', fx.env)).status).toBe(400);
+    expect((await get('/api/players?protected=maybe', fx.env)).status).toBe(400);
+    expect((await get('/api/players?sort=uid', fx.env)).status).toBe(400);
+  });
+});
