@@ -129,7 +129,7 @@ for (const [key, db] of Object.entries(DBS)) {
 
   // 父行现状：old/new 是否存在、是否撞号（auth 按 tour_team_id 查，tour/club 按主键 id 查）
   const parent = db.parent;
-  const checkCol = key === 'auth' && TOUCH_CLUB ? 'tour_team_id' : db.checkCol;
+  const checkCol = db.checkCol;
   const parentRows = query(
     db,
     `SELECT ${ident(checkCol)} AS id FROM ${ident(parent)} WHERE ${ident(checkCol)} IN (${OLD}, ${NEW})`,
@@ -194,6 +194,15 @@ if (errors.length) {
   for (const e of errors) console.error('✗ ' + e);
   console.error(report.join('\n'));
   process.exit(2);
+}
+// 换壳模式附加闸：auth 的 club_id 也有 UNIQUE——tour_team_id 空闲但 club_id 被别的行占着，
+// 执行期才会炸，必须在预演就拦下
+if (TOUCH_CLUB && plan.auth?.oldRow) {
+  const clash = query(plan.auth.db, `SELECT id FROM ${ident(plan.auth.db.parent)} WHERE club_id = ${NEW} AND tour_team_id <> ${OLD}`);
+  if (clash.length) {
+    console.error(`\n=== 预演未通过，不产出工件 ===\n✗ auth 库：club_id=${NEW} 已被别的行占用（换壳模式撞 UNIQUE），先解决冲突`);
+    process.exit(2);
+  }
 }
 
 // ---------- 生成 SQL 工件（米兰口径：tour 先子后父 + defer；auth 单行带守卫；club 同 tour） ----------
