@@ -1,11 +1,13 @@
 import { NavLink } from 'react-router';
 import { isSuperAdmin, TOUR_SITE_URL, type MeUser } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
+import { useUnreadCount } from '../lib/queries.ts';
 
 const ROLE_LABEL: Record<MeUser['role'], string> = { admin: '管理组', coach: '教练', viewer: '观众' };
 
 export default function TopBar() {
   const { user, authMode } = useAuth();
+  const unread = useUnreadCount().data ?? 0;
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -41,6 +43,10 @@ export default function TopBar() {
         <div className="userbox">
           {user === undefined ? null : user ? (
             <>
+              <NavLink to="/notifications" className="inbox-link" title="站内信收件篮">
+                收件篮
+                {unread > 0 && <span className="inbox-unread-dot" aria-label={`${unread} 条未读`} />}
+              </NavLink>
               <span className="userbox-name">{user.name}</span>
               {isSuperAdmin(user) && <span className="badge red">超管</span>}
               <span className={`role-badge role-${user.role}`}>{ROLE_LABEL[user.role]}</span>

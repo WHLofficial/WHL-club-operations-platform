@@ -10,6 +10,7 @@ import PlayersLibrary from './pages/PlayersLibrary.tsx';
 import Bind from './pages/Bind.tsx';
 import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
+import Notifications from './pages/Notifications.tsx';
 
 // 市场三页按页拆 chunk（增量 16）：市场板公开，海捞/我的要登录
 const MarketBoardPage = lazy(() => import('./pages/market/MarketBoardPage.tsx'));
@@ -101,6 +102,14 @@ export default function App() {
             element={
               <RequireUser>
                 <Ledger />
+              </RequireUser>
+            }
+          />
+          <Route
+            path="/notifications"
+            element={
+              <RequireUser>
+                <Notifications />
               </RequireUser>
             }
           />

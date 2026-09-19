@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（增量 16 commit 4）。
 // 口径沿用增量 15 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type SquadOverview } from './api.ts';
+import { api, apiPost, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
@@ -13,6 +13,7 @@ export const qk = {
   listing: (id: number) => ['market', 'listing', id] as const,
   freeAgents: ['market', 'free-agents'] as const,
   trainees: ['market', 'trainees'] as const,
+  notifications: ['notifications'] as const,
 };
 
 export interface MarketMyClub {
@@ -97,5 +98,28 @@ export function useMarketInvalidation() {
     void qc.invalidateQueries({ queryKey: ['market', 'board'] });
     void qc.invalidateQueries({ queryKey: qk.myBids });
     if (listingId !== null) void qc.invalidateQueries({ queryKey: qk.listing(listingId) });
+  };
+}
+
+// 未读数（顶栏小蓝点）：60s 轮询 + 窗口聚焦即拉；登录态才启用
+export function useUnreadCount() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: async () => (await api<{ unread: number }>('/api/notifications/unread-count')).unread,
+    enabled: user != null,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// 标已读（单条 ids / 全部 all），写后失效收件篮与未读数
+export function useMarkNotificationsRead() {
+  const qc = useQueryClient();
+  return async (body: { ids?: number[]; all?: boolean }) => {
+    const out = await apiPost<{ marked: number }>('/api/notifications/read', body);
+    void qc.invalidateQueries({ queryKey: qk.notifications });
+    void qc.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
+    return out;
   };
 }

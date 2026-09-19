@@ -681,6 +681,21 @@ export interface ManualLedgerResult {
   balance: number;
 }
 
+// 站内信收件篮（增量 18）
+export interface NotificationItem {
+  id: number;
+  template: string;
+  text: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface NotificationsPage {
+  items: NotificationItem[];
+  nextCursor: number | null;
+  unread: number;
+}
+
 /** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
 export const LEDGER_KIND_LABELS: Record<string, string> = {
   opening_import: '期初导入',

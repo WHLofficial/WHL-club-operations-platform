@@ -4,6 +4,7 @@
 
 :root {
   --paper: #fdf4e3;         /* 徽章贴纸白（奶油纸） */
+  --cream: #fdf4e3;         /* 奶油字：与 --paper 同值，语义=深底上的反白文字 */
   --card: #fffdf7;
   --ink: #2b1d12;
   --muted: #7a6a5a;
@@ -157,6 +158,83 @@ h3 {
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 收件篮入口（增量 18）：顶栏用户区内的链接 + 未读 sky 小蓝点 */
+.inbox-link {
+  position: relative;
+  color: var(--cream);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.inbox-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.inbox-unread-dot {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sky);
+  box-shadow: 0 0 0 2px var(--cocoa);
+}
+
+/* 收件篮页（增量 18） */
+.inbox-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.inbox-item button {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 8px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.inbox-item.is-unread button {
+  font-weight: 600;
+}
+
+.inbox-dot {
+  flex: none;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sky);
+}
+
+.inbox-text {
+  flex: 1;
+}
+
+.inbox-time {
+  flex: none;
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .role-badge {
