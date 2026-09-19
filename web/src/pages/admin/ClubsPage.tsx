@@ -97,11 +97,10 @@ function ClubsSection() {
     }
   }
 
-  async function doUnbind(club: AdminClubRow) {
-    if (!club.binding) return;
+  async function doUnbind(club: AdminClubRow, userId: number) {
     try {
-      await apiPost('/api/admin/bindings/unbind', { userId: club.binding.userId });
-      show(`${club.name} 已解绑。`);
+      await apiPost('/api/admin/bindings/unbind', { userId });
+      show(`${club.name} 已解绑（用户 #${userId}）。`);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '解绑失败', true);
@@ -227,19 +226,21 @@ function ClubsSection() {
                   </td>
                   <td>{club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : <span className="muted">未定级</span>}</td>
                   <td>
-                    {club.binding ? (
-                      <>
-                        {club.binding.userName ?? `用户 #${club.binding.userId}`}
-                        <ConfirmButton
-                          className="btn-ghost btn-sm unbind-btn"
-                          label="解绑"
-                          confirmLabel="再点一次确认解绑"
-                          disarmKey={club.binding ? 'bound' : 'unbound'}
-                          onConfirm={() => doUnbind(club)}
-                        />
-                      </>
-                    ) : (
+                    {club.bindings.length === 0 ? (
                       <span className="muted">未绑定</span>
+                    ) : (
+                      club.bindings.map((b) => (
+                        <span key={b.userId}>
+                          {b.userName ?? `用户 #${b.userId}`}
+                          <ConfirmButton
+                            className="btn-ghost btn-sm unbind-btn"
+                            label="解绑"
+                            confirmLabel="再点一次确认解绑"
+                            disarmKey={`bound-${b.userId}`}
+                            onConfirm={() => doUnbind(club, b.userId)}
+                          />
+                        </span>
+                      ))
                     )}
                   </td>
                   <td className="hint">

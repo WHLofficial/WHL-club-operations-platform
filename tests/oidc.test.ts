@@ -498,8 +498,8 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     // 管理列表：绑定人名字本地 user_name 命中，全程不碰 tour user 表（已空）
     const admin = await app.request('/api/admin/clubs', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
     expect(admin.status).toBe(200);
-    const list = (await admin.json()) as { clubs: { binding: { userName: string | null } | null }[] };
-    expect(list.clubs[0].binding?.userName).toBe('管理组甲');
+    const list = (await admin.json()) as { clubs: { bindings: { userName: string | null }[] }[] };
+    expect(list.clubs[0].bindings[0]?.userName).toBe('管理组甲');
 
     // 旧格式会话行（claims NULL）视为未登录——重走一次 OIDC 登录即恢复
     sqlite.exec(

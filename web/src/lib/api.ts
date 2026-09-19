@@ -194,7 +194,7 @@ export interface AdminClubRow {
   status: string;
   transferBanned?: boolean;
   createdAt: string;
-  binding: { userId: number; userName: string | null; boundAt: string } | null;
+  bindings: { userId: number; userName: string | null; boundAt: string }[];
   latestCode: { expiresAt: string | null; usedBy: number | null; usedAt: string | null; createdAt: string } | null;
 }
 

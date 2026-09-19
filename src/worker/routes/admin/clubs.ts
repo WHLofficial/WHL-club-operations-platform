@@ -138,8 +138,13 @@ app.get('/clubs', async (c) => {
         'SELECT club_id, expires_at, used_by, used_at, created_at FROM club_bind_code ORDER BY id DESC LIMIT 200',
       ).all<{ club_id: number; expires_at: string | null; used_by: number | null; used_at: string | null; created_at: string }>();
 
-  const byClub = new Map<number, { userId: number; userName: string | null; boundAt: string }>();
-  for (const b of bindings.results) byClub.set(b.club_id, { userId: b.user_id, userName: b.user_name, boundAt: b.bound_at });
+  // 增量 17：多教练同队——一个俱乐部可挂多个绑定行，全部返回（前端逐个可解绑）
+  const byClub = new Map<number, { userId: number; userName: string | null; boundAt: string }[]>();
+  for (const b of bindings.results) {
+    const list = byClub.get(b.club_id) ?? [];
+    list.push({ userId: b.user_id, userName: b.user_name, boundAt: b.bound_at });
+    byClub.set(b.club_id, list);
+  }
   const latestCode = new Map<number, { expiresAt: string | null; usedBy: number | null; usedAt: string | null; createdAt: string }>();
   for (const code of codes.results) {
     if (!latestCode.has(code.club_id)) {
@@ -155,21 +160,18 @@ app.get('/clubs', async (c) => {
   const season = await getVisibleSeason(c.env.DB);
   const cache = tierCache();
   return c.json({
-    clubs: await Promise.all(
-      clubs.results.map(async (r) => {
-        const binding = byClub.get(r.id) ?? null;
-        return {
+      clubs: await Promise.all(
+        clubs.results.map(async (r) => ({
           id: r.id,
           name: r.name,
           leagueTier: await deriveClubTier(c.env, season, r.id, cache),
           status: r.status,
           transferBanned: r.transfer_banned === 1,
           createdAt: r.created_at,
-          binding: binding ? { userId: binding.userId, userName: binding.userName ?? null, boundAt: binding.boundAt } : null,
+          bindings: byClub.get(r.id) ?? [],
           latestCode: latestCode.get(r.id) ?? null,
-        };
-      }),
-    ),
+        })),
+      ),
   });
 });
 

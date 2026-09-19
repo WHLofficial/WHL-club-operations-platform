@@ -342,16 +342,17 @@ describe('建队与认证码绑定（§3.2）', () => {
     expect(audit.map((r) => r.action)).toEqual(['club_bind', 'club_unbind', 'club_bind']);
   });
 
-  it('管理端俱乐部列表带绑定状态与人名', async () => {
+  it('管理端俱乐部列表带绑定状态与人名，多教练全部列出', async () => {
     const fx = withAuth(freshEnv());
     const clubId = await createClub(fx, '阿森纳');
-    const code = await issueCode(fx, clubId);
-    await post('/api/clubs/bind', { code }, 'tok-coach', fx.env);
+    // 两个账号先后绑定同一队（多教练同权限）
+    await post('/api/clubs/bind', { code: await issueCode(fx, clubId) }, 'tok-coach', fx.env);
+    await post('/api/clubs/bind', { code: await issueCode(fx, clubId) }, 'tok-coach2', fx.env);
     const res = await get('/api/admin/clubs', 'tok-admin', fx.env);
-    const body = (await res.json()) as { clubs: { id: number; binding: { userId: number; userName: string | null } | null; latestCode: { usedBy: number | null } | null }[] };
+    const body = (await res.json()) as { clubs: { id: number; bindings: { userId: number; userName: string | null }[]; latestCode: { usedBy: number | null } | null }[] };
     const club = body.clubs.find((c) => c.id === clubId)!;
-    expect(club.binding).toMatchObject({ userId: 2, userName: '教练乙' });
-    expect(club.latestCode?.usedBy).toBe(2);
+    expect(club.bindings).toMatchObject([{ userId: 2, userName: '教练乙' }, { userId: 5, userName: '教练戊' }]);
+    expect(club.latestCode?.usedBy).toBe(5);
   });
 
   it('目录缺行：发码被拒提示先登记关联（auth team_not_found）', async () => {
