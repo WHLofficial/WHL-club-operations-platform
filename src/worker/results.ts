@@ -307,7 +307,8 @@ export async function confirmResult(
   };
 }
 
-/** 确认钩子全集（增量 21）：XP / bot 通知 / 奖金 / 比赛日收入，逐个吞错收集。 */
+/** 确认钩子全集（增量 21）：XP / bot 通知 / 奖金 / 比赛日收入，逐个吞错收集。
+ *  通知钩子无幂等锚（重复排队会扰民），重放时以 opts.notify=false 跳过。 */
 interface HookOutcome {
   xp: XpHookSummary;
   xpError: string | null;
@@ -321,6 +322,7 @@ async function runHooks(
   matchId: number,
   m: TourMatchRow,
   binding: { season: number; window_seq: number; competition_type: string | null },
+  opts: { notify?: boolean } = {},
 ): Promise<HookOutcome> {
   const out: HookOutcome = { xp: { granted: 0, unresolved: [] }, xpError: null, notifyError: null, prizeError: null, revenueError: null };
   try {
@@ -328,10 +330,12 @@ async function runHooks(
   } catch (err) {
     out.xpError = String(err);
   }
-  try {
-    await queueResultNotifications(env, binding, m);
-  } catch (err) {
-    out.notifyError = String(err);
+  if (opts.notify !== false) {
+    try {
+      await queueResultNotifications(env, binding, m);
+    } catch (err) {
+      out.notifyError = String(err);
+    }
   }
   try {
     const prizeStatements = await matchPrizeStatements(env, {
@@ -411,14 +415,15 @@ export async function autoConfirmResults(env: Env, cap = 20): Promise<AutoConfir
   return summary;
 }
 
-/** 重放已确认场次的三钩子（增量 21，幂等：XP UNIQUE 锚 / 奖金账本闸 / 上座主键），并重算复核标记。 */
+/** 重放已确认场次的三钩子（增量 21，幂等：XP UNIQUE 锚 / 奖金账本闸 / 上座主键），并重算复核标记。
+ *  通知钩子不重放（notifications 无去重锚，重排队会重复打扰用户）；原确认时通知失败的话信号保留在复核标记里。 */
 export async function replayHooksForMatch(env: Env, matchIdInput: unknown): Promise<ConfirmedResultItem> {
   const matchId = Number(matchIdInput);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(400, '比赛 ID 不对');
   const row = await env.DB.prepare(
     `SELECT id, match_id, season, window_seq, competition_type, stage_name, stage_kind, round,
             home_team_id, away_team_id, home_team, away_team, score_home, score_away, pen_home, pen_away,
-            walkover_side, winner_team, finished_at, confirmed_at
+            walkover_side, winner_team, finished_at, confirmed_at, review_note
      FROM result_confirmations WHERE match_id = ?`,
   )
     .bind(matchId)
@@ -443,17 +448,23 @@ export async function replayHooksForMatch(env: Env, matchIdInput: unknown): Prom
       winner_team: string | null;
       finished_at: string | null;
       confirmed_at: string;
+      review_note: string | null;
     }>();
   if (!row) throw new HttpError(404, '这场比赛还没确认过，无可重放的钩子');
 
   // 钩子参数优先取比赛系统现况（stage_config/winner_team_id 只有 TOUR_DB 有），
   // 比赛系统清库等场景退回快照（此时晋级奖金/胜者定位缺位，XP 与上座不受影响）
   const fresh = await env.TOUR_DB.prepare(`${MATCH_SELECT} WHERE m.id = ?`).bind(matchId).first<TourMatchRow>();
-  const m: TourMatchRow = fresh ?? { ...row, status: 'finished', tournament_id: 0, stage_config: null, winner_team_id: null };
+  const m: TourMatchRow = fresh ?? { ...row, id: matchId, status: 'finished', tournament_id: 0, stage_config: null, winner_team_id: null };
   const binding = { season: row.season, window_seq: row.window_seq, competition_type: row.competition_type };
 
-  const hooks = await runHooks(env, matchId, m, binding);
+  const hooks = await runHooks(env, matchId, m, binding, { notify: false });
   const review = reviewOf(hooks);
+  if ((row.review_note ?? '').includes('通知发送失败')) {
+    // 原确认时通知没发出去：重放不补发，标记不能清零（否则丢修复信号）
+    review.needsReview = true;
+    review.note = ['通知发送失败（重放不含通知，未补发）', review.note].filter(Boolean).join('；').slice(0, 300);
+  }
   await env.DB.prepare('UPDATE result_confirmations SET needs_review = ?, review_note = ? WHERE match_id = ?')
     .bind(review.needsReview ? 1 : 0, review.note, matchId)
     .run();

@@ -350,11 +350,13 @@ describe('赛果自动确认（增量 21）：cron 扫完赛场次 + 异常标�
     const note = sqlGet<{ review_note: string }>(fx.sqlite, 'SELECT review_note FROM result_confirmations WHERE match_id = 900')?.review_note ?? '';
     expect(note).toContain('没解析到');
 
-    // 补录俱乐部与球员后重放：标记清零，XP 事件只记一次
+    // 补录俱乐部与球员后重放：标记清零，XP 事件只记一次；
+    // 通知钩子无幂等锚，重放直接跳过——绑了账号也不得排队（重复排会扰民）
     fx.sqlite.exec(`
       INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '曼城', 'premier', 'active');
       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status)
         VALUES (31, 'm31', '哈兰德', 2, 'ST', 26, 150, 180, 99, 'first_team');
+      INSERT INTO club_bindings (club_id, user_id, user_name, bound_at) VALUES (2, 2, '教练乙', '2026-01-01T00:00:00Z');
     `);
     const replay = await post('/api/admin/results/900/replay-hooks', {}, 'tok-admin', fx.env);
     expect(replay.status).toBe(201);
@@ -365,5 +367,6 @@ describe('赛果自动确认（增量 21）：cron 扫完赛场次 + 异常标�
 
     await post('/api/admin/results/900/replay-hooks', {}, 'tok-admin', fx.env);
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '900'")?.n).toBe(2);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM notifications')?.n).toBe(0);
   });
 });
