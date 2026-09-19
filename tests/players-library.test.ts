@@ -464,7 +464,13 @@ describe('球员库 total 与新筛选（增量 17）', () => {
         (53, 's3', '无徽', NULL);
     `);
     expect((await list17('/api/players?ps=1', fx.env)).players.map((p) => p.id)).toEqual([51]);
-    expect((await list17('/api/players?ps=2', fx.env)).players.map((p) => p.id)).toEqual([52]); // 102=2+100
+    const gold = await list17('/api/players?ps=2', fx.env);
+    expect(gold.players.map((p) => p.id)).toEqual([52]); // 102=2+100
+    // psIds 与槽位对齐：52 号只有金槽 13（下标 12）有值，前面 12 个槽是 null
+    const goldRow = gold.players.find((p) => p.id === 52)!;
+    expect(goldRow.psIds).toHaveLength(15);
+    expect(goldRow.psIds!.slice(0, 12)).toEqual(Array.from({ length: 12 }, () => null));
+    expect(goldRow.psIds![12]).toBe(102);
     expect((await list17('/api/players?ps=1,5', fx.env)).players.map((p) => p.id)).toEqual([51]);
     expect((await list17('/api/players?ps=9', fx.env)).players.map((p) => p.id)).toEqual([]);
     expect((await get('/api/players?ps=0', fx.env)).status).toBe(400);

@@ -528,10 +528,12 @@ app.get('/players', async (c) => {
     protectedUntil: r.ct_protected_until,
     effectiveFrom: r.ct_effective_from,
     attrValue: attrValueExpr ? (r.attr_value ?? null) : undefined,
+    // 槽位对齐：保留 15 长度、缺槽为 null——前端金徽判定要按真实槽位（13+ 为金槽）
     psIds: psSlotSelects
-      ? Array.from({ length: 15 }, (_, i) => (r as Record<string, unknown>)[`ps${i + 1}`])
-          .filter((v): v is number => v !== null && v !== undefined && Number.isFinite(Number(v)))
-          .map(Number)
+      ? Array.from({ length: 15 }, (_, i) => {
+          const v = (r as Record<string, unknown>)[`ps${i + 1}`];
+          return v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
+        })
       : undefined,
   }));
 

@@ -308,14 +308,14 @@ function yearsBetween(iso: string): string {
   return `${((Date.now() - t) / 86400000 / 365.25).toFixed(1)} 年`;
 }
 
-// PlayStyle 槽位原值 → 显示名（金徽=基础 ID+100，或金槽 13+）
+// PlayStyle 槽位原值 → 显示名（psIds 与槽位对齐、缺槽 null；金徽=基础 ID+100，或金槽 13+）
 function psNames(row: PlayerLibraryRow): string {
   if (!row.psIds || row.psIds.length === 0) return '—';
   const names = row.psIds
     .map((v, slot) => {
       if (v === null) return null;
       const gold = v >= 100 || slot >= 13;
-      const base = gold && v >= 100 ? v - 100 : v;
+      const base = v >= 100 ? v - 100 : v;
       const ref = playstyleById.get(base);
       const name = ref?.chs ?? ref?.en ?? String(v);
       return gold ? `金·${name}` : name;

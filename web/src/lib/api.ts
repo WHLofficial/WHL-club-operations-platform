@@ -170,8 +170,8 @@ export interface PlayerLibraryRow extends PlayerListItem {
   protectedUntil: string | null;
   effectiveFrom: string | null;
   attrValue?: number;
-  // ps 筛选时带回的 PSID1-15 槽位原值（槽位序；金徽=基础 ID+100）
-  psIds?: number[];
+  // ps 筛选时带回的 PSID1-15 槽位原值（长度 15、缺槽 null；金徽=基础 ID+100，金槽 13+）
+  psIds?: (number | null)[];
 }
 
 export interface PlayersLibraryResponse {
