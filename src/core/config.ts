@@ -61,6 +61,7 @@ export const CONFIG_KEYS = [
   'window_force_settle',
   'market_bid_paused',
   'stadium_max_open_tier',
+  'naming_params',
   'review_amount_threshold',
   'bid_pattern_alert',
   'prize_table',
@@ -145,6 +146,16 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   facility_prices: '0.1,3,5,8,12,16',
   // 球场档位开放进度（插件 max_open_tier 口径，S9 初仅开放 0→1）
   stadium_max_open_tier: '1',
+  // 增量 20 冠名市场：底价系数 + 三套餐条款（插件 _conf_schema naming_* 口径；行业系数不引入，一律 1.0）
+  naming_params: JSON.stringify({
+    base: 0.5,
+    perCapacityWan: 0.3,
+    perFansWan: 0.12,
+    terminatePenalty: 0.3,
+    stable: { windows: 6, factor: 0.85 },
+    short: { windows: 2, factor: 1.25 },
+    bet: { windows: 4, factor: 0.7, bonusRate: 0.7, attend: 0.8, fans: 0.03 },
+  }),
   xp_per_level: '10',
   trainee_xp_full: '40',
   trainee_xp_half: '15',

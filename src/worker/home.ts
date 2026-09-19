@@ -8,6 +8,7 @@ import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { clubIdByTourTeam } from './prizes.ts';
+import { getActiveNaming, windowNamingStatements } from './naming-ops.ts';
 
 export interface AttendanceModel {
   weather_probabilities: Record<string, number>;
@@ -325,6 +326,8 @@ export interface HomeWindowSummary {
   maintenanceClubs: number;
   maintenanceTotal: number;
   fansClubs: number;
+  namingClubs: number;
+  namingTotal: number;
 }
 
 /**
@@ -343,7 +346,7 @@ export async function windowHomeStatements(
 
   const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans FROM stadiums').all<StadiumRow>();
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
-  const summary: HomeWindowSummary = { maintenanceClubs: 0, maintenanceTotal: 0, fansClubs: 0 };
+  const summary: HomeWindowSummary = { maintenanceClubs: 0, maintenanceTotal: 0, fansClubs: 0, namingClubs: 0, namingTotal: 0 };
 
   for (const s of stadiums.results) {
     const tierEntry = tierTable[String(s.tier)];
@@ -384,6 +387,15 @@ export async function windowHomeStatements(
           .prepare(`UPDATE stadiums SET fans = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`)
           .bind(nextFans, s.club_id),
       );
+    }
+
+    // 窗末冠名收租（增量 20）：费用 + 剩余窗口递减/到期 + 对赌奖金，幂等靠账本闸（club 维度）
+    const naming = await getActiveNaming(env.DB, s.club_id);
+    if (naming) {
+      const fansGrowth = s.fans > 0 ? (nextFans - s.fans) / s.fans : 0;
+      statements.push(...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth));
+      summary.namingClubs++;
+      summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
     }
   }
   return { statements, summary };

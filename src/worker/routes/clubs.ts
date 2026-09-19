@@ -11,6 +11,7 @@ import { deriveClubTier } from '../tier.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
+import { quoteBrands, signNaming, terminateNaming, getActiveNaming, loadNamingParams } from '../naming-ops.ts';
 import { getVisibleSeason } from '../seasons.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -99,6 +100,7 @@ app.get('/me/club', async (c) => {
     .first<{ name: string | null; capacity: number; tier: number; shell_influence: number; bonus_points: number; fans: number }>();
   let home: {
     name: string | null;
+    namingBrand: string | null;
     capacity: number;
     tier: number;
     tierName: string | null;
@@ -114,8 +116,10 @@ app.get('/me/club', async (c) => {
       .bind(club.id)
       .all<{ facility_key: string; level: number }>();
     const tierTable = await loadTierTable(c.env.DB);
+    const naming = await getActiveNaming(c.env.DB, club.id);
     home = {
       name: stadium.name,
+      namingBrand: naming?.brand ?? null,
       capacity: stadium.capacity,
       tier: stadium.tier,
       tierName: tierTable[String(stadium.tier)]?.name ?? null,
@@ -289,6 +293,40 @@ app.post('/club/facilities/upgrade', async (c) => {
   const body = (await c.req.raw.json().catch(() => null)) as { key?: unknown } | null;
   if (typeof body?.key !== 'string') throw new HttpError(400, '缺设施类型');
   const out = await upgradeFacilityLevel(c.env, club.id, body.key);
+  return c.json(out, 201);
+});
+
+// 冠名市场（增量 20）：报价按本队队况逐品牌现算；合同费用条款签约时快照锁定
+app.get('/club/naming/quote', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
+  const contract = await getActiveNaming(c.env.DB, club.id);
+  if (contract) return c.json({ contract });
+  const stadium = await c.env.DB
+    .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
+    .bind(club.id)
+    .first<{ capacity: number; fans: number }>();
+  if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
+  const params = await loadNamingParams(c.env.DB);
+  return c.json({ brands: quoteBrands(params, stadium.capacity, stadium.fans) });
+});
+
+app.post('/club/naming/sign', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
+  const body = (await c.req.raw.json().catch(() => null)) as { brand?: unknown; packageNo?: unknown } | null;
+  if (typeof body?.brand !== 'string') throw new HttpError(400, '缺品牌');
+  const contract = await signNaming(c.env, club.id, body.brand, Number(body?.packageNo));
+  return c.json({ contract }, 201);
+});
+
+app.post('/club/naming/terminate', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
+  const out = await terminateNaming(c.env, club.id);
   return c.json(out, 201);
 });
 

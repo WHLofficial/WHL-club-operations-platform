@@ -120,7 +120,7 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 59 键（§13 + 增量 15 market_bid_paused + 增量 19 stadium_max_open_tier）', () => {
-    expect(CONFIG_KEYS.length).toBe(59);
+  it('注册表 60 键（§13 + 增量 15 market_bid_paused + 增量 19/20 设施与冠名参数）', () => {
+    expect(CONFIG_KEYS.length).toBe(60);
   });
 });
