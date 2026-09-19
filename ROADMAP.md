@@ -182,6 +182,18 @@
 
 ---
 
+## 增量 17 · 体验修缮 + 俱乐部目录工具（2026-09-19 本地完成，push/部署/生产回填等令）
+
+**裁决**（计划 `.zcode/plans/plan-sess_4cad139a-6977-4a40-9531-f7cf24c68499.md`）：①换队壳=换游戏队号（rekey 口径）；②新建俱乐部必填游戏队号+自动建 auth 目录；③多教练同权限、逐个解绑；④队籍回填只写队籍不造合同；⑤徽章筛=具体 PlayStyle 多选；⑥**列显示与筛选双向联动**（筛选激活→列自动加入，取消→自动移除，手动勾选过则手动为准）；⑦年龄快捷预设不做；⑧站内信顺延增量 18。
+
+**交付**（9 个 commit）：`15f5950` TopBar 响应式重排（桌面单行、≤640px 品牌用户区/导航两行横滑）；`c158068` 球员库接口扩展（total+新增筛选：身价/声望/成长空间/初始 CA/惯用脚/成长档位/未来之星/中国计划/经纪人档位/PlayStyle 多选/位置四槽多选/34 细分属性区间/合同域全整套：has_contract+周薪+解约金+formal/trainee+成约方式+保护期+效力年限+UID/fc_id 精确查号）；`52bc412` 球员库改版（翻页条上移带「共 N 名 · 共 M 页 · 第 X 页」、每页 20、SoFIFA 式可变列双向联动、更多筛选折叠面板、URL query 持久化、UID 去 fc 前缀）；`09890a8`+`d0d8e3c` 新建俱乐部必填 gameTeamId（TOUR_DB 校验+队名预填+指定 id 建 clubs 行+`authRegisterTeam` upsert 建 auth 目录，失败不回滚可重试；双模 league_tier 保留；GET /clubs 改 bindings 数组+前端多教练逐个解绑）；`54a8e45`+`f9ee04c` 换队号 rekey 预演工具 `scripts/rekey-team/`（三库核查清单+硬闸+01/02/03 SQL 工件+README；f9ee04c 补换壳模式 auth `club_id` UNIQUE 撞号预演闸——`tour_team_id` 空闲但 `club_id` 被占执行期才炸，本地演练双向验证：干扰行在→exit 2 无工件、删→正常产出）；`05c8e06` 16 队队籍回填预检+SQL 工件 `scripts/prod-20260919-roster-backfill/`（444 人幂等 UPDATE，逐行期望数）。
+
+**验收**：**342 测试绿 + 三份 tsc 干净 + build 过**（新增 15 用例：游戏队号三库建档/缺号 404/重号 409/目录失败重试/多教练 bindings/球员库新筛选域）。本地冒烟：新建俱乐部三库落行、多教练双绑定显示与逐个解绑（stale dist 曾误显未绑定，重建后正常）、rekey 演练 A 执行+回滚、演练 B 负向闸 exit 2。收口 code review 修两项：测试夹具统一吃 gameTeamId（10 文件 106 失败→全绿）；rekey 换壳 club_id 撞号闸（上述 f9ee04c）。**Windows 踩坑**：`npx.cmd` spawnSync 无 shell EINVAL（Node 24）→ `execFileSync(process.execPath, [wrangler.js…])`；UNION ALL compound SELECT 实测 ~8 项上限 → 标量子查询别名 `'table.column'` 每批 100。
+
+**待办（等令）**：①push（9 commits 本地）；②部署（注意 worker bindings 数组与前端 AdminClubRow 需同代次发布）；③生产执行 16 队 roster backfill（444 人，`scripts/prod-20260919-roster-backfill/`）。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
