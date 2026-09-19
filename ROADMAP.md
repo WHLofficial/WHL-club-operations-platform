@@ -204,6 +204,16 @@
 
 ---
 
+## 增量 19 · 设施经营——球场扩建 / 档位升级 / 子设施升级 + 建设券（2026-09-20 本地完成，push/部署等令）
+
+**规则口径**（revenue 插件 README §三/§四 + `_conf_schema.json` + formula.py:407）：扩建 0.1M/100 座、限当前档位座位区间；升级按**当前档** upgrade_cost、需容量 ≥ 新档 min_seats + `stadium_max_open_tier` 开放闸（默认 1，S9 只开 0→1）；子设施五类 0–5 级费用 `3,5,8,12,16`（config 键 `facility_prices` 六位串）。建设支出全额 × `voucher_refund`(0.25) 返建设券，券只抵后续建设支出（先券后钱）；混合支付时账本只记现金，memo 注明券抵。
+
+**交付**（3 个 commit + 1 修复）：`937c68f` 服务端——迁移 0023（`stadiums.build_credit`）；新 `stadium-ops.ts`（扩建/升级/设施升级三操作 + 券拆分 `splitPayment`/`creditRefund`；玩家主动操作全部 `idempotent: false` 关账本幂等闸；三条 UPDATE 各带守护条件，`changes===0` → 409，与全库惯例一致）；`routes/clubs.ts` 四端点（`GET /club/stadium/build-info` 一次拉全预览 + 三个 POST）；config 增 `facility_prices`/`stadium_max_open_tier` 两键（58→59）。`1cf1d8a` 前端——球队中心设施经营卡：扩建输入（100 座步进校验 + 档位余量提示）、档位升级（未开放/容量不足置灰带 title）、五类子设施逐级升级；费用提示券抵与实付，操作后失效 `stadiumBuild`/`myClub`/`balance` 三查询。`fa973a5` 修复——冒烟抓到真 bug：设施升级 batch 漏了 `build_credit` 的 UPDATE，券只进提示不落库；补语句 + 券余额断言。
+
+**验收**：**355 测试绿 + 三份 tsc 干净 + build 过**（stadium-ops.test.ts 8 用例：券拆分/返券、扩建成功与四种闸、升级两档闸、设施升级全链含券余额落库断言、路由冒烟）。本地 8791 冒烟实测闭环：commercial 1→2 级返回 `{cost:5, creditUsed:0.25, cash:4.75, refund:1.25}`，库内 `build_credit 0.25→1.25`、`balance 46.65→41.9`、level=2 全对；headless 截图确认设施经营卡渲染与数据一致。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
