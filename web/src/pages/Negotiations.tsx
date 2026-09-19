@@ -1,16 +1,10 @@
 // 签约谈判（增量 4，§6.7）：我的谈判会话——定新违约金、工资报价（≤3 轮）、直签训练营。
 // 满意度文案与结局由服务端给出（§6.10：前端不含任何判定参数，E 数值仅展示）。
 // 家族口径：mono 数字、口语化文案、操作 toast 反馈、两段式 busy 态。
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import {
-  api,
-  apiPost,
-  type NegotiationSession,
-  type OfferResult,
-  type ReleaseFeeResult,
-  type TraineeSignResult,
-} from '../lib/api.ts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../lib/api.ts';
 import { useToast } from '../lib/toast.tsx';
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -41,23 +35,18 @@ function money(x: number | null | undefined): string {
 
 export default function Negotiations() {
   const { show, toastNode } = useToast();
-  const [sessions, setSessions] = useState<NegotiationSession[] | null>(null);
-  const [loadError, setLoadError] = useState('');
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api<{ sessions: NegotiationSession[] }>('/api/negotiations?mine=1');
-      setSessions(data.sessions);
-      setLoadError('');
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : '谈判名单打不开了，稍后再试');
-      setSessions(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const qc = useQueryClient();
+  const sessionsQuery = useQuery({
+    queryKey: ['negotiations', 'mine'],
+    queryFn: async () => (await api<{ sessions: NegotiationSession[] }>('/api/negotiations?mine=1')).sessions,
+  });
+  const sessions = sessionsQuery.data ?? null;
+  const loadError = sessionsQuery.isError
+    ? sessionsQuery.error instanceof Error
+      ? sessionsQuery.error.message
+      : '谈判名单打不开了，稍后再试'
+    : '';
+  const refresh = () => qc.invalidateQueries({ queryKey: ['negotiations', 'mine'] });
 
   const active = useMemo(() => (sessions ?? []).filter((s) => s.status === 'active'), [sessions]);
   const done = useMemo(() => (sessions ?? []).filter((s) => s.status !== 'active'), [sessions]);

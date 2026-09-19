@@ -1,11 +1,11 @@
 // 球队中心（增量 2 + 增量 5 旁路）：球队头 + 注册工作台 + 续约/解约（规则 4.4.3/4.4.4）
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ApiError,
   api,
   apiPost,
-  type MyClubOverview,
   type RcChangeResult,
   type RegistrationResult,
   type SquadIssue,
@@ -15,6 +15,7 @@ import {
   type TerminationResult,
 } from '../lib/api.ts';
 import { CONTRACT_TYPE_LABEL, LEAGUE_TIER_LABEL } from '../lib/ref.ts';
+import { qk, useMyClubOverview } from '../lib/queries.ts';
 import { useToast } from '../lib/toast.tsx';
 
 type SquadFilter = 'all' | 'first_team' | 'trainee';
@@ -23,28 +24,19 @@ type Assignment = 'none' | 'first_team' | 'trainee';
 const SQUAD_FILTER_LABEL: Record<SquadFilter, string> = { all: '全部', first_team: '一线队', trainee: '训练营' };
 
 export default function Club() {
-  const [overview, setOverview] = useState<MyClubOverview | null>(null);
-  const [squad, setSquad] = useState<SquadOverview | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const qc = useQueryClient();
+  const overviewQuery = useMyClubOverview();
+  const overview = overviewQuery.data ?? null;
+  // 没绑俱乐部时不拉名单（与旧 useEffect 的 `data.club ? 拉名单` 门一致）
+  const squadQuery = useQuery({
+    queryKey: qk.squad,
+    queryFn: () => api<SquadOverview>('/api/club/squad'),
+    enabled: overview?.club != null,
+  });
+  const squad = squadQuery.data ?? null;
+  const refreshSquad = () => void qc.invalidateQueries({ queryKey: qk.squad });
 
-  useEffect(() => {
-    api<MyClubOverview>('/api/me/club')
-      .then((data) => {
-        setOverview(data);
-        if (data.club) return api<SquadOverview>('/api/club/squad');
-        return null;
-      })
-      .then((data) => {
-        if (data) setSquad(data);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : '加载球队信息失败');
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
+  if (overviewQuery.isPending) {
     return (
       <div className="container">
         <h1>球队中心</h1>
@@ -55,11 +47,13 @@ export default function Club() {
     );
   }
 
-  if (error) {
+  if (overviewQuery.isError) {
     return (
       <div className="container">
         <h1>球队中心</h1>
-        <div className="banner warn">{error}</div>
+        <div className="banner warn">
+          {overviewQuery.error instanceof Error ? overviewQuery.error.message : '加载球队信息失败'}
+        </div>
         <div className="card empty-state">
           <p className="muted">观众视角看不到球队内部。转会操作需要教练账号。</p>
         </div>
@@ -124,12 +118,12 @@ export default function Club() {
 
       {home && <StadiumCard home={home} />}
 
-      {squad && <RegistrationSection squad={squad} onRefresh={() => api<SquadOverview>('/api/club/squad').then(setSquad)} />}
+      {squad && <RegistrationSection squad={squad} onRefresh={refreshSquad} />}
 
       {squad && (
         <BypassSection
           squad={squad}
-          onRefresh={() => api<SquadOverview>('/api/club/squad').then(setSquad)}
+          onRefresh={refreshSquad}
         />
       )}
     </div>

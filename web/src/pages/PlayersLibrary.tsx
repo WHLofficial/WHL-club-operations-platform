@@ -1,9 +1,10 @@
 // 球员库（增量 6.1 d8）：全联盟公开名册。当前视图=现在的归属与能力；初始视图=导入时的底册
 // （归属打建档俱乐部、CA 取建档值、PA 取导入上限，TECH_DESIGN §15 假设 24）。
-// 筛选 + keyset 游标分页（游标栈支持往回翻）；不显示工资——那是合同卷宗里的事。
-import { useCallback, useEffect, useRef, useState } from 'react';
+// 筛选 + keyset 游标分页（useInfiniteQuery 双向翻页，增量 16 起）；不显示工资——那是合同卷宗里的事。
+import { useState } from 'react';
 import { Link } from 'react-router';
-import { api, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { api, type PlayersLibraryResponse } from '../lib/api.ts';
 
 type View = 'current' | 'initial';
 type SortKey = 'id' | 'ca' | 'pa' | 'age' | 'market_value';
@@ -48,23 +49,11 @@ export default function PlayersLibrary() {
   const [name, setName] = useState('');
   const [sort, setSort] = useState<SortKey>('id');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
-  // 游标栈：stack[0]=null（第一页），往后翻压栈，往回翻出栈
-  const [cursorStack, setCursorStack] = useState<(string | null)[]>([null]);
-  const [rows, setRows] = useState<PlayerLibraryRow[] | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState('');
-  const [busy, setBusy] = useState(false);
 
-  const cursor = cursorStack[cursorStack.length - 1]!;
-
-  // 请求序号守卫：筛选/翻页连点时，旧请求晚归不得覆盖新状态（review 修复，增量 6.1 d12）
-  const seqRef = useRef(0);
-
-  const load = useCallback(async () => {
-    const seq = ++seqRef.current;
-    setBusy(true);
-    setLoadError('');
-    try {
+  // 筛选全部进 queryKey：改筛选 = 换 key = 自动回到第一页（旧游标栈语义）
+  const libQuery = useInfiniteQuery({
+    queryKey: ['players', view, position, status, growable, name, sort, order],
+    queryFn: async ({ pageParam }) => {
       const params = new URLSearchParams();
       if (view === 'initial') params.set('view', 'initial');
       if (position) params.set('position', position);
@@ -75,33 +64,24 @@ export default function PlayersLibrary() {
         params.set('sort', sort);
         params.set('order', order);
       }
-      if (cursor) params.set('cursor', cursor);
-      const res = await api<PlayersLibraryResponse>(`/api/players?${params.toString()}`);
-      if (seq !== seqRef.current) return;
-      setRows(res.players);
-      setNextCursor(res.nextCursor);
-    } catch (e) {
-      if (seq !== seqRef.current) return;
-      setLoadError(e instanceof Error ? e.message : '加载失败');
-    } finally {
-      if (seq === seqRef.current) setBusy(false);
-    }
-  }, [view, position, status, growable, name, sort, order, cursor]);
+      if (pageParam) params.set('cursor', pageParam);
+      return api<PlayersLibraryResponse>(`/api/players?${params.toString()}`);
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+    getPreviousPageParam: (_first, _all, firstPageParam) => firstPageParam,
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const resetPaging = () => setCursorStack([null]);
+  const rows = libQuery.data ? libQuery.data.pages[libQuery.data.pages.length - 1]!.players : null;
+  const loadError = libQuery.isError ? (libQuery.error instanceof Error ? libQuery.error.message : '加载失败') : '';
+  const busy = libQuery.isFetching;
+  const page = libQuery.data?.pages.length ?? 1;
+  const canPrev = libQuery.hasPreviousPage && !busy;
+  const canNext = libQuery.hasNextPage && !busy;
 
   const changeFilter = <T,>(setter: (v: T) => void) => (v: T) => {
     setter(v);
-    resetPaging();
   };
-
-  const page = cursorStack.length;
-  const canPrev = page > 1;
-  const canNext = nextCursor !== null && !busy;
 
   return (
     <div className="container">
@@ -153,7 +133,6 @@ export default function PlayersLibrary() {
               value={sort}
               onChange={(e) => {
                 setSort(e.target.value as SortKey);
-                resetPaging();
               }}
             >
               {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
@@ -270,21 +249,11 @@ export default function PlayersLibrary() {
         )}
 
         <div className="library-pager">
-          <button
-            className="btn btn-sm"
-            type="button"
-            disabled={!canPrev || busy}
-            onClick={() => setCursorStack((s) => s.slice(0, -1))}
-          >
+          <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => void libQuery.fetchPreviousPage()}>
             上一页
           </button>
           <span className="muted">第 {page} 页</span>
-          <button
-            className="btn btn-sm"
-            type="button"
-            disabled={!canNext}
-            onClick={() => nextCursor && setCursorStack((s) => [...s, nextCursor])}
-          >
+          <button className="btn btn-sm" type="button" disabled={!canNext} onClick={() => void libQuery.fetchNextPage()}>
             下一页
           </button>
         </div>

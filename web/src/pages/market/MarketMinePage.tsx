@@ -1,16 +1,18 @@
 // 我的 /market/mine（增量 16 拆页）：挂牌我的球员（原 ListSection）+ 我的出价（原 MyBidsSection）。
-// 需登录（路由守卫），操作要教练账号；数据层暂仍 useEffect（commit 4 换 TanStack Query）。
+// 需登录（路由守卫），操作要教练账号；数据层 TanStack Query（lib/queries.ts）。
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { apiPost, type MyBidRow, type SquadOverview } from '../../lib/api.ts';
+import { useMarketInvalidation, useMyBids, useMyClub, useSquad } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
-import { BID_STATUS_LABEL, MarketNav, money, useMyBids, useMyClub, useSquad } from './shared.tsx';
+import { BID_STATUS_LABEL, MarketNav, money } from './shared.tsx';
 
 export default function MarketMinePage() {
   const { show, toastNode } = useToast();
   const { loading, isCoach, club: myClub } = useMyClub();
   const { bids: myBids, refresh: refreshMine } = useMyBids(isCoach);
   const squad = useSquad(isCoach);
+  const invalidateMarket = useMarketInvalidation();
 
   const heldTotal = useMemo(() => (myBids ?? []).filter((b) => b.holdStatus === 'held').reduce((s, b) => s + b.amount, 0), [myBids]);
   const available = myClub?.balance !== null && myClub !== null ? (myClub.balance ?? 0) - heldTotal : null;
@@ -30,7 +32,15 @@ export default function MarketMinePage() {
         </div>
       ) : (
         <>
-          <ListSection squad={squad} onDone={(msg) => { show(msg); void refreshMine(); }} onError={(m) => show(m, true)} />
+          <ListSection
+            squad={squad}
+            onDone={(msg) => {
+              show(msg);
+              invalidateMarket(null);
+              refreshMine();
+            }}
+            onError={(m) => show(m, true)}
+          />
           {myBids !== null && <MyBidsSection bids={myBids} available={available} balance={myClub.balance} />}
         </>
       )}

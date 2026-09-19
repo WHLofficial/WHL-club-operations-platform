@@ -1,7 +1,8 @@
 // 海捞 /market/free（增量 16 拆页）：海捞自由球员签入（规则 4.4.4）+ 激活别队训练营球员（规则 4.4.2）。
 // 原 Market.tsx 的 FreeAgentSection 与 ActivateSection 原样搬迁；需登录（路由守卫），操作要教练账号。
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   apiPost,
@@ -12,13 +13,13 @@ import {
   type FreeAgentsResponse,
   type TraineesResponse,
 } from '../../lib/api.ts';
+import { qk, useMyClub } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
-import { MarketNav, deadlineText, useMyClub } from './shared.tsx';
+import { MarketNav, deadlineText } from './shared.tsx';
 
 export default function MarketFreePage() {
   const { show, toastNode } = useToast();
   const { loading, isCoach, club } = useMyClub();
-
   return (
     <div className="container">
       <h1>转会市场 · 海捞</h1>
@@ -47,16 +48,11 @@ export default function MarketFreePage() {
 /* ---------- 海捞自由球员（规则 4.4.4） ---------- */
 
 function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; onError: (msg: string) => void }) {
-  const [data, setData] = useState<FreeAgentsResponse | null>(null);
   const [feeById, setFeeById] = useState<Record<number, string>>({});
   const [armedId, setArmedId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
-
-  useEffect(() => {
-    api<FreeAgentsResponse>('/api/market/free-agents')
-      .then(setData)
-      .catch(() => setData(null));
-  }, []);
+  // 拉失败按空名单展示（旧行为 .catch(() => setData(null)) 的静默口径由展示层 hint 承接）
+  const { data } = useQuery({ queryKey: qk.freeAgents, queryFn: () => api<FreeAgentsResponse>('/api/market/free-agents'), retry: false });
 
   async function sign(p: FreeAgentRow) {
     if (busyId !== null) return;
@@ -79,7 +75,7 @@ function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; 
   return (
     <section className="card admin-section">
       <h3>海捞自由球员</h3>
-      {data === null ? (
+      {data === undefined ? (
         <p className="muted">自由球员名单还没加载出来…</p>
       ) : data.freeAgents.length === 0 ? (
         <p className="hint">
@@ -163,14 +159,9 @@ function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; 
 /* ---------- 激活别队训练营球员（规则 4.4.2） ---------- */
 
 function ActivateSection({ onDone, onError }: { onDone: (msg: string) => void; onError: (msg: string) => void }) {
-  const [data, setData] = useState<TraineesResponse | null>(null);
+  const qc = useQueryClient();
   const [busyId, setBusyId] = useState<number | null>(null);
-
-  useEffect(() => {
-    api<TraineesResponse>('/api/market/trainees')
-      .then(setData)
-      .catch(() => setData(null));
-  }, []);
+  const { data } = useQuery({ queryKey: qk.trainees, queryFn: () => api<TraineesResponse>('/api/market/trainees'), retry: false });
 
   async function activate(t: ActivatableTrainee) {
     if (busyId !== null) return;
@@ -182,7 +173,9 @@ function ActivateSection({ onDone, onError }: { onDone: (msg: string) => void; o
           ? `已激活 ${t.name}：挂牌 ${res.askPrice.toFixed(2)} m。请在 ${deadlineText(res.firstBidDeadline, '')} 前落首价，落价即成交（训练营球员直进审核）。逾期激活作废（还占本窗激活额度）。`
           : `已激活 ${t.name}：挂牌 ${res.askPrice.toFixed(2)} m。请在 ${deadlineText(res.firstBidDeadline, '')} 前落首价；落价后进 24 小时匹配窗，等原属俱乐部决定是否匹配。逾期激活作废（还占本窗激活额度）。`,
       );
-      setData(await api<TraineesResponse>('/api/market/trainees'));
+      // 激活生成新挂牌：训练营名单与市场板一并失效
+      void qc.invalidateQueries({ queryKey: qk.trainees });
+      void qc.invalidateQueries({ queryKey: ['market', 'board'] });
     } catch (err) {
       onError(err instanceof Error ? err.message : '激活失败');
     } finally {
@@ -193,7 +186,7 @@ function ActivateSection({ onDone, onError }: { onDone: (msg: string) => void; o
   return (
     <section className="card admin-section">
       <h3>激活训练营球员</h3>
-      {data === null ? (
+      {data === undefined ? (
         <p className="muted">训练营名单还没加载出来…</p>
       ) : data.trainees.length === 0 ? (
         <p className="hint">

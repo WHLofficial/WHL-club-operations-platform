@@ -1,16 +1,9 @@
 // 市场板 /market（增量 16 拆页）：挂牌板（卡柜）+ 单卡详情与出价历史 + 匹配决定（24h 窗）。
 // 原 Market.tsx 的挂牌板与 DetailSection 原样搬迁；海捞/我的挂牌/我的出价分到 /market/free、/market/mine。
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import {
-  api,
-  apiPost,
-  type BidPlaceResult,
-  type MarketListing,
-  type MarketListingDetail,
-  type MarketListings,
-  type MatchDecisionResult,
-} from '../../lib/api.ts';
+import { apiPost, type BidPlaceResult, type MarketListing, type MarketListingDetail, type MatchDecisionResult } from '../../lib/api.ts';
+import { useListingDetail, useMarketInvalidation, useBoard, useMyBids, useMyClub, type MarketMyClub } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import {
   BID_STATUS_LABEL,
@@ -20,60 +13,38 @@ import {
   MarketNav,
   deadlineText,
   money,
-  useMyBids,
-  useMyClub,
   type ListingFilter,
-  type MarketMyClub,
 } from './shared.tsx';
 
 export default function MarketBoardPage() {
   const { show, toastNode } = useToast();
   const [filter, setFilter] = useState<ListingFilter>('active');
-  const [board, setBoard] = useState<MarketListings | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [detail, setDetail] = useState<MarketListingDetail | null>(null);
-  const [loadError, setLoadError] = useState('');
   const { club: myClub, isCoach } = useMyClub();
   const { bids: myBids, refresh: refreshMine } = useMyBids(isCoach);
+  const boardQuery = useBoard(filter);
+  const detailQuery = useListingDetail(selected);
+  const invalidateMarket = useMarketInvalidation();
 
-  const refreshBoard = useCallback(
-    async (f: ListingFilter) => {
-      try {
-        const data = await api<MarketListings>(`/api/market/listings?status=${f}`);
-        setBoard(data);
-      } catch (err) {
-        setLoadError(err instanceof Error ? err.message : '市场打不开了，稍后再试');
-      }
-    },
-    [],
-  );
+  const board = boardQuery.data ?? null;
+  const detail = detailQuery.data ?? null;
+  const loadError = boardQuery.isError
+    ? boardQuery.error instanceof Error
+      ? boardQuery.error.message
+      : '市场打不开了，稍后再试'
+    : '';
 
+  // 详情拉失败 → toast（旧行为）；成功态由 Query 缓存接管
   useEffect(() => {
-    refreshBoard(filter);
-  }, [filter, refreshBoard]);
-
-  useEffect(() => {
-    if (selected === null) {
-      setDetail(null);
-      return;
+    if (detailQuery.isError) {
+      show(detailQuery.error instanceof Error ? detailQuery.error.message : '详情打不开了', true);
     }
-    api<MarketListingDetail>(`/api/market/listings/${selected}`)
-      .then(setDetail)
-      .catch((err: unknown) => show(err instanceof Error ? err.message : '详情打不开了', true));
-  }, [selected, show]);
+  }, [detailQuery.isError, detailQuery.error, show]);
 
-  async function afterBidOrList() {
-    await Promise.all([refreshBoard(filter), refreshMine(), selected !== null ? refreshDetail() : Promise.resolve()]);
-  }
-
-  async function refreshDetail() {
-    if (selected === null) return;
-    try {
-      setDetail(await api<MarketListingDetail>(`/api/market/listings/${selected}`));
-    } catch {
-      /* 详情刷新失败静默，下一次点击会重新拉 */
-    }
-  }
+  const afterBidOrList = () => {
+    invalidateMarket(selected);
+    refreshMine();
+  };
 
   const heldTotal = useMemo(() => (myBids ?? []).filter((b) => b.holdStatus === 'held').reduce((s, b) => s + b.amount, 0), [myBids]);
   const available = myClub?.balance !== null && myClub !== null ? (myClub.balance ?? 0) - heldTotal : null;
@@ -96,7 +67,9 @@ export default function MarketBoardPage() {
         </div>
 
         {board === null ? (
-          <p className="muted">正在翻卡柜…</p>
+          loadError ? null : (
+            <p className="muted">正在翻卡柜…</p>
+          )
         ) : board.listings.length === 0 ? (
           <div className="empty-state">
             <p className="muted">

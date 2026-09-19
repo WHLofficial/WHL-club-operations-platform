@@ -1,5 +1,6 @@
 // 流水账（附录 A〔6〕，UI_DESIGN §4.2 .ledger-book）：余额大字置顶 + 收支手账 + 类型筛选 + 翻页
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import {
   api,
   ledgerKindLabel,
@@ -35,60 +36,34 @@ function fmtAmount(n: number): string {
 }
 
 export default function Ledger() {
-  const [balance, setBalance] = useState<ClubBalance | null>(null);
   const [kind, setKind] = useState('');
-  const [entries, setEntries] = useState<LedgerPage['entries']>([]);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // 余额拉失败按「全空」展示（旧行为 .catch 落全 null）
+  const balanceQuery = useQuery({
+    queryKey: ['club', 'balance'],
+    queryFn: () => api<ClubBalance>('/api/club/balance'),
+    retry: false,
+  });
+  const balance = balanceQuery.data ?? { club: null, balance: null, held: null, available: null };
+  const ledgerQuery = useInfiniteQuery({
+    // 切类型就从头翻：kind 进 key
+    queryKey: ['ledger', kind],
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams();
+      if (kind) qs.set('kind', kind);
+      if (pageParam !== null) qs.set('cursor', String(pageParam));
+      return api<LedgerPage>(`/api/club/ledger${qs.size > 0 ? `?${qs}` : ''}`);
+    },
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.nextCursor,
+  });
+  const entries = ledgerQuery.data ? ledgerQuery.data.pages.flatMap((p) => p.entries) : [];
+  const lastPage = ledgerQuery.data?.pages[ledgerQuery.data.pages.length - 1] ?? null;
+  const nextCursor = ledgerQuery.hasNextPage ? (lastPage?.nextCursor ?? null) : null;
+  const loaded = !ledgerQuery.isPending;
+  const busy = ledgerQuery.isFetching;
+  const error = ledgerQuery.isError ? (ledgerQuery.error instanceof Error ? ledgerQuery.error.message : '流水读不出来，稍后再试') : null;
 
-  function loadPage(cursor: number | null, kindFilter: string) {
-    const qs = new URLSearchParams();
-    if (kindFilter) qs.set('kind', kindFilter);
-    if (cursor !== null) qs.set('cursor', String(cursor));
-    return api<LedgerPage>(`/api/club/ledger${qs.size > 0 ? `?${qs}` : ''}`);
-  }
-
-  useEffect(() => {
-    api<ClubBalance>('/api/club/balance')
-      .then(setBalance)
-      .catch(() => setBalance({ club: null, balance: null, held: null, available: null }));
-  }, []);
-
-  useEffect(() => {
-    // 切类型就从头翻；首次加载同理
-    setLoaded(false);
-    setEntries([]);
-    setNextCursor(null);
-    setError(null);
-    loadPage(null, kind)
-      .then((d) => {
-        setEntries(d.entries);
-        setNextCursor(d.nextCursor);
-        setLoaded(true);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : '流水读不出来，稍后再试');
-        setLoaded(true);
-      });
-  }, [kind]);
-
-  async function loadMore() {
-    if (busy || nextCursor === null) return;
-    setBusy(true);
-    try {
-      const d = await loadPage(nextCursor, kind);
-      setEntries((prev) => [...prev, ...d.entries]);
-      setNextCursor(d.nextCursor);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '流水读不出来，稍后再试');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const noClub = balance !== null && balance.club === null;
+  const noClub = balance.club === null && !balanceQuery.isPending;
 
   return (
     <div className="container">
@@ -161,7 +136,7 @@ export default function Ledger() {
               </div>
             )}
             {nextCursor !== null && (
-              <button className="btn" type="button" disabled={busy} onClick={loadMore}>
+              <button className="btn" type="button" disabled={busy} onClick={() => void ledgerQuery.fetchNextPage()}>
                 {busy ? '读取中…' : '再看 30 笔'}
               </button>
             )}

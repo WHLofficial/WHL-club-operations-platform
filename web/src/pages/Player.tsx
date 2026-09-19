@@ -1,8 +1,9 @@
 // 球员档案卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，增量 6.1 d9 改 E2 页内页签：
 // 档案=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 档案与升级）
 // 成长档案区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, GROWTH_EVENT_LABEL, type GrowthDetail, type LevelUpResult, type PlayerDetail } from '../lib/api.ts';
 import {
   AGENT_TIER_LABEL,
@@ -159,30 +160,26 @@ function PlaystyleBadge({ psid, slot }: { psid: number; slot: number }) {
 
 export default function Player() {
   const { id } = useParams();
-  const [data, setData] = useState<PlayerDetail | null>(null);
-  const [growth, setGrowth] = useState<GrowthDetail | null>(null);
-  const [error, setError] = useState('');
+  const qc = useQueryClient();
   const [tab, setTab] = useState<PlayerTab>('profile');
   const { show, toastNode } = useToast();
   const [armedPlan, setArmedPlan] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const loadAll = useCallback(() => {
-    if (!id) return;
-    api<PlayerDetail>(`/api/players/${id}`)
-      .then(setData)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : '加载球员档案失败'));
-    api<GrowthDetail>(`/api/players/${id}/growth`)
-      .then(setGrowth)
-      .catch(() => setGrowth(null));
-  }, [id]);
-
-  useEffect(() => {
-    setError('');
-    setGrowth(null);
-    setArmedPlan(null);
-    loadAll();
-  }, [loadAll]);
+  const dataQuery = useQuery({
+    queryKey: ['player', id ?? ''],
+    queryFn: () => api<PlayerDetail>(`/api/players/${id}`),
+    enabled: id !== undefined,
+  });
+  // 成长档案拉失败按 null 展示（旧行为 .catch(() => setGrowth(null))）
+  const growthQuery = useQuery({
+    queryKey: ['player', id ?? '', 'growth'],
+    queryFn: () => api<GrowthDetail>(`/api/players/${id}/growth`),
+    enabled: id !== undefined,
+  });
+  const data = dataQuery.data ?? null;
+  const growth = growthQuery.data ?? null;
+  const refreshAll = () => void qc.invalidateQueries({ queryKey: ['player', id ?? ''] });
 
   async function choosePlan(planIndex: number) {
     if (busy || !growth) return;
@@ -198,7 +195,7 @@ export default function Player() {
       if (r.plan.gold > 0) parts.push(`金徽章 +${r.plan.gold}`);
       show(`升级完成：${parts.join('，')}。还剩 ${r.pendingLeft} 次待升级。`);
       setArmedPlan(null);
-      loadAll();
+      refreshAll();
     } catch (err) {
       show(err instanceof Error ? err.message : '升级失败', true);
       setArmedPlan(null);
@@ -207,10 +204,10 @@ export default function Player() {
     }
   }
 
-  if (error) {
+  if (dataQuery.isError) {
     return (
       <div className="container">
-        <div className="banner bad">{error}</div>
+        <div className="banner bad">{dataQuery.error instanceof Error ? dataQuery.error.message : '加载球员档案失败'}</div>
         <Link className="btn btn-ghost" to="/club">
           回球队中心
         </Link>

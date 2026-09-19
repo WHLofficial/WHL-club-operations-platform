@@ -1,6 +1,7 @@
 // 认证码绑队（UI_DESIGN §5 登录/建队：档案登记卡文案 + 绑定成功盖 .stamp-ok）
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../lib/api.ts';
 
 export default function Bind() {
@@ -8,6 +9,7 @@ export default function Bind() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  const qc = useQueryClient();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -16,6 +18,8 @@ export default function Bind() {
     setError('');
     try {
       await apiPost('/api/clubs/bind', { code: code.trim().toUpperCase() });
+      // 绑定改变 /api/me/club 的 club 形状，球队中心/市场的缓存全部失效
+      void qc.invalidateQueries({ queryKey: ['me', 'club'] });
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : '绑定失败，请稍后再试');
