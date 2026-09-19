@@ -1013,6 +1013,11 @@ tbody tr:hover td {
   background: #f6effa;
 }
 
+/* 注册逐人标红（增量 16）：体检/422 打回时点名的球员行，浅红底 */
+.row-flagged td {
+  background: #fbe9e7;
+}
+
 .cap-bar {
   height: 8px;
   border-radius: 999px;

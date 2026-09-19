@@ -23,6 +23,17 @@ type Assignment = 'none' | 'first_team' | 'trainee';
 
 const SQUAD_FILTER_LABEL: Record<SquadFilter, string> = { all: '全部', first_team: '一线队', trainee: '训练营' };
 
+// 标红 badge 的短标签（完整原因在 message，悬浮 title 兜底）
+const ISSUE_RULE_LABEL: Record<string, string> = {
+  squad_size: '人数',
+  gk: '门将',
+  trainee_size: '训练营人数',
+  trainee_growth: '不可成长',
+  ca_pa: '初始CA限额',
+  contract: '无合同',
+  wage_cap: '工资帽',
+};
+
 export default function Club() {
   const qc = useQueryClient();
   const overviewQuery = useMyClubOverview();
@@ -209,6 +220,20 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
     });
   }, [squad.players, assign, filter]);
 
+  // 逐人标红（增量 16）：issues 里带 playerIds 的规则按球员展开；
+  // 规则级问题（人数/门将/工资帽）playerIds 为空，行上自然不命中，banner 兜底
+  const flagged = useMemo(() => {
+    const map = new Map<number, SquadIssue[]>();
+    for (const issue of issues ?? []) {
+      for (const pid of issue.playerIds) {
+        const list = map.get(pid) ?? [];
+        list.push(issue);
+        map.set(pid, list);
+      }
+    }
+    return map;
+  }, [issues]);
+
   function setAssignment(playerId: number, next: Assignment) {
     setAssign((prev) => ({ ...prev, [playerId]: next }));
     setLastResult(null);
@@ -336,7 +361,14 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
                 </thead>
                 <tbody>
                   {rows.map((p) => (
-                    <SquadRow key={p.id} player={p} value={assign[p.id] ?? 'none'} editable={editable} onChange={setAssignment} />
+                    <SquadRow
+                      key={p.id}
+                      player={p}
+                      value={assign[p.id] ?? 'none'}
+                      editable={editable}
+                      flags={flagged.get(p.id)}
+                      onChange={setAssignment}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -380,18 +412,27 @@ function SquadRow({
   player,
   value,
   editable,
+  flags,
   onChange,
 }: {
   player: SquadPlayerRow;
   value: Assignment;
   editable: boolean;
+  flags?: SquadIssue[];
   onChange: (playerId: number, next: Assignment) => void;
 }) {
   const traineeBlocked = !player.growable || (player.pa !== null && player.ca !== null && player.pa - player.ca <= 0);
   return (
-    <tr className={value === 'trainee' ? 'row-trainee' : undefined}>
+    <tr className={`${value === 'trainee' ? 'row-trainee' : ''}${flags !== undefined && flags.length > 0 ? ' row-flagged' : ''}`.trim() || undefined}>
       <td>
         <Link to={`/players/${player.id}`}>{player.name}</Link>
+        {flags !== undefined &&
+          flags.length > 0 &&
+          flags.map((issue, i) => (
+            <span key={i} className="badge red" title={issue.message}>
+              {ISSUE_RULE_LABEL[issue.rule] ?? issue.rule}
+            </span>
+          ))}
         {player.status === 'retired' && <span className="badge gray">退役</span>}
       </td>
       <td>{player.position ?? '—'}</td>
