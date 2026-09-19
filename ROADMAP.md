@@ -162,6 +162,16 @@
 
 ---
 
+## 增量 15 · 管理端重构（壳 + 8 子页 + admin 拆分 + config 超管全开 + 暂停出价；2026-09-19 本地完成，待部署）
+
+**裁决**（2026-09-19 脑暴，见 refactor-plan-decisions 记忆）：①管理端从 2993 行单页拆左侧栏壳 + 8 子路由（总览/赛季/球员/导入/转会/俱乐部/财政/系统），React.lazy 分包；②后端 `admin.ts`（1381 行/47 端点）拆 `routes/admin/` 八域，URL 零变；③数据层接 TanStack Query（仅管理端，用户端留增量 16）；④新增暂停出价（全局 config 开关 + 单挂牌列，两者都要——用户：「转会干预里增加暂停出价→两者都做」）；⑤config 超管全开零认证中心改动（超管权限点平台侧投影）；⑥批量维护结构化逐行预览，消灭静默剔除。
+
+**交付**（6 个 commit）：`421ca8b` 八域拆分（47 端点逐字节等价，子代理审查通过）；`dd94c5b` 壳 + 8 页（section 原样搬迁，headless h2 计数对基线）；`148cf12` TanStack Query（共享 ADMIN_CLUBS_KEY 四处去重、写后 invalidate）；`a4c4418` ConfirmButton 统一 16 个两段式确认 + usePrompt 替代 2 处 window.prompt + 导入切片泛型助手 + 批量维护逐行预览表；`afc39b7` 暂停出价（迁移 0021 `listings.bid_paused` + config 键 `market_bid_paused` + 4 管理端点 + 出价入口 423 双码 `bid_paused`/`listing_bid_paused` + 板/详情透出 + 用户端禁用提示；语义：只挡新出价，不改变结算时刻）；`3519fea` config 超管全开（独立权限点 `club.config.manage.super`，两登录模式各自投影；GET 明文/PUT 逐键编辑 + 审计 `config_set`，涉密键审计只落掩码）+ `GET /api/admin/overview`（isolate 60s 缓存 + `?fresh=1` 强拉）+ `GET /api/admin/audit-log`（limit 钳 100、action 前缀过滤）+ 系统页编辑/审计日志区 + 总览计数卡 + 顶栏超管徽章。
+
+**验收**：**327 测试绿 + 三份 tsc 干净**（暂停出价 +4 用例、admin-system +7 用例）；本地 D1 已打 0021；headless 冒烟转会/系统/总览页通过。收口 code review 修掉：系统页 config 读取失败误显「读取中…」、总览刷新连发 3 请求（改单次 fetchQuery + fresh=1）、3 处指向旧 admin.ts 的注释。**待办**：生产部署时迁移 0021 工件（期望 changes + 回滚 SQL，沿 `scripts/prod-20260919-*` 规范）。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |

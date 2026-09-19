@@ -59,7 +59,7 @@ function ConfigSection({ editable }: { editable: boolean }) {
           : '只读视图：涉密键只显示「（内部参数，已隐藏）」。参数调整需要超管操作。'}
       </p>
       {rows.length === 0 ? (
-        <p className="muted">读取中…</p>
+        <p className="muted">{data === undefined ? '读取中…' : '没有参数或读取失败。'}</p>
       ) : (
         <div className="table-wrap">
           <table>

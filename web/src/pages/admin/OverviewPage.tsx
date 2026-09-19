@@ -34,11 +34,14 @@ function OverviewCountsSection() {
   async function refresh() {
     if (refreshing) return;
     setRefreshing(true);
-    // ?fresh=1 绕过服务端 60s isolate 缓存强拉
-    queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
     try {
-      await api<AdminOverview>('/api/admin/overview?fresh=1');
-      await queryClient.refetchQueries({ queryKey: ['admin', 'overview'] });
+      // fetchQuery 用 ?fresh=1 绕过服务端 60s isolate 缓存强拉一次，结果回填缓存
+      await queryClient.fetchQuery({
+        queryKey: ['admin', 'overview'],
+        queryFn: () => api<AdminOverview>('/api/admin/overview?fresh=1'),
+      });
+    } catch {
+      // 强拉失败保留旧缓存；错误展示走 useQuery 的 error 分支
     } finally {
       setRefreshing(false);
     }

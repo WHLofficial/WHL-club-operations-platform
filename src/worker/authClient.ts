@@ -50,7 +50,7 @@ async function machineCall(env: Env, path: string, body: MachineBody): Promise<R
   return parsed;
 }
 
-// 管理端发码（admin.ts /clubs/:id/bindcode）：按 club_id 解析目录行；明码只在本次响应出现
+// 管理端发码（routes/admin/clubs.ts /clubs/:id/bindcode）：按 club_id 解析目录行；明码只在本次响应出现
 export async function authIssueTeamCode(
   env: Env,
   { clubId, hours }: { clubId: number; hours: number },
@@ -70,7 +70,7 @@ export async function authBindTeam(env: Env, { code, accountId }: { code: string
   return { teamId };
 }
 
-// 管理端解绑（admin.ts /bindings/unbind）
+// 管理端解绑（routes/admin/clubs.ts /bindings/unbind）
 export async function authUnbindTeam(env: Env, accountId: number): Promise<void> {
   await machineCall(env, '/api/team/unbind', { account_id: accountId });
 }

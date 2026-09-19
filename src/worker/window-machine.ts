@@ -58,7 +58,7 @@ export async function listWindows(db: D1Database): Promise<{ seasons: { season: 
  * 赛季行不存在时自动按 running 建档（完整赛季管理随增量 6）。
  * 全球员经纪人档位重掷：roll < prob → 三档等概率（会话存续期档位恒定，E 已快照）。
  * declareGrowthPeriod=true（管理端勾选复选框）时同批宣告新成长期——不再与窗口绑定，
- * 只是把「开窗」当成一个常用时点；管理端也可以随时手动宣告（见 routes/admin.ts 的 /growth/periods）。
+ * 只是把「开窗」当成一个常用时点；管理端也可以随时手动宣告（见 routes/admin/growth.ts 的 /growth/periods）。
  */
 export async function openWindow(
   env: Env,
