@@ -1,6 +1,7 @@
 // 管理端 · 转会页：审核队列（含市场干预）+ 强制拍卖（规则 4.4.5）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
-// （原 Admin.tsx 三 section，增量 15 拆分，行为零变化；暂停出价控件在后续 commit 加入）
-import { useCallback, useEffect, useState } from 'react';
+// （原 Admin.tsx 三 section，增量 15 拆分；commit 3 数据层转 TanStack Query，暂停出价控件在后续 commit 加入）
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowsResponse } from '../../lib/api.ts';
 import { useToast } from '../../lib/toast.tsx';
 
@@ -61,25 +62,23 @@ function completedMessage(r: AdminReviewRow): string {
 
 function ReviewsSection() {
   const { show, toastNode } = useToast();
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<'open' | 'approved' | 'rejected' | 'all'>('open');
-  const [reviews, setReviews] = useState<AdminReviewRow[] | null>(null);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [feeDrafts, setFeeDrafts] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
   const [interveneId, setInterveneId] = useState('');
 
-  const load = useCallback(async (s: 'open' | 'approved' | 'rejected' | 'all') => {
-    try {
-      const data = await api<AdminReviews>(`/api/admin/reviews?status=${s}`);
-      setReviews(data.reviews);
-    } catch (err) {
-      show(err instanceof Error ? err.message : '审核队列加载失败', true);
-    }
-  }, [show]);
+  const { data: reviews, error: reviewsError } = useQuery({
+    queryKey: ['admin', 'reviews', status],
+    queryFn: () => api<AdminReviews>(`/api/admin/reviews?status=${status}`).then((d) => d.reviews),
+  });
 
   useEffect(() => {
-    load(status);
-  }, [status, load]);
+    if (reviewsError) show(reviewsError instanceof Error ? reviewsError.message : '审核队列加载失败', true);
+  }, [reviewsError, show]);
+
+  const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'reviews'] });
 
   async function decide(row: AdminReviewRow, action: 'approve' | 'reject') {
     if (busyId !== null) return;
@@ -103,7 +102,7 @@ function ReviewsSection() {
           : `已驳回：${row.transfer.player.name} 的单子，资金已解冻。`,
       );
       setFeeDrafts((prev) => ({ ...prev, [row.id]: '' }));
-      await load(status);
+      await reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '操作失败', true);
     } finally {
@@ -127,7 +126,7 @@ function ReviewsSection() {
         ))}
       </div>
 
-      {reviews === null ? (
+      {reviews === undefined ? (
         <p className="muted">正在翻审核夹…</p>
       ) : reviews.length === 0 ? (
         <div className="empty-state">
@@ -260,7 +259,7 @@ function ReviewsSection() {
                 try {
                   const res = await apiPost<{ ok: boolean; status: string }>(`${base}${id}${suffix}`, { reason: reason.trim() });
                   show(`${label}：${kind} #${id} → ${res.status === 'done' || res.status === 'settled' ? '已执行' : '状态没变（已是目标状态）'}。`);
-                  await load(status);
+                  await reload();
                 } catch (err) {
                   show(err instanceof Error ? err.message : '处置失败', true);
                 }
@@ -279,22 +278,20 @@ function ReviewsSection() {
 
 function ForcedAuctionSection() {
   const { show, toastNode } = useToast();
+  const queryClient = useQueryClient();
   const [playerId, setPlayerId] = useState('');
   const [createArmed, setCreateArmed] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
-  const [open, setOpen] = useState<MarketListings | null>(null);
   const [cancelId, setCancelId] = useState<number | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
 
-  const reload = useCallback(() => {
-    api<MarketListings>('/api/market/listings?status=active')
-      .then((d) => setOpen(d))
-      .catch(() => setOpen(null));
-  }, []);
+  // 原 catch → setOpen(null)：失败时强制拍卖列表静默置空，queryFn 里保持一致
+  const { data: open } = useQuery({
+    queryKey: ['admin', 'forced-auctions'],
+    queryFn: () => api<MarketListings>('/api/market/listings?status=active').catch(() => null),
+  });
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'forced-auctions'] });
 
   const forced = (open?.listings ?? []).filter((l) => l.type === 'forced');
 
@@ -400,7 +397,7 @@ const WINDOW_STATUS_LABEL: Record<string, string> = { open: '进行中', closed:
 
 function WindowsSection() {
   const { show, toastNode } = useToast();
-  const [data, setData] = useState<WindowsResponse | null>(null);
+  const queryClient = useQueryClient();
   const [season, setSeason] = useState('');
   const [seq, setSeq] = useState('');
   const [openBusy, setOpenBusy] = useState(false);
@@ -409,15 +406,16 @@ function WindowsSection() {
   const [forceArmed, setForceArmed] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const reload = useCallback(() => {
-    api<WindowsResponse>('/api/admin/windows')
-      .then(setData)
-      .catch((err: unknown) => show(err instanceof Error ? err.message : '窗口列表加载失败', true));
-  }, [show]);
+  const { data, error: windowsError } = useQuery({
+    queryKey: ['admin', 'windows'],
+    queryFn: () => api<WindowsResponse>('/api/admin/windows'),
+  });
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (windowsError) show(windowsError instanceof Error ? windowsError.message : '窗口列表加载失败', true);
+  }, [windowsError, show]);
+
+  const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'windows'] });
 
   async function openWindow() {
     if (openBusy) return;
@@ -510,7 +508,7 @@ function WindowsSection() {
         </button>
       </div>
 
-      {data === null ? (
+      {data === undefined ? (
         <p className="muted">正在翻窗口台账…</p>
       ) : data.windows.length === 0 ? (
         <div className="empty-state">

@@ -1,7 +1,9 @@
 // 管理端 · 导入页：球员导入（通道 A/B 两段式）+ 名单合同模板导入（通道 C）
-// （原 Admin.tsx 两 section，增量 15 拆分，行为零变化；解析件在 lib/imports.ts）
-import { useEffect, useState } from 'react';
-import { api, apiPost, type AdminClubRow, type ContractImportConfirm, type ContractImportPreview, type ImportConfirm, type ImportPreview } from '../../lib/api.ts';
+// （原 Admin.tsx 两 section，增量 15 拆分；解析件在 lib/imports.ts，commit 3 数据层转 TanStack Query）
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiPost, type ContractImportConfirm, type ContractImportPreview, type ImportConfirm, type ImportPreview } from '../../lib/api.ts';
+import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { IMPORT_SLICE, parseXlsx, REQUIRED_C, requiredColumns, toCanonicalContractRow } from '../../lib/imports.ts';
@@ -303,7 +305,7 @@ const C_OUTCOME_LABEL: Record<ContractImportPreview['samples'][number]['outcome'
 
 function ContractsSection() {
   const { show, toastNode } = useToast();
-  const [clubs, setClubs] = useState<AdminClubRow[]>([]);
+  const { data: clubs = [] } = useQuery({ queryKey: ADMIN_CLUBS_KEY, queryFn: fetchAdminClubs });
   const [clubId, setClubId] = useState('');
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [fileName, setFileName] = useState('');
@@ -313,12 +315,6 @@ function ContractsSection() {
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [result, setResult] = useState<ContractImportConfirm | null>(null);
   const [progress, setProgress] = useState('');
-
-  useEffect(() => {
-    api<{ clubs: AdminClubRow[] }>('/api/admin/clubs')
-      .then((d) => setClubs(d.clubs))
-      .catch(() => undefined);
-  }, []);
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

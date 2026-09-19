@@ -1,7 +1,9 @@
 // 管理端 · 财政页：期初余额导入（幂等）+ 手动记账（§7.1 / §9.1 奖金模板）
-// （原 Admin.tsx 两 section，增量 15 拆分，行为零变化）
-import { useEffect, useState } from 'react';
-import { api, apiPost, MANUAL_LEDGER_KINDS, type AdminClubRow, type ManualLedgerResult, type OpeningImportResult } from '../../lib/api.ts';
+// （原 Admin.tsx 两 section，增量 15 拆分；commit 3 数据层转 TanStack Query）
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiPost, MANUAL_LEDGER_KINDS, type ManualLedgerResult, type OpeningImportResult } from '../../lib/api.ts';
+import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
 
 export default function FinancePage() {
@@ -15,16 +17,10 @@ export default function FinancePage() {
 
 function OpeningBalanceSection() {
   const { show, toastNode } = useToast();
-  const [clubs, setClubs] = useState<AdminClubRow[]>([]);
+  const { data: clubs = [] } = useQuery({ queryKey: ADMIN_CLUBS_KEY, queryFn: fetchAdminClubs });
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<OpeningImportResult | null>(null);
-
-  useEffect(() => {
-    api<{ clubs: AdminClubRow[] }>('/api/admin/clubs')
-      .then((d) => setClubs(d.clubs))
-      .catch(() => undefined);
-  }, []);
 
   const parsed = text
     .split('\n')
@@ -108,7 +104,7 @@ function OpeningBalanceSection() {
 
 function ManualLedgerSection() {
   const { show, toastNode } = useToast();
-  const [clubs, setClubs] = useState<AdminClubRow[]>([]);
+  const { data: clubs = [] } = useQuery({ queryKey: ADMIN_CLUBS_KEY, queryFn: fetchAdminClubs });
   const [clubId, setClubId] = useState('');
   const [kind, setKind] = useState(MANUAL_LEDGER_KINDS[0]!.value);
   const [amountText, setAmountText] = useState('');
@@ -116,12 +112,6 @@ function ManualLedgerSection() {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ManualLedgerResult | null>(null);
-
-  useEffect(() => {
-    api<{ clubs: AdminClubRow[] }>('/api/admin/clubs')
-      .then((d) => setClubs(d.clubs))
-      .catch(() => undefined);
-  }, []);
 
   const kindDef = MANUAL_LEDGER_KINDS.find((k) => k.value === kind);
   const amount = Number(amountText);

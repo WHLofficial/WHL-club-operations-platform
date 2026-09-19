@@ -1,6 +1,7 @@
 // 管理端 · 赛季页：赛季与赛事绑定（§11，增量 6.1 层级）+ 赛果确认（附录 A〔6〕，确认钩子触发 XP/通知）
-// （原 Admin.tsx 两 section，增量 15 拆分，行为零变化）
-import { useCallback, useEffect, useState } from 'react';
+// （原 Admin.tsx 两 section，增量 15 拆分；commit 3 数据层转 TanStack Query）
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   apiPost,
@@ -11,7 +12,6 @@ import {
   type ResultsQueue,
   type SeasonBinding,
   type SeasonBindingsResponse,
-  type SeasonCurrent,
   type SeasonRow,
   type SeasonsResponse,
   type SeasonSettleResult,
@@ -19,6 +19,7 @@ import {
   type StageSettleResult,
   type TournamentRow,
 } from '../../lib/api.ts';
+import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
 
 export default function SeasonsPage() {
@@ -32,11 +33,8 @@ export default function SeasonsPage() {
 
 function SeasonsSection() {
   const { show, toastNode } = useToast();
-  const [current, setCurrent] = useState<SeasonCurrent | null>(null);
-  const [seasons, setSeasons] = useState<SeasonRow[]>([]);
-  const [tournaments, setTournaments] = useState<TournamentRow[]>([]);
+  const queryClient = useQueryClient();
   const [selectedSeason, setSelectedSeason] = useState('');
-  const [bindings, setBindings] = useState<SeasonBinding[]>([]);
   const [newSeason, setNewSeason] = useState('');
   const [newAgeCap, setNewAgeCap] = useState('');
   const [settleArmed, setSettleArmed] = useState(false);
@@ -48,20 +46,33 @@ function SeasonsSection() {
   const [unbindArmedId, setUnbindArmedId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 原三个静默拉取（current/seasons/tournaments）转 query；失败静默置空保持原行为
+  const { data: current } = useQuery({ queryKey: SEASON_CURRENT_KEY, queryFn: fetchSeasonCurrent });
+  const { data: seasonsData } = useQuery({
+    queryKey: ['admin', 'seasons'],
+    queryFn: () => api<SeasonsResponse>('/api/admin/seasons').then((d) => d.seasons).catch(() => [] as SeasonRow[]),
+  });
+  const seasons = seasonsData ?? [];
+  const { data: tournaments = [] } = useQuery({
+    queryKey: ['admin', 'tournaments'],
+    queryFn: () => api<{ tournaments: TournamentRow[] }>('/api/admin/tournaments').then((d) => d.tournaments).catch(() => [] as TournamentRow[]),
+  });
+
   const seasonNo = Number(selectedSeason);
 
-  const reload = useCallback(() => {
-    api<SeasonCurrent>('/api/seasons/current').then(setCurrent).catch(() => undefined);
-    api<SeasonsResponse>('/api/admin/seasons')
-      .then((d) => setSeasons(d.seasons))
-      .catch(() => undefined);
-    api<{ tournaments: TournamentRow[] }>('/api/admin/tournaments')
-      .then((d) => setTournaments(d.tournaments))
-      .catch(() => undefined);
-  }, []);
+  // 绑定列表跟着所选赛季走：切赛季 = 切 key 自动重拉；失败静默置空保持原行为
+  const { data: bindingsData } = useQuery({
+    queryKey: ['admin', 'season-bindings', seasonNo],
+    queryFn: () =>
+      api<SeasonBindingsResponse>(`/api/admin/seasons/${seasonNo}/tournaments`).then((d) => d.bindings).catch(() => [] as SeasonBinding[]),
+    enabled: !!seasonNo,
+  });
+  const bindings = seasonNo ? (bindingsData ?? []) : [];
+
   useEffect(() => {
-    reload();
-  }, [reload]);
+    setUnbindArmedId(null);
+    setBindArmed(false);
+  }, [seasonNo]);
 
   // 默认选中当前赛季（还没建档时不选）
   useEffect(() => {
@@ -70,17 +81,12 @@ function SeasonsSection() {
     }
   }, [seasons, current, selectedSeason]);
 
-  const loadBindings = useCallback((season: number) => {
-    api<SeasonBindingsResponse>(`/api/admin/seasons/${season}/tournaments`)
-      .then((d) => setBindings(d.bindings))
-      .catch(() => setBindings([]));
-  }, []);
-  useEffect(() => {
-    setUnbindArmedId(null);
-    setBindArmed(false);
-    if (seasonNo) loadBindings(seasonNo);
-    else setBindings([]);
-  }, [seasonNo, loadBindings]);
+  const reload = () => {
+    queryClient.invalidateQueries({ queryKey: SEASON_CURRENT_KEY });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'seasons'] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'tournaments'] });
+  };
+  const loadBindings = () => queryClient.invalidateQueries({ queryKey: ['admin', 'season-bindings'] });
 
   const newSeasonValid = Number.isInteger(Number(newSeason)) && Number(newSeason) > 0;
   const newAgeCapValid = newAgeCap.trim() === '' || (Number.isInteger(Number(newAgeCap)) && Number(newAgeCap) >= 15 && Number(newAgeCap) <= 40);
@@ -149,7 +155,7 @@ function SeasonsSection() {
     try {
       const res = await apiPost<StageSettleResult>(`/api/admin/season-bindings/${b.id}/stage-settle`, {});
       show(`赛事完结结算完成：${res.items} 笔入账。`);
-      loadBindings(seasonNo);
+      loadBindings();
     } catch (err) {
       show(err instanceof Error ? err.message : '完结结算失败', true);
     } finally {
@@ -168,7 +174,7 @@ function SeasonsSection() {
       show(`已把「${res.tournament.name}」绑进 S${seasonNo}，完赛场次会进赛果确认队列。`);
       setBindTournament('');
       setBindArmed(false);
-      loadBindings(seasonNo);
+      loadBindings();
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '绑定失败', true);
@@ -184,7 +190,7 @@ function SeasonsSection() {
       await apiPost<{ ok: boolean }>(`/api/admin/seasons/${seasonNo}/unbind-tournament`, { tournamentId: b.tournamentId });
       show(`已把「${tournamentName(b.tournamentId) ?? `#${b.tournamentId}`}」从 S${seasonNo} 解绑。`);
       setUnbindArmedId(null);
-      loadBindings(seasonNo);
+      loadBindings();
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '解绑失败', true);
@@ -374,18 +380,17 @@ function resultScoreLine(r: { homeTeam: string | null; awayTeam: string | null; 
 
 function ResultsSection() {
   const { show, toastNode } = useToast();
-  const [data, setData] = useState<ResultsQueue | null>(null);
+  const queryClient = useQueryClient();
   const [armedId, setArmedId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  const reload = useCallback(() => {
-    api<ResultsQueue>('/api/admin/results/queue')
-      .then(setData)
-      .catch(() => setData({ queue: [], confirmed: [] }));
-  }, []);
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  // 原失败时静默置空队列，queryFn 里保持一致
+  const { data } = useQuery({
+    queryKey: ['admin', 'results-queue'],
+    queryFn: () => api<ResultsQueue>('/api/admin/results/queue').catch(() => ({ queue: [], confirmed: [] })),
+  });
+
+  const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'results-queue'] });
 
   async function confirm(matchId: number) {
     if (armedId !== matchId || busyId !== null) return;
@@ -411,7 +416,7 @@ function ResultsSection() {
       <h2>赛果确认</h2>
       {toastNode}
       <p className="hint">从比赛系统同步的完赛场次在这里确认；确认只入档赛果，奖金到「手动记账」按模板发。</p>
-      {data === null ? (
+      {data === undefined ? (
         <p className="muted">读取中…</p>
       ) : data.queue.length === 0 ? (
         <p className="muted">没有待确认的赛果。绑好赛事之后，比完的场次会出现在这里。</p>
@@ -461,7 +466,7 @@ function ResultsSection() {
           </table>
         </div>
       )}
-      {data !== null && data.confirmed.length > 0 && (
+      {data !== undefined && data.confirmed.length > 0 && (
         <details>
           <summary>最近已确认（{data.confirmed.length}）</summary>
           <div className="table-wrap">

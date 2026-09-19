@@ -1,7 +1,9 @@
 // 管理端 · 球员页：注册快照与准入体检 + 球员批量维护（增量 10）+ 成长引擎（§10）
-// （原 Admin.tsx 三 section，增量 15 拆分，行为零变化）
-import { useCallback, useEffect, useState } from 'react';
-import { api, apiPost, MANUAL_GROWTH_TYPES, type AdminRegistrations, type ComplianceReport, type GrowthPeriodsResponse, type GrowthSettlementResult, type SeasonCurrent } from '../../lib/api.ts';
+// （原 Admin.tsx 三 section，增量 15 拆分；commit 3 数据层转 TanStack Query）
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, apiPost, MANUAL_GROWTH_TYPES, type AdminRegistrations, type ComplianceReport, type GrowthPeriodsResponse, type GrowthSettlementResult } from '../../lib/api.ts';
+import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 
@@ -20,39 +22,38 @@ export default function PlayersPage() {
 function RegistrationsSection() {
   const { show, toastNode } = useToast();
   const [seasonInput, setSeasonInput] = useState('');
-  const [snapshot, setSnapshot] = useState<AdminRegistrations | null>(null);
+  const [activeSeason, setActiveSeason] = useState<string | null>(null);
   const [report, setReport] = useState<ComplianceReport | null>(null);
-  const [busy, setBusy] = useState(false);
   const [checkBusy, setCheckBusy] = useState(false);
 
-  const seasonQuery = (season?: string) => (season ? `?season=${encodeURIComponent(season)}` : '');
+  // 提交查询 = 切 query key，快照随之自动重拉；赛季筛选进 key，留空=最新
+  const { data: snapshot, isFetching: busy, error: snapshotError } = useQuery({
+    queryKey: ['admin', 'registrations', activeSeason ?? ''],
+    queryFn: () => {
+      const q = activeSeason ? `?season=${encodeURIComponent(activeSeason)}` : '';
+      return api<AdminRegistrations>(`/api/admin/registrations${q}`);
+    },
+  });
 
-  async function loadSnapshot(season?: string) {
-    setBusy(true);
-    try {
-      setSnapshot(await api<AdminRegistrations>(`/api/admin/registrations${seasonQuery(season)}`));
-      setReport(null);
-    } catch (err) {
-      show(err instanceof Error ? err.message : '注册名单加载失败', true);
-    } finally {
-      setBusy(false);
-    }
-  }
+  useEffect(() => {
+    if (snapshotError) show(snapshotError instanceof Error ? snapshotError.message : '注册名单加载失败', true);
+  }, [snapshotError, show]);
+
+  // 快照刷新后清上一份资格检查报告（原 loadSnapshot 成功路径里的 setReport(null)）
+  useEffect(() => {
+    setReport(null);
+  }, [snapshot]);
 
   async function runCheck(season?: string) {
     setCheckBusy(true);
     try {
-      setReport(await api<ComplianceReport>(`/api/admin/compliance${seasonQuery(season)}`));
+      setReport(await api<ComplianceReport>(`/api/admin/compliance${season ? `?season=${encodeURIComponent(season)}` : ''}`));
     } catch (err) {
       show(err instanceof Error ? err.message : '资格检查失败', true);
     } finally {
       setCheckBusy(false);
     }
   }
-
-  useEffect(() => {
-    loadSnapshot();
-  }, []);
 
   const season = seasonInput.trim();
 
@@ -68,7 +69,7 @@ function RegistrationsSection() {
         className="inline-form"
         onSubmit={(e) => {
           e.preventDefault();
-          loadSnapshot(season || undefined);
+          setActiveSeason(season || null);
         }}
       >
         <label className="field">
@@ -89,7 +90,7 @@ function RegistrationsSection() {
         </button>
       </form>
 
-      {snapshot === null ? null : snapshot.season === null ? (
+      {snapshot === undefined ? null : snapshot.season === null ? (
         <div className="empty-state">
           <p className="muted">还没有任何注册名单。等教练在球队中心提交名单。</p>
         </div>
@@ -312,6 +313,7 @@ function PlayerBatchSection() {
 
 function GrowthSection() {
   const { show, toastNode } = useToast();
+  const queryClient = useQueryClient();
   const [playerId, setPlayerId] = useState('');
   const [eventType, setEventType] = useState(MANUAL_GROWTH_TYPES[1]!.type);
   const [value, setValue] = useState('');
@@ -324,28 +326,27 @@ function GrowthSection() {
   const [tierPlayerId, setTierPlayerId] = useState('');
   const [tier, setTier] = useState('1');
   const [tierArmed, setTierArmed] = useState(false);
-  const [periods, setPeriods] = useState<GrowthPeriodsResponse | null>(null);
   const [periodNote, setPeriodNote] = useState('');
   const [periodArmed, setPeriodArmed] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const reloadPeriods = useCallback(() => {
-    api<GrowthPeriodsResponse>('/api/admin/growth/periods')
-      .then(setPeriods)
-      .catch((err: unknown) => show(err instanceof Error ? err.message : '成长期加载失败', true));
-  }, [show]);
+  const { data: periods, error: periodsError } = useQuery({
+    queryKey: ['admin', 'growth-periods'],
+    queryFn: () => api<GrowthPeriodsResponse>('/api/admin/growth/periods'),
+  });
 
   useEffect(() => {
-    reloadPeriods();
-  }, [reloadPeriods]);
+    if (periodsError) show(periodsError instanceof Error ? periodsError.message : '成长期加载失败', true);
+  }, [periodsError, show]);
+
+  const reloadPeriods = () => queryClient.invalidateQueries({ queryKey: ['admin', 'growth-periods'] });
+
+  // 与赛季页共享同一份 /api/seasons/current（key 去重），只用来预填结算赛季
+  const { data: current } = useQuery({ queryKey: SEASON_CURRENT_KEY, queryFn: fetchSeasonCurrent });
 
   useEffect(() => {
-    api<SeasonCurrent>('/api/seasons/current')
-      .then((d) => {
-        if (d.season) setSettleSeason(String(d.season.season));
-      })
-      .catch(() => undefined);
-  }, []);
+    if (current?.season) setSettleSeason(String(current.season.season));
+  }, [current]);
 
   const pid = Number(playerId);
   const eventValid = Number.isInteger(pid) && pid > 0;

@@ -1,5 +1,5 @@
-// 管理端 · 总览（原 Admin.tsx M0 货币监控，增量 15 拆分，行为零变化）
-import { useCallback, useEffect, useState } from 'react';
+// 管理端 · 总览（原 Admin.tsx M0 货币监控；增量 15 拆分，commit 3 数据层转 TanStack Query）
+import { useQuery } from '@tanstack/react-query';
 import { api, ledgerKindLabel, type M0Report } from '../../lib/api.ts';
 
 export default function OverviewPage() {
@@ -11,21 +11,16 @@ export default function OverviewPage() {
 }
 
 function M0Section() {
-  const [report, setReport] = useState<M0Report | null>(null);
-  const [error, setError] = useState('');
-
-  const reload = useCallback(() => {
-    api<M0Report>('/api/admin/m0')
-      .then(setReport)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : '加载 M0 报表失败'));
-  }, []);
-  useEffect(reload, [reload]);
+  const { data: report, error } = useQuery({
+    queryKey: ['admin', 'm0'],
+    queryFn: () => api<M0Report>('/api/admin/m0'),
+  });
 
   if (error) {
     return (
       <section className="card admin-section">
         <h2>M0 货币监控</h2>
-        <div className="banner bad">{error}</div>
+        <div className="banner bad">{error instanceof Error ? error.message : '加载 M0 报表失败'}</div>
       </section>
     );
   }

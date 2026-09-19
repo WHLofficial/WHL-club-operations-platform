@@ -1,6 +1,8 @@
-// 管理端 · 俱乐部页：建队、绑定认证码、解绑、转会冻结、主场档案（原 Admin.tsx ClubsSection，增量 15 拆分，行为零变化）
-import { useCallback, useEffect, useState } from 'react';
+// 管理端 · 俱乐部页：建队、绑定认证码、解绑、转会冻结、主场档案（原 Admin.tsx ClubsSection，增量 15 拆分）
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiDelete, apiPost, type AdminClubRow, type StadiumAdmin } from '../../lib/api.ts';
+import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 
@@ -14,22 +16,24 @@ export default function ClubsPage() {
 
 function ClubsSection() {
   const { show, toastNode } = useToast();
-  const [clubs, setClubs] = useState<AdminClubRow[] | null>(null);
+  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
   const [unbinding, setUnbinding] = useState<number | null>(null);
   const [stadium, setStadium] = useState<{ club: string; clubId: number; form: StadiumForm; tierName: string | null; fans: number; influence: StadiumAdmin['influence'] } | null>(null);
 
-  const reload = useCallback(() => {
-    api<{ clubs: AdminClubRow[] }>('/api/admin/clubs')
-      .then((d) => setClubs(d.clubs))
-      .catch((err: unknown) => show(err instanceof Error ? err.message : '俱乐部列表加载失败', true));
-  }, [show]);
+  const { data: clubsData, error: clubsError } = useQuery({
+    queryKey: ADMIN_CLUBS_KEY,
+    queryFn: fetchAdminClubs,
+  });
+  const clubs = clubsData ?? null;
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (clubsError) show(clubsError instanceof Error ? clubsError.message : '俱乐部列表加载失败', true);
+  }, [clubsError, show]);
+
+  const reload = () => queryClient.invalidateQueries({ queryKey: ADMIN_CLUBS_KEY });
 
   async function createClub(e: React.FormEvent) {
     e.preventDefault();
