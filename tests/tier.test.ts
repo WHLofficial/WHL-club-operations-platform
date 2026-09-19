@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, attachAuthChannel, sqlGet } from './d1.ts';
+import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
@@ -26,6 +27,7 @@ function freshEnv(): Fixture {
      INSERT INTO user (id, name, role, locked, must_change_pw) VALUES
        (1, '管理组甲', 'admin', 0, 0), (2, '教练乙', 'coach', 0, 0);`,
   );
+  tour.exec(TOUR_TEAM_SEED_SQL);
   const kv = new Map<string, string>();
   const env: Env = {
     DB: createTestD1(sqlite),
@@ -194,7 +196,7 @@ describe('分级派生（增量 9：报名定级）', () => {
 
   it('建队双模：派生模式忽略 leagueTier（列 NULL）；回滚模式写休眠列', async () => {
     const fx = freshEnv();
-    const created = await post('/api/admin/clubs', { name: '里昂', leagueTier: 'premier' }, 'tok-admin', fx.env);
+    const created = await post('/api/admin/clubs', { name: '里昂', leagueTier: 'premier', gameTeamId: 9001 }, 'tok-admin', fx.env);
     expect(created.status).toBe(201);
     const body = (await created.json()) as { club: { id: number; leagueTier: string | null } };
     expect(body.club.leagueTier).toBeNull();
@@ -202,7 +204,7 @@ describe('分级派生（增量 9：报名定级）', () => {
 
     // 回滚通道：摘掉 AUTH_DB 即读休眠列，建队写列、派生回读
     fx.env.AUTH_DB = undefined;
-    const legacy = await post('/api/admin/clubs', { name: '波尔多', leagueTier: 'second' }, 'tok-admin', fx.env);
+    const legacy = await post('/api/admin/clubs', { name: '波尔多', leagueTier: 'second', gameTeamId: 9002 }, 'tok-admin', fx.env);
     expect(legacy.status).toBe(201);
     const legacyBody = (await legacy.json()) as { club: { id: number; leagueTier: string | null } };
     expect(legacyBody.club.leagueTier).toBe('second');

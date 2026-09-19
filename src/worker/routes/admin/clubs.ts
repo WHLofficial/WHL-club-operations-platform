@@ -4,7 +4,7 @@ import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
-import { authIssueTeamCode, authUnbindTeam, AuthApiError } from '../../authClient.ts';
+import { authIssueTeamCode, authRegisterTeam, authUnbindTeam, AuthApiError } from '../../authClient.ts';
 import { getBoundClub } from '../../binding.ts';
 import { getVisibleSeason } from '../../seasons.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../../home.ts';
@@ -15,23 +15,39 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.post('/clubs', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
-  const body = (await readJson(c)) as { name?: unknown; leagueTier?: unknown } | null;
-  const name = typeof body?.name === 'string' ? body.name.trim() : '';
-  const leagueTier = body?.leagueTier;
+  const body = (await readJson(c)) as { name?: unknown; leagueTier?: unknown; gameTeamId?: unknown } | null;
+  // 增量 17：游戏球队 ID 必填——四个 id 空间一致（tour team.id = auth team.tour_team_id = auth club_id = clubs.id），
+  // 建队即指定 id，不再让 D1 自增产生第四套号
+  const gameTeamId = Number(body?.gameTeamId);
+  if (body?.gameTeamId === undefined || body?.gameTeamId === null || body?.gameTeamId === '') {
+    throw new HttpError(400, '必须提供游戏球队 ID（与游戏内球队编号一致）');
+  }
+  if (!Number.isInteger(gameTeamId) || gameTeamId <= 0) throw new HttpError(400, '游戏球队 ID 应为正整数');
+  // tour 校验 + 队名预填：赛事系统里没有的队号不建（先去赛事系统建队）
+  const tourTeam = await c.env.TOUR_DB.prepare('SELECT id, name FROM team WHERE id = ?')
+    .bind(gameTeamId)
+    .first<{ id: number; name: string }>();
+  if (!tourTeam) throw new HttpError(404, '赛事系统里没有这支球队，请先在赛事系统建队');
+  const bodyName = typeof body?.name === 'string' ? body.name.trim() : '';
+  const name = bodyName || tourTeam.name.trim();
   if (!name) throw new HttpError(400, '俱乐部名字不能为空');
   if (name.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
   // 增量 9：级别由赛事报名派生（worker/tier.ts），建队不再定级； AUTH_DB 未配置的
   // 回滚通道下仍接受显式定级写休眠列（与旧行为一致），派生通道忽略该参数。
+  const leagueTier = body?.leagueTier;
   if (leagueTier !== undefined && leagueTier !== null && leagueTier !== 'premier' && leagueTier !== 'second') {
     throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
   }
   const writeTier = c.env.AUTH_DB ? null : (leagueTier ?? null);
+  // id 撞号先查（插入冲突会被名字冲突的 catch 混淆，给不出准话）
+  const idTaken = await c.env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(gameTeamId).first<{ id: number }>();
+  if (idTaken) throw new HttpError(409, `球队 ID #${gameTeamId} 已被登记册占用`);
   const club = await c.env.DB.prepare(
-    `INSERT INTO clubs (name, league_tier, status, created_at)
-     VALUES (?, ?, 'active', ${nowSql()})
+    `INSERT INTO clubs (id, name, league_tier, status, created_at)
+     VALUES (?, ?, ?, 'active', ${nowSql()})
      RETURNING id, name, league_tier, status, created_at`,
   )
-    .bind(name, writeTier)
+    .bind(gameTeamId, name, writeTier)
     .first<{ id: number; name: string; league_tier: string; status: string; created_at: string }>()
     .catch(() => null);
   if (!club) throw new HttpError(409, '俱乐部名字已存在');
@@ -40,8 +56,18 @@ app.post('/clubs', async (c) => {
     action: 'club_create',
     targetType: 'club',
     targetId: club.id,
-    after: { name, leagueTier: writeTier },
+    after: { name, gameTeamId, leagueTier: writeTier },
   });
+  // auth 目录自动建档（增量 17）：register upsert 幂等；失败不回滚 clubs 行，留「重新登记」重试
+  let authLinked: boolean | null = null;
+  if (c.env.AUTH_DB) {
+    try {
+      await authRegisterTeam(c.env, { tourTeamId: gameTeamId, name, clubId: club.id });
+      authLinked = true;
+    } catch {
+      authLinked = false;
+    }
+  }
   return c.json(
     {
       club: {
@@ -51,9 +77,39 @@ app.post('/clubs', async (c) => {
         status: club.status,
         createdAt: club.created_at,
       },
+      authLinked,
     },
     201,
   );
+});
+
+// 建队时队名预填（增量 17）：按游戏球队 ID 查赛事系统队名
+app.get('/clubs/tour-team', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const teamId = Number(c.req.query('teamId'));
+  if (!Number.isInteger(teamId) || teamId <= 0) throw new HttpError(400, 'teamId 应为正整数');
+  const row = await c.env.TOUR_DB.prepare('SELECT id, name FROM team WHERE id = ?')
+    .bind(teamId)
+    .first<{ id: number; name: string }>();
+  if (!row) throw new HttpError(404, '赛事系统里没有这支球队');
+  return c.json({ team: { id: row.id, name: row.name } });
+});
+
+// 建队后 auth 目录登记重试（增量 17）：register upsert 幂等，失败即可重按
+app.post('/clubs/:id/register-auth', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(id).first<{ id: number; name: string }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  if (!c.env.AUTH_DB) throw new HttpError(400, '当前未接入认证中心（回滚通道），无需登记');
+  try {
+    await authRegisterTeam(c.env, { tourTeamId: club.id, name: club.name, clubId: club.id });
+  } catch (e) {
+    if (e instanceof AuthApiError) throw new HttpError(502, `认证中心登记失败：${e.message}`);
+    throw e;
+  }
+  return c.json({ ok: true });
 });
 
 app.get('/clubs', async (c) => {

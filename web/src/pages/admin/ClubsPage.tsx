@@ -22,6 +22,8 @@ function ClubsSection() {
   const { ask, promptNode } = usePrompt();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
+  const [gameTeamId, setGameTeamId] = useState('');
+  const [prefilling, setPrefilling] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
   const [stadium, setStadium] = useState<{ club: string; clubId: number; form: StadiumForm; tierName: string | null; fans: number; influence: StadiumAdmin['influence'] } | null>(null);
@@ -38,19 +40,51 @@ function ClubsSection() {
 
   const reload = () => queryClient.invalidateQueries({ queryKey: ADMIN_CLUBS_KEY });
 
+  // 游戏球队 ID 失焦 → tour 查队名预填（名字已被手填过则不动）
+  async function prefillName() {
+    const id = gameTeamId.trim();
+    if (!id || !/^\d+$/.test(id) || prefilling) return;
+    setPrefilling(true);
+    try {
+      const res = await api<{ team: { id: number; name: string } }>(`/api/admin/clubs/tour-team?teamId=${id}`);
+      if (!name.trim()) setName(res.team.name);
+    } catch {
+      // 查不到不打断：留到提交时后端统一校验（404 文案更完整）
+    } finally {
+      setPrefilling(false);
+    }
+  }
+
   async function createClub(e: React.FormEvent) {
     e.preventDefault();
     if (creating) return;
     setCreating(true);
     try {
-      await apiPost('/api/admin/clubs', { name: name.trim() });
+      const res = await apiPost<{ club: { name: string }; authLinked: boolean | null }>('/api/admin/clubs', {
+        name: name.trim(),
+        gameTeamId: gameTeamId.trim(),
+      });
       setName('');
-      show('俱乐部建好了，登记册上多了一页。');
+      setGameTeamId('');
+      if (res.authLinked === false) {
+        show(`${res.club.name} 已建，但认证中心目录登记失败——稍后点列表里的「重新登记」。`, true);
+      } else {
+        show('俱乐部建好了，登记册上多了一页。');
+      }
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '建队失败', true);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function registerAuth(club: AdminClubRow) {
+    try {
+      await apiPost(`/api/admin/clubs/${club.id}/register-auth`, {});
+      show(`${club.name} 的认证中心目录已登记。`);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '登记失败', true);
     }
   }
 
@@ -144,15 +178,29 @@ function ClubsSection() {
       {toastNode}
       {promptNode}
       <form className="inline-form" onSubmit={createClub}>
+        <label className="field">
+          游戏球队 ID
+          <input
+            className="mono"
+            value={gameTeamId}
+            onChange={(e) => setGameTeamId(e.target.value)}
+            onBlur={prefillName}
+            placeholder="必填，如 131681"
+            inputMode="numeric"
+          />
+        </label>
         <label className="field grow">
           俱乐部名字
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="比如：阿森纳" maxLength={40} />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="留空则取赛事系统队名" maxLength={40} />
         </label>
-        <button className="btn" type="submit" disabled={creating || !name.trim()}>
+        <button className="btn" type="submit" disabled={creating || !gameTeamId.trim()}>
           {creating ? '建队中…' : '建俱乐部'}
         </button>
       </form>
-      <p className="hint">联赛级别不再建队时定死：由各队在本赛季报名的定级赛事（顶级/次级联赛）自动派生。</p>
+      <p className="hint">
+        联赛级别不再建队时定死：由各队在本赛季报名的定级赛事（顶级/次级联赛）自动派生。球队 ID 必须与游戏内一致（赛事系统先建队），
+        俱乐部将以该 ID 建档并在认证中心自动登记；登记失败可稍后点「重新登记」。
+      </p>
 
       {clubs === null ? (
         <p className="muted">正在翻登记册…</p>
@@ -204,6 +252,9 @@ function ClubsSection() {
                   <td>
                     <button className="btn btn-ghost btn-sm" type="button" onClick={() => issueCode(club)}>
                       发认证码
+                    </button>
+                    <button className="btn btn-ghost btn-sm" type="button" onClick={() => registerAuth(club)} title="认证中心目录登记（建队时自动做过；失败后从这里重试，幂等）">
+                      重新登记
                     </button>
                     <button
                       className={`btn btn-sm ${club.transferBanned ? 'btn' : 'btn-ghost btn-danger'}`}

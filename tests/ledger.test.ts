@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
+import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 interface Fixture {
@@ -24,6 +25,7 @@ function freshEnv(): Fixture {
        (1, '管理组甲', 'admin', 0, 0),
        (2, '教练乙', 'coach', 0, 0);`,
   );
+  tour.exec(TOUR_TEAM_SEED_SQL);
   const kv = new Map<string, string>();
   const env: Env = {
     DB: createTestD1(sqlite),
@@ -63,7 +65,7 @@ function post(path: string, body: unknown, token: string, env: Env) {
 
 async function bindCoach(fx: Fixture): Promise<number> {
   const auth = attachAuthChannel(fx.env);
-  const res = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'premier' }, 'tok-admin', fx.env);
+  const res = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'premier', gameTeamId: 9001 }, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   const { club } = (await res.json()) as { club: { id: number } };
   authRegisterClubTeam(auth, club.id, club.id, '阿森纳');

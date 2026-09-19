@@ -74,3 +74,15 @@ export async function authBindTeam(env: Env, { code, accountId }: { code: string
 export async function authUnbindTeam(env: Env, accountId: number): Promise<void> {
   await machineCall(env, '/api/team/unbind', { account_id: accountId });
 }
+
+// 管理端建队自动建档（增量 17）：auth team 目录 upsert（ON CONFLICT(tour_team_id) 幂等），
+// 同步带上 club_id 关联；失败可重试（目录行已建时重复调用只更新 name/club_id）
+export async function authRegisterTeam(
+  env: Env,
+  { tourTeamId, name, clubId }: { tourTeamId: number; name: string; clubId: number },
+): Promise<number> {
+  const out = await machineCall(env, '/api/team/register', { tour_team_id: tourTeamId, name, club_id: clubId });
+  const teamId = Number(out.teamId);
+  if (!Number.isInteger(teamId)) throw new AuthApiError('auth_bad_response', '登记响应缺少 teamId');
+  return teamId;
+}

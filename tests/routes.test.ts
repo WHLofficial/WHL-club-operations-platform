@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, createAuthDb, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { generateCode } from '../src/lib/crypto.ts';
 import { TRAINEE_WAGE } from '../src/core/squad-rules.ts';
 import { resetConfigCache } from '../src/core/config.ts';
@@ -33,6 +34,7 @@ function freshEnv(): Fixture {
        (4, '教练丁', 'coach', 1, 0),
        (5, '教练戊', 'coach', 0, 0);`,
   );
+  tour.exec(TOUR_TEAM_SEED_SQL);
   const kv = new Map<string, string>();
   const env: Env = {
     DB: createTestD1(sqlite),
@@ -180,8 +182,10 @@ function patch(path: string, body: unknown, token: string | undefined, env: Env)
   );
 }
 
+let clubSeq = 9000;
 async function createClub(fx: Fixture, name: string, leagueTier = 'premier'): Promise<number> {
-  const res = await post('/api/admin/clubs', { name, leagueTier }, 'tok-admin', fx.env);
+  clubSeq += 1;
+  const res = await post('/api/admin/clubs', { name, leagueTier, gameTeamId: clubSeq }, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   const body = (await res.json()) as { club: { id: number } };
   return body.club.id;
@@ -209,9 +213,9 @@ async function issueCode(fx: Fixture, clubId: number): Promise<string> {
 describe('建队与认证码绑定（§3.2）', () => {
   it('管理组建俱乐部，重名被拒', async () => {
     const fx = freshEnv();
-    const res = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'premier' }, 'tok-admin', fx.env);
+    const res = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'premier', gameTeamId: 9001 }, 'tok-admin', fx.env);
     expect(res.status).toBe(201);
-    const dup = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'second' }, 'tok-admin', fx.env);
+    const dup = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'second', gameTeamId: 9002 }, 'tok-admin', fx.env);
     expect(dup.status).toBe(409);
     expect(((await dup.json()) as { error: string }).error).toBe('俱乐部名字已存在');
   });
