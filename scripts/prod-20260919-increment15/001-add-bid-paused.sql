@@ -1,0 +1,11 @@
+-- 增量 15（2026-09-19 生产执行）：listings 加 bid_paused 列（单挂牌暂停出价开关）
+-- 语义：bid_paused=1 时该挂牌拒绝新出价（423 listing_bid_paused），
+--   已出的价、到期结算、管理干预均不受影响；全局开关走 config 键 market_bid_paused，不动表结构。
+-- 本文件为工件留档；实际执行走迁移通道（账目随 d1_migrations 记录）：
+--   npx wrangler d1 migrations apply whl-club --remote
+-- 期望：DDL 语句 meta.changes=0；验证用 PRAGMA table_info(listings) 应出现 bid_paused（NOT NULL DEFAULT 0）。
+-- 影响面：纯加列带默认值，不重写存量行，listings 现有数据零变化。
+-- 回滚：
+--   ALTER TABLE listings DROP COLUMN bid_paused;
+--   DELETE FROM d1_migrations WHERE name = '0021_listing_bid_pause.sql';
+ALTER TABLE listings ADD COLUMN bid_paused INTEGER NOT NULL DEFAULT 0;
