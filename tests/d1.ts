@@ -87,6 +87,7 @@ const MIGRATION_FILES = [
   '0020_drop_initial_club.sql',
   '0021_listing_bid_pause.sql',
   '0022_notification_read.sql',
+  '0023_stadium_build_credit.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

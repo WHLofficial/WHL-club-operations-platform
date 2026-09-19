@@ -60,6 +60,7 @@ export const CONFIG_KEYS = [
   'renewal_raise',
   'window_force_settle',
   'market_bid_paused',
+  'stadium_max_open_tier',
   'review_amount_threshold',
   'bid_pattern_alert',
   'prize_table',
@@ -140,6 +141,10 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     4: { name: '国际级', min_seats: 50000, max_seats: 100000, base_maintenance: 14.0, per_10k_rate: 0.2, attend_coef: 1.4, upgrade_cost: 0.0 },
   }),
   voucher_refund: '0.25',
+  // 增量 19 设施经营：首位=扩建单价（M/100 座），后五位=子设施升到 1-5 级费用（插件 formula.py:407 口径）
+  facility_prices: '0.1,3,5,8,12,16',
+  // 球场档位开放进度（插件 max_open_tier 口径，S9 初仅开放 0→1）
+  stadium_max_open_tier: '1',
   xp_per_level: '10',
   trainee_xp_full: '40',
   trainee_xp_half: '15',

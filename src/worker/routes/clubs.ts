@@ -9,6 +9,8 @@ import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier } from '../tier.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
+import { createConfigService } from '../../core/config.ts';
+import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
 import { getVisibleSeason } from '../seasons.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -210,6 +212,84 @@ app.get('/club/ledger', async (c) => {
     })),
     nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
   });
+});
+
+// 设施经营（增量 19）：build-info 一次拉全预览数据；扩建/升级操作即批即记账
+app.get('/club/stadium/build-info', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
+  const stadium = await c.env.DB
+    .prepare('SELECT club_id, capacity, tier, build_credit FROM stadiums WHERE club_id = ?')
+    .bind(club.id)
+    .first<{ club_id: number; capacity: number; tier: number; build_credit: number }>();
+  if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
+  const [tierTable, prices] = await Promise.all([loadTierTable(c.env.DB), loadFacilityPrices(c.env.DB)]);
+  const config = createConfigService(c.env.DB);
+  const maxOpenTier = (await config.getNumber('stadium_max_open_tier')) ?? 1;
+  const refundRatio = (await config.getNumber('voucher_refund')) ?? 0.25;
+  const tierEntry = tierTable[String(stadium.tier)];
+  const nextEntry = tierTable[String(stadium.tier + 1)];
+  const facilities = await c.env.DB
+    .prepare('SELECT facility_key, level FROM club_facilities WHERE club_id = ? ORDER BY facility_key')
+    .bind(club.id)
+    .all<{ facility_key: string; level: number }>();
+  const levelOf = (key: string) => facilities.results.find((f) => f.facility_key === key)?.level ?? 0;
+  const balance = await loadBalance(c.env.DB, club.id);
+  return c.json({
+    credit: stadium.build_credit,
+    balance,
+    expansionPer100: prices.expansionPer100,
+    maxOpenTier,
+    refundRatio,
+    tier: {
+      level: stadium.tier,
+      name: tierEntry?.name ?? null,
+      capacity: stadium.capacity,
+      minSeats: tierEntry?.min_seats ?? null,
+      maxSeats: tierEntry?.max_seats ?? null,
+    },
+    nextTier: nextEntry
+      ? {
+          name: nextEntry.name,
+          minSeats: nextEntry.min_seats,
+          upgradeCost: tierEntry?.upgrade_cost ?? null,
+          open: stadium.tier + 1 <= maxOpenTier,
+          capacityOk: stadium.capacity >= nextEntry.min_seats,
+        }
+      : null,
+    facilities: FACILITY_KEYS.map((key) => {
+      const level = levelOf(key);
+      return { key, level, nextCost: level >= 5 ? null : (prices.upgradeCosts[level] ?? null) };
+    }),
+  });
+});
+
+app.post('/club/stadium/expand', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
+  const body = (await c.req.raw.json().catch(() => null)) as { seats?: unknown } | null;
+  const out = await expandStadium(c.env, club.id, Number(body?.seats));
+  return c.json(out, 201);
+});
+
+app.post('/club/stadium/upgrade', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
+  const out = await upgradeStadiumTier(c.env, club.id);
+  return c.json(out, 201);
+});
+
+app.post('/club/facilities/upgrade', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
+  const body = (await c.req.raw.json().catch(() => null)) as { key?: unknown } | null;
+  if (typeof body?.key !== 'string') throw new HttpError(400, '缺设施类型');
+  const out = await upgradeFacilityLevel(c.env, club.id, body.key);
+  return c.json(out, 201);
 });
 
 export default app;
