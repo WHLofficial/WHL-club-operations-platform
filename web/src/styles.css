@@ -1533,3 +1533,56 @@ tbody tr:hover td {
 .radar-legend-key {
   font-weight: 700;
 }
+
+/* ---- 管理端壳布局（增量 15：左深可可侧栏 + 右子页内容） ---- */
+.admin-shell {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.admin-sidebar {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  background: var(--cocoa);
+  border-radius: 10px;
+  box-shadow: inset 0 -3px 0 var(--cocoa-deep);
+}
+.admin-nav-link {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: var(--paper);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.admin-nav-link:hover {
+  background: rgba(253, 244, 227, 0.14);
+}
+.admin-nav-link.on {
+  background: var(--terracotta);
+  color: #fff;
+}
+.admin-main {
+  min-width: 0;
+}
+.admin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+@media (max-width: 760px) {
+  .admin-shell {
+    grid-template-columns: 1fr;
+  }
+  .admin-sidebar {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

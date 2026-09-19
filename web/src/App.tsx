@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router';
 import TopBar from './components/TopBar.tsx';
 import { api, type AuthMode, type MeUser } from './lib/api.ts';
@@ -10,7 +10,17 @@ import Bind from './pages/Bind.tsx';
 import Market from './pages/Market.tsx';
 import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
-import Admin from './pages/Admin.tsx';
+
+// 管理端按页拆 chunk（增量 15）：壳 + 8 子页全部懒加载，不再全量进主包
+const AdminLayout = lazy(() => import('./pages/admin/AdminLayout.tsx'));
+const AdminOverviewPage = lazy(() => import('./pages/admin/OverviewPage.tsx'));
+const AdminSeasonsPage = lazy(() => import('./pages/admin/SeasonsPage.tsx'));
+const AdminPlayersPage = lazy(() => import('./pages/admin/PlayersPage.tsx'));
+const AdminImportsPage = lazy(() => import('./pages/admin/ImportsPage.tsx'));
+const AdminMarketPage = lazy(() => import('./pages/admin/MarketPage.tsx'));
+const AdminClubsPage = lazy(() => import('./pages/admin/ClubsPage.tsx'));
+const AdminFinancePage = lazy(() => import('./pages/admin/FinancePage.tsx'));
+const AdminSystemPage = lazy(() => import('./pages/admin/SystemPage.tsx'));
 
 export default function App() {
   const [user, setUser] = useState<MeUser | null | undefined>(undefined);
@@ -47,17 +57,35 @@ export default function App() {
   return (
     <>
       <TopBar user={user} authMode={authMode} />
-      <Routes>
-        <Route path="/" element={<Home user={user} authMode={authMode} authHome={authHome} />} />
-        <Route path="/club" element={<Club />} />
-        <Route path="/bind" element={<Bind />} />
-        <Route path="/players" element={<PlayersLibrary />} />
-        <Route path="/players/:id" element={<Player />} />
-        <Route path="/market" element={<Market />} />
-        <Route path="/negotiations" element={<Negotiations />} />
-        <Route path="/ledger" element={<Ledger />} />
-        <Route path="/admin" element={<Admin user={user} />} />
-      </Routes>
+      {/* 只有管理端是懒加载 chunk，Suspense 实际只在进 /admin 时兜住首帧 */}
+      <Suspense
+        fallback={
+          <div className="page-loading" role="status" aria-label="加载中">
+            <p>加载中…</p>
+          </div>
+        }
+      >
+        <Routes>
+          <Route path="/" element={<Home user={user} authMode={authMode} authHome={authHome} />} />
+          <Route path="/club" element={<Club />} />
+          <Route path="/bind" element={<Bind />} />
+          <Route path="/players" element={<PlayersLibrary />} />
+          <Route path="/players/:id" element={<Player />} />
+          <Route path="/market" element={<Market />} />
+          <Route path="/negotiations" element={<Negotiations />} />
+          <Route path="/ledger" element={<Ledger />} />
+          <Route path="/admin" element={<AdminLayout user={user} />}>
+            <Route index element={<AdminOverviewPage />} />
+            <Route path="seasons" element={<AdminSeasonsPage />} />
+            <Route path="players" element={<AdminPlayersPage />} />
+            <Route path="imports" element={<AdminImportsPage />} />
+            <Route path="market" element={<AdminMarketPage />} />
+            <Route path="clubs" element={<AdminClubsPage />} />
+            <Route path="finance" element={<AdminFinancePage />} />
+            <Route path="system" element={<AdminSystemPage />} />
+          </Route>
+        </Routes>
+      </Suspense>
     </>
   );
 }
