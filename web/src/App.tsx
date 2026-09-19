@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router';
 import TopBar from './components/TopBar.tsx';
+import RequireUser from './components/RequireUser.tsx';
 import { useAuth } from './lib/auth.tsx';
 import Home from './pages/Home.tsx';
 import Club from './pages/Club.tsx';
@@ -48,13 +49,41 @@ export default function App() {
       >
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/club" element={<Club />} />
-          <Route path="/bind" element={<Bind />} />
+          <Route
+            path="/club"
+            element={
+              <RequireUser>
+                <Club />
+              </RequireUser>
+            }
+          />
+          <Route
+            path="/bind"
+            element={
+              <RequireUser>
+                <Bind />
+              </RequireUser>
+            }
+          />
           <Route path="/players" element={<PlayersLibrary />} />
           <Route path="/players/:id" element={<Player />} />
           <Route path="/market" element={<Market />} />
-          <Route path="/negotiations" element={<Negotiations />} />
-          <Route path="/ledger" element={<Ledger />} />
+          <Route
+            path="/negotiations"
+            element={
+              <RequireUser>
+                <Negotiations />
+              </RequireUser>
+            }
+          />
+          <Route
+            path="/ledger"
+            element={
+              <RequireUser>
+                <Ledger />
+              </RequireUser>
+            }
+          />
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminOverviewPage />} />
             <Route path="seasons" element={<AdminSeasonsPage />} />
