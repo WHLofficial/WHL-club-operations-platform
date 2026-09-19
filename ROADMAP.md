@@ -172,6 +172,16 @@
 
 ---
 
+## 增量 16 · 用户端重构（Market 拆三页 + 登录守卫 + AuthContext + TanStack Query 铺开 + 注册逐人标红；2026-09-19 本地完成）
+
+**裁决**（refactor-plan-decisions 记忆）：①Market=子路由三页 `/market`（挂牌板+详情出价，公开）、`/market/free`（海捞签入+训练营激活，需登录）、`/market/mine`（挂牌我的球员+我的出价，需登录），seg 子导航切换；②用户页守卫 `RequireUser` 软卡不重定向（沿管理端 AdminLayout 风格），匿名显示对应登录入口（oidc 统一登录 / 兼容模式去赛事系统）；③AuthContext 落地——`/api/me` 全站单点拉取（useQuery `['me']`，staleTime Infinity，登录登出都是整页跳），TopBar/Home/AdminLayout 的 props 钻透退役；④用户端 8 页数据层全接 TanStack Query（key 设计沿用管理端口径，写后精确 invalidate，不引 useMutation）；⑤注册逐人标红——`SquadIssue.playerIds` 后端早有、前端从没用过，改后按球员展开行级红底 + 规则短标签 badge（title 悬浮完整 message），compliance 预检与 422 打回双源生效；⑥worker 侧零改动。
+
+**交付**（7 个 commit）：`92a1d03` AuthContext（lib/auth.tsx，me 拉失败按匿名兜底不卡加载闸）；`25cecc9` RequireUser 守卫（/club /bind /negotiations /ledger + 市场后两页）；`2f5b885` Market 拆三页（875 行单页退役，`pages/market/` 四文件：BoardPage/FreePage/MinePage/shared，区块原样搬迁；三态区分「加载中/无俱乐部/非教练」——首版把两者都落 null 会永远停在「正在确认」，冒烟抓出）；`ddde5c9` 数据层（`lib/queries.ts` 共享 qk：me/club、squad、my-bids、board、listing、free-agents、trainees；游标页 useInfiniteQuery；出价→板+我的出价+详情联动失效，绑队→me/club 失效）；`daf3c93` 注册标红（`row-flagged` 浅红底 + `ISSUE_RULE_LABEL` 七规则短标签；规则级问题 playerIds 为空自然不命中，banner 兜底）；`5dc9152` 收口审查修复（见验收）。
+
+**验收**：**327 测试绿 + 三份 tsc 干净 + build 过**；headless 冒烟：市场三页切换/匿名守卫软卡/注册标红（本地三库种最小数据：auth team+binding、club 赛季+定级赛事+6 人名单+合同+含不可成长训练营的快照、tour 最小 entry 表，体检返回 `trainee_growth playerIds=[9005]` → 阿五行红底+badge 截图确认）/球员库分页钮到底状态正确。**收口 code review 修掉 3 处**：①无限查询 `getNextPageParam` 返回 null 在 v5 里仍算有下一页（只有 undefined 才是到底）→ `?? undefined`，否则最后一页按钮还亮、点了重复拉第一页；②球员库「上一页」不能用 `fetchPreviousPage`（它是往前补页不是回退，页码与行会错位）→ 页码状态 + 缓存回退还原旧游标栈语义；③市场详情切卡保留旧详情（placeholderData keepPreviousData，旧行为）。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
