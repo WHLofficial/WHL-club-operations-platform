@@ -21,6 +21,7 @@ import {
 } from '../../lib/api.ts';
 import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import ConfirmButton from '../../components/ConfirmButton.tsx';
 
 export default function SeasonsPage() {
   return (
@@ -37,13 +38,9 @@ function SeasonsSection() {
   const [selectedSeason, setSelectedSeason] = useState('');
   const [newSeason, setNewSeason] = useState('');
   const [newAgeCap, setNewAgeCap] = useState('');
-  const [settleArmed, setSettleArmed] = useState(false);
   const [settleCheck, setSettleCheck] = useState<SettleCheckResult | null>(null);
-  const [seasonArmed, setSeasonArmed] = useState(false);
   const [bindTournament, setBindTournament] = useState('');
   const [bindType, setBindType] = useState('league_premier');
-  const [bindArmed, setBindArmed] = useState(false);
-  const [unbindArmedId, setUnbindArmedId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
   // 原三个静默拉取（current/seasons/tournaments）转 query；失败静默置空保持原行为
@@ -69,11 +66,6 @@ function SeasonsSection() {
   });
   const bindings = seasonNo ? (bindingsData ?? []) : [];
 
-  useEffect(() => {
-    setUnbindArmedId(null);
-    setBindArmed(false);
-  }, [seasonNo]);
-
   // 默认选中当前赛季（还没建档时不选）
   useEffect(() => {
     if (!selectedSeason && seasons.length > 0) {
@@ -93,7 +85,7 @@ function SeasonsSection() {
   const tournamentName = (id: number) => tournaments.find((t) => t.id === id)?.name;
 
   async function createSeason() {
-    if (busy || !seasonArmed || !newSeasonValid) return;
+    if (busy || !newSeasonValid) return;
     setBusy(true);
     try {
       const cap = newAgeCap.trim() === '' ? null : Number(newAgeCap);
@@ -101,7 +93,6 @@ function SeasonsSection() {
       show(`赛季 ${Number(newSeason)} 已建档，进入备赛期${cap !== null ? `（可成长年龄上限 ${cap}，重判 growable ${res.growable} 人）` : ''}。`);
       setNewSeason('');
       setNewAgeCap('');
-      setSeasonArmed(false);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '建档失败', true);
@@ -130,7 +121,6 @@ function SeasonsSection() {
     try {
       const res = await apiPost<SeasonSettleResult>(`/api/admin/seasons/${seasonNo}/settle-season`, { acknowledged });
       show(`赛季 ${seasonNo} 已结算：忠诚奖金 ${res.loyalty} 份、growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。`);
-      setSettleArmed(false);
       setSettleCheck(null);
       reload();
     } catch (err) {
@@ -139,10 +129,8 @@ function SeasonsSection() {
         if (window.confirm(`${msg}
 
 忽略警示并继续结算？`)) await runSeasonSettle(true);
-        else setSettleArmed(false);
       } else {
         show(msg, true);
-        setSettleArmed(false);
       }
     } finally {
       setBusy(false);
@@ -164,7 +152,7 @@ function SeasonsSection() {
   }
 
   async function bind() {
-    if (busy || !bindArmed || !seasonNo || bindTournament === '') return;
+    if (busy || !seasonNo || bindTournament === '') return;
     setBusy(true);
     try {
       const res = await apiPost<BindTournamentResult>(`/api/admin/seasons/${seasonNo}/bind-tournament`, {
@@ -173,7 +161,6 @@ function SeasonsSection() {
       });
       show(`已把「${res.tournament.name}」绑进 S${seasonNo}，完赛场次会进赛果确认队列。`);
       setBindTournament('');
-      setBindArmed(false);
       loadBindings();
       reload();
     } catch (err) {
@@ -184,17 +171,15 @@ function SeasonsSection() {
   }
 
   async function unbind(b: SeasonBinding) {
-    if (busy || !seasonNo || unbindArmedId !== b.id) return;
+    if (busy || !seasonNo) return;
     setBusy(true);
     try {
       await apiPost<{ ok: boolean }>(`/api/admin/seasons/${seasonNo}/unbind-tournament`, { tournamentId: b.tournamentId });
       show(`已把「${tournamentName(b.tournamentId) ?? `#${b.tournamentId}`}」从 S${seasonNo} 解绑。`);
-      setUnbindArmedId(null);
       loadBindings();
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '解绑失败', true);
-      setUnbindArmedId(null);
     } finally {
       setBusy(false);
     }
@@ -231,7 +216,6 @@ function SeasonsSection() {
             value={newSeason}
             onChange={(e) => {
               setNewSeason(e.target.value);
-              setSeasonArmed(false);
             }}
             placeholder="4"
           />
@@ -242,31 +226,30 @@ function SeasonsSection() {
             value={newAgeCap}
             onChange={(e) => {
               setNewAgeCap(e.target.value);
-              setSeasonArmed(false);
             }}
             placeholder="25 / 24 / 23…"
             className="mono"
           />
         </label>
-        <button
-          className={`btn${seasonArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy || !newSeasonValid || !newAgeCapValid}
-          onClick={() => (seasonArmed ? createSeason() : setSeasonArmed(true))}
-        >
-          {seasonArmed ? '确认建档（再点一次）' : '建档'}
-        </button>
+        <ConfirmButton
+          label="建档"
+          confirmLabel="确认建档（再点一次）"
+          busy={busy}
+          disabled={!newSeasonValid || !newAgeCapValid}
+          disarmKey={`${newSeason}|${newAgeCap}`}
+          onConfirm={createSeason}
+        />
         <button className="btn btn-ghost" type="button" disabled={busy || !seasonNo} onClick={() => runSeasonSettleCheck()}>
           结算体检
         </button>
-        <button
-          className={`btn${settleArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy || !seasonNo}
-          onClick={() => (settleArmed ? runSeasonSettle(false) : setSettleArmed(true))}
-        >
-          {settleArmed ? '确认结算（再点一次）' : '结算赛季'}
-        </button>
+        <ConfirmButton
+          label="结算赛季"
+          confirmLabel="确认结算（再点一次）"
+          busy={busy}
+          disabled={!seasonNo}
+          disarmKey={String(seasonNo)}
+          onConfirm={() => runSeasonSettle(false)}
+        />
       </div>
       {settleCheck && (
         <div className="hint">
@@ -298,7 +281,6 @@ function SeasonsSection() {
             value={bindTournament}
             onChange={(e) => {
               setBindTournament(e.target.value);
-              setBindArmed(false);
             }}
           >
             <option value="">选赛事…</option>
@@ -315,7 +297,6 @@ function SeasonsSection() {
             value={bindType}
             onChange={(e) => {
               setBindType(e.target.value);
-              setBindArmed(false);
             }}
           >
             {Object.entries(COMPETITION_TYPE_LABEL).map(([v, label]) => (
@@ -325,14 +306,14 @@ function SeasonsSection() {
             ))}
           </select>
         </label>
-        <button
-          className={`btn${bindArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy || !seasonNo || bindTournament === ''}
-          onClick={() => (bindArmed ? bind() : setBindArmed(true))}
-        >
-          {bindArmed ? '确认绑定（再点一次）' : '绑定赛事'}
-        </button>
+        <ConfirmButton
+          label="绑定赛事"
+          confirmLabel="确认绑定（再点一次）"
+          busy={busy}
+          disabled={!seasonNo || bindTournament === ''}
+          disarmKey={`${seasonNo}|${bindTournament}|${bindType}`}
+          onConfirm={bind}
+        />
       </div>
       <div>
         {!seasonNo ? (
@@ -346,14 +327,14 @@ function SeasonsSection() {
                 #{b.tournamentId} {tournamentName(b.tournamentId) ?? '（比赛系统里找不到这座赛事）'} ·{' '}
                 {COMPETITION_TYPE_LABEL[b.competitionType ?? ''] ?? b.competitionType ?? '类型未标'}
               </span>
-              <button
-                className={`btn btn-sm${unbindArmedId === b.id ? ' btn-armed' : ''}`}
-                type="button"
-                disabled={busy}
-                onClick={() => (unbindArmedId === b.id ? unbind(b) : setUnbindArmedId(b.id))}
-              >
-                {unbindArmedId === b.id ? '确认解绑（再点一次）' : '解绑'}
-              </button>
+              <ConfirmButton
+                className="btn-sm"
+                label="解绑"
+                confirmLabel="确认解绑（再点一次）"
+                busy={busy}
+                disarmKey={seasonNo}
+                onConfirm={() => unbind(b)}
+              />
               {b.stageSettledAt ? (
                 <span className="badge" title="入场/保底/剩余池已一次性发放">
                   已完结结算 {b.stageSettledAt.slice(0, 10)}
@@ -381,7 +362,6 @@ function resultScoreLine(r: { homeTeam: string | null; awayTeam: string | null; 
 function ResultsSection() {
   const { show, toastNode } = useToast();
   const queryClient = useQueryClient();
-  const [armedId, setArmedId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   // 原失败时静默置空队列，queryFn 里保持一致
@@ -393,7 +373,7 @@ function ResultsSection() {
   const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'results-queue'] });
 
   async function confirm(matchId: number) {
-    if (armedId !== matchId || busyId !== null) return;
+    if (busyId !== null) return;
     setBusyId(matchId);
     try {
       const r = await apiPost<ConfirmResultResult>(`/api/admin/results/${matchId}/confirm`, {});
@@ -402,7 +382,6 @@ function ResultsSection() {
           ? `有 ${r.xp.unresolved.length} 个球员没匹配上（${r.xp.unresolved.join('、')}），请到「成长引擎」补录。`
           : '';
       show(`赛果已确认入档${r.xp.granted > 0 ? `，自动记了 ${r.xp.granted} 条 XP 事件` : ''}。${unresolvedNote}`);
-      setArmedId(null);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '确认失败', true);
@@ -451,14 +430,15 @@ function ResultsSection() {
                   </td>
                   <td className="mono">{r.finishedAt?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
                   <td>
-                    <button
-                      className={`btn btn-sm${armedId === r.matchId ? ' btn-armed' : ''}`}
-                      type="button"
+                    <ConfirmButton
+                      className="btn-sm"
+                      label="确认"
+                      confirmLabel="确认入档（再点一次）"
+                      busyLabel="确认中…"
+                      busy={busyId === r.matchId}
                       disabled={busyId !== null}
-                      onClick={() => (armedId === r.matchId ? confirm(r.matchId) : setArmedId(r.matchId))}
-                    >
-                      {busyId === r.matchId ? '确认中…' : armedId === r.matchId ? '确认入档（再点一次）' : '确认'}
-                    </button>
+                      onConfirm={() => confirm(r.matchId)}
+                    />
                   </td>
                 </tr>
               ))}

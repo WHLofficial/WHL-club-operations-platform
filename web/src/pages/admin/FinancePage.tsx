@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiPost, MANUAL_LEDGER_KINDS, type ManualLedgerResult, type OpeningImportResult } from '../../lib/api.ts';
 import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import ConfirmButton from '../../components/ConfirmButton.tsx';
 
 export default function FinancePage() {
   return (
@@ -109,7 +110,6 @@ function ManualLedgerSection() {
   const [kind, setKind] = useState(MANUAL_LEDGER_KINDS[0]!.value);
   const [amountText, setAmountText] = useState('');
   const [memo, setMemo] = useState('');
-  const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ManualLedgerResult | null>(null);
 
@@ -120,7 +120,6 @@ function ManualLedgerSection() {
 
   function pickKind(v: string) {
     setKind(v);
-    setArmed(false);
     setResult(null);
     // 奖金模板选赛事类型自动带参考值（§9.1），可改
     const def = MANUAL_LEDGER_KINDS.find((k) => k.value === v);
@@ -128,7 +127,7 @@ function ManualLedgerSection() {
   }
 
   async function submit() {
-    if (busy || !armed || !valid) return;
+    if (busy || !valid) return;
     setBusy(true);
     try {
       const res = await apiPost<ManualLedgerResult>('/api/admin/ledger/manual', {
@@ -139,7 +138,6 @@ function ManualLedgerSection() {
       });
       setResult(res);
       show('已入账，流水账里能查到。');
-      setArmed(false);
       setAmountText('');
       setMemo('');
     } catch (err) {
@@ -163,7 +161,6 @@ function ManualLedgerSection() {
             value={clubId}
             onChange={(e) => {
               setClubId(e.target.value);
-              setArmed(false);
               setResult(null);
             }}
           >
@@ -191,7 +188,6 @@ function ManualLedgerSection() {
             value={amountText}
             onChange={(e) => {
               setAmountText(e.target.value);
-              setArmed(false);
               setResult(null);
             }}
             placeholder={kind === 'manual_adjust' ? '-5 或 3.5' : '8.5'}
@@ -206,7 +202,6 @@ function ManualLedgerSection() {
           value={memo}
           onChange={(e) => {
             setMemo(e.target.value);
-            setArmed(false);
             setResult(null);
           }}
           placeholder={kind === 'manual_adjust' ? '例：冲正 #123 重复记的一笔转会税' : '例：2027 赛季顶级联赛第 5 轮胜场奖金'}
@@ -218,14 +213,15 @@ function ManualLedgerSection() {
       {result && (
         <div className="banner info">已入账。该俱乐部当前余额 {result.balance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} m。</div>
       )}
-      <button
-        className={`btn${armed ? ' btn-armed' : ''}`}
-        type="button"
-        disabled={busy || !valid}
-        onClick={() => (armed ? submit() : setArmed(true))}
-      >
-        {busy ? '记账中…' : armed ? '确认入账（再点一次）' : '记这笔账'}
-      </button>
+      <ConfirmButton
+        label="记这笔账"
+        confirmLabel="确认入账（再点一次）"
+        busyLabel="记账中…"
+        busy={busy}
+        disabled={!valid}
+        disarmKey={`${clubId}|${kind}|${amountText}|${memo}`}
+        onConfirm={submit}
+      />
     </section>
   );
 }

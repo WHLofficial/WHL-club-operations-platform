@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowsResponse } from '../../lib/api.ts';
 import { useToast } from '../../lib/toast.tsx';
+import ConfirmButton from '../../components/ConfirmButton.tsx';
+import EmptyState from '../../components/EmptyState.tsx';
+import { usePrompt } from '../../components/PromptDialog.tsx';
 
 export default function MarketPage() {
   return (
@@ -62,6 +65,7 @@ function completedMessage(r: AdminReviewRow): string {
 
 function ReviewsSection() {
   const { show, toastNode } = useToast();
+  const { ask, promptNode } = usePrompt();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<'open' | 'approved' | 'rejected' | 'all'>('open');
   const [notes, setNotes] = useState<Record<number, string>>({});
@@ -114,6 +118,7 @@ function ReviewsSection() {
     <section className="card admin-section">
       <h2>审核队列</h2>
       {toastNode}
+      {promptNode}
       <p className="hint">
         市场成交单与方式单据（续约、解约、海捞、匹配）都在这里盖章：转会成交批准后开启签约谈判，由买方谈妥合同后成约过户；
         方式单据批准即落合同、收附加费。驳回则解冻全部资金、挂牌下架（不收下架费）。
@@ -129,9 +134,7 @@ function ReviewsSection() {
       {reviews === undefined ? (
         <p className="muted">正在翻审核夹…</p>
       ) : reviews.length === 0 ? (
-        <div className="empty-state">
-          <p className="muted">{status === 'open' ? '没有待审的单子。市场很平静。' : '这一栏暂时没有记录。'}</p>
-        </div>
+        <EmptyState>{status === 'open' ? '没有待审的单子。市场很平静。' : '这一栏暂时没有记录。'}</EmptyState>
       ) : (
         <div className="table-wrap">
           <table>
@@ -254,10 +257,10 @@ function ReviewsSection() {
               disabled={!Number.isInteger(Number(interveneId)) || Number(interveneId) <= 0}
               onClick={async () => {
                 const id = Number(interveneId);
-                const reason = window.prompt(`处置原因（${kind} #${id}，会进审计）：`);
-                if (!reason || reason.trim().length < 2) return;
+                const reason = await ask(`处置原因（${kind} #${id}，会进审计）：`);
+                if (!reason) return;
                 try {
-                  const res = await apiPost<{ ok: boolean; status: string }>(`${base}${id}${suffix}`, { reason: reason.trim() });
+                  const res = await apiPost<{ ok: boolean; status: string }>(`${base}${id}${suffix}`, { reason });
                   show(`${label}：${kind} #${id} → ${res.status === 'done' || res.status === 'settled' ? '已执行' : '状态没变（已是目标状态）'}。`);
                   await reload();
                 } catch (err) {
@@ -280,7 +283,6 @@ function ForcedAuctionSection() {
   const { show, toastNode } = useToast();
   const queryClient = useQueryClient();
   const [playerId, setPlayerId] = useState('');
-  const [createArmed, setCreateArmed] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [cancelId, setCancelId] = useState<number | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -302,7 +304,6 @@ function ForcedAuctionSection() {
       const res = await apiPost<ForcedAuctionResult>('/api/admin/forced-auctions', { playerId: Number(playerId) });
       show(`强制拍卖已挂出：挂牌价 ${res.askPrice.toFixed(2)} m，1m 起拍，整单税 50%。`);
       setPlayerId('');
-      setCreateArmed(false);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '建强制拍卖失败', true);
@@ -317,7 +318,6 @@ function ForcedAuctionSection() {
     try {
       await apiPost(`/api/admin/forced-auctions/${listingId}/cancel`, {});
       show('强制拍卖已取消，挂牌下架。');
-      setCancelId(null);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '取消失败', true);
@@ -337,17 +337,17 @@ function ForcedAuctionSection() {
       <div className="inline-form">
         <div className="field">
           <label htmlFor="forced-player">球员 ID</label>
-          <input id="forced-player" className="mono" type="number" min="1" value={playerId} onChange={(e) => { setPlayerId(e.target.value); setCreateArmed(false); }} />
+          <input id="forced-player" className="mono" type="number" min="1" value={playerId} onChange={(e) => setPlayerId(e.target.value)} />
         </div>
-        <button
-          className={`btn${createArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={createBusy || playerId === '' || Number(playerId) < 1}
-          onClick={() => (createArmed ? create() : setCreateArmed(true))}
-          onBlur={() => setCreateArmed(false)}
-        >
-          {createBusy ? '挂出中…' : createArmed ? '再点一次确认挂出' : '挂出强制拍卖'}
-        </button>
+        <ConfirmButton
+          label="挂出强制拍卖"
+          confirmLabel="再点一次确认挂出"
+          busyLabel="挂出中…"
+          busy={createBusy}
+          disabled={playerId === '' || Number(playerId) < 1}
+          disarmKey={playerId}
+          onConfirm={create}
+        />
       </div>
 
       {forced.length > 0 && (
@@ -371,15 +371,18 @@ function ForcedAuctionSection() {
                   <td className="num mono">{l.askPrice.toFixed(2)}</td>
                   <td className="num mono">{l.highestBid?.toFixed(2) ?? '—'}</td>
                   <td>
-                    <button
-                      className={`btn btn-sm btn-danger${cancelId === l.id ? ' btn-armed' : ''}`}
-                      type="button"
+                    <ConfirmButton
+                      className="btn-danger btn-sm"
+                      label="取消拍卖"
+                      confirmLabel="再点一次确认取消"
+                      busyLabel="取消中…"
+                      busy={cancelBusy && cancelId === l.id}
                       disabled={cancelBusy}
-                      onClick={() => (cancelId === l.id ? cancel(l.id) : setCancelId(l.id))}
-                      onBlur={() => setCancelId(null)}
-                    >
-                      {cancelBusy && cancelId === l.id ? '取消中…' : cancelId === l.id ? '再点一次确认取消' : '取消拍卖'}
-                    </button>
+                      onConfirm={() => {
+                        setCancelId(l.id);
+                        return cancel(l.id);
+                      }}
+                    />
                   </td>
                 </tr>
               ))}
@@ -402,8 +405,6 @@ function WindowsSection() {
   const [seq, setSeq] = useState('');
   const [openBusy, setOpenBusy] = useState(false);
   const [declarePeriod, setDeclarePeriod] = useState(false);
-  const [closeArmed, setCloseArmed] = useState(false);
-  const [forceArmed, setForceArmed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const { data, error: windowsError } = useQuery({
@@ -451,8 +452,6 @@ function WindowsSection() {
           ? `第 ${res.season} 赛季窗口 ${res.windowSeq} 已关闭：${res.forceSettled} 场签约谈判按已定条款强制成约。`
           : `第 ${res.season} 赛季窗口 ${res.windowSeq} 已关闭，窗尾截止处理完成。`,
       );
-      setCloseArmed(false);
-      setForceArmed(false);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '关窗失败', true);
@@ -488,32 +487,27 @@ function WindowsSection() {
         同时宣告新成长期（里程碑从开窗时点重新累计；成长期不绑窗口，之后也可以手动宣告）
       </label>
       <div className="inline-form">
-        <button
-          className={`btn${closeArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy}
-          onClick={() => (closeArmed ? closeWindow(false) : setCloseArmed(true))}
-          onBlur={() => setCloseArmed(false)}
-        >
-          {busy ? '处理中…' : closeArmed ? '再点一次确认关窗' : '关闭当前窗口'}
-        </button>
-        <button
-          className={`btn btn-danger${forceArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy}
-          onClick={() => (forceArmed ? closeWindow(true) : setForceArmed(true))}
-          onBlur={() => setForceArmed(false)}
-        >
-          {forceArmed ? '再点一次确认强制关窗' : '强制关窗（强结谈判）'}
-        </button>
+        <ConfirmButton
+          label="关闭当前窗口"
+          confirmLabel="再点一次确认关窗"
+          busyLabel="处理中…"
+          busy={busy}
+          onConfirm={() => closeWindow(false)}
+        />
+        <ConfirmButton
+          className="btn-danger"
+          label="强制关窗（强结谈判）"
+          confirmLabel="再点一次确认强制关窗"
+          busyLabel="处理中…"
+          busy={busy}
+          onConfirm={() => closeWindow(true)}
+        />
       </div>
 
       {data === undefined ? (
         <p className="muted">正在翻窗口台账…</p>
       ) : data.windows.length === 0 ? (
-        <div className="empty-state">
-          <p className="muted">还没有开过窗。建好俱乐部、导完合同之后，从这里开第一扇窗。</p>
-        </div>
+        <EmptyState>还没有开过窗。建好俱乐部、导完合同之后，从这里开第一扇窗。</EmptyState>
       ) : (
         <div className="table-wrap">
           <table>

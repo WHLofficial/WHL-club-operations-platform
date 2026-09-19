@@ -6,6 +6,8 @@ import { api, apiPost, MANUAL_GROWTH_TYPES, type AdminRegistrations, type Compli
 import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
+import ConfirmButton from '../../components/ConfirmButton.tsx';
+import EmptyState from '../../components/EmptyState.tsx';
 
 export default function PlayersPage() {
   return (
@@ -91,18 +93,14 @@ function RegistrationsSection() {
       </form>
 
       {snapshot === undefined ? null : snapshot.season === null ? (
-        <div className="empty-state">
-          <p className="muted">还没有任何注册名单。等教练在球队中心提交名单。</p>
-        </div>
+        <EmptyState>还没有任何注册名单。等教练在球队中心提交名单。</EmptyState>
       ) : (
         <>
           <h3>
             第 {snapshot.season} 赛季注册名单（{snapshot.clubs.length} 支俱乐部）
           </h3>
           {snapshot.clubs.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">这个赛季还没有俱乐部提交注册。</p>
-            </div>
+            <EmptyState>这个赛季还没有俱乐部提交注册。</EmptyState>
           ) : (
             <div className="table-wrap">
               <table>
@@ -154,9 +152,7 @@ function RegistrationsSection() {
             资格检查报告{report.season !== null ? `（第 ${report.season} 赛季）` : ''}
           </h3>
           {report.clubs.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">没有可检查的俱乐部。</p>
-            </div>
+            <EmptyState>没有可检查的俱乐部。</EmptyState>
           ) : (
             <div className="table-wrap">
               <table>
@@ -288,7 +284,7 @@ function PlayerBatchSection() {
       <p className="hint">
         每行一名球员：<code className="mono">球员ID 字段=值 字段=值…</code>。字段与单改接口一致（marketValue / status /
         growthTier / isFutureStar / growable / prestige / badgesSilver / badgesGold / ca / baseCa / pa）；
-        marketValue、ca、baseCa、pa、prestige 可填 null 表示清空。任一行有错则整批不落库，一次最多 200 行。
+        marketValue、ca、baseCa、pa、prestige 可填 null 表示清空。任一行有错就整批拦截，改好再提交；一次最多 200 行。
       </p>
       <textarea
         className="mono"
@@ -297,14 +293,53 @@ function PlayerBatchSection() {
         onChange={(e) => setText(e.target.value)}
         placeholder={'1 marketValue=30.5 ca=82\n2 status=trainee badgesGold=1\n3 ca=null'}
       />
-      <div className="row-gap" style={{ marginTop: '0.5rem' }}>
-        <span className="hint">
-          解析 {goodCount} 行可提交{badCount > 0 ? `，${badCount} 行有错（不拦截提交，服务端整批校验）` : ''}
-        </span>
-        <button className="primary" disabled={busy || goodCount === 0} onClick={runBatch}>
-          {busy ? '提交中…' : `批量更新 ${goodCount} 名球员`}
-        </button>
-      </div>
+      {rows.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th className="num">行号</th>
+                <th className="num">球员 ID</th>
+                <th>改动</th>
+                <th>校验</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td className="num mono">{i + 1}</td>
+                  <td className="num mono">{Number.isInteger(r.id) ? r.id : '—'}</td>
+                  <td className="mono">
+                    {Object.entries(r.fields)
+                      .map(([k, v]) => `${k}=${String(v)}`)
+                      .join(' ') || '—'}
+                  </td>
+                  <td>
+                    {r.error ? (
+                      <>
+                        <span className="badge red">无效</span> <span className="muted">{r.error}</span>
+                      </>
+                    ) : (
+                      <span className="badge ok">有效</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rows.length > 0 && (
+        <div className="row-gap" style={{ marginTop: '0.5rem' }}>
+          <span className="hint">
+            解析 {goodCount} 行可提交
+            {badCount > 0 ? `，${badCount} 行有错（无效行见上表，改好或删掉才能提交）` : ''}。
+          </span>
+          <button className="primary" disabled={busy || goodCount === 0 || badCount > 0} onClick={runBatch}>
+            {busy ? '提交中…' : `批量更新 ${goodCount} 名球员`}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -318,16 +353,12 @@ function GrowthSection() {
   const [eventType, setEventType] = useState(MANUAL_GROWTH_TYPES[1]!.type);
   const [value, setValue] = useState('');
   const [matchRef, setMatchRef] = useState('');
-  const [eventArmed, setEventArmed] = useState(false);
   const [settleSeason, setSettleSeason] = useState('');
   const [half, setHalf] = useState(false);
-  const [runArmed, setRunArmed] = useState(false);
   const [summary, setSummary] = useState<GrowthSettlementResult | null>(null);
   const [tierPlayerId, setTierPlayerId] = useState('');
   const [tier, setTier] = useState('1');
-  const [tierArmed, setTierArmed] = useState(false);
   const [periodNote, setPeriodNote] = useState('');
-  const [periodArmed, setPeriodArmed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const { data: periods, error: periodsError } = useQuery({
@@ -354,15 +385,8 @@ function GrowthSection() {
   const settleValid = Number.isInteger(Number(settleSeason)) && Number(settleSeason) > 0;
   const tierValid = Number.isInteger(Number(tierPlayerId)) && Number(tierPlayerId) > 0;
 
-  function resetArm() {
-    setEventArmed(false);
-    setRunArmed(false);
-    setTierArmed(false);
-    setPeriodArmed(false);
-  }
-
   async function declarePeriod() {
-    if (busy || !periodArmed) return;
+    if (busy) return;
     setBusy(true);
     try {
       const body: Record<string, unknown> = {};
@@ -370,18 +394,16 @@ function GrowthSection() {
       const r = await apiPost<{ ok: boolean; id: number; startEventId: number }>('/api/admin/growth/periods', body);
       show(`新成长期已宣告（第 ${r.id} 期）：里程碑从这个时点之后的进+攻重新累计。`);
       setPeriodNote('');
-      setPeriodArmed(false);
       reloadPeriods();
     } catch (err) {
       show(err instanceof Error ? err.message : '宣告失败', true);
-      resetArm();
     } finally {
       setBusy(false);
     }
   }
 
   async function recordEvent() {
-    if (busy || !eventArmed || !eventValid) return;
+    if (busy || !eventValid) return;
     setBusy(true);
     try {
       const body: Record<string, unknown> = { playerId: pid, eventType };
@@ -393,19 +415,17 @@ function GrowthSection() {
           ? '这笔之前记过（同一球员同一场次同一事件），没有重复入账。'
           : `已补录，+${r.xp} XP。`,
       );
-      setEventArmed(false);
       setValue('');
       setMatchRef('');
     } catch (err) {
       show(err instanceof Error ? err.message : '补录失败', true);
-      resetArm();
     } finally {
       setBusy(false);
     }
   }
 
   async function runSettlement() {
-    if (busy || !runArmed || !settleValid) return;
+    if (busy || !settleValid) return;
     setBusy(true);
     try {
       const r = await apiPost<GrowthSettlementResult>('/api/admin/growth/settlement/run', {
@@ -416,25 +436,21 @@ function GrowthSection() {
       show(
         `结算完成（成长期 ${r.growthPeriodId === 0 ? '未宣告' : `第 ${r.growthPeriodId} 期`}）：训练营 ${r.traineeCount} 人 ×${r.traineeXp} XP，中国计划 ${r.chinaCount} 人，里程碑补发 ${r.milestonesGranted} 条。`,
       );
-      setRunArmed(false);
     } catch (err) {
       show(err instanceof Error ? err.message : '结算失败', true);
-      resetArm();
     } finally {
       setBusy(false);
     }
   }
 
   async function confirmTier() {
-    if (busy || !tierArmed || !tierValid) return;
+    if (busy || !tierValid) return;
     setBusy(true);
     try {
       await apiPost<{ ok: boolean }>(`/api/admin/growth/${Number(tierPlayerId)}/tier`, { tier: Number(tier) });
       show(`档位已核定：球员 #${Number(tierPlayerId)} → 档 ${tier}。`);
-      setTierArmed(false);
     } catch (err) {
       show(err instanceof Error ? err.message : '核定失败', true);
-      resetArm();
     } finally {
       setBusy(false);
     }
@@ -452,22 +468,13 @@ function GrowthSection() {
           球员 ID
           <input
             value={playerId}
-            onChange={(e) => {
-              setPlayerId(e.target.value);
-              resetArm();
-            }}
+            onChange={(e) => setPlayerId(e.target.value)}
             placeholder="如 12"
           />
         </label>
         <label className="field">
           事件类型
-          <select
-            value={eventType}
-            onChange={(e) => {
-              setEventType(e.target.value);
-              resetArm();
-            }}
-          >
+          <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
             {MANUAL_GROWTH_TYPES.map((t) => (
               <option key={t.type} value={t.type}>
                 {t.label}
@@ -478,35 +485,21 @@ function GrowthSection() {
         {selectedType?.needsValue && (
           <label className="field">
             数值
-            <input
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                resetArm();
-              }}
-              placeholder={eventType === 'rating' ? '8.5' : '次数'}
-            />
+            <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={eventType === 'rating' ? '8.5' : '次数'} />
           </label>
         )}
         <label className="field">
           关联场次（可选）
-          <input
-            value={matchRef}
-            onChange={(e) => {
-              setMatchRef(e.target.value);
-              resetArm();
-            }}
-            placeholder="比赛 ID，同场同事件靠它去重"
-          />
+          <input value={matchRef} onChange={(e) => setMatchRef(e.target.value)} placeholder="比赛 ID，同场同事件靠它去重" />
         </label>
-        <button
-          className={`btn${eventArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy || !eventValid || (selectedType?.needsValue === true && value.trim() === '')}
-          onClick={() => (eventArmed ? recordEvent() : setEventArmed(true))}
-        >
-          {eventArmed ? '确认补录（再点一次）' : '补录'}
-        </button>
+        <ConfirmButton
+          label="补录"
+          confirmLabel="确认补录（再点一次）"
+          busy={busy}
+          disabled={!eventValid || (selectedType?.needsValue === true && value.trim() === '')}
+          disarmKey={`${playerId}|${eventType}|${value}|${matchRef}`}
+          onConfirm={recordEvent}
+        />
       </div>
       {selectedType && <p className="hint">折算口径：{selectedType.hint}。</p>}
 
@@ -533,23 +526,15 @@ function GrowthSection() {
       <div className="inline-form">
         <label className="field">
           备注（可选）
-          <input
-            value={periodNote}
-            onChange={(e) => {
-              setPeriodNote(e.target.value);
-              resetArm();
-            }}
-            placeholder="如：半赛季换血期"
-          />
+          <input value={periodNote} onChange={(e) => setPeriodNote(e.target.value)} placeholder="如：半赛季换血期" />
         </label>
-        <button
-          className={`btn${periodArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy}
-          onClick={() => (periodArmed ? declarePeriod() : setPeriodArmed(true))}
-        >
-          {periodArmed ? '确认宣告（再点一次）' : '宣告新成长期'}
-        </button>
+        <ConfirmButton
+          label="宣告新成长期"
+          confirmLabel="确认宣告（再点一次）"
+          busy={busy}
+          disarmKey={periodNote}
+          onConfirm={declarePeriod}
+        />
       </div>
       {periods && periods.periods.length > 1 && (
         <div className="table-wrap">
@@ -583,34 +568,20 @@ function GrowthSection() {
       <div className="inline-form">
         <label className="field">
           赛季编号
-          <input
-            value={settleSeason}
-            onChange={(e) => {
-              setSettleSeason(e.target.value);
-              resetArm();
-            }}
-            placeholder="4"
-          />
+          <input value={settleSeason} onChange={(e) => setSettleSeason(e.target.value)} placeholder="4" />
         </label>
         <label className="field field-check">
-          <input
-            type="checkbox"
-            checked={half}
-            onChange={(e) => {
-              setHalf(e.target.checked);
-              resetArm();
-            }}
-          />
+          <input type="checkbox" checked={half} onChange={(e) => setHalf(e.target.checked)} />
           半赛季训练营（15 XP，整赛季 40）
         </label>
-        <button
-          className={`btn${runArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy || !settleValid}
-          onClick={() => (runArmed ? runSettlement() : setRunArmed(true))}
-        >
-          {runArmed ? '确认结算（再点一次）' : '运行结算'}
-        </button>
+        <ConfirmButton
+          label="运行结算"
+          confirmLabel="确认结算（再点一次）"
+          busy={busy}
+          disabled={!settleValid}
+          disarmKey={`${settleSeason}|${half}`}
+          onConfirm={runSettlement}
+        />
       </div>
       {summary && (
         <div className="table-wrap">
@@ -650,24 +621,11 @@ function GrowthSection() {
       <div className="inline-form">
         <label className="field">
           球员 ID
-          <input
-            value={tierPlayerId}
-            onChange={(e) => {
-              setTierPlayerId(e.target.value);
-              resetArm();
-            }}
-            placeholder="如 10"
-          />
+          <input value={tierPlayerId} onChange={(e) => setTierPlayerId(e.target.value)} placeholder="如 10" />
         </label>
         <label className="field">
           核定档位
-          <select
-            value={tier}
-            onChange={(e) => {
-              setTier(e.target.value);
-              resetArm();
-            }}
-          >
+          <select value={tier} onChange={(e) => setTier(e.target.value)}>
             {[1, 2, 3, 4, 5].map((t) => (
               <option key={t} value={String(t)}>
                 档 {t}
@@ -675,14 +633,14 @@ function GrowthSection() {
             ))}
           </select>
         </label>
-        <button
-          className={`btn${tierArmed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={busy || !tierValid}
-          onClick={() => (tierArmed ? confirmTier() : setTierArmed(true))}
-        >
-          {tierArmed ? '确认核定（再点一次）' : '核定'}
-        </button>
+        <ConfirmButton
+          label="核定"
+          confirmLabel="确认核定（再点一次）"
+          busy={busy}
+          disabled={!tierValid}
+          disarmKey={`${tierPlayerId}|${tier}`}
+          onConfirm={confirmTier}
+        />
       </div>
     </section>
   );

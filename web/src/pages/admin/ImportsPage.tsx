@@ -1,12 +1,14 @@
 // 管理端 · 导入页：球员导入（通道 A/B 两段式）+ 名单合同模板导入（通道 C）
-// （原 Admin.tsx 两 section，增量 15 拆分；解析件在 lib/imports.ts，commit 3 数据层转 TanStack Query）
+// （原 Admin.tsx 两 section，增量 15 拆分；commit 3 数据层接 TanStack Query，commit 4 换共享预览块/切片助手）
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { apiPost, type ContractImportConfirm, type ContractImportPreview, type ImportConfirm, type ImportPreview } from '../../lib/api.ts';
+import { type ContractImportConfirm, type ContractImportPreview, type ImportConfirm, type ImportPreview } from '../../lib/api.ts';
 import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
-import { IMPORT_SLICE, parseXlsx, REQUIRED_C, requiredColumns, toCanonicalContractRow } from '../../lib/imports.ts';
+import { confirmInSlices, parseXlsx, previewInSlices, REQUIRED_C, requiredColumns, toCanonicalContractRow } from '../../lib/imports.ts';
+import ConfirmButton from '../../components/ConfirmButton.tsx';
+import ImportPreviewBlock from '../../components/ImportPreviewBlock.tsx';
 
 export default function ImportsPage() {
   return (
@@ -75,29 +77,11 @@ function ImportSection() {
     patch({ previewBusy: true, result: null, armed: false, preview: null });
     try {
       const futureStars = parseStarIds(starText);
-      let preview: ImportPreview | null = null;
-      let done = 0;
-      for (let i = 0; i < state.rows.length; i += IMPORT_SLICE) {
-        const slice = state.rows.slice(i, i + IMPORT_SLICE);
-        const res = await apiPost<ImportPreview>('/api/admin/players/import/preview', {
-          channel: state.channel,
-          rows: slice,
-          futureStarIds: futureStars,
-        });
-        if (preview === null) {
-          preview = res;
-        } else {
-          preview.stats.total += res.stats.total;
-          preview.stats.valid += res.stats.valid;
-          preview.stats.error += res.stats.error;
-          preview.stats.insertEstimate += res.stats.insertEstimate;
-          preview.stats.updateEstimate += res.stats.updateEstimate;
-          preview.errors.push(...res.errors);
-          if (preview.samples.length < 5) preview.samples.push(...res.samples.slice(0, 5 - preview.samples.length));
-        }
-        done += slice.length;
-        patch({ progress: `预览 ${done} / ${state.rows.length} 行` });
-      }
+      const preview = await previewInSlices<ImportPreview>(
+        state.rows,
+        (slice) => ({ channel: state.channel, rows: slice, futureStarIds: futureStars }),
+        (progress) => patch({ progress }),
+      );
       patch({ preview, previewBusy: false, progress: '' });
     } catch (err) {
       patch({ previewBusy: false, progress: '' });
@@ -110,20 +94,11 @@ function ImportSection() {
     patch({ confirmBusy: true });
     try {
       const futureStars = parseStarIds(starText);
-      let result: ImportConfirm | null = null;
-      let done = 0;
-      for (let i = 0; i < state.rows.length; i += IMPORT_SLICE) {
-        const slice = state.rows.slice(i, i + IMPORT_SLICE);
-        const res = await apiPost<ImportConfirm>('/api/admin/players/import/confirm', {
-          channel: state.channel,
-          rows: slice,
-          futureStarIds: futureStars,
-        });
-        if (result === null) result = res;
-        else result.written += res.written;
-        done += slice.length;
-        patch({ progress: `落库 ${done} / ${state.rows.length} 行` });
-      }
+      const result = await confirmInSlices<ImportConfirm>(
+        state.rows,
+        (slice) => ({ channel: state.channel, rows: slice, futureStarIds: futureStars }),
+        (progress) => patch({ progress }),
+      );
       patch({ result, armed: false, preview: null, rows: [], fileName: '', confirmBusy: false, progress: '' });
       show(`落库完成：${result?.written ?? 0} 行已写入。`);
     } catch (err) {
@@ -133,7 +108,6 @@ function ImportSection() {
   }
 
   const preview = state.preview;
-  const hasErrors = (preview?.stats.error ?? 0) > 0;
 
   return (
     <section className="card admin-section">
@@ -180,15 +154,14 @@ function ImportSection() {
         <button className="btn" type="button" disabled={state.rows.length === 0 || state.previewBusy} onClick={runPreview}>
           {state.previewBusy ? state.progress || '预览中…' : '第一步 · 预览'}
         </button>
-        <button
-          className={`btn${state.armed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={preview === null || hasErrors || state.confirmBusy || state.rows.length === 0}
-          onClick={() => (state.armed ? runConfirm() : patch({ armed: true }))}
-          onBlur={() => patch({ armed: false })}
-        >
-          {state.confirmBusy ? state.progress || '落库中…' : state.armed ? '再点一次确认落库' : '第二步 · 确认落库'}
-        </button>
+        <ConfirmButton
+          label="第二步 · 确认落库"
+          confirmLabel="再点一次确认落库"
+          busyLabel={state.progress || '落库中…'}
+          busy={state.confirmBusy}
+          disabled={preview === null || (preview.stats.error ?? 0) > 0 || state.rows.length === 0}
+          onConfirm={runConfirm}
+        />
       </div>
 
       {state.result && (
@@ -199,90 +172,21 @@ function ImportSection() {
       )}
 
       {preview && (
-        <>
-          <div className="preview-stats">
-            <div className="club-stat">
-              <span className="stat-label">总行数</span>
-              <span className="stat-value mono">{preview.stats.total}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">有效</span>
-              <span className="stat-value mono">{preview.stats.valid}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">错误</span>
-              <span className={`stat-value mono${hasErrors ? ' bad-text' : ''}`}>{preview.stats.error}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">新增预估</span>
-              <span className="stat-value mono">{preview.stats.insertEstimate}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">覆盖预估</span>
-              <span className="stat-value mono">{preview.stats.updateEstimate}</span>
-            </div>
-          </div>
-          {hasErrors && <div className="banner bad">还有 {preview.stats.error} 行没通过校验，修正源文件后再来。</div>}
-          {preview.errors.length > 0 && (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th className="num">行号</th>
-                    <th>字段</th>
-                    <th>问题</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.errors.slice(0, 50).map((e, i) => (
-                    <tr key={`${e.row}-${e.field}-${i}`}>
-                      <td className="num mono">{e.row}</td>
-                      <td className="mono">{e.field}</td>
-                      <td>{e.message}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {preview.samples.length > 0 && (
-            <>
-              <h3>抽样</h3>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th className="num">ID</th>
-                      <th>姓名</th>
-                      <th className="num">CA</th>
-                      <th className="num">PA</th>
-                      <th className="num">年龄</th>
-                      <th>位置</th>
-                      <th>惯用脚</th>
-                      <th>中国计划</th>
-                      <th>未来之星</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.samples.map((s) => (
-                      <tr key={s.fcId}>
-                        <td className="num mono">{s.fcId}</td>
-                        <td>{s.name}</td>
-                        <td className="num mono">{s.ca}</td>
-                        <td className="num mono">{s.pa}</td>
-                        <td className="num">{s.age ?? '—'}</td>
-                        <td>{s.position ?? '—'}</td>
-                        <td>{s.foot === 1 ? '右脚' : '左脚'}</td>
-                        <td>{s.chinaPlan ? '是' : '—'}</td>
-                        <td>{s.futureStar ? '是' : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </>
+        <ImportPreviewBlock
+          preview={preview}
+          sampleKey={(s) => s.fcId}
+          sampleColumns={[
+            { label: 'ID', num: true, render: (s) => s.fcId },
+            { label: '姓名', render: (s) => s.name },
+            { label: 'CA', num: true, render: (s) => s.ca },
+            { label: 'PA', num: true, render: (s) => s.pa },
+            { label: '年龄', num: true, render: (s) => s.age ?? '—' },
+            { label: '位置', render: (s) => s.position ?? '—' },
+            { label: '惯用脚', render: (s) => (s.foot === 1 ? '右脚' : '左脚') },
+            { label: '中国计划', render: (s) => (s.chinaPlan ? '是' : '—') },
+            { label: '未来之星', render: (s) => (s.futureStar ? '是' : '—') },
+          ]}
+        />
       )}
     </section>
   );
@@ -296,12 +200,6 @@ function parseStarIds(text: string): number[] {
 }
 
 /* ---------- 名单合同模板导入（通道 C） ---------- */
-
-const C_OUTCOME_LABEL: Record<ContractImportPreview['samples'][number]['outcome'], string> = {
-  create: '新建',
-  update: '覆盖',
-  claim: '认领',
-};
 
 function ContractsSection() {
   const { show, toastNode } = useToast();
@@ -349,26 +247,11 @@ function ContractsSection() {
     setArmed(false);
     setPreview(null);
     try {
-      let agg: ContractImportPreview | null = null;
-      for (let i = 0; i < rows.length; i += IMPORT_SLICE) {
-        const slice = rows.slice(i, i + IMPORT_SLICE);
-        const res = await apiPost<ContractImportPreview>('/api/admin/players/import/preview', {
-          channel: 'C',
-          clubId: Number(clubId),
-          rows: slice,
-        });
-        if (agg === null) agg = res;
-        else {
-          agg.stats.total += res.stats.total;
-          agg.stats.valid += res.stats.valid;
-          agg.stats.error += res.stats.error;
-          agg.stats.insertEstimate += res.stats.insertEstimate;
-          agg.stats.updateEstimate += res.stats.updateEstimate;
-          agg.errors.push(...res.errors);
-          if (agg.samples.length < 5) agg.samples.push(...res.samples.slice(0, 5 - agg.samples.length));
-        }
-        setProgress(`预览 ${Math.min(i + IMPORT_SLICE, rows.length)} / ${rows.length} 行`);
-      }
+      const agg = await previewInSlices<ContractImportPreview>(
+        rows,
+        (slice) => ({ channel: 'C', clubId: Number(clubId), rows: slice }),
+        setProgress,
+      );
       setPreview(agg);
     } catch (err) {
       show(err instanceof Error ? err.message : '预览失败', true);
@@ -382,18 +265,11 @@ function ContractsSection() {
     if (!armed || confirmBusy || !clubId) return;
     setConfirmBusy(true);
     try {
-      let agg: ContractImportConfirm | null = null;
-      for (let i = 0; i < rows.length; i += IMPORT_SLICE) {
-        const slice = rows.slice(i, i + IMPORT_SLICE);
-        const res = await apiPost<ContractImportConfirm>('/api/admin/players/import/confirm', {
-          channel: 'C',
-          clubId: Number(clubId),
-          rows: slice,
-        });
-        if (agg === null) agg = res;
-        else agg.written += res.written;
-        setProgress(`落库 ${Math.min(i + IMPORT_SLICE, rows.length)} / ${rows.length} 行`);
-      }
+      const agg = await confirmInSlices<ContractImportConfirm>(
+        rows,
+        (slice) => ({ channel: 'C', clubId: Number(clubId), rows: slice }),
+        setProgress,
+      );
       setResult(agg);
       setArmed(false);
       setPreview(null);
@@ -408,8 +284,6 @@ function ContractsSection() {
       setProgress('');
     }
   }
-
-  const hasErrors = (preview?.stats.error ?? 0) > 0;
 
   return (
     <section className="card admin-section">
@@ -444,15 +318,14 @@ function ContractsSection() {
         <button className="btn" type="button" disabled={rows.length === 0 || !clubId || previewBusy} onClick={runPreview}>
           {previewBusy ? progress || '预览中…' : '第一步 · 预览'}
         </button>
-        <button
-          className={`btn${armed ? ' btn-armed' : ''}`}
-          type="button"
-          disabled={preview === null || hasErrors || confirmBusy || rows.length === 0 || !clubId}
-          onClick={() => (armed ? runConfirm() : setArmed(true))}
-          onBlur={() => setArmed(false)}
-        >
-          {confirmBusy ? progress || '落库中…' : armed ? '再点一次确认落库' : '第二步 · 确认落库'}
-        </button>
+        <ConfirmButton
+          label="第二步 · 确认落库"
+          confirmLabel="再点一次确认落库"
+          busyLabel={progress || '落库中…'}
+          busy={confirmBusy}
+          disabled={preview === null || (preview.stats.error ?? 0) > 0 || rows.length === 0 || !clubId}
+          onConfirm={runConfirm}
+        />
       </div>
 
       {result && (
@@ -463,86 +336,20 @@ function ContractsSection() {
       )}
 
       {preview && (
-        <>
-          <div className="preview-stats">
-            <div className="club-stat">
-              <span className="stat-label">总行数</span>
-              <span className="stat-value mono">{preview.stats.total}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">有效</span>
-              <span className="stat-value mono">{preview.stats.valid}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">错误</span>
-              <span className={`stat-value mono${hasErrors ? ' bad-text' : ''}`}>{preview.stats.error}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">新建/认领</span>
-              <span className="stat-value mono">{preview.stats.insertEstimate}</span>
-            </div>
-            <div className="club-stat">
-              <span className="stat-label">覆盖</span>
-              <span className="stat-value mono">{preview.stats.updateEstimate}</span>
-            </div>
-          </div>
-          {hasErrors && <div className="banner bad">还有 {preview.stats.error} 行没通过校验，修正源文件后再来。</div>}
-          {preview.errors.length > 0 && (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th className="num">行号</th>
-                    <th>字段</th>
-                    <th>问题</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.errors.slice(0, 50).map((e, i) => (
-                    <tr key={`${e.row}-${e.field}-${i}`}>
-                      <td className="num mono">{e.row}</td>
-                      <td className="mono">{e.field}</td>
-                      <td>{e.message}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {preview.samples.length > 0 && (
-            <>
-              <h3>抽样</h3>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th className="num">uid</th>
-                      <th>球员</th>
-                      <th className="num">违约金</th>
-                      <th className="num">工资</th>
-                      <th>类型</th>
-                      <th>效力起点</th>
-                      <th>动作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.samples.map((s) => (
-                      <tr key={s.uid}>
-                        <td className="num mono">{s.uid}</td>
-                        <td>{s.playerName ?? '—'}</td>
-                        <td className="num mono">{s.releaseFee}</td>
-                        <td className="num mono">{s.wage}</td>
-                        <td>{s.contractType === 'trainee' ? '训练营' : '正式'}</td>
-                        <td>{s.effectiveFrom}</td>
-                        <td>{C_OUTCOME_LABEL[s.outcome]}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </>
+        <ImportPreviewBlock
+          preview={preview}
+          insertLabel="新建/认领"
+          sampleKey={(s) => s.uid}
+          sampleColumns={[
+            { label: 'uid', num: true, render: (s) => s.uid },
+            { label: '球员', render: (s) => s.playerName ?? '—' },
+            { label: '违约金', num: true, render: (s) => s.releaseFee },
+            { label: '工资', num: true, render: (s) => s.wage },
+            { label: '类型', render: (s) => (s.contractType === 'trainee' ? '训练营' : '正式') },
+            { label: '效力起点', render: (s) => s.effectiveFrom },
+            { label: '动作', render: (s) => (s.outcome === 'create' ? '新建' : s.outcome === 'update' ? '覆盖' : '认领') },
+          ]}
+        />
       )}
     </section>
   );

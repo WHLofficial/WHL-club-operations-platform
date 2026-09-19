@@ -5,6 +5,9 @@ import { api, apiDelete, apiPost, type AdminClubRow, type StadiumAdmin } from '.
 import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
+import ConfirmButton from '../../components/ConfirmButton.tsx';
+import EmptyState from '../../components/EmptyState.tsx';
+import { usePrompt } from '../../components/PromptDialog.tsx';
 
 export default function ClubsPage() {
   return (
@@ -16,11 +19,11 @@ export default function ClubsPage() {
 
 function ClubsSection() {
   const { show, toastNode } = useToast();
+  const { ask, promptNode } = usePrompt();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
-  const [unbinding, setUnbinding] = useState<number | null>(null);
   const [stadium, setStadium] = useState<{ club: string; clubId: number; form: StadiumForm; tierName: string | null; fans: number; influence: StadiumAdmin['influence'] } | null>(null);
 
   const { data: clubsData, error: clubsError } = useQuery({
@@ -65,7 +68,6 @@ function ClubsSection() {
     try {
       await apiPost('/api/admin/bindings/unbind', { userId: club.binding.userId });
       show(`${club.name} 已解绑。`);
-      setUnbinding(null);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '解绑失败', true);
@@ -125,9 +127,9 @@ function ClubsSection() {
         await apiDelete(`/api/admin/clubs/${club.id}/transfer-ban`);
         show(`${club.name} 已解冻转会权限。`);
       } else {
-        const reason = window.prompt(`冻结「${club.name}」转会权限——原因（至少两个字，会进审计）：`);
-        if (!reason || reason.trim().length < 2) return;
-        await apiPost(`/api/admin/clubs/${club.id}/transfer-ban`, { reason: reason.trim() });
+        const reason = await ask(`冻结「${club.name}」转会权限——原因（至少两个字，会进审计）：`);
+        if (!reason) return;
+        await apiPost(`/api/admin/clubs/${club.id}/transfer-ban`, { reason });
         show(`${club.name} 转会权限已冻结，挂单/出价/海捞/议价全被拦下。`);
       }
       reload();
@@ -140,6 +142,7 @@ function ClubsSection() {
     <section className="card admin-section">
       <h2>俱乐部管理</h2>
       {toastNode}
+      {promptNode}
       <form className="inline-form" onSubmit={createClub}>
         <label className="field grow">
           俱乐部名字
@@ -154,9 +157,7 @@ function ClubsSection() {
       {clubs === null ? (
         <p className="muted">正在翻登记册…</p>
       ) : clubs.length === 0 ? (
-        <div className="empty-state">
-          <p className="muted">登记册还是空的。先建第一支俱乐部。</p>
-        </div>
+        <EmptyState>登记册还是空的。先建第一支俱乐部。</EmptyState>
       ) : (
         <div className="table-wrap">
           <table>
@@ -181,14 +182,13 @@ function ClubsSection() {
                     {club.binding ? (
                       <>
                         {club.binding.userName ?? `用户 #${club.binding.userId}`}
-                        <button
-                          className="btn btn-ghost btn-sm unbind-btn"
-                          type="button"
-                          onClick={() => (unbinding === club.id ? doUnbind(club) : setUnbinding(club.id))}
-                          onBlur={() => setUnbinding(null)}
-                        >
-                          {unbinding === club.id ? '再点一次确认解绑' : '解绑'}
-                        </button>
+                        <ConfirmButton
+                          className="btn-ghost btn-sm unbind-btn"
+                          label="解绑"
+                          confirmLabel="再点一次确认解绑"
+                          disarmKey={club.binding ? 'bound' : 'unbound'}
+                          onConfirm={() => doUnbind(club)}
+                        />
                       </>
                     ) : (
                       <span className="muted">未绑定</span>

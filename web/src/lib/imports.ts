@@ -1,5 +1,7 @@
 // 管理端导入共用解析件（原 Admin.tsx 顶部 helper，增量 15 拆出供球员导入/合同导入两页共用）
 // 每个请求带的行数上限：Worker 侧校验 + 落库都按小批走，前端切片
+import { apiPost } from './api.ts';
+
 export const IMPORT_SLICE = 1000;
 export const REQUIRED_A = ['ID', 'Name', 'Age', 'CA', 'PA', 'naID', 'PosID1', 'FootID'];
 export const REQUIRED_B = ['playerid', 'overallrating', 'potential', 'Position', 'preferredfoot'];
@@ -47,4 +49,55 @@ export async function parseXlsx(file: File, channel: Channel): Promise<Record<st
 
 export function requiredColumns(channel: Channel): string[] {
   return channel === 'A' ? REQUIRED_A : channel === 'B' ? REQUIRED_B : REQUIRED_C;
+}
+
+// 分片预览 + 聚合（增量 15 commit 4 抽出：原 A/B/C 三处几乎相同的切片循环）
+// buildBody 决定通道差异（futureStarIds / clubId），进度文案沿用原口径；
+// 泛型兼容 ImportPreview（A/B）与 ContractImportPreview（C）
+interface PreviewAggLike {
+  stats: { total: number; valid: number; error: number; insertEstimate: number; updateEstimate: number };
+  errors: { row: number; field: string; message: string }[];
+  samples: unknown[];
+}
+
+export async function previewInSlices<P extends PreviewAggLike>(
+  rows: Record<string, unknown>[],
+  buildBody: (slice: Record<string, unknown>[]) => Record<string, unknown>,
+  onProgress: (text: string) => void,
+): Promise<P> {
+  let agg: P | null = null;
+  for (let i = 0; i < rows.length; i += IMPORT_SLICE) {
+    const slice = rows.slice(i, i + IMPORT_SLICE);
+    const res = (await apiPost<P>('/api/admin/players/import/preview', buildBody(slice))) as P & PreviewAggLike;
+    if (agg === null) {
+      agg = res;
+    } else {
+      agg.stats.total += res.stats.total;
+      agg.stats.valid += res.stats.valid;
+      agg.stats.error += res.stats.error;
+      agg.stats.insertEstimate += res.stats.insertEstimate;
+      agg.stats.updateEstimate += res.stats.updateEstimate;
+      agg.errors.push(...res.errors);
+      if (agg.samples.length < 5) agg.samples.push(...res.samples.slice(0, 5 - agg.samples.length));
+    }
+    onProgress(`预览 ${Math.min(i + IMPORT_SLICE, rows.length)} / ${rows.length} 行`);
+  }
+  return agg!;
+}
+
+// 分片落库 + 聚合（只累加 written，原三通道口径一致）
+export async function confirmInSlices<C extends { written: number }>(
+  rows: Record<string, unknown>[],
+  buildBody: (slice: Record<string, unknown>[]) => Record<string, unknown>,
+  onProgress: (text: string) => void,
+): Promise<C> {
+  let agg: C | null = null;
+  for (let i = 0; i < rows.length; i += IMPORT_SLICE) {
+    const slice = rows.slice(i, i + IMPORT_SLICE);
+    const res = await apiPost<C>('/api/admin/players/import/confirm', buildBody(slice));
+    if (agg === null) agg = res;
+    else agg.written += res.written;
+    onProgress(`落库 ${Math.min(i + IMPORT_SLICE, rows.length)} / ${rows.length} 行`);
+  }
+  return agg!;
 }
