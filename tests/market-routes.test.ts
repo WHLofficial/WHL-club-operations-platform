@@ -700,3 +700,83 @@ describe('管理介入扩权（增量 10）', () => {
     expect((fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'admin_negotiation_void'").get() as { n: number }).n).toBe(1);
   });
 });
+
+describe('暂停出价（增量 15：全局开关 + 单挂牌冻结）', () => {
+  it('全局暂停：出价 423 code=bid_paused，恢复后可出价；开关留审计', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    const listRes = await listPlayer(mf, 10, 15);
+    const listingId = ((await listRes.json()) as { listingId: number }).listingId;
+
+    const pauseRes = await post('/api/admin/market/pause-bids', { paused: true }, 'tok-admin', fx.env);
+    expect(pauseRes.status).toBe(200);
+    const getState = await get('/api/admin/market/pause-bids', 'tok-admin', fx.env);
+    expect(((await getState.json()) as { paused: boolean }).paused).toBe(true);
+
+    const bidRes = await post(`/api/market/listings/${listingId}/bids`, { amount: 15 }, 'tok-coach2', fx.env);
+    expect(bidRes.status).toBe(423);
+    expect(((await bidRes.json()) as { code?: string }).code).toBe('bid_paused');
+    // 非法 body 拒绝
+    expect((await post('/api/admin/market/pause-bids', { paused: 'yes' }, 'tok-admin', fx.env)).status).toBe(400);
+
+    const resumeRes = await post('/api/admin/market/pause-bids', { paused: false }, 'tok-admin', fx.env);
+    expect(resumeRes.status).toBe(200);
+    const okRes = await post(`/api/market/listings/${listingId}/bids`, { amount: 15 }, 'tok-coach2', fx.env);
+    expect(okRes.status).toBe(201);
+    // 审计只在状态实际变化时留痕：暂停 + 恢复各一条（中间非法 body 不留痕）
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'market_bid_pause'")?.n).toBe(2);
+  });
+
+  it('单挂牌暂停：只挡该件（423 code=listing_bid_paused），别件照常；详情透出 bidPaused', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    const listRes = await listPlayer(mf, 10, 15);
+    const id1 = ((await listRes.json()) as { listingId: number }).listingId;
+    const p2 = await seedSecondPlayer(fx, mf.sellerClub);
+    const list2Res = await listPlayer(mf, p2, 10);
+    const id2 = ((await list2Res.json()) as { listingId: number }).listingId;
+
+    expect((await post(`/api/admin/market/listings/${id1}/pause-bid`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    // 该件被拒
+    const bid1 = await post(`/api/market/listings/${id1}/bids`, { amount: 15 }, 'tok-coach2', fx.env);
+    expect(bid1.status).toBe(423);
+    expect(((await bid1.json()) as { code?: string }).code).toBe('listing_bid_paused');
+    // 别件照常
+    expect((await post(`/api/market/listings/${id2}/bids`, { amount: 10 }, 'tok-coach2', fx.env)).status).toBe(201);
+    // 板与详情透出 bidPaused
+    const board = await get('/api/market/listings?status=all', 'tok-viewer', fx.env);
+    const boardRows = ((await board.json()) as { listings: { id: number; bidPaused: boolean }[] }).listings;
+    expect(boardRows.find((r) => r.id === id1)?.bidPaused).toBe(true);
+    expect(boardRows.find((r) => r.id === id2)?.bidPaused).toBe(false);
+    const detail = await get(`/api/market/listings/${id1}`, 'tok-viewer', fx.env);
+    const detailBody = (await detail.json()) as { marketBidPaused: boolean; listing: { bidPaused: boolean } };
+    expect(detailBody.listing.bidPaused).toBe(true);
+    expect(detailBody.marketBidPaused).toBe(false);
+    // 恢复后可出价；重复暂停同向操作幂等（仍在竞价期）
+    expect((await post(`/api/admin/market/listings/${id1}/resume-bid`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    expect((await post(`/api/market/listings/${id1}/bids`, { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'market_listing_bid_pause'")?.n).toBe(2);
+  });
+
+  it('暂停不改变结算时刻：bid_paused=1 的挂牌到期照常进待审', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    // 先出一口价进 bidding（惰性结算只对竞价中的单子计时）
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    expect((await post('/api/admin/market/listings/1/pause-bid', {}, 'tok-admin', fx.env)).status).toBe(200);
+    await ageListingForDeadline(fx, 1);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')?.status).toBe('pending_review');
+  });
+
+  it('非竞价期/不存在的挂牌：pause-bid 404 / 409', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    expect((await post('/api/admin/market/listings/999/pause-bid', {}, 'tok-admin', fx.env)).status).toBe(404);
+    await listPlayer(mf, 10, 15);
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    await ageListingForDeadline(fx, 1); // → pending_review
+    expect((await post('/api/admin/market/listings/1/pause-bid', {}, 'tok-admin', fx.env)).status).toBe(409);
+    expect((await post('/api/admin/market/listings/1/resume-bid', {}, 'tok-admin', fx.env)).status).toBe(409);
+  });
+});

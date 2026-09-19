@@ -501,19 +501,29 @@ function DetailSection({
   const isActivator = myClub !== null && l.activatedBy === myClub.id;
   const isSeller = myClub !== null && myClub.id === l.sellerClub.id;
   const baseCanBid =
-    myClub !== null && myClub.isCoach && myClub.id !== l.sellerClub.id && (l.status === 'listed' || l.status === 'bidding') && l.windowOpen;
+    myClub !== null &&
+    myClub.isCoach &&
+    myClub.id !== l.sellerClub.id &&
+    (l.status === 'listed' || l.status === 'bidding') &&
+    l.windowOpen &&
+    !l.bidPaused &&
+    !detail.marketBidPaused;
   // 激活首价窗：只有激活方能落价，且金额固定为挂牌价
   const canBid = baseCanBid && !(l.firstBidPending && !isActivator);
   const bidHint = !l.windowOpen
     ? '这单所属的转会窗口已经关了。'
-    : l.status === 'pending_review'
-      ? '这单已截止，正在等管理组审核。'
-      : l.status === 'matched_pending'
-        ? `首价已落定，24 小时匹配窗内等 ${l.sellerClub.name} 决定是否匹配（${deadlineText(l.matchDeadline)} 截止）。`
-        : l.status === 'delisted'
-          ? '这单已经下架。'
-          : myClub?.id === l.sellerClub.id
-            ? '自家的挂牌，等别人来出价。'
+    : l.bidPaused
+      ? '这单被管理组暂停出价，已出的价与到期结算不受影响。'
+      : detail.marketBidPaused
+        ? '全市场出价已暂停（管理组干预中），恢复后再来。'
+        : l.status === 'pending_review'
+          ? '这单已截止，正在等管理组审核。'
+          : l.status === 'matched_pending'
+            ? `首价已落定，24 小时匹配窗内等 ${l.sellerClub.name} 决定是否匹配（${deadlineText(l.matchDeadline)} 截止）。`
+            : l.status === 'delisted'
+              ? '这单已经下架。'
+              : myClub?.id === l.sellerClub.id
+                ? '自家的挂牌，等别人来出价。'
             : l.firstBidPending && !isActivator
               ? `激活首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价（${deadlineText(l.activationDeadline, '')} 前须落价）。`
               : null;

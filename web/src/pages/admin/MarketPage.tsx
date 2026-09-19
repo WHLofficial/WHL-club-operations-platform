@@ -1,5 +1,5 @@
-// 管理端 · 转会页：审核队列（含市场干预）+ 强制拍卖（规则 4.4.5）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
-// （原 Admin.tsx 三 section，增量 15 拆分；commit 3 数据层转 TanStack Query，暂停出价控件在后续 commit 加入）
+// 管理端 · 转会页：审核队列（含市场干预）+ 暂停出价 + 强制拍卖（规则 4.4.5）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
+// （原 Admin.tsx 三 section，增量 15 拆分；暂停出价为增量 15 commit 5 新增）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowsResponse } from '../../lib/api.ts';
@@ -238,6 +238,7 @@ function ReviewsSection() {
           对卡在竞价/匹配窗或签约谈判的单据直接处置：撤出价、强制送审、强制作废（解冻资金、球员还原）、
           谈判强制按预期工资成交或作废谈判。所有动作都要求填原因并进审计。
         </p>
+        <BidPauseSwitch />
         <div className="inline-form">
           <label className="field">
             ID
@@ -277,6 +278,65 @@ function ReviewsSection() {
   );
 }
 
+/* ---------- 暂停出价（全局开关，单挂牌按钮在强制拍卖行内） ---------- */
+
+function BidPauseSwitch() {
+  const { show, toastNode } = useToast();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  const { data } = useQuery({
+    queryKey: ['admin', 'pause-bids'],
+    queryFn: () => api<{ paused: boolean }>('/api/admin/market/pause-bids'),
+  });
+
+  async function toggle(paused: boolean) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await apiPost('/api/admin/market/pause-bids', { paused });
+      show(
+        paused
+          ? '全市场出价已暂停：不能再对新挂牌出价，已出的价与到期结算不受影响。'
+          : '全市场出价已恢复。',
+      );
+      queryClient.invalidateQueries({ queryKey: ['admin', 'pause-bids'] });
+    } catch (err) {
+      show(err instanceof Error ? err.message : '操作失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="inline-form">
+      {toastNode}
+      <span className="hint">
+        全局暂停出价：
+        {data === undefined ? '…' : data.paused ? '已暂停（全市场不能出新价，结算照常）' : '未暂停'}
+      </span>
+      {data?.paused ? (
+        <ConfirmButton
+          label="恢复全市场出价"
+          confirmLabel="再点一次确认恢复"
+          busyLabel="处理中…"
+          busy={busy}
+          onConfirm={() => toggle(false)}
+        />
+      ) : (
+        <ConfirmButton
+          className="btn-danger"
+          label="暂停全市场出价"
+          confirmLabel="再点一次确认暂停"
+          busyLabel="处理中…"
+          busy={busy}
+          onConfirm={() => toggle(true)}
+        />
+      )}
+    </div>
+  );
+}
+
 /* ---------- 强制拍卖（规则 4.4.5） ---------- */
 
 function ForcedAuctionSection() {
@@ -286,6 +346,7 @@ function ForcedAuctionSection() {
   const [createBusy, setCreateBusy] = useState(false);
   const [cancelId, setCancelId] = useState<number | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [pauseBusyId, setPauseBusyId] = useState<number | null>(null);
 
   // 原 catch → setOpen(null)：失败时强制拍卖列表静默置空，queryFn 里保持一致
   const { data: open } = useQuery({
@@ -326,13 +387,27 @@ function ForcedAuctionSection() {
     }
   }
 
+  async function setBidPause(listingId: number, paused: boolean) {
+    if (pauseBusyId !== null) return;
+    setPauseBusyId(listingId);
+    try {
+      await apiPost(`/api/admin/market/listings/${listingId}/${paused ? 'pause-bid' : 'resume-bid'}`, {});
+      show(paused ? `挂牌 #${listingId} 已暂停出价，其余市场照常。` : `挂牌 #${listingId} 已恢复出价。`);
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '操作失败', true);
+    } finally {
+      setPauseBusyId(null);
+    }
+  }
+
   return (
     <section className="card admin-section">
       <h2>强制拍卖</h2>
       {toastNode}
       <p className="hint">
         资格检查未过的处置手段：按 1m 挂牌强拍（只有本队 CA 前六、不含门将的球员可拍），成交整单税 50%。
-        未成交前可以取消。
+        未成交前可以取消；行内可单独暂停/恢复这一件的出价（其余市场照常）。
       </p>
       <div className="inline-form">
         <div className="field">
@@ -371,18 +446,29 @@ function ForcedAuctionSection() {
                   <td className="num mono">{l.askPrice.toFixed(2)}</td>
                   <td className="num mono">{l.highestBid?.toFixed(2) ?? '—'}</td>
                   <td>
-                    <ConfirmButton
-                      className="btn-danger btn-sm"
-                      label="取消拍卖"
-                      confirmLabel="再点一次确认取消"
-                      busyLabel="取消中…"
-                      busy={cancelBusy && cancelId === l.id}
-                      disabled={cancelBusy}
-                      onConfirm={() => {
-                        setCancelId(l.id);
-                        return cancel(l.id);
-                      }}
-                    />
+                    <div className="inline-form">
+                      <ConfirmButton
+                        className="btn-sm"
+                        label={l.bidPaused ? '恢复出价' : '暂停出价'}
+                        confirmLabel={l.bidPaused ? '再点一次确认恢复' : '再点一次确认暂停'}
+                        busyLabel={l.bidPaused ? '恢复中…' : '暂停中…'}
+                        busy={pauseBusyId === l.id}
+                        disabled={pauseBusyId !== null && pauseBusyId !== l.id}
+                        onConfirm={() => setBidPause(l.id, !l.bidPaused)}
+                      />
+                      <ConfirmButton
+                        className="btn-danger btn-sm"
+                        label="取消拍卖"
+                        confirmLabel="再点一次确认取消"
+                        busyLabel="取消中…"
+                        busy={cancelBusy && cancelId === l.id}
+                        disabled={cancelBusy}
+                        onConfirm={() => {
+                          setCancelId(l.id);
+                          return cancel(l.id);
+                        }}
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}

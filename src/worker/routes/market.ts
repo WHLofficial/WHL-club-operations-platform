@@ -16,6 +16,7 @@ import {
 } from '../../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from '../seasons.ts';
 import { loadMarketContext } from '../market-context.ts';
+import { createConfigService } from '../../core/config.ts';
 import { availableBalance } from '../ledger.ts';
 import { settleOverdue, settleListingForReview } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
@@ -47,6 +48,7 @@ interface ListingRow {
   activated_by: number | null;
   activation_deadline: string | null;
   match_deadline: string | null;
+  bid_paused?: number;
   activator_name?: string | null;
   player_name: string;
   position: string | null;
@@ -87,7 +89,7 @@ app.get('/market/listings', async (c) => {
   const ph = statuses.map(() => '?').join(', ');
   const rows = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
-            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline,
+            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
             p.name AS player_name, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name
      FROM listings l
@@ -138,6 +140,7 @@ app.get('/market/listings', async (c) => {
         status: r.status,
         listedAt: r.listed_at,
         lastBidAt: r.last_bid_at,
+        bidPaused: r.bid_paused === 1,
         highestBid: a?.highest ?? null,
         bidCount: a?.count ?? 0,
         activatedBy: r.activated_by,
@@ -363,7 +366,7 @@ app.get('/market/listings/:id', async (c) => {
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
   const listing = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
-            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline,
+            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
             p.name AS player_name, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name, ca2.name AS activator_name
      FROM listings l
@@ -412,6 +415,7 @@ app.get('/market/listings/:id', async (c) => {
       : round2(listing.ask_price);
 
   return c.json({
+    marketBidPaused: (await createConfigService(c.env.DB).get('market_bid_paused')) === 'true',
     listing: {
       id: listing.id,
       player: { id: listing.player_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },
@@ -421,6 +425,7 @@ app.get('/market/listings/:id', async (c) => {
       status: listing.status,
       listedAt: listing.listed_at,
       lastBidAt: listing.last_bid_at,
+      bidPaused: listing.bid_paused === 1,
       releaseFee: contract?.release_fee ?? null,
       deadlineAt,
       deadlineNote: listing.deadline_note,
@@ -469,8 +474,13 @@ app.post('/market/listings/:id/bids', async (c) => {
   // 惰性结算先跑：可能这单刚好截止，出价要被拒
   await settleOverdue(c.env);
 
+  // 全局暂停出价（管理端干预开关；已出的价与到期结算不受影响）
+  if ((await createConfigService(c.env.DB).get('market_bid_paused')) === 'true') {
+    throw new HttpError(423, '全市场出价已暂停（管理组干预中），恢复后再来', 'bid_paused');
+  }
+
   const listing = await c.env.DB.prepare(
-    `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.activated_by, l.activation_deadline, l.season, l.window_seq,
+    `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.activated_by, l.activation_deadline, l.season, l.window_seq, l.bid_paused,
             ct.contract_type AS player_contract_type
      FROM listings l
      LEFT JOIN contracts ct ON ct.player_id = l.player_id AND ct.is_active = 1
@@ -488,9 +498,11 @@ app.post('/market/listings/:id/bids', async (c) => {
       activation_deadline: string | null;
       season: number | null;
       window_seq: number | null;
+      bid_paused: number;
       player_contract_type: string | null;
     }>();
   if (!listing) throw new HttpError(404, '这单挂牌不存在');
+  if (listing.bid_paused === 1) throw new HttpError(423, '这单被管理组暂停出价，恢复后再来', 'listing_bid_paused');
   if (listing.seller_club_id === club.id) throw new HttpError(403, '不能对自己俱乐部的挂牌出价');
   if (listing.type === 'activation' && listing.status === 'matched_pending') {
     throw new HttpError(409, '首价已落定，被激活方正在考虑是否匹配，这单不开放竞价');

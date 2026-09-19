@@ -337,6 +337,7 @@ export interface MarketListing {
   status: ListingStatus;
   listedAt: string;
   lastBidAt: string | null;
+  bidPaused: boolean;
   highestBid: number | null;
   bidCount: number;
   activatedBy: number | null;
@@ -354,6 +355,7 @@ export interface MarketListings {
 }
 
 export interface MarketListingDetail {
+  marketBidPaused: boolean;
   listing: MarketListing & {
     releaseFee: number | null;
     windowOpen: boolean;

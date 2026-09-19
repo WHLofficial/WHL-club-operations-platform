@@ -59,6 +59,7 @@ export const CONFIG_KEYS = [
   'young_blend_age',
   'renewal_raise',
   'window_force_settle',
+  'market_bid_paused',
   'review_amount_threshold',
   'bid_pattern_alert',
   'prize_table',
@@ -161,6 +162,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   young_blend_age: '25',
   renewal_raise: '0.05,0.15',
   window_force_settle: 'false',
+  market_bid_paused: 'false',
 };
 
 export const CONFIG_SECRET_KEYS: ReadonlySet<string> = new Set([

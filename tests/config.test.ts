@@ -120,7 +120,7 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 57 键，与 §13 一致', () => {
-    expect(CONFIG_KEYS.length).toBe(57);
+  it('注册表 58 键（§13 + 增量 15 market_bid_paused）', () => {
+    expect(CONFIG_KEYS.length).toBe(58);
   });
 });

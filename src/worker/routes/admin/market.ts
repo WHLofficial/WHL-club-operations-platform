@@ -3,6 +3,9 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { requireAdmin } from '../../../lib/session.ts';
+import { writeAudit } from '../../../lib/audit.ts';
+import { HttpError } from '../../../lib/http.ts';
+import { createConfigService } from '../../../core/config.ts';
 import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminCancelSigning, requireReason } from '../../market-intervene.ts';
 import { listWindows, openWindow, closeWindow } from '../../window-machine.ts';
 import { createForcedAuction, cancelForcedAuction } from '../../bypass.ts';
@@ -51,6 +54,63 @@ app.post('/negotiations/:id/void', async (c) => {
   const status = await adminCancelSigning(c.env, Number(c.req.param('id')), user.id, reason);
   return c.json({ ok: true, status });
 });
+
+// ---- 暂停出价（增量 15：全局开关 + 单挂牌冻结；只挡新出价，不改变结算时刻） ----
+
+// GET /api/admin/market/pause-bids —— 全局暂停状态
+app.get('/market/pause-bids', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const service = createConfigService(c.env.DB);
+  return c.json({ paused: (await service.get('market_bid_paused')) === 'true' });
+});
+
+// POST /api/admin/market/pause-bids —— 全局开关（body {paused}；普通 admin 可操作，审计 market_bid_pause）
+app.post('/market/pause-bids', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { paused?: unknown } | null;
+  if (typeof body?.paused !== 'boolean') throw new HttpError(400, 'paused 须为布尔值');
+  const service = createConfigService(c.env.DB);
+  const before = (await service.get('market_bid_paused')) === 'true';
+  if (before !== body.paused) {
+    await service.set('market_bid_paused', body.paused ? 'true' : 'false');
+    await writeAudit(c.env.DB, {
+      actor: user.id,
+      action: 'market_bid_pause',
+      targetType: 'market',
+      before: { paused: before },
+      after: { paused: body.paused },
+    });
+  }
+  return c.json({ ok: true, paused: body.paused });
+});
+
+// POST /api/admin/market/listings/:id/pause-bid | resume-bid —— 单挂牌冻结（只挡新出价）
+for (const [suffix, paused] of [
+  ['/pause-bid', true],
+  ['/resume-bid', false],
+] as const) {
+  app.post(`/market/listings/:id${suffix}`, async (c) => {
+    const user = await requireAdmin(c.env, c.req.raw);
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
+    const res = await c.env.DB.prepare(`UPDATE listings SET bid_paused = ? WHERE id = ? AND status IN ('listed', 'bidding')`)
+      .bind(paused ? 1 : 0, id)
+      .run();
+    if (res.meta.changes === 0) {
+      const exists = await c.env.DB.prepare('SELECT status FROM listings WHERE id = ?').bind(id).first<{ status: string }>();
+      if (!exists) throw new HttpError(404, '这单挂牌不存在');
+      throw new HttpError(409, `这单状态是 ${exists.status}，不在竞价期，无需${paused ? '暂停' : '恢复'}出价`);
+    }
+    await writeAudit(c.env.DB, {
+      actor: user.id,
+      action: 'market_listing_bid_pause',
+      targetType: 'listing',
+      targetId: id,
+      after: { bidPaused: paused },
+    });
+    return c.json({ ok: true, bidPaused: paused });
+  });
+}
 
 // ---- 窗口状态机（§11/§6.4-6，增量 5） ----
 
