@@ -271,6 +271,19 @@ a.card:hover {
   border-color: var(--terracotta);
 }
 
+/* 幽灵态默认配色是给奶油纸用的（焦橙深字），落在可可棕顶栏上近乎同色（对比 1.2:1），
+   故顶栏作用域内改奶油字 + 半透明奶油描边，与 .nav-tab 同一套顶栏语言。
+   描边取 60%（3.5:1）而非更淡：按钮边界属 WCAG 1.4.11 的界面元素，需 ≥3:1 */
+.topbar .btn-ghost {
+  color: #fdf4e3;
+  border-color: rgba(253, 244, 227, 0.6);
+}
+
+.topbar .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(253, 244, 227, 0.85);
+}
+
 .btn-danger {
   background: var(--bad);
 }

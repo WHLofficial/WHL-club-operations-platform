@@ -67,7 +67,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 
 | 组件 | 类名 | 本站差异 |
 |---|---|---|
-| 顶栏 | `.topbar .brand .nav-links .nav-tab.is-active .userbox .role-badge` | 底 `--cocoa`、描边 `--cocoa-deep`、字奶油白；**brand = 徽章图（圆裁 24px）+ 「WHL 经理办公室」** |
+| 顶栏 | `.topbar` 内：`.brand .nav-links .nav-tab.is-active .userbox .role-badge .btn-ghost` | 底 `--cocoa`、描边 `--cocoa-deep`、字奶油白；**brand = 徽章图（圆裁 24px）+ 「WHL 经理办公室」**；**顶栏内幽灵按钮（登出）改奶油字 `#fdf4e3` + 60% 奶油描边**（幽灵态默认的焦橙深字在 `--cocoa` 上对比仅 1.2:1，等于隐形；描边要 ≥3:1 才合 WCAG 1.4.11 的界面元素口径） |
 | 卡片 | `.card / a.card` | 白底 `--card`、1px `--border`、radius 12px、无阴影；hover 才浮起（边框变 `--terracotta` + `0 2px 10px rgba(74,39,8,.12)`） |
 | 按钮 | `.btn / .btn-ghost / .btn-danger / .btn-sm` | 实心 `--terracotta` 白字、hover `--terracotta-deep`；不可逆操作两段式确认（「再点一次确认」） |
 | 表单 | `label.field / .error-msg / .hint` | input focus 焦橙边 + `0 0 0 3px rgba(164,97,44,.15)` 光环 |
