@@ -307,6 +307,7 @@ interface ListBody17 {
     wage: number | null;
     releaseFee: number | null;
     contractType: string | null;
+    psIds?: (number | null)[];
   }[];
   total: number;
   nextCursor: string | null;
