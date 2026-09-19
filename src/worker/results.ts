@@ -8,6 +8,7 @@ import { recordGrowthEventStatements, defensivePositionsForClub, isCpuTeam, type
 import { queueClubNotification } from './notify.ts';
 import { matchPrizeStatements } from './prizes.ts';
 import { matchAttendanceStatements } from './home.ts';
+import { createConfigService } from '../core/config.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -83,6 +84,8 @@ export interface ConfirmedResultItem {
   scoreAway: number | null;
   winnerTeam: string | null;
   confirmedAt: string;
+  needsReview: boolean;
+  reviewNote: string | null;
 }
 
 function toConfirmedItem(r: {
@@ -99,6 +102,8 @@ function toConfirmedItem(r: {
   score_away: number | null;
   winner_team: string | null;
   confirmed_at: string;
+  needs_review: number;
+  review_note: string | null;
 }): ConfirmedResultItem {
   return {
     id: r.id,
@@ -114,11 +119,51 @@ function toConfirmedItem(r: {
     scoreAway: r.score_away,
     winnerTeam: r.winner_team,
     confirmedAt: r.confirmed_at,
+    needsReview: r.needs_review === 1,
+    reviewNote: r.review_note,
   };
 }
 
 // 待确认队列：绑定的全部赛事（赛季级绑定，增量 6.1 修订）→ 该赛事 finished 场次，剔除已确认；每赛事硬 LIMIT（§17）
 export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]; confirmed: ConfirmedResultItem[] }> {
+  const pending = await scanPendingMatches(env);
+
+  const queue: (ResultQueueItem & { _sortKey: string })[] = pending.map(({ m, season, competitionType }) => ({
+    matchId: m.id,
+    season,
+    competitionType,
+    stageName: m.stage_name,
+    round: m.round,
+    homeTeam: m.home_team,
+    awayTeam: m.away_team,
+    scoreHome: m.score_home,
+    scoreAway: m.score_away,
+    penHome: m.pen_home,
+    penAway: m.pen_away,
+    walkoverSide: m.walkover_side,
+    winnerTeam: m.winner_team,
+    finishedAt: m.finished_at,
+    _sortKey: m.finished_at ?? '',
+  }));
+  queue.sort((a, b) => (a._sortKey < b._sortKey ? 1 : a._sortKey > b._sortKey ? -1 : b.matchId - a.matchId));
+
+  const confirmed = await env.DB.prepare(
+    `SELECT id, match_id, season, window_seq, competition_type, stage_name, round,
+            home_team, away_team, score_home, score_away, winner_team, confirmed_at,
+            needs_review, review_note
+     FROM result_confirmations ORDER BY id DESC LIMIT 50`,
+  ).all();
+  return {
+    queue: queue.map(({ _sortKey: _ignored, ...item }) => item),
+    confirmed: (confirmed.results as Parameters<typeof toConfirmedItem>[0][]).map(toConfirmedItem),
+  };
+}
+
+/** 扫描绑定赛事的完赛未确认场次（手动队列与 cron 自动确认共用）。
+ *  已确认集合只回看 500 条：更早的场次重扫进来也会在确认 INSERT 处撞 UNIQUE，调用方按幂等跳过。 */
+async function scanPendingMatches(
+  env: Env,
+): Promise<{ m: TourMatchRow; season: number; competitionType: string | null }[]> {
   const bound = await env.DB.prepare(
     `SELECT season, tournament_id, competition_type FROM season_tournaments
      ORDER BY season DESC, tournament_id DESC LIMIT 20`,
@@ -129,7 +174,7 @@ export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]
   ).all<{ match_id: number }>();
   const confirmedSet = new Set(confirmedRows.results.map((r) => r.match_id));
 
-  const queue: (ResultQueueItem & { _sortKey: string })[] = [];
+  const out: { m: TourMatchRow; season: number; competitionType: string | null }[] = [];
   for (const w of bound.results) {
     const rows = await env.TOUR_DB.prepare(
       `${MATCH_SELECT} WHERE s.tournament_id = ? AND m.status = 'finished'
@@ -139,36 +184,10 @@ export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]
       .all<TourMatchRow>();
     for (const r of rows.results) {
       if (confirmedSet.has(r.id)) continue;
-      queue.push({
-        matchId: r.id,
-        season: w.season,
-        competitionType: w.competition_type,
-        stageName: r.stage_name,
-        round: r.round,
-        homeTeam: r.home_team,
-        awayTeam: r.away_team,
-        scoreHome: r.score_home,
-        scoreAway: r.score_away,
-        penHome: r.pen_home,
-        penAway: r.pen_away,
-        walkoverSide: r.walkover_side,
-        winnerTeam: r.winner_team,
-        finishedAt: r.finished_at,
-        _sortKey: r.finished_at ?? '',
-      });
+      out.push({ m: r, season: w.season, competitionType: w.competition_type });
     }
   }
-  queue.sort((a, b) => (a._sortKey < b._sortKey ? 1 : a._sortKey > b._sortKey ? -1 : b.matchId - a.matchId));
-
-  const confirmed = await env.DB.prepare(
-    `SELECT id, match_id, season, window_seq, competition_type, stage_name, round,
-            home_team, away_team, score_home, score_away, winner_team, confirmed_at
-     FROM result_confirmations ORDER BY id DESC LIMIT 50`,
-  ).all();
-  return {
-    queue: queue.map(({ _sortKey: _ignored, ...item }) => item),
-    confirmed: (confirmed.results as Parameters<typeof toConfirmedItem>[0][]).map(toConfirmedItem),
-  };
+  return out;
 }
 
 // 确认一场比赛：完赛校验 → 赛季绑定解析 → 快照落库 + 审计（幂等：match_id 唯一，重复确认 409）。
@@ -178,7 +197,16 @@ export async function confirmResult(
   env: Env,
   actor: number,
   matchIdInput: unknown,
-): Promise<{ result: ConfirmedResultItem; xp: XpHookSummary; prizeError: string | null; revenueError: string | null }> {
+): Promise<{
+  result: ConfirmedResultItem;
+  xp: XpHookSummary;
+  xpError: string | null;
+  notifyError: string | null;
+  prizeError: string | null;
+  revenueError: string | null;
+  needsReview: boolean;
+  reviewNote: string | null;
+}> {
   const matchId = Number(matchIdInput);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(400, '比赛 ID 不对');
 
@@ -260,15 +288,55 @@ export async function confirmResult(
   )
     .bind(matchId)
     .first();
-  // 确认钩子①：自动 XP 事件（§10.1）；钩子②bot 通知（§12，尽力而为不阻塞确认）；
-  // 钩子③赛事奖金即时入账（增量 11，吞错不阻塞确认——奖金失败可重确认同 match 幂等重放）
-  const xp = await recordAutoXpForMatch(env, matchId, m, ctx);
-  await queueResultNotifications(env, ctx, m);
-  let prizeError: string | null = null;
+  // 确认钩子①-④（增量 21 起全部吞错不阻塞确认——快照已落库，钩子皆幂等可经 replay-hooks 重放）；
+  // 任一异常或 XP 没解析到位 → 标人工复核
+  const hooks = await runHooks(env, matchId, m, ctx);
+  const review = reviewOf(hooks);
+  await env.DB.prepare('UPDATE result_confirmations SET needs_review = ?, review_note = ? WHERE match_id = ?')
+    .bind(review.needsReview ? 1 : 0, review.note, matchId)
+    .run();
+  return {
+    result: toConfirmedItem({ ...(row as Parameters<typeof toConfirmedItem>[0]), needs_review: review.needsReview ? 1 : 0, review_note: review.note }),
+    xp: hooks.xp,
+    xpError: hooks.xpError,
+    notifyError: hooks.notifyError,
+    prizeError: hooks.prizeError,
+    revenueError: hooks.revenueError,
+    needsReview: review.needsReview,
+    reviewNote: review.note,
+  };
+}
+
+/** 确认钩子全集（增量 21）：XP / bot 通知 / 奖金 / 比赛日收入，逐个吞错收集。 */
+interface HookOutcome {
+  xp: XpHookSummary;
+  xpError: string | null;
+  notifyError: string | null;
+  prizeError: string | null;
+  revenueError: string | null;
+}
+
+async function runHooks(
+  env: Env,
+  matchId: number,
+  m: TourMatchRow,
+  binding: { season: number; window_seq: number; competition_type: string | null },
+): Promise<HookOutcome> {
+  const out: HookOutcome = { xp: { granted: 0, unresolved: [] }, xpError: null, notifyError: null, prizeError: null, revenueError: null };
+  try {
+    out.xp = await recordAutoXpForMatch(env, matchId, m, binding);
+  } catch (err) {
+    out.xpError = String(err);
+  }
+  try {
+    await queueResultNotifications(env, binding, m);
+  } catch (err) {
+    out.notifyError = String(err);
+  }
   try {
     const prizeStatements = await matchPrizeStatements(env, {
       matchId,
-      season: ctx.season,
+      season: binding.season,
       competitionType: binding.competition_type,
       stageKind: m.stage_kind,
       round: m.round,
@@ -284,23 +352,128 @@ export async function confirmResult(
     });
     if (prizeStatements.length > 0) await env.DB.batch(prizeStatements);
   } catch (err) {
-    prizeError = String(err);
+    out.prizeError = String(err);
   }
-  // 钩子④比赛日收入即时入账（增量 12，吞错不阻塞确认——快照 match_id 主键幂等，重确认安全）
-  let revenueError: string | null = null;
   try {
     const home = await matchAttendanceStatements(env, {
       matchId,
-      season: ctx.season,
-      windowSeq: ctx.window_seq,
+      season: binding.season,
+      windowSeq: binding.window_seq,
       homeTeamId: m.home_team_id,
       awayTeamId: m.away_team_id,
     });
     if (home.statements.length > 0) await env.DB.batch(home.statements);
   } catch (err) {
-    revenueError = String(err);
+    out.revenueError = String(err);
   }
-  return { result: toConfirmedItem(row as Parameters<typeof toConfirmedItem>[0]), xp, prizeError, revenueError };
+  return out;
+}
+
+/** 人工复核判定（增量 21）：任一钩子异常或 XP 没解析到位 → 标复核。 */
+function reviewOf(hooks: HookOutcome): { needsReview: boolean; note: string | null } {
+  const parts: string[] = [];
+  if (hooks.xpError) parts.push('XP 事件入账失败');
+  if (hooks.notifyError) parts.push('通知发送失败');
+  if (hooks.prizeError) parts.push('奖金入账失败');
+  if (hooks.revenueError) parts.push('比赛日收入入账失败');
+  if (hooks.xp.unresolved.length > 0) {
+    parts.push(`${hooks.xp.unresolved.length} 项没解析到（${hooks.xp.unresolved.join('、')}）`);
+  }
+  return { needsReview: parts.length > 0, note: parts.length > 0 ? parts.join('；').slice(0, 300) : null };
+}
+
+/** cron 自动确认（增量 21）：完赛场次逐场入档（actor=0 系统），异常场标人工复核。 */
+export interface AutoConfirmSummary {
+  skipped: boolean;
+  confirmed: number;
+  flagged: number;
+  failed: number;
+}
+
+export async function autoConfirmResults(env: Env, cap = 20): Promise<AutoConfirmSummary> {
+  const config = createConfigService(env.DB);
+  const flag = await config.getNumber('results_auto_confirm');
+  if (flag === 0) return { skipped: true, confirmed: 0, flagged: 0, failed: 0 };
+  const pending = (await scanPendingMatches(env))
+    .sort((a, b) => ((a.m.finished_at ?? '') < (b.m.finished_at ?? '') ? -1 : 1))
+    .slice(0, cap);
+  const summary: AutoConfirmSummary = { skipped: false, confirmed: 0, flagged: 0, failed: 0 };
+  for (const item of pending) {
+    try {
+      const out = await confirmResult(env, 0, item.m.id);
+      summary.confirmed++;
+      if (out.needsReview) summary.flagged++;
+    } catch {
+      // 409（重复确认）等单场失败不挡整轮
+      summary.failed++;
+    }
+  }
+  return summary;
+}
+
+/** 重放已确认场次的三钩子（增量 21，幂等：XP UNIQUE 锚 / 奖金账本闸 / 上座主键），并重算复核标记。 */
+export async function replayHooksForMatch(env: Env, matchIdInput: unknown): Promise<ConfirmedResultItem> {
+  const matchId = Number(matchIdInput);
+  if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(400, '比赛 ID 不对');
+  const row = await env.DB.prepare(
+    `SELECT id, match_id, season, window_seq, competition_type, stage_name, stage_kind, round,
+            home_team_id, away_team_id, home_team, away_team, score_home, score_away, pen_home, pen_away,
+            walkover_side, winner_team, finished_at, confirmed_at
+     FROM result_confirmations WHERE match_id = ?`,
+  )
+    .bind(matchId)
+    .first<{
+      id: number;
+      match_id: number;
+      season: number;
+      window_seq: number;
+      competition_type: string | null;
+      stage_name: string | null;
+      stage_kind: string | null;
+      round: number | null;
+      home_team_id: number | null;
+      away_team_id: number | null;
+      home_team: string | null;
+      away_team: string | null;
+      score_home: number | null;
+      score_away: number | null;
+      pen_home: number | null;
+      pen_away: number | null;
+      walkover_side: string | null;
+      winner_team: string | null;
+      finished_at: string | null;
+      confirmed_at: string;
+    }>();
+  if (!row) throw new HttpError(404, '这场比赛还没确认过，无可重放的钩子');
+
+  // 钩子参数优先取比赛系统现况（stage_config/winner_team_id 只有 TOUR_DB 有），
+  // 比赛系统清库等场景退回快照（此时晋级奖金/胜者定位缺位，XP 与上座不受影响）
+  const fresh = await env.TOUR_DB.prepare(`${MATCH_SELECT} WHERE m.id = ?`).bind(matchId).first<TourMatchRow>();
+  const m: TourMatchRow = fresh ?? { ...row, status: 'finished', tournament_id: 0, stage_config: null, winner_team_id: null };
+  const binding = { season: row.season, window_seq: row.window_seq, competition_type: row.competition_type };
+
+  const hooks = await runHooks(env, matchId, m, binding);
+  const review = reviewOf(hooks);
+  await env.DB.prepare('UPDATE result_confirmations SET needs_review = ?, review_note = ? WHERE match_id = ?')
+    .bind(review.needsReview ? 1 : 0, review.note, matchId)
+    .run();
+  return toConfirmedItem({
+    id: row.id,
+    match_id: matchId,
+    season: row.season,
+    window_seq: row.window_seq,
+    competition_type: row.competition_type,
+    stage_name: row.stage_name,
+    round: row.round,
+    home_team: row.home_team,
+    away_team: row.away_team,
+    score_home: row.score_home,
+    score_away: row.score_away,
+    winner_team: row.winner_team,
+    confirmed_at: row.confirmed_at,
+    needs_review: review.needsReview ? 1 : 0,
+    review_note: review.note,
+  });
 }
 
 /** elim 阶段 config_json 里的入场队数（晋级轮次推算用；解析失败按未知处理=不发晋级奖金） */

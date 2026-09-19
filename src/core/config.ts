@@ -62,6 +62,7 @@ export const CONFIG_KEYS = [
   'market_bid_paused',
   'stadium_max_open_tier',
   'naming_params',
+  'results_auto_confirm',
   'review_amount_threshold',
   'bid_pattern_alert',
   'prize_table',
@@ -156,6 +157,8 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     short: { windows: 2, factor: 1.25 },
     bet: { windows: 4, factor: 0.7, bonusRate: 0.7, attend: 0.8, fans: 0.03 },
   }),
+  // 增量 21 赛果自动化：cron 每 5 分钟自动确认完赛场次（异常场标人工复核）
+  results_auto_confirm: 'on',
   xp_per_level: '10',
   trainee_xp_full: '40',
   trainee_xp_half: '15',

@@ -12,6 +12,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { sha256Hex } from '../../lib/crypto.ts';
 import { parseOidcClaims } from '../../lib/session.ts';
+import { writeAudit } from '../../lib/audit.ts';
 import {
   BACKCHANNEL_LOGOUT_EVENT,
   OIDC_PROBE_COOKIE,
@@ -225,6 +226,14 @@ authRoutes.get('/auth/callback', async (c) => {
       new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(),
     )
     .run();
+  // auth 事件审计（增量 21）：登录成功（尽力而为，不阻塞建会话）
+  await writeAudit(c.env.DB, {
+    actor: Number(payload.sub),
+    action: 'auth_login',
+    targetType: 'oidc_session',
+    targetId: null,
+    after: { sub: payload.sub, sid: payload.sid, name: claims.name },
+  }).catch(() => {});
 
   setCookie(c, OIDC_SESSION_COOKIE, token, {
     httpOnly: true,
@@ -242,9 +251,23 @@ authRoutes.get('/auth/callback', async (c) => {
 authRoutes.post('/auth/logout', async (c) => {
   const token = getCookie(c, OIDC_SESSION_COOKIE);
   if (token) {
+    const tokenHash = await sha256Hex(token);
+    const session = await c.env.DB.prepare('SELECT sub FROM oidc_session WHERE token_hash = ? AND revoked_at IS NULL')
+      .bind(tokenHash)
+      .first<{ sub: string }>();
     await c.env.DB.prepare('UPDATE oidc_session SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
-      .bind(new Date().toISOString(), await sha256Hex(token))
+      .bind(new Date().toISOString(), tokenHash)
       .run();
+    if (session) {
+      // auth 事件审计（增量 21）：主动登出（尽力而为）
+      await writeAudit(c.env.DB, {
+        actor: Number(session.sub),
+        action: 'auth_logout',
+        targetType: 'oidc_session',
+        targetId: null,
+        after: { sub: session.sub },
+      }).catch(() => {});
+    }
   }
   deleteCookie(c, OIDC_SESSION_COOKIE, { path: '/', secure: true });
   deleteCookie(c, OIDC_TEMP_COOKIE, { path: '/', secure: true });
@@ -282,6 +305,14 @@ authRoutes.post('/auth/backchannel-logout', async (c) => {
   await c.env.DB.prepare('UPDATE oidc_session SET revoked_at = ? WHERE auth_sid = ? AND revoked_at IS NULL')
     .bind(new Date().toISOString(), payload.sid)
     .run();
+  // auth 事件审计（增量 21）：认证中心推送的全端登出（尽力而为；sid 无本地用户行，actor 记 0=系统）
+  await writeAudit(c.env.DB, {
+    actor: 0,
+    action: 'auth_backchannel_logout',
+    targetType: 'oidc_session',
+    targetId: null,
+    after: { sid: payload.sid },
+  }).catch(() => {});
   // 规范要求：成功回 200 空体（未知 sid 也算成功），失败回 400
   return c.body(null, 200);
 });

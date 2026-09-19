@@ -17,6 +17,7 @@ import adminRoutes from './routes/admin/index.ts';
 import authRoutes from './routes/auth.ts';
 import { settleOverdue } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
+import { autoConfirmResults } from './results.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -107,9 +108,11 @@ export { app };
 // 惰性结算统一入口（§6.5）：cron 与手动 tick 共用；幂等可重入
 async function runSettleTick(env: Env) {
   const summary = await settleOverdue(env);
+  // 赛果自动确认（增量 21）：完赛场次逐场入档，异常标人工；开关/上限在 results.ts
+  const autoResults = await autoConfirmResults(env);
   // bot 通知重试（§12）：失败留 pending，下轮再投
   const notify = await dispatchPendingNotifications(env);
-  return { ok: true, ...summary, notify };
+  return { ok: true, ...summary, autoResults, notify };
 }
 
 export default {

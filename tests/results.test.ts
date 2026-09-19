@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet } from './d1.ts';
-import { resetConfigCache } from '../src/core/config.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
+import { resetConfigCache, createConfigService } from '../src/core/config.ts';
+import { autoConfirmResults } from '../src/worker/results.ts';
 
 interface Fixture {
   env: Env;
@@ -293,5 +294,76 @@ describe('赛果只读同步与确认（附录 A〔6〕）', () => {
       fx.env,
     );
     expect(res.status).toBe(409);
+  });
+});
+
+describe('赛果自动确认（增量 21）：cron 扫完赛场次 + 异常标人工 + 钩子重放', () => {
+  async function bindTournament5(fx: Fixture): Promise<void> {
+    await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
+    await openWindowFor(fx, 3, 1);
+    await post(
+      '/api/admin/seasons/3/bind-tournament',
+      { tournamentId: 5, competitionType: 'league_premier' },
+      'tok-admin',
+      fx.env,
+    );
+  }
+
+  it('无事件的干净场自动入档（confirmed_by=0 系统留痕）；开关 off 跳过', async () => {
+    const fx = freshEnv();
+    seedTournament(fx);
+    await bindTournament5(fx);
+
+    const out = await autoConfirmResults(fx.env);
+    expect(out).toEqual({ skipped: false, confirmed: 2, flagged: 0, failed: 0 });
+    const rows = sqlAll<{ confirmed_by: number; needs_review: number }>(fx.sqlite, 'SELECT confirmed_by, needs_review FROM result_confirmations');
+    expect(rows).toEqual([
+      { confirmed_by: 0, needs_review: 0 },
+      { confirmed_by: 0, needs_review: 0 },
+    ]);
+    // 自动确认的审计 actor=0（系统），确认端点 409 语义不受影响
+    expect(sqlGet<{ actor: number }>(fx.sqlite, "SELECT actor FROM audit_log WHERE action = 'result_confirm' ORDER BY id LIMIT 1")).toMatchObject({ actor: 0 });
+    const again = await post('/api/admin/results/900/confirm', {}, 'tok-admin', fx.env);
+    expect(again.status).toBe(409);
+
+    // 开关 off：不再自动确认（902 仍未完赛，重种一场完赛来验证）
+    const config = createConfigService(fx.env.DB);
+    await config.set('results_auto_confirm', '0');
+    resetConfigCache();
+    fx.tour.exec(`INSERT INTO match (id, stage_id, round, slot, home_entry_id, away_entry_id, score_home, score_away, status, winner_entry_id, finished_at)
+      VALUES (904, 50, 2, 1, 11, 12, 1, 0, 'finished', 11, '2026-07-06T21:00:00Z')`);
+    const skipped = await autoConfirmResults(fx.env);
+    expect(skipped).toEqual({ skipped: true, confirmed: 0, flagged: 0, failed: 0 });
+  });
+
+  it('XP 没解析到位 → needs_review=1 带 note；补录后 replay-hooks 清标记且幂等不双记', async () => {
+    const fx = freshEnv();
+    seedTournament(fx);
+    await bindTournament5(fx);
+    // 900 有进球事件，但平台侧还没有俱乐部/球员可解析
+    fx.tour.exec(`INSERT INTO player (id, team_id, name) VALUES (21, 2, '哈兰德');
+      INSERT INTO match_event (id, match_id, player_id, assist_player_id, type, minute) VALUES (1, 900, 21, NULL, 'goal', 10)`);
+
+    const out = await autoConfirmResults(fx.env);
+    expect(out).toEqual({ skipped: false, confirmed: 2, flagged: 1, failed: 0 });
+    expect(sqlGet<{ needs_review: number }>(fx.sqlite, 'SELECT needs_review FROM result_confirmations WHERE match_id = 900')).toMatchObject({ needs_review: 1 });
+    const note = sqlGet<{ review_note: string }>(fx.sqlite, 'SELECT review_note FROM result_confirmations WHERE match_id = 900')?.review_note ?? '';
+    expect(note).toContain('没解析到');
+
+    // 补录俱乐部与球员后重放：标记清零，XP 事件只记一次
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '曼城', 'premier', 'active');
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status)
+        VALUES (31, 'm31', '哈兰德', 2, 'ST', 26, 150, 180, 99, 'first_team');
+    `);
+    const replay = await post('/api/admin/results/900/replay-hooks', {}, 'tok-admin', fx.env);
+    expect(replay.status).toBe(201);
+    const item = ((await replay.json()) as { result: { needsReview: boolean; reviewNote: string | null } }).result;
+    expect(item.needsReview).toBe(false);
+    const xpRows = sqlAll<{ event_type: string; player_id: number }>(fx.sqlite, "SELECT event_type, player_id FROM growth_events WHERE match_ref = '900'");
+    expect(xpRows.map((r) => r.event_type).sort()).toEqual(['appearance', 'goal']); // 各一条，不双记
+
+    await post('/api/admin/results/900/replay-hooks', {}, 'tok-admin', fx.env);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '900'")?.n).toBe(2);
   });
 });

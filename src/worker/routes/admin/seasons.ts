@@ -5,7 +5,7 @@ import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { createAuditStatement } from '../../../lib/audit.ts';
 import { settleTournamentStage, settleSeason, checkSeasonSettle, rejudgeGrowable } from '../../season-settle.ts';
-import { queueResults, confirmResult } from '../../results.ts';
+import { queueResults, confirmResult, replayHooksForMatch } from '../../results.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -179,6 +179,13 @@ app.post('/results/:id/confirm', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const { result, xp } = await confirmResult(c.env, user.id, c.req.param('id'));
   return c.json({ ok: true, result, xp }, 201);
+});
+
+// 重放已确认场次的三钩子（增量 21，幂等）：钩子失败/标了人工复核的场，修完数据后从这里补账
+app.post('/results/:id/replay-hooks', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const result = await replayHooksForMatch(c.env, c.req.param('id'));
+  return c.json({ ok: true, result }, 201);
 });
 
 export default app;

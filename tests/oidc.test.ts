@@ -298,6 +298,8 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
       claims: JSON.stringify(coachClaims),
       revoked_at: null,
     });
+    // auth 事件审计（增量 21）：登录成功留痕
+    expect(sqlGet<{ actor: number }>(sqlite, "SELECT actor FROM audit_log WHERE action = 'auth_login'")).toMatchObject({ actor: 2 });
 
     // /api/me 用会话 cookie 认人（只读 claims 存档，不再查 tour 库）
     const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
@@ -397,6 +399,8 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
 
     const row = sqlGet<{ revoked_at: string | null }>(sqlite, 'SELECT revoked_at FROM oidc_session');
     expect(row?.revoked_at).not.toBeNull();
+    // auth 事件审计（增量 21）：主动登出留痕
+    expect(sqlGet<{ actor: number }>(sqlite, "SELECT actor FROM audit_log WHERE action = 'auth_logout'")).toMatchObject({ actor: 2 });
 
     const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
     expect(((await me.json()) as { user: unknown }).user).toBeNull();
@@ -442,6 +446,8 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     expect(await ok.text()).toBe('');
     const row = sqlGet<{ revoked_at: string | null }>(sqlite, 'SELECT revoked_at FROM oidc_session');
     expect(row?.revoked_at).not.toBeNull();
+    // auth 事件审计（增量 21）：backchannel 全端登出留痕（actor=0 系统）
+    expect(sqlGet<{ actor: number }>(sqlite, "SELECT actor FROM audit_log WHERE action = 'auth_backchannel_logout'")).toMatchObject({ actor: 0 });
     const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
     expect(((await me.json()) as { user: unknown }).user).toBeNull();
 
