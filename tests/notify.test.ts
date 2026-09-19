@@ -380,6 +380,23 @@ describe('站内信收件篮（增量 18）', () => {
     expect((await postRead({})).status).toBe(400);
   });
 
+  it('ids 超 D1 绑定参数上限（>100）自动分块，一次全标', async () => {
+    const fx = freshEnv();
+    const values = Array.from({ length: 150 }, (_, i) => `(${200 + i}, 1, 1, 'web', 'levelup', '{"text":"第${i}条"}', 'sent', '2026-07-01T10:00:00Z')`).join(', ');
+    fx.sqlite.exec(`INSERT INTO notifications (id, club_id, user_id, channel, template, payload, status, created_at) VALUES ${values};`);
+    const res = await app.request(
+      '/api/notifications/read',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Cookie: 'whl_session=tok-admin' },
+        body: JSON.stringify({ ids: Array.from({ length: 150 }, (_, i) => 200 + i) }),
+      },
+      fx.env,
+    );
+    expect(((await res.json()) as { marked: number }).marked).toBe(150);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE read_at IS NULL")?.n).toBe(0);
+  });
+
   it('投递通道只认 channel=qq：pending 的 web 行不会被 cron 投递', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`

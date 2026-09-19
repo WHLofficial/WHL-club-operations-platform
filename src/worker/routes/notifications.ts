@@ -66,16 +66,23 @@ app.post('/notifications/read', async (c) => {
   const body = (await c.req.raw.json().catch(() => null)) as { ids?: unknown; all?: unknown } | null;
   const ids = Array.isArray(body?.ids) ? body!.ids.filter((v): v is number => Number.isInteger(v) && v > 0) : [];
   if (!body?.all && ids.length === 0) throw new HttpError(400, '没有要标已读的通知');
-  const conds = [`channel = 'web'`, `user_id = ?`, `read_at IS NULL`];
-  const args: unknown[] = [user.id];
-  if (!body?.all) {
-    conds.push(`id IN (${ids.map(() => '?').join(', ')})`);
-    args.push(...ids);
+  const baseConds = [`channel = 'web'`, `user_id = ?`, `read_at IS NULL`];
+  if (body?.all) {
+    const out = await c.env.DB.prepare(`UPDATE notifications SET read_at = ${nowSql()} WHERE ${baseConds.join(' AND ')}`)
+      .bind(user.id)
+      .run();
+    return c.json({ marked: out.meta.changes ?? 0 });
   }
-  const out = await c.env.DB.prepare(`UPDATE notifications SET read_at = ${nowSql()} WHERE ${conds.join(' AND ')}`)
-    .bind(...args)
-    .run();
-  return c.json({ marked: out.meta.changes ?? 0 });
+  // D1 单查询绑定参数上限 100：ids 分块进 batch，一块失败整体回滚
+  const chunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  const stmts = chunks.map((chunk) =>
+    c.env.DB.prepare(
+      `UPDATE notifications SET read_at = ${nowSql()} WHERE ${[...baseConds, `id IN (${chunk.map(() => '?').join(', ')} )`].join(' AND ')}`,
+    ).bind(user.id, ...chunk),
+  );
+  const outs = await c.env.DB.batch(stmts);
+  return c.json({ marked: outs.reduce((sum, o) => sum + (o.meta.changes ?? 0), 0) });
 });
 
 export default app;
