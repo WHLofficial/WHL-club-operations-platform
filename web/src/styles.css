@@ -899,6 +899,24 @@ tbody tr:hover td {
   color: #fff;
 }
 
+/* 市场三页子导航（增量 16）：seg 里放 NavLink（a），样式对齐 button */
+.seg a {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.seg a + a {
+  border-left: 1px solid var(--border);
+}
+
+.seg a.on {
+  background: var(--terracotta);
+  color: #fff;
+}
+
 .code-card {
   margin-top: 14px;
   padding: 14px;

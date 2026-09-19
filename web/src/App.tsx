@@ -8,9 +8,13 @@ import Club from './pages/Club.tsx';
 import Player from './pages/Player.tsx';
 import PlayersLibrary from './pages/PlayersLibrary.tsx';
 import Bind from './pages/Bind.tsx';
-import Market from './pages/Market.tsx';
 import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
+
+// 市场三页按页拆 chunk（增量 16）：市场板公开，海捞/我的要登录
+const MarketBoardPage = lazy(() => import('./pages/market/MarketBoardPage.tsx'));
+const MarketFreePage = lazy(() => import('./pages/market/MarketFreePage.tsx'));
+const MarketMinePage = lazy(() => import('./pages/market/MarketMinePage.tsx'));
 
 // 管理端按页拆 chunk（增量 15）：壳 + 8 子页全部懒加载，不再全量进主包
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout.tsx'));
@@ -67,7 +71,23 @@ export default function App() {
           />
           <Route path="/players" element={<PlayersLibrary />} />
           <Route path="/players/:id" element={<Player />} />
-          <Route path="/market" element={<Market />} />
+          <Route path="/market" element={<MarketBoardPage />} />
+          <Route
+            path="/market/free"
+            element={
+              <RequireUser>
+                <MarketFreePage />
+              </RequireUser>
+            }
+          />
+          <Route
+            path="/market/mine"
+            element={
+              <RequireUser>
+                <MarketMinePage />
+              </RequireUser>
+            }
+          />
           <Route
             path="/negotiations"
             element={
