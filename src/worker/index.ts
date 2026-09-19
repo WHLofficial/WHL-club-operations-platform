@@ -12,7 +12,7 @@ import marketRoutes from './routes/market.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
 import growthRoutes from './routes/growth.ts';
-import adminRoutes from './routes/admin.ts';
+import adminRoutes from './routes/admin/index.ts';
 import authRoutes from './routes/auth.ts';
 import { settleOverdue } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
