@@ -7,6 +7,8 @@ import {
   api,
   apiPost,
   type BuildPaymentResult,
+  type NamingQuoteResponse,
+  type NamingTerminateResult,
   type RcChangeResult,
   type RegistrationResult,
   type SquadIssue,
@@ -133,6 +135,8 @@ export default function Club() {
 
       {home && <FacilityOpsCard />}
 
+      {home && <NamingCard />}
+
       {squad && <RegistrationSection squad={squad} onRefresh={refreshSquad} />}
 
       {squad && (
@@ -160,7 +164,7 @@ function StadiumCard({ home }: { home: StadiumInfo }) {
     <section className="card">
       <h3>主场档案</h3>
       <p>
-        <b>{home.name || '未冠名'}</b> · {home.tierName ?? `档位 ${home.tier}`}（{home.tier} 级） · 容量{' '}
+        <b>{home.namingBrand ? `${home.namingBrand}·${home.name || '未冠名'}` : home.name || '未冠名'}</b> · {home.tierName ?? `档位 ${home.tier}`}（{home.tier} 级） · 容量{' '}
         <span className="mono">{home.capacity.toLocaleString()}</span> 座 · 死忠球迷{' '}
         <span className="mono">{Math.round(home.fans).toLocaleString()}</span>
       </p>
@@ -318,6 +322,121 @@ function FacilityOpsCard() {
           </span>
         ))}
       </p>
+    </section>
+  );
+}
+
+/* ---------- 冠名市场（增量 20）：品牌池报价 / 签约 / 退约 ---------- */
+
+function NamingCard() {
+  const qc = useQueryClient();
+  const { show } = useToast();
+  const quoteQuery = useQuery({
+    queryKey: qk.naming,
+    queryFn: () => api<NamingQuoteResponse>('/api/club/naming/quote'),
+    retry: false,
+  });
+  const [busy, setBusy] = useState(false);
+  const quote = quoteQuery.data ?? null;
+
+  function refresh() {
+    void qc.invalidateQueries({ queryKey: qk.naming });
+    void qc.invalidateQueries({ queryKey: qk.myClub });
+    void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+  }
+
+  async function sign(brand: string, packageNo: number, pkgName: string) {
+    setBusy(true);
+    try {
+      const out = await apiPost<{ contract: { brand: string; feePerWindow: number; windowsTotal: number } }>(
+        '/api/club/naming/sign',
+        { brand, packageNo },
+      );
+      refresh();
+      show(`已签下 ${out.contract.brand}（${pkgName}）：每窗 ${out.contract.feePerWindow.toFixed(2)}M × ${out.contract.windowsTotal} 窗，窗末入账。`);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '签约失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function terminate() {
+    if (!window.confirm('提前解约要赔剩余窗口费用（当窗照收后的 30%）。确定退冠名？')) return;
+    setBusy(true);
+    try {
+      const out = await apiPost<NamingTerminateResult>('/api/club/naming/terminate', {});
+      refresh();
+      show(
+        out.penalty > 0
+          ? `已与 ${out.brand} 解约，赔金 ${out.penalty.toFixed(2)}M 已从余额扣除。`
+          : `已与 ${out.brand} 解约（无赔金）。`,
+      );
+    } catch (err) {
+      show(err instanceof Error ? err.message : '退约失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (quoteQuery.isPending) return null;
+  if (quoteQuery.isError || !quote) {
+    return (
+      <section className="card">
+        <h3>冠名市场</h3>
+        <p className="muted">{quoteQuery.error instanceof Error ? quoteQuery.error.message : '冠名数据读不出来'}</p>
+      </section>
+    );
+  }
+
+  const contract = quote.contract;
+  return (
+    <section className="card">
+      <h3>冠名市场</h3>
+      {contract ? (
+        <>
+          <p>
+            现约 <b>{contract.brand}</b>（{contract.pkgName}套餐）：每窗{' '}
+            <span className="mono">{contract.feePerWindow.toFixed(2)}</span> M，还剩{' '}
+            <span className="mono">{contract.windowsRemaining}</span>/{contract.windowsTotal} 窗
+            {contract.bonusAmount > 0 && (
+              <>
+                {' '}· 达线奖金 <span className="mono">{contract.bonusAmount.toFixed(2)}</span> M（上座 ≥{' '}
+                <span className="mono">{contract.betAttend}</span> 或死忠增长 ≥{' '}
+                <span className="mono">{contract.betFans}</span>）
+              </>
+            )}
+          </p>
+          <p className="hint">冠名费每窗关窗时自动入账；提前解约赔剩余窗口费用（当窗费用照收后的 30%）。</p>
+          <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void terminate()}>
+            退冠名
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="hint">签下品牌冠名，每窗关窗时按合同金额入账。同一时间只能有一份生效冠名。</p>
+          {quote.brands!.map((b) => (
+            <p key={b.brand}>
+              <b>{b.brand}</b>
+              <span className="hint">（{b.industry} · 热度 {b.heat}）底价 </span>
+              <span className="mono">{b.baseFee.toFixed(2)}</span> M/窗
+              {b.packages.map((p) => (
+                <span key={p.packageNo} style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    type="button"
+                    disabled={busy}
+                    title={`${p.windows} 窗 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`}
+                    onClick={() => void sign(b.brand, p.packageNo, p.pkgName)}
+                  >
+                    {p.pkgName} {p.feePerWindow.toFixed(2)}M×{p.windows}窗
+                  </button>
+                </span>
+              ))}
+            </p>
+          ))}
+        </>
+      )}
     </section>
   );
 }

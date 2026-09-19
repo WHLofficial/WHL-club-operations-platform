@@ -90,6 +90,7 @@ export interface MyClubOverview {
 
 export interface StadiumInfo {
   name: string | null;
+  namingBrand: string | null;
   capacity: number;
   tier: number;
   tierName: string | null;
@@ -715,6 +716,54 @@ export interface BuildPaymentResult {
   refund: number;
 }
 
+// 冠名市场（增量 20）
+export interface NamingPackage {
+  packageNo: number;
+  pkgName: string;
+  windows: number;
+  feePerWindow: number;
+  bonusAmount: number;
+  betAttend: number | null;
+  betFans: number | null;
+}
+
+export interface BrandQuote {
+  brand: string;
+  heat: number;
+  industry: string;
+  baseFee: number;
+  packages: NamingPackage[];
+}
+
+export interface NamingContract {
+  id: number;
+  clubId: number;
+  brand: string;
+  baseFee: number;
+  packageNo: number;
+  pkgName: string;
+  feePerWindow: number;
+  windowsTotal: number;
+  windowsRemaining: number;
+  bonusAmount: number;
+  betAttend: number | null;
+  betFans: number | null;
+  status: string;
+  startedSeason: number;
+  startedWindow: number;
+}
+
+export interface NamingQuoteResponse {
+  contract?: NamingContract;
+  brands?: BrandQuote[];
+}
+
+export interface NamingTerminateResult {
+  brand: string;
+  penalty: number;
+  windowsRemaining: number;
+}
+
 /** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
 export const LEDGER_KIND_LABELS: Record<string, string> = {
   opening_import: '期初导入',
@@ -737,6 +786,9 @@ export const LEDGER_KIND_LABELS: Record<string, string> = {
   stadium_expand: '球场扩建',
   stadium_upgrade: '球场升级',
   facility_upgrade: '设施升级',
+  naming_fee: '冠名费',
+  naming_bonus: '对赌奖金',
+  naming_penalty: '冠名解约赔款',
   luxury_tax: '富人税',
 };
 

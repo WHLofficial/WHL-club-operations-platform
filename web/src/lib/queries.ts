@@ -15,6 +15,7 @@ export const qk = {
   trainees: ['market', 'trainees'] as const,
   notifications: ['notifications'] as const,
   stadiumBuild: ['club', 'stadium-build'] as const,
+  naming: ['club', 'naming'] as const,
 };
 
 export interface MarketMyClub {
