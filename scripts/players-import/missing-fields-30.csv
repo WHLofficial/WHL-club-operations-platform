@@ -1,0 +1,31 @@
+xlsx_row,ID,Name,Team,TeamID,Age,CA,PA,naID,FootID,note
+1923,253108,M. Cham,SK Slavia Praha,266,24,74,76,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+3600,231616,E. Riis,Bristol City,1919,27,71,72,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+4356,259465,I. Jensen,AZ Alkmaar,1906,21,70,83,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+5102,271710,B. Yusuf,Ferencvárosi Torna Club,1874,24,69,75,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+5313,209973,J. Nsame,Legia Warszawa,1871,32,69,69,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+5670,242222,L. Selahi,Widzew Łódź,301,26,69,73,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+6012,228101,G. Cotugno,Racing Club de Montevideo,112615,30,69,69,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+6229,216698,M. García,CA Aldosivi,111707,33,68,68,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+6236,198131,G. Grozav,Asociația Clubul Sportiv Petrolul 52,110078,34,68,68,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+6763,246422,Sidnei Tavares,Blackburn Rovers,3,23,68,77,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+7202,210876,B. Hüseynov,Qarabağ FK,113888,33,68,68,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+8862,76537,João Paulo,Oțelul Galați,110072,27,66,67,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+9487,233190,D. Palacio,Nacional Potosí,112667,28,65,65,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+9758,199044,J. Bokila,Livingston FC,621,36,65,65,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+9785,73990,Pau Cabanes,Villarreal CF,483,20,65,79,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+9843,236617,T. Vlietinck,Oud-Heverlee Leuven,100087,27,65,65,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+9997,72269,L. Kourouma,Girona FC,110062,21,65,74,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+10388,71450,M. Bundgaard,Sønderjyske Fodbold,1447,23,65,73,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+11835,252884,D. Jefferies,Lincoln City,149,23,63,70,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+12283,266898,L. Etoga,Sporting Club Bastia,58,22,63,72,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+13902,75502,P. Ba,Girona FC,110062,21,61,70,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+14151,243790,Wang Zhen'ao,Shanghai Port,112540,25,61,63,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+14611,239783,G. Garner,Newport County,112254,26,60,61,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+15682,266632,L. Liș,Metaloglobus București,114545,20,58,65,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+16604,280142,D. Ruward,PEC Zwolle,1914,20,57,67,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+17797,271255,A. Abdulrauof,Al Khaleej,112883,21,52,66,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+18057,277856,J. Collins,Bohemian FC,305,18,51,66,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+18114,71438,A. Kuzhiyil,East Bengal FC,111629,22,50,59,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+18358,73274,D. Meitei,Mohammedan SC,111633,20,48,54,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）
+18373,277518,He Xiaoke,Henan FC,111779,21,47,56,,,待补：naID（1-218，见 nation-id-reference.csv 或 FC26db 的 NationID 表）与 FootID（1=右脚 2=左脚）

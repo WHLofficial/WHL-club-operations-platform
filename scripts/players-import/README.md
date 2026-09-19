@@ -19,6 +19,20 @@ node scripts/players-import/generate-sql.ts [xlsx路径] [每片语句数]
 输出：`sql/players-import-NN.sql`（**不入库**，见根 `.gitignore`；30MB 级生成物）+ `players-import-report.md`
 （字段口径表、被拦下的行、每片行区间/字节/sha256 清单——sha256 即写进生产 D1 的逐字节内容，是入库的审计凭据）。
 
+## 缺字段球员的增量补录
+
+30 行的 `naID`/`FootID` 在源表是 `#N/A` / `Not Found`，校验拦下（其余 18301 人已入库）。补到这两个值后用：
+
+```
+node scripts/players-import/overlay-missing.ts [xlsx路径] [补值CSV]
+# 默认：E:/Downloads/FC26db20251217_fixed.xlsx、scripts/players-import/missing-fields-30.csv
+```
+
+补值表 `missing-fields-30.csv` 表头 `ID,naID,FootID`（naID 见同目录 `nation-id-reference.csv`，1-218；
+FootID 1=右脚 2=左脚）。只补这两列——源行其余字段齐全，`PosID1` 可空，归一化本就允许。
+产 `sql/players-import-overlay.sql`（同样靠喂假 DB 捕获 `upsertStatement`，与上面 19 片同口径）
++ `players-import-overlay-report.md`（补录/待填/补值不合法/归一化报错 四类清单）。
+
 ## 生产执行记录（2026-09-18）
 
 ```
@@ -35,9 +49,16 @@ npx wrangler d1 execute whl-club --remote --file scripts/players-import/sql/play
 
 ## 未入库的输入
 
-- **30 行 `naID = #N/A`**（`nationality`/`internationalrep` 同为 `#N/A`）：FC26db 国籍反查未命中，`FC26db…_backup.xlsx`
-  的 `Main` 表同样是 `#N/A`，本地无源可补 → 校验拦下。日后补到 naID 重跑即幂等入账。
-- **`club_id` 全为 NULL**：导入只写 FC 源列，不碰运营列（§5.4），全体球员初始未归属，绑队另行处理。
+- **30 行缺字段**（2026-09-19 深挖后的准确口径）：这些行缺的是**两个**校验必需列——`naID` 与 `FootID`，
+  源表分别是 `#N/A` 与 `Not Found`（`nationality`/`Foot`/`PosID1`/`Position1`/`internationalrep` 也一并缺，但 `PosID1` 可空、
+  `prestige` 允许 NULL，故只有前两列卡校验）。`FC26db…_backup.xlsx` 的 `Main` 表同为 `#N/A`。本地反查全部落空：
+  FC Editor 的队壳表（`player_tables/{teamid} - {Team}.xlsx`）只有 Squad Info 14 列、**没有国籍列**；
+  `master.db` 不是可读 SQLite（`file is not a database`）；`_temp/players.txt`（20909 行、含 `nationality`）里这 30 个 ID **一个都没有**。
+  在线源（sofifa 转登录页、futbin/fut.gg/fifaindex 403、Wikipedia/Wikidata 出网被拦）均不可用。
+  → 按「查不到的逐条报，不猜」搁置：清单在 `missing-fields-30.csv`，补值后用 `overlay-missing.ts` 一条命令入账（幂等）。
+- **`club_id` 导入时为 NULL**：导入只写 FC 源列，不碰运营列（§5.4）——本次首灌全体未归属。
+  2026-09-19 增量 14 已把 4 支 CPU 队（曼城/巴塞罗那/RB莱比锡/AC米兰）的 107 名球员回填 `club_id`
+  （`scripts/prod-20260919-increment14/02-backfill-cpu-club-id.sql`），此后导入侧按 `clubIdForTeam` 直接写 `club_id`。
 - **审计行未写**：绕过管理端即无 `players_import` 审计记录，本次以报告 + 分片 sha256 作为凭据。
 
 ## 数据缺口

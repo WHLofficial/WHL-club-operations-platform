@@ -131,7 +131,7 @@ if (dropped.length === 0) report.push('无。');
 else {
   report.push('| 源表行号 | ID | 姓名 | 字段 | 原因 |', '| --- | --- | --- | --- | --- |');
   for (const d of dropped) report.push(`| ${d.row} | ${d.fcId} | ${d.name} | ${d.field} | ${d.message} |`);
-  report.push('', '说明：`naID 缺失` 的 30 行源值是 `#N/A`（FC26db 国籍反查未命中），backup 版同样为 `#N/A`，本地无源可补；国际声望同步缺失。补齐后重跑即幂等入账。');
+  report.push('', '说明：这些行源值缺 `naID`（`#N/A`）与 `FootID`（`Not Found`）两列，`FC26db…_backup.xlsx` 的 `Main` 表同样缺；本地与在线源 2026-09-19 已逐个排查，均无源可补（详见 README「未入库的输入」）。补齐后用 `scripts/players-import/overlay-missing.ts` 增量入账，幂等。');
 }
 const reportPath = join(OUT_DIR, '..', 'players-import-report.md');
 writeFileSync(reportPath, report.join('\n') + '\n', 'utf8');
