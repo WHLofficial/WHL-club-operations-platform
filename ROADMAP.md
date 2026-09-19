@@ -228,6 +228,18 @@
 
 ---
 
+## 增量 21 · 赛果自动化——cron 自动确认 / 钩子重放 / 人工复核 / auth 审计（2026-09-20 本地完成，push/部署等令）
+
+**P0 修复**：确认钩子原本裸奔——XP/通知在快照落库后同步执行，任一失败把已入档的确认炸掉且 409 挡住重试。`b9dc6db` 把四钩子（XP/通知/奖金/上座）收进 `runHooks` 逐个吞错收集，确认主体不再被钩子拖死。
+
+**交付**：①`autoConfirmResults` 挂进 `runSettleTick`（cron `*/5`）：扫绑定赛事完赛未确认场次逐场入档，actor=0 系统留痕，每轮 cap 20，单场失败计 failed 不挡整轮；config 开关 `results_auto_confirm`（数值口径，0=off），键数 60→61。②`replayHooksForMatch` + `POST /admin/results/:id/replay-hooks`：钩子参数优先取 TOUR_DB 现况（stage_config/winner_team_id 快照表没有，清库时回退快照），幂等靠 XP UNIQUE 锚/奖金账本闸/上座主键。③迁移 0025 `result_confirmations` 加 needs_review/review_note：任一钩子异常或 XP unresolved 非空即标「待复核」（note 截 300）。④auth 三事件审计：auth_login / auth_logout / auth_backchannel_logout（backchannel actor=0），writeAudit 尽力而为不阻塞登录主流程。⑤前端（`54e6797`）：SeasonsPage 已确认列表「复核」列（待复核徽章 title 带 note + 重放钩子按钮 + cron 口径提示语），SystemPage 审计 actor=0 显示「系统」。
+
+**review 修复**：`0463d38` 重放不再重排通知——`queueClubNotification` 无去重锚，原实现重放一次就给绑定账号重复插 web/QQ 行；改为重放跳过通知钩子（notifications 无锚是根因，schema 加锚留待有真实重复需求再议），原确认时通知失败的信号保留在复核标记里不丢。另修 replay 回退快照时 `m.id` 误用确认行 id 的埋雷（未被调用，一并收紧）。
+
+**验收**：**369 测试绿 + 三份 tsc 干净**（results 新增自动确认两用例：干净场 actor=0 入档/开关 off 跳过；unresolved 标复核→补录→replay 清标记且 XP 不双记、通知不重排；oidc 三处审计断言）。本地 8791 全链冒烟：本地 whl 库种裁剪版比赛结构 + 两场完赛（一场全可解析、一场客队「幽灵 FC」不可解析）→ `POST /api/cron/tick` 一次 `confirmed=2 flagged=1` → 快照 confirmed_by=0/needs_review 与 note 全对 → XP 8 事件 6.5 值、上座两行、通知按绑定账号落库 → replay-hooks 两场 201 且二次 tick confirmed=0、XP 总量不变 → SeasonsPage 截图复核列徽章+按钮齐备。**0022-0025 四迁移随下次部署 apply --remote。**
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
