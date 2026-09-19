@@ -1,15 +1,9 @@
 import { NavLink } from 'react-router';
-import { TOUR_SITE_URL, type AuthMode, type MeUser } from '../lib/api.ts';
+import { TOUR_SITE_URL } from '../lib/api.ts';
+import { useAuth } from '../lib/auth.tsx';
 
-export default function Home({
-  user,
-  authMode,
-  authHome,
-}: {
-  user: MeUser | null | undefined;
-  authMode: AuthMode;
-  authHome: string | null;
-}) {
+export default function Home() {
+  const { user, authMode, authHome } = useAuth();
   return (
     <div className="container">
       <section className="card home-hero">

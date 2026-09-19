@@ -1,9 +1,11 @@
 import { NavLink } from 'react-router';
-import { isSuperAdmin, TOUR_SITE_URL, type AuthMode, type MeUser } from '../lib/api.ts';
+import { isSuperAdmin, TOUR_SITE_URL, type MeUser } from '../lib/api.ts';
+import { useAuth } from '../lib/auth.tsx';
 
 const ROLE_LABEL: Record<MeUser['role'], string> = { admin: '管理组', coach: '教练', viewer: '观众' };
 
-export default function TopBar({ user, authMode }: { user: MeUser | null | undefined; authMode: AuthMode }) {
+export default function TopBar() {
+  const { user, authMode } = useAuth();
   return (
     <header className="topbar">
       <div className="topbar-inner">
