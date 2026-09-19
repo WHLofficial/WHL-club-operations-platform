@@ -696,6 +696,25 @@ export interface NotificationsPage {
   unread: number;
 }
 
+// 设施经营预览（增量 19）
+export interface StadiumBuildInfo {
+  credit: number;
+  balance: number;
+  expansionPer100: number;
+  maxOpenTier: number;
+  refundRatio: number;
+  tier: { level: number; name: string | null; capacity: number; minSeats: number | null; maxSeats: number | null };
+  nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean; capacityOk: boolean } | null;
+  facilities: { key: string; level: number; nextCost: number | null }[];
+}
+
+export interface BuildPaymentResult {
+  cost: number;
+  creditUsed: number;
+  cash: number;
+  refund: number;
+}
+
 /** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
 export const LEDGER_KIND_LABELS: Record<string, string> = {
   opening_import: '期初导入',
@@ -715,6 +734,9 @@ export const LEDGER_KIND_LABELS: Record<string, string> = {
   broadcast: '转播分成',
   facility_build: '设施建设',
   facility_maintenance: '设施维护',
+  stadium_expand: '球场扩建',
+  stadium_upgrade: '球场升级',
+  facility_upgrade: '设施升级',
   luxury_tax: '富人税',
 };
 

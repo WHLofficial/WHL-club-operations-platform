@@ -6,10 +6,12 @@ import {
   ApiError,
   api,
   apiPost,
+  type BuildPaymentResult,
   type RcChangeResult,
   type RegistrationResult,
   type SquadIssue,
   type SquadOverview,
+  type StadiumBuildInfo,
   type StadiumInfo,
   type SquadPlayerRow,
   type TerminationResult,
@@ -129,6 +131,8 @@ export default function Club() {
 
       {home && <StadiumCard home={home} />}
 
+      {home && <FacilityOpsCard />}
+
       {squad && <RegistrationSection squad={squad} onRefresh={refreshSquad} />}
 
       {squad && (
@@ -176,6 +180,144 @@ function StadiumCard({ home }: { home: StadiumInfo }) {
           ))}
         </p>
       )}
+    </section>
+  );
+}
+
+/* ---------- 设施经营（增量 19）：扩建 / 升级 / 子设施 + 建设券 ---------- */
+
+function FacilityOpsCard() {
+  const qc = useQueryClient();
+  const { show } = useToast();
+  const infoQuery = useQuery({
+    queryKey: qk.stadiumBuild,
+    queryFn: () => api<StadiumBuildInfo>('/api/club/stadium/build-info'),
+    retry: false,
+  });
+  const [seats, setSeats] = useState('500');
+  const [busy, setBusy] = useState(false);
+  const info = infoQuery.data ?? null;
+
+  function refresh() {
+    void qc.invalidateQueries({ queryKey: qk.stadiumBuild });
+    void qc.invalidateQueries({ queryKey: qk.myClub });
+    void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+  }
+
+  async function run(path: string, body: Record<string, unknown>, done: string) {
+    setBusy(true);
+    try {
+      const out = await apiPost<BuildPaymentResult>(path, body);
+      refresh();
+      show(
+        `${done}：费用 ${out.cost.toFixed(2)}M${out.creditUsed > 0 ? `（建设券抵 ${out.creditUsed.toFixed(2)}M）` : ''}，实付 ${out.cash.toFixed(2)}M，返建设券 ${out.refund.toFixed(2)}M。`,
+      );
+    } catch (err) {
+      show(err instanceof Error ? err.message : '操作失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (infoQuery.isPending) return null;
+  if (infoQuery.isError || !info) {
+    return (
+      <section className="card">
+        <h3>设施经营</h3>
+        <p className="muted">{infoQuery.error instanceof Error ? infoQuery.error.message : '设施数据读不出来'}</p>
+      </section>
+    );
+  }
+
+  const seatCount = Number(seats);
+  const seatsValid = Number.isInteger(seatCount) && seatCount > 0 && seatCount % 100 === 0;
+  const expandCost = seatsValid ? (seatCount / 100) * info.expansionPer100 : null;
+  const capacityHeadroom = info.tier.maxSeats !== null ? info.tier.maxSeats - info.tier.capacity : null;
+  const expandError =
+    seatsValid && capacityHeadroom !== null && seatCount > capacityHeadroom
+      ? `超当前档位上限，最多还能扩 ${capacityHeadroom.toLocaleString()} 座`
+      : null;
+  const upgradeBlocked = !info.nextTier || !info.nextTier.open || !info.nextTier.capacityOk;
+
+  return (
+    <section className="card">
+      <h3>设施经营</h3>
+      <p className="hint">
+        建设券余额 <span className="mono">{info.credit.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}%，可抵扣后续建设）· 当前余额{' '}
+        <span className="mono">{info.balance.toFixed(2)}</span> M · 开放至 {info.maxOpenTier} 级
+      </p>
+
+      <p>
+        <b>扩建</b>（当前 {info.tier.capacity.toLocaleString()} 座 / 档位上限 {info.tier.maxSeats?.toLocaleString() ?? '—'}）：
+        <input
+          className="mono"
+          style={{ width: 90, marginLeft: 6 }}
+          inputMode="numeric"
+          value={seats}
+          onChange={(e) => setSeats(e.target.value.replace(/[^\d]/g, ''))}
+        />{' '}
+        座
+        {expandCost !== null && (
+          <span className="hint" style={{ marginLeft: 6 }}>
+            应付 <span className="mono">{expandCost.toFixed(2)}</span> M
+          </span>
+        )}
+        {expandError && <span className="error-msg"> {expandError}</span>}
+        <button
+          className="btn btn-sm"
+          type="button"
+          disabled={busy || !seatsValid || expandError !== null}
+          style={{ marginLeft: 8 }}
+          onClick={() => void run('/api/club/stadium/expand', { seats: seatCount }, `扩建 +${seatCount} 座`)}
+        >
+          扩建
+        </button>
+      </p>
+
+      <p>
+        <b>球场升级</b>：
+        {info.nextTier ? (
+          <>
+            下一档 {info.nextTier.name}（至少 {info.nextTier.minSeats.toLocaleString()} 座）· 费用{' '}
+            <span className="mono">{info.nextTier.upgradeCost?.toFixed(2) ?? '—'}</span> M
+            <button
+              className="btn btn-sm"
+              type="button"
+              disabled={busy || upgradeBlocked}
+              style={{ marginLeft: 8 }}
+              title={upgradeBlocked ? (!info.nextTier.open ? `第 ${info.tier.level + 1} 档暂未开放` : '容量不足，先扩建') : undefined}
+              onClick={() => void run('/api/club/stadium/upgrade', {}, `升级到${info.nextTier!.name}`)}
+            >
+              {upgradeBlocked ? (info.nextTier.open ? '容量不足' : '未开放') : '升级'}
+            </button>
+          </>
+        ) : (
+          <span className="muted">已是最高档位</span>
+        )}
+      </p>
+
+      <p>
+        <b>子设施</b>：
+        {info.facilities.map((f) => (
+          <span key={f.key} style={{ marginLeft: 10, whiteSpace: 'nowrap' }}>
+            {FACILITY_LABEL[f.key] ?? f.key} <span className="mono">{f.level}</span> 级
+            {f.nextCost !== null ? (
+              <button
+                className="btn btn-ghost btn-sm"
+                type="button"
+                disabled={busy}
+                style={{ marginLeft: 4 }}
+                title={`升到 ${f.level + 1} 级：${f.nextCost.toFixed(2)}M`}
+                onClick={() => void run('/api/club/facilities/upgrade', { key: f.key }, `${FACILITY_LABEL[f.key] ?? f.key}升到 ${f.level + 1} 级`)}
+              >
+                升级 {f.nextCost.toFixed(2)}M
+              </button>
+            ) : (
+              <span className="muted"> 满级</span>
+            )}
+          </span>
+        ))}
+      </p>
     </section>
   );
 }
