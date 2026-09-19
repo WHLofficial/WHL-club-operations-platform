@@ -128,10 +128,12 @@ describe('球场升级', () => {
 describe('子设施升级', () => {
   it('无行从 0 级起升（费用 3M），逐级抬价；满级被拒；非法 key 被拒', async () => {
     const fx = freshEnv();
-    seedClub(fx.sqlite, { credit: 2 });
+    seedClub(fx.sqlite, { credit: 2, balance: 10 });
     const r1 = await upgradeFacilityLevel(fx.env, 1, 'commercial');
     expect(r1).toEqual({ cost: 3, creditUsed: 2, cash: 1, refund: 0.75, level: 1 });
     expect(sqlGet<{ level: number }>(fx.sqlite, "SELECT level FROM club_facilities WHERE club_id=1 AND facility_key='commercial'")?.level).toBe(1);
+    // 券余额 = 种子 2M − 抵扣 2M + 返还 0.75M（费用 3M × 0.25）
+    expect(sqlGet<{ build_credit: number }>(fx.sqlite, 'SELECT build_credit FROM stadiums WHERE club_id=1')?.build_credit).toBeCloseTo(0.75, 5);
 
     const r2 = await upgradeFacilityLevel(fx.env, 1, 'commercial');
     expect(r2.cost).toBe(5); // 1→2 级费用

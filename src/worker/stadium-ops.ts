@@ -214,6 +214,12 @@ export async function upgradeFacilityLevel(
     }),
     env.DB
       .prepare(
+        `UPDATE stadiums SET build_credit = build_credit - ? + ?,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`,
+      )
+      .bind(creditUsed, refund, clubId),
+    env.DB
+      .prepare(
         `INSERT INTO club_facilities (club_id, facility_key, level, updated_at)
          VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          ON CONFLICT(club_id, facility_key) DO UPDATE SET
