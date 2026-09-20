@@ -75,15 +75,15 @@ e2e 冒烟默认打 `http://127.0.0.1:8791`，用本机 Chrome（`C:/Program Fil
 
 ## 数据库迁移
 
-`src/db/migrations/` 下 27 个文件（`0001_init` … `0027_players_sort_indexes.sql`），由 `wrangler d1 migrations apply whl-club` 管理，只对 `DB` 生效（另两库只读）。
+`src/db/migrations/` 下 28 个文件（`0001_init` … `0028_contract_window_ticks.sql`），由 `wrangler d1 migrations apply whl-club` 管理，只对 `DB` 生效（另两库只读）。
 
 新增迁移要同时把文件名追加到 `tests/d1.ts` 的 `MIGRATION_FILES`，否则测试夹具与迁移会脱节。
 
-`0001`–`0027` 已全部 apply 到生产（2026-09-20 完成 `0022`–`0027`）。提醒：`0027` 的四条表达式索引一次性写约 7.3 万行（4 × 18301 名球员），D1 免费档日写配额 10 万行——同类大迁移要单独安排，别和别的写叠加。
+`0001`–`0027` 已 apply 到生产（2026-09-20 完成 `0022`–`0027`）；`0028`（增量 25，纯加列，无回填）**尚未 apply**。提醒：`0027` 的四条表达式索引一次性写约 7.3 万行（4 × 18301 名球员），D1 免费档日写配额 10 万行——同类大迁移要单独安排，别和别的写叠加。
 
 ## 测试
 
-- 单元/集成：`npm test`，当前 30 个文件 / 387 个用例。`tests/d1.ts` 用本地 SQLite 执行真实迁移，`tests/tour-team-seed.ts` 提供赛事库夹具。
+- 单元/集成：`npm test`，当前 31 个文件 / 397 个用例。`tests/d1.ts` 用本地 SQLite 执行真实迁移，`tests/tour-team-seed.ts` 提供赛事库夹具。
 - 类型：`npm run typecheck`（三份 tsconfig）。
 - e2e 冒烟：`npm run test:e2e`，8 个场景（首页、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、无未捕获前端错误）。
 
@@ -110,7 +110,7 @@ docs/          附属插件与集成说明
 npm run build && wrangler deploy
 ```
 
-生产状态（2026-09-20 查证 `wrangler deployments status --name whl-club`）：最新部署 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（2026-09-20T05:42:27Z），含增量 17–24；此前增量 16 为 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0027_players_sort_indexes.sql`。生产数据：球员库 18301 人（其中 444 人队籍已于 2026-09-20 回填，全库入籍 551 人）。仍未执行的生产写：球员库 30 人缺字段补录。
+生产状态（2026-09-20 查证 `wrangler deployments status --name whl-club`）：最新部署 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（2026-09-20T05:42:27Z），含增量 17–24；此前增量 16 为 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0027_players_sort_indexes.sql`（增量 25 的 `0028` 本地就绪但未 apply）。生产数据：球员库 18301 人（其中 444 人队籍已于 2026-09-20 回填，全库入籍 551 人）。仍未执行的生产写：球员库 30 人缺字段补录。
 
 ## 约定与边界
 

@@ -294,6 +294,27 @@
 
 ---
 
+## 增量 25 · 合同期与财政节点改窗刻度——效力/保护期/解约费按常规窗计时 + 窗分型（临时窗）+ 忠诚奖金移入中期窗 + 税最先扣（2026-09-20 本地完成，push/部署等令）
+
+**范围**：规则以赛季/半赛季为主刻度（4.2.3 工资帽半赛季周期、4.3.1 保护期 1.5 赛季、4.3.2 忠诚奖金按赛季、4.4.4 效力满 3 年免费解约），原实现按自然日折算（`PROTECTION_DAYS = 548` 天、`(now − effective_from) ÷ 365.25` 年），属口径错；本轮把合同期与资金动账节点一并定时点。
+
+**裁决**（2026-09-20 用户逐条拍板）：①窗分型 = 开窗表单复选框「临时窗」，落库 `season_windows.is_temporary`，季初/中期按同赛季非临时窗顺序派生（不落库）；②效力只由**常规窗**关窗推进（每窗 +0.5 赛季），临时窗 +0、赛季结算不推进；③保护期 = 签约后经历 3 个常规窗关窗解除（= 效力 1.5，即 1.5 赛季只保护 2 窗）；④忠诚奖金改在**每赛季中期窗**（同赛季第 2 个非临时窗）关窗时发一次，季初/临时窗不发；⑤满 3 年免费解约 ⇔ 效力 ≥3.0 ⇔ 6 个常规窗；⑥训练营球员无保护期（`protection_ticks` NULL）；⑦续约/匹配把 `protection_ticks` 置为当前窗数（保护期即刻结束）、`service_ticks` 效力基数不动；⑧临时窗关窗只扣富人税 + 维护费（不扣工资、不收冠名租金；维护费按本窗已确认主场数照收）；⑨临时窗不递减冠名剩余窗数（与不收租同步）；⑩冠名前端仍按赛季展示（落库按窗，界面 = 窗数 ÷ 2）；⑪同赛季非临时窗上限 2（第 3 个服务端硬拦 409，要加窗只能勾临时窗）；⑫效力 0 不可被激活（临时窗期间签约者也要等下个常规窗关窗）；⑬保护期显示改二值「保护 / 非保护」；⑭富人税最先扣、税基含未扣工资（`balance` 与 `balance + ΣRC` 两项取多）。
+
+**交付**（5 个 commit）：
+- `2120dce` 迁移 `0028_contract_window_ticks.sql`（contracts 加 `service_ticks` NOT NULL DEFAULT 0 / `protection_ticks` / `signed_season` / `signed_window_seq`，season_windows 加 `is_temporary` NOT NULL DEFAULT 0；纯加列、无回填）+ `tests/d1.ts` 的 `MIGRATION_FILES` 追加。
+- `2543e05` 判定与写库改窗刻度：`src/core/bypass-rules.ts` 重写为纯函数（`serviceSeasons` / `isProtected` / `protectionTicksFor` / `activationFee` / `terminationFee`）；新增 `src/worker/contract-ticks.ts`（`currentWindow` / `closedRegularTicks` / `windowBaseTicks` / `regularWindowOrdinal`）；`src/worker/{activations,bypass,transfers,contracts-import}.ts` 与 `src/worker/routes/players.ts` 改为按窗刻度读写（导入按 `effective_from` 反查签约基数）；测试 `tests/{bypass-rules,bypass-routes,activation,activation-match,players-library}.test.ts`。
+- `71de78d` 关窗批按窗类型分支：`src/worker/window-machine.ts`（开窗 `temporary` 入参 + 常规窗上限 2 硬拦 + 列表带窗类型；关窗按 `is_temporary` 分派并回显 `loyalty`）、`window-payroll.ts`（`chargeWages` + 税最先扣、税基含未扣工资 + `-0` 归一）、`home.ts`（`chargeNaming`，临时窗不收租不递减）、`season-settle.ts`（忠诚奖金抽成 `loyaltyMovements`，幂等 `kind='loyalty' ref_type='window'`）、`routes/admin/market.ts`；测试 `tests/{home,season-settle,window-machine}.test.ts`。
+- `fc68060` 前端：`web/src/lib/api.ts` 类型 + `pages/{PlayersLibrary,Player,Club}.tsx`（效力/保护期按赛季展示、保护期二值）+ `pages/admin/{MarketPage,SeasonsPage}.tsx`（临时窗复选框、窗类型列、忠诚奖金回显、冠名按赛季换算）。
+- `e74138d` 自审补测：新增 `tests/contract-ticks.test.ts`（6 例）+ 修正两处注释（`regularWindowOrdinal` 对临时窗的返回值、`closedRegularTicks` 的日期串截断口径）。
+
+**验收**：`npm test` **31 文件 / 397 用例全绿**（原基线 30 / 387），`npm run typecheck`（三份 tsconfig）与 `npm run build` 过。自审（code-review-skill 四阶段）无阻断项：全部调用点核对无遗漏（`PROTECTION_DAYS` / `protected_until` / `365.25` 仅剩迁移注释与导入模板映射）；`currentWindow` 与原 `getOpenWindow` 的 SQL 逐字一致（只多读 `is_temporary`），无回归；`settleSeason` 的 `growable` 批次下标在语句数减少后仍正确。
+
+**遗留**：`0028` 未 apply（本地已到 0028，生产停在 0027；纯加列迁移，生产 `contracts` / `season_windows` 均 0 行）；旧列 `protected_until`（signed_at + 548 天）保留留档、判定不再读；导入历史合同的签约基数按日期串截断，与签约同日关的窗不计（效力算得更年轻，已在 `closedRegularTicks` 注明）；e2e 冒烟未跑（本轮不涉页面结构，仍是增量 23 的 8 场景）。
+
+**文档**：TECH_DESIGN §6.3（窗内回滚还原 `protection_ticks`）、§8 窗末结算（临时窗不收冠名租金）、§11 结算段与关窗批（增量 25 改口径三条）、§13 `loyalty_tiers` 单位改赛季、§15 假设 13/14 重写为窗刻度 + 新增假设 39（窗分型与效力推进点）/40（临时窗扣费与忠诚奖金中期发）、附录 A 窗口两行与赛季结算行；PRD 合同台账/解约/续约/赛季结算/假设 5；UI_DESIGN 卷宗条款与「收口」文案；README 与 AGENTS.md 的迁移数与测试数；CHANGELOG [未发布] 增量 25 节。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
