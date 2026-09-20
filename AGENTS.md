@@ -20,7 +20,7 @@ Cloudflare Worker（Hono）同时提供 API 与前端静态资源，前端是 Re
 
 - `npm run deploy`、`wrangler deploy`、任何 `--remote` 写操作（`d1 execute` / `d1 migrations apply` / `kv key put` / `r2`）。
 - 生产 D1 的迁移 apply、`scripts/prod-*/` 下任何 SQL 工件、`scripts/players-import/sql/` 分片导入。
-- 球员库全量**重**导入（首灌已于 2026-09-18 执行，入库 18301 人，勿重跑分片）、30 人缺字段补录（`overlay-missing.ts`）、16 队队籍回填（`scripts/prod-20260919-roster-backfill/`，444 人，等管理组下令）。
+- 球员库全量**重**导入（首灌已于 2026-09-18 执行，入库 18301 人，勿重跑分片）、30 人缺字段补录（`overlay-missing.ts`）。16 队队籍回填（`scripts/prod-20260919-roster-backfill/`）已于 2026-09-20 执行完毕（444 人），工件内守卫 `club_id IS NULL` 使其幂等，但无新指令不要再跑。
 - `git push` 与发布。
 
 一次授权不延续到下一轮。执行前先说明影响面（行数、配额、不可逆点）再等确认。
@@ -67,4 +67,5 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 
 - 增量 17–24 已推送（`9f05116..fe60273`，50 个提交）并部署上线，工作区干净；本地与 `origin/main` 的差值以 `git rev-list --count origin/main..HEAD` 为准。
 - 生产最新 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（2026-09-20T05:42Z，含增量 17–24）；生产迁移已到 0027，无待 apply。
-- 尚未执行的生产写：16 队队籍回填（`scripts/prod-20260919-roster-backfill/`）、球员库 30 人缺字段补录（`scripts/players-import/overlay-missing.ts`）。
+- 生产数据：球员库 18301 人；16 队队籍回填已于 2026-09-20 执行（444 人入籍，全库入籍 551 人）。
+- 尚未执行的生产写：球员库 30 人缺字段补录（`scripts/players-import/overlay-missing.ts`）。

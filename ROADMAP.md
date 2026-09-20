@@ -182,7 +182,7 @@
 
 ---
 
-## 增量 17 · 体验修缮 + 俱乐部目录工具（2026-09-19 本地完成；2026-09-20 已部署 Version 90bfd78f，生产队籍回填仍等令）
+## 增量 17 · 体验修缮 + 俱乐部目录工具（2026-09-19 本地完成；2026-09-20 已部署 Version 90bfd78f，生产队籍回填同日执行完毕）
 
 **裁决**（计划 `.zcode/plans/plan-sess_4cad139a-6977-4a40-9531-f7cf24c68499.md`）：①换队壳=换游戏队号（rekey 口径）；②新建俱乐部必填游戏队号+自动建 auth 目录；③多教练同权限、逐个解绑；④队籍回填只写队籍不造合同；⑤徽章筛=具体 PlayStyle 多选；⑥**列显示与筛选双向联动**（筛选激活→列自动加入，取消→自动移除，手动勾选过则手动为准）；⑦年龄快捷预设不做；⑧站内信顺延增量 18。
 
@@ -190,7 +190,7 @@
 
 **验收**：**342 测试绿 + 三份 tsc 干净 + build 过**（新增 15 用例：游戏队号三库建档/缺号 404/重号 409/目录失败重试/多教练 bindings/球员库新筛选域）。本地冒烟：新建俱乐部三库落行、多教练双绑定显示与逐个解绑（stale dist 曾误显未绑定，重建后正常）、rekey 演练 A 执行+回滚、演练 B 负向闸 exit 2。收口 code review 修两项：测试夹具统一吃 gameTeamId（10 文件 106 失败→全绿）；rekey 换壳 club_id 撞号闸（上述 f9ee04c）。**Windows 踩坑**：`npx.cmd` spawnSync 无 shell EINVAL（Node 24）→ `execFileSync(process.execPath, [wrangler.js…])`；UNION ALL compound SELECT 实测 ~8 项上限 → 标量子查询别名 `'table.column'` 每批 100。
 
-**待办（等令）**：①push（9 commits 本地）；②部署（注意 worker bindings 数组与前端 AdminClubRow 需同代次发布）；③生产执行 16 队 roster backfill（444 人，`scripts/prod-20260919-roster-backfill/`）。
+**待办（已于 2026-09-20 全部完成）**：①push —— 增量 17 随增量 17–24 共 50 个提交一并推送（`9f05116..fe60273`）；②部署 —— 与 bindings 数组、前端 `AdminClubRow` 同代次发布，出 Version `90bfd78f`；③生产执行 16 队 roster backfill（444 人，`scripts/prod-20260919-roster-backfill/`）—— 同日下令执行，444 行写入、复查通过，记录见该目录 README。
 
 ---
 
@@ -278,7 +278,7 @@
 
 **③ CHANGELOG.md 新建**（`2d78587`）：Keep a Changelog 风格；本项目按增量推进、以 Cloudflare Version id 标记（仓库无 git tag）。[未发布] = 增量 17–24（自审后补 24）；[已上线] 增量 16（`6ed7446c`）与增量 15（`4d03eb57`）；早期增量 0–14 各一行标题。
 
-**④ scripts/README.md 新建**（`d99ae79`）：按性质分级（只读 / 产工件 / 写生产 / 未执行）+ 顶层脚本表 + 各子目录说明；生产工件状态逐个标注（increment14 已执行、increment15 已执行、milan-rekey 已执行、**roster-backfill 未执行**）；执行纪律：含外键或大事务的工件必须 `--command` 或 D1 REST `/query`（`--file` 通道让 `PRAGMA defer_foreign_keys` 失效，会整批回滚）。
+**④ scripts/README.md 新建**（`d99ae79`）：按性质分级（只读 / 产工件 / 写生产 / 未执行）+ 顶层脚本表 + 各子目录说明；生产工件状态逐个标注（increment14 已执行、increment15 已执行、milan-rekey 已执行、**roster-backfill 未执行**——该行状态后来在执行回填后已改为「已执行」）；执行纪律：含外键或大事务的工件必须 `--command` 或 D1 REST `/query`（`--file` 通道让 `PRAGMA defer_foreign_keys` 失效，会整批回滚）。
 
 **⑤ TECH_DESIGN 与现状对齐**（`3eec8e2`）：§13 把 `review_amount_threshold`（`40`）与 `bid_pattern_alert`（`{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}`）由「待定」改实值，补 5 个已落地键（`window_force_settle` / `market_bid_paused` / `stadium_max_open_tier` / `naming_params` / `results_auto_confirm`），`facility_prices` 改精确值，表尾补注册表口径（61 条登记 / 唯一键 59 / 无默认键）；§15 加分类口径（已定 / 假设 / 已解决 / 可配置 / 已执行 / 已撤销）并把 27 号归位到 26 号之后；§17.1 补表达式索引规约、§17.3 按 `src/lib/guard.ts` 现状改写（进程内限流 + TTL SWR，明确「不用 KV」的配额理由）；§12 记通知双通道、假设 23 由「假设」改「已定（增量 18 补 web 收件篮）」；附录 A 通知行拆为 web 三端点〔18〕与 qq 投递〔6〕，表头加「冻结于增量 6 era，增量 7+ 不回填」的范围说明。
 
@@ -290,7 +290,7 @@
 
 **遗留**：附录 A 只修过期行、不回填增量 7+ 新增路由（表头已写明冻结范围）；TECH_DESIGN §15 各条只补落地增量号，未逐条回代码核位置；e2e 仍只覆盖兼容模式会话路径（增量 23 遗留）。
 
-**部署（2026-09-20，用户下令执行）**：推送 50 个提交（`9f05116..fe60273`）→ 生产 D1 apply 0022–0027（生产迁移现到 0027，0027 的四条索引一次性写约 7.3 万行）→ `npm run deploy` 出 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（取代增量 16 的 `6ed7446c`）。生产回读：`/api/health` 三资源 ok；`/api/me` 为 oidc 模式；首页与 `/api/clubs/directory`、`/api/players`（含 `sort=ca` 表达式索引路径）200；增量 17–23 新增路由（`/api/notifications*`、`/api/club/stadium/build-info`、`/api/club/naming/quote`、`/api/admin/overview`）返回 401 未登录而非 404，确认新代码已上线；0026 的 `clubs.is_cpu` 四个 CPU 队（id 10 / 241 / 112172 / 131681）核对均 `is_cpu=1`。仍未执行：16 队队籍回填、30 人缺字段补录。
+**部署（2026-09-20，用户下令执行）**：推送 50 个提交（`9f05116..fe60273`）→ 生产 D1 apply 0022–0027（生产迁移现到 0027，0027 的四条索引一次性写约 7.3 万行）→ `npm run deploy` 出 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（取代增量 16 的 `6ed7446c`）。生产回读：`/api/health` 三资源 ok；`/api/me` 为 oidc 模式；首页与 `/api/clubs/directory`、`/api/players`（含 `sort=ca` 表达式索引路径）200；增量 17–23 新增路由（`/api/notifications*`、`/api/club/stadium/build-info`、`/api/club/naming/quote`、`/api/admin/overview`）返回 401 未登录而非 404，确认新代码已上线；0026 的 `clubs.is_cpu` 四个 CPU 队（id 10 / 241 / 112172 / 131681）核对均 `is_cpu=1`。**同日另批**：16 队队籍回填已单独执行完毕（444 行，见增量 17 节与 `scripts/prod-20260919-roster-backfill/README.md`）。仍未执行：30 人缺字段补录。
 
 ---
 
@@ -305,4 +305,4 @@
 | 球员库源数据（FC Editor 逐队导出）：`E:\BaiduNetdiskDownload\FC Editor by decoruiz Alpha v21.5_2\player_tables\`（每队一个 `{id} - {Team}.xlsx`）；口径 `fc_id` = EA id 为 upsert 键、`prestige` ← `internationalrep`(1-5)、`base_ca` = 导入时 CA、`game_attrs` = FC 源 61 列 | 后续增量补录 / 重导 | 参考路径：首灌已于 2026-09-18 执行（入库 18301）；此逐队源供后续核对与增量补录用 |
 | 球员库导入通道 | 球员库首灌 | 已裁决：管理端网页通道要 OIDC 会话（离线脚本拿不到），走 `scripts/players-import/generate-sql.ts` 产分片 SQL + D1 REST `/query`；`--file` 通道遇 FK / 大事务会因 `PRAGMA defer_foreign_keys` 失效整批回滚 |
 | 30 人缺字段补录工件（`scripts/players-import/overlay-missing.ts` + `missing-fields-30.csv`，源缺 `naID` / `FootID`，需人工填值） | 球员库收口 | **等令，未执行**（生产现 18301 人，2026-09-20 查证） |
-| 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | 增量 12 后收口 | **等管理组下令，未执行** |
+| 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | 增量 12 后收口 | **已执行**（2026-09-20，444 行；复查全库 assigned 551 = CPU 4 队 107 + 本批 444） |

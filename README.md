@@ -110,7 +110,7 @@ docs/          附属插件与集成说明
 npm run build && wrangler deploy
 ```
 
-生产状态（2026-09-20 查证 `wrangler deployments status --name whl-club`）：最新部署 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（2026-09-20T05:42:27Z），含增量 17–24；此前增量 16 为 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0027_players_sort_indexes.sql`。仍未执行的生产写：16 队队籍回填（`scripts/prod-20260919-roster-backfill/`）、球员库 30 人缺字段补录。
+生产状态（2026-09-20 查证 `wrangler deployments status --name whl-club`）：最新部署 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（2026-09-20T05:42:27Z），含增量 17–24；此前增量 16 为 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0027_players_sort_indexes.sql`。生产数据：球员库 18301 人（其中 444 人队籍已于 2026-09-20 回填，全库入籍 551 人）。仍未执行的生产写：球员库 30 人缺字段补录。
 
 ## 约定与边界
 

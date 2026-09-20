@@ -61,7 +61,7 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 | `prod-20260919-increment14/` | 00 迁移记账 / 01 CPU 队 / 02 回填 CPU club_id / 03 换队号 / 04 认证侧队号关联，各带期望 changes 与回滚语句 | **已执行** |
 | `prod-20260919-increment15/001-add-bid-paused.sql` | 迁移 0021 `listings.bid_paused` | **已执行** |
 | `prod-20260919-milan-rekey/` | 01 赛事库换队号 / 02 认证库队号，四 id 空间统一（米兰 47 → 131681） | **已执行** |
-| `prod-20260919-roster-backfill/` | 16 队队籍回填，444 人幂等 UPDATE，只写队籍不造合同 | **未执行**，等管理组下令 |
+| `prod-20260919-roster-backfill/` | 16 队队籍回填，444 人幂等 UPDATE，只写队籍不造合同 | **已执行**（2026-09-20，444 行；复查 assigned 全库 551 = CPU 4 队 107 + 本批 444，free 17750） |
 
 **执行纪律**：含外键或大事务的工件必须走 `--command` 或 D1 REST `/query`，`--file` 通道会让 `PRAGMA defer_foreign_keys` 失效，整批回滚。执行前先看该目录 README 的核查清单与期望 changes。
 
