@@ -274,7 +274,7 @@
 
 **① README 重写**（`cbadbb8`）：定位、文档索引、技术栈、快速开始、常用命令（与 `package.json` 逐条对齐）、绑定资源表（三 D1 + KV + R2 + assets + secret/vars + cron）、迁移章节（27 个文件 0001–0027，只对 `DB`；新增迁移须追加 `tests/d1.ts` 的 `MIGRATION_FILES`）、测试与 e2e、目录结构、部署现状、约定与边界。
 
-**② 项目级 AGENTS.md 新建**（`97ffa68`）：三库权限表、危险清单（deploy / `--remote` 写 / 生产迁移 / `scripts/prod-*` 工件 / 球员库 18408 导入 / 30 人补录 / 16 队队籍回填 / push）、开发口径（端口 8791/8795/8792；改前端不 build 看不到；AUTH_MODE 与兼容模式；会话解析在 `src/lib/session.ts`、cookie 名在 `src/lib/oidc.ts`）、测试与迁移纪律、代码与提交规范（Edit/Write 禁终端改文件、core/lib/worker/routes 分层、guard.ts 口径）、文档纪律、当前状态。用户级 AGENTS.md 仍先注入，本文件只做项目收窄。
+**② 项目级 AGENTS.md 新建**（`97ffa68`）：三库权限表、危险清单（deploy / `--remote` 写 / 生产迁移 / `scripts/prod-*` 工件 / 球员库全量重导入 / 30 人补录 / 16 队队籍回填 / push）、开发口径（端口 8791/8795/8792；改前端不 build 看不到；AUTH_MODE 与兼容模式；会话解析在 `src/lib/session.ts`、cookie 名在 `src/lib/oidc.ts`）、测试与迁移纪律、代码与提交规范（Edit/Write 禁终端改文件、core/lib/worker/routes 分层、guard.ts 口径）、文档纪律、当前状态。用户级 AGENTS.md 仍先注入，本文件只做项目收窄。
 
 **③ CHANGELOG.md 新建**（`2d78587`）：Keep a Changelog 风格；本项目按增量推进、以 Cloudflare Version id 标记（仓库无 git tag）。[未发布] = 增量 17–23；[已上线] 增量 16（`6ed7446c`）与增量 15（`4d03eb57`）；早期增量 0–14 各一行标题。
 
@@ -282,7 +282,7 @@
 
 **⑤ TECH_DESIGN 与现状对齐**（`3eec8e2`）：§13 把 `review_amount_threshold`（`40`）与 `bid_pattern_alert`（`{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}`）由「待定」改实值，补 5 个已落地键（`window_force_settle` / `market_bid_paused` / `stadium_max_open_tier` / `naming_params` / `results_auto_confirm`），`facility_prices` 改精确值，表尾补注册表口径（61 条登记 / 唯一键 59 / 无默认键）；§15 加分类口径（已定 / 假设 / 已解决 / 可配置 / 已执行 / 已撤销）并把 27 号归位到 26 号之后；§17.1 补表达式索引规约、§17.3 按 `src/lib/guard.ts` 现状改写（进程内限流 + TTL SWR，明确「不用 KV」的配额理由）；§12 记通知双通道、假设 23 由「假设」改「已定（增量 18 补 web 收件篮）」；附录 A 通知行拆为 web 三端点〔18〕与 qq 投递〔6〕，表头加「冻结于增量 6 era，增量 7+ 不回填」的范围说明。
 
-**⑥ 过期草稿清理**：`handoff-20260916.md`（停在增量 12，四仓 HEAD 快照全过期）删除；其中仍有效的三条已迁走——18408 导入源数据位置与口径、导入通道选择（离线脚本产 SQL 走 D1 REST `/query`）、`--file` 通道 FK 陷阱（后两条进 `scripts/README.md`，第一条进本节下方「外部依赖与待输入」表）。
+**⑥ 过期草稿清理**：`handoff-20260916.md`（停在增量 12，四仓 HEAD 快照全过期）删除；其中仍有效的三条已迁走——球员库逐队源数据位置与字段口径、导入通道选择（离线脚本产 SQL 走 D1 REST `/query`）、`--file` 通道 FK 陷阱（后两条进 `scripts/README.md`，第一条进本节下方「外部依赖与待输入」表）。
 
 **验收**：文档里每处路径、命令、键名、版本号均以代码或联网只读查证为准（`wrangler deployments list --name whl-club` 实证生产最新 Version = 增量 16 的 `6ed7446c`，`wrangler d1 migrations list whl-club --remote` 实证生产迁移停在 0021）；`npm test` 387 用例 / 30 文件不变（本轮不碰代码）。
 
@@ -298,6 +298,7 @@
 | 平台部署域必须是 .whleague.win 子域（共享 cookie） | 部署 | 待定子域 |
 | PlayStyle 图标资产包（`assets/icons/playstyles/{id}.webp`） | 增量 1 球员卡 | 待供给（缺图降级 🥇🥈） |
 | 工资帽数值（随赛季大名单） | 增量 2 工资帽 | config 项，不阻塞 |
-| 球员库 18408 全量导入源数据：`E:\BaiduNetdiskDownload\FC Editor by decoruiz Alpha v21.5_2\player_tables\`（每队一个 `{id} - {Team}.xlsx`）；口径 `fc_id` = EA id 为 upsert 键、`prestige` ← `internationalrep`(1-5)、`base_ca` = 导入时 CA、`game_attrs` = FC 源 61 列 | 球员库首灌 | **等令，未执行**（工具见 `scripts/players-import/`） |
+| 球员库源数据（FC Editor 逐队导出）：`E:\BaiduNetdiskDownload\FC Editor by decoruiz Alpha v21.5_2\player_tables\`（每队一个 `{id} - {Team}.xlsx`）；口径 `fc_id` = EA id 为 upsert 键、`prestige` ← `internationalrep`(1-5)、`base_ca` = 导入时 CA、`game_attrs` = FC 源 61 列 | 后续增量补录 / 重导 | 参考路径：首灌已于 2026-09-18 执行（入库 18301）；此逐队源供后续核对与增量补录用 |
 | 球员库导入通道 | 球员库首灌 | 已裁决：管理端网页通道要 OIDC 会话（离线脚本拿不到），走 `scripts/players-import/generate-sql.ts` 产分片 SQL + D1 REST `/query`；`--file` 通道遇 FK / 大事务会因 `PRAGMA defer_foreign_keys` 失效整批回滚 |
+| 30 人缺字段补录工件（`scripts/players-import/overlay-missing.ts` + `missing-fields-30.csv`，源缺 `naID` / `FootID`，需人工填值） | 球员库收口 | **等令，未执行**（生产现 18301 人，2026-09-20 查证） |
 | 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | 增量 12 后收口 | **等管理组下令，未执行** |

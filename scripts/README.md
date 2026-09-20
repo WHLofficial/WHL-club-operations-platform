@@ -38,11 +38,11 @@ FC26 源数据导入工具链。走离线脚本而不是管理端网页导入的
 | `nation-id-reference.csv` | 国籍 id 参照表 | — |
 | `players-import-report.md` | 首灌报告（含 sha256 清单） | — |
 | `players-import-overlay-report.md` | 补录报告 | — |
-| `sql/players-import-01..19.sql` | 首灌分片（**gitignored**，可由脚本逐字节复现） | 未执行 |
+| `sql/players-import-01..19.sql` | 首灌分片（**gitignored**，可由脚本逐字节复现） | **已执行**（2026-09-18，19 片逐片 `--file` 直写生产） |
 
-用法：`node scripts/players-import/generate-sql.ts [xlsx路径] [每片语句数] [--mode minor|major]`（默认源 `E:/Downloads/FC26db20251217_fixed.xlsx`、1000 语句/片）。执行分片用 `npx wrangler d1 execute whl-club --remote --file <片>`——**写生产，需明令**。
+用法：`node scripts/players-import/generate-sql.ts [xlsx路径] [每片语句数] [--mode minor|major]`（默认源 `E:/Downloads/FC26db20251217_fixed.xlsx`、1000 语句/片）。执行分片用 `npx wrangler d1 execute whl-club --remote --file <片>`——首灌分片不含外键依赖，`--file` 可行；**但写生产，需明令**（含外键或大事务的工件另有纪律，见下方「执行纪律」）。
 
-球员库 18408 全量导入与 30 人补录均**尚未执行**。
+球员库**首灌已于 2026-09-18 执行**：源 18407 数据行 − 76 重复 = 18331 唯一行，入库 **18301**（2026-09-20 查生产 `SELECT COUNT(*) FROM players` = 18301），被校验拦下 30 行（源值缺 `naID` / `FootID`）；**30 人缺字段补录（`overlay-missing.ts`）尚未执行**。首灌后勿再重跑全量分片。
 
 ## rekey-team/
 

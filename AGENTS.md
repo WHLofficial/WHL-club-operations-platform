@@ -20,7 +20,7 @@ Cloudflare Worker（Hono）同时提供 API 与前端静态资源，前端是 Re
 
 - `npm run deploy`、`wrangler deploy`、任何 `--remote` 写操作（`d1 execute` / `d1 migrations apply` / `kv key put` / `r2`）。
 - 生产 D1 的迁移 apply、`scripts/prod-*/` 下任何 SQL 工件、`scripts/players-import/sql/` 分片导入。
-- 球员库 18408 全量导入、30 人缺字段补录（`overlay-missing.ts`）、16 队队籍回填（`scripts/prod-20260919-roster-backfill/`，444 人，等管理组下令）。
+- 球员库全量**重**导入（首灌已于 2026-09-18 执行，入库 18301 人，勿重跑分片）、30 人缺字段补录（`overlay-missing.ts`）、16 队队籍回填（`scripts/prod-20260919-roster-backfill/`，444 人，等管理组下令）。
 - `git push` 与发布。
 
 一次授权不延续到下一轮。执行前先说明影响面（行数、配额、不可逆点）再等确认。

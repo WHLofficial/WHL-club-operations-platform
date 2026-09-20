@@ -79,7 +79,7 @@ e2e 冒烟默认打 `http://127.0.0.1:8791`，用本机 Chrome（`C:/Program Fil
 
 新增迁移要同时把文件名追加到 `tests/d1.ts` 的 `MIGRATION_FILES`，否则测试夹具与迁移会脱节。
 
-`0026_clubs_is_cpu` 与 `0027_players_sort_indexes.sql` 尚未在生产 apply；0027 会一次性写约 7.3 万行（4 条表达式索引 × 18301 名球员），D1 免费档日写配额 10 万行，部署日需单独安排。
+`0022`–`0027` 均未在生产 apply（生产迁移停在 0021）；其中 `0027` 会一次性写约 7.3 万行（4 条表达式索引 × 18301 名球员），D1 免费档日写配额 10 万行，部署日需单独安排。
 
 ## 测试
 
@@ -94,7 +94,7 @@ src/
   core/        纯函数域逻辑（config、市场/谈判/阵容规则、FC26 导入归一、税、成长）
   lib/         http、session、oidc、crypto、audit、guard（限流+缓存）、ratelimit
   worker/      路由装配与各业务模块（结算、通知、成长、窗口、奖品、冠名、设施…）
-    routes/    对外端点：admin/ 八域 + auth/clubs/growth/market/negotiations/notifications/players/registration/seasons/transfers
+    routes/    对外端点：admin/ 九域（clubs、config、finance、growth、market、overview、players、reviews、seasons）+ auth/clubs/growth/market/negotiations/notifications/players/registration/seasons/transfers
   db/migrations/  D1 迁移
 web/src/       前端：pages/（用户端 + admin/ + market/）、components/、lib/（api、auth、queries、adminQueries）
 tests/         Vitest 用例与 D1/赛事库夹具
@@ -114,6 +114,6 @@ npm run build && wrangler deploy
 
 ## 约定与边界
 
-- 生产库（`DB` 远端）、赛事库与认证库的写操作、球员库大批量导入、任何 `--remote` 命令都需要明确指令后才执行，见 [AGENTS.md](./AGENTS.md)。
+- 生产库（`DB` 远端）、赛事库与认证库的写操作、球员库大批量导入/重导（首灌已执行，勿重跑）、任何 `--remote` 命令都需要明确指令后才执行，见 [AGENTS.md](./AGENTS.md)。
 - 平台只写自有 `DB`；读赛事/认证库只做只读查询。
 - 离线导入分片 `scripts/players-import/sql/` 不入库（可由脚本按源数据逐字节复现，审计凭据是报告里的 sha256 清单）。
