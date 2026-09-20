@@ -174,7 +174,9 @@ function writeShards(dir: string, prefix: string, changes: Change[], reverse: bo
       .map((c) => {
         const from = reverse ? `NULL/free` : `${c.from}/${c.statusFrom}`;
         const to = reverse ? `${c.from}/${c.statusFrom}` : 'NULL/free';
-        return `-- ${c.fcId} ${c.name} ${from} -> ${to}\n${buildUpdate(c, reverse)}`;
+        // 名字只进注释，但换行会把注释撑开一行 → 折成空格，保证「一注释一语句」的形状
+        const who = c.name.replace(/[\r\n]+/g, ' ');
+        return `-- ${c.fcId} ${who} ${from} -> ${to}\n${buildUpdate(c, reverse)}`;
       })
       .join('\n');
     const text = `${head}${body}\n`;
@@ -193,7 +195,7 @@ function writeShards(dir: string, prefix: string, changes: Change[], reverse: bo
 
 function buildPrecheck(): string {
   return [
-    '-- S9 队籍收尾 · 执行前复查（只读，全部单行语句）',
+    '-- S9 队籍收尾 · 执行前复查（只读；用 --file 跑，多行 SELECT 在 --command 下会报 incomplete input）',
     `-- 生成器 scripts/prod-20260921-s9-free-leftover/gen-free-leftover-sql.ts；生成时点 ${TS}`,
     '-- 判据：rostered_now = 874（570 联盟世界 + 304 遗留）、null_club = 17427、free_now = 0、守卫表全 0',
     '',
