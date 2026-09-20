@@ -87,7 +87,7 @@ for (let i = 0; i < players.length; i += PER_FILE) {
   const part = players.slice(i, i + PER_FILE);
   const no = String(i / PER_FILE + 1).padStart(2, '0');
   const name = `players-import-${no}.sql`;
-  const head = `-- 球员库导入 分片 ${no}（生成：scripts/players-import/generate-sql.ts；勿手改）\n-- 源：${SRC} → Base 表；本片 ${part.length} 行（第 ${i + 1}-${i + part.length} 行）\n`;
+  const head = `-- 球员库导入 分片 ${no}（生成：scripts/players-import/generate-sql.ts；勿手改）\n-- 换版模式：${MODE === 'major' ? 'major（大换版：经验清零、CA/徽章各保留 1/3）' : 'minor（小换版：成长全保留、CA 增量平移）'}\n-- 源：${SRC} → Base 表；本片 ${part.length} 行（第 ${i + 1}-${i + part.length} 行）\n`;
   const text = head + part.map(upsertSql).join('\n') + '\n';
   writeFileSync(join(OUT_DIR, name), text, 'utf8');
   files.push(`${name}（${part.length} 行）`);
@@ -100,6 +100,7 @@ const report = [
   '# 球员库导入报告（FC26db Base → players）',
   '',
   `源文件：\`${SRC}\`｜表 \`Base\`｜数据行 ${rawRows.length}`,
+  `换版模式：**${MODE === 'major' ? 'major（大换版：经验清零、成长 CA/徽章各保留 1/3 向上取整）' : 'minor（小换版：成长全保留、CA 增量平移）'}**`,
   `去重：源侧重复 ID ${dupIds.length} 个（整行同内容，保留首行）→ 唯一行 ${rows.length}`,
   `可入库：**${players.length}**｜被校验拦下：${dropped.length}`,
   `分片：${files.length} 个文件（每片 ${PER_FILE} 行），目录 \`scripts/players-import/sql/\``,
