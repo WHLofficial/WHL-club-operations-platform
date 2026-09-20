@@ -133,7 +133,13 @@ export const FC_EDITOR_REQUIRED_COLUMNS = [
   'preferredfoot',
 ] as const;
 
-// 通道 B game_attrs：61 列原文归档（role/playstyles 文本无反查表，仅存档展示）
+// 通道 B game_attrs：61 列原文归档。role/playstyles 虽是文本，但**有反查表**：
+// web/assets/ref/{role,playstyle,position}.json（由 scripts/gen_ref_json.py 从同一份 FC26db 源生成，
+// 源文件 E:\Downloads\FC26db20251217_fixed.xlsx 的 RoleID / PlayStyleID / PositionID 三张表），
+// 可把文本还原成 RoleID1-5 / PSID1-15 的数字 ID。两条映射陷阱：
+//   ① 连字符 —— s901 写 `CM Half Winger +`，表里是 `CM Half-Winger +`（`++` = 基础 ID + 100）；
+//   ② `Playstyles+` 列给的是**基础名**（如 `Enforcer`），落库要 +100 进金槽 PSID13-15。
+// `Playstyles` 列里的 `One club player` / `Injury prone` 不在 PlayStyleID 表内（生涯特性，非花式）⇒ 丢弃。
 export const FC_EDITOR_GAME_ATTR_COLUMNS: readonly string[] = [
   'playerid',
   'firstname',

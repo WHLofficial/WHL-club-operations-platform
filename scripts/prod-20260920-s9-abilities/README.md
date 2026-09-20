@@ -82,7 +82,36 @@ UPDATE players
 | `weakfoot` | `weakfootabilitytypecode` | **唯一改名项**，须映射 |
 | `skillmoves` | 无 | s901 没有 ⇒ 保持原值不动 |
 | `hashighqualityhead`、`internationalrep` | 无 | 不动 |
-| `PosID1-4` / `RoleID1-5` / `PSID1-15` / `naID` / `TeamID` / `ID` | `Position`/`Position2-4`、`role1-5`（文本）、`Playstyles`（文本）、`nationality`、`teamid`、`playerid` | **不动**（见 §8 裁决点） |
+| `PosID1-4` / `RoleID1-5` / `PSID1-15` | `Position`/`Position2-4`、`role1-5`（文本）、`Playstyles` / `Playstyles+`（文本） | **可映射**（反查表在仓库里，见 §5.1）；本批是否同步见 §8 裁决点 3 |
+| `naID` / `TeamID` / `ID` | `nationality`、`teamid`、`playerid` | **不动**（另一批的事：队籍要 158 人大改） |
+
+### 5.1 文本 → ID 反查表（纠正早前「无反查表」的错判）
+
+反查表**存在且在仓库里**：`web/assets/ref/{position,role,playstyle,nation,team}.json`，生成器 `scripts/gen_ref_json.py`，默认源就是 `E:\Downloads\FC26db20251217_fixed.xlsx` —— 与 s901 同源的 RoleID（99 条）/ PlayStyleID（73 条，含 `+` 变体 ID 101–156）/ PositionID（13 条）三张表。前端球员卡本来就是拿它们渲染位置/角色/金徽的（`web/src/lib/ref.ts`、`web/src/pages/Player.tsx:379-382`）。
+
+实测（2026-09-20，570 行全量）：
+
+| 源列 | 目标键 | 未命中 | 规则 |
+| --- | --- | --- | --- |
+| `Position`/`Position2-4` | `PosID1-4` | **0** | `None`/空 → 无槽；`-` → −1 |
+| `role1-5` | `RoleID1-5` | **0** | 归一化 `Half Winger` → `Half-Winger`（表里带连字符）；`++` 版 = 基础 ID + 100；`0` → 空槽 |
+| `Playstyles` | `PSID1-12` | 2 个值（`One club player` ×57、`Injury prone` ×53） | 逗号分隔逐项查表；**这两个不在 PlayStyleID 表内**（生涯特性非花式，来源 `Base` 的文本列同样如此）⇒ 丢弃 |
+| `Playstyles+` | `PSID13-15` | **0** | 列里给的是**基础名**（如 `Enforcer`），落库 **+100** 进金槽（与 `web/src/lib/api.ts:179` 注「金徽=基础 ID+100，金槽 13+」一致） |
+
+### 5.2 若全量同步，570 行里到底会变多少（实测）
+
+| 字段 | 变化行数 | 形态 |
+| --- | --- | --- |
+| `ca` | **254** | 只升不降（均值 +0.89，max +8） |
+| `pa` | 1 | 只升 |
+| `height` / `weight` / `weakfoot` | **0 / 0 / 0** | 两源本就一致 —— 换版不动身体与逆足 |
+| `PosID1-4` | **0** | 两源位置完全一致 |
+| `RoleID1-5` | 9 | 全是**源多一个角色**（例：`[13,9,11]` vs 库内 `[13,9]`），无删除、无替换 |
+| `PSID1-12` | 36 | 35 行源多一个；1 行替换（`fc_id 243812`：源 32 顶掉库内 1） |
+| `PSID13-15`（金徽） | 4 | 全部是源新增金徽（如 101 `Finesse Shot +`、151/155 门将金徽） |
+
+即：本批真正要落的只有 **CA 254 行 + PA 1 行（+ 角色 9 / 花式 40 行，若裁决同步）**；身体属性、逆足、位置三项改动数为 0，可以完全不写。改动方向单一——**s901 是增量侧、库内是子集**，不会删掉任何既有角色/花式。
+
 
 通道能力已验证（2026-09-20 只读）：D1 支持 `json_set`（`json_extract(json_set(game_attrs,'$.CA',77),'$.CA')` 返回 77）；生产 `game_attrs` 是合法 JSON、Kane（`fc_id = 202126`）为 **71 键**，`$.CA`=89、`$.PA`=89、`$.height`=188、`$.weight`=86、`$.weakfoot`=4、`$.skillmoves`=2、`$.PosID2`=-1、`$.PSID1`=5、`$.ID`=202126。
 
@@ -102,11 +131,12 @@ UPDATE players
 
 ## 8. 裁决点
 
-1. **是否同步 `height`/`weight`/`weakfoot`** —— 推荐**是**（同源、同键、卷宗直接展示）。
+1. **是否同步 `height`/`weight`/`weakfoot`** —— 推荐**否，没必要**（早前推荐「是」是按「同源、同键」推的，实测三项差异 **0 行**，写了也是空写）。
 2. **是否改队籍**（158 人不一致）—— 推荐**否**。指令只说能力；改队籍会一次性动 158 人归属，与 roster-backfill 口径冲突，属另一批。
-3. **是否同步位置/角色**（`Position2-4`、`role1-5`）—— 推荐**否**。`role*` 在 s901 是文本（如 `CB Stopper +`）、平台是数字 ID（`RoleID1-5`），`src/core/fc26.ts` 注释已裁决「无反查表，仅存档展示」，强行映射会出错；位置改动影响报名阵容规则。
+3. **是否同步位置/角色/花式**（`Position2-4`、`role1-5`、`Playstyles`/`Playstyles+`）—— 反查表存在（§5.1），映射实测零未命中，**可以做**；但差异很小且方向单一：位置 **0 行**、角色 **9 行**（各多一个）、花式 **36 行**（含 4 行金徽）。推荐**一并同步角色与花式**（9 + 36 行，只增不删，且角色/花式会影响球员卡展示与后续战术语义），**位置不同步**（0 行差异，改了没意义；且位置影响报名阵容规则）。若不想扩大范围，只同步 `ca`/`pa` 也成立。
 4. **是否写 `audit_log`** —— 离线工件默认不写（`prod-20260919-*` 惯例）。
 5. **是否顺带补 `nationality`/`contractvaliduntil`** —— 推荐**否**（合同是另一个源：`一线队-S9.csv`）。
+6. **金徽落槽口径**（若同步花式）—— `Playstyles+` 项落 `PSID13-15` 并写成**基础 ID + 100**（`web/src/lib/api.ts:179` 的前端口径），同时把 `NumofPS` 改成常规花式条数。
 
 ## 9. 执行步骤（许可后）
 
