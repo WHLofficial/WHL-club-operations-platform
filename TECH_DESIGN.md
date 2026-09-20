@@ -695,7 +695,7 @@ seasons(season=N, status: preparing → running → settled)
 | 资金变动（大额） | 俱乐部教练 |
 | 窗口开启/关闭、结算完成 | 全体教练 |
 
-实现：`notifications` 表 → Worker 投递器（HMAC 签名 POST 到 AstrBot 接收插件，复用竞猜系统对接协议）→ 失败重试（惰性：下次 cron 扫 pending）。模板渲染纯代码，无 LLM（P2 事件文案才用 LLM）。
+实现：`notifications` 表双通道（增量 18）——每个绑定账号一条 `channel='web'` 行（`status='sent'` 免投递，直接进 web 收件篮），绑了 QQ 的另加一条 `channel='qq'` 行由投递器发送（HMAC 签名 POST 到 AstrBot 接收插件，复用竞猜系统对接协议）→ 失败重试（惰性：下次 cron 扫 `channel='qq'` 的 pending）。模板渲染纯代码，无 LLM（P2 事件文案才用 LLM）。web 收件篮端点见附录 A〔18〕。
 
 **AstrBot 侧接收插件规格**（新写一个约 30 行的小插件，协议照抄竞猜 `docs/astrbot-sync-api.md`）：
 
@@ -733,7 +733,7 @@ seasons(season=N, status: preparing → running → settled)
 | `luxury_value_threshold` / `luxury_value_rate` | `700` / `0.05` | 富人税（球队价值） |
 | `attendance_model` | json | 主场收入全套系数（revenue 移植，§8；天气概率 40/30/20/10） |
 | `tier_table` | json | 球场档位 0-4（座位区间/维护费/上座系数/升级费） |
-| `facility_prices` | `0.1M/100座+梯度` | 设施扩建价格表 |
+| `facility_prices` | `0.1,3,5,8,12,16` | 首位=扩建单价（M/100 座），后五位=子设施升到 1-5 级费用 |
 | `maintenance_table` | json | 设施维护费表 |
 | `voucher_refund` | `0.25` | 建设券返还比例 |
 | `xp_per_level` | `10` | 每级经验 |
@@ -755,10 +755,17 @@ seasons(season=N, status: preparing → running → settled)
 | `max_attempts` | `3` | 报价轮数上限（非涉密） |
 | `young_blend_age` | `25` | 年轻球员等级混合年龄 |
 | `renewal_raise` | `0.05,0.15` | 续约加薪区间（规则 4.3.3） |
-| `review_amount_threshold` | 待定 | 大额强制审阈值 |
-| `bid_pattern_alert` | 待定 | 连续抬价/关联出价告警阈值 |
+| `review_amount_threshold` | `40` | 大额强制审阈值（m；增量 10 落地） |
+| `bid_pattern_alert` | `{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}` | 连续抬价/关联出价告警阈值（增量 10 落地） |
+| `window_force_settle` | `false` | 关窗遇活跃谈判会话时是否允许强制按 E 结算（假设 12 的开关）〔5〕 |
+| `market_bid_paused` | `false` | 全局暂停出价开关；单挂牌级另看 `listings.bid_paused` 列〔15〕 |
+| `stadium_max_open_tier` | `1` | 球场档位开放进度（S9 仅开放 0→1）〔19〕 |
+| `naming_params` | json（底价 `base` 0.5 / `perCapacityWan` 0.3 / `perFansWan` 0.12 / `terminatePenalty` 0.3；套餐 `stable` 6 窗×0.85、`short` 2 窗×1.25、`bet` 4 窗×0.7 + 达线奖金 ×0.7） | 冠名市场底价与三套餐〔20〕 |
+| `results_auto_confirm` | `on` | cron 每 5 分钟自动确认完赛场次（`0`/`off` 关）〔21〕 |
 
 🔒 = 涉密键（§6.10：掩码展示、audit 不记值、不进前端）。
+
+注册表在 `src/core/config.ts` 的 `CONFIG_KEYS` 共 61 条登记（唯一键 59 个——`prize_table` 与 `attendance_model` 各重复登记一次，读取按名取默认，无副作用）；有默认值的键见同文件 `CONFIG_DEFAULTS`，`wage_cap` / `maintenance_table` / `upgrade_plans` / `tier_conditions` 无默认，缺省时 `get` 返回 null。
 
 ## 14. 迁移与部署
 
@@ -786,6 +793,8 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 
 ## 15. 假设与待办
 
+分类口径：**已定** = 已裁决并落地（每条的落地位置见 ROADMAP 对应增量节的「裁决 / 交付」段）；**假设** = 仍开放，待确认或待数值输入；**已解决** = 调研或映射类问题已闭环；**可配置** = 等外部数值填 config，不阻塞开发；**已执行** = 生产侧动作已完成；**已撤销** = 被后续裁决推翻。编号沿用历史编号，不重排（27 号原排在 28/29 之后，已归位到 26 号之后）；新增条目续编。
+
 | # | 类型 | 内容 |
 |---|---|---|
 | 1 | 假设 | 交易日 = 自然日（可配置交易日历），待确认 |
@@ -810,13 +819,13 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 20 | 已定（增量 13 补 CPU 例外） | 自动 XP 球员匹配：比赛系统队名 = 平台俱乐部名 → 比赛系统球员名 = 平台名单名（clubs 无 tour team 键、tour player.id 与平台 uid/fc_id 无关，不建映射表）；解不开的进 confirm 响应 `xp.unresolved` 由管理组补录兜底；**CPU 队（队名带 (CPU)）例外：整队静默跳过，不进 unresolved**（假设 36） |
 | 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
 | 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
-| 23 | 假设 | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮（/api/me/notifications）延后 P1，MVP 只走 QQ 推送 |
+| 23 | 已定（增量 18 补 web 收件篮） | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮已在增量 18 落地（端点 `/api/notifications` 系列，非原设想的 `/api/me/notifications`），未读判定用独立列 `read_at` |
 | 24 | **已撤销**（增量 14 裁决 4） | 球员初始归属 `initial_club_id`（0015 立）**已删除**（迁移 0020 `DROP COLUMN`）：它从不参与成长判定（「本队」一律看 `players.club_id`），只是球员库初始视图一列 + 档案卡一行字，用户裁定「无意义，去掉」。球员库 `view=initial` 保留 CA=base_ca、PA=导入值的口径；归属列两种视图都显示**当前**归属 |
 | 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
 | 26 | 已定（增量 7） | 球队绑定真源上收 auth（三表 team/team_bind_code/team_binding；机器端点五条 HMAC）；本侧旧表 club_bind_code/club_bindings 休眠保留防回滚，AUTH_DB 未配置时回落读本地表（回滚通道）；发码 team_not_found 不自动登记目录（提示先登记关联，与 tour 侧自愈 register 不同）；OIDC 教练判定=绑定即教练（管理点仍走权限点；未绑定的准教练凭 club.* 权限点保留旁路进绑前端点） |
-| 28 | 已定（增量 11） | 富人税/工资只在窗末（closeWindow 批）收，赛季结算不重复收（§11 结算顺序里「富人税」步即窗末已收项，结算按钮不再扣）；工资=Σ现行合同 wage 全额、一窗=半赛季扣全额 |
-| 29 | 已定（增量 11） | 资格赛止步保底口径：确认赛果里输过至少一场的队各得保底 7.5，多轮晋级失败口径一致（不区分止步轮次）；赢家不发 | 
 | 27 | 已定（增量 9） | 俱乐部分级不再建队时定死（clubs.league_tier 休眠）：当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（worker/tier.ts）；注册提交派生不到级别一律 400 拦下（tier_pending「尚未在赛事平台报名，请等待赛事平台管理员确认报名」），注册页带报名状态探测（红=未报名/绿=已报名）；同时报两座定级赛事视为数据异常 500；AUTH_DB 未配置时回落读休眠列（回滚通道）；升降级=换季报名哪座定级赛事就在哪级，club 库零人工写入 |
+| 28 | 已定（增量 11） | 富人税/工资只在窗末（closeWindow 批）收，赛季结算不重复收（§11 结算顺序里「富人税」步即窗末已收项，结算按钮不再扣）；工资=Σ现行合同 wage 全额、一窗=半赛季扣全额 |
+| 29 | 已定（增量 11） | 资格赛止步保底口径：确认赛果里输过至少一场的队各得保底 7.5，多轮晋级失败口径一致（不区分止步轮次）；赢家不发 |
 | 30 | 已定（增量 12） | 比赛日天气在赛果确认时按概率掷出并固化（晴 40/多云 30/雨 20/雪 10），同场不重掷（§8 上座公式天气系数；确认即入账的输入之一） |
 | 31 | 已定（增量 12） | 近 3 场战绩口径 = 平台已确认赛果（不含本场）：胜 3 平 1 负 0，**点球决胜按平局计**（用户裁决 2026-09-16），弃权按 winner 记胜负，不足 3 场取中性 4 分 |
 | 32 | 已定（增量 12） | 球员影响力闸门 = 在册现行合同（`contracts.is_active=1 AND contracts.club_id = players.club_id`），**不看 players.club_id**；无合同/已解约不计入球队影响力 |
@@ -845,6 +854,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 1. 只增表（`ledger_entries` / `audit_log`）**上线即建** `(kind, id)`、`(target_type, target_id, id)` 型索引——比赛系统是配额报警后才补的，不重演。
 2. 高频过滤+排序的列表直接建带排序尾列的复合索引：`listings(status, listed_at DESC)`、`bids(listing_id, amount DESC)`、截止扫描专用 `listings(status, deadline_at)`——让「最新 N 条」与 cron 扫描只走索引区间，免全表扫、免排序。
 3. 外键列全部配索引；上线后定期清理与 UNIQUE 前缀重复的冗余索引（纯写放大）。
+4. 排序表达式里带 `COALESCE` 的列表建**表达式索引**：如球员库按 CA/PA/年龄/身价排序，建 `CREATE INDEX idx_players_sort_ca ON players(COALESCE(ca, 0), id)`（增量 23，迁移 0027，四条同构）——让「排序 + 游标」走覆盖索引，消掉全表扫与排序步骤（本地 `EXPLAIN QUERY PLAN` 实证为 `SCAN players USING COVERING INDEX idx_players_sort_*`）。
 
 ### 17.2 查询规约
 
@@ -858,8 +868,8 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 ### 17.3 事务与缓存规约
 
 1. **钱的原子性比比赛系统更严**：一笔业务（流水 + 余额 + 审计）合并进单个 `db.batch`（隐式事务）一次提交；比赛系统终场「先写后重算」的两段式仅适用于幂等可重算的派生表，**账本禁用**。
-2. 公开 GET 套边缘 Cache API 中间件 pubCache（按完整 URL 键、只缓存 2xx、`waitUntil` 异步回填；挂牌板/榜单类 TTL 300s、准实时类 60s）。
-3. 低频高成本接口用 KV 做 SWR：键带版本号（`swr:xxx:v1:...`，DTO 变形时换版本隔离旧缓存），过期先回旧值再后台重算回填。
+2. 公开 GET 走进程内守护（`src/lib/guard.ts`，增量 23）：`assertPublicRate(c, scope)` 按同 IP 60 次/60 秒限流（超限 429），`cachedJson(key, ttlMs, loader, ctx)` 做 TTL + stale-while-revalidate（新鲜直回；过期先回旧值、后台单飞刷新），TTL 取 `PUBLIC_CACHE_TTL_MS`（当前 20000ms，未配置或 0 即旁路）。缓存键用 `canonicalQuery` 归一（参数顺序无关），条目上限 64 条按插入序淘汰（键来自查询串、外部可控，不设上限会被构造请求堆内存）。
+3. **不用 KV 做 SWR**（增量 23 裁决，推翻本节原方案）：KV 免费档写约 1k 次/天，公开 GET 每请求写计数会打爆写配额；边缘 Cache API 中间件 pubCache 也未启用。代价是缓存与计数都在 isolate 内存里——重启即清、多 isolate 不共享（朋友局可接受）。将来若确需跨 isolate 共享，先算清写配额与失效成本再改。
 4. R2 媒体一律版本化 key + `Cache-Control: immutable` 长缓存，同 PoP 重复浏览不打 R2。
 5. 公开路径跳过会话检查（每请求省一次 KV get + D1 user 点查）。
 
@@ -873,6 +883,8 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 ## 附录 A · API 路由清单（契约冻结首层）
 
 权限列：👤=coach 及以上 / 🛡=管理组 / 🌐=公开。分页一律硬 LIMIT + 游标（§17）；错误统一 `{error, code?}`。标〔增量 n〕= ROADMAP 对应增量交付。
+
+> **冻结范围**：本表冻结于增量 6 era（末次整体维护），增量 7 起新增/变更的端点**不回填本表**，以 ROADMAP 各增量节的「交付」段与 `src/worker/routes/` 现码为准——回填会造成文档与实现双轨漂移。增量 7+ 的主要新增面：认证四端点（`/api/auth/login|sync|callback|logout|backchannel-logout`，增量 7）、球员库扩展与批量维护（增量 17）、俱乐部目录与换队号（`/api/clubs/directory`、`/api/admin/clubs/tour-team`、`register-auth`、`transfer-ban`，增量 17）、通知三端点（增量 18）、设施与冠名（`/api/club/stadium/*`、`/api/club/facilities/upgrade`、`/api/club/naming/*`，增量 19/20）、赛果自动化（`/api/admin/results/:id/replay-hooks`，增量 21）、`/api/admin/overview` 与 `/api/admin/audit-log`（增量 15）。
 
 | 模块 | 端点 | 权限 | 说明 |
 |---|---|---|---|
@@ -923,7 +935,8 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 成长 | POST `/api/admin/growth/settlement/run` | 🛡 | 赛季结算（XP/升级待办/忠诚奖金 P1）〔6〕 |
 | 成长 | POST `/api/growth/levelup/:playerId` | 👤 | 升级方案二选一（本队教练或管理组）〔6〕 |
 | 成长 | POST `/api/admin/growth/:playerId/tier` | 🛡 | 档位核定 1-5（§10.3）〔6〕 |
-| 通知 | bot 投递（无 web 端点）：cron 每 5 分钟扫 notifications pending → HMAC POST 到 AstrBot 插件（§12；MVP 写入点=赛果确认/升级，假设 23） | 内部 | QQ 推送〔6〕；web 收件篮 P1 |
+| 通知 | GET `/api/notifications?cursor=` · GET `/api/notifications/unread-count` · POST `/api/notifications/read` | 👤 | web 收件篮（只读本人 `channel='web'` 行，id 倒序游标 30/页；`read` 支持 ids/all，幂等）〔18〕 |
+| 通知 | bot 投递（无 web 端点）：cron 每 5 分钟扫 `channel='qq'` 的 pending → HMAC POST 到 AstrBot 插件（§12；写入点=赛果确认/升级，假设 23） | 内部 | QQ 推送〔6〕 |
 | 监管 | GET `/api/admin/m0` | 🛡 | M0 报表（Σ余额/冻结/kind 分解/俱乐部明细）〔6〕 |
 | 监管 | POST `/api/cron/tick`（X-Cron-Key） | 内部 | 手动触发惰性结算（与 scheduled 等价）〔3〕 |
 
