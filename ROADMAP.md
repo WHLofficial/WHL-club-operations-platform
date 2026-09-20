@@ -250,6 +250,24 @@
 
 ---
 
+## 增量 23 · 性能与守护——排序表达式索引 / 进程内限流 / TTL SWR 缓存 / e2e 冒烟（2026-09-20 本地完成，push/部署等令）
+
+**范围裁决**：脑暴原案是「KV 限流 + KV 缓存」，实测否决——KV 免费档写约 1k 次/天，公开 GET 每请求写计数或刷缓存会打爆写配额。改**进程内**（module 级 Map）实现，代价是 isolate 重启即清、多 isolate 不共享，朋友局流量可接受（口径写在 `src/lib/guard.ts` 头注释）。
+
+**① 排序表达式索引**（`5ab715c`）：球员库排序走 `COALESCE(col, 0)` 表达式 + `id`（`players.ts` SORT_EXPRS），普通列索引匹配不上，18k 行每次全扫排序。迁移 0027 建 4 条 `CREATE INDEX idx_players_sort_{ca,pa,age,market_value} ON players(COALESCE(<col>, 0), id)`。本地 EXPLAIN QUERY PLAN 实证三条查询均 `SCAN players USING COVERING INDEX idx_players_sort_*`（无排序步骤）。influence 排序（表达式内联 config 系数）与 `view=initial` 排序无法静态索引，保持全扫（低频可接受）。
+
+**② 公开 GET 守护**（`ecea30d`）：新增 `src/lib/guard.ts`——`memoryRateLimit(key,limit,windowMs)` 固定窗口限流（Map 超 10k 清过期桶）、`assertPublicRate(c,scope)` 60 req/60s/IP（`CF-Connecting-IP` 回落 `'local'`，超限 429）、`cachedJson(key,ttlMs,loader,ctx?)` TTL+SWR（新鲜直回；过期回旧值 + 后台单飞刷新防击穿；**ttlMs≤0 = 旁路**）、`waitUntilOf(c)`、`resetGuards()`。挂点 `/api/players`（列表体抽成 `listPlayers(c)`）与 `/api/clubs/directory`；TTL 取 `env.PUBLIC_CACHE_TTL_MS`（未配/0 = 旁路，故测试环境天然不缓存），生产 vars 配 20000。
+
+**③ 自审修复**（`18841a6`）：`cacheStore` 原本无淘汰——键来自外部可控的查询串，公开 GET 每换一个查询串就多一条，构造请求能把 isolate 内存堆到 OOM（`rateBuckets` 有 10k 兜底，缓存没有）。加条数上限 64（单条响应 4KB 量级）+ 超限按插入序淘汰最旧（跳过正在刷新的）；键改用 `canonicalQuery` 按参数名排序归一（`?a=1&b=2` 与 `?b=2&a=1` 同一份数据，原本算两个键重复装载）。
+
+**④ e2e 冒烟**（`652b04f`）：`scripts/e2e/smoke.mjs` + `npm run test:e2e`——playwright-core + 系统 Chrome，对 dev 8791 黑盒跑 8 场景：首页渲染、会话生效、公开接口、球员库翻页文案与排序交互、市场页、管理端可达、收件篮、无未捕获前端错误（失败自动截图到 `scratch/`）。会话种子只动本地：cookie `whl_session` → 共享 KV `sess:{token}` → TOUR_DB `user` 表（`wrangler kv key put --local`，绝不用 `--remote`——该命名空间与赛事/竞猜共用）。
+
+**验收**：**387 测试 / 30 文件绿 + 三份 tsc 干净 + build 过**（guard.test.ts 11 用例：限流窗口/分桶、缓存命中、SWR 过期回旧值+单飞、ttl≤0 旁路、61 次请求 429、键归一、超限淘汰；players-library.test.ts 加文件级 `beforeEach(resetGuards)`——该文件密集打 /api/players，不清计数真会撞 60 次限流）。e2e 8/8 通过（rebuild 后复跑）。**部署注意：0027 远端 apply 一次性写 ≈18301×4≈73k rows_written，须择日或当天不叠加其他写**（见 D1 配额口径）。
+
+**遗留**：e2e 跑的是本机 dev 进程（该进程早于 `AUTH_MODE` 变量启动，实际在兼容模式），故只覆盖兼容模式会话路径；OIDC 模式下的登录态场景与 `PUBLIC_CACHE_TTL_MS` 生效路径由单元测试覆盖，未做端到端。重启 dev 后按 `npm run dev` 起的进程会是 OIDC 模式，届时 e2e 需改种 `oidc_session` 行 + `__Host-club_session` cookie（脚本头部注释已写明）。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
