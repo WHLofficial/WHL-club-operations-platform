@@ -327,3 +327,6 @@
 | 球员库导入通道 | 球员库首灌 | 已裁决：管理端网页通道要 OIDC 会话（离线脚本拿不到），走 `scripts/players-import/generate-sql.ts` 产分片 SQL + D1 REST `/query`；`--file` 通道遇 FK / 大事务会因 `PRAGMA defer_foreign_keys` 失效整批回滚 |
 | 30 人缺字段补录工件（`scripts/players-import/overlay-missing.ts` + `missing-fields-30.csv`，源缺 `naID` / `FootID`，需人工填值） | 球员库收口 | **等令，未执行**（生产现 18301 人，2026-09-20 查证） |
 | 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | 增量 12 后收口 | **已执行**（2026-09-20，444 行；复查全库 assigned 551 = CPU 4 队 107 + 本批 444） |
+| S9 窗基线工件（`scripts/prod-20260920-s9-window-baseline/`：直造一条已关季初常规窗 + 62 行 `result_confirmations` 与 50 行 `match_attendance` 的 `window_seq` 0→1） | 生产数据侧 | **等令，未执行**（用户口径：制造「赛季初窗已关闭、中期窗未开」的状态，62 场已确认比赛就落在该窗之后） |
+| 16 队合同导入（源 `E:\Downloads\一线队-S9.csv`；计划书 `scripts/prod-20260920-s9-contracts/README.md`：16 队可导 378 行、84 行异队冲突、164 行无目标队；工件待产） | 生产数据侧 | **等令，未执行**；硬前置 = 迁移 0028 已 apply **且** 增量 25 已部署（否则刻度列写不进去，或落成「无保护期」） |
+| 20 队（含 CPU）能力导入（源 `FC Editor…/player_tables/s901`；计划书 `scripts/prod-20260920-s9-abilities/README.md`：570 人全命中，只改 `ca`/`base_ca`/`pa` 并 `json_set` 合并 34 项能力，**不动队籍**；工件待产） | 生产数据侧 | **等令，未执行** |
