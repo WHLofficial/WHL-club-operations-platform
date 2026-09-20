@@ -7,6 +7,10 @@ dist/
 __pycache__/
 .smoke/
 
+# 本地草稿区（探针脚本、e2e 失败截图、临时 SQL/KV 值）与会话交接草稿：不进仓库
+scratch/
+handoff-*.md
+
 # 离线导入生成物（30MB 级 SQL 分片）：可由 scripts/players-import/generate-sql.ts 逐字节复现，
 # 入库的审计凭据是报告里的 sha256 清单，故分片本体不入库。
 scripts/players-import/sql/
