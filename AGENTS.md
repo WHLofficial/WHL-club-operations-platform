@@ -63,7 +63,8 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 - 路径、命令、按钮、版本号必须亲自查证后再写进文档；未验证的要标「未验证」。
 - `scratch/` 与 `handoff-*.md` 已 gitignore，属本地草稿，不进提交。
 
-## 当前状态（2026-09-20）
+## 当前状态（2026-09-20 部署后）
 
-- 本地领先 `origin/main` 一批未推送提交（增量 17–24 的本地收口；实时数以 `git rev-list --count origin/main..HEAD` 为准），未 push、未部署。
-- 生产最新 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`（2026-09-19T13:58Z，增量 16）；生产迁移停在 0021，0022–0027 待 apply（0027 一次性约 7.3 万行写，需单独择日）。
+- 增量 17–24 已推送（`9f05116..fe60273`，50 个提交）并部署上线，工作区干净；本地与 `origin/main` 的差值以 `git rev-list --count origin/main..HEAD` 为准。
+- 生产最新 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（2026-09-20T05:42Z，含增量 17–24）；生产迁移已到 0027，无待 apply。
+- 尚未执行的生产写：16 队队籍回填（`scripts/prod-20260919-roster-backfill/`）、球员库 30 人缺字段补录（`scripts/players-import/overlay-missing.ts`）。
