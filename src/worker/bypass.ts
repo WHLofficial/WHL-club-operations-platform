@@ -9,6 +9,7 @@ import { rcChangeFee, terminationFee, freeAgentFee, matchDiff, FORCED_AUCTION_PR
 import { round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
+import { closedRegularTicks } from './contract-ticks.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import {
   completeTermination,
@@ -25,7 +26,7 @@ function nowSql() {
 
 interface RcChangeEvidence {
   oldReleaseFee: number;
-  oldProtectedUntil: string | null;
+  oldProtectionTicks: number | null;
 }
 
 interface OwnPlayerRow {
@@ -194,9 +195,9 @@ export async function createRcChange(
     throw new HttpError(400, player.status === 'listed' ? '这名球员在挂牌流程里，不能续约' : '当前状态不能续约');
   }
   const contract = await db
-    .prepare('SELECT release_fee, contract_type, protected_until FROM contracts WHERE player_id = ? AND is_active = 1')
+    .prepare('SELECT release_fee, contract_type, protection_ticks FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(playerId)
-    .first<{ release_fee: number | null; contract_type: string; protected_until: string | null }>();
+    .first<{ release_fee: number | null; contract_type: string; protection_ticks: number | null }>();
   if (!contract || contract.release_fee === null || contract.release_fee <= 0) {
     throw new HttpError(409, '球员没有含违约金的现行合同，先让管理组补合同');
   }
@@ -228,7 +229,7 @@ export async function createRcChange(
     extraFee: null,
     season: win.season,
     windowSeq: win.windowSeq,
-    evidence: { oldReleaseFee: oldRc, oldProtectedUntil: contract.protected_until },
+    evidence: { oldReleaseFee: oldRc, oldProtectionTicks: contract.protection_ticks },
     payload: {
       kind: 'rc_change',
       playerId,
@@ -276,19 +277,18 @@ export async function createTermination(
     throw new HttpError(400, player.status === 'listed' ? '这名球员在挂牌流程里，不能解约' : '当前状态不能解约');
   }
   const contract = await db
-    .prepare('SELECT release_fee, effective_from FROM contracts WHERE player_id = ? AND is_active = 1')
+    .prepare('SELECT release_fee, service_ticks FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(playerId)
-    .first<{ release_fee: number | null; effective_from: string | null }>();
+    .first<{ release_fee: number | null; service_ticks: number }>();
   if (!contract || contract.release_fee === null || contract.release_fee <= 0) {
     throw new HttpError(409, '球员没有含违约金的现行合同，先让管理组补合同');
   }
-  if (contract.effective_from === null) {
-    throw new HttpError(409, '合同缺效力起点，算不了解约费，先让管理组补合同数据');
-  }
   await ensureNotInFlight(db, playerId);
 
-  const fee = terminationFee(contract.release_fee, contract.effective_from, Date.now());
-  if (fee === null) throw new HttpError(409, '合同缺效力起点，算不了解约费，先让管理组补合同数据');
+  // 解约费按窗刻度（4.4.4）：效力 = 已关常规窗数 − 签约基数（每常规窗 0.5 赛季），满 6 窗（3 赛季）免费
+  const currentTicks = await closedRegularTicks(db);
+  const serviceTicks = contract.service_ticks ?? 0;
+  const fee = terminationFee(contract.release_fee, serviceTicks, currentTicks);
   if (fee > 0) {
     const available = await availableBalance(db, clubId);
     if (round2(available) < fee) {
@@ -306,7 +306,7 @@ export async function createTermination(
     extraFee: fee,
     season: win.season,
     windowSeq: win.windowSeq,
-    evidence: { oldReleaseFee: contract.release_fee, effectiveFrom: contract.effective_from },
+    evidence: { oldReleaseFee: contract.release_fee, serviceTicks },
     payload: {
       kind: 'termination',
       playerId,
@@ -636,8 +636,8 @@ export async function rollbackRcChangeForPlayer(
   if (stillOwned) {
     statements.push(
       db
-        .prepare(`UPDATE contracts SET release_fee = ?, protected_until = ? WHERE player_id = ? AND is_active = 1`)
-        .bind(ev.oldReleaseFee, ev.oldProtectedUntil, playerId),
+        .prepare(`UPDATE contracts SET release_fee = ?, protection_ticks = ? WHERE player_id = ? AND is_active = 1`)
+        .bind(ev.oldReleaseFee, ev.oldProtectionTicks, playerId),
     );
   }
   for (const r of refundable) {
@@ -660,7 +660,7 @@ export async function rollbackRcChangeForPlayer(
       targetId: playerId,
       after: {
         restoredReleaseFee: stillOwned ? ev.oldReleaseFee : null,
-        restoredProtectedUntil: stillOwned ? ev.oldProtectedUntil : null,
+        restoredProtectionTicks: stillOwned ? ev.oldProtectionTicks : null,
         refund: refundable.reduce((s, r) => s + (r.extra_fee ?? 0), 0),
         refundedTransfers: refundable.map((r) => r.id),
         stillOwned,

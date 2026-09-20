@@ -5,9 +5,14 @@ import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, POSITION_BY_ID } from '../../core/fc26.ts';
+import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { playerAbilityLevel } from '../home.ts';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// 窗刻度基准（增量 25）：当前已关常规窗数——效力 = 0.5 ×(本值 − contracts.service_ticks)，
+// 保护期判定 = 本值 < contracts.protection_ticks（季初/中期按同赛季非临时窗顺序派生，不入库）
+const CURRENT_TICKS_SQL = `(SELECT COUNT(*) FROM season_windows swe WHERE swe.status = 'closed' AND swe.is_temporary = 0)`;
 
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 const CONTRACT_TYPES = ['formal', 'trainee'] as const;
@@ -367,13 +372,11 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   }
   const protectedQ = c.req.query('protected');
   if (protectedQ !== undefined) {
-    const now = new Date().toISOString();
+    // 保护期按窗刻度（增量 25）：当前已关常规窗数 < protection_ticks 即在保护期内
     if (protectedQ === 'in') {
-      filters.push('ct.protected_until IS NOT NULL AND ct.protected_until > ?');
-      filterArgs.push(now);
+      filters.push(`(${CURRENT_TICKS_SQL}) < ct.protection_ticks`);
     } else if (protectedQ === 'out') {
-      filters.push('(ct.protected_until IS NULL OR ct.protected_until <= ?)');
-      filterArgs.push(now);
+      filters.push(`(ct.protection_ticks IS NULL OR (${CURRENT_TICKS_SQL}) >= ct.protection_ticks)`);
     } else {
       throw new HttpError(400, 'protected 只能是 in / out');
     }
@@ -386,8 +389,10 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     if (raw === undefined) continue;
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `effective_years_${suffix} 应为非负数`);
-    filters.push(`(julianday(?) - julianday(COALESCE(ct.effective_from, ct.signed_at))) / 365.25 ${op} ?`);
-    filterArgs.push(new Date().toISOString(), n);
+    // 效力（赛季）= 0.5 × (已关常规窗数 − 签约基数)；参数名沿用 effective_years_*（1 赛季 = 1 年）
+    // 无现行合同的球员没有效力可比（不能拿基数 0 当满效力）
+    filters.push(`(ct.player_id IS NOT NULL AND (((${CURRENT_TICKS_SQL}) - COALESCE(ct.service_ticks, 0)) * 0.5) ${op} ?)`);
+    filterArgs.push(n);
   }
 
   const sortRaw = c.req.query('sort') ?? 'id';
@@ -437,7 +442,9 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
             json_extract(players.game_attrs, '$.PosID3') AS pos3,
             json_extract(players.game_attrs, '$.PosID4') AS pos4,
             ct.wage AS ct_wage, ct.release_fee AS ct_release_fee, ct.contract_type AS ct_contract_type,
-            ct.source AS ct_source, ct.protected_until AS ct_protected_until, ct.effective_from AS ct_effective_from,
+            ct.source AS ct_source, ct.player_id AS ct_player_id,
+            ct.service_ticks AS ct_service_ticks, ct.protection_ticks AS ct_protection_ticks,
+            ${CURRENT_TICKS_SQL} AS current_ticks,
             cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${SORT_EXPRS[sort]} AS sort_key` : ''}
      FROM players
      LEFT JOIN clubs cc ON cc.id = players.club_id
@@ -477,8 +484,10 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       ct_release_fee: number | null;
       ct_contract_type: string | null;
       ct_source: string | null;
-      ct_protected_until: string | null;
-      ct_effective_from: string | null;
+      ct_player_id: number | null;
+      ct_service_ticks: number | null;
+      ct_protection_ticks: number | null;
+      current_ticks: number;
       club_name: string | null;
       attr_value?: number | null;
       ps1?: number | null;
@@ -544,8 +553,9 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     releaseFee: r.ct_release_fee,
     contractType: r.ct_contract_type,
     source: r.ct_source,
-    protectedUntil: r.ct_protected_until,
-    effectiveFrom: r.ct_effective_from,
+    // 窗刻度（增量 25）：serviceSeasons = 效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
+    serviceSeasons: r.ct_player_id === null ? null : serviceSeasons(r.ct_service_ticks ?? 0, r.current_ticks),
+    protected: r.ct_protection_ticks !== null && r.current_ticks < r.ct_protection_ticks,
     attrValue: attrValueExpr ? (r.attr_value ?? null) : undefined,
     // 槽位对齐：保留 15 长度、缺槽为 null——前端金徽判定要按真实槽位（13+ 为金槽）
     psIds: psSlotSelects
@@ -603,12 +613,13 @@ app.get('/players/:id', async (c) => {
     }>();
   if (!p) throw new HttpError(404, '球员不存在');
 
-  const [club, contract] = await Promise.all([
+  const [club, contract, ticksRow] = await Promise.all([
     p.club_id
       ? c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(p.club_id).first<{ id: number; name: string }>()
       : Promise.resolve(null),
     c.env.DB.prepare(
-      `SELECT id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, protected_until
+      `SELECT id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from,
+              service_ticks, protection_ticks, signed_season, signed_window_seq
        FROM contracts WHERE player_id = ? AND is_active = 1`,
     )
       .bind(id)
@@ -621,9 +632,15 @@ app.get('/players/:id', async (c) => {
         source: string | null;
         signed_at: string | null;
         effective_from: string | null;
-        protected_until: string | null;
+        service_ticks: number | null;
+        protection_ticks: number | null;
+        signed_season: number | null;
+        signed_window_seq: number | null;
       }>(),
+    c.env.DB.prepare(`SELECT ${CURRENT_TICKS_SQL} AS n`).first<{ n: number }>(),
   ]);
+  // 窗刻度（增量 25）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
+  const currentTicks = ticksRow?.n ?? 0;
 
   let gameAttrs: Record<string, unknown> | null = null;
   if (p.game_attrs) {
@@ -671,7 +688,10 @@ app.get('/players/:id', async (c) => {
           source: contract.source,
           signedAt: contract.signed_at,
           effectiveFrom: contract.effective_from,
-          protectedUntil: contract.protected_until,
+          serviceSeasons: serviceSeasons(contract.service_ticks ?? 0, currentTicks),
+          protected: contract.protection_ticks !== null && currentTicks < contract.protection_ticks,
+          signedSeason: contract.signed_season,
+          signedWindowSeq: contract.signed_window_seq,
         }
       : null,
   });

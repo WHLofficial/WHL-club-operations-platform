@@ -11,6 +11,8 @@ import {
   type NormalizedContract,
 } from '../core/import.ts';
 import { CPU_CLUB_IDS_SQL, cpuClubIds } from './growth.ts';
+import { protectionTicksFor } from '../core/bypass-rules.ts';
+import { windowBaseTicks } from './contract-ticks.ts';
 
 const CHUNK_ROWS = 200; // 每 db.batch 一个事务批次
 
@@ -180,17 +182,34 @@ export async function previewContractsImport(env: Env, body: unknown) {
   };
 }
 
-function upsertContractStatement(db: D1Database, clubId: number, c: Classified): D1PreparedStatement {
-  // 冲突时保 signed_at 原值；protected_until 留空（保护期规则在转会增量落地）
+function upsertContractStatement(
+  db: D1Database,
+  clubId: number,
+  c: Classified,
+  baseTicks: number,
+): D1PreparedStatement {
+  // 冲突时保 signed_at 原值；窗刻度（增量 25）：效力基数取该合同效力起点当年已关常规窗数，
+  // 保护期 = 基数 + 3 个常规窗（训练营无保护期）；导入不落 signed_season/signed_window_seq
   return db
     .prepare(
-      `INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, is_active)
-       VALUES (?, ?, ?, ?, ?, 'import', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, 1)
+      `INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from,
+                              service_ticks, protection_ticks, is_active)
+       VALUES (?, ?, ?, ?, ?, 'import', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, 1)
        ON CONFLICT(player_id) DO UPDATE SET
          club_id = excluded.club_id, release_fee = excluded.release_fee, wage = excluded.wage,
-         contract_type = excluded.contract_type, effective_from = excluded.effective_from, is_active = 1`,
+         contract_type = excluded.contract_type, effective_from = excluded.effective_from,
+         service_ticks = excluded.service_ticks, protection_ticks = excluded.protection_ticks, is_active = 1`,
     )
-    .bind(c.playerId, clubId, c.contract.releaseFee, c.contract.wage, c.contract.contractType, c.contract.effectiveFrom);
+    .bind(
+      c.playerId,
+      clubId,
+      c.contract.releaseFee,
+      c.contract.wage,
+      c.contract.contractType,
+      c.contract.effectiveFrom,
+      baseTicks,
+      protectionTicksFor(baseTicks, c.contract.contractType),
+    );
 }
 
 export async function confirmContractsImport(env: Env, actor: number, body: unknown) {
@@ -207,11 +226,23 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
   let written = 0;
   let inserted = 0;
   const batches = Math.ceil(classified.ok.length / CHUNK_ROWS) || 0;
+  // 效力基数按「效力起点」当日已关常规窗数算（同一日期只查一次）
+  const baseTicksCache = new Map<string, number>();
+  const baseTicksFor = async (effectiveFrom: string): Promise<number> => {
+    const cached = baseTicksCache.get(effectiveFrom);
+    if (cached !== undefined) return cached;
+    const value = await windowBaseTicks(env.DB, effectiveFrom);
+    baseTicksCache.set(effectiveFrom, value);
+    return value;
+  };
   for (let i = 0; i < classified.ok.length; i += CHUNK_ROWS) {
     const slice = classified.ok.slice(i, i + CHUNK_ROWS);
     const insertCount = slice.filter((c) => c.outcome !== 'update').length;
     const claimIds = slice.filter((c) => c.outcome === 'claim').map((c) => c.playerId);
-    const statements = slice.map((c) => upsertContractStatement(env.DB, payload.clubId, c));
+    const statements: D1PreparedStatement[] = [];
+    for (const c of slice) {
+      statements.push(upsertContractStatement(env.DB, payload.clubId, c, await baseTicksFor(c.contract.effectiveFrom)));
+    }
     if (claimIds.length > 0) {
       const ph = claimIds.map(() => '?').join(', ');
       statements.push(

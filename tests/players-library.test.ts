@@ -311,6 +311,8 @@ interface ListBody17 {
     wage: number | null;
     releaseFee: number | null;
     contractType: string | null;
+    serviceSeasons: number | null;
+    protected: boolean;
     psIds?: (number | null)[];
   }[];
   total: number;
@@ -440,9 +442,18 @@ describe('球员库 total 与新筛选（增量 17）', () => {
         (41, 'c1', '有合同', 1),
         (42, 'c2', '无合同', 1),
         (43, 'c3', '训练营', 1);
-      INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, protected_until, is_active) VALUES
-        (41, 1, NULL, 5.5, 'formal', 'negotiation', '2023-01-01T00:00:00Z', '2023-01-01T00:00:00Z', '2027-06-30T00:00:00Z', 1),
-        (43, 1, 10, 0.75, 'trainee', 'import', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL, 1);
+      INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, service_ticks, protection_ticks, signed_season, signed_window_seq, is_active) VALUES
+        -- 效力基数 4 → 已关常规窗数 6 时效力 1.0 赛季；保护期 4+3=7 > 6 → 保护中
+        (41, 1, NULL, 5.5, 'formal', 'negotiation', '2023-01-01T00:00:00Z', '2023-01-01T00:00:00Z', 4, 7, 2, 1, 1),
+        -- 训练营：无保护期；效力基数 0 → 3.0 赛季
+        (43, 1, 10, 0.75, 'trainee', 'import', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 0, NULL, 3, 1, 1);
+      INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at, closed_at) VALUES
+        (1, 1, 'closed', 0, '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z'),
+        (1, 2, 'closed', 0, '2026-02-02T00:00:00Z', '2026-03-01T00:00:00Z'),
+        (2, 1, 'closed', 0, '2026-03-02T00:00:00Z', '2026-04-01T00:00:00Z'),
+        (2, 2, 'closed', 0, '2026-04-02T00:00:00Z', '2026-05-01T00:00:00Z'),
+        (3, 1, 'closed', 0, '2026-05-02T00:00:00Z', '2026-06-01T00:00:00Z'),
+        (3, 2, 'closed', 0, '2026-06-02T00:00:00Z', '2026-07-01T00:00:00Z');
     `);
     expect((await list17('/api/players?has_contract=1', fx.env)).players.map((p) => p.id)).toEqual([41, 43]);
     expect((await list17('/api/players?has_contract=0', fx.env)).players.map((p) => p.id)).toEqual([42]);
@@ -452,12 +463,16 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     expect((await list17('/api/players?source=negotiation', fx.env)).players.map((p) => p.id)).toEqual([41]);
     expect((await list17('/api/players?protected=in', fx.env)).players.map((p) => p.id)).toEqual([41]);
     expect((await list17('/api/players?protected=out', fx.env)).players.map((p) => p.id)).toEqual([42, 43]);
-    expect((await list17('/api/players?effective_years_min=3', fx.env)).players.map((p) => p.id)).toEqual([41]);
+    // 效力时长按赛季：41 = 1.0，43 = 3.0
+    expect((await list17('/api/players?effective_years_max=1', fx.env)).players.map((p) => p.id)).toEqual([41]);
+    expect((await list17('/api/players?effective_years_min=3', fx.env)).players.map((p) => p.id)).toEqual([43]);
     // 响应带现行合同速览
     const withContract = await list17('/api/players?name=有合同', fx.env);
     expect(withContract.players[0]!.wage).toBe(5.5);
     expect(withContract.players[0]!.releaseFee).toBeNull();
     expect(withContract.players[0]!.contractType).toBe('formal');
+    expect(withContract.players[0]!.serviceSeasons).toBe(1);
+    expect(withContract.players[0]!.protected).toBe(true);
   });
 
   it('PlayStyle 多选：银槽基础 ID 与金槽 ID+100 都命中；非法值 400', async () => {

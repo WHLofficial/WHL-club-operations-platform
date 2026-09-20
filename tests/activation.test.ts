@@ -108,7 +108,9 @@ async function seedTrainee(fx: Fixture): Promise<ActivationFixture> {
        (${buyerClub}, 'opening_import', 50, 50, '期初', '2026-07-01T00:00:00Z'),
        (${rivalClub}, 'opening_import', 30, 30, '期初', '2026-07-01T00:00:00Z');
      INSERT INTO seasons (season, status) VALUES (1, 'running');
-     INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z');
+     INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at, closed_at) VALUES
+       (1, 1, 'closed', 0, '2026-05-01T00:00:00Z', '2026-06-01T00:00:00Z');
+     INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at) VALUES (1, 2, 'open', 0, '2026-07-01T00:00:00Z');
      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
        (20, 'fc20', '小将', ${ownerClub}, 'ST', 18, 68, 86, 15, 'trainee');
      INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
@@ -178,17 +180,19 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     );
     const noContract = await post('/api/market/activations', { playerId: 22 }, 'tok-coach2', fx.env);
     expect(noContract.status).toBe(400);
-    // §6.2：正式球员同样可被激活（无 signed_at/protected_until 记录 → 保护期外 1 倍价 20m）
+    // §6.2：正式球员同样可被激活（导入遗留合同无保护期刻度 protection_ticks=NULL → 保护期外 1 倍价 20m）
     const formal = await post('/api/market/activations', { playerId: 21 }, 'tok-coach2', fx.env);
     expect(formal.status).toBe(201);
     expect(((await formal.json()) as { askPrice: number }).askPrice).toBe(20);
   });
 
-  it('本窗口刚签约（效力起点在窗口开启后）不可被激活', async () => {
+  it('效力为 0（签约后未经历常规窗关窗）不可被激活', async () => {
     const fx = await seedTrainee(freshEnv());
-    fx.sqlite.exec(`UPDATE contracts SET effective_from = '2026-07-05' WHERE player_id = 20`);
-    const { status } = await activateTrainee(fx);
+    // 已关常规窗数 = 1（种子里的 S1 第 1 窗）；把签约基数抬到 1 → 效力 0
+    fx.sqlite.exec(`UPDATE contracts SET service_ticks = 1 WHERE player_id = 20`);
+    const { status, body } = await activateTrainee(fx);
     expect(status).toBe(409);
+    expect((body as { error?: string }).error).toContain('刚签约的球员不可被激活');
   });
 
   it('激活方可支配资金不足 5m 时直接拒绝', async () => {

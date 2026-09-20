@@ -83,8 +83,9 @@ interface BypassFixture extends Fixture {
   clubB: number;
 }
 
-// clubA（100m）/clubB（50m）+ 窗口开放 + clubA 名下三名球员：
-// 20 乡贤 RC10 效力 2020（解约免费）/ 21 老将 RC20 效力近期（解约收费）/ 22 新秀 训练营合同
+// clubA（100m）/clubB（50m）+ 窗口开放 + clubA 名下三名球员（增量 25 起效力按常规窗刻度）：
+// 已关常规窗 6 个（S1–S3 各 2），当前窗口 = S4 第 1 窗 → closedRegularTicks = 6
+// 20 乡贤 service_ticks 0（效力 3.0 赛季，解约免费）/ 21 老将 service_ticks 6（效力 0，解约收费）/ 22 新秀 训练营合同
 async function seedBypass(): Promise<BypassFixture> {
   const fx = freshEnv();
   const clubA = await createClub(fx, '甲队');
@@ -106,18 +107,25 @@ async function seedBypass(): Promise<BypassFixture> {
      INSERT INTO ledger_entries (club_id, kind, amount, balance_after, memo, created_at) VALUES
        (${clubA}, 'opening_import', 100, 100, '期初', '2026-07-01T00:00:00Z'),
        (${clubB}, 'opening_import', 50, 50, '期初', '2026-07-01T00:00:00Z');
-     INSERT INTO seasons (season, status) VALUES (1, 'running');
-     INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z');
+     INSERT INTO seasons (season, status) VALUES (1, 'settled'), (2, 'settled'), (3, 'settled'), (4, 'running');
+     INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at, closed_at) VALUES
+       (1, 1, 'closed', 0, '2026-01-01T00:00:00Z', '2026-01-05T00:00:00Z'),
+       (1, 2, 'closed', 0, '2026-02-01T00:00:00Z', '2026-02-05T00:00:00Z'),
+       (2, 1, 'closed', 0, '2026-03-01T00:00:00Z', '2026-03-05T00:00:00Z'),
+       (2, 2, 'closed', 0, '2026-04-01T00:00:00Z', '2026-04-05T00:00:00Z'),
+       (3, 1, 'closed', 0, '2026-05-01T00:00:00Z', '2026-05-05T00:00:00Z'),
+       (3, 2, 'closed', 0, '2026-06-01T00:00:00Z', '2026-06-05T00:00:00Z'),
+       (4, 1, 'open', 0, '2026-07-01T00:00:00Z', NULL);
      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, base_ca, market_value, status) VALUES
        (20, 'fc20', '乡贤', ${clubA}, 'ST', 26, 80, 82, 72, 15, 'normal'),
        (21, 'fc21', '老将', ${clubA}, 'CB', 29, 85, 85, 75, 25, 'normal'),
        (22, 'fc22', '新秀', ${clubA}, 'CM', 17, 55, 78, 55, 3, 'trainee'),
        (23, 'fc23', '无据', ${clubA}, 'GK', 30, 70, 70, 70, 5, 'normal');
-     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
-       (1, 20, ${clubA}, 10, 1, 'formal', 1, '2020-01-01'),
-       (2, 21, ${clubA}, 20, 2.5, 'formal', 1, '2026-08-01'),
-       (3, 22, ${clubA}, 5, 0.75, 'trainee', 1, '2026-08-01'),
-       (4, 23, ${clubA}, 8, 1, 'formal', 1, NULL);`,
+     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from, service_ticks, protection_ticks) VALUES
+       (1, 20, ${clubA}, 10, 1, 'formal', 1, '2020-01-01', 0, 3),
+       (2, 21, ${clubA}, 20, 2.5, 'formal', 1, '2026-08-01', 6, 9),
+       (3, 22, ${clubA}, 5, 0.75, 'trainee', 1, '2026-08-01', 6, NULL),
+       (4, 23, ${clubA}, 8, 1, 'formal', 1, NULL, 6, 9);`,
   );
   return { ...fx, clubA, clubB };
 }
@@ -146,7 +154,7 @@ describe('续约（rc_change）', () => {
     expect(t?.fee).toBe(15);
     expect(t?.status).toBe('pending_review');
     expect(t?.review_task_id).toBeGreaterThan(0);
-    expect(JSON.parse(t?.evidence ?? '{}')).toEqual({ oldReleaseFee: 10, oldProtectedUntil: null });
+    expect(JSON.parse(t?.evidence ?? '{}')).toEqual({ oldReleaseFee: 10, oldProtectionTicks: 3 });
     const task = sqlGet<{ payload: string }>(fx.sqlite, 'SELECT payload FROM review_tasks WHERE ref_id = ?', body.transferId);
     expect(JSON.parse(task?.payload ?? '{}')).toMatchObject({ kind: 'rc_change', oldReleaseFee: 10, newReleaseFee: 15, changeFee: 1.5 });
   });
@@ -209,14 +217,14 @@ describe('续约（rc_change）', () => {
     expect(done?.status).toBe('completed');
     expect(done?.tax).toBe(0);
     expect(done?.extra_fee).toBe(1.5);
-    const contract = sqlGet<{ release_fee: number; wage: number; source: string; protected_until: string | null; signed_at: string | null; effective_from: string; club_id: number }>(
+    const contract = sqlGet<{ release_fee: number; wage: number; source: string; service_ticks: number; protection_ticks: number | null; signed_at: string | null; club_id: number }>(
       fx.sqlite,
-      'SELECT release_fee, wage, source, protected_until, signed_at, effective_from, club_id FROM contracts WHERE player_id = 20 AND is_active = 1',
+      'SELECT release_fee, wage, source, service_ticks, protection_ticks, signed_at, club_id FROM contracts WHERE player_id = 20 AND is_active = 1',
     );
     expect(contract?.release_fee).toBe(15);
     expect(contract?.source).toBe('negotiation');
-    expect(contract?.protected_until).not.toBeNull(); // 保护期收口到当下（4.4.6）
-    expect(contract?.effective_from).toBe('2020-01-01'); // 效力年数延续
+    expect(contract?.protection_ticks).toBe(6); // 保护期收口到当下窗数 = 6（4.4.6：更改违约金后原保护期直接结束）
+    expect(contract?.service_ticks).toBe(0); // 效力基数不动，效力时长延续
     expect(contract?.club_id).toBe(fx.clubA);
     const player = sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 20');
     expect(player).toEqual({ club_id: fx.clubA, status: 'normal' }); // 不换主、状态不动
@@ -301,11 +309,11 @@ describe('解约（termination）', () => {
     ).toBe(1);
   });
 
-  it('未满 3 年收解约费：RC×(3−效力)×0.1 销毁', async () => {
+  it('未满 3 赛季收解约费：RC×(3−效力赛季数)×0.1 销毁', async () => {
     const fx = await seedBypass();
     const submit = await post('/api/transfers/termination', { playerId: 21 }, 'tok-coach', fx.env);
     expect(submit.status).toBe(201);
-    const expectedFee = terminationFee(20, '2026-08-01', Date.now()) as number;
+    const expectedFee = terminationFee(20, 6, 6); // service_ticks 6、已关常规窗 6 → 效力 0
     expect(((await submit.json()) as { terminationFee: number }).terminationFee).toBeCloseTo(expectedFee, 2);
     const taskId = await openReviewTaskId(fx);
     const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
@@ -317,10 +325,11 @@ describe('解约（termination）', () => {
     expect(entry?.amount).toBeCloseTo(-expectedFee, 2);
   });
 
-  it('合同缺效力起点：提交被挡', async () => {
+  it('导入遗留合同（effective_from 为空）也按窗刻度算费，不再挡提交', async () => {
     const fx = await seedBypass();
     const res = await post('/api/transfers/termination', { playerId: 23 }, 'tok-coach', fx.env);
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { terminationFee: number }).terminationFee).toBeCloseTo(terminationFee(8, 6, 6), 2);
   });
 
   it('在流程中的球员不能解约（4.4.10）', async () => {
@@ -340,7 +349,7 @@ describe('海捞（free_agent）', () => {
          (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free'),
          (25, 'fc25', '旧将', NULL, 'CM', 30, 74, 74, 'free');
        INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq)
-         VALUES ('termination', 25, ${fx.clubA}, NULL, 0, 'completed', 1, 1);`,
+         VALUES ('termination', 25, ${fx.clubA}, NULL, 0, 'completed', 4, 1);`,
     );
     const res = await get('/api/market/free-agents', 'tok-coach', fx.env);
     expect(res.status).toBe(200);
@@ -454,12 +463,13 @@ describe('海捞（free_agent）', () => {
     const offer = await post(`/api/negotiations/${sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)?.id}/offer`, { wage: eBase }, 'tok-coach2', fx.env);
     expect(((await offer.json()) as { result: string }).result).toBe('success');
 
-    const contract = sqlGet<{ club_id: number; release_fee: number; is_active: number; protected_until: string | null; source: string; contract_type: string }>(
+    const contract = sqlGet<{ club_id: number; release_fee: number; is_active: number; service_ticks: number; protection_ticks: number | null; source: string; contract_type: string }>(
       fx.sqlite,
-      'SELECT club_id, release_fee, is_active, protected_until, source, contract_type FROM contracts WHERE player_id = 24',
+      'SELECT club_id, release_fee, is_active, service_ticks, protection_ticks, source, contract_type FROM contracts WHERE player_id = 24',
     );
     expect(contract).toMatchObject({ club_id: fx.clubB, release_fee: 6, is_active: 1, source: 'negotiation', contract_type: 'formal' });
-    expect(contract?.protected_until).not.toBeNull();
+    expect(contract?.service_ticks).toBe(6); // 新合同效力重新起算（当前已关常规窗 6）
+    expect(contract?.protection_ticks).toBe(9); // 新合同保护期 = 6 + 3 个常规窗
     const player = sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 24');
     expect(player).toEqual({ club_id: fx.clubB, status: 'normal' });
     const done = sqlGet<{ status: string; tax: number; extra_fee: number }>(
@@ -477,10 +487,10 @@ describe('海捞（free_agent）', () => {
     expect((await post('/api/transfers/termination', { playerId: 20 }, 'tok-coach', fx.env)).status).toBe(201);
     const taskId = await openReviewTaskId(fx);
     expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
-    // 关窗 1、开窗 2
+    // 关 S4 第 1 窗、开 S4 第 2 窗
     fx.sqlite.exec(
-      `UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 1 AND window_seq = 1;
-       INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 2, 'open', '2026-08-02T00:00:00Z');`,
+      `UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 4 AND window_seq = 1;
+       INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at) VALUES (4, 2, 'open', 0, '2026-08-02T00:00:00Z');`,
     );
     const submit = await post('/api/transfers/free-agent', { playerId: 20, newReleaseFee: 9 }, 'tok-coach2', fx.env);
     expect(submit.status).toBe(201);
@@ -490,12 +500,15 @@ describe('海捞（free_agent）', () => {
     const sessionId = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)?.id as number;
     const e = sqlGet<{ expected_wage: number }>(fx.sqlite, 'SELECT expected_wage FROM negotiation_sessions WHERE id = ?', sessionId)?.expected_wage ?? 0;
     expect((await post(`/api/negotiations/${sessionId}/offer`, { wage: e }, 'tok-coach2', fx.env)).status).toBe(200);
-    const contract = sqlGet<{ club_id: number; release_fee: number; is_active: number; effective_from: string }>(
+    const contract = sqlGet<{ club_id: number; release_fee: number; is_active: number; service_ticks: number; signed_season: number; signed_window_seq: number }>(
       fx.sqlite,
-      'SELECT club_id, release_fee, is_active, effective_from FROM contracts WHERE player_id = 20',
+      'SELECT club_id, release_fee, is_active, service_ticks, signed_season, signed_window_seq FROM contracts WHERE player_id = 20',
     );
     expect(contract).toMatchObject({ club_id: fx.clubB, release_fee: 9, is_active: 1 });
-    expect(contract?.effective_from).not.toBe('2020-01-01'); // 效力重新起算
+    // 效力重新起算：签约基数 = 关 S4 第 1 窗后的已关常规窗数 7，签约窗记 S4 第 2 窗
+    expect(contract?.service_ticks).toBe(7);
+    expect(contract?.signed_season).toBe(4);
+    expect(contract?.signed_window_seq).toBe(2);
     // 旧解约单仍 completed，未受影响
     const term = sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE type = 'termination' AND player_id = 20");
     expect(term?.status).toBe('completed');
@@ -526,12 +539,12 @@ describe('窗内回滚（4.4.10）', () => {
   it('续约后被挂牌 → RC/保护期还原 + 续约费退还（ref=续约单本身）', async () => {
     const fx = await seedCompletedRcChange();
     expect((await post('/api/market/listings', { playerId: 20, askPrice: 11 }, 'tok-coach', fx.env)).status).toBe(201);
-    const contract = sqlGet<{ release_fee: number; protected_until: string | null }>(
+    const contract = sqlGet<{ release_fee: number; protection_ticks: number | null }>(
       fx.sqlite,
-      'SELECT release_fee, protected_until FROM contracts WHERE player_id = 20 AND is_active = 1',
+      'SELECT release_fee, protection_ticks FROM contracts WHERE player_id = 20 AND is_active = 1',
     );
     expect(contract?.release_fee).toBe(10); // 回到本窗第一张续约单之前
-    expect(contract?.protected_until).toBeNull(); // 原本无保护期记录，还原为 NULL
+    expect(contract?.protection_ticks).toBe(3); // 还原为续约前的保护期刻度（原 3）
     const refund = sqlGet<{ amount: number; ref_type: string; ref_id: number }>(
       fx.sqlite,
       `SELECT amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'rc_change_refund' AND club_id = ${fx.clubA}`,

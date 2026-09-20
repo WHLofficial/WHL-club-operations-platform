@@ -9,6 +9,7 @@ import { activationFee, matchDiff } from '../core/bypass-rules.ts';
 import { TRAINEE_ACTIVATION_FEE, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { availableBalance } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
+import { closedRegularTicks } from './contract-ticks.ts';
 import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
@@ -51,26 +52,20 @@ export async function createActivation(
   }
 
   const contract = await db
-    .prepare('SELECT release_fee, contract_type, effective_from, signed_at, protected_until FROM contracts WHERE player_id = ? AND is_active = 1')
+    .prepare('SELECT release_fee, contract_type, service_ticks, protection_ticks FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(playerId)
-    .first<{ release_fee: number | null; contract_type: string; effective_from: string | null; signed_at: string | null; protected_until: string | null }>();
+    .first<{ release_fee: number | null; contract_type: string; service_ticks: number; protection_ticks: number | null }>();
   if (!contract) throw new HttpError(400, '找不到这名球员的现行合同，先让管理组核对合同');
   const isTrainee = contract.contract_type === 'trainee';
+  // 效力与保护期按转会窗刻度（增量 25）：当前已关常规窗数 − 签约基数；训练营合同无保护期
+  const currentTicks = await closedRegularTicks(db);
   const askPrice = isTrainee
     ? TRAINEE_ACTIVATION_FEE
-    : activationFee(contract.release_fee ?? 0, contract.protected_until, contract.signed_at, Date.now());
+    : activationFee(contract.release_fee ?? 0, contract.protection_ticks, currentTicks);
 
-  // 效力校验（4.4.2.1）：本窗口刚签约（效力起点不早于窗口开启）的球员不可被激活
-  const winRow = await db
-    .prepare('SELECT opened_at FROM season_windows WHERE season = ? AND window_seq = ?')
-    .bind(win.season, win.windowSeq)
-    .first<{ opened_at: string | null }>();
-  if (
-    contract.effective_from !== null &&
-    winRow?.opened_at != null &&
-    Date.parse(contract.effective_from) >= Date.parse(winRow.opened_at)
-  ) {
-    throw new HttpError(409, '本窗口刚签约的球员不可被激活（效力未满一窗）');
+  // 效力校验（4.4.2.3(3)）：效力为 0（刚签约、还没经历常规窗关窗）的球员不可被激活
+  if (currentTicks <= (contract.service_ticks ?? 0)) {
+    throw new HttpError(409, '刚签约的球员不可被激活（效力为 0，等常规窗关窗后才行）');
   }
 
   // 一窗一次（4.4.2.1）：失效激活也占额（§6.2 假设口径）

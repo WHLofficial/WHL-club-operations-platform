@@ -5,15 +5,16 @@
 //
 // 类型分支（§6.3）：
 // - 归属变更（transfer/activation/forced_auction）：fee=成交价（货币），交易税按梯度
-//   （强制拍卖整单 50% 特例），新合同带保护期（signed_at+PROTECTION_DAYS）。
+//   （强制拍卖整单 50% 特例），新合同带保护期（增量 25 窗刻度：3 个常规窗关窗）。
 // - 本队留人（rc_change 续约/match 匹配）：fee=新违约金（非货币，附加费已在审核通过时收），
-//   无划款无税，合同只改 RC/工资/成约方式并把保护期收口到当下（4.4.6/4.4.2.4）。
+//   无划款无税，合同只改 RC/工资/成约方式并把保护期收口到当下（4.4.6/4.4.2.4，效力基数不动）。
 // - 海捞（free_agent）：fee=新违约金（非货币），球员无现行合同 → 新合同 INSERT，
 //   签入费已在审核通过时收。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { transferTax } from '../core/tax.ts';
-import { PROTECTION_DAYS } from '../core/bypass-rules.ts';
+import { protectionTicksFor } from '../core/bypass-rules.ts';
+import { closedRegularTicks } from './contract-ticks.ts';
 import { round2 } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext } from './market-context.ts';
@@ -107,6 +108,8 @@ export async function completeTransfer(
   const ownership = !amendment && !freeAgent;
   if (ownership && transfer.fee === null) throw new HttpError(409, '转会单缺成交价，数据不完整');
   const listingId = listingIdFromTransfer(transfer);
+  // 窗刻度（增量 25）：当下已关常规窗数 = 新合同的效力基数；保护期 = 基数 + 3 个常规窗
+  const baseTicks = await closedRegularTicks(db);
 
   const ctx = await loadMarketContext(db);
   const contract = await db
@@ -200,32 +203,44 @@ export async function completeTransfer(
     );
   }
   if (terms && freeAgent) {
-    // 海捞：落新合同（带保护期）。contracts.player_id 全局唯一（解约只是 is_active=0），
-    // 复签走 ON CONFLICT UPSERT 把旧合同行整体翻新
+    // 海捞：落新合同（保护期按窗刻度，训练营无保护期）。contracts.player_id 全局唯一
+    //（解约只是 is_active=0），复签走 ON CONFLICT UPSERT 把旧合同行整体翻新
     statements.push(
       db
         .prepare(
-          `INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, protected_until, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ${nowSql()}, strftime('%Y-%m-%d', 'now'),
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+${PROTECTION_DAYS} days'), 1)
+          `INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from,
+                                  service_ticks, protection_ticks, signed_season, signed_window_seq, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ${nowSql()}, strftime('%Y-%m-%d', 'now'), ?, ?, ?, ?, 1)
            ON CONFLICT(player_id) DO UPDATE SET
              club_id = excluded.club_id, release_fee = excluded.release_fee, wage = excluded.wage,
              contract_type = excluded.contract_type, source = excluded.source,
              signed_at = excluded.signed_at, effective_from = excluded.effective_from,
-             protected_until = excluded.protected_until, is_active = 1`,
+             service_ticks = excluded.service_ticks, protection_ticks = excluded.protection_ticks,
+             signed_season = excluded.signed_season, signed_window_seq = excluded.signed_window_seq, is_active = 1`,
         )
-        .bind(transfer.player_id, transfer.to_club_id, terms.releaseFee, terms.wage, terms.contractType, terms.source),
+        .bind(
+          transfer.player_id,
+          transfer.to_club_id,
+          terms.releaseFee,
+          terms.wage,
+          terms.contractType,
+          terms.source,
+          baseTicks,
+          protectionTicksFor(baseTicks, terms.contractType),
+          transfer.season,
+          transfer.window_seq,
+        ),
     );
   } else if (terms && amendment) {
-    // 续约/匹配：只改 RC/工资/成约方式，保护期到当下收口（4.4.6「保护期直接结束」）；
-    // 效力起点不动（解约费/忠诚奖金的服务年数延续）
+    // 续约/匹配：只改 RC/工资/成约方式，保护期到当下收口（4.4.6「保护期直接结束」）——
+    // 把 protection_ticks 设为当前窗数，判定恒不成立；效力基数 service_ticks 不动
     statements.push(
       db
         .prepare(
-          `UPDATE contracts SET wage = ?, release_fee = ?, source = ?, protected_until = ${nowSql()}
+          `UPDATE contracts SET wage = ?, release_fee = ?, source = ?, protection_ticks = ?
            WHERE player_id = ? AND is_active = 1 AND club_id = ?`,
         )
-        .bind(terms.wage, terms.releaseFee, terms.source, transfer.player_id, transfer.to_club_id),
+        .bind(terms.wage, terms.releaseFee, terms.source, baseTicks, transfer.player_id, transfer.to_club_id),
     );
   } else if (terms) {
     statements.push(
@@ -233,7 +248,7 @@ export async function completeTransfer(
         .prepare(
           `UPDATE contracts SET club_id = ?, wage = ?, release_fee = ?, source = ?, contract_type = ?,
              signed_at = ${nowSql()}, effective_from = strftime('%Y-%m-%d', 'now'),
-             protected_until = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+${PROTECTION_DAYS} days')
+             service_ticks = ?, protection_ticks = ?, signed_season = ?, signed_window_seq = ?
            WHERE player_id = ? AND is_active = 1 AND club_id IS ?`,
         )
         .bind(
@@ -242,6 +257,10 @@ export async function completeTransfer(
           terms.releaseFee,
           terms.source,
           terms.contractType,
+          baseTicks,
+          protectionTicksFor(baseTicks, terms.contractType),
+          transfer.season,
+          transfer.window_seq,
           transfer.player_id,
           transfer.from_club_id,
         ),

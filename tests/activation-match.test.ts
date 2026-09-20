@@ -101,11 +101,13 @@ async function seedActivation(fx: Fixture): Promise<MatchFixture> {
        (${ownerClub}, 'opening_import', 100, 100, '期初', '2026-07-01T00:00:00Z'),
        (${buyerClub}, 'opening_import', 50, 50, '期初', '2026-07-01T00:00:00Z');
      INSERT INTO seasons (season, status) VALUES (1, 'running');
-     INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z');
+     INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at, closed_at) VALUES
+       (1, 1, 'closed', 0, '2026-05-01T00:00:00Z', '2026-06-01T00:00:00Z');
+     INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at) VALUES (1, 2, 'open', 0, '2026-07-01T00:00:00Z');
      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
        (30, 'fc30', '核心', ${ownerClub}, 'ST', 24, 80, 85, 'normal');
-     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from) VALUES
-       (1, 30, ${ownerClub}, 10, 1, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01');`,
+     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
+       (1, 30, ${ownerClub}, 10, 1, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01', 0, 3);`,
   );
   return { ...fx, ownerClub, buyerClub };
 }
@@ -162,8 +164,8 @@ describe('普通球员激活（倍数价）', () => {
     fx.sqlite.exec(
       `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
          (31, 'fc31', '大牌', ${fx.ownerClub}, 'CM', 27, 86, 88, 'normal');
-       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from) VALUES
-         (2, 31, ${fx.ownerClub}, 30, 3, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01');`,
+       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
+         (2, 31, ${fx.ownerClub}, 30, 3, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01', 0, 3);`,
     );
     const big = await post('/api/transfers/activation', { playerId: 31 }, 'tok-coach2', fx.env);
     expect(big.status).toBe(201);
@@ -172,8 +174,8 @@ describe('普通球员激活（倍数价）', () => {
     fx.sqlite.exec(
       `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
          (32, 'fc32', '老臣', ${fx.ownerClub}, 'CB', 30, 80, 80, 'normal');
-       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from) VALUES
-         (3, 32, ${fx.ownerClub}, 10, 1, 'formal', 1, '2024-01-01T00:00:00Z', '2024-01-01');`,
+       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
+         (3, 32, ${fx.ownerClub}, 10, 1, 'formal', 1, '2024-01-01T00:00:00Z', '2024-01-01', 0, NULL);`,
     );
     const vet = await post('/api/transfers/activation', { playerId: 32 }, 'tok-coach2', fx.env);
     expect(vet.status).toBe(201);
@@ -262,12 +264,14 @@ describe('匹配 / 放行 / 到期', () => {
       "SELECT status, tax, extra_fee FROM transfers WHERE type = 'match'",
     );
     expect(done).toMatchObject({ status: 'completed', tax: 0 });
-    const contract = sqlGet<{ release_fee: number; wage: number; source: string; protected_until: string | null; club_id: number }>(
+    const contract = sqlGet<{ release_fee: number; wage: number; source: string; service_ticks: number; protection_ticks: number | null; club_id: number }>(
       fx.sqlite,
-      'SELECT release_fee, wage, source, protected_until, club_id FROM contracts WHERE player_id = 30 AND is_active = 1',
+      'SELECT release_fee, wage, source, service_ticks, protection_ticks, club_id FROM contracts WHERE player_id = 30 AND is_active = 1',
     );
     expect(contract).toMatchObject({ release_fee: 25, source: 'negotiation', club_id: fx.ownerClub });
-    expect(contract?.protected_until).not.toBeNull(); // 匹配后保护期收口
+    // 匹配后保护期收口：protection_ticks = 当前已关常规窗数（1），效力基数不动（0）
+    expect(contract?.protection_ticks).toBe(1);
+    expect(contract?.service_ticks).toBe(0);
     const player = sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 30');
     expect(player).toEqual({ club_id: fx.ownerClub, status: 'normal' });
     // 撬人队首价冻结已解、无任何划款
@@ -309,8 +313,8 @@ describe('匹配 / 放行 / 到期', () => {
     expect((await post(`/api/negotiations/${sessionId}/offer`, { wage: e }, 'tok-coach', fx.env)).status).toBe(200);
     // 球员留队（匹配成约）。下窗再被激活，匹配应被生涯一次挡下
     fx.sqlite.exec(
-      `UPDATE season_windows SET status = 'closed' WHERE season = 1 AND window_seq = 1;
-       INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 2, 'open', '2026-09-01T00:00:00Z');`,
+      `UPDATE season_windows SET status = 'closed', closed_at = '2026-09-01T00:00:00Z' WHERE season = 1 AND window_seq = 2;
+       INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at) VALUES (1, 3, 'open', 0, '2026-09-02T00:00:00Z');`,
     );
     const act2 = await activateCore(fx);
     expect(act2.status).toBe(201);
