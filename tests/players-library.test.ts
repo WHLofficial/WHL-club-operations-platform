@@ -1,11 +1,15 @@
 // 球员库列表（增量 6.1 d6）：筛选（position/name/growable/CA·PA·年龄区间）、数值键 keyset 排序翻页、参数校验
 // + view=initial 的导入时口径（CA=base_ca、PA=导入值）；initial_club_id 已在增量 14 裁决 4 删除
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, runMigration } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
+import { resetGuards } from '../src/lib/guard.ts';
+
+// 本文件密集打 /api/players，每个用例先清进程内限流计数（增量 23 守护）
+beforeEach(() => resetGuards());
 
 interface Fixture {
   env: Env;

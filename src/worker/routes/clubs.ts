@@ -4,6 +4,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
+import { assertPublicRate, cachedJson, waitUntilOf } from '../../lib/guard.ts';
 import { writeAudit } from '../../lib/audit.ts';
 import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
@@ -17,11 +18,22 @@ import { getVisibleSeason } from '../seasons.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 // 俱乐部目录（🌐 公开）：球员库筛选下拉用，只出 id/名称/级别，不含经营数据
+// 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）
 app.get('/clubs/directory', async (c) => {
-  const rows = await c.env.DB.prepare(
-    `SELECT id, name, league_tier FROM clubs WHERE status = 'active' ORDER BY name`,
-  ).all<{ id: number; name: string; league_tier: string }>();
-  return c.json({ clubs: rows.results });
+  assertPublicRate(c, 'clubs-directory');
+  const ttlMs = Number(c.env.PUBLIC_CACHE_TTL_MS) || 0;
+  const data = await cachedJson(
+    'clubs:directory',
+    ttlMs,
+    async () => {
+      const rows = await c.env.DB.prepare(
+        `SELECT id, name, league_tier FROM clubs WHERE status = 'active' ORDER BY name`,
+      ).all<{ id: number; name: string; league_tier: string }>();
+      return { clubs: rows.results };
+    },
+    waitUntilOf(c),
+  );
+  return c.json(data);
 });
 
 app.post('/clubs/bind', async (c) => {

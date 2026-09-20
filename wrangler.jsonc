@@ -53,7 +53,8 @@
   "vars": {
     "AUTH_MODE": "oidc",
     "OIDC_ISSUER": "https://auth.whleague.win",
-    "OIDC_CLIENT_ID": "club"
+    "OIDC_CLIENT_ID": "club",
+    "PUBLIC_CACHE_TTL_MS": "20000"
   },
   // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑随增量 3+ 落地
   "triggers": {

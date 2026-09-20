@@ -1,7 +1,8 @@
 // 球员查询（附录 A〔1〕，🌐 公开：跳过会话检查，§17.3-5）
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
+import { assertPublicRate, cachedJson, waitUntilOf } from '../../lib/guard.ts';
 import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, POSITION_BY_ID } from '../../core/fc26.ts';
 import { playerAbilityLevel } from '../home.ts';
@@ -99,7 +100,24 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
 // 排序：sort=id|ca|pa|age|market_value|influence + order（id 固定 ASC 旧整数游标）
+// 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）
 app.get('/players', async (c) => {
+  assertPublicRate(c, 'players');
+  const ttlMs = Number(c.env.PUBLIC_CACHE_TTL_MS) || 0;
+  const data = await cachedJson(
+    `players:${new URL(c.req.url).search}`,
+    ttlMs,
+    () => listPlayers(c),
+    waitUntilOf(c),
+  );
+  return c.json(data);
+});
+
+async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
+  players: unknown[];
+  total: number;
+  nextCursor: string | null;
+}> {
   const viewRaw = c.req.query('view');
   if (viewRaw !== undefined && viewRaw !== 'initial') throw new HttpError(400, 'view 只能是 initial');
   const initial = viewRaw === 'initial';
@@ -542,8 +560,8 @@ app.get('/players', async (c) => {
     const last = rows.results[limit - 1]!;
     nextCursor = sort === 'id' ? String(last.id) : `${Number(last.sort_key ?? 0)}~${last.id}`;
   }
-  return c.json({ players, total: countRow?.n ?? 0, nextCursor });
-});
+  return { players, total: countRow?.n ?? 0, nextCursor };
+}
 
 // GET /api/players/:id —— 档案卡数据（球员 + 俱乐部 + 现行合同 + FC 存档）
 app.get('/players/:id', async (c) => {
