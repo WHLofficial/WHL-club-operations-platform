@@ -265,8 +265,9 @@ export function isCpuTeam(teamName: string | null | undefined): boolean {
   return typeof teamName === 'string' && teamName.endsWith('(CPU)');
 }
 
-// 与 isCpuTeam 逐字对齐：严格取末 5 字符（LIKE 在 SQLite 里对 ASCII 不区分大小写，会与队名口径分叉）
-const CPU_CLUB_NAME_MATCH = "substr(name, -5) = '(CPU)'";
+// CPU 判定列化（增量 22，迁移 0026）：clubs.is_cpu 由迁移按队名口径回填（substr(name,-5)='(CPU)'），
+// 之后新增 CPU 队走管理端建 clubs 行时置列；队名后缀只活在 tour 库侧的 isCpuTeam。
+const CPU_CLUB_NAME_MATCH = 'is_cpu = 1';
 
 /** 同上的 SQL 谓词形态——在 WHERE 子句里当集合用（如 club_id IN (SELECT ...)）。 */
 export const CPU_CLUB_IDS_SQL = `(SELECT id FROM clubs WHERE ${CPU_CLUB_NAME_MATCH})`;

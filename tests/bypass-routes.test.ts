@@ -375,7 +375,7 @@ describe('海捞（free_agent）', () => {
     const fx = await seedBypass();
     const cpuClubId = 131681; // AC米兰(CPU)
     fx.sqlite.exec(
-      `INSERT INTO clubs (id, name, league_tier, status) VALUES (${cpuClubId}, 'AC米兰(CPU)', 'premier', 'active');
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (${cpuClubId}, 'AC米兰(CPU)', 'premier', 'active', 1);
        INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
          (26, 'fc26', '米兰人', ${cpuClubId}, 'ST', 27, 78, 80, 'normal');`,
     );

@@ -930,7 +930,7 @@ describe('通道 C · 名单合同模板导入（§5.4）', () => {
     const fx = freshEnv();
     await seedContractWorld(fx);
     fx.sqlite.exec(
-      `INSERT INTO clubs (id, name, league_tier, status) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active');
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
        INSERT INTO players (uid, name, club_id, position, ca, pa, fc_id) VALUES ('fc4', '米兰人', 131681, 'ST', 78, 80, 4);`,
     );
     const rows = [{ uid: 'fc4', releaseFee: 30, wage: 1.5, effectiveFrom: '2026-07-01', contractType: 'formal' }];

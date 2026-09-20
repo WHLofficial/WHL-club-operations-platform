@@ -157,7 +157,7 @@ describe('强制拍卖（4.4.5）', () => {
   it('CPU 队球员不参与强制拍卖（增量 14：CPU 队不入账）', async () => {
     const fx = await seedAuction();
     fx.sqlite.exec(
-      `INSERT INTO clubs (id, name, league_tier, status) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active');
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
        INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
          (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
     );

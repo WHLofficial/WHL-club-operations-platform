@@ -39,6 +39,13 @@ function runNormalize(rows: Record<string, unknown>[]): ReturnType<typeof normal
   }
 }
 
+// 目标俱乐部必须真实存在（增量 22 缺陷修复）：预览/确认都查，坏 clubId 原本会静默放行、
+// 落库才撞 contracts.club_id 外键炸 500
+async function requireClubExists(db: D1Database, clubId: number): Promise<void> {
+  const club = await db.prepare('SELECT id FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
+  if (!club) throw new HttpError(404, '目标俱乐部不存在，先到「俱乐部」里建队', 'club_not_found');
+}
+
 async function lookupIn<T>(db: D1Database, ids: number[], sql: (ph: string) => string): Promise<T[]> {
   const out: T[] = [];
   for (let i = 0; i < ids.length; i += 90) {
@@ -144,6 +151,7 @@ async function classify(db: D1Database, clubId: number, contracts: NormalizedCon
 
 export async function previewContractsImport(env: Env, body: unknown) {
   const payload = parseContractPayload(body);
+  await requireClubExists(env.DB, payload.clubId);
   const outcome = runNormalize(payload.rows);
   const classified = await classify(env.DB, payload.clubId, outcome.contracts);
   const errors = [...outcome.errors, ...classified.errors].sort((a, b) => a.row - b.row);
@@ -187,6 +195,7 @@ function upsertContractStatement(db: D1Database, clubId: number, c: Classified):
 
 export async function confirmContractsImport(env: Env, actor: number, body: unknown) {
   const payload = parseContractPayload(body);
+  await requireClubExists(env.DB, payload.clubId);
   const outcome = runNormalize(payload.rows);
   const classified = await classify(env.DB, payload.clubId, outcome.contracts);
   const errors = [...outcome.errors, ...classified.errors];

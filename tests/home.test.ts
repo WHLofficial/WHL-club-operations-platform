@@ -365,7 +365,7 @@ describe('CPU 队不入账（增量 14 裁决 6）', () => {
   it('目录里 club_id 照样补上，但 clubIdByTourTeam 不返回 CPU 队（奖金/主场收入都发不出）', async () => {
     const fx = freshEnv();
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 7);
-    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (241, '巴塞罗那(CPU)', 'active')`).run();
+    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status, is_cpu) VALUES (241, '巴塞罗那(CPU)', 'active', 1)`).run();
     authRegisterClubTeam(fx.auth, 6, 241, '巴塞罗那(CPU)');
 
     const map = await clubIdByTourTeam(fx.env, [6, 7]);

@@ -90,6 +90,7 @@ const MIGRATION_FILES = [
   '0023_stadium_build_credit.sql',
   '0024_naming_contracts.sql',
   '0025_result_review.sql',
+  '0026_clubs_is_cpu.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

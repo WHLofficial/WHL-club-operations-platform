@@ -122,7 +122,7 @@ describe('赛果确认即时入账（增量 11 §9.1）', () => {
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 101);
     // CPU 队：clubs 行与目录 club_id 都补齐（赛程/展示要用），但奖金与主场收入不发
-    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (241, '巴塞罗那(CPU)', 'active')`).run();
+    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status, is_cpu) VALUES (241, '巴塞罗那(CPU)', 'active', 1)`).run();
     authRegisterClubTeam(fx.auth, 6, 241, '巴塞罗那(CPU)');
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 101, awayTeamId: 6, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');

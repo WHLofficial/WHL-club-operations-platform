@@ -45,6 +45,8 @@ export interface NormalizedPlayer {
 export interface NormalizeOutcome {
   players: NormalizedPlayer[];
   errors: ImportRowError[];
+  /** 警告清单（增量 22 I4）：脏值已按安全口径落库但不静默——预览页展示供人工扫一眼，不挡确认 */
+  warnings: ImportRowError[];
 }
 
 export const IMPORT_ROW_LIMIT = 5000; // §5.4：单批 ≤5000 行事务提交，超量由前端切片
@@ -80,6 +82,7 @@ export function normalizeImportBatch(
 ): NormalizeOutcome {
   const players: NormalizedPlayer[] = [];
   const errors: ImportRowError[] = [];
+  const warnings: ImportRowError[] = [];
 
   const required = channel === 'A' ? FC26_REQUIRED_COLUMNS : FC_EDITOR_REQUIRED_COLUMNS;
   const absent = missingColumns(rows, required);
@@ -95,6 +98,7 @@ export function normalizeImportBatch(
   rows.forEach((raw, i) => {
     const rowNo = i + 1;
     const fail = (field: string, message: string) => errors.push({ row: rowNo, field, message });
+    const warn = (field: string, message: string) => warnings.push({ row: rowNo, field, message });
 
     if (channel === 'A') {
       const fcId = toNum(raw['ID']);
@@ -114,6 +118,9 @@ export function normalizeImportBatch(
       if (ca === null || ca < 1 || ca > 99) return fail('CA', 'CA 须在 1-99 之间');
       if (pa === null || pa < 1 || pa > 99) return fail('PA', 'PA 须在 1-99 之间');
       if (naId === null) return fail('naID', 'naID 缺失');
+      // naID 值域（增量 22 I4）：NationID 是 1-1000 量级的整数，域外一定是源文件脏值
+      if (!Number.isInteger(naId)) return fail('naID', 'naID 必须是整数');
+      if (naId < 1 || naId > 1000) return fail('naID', 'naID 须在 1-1000 之间');
       if (footId !== 1 && footId !== 2) return fail('FootID', 'FootID 只能是 1（右脚）或 2（左脚）');
 
       let position: string | null = null;
@@ -128,6 +135,10 @@ export function normalizeImportBatch(
       const gameAttrs: Record<string, unknown> = {};
       for (const col of FC26_GAME_ATTR_COLUMNS) gameAttrs[col] = raw[col] ?? null;
       gameAttrs['TeamID'] = normalizeTeamId(raw['TeamID']);
+      // TeamID 脏值不挡行（按无队籍落库），但出警告清单供人工核对（增量 22 I4）
+      if (gameAttrs['TeamID'] === null && toStr(raw['TeamID']) !== '') {
+        warn('TeamID', `TeamID「${toStr(raw['TeamID'])}」无法解析，按无队籍处理`);
+      }
 
       players.push({
         fcId,
@@ -182,6 +193,15 @@ export function normalizeImportBatch(
     const gameAttrs: Record<string, unknown> = {};
     for (const col of FC_EDITOR_GAME_ATTR_COLUMNS) gameAttrs[col] = raw[col] ?? null;
     gameAttrs['teamid'] = normalizeTeamId(raw['teamid']);
+    if (gameAttrs['teamid'] === null && toStr(raw['teamid']) !== '') {
+      warn('teamid', `teamid「${toStr(raw['teamid'])}」无法解析，按无队籍处理`);
+    }
+
+    // 通道 B 的 nationality 非必需列：缺省按无中国计划；给了值但不在值域内挡行
+    const nationality = toNum(raw['nationality']);
+    if (nationality !== null && (!Number.isInteger(nationality) || nationality < 1 || nationality > 1000)) {
+      return fail('nationality', 'nationality 须为 1-1000 之间的整数');
+    }
 
     players.push({
       fcId,
@@ -201,7 +221,7 @@ export function normalizeImportBatch(
     });
   });
 
-  return { players, errors };
+  return { players, errors, warnings };
 }
 
 // FC Editor 出生日期 DD/MM/YYYY → 按导入日推算年龄（FC26db 无出生日期，年龄按库内值）
