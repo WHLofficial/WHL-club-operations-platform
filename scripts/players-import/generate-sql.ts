@@ -1,6 +1,7 @@
 // 球员库导入 SQL 生成器（增量13 任务 B）：读 FC26db Base 表 → 复用端上 normalizeImportBatch
 // → 产分片 SQL（每片 ≤ 片内语句数上限，规避单请求体积）+ 导入报告。
-// 用法：node scripts/players-import/generate-sql.ts [xlsx路径] [每片语句数]
+// 用法：node scripts/players-import/generate-sql.ts [xlsx路径] [每片语句数] [--mode minor|major]
+//   --mode minor（缺省，小换版：成长全保留、CA 增量平移）| major（大换版：经验清零、CA/徽章各保留 1/3）
 //
 // 为什么不用端上 /players/import/confirm：该端点要管理端 OIDC 会话，脚本拿不到；
 // 归一化与 upsert 语义直接 import 同一份 TS 代码，保证与网页导入逐字同口径。
@@ -11,9 +12,16 @@ import * as XLSX from 'xlsx';
 import { normalizeImportBatch } from '../../src/core/import.ts';
 import type { NormalizedPlayer } from '../../src/core/import.ts';
 import { upsertStatement } from '../../src/worker/players-import.ts';
+import type { ImportMode } from '../../src/worker/players-import.ts';
 
 const SRC = process.argv[2] ?? 'E:/Downloads/FC26db20251217_fixed.xlsx';
 const PER_FILE = Number(process.argv[3] ?? 1000);
+const modeArg = process.argv.indexOf('--mode');
+const modeRaw = modeArg !== -1 ? process.argv[modeArg + 1] : undefined;
+const MODE: ImportMode = modeRaw === undefined ? 'minor' : modeRaw === 'minor' || modeRaw === 'major' ? modeRaw : (() => {
+  console.error('--mode 只能是 minor 或 major');
+  process.exit(2);
+})();
 const SLICE = 1000; // 与 web/src/pages/Admin.tsx 的 IMPORT_SLICE 同口径
 const OUT_DIR = new URL('./sql/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
@@ -67,7 +75,7 @@ function upsertSql(p: NormalizedPlayer): string {
       };
     },
   } as unknown as Parameters<typeof upsertStatement>[0];
-  const sql = upsertStatement(capture, p) as unknown as string;
+  const sql = upsertStatement(capture, p, MODE) as unknown as string;
   if (sql.includes('?')) throw new Error(`占位符未全部替换（fc_id=${p.fcId}）`);
   return `${sql};`;
 }

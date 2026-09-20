@@ -21,6 +21,7 @@ export default function ImportsPage() {
 
 interface ImportState {
   channel: 'A' | 'B';
+  mode: 'minor' | 'major';
   rows: Record<string, unknown>[];
   fileName: string;
   preview: ImportPreview | null;
@@ -35,6 +36,7 @@ function ImportSection() {
   const { show, toastNode } = useToast();
   const [state, setState] = useState<ImportState>({
     channel: 'A',
+    mode: 'minor',
     rows: [],
     fileName: '',
     preview: null,
@@ -79,7 +81,7 @@ function ImportSection() {
       const futureStars = parseStarIds(starText);
       const preview = await previewInSlices<ImportPreview>(
         state.rows,
-        (slice) => ({ channel: state.channel, rows: slice, futureStarIds: futureStars }),
+        (slice) => ({ channel: state.channel, mode: state.mode, rows: slice, futureStarIds: futureStars }),
         (progress) => patch({ progress }),
       );
       patch({ preview, previewBusy: false, progress: '' });
@@ -96,7 +98,7 @@ function ImportSection() {
       const futureStars = parseStarIds(starText);
       const result = await confirmInSlices<ImportConfirm>(
         state.rows,
-        (slice) => ({ channel: state.channel, rows: slice, futureStarIds: futureStars }),
+        (slice) => ({ channel: state.channel, mode: state.mode, rows: slice, futureStarIds: futureStars }),
         (progress) => patch({ progress }),
       );
       patch({ result, armed: false, preview: null, rows: [], fileName: '', confirmBusy: false, progress: '' });
@@ -135,6 +137,29 @@ function ImportSection() {
       </div>
 
       <label className="field">
+        换版模式（增量 22：决定覆盖已有球员时平台成长怎么算；新插入球员两模式等价）
+        <div className="seg" role="radiogroup" aria-label="换版模式">
+          <button
+            type="button"
+            className={state.mode === 'minor' ? 'on' : ''}
+            onClick={() => patch({ mode: 'minor', preview: null, result: null, armed: false })}
+          >
+            小换版 · 成长全保留
+          </button>
+          <button
+            type="button"
+            className={state.mode === 'major' ? 'on' : ''}
+            onClick={() => patch({ mode: 'major', preview: null, result: null, armed: false })}
+          >
+            大换版 · 经验清零，CA/徽章各留 1/3
+          </button>
+        </div>
+        {state.mode === 'major' && (
+          <span className="hint bad-text">大换版不可轻点：覆盖球员的成长经验清零、成长所得 CA 与徽章各保留 1/3（向上取整）。确认前先看预览统计。</span>
+        )}
+      </label>
+
+      <label className="field">
         源文件（xlsx）
         <input type="file" accept=".xlsx,.xls" onChange={onFile} />
       </label>
@@ -166,8 +191,8 @@ function ImportSection() {
 
       {state.result && (
         <div className="banner info">
-          落库完成：写入 {state.result.written} 行（新增约 {state.result.insertedEstimate}、覆盖约 {state.result.updatedEstimate}），分{' '}
-          {state.result.batches} 批。重复导入安全，运营数据不受影响。
+          落库完成（{state.result.mode === 'major' ? '大换版' : '小换版'}）：写入 {state.result.written} 行（新增约 {state.result.insertedEstimate}、覆盖约{' '}
+          {state.result.updatedEstimate}，其中成长中球员 {state.result.growthPlayers} 人），分 {state.result.batches} 批。重复导入安全，运营数据不受影响。
         </div>
       )}
 

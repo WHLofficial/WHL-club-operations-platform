@@ -5,13 +5,22 @@ import type { Env } from './env.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { IMPORT_ROW_LIMIT, normalizeImportBatch, type ImportChannel, type NormalizedPlayer } from '../core/import.ts';
 
+export type ImportMode = 'minor' | 'major';
+
 export interface ImportPayload {
   channel: ImportChannel;
   rows: Record<string, unknown>[];
   futureStarIds: Set<number>;
+  mode: ImportMode;
 }
 
 const CHUNK_ROWS = 200; // 每 db.batch 一个事务批次（§5.4 单批 ≤5000 行，超量分批）
+
+function parseMode(v: unknown): ImportMode {
+  if (v === undefined || v === null) return 'minor'; // 缺省小换版：名单版本更新的常规语义
+  if (v === 'minor' || v === 'major') return v;
+  throw new HttpError(400, 'mode 只能是 minor（小换版，成长全保留）或 major（大换版，经验清零、CA/徽章各保留 1/3）');
+}
 
 function parseFutureStarIds(v: unknown): Set<number> {
   if (v === undefined || v === null) return new Set();
@@ -26,7 +35,7 @@ function parseFutureStarIds(v: unknown): Set<number> {
 }
 
 export function parseImportPayload(body: unknown): ImportPayload {
-  const b = body as { channel?: unknown; rows?: unknown; futureStarIds?: unknown } | null;
+  const b = body as { channel?: unknown; rows?: unknown; futureStarIds?: unknown; mode?: unknown } | null;
   if (!b || (b.channel !== 'A' && b.channel !== 'B')) {
     throw new HttpError(400, 'channel 只能是 A（FC26db 当季主源）或 B（FC Editor 队壳）');
   }
@@ -38,6 +47,7 @@ export function parseImportPayload(body: unknown): ImportPayload {
     channel: b.channel,
     rows: b.rows as Record<string, unknown>[],
     futureStarIds: parseFutureStarIds(b.futureStarIds),
+    mode: parseMode(b.mode),
   };
 }
 
@@ -50,19 +60,35 @@ function runNormalize(payload: ImportPayload) {
   }
 }
 
-// fc_id 已存在数（IN ≤90 一批，§17.2-1）——预览给出新增/覆盖预估，确认按 chunk 记审计
-async function countExisting(db: D1Database, fcIds: number[]): Promise<number> {
-  let count = 0;
+// 库内现状（IN ≤90 一批，§17.2-1）——预览的换版统计与确认的插入/覆盖预估共用
+interface ExistingRow {
+  fc_id: number;
+  ca: number | null;
+  base_ca: number | null;
+  growth_xp: number;
+}
+
+async function fetchExisting(db: D1Database, fcIds: number[]): Promise<ExistingRow[]> {
+  const out: ExistingRow[] = [];
   for (let i = 0; i < fcIds.length; i += 90) {
     const slice = fcIds.slice(i, i + 90);
     const placeholders = slice.map(() => '?').join(', ');
     const rows = await db
-      .prepare(`SELECT fc_id FROM players WHERE fc_id IN (${placeholders})`)
+      .prepare(`SELECT fc_id, ca, base_ca, growth_xp FROM players WHERE fc_id IN (${placeholders})`)
       .bind(...slice)
-      .all<{ fc_id: number }>();
-    count += rows.results.length;
+      .all<ExistingRow>();
+    out.push(...rows.results);
   }
-  return count;
+  return out;
+}
+
+// 换版影响统计（增量 22 I1）：成长增量 δ = ca − base_ca，δ>0 的行才是被换版规则触及的球员
+function swapStats(existing: ExistingRow[], mode: ImportMode) {
+  const growth = existing.filter((r) => (r.ca ?? 0) - (r.base_ca ?? 0) > 0);
+  return {
+    growthPlayers: growth.length,
+    xpToWipe: mode === 'major' ? Math.round(existing.reduce((s, r) => s + (r.growth_xp > 0 ? r.growth_xp : 0), 0) * 100) / 100 : 0,
+  };
 }
 
 function sampleView(p: NormalizedPlayer) {
@@ -84,36 +110,51 @@ function sampleView(p: NormalizedPlayer) {
 export async function previewImport(env: Env, body: unknown) {
   const payload = parseImportPayload(body);
   const outcome = runNormalize(payload);
-  const existing = await countExisting(env.DB, outcome.players.map((p) => p.fcId));
+  const existing = await fetchExisting(env.DB, outcome.players.map((p) => p.fcId));
   return {
     channel: payload.channel,
+    mode: payload.mode,
     stats: {
       total: payload.rows.length,
       valid: outcome.players.length,
       error: outcome.errors.length,
-      insertEstimate: outcome.players.length - existing,
-      updateEstimate: existing,
+      warning: outcome.warnings.length,
+      insertEstimate: outcome.players.length - existing.length,
+      updateEstimate: existing.length,
+      ...swapStats(existing, payload.mode),
     },
     errors: outcome.errors.slice(0, 50),
+    warnings: outcome.warnings.slice(0, 50),
     samples: outcome.players.slice(0, 5).map(sampleView),
   };
 }
 
 // 导出供 scripts/players-import/generate-sql.ts 复用：离线导入脚本靠它取到与网页导入逐字相同的
 // SQL 文本与参数顺序，避免手抄一份 SQL 后与生产口径漂移。
-export function upsertStatement(db: D1Database, p: NormalizedPlayer): D1PreparedStatement {
-  // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、growable（赛季结算重判）冲突时不更新。
-  // base_ca = 非平台成长所得 CA（§10.4）：随每次导入刷新到源文件值，平台成长不加在它上面。
-  // club_id 只在新插入时写（CPU 队球员的队籍，增量 14）；冲突时不更新，免得覆盖认领/解约后的归属。
+//
+// 换版模式（增量 22 I1，规则 §5.4 / TECH_DESIGN §10.4）。成长增量 δ = ca − base_ca（负值按 0）：
+// - minor 小换版：成长全保留，CA 增量平移 → ca = excluded.ca + δ；base_ca 刷到新源值。
+// - major 大换版：经验清零、成长 CA/徽章各保留 1/3（向上取整；SQLite 整数除法是 floor，
+//   (δ+2)/3 即 ceil(δ/3)），levels_applied 归零，base_ca 刷到新源值；徽章计数化，银/金各自折算。
+// ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、growable（赛季结算重判）冲突时不更新。
+// club_id 只在新插入时写（CPU 队球员的队籍，增量 14）；冲突时不更新，免得覆盖认领/解约后的归属。
+export function upsertStatement(db: D1Database, p: NormalizedPlayer, mode: ImportMode = 'minor'): D1PreparedStatement {
+  const growthUpdate =
+    mode === 'major'
+      ? `ca = excluded.ca + (max(players.ca - players.base_ca, 0) + 2) / 3,
+         base_ca = excluded.ca, growth_xp = 0, levels_applied = 0,
+         badges_silver = (badges_silver + 2) / 3, badges_gold = (badges_gold + 2) / 3,`
+      : `ca = excluded.ca + max(players.ca - players.base_ca, 0), base_ca = excluded.ca,`;
   return db
     .prepare(
       `INSERT INTO players
          (uid, name, ca, pa, age, foot, position, club_id, prestige, china_plan, is_future_star, fc_id, base_ca, growable, game_attrs, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(fc_id) DO UPDATE SET
-         uid = excluded.uid, name = excluded.name, ca = excluded.ca, pa = excluded.pa, age = excluded.age,
+         uid = excluded.uid, name = excluded.name, ${growthUpdate}
+         pa = excluded.pa, age = excluded.age,
          foot = excluded.foot, position = excluded.position, prestige = excluded.prestige,
-         china_plan = excluded.china_plan, base_ca = excluded.ca, game_attrs = excluded.game_attrs, updated_at = excluded.updated_at`,
+         china_plan = excluded.china_plan, game_attrs = excluded.game_attrs, updated_at = excluded.updated_at`,
     )
     .bind(
       p.uid,
@@ -144,12 +185,14 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
   const audit = createAuditStatement(env.DB);
   let written = 0;
   let inserted = 0;
+  let growthPlayers = 0;
   const batchCount = Math.ceil(outcome.players.length / CHUNK_ROWS);
   for (let i = 0; i < outcome.players.length; i += CHUNK_ROWS) {
     const slice = outcome.players.slice(i, i + CHUNK_ROWS);
-    const existing = await countExisting(env.DB, slice.map((p) => p.fcId));
-    inserted += slice.length - existing;
-    const statements = slice.map((p) => upsertStatement(env.DB, p));
+    const existing = await fetchExisting(env.DB, slice.map((p) => p.fcId));
+    inserted += slice.length - existing.length;
+    growthPlayers += swapStats(existing, payload.mode).growthPlayers;
+    const statements = slice.map((p) => upsertStatement(env.DB, p, payload.mode));
     statements.push(
       audit({
         actor,
@@ -157,15 +200,25 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
         targetType: 'players',
         after: {
           channel: payload.channel,
+          mode: payload.mode,
           batchNo: i / CHUNK_ROWS + 1,
           rows: slice.length,
-          insertEstimate: slice.length - existing,
-          updateEstimate: existing,
+          insertEstimate: slice.length - existing.length,
+          updateEstimate: existing.length,
+          growthPlayers: swapStats(existing, payload.mode).growthPlayers,
         },
       }),
     );
     await env.DB.batch(statements);
     written += slice.length;
   }
-  return { written, insertedEstimate: inserted, updatedEstimate: written - inserted, batches: batchCount, channel: payload.channel };
+  return {
+    written,
+    insertedEstimate: inserted,
+    updatedEstimate: written - inserted,
+    batches: batchCount,
+    channel: payload.channel,
+    mode: payload.mode,
+    growthPlayers,
+  };
 }

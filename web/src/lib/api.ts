@@ -201,8 +201,19 @@ export interface AdminClubRow {
 
 export interface ImportPreview {
   channel: 'A' | 'B';
-  stats: { total: number; valid: number; error: number; insertEstimate: number; updateEstimate: number };
+  mode: 'minor' | 'major';
+  stats: {
+    total: number;
+    valid: number;
+    error: number;
+    warning: number;
+    insertEstimate: number;
+    updateEstimate: number;
+    growthPlayers: number; // 成长增量 δ>0、将被换版规则触及的球员数
+    xpToWipe: number; // 大换版时将被清零的经验总量（小换版恒 0）
+  };
   errors: { row: number; field: string; message: string }[];
+  warnings: { row: number; field: string; message: string }[];
   samples: {
     fcId: number;
     uid: string;
@@ -224,6 +235,8 @@ export interface ImportConfirm {
   updatedEstimate: number;
   batches: number;
   channel: 'A' | 'B';
+  mode: 'minor' | 'major';
+  growthPlayers: number;
 }
 
 export interface OpeningImportResult {

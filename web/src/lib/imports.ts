@@ -55,8 +55,18 @@ export function requiredColumns(channel: Channel): string[] {
 // buildBody 决定通道差异（futureStarIds / clubId），进度文案沿用原口径；
 // 泛型兼容 ImportPreview（A/B）与 ContractImportPreview（C）
 interface PreviewAggLike {
-  stats: { total: number; valid: number; error: number; insertEstimate: number; updateEstimate: number };
+  stats: {
+    total: number;
+    valid: number;
+    error: number;
+    insertEstimate: number;
+    updateEstimate: number;
+    warning?: number;
+    growthPlayers?: number;
+    xpToWipe?: number;
+  };
   errors: { row: number; field: string; message: string }[];
+  warnings?: { row: number; field: string; message: string }[];
   samples: unknown[];
 }
 
@@ -77,7 +87,11 @@ export async function previewInSlices<P extends PreviewAggLike>(
       agg.stats.error += res.stats.error;
       agg.stats.insertEstimate += res.stats.insertEstimate;
       agg.stats.updateEstimate += res.stats.updateEstimate;
+      agg.stats.warning = (agg.stats.warning ?? 0) + (res.stats.warning ?? 0);
+      agg.stats.growthPlayers = (agg.stats.growthPlayers ?? 0) + (res.stats.growthPlayers ?? 0);
+      agg.stats.xpToWipe = Math.round(((agg.stats.xpToWipe ?? 0) + (res.stats.xpToWipe ?? 0)) * 100) / 100;
       agg.errors.push(...res.errors);
+      agg.warnings?.push(...(res.warnings ?? []));
       if (agg.samples.length < 5) agg.samples.push(...res.samples.slice(0, 5 - agg.samples.length));
     }
     onProgress(`预览 ${Math.min(i + IMPORT_SLICE, rows.length)} / ${rows.length} 行`);
