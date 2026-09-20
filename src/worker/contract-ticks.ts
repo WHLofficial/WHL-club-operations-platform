@@ -21,7 +21,12 @@ export async function currentWindow(db: D1Database): Promise<WindowRef | null> {
   return row ? { season: row.season, windowSeq: row.window_seq, isTemporary: row.is_temporary ?? 0 } : null;
 }
 
-/** 截至指定时点（缺省 = 当下）已关的常规窗数——效力推进计数 */
+/**
+ * 截至指定时点（缺省 = 当下）已关的常规窗数——效力推进计数。
+ * atIso 用字符串比较：closed_at 与运行期 signed_at 都是 ISO 时间戳（同格式可比）；
+ * 导入的历史合同传的是日期串 YYYY-MM-DD，此时与 signed 同日关的窗不计（效力算得更年轻，
+ * 即解约费偏保守、保护期偏长）。
+ */
 export async function closedRegularTicks(db: D1Database, atIso?: string | null): Promise<number> {
   if (atIso) {
     const row = await db
@@ -45,7 +50,10 @@ export async function windowBaseTicks(db: D1Database, signedAt: string | null): 
   return closedRegularTicks(db, signedAt);
 }
 
-/** 同赛季第几个非临时窗（1 = 季初、2 = 中期）；该窗本身是临时窗时返回 0 */
+/**
+ * 同赛季第几个非临时窗（1 = 季初、2 = 中期）= window_seq ≤ 本窗的非临时窗数。
+ * 调用方只在常规窗上用它判定（关窗时才发忠诚奖金）；对临时窗调用得到的是它之前已开的常规窗数，不是 0。
+ */
 export async function regularWindowOrdinal(db: D1Database, season: number, windowSeq: number): Promise<number> {
   const row = await db
     .prepare(
