@@ -284,7 +284,7 @@
 
 **⑥ 过期草稿清理**：`handoff-20260916.md`（停在增量 12，四仓 HEAD 快照全过期）删除；其中仍有效的三条已迁走——球员库逐队源数据位置与字段口径、导入通道选择（离线脚本产 SQL 走 D1 REST `/query`）、`--file` 通道 FK 陷阱（后两条进 `scripts/README.md`，第一条进本节下方「外部依赖与待输入」表）。
 
-**验收**：文档里每处路径、命令、键名、版本号均以代码或联网只读查证为准（`wrangler deployments list --name whl-club` 实证生产最新 Version = 增量 16 的 `6ed7446c`，`wrangler d1 migrations list whl-club --remote` 实证生产迁移停在 0021）；`npm test` 387 用例 / 30 文件不变（本轮不碰代码）。
+**验收**：文档里每处路径、命令、键名、版本号均以代码或联网只读查证为准（`wrangler deployments list --name whl-club` 实证生产最新 Version = 增量 16 的 `6ed7446c`，`wrangler d1 migrations list whl-club --remote` 实证生产迁移停在 0021，`SELECT COUNT(*) FROM players` 实证生产 18301 人、缺字段列为空——据此纠正了「球员库首灌未执行」的误记）；`npm test` 387 用例 / 30 文件不变（本轮不碰代码，仅 0027 头注释一行）。
 
 **遗留**：附录 A 只修过期行、不回填增量 7+ 新增路由（表头已写明冻结范围）；TECH_DESIGN §15 各条只补落地增量号，未逐条回代码核位置；e2e 仍只覆盖兼容模式会话路径（增量 23 遗留）。
 

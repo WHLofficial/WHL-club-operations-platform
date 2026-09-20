@@ -27,7 +27,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 ## 2. 技术路径
 
 - **栈**：React 19 + react-router 7 + Vite（与赛事系统同栈，PRD 已定 React SPA）；**不引 Tailwind / 组件库 / CSS-in-JS**。
-- **样式架构**：全局单文件 `src/styles.css`（估 700-800 行 = 家族基础 ~250 + 档案室主题扩展 ~500），设计令牌全部集中在 `:root`；动态值才用 inline style。
+- **样式架构**：全局单文件 `src/styles.css`（估 700-800 行 = 家族基础 ~250 + 档案室主题扩展 ~500），设计令牌全部集中在 `:root`；动态值才用 inline style。（实现落在 `web/src/styles.css`。）
 - **浅色主题，无暗色切换**（家族硬惯例）；`index.html` 的 `theme-color` = 顶栏棕。
 - **移动端**：单一断点 `@media (max-width: 640px)`，CSS-only 适配（卡柜单列、表格 `overflow-x:auto` 横滚、触摸目标 ≥36px）；`viewport-fit=cover`。
 - **动效纪律**：家族克制——本站唯一新增 keyframe 是**盖章 scale-in**（§4.1）；live 类动效沿赛事 `livepulse` 若被复用，同样尊重 reduced-motion；其余动效仅 hover/过渡。
@@ -150,7 +150,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 ## 6. 实现阶段校色与待办
 
 1. ~~量化校色~~ **已完成（v1.0.1）**：`scripts/calibrate_tokens.py` 对徽章原图 quantize，四主令牌已按量化结果落定（见 §3 表）；主按钮白字对比 4.86 达标。
-2. 徽章图拷入仓库（`public/` 或 `src/assets/`，原图 1500×1500 需出 48/72/96px 圆裁变体或 CSS 圆裁）。
+2. 徽章图拷入仓库（`public/` 或 `src/assets/`，原图 1500×1500 需出 48/72/96px 圆裁变体或 CSS 圆裁）。（已完成：落在 `web/public/assets/brand/whl-badge-{48,96}.webp`。）
 3. 挂牌板顶部「市场快讯 ticker」为**可选件**（赛事 portal 已有母题，是否复用到市场页开发时定）。
 4. 除盖章 scale-in 外不新增任何 keyframe；所有动效过 reduced-motion。
 5. 验收基线：三个对照页（球员详情 / 挂牌板 / 账本）与赛事系统并排看——结构气质一致、颜色气质一眼是「俱乐部站」。
