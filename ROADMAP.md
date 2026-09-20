@@ -240,6 +240,16 @@
 
 ---
 
+## 增量 22 · 换版机制与导入加固——小/大换版模式 / 合同导入校验 / 预览警告 / CPU 列化（2026-09-20 本地完成，push/部署等令）
+
+**I1 换版模式**（规则 §5.4 / TECH_DESIGN §10.4，`1161ee9`）：导入原 upsert 把 CA 拉回源值但保留 growth_xp/levels/徽章——既非小换版也非大换版的缺陷。`players_import` 加 `mode`：**小换版**（缺省）成长全保留、CA 增量平移（`ca = excluded.ca + max(ca−base_ca, 0)`）；**大换版**经验清零、成长 CA 与徽章各保留 1/3 向上取整（SQLite 整数除法 `(δ+2)/3` 即 ceil）、levels_applied 归零；`base_ca` 都刷到新源值；新插入路径两模式等价。预览统计加 growthPlayers（δ>0 将受影响人数）与 xpToWipe（大换版将清零经验总量）；确认审计批次带 mode。前端导入页加模式选择（大换版红色警示 + armed 二次确认沿用），预览块渲染换版统计与警告表。离线脚本 generate-sql.ts 加 `--mode`（`4ff6634` 分片头与报告记录模式，生产执行可追溯）。**档案划断口径**：成长字段归零 + 审计留痕，不插 growth_events/growth_periods 行（18k 行级插入会打爆 D1 写配额）。
+
+**I3+I4+is_cpu（`9bfacf9`）**：①合同导入 clubId 不存在原本预览放行、落库撞 FK 500——preview/confirm 双 404；②导入管线加 warnings 清单（TeamID/teamid 脏值按无队籍落库但不静默）+ naID 值域 1-1000 挡行（通道 B nationality 同口径）；③迁移 0026 `clubs.is_cpu`（按队名 (CPU) 后缀回填），`cpuClubIds`/`CPU_CLUB_IDS_SQL` 改走列，tour 侧 `isCpuTeam` 队名判定保留；`FC26_CPU_TEAM_IDS` 常量保留（导入源口径）。
+
+**验收**：**376 测试 + 三份 tsc + build 全绿**（新增 import.test.ts 7 用例：naID 值域/TeamID 警告、小换版平移+成长保留、大换版 ceil 折算+清零、δ≤0、新插入等价、mode 400、合同 404、cpuClubIds 走列）。本地 8791 冒烟：两名 δ=5/XP12/银7金2 球员实导——minor → ca 75、成长字段原样；major → ca 72、xp 0、levels 0、银3金1；naID 5000 挡行、坏 clubId 404；导入页模式选择器截图核验。**部署注意：0026 --remote apply 后须核查 `SELECT id,name,is_cpu FROM clubs` 命中 4 支 CPU 队**（回填按队名后缀，若生产队名无后缀则手工 UPDATE）。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
