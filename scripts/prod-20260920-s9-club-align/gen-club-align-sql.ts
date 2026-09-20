@@ -18,6 +18,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import * as XLSX from 'xlsx';
 
@@ -26,7 +27,7 @@ const POSITIONAL = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const VERIFY = FLAGS.has('--verify');
 const LOCAL = FLAGS.has('--local');
 
-const HERE = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 const OUT_DIR = join(HERE, 'sql');
 const RB_DIR = join(HERE, 'rollback');
 const SRC_DIR = POSITIONAL[0] ?? 'E:/BaiduNetdiskDownload/FC Editor by decoruiz Alpha v21.5_2/player_tables/s901';
@@ -66,8 +67,10 @@ function readSource(dir: string): SrcRow[] {
     if (!sheet) throw new Error(`${file} 里找不到 Squad Info 表`);
     const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null, raw: true });
     for (const r of json) {
-      const fcId = Number(r['playerid']);
-      if (!Number.isFinite(fcId)) continue;
+      const rawId = r['playerid'];
+      if (rawId == null || rawId === '') continue;
+      const fcId = Number(rawId);
+      if (!Number.isFinite(fcId) || fcId <= 0) continue;
       const prev = seen.get(fcId);
       if (prev) throw new Error(`球员 ${fcId} 同时出现在 ${prev} 与 ${file}`);
       seen.set(fcId, file);
@@ -218,16 +221,17 @@ function buildPrecheck(fcIds: number[]): string {
   ].join('\n');
 }
 
-function buildVerify(fcIds: number[]): string {
-  const list = fcIds.join(',');
+function buildVerify(src: SrcRow[]): string {
+  // 真校验：把「fc_id → 目标队」整张映射塞进 json_each（不用 VALUES，SQLite 的 compound SELECT 默认上限 500 项，570 行会被拒）
+  const json = JSON.stringify(src.map((s) => [s.fcId, s.clubId]));
   return [
     '-- S9 队籍对齐 · 执行后验收（只读）',
     `-- 生成器 scripts/prod-20260920-s9-club-align/gen-club-align-sql.ts；生成时点 ${TS}`,
-    '-- 判据：remaining_570 = 0（570 人全部与 s901 一致）；from_null 归零的 323 人已落到目标队',
+    '-- 判据：want_rows = 570、missing_now = 0、remaining = 0（570 人 club_id 全部等于 s901 目标队）、null_left = 0',
     '',
-    `SELECT (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND club_id IS NULL) AS null_left;`,
+    `WITH want AS (SELECT json_extract(value, '$[0]') AS fc_id, json_extract(value, '$[1]') AS club_id FROM json_each('${json}')) SELECT (SELECT COUNT(*) FROM want) AS want_rows, (SELECT COUNT(*) FROM want w WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.fc_id = w.fc_id)) AS missing_now, (SELECT COUNT(*) FROM want w JOIN players p ON p.fc_id = w.fc_id AND p.club_id IS w.club_id) AS aligned_now, (SELECT COUNT(*) FROM want w JOIN players p ON p.fc_id = w.fc_id WHERE p.club_id IS NOT w.club_id) AS remaining, (SELECT COUNT(*) FROM want w JOIN players p ON p.fc_id = w.fc_id WHERE p.club_id IS NULL) AS null_left;`,
     '',
-    '-- 逐队「s901 名单人数 vs 平台现任人数」对照（is_cpu 仅作标注）',
+    '-- 逐队「s901 名单人数 vs 平台现任人数」对照（is_cpu 仅作标注；roster_now 含本批不动的遗留球员）',
     'SELECT c.id AS club_id, c.name, c.is_cpu,',
     '       (SELECT COUNT(*) FROM players p WHERE p.club_id = c.id) AS roster_now',
     '  FROM clubs c ORDER BY c.id;',
@@ -355,7 +359,8 @@ if (VERIFY) {
     for (const c of changes.slice(0, 20)) console.log(`  ${c.fcId} ${c.name} ${c.from ?? 'NULL'} -> ${c.to}`);
   }
   if (missing.length > 0) for (const id of missing.slice(0, 20)) console.log(`  缺失 ${id}`);
-  process.exit(changes.length === 0 && missing.length === 0 ? 0 : 4);
+  // 0 = 已对齐完；4 = 还有差异；5 = 有球员查不到（无法判定对齐状态）
+  process.exit(missing.length > 0 ? 5 : changes.length === 0 ? 0 : 4);
 }
 
 if (missing.length > 0) {
@@ -370,7 +375,7 @@ const manifest: string[] = [];
 const sqlFiles = writeShards(OUT_DIR, 'club-align-update', changes, false, manifest);
 const rbFiles = writeShards(RB_DIR, 'club-align-rollback', changes, true, manifest);
 writeFileSync(join(HERE, '01-precheck.sql'), buildPrecheck(fcIds), 'utf8');
-writeFileSync(join(HERE, '02-verify.sql'), buildVerify(fcIds), 'utf8');
+writeFileSync(join(HERE, '02-verify.sql'), buildVerify(src), 'utf8');
 writeFileSync(
   join(HERE, 'club-align-report.md'),
   buildReport({ src, prod, changes, missing, roster, clubs, counts, sqlFiles, rbFiles, manifest }),

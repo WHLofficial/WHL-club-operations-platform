@@ -167,21 +167,31 @@ Case B 下 `base_ca` 不动，本批**只把 `ca` 抬到源值**，于是：
 2. `node gen-abilities-sql.ts` 重跑生成（若距离上次生成已久，旧值与守卫会重新抓；报告写明生成时点）。
 3. 执行前复查：`01-precheck.sql`（570 个 `fc_id` 全部命中、`game_attrs` 全部 `json_valid`、守卫计数）。
 4. 逐片执行 `sql/abilities-update-0N.sql`（本批**不碰任何外键列**，`--file` 可用；`scripts/README.md:66` 的 `--command` 纪律是为含外键/大事务的工件设的）。
-5. 跑 `02-verify.sql` + `01-precheck.sql` 复查（`from_null` 之类计数应归零）。
+5. 跑 `02-verify.sql`（六列判据见 §10）与 `01-precheck.sql` 复查。
 6. 需要回退时逐片执行 `rollback/abilities-rollback-0N.sql`（按新值守卫，重复执行 changes = 0），再跑一次 `--verify` 看差异是否回到 257。
 
 ## 10. 验收
 
+`02-verify.sql` 第一条语句给六列（期望值就写在文件头部注释里，随生成时点变化）：
+
+| 列 | 本批期望 | 含义 |
+| --- | --- | --- |
+| `touched` | 257 | 本次语句实际改到的行数（`updated_at = 生成时点`）——**等于语句数才说明每条都命中** |
+| `delta_gt0` | 254 | `ca <> COALESCE(base_ca, ca)`，即这批涨幅成为成长值（Case B 的核心效果） |
+| `null_core` | 0 | `ca`/`pa`/`base_ca` 有 NULL 的行（守卫写不出来的前提） |
+| `gold_rows` | 4 | 任一金槽（`PSID13-15` ≥ 101）的行数 |
+| `gold_slots` | 5 | 金槽总个数（与「行数」不同：`fc 234577` 一行两个） |
+| `ca_vs_attr` | 254 | `game_attrs.$.CA` 与 `ca` 背离的行数——**Case B 下故意不等，不是错误** |
+
 ```sql
--- 逐人核对（只读）：把 s901 的 overallrating 与落库后 ca 比对，期望 0 行不等
--- 生成器把这份比对做成了 --verify 模式（等价于逐行重算）：期望「剩余差异 0 行」
--- 现值列：ca / pa / RoleID / PSID
--- Case B 下这些**故意不等**，不是错误：
+-- 口径说明：Case B 下这些**故意不等**，不是错误
 --   players.base_ca 与 json_extract(game_attrs,'$.CA') 仍停在换版前
 --   json_extract(game_attrs,'$.PA') 同 players.pa 的关系不再成立（$.PA 不写）
 SELECT COUNT(*) FROM players WHERE fc_id IN (…) AND json_valid(game_attrs) = 0;   -- 期望 0
 SELECT COUNT(*) FROM players WHERE fc_id IN (…) AND ca < 1 OR ca > 99;            -- 期望 0
 ```
+
+逐人核对另跑 `node gen-abilities-sql.ts --verify`（独立重算，不看 SQL）：期望「仍有差异的行 0」（退出码 0；有差异退 4）。
 
 ## 11. 工件清单（已产，2026-09-20）
 

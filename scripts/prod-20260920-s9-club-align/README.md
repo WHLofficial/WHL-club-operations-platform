@@ -108,32 +108,37 @@ UPDATE players SET club_id = 66, updated_at = '<生成时点>' WHERE fc_id = 188
 
 ## 9. 执行步骤（许可后）
 
-1. `node gen-club-align-sql.ts --verify` —— 只读复核：期望「缺失 0 / 剩余差异 0 行」（退出码 0；有差异退 4）。
+1. `node gen-club-align-sql.ts --verify` —— 只读复核：期望「缺失 0 / 剩余差异 0 行」（退出码 0；仍有差异退 4；有球员查不到退 5）。
 2. `node gen-club-align-sql.ts` 重跑生成（旧队籍与守卫会按当下生产库重抓；报告写明生成时点）。
 3. `npx wrangler d1 execute whl-club --remote --file 01-precheck.sql` —— 复查命中数、守卫表计数、对齐前名额。
-4. 逐片执行 `sql/club-align-update-01.sql`、`-02.sql`、`-03.sql`，每片后跑一次 `02-verify.sql` 看进度（`null_left` 应递减到 0）。
+4. 逐片执行 `sql/club-align-update-01.sql`、`-02.sql`、`-03.sql`，每片后跑一次 `02-verify.sql` 看进度（`remaining` 应递减到 0）。
 5. 全量后再跑 `node gen-club-align-sql.ts --verify` ⇒ 期望「剩余差异 0 行」。
 6. 回退：逐片执行 `rollback/club-align-rollback-0N.sql`（按新值守卫，重复执行 `changes = 0`）。
 
 ## 10. 验收
 
-```sql
--- 1) 570 人里已无自由身（期望 0）
-SELECT COUNT(*) FROM players WHERE fc_id IN (…) AND club_id IS NULL;
--- 2) 逐队名单规模（对齐前对照见 §4「对齐后名单估算」）
-SELECT club_id, COUNT(*) FROM players WHERE club_id IS NOT NULL GROUP BY club_id ORDER BY club_id;
--- 3) 生成器的 --verify 逐行重算：期望「剩余差异 0 行」
-```
+`02-verify.sql` 第 1 条语句是**真校验**（把全部 570 条「fc_id → 目标队」映射用 `json_each` 内联，逐行比对现值；不用 `VALUES`，因为 SQLite 的 compound SELECT 默认上限 500 项会被 570 行顶掉）：
 
-## 11. 工件清单（已产，2026-09-20）
+| 列 | 期望 | 含义 |
+| --- | --- | --- |
+| `want_rows` | 570 | 映射表行数 |
+| `missing_now` | 0 | 映射里的球员在平台查不到（球员库被清过？） |
+| `aligned_now` | 570 | 现值已等于目标队 |
+| `remaining` | 0 | 现值 ≠ 目标队（含 NULL）——**本批的执行判据** |
+| `null_left` | 0 | 仍是自由身（323 名认领者应全部落队） |
+
+第 2 条语句是逐队 `roster_now`（对齐后各队人数，含本批不动的 304 名遗留球员）。
+另：`node gen-club-align-sql.ts --verify` 逐行重算，期望「剩余差异 0 行」（独立复核，不看 SQL）。
+
+## 11. 工件清单（已产，2026-09-20；2026-09-20 复审后重生成）
 
 | 文件 | 内容 |
 | --- | --- |
 | `gen-club-align-sql.ts` | 读 s901 队壳文件 + 只读抓生产旧队籍 → 产分片/回滚/预检/验收/报告；支持 `--verify`、`--local` |
 | `sql/club-align-update-01..03.sql` | 481 条 `UPDATE`（3 片：200/200/81）—— **gitignore** |
 | `rollback/club-align-rollback-01..03.sql` | 同 481 条反向写回原队籍（含 NULL）—— 提交留档 |
-| `01-precheck.sql` | 执行前只读复查（命中数、守卫表、对齐前名额） |
-| `02-verify.sql` | 执行后只读验收 |
+| `01-precheck.sql` | 执行前只读复查（命中数、6 张守卫表计数、对齐前名额） |
+| `02-verify.sql` | 执行后只读验收（真校验五列 + 逐队人数） |
 | `club-align-report.md` | 汇总、守卫表、逐队明细、status 分布、分片 sha256 |
 
 生成物**不可逐字节复现**：旧队籍取自生成时点的生产库，`updated_at` 也是生成时点；重跑只在差异归零后产出空分片。

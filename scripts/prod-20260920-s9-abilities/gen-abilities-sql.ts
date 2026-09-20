@@ -24,6 +24,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import * as XLSX from 'xlsx';
 import { FC26_GAME_ATTR_COLUMNS } from '../../src/core/fc26.ts';
@@ -34,7 +35,7 @@ const VERIFY = FLAGS.has('--verify');
 const LOCAL = FLAGS.has('--local');
 const ALLOW_SKIPPED = FLAGS.has('--allow-skipped');
 
-const HERE = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 const REF_DIR = join(HERE, '..', '..', 'web', 'assets', 'ref');
 const OUT_DIR = join(HERE, 'sql');
 const RB_DIR = join(HERE, 'rollback');
@@ -157,13 +158,18 @@ function readSource(dir: string, role: ReturnType<typeof loadRef>, ps: ReturnTyp
   const droppedPsTexts = new Map<string, number>();
   const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
   for (const file of files) {
-    const clubId = Number(file.split(' - ')[0]);
+    const fileMatch = /^(\d+)\s*-\s*(.+)\.xlsx$/i.exec(file);
+    if (!fileMatch) {
+      console.warn(`跳过文件名不含俱乐部 id 的文件：${file}`);
+      continue;
+    }
+    const clubId = Number(fileMatch[1]);
     const wb = XLSX.read(readFileSync(join(dir, file)), { type: 'buffer' });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const sheetRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null });
     for (const r of sheetRows) {
       const fcId = num(r['playerid']);
-      if (fcId == null) continue;
+      if (fcId == null || fcId <= 0) continue;
       const attrs: Record<string, number | null> = {};
       for (const key of ATTR_KEYS) attrs[key] = num(r[key]);
       const roles: number[] = [];
@@ -246,13 +252,23 @@ function loadProd(fcIds: number[]): Map<number, ProdRow> {
     );
     for (const r of rows) {
       const fid = Number(r['fc_id']);
+      const raw = r['game_attrs'];
+      let attrs: Record<string, unknown>;
+      try {
+        attrs = JSON.parse(String(raw)) as Record<string, unknown>;
+      } catch {
+        throw new Error(`fc ${fid} 的 game_attrs 不是合法 JSON，无法读当前槽位：${String(raw).slice(0, 80)}`);
+      }
+      if (attrs == null || typeof attrs !== 'object') {
+        throw new Error(`fc ${fid} 的 game_attrs 解析结果不是对象（=${String(raw).slice(0, 40)}），无法读当前槽位`);
+      }
       out.set(fid, {
         id: Number(r['id']),
         name: String(r['name'] ?? ''),
         ca: r['ca'] == null ? null : Number(r['ca']),
         pa: r['pa'] == null ? null : Number(r['pa']),
         baseCa: r['base_ca'] == null ? null : Number(r['base_ca']),
-        attrs: JSON.parse(String(r['game_attrs'])) as Record<string, unknown>,
+        attrs,
       });
     }
   }
@@ -457,7 +473,7 @@ function buildPrecheck(fcIds: number[]): string {
   const list = fcIds.join(',');
   return [
     '-- 只读预检：执行前跑一次（npx wrangler d1 execute whl-club --remote --file 本文件）',
-    `-- 生成时点 ${TS}；期望 src_found = json_ok = ${fcIds.length}，其余三项为 0`,
+    `-- 生成时点 ${TS}；期望 src_found = json_ok = ${fcIds.length}，其余四项为 0`,
     '', 'SELECT',
   ]
     .concat([
@@ -472,11 +488,18 @@ function buildPrecheck(fcIds: number[]): string {
     .join('\n');
 }
 
-function buildVerify(fcIds: number[], stmtRows: number, deltaExpected: number, goldExpected: number): string {
+function buildVerify(
+  fcIds: number[],
+  stmtRows: number,
+  deltaExpected: number,
+  goldRowsExpected: number,
+  goldSlotsExpected: number,
+): string {
   const list = fcIds.join(',');
+  const goldCount = (key: string) => `(CASE WHEN COALESCE(json_extract(game_attrs, '$.${key}'), 0) >= 101 THEN 1 ELSE 0 END)`;
   return [
     '-- 只读验收：执行后跑一次（npx wrangler d1 execute whl-club --remote --file 本文件）',
-    `-- 期望 touched = ${stmtRows}（本批语句数）、delta_gt0 = ${deltaExpected}、gold_slots = ${goldExpected}、null_core = 0`,
+    `-- 期望 touched = ${stmtRows}（本批语句数）、delta_gt0 = ${deltaExpected}、gold_rows = ${goldRowsExpected}、gold_slots = ${goldSlotsExpected}、null_core = 0`,
     '-- 逐行复核另跑：node gen-abilities-sql.ts --verify（重算差异，期望「剩余差异 0 行」）',
     '', 'SELECT',
   ]
@@ -484,7 +507,8 @@ function buildVerify(fcIds: number[], stmtRows: number, deltaExpected: number, g
       `  (SELECT COUNT(*) FROM players WHERE updated_at = '${TS}') AS touched,`,
       `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND ca <> COALESCE(base_ca, ca)) AS delta_gt0,`,
       `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND (ca IS NULL OR pa IS NULL OR base_ca IS NULL)) AS null_core,`,
-      `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND (COALESCE(json_extract(game_attrs, '$.PSID13'), 0) >= 101 OR COALESCE(json_extract(game_attrs, '$.PSID14'), 0) >= 101 OR COALESCE(json_extract(game_attrs, '$.PSID15'), 0) >= 101)) AS gold_slots,`,
+      `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND (${goldCount('PSID13')} + ${goldCount('PSID14')} + ${goldCount('PSID15')}) > 0) AS gold_rows,`,
+      `  (SELECT COALESCE(SUM(${goldCount('PSID13')} + ${goldCount('PSID14')} + ${goldCount('PSID15')}), 0) FROM players WHERE fc_id IN (${list})) AS gold_slots,`,
       `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND ca <> COALESCE(json_extract(game_attrs, '$.CA'), ca)) AS ca_vs_attr;`,
       '',
     ])
@@ -542,9 +566,15 @@ const sqlFiles = writeShards(OUT_DIR, 'abilities-update', changes, false, manife
 const rbFiles = writeShards(RB_DIR, 'abilities-rollback', changes, true, manifest);
 writeFileSync(join(HERE, '01-precheck.sql'), buildPrecheck(fcIds), 'utf8');
 const deltaExpected = changes.filter((c) => c.caChanged).length;
+// 金徽：验收 SQL 数的是「行数」（任一金槽 ≥101）与「槽位数」，两者都与语句里的槽位写次数不同，须分开给
+const goldKeySet = new Set(GOLD_SLOTS);
+const goldRowsExpected = new Set(
+  changes.filter((c) => c.sets.some((s) => goldKeySet.has(s.key))).map((c) => c.fcId),
+).size;
+const goldSlotsExpected = changes.reduce((n, c) => n + c.sets.filter((s) => goldKeySet.has(s.key)).length, 0);
 writeFileSync(
   join(HERE, '02-verify.sql'),
-  buildVerify(fcIds, changes.length, deltaExpected, stats['PSID13']),
+  buildVerify(fcIds, changes.length, deltaExpected, goldRowsExpected, goldSlotsExpected),
   'utf8',
 );
 
@@ -581,7 +611,7 @@ for (const key of ATTR_KEYS) {
 }
 lines.push(`| \`RoleID1-5\` | ${stats['RoleID1']} | 角色槽位（保序追加，不删既有） |`);
 lines.push(`| \`PSID1-12\` | ${stats['PSID1']} | 花式槽位（同上） |`);
-lines.push(`| \`PSID13-15\` | ${stats['PSID13']} | 金徽槽位（\`Playstyles+\` 基础名 + 100） |`);
+lines.push(`| \`PSID13-15\` | ${stats['PSID13']} | 金徽槽位（\`Playstyles+\` 基础名 + 100）；落库后涉及 ${goldRowsExpected} 行（02-verify.sql 的 \`gold_rows\`） |`);
 lines.push('');
 lines.push('## 只比对、不写库的字段（README §8 裁决点）');
 lines.push('');
@@ -589,7 +619,9 @@ lines.push('| 字段 | 差异行数 |');
 lines.push('| --- | --- |');
 for (const key of REPORT_ONLY_ATTRS) lines.push(`| \`${key}\` | ${stats[key]} |`);
 lines.push(`| \`PosID1-4\` | ${stats['PosID']} |`);
-lines.push(`| \`base_ca\`（JSON 里为 NULL 的行） | ${stats['base_ca']} |`);
+lines.push(`| \`players.base_ca\` 为 NULL 的行 | ${stats['base_ca']} |`);
+lines.push(`| \`game_attrs.$.CA\` ≠ \`ca\` 的行（Case B 预期的背离） | ${stats['attr_ca']} |`);
+lines.push(`| \`game_attrs.$.PA\` ≠ \`pa\` 的行 | ${stats['attr_pa']} |`);
 lines.push('');
 lines.push(`明文差异：${skipped.length} 条${ALLOW_SKIPPED ? '（已用 --allow-skipped 跳过）' : '（为 0 才允许生成）'}`);
 for (const line of skipped.slice(0, 30)) lines.push(`- ${line}`);

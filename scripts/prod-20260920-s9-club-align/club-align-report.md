@@ -1,6 +1,6 @@
 # S9 队籍对齐 · 生成报告
 
-- 生成器：scripts/prod-20260920-s9-club-align/gen-club-align-sql.ts；生成时点 2026-09-20T15:39:19.313Z
+- 生成器：scripts/prod-20260920-s9-club-align/gen-club-align-sql.ts；生成时点 2026-09-20T15:57:58.261Z
 - 源：E:/BaiduNetdiskDownload/FC Editor by decoruiz Alpha v21.5_2/player_tables/s901（20 个「<clubs.id> - <队名>.xlsx」，sheet `Squad Info`，键 `playerid`）
 - 口径：只写 players.club_id = 队壳文件名前缀对应俱乐部；含 4 支 CPU 队；不动能力/合同/状态/成长字段
 
@@ -67,11 +67,11 @@
 
 | 文件 | 语句区间 | 条数 | 字节 | sha256 |
 | --- | --- | --- | --- | --- |
-| sql/club-align-update-01.sql | 1-200 | 200 | 30143 | `7bcabe489003e432db5077d5c4d254dc1e9a80ddee75f01487f6b41f384b9a81` |
-| sql/club-align-update-02.sql | 201-400 | 200 | 29844 | `28349adb46dcff7976c7c829a74952b033cfca2f732cdcce1d45629e8d2fe76b` |
-| sql/club-align-update-03.sql | 401-481 | 81 | 12228 | `1b93d350fb522df0e15ea6dab453f7a46e26a043fb570593784c41fbe73a5908` |
-| rollback/club-align-rollback-01.sql | 1-200 | 200 | 30143 | `507a5ede2ddbbc370305eafd3d34ff768eabad452d10d37f95e7c71dff4e693f` |
-| rollback/club-align-rollback-02.sql | 201-400 | 200 | 29844 | `301fe5ae8cd78dfc299b19aacf2df291c296a7b0d970a7a7b7093122c4c4f014` |
-| rollback/club-align-rollback-03.sql | 401-481 | 81 | 12228 | `e44c16d6da38ce94a90bf262fbf56c770d61293b5aeea60ff503531885bf6d65` |
+| sql/club-align-update-01.sql | 1-200 | 200 | 30143 | `0cc7aa53c530ab6738c2defa921ac52e74b708d40117014259021819d2b03369` |
+| sql/club-align-update-02.sql | 201-400 | 200 | 29844 | `ade2c5a544877d58aa4138131368401c6c0b7d40a0fb1dffcfdcc727880a5b91` |
+| sql/club-align-update-03.sql | 401-481 | 81 | 12228 | `9c2946201d075cbfe061d4ace9fc73d90c676820fcb48784dd4027f12f34ec65` |
+| rollback/club-align-rollback-01.sql | 1-200 | 200 | 30143 | `bb4a2fca5b35c6790e9893b8615d83dfbadb701c552fc56445e5201b3770f8b1` |
+| rollback/club-align-rollback-02.sql | 201-400 | 200 | 29844 | `f408ae154dbbb506997e78bd265d0cbba692b69d8de8270136646f33998b49ad` |
+| rollback/club-align-rollback-03.sql | 401-481 | 81 | 12228 | `3101a961329cd79e31605df6dfe54d39100195c7b3706b4d534796010841559f` |
 
 生成物**不可逐字节复现**：旧队籍取自生成时点的生产库，时间戳亦为生成时点。回滚分片已提交，落库分片 gitignore。

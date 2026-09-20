@@ -1,6 +1,6 @@
 # S9 能力导入（FC Editor s901 → 生产 players）生成报告
 
-- 生成时点：2026-09-20T15:51:10.315Z
+- 生成时点：2026-09-20T15:59:02.880Z
 - 源目录：`E:/BaiduNetdiskDownload/FC Editor by decoruiz Alpha v21.5_2/player_tables/s901`
 - 源行：570（唯一 playerid 570）；生产命中 570
 - 落库语句：257 条 → 2 片；回滚语句：2 片（`rollback/`）
@@ -44,7 +44,7 @@
 | `gkreflexes` | 11 | 34 项能力项（两源同名直连） |
 | `RoleID1-5` | 9 | 角色槽位（保序追加，不删既有） |
 | `PSID1-12` | 51 | 花式槽位（同上） |
-| `PSID13-15` | 5 | 金徽槽位（`Playstyles+` 基础名 + 100） |
+| `PSID13-15` | 5 | 金徽槽位（`Playstyles+` 基础名 + 100）；落库后涉及 4 行（02-verify.sql 的 `gold_rows`） |
 
 ## 只比对、不写库的字段（README §8 裁决点）
 
@@ -54,7 +54,9 @@
 | `weight` | 0 |
 | `weakfoot` | 0 |
 | `PosID1-4` | 0 |
-| `base_ca`（JSON 里为 NULL 的行） | 0 |
+| `players.base_ca` 为 NULL 的行 | 0 |
+| `game_attrs.$.CA` ≠ `ca` 的行（Case B 预期的背离） | 0 |
+| `game_attrs.$.PA` ≠ `pa` 的行 | 0 |
 
 明文差异：0 条（为 0 才允许生成）
 槽位溢出（源项数 > 列数，有即中止生成）：0 行
@@ -99,10 +101,10 @@
 
 | 文件 | 语句 | 条数 | 字节 | sha256 |
 | --- | --- | --- | --- | --- |
-| sql/abilities-update-01.sql | 1-200 | 200 | 72167 | `bdc6c9fb117a7dddec3b990b8255caa6e3bc326c282b16ab44c9ce2fa99db647` |
-| sql/abilities-update-02.sql | 201-257 | 57 | 21666 | `8f6b2b951a4abaed1f9848cebeca71f284a0b15e472a591454d151fab194dcb3` |
-| rollback/abilities-rollback-01.sql | 1-200 | 200 | 75753 | `06b503d6571c57a8bac55bc440d0410d25d40fa0e251963ba448b9a509ba9b84` |
-| rollback/abilities-rollback-02.sql | 201-257 | 57 | 22704 | `5d9a57776f25b553f796bedcc24b9d3231ce1b3031adeb5bf65f118fd71c48cc` |
+| sql/abilities-update-01.sql | 1-200 | 200 | 72167 | `c10ed069c720acf3302cfd10293e1c28be355f2e2c9f25e769d6ed0a1311a6cf` |
+| sql/abilities-update-02.sql | 201-257 | 57 | 21666 | `ed3c5367c4b924a5aa788ef8a05bd07959d37850734e27964372b1941010eaa1` |
+| rollback/abilities-rollback-01.sql | 1-200 | 200 | 75753 | `24c1a9e9c67a2db4bc8e967c0be8d6f6347902e66eb103cd6e2d16bb79309891` |
+| rollback/abilities-rollback-02.sql | 201-257 | 57 | 22704 | `3205a1fce2fe9996f741491135b80b6eef0497c660627c48f0d056f4fa068800` |
 
 ## 执行前的本地演练（可选，不碰生产）
 
@@ -125,5 +127,5 @@ node scripts/prod-20260920-s9-abilities/gen-abilities-sql.ts --verify   # 期望
 样例语句（第 1 条）：
 
 ```sql
-UPDATE players SET ca = 76, game_attrs = json_set(game_attrs, '$.sprintspeed', 70, '$.shortpassing', 71, '$.reactions', 75, '$.ballcontrol', 69, '$.interceptions', 80, '$.headingaccuracy', 74, '$.defensiveawareness', 78, '$.standingtackle', 73, '$.slidingtackle', 71, '$.jumping', 81, '$.strength', 81, '$.aggression', 76), updated_at = '2026-09-20T15:51:10.315Z' WHERE fc_id = 277225 AND ca = 73 AND pa = 84;
+UPDATE players SET ca = 76, game_attrs = json_set(game_attrs, '$.sprintspeed', 70, '$.shortpassing', 71, '$.reactions', 75, '$.ballcontrol', 69, '$.interceptions', 80, '$.headingaccuracy', 74, '$.defensiveawareness', 78, '$.standingtackle', 73, '$.slidingtackle', 71, '$.jumping', 81, '$.strength', 81, '$.aggression', 76), updated_at = '2026-09-20T15:59:02.880Z' WHERE fc_id = 277225 AND ca = 73 AND pa = 84;
 ```
