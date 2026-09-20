@@ -19,3 +19,4 @@ scripts/players-import/sql/
 # 可复现凭据是各目录的报告与已提交的 rollback/ 分片。
 scripts/prod-20260920-s9-abilities/sql/
 scripts/prod-20260920-s9-club-align/sql/
+scripts/prod-20260921-s9-free-leftover/sql/

@@ -65,18 +65,26 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 
 **执行纪律**：含外键或大事务的工件必须走 `--command` 或 D1 REST `/query`，`--file` 通道会让 `PRAGMA defer_foreign_keys` 失效，整批回滚。执行前先看该目录 README 的核查清单与期望 changes。
 
-## prod-20260920-*（一次性生产工件；窗基线已执行，三条导入未执行）
+## prod-20260920-*（一次性生产工件；窗基线与队籍对齐已执行，两条导入未执行）
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
 | `prod-20260920-s9-window-baseline/` | S9 窗基线：SQL 直造「季初常规窗（season 9 / window_seq 1）已关」一条，再把 62 场已确认比赛的 `window_seq` 由 0 改 1（另 `match_attendance` 50 行） | **已执行**（2026-09-20 经 `--command` 逐条跑；changes 1 / 62 / 50 与期望一致，验收 9 项全中，见该目录 README 第十节） |
-| `prod-20260920-s9-club-align/` | s901 队壳文件 → 570 人队籍对齐（16 人控队 + 4 CPU）：481 条 `UPDATE players SET club_id`（改队 158 + 认领 323），只写队籍一列；排在合同批之前跑 | **未执行**（工件已产：3 落库片 + 3 回滚片 + 预检/验收/报告/README） |
+| `prod-20260920-s9-club-align/` | s901 队壳文件 → 570 人队籍对齐（16 人控队 + 4 CPU）：481 条 `UPDATE players SET club_id`（改队 158 + 认领 323），只写队籍一列；排在合同批之前跑 | **已执行**（2026-09-21 经 `--file` 逐片跑；481 语句 / rows_written 962 / touched 481；验收：已对齐 570、剩余差异 0、入籍 874、自由身 17427，逐队人数与预估逐队吻合；见该目录 README 第十四节） |
 | `prod-20260920-s9-abilities/` | FC Editor s901 → 20 队（含 CPU）570 人现值能力（Case B：只改 `ca`/`pa` + `json_set` 合并 34 项能力项与 `RoleID1-5`/`PSID1-15`，**不动 `base_ca`/`$.CA`/`$.PA`/队籍**） | **未执行**（工件已产：257 条语句 2 片 + 回滚 + 预检/验收/报告/README） |
 | `prod-20260920-s9-contracts/` | 一线队-S9.csv → 16 人控队合同：现在可导 378 行（claim 298 + create 80）、84 行异队冲突、164 行无目标队；**队籍对齐后 84 行冲突归零，16 队 462 行全部可导**；README 含映射规则、分类预测与 6 个裁决点 | **未执行**（工件待产） |
 
 四个目录都受上面「执行纪律」约束。硬前置：合同批要求 **迁移 0028 已 apply 且增量 25 已部署**（否则 `service_ticks`/`protection_ticks` 写不进去，或落成「无保护期」）；能力批只依赖 `json_set`（已在生产只读验证可用）；队籍批只写 `players.club_id`（该列**无外键**，`--file` 可用）且要求 `contracts`/`listings`/`registrations`/`negotiation_sessions`/`transfers`/`bids` 全为 0（执行前 `01-precheck.sql` 复核）。
 
 建议顺序：**队籍对齐 → 合同 → 能力**（队籍先对，合同批才不带 84 行冲突；能力与另两批无依赖，可任意时点插入）。
+
+## prod-20260921-*（一次性生产工件；未执行）
+
+| 目录 | 内容 | 状态 |
+|---|---|---|
+| `prod-20260921-s9-free-leftover/` | S9 队籍收尾：把「平台在册但不在联盟世界 20 队名单里」的 **304 人**释放为自由身（`club_id → NULL` + `status → 'free'`，用户 2026-09-21 裁定口径）；304 条幂等 UPDATE 2 片 + 回滚 + 预检/验收/报告/README | **未执行**（工件已产；2026-09-21 凌晨遇 D1 免费档日读取配额上限，待 UTC 00:00 重置后跑） |
+
+该批只写 `players.club_id` / `players.status`（两列都**无外键**，`--file` 可用），要求 6 张守卫表全 0；排在合同批之前、与另两批无 fc_id 交集。详见该目录 README（含逐队分布、验收判据与本地演练记录）。
 
 ## revenue-import/
 
