@@ -1,8 +1,10 @@
 # S9 一线队合同导入（数据源 `E:\Downloads\一线队-S9.csv`）
 
 > **状态：未执行。** 等生产写令（`scripts/README.md` 纪律：写生产需明确指令，一次授权不延续）。
-> 前置批：`scripts/prod-20260920-s9-window-baseline/`（季初窗 seq=1 已关、中期窗未开）。
-> 本文档是计划书，不含可执行 SQL；工件（派生 CSV 或离线 SQL）待许可后产。
+> 前置批：`scripts/prod-20260920-s9-window-baseline/`（季初窗 seq=1 已关、中期窗未开）→ **`scripts/prod-20260920-s9-club-align/`（已裁决先跑：按 s901 对齐 570 人队籍）**。
+> 本文档是计划书，不含可执行 SQL；工件（`gen-contracts-sql.ts` + SQL 分片）待许可后产。
+>
+> ⚠️ 队籍对齐批跑完后，本文档 §5 的「84 行异队冲突」全部归零（那些球员的平台队籍就是对齐的目标），16 人控队 **462 行全部可导入**。
 
 ## 1. 要做什么
 
@@ -23,6 +25,7 @@
 1. **迁移 `0028_contract_window_ticks.sql` 必须已 apply**：`contracts.service_ticks` / `contracts.protection_ticks` 是增量 25 新增列，未 apply 时写不进去（`no such column`）。
 2. **增量 25 的 worker 必须已部署**：未部署时线上 `upsertContractStatement`（`src/worker/contracts-import.ts:185-213`）的 INSERT 不含刻度列，先导的合同会在 0028 apply 后落 DDL 默认值 `service_ticks = 0` / `protection_ticks = NULL`（= **无保护期**，语义错）。
 3. **窗基线批先执行**：`windowBaseTicks(db, effective_from)` 数的是「`closed_at <= effective_from` 的已关常规窗」。基线的季初窗 `closed_at = 2026-09-18T01:01:00.000Z`，故 `effective_from >= 2026-09-18` 的合同基数 = 1 tick。
+4. **队籍对齐批先执行**（建议顺序：窗基线 → 队籍对齐 → 合同）：`classify` 规则②会把「球员现属队 ≠ 目标队且非 CPU」判为错误（`src/worker/contracts-import.ts:82-152`）。对齐后这 84 行变成普通 `create`，16 队 462 行零冲突。若不做对齐，只能按 §6-② 跳过 84 行。
 
 ## 4. 映射规则（CSV → 通道 C 五列）
 
@@ -81,6 +84,8 @@
 - claim 的来源：自由身 `club_id IS NULL` **261 人**、从 CPU 队挖走 **37 人**（`241` 巴萨 12 / `10` 曼城 11 / `112172` RB莱比锡 9 / `131681` AC米兰 5）。
 - **没有任何一队能零冲突整队导入**（最少 1 行）。根因：CSV 是联盟自己在游戏里转过会的世界，平台 `club_id` 是 EA 原始队籍 + roster-backfill。样例：CSV 把 Kane 放 AC米兰、Mbappé 放利物浦，平台分别在拜仁、皇马。
 
+**队籍对齐批跑完后的分类（已裁决路径）**：570 行 CSV 的队籍与 s901 完全一致（570/570），对齐后 16 队 462 行的 `club_id` 已等于目标队 ⇒ `classify` 全判 `create`（无冲突、无 claim），**16 队 462 行全可导**（原本 378 = 298 claim + 80 create）。两种路径写出的 `contracts` 行完全相同（`claim` 与 `create` 只是 `players.club_id` 认领分支的差别，合同字段同源同值）。
+
 ## 6. 裁决点
 
 **① 导入范围**
@@ -88,10 +93,9 @@
 - B：含 4 支 CPU 队，461 行。
 - 影响：B 会额外给 CPU 队建合同，且让 CPU 队球员有工资支出（CPU 队不入账逻辑见增量 11 口径），本批指令只说「16 队」。
 
-**② 84 行异队冲突怎么处置**
-- A（推荐）：**跳过**，只导 378 行。这些球员的平台队籍与 CSV 不同，导入会 422 整批拒绝；跳过不动队籍，等联盟自己决定转会口径。
-- B：**先按 CSV 改队籍再导**（承认 CSV 是联盟权威世界，一次性转 84 人），需要额外一条 `UPDATE players SET club_id = ?` 工件，且会与 roster-backfill（按 EA 队籍灌的 444 人）口径冲突——须先想清楚谁权威。
-- C：逐条人工核对后决定。
+**② 84 行异队冲突怎么处置 —— 已裁决：先跑队籍对齐批**
+- **已选（2026-09-20）**：单开 `scripts/prod-20260920-s9-club-align/` 按 s901 对齐 570 人队籍，排在合同批之前；对齐后本批 462 行零冲突全可导（见 §5 末段）。这正是「先队籍对齐、再合同、后能力」顺序的来源。
+- 备选（若不做对齐）：跳过 84 行只导 378 行，或逐条人工核对。
 
 **③ 164 行无目标队（布鲁日 / 国际米兰 / 牛津联 / 在解约）**
 - A（推荐）：本批不导。

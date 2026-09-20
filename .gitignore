@@ -14,3 +14,8 @@ handoff-*.md
 # 离线导入生成物（30MB 级 SQL 分片）：可由 scripts/players-import/generate-sql.ts 逐字节复现，
 # 入库的审计凭据是报告里的 sha256 清单，故分片本体不入库。
 scripts/players-import/sql/
+
+# 2026-09-20 两条生产批的落库分片：旧值/守卫取自生成时点的生产库，不可逐字节复现，
+# 可复现凭据是各目录的报告与已提交的 rollback/ 分片。
+scripts/prod-20260920-s9-abilities/sql/
+scripts/prod-20260920-s9-club-align/sql/

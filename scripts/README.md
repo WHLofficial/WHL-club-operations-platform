@@ -65,15 +65,18 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 
 **执行纪律**：含外键或大事务的工件必须走 `--command` 或 D1 REST `/query`，`--file` 通道会让 `PRAGMA defer_foreign_keys` 失效，整批回滚。执行前先看该目录 README 的核查清单与期望 changes。
 
-## prod-20260920-*（一次性生产工件；窗基线已执行，两条导入未执行）
+## prod-20260920-*（一次性生产工件；窗基线已执行，三条导入未执行）
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
 | `prod-20260920-s9-window-baseline/` | S9 窗基线：SQL 直造「季初常规窗（season 9 / window_seq 1）已关」一条，再把 62 场已确认比赛的 `window_seq` 由 0 改 1（另 `match_attendance` 50 行） | **已执行**（2026-09-20 经 `--command` 逐条跑；changes 1 / 62 / 50 与期望一致，验收 9 项全中，见该目录 README 第十节） |
-| `prod-20260920-s9-contracts/` | 一线队-S9.csv → 16 人控队合同：378 行可导（claim 298 + create 80）、84 行异队冲突、164 行无目标队；README 含映射规则、分类预测与 6 个裁决点 | **未执行**（工件待产） |
-| `prod-20260920-s9-abilities/` | FC Editor s901 → 20 队（含 CPU）570 人能力：只改 `ca`/`base_ca`/`pa` + `json_set` 合并 34 项能力与 `height`/`weight`/`weakfoot`，**不动队籍** | **未执行**（工件待产） |
+| `prod-20260920-s9-club-align/` | s901 队壳文件 → 570 人队籍对齐（16 人控队 + 4 CPU）：481 条 `UPDATE players SET club_id`（改队 158 + 认领 323），只写队籍一列；排在合同批之前跑 | **未执行**（工件已产：3 落库片 + 3 回滚片 + 预检/验收/报告/README） |
+| `prod-20260920-s9-abilities/` | FC Editor s901 → 20 队（含 CPU）570 人现值能力（Case B：只改 `ca`/`pa` + `json_set` 合并 34 项能力项与 `RoleID1-5`/`PSID1-15`，**不动 `base_ca`/`$.CA`/`$.PA`/队籍**） | **未执行**（工件已产：257 条语句 2 片 + 回滚 + 预检/验收/报告/README） |
+| `prod-20260920-s9-contracts/` | 一线队-S9.csv → 16 人控队合同：现在可导 378 行（claim 298 + create 80）、84 行异队冲突、164 行无目标队；**队籍对齐后 84 行冲突归零，16 队 462 行全部可导**；README 含映射规则、分类预测与 6 个裁决点 | **未执行**（工件待产） |
 
-三个目录都受上面「执行纪律」约束。另外两条硬前置：合同批要求 **迁移 0028 已 apply 且增量 25 已部署**（否则 `service_ticks`/`protection_ticks` 写不进去，或落成「无保护期」）；能力批只依赖 `json_set`（已在生产只读验证可用）。
+四个目录都受上面「执行纪律」约束。硬前置：合同批要求 **迁移 0028 已 apply 且增量 25 已部署**（否则 `service_ticks`/`protection_ticks` 写不进去，或落成「无保护期」）；能力批只依赖 `json_set`（已在生产只读验证可用）；队籍批只写 `players.club_id`（该列**无外键**，`--file` 可用）且要求 `contracts`/`listings`/`registrations`/`negotiation_sessions`/`transfers`/`bids` 全为 0（执行前 `01-precheck.sql` 复核）。
+
+建议顺序：**队籍对齐 → 合同 → 能力**（队籍先对，合同批才不带 84 行冲突；能力与另两批无依赖，可任意时点插入）。
 
 ## revenue-import/
 
