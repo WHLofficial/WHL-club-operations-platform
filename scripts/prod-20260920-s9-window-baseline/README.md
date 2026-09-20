@@ -1,6 +1,6 @@
 # S9 窗基线：季初窗已关、中期窗未开（2026-09-20）
 
-> **状态：未执行（等管理组明确下令）**。本目录只交付预检 + SQL 工件，不写任何库。
+> **状态：已于 2026-09-20 执行完毕（生产 whl-club）**。执行记录见第十节；三条 SQL 的实测 changes 与预期完全一致。
 
 ## 一、要做什么（用户裁决 2026-09-20）
 
@@ -117,3 +117,46 @@ npx wrangler d1 execute whl-club --remote --json --command "$(cat scripts/prod-2
 ## 九、后续联动
 
 本批只解决窗基线。之后按用户指令还有两件独立的生产数据导入（各自的探索/计划另出）：16 队名单合同导入、20 队球员能力导入。两者都不依赖本批，但**合同导入的刻度基数**与本批窗行的 `closed_at` 有关（见上）。
+
+## 十、执行记录（2026-09-20，生产 whl-club）
+
+用户指令：「现开工窗基线」。执行通道 `npx wrangler d1 execute whl-club --remote --json --command "<单条语句>"`，01/02 逐条跑以便逐句核对 changes。
+
+**执行前复查**（只读，与第二节快照完全一致）：
+
+```sql
+SELECT (SELECT COUNT(*) FROM season_windows) AS windows_total, ... ;
+-- → windows_total=0, existing_w1=0, rc_total=62, rc0=62, ma_total=50, ma0=50,
+--   contracts=0, season_status='preparing'
+```
+
+**01 建窗**（`changes: 1`，`rows_written: 2`，`last_row_id: 1`）：
+
+```sql
+INSERT INTO season_windows (season, window_seq, status, opened_at, closed_at)
+SELECT 9, 1, 'closed', '2026-09-18T01:00:00.000Z', '2026-09-18T01:01:00.000Z'
+WHERE NOT EXISTS (SELECT 1 FROM season_windows WHERE season = 9 AND window_seq = 1);
+```
+
+**02 归窗**：`UPDATE result_confirmations SET window_seq = 1 WHERE season = 9 AND window_seq = 0;` → `changes: 62`（`rows_read: 186`、`rows_written: 124`）；`UPDATE match_attendance SET window_seq = 1 WHERE season = 9 AND window_seq = 0;` → `changes: 50`（`rows_read: 50`、`rows_written: 100`）。两条均与期望值相同，无多改无少改。
+
+**03 验收**（`03-verify.sql` 单行多标量，实测值 / 期望值）：
+
+| 标量 | 实测 | 期望 |
+|---|---|---|
+| `windows_s9` | 1 | 1 |
+| `w1_closed` | 1 | 1 |
+| `open_windows` | 0 | 0 |
+| `rc_zero` | 0 | 0 |
+| `rc_one` | 62 | 62 |
+| `ma_zero` | 0 | 0 |
+| `ma_one` | 50 | 50 |
+| `season_status` | `preparing` | `preparing` |
+| `contracts` | 0 | 0 |
+
+**执行后实际状态**：S9 存在唯一一条窗行 `season=9, window_seq=1, status='closed'`（`opened_at 2026-09-18T01:00:00.000Z` / `closed_at 2026-09-18T01:01:00.000Z`），无任何在开窗；62 场确认与 50 行上座已归入第 1 窗；`seasons.status` 仍是 `preparing`（20 队仍可提交 S9 名单）；`contracts` 仍 0 行。
+
+**本批不做的事（保持不变）**：不开窗不经应用、不重掷经纪人档位、不写审计、不跑关窗批、不动 `seasons.status`、不补收第五节那 ≈117.5m 维护费。
+
+**未验证项**：只读了库内状态，没有用管理端会话调 `GET /api/seasons/current` 复核展示端回显（需要 admin 会话）；`closedRegularTicks` 的实际取值等合同批 producer 生成时按 `effective_from` 复算。
+

@@ -65,11 +65,11 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 
 **执行纪律**：含外键或大事务的工件必须走 `--command` 或 D1 REST `/query`，`--file` 通道会让 `PRAGMA defer_foreign_keys` 失效，整批回滚。执行前先看该目录 README 的核查清单与期望 changes。
 
-## prod-20260920-*（一次性生产工件，**均未执行**）
+## prod-20260920-*（一次性生产工件；窗基线已执行，两条导入未执行）
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `prod-20260920-s9-window-baseline/` | S9 窗基线：SQL 直造「季初常规窗（season 9 / window_seq 1）已关」一条，再把 62 场已确认比赛的 `window_seq` 由 0 改 1（另 `match_attendance` 50 行） | **未执行**（等令；01/02/03/99 + README 已备） |
+| `prod-20260920-s9-window-baseline/` | S9 窗基线：SQL 直造「季初常规窗（season 9 / window_seq 1）已关」一条，再把 62 场已确认比赛的 `window_seq` 由 0 改 1（另 `match_attendance` 50 行） | **已执行**（2026-09-20 经 `--command` 逐条跑；changes 1 / 62 / 50 与期望一致，验收 9 项全中，见该目录 README 第十节） |
 | `prod-20260920-s9-contracts/` | 一线队-S9.csv → 16 人控队合同：378 行可导（claim 298 + create 80）、84 行异队冲突、164 行无目标队；README 含映射规则、分类预测与 6 个裁决点 | **未执行**（工件待产） |
 | `prod-20260920-s9-abilities/` | FC Editor s901 → 20 队（含 CPU）570 人能力：只改 `ca`/`base_ca`/`pa` + `json_set` 合并 34 项能力与 `height`/`weight`/`weakfoot`，**不动队籍** | **未执行**（工件待产） |
 
