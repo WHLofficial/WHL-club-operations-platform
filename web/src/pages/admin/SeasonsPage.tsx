@@ -120,7 +120,7 @@ function SeasonsSection() {
     setBusy(true);
     try {
       const res = await apiPost<SeasonSettleResult>(`/api/admin/seasons/${seasonNo}/settle-season`, { acknowledged });
-      show(`赛季 ${seasonNo} 已结算：忠诚奖金 ${res.loyalty} 份、growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。`);
+      show(`赛季 ${seasonNo} 已结算：growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。（忠诚奖金自增量 25 起在赛季中期末关窗时发。）`);
       setSettleCheck(null);
       reload();
     } catch (err) {

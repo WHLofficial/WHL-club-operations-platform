@@ -136,7 +136,11 @@ export interface ContractDto {
   source: string | null;
   signedAt: string | null;
   effectiveFrom: string | null;
-  protectedUntil: string | null;
+  // 增量 25 窗刻度：效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
+  serviceSeasons: number;
+  protected: boolean;
+  signedSeason: number | null;
+  signedWindowSeq: number | null;
 }
 
 export interface PlayerDetail {
@@ -168,8 +172,9 @@ export interface PlayerLibraryRow extends PlayerListItem {
   baseCa: number | null;
   fcId: number | null;
   source: string | null;
-  protectedUntil: string | null;
-  effectiveFrom: string | null;
+  // 增量 25 窗刻度：效力时长（赛季）；protected = 是否在保护期内（无合同 = null）
+  serviceSeasons: number | null;
+  protected: boolean;
   attrValue?: number;
   // ps 筛选时带回的 PSID1-15 槽位原值（长度 15、缺槽 null；金徽=基础 ID+100，金槽 13+）
   psIds?: (number | null)[];
@@ -633,6 +638,8 @@ export interface WindowRow {
   season: number;
   windowSeq: number;
   status: string;
+  /** 增量 25：临时窗（效力与工资不推进、不收冠名费；维护费按本窗主场数照收） */
+  isTemporary: boolean;
   openedAt: string | null;
   closedAt: string | null;
 }
@@ -646,6 +653,8 @@ export interface OpenWindowResult {
   ok: boolean;
   season: number;
   windowSeq: number;
+  /** 增量 25：本次开的是临时窗 */
+  isTemporary: boolean;
   rerolled: number;
   /** 开窗时勾选了「同时宣告新成长期」 */
   growthPeriodDeclared: boolean;
@@ -655,6 +664,9 @@ export interface CloseWindowResult {
   ok: boolean;
   season: number;
   windowSeq: number;
+  /** 增量 25：本次关的是临时窗 */
+  isTemporary: boolean;
+  loyalty: { count: number; total: number };
   forceSettled: number;
 }
 
@@ -892,7 +904,6 @@ export interface SettleCheckResult {
 
 export interface SeasonSettleResult {
   ok: boolean;
-  loyalty: number;
   growable: number;
   warnings: string[];
 }

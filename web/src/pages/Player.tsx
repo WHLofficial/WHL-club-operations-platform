@@ -306,12 +306,18 @@ export default function Player() {
                         <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)} m / 半赛季`}</td>
                       </tr>
                       <tr>
-                        <th>效力起点</th>
-                        <td className="mono">{contract.effectiveFrom ?? '—'}</td>
+                        <th>签约赛季</th>
+                        <td className="mono">
+                          {contract.signedSeason === null ? '—' : `S${contract.signedSeason}${contract.signedWindowSeq ? ` 第 ${contract.signedWindowSeq} 窗` : ''}`}
+                        </td>
                       </tr>
                       <tr>
-                        <th>保护期至</th>
-                        <td className="mono">{contract.protectedUntil ?? '—'}</td>
+                        <th>效力时长</th>
+                        <td className="mono">{contract.serviceSeasons.toFixed(1)} 赛季</td>
+                      </tr>
+                      <tr>
+                        <th>保护期</th>
+                        <td className="mono">{contract.protected ? '保护中' : '非保护'}</td>
                       </tr>
                       <tr>
                         <th>合同类型</th>

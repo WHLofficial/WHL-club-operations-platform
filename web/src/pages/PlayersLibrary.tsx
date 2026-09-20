@@ -268,12 +268,12 @@ const COL_DEFS: { key: string; label: string }[] = [
   { key: 'agentTier', label: '经纪人' },
   { key: 'ps', label: 'PlayStyle' },
   { key: 'fcId', label: 'FC ID' },
-  { key: 'wage', label: '周薪' },
+  { key: 'wage', label: '工资（半赛季）' },
   { key: 'releaseFee', label: '解约金' },
   { key: 'contractType', label: '合同类型' },
   { key: 'source', label: '成约方式' },
-  { key: 'protected', label: '保护期至' },
-  { key: 'years', label: '效力年限' },
+  { key: 'protected', label: '保护期' },
+  { key: 'years', label: '效力时长' },
 ];
 
 // 筛选 → 自动加列（双向联动的「筛了就显示」半边；取消筛选自动撤由派生实现）
@@ -302,11 +302,7 @@ function money(x: number | null): string {
   return x === null ? '—' : `${x.toFixed(2)} m`;
 }
 
-function yearsBetween(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '—';
-  return `${((Date.now() - t) / 86400000 / 365.25).toFixed(1)} 年`;
-}
+// 增量 25：效力时长按窗刻度存储（赛季数），不再由日期折算
 
 // PlayStyle 槽位原值 → 显示名（psIds 与槽位对齐、缺槽 null；金徽=基础 ID+100，或金槽 13+）
 function psNames(row: PlayerLibraryRow): string {
@@ -368,9 +364,9 @@ function renderCol(key: string, p: PlayerLibraryRow) {
     case 'source':
       return <td key={key}>{p.source ? (SOURCE_LABEL[p.source] ?? p.source) : '—'}</td>;
     case 'protected':
-      return <td key={key} className="mono">{p.protectedUntil ? p.protectedUntil.slice(0, 10) : '—'}</td>;
+      return <td key={key} className="mono">{p.contractType ? (p.protected ? '保护中' : '非保护') : '—'}</td>;
     case 'years':
-      return <td key={key} className="num mono">{p.effectiveFrom ? yearsBetween(p.effectiveFrom) : '—'}</td>;
+      return <td key={key} className="num mono">{p.serviceSeasons === null ? '—' : `${p.serviceSeasons.toFixed(1)} 赛季`}</td>;
     default:
       return <td key={key}>—</td>;
   }
@@ -712,8 +708,8 @@ export default function PlayersLibrary() {
                     <option value="0">无</option>
                   </select>
                 </label>
-                {num('wageMin', '周薪 ≥', 'm')}
-                {num('wageMax', '周薪 ≤', 'm')}
+                {num('wageMin', '工资 ≥', 'm/半赛季')}
+                {num('wageMax', '工资 ≤', 'm/半赛季')}
                 {num('rcMin', '解约金 ≥', 'm')}
                 {num('rcMax', '解约金 ≤', 'm')}
                 <label className="field check">
@@ -747,8 +743,8 @@ export default function PlayersLibrary() {
                     <option value="out">保护期外</option>
                   </select>
                 </label>
-                {num('yearsMin', '效力年限 ≥', '年')}
-                {num('yearsMax', '效力年限 ≤', '年')}
+                {num('yearsMin', '效力时长 ≥', '赛季')}
+                {num('yearsMax', '效力时长 ≤', '赛季')}
               </div>
             </div>
           </div>

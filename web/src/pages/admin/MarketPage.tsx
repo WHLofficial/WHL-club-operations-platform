@@ -2,7 +2,7 @@
 // （原 Admin.tsx 三 section，增量 15 拆分；暂停出价为增量 15 commit 5 新增）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowsResponse } from '../../lib/api.ts';
+import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
@@ -484,6 +484,16 @@ function ForcedAuctionSection() {
 
 const WINDOW_STATUS_LABEL: Record<string, string> = { open: '进行中', closed: '已关闭' };
 
+// 窗类型（增量 25）：只有「临时」落库；季初 / 中期按同赛季非临时窗的 window_seq 升序派生
+function windowKindLabel(w: WindowRow, all: WindowRow[]): string {
+  if (w.isTemporary) return '临时窗';
+  const regular = all
+    .filter((x) => x.season === w.season && !x.isTemporary)
+    .sort((a, b) => a.windowSeq - b.windowSeq);
+  const idx = regular.findIndex((x) => x.windowSeq === w.windowSeq);
+  return idx === 0 ? '赛季初' : idx === 1 ? '中期' : '常规窗';
+}
+
 function WindowsSection() {
   const { show, toastNode } = useToast();
   const queryClient = useQueryClient();
@@ -491,6 +501,7 @@ function WindowsSection() {
   const [seq, setSeq] = useState('');
   const [openBusy, setOpenBusy] = useState(false);
   const [declarePeriod, setDeclarePeriod] = useState(false);
+  const [temporary, setTemporary] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const { data, error: windowsError } = useQuery({
@@ -512,14 +523,16 @@ function WindowsSection() {
         ...(season.trim() === '' ? {} : { season: Number(season) }),
         ...(seq.trim() === '' ? {} : { windowSeq: Number(seq) }),
         ...(declarePeriod ? { declareGrowthPeriod: true } : {}),
+        ...(temporary ? { temporary: true } : {}),
       });
       show(
-        `窗口已开：第 ${res.season} 赛季 · 窗口 ${res.windowSeq}。全联盟经纪人档位重掷了 ${res.rerolled} 名球员。` +
+        `窗口已开：第 ${res.season} 赛季 · 窗口 ${res.windowSeq}${res.isTemporary ? '（临时窗）' : ''}。全联盟经纪人档位重掷了 ${res.rerolled} 名球员。` +
           (res.growthPeriodDeclared ? ' 已同时宣告新成长期，里程碑重新起算。' : ''),
       );
       setSeason('');
       setSeq('');
       setDeclarePeriod(false);
+      setTemporary(false);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '开窗失败', true);
@@ -533,10 +546,14 @@ function WindowsSection() {
     setBusy(true);
     try {
       const res = await apiPost<CloseWindowResult>('/api/admin/windows/close', force ? { force: true } : {});
+      const tail = res.isTemporary ? '（临时窗）' : '';
       show(
-        res.forceSettled > 0
-          ? `第 ${res.season} 赛季窗口 ${res.windowSeq} 已关闭：${res.forceSettled} 场签约谈判按已定条款强制成约。`
-          : `第 ${res.season} 赛季窗口 ${res.windowSeq} 已关闭，窗尾截止处理完成。`,
+        (res.forceSettled > 0
+          ? `第 ${res.season} 赛季窗口 ${res.windowSeq}${tail} 已关闭：${res.forceSettled} 场签约谈判按已定条款强制成约。`
+          : `第 ${res.season} 赛季窗口 ${res.windowSeq}${tail} 已关闭，窗尾截止处理完成。`) +
+          (res.loyalty && res.loyalty.count > 0
+            ? `中期窗忠诚奖金发放 ${res.loyalty.count} 队 / 合计 ${res.loyalty.total.toFixed(2)} m。`
+            : ''),
       );
       reload();
     } catch (err) {
@@ -554,6 +571,8 @@ function WindowsSection() {
         同一时刻只有一个窗口开着。开窗会给全联盟球员重掷经纪人档位；关窗前先处理完市场截止单，
         并要求没有待审单、没有等待匹配的激活单、没有进行中的签约谈判——除非开了 window_force_settle 参数并用强制关窗，
         未谈完的谈判会按买方已提交的条款强制成约。勾选「同时宣告新成长期」会在开窗同一批里画一条里程碑起算线。
+        一个赛季最多 2 个常规窗（第 1 个是季初、第 2 个是中期）：季初与中期关窗推进效力 0.5 赛季、按合同扣工资与冠名费，中期关窗另发忠诚奖金；
+        临时窗只扣富人税与维护费（维护费按本窗主场数照收），不推进效力、不扣工资、不收冠名费。
       </p>
       <div className="inline-form">
         <div className="field">
@@ -568,6 +587,10 @@ function WindowsSection() {
           {openBusy ? '开窗中…' : '开新窗'}
         </button>
       </div>
+      <label className="field field-check">
+        <input type="checkbox" checked={temporary} onChange={(e) => setTemporary(e.target.checked)} />
+        临时窗（不推进效力、不扣工资、不收冠名费；仅富人税与维护费）
+      </label>
       <label className="field field-check">
         <input type="checkbox" checked={declarePeriod} onChange={(e) => setDeclarePeriod(e.target.checked)} />
         同时宣告新成长期（里程碑从开窗时点重新累计；成长期不绑窗口，之后也可以手动宣告）
@@ -601,6 +624,7 @@ function WindowsSection() {
               <tr>
                 <th className="num">赛季</th>
                 <th className="num">窗口</th>
+                <th>类型</th>
                 <th>状态</th>
                 <th>开窗时间</th>
                 <th>关窗时间</th>
@@ -611,6 +635,7 @@ function WindowsSection() {
                 <tr key={`${w.season}-${w.windowSeq}`}>
                   <td className="num mono">{w.season}</td>
                   <td className="num mono">{w.windowSeq}</td>
+                  <td>{windowKindLabel(w, data.windows)}</td>
                   <td>
                     <span className={`badge ${w.status === 'open' ? 'sky' : 'gray'}`}>{WINDOW_STATUS_LABEL[w.status] ?? w.status}</span>
                   </td>

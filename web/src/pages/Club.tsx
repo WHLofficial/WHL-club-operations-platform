@@ -27,6 +27,12 @@ type Assignment = 'none' | 'first_team' | 'trainee';
 
 const SQUAD_FILTER_LABEL: Record<SquadFilter, string> = { all: '全部', first_team: '一线队', trainee: '训练营' };
 
+// 冠名期限按赛季展示（增量 25：库内按常规窗计数，1 赛季 = 2 个常规窗）
+function seasonsOf(windows: number): string {
+  const s = windows / 2;
+  return Number.isInteger(s) ? String(s) : s.toFixed(1);
+}
+
 // 标红 badge 的短标签（完整原因在 message，悬浮 title 兜底）
 const ISSUE_RULE_LABEL: Record<string, string> = {
   squad_size: '人数',
@@ -353,7 +359,7 @@ function NamingCard() {
         { brand, packageNo },
       );
       refresh();
-      show(`已签下 ${out.contract.brand}（${pkgName}）：每窗 ${out.contract.feePerWindow.toFixed(2)}M × ${out.contract.windowsTotal} 窗，窗末入账。`);
+      show(`已签下 ${out.contract.brand}（${pkgName}）：每窗 ${out.contract.feePerWindow.toFixed(2)}M × ${seasonsOf(out.contract.windowsTotal)} 赛季，常规窗关窗入账。`);
     } catch (err) {
       show(err instanceof Error ? err.message : '签约失败', true);
     } finally {
@@ -398,7 +404,8 @@ function NamingCard() {
           <p>
             现约 <b>{contract.brand}</b>（{contract.pkgName}套餐）：每窗{' '}
             <span className="mono">{contract.feePerWindow.toFixed(2)}</span> M，还剩{' '}
-            <span className="mono">{contract.windowsRemaining}</span>/{contract.windowsTotal} 窗
+            <span className="mono">{seasonsOf(contract.windowsRemaining)}</span>/
+            <span className="mono">{seasonsOf(contract.windowsTotal)}</span> 赛季
             {contract.bonusAmount > 0 && (
               <>
                 {' '}· 达线奖金 <span className="mono">{contract.bonusAmount.toFixed(2)}</span> M（上座 ≥{' '}
@@ -407,14 +414,16 @@ function NamingCard() {
               </>
             )}
           </p>
-          <p className="hint">冠名费每窗关窗时自动入账；提前解约赔剩余窗口费用（当窗费用照收后的 30%）。</p>
+          <p className="hint">
+            冠名费在常规窗关窗时自动入账（1 赛季 = 2 个常规窗，临时窗不计）；提前解约赔剩余期间的 30%（当窗费用照收）。
+          </p>
           <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void terminate()}>
             退冠名
           </button>
         </>
       ) : (
         <>
-          <p className="hint">签下品牌冠名，每窗关窗时按合同金额入账。同一时间只能有一份生效冠名。</p>
+          <p className="hint">签下品牌冠名，常规窗关窗时按合同金额入账。同一时间只能有一份生效冠名。</p>
           {quote.brands!.map((b) => (
             <p key={b.brand}>
               <b>{b.brand}</b>
@@ -426,10 +435,10 @@ function NamingCard() {
                     className="btn btn-ghost btn-sm"
                     type="button"
                     disabled={busy}
-                    title={`${p.windows} 窗 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`}
+                    title={`${seasonsOf(p.windows)} 赛季 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`}
                     onClick={() => void sign(b.brand, p.packageNo, p.pkgName)}
                   >
-                    {p.pkgName} {p.feePerWindow.toFixed(2)}M×{p.windows}窗
+                    {p.pkgName} {p.feePerWindow.toFixed(2)}M×{seasonsOf(p.windows)}赛季
                   </button>
                 </span>
               ))}
@@ -788,7 +797,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       show(
         res.terminationFee > 0
           ? `解约申请已提交：${termPlayer.name}，解约费 ${res.terminationFee.toFixed(2)} m 待审核时回收。他本窗内全联盟禁签。`
-          : `解约申请已提交：${termPlayer.name}，效力满三年免费解约。他本窗内全联盟禁签。`,
+          : `解约申请已提交：${termPlayer.name}，效力满 3 赛季免费解约。他本窗内全联盟禁签。`,
       );
       setTermPlayerId('');
       setTermArmed(false);
@@ -806,7 +815,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       {toastNode}
       <p className="hint">
         两种方式都直接开单送管理组审核：续约改违约金（违约金 ≤ 20 m 时幅度 ±10 m、超过 20 m 时幅度 ±50%；提高付差额的 30%，降低免费，
-        保护期从审核通过重新起算）；解约效力满三年免费，不足三年按违约金 ×（3 − 效力年数）× 10% 回收解约费，被解约球员本窗全联盟禁签。
+        原保护期自审核通过起结束）；解约效力满 3 赛季免费，不足 3 赛季按违约金 ×（3 − 效力赛季数）× 10% 回收解约费，被解约球员本窗全联盟禁签。
       </p>
       {formal.length === 0 ? (
         <p className="muted">队里还没有带正式合同的球员，这两条操作都做不了。</p>
