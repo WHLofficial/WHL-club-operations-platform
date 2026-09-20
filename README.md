@@ -110,7 +110,7 @@ docs/          附属插件与集成说明
 npm run build && wrangler deploy
 ```
 
-生产状态（2026-09-20 查证 `wrangler deployments list --name whl-club`）：最新部署 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`（2026-09-19T13:58:25Z），即增量 16 的用户端重构；此前增量 15 为 Version `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。此后无部署，增量 17–23 的本地提交尚未上线，生产迁移停在 0021。
+生产状态（2026-09-20 查证 `wrangler deployments list --name whl-club`）：最新部署 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`（2026-09-19T13:58:25Z），即增量 16 的用户端重构；此前增量 15 为 Version `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。此后无部署，增量 17–24 的本地提交尚未上线，生产迁移停在 0021。
 
 ## 约定与边界
 
