@@ -263,7 +263,7 @@ describe('窗末主场结算：维护费+死忠演化（增量 12）', () => {
          VALUES (1, 1, 1, 1, '多云', 7333, 1, 0, 0, '2026-09-16T00:00:00Z')`,
       )
       .run();
-    const { statements, summary } = await windowHomeStatements(fx.env, 1, 1);
+    const { statements, summary } = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
     // 维护费：tier0 = 2.0 + 0.8 × 2万 × 1 场 = 3.6
     expect(summary.maintenanceClubs).toBe(1);
     expect(summary.maintenanceTotal).toBeCloseTo(3.6, 2);
@@ -280,7 +280,7 @@ describe('窗末主场结算：维护费+死忠演化（增量 12）', () => {
     const fans = fx.sqlite.prepare('SELECT fans FROM stadiums WHERE club_id = 1').get() as { fans: number };
     expect(fans.fans).toBeCloseTo(2074.4, 1);
     // 幂等：同窗重放维护费不双扣（ledger 闸）
-    const again = await windowHomeStatements(fx.env, 1, 1);
+    const again = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
     await fx.env.DB.batch(again.statements);
     expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'maintenance'").get()).toEqual({ n: 1 });
   });

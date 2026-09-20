@@ -122,10 +122,13 @@ app.get('/windows', async (c) => {
 
 // POST /api/admin/windows/open —— 开新窗（前置：无在开窗口；全球员经纪人档位重掷）
 // declareGrowthPeriod=true 时同批宣告新成长期（勾选框；成长期本身不与窗口绑定）
+// temporary=true 开临时窗（不推进效力/不计忠诚奖金/不扣工资与冠名租金）；同赛季常规窗最多 2 个
 app.post('/windows/open', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
-  const body = (await readJson(c)) as { season?: unknown; windowSeq?: unknown; declareGrowthPeriod?: unknown } | null;
-  return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq, body?.declareGrowthPeriod), 201);
+  const body = (await readJson(c)) as
+    | { season?: unknown; windowSeq?: unknown; declareGrowthPeriod?: unknown; temporary?: unknown }
+    | null;
+  return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq, body?.declareGrowthPeriod, body?.temporary), 201);
 });
 
 // POST /api/admin/windows/close —— 关窗（前置校验；force 需 window_force_settle=true）

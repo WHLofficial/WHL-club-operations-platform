@@ -8,10 +8,11 @@ import type { PayrollSummary } from './window-payroll.ts';
 import { HttpError } from '../lib/http.ts';
 import { createConfigService } from '../core/config.ts';
 import { createAuditStatement } from '../lib/audit.ts';
-import { getOpenWindow } from './seasons.ts';
+import { currentWindow, closedRegularTicks, regularWindowOrdinal } from './contract-ticks.ts';
 import { settleOverdue } from './market-settle.ts';
 import { forceSettleAtExpected } from './negotiations.ts';
 import { windowPayrollStatements } from './window-payroll.ts';
+import { loyaltyMovements } from './season-settle.ts';
 import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 
@@ -29,6 +30,7 @@ export interface WindowRow {
   season: number;
   windowSeq: number;
   status: string;
+  isTemporary: boolean;
   openedAt: string | null;
   closedAt: string | null;
 }
@@ -38,8 +40,10 @@ export async function listWindows(db: D1Database): Promise<{ seasons: { season: 
     .prepare('SELECT season, status FROM seasons ORDER BY season DESC LIMIT 50')
     .all<{ season: number; status: string }>();
   const windows = await db
-    .prepare('SELECT season, window_seq, status, opened_at, closed_at FROM season_windows ORDER BY season DESC, window_seq DESC LIMIT 100')
-    .all<{ season: number; window_seq: number; status: string; opened_at: string | null; closed_at: string | null }>();
+    .prepare(
+      'SELECT season, window_seq, status, is_temporary, opened_at, closed_at FROM season_windows ORDER BY season DESC, window_seq DESC LIMIT 100',
+    )
+    .all<{ season: number; window_seq: number; status: string; is_temporary: number | null; opened_at: string | null; closed_at: string | null }>();
   // DTO 冻结 camelCase（附录 A），在此层统一映射
   return {
     seasons: seasons.results,
@@ -47,6 +51,7 @@ export async function listWindows(db: D1Database): Promise<{ seasons: { season: 
       season: r.season,
       windowSeq: r.window_seq,
       status: r.status,
+      isTemporary: (r.is_temporary ?? 0) === 1,
       openedAt: r.opened_at,
       closedAt: r.closed_at,
     })),
@@ -66,7 +71,8 @@ export async function openWindow(
   seasonInput: unknown,
   windowSeqInput: unknown,
   declareGrowthPeriodInput?: unknown,
-): Promise<{ ok: true; season: number; windowSeq: number; rerolled: number; growthPeriodDeclared: boolean }> {
+  temporaryInput?: unknown,
+): Promise<{ ok: true; season: number; windowSeq: number; rerolled: number; growthPeriodDeclared: boolean; isTemporary: boolean }> {
   const db = env.DB;
   const config = createConfigService(db);
 
@@ -93,6 +99,19 @@ export async function openWindow(
   } else {
     windowSeq = Number(windowSeqInput);
     if (!Number.isInteger(windowSeq) || windowSeq <= 0) throw new HttpError(400, 'windowSeq 应为正整数');
+  }
+
+  // 窗类型（增量 25）：临时窗由管理端复选框指定；同赛季常规窗最多 2 个（季初 + 中期），
+  // 第 3 个非临时窗硬拦（要开就勾临时窗）；季初/中期不落库，按同赛季非临时窗顺序派生
+  const isTemporary = temporaryInput === true;
+  if (!isTemporary) {
+    const regularCount = await db
+      .prepare(`SELECT COUNT(*) AS n FROM season_windows WHERE season = ? AND is_temporary = 0`)
+      .bind(season)
+      .first<{ n: number }>();
+    if ((regularCount?.n ?? 0) >= 2) {
+      throw new HttpError(409, 'S' + season + ' 已经开过 2 个常规窗（季初 + 中期），再开请勾选「临时窗」');
+    }
   }
 
   // 经纪人档位重掷（§6.8）：窗口推进事务内全球员 0.3 概率三档等概率
@@ -145,9 +164,9 @@ export async function openWindow(
     db.prepare(`UPDATE seasons SET status = 'running' WHERE season = ? AND status = 'preparing'`).bind(season),
     db
       .prepare(
-        `INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (?, ?, 'open', ${nowSql()})`,
+        `INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at) VALUES (?, ?, 'open', ?, ${nowSql()})`,
       )
-      .bind(season, windowSeq),
+      .bind(season, windowSeq, isTemporary ? 1 : 0),
   ];
   if (declarePeriod) {
     openBatch.push(
@@ -168,6 +187,7 @@ export async function openWindow(
       after: {
         season,
         windowSeq,
+        isTemporary,
         growthPeriodDeclared: declarePeriod,
         playersScanned: scanned,
         rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0),
@@ -186,6 +206,7 @@ export async function openWindow(
     windowSeq,
     rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0),
     growthPeriodDeclared: declarePeriod,
+    isTemporary,
   };
 }
 
@@ -198,10 +219,20 @@ export async function closeWindow(
   env: Env,
   actor: number,
   forceInput: unknown,
-): Promise<{ ok: true; season: number; windowSeq: number; forceSettled: number; payroll: PayrollSummary; home: HomeWindowSummary }> {
+): Promise<{
+  ok: true;
+  season: number;
+  windowSeq: number;
+  isTemporary: boolean;
+  forceSettled: number;
+  payroll: PayrollSummary;
+  home: HomeWindowSummary;
+  loyalty: { count: number; total: number };
+}> {
   const db = env.DB;
-  const win = await getOpenWindow(db);
+  const win = await currentWindow(db);
   if (!win) throw new HttpError(409, '当前没有开着的窗口');
+  const isTemporary = win.isTemporary === 1;
 
   // 截止判定/激活失效/匹配到期先收一遍，让该进待审的进待审
   await settleOverdue(env, { actor });
@@ -239,10 +270,23 @@ export async function closeWindow(
   }
 
   const audit = createAuditStatement(db);
-  // 窗末扣款（增量 11）：工资+富人税并入关窗批（窗口状态 UPDATE 行数=原子闸；失败整批回滚含关窗）
-  const payroll = await windowPayrollStatements(env, win.season, win.windowSeq);
-  // 窗末主场结算（增量 12）：维护费+死忠演化并入同批（幂等闸/原子语义与工资一致）
-  const home = await windowHomeStatements(env, win.season, win.windowSeq);
+  // 窗末扣款（增量 11；增量 25 按窗类型分支）：常规窗 = 富人税 → 工资 → 维护费 → 冠名收租；
+  // 临时窗 = 富人税 → 维护费（工资不扣、冠名不收不减）。全部并入关窗批（窗口状态 UPDATE 行数=原子闸）
+  const payroll = await windowPayrollStatements(env, win.season, win.windowSeq, { chargeWages: !isTemporary });
+  // 窗末主场结算（增量 12）：维护费+死忠演化+冠名收租并入同批（幂等闸/原子语义与工资一致）
+  const home = await windowHomeStatements(env, win.season, win.windowSeq, { chargeNaming: !isTemporary });
+  // 忠诚奖金（规则 4.3.2；增量 25 改口径）：只在常规窗且同赛季第 2 个（中期）关窗时发，
+  // 效力按关窗后窗刻度算（本窗 +0.5 已计入），逐队汇总，幂等 ref = window/season*100+windowSeq
+  let loyalty: { statements: ReturnType<Env['DB']['prepare']>[]; summary: { count: number; total: number } } = {
+    statements: [],
+    summary: { count: 0, total: 0 },
+  };
+  if (!isTemporary) {
+    const ordinal = await regularWindowOrdinal(db, win.season, win.windowSeq);
+    if (ordinal === 2) {
+      loyalty = await loyaltyMovements(db, actor, win.season, win.windowSeq, (await closedRegularTicks(db)) + 1);
+    }
+  }
   const results = await db.batch([
     db
       .prepare(`UPDATE season_windows SET status = 'closed', closed_at = ${nowSql()} WHERE season = ? AND window_seq = ? AND status = 'open'`)
@@ -252,13 +296,30 @@ export async function closeWindow(
       action: 'window_close',
       targetType: 'season_window',
       targetId: null,
-      after: { season: win.season, windowSeq: win.windowSeq, forceSettled },
+      after: {
+        season: win.season,
+        windowSeq: win.windowSeq,
+        isTemporary,
+        forceSettled,
+        loyaltyCount: loyalty.summary.count,
+        loyaltyTotal: loyalty.summary.total,
+      },
     }),
     ...payroll.statements,
     ...home.statements,
+    ...loyalty.statements,
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '窗口刚被关过了');
   // 窗尾收口（4.4.7）：无人出价下架收费、仍在竞价的强制进待审
   await settleOverdue(env, { actor });
-  return { ok: true, season: win.season, windowSeq: win.windowSeq, forceSettled, payroll: payroll.summary, home: home.summary };
+  return {
+    ok: true,
+    season: win.season,
+    windowSeq: win.windowSeq,
+    isTemporary,
+    forceSettled,
+    payroll: payroll.summary,
+    home: home.summary,
+    loyalty: loyalty.summary,
+  };
 }

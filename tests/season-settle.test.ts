@@ -5,7 +5,7 @@ import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam } fro
 import type { Env } from '../src/worker/env.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { confirmResult } from '../src/worker/results.ts';
-import { settleTournamentStage, settleSeason, checkSeasonSettle, rejudgeGrowable } from '../src/worker/season-settle.ts';
+import { settleTournamentStage, settleSeason, checkSeasonSettle, rejudgeGrowable, loyaltyMovements } from '../src/worker/season-settle.ts';
 import { windowPayrollStatements } from '../src/worker/window-payroll.ts';
 
 function freshEnv() {
@@ -218,32 +218,47 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
 });
 
 describe('窗末扣款（工资+富人税 §9.2）', () => {
-  it('工资全额扣；富人税 = max(资金档, 价值档)；税基取扣完工资后的余额', async () => {
+  it('常规窗：富人税先扣、税基含未扣工资；工资全额扣', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
     fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24)`).run();
     fx.sqlite.prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES (1, 1, 1, 500, 3, '2026-01-01T00:00:00Z', 1)`).run();
-    // 余额 130：扣工资 3 后 127>125 → 税1=25.4；价值 127+500=627≤700 → 税2=0 → 25.4
+    // 余额 130（税基含未扣工资）：130>125 → 税1=130×0.2=26；价值 130+500=630≤700 → 税2=0 → 26
     fx.sqlite.prepare(`UPDATE ledger_accounts SET balance = 130 WHERE club_id = 1`).run();
-    const { statements, summary } = await windowPayrollStatements(fx.env, 1, 1);
-    expect(summary).toMatchObject({ wageClubs: 1, wageTotal: 3, taxClubs: 1, taxTotal: 25.4 });
+    const { statements, summary } = await windowPayrollStatements(fx.env, 1, 1, { chargeWages: true });
+    expect(summary).toMatchObject({ wageClubs: 1, wageTotal: 3, taxClubs: 1, taxTotal: 26 });
     await fx.env.DB.batch(statements);
-    const rows = fx.sqlite.prepare("SELECT kind, amount FROM ledger_entries ORDER BY id").all() as { kind: string; amount: number }[];
+    const rows = fx.sqlite.prepare('SELECT kind, amount FROM ledger_entries ORDER BY id').all() as { kind: string; amount: number }[];
     expect(rows.map((r) => [r.kind, r.amount])).toEqual([
+      ['luxury_tax', -26],
       ['wage', -3],
-      ['luxury_tax', -25.4],
     ]);
     // 幂等：同窗重放不双扣
-    const again = await windowPayrollStatements(fx.env, 1, 1);
+    const again = await windowPayrollStatements(fx.env, 1, 1, { chargeWages: true });
     await fx.env.DB.batch(again.statements);
     const wages = fx.sqlite.prepare("SELECT COUNT(*) AS n FROM ledger_entries WHERE kind='wage'").get() as { n: number };
     expect(wages.n).toBe(1);
   });
+
+  it('临时窗：只扣富人税，不扣工资', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24)`).run();
+    fx.sqlite.prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES (1, 1, 1, 500, 3, '2026-01-01T00:00:00Z', 1)`).run();
+    fx.sqlite.prepare(`UPDATE ledger_accounts SET balance = 130 WHERE club_id = 1`).run();
+    const { statements, summary } = await windowPayrollStatements(fx.env, 1, 1, { chargeWages: false });
+    expect(summary).toMatchObject({ wageClubs: 0, taxClubs: 1, taxTotal: 26 });
+    expect(summary.wageTotal).toBe(0);
+    await fx.env.DB.batch(statements);
+    const kinds = (fx.sqlite.prepare('SELECT kind FROM ledger_entries').all() as { kind: string }[]).map((r) => r.kind);
+    expect(kinds).toEqual(['luxury_tax']);
+  });
 });
 
-describe('赛季结算（忠诚奖金+growable 重判+settled）', () => {
-  it('硬阻断（开窗未关）409；忠诚分档+入俱乐部账；growable 按 age_cap 重判；重复结算 409', async () => {
+describe('赛季结算（growable 重判+settled）与忠诚奖金（增量 25 移入中期窗）', () => {
+  it('硬阻断（开窗未关）409；growable 按 age_cap 重判；重复结算 409', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
@@ -253,18 +268,40 @@ describe('赛季结算（忠诚奖金+growable 重判+settled）', () => {
     expect(check.blockers.length).toBeGreaterThan(0);
     await expect(settleSeason(fx.env, 1, 1, true)).rejects.toThrow('结算前置不满足');
     fx.sqlite.prepare(`UPDATE season_windows SET status='closed' WHERE season=1`).run();
-    // 三份合同：1 年前（5%）、2 年前（10%）、3 年前（20%）
     fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age, ca, pa) VALUES (1, 'p1', '甲', 1, 24, 80, 90), (2, 'p2', '乙', 1, 26, 80, 90), (3, 'p3', '丙', 1, 30, 95, 95)`).run();
     fx.sqlite
-      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES
-        (1, 1, 1, 100, 3, ?, 1), (2, 2, 1, 100, 3, ?, 1), (3, 3, 1, 100, 3, ?, 1)`)
-      .run(new Date(Date.now() - 365.25 * 86400_000).toISOString(), new Date(Date.now() - 2 * 365.25 * 86400_000).toISOString(), new Date(Date.now() - 3 * 365.25 * 86400_000).toISOString());
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, service_ticks, is_active) VALUES
+        (1, 1, 1, 100, 3, 4, 1), (2, 2, 1, 100, 3, 2, 1), (3, 3, 1, 100, 3, 0, 1)`)
+      .run();
     const res = await settleSeason(fx.env, 1, 1, true);
-    expect(res.loyalty).toBe(3);
-    const loyalty = fx.sqlite.prepare('SELECT kind, amount FROM ledger_entries WHERE kind = ? ORDER BY amount').all('loyalty') as { amount: number }[];
-    expect(loyalty.map((r) => r.amount)).toEqual([5, 10, 20]); // 1 年→5%、2 年→10%、3 年→20%
+    expect(res.growable).toBe(2); // p2 掉出（26>cap）、p3 掉出（CA=PA）；p1 保持可成长
+    // 赛季结算不再发忠诚奖金（增量 25：移到中期窗关窗批）
+    expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'loyalty'").get()).toEqual({ n: 0 });
     expect((fx.sqlite.prepare('SELECT status FROM seasons WHERE season=1').get() as { status: string }).status).toBe('settled');
     await expect(settleSeason(fx.env, 1, 1, true)).rejects.toThrow('已经结算过');
+  });
+
+  it('忠诚奖金：按效力赛季分档、逐队合并一笔、ref=窗口；效力 0 不发', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    // ticksAfterClose = 6（S1 两个常规窗刚关完）：效力 1.0/2.0/3.0 赛季 → 5%/10%/20%；同队合并
+    fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24), (2, 'p2', '乙', 1, 25), (3, 'p3', '丙', 1, 30), (4, 'p4', '丁', 2, 24)`).run();
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, service_ticks, is_active) VALUES
+        (1, 1, 1, 100, 3, 4, 1), (2, 2, 1, 100, 3, 2, 1), (3, 3, 1, 100, 3, 0, 1), (4, 4, 2, 100, 3, 6, 1)`)
+      .run();
+    const { statements, summary } = await loyaltyMovements(fx.env.DB, 1, 1, 1, 6);
+    expect(summary).toEqual({ count: 3, total: 35 }); // 5 + 10 + 20；2 队效力 0 无档不发
+    await fx.env.DB.batch(statements);
+    const rows = fx.sqlite
+      .prepare("SELECT club_id, amount, ref_type, ref_id, memo FROM ledger_entries WHERE kind = 'loyalty' ORDER BY club_id")
+      .all() as { club_id: number; amount: number; ref_type: string; ref_id: number; memo: string }[];
+    expect(rows).toHaveLength(1); // 一队三份合同合并成一条流水（幂等闸按 (club_id,kind,ref_type,ref_id)）
+    expect(rows[0]).toMatchObject({ club_id: 1, amount: 35, ref_type: 'window', ref_id: 101 });
+    expect(rows[0]?.memo).toContain('S1 第 1 窗');
+    expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'loyalty_bonus'").get()).toEqual({ n: 1 });
   });
 
   it('软警示（未确认完赛果）需 acknowledged；age_cap 缺失跳过 growable 重判', async () => {

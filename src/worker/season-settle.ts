@@ -1,12 +1,14 @@
 // 赛季结算域（增量 11，PRD 4.8/TECH_DESIGN §11/§9.1-9.2）：
 // 1. 赛事完结结算：入场奖金（联赛）、资格赛止步保底、冠军杯小组赛剩余池按胜场占比——一次性项，stage_settled_at 原子闸幂等。
-// 2. 赛季结算按钮（手动 + 前置校验）：忠诚奖金（现合同效力起点分档）→ growable 重判（规则 4.1.1 本季 age_cap）→ 状态 settled。
+// 2. 赛季结算按钮（手动 + 前置校验）：growable 重判（规则 4.1.1 本季 age_cap）→ 状态 settled。
+//    忠诚奖金自增量 25 起改在赛季中期窗（同赛季第 2 个常规窗）关窗时发（规则 4.3.2 + 窗刻度），见 loyaltyMovements。
 //    死忠演化归增量 12（主场收入域），此处留位不实现；富人税/工资在窗末（closeWindow）收，季末不重复（假设 28）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
+import { serviceSeasons } from '../core/bypass-rules.ts';
 import { clubIdByTourTeam, loadPrizeTable } from './prizes.ts';
 
 function nowSql(): string {
@@ -231,11 +233,74 @@ export async function checkSeasonSettle(env: Env, season: number): Promise<Seaso
 }
 
 /**
- * 赛季结算（手动按钮）：忠诚奖金 → growable 重判 → seasons.status='settled'。
- * 忠诚奖金按现合同效力起点（effective_from→结算时点）分档（loyalty_tiers [[年, RC 比],…] 取满足的最高档），
- * 入俱乐部账本，逐合同审计；0.5 年=365.25/2 天。
+ * 忠诚奖金（规则 4.3.2）：赛季中期窗（同赛季第 2 个常规窗）关窗时发一次，按窗刻度算效力
+ * （1 个常规窗 = 0.5 赛季），取满足的最高档（loyalty_tiers [[赛季, RC 比],…]），逐队汇总入账本。
+ * 幂等键 = window/season*100+windowSeq：同一窗重放不重复发；一队多条合同同窗合并成一条流水。
+ * 返回待拼进关窗批的语句与汇总（供关窗响应回显）。
  */
-export async function settleSeason(env: Env, actor: number, seasonInput: unknown, acknowledged: boolean): Promise<{ ok: true; loyalty: number; growable: number; warnings: string[] }> {
+export async function loyaltyMovements(
+  db: D1Database,
+  actor: number | null,
+  season: number,
+  windowSeq: number,
+  ticksAfterClose: number,
+): Promise<{ statements: D1PreparedStatement[]; summary: { count: number; total: number } }> {
+  const config = createConfigService(db);
+  const tiersRaw = await config.get('loyalty_tiers');
+  const tiers = (tiersRaw ? JSON.parse(tiersRaw) : [[0.5, 0.05], [1.5, 0.1], [2.5, 0.2]]) as [number, number][];
+  tiers.sort((a, b) => a[0] - b[0]); // 配置可能乱序，按起效赛季升序后「取满足的最高档」才成立
+
+  const contracts = await db
+    .prepare(
+      `SELECT id, club_id, release_fee, service_ticks FROM contracts
+       WHERE is_active = 1 AND club_id IS NOT NULL AND release_fee IS NOT NULL`,
+    )
+    .all<{ id: number; club_id: number; release_fee: number; service_ticks: number | null }>();
+
+  const byClub = new Map<number, { amount: number; count: number }>();
+  for (const ct of contracts.results) {
+    const seasons = serviceSeasons(ct.service_ticks ?? 0, ticksAfterClose);
+    let rate = 0;
+    for (const [minSeasons, r] of tiers) if (seasons >= minSeasons) rate = r; // 取满足的最高档
+    if (rate <= 0 || ct.release_fee <= 0) continue;
+    const amount = Math.round(ct.release_fee * rate * 100) / 100;
+    const cur = byClub.get(ct.club_id) ?? { amount: 0, count: 0 };
+    byClub.set(ct.club_id, { amount: Math.round((cur.amount + amount) * 100) / 100, count: cur.count + 1 });
+  }
+
+  const audit = createAuditStatement(db);
+  const statements: D1PreparedStatement[] = [];
+  let total = 0;
+  let count = 0;
+  for (const [clubId, agg] of byClub) {
+    total = Math.round((total + agg.amount) * 100) / 100;
+    count += agg.count;
+    statements.push(
+      ...ledgerMovement(db, {
+        clubId,
+        delta: agg.amount,
+        kind: 'loyalty',
+        refType: 'window',
+        refId: season * 100 + windowSeq,
+        memo: `忠诚奖金（S${season} 第 ${windowSeq} 窗，${agg.count} 人现行合同）`,
+      }),
+      audit({
+        actor,
+        action: 'loyalty_bonus',
+        targetType: 'club',
+        targetId: clubId,
+        after: { season, windowSeq, contracts: agg.count, amount: agg.amount },
+      }),
+    );
+  }
+  return { statements, summary: { count, total } };
+}
+
+/**
+ * 赛季结算（手动按钮）：growable 重判 → seasons.status='settled'。
+ * 忠诚奖金自增量 25 起在赛季中期窗关窗时发（见 loyaltyMovements），此处只做成长重判与状态收口。
+ */
+export async function settleSeason(env: Env, actor: number, seasonInput: unknown, acknowledged: boolean): Promise<{ ok: true; growable: number; warnings: string[] }> {
   const season = Number(seasonInput);
   if (!Number.isInteger(season)) throw new HttpError(400, '赛季号不对');
   const db = env.DB;
@@ -249,39 +314,8 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
     throw new HttpError(409, `待确认提示：${check.warnings.join('；')}。确认继续请带 acknowledged=true`);
   }
 
-  const config = createConfigService(db);
-  const tiersRaw = await config.get('loyalty_tiers');
-  const tiers = (tiersRaw ? JSON.parse(tiersRaw) : [[0.5, 0.05], [1.5, 0.1], [2.5, 0.2]]) as [number, number][];
-  tiers.sort((a, b) => a[0] - b[0]); // 配置可能乱序，按起效年限升序后「取满足的最高档」才成立
-
-  const contracts = await db
-    .prepare(
-      `SELECT ct.id, ct.club_id, ct.release_fee, ct.effective_from, ct.contract_type
-       FROM contracts ct WHERE ct.is_active = 1 AND ct.club_id IS NOT NULL AND ct.release_fee IS NOT NULL AND ct.effective_from IS NOT NULL`,
-    )
-    .all<{ id: number; club_id: number; release_fee: number; effective_from: string; contract_type: string }>();
-  const startMs = Date.now(); // 忠诚起算=本次结算时点（settled_at 在本批才写入，读取必为 NULL）
-  const loyaltyMovements: { clubId: number; amount: number; memo: string; contractId: number }[] = [];
-  for (const ct of contracts.results) {
-    const start = Date.parse(ct.effective_from);
-    if (!Number.isFinite(start)) continue;
-    const years = (startMs - start) / (365.25 * 24 * 3600_000);
-    let rate = 0;
-    for (const [minYears, r] of tiers) if (years >= minYears) rate = r; // 取满足的最高档
-    if (rate <= 0 || ct.release_fee <= 0) continue;
-    loyaltyMovements.push({ clubId: ct.club_id, amount: Math.round(ct.release_fee * rate * 100) / 100, memo: `忠诚奖金（效力 ${years.toFixed(1)} 年 × ${Math.round(rate * 100)}% RC）`, contractId: ct.id });
-  }
-
   const audit = createAuditStatement(db);
-  const statements = [
-    ...loyaltyMovements.flatMap((m) =>
-      ledgerMovement(db, { clubId: m.clubId, delta: m.amount, kind: 'loyalty', refType: 'contract', refId: m.contractId, memo: m.memo }),
-    ),
-    ...loyaltyMovements.map((m) =>
-      audit({ actor, action: 'loyalty_bonus', targetType: 'contract', targetId: m.contractId, after: { clubId: m.clubId, amount: m.amount, season } }),
-    ),
-    audit({ actor, action: 'season_settle', targetType: 'season', targetId: null, after: { season, loyaltyCount: loyaltyMovements.length } }),
-  ];
+  const statements = [audit({ actor, action: 'season_settle', targetType: 'season', targetId: null, after: { season } })];
 
   // 死忠演化步骤占位：归增量 12（主场收入域）实现后插入本批；
   // growable 重判并入主批（规则 4.1.1：按本季 age_cap 全量重算，只改有变化的行）
@@ -295,5 +329,6 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
     db.prepare(`UPDATE seasons SET status = 'settled', settled_at = ${nowSql()} WHERE season = ? AND status != 'settled'`).bind(season),
   ]);
   const growable = growableStmt ? (batchResults[statements.length]?.meta.changes ?? 0) : 0;
-  return { ok: true, loyalty: loyaltyMovements.length, growable, warnings: check.warnings };
+  return { ok: true, growable, warnings: check.warnings };
 }
+

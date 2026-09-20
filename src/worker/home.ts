@@ -331,15 +331,17 @@ export interface HomeWindowSummary {
 }
 
 /**
- * 窗末主场结算（增量 12，并入关窗批）：维护费 + 死忠演化。
- * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；
- * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训本期 0 级）。
- * 幂等：ledger 走 'maintenance'/'window' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
+ * 窗末主场结算（增量 12，并入关窗批）：维护费 + 死忠演化 + 冠名收租。
+ * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；临时窗照收。
+ * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训本期 0 级）——每种窗都演化。
+ * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，增量 25 裁决）。
+ * 幂等：ledger 走 'maintenance'/'naming_fee'/'window' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
  */
 export async function windowHomeStatements(
   env: Env,
   season: number,
   windowSeq: number,
+  opts: { chargeNaming: boolean },
 ): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; summary: HomeWindowSummary }> {
   const model = await loadAttendanceModel(env.DB);
   const tierTable = await loadTierTable(env.DB);
@@ -389,13 +391,16 @@ export async function windowHomeStatements(
       );
     }
 
-    // 窗末冠名收租（增量 20）：费用 + 剩余窗口递减/到期 + 对赌奖金，幂等靠账本闸（club 维度）
-    const naming = await getActiveNaming(env.DB, s.club_id);
-    if (naming) {
-      const fansGrowth = s.fans > 0 ? (nextFans - s.fans) / s.fans : 0;
-      statements.push(...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth));
-      summary.namingClubs++;
-      summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
+    // 窗末冠名收租（增量 20）：费用 + 剩余窗口递减/到期 + 对赌奖金，幂等靠账本闸（club 维度）；
+    // 临时窗不收租也不递减（增量 25 裁决）
+    if (opts.chargeNaming) {
+      const naming = await getActiveNaming(env.DB, s.club_id);
+      if (naming) {
+        const fansGrowth = s.fans > 0 ? (nextFans - s.fans) / s.fans : 0;
+        statements.push(...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth));
+        summary.namingClubs++;
+        summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
+      }
     }
   }
   return { statements, summary };
