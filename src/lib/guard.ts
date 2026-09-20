@@ -35,6 +35,32 @@ export function assertPublicRate(c: { req: { header(name: string): string | unde
 type CacheEntry = { value: unknown; loadedAt: number; refreshing?: Promise<void> };
 const cacheStore = new Map<string, CacheEntry>();
 
+// 缓存条数上限：键来自请求查询串（外部可控），不设上限会长住 isolate 内存——
+// 公开 GET 每换一个查询串就多一条，爬虫/构造请求能一路堆到 isolate OOM。
+// 超限按插入序淘汰最旧的（正在刷新的跳过，别把在飞的刷新结果丢了）；缓存只是加速层，
+// 淘汰不影响正确性。单条响应实测 4KB 量级，64 条上限下最坏也就几百 KB。
+const MAX_CACHE_ENTRIES = 64;
+
+function rememberCache(key: string, value: unknown): void {
+  if (!cacheStore.has(key) && cacheStore.size >= MAX_CACHE_ENTRIES) {
+    let need = cacheStore.size - MAX_CACHE_ENTRIES + 1;
+    for (const [k, entry] of cacheStore) {
+      if (need <= 0) break;
+      if (entry.refreshing) continue;
+      cacheStore.delete(k);
+      need -= 1;
+    }
+  }
+  cacheStore.set(key, { value, loadedAt: Date.now() });
+}
+
+// 查询串归一成缓存键：参数按名排序（顺序不同=同一份数据），键仍受外部输入影响，故另有条数上限兜底
+export function canonicalQuery(url: string): string {
+  const entries = [...new URL(url).searchParams.entries()];
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return entries.map(([k, v]) => `${k}=${v}`).join('&');
+}
+
 // TTL + SWR：新鲜直接回；过期回旧值并后台刷新（单飞，防击穿）；ttlMs<=0 旁路（测试环境默认旁路）。
 // ctx 传 Hono executionCtx（Workers 下后台刷新活过请求结束）；拿不到就就地刷新不 waitUntil。
 export async function cachedJson<T>(
@@ -47,14 +73,14 @@ export async function cachedJson<T>(
   const entry = cacheStore.get(key);
   if (!entry) {
     const value = await loader();
-    cacheStore.set(key, { value, loadedAt: Date.now() });
+    rememberCache(key, value);
     return value;
   }
   if (Date.now() - entry.loadedAt < ttlMs) return entry.value as T;
   if (!entry.refreshing) {
     const refresh = loader()
       .then((v) => {
-        cacheStore.set(key, { value: v, loadedAt: Date.now() });
+        rememberCache(key, v);
       })
       .catch(() => {
         // 刷新失败保留旧值，下个请求再试

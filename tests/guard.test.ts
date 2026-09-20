@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations } from './d1.ts';
-import { assertPublicRate, cachedJson, memoryRateLimit, resetGuards } from '../src/lib/guard.ts';
+import { assertPublicRate, cachedJson, canonicalQuery, memoryRateLimit, resetGuards } from '../src/lib/guard.ts';
 
 function freshEnv(): Env {
   const sqlite = new DatabaseSync(':memory:');
@@ -95,6 +95,27 @@ describe('cachedJson TTL + SWR', () => {
     expect(await cachedJson('z', 0, loader)).toEqual({ n: 2 });
     expect(await cachedJson('z', -1, loader)).toEqual({ n: 3 });
   });
+
+  it('条数上限：键外部可控，超限淘汰最旧，不无限长住内存', async () => {
+    resetGuards();
+    let calls = 0;
+    const loader = async () => ({ n: ++calls });
+    // 灌 70 个不同键（上限 64）：最旧的 7 条应被淘汰
+    for (let i = 0; i < 70; i++) await cachedJson(`k${i}`, 60_000, loader);
+    const afterFill = calls;
+    // 最新键仍命中缓存（loader 不再跑）
+    await cachedJson('k69', 60_000, loader);
+    expect(calls).toBe(afterFill);
+    // 最旧键已被淘汰，需重新装载
+    await cachedJson('k0', 60_000, loader);
+    expect(calls).toBe(afterFill + 1);
+  });
+
+  it('canonicalQuery：参数顺序不同归一到同一键', () => {
+    expect(canonicalQuery('http://x/api/players?b=2&a=1')).toBe('a=1&b=2');
+    expect(canonicalQuery('http://x/api/players?a=1&b=2')).toBe(canonicalQuery('http://x/api/players?b=2&a=1'));
+    expect(canonicalQuery('http://x/api/players')).toBe('');
+  });
 });
 
 describe('公开 GET 挂点（限流 + 缓存）', () => {
@@ -120,6 +141,12 @@ describe('公开 GET 挂点（限流 + 缓存）', () => {
     // 不同 query 各自缓存（筛掉 normal 后 total=0，与上面不同）
     const other = await (await get('/api/players?limit=1&status=listed', env)).json<{ total: number }>();
     expect(other.total).not.toBe((second as { total: number }).total);
+    // 参数顺序不同 → 归一后同一键：改库后换序请求仍回缓存旧值（键没归一就会读到新值）
+    await env.DB.prepare(
+      `INSERT INTO players (uid, name, position, ca, pa, status) VALUES ('fc9', '丙', 'ST', 55, 65, 'normal')`,
+    ).run();
+    const reordered = await (await get('/api/players?status=listed&limit=1', env)).json();
+    expect(reordered).toEqual(other);
   });
 
   it('未配 PUBLIC_CACHE_TTL_MS：旁路，数据变更立即可见', async () => {

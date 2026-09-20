@@ -2,7 +2,7 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
-import { assertPublicRate, cachedJson, waitUntilOf } from '../../lib/guard.ts';
+import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, POSITION_BY_ID } from '../../core/fc26.ts';
 import { playerAbilityLevel } from '../home.ts';
@@ -100,12 +100,13 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
 // 排序：sort=id|ca|pa|age|market_value|influence + order（id 固定 ASC 旧整数游标）
-// 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）
+// 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
+// 缓存键用归一后的查询串（canonicalQuery），条数上限由 guard 侧兜底
 app.get('/players', async (c) => {
   assertPublicRate(c, 'players');
   const ttlMs = Number(c.env.PUBLIC_CACHE_TTL_MS) || 0;
   const data = await cachedJson(
-    `players:${new URL(c.req.url).search}`,
+    `players:${canonicalQuery(c.req.url)}`,
     ttlMs,
     () => listPlayers(c),
     waitUntilOf(c),
