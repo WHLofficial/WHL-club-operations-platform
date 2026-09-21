@@ -2,8 +2,9 @@
 // 面板只负责渲染与回调，筛选状态、URL 同步、列清单都在页面（pages/PlayersLibrary.tsx）手里。
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClubDirectoryRow } from '../lib/api.ts';
+import MultiSelect, { type MultiSelectItem } from './MultiSelect.tsx';
 import { ATTR_GROUPS, ATTR_LABELS, playstyleById, SOURCE_LABEL } from '../lib/ref.ts';
-import { COL_DEFS, POSITION_GROUPS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
+import { COL_DEFS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
 
 export interface FilterPanelProps {
   filters: Filters;
@@ -24,6 +25,10 @@ export interface FilterPanelProps {
 // PlayStyle 下拉数据：ref 表按类型分组（id 0 是占位）
 const PLAYSTYLES = [...playstyleById.values()].filter((r) => r.id > 0);
 const PS_TYPES = [...new Set(PLAYSTYLES.map((r) => r.type ?? '其他'))];
+
+// 位置与显示列的多选下拉条目（增量 27 步骤 3）；位置只有 12 个码位、不分段
+const POSITION_ITEMS: MultiSelectItem[] = POSITIONS.map((p) => ({ value: p, label: p }));
+const COL_ITEMS: MultiSelectItem[] = COL_DEFS.map((d) => ({ value: d.key, label: d.label }));
 
 export default function FilterPanel({
   filters,
@@ -105,30 +110,10 @@ export default function FilterPanel({
         </button>
       </div>
 
-      <div className="lib-chip-row" role="group" aria-label="位置多选">
-        <span className="muted lib-chip-label">位置</span>
-        {POSITION_GROUPS.map(([label, group]) => (
-          <button
-            key={label}
-            type="button"
-            className={`lib-chip${group.every((p) => filters.positions.includes(p)) ? ' on' : ''}`}
-            onClick={() =>
-              setFilters((f) => ({
-                ...f,
-                positions: group.every((p) => f.positions.includes(p))
-                  ? f.positions.filter((p) => !group.includes(p))
-                  : [...new Set([...f.positions, ...group])],
-              }))
-            }
-          >
-            {label}
-          </button>
-        ))}
-        {POSITIONS.map((p) => (
-          <button key={p} type="button" className={`lib-chip${filters.positions.includes(p) ? ' on' : ''}`} onClick={() => togglePosition(p)}>
-            {p}
-          </button>
-        ))}
+      {/* 位置（增量 27 步骤 3）：改多选下拉，只有 12 个码位；原先的四个组 chip
+          （门将/后卫/中场/前锋）下线，一行铺 5 行的位置清单收成一行控件。 */}
+      <div className="lib-chip-row">
+        <MultiSelect label="位置" items={POSITION_ITEMS} selected={filters.positions} onToggle={togglePosition} onClear={() => set('positions', [])} />
       </div>
 
       <details className="lib-adv" open={false}>
@@ -281,21 +266,23 @@ export default function FilterPanel({
         </div>
       </details>
 
-      <details className="lib-cols">
-        <summary>显示列（{activeCols.length} 列可变）</summary>
-        <div className="lib-chip-row">
-          {COL_DEFS.map((d) => (
-            <button key={d.key} type="button" className={`lib-chip${activeCols.includes(d.key) ? ' on' : ''}`} onClick={() => toggleCol(d.key)}>
-              {d.label}
-            </button>
-          ))}
-          {manualCols !== null && (
-            <button type="button" className="lib-chip" onClick={resetCols}>
-              恢复自动
-            </button>
-          )}
-        </div>
-      </details>
+      {/* 显示列（增量 27 步骤 3）：与位置同一个多选下拉 —— 18 个 chip 铺开吃掉左栏一大片，
+          语义上本来就是「勾选哪些列」。手动改过列才在面板底部出现「恢复自动」。 */}
+      <div className="lib-chip-row">
+        <MultiSelect
+          label="显示列"
+          items={COL_ITEMS}
+          selected={activeCols}
+          onToggle={toggleCol}
+          footer={
+            manualCols !== null ? (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={resetCols}>
+                恢复自动
+              </button>
+            ) : null
+          }
+        />
+      </div>
     </div>
   );
 }

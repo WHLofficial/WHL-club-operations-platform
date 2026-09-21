@@ -52,14 +52,10 @@ export const STATUS_BADGE: Record<string, string> = {
   retired: 'gray',
 };
 
-// 位置全集按 PositionID 升序（同 src/core/fc26.ts POSITION_BY_ID）；组快捷只做整组选中
+// 位置全集按 PositionID 升序（同 src/core/fc26.ts POSITION_BY_ID）。
+// 增量 27 前这里还有一份 POSITION_GROUPS（门将/后卫/中场/前锋整组选中的快捷 chip），
+// 位置改多选下拉后只剩 12 个码位，那份分组没有引用者了。
 export const POSITIONS = ['GK', 'RB', 'CB', 'LB', 'CDM', 'RM', 'CM', 'LM', 'CAM', 'RW', 'ST', 'LW'];
-export const POSITION_GROUPS: [string, string[]][] = [
-  ['门将', ['GK']],
-  ['后卫', ['RB', 'CB', 'LB']],
-  ['中场', ['CDM', 'RM', 'CM', 'LM', 'CAM']],
-  ['前锋', ['RW', 'ST', 'LW']],
-];
 
 export const PAGE_SIZE = 20;
 

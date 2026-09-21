@@ -114,6 +114,12 @@ function open(url = '/players'): ReturnType<typeof userEvent.setup> {
   return userEvent.setup();
 }
 
+// 位置改多选下拉后（增量 27 步骤 3），选一个位置要先开面板、再勾码位
+async function pickPosition(user: ReturnType<typeof userEvent.setup>, side: HTMLElement, pos: string): Promise<void> {
+  await user.click(within(side).getByRole('button', { name: /^位置/ }));
+  await user.click(within(side).getByRole('checkbox', { name: pos }));
+}
+
 // 页面在 effect 里把筛选写回地址栏（replaceState），所以断言直接看 window.location.search
 function search(): string {
   return window.location.search;
@@ -222,7 +228,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
     expect(screen.getByText('未设筛选条件')).toBeTruthy();
 
     const side = document.getElementById('library-side') as HTMLElement;
-    await user.click(within(side).getByRole('button', { name: 'ST' }));
+    await pickPosition(user, side, 'ST');
     await waitFor(() => expect(search()).toBe('?position=ST&limit=20'));
     expect(screen.getByRole('button', { name: '移除筛选：位置：ST' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^筛选（1）$/ })).toBeTruthy();
@@ -250,12 +256,12 @@ describe('左栏开合与摘要条（宽屏）', () => {
     expect(box).toHaveProperty('value', '');
   });
 
-  it('显示列面板：手动去掉一列后出现「恢复自动」，恢复后回到自动清单', async () => {
+  it('显示列下拉：手动去掉一列后出现「恢复自动」，恢复后回到自动清单', async () => {
     const user = open();
     await screen.findByRole('link', { name: 'Šeško' });
     const side = document.getElementById('library-side') as HTMLElement;
-    await user.click(within(side).getByText(/^显示列（/));
-    await user.click(within(side).getByRole('button', { name: '徽章' }));
+    await user.click(within(side).getByRole('button', { name: /^显示列/ }));
+    await user.click(within(side).getByRole('checkbox', { name: '徽章' }));
     await waitFor(() => expect(headerButtons().some((b) => b.textContent?.startsWith('徽章'))).toBe(false));
     expect(search()).toContain('cols=');
 
@@ -310,7 +316,7 @@ describe('窄屏筛选抽屉', () => {
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
 
     const side = document.getElementById('library-side') as HTMLElement;
-    await user.click(within(side).getByRole('button', { name: 'ST' }));
+    await pickPosition(user, side, 'ST');
     await waitFor(() => expect(search()).toBe('?position=ST&limit=20'));
     expect(document.querySelector('.library-shell.drawer-open')).not.toBeNull();
     expect(screen.getByRole('button', { name: '移除筛选：位置：ST' })).toBeTruthy();
@@ -361,7 +367,7 @@ describe('窄屏筛选抽屉', () => {
     const toggle = screen.getByRole('button', { name: /^筛选/ });
     // 宽屏左栏常驻，先在里头落个焦点（focusin 委托靠这个记录「焦点在左栏」）
     const aside = document.getElementById('library-side') as HTMLElement;
-    const inside = within(aside).getByRole('button', { name: 'ST' });
+    const inside = within(aside).getByRole('button', { name: /^位置/ });
     inside.focus();
     expect(document.activeElement).toBe(inside);
 

@@ -34,7 +34,7 @@ type SortKey = SortKeyName;
 // 游标里文本值的长度上限：库里最长姓名 22 字符（生产实测），拦掉塞长串游标的玩法
 const TEXT_CURSOR_MAX = 120;
 
-// 位置权重：门将 1 → 后卫 2 → 中场 3 → 前锋 4（与前端 POSITION_GROUPS 的分组同序）
+// 位置权重：门将 1 → 后卫 2 → 中场 3 → 前锋 4（与前端位置列表的分组同序；前端只用来排下拉）
 const POSITION_SORT_CASE = `CASE players.position
   WHEN 'GK' THEN 1
   WHEN 'RB' THEN 2 WHEN 'CB' THEN 2 WHEN 'LB' THEN 2

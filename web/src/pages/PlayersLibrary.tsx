@@ -350,7 +350,7 @@ export default function PlayersLibrary() {
       if (!side) return;
       // 只看真正能 Tab 到的：offsetParent 为 null（display:none 之类）的不算，
       // 收起的 <details> 里的控件也不算 —— 注意 Chrome 对收起 details 的内容**不返回 null**
-      // （实测 .lib-cols 收起时里面的 chip 仍有 offsetParent），所以必须显式排除。
+      // （实测「更多筛选」收起时里面的输入框仍有 offsetParent），所以必须显式排除。
       // 但 details 自己的 <summary> 要留下：收起时它照样能 Tab 到，正是它决定了「最后一个」。
       // 漏掉这一步时清单里「最后一个」是收起面板里的 chip，从真正的最后一个往后 Tab 没人拦，
       // 焦点落到 body（375 实测第 25 次 Tab 逃出）

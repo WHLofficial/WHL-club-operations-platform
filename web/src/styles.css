@@ -1631,16 +1631,105 @@ tbody tr:hover td {
   color: var(--cream);
 }
 
-.lib-adv,
-.lib-cols {
+/* 多选下拉（增量 27 步骤 3）：位置 / 显示列 / PlayStyle 三处共用 */
+.multiselect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.multiselect.on {
+  border-color: var(--terracotta);
+  color: var(--terracotta-deep);
+}
+
+.multiselect-text {
+  white-space: nowrap;
+}
+
+.multiselect-caret {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+/* popover 的 UA 样式是 inset:0 + margin:auto（居中显示），这里全部归零：
+   位置由组件按触发器的 getBoundingClientRect 现算，跟着滚动与缩放走。 */
+.multiselect-panel {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 8px;
+  width: min(320px, 86vw);
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 8px 20px rgba(43, 29, 18, 0.16);
+  color: var(--text);
+  font-size: 13px;
+  /* 不支持 Popover API 的浏览器拿不到 top layer，靠它压住表格 */
+  z-index: 40;
+}
+
+.multiselect-panel:focus {
+  outline: none;
+}
+
+.multiselect-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.multiselect-item:hover {
+  background: var(--panel);
+}
+
+.multiselect-section {
+  padding: 6px 8px 2px;
+  font-weight: 700;
+  color: var(--terracotta-deep);
+}
+
+.multiselect-group {
+  padding: 4px 8px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.multiselect-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border);
+}
+
+.lib-adv {
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-bottom: 12px;
   background: var(--panel);
 }
 
-.lib-adv summary,
-.lib-cols summary {
+.lib-adv summary {
   padding: 9px 14px;
   cursor: pointer;
   font-size: 14px;
