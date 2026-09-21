@@ -315,6 +315,36 @@
 
 ---
 
+## 增量 26 · 球员库筛选搬进左栏——筛选/显示列左置 + 表头点排序（29 键）+ 姓名去变音搜索 + 窄屏抽屉（2026-09-21 本地完成，push/部署等令）
+
+**范围**：球员库（`/players`）的筛选控件原先横铺在表格上方、随表格一起滚走；搜索只做裸 `LIKE`（「sesko」搜不到「Šeško」）；排序只有 6 个键、走下拉框。本轮把筛选与显示列搬进球员列左侧的固定栏（窄屏改抽屉）、搜索走去变音折叠、排序键扩到表头每一列且可点表头排序。**不写任何生产数据、不 push、不部署。**
+
+**裁决**（2026-09-21 用户一问一题逐条拍板，共 19 项；要点如下）：
+① 桌面左栏**可收起**、sticky、定宽 260px，收起态记 `localStorage`；② 窄屏用 **900px 断点的左侧滑出抽屉**（遮罩 / × / Esc 三条关闭路），否决「塌回表格上方」（那正是要省掉的）；③ 排序列 = **表头全部列可点**，两态循环（升 → 降 → 升），`sort`/`order` 继续留 URL；④ 搜索**只做拉丁去变音**，不做中文拼音、不做词序分词、不做容错拼写；⑤ 搜索框**聚焦才预载轻量名册**并本地过滤推荐（不逐键请求），点推荐直接跳 `/players/:id`；⑥ 工具条只留搜索框 + 视图段、**整行 sticky 吸顶**，「筛选（N）」按钮兼作抽屉入口；⑦ 生效条件摘要条常驻、每条 chip 可单独撤销；⑧ 仍是一张 `.card` + 竖向分隔线；⑨ 断点 900px，不动 `.admin-shell` 的 760px；⑩ 验收 = 前端组件测试基建 + e2e 三视口截图。
+明确不做：`name_folded` 物化列（只在折叠表撞 D1 深度上限时才换）、引 UI 库、改 `PromptDialog`、改限流数值。
+
+**交付**（18 个 commit = 16 个功能与测试 + 2 个收口文档；10 步 + 3 轮过审修正）：
+- `78a8713` 新增 `src/core/name-fold.ts`（`FOLD_SPEC` 码位映射表 + `foldName` / `sqlFold` / `unmappedNameChars` / `describeChars` / `foldNameQuery` / `likeContains` / `foldNamePattern`）+ `tests/name-fold.test.ts` + `scripts/bench-name-fold.mjs`；`d02df47` 过审修正（表项重复检测、链深与 GLOB 守卫的实测说明）。
+- `afe3f78` `src/worker/routes/players.ts` 姓名过滤由裸 `LIKE` 改 `sqlFold('players.name') LIKE ? ESCAPE '\'` + `foldNamePattern(q)`，新增 `GET /api/players/roster`（单条 SQL 拼「姓名|俱乐部ID|球员ID」多行文本，`ROSTER_CACHE_TTL_MS = 300_000`），`src/core/import.ts` 加 `warnUnfoldable` 只警告不挡行；`5dc0c12` 过审修正（结构性消除两侧漂移、名册行格式、缓存下限、空白查询词）。
+- `03e47a8` 排序键 6 → **29 个** `SORT_KEY_NAMES`，`TEXT_SORT_KEYS = {name, contract_type, source}` 走文本游标 `decodeTextCursor`，`buildSortExprs({caExpr,paExpr,inflExpr})`，27 键 × 升降 × 3 页矩阵测试。
+- `a7b92c0` 抽出 `web/src/components/FilterPanel.tsx`（12 props）与 `web/src/lib/players-library.ts`（Filters / EMPTY_FILTERS / RANGE_URL_KEYS / filtersFromUrl / filtersToQuery / COL_DEFS / autoColsFor），`PlayersLibrary.tsx` 853 → 340 行（该提交内；收口时 598 行，后续左栏/抽屉/排序各步增回），行为不变。
+- `510fcba` 左栏栅格 `260px minmax(0,1fr)` + sticky + 收起态记 `players-library:side` + 摘要条；`2f954c8` 过审修正（`--topbar-h` 避让顶栏、姓名 chip 同步清搜索缓冲、窄屏兜底、属性三项联动）。
+- `80134ae` 表头点排序 + 后端 `attr:<属性键>` 排序键（本步抓到阻断性真 bug，见验收）；`db6b2a3` 过审修正（默认态不再谎报排序列、排序列消失即回落 `sortColumnVisible`、折叠闸补形状变体、属性键单一来源、`parseColsParam`）。
+- `776a777` 新增 `web/src/components/PlayerSearchBox.tsx` + `web/src/lib/roster.ts`（`parseRoster` / `suggestPlayers` / `ROSTER_SUGGEST_LIMIT = 8`）。
+- `23d37b5` 窄屏抽屉（新增 `web/src/lib/use-media.ts` 的 `useMediaQuery`，走 matchMedia 而非 resize）+ `web/src/components/TopBar.tsx` 用 ResizeObserver 实测回写 `--topbar-h`；`2aa3692` 过审修正（抽屉内不再误吸顶、抬头吸顶、背景 inert、锁滚不横跳、焦点归位）。
+- `23f6493` 前端组件测试基建（devDeps jsdom ^29.1.1 / @testing-library/react ^16.3.3 / @testing-library/dom ^10.4.2 / @testing-library/user-event ^14.6.7，package.json 里带 caret；`vitest.config.ts` 加 react 插件、include 扩到 `web/**/*.test.ts(x)`）+ `scripts/e2e/smoke.mjs` 三视口截图场景；`abbe1cb` 排序键表提到 `src/core/players-sort.ts`（零 import）前后端共用同一份 + `tests/core-zero-import.test.ts` 守卫；`30c77fa` 过审修正（Tab 焦点循环补全、摘要条 inert、e2e 断言补强）。
+- `a31997f` 与紧随的收口文档提交：`src/core/name-fold.ts` 头注释的悬空引用改指本节；ROADMAP 加本节、CHANGELOG 加 [未发布] 增量 26 节、README 测试数与 e2e 场景数、AGENTS 当前状态、UI_DESIGN 球员库行、TECH_DESIGN 附录 A 冻结说明。
+
+**验收**：`npm test` **36 文件 / 481 用例全绿**（原基线 31 / 397），`npm run typecheck`（三份 tsconfig）与 `npx vite build` 过（index gzip 141.75 kB）；`E2E_PERSIST_TO=.wrangler/rehearsal node scripts/e2e/smoke.mjs` **9/9 场景通过**（原 8）；真浏览器（本机 Chrome，375 / 900 / 1280 三视口）24 项断言全过——抽屉内 106 个 chip 无一被遮挡、表格+工具条+摘要条三块背景区 inert、`role=dialog` + `aria-modal=true`、连按 60 次 Tab 始终留在抽屉内（含顶栏）、已被内层消化的 Esc 不关抽屉、开关前后 `clientWidth` 375→375 无横跳、375↔1280 两个方向的焦点都交还入口按钮、console 错误 0（**真机手测**，探针在 gitignored 的 `scratch/verify-drawer-fix.mjs`，记录见记忆目录 `increment26-execution-state.md`；仓库未落脚本，`scripts/e2e/smoke.mjs` 的窄屏场景只覆盖其中 6 条）。
+**两个只有真引擎 / 真浏览器能抓到的真 bug**：① `sqlFold` 的 REPLACE 链撞 **D1 表达式树深度上限 100**（`D1_ERROR: Expression tree is too large (maximum depth 100)`，`?name=` 与 `sort=name` 直接 500；node:sqlite 上限 1000 所以本地单测**测不出**）⇒ 折叠表由 253 项裁到**生产实测 87 项**（18301 行姓名 / 3048 行含非 ASCII 逐位核对），新增 `SQL_FOLD_DEPTH_LIMIT = 100` / `SQL_FOLD_ENTRY_BUDGET = 92` 与 `scripts/check-name-fold-depth.mjs`（改表必跑）；② 焦点循环的清单不能用 `offsetParent !== null` 过滤收起 `<details>` 的内容（Chrome 对收起 details 内元素**不返回 null**），否则真实最后一个可聚焦元素是显示列的 `<summary>`、往后 Tab 无人拦（375 实测第 25 次 Tab 逃到 body）⇒ 改为显式排除 `details:not([open])` 后代、保留其 `:scope > summary`。
+另有两条口径修正：`foldName` 只做「查表替换 + ASCII 小写」（删掉 NFD 与整段 toLowerCase，否则库里出现西里尔/希腊大写会「JS 折了 SQL 没折」静默 0 命中）；`unmappedNameChars` 加形状变体判据 `FOLD_SHAPED = /[\p{Z}\p{Pd}\p{Pi}\p{Pf}\p{Cf}]/u`（弯引号/花式空格/不可见字符最容易从网页粘进来，原先直接跳过、永不报警）。`sqlFold` 形态 = `CASE WHEN expr GLOB '*[^ -~]*' THEN lower(<REPLACE 链>) ELSE lower(expr) END`，守卫把 18301 行的每查询成本从 483ms 降到 93ms、语义不变。
+
+**遗留**：窄屏抽屉锁滚仍靠 `body { overflow: hidden }`（iOS 上不彻底，已加 `overscroll-behavior: contain` 兜底，真机未验）；`aria-modal="true"` 而顶栏渲染在 `<Routes>` 之外、不在 inert 区内（已用 Tab 焦点循环把顶栏挡在循环外，未提成共享 inert hook）；e2e 的焦点断言只在窄屏场景覆盖；增量 25 的 worker 仍未部署（见上一节）。
+
+**文档**：本节 + `CHANGELOG.md` [未发布] 增量 26 节 + `README.md` 测试数与 e2e 场景数 + `AGENTS.md` 当前状态 + `src/core/name-fold.ts` 头注释（原「见 ROADMAP 的增量 26 记录」是悬空引用，由本节补上）+ 记忆目录 `increment26-plan.md` / `increment26-execution-state.md`。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |

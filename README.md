@@ -83,9 +83,9 @@ e2e 冒烟默认打 `http://127.0.0.1:8791`，用本机 Chrome（`C:/Program Fil
 
 ## 测试
 
-- 单元/集成：`npm test`，当前 31 个文件 / 397 个用例。`tests/d1.ts` 用本地 SQLite 执行真实迁移，`tests/tour-team-seed.ts` 提供赛事库夹具。
+- 单元/集成：`npm test`，当前 36 个文件 / 481 个用例。`tests/d1.ts` 用本地 SQLite 执行真实迁移，`tests/tour-team-seed.ts` 提供赛事库夹具。
 - 类型：`npm run typecheck`（三份 tsconfig）。
-- e2e 冒烟：`npm run test:e2e`，8 个场景（首页、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、无未捕获前端错误）。
+- e2e 冒烟：`npm run test:e2e`，9 个场景（首页、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、球员库三视口截图、无未捕获前端错误）。
 
 ## 目录结构
 
