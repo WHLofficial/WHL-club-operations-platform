@@ -11,8 +11,10 @@
 // 完整区块覆盖（Latin-1 + Latin Extended-A），不是只照抄清单，
 // 免得下个赛季新球员带来一个没进清单的字母就漏搜。
 //
-// 两侧唯一的能力差异（有意保留，不会造成漏搜）：JS 侧先做 NFD 分解去组合记号，SQL 侧没有这个能力。
-// 多出来的 NFD 只作用于**查询词**；库里凡是表外字符都会被硬闸拦下，所以不存在「JS 折了、SQL 没折」的组合。
+// 两侧不会漂移是**按构造**成立的：foldName 只做「查表替换 + ASCII 小写」两件事，
+// sqlFold 生成的 REPLACE 链 + SQLite 的 lower() 恰好就是这两件，逐一对应。
+// 硬闸因此不是正确性的兜底，而是**覆盖度**的提醒：库里的某个字有可折叠的对照形、却还没进表
+//（比如 ẞ、Ш），按对照形搜它就搜不到——该补表了。
 //
 // 表项格式：4 位十六进制码位 = 替换文本（空格分隔；替换文本为空表示删除该字符）。
 // 用码位而非字面字符写表：软连字符、组合记号这类字符直接写进源码是审阅灾难。
@@ -67,13 +69,24 @@ export const NAME_FOLD: ReadonlyArray<readonly [string, string]> = [...FOLD_MAP.
   ([a], [b]) => a.codePointAt(0)! - b.codePointAt(0)!,
 );
 
-const COMBINING = /\p{M}+/gu;
-
-// 折查询词与折库内姓名共用同一张表；NFD 只在这里用（见文件头说明）
+// 折查询词与折库内姓名共用同一张表。
+// 这里刻意**只做两件 SQL 也做得到的事**：查表替换 + ASCII 小写（表里同时收了大小写两形，Š 与 š）。
+// 不做 NFD 分解、也不做整段 Unicode 的 toLowerCase —— SQLite 的 lower() 只折 ASCII、更没有 normalize，
+// 多做一步就多一类「JS 折了、SQL 没折」的静默漏搜。这不是理论风险：曾实测库内 'Шевченко'，
+// 查询词原样照打，旧裸 LIKE 命中、走整段 toLowerCase 的实现 0 命中。只做这两件事之后，
+// 两侧可折叠的字符集合按构造相同，任意字符串都不可能漂移（tests/name-fold.test.ts 有对应用例）。
 export function foldName(raw: string): string {
   let out = '';
-  for (const ch of raw.normalize('NFD').replace(COMBINING, '')) out += FOLD_MAP.get(ch) ?? ch;
-  return out.toLowerCase();
+  for (const ch of raw) {
+    const mapped = FOLD_MAP.get(ch);
+    if (mapped !== undefined) {
+      out += mapped;
+      continue;
+    }
+    const cp = ch.codePointAt(0)!;
+    out += cp >= 0x41 && cp <= 0x5a ? String.fromCharCode(cp + 32) : ch;
+  }
+  return out;
 }
 
 function sqlLit(s: string): string {
@@ -100,10 +113,11 @@ export function sqlFold(expr: string): string {
   return `CASE WHEN ${expr} GLOB ${sqlLit(NON_ASCII_GLOB)} THEN lower(${out}) ELSE lower(${expr}) END`;
 }
 
-// 硬闸：列出既不在表内、又跟折叠有关的非 ASCII 字符（有输出即说明该补表，而不是静默漏搜）。
+// 硬闸：列出既不在表内、又「有可折叠对照形」的非 ASCII 字符（有输出即说明该补表）。
 // 按原始字符查表（不先做 NFD）：库里要过 SQL 那一侧，而 SQL 只有这张表。
-// 只报「折叠相关」的字符（拉丁字母 / 组合记号 / 本身能被 NFD 分解的），不报汉字、假名、全角标点这些：
-// 折叠对它们本来就是原地不动，SQL 与 JS 两侧都不动 ⇒ 不是漏搜，报了只会让警告变成狼来了。
+// 报两类：① 拉丁脚本的字（ẞ 这类带变音的对照形，表按区块覆盖了 Latin-1 + Ext-A，其余落空）；
+// ② 大小写会变的字（西里尔 Ш、希腊 Π——按小写形搜它搜不到）。
+// 不报汉字、假名、全角标点这些：它们没有对照形，两侧都原地不动，报了只会让警告变成狼来了。
 const FOLD_RELEVANT = /[\p{Script=Latin}\p{Mn}]/u;
 
 export function unmappedNameChars(names: Iterable<string>): string[] {
@@ -112,7 +126,7 @@ export function unmappedNameChars(names: Iterable<string>): string[] {
     for (const ch of name) {
       if (ch.codePointAt(0)! < 0x80) continue;
       if (FOLD_MAP.has(ch)) continue;
-      if (!FOLD_RELEVANT.test(ch) && ch.normalize('NFD') === ch) continue;
+      if (!FOLD_RELEVANT.test(ch) && ch.toLowerCase() === ch) continue;
       bad.add(ch);
     }
   }
@@ -123,8 +137,19 @@ export function describeChars(chars: readonly string[]): string {
   return chars.map((ch) => `U+${ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}「${ch}」`).join(' ');
 }
 
-// LIKE 模式串：折查询词 + 转义 LIKE 元字符。路由与单测共用这一处，免得两边各写一遍转义。
-// 折叠在前（表里没有 \ % _ 这些 ASCII 元字符），所以转义只需处理折叠后的串。
+// 查询词归一：去首尾空白 + 折叠。路由要先拿它判空——ZWSP、软连字符这类不可见字符 trim() 不走，
+// 折完才是空串；不先折就判空会拼出 `%%`（匹配全库），把「搜了个不可见字符」悄悄降级成「列出所有球员」。
+export function foldNameQuery(query: string): string {
+  return foldName(query.trim());
+}
+
+// 归一后的词 → LIKE 包含模式（转义元字符）。折叠在前（表里没有 \ % _ 这些 ASCII 元字符），
+// 所以转义只需处理折叠后的串。
+export function likeContains(folded: string): string {
+  return `%${folded.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+}
+
+// 两步合一：单测与「拿到原始查询词」的调用方用这个。
 export function foldNamePattern(query: string): string {
-  return `%${foldName(query.trim()).replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  return likeContains(foldNameQuery(query));
 }

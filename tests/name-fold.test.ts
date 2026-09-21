@@ -105,6 +105,10 @@ describe('sqlFold：SQL 侧与 JS 侧同源', () => {
     '阿尔法',
     'Édouard',
     'Böhm',
+    // 非拉丁：折叠对它们必须是「两侧都不动」，否则就是静默漏搜（见下「不漂移」用例）
+    'Шевченко',
+    'Παπαδόπουλος',
+    '가나다',
   ];
 
   const QUERIES = [
@@ -129,6 +133,10 @@ describe('sqlFold：SQL 侧与 JS 侧同源', () => {
     'douard',
     'bohm',
     'zzz',
+    'Шевченко',
+    'шевченко',
+    'Παπαδόπουλος',
+    '가나',
   ];
 
   function makeTable(): DatabaseSync {
@@ -200,8 +208,24 @@ describe('硬闸与表完整性', () => {
     expect(unmappedNameChars(['ẞtefan'])).toEqual(['ẞ']); // U+1E9E 不在覆盖内
     expect(unmappedNameChars(['中', 'Ø', 'A'])).toEqual([]); // 汉字折叠前后一样，报了是狼来了
     expect(unmappedNameChars(['İbra'])).toEqual([]); // 表内字符不算
-    expect(unmappedNameChars(['Ḑevi'])).toEqual(['Ḑ']); // 能被 NFD 分解 ⇒ 折叠相关
+    expect(unmappedNameChars(['Ḑevi'])).toEqual(['Ḑ']); // 拉丁脚本 ⇒ 第一条判据就命中
     expect(unmappedNameChars(['plain ascii'])).toEqual([]);
+  });
+
+  // 不漂移是这一步的关键：foldName 只做「查表替换 + ASCII 小写」，SQL 侧恰好也是这两件。
+  // 曾经 JS 侧多做一层整段 Unicode 的 toLowerCase，于是库里的 'Шевченко' 原样照打反而 0 命中
+  //（JS 折成 'шевченко'、SQLite 只折 ASCII 不折），是比「搜不到变音」更糟的回归。
+  it('非拉丁不受影响：两侧都不动，原样照打仍命中', () => {
+    expect(foldName('Шевченко')).toBe('Шевченко');
+    expect(foldName('Παπαδόπουλος')).toBe('Παπαδόπουλος');
+    expect(foldName('가나다')).toBe('가나다'); // 韩文音节 NFD 会散成字母，但 JS 侧不再做 NFD
+    expect(foldName('阿尔法')).toBe('阿尔法');
+  });
+
+  it('非拉丁的大写字母要报（按另一种大小写搜它搜不到）', () => {
+    expect(unmappedNameChars(['Шевченко', 'Мбаппе', '中'])).toEqual(['М', 'Ш']);
+    expect(unmappedNameChars(['Παπαδόπουλος'])).toEqual(['Π']); // 小写 ο 无对照形，不报
+    expect(unmappedNameChars(['가나다'])).toEqual([]); // 无对照形、两侧都原地不动
   });
 
   it('describeChars 输出码位便于补表', () => {

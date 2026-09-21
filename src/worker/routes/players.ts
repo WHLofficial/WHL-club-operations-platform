@@ -6,7 +6,7 @@ import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../..
 import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, POSITION_BY_ID } from '../../core/fc26.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
-import { foldNamePattern, sqlFold } from '../../core/name-fold.ts';
+import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { playerAbilityLevel } from '../home.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -294,13 +294,15 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   }
   const name = c.req.query('name');
   if (name !== undefined) {
-    const q = name.trim();
-    if (q === '') throw new HttpError(400, 'name 不能为空');
+    // 先折再判空：ZWSP、软连字符这类不可见字符 trim() 不走，折完才是空串；
+    // 按原串判空会拼出 `%%`（匹配全库），搜索框语义被悄悄降级。
+    const folded = foldNameQuery(name);
+    if (folded === '') throw new HttpError(400, 'name 不能为空');
     // 去变音搜索（增量 26）：库内是 FC 拉丁名（Šeško/Ødegaard/Çalhanoğlu…），查询词与列值
     // 都经 name-fold 折叠后比对，否则 sa 搜不到 Š 这类字母。折叠规则两侧同源（见 core/name-fold.ts）：
-    // 参数侧走 JS foldName（多做一层 NFD 分解），列侧走同表生成的 REPLACE 链内联表达式。
+    // 参数侧走 JS foldName，列侧走同表生成的 REPLACE 链内联表达式，两侧都只做「查表 + ASCII 小写」。
     filters.push(`${sqlFold('players.name')} LIKE ? ESCAPE '\\'`);
-    filterArgs.push(foldNamePattern(q));
+    filterArgs.push(likeContains(folded));
   }
   const growable = c.req.query('growable');
   if (growable !== undefined) {
@@ -680,35 +682,35 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   return { players, total: countRow?.n ?? 0, nextCursor };
 }
 
-// 名册这条走全表扫描，缓存下限给足 5 分钟（公开 TTL 只有 20s，撑不住 18301 行的重复读）
+// 名册这条走全表扫描，缓存下限给足 5 分钟（公开 TTL 只有 20s，撑不住 18301 行的重复读）。
+// 注意这里是「取大」而不是「跟随公开 TTL」：未配 PUBLIC_CACHE_TTL_MS（或配 0）的环境下
+// 公开 TTL 是 0，跟着走会把缓存整个旁路掉，公开端点退化成一请求一全表扫。
 const ROSTER_CACHE_TTL_MS = 300_000;
 
 // GET /api/players/roster —— 轻量名册（增量 26，球员库搜索框的本地推荐用）
 // 载荷 = 单行文本，每行「姓名|俱乐部ID|球员ID」（俱乐部为空则省略该段），换行分隔：
-// 姓名写在最前、两个数字在后，前端从行尾反向切分 ⇒ 姓名里出现分隔符也不会串字段。
+// 姓名写在最前、两个数字在后，前端从行尾反向切分 ⇒ 姓名里出现「|」也不会串字段。
+// 姓名里的换行/回车在 SQL 里换成空格，否则一个球员会被拆成两行、行数与 count 对不上。
+// 顺序按 players.id（前端本地过滤自己排，但载荷必须确定，否则测试与 diff 都不稳）。
 // 目的是让前端一次性拿到全量名册、之后在本地折叠过滤（打字零请求，也就绕开限流与缓存位）。
 // 走全表扫描（18301 行 / 313KB raw / 150KB gzip，2026-09-21 实测），D1 免费档 5M 行/天 ⇒
-// 每次加载约 0.4%，故进程内缓存给 5 分钟下限（公开 TTL 只有 20s 撑不住；前端另有会话级缓存）。
+// 每次加载约 0.4%，故进程内缓存给 5 分钟下限（前端另有会话级缓存）。
 // 体积涨到 MB 量级（D1 单查询结果上限）时改分段加载或物化精简表——目前离得很远。
 // 路由必须注册在 /players/:id 之前（否则「roster」会被当成球员 ID 落进详情分支）。
 app.get('/players/roster', async (c) => {
   assertPublicRate(c, 'players');
-  const ttlMs = Number(c.env.PUBLIC_CACHE_TTL_MS) || 0;
-  const data = await cachedJson(
-    'players:roster',
-    ttlMs > 0 ? Math.max(ttlMs, ROSTER_CACHE_TTL_MS) : 0,
-    () => loadRoster(c),
-    waitUntilOf(c),
-  );
+  const ttlMs = Math.max(Number(c.env.PUBLIC_CACHE_TTL_MS) || 0, ROSTER_CACHE_TTL_MS);
+  const data = await cachedJson('players:roster', ttlMs, () => loadRoster(c), waitUntilOf(c));
   return c.json(data);
 });
 
 async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: string; count: number }> {
   const row = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n, group_concat(line, char(10)) AS roster FROM (
-       SELECT players.name || CASE WHEN players.club_id IS NULL THEN '' ELSE '|' || players.club_id END
+       SELECT replace(replace(players.name, char(13), ' '), char(10), ' ')
+              || CASE WHEN players.club_id IS NULL THEN '' ELSE '|' || players.club_id END
               || '|' || players.id AS line
-       FROM players)`,
+       FROM players ORDER BY players.id)`,
   ).first<{ n: number; roster: string | null }>();
   return { roster: row?.roster ?? '', count: row?.n ?? 0 };
 }

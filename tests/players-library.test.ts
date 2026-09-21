@@ -105,6 +105,10 @@ describe('球员库列表（增量 6.1 d6）', () => {
     seedPlayers(fx.sqlite);
     const res = await list('/api/players?name=%25', fx.env);
     expect(res.players).toEqual([]);
+    // 增量 26：折叠改写后三个元字符的语义都没变，% 之外再钉 _ 与反斜杠
+    expect((await list('/api/players?name=_', fx.env)).players).toEqual([]);
+    expect((await list('/api/players?name=%5C', fx.env)).players).toEqual([]);
+    expect((await list('/api/players?name=a%5Cb', fx.env)).players).toEqual([]);
   });
 
   it('列表回俱乐部名（d8）：两种视图都打现行归属名，无归属显示 null', async () => {
@@ -554,6 +558,68 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
     expect(await ids('zzzz')).toEqual([]);
   });
 
+  // 判空必须在折叠之后：ZWSP / 软连字符 trim() 不走，折完才是空串；按原串判空会拼出 `%%`，
+  // 于是「搜了个不可见字符」从空结果变成列出全库（旧实现的返回是空集）。
+  it('name 全是不见字符时按空串拒（400），不退化成列出全库', async () => {
+    const fx = freshEnv();
+    seedAccents(fx.sqlite);
+
+    for (const q of ['\u200b', '\u00ad', '\u200b\u00ad']) {
+      const res = await get(`/api/players?name=${encodeURIComponent(q)}`, fx.env);
+      expect(res.status, `查询词 ${JSON.stringify(q)}`).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('name 不能为空');
+    }
+    expect((await get('/api/players?name=%20', fx.env)).status).toBe(400); // 纯空格仍是 400
+  });
+
+  it('名册端点：姓名里的 | 与换行不撑坏行格式，行序按 id 确定', async () => {
+    const fx = freshEnv();
+    seedAccents(fx.sqlite);
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '拜仁慕尼黑', 'premier', 'active');
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, status) VALUES
+        (107, 'a7', 'A|B',                          1, 'ST', 24, 75, 80, 0, 'normal'),
+        (108, 'a8', 'C' || char(10) || 'D',        NULL, 'ST', 23, 74, 79, 0, 'normal'),
+        (109, 'a9', 'E' || char(13) || 'F',           2, 'ST', 22, 73, 78, 0, 'normal');
+    `);
+
+    const body = (await (await get('/api/players/roster', fx.env)).json()) as { roster: string; count: number };
+    const lines = body.roster.split('\n');
+    // 姓名带 \n 的球员若不在 SQL 里换成空格，这里会多出一行、与 count 对不上
+    expect(lines).toHaveLength(body.count);
+    expect(body.count).toBe(9);
+
+    const parse = (line: string) => {
+      const i = line.lastIndexOf('|');
+      const id = Number(line.slice(i + 1));
+      const rest = line.slice(0, i);
+      const j = rest.lastIndexOf('|');
+      return { id, clubId: j < 0 ? null : Number(rest.slice(j + 1)), name: j < 0 ? rest : rest.slice(0, j) };
+    };
+    const rows = lines.map(parse);
+    // 载荷顺序确定（SQL 里 ORDER BY players.id）⇒ 不必在测试里再排一遍
+    expect(rows.map((r) => r.id)).toEqual([101, 102, 103, 104, 105, 106, 107, 108, 109]);
+    expect(rows[6]).toEqual({ id: 107, clubId: 1, name: 'A|B' }); // 姓名含分隔符：从行尾反向切分仍正确
+    expect(rows[7]).toEqual({ id: 108, clubId: null, name: 'C D' }); // \n 换空格
+    expect(rows[8]).toEqual({ id: 109, clubId: 2, name: 'E F' }); // \r 换空格
+    expect(body.roster).not.toContain('\r');
+  });
+
+  // 折叠只做「查表 + ASCII 小写」两件 SQL 也做得到的事，所以非拉丁名两侧都不动：
+  // 原样照打必须命中（曾经 JS 侧多做一层整段 toLowerCase，把 'Шевченко' 折成 'шевченко' ⇒ 0 命中）
+  it('非拉丁姓名：原样照打命中，另一种大小写不命中（两侧行为一致）', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, status)
+       VALUES (201, 'b1', 'Шевченко', NULL, 'CB', 30, 80, 82, 0, 'normal')`,
+    );
+    const ids = async (q: string) => (await list(`/api/players?name=${encodeURIComponent(q)}&limit=100`, fx.env)).players.map((p) => p.id);
+
+    expect(await ids('Шевченко')).toEqual([201]);
+    expect(await ids('евчен')).toEqual([201]); // 子串
+    expect(await ids('шевченко')).toEqual([]); // 另一大小写：库里原样、SQLite 只折 ASCII ⇒ 不命中
+  });
+
   it('名册端点：行格式=姓名|俱乐部|ID，俱乐部空则省略；与 /players/:id 不冲突', async () => {
     const fx = freshEnv();
     seedAccents(fx.sqlite);
@@ -590,6 +656,8 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
     expect(card.player).toEqual(expect.objectContaining({ id: 101, name: 'Šeško' }));
 
     // 空库：不报错、count 0、roster 空串（group_concat 无行时是 NULL）
+    // 名册缓存有自己的 5 分钟下限、不跟随公开 TTL（见路由注释），所以同一进程里换库要先清缓存
+    resetGuards();
     const empty = freshEnv();
     const emptyBody = (await (await get('/api/players/roster', empty.env)).json()) as { roster: string; count: number };
     expect(emptyBody).toEqual({ roster: '', count: 0 });
