@@ -191,6 +191,8 @@ function readCsv(path: string): { rows: CsvRow[]; skipped: SkipRow[]; csvRows: n
     const wageRaw = cell(c, 20);
     const yearsRaw = cell(c, 27);
     // 训练营行：违约金列或工资列含「训练营」（63 行在 16 队内；7 行只有工资列写「海捞训练营」）
+    // 状态列（col28）不参与判定：实测它在 16 队内只有 22 行有值（「已匹配」18 / 「已续约1」4），
+    // 63 个训练营行的状态列全为空，故 col19/20 是训练营的完备信号。
     const trainee = /训练营/.test(rcRaw) || /训练营/.test(wageRaw);
     const releaseFee = trainee ? TRAINEE_RC : num(rcRaw);
     const wage = trainee ? TRAINEE_WAGE : num(wageRaw);
@@ -247,13 +249,21 @@ function readCsv(path: string): { rows: CsvRow[]; skipped: SkipRow[]; csvRows: n
 function d1Rows(sql: string): Record<string, unknown>[] {
   const scope = LOCAL ? '--local' : '--remote';
   const cmd = `npx wrangler d1 execute ${DB} ${scope} --json --command "${sql}"`;
-  const res = spawnSync(cmd, { shell: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const run = () => spawnSync(cmd, { shell: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  let res = run();
+  // Windows 上 wrangler 偶发子进程崩溃（exit 3221226505 / `UV_HANDLE_CLOSING` 断言），与 SQL 无关。
+  // 这里全是只读 SELECT，重跑无副作用 ⇒ 直接重试两次。
+  for (let attempt = 1; attempt <= 2 && res.status !== 0 && (res.status === 3221226505 || /UV_HANDLE_CLOSING/.test(res.stderr ?? '')); attempt++) {
+    console.error(`[warn] wrangler 读取崩溃（exit ${res.status}），重试第 ${attempt} 次…`);
+    res = run();
+  }
   if (res.status !== 0) {
     throw new Error(`wrangler 读取失败（exit ${res.status}）：\n${res.stderr || res.stdout}`);
   }
-  const at = res.stdout.indexOf('[');
-  if (at < 0) throw new Error(`wrangler 输出不是 JSON：\n${res.stdout.slice(0, 400)}`);
-  const parsed = JSON.parse(res.stdout.slice(at)) as Array<{ results?: Record<string, unknown>[] }>;
+  // 警告行里也可能出现 `[`，故只认「行首的 `[`」再解析。
+  const m = /^\[/m.exec(res.stdout);
+  if (!m || m.index == null) throw new Error(`wrangler 输出不是 JSON：\n${res.stdout.slice(0, 400)}`);
+  const parsed = JSON.parse(res.stdout.slice(m.index)) as Array<{ results?: Record<string, unknown>[] }>;
   return parsed[0]?.results ?? [];
 }
 
@@ -306,12 +316,20 @@ function loadTicks(): number {
 // ---------------------------------------------------------------- SQL 生成
 
 function buildInsert(r: CsvRow, playerId: number): string {
+  if (!(playerId > 0)) throw new Error(`fc ${r.fcId} 没有有效的 player_id（${playerId}）——拒绝生成会静默不命中的语句`);
   return (
     'INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from, service_ticks, protection_ticks, is_active)\n' +
     `SELECT p.id, ${r.clubId}, ${lit(r.releaseFee)}, ${lit(r.wage)}, ${lit(r.trainee ? 'trainee' : 'formal')}, 'import', ${lit(TS)}, ${lit(EFFECTIVE_FROM)}, ${lit(r.serviceTicks)}, ${lit(r.protectionTicks)}, 1\n` +
     `FROM players p WHERE p.fc_id = ${r.fcId} AND p.club_id = ${r.clubId} AND p.id = ${playerId}\n` +
     '  AND NOT EXISTS (SELECT 1 FROM contracts WHERE player_id = p.id);'
   );
+}
+
+/** fc_id → players.id；缺号即抛（不落 `?? 0` 这种会静默不命中的兜底）。 */
+function playerIdOf(playerIds: Map<number, number>, fcId: number): number {
+  const id = playerIds.get(fcId);
+  if (id == null) throw new Error(`fc ${fcId} 未从 players 加载到 id（loadPlayers 结果与可导行不一致）`);
+  return id;
 }
 
 function shards<T>(list: T[], size: number): { no: string; from: number; to: number; items: T[] }[] {
@@ -354,7 +372,7 @@ function writeShards(
       '',
     ].join('\n');
     const body = part.items
-      .map((r) => `-- fc ${r.fcId} ${r.clubName} ${r.name} ${r.trainee ? 'trainee' : 'formal'} 效力${r.serviceYears}赛季\n${buildInsert(r, playerIds.get(r.fcId) ?? 0)}`)
+      .map((r) => `-- fc ${r.fcId} ${r.clubName} ${r.name} ${r.trainee ? 'trainee' : 'formal'} 效力${r.serviceYears}赛季\n${buildInsert(r, playerIdOf(playerIds, r.fcId))}`)
       .join('\n');
     const text = `${head}${body}\n`;
     writeFileSync(join(dir, name), text, 'utf8');
@@ -451,7 +469,12 @@ function compareWithDb(rows: CsvRow[], playerIds: Map<number, number>): { diffs:
     );
     for (const r of res) byPlayer.set(Number(r['player_id']), r);
   }
-  const eq = (a: unknown, b: unknown) => (a == null && b == null) || Number(a) === Number(b) || String(a) === String(b);
+  // 逐列比对：NULL 只等于 NULL——不能拿 Number(null)===0 放行「期望 NULL、库里 0」这类差异
+  // （trainee 的 protection_ticks 期望 NULL，若库内落成 0，宽松写法会误判通过）。
+  const eq = (a: unknown, b: unknown): boolean => {
+    if (a == null || b == null) return a == null && b == null;
+    return Number(a) === Number(b) || String(a) === String(b);
+  };
   for (const r of rows) {
     const pid = playerIds.get(r.fcId);
     const got = pid == null ? undefined : byPlayer.get(pid);

@@ -244,3 +244,17 @@ node scripts/prod-20260920-s9-contracts/exec-shards.mjs \
 - **增量 25 未部署**（本轮指令只到「合同导入」，`git push` / `wrangler deploy` 都不在授权内）。0028 已 apply、线上 worker 若仍是旧版：此时**通过网页面板**创建合同会落 DDL 默认刻度（`service_ticks = 0`、`protection_ticks = NULL`）。窗口关闭期间无正常路径会在面板建合同（谈判/强制拍卖都要窗口），但**下次窗口开启前应先部署增量 25**。
 - **CPU 队 108 行、无平台队 164 行未导**（范围裁决 §6-①③），这 272 人暂时没有合同记录。
 - **保护期语义**沿用增量 25 口径：`protection_ticks = service_ticks + 3`，效力老的球员保护期已过期（`< 1` 即无保护），与本批刻度一致。
+- **CSV 状态列（col28）未映射**：该列在 16 队内只有 22 行有值（`已匹配` 18 / `已续约1` 4），其余全空；它既不承载训练营标记（63 个训练营行的状态列全空 ⇒ 训练营判定只用 col19/20，已在生成器注释里写死），也没有对应的合同列。若这 22 行的含义（是否意味着已续约过 1 次、影响保护期起算）需要反映，得另开一批处理。
+
+### 11.9 复审修正（2026-09-21，code-review-skill 过审）
+
+对生成器与执行器各做一轮复审，改了四处（都不改动已落库的数据）：
+
+| 文件 | 问题 | 修正 |
+| --- | --- | --- |
+| `gen-contracts-sql.ts` | 逐列复核用的 `eq()` 写成 `Number(a) === Number(b)` 打头，`Number(null) === 0` ⇒ 「期望 NULL、库里 0」会被误判通过（trainee 的 `protection_ticks` 正是期望 NULL） | 改成 NULL 只等于 NULL；改完重跑 `--verify` 仍是 **462 / 命中 462 / 差异 0**，说明原结论经得起严格比对 |
+| `gen-contracts-sql.ts` | `writeShards` 用 `playerIds.get(fcId) ?? 0` 兜底，缺号会生成 `p.id = 0` 这种**静默不命中**的语句（上游已有 exit 4 闸，但兜底方向错了） | 换成 `playerIdOf()`，缺号即抛 |
+| `gen-contracts-sql.ts` | `d1Rows` 用 `stdout.indexOf('[')` 定位 JSON，wrangler 的警告行里若出现 `[` 会解析失败；Windows 上偶发子进程崩溃（exit `3221226505`） | 只认「行首 `[`」；对只读 SELECT 直接重试两次 |
+| `exec-shards.mjs` | `--chunk=abc` ⇒ `NaN` 静默退化成「一批全塞」；SQL 里的 `"` 会被 `--command "…"` 的 shell 抢先解释；`JSON.parse` 未捕获；批间只 `break` 不重试 | 加 `--chunk` / `--retry` 参数校验、shell 元字符（`"` `%` `&` `\|` `<` `>`）直接拒绝、`JSON.parse` 进 try/catch、新增 **默认关闭** 的 `--retry=N`（工件带守卫时才开，避免静默重放未守卫的写） |
+
+三条守卫都用现场用例验过：含 `"` 的语句 exit 3 并提示改写；`--chunk=abc` exit 2；`--remote` 与 `--local` 同时给 exit 2；`--dry` 仍把 50 条切成 6 批（10/10/10/9/10/1）。

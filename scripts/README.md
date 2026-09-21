@@ -65,7 +65,7 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 
 **执行纪律**：含外键或大事务的工件必须走 `--command` 或 D1 REST `/query`，`--file` 通道会让 `PRAGMA defer_foreign_keys` 失效，整批回滚。执行前先看该目录 README 的核查清单与期望 changes。
 
-**批量执行器**：`prod-20260920-s9-contracts/exec-shards.mjs` 把「多行 SQL 分片」折成单行、按条数与命令行字节上限分批走 `--command`，逐批回显 `changes` / `rows_written`（默认 `--local`，加 `--remote` 才碰生产；`--dry` 只算批次）。用它要注意两条 Windows 实测限制：`--command` 只吃**单行** SQL（多行报 `incomplete input: SQLITE_ERROR [code: 7500]`）；命令行受 `cmd.exe` 字节数约束（中文按 3 字节算，约 5.5KB 的批会被拒「命令行太长」），故脚本压到 4000 字节 / 10 条。
+**批量执行器**：`prod-20260920-s9-contracts/exec-shards.mjs` 把「多行 SQL 分片」折成单行、按条数与命令行字节上限分批走 `--command`，逐批回显 `changes` / `rows_written`（默认 `--local`，加 `--remote` 才碰生产；`--dry` 只算批次）。用它要注意两条 Windows 实测限制：`--command` 只吃**单行** SQL（多行报 `incomplete input: SQLITE_ERROR [code: 7500]`）；命令行受 `cmd.exe` 字节数约束（中文按 3 字节算，约 5.5KB 的批会被拒「命令行太长」），故脚本压到 4000 字节 / 10 条。另有三条守卫：语句含 shell 元字符（`"` `%` `&` `|` `<` `>`）直接拒绝（SQL 是塞进 `--command "…"` 交 shell 的，元字符会被 shell 抢先解释）；`wrangler` 在 Windows 上偶发子进程崩溃（exit `3221226505` / `UV_HANDLE_CLOSING` 断言，与 SQL 无关），重跑即过，但自动重试默认**关**（批中途崩溃时前面的语句可能已落库），工件带守卫、重放 `changes = 0` 时才用 `--retry=3` 打开。
 
 ## prod-20260920-*（一次性生产工件；四条均已执行）
 
