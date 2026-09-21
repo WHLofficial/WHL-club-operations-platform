@@ -35,6 +35,12 @@ import {
 // localStorage 在隐私模式/被禁用时会抛，读写成败都不影响页面。
 const SIDE_STORAGE_KEY = 'players-library:side';
 const DRAWER_QUERY = '(max-width: 900px)';
+// 抽屉的焦点循环用：只看浏览器默认能 Tab 到的那些（不含 tabindex="-1"）。
+// summary 必须算进来 —— <summary> 是可聚焦的（「显示列」那个 <details> 的开关就是它），
+// 而它不匹配任何常规选择器；漏掉它时抽屉里真正的最后一个可聚焦元素不在 items 里，
+// 从它往后 Tab 就没被拦住，焦点落到 body（实测 375 下第 25 次 Tab 逃出）
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 function readSideOpen(): boolean {
   try {
     return localStorage.getItem(SIDE_STORAGE_KEY) !== 'closed';
@@ -169,6 +175,9 @@ export default function PlayersLibrary() {
   const asideRef = useRef<HTMLElement | null>(null);
   // 关抽屉时是否要把焦点交还入口按钮（见下面 closeDrawer 的注释）
   const restoreFocus = useRef(false);
+  // 上一次焦点是否落在左栏/抽屉里。宽度变化时用它决定要不要把焦点接回来——
+  // 不能在 effect 里嗅探 activeElement：那时 display:none / inert 已生效、焦点已被踢走
+  const focusInSide = useRef(false);
 
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -296,6 +305,15 @@ export default function PlayersLibrary() {
     setSideOpen(next);
   };
 
+  // 记录焦点是否在左栏里（一个委托监听，别在每个控件上挂 onFocus）
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      focusInSide.current = !!asideRef.current?.contains(e.target as Node);
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
+
   // 抽屉关闭：× / 遮罩 / Esc 三条路都走这里，焦点交还给入口按钮（键盘用户不至于掉到文档开头）
   const closeDrawer = () => {
     restoreFocus.current = true;
@@ -312,16 +330,47 @@ export default function PlayersLibrary() {
     toggleRef.current?.focus();
   }, [drawerOpen]);
 
-  // 抽屉开着时：锁背景滚动（不然滑抽屉会带着表格一起滚）、Esc 关闭、焦点移进抽屉
+  // 抽屉开着时：锁背景滚动（不然滑抽屉会带着表格一起滚）、Esc 关闭、Tab 循环留在抽屉内、焦点移进抽屉
   useEffect(() => {
     if (!drawerOpen) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      // 内层组件已经消化过的 Esc 不再二次响应（搜索框按 Esc 只收下拉，不该把抽屉一起关掉）
+      // 内层组件已经消化过的 Esc 不再二次响应（PlayerSearchBox 收下拉时会 preventDefault）
       if (e.defaultPrevented) return;
-      if (e.key === 'Escape') closeDrawer();
+      if (e.key === 'Escape') {
+        closeDrawer();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      // 顶栏在 <Routes> 之外，不属于任何一个 inert 区，所以光靠 inert 挡不住 Tab 走到抽屉外。
+      // 这里补最小焦点循环，让 role=dialog + aria-modal 名副其实。
+      const side = asideRef.current;
+      if (!side) return;
+      // 只看真正能 Tab 到的：offsetParent 为 null（display:none 之类）的不算，
+      // 收起的 <details> 里的控件也不算 —— 注意 Chrome 对收起 details 的内容**不返回 null**
+      // （实测 .lib-cols 收起时里面的 chip 仍有 offsetParent），所以必须显式排除。
+      // 但 details 自己的 <summary> 要留下：收起时它照样能 Tab 到，正是它决定了「最后一个」。
+      // 漏掉这一步时清单里「最后一个」是收起面板里的 chip，从真正的最后一个往后 Tab 没人拦，
+      // 焦点落到 body（375 实测第 25 次 Tab 逃出）
+      const items = [...side.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter((el) => {
+        if (el.offsetParent === null) return false;
+        const closed = el.closest('details:not([open])');
+        return !closed || closed.querySelector(':scope > summary') === el;
+      });
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      const active = document.activeElement;
+      const inside = !!active && side.contains(active);
+      if (e.shiftKey && (active === first || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => {
@@ -331,12 +380,17 @@ export default function PlayersLibrary() {
   }, [drawerOpen]);
 
   // 回到宽屏就把抽屉状态放掉：抽屉是窄屏专属形态，留着会让宽屏下一开窗就带遮罩。
-  // 焦点若还在抽屉里（× 是窄屏专属，一拉宽就 display:none），交还给入口按钮，别让它掉到 body
+  // 焦点归位不靠「此刻 activeElement 是否在 aside 里」嗅探：这个 effect 在 paint 之后才跑，
+  // 那时 display:none / inert 已经生效、焦点元素已被浏览器踢出，嗅探必然判否（收起过左栏的用户
+  // 每次都踩）。改成记录「上一次焦点落在哪里」，两个方向共用一个判据。
   useEffect(() => {
-    if (narrow) return;
+    if (narrow) {
+      // 变窄：左栏从常驻变成 inert 子树，浏览器会把焦点踢到 body；抽屉没开时交给入口按钮
+      if (!drawerOpen && focusInSide.current) toggleRef.current?.focus();
+      return;
+    }
     setDrawerOpen(false);
-    const active = document.activeElement;
-    if (active && asideRef.current?.contains(active)) toggleRef.current?.focus();
+    if (focusInSide.current) toggleRef.current?.focus();
   }, [narrow]);
 
   return (
@@ -381,8 +435,10 @@ export default function PlayersLibrary() {
           />
         </div>
 
-        {/* 生效条件摘要条（增量 26 决策 18）：常驻一行，每条可单独撤掉；没有条件时留一行提示 */}
-        <div className="lib-summary" role="group" aria-label="已生效的筛选条件">
+        {/* 生效条件摘要条（增量 26 决策 18）：常驻一行，每条可单独撤掉；没有条件时留一行提示。
+            抽屉开着时它也要 inert：摘要是夹在工具条与表格之间的第三块背景区，漏掉它
+            Shift+Tab 就能落到 chip 上，回车会在遮罩后面把筛选撤掉 */}
+        <div className="lib-summary" role="group" aria-label="已生效的筛选条件" inert={narrow && drawerOpen}>
           {chips.length === 0 ? (
             <span className="muted">未设筛选条件</span>
           ) : (

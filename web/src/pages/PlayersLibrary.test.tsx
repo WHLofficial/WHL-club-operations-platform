@@ -328,25 +328,45 @@ describe('窄屏筛选抽屉', () => {
     expect(aside.hasAttribute('inert')).toBe(false);
   });
 
-  it('开着时抽屉是模态：背景 inert（Shift+Tab 逃不到遮罩后），关掉就还原', async () => {
+  it('开着时抽屉是模态：背景三块区域都 inert，关掉就还原', async () => {
     setNarrow(true);
     const user = open();
     await screen.findByRole('link', { name: 'Šeško' });
     const main = document.querySelector('.library-main') as HTMLElement;
     const toolbar = document.querySelector('.lib-toolbar') as HTMLElement;
+    // 摘要条是夹在工具条与表格之间的第三块背景区，chip 是可聚焦按钮，漏掉它 Shift+Tab 就能
+    // 落到 chip 上、在遮罩后面把筛选撤掉
+    const summary = document.querySelector('.lib-summary') as HTMLElement;
     const aside = document.getElementById('library-side') as HTMLElement;
     expect(main.hasAttribute('inert')).toBe(false);
+    expect(summary.hasAttribute('inert')).toBe(false);
 
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
     expect(main.hasAttribute('inert')).toBe(true);
     expect(toolbar.hasAttribute('inert')).toBe(true);
+    expect(summary.hasAttribute('inert')).toBe(true);
     expect(aside.getAttribute('role')).toBe('dialog');
     expect(aside.getAttribute('aria-modal')).toBe('true');
 
     await user.keyboard('{Escape}');
     await waitFor(() => expect(main.hasAttribute('inert')).toBe(false));
     expect(toolbar.hasAttribute('inert')).toBe(false);
+    expect(summary.hasAttribute('inert')).toBe(false);
     expect(aside.getAttribute('role')).toBeNull();
+  });
+
+  it('变窄时焦点若在左栏里，交给入口按钮（变窄后左栏是 inert 子树，焦点会被踢到 body）', async () => {
+    open();
+    await screen.findByRole('link', { name: 'Šeško' });
+    const toggle = screen.getByRole('button', { name: /^筛选/ });
+    // 宽屏左栏常驻，先在里头落个焦点（focusin 委托靠这个记录「焦点在左栏」）
+    const aside = document.getElementById('library-side') as HTMLElement;
+    const inside = within(aside).getByRole('button', { name: 'ST' });
+    inside.focus();
+    expect(document.activeElement).toBe(inside);
+
+    setNarrow(true);
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
   });
 
   it('内层已消化的 Esc 不再顺带关抽屉（搜索框按 Esc 只收下拉）', async () => {

@@ -59,6 +59,9 @@ export default function PlayerSearchBox({ value, onChange, onSubmit, clubs, busy
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
+      // 这一下 Esc 归搜索框（收下拉），标记成已消化：抽屉/弹窗的 window 级 Esc 处理器
+      // 会跳过 defaultPrevented，别让一次 Esc 同时收下拉又关抽屉
+      if (open) e.preventDefault();
       setOpen(false);
       setActive(-1);
       return;

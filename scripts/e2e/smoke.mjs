@@ -31,6 +31,18 @@ const USER_ID = 1; // 本地 tour 库的基线管理员（role=admin），也是
 // 本地 TOUR_DB（whl）是空库（只有 _cf_METADATA），读赛事库的这几个端点必然 500：
 // 环境噪声，不是本仓库的回归，⑨ 不据此判失败；换成有数据的环境自然会通过
 const EMPTY_TOUR_DB_PATHS = ['/api/me/club', '/api/me/bids', '/api/admin/clubs'];
+// 噪声判据必须同时钉住状态码与路径名：只按 URL 后缀匹配的话，这三个端点上的 401/403/404
+// 也会被静默吞掉（那才是真回归），带查询串时后缀还会失配
+const NOISE_STATUS = 500;
+function isKnownNoise(line) {
+  const m = /^(\d{3}) \S+ (\S+)$/.exec(line);
+  if (!m || Number(m[1]) !== NOISE_STATUS) return false;
+  try {
+    return EMPTY_TOUR_DB_PATHS.includes(new URL(m[2]).pathname);
+  } catch {
+    return false;
+  }
+}
 const SHOT_DIR = 'scratch';
 const TIMEOUT = 15_000;
 
@@ -90,6 +102,14 @@ function seedSession() {
 }
 function clearSession() {
   wrangler(['kv', 'key', 'delete', '--binding', 'SESSION_KV', '--local', KV_KEY]);
+  // 种下的 oidc_session 行也要撤：只删 KV 的话每跑一次就留一行 auth_sid='e2e-smoke' 的孤儿会话
+  const sqlFile = join(SHOT_DIR, 'e2e-oidc-cleanup.sql');
+  writeFileSync(sqlFile, `DELETE FROM oidc_session WHERE auth_sid = 'e2e-smoke';`, 'utf8');
+  try {
+    wrangler(['d1', 'execute', 'whl-club', '--local', '--file', sqlFile, '--json']);
+  } catch (e) {
+    console.warn(`（跳过 OIDC 会话清理：${String(e?.message ?? e).slice(0, 120)}）`);
+  }
 }
 
 // ---- 结果收集 ----
@@ -198,6 +218,7 @@ async function main() {
           (await page.locator('.library-main .empty-state').count()) > 0,
           '既没有表头也没有空态，球员库渲染异常',
         );
+        console.log('   （跳过表头排序：本地球员库为空，没有表头可点）');
         return;
       }
       assert(/共 \d+ 名球员 · 共 \d+ 页 · 第 \d+ 页/.test(await text()), '翻页信息文案不符合预期');
@@ -262,6 +283,45 @@ async function main() {
             (await page.evaluate(() => document.body.style.overflow)) === 'hidden',
             `${label}：抽屉开着时背景未锁滚`,
           );
+          // 焦点断言只有真浏览器有意义：jsdom 不实现 inert 的焦点拦截，组件测试测不到这条。
+          // 打开即把焦点移进抽屉，是「inert 移出 Tab 序 + 主动 focus」两件事合起来才成立的
+          const focused = await page.evaluate(() => document.activeElement?.className ?? 'null');
+          assert(
+            focused.includes('lib-drawer-close'),
+            `${label}：打开抽屉后焦点应在关闭按钮上（实际 ${focused}）`,
+          );
+          // 焦点循环：顶栏渲染在 <Routes> 之外、不属于任何 inert 区，只有循环能挡住 Shift+Tab
+          await page.keyboard.press('Shift+Tab');
+          assert(
+            await page.evaluate(() => !!document.activeElement?.closest('.library-side')),
+            `${label}：Shift+Tab 逃出了抽屉（焦点落到了 ${await page.evaluate(() => document.activeElement?.className)}）`,
+          );
+          await page.keyboard.press('Escape');
+          await page.waitForFunction(
+            () => {
+              const el = document.querySelector('.library-side');
+              return !!el && el.getBoundingClientRect().x < 0;
+            },
+            null,
+            { timeout: TIMEOUT },
+          );
+          // 焦点归位要在抽屉退场之后才生效（入口按钮在工具条里，打开时它是 inert 的，
+          // 同帧 focus() 会被浏览器静默忽略、activeElement 掉到 body）
+          const restored = await page.evaluate(() => document.activeElement?.className ?? 'null');
+          assert(
+            restored.includes('lib-side-toggle'),
+            `${label}：Esc 关闭后焦点未交还入口按钮（实际 ${restored}）`,
+          );
+          // 上面把抽屉关了，截图要的是打开态 ⇒ 再开一次（这条也顺带证明开关是可重复的）
+          await page.locator('button.lib-side-toggle').click();
+          await page.waitForFunction(
+            () => {
+              const el = document.querySelector('.library-side');
+              return !!el && el.getBoundingClientRect().x >= 0;
+            },
+            null,
+            { timeout: TIMEOUT },
+          );
         } else {
           assert(await side.isVisible(), `${label}：宽屏左栏应常驻可见`);
           assert((await page.locator('.lib-drawer-mask').count()) === 0, `${label}：宽屏不应出现遮罩`);
@@ -277,9 +337,7 @@ async function main() {
     await check('⑨ 无未捕获前端错误', async () => {
       // 本地 TOUR_DB（whl）是空库（只有 _cf_METADATA），读赛事库的这几个端点必然 500 —— 那是
       // 环境噪声，不是本仓库的回归；换成有数据的环境自然会通过。其余任何 4xx/5xx 仍然报错。
-      const noise = new Set(
-        [...badResponses].filter((line) => EMPTY_TOUR_DB_PATHS.some((p) => line.endsWith(p))),
-      );
+      const noise = new Set([...badResponses].filter(isKnownNoise));
       const unexpected = [...new Set(badResponses)].filter((line) => !noise.has(line));
       if (noise.size) console.log(`   已知环境噪声（本地 TOUR_DB 空库）：${[...noise].join(' / ')}`);
       assert(

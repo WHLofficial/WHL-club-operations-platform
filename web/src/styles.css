@@ -1770,6 +1770,8 @@ tbody tr:hover td {
     box-shadow: 0 0 24px rgba(43, 29, 18, 0.18);
     transform: translateX(-100%);
     transition: transform 0.2s ease;
+    /* 抽屉滚到底后继续滑不把整页带着滚（iOS 上 body 的 overflow: hidden 挡不住） */
+    overscroll-behavior: contain;
   }
 
   .library-shell.drawer-open .library-side {
