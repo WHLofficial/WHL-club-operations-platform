@@ -14,6 +14,7 @@ import {
   POSITION_NAMES,
 } from './fc26.ts';
 import { S1_GROWABLE_AGE_CAP, TRAINEE_RC, TRAINEE_WAGE } from './squad-rules.ts';
+import { describeChars, unmappedNameChars } from './name-fold.ts';
 
 export type ImportChannel = 'A' | 'B';
 
@@ -99,6 +100,13 @@ export function normalizeImportBatch(
     const rowNo = i + 1;
     const fail = (field: string, message: string) => errors.push({ row: rowNo, field, message });
     const warn = (field: string, message: string) => warnings.push({ row: rowNo, field, message });
+    // 折叠表覆盖闸（增量 26）：姓名里出现折叠表外的字母，按去变音搜它就搜不到（表外字符
+    // 不会被 SQL 侧折叠）。只出警告不挡行——源数据冒出个新字母不该让整批导入失败，
+    // 但必须在预览报告里看得见，别变成静默漏搜。补表见 src/core/name-fold.ts。
+    const warnUnfoldable = (field: string, name: string) => {
+      const unknown = unmappedNameChars([name]);
+      if (unknown.length > 0) warn(field, `姓名含折叠表外字符：${describeChars(unknown)}（按去变音搜不到这些字）`);
+    };
 
     if (channel === 'A') {
       const fcId = toNum(raw['ID']);
@@ -114,6 +122,7 @@ export function normalizeImportBatch(
       if (seen.has(fcId)) return fail('ID', `同批重复 ID：${fcId}`);
       seen.add(fcId);
       if (name === '') return fail('Name', '姓名不能为空');
+      warnUnfoldable('Name', name);
       if (age === null || age < 14 || age > 50) return fail('Age', '年龄须在 14-50 之间');
       if (ca === null || ca < 1 || ca > 99) return fail('CA', 'CA 须在 1-99 之间');
       if (pa === null || pa < 1 || pa > 99) return fail('PA', 'PA 须在 1-99 之间');
@@ -170,6 +179,7 @@ export function normalizeImportBatch(
     const last = toStr(raw['lastname']);
     const name = common || `${first} ${last}`.trim();
     if (name === '') return fail('commonname', '姓名不能为空（commonname/firstname/lastname 都缺）');
+    warnUnfoldable('commonname', name);
 
     const ca = toNum(raw['overallrating']);
     const pa = toNum(raw['potential']);

@@ -82,6 +82,28 @@ describe('导入归一化（增量 22 I4：naID 值域 + TeamID 脏值警告）'
     expect(warned.errors).toHaveLength(0);
     expect(warned.warnings.map((w) => w.field)).toEqual(['teamid']);
   });
+
+  it('姓名折叠表外字符出警告不挡行（增量 26）；表内字母与汉字都不报', () => {
+    // ẞ（U+1E9E）不在 name-fold 覆盖内 ⇒ 按去变音搜不到它
+    const warned = normalizeImportBatch('A', [rowA(5, { Name: 'ẞtefan' })]);
+    expect(warned.errors).toHaveLength(0);
+    expect(warned.players).toHaveLength(1);
+    expect(warned.warnings).toEqual([
+      { row: 1, field: 'Name', message: '姓名含折叠表外字符：U+1E9E「ẞ」（按去变音搜不到这些字）' },
+    ]);
+
+    // 表内字母（Š/Ø/Ç/ß 都在表里）与汉字都不算表外
+    const clean = normalizeImportBatch('A', [rowA(6, { Name: 'Šeško' }), rowA(7, { Name: '张三' })]);
+    expect(clean.warnings).toEqual([]);
+
+    // 通道 B 同样挂警告，字段名随通道走
+    const base = { playerid: 9, overallrating: 70, potential: 85, Position: '', preferredfoot: 'Right', birthdate: '01/02/2004' };
+    expect(normalizeImportBatch('B', [{ ...base, commonname: 'Łukasz' }]).warnings).toEqual([]); // Ł 在表内
+    const bWarn = normalizeImportBatch('B', [{ ...base, commonname: 'Ṁarek' }]);
+    expect(bWarn.warnings.map((w) => [w.field, w.message])).toEqual([
+      ['commonname', '姓名含折叠表外字符：U+1E40「Ṁ」（按去变音搜不到这些字）'],
+    ]);
+  });
 });
 
 describe('球员导入换版模式（增量 22 I1，规则 §5.4）', () => {

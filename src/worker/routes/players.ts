@@ -6,6 +6,7 @@ import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../..
 import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, POSITION_BY_ID } from '../../core/fc26.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
+import { foldNamePattern, sqlFold } from '../../core/name-fold.ts';
 import { playerAbilityLevel } from '../home.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -105,6 +106,7 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
 // 排序：sort=id|ca|pa|age|market_value|influence + order（id 固定 ASC 旧整数游标）
+// 增量 26：name 走去变音折叠（core/name-fold）——「sesko」能搜到「Šeško」
 // 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
 // 缓存键用归一后的查询串（canonicalQuery），条数上限由 guard 侧兜底
 app.get('/players', async (c) => {
@@ -202,8 +204,11 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   if (name !== undefined) {
     const q = name.trim();
     if (q === '') throw new HttpError(400, 'name 不能为空');
-    filters.push(`players.name LIKE ? ESCAPE '\\'`);
-    filterArgs.push(`%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
+    // 去变音搜索（增量 26）：库内是 FC 拉丁名（Šeško/Ødegaard/Çalhanoğlu…），查询词与列值
+    // 都经 name-fold 折叠后比对，否则 sa 搜不到 Š 这类字母。折叠规则两侧同源（见 core/name-fold.ts）：
+    // 参数侧走 JS foldName（多做一层 NFD 分解），列侧走同表生成的 REPLACE 链内联表达式。
+    filters.push(`${sqlFold('players.name')} LIKE ? ESCAPE '\\'`);
+    filterArgs.push(foldNamePattern(q));
   }
   const growable = c.req.query('growable');
   if (growable !== undefined) {
@@ -572,6 +577,39 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     nextCursor = sort === 'id' ? String(last.id) : `${Number(last.sort_key ?? 0)}~${last.id}`;
   }
   return { players, total: countRow?.n ?? 0, nextCursor };
+}
+
+// 名册这条走全表扫描，缓存下限给足 5 分钟（公开 TTL 只有 20s，撑不住 18301 行的重复读）
+const ROSTER_CACHE_TTL_MS = 300_000;
+
+// GET /api/players/roster —— 轻量名册（增量 26，球员库搜索框的本地推荐用）
+// 载荷 = 单行文本，每行「姓名|俱乐部ID|球员ID」（俱乐部为空则省略该段），换行分隔：
+// 姓名写在最前、两个数字在后，前端从行尾反向切分 ⇒ 姓名里出现分隔符也不会串字段。
+// 目的是让前端一次性拿到全量名册、之后在本地折叠过滤（打字零请求，也就绕开限流与缓存位）。
+// 走全表扫描（18301 行 / 313KB raw / 150KB gzip，2026-09-21 实测），D1 免费档 5M 行/天 ⇒
+// 每次加载约 0.4%，故进程内缓存给 5 分钟下限（公开 TTL 只有 20s 撑不住；前端另有会话级缓存）。
+// 体积涨到 MB 量级（D1 单查询结果上限）时改分段加载或物化精简表——目前离得很远。
+// 路由必须注册在 /players/:id 之前（否则「roster」会被当成球员 ID 落进详情分支）。
+app.get('/players/roster', async (c) => {
+  assertPublicRate(c, 'players');
+  const ttlMs = Number(c.env.PUBLIC_CACHE_TTL_MS) || 0;
+  const data = await cachedJson(
+    'players:roster',
+    ttlMs > 0 ? Math.max(ttlMs, ROSTER_CACHE_TTL_MS) : 0,
+    () => loadRoster(c),
+    waitUntilOf(c),
+  );
+  return c.json(data);
+});
+
+async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: string; count: number }> {
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n, group_concat(line, char(10)) AS roster FROM (
+       SELECT players.name || CASE WHEN players.club_id IS NULL THEN '' ELSE '|' || players.club_id END
+              || '|' || players.id AS line
+       FROM players)`,
+  ).first<{ n: number; roster: string | null }>();
+  return { roster: row?.roster ?? '', count: row?.n ?? 0 };
 }
 
 // GET /api/players/:id —— 档案卡数据（球员 + 俱乐部 + 现行合同 + FC 存档）

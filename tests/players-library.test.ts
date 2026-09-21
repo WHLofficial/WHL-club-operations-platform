@@ -517,3 +517,78 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     expect((await get('/api/players?sort=uid', fx.env)).status).toBe(400);
   });
 });
+
+// 增量 26：去变音搜索（name 走 core/name-fold 折叠）+ 轻量名册端点
+describe('姓名去变音搜索与轻量名册（增量 26）', () => {
+  // 库内是 FC 拉丁名：预合成、分解、软连字符混着来，另有中文名作回归
+  // （分解与软连字符用 char() 拼——把组合记号直接写进源码是审阅灾难，也是 name-fold 用码位建表的同一理由）
+  function seedAccents(sqlite: DatabaseSync): void {
+    sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '利物浦', 'premier', 'active');
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, status) VALUES
+        (101, 'a1', 'Šeško',              1, 'ST', 22, 78, 88, 1, 'normal'),
+        (102, 'a2', 'Ødegaard',           NULL, 'CAM', 27, 86, 88, 0, 'normal'),
+        (103, 'a3', 'Çalhanoğlu',         1, 'CM', 31, 84, 84, 0, 'normal'),
+        (104, 'a4', 'S' || char(780) || 'eško',   NULL, 'ST', 20, 70, 90, 1, 'normal'),
+        (105, 'a5', 'M' || char(173) || 'uller',  1, 'ST', 25, 80, 82, 0, 'normal'),
+        (106, 'a6', '阿尔法三世',         NULL, 'CB', 19, 60, 85, 1, 'normal');
+    `);
+  }
+
+  it('name 折叠：sesko 搜得到 Šeško（预合成、分解、软连字符三种写法都算）', async () => {
+    const fx = freshEnv();
+    seedAccents(fx.sqlite);
+
+    const ids = async (q: string) => (await list(`/api/players?name=${encodeURIComponent(q)}&limit=100`, fx.env)).players.map((p) => p.id);
+
+    expect(await ids('sesko')).toEqual([101, 104]); // 101 预合成、104 分解形式
+    expect(await ids('SESKO')).toEqual([101, 104]); // 大小写无关
+    expect(await ids('Šeško')).toEqual([101, 104]); // 打原字也命中
+    expect(await ids('odegaard')).toEqual([102]); // Ø → o
+    expect(await ids('calhanoglu')).toEqual([103]); // Ç/ğ
+    expect(await ids('muller')).toEqual([105]); // 软连字符 U+00AD 被吃掉 → Muller
+    expect(await ids('阿尔法')).toEqual([106]); // 中文子串回归：折叠对 CJK 是恒等
+    expect(await ids('zzzz')).toEqual([]);
+  });
+
+  it('名册端点：行格式=姓名|俱乐部|ID，俱乐部空则省略；与 /players/:id 不冲突', async () => {
+    const fx = freshEnv();
+    seedAccents(fx.sqlite);
+
+    const res = await get('/api/players/roster', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { roster: string; count: number };
+    expect(body.count).toBe(6);
+
+    const lines = body.roster.split('\n');
+    expect(lines).toHaveLength(6);
+    // 从行尾反向切分：最后一段是球员 ID，倒数第二段（若存在）是俱乐部 ID，其余是姓名
+    const parse = (line: string) => {
+      const i = line.lastIndexOf('|');
+      const id = Number(line.slice(i + 1));
+      const rest = line.slice(0, i);
+      const j = rest.lastIndexOf('|');
+      return { id, clubId: j < 0 ? null : Number(rest.slice(j + 1)), name: j < 0 ? rest : rest.slice(0, j) };
+    };
+    const rows = lines.map(parse).sort((a, b) => a.id - b.id);
+    expect(rows).toEqual([
+      { id: 101, clubId: 1, name: 'Šeško' },
+      { id: 102, clubId: null, name: 'Ødegaard' },
+      { id: 103, clubId: 1, name: 'Çalhanoğlu' },
+      { id: 104, clubId: null, name: 'S\u030Ceško' },
+      { id: 105, clubId: 1, name: 'M\u00ADuller' },
+      { id: 106, clubId: null, name: '阿尔法三世' },
+    ]);
+
+    // 路由不冲突：「roster」不能被 /players/:id 抢走
+    const detail = await get('/api/players/101', fx.env);
+    expect(detail.status).toBe(200);
+    const card = (await detail.json()) as { player: { id: number; name: string } };
+    expect(card.player).toEqual(expect.objectContaining({ id: 101, name: 'Šeško' }));
+
+    // 空库：不报错、count 0、roster 空串（group_concat 无行时是 NULL）
+    const empty = freshEnv();
+    const emptyBody = (await (await get('/api/players/roster', empty.env)).json()) as { roster: string; count: number };
+    expect(emptyBody).toEqual({ roster: '', count: 0 });
+  });
+});

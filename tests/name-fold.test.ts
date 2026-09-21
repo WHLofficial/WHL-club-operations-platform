@@ -196,9 +196,11 @@ describe('硬闸与表完整性', () => {
     expect(bad.length === 0 ? '' : `缺表项：${describeChars(bad)}`).toBe('');
   });
 
-  it('表外字符会被抓出来（不静默漏搜）', () => {
+  it('表外字符会被抓出来（不静默漏搜），但与折叠无关的汉字不报', () => {
     expect(unmappedNameChars(['ẞtefan'])).toEqual(['ẞ']); // U+1E9E 不在覆盖内
-    expect(unmappedNameChars(['中', 'Ø', 'A'])).toEqual(['中']); // ASCII 与表内字符都不算
+    expect(unmappedNameChars(['中', 'Ø', 'A'])).toEqual([]); // 汉字折叠前后一样，报了是狼来了
+    expect(unmappedNameChars(['İbra'])).toEqual([]); // 表内字符不算
+    expect(unmappedNameChars(['Ḑevi'])).toEqual(['Ḑ']); // 能被 NFD 分解 ⇒ 折叠相关
     expect(unmappedNameChars(['plain ascii'])).toEqual([]);
   });
 

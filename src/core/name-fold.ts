@@ -6,8 +6,9 @@
 // 所以本文件是唯一的表来源：foldName 用它折查询词，sqlFold 用它生成库侧表达式。
 //
 // 覆盖范围不是猜的：2026-09-21 生产全库扫描（18301 行姓名 / 3048 行含非 ASCII / 91 种非字母数字字符，
-// 其中非 ASCII 87 个）逐字符核对后建表；unmappedNameChars() 是配套硬闸——库里出现表外字符即报错，
-// 逼着补表。表本身按拉丁字母的完整区块覆盖（Latin-1 + Latin Extended-A），不是只照抄清单，
+// 其中非 ASCII 87 个）逐字符核对后建表；unmappedNameChars() 是配套硬闸——库里出现与折叠相关的
+// 表外字符就报出来（导入预览里是警告，脚本扫描里可直接当退出码），逼着补表。表本身按拉丁字母的
+// 完整区块覆盖（Latin-1 + Latin Extended-A），不是只照抄清单，
 // 免得下个赛季新球员带来一个没进清单的字母就漏搜。
 //
 // 两侧唯一的能力差异（有意保留，不会造成漏搜）：JS 侧先做 NFD 分解去组合记号，SQL 侧没有这个能力。
@@ -99,14 +100,20 @@ export function sqlFold(expr: string): string {
   return `CASE WHEN ${expr} GLOB ${sqlLit(NON_ASCII_GLOB)} THEN lower(${out}) ELSE lower(${expr}) END`;
 }
 
-// 硬闸：列出既不在表内、又非 ASCII 的字符（有输出即说明该补表，而不是静默漏搜）。
+// 硬闸：列出既不在表内、又跟折叠有关的非 ASCII 字符（有输出即说明该补表，而不是静默漏搜）。
 // 按原始字符查表（不先做 NFD）：库里要过 SQL 那一侧，而 SQL 只有这张表。
+// 只报「折叠相关」的字符（拉丁字母 / 组合记号 / 本身能被 NFD 分解的），不报汉字、假名、全角标点这些：
+// 折叠对它们本来就是原地不动，SQL 与 JS 两侧都不动 ⇒ 不是漏搜，报了只会让警告变成狼来了。
+const FOLD_RELEVANT = /[\p{Script=Latin}\p{Mn}]/u;
+
 export function unmappedNameChars(names: Iterable<string>): string[] {
   const bad = new Set<string>();
   for (const name of names) {
     for (const ch of name) {
       if (ch.codePointAt(0)! < 0x80) continue;
-      if (!FOLD_MAP.has(ch)) bad.add(ch);
+      if (FOLD_MAP.has(ch)) continue;
+      if (!FOLD_RELEVANT.test(ch) && ch.normalize('NFD') === ch) continue;
+      bad.add(ch);
     }
   }
   return [...bad].sort((a, b) => a.codePointAt(0)! - b.codePointAt(0)!);
