@@ -1514,6 +1514,58 @@ tbody tr:hover td {
   min-width: 140px;
 }
 
+/* 增量 26 步骤 7：姓名搜索的本地推荐下拉（名册一次性预载后本地过滤） */
+.search-box {
+  position: relative;
+}
+
+.search-suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  /* 在顶栏（z-index 20）之下、表格之上：滚动到顶栏相接时下拉从顶栏下方滑走，不盖住导航 */
+  z-index: 10;
+  min-width: 260px;
+  max-width: 360px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(43, 29, 18, 0.16);
+}
+
+.search-suggest-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.search-suggest-item.on {
+  background: var(--terracotta-tint);
+}
+
+.search-suggest-name {
+  color: var(--ink);
+}
+
+.search-suggest-club {
+  font-size: 12px;
+}
+
+.search-suggest-hint {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .library-pager {
   display: flex;
   align-items: center;

@@ -8,6 +8,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from '../lib/ref.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
+import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
 import {
   COL_DEFS,
   DEFAULT_COLS,
@@ -300,24 +301,13 @@ export default function PlayersLibrary() {
               初始
             </button>
           </div>
-          <form
-            className="library-search"
-            onSubmit={(e) => {
-              e.preventDefault();
-              set('name', nameInput.trim());
-            }}
-          >
-            <input
-              type="search"
-              placeholder="按姓名找"
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              aria-label="按姓名找"
-            />
-            <button className="btn btn-sm" type="submit" disabled={busy}>
-              找
-            </button>
-          </form>
+          <PlayerSearchBox
+            value={nameInput}
+            onChange={setNameInput}
+            onSubmit={() => set('name', nameInput.trim())}
+            clubs={clubsQuery.data?.clubs ?? []}
+            busy={busy}
+          />
         </div>
 
         {/* 生效条件摘要条（增量 26 决策 18）：常驻一行，每条可单独撤掉；没有条件时留一行提示 */}
