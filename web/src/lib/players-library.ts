@@ -4,6 +4,7 @@
 // 留在页面里会形成页面 ↔ 组件的循环导入。
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from './ref.ts';
 import { FC26_GAME_ATTR_COLUMNS } from '../../../src/core/fc26.ts';
+import { SORT_KEY_NAMES } from '../../../src/core/players-sort.ts';
 
 // 细分属性白名单：与后端同一份来源（core/fc26 的 sprintspeed 起 34 项，players.ts 也这么切）。
 // 前端只用它做校验与下拉展示 —— 硬校验仍在后端；但校验口径必须一致，否则一个手改的
@@ -12,39 +13,11 @@ export const ATTR_KEYS: readonly string[] = FC26_GAME_ATTR_COLUMNS.slice(FC26_GA
 
 export type View = 'current' | 'initial';
 
-// 排序键：与 src/worker/routes/players.ts 的 SORT_KEY_NAMES 逐字一致（29 个固定键），
-// 外加 `attr:<属性键>`（后端同样支持按细分属性排序）。表头每一列都可点，映射见 FIXED_COLUMNS 与 COL_DEFS。
-export const SORT_KEYS = [
-  'id',
-  'uid',
-  'name',
-  'club',
-  'position',
-  'age',
-  'ca',
-  'pa',
-  'growable',
-  'influence',
-  'status',
-  'market_value',
-  'badges',
-  'prestige',
-  'base_ca',
-  'growth_gap',
-  'foot',
-  'growth_tier',
-  'future_star',
-  'china_plan',
-  'agent_tier',
-  'ps',
-  'fc_id',
-  'wage',
-  'release_fee',
-  'contract_type',
-  'source',
-  'protected',
-  'years',
-] as const;
+// 排序键：与后端共用同一份表（core/players-sort.ts，players.ts 也 import 它），外加
+// `attr:<属性键>`（后端同样支持按细分属性排序）。表头每一列都可点，映射见 FIXED_COLUMNS 与 COL_DEFS。
+// 从 core 引入而不是本地写一份：原先两边各一份字面量，测试比对的是硬编码副本，
+// 后端加键、前端漏加不会有任何断言报错
+export const SORT_KEYS = SORT_KEY_NAMES;
 
 export type SortKey = (typeof SORT_KEYS)[number] | `attr:${string}`;
 

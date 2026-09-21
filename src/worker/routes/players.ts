@@ -7,6 +7,7 @@ import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, POSITION_BY_ID } from '../../core/fc26.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
+import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
 import { playerAbilityLevel } from '../home.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -23,48 +24,13 @@ const CONTRACT_SOURCES = ['negotiation', 'forced', 'direct', 'import'] as const;
 const ATTR_KEYS: readonly string[] = FC26_GAME_ATTR_COLUMNS.slice(FC26_GAME_ATTR_COLUMNS.indexOf('sprintspeed'));
 const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
 
-// 球员库排序键（增量 6.1 d6；增量 26 扩到表头每一列）：id 沿旧整数游标 ASC（既有调用兼容）；
-// 数值键走 COALESCE 双向 keyset，NULL 当 0（ASC 排首、DESC 排尾）；文本键走文本游标，
-// 比较是 BINARY 码位序，靠表达式里的 lower() 拿 ASCII 大小写不敏感
-// 非数值列不按字母序而按下面的手写权重表：球队=clubs.id（即筛选下拉里的队序）、位置=门将→后卫→中场→前锋、
-// 状态=在队→挂牌→训练营→自由身→退役；这些列用户是按业务顺序找人的，字母序对它们没意义
+// 球员库排序键（增量 6.1 d6；增量 26 扩到表头每一列）：表本身在 src/core/players-sort.ts，
+// 与前端 web/src/lib/players-library.ts 共用同一份 —— 两边各写一份字面量时，后端加键前端漏加没人会发现
+// 键的语义（数值 keyset / 文本游标 / 手写权重序）见那个文件，实现见下面的 buildSortExprs
 // influence（增量 17）：规则 4.1.3 球员影响力=系数×能力等级×国际声望，现值口径，ROUND 2 位
 // view=initial（增量 6.1 d7）：初始球员库=导入时数据——CA=base_ca、PA=导入 json 值（归属无「初始」维度，
 // 增量 14 裁决 4 删掉 initial_club_id：它从不参与成长判定，只是同一件事的第二种说法）
-const SORT_KEY_NAMES = [
-  'id',
-  'uid',
-  'name',
-  'club',
-  'position',
-  'age',
-  'ca',
-  'pa',
-  'growable',
-  'influence',
-  'status',
-  'market_value',
-  'badges',
-  'prestige',
-  'base_ca',
-  'growth_gap',
-  'foot',
-  'growth_tier',
-  'future_star',
-  'china_plan',
-  'agent_tier',
-  'ps',
-  'fc_id',
-  'wage',
-  'release_fee',
-  'contract_type',
-  'source',
-  'protected',
-  'years',
-] as const;
-type SortKey = (typeof SORT_KEY_NAMES)[number];
-// 文本键：游标里带的是字符串而不是数字（其余键一律按数值比大小）
-const TEXT_SORT_KEYS: ReadonlySet<SortKey> = new Set<SortKey>(['name', 'contract_type', 'source']);
+type SortKey = SortKeyName;
 // 游标里文本值的长度上限：库里最长姓名 22 字符（生产实测），拦掉塞长串游标的玩法
 const TEXT_CURSOR_MAX = 120;
 

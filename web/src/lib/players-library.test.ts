@@ -3,6 +3,7 @@
 // 这层此前完全没有测试（vitest 的 include 不含 web/），而左栏搬家的多数逻辑都在这里。
 import { describe, expect, it } from 'vitest';
 import { FC26_GAME_ATTR_COLUMNS } from '../../../src/core/fc26.ts';
+import { SORT_KEY_NAMES } from '../../../src/core/players-sort.ts';
 import {
   ATTR_KEYS,
   COL_DEFS,
@@ -32,8 +33,11 @@ function filters(patch: Partial<Filters>): Filters {
 }
 
 describe('排序键', () => {
-  it('29 个固定键与后端 SORT_KEY_NAMES 同序', () => {
+  it('29 个固定键，且就是后端那份表本身（不是副本）', () => {
     expect(SORT_KEYS).toHaveLength(29);
+    // 同一引用：前端这份就是 core/players-sort.ts 导出的那个数组，后端 players.ts 也 import 它。
+    // 断言字面量清单只会钉住硬编码副本 —— 后端加键、前端漏加时两边各自「自洽」而无人报错
+    expect(SORT_KEYS).toBe(SORT_KEY_NAMES);
     expect(SORT_KEYS).toEqual([
       'id', 'uid', 'name', 'club', 'position', 'age', 'ca', 'pa', 'growable', 'influence',
       'status', 'market_value', 'badges', 'prestige', 'base_ca', 'growth_gap', 'foot',
