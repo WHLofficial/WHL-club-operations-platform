@@ -166,6 +166,9 @@ export default function PlayersLibrary() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const asideRef = useRef<HTMLElement | null>(null);
+  // 关抽屉时是否要把焦点交还入口按钮（见下面 closeDrawer 的注释）
+  const restoreFocus = useRef(false);
 
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -295,9 +298,19 @@ export default function PlayersLibrary() {
 
   // 抽屉关闭：× / 遮罩 / Esc 三条路都走这里，焦点交还给入口按钮（键盘用户不至于掉到文档开头）
   const closeDrawer = () => {
+    restoreFocus.current = true;
     setDrawerOpen(false);
-    toggleRef.current?.focus();
   };
+
+  // 焦点归位必须等这次提交落地再 focus：入口按钮在工具条里，而工具条开着时是 inert 的，
+  // 关闭当帧 focus() 会被浏览器静默忽略（实测 activeElement 掉到 body）。jsdom 不实现 inert
+  // 的焦点拦截，所以这条只有真浏览器能抓到。
+  useEffect(() => {
+    if (drawerOpen) return;
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    toggleRef.current?.focus();
+  }, [drawerOpen]);
 
   // 抽屉开着时：锁背景滚动（不然滑抽屉会带着表格一起滚）、Esc 关闭、焦点移进抽屉
   useEffect(() => {
@@ -306,6 +319,8 @@ export default function PlayersLibrary() {
     document.body.style.overflow = 'hidden';
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
+      // 内层组件已经消化过的 Esc 不再二次响应（搜索框按 Esc 只收下拉，不该把抽屉一起关掉）
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') closeDrawer();
     };
     window.addEventListener('keydown', onKey);
@@ -315,9 +330,13 @@ export default function PlayersLibrary() {
     };
   }, [drawerOpen]);
 
-  // 回到宽屏就把抽屉状态放掉：抽屉是窄屏专属形态，留着会让宽屏下一开窗就带遮罩
+  // 回到宽屏就把抽屉状态放掉：抽屉是窄屏专属形态，留着会让宽屏下一开窗就带遮罩。
+  // 焦点若还在抽屉里（× 是窄屏专属，一拉宽就 display:none），交还给入口按钮，别让它掉到 body
   useEffect(() => {
-    if (!narrow) setDrawerOpen(false);
+    if (narrow) return;
+    setDrawerOpen(false);
+    const active = document.activeElement;
+    if (active && asideRef.current?.contains(active)) toggleRef.current?.focus();
   }, [narrow]);
 
   return (
@@ -326,7 +345,7 @@ export default function PlayersLibrary() {
       <p className="muted">全联盟的公开名册。点姓名进球员档案；筛了哪一项，表里就自动多哪一列（列选择器里手动调过则以手动为准）。</p>
 
       <section className="card">
-        <div className="library-controls">
+        <div className="library-controls lib-toolbar" inert={narrow && drawerOpen}>
           {/* 宽屏开合左栏、窄屏开抽屉：同一个按钮、两种语义，计数徽标两边共用 */}
           <button
             ref={toggleRef}
@@ -389,11 +408,15 @@ export default function PlayersLibrary() {
 
         <div className={`${sideOpen ? 'library-shell' : 'library-shell collapsed'}${drawerOpen ? ' drawer-open' : ''}`}>
           {/* 窄屏关着时 inert：抽屉虽在屏幕外仍占 DOM，不加这个 Tab 能一路走进那几十个输入框。
-              宽屏不用（左栏是常驻的，inert 会把正常使用的侧栏一起锁掉） */}
+              宽屏不用（左栏是常驻的，inert 会把正常使用的侧栏一起锁掉）。
+              开着时反过来：抽屉是模态形态（遮罩 + 锁滚），背景也要 inert，否则 Shift+Tab 能逃到遮罩后面 */}
           <aside
+            ref={asideRef}
             className="library-side"
             id="library-side"
             aria-label="筛选与显示列"
+            role={narrow && drawerOpen ? 'dialog' : undefined}
+            aria-modal={narrow && drawerOpen ? true : undefined}
             inert={narrow && !drawerOpen}
           >
             {/* 抽屉抬头只在窄屏出现（宽屏 display:none）：标题 + 关闭按钮，与遮罩、Esc 同一出口 */}
@@ -425,7 +448,7 @@ export default function PlayersLibrary() {
             />
           </aside>
 
-          <div className="library-main">
+          <div className="library-main" inert={narrow && drawerOpen}>
             {filters.view === 'initial' && (
               <p className="hint">初始视图是导入时的底册：CA 取建档值，PA 取导入的上限值。所属球队列给的是当前归属。</p>
             )}

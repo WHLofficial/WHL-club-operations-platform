@@ -43,6 +43,9 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /* 抽屉锁滚会去掉滚动条：Windows 经典滚动条下内容区凭空宽 16px，整页横跳一次
+     （实测 clientWidth 878 → 894）。常驻一条 gutter 就不动了。 */
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -1778,8 +1781,11 @@ tbody tr:hover td {
     padding-left: 0;
   }
 
-  /* 工具条整行吸顶（决策 16）：滚动时「筛选（N）」这个抽屉入口常驻可见 */
-  .library-controls {
+  /* 工具条整行吸顶（决策 16）：滚动时「筛选（N）」这个抽屉入口常驻可见。
+     必须只命中页面工具条（.lib-toolbar）：FilterPanel 里也有一行 .library-controls，
+     抽屉是独立滚动容器，那条规则会把抽屉内那一行按 top: var(--topbar-h) 往下推、
+     盖住下面的位置 chip（375px 实测挡掉头两行），所以下面还要显式归位。 */
+  .lib-toolbar {
     position: sticky;
     top: var(--topbar-h);
     z-index: 5;
@@ -1787,8 +1793,19 @@ tbody tr:hover td {
     padding: 12px 0 10px;
   }
 
+  .library-side .library-controls {
+    position: static;
+    top: auto;
+    padding: 0;
+  }
+
+  /* 抬头（含唯一的 × ）在抽屉里吸顶：抽屉内容一长就滚，关闭入口不能跟着滚走 */
   .lib-drawer-head {
     display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--card);
   }
 }
 
