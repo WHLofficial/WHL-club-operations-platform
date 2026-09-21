@@ -6,7 +6,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
-import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from '../lib/ref.ts';
+import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, playstyleIsGold } from '../lib/ref.ts';
+import { PS_GOLD_BASE, isGoldPlaystyleId } from '../../../src/core/fc26.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
 import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
@@ -62,13 +63,14 @@ function money(x: number | null): string {
 // 增量 25：效力时长按窗刻度存储（赛季数），不再由日期折算
 
 // PlayStyle 槽位原值 → 显示名（psIds 与槽位对齐、缺槽 null；金徽=基础 ID+100，或金槽 13+）
+// 金徽判定与基础 ID 剥离都走 core/ref 的口径，别在这里再写一遍 >=100 / -100
 function psNames(row: PlayerLibraryRow): string {
   if (!row.psIds || row.psIds.length === 0) return '—';
   const names = row.psIds
     .map((v, slot) => {
       if (v === null) return null;
-      const gold = v >= 100 || slot >= 13;
-      const base = v >= 100 ? v - 100 : v;
+      const gold = playstyleIsGold(v, slot);
+      const base = isGoldPlaystyleId(v) ? v - PS_GOLD_BASE : v;
       const ref = playstyleById.get(base);
       const name = ref?.chs ?? ref?.en ?? String(v);
       return gold ? `金·${name}` : name;

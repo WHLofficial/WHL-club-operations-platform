@@ -494,7 +494,7 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     expect(withContract.players[0]!.protected).toBe(true);
   });
 
-  it('PlayStyle 多选：银槽基础 ID 与金槽 ID+100 都命中；非法值 400', async () => {
+  it('PlayStyle 多选：银徽只命中银槽、金徽（ID+100）只命中金槽；非法值 400', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`
       INSERT INTO players (id, uid, name, game_attrs) VALUES
@@ -503,8 +503,12 @@ describe('球员库 total 与新筛选（增量 17）', () => {
         (53, 's3', '无徽', NULL);
     `);
     expect((await list17('/api/players?ps=1', fx.env)).players.map((p) => p.id)).toEqual([51]);
-    const gold = await list17('/api/players?ps=2', fx.env);
-    expect(gold.players.map((p) => p.id)).toEqual([52]); // 102=2+100
+    // 增量 27 步骤 4 改语义：2 是银徽章 ID，52 号只有金槽的 102（=2+100），不再算命中
+    expect((await list17('/api/players?ps=2', fx.env)).players.map((p) => p.id)).toEqual([]);
+    const gold = await list17('/api/players?ps=102', fx.env);
+    expect(gold.players.map((p) => p.id)).toEqual([52]);
+    // 银金混选：一段一命中，各查各的槽
+    expect((await list17('/api/players?ps=1,102', fx.env)).players.map((p) => p.id)).toEqual([51, 52]);
     // psIds 与槽位对齐：52 号只有金槽 13（下标 12）有值，前面 12 个槽是 null
     const goldRow = gold.players.find((p) => p.id === 52)!;
     expect(goldRow.psIds).toHaveLength(15);
@@ -514,6 +518,20 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     expect((await list17('/api/players?ps=9', fx.env)).players.map((p) => p.id)).toEqual([]);
     expect((await get('/api/players?ps=0', fx.env)).status).toBe(400);
     expect((await get('/api/players?ps=abc', fx.env)).status).toBe(400);
+    // 100 夹在银段与金段之间（银 1-99 / 金 101-199），200 越界，都是非法值
+    expect((await get('/api/players?ps=100', fx.env)).status).toBe(400);
+    expect((await get('/api/players?ps=200', fx.env)).status).toBe(400);
+    // 金值不会去碰银槽：给银槽塞个 102（脏数据）也不该被 ps=102 捞出来
+    fx.sqlite.exec(`UPDATE players SET game_attrs = '{"PSID1":102}' WHERE id = 51;`);
+    expect((await list17('/api/players?ps=102', fx.env)).players.map((p) => p.id)).toEqual([52]);
+    // 反方向也对称：银值落在金槽（脏数据）同样不被银段值捞出来 —— 银金各查各的槽
+    fx.sqlite.exec(`UPDATE players SET game_attrs = '{"PSID13":2}' WHERE id = 53;`);
+    expect((await list17('/api/players?ps=2', fx.env)).players.map((p) => p.id)).toEqual([]);
+    // 重复值去重后语义不变
+    fx.sqlite.exec(`UPDATE players SET game_attrs = '{"PSID1":2}' WHERE id = 53;`);
+    expect((await list17('/api/players?ps=2,2,2', fx.env)).players.map((p) => p.id)).toEqual([53]);
+    // 每个值要铺 12-15 个槽位条件，超量直接 400（地址栏手改能塞进任意长的清单）
+    expect((await get(`/api/players?ps=${Array.from({ length: 101 }, (_, i) => i + 1).join(',')}`, fx.env)).status).toBe(400);
   });
 
   it('club_id=free 筛无归属球员；market_value 区间', async () => {

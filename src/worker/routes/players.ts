@@ -4,7 +4,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { createConfigService } from '../../core/config.ts';
-import { FC26_GAME_ATTR_COLUMNS, POSITION_BY_ID } from '../../core/fc26.ts';
+import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, isGoldPlaystyleId, isPlaystyleId } from '../../core/fc26.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
@@ -45,10 +45,10 @@ const POSITION_SORT_CASE = `CASE players.position
 const STATUS_SORT_CASE = `CASE players.status
   WHEN 'normal' THEN 1 WHEN 'listed' THEN 2 WHEN 'trainee' THEN 3 WHEN 'free' THEN 4 WHEN 'retired' THEN 5
   ELSE 0 END`;
-// PlayStyle 列按「挂了几个」排：PSID1-15 的非空槽计数（金徽存的是基础 ID+100，仍是同一个槽）。
+// PlayStyle 列按「挂了几个」排：PSID1-15 的非空槽计数（金徽槽存的是基础 ID+100，仍是同一个槽）。
 // 每个 IS NOT NULL 必须自带括号：SQLite 里 + 的优先级高于 IS NOT NULL，不括起来会被解析成一整串比较
 const PS_COUNT_EXPR = `(${Array.from(
-  { length: 15 },
+  { length: PS_SLOT_COUNT },
   (_, i) => `(json_extract(players.game_attrs, '$.PSID${i + 1}') IS NOT NULL)`,
 ).join(' + ')})`;
 
@@ -393,21 +393,39 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       filterArgs.push(n);
     }
   }
-  // PlayStyle 多选：PSID1-15 任一槽命中即入册；金徽存基础 ID+100（§5.2），两种形态都算。
-  // 命中时 15 个槽位原值随行带回（psIds），前端列联动渲染 PlayStyle 名用
+  // PlayStyle 多选（增量 27 步骤 4 改语义）：银徽章 ID（1-99）只命中银槽 1-12，
+  // 金徽章 ID（101-199，= 基础 ID+100）只命中金槽 13-15。
+  // 改之前是 `IN (n, n+100)` 全槽匹配，于是「筛某银徽章」会把只挂了对应金徽章的球员
+  // 一并捞出来（两类徽章在数据上是两件事，界面上分了两段，命中语义必须跟着分）；
+  // 顺带修掉一个真 bug：白名单只收 1-99，点金徽章必然 400。
   const psRaw = c.req.query('ps');
   let psSlotSelects = '';
   if (psRaw !== undefined) {
-    const list = psRaw
-      .split(',')
-      .map((p) => Number(p.trim()))
-      .filter((p) => p !== 0);
+    const list = [
+      ...new Set(
+        psRaw
+          .split(',')
+          .map((p) => Number(p.trim()))
+          .filter((p) => p !== 0),
+      ),
+    ];
     if (list.length === 0) throw new HttpError(400, 'ps 不能为空');
-    if (list.some((n) => !Number.isInteger(n) || n < 1 || n > 99)) throw new HttpError(400, 'ps 应为基础 PlayStyle ID（1-99）');
-    const marks = list.flatMap((n) => [n, n + 100]).map(() => '?').join(',');
-    const psSlots = Array.from({ length: 15 }, (_, i) => `json_extract(players.game_attrs, '$.PSID${i + 1}')`);
-    filters.push(`(${psSlots.map((s) => `${s} IN (${marks})`).join(' OR ')})`);
-    for (let i = 0; i < psSlots.length; i++) filterArgs.push(...list.flatMap((n) => [n, n + 100]));
+    // 一个值要铺 12-15 个槽位条件，重复值会成倍放大 OR 链与绑定参数（地址栏手改能塞进来）
+    if (list.length > PS_FILTER_MAX_ITEMS) throw new HttpError(400, `ps 最多 ${PS_FILTER_MAX_ITEMS} 项`);
+    if (list.some((n) => !isPlaystyleId(n))) {
+      throw new HttpError(400, `ps 应为银徽章 ID（1-${PS_SILVER_MAX}）或金徽章 ID（${PS_GOLD_MIN}-${PS_GOLD_MAX}）`);
+    }
+    const psSlots = Array.from({ length: PS_SLOT_COUNT }, (_, i) => `json_extract(players.game_attrs, '$.PSID${i + 1}')`);
+    // 银值 × 银槽、金值 × 金槽：值只跟同段的槽比对，槽位段界来自 core/fc26 的口径常量
+    const checks: string[] = [];
+    for (const value of list) {
+      const slots = isGoldPlaystyleId(value) ? psSlots.slice(PS_SILVER_SLOT_COUNT) : psSlots.slice(0, PS_SILVER_SLOT_COUNT);
+      for (const slot of slots) {
+        checks.push(`${slot} = ?`);
+        filterArgs.push(value);
+      }
+    }
+    filters.push(`(${checks.join(' OR ')})`);
     psSlotSelects = psSlots.map((s, i) => `, ${s} AS ps${i + 1}`).join('');
   }
   // 合同维度（现行合同：player_id UNIQUE 不产生重复行）
@@ -641,7 +659,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     attrValue: attrValueExpr ? (r.attr_value ?? null) : undefined,
     // 槽位对齐：保留 15 长度、缺槽为 null——前端金徽判定要按真实槽位（13+ 为金槽）
     psIds: psSlotSelects
-      ? Array.from({ length: 15 }, (_, i) => {
+      ? Array.from({ length: PS_SLOT_COUNT }, (_, i) => {
           const v = (r as Record<string, unknown>)[`ps${i + 1}`];
           return v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
         })

@@ -98,12 +98,24 @@ describe('URL → 筛选状态', () => {
     });
   });
 
-  it('位置白名单外的值被丢掉，PlayStyle 只收 1–99 的整数', () => {
+  it('位置白名单外的值被丢掉，PlayStyle 收银段（1-99）与金段（101-199），100 与越界值丢掉', () => {
     withQuery('position=GK,XX,门将&ps=0,3,abc,200', () => {
       const f = filtersFromUrl();
       expect(f.positions).toEqual(['GK']);
       expect(f.ps).toEqual([3]);
     });
+    // 增量 27 步骤 4：金徽章 ID（基础 ID+100）合法，100 是两段之间的空档、200 越界
+    withQuery('ps=101,125,100,200,-1', () => {
+      expect(filtersFromUrl().ps).toEqual([101, 125]);
+    });
+  });
+
+  it('金段 PlayStyle 发出的 URL 也合法（银金各查各的槽，值本身就是两段的 ID）', () => {
+    const q = (f: Filters) => new URLSearchParams(filtersToQuery(f));
+    expect(q(filters({ ps: [3, 101] })).get('ps')).toBe('3,101');
+    // 模型里混进脏值（比如手改 URL 的中间态）时不发出去：后端会 400，整个列表变错误态
+    expect(q(filters({ ps: [3, 100, 200] })).get('ps')).toBe('3');
+    expect(q(filters({ ps: [100] })).has('ps')).toBe(false);
   });
 
   it('非法 sort 回落默认 id，合法属性列排序可通过 URL 分享', () => {

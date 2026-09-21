@@ -124,6 +124,30 @@ export const FC26_GAME_ATTR_COLUMNS: readonly string[] = [
   'gkreflexes',
 ];
 
+// PlayStyle 槽位与两段 ID 口径（TECH_DESIGN §5.2）：15 个槽里 1-12 是银槽、13-15 是金槽；
+// 金徽落库时存「基础 ID + 100」，于是银段 1-99、金段 101-199 互不重叠（100 是空档）。
+// 后端筛选、前端下拉与两侧 URL 白名单共用这一份，别再各自写 1-99 这样的字面量。
+export const PS_SLOT_COUNT = 15;
+export const PS_SILVER_SLOT_COUNT = 12;
+export const PS_GOLD_BASE = 100;
+export const PS_SILVER_MAX = 99;
+export const PS_GOLD_MIN = PS_GOLD_BASE + 1;
+export const PS_GOLD_MAX = PS_GOLD_BASE + PS_SILVER_MAX;
+
+// 合法的 PlayStyle 筛选值：银段 1-99 或金段 101-199
+export function isPlaystyleId(n: number): boolean {
+  return Number.isInteger(n) && ((n >= 1 && n <= PS_SILVER_MAX) || (n >= PS_GOLD_MIN && n <= PS_GOLD_MAX));
+}
+
+// ps 筛选一次最多接受多少个值：每个值要铺 12-15 个槽位条件，地址栏手改能塞进任意长的清单
+// （面板实际能勾 72 项 —— 银 36 + 金 36，100 是给 ref 表扩项留的余量）
+export const PS_FILTER_MAX_ITEMS = 100;
+
+// 金徽章：ID 落在金段（= 基础 ID + 100），只可能出现在金槽里
+export function isGoldPlaystyleId(n: number): boolean {
+  return n >= PS_GOLD_MIN;
+}
+
 // 通道 B（FC Editor s901）必需列；姓名列 commonname/firstname/lastname 缺一可用
 export const FC_EDITOR_REQUIRED_COLUMNS = [
   'playerid',

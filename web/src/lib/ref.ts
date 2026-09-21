@@ -5,6 +5,7 @@ import positionRef from '../../assets/ref/position.json';
 import playstyleRef from '../../assets/ref/playstyle.json';
 import roleRef from '../../assets/ref/role.json';
 import teamRef from '../../assets/ref/team.json';
+import { isGoldPlaystyleId, PS_SILVER_SLOT_COUNT } from '../../../src/core/fc26.ts';
 
 export interface PlayStyleRow {
   id: number;
@@ -55,9 +56,10 @@ export function roleChs(id: unknown): string | null {
   return row.chs ?? row.en ?? null;
 }
 
-// 金段徽章 = 基础 ID+100（§5.2）；槽位口径：1-7 银槽、13 起金槽
+// 金段徽章 = 基础 ID+100（§5.2）；槽位口径：1-12 银槽、13 起金槽（常量在 core/fc26.ts，
+// 与后端筛选共用一份 —— 两边各写一次「>= 100」就是下次改段界时的漂移入口）
 export function playstyleIsGold(psid: number, slot: number): boolean {
-  return psid >= 100 || slot >= 13;
+  return isGoldPlaystyleId(psid) || slot > PS_SILVER_SLOT_COUNT;
 }
 
 export function playstyleIconUrl(id: number): string {

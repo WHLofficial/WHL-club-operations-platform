@@ -1818,6 +1818,9 @@ tbody tr:hover td {
   box-shadow: 0 0 0 3px rgba(164, 97, 44, 0.15);
 }
 
+/* PlayStyle 下拉（增量 27 步骤 4）：夹在「细分属性」栅格下方的一整行控件，
+   触发器只写「PlayStyle · N」，银/金两段与六类分组都在面板里（.multiselect-section / .multiselect-group）。
+   父级 .lib-adv-group 是 block（不是 flex 容器），所以这里只留一条上间距，不写 flex 属性 */
 .lib-adv-ps {
   margin-top: 10px;
 }

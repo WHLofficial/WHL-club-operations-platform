@@ -5,6 +5,7 @@ import type { ClubDirectoryRow } from '../lib/api.ts';
 import MultiSelect, { type MultiSelectItem } from './MultiSelect.tsx';
 import { ATTR_GROUPS, ATTR_LABELS, playstyleById, SOURCE_LABEL } from '../lib/ref.ts';
 import { COL_DEFS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
+import { isGoldPlaystyleId } from '../../../src/core/fc26.ts';
 
 export interface FilterPanelProps {
   filters: Filters;
@@ -22,9 +23,32 @@ export interface FilterPanelProps {
   resetCols: () => void;
 }
 
-// PlayStyle 下拉数据：ref 表按类型分组（id 0 是占位）
-const PLAYSTYLES = [...playstyleById.values()].filter((r) => r.id > 0);
-const PS_TYPES = [...new Set(PLAYSTYLES.map((r) => r.type ?? '其他'))];
+// PlayStyle 下拉数据（增量 27 步骤 4）：银徽章与金徽章是两件事——金徽在库里存「基础 ID+100」
+// 且只进金槽（core/fc26.ts 的两段 ID 口径），所以顶层分两段、段内再按 EA 的六类分组。
+// 段名排在 id 序之前：ref 表是按 id 升序的，不排序也能得到「先银后金」，但表一旦被重排就会串段。
+const PS_TYPE_CN: Record<string, string> = {
+  Finishing: '射门',
+  Passing: '传球',
+  Defending: '防守',
+  Ballcontrol: '控球',
+  Physical: '体格',
+  Goalkeeper: '门将',
+};
+
+function psItem(row: { id: number; chs?: string; en?: string; type?: string }, section: string): MultiSelectItem {
+  return {
+    value: String(row.id),
+    label: row.chs ?? row.en ?? String(row.id),
+    section,
+    group: PS_TYPE_CN[row.type ?? ''] ?? row.type ?? '其他',
+  };
+}
+
+const PS_ROWS = [...playstyleById.values()].filter((r) => r.id > 0);
+const PS_ITEMS: MultiSelectItem[] = [
+  ...PS_ROWS.filter((r) => !isGoldPlaystyleId(r.id)).map((r) => psItem(r, '银徽章')),
+  ...PS_ROWS.filter((r) => isGoldPlaystyleId(r.id)).map((r) => psItem(r, '金徽章')),
+];
 
 // 位置与显示列的多选下拉条目（增量 27 步骤 3）；位置只有 12 个码位、不分段
 const POSITION_ITEMS: MultiSelectItem[] = POSITIONS.map((p) => ({ value: p, label: p }));
@@ -203,17 +227,13 @@ export default function FilterPanel({
               </label>
             </div>
             <div className="lib-adv-ps">
-              <span className="muted">PlayStyle（多选，金徽也算）</span>
-              {PS_TYPES.map((type) => (
-                <div key={type} className="lib-chip-row">
-                  <span className="muted lib-chip-label">{type}</span>
-                  {PLAYSTYLES.filter((r) => (r.type ?? '其他') === type).map((r) => (
-                    <button key={r.id} type="button" className={`lib-chip${filters.ps.includes(r.id) ? ' on' : ''}`} onClick={() => togglePs(r.id)}>
-                      {r.chs ?? r.en ?? r.id}
-                    </button>
-                  ))}
-                </div>
-              ))}
+              <MultiSelect
+                label="PlayStyle"
+                items={PS_ITEMS}
+                selected={filters.ps.map(String)}
+                onToggle={(v) => togglePs(Number(v))}
+                onClear={() => set('ps', [])}
+              />
             </div>
           </div>
           <div className="lib-adv-group">

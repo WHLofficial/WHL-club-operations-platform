@@ -256,6 +256,27 @@ describe('左栏开合与摘要条（宽屏）', () => {
     expect(box).toHaveProperty('value', '');
   });
 
+  it('PlayStyle 下拉：面板分银/金两段，选金徽章发的是金段 ID（101 = 基础 ID+100）', async () => {
+    const user = open();
+    await screen.findByRole('link', { name: 'Šeško' });
+    const side = document.getElementById('library-side') as HTMLElement;
+    // 「更多筛选」默认收起（jsdom 里直接置 open，真实的点摘要动作交给 e2e）
+    (side.querySelector('details.lib-adv') as HTMLDetailsElement).open = true;
+
+    await user.click(within(side).getByRole('button', { name: /^PlayStyle/ }));
+    const panel = within(side).getByRole('group', { name: 'PlayStyle' });
+    expect(within(panel).getByText('银徽章')).toBeTruthy();
+    expect(within(panel).getByText('金徽章')).toBeTruthy();
+    // 六类分组的中文名（旧版铺的是英文 type）：银金两段各一份
+    expect(within(panel).getAllByText('门将')).toHaveLength(2);
+
+    // 选金徽章：旧版这条路径必然 400（前端序列化无白名单 + 后端只收 1-99）
+    await user.click(within(side).getByRole('checkbox', { name: '精准搓射 +' }));
+    await waitFor(() => expect(search()).toBe('?ps=101&limit=20'));
+    expect(lastListQuery()).toContain('ps=101');
+    expect(within(side).getByRole('button', { name: /^PlayStyle · 1/ })).toBeTruthy();
+  });
+
   it('显示列下拉：手动去掉一列后出现「恢复自动」，恢复后回到自动清单', async () => {
     const user = open();
     await screen.findByRole('link', { name: 'Šeško' });

@@ -3,7 +3,7 @@
 // 生效条件摘要条（filterChips）。拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，
 // 留在页面里会形成页面 ↔ 组件的循环导入。
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from './ref.ts';
-import { FC26_GAME_ATTR_COLUMNS } from '../../../src/core/fc26.ts';
+import { FC26_GAME_ATTR_COLUMNS, isPlaystyleId } from '../../../src/core/fc26.ts';
 import { SORT_KEY_NAMES } from '../../../src/core/players-sort.ts';
 
 // 细分属性白名单：与后端同一份来源（core/fc26 的 sprintspeed 起 34 项，players.ts 也这么切）。
@@ -202,9 +202,7 @@ export function filtersFromUrl(): Filters {
   f.futureStar = str('is_future_star') === '1';
   f.chinaPlan = str('china_plan') === '1';
   f.agentTier = str('agent_tier').replace(/\D/g, '');
-  f.ps = str('ps')
-    ? [...new Set(str('ps').split(',').map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 99))]
-    : [];
+  f.ps = str('ps') ? [...new Set(str('ps').split(',').map(Number).filter((n) => isPlaystyleId(n)))] : [];
   if (str('has_contract') === '1' || str('has_contract') === '0') f.hasContract = str('has_contract') as '1' | '0';
   f.rcNone = str('release_fee_none') === '1';
   f.contractType = str('contract_type');
@@ -251,7 +249,9 @@ export function filtersToQuery(f: Filters): string {
   put('is_future_star', f.futureStar ? '1' : '');
   put('china_plan', f.chinaPlan ? '1' : '');
   put('agent_tier', f.agentTier);
-  put('ps', f.ps.join(','));
+  // 金段 ID（101-199）也要发出去：银徽与金徽各查各的槽（增量 27 步骤 4）。
+  // 这里的过滤是防手改地址栏塞脏值 —— 后端会 400，整个列表变成错误态。
+  put('ps', f.ps.filter((n) => isPlaystyleId(n)).join(','));
   put('has_contract', f.hasContract);
   put('wage_min', f.wageMin);
   put('wage_max', f.wageMax);
