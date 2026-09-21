@@ -3,7 +3,7 @@
 // 生效条件摘要条（filterChips）。拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，
 // 留在页面里会形成页面 ↔ 组件的循环导入。
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from './ref.ts';
-import { FC26_GAME_ATTR_COLUMNS, isPlaystyleId } from '../../../src/core/fc26.ts';
+import { FC26_GAME_ATTR_COLUMNS, isGoldPlaystyleId, isPlaystyleId } from '../../../src/core/fc26.ts';
 import { SORT_KEY_NAMES } from '../../../src/core/players-sort.ts';
 
 // 细分属性白名单：与后端同一份来源（core/fc26 的 sprintspeed 起 34 项，players.ts 也这么切）。
@@ -372,12 +372,22 @@ const RANGE_CHIP_GROUPS: [keyof Filters, keyof Filters, string, string][] = [
   ['yearsMin', 'yearsMax', '效力时长', ' 赛季'],
 ];
 
+// 摘要条里的徽章名：金段的 chs/en 都带 " +" 后缀（参考表如此），金徽章那一类已经写在
+// chip 前缀里了，名字再拖一个加号是噪音。
+function psChipName(id: number, gold: boolean): string {
+  const ref = playstyleById.get(id);
+  const name = ref?.chs ?? ref?.en ?? String(id);
+  return gold ? name.replace(/\s*\+\s*$/, '') : name;
+}
+
 export function filterChips(f: Filters, clubs: readonly { id: number; name: string }[]): FilterChip[] {
   const chips: FilterChip[] = [];
   const push = (id: string, label: string, clear: Partial<Filters>) => chips.push({ id, label, clear });
 
   if (f.name) push('name', `姓名含「${f.name}」`, { name: '' });
-  for (const p of f.positions) push(`position:${p}`, `位置：${p}`, { positions: f.positions.filter((x) => x !== p) });
+  // 位置与 PlayStyle 是「一类一条」：多选很容易选出一串，逐个成 chip 会把摘要条铺满；
+  // 点 × 清掉整类。位置只此一条，PlayStyle 按银/金两段各一条（徽章名去掉金段的 " +" 后缀）。
+  if (f.positions.length > 0) push('positions', `位置：${f.positions.join('、')}`, { positions: [] });
   if (f.status) push('status', `状态：${STATUS_LABEL[f.status] ?? f.status}`, { status: '' });
   if (f.club) {
     const name = f.club === 'free' ? '自由身' : (clubs.find((c) => String(c.id) === f.club)?.name ?? f.club);
@@ -402,9 +412,13 @@ export function filterChips(f: Filters, clubs: readonly { id: number; name: stri
   if (f.agentTier) push('agentTier', `经纪人：${AGENT_TIER_LABEL[Number(f.agentTier)] ?? f.agentTier}`, { agentTier: '' });
   if (f.futureStar) push('futureStar', '仅未来之星', { futureStar: false });
   if (f.chinaPlan) push('chinaPlan', '仅中国计划', { chinaPlan: false });
-  for (const id of f.ps) {
-    const ref = playstyleById.get(id);
-    push(`ps:${id}`, `PlayStyle：${ref?.chs ?? ref?.en ?? id}`, { ps: f.ps.filter((n) => n !== id) });
+  const silverPs = f.ps.filter((n) => !isGoldPlaystyleId(n));
+  const goldPs = f.ps.filter((n) => isGoldPlaystyleId(n));
+  if (silverPs.length > 0) {
+    push('ps:silver', `银徽章：${silverPs.map((n) => psChipName(n, false)).join('、')}`, { ps: goldPs });
+  }
+  if (goldPs.length > 0) {
+    push('ps:gold', `金徽章：${goldPs.map((n) => psChipName(n, true)).join('、')}`, { ps: silverPs });
   }
   if (f.hasContract) push('hasContract', f.hasContract === '1' ? '仅有合同' : '仅无合同', { hasContract: '' });
   if (f.rcNone) push('rcNone', '无解约金条款', { rcNone: false });

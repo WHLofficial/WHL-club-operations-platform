@@ -1595,9 +1595,8 @@ tbody tr:hover td {
 .library-pager {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 16px;
-  margin-top: 14px;
+  margin-left: auto;
 }
 
 /* 增量 17 球员库改版：位置/PlayStyle 筛选 chips、高级筛选面板、列选择器 */
@@ -1989,14 +1988,26 @@ tbody tr:hover td {
   min-width: 0;
 }
 
-/* 生效条件摘要条：常驻一行可删 chips */
+/* 摘要条 × 翻页条同一行（增量 27 步骤 5）：摘要在左、翻页靠 margin-left:auto 贴右。
+   窄屏换行时两半各占一行，翻页仍贴右。没有筛选条件时摘要整块不渲染，这一行只剩翻页 */
+.lib-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  min-height: 28px;
+  margin-bottom: 12px;
+}
+
+/* 生效条件摘要条：一类一条可删 chips（位置一条、银/金徽章各一条）。
+   min-width:0 是为了让它在 .lib-bar 这个 flex 行里能被压缩换行（默认 min-width:auto 取
+   min-content，选中一长串位置时会把翻页条挤出这一行而不是自己折行） */
 .lib-summary {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  min-height: 24px;
-  margin-bottom: 12px;
+  min-width: 0;
   font-size: 13px;
 }
 

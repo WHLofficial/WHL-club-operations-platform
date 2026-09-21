@@ -254,11 +254,28 @@ describe('摘要条 chips', () => {
     }
   });
 
-  it('多个位置/PlayStyle 各自一条，删一条不丢另一条', () => {
+  it('位置与 PlayStyle 按类合并成一条 chip：删一条不会连另一类一起丢', () => {
     const chips = filterChips(filters({ positions: ['ST', 'GK'], ps: [3, 12] }), CLUBS);
-    const st = chips.find((c) => c.id === 'position:ST');
-    expect(st?.clear).toEqual({ positions: ['GK'] });
-    expect(chips.filter((c) => c.id.startsWith('ps:'))).toHaveLength(2);
+    const pos = chips.find((c) => c.id === 'positions');
+    expect(pos?.label).toBe('位置：ST、GK');
+    expect(pos?.clear).toEqual({ positions: [] });
+    // 3、12 都在银段 ⇒ 只出银徽章那一条
+    expect(chips.filter((c) => c.id.startsWith('ps:')).map((c) => c.id)).toEqual(['ps:silver']);
+    expect(chips.find((c) => c.id === 'ps:silver')?.clear).toEqual({ ps: [] });
+  });
+
+  it('银/金徽章各成一条：删银留金、删金留银，金徽章名去掉 " +" 后缀', () => {
+    const chips = filterChips(filters({ ps: [1, 101] }), CLUBS);
+    const silver = chips.find((c) => c.id === 'ps:silver');
+    const gold = chips.find((c) => c.id === 'ps:gold');
+    expect(silver?.label).toBe('银徽章：精准搓射');
+    expect(gold?.label).toBe('金徽章：精准搓射');
+    expect(silver?.clear).toEqual({ ps: [101] });
+    expect(gold?.clear).toEqual({ ps: [1] });
+    // 只有金段时同样只剩一条，且一删就清空（别退化成 clear 里留个拖不动的空银段）
+    const onlyGold = filterChips(filters({ ps: [101] }), CLUBS);
+    expect(onlyGold.map((c) => c.id)).toEqual(['ps:gold']);
+    expect(onlyGold.find((c) => c.id === 'ps:gold')?.clear).toEqual({ ps: [] });
   });
 
   it('俱乐部名从目录里查，自由身与未知 id 有各自的文案；状态用中文标签、未知状态回落原名', () => {

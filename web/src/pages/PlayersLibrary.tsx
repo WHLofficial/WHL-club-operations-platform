@@ -437,31 +437,6 @@ export default function PlayersLibrary() {
           />
         </div>
 
-        {/* 生效条件摘要条（增量 26 决策 18）：常驻一行，每条可单独撤掉；没有条件时留一行提示。
-            抽屉开着时它也要 inert：摘要是夹在工具条与表格之间的第三块背景区，漏掉它
-            Shift+Tab 就能落到 chip 上，回车会在遮罩后面把筛选撤掉 */}
-        <div className="lib-summary" role="group" aria-label="已生效的筛选条件" inert={narrow && drawerOpen}>
-          {chips.length === 0 ? (
-            <span className="muted">未设筛选条件</span>
-          ) : (
-            <>
-              <span className="lib-summary-label">已筛</span>
-              {chips.map((chip) => (
-                <button
-                  key={chip.id}
-                  type="button"
-                  className="lib-chip on"
-                  aria-label={`移除筛选：${chip.label}`}
-                  onClick={() => removeChip(chip)}
-                >
-                  {chip.label}
-                  <span aria-hidden="true">×</span>
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-
         {drawerOpen && narrow ? <div className="lib-drawer-mask" aria-hidden="true" onClick={closeDrawer} /> : null}
 
         <div className={`${sideOpen ? 'library-shell' : 'library-shell collapsed'}${drawerOpen ? ' drawer-open' : ''}`}>
@@ -513,17 +488,39 @@ export default function PlayersLibrary() {
 
             {loadError && <div className="banner warn">{loadError}</div>}
 
-            {/* 翻页信息与翻页条在表格上方：不用再沉底找 */}
-            <div className="library-pager">
-              <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => setPageIdx((p) => p - 1)}>
-                上一页
-              </button>
-              <span className="muted">
-                {total !== null ? `共 ${total} 名球员 · 共 ${totalPages} 页 · 第 ${pageIdx} 页` : `第 ${pageIdx} 页`}
-              </span>
-              <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
-                下一页
-              </button>
+            {/* 摘要条与翻页条合成一行（增量 27 步骤 5）：摘要在左、翻页贴右，表格上方不再
+                多占两行。摘要条在搬进这里的同时去掉了自己的 inert —— 整块 .library-main
+                在抽屉开着时已经 inert，夹在工具条与表格之间的那块背景区不再单独存在。
+                没有筛选条件时摘要整块不渲染：原先那句「未设筛选条件」占位只是把空白写得更显眼 */}
+            <div className="lib-bar">
+              {chips.length > 0 && (
+                <div className="lib-summary" role="group" aria-label="已生效的筛选条件">
+                  <span className="lib-summary-label">已筛</span>
+                  {chips.map((chip) => (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      className="lib-chip on"
+                      aria-label={`移除筛选：${chip.label}`}
+                      onClick={() => removeChip(chip)}
+                    >
+                      {chip.label}
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="library-pager">
+                <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => setPageIdx((p) => p - 1)}>
+                  上一页
+                </button>
+                <span className="muted">
+                  {total !== null ? `共 ${total} 名球员 · 共 ${totalPages} 页 · 第 ${pageIdx} 页` : `第 ${pageIdx} 页`}
+                </span>
+                <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
+                  下一页
+                </button>
+              </div>
             </div>
 
             {rows === null ? (

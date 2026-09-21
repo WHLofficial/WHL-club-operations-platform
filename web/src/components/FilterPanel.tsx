@@ -69,8 +69,9 @@ export default function FilterPanel({
   resetCols,
 }: FilterPanelProps) {
   // 成对区间输入（增量 27 步骤 2）：同属性的上下限并成一行两列，左「最低」右「最高」。
-  // 字段名与 URL 键一律不动（还是 caMin/caMax 这一套），这里只改版式与文案 ——
-  // 摘要条那边要不要合成一条 chip 是步骤 5 的事，别把两件事揉进一次改动。
+  // 字段名与 URL 键一律不动（还是 caMin/caMax 这一套），这里只改版式与文案。
+  // 摘要条那边不跟着合并（步骤 5 只并了位置与徽章）：上下限是两件独立的事，
+  // 「CA ≥ 70」和「CA ≤ 90」各留一条 chip，删一个不会把另一个也带走。
   const pair = (minKey: keyof Filters, maxKey: keyof Filters, label: string, hint?: string) => (
     <div className="pair">
       <span className="pair-label">

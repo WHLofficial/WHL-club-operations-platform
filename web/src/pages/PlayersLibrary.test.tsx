@@ -225,7 +225,8 @@ describe('左栏开合与摘要条（宽屏）', () => {
   it('选中一项筛选：出 chip、工具条计数跟着走，点 chip 的 × 撤掉', async () => {
     const user = open();
     await screen.findByRole('link', { name: 'Šeško' });
-    expect(screen.getByText('未设筛选条件')).toBeTruthy();
+    // 没有筛选条件时摘要条整块不渲染（增量 27 步骤 5 起不再留「未设筛选条件」占位）
+    expect(screen.queryByRole('group', { name: '已生效的筛选条件' })).toBeNull();
 
     const side = document.getElementById('library-side') as HTMLElement;
     await pickPosition(user, side, 'ST');
@@ -236,7 +237,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
 
     await user.click(screen.getByRole('button', { name: '移除筛选：位置：ST' }));
     await waitFor(() => expect(search()).toBe('?limit=20'));
-    expect(screen.getByText('未设筛选条件')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: '已生效的筛选条件' })).toBeNull();
     expect(screen.getByRole('button', { name: /^筛选$/ })).toBeTruthy();
   });
 
@@ -361,24 +362,23 @@ describe('窄屏筛选抽屉', () => {
     await screen.findByRole('link', { name: 'Šeško' });
     const main = document.querySelector('.library-main') as HTMLElement;
     const toolbar = document.querySelector('.lib-toolbar') as HTMLElement;
-    // 摘要条是夹在工具条与表格之间的第三块背景区，chip 是可聚焦按钮，漏掉它 Shift+Tab 就能
-    // 落到 chip 上、在遮罩后面把筛选撤掉
-    const summary = document.querySelector('.lib-summary') as HTMLElement;
+    // 摘要条（chip 是可聚焦按钮）自增量 27 步骤 5 起住在 .library-main 里，靠 main 的 inert 覆盖。
+    // 断言包含关系而不是它自己有没有 inert：一旦有人把摘要条搬回 main 外面，Shift+Tab 就又能
+    // 落到 chip 上、在遮罩后面把筛选撤掉，而这条测试不会有任何反应
+    const bar = document.querySelector('.lib-bar') as HTMLElement;
+    expect(main.contains(bar)).toBe(true);
     const aside = document.getElementById('library-side') as HTMLElement;
     expect(main.hasAttribute('inert')).toBe(false);
-    expect(summary.hasAttribute('inert')).toBe(false);
 
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
     expect(main.hasAttribute('inert')).toBe(true);
     expect(toolbar.hasAttribute('inert')).toBe(true);
-    expect(summary.hasAttribute('inert')).toBe(true);
     expect(aside.getAttribute('role')).toBe('dialog');
     expect(aside.getAttribute('aria-modal')).toBe('true');
 
     await user.keyboard('{Escape}');
     await waitFor(() => expect(main.hasAttribute('inert')).toBe(false));
     expect(toolbar.hasAttribute('inert')).toBe(false);
-    expect(summary.hasAttribute('inert')).toBe(false);
     expect(aside.getAttribute('role')).toBeNull();
   });
 

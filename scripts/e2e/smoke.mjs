@@ -203,13 +203,15 @@ async function main() {
       assert(Array.isArray(pj.players) && typeof pj.total === 'number', '球员库响应缺 players/total');
     });
 
-    await check('④ 球员库页：左栏 + 摘要条 + 表头点排序', async () => {
+    await check('④ 球员库页：左栏 + 翻页条 + 表头点排序', async () => {
       await page.goto(`${BASE}/players`, { waitUntil: 'domcontentloaded' });
       await page.locator('.library-shell').first().waitFor({ timeout: TIMEOUT });
       // 等名册落地：加载中只有「正在翻名册…」，此时既没有表头也没有空态
       await page.locator('.library-main tbody tr, .library-main .empty-state').first().waitFor({ timeout: TIMEOUT });
       assert(await page.locator('.library-side').isVisible(), '宽屏下左栏不可见');
-      assert(await page.locator('.lib-summary').isVisible(), '摘要条不可见');
+      // 摘要条与翻页条同一行（增量 27 步骤 5）；没有筛选条件时摘要整块不渲染，只剩翻页
+      assert(await page.locator('.lib-bar .library-pager').isVisible(), '翻页条不可见');
+      assert((await page.locator('.lib-summary').count()) === 0, '未设筛选时不应有摘要条');
       // 排序入口自增量 26 起是表头（工具栏的排序下拉与方向段控件已删除）
       const headers = page.locator('.library-main thead button.th-sort');
       if ((await headers.count()) === 0) {
