@@ -294,7 +294,7 @@
 
 ---
 
-## 增量 25 · 合同期与财政节点改窗刻度——效力/保护期/解约费按常规窗计时 + 窗分型（临时窗）+ 忠诚奖金移入中期窗 + 税最先扣（2026-09-20 本地完成，push/部署等令）
+## 增量 25 · 合同期与财政节点改窗刻度——效力/保护期/解约费按常规窗计时 + 窗分型（临时窗）+ 忠诚奖金移入中期窗 + 税最先扣（2026-09-20 本地完成，2026-09-21 随 Version b83ec876 上线）
 
 **范围**：规则以赛季/半赛季为主刻度（4.2.3 工资帽半赛季周期、4.3.1 保护期 1.5 赛季、4.3.2 忠诚奖金按赛季、4.4.4 效力满 3 年免费解约），原实现按自然日折算（`PROTECTION_DAYS = 548` 天、`(now − effective_from) ÷ 365.25` 年），属口径错；本轮把合同期与资金动账节点一并定时点。
 
@@ -309,15 +309,15 @@
 
 **验收**：`npm test` **31 文件 / 397 用例全绿**（原基线 30 / 387），`npm run typecheck`（三份 tsconfig）与 `npm run build` 过。自审（code-review-skill 四阶段）无阻断项：全部调用点核对无遗漏（`PROTECTION_DAYS` / `protected_until` / `365.25` 仅剩迁移注释与导入模板映射）；`currentWindow` 与原 `getOpenWindow` 的 SQL 逐字一致（只多读 `is_temporary`），无回归；`settleSeason` 的 `growable` 批次下标在语句数减少后仍正确。
 
-**遗留**：~~`0028` 未 apply~~ → **2026-09-21 已随合同导入批 apply 到生产（生产迁移现到 0028）**；**worker 仍未部署**（增量 25 的线上代码不在生产，网页面板建合同会落 DDL 默认刻度，下次开窗前应先 `npm run deploy`）；旧列 `protected_until`（signed_at + 548 天）保留留档、判定不再读；导入历史合同的签约基数按日期串截断，与签约同日关的窗不计（效力算得更年轻，已在 `closedRegularTicks` 注明）；e2e 冒烟未跑（本轮不涉页面结构，仍是增量 23 的 8 场景）。
+**遗留**：~~`0028` 未 apply~~ → **2026-09-21 已随合同导入批 apply 到生产（生产迁移现到 0028）**；~~worker 仍未部署~~ → **2026-09-21 已随 Version `b83ec876` 上线**（网页面板建合同不再落 DDL 默认刻度）；旧列 `protected_until`（signed_at + 548 天）保留留档、判定不再读；导入历史合同的签约基数按日期串截断，与签约同日关的窗不计（效力算得更年轻，已在 `closedRegularTicks` 注明）；e2e 冒烟未跑（本轮不涉页面结构，仍是增量 23 的 8 场景）。
 
 **文档**：TECH_DESIGN §6.3（窗内回滚还原 `protection_ticks`）、§8 窗末结算（临时窗不收冠名租金）、§11 结算段与关窗批（增量 25 改口径三条）、§13 `loyalty_tiers` 单位改赛季、§15 假设 13/14 重写为窗刻度 + 新增假设 39（窗分型与效力推进点）/40（临时窗扣费与忠诚奖金中期发）、附录 A 窗口两行与赛季结算行；PRD 合同台账/解约/续约/赛季结算/假设 5；UI_DESIGN 卷宗条款与「收口」文案；README 与 AGENTS.md 的迁移数与测试数；CHANGELOG [未发布] 增量 25 节。
 
 ---
 
-## 增量 26 · 球员库筛选搬进左栏——筛选/显示列左置 + 表头点排序（29 键）+ 姓名去变音搜索 + 窄屏抽屉（2026-09-21 本地完成，push/部署等令）
+## 增量 26 · 球员库筛选搬进左栏——筛选/显示列左置 + 表头点排序（29 键）+ 姓名去变音搜索 + 窄屏抽屉（2026-09-21 完成并随 Version b83ec876 上线）
 
-**范围**：球员库（`/players`）的筛选控件原先横铺在表格上方、随表格一起滚走；搜索只做裸 `LIKE`（「sesko」搜不到「Šeško」）；排序只有 6 个键、走下拉框。本轮把筛选与显示列搬进球员列左侧的固定栏（窄屏改抽屉）、搜索走去变音折叠、排序键扩到表头每一列且可点表头排序。**不写任何生产数据、不 push、不部署。**
+**范围**：球员库（`/players`）的筛选控件原先横铺在表格上方、随表格一起滚走；搜索只做裸 `LIKE`（「sesko」搜不到「Šeško」）；排序只有 6 个键、走下拉框。本轮把筛选与显示列搬进球员列左侧的固定栏（窄屏改抽屉）、搜索走去变音折叠、排序键扩到表头每一列且可点表头排序。**不写任何生产数据**；push 与部署等令（2026-09-21 已下令并执行，见本节的「上线」段与 `CHANGELOG.md` 顶部的 Version 记录）。
 
 **裁决**（2026-09-21 用户一问一题逐条拍板，共 19 项；要点如下）：
 ① 桌面左栏**可收起**、sticky、定宽 260px，收起态记 `localStorage`；② 窄屏用 **900px 断点的左侧滑出抽屉**（遮罩 / × / Esc 三条关闭路），否决「塌回表格上方」（那正是要省掉的）；③ 排序列 = **表头全部列可点**，两态循环（升 → 降 → 升），`sort`/`order` 继续留 URL；④ 搜索**只做拉丁去变音**，不做中文拼音、不做词序分词、不做容错拼写；⑤ 搜索框**聚焦才预载轻量名册**并本地过滤推荐（不逐键请求），点推荐直接跳 `/players/:id`；⑥ 工具条只留搜索框 + 视图段、**整行 sticky 吸顶**，「筛选（N）」按钮兼作抽屉入口；⑦ 生效条件摘要条常驻、每条 chip 可单独撤销；⑧ 仍是一张 `.card` + 竖向分隔线；⑨ 断点 900px，不动 `.admin-shell` 的 760px；⑩ 验收 = 前端组件测试基建 + e2e 三视口截图。
@@ -339,7 +339,9 @@
 **两个只有真引擎 / 真浏览器能抓到的真 bug**：① `sqlFold` 的 REPLACE 链撞 **D1 表达式树深度上限 100**（`D1_ERROR: Expression tree is too large (maximum depth 100)`，`?name=` 与 `sort=name` 直接 500；node:sqlite 上限 1000 所以本地单测**测不出**）⇒ 折叠表由 253 项裁到**生产实测 87 项**（18301 行姓名 / 3048 行含非 ASCII 逐位核对），新增 `SQL_FOLD_DEPTH_LIMIT = 100` / `SQL_FOLD_ENTRY_BUDGET = 92` 与 `scripts/check-name-fold-depth.mjs`（改表必跑）；② 焦点循环的清单不能用 `offsetParent !== null` 过滤收起 `<details>` 的内容（Chrome 对收起 details 内元素**不返回 null**），否则真实最后一个可聚焦元素是显示列的 `<summary>`、往后 Tab 无人拦（375 实测第 25 次 Tab 逃到 body）⇒ 改为显式排除 `details:not([open])` 后代、保留其 `:scope > summary`。
 另有两条口径修正：`foldName` 只做「查表替换 + ASCII 小写」（删掉 NFD 与整段 toLowerCase，否则库里出现西里尔/希腊大写会「JS 折了 SQL 没折」静默 0 命中）；`unmappedNameChars` 加形状变体判据 `FOLD_SHAPED = /[\p{Z}\p{Pd}\p{Pi}\p{Pf}\p{Cf}]/u`（弯引号/花式空格/不可见字符最容易从网页粘进来，原先直接跳过、永不报警）。`sqlFold` 形态 = `CASE WHEN expr GLOB '*[^ -~]*' THEN lower(<REPLACE 链>) ELSE lower(expr) END`，守卫把 18301 行的每查询成本从 483ms 降到 93ms、语义不变。
 
-**遗留**：窄屏抽屉锁滚仍靠 `body { overflow: hidden }`（iOS 上不彻底，已加 `overscroll-behavior: contain` 兜底，真机未验）；`aria-modal="true"` 而顶栏渲染在 `<Routes>` 之外、不在 inert 区内（已用 Tab 焦点循环把顶栏挡在循环外，未提成共享 inert hook）；e2e 的焦点断言只在窄屏场景覆盖；增量 25 的 worker 仍未部署（见上一节）。
+**遗留**：窄屏抽屉锁滚仍靠 `body { overflow: hidden }`（iOS 上不彻底，已加 `overscroll-behavior: contain` 兜底，真机未验）；`aria-modal="true"` 而顶栏渲染在 `<Routes>` 之外、不在 inert 区内（已用 Tab 焦点循环把顶栏挡在循环外，未提成共享 inert hook）；e2e 的焦点断言只在窄屏场景覆盖。
+
+**上线**（2026-09-21）：用户下令后推送 39 个提交（`29c8199..d17cbdd`）并部署，Version `b83ec876-9fc7-4c16-8d01-0cba3d8ab5e5`（`wrangler deploy` CLI 回显的 Current Version ID 为 `81e93c74-228f-4fee-9d87-9fecf602d360`，同一批相隔 5 秒）。生产迁移无需 apply（`d1 migrations list --remote` 报 No migrations to apply，已到 0028）。生产回读全部通过：`/api/health` 三资源 ok，`/api/players?sort=name` 200（修复前 500），`?name=sesko` 返回 `B. Šeško`，`/api/players/roster` 200 / 325262 字节，另四个排序键与三个筛选查询全 200。
 
 **文档**：本节 + `CHANGELOG.md` [未发布] 增量 26 节 + `README.md` 测试数与 e2e 场景数 + `AGENTS.md` 当前状态 + `src/core/name-fold.ts` 头注释（原「见 ROADMAP 的增量 26 记录」是悬空引用，由本节补上）+ 记忆目录 `increment26-plan.md` / `increment26-execution-state.md`。
 

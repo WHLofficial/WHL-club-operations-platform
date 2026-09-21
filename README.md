@@ -110,7 +110,7 @@ docs/          附属插件与集成说明
 npm run build && wrangler deploy
 ```
 
-生产状态（2026-09-20 查证 `wrangler deployments status --name whl-club`）：最新部署 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（2026-09-20T05:42:27Z），含增量 17–24；此前增量 16 为 Version `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0028_contract_window_ticks.sql`（2026-09-21 随合同导入批 apply）。生产数据：球员库 18301 人（全库入籍 570，其中 444 人于 2026-09-20 回填、481 人于 2026-09-21 按 s901 队籍对齐后归入 20 队；自由身 17731 全部 `status='free'`；16 人控队合同 462 行已于 2026-09-21 落库）。仍未执行的生产写：球员库 30 人缺字段补录；`npm run deploy` 未跑（增量 25 的 worker 代码不在生产）。
+生产状态（2026-09-21 查证 `wrangler deployments status --name whl-club`）：最新部署 Version `b83ec876-9fc7-4c16-8d01-0cba3d8ab5e5`（2026-09-21T14:39:00Z，含增量 25–26；`wrangler deploy` CLI 回显的 Current Version ID 为 `81e93c74-228f-4fee-9d87-9fecf602d360`，同一批相隔 5 秒）；此前增量 17–24 为 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`、增量 16 为 `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0028_contract_window_ticks.sql`（2026-09-21 随合同导入批 apply；`d1 migrations list --remote` 报无需 apply）。生产数据：球员库 18301 人（全库入籍 570，其中 444 人于 2026-09-20 回填、481 人于 2026-09-21 按 s901 队籍对齐后归入 20 队；自由身 17731 全部 `status='free'`；16 人控队合同 462 行已于 2026-09-21 落库）。仍未执行的生产写：球员库 30 人缺字段补录。
 
 ## 约定与边界
 
