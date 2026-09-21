@@ -24,6 +24,8 @@
   --warn: #d97706;
   --border: #e6dcc8;
   --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  /* 控件行统一高度（增量 27 步骤 1）：按钮 / 段控件 / 输入框 / 下拉在 .control-row 里同高 */
+  --control-h: 34px;
   /* 顶栏实际高度（浏览器实测：≥641px 宽 54px，≤640px 折两行 102px）。
      顶栏 sticky 且不透明，任何吸顶元素都得跳过它，见 .library-side、步骤 8 的抽屉 */
   --topbar-h: 54px;
@@ -1484,17 +1486,38 @@ tbody tr:hover td {
   border-top: none;
 }
 
-/* 球员库（增量 6.1 d8）：筛选条、搜索框、翻页 */
+/* 球员库（增量 6.1 d8）：筛选条、搜索框、翻页。
+   增量 27 步骤 1：行布局整体交给 .control-row（页面工具条与左栏顶部共用同一套），
+   这个类只剩「与下方区块的间距」—— 两套 flex 规则并存时谁生效只看书写顺序，
+   改一处忘一处就是图 1 那种半对齐。 */
 .library-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
   margin-bottom: 12px;
 }
 
-.library-controls .field {
+/* 控件行（增量 27 步骤 1）：按钮 / 段控件 / 输入框 / 下拉同高、底边同基线。
+   未对齐的根因是各控件自带的外边距：.seg 有 margin-bottom:8px、label.field 有 margin:12px 0，
+   而 align-items:flex-end 对齐的是 margin box 的底边 ⇒ 段控件被自己的下外边距顶高 8px。
+   归零外边距 + 统一高度（--control-h）即可；标签在输入框上方，对齐后是底边齐、标签齐头。 */
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+}
+
+.control-row > .seg,
+.control-row > .field,
+.control-row .field {
   margin: 0;
+}
+
+.control-row > .seg,
+.control-row > .btn,
+.control-row .field > input:not([type='checkbox']),
+.control-row .field > select,
+.control-row .library-search input,
+.control-row .library-search .btn {
+  height: var(--control-h);
 }
 
 .library-controls .field select {

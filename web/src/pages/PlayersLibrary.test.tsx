@@ -237,7 +237,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
   it('撤掉「姓名」chip 时搜索框缓冲一起清空（否则再点「找」条件会复活）', async () => {
     const user = open();
     await screen.findByRole('link', { name: 'Šeško' });
-    const box = screen.getByPlaceholderText(/按姓名找/);
+    const box = screen.getByPlaceholderText('查找');
 
     await user.type(box, 'sesko');
     expect(box).toHaveProperty('value', 'sesko');

@@ -399,7 +399,7 @@ export default function PlayersLibrary() {
       <p className="muted">全联盟的公开名册。点姓名进球员档案；筛了哪一项，表里就自动多哪一列（列选择器里手动调过则以手动为准）。</p>
 
       <section className="card">
-        <div className="library-controls lib-toolbar" inert={narrow && drawerOpen}>
+        <div className="library-controls lib-toolbar control-row" inert={narrow && drawerOpen}>
           {/* 宽屏开合左栏、窄屏开抽屉：同一个按钮、两种语义，计数徽标两边共用 */}
           <button
             ref={toggleRef}

@@ -54,7 +54,7 @@ export default function FilterPanel({
 
   return (
     <div className="lib-panel">
-      <div className="library-controls">
+      <div className="library-controls control-row">
         <label className="field">
           俱乐部
           <select value={filters.club} onChange={(e) => set('club', e.target.value)}>

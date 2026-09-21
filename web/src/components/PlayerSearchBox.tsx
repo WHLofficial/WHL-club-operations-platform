@@ -100,7 +100,7 @@ export default function PlayerSearchBox({ value, onChange, onSubmit, clubs, busy
         <input
           ref={inputRef}
           type="search"
-          placeholder="按姓名找（支持去变音：sesko → Šeško）"
+          placeholder="查找"
           value={value}
           role="combobox"
           aria-label="按姓名找"
