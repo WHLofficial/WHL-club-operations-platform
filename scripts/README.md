@@ -65,18 +65,20 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 
 **执行纪律**：含外键或大事务的工件必须走 `--command` 或 D1 REST `/query`，`--file` 通道会让 `PRAGMA defer_foreign_keys` 失效，整批回滚。执行前先看该目录 README 的核查清单与期望 changes。
 
-## prod-20260920-*（一次性生产工件；窗基线与队籍对齐已执行，两条导入未执行）
+**批量执行器**：`prod-20260920-s9-contracts/exec-shards.mjs` 把「多行 SQL 分片」折成单行、按条数与命令行字节上限分批走 `--command`，逐批回显 `changes` / `rows_written`（默认 `--local`，加 `--remote` 才碰生产；`--dry` 只算批次）。用它要注意两条 Windows 实测限制：`--command` 只吃**单行** SQL（多行报 `incomplete input: SQLITE_ERROR [code: 7500]`）；命令行受 `cmd.exe` 字节数约束（中文按 3 字节算，约 5.5KB 的批会被拒「命令行太长」），故脚本压到 4000 字节 / 10 条。
+
+## prod-20260920-*（一次性生产工件；四条均已执行）
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
 | `prod-20260920-s9-window-baseline/` | S9 窗基线：SQL 直造「季初常规窗（season 9 / window_seq 1）已关」一条，再把 62 场已确认比赛的 `window_seq` 由 0 改 1（另 `match_attendance` 50 行） | **已执行**（2026-09-20 经 `--command` 逐条跑；changes 1 / 62 / 50 与期望一致，验收 9 项全中，见该目录 README 第十节） |
 | `prod-20260920-s9-club-align/` | s901 队壳文件 → 570 人队籍对齐（16 人控队 + 4 CPU）：481 条 `UPDATE players SET club_id`（改队 158 + 认领 323），只写队籍一列；排在合同批之前跑 | **已执行**（2026-09-21 经 `--file` 逐片跑；481 语句 / rows_written 962 / touched 481；验收：已对齐 570、剩余差异 0、入籍 874、自由身 17427，逐队人数与预估逐队吻合；见该目录 README 第十四节） |
-| `prod-20260920-s9-abilities/` | FC Editor s901 → 20 队（含 CPU）570 人现值能力（Case B：只改 `ca`/`pa` + `json_set` 合并 34 项能力项与 `RoleID1-5`/`PSID1-15`，**不动 `base_ca`/`$.CA`/`$.PA`/队籍**） | **未执行**（工件已产：257 条语句 2 片 + 回滚 + 预检/验收/报告/README） |
-| `prod-20260920-s9-contracts/` | 一线队-S9.csv → 16 人控队合同：现在可导 378 行（claim 298 + create 80）、84 行异队冲突、164 行无目标队；**队籍对齐后 84 行冲突归零，16 队 462 行全部可导**；README 含映射规则、分类预测与 6 个裁决点 | **未执行**（工件待产） |
+| `prod-20260920-s9-abilities/` | FC Editor s901 → 20 队（含 CPU）570 人现值能力（Case B：只改 `ca`/`pa` + `json_set` 合并 34 项能力项与 `RoleID1-5`/`PSID1-15`，**不动 `base_ca`/`$.CA`/`$.PA`/队籍**） | **已执行**（2026-09-21 经 `--file` 两片：200 + 57 条语句 / rows_written 400 + 112 / changes 201 + 58；逐行复核 `--verify` 源行 570 / 命中 570 / 差异 0；验收六列 —— `touched` 257、`delta_gt0` 254、`null_core` 0、`gold_rows` 35、`gold_slots` 36、`ca_vs_attr` 254；见该目录 README 第十三节） |
+| `prod-20260920-s9-contracts/` | 一线队-S9.csv → 16 人控队合同：队籍对齐后 **462 行全部可导**（原预测 378 = claim 298 + create 80 已归零）；462 条带守卫的 `INSERT … SELECT`（10 片）+ 生成器 `gen-contracts-sql.ts`（含 `--verify`）+ 执行器 `exec-shards.mjs` + 预检/验收/回滚/报告 | **已执行**（2026-09-21：先 apply 迁移 0028，再经 `exec-shards.mjs --remote` 跑 10 片 = 462 语句 / changes 462 / rows_written 1386；逐行复核 462 / 命中 462 / 差异 0；验收 11 列全中 + 逐队 16 行与效力年分布全中；`players` 未被动、守卫表仍 0；见该目录 README 第十一节） |
 
-四个目录都受上面「执行纪律」约束。硬前置：合同批要求 **迁移 0028 已 apply 且增量 25 已部署**（否则 `service_ticks`/`protection_ticks` 写不进去，或落成「无保护期」）；能力批只依赖 `json_set`（已在生产只读验证可用）；队籍批只写 `players.club_id`（该列**无外键**，`--file` 可用）且要求 `contracts`/`listings`/`registrations`/`negotiation_sessions`/`transfers`/`bids` 全为 0（执行前 `01-precheck.sql` 复核）。
+四个目录都受上面「执行纪律」约束。硬前置（**均已满足**）：合同批要求 **迁移 0028 已 apply**（2026-09-21 已 apply；离线 SQL 通道显式写刻度列，**不需要**先部署增量 25 —— 该部署仍是网页面板通道的残留风险，见该目录 README §11.8）；能力批只依赖 `json_set`（已在生产只读验证可用）；队籍批只写 `players.club_id`（该列**无外键**，`--file` 可用）且要求 `contracts`/`listings`/`registrations`/`negotiation_sessions`/`transfers`/`bids` 全为 0（执行前 `01-precheck.sql` 复核）。
 
-建议顺序：**队籍对齐 → 合同 → 能力**（队籍先对，合同批才不带 84 行冲突；能力与另两批无依赖，可任意时点插入）。
+建议顺序：**队籍对齐 → 合同 → 能力**（队籍先对，合同批才不带 84 行冲突；能力与另两批无依赖，可任意时点插入）。四批已于 2026-09-21 全部执行完毕。
 
 ## prod-20260921-*（一次性生产工件；已执行）
 
