@@ -494,22 +494,30 @@ function buildVerify(
   deltaExpected: number,
   goldRowsExpected: number,
   goldSlotsExpected: number,
+  markerScope = false,
 ): string {
   const list = fcIds.join(',');
+  const scope = markerScope ? `updated_at = '${TS}'` : `fc_id IN (${list})`;
   const goldCount = (key: string) => `(CASE WHEN COALESCE(json_extract(game_attrs, '$.${key}'), 0) >= 101 THEN 1 ELSE 0 END)`;
   return [
-    '-- 只读验收：执行后跑一次（npx wrangler d1 execute whl-club --remote --file 本文件）',
-    `-- 期望 touched = ${stmtRows}（本批语句数）、delta_gt0 = ${deltaExpected}、gold_rows = ${goldRowsExpected}、gold_slots = ${goldSlotsExpected}、null_core = 0`,
+    markerScope
+      ? '-- 只读验收（批次标记口径）：范围收窄为本批落库行（全批写 updated_at = 生成时点，该时刻全库唯一）。'
+      : '-- 只读验收：执行后跑一次。注意本文件里的 fc_id 列表很长，Windows 下 --command 会「命令行太长」，实操用 02-verify-marker.sql。',
+    markerScope
+      ? '-- 与 02-verify.sql 等价——两文件只差范围写法；覆盖完整性由 gen-abilities-sql.ts --verify 保证。'
+      : `-- 范围 = 源 ${fcIds.length} 行（fc_id IN …）`,
+    `-- 期望 touched = ${stmtRows}（本批语句数）、delta_gt0 = ${deltaExpected}、null_core = 0、ca_vs_attr = ${deltaExpected}`,
+    `-- gold_rows / gold_slots 量的是「范围内**持有**金徽（PSID13-15 ≥ 101）的行 / 槽」= 状态数，随源库变化，故不写死；本批**变更** ${goldRowsExpected} 行 / ${goldSlotsExpected} 槽`,
     '-- 逐行复核另跑：node gen-abilities-sql.ts --verify（重算差异，期望「剩余差异 0 行」）',
     '', 'SELECT',
   ]
     .concat([
       `  (SELECT COUNT(*) FROM players WHERE updated_at = '${TS}') AS touched,`,
-      `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND ca <> COALESCE(base_ca, ca)) AS delta_gt0,`,
-      `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND (ca IS NULL OR pa IS NULL OR base_ca IS NULL)) AS null_core,`,
-      `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND (${goldCount('PSID13')} + ${goldCount('PSID14')} + ${goldCount('PSID15')}) > 0) AS gold_rows,`,
-      `  (SELECT COALESCE(SUM(${goldCount('PSID13')} + ${goldCount('PSID14')} + ${goldCount('PSID15')}), 0) FROM players WHERE fc_id IN (${list})) AS gold_slots,`,
-      `  (SELECT COUNT(*) FROM players WHERE fc_id IN (${list}) AND ca <> COALESCE(json_extract(game_attrs, '$.CA'), ca)) AS ca_vs_attr;`,
+      `  (SELECT COUNT(*) FROM players WHERE ${scope} AND ca <> COALESCE(base_ca, ca)) AS delta_gt0,`,
+      `  (SELECT COUNT(*) FROM players WHERE ${scope} AND (ca IS NULL OR pa IS NULL OR base_ca IS NULL)) AS null_core,`,
+      `  (SELECT COUNT(*) FROM players WHERE ${scope} AND (${goldCount('PSID13')} + ${goldCount('PSID14')} + ${goldCount('PSID15')}) > 0) AS gold_rows,`,
+      `  (SELECT COALESCE(SUM(${goldCount('PSID13')} + ${goldCount('PSID14')} + ${goldCount('PSID15')}), 0) FROM players WHERE ${scope}) AS gold_slots,`,
+      `  (SELECT COUNT(*) FROM players WHERE ${scope} AND ca <> COALESCE(json_extract(game_attrs, '$.CA'), ca)) AS ca_vs_attr;`,
       '',
     ])
     .join('\n');
@@ -575,6 +583,11 @@ const goldSlotsExpected = changes.reduce((n, c) => n + c.sets.filter((s) => gold
 writeFileSync(
   join(HERE, '02-verify.sql'),
   buildVerify(fcIds, changes.length, deltaExpected, goldRowsExpected, goldSlotsExpected),
+  'utf8',
+);
+writeFileSync(
+  join(HERE, '02-verify-marker.sql'),
+  buildVerify(fcIds, changes.length, deltaExpected, goldRowsExpected, goldSlotsExpected, true),
   'utf8',
 );
 

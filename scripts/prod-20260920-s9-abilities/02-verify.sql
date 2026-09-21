@@ -1,5 +1,7 @@
 -- 只读验收：执行后跑一次（npx wrangler d1 execute whl-club --remote --file 本文件）
--- 期望 touched = 257（本批语句数）、delta_gt0 = 254、gold_rows = 4、gold_slots = 5、null_core = 0
+-- 期望（2026-09-21 实测）：touched = 257（本批语句数）、delta_gt0 = 254、null_core = 0、gold_rows = 35、gold_slots = 36
+--   gold_rows / gold_slots 量的是「范围内**持有**金徽（PSID13-15 ≥ 101）的行 / 槽数」= 状态数，
+--   不是本批增量；本批**新增/变更**的金徽是 4 行 / 5 槽。源库再变化时这两个数会跟着变，别当固定期望。
 -- 逐行复核另跑：node gen-abilities-sql.ts --verify（重算差异，期望「剩余差异 0 行」）
 
 SELECT

@@ -179,9 +179,11 @@ Case B 下 `base_ca` 不动，本批**只把 `ca` 抬到源值**，于是：
 | `touched` | 257 | 本次语句实际改到的行数（`updated_at = 生成时点`）——**等于语句数才说明每条都命中** |
 | `delta_gt0` | 254 | `ca <> COALESCE(base_ca, ca)`，即这批涨幅成为成长值（Case B 的核心效果） |
 | `null_core` | 0 | `ca`/`pa`/`base_ca` 有 NULL 的行（守卫写不出来的前提） |
-| `gold_rows` | 4 | 任一金槽（`PSID13-15` ≥ 101）的行数 |
-| `gold_slots` | 5 | 金槽总个数（与「行数」不同：`fc 234577` 一行两个） |
+| `gold_rows` | 35 | 范围内**持有**任一金槽（`PSID13-15` ≥ 101）的行数——**状态数，不是本批增量**；本批新增/变更金徽的是 4 行 |
+| `gold_slots` | 36 | 范围内金槽总个数（与「行数」不同：可有行持两个）——同为状态数；本批新增/变更 5 槽（`fc 234577` 一行两个） |
 | `ca_vs_attr` | 254 | `game_attrs.$.CA` 与 `ca` 背离的行数——**Case B 下故意不等，不是错误** |
+
+> 口径提示（2026-09-21 首次执行时发现工件写错）：`gold_rows`/`gold_slots` 的量法是「范围内容量」，而生成器 §5.2 算的 4 行 / 5 槽是「本批改了哪些金槽」——两者语义不同，**别用 4/5 去核 35/36**。
 
 ```sql
 -- 口径说明：Case B 下这些**故意不等**，不是错误
@@ -198,10 +200,11 @@ SELECT COUNT(*) FROM players WHERE fc_id IN (…) AND ca < 1 OR ca > 99;        
 | 文件 | 内容 |
 | --- | --- |
 | `gen-abilities-sql.ts` | 读 s901 + 反查表 + 只读抓生产旧值 → 产分片/回滚/预检/验收/报告；支持 `--verify`、`--local` |
-| `sql/abilities-update-01.sql`、`-02.sql` | 257 条 `UPDATE`（2 片 ×200）—— **gitignore** |
+| `sql/abilities-update-01.sql`、`-02.sql` | 257 条 `UPDATE`（2 片：200 + 57）—— **gitignore** |
 | `rollback/abilities-rollback-01.sql`、`-02.sql` | 同 257 条反向（写回原样值，含槽位 `0` 哨兵）—— 提交留档 |
 | `01-precheck.sql` | 执行前只读复查 |
-| `02-verify.sql` | 执行后只读验收 |
+| `02-verify.sql` | 执行后只读验收（范围 = 源 570 行）。**Windows 上 `--command` 跑不了**（fc_id 列表太长，报「命令行太长」），实操用下一个 |
+| `02-verify-marker.sql` | 同一验收的批次标记口径（范围 = `updated_at = 生成时点` 的本批 257 行），短到能过 `--command` |
 | `abilities-report.md` | 逐字段变更计数、逐队明细、未映射文本、分片 sha256、演练与执行步骤 |
 
 ## 12. 本地演练（已完成，不碰生产）
@@ -220,3 +223,20 @@ SELECT COUNT(*) FROM players WHERE fc_id IN (…) AND ca < 1 OR ca > 99;        
 另外两处自审后加固的闸（2026-09-20 复审）：
 - **槽位溢出即中止**：源项数 > 列数（角色 5 / 花式 12 / 金徽 3）时不再静默截断——`mergeSlots` 返回 `dropped`，生成器计入 `slots_dropped` 并以退出码 5 中止（**不能用 `--allow-skipped` 放过**，那属数据丢失）。真实数据实测 `slots_dropped = 0`（报告 §末行「槽位溢出…0 行」）。
 - **`skipped`（只比对不写的字段有差异）** 默认中止并给退出码 3；真实数据实测 0 条（§5.2 的 `height`/`weight`/`weakfoot`/`PosID` 全 0 差异）。
+
+## 13. 执行记录（生产，2026-09-21）
+
+许可来源：用户「进入合同导入和能力导入」。执行前后各跑一次生成器重算，执行后跑验收。
+
+| 步骤 | 命令 / 工件 | 结果 |
+| --- | --- | --- |
+| 执行前复核 | `node gen-abilities-sql.ts --verify` | 源行 570 / 命中 570 / **仍有差异的行 257**（与工件语句数一致） |
+| 落库片 01 | `wrangler d1 execute whl-club --remote --file sql/abilities-update-01.sql` | 200 语句 / rows_read 200 / **rows_written 400** / `meta.changes` 201 |
+| 落库片 02 | 同上 `-02.sql` | 57 语句 / 57 / **112** / 58 |
+| 合计 | 2 片 | **257 语句 / 512 写**（每条 UPDATE 平均 2 行写，全是 `players` 上的索引维护） |
+| 执行后复核 | `node gen-abilities-sql.ts --verify` | **`[verify] 源行 570 / 命中 570 / 仍有差异的行 0`**（退出码 0） |
+| 验收六列 | `node scratch/run-verify.mjs scripts/prod-20260920-s9-abilities/02-verify-marker.sql` | `touched 257` / `delta_gt0 254` / `null_core 0` / `gold_rows 35` / `gold_slots 36` / `ca_vs_attr 254`（meta rows_read 109806 / rows_written 0） |
+
+口径更正（执行时发现，已回改工件）：原 §10 表与 `02-verify.sql` 头部把 `gold_rows`/`gold_slots` 期望写成 4/5。那是 §5.2 算的「本批**变更**了金徽的行/槽」，而 SQL 量的是「范围内**持有**金徽的行/槽」。实测 35/36（状态数），变更数确为 4 行 / 5 槽——两数都对，语义不同。生成器已同步改成不再把变更数当作 SQL 期望。
+
+回滚：`rollback/abilities-rollback-01.sql`、`-02.sql`（写回原 `ca`/`pa`/槽位，含槽位 `0` 哨兵）；两片 `updated_at` 同写生成时点，回滚后 `touched` 不会归零，判回滚完成看 `--verify` 是否报出与回滚前相同的差异行数。
