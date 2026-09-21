@@ -7,6 +7,7 @@ import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, runMigration } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { resetGuards } from '../src/lib/guard.ts';
+import { foldName } from '../src/core/name-fold.ts';
 
 // 本文件密集打 /api/players，每个用例先清进程内限流计数（增量 23 守护）
 beforeEach(() => resetGuards());
@@ -179,7 +180,8 @@ describe('球员库列表（增量 6.1 d6）', () => {
   it('参数校验：sort/growable/cursor/区间 400', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
-    expect((await get('/api/players?sort=uid', fx.env)).status).toBe(400);
+    // 增量 26：uid 变成合法排序键（表头可点），这里改用真的不存在的键
+    expect((await get('/api/players?sort=没有这个键', fx.env)).status).toBe(400);
     expect((await get('/api/players?growable=yes', fx.env)).status).toBe(400);
     expect((await get('/api/players?sort=ca&cursor=oops', fx.env)).status).toBe(400);
     expect((await get('/api/players?ca_min=-1', fx.env)).status).toBe(400);
@@ -514,7 +516,8 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     expect((await get('/api/players?agent_tier=7', fx.env)).status).toBe(400);
     expect((await get('/api/players?has_contract=yes', fx.env)).status).toBe(400);
     expect((await get('/api/players?protected=maybe', fx.env)).status).toBe(400);
-    expect((await get('/api/players?sort=uid', fx.env)).status).toBe(400);
+    // 增量 26：uid 变成合法排序键（表头可点），这里改用真的不存在的键
+    expect((await get('/api/players?sort=没有这个键', fx.env)).status).toBe(400);
   });
 });
 
@@ -592,3 +595,222 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
     expect(emptyBody).toEqual({ roster: '', count: 0 });
   });
 });
+
+// ---- 增量 26：表头每一列可点（排序键扩到 28 个）+ 文本键游标 ----
+
+// 期望顺序在 JS 侧独立重算：镜像的只有「权重表 + NULL 当 0」这两条口径，SQL 表达式不复用，
+// 否则测试会跟着实现一起错。8 名球员刻意在多数维度上打平，逼出 (值, id) 复合序的平局分支。
+const TICKS = 1; // 下面种了 1 个已关常规窗（另有 1 个临时窗不该被数）
+const POSITION_WEIGHT: Record<string, number> = {
+  GK: 1,
+  RB: 2,
+  CB: 2,
+  LB: 2,
+  CDM: 3,
+  RM: 3,
+  CM: 3,
+  LM: 3,
+  CAM: 3,
+  RW: 4,
+  ST: 4,
+  LW: 4,
+};
+const STATUS_WEIGHT: Record<string, number> = { normal: 1, listed: 2, trainee: 3, free: 4, retired: 5 };
+
+interface SortRow {
+  id: number;
+  uid: string;
+  name: string;
+  clubId: number | null;
+  position: string | null;
+  age: number | null;
+  ca: number;
+  pa: number;
+  baseCa: number | null;
+  growable: number;
+  mv: number | null;
+  status: string;
+  badgeSilver: number;
+  badgeGold: number;
+  prestige: number | null;
+  foot: number | null;
+  growthTier: number;
+  futureStar: number;
+  chinaPlan: number;
+  agentTier: number;
+  fcId: number | null;
+  psCount: number;
+  wage: number | null;
+  releaseFee: number | null;
+  contractType: string | null;
+  source: string | null;
+  serviceTicks: number | null; // null = 无现行合同
+  protectionTicks: number | null;
+}
+
+const SORT_VALUE: Record<string, (r: SortRow) => number | string> = {
+  uid: (r) => Number(r.uid.replace(/^fc/, '')),
+  name: (r) => foldName(r.name),
+  club: (r) => r.clubId ?? 0,
+  position: (r) => POSITION_WEIGHT[r.position ?? ''] ?? 0,
+  age: (r) => r.age ?? 0,
+  ca: (r) => r.ca,
+  pa: (r) => r.pa,
+  growable: (r) => r.growable,
+  status: (r) => STATUS_WEIGHT[r.status] ?? 0,
+  market_value: (r) => r.mv ?? 0,
+  badges: (r) => r.badgeSilver + r.badgeGold,
+  prestige: (r) => r.prestige ?? 0,
+  base_ca: (r) => r.baseCa ?? 0,
+  growth_gap: (r) => r.pa - r.ca,
+  foot: (r) => r.foot ?? 0,
+  growth_tier: (r) => r.growthTier,
+  future_star: (r) => r.futureStar,
+  china_plan: (r) => r.chinaPlan,
+  agent_tier: (r) => r.agentTier,
+  ps: (r) => r.psCount,
+  fc_id: (r) => r.fcId ?? 0,
+  wage: (r) => r.wage ?? 0,
+  release_fee: (r) => r.releaseFee ?? 0,
+  contract_type: (r) => r.contractType ?? '',
+  source: (r) => r.source ?? '',
+  protected: (r) => (r.protectionTicks !== null && TICKS < r.protectionTicks ? 1 : 0),
+  years: (r) => (r.serviceTicks === null ? 0 : (TICKS - r.serviceTicks) * 0.5),
+};
+
+function seedSortRows(sqlite: DatabaseSync): SortRow[] {
+  sqlite.exec(`
+    INSERT INTO clubs (id, name, league_tier, status) VALUES
+      (1, '老东家 FC', 'premier', 'active'),
+      (2, '蓝月亮', 'premier', 'active'),
+      (3, '雾都联', 'second', 'active');
+    INSERT INTO season_windows (id, season, window_seq, status, opened_at, closed_at, is_temporary) VALUES
+      (1, 9, 1, 'closed', '2026-09-18T01:00:00.000Z', '2026-09-18T01:01:00.000Z', 0),
+      (2, 9, 2, 'closed', '2026-09-20T01:00:00.000Z', '2026-09-20T01:01:00.000Z', 1);
+    INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, base_ca, growable, market_value, status,
+                         badges_silver, badges_gold, prestige, foot, growth_tier, is_future_star, china_plan,
+                         agent_tier, fc_id, game_attrs) VALUES
+      (1, 'fc901',  'Šeško',    2,    'ST',  24, 70, 88, 60, 1, 50,   'normal',
+       2, 1, 2, 2, 3, 1, 0, 1, 901,  '{"PSID1":5,"PSID3":7,"PSID15":101}'),
+      (2, 'fc900',  'Ødegaard', NULL, 'CAM', 27, 85, 86, 80, 0, NULL, 'listed',
+       0, 0, 4, 1, 1, 0, 1, 3, 900,  NULL),
+      (3, 'fc1000', 'Alpha',    1,    'GK',  33, 60, 60, 60, 0, 10,   'free',
+       0, 0, 1, 1, 1, 0, 0, 2, 1000, '{"PSID2":9}'),
+      (4, 'fc902',  'A~B',      1,    'LB',  21, 66, 90, 66, 1, 20,   'trainee',
+       3, 0, 1, 2, 2, 1, 0, 1, 902,  '{"PSID1":5,"PSID2":6}'),
+      (5, 'fc903',  '阿尔法',   3,    'CDM', 19, 72, 95, 50, 1, 120,  'normal',
+       1, 2, 3, 1, 4, 1, 1, 3, 903,  NULL),
+      (6, 'fc904',  'Müller',   3,    'RW',  25, 88, 88, 88, 0, 200,  'normal',
+       0, 0, 5, 1, 1, 0, 0, 2, 904,  '{"PSID5":11}'),
+      (7, 'fc905',  'zeta',     2,    'CM',  30, 80, 85, 70, 1, 30,   'normal',
+       2, 0, 2, 2, 3, 0, 1, 1, 905,
+       '{"PSID1":1,"PSID2":2,"PSID3":3,"PSID4":4,"PSID5":5,"PSID6":6,"PSID7":7,"PSID8":8,"PSID9":9,"PSID10":10,"PSID11":11,"PSID12":12,"PSID13":113,"PSID14":114,"PSID15":115}'),
+      (8, 'fc906',  'ŠEŠKO',    NULL, 'CB',  22, 90, 90, 90, 0, 300,  'retired',
+       0, 3, 4, 1, 1, 0, 0, 2, 906,  NULL);
+    INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, source, is_active,
+                           signed_at, effective_from, service_ticks, protection_ticks) VALUES
+      (1, 1, 2,    5,  2,    'formal',  'import',      1, '2026-09-21T01:46:58.647Z', '2026-09-18', 1,  4),
+      (2, 2, NULL, 30, 0.75, 'trainee', 'direct',      1, '2026-09-21T01:46:58.647Z', '2026-09-18', 2,  NULL),
+      (3, 7, 2,    80, 8,    'formal',  'negotiation', 1, '2026-09-21T01:46:58.647Z', '2026-09-18', -1, 2),
+      (4, 8, NULL, 10, 1.5,  'formal',  'forced',      1, '2026-09-21T01:46:58.647Z', '2026-09-18', 1,  4);
+  `);
+  return [
+    { id: 1, uid: 'fc901', name: 'Šeško', clubId: 2, position: 'ST', age: 24, ca: 70, pa: 88, baseCa: 60, growable: 1, mv: 50, status: 'normal', badgeSilver: 2, badgeGold: 1, prestige: 2, foot: 2, growthTier: 3, futureStar: 1, chinaPlan: 0, agentTier: 1, fcId: 901, psCount: 3, wage: 2, releaseFee: 5, contractType: 'formal', source: 'import', serviceTicks: 1, protectionTicks: 4 },
+    { id: 2, uid: 'fc900', name: 'Ødegaard', clubId: null, position: 'CAM', age: 27, ca: 85, pa: 86, baseCa: 80, growable: 0, mv: null, status: 'listed', badgeSilver: 0, badgeGold: 0, prestige: 4, foot: 1, growthTier: 1, futureStar: 0, chinaPlan: 1, agentTier: 3, fcId: 900, psCount: 0, wage: 0.75, releaseFee: 30, contractType: 'trainee', source: 'direct', serviceTicks: 2, protectionTicks: null },
+    { id: 3, uid: 'fc1000', name: 'Alpha', clubId: 1, position: 'GK', age: 33, ca: 60, pa: 60, baseCa: 60, growable: 0, mv: 10, status: 'free', badgeSilver: 0, badgeGold: 0, prestige: 1, foot: 1, growthTier: 1, futureStar: 0, chinaPlan: 0, agentTier: 2, fcId: 1000, psCount: 1, wage: null, releaseFee: null, contractType: null, source: null, serviceTicks: null, protectionTicks: null },
+    { id: 4, uid: 'fc902', name: 'A~B', clubId: 1, position: 'LB', age: 21, ca: 66, pa: 90, baseCa: 66, growable: 1, mv: 20, status: 'trainee', badgeSilver: 3, badgeGold: 0, prestige: 1, foot: 2, growthTier: 2, futureStar: 1, chinaPlan: 0, agentTier: 1, fcId: 902, psCount: 2, wage: null, releaseFee: null, contractType: null, source: null, serviceTicks: null, protectionTicks: null },
+    { id: 5, uid: 'fc903', name: '阿尔法', clubId: 3, position: 'CDM', age: 19, ca: 72, pa: 95, baseCa: 50, growable: 1, mv: 120, status: 'normal', badgeSilver: 1, badgeGold: 2, prestige: 3, foot: 1, growthTier: 4, futureStar: 1, chinaPlan: 1, agentTier: 3, fcId: 903, psCount: 0, wage: null, releaseFee: null, contractType: null, source: null, serviceTicks: null, protectionTicks: null },
+    { id: 6, uid: 'fc904', name: 'Müller', clubId: 3, position: 'RW', age: 25, ca: 88, pa: 88, baseCa: 88, growable: 0, mv: 200, status: 'normal', badgeSilver: 0, badgeGold: 0, prestige: 5, foot: 1, growthTier: 1, futureStar: 0, chinaPlan: 0, agentTier: 2, fcId: 904, psCount: 1, wage: null, releaseFee: null, contractType: null, source: null, serviceTicks: null, protectionTicks: null },
+    { id: 7, uid: 'fc905', name: 'zeta', clubId: 2, position: 'CM', age: 30, ca: 80, pa: 85, baseCa: 70, growable: 1, mv: 30, status: 'normal', badgeSilver: 2, badgeGold: 0, prestige: 2, foot: 2, growthTier: 3, futureStar: 0, chinaPlan: 1, agentTier: 1, fcId: 905, psCount: 15, wage: 8, releaseFee: 80, contractType: 'formal', source: 'negotiation', serviceTicks: -1, protectionTicks: 2 },
+    { id: 8, uid: 'fc906', name: 'ŠEŠKO', clubId: null, position: 'CB', age: 22, ca: 90, pa: 90, baseCa: 90, growable: 0, mv: 300, status: 'retired', badgeSilver: 0, badgeGold: 3, prestige: 4, foot: 1, growthTier: 1, futureStar: 0, chinaPlan: 0, agentTier: 2, fcId: 906, psCount: 0, wage: 1.5, releaseFee: 10, contractType: 'formal', source: 'forced', serviceTicks: 1, protectionTicks: 4 },
+  ];
+}
+
+function expectedOrder(rows: SortRow[], key: string, dir: 'asc' | 'desc'): number[] {
+  const value = SORT_VALUE[key]!;
+  return [...rows]
+    .sort((a, b) => {
+      const av = value(a);
+      const bv = value(b);
+      let cmp = 0;
+      if (typeof av === 'string' || typeof bv === 'string') {
+        cmp = String(av) < String(bv) ? -1 : String(av) > String(bv) ? 1 : 0;
+      } else {
+        cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      }
+      if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
+      return dir === 'asc' ? a.id - b.id : b.id - a.id; // 平局按 id，方向与主键一致（与 SQL 的 ORDER BY … , players.id 同）
+    })
+    .map((r) => r.id);
+}
+
+async function pageAll(key: string, dir: 'asc' | 'desc', env: Env, size: number): Promise<{ ids: number[]; pages: number }> {
+  const ids: number[] = [];
+  let cursor: string | null = null;
+  for (let pages = 1; pages <= 20; pages++) {
+    const cursorQs = cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`;
+    const body = await list(`/api/players?sort=${key}&order=${dir}&limit=${size}${cursorQs}`, env);
+    ids.push(...body.players.map((p) => p.id));
+    cursor = body.nextCursor;
+    if (cursor === null) return { ids, pages };
+  }
+  throw new Error(`排序键 ${key} 的游标翻页没有终止（疑似漏行/死循环）`);
+}
+
+describe('球员库排序键（增量 26）', () => {
+  it('除 id 外的 27 个键 × 升降两向：翻页不重不漏，顺序与 JS 侧独立重算一致', async () => {
+    const fx = freshEnv();
+    const rows = seedSortRows(fx.sqlite);
+    const keys = Object.keys(SORT_VALUE);
+    expect(keys.length).toBe(27); // id 走旧的整数游标，另有既有用例覆盖
+
+    for (const key of keys) {
+      for (const dir of ['asc', 'desc'] as const) {
+        // 公开 GET 限流是 60 请求/60 秒/IP（guard.ts），27 键 × 两向 × 3 页远超额度；
+        // 这里清进程内计数而不是放宽额度——限流本身另有守护用例
+        resetGuards();
+        const actual = await pageAll(key, dir, fx.env, 3);
+        // 8 人 / 每页 3 条 ⇒ 3 页，确保真的经过了游标（而不是一页拿完）
+        expect({ key, dir, ...actual }).toEqual({ key, dir, ids: expectedOrder(rows, key, dir), pages: 3 });
+      }
+    }
+  });
+
+  it('文本键游标：值里带 ~ 时从最后一个 ~ 切；文本/数值键的游标互不串', async () => {
+    const fx = freshEnv();
+    seedSortRows(fx.sqlite);
+    // 折名序列（升）：alpha(3) < a~b(4) < muller(6) < odegaard(2) < sesko(1) < sesko(8) < zeta(7) < 阿尔法(5)
+    const after = await list(`/api/players?sort=name&order=asc&limit=1&cursor=${encodeURIComponent('a~b~4')}`, fx.env);
+    expect(after.players.map((p) => p.id)).toEqual([6]);
+
+    // 折名相同的两条（1/8）靠 id 定序：降序时 8 在前
+    const dupes = await list('/api/players?sort=name&order=desc&limit=2', fx.env);
+    expect(dupes.players.map((p) => p.id)).toEqual([5, 7]);
+
+    // 超长文本值、没有 ~、数值键吃文本值——都按坏游标拒掉
+    expect((await get(`/api/players?sort=name&cursor=${encodeURIComponent(`${'a'.repeat(200)}~4`)}`, fx.env)).status).toBe(400);
+    expect((await get('/api/players?sort=name&cursor=没有波浪号', fx.env)).status).toBe(400);
+    expect((await get(`/api/players?sort=ca&cursor=${encodeURIComponent('sesko~7')}`, fx.env)).status).toBe(400);
+  });
+
+  it('view=initial 下 ca / growth_gap 换成初始口径（base_ca 与 $.PA）', async () => {
+    const fx = freshEnv();
+    const rows = seedSortRows(fx.sqlite);
+    const idsOf = (path: string) =>
+      list(path, fx.env).then((body) => body.players.map((p) => p.id));
+    const byInitialCa = await idsOf('/api/players?view=initial&sort=ca&order=asc&limit=100');
+    const initialCa = [...rows].sort((a, b) => (a.baseCa ?? 0) - (b.baseCa ?? 0) || a.id - b.id).map((r) => r.id);
+    // 现值口径下 CA 升序是 [3,4,1,5,7,2,6,8]，初始口径是 base_ca 升序，两者必须不同才说明切了口径
+    const currentCa = await idsOf('/api/players?sort=ca&order=asc&limit=100');
+    expect(currentCa).toEqual([...rows].sort((a, b) => a.ca - b.ca || a.id - b.id).map((r) => r.id));
+    expect(currentCa).not.toEqual(initialCa);
+    expect(byInitialCa).toEqual(initialCa);
+
+    const initGap = await idsOf('/api/players?view=initial&sort=growth_gap&order=asc&limit=100');
+    const expectedGap = [...rows]
+      .sort((a, b) => a.pa - (a.baseCa ?? 0) - (b.pa - (b.baseCa ?? 0)) || a.id - b.id)
+      .map((r) => r.id);
+    expect(initGap).toEqual(expectedGap);
+  });
+});
+

@@ -23,14 +23,111 @@ const CONTRACT_SOURCES = ['negotiation', 'forced', 'direct', 'import'] as const;
 const ATTR_KEYS: readonly string[] = FC26_GAME_ATTR_COLUMNS.slice(FC26_GAME_ATTR_COLUMNS.indexOf('sprintspeed'));
 const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
 
-// 球员库排序键（增量 6.1 d6）：id 沿旧整数游标 ASC（既有调用兼容）；数值键走 COALESCE 双向 keyset，NULL 当 0 排尾
+// 球员库排序键（增量 6.1 d6；增量 26 扩到表头每一列）：id 沿旧整数游标 ASC（既有调用兼容）；
+// 数值键走 COALESCE 双向 keyset，NULL 当 0（ASC 排首、DESC 排尾）；文本键走文本游标，
+// 比较是 BINARY 码位序，靠表达式里的 lower() 拿 ASCII 大小写不敏感
+// 非数值列不按字母序而按下面的手写权重表：球队=clubs.id（即筛选下拉里的队序）、位置=门将→后卫→中场→前锋、
+// 状态=在队→挂牌→训练营→自由身→退役；这些列用户是按业务顺序找人的，字母序对它们没意义
 // influence（增量 17）：规则 4.1.3 球员影响力=系数×能力等级×国际声望，现值口径，ROUND 2 位
 // view=initial（增量 6.1 d7）：初始球员库=导入时数据——CA=base_ca、PA=导入 json 值（归属无「初始」维度，
 // 增量 14 裁决 4 删掉 initial_club_id：它从不参与成长判定，只是同一件事的第二种说法）
-const SORT_KEYS = { id: 'id', ca: 'ca', pa: 'pa', age: 'age', market_value: 'market_value', influence: 'influence' } as const;
-type SortKey = keyof typeof SORT_KEYS;
+const SORT_KEY_NAMES = [
+  'id',
+  'uid',
+  'name',
+  'club',
+  'position',
+  'age',
+  'ca',
+  'pa',
+  'growable',
+  'influence',
+  'status',
+  'market_value',
+  'badges',
+  'prestige',
+  'base_ca',
+  'growth_gap',
+  'foot',
+  'growth_tier',
+  'future_star',
+  'china_plan',
+  'agent_tier',
+  'ps',
+  'fc_id',
+  'wage',
+  'release_fee',
+  'contract_type',
+  'source',
+  'protected',
+  'years',
+] as const;
+type SortKey = (typeof SORT_KEY_NAMES)[number];
+// 文本键：游标里带的是字符串而不是数字（其余键一律按数值比大小）
+const TEXT_SORT_KEYS: ReadonlySet<SortKey> = new Set<SortKey>(['name', 'contract_type', 'source']);
+// 游标里文本值的长度上限：库里最长姓名 22 字符（生产实测），拦掉塞长串游标的玩法
+const TEXT_CURSOR_MAX = 120;
 
-// 编 cursor 用的行内字段：数值排序时 SELECT 额外带出 `sort_key`（与 ORDER BY 同一表达式，保证游标值与排序值逐位一致）
+// 位置权重：门将 1 → 后卫 2 → 中场 3 → 前锋 4（与前端 POSITION_GROUPS 的分组同序）
+const POSITION_SORT_CASE = `CASE players.position
+  WHEN 'GK' THEN 1
+  WHEN 'RB' THEN 2 WHEN 'CB' THEN 2 WHEN 'LB' THEN 2
+  WHEN 'CDM' THEN 3 WHEN 'RM' THEN 3 WHEN 'CM' THEN 3 WHEN 'LM' THEN 3 WHEN 'CAM' THEN 3
+  WHEN 'RW' THEN 4 WHEN 'ST' THEN 4 WHEN 'LW' THEN 4
+  ELSE 0 END`;
+// 状态权重：在队 1 → 挂牌 2 → 训练营 3 → 自由身 4 → 退役 5（与前端 STATUS_LABEL 同序；取值见 PLAYER_STATUS）
+const STATUS_SORT_CASE = `CASE players.status
+  WHEN 'normal' THEN 1 WHEN 'listed' THEN 2 WHEN 'trainee' THEN 3 WHEN 'free' THEN 4 WHEN 'retired' THEN 5
+  ELSE 0 END`;
+// PlayStyle 列按「挂了几个」排：PSID1-15 的非空槽计数（金徽存的是基础 ID+100，仍是同一个槽）。
+// 每个 IS NOT NULL 必须自带括号：SQLite 里 + 的优先级高于 IS NOT NULL，不括起来会被解析成一整串比较
+const PS_COUNT_EXPR = `(${Array.from(
+  { length: 15 },
+  (_, i) => `(json_extract(players.game_attrs, '$.PSID${i + 1}') IS NOT NULL)`,
+).join(' + ')})`;
+
+// 排序表达式：ORDER BY、SELECT 里的 sort_key、游标比较表达式三处共用同一份，保证游标值与排序值逐位一致；
+// 视图口径（caExpr/paExpr）与运行时影响力系数（inflExpr）都在这儿注入
+function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string }): Record<SortKey, string> {
+  return {
+    id: 'players.id',
+    // uid = 'fc' + fcId（core/import.ts:154/218），表里显示的是去掉前缀的号，排序也按号不走字符串
+    uid: "COALESCE(CAST(SUBSTR(players.uid, 3) AS INTEGER), 0)",
+    name: sqlFold('players.name'),
+    club: 'COALESCE(players.club_id, 0)',
+    position: POSITION_SORT_CASE,
+    age: 'COALESCE(players.age, 0)',
+    ca: `COALESCE(${ctx.caExpr}, 0)`,
+    pa: `COALESCE(${ctx.paExpr}, 0)`,
+    growable: 'COALESCE(players.growable, 0)',
+    influence: ctx.inflExpr,
+    status: STATUS_SORT_CASE,
+    market_value: 'COALESCE(players.market_value, 0)',
+    badges: '(COALESCE(players.badges_silver, 0) + COALESCE(players.badges_gold, 0))',
+    prestige: 'COALESCE(players.prestige, 0)',
+    base_ca: 'COALESCE(players.base_ca, 0)',
+    growth_gap: `((${ctx.paExpr}) - (${ctx.caExpr}))`,
+    foot: 'COALESCE(players.foot, 0)',
+    growth_tier: 'COALESCE(players.growth_tier, 0)',
+    future_star: 'COALESCE(players.is_future_star, 0)',
+    china_plan: 'COALESCE(players.china_plan, 0)',
+    agent_tier: 'COALESCE(players.agent_tier, 0)',
+    ps: PS_COUNT_EXPR,
+    fc_id: 'COALESCE(players.fc_id, 0)',
+    // 合同维度全部取现行合同（与列表 LEFT JOIN contracts ... is_active = 1 同源）；无合同的一方按 0 / 空串
+    wage: 'COALESCE(ct.wage, 0)',
+    release_fee: 'COALESCE(ct.release_fee, 0)',
+    contract_type: "COALESCE(ct.contract_type, '')",
+    source: "COALESCE(ct.source, '')",
+    // 与行映射里的 protected（增量 25）= 是否在保护期内，同一条判据
+    protected: `CASE WHEN ct.protection_ticks IS NOT NULL AND (${CURRENT_TICKS_SQL}) < ct.protection_ticks THEN 1 ELSE 0 END`,
+    // 效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)，与 effective_years_* 筛选同源；
+    // 无现行合同的球员没有签约基数可比，按 0 参与排序（不能拿 NULL 当键：keyset 的 NULL 比较恒为假，会漏行）
+    years: `CASE WHEN ct.player_id IS NULL THEN 0 ELSE ((${CURRENT_TICKS_SQL}) - COALESCE(ct.service_ticks, 0)) * 0.5 END`,
+  };
+}
+
+// 编 cursor 用的行内字段：非 id 排序时 SELECT 额外带出 `sort_key`（与 ORDER BY 同一表达式，保证游标值与排序值逐位一致）
 
 const RANGE_PARAMS = {
   ca_min: { col: 'players.ca', op: '>=' },
@@ -60,6 +157,17 @@ function decodeNumericCursor(raw: string): { v: number; id: number } {
   const v = Number(raw.slice(0, sep));
   const id = Number(raw.slice(sep + 1));
   if (!Number.isFinite(v) || !Number.isInteger(id) || id < 0) throw new HttpError(400, 'cursor 不对');
+  return { v, id };
+}
+
+// 文本键的游标：`<排序值>~<球员 id>`。值里可能有 ~（姓名可能出现），所以从最后一个 ~ 切；
+// 排序值为空串是合法状态（无现行合同的 contract_type / source 就是 ''），所以 sep 允许为 0
+function decodeTextCursor(raw: string): { v: string; id: number } {
+  const sep = raw.lastIndexOf('~');
+  if (sep < 0) throw new HttpError(400, 'cursor 不对');
+  const v = raw.slice(0, sep);
+  const id = Number(raw.slice(sep + 1));
+  if (v.length > TEXT_CURSOR_MAX || !Number.isInteger(id) || id < 0) throw new HttpError(400, 'cursor 不对');
   return { v, id };
 }
 
@@ -105,7 +213,8 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 //       growth_tier / is_future_star / china_plan / agent_tier / badges_silver_min / badges_gold_min /
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
-// 排序：sort=id|ca|pa|age|market_value|influence + order（id 固定 ASC 旧整数游标）
+// 排序（增量 26 起表头每一列都可点，键名见 SORT_KEY_NAMES）：sort + order（id 固定 ASC 旧整数游标；
+//       name / contract_type / source 三个文本键走文本游标，其余数值键走 keyset）
 // 增量 26：name 走去变音折叠（core/name-fold）——「sesko」能搜到「Šeško」
 // 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
 // 缓存键用归一后的查询串（canonicalQuery），条数上限由 guard 侧兜底
@@ -133,24 +242,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   const paExpr = initial ? "COALESCE(json_extract(players.game_attrs, '$.PA'), players.pa)" : 'players.pa';
   const coefs = await influenceCoefs(c.env.DB);
   const inflExpr = influenceExpr(coefs);
-  // keyset 比较表达式（WHERE/ORDER BY 同源，保证全序一致）；influence 恒为现值口径，不随 view 切
-  const SORT_EXPRS: Record<SortKey, string> = initial
-    ? {
-        id: 'players.id',
-        ca: 'COALESCE(players.base_ca, 0)',
-        pa: "COALESCE(json_extract(players.game_attrs, '$.PA'), 0)",
-        age: 'COALESCE(players.age, 0)',
-        market_value: 'COALESCE(players.market_value, 0)',
-        influence: inflExpr,
-      }
-    : {
-        id: 'players.id',
-        ca: 'COALESCE(players.ca, 0)',
-        pa: 'COALESCE(players.pa, 0)',
-        age: 'COALESCE(players.age, 0)',
-        market_value: 'COALESCE(players.market_value, 0)',
-        influence: inflExpr,
-      };
+  const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
 
   // filters 进 COUNT；cursor 只进列表查询（总数不随翻页游标变）
   const filters: string[] = [];
@@ -401,7 +493,9 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   }
 
   const sortRaw = c.req.query('sort') ?? 'id';
-  if (!(sortRaw in SORT_KEYS)) throw new HttpError(400, 'sort 只能是 id / ca / pa / age / market_value / influence');
+  if (!(SORT_KEY_NAMES as readonly string[]).includes(sortRaw)) {
+    throw new HttpError(400, `sort 只能是 ${SORT_KEY_NAMES.join(' / ')}`);
+  }
   const sort = sortRaw as SortKey;
   const order = sort === 'id' || c.req.query('order') === 'asc' ? 'asc' : 'desc';
 
@@ -416,10 +510,11 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     }
     orderBy = 'ORDER BY players.id ASC';
   } else {
-    const keyExpr = SORT_EXPRS[sort];
+    const keyExpr = sortExprs[sort];
+    const text = TEXT_SORT_KEYS.has(sort);
     const cursor = c.req.query('cursor');
     if (cursor !== undefined) {
-      const { v, id } = decodeNumericCursor(cursor);
+      const { v, id } = text ? decodeTextCursor(cursor) : decodeNumericCursor(cursor);
       if (order === 'desc') {
         cursorConds.push(`(${keyExpr} < ? OR (${keyExpr} = ? AND players.id < ?))`);
       } else {
@@ -450,7 +545,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
             ct.source AS ct_source, ct.player_id AS ct_player_id,
             ct.service_ticks AS ct_service_ticks, ct.protection_ticks AS ct_protection_ticks,
             ${CURRENT_TICKS_SQL} AS current_ticks,
-            cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${SORT_EXPRS[sort]} AS sort_key` : ''}
+            cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${sortExprs[sort]} AS sort_key` : ''}
      FROM players
      LEFT JOIN clubs cc ON cc.id = players.club_id
      LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1
@@ -510,7 +605,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       ps13?: number | null;
       ps14?: number | null;
       ps15?: number | null;
-      sort_key?: number;
+      sort_key?: number | string | null;
     }>();
 
   const countRow = await c.env.DB.prepare(
@@ -574,7 +669,13 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   let nextCursor: string | null = null;
   if (rows.results.length > limit) {
     const last = rows.results[limit - 1]!;
-    nextCursor = sort === 'id' ? String(last.id) : `${Number(last.sort_key ?? 0)}~${last.id}`;
+    // 文本键原样带上排序值（前端拉下一页时按 URL 编码回传）；数值键沿用 Number 归一
+    nextCursor =
+      sort === 'id'
+        ? String(last.id)
+        : TEXT_SORT_KEYS.has(sort)
+          ? `${String(last.sort_key ?? '')}~${last.id}`
+          : `${Number(last.sort_key ?? 0)}~${last.id}`;
   }
   return { players, total: countRow?.n ?? 0, nextCursor };
 }
