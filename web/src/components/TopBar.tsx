@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { NavLink } from 'react-router';
 import { isSuperAdmin, TOUR_SITE_URL, type MeUser } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
@@ -8,8 +9,26 @@ const ROLE_LABEL: Record<MeUser['role'], string> = { admin: '管理组', coach: 
 export default function TopBar() {
   const { user, authMode } = useAuth();
   const unread = useUnreadCount().data ?? 0;
+  const barRef = useRef<HTMLElement | null>(null);
+
+  // 把顶栏实测高度写进 --topbar-h：样式表里 54px（宽屏）/ 102px（窄屏折两行）只是 16px 默认字号
+  // 量出来的常量，用户把浏览器默认字号调大后顶栏更高，写死的常量会让所有吸顶元素（球员库左栏、
+  // 窄屏工具条）被顶栏压住。内联样式优先级高于 :root 与媒体块，所以这里回写的就是最终值。
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => {
+      document.documentElement.style.setProperty('--topbar-h', `${Math.round(el.getBoundingClientRect().height)}px`);
+    };
+    apply();
+    // 观察 border-box：默认的 content-box 观察不到「只改 padding」引起的视觉高度变化
+    const observer = new ResizeObserver(apply);
+    observer.observe(el, { box: 'border-box' });
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <header className="topbar">
+    <header className="topbar" ref={barRef}>
       <div className="topbar-inner">
         <NavLink to="/" className="brand">
           <img className="brand-logo" src="/assets/brand/whl-badge-96.webp" alt="WHL 徽章" />

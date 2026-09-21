@@ -44,6 +44,7 @@ export default function FilterPanel({
       {label}
       <input
         type="number"
+        name={String(key)}
         value={filters[key] as string}
         placeholder={placeholder}
         onChange={(e) => set(key, e.target.value as Filters[typeof key])}

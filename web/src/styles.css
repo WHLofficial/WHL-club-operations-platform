@@ -1702,8 +1702,47 @@ tbody tr:hover td {
   padding-left: 0;
 }
 
-/* 窄屏兜底：两列栅格在 375px 视口下主列只剩 45px（实测）。
-   这里先让侧栏落到表格上方把宽度还回去；步骤 8 会把整段换成 900px 断点 + 左侧滑出抽屉。 */
+/* 抽屉抬头与遮罩的基础样式（宽屏一律不出现：左栏是常驻的，没有「关」这个概念）。
+   注意顺序：这两条要排在下面的窄屏媒体块之前，媒体块里同选择器的一条才能覆盖掉 display。 */
+.lib-drawer-head {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.lib-drawer-close {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.lib-drawer-close:hover {
+  border-color: var(--terracotta);
+  color: var(--terracotta-deep);
+}
+
+/* 遮罩配色与 .modal-mask 一致（用户已认识这个「后面不能点」的视觉语言）；
+   z-index 在顶栏（20）之上、抽屉（30）之下 */
+.lib-drawer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: rgba(43, 29, 18, 0.45);
+}
+
+/* 窄屏（增量 26 决策 7/15/16，断点 900px）：左栏从两列栅格改成左侧滑出抽屉。
+   为什么不是「塌回表格上方」：本次搬家要省的就是表格上方的垂直空间，搬回上方等于原地不动。
+   关着的时候靠 React 的 inert 让它不可点不可 Tab（不用 visibility 过渡：过渡在 t=0 仍是 hidden，
+   会让「打开就把焦点移进抽屉」那一步静默失败 —— 实测 focus() 返回了但 activeElement 没变）。 */
 @media (max-width: 900px) {
 
   .library-shell,
@@ -1711,20 +1750,51 @@ tbody tr:hover td {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .library-side {
-    position: static;
+  .library-side,
+  .library-shell.collapsed .library-side {
+    display: block;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(320px, 85vw);
     max-height: none;
-    overflow: visible;
-    padding-right: 0;
-    padding-bottom: 12px;
-    margin-bottom: 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px 14px 32px;
+    border-right: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: 0 0 24px rgba(43, 29, 18, 0.18);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+
+  .library-shell.drawer-open .library-side {
+    transform: none;
   }
 
   .library-main,
   .library-shell.collapsed .library-main {
     padding-left: 0;
+  }
+
+  /* 工具条整行吸顶（决策 16）：滚动时「筛选（N）」这个抽屉入口常驻可见 */
+  .library-controls {
+    position: sticky;
+    top: var(--topbar-h);
+    z-index: 5;
+    background: var(--card);
+    padding: 12px 0 10px;
+  }
+
+  .lib-drawer-head {
+    display: flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-side {
+    transition: none;
   }
 }
 

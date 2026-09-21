@@ -2,11 +2,12 @@
 // 列与筛选双向联动：筛了什么就自动加什么列（手动调过列选择器后以手动为准，取消筛选也不再自动撤）；
 // 筛选条件全部进 URL query，刷新不丢、链接可分享。当前视图=现在的归属与能力；初始视图=导入时的底册。
 // 筛选模型（Filters / URL 互转 / 列系统）在 ../lib/players-library.ts，筛选控件在 ../components/FilterPanel.tsx。
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from '../lib/ref.ts';
+import { useMediaQuery } from '../lib/use-media.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
 import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
 import {
@@ -29,9 +30,11 @@ import {
   type SortKey,
 } from '../lib/players-library.ts';
 
-// 左栏开合记在本地：桌面用户收起一次就一直收起（移动端抽屉另有开关，见步骤 8）。
+// 左栏开合记在本地：桌面用户收起一次就一直收起（移动端抽屉不记 —— 每次进来默认关，
+// 与 .admin-shell 的窄屏行为一致）。
 // localStorage 在隐私模式/被禁用时会抛，读写成败都不影响页面。
 const SIDE_STORAGE_KEY = 'players-library:side';
+const DRAWER_QUERY = '(max-width: 900px)';
 function readSideOpen(): boolean {
   try {
     return localStorage.getItem(SIDE_STORAGE_KEY) !== 'closed';
@@ -157,8 +160,12 @@ export default function PlayersLibrary() {
     parseColsParam(new URLSearchParams(window.location.search).get('cols')),
   );
   const [nameInput, setNameInput] = useState(filters.name);
-  // 左栏开合：初值读本地记忆（默认展开），移动端另有抽屉开关
+  // 左栏开合：初值读本地记忆（默认展开）；窄屏下同一份 DOM 变成滑出抽屉，另有 drawerOpen
   const [sideOpen, setSideOpen] = useState(readSideOpen);
+  const narrow = useMediaQuery(DRAWER_QUERY);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
 
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -286,6 +293,33 @@ export default function PlayersLibrary() {
     setSideOpen(next);
   };
 
+  // 抽屉关闭：× / 遮罩 / Esc 三条路都走这里，焦点交还给入口按钮（键盘用户不至于掉到文档开头）
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    toggleRef.current?.focus();
+  };
+
+  // 抽屉开着时：锁背景滚动（不然滑抽屉会带着表格一起滚）、Esc 关闭、焦点移进抽屉
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeDrawer();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [drawerOpen]);
+
+  // 回到宽屏就把抽屉状态放掉：抽屉是窄屏专属形态，留着会让宽屏下一开窗就带遮罩
+  useEffect(() => {
+    if (!narrow) setDrawerOpen(false);
+  }, [narrow]);
+
   return (
     <div className="container">
       <h2>球员库</h2>
@@ -293,13 +327,21 @@ export default function PlayersLibrary() {
 
       <section className="card">
         <div className="library-controls">
+          {/* 宽屏开合左栏、窄屏开抽屉：同一个按钮、两种语义，计数徽标两边共用 */}
           <button
+            ref={toggleRef}
             type="button"
             className="btn btn-sm lib-side-toggle"
-            aria-expanded={sideOpen}
+            aria-expanded={narrow ? drawerOpen : sideOpen}
             aria-controls="library-side"
-            onClick={toggleSide}
-            title={sideOpen ? '收起筛选栏' : '展开筛选栏'}
+            onClick={() => (narrow ? setDrawerOpen(true) : toggleSide())}
+            title={
+              narrow
+                ? '打开筛选抽屉'
+                : sideOpen
+                  ? '收起筛选栏'
+                  : '展开筛选栏'
+            }
           >
             筛选{chips.length > 0 ? `（${chips.length}）` : ''}
           </button>
@@ -343,8 +385,30 @@ export default function PlayersLibrary() {
           )}
         </div>
 
-        <div className={sideOpen ? 'library-shell' : 'library-shell collapsed'}>
-          <aside className="library-side" id="library-side" aria-label="筛选与显示列">
+        {drawerOpen && narrow ? <div className="lib-drawer-mask" aria-hidden="true" onClick={closeDrawer} /> : null}
+
+        <div className={`${sideOpen ? 'library-shell' : 'library-shell collapsed'}${drawerOpen ? ' drawer-open' : ''}`}>
+          {/* 窄屏关着时 inert：抽屉虽在屏幕外仍占 DOM，不加这个 Tab 能一路走进那几十个输入框。
+              宽屏不用（左栏是常驻的，inert 会把正常使用的侧栏一起锁掉） */}
+          <aside
+            className="library-side"
+            id="library-side"
+            aria-label="筛选与显示列"
+            inert={narrow && !drawerOpen}
+          >
+            {/* 抽屉抬头只在窄屏出现（宽屏 display:none）：标题 + 关闭按钮，与遮罩、Esc 同一出口 */}
+            <div className="lib-drawer-head">
+              <span>筛选与显示列</span>
+              <button
+                ref={closeRef}
+                type="button"
+                className="lib-drawer-close"
+                aria-label="关闭筛选抽屉"
+                onClick={closeDrawer}
+              >
+                ×
+              </button>
+            </div>
             <FilterPanel
               filters={filters}
               set={set}
