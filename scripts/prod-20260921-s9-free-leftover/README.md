@@ -1,6 +1,6 @@
 # S9 队籍收尾 · 遗留球员释放自由身（一次性生产工件）
 
-> 状态：**工件已产，生产执行待配额**。本批口径由用户 2026-09-21 裁定：`clubID改null，status改free`。
+> 状态：**已于 2026-09-21 生产执行完毕**（304 条语句、912 rows_written，验收六列全中；见 §十三）。本批口径由用户 2026-09-21 裁定：`clubID改null，status改free`。
 > 前序：`scripts/prod-20260920-s9-club-align/`（队籍对齐）已于 2026-09-21 生产执行完毕（570 人对齐、在册 874、自由身 17427）。
 
 ---
@@ -76,7 +76,7 @@ UPDATE players SET club_id = NULL, status = 'free', updated_at = '<生成时点>
 - **守卫双列**：`club_id IS 旧值 AND status = 旧值`（`IS` 对非空值等价 `=`，null 安全）⇒ 重放、错版、他人先改过时 `changes = 0`。
 - 回滚（`rollback/`，反向同形）：`SET club_id = 旧值, status = 旧status` + `WHERE fc_id = ? AND club_id IS NULL AND status = 'free'`。
 - `players.club_id` / `players.status` 都**没有外键**（`src/db/migrations/0001_init.sql:8,17`），故本批可用 `--file` 分片执行，不受 `scripts/README.md:66` 的 `PRAGMA defer_foreign_keys` 纪律约束。
-- 写入量：304 条 UPDATE × 2 次行写 ≈ **608 rows_written**（队籍对齐批实测每条 2 次：行 + 1 个索引）。
+- 写入量：304 条 UPDATE × **3** 次行写 = **912 rows_written**（实测；写 `club_id` + `status` 两个索引列 ⇒ 行 + `idx_players_club` + `idx_players_status`。只写 `club_id` 的队籍对齐批是每条 2 次）。
 
 ## 六、为什么同时写 `status = 'free'`
 
@@ -92,7 +92,7 @@ UPDATE players SET club_id = NULL, status = 'free', updated_at = '<生成时点>
 - **不动能力与成长**：`ca`/`base_ca`/`growth_xp`/`levels_applied`/徽章一行不改 ⇒ 这批人与「被解约」不同，将来若被签下不会从初始态重新成长（差异是有意的，用户口径）。
 - EA 原始队籍不会丢：留在 `game_attrs.$.TeamID`。
 
-## 八、执行步骤（等令 + 等配额）
+## 八、执行步骤（已于 2026-09-21 执行，步骤留档）
 
 0. 生成工件：`node scripts/prod-20260921-s9-free-leftover/gen-free-leftover-sql.ts`（对 `--remote` 只读抓旧队籍/旧 status，产出分片与报告）。
 1. 生产只读复查：`node gen-free-leftover-sql.ts --verify` ⇒ 期望「s901 名单 570；在册 874；遗留 304」，退出码 4（有差异）；再跑 `01-precheck.sql`。
@@ -141,6 +141,41 @@ npx wrangler d1 execute whl-club --remote --file <绝对路径>/rollback/free-le
 
 在本地 D1（`--local`）上生成并跑了一遍完整往返，结论：落库写双列成功、重放 `changes = 0`、回滚把 `club_id`/`status` 一起还原、回滚重放 `changes = 0`。本地库有一行 `fc_id` 为空（`阿七`），据此给生成器加了「在册行 `fc_id` 为空即报错」的守卫。
 
-## 十三、执行记录
+## 十三、执行记录（2026-09-21）
 
-_待补：执行后在此记录执行前复查、逐片 `Rows read/written`、验收六列实测、逐队名单与执行后状态。_
+### 执行前复查（只读，全中）
+
+| 项 | 期望 | 实测 |
+| --- | --- | --- |
+| `rostered_now` | 874 | 874 |
+| `null_club` | 17427 | 17427 |
+| `free_now` | 0 | 0 |
+| 六张守卫表（contracts/listings/registrations/negotiation_sessions/transfers/bids） | 全 0 | 全 0 |
+| 逐队 `roster_now` | = §四「释放后名单」列 + 待释放列 | 逐队吻合（合计 874） |
+
+生成器 `--verify` 报「s901 名单 570 人；在册 874 人；遗留 304 人」，生成时点 `2026-09-21T00:14:45.780Z`（UTC）。
+
+### 逐片执行（`npx wrangler d1 execute whl-club --remote --file <分片>`）
+
+| 分片 | 语句 | rows_read | rows_written | meta.changes |
+| --- | --- | --- | --- | --- |
+| `sql/free-leftover-update-01.sql` | 200 | 200 | 600 | 201（不可靠，忽略） |
+| `sql/free-leftover-update-02.sql` | 104 | 104 | 312 | 105（同上） |
+| **合计** | **304** | 304 | **912** | — |
+
+### 验收（全中）
+
+- `--verify` → 「s901 名单 570 人；在册 570 人；**遗留 0 人**」（退出码 0），在册 status 分布 `normal×570`。
+- `02-verify.sql` 六列：`want_rows` **304** / `still_rostered` **0** / `status_not_free` **0** / `null_club` **17731** / `rostered_now` **570** / `touched` **304**。
+- 逐队 `roster_now` 逐队等于 s901 队壳行数：阿森纳 30、阿斯顿维拉 30、切尔西 31、利物浦 37、曼城(CPU) 28、曼联 25、纽卡斯尔联 23、诺丁汉森林 23、拜仁慕尼黑 37、慕尼黑1860 26、尤文图斯 31、里昂 31、巴黎圣日耳曼 29、巴塞罗那(CPU) 29、皇家马德里 23、奥林匹亚科斯 30、皇家贝蒂斯 25、佛罗伦萨 31、RB莱比锡(CPU) 26、AC米兰(CPU) 25（合计 570）。
+
+### 执行后状态
+
+- 在册 **570**（= 联盟世界名单）、自由身 **17731**、`status='free'` **304**；六张守卫表仍全 0。
+- 20 队报名候选名单从 874 收回 570；合同批 / 能力批的 fc_id 全在 570 内，不受影响。
+
+### 未验证项与过程备注
+
+- 未用 admin 会话在页面复核（球员库「自由身」筛选、海捞池）；只做了库内与生成器的数据层验收。
+- 执行期间遇到两次环境故障，均与工件无关、重试即恢复：`npx wrangler` 在 Node v24 + Windows 下偶发 libuv 断言崩溃（`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`），以及 OAuth token 恰在 2026-09-20T17:45:24Z 到期时的一次「non-interactive environment」报错。
+- 回滚（§十）两条分片可用，守卫按导入后新值（`club_id IS NULL AND status = 'free'`），重复执行不写。
