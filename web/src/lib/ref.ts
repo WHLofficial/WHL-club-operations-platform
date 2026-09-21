@@ -64,6 +64,60 @@ export function playstyleIconUrl(id: number): string {
   return `/assets/icons/playstyles/${id}.webp`;
 }
 
+// 细分属性中文名（34 项，顺序 = FC26 的细分属性列顺序，与 players-library.ts 的 ATTR_KEYS、
+// 后端 FC26_GAME_ATTR_COLUMNS 逐序对齐）。
+// 增量 27 步骤 2：原先这份表只活在 pages/Player.tsx 里，筛选面板的下拉只好铺英文键；提到这里
+// 两处共用一份 —— 各留一份就多一次「下拉里是 sprintspeed、档案页写冲刺速度」的漂移机会。
+// 顺序与完整性由 web/src/lib/ref.test.ts 与 ATTR_KEYS 逐序比对兜底。
+export const ATTR_LABELS: Record<string, string> = {
+  sprintspeed: '冲刺速度',
+  acceleration: '加速',
+  finishing: '终结',
+  positioning: '跑位',
+  shotpower: '射门力量',
+  longshots: '远射',
+  penalties: '点球',
+  volleys: '凌空',
+  vision: '视野',
+  crossing: '传中',
+  freekickaccuracy: '任意球',
+  longpassing: '长传',
+  shortpassing: '短传',
+  curve: '弧线',
+  agility: '敏捷',
+  balance: '平衡',
+  reactions: '反应',
+  composure: '沉着',
+  ballcontrol: '控球',
+  dribbling: '盘带',
+  interceptions: '拦截',
+  headingaccuracy: '头球精度',
+  defensiveawareness: '防守意识',
+  standingtackle: '站立抢断',
+  slidingtackle: '铲断',
+  jumping: '弹跳',
+  stamina: '体力',
+  strength: '力量',
+  aggression: '侵略性',
+  gkdiving: '扑救',
+  gkhandling: '手型',
+  gkkicking: '开球',
+  gkpositioning: '站位',
+  gkreflexes: '反应扑救',
+};
+
+// 属性组（增量 6.1 d10 四裁决：六组速查卡；门将追加 GKP 共七组；组值=组内平均）。
+// 增量 27 步骤 2：筛选面板的「属性」下拉按这份表分七组小标题，与档案页速查卡同一套分组。
+export const ATTR_GROUPS = [
+  { key: 'PAC', label: '速度', keys: ['sprintspeed', 'acceleration'] },
+  { key: 'SHO', label: '射门', keys: ['finishing', 'positioning', 'shotpower', 'longshots', 'penalties', 'volleys'] },
+  { key: 'PAS', label: '传球', keys: ['vision', 'crossing', 'freekickaccuracy', 'longpassing', 'shortpassing', 'curve'] },
+  { key: 'DRI', label: '盘带', keys: ['agility', 'balance', 'reactions', 'composure', 'ballcontrol', 'dribbling'] },
+  { key: 'DEF', label: '防守', keys: ['interceptions', 'headingaccuracy', 'defensiveawareness', 'standingtackle', 'slidingtackle'] },
+  { key: 'PHY', label: '体格', keys: ['jumping', 'stamina', 'strength', 'aggression'] },
+  { key: 'GKP', label: '门将', keys: ['gkdiving', 'gkhandling', 'gkkicking', 'gkpositioning', 'gkreflexes'] },
+] as const;
+
 export const AGENT_TIER_LABEL = ['', '温和', '普通', '苛刻'] as const;
 
 export const STATUS_LABEL: Record<string, string> = {

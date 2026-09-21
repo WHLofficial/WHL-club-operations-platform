@@ -7,6 +7,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, GROWTH_EVENT_LABEL, type GrowthDetail, type LevelUpResult, type PlayerDetail } from '../lib/api.ts';
 import {
   AGENT_TIER_LABEL,
+  ATTR_GROUPS,
+  ATTR_LABELS,
   CONTRACT_TYPE_LABEL,
   SOURCE_LABEL,
   STATUS_LABEL,
@@ -27,54 +29,6 @@ const TAB_LABEL: Record<PlayerTab, string> = {
   attrs: '属性',
   growth: '成长',
 };
-
-const ATTR_LABELS: Record<string, string> = {
-  sprintspeed: '冲刺速度',
-  acceleration: '加速',
-  finishing: '终结',
-  positioning: '跑位',
-  shotpower: '射门力量',
-  longshots: '远射',
-  penalties: '点球',
-  volleys: '凌空',
-  vision: '视野',
-  crossing: '传中',
-  freekickaccuracy: '任意球',
-  longpassing: '长传',
-  shortpassing: '短传',
-  curve: '弧线',
-  agility: '敏捷',
-  balance: '平衡',
-  reactions: '反应',
-  composure: '沉着',
-  ballcontrol: '控球',
-  dribbling: '盘带',
-  interceptions: '拦截',
-  headingaccuracy: '头球精度',
-  defensiveawareness: '防守意识',
-  standingtackle: '站立抢断',
-  slidingtackle: '铲断',
-  jumping: '弹跳',
-  stamina: '体力',
-  strength: '力量',
-  aggression: '侵略性',
-  gkdiving: '扑救',
-  gkhandling: '手型',
-  gkkicking: '开球',
-  gkpositioning: '站位',
-  gkreflexes: '反应扑救',
-};
-
-// 属性组（增量 6.1 d10，四裁决：六组速查卡；门将追加 GKP 共七组；组值=组内平均）
-const ATTR_GROUPS = [
-  { key: 'PAC', label: '速度', keys: ['sprintspeed', 'acceleration'] },
-  { key: 'SHO', label: '射门', keys: ['finishing', 'positioning', 'shotpower', 'longshots', 'penalties', 'volleys'] },
-  { key: 'PAS', label: '传球', keys: ['vision', 'crossing', 'freekickaccuracy', 'longpassing', 'shortpassing', 'curve'] },
-  { key: 'DRI', label: '盘带', keys: ['agility', 'balance', 'reactions', 'composure', 'ballcontrol', 'dribbling'] },
-  { key: 'DEF', label: '防守', keys: ['interceptions', 'headingaccuracy', 'defensiveawareness', 'standingtackle', 'slidingtackle'] },
-  { key: 'PHY', label: '体格', keys: ['jumping', 'stamina', 'strength', 'aggression'] },
-  { key: 'GKP', label: '门将', keys: ['gkdiving', 'gkhandling', 'gkkicking', 'gkpositioning', 'gkreflexes'] },
-] as const;
 
 // 细分色阶（四裁决：绿>=70 / 橙 50-69 / 红<50）
 function attrClass(v: number): string {
@@ -278,7 +232,7 @@ export default function Player() {
             {player.chinaPlan && <span className="badge red">中国计划</span>}
             {player.growthTier > 1 && <span className="badge gray">成长档位 {player.growthTier}</span>}
           </div>
-          <p className="player-card-agent">经纪人档位 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
+          <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
         </section>
 
         <section className="dossier-file">

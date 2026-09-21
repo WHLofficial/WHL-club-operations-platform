@@ -1683,6 +1683,52 @@ tbody tr:hover td {
   font-size: 14px;
 }
 
+/* 成对区间输入（增量 27 步骤 2）：同属性的上下限并成一行两列，label 在左、单位缀在 label 后。
+   .field 是「label 在上、输入框占满整行」的版式，成对版式正好相反，所以不套那个类；
+   输入框外观（边框/圆角/内边距/聚焦环）在这里自成一份，与同组 select 同高。 */
+.lib-adv-grid .pair {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pair-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-width: 56px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pair-hint {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.lib-adv-grid .pair input {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  margin-top: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+}
+
+.lib-adv-grid .pair input:focus {
+  outline: none;
+  border-color: var(--terracotta);
+  box-shadow: 0 0 0 3px rgba(164, 97, 44, 0.15);
+}
+
 .lib-adv-ps {
   margin-top: 10px;
 }

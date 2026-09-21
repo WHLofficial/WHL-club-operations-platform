@@ -2,8 +2,8 @@
 // 面板只负责渲染与回调，筛选状态、URL 同步、列清单都在页面（pages/PlayersLibrary.tsx）手里。
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClubDirectoryRow } from '../lib/api.ts';
-import { playstyleById, SOURCE_LABEL } from '../lib/ref.ts';
-import { ATTR_KEYS, COL_DEFS, POSITION_GROUPS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
+import { ATTR_GROUPS, ATTR_LABELS, playstyleById, SOURCE_LABEL } from '../lib/ref.ts';
+import { COL_DEFS, POSITION_GROUPS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
 
 export interface FilterPanelProps {
   filters: Filters;
@@ -39,17 +39,32 @@ export default function FilterPanel({
   toggleCol,
   resetCols,
 }: FilterPanelProps) {
-  const num = (key: keyof Filters, label: string, placeholder?: string) => (
-    <label className="field">
-      {label}
+  // 成对区间输入（增量 27 步骤 2）：同属性的上下限并成一行两列，左「最低」右「最高」。
+  // 字段名与 URL 键一律不动（还是 caMin/caMax 这一套），这里只改版式与文案 ——
+  // 摘要条那边要不要合成一条 chip 是步骤 5 的事，别把两件事揉进一次改动。
+  const pair = (minKey: keyof Filters, maxKey: keyof Filters, label: string, hint?: string) => (
+    <div className="pair">
+      <span className="pair-label">
+        {label}
+        {hint ? <span className="pair-hint">{hint}</span> : null}
+      </span>
       <input
         type="number"
-        name={String(key)}
-        value={filters[key] as string}
-        placeholder={placeholder}
-        onChange={(e) => set(key, e.target.value as Filters[typeof key])}
+        name={String(minKey)}
+        value={filters[minKey] as string}
+        placeholder="最低"
+        aria-label={`${label} 最低`}
+        onChange={(e) => set(minKey, e.target.value as Filters[typeof minKey])}
       />
-    </label>
+      <input
+        type="number"
+        name={String(maxKey)}
+        value={filters[maxKey] as string}
+        placeholder="最高"
+        aria-label={`${label} 最高`}
+        onChange={(e) => set(maxKey, e.target.value as Filters[typeof maxKey])}
+      />
+    </div>
   );
 
   return (
@@ -122,27 +137,20 @@ export default function FilterPanel({
           <div className="lib-adv-group">
             <h4>区间</h4>
             <div className="lib-adv-grid">
-              {num('caMin', 'CA ≥')}
-              {num('caMax', 'CA ≤')}
-              {num('paMin', 'PA ≥')}
-              {num('paMax', 'PA ≤')}
-              {num('gapMin', '成长空间 ≥', 'PA−CA')}
-              {num('gapMax', '成长空间 ≤')}
-              {num('baseCaMin', '初始 CA ≥')}
-              {num('baseCaMax', '初始 CA ≤')}
-              {num('ageMin', '年龄 ≥')}
-              {num('ageMax', '年龄 ≤')}
-              {num('mvMin', '身价 ≥', 'm')}
-              {num('mvMax', '身价 ≤', 'm')}
-              {num('inflMin', '影响力 ≥')}
-              {num('inflMax', '影响力 ≤')}
+              {pair('caMin', 'caMax', 'CA')}
+              {pair('paMin', 'paMax', 'PA')}
+              {pair('gapMin', 'gapMax', '成长空间', 'PA−CA')}
+              {pair('baseCaMin', 'baseCaMax', '初始 CA')}
+              {pair('ageMin', 'ageMax', '年龄', '岁')}
+              {pair('mvMin', 'mvMax', '身价', 'm')}
+              {pair('inflMin', 'inflMax', '影响力')}
             </div>
           </div>
           <div className="lib-adv-group">
             <h4>细分属性</h4>
             <div className="lib-adv-grid">
               <label className="field">
-                属性键
+                属性
                 {/* 换属性键时把区间一起清掉：否则旧 min/max 留在状态里，摘要条看不见、计数不计、
                     单删不了，而选回同一个属性时它又会悄悄生效 */}
                 <select
@@ -150,15 +158,19 @@ export default function FilterPanel({
                   onChange={(e) => setFilters((f) => ({ ...f, attr: e.target.value, attrMin: '', attrMax: '' }))}
                 >
                   <option value="">不筛</option>
-                  {ATTR_KEYS.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
+                  {/* 增量 27 步骤 2：34 项按档案页的七组速查卡分组（单一来源 ref.ts），选项写中文名 */}
+                  {ATTR_GROUPS.map((g) => (
+                    <optgroup key={g.key} label={g.label}>
+                      {g.keys.map((k) => (
+                        <option key={k} value={k}>
+                          {ATTR_LABELS[k] ?? k}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </label>
-              {filters.attr && num('attrMin', '≥')}
-              {filters.attr && num('attrMax', '≤')}
+              {filters.attr && pair('attrMin', 'attrMax', ATTR_LABELS[filters.attr] ?? filters.attr)}
             </div>
           </div>
           <div className="lib-adv-group">
@@ -184,7 +196,7 @@ export default function FilterPanel({
                 </select>
               </label>
               <label className="field">
-                经纪人
+                经纪人性格
                 <select value={filters.agentTier} onChange={(e) => set('agentTier', e.target.value)}>
                   <option value="">全部</option>
                   <option value="1">温和</option>
@@ -230,10 +242,8 @@ export default function FilterPanel({
                   <option value="0">无</option>
                 </select>
               </label>
-              {num('wageMin', '工资 ≥', 'm/半赛季')}
-              {num('wageMax', '工资 ≤', 'm/半赛季')}
-              {num('rcMin', '解约金 ≥', 'm')}
-              {num('rcMax', '解约金 ≤', 'm')}
+              {pair('wageMin', 'wageMax', '工资', 'm/半赛季')}
+              {pair('rcMin', 'rcMax', '解约金', 'm')}
               <label className="field check">
                 <input type="checkbox" checked={filters.rcNone} onChange={(e) => set('rcNone', e.target.checked)} />
                 无解约金条款
@@ -265,8 +275,7 @@ export default function FilterPanel({
                   <option value="out">保护期外</option>
                 </select>
               </label>
-              {num('yearsMin', '效力时长 ≥', '赛季')}
-              {num('yearsMax', '效力时长 ≤', '赛季')}
+              {pair('yearsMin', 'yearsMax', '效力时长', '赛季')}
             </div>
           </div>
         </div>
