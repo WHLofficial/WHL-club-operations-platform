@@ -57,4 +57,18 @@ if (!orderBy.ok) {
   process.exit(tooLarge ? 1 : 2);
 }
 console.log('[depth] ORDER BY 折叠：真引擎通过');
+
+// ③ 最重的一条：文本键翻页的游标条件，折叠表达式在一次查询里出现三次
+//    （实际路由用绑定参数，这里换成同形的字面量——wrangler d1 execute 不做参数绑定）
+const folded = sqlFold('players.name');
+const cursor = run(
+  `SELECT players.id FROM players WHERE (${folded} < 'sesko' OR (${folded} = 'sesko' AND players.id < 5)) ORDER BY ${folded} ASC, players.id ASC LIMIT 3;`,
+);
+if (!cursor.ok) {
+  const tooLarge = /too large/.test(cursor.out);
+  console.error(`[depth] 游标条件折叠失败${tooLarge ? '（撞深度上限）' : ''}：\n${cursor.out.trim().split('\n').slice(-6).join('\n')}`);
+  process.exit(tooLarge ? 1 : 2);
+}
+console.log('[depth] 游标条件折叠（表达式 ×3）：真引擎通过');
+
 console.log(`[depth] 结论：${remote ? '生产' : '本地'} D1 接受当前折叠链`);

@@ -1770,7 +1770,9 @@ th.num {
 .th-sort {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 4px;
+  width: 100%;
   padding: 0;
   border: 0;
   background: none;
@@ -1778,6 +1780,11 @@ th.num {
   color: inherit;
   letter-spacing: inherit;
   cursor: pointer;
+}
+
+/* 数值列表头右对齐，标签也跟着靠右（与单元格对齐） */
+th.num .th-sort {
+  justify-content: flex-end;
 }
 
 .th-sort:hover {
@@ -1964,7 +1971,8 @@ th.num {
 }
 .admin-sidebar {
   position: sticky;
-  top: 16px;
+  /* 与 .library-side 同一类：顶栏也是 sticky，硬编码 16px 会让侧栏顶部被它盖住 */
+  top: calc(var(--topbar-h) + 12px);
   display: flex;
   flex-direction: column;
   gap: 2px;

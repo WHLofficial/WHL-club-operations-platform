@@ -3,7 +3,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClubDirectoryRow } from '../lib/api.ts';
 import { playstyleById, SOURCE_LABEL } from '../lib/ref.ts';
-import { COL_DEFS, POSITION_GROUPS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
+import { ATTR_KEYS, COL_DEFS, POSITION_GROUPS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
 
 export interface FilterPanelProps {
   filters: Filters;
@@ -20,16 +20,6 @@ export interface FilterPanelProps {
   toggleCol: (key: string) => void;
   resetCols: () => void;
 }
-
-// 细分属性键与后端白名单同源（FC26_GAME_ATTR_COLUMNS 尾段 34 项，照搬 src/core/fc26.ts）；
-// 前端只做展示，硬校验在后端
-const ATTR_KEYS = [
-  'sprintspeed', 'acceleration', 'finishing', 'positioning', 'shotpower', 'longshots', 'penalties', 'volleys',
-  'vision', 'crossing', 'freekickaccuracy', 'longpassing', 'shortpassing', 'curve', 'agility', 'balance',
-  'reactions', 'composure', 'ballcontrol', 'dribbling', 'interceptions', 'headingaccuracy', 'defensiveawareness',
-  'standingtackle', 'slidingtackle', 'jumping', 'stamina', 'strength', 'aggression',
-  'gkdiving', 'gkhandling', 'gkkicking', 'gkpositioning', 'gkreflexes',
-] as const;
 
 // PlayStyle 下拉数据：ref 表按类型分组（id 0 是占位）
 const PLAYSTYLES = [...playstyleById.values()].filter((r) => r.id > 0);

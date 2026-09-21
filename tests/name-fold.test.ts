@@ -49,7 +49,6 @@ describe('foldName：去变音（JS 侧）', () => {
       ['Öztürk', 'ozturk'],
       ['Ångström', 'angstrom'],
       ['Ísland', 'island'],
-      ['ægir', 'aegir'],
     ];
     for (const [raw, folded] of cases) expect(foldName(raw), raw).toBe(folded);
   });
@@ -238,6 +237,17 @@ describe('硬闸与表完整性', () => {
     expect(unmappedNameChars(['Шевченко', 'Мбаппе', '中'])).toEqual(['М', 'Ш']);
     expect(unmappedNameChars(['Παπαδόπουλος'])).toEqual(['Π']); // 小写 ο 无对照形，不报
     expect(unmappedNameChars(['가나다'])).toEqual([]); // 无对照形、两侧都原地不动
+  });
+
+  // 这类字符大小写不变、也不是拉丁脚本，曾经被判据漏掉、永不报警；而它们恰恰最可能从网页/手机键盘粘进来，
+  // 一旦进库就是「用户按键盘上那个键搜不到」，比变音字母更该提醒
+  it('刻意不收的形状变体要报（弯引号/花式空格/不可见字符）', () => {
+    expect(unmappedNameChars(['O’Brien'])).toEqual(['’']); // U+2019
+    expect(unmappedNameChars(['Jean‑Pierre'])).toEqual(['‑']); // U+2011 不断行连字符
+    expect(unmappedNameChars(['A\u00a0B'])).toEqual(['\u00a0']); // 不换行空格
+    expect(unmappedNameChars(['A\u200bB'])).toEqual(['\u200b']); // 零宽空格
+    expect(unmappedNameChars(['A\u200eB'])).toEqual(['\u200e']); // 从左至右标记
+    expect(unmappedNameChars(['M\u00aduller'])).toEqual([]); // 软连字符在表内（折叠即删除）
   });
 
   it('describeChars 输出码位便于补表', () => {

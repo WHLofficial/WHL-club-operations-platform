@@ -22,6 +22,8 @@ import {
   filtersFromUrl,
   filtersToQuery,
   firstOrderFor,
+  parseColsParam,
+  sortColumnVisible,
   type FilterChip,
   type Filters,
   type SortKey,
@@ -131,7 +133,7 @@ function SortHeader({
   label: string;
   sortKey: SortKey;
   num?: boolean;
-  activeKey: string;
+  activeKey: string | null;
   order: 'asc' | 'desc';
   onSort: (key: SortKey) => void;
 }) {
@@ -151,10 +153,9 @@ function SortHeader({
 export default function PlayersLibrary() {
   const [filters, setFilters] = useState<Filters>(filtersFromUrl);
   // null=未手动干预（列跟随筛选联动）；一旦手动勾选，改为以手动清单为准
-  const [manualCols, setManualCols] = useState<string[] | null>(() => {
-    const raw = new URLSearchParams(window.location.search).get('cols');
-    return raw ? raw.split(',').filter(Boolean) : null;
-  });
+  const [manualCols, setManualCols] = useState<string[] | null>(() =>
+    parseColsParam(new URLSearchParams(window.location.search).get('cols')),
+  );
   const [nameInput, setNameInput] = useState(filters.name);
   // 左栏开合：初值读本地记忆（默认展开），移动端另有抽屉开关
   const [sideOpen, setSideOpen] = useState(readSideOpen);
@@ -255,20 +256,29 @@ export default function PlayersLibrary() {
   };
 
   // 表头排序：同一列再点翻向，换列用该列的自然首向（firstOrderFor）。
-  // 默认态 sort='id'（URL 里没有排序参数）挂在 UID 列上显示——它是最初始的顺序，也是身份轴；
-  // 但 id 分支后端固定升序（players.ts 里 sort==='id' 时 order 恒 asc），箭头与翻向基准都得按 asc 来，否则
-  // 默认就显示「↓」而表格其实是升序，第一次点这一列还会因为基准取反而不动。
-  const activeSortKey = filters.sort === 'id' ? 'uid' : filters.sort;
+  // 默认态（URL 里没有排序参数、sort='id'）不给任何列打 active：那走的是 players.id，即源表的注册顺序，
+  // 与 uid（fc_id）无关（生产实测各分片首行 fc_id 并非递增），标成「UID ↑」是在说假话。
+  // 默认态全列显示 ↕，点哪列就从那列的自然首向开始——顺带避掉「第一次点 UID 其实是换键」的错位。
+  const activeSortKey: SortKey | null = filters.sort === 'id' ? null : filters.sort;
   const activeOrder: 'asc' | 'desc' = filters.sort === 'id' ? 'asc' : filters.order;
   const sortBy = (key: SortKey) => {
     setFilters((f) => {
-      const current = f.sort === 'id' ? 'uid' : f.sort;
+      // 默认态视作「还没有当前键」：f.sort='id' 时若拿 'uid' 当基准，第一次点 UID 会被当成同列翻向
+      const current = f.sort === 'id' ? null : f.sort;
       const order = f.sort === 'id' ? 'asc' : f.order;
-      // 同列翻向时顺手把 sort 落成真实键（'uid'），默认态才能离开 id 分支
       if (current === key) return { ...f, sort: key, order: order === 'asc' ? 'desc' : 'asc' };
       return { ...f, sort: key, order: firstOrderFor(key) };
     });
   };
+
+  // 排序列随筛选消失时把排序撤回默认（例如按「身价」排完再删掉身价 chip：列没了、指示也没了，
+  // 否则表格按一个看不见也取消不掉的键排）。固定列永远在，不受影响。
+  useEffect(() => {
+    const key = filters.sort;
+    if (key === 'id') return;
+    if (sortColumnVisible(key, activeCols)) return;
+    setFilters((f) => (f.sort === key ? { ...f, sort: EMPTY_FILTERS.sort, order: EMPTY_FILTERS.order } : f));
+  }, [filters.sort, activeCols, setFilters]);
 
   const toggleSide = () => {
     const next = !sideOpen;

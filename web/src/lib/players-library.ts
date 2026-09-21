@@ -3,6 +3,12 @@
 // 生效条件摘要条（filterChips）。拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，
 // 留在页面里会形成页面 ↔ 组件的循环导入。
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from './ref.ts';
+import { FC26_GAME_ATTR_COLUMNS } from '../../../src/core/fc26.ts';
+
+// 细分属性白名单：与后端同一份来源（core/fc26 的 sprintspeed 起 34 项，players.ts 也这么切）。
+// 前端只用它做校验与下拉展示 —— 硬校验仍在后端；但校验口径必须一致，否则一个手改的
+// `?sort=attr:foo` 会通过前端、再让整个列表请求 400（整页变成错误态）。
+export const ATTR_KEYS: readonly string[] = FC26_GAME_ATTR_COLUMNS.slice(FC26_GAME_ATTR_COLUMNS.indexOf('sprintspeed'));
 
 export type View = 'current' | 'initial';
 
@@ -50,10 +56,11 @@ export function firstOrderFor(key: SortKey): 'asc' | 'desc' {
   return ASC_FIRST.has(key) ? 'asc' : 'desc';
 }
 
-// URL 里的 sort：接受 29 个固定键或 attr:<字母数字下划线>。真正的白名单在后端（非法值会 400），
-// 这里只挡住明显的垃圾值，免得出错前先拿它当排序键渲染表头
+// URL 里的 sort：接受 29 个固定键或 attr:<白名单属性键>。真正的白名单在后端（非法值会 400），
+// 这里按同一份 ATTR_KEYS 校验，免得手改的 URL 先被当真、再让整页请求 400
 export function isSortKey(v: string): v is SortKey {
-  return (SORT_KEYS as readonly string[]).includes(v) || /^attr:[A-Za-z0-9_]{1,40}$/.test(v);
+  if ((SORT_KEYS as readonly string[]).includes(v)) return true;
+  return v.startsWith('attr:') && ATTR_KEYS.includes(v.slice(5));
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -330,6 +337,27 @@ export const COL_DEFS: { key: string; label: string; sort: SortKey; num?: boolea
   { key: 'protected', label: '保护期', sort: 'protected' },
   { key: 'years', label: '效力时长', sort: 'years', num: true },
 ];
+
+const COL_KEYS: ReadonlySet<string> = new Set(COL_DEFS.map((d) => d.key));
+
+// 某个排序键此刻是否有可见的列承载它。两边命名不同名（列键是驼峰 marketValue，排序键是后端的
+// market_value；attr 列则与排序键同名 attr:sprintspeed），所以不能拿 filters.sort 直接去 activeCols 里找
+export function sortColumnVisible(key: SortKey, activeCols: readonly string[]): boolean {
+  if (FIXED_COLUMNS.some((c) => c.sort === key)) return true;
+  if (activeCols.includes(key)) return true;
+  return COL_DEFS.some((d) => d.sort === key && activeCols.includes(d.key));
+}
+
+// `?cols=` 的解析：只认 COL_DEFS 里的键与 attr:<白名单属性键>。
+// 手改 URL 塞进来的别的键照旧会渲染成表头（表头列不是硬校验点），但 `attr:` 前缀必须过白名单，
+// 否则它既能骗过排序校验、又会在点表头时把列表请求打成 400
+export function parseColsParam(raw: string | null): string[] | null {
+  const cols = (raw ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter((c) => (c.startsWith('attr:') ? ATTR_KEYS.includes(c.slice(5)) : COL_KEYS.has(c)));
+  return cols.length > 0 ? cols : null;
+}
 
 // 筛选 → 自动加列（双向联动的「筛了就显示」半边；取消筛选自动撤由派生实现）
 export function autoColsFor(f: Filters): string[] {

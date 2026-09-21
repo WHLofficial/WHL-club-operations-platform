@@ -18,7 +18,7 @@ const CURRENT_TICKS_SQL = `(SELECT COUNT(*) FROM season_windows swe WHERE swe.st
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 const CONTRACT_TYPES = ['formal', 'trainee'] as const;
 const CONTRACT_SOURCES = ['negotiation', 'forced', 'direct', 'import'] as const;
-// 细分属性白名单（FC26 源列尾段：sprintspeed 起，34 外场 + 6 门将）；
+// 细分属性白名单（FC26 源列尾段：sprintspeed 起共 34 项 = 29 外场 + 5 门将）；
 // attr 筛选的 json_extract 键必须在此表内，拼 SQL 前拦住任意键注入
 const ATTR_KEYS: readonly string[] = FC26_GAME_ATTR_COLUMNS.slice(FC26_GAME_ATTR_COLUMNS.indexOf('sprintspeed'));
 const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
@@ -106,7 +106,7 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
     badges: '(COALESCE(players.badges_silver, 0) + COALESCE(players.badges_gold, 0))',
     prestige: 'COALESCE(players.prestige, 0)',
     base_ca: 'COALESCE(players.base_ca, 0)',
-    growth_gap: `((${ctx.paExpr}) - (${ctx.caExpr}))`,
+    growth_gap: `(COALESCE(${ctx.paExpr}, 0) - COALESCE(${ctx.caExpr}, 0))`,
     foot: 'COALESCE(players.foot, 0)',
     growth_tier: 'COALESCE(players.growth_tier, 0)',
     future_star: 'COALESCE(players.is_future_star, 0)',
@@ -130,7 +130,9 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
 // 细分属性的排序表达式（表头每个属性列都能点）：属性值存在 game_attrs 的 JSON 里，可能是数字、字符串或缺键；
 // NULL 当 0 与其它数值键同口径（否则 keyset 的 NULL 比较恒为假会漏行）。键必须先在 ATTR_KEYS 白名单里过一遍
 function attrSortExpr(key: string): string {
-  return `COALESCE(json_extract(players.game_attrs, '$.${key}'), 0)`;
+  // `+ 0`：属性值理论上是数字，但若哪天混进字符串（'80' 或 '★'），游标侧 Number() 会得 NaN / 与 TEXT
+  // 比较恒假 ⇒ 翻页静默截断。算术转换把两者都拉回数值域（非数字当 0），与其它数值键同口径
+  return `COALESCE(json_extract(players.game_attrs, '$.${key}') + 0, 0)`;
 }
 
 // 编 cursor 用的行内字段：非 id 排序时 SELECT 额外带出 `sort_key`（与 ORDER BY 同一表达式，保证游标值与排序值逐位一致）

@@ -417,7 +417,8 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     fx.sqlite.exec(`
       INSERT INTO players (id, uid, name, game_attrs) VALUES
         (28, 'a1', '射手', '{"finishing":88,"vision":70}'),
-        (29, 'a2', '中场', '{"finishing":62,"vision":91}');
+        (29, 'a2', '中场', '{"finishing":62,"vision":91}'),
+        (30, 'a3', '无该属性', '{"vision":99}');
     `);
     const finishers = await list17('/api/players?attr=finishing&attr_min=80', fx.env);
     expect(finishers.players.map((p) => p.id)).toEqual([28]);
@@ -428,10 +429,14 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     expect((await get('/api/players?attr=nosuchkey', fx.env)).status).toBe(400);
     // attr 单独给合法：不过滤，只把该属性的值带回响应（前端「选一个属性」这个动作只发 attr）
     const justAttr = await list17('/api/players?attr=finishing', fx.env);
-    expect(justAttr.total).toBe(2);
-    expect(justAttr.players.map((p) => p.attrValue)).toEqual([88, 62]);
+    expect(justAttr.total).toBe(3);
+    expect(justAttr.players.map((p) => p.attrValue)).toEqual([88, 62, null]);
     // 空串等同没给（前端清空属性键时 URL 上会留 attr=）
-    expect((await list17('/api/players?attr=&attr_min=80', fx.env)).total).toBe(2);
+    expect((await list17('/api/players?attr=&attr_min=80', fx.env)).total).toBe(3);
+    // 区间值给空串也等同没给：缺该属性的那行（json_extract → NULL）不能被 Number('') = 0 悄悄滤掉
+    const emptyMin = await list17('/api/players?attr=finishing&attr_min=', fx.env);
+    expect(emptyMin.total).toBe(3);
+    expect(emptyMin.players.map((p) => p.id)).toEqual([28, 29, 30]);
   });
 
   it('徽章/惯用脚/fc_id 筛选', async () => {

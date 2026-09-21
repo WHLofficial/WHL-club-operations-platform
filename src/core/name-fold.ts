@@ -19,7 +19,7 @@
 // 归一化 —— 弯引号 / 花式空格 / 破折号 / 不可见格式字符（U+2000–U+200A、U+2018/2019、U+201C/201D、
 // U+2010–U+2015、U+00A0 等），以及 Latin-1 / Extended-A 里生产未出现的字母（Ã、Æ、Œ 这类）。
 // 代价说清楚：手机上打出的弯引号「O’Brien」不会命中库里的「O'Brien」（旧裸 LIKE 也一样不命中，
-// 不是回归）；库里若哪天出现这些字符，硬闸会报出来。
+// 不是回归）；库里若哪天出现这些字符，硬闸会报出来（见下面的第三类判据）。
 //
 // 两侧不会漂移是**按构造**成立的：foldName 只做「查表替换 + ASCII 小写」两件事，
 // sqlFold 生成的 REPLACE 链 + SQLite 的 lower() 恰好就是这两件，逐一对应。
@@ -112,11 +112,14 @@ export function sqlFold(expr: string): string {
 
 // 硬闸：列出既不在表内、又「有可折叠对照形」的非 ASCII 字符（有输出即说明该补表）。
 // 按原始字符查表（不先做 NFD）：库里要过 SQL 那一侧，而 SQL 只有这张表。
-// 报两类：① 拉丁脚本的字（ẞ 这类带变音的对照形，表只收生产实测清单，其余落空）；
-// ② 大小写会变的字（西里尔 Ш、希腊 Π——按小写形搜它搜不到）。
+// 报三类：① 拉丁脚本的字（ẞ 这类带变音的对照形，表只收生产实测清单，其余落空）；
+// ② 大小写会变的字（西里尔 Ш、希腊 Π——按小写形搜它搜不到）；
+// ③ 上面「刻意不收」清单里的形状变体（非 ASCII 空白 / 连字符 / 弯引号 / 不可见格式字符）——
+//    库里出现一个弯引号，就意味着用户按键盘上那个键搜不到它，这正是最该提醒的一类。
 // 组合记号（Mn）也报：库里若混进 U+0302 这类分解形式，SQL 侧去掉的只有表里的 0301/0308。
 // 不报汉字、假名、全角标点这些：它们没有对照形，两侧都原地不动，报了只会让警告变成狼来了。
 const FOLD_RELEVANT = /[\p{Script=Latin}\p{Mn}]/u;
+const FOLD_SHAPED = /[\p{Z}\p{Pd}\p{Pi}\p{Pf}\p{Cf}]/u;
 
 export function unmappedNameChars(names: Iterable<string>): string[] {
   const bad = new Set<string>();
@@ -124,7 +127,7 @@ export function unmappedNameChars(names: Iterable<string>): string[] {
     for (const ch of name) {
       if (ch.codePointAt(0)! < 0x80) continue;
       if (FOLD_MAP.has(ch)) continue;
-      if (!FOLD_RELEVANT.test(ch) && ch.toLowerCase() === ch) continue;
+      if (!FOLD_RELEVANT.test(ch) && ch.toLowerCase() === ch && !FOLD_SHAPED.test(ch)) continue;
       bad.add(ch);
     }
   }
