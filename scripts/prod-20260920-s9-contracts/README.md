@@ -1,8 +1,8 @@
 # S9 一线队合同导入（数据源 `E:\Downloads\一线队-S9.csv`）
 
-> **状态：未执行。** 等生产写令（`scripts/README.md` 纪律：写生产需明确指令，一次授权不延续）。
+> **状态：已于 2026-09-21 在生产执行完毕（462 行合同已落库，逐行复核 0 差异）。执行记录见 §11。**
 > 前置批：`scripts/prod-20260920-s9-window-baseline/`（季初窗 seq=1 已关、中期窗未开，已于 2026-09-20 执行）→ **`scripts/prod-20260920-s9-club-align/`（已于 2026-09-21 执行完毕：570 人队籍已按 s901 对齐，含 4 支 CPU 队）**。
-> 本文档是计划书，不含可执行 SQL；工件（`gen-contracts-sql.ts` + SQL 分片）待许可后产。
+> 迁移 `0028_contract_window_ticks.sql` 已 apply 到生产（2026-09-21）。
 >
 > ✅ 队籍对齐批跑完后，本文档 §5 的「84 行异队冲突」已全部归零（那些球员的平台队籍现在就是对齐的目标），16 人控队 **462 行全部可导入**（实测全库入籍 874 = 570 s901 对齐 + 304 遗留）。
 
@@ -54,6 +54,8 @@
 - 效力年（col27）空 2 行（两行都在佛罗伦萨），本批按 0 赛季处理。
 
 ## 5. 分类预测（按 `classify` 真实规则离线重算，`src/worker/contracts-import.ts:82-152`）
+
+> ⚠️ 本节数字是**队籍对齐前**的预测（可导 378 = claim 298 + create 80）。对齐批跑完后实际是 **462 行全部 create**，见 §11 执行记录。
 
 | 队（目标 club id） | CSV 行 | 异队冲突 | claim | create | 可导入 |
 | --- | --- | --- | --- | --- | --- |
@@ -119,6 +121,8 @@ CSV 有 `效力年`（col27，分布：0→232、0.5→16、1→85、1.5→170�
 
 ## 7. 执行步骤（推荐方案，许可后产工件再执行）
 
+> ⚠️ 本节是**计划书原文**，保留下来看当时的判断；实际执行的通道、命令与结果见 §11（离线 SQL 工件 + `exec-shards.mjs`，无 claim、无 378 行）。
+
 1. 产工件：`gen-contracts-sql.ts`（读 CSV → 按 §4 映射 + §5 分类 → 产 SQL 与报告）。
 2. 报告里逐行列出：目标队 / 分类（claim|create|skip-冲突|skip-无队）/ `releaseFee` / `wage` / `contractType` / `service_ticks` / `protection_ticks` / `effective_from`。
 3. 执行前复查（只读）：`contracts` = 0 行、`season_windows` 有 1 条已关常规窗、`0028` 已 apply（`PRAGMA table_info(contracts)` 含 `service_ticks`）。
@@ -129,6 +133,8 @@ CSV 有 `效力年`（col27，分布：0→232、0.5→16、1→85、1.5→170�
 预期写入量：378 行合同 + 298 行球员队籍 ≈ 4 条索引 × 676 ≈ **约 2.7k rows_written**（免费档 10 万/天，安全）。
 
 ## 8. 验收
+
+> ⚠️ 期望值 378 是队籍对齐前的预测；实际验收口径与实测值见 §11。
 
 ```
 SELECT COUNT(*) FROM contracts;                              -- 期望 378（或 461）
@@ -151,3 +157,90 @@ DELETE FROM contracts WHERE source = 'import';
 - **认领会改变 16 队人数**（+378 行里的 298 人来自自由身池与 CPU 队）。导入后建议跑一次报名体检（`initialCa = base_ca ?? ca`，`src/core/squad-rules.ts:17-20`）。
 - **CSV 与 roster-backfill 的口径冲突**：roster 按 EA 队籍灌 444 人，CSV 是联盟转会后的世界；本批只补合同，不解决谁权威。
 - **`releaseFee = 0` 与文案不一致**：后端要求 `>0`，文案写「0-1000」，CSV 无 0 值，不受影响。
+
+## 11. 执行记录（生产，2026-09-21）
+
+### 11.1 工件
+
+| 文件 | 说明 |
+| --- | --- |
+| `gen-contracts-sql.ts` | 生成器：读 CSV → 归一化 → 算刻度 → 分类闸 → 产分片 / 预检 / 验收 / 回滚 / 报告；`--verify` 逐行复核（只读，不写文件） |
+| `sql/contracts-insert-01..10.sql` | 10 片写入（各 50 条，末片 12 条），单条 = 一条带守卫的 `INSERT … SELECT` |
+| `01-precheck.sql` | 只读预检（contracts 行数 / 刻度列是否到位 / 窗 / clubs / 球员命中） |
+| `02-verify.sql` | 只读验收（11 个聚合列 + 逐队条数 + 效力年分布 + 越界队空集） |
+| `rollback/contracts-rollback.sql` | 回滚（按 `signed_at` 精确圈定本批 462 行） |
+| `exec-shards.mjs` | 执行通道：把多行 SQL 折成单行、按条数与命令行字节上限分批走 `--command`；`--local` 默认、`--remote` 才碰生产 |
+| `contracts-report.md` | 生成报告（裁决点 / 逐队统计 / 跳过的行 / 462 行明细 / 分片 sha256 / 执行步骤 / 风险） |
+
+生成时点 **2026-09-21T01:46:58.647Z**（本批所有行的 `signed_at`，也是回滚与验收的圈定标记）；`effective_from` 全批 `2026-09-18`（S9 季初锚点，仅展示用）。
+
+> `sql/` 分片**不进仓库**（`.gitignore`）：片内 `player_id` 与守卫取自生成时点的生产库，而本批执行后 `contracts` 已非空、生成器会被 exit 6 闸拦下，故不可逐字节复现。复现凭据是 `contracts-report.md` §4 的 462 行明细（含 `player_id / fc_id / club_id / rc / wage / type / service_ticks / protection_ticks`）与 §5 的分片 sha256，加上已入库的 `rollback/`。
+
+### 11.2 前置：迁移 0028
+
+1. 执行前 `01-precheck.sql`（生产只读）：`contracts_rows 0`、`tick_cols 0`、`tick_cols_window 0`、`closed_windows 1`、`clubs_rows 20`、`players_found 462`。
+2. `npx wrangler d1 migrations apply whl-club --remote` → `0028_contract_window_ticks.sql` ✅（Executed 6 commands，3.09ms）。
+3. 执行后再跑预检：`tick_cols 4`、`tick_cols_window 1`，其余不变；`migrations list --remote` = 「No migrations to apply!」。
+4. **本批走离线 SQL 通道**：INSERT 显式写 `service_ticks` / `protection_ticks`，不依赖线上 worker 版本，故**不需要**先部署增量 25（§3-2 那条警告针对的是网页面板通道）。
+
+### 11.3 写入
+
+10 片全部走 `exec-shards.mjs --remote`（每批 ≤10 条，单条命令行 ≤4000 字节）：
+
+| 片 | 语句 | changes | rows_written | 备注 |
+| --- | --- | --- | --- | --- |
+| 01 | 50 | 50 | 150 | |
+| 02 | 50 | 50 | 150 | |
+| 03 | 50 | 20 + 30 | 60 + 90 | 首跑第 3 批失败（瞬时），重跑补 30；被首次写入的 20 条被守卫跳过 ⇒ 幂等实证 |
+| 04 | 50 | 50 | 150 | 首跑失败（未写入），重跑 50 |
+| 05 | 50 | 50 | 150 | 同上 |
+| 06 | 50 | 50 | 150 | 同上 |
+| 07 | 50 | 50 | 150 | |
+| 08 | 50 | 50 | 150 | |
+| 09 | 50 | 50 | 150 | |
+| 10 | 12 | 12 | 36 | |
+| **合计** | **462** | **462** | **1386** | rows_written = 3 × changes（1 行 + 2 索引） |
+
+失败的 4 次都是 `cmd.exe` 的瞬时拒绝（「命令行太长」，非 SQL 错误）；因每条 INSERT 都带 `AND NOT EXISTS (SELECT 1 FROM contracts WHERE player_id = p.id)` 守卫，重跑只会补差、不会重复。这也是执行器把批压到 4000 字节 / 10 条的原因。
+
+### 11.4 验收（全部只读）
+
+`02-verify.sql`：`rows_total 462` / `rows_import 462` / `formal 399` / `trainee 63` / `bad_type 0` / `null_service_ticks 0` / `bad_protection 0` / `bad_trainee 0` / `bad_money 0` / `off_grid 0` / `club_mismatch 0`。
+
+- 逐队条数：1→30、2→30、5→31、9→37、11→25、13→23、14→23、21→37、33→26、45→31、66→31、73→29、243→23、280→30、449→25、110374→31（合计 462，与报告 §2 逐队一致）。
+- 效力年分布：0 赛季 163 / 0.5→14 / 1→69 / 1.5→82 / 2→55 / 2.5→79（与 CSV 逐行统计一致）。
+- 落在 16 支目标队之外的合同：空集。
+- 逐行复核：`node scripts/prod-20260920-s9-contracts/gen-contracts-sql.ts --verify` → **源行 462 / 命中 462 / 仍有差异的行 0**（退出码 0），比对列 = `club_id` / `release_fee` / `wage` / `contract_type` / `source` / `service_ticks` / `protection_ticks`。
+
+### 11.5 副作用核查
+
+`contracts 462`（`DISTINCT player_id` 也是 462 ⇒ 无重复）；`players` 未被本批改写：在册仍 570、自由身仍 17731（`club_id IS NULL` 且 `status <> 'free'` = 0，即上一批口径未被破坏）；`listings` / `transfers` / `negotiation_sessions` 仍 0 行。
+
+### 11.6 回滚
+
+```bash
+node scripts/prod-20260920-s9-contracts/exec-shards.mjs \
+  scripts/prod-20260920-s9-contracts/rollback/contracts-rollback.sql --remote
+```
+
+`DELETE FROM contracts WHERE source = 'import' AND signed_at = '2026-09-21T01:46:58.647Z';` —— 用生成时点而非「全表 source='import'」圈定，避免误删以后网页面板导入的合同。队籍无需回滚（本批全部 create，未产出任何 players 更新）。
+
+### 11.7 本地演练（执行前，`--local` + 独立状态目录）
+
+`npx wrangler d1 migrations apply whl-club --local --persist-to .wrangler/rehearsal` 把 0001–0028 全量 apply 通过（含 0028，等于给生产 apply 做了一次同引擎预演）；`scratch/contracts-local-fixture.mjs` 按分片里的 `(player_id, fc_id, club_id)` 反向造出 16 队 + 462 人夹具，然后：
+
+| 演练项 | 结果 |
+| --- | --- |
+| 10 片写入 | 462 条全部落库，`source` 全 `import` |
+| `02-verify.sql` | 与生产验收逐列一致（462 / 399 / 63 / bad_* 全 0；逐队、效力年分布、越界队空集一致） |
+| 幂等重放 | 重跑分片 01 + 10 后仍 462 行 |
+| 队籍守卫 | 把 1 名球员 `club_id` 改成别队并删其合同后重跑 → 仍 461 行、该球员 0 行（守卫生效） |
+| 回滚 | 跑 `rollback/contracts-rollback.sql` → `left_rows 0`、`contracts 0` |
+
+**通道经验（写给下一批）**：`--command` 只吃单行 SQL（多行报 `incomplete input: SQLITE_ERROR [code: 7500]`）；Windows 下走 `cmd.exe` 时命令行受字节数约束（中文按 3 字节算，约 5.5KB 的批会被拒），故执行器压到 4000 字节 / 10 条；本地模式下 wrangler 不回传 `meta.changes`（恒 0），本地演练只能按行数判断。
+
+### 11.8 残留风险
+
+- **增量 25 未部署**（本轮指令只到「合同导入」，`git push` / `wrangler deploy` 都不在授权内）。0028 已 apply、线上 worker 若仍是旧版：此时**通过网页面板**创建合同会落 DDL 默认刻度（`service_ticks = 0`、`protection_ticks = NULL`）。窗口关闭期间无正常路径会在面板建合同（谈判/强制拍卖都要窗口），但**下次窗口开启前应先部署增量 25**。
+- **CPU 队 108 行、无平台队 164 行未导**（范围裁决 §6-①③），这 272 人暂时没有合同记录。
+- **保护期语义**沿用增量 25 口径：`protection_ticks = service_ticks + 3`，效力老的球员保护期已过期（`< 1` 即无保护），与本批刻度一致。
