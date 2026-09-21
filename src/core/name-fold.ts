@@ -51,10 +51,14 @@ const FOLD_SPEC = `
 `.trim();
 
 const FOLD_MAP = new Map<string, string>();
-for (const token of FOLD_SPEC.split(/\s+/)) {
+const TOKENS = FOLD_SPEC.split(/\s+/);
+for (const token of TOKENS) {
   const eq = token.indexOf('=');
   if (eq !== 4) throw new Error(`name-fold: 表项应为「4 位十六进制=替换文本」，得到「${token}」`);
-  FOLD_MAP.set(String.fromCodePoint(Number.parseInt(token.slice(0, 4), 16)), token.slice(5));
+  const key = String.fromCodePoint(Number.parseInt(token.slice(0, 4), 16));
+  // 重复键会被 Map 静默覆盖（表里两处写同一字符、后一处胜），查起来极难，所以这里直接拦
+  if (FOLD_MAP.has(key)) throw new Error(`name-fold: 表项重复，${token.slice(0, 4)} 出现两次`);
+  FOLD_MAP.set(key, token.slice(5));
 }
 
 // 按码位排序导出：sqlFold 的 REPLACE 链顺序、单测与审计输出都依赖这个稳定顺序
@@ -80,6 +84,8 @@ const NON_ASCII_GLOB = '*[^ -~]*';
 
 // 库侧折叠表达式：把 expr 折成 ASCII 小写，供 LIKE 匹配。
 // 表项键都是非 ASCII、替换文本都是 ASCII，所以链内不存在「前面的替换造出后面的键」的干扰。
+// 注意链的嵌套深度随表项数增长（当前 253 项，SQLite 表达式深度上限默认 1000，实测可执行）；
+// 表若再大幅扩项，先确认没撞上深度上限。
 //
 // 外面套一层 GLOB 守卫，是实测逼出来的：链子对每行都要跑 ${NAME_FOLD.length} 次 REPLACE
 // （20 字符的名字 ≈ 5000 次字符串分配），18301 行实测 483 ms/次；而姓名里绝大多数是纯 ASCII，
