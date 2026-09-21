@@ -24,6 +24,15 @@
   --warn: #d97706;
   --border: #e6dcc8;
   --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  /* 顶栏实际高度（浏览器实测：≥641px 宽 54px，≤640px 折两行 102px）。
+     顶栏 sticky 且不透明，任何吸顶元素都得跳过它，见 .library-side、步骤 8 的抽屉 */
+  --topbar-h: 54px;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --topbar-h: 102px;
+  }
 }
 
 * {
@@ -1617,10 +1626,12 @@ tbody tr:hover td {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* 顶栏是 sticky 且不透明（.topbar），侧栏吸顶必须从它下面开始，否则滚动后被盖住约 42px，
+   而侧栏自己 overflow-y:auto —— 被盖住的正好是滚动框顶端，里面滚不回来 */
 .library-side {
   position: sticky;
-  top: 12px;
-  max-height: calc(100vh - 24px);
+  top: calc(var(--topbar-h) + 12px);
+  max-height: calc(100vh - var(--topbar-h) - 24px);
   overflow-y: auto;
   padding-right: 16px;
   border-right: 1px solid var(--border);
@@ -1637,6 +1648,32 @@ tbody tr:hover td {
 
 .library-shell.collapsed .library-main {
   padding-left: 0;
+}
+
+/* 窄屏兜底：两列栅格在 375px 视口下主列只剩 45px（实测）。
+   这里先让侧栏落到表格上方把宽度还回去；步骤 8 会把整段换成 900px 断点 + 左侧滑出抽屉。 */
+@media (max-width: 900px) {
+
+  .library-shell,
+  .library-shell.collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .library-side {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .library-main,
+  .library-shell.collapsed .library-main {
+    padding-left: 0;
+  }
 }
 
 /* 侧栏窄：区间输入框改成填满一行两列，别留 130px 固定宽的空白 */

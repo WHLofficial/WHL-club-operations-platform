@@ -320,6 +320,8 @@ interface ListBody17 {
     serviceSeasons: number | null;
     protected: boolean;
     psIds?: (number | null)[];
+    /** 带 attr 筛选/排序时随行带回的属性值（前端自动加列显示用） */
+    attrValue?: number | null;
   }[];
   total: number;
   nextCursor: string | null;
@@ -423,7 +425,13 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     const vision = await list17('/api/players?attr=vision&attr_max=80', fx.env);
     expect(vision.players.map((p) => p.id)).toEqual([28]);
     expect((await get('/api/players?attr=nosuchkey&attr_min=1', fx.env)).status).toBe(400);
-    expect((await get('/api/players?attr=finishing', fx.env)).status).toBe(400);
+    expect((await get('/api/players?attr=nosuchkey', fx.env)).status).toBe(400);
+    // attr 单独给合法：不过滤，只把该属性的值带回响应（前端「选一个属性」这个动作只发 attr）
+    const justAttr = await list17('/api/players?attr=finishing', fx.env);
+    expect(justAttr.total).toBe(2);
+    expect(justAttr.players.map((p) => p.attrValue)).toEqual([88, 62]);
+    // 空串等同没给（前端清空属性键时 URL 上会留 attr=）
+    expect((await list17('/api/players?attr=&attr_min=80', fx.env)).total).toBe(2);
   });
 
   it('徽章/惯用脚/fc_id 筛选', async () => {

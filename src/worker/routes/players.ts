@@ -404,22 +404,21 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     filters.push(`${inflExpr} ${op} ?`);
     filterArgs.push(n);
   }
-  // 细分属性区间：attr + attr_min/attr_max（键在白名单内才放行）；命中行的属性值随响应带回（前端自动加列用）
+  // 细分属性区间：attr + attr_min/attr_max（键在白名单内才放行）；命中行的属性值随响应带回（前端自动加列用）。
+  // attr 单独给（不带任何区间）也算合法：只把该属性的值带回响应、不做数值过滤。
+  // 以前这里直接 400，而前端「选一个细分属性」这个动作本身就只发 attr —— 等于选一下就报一次错。
   let attrValueExpr: string | null = null;
   const attr = c.req.query('attr');
-  if (attr !== undefined) {
+  if (attr !== undefined && attr !== '') {
     if (!(ATTR_KEYS as readonly string[]).includes(attr)) throw new HttpError(400, 'attr 不是可筛选的属性键');
     const attrExpr = `json_extract(players.game_attrs, '$.${attr}')`;
     attrValueExpr = attrExpr;
-    const minRaw = c.req.query('attr_min');
-    const maxRaw = c.req.query('attr_max');
-    if (minRaw === undefined && maxRaw === undefined) throw new HttpError(400, 'attr 需要搭配 attr_min / attr_max');
     for (const [param, op] of [
       ['attr_min', '>='],
       ['attr_max', '<='],
     ] as const) {
       const raw = c.req.query(param);
-      if (raw === undefined) continue;
+      if (raw === undefined || raw === '') continue;
       const n = Number(raw);
       if (!Number.isFinite(n)) throw new HttpError(400, `${param} 应为数字`);
       filters.push(`${attrExpr} ${op} ?`);

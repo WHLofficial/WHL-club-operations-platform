@@ -13,7 +13,8 @@ export interface FilterPanelProps {
   togglePosition: (pos: string) => void;
   togglePs: (id: number) => void;
   resetAll: () => void;
-  activeAdvCount: number;
+  // 生效条件条数（与工具条按钮上的数字同一个来源：页面把摘要条的 chips.length 传进来）
+  activeCount: number;
   activeCols: string[];
   manualCols: string[] | null;
   toggleCol: (key: string) => void;
@@ -42,7 +43,7 @@ export default function FilterPanel({
   togglePosition,
   togglePs,
   resetAll,
-  activeAdvCount,
+  activeCount,
   activeCols,
   manualCols,
   toggleCol,
@@ -98,7 +99,7 @@ export default function FilterPanel({
         </button>
       </div>
 
-      <div className="lib-chip-row" aria-label="位置多选">
+      <div className="lib-chip-row" role="group" aria-label="位置多选">
         <span className="muted lib-chip-label">位置</span>
         {POSITION_GROUPS.map(([label, group]) => (
           <button
@@ -125,7 +126,7 @@ export default function FilterPanel({
       </div>
 
       <details className="lib-adv" open={false}>
-        <summary>更多筛选{activeAdvCount > 0 ? `（已启用 ${activeAdvCount} 项）` : ''}</summary>
+        <summary>更多筛选{activeCount > 0 ? `（已启用 ${activeCount} 项）` : ''}</summary>
         <div className="lib-adv-body">
           <div className="lib-adv-group">
             <h4>区间</h4>
@@ -151,7 +152,12 @@ export default function FilterPanel({
             <div className="lib-adv-grid">
               <label className="field">
                 属性键
-                <select value={filters.attr} onChange={(e) => set('attr', e.target.value)}>
+                {/* 换属性键时把区间一起清掉：否则旧 min/max 留在状态里，摘要条看不见、计数不计、
+                    单删不了，而选回同一个属性时它又会悄悄生效 */}
+                <select
+                  value={filters.attr}
+                  onChange={(e) => setFilters((f) => ({ ...f, attr: e.target.value, attrMin: '', attrMax: '' }))}
+                >
                   <option value="">不筛</option>
                   {ATTR_KEYS.map((k) => (
                     <option key={k} value={k}>

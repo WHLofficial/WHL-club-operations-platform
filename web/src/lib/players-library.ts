@@ -209,7 +209,8 @@ export function filtersFromUrl(): Filters {
   const f: Filters = { ...EMPTY_FILTERS };
   if (str('view') === 'initial') f.view = 'initial';
   f.name = str('name');
-  f.positions = str('position') ? str('position').split(',').filter((p) => POSITIONS.includes(p)) : [];
+  // 去重：URL 里手写 ?position=GK,GK 会出重复项（摘要条上就是两个一样的 chip、React key 也重复）
+  f.positions = str('position') ? [...new Set(str('position').split(',').filter((p) => POSITIONS.includes(p)))] : [];
   f.status = str('status');
   if (str('growable') === '1' || str('growable') === '0') f.growable = str('growable') as '1' | '0';
   const sortParam = str('sort');
@@ -225,7 +226,9 @@ export function filtersFromUrl(): Filters {
   f.futureStar = str('is_future_star') === '1';
   f.chinaPlan = str('china_plan') === '1';
   f.agentTier = str('agent_tier').replace(/\D/g, '');
-  f.ps = str('ps') ? str('ps').split(',').map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 99) : [];
+  f.ps = str('ps')
+    ? [...new Set(str('ps').split(',').map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 99))]
+    : [];
   if (str('has_contract') === '1' || str('has_contract') === '0') f.hasContract = str('has_contract') as '1' | '0';
   f.rcNone = str('release_fee_none') === '1';
   f.contractType = str('contract_type');

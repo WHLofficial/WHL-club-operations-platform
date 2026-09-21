@@ -245,12 +245,13 @@ export default function PlayersLibrary() {
     setNameInput('');
   };
 
-  // 「更多筛选」启用计数：autoCols 与高级面板参数一一对应（含 fcId、rcNone 等无列项经由列映射）
-  const activeAdvCount = autoCols.length;
-
   // 生效条件摘要条：每个 chip 自带「只清自己」的补丁，合并回筛选即可（纯函数在 lib 里）
   const chips = useMemo(() => filterChips(filters, clubsQuery.data?.clubs ?? []), [filters, clubsQuery.data]);
-  const removeChip = (chip: FilterChip) => setFilters((f) => ({ ...f, ...chip.clear }));
+  const removeChip = (chip: FilterChip) => {
+    setFilters((f) => ({ ...f, ...chip.clear }));
+    // 搜索框有自己的缓冲 state：撤掉「姓名」chip 时得把缓冲一起清掉，否则再点「找」条件就复活了
+    if (chip.clear.name !== undefined) setNameInput(chip.clear.name);
+  };
 
   // 表头排序：同一列再点翻向，换列用该列的自然首向（firstOrderFor）。
   // 默认态 sort='id'（URL 里没有排序参数）挂在 UID 列上显示——它是最初始的顺序，也是身份轴；
@@ -269,10 +270,9 @@ export default function PlayersLibrary() {
   };
 
   const toggleSide = () => {
-    setSideOpen((open) => {
-      writeSideOpen(!open);
-      return !open;
-    });
+    const next = !sideOpen;
+    writeSideOpen(next);
+    setSideOpen(next);
   };
 
   return (
@@ -286,6 +286,7 @@ export default function PlayersLibrary() {
             type="button"
             className="btn btn-sm lib-side-toggle"
             aria-expanded={sideOpen}
+            aria-controls="library-side"
             onClick={toggleSide}
             title={sideOpen ? '收起筛选栏' : '展开筛选栏'}
           >
@@ -320,7 +321,7 @@ export default function PlayersLibrary() {
         </div>
 
         {/* 生效条件摘要条（增量 26 决策 18）：常驻一行，每条可单独撤掉；没有条件时留一行提示 */}
-        <div className="lib-summary" aria-label="已生效的筛选条件">
+        <div className="lib-summary" role="group" aria-label="已生效的筛选条件">
           {chips.length === 0 ? (
             <span className="muted">未设筛选条件</span>
           ) : (
@@ -343,7 +344,7 @@ export default function PlayersLibrary() {
         </div>
 
         <div className={sideOpen ? 'library-shell' : 'library-shell collapsed'}>
-          <aside className="library-side" aria-label="筛选与显示列">
+          <aside className="library-side" id="library-side" aria-label="筛选与显示列">
             <FilterPanel
               filters={filters}
               set={set}
@@ -352,7 +353,7 @@ export default function PlayersLibrary() {
               togglePosition={togglePosition}
               togglePs={togglePs}
               resetAll={resetAll}
-              activeAdvCount={activeAdvCount}
+              activeCount={chips.length}
               activeCols={activeCols}
               manualCols={manualCols}
               toggleCol={toggleCol}
