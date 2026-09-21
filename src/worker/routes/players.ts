@@ -127,6 +127,12 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
   };
 }
 
+// 细分属性的排序表达式（表头每个属性列都能点）：属性值存在 game_attrs 的 JSON 里，可能是数字、字符串或缺键；
+// NULL 当 0 与其它数值键同口径（否则 keyset 的 NULL 比较恒为假会漏行）。键必须先在 ATTR_KEYS 白名单里过一遍
+function attrSortExpr(key: string): string {
+  return `COALESCE(json_extract(players.game_attrs, '$.${key}'), 0)`;
+}
+
 // 编 cursor 用的行内字段：非 id 排序时 SELECT 额外带出 `sort_key`（与 ORDER BY 同一表达式，保证游标值与排序值逐位一致）
 
 const RANGE_PARAMS = {
@@ -213,7 +219,7 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 //       growth_tier / is_future_star / china_plan / agent_tier / badges_silver_min / badges_gold_min /
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
-// 排序（增量 26 起表头每一列都可点，键名见 SORT_KEY_NAMES）：sort + order（id 固定 ASC 旧整数游标；
+// 排序（增量 26 起表头每一列都可点，键名见 SORT_KEY_NAMES，属性列用 attr:<属性键>）：sort + order（id 固定 ASC 旧整数游标；
 //       name / contract_type / source 三个文本键走文本游标，其余数值键走 keyset）
 // 增量 26：name 走去变音折叠（core/name-fold）——「sesko」能搜到「Šeško」
 // 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
@@ -494,15 +500,22 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     filterArgs.push(n);
   }
 
+  // 排序键：SORT_KEY_NAMES 里的 29 个固定键，外加 `attr:<属性键>`（表头每个属性列都可点，键同样过白名单）
   const sortRaw = c.req.query('sort') ?? 'id';
-  if (!(SORT_KEY_NAMES as readonly string[]).includes(sortRaw)) {
-    throw new HttpError(400, `sort 只能是 ${SORT_KEY_NAMES.join(' / ')}`);
+  const attrSort = sortRaw.startsWith('attr:') ? sortRaw.slice(5) : null;
+  if (attrSort !== null) {
+    if (!(ATTR_KEYS as readonly string[]).includes(attrSort)) throw new HttpError(400, 'sort 的 attr 键不是可排的属性键');
+  } else if (!(SORT_KEY_NAMES as readonly string[]).includes(sortRaw)) {
+    throw new HttpError(400, `sort 只能是 ${SORT_KEY_NAMES.join(' / ')} 或 attr:<属性键>`);
   }
   const sort = sortRaw as SortKey;
-  const order = sort === 'id' || c.req.query('order') === 'asc' ? 'asc' : 'desc';
+  // id 键固定 ASC（旧调用兼容），其 URL 参数由前端清掉，所以它同时也是「无排序参数」的默认态
+  const order = sortRaw === 'id' || c.req.query('order') === 'asc' ? 'asc' : 'desc';
+  // ORDER BY、sort_key、游标比较三处共用这一个表达式
+  const sortExpr = attrSort !== null ? attrSortExpr(attrSort) : sortRaw === 'id' ? 'players.id' : sortExprs[sort];
 
   let orderBy: string;
-  if (sort === 'id') {
+  if (sortRaw === 'id') {
     const cursor = c.req.query('cursor');
     if (cursor !== undefined) {
       const n = Number(cursor);
@@ -512,8 +525,8 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     }
     orderBy = 'ORDER BY players.id ASC';
   } else {
-    const keyExpr = sortExprs[sort];
-    const text = TEXT_SORT_KEYS.has(sort);
+    const keyExpr = sortExpr;
+    const text = attrSort === null && TEXT_SORT_KEYS.has(sort);
     const cursor = c.req.query('cursor');
     if (cursor !== undefined) {
       const { v, id } = text ? decodeTextCursor(cursor) : decodeNumericCursor(cursor);
@@ -531,7 +544,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   const limit = Math.min(Math.max(Number.isInteger(limitRaw) ? limitRaw : 50, 1), 100);
 
   const where = filters.length + cursorConds.length > 0 ? `WHERE ${[...filters, ...cursorConds].join(' AND ')}` : '';
-  const needSortKey = sort !== 'id';
+  const needSortKey = sortRaw !== 'id';
   const rows = await c.env.DB.prepare(
     `SELECT players.id, players.uid, players.name, players.club_id, players.position, players.age, players.foot,
             ${caExpr} AS ca, ${paExpr} AS pa, players.ca AS cur_ca, players.pa AS cur_pa,
@@ -547,7 +560,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
             ct.source AS ct_source, ct.player_id AS ct_player_id,
             ct.service_ticks AS ct_service_ticks, ct.protection_ticks AS ct_protection_ticks,
             ${CURRENT_TICKS_SQL} AS current_ticks,
-            cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${sortExprs[sort]} AS sort_key` : ''}
+            cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${sortExpr} AS sort_key` : ''}
      FROM players
      LEFT JOIN clubs cc ON cc.id = players.club_id
      LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1
@@ -673,9 +686,9 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     const last = rows.results[limit - 1]!;
     // 文本键原样带上排序值（前端拉下一页时按 URL 编码回传）；数值键沿用 Number 归一
     nextCursor =
-      sort === 'id'
+      sortRaw === 'id'
         ? String(last.id)
-        : TEXT_SORT_KEYS.has(sort)
+        : attrSort === null && TEXT_SORT_KEYS.has(sort)
           ? `${String(last.sort_key ?? '')}~${last.id}`
           : `${Number(last.sort_key ?? 0)}~${last.id}`;
   }

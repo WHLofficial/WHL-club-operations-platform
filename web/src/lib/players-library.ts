@@ -6,18 +6,55 @@ import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } fr
 
 export type View = 'current' | 'initial';
 
-// 排序键与中文名。值必须与 src/worker/routes/players.ts 的 SORT_KEY_NAMES 逐字一致，对不上后端直接 400。
-// 后端在增量 26 已把可排序列扩到表头每一列（29 个键），这张表按步骤补齐。
-export const SORT_LABEL: Record<string, string> = {
-  id: '注册顺序',
-  ca: 'CA',
-  pa: 'PA',
-  age: '年龄',
-  market_value: '身价',
-  influence: '影响力',
-};
+// 排序键：与 src/worker/routes/players.ts 的 SORT_KEY_NAMES 逐字一致（29 个固定键），
+// 外加 `attr:<属性键>`（后端同样支持按细分属性排序）。表头每一列都可点，映射见 FIXED_COLUMNS 与 COL_DEFS。
+export const SORT_KEYS = [
+  'id',
+  'uid',
+  'name',
+  'club',
+  'position',
+  'age',
+  'ca',
+  'pa',
+  'growable',
+  'influence',
+  'status',
+  'market_value',
+  'badges',
+  'prestige',
+  'base_ca',
+  'growth_gap',
+  'foot',
+  'growth_tier',
+  'future_star',
+  'china_plan',
+  'agent_tier',
+  'ps',
+  'fc_id',
+  'wage',
+  'release_fee',
+  'contract_type',
+  'source',
+  'protected',
+  'years',
+] as const;
 
-export type SortKey = keyof typeof SORT_LABEL;
+export type SortKey = (typeof SORT_KEYS)[number] | `attr:${string}`;
+
+// 首次点某列表头的方向：身份、文本与业务序（在队→退役）从小到大，其余数值与标记类从大到小
+// —— 点 CA / 身价 / 徽章的人想看的是「最好的在前」，点姓名的人想看字母序
+const ASC_FIRST: ReadonlySet<string> = new Set(['id', 'uid', 'name', 'club', 'position', 'status', 'contract_type', 'source']);
+
+export function firstOrderFor(key: SortKey): 'asc' | 'desc' {
+  return ASC_FIRST.has(key) ? 'asc' : 'desc';
+}
+
+// URL 里的 sort：接受 29 个固定键或 attr:<字母数字下划线>。真正的白名单在后端（非法值会 400），
+// 这里只挡住明显的垃圾值，免得出错前先拿它当排序键渲染表头
+export function isSortKey(v: string): v is SortKey {
+  return (SORT_KEYS as readonly string[]).includes(v) || /^attr:[A-Za-z0-9_]{1,40}$/.test(v);
+}
 
 export const STATUS_LABEL: Record<string, string> = {
   normal: '在队',
@@ -175,7 +212,8 @@ export function filtersFromUrl(): Filters {
   f.positions = str('position') ? str('position').split(',').filter((p) => POSITIONS.includes(p)) : [];
   f.status = str('status');
   if (str('growable') === '1' || str('growable') === '0') f.growable = str('growable') as '1' | '0';
-  if (str('sort') in SORT_LABEL) f.sort = str('sort') as SortKey;
+  const sortParam = str('sort');
+  if (isSortKey(sortParam)) f.sort = sortParam;
   if (str('order') === 'asc') f.order = 'asc';
   f.club = str('club_id') === 'free' ? 'free' : str('club_id').replace(/\D/g, '');
   for (const [key, urlKey] of RANGE_URL_KEYS) {
@@ -255,25 +293,39 @@ export function filtersToQuery(f: Filters): string {
 
 export const DEFAULT_COLS = ['marketValue', 'badges'];
 
-export const COL_DEFS: { key: string; label: string }[] = [
-  { key: 'marketValue', label: '身价' },
-  { key: 'badges', label: '徽章' },
-  { key: 'prestige', label: '声望' },
-  { key: 'baseCa', label: '初始 CA' },
-  { key: 'growthGap', label: '成长空间' },
-  { key: 'foot', label: '惯用脚' },
-  { key: 'growthTier', label: '成长档位' },
-  { key: 'futureStar', label: '未来之星' },
-  { key: 'chinaPlan', label: '中国计划' },
-  { key: 'agentTier', label: '经纪人' },
-  { key: 'ps', label: 'PlayStyle' },
-  { key: 'fcId', label: 'FC ID' },
-  { key: 'wage', label: '工资（半赛季）' },
-  { key: 'releaseFee', label: '解约金' },
-  { key: 'contractType', label: '合同类型' },
-  { key: 'source', label: '成约方式' },
-  { key: 'protected', label: '保护期' },
-  { key: 'years', label: '效力时长' },
+// 固定 10 列（标签 / 排序键 / 是否数值列）。数组顺序就是表头与单元格的渲染顺序，改动前先看页面行渲染同序
+export const FIXED_COLUMNS: { label: string; sort: SortKey; num?: boolean }[] = [
+  { label: 'UID', sort: 'uid' },
+  { label: '姓名', sort: 'name' },
+  { label: '所属球队', sort: 'club' },
+  { label: '位置', sort: 'position' },
+  { label: '年龄', sort: 'age', num: true },
+  { label: 'CA', sort: 'ca', num: true },
+  { label: 'PA', sort: 'pa', num: true },
+  { label: '成长', sort: 'growable' },
+  { label: '影响力', sort: 'influence', num: true },
+  { label: '状态', sort: 'status' },
+];
+
+export const COL_DEFS: { key: string; label: string; sort: SortKey; num?: boolean }[] = [
+  { key: 'marketValue', label: '身价', sort: 'market_value', num: true },
+  { key: 'badges', label: '徽章', sort: 'badges' },
+  { key: 'prestige', label: '声望', sort: 'prestige', num: true },
+  { key: 'baseCa', label: '初始 CA', sort: 'base_ca', num: true },
+  { key: 'growthGap', label: '成长空间', sort: 'growth_gap', num: true },
+  { key: 'foot', label: '惯用脚', sort: 'foot' },
+  { key: 'growthTier', label: '成长档位', sort: 'growth_tier' },
+  { key: 'futureStar', label: '未来之星', sort: 'future_star' },
+  { key: 'chinaPlan', label: '中国计划', sort: 'china_plan' },
+  { key: 'agentTier', label: '经纪人', sort: 'agent_tier' },
+  { key: 'ps', label: 'PlayStyle', sort: 'ps' },
+  { key: 'fcId', label: 'FC ID', sort: 'fc_id', num: true },
+  { key: 'wage', label: '工资（半赛季）', sort: 'wage', num: true },
+  { key: 'releaseFee', label: '解约金', sort: 'release_fee', num: true },
+  { key: 'contractType', label: '合同类型', sort: 'contract_type' },
+  { key: 'source', label: '成约方式', sort: 'source' },
+  { key: 'protected', label: '保护期', sort: 'protected' },
+  { key: 'years', label: '效力时长', sort: 'years', num: true },
 ];
 
 // 筛选 → 自动加列（双向联动的「筛了就显示」半边；取消筛选自动撤由派生实现）

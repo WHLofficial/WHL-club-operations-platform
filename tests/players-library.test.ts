@@ -528,7 +528,8 @@ describe('球员库 total 与新筛选（增量 17）', () => {
 // 增量 26：去变音搜索（name 走 core/name-fold 折叠）+ 轻量名册端点
 describe('姓名去变音搜索与轻量名册（增量 26）', () => {
   // 库内是 FC 拉丁名：预合成、分解、软连字符混着来，另有中文名作回归
-  // （分解与软连字符用 char() 拼——把组合记号直接写进源码是审阅灾难，也是 name-fold 用码位建表的同一理由）
+  // （分解用 char() 拼——把组合记号直接写进源码是审阅灾难，也是 name-fold 用码位建表的同一理由；
+  //   这里用 U+0301，它是 2026-09-21 生产扫描实测存在的两个组合记号之一，表内收着）
   function seedAccents(sqlite: DatabaseSync): void {
     sqlite.exec(`
       INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '利物浦', 'premier', 'active');
@@ -536,7 +537,7 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
         (101, 'a1', 'Šeško',              1, 'ST', 22, 78, 88, 1, 'normal'),
         (102, 'a2', 'Ødegaard',           NULL, 'CAM', 27, 86, 88, 0, 'normal'),
         (103, 'a3', 'Çalhanoğlu',         1, 'CM', 31, 84, 84, 0, 'normal'),
-        (104, 'a4', 'S' || char(780) || 'eško',   NULL, 'ST', 20, 70, 90, 1, 'normal'),
+        (104, 'a4', 'S' || char(769) || 'eško',   NULL, 'ST', 20, 70, 90, 1, 'normal'),
         (105, 'a5', 'M' || char(173) || 'uller',  1, 'ST', 25, 80, 82, 0, 'normal'),
         (106, 'a6', '阿尔法三世',         NULL, 'CB', 19, 60, 85, 1, 'normal');
     `);
@@ -558,18 +559,23 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
     expect(await ids('zzzz')).toEqual([]);
   });
 
-  // 判空必须在折叠之后：ZWSP / 软连字符 trim() 不走，折完才是空串；按原串判空会拼出 `%%`，
-  // 于是「搜了个不可见字符」从空结果变成列出全库（旧实现的返回是空集）。
-  it('name 全是不见字符时按空串拒（400），不退化成列出全库', async () => {
+  // 判空必须在折叠之后：软连字符 trim() 不走、但表里把它折成空串；按原串判空会拼出 `%%`，
+  // 于是「搜了个不可见字符」从空结果变成列出全库。
+  // ZWSP（U+200B）不在这张表里（生产姓名里没有它），所以它现在是字面字符——按字面搜、命中不了什么。
+  it('name 折完为空时按空串拒（400），不退化成列出全库', async () => {
     const fx = freshEnv();
     seedAccents(fx.sqlite);
 
-    for (const q of ['\u200b', '\u00ad', '\u200b\u00ad']) {
+    for (const q of ['\u00ad', '\u00ad\u00ad', '\u00ad ']) {
       const res = await get(`/api/players?name=${encodeURIComponent(q)}`, fx.env);
       expect(res.status, `查询词 ${JSON.stringify(q)}`).toBe(400);
       expect(((await res.json()) as { error: string }).error).toBe('name 不能为空');
     }
     expect((await get('/api/players?name=%20', fx.env)).status).toBe(400); // 纯空格仍是 400
+
+    const zwsp = await get(`/api/players?name=${encodeURIComponent('\u200b')}`, fx.env);
+    expect(zwsp.status).toBe(200);
+    expect(((await zwsp.json()) as { players: unknown[] }).players).toEqual([]); // 字面搜，不是全库
   });
 
   it('名册端点：姓名里的 | 与换行不撑坏行格式，行序按 id 确定', async () => {
@@ -644,7 +650,7 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
       { id: 101, clubId: 1, name: 'Šeško' },
       { id: 102, clubId: null, name: 'Ødegaard' },
       { id: 103, clubId: 1, name: 'Çalhanoğlu' },
-      { id: 104, clubId: null, name: 'S\u030Ceško' },
+      { id: 104, clubId: null, name: 'S\u0301eško' },
       { id: 105, clubId: 1, name: 'M\u00ADuller' },
       { id: 106, clubId: null, name: '阿尔法三世' },
     ]);
@@ -842,6 +848,34 @@ describe('球员库排序键（增量 26）', () => {
         expect({ key, dir, ...actual }).toEqual({ key, dir, ids: expectedOrder(rows, key, dir), pages: 3 });
       }
     }
+  });
+
+  it('属性列排序：attr:<属性键> 过白名单、走数值游标、翻页不重不漏', async () => {
+    const fx = freshEnv();
+    seedSortRows(fx.sqlite);
+    // 只给 6 行塞属性值，另 2 行没有这个键（NULL 当 0，与其它数值键同口径）
+    for (const [id, v] of [
+      [1, 80],
+      [4, 80],
+      [2, 50],
+      [5, 50],
+      [3, 65],
+      [6, 65],
+    ] as const) {
+      fx.sqlite.exec(`UPDATE players SET game_attrs = json_set(COALESCE(game_attrs, '{}'), '$.sprintspeed', ${v}) WHERE id = ${id}`);
+    }
+
+    // 同一档位按 id 定序，方向与主键一致（ORDER BY keyExpr dir, players.id dir）
+    resetGuards();
+    expect(await pageAll('attr:sprintspeed', 'desc', fx.env, 3)).toEqual({ ids: [4, 1, 6, 3, 5, 2, 8, 7], pages: 3 });
+    resetGuards();
+    expect(await pageAll('attr:sprintspeed', 'asc', fx.env, 100)).toEqual({ ids: [7, 8, 2, 5, 3, 6, 1, 4], pages: 1 });
+
+    // 白名单外的属性键（含塞注入串）必须拒掉；固定键不受影响
+    resetGuards();
+    expect((await get('/api/players?sort=attr:nope', fx.env)).status).toBe(400);
+    expect((await get(`/api/players?sort=attr:${encodeURIComponent("x') OR 1=1--")}`, fx.env)).status).toBe(400);
+    expect((await get('/api/players?sort=uid&limit=1', fx.env)).status).toBe(200);
   });
 
   it('文本键游标：值里带 ~ 时从最后一个 ~ 切；文本/数值键的游标互不串', async () => {

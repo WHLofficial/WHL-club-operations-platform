@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import {
   NAME_FOLD,
+  SQL_FOLD_DEPTH_LIMIT,
+  SQL_FOLD_ENTRY_BUDGET,
   describeChars,
   foldName,
   foldNamePattern,
@@ -39,14 +41,15 @@ describe('foldName：去变音（JS 侧）', () => {
       ['Iñigo Martínez', 'inigo martinez'],
       ['Þór', 'thor'],
       ['Groß', 'gross'],
-      ['Ægir', 'aegir'],
+      ['ægir', 'aegir'],
       ['Łukasz', 'lukasz'],
-      ['Đorđe', 'dorde'],
+      ['Đoković', 'dokovic'],
       ['Ștefan', 'stefan'],
       ['Çalhanoğlu', 'calhanoglu'],
       ['Öztürk', 'ozturk'],
       ['Ångström', 'angstrom'],
       ['Ísland', 'island'],
+      ['ægir', 'aegir'],
     ];
     for (const [raw, folded] of cases) expect(foldName(raw), raw).toBe(folded);
   });
@@ -57,9 +60,18 @@ describe('foldName：去变音（JS 侧）', () => {
     expect(foldName('Iİıi')).toBe('iiii');
   });
 
-  it('库里混着分解形式（base + 组合记号）也能折', () => {
-    // S + U+030C（组合抑扬）与预合成的 Š 必须折成同一个
-    expect(foldName('S\u030Ceško')).toBe('sesko');
+  it('表里没有的字形不折，但两侧都不折（覆盖度问题，不是漂移）', () => {
+    // 生产实测只有小写 æ（23 次）、没有大写 Æ ⇒ 表里没有 Æ。库里真出现大写 Æ 时导入硬闸会报出来。
+    expect(foldName('Ægir')).toBe('Ægir');
+    expect(unmappedNameChars(['Ægir'])).toEqual(['Æ']);
+    // 组合抑扬 U+030C 同理：生产只有 U+0301/U+0308 两个组合记号，预算内收不下其余组合记号
+    expect(foldName('S\u030Ceško')).toBe('s\u030cesko');
+  });
+
+  it('库里混着分解形式（生产实测的 U+0301/U+0308）也能折', () => {
+    // 生产扫描到的两个组合记号在表内：分解形式与预合成形式必须折成同一个
+    expect(foldName('So\u0301n')).toBe('son');
+    expect(foldName('Mu\u0308ller')).toBe('muller');
     expect(foldName('M\u00ADuller')).toBe('muller'); // 软连字符直接删
   });
 
@@ -83,7 +95,9 @@ describe('foldName：去变音（JS 侧）', () => {
 });
 
 describe('sqlFold：SQL 侧与 JS 侧同源', () => {
-  // 真库样本 + 边界：预合成/分解、软连字符、点号、撇号、土耳其 i、中文
+  // 真库样本 + 边界：预合成/分解、软连字符、点号、撇号、土耳其 i、中文。
+  // 其中 'S\u030Ceško'（组合抑扬 U+030C）、'Ægir'（大写 Æ）、'Đorđe'（小写 đ）在生产里都没有出现，
+  // 故不在表内 —— 它们是「表里没有的字形两侧都不折」这条路径的样本，不是漏收。
   const NAMES = [
     'Šeško',
     'S\u030Ceško',
@@ -161,7 +175,8 @@ describe('sqlFold：SQL 侧与 JS 侧同源', () => {
     const sqlite = makeTable();
     const sql = `SELECT name FROM t WHERE ${sqlFold('t.name')} LIKE ? ESCAPE '\\' ORDER BY name`;
     const hits = (sqlite.prepare(sql).all('%sesko%') as { name: string }[]).map((r) => r.name);
-    expect(hits).toEqual(['S\u030Ceško', 'Šeško']);
+    // 只有预合成的 Š 命中：语料里那条 S+U+030C 是生产里没有的组合记号，表里没收（见下「覆盖度」用例）
+    expect(hits).toEqual(['Šeško']);
   });
 
   it('生成的是可执行的内联表达式，项数与表一致', () => {
@@ -170,9 +185,6 @@ describe('sqlFold：SQL 侧与 JS 侧同源', () => {
     expect(expr.endsWith('END')).toBe(true);
     expect(expr.split('REPLACE(').length - 1).toBe(NAME_FOLD.length);
     expect(expr).toContain('REPLACE(t.name, '); // 列表达式原样嵌进去，不被改写
-    // 替换值里的撇号要成对（否则 SQL 文本会被断开）
-    expect(NAME_FOLD.some(([, v]) => v === "'")).toBe(true);
-    expect(expr).toContain(", '''')");
   });
 
   it('GLOB 守卫只跳过纯 ASCII 行：守卫版与不守卫版、与 JS 完全等价', () => {
@@ -232,14 +244,21 @@ describe('硬闸与表完整性', () => {
     expect(describeChars(['中', 'Ø'])).toBe('U+4E2D「中」 U+00D8「Ø」');
   });
 
-  it('表项不重复、键非 ASCII、值只含 ASCII 小写与空格/撇号/引号/连字符', () => {
+  it('表项不重复、键非 ASCII、值只含 ASCII 小写', () => {
     const keys = NAME_FOLD.map(([k]) => k);
     expect(new Set(keys).size).toBe(keys.length);
     for (const [key, value] of NAME_FOLD) {
       expect(key.codePointAt(0)! >= 0x80, key).toBe(true);
-      // 值若含非 ASCII，或含大写，SQL 侧就会与 JS 侧漂移
-      expect(/^[a-z'" -]*$/.test(value), `${key} → ${value}`).toBe(true);
+      // 值若含非 ASCII、大写或空格，SQL 侧就会与 JS 侧漂移；空格值还会被 FOLD_SPEC 的 /\s+/ 切碎
+      expect(/^[a-z]*$/.test(value), `${key} → ${value}`).toBe(true);
     }
+  });
+
+  // 折叠链的嵌套深度 = 表项数，D1 的表达式树深度上限 100（node:sqlite 是 1000 ⇒ 单测测不出，
+  // 真引擎会直接 500）。这一步曾因此把表从 253 项裁到生产实测的 87 项。
+  it('表项数留在 D1 表达式树深度预算内', () => {
+    expect(NAME_FOLD.length).toBeLessThanOrEqual(SQL_FOLD_ENTRY_BUDGET);
+    expect(SQL_FOLD_ENTRY_BUDGET + 4).toBeLessThan(SQL_FOLD_DEPTH_LIMIT); // 链外还有 CASE/GLOB/lower 约 4 层
   });
 
   it('表按码位升序（生成物可 diff，链式替换顺序稳定）', () => {

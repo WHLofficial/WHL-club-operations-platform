@@ -12,14 +12,15 @@ import {
   COL_DEFS,
   DEFAULT_COLS,
   EMPTY_FILTERS,
+  FIXED_COLUMNS,
   PAGE_SIZE,
-  SORT_LABEL,
   STATUS_BADGE,
   STATUS_LABEL,
   autoColsFor,
   filterChips,
   filtersFromUrl,
   filtersToQuery,
+  firstOrderFor,
   type FilterChip,
   type Filters,
   type SortKey,
@@ -114,6 +115,36 @@ function renderCol(key: string, p: PlayerLibraryRow) {
     default:
       return <td key={key}>—</td>;
   }
+}
+
+// 表头排序（增量 26 步骤 6）：整个表头是可点按钮，点一下按该列排，再点翻向；箭头只在当前排序列点亮。
+// aria-sort 给读屏（它就挂 th），箭头本身是装饰
+function SortHeader({
+  label,
+  sortKey,
+  num,
+  activeKey,
+  order,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  num?: boolean;
+  activeKey: string;
+  order: 'asc' | 'desc';
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === activeKey;
+  return (
+    <th className={num ? 'num' : ''} aria-sort={active ? (order === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className={active ? 'th-sort on' : 'th-sort'} onClick={() => onSort(sortKey)} title={`按${label}排序`}>
+        {label}
+        <span className="th-arrow" aria-hidden="true">
+          {active ? (order === 'asc' ? '↑' : '↓') : '↕'}
+        </span>
+      </button>
+    </th>
+  );
 }
 
 export default function PlayersLibrary() {
@@ -221,6 +252,22 @@ export default function PlayersLibrary() {
   const chips = useMemo(() => filterChips(filters, clubsQuery.data?.clubs ?? []), [filters, clubsQuery.data]);
   const removeChip = (chip: FilterChip) => setFilters((f) => ({ ...f, ...chip.clear }));
 
+  // 表头排序：同一列再点翻向，换列用该列的自然首向（firstOrderFor）。
+  // 默认态 sort='id'（URL 里没有排序参数）挂在 UID 列上显示——它是最初始的顺序，也是身份轴；
+  // 但 id 分支后端固定升序（players.ts 里 sort==='id' 时 order 恒 asc），箭头与翻向基准都得按 asc 来，否则
+  // 默认就显示「↓」而表格其实是升序，第一次点这一列还会因为基准取反而不动。
+  const activeSortKey = filters.sort === 'id' ? 'uid' : filters.sort;
+  const activeOrder: 'asc' | 'desc' = filters.sort === 'id' ? 'asc' : filters.order;
+  const sortBy = (key: SortKey) => {
+    setFilters((f) => {
+      const current = f.sort === 'id' ? 'uid' : f.sort;
+      const order = f.sort === 'id' ? 'asc' : f.order;
+      // 同列翻向时顺手把 sort 落成真实键（'uid'），默认态才能离开 id 分支
+      if (current === key) return { ...f, sort: key, order: order === 'asc' ? 'desc' : 'asc' };
+      return { ...f, sort: key, order: firstOrderFor(key) };
+    });
+  };
+
   const toggleSide = () => {
     setSideOpen((open) => {
       writeSideOpen(!open);
@@ -250,24 +297,6 @@ export default function PlayersLibrary() {
             </button>
             <button type="button" className={filters.view === 'initial' ? 'on' : ''} onClick={() => set('view', 'initial')}>
               初始
-            </button>
-          </div>
-          <label className="field">
-            排序
-            <select value={filters.sort} onChange={(e) => set('sort', e.target.value as SortKey)}>
-              {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
-                <option key={k} value={k}>
-                  {SORT_LABEL[k]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="seg seg-mini" role="radiogroup" aria-label="排序方向">
-            <button type="button" className={filters.order === 'desc' ? 'on' : ''} disabled={filters.sort === 'id'} onClick={() => set('order', 'desc')}>
-              高到低
-            </button>
-            <button type="button" className={filters.order === 'asc' ? 'on' : ''} disabled={filters.sort === 'id'} onClick={() => set('order', 'asc')}>
-              低到高
             </button>
           </div>
           <form
@@ -362,21 +391,35 @@ export default function PlayersLibrary() {
                 <table>
                   <thead>
                     <tr>
-                      <th>UID</th>
-                      <th>姓名</th>
-                      <th>所属球队</th>
-                      <th>位置</th>
-                      <th className="num">年龄</th>
-                      <th className="num">CA</th>
-                      <th className="num">PA</th>
-                      <th>成长</th>
-                      <th className="num">影响力</th>
-                      <th>状态</th>
-                      {activeCols.map((key) => (
-                        <th key={key} className={key.startsWith('attr:') || ['marketValue', 'baseCa', 'growthGap', 'wage', 'releaseFee', 'years', 'prestige', 'fcId'].includes(key) ? 'num' : ''}>
-                          {key.startsWith('attr:') ? key.slice(5) : COL_DEFS.find((d) => d.key === key)?.label ?? key}
-                        </th>
+                      {FIXED_COLUMNS.map((col) => (
+                        <SortHeader
+                          key={col.label}
+                          label={col.label}
+                          sortKey={col.sort}
+                          num={col.num}
+                          activeKey={activeSortKey}
+                          order={activeOrder}
+                          onSort={sortBy}
+                        />
                       ))}
+                      {activeCols.map((key) => {
+                        const def = COL_DEFS.find((d) => d.key === key);
+                        const label = key.startsWith('attr:') ? key.slice(5) : def?.label ?? key;
+                        // 认不出的列（手改 ?cols= 塞进来的）不装作能排：照常出表头，只是不可点
+                        const dynSort: SortKey | null = key.startsWith('attr:') ? (key as SortKey) : def?.sort ?? null;
+                        if (dynSort === null) return <th key={key}>{label}</th>;
+                        return (
+                          <SortHeader
+                            key={key}
+                            label={label}
+                            sortKey={dynSort}
+                            num={key.startsWith('attr:') || def?.num === true}
+                            activeKey={activeSortKey}
+                            order={activeOrder}
+                            onSort={sortBy}
+                          />
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>

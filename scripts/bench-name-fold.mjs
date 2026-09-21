@@ -7,15 +7,12 @@
 // 用法：node scripts/bench-name-fold.mjs [行数] [含变音行数]
 //   默认 18301 行 / 3048 行含变音（= 2026-09-21 生产 players 实测值）。
 //
-// 2026-09-21 实测结论（本机，18301 行）：
-//   裸 LIKE（改造前）            1.0 ms/次
-//   折链全量 253 项（无守卫）      483 ms/次
-//   折链裁到生产 87 项（无守卫）   181 ms/次
-//   GLOB 守卫生效 + 全量 253 项   98 ms/次   ← 采用
-//   GLOB 守卫生效 + 裁到 87 项    40 ms/次   ← 备用（生产嫌慢时）
-// 三路语义比对（守卫版 == 不守卫版 == JS foldName 过滤）见脚本末尾与
-// tests/name-fold.test.ts。若要在生产上换用「裁表」方案：把 src/core/name-fold.ts 的
-// NAME_FOLD 过滤成「生产实测出现过的字符」即可，其余代码不用动。
+// 表只有 87 项（= 生产实测出现过的字符），所以这里不再有「全量 vs 生产清单」两档。
+// 当前表（87 项）实测：裸 LIKE 1.0 / 折链无守卫 147.5 / GLOB 守卫 33.2 ms 每次查询（18301 行）。
+// 历史：253 项的全量链无守卫 483 ms/次、GLOB 守卫 98 ms/次 —— 但 253 项在真引擎上直接撞 D1
+// 表达式树深度上限 100 报 500（node:sqlite 是 1000，单测测不出），所以表被裁到生产的 87 项，
+// 深度由 scripts/check-name-fold-depth.mjs 对真引擎把关。
+// GLOB 守卫（纯 ASCII 行不跑链）仍是纯优化，语义与不守卫版逐位相同，见脚本末尾的三路比对。
 import { DatabaseSync } from 'node:sqlite';
 import { NAME_FOLD, foldName, foldNamePattern } from '../src/core/name-fold.ts';
 
@@ -75,14 +72,12 @@ for (let i = 1; i <= ROWS; i++) ins.run(i, makeName(i));
 sqlite.exec('COMMIT');
 
 const trimmed = NAME_FOLD.filter(([k]) => PROD_SET.has(k));
-console.log(`行数 ${ROWS}（含变音 ${ACCENTED}）｜表项 全量 ${NAME_FOLD.length} / 生产清单 ${trimmed.length}`);
+console.log(`行数 ${ROWS}（含变音 ${ACCENTED}）｜表项 ${NAME_FOLD.length}／其中生产清单 ${trimmed.length}`);
 const word = foldNamePattern('sen');
 bench(sqlite, '裸 LIKE（改造前）', 'name', word);
-bench(sqlite, '折链全量（无守卫）', foldAll(NAME_FOLD, 'name'), word);
-bench(sqlite, '折链生产清单（无守卫）', foldAll(trimmed, 'name'), word);
-bench(sqlite, 'GLOB 守卫 + 全量', foldGuarded(NAME_FOLD, 'name'), word);
-bench(sqlite, 'GLOB 守卫 + 生产清单', foldGuarded(trimmed, 'name'), word);
-bench(sqlite, 'GLOB 守卫 + 全量（无命中词）', foldGuarded(NAME_FOLD, 'name'), foldNamePattern('zzzz'));
+bench(sqlite, '折链（无守卫）', foldAll(NAME_FOLD, 'name'), word);
+bench(sqlite, 'GLOB 守卫 + 折链', foldGuarded(NAME_FOLD, 'name'), word);
+bench(sqlite, 'GLOB 守卫 + 折链（无命中词）', foldGuarded(NAME_FOLD, 'name'), foldNamePattern('zzzz'));
 
 // 三路一致性：守卫版、不守卫版、JS foldName 过滤，命中集必须逐位相同
 let bad = 0;
