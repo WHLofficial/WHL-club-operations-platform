@@ -1,0 +1,29 @@
+-- 01-free-status.sql —— S9 全部自由身球员补标 status = 'free'
+--
+-- 口径（用户裁决 2026-09-21）：「球员库里只要没在 20 队的 status 都应该是 free」。
+--   平台 clubs 表恰好 20 行（16 人控 + 4 CPU），故「没在 20 队」= players.club_id IS NULL。
+--   前一批 prod-20260921-s9-free-leftover 已释放 304 人（club_id = NULL 且 status = 'free'）；
+--   本批把其余 17427 名既存自由身（status 仍为 'normal'）补齐成 'free'。
+--
+-- 只写两列：status（→ 'free'）与 updated_at（→ 本批时间戳，兼作回滚圈定标记）。
+--   能力 / 合同 / 成长字段 / 队籍（club_id）一行不动，也不走解约路径（不把 CA 回基准、不清 XP）。
+--
+-- 为什么写 status：归属判定只看 club_id（球员库「自由身」筛选 src/worker/routes/players.ts:160-166、
+--   海捞池 src/worker/routes/market.ts:270、合同导入认领守卫 src/worker/contracts-import.ts:252），
+--   status 是标签层——写它只是让球员库「状态」列与归属一致（web 端 STATUS_LABEL.free = 「自由身」，灰徽）。
+--   已逐点核对 status 的读点，无一处把自由身挡在门外：海捞只拒 retired/listed（src/worker/bypass.ts:362）；
+--   激活先拒 club_id IS NULL（src/worker/activations.ts:48）；强制拍卖先拒 club_id IS NULL（src/worker/bypass.ts:435）；
+--   续约/解约作用于本队球员（src/worker/bypass.ts:194/276）；报名候选按 club_id 取人（src/worker/routes/registration.ts:37）；
+--   训练营激活池要求 status='trainee' 且 club_id IS NOT NULL（src/worker/routes/market.ts:315）。
+--
+-- 预检实测（2026-09-21T01:09Z，--remote 只读）：players 总 18301；club_id IS NULL 17731
+--   （status: free 304 / normal 17427）；club_id IS NOT NULL 570（全 normal）；club_id 非空且 status='free' 0 行；
+--   守卫表 contracts / listings / registrations / negotiation_sessions / transfers / bids 全 0。
+-- 期望 changes = 17427（rows_written 预估 ≈ 17427 × 2 ≈ 34.9k，免费档 10 万/天可承受）。
+-- 守卫 status <> 'free' ⇒ 重放 changes = 0，幂等。
+-- 回滚见 99-rollback.sql（按 updated_at = '2026-09-21T01:10:00.000Z' 精确圈定本批触达的行，不会误伤前一批 304 人）。
+--
+-- 执行：npx wrangler d1 execute whl-club --remote --file <本文件绝对路径>
+--   （players 无外键，不受 scripts/README.md 里「含外键或大事务必须走 --command」的约束；但 --file 只回聚合摘要 + meta）
+
+UPDATE players SET status = 'free', updated_at = '2026-09-21T01:10:00.000Z' WHERE club_id IS NULL AND status <> 'free';

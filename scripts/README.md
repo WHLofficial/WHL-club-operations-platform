@@ -83,8 +83,9 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 | 目录 | 内容 | 状态 |
 |---|---|---|
 | `prod-20260921-s9-free-leftover/` | S9 队籍收尾：把「平台在册但不在联盟世界 20 队名单里」的 **304 人**释放为自由身（`club_id → NULL` + `status → 'free'`，用户 2026-09-21 裁定口径）；304 条幂等 UPDATE 2 片 + 回滚 + 预检/验收/报告/README | **已执行**（2026-09-21：304 语句 / rows_written 912；验收六列全中 —— 在册 570、自由身 17731、`free` 304、`still_rostered` 0、`status_not_free` 0、`touched` 304；逐队名单回到联盟世界人数） |
+| `prod-20260921-s9-free-status/` | 全部自由身补标 `status = 'free'`（用户 2026-09-21 裁决「球员库里只要没在 20 队的 status 都应该是 free」）：一条带守卫的批量 UPDATE，把其余 **17427** 名既存自由身（`status` 仍为 `normal`）补齐；只写 `status`/`updated_at` 两列，回滚按 `updated_at` 时间戳精确圈定 | **已执行**（2026-09-21：单条 UPDATE / rows_written 34854 / `touched` 17427；验收七列全中 —— 自由身 17731 全 `free`、在册 570 全 `normal`、`bad_free_with_club` 0、守卫表全 0） |
 
-该批只写 `players.club_id` / `players.status`（两列都**无外键**，`--file` 可用），要求 6 张守卫表全 0；排在合同批之前、与另两批无 fc_id 交集。详见该目录 README（含逐队分布、验收判据与本地演练记录）。
+两批都只写 `players.club_id` / `players.status`（两列都**无外键**，`--file` 可用），要求 6 张守卫表全 0；排在合同批之前、与另两批无 fc_id 交集。详见各自 README（含逐队分布、验收判据与本地演练记录）。
 
 ## revenue-import/
 
