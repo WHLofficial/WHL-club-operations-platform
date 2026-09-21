@@ -135,7 +135,7 @@ CREATE TABLE players (
 
 > **FC 属性字段清单（v1.3 与 FC26db 去重合并 + 存储简化定稿）**：属性源双轨——**FC26db（FC26 赛季全库，`Base` 94 列，18408 球员）为当季主源**；FC Editor（s901 阵容版本，61 列，按俱乐部分文件如 `1 - Arsenal.xlsx`）为 FC25 历史赛季源。两源 **playerid = ID 同键**（已对队壳名单 30/30 全中验证）。
 >
-> **存储口径（简化裁决：查找类字段只存 ID，名称与图标由前端渲染）**：`game_attrs` 只存 ID 键列（`naID / TeamID / PosID1-4 / RoleID1-5 / PSID1-15 / NumofPS`）与非查找原值列（`ID / Name / Age / CA / PA / height / weight / weakfoot / skillmoves / hashighqualityhead / internationalrep` + 34 细分属性）；**惯用脚例外——归一化为平台列 `foot`（0=左脚 1=右脚，FC26db FootID 1右/2左、FC Editor preferredfoot 文本在导入时转换），FootID/Foot 不落库**。文本列（`nationality / Team / Position1-4 / Role1-5 / PlayStyles1-8 / PlayStyles+`）不落库。参考表（NationID 219 / PlayStyleID 73 / PositionID 13 / RoleID 100 / TeamID 693，约 1100 行）做成**随 SPA 版本发布的静态 JSON**，前端按 ID 渲染名称；**PlayStyleID 行含图标键，图标按 `assets/icons/playstyles/{id}.webp` 约定命名——前端徽章小图标能力就此预留**（图标资产包为实现阶段素材，缺图时降级为 🥇🥈 文本徽章）。已验证：PlayStyleID 覆盖 **0-156 双段**（银段 0-72、金段=基础 ID+100，如 7→107 Low driven shot→Low driven shot +）；RoleID 完整编码角色+熟练度（如 141='ST Advanced Forward ++'）；PSID 槽 1-7 为银、13 起为金槽；ID 槽(15)比文本槽(8)更全，弃文本零损失。FC Editor（FC25）历史源仅 position 文本在导入时规范化为 PositionID；role/playstyles 文本无 ID 反查表，归档保留原文（仅存档展示）。
+> **存储口径（简化裁决：查找类字段只存 ID，名称与图标由前端渲染）**：`game_attrs` 只存 ID 键列（`naID / TeamID / PosID1-4 / RoleID1-5 / PSID1-15 / NumofPS`）与非查找原值列（`ID / Name / Age / CA / PA / height / weight / weakfoot / skillmoves / hashighqualityhead / internationalrep` + 34 细分属性）；**惯用脚例外——归一化为平台列 `foot`（0=左脚 1=右脚，FC26db FootID 1右/2左、FC Editor preferredfoot 文本在导入时转换），FootID/Foot 不落库**。文本列（`nationality / Team / Position1-4 / Role1-5 / PlayStyles1-8 / PlayStyles+`）不落库。参考表（NationID 219 / PlayStyleID 73 / PositionID 13 / RoleID 100 / TeamID 693，约 1100 行）做成**随 SPA 版本发布的静态 JSON**，前端按 ID 渲染名称；**PlayStyleID 行含图标键，图标按 `assets/icons/playstyles/{id}.webp` 约定命名——前端徽章小图标能力就此预留**（图标资产包为实现阶段素材，缺图时降级为 🥇🥈 文本徽章）。已验证：PlayStyleID 覆盖 **0-156 双段**（银段 0-56、金段=基础 ID+100 且 `en`/`chs` 均带 ` +` 后缀，如 7→107 Low driven shot→Low driven shot +；随 SPA 发布的 `web/assets/ref/playstyle.json` 共 73 行 = 占位 0 + 银 36 + 金 36）；RoleID 完整编码角色+熟练度（如 141='ST Advanced Forward ++'）；**PSID 槽共 15 个 = 银槽 1-12 + 金槽 13-15**（金徽落库存「基础 ID + 100」，故银段 1-99、金段 101-199，100 是空档；槽位与段位常量由 `src/core/fc26.ts` 单一承载，增量 27 收口）；ID 槽(15)比文本槽(8)更全，弃文本零损失。FC Editor（FC25）历史源仅 position 文本在导入时规范化为 PositionID；role/playstyles 文本无 ID 反查表，归档保留原文（仅存档展示）。
 >
 > 合并清单 = FC26db 94 列 ∪ FC Editor 独有 4 列（birthdate/number/playerjointeamdate/contractvaliduntil，仅 FC25 归档；平台效力起点以 contracts.effective_from 为准）。下表字段另落独立列或参与平台逻辑：
 >
@@ -149,7 +149,7 @@ CREATE TABLE players (
 > | 脚 / 逆足 / 花式 | `FootID`+`Foot`（1右/2左）/ `weakfoot` / `skillmoves` | preferredfoot / weakfootabilitytypecode | skillmoves 为新增存档；FootID 表随源 |
 > | 位置 | Position1-4 + PosID1-4（PositionID 表 13 位） | Position / Position2-4 | → position 列（防守位置判定、XP 规则用） |
 > | 角色 | Role1-5 + RoleID1-5（RoleID 表 100 条中英双语，+/- 熟练度内嵌名中） | role1-5 | 存档展示 |
-> | 徽章 | `PlayStyles1-15` + `PSID1-15` + `NumofPS`；`PlayStyles+`（独立列） | Playstyles / Playstyles+ | **银徽章 = PSID 1-7 槽、金徽章 = 金槽（13 起，ID=基础+100）**；PlayStyleID 表（0-156 双段，含中文名/分类/**图标键**）→ 前端渲染名称与小图标；平台台账只记计数（badges_silver/gold，见 players 表） |
+> | 徽章 | `PlayStyles1-15` + `PSID1-15` + `NumofPS`；`PlayStyles+`（独立列） | Playstyles / Playstyles+ | **银徽章 = 银槽 `PSID1-12`、金徽章 = 金槽 `PSID13-15`（金槽存基础 ID+100）**；PlayStyleID 表（0-156 双段，含中文名/分类/**图标键**）→ 前端渲染名称与小图标；平台台账只记计数（badges_silver/gold，见 players 表） |
 > | 声望 | `internationalrep`（1-5） | — | → prestige 列导入映射（原纯手填字段有了源） |
 > | 归属 | `TeamID` + `Team`（TeamID 表 693 队） | teamid / playerjointeamdate / contractvaliduntil / number | TeamID→存档；队壳归属以平台 contracts 为准；number 仅 FC Editor 源有 |
 > | 细分属性 | **34 项 finishing…gkreflexes 两源同名直通** | 同左 | 仅存档（球员卡展示） |
@@ -811,7 +811,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 7 | 假设 | 监管量化标准（规则引用的 8.1.1/8.1.4 不在手头）= 管理组裁量 + 阈值可配置 |
 | 8 | 假设 | 联网调研同类玩法（Hattrick/FPL/FM）未能成功（官方 wiki 403、FPL JS 渲染、Wikipedia 超时），经济参照以现行规则与 revenue 插件实测为准，未引入外部来源数值 |
 | 9 | 已解决 | CA=overallrating、PA=potential 映射：FC26db 官方列名直接为 CA/PA，且 playerid=ID 同键已验证（§5.2） |
-| 10 | 已解决 | 徽章闭环定稿：映射 银=PSID 1-7 槽、金=金槽（PS+ ID=基础+100，§5.2）；台账只记计数 badges_silver/gold（CHECK 上限 15/3）；**比赛效果由 FC 游戏引擎原生承担，平台无效果逻辑**（比赛在真实 FC 中进行，平台只读赛果）；发放时选具体 PlayStyle 属管理组操作（发放界面可给选择器生成落地清单，操作辅助非数值计算）；前端按 PlayStyleID 静态参考表渲染名称与小图标（`assets/icons/playstyles/{id}.webp` 约定，资产包实现阶段补，缺图降级 🥇🥈） |
+| 10 | 已解决 | 徽章闭环定稿：映射 银=银槽 `PSID1-12`、金=金槽 `PSID13-15`（PS+ ID=基础+100，§5.2）；台账只记计数 badges_silver/gold（CHECK 上限 15/3）；**比赛效果由 FC 游戏引擎原生承担，平台无效果逻辑**（比赛在真实 FC 中进行，平台只读赛果）；发放时选具体 PlayStyle 属管理组操作（发放界面可给选择器生成落地清单，操作辅助非数值计算）；前端按 PlayStyleID 静态参考表渲染名称与小图标（`assets/icons/playstyles/{id}.webp` 约定，资产包实现阶段补，缺图降级 🥇🥈）。**筛选口径（增量 27 收口）**：筛银徽章**只比银槽**、筛金徽章**只比金槽**，不再「基础 ID 或其 +100 命中任一槽」（旧语义下筛银徽章会捞出只挂金徽章的球员）；参数白名单 = 银 1-99 ∪ 金 101-199（去重 + 上限 100 项）。已知渲染口径差：球员档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15`，落在 `PSID8-12` 的银徽章「可筛不可见」（见 ROADMAP 增量 27 遗留） |
 | 11 | 已解决 | 国籍代码表：FC26db 内嵌 NationID 219 国（中国=155 China PR），导入工具随源消费（§5.2） |
 | 12 | 假设 | 窗口推进遇活跃谈判会话默认阻塞，管理组可强制按 E 结算/取消后推进（§6.4 不变式 6），开关可配置 |
 | 13 | 已定（增量 25 改窗刻度） | 保护期判定 = **转会窗刻度**：`contracts.protection_ticks`（= 签约基数 + 3 个常规窗）×`season_windows.is_temporary=0`；`当前已关常规窗数 < protection_ticks` 即在保护期内。训练营合同无保护期（NULL）。旧列 `protected_until`（曾按 signed_at + 548 天）保留留档、判定不再读 |
@@ -891,7 +891,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 
 权限列：👤=coach 及以上 / 🛡=管理组 / 🌐=公开。分页一律硬 LIMIT + 游标（§17）；错误统一 `{error, code?}`。标〔增量 n〕= ROADMAP 对应增量交付。
 
-> **冻结范围**：本表冻结于增量 6 era（末次整体维护），增量 7 起新增/变更的端点**不回填本表**，以 ROADMAP 各增量节的「交付」段与 `src/worker/routes/` 现码为准——回填会造成文档与实现双轨漂移。增量 7+ 的主要新增面：认证四端点（`/api/auth/login|sync|callback|logout|backchannel-logout`，增量 7）、球员库扩展与批量维护（增量 17）、俱乐部目录与换队号（`/api/clubs/directory`、`/api/admin/clubs/tour-team`、`register-auth`、`transfer-ban`，增量 17）、通知三端点（增量 18）、设施与冠名（`/api/club/stadium/*`、`/api/club/facilities/upgrade`、`/api/club/naming/*`，增量 19/20）、赛果自动化（`/api/admin/results/:id/replay-hooks`，增量 21）、球员库姓名去变音搜索与轻量名册端点 `GET /api/players/roster`、排序键扩到 29 列（增量 26）、`/api/admin/overview` 与 `/api/admin/audit-log`（增量 15）。
+> **冻结范围**：本表冻结于增量 6 era（末次整体维护），增量 7 起新增/变更的端点**不回填本表**，以 ROADMAP 各增量节的「交付」段与 `src/worker/routes/` 现码为准——回填会造成文档与实现双轨漂移。增量 7+ 的主要新增面：认证四端点（`/api/auth/login|sync|callback|logout|backchannel-logout`，增量 7）、球员库扩展与批量维护（增量 17）、俱乐部目录与换队号（`/api/clubs/directory`、`/api/admin/clubs/tour-team`、`register-auth`、`transfer-ban`，增量 17）、通知三端点（增量 18）、设施与冠名（`/api/club/stadium/*`、`/api/club/facilities/upgrade`、`/api/club/naming/*`，增量 19/20）、赛果自动化（`/api/admin/results/:id/replay-hooks`，增量 21）、球员库姓名去变音搜索与轻量名册端点 `GET /api/players/roster`、排序键扩到 29 列（增量 26）、球员库 PlayStyle 筛选语义改「银值只比银槽 / 金值只比金槽」且 `ps` 白名单改「银 1-99 ∪ 金 101-199」（无新增端点，增量 27）、`/api/admin/overview` 与 `/api/admin/audit-log`（增量 15）。
 
 | 模块 | 端点 | 权限 | 说明 |
 |---|---|---|---|

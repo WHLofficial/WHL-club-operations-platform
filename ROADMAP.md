@@ -347,6 +347,33 @@
 
 ---
 
+## 增量 27 · 球员库左栏 UI 收口——多选下拉替代 chip 墙 + 区间成对 + PlayStyle 银/金分槽（2026-09-21 本地完成）
+
+**范围**：增量 26 把筛选搬进左栏后，用户对实际观感提了 8 条反馈——同一行元素没对齐（工具条与左栏各一处）；球员列表上方空白太多；查找框灰字一整句太长；位置是 16 个 chip 铺 5 行；「更多筛选」里同一属性的最大值/最小值各占一行；属性下拉列的是 34 个英文键；「经纪人」叫法像人而不是性格；PlayStyle 与显示列也该是多选下拉。本轮把这 8 条逐条落地，并修掉随第 8 条暴露的**金徽筛选必然 400**。**不写任何生产数据、不碰缓存 / 限流 / 查询行为**。
+
+**裁决**（2026-09-21 用户一问一题逐条拍板，共 13 项；要点如下）：
+① 同行对齐走**控件行组件化**（工具条与左栏共用一套行布局与统一高度），不做零散 margin 微调；② 表格上方空白 = **摘要条与翻页条合并成一行** + **无筛选时不渲染摘要条**（「未设筛选条件」占位取消）；③ 搜索框灰字**只保留「查找」**；④ 属性下拉 label 改「属性」、选项写**中文名**、按**七组小标题**分组；⑤ 区间上下限：凡同一属性的最大/最小**合并成一对、一行两列**（左最小、右最大）；⑥ 「经纪人」→「**经纪人性格**」（仅筛选面板 label 与档案页；摘要条 chip 与表格列名仍叫「经纪人」）；⑦ 位置改**多选下拉**、**只放 12 个码位**（四个组 chip 下线，一键选「后卫」的能力随之消失，用户接受）；⑧ PlayStyle 也改多选下拉、**不带搜索框**、顶层分「**银徽章 / 金徽章**」两段（各 36 项）、段内按 EA 六类分组；⑨ **金徽不再算命中**（筛银徽章只看银槽 ⇒ 这是后端行为改动）；⑩ 显示列改同一个多选下拉；⑪ 摘要条粒度：**位置一条、银徽章一条、金徽章一条**（点 × 清掉整类），区间上下限仍各一条 chip（删一个不带走另一个）；⑫ 多选面板用**原生 Popover API**（进 top layer，不被窄屏抽屉裁切）；⑬ **生产读消耗的量化与治理整条挪到增量 28**——原计划第一步是打生产实测，但 2026-09-21 当日 D1 读额度已超限（免费档按 UTC 零点归零），用户裁决「步骤一先搁置」。
+明确不做：不改缓存 / 限流数值、不改除 ps 外的后端语义、不引 UI 库、不动 `.admin-shell` 的 760px 断点、不写生产数据。
+
+**交付**（6 个 commit，每步一 commit + code-review-skill 过审）：
+- `f09c957` 步骤 1：控件行统一（`:root --control-h: 34px` + `.control-row`，`.library-controls` 只留外边距）+ 搜索框占位改「查找」。
+- `c14bd71` 步骤 2：`web/src/lib/ref.ts` 导出 `ATTR_LABELS`（34 项中文名）与 `ATTR_GROUPS`（七组），档案页删掉两份本地副本改为 import；`FilterPanel.tsx` 删 `num()` 工厂、新增 `pair(minKey, maxKey, label, hint?)` 渲染一行两列（区间 7 对 + 属性 1 对 + 合同 3 对），属性下拉改「属性」+ `<optgroup>` 七组 + 中文名，「经纪人」→「经纪人性格」；新增 `web/src/lib/ref.test.ts`（与 `ATTR_KEYS` 逐序全等、无重复）。
+- `24efb8e` 步骤 3：新增 `web/src/components/MultiSelect.tsx`（Popover / 自管 open 态 / 三条关闭路 / 位置现算），位置（12 码位）与显示列（18 列）接入，`POSITION_GROUPS` 与 `.lib-cols` 下线；新增 `MultiSelect.test.tsx` 6 例。
+- `92bdc55` 步骤 4：`src/core/fc26.ts` 出 `PS_SLOT_COUNT = 15` / `PS_SILVER_SLOT_COUNT = 12` / `PS_GOLD_BASE = 100` / `isPlaystyleId` / `isGoldPlaystyleId`；后端 ps 过滤改为**银值只比银槽、金值只比金槽**（白名单「银 1-99 ∪ 金 101-199」，去重 + 上限 100 项）；前端 `filtersFromUrl` / `filtersToQuery` 两侧同步用同一判据；PlayStyle 面板改银/金两段（各 36 项、段内六类）；`web/src/pages/Player.tsx` 与 `ref.ts` 的写死槽位口径改走常量。
+- `53ef515` 步骤 5：摘要条与翻页条合并成 `.lib-bar` 一行（chips 靠左、翻页 `margin-left:auto` 靠右），无筛选不渲染摘要条；`filterChips` 的位置与银/金各合成一条 chip（`psChipName` 去掉参考表自带的 `" +"` 后缀）；`scripts/e2e/smoke.mjs` ④ 断言随之改写。
+- `016a1ba` 步骤 6：多选面板**下方不足 220px 时翻到触发器上方贴底**（落位抽成导出纯函数 `panelPlacement`，新增 4 例单测）+ 窄屏勾选框标签 `white-space: nowrap` + e2e ⑧ 新增面板几何/命中、同行控件底边对齐、翻页条按线上量级量页面横向溢出三组探针。
+
+**验收**：`npm run typecheck`（三份 tsconfig）全清；`npx vitest run` **38 文件 / 497 用例全绿**（增量 26 收口时 36 / 481，本增量 +2 文件 / +16 例：`ref.test.ts` 3 + `MultiSelect.test.tsx` 10 + 页面与 lib 的改写）；`npm run build` 成功（`web/dist/assets/index-DarEGXR6.js` 450.73 kB / gzip 142.76 kB）；`npm run test:e2e` **9/9 场景通过**（⑧ 三视口 1280×900 / 900×800 / 375×812）。e2e 新增断言的实测输出：`desktop 工具条 3 对 / 左栏 2 对，底边偏差 []`（对齐从「看着别扭」变成可失败的硬断言）、`位置 触发器底 403 面板 409–843（视口 900）`、`PlayStyle 触发器底 800 面板 8–760（视口 800）`、`翻页条：高度 30，页面 1265/1280`。真浏览器截图（`scratch/e2e-players-{desktop,tablet,mobile}[-multiselect[-ps]].png`，8 张）逐张复核：工具条三件套与左栏两行底边齐平、摘要条与翻页条合并成表格正上方一行、位置/显示列/PlayStyle 均为下拉、375px 抽屉里 CA/PA/成长空间/初始 CA/年龄/身价/影响力 各一行两列。
+
+**两个只有真浏览器能抓到的真 bug**：① **多选面板掉出视口**：把 PlayStyle 触发器滚到抽屉下沿后，面板落在 806–966 而视口高 800，掉在视口外、点不到也滚不到 ⇒ 加向上翻转；且**落位必须在 `showPopover()` 之后**——之前面板命中 `[popover]:not(:popover-open)`、UA 样式是 `display:none`，`offsetWidth` / `scrollHeight` 量到 0，「面板想要多高」恒为 0，翻转几乎永不触发（改用常量 `MIN_PANEL_ROOM = 220` 判据正是为了绕开这个坑，评审抓出后已修）。② **375px 抽屉里勾选框标签被拆成三行**：`.lib-adv-grid .field.check` 被 `flex: 1 1 96px` 压到 96px，「仅未来之星」渲染成「仅未 / 来之 / 星」⇒ `white-space: nowrap`。
+另有两条 e2e 断言被评审判定为**空洞**（`pagerProbe` 断 `scrollWidth > clientWidth` 不可能失败，CJK 会换行；同行判据按 `top` 归行会跳过底边对齐但顶边不同的成对控件）⇒ 改为「页面级横向溢出」与「纵向相交归行 + 只比底边 + 断言量到非空」，并把「同行控件 N 对」打进日志以证非空集。
+
+**遗留**：① **球员库 D1 读消耗的量化与治理**（增量 28，含本增量被挪走的那部分）；② 档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15`，而筛选与导入口径是银槽 1-12 ⇒ 落在 `PSID8-12` 的银徽章「可筛不可见」（既存问题，本轮不修）；③ 摘要条「筛选（N）」数的是 chip 条数，位置选 12 个仍显示 1（chip 粒度合并的必然结果，已接受）；④ 多选面板内联 `maxHeight` 会覆盖 CSS 的 `min(70vh, 480px)`，内容超高时面板可长过 480px；⑤ 1280 宽下表格里「Baseline Utd」「20.00 m」「2金7银」会折行（列宽所致，非本轮引入）。
+
+**文档**：本节 + `CHANGELOG.md` [未发布] 增量 27 节 + `UI_DESIGN.md` 球员库行 + `TECH_DESIGN.md` 的 PlayStyle 槽位口径（原写「银槽 1-7 / 金槽 13 起」，改为「15 槽 = 银 1-12 + 金 13-15」）+ `README.md` 测试数与 e2e 场景描述 + `AGENTS.md` 当前状态。
+
+---
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
@@ -358,6 +385,7 @@
 | 球员库源数据（FC Editor 逐队导出）：`E:\BaiduNetdiskDownload\FC Editor by decoruiz Alpha v21.5_2\player_tables\`（每队一个 `{id} - {Team}.xlsx`）；口径 `fc_id` = EA id 为 upsert 键、`prestige` ← `internationalrep`(1-5)、`base_ca` = 导入时 CA、`game_attrs` = FC 源 61 列 | 后续增量补录 / 重导 | 参考路径：首灌已于 2026-09-18 执行（入库 18301）；此逐队源供后续核对与增量补录用 |
 | 球员库导入通道 | 球员库首灌 | 已裁决：管理端网页通道要 OIDC 会话（离线脚本拿不到），走 `scripts/players-import/generate-sql.ts` 产分片 SQL + D1 REST `/query`；`--file` 通道遇 FK / 大事务会因 `PRAGMA defer_foreign_keys` 失效整批回滚 |
 | 30 人缺字段补录工件（`scripts/players-import/overlay-missing.ts` + `missing-fields-30.csv`，源缺 `naID` / `FootID`，需人工填值） | 球员库收口 | **等令，未执行**（生产现 18301 人，2026-09-20 查证） |
+| 球员库 D1 读消耗的量化与治理（增量 27 步骤 1 原计划：生产 `rows_read` 抽样 + 按 URL 统计重复率与命中率 + 必要时只读统计端点；再据此选「缓存/查询微调 / 静态快照 / 只改前端」） | 增量 28 | **等令**——用户 2026-09-21 裁决整条挪到增量 28（当日生产 D1 读额度已超限，免费档按 UTC 零点归零；量化本身要先打生产，故与原计划自相矛盾）。背景与量级估算见 TECH_DESIGN §17 与本节各增量的缓存/分页口径 |
 | 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | 增量 12 后收口 | **已执行**（2026-09-20，444 行；复查全库 assigned 551 = CPU 4 队 107 + 本批 444） |
 | S9 窗基线工件（`scripts/prod-20260920-s9-window-baseline/`：直造一条已关季初常规窗 + 62 行 `result_confirmations` 与 50 行 `match_attendance` 的 `window_seq` 0→1） | 生产数据侧 | **已执行**（2026-09-20 经 `--command` 逐条跑：changes 1 / 62 / 50 与期望一致，验收 9 项全中 → `windows_s9=1, w1_closed=1, open_windows=0, rc_one=62, ma_one=50, season_status=preparing`；代价：该窗 ≈117.5m 维护费与死忠演化不会被任何关窗批收取） |
 | 20 队（含 CPU）队籍对齐工件（源 `FC Editor…/player_tables/s901` 队壳文件；`scripts/prod-20260920-s9-club-align/`：570 人按队壳对齐，481 条 `UPDATE players SET club_id`（改队 158 + 认领 323），只写队籍一列） | 生产数据侧 | **已于 2026-09-21 执行**（481 语句 / rows_written 962 / touched 481；验收：已对齐 570、剩余差异 0、入籍 874 = 551+323、自由身 17427，逐队人数与预估逐队吻合）；合同批的 84 行异队冲突已归零（16 队 462 行全部可导）；**遗留 304 人（275 人不在联盟世界任何一线队名单 + 29 人所在队在平台不存在）已于 2026-09-21 由 `scripts/prod-20260921-s9-free-leftover/` 释放自由身（`club_id = NULL` + `status = 'free'`）** |

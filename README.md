@@ -37,6 +37,8 @@ npm run dev:web
 
 注意：`npm run dev` 提供的前端是 `web/dist` 的构建产物，改前端后不 `npm run build` 就看不到变化；要即时预览用 `npm run dev:web`。
 
+两个本地坑（实测踩过）：① 若 `.wrangler/state/v3` 里的 D1 是**用别的方式建的**（`d1_migrations` 表为空），`npm run db:migrate:local` 会从 `0001` 重放并报 `table players already exists`；此时要按缺的迁移手工补（例如 `0028` 的 `contracts.service_ticks / protection_ticks / signed_season / signed_window_seq` 与 `season_windows.is_temporary`、`0027` 的四条排序索引），否则 `/api/players` 直接 500。② 同一端口上**不要同时跑两个 `wrangler dev`**：Windows 下两个进程会同时听着同一端口，请求随机落到任一个，表现为「HTML 是新的、带 hash 的 JS 却 404 → SPA 兜底回 `200 text/html`」、页面白屏（`Failed to load module script: ... MIME type of "text/html"`）。
+
 登录模式由 `wrangler.jsonc` 的 `AUTH_MODE` 决定：默认 `oidc`（认证中心 `https://auth.whleague.win`，client `club`）。撤掉 `AUTH_MODE` 即回兼容模式——读 cookie `whl_session` → KV `sess:{token}` → 赛事库 `user` 表。想在本机跑真 OIDC 联调，用 `npm run dev:oidc`（8795 端口，issuer 指向本地 8792），配套冒烟脚本见 `scripts/smoke-oidc-local.mjs`。
 
 ## 常用命令
@@ -83,9 +85,9 @@ e2e 冒烟默认打 `http://127.0.0.1:8791`，用本机 Chrome（`C:/Program Fil
 
 ## 测试
 
-- 单元/集成：`npm test`，当前 36 个文件 / 481 个用例。`tests/d1.ts` 用本地 SQLite 执行真实迁移，`tests/tour-team-seed.ts` 提供赛事库夹具。
+- 单元/集成：`npm test`，当前 38 个文件 / 497 个用例（含 `web/src/**` 的前端组件测试，放在 jsdom 环境）。`tests/d1.ts` 用本地 SQLite 执行真实迁移，`tests/tour-team-seed.ts` 提供赛事库夹具。
 - 类型：`npm run typecheck`（三份 tsconfig）。
-- e2e 冒烟：`npm run test:e2e`，9 个场景（首页、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、球员库三视口截图、无未捕获前端错误）。
+- e2e 冒烟：`npm run test:e2e`，9 个场景（首页、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、球员库三视口截图与控件探针、无未捕获前端错误）。第 8 个场景在三视口（1280/900/375）下额外断言：多选下拉面板整块落在视口内且 `elementFromPoint` 命中的是面板本身、同行控件底边逐对齐、翻页条按线上量级文案不撑出页面横向滚动；截图落 `scratch/`。
 
 ## 目录结构
 

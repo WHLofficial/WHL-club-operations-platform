@@ -17,13 +17,17 @@
 | `gen_ref_json.py` | 从 FC26db 源抽 NationID / PlayStyleID / PositionID / RoleID / TeamID 五表写 `web/assets/ref/*.json` | `python scripts/gen_ref_json.py [FC26db xlsx 路径]`（默认 `E:\Downloads\FC26db20251217_fixed.xlsx`） |
 | `list_wrangler.ps1` | 列本机 wrangler 相关 node 进程的 PID 与命令行（排查端口占用） | PowerShell 直接跑 |
 | `smoke-oidc-local.mjs` | 双服务联调冒烟：club 8795（OIDC）× auth 8792（真认证中心），手推 authorize → 登录 → callback → `/api/me` → back-channel 登出 → end_session | 见文件头注释；需先起 auth 仓本地服务，注意 auth 登录限流 5 次/15 分钟 |
-| `e2e/smoke.mjs` | 平台 e2e 冒烟（8 场景），见下 | `npm run test:e2e` 或 `node scripts/e2e/smoke.mjs [baseUrl]` |
+| `e2e/smoke.mjs` | 平台 e2e 冒烟（9 场景），见下 | `npm run test:e2e` 或 `node scripts/e2e/smoke.mjs [baseUrl]` |
 
 ## e2e/
 
-`smoke.mjs` 用 `playwright-core` 驱动**本机 Chrome**（`C:/Program Files/Google/Chrome/Application/chrome.exe`，未装浏览器二进制）。前置：`npm run build` + `npm run dev`（默认打 `http://127.0.0.1:8791`，可用 `E2E_BASE` / `E2E_CHROME` 或第二个参数覆盖）。场景：首页渲染、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、无未捕获前端错误；失败截图落 `scratch/e2e-fail-*.png`。
+`smoke.mjs` 用 `playwright-core` 驱动**本机 Chrome**（`C:/Program Files/Google/Chrome/Application/chrome.exe`，未装浏览器二进制）。前置：`npm run build` + `npm run dev`（默认打 `http://127.0.0.1:8791`，可用 `E2E_BASE` / `E2E_CHROME` 或第二个参数覆盖）。场景：首页渲染、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、**球员库三视口（1280×900 / 900×800 / 375×812）截图与控件探针**、无未捕获前端错误；失败截图落 `scratch/e2e-fail-*.png`。
 
-脚本会往**本地** KV 种一条 `sess:<随机 token>` 会话（`--local`，该命名空间与赛事/竞猜共用，`--remote` 等于生产写），结束时删除。当前默认兼容模式；若 dev 以 OIDC 模式跑，需改种 `oidc_session` 行 + `__Host-club_session` cookie（文件头注释有说明）。
+第 8 个场景除了截图，还断言只有真浏览器才有意义的三类事实（增量 27 加）：① 多选下拉面板整块落在视口内、`document.elementFromPoint` 命中的是面板本身、面板与触发器不重叠、高度 ≥160（唯一能抓「Popover 没进 top layer ⇒ 面板看得见点不到」的判据）；② 工具条与左栏各自的同行控件**底边逐对齐**（`align-items: flex-end` 下顶边本就允许不同），并把「同行控件 N 对」打进日志以防空集静默通过；③ 把翻页条文案临时换成线上量级（「共 34835 名球员 · 共 1742 页 · 第 1 页」）后量**页面级**横向溢出（量 `.library-pager` 自身没用：CJK 会换行，`scrollWidth` 恒等于 `clientWidth`）。
+
+本地 D1 必须是**迁移全量已 apply** 的状态（`.wrangler/state/v3` 中 `d1_migrations` 若为空这层就靠不住，详见根 README 快速开始的「两个本地坑」），缺列时 `/api/players` 报 500、场景 4/8 会失败。
+
+脚本会往**本地** KV 种一条 `sess:<随机 token>` 会话（`--local`，该命名空间与赛事/竞猜共用，`--remote` 等于生产写），结束时删除。**两条登录通道都种**（增量 27 起）：兼容模式走 KV `whl_session` → `sess:{token}`；OIDC 模式走 D1 `oidc_session` 行（`token_hash = sha256(cookie 值)`）+ `__Host-club_session` cookie，本地没有该表时那一半自动跳过，两个 cookie 同时带上。若 dev 用非默认 persist 目录（如 `wrangler dev --persist-to .wrangler/rehearsal`），必须用同一个目录跑 e2e（`E2E_PERSIST_TO=.wrangler/rehearsal`），否则会话种在另一边、页面会跳认证中心。
 
 ## players-import/
 
