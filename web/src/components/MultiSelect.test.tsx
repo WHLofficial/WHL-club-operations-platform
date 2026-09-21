@@ -7,7 +7,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import MultiSelect, { type MultiSelectItem } from './MultiSelect.tsx';
+import MultiSelect, { panelPlacement, type MultiSelectItem } from './MultiSelect.tsx';
 
 // vitest 没开 globals，Testing Library 的自动清理不会挂上，得自己来
 afterEach(cleanup);
@@ -129,5 +129,46 @@ describe('多选下拉', () => {
     expect([...box.querySelectorAll('.multiselect-section')].map((el) => el.textContent)).toEqual(['银徽章', '金徽章']);
     // 「终结」出现两次（银段一次、金段一次），不能并成一块
     expect([...box.querySelectorAll('.multiselect-group')].map((el) => el.textContent)).toEqual(['终结', '传球', '终结']);
+  });
+});
+
+// 落位是纯函数（真实布局量不出来，所以 DOM 里测不了；真浏览器的落位由 e2e 断言）：
+// 直接喂几何数字，覆盖「下方够放」「下方只剩一条缝」「上下都不够」三种情形。
+describe('panelPlacement', () => {
+  const view = { width: 375, height: 812 };
+
+  it('下方空间充足：贴着触发器下沿展开，高度按可用空间给', () => {
+    const at = panelPlacement({ top: 100, bottom: 134, left: 40 }, view, 320);
+    expect(at.openUp).toBe(false);
+    expect(at.top).toBe(140);
+    expect(at.bottom).toBeUndefined();
+    expect(at.maxHeight).toBe(812 - 134 - 6 - 8);
+  });
+
+  it('触发器贴近视口底部：翻到上方贴底，且不会掉出视口', () => {
+    const at = panelPlacement({ top: 766, bottom: 800, left: 40 }, view, 320);
+    expect(at.openUp).toBe(true);
+    expect(at.top).toBeUndefined();
+    expect(at.bottom).toBe(812 - 766 + 6);
+    // 面板上沿 = 触发器上沿 − 6 − 高度，必须 ≥ 视口内的留白
+    expect(at.maxHeight).toBe(766 - 6 - 8);
+    expect(view.height - at.bottom! - at.maxHeight).toBeGreaterThanOrEqual(0);
+  });
+
+  it('下方只剩一条缝（旧实现在这里把面板压到 160 高、溢出视口）：同样翻上去', () => {
+    // 触发器底边距视口底 74px ⇒ 下方可用 60px，远不到 MIN_PANEL_ROOM
+    const at = panelPlacement({ top: 704, bottom: 738, left: 40 }, view, 320);
+    expect(at.openUp).toBe(true);
+    expect(at.maxHeight).toBe(704 - 6 - 8);
+    expect(view.height - at.bottom! - at.maxHeight).toBeGreaterThanOrEqual(0);
+  });
+
+  it('上下都放不下（退化视口）：翻到空间较大的一侧，高度兜底到 160', () => {
+    // 视口只有 120 高时两侧都不够：below=12 / above=46 ⇒ 取上方的 46，高度按兜底 160
+    //（此时确实会溢出，属既定取舍：够不着比只剩一条缝好，真实视口不会这么矮）
+    const at = panelPlacement({ top: 60, bottom: 94, left: 4 }, { width: 320, height: 120 }, 320);
+    expect(at.openUp).toBe(true);
+    expect(at.maxHeight).toBe(160);
+    expect(at.left).toBe(8); // 左移不出视口
   });
 });

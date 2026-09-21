@@ -1769,6 +1769,9 @@ tbody tr:hover td {
   align-items: center;
   gap: 6px;
   font-size: 14px;
+  /* 窄栏（260px 侧栏 / 320px 抽屉）里 flex 会把勾选框这一行压到 96px，不加 nowrap
+     标签会被拆成三行（「仅未 / 来之 / 星」）—— 让它整条换行，不拆字 */
+  white-space: nowrap;
 }
 
 /* 成对区间输入（增量 27 步骤 2）：同属性的上下限并成一行两列，label 在左、单位缀在 label 后。

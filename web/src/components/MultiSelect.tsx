@@ -41,6 +41,38 @@ function toBlocks(items: MultiSelectItem[]): { section?: string; group?: string;
 const HTMLElementCtor = typeof globalThis.HTMLElement === 'function' ? globalThis.HTMLElement : null;
 const HAS_POPOVER = HTMLElementCtor !== null && 'showPopover' in HTMLElementCtor.prototype;
 
+/** 面板与触发器之间的间隙、离视口边缘的留白。 */
+const PANEL_GAP = 6;
+const PANEL_EDGE = 8;
+/** 触发器下方留不出这么多高度就翻到上方：低于这个可用高度，面板会矮到没法用。 */
+const MIN_PANEL_ROOM = 220;
+/** 面板高度的兜底下限：再矮就只剩一条缝了。 */
+const MIN_PANEL_HEIGHT = 160;
+
+/**
+ * 面板落位（纯函数，jsdom 里量不出布局，所以抽出来单测）。
+ * 抽屉底部、窄屏底部的触发器下方没有空间（真浏览器实测：触发器贴底时面板会掉到视口外 166px，
+ * 点不到也滚不到）⇒ 放不下就翻到触发器上方、贴底对齐。
+ * 判据用常量而不是面板实测高度：showPopover() 之前面板是 display:none，offsetHeight /
+ * scrollHeight 都是 0，那时量出来的「面板想要多高」恒为 0，会永远判成放得下。
+ */
+export function panelPlacement(
+  box: { top: number; bottom: number; left: number },
+  view: { width: number; height: number },
+  panelWidth: number,
+): { left: number; top?: number; bottom?: number; maxHeight: number; openUp: boolean } {
+  const below = view.height - box.bottom - PANEL_GAP - PANEL_EDGE;
+  const above = box.top - PANEL_GAP - PANEL_EDGE;
+  const openUp = below < MIN_PANEL_ROOM && above > below;
+  return {
+    left: Math.max(PANEL_EDGE, Math.min(box.left, view.width - panelWidth - PANEL_EDGE)),
+    top: openUp ? undefined : box.bottom + PANEL_GAP,
+    bottom: openUp ? view.height - box.top + PANEL_GAP : undefined,
+    maxHeight: Math.max(MIN_PANEL_HEIGHT, openUp ? above : below),
+    openUp,
+  };
+}
+
 export default function MultiSelect({ label, items, selected, onToggle, onClear, footer }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -55,13 +87,16 @@ export default function MultiSelect({ label, items, selected, onToggle, onClear,
 
     // top layer 里的面板脱离文档流：位置每次都得按触发器现算，滚动与缩放时跟着走
     const place = () => {
-      const box = trigger.getBoundingClientRect();
-      const width = panel.offsetWidth || 320;
-      panel.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - width - 8))}px`;
-      panel.style.top = `${box.bottom + 6}px`;
-      panel.style.maxHeight = `${Math.max(160, window.innerHeight - box.bottom - 20)}px`;
+      const at = panelPlacement(
+        trigger.getBoundingClientRect(),
+        { width: window.innerWidth, height: window.innerHeight },
+        panel.offsetWidth || 320,
+      );
+      panel.style.left = `${at.left}px`;
+      panel.style.top = at.top === undefined ? 'auto' : `${at.top}px`;
+      panel.style.bottom = at.bottom === undefined ? 'auto' : `${at.bottom}px`;
+      panel.style.maxHeight = `${at.maxHeight}px`;
     };
-    place();
     if (HAS_POPOVER) {
       try {
         panel.showPopover();
@@ -69,6 +104,8 @@ export default function MultiSelect({ label, items, selected, onToggle, onClear,
         // 已经在 top layer 里（连点两次开关之类的时序）就当它已经开着，不影响下面的定位
       }
     }
+    // 必须等进了 top layer 再落位：之前面板是 display:none，offsetWidth 量到 0
+    place();
     panel.focus({ preventScroll: true });
 
     // capture 监听：滚动可能发生在抽屉/侧栏这些内层容器上，不 capture 就收不到

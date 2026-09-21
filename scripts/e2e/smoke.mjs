@@ -173,6 +173,118 @@ async function main() {
 
   const text = () => page.locator('body').innerText();
 
+  // 多选下拉面板（原生 Popover）的几何 + 命中测试。这两条只有真浏览器能验：jsdom 里没有
+  // Popover，面板会退化成普通 fixed 元素、照样点得到；真浏览器里如果它被判成「看得见却点不到」
+  // （[popover]:not(:popover-open) 那条 UA 规则一旦不匹配就永不显示），只有 elementFromPoint 抓得住。
+  const panelProbe = () =>
+    page.evaluate(() => {
+      const panel = document.querySelector('.multiselect-panel');
+      if (!panel) return null;
+      const trigger = document.querySelector('button.multiselect[aria-expanded="true"]');
+      const r = panel.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        Math.round(r.left + Math.min(r.width, 40) / 2),
+        Math.round(r.top + Math.min(r.height, 40) / 2),
+      );
+      return {
+        left: Math.round(r.left),
+        top: Math.round(r.top),
+        right: Math.round(r.right),
+        bottom: Math.round(r.bottom),
+        height: Math.round(r.height),
+        viewportH: window.innerHeight,
+        inViewport: r.left >= -1 && r.top >= -1 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1,
+        hitInside: !!hit && !!hit.closest('.multiselect-panel'),
+        hitClass: hit ? String(hit.className) : 'null',
+        triggerBottom: trigger ? Math.round(trigger.getBoundingClientRect().bottom) : null,
+      };
+    });
+
+  const openPanel = async (label) => {
+    await page.locator('.library-side button.multiselect', { hasText: label }).first().click();
+    await page.waitForSelector('.multiselect-panel', { timeout: TIMEOUT });
+    await page.waitForTimeout(150); // 等 place() 落位（面板位置是按触发器现算的）
+  };
+  const closePanel = async () => {
+    if (await page.locator('.multiselect-panel').count()) await page.keyboard.press('Escape');
+  };
+
+  // 同一行控件的对齐（增量 27 步骤 1 的诉求）：.control-row 是 align-items:flex-end，
+  // 所以「同一行」= 纵向范围相交、对齐判据 = 底边齐平（顶边可以不同：label 在上的 .field 比按钮高）。
+  // .seg 曾经的 margin-bottom:8px 正是这样抬高了底边、被这条抓出来的。
+  const controlRowAlign = (sel) =>
+    page.evaluate((s) => {
+      const out = [];
+      for (const row of document.querySelectorAll(s)) {
+        const kids = [...row.children]
+          .map((el) => ({ name: el.className || el.tagName, b: el.getBoundingClientRect() }))
+          .filter((k) => k.b.height > 1 && k.b.width > 1);
+        for (let i = 0; i < kids.length; i++) {
+          for (let j = i + 1; j < kids.length; j++) {
+            const a = kids[i].b;
+            const c = kids[j].b;
+            // 纵向不相交 = 换过行（行间距 10px，不会相交）
+            if (Math.min(a.bottom, c.bottom) - Math.max(a.top, c.top) <= 0) continue;
+            out.push({
+              pair: `${kids[i].name} ↔ ${kids[j].name}`,
+              bottom: Math.round(a.bottom - c.bottom),
+            });
+          }
+        }
+      }
+      return out;
+    }, sel);
+
+  const assertRowAligned = async (label, sel) => {
+    const pairs = await controlRowAlign(sel);
+    const bad = pairs.filter((p) => Math.abs(p.bottom) > 2);
+    console.log(`   ${label}：同行控件 ${pairs.length} 对，底边偏差 ${JSON.stringify(bad)}`);
+    // 空集静默通过 = 什么都没验（比如换了类名、控件各自换了行）
+    assert(pairs.length > 0, `${label}：没量到任何同行控件（${sel}）`);
+    assert(bad.length === 0, `${label}：同行控件底边没对齐 ${JSON.stringify(bad)}`);
+  };
+
+  const assertPanel = (label, what, p) => {
+    assert(p, `${label}：点「${what}」没有出现多选面板`);
+    assert(
+      p.inViewport,
+      `${label}：${what} 面板出视口（${p.left},${p.top}–${p.right},${p.bottom}，视口高 ${p.viewportH}）`,
+    );
+    assert(p.hitInside, `${label}：${what} 面板点不到，命中的是 ${p.hitClass}`);
+    // 面板要么整块在触发器下方，要么整块翻到上方（触发器贴视口底部时）——骑在两侧说明定位算错了
+    assert(
+      p.triggerBottom === null || p.top >= p.triggerBottom || p.bottom <= p.triggerBottom,
+      `${label}：${what} 面板与触发器重叠（面板 ${p.top}–${p.bottom} / 触发器底 ${p.triggerBottom}）`,
+    );
+    // 贴底兜底高度是 160：再矮就不是能用的大小了（翻转若算错，常表现为被压成一条）
+    assert(
+      p.height >= 160,
+      `${label}：${what} 面板被压得过矮（${p.height}px，视口高 ${p.viewportH}）`,
+    );
+  };
+
+  // 翻页条：本地夹具只有几百人，文案比线上（三万多人、上千页）短得多，直接量会漏 ⇒ 临时换成
+  // 线上量级的文案再量（与数据无关），量完立刻还原。
+  // 判据是「页面不出横向滚动条」：翻页条自己不会横向溢出（文案是 CJK，会换行），
+  // 真正要防的是有人给它加 nowrap 或塞进一个撑宽的元素。
+  const pagerProbe = () =>
+    page.evaluate(() => {
+      const pager = document.querySelector('.library-pager');
+      const span = pager?.querySelector('span');
+      if (!pager || !span) return null;
+      const before = span.textContent;
+      span.textContent = '共 34835 名球员 · 共 1742 页 · 第 1 页';
+      const doc = document.documentElement;
+      const out = {
+        pagerHeight: Math.round(pager.getBoundingClientRect().height),
+        docScrollW: doc.scrollWidth,
+        docClientW: doc.clientWidth,
+        pageOverflow: doc.scrollWidth > doc.clientWidth + 1,
+      };
+      span.textContent = before;
+      return out;
+    });
+
   try {
     await check('① 首页渲染（顶栏 + 经理办公室）', async () => {
       await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
@@ -328,6 +440,60 @@ async function main() {
           assert(await side.isVisible(), `${label}：宽屏左栏应常驻可见`);
           assert((await page.locator('.lib-drawer-mask').count()) === 0, `${label}：宽屏不应出现遮罩`);
         }
+        // 多选下拉（增量 27 步骤 6）：左栏/抽屉里都要能打开、整块落在视口内、并且真的点得到
+        await openPanel('位置');
+        const pos = await panelProbe();
+        assertPanel(label, '位置', pos);
+        await closePanel();
+
+        // 同行控件对齐（增量 27 步骤 1）：工具条一行、左栏一行，逐对量 top/bottom
+        await assertRowAligned(`${label} 工具条`, '.lib-toolbar.control-row');
+        await assertRowAligned(`${label} 左栏`, '.library-side .control-row');
+
+        // 再开一次留给截图（顺带证明开关可重复）
+        await openPanel('位置');
+        const posShot = join(SHOT_DIR, `e2e-players-${label}-multiselect.png`);
+        await page.screenshot({ path: posShot, fullPage: false });
+        shots.push(posShot);
+        await closePanel();
+
+        // 抽屉往下滚，把 PlayStyle 触发器顶到抽屉下沿：触发器下方空间最小时，面板最容易被顶出视口
+        if (width <= 900) {
+          const adv = page.locator('.library-side details.lib-adv');
+          if (!(await adv.evaluate((el) => el.open))) await adv.locator('> summary').click();
+          await page
+            .locator('.library-side button.multiselect', { hasText: 'PlayStyle' })
+            .first()
+            .evaluate((el) => el.scrollIntoView({ block: 'end' }));
+          await page.waitForTimeout(200);
+          await openPanel('PlayStyle');
+          const ps = await panelProbe();
+          console.log(
+            `   面板几何：位置 触发器底 ${pos.triggerBottom} 面板 ${pos.top}–${pos.bottom}（视口高 ${pos.viewportH}）` +
+              ` / PlayStyle 触发器底 ${ps?.triggerBottom} 面板 ${ps?.top}–${ps?.bottom}`,
+          );
+          assertPanel(label, '（贴底）PlayStyle', ps);
+          const psShot = join(SHOT_DIR, `e2e-players-${label}-multiselect-ps.png`);
+          await page.screenshot({ path: psShot, fullPage: false });
+          shots.push(psShot);
+          await closePanel();
+        } else {
+          console.log(
+            `   面板几何：位置 触发器底 ${pos.triggerBottom} 面板 ${pos.top}–${pos.bottom}（视口高 ${pos.viewportH}）`,
+          );
+        }
+
+        // 翻页条：按线上量级的文案量一次页面横向溢出（本地夹具文案短得多，直接量会漏）
+        const pager = await pagerProbe();
+        assert(pager, `${label}：找不到翻页条文案节点`);
+        console.log(
+          `   翻页条：高度 ${pager.pagerHeight}，页面 ${pager.docScrollW}/${pager.docClientW}`,
+        );
+        assert(
+          !pager.pageOverflow,
+          `${label}：翻页条把页面撑出横向滚动（${pager.docScrollW} > ${pager.docClientW}）`,
+        );
+
         const shot = join(SHOT_DIR, `e2e-players-${label}.png`);
         await page.screenshot({ path: shot, fullPage: false });
         shots.push(shot);
