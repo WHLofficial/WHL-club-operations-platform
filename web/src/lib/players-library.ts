@@ -1,6 +1,8 @@
 // 球员库的筛选模型与列模型（增量 26 从 pages/PlayersLibrary.tsx 拆出，供页面与 FilterPanel 共用）。
-// 三件事都在这里：Filters 类型与默认值、URL query ↔ 筛选状态的互转、筛选 → 自动列的联动规则。
-// 拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，留在页面里会形成页面 ↔ 组件的循环导入。
+// 四件事都在这里：Filters 类型与默认值、URL query ↔ 筛选状态的互转、筛选 → 自动列的联动规则、
+// 生效条件摘要条（filterChips）。拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，
+// 留在页面里会形成页面 ↔ 组件的循环导入。
+import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from './ref.ts';
 
 export type View = 'current' | 'initial';
 
@@ -294,4 +296,70 @@ export function autoColsFor(f: Filters): string[] {
   if (f.protectedSel) cols.push('protected');
   if (f.yearsMin || f.yearsMax) cols.push('years');
   return cols;
+}
+
+// ---- 生效条件摘要条（增量 26 步骤 5）：当前筛选翻成一行可删 chips ----
+// 每个 chip 只带「把自己清掉」的补丁，页面合并回 Filters —— 这里保持纯函数，不碰状态也不碰 DOM。
+export interface FilterChip {
+  id: string;
+  label: string;
+  clear: Partial<Filters>;
+}
+
+// 区间项：两边各自成一条 chips（与输入框一一对应，删掉「CA ≥ 70」不会连「CA ≤ 90」一起丢）
+const RANGE_CHIP_GROUPS: [keyof Filters, keyof Filters, string, string][] = [
+  ['caMin', 'caMax', 'CA', ''],
+  ['paMin', 'paMax', 'PA', ''],
+  ['ageMin', 'ageMax', '年龄', ' 岁'],
+  ['baseCaMin', 'baseCaMax', '初始 CA', ''],
+  ['gapMin', 'gapMax', '成长空间', ''],
+  ['mvMin', 'mvMax', '身价', ' m'],
+  ['inflMin', 'inflMax', '影响力', ''],
+  ['wageMin', 'wageMax', '工资', ' m'],
+  ['rcMin', 'rcMax', '解约金', ' m'],
+  ['yearsMin', 'yearsMax', '效力时长', ' 赛季'],
+];
+
+export function filterChips(f: Filters, clubs: readonly { id: number; name: string }[]): FilterChip[] {
+  const chips: FilterChip[] = [];
+  const push = (id: string, label: string, clear: Partial<Filters>) => chips.push({ id, label, clear });
+
+  if (f.name) push('name', `姓名含「${f.name}」`, { name: '' });
+  for (const p of f.positions) push(`position:${p}`, `位置：${p}`, { positions: f.positions.filter((x) => x !== p) });
+  if (f.status) push('status', `状态：${STATUS_LABEL[f.status] ?? f.status}`, { status: '' });
+  if (f.club) {
+    const name = f.club === 'free' ? '自由身' : (clubs.find((c) => String(c.id) === f.club)?.name ?? f.club);
+    push('club', `俱乐部：${name}`, { club: '' });
+  }
+  if (f.growable !== 'all') push('growable', f.growable === '1' ? '仅可成长' : '仅非成长', { growable: 'all' });
+
+  for (const [minKey, maxKey, label, unit] of RANGE_CHIP_GROUPS) {
+    const min = f[minKey] as string;
+    const max = f[maxKey] as string;
+    if (min) push(String(minKey), `${label} ≥ ${min}${unit}`, { [minKey]: '' } as Partial<Filters>);
+    if (max) push(String(maxKey), `${label} ≤ ${max}${unit}`, { [maxKey]: '' } as Partial<Filters>);
+  }
+
+  if (f.attr) {
+    push('attr', `属性：${f.attr}`, { attr: '', attrMin: '', attrMax: '' });
+    if (f.attrMin) push('attrMin', `${f.attr} ≥ ${f.attrMin}`, { attrMin: '' });
+    if (f.attrMax) push('attrMax', `${f.attr} ≤ ${f.attrMax}`, { attrMax: '' });
+  }
+  if (f.foot) push('foot', f.foot === '0' ? '左脚' : '右脚', { foot: '' });
+  if (f.growthTier) push('growthTier', `成长档位：${f.growthTier} 档`, { growthTier: '' });
+  if (f.agentTier) push('agentTier', `经纪人：${AGENT_TIER_LABEL[Number(f.agentTier)] ?? f.agentTier}`, { agentTier: '' });
+  if (f.futureStar) push('futureStar', '仅未来之星', { futureStar: false });
+  if (f.chinaPlan) push('chinaPlan', '仅中国计划', { chinaPlan: false });
+  for (const id of f.ps) {
+    const ref = playstyleById.get(id);
+    push(`ps:${id}`, `PlayStyle：${ref?.chs ?? ref?.en ?? id}`, { ps: f.ps.filter((n) => n !== id) });
+  }
+  if (f.hasContract) push('hasContract', f.hasContract === '1' ? '仅有合同' : '仅无合同', { hasContract: '' });
+  if (f.rcNone) push('rcNone', '无解约金条款', { rcNone: false });
+  if (f.contractType) push('contractType', `合同类型：${CONTRACT_TYPE_LABEL[f.contractType] ?? f.contractType}`, { contractType: '' });
+  if (f.source) push('source', `成约方式：${SOURCE_LABEL[f.source] ?? f.source}`, { source: '' });
+  if (f.protectedSel) push('protected', f.protectedSel === 'in' ? '保护中' : '非保护', { protectedSel: '' });
+  if (f.fcId) push('fcId', `FC ID：${f.fcId}`, { fcId: '' });
+
+  return chips;
 }

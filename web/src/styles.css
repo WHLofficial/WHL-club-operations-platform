@@ -1606,6 +1606,73 @@ tbody tr:hover td {
   font-size: 12px;
 }
 
+/* 增量 26：筛选搬进左侧栏（桌面可收起，窄屏改抽屉见后续断点） */
+.library-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  align-items: start;
+}
+
+.library-shell.collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.library-side {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding-right: 16px;
+  border-right: 1px solid var(--border);
+}
+
+.library-shell.collapsed .library-side {
+  display: none;
+}
+
+.library-main {
+  min-width: 0; /* 表格自己横向滚动，别把栅格撑开 */
+  padding-left: 16px;
+}
+
+.library-shell.collapsed .library-main {
+  padding-left: 0;
+}
+
+/* 侧栏窄：区间输入框改成填满一行两列，别留 130px 固定宽的空白 */
+.library-side .lib-adv-grid .field {
+  flex: 1 1 96px;
+}
+
+.library-side .lib-adv-grid .field input,
+.library-side .lib-adv-grid .field select {
+  width: 100%;
+  min-width: 0;
+}
+
+/* 生效条件摘要条：常驻一行可删 chips */
+.lib-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 24px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.lib-summary-label {
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.lib-summary .lib-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+}
+
 /* 球员页页签（增量 6.1 d9：档案/属性/成长，左卡常驻） */
 .dossier-tabs {
   margin-bottom: 14px;

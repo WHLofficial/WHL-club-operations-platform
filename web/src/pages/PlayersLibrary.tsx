@@ -17,11 +17,31 @@ import {
   STATUS_BADGE,
   STATUS_LABEL,
   autoColsFor,
+  filterChips,
   filtersFromUrl,
   filtersToQuery,
+  type FilterChip,
   type Filters,
   type SortKey,
 } from '../lib/players-library.ts';
+
+// 左栏开合记在本地：桌面用户收起一次就一直收起（移动端抽屉另有开关，见步骤 8）。
+// localStorage 在隐私模式/被禁用时会抛，读写成败都不影响页面。
+const SIDE_STORAGE_KEY = 'players-library:side';
+function readSideOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDE_STORAGE_KEY) !== 'closed';
+  } catch {
+    return true;
+  }
+}
+function writeSideOpen(open: boolean): void {
+  try {
+    localStorage.setItem(SIDE_STORAGE_KEY, open ? 'open' : 'closed');
+  } catch {
+    /* 存不了就只是不记住，不打扰用户 */
+  }
+}
 function money(x: number | null): string {
   return x === null ? '—' : `${x.toFixed(2)} m`;
 }
@@ -104,6 +124,8 @@ export default function PlayersLibrary() {
     return raw ? raw.split(',').filter(Boolean) : null;
   });
   const [nameInput, setNameInput] = useState(filters.name);
+  // 左栏开合：初值读本地记忆（默认展开），移动端另有抽屉开关
+  const [sideOpen, setSideOpen] = useState(readSideOpen);
 
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -195,6 +217,17 @@ export default function PlayersLibrary() {
   // 「更多筛选」启用计数：autoCols 与高级面板参数一一对应（含 fcId、rcNone 等无列项经由列映射）
   const activeAdvCount = autoCols.length;
 
+  // 生效条件摘要条：每个 chip 自带「只清自己」的补丁，合并回筛选即可（纯函数在 lib 里）
+  const chips = useMemo(() => filterChips(filters, clubsQuery.data?.clubs ?? []), [filters, clubsQuery.data]);
+  const removeChip = (chip: FilterChip) => setFilters((f) => ({ ...f, ...chip.clear }));
+
+  const toggleSide = () => {
+    setSideOpen((open) => {
+      writeSideOpen(!open);
+      return !open;
+    });
+  };
+
   return (
     <div className="container">
       <h2>球员库</h2>
@@ -202,6 +235,15 @@ export default function PlayersLibrary() {
 
       <section className="card">
         <div className="library-controls">
+          <button
+            type="button"
+            className="btn btn-sm lib-side-toggle"
+            aria-expanded={sideOpen}
+            onClick={toggleSide}
+            title={sideOpen ? '收起筛选栏' : '展开筛选栏'}
+          >
+            筛选{chips.length > 0 ? `（${chips.length}）` : ''}
+          </button>
           <div className="seg" role="radiogroup" aria-label="按视图切换">
             <button type="button" className={filters.view === 'current' ? 'on' : ''} onClick={() => set('view', 'current')}>
               当前
@@ -248,92 +290,121 @@ export default function PlayersLibrary() {
           </form>
         </div>
 
-        <FilterPanel
-          filters={filters}
-          set={set}
-          setFilters={setFilters}
-          clubs={clubsQuery.data?.clubs ?? []}
-          togglePosition={togglePosition}
-          togglePs={togglePs}
-          resetAll={resetAll}
-          activeAdvCount={activeAdvCount}
-          activeCols={activeCols}
-          manualCols={manualCols}
-          toggleCol={toggleCol}
-          resetCols={() => setManualCols(null)}
-        />
-
-        {filters.view === 'initial' && (
-          <p className="hint">初始视图是导入时的底册：CA 取建档值，PA 取导入的上限值。所属球队列给的是当前归属。</p>
-        )}
-
-        {loadError && <div className="banner warn">{loadError}</div>}
-
-        {/* 翻页信息与翻页条在表格上方：不用再沉底找 */}
-        <div className="library-pager">
-          <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => setPageIdx((p) => p - 1)}>
-            上一页
-          </button>
-          <span className="muted">
-            {total !== null ? `共 ${total} 名球员 · 共 ${totalPages} 页 · 第 ${pageIdx} 页` : `第 ${pageIdx} 页`}
-          </span>
-          <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
-            下一页
-          </button>
+        {/* 生效条件摘要条（增量 26 决策 18）：常驻一行，每条可单独撤掉；没有条件时留一行提示 */}
+        <div className="lib-summary" aria-label="已生效的筛选条件">
+          {chips.length === 0 ? (
+            <span className="muted">未设筛选条件</span>
+          ) : (
+            <>
+              <span className="lib-summary-label">已筛</span>
+              {chips.map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  className="lib-chip on"
+                  aria-label={`移除筛选：${chip.label}`}
+                  onClick={() => removeChip(chip)}
+                >
+                  {chip.label}
+                  <span aria-hidden="true">×</span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
 
-        {rows === null ? (
-          <p className="muted">{busy ? '正在翻名册…' : ''}</p>
-        ) : rows.length === 0 ? (
-          <div className="empty-state">
-            <p className="muted">这个筛法下没有球员。放宽条件，或者换个词再找。</p>
+        <div className={sideOpen ? 'library-shell' : 'library-shell collapsed'}>
+          <aside className="library-side" aria-label="筛选与显示列">
+            <FilterPanel
+              filters={filters}
+              set={set}
+              setFilters={setFilters}
+              clubs={clubsQuery.data?.clubs ?? []}
+              togglePosition={togglePosition}
+              togglePs={togglePs}
+              resetAll={resetAll}
+              activeAdvCount={activeAdvCount}
+              activeCols={activeCols}
+              manualCols={manualCols}
+              toggleCol={toggleCol}
+              resetCols={() => setManualCols(null)}
+            />
+          </aside>
+
+          <div className="library-main">
+            {filters.view === 'initial' && (
+              <p className="hint">初始视图是导入时的底册：CA 取建档值，PA 取导入的上限值。所属球队列给的是当前归属。</p>
+            )}
+
+            {loadError && <div className="banner warn">{loadError}</div>}
+
+            {/* 翻页信息与翻页条在表格上方：不用再沉底找 */}
+            <div className="library-pager">
+              <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => setPageIdx((p) => p - 1)}>
+                上一页
+              </button>
+              <span className="muted">
+                {total !== null ? `共 ${total} 名球员 · 共 ${totalPages} 页 · 第 ${pageIdx} 页` : `第 ${pageIdx} 页`}
+              </span>
+              <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
+                下一页
+              </button>
+            </div>
+
+            {rows === null ? (
+              <p className="muted">{busy ? '正在翻名册…' : ''}</p>
+            ) : rows.length === 0 ? (
+              <div className="empty-state">
+                <p className="muted">这个筛法下没有球员。放宽条件，或者换个词再找。</p>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>UID</th>
+                      <th>姓名</th>
+                      <th>所属球队</th>
+                      <th>位置</th>
+                      <th className="num">年龄</th>
+                      <th className="num">CA</th>
+                      <th className="num">PA</th>
+                      <th>成长</th>
+                      <th className="num">影响力</th>
+                      <th>状态</th>
+                      {activeCols.map((key) => (
+                        <th key={key} className={key.startsWith('attr:') || ['marketValue', 'baseCa', 'growthGap', 'wage', 'releaseFee', 'years', 'prestige', 'fcId'].includes(key) ? 'num' : ''}>
+                          {key.startsWith('attr:') ? key.slice(5) : COL_DEFS.find((d) => d.key === key)?.label ?? key}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((p) => (
+                      <tr key={p.id}>
+                        <td className="mono">{p.uid.replace(/^fc/, '')}</td>
+                        <td>
+                          <Link to={`/players/${p.id}`}>{p.name}</Link>
+                        </td>
+                        <td>{p.clubName ?? '自由身'}</td>
+                        <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>
+                        <td className="num mono">{p.age ?? '—'}</td>
+                          <td className="num mono">{p.ca}</td>
+                          <td className="num mono">{p.pa}</td>
+                          <td>{p.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}</td>
+                          <td className="num mono">{p.influence.toFixed(2)}</td>
+                          <td>
+                            <span className={`badge ${STATUS_BADGE[p.status] ?? 'gray'}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
+                          </td>
+                          {activeCols.map((key) => renderCol(key, p))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
           </div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>UID</th>
-                  <th>姓名</th>
-                  <th>所属球队</th>
-                  <th>位置</th>
-                  <th className="num">年龄</th>
-                  <th className="num">CA</th>
-                  <th className="num">PA</th>
-                  <th>成长</th>
-                  <th className="num">影响力</th>
-                  <th>状态</th>
-                  {activeCols.map((key) => (
-                    <th key={key} className={key.startsWith('attr:') || ['marketValue', 'baseCa', 'growthGap', 'wage', 'releaseFee', 'years', 'prestige', 'fcId'].includes(key) ? 'num' : ''}>
-                      {key.startsWith('attr:') ? key.slice(5) : COL_DEFS.find((d) => d.key === key)?.label ?? key}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((p) => (
-                  <tr key={p.id}>
-                    <td className="mono">{p.uid.replace(/^fc/, '')}</td>
-                    <td>
-                      <Link to={`/players/${p.id}`}>{p.name}</Link>
-                    </td>
-                    <td>{p.clubName ?? '自由身'}</td>
-                    <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>
-                    <td className="num mono">{p.age ?? '—'}</td>
-                    <td className="num mono">{p.ca}</td>
-                    <td className="num mono">{p.pa}</td>
-                    <td>{p.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}</td>
-                    <td className="num mono">{p.influence.toFixed(2)}</td>
-                    <td>
-                      <span className={`badge ${STATUS_BADGE[p.status] ?? 'gray'}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
-                    </td>
-                    {activeCols.map((key) => renderCol(key, p))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        </div>
       </section>
     </div>
   );
