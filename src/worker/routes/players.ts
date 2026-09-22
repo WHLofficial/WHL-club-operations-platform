@@ -892,4 +892,54 @@ app.get('/players/:id', async (c) => {
   });
 });
 
+// GET /api/players/:id/transfers —— 这名球员的转会记录（只列已完成单据，最近 50 条）
+// 口径与 /players/:id 一致：公开只读、不加限流与缓存（单球员单页面的低频查询）。
+app.get('/players/:id/transfers', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');
+  const exists = await c.env.DB.prepare('SELECT 1 AS ok FROM players WHERE id = ?').bind(id).first<{ ok: number }>();
+  if (!exists) throw new HttpError(404, '球员不存在');
+
+  const rows = await c.env.DB.prepare(
+    `SELECT t.id, t.type, t.from_club_id, t.to_club_id, t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at,
+            fc.name AS from_club_name, tc.name AS to_club_name
+     FROM transfers t
+     LEFT JOIN clubs fc ON fc.id = t.from_club_id
+     LEFT JOIN clubs tc ON tc.id = t.to_club_id
+     WHERE t.player_id = ? AND t.status = 'completed'
+     ORDER BY (t.completed_at IS NULL), t.completed_at DESC, t.id DESC
+     LIMIT 50`,
+  )
+    .bind(id)
+    .all<{
+      id: number;
+      type: string;
+      from_club_id: number | null;
+      to_club_id: number | null;
+      fee: number | null;
+      extra_fee: number | null;
+      season: number | null;
+      window_seq: number | null;
+      completed_at: string | null;
+      from_club_name: string | null;
+      to_club_name: string | null;
+    }>();
+
+  return c.json({
+    transfers: rows.results.map((r) => ({
+      id: r.id,
+      type: r.type,
+      fromClubId: r.from_club_id,
+      fromClubName: r.from_club_name,
+      toClubId: r.to_club_id,
+      toClubName: r.to_club_name,
+      fee: r.fee,
+      extraFee: r.extra_fee,
+      season: r.season,
+      windowSeq: r.window_seq,
+      completedAt: r.completed_at,
+    })),
+  });
+});
+
 export default app;

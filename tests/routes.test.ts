@@ -426,6 +426,34 @@ describe('球员查询（附录 A〔1〕）', () => {
     expect((await get('/api/players/999', undefined, fx.env)).status).toBe(404);
   });
 
+  it('转会记录：只列已完成单据、带双方队名、最近的在前', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx);
+    fx.sqlite.exec(`
+      INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, extra_fee, status, season, window_seq, completed_at) VALUES
+        (1, 'transfer', 1, 1, 2, 30, 1.5, 'completed', 3, 2, '2026-06-01T00:00:00Z'),
+        (2, 'rc_change', 1, 1, 1, NULL, NULL, 'completed', 4, 1, '2026-07-01T00:00:00Z'),
+        (3, 'free_agent', 1, NULL, 2, NULL, NULL, 'completed', 4, 1, '2026-07-05T00:00:00Z'),
+        (4, 'termination', 1, 1, NULL, NULL, NULL, 'pending_review', 4, 1, NULL),
+        (5, 'transfer', 2, 2, 1, 40, NULL, 'completed', 4, 1, '2026-07-06T00:00:00Z');
+    `);
+
+    const res = await get('/api/players/1/transfers', undefined, fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      transfers: { id: number; type: string; fromClubName: string | null; toClubName: string | null; fee: number | null; extraFee: number | null; season: number; windowSeq: number }[];
+    };
+    // 待审的解约不算记录；另一名球员的单据也不混进来
+    expect(body.transfers.map((t) => t.id)).toEqual([3, 2, 1]);
+    expect(body.transfers[0]).toMatchObject({ type: 'free_agent', fromClubName: null, toClubName: '曼城', fee: null });
+    expect(body.transfers[1]).toMatchObject({ type: 'rc_change', fromClubName: '阿森纳', toClubName: '阿森纳', season: 4, windowSeq: 1 });
+    expect(body.transfers[2]).toMatchObject({ type: 'transfer', fromClubName: '阿森纳', toClubName: '曼城', fee: 30, extraFee: 1.5 });
+
+    expect((await get('/api/players/1/transfers', undefined, fx.env)).headers.get('content-type')).toContain('application/json');
+    expect((await get('/api/players/999/transfers', undefined, fx.env)).status).toBe(404);
+    expect((await get('/api/players/abc/transfers', undefined, fx.env)).status).toBe(400);
+  });
+
   it('status 过滤与非法值拒绝', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(
