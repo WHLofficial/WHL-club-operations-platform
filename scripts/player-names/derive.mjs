@@ -199,16 +199,22 @@ for (const m of clubMismatch.slice(0, 10)) console.log(`    ✗ fc ${m.fc} tour 
 
 const sqlLit = (s) => (s === '' || s == null ? 'NULL' : `'${String(s).replace(/'/g, "''")}'`);
 
+// 每个产出文件都带这一行：load.mjs 逐条语句发给 D1，而 D1 不收事务控制语句
+const NO_TXN = '-- 无事务控制：D1 拒收 BEGIN/COMMIT；每条语句按 fc_id 独立更新，可整体重跑。';
+
 fs.mkdirSync(OUT, { recursive: true });
 
 function writeBatched(file, header, target, values) {
-  const parts = [header, 'BEGIN;'];
+  // 不写 BEGIN/COMMIT：D1 拒收 SQL 事务控制语句（「please use the state.storage.transaction() …
+  // instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements」，本地与远端一样）。
+  // 这里也不需要事务：每条语句只按 fc_id 更新自己那批行，重复执行结果相同，中断后整体重跑即可。
+  const parts = [header, NO_TXN];
   for (let i = 0; i < values.length; i += BATCH) {
     const chunk = values.slice(i, i + BATCH);
-    parts.push(`WITH v(fc,fn,ln,cn,dn${target.extra ? ',num' : ''}) AS (VALUES\n${chunk.join(',\n')}\n)`);
+    parts.push(`WITH v(${target.cols}) AS (VALUES\n${chunk.join(',\n')}\n)`);
     parts.push(target.sql);
   }
-  parts.push('COMMIT;', '');
+  parts.push('');
   fs.writeFileSync(file, parts.join('\n'), 'utf8');
   return fs.statSync(file).size;
 }
@@ -223,7 +229,7 @@ const displaySize = writeBatched(
   path.join(OUT, 'display_name.sql'),
   '-- 由 scripts/player-names/derive.mjs 生成，请勿手改。\n-- 只更新派生得到显示名的行；display_name 为空的行保持 NULL，显示处回落 players.name。',
   {
-    extra: false,
+    cols: 'fc,fn,ln,cn,dn',
     sql: `UPDATE players SET
   first_name   = COALESCE(v.fn, players.first_name),
   last_name    = COALESCE(v.ln, players.last_name),
@@ -239,7 +245,7 @@ const numberSize = writeBatched(
   path.join(OUT, 'number.sql'),
   '-- 由 scripts/player-names/derive.mjs 生成，请勿手改。\n-- 球衣号来自赛事系统 player.number，按 fc_id 归属（赛事系统 player.id 即本库 fc_id）。',
   {
-    extra: true,
+    cols: 'fc,num',
     sql: `UPDATE players SET number = v.num FROM v WHERE players.fc_id = v.fc;`,
   },
   numberValues,

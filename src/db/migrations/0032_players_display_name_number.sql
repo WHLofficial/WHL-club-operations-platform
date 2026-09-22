@@ -10,11 +10,12 @@
 --
 -- 球衣号（number）：数据源自增量 32 起从赛事平台转到本平台（tour 只显示）。
 -- 用 TEXT 而不是 INTEGER：赛事平台原列就是 TEXT，允许空（未赋号），号码前导零/字母不做假设；
--- 「必须是整数、同俱乐部不重复」的校验在端点里做（worker/players-number.ts），不靠列类型。
+-- 「必须是整数、同俱乐部不重复」的校验在端点里做（src/worker/routes/registration.ts），不靠列类型。
 ALTER TABLE players ADD COLUMN first_name TEXT;
 ALTER TABLE players ADD COLUMN last_name TEXT;
 ALTER TABLE players ADD COLUMN common_name TEXT;
 ALTER TABLE players ADD COLUMN display_name TEXT;
 ALTER TABLE players ADD COLUMN number TEXT;
 
--- 回滚：ALTER TABLE players DROP COLUMN first_name; 同理其余四列
+-- 回滚：先 DROP INDEX idx_players_sort_name;（0033 建在 display_name 上，不先删它列就删不掉），
+--       再 ALTER TABLE players DROP COLUMN first_name; 同理其余四列

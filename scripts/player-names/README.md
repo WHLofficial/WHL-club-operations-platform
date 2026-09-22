@@ -58,6 +58,9 @@ commonname 原样
 - 831 人派生不出显示名，全是没有任何俱乐部的球员库长尾（导入后新增的补丁球员，字典里 nameid
   大于 41,189，也没有 cards 行），显示回落缩写名。523 人显示名是单词（FC26 只给了常用名）。
 - 搜索同时匹配显示名与 `players.name`，所以单词显示名的人仍可按姓搜到（见 `src/worker/routes/players.ts`）。
+- 落库链路已在本地 D1 端到端跑通：`--local --numbers` 共 19 条语句全部执行、重复执行结果不变；
+  实测 fc 20801 落成 `display_name='Cristiano Ronaldo'` / `number='7'`（与赛事系统一致），
+  不在派生集里的行（fc 999999）五列保持 NULL 未被碰。
 
 ## 用法
 
@@ -71,3 +74,14 @@ node scripts/player-names/load.mjs --remote --yes-prod   # 写生产，必须显
 
 `derive.mjs` 退出码非 0 表示赛事系统有人在本库 `fc_id` 里找不到、或出现新的逐字不一致 —— 先看
 `out/display-names.csv` 再决定是否落库。产出物（`data/`、`out/`）不进版本库，见 `.gitignore`。
+
+### 两个踩过的坑（改这两个脚本前先看）
+
+- **产出文件里不能有 `BEGIN`/`COMMIT`**：D1 拒收 SQL 事务控制语句，本地与远端一样，报
+  `please use the state.storage.transaction() … instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements`。
+  `load.mjs` 是逐条语句发给 D1 的，所以第一条就抛错、一条都落不了库（fail-closed，不会脏数据）。
+  这里也不需要事务：每条语句只按 `fc_id` 更新自己那批行，重复执行结果相同，中断后整体重跑即可。
+  `load.mjs` 另有一道守卫：真在文件里读到事务控制语句就直接退出码 2 说清楚，不让它变成一条看不懂的 D1 报错。
+- **不要 `spawn('npx.cmd')`**：Node 24 在 Windows 上对 `.cmd`/`.bat` 直接抛 `EINVAL`（`.cmd` 现在必须带
+  `shell`，而带 `shell` 又得自己处理引号）。`load.mjs` 改成用 `process.execPath` 跑
+  `node_modules/wrangler/bin/wrangler.js`，绕开这一整类麻烦。
