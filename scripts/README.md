@@ -18,6 +18,9 @@
 | `list_wrangler.ps1` | 列本机 wrangler 相关 node 进程的 PID 与命令行（排查端口占用） | PowerShell 直接跑 |
 | `smoke-oidc-local.mjs` | 双服务联调冒烟：club 8795（OIDC）× auth 8792（真认证中心），手推 authorize → 登录 → callback → `/api/me` → back-channel 登出 → end_session | 见文件头注释；需先起 auth 仓本地服务，注意 auth 登录限流 5 次/15 分钟 |
 | `e2e/smoke.mjs` | 平台 e2e 冒烟（9 场景），见下 | `npm run test:e2e` 或 `node scripts/e2e/smoke.mjs [baseUrl]` |
+| `measure-d1-reads.mjs` | **D1 读量定标**（增量 28 步骤 1）：用真实路由 + 假 D1 抓下它实际执行的 SQL，内联参数后打生产读 `meta.rows_read`。30 个球员库形状 + 6 个成本探针 | `node scripts/measure-d1-reads.mjs [--local] [--dump] [--only=<id>] [--probes] [--json-out=<path>]` |
+| `measure-surface-reads.mjs` | **全站读面普查**（增量 28 步骤 6）：同机制，覆盖 18 个 URL 读面 + 3 个 cron 任务；只执行 SELECT（GET 里可能藏 `settleOverdue` 的写） | `node scripts/measure-surface-reads.mjs [--local] [--dump] [--only=<id>] [--json-out=<path>]` |
+| `d1-read-audit/` | 上面两支的**机件与报告**：`harness.mjs`（真实路由 + 假 D1 + 内联器 + 生产 `rows_read`）与 `README.md`（读量报告：形状表、成本模型、阈值与候选清单、普查与处置） | 见 `scripts/d1-read-audit/README.md` |
 
 ## e2e/
 

@@ -717,6 +717,24 @@ export async function countPlayers(c: Context<{ Bindings: Env }>): Promise<numbe
   return row?.n ?? 0;
 }
 
+// 全库球员总数（无筛选）——管理端总览用（增量 28 步骤 6）。
+// 管理端总览原本直接 `SELECT COUNT(*) FROM players`（18,301 行/次，是全站第二重读面），
+// 只靠一个 isolate 级 60s 缓存挡着：多 isolate 时每个 isolate 每 60s 都要重读一次整表。
+// 这里再叠一层与列表同源的缓存（players 作用域 ⇒ 同一份代际键，写路径 purge 一起失效），
+// 于是「第一个 isolate 算一次、其余 isolate 与后续 1h 内都免费」，而新鲜度由 purge 保证。
+// 只在「确实要这个数字」的地方调用；带筛选的总数走 countPlayers（内部端点，不复用本缓存）。
+export async function countAllPlayers(c: Context<{ Bindings: Env }>): Promise<number> {
+  return cachedJson(
+    'players:count:all',
+    ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS),
+    async () => {
+      const row = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
+      return row?.n ?? 0;
+    },
+    { scope: 'players', env: c.env, ctx: waitUntilOf(c) },
+  );
+}
+
 // GET /api/players/roster —— 轻量名册（增量 26，球员库搜索框的本地推荐用）
 // 载荷 = 单行文本，每行「姓名|俱乐部ID|球员ID」（俱乐部为空则省略该段），换行分隔：
 // 姓名写在最前、两个数字在后，前端从行尾反向切分 ⇒ 姓名里出现「|」也不会串字段。

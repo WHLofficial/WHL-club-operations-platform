@@ -21,6 +21,7 @@
 import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { captureSurface, fetchConfigMap, inlineParams, runWrangler as runWranglerShared } from './d1-read-audit/harness.mjs';
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(`--${name}`);
@@ -39,144 +40,12 @@ if (DUMP && JSON_OUT) {
   process.exit(2);
 }
 const playersApp = (await import(new URL('src/worker/routes/players.ts', ROOT))).default;
-
-// ---- 假 D1：只记录 SQL 与绑定参数 ------------------------------------------------------------
-// first() 的行为要能撑住路由的分支：
-// - 配置查询（FROM config）返回 { value } —— 生产没有 attendance_model 行，所以通常是 { value: null }，
-//   路由于是走 0.25/0.13 兜底（与线上一致）；
-// - 其它查询（详情路由的球员行、列表路由的 COUNT 行）返回一个「什么字段都读得出值」的代理行，
-//   否则详情路由会在 `if (!p) throw 404` 处提前退出，抓不到后面三条语句（club_id 给 1 是为了让它继续走 clubs 分支）。
-function captureDb(sink, configValue) {
-  const benignRow = new Proxy(
-    {},
-    {
-      get: (_t, key) => (key === 'id' ? 1 : key === 'club_id' ? 1 : null),
-      has: () => true,
-    },
-  );
-  return {
-    prepare(sql) {
-      const rec = { sql, args: [] };
-      sink.push(rec);
-      const isConfig = /FROM\s+config/i.test(sql);
-      const stmt = {
-        bind(...args) {
-          rec.args = args;
-          return stmt;
-        },
-        all: async () => ({ results: [], success: true, meta: {} }),
-        first: async () => (isConfig ? { value: configValue } : benignRow),
-        run: async () => ({ success: true, meta: {} }),
-        raw: async () => [],
-      };
-      return stmt;
-    },
-  };
-}
-
-async function capture(url, configValue) {
-  const sink = [];
-  // PUBLIC_CACHE_TTL_MS=0 让公开读缓存全部旁路（增量 28 起 ttlForScope 把 0 当「显式旁路」，
-  // 对 players / roster / clubs 三个 scope 一律生效）⇒ 每次请求都真跑 loader、抓得到 SQL。
-  const res = await playersApp.request(new URL(url, 'http://capture.local'), {}, { DB: captureDb(sink, configValue), PUBLIC_CACHE_TTL_MS: '0' });
-  if (res.status >= 400) {
-    const body = await res.text();
-    throw new Error(`路由返回 ${res.status}：${body.slice(0, 200)}`);
-  }
-  return sink;
-}
-
-// ---- 参数内联（扫描器，不能正则：要跳过字符串字面量） -----------------------------------------
-function quoteLiteral(v) {
-  if (v === null || v === undefined) return 'NULL';
-  if (typeof v === 'boolean') return v ? '1' : '0';
-  if (typeof v === 'number') {
-    if (!Number.isFinite(v)) throw new Error(`数值参数不是有限数：${v}`);
-    return String(v);
-  }
-  const s = String(v);
-  if (s.includes('"')) throw new Error(`字面量含双引号，cmd.exe 下不安全：${s}`);
-  if (!s.includes('%')) return `'${s.replace(/'/g, "''")}'`;
-  const parts = [];
-  s.split('%').forEach((piece, idx) => {
-    if (idx > 0) parts.push('char(37)');
-    if (piece !== '') parts.push(`'${piece.replace(/'/g, "''")}'`);
-  });
-  return parts.join(' || ');
-}
-
-function inlineParams(sql, args) {
-  let out = '';
-  let i = 0;
-  let ai = 0;
-  let inStr = false;
-  while (i < sql.length) {
-    const ch = sql[i];
-    if (inStr) {
-      if (ch === "'") {
-        if (sql[i + 1] === "'") {
-          out += "''";
-          i += 2;
-          continue;
-        }
-        inStr = false;
-        out += ch;
-        i += 1;
-        continue;
-      }
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === "'") {
-      inStr = true;
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === '?') {
-      out += quoteLiteral(args[ai]);
-      ai += 1;
-      i += 1;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      while (i < sql.length && /\s/.test(sql[i])) i += 1;
-      out += ' ';
-      continue;
-    }
-    out += ch;
-    i += 1;
-  }
-  if (inStr) throw new Error('SQL 字符串字面量未闭合');
-  if (ai !== args.length) throw new Error(`绑定参数个数不符：SQL 用掉 ${ai} 个，路由给了 ${args.length} 个`);
-  return out.trim();
-}
-
-// ---- 打生产 D1 读 meta ---------------------------------------------------------------------
-function runWrangler(sql) {
-  const target = LOCAL ? '--local' : '--remote';
-  const cmd = `npx wrangler d1 execute whl-club ${target} --json --command "${sql}"`;
-  let lastErr = null;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const out = execSync(cmd, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
-      const parsed = JSON.parse(out.slice(out.indexOf('[')));
-      return parsed.map((s) => ({
-        rows_read: s.meta?.rows_read ?? null,
-        rows_written: s.meta?.rows_written ?? null,
-        duration_ms: s.meta?.duration ?? null,
-      }));
-    } catch (e) {
-      lastErr = e;
-      // 已知的 Windows 偶发：exit 3221226505 + libuv 断言，重跑即过
-      const msg = String(e.stderr ?? e.message ?? '');
-      if (!/3221226505|UV_HANDLE_CLOSING|ETIMEDOUT|ECONNRESET/.test(msg) || attempt === 3) throw e;
-      console.error(`   [retry ${attempt}] wrangler 偶发失败，重跑`);
-    }
-  }
-  throw lastErr;
-}
+// ---- 共用机件（假 D1 / 参数内联 / 打 wrangler）----------------------------------------------
+// 增量 28 步骤 6 抽到 scripts/d1-read-audit/harness.mjs：读面普查脚本要用同一套机件，
+// 复制一份必然分叉（字符串字面量处理、% 的 cmd.exe 坑、Windows 偶发退出码都在细节里）。
+// 这里只留两个薄包装，主流程与形状清单逐字不动。
+const capture = (url, config) => captureSurface({ app: playersApp, url, config });
+const runWrangler = (sql) => runWranglerShared(sql, { local: LOCAL });
 
 // ---- 形状清单 ------------------------------------------------------------------------------
 // 每个形状 = 一个真实 URL。路由自己会跑多条语句（配置探测 + 列表主查询；增量 28 步骤 2 之前的版本还带一条 COUNT），
@@ -268,20 +137,11 @@ const PROBES = [
 ];
 
 // ---- 主流程 --------------------------------------------------------------------------------
-console.error('读取生产配置 attendance_model（只为让排序表达式里的系数与线上一致）…');
-let configValue = null;
-try {
-  const out = execSync(`npx wrangler d1 execute whl-club ${LOCAL ? '--local' : '--remote'} --json --command "SELECT value FROM config WHERE key = 'attendance_model'"`, {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const parsed = JSON.parse(out.slice(out.indexOf('[')));
-  configValue = parsed[0]?.results?.[0]?.value ?? null;
-} catch {
-  console.error('  取不到（不致命：influenceCoefs 会退回 0.25/0.13 兜底，形状与线上一致）');
-}
-console.error(`  attendance_model = ${configValue ? `${configValue.slice(0, 60)}…` : '（空）'}`);
+console.error('读取生产 config 表（只为让排序表达式与路由分支跟线上一致）…');
+// 生产没有 attendance_model 行 ⇒ 取不到值是正常的：influenceCoefs 会退回 0.25/0.13 兜底，形状与线上一致
+const config = fetchConfigMap({ local: LOCAL });
+const attendance = config.get('attendance_model');
+console.error(`  config 覆盖 ${config.size} 项；attendance_model = ${attendance ? `${attendance.slice(0, 60)}…` : '（空）'}`);
 
 const work = flag('probes') ? PROBES : SHAPES;
 const results = [];
@@ -295,7 +155,7 @@ for (const shape of work) {
   } else {
     let statements;
     try {
-      statements = await capture(shape.url, configValue);
+      statements = await capture(shape.url, config);
     } catch (e) {
       results.push({ ...shape, error: String(e.message ?? e) });
       console.error(`✗ ${shape.id}：抓取 SQL 失败 —— ${e.message ?? e}`);

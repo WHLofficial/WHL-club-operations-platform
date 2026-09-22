@@ -5,12 +5,14 @@
 import type { Env } from './env.ts';
 
 export class AuthApiError extends Error {
-  constructor(
-    /** auth 端业务错误码：invalid_code / already_bound / not_bound / team_not_found / … */
-    public code: string,
-    message: string,
-  ) {
+  /** auth 端业务错误码：invalid_code / already_bound / not_bound / team_not_found / … */
+  code: string;
+  // 写成显式字段赋值而不是 TS 参数属性：参数属性是唯一一种「需要代码生成」的 TS 语法，
+  // Node 的类型剥离不支持它（ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX）⇒ 凡 import 本文件的路由模块
+  // 都无法在 Node 里加载，读量普查脚本（scripts/measure-surface-reads.mjs）就抓不到它们的 SQL。
+  constructor(code: string, message: string) {
     super(message);
+    this.code = code;
   }
 }
 

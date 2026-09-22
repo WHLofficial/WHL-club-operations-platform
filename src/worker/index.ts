@@ -116,9 +116,9 @@ app.post('/api/cron/tick', async (c) => {
 });
 
 // 内部计数端点（增量 28）：公开列表去掉 total 后（每次请求多跑一条 18,763 行的整表 COUNT），
-// 这个口径留给运维/对账。守卫比 tick 更严——**未配 CRON_KEY 就拒绝**（生产当前没配，实测
-// 2026-09-22），且只认 X-Cron-Key 头（GET 带 ?key= 会把密钥写进访问日志）：这个端点每次调用
-// 都是整表 COUNT，放行等于公开一个读放大器。不进公开缓存、不挂公开限流。
+// 这个口径留给运维/对账。守卫比 tick 更严——**未配 CRON_KEY 就拒绝**，且只认 X-Cron-Key 头
+// （GET 带 ?key= 会把密钥写进访问日志）：这个端点每次调用都是整表 COUNT，放行等于公开一个读放大器。
+// 不进公开缓存、不挂公开限流。生产已于 2026-09-22 配好 CRON_KEY（此前 tick 是 fail-open 的）。
 app.get('/api/cron/players-count', async (c) => {
   assertCronKey(c, { allowUnset: false, queryKey: false });
   return c.json({ count: await countPlayers(c) });

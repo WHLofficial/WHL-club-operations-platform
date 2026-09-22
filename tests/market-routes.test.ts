@@ -784,3 +784,48 @@ describe('暂停出价（增量 15：全局开关 + 单挂牌冻结）', () => {
     expect((await post('/api/admin/market/listings/1/resume-bid', {}, 'tok-admin', fx.env)).status).toBe(409);
   });
 });
+
+// 增量 28 步骤 6：海捞名单查询的执行计划护栏。
+// 这条查询曾是全站最大读放大器（生产实测 36,274 行/次）。重写成「两分支 top-N + 合并」后，便宜来自两个
+// 计划性质：无归属支沿 idx_players_club_ca(club_id, ca DESC, id) 走 ca 序、第 300 行即停；CPU 队支由 clubs
+// 驱动（CROSS JOIN 固定连接顺序，否则优化器改用 idx_players_status 扫全部自由身球员）。
+// 任一条退化都只体现在读量上——接口返回一模一样、功能用例全绿，所以这里不看结果，看执行计划。
+describe('海捞名单查询计划（增量 28 步骤 6）', () => {
+  it('无归属支走 idx_players_club_ca；CPU 队支由 clubs 驱动；不再 MULTI-INDEX OR', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    const cpuClub = await createClub(fx, 'AC米兰(CPU)');
+    fx.sqlite.exec(`UPDATE clubs SET is_cpu = 1 WHERE id = ${cpuClub}`);
+    // 灌足量行：优化器在小表上会挑别的计划，而生产是 17,731 名自由身 + 4 支 CPU 队约 107 人
+    const ins = fx.sqlite.prepare(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status)
+       VALUES (?, ?, ?, ?, 'ST', 25, ?, 70, 1, 'free')`,
+    );
+    for (let i = 0; i < 400; i += 1) ins.run(2000 + i, `fa${i}`, `自由${i}`, null, 40 + (i % 50));
+    for (let i = 0; i < 20; i += 1) ins.run(3000 + i, `cp${i}`, `米兰${i}`, cpuClub, 50 + i);
+
+    const captured: string[] = [];
+    const real = fx.env.DB;
+    const env = {
+      ...mf.env,
+      DB: {
+        prepare(sql: string) {
+          captured.push(sql);
+          return real.prepare(sql);
+        },
+        batch: real.batch.bind(real),
+      } as unknown as D1Database,
+    };
+    const res = await get('/api/market/free-agents', 'tok-coach', env);
+    expect(res.status).toBe(200);
+
+    const sql = captured.find((s) => s.includes('UNION ALL') && s.includes('club_id IS NULL'));
+    expect(sql).toBeDefined();
+    const plan = sqlAll<{ detail: string }>(fx.sqlite, `EXPLAIN QUERY PLAN ${sql}`)
+      .map((r) => r.detail)
+      .join(' | ');
+    expect(plan).toContain('idx_players_club_ca');
+    expect(plan).toContain('SCAN cp');
+    expect(plan).not.toContain('MULTI-INDEX OR');
+  });
+});

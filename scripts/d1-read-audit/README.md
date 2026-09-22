@@ -25,7 +25,7 @@
 
 **三条必须知道的边界**：
 - **测的是管理通道，不是 worker 通道。** 管理通道在 9/21 配额触顶期间照样成功（配额上限只阻断 worker 侧真实表读），所以测量不受当日余量约束；但测出的 `rows_read` 是「这条 SQL 读多少行」的物理事实，与走哪条通道无关 —— 已用两个已知基准交叉验证：主查询 LIMIT 2 = 7 行、`COUNT(*) FROM players` = 18,301 行，与 9/21 排查时的数字一致。
-- **`--local` 不回传 `meta.rows_read`**（实测全 `null`），所以本地只能验证脚本机制，数字必须打生产。
+- **`--local` 不回传 `meta.rows_read`**（实测全 `null`），所以本地只能验证脚本机制，数字必须打生产。**本地与远端的读数不可混读**：本地 `.wrangler/state/v3` 是空库（`players` 只有 e2e 夹具的 9 行），所以就算某天本地开始回传行数，也只会看到个位数 —— 本报告第三、七节的所有数字都是 `target: remote` 的生产读数（JSON 里的 `target` 字段即此口径）。
 - **假 D1 的偏差**：详情形状实测 4 条语句，是因为假 D1 让 `club_id` 取到 1 从而走进了 clubs 分支；生产里 id=1 的球员若没有俱乐部就是 3 条（影响 4 vs 3 行，可忽略）。列表形状的 COUNT 行被假 D1 喂成 `n: null`，只影响返回值、不影响 SQL。
 
 **平台坑**：`%` 不能原样进命令行（Windows 的 `execSync` 走 cmd.exe，`'%sesko%'` 会被当变量展开成 `''`，LIKE 会变成另一种形状）⇒ 字面量里的 `%` 一律拼成 `char(37)`（SQLite 语义等价：`||` 拼回 TEXT，LIKE 结果一致）；多行 SQL 进 `--command` 会偶发失败 ⇒ 折叠空白（折叠必须跳过字符串字面量内部）。
@@ -185,3 +185,75 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements-
 `measurements.json` 的字段随脚本演进而分层，读它时按 `list_rows` / `count_rows` 是否存在判断口径：**有**这两列的条目是步骤 2（去 COUNT）之后、用现行脚本跑的（目前是步骤 4 复测的 `sort-prestige` / `sort-club` / `sort-status` 三条，`list_rows` 即主查询读量）；**没有**的条目是步骤 1 的产物，只有 `statements` / `metas` / `rows_read_total`，其中 `metas[1]` 是当时的主查询、`metas[2]` 是当时还在的 COUNT。旧条目若被重打印，`list_rows` 缺省会显示为 0、整行读量落进「其它」列——不是数据错，是列口径不同。
 
 **本次测量总消耗：约 118 万行**（免费档 24%），其中 `measurements.json` 里逐形状最新值合计 **1,084,282 行**，差额来自重复运行（探针两次、补测 7 个新形状、`detail` 补测）与 wrangler 偶发失败后的重试。测量走管理通道，不占用、也不受限于当日免费档的**强制**上限。
+
+---
+
+## 七、全站读面普查与处置（步骤 6）
+
+**目的**：第三节只量了 `/api/players` 的形状。但配额是按**账号**计的，任何读面都能把免费档打爆（2026-09-21 的事故里 cron 也在失败）。所以把站内所有读面都量一遍，按「单次读量 × 可触发面」排优先级处置。
+
+**工具**：`scripts/measure-surface-reads.mjs`（18 个 URL 读面 + 展开的 3 个 cron 任务 = 21 条），与 `measure-d1-reads.mjs` 共用 `scripts/d1-read-audit/harness.mjs` 的「真实路由 + 假 D1 抓 SQL + 打生产读 `meta.rows_read`」机件。
+
+三个方法要点：
+1. **每个读面跑在独立进程**（`--only=<id>`）：`src/core/config.ts` 把 config 读在 isolate 内缓存 60s，同进程连跑多个读面会把后面读面的配置读量抹成 0。
+2. **只执行 SELECT**（`selectOnly`）：GET 里也可能藏写语句 —— `/api/market/*` 每次请求前先跑 `settleOverdue`，原样拿去打生产就是真写。
+3. **鉴权靠假会话**：假 D1 对 `oidc_session` 查询回一份管理员 claims + 请求带 `cookie: __Host-club_session=probe-token`，才能过 `requireUser` / `requireAdmin` 抓到业务 SQL（否则在 401 处提前退出，一条都抓不到）。
+
+### 7.1 普查结果（2026-09-22 生产实测，`surface-measurements.json`）
+
+| 读面 | 单次读量（行） | 语句数 | 备注 |
+| --- | --- | --- | --- |
+| `GET /api/market/free-agents` | **36,274 → 843** | 5 | 全站最大读放大器，教练可触发、无缓存；**已于本步骤处置** |
+| `GET /api/admin/overview` | 18,449（冷）/ 0（命中） | 8 | 含 `SELECT COUNT(*) FROM players`；仅管理端；**已加两级缓存** |
+| `GET /api/me/club` | 105 | 14 | 登录后每次页面加载 |
+| `cron:autoConfirmResults` | 75 | 3 | 288 轮/日 |
+| `GET /api/club/squad` | 65 | 6 | |
+| `GET /api/clubs/directory` | 20 | 1 | 已缓存（24h） |
+| `GET /api/notifications` | 15 | 3 | |
+| `GET /api/market/listings` | 11 | 17 | 含 `settleOverdue` 的 11 个 config 读 |
+| `GET /api/market/listings/:id` | 9 | 21 | 同上 |
+| `GET /api/club/ledger` | 9 | 4 | |
+| `GET /api/club/stadium/build-info` | 9 | 10 | |
+| `GET /api/notifications/unread-count` | 8 | 2 | 前端每 60s 轮询 |
+| `cron:settleOverdue` | 7 | 16 | 288 轮/日 |
+| `GET /api/market/trainees` | 4 | 6 | |
+| `GET /api/players/:id` | 4 | 4 | |
+| `GET /api/seasons/current` | 3 | 3 | |
+| `GET /api/club/balance` | 2 | 4 | |
+| `GET /api/players/:id/growth` | 2 | 4 | |
+| `GET /api/me/bids` | 1 | 4 | |
+| `GET /api/transfers/:id` | 1 | 1 | |
+| `cron:dispatchPendingNotifications` | 0 | 0 | 生产未配 `SYNC_BASE_URL` ⇒ `skipped:'unconfigured'` 空转 |
+
+**除两个 ≥10,000 行的读面外，全站单次读量都 ≤105 行**；cron 三段合计 82 行/轮 × 288 轮/日 ≈ **2.4 万行/日**（可忽略）。
+
+**判定（按计划阈值「<10,000 行 ⇒ 登记不动」）**：其余 19 条读面全部登记为「已量化、不动」。容量推演：最重的 `/api/me/club`（105 行/次）在免费档下可承受 **47,619 次/日**；前端唯一轮询的 `/api/notifications/unread-count`（8 行/次、60s 一次）单标签页不过 **1.15 万行/日**；市场端点的 11 行 config 读来自每次请求前的 `settleOverdue`（`ORDER BY l.id LIMIT 100` 且生产无逾期项，故极便宜）。**加索引或改查询都不值得**——它们的成本不构成任何风险。
+
+### 7.2 处置一：`/api/market/free-agents`（36,274 → 843，降 97.7%）
+
+**病灶**：原查询是 `WHERE (p.club_id IS NULL OR p.club_id IN (SELECT id FROM clubs WHERE is_cpu=1)) AND p.status IN ('free','normal') ORDER BY p.ca DESC, p.id LIMIT 300`。生产 **17,731 名球员 `club_id IS NULL`（占 97%）**，SQLite 对 `OR` 走 `MULTI-INDEX OR` + `USE TEMP B-TREE FOR ORDER BY` ⇒ 必须把 17,731 行全部读出来排序。
+
+**先试索引（失败）**：新建 `idx_players_club_ca ON players(club_id, ca DESC, id)`（迁移 `0030`）后单独重测仍是 **36,271 行** —— 索引能供 `club_id = ?` 这一个等值条件，但 `OR` 的另一半与 `ORDER BY` 仍要求全读。本地 `node:sqlite` 探针（20,000 行合成）逐个试 `(club_id, ca DESC, id)` / `(status, ca DESC, id)` / `(ca DESC, id)` / `(club_id, status, ca DESC, id)`，**没有一条能消掉 `TEMP B-TREE`**。
+
+**再试改写（分两层）**：
+1. 拆成 `UNION ALL` 两分支（无归属 / CPU 队）后 **19,141 行**：无归属支 **300 行**（沿 `idx_players_club_ca` 走 ca 序、够了就停），但 CPU 支仍 **18,540 行**（`club_id IN (子查询)` 让优化器改用 `idx_players_status`，两个 status 值 + 过滤 → 停不下来）。
+2. 把 CPU 支的连接写成 **`FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id`**（以 clubs 为驱动表固定连接顺序）⇒ 计划变成 `SCAN cp | SEARCH p USING INDEX idx_players_club (club_id=?)`，**239 行**，且结果与旧版逐行一致 ✓。生产 EXPLAIN 确认，本地探针 `scratch/free-agents-probe*.mjs` 复现同一结论。
+   - 变体对照：`FROM clubs cp JOIN players p ON p.club_id = cp.id`（不加 CROSS JOIN）仍 18,982 行（优化器不理会书写顺序）；加 `INDEXED BY idx_players_club_ca` 同样 239 行 ⇒ **不需要索引提示**。
+   - SQLite 坑：复合 SELECT 的分支不能自带 `ORDER BY` / `LIMIT`（报 `ORDER BY clause should come after UNION ALL not before`）⇒ 每个分支必须包一层 `SELECT * FROM (...)`。
+
+**同源锁死**：`tests/market-routes.test.ts` 的「海捞名单查询计划」用例用**真实路由 SQL** 跑 `EXPLAIN QUERY PLAN`，断言含 `idx_players_club_ca`、含 `SCAN cp`、不含 `MULTI-INDEX OR`（理由同 `tests/players-sort-indexes.test.ts`：退化只体现在读量上，接口返回一模一样）。已做变异验证（把 `CROSS JOIN` 换回 `LEFT JOIN` ⇒ 用例立刻红）。
+
+**顺带登记的产品问题（本增量不处理）**：池子已是 17,731 人而 `LIMIT 300` 无分页、无筛选（路由里「约 107 人 + 190+」的注释早已失真）⇒ 除 CA 最高的 300 人之外都看不到。
+
+### 7.3 处置二：`/api/admin/overview`（冷 18,449 不变，频次靠缓存）
+
+它是「单次贵但只在管理端触发」的形状：`Promise.all` 五条里 `SELECT COUNT(*) AS n FROM players` 占 18,301 行，其余（review_tasks / listings / clubs / results）合计 148 行。原来只有 module 级 isolate 缓存（60s）+ `?fresh=1`，**挡不住多 isolate**。
+
+**处置**：把这条全表 COUNT 抽成 `countAllPlayers(c)`（`src/worker/routes/players.ts`），挂到**公开列表同一个 scope `players`** 的两级缓存上（`cachedJson('players:count:all', ttlForScope('players', …), …)`）⇒ 与列表共享同一份代际键，写路径 purge 一起失效；1h 内多 isolate 只算一次，命中即 0 行。
+
+**口径**：治理的是**频次**不是单次 —— 冷缓存仍 18,449 行（见 7.1 表，普查脚本用 `PUBLIC_CACHE_TTL_MS: '0'` 旁路缓存，故表里是冷路径值）。带筛选的总数仍走内部端点 `GET /api/cron/players-count`，不共用本缓存。
+
+### 7.4 顺带修掉的工具障碍
+
+`src/worker/authClient.ts` 的 `AuthApiError` 原本用 TS **参数属性**（`constructor(public code: string, …)`）—— 那是唯一需要「代码生成」的 TS 语法，Node 的类型剥离不支持（`TypeScript parameter property is not supported in strip-only mode`）⇒ 凡 import 它的模块在 Node 里都加载不了，`/api/clubs/directory`、`/api/me/club`、`/api/club/balance`、`/api/club/ledger`、`/api/club/stadium/build-info` 五个读面抓不到 SQL。改成显式字段赋值后 18 个读面全部可测。
+

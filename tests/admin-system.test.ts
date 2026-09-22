@@ -5,6 +5,7 @@ import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet } from './d1.ts';
 import { resetConfigCache, CONFIG_MASK } from '../src/core/config.ts';
+import { resetGuards } from '../src/lib/guard.ts';
 import { resetOverviewCache } from '../src/worker/routes/admin/overview.ts';
 
 interface Fixture {
@@ -38,6 +39,9 @@ function freshEnv(): Fixture {
     } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
+    // 显式旁路两级缓存（增量 28 步骤 3 起默认是分级 TTL，不配不再等于旁路）：
+    // 本文件验的是 isolate 级缓存与鉴权，两级缓存本身由 guard.test.ts 覆盖
+    PUBLIC_CACHE_TTL_MS: '0',
   };
   kv.set('sess:tok-admin', JSON.stringify({ userId: 1 }));
   kv.set('sess:tok-super', JSON.stringify({ userId: 5 }));
@@ -181,6 +185,37 @@ describe('总览轻计数（增量 15）', () => {
     expect(cached.activeListings).toBe(1);
     const fresh = (await (await get('/api/admin/overview?fresh=1', 'tok-admin', fx.env)).json()) as { activeListings: number };
     expect(fresh.activeListings).toBe(2);
+  });
+
+  it('players 总数走两级缓存：隔掉 isolate 缓存后仍不重算整表 COUNT（增量 28 步骤 6）', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
+         (10, 'fc10', 'P10', NULL, 'ST', 24, 80, 85, 30, 'free'),
+         (11, 'fc11', 'P11', NULL, 'CM', 25, 75, 80, 20, 'free');`,
+    );
+    const counted: string[] = [];
+    const real = fx.env.DB;
+    const env = {
+      ...fx.env,
+      // 放开两级缓存（本文件默认 '0' = 旁路），计数才有缓存可言
+      PUBLIC_CACHE_TTL_MS: undefined,
+      DB: {
+        prepare(sql: string) {
+          if (/FROM players\s*$/.test(sql.trim())) counted.push(sql);
+          return real.prepare(sql);
+        },
+        batch: real.batch.bind(real),
+      } as unknown as D1Database,
+    } as unknown as Env;
+    resetGuards(); // 清 L1，从零开始
+
+    expect((await get('/api/admin/overview', 'tok-admin', env)).status).toBe(200);
+    expect(counted.length).toBe(1);
+    resetOverviewCache(); // 只清 isolate 那层：两级缓存应当仍然供数
+    const second = (await (await get('/api/admin/overview', 'tok-admin', env)).json()) as { players: number };
+    expect(second.players).toBe(2);
+    expect(counted.length).toBe(1);
   });
 
   it('未登录 401；普通（非管理组）用户 403', async () => {

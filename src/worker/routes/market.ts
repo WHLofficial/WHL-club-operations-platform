@@ -22,7 +22,6 @@ import { settleOverdue, settleListingForReview } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { createActivation } from '../activations.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
-import { CPU_CLUB_IDS_SQL } from '../growth.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -31,6 +30,9 @@ function nowSql() {
 }
 
 const LISTING_STATUSES = ['listed', 'bidding', 'matched_pending', 'pending_review', 'delisted'] as const;
+
+/** 海捞名单上限：两分支各自取这么多再合并（见 /market/free-agents 的 top-N 重写） */
+const FREE_AGENT_LIMIT = 300;
 
 interface ListingRow {
   id: number;
@@ -262,13 +264,36 @@ app.get('/market/free-agents', async (c) => {
 
   const win = await getOpenWindow(c.env.DB);
   // 名单 = 真无归属的球员 + CPU 队球员（增量 14：CPU 队有 clubs 行、其球员带 club_id，但照旧可海捞）
-  // 上限 300：海捞池现在含 4 支 CPU 队约 107 人，加上待业球员约 190+，100 会把低 CA 那半截藏起来
-  const rows = await c.env.DB.prepare(
+  // 上限 300：海捞池含 4 支 CPU 队约 107 人 + 待业球员（增量 28 步骤 6 普查时生产已有 17,731 名自由身，
+  //   即 LIMIT 300 只露 CA 最高的那 300 人 —— 池子规模与「藏起低 CA 那半截」的老理由已不成比例，
+  //   分页/筛选是产品决策，登记在案未在本增量处理）
+  //
+  // 两分支 top-N 重写（增量 28 步骤 6）：普查实测这条查询单次 36,274 行，是全站最大读放大器。
+  //   原写法 (club_id IS NULL OR club_id IN ...) 让 SQLite 走 MULTI-INDEX OR + 临时排序，必须读出
+  //   全部 17,731 名自由身球员再排序，索引救不了它。拆成两支各取 top-N 再合并后（生产实测）：
+  //   · 无归属支 300 行 —— 沿 idx_players_club_ca(club_id, ca DESC, id) 走 ca 序、第 300 行即停（迁移 0030）
+  //   · CPU 队支 239 行 —— 必须让 clubs 当驱动表（CROSS JOIN 固定连接顺序）。写成 `club_id IN (子查询)`
+  //     时优化器会改用 idx_players_status 扫全部自由身球员（18,540 行）再过滤，CROSS JOIN 才把它掰过来。
+  //   等价性：club_id IS NULL 与 club_id ∈ CPU 队互斥（NULL 不等于任何值），两分支无重叠，
+  //   且全局 top-300 必然包含在各分支的 top-300 之内。
+  const nullClubBranch =
     `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa, cl.name AS club_name
      FROM players p
      LEFT JOIN clubs cl ON cl.id = p.club_id
-     WHERE (p.club_id IS NULL OR p.club_id IN ${CPU_CLUB_IDS_SQL}) AND p.status IN ('free', 'normal')
-     ORDER BY p.ca DESC, p.id LIMIT 300`,
+     WHERE p.club_id IS NULL AND p.status IN ('free', 'normal')
+     ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
+  // CPU 队球员的东家就是 cp 本身，所以 club_name 取 cp.name，不必再 LEFT JOIN 一次 clubs
+  const cpuClubBranch =
+    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa, cp.name AS club_name
+     FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id
+     WHERE cp.is_cpu = 1 AND p.status IN ('free', 'normal')
+     ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
+  const rows = await c.env.DB.prepare(
+    `SELECT * FROM (
+       SELECT * FROM (${nullClubBranch})
+       UNION ALL
+       SELECT * FROM (${cpuClubBranch})
+     ) ORDER BY ca DESC, id LIMIT ${FREE_AGENT_LIMIT}`,
   ).all<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_name: string | null }>();
 
   const banned = new Set<number>();
