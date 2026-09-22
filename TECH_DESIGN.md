@@ -126,8 +126,8 @@ CREATE TABLE players (
   china_plan INTEGER DEFAULT 0,      -- 中国球员加强计划（naID=155 China PR 自动判定，见 §5.2）
   agent_tier INTEGER DEFAULT 2,      -- 经纪人性格 1温和/2普通/3苛刻（公开属性，玩家可见；窗口推进以 0.3 概率重掷，见 §6.8）
   fc_id INTEGER,                     -- EA 球员 ID：FC Editor playerid = FC26db ID（同键已验证，导入对齐键）
-  badges_silver INTEGER DEFAULT 0,   -- 成长所得银徽章计数（上限 15，CHECK 约束；身份由管理组在 FC 阵容文件落实，平台不追踪明细，见 §5.2/§15#10）
-  badges_gold INTEGER DEFAULT 0,     -- 成长所得金徽章计数（上限 3，CHECK 约束）
+  badges_silver INTEGER DEFAULT 0,   -- 成长所得银徽章计数（CHECK 上限 15 留档；口径上限=badge_cap_silver 12，增量 30 起与 12 个银槽统一；明细见 player_playstyles，§5.2/§15#10）
+  badges_gold INTEGER DEFAULT 0,     -- 成长所得金徽章计数（CHECK 上限 3，与 3 个金槽同口径）
   game_attrs TEXT,                   -- 当季 FC 源全量 JSON：FC26db Base 94 列（键=表头名）/ 历史赛季 FC Editor 61 列（清单见下）
   created_at TEXT, updated_at TEXT
 );
@@ -291,6 +291,20 @@ CREATE TABLE growth_periods (                      -- 成长期（增量 13）�
   source TEXT NOT NULL DEFAULT 'manual',           -- manual(管理组宣告)/window_open(开窗勾选)
   note TEXT, declared_by INTEGER, declared_at TEXT
 );
+CREATE TABLE player_playstyles (                   -- PlayStyle 明细（增量 30，迁移 0031）
+  id INTEGER PRIMARY KEY,
+  player_id INTEGER NOT NULL,
+  slot INTEGER NOT NULL,                          -- 1-15：银 1-12、金 13-15
+  kind TEXT NOT NULL,                             -- silver/gold（金徽的 +100 由 kind 表示）
+  psid INTEGER NOT NULL,                          -- 基础 ID 1-99（读出来再用 playstyleIdOf 还原金段）
+  source TEXT NOT NULL,                           -- growth(升级方案)/china(中国计划)/manual
+  granted_by INTEGER, created_at TEXT,
+  UNIQUE (player_id, slot),                       -- 一个槽一枚
+  UNIQUE (player_id, kind, psid),                 -- 同一枚不重复发
+  CHECK (kind IN ('silver','gold')),
+  CHECK (psid BETWEEN 1 AND 99),
+  CHECK ((kind = 'silver' AND slot BETWEEN 1 AND 12) OR (kind = 'gold' AND slot BETWEEN 13 AND 15))
+);
 CREATE TABLE notifications (
   id INTEGER PRIMARY KEY, club_id INTEGER, user_id INTEGER,
   channel TEXT,                                   -- qq/web
@@ -336,7 +350,7 @@ CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);  -- 全
 | `is_future_star` | Growth+ 名单上传 → 预置建议值，**管理组核定后生效**（核定写 audit） | — |
 | `game_attrs` | §5.2 ID-only 口径全量 | 原文归档（role/playstyles 文本无反查表） |
 
-**upsert 幂等**（关键约束）：`ON CONFLICT(fc_id) DO UPDATE` **只写 FC 源列**（上表 + height/weight/weakfoot/skillmoves 等）；**绝不触碰运营列**——status、contracts、badges_silver/gold、growth_tier/xp、market_value、agent_tier、registrations。`club_id` 是唯一例外且只在**新插入**时写（增量 14，用户裁决：CPU 队球员的队籍，4 支 CPU 队之外的球员落 NULL）；冲突时不更新，免得覆盖认领/解约/转会后的事实归属。重复导入安全，运营数据零风险。
+**upsert 幂等**（关键约束）：`ON CONFLICT(fc_id) DO UPDATE` **只写 FC 源列**（上表 + height/weight/weakfoot/skillmoves 等）；**绝不触碰运营列**——status、contracts、badges_silver/gold、growth_tier/xp、market_value、agent_tier、registrations、`player_playstyles` 明细（导入不写明细；只有大换版折算会删掉超额的三分之二，见 §10.4）。`club_id` 是唯一例外且只在**新插入**时写（增量 14，用户裁决：CPU 队球员的队籍，4 支 CPU 队之外的球员落 NULL）；冲突时不更新，免得覆盖认领/解约/转会后的事实归属。重复导入安全，运营数据零风险。
 
 **参考表静态 JSON**：导入工具顺带从源文件生成 NationID/PlayStyleID(含图标键)/PositionID/RoleID/TeamID 五张 JSON 进 `web/assets/ref/`，随 SPA 版本发布（前端渲染名称与徽章小图标的数据源，换赛季重新生成）。
 
@@ -657,7 +671,7 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
   档5: [5CA] | [3CA+1金徽章] / [3CA+2银]
 ```
 
-实现：结算生成「升级待办」→ 教练（或管理组）选方案 → 写入 CA 与徽章计数（badges_silver/badges_gold，上限 15 银/3 金）→ 审计留痕。方案表与徽章效果存 config；徽章身份（具体 PlayStyle）由管理组在 FC 阵容文件落实，平台只记计数（§5.2 简化裁决，球员卡小图标按 PSID 经静态参考表渲染）。
+实现：结算生成「升级待办」→ 教练（或管理组）选方案 → **选满本方案要发的 PlayStyle**（档 3 起才有徽章方案；`POST /api/growth/levelup/:playerId` 带 `picks`）→ 同批写入 CA、台账计数（`badges_silver`/`badges_gold`，上限 **12 银/3 金**）与明细行 `player_playstyles`（`source='growth'`）→ 审计留痕。方案表存 config；徽章身份（具体 PlayStyle）**平台自己记账**（增量 30 起，见 §5.2 与决策表第 10 条），FC 阵容文件仍由管理组人工落实。
 
 ### 10.3 成长档位（初始 1、上限 5，管理组核定）
 
@@ -670,7 +684,7 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 | 小换版（同大版本，换阵容名单版本） | 成长经验、CA、徽章全部保留 |
 | 大换版（游戏大版本更替，如 FC25→FC26） | 经验清零；成长所得 CA 保留 1/3（向上取整）；徽章按数量保留 1/3（向上取整）随机抽取 |
 
-实现：球员表记录 `base_ca`（非成长所得 CA），换版时 CA = base_ca + ceil(成长CA/3)，徽章按计数保留 ceil(n/3)（计数化后无个体可随机，银/金各自向上取整）。可成长年龄上限按赛季规则（S1≤25/S2≤24/S3+≤23）在赛季结算时判定冻结。
+实现：球员表记录 `base_ca`（非成长所得 CA），换版时 CA = base_ca + ceil(成长CA/3)，徽章按计数保留 ceil(n/3)（银/金各自向上取整），**明细行 `player_playstyles` 同步折算**（每 kind 留最早入库的 ceil(n/3) 行，`FOLD_PLAYSTYLES_SQL` 整表一次跑、幂等）。可成长年龄上限按赛季规则（S1≤25/S2≤24/S3+≤23）在赛季结算时判定冻结。
 
 ## 11. 赛程绑定与窗口状态机
 
@@ -746,8 +760,8 @@ seasons(season=N, status: preparing → running → settled)
 | `tier_conditions` | json | 成长档位条件（§10.3） |
 | `trainee_xp_full` / `trainee_xp_half` | `40` / `15` | 训练营赛季/半赛季 XP |
 | `china_xp_bonus` | `20` | 中国计划赛季加成 |
-| `china_badges` | `3` | 中国计划自选银徽章数（离队失效） |
-| `badge_cap_silver` / `badge_cap_gold` | `15` / `3` | 徽章持有上限（DB CHECK 同步约束） |
+| `china_badges` | `3` | 中国计划自选银徽章数（离队失效；增量 30 起由 `POST /api/growth/china-playstyles/:playerId` 实际发放） |
+| `badge_cap_silver` / `badge_cap_gold` | `12` / `3` | 徽章持有上限（= 12 个银槽 / 3 个金槽，增量 30 起两口径统一；DB CHECK 仍是 0..15 / 0..3，历史台账不 clamp） |
 | `wage_param_a` 🔒 | `0.02` | 预期工资系数（§6.7） |
 | `wage_param_b` 🔒 | `1.9` | 同上 |
 | `wage_param_c` 🔒 | `0.45` | 同上 |
@@ -811,7 +825,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 7 | 假设 | 监管量化标准（规则引用的 8.1.1/8.1.4 不在手头）= 管理组裁量 + 阈值可配置 |
 | 8 | 假设 | 联网调研同类玩法（Hattrick/FPL/FM）未能成功（官方 wiki 403、FPL JS 渲染、Wikipedia 超时），经济参照以现行规则与 revenue 插件实测为准，未引入外部来源数值 |
 | 9 | 已解决 | CA=overallrating、PA=potential 映射：FC26db 官方列名直接为 CA/PA，且 playerid=ID 同键已验证（§5.2） |
-| 10 | 已解决 | 徽章闭环定稿：映射 银=银槽 `PSID1-12`、金=金槽 `PSID13-15`（PS+ ID=基础+100，§5.2）；台账只记计数 badges_silver/gold（CHECK 上限 15/3）；**比赛效果由 FC 游戏引擎原生承担，平台无效果逻辑**（比赛在真实 FC 中进行，平台只读赛果）；发放时选具体 PlayStyle 属管理组操作（发放界面可给选择器生成落地清单，操作辅助非数值计算）；前端按 PlayStyleID 静态参考表渲染名称与小图标（`assets/icons/playstyles/{id}.webp` 约定，资产包实现阶段补，缺图降级 🥇🥈）。**筛选口径（增量 27 收口）**：筛银徽章**只比银槽**、筛金徽章**只比金槽**，不再「基础 ID 或其 +100 命中任一槽」（旧语义下筛银徽章会捞出只挂金徽章的球员）；参数白名单 = 银 1-99 ∪ 金 101-199（去重 + 上限 100 项）。**渲染口径（增量 29 收口）**：属性页与列表都按槽位渲染**全 15 槽**（银 `PSID1-12` + 金 `PSID13-15`），与筛选/导入同源（`PS_SLOT_KEYS` 由 `PS_SLOT_COUNT` 派生；原先的「属性页只渲染 `PSID1-7`+`PSID13-15` ⇒ `PSID8-12` 可筛不可见」已消除）；槽号是 **1 起**（列表 `psNames` 的数组下标须 `+1` 再传 `playstyleIsGold`）。徽章墙的「🥈 x/15」那个 **15 是台账计数上限** `badge_cap_silver`（config，DDL CHECK 0..15），与「12 个银槽」是两个口径，别混 |
+| 10 | 已解决 | 徽章闭环定稿：映射 银=银槽 `PSID1-12`、金=金槽 `PSID13-15`（PS+ ID=基础+100，§5.2）；台账计数 badges_silver/gold（CHECK 上限 15/3）+ **明细表 `player_playstyles`**（增量 30：一行一个槽，`psid` 存基础 ID 1-99、金徽由 `kind='gold'` 表示，`source` ∈ growth/china/manual）；**比赛效果由 FC 游戏引擎原生承担，平台无效果逻辑**（比赛在真实 FC 中进行，平台只读赛果）；发放时选具体 PlayStyle 属管理组操作（发放界面可给选择器生成落地清单，操作辅助非数值计算）；前端按 PlayStyleID 静态参考表渲染名称与小图标（`assets/icons/playstyles/{id}.webp` 约定，资产包实现阶段补，缺图降级 🥇🥈）。**筛选口径（增量 27 收口）**：筛银徽章**只比银槽**、筛金徽章**只比金槽**，不再「基础 ID 或其 +100 命中任一槽」（旧语义下筛银徽章会捞出只挂金徽章的球员）；参数白名单 = 银 1-99 ∪ 金 101-199（去重 + 上限 100 项）。**渲染口径（增量 29 收口）**：属性页与列表都按槽位渲染**全 15 槽**（银 `PSID1-12` + 金 `PSID13-15`），与筛选/导入同源（`PS_SLOT_KEYS` 由 `PS_SLOT_COUNT` 派生；原先的「属性页只渲染 `PSID1-7`+`PSID13-15` ⇒ `PSID8-12` 可筛不可见」已消除）；槽号是 **1 起**（列表 `psNames` 的数组下标须 `+1` 再传 `playstyleIsGold`）。徽章墙的「🥈 x/12」那个 **12 是台账计数上限** `badge_cap_silver`（config 默认 12，**增量 30 起与「12 个银槽」统一**——迁移 0031 已把配置值从 15 改写成 12；DDL CHECK 仍是 0..15，**历史台账不 clamp**，所以旧数据理论上可能显示成「🥈 15/12」）。**发放与回收口径（增量 30）**：升级方案带徽章时必须一并交 `picks`（银/金数量须与方案一致），发放走 `player_playstyles` 明细 + 台账同批；中国计划徽章由 `POST /api/growth/china-playstyles/:playerId` 一次发满名额（`china_badges` 默认 3，`source='china'`）；**离队即回收**——转会成约时删 `source='china'` 明细并同步减台账（`from_club_id IS NULL` 的海捞是**签入**不是离队，不动），解约时删该球员全部明细 |
 | 11 | 已解决 | 国籍代码表：FC26db 内嵌 NationID 219 国（中国=155 China PR），导入工具随源消费（§5.2） |
 | 12 | 假设 | 窗口推进遇活跃谈判会话默认阻塞，管理组可强制按 E 结算/取消后推进（§6.4 不变式 6），开关可配置 |
 | 13 | 已定（增量 25 改窗刻度） | 保护期判定 = **转会窗刻度**：`contracts.protection_ticks`（= 签约基数 + 3 个常规窗）×`season_windows.is_temporary=0`；`当前已关常规窗数 < protection_ticks` 即在保护期内。训练营合同无保护期（NULL）。旧列 `protected_until`（曾按 signed_at + 548 天）保留留档、判定不再读 |
@@ -908,6 +922,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 系统 | GET `/api/admin/config` | 🛡 | config 键注册表（涉密键掩码，§13）〔1〕 |
 | 球员 | POST `/api/admin/players/import/preview` · `/confirm` | 🛡 | 导入管线两段式（§5.4）〔1〕 |
 | 球员 | GET `/api/players/:id` | 🌐 | 球员卡数据〔1〕 |
+| 球员 | GET `/api/players/:id/transfers` | 🌐 | 球员转会记录（只列 `status='completed'`，带双方队名，最近 50 条；增量 30）〔5〕 |
 | 球员 | GET `/api/players?club_id=&status=&cursor=` | 🌐 | 球员列表〔1〕 |
 | 球员 | PATCH `/api/admin/players/:id` | 🛡 | 改身价/状态/档位等（审计）〔1〕 |
 | 球员 | POST `/api/admin/players/attributes-batch` | 🛡 | 属性批量维护（P1）〔7+〕 |
@@ -942,7 +957,8 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 成长 | GET `/api/players/:id/growth` | 🌐 | XP 事件与成长史〔6〕 |
 | 成长 | POST `/api/admin/growth/events` | 🛡 | 补录（评分/扑救/夺权）〔6〕 |
 | 成长 | POST `/api/admin/growth/settlement/run` | 🛡 | 赛季结算（XP/升级待办；忠诚奖金自增量 25 起在中期窗关窗发 P1）〔6〕 |
-| 成长 | POST `/api/growth/levelup/:playerId` | 👤 | 升级方案二选一（本队教练或管理组）〔6〕 |
+| 成长 | POST `/api/growth/levelup/:playerId` | 👤 | 升级方案二选一（本队教练或管理组）；带徽章的方案须一并交 `picks`（增量 30）〔6〕 |
+| 成长 | POST `/api/growth/china-playstyles/:playerId` | 👤 | 中国计划徽章发放（名额一次发满，离队失效；增量 30）〔6〕 |
 | 成长 | POST `/api/admin/growth/:playerId/tier` | 🛡 | 档位核定 1-5（§10.3）〔6〕 |
 | 通知 | GET `/api/notifications?cursor=` · GET `/api/notifications/unread-count` · POST `/api/notifications/read` | 👤 | web 收件篮（只读本人 `channel='web'` 行，id 倒序游标 30/页；`read` 支持 ids/all，幂等）〔18〕 |
 | 通知 | bot 投递（无 web 端点）：cron 每 5 分钟扫 `channel='qq'` 的 pending → HMAC POST 到 AstrBot 插件（§12；写入点=赛果确认/升级，假设 23） | 内部 | QQ 推送〔6〕 |

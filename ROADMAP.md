@@ -543,6 +543,46 @@
 
 ---
 
+## 增量 30 · 球员面板专项整改——术语三改 + 合同卷宗对齐 + 六维图与 PlayStyles 归位 + 徽章×PlayStyle 合并 + 转会记录页签（2026-09-22 本地完成，待部署）
+
+**缘起**：用户 m00004 一次下达六项球员面板整改（术语口径、合同卷宗排版、属性文案、布局归位、徽章与 PlayStyle 合并、转会记录功能）。前四项是 UI/文案，后两项要动数据层与端点。
+
+**范围与交付**：① **术语三改全系统对齐**——「到顶」→「非成长」、「经纪人档位」→「经纪人性格」、「档案」→「合同」（限指代球员合同页签/成长记录的那批文案与注释）、「效力球队」→「来源球队」；② **合同卷宗左右对齐与字体**——新增 `.dossier-table` 作用域（标签列定宽 6.5em、值列统一左对齐、数值列等宽 `tabular-nums`）；③ **六维雷达从属性页搬到左栏球员卡下方**（新增 `.dossier-side` 纵列 + `.radar-card`，axes/values 计算上提到页面级）；④ **PlayStyles 从属性页尾部搬进属性网格第二行空位**（网格桌面固定 `repeat(4,1fr)`、`.ps-card` 跨两列、900px 以下两列）；⑤ **徽章 × PlayStyle 合并**（见下）；⑥ **转会记录页签**（见下）。
+
+**第 5 项（数据层核心）**：原「徽章」只是 `players.badges_silver/badges_gold` 两个计数、PlayStyle 身份由管理组在 FC 阵容文件里人工落实，两边天然会漂。本增量把身份收回平台：
+- `src/core/fc26.ts` 新增 `PS_GRANTABLE_BASE_IDS`（**36 项基础 ID**：1-8 / 11-16 / 21-26 / 31-35 / 41-45 / 51-56，与 `web/assets/ref/playstyle.json` 银段逐项一致；金徽 ID 严格 = 基础 +100）与 `isGrantablePlaystyleId` / `playstyleIdOf` / `playstyleKindOf` / `playstyleSlotRange` / `nextFreePlaystyleSlot` / `playstyleSlotsOf` / `mergePlaystyleSlots` / `planPlaystylePicks`。
+- 迁移 `0031_player_playstyles.sql` 建明细表：`player_id / slot(1-15) / kind(silver|gold) / psid(基础 ID 1-99) / source(growth|china|manual) / granted_by / created_at`，`UNIQUE(player_id,slot)` + `UNIQUE(player_id,kind,psid)` + 段界 CHECK（银 1-12 / 金 13-15），并把 `config.badge_cap_silver` 由 15 改写成 **12**。
+- `applyLevelUp` 加第 5 参 `picks`：带徽章的方案**必须一次选满**（数量须与方案一致、白名单内、同段不重复、未被 FC 源同段占用、槽位有空），台账与明细同批写。
+- 新端点 `POST /api/growth/china-playstyles/:playerId`：把一直没人读的 `china_badges`（默认 3）落成真发放，名额一次发满、`source='china'`。
+- 回收：`completeTransfer` 成约时删 `source='china'` 明细并同步减台账（**转出方为空的海捞是签入不是离队，不动**）；`completeTermination` 解约时删该球员全部明细。
+- 大换版折算：`FOLD_PLAYSTYLES_SQL`（窗口函数 CTE 先算排名再删，避免 DELETE 自引用本表）每 kind 留最早 `ceil(n/3)` 行，`generate-sql.ts` 拼在最后一片末尾。
+- `GET /api/players/:id/growth` 返回 `playstyleDetails` 与 `player.chinaPlaystyles {quota,granted,left}`；属性页列表 = FC 源槽 ∪ 明细（按 kind+基础 ID 去重，FC 源优先）。
+
+**第 6 项**：`GET /api/players/:id/transfers`（只列 `status='completed'`，LEFT JOIN clubs 出双方队名，最近 50 条）+ 球员详情第 4 页签「转会记录」；`TRANSFER_TYPE_LABEL` 从 `web/src/pages/admin/MarketPage.tsx` 抽到 `web/src/lib/ref.ts` 共用。
+
+**裁决**：① 术语「摘要条 chip 与表格列名仍叫『经纪人』」沿用增量 27 裁决（不动）；② 主题名「复古档案室」、容器名「档案卡 `.dossier`」、「主场/球场档案」不是本轮口径对象；③ 上限口径**统一为 12 银**（此前 `TECH_DESIGN.md` 写「15 与 12 是两个口径，别混」，本增量改写）；④ 明细行 `psid` **存基础 ID**、金徽由 `kind` 表示（读出来用 `playstyleIdOf` 还原）；⑤ 中国计划发放**同时加台账**，离队回收时同步减。
+
+**边界（不做）**：不部署、不 push、不 apply 生产迁移、不重导入球员库、不重建 players 表、不加依赖、不做顺手重构、不改 DDL CHECK(0..15)、不 clamp 历史台账。
+
+**分步**（每步一 commit）：1 术语三改（`f4d4a68`，21 文件）→ 2+4 合同卷宗对齐与布局归位（`e74148f`）→ 5 core（`de3c04c`）→ 5 worker（`60c8dd5`）→ 6 worker 端点（`1c44506`）→ 5+6 web（`d38b39f`）→ 评审修复（`6bd9138`）→ 文档收口（本节）。
+
+**验收标准**：六项在真浏览器可见且不外溢；每处改动做**变异验证**（断言必须能变红）；`npm run typecheck` 三份 tsconfig 全清、`npx vitest run` 全绿、`npm run build` 成功、`npm run test:e2e` 9/9；`code-review-skill` 过审。
+
+**步骤 1–4 记录（2026-09-22）**：术语三改（`f4d4a68`，21 文件，纯文案/注释；**例外保持原貌**：CHANGELOG/ROADMAP 历史条目、`PRD.md:5` 版本行、已 apply 的迁移注释、`scripts/prod-*/README`，以及「主场/球场档案」语义）；合同卷宗与布局（`e74148f`，`web/src/pages/Player.tsx` + `web/src/styles.css`）——诊断是「全局 `.mono` 规则不存在，而 `td.num` 自带右对齐+等宽」⇒ 三行 `td.mono` 与两行金额字体/对齐不一致，故新增 `.dossier-table` 作用域统一左对齐并给数值列补等宽；雷达搬到 `.dossier-side` 下的 `.radar-card`，PlayStyles 成为 `.attr-group-grid` 第 7 项（`.ps-card` 跨两列）。真浏览器复核（1440×1000 / 820×1100）：合同页签 7 行全左对齐、数值列等宽；属性页网格恰 4 列、第二行 = DEF/PHY + PS 卡；左栏雷达卡常驻；820px 下网格两列。
+
+**步骤 5–6 记录（2026-09-22）**：core `de3c04c`（白名单与槽位口径 + `badge_cap_silver` 默认改 12 + `web/src/lib/ref.ts` 的 `playstyleBadges` 改走 `playstyleSlotsOf` + 新增 `tests/playstyles.test.ts` 12 例）；worker `60c8dd5`（迁移 0031 + `tests/d1.ts` 登记 + growth 发放/回收/折算 + 中国计划端点 + 上限 12 落点）；worker 端点 `1c44506`（`GET /players/:id/transfers` + 4 例）；web `d38b39f`（选择器、中国计划发放块、转会页签、类型层、样式）。真浏览器复核（本地 8791，球员 9100）：点方案 2 展开 **35 个银选项**（36 − 已拥有 PSID1），选满后其余 disabled；确认后 `GET /growth` 复核 ca 76→78、明细落 `{slot:2,silver,psid:2,source:'growth'}`（**跳过被 FC PSID1 占用的槽 1**）；中国计划选 3 个发放后徽章墙 🥈 4/12、明细 3 行 `source='china'`、`granted_by=1`；属性页实测 `gridTemplateColumns = 198.1px ×4`、PS 卡跨两列、卡内 5 银 + 1 金（FC PSID13=102 与银「吊射」共存）；转会页签 6 列无横向溢出。
+
+**步骤 7 记录（2026-09-22，commit `6bd9138`）**：`code-review-skill` 过审后修 1 个真实缺陷 + 5 条记录不改。
+- 🟡 **真缺陷（已修）**：`src/worker/transfers.ts` 的 china 明细回收原先只 gate 在 `!amendment`，于是**海捞真自由身**（`type='free_agent'` 且 `from_club_id IS NULL`）会被当成离队 —— 签入即删掉他的 china 明细并扣台账。改为 `amendment || transfer.from_club_id === null ? 0 : (COUNT…)`（从 CPU 队摘人 `from_club_id` 不为空，照旧回收）。回归测试 `tests/bypass-routes.test.ts` 新增「海捞真自由身是签入不是离队」，**变异验证**（去掉守卫）⇒ 两行 china 明细被删、断言变红。
+- 🟢 **记录不改**（遗留）：① 台账可能 > 12（历史 cap 15 遗留），徽章墙会显示「🥈 15/12」（迁移注释已声明历史台账不 clamp）；② `Player.tsx` 徽章墙分母 12/3 是硬编码，改 config 不跟随（增量前也是硬编码）；③ 方案卡 `disabled={busy || (armedPlan === i && !picksReady)}` 让 `choosePlan` 里「先选满再确认」那条 toast 在 UI 上不可达（防御性死代码）；④ 双击发放/升级会撞 UNIQUE 让第二个请求 500，不会写脏数据；⑤ `resolvePlaystylePicks` 对「0 徽章方案」直接返回 `[]`，多传的 picks 被静默忽略（无状态变化）。
+
+**步骤 8 记录（2026-09-22，纯文档提交）**：文档与记忆收口 —— `TECH_DESIGN.md`（决策表第 10 条把「15 与 12 是两个口径，别混」改写为**已统一**并补发放/回收口径、`player_playstyles` DDL 入 §5 建表清单、§10.2/§10.4 补 picks 与明细折算、§5.4 upsert 幂等段补明细列、config 表 `badge_cap_silver` 改 12、端点表加 2 行）；`UI_DESIGN.md` 球员详情行改为四页签 + 左栏雷达卡 + PS 卡嵌网格 + 徽章墙 x/12；`ROADMAP.md` 本节；`CHANGELOG.md` 顶部新增增量 30 条目；`AGENTS.md` 当前状态补一行；记忆目录新建 `increment30-plan.md` / `increment30-execution-state.md`。
+
+**验收（步骤 1–7 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **40 文件 / 573 例全绿**（增量 29 基线 39/550 ⇒ core +12、worker 测试改 2 加 4 + 中国计划 3 + 折算 1 + 回收 1 + 海捞回归 1）；`npm run build` 成功（`web/dist/assets/index-C56W4cF9.js` 457.55 kB / gzip 145.20 kB）；变异验证 4 处（`flatMap` 类改动、槽号、折算 SQL、海捞守卫）均能变红。
+
+**待办**：① 推送 + 部署 + 生产迁移 0031 apply（需用户明确下令）；② 部署后核对线上 `/players` 产物 hash 与档案页四页签；③ 上述 5 条 🟢 遗留；④ PlayStyle 图标资产包仍待供给（缺图降级 🥇🥈）。
+
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
