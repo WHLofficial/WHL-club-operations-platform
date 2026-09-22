@@ -16,6 +16,18 @@ export function tierCache(): TierCache {
   return new Map();
 }
 
+// 当季定级赛事清单（只认 league_premier/league_second）：单队派生与批量派生共用一份口径，
+// 否则「哪些赛事参与定级」会出现两个来源。
+function loadLeagueList(env: Env, season: number): Promise<{ tid: number; tier: Tier }[]> {
+  return env.DB.prepare(
+    `SELECT tournament_id AS tid, competition_type AS ct FROM season_tournaments
+     WHERE season = ? AND competition_type IN ('league_premier', 'league_second')`,
+  )
+    .bind(season)
+    .all<{ tid: number; ct: string }>()
+    .then((r) => r.results.map((x) => ({ tid: x.tid, tier: TIER_BY_TYPE[x.ct] })));
+}
+
 async function derive(env: Env, season: number, clubId: number, cache?: TierCache): Promise<Tier | null> {
   if (!env.AUTH_DB) {
     // 回滚通道：认证通道未配置时读休眠的单值列（旧行为，建队时的定级仍生效）
@@ -31,14 +43,7 @@ async function derive(env: Env, season: number, clubId: number, cache?: TierCach
   const stKey = `st:${season}`;
   let leagues = cache?.get(stKey) as Promise<{ tid: number; tier: Tier }[]> | undefined;
   if (!leagues) {
-    leagues = env.DB
-      .prepare(
-        `SELECT tournament_id AS tid, competition_type AS ct FROM season_tournaments
-         WHERE season = ? AND competition_type IN ('league_premier', 'league_second')`,
-      )
-      .bind(season)
-      .all<{ tid: number; ct: string }>()
-      .then((r) => r.results.map((x) => ({ tid: x.tid, tier: TIER_BY_TYPE[x.ct] })));
+    leagues = loadLeagueList(env, season);
     cache?.set(stKey, leagues);
   }
   const list = await leagues;
@@ -68,4 +73,87 @@ export async function deriveClubTier(env: Env, season: number | null, clubId: nu
   const p = derive(env, season, clubId, cache);
   cache?.set(key, p);
   return p;
+}
+
+// 批量派生（增量 31）：公开球队列表一屏就要算 20 队，逐队调 deriveClubTier 是 20×(1 AUTH_DB + 1 TOUR_DB)，
+// 其中 AUTH_DB 那条每队要扫 team 全表 20 行（实测 20 队 400 行），而集合形状只要 20 + 62 行。
+//
+// 规则与 derive() 同一份（TIER_BY_TYPE / loadLeagueList / 「报名行 → 级别」的映射），差别只有一处：
+// 一队同时报了多座定级赛事（derive 抛 HttpError(500)）在批量里**降级为 null** —— 单队数据问题
+// 不该打死整张公开列表页，但也不能静默，所以留一条 console.warn 给运维。
+export async function deriveClubTiers(
+  env: Env,
+  season: number | null,
+  clubIds: number[],
+  preloadedTourTeamIds?: Map<number, number>,
+): Promise<Map<number, Tier | null>> {
+  const out = new Map<number, Tier | null>(clubIds.map((id) => [id, null]));
+  if (season === null || clubIds.length === 0) return out;
+
+  if (!env.AUTH_DB) {
+    // 回滚通道（同 derive）：认证通道未配置时读休眠的单值列
+    const ph = clubIds.map(() => '?').join(', ');
+    const rows = await env.DB.prepare(`SELECT id, league_tier AS t FROM clubs WHERE id IN (${ph})`)
+      .bind(...clubIds)
+      .all<{ id: number; t: string | null }>();
+    for (const r of rows.results) out.set(r.id, r.t === 'premier' || r.t === 'second' ? r.t : null);
+    return out;
+  }
+
+  let tourTeamIds = preloadedTourTeamIds;
+  if (!tourTeamIds) {
+    const rows = await env.AUTH_DB.prepare('SELECT club_id, tour_team_id AS tid FROM team WHERE club_id IS NOT NULL')
+      .all<{ club_id: number; tid: number | null }>();
+    tourTeamIds = new Map<number, number>();
+    for (const r of rows.results) if (typeof r.tid === 'number') tourTeamIds.set(r.club_id, r.tid);
+  }
+  if (env.TOUR_DB === undefined) return out;
+
+  const pairs: Array<[clubId: number, tourTeamId: number]> = [];
+  for (const id of clubIds) {
+    const tid = tourTeamIds.get(id);
+    if (typeof tid === 'number') pairs.push([id, tid]);
+  }
+  if (pairs.length === 0) return out;
+
+  const list = await loadLeagueList(env, season);
+  if (list.length === 0) return out; // 本赛季还没绑定任何定级赛事
+
+  const teamPh = pairs.map(() => '?').join(', ');
+  const tidPh = list.map(() => '?').join(', ');
+  const entries = await env.TOUR_DB.prepare(
+    `SELECT team_id AS team, tournament_id AS tid FROM entry WHERE team_id IN (${teamPh}) AND tournament_id IN (${tidPh})`,
+  )
+    .bind(...pairs.map((p) => p[1]), ...list.map((l) => l.tid))
+    .all<{ team: number; tid: number }>();
+
+  // tour_team_id → club_id 反查。AUTH_DB.team 的 UNIQUE(club_id)/UNIQUE(tour_team_id) 被破坏时
+  // 同一座 tour team 会映射到两家俱乐部：单块 derive 取 .first()（确定性首行），批量不能悄悄 last-wins，
+  // 否则同一 clubId 在两处得到不同 tier —— 冲突的两家都按未定级显示并告警。
+  const clubByTourTeam = new Map<number, number>();
+  const ambiguousTeams = new Set<number>();
+  for (const [clubId, tourTeamId] of pairs) {
+    const prev = clubByTourTeam.get(tourTeamId);
+    if (prev !== undefined && prev !== clubId) {
+      ambiguousTeams.add(tourTeamId);
+      console.warn(`[tier] AUTH_DB 映射冲突，列表按未定级显示：比赛系统球队 ${tourTeamId} 同时挂在俱乐部 ${prev} 与 ${clubId} 下，请管理组核对绑定`);
+      continue;
+    }
+    clubByTourTeam.set(tourTeamId, clubId);
+  }
+
+  const tiersByClub = new Map<number, Set<Tier>>();
+  for (const e of entries.results) {
+    const tier = list.find((l) => l.tid === e.tid)?.tier;
+    const clubId = clubByTourTeam.get(e.team);
+    if (!tier || clubId === undefined || ambiguousTeams.has(e.team)) continue;
+    const set = tiersByClub.get(clubId) ?? new Set<Tier>();
+    set.add(tier);
+    tiersByClub.set(clubId, set);
+  }
+  for (const [clubId, tiers] of tiersByClub) {
+    if (tiers.size === 1) out.set(clubId, [...tiers][0]);
+    else console.warn(`[tier] 分级数据冲突，列表按未定级显示：俱乐部 ${clubId} 在本赛季报了多座定级赛事，请管理组核对赛事报名`);
+  }
+  return out;
 }

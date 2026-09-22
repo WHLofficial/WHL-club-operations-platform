@@ -9,7 +9,7 @@ import { ttlForScope } from '../../lib/cache-policy.ts';
 import { writeAudit } from '../../lib/audit.ts';
 import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
-import { deriveClubTier } from '../tier.ts';
+import { deriveClubTier, deriveClubTiers } from '../tier.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
@@ -31,6 +31,118 @@ app.get('/clubs/directory', async (c) => {
         `SELECT id, name, league_tier FROM clubs WHERE status = 'active' ORDER BY name`,
       ).all<{ id: number; name: string; league_tier: string }>();
       return { clubs: rows.results };
+    },
+    { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
+  );
+  return c.json(data);
+});
+
+// 球队页列表（🌐 公开，增量 31）：全平台 active 俱乐部的四项指标 + 分级 + 队徽。
+// 省 D1 额度在三处：① 阵容聚合一条语句算全平台（实测 1,032 行——`club_id IS NOT NULL` 被
+// SQLite 改写成范围扫 `club_id > ?`，天然跳过 17,731 条 NULL，所以不需要部分索引）；
+// ② club → tour team 映射与队徽各一条批量查询（20 + 40 行），不逐队查；
+// ③ 分级走 deriveClubTiers 集合派生（src/worker/tier.ts），不是 20 次 deriveClubTier。
+// 冷算约 1,100–1,200 行，证据：scripts/d1-read-audit/clubs-measurements.json。
+//
+// 训练营口径 = `players.status = 'trainee'`（写入在 routes/registration.ts，读取在 routes/market.ts）。
+const CLUB_SQUAD_AGG_SQL = `SELECT p.club_id,
+         COUNT(*) AS squad,
+         SUM(CASE WHEN p.status = 'trainee' THEN 1 ELSE 0 END) AS trainee,
+         AVG(p.ca) AS avg_ca,
+         SUM(COALESCE(p.market_value, 0)) AS total_value,
+         SUM(COALESCE(ct.wage, 0)) AS total_wage
+  FROM players p LEFT JOIN contracts ct ON ct.player_id = p.id AND ct.is_active = 1
+  WHERE p.club_id IS NOT NULL
+  GROUP BY p.club_id`;
+
+interface ClubRow {
+  id: number;
+  name: string;
+  is_cpu: number;
+  league_tier: string | null;
+}
+interface SquadAggRow {
+  club_id: number;
+  squad: number;
+  trainee: number;
+  avg_ca: number | null;
+  total_value: number | null;
+  total_wage: number | null;
+}
+
+// club_id → tour_team_id（AUTH_DB 批量，实测 20 行）。队徽与分级派生共用这一份映射：
+// 逐队查的话每队都要扫 team 全表 20 行，20 队就是 400 行。
+async function loadClubTourTeams(env: Env): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (!env.AUTH_DB) return out;
+  const rows = await env.AUTH_DB.prepare('SELECT club_id, tour_team_id AS tid FROM team WHERE club_id IS NOT NULL')
+    .all<{ club_id: number; tid: number | null }>();
+  for (const r of rows.results) if (typeof r.tid === 'number') out.set(r.club_id, r.tid);
+  return out;
+}
+
+// 队徽：本平台 `clubs.logo_key` 全仓无人**写**（写侧在比赛系统），虽然 `GET /me/club` 会读出来渲染，
+// 但没有任何入口能给它赋值 ⇒ 球队页一律取比赛系统 `team.logo_key`（生产 20/20 覆盖）。
+// 返回 tour_team_id → key，路由再经上面的映射折回 club_id。
+async function loadTeamLogos(env: Env, tourTeamIds: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  if (env.TOUR_DB === undefined || tourTeamIds.length === 0) return out;
+  const ph = tourTeamIds.map(() => '?').join(', ');
+  const rows = await env.TOUR_DB.prepare(`SELECT id, logo_key FROM team WHERE id IN (${ph})`)
+    .bind(...tourTeamIds)
+    .all<{ id: number; logo_key: string | null }>();
+  for (const r of rows.results) if (r.logo_key) out.set(r.id, r.logo_key);
+  return out;
+}
+
+// 公开球队列表（增量 31）：一屏 20 队，一次算完 —— 固定 4 条 whl-club 语句 + AUTH_DB/TOUR_DB 各 1~2 条，无逐队查询。
+// tier 与 logo 派生自比赛系统（AUTH_DB.team / TOUR_DB.entry / TOUR_DB.team），那边改数据本 worker 收不到写事件、
+// 无从 purge ⇒ 最长陈旧 clubs scope 的 TTL（24h）。这是外源派生数据的已知代价，要即时生效只能等 TTL 过期。
+app.get('/clubs', async (c) => {
+  assertPublicRate(c, 'clubs-list');
+  const data = await cachedJson(
+    'clubs:list',
+    ttlForScope('clubs', c.env.PUBLIC_CACHE_TTL_MS),
+    async () => {
+      const [season, clubRows, aggRows] = await Promise.all([
+        getVisibleSeason(c.env.DB),
+        c.env.DB.prepare(
+          `SELECT id, name, is_cpu, league_tier FROM clubs WHERE status = 'active' ORDER BY name`,
+        ).all<ClubRow>(),
+        c.env.DB.prepare(CLUB_SQUAD_AGG_SQL).all<SquadAggRow>(),
+      ]);
+
+      const tourTeams = await loadClubTourTeams(c.env);
+      const clubIds = clubRows.results.map((r) => r.id);
+      // 只查可见（active）俱乐部对应的 tour team：退役俱乐部若还留着映射，不必白查一条
+      const visibleTourTeamIds = clubIds
+        .map((id) => tourTeams.get(id))
+        .filter((tid): tid is number => typeof tid === 'number');
+      const [logos, tiers] = await Promise.all([
+        loadTeamLogos(c.env, visibleTourTeamIds),
+        deriveClubTiers(c.env, season, clubIds, tourTeams),
+      ]);
+
+      const agg = new Map(aggRows.results.map((r) => [r.club_id, r]));
+      return {
+        clubs: clubRows.results.map((cl) => {
+          const a = agg.get(cl.id);
+          const squad = a?.squad ?? 0;
+          const trainee = a?.trainee ?? 0;
+          const tourTeamId = tourTeams.get(cl.id);
+          return {
+            id: cl.id,
+            name: cl.name,
+            isCpu: cl.is_cpu === 1,
+            tier: tiers.get(cl.id) ?? null,
+            logoKey: (tourTeamId === undefined ? undefined : logos.get(tourTeamId)) ?? null,
+            squad: { senior: squad - trainee, trainee },
+            avgCa: a?.avg_ca == null ? null : Math.round(a.avg_ca * 10) / 10,
+            totalValue: a?.total_value ?? 0,
+            totalWage: a?.total_wage ?? 0,
+          };
+        }),
+      };
     },
     { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
   );
