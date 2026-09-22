@@ -1,0 +1,763 @@
+{
+  "generatedAt": "2026-09-22T01:32:17.351Z",
+  "target": "remote",
+  "results": [
+    {
+      "id": "default",
+      "label": "默认浏览（第 1 页，limit 20）",
+      "url": "/players?limit=20",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1615
+        },
+        {
+          "rows_read": 56,
+          "rows_written": 0,
+          "duration_ms": 1.9517
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.5626
+        }
+      ],
+      "rows_read_total": 18819,
+      "duration_ms_total": 5.7
+    },
+    {
+      "id": "page5",
+      "label": "第 5 页（cursor=100）",
+      "url": "/players?limit=20&cursor=100",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 52,
+          "rows_written": 0,
+          "duration_ms": 1.3306
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.4921
+        }
+      ],
+      "rows_read_total": 18815,
+      "duration_ms_total": 4.8
+    },
+    {
+      "id": "view-initial",
+      "label": "初始视图（base_ca / json PA）",
+      "url": "/players?limit=20&view=initial",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 56,
+          "rows_written": 0,
+          "duration_ms": 1.2506
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.7369
+        }
+      ],
+      "rows_read_total": 18819,
+      "duration_ms_total": 5
+    },
+    {
+      "id": "sort-id",
+      "label": "sort=id（PK）",
+      "url": "/players?limit=20&sort=id",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 56,
+          "rows_written": 0,
+          "duration_ms": 1.1129
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.5687
+        }
+      ],
+      "rows_read_total": 18819,
+      "duration_ms_total": 4.7
+    },
+    {
+      "id": "sort-ca",
+      "label": "sort=ca（0027 表达式索引）",
+      "url": "/players?limit=20&sort=ca",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 58,
+          "rows_written": 0,
+          "duration_ms": 2.5305
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 5.0755
+        }
+      ],
+      "rows_read_total": 18821,
+      "duration_ms_total": 7.6
+    },
+    {
+      "id": "sort-market-value",
+      "label": "sort=market_value（0027 表达式索引）",
+      "url": "/players?limit=20&sort=market_value",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 1.4432
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 4.9696
+        }
+      ],
+      "rows_read_total": 18785,
+      "duration_ms_total": 6.4
+    },
+    {
+      "id": "sort-prestige",
+      "label": "sort=prestige（无索引）",
+      "url": "/players?limit=20&sort=prestige",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 42.7159
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.5873
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 46.3
+    },
+    {
+      "id": "sort-name",
+      "label": "sort=name（无索引 + 折叠表达式）",
+      "url": "/players?limit=20&sort=name",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2107
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 87.1163
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.5753
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 90.9
+    },
+    {
+      "id": "sort-ps",
+      "label": "sort=ps（15 槽计数表达式）",
+      "url": "/players?limit=20&sort=ps",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 254.9524
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.3501
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 258.3
+    },
+    {
+      "id": "sort-influence",
+      "label": "sort=influence（CASE + ROUND 表达式）",
+      "url": "/players?limit=20&sort=influence",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 37.0295
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.9454
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 41
+    },
+    {
+      "id": "sort-uid",
+      "label": "sort=uid（CAST/SUBSTR 表达式）",
+      "url": "/players?limit=20&sort=uid",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 32.7316
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.3795
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 36.1
+    },
+    {
+      "id": "sort-years",
+      "label": "sort=years（含窗刻度子查询）",
+      "url": "/players?limit=20&sort=years",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 37637,
+          "rows_written": 0,
+          "duration_ms": 148.6336
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.4829
+        }
+      ],
+      "rows_read_total": 56400,
+      "duration_ms_total": 152.1
+    },
+    {
+      "id": "sort-protected",
+      "label": "sort=protected（含窗刻度子查询）",
+      "url": "/players?limit=20&sort=protected",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 37637,
+          "rows_written": 0,
+          "duration_ms": 121.5021
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 4.9869
+        }
+      ],
+      "rows_read_total": 56400,
+      "duration_ms_total": 126.5
+    },
+    {
+      "id": "filter-club",
+      "label": "club_id=5（有索引）",
+      "url": "/players?limit=20&club_id=5",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 64,
+          "rows_written": 0,
+          "duration_ms": 1.1214
+        },
+        {
+          "rows_read": 63,
+          "rows_written": 0,
+          "duration_ms": 0.2684
+        }
+      ],
+      "rows_read_total": 127,
+      "duration_ms_total": 1.4
+    },
+    {
+      "id": "filter-status",
+      "label": "status=normal（有索引）",
+      "url": "/players?limit=20&status=normal",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1553
+        },
+        {
+          "rows_read": 58,
+          "rows_written": 0,
+          "duration_ms": 1.3113
+        },
+        {
+          "rows_read": 1032,
+          "rows_written": 0,
+          "duration_ms": 0.6355
+        }
+      ],
+      "rows_read_total": 1090,
+      "duration_ms_total": 2.1
+    },
+    {
+      "id": "filter-growable",
+      "label": "growable=1（无索引）",
+      "url": "/players?limit=20&growable=1",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 95,
+          "rows_written": 0,
+          "duration_ms": 2.3501
+        },
+        {
+          "rows_read": 18588,
+          "rows_written": 0,
+          "duration_ms": 21.9323
+        }
+      ],
+      "rows_read_total": 18683,
+      "duration_ms_total": 24.3
+    },
+    {
+      "id": "filter-position",
+      "label": "position=ST（主列 + PosID2-4 槽 OR）",
+      "url": "/players?limit=20&position=ST",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 110,
+          "rows_written": 0,
+          "duration_ms": 1.5097
+        },
+        {
+          "rows_read": 18397,
+          "rows_written": 0,
+          "duration_ms": 86.9823
+        }
+      ],
+      "rows_read_total": 18507,
+      "duration_ms_total": 88.5
+    },
+    {
+      "id": "filter-ps",
+      "label": "ps=25（12 个银槽 OR）",
+      "url": "/players?limit=20&ps=25",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 293,
+          "rows_written": 0,
+          "duration_ms": 3.6702
+        },
+        {
+          "rows_read": 18336,
+          "rows_written": 0,
+          "duration_ms": 174.6329
+        }
+      ],
+      "rows_read_total": 18629,
+      "duration_ms_total": 178.3
+    },
+    {
+      "id": "filter-attr",
+      "label": "attr=sprintspeed & attr_min=80",
+      "url": "/players?limit=20&attr=sprintspeed&attr_min=80",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 88,
+          "rows_written": 0,
+          "duration_ms": 1.3893
+        },
+        {
+          "rows_read": 18505,
+          "rows_written": 0,
+          "duration_ms": 89.5153
+        }
+      ],
+      "rows_read_total": 18593,
+      "duration_ms_total": 90.9
+    },
+    {
+      "id": "filter-ca",
+      "label": "ca_min=80（不匹配 0027 表达式索引）",
+      "url": "/players?limit=20&ca_min=80",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 56,
+          "rows_written": 0,
+          "duration_ms": 1.7038
+        },
+        {
+          "rows_read": 18582,
+          "rows_written": 0,
+          "duration_ms": 17.8379
+        }
+      ],
+      "rows_read_total": 18638,
+      "duration_ms_total": 19.5
+    },
+    {
+      "id": "filter-name",
+      "label": "name=sesko（折叠 LIKE）",
+      "url": "/players?limit=20&name=sesko",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 18304,
+          "rows_written": 0,
+          "duration_ms": 67.7835
+        },
+        {
+          "rows_read": 18302,
+          "rows_written": 0,
+          "duration_ms": 73.3521
+        }
+      ],
+      "rows_read_total": 36606,
+      "duration_ms_total": 141.1
+    },
+    {
+      "id": "roster",
+      "label": "名册端点（固定键，group_concat 全表）",
+      "url": "/players/roster",
+      "statements": 1,
+      "metas": [
+        {
+          "rows_read": 18301,
+          "rows_written": 0,
+          "duration_ms": 33.4834
+        }
+      ],
+      "rows_read_total": 18301,
+      "duration_ms_total": 33.5
+    },
+    {
+      "id": "detail",
+      "label": "球员详情（4 条窄查询）",
+      "url": "/players/1",
+      "statements": 4,
+      "metas": [
+        {
+          "rows_read": 1,
+          "rows_written": 0,
+          "duration_ms": 0.3326
+        },
+        {
+          "rows_read": 1,
+          "rows_written": 0,
+          "duration_ms": 0.2347
+        },
+        {
+          "rows_read": 1,
+          "rows_written": 0,
+          "duration_ms": 0.3692
+        },
+        {
+          "rows_read": 1,
+          "rows_written": 0,
+          "duration_ms": 0.197
+        }
+      ],
+      "rows_read_total": 4,
+      "duration_ms_total": 1.1
+    },
+    {
+      "id": "probe-inner-only",
+      "label": "探针：全表扫 + 排序，只选 id 不 join",
+      "sql": [
+        "SELECT COUNT(*) AS n FROM (SELECT players.id FROM players ORDER BY COALESCE(players.prestige, 0) DESC, players.id DESC LIMIT 21)"
+      ],
+      "statements": 1,
+      "metas": [
+        {
+          "rows_read": 36602,
+          "rows_written": 0,
+          "duration_ms": 18.668
+        }
+      ],
+      "rows_read_total": 36602,
+      "duration_ms_total": 18.7
+    },
+    {
+      "id": "probe-two-phase",
+      "label": "探针：两段式（21 个 id 先选出，再 join 补字段）——实测只省 2.6%",
+      "sql": [
+        "WITH page AS (SELECT players.id FROM players ORDER BY COALESCE(players.prestige, 0) DESC, players.id DESC LIMIT 21)\n       SELECT players.id, players.name, cc.name AS club_name, ct.wage AS ct_wage\n       FROM page JOIN players ON players.id = page.id\n       LEFT JOIN clubs cc ON cc.id = players.club_id\n       LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1"
+      ],
+      "statements": 1,
+      "metas": [
+        {
+          "rows_read": 36654,
+          "rows_written": 0,
+          "duration_ms": 36.3268
+        }
+      ],
+      "rows_read_total": 36654,
+      "duration_ms_total": 36.3
+    },
+    {
+      "id": "probe-count-nojoin",
+      "label": "探针：COUNT 去掉 LEFT JOIN（无筛选）",
+      "sql": [
+        "SELECT COUNT(*) AS n FROM players"
+      ],
+      "statements": 1,
+      "metas": [
+        {
+          "rows_read": 18301,
+          "rows_written": 0,
+          "duration_ms": 0.5073
+        }
+      ],
+      "rows_read_total": 18301,
+      "duration_ms_total": 0.5
+    },
+    {
+      "id": "probe-scan-nosort",
+      "label": "探针：全表扫、不排序（growable=1）",
+      "sql": [
+        "SELECT COUNT(*) AS n FROM (SELECT id FROM players WHERE growable = 1)"
+      ],
+      "statements": 1,
+      "metas": [
+        {
+          "rows_read": 18301,
+          "rows_written": 0,
+          "duration_ms": 18.0306
+        }
+      ],
+      "rows_read_total": 18301,
+      "duration_ms_total": 18
+    },
+    {
+      "id": "probe-early-stop",
+      "label": "探针：能提前停下的路径（rowid 序 LIMIT 21）",
+      "sql": [
+        "SELECT COUNT(*) AS n FROM (SELECT id FROM players ORDER BY id LIMIT 21)"
+      ],
+      "statements": 1,
+      "metas": [
+        {
+          "rows_read": 21,
+          "rows_written": 0,
+          "duration_ms": 0.4079
+        }
+      ],
+      "rows_read_total": 21,
+      "duration_ms_total": 0.4
+    },
+    {
+      "id": "sort-pa",
+      "label": "sort=pa（0027 表达式索引）",
+      "url": "/players?limit=20&sort=pa",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2611
+        },
+        {
+          "rows_read": 61,
+          "rows_written": 0,
+          "duration_ms": 1.6737
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 4.2624
+        }
+      ],
+      "rows_read_total": 18824,
+      "duration_ms_total": 6.2
+    },
+    {
+      "id": "sort-age",
+      "label": "sort=age（0027 表达式索引）",
+      "url": "/players?limit=20&sort=age",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2399
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 2.5067
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 8.6792
+        }
+      ],
+      "rows_read_total": 18785,
+      "duration_ms_total": 11.4
+    },
+    {
+      "id": "sort-ca-initial",
+      "label": "view=initial + sort=ca（口径变了，0027 索引是否还命中）",
+      "url": "/players?limit=20&view=initial&sort=ca",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.194
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 29.0812
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 4.4962
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 33.8
+    },
+    {
+      "id": "sort-club",
+      "label": "sort=club（clubs.id 权重；有 club_id 列索引）",
+      "url": "/players?limit=20&sort=club",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1754
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 176.5576
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 5.1682
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 181.9
+    },
+    {
+      "id": "sort-status",
+      "label": "sort=status（CASE 权重；有 status 列索引）",
+      "url": "/players?limit=20&sort=status",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.3293
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 147.4835
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 4.5375
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 152.4
+    },
+    {
+      "id": "sort-wage",
+      "label": "sort=wage（contracts 表，无法静态索引）",
+      "url": "/players?limit=20&sort=wage",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1678
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 130.8342
+        },
+        {
+          "rows_read": 18763,
+          "rows_written": 0,
+          "duration_ms": 3.5572
+        }
+      ],
+      "rows_read_total": 56398,
+      "duration_ms_total": 134.6
+    },
+    {
+      "id": "filter-club-free",
+      "label": "club_id=free（club_id IS NULL，17,731 名自由身）",
+      "url": "/players?limit=20&club_id=free",
+      "statements": 3,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.195
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 1.4426
+        },
+        {
+          "rows_read": 17732,
+          "rows_written": 0,
+          "duration_ms": 3.4865
+        }
+      ],
+      "rows_read_total": 17754,
+      "duration_ms_total": 5.1
+    },
+    {
+      "id": "probe-join-only",
+      "label": "探针：同扫描基数与排序，只加两个 LEFT JOIN（隔离 join 成本）",
+      "sql": [
+        "SELECT COUNT(*) AS n FROM (\n         SELECT players.id FROM players\n         LEFT JOIN clubs cc ON cc.id = players.club_id\n         LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1\n         ORDER BY COALESCE(players.prestige, 0) DESC, players.id DESC LIMIT 21)"
+      ],
+      "statements": 1,
+      "metas": [
+        {
+          "rows_read": 36602,
+          "rows_written": 0,
+          "duration_ms": 27.3584
+        }
+      ],
+      "rows_read_total": 36602,
+      "duration_ms_total": 27.4
+    }
+  ]
+}
