@@ -135,6 +135,13 @@ export async function completeTransfer(
 
   const guard = { sql: `(SELECT status FROM transfers WHERE id = ?) IN ('pending_review', 'signing')`, params: [transferId] };
   const audit = createAuditStatement(db);
+  // 离队要回收的中国计划徽章数（在 batch 外先读，批内只做减法）
+  const chinaPlaystyleCount = amendment
+    ? 0
+    : ((await db
+        .prepare(`SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = ? AND source = 'china'`)
+        .bind(transfer.player_id)
+        .first<{ n: number }>())?.n ?? 0);
   const statements: D1PreparedStatement[] = [];
   if (ownership && listingId !== null) {
     // 成交出价 → won；其冻结 → settled（落选冻结早已在抬价时释放）
@@ -201,6 +208,16 @@ export async function completeTransfer(
         )
         .bind(transfer.to_club_id, playerStatus, transfer.player_id, transfer.from_club_id, transfer.from_club_id),
     );
+    // 中国计划徽章随离队失效（§10）：明细行回收，台账计数同步减。计数在 batch 外先读出来，
+    // 免得依赖批内语句顺序；重放时已无 china 行可减、DELETE 空转，整批仍然幂等。
+    if (chinaPlaystyleCount > 0) {
+      statements.push(
+        db
+          .prepare(`UPDATE players SET badges_silver = MAX(0, badges_silver - ?), updated_at = ${nowSql()} WHERE id = ?`)
+          .bind(chinaPlaystyleCount, transfer.player_id),
+        db.prepare(`DELETE FROM player_playstyles WHERE player_id = ? AND source = 'china'`).bind(transfer.player_id),
+      );
+    }
   }
   if (terms && freeAgent) {
     // 海捞：落新合同（保护期按窗刻度，训练营无保护期）。contracts.player_id 全局唯一
@@ -361,6 +378,8 @@ export async function completeTermination(
       )
       .bind(transfer.player_id, transfer.from_club_id),
     db.prepare(`UPDATE contracts SET is_active = 0 WHERE player_id = ? AND is_active = 1`).bind(transfer.player_id),
+    // 徽章明细一并归零（增量 30：台账在上一句已清零，明细表不能留残行，否则重签后又漂回两个口径）
+    db.prepare(`DELETE FROM player_playstyles WHERE player_id = ?`).bind(transfer.player_id),
     ...growthResetStatements(db, transfer.player_id, `termination:${transferId}`, transfer.season, transfer.window_seq),
   ];
   const statusStmtIndex = statements.length;

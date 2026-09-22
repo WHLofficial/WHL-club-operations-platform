@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import * as XLSX from 'xlsx';
 import { normalizeImportBatch } from '../../src/core/import.ts';
 import type { NormalizedPlayer } from '../../src/core/import.ts';
-import { upsertStatement } from '../../src/worker/players-import.ts';
+import { upsertStatement, FOLD_PLAYSTYLES_SQL } from '../../src/worker/players-import.ts';
 import type { ImportMode } from '../../src/worker/players-import.ts';
 
 const SRC = process.argv[2] ?? 'E:/Downloads/FC26db20251217_fixed.xlsx';
@@ -88,7 +88,12 @@ for (let i = 0; i < players.length; i += PER_FILE) {
   const no = String(i / PER_FILE + 1).padStart(2, '0');
   const name = `players-import-${no}.sql`;
   const head = `-- 球员库导入 分片 ${no}（生成：scripts/players-import/generate-sql.ts；勿手改）\n-- 换版模式：${MODE === 'major' ? 'major（大换版：经验清零、CA/徽章各保留 1/3）' : 'minor（小换版：成长全保留、CA 增量平移）'}\n-- 源：${SRC} → Base 表；本片 ${part.length} 行（第 ${i + 1}-${i + part.length} 行）\n`;
-  const text = head + part.map(upsertSql).join('\n') + '\n';
+  // 大换版：发放明细的折算只能在全部分片写完之后跑，所以挂在最后一片尾巴上（幂等，重复执行无副作用）
+  const tail =
+    MODE === 'major' && i + PER_FILE >= players.length
+      ? `\n-- 大换版折算：发放明细每段保留最早的 ceil(n/3) 行（与台账计数同规则；必须在本片之后执行）\n${FOLD_PLAYSTYLES_SQL};\n`
+      : '';
+  const text = head + part.map(upsertSql).join('\n') + '\n' + tail;
   writeFileSync(join(OUT_DIR, name), text, 'utf8');
   files.push(`${name}（${part.length} 行）`);
   const sha = createHash('sha256').update(text, 'utf8').digest('hex');

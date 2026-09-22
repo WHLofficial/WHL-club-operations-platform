@@ -312,7 +312,7 @@ function buildPlayerFilters(
   const badgesSilverMin = c.req.query('badges_silver_min');
   if (badgesSilverMin !== undefined) {
     const n = Number(badgesSilverMin);
-    if (!Number.isInteger(n) || n < 0 || n > 15) throw new HttpError(400, 'badges_silver_min 应为 0-15');
+    if (!Number.isInteger(n) || n < 0 || n > 12) throw new HttpError(400, 'badges_silver_min 应为 0-12');
     filters.push('players.badges_silver >= ?');
     filterArgs.push(n);
   }

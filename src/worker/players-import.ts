@@ -175,6 +175,22 @@ export function upsertStatement(db: D1Database, p: NormalizedPlayer, mode: Impor
     );
 }
 
+// 大换版折算：发放明细每段（银/金）保留最早的 ceil(n/3) 行，与台账计数折算（(x+2)/3）同一条规则，
+// 否则换版后台账说 1 个、属性页列 3 个，又漂回两个口径。
+// 「最早」按槽号排（发放总是落在最小空槽，槽号顺序即发放顺序）。
+// 用窗口函数先在 CTE 里把排名与总数算完再删，避免 DELETE 的 WHERE 自引用本表 —— 那会踩
+// SQLite「边扫边删」的执行策略，计数随删除变化时结果不可预期。整表一次跑、幂等（删完 rank ≤ keep）。
+export const FOLD_PLAYSTYLES_SQL = `WITH ranked AS (
+  SELECT id, ROW_NUMBER() OVER (PARTITION BY player_id, kind ORDER BY slot) AS rn,
+         COUNT(*) OVER (PARTITION BY player_id, kind) AS total
+  FROM player_playstyles
+)
+DELETE FROM player_playstyles WHERE id IN (SELECT id FROM ranked WHERE rn > (total + 2) / 3)`;
+
+export function foldPlaystylesStatement(db: D1Database): D1PreparedStatement {
+  return db.prepare(FOLD_PLAYSTYLES_SQL);
+}
+
 export async function confirmImport(env: Env, actor: number, body: unknown) {
   const payload = parseImportPayload(body);
   const outcome = runNormalize(payload);
@@ -212,6 +228,8 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
     await env.DB.batch(statements);
     written += slice.length;
   }
+  // 大换版：台账计数已在 upsert 里折算，明细表跟着折（整表一次，幂等）
+  if (payload.mode === 'major') await foldPlaystylesStatement(env.DB).run();
   return {
     written,
     insertedEstimate: inserted,

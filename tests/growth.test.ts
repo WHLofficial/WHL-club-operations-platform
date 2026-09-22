@@ -410,41 +410,138 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     const outOfRange = await post('/api/growth/levelup/10', { planIndex: 5 }, 'tok-admin', fx.env); // 有待办但方案号越界
     expect(outOfRange.status).toBe(400);
 
-    const lv2 = await post('/api/growth/levelup/10', { planIndex: 1 }, 'tok-admin', fx.env);
-    const r2 = (await lv2.json()) as { plan: { ca: number; silver: number }; levelsApplied: number };
+    const lv2 = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    const r2 = (await lv2.json()) as {
+      plan: { ca: number; silver: number };
+      levelsApplied: number;
+      playstyles: { slot: number; psid: number; gold: boolean }[];
+    };
     expect(r2.plan).toEqual({ ca: 2, silver: 1, gold: 0 });
     expect(r2.levelsApplied).toBe(2);
+    // 方案带 1 个银徽章 → 落槽 1、发的是选中的银 PlayStyle（psid 用存库形式：银 1-99 / 金 101-199）
+    expect(r2.playstyles).toEqual([{ slot: 1, psid: 1, gold: false }]);
     expect(sqlGet<{ ca: number; badges_silver: number }>(fx.sqlite, 'SELECT ca, badges_silver FROM players WHERE id = 10')).toMatchObject({ ca: 85, badges_silver: 1 });
+    expect(sqlAll<{ slot: number; kind: string; psid: number; source: string }>(fx.sqlite, 'SELECT slot, kind, psid, source FROM player_playstyles WHERE player_id = 10')).toEqual([
+      { slot: 1, kind: 'silver', psid: 1, source: 'growth' }, // 明细存基础 ID
+    ]);
 
     const drained = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
     expect(drained.status).toBe(409);
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE event_type = 'levelup'")?.n).toBe(2);
 
     const growth = (await (await get('/api/players/10/growth', 'tok-admin', fx.env)).json()) as {
-      player: { pendingLevelUps: number; growthXp: number; upgradePlans: unknown[] };
+      player: { pendingLevelUps: number; growthXp: number; upgradePlans: unknown[]; chinaPlaystyles: { quota: number; granted: number; left: number } };
       events: { eventType: string; matchRef: string | null }[];
+      playstyleDetails: { slot: number; kind: string; psid: number; source: string; createdAt: string | null }[];
     };
     expect(growth.player.pendingLevelUps).toBe(0);
     expect(growth.player.growthXp).toBe(25);
     expect(growth.player.upgradePlans).toHaveLength(2);
     expect(growth.events.map((e) => e.matchRef)).toEqual(expect.arrayContaining(['levelup:1', 'levelup:2']));
+    expect(growth.playstyleDetails).toMatchObject([{ slot: 1, kind: 'silver', psid: 1, source: 'growth' }]);
+    expect(growth.player.chinaPlaystyles).toEqual({ quota: 3, granted: 0, left: 3 });
   });
 
-  it('徽章封顶：银 15/金 3 到帽后不再加，CA 照加', async () => {
+  it('带徽章的方案必须交 picks：缺数量 / 不在清单 / 重复 / 已拥有各自 400，且一个字段都没写', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec("UPDATE players SET growth_xp = 25 WHERE id = 10"); // 待办 2；档 3 方案 1 = 2CA + 1 银
+
+    const none = await post('/api/growth/levelup/10', { planIndex: 1 }, 'tok-admin', fx.env);
+    expect(none.status).toBe(400);
+    expect(((await none.json()) as { error: string }).error).toContain('要发 1 个银 PlayStyle');
+
+    const bogus = await post('/api/growth/levelup/10', { planIndex: 1, picks: [9] }, 'tok-admin', fx.env); // 9 不在白名单
+    expect(bogus.status).toBe(400);
+    expect(((await bogus.json()) as { error: string }).error).toContain('不在可发放清单里');
+
+    const gold = await post('/api/growth/levelup/10', { planIndex: 1, picks: [101] }, 'tok-admin', fx.env); // 该方案不发金徽
+    expect(gold.status).toBe(400);
+
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles')?.n).toBe(0);
+    expect(sqlGet<{ ca: number; levels_applied: number }>(fx.sqlite, 'SELECT ca, levels_applied FROM players WHERE id = 10')).toMatchObject({ ca: 80, levels_applied: 0 });
+
+    // 先发一次，再用同一个 PlayStyle 升级 → 已拥有
+    const first = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    expect(first.status).toBe(200);
+    const again = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    expect(again.status).toBe(400);
+    expect(((await again.json()) as { error: string }).error).toContain('已经在这名球员身上');
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles')?.n).toBe(1);
+  });
+
+  it('FC 源槽也算占用：game_attrs 里已有的 PlayStyle 不能重发，槽位从下一个空槽起', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec(
+      `UPDATE players SET growth_xp = 10, game_attrs = '{"PSID1": 3}' WHERE id = 10`, // 槽 1 被 FC 源占（银 3）
+    );
+
+    const dup = await post('/api/growth/levelup/10', { planIndex: 1, picks: [3] }, 'tok-admin', fx.env);
+    expect(dup.status).toBe(400);
+    expect(((await dup.json()) as { error: string }).error).toContain('已经在这名球员身上');
+
+    const ok = await post('/api/growth/levelup/10', { planIndex: 1, picks: [5] }, 'tok-admin', fx.env);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { playstyles: unknown }).playstyles).toEqual([{ slot: 2, psid: 5, gold: false }]); // 跳过槽 1
+  });
+
+  it('金徽落金槽（13 起）且存库 ID 是基础 ID + 100', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec("UPDATE players SET growth_xp = 10 WHERE id = 10");
+
+    const lv = await post('/api/growth/levelup/10', { planIndex: 2, picks: [101, 102] }, 'tok-admin', fx.env); // 档 3 方案 2 = 3CA + 2 银
+    expect(lv.status).toBe(400); // 方案 2 是 2 银，给金徽数量对不上
+
+    fx.sqlite.exec("UPDATE players SET growth_tier = 5 WHERE id = 10"); // 档 5 方案 1 = 3CA + 1 金
+    const goldLv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [101] }, 'tok-admin', fx.env);
+    expect(goldLv.status).toBe(200);
+    expect(((await goldLv.json()) as { playstyles: unknown }).playstyles).toEqual([{ slot: 13, psid: 101, gold: true }]);
+    expect(sqlGet<{ slot: number; kind: string; psid: number }>(fx.sqlite, 'SELECT slot, kind, psid FROM player_playstyles WHERE player_id = 10')).toMatchObject({
+      slot: 13,
+      kind: 'gold',
+      psid: 1, // 明细存基础 ID，金徽的 +100 由 kind 表示
+    });
+  });
+
+  it('银槽满 12 后不再发（400），CA 与台账一个都不动', async () => {
     const fx = freshEnv();
     seedPlatform(fx);
     fx.sqlite.exec(`
-      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca, badges_silver, badges_gold) VALUES
-        (40, 'p40', '老将', 1, 'ST', 'normal', 5, 10, 90, 15, 3);
+      UPDATE players SET growth_xp = 10 WHERE id = 10;
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at)
+        WITH RECURSIVE s(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM s WHERE v < 12)
+        SELECT 10, v, 'silver', v, 'growth', '2026-01-01T00:00:00.000Z' FROM s;
     `);
 
-    const lv = await post('/api/growth/levelup/40', { planIndex: 2 }, 'tok-admin', fx.env); // [3CA+2银]
+    const lv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [55] }, 'tok-admin', fx.env);
+    expect(lv.status).toBe(400);
+    expect(((await lv.json()) as { error: string }).error).toContain('银槽已满（12 个）');
+    expect(sqlGet<{ ca: number; badges_silver: number; levels_applied: number }>(fx.sqlite, 'SELECT ca, badges_silver, levels_applied FROM players WHERE id = 10')).toMatchObject({
+      ca: 80,
+      badges_silver: 0,
+      levels_applied: 0,
+    });
+  });
+
+  it('徽章封顶：台账到帽后不再加，CA 照加', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 台账被管理端手工顶到帽（12），槽位其实还空着 —— 计数封顶只挡台账，不挡 CA
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca, badges_silver, badges_gold) VALUES
+        (40, 'p40', '老将', 1, 'ST', 'normal', 5, 10, 90, 12, 3);
+    `);
+
+    const lv = await post('/api/growth/levelup/40', { planIndex: 2, picks: [1, 2] }, 'tok-admin', fx.env); // [3CA+2银]
     expect(lv.status).toBe(200);
     expect(sqlGet<{ ca: number; badges_silver: number; badges_gold: number }>(fx.sqlite, 'SELECT ca, badges_silver, badges_gold FROM players WHERE id = 40')).toMatchObject({
       ca: 93,
-      badges_silver: 15,
+      badges_silver: 12,
       badges_gold: 3,
     });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 40')?.n).toBe(2);
   });
 
   it('非管理组只能给自己俱乐部球员升级；未登录 401', async () => {
@@ -475,6 +572,110 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     expect(bad.status).toBe(400);
     const coach = await post('/api/admin/growth/10/tier', { tier: 3 }, 'tok-coach', fx.env);
     expect(coach.status).toBe(403);
+  });
+});
+
+describe('中国计划徽章发放（增量 30：中国计划自选 3 个银 PlayStyle）', () => {
+  it('本队教练一次发满 3 个：台账 +3、明细落槽 1-3、再发 409；鉴权与计划门槛各就各位', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 周九：club 1 的中国计划球员（tok-coach 绑定的是 club 2，用来验 403）
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, status, china_plan, ca) VALUES (30, 'p30', '周九', 1, 'ST', 'normal', 1, 70);`,
+    );
+
+    const res = await post('/api/growth/china-playstyles/22', { picks: [1, 2, 3] }, 'tok-coach', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { granted: number; left: number; playstyles: unknown };
+    expect(body.granted).toBe(3);
+    expect(body.left).toBe(0);
+    expect(body.playstyles).toEqual([
+      { slot: 1, psid: 1, gold: false },
+      { slot: 2, psid: 2, gold: false },
+      { slot: 3, psid: 3, gold: false },
+    ]);
+    // 台账同步加（离队时按 source='china' 行数回收）
+    expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 22')?.badges_silver).toBe(3);
+    expect(
+      sqlAll<{ slot: number; kind: string; psid: number; source: string; granted_by: number }>(
+        fx.sqlite,
+        'SELECT slot, kind, psid, source, granted_by FROM player_playstyles WHERE player_id = 22 ORDER BY slot',
+      ),
+    ).toEqual([
+      { slot: 1, kind: 'silver', psid: 1, source: 'china', granted_by: 2 },
+      { slot: 2, kind: 'silver', psid: 2, source: 'china', granted_by: 2 },
+      { slot: 3, kind: 'silver', psid: 3, source: 'china', granted_by: 2 },
+    ]);
+
+    const again = await post('/api/growth/china-playstyles/22', { picks: [4] }, 'tok-coach', fx.env);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toContain('已经发完（3 个）');
+
+    const notInPlan = await post('/api/growth/china-playstyles/20', { picks: [4] }, 'tok-coach', fx.env);
+    expect(notInPlan.status).toBe(409);
+    expect(((await notInPlan.json()) as { error: string }).error).toContain('不在中国球员计划里');
+
+    const otherClub = await post('/api/growth/china-playstyles/30', { picks: [4, 5, 6] }, 'tok-coach', fx.env);
+    expect(otherClub.status).toBe(403);
+    expect((await post('/api/growth/china-playstyles/30', { picks: [4, 5, 6] }, 'tok-admin', fx.env)).status).toBe(200); // 管理组通吃
+
+    const anon = await app.request('/api/growth/china-playstyles/30', { method: 'POST', body: JSON.stringify({ picks: [] }) }, fx.env);
+    expect(anon.status).toBe(401);
+    expect((await post('/api/growth/china-playstyles/abc', { picks: [] }, 'tok-admin', fx.env)).status).toBe(400);
+    expect((await post('/api/growth/china-playstyles/999', { picks: [] }, 'tok-admin', fx.env)).status).toBe(404);
+  });
+
+  it('数量必须对得上名额：少给 / 多给 / 重复 / 不在清单都 400，一个字段都不写', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+
+    const few = await post('/api/growth/china-playstyles/22', { picks: [1] }, 'tok-coach', fx.env);
+    expect(few.status).toBe(400);
+    expect(((await few.json()) as { error: string }).error).toContain('要发 3 个银 PlayStyle');
+
+    const many = await post('/api/growth/china-playstyles/22', { picks: [1, 2, 3, 4] }, 'tok-coach', fx.env);
+    expect(many.status).toBe(400);
+
+    const dup = await post('/api/growth/china-playstyles/22', { picks: [1, 1, 2] }, 'tok-coach', fx.env);
+    expect(dup.status).toBe(400);
+    expect(((await dup.json()) as { error: string }).error).toContain('不能在同一段里选两次');
+
+    const bogus = await post('/api/growth/china-playstyles/22', { picks: [1, 2, 9] }, 'tok-coach', fx.env);
+    expect(bogus.status).toBe(400);
+    expect(((await bogus.json()) as { error: string }).error).toContain('不在可发放清单里');
+
+    const goldInChina = await post('/api/growth/china-playstyles/22', { picks: [101, 102, 103] }, 'tok-coach', fx.env);
+    expect(goldInChina.status).toBe(400); // 中国计划只发银徽章
+
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles')?.n).toBe(0);
+    expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 22')?.badges_silver).toBe(0);
+  });
+
+  it('名额按已发行数递减：库里已有 1 行 china 明细时，本次只收 2 个', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec(`
+      UPDATE players SET badges_silver = 1 WHERE id = 22;
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at)
+        VALUES (22, 1, 'silver', 5, 'china', '2026-01-01T00:00:00Z');
+    `);
+
+    const growth = (await (await get('/api/players/22/growth', 'tok-coach', fx.env)).json()) as {
+      player: { chinaPlaystyles: { quota: number; granted: number; left: number } };
+      playstyleDetails: { slot: number; psid: number; source: string }[];
+    };
+    expect(growth.player.chinaPlaystyles).toEqual({ quota: 3, granted: 1, left: 2 });
+    expect(growth.playstyleDetails).toMatchObject([{ slot: 1, psid: 5, source: 'china' }]);
+
+    const one = await post('/api/growth/china-playstyles/22', { picks: [2] }, 'tok-coach', fx.env);
+    expect(one.status).toBe(400); // 名额剩 2，只给 1 个不行
+    expect(((await one.json()) as { error: string }).error).toContain('要发 2 个银 PlayStyle');
+
+    const two = await post('/api/growth/china-playstyles/22', { picks: [2, 3] }, 'tok-coach', fx.env);
+    expect(two.status).toBe(200);
+    expect(((await two.json()) as { left: number }).left).toBe(0);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 22 AND source = 'china'")?.n).toBe(3);
+    expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 22')?.badges_silver).toBe(3);
   });
 });
 

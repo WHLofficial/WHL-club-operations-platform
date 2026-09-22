@@ -4,6 +4,14 @@
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement, type AuditEntry } from '../lib/audit.ts';
 import { createConfigService } from '../core/config.ts';
+import {
+  basePlaystyleId,
+  planPlaystylePicks,
+  playstyleIdOf,
+  playstyleSlotsOf,
+  type PlaystyleKind,
+  type PlaystyleSlot,
+} from '../core/fc26.ts';
 import { queueClubNotification } from './notify.ts';
 import type { Env } from './env.ts';
 
@@ -464,13 +472,112 @@ async function scanRows<T>(db: D1Database, baseSql: string, cursorCol: string, p
   return out;
 }
 
+// ---- PlayStyle 发放明细（增量 30：徽章与 PlayStyle 合并）----
+// 台账计数（players.badges_silver / badges_gold）说「发了几个」，明细表（player_playstyles）说
+// 「发了哪几个、落在哪个槽、谁发的、什么来源」。两侧口径必须同进同退：
+//   · 升级方案 / 中国计划发放 → 明细写行 + 台账加计数（同批）
+//   · 转会离队回收 source='china' 的行 → 台账同步减（见 transfers.ts）
+//   · 解约清零 → 明细全删、台账归零
+//   · 大换版折算 → 每段按行数折算，保留最早的那几行（见 players-import.ts）
+
+export type PlaystyleSource = 'growth' | 'china' | 'manual';
+
+export interface GrantedPlaystyle {
+  slot: number;
+  kind: PlaystyleKind;
+  /** 基础 ID（1-99）：金徽的 +100 由 kind 表示 */
+  psid: number;
+  source: PlaystyleSource;
+  createdAt: string | null;
+}
+
+/** 球员的发放明细（属性页清单与成长页签共用），按槽号升序 */
+export async function listPlayerPlaystyles(db: D1Database, playerId: number): Promise<GrantedPlaystyle[]> {
+  const rows = await db
+    .prepare('SELECT slot, kind, psid, source, created_at FROM player_playstyles WHERE player_id = ? ORDER BY slot')
+    .bind(playerId)
+    .all<{ slot: number; kind: PlaystyleKind; psid: number; source: PlaystyleSource; created_at: string | null }>();
+  return rows.results.map((r) => ({ slot: r.slot, kind: r.kind, psid: r.psid, source: r.source, createdAt: r.created_at }));
+}
+
+/** FC 源数据的 PlayStyle 槽位（game_attrs 里 PSID1-15 那一份，导入即整列覆盖） */
+async function fcPlaystyleSlots(db: D1Database, playerId: number): Promise<PlaystyleSlot[]> {
+  const row = await db.prepare('SELECT game_attrs FROM players WHERE id = ?').bind(playerId).first<{ game_attrs: string | null }>();
+  if (!row?.game_attrs) return [];
+  try {
+    return playstyleSlotsOf(JSON.parse(row.game_attrs) as Record<string, unknown>);
+  } catch {
+    return []; // 脏 JSON 当没有：发放校验少一条占用总比整条链路 500 好
+  }
+}
+
+/** 发放校验要的两份现状：FC 源槽 + 既有发放明细（两次读并发） */
+async function playstylePickPlan(
+  db: D1Database,
+  playerId: number,
+): Promise<{ fc: PlaystyleSlot[]; granted: GrantedPlaystyle[] }> {
+  const [fc, granted] = await Promise.all([fcPlaystyleSlots(db, playerId), listPlayerPlaystyles(db, playerId)]);
+  return { fc, granted };
+}
+
+/** picks 入参归一：非数组当空（planPlaystylePicks 会按数量不匹配给出人话报错） */
+function normalizePlaystylePicks(input: unknown): number[] {
+  if (!Array.isArray(input)) return [];
+  return input.map((v) => Number(v));
+}
+
+/** 发放明细的 INSERT 语句（与台账计数同批写入）；psid 落库前换算成基础 ID */
+function insertPlaystyleStatements(
+  db: D1Database,
+  playerId: number,
+  slots: readonly PlaystyleSlot[],
+  source: PlaystyleSource,
+  actor: number,
+): D1PreparedStatement[] {
+  return slots.map((s) =>
+    db
+      .prepare(
+        `INSERT INTO player_playstyles (player_id, slot, kind, psid, source, granted_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ${nowSql()})`,
+      )
+      .bind(playerId, s.slot, s.gold ? 'gold' : 'silver', basePlaystyleId(s.psid), source, actor),
+  );
+}
+
+/** 发放校验：白名单 + 段内不重复 + 未拥有 + 数量对得上 + 该段还有空槽 */
+function resolvePlaystylePicks(
+  picksInput: unknown,
+  plan: { silverCount: number; goldCount: number },
+  state: { fc: PlaystyleSlot[]; granted: GrantedPlaystyle[] },
+): PlaystyleSlot[] {
+  if (plan.silverCount <= 0 && plan.goldCount <= 0) return [];
+  const outcome = planPlaystylePicks(normalizePlaystylePicks(picksInput), {
+    silverCount: plan.silverCount,
+    goldCount: plan.goldCount,
+    ownedPsids: [
+      ...state.fc.map((s) => s.psid),
+      ...state.granted.map((g) => playstyleIdOf(g.psid, g.kind)),
+    ],
+    usedSlots: [...state.fc.map((s) => s.slot), ...state.granted.map((g) => g.slot)],
+  });
+  if (!outcome.ok) throw new HttpError(400, outcome.message);
+  return outcome.slots;
+}
+
 // ---- 升级方案二选一（§10.2）：消费一次待办，写入 CA 与徽章计数 ----
 
-export async function applyLevelUp(env: Env, actor: number, playerId: number, planIndexInput: unknown): Promise<{
+export async function applyLevelUp(
+  env: Env,
+  actor: number,
+  playerId: number,
+  planIndexInput: unknown,
+  picksInput?: unknown,
+): Promise<{
   ok: true;
   plan: UpgradePlan;
   levelsApplied: number;
   pendingLeft: number;
+  playstyles: PlaystyleSlot[];
 }> {
   const db = env.DB;
   const player = await db
@@ -499,9 +606,11 @@ export async function applyLevelUp(env: Env, actor: number, playerId: number, pl
     throw new HttpError(400, `方案序号不对，档 ${player.growth_tier} 有 ${plans.length} 个可选方案`);
   }
   const plan = plans[planIndex]!;
-  const capSilver = (await config.getNumber('badge_cap_silver')) ?? 15;
+  const capSilver = (await config.getNumber('badge_cap_silver')) ?? 12;
   const capGold = (await config.getNumber('badge_cap_gold')) ?? 3;
   const nextLevelNo = player.levels_applied + 1;
+  // 带徽章的方案要先选好发哪几个 PlayStyle：台账计数与明细必须同一次写入，否则又漂回两个口径
+  const grants = resolvePlaystylePicks(picksInput, { silverCount: plan.silver, goldCount: plan.gold }, await playstylePickPlan(db, playerId));
 
   await db.batch([
     db
@@ -510,6 +619,7 @@ export async function applyLevelUp(env: Env, actor: number, playerId: number, pl
            levels_applied = levels_applied + 1, updated_at = ${nowSql()} WHERE id = ?`,
       )
       .bind(plan.ca, capSilver, plan.silver, capGold, plan.gold, playerId),
+    ...insertPlaystyleStatements(db, playerId, grants, 'growth', actor),
     ...recordGrowthEventStatements(db, {
       playerId,
       matchRef: `levelup:${nextLevelNo}`,
@@ -527,7 +637,7 @@ export async function applyLevelUp(env: Env, actor: number, playerId: number, pl
     action: 'growth_levelup',
     targetType: 'player',
     targetId: playerId,
-    after: { tier: player.growth_tier, planIndex, plan },
+    after: { tier: player.growth_tier, planIndex, plan, playstyles: grants },
   });
   // 通知教练（§12；尽力而为，没绑 QQ 静默跳过）
   await queueClubNotification(env, player.club_id, 'levelup', {
@@ -536,5 +646,44 @@ export async function applyLevelUp(env: Env, actor: number, playerId: number, pl
     silver: plan.silver,
     gold: plan.gold,
   });
-  return { ok: true, plan, levelsApplied: nextLevelNo, pendingLeft: pending - 1 };
+  return { ok: true, plan, levelsApplied: nextLevelNo, pendingLeft: pending - 1, playstyles: grants };
+}
+
+// ---- 中国球员计划自选银徽章（§10：config.china_badges 落地）----
+// 离队失效：source='china' 的行在转会成交时回收、解约时随明细一起删（transfers.ts）。
+// 名额 = china_badges（默认 3）− 已发的 source='china' 行数，所以这个端点可以分几次调，
+// 每次把剩下的名额选完为止。
+export async function grantChinaPlaystyles(
+  env: Env,
+  actor: number,
+  playerId: number,
+  picksInput: unknown,
+): Promise<{ ok: true; playstyles: PlaystyleSlot[]; granted: number; left: number }> {
+  const db = env.DB;
+  const config = createConfigService(db);
+  const quota = (await config.getNumber('china_badges')) ?? 3;
+  const capSilver = (await config.getNumber('badge_cap_silver')) ?? 12;
+  const state = await playstylePickPlan(db, playerId);
+  const already = state.granted.filter((g) => g.source === 'china').length;
+  const need = quota - already;
+  if (need <= 0) throw new HttpError(409, `中国计划徽章已经发完（${quota} 个）`);
+
+  const grants = resolvePlaystylePicks(picksInput, { silverCount: need, goldCount: 0 }, state);
+
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE players SET badges_silver = MIN(?, badges_silver + ?), updated_at = ${nowSql()} WHERE id = ?`,
+      )
+      .bind(capSilver, grants.length, playerId),
+    ...insertPlaystyleStatements(db, playerId, grants, 'china', actor),
+  ]);
+  await writeAudit(db, {
+    actor,
+    action: 'growth_china_playstyles',
+    targetType: 'player',
+    targetId: playerId,
+    after: { quota, playstyles: grants },
+  });
+  return { ok: true, playstyles: grants, granted: grants.length, left: need - grants.length };
 }

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
 import { normalizeImportBatch } from '../src/core/import.ts';
 import { cpuClubIds } from '../src/worker/growth.ts';
 import { resetConfigCache } from '../src/core/config.ts';
@@ -169,6 +169,34 @@ describe('球员导入换版模式（增量 22 I1，规则 §5.4）', () => {
     expect(sqlGet(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'players_import' ORDER BY id DESC LIMIT 1")).toMatchObject({
       after: expect.stringContaining('"mode":"major"'),
     });
+  });
+
+  it('大换版折算 PlayStyle 明细：每 kind 留最早 ceil(n/3) 行（与台账折算同一口径）；小换版一行不动', async () => {
+    const fx = freshEnv();
+    seedGrowingPlayer(fx.sqlite);
+    fx.sqlite.exec(`
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (100, 1, 'silver', 1, 'growth', '2026-01-01T00:00:00Z'),
+        (100, 2, 'silver', 2, 'growth', '2026-01-02T00:00:00Z'),
+        (100, 3, 'silver', 3, 'growth', '2026-01-03T00:00:00Z'),
+        (100, 4, 'silver', 4, 'china', '2026-01-04T00:00:00Z'),
+        (100, 5, 'silver', 5, 'china', '2026-01-05T00:00:00Z'),
+        (100, 13, 'gold', 1, 'growth', '2026-01-06T00:00:00Z'),
+        (100, 14, 'gold', 2, 'growth', '2026-01-07T00:00:00Z');
+    `);
+
+    const minor = await post('/api/admin/players/import/confirm', { channel: 'A', mode: 'minor', rows: [rowA(100)] }, fx.env);
+    expect(minor.status).toBe(200);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 100')?.n).toBe(7);
+
+    const major = await post('/api/admin/players/import/confirm', { channel: 'A', mode: 'major', rows: [rowA(100)] }, fx.env);
+    expect(major.status).toBe(200);
+    // 银 5 → ceil(5/3)=2（留最早两个槽）；金 2 → ceil(2/3)=1（留槽 13）
+    expect(sqlAll<{ slot: number; kind: string }>(fx.sqlite, 'SELECT slot, kind FROM player_playstyles WHERE player_id = 100 ORDER BY slot')).toEqual([
+      { slot: 1, kind: 'silver' },
+      { slot: 2, kind: 'silver' },
+      { slot: 13, kind: 'gold' },
+    ]);
   });
 
   it('mode 非法值 400', async () => {

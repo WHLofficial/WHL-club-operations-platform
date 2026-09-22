@@ -79,7 +79,7 @@ function parsePlayerUpdates(body: Record<string, unknown>): { updates: Record<st
   }
   if ('badgesSilver' in body) {
     const v = Number(body.badgesSilver);
-    if (!Number.isInteger(v) || v < 0 || v > 15) errors.push('银徽章数须在 0-15 之间');
+    if (!Number.isInteger(v) || v < 0 || v > 12) errors.push('银徽章数须在 0-12 之间');
     else updates.badges_silver = v;
   }
   if ('badgesGold' in body) {

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
@@ -220,6 +220,28 @@ describe('报价判定三路径', () => {
     expect(sqlGet<{ balance: number }>(fx.sqlite, `SELECT balance FROM ledger_accounts WHERE club_id = ${fx.buyerClub}`)?.balance).toBe(35);
     // 已结束的会话不能再报价
     expect((await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: 4 }, 'tok-coach2', fx.env)).status).toBe(409);
+  });
+
+  it('离队回收中国计划徽章：成约后 china 明细删掉、台账同步减，成长得来的留着', async () => {
+    const fx = await seedSigning(freshEnv());
+    fx.sqlite.exec(`
+      UPDATE players SET badges_silver = 5, china_plan = 1 WHERE id = 10;
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (10, 1, 'silver', 1, 'growth', '2026-01-01T00:00:00Z'),
+        (10, 2, 'silver', 2, 'china', '2026-01-02T00:00:00Z'),
+        (10, 3, 'silver', 3, 'china', '2026-01-03T00:00:00Z');
+    `);
+
+    await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    fx.env.rng = () => 0.9;
+    const res = await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: 3.11 }, 'tok-coach2', fx.env);
+    expect(res.status).toBe(200);
+    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM players WHERE id = 10')?.club_id).toBe(fx.buyerClub);
+    // 走的是成长得来的 1 个留在身上，2 个中国计划的随离队失效
+    expect(
+      sqlAll<{ slot: number; source: string }>(fx.sqlite, 'SELECT slot, source FROM player_playstyles WHERE player_id = 10 ORDER BY slot'),
+    ).toEqual([{ slot: 1, source: 'growth' }]);
+    expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 10')?.badges_silver).toBe(3);
   });
 
   it('三轮未谈拢 → 按 E 强制成约', async () => {

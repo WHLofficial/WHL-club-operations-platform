@@ -255,6 +255,8 @@ describe('解约（termination）', () => {
     // 解约前攒点成长：XP/已消费级数/徽章 + 两条进球历史 —— 解约后数值全零、历史一行不删
     fx.sqlite.exec(`
       UPDATE players SET growth_xp = 52, levels_applied = 2, badges_silver = 4, badges_gold = 1 WHERE id = 20;
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (20, 1, 'silver', 1, 'growth', '2026-07-01T00:00:00Z'), (20, 2, 'silver', 2, 'china', '2026-07-02T00:00:00Z');
       INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES
         (20, 'g1', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z'), (20, 'g2', 'goal', 1, 0.5, 'auto', '2026-07-01T00:00:00Z');
     `);
@@ -287,6 +289,8 @@ describe('解约（termination）', () => {
     });
     const contract = sqlGet<{ is_active: number }>(fx.sqlite, 'SELECT is_active FROM contracts WHERE player_id = 20');
     expect(contract?.is_active).toBe(0);
+    // PlayStyle 明细随解约全删（成长得来的也删：回到初始）
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 20')?.n).toBe(0);
     const t = sqlGet<{ status: string; tax: number; extra_fee: number }>(
       fx.sqlite,
       "SELECT status, tax, extra_fee FROM transfers WHERE type = 'termination' AND player_id = 20",
