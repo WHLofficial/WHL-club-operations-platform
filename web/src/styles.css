@@ -2003,6 +2003,14 @@ tbody tr:hover td {
   margin-bottom: 12px;
 }
 
+/* 球员库表格单元格不折行（增量 29）：12 列挤在约 980px 里时，「Baseline Utd」按空格断行、
+   「2金7银」按 CJK 任意断行，一行数据被撑成三四行。
+   只限球员库 —— 管理员页的表格靠折行塞长文案，不动。th 早已是 nowrap（见上方表格段）。
+   列宽不够就让 .table-wrap 横向滚动（它本来就是 overflow-x:auto）。 */
+.library-main td {
+  white-space: nowrap;
+}
+
 /* 生效条件摘要条：一类一条可删 chips（位置一条、银/金徽章各一条）。
    min-width:0 是为了让它在 .lib-bar 这个 flex 行里能被压缩换行（默认 min-width:auto 取
    min-content，选中一长串位置时会把翻页条挤出这一行而不是自己折行） */

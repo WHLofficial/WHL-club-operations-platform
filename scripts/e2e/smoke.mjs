@@ -267,6 +267,41 @@ async function main() {
   // 线上量级的文案再量（与数据无关），量完立刻还原。
   // 判据是「页面不出横向滚动条」：翻页条自己不会横向溢出（文案是 CJK，会换行），
   // 真正要防的是有人给它加 nowrap 或塞进一个撑宽的元素。
+  // 表格单元格不折行（增量 29）：12 列挤在约 980px 里时，「Baseline Utd」会按空格断行、
+  // 「2金7银」会按 CJK 任意断行。本机夹具只有 9 名球员、名字也短，折行在这里复现不出来 ⇒
+  // 这组断言锁的是口径（td 的 computed white-space 一律 nowrap、容器允许横向滚动），不是布局本身。
+  const tableLayoutProbe = () =>
+    page.evaluate(() => {
+      const wrap = document.querySelector('.library-main .table-wrap');
+      const table = wrap ? wrap.querySelector('table') : null;
+      const cells = [...document.querySelectorAll('.library-main tbody td')];
+      const head = document.querySelector('.library-main thead th');
+      return {
+        cells: cells.length,
+        notNowrap: cells.filter((el) => getComputedStyle(el).whiteSpace !== 'nowrap').length,
+        headNowrap: head ? getComputedStyle(head).whiteSpace === 'nowrap' : null,
+        overflowX: wrap ? getComputedStyle(wrap).overflowX : null,
+        // 不折行的代价：表格最小宽度超过容器就要横向滚动（口径是「宁可横滚，不要断行」）
+        tableW: table ? Math.round(table.getBoundingClientRect().width) : 0,
+        wrapW: wrap ? Math.round(wrap.getBoundingClientRect().width) : 0,
+      };
+    });
+
+  const assertTableNoWrap = (label, t) => {
+    console.log(
+      `   ${label} 表格：${t.cells} 个单元格，非 nowrap ${t.notNowrap}，表头 nowrap ${t.headNowrap}，` +
+        `容器 overflow-x ${t.overflowX}，宽 ${t.tableW}/${t.wrapW}`,
+    );
+    // 空集静默通过 = 什么都没验（比如表格没渲染出来）
+    assert(t.cells > 0, `${label}：没量到球员库表格单元格`);
+    assert(t.notNowrap === 0, `${label}：有 ${t.notNowrap} 个单元格仍会折行`);
+    assert(t.headNowrap === true, `${label}：表头也不是 nowrap（口径该统一到整表）`);
+    assert(
+      t.overflowX === 'auto' || t.overflowX === 'scroll',
+      `${label}：表格容器不横向滚动（${t.overflowX}），单元格不折行会把内容压出容器`,
+    );
+  };
+
   const pagerProbe = () =>
     page.evaluate(() => {
       const pager = document.querySelector('.library-pager');
@@ -499,6 +534,8 @@ async function main() {
           !pager.pageOverflow,
           `${label}：翻页条把页面撑出横向滚动（${pager.docScrollW} > ${pager.docClientW}）`,
         );
+
+        assertTableNoWrap(label, await tableLayoutProbe());
 
         const shot = join(SHOT_DIR, `e2e-players-${label}.png`);
         await page.screenshot({ path: shot, fullPage: false });
