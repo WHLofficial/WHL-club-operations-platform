@@ -619,6 +619,32 @@ td.num {
   font-variant-numeric: tabular-nums;
 }
 
+/* 球衣号编辑（增量 32）：卷宗表格里的内联输入——全局没有裸 input 样式，
+   label.field 那套是「标签在上、输入框占满整行」，塞进表格值列会撑破版式，
+   所以这里自带一套窄输入（只装 1–2 位数字） */
+.number-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.number-edit input {
+  width: 4.5em;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.number-edit input:focus {
+  outline: none;
+  border-color: var(--terracotta);
+}
+
 tbody tr:hover td {
   background: #f7f0e0;
 }

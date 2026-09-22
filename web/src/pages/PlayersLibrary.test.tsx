@@ -24,6 +24,7 @@ const CLUBS: ClubDirectoryRow[] = [
 function row(patch: Partial<PlayerLibraryRow> & { id: number; name: string }): PlayerLibraryRow {
   return {
     uid: `fc${200000 + patch.id}`,
+    number: null,
     clubId: 1,
     position: 'ST',
     age: 24,

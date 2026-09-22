@@ -255,6 +255,8 @@ export interface PlayerListItem {
   name: string;
   /** FC26db 官方缩写名（`E. Haaland`）：与显示名不同时列在名字下方小字 */
   officialName?: string;
+  /** 球衣号（增量 32）：1–99 的字符串，由所属俱乐部设定；没定号或已换队（换队即清空）时为 null */
+  number: string | null;
   clubId: number | null;
   position: string | null;
   age: number | null;
@@ -483,6 +485,7 @@ export interface SquadCompliance {
 export interface SquadPlayerRow {
   id: number;
   name: string;
+  number: string | null;
   position: string | null;
   age: number | null;
   ca: number | null;

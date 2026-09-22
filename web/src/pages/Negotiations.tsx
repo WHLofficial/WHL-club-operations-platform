@@ -6,6 +6,7 @@ import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../lib/api.ts';
 import { useToast } from '../lib/toast.tsx';
+import { qk } from '../lib/queries.ts';
 
 const SOURCE_LABEL: Record<string, string> = {
   negotiation: '报价成约',
@@ -48,11 +49,14 @@ export default function Negotiations() {
     : '';
   const refresh = () => qc.invalidateQueries({ queryKey: ['negotiations', 'mine'] });
 
+  const [justSigned, setJustSigned] = useState<{ id: number; name: string } | null>(null);
   const active = useMemo(() => (sessions ?? []).filter((s) => s.status === 'active'), [sessions]);
   const done = useMemo(() => (sessions ?? []).filter((s) => s.status !== 'active'), [sessions]);
 
-  async function afterSettled(msg: string) {
+  // 成约即过户 ⇒ 顺手把新援的球衣号定了（增量 32）。号码不是必填，所以留「先跳过」。
+  async function afterSettled(msg: string, player: { id: number; name: string }) {
     show(msg);
+    setJustSigned(player);
     await refresh();
   }
 
@@ -66,6 +70,8 @@ export default function Negotiations() {
       </p>
       {loadError && <div className="banner warn">{loadError}</div>}
       {toastNode}
+
+      {justSigned !== null && <NumberPrompt player={justSigned} onDone={() => setJustSigned(null)} />}
 
       {sessions === null && !loadError && <p className="muted">正在翻谈判夹…</p>}
 
@@ -120,6 +126,67 @@ export default function Negotiations() {
   );
 }
 
+/* ---------- 成约后的球衣号（增量 32） ---------- */
+
+// 成约那一刻球员就过户了，号码是俱乐部的 ⇒ 就地让教练定号，省得回头翻球员卡。
+// 可以跳过：合同页签随时能补，所以这里不拦路，也不校验同队重复之外的东西（后端把关）。
+function NumberPrompt({ player, onDone }: { player: { id: number; name: string }; onDone: () => void }) {
+  const { show } = useToast();
+  const qc = useQueryClient();
+  const [num, setNum] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (busy || num === '') return;
+    setBusy(true);
+    try {
+      const res = await apiPost<{ ok: boolean; number: string | null }>(`/api/club/players/${player.id}/number`, {
+        number: Number(num),
+      });
+      show(`${player.name} 定为 ${res.number} 号。`);
+      // 阵容表的号码列吃 /api/club/squad
+      void qc.invalidateQueries({ queryKey: qk.squad });
+      onDone();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '定号失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h3>
+        给 {player.name} 定球衣号
+        <span className="badge green">新援</span>
+      </h3>
+      <p className="hint">球员已经过户到你的队里。定个 1–99 的号；不着急也可以先跳过，之后在球员卡的合同页签补。</p>
+      <div className="inline-form">
+        <div className="field">
+          <label htmlFor="new-player-number">球衣号</label>
+          <input
+            id="new-player-number"
+            className="mono"
+            type="number"
+            min="1"
+            max="99"
+            step="1"
+            value={num}
+            placeholder="1–99"
+            onChange={(e) => setNum(e.target.value)}
+          />
+        </div>
+        <button className="btn" type="button" disabled={busy || num === ''} onClick={save}>
+          {busy ? '保存中…' : '定号'}
+        </button>
+        <button className="btn btn-ghost" type="button" disabled={busy} onClick={onDone}>
+          先跳过
+        </button>
+      </div>
+    </section>
+  );
+}
+
 /* ---------- 单个进行中的会话 ---------- */
 
 function SessionCard({
@@ -130,7 +197,7 @@ function SessionCard({
 }: {
   session: NegotiationSession;
   onChanged: () => Promise<void>;
-  onSettled: (msg: string) => Promise<void>;
+  onSettled: (msg: string, player: { id: number; name: string }) => Promise<void>;
   onError: (msg: string) => void;
 }) {
   const s = session;
@@ -264,7 +331,7 @@ function OfferStep({
   session: NegotiationSession;
   lastOffer: number | null;
   onChanged: () => Promise<void>;
-  onSettled: (msg: string) => Promise<void>;
+  onSettled: (msg: string, player: { id: number; name: string }) => Promise<void>;
   onError: (msg: string) => void;
 }) {
   const { show } = useToast();
@@ -294,7 +361,7 @@ function OfferStep({
         await onChanged();
         show(outcomeMessage(res), res.risk === true);
       } else {
-        await onSettled(outcomeMessage(res));
+        await onSettled(outcomeMessage(res), { id: session.player.id, name: session.player.name });
       }
       setWage('');
     } catch (err) {
@@ -309,7 +376,7 @@ function OfferStep({
     setBusy(true);
     try {
       const res = await apiPost<TraineeSignResult>(`/api/negotiations/${session.id}/trainee`, {});
-      await onSettled(res.message);
+      await onSettled(res.message, { id: session.player.id, name: session.player.name });
     } catch (err) {
       onError(err instanceof Error ? err.message : '签约失败');
     } finally {

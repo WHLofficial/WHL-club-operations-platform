@@ -22,6 +22,7 @@ interface OwnedPlayerRow {
   id: number;
   name: string;
   display_name: string | null;
+  number: string | null;
   position: string | null;
   age: number | null;
   ca: number | null;
@@ -36,7 +37,7 @@ interface OwnedPlayerRow {
 
 async function loadOwnedPlayers(env: Env, clubId: number): Promise<OwnedPlayerRow[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, name, display_name, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
+    `SELECT id, name, display_name, number, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
      FROM players WHERE club_id = ? ORDER BY id LIMIT 500`,
   )
     .bind(clubId)
@@ -119,6 +120,7 @@ app.get('/club/squad', async (c) => {
       return {
         id: p.id,
         name: rowDisplayName(p),
+        number: p.number,
         position: p.position,
         age: p.age,
         ca: p.ca,
@@ -154,6 +156,63 @@ app.get('/club/squad', async (c) => {
           tier: rules.tier,
         },
   });
+});
+
+// POST /api/club/players/:id/number —— 给本队球员定球衣号（增量 32；传 null / 空串 = 清号）
+// 号码属于俱乐部：换队与解约时由 transfers.ts 一并清空，所以这里只认「球员现在就在我的队里」。
+// 同队不重复是查后写：players 是全局表，D1 里没有「按 club_id 分区的唯一索引」可用
+//（唯一索引只认列与常量，不认关联子查询），20 队 / 570 人的规模上一次点查足够。
+app.post('/club/players/:id/number', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+  const playerId = Number(c.req.param('id'));
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
+
+  const body = (await c.req.raw.json().catch(() => null)) as { number?: unknown } | null;
+  if (!body) throw new HttpError(400, '请求格式不对');
+  // 清号（null / 空串）是正常操作：刚签下的球员可以先跳过，号码换人也得先把旧的摘掉
+  let number: string | null = null;
+  if (body.number !== null && body.number !== undefined && body.number !== '') {
+    const n = Number(body.number);
+    if (!Number.isInteger(n) || n < 1 || n > 99) throw new HttpError(400, '球衣号要填 1–99 的整数');
+    number = String(n);
+  }
+
+  const owned = await c.env.DB.prepare(
+    'SELECT id, name, display_name, number FROM players WHERE id = ? AND club_id = ?',
+  )
+    .bind(playerId, club.id)
+    .first<{ id: number; name: string; display_name: string | null; number: string | null }>();
+  if (!owned) throw new HttpError(404, '这名球员不在你的队里');
+
+  if (number !== null) {
+    const clash = await c.env.DB.prepare(
+      'SELECT name, display_name FROM players WHERE club_id = ? AND number = ? AND id != ? LIMIT 1',
+    )
+      .bind(club.id, number, playerId)
+      .first<{ name: string; display_name: string | null }>();
+    if (clash) throw new HttpError(409, `${number} 号已经给 ${rowDisplayName(clash)} 了，先给他换个号`);
+  }
+
+  const audit = createAuditStatement(c.env.DB);
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE players SET number = ?, updated_at = ${nowSql()} WHERE id = ? AND club_id = ?`).bind(
+      number,
+      playerId,
+      club.id,
+    ),
+    audit({
+      actor: user.id,
+      action: 'player_number',
+      targetType: 'player',
+      targetId: playerId,
+      before: { number: owned.number },
+      after: { number },
+    }),
+  ]);
+
+  return c.json({ ok: true, id: playerId, number });
 });
 
 function parseIdList(raw: unknown, label: string): number[] {

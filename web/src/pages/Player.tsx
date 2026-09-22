@@ -10,6 +10,7 @@ import {
   GROWTH_EVENT_LABEL,
   type GrowthDetail,
   type LevelUpResult,
+  type MyClubOverview,
   type PlayerDetail,
   type PlayerTransfersResponse,
   type UpgradePlanDto,
@@ -40,6 +41,8 @@ import {
   type PlaystyleSlot,
 } from '../../../src/core/fc26.ts';
 import { useToast } from '../lib/toast.tsx';
+import { qk } from '../lib/queries.ts';
+import { useAuth } from '../lib/auth.tsx';
 
 type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers';
 
@@ -184,12 +187,25 @@ export default function Player() {
   const [picks, setPicks] = useState<number[]>([]);
   const [chinaPicks, setChinaPicks] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+  // 球衣号草稿（增量 32）：null = 还没动过，显示服务端的值；改过之后是本地输入
+  const [numberDraft, setNumberDraft] = useState<string | null>(null);
+  const [numberBusy, setNumberBusy] = useState(false);
 
   const dataQuery = useQuery({
     queryKey: ['player', id ?? ''],
     queryFn: () => api<PlayerDetail>(`/api/players/${id}`),
     enabled: id !== undefined,
   });
+  // 我的俱乐部（只为球衣号编辑权）：与俱乐部页共用 queryKey，教练在别处拉过就不重复请求；
+  // 非教练不拉（enabled: false）——球员页是公开页，别让每个登录用户都多打一次 /api/me/club。
+  const { user } = useAuth();
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
+  const myClubQuery = useQuery({
+    queryKey: qk.myClub,
+    queryFn: () => api<MyClubOverview>('/api/me/club'),
+    enabled: isCoach,
+  });
+  const myClubId = myClubQuery.data?.club?.id ?? null;
   // 成长记录拉失败按 null 展示（旧行为 .catch(() => setGrowth(null))）
   const growthQuery = useQuery({
     queryKey: ['player', id ?? '', 'growth'],
@@ -299,6 +315,28 @@ export default function Player() {
   }
 
   const { player, club, contract } = data;
+  // 球衣号（增量 32）：号码属于俱乐部，只有球员现属俱乐部的教练能改；
+  // 后端同样按「球员现在就在我的队里」把关，这里只是别把按钮露给外人
+  const canEditNumber = isCoach && club !== null && myClubId === club.id;
+
+  async function saveNumber(raw: string) {
+    if (numberBusy) return;
+    setNumberBusy(true);
+    try {
+      const res = await apiPost<{ ok: boolean; number: string | null }>(`/api/club/players/${player.id}/number`, {
+        number: raw === '' ? null : Number(raw),
+      });
+      show(res.number === null ? '球衣号已清空。' : `球衣号定为 ${res.number} 号。`);
+      setNumberDraft(null);
+      refreshAll();
+      // 阵容表的号码列吃 /api/club/squad，改完一起失效
+      void qc.invalidateQueries({ queryKey: qk.squad });
+    } catch (err) {
+      show(err instanceof Error ? err.message : '改号失败', true);
+    } finally {
+      setNumberBusy(false);
+    }
+  }
   const attrs = player.gameAttrs ?? {};
   const nation = nationName(attrs['naID']);
   // 六维雷达：原在属性页签里（增量 6.1 d11），增量 30 搬到左栏球员卡下方常驻——数据仍在页面级算一次
@@ -399,52 +437,88 @@ export default function Player() {
           {tab === 'profile' && (
             <>
               <h3>合同卷宗</h3>
-              {contract ? (
-                <div className="table-wrap">
-                  <table className="dossier-table">
-                    <tbody>
-                      <tr>
-                        <th>违约金</th>
-                        <td className="num mono">{contract.releaseFee === null ? '—' : `${contract.releaseFee.toFixed(2)} m`}</td>
-                      </tr>
-                      <tr>
-                        <th>工资</th>
-                        <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)} m / 半赛季`}</td>
-                      </tr>
-                      <tr>
-                        <th>签约赛季</th>
-                        <td className="mono">
-                          {contract.signedSeason === null ? '—' : `S${contract.signedSeason}${contract.signedWindowSeq ? ` 第 ${contract.signedWindowSeq} 窗` : ''}`}
-                        </td>
-                      </tr>
-                      <tr>
-                        <th>效力时长</th>
-                        <td className="mono">{contract.serviceSeasons.toFixed(1)} 赛季</td>
-                      </tr>
-                      <tr>
-                        <th>保护期</th>
-                        <td className="mono">{contract.protected ? '保护中' : '非保护'}</td>
-                      </tr>
-                      <tr>
-                        <th>合同类型</th>
-                        <td>{CONTRACT_TYPE_LABEL[contract.contractType] ?? contract.contractType}</td>
-                      </tr>
-                      <tr>
-                        <th>成约方式</th>
-                        <td>
-                          {contract.source ? (
-                            <span className={`stamp-inline ${contract.source === 'forced' || contract.source === 'direct' ? 'stamp-inline-force' : 'stamp-inline-ok'}`}>
-                              {SOURCE_LABEL[contract.source] ?? contract.source}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
+              <div className="table-wrap">
+                <table className="dossier-table">
+                  <tbody>
+                    {/* 球衣号（增量 32）：号码是俱乐部的东西，本队教练在这里填/改/清；
+                        别人只读，没定号显示 —（换队/解约后后端会把它清空） */}
+                    <tr>
+                      <th>球衣号</th>
+                      <td className="mono">
+                        {canEditNumber ? (
+                          <span className="number-edit">
+                            <input
+                              aria-label="球衣号"
+                              inputMode="numeric"
+                              placeholder="1–99"
+                              value={numberDraft ?? player.number ?? ''}
+                              onChange={(e) => setNumberDraft(e.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              disabled={numberBusy || (numberDraft ?? player.number ?? '') === (player.number ?? '')}
+                              onClick={() => void saveNumber(numberDraft ?? player.number ?? '')}
+                            >
+                              {numberBusy ? '保存中…' : '保存'}
+                            </button>
+                            {player.number !== null && (
+                              <button type="button" className="btn btn-sm btn-ghost" disabled={numberBusy} onClick={() => void saveNumber('')}>
+                                清号
+                              </button>
+                            )}
+                          </span>
+                        ) : (
+                          (player.number ?? '—')
+                        )}
+                      </td>
+                    </tr>
+                    {contract && (
+                      <>
+                        <tr>
+                          <th>违约金</th>
+                          <td className="num mono">{contract.releaseFee === null ? '—' : `${contract.releaseFee.toFixed(2)} m`}</td>
+                        </tr>
+                        <tr>
+                          <th>工资</th>
+                          <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)} m / 半赛季`}</td>
+                        </tr>
+                        <tr>
+                          <th>签约赛季</th>
+                          <td className="mono">
+                            {contract.signedSeason === null ? '—' : `S${contract.signedSeason}${contract.signedWindowSeq ? ` 第 ${contract.signedWindowSeq} 窗` : ''}`}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>效力时长</th>
+                          <td className="mono">{contract.serviceSeasons.toFixed(1)} 赛季</td>
+                        </tr>
+                        <tr>
+                          <th>保护期</th>
+                          <td className="mono">{contract.protected ? '保护中' : '非保护'}</td>
+                        </tr>
+                        <tr>
+                          <th>合同类型</th>
+                          <td>{CONTRACT_TYPE_LABEL[contract.contractType] ?? contract.contractType}</td>
+                        </tr>
+                        <tr>
+                          <th>成约方式</th>
+                          <td>
+                            {contract.source ? (
+                              <span className={`stamp-inline ${contract.source === 'forced' || contract.source === 'direct' ? 'stamp-inline-force' : 'stamp-inline-ok'}`}>
+                                {SOURCE_LABEL[contract.source] ?? contract.source}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </tr>
+                      </>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {!contract && (
                 <div className="empty-state">
                   <p className="muted">卷宗里还没有合同。签约、续约之后，条款都会收录在这里。</p>
                 </div>

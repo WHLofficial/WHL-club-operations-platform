@@ -148,6 +148,7 @@ function detailFixture(patch: Partial<ClubDetailDto> = {}): ClubDetailDto {
 function rosterRow(patch: Partial<PlayerLibraryRow> & { id: number; name: string }): PlayerLibraryRow {
   return {
     uid: `fc${patch.id}`,
+    number: null,
     clubId: 1,
     position: 'CM',
     age: 24,

@@ -568,7 +568,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   const where = filters.length + cursorConds.length > 0 ? `WHERE ${[...filters, ...cursorConds].join(' AND ')}` : '';
   const needSortKey = sortRaw !== 'id';
   const rows = await c.env.DB.prepare(
-    `SELECT players.id, players.uid, players.name, players.display_name, players.club_id, players.position, players.age, players.foot,
+    `SELECT players.id, players.uid, players.name, players.display_name, players.number, players.club_id, players.position, players.age, players.foot,
             ${caExpr} AS ca, ${paExpr} AS pa, players.ca AS cur_ca, players.pa AS cur_pa,
             players.base_ca, players.fc_id,
             players.prestige, players.market_value, players.status,
@@ -594,6 +594,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       uid: string;
       name: string;
       display_name: string | null;
+      number: string | null;
       club_id: number | null;
       position: string | null;
       age: number | null;
@@ -659,6 +660,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     // `officialName` = FC26db 缩写名，前端在标题下用小字标注，相同时不显示
     name: rowDisplayName(r),
     officialName: r.name,
+    number: r.number,
     clubId: r.club_id,
     clubName: r.club_name,
     position: r.position,
@@ -795,6 +797,7 @@ interface PlayerDetailRow {
   uid: string;
   name: string;
   display_name: string | null;
+  number: string | null;
   club_id: number | null;
   position: string | null;
   foot: number;
@@ -818,7 +821,7 @@ interface PlayerDetailRow {
 }
 
 const PLAYER_DETAIL_COLUMNS =
-  `id, fc_id, uid, name, display_name, club_id, position, foot, age, ca, pa, growable, prestige, market_value,
+  `id, fc_id, uid, name, display_name, number, club_id, position, foot, age, ca, pa, growable, prestige, market_value,
    status, growth_tier, growth_xp, is_future_star, china_plan, agent_tier,
    badges_silver, badges_gold, game_attrs, created_at, updated_at`;
 
@@ -875,6 +878,7 @@ app.get('/players/:id', async (c) => {
       uid: p.uid,
       name: rowDisplayName(p),
       officialName: p.name,
+      number: p.number,
       clubId: p.club_id,
       position: p.position,
       foot: p.foot,

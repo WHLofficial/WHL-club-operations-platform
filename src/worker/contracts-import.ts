@@ -247,9 +247,10 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
     if (claimIds.length > 0) {
       const ph = claimIds.map(() => '?').join(', ');
       statements.push(
-        // 认领只作用于仍无归属、或仍挂 CPU 队的行：分类与落库之间被人抢走也不会错绑
+        // 认领只作用于仍无归属、或仍挂 CPU 队的行：分类与落库之间被人抢走也不会错绑。
+        // 号码一并清空（增量 32）：换队即失效，新东家自己定号
         env.DB.prepare(
-          `UPDATE players SET club_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          `UPDATE players SET club_id = ?, number = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
            WHERE id IN (${ph}) AND (club_id IS NULL OR club_id IN ${CPU_CLUB_IDS_SQL})`,
         ).bind(payload.clubId, ...claimIds),
       );

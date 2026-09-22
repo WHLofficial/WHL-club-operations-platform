@@ -596,6 +596,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
               <table>
                 <thead>
                   <tr>
+                    <th className="num">号码</th>
                     <th>球员</th>
                     <th>位置</th>
                     <th className="num">年龄</th>
@@ -671,6 +672,8 @@ function SquadRow({
   const traineeBlocked = !player.growable || (player.pa !== null && player.ca !== null && player.pa - player.ca <= 0);
   return (
     <tr className={`${value === 'trainee' ? 'row-trainee' : ''}${flags !== undefined && flags.length > 0 ? ' row-flagged' : ''}`.trim() || undefined}>
+      {/* 号码只读（增量 32）：定号/改号在球员卡的合同页签，那里才有归属校验的上下文 */}
+      <td className="num mono">{player.number ?? '—'}</td>
       <td>
         <Link to={`/players/${player.id}`}>{player.name}</Link>
         {flags !== undefined &&

@@ -254,7 +254,7 @@ describe('解约（termination）', () => {
     const fx = await seedBypass();
     // 解约前攒点成长：XP/已消费级数/徽章 + 两条进球历史 —— 解约后数值全零、历史一行不删
     fx.sqlite.exec(`
-      UPDATE players SET growth_xp = 52, levels_applied = 2, badges_silver = 4, badges_gold = 1 WHERE id = 20;
+      UPDATE players SET growth_xp = 52, levels_applied = 2, badges_silver = 4, badges_gold = 1, number = '7' WHERE id = 20;
       INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
         (20, 1, 'silver', 1, 'growth', '2026-07-01T00:00:00Z'), (20, 2, 'silver', 2, 'china', '2026-07-02T00:00:00Z');
       INSERT INTO growth_events (player_id, match_ref, event_type, value, xp, source, created_at) VALUES
@@ -271,16 +271,18 @@ describe('解约（termination）', () => {
     const player = sqlGet<{
       club_id: number | null;
       status: string;
+      number: string | null;
       ca: number | null;
       growth_xp: number;
       levels_applied: number;
       badges_silver: number;
       badges_gold: number;
-    }>(fx.sqlite, 'SELECT club_id, status, ca, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = 20');
-    // 恢复初始：CA 回 base_ca，成长所得（XP/已消费级数/徽章）一并归零
+    }>(fx.sqlite, 'SELECT club_id, status, number, ca, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = 20');
+    // 恢复初始：CA 回 base_ca，成长所得（XP/已消费级数/徽章）一并归零；号码随归属一起清掉
     expect(player).toEqual({
       club_id: null,
       status: 'free',
+      number: null,
       ca: 72,
       growth_xp: 0,
       levels_applied: 0,

@@ -200,6 +200,8 @@ describe('报价判定三路径', () => {
   it('成功：报价 ≥ E 必成，成约即过户写合同', async () => {
     const fx = await seedSigning(freshEnv());
     await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    // 球衣号是俱乐部的东西：换队后新东家重新定号，旧号必须清掉
+    fx.sqlite.exec("UPDATE players SET number = '11' WHERE id = 10");
     fx.env.rng = () => 0.9;
     const res = await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: 3.11 }, 'tok-coach2', fx.env);
     expect(res.status).toBe(200);
@@ -213,9 +215,10 @@ describe('报价判定三路径', () => {
         'SELECT wage, release_fee, source, contract_type FROM contracts WHERE player_id = 10 AND is_active = 1',
       ),
     ).toEqual({ wage: 3.11, release_fee: 20, source: 'negotiation', contract_type: 'formal' });
-    expect(sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 10')).toEqual({
+    expect(sqlGet<{ club_id: number; status: string; number: string | null }>(fx.sqlite, 'SELECT club_id, status, number FROM players WHERE id = 10')).toEqual({
       club_id: fx.buyerClub,
       status: 'normal',
+      number: null,
     });
     expect(sqlGet<{ balance: number }>(fx.sqlite, `SELECT balance FROM ledger_accounts WHERE club_id = ${fx.buyerClub}`)?.balance).toBe(35);
     // 已结束的会话不能再报价

@@ -1192,6 +1192,78 @@ describe('注册名单提交与校验（附录 A〔2〕）', () => {
   });
 });
 
+// 球衣号（增量 32）：号码属于俱乐部——只有球员现属俱乐部的教练能改，
+// 同队不重复，换队/解约时由 transfers.ts 清空（那条在 negotiation-routes 里验）。
+describe('球衣号设定（增量 32）', () => {
+  const numberSql = 'SELECT number FROM players WHERE id = 1';
+
+  it('定号/改号/清号：落库 + 审计留痕 + 阵容回显', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+
+    const set = await post('/api/club/players/1/number', { number: 9 }, 'tok-coach', fx.env);
+    expect(set.status).toBe(200);
+    expect((await set.json()) as unknown).toMatchObject({ ok: true, id: 1, number: '9' });
+    // 存成字符串：原列是 TEXT，前端显示不用再判型
+    expect(sqlGet<{ number: string | null }>(fx.sqlite, numberSql)).toEqual({ number: '9' });
+
+    const change = await post('/api/club/players/1/number', { number: '10' }, 'tok-coach', fx.env);
+    expect((await change.json()) as unknown).toMatchObject({ number: '10' });
+    expect(sqlGet<{ number: string | null }>(fx.sqlite, numberSql)).toEqual({ number: '10' });
+
+    // 清号是正常操作（签下球员先跳过、号码换人都用得上）
+    const cleared = await post('/api/club/players/1/number', { number: null }, 'tok-coach', fx.env);
+    expect((await cleared.json()) as unknown).toMatchObject({ number: null });
+    expect(sqlGet<{ number: string | null }>(fx.sqlite, numberSql)).toEqual({ number: null });
+    expect((await post('/api/club/players/1/number', { number: '' }, 'tok-coach', fx.env)).status).toBe(200);
+
+    const audits = sqlAll<{ before: string; after: string }>(
+      fx.sqlite,
+      "SELECT before, after FROM audit_log WHERE action = 'player_number' ORDER BY id",
+    );
+    expect(audits).toHaveLength(4);
+    expect(JSON.parse(audits[0].before)).toEqual({ number: null });
+    expect(JSON.parse(audits[0].after)).toEqual({ number: '9' });
+    expect(JSON.parse(audits[3].before)).toEqual({ number: null });
+    expect(JSON.parse(audits[3].after)).toEqual({ number: null });
+
+    await post('/api/club/players/2/number', { number: 9 }, 'tok-coach', fx.env);
+    const squad = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
+      players: { id: number; number: string | null }[];
+    };
+    expect(squad.players.find((p) => p.id === 2)).toMatchObject({ number: '9' });
+    expect(squad.players.find((p) => p.id === 1)).toMatchObject({ number: null });
+  });
+
+  it('越界与重复：1–99 之外 400、同队撞号 409、别队球员 404、观众 403', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+
+    for (const bad of [0, 100, 1.5, -3]) {
+      const res = await post('/api/club/players/1/number', { number: bad }, 'tok-coach', fx.env);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toContain('1–99');
+    }
+
+    await post('/api/club/players/1/number', { number: 9 }, 'tok-coach', fx.env);
+    const clash = await post('/api/club/players/2/number', { number: 9 }, 'tok-coach', fx.env);
+    expect(clash.status).toBe(409);
+    // 撞号文案点名占号的人（显示名口径：种子没写 display_name ⇒ 回落官方名）
+    expect(((await clash.json()) as { error: string }).error).toContain('一线1');
+    expect(sqlGet<{ number: string | null }>(fx.sqlite, 'SELECT number FROM players WHERE id = 2')).toEqual({ number: null });
+
+    // 改自己的号不算撞号（同一个人先占 9 再存 9）
+    expect((await post('/api/club/players/1/number', { number: 9 }, 'tok-coach', fx.env)).status).toBe(200);
+
+    // 别的队的球员：种子把 23 人都挂在 club 1 上，这里另建一支队来试越权
+    fx.sqlite.exec("INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '切尔西', 'premier', 'active')");
+    fx.sqlite.exec("INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (2, 5, '2026-01-01T00:00:00Z')");
+    expect((await post('/api/club/players/1/number', { number: 3 }, 'tok-coach2', fx.env)).status).toBe(404);
+    expect((await post('/api/club/players/1/number', { number: 3 }, 'tok-viewer', fx.env)).status).toBe(403);
+    expect((await post('/api/club/players/999/number', { number: 3 }, 'tok-coach', fx.env)).status).toBe(404);
+  });
+});
+
 describe('注册快照与准入体检（管理端）', () => {
   it('快照按俱乐部分组；缺省取最新赛季；教练 403', async () => {
     const fx = freshEnv();

@@ -202,11 +202,13 @@ export async function completeTransfer(
     }
   }
   if (!amendment) {
-    // 球员归属变更（普通/激活/拍卖/海捞）；本队留人不动 players
+    // 球员归属变更（普通/激活/拍卖/海捞）；本队留人不动 players。
+    // 号码随归属清空（增量 32）：球衣号是俱乐部的东西，换队后新东家重新定号，
+    // 留着旧号会让「同队不重复」在两个队之间打架、也会把旧号带进新队的阵容表。
     statements.push(
       db
         .prepare(
-          `UPDATE players SET club_id = ?, status = ?, updated_at = ${nowSql()}
+          `UPDATE players SET club_id = ?, status = ?, number = NULL, updated_at = ${nowSql()}
            WHERE id = ? AND (club_id IS ? OR club_id = ?)`,
         )
         .bind(transfer.to_club_id, playerStatus, transfer.player_id, transfer.from_club_id, transfer.from_club_id),
@@ -375,7 +377,7 @@ export async function completeTermination(
     // 重放安全：players UPDATE 有 club_id 闸，reset 事件靠 UNIQUE(player_id, match_ref, event_type) 去重。
     db
       .prepare(
-        `UPDATE players SET club_id = NULL, status = 'free', ca = COALESCE(base_ca, ca),
+        `UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE(base_ca, ca),
            growth_xp = 0, levels_applied = 0, badges_silver = 0, badges_gold = 0, updated_at = ${nowSql()}
          WHERE id = ? AND club_id = ?`,
       )
