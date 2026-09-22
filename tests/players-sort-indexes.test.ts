@@ -6,9 +6,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { resetGuards } from '../src/lib/guard.ts';
+import { sqlFold } from '../src/core/name-fold.ts';
 import { applyMigrations, createTestD1, createTestKV } from './d1.ts';
 
 // [排序键, 索引名]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
+// + 0033 一条（name，增量 32 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
 const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string]> = [
   ['ca', 'idx_players_sort_ca'],
   ['pa', 'idx_players_sort_pa'],
@@ -17,6 +19,7 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string]> = [
   ['prestige', 'idx_players_sort_prestige'],
   ['club', 'idx_players_sort_club'],
   ['status', 'idx_players_sort_status'],
+  ['name', 'idx_players_sort_name'],
 ];
 
 let shared: DatabaseSync | null = null;
@@ -109,7 +112,7 @@ describe('排序表达式索引与查询表达式同源（增量 28）', () => {
     });
   }
 
-  it('七条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('八条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
     const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
     const rows = sqlite
@@ -117,5 +120,19 @@ describe('排序表达式索引与查询表达式同源（增量 28）', () => {
       .all() as { name: string; sql: string }[];
     expect(rows.map((r) => r.name)).toEqual([...INDEXED_SORTS.map(([, index]) => index)].sort());
     for (const row of rows) expect(row.sql.replace(/\s+/g, ' ')).toMatch(/,\s*id\s*\)\s*$/);
+  });
+
+  // 折叠表达式含 5 个不可见字符（00ad 软连字符、0301/0308 组合记号，见 src/core/name-fold.ts 的码位表），
+  // 手写进 SQL 迁移时极易被编辑器/工具静默吃掉 —— 少一个字符索引就建得出来、但永远匹配不上查询表达式，
+  // 于是退回全表扫而功能测试全绿。所以这里把迁移里那行表达式锁到 core 的 sqlFold 输出上。
+  // 索引侧写非限定列名是 SQLite 的硬要求（限定名报 `the "." operator prohibited in index expressions`），
+  // 而查询侧写限定名；两者被优化器认作同一表达式这件事由上面三条 EXPLAIN 用例证明。
+  it('姓名索引的折叠表达式与 core 同源（SQLite 禁止索引表达式里的限定列名，故索引侧写非限定名）', () => {
+    const sqlite = baseSqlite();
+    const row = sqlite
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_players_sort_name'`)
+      .get() as { sql: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.sql).toContain(sqlFold('COALESCE(display_name, name)'));
   });
 });

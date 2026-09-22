@@ -97,6 +97,7 @@ const MIGRATION_FILES = [
   '0030_players_club_ca_index.sql',
   '0031_player_playstyles.sql',
   '0032_players_display_name_number.sql',
+  '0033_players_name_sort_index.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

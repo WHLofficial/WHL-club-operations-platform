@@ -1,0 +1,34 @@
+-- 增量 32 步骤 10：文本排序键（球员库表头「姓名」列）的表达式索引
+--
+-- 为什么现在做：增量 28 的读额度审计（scripts/d1-read-audit/README.md:64/221）把 sort=name 记为
+-- 37,635 行/次的全表扫——0027 只覆盖 ca/pa/age/market_value，0029 只覆盖 prestige/club/status，
+-- 姓名列从来就没有过索引（0027 之前是裸列，之后是 sqlFold 折叠表达式，两者都用不上 B-tree）。
+-- 本增量的步骤 3 把排序键从折叠的官方缩写名改成折叠的**显示名**（COALESCE(display_name, name)，
+-- 见 src/worker/routes/players.ts buildSortExprs 的 name 键），表达式换了一次，正是一并补索引的时机。
+--
+-- 表达式为什么长这样（两个非显然的约束，都已在真引擎上实测）：
+--  1. 链深：折叠是线性嵌套的 REPLACE，87 项（src/core/name-fold.ts 的 NAME_FOLD），链外约 4 层，
+--     D1 的表达式树深度上限 100。实测：本地 D1 apply 0032 后 CREATE INDEX 这条表达式成功，
+--     且 WHERE / ORDER BY / keyset 游标（表达式出现三次）三种形状都通过。
+--  2. 限定列名：**索引表达式里禁止 `.` 限定符**。写成 COALESCE(players.display_name, players.name)
+--     会直接报 `the "." operator prohibited in index expressions`（offset 1955）。所以索引用非限定列名；
+--     而查询侧（路由）用限定名——实测优化器仍认作同一表达式：
+--       ORDER BY 形状 → SCAN players USING INDEX idx_players_sort_name
+--       游标形状     → SEARCH players USING INDEX idx_players_sort_name (<expr>>?)
+--     这条「同源性」不靠文本比对保证，靠 tests/players-sort-indexes.test.ts 的 EXPLAIN QUERY PLAN
+--     锁死（INDEXED_SORTS 里 name 一条），表达式一旦漂移该用例立刻红。
+--
+-- 尾列 id：keyset 游标是 (排序键, id) 双列比较，缺了它带 cursor 的页仍会临时排序。
+--
+-- ⛔ 下面那一行 CREATE INDEX 里的表达式**不要手改**（也别让编辑器重新格式化它）：折叠表里有 5 个
+--   不可见字符（00ad 软连字符、0301/0308 组合记号，见 src/core/name-fold.ts 的码位表），手写/复制时
+--   极易被静默吃掉——少一个字符，索引照样建得出来，但永远匹配不上查询表达式，于是静默退回全表扫，
+--   而所有功能测试全绿。这行是用 scripts 侧从 sqlFold() 生成后落盘的（生成即逐字同源），
+--   并由 tests/players-sort-indexes.test.ts 的最后一条用例把它锁回 sqlFold('COALESCE(display_name, name)')：
+--   字符一旦漂移，那条用例立刻红。要改表达式就改 src/core/name-fold.ts，然后重新生成这一行。
+--   变异验证（2026-09-22，node:sqlite 2000 行 + 真引擎本地 D1）：无索引 / 索引建在旧表达式
+--   （折叠 players.name）/ 表达式错一个字符，三种情况都实测退化成 TEMP B-TREE，所以 EXPLAIN 断言不是空转。
+-- ⚠️ 部署核查：本条索引远端 apply 一次性写 ≈ 18301 行；审计报告要求索引分批 + 分天、每批 ≤3 条
+--   （免费档 10 万行/日，本增量自留 6 万/日），故本迁移只含这一条。
+-- 回滚：DROP INDEX idx_players_sort_name;
+CREATE INDEX idx_players_sort_name ON players(CASE WHEN COALESCE(display_name, name) GLOB '*[^ -~]*' THEN lower(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(display_name, name), '­', ''), 'À', 'a'), 'Á', 'a'), 'Â', 'a'), 'Å', 'a'), 'Ç', 'c'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ö', 'o'), 'Ø', 'o'), 'Ü', 'u'), 'Þ', 'th'), 'ß', 'ss'), 'à', 'a'), 'á', 'a'), 'â', 'a'), 'ã', 'a'), 'ä', 'a'), 'å', 'a'), 'æ', 'ae'), 'ç', 'c'), 'è', 'e'), 'é', 'e'), 'ê', 'e'), 'ë', 'e'), 'í', 'i'), 'î', 'i'), 'ï', 'i'), 'ð', 'd'), 'ñ', 'n'), 'ò', 'o'), 'ó', 'o'), 'ô', 'o'), 'õ', 'o'), 'ö', 'o'), 'ø', 'o'), 'ù', 'u'), 'ú', 'u'), 'ü', 'u'), 'ý', 'y'), 'þ', 'th'), 'ă', 'a'), 'ą', 'a'), 'Ć', 'c'), 'ć', 'c'), 'ċ', 'c'), 'Č', 'c'), 'č', 'c'), 'Ď', 'd'), 'Đ', 'd'), 'ę', 'e'), 'ě', 'e'), 'ğ', 'g'), 'İ', 'i'), 'ı', 'i'), 'ķ', 'k'), 'Ľ', 'l'), 'ľ', 'l'), 'Ł', 'l'), 'ł', 'l'), 'ń', 'n'), 'ņ', 'n'), 'ň', 'n'), 'ő', 'o'), 'ř', 'r'), 'Ś', 's'), 'ś', 's'), 'Ş', 's'), 'ş', 's'), 'Š', 's'), 'š', 's'), 'ţ', 't'), 'ť', 't'), 'ů', 'u'), 'ű', 'u'), 'ź', 'z'), 'Ż', 'z'), 'ż', 'z'), 'Ž', 'z'), 'ž', 'z'), 'Ș', 's'), 'ș', 's'), 'Ț', 't'), 'ț', 't'), '́', ''), '̈', '')) ELSE lower(COALESCE(display_name, name)) END, id);
