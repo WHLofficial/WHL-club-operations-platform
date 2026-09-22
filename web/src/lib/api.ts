@@ -133,6 +133,107 @@ export interface ClubSummary {
   totalWage: number;
 }
 
+/** 分档统计的一档（年龄 / CA / 效力），服务端给什么档就渲染什么档，前端不重算边界 */
+export interface ClubBand {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface ClubSquadStructure {
+  size: number;
+  senior: number;
+  trainee: number;
+  avgCa: number | null;
+  maxCa: number | null;
+  avgPa: number | null;
+  /** 平均成长空间（pa − ca），只统计还有空间的人；全员到顶时为 null */
+  avgGrowth: number | null;
+  totalValue: number;
+  totalWage: number;
+  avgWage: number | null;
+  badgesSilver: number;
+  badgesGold: number;
+  /** 位置分布，按位置规范顺序出非零项；无法识别的位置归「未知」一项 */
+  byPosition: { position: string; count: number }[];
+  byAge: ClubBand[];
+  byCa: ClubBand[];
+}
+
+/** 合同结构：合同无固定到期日，只有保护期与效力赛季数，所以不叫「合同到期」 */
+export interface ClubContractStructure {
+  signed: number;
+  unprotected: number;
+  protectedCount: number;
+  /** 平均效力（赛季），0.5 的整数倍 */
+  avgYears: number | null;
+  byYears: ClubBand[];
+}
+
+export interface ClubTransferRow {
+  id: number;
+  type: string;
+  /** transfers.player_id 无 NOT NULL ⇒ 可能为空，为 null 时页面只出球员名不链档案 */
+  playerId: number | null;
+  playerName: string | null;
+  fromClubId: number | null;
+  fromClubName: string | null;
+  toClubId: number | null;
+  toClubName: string | null;
+  fee: number | null;
+  extraFee: number | null;
+  season: number | null;
+  windowSeq: number | null;
+  completedAt: string | null;
+}
+
+export interface ClubFormRow {
+  matchId: number;
+  season: number;
+  competitionType: string | null;
+  stageName: string | null;
+  /** result_confirmations.round 是 INTEGER（迁移 0009），不是轮次名 */
+  round: number | null;
+  homeTeam: string | null;
+  awayTeam: string | null;
+  scoreHome: number | null;
+  scoreAway: number | null;
+  penHome: number | null;
+  penAway: number | null;
+  /** 90 分钟口径：点球大战不改判定；双弃权双方都记负。拿不到本方队 id 时为 null */
+  result: 'win' | 'draw' | 'loss' | null;
+  finishedAt: string | null;
+}
+
+/** 球队详情（GET /api/clubs/:id，需登录）。阵容名单不在这里——前端复用 GET /api/players?club_id=N */
+export interface ClubDetail {
+  club: { id: number; name: string; isCpu: boolean; tier: 'premier' | 'second' | null; logoKey: string | null };
+  squad: ClubSquadStructure;
+  contracts: ClubContractStructure;
+  transfers: { incoming: ClubTransferRow[]; outgoing: ClubTransferRow[] };
+  form: { recent: ClubFormRow[]; wins: number; draws: number; losses: number };
+}
+
+/** 当季联赛排名（GET /api/clubs/:id/standing）。取不到时 standing 为 null、note 给原因 */
+export interface ClubStanding {
+  standing: {
+    tournamentId: number;
+    stageName: string | null;
+    groupName: string | null;
+    /** 名次按积分榜已排好的行序取下标（比赛系统 DTO 的 rank 字段恒为 0） */
+    position: number;
+    played: number | null;
+    won: number | null;
+    drawn: number | null;
+    lost: number | null;
+    goalsFor: number | null;
+    goalsAgainst: number | null;
+    pts: number | null;
+    pointsDeducted: number | null;
+  } | null;
+  note: string | null;
+}
+
 export interface PlayerListItem {
   id: number;
   uid: string;

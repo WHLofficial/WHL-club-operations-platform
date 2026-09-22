@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（增量 16 commit 4）。
 // 口径沿用增量 15 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type SquadOverview } from './api.ts';
+import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type PlayersLibraryResponse, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
@@ -10,6 +10,8 @@ export const qk = {
   squad: ['club', 'squad'] as const,
   clubsList: ['clubs', 'list'] as const,
   clubDetail: (id: number) => ['clubs', 'detail', id] as const,
+  clubStanding: (id: number) => ['clubs', 'standing', id] as const,
+  clubRoster: (id: number) => ['players', 'club-roster', id] as const,
   myBids: ['market', 'my-bids'] as const,
   board: (status: string) => ['market', 'board', status] as const,
   listing: (id: number) => ['market', 'listing', id] as const,
@@ -90,6 +92,38 @@ export function useClubsList() {
   return useQuery({
     queryKey: qk.clubsList,
     queryFn: () => api<{ clubs: ClubSummary[] }>('/api/clubs'),
+  });
+}
+
+// 球队详情：结构统计由服务端一次算完（增量 31 步骤 6），前端不再二次聚合。
+// 生产实测 12 条语句 / 151–165 行，服务端按 clubs scope 缓存 24h，故这里不覆盖 staleTime。
+export function useClubDetail(id: number) {
+  return useQuery({
+    queryKey: qk.clubDetail(id),
+    queryFn: () => api<ClubDetail>(`/api/clubs/${id}`),
+    enabled: Number.isInteger(id) && id > 0,
+  });
+}
+
+// 当季排名：后端代理比赛系统公开积分榜（服务端缓存 300s）。
+// 取不到时后端回 200 + standing:null + note，所以这里只需把 note 原样显示，不用当错误处理。
+export function useClubStanding(id: number) {
+  return useQuery({
+    queryKey: qk.clubStanding(id),
+    queryFn: () => api<ClubStanding>(`/api/clubs/${id}/standing`),
+    enabled: Number.isInteger(id) && id > 0,
+    staleTime: 300_000,
+  });
+}
+
+// 阵容名单：复用球员库列表端点（club_id 筛选），不新建读面。
+// limit=100 是端点上限，生产最大阵容 37 人 ⇒ 一页装完；真超了用 nextCursor 提示去球员库看。
+export function useClubRoster(id: number) {
+  return useQuery({
+    queryKey: qk.clubRoster(id),
+    queryFn: () => api<PlayersLibraryResponse>(`/api/players?club_id=${id}&limit=100`),
+    enabled: Number.isInteger(id) && id > 0,
+    staleTime: 60_000,
   });
 }
 

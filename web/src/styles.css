@@ -2515,3 +2515,166 @@ th.num .th-sort {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- 球队详情（增量 31 步骤 7）：阵容组 / 运营组 / 战绩组 ---------- */
+
+.club-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.club-detail-title {
+  min-width: 0;
+}
+.club-detail-title h1 {
+  margin: 0;
+}
+.club-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.club-detail-back {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.club-block {
+  margin-top: 16px;
+}
+.club-sub {
+  margin-top: 16px;
+}
+.club-sub h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.club-sub-empty {
+  margin: 0;
+  font-size: 13px;
+}
+
+.club-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+.club-stat {
+  min-width: 0;
+}
+.club-stat dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+.club-stat dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 结构分析柱状图：轨道 flex:1 + min-width:0，条形只按百分比给宽度 ⇒ 窄屏压轨道，不挤破容器。
+   元素是 <ul>/<li>（让档位标签与人数留在无障碍树里），所以要把列表默认样式清掉。 */
+.band-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 460px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.band-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.band-label {
+  flex: none;
+  width: 4.5em;
+  font-size: 12px;
+  color: var(--muted);
+}
+.band-track {
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  background: #f3ead9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.band-bar {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  background: var(--terracotta);
+  border-radius: 6px;
+}
+.band-count {
+  flex: none;
+  width: 2.5em;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 位置分布 chip。**必须带 club- 前缀**：styles.css 上文已有一组全局 .pos-chips/.pos-chip/.pos-chip-main
+   （球员档案页的位置徽章），后段重定义同名类会把那边的 .pos-chip-main 深墨底覆盖成米色底、字色仍是纸色。 */
+.club-pos-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.club-pos-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 10px;
+  background: #f3ead9;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.club-pos-chip-name {
+  font-weight: 600;
+}
+
+/* 近期战绩：一行一场，窄屏折成两行（日期 + 赛事一行，比分 + 判定一行） */
+.form-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.form-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: #f7f0e0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.form-date {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.form-stage {
+  flex: none;
+  font-size: 12px;
+}
+.form-teams {
+  min-width: 0;
+  flex: 1;
+}
+.form-tail {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}

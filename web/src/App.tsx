@@ -8,6 +8,7 @@ import Club from './pages/Club.tsx';
 import Player from './pages/Player.tsx';
 import PlayersLibrary from './pages/PlayersLibrary.tsx';
 import Clubs from './pages/Clubs.tsx';
+import ClubDetail from './pages/ClubDetail.tsx';
 import Bind from './pages/Bind.tsx';
 import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
@@ -74,6 +75,14 @@ export default function App() {
           <Route path="/players" element={<PlayersLibrary />} />
           <Route path="/players/:id" element={<Player />} />
           <Route path="/clubs" element={<Clubs />} />
+          <Route
+            path="/clubs/:id"
+            element={
+              <RequireUser>
+                <ClubDetail />
+              </RequireUser>
+            }
+          />
           <Route path="/market" element={<MarketBoardPage />} />
           <Route
             path="/market/free"
