@@ -45,18 +45,23 @@ function freshEnv(): Fixture {
   return { env, sqlite, captured };
 }
 
-// 20 队 / 570 人的缩样：两队各三人 + 一名训练营 + 一名自由身 + 一名无 fc_id
+// 20 队 / 570 人的缩样：两队各三人 + 一名训练营 + 一名自由身 + 一名无 fc_id。
+//
+// 行序刻意错开：两队的 id 交替（1 队 301/303，2 队夹在 302），status 也交替
+// （1 队一个 listed 一个 normal，2 队夹在中间）。分组的正确性依赖 SQL 里的
+// `ORDER BY c.name, p.fc_id` 把同一队排到一起（JS 侧是线性归并），行序若与期望输出一致，
+// 把 ORDER BY 删掉测试照样绿 —— rowid 序与 idx_players_status 序都会给出「刚好正确」的分组。
 function seed(fx: Fixture): void {
   fx.sqlite.exec(
     `INSERT INTO clubs (id, name, league_tier, status) VALUES
        (1, '曼城', 'premier', 'active'), (2, '阿森纳', 'premier', 'active');
      INSERT INTO players (id, uid, name, fc_id, display_name, club_id, number, status) VALUES
-       (301, 'u301', 'E. Haaland',              239085, 'Erling Haaland', 1,    '9',  'normal'),
-       (302, 'u302', 'Ederson Santana de Moraes', 212602, 'Ederson',       1,    NULL, 'listed'),
-       (303, 'u303', 'M. Ødegaard',             201101, NULL,             2,    '8',  'normal'),
-       (304, 'u304', 'J. Trainee',              900001, 'Joe Trainee',    1,    '30', 'trainee'),
-       (305, 'u305', 'F. Free',                 900002, 'Free Man',       NULL, NULL, 'free'),
-       (306, 'u306', 'No Fc Id',                NULL,   'No Fc Id',       2,    '7',  'normal');`,
+       (301, 'u301', 'E. Haaland',                239085, 'Erling Haaland', 1,    '9',  'listed'),
+       (302, 'u302', 'M. Ødegaard',               201101, NULL,             2,    '8',  'normal'),
+       (303, 'u303', 'Ederson Santana de Moraes', 212602, 'Ederson',        1,    NULL, 'normal'),
+       (304, 'u304', 'J. Trainee',                900001, 'Joe Trainee',    1,    '30', 'trainee'),
+       (305, 'u305', 'F. Free',                   900002, 'Free Man',       NULL, NULL, 'free'),
+       (306, 'u306', 'No Fc Id',                  NULL,   'No Fc Id',       2,    '7',  'normal');`,
   );
 }
 
