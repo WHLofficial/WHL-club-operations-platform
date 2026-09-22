@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
+import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
@@ -19,16 +20,6 @@ export default function MarketPage() {
 }
 
 /* ---------- 审核队列（增量 3 成交确认 + 增量 5 旁路单据） ---------- */
-
-const TRANSFER_TYPE_LABEL: Record<string, string> = {
-  transfer: '普通成交',
-  activation: '激活成交',
-  forced_auction: '强制拍卖',
-  rc_change: '续约',
-  termination: '解约',
-  free_agent: '海捞签入',
-  match: '匹配留队',
-};
 
 // 旁路单据的摘要行（payload 由 createBypassTransfer / submitMatch 冻结）
 function bypassSummary(r: AdminReviewRow): string | null {

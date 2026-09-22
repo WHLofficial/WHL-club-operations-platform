@@ -907,6 +907,77 @@ tbody tr:hover td {
   height: 16px;
 }
 
+/* PlayStyle 发放选择器（增量 30）：升级方案/中国计划两处共用，点选后高亮，本段选满其余置灰 */
+.ps-pick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.ps-pick {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.ps-pick .ps-badge {
+  opacity: 0.62;
+}
+
+.ps-pick:hover:not(:disabled) .ps-badge {
+  opacity: 1;
+}
+
+.ps-pick.on .ps-badge {
+  opacity: 1;
+  border-color: var(--terracotta);
+  box-shadow: 0 0 0 2px var(--terracotta-tint);
+}
+
+.ps-pick:disabled {
+  cursor: not-allowed;
+}
+
+.ps-pick:disabled .ps-badge {
+  opacity: 0.3;
+}
+
+.pick-panel {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  background: var(--paper);
+}
+
+.pick-panel .hint {
+  margin: 0;
+}
+
+/* 中国计划自选徽章（增量 30）：名额用完只留已发清单 */
+.china-ps {
+  border-top: 1px dashed var(--border);
+  margin-top: 14px;
+  padding-top: 10px;
+}
+
+.china-ps h4 {
+  margin: 0 0 6px;
+}
+
+.china-ps .btn {
+  margin-top: 4px;
+}
+
+/* 转会记录表（增量 30）：列多且都是短字段，窄屏靠横向滚动，不折行 */
+.transfer-table th,
+.transfer-table td {
+  white-space: nowrap;
+}
+
 .attr-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

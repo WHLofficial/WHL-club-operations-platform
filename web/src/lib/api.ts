@@ -156,6 +156,25 @@ export interface PlayerDetail {
   contract: ContractDto | null;
 }
 
+/** 转会记录（增量 30）：只含已完成单据，按完成时间倒序 */
+export interface PlayerTransferRow {
+  id: number;
+  type: string;
+  fromClubId: number | null;
+  fromClubName: string | null;
+  toClubId: number | null;
+  toClubName: string | null;
+  fee: number | null;
+  extraFee: number | null;
+  season: number | null;
+  windowSeq: number | null;
+  completedAt: string | null;
+}
+
+export interface PlayerTransfersResponse {
+  transfers: PlayerTransferRow[];
+}
+
 // ---- 增量 6.1 d8：球员库（公开 /api/players，keyset 游标分页）----
 
 export interface PlayerLibraryRow extends PlayerListItem {
@@ -997,6 +1016,15 @@ export interface UpgradePlanDto {
   gold: number;
 }
 
+/** 发放明细行（增量 30）：psid 是基础 ID（1-99），金徽由 kind 表示 */
+export interface PlaystyleDetailRow {
+  slot: number;
+  kind: 'silver' | 'gold';
+  psid: number;
+  source: 'growth' | 'china' | 'manual';
+  createdAt: string;
+}
+
 export interface GrowthDetail {
   player: {
     id: number;
@@ -1012,7 +1040,11 @@ export interface GrowthDetail {
     xpPerLevel: number;
     pendingLevelUps: number;
     upgradePlans: UpgradePlanDto[];
+    /** 中国计划自选银徽章名额（config.china_badges − 已发数） */
+    chinaPlaystyles: { quota: number; granted: number; left: number };
   };
+  /** 发放明细：与 FC 源槽合并后才是这名球员完整的 PlayStyle 清单 */
+  playstyleDetails: PlaystyleDetailRow[];
   events: GrowthEventRow[];
 }
 
@@ -1021,6 +1053,8 @@ export interface LevelUpResult {
   plan: UpgradePlanDto;
   levelsApplied: number;
   pendingLeft: number;
+  /** 本次落下的明细（存库形式：银 1-99 / 金 101-199） */
+  playstyles: { slot: number; psid: number; gold: boolean }[];
 }
 
 export interface GrowthSettlementResult {

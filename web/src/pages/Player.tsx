@@ -1,10 +1,19 @@
 // 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，增量 6.1 d9 改 E2 页内页签：
-// 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级）
+// 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级；转会记录=单据流水）
 // 成长记录区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, GROWTH_EVENT_LABEL, type GrowthDetail, type LevelUpResult, type PlayerDetail } from '../lib/api.ts';
+import {
+  api,
+  apiPost,
+  GROWTH_EVENT_LABEL,
+  type GrowthDetail,
+  type LevelUpResult,
+  type PlayerDetail,
+  type PlayerTransfersResponse,
+  type UpgradePlanDto,
+} from '../lib/api.ts';
 import {
   AGENT_TIER_LABEL,
   ATTR_GROUPS,
@@ -12,6 +21,7 @@ import {
   CONTRACT_TYPE_LABEL,
   SOURCE_LABEL,
   STATUS_LABEL,
+  TRANSFER_TYPE_LABEL,
   nationName,
   playstyleBadges,
   playstyleById,
@@ -20,14 +30,24 @@ import {
   roleChs,
   teamName,
 } from '../lib/ref.ts';
+import {
+  PS_GOLD_BASE,
+  PS_GRANTABLE_BASE_IDS,
+  mergePlaystyleSlots,
+  playstyleIdOf,
+  playstyleKindOf,
+  type PlaystyleKind,
+  type PlaystyleSlot,
+} from '../../../src/core/fc26.ts';
 import { useToast } from '../lib/toast.tsx';
 
-type PlayerTab = 'profile' | 'attrs' | 'growth';
+type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers';
 
 const TAB_LABEL: Record<PlayerTab, string> = {
   profile: '合同',
   attrs: '属性',
   growth: '成长',
+  transfers: '转会记录',
 };
 
 // 细分色阶（四裁决：绿>=70 / 橙 50-69 / 红<50）
@@ -111,12 +131,58 @@ function PlaystyleBadge({ psid, gold }: { psid: number; gold: boolean }) {
   );
 }
 
+// PlayStyle 发放选择器（增量 30）：升级方案带徽章、中国计划自选徽章两处共用。
+// 只列「可发放白名单 − 已拥有」，本段选满后其余项禁用 —— 发放数量必须与方案/名额严格相等，
+// 少选多选后端都会拒（400），所以在点确认之前就把可选范围收干净。
+function PlaystylePickGrid({
+  kind,
+  options,
+  selected,
+  limit,
+  disabled,
+  onToggle,
+}: {
+  kind: PlaystyleKind;
+  options: readonly number[];
+  selected: readonly number[];
+  limit: number;
+  disabled: boolean;
+  onToggle: (psid: number) => void;
+}) {
+  if (options.length === 0) {
+    return <p className="muted">没有可选的 {kind === 'gold' ? '金' : '银'} PlayStyle：白名单里的都已在身上。</p>;
+  }
+  const chosen = selected.filter((p) => playstyleKindOf(p) === kind);
+  const full = chosen.length >= limit;
+  return (
+    <div className="ps-pick-grid">
+      {options.map((psid) => {
+        const on = selected.includes(psid);
+        return (
+          <button
+            key={psid}
+            type="button"
+            className={`ps-pick${on ? ' on' : ''}`}
+            aria-pressed={on}
+            disabled={disabled || (!on && full)}
+            onClick={() => onToggle(psid)}
+          >
+            <PlaystyleBadge psid={psid} gold={kind === 'gold'} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Player() {
   const { id } = useParams();
   const qc = useQueryClient();
   const [tab, setTab] = useState<PlayerTab>('profile');
   const { show, toastNode } = useToast();
   const [armedPlan, setArmedPlan] = useState<number | null>(null);
+  const [picks, setPicks] = useState<number[]>([]);
+  const [chinaPicks, setChinaPicks] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
 
   const dataQuery = useQuery({
@@ -130,28 +196,83 @@ export default function Player() {
     queryFn: () => api<GrowthDetail>(`/api/players/${id}/growth`),
     enabled: id !== undefined,
   });
+  // 转会记录只在切到该页签时拉（球员卡最常看的是合同与成长，别让每条详情都多打一次）
+  const transfersQuery = useQuery({
+    queryKey: ['player', id ?? '', 'transfers'],
+    queryFn: () => api<PlayerTransfersResponse>(`/api/players/${id}/transfers`),
+    enabled: id !== undefined && tab === 'transfers',
+  });
   const data = dataQuery.data ?? null;
   const growth = growthQuery.data ?? null;
   const refreshAll = () => void qc.invalidateQueries({ queryKey: ['player', id ?? ''] });
 
   async function choosePlan(planIndex: number) {
     if (busy || !growth) return;
+    const plan = growth.player.upgradePlans[planIndex];
+    const need = (plan?.silver ?? 0) + (plan?.gold ?? 0);
     if (armedPlan !== planIndex) {
       setArmedPlan(planIndex);
+      setPicks([]);
+      return;
+    }
+    if (picks.length !== need) {
+      show(`这个方案要发 ${need} 个 PlayStyle，先选满再确认。`, true);
       return;
     }
     setBusy(true);
     try {
-      const r = await apiPost<LevelUpResult>(`/api/growth/levelup/${growth.player.id}`, { planIndex });
+      const r = await apiPost<LevelUpResult>(`/api/growth/levelup/${growth.player.id}`, { planIndex, picks });
       const parts = [`+${r.plan.ca} CA`];
       if (r.plan.silver > 0) parts.push(`银徽章 +${r.plan.silver}`);
       if (r.plan.gold > 0) parts.push(`金徽章 +${r.plan.gold}`);
       show(`升级完成：${parts.join('，')}。还剩 ${r.pendingLeft} 次待升级。`);
       setArmedPlan(null);
+      setPicks([]);
       refreshAll();
     } catch (err) {
       show(err instanceof Error ? err.message : '升级失败', true);
       setArmedPlan(null);
+      setPicks([]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 选中的项按段各记一份额度（方案可能同时要银和要金，两段互不挤占）
+  function togglePick(psid: number, silverLimit: number, goldLimit: number) {
+    setPicks((prev) => {
+      if (prev.includes(psid)) return prev.filter((p) => p !== psid);
+      const kind = playstyleKindOf(psid);
+      const limit = kind === 'gold' ? goldLimit : silverLimit;
+      const chosen = prev.filter((p) => playstyleKindOf(p) === kind).length;
+      return chosen >= limit ? prev : [...prev, psid];
+    });
+  }
+
+  function toggleChinaPick(psid: number, limit: number) {
+    setChinaPicks((prev) => {
+      if (prev.includes(psid)) return prev.filter((p) => p !== psid);
+      return prev.length >= limit ? prev : [...prev, psid];
+    });
+  }
+
+  async function grantChina(left: number) {
+    if (busy || !growth) return;
+    if (chinaPicks.length !== left) {
+      show(`还剩 ${left} 个名额，先选满再发放。`, true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await apiPost<{ playstyles: PlaystyleSlot[]; granted: number; left: number }>(
+        `/api/growth/china-playstyles/${growth.player.id}`,
+        { picks: chinaPicks },
+      );
+      show(`中国计划徽章已发 ${r.granted} 个${r.left > 0 ? `，还剩 ${r.left} 个名额` : '，名额已发完'}。`);
+      setChinaPicks([]);
+      refreshAll();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '发放失败', true);
     } finally {
       setBusy(false);
     }
@@ -184,6 +305,16 @@ export default function Player() {
   const isGk = player.position === 'GK';
   const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
   const radarValues = radarAxes.map((g) => ({ key: g.key, label: g.label, value: groupAverage(g.keys, attrs) }));
+  // PlayStyle 清单 = FC 源槽 + 发放明细（增量 30）：明细存基础 ID，合并时换算成存库 ID 并去重
+  const playstyles = mergePlaystyleSlots(
+    playstyleBadges(attrs),
+    (growth?.playstyleDetails ?? []).map((d) => ({ slot: d.slot, kind: d.kind, psid: d.psid })),
+  );
+  const ownedPsids = playstyles.map((s) => s.psid);
+  const silverOptions = PS_GRANTABLE_BASE_IDS.filter((id) => !ownedPsids.includes(id));
+  const goldOptions = PS_GRANTABLE_BASE_IDS.map((id) => id + PS_GOLD_BASE).filter((id) => !ownedPsids.includes(id));
+  const armedPlanDef = armedPlan === null ? null : growth?.player.upgradePlans[armedPlan] ?? null;
+  const transfers = transfersQuery.data?.transfers ?? [];
 
   return (
     <div className="container">
@@ -322,14 +453,79 @@ export default function Player() {
           )}
 
           {tab === 'attrs' && player.gameAttrs && (
-            <AttrSheet attrs={attrs} position={player.position} prestige={player.prestige} />
+            <AttrSheet attrs={attrs} position={player.position} prestige={player.prestige} playstyles={playstyles} />
           )}
 
-          {tab === 'growth' && growth && <GrowthBlock growth={growth} armedPlan={armedPlan} busy={busy} onChoosePlan={choosePlan} />}
+          {tab === 'growth' && growth && (
+            <GrowthBlock
+              growth={growth}
+              armedPlan={armedPlan}
+              armedPlanDef={armedPlanDef}
+              picks={picks}
+              chinaPicks={chinaPicks}
+              silverOptions={silverOptions}
+              goldOptions={goldOptions}
+              chinaPlan={player.chinaPlan}
+              busy={busy}
+              onChoosePlan={choosePlan}
+              onTogglePick={togglePick}
+              onToggleChinaPick={toggleChinaPick}
+              onGrantChina={grantChina}
+            />
+          )}
           {tab === 'growth' && !growth && (
             <div className="empty-state">
               <p className="muted">成长记录还没就绪。</p>
             </div>
+          )}
+
+          {tab === 'transfers' && (
+            <>
+              <h3>转会记录</h3>
+              {transfersQuery.isError ? (
+                <div className="banner bad">
+                  {transfersQuery.error instanceof Error ? transfersQuery.error.message : '转会记录拉取失败'}
+                </div>
+              ) : transfersQuery.isPending ? (
+                <p className="muted">正在翻查转会记录…</p>
+              ) : transfers.length === 0 ? (
+                <div className="empty-state">
+                  <p className="muted">卷宗里还没有转会记录。成交、解约、海捞签入之后，单据都会收录在这里。</p>
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="transfer-table">
+                    <thead>
+                      <tr>
+                        <th>完成时间</th>
+                        <th>类型</th>
+                        <th>转出</th>
+                        <th>转入</th>
+                        <th>费用</th>
+                        <th>赛季</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transfers.map((t) => (
+                        <tr key={t.id}>
+                          <td className="mono">{t.completedAt === null ? '—' : t.completedAt.slice(0, 10)}</td>
+                          <td>{TRANSFER_TYPE_LABEL[t.type] ?? t.type}</td>
+                          <td>{t.fromClubName ?? '自由身'}</td>
+                          <td>{t.toClubName ?? '自由身'}</td>
+                          <td className="num mono">
+                            {t.fee === null ? '—' : `${t.fee.toFixed(2)} m`}
+                            {t.extraFee !== null && t.extraFee > 0 ? ` +${t.extraFee.toFixed(2)}` : ''}
+                          </td>
+                          <td className="mono">
+                            {t.season === null ? '—' : `S${t.season}${t.windowSeq ? ` 第 ${t.windowSeq} 窗` : ''}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </section>
       </div>
@@ -343,10 +539,13 @@ function AttrSheet({
   attrs,
   position,
   prestige,
+  playstyles,
 }: {
   attrs: Record<string, unknown>;
   position: string | null;
   prestige: number | null;
+  /** FC 源槽 + 发放明细合并后的清单（页面级算一次，成长页签的候选也要用同一份） */
+  playstyles: PlaystyleSlot[];
 }) {
   const team = teamName(attrs['TeamID']);
   const posChips = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
@@ -355,9 +554,6 @@ function AttrSheet({
   const roles = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5']
     .map((k) => roleChs(attrs[k]))
     .filter((v): v is string => v !== null);
-  // 15 槽全扫（银 1-12 + 金 13-15），只有有值的槽进清单；槽位键与金/银判定都来自 core 与 ref，
-  // 页面里不再手抄槽号（手抄的那版只列了 PSID1-7 + PSID13-15，PSID8-12 的银徽章看不见）
-  const playstyles = playstyleBadges(attrs);
   const weakfoot = Number(attrs['weakfoot']);
   const skillmoves = Number(attrs['skillmoves']);
   const isGk = position === 'GK';
@@ -454,22 +650,51 @@ function AttrSheet({
   );
 }
 
-// 成长记录块（§10）：放合同卷宗下方，FC 存档之前
+// 成长记录块（§10）：XP 进度、升级方案二选一（带徽章的方案要先选 PlayStyle）、
+// 中国计划自选徽章、徽章墙、事件时间线
 function GrowthBlock({
   growth,
   armedPlan,
+  armedPlanDef,
+  picks,
+  chinaPicks,
+  silverOptions,
+  goldOptions,
+  chinaPlan,
   busy,
   onChoosePlan,
+  onTogglePick,
+  onToggleChinaPick,
+  onGrantChina,
 }: {
   growth: GrowthDetail;
   armedPlan: number | null;
+  /** 已点开的方案定义（null = 没在确认流程里） */
+  armedPlanDef: UpgradePlanDto | null;
+  picks: number[];
+  chinaPicks: number[];
+  silverOptions: readonly number[];
+  goldOptions: readonly number[];
+  chinaPlan: boolean;
   busy: boolean;
   onChoosePlan: (planIndex: number) => void;
+  onTogglePick: (psid: number, silverLimit: number, goldLimit: number) => void;
+  onToggleChinaPick: (psid: number, limit: number) => void;
+  onGrantChina: (left: number) => void;
 }) {
   const p = growth.player;
   const xpInLevel = Math.floor(p.growthXp) % p.xpPerLevel;
   const pct = Math.min(100, Math.round((xpInLevel / p.xpPerLevel) * 100));
   const toNext = p.xpPerLevel - xpInLevel;
+  const need = (armedPlanDef?.silver ?? 0) + (armedPlanDef?.gold ?? 0);
+  const picksReady = picks.length === need;
+  const china = p.chinaPlaystyles;
+  const chinaGranted = growth.playstyleDetails.filter((d) => d.source === 'china');
+  const chinaReady = chinaPicks.length === china.left;
+  const planBadgeText = (silver: number, gold: number) => {
+    if (silver === 0 && gold === 0) return '不加徽章';
+    return [silver > 0 ? `🥈 ×${silver}` : '', gold > 0 ? `🥇 ×${gold}` : ''].filter(Boolean).join(' ');
+  };
   return (
     <div className="growth-block">
       <h3>成长记录</h3>
@@ -485,29 +710,99 @@ function GrowthBlock({
         <p className="hint">训练营球员按赛季固定经验结算（训练营赛季那行），不按场次累计。</p>
       )}
       {p.pendingLevelUps > 0 && p.upgradePlans.length > 0 && (
-        <div className="upgrade-plans">
-          {p.upgradePlans.map((plan, i) => (
-            <button
-              key={i}
-              type="button"
-              className={`upgrade-plan-card${armedPlan === i ? ' armed' : ''}`}
-              disabled={busy}
-              onClick={() => onChoosePlan(i)}
-            >
-              <b>方案 {i + 1}{armedPlan === i ? '（再点一次确认）' : ''}</b>
-              <span className="mono upgrade-plan-ca">+{plan.ca} CA</span>
-              <span className="upgrade-plan-badges">
-                {plan.silver > 0 && <span>🥈 ×{plan.silver}</span>}
-                {plan.gold > 0 && <span>🥇 ×{plan.gold}</span>}
-                {plan.silver === 0 && plan.gold === 0 && <span className="muted">不加徽章</span>}
-              </span>
-            </button>
-          ))}
-        </div>
+        <>
+          <div className="upgrade-plans">
+            {p.upgradePlans.map((plan, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`upgrade-plan-card${armedPlan === i ? ' armed' : ''}`}
+                disabled={busy || (armedPlan === i && !picksReady)}
+                onClick={() => onChoosePlan(i)}
+              >
+                <b>
+                  方案 {i + 1}
+                  {armedPlan === i ? (picksReady ? '（再点一次确认）' : '（先选 PlayStyle）') : ''}
+                </b>
+                <span className="mono upgrade-plan-ca">+{plan.ca} CA</span>
+                <span className="upgrade-plan-badges">
+                  {plan.silver === 0 && plan.gold === 0 ? (
+                    <span className="muted">不加徽章</span>
+                  ) : (
+                    <span>{planBadgeText(plan.silver, plan.gold)}</span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+          {armedPlanDef && need > 0 && (
+            <div className="pick-panel">
+              <p className="hint">
+                方案 {(armedPlan ?? 0) + 1} 要发 {planBadgeText(armedPlanDef.silver, armedPlanDef.gold)}，已选 {picks.length}/{need}
+                {picksReady ? '：选满了，再点一次方案确认。' : '：选满之后才能确认。'}
+              </p>
+              {armedPlanDef.silver > 0 && (
+                <PlaystylePickGrid
+                  kind="silver"
+                  options={silverOptions}
+                  selected={picks}
+                  limit={armedPlanDef.silver}
+                  disabled={busy}
+                  onToggle={(psid) => onTogglePick(psid, armedPlanDef.silver, armedPlanDef.gold)}
+                />
+              )}
+              {armedPlanDef.gold > 0 && (
+                <PlaystylePickGrid
+                  kind="gold"
+                  options={goldOptions}
+                  selected={picks}
+                  limit={armedPlanDef.gold}
+                  disabled={busy}
+                  onToggle={(psid) => onTogglePick(psid, armedPlanDef.silver, armedPlanDef.gold)}
+                />
+              )}
+            </div>
+          )}
+        </>
       )}
       <p className="hint">
-        徽章墙：🥇 {p.badgesGold}/3 · 🥈 {p.badgesSilver}/15（徽章到帽后选带徽章的方案也不再涨）
+        徽章墙：🥇 {p.badgesGold}/3 · 🥈 {p.badgesSilver}/12（金槽 3 个 + 银槽 12 个；台账到帽后选带徽章的方案也不再涨）
       </p>
+      {chinaPlan && (
+        <div className="china-ps">
+          <h4>中国计划徽章</h4>
+          {china.left > 0 ? (
+            <>
+              <p className="hint">
+                自选 {china.left} 个银 PlayStyle（名额 {china.quota} 个，已发 {china.granted} 个）。这些徽章随离队失效，
+                升级得来的徽章不受影响。
+              </p>
+              <PlaystylePickGrid
+                kind="silver"
+                options={silverOptions}
+                selected={chinaPicks}
+                limit={china.left}
+                disabled={busy}
+                onToggle={(psid) => onToggleChinaPick(psid, china.left)}
+              />
+              <button type="button" className="btn" disabled={busy || !chinaReady} onClick={() => onGrantChina(china.left)}>
+                发放中国计划徽章{chinaReady ? '' : `（还差 ${china.left - chinaPicks.length} 个）`}
+              </button>
+            </>
+          ) : (
+            <p className="muted">
+              名额已发完（{china.granted}/{china.quota}）。
+            </p>
+          )}
+          {chinaGranted.length > 0 && (
+            <div className="ps-list">
+              {chinaGranted.map((d) => (
+                <PlaystyleBadge key={`${d.slot}-${d.psid}`} psid={playstyleIdOf(d.psid, d.kind)} gold={d.kind === 'gold'} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {growth.events.length > 0 ? (
         <div className="table-wrap">
           <table>

@@ -154,6 +154,17 @@ export const CONTRACT_TYPE_LABEL: Record<string, string> = {
   trainee: '训练营合同',
 };
 
+// 转会单据类型（transfers.type）：球员转会记录与转会市场两处共用，原先只写在 MarketPage 里
+export const TRANSFER_TYPE_LABEL: Record<string, string> = {
+  transfer: '普通成交',
+  activation: '激活成交',
+  forced_auction: '强制拍卖',
+  rc_change: '续约',
+  termination: '解约',
+  free_agent: '海捞签入',
+  match: '匹配留队',
+};
+
 export const LEAGUE_TIER_LABEL: Record<string, string> = {
   premier: '顶级联赛',
   second: '次级联赛',
