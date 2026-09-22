@@ -48,11 +48,22 @@ const PANEL_EDGE = 8;
 const MIN_PANEL_ROOM = 220;
 /** 面板高度的兜底下限：再矮就只剩一条缝了。 */
 const MIN_PANEL_HEIGHT = 160;
+/**
+ * 面板高度的上限：不高于 480px、也不高于视口的 70%。这对数字原先只写在 styles.css 的
+ * `.multiselect-panel` 上，而 place() 每次开面板都写一遍内联 maxHeight，CSS 那条永远是死的 ——
+ * 1200px 高的窗口、触发器靠上时面板会被拉到约 1100px（等于没有上限）。
+ * 上限收到这里：JS 只写一个值，样式表里不再重复写数字。
+ */
+const PANEL_MAX_PX = 480;
+const PANEL_MAX_VH = 0.7;
+// 视口高 < 约 229px 时 70vh 会小于兜底 160，兜底优先（与翻转前的旧实现同样取「够得着」优先）
 
 /**
  * 面板落位（纯函数，jsdom 里量不出布局，所以抽出来单测）。
  * 抽屉底部、窄屏底部的触发器下方没有空间（真浏览器实测：触发器贴底时面板会掉到视口外 166px，
  * 点不到也滚不到）⇒ 放不下就翻到触发器上方、贴底对齐。
+ * 高度取「可用空间」与上限（480px / 70vh）的小者，再兜底到下限 160：上方不封顶的话，72 项
+ * PlayStyle 面板在高窗口里会拉到接近满屏。
  * 判据用常量而不是面板实测高度：showPopover() 之前面板是 display:none，offsetHeight /
  * scrollHeight 都是 0，那时量出来的「面板想要多高」恒为 0，会永远判成放得下。
  */
@@ -64,11 +75,13 @@ export function panelPlacement(
   const below = view.height - box.bottom - PANEL_GAP - PANEL_EDGE;
   const above = box.top - PANEL_GAP - PANEL_EDGE;
   const openUp = below < MIN_PANEL_ROOM && above > below;
+  const room = openUp ? above : below;
+  const cap = Math.min(PANEL_MAX_PX, view.height * PANEL_MAX_VH);
   return {
     left: Math.max(PANEL_EDGE, Math.min(box.left, view.width - panelWidth - PANEL_EDGE)),
     top: openUp ? undefined : box.bottom + PANEL_GAP,
     bottom: openUp ? view.height - box.top + PANEL_GAP : undefined,
-    maxHeight: Math.max(MIN_PANEL_HEIGHT, openUp ? above : below),
+    maxHeight: Math.max(MIN_PANEL_HEIGHT, Math.min(room, cap)),
     openUp,
   };
 }

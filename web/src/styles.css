@@ -1669,7 +1669,8 @@ tbody tr:hover td {
   margin: 0;
   padding: 8px;
   width: min(320px, 86vw);
-  max-height: min(70vh, 480px);
+  /* max-height 由 MultiSelect.tsx 的 place() 按可用空间现算（组件常量 PANEL_MAX_PX / PANEL_MAX_VH
+     守上限）——这里再写一条会被内联样式顶掉，只会误导后人。 */
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 10px;

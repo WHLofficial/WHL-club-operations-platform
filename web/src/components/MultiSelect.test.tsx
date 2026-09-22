@@ -134,15 +134,19 @@ describe('多选下拉', () => {
 
 // 落位是纯函数（真实布局量不出来，所以 DOM 里测不了；真浏览器的落位由 e2e 断言）：
 // 直接喂几何数字，覆盖「下方够放」「下方只剩一条缝」「上下都不够」三种情形。
+// 高度还要过两道上限（PANEL_MAX_PX 480 / PANEL_MAX_VH 70vh）——这对数字原先只写在 CSS 里，
+// 被 place() 的内联 maxHeight 顶掉，1200px 高的窗口里面板会拉到接近满屏。
 describe('panelPlacement', () => {
   const view = { width: 375, height: 812 };
 
-  it('下方空间充足：贴着触发器下沿展开，高度按可用空间给', () => {
+  it('下方空间充足：贴着触发器下沿展开，高度封顶到 480（不铺满可用空间）', () => {
     const at = panelPlacement({ top: 100, bottom: 134, left: 40 }, view, 320);
     expect(at.openUp).toBe(false);
     expect(at.top).toBe(140);
     expect(at.bottom).toBeUndefined();
-    expect(at.maxHeight).toBe(812 - 134 - 6 - 8);
+    // 可用空间 664 > 上限 480（70vh = 568）
+    expect(812 - 134 - 6 - 8).toBeGreaterThan(480);
+    expect(at.maxHeight).toBe(480);
   });
 
   it('触发器贴近视口底部：翻到上方贴底，且不会掉出视口', () => {
@@ -150,8 +154,8 @@ describe('panelPlacement', () => {
     expect(at.openUp).toBe(true);
     expect(at.top).toBeUndefined();
     expect(at.bottom).toBe(812 - 766 + 6);
+    expect(at.maxHeight).toBe(480);
     // 面板上沿 = 触发器上沿 − 6 − 高度，必须 ≥ 视口内的留白
-    expect(at.maxHeight).toBe(766 - 6 - 8);
     expect(view.height - at.bottom! - at.maxHeight).toBeGreaterThanOrEqual(0);
   });
 
@@ -159,8 +163,24 @@ describe('panelPlacement', () => {
     // 触发器底边距视口底 74px ⇒ 下方可用 60px，远不到 MIN_PANEL_ROOM
     const at = panelPlacement({ top: 704, bottom: 738, left: 40 }, view, 320);
     expect(at.openUp).toBe(true);
-    expect(at.maxHeight).toBe(704 - 6 - 8);
+    expect(at.maxHeight).toBe(480);
     expect(view.height - at.bottom! - at.maxHeight).toBeGreaterThanOrEqual(0);
+  });
+
+  it('高视口（1400）：仍然是 480，不随窗口长高', () => {
+    const tall = { width: 1440, height: 1400 };
+    const at = panelPlacement({ top: 100, bottom: 134, left: 40 }, tall, 320);
+    expect(at.openUp).toBe(false);
+    // 可用空间 1252、70vh = 980，两个上限都不该被可用空间顶开
+    expect(at.maxHeight).toBe(480);
+  });
+
+  it('极矮视口（400）：由 70vh 收口到 280（仍高于兜底 160）', () => {
+    const short = { width: 800, height: 400 };
+    const at = panelPlacement({ top: 10, bottom: 44, left: 40 }, short, 320);
+    expect(at.openUp).toBe(false);
+    // 可用空间 342 > 70vh(280) ⇒ 取 280
+    expect(at.maxHeight).toBe(280);
   });
 
   it('上下都放不下（退化视口）：翻到空间较大的一侧，高度兜底到 160', () => {
