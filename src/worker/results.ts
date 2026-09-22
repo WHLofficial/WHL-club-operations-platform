@@ -538,7 +538,10 @@ interface XpHookSummary {
 /**
  * 从比赛系统 match_event 生成出场/进球/助攻/零封事件（growth_events 去重锚防重复）。
  * 限制口径（§15 假设 20-22）：仅联赛与冠军杯小组赛计 XP；弃权场不计；训练营球员不按场次
- * （走结算固定 XP）。球员匹配按「队名=俱乐部名 → 球员名=名单名」，解不开的进 unresolved 由管理组补录；
+ * （走结算固定 XP）。球员匹配先按 **fc_id**（赛事系统的 player.id 就是 FC26 playerid，两库早前
+ * 一起 rekey 过，实测 570/570 命中），姓名只作回落 —— tour 存完整人名、本库存官方缩写名，
+ * 靠名字认人在两侧写法不同的球员上会漏；队名仍按「队名=俱乐部名」解（零封要的是当场那支队的
+ * 防守位置表），解不开的进 unresolved 由管理组补录；
  * CPU 队（队名带 (CPU)）整队静默跳过，不计 XP 也不进 unresolved（用户规则 2026-09-18）。
  */
 async function recordAutoXpForMatch(
@@ -584,10 +587,13 @@ async function recordAutoXpForMatch(
     if (ev.assist_player_id !== null) seen.set(ev.assist_player_id, { name: ev.assist_name, teamId: ev.assist_team_id, teamName: ev.assist_team_name });
   }
 
-  // 队名 → 平台俱乐部 → 名单内同名球员（带 position/status 供零封判定与训练营排除）
+  // 队名 → 平台俱乐部 → 名单内球员（带 position/status 供零封判定与训练营排除）
   const clubCache = new Map<string, { clubId: number; defensive: Set<string> } | null>();
   const rosterCache = new Map<string, { id: number; position: string | null; status: string } | null>();
-  async function resolve(teamName: string | null, playerName: string | null) {
+  // tourPlayerId 是赛事系统 player.id，等于本库 players.fc_id —— 认人先用它。
+  // 姓名回落只在 fc_id 查不到时用：tour 存完整人名（`Anan Khalaili`），本库存官方缩写名
+  // （`A. Khalaili`），按名字等值匹配本来就只在两侧写法恰好相同时才成立。
+  async function resolve(teamName: string | null, playerName: string | null, tourPlayerId: number) {
     if (!teamName || !playerName) return null;
     // CPU 队（队名带 (CPU)）球员无成长：整队静默跳过，不进 unresolved 提示（用户规则 2026-09-18）
     if (isCpuTeam(teamName)) return null;
@@ -601,13 +607,18 @@ async function recordAutoXpForMatch(
       if (!unresolved.includes(`俱乐部「${teamName}」`)) unresolved.push(`俱乐部「${teamName}」`);
       return null;
     }
-    const key = `${club.clubId}:${playerName}`;
+    const key = `${club.clubId}:${tourPlayerId}`;
     let player = rosterCache.get(key);
     if (player === undefined) {
       player =
+        // 不按 club_id 过滤：事件归属的是「这个人」，转会后旧比赛仍算他的成长
+        (await env.DB.prepare('SELECT id, position, status FROM players WHERE fc_id = ?')
+          .bind(tourPlayerId)
+          .first<{ id: number; position: string | null; status: string }>()) ??
         (await env.DB.prepare('SELECT id, position, status FROM players WHERE club_id = ? AND name = ? ORDER BY id LIMIT 1')
           .bind(club.clubId, playerName)
-          .first<{ id: number; position: string | null; status: string }>()) ?? null;
+          .first<{ id: number; position: string | null; status: string }>()) ??
+        null;
       rosterCache.set(key, player);
     }
     if (!player) {
@@ -632,7 +643,7 @@ async function recordAutoXpForMatch(
 
   const resolved = new Map<number, Awaited<ReturnType<typeof resolve>>>();
   for (const [tourPlayerId, info] of seen) {
-    const r = await resolve(info.teamName, info.name);
+    const r = await resolve(info.teamName, info.name, tourPlayerId);
     resolved.set(tourPlayerId, r);
     if (!r || r.player.status === 'trainee') continue; // 训练营不按场次（§10.1）
     push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'appearance', value: 1, xp: 1, recordedBy: null });

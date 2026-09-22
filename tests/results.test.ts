@@ -336,6 +336,33 @@ describe('赛果自动确认（增量 21）：cron 扫完赛场次 + 异常标�
     expect(skipped).toEqual({ skipped: true, confirmed: 0, flagged: 0, failed: 0 });
   });
 
+  it('球员匹配优先走 fc_id：两侧名字写法不同也能对上（增量 32）', async () => {
+    const fx = freshEnv();
+    seedTournament(fx);
+    await bindTournament5(fx);
+    // 赛事系统存完整人名（`Erling Haaland`），平台存 FC26 官方缩写名（`E. Haaland`）——
+    // 按姓名等值匹配必然解不开，只有 fc_id（tour 的 player.id = 本库 players.fc_id）能认人
+    fx.tour.exec(`INSERT INTO player (id, team_id, name) VALUES (21, 2, 'Erling Haaland');
+      INSERT INTO match_event (id, match_id, player_id, assist_player_id, type, minute) VALUES (1, 900, 21, NULL, 'goal', 10)`);
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '曼城', 'premier', 'active');
+      INSERT INTO players (id, uid, name, fc_id, club_id, position, age, ca, pa, market_value, status)
+        VALUES (31, 'm31', 'E. Haaland', 21, 2, 'ST', 26, 150, 180, 99, 'first_team');
+    `);
+
+    const out = await autoConfirmResults(fx.env);
+    // 解开了 ⇒ 不标人工
+    expect(out).toEqual({ skipped: false, confirmed: 2, flagged: 0, failed: 0 });
+    const xpRows = sqlAll<{ event_type: string; player_id: number }>(
+      fx.sqlite,
+      "SELECT event_type, player_id FROM growth_events WHERE match_ref = '900' ORDER BY event_type",
+    );
+    expect(xpRows).toEqual([
+      { event_type: 'appearance', player_id: 31 },
+      { event_type: 'goal', player_id: 31 },
+    ]);
+  });
+
   it('XP 没解析到位 → needs_review=1 带 note；补录后 replay-hooks 清标记且幂等不双记', async () => {
     const fx = freshEnv();
     seedTournament(fx);
