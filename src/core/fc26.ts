@@ -128,6 +128,12 @@ export const FC26_GAME_ATTR_COLUMNS: readonly string[] = [
 // 金徽落库时存「基础 ID + 100」，于是银段 1-99、金段 101-199 互不重叠（100 是空档）。
 // 后端筛选、前端下拉与两侧 URL 白名单共用这一份，别再各自写 1-99 这样的字面量。
 export const PS_SLOT_COUNT = 15;
+// 槽位键清单（PSID1..PSID15）。档案页原先手抄了 PSID1-7 + PSID13-15 十个键，落在 PSID8-12 的
+// 银徽章因此「可筛不可见」（增量 29 收口）；由槽数派生，免得多一个改段界时的漂移点。
+export const PS_SLOT_KEYS: readonly string[] = Array.from(
+  { length: PS_SLOT_COUNT },
+  (_, i) => `PSID${i + 1}`,
+);
 export const PS_SILVER_SLOT_COUNT = 12;
 export const PS_GOLD_BASE = 100;
 export const PS_SILVER_MAX = 99;

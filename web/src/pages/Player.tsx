@@ -13,9 +13,10 @@ import {
   SOURCE_LABEL,
   STATUS_LABEL,
   nationName,
+  playstyleBadges,
   playstyleById,
   playstyleIconUrl,
-  playstyleIsGold,
+  type PlaystyleBadgeSlot,
   positionName,
   roleChs,
   teamName,
@@ -91,8 +92,7 @@ function AttrRadar({ values }: { values: { key: string; label: string; value: nu
   );
 }
 
-function PlaystyleBadge({ psid, slot }: { psid: number; slot: number }) {
-  const gold = playstyleIsGold(psid, slot);
+function PlaystyleBadge({ psid, gold }: PlaystyleBadgeSlot) {
   const row = playstyleById.get(psid);
   const label = row?.chs ?? row?.en ?? `PS ${psid}`;
   return (
@@ -333,13 +333,9 @@ function AttrSheet({
   const roles = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5']
     .map((k) => roleChs(attrs[k]))
     .filter((v): v is string => v !== null);
-  const playstyles = (['PSID1', 'PSID2', 'PSID3', 'PSID4', 'PSID5', 'PSID6', 'PSID7', 'PSID13', 'PSID14', 'PSID15'] as const)
-    .map((key, i) => {
-      const slot = i < 7 ? i + 1 : 13 + (i - 7);
-      const psid = Number(attrs[key]);
-      return Number.isFinite(psid) && psid > 0 ? { psid, slot } : null;
-    })
-    .filter((v): v is { psid: number; slot: number } => v !== null);
+  // 15 槽全扫（银 1-12 + 金 13-15），只有有值的槽进清单；槽位键与金/银判定都来自 core 与 ref，
+  // 页面里不再手抄槽号（手抄的那版只列了 PSID1-7 + PSID13-15，PSID8-12 的银徽章看不见）
+  const playstyles = playstyleBadges(attrs);
   const weakfoot = Number(attrs['weakfoot']);
   const skillmoves = Number(attrs['skillmoves']);
   const isGk = position === 'GK';
@@ -438,8 +434,8 @@ function AttrSheet({
         <>
           <h4>PlayStyles</h4>
           <div className="ps-list">
-            {playstyles.map(({ psid, slot }) => (
-              <PlaystyleBadge key={`${slot}-${psid}`} psid={psid} slot={slot} />
+            {playstyles.map((b) => (
+              <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} slot={b.slot} gold={b.gold} />
             ))}
           </div>
         </>
