@@ -328,6 +328,63 @@ describe('分页条（游标式）', () => {
   });
 });
 
+describe('增量 28：列表 staleTime（每次未命中都是 D1 实读）', () => {
+  it('60s 内重新挂载页面复用缓存，不再重发列表请求', async () => {
+    window.history.replaceState(null, '', '/players');
+    // 这条要的是「缓存条目还活着」：只关重试，保留默认 gcTime（5 分钟）
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/players']}>
+          <PlayersLibrary />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const listCalls = (): number =>
+      apiMock.mock.calls.map((call) => String(call[0])).filter((path) => path.startsWith('/api/players?')).length;
+
+    const first = render(tree);
+    await screen.findByRole('link', { name: 'Šeško' });
+    expect(listCalls()).toBe(1);
+
+    // 切走再回来：仍在 60s 新鲜期内 ⇒ 不该再打一次列表（否则每次进页面都是一轮 D1 实读）
+    first.unmount();
+    render(tree);
+    await screen.findByRole('link', { name: 'Šeško' });
+    expect(listCalls()).toBe(1);
+  });
+
+  // 反向边界：只测「新鲜期内不重取」的话，staleTime 误设成 Infinity 也能过 —— 过期必须重取
+  it('超过 60s 再挂载会重取（staleTime 不是无限）', async () => {
+    window.history.replaceState(null, '', '/players');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/players']}>
+          <PlayersLibrary />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const listCalls = (): number =>
+      apiMock.mock.calls.map((call) => String(call[0])).filter((path) => path.startsWith('/api/players?')).length;
+
+    // shouldAdvanceTime：Testing Library 的 waitFor 靠计时器轮询，装了假表也得让它自己往前走
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const first = render(tree);
+      await screen.findByRole('link', { name: 'Šeško' });
+      expect(listCalls()).toBe(1);
+
+      first.unmount();
+      vi.advanceTimersByTime(61_000);
+      render(tree);
+      await waitFor(() => expect(listCalls()).toBe(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('窄屏筛选抽屉', () => {
   it('开抽屉：遮罩出现、背景锁滚、焦点进抽屉；Esc 关闭并把焦点还给入口按钮', async () => {
     setNarrow(true);

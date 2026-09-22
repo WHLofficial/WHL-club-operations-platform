@@ -1,7 +1,7 @@
 // 管理端 · 财政页：期初余额导入（幂等）+ 手动记账（§7.1 / §9.1 奖金模板）
 // （原 Admin.tsx 两 section，增量 15 拆分；commit 3 数据层转 TanStack Query）
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiPost, MANUAL_LEDGER_KINDS, type ManualLedgerResult, type OpeningImportResult } from '../../lib/api.ts';
 import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
@@ -18,6 +18,7 @@ export default function FinancePage() {
 
 function OpeningBalanceSection() {
   const { show, toastNode } = useToast();
+  const qc = useQueryClient();
   const { data: clubs = [] } = useQuery({ queryKey: ADMIN_CLUBS_KEY, queryFn: fetchAdminClubs });
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,6 +41,9 @@ function OpeningBalanceSection() {
     try {
       const res = await apiPost<OpeningImportResult>('/api/admin/ledger/opening-import', { rows: parsed });
       setResult(res);
+      // 账目改了就得让「余额」「流水账」重取：这两页在别处，靠的是显式失效（客户端 staleTime 会压住挂载重取）
+      void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+      void qc.invalidateQueries({ queryKey: ['ledger'] });
       show(res.written > 0 ? '期初余额已入账。' : '这批都已经导入过了，全部跳过。');
     } catch (err) {
       show(err instanceof Error ? err.message : '导入失败', true);
@@ -105,6 +109,7 @@ function OpeningBalanceSection() {
 
 function ManualLedgerSection() {
   const { show, toastNode } = useToast();
+  const qc = useQueryClient();
   const { data: clubs = [] } = useQuery({ queryKey: ADMIN_CLUBS_KEY, queryFn: fetchAdminClubs });
   const [clubId, setClubId] = useState('');
   const [kind, setKind] = useState(MANUAL_LEDGER_KINDS[0]!.value);
@@ -137,6 +142,8 @@ function ManualLedgerSection() {
         memo: memo.trim(),
       });
       setResult(res);
+      void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+      void qc.invalidateQueries({ queryKey: ['ledger'] });
       show('已入账，流水账里能查到。');
       setAmountText('');
       setMemo('');

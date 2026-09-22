@@ -48,6 +48,7 @@ export default function MarketFreePage() {
 /* ---------- 海捞自由球员（规则 4.4.4） ---------- */
 
 function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; onError: (msg: string) => void }) {
+  const qc = useQueryClient();
   const [feeById, setFeeById] = useState<Record<number, string>>({});
   const [armedId, setArmedId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -65,6 +66,8 @@ function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; 
       );
       setFeeById((prev) => ({ ...prev, [p.id]: '' }));
       setArmedId(null);
+      // 申请挂上「在途」后名单状态可能变（本窗被解约/在途），别让 30s 的客户端缓存留住旧名单
+      void qc.invalidateQueries({ queryKey: qk.freeAgents });
     } catch (err) {
       onError(err instanceof Error ? err.message : '海捞失败');
     } finally {

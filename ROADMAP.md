@@ -436,6 +436,17 @@
 - **只读评审（code-review-skill）**：结论可合入、无 🔴，独立复核了三条索引表达式与查询表达式逐字等价（SQLite 对唯一表上的裸列名与限定名解析到同一表达式，0027 也是裸列名写法）、测试确实在跑 SQL（`ttlForScope('players','0')` 返回 0 ⇒ `cachedJson` 旁路 L1/L2；`resetGuards()` 清限流桶与缓存）且断言非空洞。3 条 🟡 已全部处置：① `README.md` 迁移计数与生产迁移状态过期（28→29 个文件、`0028`→`0029`，`AGENTS.md` 同步）——已改，并补一句「迁移一旦 apply 到生产就不得再改」的纪律（`0029` 已 apply，此后要改只能新增 `0030`，否则线上记账与新环境重放漂移）；② 测试只锁了默认降序、且**「同一列既筛选又排序」时索引服务不了排序**——已补 `order=asc` 用例（7 个键，测试 15→22 例），缺口本身经本地 `EXPLAIN QUERY PLAN` 实测确认（`WHERE status=? ORDER BY <status CASE>` 与 `WHERE club_id=? ORDER BY COALESCE(club_id,0)` 都退回临时排序，因为筛选条件写的是裸列、与排序表达式不是同一个表达式；`ca>=?` 因范围筛选 + 同源表达式反而两条都吃上），**读量受命中行数约束而非全表扫故不阻断**，已写入报告 §3.1 的「已知缺口」并登记为后续候选（要收掉得让筛选也用 `COALESCE(club_id,0)`，会改变 `club_id IS NULL` 的语义）；③ `measurements.json` 里三条复测条目的 `label` 与新增字段缺失（JSON 是脚本改标签**之前**跑出来的）——已用现行脚本重跑那三个形状（约 120 行读）刷新，并在报告 §6 写明字段分层口径（有 `list_rows`/`count_rows` 的是步骤 2 之后的产物，没有的只有 `statements`/`metas`/`rows_read_total`）。
 - **写放大（评审 🟢，未量化，记录）**：三条索引对**后续** players 写路径（球员导入/全量重导、`growth` 的 `UPDATE players`、转会改 `club_id`/`status`）有长期写放大，目前只记录了 apply 期的 54,903 行；免费档日写 10 万行，将来大批量重导前要按「写行数 × 索引数」估一次。
 
+**步骤 5 记录（2026-09-22）**：前端请求节流（`staleTime`）。分页条文案已随步骤 2 的契约变更完成，所以本步只剩节流一件事。
+- **`web/src/main.tsx`**：QueryClient 全局默认加 `staleTime: 30_000`（保留增量 15 的 `retry: false`、`refetchOnWindowFocus: false`）。理由：同一页反复挂载、切走再回来不该重发请求——每次未命中都是 D1 实读；而写路径有两条保险（前端显式改数据处仍走 `invalidateQueries`，它绕过 `staleTime` 强制重取；服务端有写路径代际键 purge）。
+- **`web/src/pages/PlayersLibrary.tsx`**：列表 `useInfiniteQuery` 加 `staleTime: 60_000`（query 级覆盖客户端默认）。列表每页都是实读（默认浏览 56 行/页，贵形状数千行），60s 内复用已加载的页。
+- **新测试**（`web/src/pages/PlayersLibrary.test.tsx` 新增 describe「增量 28：列表 staleTime」）：用**同一个 QueryClient**（只关 `retry`，保留默认 `gcTime`，否则卸载即回收、测的就成了 gcTime）渲染 → 卸载 → 再渲染，断言 `/api/players?` 请求次数仍是 1；另一例用假计时器（`vi.useFakeTimers({ shouldAdvanceTime: true })`）把时钟推过 60s 后重新挂载，断言这次**必须**重取——只测「新鲜期内不重取」的话，`staleTime` 误设成 `Infinity` 也能过。**做过变异验证**：删掉 `staleTime: 60_000` 第一例立刻红；改成 `Infinity` 第二例立刻红 ⇒ 两条断言都不是空洞的。
+- **只读评审（code-review-skill）**：结论「可合入、无 🔴」；语义面逐条核对通过（query 级覆盖客户端默认、新鲜期重新挂载不发请求、`invalidateQueries` 绕过 `staleTime`、`refetchInterval` 不受 `staleTime` 影响、客户端 30s/60s 均短于服务端分级 TTL ⇒ 方向安全）。两条 🟡 是「既存瑕疵被本改动放大」，本步顺手修掉：
+  - `web/src/pages/admin/FinancePage.tsx`：期初导入与手动记账成功后只 `setResult`，不失效别的页面——管理员随即切到流水账页会在 30s 内看不到刚入的账。两处各补 `void qc.invalidateQueries({ queryKey: ['club', 'balance'] })` 与 `{ queryKey: ['ledger'] }`（`Ledger.tsx` 的键是 `['club','balance']` 与 `['ledger', kind]`）。
+  - `web/src/pages/market/MarketFreePage.tsx`：海捞申请成功后不失效 `qk.freeAgents`（同文件 `ActivateSection` 有失效先例）。补 `void qc.invalidateQueries({ queryKey: qk.freeAgents })`。
+  - 🟢 记录未改：聚焦重取在 30s 内被抑制（`useUnreadCount` 的 60s 轮询本身不受影响）；列表 60s 与全局 30s 的粒度差是有意的。
+- **诚实记录**：全局那 30s 没有直接测试（`main.tsx` 在模块加载时就 `createRoot(...).render`，jsdom 里没法只 import 取它的 QueryClient），被锁住的是真正要紧的那条——球员库列表的 60s。
+- **验收**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 537 例全绿**（步骤 4 后基线 39/535，本步 +2）；`npm run build` 成功（`web/dist/assets/index-DZu3s6Fn.js` 451.07 kB / gzip 142.94 kB）；本地 8791 + `npm run test:e2e` **9/9 通过**。
+
 ---
 
 ## 外部依赖与待输入

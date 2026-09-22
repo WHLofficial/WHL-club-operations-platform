@@ -207,6 +207,9 @@ export default function PlayersLibrary() {
     initialPageParam: null as string | null,
     // nextCursor 到底时是 null；v5 里 null 仍是合法游标，必须转 undefined 才算「没有下一页」
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    // 增量 28：列表每页都是 D1 实读（默认浏览 56 行/页，贵形状数千行），60s 内复用已加载的页；
+    // 写路径由服务端代际键 purge，前端改数据的地方仍用 invalidateQueries 强制重取
+    staleTime: 60_000,
   });
 
   const [pageIdx, setPageIdx] = useState(1);
