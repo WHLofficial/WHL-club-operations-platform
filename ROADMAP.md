@@ -590,6 +590,40 @@
 **待办**：① 上述 5 条 🟢 遗留；② PlayStyle 图标资产包仍待供给（缺图降级 🥇🥈）；③ 生产库 `player_playstyles` 目前 0 行 —— 首次真实发放（升级选徽章方案 / 中国计划）建议人工跟一单核对明细落槽。
 
 
+## 增量 31 · 球队页（公开列表 + 登录详情 + 自家队中心合并）
+
+**状态**：2026-09-22 本地完成步骤 0–10（11 个提交），**未推送、未部署**；步骤 11（e2e 三视口 + 全量验收）与步骤 12（推送/部署/最小化回读）待办，后者等用户下令。**本增量不含迁移**（0032 在步骤 1 被裁掉），故推送无生产 DDL 耦合。
+
+**缘起**：用户 m12793 下达「新增球队页（列表 + 详情）」，并特别要求注意性能、省 D1 额度。经脑暴发散 → 一问一题裁决（Q1–Q17）→ 技术路径与用户操作动线 → 计划。计划稿 v1 被拒后修订重交（编号因增量 30 已占用改为 31，迁移号改 0032，后又在步骤 1 裁掉）。
+
+**范围与交付**：公开 **`/clubs`** 列表页；需登录的 **`/clubs/:id`** 详情页；**`/club` 改重定向**到自家队详情，原「我的球队中心」（`web/src/pages/Club.tsx`，897 行）整体搬进详情页教练区块；入口四处；新增 `GET /api/clubs`、`GET /api/clubs/:id`（+ `GET /api/clubs/:id/standing`）、`GET /api/media/*` 三个端点。
+**不做**：改球员库或市场读面契约、国籍分布、详情页财政与主场组、改 `clubFormPts` 代码、引图表库、写生产数据、动 `.admin-shell` 断点。
+
+**技术路径**
+- **① `GET /api/clubs`（公开）** —— 一次算完 20 队：固定 4 条 whl-club 语句 + AUTH_DB/TOUR_DB 各 1~2 条，**无逐队查询**；clubs scope 缓存（24h）+ `assertPublicRate('clubs')`。聚合 `CLUB_SQUAD_AGG_SQL` 带 `WHERE club_id IS NOT NULL` ⇒ SQLite 改写成范围扫跳过 17,731 行 NULL（**实测读 1,032 行**，全表 18,301）；`contracts.player_id` 是 UNIQUE ⇒ LEFT JOIN 无扇出。响应 `{ clubs: [{ id, name, isCpu, tier, logoKey, squad:{senior,trainee}, avgCa, totalValue, totalWage }] }`。`tier.ts` 抽出 `loadLeagueList`（`derive` 内部改用它，SQL 逐字不变）并新增 `deriveClubTiers` 批量派生：**一队双定级**（单队 `derive` 会抛 500）在批量里降级 `null` + `console.warn`，AUTH_DB 映射冲突也降级告警、**不 last-wins**。队徽取比赛系统 `team.logo_key`（本平台 `clubs.logo_key` 全仓无人写无人渲染）。
+- **② `GET /api/clubs/:id`（需登录，同一 clubs scope）** —— 队头 + 阵容结构 + 合同结构 + 转会往来 + 近期战绩；阵容**一条语句**取全队（走 `idx_players_club_ca`）在 JS 里算三个维度分布，避免三条 GROUP BY。战绩绑**比赛系统队 id**（`result_confirmations` 存的是 tour team id，见迁移 0017），90 分钟口径、双弃权双方各记负。排名走代理 `GET /api/clubs/:id/standing`：`TOUR_API_BASE` 未配即降级且**零查库**，失败不落缓存（`StandingUnavailable`）、响应体限 2MB。**验收冷算 151 行（club 1）/ 165 行（club 9，生产阵容最大 37 人）**，排名 11 行，均远低于 500 行线。
+- **③ `GET /api/media/*`（公开）** —— 镜像比赛系统的公开媒体路由，**只读不写**，key 白名单 `/^(team|tournament)\/\d+\//` + 长度 ≤1024；边缘缓存（`caches.default`，jsdom/node 无 `caches` 时静默旁路）命中即返，`immutable` + ETag + `waitUntil(cache.put)`；残缺百分号编码不接住就是匿名 500，已 catch 回 `{error:'not_found'}`。**本路由不碰任何 D1**，是球队页里唯一的零 D1 读面。走本域而非直连比赛系统的理由：R2 桶 `whl-media` 已绑定本 Worker（`MEDIA`），同源取图省一次跨站请求与 DNS，也无 CORS / 混内容问题。**不加 `assertPublicRate`**：零 D1 读且命中边缘缓存后连 R2 都不打，而限流是 60/min/IP，一屏 20 个队徽会被正常浏览打成 429（比赛系统同样不限流）。
+- **前端** —— `web/src/pages/Clubs.tsx`（按顶级/次级/未定级三段出卡片，生产 20 队一屏放得下 ⇒ 无筛选无分页；整卡链 `/clubs/:id`；空段整段不渲染）；`web/src/pages/ClubDetail.tsx`（阵容组 10 项统计 + 位置分布 chip + **CSS 自绘**年龄/CA 结构图 + 名单表；运营组合同结构 4 项 + 效力年限图 + 转入转出表；战绩组当季联赛排名 5 项 + 近 5 场）；`web/src/components/TeamLogo.tsx`（有 logoKey 出 `<img>` 走 `mediaUrl()`，否则按队名哈希出首字色块，同队三处同色）；路由 `/clubs` 进公开组、`/clubs/:id` 进 `RequireUser` 组、`/club` 改 `<Navigate>`。
+
+**裁决（Q1–Q17）**：列表公开 / 详情需登录；列表 4 指标（阵容人数拆一线队+训练营、平均 CA、总身价、工资总额）；按分级分段卡片；详情三组（阵容/运营/战绩），**不含财政与主场**；统一 `/clubs/:id` 且 `/club` 重定向；分级批量派生、未定级归第三段；队徽参照 tour 平台、镜像其 media 路由；入口四处；CPU 队显示带标记；训练营 = `players.status='trainee'`；结构分析全要，**年龄用 CSS 自绘柱状图不引图表库**；教练区块仅「已登录且绑定该队」渲染；**Q17 = 球队页 URL id 一律用平台库 `clubs.id`**（长期有效，已写进 `AGENTS.md`）。术语沿用增量 30：非成长 / 经纪人性格 / 合同 / 来源球队。
+
+**分步**（每步一 commit + code-review-skill 过审）：0 生产只读事实核对 + 计划落盘（计划在 `.zcode/plans/plan-sess_4cad139a-6977-4a40-9531-f7cf24c68499.md`，`.zcode/` 已 gitignore）→ 1 读量实测（`70dc811`）→ 2 媒体路由（`e0411de`）→ 3 列表端点（`5dbfe41`）→ 4 `TeamLogo` + `/clubs` 列表页（`a84c748`）→ 5 入口四处（`779ee6b`）→ 6 详情端点 + 读量证据（`5b90031` + `32068be`）→ 7 详情页（`00092b4`）→ 8 教练区块迁移 + `/club` 重定向（`57e68a6`）→ 9 `clubFormPts` 只读核对（`829063f`）→ 10 文档收口（本节）。另有 `545ad90` 把 Q17 写进 `AGENTS.md`。
+
+**步骤 1 记录（2026-09-22，`70dc811`）**：读量量化后**裁掉迁移 0032**。原计划给 `players` 建部分覆盖索引 `WHERE club_id IS NOT NULL`（索引内约 570 条），实测发现 `WHERE club_id IS NOT NULL` 的聚合本来就只读 1,032 行（SQLite 直接范围扫跳过 17,731 行 NULL），索引收益不足以抵一条生产 DDL ⇒ 本增量零迁移。
+
+**步骤 6–8 的关键手法**：读量实测不靠估算，而是**调真实路由抓 SQL**（`mountApp` + 自带假 D1 按 SQL 文本回生产同形的值），逐条 `inlineParams` 后打生产 `--remote --json`（工件 `scripts/d1-read-audit/measure-club-detail.mjs` + `club-detail-measurements.json`）。评审抓到并修掉的真缺陷：**CSS 类名冲突污染球员档案页** —— 新追加的 `.pos-chip` 与 `web/src/pages/Player.tsx:568` 在用的 `.pos-chip-main` 同特异性且位置更晚 ⇒ 覆盖其 `background:var(--ink)` 而 `color:var(--paper)` 仍生效，球员页第一个位置徽章变浅底浅字不可读；修法是新增类一律带 `club-` 前缀。另一处是 `/club` 重定向把「请求失败」当成「未绑定」（`useMyClub` 在 `isError` 时 `club: null`，而全局 `retry: false` ⇒ 一次失败即终态），会把绑着队的教练送去写着「一账号只能绑一支队」的 `/bind`；修法是 `MyClubState` 新增 `failed` 并让壳在该状态下留在原地报错。
+
+**步骤 9 记录（2026-09-22，`829063f`，本增量的最重要结论）**：`clubFormPts` 的「真 bug」**被证伪**。
+- 语义上确实是两套 id：`result_confirmations.home_team_id / away_team_id` 存**比赛系统队 id**（迁移 0017 原话「赛果快照补两队 tour team id」，写入源是 `results.ts` 从 TOUR_DB 读出的 `TourMatchRow`），而 `clubFormPts` 绑的是 **club id**。
+- 但生产实测（2026-09-22）：AUTH_DB `team` 表 20 行**逐队 `club_id` = `tour_team_id`**（1/2/5/9/10/11/13/14/21/33/45/66/73/241/243/280/449/110374/112172/131681 全等）；`result_confirmations` 69 行的队 id 全落在这 20 个值内，**20 队各有 6–7 条已确认赛果**。⇒ 函数**算得出真值**，`form_coef_table` 取的是真实战绩档、`evolveFans` 的 ≥7 / ≤1 分支会触发。此前「命中恒 0 ⇒ 战绩系数恒 1.0」的结论**是错的**。
+- 定性为**潜伏缺陷，非现行故障**：历史上确有真实失效窗口 —— 米兰的 `tour_team_id` 长期是 legacy 47 而 `club_id` 是 131681，直到 2026-09-19 rekey 才统一，那段时间本函数对米兰恒返中性 4。将来若新增 club 的 id 不等于其 tour 队 id，本函数会**静默退化成「永远中性」**。
+- 处置：按计划**不改代码行为**，只订正两处注释（`src/worker/home.ts` 的 `clubFormPts` 上方、`src/worker/routes/clubs.ts` 的 `CLUB_FORM_SQL` 上方），写明 id 语义、生产实测的巧合与正确写法（照 `prizes.ts` 的 `clubIdByTourTeam` 先映射）。
+
+**验收（步骤 1–9 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **46 文件 / 637 例全绿**（增量 30 基线 40/573 ⇒ 本增量 +6 文件 / +64 例）；`npm run build` 成功（`web/dist/assets/index-zs-7vV9W.js` **472.43 kB / gzip 148.78 kB**、`index-BIj79sRd.css` 31.56 kB / gzip 7.07 kB）；`npm run test:e2e` **9/9**。变异验证多处（教练区块身份判定、`/club` 两个 Navigate 目标、`failed` 分支、`平均成长空间`、积分榜 TTL）均能定向变红。
+
+**待办**：① 步骤 11 e2e 三视口（1280×900 / 900×800 / 375×812）+ 全量验收（含新场景：卡片分组与 CPU 标、整卡可点、未登录详情引导、自家队重定向、柱状图不溢出）；② 步骤 12 推送 + 部署 + 最小化回读（**等用户下令**；会连带增量 30 的 7 个提交，但本增量无迁移故无 DDL 耦合）；③ `CoachPanel`（874 行）搬迁后无专属组件测试，只有经详情页的 2 条冒烟断言（搬迁前就存在的覆盖薄弱）；④ `clubFormPts` 的 id 口径可择机改成显式映射（见步骤 9）；⑤ 顶栏「球队中心」tab 仍指向 `/club`，重定向后高亮落在「球队」tab —— 已接受（给 TopBar 加 `useMyClub()` 会让每个登录用户每次加载多打一次 `/api/me/club`，与省 D1 额度主线相悖）。
+
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
