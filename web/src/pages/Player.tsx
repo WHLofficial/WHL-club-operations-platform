@@ -322,7 +322,7 @@ export default function Player() {
       <p className="crumb">
         {club ? (
           <>
-            <Link to="/club">{club.name}</Link> 的球员合同
+            <Link to={`/clubs/${club.id}`}>{club.name}</Link> 的球员合同
           </>
         ) : (
           '球员合同'

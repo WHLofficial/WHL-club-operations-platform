@@ -577,7 +577,10 @@ export default function PlayersLibrary() {
                         <td>
                           <Link to={`/players/${p.id}`}>{p.name}</Link>
                         </td>
-                        <td>{p.clubName ?? '自由身'}</td>
+                        <td>
+                          {/* 归属球队链到球队页（增量 31）；自由身没有俱乐部，不给链接 */}
+                          {p.clubId === null ? '自由身' : <Link to={`/clubs/${p.clubId}`}>{p.clubName ?? '未知球队'}</Link>}
+                        </td>
                         <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>
                         <td className="num mono">{p.age ?? '—'}</td>
                           <td className="num mono">{p.ca}</td>

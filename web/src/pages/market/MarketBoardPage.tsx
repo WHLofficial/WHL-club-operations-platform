@@ -280,7 +280,7 @@ function DetailSection({
         <span className={`badge ${LISTING_STATUS_BADGE[l.status] ?? 'gray'}`}>{LISTING_STATUS_LABEL[l.status] ?? l.status}</span>
       </h3>
       <p className="hint">
-        卖方 {l.sellerClub.name} · {l.type === 'activation' ? `激活价 ${money(l.askPrice)} m（${l.activatorName ?? '激活方'} 发起）` : `挂牌价 ${money(l.askPrice)} m`} ·
+        卖方 <Link to={`/clubs/${l.sellerClub.id}`}>{l.sellerClub.name}</Link> · {l.type === 'activation' ? `激活价 ${money(l.askPrice)} m（${l.activatorName ?? '激活方'} 发起）` : `挂牌价 ${money(l.askPrice)} m`} ·
         违约金 {money(l.releaseFee)} m ·{' '}
         {l.matchPhase === 'matching'
           ? <>匹配窗截止 <span className="mono">{deadlineText(l.matchDeadline)}</span></>
@@ -398,7 +398,9 @@ function DetailSection({
             <tbody>
               {detail.bids.map((b) => (
                 <tr key={b.id}>
-                  <td>{b.clubName}</td>
+                  <td>
+                    <Link to={`/clubs/${b.clubId}`}>{b.clubName}</Link>
+                  </td>
                   <td className="num mono">{money(b.amount)}</td>
                   <td className="mono">{b.createdAt.slice(0, 16).replace('T', ' ')}</td>
                   <td>

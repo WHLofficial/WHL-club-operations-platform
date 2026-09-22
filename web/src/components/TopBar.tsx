@@ -44,6 +44,9 @@ export default function TopBar() {
           <NavLink to="/players" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             球员库
           </NavLink>
+          <NavLink to="/clubs" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
+            球队
+          </NavLink>
           <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             转会市场
           </NavLink>

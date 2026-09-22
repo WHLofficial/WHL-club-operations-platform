@@ -61,6 +61,10 @@ export default function Home() {
           <h3>转会市场</h3>
           <p className="muted">还没有挂牌。窗口开了之后，这里就是市场。</p>
         </NavLink>
+        <NavLink to="/clubs" className="card nav-card">
+          <h3>球队</h3>
+          <p className="muted">全联盟球队总览：阵容人数、平均 CA、身价与工资，点开看单队详情。</p>
+        </NavLink>
         <NavLink to="/ledger" className="card nav-card">
           <h3>财政账本</h3>
           <p className="muted">期初余额导入之后，每一笔收支都会记进这本流水账。</p>
