@@ -24,10 +24,10 @@ describe('属性中文名表', () => {
   });
 });
 
-// 档案页原先手抄了 PSID1-7 + PSID13-15（模块顶部的槽位键清单当时还没导出），落在 PSID8-12 的
-// 银徽章因此「可筛不可见」：列表按台账列 badges_silver 显示 8 银，档案页只列得出 7 个。
+// 属性页原先手抄了 PSID1-7 + PSID13-15（模块顶部的槽位键清单当时还没导出），落在 PSID8-12 的
+// 银徽章因此「可筛不可见」：列表按台账列 badges_silver 显示 8 银，属性页只列得出 7 个。
 // 这里钉死「扫全 15 槽」，免得以后有人为了「只显示常见槽」再把手抄清单写回页面。
-describe('档案页徽章清单 playstyleBadges', () => {
+describe('属性页徽章清单 playstyleBadges', () => {
   it('扫全 15 槽：落在 PSID8-12 的银徽章也进清单', () => {
     expect(playstyleBadges({ PSID8: 25, PSID12: 7 })).toEqual([
       { psid: 25, slot: 8, gold: false },

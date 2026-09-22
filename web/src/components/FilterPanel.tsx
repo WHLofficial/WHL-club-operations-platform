@@ -168,7 +168,7 @@ export default function FilterPanel({
                   onChange={(e) => setFilters((f) => ({ ...f, attr: e.target.value, attrMin: '', attrMax: '' }))}
                 >
                   <option value="">不筛</option>
-                  {/* 增量 27 步骤 2：34 项按档案页的七组速查卡分组（单一来源 ref.ts），选项写中文名 */}
+                  {/* 增量 27 步骤 2：34 项按属性页的七组速查卡分组（单一来源 ref.ts），选项写中文名 */}
                   {ATTR_GROUPS.map((g) => (
                     <optgroup key={g.key} label={g.label}>
                       {g.keys.map((k) => (

@@ -49,7 +49,7 @@ describe('训练营合同常量与档位名', () => {
     expect(TRAINEE_WAGE).toBe(0.75);
     expect(TRAINEE_RELEASE_FEE).toBe(5);
   });
-  it('经纪人档位名齐全', () => {
+  it('经纪人性格名齐全', () => {
     expect(AGENT_TIER_LABELS[1]).toBe('温和');
     expect(AGENT_TIER_LABELS[2]).toBe('普通');
     expect(AGENT_TIER_LABELS[3]).toBe('苛刻');

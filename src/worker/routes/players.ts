@@ -769,7 +769,7 @@ async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: stri
   return { roster: row?.roster ?? '', count: row?.n ?? 0 };
 }
 
-// GET /api/players/:id —— 档案卡数据（球员 + 俱乐部 + 现行合同 + FC 存档）
+// GET /api/players/:id —— 球员卡数据（球员 + 俱乐部 + 现行合同 + FC 存档）
 app.get('/players/:id', async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');

@@ -397,7 +397,7 @@ describe('球员查询（附录 A〔1〕）', () => {
     expect(body2.nextCursor).toBeNull();
   });
 
-  it('档案卡：球员 + 俱乐部 + 合同，game_attrs 解析', async () => {
+  it('球员卡：球员 + 俱乐部 + 合同，game_attrs 解析', async () => {
     const fx = freshEnv();
     seedPlayers(fx);
     fx.sqlite

@@ -564,7 +564,7 @@ function GrowthSection() {
       )}
 
       <h3>赛季结算</h3>
-      <p className="hint">按 §10.1 结算：训练营球员固定经验、中国计划加成、进+攻里程碑补发（只算当前成长期内）；重放安全，重复运行不会重复入账。升级在球员档案页选方案。</p>
+      <p className="hint">按 §10.1 结算：训练营球员固定经验、中国计划加成、进+攻里程碑补发（只算当前成长期内）；重放安全，重复运行不会重复入账。升级在球员卡成长页选方案。</p>
       <div className="inline-form">
         <label className="field">
           赛季编号

@@ -9,7 +9,7 @@ import { applyLevelUp, getUpgradePlans, DEFAULT_UPGRADE_PLANS } from '../growth.
 
 const app = new Hono<{ Bindings: Env }>();
 
-// 成长史（🌐 公开）：档案卡成长页数据源——XP 进度、徽章、待升级次数、事件时间线
+// 成长史（🌐 公开）：球员卡成长页数据源——XP 进度、徽章、待升级次数、事件时间线
 app.get('/players/:id/growth', async (c) => {
   const playerId = Number(c.req.param('id'));
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');

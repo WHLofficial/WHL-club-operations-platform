@@ -1,6 +1,6 @@
-// 球员档案卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，增量 6.1 d9 改 E2 页内页签：
-// 档案=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 档案与升级）
-// 成长档案区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
+// 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，增量 6.1 d9 改 E2 页内页签：
+// 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级）
+// 成长记录区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -25,7 +25,7 @@ import { useToast } from '../lib/toast.tsx';
 type PlayerTab = 'profile' | 'attrs' | 'growth';
 
 const TAB_LABEL: Record<PlayerTab, string> = {
-  profile: '档案',
+  profile: '合同',
   attrs: '属性',
   growth: '成长',
 };
@@ -124,7 +124,7 @@ export default function Player() {
     queryFn: () => api<PlayerDetail>(`/api/players/${id}`),
     enabled: id !== undefined,
   });
-  // 成长档案拉失败按 null 展示（旧行为 .catch(() => setGrowth(null))）
+  // 成长记录拉失败按 null 展示（旧行为 .catch(() => setGrowth(null))）
   const growthQuery = useQuery({
     queryKey: ['player', id ?? '', 'growth'],
     queryFn: () => api<GrowthDetail>(`/api/players/${id}/growth`),
@@ -160,7 +160,7 @@ export default function Player() {
   if (dataQuery.isError) {
     return (
       <div className="container">
-        <div className="banner bad">{dataQuery.error instanceof Error ? dataQuery.error.message : '加载球员档案失败'}</div>
+        <div className="banner bad">{dataQuery.error instanceof Error ? dataQuery.error.message : '加载球员合同失败'}</div>
         <Link className="btn btn-ghost" to="/club">
           回球队中心
         </Link>
@@ -171,7 +171,7 @@ export default function Player() {
     return (
       <div className="container">
         <div className="card empty-state">
-          <p className="muted">正在抽档案…</p>
+          <p className="muted">正在调阅合同卷宗…</p>
         </div>
       </div>
     );
@@ -187,10 +187,10 @@ export default function Player() {
       <p className="crumb">
         {club ? (
           <>
-            <Link to="/club">{club.name}</Link> 的球员档案
+            <Link to="/club">{club.name}</Link> 的球员合同
           </>
         ) : (
-          '球员档案'
+          '球员合同'
         )}
       </p>
       <div className="dossier">
@@ -226,7 +226,7 @@ export default function Player() {
             <span className={`badge ${player.status === 'listed' ? 'sky' : player.status === 'trainee' ? 'purple' : 'gray'}`}>
               {STATUS_LABEL[player.status] ?? player.status}
             </span>
-            {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">到顶</span>}
+            {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}
             {player.isFutureStar && <span className="badge gold">未来之星</span>}
             {player.chinaPlan && <span className="badge red">中国计划</span>}
             {player.growthTier > 1 && <span className="badge gray">成长档位 {player.growthTier}</span>}
@@ -306,7 +306,7 @@ export default function Player() {
           {tab === 'growth' && growth && <GrowthBlock growth={growth} armedPlan={armedPlan} busy={busy} onChoosePlan={choosePlan} />}
           {tab === 'growth' && !growth && (
             <div className="empty-state">
-              <p className="muted">成长档案还没就绪。</p>
+              <p className="muted">成长记录还没就绪。</p>
             </div>
           )}
         </section>
@@ -356,7 +356,7 @@ function AttrSheet({
             <span className="pos-chip">—</span>
           )}
         </div>
-        {team && <span className="pos-team">效力球队 {team}</span>}
+        {team && <span className="pos-team">来源球队 {team}</span>}
       </div>
       {roles.length > 0 && (
         <div className="role-chips">
@@ -443,7 +443,7 @@ function AttrSheet({
   );
 }
 
-// 成长档案块（§10）：放合同卷宗下方，FC 存档之前
+// 成长记录块（§10）：放合同卷宗下方，FC 存档之前
 function GrowthBlock({
   growth,
   armedPlan,
@@ -461,7 +461,7 @@ function GrowthBlock({
   const toNext = p.xpPerLevel - xpInLevel;
   return (
     <div className="growth-block">
-      <h3>成长档案</h3>
+      <h3>成长记录</h3>
       <p className="growth-xp-row">
         <span className="mono growth-xp-num">{Math.floor(p.growthXp)} XP</span>
         <span className="growth-bar" aria-hidden="true">

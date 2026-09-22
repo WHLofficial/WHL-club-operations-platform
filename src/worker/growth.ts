@@ -186,7 +186,7 @@ export async function loadGrowthPeriod(db: D1Database): Promise<GrowthPeriod> {
   return row ? { id: row.id, startEventId: row.start_event_id } : { id: 0, startEventId: 0 };
 }
 
-/** 成长期档案行（管理端展示用；DTO 冻结 camelCase） */
+/** 成长期记录行（管理端展示用；DTO 冻结 camelCase） */
 export interface GrowthPeriodRow {
   id: number;
   season: number | null;

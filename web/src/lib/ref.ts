@@ -68,7 +68,7 @@ export interface PlaystyleBadgeSlot {
   gold: boolean;
 }
 
-// 档案页的徽章清单：按槽位键扫全 15 槽（银 1-12 + 金 13-15），只收有值的槽 —— 空槽不出现在
+// 属性页的徽章清单：按槽位键扫全 15 槽（银 1-12 + 金 13-15），只收有值的槽 —— 空槽不出现在
 // 清单里，免得铺一排「未设置」。清单来自 core 常量而不是页面里手抄，改段界时两边一起动。
 export function playstyleBadges(attrs: Record<string, unknown>): PlaystyleBadgeSlot[] {
   return PS_SLOT_KEYS.flatMap((key, i) => {
@@ -86,7 +86,7 @@ export function playstyleIconUrl(id: number): string {
 // 细分属性中文名（34 项，顺序 = FC26 的细分属性列顺序，与 players-library.ts 的 ATTR_KEYS、
 // 后端 FC26_GAME_ATTR_COLUMNS 逐序对齐）。
 // 增量 27 步骤 2：原先这份表只活在 pages/Player.tsx 里，筛选面板的下拉只好铺英文键；提到这里
-// 两处共用一份 —— 各留一份就多一次「下拉里是 sprintspeed、档案页写冲刺速度」的漂移机会。
+// 两处共用一份 —— 各留一份就多一次「下拉里是 sprintspeed、属性页写冲刺速度」的漂移机会。
 // 顺序与完整性由 web/src/lib/ref.test.ts 与 ATTR_KEYS 逐序比对兜底。
 export const ATTR_LABELS: Record<string, string> = {
   sprintspeed: '冲刺速度',
@@ -126,7 +126,7 @@ export const ATTR_LABELS: Record<string, string> = {
 };
 
 // 属性组（增量 6.1 d10 四裁决：六组速查卡；门将追加 GKP 共七组；组值=组内平均）。
-// 增量 27 步骤 2：筛选面板的「属性」下拉按这份表分七组小标题，与档案页速查卡同一套分组。
+// 增量 27 步骤 2：筛选面板的「属性」下拉按这份表分七组小标题，与属性页速查卡同一套分组。
 export const ATTR_GROUPS = [
   { key: 'PAC', label: '速度', keys: ['sprintspeed', 'acceleration'] },
   { key: 'SHO', label: '射门', keys: ['finishing', 'positioning', 'shotpower', 'longshots', 'penalties', 'volleys'] },

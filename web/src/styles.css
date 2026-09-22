@@ -745,7 +745,7 @@ tbody tr:hover td {
   color: var(--cocoa);
 }
 
-/* ---- 球员卡 .player-card（贴纸白边 + 奶油面）与档案卡 .dossier ---- */
+/* ---- 球员卡 .player-card（贴纸白边 + 奶油面）与左右栏容器 .dossier ---- */
 
 .dossier {
   display: grid;
@@ -1381,7 +1381,7 @@ tbody tr:hover td {
   }
 }
 
-/* ---- 成长档案（§10，UI_DESIGN §4.2 档案卡扩展）：XP 进度条 + 升级方案卡 ---- */
+/* ---- 成长记录（§10，UI_DESIGN §4.2 球员卡扩展）：XP 进度条 + 升级方案卡 ---- */
 
 .growth-block {
   margin-top: 24px;
@@ -2077,7 +2077,7 @@ th.num .th-sort {
   opacity: 1;
 }
 
-/* 球员页页签（增量 6.1 d9：档案/属性/成长，左卡常驻） */
+/* 球员页页签（增量 6.1 d9：合同/属性/成长，左卡常驻） */
 .dossier-tabs {
   margin-bottom: 14px;
 }

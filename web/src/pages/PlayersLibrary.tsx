@@ -64,7 +64,7 @@ function money(x: number | null): string {
 // PlayStyle 槽位原值 → 显示名（psIds 与槽位对齐、缺槽 null；金徽=基础 ID+100，或金槽 13+）
 // 金徽判定与基础 ID 剥离都走 core/ref 的口径，别在这里再写一遍 >=100 / -100
 // slot 是数组下标（0 起），playstyleIsGold 收的是槽号（1 起）⇒ 这里 +1，否则下标 12 的 PSID13
-// 走不到「金槽」分支（增量 29：银段 ID 落在金槽时会显示成银，与档案页的 🥇 不一致）
+// 走不到「金槽」分支（增量 29：银段 ID 落在金槽时会显示成银，与属性页的 🥇 不一致）
 export function psNames(row: PlayerLibraryRow): string {
   if (!row.psIds || row.psIds.length === 0) return '—';
   const names = row.psIds
@@ -403,7 +403,7 @@ export default function PlayersLibrary() {
   return (
     <div className="container">
       <h2>球员库</h2>
-      <p className="muted">全联盟的公开名册。点姓名进球员档案；筛了哪一项，表里就自动多哪一列（列选择器里手动调过则以手动为准）。</p>
+      <p className="muted">全联盟的公开名册。点姓名进球员合同；筛了哪一项，表里就自动多哪一列（列选择器里手动调过则以手动为准）。</p>
 
       <section className="card">
         <div className="library-controls lib-toolbar control-row" inert={narrow && drawerOpen}>

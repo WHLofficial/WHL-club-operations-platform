@@ -120,7 +120,7 @@ app.get('/windows', async (c) => {
   return c.json(await listWindows(c.env.DB));
 });
 
-// POST /api/admin/windows/open —— 开新窗（前置：无在开窗口；全球员经纪人档位重掷）
+// POST /api/admin/windows/open —— 开新窗（前置：无在开窗口；全球员经纪人性格重掷）
 // declareGrowthPeriod=true 时同批宣告新成长期（勾选框；成长期本身不与窗口绑定）
 // temporary=true 开临时窗（不推进效力/不计忠诚奖金/不扣工资与冠名租金）；同赛季常规窗最多 2 个
 app.post('/windows/open', async (c) => {

@@ -1,6 +1,6 @@
 // 窗口状态机（TECH_DESIGN §11/§6.4-6）：season_windows open → closed。
 // 开窗（= 推进进入新窗）：前置校验无在开窗口，全球员按 agent_change_probability 三档等概率
-// 重掷经纪人档位（§6.8）；关窗：先跑惰性结算（截止判定/激活失效/匹配到期），再校验
+// 重掷经纪人性格（§6.8）；关窗：先跑惰性结算（截止判定/激活失效/匹配到期），再校验
 // ——活跃谈判会话（force 且 window_force_settle=true 时按 E 强制成约）、匹配等待单、
 // 待审队列全空——然后落 closed 并做窗尾收口（无人出价下架收费、竞价转待审）。
 import type { Env } from './env.ts';
@@ -61,7 +61,7 @@ export async function listWindows(db: D1Database): Promise<{ seasons: { season: 
 /**
  * 开窗：无在开窗口（一次只有一个窗）；season 缺省取最新赛季、windowSeq 缺省顺延；
  * 赛季行不存在时自动按 running 建档（完整赛季管理随增量 6）。
- * 全球员经纪人档位重掷：roll < prob → 三档等概率（会话存续期档位恒定，E 已快照）。
+ * 全球员经纪人性格重掷：roll < prob → 三档等概率（会话存续期性格恒定，E 已快照）。
  * declareGrowthPeriod=true（管理端勾选复选框）时同批宣告新成长期——不再与窗口绑定，
  * 只是把「开窗」当成一个常用时点；管理端也可以随时手动宣告（见 routes/admin/growth.ts 的 /growth/periods）。
  */
@@ -114,7 +114,7 @@ export async function openWindow(
     }
   }
 
-  // 经纪人档位重掷（§6.8）：窗口推进事务内全球员 0.3 概率三档等概率
+  // 经纪人性格重掷（§6.8）：窗口推进事务内全球员 0.3 概率三档等概率
   const prob = await config.getNumber('agent_reroll_prob');
   const roll = env.rng ?? defaultRng;
   const rerolls = new Map<number, number[]>();

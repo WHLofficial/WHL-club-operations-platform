@@ -526,7 +526,7 @@ function WindowsSection() {
         ...(temporary ? { temporary: true } : {}),
       });
       show(
-        `窗口已开：第 ${res.season} 赛季 · 窗口 ${res.windowSeq}${res.isTemporary ? '（临时窗）' : ''}。全联盟经纪人档位重掷了 ${res.rerolled} 名球员。` +
+        `窗口已开：第 ${res.season} 赛季 · 窗口 ${res.windowSeq}${res.isTemporary ? '（临时窗）' : ''}。全联盟经纪人性格重掷了 ${res.rerolled} 名球员。` +
           (res.growthPeriodDeclared ? ' 已同时宣告新成长期，里程碑重新起算。' : ''),
       );
       setSeason('');
@@ -568,7 +568,7 @@ function WindowsSection() {
       <h2>转会窗口</h2>
       {toastNode}
       <p className="hint">
-        同一时刻只有一个窗口开着。开窗会给全联盟球员重掷经纪人档位；关窗前先处理完市场截止单，
+        同一时刻只有一个窗口开着。开窗会给全联盟球员重掷经纪人性格；关窗前先处理完市场截止单，
         并要求没有待审单、没有等待匹配的激活单、没有进行中的签约谈判——除非开了 window_force_settle 参数并用强制关窗，
         未谈完的谈判会按买方已提交的条款强制成约。勾选「同时宣告新成长期」会在开窗同一批里画一条里程碑起算线。
         一个赛季最多 2 个常规窗（第 1 个是季初、第 2 个是中期）：季初与中期关窗推进效力 0.5 赛季、按合同扣工资与冠名费，中期关窗另发忠诚奖金；

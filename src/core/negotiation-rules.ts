@@ -1,12 +1,12 @@
 // 签约谈判公开规则（规则 4.3.1/4.3.4、TECH_DESIGN §6.7/§6.8）：能力等级映射、成长年龄
-// 判定、新违约金合法区间、经纪人档位名。预期工资与成败判定在 Worker 侧涉密模块
+// 判定、新违约金合法区间、经纪人性格名。预期工资与成败判定在 Worker 侧涉密模块
 // （worker/negotiation-secret.ts），本文件与 web/ 均不得引用（§6.10-1）。
 
 // 训练营合同双固定（规则 4.3.4(1)）：工资 0.75m/半赛季、违约金 5m
 export const TRAINEE_WAGE = 0.75;
 export const TRAINEE_RELEASE_FEE = 5;
 
-// 经纪人档位（§6.8，公开属性；players.agent_tier）
+// 经纪人性格（§6.8，公开属性；players.agent_tier）
 export const AGENT_TIER_LABELS: Record<number, string> = {
   1: '温和',
   2: '普通',
