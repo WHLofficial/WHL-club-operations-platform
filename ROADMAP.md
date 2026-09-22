@@ -729,6 +729,17 @@
 - 赛事仓 `tsconfig.json` 只 include `src`/`shared`，**tests 不参与 typecheck**；测试写法是 `import app from "../worker/index"`（无扩展名）+ `app.request(...)`，会话用 KV 的 `sess:tok-admin` + Cookie `whl_session=tok-admin`。
 - 默认导出改用 `Object.assign(app, { scheduled(...) })` 而不是换一个对象，**保持默认导出仍是那个 Hono 实例** ⇒ 测试里 `app.request(...)` 一行不用改。
 
+**评审补丁（2026-09-23，两仓各一个提交）**
+- 本仓 `d84371d`：`tests/squads.test.ts` 的种子行序改成两队 id 交替 + status 交替。原种子恰好是「插入序 = 期望输出序」，把 `ORDER BY c.name, p.fc_id` 整条删掉测试照样绿（rowid 序与 `idx_players_status` 序都会给出刚好正确的分组）——归并是「相邻行同 club_id 才并组」，正确性完全押在那条 ORDER BY 上，测试却无分辨力。改后变异验证：删掉整条 ORDER BY ⇒ 红（`expected [ '曼城', '阿森纳', '曼城' ] to deeply equal [ '曼城', '阿森纳' ]`）；`ORDER BY c.name` 去掉尾列 ⇒ 红（`expected [ '阿森纳', '曼城' ] to deeply equal [ '曼城', '阿森纳' ]`）。
+- 赛事仓 `728f523`：`fetchClubSquads` 补两处防线 —— ① `AbortSignal.timeout(10_000)`（原来没有 signal，对方挂住时 cron 的 catch 永不执行，一行日志都没有，observability 也抓不到）；② 快照里某队 `players: []` 直接抛错（原来只挡 `squads.length === 0`，挡不住「快照非空但某队名单空」——该队会被当成 stale 整队删光）。两条各补一条测试并变异验证定向变红（守卫改 `=== -1` ⇒ `promise resolved "[ { clubId: 10, …(2) } ]" instead of rejecting`；去掉 signal ⇒ 用例 5015ms 超时）。另修正 `kept` 的 reason 文案「有比赛事件/伤停引用，保留」→「有比赛事件引用，保留」。
+- 复测：本仓 typecheck 三份清 / vitest **48 文件 661 例**（用例数不变，只改 fixture）；赛事仓 typecheck 清 / vitest **15 文件 144 例通过 + 1 文件跳过**（142 → +2）。
+
+**已知后果（评审查出，本轮不改）**
+- 没有一线队球员的俱乐部**整个从 `squads` 数组消失**（不是空数组）。因为赛事仓「只对快照里出现过的队做删除」，一个被清空的队其镜像行永远不会被清掉——失败方向是保留陈旧数据，不是丢数据。
+- 赛事仓自动删除球员后，`tactic.roster_json` / `tactic_submission.assign_json` 里会留下悬挂的球员 id（JSON 文本无外键），教练下次保存战术时 `validateAssign` 会抛 400「队长与定位球里点到了不属于该球队的球员」。手工删除时代同样存在，属既有后果；要修得动教练子系统，本轮不碰。
+- 赛事仓「伤停随球员级联删除」（`injury.player_id ON DELETE CASCADE`）**实际不可达**：伤停必须挂在一条 `match_event` 上，而 `match_event.player_id` 无 `ON DELETE`（NO ACTION）⇒ 有伤停的球员必然删不掉、行进 `kept`。仅当那个事件的球员后来被清空时，伤停与缺阵记录才会随之消失。
+- 赛事仓手动同步端点没有 UI，`/api/health` 也不含上次同步时间 ⇒ 每小时静默失败无处发现；`deleted` 计的是尝试数而非 `meta.changes`；分批 batch 无原子性（注释已声明）。
+
 **待办**：① 两仓部署（需单独授权）；② 首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期（计划预期：号码 0 改动、名字一批被改写、0 增 0 删）；③ 生产迁移 0032/0033 仍未 apply、生产数据未落库（见增量 32 待办）。
 
 
