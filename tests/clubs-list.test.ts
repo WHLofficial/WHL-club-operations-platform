@@ -101,7 +101,8 @@ interface ClubEntry {
   logoKey: string | null;
   squad: { senior: number; trainee: number };
   avgCa: number | null;
-  totalValue: number;
+  /** 全队都没录身价时为 null（不是 0） */
+  totalValue: number | null;
   totalWage: number;
 }
 
@@ -140,6 +141,7 @@ describe('GET /api/clubs 球队列表（增量 31 步骤 3）', () => {
     addClub(fx, 2, '甲队 (CPU)', { isCpu: true });
     addClub(fx, 3, '空队');
     addClub(fx, 4, '旧队', { status: 'retired' });
+    addClub(fx, 5, '无身价队');
     linkTeam(fx, 1, 90, '阿森纳', 'team/90/1.png');
     linkTeam(fx, 2, 91, '甲队', null);
     enter(fx, 101, 90);
@@ -154,6 +156,11 @@ describe('GET /api/clubs 球队列表（增量 31 步骤 3）', () => {
     addPlayer(fx, 2, { ca: 70, marketValue: 500_000, wage: 3 });
     // 自由身（club_id NULL）不归任何俱乐部
     addPlayer(fx, null, { ca: 90, status: 'free' });
+    // 无身价队：有球员、有合同（工资算得出来），但谁都没录过 market_value —— 这就是生产现状
+    // （18,301 行 market_value 全 NULL）。身价合计必须是 null 而不是 0，否则页面会写成
+    // 「每支球队身价都是 0.00 m」这种假话。
+    addPlayer(fx, 5, { ca: 75, wage: 2 });
+    addPlayer(fx, 5, { ca: 78, wage: 3 });
 
     const clubs = await listClubs(fx.env);
 
@@ -178,11 +185,18 @@ describe('GET /api/clubs 球队列表（增量 31 步骤 3）', () => {
     expect(cpu.totalValue).toBe(500_000);
     expect(cpu.totalWage).toBe(3);
 
-    // 没有任何球员的俱乐部：人数与金额回 0，平均 CA 回 null（不是 0，避免显示成「平均 CA 0」）
+    // 没录过身价（生产现状）：身价合计回 null 而不是 0，工资总额照常有值
+    const noValue = byId(clubs, 5);
+    expect(noValue.squad).toEqual({ senior: 2, trainee: 0 });
+    expect(noValue.totalValue).toBeNull();
+    expect(noValue.totalWage).toBe(5);
+
+    // 没有任何球员的俱乐部：人数与工资回 0，平均 CA 与身价回 null（不是 0，
+    // 避免显示成「平均 CA 0」和「身价 0.00 m」）
     const empty = byId(clubs, 3);
     expect(empty.squad).toEqual({ senior: 0, trainee: 0 });
     expect(empty.avgCa).toBeNull();
-    expect(empty.totalValue).toBe(0);
+    expect(empty.totalValue).toBeNull();
     expect(empty.totalWage).toBe(0);
 
     expect(clubs.some((c) => c.id === 4)).toBe(false);

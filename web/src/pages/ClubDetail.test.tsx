@@ -364,6 +364,17 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40 m · 平均工资 —');
   });
 
+  it('全队都没录身价时总身价显示 —（不是 0.00 m）', async () => {
+    stubApi({
+      detail: detailFixture({ squad: { ...detailFixture().squad, totalValue: null } }),
+    });
+    renderDetail();
+
+    const squadBlock = (await screen.findByText('阵容组')).closest('section') as HTMLElement;
+    expect(statValue(squadBlock, '总身价')).toBe('—');
+    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40 m · 平均工资 1.10 m');
+  });
+
   it('位置分布出四档文字档位（0 人档也出）+ 档内细位，不出图示', async () => {
     stubApi();
     renderDetail();

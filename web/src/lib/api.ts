@@ -129,7 +129,11 @@ export interface ClubSummary {
   squad: { senior: number; trainee: number };
   /** 平均 CA，保留 1 位小数；全队无人时为 null */
   avgCa: number | null;
-  totalValue: number;
+  /**
+   * 全队身价合计。`players.market_value` 是运营列（导入不写、只有 admin PATCH 会写），
+   * 一个人都没录过时服务端给 null ⇒ 前端显示「—」而不是 0.00 m
+   */
+  totalValue: number | null;
   totalWage: number;
 }
 
@@ -158,7 +162,8 @@ export interface ClubSquadStructure {
   avgPa: number | null;
   /** 平均成长空间（pa − ca），只统计还有空间的人；全员到顶时为 null */
   avgGrowth: number | null;
-  totalValue: number;
+  /** 同 ClubSummary.totalValue：全队都没录身价时为 null */
+  totalValue: number | null;
   totalWage: number;
   avgWage: number | null;
   badgesSilver: number;

@@ -20,9 +20,9 @@ const TIER_LABEL: Record<'premier' | 'second', string> = {
   second: '次级联赛',
 };
 
-// 金额口径与球员库一致（身价/工资都以「m」为单位存储）
-function money(x: number): string {
-  return `${x.toFixed(2)} m`;
+// 金额口径与球员库一致（身价/工资都以「m」为单位存储）；null = 没录过，显示「—」
+function money(x: number | null): string {
+  return x === null ? '—' : `${x.toFixed(2)} m`;
 }
 
 function num1(x: number | null): string {

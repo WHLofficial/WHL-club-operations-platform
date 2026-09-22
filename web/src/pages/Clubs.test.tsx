@@ -23,10 +23,16 @@ function club(patch: Partial<ClubSummary> & { id: number; name: string }): ClubS
     logoKey: null,
     squad: { senior: 0, trainee: 0 },
     avgCa: null,
-    totalValue: 0,
+    // 生产现状：players.market_value 全 NULL ⇒ 服务端给 null，卡片显示「—」而不是 0.00 m
+    totalValue: null,
     totalWage: 0,
     ...patch,
   };
+}
+
+// 指标格是 dt/dd 成对；按 dt 取同格 dd 的文本（「—」与「0.00 m」要能分辨）
+function metric(card: HTMLElement, label: string): string {
+  return within(card).getByText(label).nextElementSibling!.textContent!.trim();
 }
 
 const CLUBS: ClubSummary[] = [
@@ -89,7 +95,15 @@ describe('球队页（增量 31 步骤 4）', () => {
 
     const cpu = screen.getByText('甲队 (CPU)').closest('a')!;
     expect(within(cpu).getByText('CPU')).toBeTruthy();
-    expect(within(cpu).getByText('—')).toBeTruthy(); // 空队平均 CA 是 —，不是 0
+    expect(metric(cpu, '平均 CA')).toBe('—'); // 空队平均 CA 是 —，不是 0
+    expect(metric(cpu, '总身价')).toBe('—'); // 没录过身价是 —，不是 0.00 m
+    expect(metric(cpu, '工资总额')).toBe('0.00 m'); // 没有合同 ⇒ 工资 0 是真话
+
+    // 有人但都没录身价（生产现状）：身价是 —，其余指标照常出
+    const second = screen.getByText('乙级队').closest('a')!;
+    expect(metric(second, '阵容')).toBe('18 人 + 2 青训');
+    expect(metric(second, '总身价')).toBe('—');
+    expect(metric(second, '工资总额')).toBe('0.00 m');
   });
 
   it('没有球队的段整段不渲染', async () => {

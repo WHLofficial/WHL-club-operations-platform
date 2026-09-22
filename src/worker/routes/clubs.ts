@@ -47,11 +47,15 @@ app.get('/clubs/directory', async (c) => {
 // 冷算约 1,100–1,200 行，证据：scripts/d1-read-audit/clubs-measurements.json。
 //
 // 训练营口径 = `players.status = 'trainee'`（写入在 routes/registration.ts，读取在 routes/market.ts）。
+//
+// 身价不套 COALESCE：`players.market_value` 是运营列（只有 admin PATCH 会写，导入永不触碰），
+// 生产 18,301 行全是 NULL ⇒ 全 NULL 时 SUM 出 NULL，前端照球员库的规矩显示「—」。套 COALESCE
+// 会把它压成 0，页面就变成「每支球队身价都是 0.00 m」这种假话（2026-09-22 上线后回读发现）。
 const CLUB_SQUAD_AGG_SQL = `SELECT p.club_id,
          COUNT(*) AS squad,
          SUM(CASE WHEN p.status = 'trainee' THEN 1 ELSE 0 END) AS trainee,
          AVG(p.ca) AS avg_ca,
-         SUM(COALESCE(p.market_value, 0)) AS total_value,
+         SUM(p.market_value) AS total_value,
          SUM(COALESCE(ct.wage, 0)) AS total_wage
   FROM players p LEFT JOIN contracts ct ON ct.player_id = p.id AND ct.is_active = 1
   WHERE p.club_id IS NOT NULL
@@ -140,7 +144,7 @@ app.get('/clubs', async (c) => {
             logoKey: (tourTeamId === undefined ? undefined : logos.get(tourTeamId)) ?? null,
             squad: { senior: squad - trainee, trainee },
             avgCa: a?.avg_ca == null ? null : Math.round(a.avg_ca * 10) / 10,
-            totalValue: a?.total_value ?? 0,
+            totalValue: a?.total_value ?? null,
             totalWage: a?.total_wage ?? 0,
           };
         }),
@@ -375,6 +379,8 @@ app.get('/clubs/:id', async (c) => {
       const yearsOf = (r: ClubSquadRow) => (r.contract_id === null ? null : (ticks - (r.service_ticks ?? 0)) * 0.5);
       const yearsValues = contracted.map(yearsOf).filter((v): v is number => v !== null);
       const wageValues = contracted.map((r) => r.wage).filter((v): v is number => typeof v === 'number');
+      // 身价与列表同一口径：一个人都没录过身价时给 null（前端显示「—」），不假装是 0
+      const valueValues = rows.map((r) => r.market_value).filter((v): v is number => typeof v === 'number');
 
       // 位置四档（增量 31 步骤 11a）：四档恒出（「0 门将」本身就是要看见的信号），档内明细按
       // POSITION_BY_ID 的细位顺序给非零项。未知/空位置另起一档，不混进四档里。
@@ -438,7 +444,7 @@ app.get('/clubs/:id', async (c) => {
           maxCa: caValues.length === 0 ? null : Math.max(...caValues),
           avgPa: mean1(paValues),
           avgGrowth: mean1(growthValues),
-          totalValue: rows.reduce((a, r) => a + (r.market_value ?? 0), 0),
+          totalValue: valueValues.length === 0 ? null : valueValues.reduce((a, b) => a + b, 0),
           totalWage: contracted.reduce((a, r) => a + (r.wage ?? 0), 0),
           avgWage: mean1(wageValues),
           badgesSilver: rows.reduce((a, r) => a + (r.badges_silver ?? 0), 0),

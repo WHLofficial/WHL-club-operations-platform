@@ -217,7 +217,7 @@ interface DetailBody {
     maxCa: number | null;
     avgPa: number | null;
     avgGrowth: number | null;
-    totalValue: number;
+    totalValue: number | null;
     totalWage: number;
     avgWage: number | null;
     badgesSilver: number;
@@ -313,6 +313,29 @@ describe('GET /api/clubs/:id 球队详情（增量 31 步骤 6）', () => {
     expect(countOf(body.contracts.byYears, '1-15')).toBe(1); // 1 赛季
     expect(countOf(body.contracts.byYears, '2-25')).toBe(1); // 2 赛季
     expect(countOf(body.contracts.byYears, 'le05')).toBe(0);
+  });
+
+  it('全队都没录身价时 totalValue 是 null 而不是 0（生产 18,301 行 market_value 全 NULL）', async () => {
+    const fx = freshEnv();
+    seededClub(fx);
+
+    // 与 seededClub 同样的两名一线球员，只是 market_value 全为空（生产现状）
+    const plain = freshEnv();
+    bindSeason(plain);
+    addClub(plain, 1, '阿森纳');
+    linkTeam(plain, 1, 90, '阿森纳', 'team/90/1.png');
+    enter(plain, 101, 90);
+    addPlayer(plain, 1, { position: 'CM', ca: 80, pa: 85, age: 22, wage: 1.5, serviceTicks: 0, protectionTicks: 3 });
+    addPlayer(plain, 1, { position: 'ST', ca: 90, pa: 90, age: 31, wage: 3, serviceTicks: 2, protectionTicks: 5 });
+
+    const body = await getDetail(plain.env);
+
+    expect(body.squad.size).toBe(2);
+    expect(body.squad.totalValue).toBeNull();
+    expect(body.squad.totalWage).toBe(4.5); // 工资照常算得出来
+    // 只要有人录过身价就照常求和（拿 seededClub 的 100 万 + 200 万做对照）
+    const withValue = await getDetail(fx.env);
+    expect(withValue.squad.totalValue).toBe(3_000_000);
   });
 
   it('近期战绩：90 分钟口径（点球不改判定）、弃权判负（含双弃权）、只取最近 5 场', async () => {

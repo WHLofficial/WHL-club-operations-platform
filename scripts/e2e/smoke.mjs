@@ -570,7 +570,7 @@ async function main() {
         clubs: [
           { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 5, trainee: 1 }, avgCa: 78.4, totalValue: 412.5, totalWage: 33.4 },
           { id: 73, name: '巴黎圣日耳曼', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 4, trainee: 0 }, avgCa: 80.1, totalValue: 502.25, totalWage: 41.2 },
-          { id: 241, name: '巴塞罗那', isCpu: true, tier: 'second', logoKey: null, squad: { senior: 3, trainee: 2 }, avgCa: null, totalValue: 100, totalWage: 9.5 },
+          { id: 241, name: '巴塞罗那', isCpu: true, tier: 'second', logoKey: null, squad: { senior: 3, trainee: 2 }, avgCa: null, totalValue: null, totalWage: 9.5 },
           { id: 131681, name: 'AC米兰', isCpu: true, tier: null, logoKey: null, squad: { senior: 2, trainee: 0 }, avgCa: 61.2, totalValue: 20.75, totalWage: 1.25 },
         ],
       };
@@ -683,6 +683,14 @@ async function main() {
           assert(href === '/clubs/1', `${label}：整卡应链到 /clubs/1（不是卡里再放详情按钮），实际 ${href}`);
           const cpu = await page.locator('.club-card .badge', { hasText: 'CPU' }).count();
           assert(cpu === 2, `${label}：CPU 标应出 2 个，实际 ${cpu}`);
+          // 没录过身价（生产现状：market_value 全 NULL）显示「—」，不能写成 0.00 m
+          const barcaValue = (
+            await page
+              .locator('.club-card', { hasText: '巴塞罗那' })
+              .locator('.club-metrics div:has(dt:text-is("总身价")) dd')
+              .innerText()
+          ).trim();
+          assert(barcaValue === '—', `${label}：没录过身价的总身价应显示「—」，实际「${barcaValue}」`);
           const ovList = await docOverflow();
           assert(ovList.scrollW <= ovList.clientW + 1, `${label}：列表页被撑出横向滚动（${ovList.scrollW} > ${ovList.clientW}）`);
           const listShot = join(SHOT_DIR, `e2e-clubs-${label}.png`);
