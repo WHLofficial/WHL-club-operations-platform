@@ -15,6 +15,11 @@ handoff-*.md
 # 入库的审计凭据是报告里的 sha256 清单，故分片本体不入库。
 scripts/players-import/sql/
 
+# 球员显示名派生物（增量 32）：data/ 是远端只读查询缓存，out/ 是生成的 SQL 与审计表，
+# 都能由 scripts/player-names/derive.mjs 从本机 FC26 存档复现，故不入库。
+scripts/player-names/data/
+scripts/player-names/out/
+
 # 2026-09-20/21 生产批的落库分片：旧值/守卫取自生成时点的生产库，不可逐字节复现，
 # 可复现凭据是各目录的报告（含分片 sha256 与逐行明细）与已提交的 rollback/ 分片。
 scripts/prod-20260920-s9-abilities/sql/
