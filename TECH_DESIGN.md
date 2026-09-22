@@ -861,16 +861,18 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 1. 只增表（`ledger_entries` / `audit_log`）**上线即建** `(kind, id)`、`(target_type, target_id, id)` 型索引——比赛系统是配额报警后才补的，不重演。
 2. 高频过滤+排序的列表直接建带排序尾列的复合索引：`listings(status, listed_at DESC)`、`bids(listing_id, amount DESC)`、截止扫描专用 `listings(status, deadline_at)`——让「最新 N 条」与 cron 扫描只走索引区间，免全表扫、免排序。
 3. 外键列全部配索引；上线后定期清理与 UNIQUE 前缀重复的冗余索引（纯写放大）。
-4. 排序表达式里带 `COALESCE` 的列表建**表达式索引**：如球员库按 CA/PA/年龄/身价排序，建 `CREATE INDEX idx_players_sort_ca ON players(COALESCE(ca, 0), id)`（增量 23，迁移 0027，四条同构）——让「排序 + 游标」走覆盖索引，消掉全表扫与排序步骤（本地 `EXPLAIN QUERY PLAN` 实证为 `SCAN players USING COVERING INDEX idx_players_sort_*`）。
+4. 排序表达式里带 `COALESCE` 的列表建**表达式索引**：如球员库按 CA/PA/年龄/身价排序，建 `CREATE INDEX idx_players_sort_ca ON players(COALESCE(ca, 0), id)`（增量 23，迁移 0027，四条同构）——让「排序 + 游标」走覆盖索引，消掉全表扫与排序步骤（本地 `EXPLAIN QUERY PLAN` 实证为 `SCAN players USING COVERING INDEX idx_players_sort_*`）。增量 28 同法补 `0029`（声望 / 归属 `COALESCE(club_id,0)` / 状态 CASE 权重三条）与 `0030`（`players(club_id, ca DESC, id)`，为海捞名单的驱动表连接备）；**表达式必须与 `buildSortExprs` 逐字一致，否则优化器静默不用索引**（增量 28 实测：`sort=club`/`status` 在 0029 之前 37,635 行、之后 43/22 行）。三条纪律：① 一条索引 ≈ 全表一行写（18,301 名球员），免费档日写 10 万行 ⇒ 每天最多 3 条；② 表达式行数多的键（姓名折叠 87 项链、PlayStyle 15 槽计数）建前先过 **D1 表达式树深度上限 100** 的体检；③ **迁移一旦 apply 到生产就不得再改**。
 
 ### 17.2 查询规约
 
 1. 禁 N+1：批量 `IN (...)` 取扁平行 + JS 里 Map 归组；D1 单查询 bind 上限 100，约定 **90 一批**分块、批间 `Promise.all` 并行。
 2. 显式列清单，禁 `SELECT *`。
-3. 列表页一律硬 LIMIT + 游标翻页（`before` 时间戳/序号），**不算总数、不用 OFFSET**；COUNT 仅用于廉价守卫（所有权校验、`n>0` 布尔）。
+3. 列表页一律硬 LIMIT + 游标翻页（`before` 时间戳/序号），**不算总数、不用 OFFSET**；COUNT 仅用于廉价守卫（所有权校验、`n>0` 布尔）。审查口径（增量 28）：**响应契约里不带 `total`** —— `GET /api/players` 只回 `players` + `nextCursor`（一次 56 行），前端翻页条改游标式文案；确实需要总数的地方（管理端筛选计数）走带 `CRON_KEY` 的内部端点 `GET /api/cron/players-count`，或把 COUNT 挂到与列表同 scope 的两级缓存上（`countAllPlayers`）。**去 COUNT 是本项目读量治理的最大单笔**：默认浏览一页 18,819 行里 COUNT 占 18,763 行（99.7%），且它不带游标、每翻一页重算整表。
 4. 单语句原子写消灭读-改-写：条件更新 `UPDATE ... SET balance = balance + ? WHERE ... AND balance + ? >= 0`；upsert `ON CONFLICT DO UPDATE ... RETURNING` 一条语句完成变更+回读。
 5. 资格/上下文校验压成一条 JOIN 查询，不串行多趟往返。
 6. 昂贵聚合**写时算**（仿比赛系统 standings：报分时全量重算派生表、与业务写入合并进同一 batch）；读路径只做索引点查/小区间 JOIN。
+7. **不能静态索引的表达式就换写法，别硬加索引**（增量 28 海捞名单实例）：`WHERE club_id IS NULL OR club_id IN (子查询) ORDER BY ca DESC LIMIT 300` 在生产 97% 球员无归属的数据下退化为 `MULTI-INDEX OR` + 临时排序 ⇒ 先试索引无效（4 种列组合都不消 `TEMP B-TREE`），改成 `UNION ALL` 两分支 + CPU 支用 **`FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id`**（小表当驱动、固定连接顺序）后 36,274 → 843 行，结果集逐行不变。SQLite 约束：复合 SELECT 的分支不能自带 `ORDER BY`/`LIMIT`，必须包一层子查询。
+8. **判断「D1 是否可用」不能用这三条**（增量 28 教训）：`/api/health` 只读 `sqlite_schema`、`wrangler d1 execute --remote` 是管理通道、`/api/clubs/directory` 缓存键固定且 stale 刷新吞错 —— 配额触顶时它们全是 200，而 worker 侧真实表读全 500。要看真错误文本：临时给 onError 加诊断字段 + `wrangler dev --remote`（本地代码 + 生产绑定，不需部署）。
 
 ### 17.3 事务与缓存规约
 
@@ -891,7 +893,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 
 权限列：👤=coach 及以上 / 🛡=管理组 / 🌐=公开。分页一律硬 LIMIT + 游标（§17）；错误统一 `{error, code?}`。标〔增量 n〕= ROADMAP 对应增量交付。
 
-> **冻结范围**：本表冻结于增量 6 era（末次整体维护），增量 7 起新增/变更的端点**不回填本表**，以 ROADMAP 各增量节的「交付」段与 `src/worker/routes/` 现码为准——回填会造成文档与实现双轨漂移。增量 7+ 的主要新增面：认证四端点（`/api/auth/login|sync|callback|logout|backchannel-logout`，增量 7）、球员库扩展与批量维护（增量 17）、俱乐部目录与换队号（`/api/clubs/directory`、`/api/admin/clubs/tour-team`、`register-auth`、`transfer-ban`，增量 17）、通知三端点（增量 18）、设施与冠名（`/api/club/stadium/*`、`/api/club/facilities/upgrade`、`/api/club/naming/*`，增量 19/20）、赛果自动化（`/api/admin/results/:id/replay-hooks`，增量 21）、球员库姓名去变音搜索与轻量名册端点 `GET /api/players/roster`、排序键扩到 29 列（增量 26）、球员库 PlayStyle 筛选语义改「银值只比银槽 / 金值只比金槽」且 `ps` 白名单改「银 1-99 ∪ 金 101-199」（无新增端点，增量 27）、`/api/admin/overview` 与 `/api/admin/audit-log`（增量 15）。
+> **冻结范围**：本表冻结于增量 6 era（末次整体维护），增量 7 起新增/变更的端点**不回填本表**，以 ROADMAP 各增量节的「交付」段与 `src/worker/routes/` 现码为准——回填会造成文档与实现双轨漂移。增量 7+ 的主要新增面：认证四端点（`/api/auth/login|sync|callback|logout|backchannel-logout`，增量 7）、球员库扩展与批量维护（增量 17）、俱乐部目录与换队号（`/api/clubs/directory`、`/api/admin/clubs/tour-team`、`register-auth`、`transfer-ban`，增量 17）、通知三端点（增量 18）、设施与冠名（`/api/club/stadium/*`、`/api/club/facilities/upgrade`、`/api/club/naming/*`，增量 19/20）、赛果自动化（`/api/admin/results/:id/replay-hooks`，增量 21）、球员库姓名去变音搜索与轻量名册端点 `GET /api/players/roster`、排序键扩到 29 列（增量 26）、球员库 PlayStyle 筛选语义改「银值只比银槽 / 金值只比金槽」且 `ps` 白名单改「银 1-99 ∪ 金 101-199」（无新增端点，增量 27）、`/api/admin/overview` 与 `/api/admin/audit-log`（增量 15）、`GET /api/cron/players-count`（增量 28，内部计数端点：`CRON_KEY` fail-closed、只认 `X-Cron-Key` 头；同轮 `GET /api/players` 去掉响应里的 `total`，契约改为只有 `players` + `nextCursor`）。
 
 | 模块 | 端点 | 权限 | 说明 |
 |---|---|---|---|
