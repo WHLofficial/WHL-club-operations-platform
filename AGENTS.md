@@ -54,6 +54,7 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 - 纯逻辑放 `src/core/`（无 IO，便于测），HTTP/会话/缓存工具放 `src/lib/`，业务编排放 `src/worker/`，端点放 `src/worker/routes/`。
 - 公开 GET 走 `src/lib/guard.ts`：`assertPublicRate` 限流 + `cachedJson` 两级缓存（L1 进程内 + L2 边缘 Cache API，增量 28）；TTL 口径在 `src/lib/cache-policy.ts`（列表 1h / 名册 24h / 目录 24h，`PUBLIC_CACHE_TTL_MS` 只是显式覆盖、配 `0` 即旁路）；新鲜度靠写路径 purge（代际键 `cache:epoch:public`），缓存键要用 `canonicalQuery` 归一，避免参数顺序不同造成重复装载。
 - 前端数据层统一用 TanStack Query（`web/src/lib/queries.ts` 用户端、`adminQueries.ts` 管理端），写后精确 invalidate，不引 useMutation。
+- **球队页 URL 的 id 一律是平台库 `clubs.id`**（`/clubs/:id`），不得用比赛系统 `tour_team_id`；跨库映射（`AUTH_DB.team.club_id → tour_team_id`）只在服务端内部做。此规则长期有效，后续新增的球队相关路由同样照此。
 
 ## 文档纪律
 
