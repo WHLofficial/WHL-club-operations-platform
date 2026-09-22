@@ -20,7 +20,8 @@ export interface Env {
   // 增量 7 机器通道（发码/烧码/解绑走 auth 机器 API）：与 auth 仓 BIND_SECRET 同值
   // （wrangler secret put AUTH_BIND_SECRET，与 auth 仓 BIND_SECRET 同值）
   AUTH_BIND_SECRET?: string;
-  // 增量 23：公开 GET 的进程内 SWR 缓存毫秒数（/api/players、/api/clubs/directory）；
-  // 未配/0=旁路（测试环境默认旁路），生产 wrangler.jsonc vars 配 20000
+  // 增量 28：公开读缓存 TTL 的**覆盖开关**（显式给数，含 0=旁路）。
+  // 生产**不配**——分级口径在 `src/lib/cache-policy.ts`（players 1h / roster 24h / clubs 24h），
+  // 新鲜度靠写路径 purge；测试配 '0' 让断言不受缓存影响。
   PUBLIC_CACHE_TTL_MS?: string;
 }

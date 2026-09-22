@@ -71,9 +71,9 @@ e2e 冒烟默认打 `http://127.0.0.1:8791`，用本机 Chrome（`C:/Program Fil
 
 密钥（wrangler secret，不入库）：`CRON_KEY`（定时/结算接口的 `X-Cron-Key`；生产 2026-09-22 已配，本地联调写进 `.dev.vars`）、`AUTH_BIND_SECRET`（与认证中心 `BIND_SECRET` 同值）。
 
-变量：`AUTH_MODE`、`OIDC_ISSUER`、`OIDC_CLIENT_ID`、`PUBLIC_CACHE_TTL_MS`。定时触发 `*/5 * * * *`（结算逾期、自动确认赛果、派发站内信）。
+变量：`AUTH_MODE`、`OIDC_ISSUER`、`OIDC_CLIENT_ID`（`PUBLIC_CACHE_TTL_MS` 仍受支持，是缓存 TTL 的显式覆盖、配 `0` 即旁路；生产不配，口径在 `src/lib/cache-policy.ts`）。定时触发 `*/5 * * * *`（结算逾期、自动确认赛果、派发站内信）。
 
-公开 GET（球员库列表、俱乐部目录）有进程内守护：同 IP 60 次/60 秒限流，响应走 TTL + stale-while-revalidate 缓存，TTL 取 `PUBLIC_CACHE_TTL_MS`（当前 20000ms），未配置或为 0 即旁路。缓存与限流都是 isolate 内的 `Map`，重启即清、多 isolate 不共享。
+公开 GET（球员库列表、球员名册、俱乐部目录）有守护：同 IP 60 次/60 秒限流，响应走**两级缓存**——L1 进程内 + L2 边缘 Cache API（跨 isolate）。TTL 分级：球员列表 1h、名册与目录 24h；**新鲜度靠写路径主动 purge**（代际键，写后本 isolate 立即失效，跨 colo 靠 KV 版本号，边缘 KV 传播最长 60s），TTL 只是 purge 失效时的自愈上限。写路径 purge 挂在两处中心钩子：`/api/*` 的 middleware（非 GET/HEAD 且响应 2xx 且路径前缀命中）与 cron tick（真改了数据才 purge）。
 
 ## 数据库迁移
 

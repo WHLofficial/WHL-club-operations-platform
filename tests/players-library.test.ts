@@ -31,6 +31,8 @@ function freshEnv(): Fixture {
     } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
+    // 增量 28：未配 = 走分级 TTL（生产口径），这里显式旁路，让断言看到每次改库的结果
+    PUBLIC_CACHE_TTL_MS: '0',
   };
   return { env, sqlite };
 }
@@ -209,6 +211,7 @@ describe('初始归属字段的兴废（增量 6.1 d7 加、增量 14 裁决 4 �
       } as unknown as KVNamespace,
       MEDIA: {} as never,
       ASSETS: {} as never,
+      PUBLIC_CACHE_TTL_MS: '0',
     };
     return { env, sqlite };
   }

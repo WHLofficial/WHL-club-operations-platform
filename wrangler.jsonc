@@ -50,11 +50,15 @@
   ],
   // 统一认证中心（生产）：AUTH_MODE="oidc" 显式开启 RP 模式（增量 9 显式化），
   // 会话与 claims 由 auth 侧签发；撤掉 AUTH_MODE 重新部署即回兼容模式
+  //
+  // 增量 28：原来这里的 PUBLIC_CACHE_TTL_MS="20000" 已删——公开读缓存改「分级兜底 TTL」
+  // （players 1h / roster 24h / clubs 24h，口径在 src/lib/cache-policy.ts），
+  // 一个全局数字没法同时满足「列表键空间无穷」和「名册固定键单次 18301 行」这两种形状。
+  // 变量本身仍受支持，作为显式覆盖（含 0=旁路），测试用。
   "vars": {
     "AUTH_MODE": "oidc",
     "OIDC_ISSUER": "https://auth.whleague.win",
-    "OIDC_CLIENT_ID": "club",
-    "PUBLIC_CACHE_TTL_MS": "20000"
+    "OIDC_CLIENT_ID": "club"
   },
   // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑随增量 3+ 落地
   "triggers": {

@@ -875,8 +875,8 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 ### 17.3 事务与缓存规约
 
 1. **钱的原子性比比赛系统更严**：一笔业务（流水 + 余额 + 审计）合并进单个 `db.batch`（隐式事务）一次提交；比赛系统终场「先写后重算」的两段式仅适用于幂等可重算的派生表，**账本禁用**。
-2. 公开 GET 走进程内守护（`src/lib/guard.ts`，增量 23）：`assertPublicRate(c, scope)` 按同 IP 60 次/60 秒限流（超限 429），`cachedJson(key, ttlMs, loader, ctx)` 做 TTL + stale-while-revalidate（新鲜直回；过期先回旧值、后台单飞刷新），TTL 取 `PUBLIC_CACHE_TTL_MS`（当前 20000ms，未配置或 0 即旁路）。缓存键用 `canonicalQuery` 归一（参数顺序无关），条目上限 64 条按插入序淘汰（键来自查询串、外部可控，不设上限会被构造请求堆内存）。
-3. **不用 KV 做 SWR**（增量 23 裁决，推翻本节原方案）：KV 免费档写约 1k 次/天，公开 GET 每请求写计数会打爆写配额；边缘 Cache API 中间件 pubCache 也未启用。代价是缓存与计数都在 isolate 内存里——重启即清、多 isolate 不共享（朋友局可接受）。将来若确需跨 isolate 共享，先算清写配额与失效成本再改。
+2. 公开 GET 走 `src/lib/guard.ts`（增量 23 起，增量 28 重做缓存层）：`assertPublicRate(c, scope)` 按同 IP 60 次/60 秒限流（超限 429）；`cachedJson(key, ttlMs, loader, { scope, env, ctx })` 是**两级缓存**——L1 进程内（`Map`，上限 64 条按插入序淘汰）+ L2 边缘 Cache API（跨 isolate，合成 URL 作键，`cache-control: max-age` 管过期，全程 try/catch 旁路）。TTL 口径单一来源 `src/lib/cache-policy.ts`：列表 1h、名册 24h、目录 24h（`PUBLIC_CACHE_TTL_MS` 退化为显式覆盖，配 `0` 即旁路、生产不配）。缓存键 = `${scope}:v${epoch}:${canonicalQuery}`（`canonicalQuery` 参数顺序无关）。
+3. **新鲜度靠写路径 purge，TTL 只是兜底**（增量 28 裁决⑩）：代际键 `cache:epoch:public` 存 KV（isolate 记忆 5s），写路径 bump 一次 = L1 与 L2 同时失效；键空间无穷（筛选 × 排序 × 游标）且 Cache API 无前缀删除、`cache.delete` 只作用于当前 colo，所以不能按键枚举 purge。挂钩只有两处：`src/worker/index.ts` 的 `/api/*` middleware（非 GET/HEAD + 响应 2xx + `scopesForWritePath` 命中）与 `scheduled()`（tick 真改了数据才 purge）。KV 读失败时本次请求按 60s 短 TTL（fail-short，宁可多读不可陈旧）。**不用 KV 存载荷**（增量 23 裁决仍成立）：KV 免费档写约 1k 次/天，且该绑定与登录会话共用，公开 GET 每请求写缓存会打爆写配额。
 4. R2 媒体一律版本化 key + `Cache-Control: immutable` 长缓存，同 PoP 重复浏览不打 R2。
 5. 公开路径跳过会话检查（每请求省一次 KV get + D1 user 点查）。
 

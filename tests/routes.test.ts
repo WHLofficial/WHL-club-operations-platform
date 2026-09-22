@@ -46,6 +46,8 @@ function freshEnv(): Fixture {
     } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
+    // 增量 28：未配 = 走分级 TTL（生产口径），这里显式旁路，让断言看到每次改库的结果
+    PUBLIC_CACHE_TTL_MS: '0',
   };
   for (const [uid, token] of [
     [1, 'tok-admin'],

@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { deleteCookie, getCookie } from 'hono/cookie';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { assertCronKey } from '../lib/guard.ts';
+import { assertCronKey, purgePublicCaches, waitUntilOf } from '../lib/guard.ts';
+import { scopesForWritePath } from '../lib/cache-policy.ts';
 import { getAuthUser, isOidc, isStaleOidcSession } from '../lib/session.ts';
 import { OIDC_PROBE_COOKIE, OIDC_SESSION_COOKIE } from '../lib/oidc.ts';
 import clubsRoutes from './routes/clubs.ts';
@@ -16,11 +17,27 @@ import growthRoutes from './routes/growth.ts';
 import notificationsRoutes from './routes/notifications.ts';
 import adminRoutes from './routes/admin/index.ts';
 import authRoutes from './routes/auth.ts';
-import { settleOverdue } from './market-settle.ts';
+import { settleOverdue, type SettleSummary } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults } from './results.ts';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// 公开读缓存的中心化失效挂钩（增量 28）：**必须注册在路由之前**——Hono 的 compose 里路由
+// 返回响应就结束链路，注册在后面的中间件根本不会执行。
+// 不在 27 个含写语句的文件里逐个接 purge：散接必漏，而漏接的代价是「列表最长陈旧 1h、
+// 名册/目录 24h」（兜底 TTL 自愈，有界但不新鲜）。判据只看「非 GET/HEAD + 响应 2xx +
+// 路径前缀命中」，宁可多 purge（一次 KV 写）不可漏；失败/非 2xx 的写没改数据，不 purge。
+app.use('/api/*', async (c, next) => {
+  await next();
+  if (c.req.method === 'GET' || c.req.method === 'HEAD') return;
+  if (c.res.status < 200 || c.res.status >= 300) return;
+  if (scopesForWritePath(new URL(c.req.url).pathname).length === 0) return;
+  const task = purgePublicCaches(c.env).catch(() => {});
+  const ctx = waitUntilOf(c);
+  if (ctx) ctx.waitUntil(task);
+  else await task;
+});
 
 app.route('/api', clubsRoutes);
 app.route('/api', playersRoutes);
@@ -121,10 +138,31 @@ async function runSettleTick(env: Env) {
   return { ok: true, ...summary, autoResults, notify };
 }
 
+// tick 是否真的动了**公开数据**（增量 28 的 purge 判据）：只看 settleOverdue 的
+// {settled,delisted,voided,notesUpdated,healed}——挂牌结算会写 contracts / players.club_id，
+// 正是列表的合同列与名册的俱乐部归属。**刻意不看 notify 与 autoResults**：前者只写 notifications、
+// 后者只写 result_confirmations，都不在公开 scope 里，算进来会让每个 tick 都可能白 purge 一次，
+// 而每次 purge 之后第一个名册请求就要全表扫 18301 行（288 次/天 ≈ 527 万行，单这一项就吃掉免费档）。
+// tick 每 5 分钟一次、空跑占多数，空跑还 purge 等于白付一次 KV 写并让名册重新全表扫。
+function tickChanged(summary: SettleSummary): boolean {
+  return (
+    summary.settled > 0 ||
+    summary.delisted > 0 ||
+    summary.voided > 0 ||
+    summary.notesUpdated > 0 ||
+    summary.healed > 0
+  );
+}
+
 export default {
   fetch: app.fetch,
   // cron 兜底（wrangler.jsonc triggers */5）：扫描/结算全部挂牌状态机
   scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
-    ctx.waitUntil(runSettleTick(env));
+    ctx.waitUntil(
+      runSettleTick(env).then(async (summary) => {
+        if (!tickChanged(summary)) return;
+        await purgePublicCaches(env).catch(() => {});
+      }),
+    );
   },
 };

@@ -76,9 +76,8 @@ function captureDb(sink, configValue) {
 
 async function capture(url, configValue) {
   const sink = [];
-  // PUBLIC_CACHE_TTL_MS=0 让 /players 的 cachedJson 直接旁路 loader（players.ts:197 是 `Number(...) || 0`）。
-  // 注意 roster 不走这条路：它用 Math.max(PUBLIC_CACHE_TTL_MS, ROSTER_CACHE_TTL_MS=300000)，
-  // 所以同进程里第二次请求 /players/roster 会命中 5 分钟缓存、抓不到 SQL（本脚本只请求它一次）。
+  // PUBLIC_CACHE_TTL_MS=0 让公开读缓存全部旁路（增量 28 起 ttlForScope 把 0 当「显式旁路」，
+  // 对 players / roster / clubs 三个 scope 一律生效）⇒ 每次请求都真跑 loader、抓得到 SQL。
   const res = await playersApp.request(new URL(url, 'http://capture.local'), {}, { DB: captureDb(sink, configValue), PUBLIC_CACHE_TTL_MS: '0' });
   if (res.status >= 400) {
     const body = await res.text();

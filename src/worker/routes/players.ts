@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
+import { ttlForScope } from '../../lib/cache-policy.ts';
 import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, isGoldPlaystyleId, isPlaystyleId } from '../../core/fc26.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
@@ -195,14 +196,15 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 // 增量 28：**响应不再带 total**。原先每次请求都多跑一条 `COUNT(*)`（实测 18,763 行/次，
 // 占单页读量的 99.7%，且不带 cursor ⇒ 每翻一页都重算整表）；分页条改游标式（第 K 页 ·
 // 已加载 N 名 · 还有更多/已到末页），总数口径移到内部端点 GET /api/cron/players-count。
+// 缓存走分级策略（`src/lib/cache-policy.ts`）：scope='players' 兜底 1h，键带代际版本号，
+// 写路径 bump 一次即整体失效——键空间（筛选 × 排序 × 游标）无法枚举，只能这么失效。
 app.get('/players', async (c) => {
   assertPublicRate(c, 'players');
-  const ttlMs = Number(c.env.PUBLIC_CACHE_TTL_MS) || 0;
   const data = await cachedJson(
     `players:${canonicalQuery(c.req.url)}`,
-    ttlMs,
+    ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS),
     () => listPlayers(c),
-    waitUntilOf(c),
+    { scope: 'players', env: c.env, ctx: waitUntilOf(c) },
   );
   return c.json(data);
 });
@@ -715,11 +717,6 @@ export async function countPlayers(c: Context<{ Bindings: Env }>): Promise<numbe
   return row?.n ?? 0;
 }
 
-// 名册这条走全表扫描，缓存下限给足 5 分钟（公开 TTL 只有 20s，撑不住 18301 行的重复读）。
-// 注意这里是「取大」而不是「跟随公开 TTL」：未配 PUBLIC_CACHE_TTL_MS（或配 0）的环境下
-// 公开 TTL 是 0，跟着走会把缓存整个旁路掉，公开端点退化成一请求一全表扫。
-const ROSTER_CACHE_TTL_MS = 300_000;
-
 // GET /api/players/roster —— 轻量名册（增量 26，球员库搜索框的本地推荐用）
 // 载荷 = 单行文本，每行「姓名|俱乐部ID|球员ID」（俱乐部为空则省略该段），换行分隔：
 // 姓名写在最前、两个数字在后，前端从行尾反向切分 ⇒ 姓名里出现「|」也不会串字段。
@@ -727,13 +724,19 @@ const ROSTER_CACHE_TTL_MS = 300_000;
 // 顺序按 players.id（前端本地过滤自己排，但载荷必须确定，否则测试与 diff 都不稳）。
 // 目的是让前端一次性拿到全量名册、之后在本地折叠过滤（打字零请求，也就绕开限流与缓存位）。
 // 走全表扫描（18301 行 / 313KB raw / 150KB gzip，2026-09-21 实测），D1 免费档 5M 行/天 ⇒
-// 每次加载约 0.4%，故进程内缓存给 5 分钟下限（前端另有会话级缓存）。
+// 每次加载约 0.4%。**兜底 TTL 是 24h（cache-policy.ts 的 roster 档）**：这是固定键，写路径
+// purge 能精确失效，长 TTL 不会让数据陈旧；反过来短 TTL 代价极大——300s 时每天 288 次重读
+// = 527 万行，单这一项就能打爆免费档。前端另有会话级缓存（PlayerSearchBox 的 staleTime: Infinity）。
 // 体积涨到 MB 量级（D1 单查询结果上限）时改分段加载或物化精简表——目前离得很远。
 // 路由必须注册在 /players/:id 之前（否则「roster」会被当成球员 ID 落进详情分支）。
 app.get('/players/roster', async (c) => {
   assertPublicRate(c, 'players');
-  const ttlMs = Math.max(Number(c.env.PUBLIC_CACHE_TTL_MS) || 0, ROSTER_CACHE_TTL_MS);
-  const data = await cachedJson('players:roster', ttlMs, () => loadRoster(c), waitUntilOf(c));
+  const data = await cachedJson(
+    'players:roster',
+    ttlForScope('roster', c.env.PUBLIC_CACHE_TTL_MS),
+    () => loadRoster(c),
+    { scope: 'roster', env: c.env, ctx: waitUntilOf(c) },
+  );
   return c.json(data);
 });
 
