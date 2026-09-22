@@ -14,6 +14,7 @@ import marketRoutes from './routes/market.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
 import growthRoutes from './routes/growth.ts';
+import squadsRoutes from './routes/squads.ts';
 import notificationsRoutes from './routes/notifications.ts';
 import adminRoutes from './routes/admin/index.ts';
 import authRoutes from './routes/auth.ts';
@@ -48,6 +49,8 @@ app.route('/api', marketRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
 app.route('/api', growthRoutes);
+// 全平台一线队名册（增量 33）：赛事系统拉取同步的契约面，只读
+app.route('/api', squadsRoutes);
 app.route('/api', notificationsRoutes);
 app.route('/api', authRoutes);
 // 媒体读取（增量 31）：镜像比赛系统的公开媒体路由，只读不写、不碰 D1（队徽/封面图同源取）
