@@ -107,6 +107,32 @@ export interface StadiumAdmin {
   influence: { players: number; shell: number; bonus: number; total: number };
 }
 
+// ---- 球队页（增量 31）----
+
+/** R2 媒体对象 key → 公开读取地址（服务端 GET /api/media/* 只读代理，不碰 D1） */
+export function mediaUrl(key: string | null | undefined): string | null {
+  return key ? `/api/media/${key}` : null;
+}
+
+/**
+ * 球队列表条目（GET /api/clubs）。tier 由平台按当季定级赛事报名派生：
+ * 未登记目录 / 本季未报名 ⇒ null（列表归「未定级」段）。
+ */
+export interface ClubSummary {
+  id: number;
+  name: string;
+  isCpu: boolean;
+  tier: 'premier' | 'second' | null;
+  /** 比赛系统 team.logo_key；本平台自己的 clubs.logo_key 是休眠列，全仓不写不读 */
+  logoKey: string | null;
+  /** 阵容人数：senior = 一线队，trainee = 训练营（players.status = 'trainee'） */
+  squad: { senior: number; trainee: number };
+  /** 平均 CA，保留 1 位小数；全队无人时为 null */
+  avgCa: number | null;
+  totalValue: number;
+  totalWage: number;
+}
+
 export interface PlayerListItem {
   id: number;
   uid: string;

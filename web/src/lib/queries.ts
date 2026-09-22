@@ -1,13 +1,15 @@
 // 用户端数据层共享 keys 与 fetchers（增量 16 commit 4）。
 // 口径沿用增量 15 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type SquadOverview } from './api.ts';
+import { api, apiPost, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
   me: ['me'] as const,
   myClub: ['me', 'club'] as const,
   squad: ['club', 'squad'] as const,
+  clubsList: ['clubs', 'list'] as const,
+  clubDetail: (id: number) => ['clubs', 'detail', id] as const,
   myBids: ['market', 'my-bids'] as const,
   board: (status: string) => ['market', 'board', status] as const,
   listing: (id: number) => ['market', 'listing', id] as const,
@@ -80,6 +82,14 @@ export function useBoard(filter: string) {
     queryKey: qk.board(filter),
     queryFn: () => api<MarketListings>(`/api/market/listings?status=${filter}`),
     placeholderData: keepPreviousData,
+  });
+}
+
+// 球队列表（增量 31）：公开页，一屏 20 队一次取完；服务端 clubs scope 缓存 24h，前端再叠 30s 全局 staleTime
+export function useClubsList() {
+  return useQuery({
+    queryKey: qk.clubsList,
+    queryFn: () => api<{ clubs: ClubSummary[] }>('/api/clubs'),
   });
 }
 
