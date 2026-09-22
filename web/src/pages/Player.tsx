@@ -16,7 +16,6 @@ import {
   playstyleBadges,
   playstyleById,
   playstyleIconUrl,
-  type PlaystyleBadgeSlot,
   positionName,
   roleChs,
   teamName,
@@ -92,7 +91,7 @@ function AttrRadar({ values }: { values: { key: string; label: string; value: nu
   );
 }
 
-function PlaystyleBadge({ psid, gold }: PlaystyleBadgeSlot) {
+function PlaystyleBadge({ psid, gold }: { psid: number; gold: boolean }) {
   const row = playstyleById.get(psid);
   const label = row?.chs ?? row?.en ?? `PS ${psid}`;
   return (
@@ -435,7 +434,7 @@ function AttrSheet({
           <h4>PlayStyles</h4>
           <div className="ps-list">
             {playstyles.map((b) => (
-              <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} slot={b.slot} gold={b.gold} />
+              <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} />
             ))}
           </div>
         </>

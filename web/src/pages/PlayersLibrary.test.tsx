@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClubDirectoryRow, PlayerLibraryRow, PlayersLibraryResponse } from '../lib/api.ts';
-import PlayersLibrary from './PlayersLibrary.tsx';
+import PlayersLibrary, { psNames } from './PlayersLibrary.tsx';
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
 vi.mock('../lib/api.ts', () => ({ api: apiMock }));
@@ -529,5 +529,33 @@ describe('窄屏筛选抽屉', () => {
 
     setNarrow(false);
     await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+});
+
+// 增量 29：列表的 PlayStyle 单元格。psNames 收的是「数组下标」，而 core/ref 的 playstyleIsGold
+// 收的是「槽号（1 起）」—— 传下标时下标 12（= PSID13，金槽）走不到「金槽」分支，银段 ID 落在金槽
+// 会被显示成银的，与档案页的 🥇 不一致。这条口径差只有异常数据才看得见，所以按纯函数直测。
+describe('psNames：槽号从 1 起', () => {
+  it('银槽里的银段 ID 不加「金·」', () => {
+    // 下标 0/6 = PSID1/PSID7，都在银槽内
+    expect(psNames(row({ id: 1, name: 'A', psIds: [1, null, null, null, null, null, 7] }))).toBe(
+      '精准搓射、低射',
+    );
+  });
+
+  it('PSID13（下标 12）是金槽：银段 ID 也按金徽渲染', () => {
+    const psIds = [...Array(12).fill(null), 25]; // 下标 12 ⇒ 槽号 13
+    expect(psNames(row({ id: 1, name: 'A', psIds }))).toBe('金·铲球');
+  });
+
+  it('金段 ID 无论落哪一槽都按金徽渲染，且显示基础名', () => {
+    expect(psNames(row({ id: 1, name: 'A', psIds: [103] }))).toBe('金·大力射门');
+    // 金段 ID 落在银槽同样判金（isGoldPlaystyleId 分支）
+    expect(psNames(row({ id: 1, name: 'A', psIds: [null, 113, null] }))).toBe('金·长传');
+  });
+
+  it('全空槽与空数组都渲染破折号', () => {
+    expect(psNames(row({ id: 1, name: 'A', psIds: [null, null] }))).toBe('—');
+    expect(psNames(row({ id: 1, name: 'A', psIds: [] }))).toBe('—');
   });
 });

@@ -5,7 +5,9 @@
 //
 // 判据必须认「模块说明符」（from 后面跟引号）。原先只写 `export\s+.*\bfrom\b`，把纯表达式也算成了
 // 依赖：增量 29 往 fc26.ts 加了个由 PS_SLOT_COUNT 派生的数组常量（`= Array.from(...)`），守卫当场误报。
-// 多行 `export {\n …\n} from '…'` 这种写法判据抓不到（行首不是 import/export），沿用原判据的边界。
+// 动态 import（`await import('./x')`）不在行首，所以另加一条不锚行首的 `\bimport\s*\(`；代价是
+// 注释/字符串里出现 `import(` 也会命中 —— 对守卫来说宁枉勿纵（命中只会让人来看一眼）。
+// 已知边界：多行 `export {\n …\n} from '…'` 抓不到（`from` 与 `export` 不在同一行），沿用原判据。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -15,7 +17,7 @@ function hasStaticDependency(line: string): boolean {
   return (
     /^\s*import\b/.test(line) ||
     /^\s*export\b[^'"]*\bfrom\s+['"]/.test(line) ||
-    /\brequire\s*\(/.test(line)
+    /\b(?:import|require)\s*\(/.test(line)
   );
 }
 
@@ -29,6 +31,9 @@ describe('前端共用的 core 数据模块', () => {
     expect(hasStaticDependency("export { a } from './a.ts';")).toBe(true);
     expect(hasStaticDependency("export type { A } from './a.ts';")).toBe(true);
     expect(hasStaticDependency("const x = require('node:fs');")).toBe(true);
+    // 动态 import 不在行首：行首判据抓不到，靠这条不锚行首的分支
+    expect(hasStaticDependency("const env = await import('./env.ts');")).toBe(true);
+    expect(hasStaticDependency("  const lazy = () => import('./env.ts');")).toBe(true);
   });
 
   for (const path of PURE_DATA_MODULES) {
