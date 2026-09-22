@@ -701,16 +701,18 @@ async function main() {
             (await page.locator('.club-block h3', { hasText: '教练工作台' }).count()) === 0,
             `${label}：登录者不是本队教练，不该看到教练工作台`,
           );
-          // 三组结构分析各出一种图：年龄 = 竖直直方图、CA = 占比横条、效力 = 横向条形图
+          // 三组结构分析各出一种图：年龄 = 竖直直方图、CA = 100% 堆叠条、效力 = 横向条形图
           assert((await page.locator('.club-histogram').count()) === 1, `${label}：年龄应出一张竖直直方图`);
-          assert((await page.locator('.club-share').count()) === 1, `${label}：CA 应出一张占比横条图`);
+          assert((await page.locator('.club-share-stack').count()) === 1, `${label}：CA 应出一根 100% 堆叠条`);
           assert((await page.locator('.band-chart').count()) === 1, `${label}：效力应出一张横向条形图`);
 
           // 几何：三张图宽高都按百分比给，窄屏只该压轨道。要验的是「图不撑破卡片、图自己不出横向滚动」。
           // 别拿「条形右缘 ≤ 轨道右缘」当断言——全局 box-sizing:border-box 下那是盒模型保证的，永远为真。
-          const charts = await page.evaluate(() => {
+          // 并排容器（.club-figures / .club-split）也一起量：网格轨道撑破卡片时图自己是不会滚的。
+          const CHART_SELECTORS = ['.club-figures', '.club-split', '.club-histogram', '.club-share-plot', '.band-chart'];
+          const charts = await page.evaluate((selectors) => {
             const out = [];
-            for (const sel of ['.club-histogram', '.club-share', '.band-chart']) {
+            for (const sel of selectors) {
               for (const el of document.querySelectorAll(sel)) {
                 const r = el.getBoundingClientRect();
                 const block = el.closest('.club-block');
@@ -727,15 +729,15 @@ async function main() {
               }
             }
             return out;
-          });
-          assert(charts.length === 3, `${label}：应量到 3 张结构图，实际 ${charts.length}`);
+          }, CHART_SELECTORS);
+          assert(charts.length === 5, `${label}：应量到 5 个结构分析容器，实际 ${charts.length}`);
           const chartOut = charts.filter((c) => c.blockRight === null || c.right > c.blockRight + 1 || c.left < c.blockLeft - 1);
           assert(chartOut.length === 0, `${label}：有结构图超出所在卡片 ${JSON.stringify(chartOut)}`);
           const chartScroll = charts.filter((c) => c.scrollW > c.clientW + 1);
           assert(chartScroll.length === 0, `${label}：有结构图自身出了横向滚动 ${JSON.stringify(chartScroll)}`);
 
           // 直方图柱高确实按「人数 / 最高档人数」算：最高档占满轨道、0 人档不出柱。
-          // 轨道有 1px 下边框（box-sizing 下算进 72px），故留 3% 容差。
+          // 轨道有 1px 下边框（box-sizing 下算进 128px 高度），故留 3% 容差。
           const hist = await page.evaluate(() => {
             const el = document.querySelector('.club-histogram');
             if (!el) return null;
@@ -753,33 +755,41 @@ async function main() {
             assert(hist[i].count === detailFixture.squad.byAge[i].count, `${label}：直方图第 ${i + 1} 档柱顶人数不符`);
           }
 
-          // CA 占比条：分母是全队人数（条长之和 = 100%），不是「最大档」——夹具最高档只占 33%
+          // CA 堆叠条：段宽分母是全队人数（不是「最大档」——夹具最高档只占 33%），
+          // 0 人的档不画段（画 0 宽段没有意义），图例五档恒出并给人数与占比。
           const share = await page.evaluate(() => {
-            const el = document.querySelector('.club-share');
-            if (!el) return null;
-            return [...el.querySelectorAll('.club-share-row')].map((row) => {
-              const track = row.querySelector('.club-share-track').getBoundingClientRect();
-              const bar = row.querySelector('.club-share-bar').getBoundingClientRect();
-              return {
-                share: track.width > 0 ? bar.width / track.width : -1,
-                title: row.getAttribute('title'),
-                count: row.querySelector('.club-share-count').textContent,
-              };
+            const stack = document.querySelector('.club-share-stack');
+            if (!stack) return null;
+            const track = stack.getBoundingClientRect();
+            const segs = [...stack.querySelectorAll('.club-share-seg')].map((s) => {
+              const r = s.getBoundingClientRect();
+              return track.width > 0 ? r.width / track.width : -1;
             });
+            const legend = [...document.querySelectorAll('.club-share-legend-row')].map((row) => ({
+              title: row.getAttribute('title'),
+              value: row.querySelector('.club-share-legend-value').textContent,
+            }));
+            return { segs, legend };
           });
-          assert(share !== null && share.length === detailFixture.squad.byCa.length, `${label}：CA 占比条行数 ≠ 夹具档数`);
-          for (let i = 0; i < share.length; i += 1) {
-            const b = detailFixture.squad.byCa[i];
+          assert(share !== null && share.legend.length === detailFixture.squad.byCa.length, `${label}：CA 图例行数 ≠ 夹具档数`);
+          const caNonZero = detailFixture.squad.byCa.filter((b) => b.count > 0);
+          assert(share.segs.length === caNonZero.length, `${label}：CA 段数 ${share.segs.length} ≠ 非零档数 ${caNonZero.length}`);
+          for (let i = 0; i < share.segs.length; i += 1) {
+            const b = caNonZero[i];
             const want = b.count / detailFixture.squad.size;
-            assert(Math.abs(share[i].share - want) <= 0.02, `${label}：CA「${b.label}」条长 ${(share[i].share * 100).toFixed(1)}% ≠ 期望 ${(want * 100).toFixed(1)}%`);
-            assert(share[i].title === `${b.label}：${b.count} 人 · 占全队 ${Math.round(want * 100)}%`, `${label}：CA「${b.label}」title 不符（${share[i].title}）`);
-            assert(share[i].count === `${b.count} 人`, `${label}：CA「${b.label}」行尾人数不符（${share[i].count}）`);
+            assert(Math.abs(share.segs[i] - want) <= 0.02, `${label}：CA「${b.label}」段宽 ${(share.segs[i] * 100).toFixed(1)}% ≠ 期望 ${(want * 100).toFixed(1)}%`);
+          }
+          for (let i = 0; i < share.legend.length; i += 1) {
+            const b = detailFixture.squad.byCa[i];
+            const pct = Math.round((b.count / detailFixture.squad.size) * 100);
+            assert(share.legend[i].title === `${b.label}：${b.count} 人 · 占全队 ${pct}%`, `${label}：CA「${b.label}」图例 title 不符（${share.legend[i].title}）`);
+            assert(share.legend[i].value === `${b.count} 人 · ${pct}%`, `${label}：CA「${b.label}」图例人数不符（${share.legend[i].value}）`);
           }
           // 刻度轴末位「100%」是绝对定位 + translateX(-100%)，可能戳出图外（盒模型管不到）。
           // 窄屏（≤640px）中间三条刻度是 display:none，它们的 rect 是原点上的 0×0 —— 必须先跳过，
           // 否则「0 < 图左缘」会把隐藏元素判成溢出。
           const axisOut = await page.evaluate(() => {
-            const el = document.querySelector('.club-share');
+            const el = document.querySelector('.club-share-plot');
             if (!el) return null;
             const r = el.getBoundingClientRect();
             return [...el.querySelectorAll('.club-share-tick')]
@@ -796,7 +806,7 @@ async function main() {
           const pos = await page.locator('.club-position-list dt').allInnerTexts();
           assert(pos.join(',') === '门将,后卫,中场,前锋', `${label}：位置档位应是门将/后卫/中场/前锋，实际 ${pos.join(',')}`);
           assert(
-            (await page.locator('.club-position-list .band-bar, .club-position-list .club-hist-bar, .club-position-list .club-share-bar').count()) === 0,
+            (await page.locator('.club-position-list .band-bar, .club-position-list .club-hist-bar, .club-position-list .club-share-seg').count()) === 0,
             `${label}：位置分布按裁决不用图示，不该出现条`,
           );
           // 阵容名单表（运营组那两张是 .transfer-table，要排除）

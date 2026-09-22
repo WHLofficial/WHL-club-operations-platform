@@ -2564,18 +2564,23 @@ th.num .th-sort {
   font-variant-numeric: tabular-nums;
 }
 
-/* 主指标三格（增量 31 步骤 11a）：大号数字 + 左侧一道焦橙短线，与下方明细行形成主次。
-   .club-stats/.club-stat 上面那组留给教练工作台与导入预览用，这里不复用（等权网格就是用户要改掉的东西）。 */
+/* 主指标块（增量 31 步骤 11b）：大号数字与下方小字明细住同一块淡奶油底，整块左侧一道焦橙竖线。
+   整块只画一道线、块内不再逐格画线——逐格画线会让每个数字各成一张小卡，而下面那行小字没有线，
+   看上去就成了「另一块东西」（用户反馈：小字与上方过于割裂）。 */
+.club-summary {
+  background: var(--cream);
+  border-left: 3px solid var(--terracotta);
+  border-radius: 0 8px 8px 0;
+  padding: 13px 16px 12px;
+}
 .club-hero {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px 18px;
+  gap: 10px 18px;
   margin: 0;
 }
 .club-hero-item {
   min-width: 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--terracotta);
 }
 .club-hero-item dt {
   font-size: 12px;
@@ -2594,14 +2599,13 @@ th.num .th-sort {
   color: var(--muted);
 }
 
-/* 明细行：按语义分组（能力/资产/荣誉…），组名 muted 加粗，组间靠间距、组内靠「·」 */
+/* 明细行：按语义分组（能力/资产/荣誉…），组名 muted 加粗，组间靠间距、组内靠「·」。
+   不画顶部分割线——它和上面的大数字同住 .club-summary，靠底色与间距分成两行就够了。 */
 .club-detail-line {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 20px;
-  margin: 12px 0 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  margin: 9px 0 0;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
@@ -2613,6 +2617,34 @@ th.num .th-sort {
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
+}
+
+/* 图排（增量 31 步骤 11b）：结构分析图并排铺满卡片宽度，不留右侧一大片空白。
+   auto-fit 会吃掉空轨道，所以只放一张图时它自己占满一行。窄屏靠 minmax 下限自动折行。 */
+.club-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px 28px;
+  margin-top: 18px;
+}
+.club-figures > .club-sub {
+  margin-top: 0;
+}
+
+/* 两列并排（左：指标块；右：图）。窄屏折成一列。 */
+.club-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px 32px;
+  align-items: start;
+}
+.club-split > .club-sub {
+  margin-top: 0;
+}
+@media (max-width: 900px) {
+  .club-split {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 位置分布：四档文字档位（用户裁决「不用图示」）。三列 = 档名 / 人数 / 档内细位；
@@ -2646,12 +2678,12 @@ th.num .th-sort {
 }
 
 /* 结构分析柱状图：轨道 flex:1 + min-width:0，条形只按百分比给宽度 ⇒ 窄屏压轨道，不挤破容器。
-   元素是 <ul>/<li>（让档位标签与人数留在无障碍树里），所以要把列表默认样式清掉。 */
+   元素是 <ul>/<li>（让档位标签与人数留在无障碍树里），所以要把列表默认样式清掉。
+   宽度交给所在列（增量 31 步骤 11b 起不再自己限宽，否则两列并排时右列会空掉一截）。 */
 .band-chart {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 460px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2661,11 +2693,15 @@ th.num .th-sort {
   align-items: center;
   gap: 10px;
 }
+/* 档位名要独占一列固定宽，各行的轨道才能对齐（每行是各自的 flex 容器，靠 width 而非内容对齐）。
+   宽度按最长的档名给足：「3 赛季及以上」这类 5 个汉字 + 数字的档名在 4.5em 下会折成两行，
+   图立刻变丑（增量 31 步骤 11b 实测）。 */
 .band-label {
   flex: none;
-  width: 4.5em;
+  width: 6.5em;
   font-size: 12px;
   color: var(--muted);
+  white-space: nowrap;
 }
 .band-track {
   flex: 1;
@@ -2692,13 +2728,15 @@ th.num .th-sort {
 
 /* 年龄直方图（增量 31 步骤 11a）：等宽 3 岁箱 ⇒ 柱相邻、柱高 = 人数 / 最高档人数、人数标在柱顶（无 y 轴）。
    六列的轨道底色相连成一块底板，所以圆角只做在首尾两列的外侧。0 人的档不出柱（不设 min-height：
-   给 0 画 2px 会假装有 1 人），柱顶那个「0」才是事实。 */
+   给 0 画 2px 会假装有 1 人），柱顶那个「0」才是事实。
+   轨道高度与列宽要成比例：早先 460px 宽 × 72px 高，每列 76×72 是个方块、整张图 6.4:1 的扁条，
+   看着不像直方图（增量 31 步骤 11b 用户反馈「长宽比失衡」）。现在宽度交给图排的列宽（约 370px
+   ⇒ 每列约 62px），高度抬到 128px，整张图约 2.9:1，每列高略大于宽——才是分布图该有的样子。 */
 .club-histogram {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 0;
-  max-width: 460px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2718,7 +2756,7 @@ th.num .th-sort {
   display: flex;
   align-items: flex-end;
   width: 100%;
-  height: 72px;
+  height: 128px;
   background: #f3ead9;
   border-bottom: 1px solid var(--border);
   overflow: hidden;
@@ -2741,18 +2779,16 @@ th.num .th-sort {
   white-space: nowrap;
 }
 
-/* CA 占比横条（增量 31 步骤 11a）：条长 = 该档占全队比例，顶部 0–100% 刻度轴，行尾给绝对人数。
-   轴的左右缩进必须与行的轨道列严格对齐——两边共用下面三个量，改一个就两边一起改，否则刻度会与条形错位。 */
-.club-share {
-  --share-label-w: 4.5em;
-  --share-count-w: 3.4em;
-  --share-gap: 10px;
-  max-width: 460px;
+/* CA 结构（增量 31 步骤 11b）：一根水平柱子按占比切段（100% 堆叠条），上方 0–100% 刻度轴，
+   下方图例给档位与人数。段色是同一主色的深浅阶梯（越强的档越深，透明度写在 JSX 的内联 style 上，
+   颜色仍只来自 --terracotta）；底板米色，所以缺 CA 的人没填满的那截自己会露出来。 */
+.club-share-plot {
+  position: relative;
 }
 .club-share-axis {
   position: relative;
   height: 16px;
-  margin: 0 calc(var(--share-count-w) + var(--share-gap)) 3px calc(var(--share-label-w) + var(--share-gap));
+  margin: 0 0 4px;
   border-bottom: 1px solid var(--border);
 }
 .club-share-tick {
@@ -2770,44 +2806,50 @@ th.num .th-sort {
 .club-share-tick:last-child {
   transform: translateX(-100%);
 }
-.club-share-list {
+.club-share-stack {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.club-share-row {
-  display: grid;
-  grid-template-columns: var(--share-label-w) 1fr var(--share-count-w);
-  align-items: center;
-  gap: var(--share-gap);
-}
-.club-share-label {
-  font-size: 12px;
-  color: var(--muted);
-}
-.club-share-track {
-  min-width: 0;
-  height: 12px;
+  height: 26px;
   background: #f3ead9;
   border-radius: 6px;
   overflow: hidden;
 }
-.club-share-bar {
+.club-share-seg {
   display: block;
   height: 100%;
   background: var(--terracotta);
-  border-radius: 6px;
 }
-.club-share-count {
+.club-share-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 18px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.club-share-legend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.club-share-swatch {
+  flex: none;
+  align-self: center;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--terracotta);
+}
+.club-share-legend-label {
   font-size: 12px;
   color: var(--muted);
-  text-align: right;
+}
+.club-share-legend-value {
+  font-size: 12px;
+  color: var(--ink);
   white-space: nowrap;
 }
-/* 窄屏只留 0% 与 100% 两个刻度：五个刻度在 ~200px 的轴里会挤在一起 */
+/* 窄屏只留 0% 与 100% 两个刻度：五个刻度在 ~300px 的轴里会挤在一起 */
 @media (max-width: 640px) {
   .club-share-tick-mid {
     display: none;

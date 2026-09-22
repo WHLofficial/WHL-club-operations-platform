@@ -40,7 +40,7 @@ const FORM_BADGE: Record<'win' | 'draw' | 'loss', string> = { win: 'green', draw
 // 结构分析图全部 CSS 自绘（不引图表库）。三张图各用各的坐标语义（增量 31 步骤 11a，用户裁决）：
 //   位置分布 → 不用图示，纯文字档位
 //   年龄结构 → 等宽 3 岁箱 ⇒ 竖直直方图（柱相邻、面积=人数）
-//   CA 结构  → 语义档不等宽（70–79 宽 10、80–84 宽 5）⇒ 横向条形图 + 占比刻度
+//   CA 结构  → 语义档不等宽（70–79 宽 10、80–84 宽 5）⇒ 一根水平柱按占比切段（100% 堆叠条）
 //   效力年限 → 普通升序横向柱状图（BandChart）
 // 三张图都只用百分比给尺寸，所以窄屏压容器不会把图形挤出去。
 // 语义一律用 <ul>/<li> 而不是 role="img"：role="img" 会把整棵子树当装饰，档位标签与人数就读不到了；
@@ -53,7 +53,8 @@ function BandChart({ bands, ariaLabel }: { bands: ClubBand[]; ariaLabel: string 
         <li className="band-row" key={b.key}>
           <span className="band-label">{b.label}</span>
           <span className="band-track" aria-hidden="true">
-            <span className="band-bar" style={{ width: `${(b.count / max) * 100}%` }} />
+            {/* 0 人不出条：.band-bar 有 min-width 2px（小值也要看得见），给 0 画 2px 会读成「有一点」 */}
+            {b.count > 0 && <span className="band-bar" style={{ width: `${(b.count / max) * 100}%` }} />}
           </span>
           <span className="band-count mono">{b.count}</span>
         </li>
@@ -82,33 +83,47 @@ function Histogram({ bins, ariaLabel }: { bins: ClubBand[]; ariaLabel: string })
   );
 }
 
-// 占比横条（CA）：条长 = 该档占全队比例，顶部 0–100% 刻度轴给出比例，行尾给绝对人数。
-// 分母用「全队人数」而不是「各档之和」，这样有人缺 CA 时条长之和 <100% 也是实话（缺的人没进任何档）。
+// CA 结构：一根水平柱子按占比切段（100% 堆叠条），上方 0–100% 刻度轴，下方图例给档位与人数。
+// 段序由高到低（后端 CA_BANDS 已是降序），段色是同一主色的深浅阶梯——越强的档越深，颜色只写在
+// CSS 里，段本身只带一个透明度。分母用「全队人数」而不是「各档之和」：有人缺 CA 时柱子填不满
+// 100%，这是实话（缺的人没进任何档），底板的米色把没填满的那截显出来。
 const SHARE_TICKS = [0, 25, 50, 75, 100];
+const SEG_ALPHA = [1, 0.82, 0.63, 0.44, 0.27];
 
 function ShareBar({ bands, total, ariaLabel }: { bands: ClubBand[]; total: number; ariaLabel: string }) {
   const denom = Math.max(1, total);
+  const alphaOf = (i: number) => SEG_ALPHA[i] ?? 0.27;
+  const pctOf = (count: number) => Math.round((count / denom) * 100);
   return (
     <div className="club-share">
-      <div className="club-share-axis" aria-hidden="true">
-        {SHARE_TICKS.map((t) => (
-          <span
-            className={t === 0 || t === 100 ? 'club-share-tick' : 'club-share-tick club-share-tick-mid'}
-            key={t}
-            style={{ left: `${t}%` }}
-          >
-            {t}%
-          </span>
-        ))}
-      </div>
-      <ul className="club-share-list" aria-label={ariaLabel}>
-        {bands.map((b) => (
-          <li className="club-share-row" key={b.key} title={`${b.label}：${b.count} 人 · 占全队 ${Math.round((b.count / denom) * 100)}%`}>
-            <span className="club-share-label">{b.label}</span>
-            <span className="club-share-track" aria-hidden="true">
-              <span className="club-share-bar" style={{ width: `${(b.count / denom) * 100}%` }} />
+      <div className="club-share-plot">
+        <div className="club-share-axis" aria-hidden="true">
+          {SHARE_TICKS.map((t) => (
+            <span
+              className={t === 0 || t === 100 ? 'club-share-tick' : 'club-share-tick club-share-tick-mid'}
+              key={t}
+              style={{ left: `${t}%` }}
+            >
+              {t}%
             </span>
-            <span className="club-share-count mono">{b.count} 人</span>
+          ))}
+        </div>
+        <div className="club-share-stack" aria-hidden="true">
+          {bands.map((b, i) =>
+            b.count === 0 ? null : (
+              <span className="club-share-seg" key={b.key} style={{ width: `${(b.count / denom) * 100}%`, opacity: alphaOf(i) }} />
+            ),
+          )}
+        </div>
+      </div>
+      <ul className="club-share-legend" aria-label={ariaLabel}>
+        {bands.map((b, i) => (
+          <li className="club-share-legend-row" key={b.key} title={`${b.label}：${b.count} 人 · 占全队 ${pctOf(b.count)}%`}>
+            <span className="club-share-swatch" aria-hidden="true" style={{ opacity: alphaOf(i) }} />
+            <span className="club-share-legend-label">{b.label}</span>
+            <span className="club-share-legend-value mono">
+              {b.count} 人 · {pctOf(b.count)}%
+            </span>
           </li>
         ))}
       </ul>
@@ -116,7 +131,9 @@ function ShareBar({ bands, total, ariaLabel }: { bands: ClubBand[]; total: numbe
   );
 }
 
-// 主指标：三格大号数字，左侧一道焦橙短线把它和明细分开（同一张卡里造出主次，不是十格等权网格）
+// 主指标：大号数字，三格铺满一行。
+// 与下方明细同住一个 .club-summary（淡奶油底 + 左侧一道焦橙竖线），所以「大数字 + 小字」是一块东西，
+// 不是两块（增量 31 步骤 11b 用户反馈：小字与上方过于割裂）。
 function HeroStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="club-hero-item">
@@ -129,7 +146,8 @@ function HeroStat({ label, value, hint }: { label: string; value: string; hint?:
   );
 }
 
-// 明细行：按语义分组（能力/资产/荣誉…），组名 muted 加粗，组内用「·」分隔
+// 明细行：按语义分组（能力/资产/荣誉…），组名 muted 加粗，组内用「·」分隔。
+// 住在 .club-summary 里，与上面的大数字共用底色，所以不再画顶部分割线（那条线正是「割裂」的来源）。
 function DetailLine({ groups }: { groups: { label: string; text: string }[] }) {
   return (
     <p className="club-detail-line">
@@ -297,57 +315,62 @@ export default function ClubDetail() {
           <h3>阵容组</h3>
           <span className="muted">在册球员与结构分析</span>
         </div>
-        <dl className="club-hero">
-          <HeroStat
-            label="阵容人数"
-            value={`${squad.senior} 人`}
-            hint={squad.trainee > 0 ? `+ ${squad.trainee} 青训` : undefined}
+        <div className="club-summary">
+          <dl className="club-hero">
+            <HeroStat
+              label="阵容人数"
+              value={`${squad.senior} 人`}
+              hint={squad.trainee > 0 ? `+ ${squad.trainee} 青训` : undefined}
+            />
+            <HeroStat label="平均 CA" value={num1(squad.avgCa)} />
+            <HeroStat label="总身价" value={money(squad.totalValue)} />
+          </dl>
+          <DetailLine
+            groups={[
+              {
+                label: '能力',
+                text: `最高 CA ${num1(squad.maxCa)} · 平均 PA ${num1(squad.avgPa)} · 成长空间 ${num1(squad.avgGrowth)}`,
+              },
+              {
+                label: '资产',
+                text: `工资总额 ${money(squad.totalWage)} · 平均工资 ${squad.avgWage === null ? '—' : money(squad.avgWage)}`,
+              },
+              { label: '荣誉', text: `金徽章 ${squad.badgesGold} 枚 · 银徽章 ${squad.badgesSilver} 枚` },
+            ]}
           />
-          <HeroStat label="平均 CA" value={num1(squad.avgCa)} />
-          <HeroStat label="总身价" value={money(squad.totalValue)} />
-        </dl>
-        <DetailLine
-          groups={[
-            {
-              label: '能力',
-              text: `最高 CA ${num1(squad.maxCa)} · 平均 PA ${num1(squad.avgPa)} · 成长空间 ${num1(squad.avgGrowth)}`,
-            },
-            {
-              label: '资产',
-              text: `工资总额 ${money(squad.totalWage)} · 平均工资 ${squad.avgWage === null ? '—' : money(squad.avgWage)}`,
-            },
-            { label: '荣誉', text: `金徽章 ${squad.badgesGold} 枚 · 银徽章 ${squad.badgesSilver} 枚` },
-          ]}
-        />
-
-        <div className="club-sub">
-          <h4>位置分布</h4>
-          {squad.size === 0 ? (
-            <p className="muted club-sub-empty">队里还没有人。</p>
-          ) : (
-            // 四档恒出（含 0 人档）：「0 门将」本身就是要看见的信号。档内细位作 muted 明细。
-            <dl className="club-position-list">
-              {squad.byPosition.map((g) => (
-                <Fragment key={g.key}>
-                  <dt>{g.label}</dt>
-                  <dd>
-                    <span className="mono">{g.count}</span> 人
-                  </dd>
-                  <dd className="club-position-detail">{g.detail === '' ? '—' : g.detail}</dd>
-                </Fragment>
-              ))}
-            </dl>
-          )}
         </div>
 
-        <div className="club-sub">
-          <h4>年龄结构</h4>
-          <Histogram bins={squad.byAge} ariaLabel="年龄分布（等宽 3 岁分箱，柱高为该档人数）" />
-        </div>
+        {/* 三张图并排铺满卡片宽度（auto-fit：窄屏自己折行），不留右侧一大片空白 */}
+        <div className="club-figures">
+          <div className="club-sub">
+            <h4>位置分布</h4>
+            {squad.size === 0 ? (
+              <p className="muted club-sub-empty">队里还没有人。</p>
+            ) : (
+              // 四档恒出（含 0 人档）：「0 门将」本身就是要看见的信号。档内细位作 muted 明细。
+              <dl className="club-position-list">
+                {squad.byPosition.map((g) => (
+                  <Fragment key={g.key}>
+                    <dt>{g.label}</dt>
+                    <dd>
+                      <span className="mono">{g.count}</span> 人
+                    </dd>
+                    <dd className="club-position-detail">{g.detail === '' ? '—' : g.detail}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+            )}
+          </div>
 
-        <div className="club-sub">
-          <h4>CA 结构</h4>
-          <ShareBar bands={squad.byCa} total={squad.size} ariaLabel="CA 分档占全队比例" />
+          <div className="club-sub">
+            <h4>年龄结构</h4>
+            <Histogram bins={squad.byAge} ariaLabel="年龄分布（等宽 3 岁分箱，柱高为该档人数）" />
+          </div>
+
+          <div className="club-sub">
+            <h4>CA 结构</h4>
+            <ShareBar bands={squad.byCa} total={squad.size} ariaLabel="CA 分档占全队比例" />
+          </div>
         </div>
 
         <div className="club-sub">
@@ -419,16 +442,21 @@ export default function ClubDetail() {
           <h3>运营组</h3>
           <span className="muted">合同结构与转会往来</span>
         </div>
-        <dl className="club-hero">
-          <HeroStat label="在册合同" value={`${contracts.signed} 份`} />
-          <HeroStat label="保护期内" value={`${contracts.protectedCount} 人`} />
-          <HeroStat label="未保护" value={`${contracts.unprotected} 人`} />
-        </dl>
-        <DetailLine groups={[{ label: '效力', text: `平均 ${seasons(contracts.avgYears)}` }]} />
+        {/* 左：合同结构；右：效力年限图。两列到窄屏折成一列（900px 断点）。 */}
+        <div className="club-split">
+          <div className="club-summary">
+            <dl className="club-hero">
+              <HeroStat label="在册合同" value={`${contracts.signed} 份`} />
+              <HeroStat label="保护期内" value={`${contracts.protectedCount} 人`} />
+              <HeroStat label="未保护" value={`${contracts.unprotected} 人`} />
+            </dl>
+            <DetailLine groups={[{ label: '效力', text: `平均 ${seasons(contracts.avgYears)}` }]} />
+          </div>
 
-        <div className="club-sub">
-          <h4>效力年限</h4>
-          <BandChart bands={contracts.byYears} ariaLabel="效力年限分档人数" />
+          <div className="club-sub">
+            <h4>效力年限</h4>
+            <BandChart bands={contracts.byYears} ariaLabel="效力年限分档人数" />
+          </div>
         </div>
 
         <div className="club-sub">
@@ -453,7 +481,7 @@ export default function ClubDetail() {
           {standing === null ? (
             <p className="muted club-sub-empty">{standingNote ?? '排名暂不可用'}</p>
           ) : (
-            <>
+            <div className="club-summary">
               <dl className="club-hero">
                 <HeroStat label="名次" value={`第 ${standing.position} 名`} />
                 <HeroStat
@@ -476,7 +504,7 @@ export default function ClubDetail() {
                   { label: '进失球', text: `${standing.goalsFor ?? 0} : ${standing.goalsAgainst ?? 0}` },
                 ]}
               />
-            </>
+            </div>
           )}
         </div>
 

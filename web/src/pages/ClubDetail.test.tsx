@@ -383,7 +383,7 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     expect(positionRow(pos, '中场')).toEqual({ count: '2 人', detail: 'CM 1 · CAM 1' });
     expect(positionRow(pos, '未知')).toEqual({ count: '1 人', detail: '—' });
     // 用户裁决「位置不用图示」：这一节不该有任何图形元素
-    expect(pos.querySelectorAll('.band-bar, .club-hist-bar, .club-share-bar').length).toBe(0);
+    expect(pos.querySelectorAll('.band-bar, .club-hist-bar, .club-share-seg').length).toBe(0);
   });
 
   it('年龄结构出竖直直方图：柱高按最高档归一、人数标在柱顶、0 人档不出柱', async () => {
@@ -416,24 +416,29 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     ]);
   });
 
-  it('CA 结构出占比横条：条长分母是全队人数（不是各档之和），带 0–100% 刻度与行尾人数', async () => {
+  it('CA 结构出 100% 堆叠条：段宽分母是全队人数（不是各档之和），带 0–100% 刻度与逐档图例', async () => {
     stubApi();
     renderDetail();
 
     await screen.findByText('CA 结构');
     const ca = sub('CA 结构');
-    const rows = ca.querySelectorAll('.club-share-row');
-    expect(rows.length).toBe(BY_CA.length);
+    // 堆叠条只画有人的档（0 人档画 0 宽段没有意义），所以段数少于档数
+    const segs = ca.querySelectorAll('.club-share-seg');
+    expect(segs.length).toBe(4);
     // 全队 5 人：1 人档 20%、2 人档 40%。若误按「各档之和归一」，最大档会变 100% ⇒ 这条会红
-    expect(Array.from(rows).map((r) => (r.querySelector('.club-share-bar') as HTMLElement).style.width)).toEqual([
-      '20%',
-      '20%',
-      '0%',
-      '40%',
-      '20%',
+    expect(Array.from(segs).map((s) => (s as HTMLElement).style.width)).toEqual(['20%', '20%', '40%', '20%']);
+
+    // 图例五档恒出（含 0 人档），label + 人数 + 占比，title 给完整口径
+    const legend = ca.querySelectorAll('.club-share-legend-row');
+    expect(legend.length).toBe(BY_CA.length);
+    expect(Array.from(legend).map((r) => (r.querySelector('.club-share-legend-value') as HTMLElement).textContent)).toEqual([
+      '1 人 · 20%',
+      '1 人 · 20%',
+      '0 人 · 0%',
+      '2 人 · 40%',
+      '1 人 · 20%',
     ]);
-    expect((rows[3] as HTMLElement).getAttribute('title')).toBe('70–79：2 人 · 占全队 40%');
-    expect((rows[3] as HTMLElement).querySelector('.club-share-count')?.textContent).toBe('2 人');
+    expect((legend[3] as HTMLElement).getAttribute('title')).toBe('70–79：2 人 · 占全队 40%');
     expect(Array.from(ca.querySelectorAll('.club-share-tick')).map((el) => el.textContent)).toEqual([
       '0%',
       '25%',
