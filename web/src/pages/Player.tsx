@@ -180,6 +180,10 @@ export default function Player() {
   const { player, club, contract } = data;
   const attrs = player.gameAttrs ?? {};
   const nation = nationName(attrs['naID']);
+  // 六维雷达：原在属性页签里（增量 6.1 d11），增量 30 搬到左栏球员卡下方常驻——数据仍在页面级算一次
+  const isGk = player.position === 'GK';
+  const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
+  const radarValues = radarAxes.map((g) => ({ key: g.key, label: g.label, value: groupAverage(g.keys, attrs) }));
 
   return (
     <div className="container">
@@ -194,45 +198,63 @@ export default function Player() {
         )}
       </p>
       <div className="dossier">
-        <section className="player-card">
-          <div className="player-card-head">
-            <h2>{player.name}</h2>
-            <span className="player-card-badges">
-              {player.badgesGold > 0 && <span title="金徽章">🥇×{player.badgesGold}</span>}
-              {player.badgesSilver > 0 && <span title="银徽章">🥈×{player.badgesSilver}</span>}
-            </span>
-          </div>
-          <p className="player-card-sub">
-            {player.position ?? '位置待定'} · {nation ?? '国籍未知'} · {player.age ?? '—'} 岁 ·{' '}
-            {player.foot === 1 ? '右脚' : '左脚'}
-          </p>
-          <div className="player-card-numbers">
-            <div>
-              <span className="stat-label">CA</span>
-              <span className="mono ca-pa">{player.ca}</span>
-            </div>
-            <div>
-              <span className="stat-label">PA</span>
-              <span className="mono ca-pa">{player.pa}</span>
-            </div>
-            <div>
-              <span className="stat-label">身价</span>
-              <span className="mono market-value">
-                {player.marketValue === null ? '未定价' : `${player.marketValue.toFixed(2)} m`}
+        <div className="dossier-side">
+          <section className="player-card">
+            <div className="player-card-head">
+              <h2>{player.name}</h2>
+              <span className="player-card-badges">
+                {player.badgesGold > 0 && <span title="金徽章">🥇×{player.badgesGold}</span>}
+                {player.badgesSilver > 0 && <span title="银徽章">🥈×{player.badgesSilver}</span>}
               </span>
             </div>
-          </div>
-          <div className="player-card-foot">
-            <span className={`badge ${player.status === 'listed' ? 'sky' : player.status === 'trainee' ? 'purple' : 'gray'}`}>
-              {STATUS_LABEL[player.status] ?? player.status}
-            </span>
-            {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}
-            {player.isFutureStar && <span className="badge gold">未来之星</span>}
-            {player.chinaPlan && <span className="badge red">中国计划</span>}
-            {player.growthTier > 1 && <span className="badge gray">成长档位 {player.growthTier}</span>}
-          </div>
-          <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
-        </section>
+            <p className="player-card-sub">
+              {player.position ?? '位置待定'} · {nation ?? '国籍未知'} · {player.age ?? '—'} 岁 ·{' '}
+              {player.foot === 1 ? '右脚' : '左脚'}
+            </p>
+            <div className="player-card-numbers">
+              <div>
+                <span className="stat-label">CA</span>
+                <span className="mono ca-pa">{player.ca}</span>
+              </div>
+              <div>
+                <span className="stat-label">PA</span>
+                <span className="mono ca-pa">{player.pa}</span>
+              </div>
+              <div>
+                <span className="stat-label">身价</span>
+                <span className="mono market-value">
+                  {player.marketValue === null ? '未定价' : `${player.marketValue.toFixed(2)} m`}
+                </span>
+              </div>
+            </div>
+            <div className="player-card-foot">
+              <span className={`badge ${player.status === 'listed' ? 'sky' : player.status === 'trainee' ? 'purple' : 'gray'}`}>
+                {STATUS_LABEL[player.status] ?? player.status}
+              </span>
+              {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}
+              {player.isFutureStar && <span className="badge gold">未来之星</span>}
+              {player.chinaPlan && <span className="badge red">中国计划</span>}
+              {player.growthTier > 1 && <span className="badge gray">成长档位 {player.growthTier}</span>}
+            </div>
+            <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
+          </section>
+
+          <section className="radar-card">
+            <div className="attr-radar">
+              <AttrRadar values={radarValues} />
+              <div className="radar-legend">
+                <h4>{isGk ? '门将六维' : '外场六维'}</h4>
+                {radarValues.map((v) => (
+                  <div key={v.key} className="radar-legend-row">
+                    <span className="mono radar-legend-key">{v.key}</span>
+                    <span className="attr-name">{v.label}</span>
+                    <span className={`mono ${v.value !== null ? attrClass(v.value) : ''}`}>{v.value ?? '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
 
         <section className="dossier-file">
           <div className="seg dossier-tabs" role="radiogroup" aria-label="球员页签">
@@ -248,7 +270,7 @@ export default function Player() {
               <h3>合同卷宗</h3>
               {contract ? (
                 <div className="table-wrap">
-                  <table>
+                  <table className="dossier-table">
                     <tbody>
                       <tr>
                         <th>违约金</th>
@@ -315,7 +337,8 @@ export default function Player() {
   );
 }
 
-// 属性页签（增量 6.1 d10）：位置矩阵 + 角色带 + 星级行 + 六组细分卡（门将七组）；d11 加六维雷达
+// 属性页签（增量 6.1 d10）：位置矩阵 + 角色带 + 星级行 + 六组细分卡（门将七组）；
+// 六维雷达在增量 30 移到左栏球员卡下方常驻，这里只剩属性卡网格（PlayStyles 卡补第二行空位）
 function AttrSheet({
   attrs,
   position,
@@ -339,8 +362,6 @@ function AttrSheet({
   const skillmoves = Number(attrs['skillmoves']);
   const isGk = position === 'GK';
   const groups = ATTR_GROUPS.filter((g) => isGk || g.key !== 'GKP');
-  const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
-  const radarValues = radarAxes.map((g) => ({ key: g.key, label: g.label, value: groupAverage(g.keys, attrs) }));
   return (
     <>
       <h3>FC 属性（当季源数据）</h3>
@@ -415,30 +436,20 @@ function AttrSheet({
             </div>
           );
         })}
-      </div>
-      <div className="attr-radar">
-        <AttrRadar values={radarValues} />
-        <div className="radar-legend">
-          <h4>{isGk ? '门将六维' : '外场六维'}</h4>
-          {radarValues.map((v) => (
-            <div key={v.key} className="radar-legend-row">
-              <span className="mono radar-legend-key">{v.key}</span>
-              <span className="attr-name">{v.label}</span>
-              <span className={`mono ${v.value !== null ? attrClass(v.value) : ''}`}>{v.value ?? '—'}</span>
+        {playstyles.length > 0 && (
+          <div className="attr-group-card ps-card">
+            <div className="attr-group-head">
+              <span className="attr-group-key">PS</span>
+              <span className="attr-name">PlayStyles</span>
             </div>
-          ))}
-        </div>
-      </div>
-      {playstyles.length > 0 && (
-        <>
-          <h4>PlayStyles</h4>
-          <div className="ps-list">
-            {playstyles.map((b) => (
-              <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} />
-            ))}
+            <div className="ps-list">
+              {playstyles.map((b) => (
+                <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} />
+              ))}
+            </div>
           </div>
-        </>
-      )}
+        )}
+      </div>
     </>
   );
 }

@@ -601,6 +601,24 @@ td.num {
   font-variant-numeric: tabular-nums;
 }
 
+/* 合同卷宗（右栏 .dossier 内的两列键值表）：标签列定宽，值列一律左对齐、数值与 .mono 列走等宽。
+   原先金额行走 td.num（右对齐 + 等宽），其余 .mono 行走默认字体（.mono 没有全局规则），
+   同一张表里左右对齐与字体各两套 —— 两列键值表里右对齐也带不来列对齐收益（增量 30 收口） */
+.dossier-table th {
+  width: 6.5em;
+}
+
+.dossier-table td {
+  text-align: left;
+}
+
+.dossier-table td.mono,
+.dossier-table td.num {
+  text-align: left;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
 tbody tr:hover td {
   background: #f7f0e0;
 }
@@ -752,6 +770,13 @@ tbody tr:hover td {
   grid-template-columns: 280px 1fr;
   gap: 24px;
   align-items: start;
+}
+
+/* 左栏：球员卡 + 六维雷达卡（增量 30 把雷达从属性页签搬到球员卡下方） */
+.dossier-side {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .player-card {
@@ -2149,9 +2174,18 @@ th.num .th-sort {
 }
 .attr-group-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   margin-bottom: 14px;
+}
+/* PlayStyles 卡：补第二行 DEF/PHY 右侧那两格（网格第 7 项，跨两列），窄屏整宽 */
+.ps-card {
+  grid-column: span 2;
+}
+@media (max-width: 900px) {
+  .attr-group-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .attr-group-card {
   border: 1px solid var(--border);
@@ -2186,7 +2220,22 @@ th.num .th-sort {
   color: var(--bad);
 }
 
-/* 六维雷达（增量 6.1 d11）：静态 SVG，无动画 */
+/* 六维雷达（增量 6.1 d11）：静态 SVG，无动画；增量 30 起挂左栏 .radar-card，改竖排（280px 栏内） */
+.radar-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.radar-card .attr-radar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 0;
+}
+.radar-card .attr-radar-svg {
+  margin: 0 auto;
+}
 .attr-radar {
   display: flex;
   gap: 20px;
