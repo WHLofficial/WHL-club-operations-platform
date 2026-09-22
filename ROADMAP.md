@@ -698,6 +698,40 @@
 **待办**：① 增量 33（跨仓：赛事平台球员表转只读、四写端点下线、阵容同步、`GET /api/squads`），需单独授权部署；② 生产落库未执行（`load.mjs --remote --yes-prod` 或先推送再跑），故生产目前仍是缩写名 + 无号码；③ 生产迁移 0032/0033 未 apply（推送部署时一次写 ≈ 18,301 行/条，审计要求索引批 ≤3 条/批、分天跑）；④ 831 人派生不出显示名（字典缺号长尾），若要补齐需更新版 FC26 字典；⑤ 赛事平台与本平台 5 人姓名写法不一致，同步时以 FC26 派生名为准（清单在 `scripts/player-names/README.md`）。
 
 
+## 增量 33 · 名册真源归位——`GET /api/squads` + 赛事平台拉取同步 + 球员写入口下线（跨仓）
+
+**状态**：2026-09-23 完成步骤 9–11（本仓 1 个提交 `aed2f67`，赛事仓 1 个提交 `ffcbc40`），两仓本地全绿。**未推送、未部署**，等令。步骤 12（部署与上线核对）属危险清单，需单独授权。
+
+**缘起**：增量 32 把球衣号的编辑入口搬回本平台（`POST /api/club/players/:id/number`）之后，赛事系统的 `player` 表（`name` + `number`）就成了第二份真源——两个写者互相覆盖。本增量把名册真源收到本平台：本仓出一个只读的全平台一线队名册端点，赛事仓改为按小时拉取同步，并把赛事仓全部球员写入口下线。
+
+**范围与交付（本仓，步骤 9）**
+- 新建 `src/worker/routes/squads.ts`，端点 `GET /api/squads`：一次 JOIN 出 20 队 570 人的一线队名册，返回 `{ squads: [{ clubId, clubName, players: [{ fcId, name, number }] }] }`。公开只读，走 `assertPublicRate(c, 'squads')` + `cachedJson('squads:all', ttlForScope('roster', c.env.PUBLIC_CACHE_TTL_MS), loader, { scope: 'roster', env, ctx })`。挂载在 `src/worker/index.ts`（growthRoutes 之后、notificationsRoutes 之前）。
+- 口径：`p.club_id IS NOT NULL AND p.status IN ('normal','listed') AND p.fc_id IS NOT NULL`；姓名走 `sqlDisplayName('p')`（与球员库同一口径，`COALESCE(display_name, name)`）；`ORDER BY c.name, p.fc_id`，JS 线性归并成按队分组（**不做 N+1**）。`fc_id` 为空的行不出——赛事系统按 fc_id 认人，没有 fc_id 就落不了地。
+- 新增 `tests/squads.test.ts`（2 例）：① 分组与口径（只出 normal/listed、姓名走 display_name 回落、fc_id 为空不出、自由身不在任何队）；② 省额度（整个请求只发 1 条含 `JOIN clubs` 的 SQL，`fx.captured` 长度 = 1）。
+
+**范围与交付（赛事仓，步骤 10–11）**
+- 新建 `worker/lib/clubRoster.ts`：`fetchClubSquads(base)` 拉本端点并逐层校验形状（坏数据抛错）；`syncRosters(db, squads, {dryRun})` 三方对账——club 有/tour 无 → INSERT（**以 fcId 当 `player.id`**）、两队不同 → 改 `team_id`、名与号码以 club 为准 UPDATE、club 无/tour 有 → DELETE（被外键拒绝则保留并进 `kept` 报告，逐条 try/catch 才拿得到是哪一行）；`runRosterSync(env)` 为 cron 入口（配置缺失或失败只记日志、不抛）。
+- 三条防御：空快照整体跳过；形状坏抛错不写库；**只对快照里出现过的队做删除**（否则一次拉取失败就会清空别队名单）。另加「同一 fcId 出现在两队 ⇒ 抛错」与「未知队整体跳过」。
+- 端点 `POST /api/admin/sync-rosters`（`?dryRun=1` 只算不写；非 dryRun 写 `accountAuditStmt` 审计 `action='player.sync_rosters'`）；`wrangler.jsonc` 加 `triggers.crons = ["0 * * * *"]` 与 `vars.CLUB_API_BASE = "https://club.whleague.win"`（**撤掉这一行 = 同步整体跳过**，可作回滚开关）。
+- **球员写入口全部下线**：`POST /:id/players`、`POST /:id/players/bulk`、`PATCH /:id/players/:pid`、`DELETE /:id/players/:pid` 四个端点删除，`src/pages/TeamDetail.tsx` 的录入 / 批量导入 / 改名 / 删除 UI 换成只读名单表（附说明：名单由俱乐部平台同步，签约解约定号改号请到俱乐部平台操作）。队级端点（建队 / 批量建队 / 改名 / 删队 / 队徽）全部保留。
+
+**不做**：动 `players.name` 语义（仍是 FC26db 官方缩写名）、给导入模板换显示名、在赛事仓保留任何球员写路径、生产迁移 apply、生产数据落库、部署（全部需单独下令）。
+
+**验收（步骤 9–11 实测）**
+- 本仓：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **48 文件 / 661 例全绿**（增量 32 基线 47/659 ⇒ +1 文件 / +2 例）；`npm run build` 成功（`web/dist/assets/index-Bco7kOHW.js` 477.77 kB / gzip 150.38 kB，**与增量 32 逐字同 hash** —— 步骤 9 只加后端路由，前端产物不该变）；`npm run test:e2e` **11/11 通过**。
+- 赛事仓：`npm run typecheck` 全清；`npx vitest run` **15 文件 / 142 例通过 + 1 文件跳过**（增量 33 前基线 14 文件 / 121 例 ⇒ +1 文件 / +21 例，新增 `tests/rosterSync.test.ts`）；`npm run build` 成功（`dist/assets/index-B9HQN9LX.js` 442.52 kB / gzip 143.49 kB）。
+- 读量：`EXPLAIN QUERY PLAN` 实测 = `SEARCH p USING INDEX idx_players_status (status=?)` + `SEARCH c USING INTEGER PRIMARY KEY (rowid=?)` + `USE TEMP B-TREE FOR ORDER BY`，**无 `SCAN p`**，读约 570 行。
+- 变异验证两处定向变红（赛事仓）：空快照守卫加 `&& false` ⇒ 「空快照整体跳过」用例失败；未知队过滤改成不过滤 ⇒ 「快照里的队本仓一支都没有」用例失败。
+- 本地实测：`GET /api/squads` 在 dev（8791）返回真实分组数据；赛事仓同步对账的 10 条用例覆盖首次建行 / 稳态零写 / 换队改名改号 / 删除 / 外键拦下 / 空快照 / 未知队 / 同人两队 / dryRun / 空串号码等价 null。
+
+**踩坑（写进测试注释与记忆）**
+- **`instrument(sqlite)` 必须记语句的 `run()` 而不是 `prepare()`** —— `syncRosters` 在 dryRun 下照样把语句 prepare 出来，只是从不执行；一开始记 prepare 会让「dryRun 一行不写」用例误报通过。
+- 赛事仓 `tsconfig.json` 只 include `src`/`shared`，**tests 不参与 typecheck**；测试写法是 `import app from "../worker/index"`（无扩展名）+ `app.request(...)`，会话用 KV 的 `sess:tok-admin` + Cookie `whl_session=tok-admin`。
+- 默认导出改用 `Object.assign(app, { scheduled(...) })` 而不是换一个对象，**保持默认导出仍是那个 Hono 实例** ⇒ 测试里 `app.request(...)` 一行不用改。
+
+**待办**：① 两仓部署（需单独授权）；② 首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期（计划预期：号码 0 改动、名字一批被改写、0 增 0 删）；③ 生产迁移 0032/0033 仍未 apply、生产数据未落库（见增量 32 待办）。
+
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
