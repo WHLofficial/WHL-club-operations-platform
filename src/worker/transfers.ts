@@ -135,13 +135,16 @@ export async function completeTransfer(
 
   const guard = { sql: `(SELECT status FROM transfers WHERE id = ?) IN ('pending_review', 'signing')`, params: [transferId] };
   const audit = createAuditStatement(db);
-  // 离队要回收的中国计划徽章数（在 batch 外先读，批内只做减法）
-  const chinaPlaystyleCount = amendment
-    ? 0
-    : ((await db
-        .prepare(`SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = ? AND source = 'china'`)
-        .bind(transfer.player_id)
-        .first<{ n: number }>())?.n ?? 0);
+  // 离队要回收的中国计划徽章数（在 batch 外先读，批内只做减法）。
+  // 只有「真的离开某支球队」才回收：转出方为空的海捞是签入（自由身球员无队可离），
+  // 从 CPU 队摘人转出方不为空、照旧回收。留队续约/匹配（amendment）不动。
+  const chinaPlaystyleCount =
+    amendment || transfer.from_club_id === null
+      ? 0
+      : ((await db
+          .prepare(`SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = ? AND source = 'china'`)
+          .bind(transfer.player_id)
+          .first<{ n: number }>())?.n ?? 0);
   const statements: D1PreparedStatement[] = [];
   if (ownership && listingId !== null) {
     // 成交出价 → won；其冻结 → settled（落选冻结早已在抬价时释放）

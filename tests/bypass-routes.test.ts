@@ -517,6 +517,38 @@ describe('海捞（free_agent）', () => {
     const term = sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE type = 'termination' AND player_id = 20");
     expect(term?.status).toBe('completed');
   });
+
+  it('海捞真自由身是签入不是离队：中国计划徽章一行不删、台账不动（增量 30）', async () => {
+    const fx = await seedBypass();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, china_plan, badges_silver) VALUES
+        (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free', 1, 5);
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (24, 1, 'silver', 1, 'growth', '2026-07-01T00:00:00Z'),
+        (24, 2, 'silver', 2, 'china', '2026-07-02T00:00:00Z'),
+        (24, 3, 'silver', 3, 'china', '2026-07-03T00:00:00Z');
+    `);
+    fx.env.rng = () => 0.9;
+    const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 6 }, 'tok-coach2', fx.env);
+    expect(submit.status).toBe(201);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    const sessionId = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)?.id as number;
+    const offer = await post(`/api/negotiations/${sessionId}/offer`, { wage: expectedWage(5, 6, 0.02, 1.9, 0.45) }, 'tok-coach2', fx.env);
+    expect(((await offer.json()) as { result: string }).result).toBe('success');
+
+    // 过户了，但「转出方为空」= 自由身签入：china 明细与台账都不该被回收逻辑碰到
+    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM players WHERE id = 24')?.club_id).toBe(fx.clubB);
+    expect(
+      sqlAll<{ slot: number; source: string }>(fx.sqlite, 'SELECT slot, source FROM player_playstyles WHERE player_id = 24 ORDER BY slot'),
+    ).toEqual([
+      { slot: 1, source: 'growth' },
+      { slot: 2, source: 'china' },
+      { slot: 3, source: 'china' },
+    ]);
+    expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 24')?.badges_silver).toBe(5);
+  });
 });
 
 describe('窗内回滚（4.4.10）', () => {
