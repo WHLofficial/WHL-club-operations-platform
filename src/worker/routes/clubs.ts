@@ -2,14 +2,16 @@
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
-import { requireCoach } from '../../lib/session.ts';
+import { requireCoach, requireUser } from '../../lib/session.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 import { assertPublicRate, cachedJson, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
 import { writeAudit } from '../../lib/audit.ts';
 import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
-import { deriveClubTier, deriveClubTiers } from '../tier.ts';
+import { deriveClubTier, deriveClubLeagues, deriveClubTiers } from '../tier.ts';
+import { closedRegularTicks } from '../contract-ticks.ts';
+import { POSITION_BY_ID } from '../../core/fc26.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
@@ -147,6 +149,446 @@ app.get('/clubs', async (c) => {
     { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
   );
   return c.json(data);
+});
+
+// ---- 球队详情（增量 31，🔒 需登录）----
+
+// 单队 club_id → tour_team_id（AUTH_DB 一条）。列表用批量版 loadClubTourTeams；详情只查自己那一条。
+async function loadClubTourTeam(env: Env, clubId: number): Promise<number | null> {
+  if (!env.AUTH_DB) return null;
+  const row = await env.AUTH_DB.prepare('SELECT tour_team_id AS tid FROM team WHERE club_id = ?')
+    .bind(clubId)
+    .first<{ tid: number | null }>();
+  return typeof row?.tid === 'number' ? row.tid : null;
+}
+
+// 阵容一条语句取全队（走 idx_players_club_ca，生产实测 61–75 行，随队规模），位置/年龄/CA 三个维度的分布与全部合计
+// 都在 JS 里算：分布要按三个维度分组，SQL 里得三条 GROUP BY（≈183 行），JS 算只要那 61 行。
+// 名单不在详情里出——前端复用 GET /api/players?club_id=N（那个读面已有索引与缓存）。
+const CLUB_SQUAD_ROWS_SQL = `SELECT p.id, p.position, p.age, p.ca, p.pa, p.status, p.market_value,
+         p.badges_silver, p.badges_gold,
+         ct.id AS contract_id, ct.wage, ct.protection_ticks, ct.service_ticks
+  FROM players p LEFT JOIN contracts ct ON ct.player_id = p.id AND ct.is_active = 1
+  WHERE p.club_id = ?`;
+
+interface ClubSquadRow {
+  id: number;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  status: string;
+  market_value: number | null;
+  badges_silver: number | null;
+  badges_gold: number | null;
+  contract_id: number | null;
+  wage: number | null;
+  protection_ticks: number | null;
+  service_ticks: number | null;
+}
+
+interface Band {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+}
+
+// 分档口径只在这里定义一次，前端只画条（不在前端再分一次档，否则两处会漂）。
+// 年龄/CA 的区间首尾相接；效力是 0.5 的整数倍（1 常规窗 = 0.5 赛季），档位之间留的空档取不到值。
+const AGE_BANDS: readonly Band[] = [
+  { key: 'u21', label: '20 岁及以下', min: 0, max: 20 },
+  { key: '21-23', label: '21–23 岁', min: 21, max: 23 },
+  { key: '24-26', label: '24–26 岁', min: 24, max: 26 },
+  { key: '27-29', label: '27–29 岁', min: 27, max: 29 },
+  { key: '30+', label: '30 岁及以上', min: 30, max: 999 },
+];
+const CA_BANDS: readonly Band[] = [
+  { key: 'u60', label: '60 以下', min: 0, max: 59 },
+  { key: '60-69', label: '60–69', min: 60, max: 69 },
+  { key: '70-79', label: '70–79', min: 70, max: 79 },
+  { key: '80-89', label: '80–89', min: 80, max: 89 },
+  { key: '90+', label: '90 及以上', min: 90, max: 999 },
+];
+const YEARS_BANDS: readonly Band[] = [
+  { key: 'le05', label: '0.5 赛季内', min: 0, max: 0.5 },
+  { key: '1-15', label: '1–1.5 赛季', min: 1, max: 1.5 },
+  { key: '2-25', label: '2–2.5 赛季', min: 2, max: 2.5 },
+  { key: '3+', label: '3 赛季及以上', min: 3, max: 999 },
+];
+
+function bandCounts(rows: ClubSquadRow[], value: (r: ClubSquadRow) => number | null, bands: readonly Band[]): Array<{ key: string; label: string; count: number }> {
+  const out = bands.map((b) => ({ key: b.key, label: b.label, count: 0 }));
+  for (const r of rows) {
+    const v = value(r);
+    if (v === null) continue;
+    const i = bands.findIndex((b) => v >= b.min && v <= b.max);
+    if (i >= 0) out[i].count += 1;
+  }
+  return out;
+}
+
+function mean1(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
+}
+
+// 转会记录：与 /api/players/:id/transfers 同一形状（LEFT JOIN clubs 双别名 + 同一排序），
+// 球队维度按转入/转出各取 10 条，并补球员名（球队页只看到金额没有意义）。
+const CLUB_TRANSFER_SQL = (side: 'from' | 'to') => `SELECT t.id, t.type, t.player_id, p.name AS player_name,
+         t.from_club_id, fc.name AS from_club_name, t.to_club_id, tc.name AS to_club_name,
+         t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at
+  FROM transfers t
+  LEFT JOIN clubs fc ON fc.id = t.from_club_id
+  LEFT JOIN clubs tc ON tc.id = t.to_club_id
+  LEFT JOIN players p ON p.id = t.player_id
+  WHERE t.${side}_club_id = ? AND t.status = 'completed'
+  ORDER BY (t.completed_at IS NULL), t.completed_at DESC, t.id DESC
+  LIMIT 10`;
+
+interface ClubTransferRow {
+  id: number;
+  type: string;
+  player_id: number | null;
+  player_name: string | null;
+  from_club_id: number | null;
+  from_club_name: string | null;
+  to_club_id: number | null;
+  to_club_name: string | null;
+  fee: number | null;
+  extra_fee: number | null;
+  season: number | null;
+  window_seq: number | null;
+  completed_at: string | null;
+}
+
+// 近期战绩：平台已确认赛果（快照表，无索引但全表 69 行，该 OR 查询实测读 76 行，可忽略）。
+// ⚠️ home_team_id / away_team_id 存的是**比赛系统队 id**，不是 club id（见迁移 0017；src/worker/home.ts
+// 的 clubFormPts 就是把 club id 绑进来才恒不命中）——这里绑的是 tourTeamId。
+const CLUB_FORM_SQL = `SELECT match_id, season, competition_type, stage_name, round,
+         home_team_id, away_team_id, home_team, away_team,
+         score_home, score_away, pen_home, pen_away, walkover_side, finished_at
+  FROM result_confirmations
+  WHERE home_team_id = ? OR away_team_id = ?
+  ORDER BY (finished_at IS NULL), finished_at DESC, id DESC
+  LIMIT 5`;
+
+interface ClubFormRow {
+  match_id: number;
+  season: number;
+  competition_type: string | null;
+  stage_name: string | null;
+  round: number | null;
+  home_team_id: number | null;
+  away_team_id: number | null;
+  home_team: string | null;
+  away_team: string | null;
+  score_home: number | null;
+  score_away: number | null;
+  pen_home: number | null;
+  pen_away: number | null;
+  walkover_side: string | null;
+  finished_at: string | null;
+}
+
+// 90 分钟口径的胜平负：点球决胜不改判定（与 src/worker/home.ts 的 formPtsOf 同口径——「90 分钟平分
+// 就是平，点球胜负只影响淘汰赛晋级/奖金」），另给 penHome/penAway 让前端标注。
+// 弃权判负按 walkover_side 定：''=普通场、home/away=该侧弃权判负、both=双弃权双方各记一场负
+// （与比赛系统 worker/lib/standings.ts 的口径一致）。
+function matchResultOf(r: ClubFormRow, tourTeamId: number): 'win' | 'draw' | 'loss' | null {
+  const isHome = r.home_team_id === tourTeamId;
+  const ourSide = isHome ? 'home' : 'away';
+  if (r.walkover_side === 'both') return 'loss';
+  if (r.walkover_side === 'home' || r.walkover_side === 'away') {
+    return r.walkover_side === ourSide ? 'loss' : 'win';
+  }
+  const ours = isHome ? r.score_home : r.score_away;
+  const theirs = isHome ? r.score_away : r.score_home;
+  if (ours === null || theirs === null) return null;
+  if (ours > theirs) return 'win';
+  if (ours < theirs) return 'loss';
+  return 'draw';
+}
+
+// 球队详情（🔒 需登录，裁决 Q1）：队头 + 阵容结构 + 合同结构 + 转会往来 + 近期战绩。
+// 不含财政与主场（那两块在自家队中心 /me/club），也不含名单（前端复用 /api/players?club_id=N）。
+// 载荷与用户无关（教练区块由前端另取 /api/me/club 判断），所以能按 clubs scope 共享缓存。
+app.get('/clubs/:id', async (c) => {
+  await requireUser(c.env, c.req.raw);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '球队 ID 不对');
+
+  const data = await cachedJson(
+    `clubs:detail:${id}`,
+    ttlForScope('clubs', c.env.PUBLIC_CACHE_TTL_MS),
+    async () => {
+      const club = await c.env.DB.prepare(
+        `SELECT id, name, is_cpu, league_tier FROM clubs WHERE id = ? AND status = 'active'`,
+      )
+        .bind(id)
+        .first<ClubRow>();
+      if (!club) throw new HttpError(404, '球队不存在');
+
+      const [season, tourTeamId, ticks, squad] = await Promise.all([
+        getVisibleSeason(c.env.DB),
+        loadClubTourTeam(c.env, id),
+        closedRegularTicks(c.env.DB),
+        c.env.DB.prepare(CLUB_SQUAD_ROWS_SQL).bind(id).all<ClubSquadRow>(),
+      ]);
+
+      const leagues = await deriveClubLeagues(
+        c.env,
+        season,
+        [id],
+        tourTeamId === null ? new Map<number, number>() : new Map([[id, tourTeamId]]),
+      );
+      const logos = tourTeamId === null ? new Map<number, string>() : await loadTeamLogos(c.env, [tourTeamId]);
+
+      const [incoming, outgoing, form] = await Promise.all([
+        c.env.DB.prepare(CLUB_TRANSFER_SQL('to')).bind(id).all<ClubTransferRow>(),
+        c.env.DB.prepare(CLUB_TRANSFER_SQL('from')).bind(id).all<ClubTransferRow>(),
+        tourTeamId === null
+          ? Promise.resolve({ results: [] as ClubFormRow[] })
+          : c.env.DB.prepare(CLUB_FORM_SQL).bind(tourTeamId, tourTeamId).all<ClubFormRow>(),
+      ]);
+
+      const rows = squad.results;
+      const trainee = rows.filter((r) => r.status === 'trainee').length;
+      const caValues = rows.map((r) => r.ca).filter((v): v is number => typeof v === 'number');
+      const paValues = rows.map((r) => r.pa).filter((v): v is number => typeof v === 'number');
+      // 成长空间 = pa − ca，只算还有空间的人（pa 缺或已到顶的不进平均，否则会拉低「空间」的含义）
+      const growthValues = rows
+        .filter((r) => typeof r.pa === 'number' && typeof r.ca === 'number' && r.pa > r.ca)
+        .map((r) => (r.pa as number) - (r.ca as number));
+      const contracted = rows.filter((r) => r.contract_id !== null);
+      // 效力（赛季）= 0.5 × (已关常规窗数 − 签约基数)，与球员库/档案页同一公式（含 trainee 的
+      // service_ticks 为 NULL ⇒ 基数按 0 算，见 src/worker/routes/players.ts 的 years 表达式）
+      const yearsOf = (r: ClubSquadRow) => (r.contract_id === null ? null : (ticks - (r.service_ticks ?? 0)) * 0.5);
+      const yearsValues = contracted.map(yearsOf).filter((v): v is number => v !== null);
+      const wageValues = contracted.map((r) => r.wage).filter((v): v is number => typeof v === 'number');
+
+      const byPosition = Object.values(POSITION_BY_ID)
+        .map((position) => ({ position, count: rows.filter((r) => r.position === position).length }))
+        .filter((x) => x.count > 0);
+      const unknownPosition = rows.filter((r) => r.position === null || !Object.values(POSITION_BY_ID).includes(r.position)).length;
+      if (unknownPosition > 0) byPosition.push({ position: '未知', count: unknownPosition });
+
+      const recent = form.results.map((r) => ({
+        matchId: r.match_id,
+        season: r.season,
+        competitionType: r.competition_type,
+        stageName: r.stage_name,
+        round: r.round,
+        homeTeam: r.home_team,
+        awayTeam: r.away_team,
+        scoreHome: r.score_home,
+        scoreAway: r.score_away,
+        penHome: r.pen_home,
+        penAway: r.pen_away,
+        result: tourTeamId === null ? null : matchResultOf(r, tourTeamId),
+        finishedAt: r.finished_at,
+      }));
+      const transferDto = (r: ClubTransferRow) => ({
+        id: r.id,
+        type: r.type,
+        playerId: r.player_id,
+        playerName: r.player_name,
+        fromClubId: r.from_club_id,
+        fromClubName: r.from_club_name,
+        toClubId: r.to_club_id,
+        toClubName: r.to_club_name,
+        fee: r.fee,
+        extraFee: r.extra_fee,
+        season: r.season,
+        windowSeq: r.window_seq,
+        completedAt: r.completed_at,
+      });
+
+      return {
+        club: {
+          id: club.id,
+          name: club.name,
+          isCpu: club.is_cpu === 1,
+          tier: leagues.get(id)?.tier ?? null,
+          logoKey: (tourTeamId === null ? undefined : logos.get(tourTeamId)) ?? null,
+        },
+        squad: {
+          size: rows.length,
+          senior: rows.length - trainee,
+          trainee,
+          avgCa: mean1(caValues),
+          maxCa: caValues.length === 0 ? null : Math.max(...caValues),
+          avgPa: mean1(paValues),
+          avgGrowth: mean1(growthValues),
+          totalValue: rows.reduce((a, r) => a + (r.market_value ?? 0), 0),
+          totalWage: contracted.reduce((a, r) => a + (r.wage ?? 0), 0),
+          avgWage: mean1(wageValues),
+          badgesSilver: rows.reduce((a, r) => a + (r.badges_silver ?? 0), 0),
+          badgesGold: rows.reduce((a, r) => a + (r.badges_gold ?? 0), 0),
+          byPosition,
+          byAge: bandCounts(rows, (r) => r.age, AGE_BANDS),
+          byCa: bandCounts(rows, (r) => r.ca, CA_BANDS),
+        },
+        contracts: {
+          signed: contracted.length,
+          unprotected: contracted.length - contracted.filter((r) => r.protection_ticks !== null && ticks < r.protection_ticks).length,
+          protectedCount: contracted.filter((r) => r.protection_ticks !== null && ticks < r.protection_ticks).length,
+          avgYears: mean1(yearsValues),
+          byYears: bandCounts(contracted, yearsOf, YEARS_BANDS),
+        },
+        transfers: { incoming: incoming.results.map(transferDto), outgoing: outgoing.results.map(transferDto) },
+        form: {
+          recent,
+          wins: recent.filter((r) => r.result === 'win').length,
+          draws: recent.filter((r) => r.result === 'draw').length,
+          losses: recent.filter((r) => r.result === 'loss').length,
+        },
+      };
+    },
+    { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
+  );
+  return c.json(data);
+});
+
+// 排名代理（🔒 需登录）：比赛系统公开积分榜 GET /api/public/tournaments/:id/standings 自带边缘缓存
+// 300s，但名次是「积分 → 净胜球 → 进球 → 相互战绩」多阶段破同分的计算结果
+// （比赛系统 worker/lib/standings.ts 的 readStageStandings）——**不可复刻**，所以只代理不重算。
+//
+// 为什么单独一个端点而不是塞进详情载荷：详情按 clubs scope 缓存 24h（它全是慢变数据），
+// 积分榜赛季中天天变，塞进去会被冻住 24h。
+//
+// 该积分榜 DTO **不带 team id**（只有 teamName/teamLogoUrl，且 rank 字段恒为 0 —— 名次只能按已排好的
+// 行序取下标），所以按名字认队：名字取 TOUR_DB `team.name`，与积分榜读的是同一张表同一列，
+// 不依赖平台自己的 clubs.name（平台改名不该影响认队）。
+const STANDING_TTL_MS = 300_000; // 与比赛系统 pubCache(300) 同频
+const STANDING_TIMEOUT_MS = 3_000; // 超时即降级：详情页不该为排名卡住
+// 上游响应体上限：超时只给了 3 秒时间窗，3 秒内照样能灌进很大的 JSON。比赛系统是自家上游，
+// 但排名区块是详情页里唯一的外部输入，异常/被污染的响应不该把 worker 的内存吃掉。
+const STANDING_MAX_BYTES = 2 * 1024 * 1024;
+
+/** 排名取不到（超时/非 2xx/网络错）——抛出它就不会把失败结果写进缓存 */
+class StandingUnavailable extends Error {}
+
+// 覆盖开关（PUBLIC_CACHE_TTL_MS）只用于测试/联调：显式给数（含 0=旁路）就照它；
+// 生产不配 ⇒ 300s，**不吃** clubs scope 的 24h 兜底。导出仅为让测试直接钉住这个 300s
+// ——集成测试观察不到 TTL 差异（都是「第二次请求不打上游」），改坏了也照样绿。
+export function standingTtl(env: Env): number {
+  return env.PUBLIC_CACHE_TTL_MS === undefined ? STANDING_TTL_MS : ttlForScope('clubs', env.PUBLIC_CACHE_TTL_MS);
+}
+
+interface StandingDto {
+  tournamentId: number;
+  stageName: string | null;
+  groupName: string | null;
+  position: number;
+  played: number | null;
+  won: number | null;
+  drawn: number | null;
+  lost: number | null;
+  goalsFor: number | null;
+  goalsAgainst: number | null;
+  pts: number | null;
+  pointsDeducted: number | null;
+}
+
+// 从积分榜响应里挑出这支球队所在的第一行（阶段按比赛系统给的顺序，先出现的先取）。
+// 响应形状是外部契约，逐层 typeof 校验：形状变了只让排名区块降级，不能让详情页 500。
+function pickStanding(body: unknown, teamName: string, tournamentId: number): StandingDto | null {
+  const stages = (body as { standings?: unknown } | null)?.standings;
+  if (!Array.isArray(stages)) return null;
+  for (const stage of stages) {
+    const groups = (stage as { groups?: unknown } | null)?.groups;
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      const rows = (group as { rows?: unknown } | null)?.rows;
+      if (!Array.isArray(rows)) continue;
+      const index = rows.findIndex((r) => (r as { teamName?: unknown } | null)?.teamName === teamName);
+      if (index < 0) continue;
+      const row = rows[index] as Record<string, unknown>;
+      const num = (v: unknown) => (typeof v === 'number' ? v : null);
+      const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : null);
+      return {
+        tournamentId,
+        stageName: str((stage as { name?: unknown }).name),
+        groupName: str((group as { name?: unknown }).name),
+        position: index + 1,
+        played: num(row.played),
+        won: num(row.won),
+        drawn: num(row.drawn),
+        lost: num(row.lost),
+        goalsFor: num(row.goalsFor),
+        goalsAgainst: num(row.goalsAgainst),
+        pts: num(row.pts),
+        pointsDeducted: num(row.pointsDeducted),
+      };
+    }
+  }
+  return null;
+}
+
+async function loadStanding(env: Env, clubId: number): Promise<{ standing: StandingDto | null; note: string | null }> {
+  const club = await env.DB.prepare(`SELECT id, name FROM clubs WHERE id = ? AND status = 'active'`)
+    .bind(clubId)
+    .first<{ id: number; name: string }>();
+  if (!club) throw new HttpError(404, '球队不存在');
+
+  const season = await getVisibleSeason(env.DB);
+  const tourTeamId = await loadClubTourTeam(env, clubId);
+  if (tourTeamId === null || env.TOUR_DB === undefined) return { standing: null, note: '本赛季暂无联赛排名' };
+
+  // 当季定级赛事就是该队联赛所在的那座（口径与分级派生同一份，见 deriveClubLeagues）
+  const leagues = await deriveClubLeagues(env, season, [clubId], new Map([[clubId, tourTeamId]]));
+  const tournamentId = leagues.get(clubId)?.tournamentId ?? null;
+  if (tournamentId === null) return { standing: null, note: '本赛季暂无联赛排名' };
+
+  const team = await env.TOUR_DB.prepare('SELECT name FROM team WHERE id = ?').bind(tourTeamId).first<{ name: string }>();
+  const teamName = team?.name ?? club.name;
+
+  const base = (env.TOUR_API_BASE ?? '').replace(/\/+$/, '');
+  const url = `${base}/api/public/tournaments/${tournamentId}/standings`;
+  let body: unknown;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(STANDING_TIMEOUT_MS),
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`比赛系统积分榜返回 ${res.status}`);
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > STANDING_MAX_BYTES) {
+      throw new Error(`积分榜响应过大（${declared} 字节）`);
+    }
+    const text = await res.text();
+    if (text.length > STANDING_MAX_BYTES) throw new Error(`积分榜响应过大（${text.length} 字节）`);
+    body = JSON.parse(text) as unknown;
+  } catch (e) {
+    console.warn(`[clubs] 排名代理失败（${url}）：${e instanceof Error ? e.message : String(e)}`);
+    throw new StandingUnavailable('排名暂不可用');
+  }
+
+  const standing = pickStanding(body, teamName, tournamentId);
+  return standing ? { standing, note: null } : { standing: null, note: '本赛季暂无联赛排名' };
+}
+
+app.get('/clubs/:id/standing', async (c) => {
+  await requireUser(c.env, c.req.raw);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '球队 ID 不对');
+  // 未配比赛系统基址：排名区块整体降级，一个库都不查（前端显示「排名暂不可用」）
+  if (!c.env.TOUR_API_BASE) return c.json({ standing: null, note: '排名暂不可用' });
+
+  try {
+    const data = await cachedJson(
+      `clubs:standing:${id}`,
+      standingTtl(c.env),
+      () => loadStanding(c.env, id),
+      { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
+    );
+    return c.json(data);
+  } catch (e) {
+    // 取不到就不缓存（cachedJson 里 loader 抛错不会落缓存），前端照常渲染其余区块
+    if (e instanceof StandingUnavailable) return c.json({ standing: null, note: e.message });
+    throw e;
+  }
 });
 
 app.post('/clubs/bind', async (c) => {

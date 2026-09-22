@@ -75,19 +75,28 @@ export async function deriveClubTier(env: Env, season: number | null, clubId: nu
   return p;
 }
 
+export interface ClubLeague {
+  tier: Tier | null;
+  /** 该队当季报名的那座定级赛事（球队详情的排名要用它去比赛系统取积分榜）；未定级/多座冲突为 null */
+  tournamentId: number | null;
+}
+
 // 批量派生（增量 31）：公开球队列表一屏就要算 20 队，逐队调 deriveClubTier 是 20×(1 AUTH_DB + 1 TOUR_DB)，
 // 其中 AUTH_DB 那条每队要扫 team 全表 20 行（实测 20 队 400 行），而集合形状只要 20 + 62 行。
 //
 // 规则与 derive() 同一份（TIER_BY_TYPE / loadLeagueList / 「报名行 → 级别」的映射），差别只有一处：
 // 一队同时报了多座定级赛事（derive 抛 HttpError(500)）在批量里**降级为 null** —— 单队数据问题
 // 不该打死整张公开列表页，但也不能静默，所以留一条 console.warn 给运维。
-export async function deriveClubTiers(
+//
+// 返回级别**与**报名赛事 id：球队详情（增量 31）要拿 tournamentId 去比赛系统取积分榜，而
+// 「哪座赛事参与定级」这件事只该有一份口径，所以两处共用这个函数（deriveClubTiers 是它的薄包装）。
+export async function deriveClubLeagues(
   env: Env,
   season: number | null,
   clubIds: number[],
   preloadedTourTeamIds?: Map<number, number>,
-): Promise<Map<number, Tier | null>> {
-  const out = new Map<number, Tier | null>(clubIds.map((id) => [id, null]));
+): Promise<Map<number, ClubLeague>> {
+  const out = new Map<number, ClubLeague>(clubIds.map((id) => [id, { tier: null, tournamentId: null }]));
   if (season === null || clubIds.length === 0) return out;
 
   if (!env.AUTH_DB) {
@@ -96,7 +105,9 @@ export async function deriveClubTiers(
     const rows = await env.DB.prepare(`SELECT id, league_tier AS t FROM clubs WHERE id IN (${ph})`)
       .bind(...clubIds)
       .all<{ id: number; t: string | null }>();
-    for (const r of rows.results) out.set(r.id, r.t === 'premier' || r.t === 'second' ? r.t : null);
+    for (const r of rows.results) {
+      out.set(r.id, { tier: r.t === 'premier' || r.t === 'second' ? r.t : null, tournamentId: null });
+    }
     return out;
   }
 
@@ -143,6 +154,7 @@ export async function deriveClubTiers(
   }
 
   const tiersByClub = new Map<number, Set<Tier>>();
+  const tourneysByClub = new Map<number, Set<number>>();
   for (const e of entries.results) {
     const tier = list.find((l) => l.tid === e.tid)?.tier;
     const clubId = clubByTourTeam.get(e.team);
@@ -150,10 +162,31 @@ export async function deriveClubTiers(
     const set = tiersByClub.get(clubId) ?? new Set<Tier>();
     set.add(tier);
     tiersByClub.set(clubId, set);
+    const tset = tourneysByClub.get(clubId) ?? new Set<number>();
+    tset.add(e.tid);
+    tourneysByClub.set(clubId, tset);
   }
   for (const [clubId, tiers] of tiersByClub) {
-    if (tiers.size === 1) out.set(clubId, [...tiers][0]);
-    else console.warn(`[tier] 分级数据冲突，列表按未定级显示：俱乐部 ${clubId} 在本赛季报了多座定级赛事，请管理组核对赛事报名`);
+    if (tiers.size !== 1) {
+      console.warn(`[tier] 分级数据冲突，列表按未定级显示：俱乐部 ${clubId} 在本赛季报了多座定级赛事，请管理组核对赛事报名`);
+      continue;
+    }
+    // 同一级别报了两座赛事（比如两座 league_premier）时级别仍唯一、但排名该看哪座说不清 ⇒ tournamentId 留 null
+    const tourneys = tourneysByClub.get(clubId);
+    out.set(clubId, {
+      tier: [...tiers][0],
+      tournamentId: tourneys && tourneys.size === 1 ? [...tourneys][0] : null,
+    });
   }
   return out;
+}
+
+export async function deriveClubTiers(
+  env: Env,
+  season: number | null,
+  clubIds: number[],
+  preloadedTourTeamIds?: Map<number, number>,
+): Promise<Map<number, Tier | null>> {
+  const leagues = await deriveClubLeagues(env, season, clubIds, preloadedTourTeamIds);
+  return new Map([...leagues].map(([clubId, l]) => [clubId, l.tier]));
 }

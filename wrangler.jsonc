@@ -58,7 +58,10 @@
   "vars": {
     "AUTH_MODE": "oidc",
     "OIDC_ISSUER": "https://auth.whleague.win",
-    "OIDC_CLIENT_ID": "club"
+    "OIDC_CLIENT_ID": "club",
+    // 增量 31：球队详情代理比赛系统公开积分榜的基址（GET /api/public/tournaments/:id/standings）。
+    // 与 src/worker/routes/auth.ts 的 TOUR_HOME 同一个源；撤掉这个变量 ⇒ 排名区块整体降级，页面照常。
+    "TOUR_API_BASE": "https://whleague.win"
   },
   // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑随增量 3+ 落地
   "triggers": {
