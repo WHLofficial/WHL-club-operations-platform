@@ -543,7 +543,7 @@
 
 ---
 
-## 增量 30 · 球员面板专项整改——术语三改 + 合同卷宗对齐 + 六维图与 PlayStyles 归位 + 徽章×PlayStyle 合并 + 转会记录页签（2026-09-22 本地完成，待部署）
+## 增量 30 · 球员面板专项整改——术语三改 + 合同卷宗对齐 + 六维图与 PlayStyles 归位 + 徽章×PlayStyle 合并 + 转会记录页签（2026-09-22 已上线，Version `d266036d`）
 
 **缘起**：用户 m00004 一次下达六项球员面板整改（术语口径、合同卷宗排版、属性文案、布局归位、徽章与 PlayStyle 合并、转会记录功能）。前四项是 UI/文案，后两项要动数据层与端点。
 
@@ -562,7 +562,7 @@
 
 **裁决**：① 术语「摘要条 chip 与表格列名仍叫『经纪人』」沿用增量 27 裁决（不动）；② 主题名「复古档案室」、容器名「档案卡 `.dossier`」、「主场/球场档案」不是本轮口径对象；③ 上限口径**统一为 12 银**（此前 `TECH_DESIGN.md` 写「15 与 12 是两个口径，别混」，本增量改写）；④ 明细行 `psid` **存基础 ID**、金徽由 `kind` 表示（读出来用 `playstyleIdOf` 还原）；⑤ 中国计划发放**同时加台账**，离队回收时同步减。
 
-**边界（不做）**：不部署、不 push、不 apply 生产迁移、不重导入球员库、不重建 players 表、不加依赖、不做顺手重构、不改 DDL CHECK(0..15)、不 clamp 历史台账。
+**边界（计划期，不做）**：不部署、不 push、不 apply 生产迁移、不重导入球员库、不重建 players 表、不加依赖、不做顺手重构、不改 DDL CHECK(0..15)、不 clamp 历史台账。**注**：前三项为计划期边界，已于步骤 9 按用户明确指令（「推送部署」）执行。
 
 **分步**（每步一 commit）：1 术语三改（`f4d4a68`，21 文件）→ 2+4 合同卷宗对齐与布局归位（`e74148f`）→ 5 core（`de3c04c`）→ 5 worker（`60c8dd5`）→ 6 worker 端点（`1c44506`）→ 5+6 web（`d38b39f`）→ 评审修复（`6bd9138`）→ 文档收口（本节）。
 
@@ -580,7 +580,14 @@
 
 **验收（步骤 1–7 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **40 文件 / 573 例全绿**（增量 29 基线 39/550 ⇒ core +12、worker 测试改 2 加 4 + 中国计划 3 + 折算 1 + 回收 1 + 海捞回归 1）；`npm run build` 成功（`web/dist/assets/index-C56W4cF9.js` 457.55 kB / gzip 145.20 kB）；变异验证 4 处（`flatMap` 类改动、槽号、折算 SQL、海捞守卫）均能变红。
 
-**待办**：① 推送 + 部署 + 生产迁移 0031 apply（需用户明确下令）；② 部署后核对线上 `/players` 产物 hash 与档案页四页签；③ 上述 5 条 🟢 遗留；④ PlayStyle 图标资产包仍待供给（缺图降级 🥇🥈）。
+**步骤 9 记录（2026-09-22，推送 + 部署 + 生产迁移）**：用户明确下令「推送部署」后执行。
+- 推送：`git push origin main` ⇒ `5394268..da7a1f6`（8 个提交），`git rev-list --left-right --count origin/main...HEAD` = `0 0`。
+- 生产迁移：`npx wrangler d1 migrations list whl-club --remote` 只报 `0031_player_playstyles.sql` 一条待应用（生产原在 0030）⇒ `npx wrangler d1 migrations apply whl-club --remote`（非交互环境自动确认）**Executed 4 commands in 4.46ms，✅**。**先迁移后部署**：旧版 worker 不引用 `player_playstyles`，故无窗口期。
+- 迁移后只读核对：`sqlite_master` 里表与索引各 1（`tbl=1`/`idx=1`）；`SELECT value FROM config WHERE key='badge_cap_silver'` = **null** —— 生产 `config` 本来就没有这一行，迁移里那条 `UPDATE` 空转，上限由代码默认值（`CONFIG_DEFAULTS`，本增量已改 12）生效；`SELECT COUNT(*) FROM player_playstyles` = 0（功能刚上线，尚无明细）。
+- 部署：`npm run deploy`（build + `wrangler deploy`）⇒ **Version `d266036d-aa2e-43be-94ac-7f40972df7bb`**（2026-09-22T11:42:02Z，100% 流量；`deployments list` 记录与 CLI 回显一致）；产物 `index-C56W4cF9.js` 457.55 kB / gzip 145.20 kB、`index-Dp9bc019.css`；Worker Startup Time 3 ms、Total Upload 545.23 KiB / gzip 130.54 KiB。
+- **线上只读核对**（4 次请求，未做全量回读以省 D1 读额度）：`https://club.whleague.win/players` HTML 引用 `assets/index-C56W4cF9.js`（与本地产物同名）；`GET /api/players/1/transfers` ⇒ `{"transfers":[]}`（新端点通、球员 1 存在未 404）；`GET /api/players/1/growth` ⇒ 顶层键 `player,playstyleDetails,events`、`playstyleDetails: []`、`player.chinaPlaystyles = {quota:3,granted:0,left:3}`（新字段与新配额口径均生效）；`GET /api/players?badges_silver_min=13` ⇒ **400「badges_silver_min 应为 0-12」**（上限 15→12 已上线）；`GET /api/players/99999999/transfers` ⇒ 404。
+
+**待办**：① 上述 5 条 🟢 遗留；② PlayStyle 图标资产包仍待供给（缺图降级 🥇🥈）；③ 生产库 `player_playstyles` 目前 0 行 —— 首次真实发放（升级选徽章方案 / 中国计划）建议人工跟一单核对明细落槽。
 
 
 ## 外部依赖与待输入
