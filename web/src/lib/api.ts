@@ -182,7 +182,7 @@ export interface PlayerLibraryRow extends PlayerListItem {
 
 export interface PlayersLibraryResponse {
   players: PlayerLibraryRow[];
-  total: number;
+  // 增量 28：服务端不再回 total（整表 COUNT 占单页读量 99.7%）；分页条用 nextCursor 判「还有更多」
   nextCursor: string | null;
 }
 

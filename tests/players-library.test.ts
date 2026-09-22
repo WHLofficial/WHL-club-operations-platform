@@ -307,7 +307,7 @@ describe('初始归属字段的兴废（增量 6.1 d7 加、增量 14 裁决 4 �
   });
 });
 
-// ---- 增量 17：total 计数、影响力、多位置、属性/徽章/合同维度筛选 ----
+// ---- 增量 17：计数、影响力、多位置、属性/徽章/合同维度筛选 ----
 
 interface ListBody17 {
   players: {
@@ -323,7 +323,6 @@ interface ListBody17 {
     /** 带 attr 筛选/排序时随行带回的属性值（前端自动加列显示用） */
     attrValue?: number | null;
   }[];
-  total: number;
   nextCursor: string | null;
 }
 
@@ -333,20 +332,63 @@ async function list17(path: string, env: Env): Promise<ListBody17> {
   return (await res.json()) as ListBody17;
 }
 
+// 增量 28：公开列表不再回 total（每条整表 COUNT = 18,763 行，占单页读量 99.7%），
+// 「这个筛法下有多少人」改由内部计数端点提供 —— 计数用例全走这里。
+// 端点未配 CRON_KEY 就 403（fail-closed），所以这里必须带密钥头。
+async function count17(query: string, env: Env): Promise<number> {
+  const res = await app.request(
+    `/api/cron/players-count${query}`,
+    { method: 'GET', headers: { 'X-Cron-Key': 'test-cron-key' } },
+    { ...env, CRON_KEY: 'test-cron-key' },
+  );
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { count: number }).count;
+}
+
 // 影响力手算依据（规则 4.1.2 十档 + 4.1.3 系数 0.25/0.13）：
 //   tier: >=93→10 >=90→9 >=87→8 >=84→7 >=80→6 >=75→5 >=70→4 >=65→3 >=60→2 else 1
 //   可成长=(CA档+PA档)/2×0.25×声望；非成长=CA档×0.13×声望
-describe('球员库 total 与新筛选（增量 17）', () => {
-  it('total 返回筛选后的总数，不随 cursor 变', async () => {
+describe('球员库 计数与新筛选（增量 17）', () => {
+  it('内部计数端点返回筛选后的总数，不随 cursor / limit 变', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
-    expect((await list17('/api/players', fx.env)).total).toBe(8);
-    expect((await list17('/api/players?position=GK', fx.env)).total).toBe(2);
+    expect(await count17('', fx.env)).toBe(8);
+    expect(await count17('?position=GK', fx.env)).toBe(2);
+    // 分页参数对计数无意义：cursor 不参与 filters，limit 只影响列表返回行数
+    expect(await count17('?limit=3', fx.env)).toBe(8);
+    expect(await count17('?limit=3&cursor=999', fx.env)).toBe(8);
+    // 列表本身已不带 total（前端改用 nextCursor 判「还有更多」）
     const paged = await list17('/api/players?limit=3', fx.env);
-    expect(paged.total).toBe(8);
     expect(paged.players.length).toBe(3);
+    expect('total' in paged).toBe(false);
     const next = await list17(`/api/players?limit=3&cursor=${paged.nextCursor}`, fx.env);
-    expect(next.total).toBe(8);
+    expect(next.players.length).toBe(3);
+    expect('total' in next).toBe(false);
+  });
+
+  it('内部计数端点：CRON_KEY 配了就守（无密钥 403、带密钥 200）', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    const guarded: Env = { ...fx.env, CRON_KEY: 'secret-key' };
+    expect((await get('/api/cron/players-count', guarded)).status).toBe(403);
+    expect((await get('/api/cron/players-count?key=wrong', guarded)).status).toBe(403);
+    // 这个端点只认 X-Cron-Key 头：GET 带 ?key= 会把密钥写进访问日志，连对的也不收
+    expect((await get('/api/cron/players-count?key=secret-key', guarded)).status).toBe(403);
+    const viaHeader = await app.request(
+      '/api/cron/players-count',
+      { method: 'GET', headers: { 'X-Cron-Key': 'secret-key' } },
+      guarded,
+    );
+    expect(viaHeader.status).toBe(200);
+    expect(((await viaHeader.json()) as { count: number }).count).toBe(8);
+  });
+
+  it('内部计数端点：未配 CRON_KEY 时拒绝（fail-closed，每次调用都是整表 COUNT）', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    // 生产 whl-club 实测没配 CRON_KEY（2026-09-22 `wrangler secret list` 只有 AUTH_BIND_SECRET），
+    // 放行等于公开一个 18,763 行/次的读放大器 —— 这里锁死「未配就 403」。
+    expect((await get('/api/cron/players-count', fx.env)).status).toBe(403);
   });
 
   it('影响力：可成长=(CA档+PA档)/2×0.25×声望、非成长=CA档×0.13×声望，响应值与手算一致', async () => {
@@ -389,7 +431,7 @@ describe('球员库 total 与新筛选（增量 17）', () => {
 
     const gated = await list17('/api/players?influence_min=2.6', fx.env);
     expect(gated.players.map((p) => p.id)).toEqual([21, 22, 25]); // 默认 sort=id 升序
-    expect(gated.total).toBe(3);
+    expect(await count17('?influence_min=2.6', fx.env)).toBe(3);
   });
 
   it('多位置：positions 按槽位序去重；position 多值筛含 PosID2-4 槽', async () => {
@@ -422,20 +464,20 @@ describe('球员库 total 与新筛选（增量 17）', () => {
     `);
     const finishers = await list17('/api/players?attr=finishing&attr_min=80', fx.env);
     expect(finishers.players.map((p) => p.id)).toEqual([28]);
-    expect(finishers.total).toBe(1);
+    expect(await count17('?attr=finishing&attr_min=80', fx.env)).toBe(1);
     const vision = await list17('/api/players?attr=vision&attr_max=80', fx.env);
     expect(vision.players.map((p) => p.id)).toEqual([28]);
     expect((await get('/api/players?attr=nosuchkey&attr_min=1', fx.env)).status).toBe(400);
     expect((await get('/api/players?attr=nosuchkey', fx.env)).status).toBe(400);
     // attr 单独给合法：不过滤，只把该属性的值带回响应（前端「选一个属性」这个动作只发 attr）
     const justAttr = await list17('/api/players?attr=finishing', fx.env);
-    expect(justAttr.total).toBe(3);
+    expect(await count17('?attr=finishing', fx.env)).toBe(3);
     expect(justAttr.players.map((p) => p.attrValue)).toEqual([88, 62, null]);
     // 空串等同没给（前端清空属性键时 URL 上会留 attr=）
-    expect((await list17('/api/players?attr=&attr_min=80', fx.env)).total).toBe(3);
+    expect(await count17('?attr=&attr_min=80', fx.env)).toBe(3);
     // 区间值给空串也等同没给：缺该属性的那行（json_extract → NULL）不能被 Number('') = 0 悄悄滤掉
     const emptyMin = await list17('/api/players?attr=finishing&attr_min=', fx.env);
-    expect(emptyMin.total).toBe(3);
+    expect(await count17('?attr=finishing&attr_min=', fx.env)).toBe(3);
     expect(emptyMin.players.map((p) => p.id)).toEqual([28, 29, 30]);
   });
 

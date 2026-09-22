@@ -135,29 +135,31 @@ describe('公开 GET 挂点（限流 + 缓存）', () => {
     resetGuards();
     const env = freshEnv();
     env.PUBLIC_CACHE_TTL_MS = '60000';
-    const first = await (await get('/api/players?limit=1', env)).json();
-    const second = await (await get('/api/players?limit=1', env)).json();
+    const first = await (await get('/api/players?limit=1', env)).json<{ players: unknown[] }>();
+    const second = await (await get('/api/players?limit=1', env)).json<{ players: unknown[] }>();
     expect(second).toEqual(first);
-    // 不同 query 各自缓存（筛掉 normal 后 total=0，与上面不同）
-    const other = await (await get('/api/players?limit=1&status=listed', env)).json<{ total: number }>();
-    expect(other.total).not.toBe((second as { total: number }).total);
+    expect(first.players.length).toBe(1);
+    // 不同 query 各自缓存（status=listed 一条都不匹配）
+    const listed = await (await get('/api/players?status=listed&limit=1', env)).json<{ players: unknown[] }>();
+    expect(listed.players.length).toBe(0);
     // 参数顺序不同 → 归一后同一键：改库后换序请求仍回缓存旧值（键没归一就会读到新值）
     await env.DB.prepare(
-      `INSERT INTO players (uid, name, position, ca, pa, status) VALUES ('fc9', '丙', 'ST', 55, 65, 'normal')`,
+      `INSERT INTO players (uid, name, position, ca, pa, status) VALUES ('fc9', '丙', 'ST', 55, 65, 'listed')`,
     ).run();
-    const reordered = await (await get('/api/players?status=listed&limit=1', env)).json();
-    expect(reordered).toEqual(other);
+    const reordered = await (await get('/api/players?limit=1&status=listed', env)).json<{ players: unknown[] }>();
+    expect(reordered).toEqual(listed);
   });
 
   it('未配 PUBLIC_CACHE_TTL_MS：旁路，数据变更立即可见', async () => {
     resetGuards();
     const env = freshEnv();
-    const before = await (await get('/api/players?limit=5', env)).json<{ total: number }>();
+    const before = await (await get('/api/players?status=listed&limit=5', env)).json<{ players: unknown[] }>();
+    expect(before.players.length).toBe(0);
     await env.DB.prepare(
-      `INSERT INTO players (uid, name, position, ca, pa, status) VALUES ('fc2', '乙', 'ST', 60, 70, 'normal')`,
+      `INSERT INTO players (uid, name, position, ca, pa, status) VALUES ('fc2', '乙', 'ST', 60, 70, 'listed')`,
     ).run();
-    const after = await (await get('/api/players?limit=5', env)).json<{ total: number }>();
-    expect(after.total).toBe(before.total + 1);
+    const after = await (await get('/api/players?status=listed&limit=5', env)).json<{ players: unknown[] }>();
+    expect(after.players.length).toBe(1);
   });
 
   it('assertPublicRate 用 CF-Connecting-IP 分桶', () => {

@@ -32,6 +32,31 @@ export function assertPublicRate(c: { req: { header(name: string): string | unde
   }
 }
 
+// 内部端点密钥校验（增量 28 从 worker/index.ts 抽出来，供 /api/cron/* 共用）：
+// X-Cron-Key 头或 ?key= 对 c.env.CRON_KEY；本地/测试未配 secret 时放行便于联调。
+// 这些端点不挂公开限流与公开缓存（它们要么触发结算、要么跑整表 COUNT），守卫只有这一道。
+//
+// 两个开关（默认都按既有语义来，只有纯读放大的端点才收紧）：
+// - `allowUnset: false` = 未配 CRON_KEY 时拒绝而不是放行。生产 whl-club 目前**没有** CRON_KEY
+//   （实测 2026-09-22 `wrangler secret list` 只有 AUTH_BIND_SECRET），放行等于把一个「每次调用
+//   跑整表 COUNT」的端点公开出去；
+// - `queryKey: false` = 只认 X-Cron-Key 头。GET + `?key=` 会把密钥写进访问日志/Referer。
+export function assertCronKey(
+  c: {
+    req: { header(name: string): string | undefined; query(name: string): string | undefined };
+    env: { CRON_KEY?: string };
+  },
+  opts: { allowUnset?: boolean; queryKey?: boolean } = {},
+): void {
+  const expected = c.env.CRON_KEY;
+  if (!expected) {
+    if (opts.allowUnset ?? true) return;
+    throw new HttpError(403, '未配置 CRON_KEY，该内部端点不可用');
+  }
+  const provided = c.req.header('X-Cron-Key') ?? ((opts.queryKey ?? true) ? c.req.query('key') : undefined);
+  if (provided !== expected) throw new HttpError(403, 'cron 密钥不对');
+}
+
 type CacheEntry = { value: unknown; loadedAt: number; refreshing?: Promise<void> };
 const cacheStore = new Map<string, CacheEntry>();
 

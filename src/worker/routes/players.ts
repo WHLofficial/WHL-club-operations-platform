@@ -192,6 +192,9 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 // 增量 26：name 走去变音折叠（core/name-fold）——「sesko」能搜到「Šeško」
 // 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
 // 缓存键用归一后的查询串（canonicalQuery），条数上限由 guard 侧兜底
+// 增量 28：**响应不再带 total**。原先每次请求都多跑一条 `COUNT(*)`（实测 18,763 行/次，
+// 占单页读量的 99.7%，且不带 cursor ⇒ 每翻一页都重算整表）；分页条改游标式（第 K 页 ·
+// 已加载 N 名 · 还有更多/已到末页），总数口径移到内部端点 GET /api/cron/players-count。
 app.get('/players', async (c) => {
   assertPublicRate(c, 'players');
   const ttlMs = Number(c.env.PUBLIC_CACHE_TTL_MS) || 0;
@@ -204,26 +207,16 @@ app.get('/players', async (c) => {
   return c.json(data);
 });
 
-async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
-  players: unknown[];
-  total: number;
-  nextCursor: string | null;
-}> {
-  const viewRaw = c.req.query('view');
-  if (viewRaw !== undefined && viewRaw !== 'initial') throw new HttpError(400, 'view 只能是 initial');
-  const initial = viewRaw === 'initial';
-  const caExpr = initial ? 'COALESCE(players.base_ca, players.ca)' : 'players.ca';
-  const paExpr = initial ? "COALESCE(json_extract(players.game_attrs, '$.PA'), players.pa)" : 'players.pa';
-  const coefs = await influenceCoefs(c.env.DB);
-  const inflExpr = influenceExpr(coefs);
-  const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
-
-  // filters 进 COUNT；cursor 只进列表查询（总数不随翻页游标变）
+// 筛选条件构造（增量 28）：列表查询与内部计数端点共用同一份。
+// 两边各写一份必然漂移，而「计数和列表对不上」是最难发现的一类错——共用的意义就在这里。
+// cursor 不在这里：它只跟「翻到哪」有关，与「筛什么」无关（计数也不随翻页变）。
+function buildPlayerFilters(
+  c: Context<{ Bindings: Env }>,
+  exprs: { caExpr: string; paExpr: string; inflExpr: string },
+): { filters: string[]; filterArgs: unknown[]; attrValueExpr: string | null; psSlotSelects: string } {
+  const { caExpr, paExpr, inflExpr } = exprs;
   const filters: string[] = [];
   const filterArgs: unknown[] = [];
-  const cursorConds: string[] = [];
-  const cursorArgs: unknown[] = [];
-
   const clubId = c.req.query('club_id');
   if (clubId !== undefined) {
     if (clubId === 'free') {
@@ -485,6 +478,38 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     filterArgs.push(n);
   }
 
+  return { filters, filterArgs, attrValueExpr, psSlotSelects };
+}
+
+// 视图口径（增量 28 抽出）：列表与内部计数端点必须用同一套表达式，否则「有多少人」会与
+// 列表实际筛出的人对不上。改动这里等于同时改两个端点。coefs 一并返回——响应里的 influence
+// 用 JS 镜像算，必须与 SQL 表达式同源。
+async function buildViewExprs(
+  c: Context<{ Bindings: Env }>,
+): Promise<{ caExpr: string; paExpr: string; inflExpr: string; coefs: { g: number; s: number } }> {
+  const viewRaw = c.req.query('view');
+  if (viewRaw !== undefined && viewRaw !== 'initial') throw new HttpError(400, 'view 只能是 initial');
+  const initial = viewRaw === 'initial';
+  const coefs = await influenceCoefs(c.env.DB);
+  return {
+    caExpr: initial ? 'COALESCE(players.base_ca, players.ca)' : 'players.ca',
+    paExpr: initial ? "COALESCE(json_extract(players.game_attrs, '$.PA'), players.pa)" : 'players.pa',
+    inflExpr: influenceExpr(coefs),
+    coefs,
+  };
+}
+
+async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
+  players: unknown[];
+  nextCursor: string | null;
+}> {
+  const exprs = await buildViewExprs(c);
+  const { caExpr, paExpr, inflExpr, coefs } = exprs;
+  const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
+  const { filters, filterArgs, attrValueExpr, psSlotSelects } = buildPlayerFilters(c, exprs);
+  const cursorConds: string[] = [];
+  const cursorArgs: unknown[] = [];
+
   // 排序键：SORT_KEY_NAMES 里的 29 个固定键，外加 `attr:<属性键>`（表头每个属性列都可点，键同样过白名单）
   const sortRaw = c.req.query('sort') ?? 'id';
   const attrSort = sortRaw.startsWith('attr:') ? sortRaw.slice(5) : null;
@@ -608,14 +633,6 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       sort_key?: number | string | null;
     }>();
 
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM players
-     LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1
-     ${filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : ''}`,
-  )
-    .bind(...filterArgs)
-    .first<{ n: number }>();
-
   const slotNames = (v: unknown): string | null => {
     // 槽位缺失（NULL）不能走 Number() 归零：PositionID 0 是 GK，会把空槽错译成门将
     if (v === null || v === undefined) return null;
@@ -677,7 +694,25 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
           ? `${String(last.sort_key ?? '')}~${last.id}`
           : `${Number(last.sort_key ?? 0)}~${last.id}`;
   }
-  return { players, total: countRow?.n ?? 0, nextCursor };
+  return { players, nextCursor };
+}
+
+// 内部计数端点（增量 28）：公开列表已不再回 total，但「这个筛法下有多少人」这个口径
+// 运维/对账仍然要，所以留在这里复算同一份 filters —— 与列表共用 buildPlayerFilters，
+// 数字不可能和列表对不上。**不要挂公开限流与公开缓存**：它的唯一用途是低频人工查询，
+// 而每次都是整表 COUNT（实测 18,763 行/次），被公开流量反复打到就是又一次读配额事故。
+// 守卫由调用方（src/worker/index.ts 的 /api/cron/players-count）用 assertCronKey 加。
+export async function countPlayers(c: Context<{ Bindings: Env }>): Promise<number> {
+  const exprs = await buildViewExprs(c);
+  const { filters, filterArgs } = buildPlayerFilters(c, exprs);
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM players
+     LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1
+     ${filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : ''}`,
+  )
+    .bind(...filterArgs)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 // 名册这条走全表扫描，缓存下限给足 5 分钟（公开 TTL 只有 20s，撑不住 18301 行的重复读）。

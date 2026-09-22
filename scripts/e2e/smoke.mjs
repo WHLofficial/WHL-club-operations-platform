@@ -273,7 +273,8 @@ async function main() {
       const span = pager?.querySelector('span');
       if (!pager || !span) return null;
       const before = span.textContent;
-      span.textContent = '共 34835 名球员 · 共 1742 页 · 第 1 页';
+      // 增量 28：翻页条改游标式文案；塞线上量级的极端值，量的是页面级横向溢出
+      span.textContent = '第 1742 页 · 已加载 34835 名 · 还有更多';
       const doc = document.documentElement;
       const out = {
         pagerHeight: Math.round(pager.getBoundingClientRect().height),
@@ -312,7 +313,12 @@ async function main() {
       const players = await page.request.get(`${BASE}/api/players?limit=5`);
       assert(players.status() === 200, `球员库状态码 ${players.status()}`);
       const pj = await players.json();
-      assert(Array.isArray(pj.players) && typeof pj.total === 'number', '球员库响应缺 players/total');
+      // 增量 28：列表不再回 total（每条整表 COUNT = 18,763 行，占单页读量 99.7%），
+      // 「还有更多」改由 nextCursor 判定 —— 所以这里断的是「没有 total、有 nextCursor」
+      assert(
+        Array.isArray(pj.players) && !('total' in pj) && 'nextCursor' in pj,
+        '球员库响应形状不对（应为 players + nextCursor，无 total）',
+      );
     });
 
     await check('④ 球员库页：左栏 + 翻页条 + 表头点排序', async () => {
@@ -335,7 +341,7 @@ async function main() {
         console.log('   （跳过表头排序：本地球员库为空，没有表头可点）');
         return;
       }
-      assert(/共 \d+ 名球员 · 共 \d+ 页 · 第 \d+ 页/.test(await text()), '翻页信息文案不符合预期');
+      assert(/第 \d+ 页 · 已加载 \d+ 名 · (还有更多|已到末页)/.test(await text()), '翻页信息文案不符合预期');
       await headers.filter({ hasText: /^CA/ }).first().click();
       await page.waitForFunction(() => location.search.includes('sort=ca'), null, { timeout: TIMEOUT });
       assert(

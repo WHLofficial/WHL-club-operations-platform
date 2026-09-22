@@ -69,9 +69,13 @@ function setNarrow(narrow: boolean): void {
   for (const listener of mediaListeners) listener({ matches: narrow } as MediaQueryListEvent);
 }
 
+// 游标式分页条（增量 28）：服务端不再回 total，「还有更多 / 已到末页」只能看 nextCursor。
+let pageCursor: string | null = null;
+
 beforeEach(() => {
   mediaListeners.clear();
   mediaMatches = false;
+  pageCursor = null;
   window.matchMedia = ((query: string) => ({
     matches: mediaMatches,
     media: query,
@@ -87,7 +91,7 @@ beforeEach(() => {
     if (path === '/api/clubs/directory') return Promise.resolve({ clubs: CLUBS });
     if (path === '/api/players/roster') return Promise.resolve({ roster: '', count: 0 });
     if (path.startsWith('/api/players?')) {
-      const body: PlayersLibraryResponse = { players: ROWS, total: ROWS.length, nextCursor: null };
+      const body: PlayersLibraryResponse = { players: ROWS, nextCursor: pageCursor };
       return Promise.resolve(body);
     }
     return Promise.reject(new Error(`测试没打桩的请求：${path}`));
@@ -289,6 +293,38 @@ describe('左栏开合与摘要条（宽屏）', () => {
 
     await user.click(within(side).getByRole('button', { name: '恢复自动' }));
     await waitFor(() => expect(headerButtons().some((b) => b.textContent?.startsWith('徽章'))).toBe(true));
+  });
+});
+
+// 增量 28：服务端不再回 total（那条整表 COUNT 占单页读量 99.7%），分页条改游标式 ——
+// 「还有更多 / 已到末页」只能由 nextCursor 推出，这里把两种状态与翻页点击都锁住。
+describe('分页条（游标式）', () => {
+  it('nextCursor 还在 ⇒ 显示「还有更多」，点下一页真的去取下一页', async () => {
+    pageCursor = 'c1';
+    const user = open();
+    await screen.findByRole('link', { name: 'Šeško' });
+
+    expect(screen.getByText('第 1 页 · 已加载 2 名 · 还有更多')).toBeTruthy();
+    const next = screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement;
+    expect(next.disabled).toBe(false);
+
+    await user.click(next);
+    await waitFor(() => expect(screen.getByText('第 2 页 · 已加载 4 名 · 还有更多')).toBeTruthy());
+    expect(lastListQuery()).toContain('cursor=c1');
+    expect((screen.getByRole('button', { name: '上一页' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('nextCursor 为 null ⇒ 显示「已到末页」，下一页按钮禁用（不再白发请求）', async () => {
+    const user = open();
+    await screen.findByRole('link', { name: 'Šeško' });
+
+    expect(screen.getByText('第 1 页 · 已加载 2 名 · 已到末页')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement).disabled).toBe(true);
+
+    const before = apiMock.mock.calls.filter((call) => String(call[0]).startsWith('/api/players?')).length;
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    const after = apiMock.mock.calls.filter((call) => String(call[0]).startsWith('/api/players?')).length;
+    expect(after).toBe(before);
   });
 });
 

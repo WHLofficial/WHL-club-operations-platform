@@ -2,10 +2,11 @@ import { Hono } from 'hono';
 import { deleteCookie, getCookie } from 'hono/cookie';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
+import { assertCronKey } from '../lib/guard.ts';
 import { getAuthUser, isOidc, isStaleOidcSession } from '../lib/session.ts';
 import { OIDC_PROBE_COOKIE, OIDC_SESSION_COOKIE } from '../lib/oidc.ts';
 import clubsRoutes from './routes/clubs.ts';
-import playersRoutes from './routes/players.ts';
+import playersRoutes, { countPlayers } from './routes/players.ts';
 import registrationRoutes from './routes/registration.ts';
 import seasonsRoutes from './routes/seasons.ts';
 import marketRoutes from './routes/market.ts';
@@ -93,12 +94,17 @@ app.get('/api/me', async (c) => {
 
 // 手动触发惰性结算（附录 A 内部端点）：X-Cron-Key 对不上 403；本地未配 secret 时放行便于联调
 app.post('/api/cron/tick', async (c) => {
-  const expected = c.env.CRON_KEY;
-  if (expected) {
-    const provided = c.req.header('X-Cron-Key') ?? c.req.query('key');
-    if (provided !== expected) throw new HttpError(403, 'cron 密钥不对');
-  }
+  assertCronKey(c);
   return c.json(await runSettleTick(c.env));
+});
+
+// 内部计数端点（增量 28）：公开列表去掉 total 后（每次请求多跑一条 18,763 行的整表 COUNT），
+// 这个口径留给运维/对账。守卫比 tick 更严——**未配 CRON_KEY 就拒绝**（生产当前没配，实测
+// 2026-09-22），且只认 X-Cron-Key 头（GET 带 ?key= 会把密钥写进访问日志）：这个端点每次调用
+// 都是整表 COUNT，放行等于公开一个读放大器。不进公开缓存、不挂公开限流。
+app.get('/api/cron/players-count', async (c) => {
+  assertCronKey(c, { allowUnset: false, queryKey: false });
+  return c.json({ count: await countPlayers(c) });
 });
 
 app.notFound((c) => c.json({ error: '接口不存在' }, 404));

@@ -16,7 +16,6 @@ import {
   DEFAULT_COLS,
   EMPTY_FILTERS,
   FIXED_COLUMNS,
-  PAGE_SIZE,
   STATUS_BADGE,
   STATUS_LABEL,
   autoColsFor,
@@ -218,8 +217,9 @@ export default function PlayersLibrary() {
   const pageCount = libQuery.data?.pages.length ?? 0;
   const currentPage = libQuery.data ? libQuery.data.pages[Math.min(pageIdx, pageCount) - 1] : undefined;
   const rows = currentPage?.players ?? null;
-  const total = currentPage?.total ?? null;
-  const totalPages = total !== null ? Math.max(Math.ceil(total / PAGE_SIZE), 1) : null;
+  // 增量 28：服务端不再回 total（那条整表 COUNT 占单页读量的 99.7%），分页条改游标式：
+  // 「已加载 N 名」= 本地已取回的所有页之和，「还有更多 / 已到末页」看 nextCursor 是否还有。
+  const loadedCount = libQuery.data?.pages.reduce((n, p) => n + p.players.length, 0) ?? 0;
   const loadError = libQuery.isError ? (libQuery.error instanceof Error ? libQuery.error.message : '加载失败') : '';
   const busy = libQuery.isFetching;
   const canPrev = pageIdx > 1 && !busy;
@@ -515,7 +515,7 @@ export default function PlayersLibrary() {
                   上一页
                 </button>
                 <span className="muted">
-                  {total !== null ? `共 ${total} 名球员 · 共 ${totalPages} 页 · 第 ${pageIdx} 页` : `第 ${pageIdx} 页`}
+                  {`第 ${pageIdx} 页 · 已加载 ${loadedCount} 名 · ${libQuery.hasNextPage ? '还有更多' : '已到末页'}`}
                 </span>
                 <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
                   下一页
