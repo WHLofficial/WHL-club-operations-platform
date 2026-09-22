@@ -248,7 +248,7 @@ function mean1(values: number[]): number | null {
 
 // 转会记录：与 /api/players/:id/transfers 同一形状（LEFT JOIN clubs 双别名 + 同一排序），
 // 球队维度按转入/转出各取 10 条，并补球员名（球队页只看到金额没有意义）。
-const CLUB_TRANSFER_SQL = (side: 'from' | 'to') => `SELECT t.id, t.type, t.player_id, ${sqlDisplayName('p')} AS player_name,
+const CLUB_TRANSFER_SQL = (side: 'from' | 'to') => `SELECT t.id, t.type, t.player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name,
          t.from_club_id, fc.name AS from_club_name, t.to_club_id, tc.name AS to_club_name,
          t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at
   FROM transfers t
@@ -263,6 +263,7 @@ interface ClubTransferRow {
   id: number;
   type: string;
   player_id: number | null;
+  player_fc_id: number | null;
   player_name: string | null;
   from_club_id: number | null;
   from_club_name: string | null;
@@ -417,6 +418,7 @@ app.get('/clubs/:id', async (c) => {
         id: r.id,
         type: r.type,
         playerId: r.player_id,
+        playerFcId: r.player_fc_id,
         playerName: r.player_name,
         fromClubId: r.from_club_id,
         fromClubName: r.from_club_name,

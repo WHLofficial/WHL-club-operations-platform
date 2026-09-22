@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import { apiPost, type MyBidRow, type SquadOverview } from '../../lib/api.ts';
 import { useMarketInvalidation, useMyBids, useMyClub, useSquad } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { playerPath } from '../../lib/player-link.ts';
 import { BID_STATUS_LABEL, MarketNav, money } from './shared.tsx';
 
 export default function MarketMinePage() {
@@ -174,7 +175,7 @@ function MyBidsSection({ bids, available, balance }: { bids: MyBidRow[]; availab
               bids.map((b) => (
                 <tr key={b.id}>
                   <td>
-                    <Link to={`/players/${b.player.id}`}>{b.player.name}</Link>
+                    <Link to={playerPath(b.player)}>{b.player.name}</Link>
                   </td>
                   <td>{b.sellerClubName}</td>
                   <td className="num mono">{money(b.amount)}</td>

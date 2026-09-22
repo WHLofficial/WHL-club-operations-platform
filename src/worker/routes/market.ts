@@ -38,6 +38,7 @@ const FREE_AGENT_LIMIT = 300;
 interface ListingRow {
   id: number;
   player_id: number;
+  player_fc_id: number | null;
   seller_club_id: number;
   type: string;
   ask_price: number;
@@ -93,7 +94,7 @@ app.get('/market/listings', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
             l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
-            ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa,
+            ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
@@ -136,7 +137,7 @@ app.get('/market/listings', async (c) => {
       }
       return {
         id: r.id,
-        player: { id: r.player_id, name: r.player_name, position: r.position, age: r.age, ca: r.ca, pa: r.pa },
+        player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, age: r.age, ca: r.ca, pa: r.pa },
         sellerClub: { id: r.seller_club_id, name: r.seller_name },
         type: r.type,
         askPrice: r.ask_price,
@@ -278,14 +279,14 @@ app.get('/market/free-agents', async (c) => {
   //   等价性：club_id IS NULL 与 club_id ∈ CPU 队互斥（NULL 不等于任何值），两分支无重叠，
   //   且全局 top-300 必然包含在各分支的 top-300 之内。
   const nullClubBranch =
-    `SELECT p.id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cl.name AS club_name
+    `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cl.name AS club_name
      FROM players p
      LEFT JOIN clubs cl ON cl.id = p.club_id
      WHERE p.club_id IS NULL AND p.status IN ('free', 'normal')
      ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
   // CPU 队球员的东家就是 cp 本身，所以 club_name 取 cp.name，不必再 LEFT JOIN 一次 clubs
   const cpuClubBranch =
-    `SELECT p.id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cp.name AS club_name
+    `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cp.name AS club_name
      FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id
      WHERE cp.is_cpu = 1 AND p.status IN ('free', 'normal')
      ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
@@ -295,7 +296,7 @@ app.get('/market/free-agents', async (c) => {
        UNION ALL
        SELECT * FROM (${cpuClubBranch})
      ) ORDER BY ca DESC, id LIMIT ${FREE_AGENT_LIMIT}`,
-  ).all<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_name: string | null }>();
+  ).all<{ id: number; fc_id: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_name: string | null }>();
 
   const banned = new Set<number>();
   if (win && rows.results.length > 0) {
@@ -317,6 +318,7 @@ app.get('/market/free-agents', async (c) => {
     club: { id: club.id, name: club.name },
     freeAgents: rows.results.map((r) => ({
       id: r.id,
+      fcId: r.fc_id,
       name: r.name,
       position: r.position,
       age: r.age,
@@ -336,13 +338,13 @@ app.get('/market/trainees', async (c) => {
 
   const win = await getOpenWindow(c.env.DB);
   const rows = await c.env.DB.prepare(
-    `SELECT p.id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, p.club_id, cl.name AS club_name
+    `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, p.club_id, cl.name AS club_name
      FROM players p JOIN clubs cl ON cl.id = p.club_id
      WHERE p.status = 'trainee' AND p.club_id IS NOT NULL AND p.club_id != ?
      ORDER BY cl.name, p.id LIMIT 50`,
   )
     .bind(club.id)
-    .all<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_id: number; club_name: string }>();
+    .all<{ id: number; fc_id: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_id: number; club_name: string }>();
 
   // 本窗口已被激活过的标记（4.4.2.1 一窗一次；失效激活也占额）
   const activated = new Set<number>();
@@ -359,6 +361,7 @@ app.get('/market/trainees', async (c) => {
     club: { id: club.id, name: club.name },
     trainees: rows.results.map((r) => ({
       id: r.id,
+      fcId: r.fc_id,
       name: r.name,
       position: r.position,
       age: r.age,
@@ -393,7 +396,7 @@ app.get('/market/listings/:id', async (c) => {
   const listing = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
             l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
-            ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa,
+            ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name, ca2.name AS activator_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
@@ -444,7 +447,7 @@ app.get('/market/listings/:id', async (c) => {
     marketBidPaused: (await createConfigService(c.env.DB).get('market_bid_paused')) === 'true',
     listing: {
       id: listing.id,
-      player: { id: listing.player_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },
+      player: { id: listing.player_id, fcId: listing.player_fc_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },
       sellerClub: { id: listing.seller_club_id, name: listing.seller_name },
       type: listing.type,
       askPrice: listing.ask_price,
@@ -665,7 +668,7 @@ app.get('/me/bids', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT b.id, b.listing_id, b.amount, b.created_at, b.status AS bid_status,
             f.status AS hold_status, l.status AS listing_status, l.ask_price,
-            p.id AS player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
+            p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
             cl.name AS seller_name
      FROM bids b
      JOIN listings l ON l.id = b.listing_id
@@ -686,6 +689,7 @@ app.get('/me/bids', async (c) => {
       listing_status: string;
       ask_price: number;
       player_id: number;
+      player_fc_id: number | null;
       player_name: string;
       position: string | null;
       ca: number | null;
@@ -703,7 +707,7 @@ app.get('/me/bids', async (c) => {
       holdStatus: r.hold_status,
       listingStatus: r.listing_status,
       askPrice: r.ask_price,
-      player: { id: r.player_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
+      player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
       sellerClubName: r.seller_name,
     })),
   });
@@ -716,7 +720,7 @@ app.get('/transfers/:id', async (c) => {
   const t = await c.env.DB.prepare(
     `SELECT t.id, t.type, t.player_id, t.from_club_id, t.to_club_id, t.fee, t.tax, t.extra_fee, t.matched,
             t.status, t.season, t.window_seq, t.created_at, t.completed_at,
-            ${sqlDisplayName('p')} AS player_name,
+            ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id,
             cf.name AS from_name, ct.name AS to_name
      FROM transfers t
      JOIN players p ON p.id = t.player_id
@@ -741,6 +745,7 @@ app.get('/transfers/:id', async (c) => {
       created_at: string | null;
       completed_at: string | null;
       player_name: string;
+      player_fc_id: number | null;
       from_name: string | null;
       to_name: string | null;
     }>();
@@ -750,7 +755,7 @@ app.get('/transfers/:id', async (c) => {
       id: t.id,
       type: t.type,
       status: t.status,
-      player: { id: t.player_id, name: t.player_name },
+      player: { id: t.player_id, fcId: t.player_fc_id, name: t.player_name },
       fromClub: t.from_club_id === null ? null : { id: t.from_club_id, name: t.from_name },
       toClub: t.to_club_id === null ? null : { id: t.to_club_id, name: t.to_name },
       fee: t.fee,

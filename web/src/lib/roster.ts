@@ -6,12 +6,16 @@
 // 打字即请求会把公开 GET 的 60 请求/60 秒限流打爆（src/lib/guard.ts），也会把进程内缓存
 // （MAX_CACHE_ENTRIES = 64）逐键击占满。
 //
+// 第三段是 **FC26 ID（fc_id）**（增量 32：服务端改成 `COALESCE(fc_id, id)`，与 playerPath 同一条回落规则），
+// 所以它可以直接当档案链接的地址用 —— 字段名就叫 fcId，别再叫 id（内部主键会随重导入变化）。
+//
 // 折叠用 src/core/name-fold.ts 的 foldName，与后端 sqlFold 同一张表 —— 本地推荐命中的名字，
 // 提交给服务端搜索也一定命中（反过来也一样）。
 import { foldName } from '../../../src/core/name-fold.ts';
 
 export interface RosterEntry {
-  id: number;
+  /** FC26 ID（服务端已 COALESCE 回落内部 id），直接用作 /players/:id */
+  fcId: number;
   name: string;
   clubId: number | null;
   /** 折叠后的姓名，用于比较（大写、变音、软连字符都已在 foldName 里处理） */
@@ -38,7 +42,7 @@ export function parseRoster(roster: string): RosterEntry[] {
     const name = sep < 0 ? head : head.slice(0, sep);
     if (name === '') continue;
     const clubNum = clubField === '' ? Number.NaN : Number(clubField);
-    out.push({ id, name, clubId: Number.isInteger(clubNum) ? clubNum : null, folded: foldName(name) });
+    out.push({ fcId: id, name, clubId: Number.isInteger(clubNum) ? clubNum : null, folded: foldName(name) });
   }
   return out;
 }
@@ -60,7 +64,7 @@ export function suggestPlayers(entries: readonly RosterEntry[], query: string, l
     if (at === 0) prefix.push(e);
     else if (at > 0) inner.push(e);
   }
-  const byName = (a: RosterEntry, b: RosterEntry) => (a.folded < b.folded ? -1 : a.folded > b.folded ? 1 : a.id - b.id);
+  const byName = (a: RosterEntry, b: RosterEntry) => (a.folded < b.folded ? -1 : a.folded > b.folded ? 1 : a.fcId - b.fcId);
   prefix.sort(byName);
   inner.sort(byName);
   return [...prefix, ...inner].slice(0, limit);

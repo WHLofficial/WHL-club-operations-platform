@@ -51,10 +51,11 @@ export default function PlayerSearchBox({ value, onChange, onSubmit, clubs, busy
   const listId = 'player-search-suggest';
   const showList = open && query !== '' && (suggestions.length > 0 || empty || loading);
 
-  const go = (id: number) => {
+  // 名册第三段就是 fc_id（服务端已回落内部 id），直接当档案地址用
+  const go = (fcId: number) => {
     setOpen(false);
     setActive(-1);
-    navigate(`/players/${id}`);
+    navigate(`/players/${fcId}`);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -82,7 +83,7 @@ export default function PlayerSearchBox({ value, onChange, onSubmit, clubs, busy
     if (e.key === 'Enter' && active >= 0 && active < suggestions.length) {
       // 高亮着某条推荐时，回车是「去这名球员」，不再当作提交搜索
       e.preventDefault();
-      go(suggestions[active].id);
+      go(suggestions[active].fcId);
     }
   };
 
@@ -128,7 +129,7 @@ export default function PlayerSearchBox({ value, onChange, onSubmit, clubs, busy
             {empty && <li className="search-suggest-hint">没有匹配的球员</li>}
             {suggestions.map((s, i) => (
               <li
-                key={s.id}
+                key={s.fcId}
                 id={`${listId}-${i}`}
                 role="option"
                 aria-selected={i === active}
@@ -136,7 +137,7 @@ export default function PlayerSearchBox({ value, onChange, onSubmit, clubs, busy
                 // 用 mousedown 而不是 click：blur 会先把列表收掉，click 永远等不到
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  go(s.id);
+                  go(s.fcId);
                 }}
                 onMouseEnter={() => setActive(i)}
               >

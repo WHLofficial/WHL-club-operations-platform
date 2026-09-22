@@ -189,6 +189,8 @@ export interface ClubTransferRow {
   type: string;
   /** transfers.player_id 无 NOT NULL ⇒ 可能为空，为 null 时页面只出球员名不链档案 */
   playerId: number | null;
+  /** 球员档案链接用的 FC26 ID（增量 32）；为空时回落 playerId */
+  playerFcId: number | null;
   playerName: string | null;
   fromClubId: number | null;
   fromClubName: string | null;
@@ -484,6 +486,7 @@ export interface SquadCompliance {
 
 export interface SquadPlayerRow {
   id: number;
+  fcId: number | null;
   name: string;
   number: string | null;
   position: string | null;
@@ -579,7 +582,7 @@ export type MatchPhase = 'first_bid' | 'matching' | null;
 
 export interface MarketListing {
   id: number;
-  player: { id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
+  player: { id: number; fcId: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
   sellerClub: { id: number; name: string };
   type: string;
   askPrice: number;
@@ -617,6 +620,7 @@ export interface MarketListingDetail {
 
 export interface ActivatableTrainee {
   id: number;
+  fcId: number | null;
   name: string;
   position: string | null;
   age: number | null;
@@ -658,7 +662,7 @@ export interface MyBidRow {
   holdStatus: 'held' | 'released' | 'settled' | null;
   listingStatus: ListingStatus;
   askPrice: number;
-  player: { id: number; name: string; position: string | null; ca: number | null; pa: number | null };
+  player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null };
   sellerClubName: string;
 }
 
@@ -667,7 +671,7 @@ export interface TransferDetail {
     id: number;
     type: string;
     status: string;
-    player: { id: number; name: string };
+    player: { id: number; fcId: number | null; name: string };
     fromClub: { id: number; name: string } | null;
     toClub: { id: number; name: string } | null;
     fee: number | null;
@@ -694,7 +698,7 @@ export interface AdminReviewRow {
     fee: number | null;
     tax: number | null;
     extraFee: number | null;
-    player: { id: number; name: string; position: string | null; ca: number | null; pa: number | null };
+    player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null };
     fromClubName: string | null;
     toClubName: string | null;
   };
@@ -716,7 +720,7 @@ export interface NegotiationSession {
   transfer: { type: string; status: string; fee: number | null };
   fromClubName: string | null;
   toClubName: string | null;
-  player: { id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
+  player: { id: number; fcId: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
   agentTier: number;
   agentTierLabel: string;
   releaseFee: number | null;
@@ -757,6 +761,7 @@ export interface TraineeSignResult {
 
 export interface FreeAgentRow {
   id: number;
+  fcId: number | null;
   name: string;
   position: string | null;
   age: number | null;

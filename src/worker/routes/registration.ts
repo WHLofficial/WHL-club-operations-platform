@@ -20,6 +20,7 @@ function nowSql() {
 
 interface OwnedPlayerRow {
   id: number;
+  fc_id: number | null;
   name: string;
   display_name: string | null;
   number: string | null;
@@ -37,7 +38,7 @@ interface OwnedPlayerRow {
 
 async function loadOwnedPlayers(env: Env, clubId: number): Promise<OwnedPlayerRow[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, name, display_name, number, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
+    `SELECT id, fc_id, name, display_name, number, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
      FROM players WHERE club_id = ? ORDER BY id LIMIT 500`,
   )
     .bind(clubId)
@@ -119,6 +120,7 @@ app.get('/club/squad', async (c) => {
       const contract = contractMap.get(p.id) ?? null;
       return {
         id: p.id,
+        fcId: p.fc_id,
         name: rowDisplayName(p),
         number: p.number,
         position: p.position,

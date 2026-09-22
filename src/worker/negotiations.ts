@@ -457,7 +457,7 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source,
               t.type AS transfer_type, t.status AS transfer_status, t.fee,
               cf.name AS from_name, ct.name AS to_name, c_cur.release_fee AS current_rc,
-              p.id AS player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier
+              p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier
        FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
        JOIN players p ON p.id = s.player_id
@@ -483,6 +483,7 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       to_name: string | null;
       current_rc: number | null;
       player_id: number;
+      player_fc_id: number | null;
       player_name: string;
       position: string | null;
       age: number | null;
@@ -550,7 +551,7 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       transfer: { type: r.transfer_type, status: r.transfer_status, fee: r.fee },
       fromClubName: r.from_name,
       toClubName: r.to_name,
-      player: { id: r.player_id, name: r.player_name, position: r.position, age: r.age, ca: r.ca, pa: r.pa },
+      player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, age: r.age, ca: r.ca, pa: r.pa },
       agentTier: r.agent_tier,
       agentTierLabel: AGENT_TIER_LABELS[r.agent_tier] ?? '普通',
       releaseFee: r.release_fee,

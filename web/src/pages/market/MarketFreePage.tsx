@@ -15,6 +15,7 @@ import {
 } from '../../lib/api.ts';
 import { qk, useMyClub } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { playerPath } from '../../lib/player-link.ts';
 import { MarketNav, deadlineText } from './shared.tsx';
 
 export default function MarketFreePage() {
@@ -110,7 +111,7 @@ function FreeAgentSection({ onDone, onError }: { onDone: (msg: string) => void; 
                   return (
                     <tr key={p.id}>
                       <td>
-                        <Link to={`/players/${p.id}`}>{p.name}</Link>
+                        <Link to={playerPath(p)}>{p.name}</Link>
                         {p.clubName && <span className="badge gray">{p.clubName}</span>}
                         {p.bannedThisWindow && <span className="badge red">本窗禁签</span>}
                       </td>
@@ -218,7 +219,7 @@ function ActivateSection({ onDone, onError }: { onDone: (msg: string) => void; o
                 {data.trainees.map((t) => (
                   <tr key={t.id}>
                     <td>
-                      <Link to={`/players/${t.id}`}>{t.name}</Link>
+                      <Link to={playerPath(t)}>{t.name}</Link>
                     </td>
                     <td>{t.club.name}</td>
                     <td className="num mono">{t.age ?? '—'}</td>

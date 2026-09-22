@@ -8,17 +8,17 @@ import { foldName } from '../src/core/name-fold.ts';
 describe('parseRoster', () => {
   it('三段与两段行都能解析；空行跳过', () => {
     const rows = parseRoster(['B. Šeško|2|90001', 'M. Ødegaard|90002', '自由球员||90003', ''].join('\n'));
-    expect(rows.map((r) => ({ id: r.id, name: r.name, clubId: r.clubId }))).toEqual([
-      { id: 90001, name: 'B. Šeško', clubId: 2 },
-      { id: 90002, name: 'M. Ødegaard', clubId: null },
-      { id: 90003, name: '自由球员', clubId: null },
+    expect(rows.map((r) => ({ fcId: r.fcId, name: r.name, clubId: r.clubId }))).toEqual([
+      { fcId: 90001, name: 'B. Šeško', clubId: 2 },
+      { fcId: 90002, name: 'M. Ødegaard', clubId: null },
+      { fcId: 90003, name: '自由球员', clubId: null },
     ]);
   });
 
   it('姓名含分隔符时按行尾反向切分，不串字段', () => {
     const rows = parseRoster('A|B|7|1|42');
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: 42, name: 'A|B|7', clubId: 1 });
+    expect(rows[0]).toMatchObject({ fcId: 42, name: 'A|B|7', clubId: 1 });
   });
 
   it('折叠列与 foldName 同源（推荐与提交后的服务端搜索命中同一批人）', () => {
@@ -53,21 +53,21 @@ describe('suggestPlayers', () => {
     const got = suggestPlayers(entries, 'sesko');
     // 库里的名字多是「缩写. 姓」，所以「sesko」多半落在词中（A. Sesko / B. Šeško / M. Šeško）；
     // 只有 Sesko Zeta 是整串前缀，排最前。两类各自按折叠名序。
-    expect(got.map((e) => e.id)).toEqual([4, 3, 1, 2]);
+    expect(got.map((e) => e.fcId)).toEqual([4, 3, 1, 2]);
   });
 
   it('查询词自身带变音也命中（SESKO / Šeško 同一批）；空词不推荐', () => {
     // 折叠两侧都做：查「Šeško」与查「SESKO」折出来都是 sesko，命中集合必须一样
-    expect(suggestPlayers(entries, 'SESKO').map((e) => e.id)).toEqual([4, 3, 1, 2]);
-    expect(suggestPlayers(entries, 'Šeško').map((e) => e.id)).toEqual([4, 3, 1, 2]);
+    expect(suggestPlayers(entries, 'SESKO').map((e) => e.fcId)).toEqual([4, 3, 1, 2]);
+    expect(suggestPlayers(entries, 'Šeško').map((e) => e.fcId)).toEqual([4, 3, 1, 2]);
     expect(suggestPlayers(entries, '')).toEqual([]);
     expect(suggestPlayers(entries, '   ')).toEqual([]);
   });
 
   it('Ø / ü / 中文都能搜到；不匹配返回空', () => {
-    expect(suggestPlayers(entries, 'odegaard').map((e) => e.id)).toEqual([5]);
-    expect(suggestPlayers(entries, 'muller').map((e) => e.id)).toEqual([6]);
-    expect(suggestPlayers(entries, '张').map((e) => e.id)).toEqual([7]);
+    expect(suggestPlayers(entries, 'odegaard').map((e) => e.fcId)).toEqual([5]);
+    expect(suggestPlayers(entries, 'muller').map((e) => e.fcId)).toEqual([6]);
+    expect(suggestPlayers(entries, '张').map((e) => e.fcId)).toEqual([7]);
     expect(suggestPlayers(entries, 'zzzz')).toEqual([]);
   });
 

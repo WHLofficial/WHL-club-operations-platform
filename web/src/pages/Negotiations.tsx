@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../lib/api.ts';
 import { useToast } from '../lib/toast.tsx';
 import { qk } from '../lib/queries.ts';
+import { playerPath } from '../lib/player-link.ts';
 
 const SOURCE_LABEL: Record<string, string> = {
   negotiation: '报价成约',
@@ -103,7 +104,7 @@ export default function Negotiations() {
                 {done.map((s) => (
                   <tr key={s.id}>
                     <td>
-                      <Link to={`/players/${s.player.id}`}>{s.player.name}</Link>
+                      <Link to={playerPath(s.player)}>{s.player.name}</Link>
                     </td>
                     <td>
                       {s.fromClubName ?? '—'} → <b>{s.toClubName ?? '—'}</b>
@@ -206,7 +207,7 @@ function SessionCard({
   return (
     <section className="card">
       <h3>
-        <Link to={`/players/${s.player.id}`}>{s.player.name}</Link> · 签约谈判
+        <Link to={playerPath(s.player)}>{s.player.name}</Link> · 签约谈判
         <span className="badge purple">谈判中</span>
         <span className={`badge ${TIER_BADGE[s.agentTier] ?? 'gray'}`}>经纪人{s.agentTierLabel}</span>
       </h3>

@@ -71,6 +71,7 @@ function transfer(patch: Partial<ClubTransferRow> & { id: number }): ClubTransfe
   return {
     type: 'transfer',
     playerId: 7,
+    playerFcId: null,
     playerName: '张三',
     fromClubId: null,
     fromClubName: null,
@@ -172,7 +173,7 @@ function rosterRow(patch: Partial<PlayerLibraryRow> & { id: number; name: string
     contractType: 'standard',
     foot: 1,
     baseCa: 75,
-    fcId: 1,
+    fcId: patch.id,
     source: null,
     serviceSeasons: 1.5,
     protected: false,
@@ -517,6 +518,33 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     expect((outgoing as HTMLAnchorElement).getAttribute('href')).toBe('/clubs/66');
     // 球员名链到档案页
     expect((within(ops).getAllByText('张三')[0] as HTMLAnchorElement).getAttribute('href')).toBe('/players/7');
+  });
+
+  it('阵容名单里的人链到 fc_id，不是内部 id（增量 32）', async () => {
+    stubApi({
+      roster: {
+        players: [rosterRow({ id: 8, name: '李四', fcId: 239085 })],
+        nextCursor: null,
+      },
+    });
+    renderDetail();
+
+    await screen.findByText('阵容名单');
+    const link = within(sub('阵容名单')).getByText('李四') as HTMLAnchorElement;
+    // 内部 id 是 8，但链接必须走 fc_id —— 内部 id 会随重导入变化
+    expect(link.getAttribute('href')).toBe('/players/239085');
+  });
+
+  it('转会记录里的人优先链 playerFcId（增量 32）', async () => {
+    stubApi({
+      detail: detailFixture({
+        transfers: { incoming: [transfer({ id: 21, playerId: 7, playerFcId: 239085, playerName: '张三' })], outgoing: [] },
+      }),
+    });
+    renderDetail();
+
+    const ops = (await screen.findByText('运营组')).closest('section') as HTMLElement;
+    expect((within(ops).getAllByText('张三')[0] as HTMLAnchorElement).getAttribute('href')).toBe('/players/239085');
   });
 
   it('没有转会记录时两块各给空态，不渲染空表', async () => {

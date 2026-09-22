@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import { apiPost, type BidPlaceResult, type MarketListing, type MarketListingDetail, type MatchDecisionResult } from '../../lib/api.ts';
 import { useListingDetail, useMarketInvalidation, useBoard, useMyBids, useMyClub, type MarketMyClub } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { playerPath } from '../../lib/player-link.ts';
 import {
   BID_STATUS_LABEL,
   FILTER_LABEL,
@@ -138,7 +139,7 @@ function MarketCard({
   return (
     <button type="button" className={`market-card${selected ? ' on' : ''}${mine ? ' mine' : ''}`} onClick={onSelect}>
       <div className="market-card-head">
-        <Link to={`/players/${listing.player.id}`} onClick={(e) => e.stopPropagation()}>
+        <Link to={playerPath(listing.player)} onClick={(e) => e.stopPropagation()}>
           {listing.player.name}
         </Link>
         <span className="badge-stack">

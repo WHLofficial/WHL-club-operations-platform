@@ -832,6 +832,17 @@ tbody tr:hover td {
   font-size: 18px;
 }
 
+/* 官方缩写名（增量 32）：显示名是 FC26 派生的完整人名，官方缩写名退到下一行小字。
+   em 而不是 px —— 跟着 h2 的字号走，别处改标题大小不用回来改这里。 */
+.official-name {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72em;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
 .player-card-badges {
   white-space: nowrap;
   font-size: 14px;

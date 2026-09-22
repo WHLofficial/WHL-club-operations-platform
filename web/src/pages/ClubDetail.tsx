@@ -13,6 +13,7 @@ import CoachPanel from './club/CoachPanel.tsx';
 import type { ClubBand, ClubFormRow, ClubTransferRow } from '../lib/api.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 import { TRANSFER_TYPE_LABEL } from '../lib/ref.ts';
+import { playerPath } from '../lib/player-link.ts';
 import { STATUS_BADGE, STATUS_LABEL } from '../lib/players-library.ts';
 
 const TIER_LABEL: Record<'premier' | 'second', string> = {
@@ -187,7 +188,7 @@ function TransferTable({ rows, empty, side }: { rows: ClubTransferRow[]; empty: 
                 {t.playerId === null ? (
                   t.playerName ?? '未知球员'
                 ) : (
-                  <Link to={`/players/${t.playerId}`}>{t.playerName ?? '未知球员'}</Link>
+                  <Link to={playerPath({ id: t.playerId, fcId: t.playerFcId })}>{t.playerName ?? '未知球员'}</Link>
                 )}
               </td>
               <td>
@@ -409,7 +410,7 @@ export default function ClubDetail() {
                       <tr key={p.id}>
                         <td className="mono">{p.uid.replace(/^fc/, '')}</td>
                         <td>
-                          <Link to={`/players/${p.id}`}>{p.name}</Link>
+                          <Link to={playerPath(p)}>{p.name}</Link>
                         </td>
                         <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>
                         <td className="num mono">{p.age ?? '—'}</td>

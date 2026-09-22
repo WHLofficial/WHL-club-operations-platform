@@ -9,6 +9,7 @@ import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryR
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, playstyleIsGold } from '../lib/ref.ts';
 import { PS_GOLD_BASE, isGoldPlaystyleId } from '../../../src/core/fc26.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
+import { playerPath } from '../lib/player-link.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
 import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
 import {
@@ -575,7 +576,7 @@ export default function PlayersLibrary() {
                       <tr key={p.id}>
                         <td className="mono">{p.uid.replace(/^fc/, '')}</td>
                         <td>
-                          <Link to={`/players/${p.id}`}>{p.name}</Link>
+                          <Link to={playerPath(p)}>{p.name}</Link>
                         </td>
                         <td>
                           {/* 归属球队链到球队页（增量 31）；自由身没有俱乐部，不给链接 */}

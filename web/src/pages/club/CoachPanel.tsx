@@ -24,6 +24,7 @@ import {
 import { CONTRACT_TYPE_LABEL, LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { qk, useMyClubOverview } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { playerPath } from '../../lib/player-link.ts';
 
 type SquadFilter = 'all' | 'first_team' | 'trainee';
 type Assignment = 'none' | 'first_team' | 'trainee';
@@ -675,7 +676,7 @@ function SquadRow({
       {/* 号码只读（增量 32）：定号/改号在球员卡的合同页签，那里才有归属校验的上下文 */}
       <td className="num mono">{player.number ?? '—'}</td>
       <td>
-        <Link to={`/players/${player.id}`}>{player.name}</Link>
+        <Link to={playerPath(player)}>{player.name}</Link>
         {flags !== undefined &&
           flags.length > 0 &&
           flags.map((issue, i) => (

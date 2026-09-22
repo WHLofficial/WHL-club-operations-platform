@@ -1,8 +1,8 @@
 // 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，增量 6.1 d9 改 E2 页内页签：
 // 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级；转会记录=单据流水）
 // 成长记录区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
-import { useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
@@ -43,6 +43,7 @@ import {
 import { useToast } from '../lib/toast.tsx';
 import { qk } from '../lib/queries.ts';
 import { useAuth } from '../lib/auth.tsx';
+import { playerPath } from '../lib/player-link.ts';
 
 type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers';
 
@@ -180,6 +181,7 @@ function PlaystylePickGrid({
 
 export default function Player() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [tab, setTab] = useState<PlayerTab>('profile');
   const { show, toastNode } = useToast();
@@ -221,6 +223,16 @@ export default function Player() {
   const data = dataQuery.data ?? null;
   const growth = growthQuery.data ?? null;
   const refreshAll = () => void qc.invalidateQueries({ queryKey: ['player', id ?? ''] });
+
+  // 规范 URL（增量 32）：地址栏里是内部 id（老分享链接、老缓存）时，换成 fc_id 的那条。
+  // 换完 queryKey 也跟着变（['player', id]），所以这一跳会多打一次详情请求——只发生在旧链接上，
+  // 换来的是分享出去的地址稳定（内部 id 会随重导入变化）。
+  const canonicalPath = data === null ? null : playerPath(data.player);
+  useEffect(() => {
+    if (canonicalPath !== null && id !== undefined && `/players/${id}` !== canonicalPath) {
+      navigate(canonicalPath, { replace: true });
+    }
+  }, [canonicalPath, id, navigate]);
 
   async function choosePlan(planIndex: number) {
     if (busy || !growth) return;
@@ -370,7 +382,14 @@ export default function Player() {
         <div className="dossier-side">
           <section className="player-card">
             <div className="player-card-head">
-              <h2>{player.name}</h2>
+              <h2>
+                {player.name}
+                {/* 官方缩写名（增量 32）：显示名派生自 FC26 存档，与 FC26db 的官方缩写名不同时
+                    在下面列一行小字——库里认人仍按官方名（`E. Haaland`），只是不再当标题 */}
+                {player.officialName !== undefined && player.officialName !== player.name && (
+                  <span className="official-name">{player.officialName}</span>
+                )}
+              </h2>
               <span className="player-card-badges">
                 {player.badgesGold > 0 && <span title="金徽章">🥇×{player.badgesGold}</span>}
                 {player.badgesSilver > 0 && <span title="银徽章">🥈×{player.badgesSilver}</span>}
