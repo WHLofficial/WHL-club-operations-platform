@@ -1,9 +1,12 @@
-// 球队详情页（增量 31 步骤 7–8）：阵容组 + 运营组 + 战绩组，登录者正是本队教练时再挂教练工作台。
+// 球队详情页（增量 31 步骤 7–8，结构分析在步骤 11a 按用户裁决整改）：
+// 阵容组 + 运营组 + 战绩组，登录者正是本队教练时再挂教练工作台。
+// 每组内是「三格主指标 + 一行语义明细」，不是等权指标网格；三张结构图各用各的坐标语义（见文件中部注释）。
 // URL 口径：/clubs/:id 的 :id 就是平台库 clubs.id（AGENTS.md「代码与提交」节，长期有效）。
 // 读量：结构统计由 GET /api/clubs/:id 一次算完（生产实测 12 条语句 / 151–165 行，clubs scope 缓存 24h）；
 // 名单复用公开的 GET /api/players?club_id=N（limit=100 一页装完），不新建读面；队徽走 /api/media/*（零 D1）。
 // 排名由后端代理比赛系统公开积分榜，取不到时后端回 200 + note，这里只负责把 note 显示出来。
 // 教练工作台走 /api/me/club（qk.myClub，与市场页、/club 壳同键，缓存热时不再读库）。
+import { Fragment } from 'react';
 import { Link, useParams } from 'react-router';
 import { useClubDetail, useClubRoster, useClubStanding, useMyClub } from '../lib/queries.ts';
 import CoachPanel from './club/CoachPanel.tsx';
@@ -34,10 +37,14 @@ function seasons(x: number | null): string {
 const FORM_LABEL: Record<'win' | 'draw' | 'loss', string> = { win: '胜', draw: '平', loss: '负' };
 const FORM_BADGE: Record<'win' | 'draw' | 'loss', string> = { win: 'green', draw: 'gray', loss: 'red' };
 
-// 结构分析柱状图：CSS 自绘（不引图表库）。轨道 flex:1 + min-width:0，条形宽度按百分比给，
-// 所以窄屏只会把轨道压短，不会把条形挤出容器。
-// 语义上用 <ul> 而不是 role="img"：role="img" 会把整棵子树当装饰，档位标签与人数就读不到了。
-// 条形本身纯装饰（aria-hidden），数据由「标签 + 人数」两段文字承载。
+// 结构分析图全部 CSS 自绘（不引图表库）。三张图各用各的坐标语义（增量 31 步骤 11a，用户裁决）：
+//   位置分布 → 不用图示，纯文字档位
+//   年龄结构 → 等宽 3 岁箱 ⇒ 竖直直方图（柱相邻、面积=人数）
+//   CA 结构  → 语义档不等宽（70–79 宽 10、80–84 宽 5）⇒ 横向条形图 + 占比刻度
+//   效力年限 → 普通升序横向柱状图（BandChart）
+// 三张图都只用百分比给尺寸，所以窄屏压容器不会把图形挤出去。
+// 语义一律用 <ul>/<li> 而不是 role="img"：role="img" 会把整棵子树当装饰，档位标签与人数就读不到了；
+// 图形本身纯装饰（aria-hidden），数据由「标签 + 人数」两段文字承载。
 function BandChart({ bands, ariaLabel }: { bands: ClubBand[]; ariaLabel: string }) {
   const max = Math.max(1, ...bands.map((b) => b.count));
   return (
@@ -55,15 +62,84 @@ function BandChart({ bands, ariaLabel }: { bands: ClubBand[]; ariaLabel: string 
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+// 竖直直方图（年龄）：柱高 = 人数 / 最高档人数，人数标在柱顶（所以不画 y 轴）。
+// 柱与柱之间不留缝——直方图的柱是相邻的箱，留缝就变成柱状图了；六个轨道底色相连，读成一块底板。
+// 0 人的档不出柱（不设 min-height：给 0 画 2px 会假装有 1 人），柱顶的「0」才是事实。
+function Histogram({ bins, ariaLabel }: { bins: ClubBand[]; ariaLabel: string }) {
+  const max = Math.max(1, ...bins.map((b) => b.count));
   return (
-    <div className="club-stat">
+    <ul className="club-histogram" aria-label={ariaLabel}>
+      {bins.map((b) => (
+        <li className="club-hist-col" key={b.key}>
+          <span className="club-hist-count mono">{b.count}</span>
+          <span className="club-hist-track" aria-hidden="true">
+            <span className="club-hist-bar" style={{ height: `${(b.count / max) * 100}%` }} />
+          </span>
+          <span className="club-hist-label">{b.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// 占比横条（CA）：条长 = 该档占全队比例，顶部 0–100% 刻度轴给出比例，行尾给绝对人数。
+// 分母用「全队人数」而不是「各档之和」，这样有人缺 CA 时条长之和 <100% 也是实话（缺的人没进任何档）。
+const SHARE_TICKS = [0, 25, 50, 75, 100];
+
+function ShareBar({ bands, total, ariaLabel }: { bands: ClubBand[]; total: number; ariaLabel: string }) {
+  const denom = Math.max(1, total);
+  return (
+    <div className="club-share">
+      <div className="club-share-axis" aria-hidden="true">
+        {SHARE_TICKS.map((t) => (
+          <span
+            className={t === 0 || t === 100 ? 'club-share-tick' : 'club-share-tick club-share-tick-mid'}
+            key={t}
+            style={{ left: `${t}%` }}
+          >
+            {t}%
+          </span>
+        ))}
+      </div>
+      <ul className="club-share-list" aria-label={ariaLabel}>
+        {bands.map((b) => (
+          <li className="club-share-row" key={b.key} title={`${b.label}：${b.count} 人 · 占全队 ${Math.round((b.count / denom) * 100)}%`}>
+            <span className="club-share-label">{b.label}</span>
+            <span className="club-share-track" aria-hidden="true">
+              <span className="club-share-bar" style={{ width: `${(b.count / denom) * 100}%` }} />
+            </span>
+            <span className="club-share-count mono">{b.count} 人</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// 主指标：三格大号数字，左侧一道焦橙短线把它和明细分开（同一张卡里造出主次，不是十格等权网格）
+function HeroStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="club-hero-item">
       <dt>{label}</dt>
       <dd className="mono">
         {value}
-        {hint !== undefined && <span className="muted"> {hint}</span>}
+        {hint !== undefined && <span className="club-hero-hint"> {hint}</span>}
       </dd>
     </div>
+  );
+}
+
+// 明细行：按语义分组（能力/资产/荣誉…），组名 muted 加粗，组内用「·」分隔
+function DetailLine({ groups }: { groups: { label: string; text: string }[] }) {
+  return (
+    <p className="club-detail-line">
+      {groups.map((g) => (
+        <span key={g.label}>
+          <b>{g.label}</b>
+          {g.text}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -221,47 +297,57 @@ export default function ClubDetail() {
           <h3>阵容组</h3>
           <span className="muted">在册球员与结构分析</span>
         </div>
-        <dl className="club-stats">
-          <Stat
+        <dl className="club-hero">
+          <HeroStat
             label="阵容人数"
             value={`${squad.senior} 人`}
             hint={squad.trainee > 0 ? `+ ${squad.trainee} 青训` : undefined}
           />
-          <Stat label="平均 CA" value={num1(squad.avgCa)} />
-          <Stat label="最高 CA" value={num1(squad.maxCa)} />
-          <Stat label="平均 PA" value={num1(squad.avgPa)} />
-          <Stat label="平均成长空间" value={num1(squad.avgGrowth)} />
-          <Stat label="总身价" value={money(squad.totalValue)} />
-          <Stat label="工资总额" value={money(squad.totalWage)} />
-          <Stat label="平均工资" value={squad.avgWage === null ? '—' : money(squad.avgWage)} />
-          <Stat label="银徽章" value={`${squad.badgesSilver} 枚`} />
-          <Stat label="金徽章" value={`${squad.badgesGold} 枚`} />
+          <HeroStat label="平均 CA" value={num1(squad.avgCa)} />
+          <HeroStat label="总身价" value={money(squad.totalValue)} />
         </dl>
+        <DetailLine
+          groups={[
+            {
+              label: '能力',
+              text: `最高 CA ${num1(squad.maxCa)} · 平均 PA ${num1(squad.avgPa)} · 成长空间 ${num1(squad.avgGrowth)}`,
+            },
+            {
+              label: '资产',
+              text: `工资总额 ${money(squad.totalWage)} · 平均工资 ${squad.avgWage === null ? '—' : money(squad.avgWage)}`,
+            },
+            { label: '荣誉', text: `金徽章 ${squad.badgesGold} 枚 · 银徽章 ${squad.badgesSilver} 枚` },
+          ]}
+        />
 
         <div className="club-sub">
           <h4>位置分布</h4>
-          {squad.byPosition.length === 0 ? (
+          {squad.size === 0 ? (
             <p className="muted club-sub-empty">队里还没有人。</p>
           ) : (
-            <div className="club-pos-chips">
-              {squad.byPosition.map((p) => (
-                <span className="club-pos-chip" key={p.position}>
-                  <span className="club-pos-chip-name">{p.position}</span>
-                  <span className="mono">{p.count}</span>
-                </span>
+            // 四档恒出（含 0 人档）：「0 门将」本身就是要看见的信号。档内细位作 muted 明细。
+            <dl className="club-position-list">
+              {squad.byPosition.map((g) => (
+                <Fragment key={g.key}>
+                  <dt>{g.label}</dt>
+                  <dd>
+                    <span className="mono">{g.count}</span> 人
+                  </dd>
+                  <dd className="club-position-detail">{g.detail === '' ? '—' : g.detail}</dd>
+                </Fragment>
               ))}
-            </div>
+            </dl>
           )}
         </div>
 
         <div className="club-sub">
           <h4>年龄结构</h4>
-          <BandChart bands={squad.byAge} ariaLabel="年龄分档人数" />
+          <Histogram bins={squad.byAge} ariaLabel="年龄分布（等宽 3 岁分箱，柱高为该档人数）" />
         </div>
 
         <div className="club-sub">
           <h4>CA 结构</h4>
-          <BandChart bands={squad.byCa} ariaLabel="CA 分档人数" />
+          <ShareBar bands={squad.byCa} total={squad.size} ariaLabel="CA 分档占全队比例" />
         </div>
 
         <div className="club-sub">
@@ -333,12 +419,12 @@ export default function ClubDetail() {
           <h3>运营组</h3>
           <span className="muted">合同结构与转会往来</span>
         </div>
-        <dl className="club-stats">
-          <Stat label="在册合同" value={`${contracts.signed} 份`} />
-          <Stat label="保护期内" value={`${contracts.protectedCount} 人`} />
-          <Stat label="未保护" value={`${contracts.unprotected} 人`} />
-          <Stat label="平均效力" value={seasons(contracts.avgYears)} />
+        <dl className="club-hero">
+          <HeroStat label="在册合同" value={`${contracts.signed} 份`} />
+          <HeroStat label="保护期内" value={`${contracts.protectedCount} 人`} />
+          <HeroStat label="未保护" value={`${contracts.unprotected} 人`} />
         </dl>
+        <DetailLine groups={[{ label: '效力', text: `平均 ${seasons(contracts.avgYears)}` }]} />
 
         <div className="club-sub">
           <h4>效力年限</h4>
@@ -367,27 +453,30 @@ export default function ClubDetail() {
           {standing === null ? (
             <p className="muted club-sub-empty">{standingNote ?? '排名暂不可用'}</p>
           ) : (
-            <dl className="club-stats">
-              <Stat label="名次" value={`第 ${standing.position} 名`} />
-              <Stat label="场次" value={standing.played === null ? '—' : `${standing.played} 场`} />
-              <Stat
-                label="胜平负"
-                value={`${standing.won ?? 0} / ${standing.drawn ?? 0} / ${standing.lost ?? 0}`}
+            <>
+              <dl className="club-hero">
+                <HeroStat label="名次" value={`第 ${standing.position} 名`} />
+                <HeroStat
+                  label="积分"
+                  value={standing.pts === null ? '—' : `${standing.pts}`}
+                  hint={
+                    standing.pointsDeducted !== null && standing.pointsDeducted > 0
+                      ? `扣 ${standing.pointsDeducted}`
+                      : undefined
+                  }
+                />
+                <HeroStat
+                  label="胜平负"
+                  value={`${standing.won ?? 0} / ${standing.drawn ?? 0} / ${standing.lost ?? 0}`}
+                />
+              </dl>
+              <DetailLine
+                groups={[
+                  { label: '场次', text: standing.played === null ? '—' : `${standing.played} 场` },
+                  { label: '进失球', text: `${standing.goalsFor ?? 0} : ${standing.goalsAgainst ?? 0}` },
+                ]}
               />
-              <Stat
-                label="进失球"
-                value={`${standing.goalsFor ?? 0} : ${standing.goalsAgainst ?? 0}`}
-              />
-              <Stat
-                label="积分"
-                value={standing.pts === null ? '—' : `${standing.pts}`}
-                hint={
-                  standing.pointsDeducted !== null && standing.pointsDeducted > 0
-                    ? `（扣 ${standing.pointsDeducted}）`
-                    : undefined
-                }
-              />
-            </dl>
+            </>
           )}
         </div>
 

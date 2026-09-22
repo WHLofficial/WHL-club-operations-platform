@@ -140,6 +140,15 @@ export interface ClubBand {
   count: number;
 }
 
+/** 位置四档之一（门将/后卫/中场/前锋，另加「未知」兜底档） */
+export interface ClubPositionGroup {
+  key: string;
+  label: string;
+  count: number;
+  /** 档内细位明细，形如「RB 1 · CB 2」；无细位数据时为空串 */
+  detail: string;
+}
+
 export interface ClubSquadStructure {
   size: number;
   senior: number;
@@ -154,8 +163,8 @@ export interface ClubSquadStructure {
   avgWage: number | null;
   badgesSilver: number;
   badgesGold: number;
-  /** 位置分布，按位置规范顺序出非零项；无法识别的位置归「未知」一项 */
-  byPosition: { position: string; count: number }[];
+  /** 位置分布：四档恒出（含 0 人档），末尾可能多一项「未知」 */
+  byPosition: ClubPositionGroup[];
   byAge: ClubBand[];
   byCa: ClubBand[];
 }

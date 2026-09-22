@@ -22,6 +22,31 @@ export const POSITION_BY_ID: Record<number, string> = {
 
 export const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
 
+// 位置四档（增量 31 步骤 11a，用户裁决 2026-09-22）：球队页讲结构只讲「门将/后卫/中场/前锋」，
+// 细位（RB/CB/LB…）是数据、四档是叙事。细位表仍是 POSITION_BY_ID，这里只加一层归组，不改数据口径。
+export const POSITION_GROUP_BY_POSITION: Record<string, string> = {
+  GK: 'GK',
+  RB: 'DF',
+  CB: 'DF',
+  LB: 'DF',
+  CDM: 'MF',
+  RM: 'MF',
+  CM: 'MF',
+  LM: 'MF',
+  CAM: 'MF',
+  RW: 'FW',
+  ST: 'FW',
+  LW: 'FW',
+};
+
+// 档序即展示序（后场到前场）
+export const POSITION_GROUPS: readonly { key: string; label: string }[] = [
+  { key: 'GK', label: '门将' },
+  { key: 'DF', label: '后卫' },
+  { key: 'MF', label: '中场' },
+  { key: 'FW', label: '前锋' },
+];
+
 // 队 id 归一化（增量 14，用户裁决 2026-09-18）：游戏内必须用假名的 4 支俱乐部，第三方 fixed 快照
 // （gen_ref_json.py 的源）仍带旧 FIFA 号，游戏真表（EAFC 26 IDs.xlsx）用新号。平台统一以游戏真 id
 // 为口径——clubs.id 与 players.club_id 都落真号，显示名由 web/assets/ref/team.json 给真名。

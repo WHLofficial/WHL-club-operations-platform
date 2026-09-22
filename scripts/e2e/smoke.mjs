@@ -1,6 +1,12 @@
 #!/usr/bin/env node
-// 本地端到端冒烟（增量 23 建，增量 26 起兼顾 OIDC 模式 + 球员库三视口）：playwright-core +
-// 系统 Chrome，对 dev 8791 做黑盒验证。
+// 本地端到端冒烟（增量 23 建，增量 26 起兼顾 OIDC 模式 + 球员库三视口，增量 31 加球队页三视口）：
+// playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
+//
+// 球队页（⑨⑩）例外：本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id），
+// GET /api/clubs 与 GET /api/clubs/:id 在本机必然 500 ⇒ 那两个端点用 page.route() 打桩回夹具
+// （打完即撤）。/api/me/club 也打桩，但理由不是「取不到」——它只读 AUTH_DB team_binding/team
+// 与 whl-club，本机其实是 200 带 club；打桩是为了造出「非教练观众」与「取不到」两种受控情形。
+// 后端响应形状与读量由单测与 scripts/d1-read-audit/ 覆盖，这里量的是真浏览器里的渲染与几何。
 //
 // 前提：
 //   - `npm run build`（前端改动不 build 看不到）+ `npm run dev`（8791）
@@ -28,8 +34,8 @@ const PERSIST_TO = process.env.E2E_PERSIST_TO ?? '';
 const SESSION_COOKIE = 'whl_session'; // 兼容模式 cookie（OIDC 模式是 __Host-club_session）
 const OIDC_COOKIE = '__Host-club_session';
 const USER_ID = 1; // 本地 tour 库的基线管理员（role=admin），也是 OIDC 会话的 sub
-// 本地 TOUR_DB（whl）是空库（只有 _cf_METADATA），读赛事库的这几个端点必然 500：
-// 环境噪声，不是本仓库的回归，⑨ 不据此判失败；换成有数据的环境自然会通过
+// 本地 TOUR_DB（whl）的 team 表是旧 schema（无 logo_key / club_id，只有 4 行），读赛事库的
+// 这几个端点必然 500：环境噪声，不是本仓库的回归，⑨ 不据此判失败；换成有数据的环境自然会通过
 const EMPTY_TOUR_DB_PATHS = ['/api/me/club', '/api/me/bids', '/api/admin/clubs'];
 // 噪声判据必须同时钉住状态码与路径名：只按 URL 后缀匹配的话，这三个端点上的 401/403/404
 // 也会被静默吞掉（那才是真回归），带查询串时后缀还会失配
@@ -545,12 +551,341 @@ async function main() {
       console.log(`   截图：${shots.map((s) => s.replace(/\\/g, '/')).join(' / ')}`);
     });
 
-    await check('⑨ 无未捕获前端错误', async () => {
-      // 本地 TOUR_DB（whl）是空库（只有 _cf_METADATA），读赛事库的这几个端点必然 500 —— 那是
-      // 环境噪声，不是本仓库的回归；换成有数据的环境自然会通过。其余任何 4xx/5xx 仍然报错。
+    // ---- 球队页（增量 31）----
+    // 本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id）⇒ GET /api/clubs 与
+    // GET /api/clubs/:id 在本机必然 500。后端响应形状与读量已由单测与 scripts/d1-read-audit/ 覆盖，
+    // 这一组要验的是**真浏览器里的渲染与几何**——分段卡片、整卡可点、结构图不溢出、窄屏不出横向
+    // 滚动——jsdom 量不到这些。所以只给球队页的读端点打桩回夹具，其余请求（会话、媒体、球员库）
+    // 仍走真服务端。/api/me/club 一并打桩，造出「非教练观众」与「取不到」两种受控情形。
+    const CLUB_ROUTES = [
+      /\/api\/clubs(\?|$)/,
+      /\/api\/clubs\/1\/standing/,
+      /\/api\/clubs\/1(\?|$)/,
+      /\/api\/players\?/,
+      /\/api\/me\/club(\?|$)/,
+    ];
+
+    await check('⑨ 球队页三视口：列表分段 / 详情三组 / 结构图不溢出（截图落 scratch/）', async () => {
+      const clubsFixture = {
+        clubs: [
+          { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 5, trainee: 1 }, avgCa: 78.4, totalValue: 412.5, totalWage: 33.4 },
+          { id: 73, name: '巴黎圣日耳曼', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 4, trainee: 0 }, avgCa: 80.1, totalValue: 502.25, totalWage: 41.2 },
+          { id: 241, name: '巴塞罗那', isCpu: true, tier: 'second', logoKey: null, squad: { senior: 3, trainee: 2 }, avgCa: null, totalValue: 100, totalWage: 9.5 },
+          { id: 131681, name: 'AC米兰', isCpu: true, tier: null, logoKey: null, squad: { senior: 2, trainee: 0 }, avgCa: 61.2, totalValue: 20.75, totalWage: 1.25 },
+        ],
+      };
+      // 档位故意给不等的人数：柱高按「最高档」归一 ⇒ 最高档必然占满轨道，高度算错这条才量得出来。
+      // CA 各档之和 = 阵容人数（6）⇒ 条长之和恰好 100%；最高档只占 33%，若有人改成「按最大档
+      // 归一」宽度会变 100%，这条断言就会红。
+      const detailFixture = {
+        club: { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null },
+        squad: {
+          size: 6, senior: 5, trainee: 1, avgCa: 78.4, maxCa: 88, avgPa: 85.2, avgGrowth: 6.8,
+          totalValue: 412.5, totalWage: 33.4, avgWage: 6.68, badgesSilver: 9, badgesGold: 2,
+          byPosition: [
+            { key: 'GK', label: '门将', count: 1, detail: 'GK 1' },
+            { key: 'DF', label: '后卫', count: 2, detail: 'CB 2' },
+            { key: 'MF', label: '中场', count: 2, detail: 'CM 1 · CDM 1' },
+            { key: 'FW', label: '前锋', count: 1, detail: 'ST 1' },
+          ],
+          byAge: [
+            { key: 'u18', label: '≤18', count: 1 },
+            { key: '19-21', label: '19–21', count: 1 },
+            { key: '22-24', label: '22–24', count: 2 },
+            { key: '25-27', label: '25–27', count: 1 },
+            { key: '28-30', label: '28–30', count: 1 },
+            { key: '31+', label: '≥31', count: 0 },
+          ],
+          byCa: [
+            { key: '90+', label: '90+', count: 0 },
+            { key: '85-89', label: '85–89', count: 1 },
+            { key: '80-84', label: '80–84', count: 2 },
+            { key: '70-79', label: '70–79', count: 2 },
+            { key: 'u70', label: '<70', count: 1 },
+          ],
+        },
+        contracts: {
+          signed: 6, unprotected: 2, protectedCount: 4, avgYears: 2.5,
+          byYears: [
+            { key: 'le05', label: '0.5 赛季内', count: 1 },
+            { key: '1-15', label: '1–1.5 赛季', count: 2 },
+            { key: '2-25', label: '2–2.5 赛季', count: 3 },
+            { key: '3+', label: '3 赛季及以上', count: 0 },
+          ],
+        },
+        transfers: {
+          incoming: [
+            { id: 11, type: 'transfer', playerId: 5, playerName: '新援甲', fromClubId: 73, fromClubName: '巴黎圣日耳曼', toClubId: 1, toClubName: '阿森纳', fee: 12.5, extraFee: 1.5, season: 9, windowSeq: 1, completedAt: '2026-09-01T10:00:00Z' },
+          ],
+          // playerId 为 null 是真实情形（transfers.player_id 无 NOT NULL）⇒ 该格出纯文本，不能链 /players/null
+          outgoing: [
+            { id: 12, type: 'free_agent', playerId: null, playerName: '离队乙', fromClubId: 1, fromClubName: '阿森纳', toClubId: null, toClubName: null, fee: null, extraFee: null, season: 9, windowSeq: null, completedAt: null },
+          ],
+        },
+        form: {
+          recent: [
+            { matchId: 101, season: 9, competitionType: '联赛', stageName: '常规赛', round: 7, homeTeam: '阿森纳', awayTeam: '利物浦', scoreHome: 2, scoreAway: 1, penHome: null, penAway: null, result: 'win', finishedAt: '2026-09-20T19:00:00Z' },
+            // 点球大战不改 90 分钟判定 ⇒ 比分 1:1 记平，点球只做标注
+            { matchId: 102, season: 9, competitionType: '联赛', stageName: '常规赛', round: 6, homeTeam: '曼城', awayTeam: '阿森纳', scoreHome: 1, scoreAway: 1, penHome: 4, penAway: 3, result: 'draw', finishedAt: '2026-09-17T19:00:00Z' },
+            { matchId: 103, season: 9, competitionType: '联赛', stageName: '常规赛', round: 5, homeTeam: '阿森纳', awayTeam: '切尔西', scoreHome: 0, scoreAway: 2, penHome: null, penAway: null, result: 'loss', finishedAt: '2026-09-13T19:00:00Z' },
+          ],
+          wins: 1, draws: 1, losses: 1,
+        },
+      };
+      const rosterFixture = {
+        players: [
+          { id: 1, uid: 'fc100001', name: '门将甲', positions: ['GK'], age: 27, ca: 80, pa: 84, status: 'normal', wage: 6.5 },
+          { id: 2, uid: 'fc100002', name: '后卫乙', positions: ['CB', 'LB'], age: 24, ca: 76, pa: 85, status: 'normal', wage: 5.25 },
+          { id: 3, uid: 'fc100003', name: '中场丙', positions: ['CM'], age: 31, ca: 74, pa: 74, status: 'listed', wage: 4.75 },
+          { id: 4, uid: 'fc100004', name: '前锋丁', positions: ['ST'], age: 19, ca: 65, pa: 88, status: 'trainee', wage: null },
+          { id: 5, uid: 'fc100005', name: '边锋戊', positions: [], age: null, ca: 61, pa: 70, status: 'normal', wage: 1.2 },
+        ],
+        nextCursor: null,
+      };
+      const standingFixture = {
+        standing: { tournamentId: 1, stageName: '常规赛', groupName: null, position: 3, played: 7, won: 4, drawn: 1, lost: 2, goalsFor: 12, goalsAgainst: 8, pts: 13, pointsDeducted: null },
+        note: null,
+      };
+      // 登录者是观众（club: null）⇒ 详情页不挂教练工作台；这一条不依赖本地能否读到真队
+      const meClubFixture = { club: null, balance: null, squadCount: null, window: null, home: null };
+
+      const ok = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      await page.route(CLUB_ROUTES[0], (r) => r.fulfill(ok(clubsFixture)));
+      await page.route(CLUB_ROUTES[1], (r) => r.fulfill(ok(standingFixture)));
+      await page.route(CLUB_ROUTES[2], (r) => r.fulfill(ok(detailFixture)));
+      await page.route(CLUB_ROUTES[3], (r) => r.fulfill(ok(rosterFixture)));
+      await page.route(CLUB_ROUTES[4], (r) => r.fulfill(ok(meClubFixture)));
+
+      const docOverflow = () =>
+        page.evaluate(() => {
+          const d = document.documentElement;
+          return { scrollW: d.scrollWidth, clientW: d.clientWidth };
+        });
+
+      const shots = [];
+      const viewports = [
+        [1280, 900, 'desktop'],
+        [900, 800, 'tablet'],
+        [375, 812, 'mobile'],
+      ];
+      try {
+        for (const [width, height, label] of viewports) {
+          await page.setViewportSize({ width, height });
+
+          // ---- 列表页：三段分组 + CPU 标 + 整卡可点 ----
+          await page.goto(`${BASE}/clubs`, { waitUntil: 'domcontentloaded' });
+          await page.locator('.club-card').first().waitFor({ timeout: TIMEOUT });
+          const segs = await page.locator('.club-segment').count();
+          assert(segs === 3, `${label}：列表应出三段（顶级/次级/未定级），实际 ${segs} 段`);
+          const cards = await page.locator('.club-card').count();
+          assert(cards === clubsFixture.clubs.length, `${label}：卡片 ${cards} 张 ≠ 夹具 ${clubsFixture.clubs.length} 张`);
+          const href = await page.locator('.club-card').first().getAttribute('href');
+          assert(href === '/clubs/1', `${label}：整卡应链到 /clubs/1（不是卡里再放详情按钮），实际 ${href}`);
+          const cpu = await page.locator('.club-card .badge', { hasText: 'CPU' }).count();
+          assert(cpu === 2, `${label}：CPU 标应出 2 个，实际 ${cpu}`);
+          const ovList = await docOverflow();
+          assert(ovList.scrollW <= ovList.clientW + 1, `${label}：列表页被撑出横向滚动（${ovList.scrollW} > ${ovList.clientW}）`);
+          const listShot = join(SHOT_DIR, `e2e-clubs-${label}.png`);
+          await page.screenshot({ path: listShot, fullPage: false });
+          shots.push(listShot);
+
+          // ---- 详情页：三组 + 结构图不溢出 ----
+          await page.goto(`${BASE}/clubs/1`, { waitUntil: 'domcontentloaded' });
+          await page.locator('.club-block').first().waitFor({ timeout: TIMEOUT });
+          assert(await page.locator('h1', { hasText: '阿森纳' }).first().isVisible(), `${label}：详情页 h1 不是队名`);
+          const groups = await page.locator('.club-block h3').allInnerTexts();
+          for (const g of ['阵容组', '运营组', '战绩组']) {
+            assert(groups.includes(g), `${label}：缺「${g}」组（实际 ${groups.join('、')}）`);
+          }
+          assert(
+            (await page.locator('.club-block h3', { hasText: '教练工作台' }).count()) === 0,
+            `${label}：登录者不是本队教练，不该看到教练工作台`,
+          );
+          // 三组结构分析各出一种图：年龄 = 竖直直方图、CA = 占比横条、效力 = 横向条形图
+          assert((await page.locator('.club-histogram').count()) === 1, `${label}：年龄应出一张竖直直方图`);
+          assert((await page.locator('.club-share').count()) === 1, `${label}：CA 应出一张占比横条图`);
+          assert((await page.locator('.band-chart').count()) === 1, `${label}：效力应出一张横向条形图`);
+
+          // 几何：三张图宽高都按百分比给，窄屏只该压轨道。要验的是「图不撑破卡片、图自己不出横向滚动」。
+          // 别拿「条形右缘 ≤ 轨道右缘」当断言——全局 box-sizing:border-box 下那是盒模型保证的，永远为真。
+          const charts = await page.evaluate(() => {
+            const out = [];
+            for (const sel of ['.club-histogram', '.club-share', '.band-chart']) {
+              for (const el of document.querySelectorAll(sel)) {
+                const r = el.getBoundingClientRect();
+                const block = el.closest('.club-block');
+                const br = block ? block.getBoundingClientRect() : null;
+                out.push({
+                  sel,
+                  left: r.left,
+                  right: r.right,
+                  blockLeft: br ? br.left : null,
+                  blockRight: br ? br.right : null,
+                  scrollW: el.scrollWidth,
+                  clientW: el.clientWidth,
+                });
+              }
+            }
+            return out;
+          });
+          assert(charts.length === 3, `${label}：应量到 3 张结构图，实际 ${charts.length}`);
+          const chartOut = charts.filter((c) => c.blockRight === null || c.right > c.blockRight + 1 || c.left < c.blockLeft - 1);
+          assert(chartOut.length === 0, `${label}：有结构图超出所在卡片 ${JSON.stringify(chartOut)}`);
+          const chartScroll = charts.filter((c) => c.scrollW > c.clientW + 1);
+          assert(chartScroll.length === 0, `${label}：有结构图自身出了横向滚动 ${JSON.stringify(chartScroll)}`);
+
+          // 直方图柱高确实按「人数 / 最高档人数」算：最高档占满轨道、0 人档不出柱。
+          // 轨道有 1px 下边框（box-sizing 下算进 72px），故留 3% 容差。
+          const hist = await page.evaluate(() => {
+            const el = document.querySelector('.club-histogram');
+            if (!el) return null;
+            return [...el.querySelectorAll('.club-hist-col')].map((c) => {
+              const track = c.querySelector('.club-hist-track').getBoundingClientRect();
+              const bar = c.querySelector('.club-hist-bar').getBoundingClientRect();
+              return { ratio: track.height > 0 ? bar.height / track.height : -1, count: Number(c.querySelector('.club-hist-count').textContent) };
+            });
+          });
+          assert(hist !== null && hist.length === detailFixture.squad.byAge.length, `${label}：直方图列数 ≠ 夹具档数`);
+          const histMax = Math.max(...detailFixture.squad.byAge.map((b) => b.count));
+          for (let i = 0; i < hist.length; i += 1) {
+            const want = detailFixture.squad.byAge[i].count / histMax;
+            assert(Math.abs(hist[i].ratio - want) <= 0.03, `${label}：直方图第 ${i + 1} 档柱高 ${hist[i].ratio.toFixed(3)} ≠ 期望 ${want.toFixed(3)}`);
+            assert(hist[i].count === detailFixture.squad.byAge[i].count, `${label}：直方图第 ${i + 1} 档柱顶人数不符`);
+          }
+
+          // CA 占比条：分母是全队人数（条长之和 = 100%），不是「最大档」——夹具最高档只占 33%
+          const share = await page.evaluate(() => {
+            const el = document.querySelector('.club-share');
+            if (!el) return null;
+            return [...el.querySelectorAll('.club-share-row')].map((row) => {
+              const track = row.querySelector('.club-share-track').getBoundingClientRect();
+              const bar = row.querySelector('.club-share-bar').getBoundingClientRect();
+              return {
+                share: track.width > 0 ? bar.width / track.width : -1,
+                title: row.getAttribute('title'),
+                count: row.querySelector('.club-share-count').textContent,
+              };
+            });
+          });
+          assert(share !== null && share.length === detailFixture.squad.byCa.length, `${label}：CA 占比条行数 ≠ 夹具档数`);
+          for (let i = 0; i < share.length; i += 1) {
+            const b = detailFixture.squad.byCa[i];
+            const want = b.count / detailFixture.squad.size;
+            assert(Math.abs(share[i].share - want) <= 0.02, `${label}：CA「${b.label}」条长 ${(share[i].share * 100).toFixed(1)}% ≠ 期望 ${(want * 100).toFixed(1)}%`);
+            assert(share[i].title === `${b.label}：${b.count} 人 · 占全队 ${Math.round(want * 100)}%`, `${label}：CA「${b.label}」title 不符（${share[i].title}）`);
+            assert(share[i].count === `${b.count} 人`, `${label}：CA「${b.label}」行尾人数不符（${share[i].count}）`);
+          }
+          // 刻度轴末位「100%」是绝对定位 + translateX(-100%)，可能戳出图外（盒模型管不到）。
+          // 窄屏（≤640px）中间三条刻度是 display:none，它们的 rect 是原点上的 0×0 —— 必须先跳过，
+          // 否则「0 < 图左缘」会把隐藏元素判成溢出。
+          const axisOut = await page.evaluate(() => {
+            const el = document.querySelector('.club-share');
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return [...el.querySelectorAll('.club-share-tick')]
+              .filter((t) => {
+                const tr = t.getBoundingClientRect();
+                if (tr.width === 0 && tr.height === 0) return false; // display:none
+                return tr.left < r.left - 1 || tr.right > r.right + 1;
+              })
+              .map((t) => t.textContent);
+          });
+          assert(axisOut !== null && axisOut.length === 0, `${label}：占比刻度戳出图外：${JSON.stringify(axisOut)}`);
+
+          // 位置分布：四档纯文字（按裁决不用图示），四档恒出
+          const pos = await page.locator('.club-position-list dt').allInnerTexts();
+          assert(pos.join(',') === '门将,后卫,中场,前锋', `${label}：位置档位应是门将/后卫/中场/前锋，实际 ${pos.join(',')}`);
+          assert(
+            (await page.locator('.club-position-list .band-bar, .club-position-list .club-hist-bar, .club-position-list .club-share-bar').count()) === 0,
+            `${label}：位置分布按裁决不用图示，不该出现条`,
+          );
+          // 阵容名单表（运营组那两张是 .transfer-table，要排除）
+          const rows = await page.locator('.club-block .table-wrap table:not(.transfer-table) tbody tr').count();
+          assert(rows === rosterFixture.players.length, `${label}：阵容名单 ${rows} 行 ≠ 夹具 ${rosterFixture.players.length} 行`);
+          assert((await page.locator('.transfer-table').count()) === 2, `${label}：转入/转出两张表都应渲染`);
+          assert((await page.locator('a[href="/players/null"]').count()) === 0, `${label}：playerId 为空时链出了 /players/null`);
+          assert(
+            (await page.locator('.form-list .form-row').count()) === detailFixture.form.recent.length,
+            `${label}：近期战绩行数 ≠ 夹具`,
+          );
+          assert(await page.locator('.badge', { hasText: '联赛第 3 名' }).first().isVisible(), `${label}：排名徽章缺失`);
+          const ovDetail = await docOverflow();
+          assert(ovDetail.scrollW <= ovDetail.clientW + 1, `${label}：详情页被撑出横向滚动（${ovDetail.scrollW} > ${ovDetail.clientW}）`);
+          const detailShot = join(SHOT_DIR, `e2e-clubs-detail-${label}.png`);
+          await page.screenshot({ path: detailShot, fullPage: false });
+          shots.push(detailShot);
+        }
+        await page.setViewportSize({ width: 1440, height: 900 });
+        console.log(`   截图：${shots.map((s) => s.replace(/\\/g, '/')).join(' / ')}`);
+      } finally {
+        for (const pattern of CLUB_ROUTES) await page.unroute(pattern);
+      }
+    });
+
+    await check('⑩ 球队页：匿名看详情给登录引导且不泄露；/club 取不到球队时不误跳 /bind', async () => {
+      // 匿名这条要先把 /api/me 钉住：本地 AUTH_MODE=oidc 时匿名进站会先被「无感同步登录态」探针
+      // （web/src/lib/auth.tsx:23 的 syncProbe）整页跳去 /api/auth/sync，本机认证中心不在接入名单
+      // ⇒ 停在登录错误页，RequireUser 那条分支根本走不到。钉成 shared 模式的匿名响应（无 syncProbe）
+      // 才落回真实的守卫分支。
+      const anon = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      try {
+        const ap = await anon.newPage();
+        await ap.route(/\/api\/me(\?|$)/, (r) =>
+          r.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ user: null, authMode: 'shared', authHome: null }),
+          }),
+        );
+        await ap.goto(`${BASE}/clubs/1`, { waitUntil: 'networkidle' });
+        const t = await ap.locator('body').innerText();
+        assert(t.includes('这个页面要登录后才能用'), `匿名看 /clubs/1 没给登录引导：${t.slice(0, 120)}`);
+        // 只数 .club-block 是弱断言（未打桩时真身 401 ⇒ ClubDetail 只渲染错误横幅，也是 0）。
+        // 同时钉住「没有错误横幅」，才能把「被守卫挡下」与「加载失败」分开。
+        assert((await ap.locator('.club-block').count()) === 0, '匿名看 /clubs/1 竟然渲染出了球队内容');
+        assert((await ap.locator('.banner').count()) === 0, '匿名看 /clubs/1 出了错误横幅，不是被守卫挡下');
+        // 列表页是公开的：不给球队端点设桩，接口 500 也要能看到页面壳 —— 证它不在守卫后面
+        await ap.goto(`${BASE}/clubs`, { waitUntil: 'networkidle' });
+        assert(await ap.locator('h1', { hasText: '球队' }).first().isVisible(), '匿名看 /clubs 被拦下了（列表本该公开）');
+      } finally {
+        await anon.close();
+      }
+
+      // 已登录但 /api/me/club 取不到：必须停在原地报错。跳 /bind 会把绑着队的教练送去写着
+      // 「一账号只能绑一支队」的登记页 —— 这正是评审修掉的那个误判，只有真浏览器能端到端验。
+      // 这里自己桩出 500，同时自己把这个噪声行收走（不留给 ⑪ 的白名单兜底），并断言桩真被请求到：
+      // 否则「取不到」这条路径可能一次都没走到，而横幅断言靠别的原因也能绿。
+      let meClubHits = 0;
+      const onMeClub = (r) => {
+        if (new URL(r.url()).pathname === '/api/me/club') meClubHits += 1;
+      };
+      page.on('request', onMeClub);
+      const badBefore = badResponses.length;
+      await page.route(CLUB_ROUTES[4], (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"取不到"}' }));
+      try {
+        await page.goto(`${BASE}/club`, { waitUntil: 'networkidle' });
+        assert(
+          new URL(page.url()).pathname === '/club',
+          `/club 在取不到球队信息时不该跳走（实际落到 ${page.url()}）`,
+        );
+        assert((await text()).includes('球队信息暂时取不到'), '/club 取不到球队信息时没出报错横幅');
+        assert(meClubHits >= 1, '/club 这次没真去请求 /api/me/club，失败分支没被走到');
+      } finally {
+        await page.unroute(CLUB_ROUTES[4]);
+        page.off('request', onMeClub);
+        // 自己桩的 500 自己认领，别依赖 ⑪ 的已知噪声白名单（那是隐式耦合）
+        const mine = badResponses.slice(badBefore).filter((line) => line.includes('/api/me/club'));
+        for (const line of mine) badResponses.splice(badResponses.indexOf(line), 1);
+      }
+    });
+
+    await check('⑪ 无未捕获前端错误', async () => {
+      // 本地 TOUR_DB（whl）的 team 表是旧 schema（无 logo_key / club_id）⇒ 读赛事库的这几个
+      // 端点必然 500 —— 那是环境噪声，不是本仓库的回归；换成有数据的环境自然会通过。
+      // 其余任何 4xx/5xx 仍然报错。（⑩ 自己桩的 500 已由 ⑩ 自己收走，不靠这里兜底。）
       const noise = new Set([...badResponses].filter(isKnownNoise));
       const unexpected = [...new Set(badResponses)].filter((line) => !noise.has(line));
-      if (noise.size) console.log(`   已知环境噪声（本地 TOUR_DB 空库）：${[...noise].join(' / ')}`);
+      if (noise.size) console.log(`   已知环境噪声（本地 TOUR_DB 旧 schema）：${[...noise].join(' / ')}`);
       assert(
         pageErrors.length === 0,
         `捕获到 ${pageErrors.length} 条：\n  ${pageErrors.slice(0, 5).join('\n  ')}`,

@@ -11,6 +11,7 @@ import type {
   ClubBand,
   ClubDetail as ClubDetailDto,
   ClubFormRow,
+  ClubPositionGroup,
   ClubStanding,
   ClubTransferRow,
   MeUser,
@@ -39,15 +40,32 @@ function band(key: string, label: string, count: number): ClubBand {
   return { key, label, count };
 }
 
+// 分档口径与后端 src/worker/routes/clubs.ts 的 AGE_BANDS / CA_BANDS / YEARS_BANDS 对齐
 const BY_AGE: ClubBand[] = [
-  band('u21', '≤20', 1),
-  band('b21', '21-23', 2),
-  band('b24', '24-26', 0),
-  band('b27', '27-29', 0),
-  band('b30', '30+', 1),
+  band('u18', '≤18', 1),
+  band('b19', '19–21', 2),
+  band('b22', '22–24', 0),
+  band('b25', '25–27', 0),
+  band('b28', '28–30', 1),
+  band('b31', '≥31', 0),
 ];
-const BY_CA: ClubBand[] = [band('u60', '<60', 0), band('b60', '60-69', 1), band('b90', '90+', 1)];
+// 五档降序、占比之和 = 阵容人数（5）⇒ 也顺带钉住「比例的分母是全队人数」而不是「各档之和」
+const BY_CA: ClubBand[] = [
+  band('ca90', '90+', 1),
+  band('ca85', '85–89', 1),
+  band('ca80', '80–84', 0),
+  band('ca70', '70–79', 2),
+  band('cau70', '<70', 1),
+];
 const BY_YEARS: ClubBand[] = [band('le05', '≤0.5', 1), band('y1', '1-1.5', 2)];
+
+const BY_POSITION: ClubPositionGroup[] = [
+  { key: 'GK', label: '门将', count: 0, detail: '' },
+  { key: 'DF', label: '后卫', count: 1, detail: 'CB 1' },
+  { key: 'MF', label: '中场', count: 2, detail: 'CM 1 · CAM 1' },
+  { key: 'FW', label: '前锋', count: 1, detail: 'ST 1' },
+  { key: 'unknown', label: '未知', count: 1, detail: '' },
+];
 
 function transfer(patch: Partial<ClubTransferRow> & { id: number }): ClubTransferRow {
   return {
@@ -101,11 +119,7 @@ function detailFixture(patch: Partial<ClubDetailDto> = {}): ClubDetailDto {
       avgWage: 1.1,
       badgesSilver: 3,
       badgesGold: 1,
-      byPosition: [
-        { position: 'CM', count: 2 },
-        { position: 'ST', count: 1 },
-        { position: '未知', count: 1 },
-      ],
+      byPosition: BY_POSITION,
       byAge: BY_AGE,
       byCa: BY_CA,
     },
@@ -244,10 +258,34 @@ function sub(title: string): HTMLElement {
   return screen.getByText(title).parentElement as HTMLElement;
 }
 
-// 按标签取统计格的数值 —— 「1 人」这类值在页面上会重复出现，直接 getByText 会撞车
+// 主指标格的标签顺序 —— 用来钉住「等权指标网格已经拆成三格主指标 + 明细行」
+function heroLabels(scope: HTMLElement): string[] {
+  return Array.from(scope.querySelectorAll('.club-hero-item dt')).map((el) => el.textContent ?? '');
+}
+
+// 按标签取主指标格的数值：dd 里是「数值 + 可选 hint」，firstChild 就是数值本身（hint 在后面的 span 里）
 function statValue(scope: HTMLElement, label: string): string {
-  const cell = within(scope).getByText(label).closest('.club-stat') as HTMLElement;
-  return (cell.querySelector('dd') as HTMLElement).textContent ?? '';
+  const cell = within(scope).getByText(label).closest('.club-hero-item') as HTMLElement;
+  return (cell.querySelector('dd') as HTMLElement).firstChild?.textContent ?? '';
+}
+
+function statHint(scope: HTMLElement, label: string): string | null {
+  const cell = within(scope).getByText(label).closest('.club-hero-item') as HTMLElement;
+  return cell.querySelector('.club-hero-hint')?.textContent?.trim() ?? null;
+}
+
+// 明细行按组名取整段文字（能力/资产/荣誉…）
+function detailLine(scope: HTMLElement, label: string): string {
+  const line = scope.querySelector('.club-detail-line') as HTMLElement;
+  return (within(line).getByText(label).closest('span') as HTMLElement).textContent ?? '';
+}
+
+// 位置分布是三列网格（dt 档名 + dd 人数 + dd 细位），按档名取同一行的后两格
+function positionRow(scope: HTMLElement, label: string): { count: string; detail: string } {
+  const dt = within(scope).getByText(label);
+  const ddCount = dt.nextElementSibling as HTMLElement;
+  const ddDetail = ddCount.nextElementSibling as HTMLElement;
+  return { count: ddCount.textContent ?? '', detail: ddDetail.textContent ?? '' };
 }
 
 // 教练工作台的统计格是 span.stat-label + span.stat-value（不是详情页那套 dl/dt/dd），取值要另走一路
@@ -290,21 +328,26 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     expect(screen.getByText('甲').className).toContain('team-logo-fallback');
   });
 
-  it('阵容组统计：人数拆一线队与青训、平均值一位小数、金额带 m、徽章计数', async () => {
+  it('阵容组：只留三格主指标（人数拆一线队/青训、平均值一位小数、金额带 m）', async () => {
     stubApi();
     renderDetail();
 
     const squadBlock = (await screen.findByText('阵容组')).closest('section') as HTMLElement;
-    expect(statValue(squadBlock, '阵容人数')).toBe('4 人 + 1 青训');
+    expect(heroLabels(squadBlock)).toEqual(['阵容人数', '平均 CA', '总身价']);
+    expect(statValue(squadBlock, '阵容人数')).toBe('4 人');
+    expect(statHint(squadBlock, '阵容人数')).toBe('+ 1 青训');
     expect(statValue(squadBlock, '平均 CA')).toBe('75.2'); // 75.24 只显示一位
-    expect(statValue(squadBlock, '最高 CA')).toBe('90.0');
-    expect(statValue(squadBlock, '平均 PA')).toBe('83.3');
-    expect(statValue(squadBlock, '平均成长空间')).toBe('10.0');
     expect(statValue(squadBlock, '总身价')).toBe('1234.50 m');
-    expect(statValue(squadBlock, '工资总额')).toBe('4.40 m');
-    expect(statValue(squadBlock, '平均工资')).toBe('1.10 m');
-    expect(statValue(squadBlock, '银徽章')).toBe('3 枚');
-    expect(statValue(squadBlock, '金徽章')).toBe('1 枚');
+  });
+
+  it('阵容组明细行：能力 / 资产 / 荣誉三段，各段内用「·」连', async () => {
+    stubApi();
+    renderDetail();
+
+    const squadBlock = (await screen.findByText('阵容组')).closest('section') as HTMLElement;
+    expect(detailLine(squadBlock, '能力')).toBe('能力最高 CA 90.0 · 平均 PA 83.3 · 成长空间 10.0');
+    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40 m · 平均工资 1.10 m');
+    expect(detailLine(squadBlock, '荣誉')).toBe('荣誉金徽章 1 枚 · 银徽章 3 枚');
   });
 
   it('没有青训时不显示「+ 0 青训」，平均工资缺失显示 —', async () => {
@@ -317,28 +360,87 @@ describe('球队详情页（增量 31 步骤 7）', () => {
 
     const squadBlock = (await screen.findByText('阵容组')).closest('section') as HTMLElement;
     expect(statValue(squadBlock, '阵容人数')).toBe('4 人');
-    expect(statValue(squadBlock, '平均工资')).toBe('—');
+    expect(statHint(squadBlock, '阵容人数')).toBeNull();
+    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40 m · 平均工资 —');
   });
 
-  it('位置分布出 chip（含未知项），年龄/CA 柱状图按最大档归一', async () => {
+  it('位置分布出四档文字档位（0 人档也出）+ 档内细位，不出图示', async () => {
     stubApi();
     renderDetail();
 
     await screen.findByText('位置分布');
-    const cm = screen.getByText('CM').parentElement as HTMLElement;
-    expect(within(cm).getByText('2')).toBeTruthy();
-    expect((screen.getByText('未知').parentElement as HTMLElement).textContent).toContain('1');
+    const pos = sub('位置分布');
+    expect(Array.from(pos.querySelectorAll('.club-position-list > dt')).map((el) => el.textContent)).toEqual([
+      '门将',
+      '后卫',
+      '中场',
+      '前锋',
+      '未知',
+    ]);
+    // 0 门将也占一行：这是要看见的信号，不是空
+    expect(positionRow(pos, '门将')).toEqual({ count: '0 人', detail: '—' });
+    expect(positionRow(pos, '后卫')).toEqual({ count: '1 人', detail: 'CB 1' });
+    expect(positionRow(pos, '中场')).toEqual({ count: '2 人', detail: 'CM 1 · CAM 1' });
+    expect(positionRow(pos, '未知')).toEqual({ count: '1 人', detail: '—' });
+    // 用户裁决「位置不用图示」：这一节不该有任何图形元素
+    expect(pos.querySelectorAll('.band-bar, .club-hist-bar, .club-share-bar').length).toBe(0);
+  });
 
-    // 年龄：最大档 2 人 ⇒ 该档满格，1 人档半格；空档仍是 0 宽（min-width 由 CSS 兜）
-    const ageBars = sub('年龄结构').querySelectorAll('.band-bar');
-    expect(ageBars.length).toBe(BY_AGE.length);
-    expect((ageBars[1] as HTMLElement).style.width).toBe('100%');
-    expect((ageBars[0] as HTMLElement).style.width).toBe('50%');
-    expect((ageBars[2] as HTMLElement).style.width).toBe('0%');
+  it('年龄结构出竖直直方图：柱高按最高档归一、人数标在柱顶、0 人档不出柱', async () => {
+    stubApi();
+    renderDetail();
 
-    // CA 图独立归一（最大档 1 人 ⇒ 满格），不会串用年龄图的比例
-    const caBars = sub('CA 结构').querySelectorAll('.band-bar');
-    expect((caBars[1] as HTMLElement).style.width).toBe('100%');
+    await screen.findByText('年龄结构');
+    const cols = sub('年龄结构').querySelectorAll('.club-hist-col');
+    expect(cols.length).toBe(BY_AGE.length);
+    expect(Array.from(cols).map((c) => (c.querySelector('.club-hist-count') as HTMLElement).textContent)).toEqual([
+      '1',
+      '2',
+      '0',
+      '0',
+      '1',
+      '0',
+    ]);
+    // 最大档 2 人 ⇒ 满格；1 人档半格；0 人档高度 0（不是 min-height 假装有 1 人）
+    const heights = Array.from(cols).map(
+      (c) => (c.querySelector('.club-hist-bar') as HTMLElement).style.height,
+    );
+    expect(heights).toEqual(['50%', '100%', '0%', '0%', '50%', '0%']);
+    expect(Array.from(cols).map((c) => (c.querySelector('.club-hist-label') as HTMLElement).textContent)).toEqual([
+      '≤18',
+      '19–21',
+      '22–24',
+      '25–27',
+      '28–30',
+      '≥31',
+    ]);
+  });
+
+  it('CA 结构出占比横条：条长分母是全队人数（不是各档之和），带 0–100% 刻度与行尾人数', async () => {
+    stubApi();
+    renderDetail();
+
+    await screen.findByText('CA 结构');
+    const ca = sub('CA 结构');
+    const rows = ca.querySelectorAll('.club-share-row');
+    expect(rows.length).toBe(BY_CA.length);
+    // 全队 5 人：1 人档 20%、2 人档 40%。若误按「各档之和归一」，最大档会变 100% ⇒ 这条会红
+    expect(Array.from(rows).map((r) => (r.querySelector('.club-share-bar') as HTMLElement).style.width)).toEqual([
+      '20%',
+      '20%',
+      '0%',
+      '40%',
+      '20%',
+    ]);
+    expect((rows[3] as HTMLElement).getAttribute('title')).toBe('70–79：2 人 · 占全队 40%');
+    expect((rows[3] as HTMLElement).querySelector('.club-share-count')?.textContent).toBe('2 人');
+    expect(Array.from(ca.querySelectorAll('.club-share-tick')).map((el) => el.textContent)).toEqual([
+      '0%',
+      '25%',
+      '50%',
+      '75%',
+      '100%',
+    ]);
   });
 
   it('阵容名单：编号去掉 fc 前缀、状态徽章、工资缺失显示 —，人链到 /players/:id', async () => {
@@ -376,10 +478,11 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     renderDetail();
 
     const ops = (await screen.findByText('运营组')).closest('section') as HTMLElement;
+    expect(heroLabels(ops)).toEqual(['在册合同', '保护期内', '未保护']);
     expect(statValue(ops, '在册合同')).toBe('3 份');
     expect(statValue(ops, '保护期内')).toBe('1 人');
     expect(statValue(ops, '未保护')).toBe('1 人');
-    expect(statValue(ops, '平均效力')).toBe('1.5 赛季');
+    expect(detailLine(ops, '效力')).toBe('效力平均 1.5 赛季');
 
     // 效力年限图只在本组归一（最大档 2 人）
     const yearBars = sub('效力年限').querySelectorAll('.band-bar');
@@ -419,11 +522,15 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     renderDetail();
 
     const form = (await screen.findByText('战绩组')).closest('section') as HTMLElement;
+    expect(heroLabels(form)).toEqual(['名次', '积分', '胜平负']);
     expect(within(form).getByText('第 3 名')).toBeTruthy();
     expect(within(form).getByText('10 场')).toBeTruthy();
     expect(within(form).getByText('5 / 2 / 3')).toBeTruthy();
     expect(within(form).getByText('18 : 12')).toBeTruthy();
     expect(within(form).getByText(/扣 2/)).toBeTruthy();
+    expect(statHint(form, '积分')).toBe('扣 2');
+    expect(detailLine(form, '场次')).toBe('场次10 场');
+    expect(detailLine(form, '进失球')).toBe('进失球18 : 12');
 
     expect(within(form).getByText(/近 3 场：1 胜 1 平 1 负/)).toBeTruthy();
     const rows = form.querySelectorAll('.form-row');

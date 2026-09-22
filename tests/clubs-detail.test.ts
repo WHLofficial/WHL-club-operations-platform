@@ -222,7 +222,7 @@ interface DetailBody {
     avgWage: number | null;
     badgesSilver: number;
     badgesGold: number;
-    byPosition: { position: string; count: number }[];
+    byPosition: { key: string; label: string; count: number; detail: string }[];
     byAge: { key: string; count: number }[];
     byCa: { key: string; count: number }[];
   };
@@ -290,13 +290,20 @@ describe('GET /api/clubs/:id 球队详情（增量 31 步骤 6）', () => {
     expect(body.squad.badgesSilver).toBe(3);
     expect(body.squad.badgesGold).toBe(1);
 
-    // 位置按 POSITION_BY_ID 的规范顺序（CM 在 ST 之前），零人位不出现
+    // 位置出四档（门将/后卫/中场/前锋），0 人档也出——「0 门将」本身就是要看见的信号；
+    // 档内细位按 POSITION_BY_ID 顺序给非零项
     expect(body.squad.byPosition).toEqual([
-      { position: 'CM', count: 2 },
-      { position: 'ST', count: 1 },
+      { key: 'GK', label: '门将', count: 0, detail: '' },
+      { key: 'DF', label: '后卫', count: 0, detail: '' },
+      { key: 'MF', label: '中场', count: 2, detail: 'CM 2' },
+      { key: 'FW', label: '前锋', count: 1, detail: 'ST 1' },
     ]);
-    expect(body.squad.byAge.map((b) => b.count)).toEqual([1, 1, 0, 0, 1]); // 17 / 22 / — / — / 31
-    expect(body.squad.byCa.map((b) => b.count)).toEqual([0, 1, 0, 1, 1]); // — / 60 / — / 80 / 90
+    // 年龄六等宽箱（≤18 / 19–21 / 22–24 / 25–27 / 28–30 / ≥31）：17 / 22 / 31
+    expect(body.squad.byAge.map((b) => b.key)).toEqual(['u18', '19-21', '22-24', '25-27', '28-30', '31+']);
+    expect(body.squad.byAge.map((b) => b.count)).toEqual([1, 0, 1, 0, 0, 1]);
+    // CA 五档由高到低（90+ / 85–89 / 80–84 / 70–79 / <70）：90 / 80 / 60
+    expect(body.squad.byCa.map((b) => b.key)).toEqual(['90+', '85-89', '80-84', '70-79', 'u70']);
+    expect(body.squad.byCa.map((b) => b.count)).toEqual([1, 0, 1, 0, 1]);
 
     // 效力刻度 = 4 个已关常规窗（临时窗不推进）
     expect(body.contracts.signed).toBe(2);

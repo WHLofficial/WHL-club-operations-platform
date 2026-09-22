@@ -11,7 +11,7 @@ import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, deriveClubLeagues, deriveClubTiers } from '../tier.ts';
 import { closedRegularTicks } from '../contract-ticks.ts';
-import { POSITION_BY_ID } from '../../core/fc26.ts';
+import { POSITION_BY_ID, POSITION_GROUP_BY_POSITION, POSITION_GROUPS } from '../../core/fc26.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
@@ -194,22 +194,30 @@ interface Band {
   max: number;
 }
 
-// 分档口径只在这里定义一次，前端只画条（不在前端再分一次档，否则两处会漂）。
-// 年龄/CA 的区间首尾相接；效力是 0.5 的整数倍（1 常规窗 = 0.5 赛季），档位之间留的空档取不到值。
+// 分档口径只在这里定义一次，前端只画图（不在前端再分一次档，否则两处会漂）。
+// 年龄（增量 31 步骤 11a，用户裁决）：等宽 3 岁箱 + 竖直直方图 ⇒ 两端开口档、中间四档等宽。
+// 代价是「成长年龄上限」（当季 seasons.age_cap，生产 25）不再是档界——直方图的前提是等宽箱，
+// 为守住一个档界把箱宽拉成 19 岁反而会让面积读错。
 const AGE_BANDS: readonly Band[] = [
-  { key: 'u21', label: '20 岁及以下', min: 0, max: 20 },
-  { key: '21-23', label: '21–23 岁', min: 21, max: 23 },
-  { key: '24-26', label: '24–26 岁', min: 24, max: 26 },
-  { key: '27-29', label: '27–29 岁', min: 27, max: 29 },
-  { key: '30+', label: '30 岁及以上', min: 30, max: 999 },
+  { key: 'u18', label: '≤18', min: 0, max: 18 },
+  { key: '19-21', label: '19–21', min: 19, max: 21 },
+  { key: '22-24', label: '22–24', min: 22, max: 24 },
+  { key: '25-27', label: '25–27', min: 25, max: 27 },
+  { key: '28-30', label: '28–30', min: 28, max: 30 },
+  { key: '31+', label: '≥31', min: 31, max: 999 },
 ];
+// CA：档界取 70/80/84/90，与游戏自己的「能力等级」阶梯对齐（src/core/negotiation-rules.ts 的
+// ratingLevel 十档档界是 60/65/70/75/80/84/87/90/93，也是谈判等级与身价/工资的定价依据）。
+// 所以 CA 用横向条形图讲「档位」而不是用直方图讲「数值分箱」——这些档不等宽（70–79 宽 10，
+// 80–84 宽 5），画直方图会让人把面积读错。档序由高到低，与条形图的排行语义一致。
 const CA_BANDS: readonly Band[] = [
-  { key: 'u60', label: '60 以下', min: 0, max: 59 },
-  { key: '60-69', label: '60–69', min: 60, max: 69 },
+  { key: '90+', label: '90+', min: 90, max: 999 },
+  { key: '85-89', label: '85–89', min: 85, max: 89 },
+  { key: '80-84', label: '80–84', min: 80, max: 84 },
   { key: '70-79', label: '70–79', min: 70, max: 79 },
-  { key: '80-89', label: '80–89', min: 80, max: 89 },
-  { key: '90+', label: '90 及以上', min: 90, max: 999 },
+  { key: 'u70', label: '<70', min: 0, max: 69 },
 ];
+// 效力是 0.5 的整数倍（1 常规窗 = 0.5 赛季），所以档位之间留的空档取不到值。
 const YEARS_BANDS: readonly Band[] = [
   { key: 'le05', label: '0.5 赛季内', min: 0, max: 0.5 },
   { key: '1-15', label: '1–1.5 赛季', min: 1, max: 1.5 },
@@ -368,11 +376,20 @@ app.get('/clubs/:id', async (c) => {
       const yearsValues = contracted.map(yearsOf).filter((v): v is number => v !== null);
       const wageValues = contracted.map((r) => r.wage).filter((v): v is number => typeof v === 'number');
 
-      const byPosition = Object.values(POSITION_BY_ID)
-        .map((position) => ({ position, count: rows.filter((r) => r.position === position).length }))
-        .filter((x) => x.count > 0);
-      const unknownPosition = rows.filter((r) => r.position === null || !Object.values(POSITION_BY_ID).includes(r.position)).length;
-      if (unknownPosition > 0) byPosition.push({ position: '未知', count: unknownPosition });
+      // 位置四档（增量 31 步骤 11a）：四档恒出（「0 门将」本身就是要看见的信号），档内明细按
+      // POSITION_BY_ID 的细位顺序给非零项。未知/空位置另起一档，不混进四档里。
+      const byPosition = POSITION_GROUPS.map((g) => {
+        const inGroup = rows.filter((r) => r.position !== null && POSITION_GROUP_BY_POSITION[r.position] === g.key);
+        const detail = Object.values(POSITION_BY_ID)
+          .filter((p) => POSITION_GROUP_BY_POSITION[p] === g.key)
+          .map((position) => ({ position, count: inGroup.filter((r) => r.position === position).length }))
+          .filter((x) => x.count > 0)
+          .map((x) => `${x.position} ${x.count}`)
+          .join(' · ');
+        return { key: g.key, label: g.label, count: inGroup.length, detail };
+      });
+      const unknownPosition = rows.filter((r) => r.position === null || POSITION_GROUP_BY_POSITION[r.position] === undefined).length;
+      if (unknownPosition > 0) byPosition.push({ key: 'unknown', label: '未知', count: unknownPosition, detail: '' });
 
       const recent = form.results.map((r) => ({
         matchId: r.match_id,
