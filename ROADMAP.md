@@ -592,7 +592,7 @@
 
 ## 增量 31 · 球队页（公开列表 + 登录详情 + 自家队中心合并）
 
-**状态**：2026-09-22 本地完成步骤 0–11（含 11a 结构分析整改与 11b 样式整改），**未推送、未部署**；步骤 12（推送/部署/最小化回读）待办，等用户下令。**本增量不含迁移**（0032 在步骤 1 被裁掉），故推送无生产 DDL 耦合。
+**状态**：2026-09-22 完成步骤 0–12（含 11a 结构分析整改与 11b 样式整改），**已推送并部署上线**（推送 `466df81..d759b86` 16 个提交 + `d759b86..2ad239b` 1 个；生产 Version `7a178d81-dccc-4696-a7d7-7d8c61eaa683` → `64020454-405c-479a-9a62-8197444f4f52` / `adb3a5ae-dbc5-4648-bf62-383e1108923d`）。**本增量不含迁移**（0032 在步骤 1 被裁掉），故推送无生产 DDL 耦合；生产迁移仍到 0031。
 
 **缘起**：用户 m12793 下达「新增球队页（列表 + 详情）」，并特别要求注意性能、省 D1 额度。经脑暴发散 → 一问一题裁决（Q1–Q17）→ 技术路径与用户操作动线 → 计划。计划稿 v1 被拒后修订重交（编号因增量 30 已占用改为 31，迁移号改 0032，后又在步骤 1 裁掉）。
 
@@ -643,9 +643,16 @@
 - **变异验证**：把 `ShareBar` 的 `denom` 由全队人数改成「按最大档归一」⇒ 只有 CA 那条用例红（21 绿）；变异前后 build hash 逐字节一致（`index-DdVd-lyb.js`）。
 - **未采纳**：运营组左列 summary 下方仍有约 150px 卡片留白（右列效力年限图更高）；改成居中/拉伸都更难看，判定为可接受的留白。
 
-**验收（步骤 1–11b 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **46 文件 / 640 例全绿**（增量 30 基线 40/573 ⇒ 本增量 +6 文件 / +67 例）；`npm run build` 成功（`web/dist/assets/index-DdVd-lyb.js` **474.57 kB / gzip 149.44 kB**、`index-BT5YAIcz.css` 34.57 kB / gzip 7.58 kB）；`npm run test:e2e` **11/11 通过**（三视口；新增球队页两场景）。变异验证多处（教练区块身份判定、`/club` 两个 Navigate 目标、`failed` 分支、`平均成长空间`、积分榜 TTL、CA 条分母、直方图归一、图表溢出）均能定向变红。
+**步骤 12 记录（推送 + 部署 + 最小化回读）**：
+- **推送**：用户 m15490「先推送部署再说」下令后执行。`git push origin main` → `466df81..d759b86`（增量 31 的 16 个提交），随后 totalValue 修复再推 `d759b86..2ad239b`。推送前用 `git diff --stat origin/main..HEAD -- src/db/migrations` 确认为空 ⇒ 零迁移。**本机沙箱会拦网络**：`npx wrangler ...` 报 `Unable to resolve Cloudflare's API hostname`，需 `dangerouslyDisableSandbox` **并加 `NODE_OPTIONS=--dns-result-order=ipv4first`**（`nslookup` 先回 IPv6，Node 默认 verbatim 顺序导致解析失败）。
+- **部署**：`NODE_OPTIONS=--dns-result-order=ipv4first npm run deploy`（= `build && wrangler deploy`），上传 19 个资产、Total Upload 567.39 KiB / gzip 136.51 KiB。生产迁移查得 **「✅ No migrations to apply!」⇒ 已在 0031**（AGENTS.md 里「生产原在 0030」的说法已过时）。生产 vars 含 `TOUR_API_BASE="https://whleague.win"`（排名代理基址已配好）。
+- **回读（2026-09-22）**：`https://club.whleague.win/` 200，首页资产 `index-DdVd-lyb.js` + `index-BT5YAIcz.css` 与本地 build 逐字一致；匿名 `GET /api/clubs/1` → **401**（符合裁决 Q1）；`GET /api/clubs` → 200、**20 队**、`logoKey` 20/20 非空、`squad.senior` 23–37、`avgCa` 77.6–83.4、`totalWage` 有真实值（如利物浦 73.55）；4 支 CPU 队（131681 米兰 / 112172 莱比锡 / 241 巴萨 / 10 曼城）`totalWage` 与 `totalValue` 均 0（无合同，符合预期）。
+- **回读抓到一个生产可见缺陷（已修，commit `2ad239b`）**：20 队 `totalValue` **全为 0**（含 31 人、avgCa 80.7 的佛罗伦萨），而 `totalWage` 有真实值 ⇒ 列表页第 3 项指标「总身价」全站显示 `0.00 m`。生产只读实测根因：`SELECT COUNT(*) AS total, SUM(CASE WHEN market_value IS NULL THEN 1 ELSE 0 END) AS nulls, SUM(market_value) FROM players` → `{"total":18301,"nulls":18301,"zeros":0,"sumv":0}` ⇒ **`players.market_value` 生产 18,301 行全 NULL**（该列是运营列，`src/core/import.ts:3` 明写导入「绝不触碰运营列（status/contracts/badges/growth/market_value/agent_tier）」，只有 admin PATCH 会写）。缺陷本身在聚合口径：`CLUB_SQUAD_AGG_SQL` 写 `SUM(COALESCE(p.market_value, 0))`，把「没人录过」压成 0 这个具体的假话。**球员库早就处理对了**（`web/src/pages/PlayersLibrary.tsx:58` 的 `money(x: number | null)` 对 null 回 `—`）。修法：聚合改 `SUM(p.market_value)`（全 NULL 时 SUM 出 NULL）、两处 `totalValue` 类型改 `number | null` 并 `?? null`、详情页改「全队都没录身价 ⇒ null」、前端 `money(null)` 回 `—`；**`totalWage` 口径不变**（CPU 队无合同 ⇒ 0 是真话）。测试：`tests/clubs-list.test.ts` 新增「无身价队」（2 人有合同无 market_value ⇒ `totalValue` null / `totalWage` 5）+ 空队由 `toBe(0)` 改 `toBeNull()`，`tests/clubs-detail.test.ts` 新增同类用例，`web/src/pages/Clubs.test.tsx` 新增 `metric(card,label)` 辅助断言 CPU 卡「总身价 `—` / 工资总额 `0.00 m`」，`web/src/pages/ClubDetail.test.tsx` 新增「全队都没录身价时显示 —」，e2e ⑨ 新增巴萨卡「总身价 = `—`」断言。变异验证两条定向变红（后端改回 `COALESCE`、前端 `money(club.totalValue ?? 0)`）后复绿。重新部署后生产复验：20 队 `totalValue` 全 `null`，首页资产 `index-C7pOcE6p.js` 与本地逐字一致。
+- **观察到的版本记录怪象（非本增量引入）**：`wrangler deployments list` 显示每次 `wrangler deploy` 会落**两条**部署记录（增量 31 为 `67938a92-…` 17:42:21 与 `7a178d81-…` 17:42:22；修复那次为 `64020454-…` 17:58:08 与 `adb3a5ae-…` 17:58:17，CLI 回显的是前者、`deployments status` 的当前版是后者）。两次产物一致（线上资产 hash 与本地 build 相同），故不影响行为。
 
-**待办**：① 步骤 12 推送 + 部署 + 最小化回读（**等用户下令**；会连带增量 30 的 7 个提交，但本增量无迁移故无 DDL 耦合）；② `CoachPanel`（874 行）搬迁后无专属组件测试，只有经详情页的 2 条冒烟断言（搬迁前就存在的覆盖薄弱）；③ `clubFormPts` 的 id 口径可择机改成显式映射（见步骤 9）；④ 顶栏「球队中心」tab 仍指向 `/club`，重定向后高亮落在「球队」tab —— 已接受（给 TopBar 加 `useMyClub()` 会让每个登录用户每次加载多打一次 `/api/me/club`，与省 D1 额度主线相悖）；⑤ 年龄档界不再包含当季 `age_cap`（步骤 11a 的已知代价，等宽箱优先）；⑥ 本机 e2e 的球队页读端点仍是打桩（本地 TOUR_DB `team` 表 schema 陈旧），若将来本地库补到与生产同形，可撤桩改成真端到端；⑦ 运营组左列留白约 150px（步骤 11b 已知取舍）。
+**验收（步骤 1–12 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **46 文件 / 642 例全绿**（增量 30 基线 40/573 ⇒ 本增量 +6 文件 / +69 例）；`npm run build` 成功（`web/dist/assets/index-C7pOcE6p.js` **474.57 kB / gzip 149.44 kB**、`index-BT5YAIcz.css` 34.57 kB / gzip 7.58 kB）；`npm run test:e2e` **11/11 通过**（三视口；新增球队页两场景）。变异验证多处（教练区块身份判定、`/club` 两个 Navigate 目标、`failed` 分支、`平均成长空间`、积分榜 TTL、CA 条分母、直方图归一、图表溢出、后端 `COALESCE`、前端 `money(totalValue ?? 0)`）均能定向变红。
+
+**待办**：① `players.market_value` 生产 18,301 行全 NULL 且无录入入口 ⇒ 球队页「总身价」指标全站恒显示 `—`（产品级待决：运营补录 / 给派生公式 / 撤掉该指标，见步骤 12）；② `CoachPanel`（874 行）搬迁后无专属组件测试，只有经详情页的 2 条冒烟断言（搬迁前就存在的覆盖薄弱）；③ `clubFormPts` 的 id 口径可择机改成显式映射（见步骤 9）；④ 顶栏「球队中心」tab 仍指向 `/club`，重定向后高亮落在「球队」tab —— 已接受（给 TopBar 加 `useMyClub()` 会让每个登录用户每次加载多打一次 `/api/me/club`，与省 D1 额度主线相悖）；⑤ 年龄档界不再包含当季 `age_cap`（步骤 11a 的已知代价，等宽箱优先）；⑥ 本机 e2e 的球队页读端点仍是打桩（本地 TOUR_DB `team` 表 schema 陈旧），若将来本地库补到与生产同形，可撤桩改成真端到端；⑦ 运营组左列留白约 150px（步骤 11b 已知取舍）。
 
 
 ## 外部依赖与待输入
