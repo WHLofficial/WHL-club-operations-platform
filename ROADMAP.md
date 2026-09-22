@@ -373,7 +373,7 @@
 **部署后回读失败的真实原因（重要，非本增量引入）**：`/api/health` 200、`/api/clubs/directory` 200，但 `/api/players?limit=1` / `?sort=name` / `?ps=25` / `?ps=125` / `/api/players/roster` / `/api/players/1` **一律 500**（体 54 字节的统一兜底文案）。逐层排查确认是 **D1 免费档当日行读配额已耗尽**：临时把 `src/worker/index.ts` 的 onError 加上 `__diag` 字段、用 `npx wrangler dev --remote`（本地代码 + 生产绑定）打 `GET /api/players?limit=1`，拿到 `D1_ERROR: Your account has exceeded D1's free tier daily row read limit…`（该诊断补丁已还原，未部署）。旁证：Cloudflare 分析 API 的 `workersInvocationsAdaptive` 显示 `scriptThrewException` **自 2026-09-21T15:20:22Z 起**、其后每 5 分钟一条（cron 也全失败），**比本次部署早约 2 小时**；`d1AnalyticsAdaptiveGroups` 显示当日 whl-club `rowsRead` **4,350,235** / readQueries 5311（免费档上限 500 万行/日）。管理通道（`wrangler d1 execute --remote`）不受该限制，故 `SELECT COUNT(*) FROM players` = 18301、主列表 SELECT 原样都能跑通 —— **用管理通道或 `/api/health` 判断 D1 是否可用会得到假阳性**（`/api/clubs/directory` 的缓存键是固定串，`?x=1` 仍命中同一条目，且 stale 刷新分支 `.catch(() => {})` 吞掉 loader 错误）。限额按 UTC 零点归零 ⇒ 最小化生产回读（`/api/health` + `?sort=name` + `?ps=25` + `?ps=125`，≤6 请求）**顺延到额度归零之后**，未阻塞部署。
 **回读已补做（2026-09-22T00:01:52Z = 本地 08:01，归零后 1 分 52 秒）**：`/api/health`（三资源 ok）、`/api/players?sort=name&limit=1`、`?ps=25`、`?ps=125`、`?ps=1,101`、`/api/players/roster`（321693 字节）**六个端点全部 200**，`?sort=name` 200 也证明增量 26 的折叠表达式深度修复在生产生效。另花 2 次请求（合计 8 次，超出原预算 2 次）做语义实测：`?ps=125&limit=3` 返回 `total=4`、三行全部命中金槽 `PSID13=125` 且银槽无 25；`?ps=25&limit=3` 返回 `total=650`、行内 25 只出现在银槽（`PSID4` / `PSID3` / `PSID1`），这些球员的金槽值（142 / 103）**没有**被银值查询捞出来 ⇒ **「银值只比银槽、金值只比金槽」的新语义在生产成立**（列表响应形状 `{players, total, nextCursor}`）。cron 最后一次失败为 2026-09-21T23:55:17Z，**00:00:34Z 起恢复成功**（`workersInvocationsAdaptive`）。排查副作用一条：Cloudflare 分析 API 用的 wrangler OAuth 令牌于 2026-09-21T18:13:20Z 过期，`npx wrangler whoami` 会刷新它，之后 GraphQL 才可用。
 
-**遗留**：① **球员库 D1 读消耗的量化与治理**（增量 28，含本增量被挪走的那部分）；② 档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15`，而筛选与导入口径是银槽 1-12 ⇒ 落在 `PSID8-12` 的银徽章「可筛不可见」（既存问题，本轮不修）；③ 摘要条「筛选（N）」数的是 chip 条数，位置选 12 个仍显示 1（chip 粒度合并的必然结果，已接受）；④ 多选面板内联 `maxHeight` 会覆盖 CSS 的 `min(70vh, 480px)`，内容超高时面板可长过 480px；⑤ 1280 宽下表格里「Baseline Utd」「20.00 m」「2金7银」会折行（列宽所致，非本轮引入）。
+**遗留**：① **球员库 D1 读消耗的量化与治理**（增量 28，含本增量被挪走的那部分）；② 档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15`，而筛选与导入口径是银槽 1-12 ⇒ 落在 `PSID8-12` 的银徽章「可筛不可见」（**增量 29 已修**：档案页按槽位扫全 15 槽）；③ 摘要条「筛选（N）」数的是 chip 条数，位置选 12 个仍显示 1（chip 粒度合并的必然结果，**增量 29 裁决维持现状**）；④ 多选面板内联 `maxHeight` 会覆盖 CSS 的 `min(70vh, 480px)`，内容超高时面板可长过 480px（**增量 29 已修**：上限收到组件常量，CSS 那条死规则删除）；⑤ 1280 宽下表格里「Baseline Utd」「20.00 m」「2金7银」会折行（列宽所致，非本轮引入；**增量 29 已修**：球员库单元格一律不折行，改由容器横向滚动）。
 
 **文档**：本节 + `CHANGELOG.md` [未发布] 增量 27 节 + `UI_DESIGN.md` 球员库行 + `TECH_DESIGN.md` 的 PlayStyle 槽位口径（原写「银槽 1-7 / 金槽 13 起」，改为「15 槽 = 银 1-12 + 金 13-15」）+ `README.md` 测试数与 e2e 场景描述 + `AGENTS.md` 当前状态。
 
@@ -480,6 +480,58 @@
 **步骤 8 记录（2026-09-22）**：文档与记忆收口（纯文档提交）。
 - **repo 五处**：`CHANGELOG.md` 顶部新增增量 28 上线条目（新增/变更/修复/验收/待办 五段，含测量机件三约束、计数端点 fail-closed、分级缓存与代际键、`0029`/`0030`、同源锁死测试、去 `total` 契约、海捞改写、`AuthApiError` 改写、三个假阳性判据、验收数字与遗留）；`README.md` 四处（测试数 38/497 → **39/539**、迁移文件 29 → **30** 且 apply 段补 `0029`/`0030` 与写配额提醒、生产状态行改为最新 Version `7c5b5879` 并补增量 28 回读结论「列表无 `total`、一次 56 行」、本地坑①补 `0029`/`0030` 的手工补法）；`AGENTS.md` 两处（生产 Version 行补 `7c5b5879` 与两值对照第三组、增量 28 条目由「进行中」改「已全流程收口」）；`UI_DESIGN.md` 翻页条改游标式文案（不显示总数）；`TECH_DESIGN.md` 三处（§17.1 索引规约补 `0029`/`0030` 与三条纪律、§17.2 第 3 条补「响应契约不带 `total`」并新增第 7/8 条——不能静态索引就换写法（含 `CROSS JOIN` 实例）、判断 D1 可用性的三个假阳性判据、附录 A 冻结范围补 `GET /api/cron/players-count`）。
 - **记忆四处**：新建 `increment28-execution-state.md`（缘起/交付链/关键机件/验收数字/遗留）；`MEMORY.md` 插入索引行并把增量 28 计划行改「已全部落地」；`club-platform-project-state.md`（frontmatter description + 新增 2026-09-22 节）；`club-platform-d1-quota.md`（description + 治理成效与三条新纪律段）。
+
+
+
+## 增量 29 · 球员库 UI 缺陷收口——档案页 15 槽徽章 + 多选面板高度上限 + 表格不折行（2026-09-22 本地完成，待部署）
+
+**缘起**：增量 27 遗留的五条 UI 瑕疵里，用户 m12257 指令「**建索引先搁置，因为今日写限额不足；海捞池后续会有新调整；球员库 UI 小瑕疵可以现在修**」⇒ 本增量只修球员库 UI 瑕疵，索引与海捞池契约都不动。
+
+**范围**：三处真实缺陷 + 两处口径同步。① **档案页徽章槽位**：`web/src/pages/Player.tsx:336` 硬编码 `['PSID1'…'PSID7','PSID13','PSID14','PSID15']` + `i < 7 ? i + 1 : 13 + (i - 7)` 推槽号，而筛选/导入/后端口径是银槽 `PSID1-12` + 金槽 `PSID13-15`（`src/core/fc26.ts` 的 `PS_SLOT_COUNT = 15` / `PS_SILVER_SLOT_COUNT = 12`）⇒ 落在 `PSID8-12` 的银徽章「可筛不可见」（生产槽位分布实测：PSID8 = 3 人、PSID9-12 = 0 人，今天最多影响 3 人，但是真口径缺陷；列表徽章列读的是台账列 `players.badges_silver/badges_gold`，所以会出现「列表 8 银、档案页只列 7 个」）。② **多选面板高度上限**：`web/src/components/MultiSelect.tsx` 的 `place()` 每次把 `maxHeight: Math.max(160, 可用空间)` 写进内联样式、无 480px/70vh 上限 ⇒ `web/src/styles.css` 的 `.multiselect-panel { max-height: min(70vh, 480px) }` 是死规则（1200px 高窗口、触发器靠上时面板会被拉到约 1100px）。③ **表格折行**：`styles.css` 的 `th` 有 `white-space: nowrap`、**`td` 没有**，默认 12 列（FIXED 10 + 默认 `DEFAULT_COLS = ['marketValue','badges']`）挤在约 980px ⇒「Baseline Utd」「20.00 m」按空格断、「2金7银」按 CJK 任意断。**不做**：不建索引（用户指令搁置）、不动海捞池契约、不写生产数据、不动 `.admin-shell` 的 760px 断点、不改 `badge_cap_silver` 口径、不跑生产 API 回读。
+
+**裁决**（2026-09-22 用户一问一题，共 5 项）：① 档案页徽章区 = 「**扩到 15 + 金徽区别，但有多少渲染多少，不渲染『未设置』**」；② 表格折行 = 「**所有单元格都不换行**」（第一问答「没懂」⇒ 用 ASCII 图重问）；③ 多选面板高度上限 = 「**JS 守上限**」（上限收进组件常量、删掉 CSS 那条死规则）；④ 摘要条「筛选（N）」计数 = 「**维持现状：数摘要条条数**」（只在文档里把「已接受」改写为「已裁决维持现状」）；⑤ 金徽视觉区分沿用既有的 `.ps-gold` + 🥇/🥈 + title「（金）」（`Player.tsx` 早有，无需新增）。
+
+**分步**（每步一 commit + code-review-skill 过审）：0 基线 → 1 档案页 15 槽（`e3b5033`）→ 2 多选面板高度上限（`da875f1`，评审修正 `b8739d5`）→ 3 表格不折行（`fa29934`）→ 4 文档与记忆收口 → 5 推送 + 部署 + 前端产物核对。
+
+**验收标准**：三处改动在真浏览器可见且不外溢（e2e 三视口 1280×900 / 900×800 / 375×812 全绿）；每处改动都做**变异验证**（断言必须能变红）；`npm run typecheck` 三份 tsconfig 全清、`npx vitest run` 全绿、`npm run build` 成功、`npm run test:e2e` 9/9；部署后线上 `/players` HTML 引用的 JS hash 与本地 `web/dist/assets/` 同名。
+
+**风险点**：① 「所有单元格都不折行」的直接代价是**横向滚动**——实测表格最小宽 **876px** vs 桌面容器 854px（约 22px 横滚）、移动端容器 290px 必然横滚；已按用户裁决接受，代价记在 UI_DESIGN 与本文件。② 本机 D1 夹具只有 9 名球员、名字短，折行在本地**复现不出来** ⇒ e2e 那组断言锁的是口径（computed `white-space`）而不是布局，已在探针注释与提交信息里诚实标注。③ `MultiSelect` 的面板上限用 `innerHeight`，而 CSS `70vh` 在移动端指的是 large viewport ⇒ 两者在移动端有细微差异（记录未改）。
+
+**步骤 0 记录（2026-09-22）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 539 例全绿**（16.38s）；`git status --short` 空、HEAD `76aaeb9`。
+
+**步骤 1 记录（2026-09-22，commit `e3b5033`，5 文件）**：档案页徽章扫全 15 槽，槽位键由槽数派生。
+- `src/core/fc26.ts`：在 `PS_SLOT_COUNT` 与 `PS_SILVER_SLOT_COUNT` 之间新增 `export const PS_SLOT_KEYS: readonly string[] = Array.from({ length: PS_SLOT_COUNT }, (_, i) => `PSID${i + 1}`)` —— 原先档案页手抄 `PSID1-7` + `PSID13-15`，与 `PS_SLOT_COUNT = 15` 无关联，所以增删槽位必然漂移；改为派生后两边同一个来源。
+- `web/src/lib/ref.ts`：新增 `export interface PlaystyleBadgeSlot { psid: number; slot: number; gold: boolean }` 与 `export function playstyleBadges(attrs)` —— `PS_SLOT_KEYS.flatMap` 扫全 15 槽，`Number.isInteger(psid) && psid > 0` 才收（空值 / `0` / `'abc'` 都不产出条目），`gold: playstyleIsGold(psid, slot)`，`slot = i + 1`（**1 起**）。
+- `web/src/pages/Player.tsx`：删掉硬编码数组与 `i < 7 ? i + 1 : 13 + (i - 7)` 推导，改 `const playstyles = playstyleBadges(attrs)`；`PlaystyleBadge` 的 props 收窄为 `{ psid, gold }`（`slot` 只用于渲染 key），金徽区分沿用既有的 `.ps-gold` + 🥇/🥈 + title「（金）」。
+- 测试 `web/src/lib/ref.test.ts` 新增 4 例：扫全 15 槽（`{PSID8: 25, PSID12: 7}` ⇒ `[{25,8,false},{7,12,false}]`，正是原先渲染不到的两槽）；金/银判定（含「金段 ID 落银槽」、`PSID15 = 156`）；空槽不产出（`{}` / `0` / `null` / `undefined` / 非数字）；槽位键与 core 同源（长度 = `PS_SLOT_COUNT`、首 `PSID1`、尾 `PSID15`、全部是 `FC26_GAME_ATTR_COLUMNS` 成员）。**变异验证**：`PS_SLOT_KEYS.flatMap` 改 `PS_SLOT_KEYS.slice(0, 7).flatMap` ⇒ 前两例立刻红（已还原）。
+- **顺带修掉一个真 bug（`tests/core-zero-import.test.ts`）**：零依赖守卫的判据 `/^\s*(import|export\s+.*from)/` 会把 `export const PS_SLOT_KEYS: readonly string[] = Array.from(` 判成依赖（`from` 命中了 `Array.from`），报 `这些模块会被打进前端 bundle，不能有依赖: expected [ Array(1) ] to deeply equal []`。改为抽出 `function hasStaticDependency(line)`：`/^\s*import/` ∥ `/^\s*export[^'"]*from\s+['"]/` ∥ `/(?:import|require)\s*\(/`（**判据必须带引号**，否则 `Array.from(` 之类又被命中；第三条不锚行首是为了抓 `await import('./x')`，代价是注释/字符串里的 `import(` 也会命中 —— 宁枉勿纵），并新增判据自测 1 例（正向 6 + 反向 2）。已知边界（沿用原判据）：多行 `export {
+…
+} from '…'` 抓不到。
+- 验收：typecheck 清；`npx vitest run` **39 文件 / 544 例全绿**；`npm run build` 成功（`web/dist/assets/index-DRPp0z40.js` 451.08 kB / gzip 142.97 kB）。
+
+**步骤 2 记录（2026-09-22，commit `da875f1` + 评审修正 `b8739d5`）**：多选面板高度上限交回组件。
+- `web/src/components/MultiSelect.tsx`：新增 `PANEL_MAX_PX = 480` / `PANEL_MAX_VH = 0.7`，`panelPlacement` 里的 `maxHeight` 改为 `Math.max(MIN_PANEL_HEIGHT, Math.min(room, cap))`，`cap = Math.min(PANEL_MAX_PX, view.height * PANEL_MAX_VH)`；注释记下「视口高 < 约 229px 时 `0.7×高` 会小于兜底 160，兜底优先」。
+- `web/src/styles.css`：`.multiselect-panel` 删掉 `max-height: min(70vh, 480px)`（该规则从未生效：`place()` 在 `open` 后**无条件**调用、每次开面板/滚动/缩放都写内联 `maxHeight`），原位留注释指向组件常量。全仓再无其它 `max-height` 来源。
+- 测试 `web/src/components/MultiSelect.test.tsx`：`panelPlacement` 用例由 12 例变 12 例（改 3 加 2）——下方充足 / 贴底翻转 / 半缝翻转三例的 `maxHeight` 由「可用空间」改为 **480**；新增「高视口 1400 仍 480」「极矮视口 400 由 70vh 收口到 280」；视口 120 仍兜底 160 不变。**变异验证**：`cap` 改 `Number.POSITIVE_INFINITY` ⇒ 5 例红（已还原）。
+- **评审 3 条 🟡**：① 守卫判据自测没钉住「抓不到」的边界 ⇒ 补非行首动态 import 判据 + 2 例自测（自测现 10 个 expect）；② `TECH_DESIGN.md`/`CHANGELOG.md`/`ROADMAP.md` 三处旧口径 ⇒ 步骤 4 改；③ **真口径 bug**：`web/src/pages/PlayersLibrary.tsx` 的 `psNames` 用 `.map((v, slot) => …)` 的 **0 起下标**当槽号传给 `playstyleIsGold(psid, slot)`，而后者语义是 **1 起** ⇒ 下标 12（= `PSID13` 金槽）走不到金槽分支，银段 ID 落在金槽时列表显示成银、与档案页 🥇 不一致（仅异常数据可见）⇒ 改为 `playstyleIsGold(v, slot + 1)` 并把 `psNames` 改为 `export`，`web/src/pages/PlayersLibrary.test.tsx` 新增 describe「psNames：槽号从 1 起」4 例。**变异验证**：改回 `slot` ⇒ 恰好 1 例红。
+- 评审 🟢 已采纳：`Player.tsx` 的 `PlaystyleBadge` props 收窄、删掉 `type PlaystyleBadgeSlot` 的 import。🟢 仅记录：commit message 里「正向 5 例/反向 2 例」实为 6/2；`Number.isInteger` 比旧 `isFinite` 严；`PANEL_MAX_VH` 用 `innerHeight` 而 CSS `70vh` 在移动端是 large viewport。
+- 真浏览器复核（e2e 三视口探针）：平板上 PlayStyle 面板 280–760（**被 480 封顶**）、移动端 292–772 —— 上限确实生效。
+- 验收：typecheck 清；`npx vitest run` **39 文件 / 546 例全绿**。
+
+**步骤 3 记录（2026-09-22，commit `fa29934`）**：球员库表格单元格一律不折行。
+- `web/src/styles.css`：在 `.lib-bar` 块之后新增 `.library-main td { white-space: nowrap; }`（`th` 早已 `nowrap`）。作用域限定球员库，管理员页表格靠折行塞长文案不受影响；列宽不够由 `.table-wrap` 的 `overflow-x: auto` 承担（该容器早已存在）。
+- `scripts/e2e/smoke.mjs`：新增 `tableLayoutProbe()` + `assertTableNoWrap(label, t)`，在场景 ⑧ 的三个视口末尾调用；断言 `cells > 0`、`notNowrap === 0`、表头 `nowrap`、容器 `overflow-x ∈ {auto, scroll}`，并打印表格宽 / 容器宽。**变异验证**：临时把规则改成注释 ⇒ 三视口量到「非 nowrap 108」、场景 ⑧ 报 `desktop：有 108 个单元格仍会折行`、9 → 8/9（已还原）。
+- 实测证据：**108 个单元格**全部单行；表格最小宽 **876px** vs 容器桌面 854 / 平板 815 / 移动 290 ⇒ 桌面约 22px 横滚、移动端必然横滚；页面级不溢出（由 `pagerProbe` 的 `!pager.pageOverflow` 把关）。**诚实边界**（已写进探针注释与提交信息）：本机夹具只有 9 名球员、名字短，折行复现不出来 ⇒ 这组断言锁的是口径（computed 值），不是布局。
+- 验收：typecheck 清；`npx vitest run` **39 文件 / 550 例全绿**；`npm run build` 成功（`web/dist/assets/index-C_n2o0KE.js` 451.12 kB / gzip 143.00 kB + `index-D-qmdoLZ.css` 27.62 kB / gzip 6.36 kB）；`npm run test:e2e` **9/9**。
+
+**步骤 4 记录（2026-09-22，纯文档提交）**：文档与记忆收口。
+- `ROADMAP.md`：新增本节；并把增量 27 遗留五条**逐条改口径**（② `PSID8-12` 可筛不可见 → **增量 29 已修**、③ 摘要条「筛选（N）」→ **增量 29 裁决维持现状**、④ 面板 `maxHeight` 顶掉 CSS 上限 → **已修**、⑤ 1280 宽折行 → **已修**；① D1 读消耗那条第 282 行早前已改为「增量 28」）。
+- `TECH_DESIGN.md`（徽章闭环决策表第 10 条）：末尾「已知渲染口径差：档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15` ⇒ `PSID8-12` 可筛不可见」整句替换为「**渲染口径（增量 29 收口）**：档案页与列表都按槽位渲染**全 15 槽**……与筛选/导入同源（`PS_SLOT_KEYS` 由 `PS_SLOT_COUNT` 派生）；槽号是 **1 起**（列表 `psNames` 的数组下标须 `+1` 再传 `playstyleIsGold`）。徽章墙的「🥈 x/15」那个 **15 是台账计数上限** `badge_cap_silver`（config，DDL CHECK 0..15），与「12 个银槽」是两个口径，别混」—— 这处正是只读评审 🟡2 指出的三处旧口径之一。
+- `UI_DESIGN.md`：球员详情行补「按槽位渲染全 15 槽（银 `PSID1-12` + 金 `PSID13-15`），只渲染有值的槽、不给空槽占位」；球员库行末尾的版本注记改为「（增量 26 改版、增量 27 收口、增量 29 补表格与槽位口径）」并补两句：**单元格一律不折行**（列宽不够改由 `.table-wrap` 横向滚动，实测表格最小宽 876px vs 桌面容器 854px）、**多选面板高度上限由组件守**（480px / 70vh）。
+- `CHANGELOG.md`：顶部新增 `## [未发布] · 增量 29 …（2026-09-22 本地完成，待部署）`（新增/变更/修复/验收/待办 五段）；并把增量 27 条目里那句「（既存问题，本增量不修）」改为「（既存问题，增量 27 未修；**增量 29 已修**）」。
+- `AGENTS.md`：当前状态补增量 29 一行（本地完成、4 commit `e3b5033`/`da875f1`/`b8739d5`/`fa29934`、未推送未部署、5 项裁决与两个顺带修的 bug）。
+- 记忆目录（`~/.zcode/cli/memories/projects/whl-club-operations-platform-59a36e78dc8d8fb3/memory/`）：新建 `increment29-plan.md`（评审指出的缺失：5 项裁决 + 5 步 + 边界 + 验收口径）与 `increment29-execution-state.md`（缘起/交付链/三处缺陷根因/三处修法/实测数字/两个顺带修的 bug/遗留）；`MEMORY.md` 顶部插两行索引；`club-platform-project-state.md` 的 frontmatter description 追加增量 29 段并新增「2026-09-22：增量 29」节。
+- 验收：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 550 例全绿**（纯文档改动不影响）；`git status --short` 仅剩本次 5 个文档文件。
 
 
 ---
