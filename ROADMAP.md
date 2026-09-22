@@ -394,7 +394,7 @@
 - **物化**：阈值写死——单次 ≥10,000 行且能被 UI 触发 ⇒ 做；≥10,000 但不可触发 ⇒ 记豁免理由；<10,000 ⇒ 不动。单日写入预算 ≤6 万行（免费档 10 万，留 40% 给业务写）⇒ **每天最多 3 条索引**（每条 18,301 行写）。步骤 1 已把 29 个排序键分类（见报告 5.1）：4 个已有 0027 索引、16 个可建 players 单表表达式索引、7 个**不能**（在 `ct.*` / 依赖 `season_windows` 子查询 / 内联运行时 config 系数）、`name` 因 87 项链需先过深度体检、`attr:*` 34 键需物化子表。**第一批（3 条 = 54,903 行写）取 `prestige` / `club` / `status`**（**已于步骤 4 执行**，见下方步骤 4 记录）——理由是表达式最安全（单表纯列/COALESCE/CASE，不像 `ps` 有 15 项链、`name` 有 87 项链）且都在前端默认列/排序下拉里可见；**不按热度选**（用户已裁决当前频次数据无意义）。其余登记「已量化、待配额」分天清单，每批后跑 `--only=<形状>` 复测。迁移 `0029_*`，索引尾列带 `id`，物化表达式与 `buildSortExprs` 共用常量。
 - **前端**：QueryClient 加 `staleTime: 30_000`（球员库列表 60s）。（分页条文案原定本步，但 `total` 契约在步骤 2 就变了、不改文案页面会显示 NaN ⇒ **已随步骤 2 完成**，步骤 5 只剩 `staleTime`。）
 
-**分步**（每步一 commit + code-review-skill 过审）：0 基线 + 额度核查 + 计划落盘 → 1 测量与报告 → 2 去 COUNT + total 契约 + 内部计数端点 → 3 分级缓存 + 边缘缓存 + 代际键 + 中心化 purge → 4 物化列/索引（迁移 0029）→ 5 前端 staleTime（分页文案已随步骤 2 完成）→ 6 全站读面普查 → 7 验收复测 + 部署 + 最小化回读 → 8 文档与记忆收口。
+**分步**（每步一 commit + code-review-skill 过审）：0 基线 + 额度核查 + 计划落盘 → 1 测量与报告 → 2 去 COUNT + total 契约 + 内部计数端点 → 3 分级缓存 + 边缘缓存 + 代际键 + 中心化 purge → 4 物化列/索引（迁移 0029）→ 5 前端 staleTime（分页文案已随步骤 2 完成）→ 6 全站读面普查 → 7 验收复测 + 部署 + 最小化回读（**部署与最小化回读已于 2026-09-22 随步骤 0–5 提前执行**，见下方「部署与回读」；步骤 7 只剩增量收尾时的按形状复测与最终回读）→ 8 文档与记忆收口。
 
 **验收标准**：主指标 = **单形状上限**（步骤 1 实测后修正：默认浏览一页 ≤70 行，现 18,819 ⇒ 去 COUNT 后 56、命中缓存 0；有索引的排序/筛选形状 ≤70 行，实测 22–64；无索引的排序/筛选形状目标 ≤1,000 行且**必须靠新建索引达成**，本增量因写配额只能覆盖第一批，未覆盖的逐条写豁免理由）；**容量推演**替代实测日均（`5,000,000 ÷ 单次读量 = 每日可承受请求数`）；`npm run typecheck` 三份 tsconfig 全清、`npx vitest run` 全绿、`npm run test:e2e` 全绿、`npm run build` 成功；筛选/排序/分页结果与改前逐条一致（除 total 移除与分页条文案）。
 
@@ -445,6 +445,15 @@
   - `web/src/pages/market/MarketFreePage.tsx`：海捞申请成功后不失效 `qk.freeAgents`（同文件 `ActivateSection` 有失效先例）。补 `void qc.invalidateQueries({ queryKey: qk.freeAgents })`。
   - 🟢 记录未改：聚焦重取在 30s 内被抑制（`useUnreadCount` 的 60s 轮询本身不受影响）；列表 60s 与全局 30s 的粒度差是有意的。
 - **诚实记录**：全局那 30s 没有直接测试（`main.tsx` 在模块加载时就 `createRoot(...).render`，jsdom 里没法只 import 取它的 QueryClient），被锁住的是真正要紧的那条——球员库列表的 60s。
+
+**部署与回读（2026-09-22，步骤 0–5 一起上线；原计划在步骤 7，经用户指示提前）**：
+- 推送 `994ded9..dbf55c7`（6 个提交），`git rev-list --count origin/main..HEAD` = 0。
+- `npm run deploy`：Total Upload **532.29 KiB / gzip 126.89 KiB**（上传 18 文件、5 个已存在），绑 5 资源 + `AUTH_MODE=oidc` + `OIDC_ISSUER` + `OIDC_CLIENT_ID`（**vars 里已无 `PUBLIC_CACHE_TTL_MS`**，符合步骤 3 的口径改动），custom domain `club.whleague.win` + cron `*/5 * * * *`，CLI 回显 `Current Version ID: 4d6119f4-aa22-47ea-979b-ce9a46c6736f`。
+- `npx wrangler deployments status --name whl-club`：生产 100% 流量 Version **`91635aca-92d3-4921-8208-d9f7912aaec7`**（Created 2026-09-22T04:19:18Z）。**与增量 26/27 一样，CLI 回显与 deployments status 是两个值**（`4d6119f4-…` vs `91635aca-…`）。
+- 最小化回读 8 个请求（`scratch/readback28.mjs`）**全部符合预期**：`/api/health` 三资源 ok；`/api/players?limit=1` **响应已无 `total`** 且带 `nextCursor`（步骤 2 的契约在生产生效）；`?sort=name`、`?sort=prestige`、`?ps=125` 全 200；`/api/cron/players-count` 无密钥 **403 `cron 密钥不对`**、带 `X-Cron-Key` **200 `count=18301`**（fail-closed 守卫在生产生效）；`/api/players/roster` 200。
+- 线上前端产物核对：live `/players` 的 HTML 引用 **`index-DZu3s6Fn.js` + `index-C87Bz2k9.css`**，与本地 `web/dist/assets/` 同名 ⇒ 部署的正是本次构建。
+- 迁移：本步无新迁移（`0029` 已在步骤 4 apply），部署后 `d1 migrations list whl-club --remote` 仍报 No migrations to apply。
+- **步骤 7 的剩余部分**：只有「部署后按形状复测一遍读量」（步骤 4 已复测三条索引形状；去 COUNT 后的默认浏览 56 行/次已在步骤 1 后的本地路径验证，生产侧随这次回读间接确认），以及增量收尾时的最小化回读记录。
 - **验收**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 537 例全绿**（步骤 4 后基线 39/535，本步 +2）；`npm run build` 成功（`web/dist/assets/index-DZu3s6Fn.js` 451.07 kB / gzip 142.94 kB）；本地 8791 + `npm run test:e2e` **9/9 通过**。
 
 ---
