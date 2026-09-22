@@ -5,7 +5,7 @@ import positionRef from '../../assets/ref/position.json';
 import playstyleRef from '../../assets/ref/playstyle.json';
 import roleRef from '../../assets/ref/role.json';
 import teamRef from '../../assets/ref/team.json';
-import { isGoldPlaystyleId, PS_SILVER_SLOT_COUNT, PS_SLOT_KEYS } from '../../../src/core/fc26.ts';
+import { isGoldPlaystyleId, PS_SILVER_SLOT_COUNT, playstyleSlotsOf } from '../../../src/core/fc26.ts';
 
 export interface PlayStyleRow {
   id: number;
@@ -68,15 +68,10 @@ export interface PlaystyleBadgeSlot {
   gold: boolean;
 }
 
-// 属性页的徽章清单：按槽位键扫全 15 槽（银 1-12 + 金 13-15），只收有值的槽 —— 空槽不出现在
-// 清单里，免得铺一排「未设置」。清单来自 core 常量而不是页面里手抄，改段界时两边一起动。
+// 属性页的徽章清单：扫全 15 槽（银 1-12 + 金 13-15），只收有值的槽 —— 空槽不出现在清单里，
+// 免得铺一排「未设置」。扫描本身在 core（后端发放校验走同一份），这里只保留前端的类型别名。
 export function playstyleBadges(attrs: Record<string, unknown>): PlaystyleBadgeSlot[] {
-  return PS_SLOT_KEYS.flatMap((key, i) => {
-    const psid = Number(attrs[key]);
-    if (!Number.isInteger(psid) || psid <= 0) return [];
-    const slot = i + 1;
-    return [{ psid, slot, gold: playstyleIsGold(psid, slot) }];
-  });
+  return playstyleSlotsOf(attrs);
 }
 
 export function playstyleIconUrl(id: number): string {

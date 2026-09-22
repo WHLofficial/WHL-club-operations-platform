@@ -154,6 +154,152 @@ export function isGoldPlaystyleId(n: number): boolean {
   return n >= PS_GOLD_MIN;
 }
 
+// 可发放的 PlayStyle 基础 ID 白名单（增量 30）：FC26 一共 36 个基础项，金徽 = 基础 ID + 100，
+// 一份 36 项清单同时管住两段；与 web/assets/ref/playstyle.json 的银段逐项对齐（测试守住）。
+// 升级方案与中国计划只从这里发放 —— 光有「银 1-99 ∪ 金 101-199」的段界拦不住库里没有的 ID。
+export const PS_GRANTABLE_BASE_IDS: readonly number[] = [
+  1, 2, 3, 4, 5, 6, 7, 8,
+  11, 12, 13, 14, 15, 16,
+  21, 22, 23, 24, 25, 26,
+  31, 32, 33, 34, 35,
+  41, 42, 43, 44, 45,
+  51, 52, 53, 54, 55, 56,
+];
+
+export type PlaystyleKind = 'silver' | 'gold';
+
+// 存库 ID → 基础 ID（银徽原样、金徽减 100）
+export function basePlaystyleId(psid: number): number {
+  return isGoldPlaystyleId(psid) ? psid - PS_GOLD_BASE : psid;
+}
+
+// 基础 ID → 存库 ID（银徽原样、金徽加 100）
+export function playstyleIdOf(baseId: number, kind: PlaystyleKind): number {
+  return kind === 'gold' ? baseId + PS_GOLD_BASE : baseId;
+}
+
+export function playstyleKindOf(psid: number): PlaystyleKind {
+  return isGoldPlaystyleId(psid) ? 'gold' : 'silver';
+}
+
+export function isGrantablePlaystyleId(psid: number): boolean {
+  return isPlaystyleId(psid) && PS_GRANTABLE_BASE_IDS.includes(basePlaystyleId(psid));
+}
+
+// 槽位段界：银 1-12、金 13-15（发放落槽与筛选铺条件共用，别再各写一次段界）
+export function playstyleSlotRange(kind: PlaystyleKind): { min: number; max: number } {
+  return kind === 'gold'
+    ? { min: PS_SILVER_SLOT_COUNT + 1, max: PS_SLOT_COUNT }
+    : { min: 1, max: PS_SILVER_SLOT_COUNT };
+}
+
+// 该段里最小的空槽；段满返回 null
+export function nextFreePlaystyleSlot(kind: PlaystyleKind, usedSlots: readonly number[]): number | null {
+  const { min, max } = playstyleSlotRange(kind);
+  for (let slot = min; slot <= max; slot += 1) {
+    if (!usedSlots.includes(slot)) return slot;
+  }
+  return null;
+}
+
+export interface PlaystyleSlot {
+  slot: number;
+  psid: number;
+  gold: boolean;
+}
+
+// 按槽位键扫全 15 槽取球员已有的 PlayStyle（FC 源数据那一份）：空槽 / 0 / 非数字都不产出条目，
+// 免得铺一排「未设置」。属性页清单与后端发放校验共用，槽位口径只留 core 这一处。
+export function playstyleSlotsOf(attrs: Record<string, unknown>): PlaystyleSlot[] {
+  return PS_SLOT_KEYS.flatMap((key, i) => {
+    const psid = Number(attrs[key]);
+    if (!Number.isInteger(psid) || psid <= 0) return [];
+    const slot = i + 1;
+    return [{ slot, psid, gold: isGoldPlaystyleId(psid) || slot > PS_SILVER_SLOT_COUNT }];
+  });
+}
+
+export interface PlaystylePickPlan {
+  /** 本次要发放的银 / 金数量（来自升级方案或中国计划） */
+  silverCount: number;
+  goldCount: number;
+  /** 球员已拥有的 PlayStyle（存库形式）：FC 源槽 + 既有发放明细 */
+  ownedPsids: readonly number[];
+  /** 球员已占用的槽位号：FC 源槽 + 既有发放明细 */
+  usedSlots: readonly number[];
+}
+
+export type PlaystylePickOutcome =
+  | { ok: true; slots: PlaystyleSlot[] }
+  | { ok: false; message: string };
+
+// picks 校验与落槽（纯函数，写库前先把话说清楚）：picks 用存库形式（银 1-99 / 金 101-199），
+// kind 由 ID 自己决定，所以调用方不必额外声明哪几个是金的。
+export function planPlaystylePicks(picks: readonly number[], plan: PlaystylePickPlan): PlaystylePickOutcome {
+  const silver: number[] = [];
+  const gold: number[] = [];
+  for (const psid of picks) {
+    if (!isGrantablePlaystyleId(psid)) {
+      return { ok: false, message: `PlayStyle ${psid} 不在可发放清单里` };
+    }
+    const bucket = playstyleKindOf(psid) === 'gold' ? gold : silver;
+    if (bucket.includes(psid)) return { ok: false, message: '同一个 PlayStyle 不能在同一段里选两次' };
+    if (plan.ownedPsids.includes(psid)) {
+      return { ok: false, message: `PlayStyle ${psid} 已经在这名球员身上了` };
+    }
+    bucket.push(psid);
+  }
+  if (silver.length !== plan.silverCount) {
+    return { ok: false, message: `本次要发 ${plan.silverCount} 个银 PlayStyle，收到 ${silver.length} 个` };
+  }
+  if (gold.length !== plan.goldCount) {
+    return { ok: false, message: `本次要发 ${plan.goldCount} 个金 PlayStyle，收到 ${gold.length} 个` };
+  }
+  const usedSlots = [...plan.usedSlots];
+  const slots: PlaystyleSlot[] = [];
+  const assign = (kind: PlaystyleKind, ids: readonly number[]): string | null => {
+    for (const psid of ids) {
+      const slot = nextFreePlaystyleSlot(kind, usedSlots);
+      if (slot === null) {
+        const total = playstyleSlotRange(kind).max - playstyleSlotRange(kind).min + 1;
+        return `${kind === 'gold' ? '金' : '银'}槽已满（${total} 个）`;
+      }
+      usedSlots.push(slot);
+      slots.push({ slot, psid, gold: kind === 'gold' });
+    }
+    return null;
+  };
+  const silverIssue = assign('silver', silver);
+  if (silverIssue !== null) return { ok: false, message: silverIssue };
+  const goldIssue = assign('gold', gold);
+  if (goldIssue !== null) return { ok: false, message: goldIssue };
+  return { ok: true, slots };
+}
+
+// 属性页清单 = FC 源槽 + 发放明细。发放时已排除「已拥有」，但大换版折算后 FC 源数据整列换新，
+// 可能与留下的明细行撞同一项 ⇒ 按 (段, 基础 ID) 去重，撞了以 FC 源为准（那一份跟着版本走）。
+export interface GrantedPlaystyleSlot {
+  slot: number;
+  kind: PlaystyleKind;
+  /** 基础 ID（1-99） */
+  psid: number;
+}
+
+export function mergePlaystyleSlots(
+  fc: readonly PlaystyleSlot[],
+  granted: readonly GrantedPlaystyleSlot[],
+): PlaystyleSlot[] {
+  const out: PlaystyleSlot[] = fc.map((s) => ({ slot: s.slot, psid: s.psid, gold: s.gold }));
+  const seen = new Set(fc.map((s) => `${s.gold ? 'gold' : 'silver'}:${basePlaystyleId(s.psid)}`));
+  for (const g of granted) {
+    const key = `${g.kind}:${g.psid}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ slot: g.slot, psid: playstyleIdOf(g.psid, g.kind), gold: g.kind === 'gold' });
+  }
+  return out.sort((a, b) => a.slot - b.slot);
+}
+
 // 通道 B（FC Editor s901）必需列；姓名列 commonname/firstname/lastname 缺一可用
 export const FC_EDITOR_REQUIRED_COLUMNS = [
   'playerid',

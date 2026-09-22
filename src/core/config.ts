@@ -164,7 +164,8 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   trainee_xp_half: '15',
   china_xp_bonus: '20',
   china_badges: '3',
-  badge_cap_silver: '15',
+  // 增量 30：银徽上限与「12 个银槽」合并成一个口径（原先 15 只是台账计数上限，装不下第 13 个）
+  badge_cap_silver: '12',
   badge_cap_gold: '3',
   wage_param_a: '0.02',
   wage_param_b: '1.9',
