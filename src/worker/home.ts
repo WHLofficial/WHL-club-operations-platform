@@ -172,6 +172,11 @@ export function formPtsOf(
   return pts;
 }
 
+// ⚠️ 这里绑的是 club id，而 result_confirmations.home_team_id / away_team_id 存的是**比赛系统队 id**
+// （迁移 0017）。生产实测（2026-09-22）两套 id 逐队相等（20/20，AUTH_DB team 的 club_id = tour_team_id），
+// 且 20 队各有 6-7 条已确认赛果，所以现在算得出真值、不是恒中性。但这是数值巧合：米兰的 tour_team_id
+// 曾长期是 legacy 47 而 club_id 是 131681，那段时间本函数恒返中性 4。将来若有 club 的 id 不等于其
+// tour 队 id，本函数会静默退化成「永远中性」，届时按 prizes.ts 的 clubIdByTourTeam 先做映射再查。
 export async function clubFormPts(env: Env, clubId: number, excludeMatchId: number): Promise<number> {
   const { results } = await env.DB.prepare(
     `SELECT home_team_id, away_team_id, score_home, score_away, pen_home, pen_away, walkover_side
