@@ -7,31 +7,35 @@ import { requireUser } from '../../lib/session.ts';
 import { getBoundClub } from '../binding.ts';
 import { createConfigService } from '../../core/config.ts';
 import { applyLevelUp, getUpgradePlans, grantChinaPlaystyles, listPlayerPlaystyles, DEFAULT_UPGRADE_PLANS } from '../growth.ts';
+import { rowDisplayName } from '../../core/player-name.ts';
+import { firstPlayerByRef } from '../player-ref.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
 // 成长史（🌐 公开）：球员卡成长页数据源——XP 进度、徽章、待升级次数、事件时间线
+// `:id` 是 fc_id（兼容内部 id，见 src/worker/player-ref.ts）——球员页 URL 就是这个编号
 app.get('/players/:id/growth', async (c) => {
-  const playerId = Number(c.req.param('id'));
-  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
-  const player = await c.env.DB.prepare(
-    `SELECT id, name, ca, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold, growable, status
-     FROM players WHERE id = ?`,
-  )
-    .bind(playerId)
-    .first<{
-      id: number;
-      name: string;
-      ca: number;
-      growth_tier: number;
-      growth_xp: number;
-      levels_applied: number;
-      badges_silver: number;
-      badges_gold: number;
-      growable: number;
-      status: string;
-    }>();
+  const ref = Number(c.req.param('id'));
+  if (!Number.isInteger(ref) || ref <= 0) throw new HttpError(400, '球员 ID 不对');
+  const player = await firstPlayerByRef<{
+    id: number;
+    name: string;
+    display_name: string | null;
+    ca: number;
+    growth_tier: number;
+    growth_xp: number;
+    levels_applied: number;
+    badges_silver: number;
+    badges_gold: number;
+    growable: number;
+    status: string;
+  }>(
+    c.env.DB,
+    'id, name, display_name, ca, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold, growable, status',
+    ref,
+  );
   if (!player) throw new HttpError(404, '找不到这名球员');
+  const playerId = player.id;
 
   const config = createConfigService(c.env.DB);
   const xpPerLevel = (await config.getNumber('xp_per_level')) ?? 10;
@@ -62,7 +66,7 @@ app.get('/players/:id/growth', async (c) => {
   return c.json({
     player: {
       id: player.id,
-      name: player.name,
+      name: rowDisplayName(player),
       ca: player.ca,
       growthTier: player.growth_tier,
       growthXp: player.growth_xp,

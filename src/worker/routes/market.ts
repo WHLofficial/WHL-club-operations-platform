@@ -18,6 +18,7 @@ import { getOpenWindow, isWindowOpen } from '../seasons.ts';
 import { loadMarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
 import { availableBalance } from '../ledger.ts';
+import { sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue, settleListingForReview } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { createActivation } from '../activations.ts';
@@ -92,7 +93,7 @@ app.get('/market/listings', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
             l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
-            p.name AS player_name, p.position, p.age, p.ca, p.pa,
+            ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
@@ -277,14 +278,14 @@ app.get('/market/free-agents', async (c) => {
   //   等价性：club_id IS NULL 与 club_id ∈ CPU 队互斥（NULL 不等于任何值），两分支无重叠，
   //   且全局 top-300 必然包含在各分支的 top-300 之内。
   const nullClubBranch =
-    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa, cl.name AS club_name
+    `SELECT p.id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cl.name AS club_name
      FROM players p
      LEFT JOIN clubs cl ON cl.id = p.club_id
      WHERE p.club_id IS NULL AND p.status IN ('free', 'normal')
      ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
   // CPU 队球员的东家就是 cp 本身，所以 club_name 取 cp.name，不必再 LEFT JOIN 一次 clubs
   const cpuClubBranch =
-    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa, cp.name AS club_name
+    `SELECT p.id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cp.name AS club_name
      FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id
      WHERE cp.is_cpu = 1 AND p.status IN ('free', 'normal')
      ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
@@ -335,7 +336,7 @@ app.get('/market/trainees', async (c) => {
 
   const win = await getOpenWindow(c.env.DB);
   const rows = await c.env.DB.prepare(
-    `SELECT p.id, p.name, p.position, p.age, p.ca, p.pa, p.club_id, cl.name AS club_name
+    `SELECT p.id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, p.club_id, cl.name AS club_name
      FROM players p JOIN clubs cl ON cl.id = p.club_id
      WHERE p.status = 'trainee' AND p.club_id IS NOT NULL AND p.club_id != ?
      ORDER BY cl.name, p.id LIMIT 50`,
@@ -392,7 +393,7 @@ app.get('/market/listings/:id', async (c) => {
   const listing = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
             l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
-            p.name AS player_name, p.position, p.age, p.ca, p.pa,
+            ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name, ca2.name AS activator_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
@@ -664,7 +665,7 @@ app.get('/me/bids', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT b.id, b.listing_id, b.amount, b.created_at, b.status AS bid_status,
             f.status AS hold_status, l.status AS listing_status, l.ask_price,
-            p.id AS player_id, p.name AS player_name, p.position, p.ca, p.pa,
+            p.id AS player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
             cl.name AS seller_name
      FROM bids b
      JOIN listings l ON l.id = b.listing_id
@@ -715,7 +716,7 @@ app.get('/transfers/:id', async (c) => {
   const t = await c.env.DB.prepare(
     `SELECT t.id, t.type, t.player_id, t.from_club_id, t.to_club_id, t.fee, t.tax, t.extra_fee, t.matched,
             t.status, t.season, t.window_seq, t.created_at, t.completed_at,
-            p.name AS player_name,
+            ${sqlDisplayName('p')} AS player_name,
             cf.name AS from_name, ct.name AS to_name
      FROM transfers t
      JOIN players p ON p.id = t.player_id

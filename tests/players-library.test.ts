@@ -746,6 +746,119 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
   });
 });
 
+// ---- 增量 32：显示名（FC26 派生的「常叫人名」）贯通各面 + 球员页按 fc_id 寻址 ----
+//
+// 口径（src/core/player-name.ts）：显示名 = COALESCE(display_name, name)。display_name 是导入侧
+// 从 FC26 存档派生的（commonname 原样 → 名+姓 → 卡片全名兜底，见 scripts/player-names/），
+// 而 players.name 仍是 FC26db 的官方缩写名（导入对齐键 fc_id 的伴生语义），语义没变、只是不再当显示名用。
+// 搜索必须**两列都打**：几百人的显示名是 FC26 单词常用名（Ederson / Isaac），只看显示名按姓搜不到；
+// 只看官方缩写名则「Erling Haaland」这种全名搜不到。
+describe('显示名与 fc_id 寻址（增量 32）', () => {
+  function seedDisplay(sqlite: DatabaseSync): void {
+    sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '曼城', 'premier', 'active');
+      INSERT INTO players (id, uid, name, display_name, fc_id, club_id, position, age, ca, pa, growable, status) VALUES
+        (301, 'n1', 'E. Haaland',              'Erling Haaland', 239085, 1,    'ST',  25, 91, 93, 0, 'normal'),
+        (302, 'n2', 'Ederson Santana de Moraes', 'Ederson',      212602, 1,    'GK',  32, 87, 87, 0, 'normal'),
+        (303, 'n3', 'M. Ødegaard',              NULL,             NULL,   NULL, 'CAM', 27, 86, 88, 0, 'normal');
+    `);
+  }
+
+  it('列表：name 出显示名、officialName 出官方缩写名；没派生过的两人相同', async () => {
+    const fx = freshEnv();
+    seedDisplay(fx.sqlite);
+
+    const body = await list('/api/players?limit=100', fx.env);
+    const byId = new Map(body.players.map((p) => [p.id, p]));
+    expect(byId.get(301)).toMatchObject({ name: 'Erling Haaland', officialName: 'E. Haaland' });
+    expect(byId.get(302)).toMatchObject({ name: 'Ederson', officialName: 'Ederson Santana de Moraes' });
+    // 没派生（display_name 为 NULL）回落官方缩写名，officialName 与 name 相同 ⇒ 前端不显示小字
+    expect(byId.get(303)).toMatchObject({ name: 'M. Ødegaard', officialName: 'M. Ødegaard' });
+  });
+
+  it('搜索两列都命中：显示名搜得到、官方全名里独有的姓也搜得到', async () => {
+    const fx = freshEnv();
+    seedDisplay(fx.sqlite);
+    const ids = async (q: string) =>
+      (await list(`/api/players?name=${encodeURIComponent(q)}&limit=100`, fx.env)).players.map((p) => p.id);
+
+    expect(await ids('ederson')).toEqual([302]); // 显示名（FC26 单词常用名）
+    expect(await ids('santana')).toEqual([302]); // 只在官方缩写名里 ⇒ 第二个 OR 分支
+    expect(await ids('haaland')).toEqual([301]); // 两列都有
+    expect(await ids('erling')).toEqual([301]); // 只在显示名里 ⇒ 第一个 OR 分支
+    expect(await ids('odegaard')).toEqual([303]); // 折叠后搜：Ø → o
+    expect(await ids('zzzz')).toEqual([]);
+  });
+
+  // 显示名序与官方名序刻意相反：显示名序 [302('ederson'), 301('erling haaland'), 303('m. odegaard')]，
+  // 官方名序 [301('e. haaland'), 302('ederson …'), 303] ⇒ 这个用例能分辨实现用的是哪一列
+  it('sort=name 按显示名排（不是官方缩写名），升降两向与游标翻页都对', async () => {
+    const fx = freshEnv();
+    seedDisplay(fx.sqlite);
+
+    // 默认降序（除 id 外所有键都是 desc 优先）
+    const desc = await list('/api/players?sort=name&limit=100', fx.env);
+    expect(desc.players.map((p) => p.id)).toEqual([303, 301, 302]);
+    expect(desc.nextCursor).toBeNull();
+
+    const asc = await list('/api/players?sort=name&order=asc&limit=100', fx.env);
+    expect(asc.players.map((p) => p.id)).toEqual([302, 301, 303]);
+
+    const paged = await list('/api/players?sort=name&limit=1', fx.env);
+    expect(paged.players.map((p) => p.id)).toEqual([303]);
+    expect(paged.nextCursor).not.toBeNull();
+    const second = await list(`/api/players?sort=name&limit=1&cursor=${encodeURIComponent(paged.nextCursor!)}`, fx.env);
+    expect(second.players.map((p) => p.id)).toEqual([301]);
+  });
+
+  it('名册端点第三段用 fc_id（没有 fc_id 才回落内部 id）', async () => {
+    const fx = freshEnv();
+    seedDisplay(fx.sqlite);
+
+    const body = (await (await get('/api/players/roster', fx.env)).json()) as { roster: string; count: number };
+    expect(body.count).toBe(3);
+    // 行序 = ORDER BY players.id；俱乐部为空则省略中间段
+    expect(body.roster.split('\n')).toEqual(['Erling Haaland|1|239085', 'Ederson|1|212602', 'M. Ødegaard|303']);
+  });
+
+  it('详情按 fc_id 解析：回内部 id 与 fcId，老链接的内部 id 仍能用，查不到 404', async () => {
+    const fx = freshEnv();
+    seedDisplay(fx.sqlite);
+    const card = async (ref: string) => {
+      const res = await get(`/api/players/${ref}`, fx.env);
+      return { status: res.status, body: (await res.json()) as { player: { id: number; fcId: number | null; name: string; officialName: string } } };
+    };
+
+    const byFcId = await card('239085');
+    expect(byFcId.status).toBe(200);
+    expect(byFcId.body.player).toMatchObject({ id: 301, fcId: 239085, name: 'Erling Haaland', officialName: 'E. Haaland' });
+
+    // 老分享链接/前端缓存里可能还是内部 id：回落分支必须还在，且指向同一个人
+    const byId = await card('301');
+    expect(byId.status).toBe(200);
+    expect(byId.body.player.id).toBe(301);
+
+    expect((await card('999999')).status).toBe(404);
+  });
+
+  it('转会记录与成长史两个子端点同样按 fc_id 解析（内部 id 也能用）', async () => {
+    const fx = freshEnv();
+    seedDisplay(fx.sqlite);
+    const status = async (path: string) => (await get(path, fx.env)).status;
+
+    expect(await status('/api/players/239085/transfers')).toBe(200);
+    expect(await status('/api/players/301/transfers')).toBe(200);
+    expect(await status('/api/players/999999/transfers')).toBe(404);
+
+    const growth = await get('/api/players/239085/growth', fx.env);
+    expect(growth.status).toBe(200);
+    const growthBody = (await growth.json()) as { player: { id: number; name: string } };
+    // 成长史按内部 id 读表，但名字同样出显示名
+    expect(growthBody.player).toMatchObject({ id: 301, name: 'Erling Haaland' });
+    expect(await status('/api/players/999999/growth')).toBe(404);
+  });
+});
+
 // ---- 增量 26：表头每一列可点（排序键扩到 28 个）+ 文本键游标 ----
 
 // 期望顺序在 JS 侧独立重算：镜像的只有「权重表 + NULL 当 0」这两条口径，SQL 表达式不复用，

@@ -10,6 +10,7 @@ import { getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, tierCache } from '../tier.ts';
+import { rowDisplayName } from '../../core/player-name.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -20,6 +21,7 @@ function nowSql() {
 interface OwnedPlayerRow {
   id: number;
   name: string;
+  display_name: string | null;
   position: string | null;
   age: number | null;
   ca: number | null;
@@ -34,7 +36,7 @@ interface OwnedPlayerRow {
 
 async function loadOwnedPlayers(env: Env, clubId: number): Promise<OwnedPlayerRow[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, name, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
+    `SELECT id, name, display_name, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
      FROM players WHERE club_id = ? ORDER BY id LIMIT 500`,
   )
     .bind(clubId)
@@ -62,7 +64,7 @@ async function loadContractMap(env: Env, clubId: number): Promise<Map<number, Co
 function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadPlayer {
   return {
     playerId: p.id,
-    name: p.name,
+    name: rowDisplayName(p),
     position: p.position,
     ca: p.ca,
     pa: p.pa,
@@ -116,7 +118,7 @@ app.get('/club/squad', async (c) => {
       const contract = contractMap.get(p.id) ?? null;
       return {
         id: p.id,
-        name: p.name,
+        name: rowDisplayName(p),
         position: p.position,
         age: p.age,
         ca: p.ca,

@@ -8,6 +8,8 @@ import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, isGoldPlaystyleId, isPlaystyleId } from '../../core/fc26.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
+import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
+import { firstPlayerByRef } from '../player-ref.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
 import { playerAbilityLevel } from '../home.ts';
 
@@ -60,7 +62,9 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
     id: 'players.id',
     // uid = 'fc' + fcId（core/import.ts:154/218），表里显示的是去掉前缀的号，排序也按号不走字符串
     uid: "COALESCE(CAST(SUBSTR(players.uid, 3) AS INTEGER), 0)",
-    name: sqlFold('players.name'),
+    // 按显示名排（增量 32）：表里显示的是派生全名，排序就得按同一个值，否则「看着是 Erling Haaland
+    // 却排在 E 段」。键名仍是 name（URL 参数不变）；表达式与迁移 0033 的索引必须逐字同源
+    name: sqlFold(sqlDisplayName()),
     club: 'COALESCE(players.club_id, 0)',
     position: POSITION_SORT_CASE,
     age: 'COALESCE(players.age, 0)',
@@ -270,8 +274,14 @@ function buildPlayerFilters(
     // 去变音搜索（增量 26）：库内是 FC 拉丁名（Šeško/Ødegaard/Çalhanoğlu…），查询词与列值
     // 都经 name-fold 折叠后比对，否则 sa 搜不到 Š 这类字母。折叠规则两侧同源（见 core/name-fold.ts）：
     // 参数侧走 JS foldName，列侧走同表生成的 REPLACE 链内联表达式，两侧都只做「查表 + ASCII 小写」。
-    filters.push(`${sqlFold('players.name')} LIKE ? ESCAPE '\\'`);
-    filterArgs.push(likeContains(folded));
+    // 显示名与缩写名两列都匹配（增量 32）：几百人的显示名是 FC26 单词常用名（`Ederson`、`Isaac`），
+    // 只看显示名按姓搜不到；反过来只看 name，`Erling Haaland` 这类派生全名搜不到。
+    // 两条折叠表达式各自独立（深度各自 88 层，未叠加），行读量与单列相同（同一次全表扫）。
+    const pattern = likeContains(folded);
+    filters.push(
+      `(${sqlFold(sqlDisplayName())} LIKE ? ESCAPE '\\' OR ${sqlFold('players.name')} LIKE ? ESCAPE '\\')`,
+    );
+    filterArgs.push(pattern, pattern);
   }
   const growable = c.req.query('growable');
   if (growable !== undefined) {
@@ -558,7 +568,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   const where = filters.length + cursorConds.length > 0 ? `WHERE ${[...filters, ...cursorConds].join(' AND ')}` : '';
   const needSortKey = sortRaw !== 'id';
   const rows = await c.env.DB.prepare(
-    `SELECT players.id, players.uid, players.name, players.club_id, players.position, players.age, players.foot,
+    `SELECT players.id, players.uid, players.name, players.display_name, players.club_id, players.position, players.age, players.foot,
             ${caExpr} AS ca, ${paExpr} AS pa, players.ca AS cur_ca, players.pa AS cur_pa,
             players.base_ca, players.fc_id,
             players.prestige, players.market_value, players.status,
@@ -583,6 +593,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       id: number;
       uid: string;
       name: string;
+      display_name: string | null;
       club_id: number | null;
       position: string | null;
       age: number | null;
@@ -644,7 +655,10 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   const players = rows.results.slice(0, limit).map((r) => ({
     id: r.id,
     uid: r.uid,
-    name: r.name,
+    // 显示名与官方缩写名分开给（增量 32）：`name` = 派生显示名（表里显示的是它），
+    // `officialName` = FC26db 缩写名，前端在标题下用小字标注，相同时不显示
+    name: rowDisplayName(r),
+    officialName: r.name,
     clubId: r.club_id,
     clubName: r.club_name,
     position: r.position,
@@ -760,53 +774,61 @@ app.get('/players/roster', async (c) => {
 
 async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: string; count: number }> {
   const row = await c.env.DB.prepare(
+    // 姓名取显示名、第三字段取 fc_id（增量 32，前端据此拼规范球员页 URL）。fc_id 生产 18301 行全覆盖，
+    // COALESCE 兜底只为守住「行数 = count」这条不变量：`||` 遇 NULL 会把整行抹成 NULL，
+    // group_concat 会静默少一行，那时行数与 count 对不上、前端反查就会错位。
     `SELECT COUNT(*) AS n, group_concat(line, char(10)) AS roster FROM (
-       SELECT replace(replace(players.name, char(13), ' '), char(10), ' ')
+       SELECT replace(replace(${sqlDisplayName()}, char(13), ' '), char(10), ' ')
               || CASE WHEN players.club_id IS NULL THEN '' ELSE '|' || players.club_id END
-              || '|' || players.id AS line
+              || '|' || COALESCE(players.fc_id, players.id) AS line
        FROM players ORDER BY players.id)`,
   ).first<{ n: number; roster: string | null }>();
   return { roster: row?.roster ?? '', count: row?.n ?? 0 };
 }
 
 // GET /api/players/:id —— 球员卡数据（球员 + 俱乐部 + 现行合同 + FC 存档）
-app.get('/players/:id', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');
+// `:id` 是裸数字 fc_id（兼容内部 id，见 src/worker/player-ref.ts）：前端据此把 URL 规范成 fc_id。
+// 响应里 `id` 仍是内部主键（写端点只认它），`fcId` 是 URL 用的那个编号。
+interface PlayerDetailRow {
+  id: number;
+  fc_id: number | null;
+  uid: string;
+  name: string;
+  display_name: string | null;
+  club_id: number | null;
+  position: string | null;
+  foot: number;
+  age: number | null;
+  ca: number;
+  pa: number;
+  growable: number;
+  prestige: number | null;
+  market_value: number | null;
+  status: string;
+  growth_tier: number;
+  growth_xp: number;
+  is_future_star: number;
+  china_plan: number;
+  agent_tier: number;
+  badges_silver: number;
+  badges_gold: number;
+  game_attrs: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
-  const p = await c.env.DB.prepare(
-    `SELECT id, uid, name, club_id, position, foot, age, ca, pa, growable, prestige, market_value,
-            status, growth_tier, growth_xp, is_future_star, china_plan, agent_tier,
-            badges_silver, badges_gold, game_attrs, created_at, updated_at
-     FROM players WHERE id = ?`,
-  )
-    .bind(id)
-    .first<{
-      id: number;
-      uid: string;
-      name: string;
-      club_id: number | null;
-      position: string | null;
-      foot: number;
-      age: number | null;
-      ca: number;
-      pa: number;
-      growable: number;
-      prestige: number | null;
-      market_value: number | null;
-      status: string;
-      growth_tier: number;
-      growth_xp: number;
-      is_future_star: number;
-      china_plan: number;
-      agent_tier: number;
-      badges_silver: number;
-      badges_gold: number;
-      game_attrs: string | null;
-      created_at: string;
-      updated_at: string;
-    }>();
+const PLAYER_DETAIL_COLUMNS =
+  `id, fc_id, uid, name, display_name, club_id, position, foot, age, ca, pa, growable, prestige, market_value,
+   status, growth_tier, growth_xp, is_future_star, china_plan, agent_tier,
+   badges_silver, badges_gold, game_attrs, created_at, updated_at`;
+
+app.get('/players/:id', async (c) => {
+  const ref = Number(c.req.param('id'));
+  if (!Number.isInteger(ref)) throw new HttpError(400, '球员 ID 不对');
+
+  const p = await firstPlayerByRef<PlayerDetailRow>(c.env.DB, PLAYER_DETAIL_COLUMNS, ref);
   if (!p) throw new HttpError(404, '球员不存在');
+  const id = p.id;
 
   const [club, contract, ticksRow] = await Promise.all([
     p.club_id
@@ -849,8 +871,10 @@ app.get('/players/:id', async (c) => {
   return c.json({
     player: {
       id: p.id,
+      fcId: p.fc_id,
       uid: p.uid,
-      name: p.name,
+      name: rowDisplayName(p),
+      officialName: p.name,
       clubId: p.club_id,
       position: p.position,
       foot: p.foot,
@@ -893,12 +917,14 @@ app.get('/players/:id', async (c) => {
 });
 
 // GET /api/players/:id/transfers —— 这名球员的转会记录（只列已完成单据，最近 50 条）
-// 口径与 /players/:id 一致：公开只读、不加限流与缓存（单球员单页面的低频查询）。
+// 口径与 /players/:id 一致：公开只读、不加限流与缓存（单球员单页面的低频查询），`:id` 同样是 fc_id。
 app.get('/players/:id/transfers', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (!Number.isInteger(id)) throw new HttpError(400, '球员 ID 不对');
-  const exists = await c.env.DB.prepare('SELECT 1 AS ok FROM players WHERE id = ?').bind(id).first<{ ok: number }>();
-  if (!exists) throw new HttpError(404, '球员不存在');
+  const ref = Number(c.req.param('id'));
+  if (!Number.isInteger(ref)) throw new HttpError(400, '球员 ID 不对');
+  // 转会记录按内部 player_id 关联，所以先解析出内部 id（命中 fc_id 时只有一次点查）
+  const found = await firstPlayerByRef<{ id: number }>(c.env.DB, 'id', ref);
+  if (!found) throw new HttpError(404, '球员不存在');
+  const id = found.id;
 
   const rows = await c.env.DB.prepare(
     `SELECT t.id, t.type, t.from_club_id, t.to_club_id, t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at,

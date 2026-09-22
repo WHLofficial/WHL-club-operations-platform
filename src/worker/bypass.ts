@@ -19,6 +19,7 @@ import {
 } from './transfers.ts';
 import { openNegotiationSession } from './negotiations.ts';
 import { cpuClubIds } from './growth.ts';
+import { rowDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -32,6 +33,7 @@ interface RcChangeEvidence {
 interface OwnPlayerRow {
   id: number;
   name: string;
+  display_name: string | null;
   club_id: number | null;
   status: string;
 }
@@ -186,7 +188,7 @@ export async function createRcChange(
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能续约', 'no_window');
 
   const player = await db
-    .prepare('SELECT id, name, club_id, status FROM players WHERE id = ?')
+    .prepare('SELECT id, name, display_name, club_id, status FROM players WHERE id = ?')
     .bind(playerId)
     .first<OwnPlayerRow>();
   if (!player) throw new HttpError(404, '球员不存在');
@@ -233,7 +235,7 @@ export async function createRcChange(
     payload: {
       kind: 'rc_change',
       playerId,
-      playerName: player.name,
+      playerName: rowDisplayName(player),
       clubId,
       oldReleaseFee: oldRc,
       newReleaseFee: newFee,
@@ -268,7 +270,7 @@ export async function createTermination(
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能解约', 'no_window');
 
   const player = await db
-    .prepare('SELECT id, name, club_id, status FROM players WHERE id = ?')
+    .prepare('SELECT id, name, display_name, club_id, status FROM players WHERE id = ?')
     .bind(playerId)
     .first<OwnPlayerRow>();
   if (!player) throw new HttpError(404, '球员不存在');
@@ -310,7 +312,7 @@ export async function createTermination(
     payload: {
       kind: 'termination',
       playerId,
-      playerName: player.name,
+      playerName: rowDisplayName(player),
       clubId,
       terminationFee: fee,
       season: win.season,
@@ -349,7 +351,7 @@ export async function createFreeAgent(
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能海捞', 'no_window');
 
   const player = await db
-    .prepare('SELECT id, name, club_id, status FROM players WHERE id = ?')
+    .prepare('SELECT id, name, display_name, club_id, status FROM players WHERE id = ?')
     .bind(playerId)
     .first<OwnPlayerRow>();
   if (!player) throw new HttpError(404, '球员不存在');
@@ -391,7 +393,7 @@ export async function createFreeAgent(
     payload: {
       kind: 'free_agent',
       playerId,
-      playerName: player.name,
+      playerName: rowDisplayName(player),
       clubId,
       newReleaseFee: newFee,
       signFee,

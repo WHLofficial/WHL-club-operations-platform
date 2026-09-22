@@ -14,6 +14,7 @@ import { closedRegularTicks } from '../contract-ticks.ts';
 import { POSITION_BY_ID, POSITION_GROUP_BY_POSITION, POSITION_GROUPS } from '../../core/fc26.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
+import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
 import { quoteBrands, signNaming, terminateNaming, getActiveNaming, loadNamingParams } from '../naming-ops.ts';
 import { getVisibleSeason } from '../seasons.ts';
@@ -247,7 +248,7 @@ function mean1(values: number[]): number | null {
 
 // 转会记录：与 /api/players/:id/transfers 同一形状（LEFT JOIN clubs 双别名 + 同一排序），
 // 球队维度按转入/转出各取 10 条，并补球员名（球队页只看到金额没有意义）。
-const CLUB_TRANSFER_SQL = (side: 'from' | 'to') => `SELECT t.id, t.type, t.player_id, p.name AS player_name,
+const CLUB_TRANSFER_SQL = (side: 'from' | 'to') => `SELECT t.id, t.type, t.player_id, ${sqlDisplayName('p')} AS player_name,
          t.from_club_id, fc.name AS from_club_name, t.to_club_id, tc.name AS to_club_name,
          t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at
   FROM transfers t

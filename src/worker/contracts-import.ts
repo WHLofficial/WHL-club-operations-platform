@@ -13,6 +13,7 @@ import {
 import { CPU_CLUB_IDS_SQL, cpuClubIds } from './growth.ts';
 import { protectionTicksFor } from '../core/bypass-rules.ts';
 import { windowBaseTicks } from './contract-ticks.ts';
+import { rowDisplayName } from '../core/player-name.ts';
 
 const CHUNK_ROWS = 200; // 每 db.batch 一个事务批次
 
@@ -82,15 +83,15 @@ interface ClassifyResult {
 async function classify(db: D1Database, clubId: number, contracts: NormalizedContract[]): Promise<ClassifyResult> {
   // CPU 队球员带 club_id 但照旧可被认领（增量 14，用户裁决）：认领 = 从 CPU 队转入本队
   const cpuIds = await cpuClubIds(db);
-  const idRows = await lookupIn<{ id: number; fc_id: number; club_id: number | null; name: string }>(
+  const idRows = await lookupIn<{ id: number; fc_id: number; club_id: number | null; name: string; display_name: string | null }>(
     db,
     contracts.map((c) => c.fcId),
-    (ph) => `SELECT id, fc_id, club_id, name FROM players WHERE fc_id IN (${ph})`,
+    (ph) => `SELECT id, fc_id, club_id, name, display_name FROM players WHERE fc_id IN (${ph})`,
   );
   const byId = new Map<number, PlayerRow>();
   const fcToId = new Map<number, number>();
   for (const r of idRows) {
-    byId.set(r.id, { id: r.id, club_id: r.club_id, name: r.name });
+    byId.set(r.id, { id: r.id, club_id: r.club_id, name: rowDisplayName(r) });
     fcToId.set(r.fc_id, r.id);
   }
 

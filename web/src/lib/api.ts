@@ -251,7 +251,10 @@ export interface ClubStanding {
 export interface PlayerListItem {
   id: number;
   uid: string;
+  /** 显示名（增量 32）：FC26 存档派生的人名，派生不到（长尾球员）时回落官方缩写名 */
   name: string;
+  /** FC26db 官方缩写名（`E. Haaland`）：与显示名不同时列在名字下方小字 */
+  officialName?: string;
   clubId: number | null;
   position: string | null;
   age: number | null;

@@ -13,6 +13,7 @@ import {
   type PlaystyleSlot,
 } from '../core/fc26.ts';
 import { queueClubNotification } from './notify.ts';
+import { rowDisplayName } from '../core/player-name.ts';
 import type { Env } from './env.ts';
 
 // §10.1 事件类型（growth_events.event_type）
@@ -425,11 +426,11 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
   // 升级待办清单（待办数 = floor(xp/10) − 已消费；发放走 /api/growth/levelup/:playerId）
   const pending = await db
     .prepare(
-      `SELECT id, name, growth_tier, CAST(growth_xp / ? AS INTEGER) - levels_applied AS pending
+      `SELECT id, name, display_name, growth_tier, CAST(growth_xp / ? AS INTEGER) - levels_applied AS pending
        FROM players WHERE CAST(growth_xp / ? AS INTEGER) - levels_applied > 0 ORDER BY id LIMIT 200`,
     )
     .bind(xpPerLevel, xpPerLevel)
-    .all<{ id: number; name: string; growth_tier: number; pending: number }>();
+    .all<{ id: number; name: string; display_name: string | null; growth_tier: number; pending: number }>();
 
   await writeAudit(db, {
     actor,
@@ -447,7 +448,7 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
     traineeCount: trainees.length,
     chinaCount: china.length,
     milestonesGranted,
-    pendingLevelUps: pending.results.map((r) => ({ playerId: r.id, name: r.name, growthTier: r.growth_tier, pending: r.pending })),
+    pendingLevelUps: pending.results.map((r) => ({ playerId: r.id, name: rowDisplayName(r), growthTier: r.growth_tier, pending: r.pending })),
   };
 }
 
@@ -581,11 +582,12 @@ export async function applyLevelUp(
 }> {
   const db = env.DB;
   const player = await db
-    .prepare('SELECT id, name, club_id, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = ?')
+    .prepare('SELECT id, name, display_name, club_id, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = ?')
     .bind(playerId)
     .first<{
       id: number;
       name: string;
+      display_name: string | null;
       club_id: number | null;
       growth_tier: number;
       growth_xp: number;
@@ -641,7 +643,7 @@ export async function applyLevelUp(
   });
   // 通知教练（§12；尽力而为，没绑 QQ 静默跳过）
   await queueClubNotification(env, player.club_id, 'levelup', {
-    player: player.name,
+    player: rowDisplayName(player),
     ca: plan.ca,
     silver: plan.silver,
     gold: plan.gold,

@@ -11,6 +11,7 @@ import { loadSquadContext } from '../../squad-context.ts';
 import { loadTransfer, rejectTransfer } from '../../transfers.ts';
 import { approveTransferDeal } from '../../bypass.ts';
 import { deriveClubTier, tierCache } from '../../tier.ts';
+import { sqlDisplayName } from '../../../core/player-name.ts';
 import { readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -33,13 +34,13 @@ app.get('/registrations', async (c) => {
   if (season === null) return c.json({ season: null, clubs: [] });
 
   const rows = await c.env.DB.prepare(
-    `SELECT r.club_id, r.player_id, r.squad, p.name AS player_name,
+    `SELECT r.club_id, r.player_id, r.squad, ${sqlDisplayName('p')} AS player_name,
             c.name AS club_name, ct.wage
      FROM registrations r
      JOIN players p ON p.id = r.player_id
      JOIN clubs c ON c.id = r.club_id
      LEFT JOIN contracts ct ON ct.player_id = r.player_id AND ct.is_active = 1 AND ct.club_id = r.club_id
-     WHERE r.season = ? ORDER BY r.club_id, r.squad, p.name LIMIT 2000`,
+     WHERE r.season = ? ORDER BY r.club_id, r.squad, ${sqlDisplayName('p')} LIMIT 2000`,
   )
     .bind(season)
     .all<{
@@ -100,7 +101,7 @@ app.get('/compliance', async (c) => {
     name: string;
   }>();
   const regRows = await c.env.DB.prepare(
-    `SELECT r.club_id, r.player_id, r.squad, p.name, p.position, p.ca, p.pa, p.base_ca, p.growable,
+    `SELECT r.club_id, r.player_id, r.squad, ${sqlDisplayName('p')} AS name, p.position, p.ca, p.pa, p.base_ca, p.growable,
             ct.player_id AS contract_player_id, ct.wage
      FROM registrations r
      JOIN players p ON p.id = r.player_id
@@ -209,7 +210,7 @@ app.get('/reviews', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT rt.id, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
             t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax, t.extra_fee,
-            t.player_id, p.name AS player_name, p.position, p.ca, p.pa,
+            t.player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
             cf.name AS from_name, ct.name AS to_name
      FROM review_tasks rt
      JOIN transfers t ON t.id = rt.ref_id

@@ -14,6 +14,7 @@ import { attemptExpected, directFail, expectedWage, satisfactionText, successRat
 import { loadNegotiationContext, type AgentTierParams } from './negotiation-context.ts';
 import { completeTransfer, loadTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
 import { createAuditStatement } from '../lib/audit.ts';
+import { sqlDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -456,7 +457,7 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source,
               t.type AS transfer_type, t.status AS transfer_status, t.fee,
               cf.name AS from_name, ct.name AS to_name, c_cur.release_fee AS current_rc,
-              p.id AS player_id, p.name AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier
+              p.id AS player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier
        FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
        JOIN players p ON p.id = s.player_id
