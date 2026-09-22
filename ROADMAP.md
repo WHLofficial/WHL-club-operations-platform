@@ -655,6 +655,49 @@
 **待办**：① `players.market_value` 生产 18,301 行全 NULL 且无录入入口 ⇒ 球队页「总身价」指标全站恒显示 `—`（产品级待决：运营补录 / 给派生公式 / 撤掉该指标，见步骤 12）；② `CoachPanel`（874 行）搬迁后无专属组件测试，只有经详情页的 2 条冒烟断言（搬迁前就存在的覆盖薄弱）；③ `clubFormPts` 的 id 口径可择机改成显式映射（见步骤 9）；④ 顶栏「球队中心」tab 仍指向 `/club`，重定向后高亮落在「球队」tab —— 已接受（给 TopBar 加 `useMyClub()` 会让每个登录用户每次加载多打一次 `/api/me/club`，与省 D1 额度主线相悖）；⑤ 年龄档界不再包含当季 `age_cap`（步骤 11a 的已知代价，等宽箱优先）；⑥ 本机 e2e 的球队页读端点仍是打桩（本地 TOUR_DB `team` 表 schema 陈旧），若将来本地库补到与生产同形，可撤桩改成真端到端；⑦ 运营组左列留白约 150px（步骤 11b 已知取舍）。
 
 
+## 增量 32 · 球员名口径改造——FC26 派生显示名 + 球衣号归属转移 + 档案页按 fc_id 寻址
+
+**状态**：2026-09-23 完成步骤 1–8（8 个提交），本地全绿（typecheck 三份 / vitest **47 文件 659 例** / build / e2e **11/11**）。**未推送、未部署**（生产迁移仍到 0031），等令。跨仓部分（赛事平台转只读 + 阵容同步）另立增量 33。
+
+**缘起**：用户 m01803「开工」，任务 = 球员名口径改造（显示名取自 FC26 存档）+ 球衣号归属从赛事平台转回本平台 + 球员档案页 URL 改 fc_id + 两系统阵容同步 + D1 读额度优化。基线经两轮重查修订（计划稿假设 HEAD=`466df81`，实测已到 `d759b86` ⇒ 增量 31 球队页已推送部署，本增量编号由 31 改 32、迁移号仍 0032/0033）。
+
+**范围与交付**
+- 迁移 `0032_players_display_name_number.sql`：`players` 加 `first_name` / `last_name` / `common_name` / `display_name` / `number` 五列（全 TEXT）。
+- `scripts/player-names/`：`derive.mjs`（读 FC26 存档 + 三份远端只读查询，产出落库 SQL）+ `load.mjs`（逐条语句写 D1）+ `README.md`。
+- 迁移 `0033_players_name_sort_index.sql`：姓名排序表达式索引（排序键换显示名后同源重建）。
+- 端点：`POST /api/club/players/:id/number`（球衣号，仅所属俱乐部教练）；`GET /players/:id` 与 `/transfers`、`/growth` 三个读端点改按 **fc_id** 寻址（内部 id 回落）；列表/详情/roster/市场/谈判/审核/球队页等 11 个携带球员名的面全部出显示名。
+- 前端：球员档案页 URL 自动规范化到 fc_id、标题补官方缩写名小字；11 处球员链接统一走 `playerPath()`；合同页签恒有「球衣号」行（教练可改）；阵容表加只读号码列；谈判成约后弹「给新援定号」（可跳过）。
+
+**不做**：动 `players.name` 语义（仍是 FC26db 官方缩写名，导入对齐键仍是 fc_id）、给导入模板换显示名、赛事平台侧改动（属增量 33）、生产数据落库（`load.mjs --remote` 需双开关 + 用户授权）。
+
+**技术路径**
+- **① 显示名派生（三源优先级）** —— `commonname 原样 || (名 && 姓 ? 名+' '+姓) || cards.csv 完整人名（同 pid 多行名字矛盾则弃用） || 空`，空交回 SQL 回落 `players.name`。三源：`E:/FC26 LE v26.3.5/player_presets/base_players.csv`（22,348 行 × 149 列，四个文本姓名列**全空**，只有 nameid：`playerid`=0 / `firstnameid`=114 / `lastnameid`=145 / `playerjerseynameid`=146 / `commonnameid`=147）、`E:/FST存档修改器编辑器v1.2.0/config/playernames.txt`（UTF-16LE，41,190 条，max nameid 41,189）、`E:/FC26 LE v26.3.5/player_presets/cards.csv`（24,731 行，法定全名，18,850 个 pid）。**cards 只能兜底不能当主口径**：与赛事系统逐字命中只有 418/570（`Cristiano Ronaldo dos Santos Aveiro` vs tour `Cristiano Ronaldo`、`Li Hao` vs `Hao Li` 语序不同），且 21 个 pid 的多行名字自相矛盾。**不加「补姓」启发式**：俱乐部 149 个 commonname 里 51 人本就是单词（`Ederson`/`Rodrygo`/`Gabriel`/`Antony`/`Marquinhos`），tour 也正是这么写的，补姓会把它们全改坏（`Ederson` → `Ederson Santana de Moraes`）。
+- **② 显示名贯通（口径只此一处）** —— 新建 `src/core/player-name.ts`：`sqlDisplayName(table = 'players')` → `COALESCE(${table}.display_name, ${table}.name)`、`rowDisplayName(row)` → `row.display_name ?? row.name`。列表/详情/roster/市场/谈判/审核/球队页转会/结算通知/导入报错文案共 11 个面改用它；**故意不改** `src/worker/players-import.ts`（FC26 官方缩写名是导入对齐键 fc_id 的伴生语义，导入模板里就是它）与 `src/worker/results.ts` 读的 TOUR_DB `player.name`（那是 tour 自己的全名）。列表行同时出 `officialName`（= `players.name`），前端在两者不同时出小字。**搜索必须两列 OR**：`` (`${sqlFold(sqlDisplayName())} LIKE ? ESCAPE '\\' OR ${sqlFold('players.name')} LIKE ? ESCAPE '\\') `` 同一 pattern 推两次 —— 只看显示名则按姓搜不到几百个单词显示名的人（`Ederson`/`Isaac`），只看 `name` 则 `Erling Haaland` 搜不到。
+- **③ fc_id 寻址** —— 新建 `src/worker/player-ref.ts`：`firstPlayerByRef<T>(db, columns, ref)` 先 `WHERE fc_id = ?` 点查、未命中再 `WHERE id = ?`。fc_id 空间 19541–279948 与内部 id 1–18301 零重叠，但**不靠区间判断**；两次都是唯一索引点查（实测 `SEARCH players USING COVERING INDEX sqlite_autoindex_players_2 (fc_id=?)` / `USING INTEGER PRIMARY KEY (rowid=?)`），保留 id 回落是因为老分享链接与前端缓存里可能还是内部 id。**写端点一律只收内部 id**（调用方手上有详情载荷的 `id`）。前端新增 `web/src/lib/player-link.ts` 的 `playerPath(p) => /players/${p.fcId ?? p.id}`，11 处链接全走它（散在 11 处手写模板串必漂移）；名册第三段 `COALESCE(fc_id, id)` 与它同源，`RosterEntry.id` 随之改名 `fcId`。
+- **④ 迁移 0033（同源表达式索引）** —— 排序键从「折叠的官方缩写名」换成「折叠的显示名」后，`sort=name` 原本就是 37,635 行/次全表扫（`scripts/d1-read-audit/README.md:64` 明写「无索引 + 折叠表达式」，0027 只覆盖 ca/pa/age/market_value、0029 只覆盖 prestige/club/status），所以这不是「让已有索引失效」而是继续裸奔 ⇒ 补 `idx_players_sort_name`。**两个非显然约束**：SQLite **禁止索引表达式里出现限定列名**（`COALESCE(players.display_name, players.name)` 报 `the "." operator prohibited in index expressions`）⇒ 索引侧写非限定名 `COALESCE(display_name, name)`，而限定名查询表达式**仍能命中**（实测 ORDER BY 形状 `SCAN players USING INDEX idx_probe_name_fold`、游标形状 `SEARCH … USING INDEX … (<expr>>?)`），同源性靠 EXPLAIN 锁死而非文本比对；NAME_FOLD 87 项链深贴 D1 上限 100，建索引前用真引擎实测过（WHERE / ORDER BY / 游标三种形状 + CREATE INDEX 全过）。尾列 `id` 是 keyset 游标 `(排序键, id)` 双列比较所需。
+- **⑤ 球衣号归属转移** —— 号码原属赛事平台（`whl.player.number`，570 行全有值、纯整数、1–99），本增量搬回本平台：端点校验整数 1–99、同俱乐部不重复（查后写，理由写在注释里：`players` 是全局表，唯一索引只认列与常量、不认关联子查询，做不出「按 club_id 分区唯一」，20 队 / 570 人规模一次点查足够）、`null`/`''` = 清号（正常操作）、写 `audit_log`、`AND club_id = ?` 写闸。**换队/解约即清号**（球衣号是俱乐部的东西，留着旧号会让「同队不重复」在两个队之间打架），`contracts-import` 的认领 UPDATE 同样清。缓存不用手接：`src/lib/cache-policy.ts` 的 `WRITE_SCOPE_PREFIXES` 含 `['/api/club', PUBLIC_SCOPES]`，`POST /api/club/players/:id/number` 自动三 scope 全 purge。
+- **⑥ 比赛结果按 fc_id 认人** —— `src/worker/results.ts` 的 `recordAutoXpForMatch` 原先靠 `club_id + name` 等值匹配，而 tour 存完整人名、本库存官方缩写名 ⇒ 两侧写法不同的人会漏。改为先 `WHERE fc_id = ?`（**不按 club_id 过滤** —— 事件归属的是「这个人」，转会后旧比赛仍算他的成长）、`??` 再姓名回落。队名仍按「队名 = 俱乐部名」解（零封要的是当场那支队的防守位置表）。
+- **⑦ 落库脚本** —— `derive.mjs` 产出 `out/display_name.sql`（17,470 条 / 959,842 B，每 1,000 行一条 `WITH v(fc,fn,ln,cn,dn) AS (VALUES …) UPDATE … FROM v WHERE players.fc_id = v.fc`）、`out/number.sql`（570 条）、`out/display-names.csv`（审计表）；空值写 NULL 而非空串（否则 `COALESCE` 不回落）。`load.mjs` 按单引号切语句（人名里的分号不会切断、`''` 转义安全）、逐条写临时文件走 `--file`（Windows 命令行放不下 50KB 的 `--command`）、`--dry-run` / `--local` / `--remote --yes-prod`（双开关）。
+
+**裁决**：`players.name` 语义不变、显示处一律 `COALESCE(display_name, name)`；显示名规则 = commonname 优先（不加补姓启发式）；cards.csv 只作兜底；`/players/:id` 的 `:id` 用裸数字 fc_id（内部 id 回落，前端 replace 成规范 URL）；号码 1–99、同队不重复、换队/解约清空；号码明细存基础 ID（增量 30 的 `player_playstyles` 口径不变）；赛事平台球员表转只读（增量 33）。
+
+**分步**（每步一 commit）：1 迁移 0032 + `tests/d1.ts`（`c07c18a`）→ 2 派生脚本（`54a98ef`）→ 3 显示名贯通后端 + 4 fc_id 寻址（`341c7cd`）→ 迁移 0033 + 排序索引锁死测试（`e2d81ed`）→ 5 号码端点与三处 UI（`097cd34`）→ 6 链接改 fcId + 官方名小字 + 旧 id 替换（`6135bbc`）→ 7 results 按 fc_id 归属（`770875b`）→ 8 验收复测 + 文档收口（本节）→ 评审修复（`0e6a524`）。另有 `0dd0784` / `c46d11c` 两个提交是增量 31 的文档收口订正。
+
+**步骤 2 记录（派生实测）**：18,301 人 → 显示名 **17,470**（commonname 2,548 / 名+姓 14,527 / cards 兜底 395 / 空 831），回落 `players.name` 831；**570 名俱乐部球员全部有显示名**（149 / 420 / 1）；球衣号 **570/570** 按 fc_id 归属、归属不一致 **0**。派生不出的 1,236 人缺口全在球员库长尾：base_players.csv 引用了 29,638 个 nameid，其中 1,170 个 > 41,189（FC26 后期补丁新增，本机字典没有），FC25 的 `playernames.csv` 实测 0 命中。570 人里与 tour 逐字不一致 5 例（`Son Heung Min` 语序、`Fornals`、`Abde`、`Cristhian Mosquera`、`Fernandez-Pardo`），是 tour 自己的短名/语序，**后续跨系统同步以 FC26 派生名为准**。
+
+**步骤 8 记录（验收与三处真缺陷）**
+- 本地 dev D1（`.wrangler/state/v3/d1`）**缺 0032/0033**（`d1_migrations` 只有 5 行、`players` 无新列）⇒ e2e 首跑 7/11 失败、`/api/players` 500。`npm run db:migrate:local` 会因 `table players already exists` 失败（本地库是手工快照），解法是单跑两个迁移文件 `npx wrangler d1 execute whl-club --local --file=…`。补齐后 e2e **11/11 全绿**。
+- **评审发现并逐条实测确认的三个真缺陷（`0e6a524`）**：① `derive.mjs` 产出 `BEGIN;`/`COMMIT;` 而 **D1 拒收 SQL 事务控制语句**（`please use the state.storage.transaction() … instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements`，本地与远端一样），`load.mjs` 逐条发送 ⇒ 第一条就抛错、一条都落不了库（fail-closed，不脏数据）；② `number.sql` 的 CTE 列数不匹配（声明 6 列只给 2 值）；③ `load.mjs` 用 `spawnSync('npx.cmd')`，**Node 24 在 Windows 上直接 `EINVAL`**（`.cmd`/`.bat` 现在必须带 `shell`），改用 `process.execPath` 跑 `node_modules/wrangler/bin/wrangler.js`。另修 `load.mjs` 语句计数器（传的是 `{sql,bytes}` 对象，永远 0）+ 加事务控制语句守卫，`0032` 回滚注释补「先 `DROP INDEX idx_players_sort_name`」（`display_name` 被 0033 引用，不先删索引列删不掉）。
+- **落库链路端到端实测**：`--local --numbers` 19 条语句全部执行、**重复执行结果不变**；fc 20801 落成 `display_name='Cristiano Ronaldo'` / `number='7'`（与 tour 一致），不在派生集里的行（fc 999999）五列保持 NULL 未被碰。
+- **不可见字符事故**：手打 0033 的索引表达式时静默丢了 5 个不可见字符（长度 1789 vs 应为 1794）⇒ 改用 node 从 `sqlFold()` 生成该行落盘并验证 byte-exact。项目惯例同样反对源码里放原始不可见字符（`tests/players-library.test.ts:607-608` 注释，测试里用 `char(769)`/`char(173)` 构造）。
+- **浏览器实测（本地 8791）**：`/players/9501`（内部 id）URL 自动变 `/players/260001`（fc_id）、标题出显示名 + 官方缩写名小字；`display_name` 为 NULL 的人不出小字；球员库列表链接实测走 fc_id；合同页签恒有「球衣号」行；`?name=erling` / `?name=haaland` / `?name=odegaard` 双列搜索都命中且未触发 D1 表达式深度上限。
+- **dev server 坑**：反复 `(npx wrangler dev &)` 会留多个 workerd 进程，端口 LISTENING 但请求全挂死（curl 000、日志已 Ready）⇒ 用 PowerShell 按命令行匹配 `wrangler|workerd|miniflare` 全杀后只起一个；`cachedJson` 的 L1 缓存（players scope TTL 1h）在进程内，种完数据必须重启才能看到。
+
+**验收（步骤 1–8 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **47 文件 / 659 例全绿**（增量 31 基线 46/642 ⇒ +1 文件 / +17 例）；`npm run build` 成功（`web/dist/assets/index-Bco7kOHW.js` **477.77 kB / gzip 150.38 kB**，增量 31 基线 474.57 kB）；`npm run test:e2e` **11/11 通过**（补齐本地迁移后）。变异验证四处均能定向变红：`idx_players_sort_name` 的表达式错一个字符（`'), 'Ó'` → `'), 'O'`）退化成 `TEMP B-TREE`；`results.ts` 的 `WHERE fc_id = ?` 加 `AND 0` ⇒ fc_id 归属用例失败；`transfers.ts` 两处 `number = NULL` 删掉 ⇒ 换队/解约两条用例各失败；球员链接回落顺序反转 ⇒ 新增的 ClubDetail 两条用例失败。
+
+**待办**：① 增量 33（跨仓：赛事平台球员表转只读、四写端点下线、阵容同步、`GET /api/squads`），需单独授权部署；② 生产落库未执行（`load.mjs --remote --yes-prod` 或先推送再跑），故生产目前仍是缩写名 + 无号码；③ 生产迁移 0032/0033 未 apply（推送部署时一次写 ≈ 18,301 行/条，审计要求索引批 ≤3 条/批、分天跑）；④ 831 人派生不出显示名（字典缺号长尾），若要补齐需更新版 FC26 字典；⑤ 赛事平台与本平台 5 人姓名写法不一致，同步时以 FC26 派生名为准（清单在 `scripts/player-names/README.md`）。
+
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
