@@ -33,8 +33,10 @@ export interface MyClubState {
   loading: boolean;
   /** /api/me 的角色判定（不看俱乐部绑定） */
   isCoach: boolean;
-  /** null = 匿名/未绑定俱乐部 */
+  /** null = 匿名/未绑定俱乐部，或这次没取到（看 failed 区分） */
   club: MarketMyClub | null;
+  /** 请求失败（403/500）。失败时 club 也是 null，但「没绑队」和「没取到」对调用方是两件事 */
+  failed: boolean;
 }
 
 // /api/me/club 全量概览（Club 页与市场页共享一个缓存条目——同一 URL，读各自关心的子集）
@@ -56,6 +58,7 @@ export function useMyClub(): MyClubState {
     loading: user != null && isPending,
     isCoach,
     club: !isError && data?.club ? { ...data.club, balance: data.balance, isCoach } : null,
+    failed: user != null && isError,
   };
 }
 

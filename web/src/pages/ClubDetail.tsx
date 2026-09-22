@@ -1,10 +1,12 @@
-// 球队详情页（增量 31 步骤 7）：阵容组 + 运营组 + 战绩组，不含财政与主场（主场档案在 /club 教练中心）。
+// 球队详情页（增量 31 步骤 7–8）：阵容组 + 运营组 + 战绩组，登录者正是本队教练时再挂教练工作台。
 // URL 口径：/clubs/:id 的 :id 就是平台库 clubs.id（AGENTS.md「代码与提交」节，长期有效）。
 // 读量：结构统计由 GET /api/clubs/:id 一次算完（生产实测 12 条语句 / 151–165 行，clubs scope 缓存 24h）；
 // 名单复用公开的 GET /api/players?club_id=N（limit=100 一页装完），不新建读面；队徽走 /api/media/*（零 D1）。
 // 排名由后端代理比赛系统公开积分榜，取不到时后端回 200 + note，这里只负责把 note 显示出来。
+// 教练工作台走 /api/me/club（qk.myClub，与市场页、/club 壳同键，缓存热时不再读库）。
 import { Link, useParams } from 'react-router';
-import { useClubDetail, useClubRoster, useClubStanding } from '../lib/queries.ts';
+import { useClubDetail, useClubRoster, useClubStanding, useMyClub } from '../lib/queries.ts';
+import CoachPanel from './club/CoachPanel.tsx';
 import type { ClubBand, ClubFormRow, ClubTransferRow } from '../lib/api.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 import { TRANSFER_TYPE_LABEL } from '../lib/ref.ts';
@@ -153,6 +155,8 @@ export default function ClubDetail() {
   const detailQuery = useClubDetail(valid ? id : 0);
   const standingQuery = useClubStanding(valid ? id : 0);
   const rosterQuery = useClubRoster(valid ? id : 0);
+  // 这几个 hook 都必须在任何 early return 之前无条件调用
+  const myClub = useMyClub();
 
   if (!valid) {
     return (
@@ -405,6 +409,18 @@ export default function ClubDetail() {
           )}
         </div>
       </section>
+
+      {/* 教练工作台（步骤 8 从 /club 整体搬入）：只有本队教练看得到，观众与别队教练都不渲染。
+          这里不套 card——CoachPanel 内部每一块自己就是 card，再套一层会变成卡中卡。 */}
+      {myClub.club?.id === club.id && (
+        <section className="club-block">
+          <div className="tier-head">
+            <h3>教练工作台</h3>
+            <span className="muted">注册、设施、冠名与合同操作</span>
+          </div>
+          <CoachPanel />
+        </section>
+      )}
     </div>
   );
 }

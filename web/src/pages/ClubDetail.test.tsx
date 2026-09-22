@@ -13,8 +13,11 @@ import type {
   ClubFormRow,
   ClubStanding,
   ClubTransferRow,
+  MeUser,
+  MyClubOverview,
   PlayerLibraryRow,
   PlayersLibraryResponse,
+  SquadOverview,
 } from '../lib/api.ts';
 import ClubDetail from './ClubDetail.tsx';
 
@@ -23,6 +26,13 @@ const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
 vi.mock('../lib/api.ts', () => ({
   api: apiMock,
   mediaUrl: (key: string | null | undefined) => (key ? `/api/media/${key}` : null),
+}));
+
+// 教练区块的开关是 useMyClub → useMyClubOverview → useAuth().user，组件测试里给一个可切的假登录态。
+// 默认匿名：既有用例一条请求都不多发，只有教练区块的两个用例才把它设成登录。
+const { authState } = vi.hoisted(() => ({ authState: { user: null as unknown } }));
+vi.mock('../lib/auth.tsx', () => ({
+  useAuth: () => ({ user: authState.user, authMode: 'shared', authHome: null }),
 }));
 
 function band(key: string, label: string, count: number): ClubBand {
@@ -167,11 +177,39 @@ interface Stub {
   detail?: ClubDetailDto | Error;
   standing?: ClubStanding | Error;
   roster?: PlayersLibraryResponse | Error;
+  me?: MyClubOverview;
+  squad?: SquadOverview;
 }
 
-// 三条请求各走各的桩。先判 standing —— '/api/clubs/1' 是 '/api/clubs/1/standing' 的前缀。
-function stubApi({ detail = detailFixture(), standing, roster = ROSTER }: Stub = {}) {
+// 教练区块的最小名单：rules / compliance / registration 都为 null，CoachPanel 里都有兜底分支
+function squadFixture(clubId: number): SquadOverview {
+  return {
+    club: { id: clubId, name: '阿森纳', leagueTier: 'premier' },
+    season: 9,
+    registeredInTournament: true,
+    players: [],
+    registration: null,
+    compliance: null,
+    rules: null,
+  };
+}
+
+function meFixture(clubId: number | null): MyClubOverview {
+  if (clubId === null) return { club: null, balance: null, squadCount: null, window: null, home: null };
+  return {
+    club: { id: clubId, name: '阿森纳', leagueTier: 'premier', logoKey: null, status: 'active', transferBanned: false },
+    balance: 12.5,
+    squadCount: 24,
+    window: { season: 9, windowSeq: 3 },
+    // home 为 null：主场档案三块（球场/设施/冠名）都不挂，教练区块只留队头
+    home: null,
+  };
+}
+
+// 各条请求各走各的桩。先判 standing —— '/api/clubs/1' 是 '/api/clubs/1/standing' 的前缀。
+function stubApi({ detail = detailFixture(), standing, roster = ROSTER, me, squad }: Stub = {}) {
   const standingBody: ClubStanding | Error = standing ?? { standing: null, note: '本赛季暂无联赛排名' };
+  const meBody = me ?? meFixture(null);
   apiMock.mockImplementation((path: string) => {
     if (path.startsWith('/api/clubs/') && path.endsWith('/standing')) {
       return standingBody instanceof Error ? Promise.reject(standingBody) : Promise.resolve(standingBody);
@@ -182,6 +220,8 @@ function stubApi({ detail = detailFixture(), standing, roster = ROSTER }: Stub =
     if (path.startsWith('/api/players?')) {
       return roster instanceof Error ? Promise.reject(roster) : Promise.resolve(roster);
     }
+    if (path === '/api/me/club') return Promise.resolve(meBody);
+    if (path === '/api/club/squad') return Promise.resolve(squad ?? squadFixture(meBody.club?.id ?? 0));
     return Promise.reject(new Error(`未桩的请求：${path}`));
   });
 }
@@ -210,9 +250,16 @@ function statValue(scope: HTMLElement, label: string): string {
   return (cell.querySelector('dd') as HTMLElement).textContent ?? '';
 }
 
+// 教练工作台的统计格是 span.stat-label + span.stat-value（不是详情页那套 dl/dt/dd），取值要另走一路
+function statText(scope: HTMLElement, label: string): string {
+  const cell = within(scope).getByText(label).closest('.club-stat') as HTMLElement;
+  return (cell.querySelector('.stat-value') as HTMLElement).textContent ?? '';
+}
+
 afterEach(() => {
   cleanup();
   apiMock.mockReset();
+  authState.user = null;
 });
 
 describe('球队详情页（增量 31 步骤 7）', () => {
@@ -451,5 +498,28 @@ describe('球队详情页（增量 31 步骤 7）', () => {
 
     expect(await screen.findByText('球队 ID 不对。')).toBeTruthy();
     expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it('登录者正是本队教练时挂出教练工作台（含只有教练看得到的资金与窗口）', async () => {
+    authState.user = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false } satisfies MeUser;
+    stubApi({ me: meFixture(1) });
+    renderDetail('/clubs/1');
+
+    expect(await screen.findByText('教练工作台')).toBeTruthy();
+    const head = screen.getByText('资金余额').closest('.club-head') as HTMLElement;
+    expect(statText(head, '资金余额')).toBe('12.50 m');
+    expect(statText(head, '一线队名单')).toBe('24 人');
+    expect(within(head).getByText('第 9 赛季 · 窗口 3')).toBeTruthy();
+  });
+
+  it('登录者带的是别的队（或没绑队）时不渲染教练工作台', async () => {
+    authState.user = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false } satisfies MeUser;
+    stubApi({ me: meFixture(2) });
+    renderDetail('/clubs/1');
+
+    expect(await screen.findByText('阿森纳')).toBeTruthy();
+    expect(screen.queryByText('教练工作台')).toBeNull();
+    // 别队的页面上连 /api/me/club 之外的教练端读面都不该打
+    expect(apiMock).not.toHaveBeenCalledWith('/api/club/squad');
   });
 });

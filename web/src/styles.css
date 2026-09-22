@@ -1001,18 +1001,7 @@ tbody tr:hover td {
   font-weight: 700;
 }
 
-/* ---- 球队中心 ---- */
-
-.club-head-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.club-head-main h2 {
-  margin: 0;
-}
+/* ---- 教练工作台（原「球队中心」，增量 31 步骤 8 并入球队详情页） ---- */
 
 .club-head-badges {
   display: flex;
