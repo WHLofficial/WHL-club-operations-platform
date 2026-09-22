@@ -483,7 +483,7 @@
 
 
 
-## 增量 29 · 球员库 UI 缺陷收口——档案页 15 槽徽章 + 多选面板高度上限 + 表格不折行（2026-09-22 本地完成，待部署）
+## 增量 29 · 球员库 UI 缺陷收口——档案页 15 槽徽章 + 多选面板高度上限 + 表格不折行（2026-09-22 已上线，Version `627508e5`）
 
 **缘起**：增量 27 遗留的五条 UI 瑕疵里，用户 m12257 指令「**建索引先搁置，因为今日写限额不足；海捞池后续会有新调整；球员库 UI 小瑕疵可以现在修**」⇒ 本增量只修球员库 UI 瑕疵，索引与海捞池契约都不动。
 
@@ -532,6 +532,13 @@
 - `AGENTS.md`：当前状态补增量 29 一行（本地完成、4 commit `e3b5033`/`da875f1`/`b8739d5`/`fa29934`、未推送未部署、5 项裁决与两个顺带修的 bug）。
 - 记忆目录（`~/.zcode/cli/memories/projects/whl-club-operations-platform-59a36e78dc8d8fb3/memory/`）：新建 `increment29-plan.md`（评审指出的缺失：5 项裁决 + 5 步 + 边界 + 验收口径）与 `increment29-execution-state.md`（缘起/交付链/三处缺陷根因/三处修法/实测数字/两个顺带修的 bug/遗留）；`MEMORY.md` 顶部插两行索引；`club-platform-project-state.md` 的 frontmatter description 追加增量 29 段并新增「2026-09-22：增量 29」节。
 - 验收：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 550 例全绿**（纯文档改动不影响）；`git status --short` 仅剩本次 5 个文档文件。
+
+**步骤 5 记录（2026-09-22）**：推送 + 部署 + 前端产物核对（本增量无后端改动，**刻意不跑生产 API 回读**以省 D1 读额度；当日写额度已用 73.2%）。
+- `git push origin main` ⇒ `76aaeb9..91bc2d3`（5 个提交：`e3b5033`/`da875f1`/`b8739d5`/`fa29934`/`91bc2d3`），`git rev-list --count origin/main..HEAD` = 0。
+- `npm run deploy` **第一次失败**：`Unable to resolve Cloudflare's API hostname (api.cloudflare.com or dash.cloudflare.com)`（既知的 wrangler → CF API DNS 抖动，与增量 27/28 同源）；**重试一次即成功** ⇒ Total Upload **533.62 KiB / gzip 127.47 KiB**、`Uploaded 19 files (4 already uploaded)`、绑 5 资源 + vars 不变、custom domain + cron 不变。
+- Version 口径：`wrangler deploy` CLI 回显 Current Version ID **`627508e5-f7c6-4e6d-90a2-5f95a82466bb`**；`wrangler deployments status --name whl-club` 的 Version 也是 **`627508e5-…`**（Created 2026-09-22T07:02:52Z，Author `p_h_han@foxmail.com`）—— **增量 26/27/28 每次都出现的「CLI 回显 ≠ deployments status」两值现象，本增量首次不成立**（上一版仍为 `7c5b5879-…`）。
+- 线上核对（不消耗 D1 读）：`GET https://club.whleague.win/players` 的 HTML 引用 `assets/index-C_n2o0KE.js` + `assets/index-D-qmdoLZ.css`，与本地 `web/dist/assets/` **同名** ⇒ 增量 29 前端已确认上线。
+- 验收（步骤 3 后已跑，纯文档改动不影响）：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 550 例全绿**；`npm run build` 成功；`npm run test:e2e` **9/9**。
 
 
 ---
