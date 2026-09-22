@@ -592,7 +592,7 @@
 
 ## 增量 31 · 球队页（公开列表 + 登录详情 + 自家队中心合并）
 
-**状态**：2026-09-22 本地完成步骤 0–10（11 个提交），**未推送、未部署**；步骤 11（e2e 三视口 + 全量验收）与步骤 12（推送/部署/最小化回读）待办，后者等用户下令。**本增量不含迁移**（0032 在步骤 1 被裁掉），故推送无生产 DDL 耦合。
+**状态**：2026-09-22 本地完成步骤 0–11（含 11a 结构分析整改），**未推送、未部署**；步骤 12（推送/部署/最小化回读）待办，等用户下令。**本增量不含迁移**（0032 在步骤 1 被裁掉），故推送无生产 DDL 耦合。
 
 **缘起**：用户 m12793 下达「新增球队页（列表 + 详情）」，并特别要求注意性能、省 D1 额度。经脑暴发散 → 一问一题裁决（Q1–Q17）→ 技术路径与用户操作动线 → 计划。计划稿 v1 被拒后修订重交（编号因增量 30 已占用改为 31，迁移号改 0032，后又在步骤 1 裁掉）。
 
@@ -603,7 +603,7 @@
 - **① `GET /api/clubs`（公开）** —— 一次算完 20 队：固定 4 条 whl-club 语句 + AUTH_DB/TOUR_DB 各 1~2 条，**无逐队查询**；clubs scope 缓存（24h）+ `assertPublicRate('clubs')`。聚合 `CLUB_SQUAD_AGG_SQL` 带 `WHERE club_id IS NOT NULL` ⇒ SQLite 改写成范围扫跳过 17,731 行 NULL（**实测读 1,032 行**，全表 18,301）；`contracts.player_id` 是 UNIQUE ⇒ LEFT JOIN 无扇出。响应 `{ clubs: [{ id, name, isCpu, tier, logoKey, squad:{senior,trainee}, avgCa, totalValue, totalWage }] }`。`tier.ts` 抽出 `loadLeagueList`（`derive` 内部改用它，SQL 逐字不变）并新增 `deriveClubTiers` 批量派生：**一队双定级**（单队 `derive` 会抛 500）在批量里降级 `null` + `console.warn`，AUTH_DB 映射冲突也降级告警、**不 last-wins**。队徽取比赛系统 `team.logo_key`（本平台 `clubs.logo_key` 全仓无人写无人渲染）。
 - **② `GET /api/clubs/:id`（需登录，同一 clubs scope）** —— 队头 + 阵容结构 + 合同结构 + 转会往来 + 近期战绩；阵容**一条语句**取全队（走 `idx_players_club_ca`）在 JS 里算三个维度分布，避免三条 GROUP BY。战绩绑**比赛系统队 id**（`result_confirmations` 存的是 tour team id，见迁移 0017），90 分钟口径、双弃权双方各记负。排名走代理 `GET /api/clubs/:id/standing`：`TOUR_API_BASE` 未配即降级且**零查库**，失败不落缓存（`StandingUnavailable`）、响应体限 2MB。**验收冷算 151 行（club 1）/ 165 行（club 9，生产阵容最大 37 人）**，排名 11 行，均远低于 500 行线。
 - **③ `GET /api/media/*`（公开）** —— 镜像比赛系统的公开媒体路由，**只读不写**，key 白名单 `/^(team|tournament)\/\d+\//` + 长度 ≤1024；边缘缓存（`caches.default`，jsdom/node 无 `caches` 时静默旁路）命中即返，`immutable` + ETag + `waitUntil(cache.put)`；残缺百分号编码不接住就是匿名 500，已 catch 回 `{error:'not_found'}`。**本路由不碰任何 D1**，是球队页里唯一的零 D1 读面。走本域而非直连比赛系统的理由：R2 桶 `whl-media` 已绑定本 Worker（`MEDIA`），同源取图省一次跨站请求与 DNS，也无 CORS / 混内容问题。**不加 `assertPublicRate`**：零 D1 读且命中边缘缓存后连 R2 都不打，而限流是 60/min/IP，一屏 20 个队徽会被正常浏览打成 429（比赛系统同样不限流）。
-- **前端** —— `web/src/pages/Clubs.tsx`（按顶级/次级/未定级三段出卡片，生产 20 队一屏放得下 ⇒ 无筛选无分页；整卡链 `/clubs/:id`；空段整段不渲染）；`web/src/pages/ClubDetail.tsx`（阵容组 10 项统计 + 位置分布 chip + **CSS 自绘**年龄/CA 结构图 + 名单表；运营组合同结构 4 项 + 效力年限图 + 转入转出表；战绩组当季联赛排名 5 项 + 近 5 场）；`web/src/components/TeamLogo.tsx`（有 logoKey 出 `<img>` 走 `mediaUrl()`，否则按队名哈希出首字色块，同队三处同色）；路由 `/clubs` 进公开组、`/clubs/:id` 进 `RequireUser` 组、`/club` 改 `<Navigate>`。
+- **前端** —— `web/src/pages/Clubs.tsx`（按顶级/次级/未定级三段出卡片，生产 20 队一屏放得下 ⇒ 无筛选无分页；整卡链 `/clubs/:id`；空段整段不渲染）；`web/src/pages/ClubDetail.tsx`（三组结构分析，每组「三格主指标 + 一行语义明细」，见下方步骤 11a）；`web/src/components/TeamLogo.tsx`（有 logoKey 出 `<img>` 走 `mediaUrl()`，否则按队名哈希出首字色块，同队三处同色）；路由 `/clubs` 进公开组、`/clubs/:id` 进 `RequireUser` 组、`/club` 改 `<Navigate>`。
 
 **裁决（Q1–Q17）**：列表公开 / 详情需登录；列表 4 指标（阵容人数拆一线队+训练营、平均 CA、总身价、工资总额）；按分级分段卡片；详情三组（阵容/运营/战绩），**不含财政与主场**；统一 `/clubs/:id` 且 `/club` 重定向；分级批量派生、未定级归第三段；队徽参照 tour 平台、镜像其 media 路由；入口四处；CPU 队显示带标记；训练营 = `players.status='trainee'`；结构分析全要，**年龄用 CSS 自绘柱状图不引图表库**；教练区块仅「已登录且绑定该队」渲染；**Q17 = 球队页 URL id 一律用平台库 `clubs.id`**（长期有效，已写进 `AGENTS.md`）。术语沿用增量 30：非成长 / 经纪人性格 / 合同 / 来源球队。
 
@@ -619,9 +619,23 @@
 - 定性为**潜伏缺陷，非现行故障**：历史上确有真实失效窗口 —— 米兰的 `tour_team_id` 长期是 legacy 47 而 `club_id` 是 131681，直到 2026-09-19 rekey 才统一，那段时间本函数对米兰恒返中性 4。将来若新增 club 的 id 不等于其 tour 队 id，本函数会**静默退化成「永远中性」**。
 - 处置：按计划**不改代码行为**，只订正两处注释（`src/worker/home.ts` 的 `clubFormPts` 上方、`src/worker/routes/clubs.ts` 的 `CLUB_FORM_SQL` 上方），写明 id 语义、生产实测的巧合与正确写法（照 `prizes.ts` 的 `clubIdByTourTeam` 先映射）。
 
-**验收（步骤 1–9 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **46 文件 / 637 例全绿**（增量 30 基线 40/573 ⇒ 本增量 +6 文件 / +64 例）；`npm run build` 成功（`web/dist/assets/index-zs-7vV9W.js` **472.43 kB / gzip 148.78 kB**、`index-BIj79sRd.css` 31.56 kB / gzip 7.07 kB）；`npm run test:e2e` **9/9**。变异验证多处（教练区块身份判定、`/club` 两个 Navigate 目标、`failed` 分支、`平均成长空间`、积分榜 TTL）均能定向变红。
+**步骤 11 记录（2026-09-22，e2e 三视口 + 全量验收）**：`scripts/e2e/smoke.mjs` 新增场景 **⑨「球队页三视口：列表分段 / 详情三组 / 结构图不溢出」**（1280×900 / 900×800 / 375×812）与 **⑩「匿名看详情给登录引导且不泄露；`/club` 取不到球队时不误跳 `/bind`」**，原 ⑨ 顺延为 ⑪。
+- **本机必须打桩**：本地 TOUR_DB（`whl`）的 `team` 表是**旧 schema**（无 `logo_key`、无 `club_id`，只有 4 行）⇒ `GET /api/clubs` 与 `GET /api/clubs/:id` 在本机必然 500（`D1_ERROR: no such column: logo_key`，抛在 `loadTeamLogos`），是环境陈旧而非代码回归。故球队页读端点用 `page.route()` 回夹具（打完即撤），其余请求仍走真服务端；判据仍是**真浏览器里的渲染与几何**（jsdom 量不到）。`/api/me/club` 也打桩，但理由不是「本地取不到」——它只读 AUTH_DB `team_binding`/`team` 与 whl-club，本机其实 200 带 club，打桩是为造出「非教练观众」与「取不到」两种受控情形。
+- **匿名那条踩到的坑**：本地 `AUTH_MODE=oidc`，匿名进站先被「无感同步登录态」探针（`web/src/lib/auth.tsx:23` 的 `syncProbe` → `/api/auth/sync`）整页跳走，本机认证中心不在接入名单 ⇒ 停在登录错误页，`RequireUser` 的软提示分支根本走不到。修法：匿名 context 里把 `/api/me` 钉成 `{user:null, authMode:'shared', authHome:null}`（无 syncProbe）。
+- **评审 4 条遗留全部修掉**：🔴「结构图几何断言恒真」（`.band-bar` 是 `.band-track` 的百分比宽子元素，且全局 `* { box-sizing: border-box }` ⇒ `bar.right ≤ track.right ≤ chart.right` 由盒模型保证，任何回归都抓不到）改为量**图表与所在卡片的边界**与**图表自身的 `scrollWidth`**；三处注释失真订正（本地 TOUR_DB 不是空库、`/api/me/club` 不是取不到）；⑩ 自己桩的 500 改为**自己认领**（从 `badResponses` 里 splice 掉），不再依赖 ⑪ 的噪声白名单兜底，并新增「桩真被请求到」的计数断言；⑩ 的 `.club-block count === 0` 补上「且无错误横幅」，把「被守卫挡下」与「加载失败」分开。
 
-**待办**：① 步骤 11 e2e 三视口（1280×900 / 900×800 / 375×812）+ 全量验收（含新场景：卡片分组与 CPU 标、整卡可点、未登录详情引导、自家队重定向、柱状图不溢出）；② 步骤 12 推送 + 部署 + 最小化回读（**等用户下令**；会连带增量 30 的 7 个提交，但本增量无迁移故无 DDL 耦合）；③ `CoachPanel`（874 行）搬迁后无专属组件测试，只有经详情页的 2 条冒烟断言（搬迁前就存在的覆盖薄弱）；④ `clubFormPts` 的 id 口径可择机改成显式映射（见步骤 9）；⑤ 顶栏「球队中心」tab 仍指向 `/club`，重定向后高亮落在「球队」tab —— 已接受（给 TopBar 加 `useMyClub()` 会让每个登录用户每次加载多打一次 `/api/me/club`，与省 D1 额度主线相悖）。
+**步骤 11a 记录（2026-09-22，详情页结构分析整改，用户 m14999 批准）**：用户对结构分析的展示方式连续下整改令 —— 位置分布 `GK CB CM ST` 是错的应改四档、年龄与 CA 档位重定、并要求「**年龄与 CA 应该是水平条形图或直方图**」且「**若干行数据也没有层次，没有主次，展示方式很差劲**」。经脑暴（bounded 型）与两轮 AskUserQuestion 定案，**硬约束是配色只用站点既有调色板变量**（`--terracotta` / `#f3ead9` / `--border` / `--muted` / `--ink`，不新造颜色）。
+- **位置分布：不用图示**（`src/core/fc26.ts` 新增 `POSITION_GROUP_BY_POSITION` 与 `POSITION_GROUPS`），出**门将/后卫/中场/前锋四档恒出**（「0 门将」本身是信号），档内细位按 `POSITION_BY_ID` 顺序拼 `CM 1 · CDM 1`；`byPosition` 契约由 `{position,count}[]` 改为 `{key,label,count,detail}[]`。
+- **年龄结构：等宽 3 岁箱 + 竖直直方图**（`Histogram`，`AGE_BANDS` 改 `≤18 / 19–21 / 22–24 / 25–27 / 28–30 / ≥31`）。**已知代价**：直方图的前提是等宽箱，故「成长年龄上限」（生产 `age_cap = 25`）**不再是档界**；因此不需要新增 `getVisibleSeasonCap`，档位是纯常量。柱高 = 人数 / 最高档人数，0 人档不设 `min-height`（给 0 画 2px 会假装有 1 人），人数标在柱顶故不画 y 轴。
+- **CA 结构：横向占比条**（`ShareBar`，`CA_BANDS` 改 `90+ / 85–89 / 80–84 / 70–79 / <70`，**降序**）。分母是**全队人数**而非「各档之和」（有人缺 CA 时条长之和 <100% 是实话），带 0–100% 刻度轴与行尾绝对人数。档界 70/80/84/90 与游戏自己的「能力等级」阶梯对齐（`src/core/negotiation-rules.ts` 的 `ratingLevel` 十档是 60/65/70/75/80/84/87/90/93，也是谈判等级与身价/工资的定价依据）；因档不等宽（70–79 宽 10、80–84 宽 5）故用横条讲「档位」而不是用直方图讲「数值分箱」。
+- **效力年限**（`byYears`）保持原普通升序横向柱状图（`BandChart`），不参与改造。
+- **三组指标重排**：删掉等权 10 格 `.club-stats` 网格，改为 `.club-hero`（**三格主指标**，左侧 2px terracotta 竖线、dd 21px/600 等宽数字）+ `.club-detail-line`（**一行语义明细**，按「能力 / 资产 / 荣誉」分组带粗体前缀）。阵容组主 = 阵容人数（+N 青训）/ 平均 CA / 总身价；运营组主 = 在册合同 / 保护期内 / 未保护；战绩组主 = 名次 / 积分（扣分副标）/ 胜平负。`.club-stats`/`.club-stat` 保留给 `ImportPreviewBlock` 与 `CoachPanel` 用。
+- **无障碍口径**：四张图都用 `<ul>/<li>` 而不是 `role="img"`（后者会把整棵子树当装饰，档位标签与人数读不到），图形部分 `aria-hidden="true"`。
+- **变异验证**：把 CA 条分母改成「按最大档归一」⇒ 只有「CA 占比」那条红；把直方图柱高改成「按总人数归一」⇒ 只有「年龄直方图」那条红；把 `.club-share` 加 `min-width: 2000px` ⇒ e2e ⑨ 在 desktop 就报「有结构图超出所在卡片」（**证几何断言非恒真**）。三处均定向变红、其余全绿。
+
+**验收（步骤 1–11a 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **46 文件 / 640 例全绿**（增量 30 基线 40/573 ⇒ 本增量 +6 文件 / +67 例）；`npm run build` 成功（`web/dist/assets/index-CCZxL-xv.js` **474.05 kB / gzip 149.30 kB**、`index-D_ckuMuh.css` 34.31 kB / gzip 7.52 kB）；`npm run test:e2e` **11/11 通过**（三视口；新增球队页两场景）。变异验证多处（教练区块身份判定、`/club` 两个 Navigate 目标、`failed` 分支、`平均成长空间`、积分榜 TTL、CA 条分母、直方图归一、图表溢出）均能定向变红。
+
+**待办**：① 步骤 12 推送 + 部署 + 最小化回读（**等用户下令**；会连带增量 30 的 7 个提交，但本增量无迁移故无 DDL 耦合）；② `CoachPanel`（874 行）搬迁后无专属组件测试，只有经详情页的 2 条冒烟断言（搬迁前就存在的覆盖薄弱）；③ `clubFormPts` 的 id 口径可择机改成显式映射（见步骤 9）；④ 顶栏「球队中心」tab 仍指向 `/club`，重定向后高亮落在「球队」tab —— 已接受（给 TopBar 加 `useMyClub()` 会让每个登录用户每次加载多打一次 `/api/me/club`，与省 D1 额度主线相悖）；⑤ 年龄档界不再包含当季 `age_cap`（步骤 11a 的已知代价，等宽箱优先）；⑥ 本机 e2e 的球队页读端点仍是打桩（本地 TOUR_DB `team` 表 schema 陈旧），若将来本地库补到与生产同形，可撤桩改成真端到端。
 
 
 ## 外部依赖与待输入
