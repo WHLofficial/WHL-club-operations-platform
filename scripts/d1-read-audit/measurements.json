@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-22T01:32:17.351Z",
+  "generatedAt": "2026-09-22T03:08:18.118Z",
   "target": "remote",
   "results": [
     {
@@ -129,23 +129,25 @@
     },
     {
       "id": "sort-prestige",
-      "label": "sort=prestige（无索引）",
+      "label": "sort=prestige（0029 表达式索引）",
       "url": "/players?limit=20&sort=prestige",
       "statements": 2,
       "metas": [
         {
-          "rows_read": 37635,
+          "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 42.7159
+          "duration_ms": 0.2714
         },
         {
-          "rows_read": 18763,
+          "rows_read": 53,
           "rows_written": 0,
-          "duration_ms": 3.5873
+          "duration_ms": 6.8038
         }
       ],
-      "rows_read_total": 56398,
-      "duration_ms_total": 46.3
+      "rows_read_total": 53,
+      "duration_ms_total": 7.1,
+      "list_rows": 53,
+      "count_rows": 0
     },
     {
       "id": "sort-name",
@@ -644,53 +646,47 @@
     },
     {
       "id": "sort-club",
-      "label": "sort=club（clubs.id 权重；有 club_id 列索引）",
+      "label": "sort=club（clubs.id 权重；0029 表达式索引）",
       "url": "/players?limit=20&sort=club",
-      "statements": 3,
+      "statements": 2,
       "metas": [
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.1754
+          "duration_ms": 0.3595
         },
         {
-          "rows_read": 37635,
+          "rows_read": 43,
           "rows_written": 0,
-          "duration_ms": 176.5576
-        },
-        {
-          "rows_read": 18763,
-          "rows_written": 0,
-          "duration_ms": 5.1682
+          "duration_ms": 6.2579
         }
       ],
-      "rows_read_total": 56398,
-      "duration_ms_total": 181.9
+      "rows_read_total": 43,
+      "duration_ms_total": 6.6,
+      "list_rows": 43,
+      "count_rows": 0
     },
     {
       "id": "sort-status",
-      "label": "sort=status（CASE 权重；有 status 列索引）",
+      "label": "sort=status（CASE 权重；0029 表达式索引）",
       "url": "/players?limit=20&sort=status",
-      "statements": 3,
+      "statements": 2,
       "metas": [
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.3293
+          "duration_ms": 0.2734
         },
         {
-          "rows_read": 37635,
+          "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 147.4835
-        },
-        {
-          "rows_read": 18763,
-          "rows_written": 0,
-          "duration_ms": 4.5375
+          "duration_ms": 3.554
         }
       ],
-      "rows_read_total": 56398,
-      "duration_ms_total": 152.4
+      "rows_read_total": 22,
+      "duration_ms_total": 3.8,
+      "list_rows": 22,
+      "count_rows": 0
     },
     {
       "id": "sort-wage",

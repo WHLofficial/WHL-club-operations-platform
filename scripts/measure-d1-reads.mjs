@@ -179,7 +179,8 @@ function runWrangler(sql) {
 }
 
 // ---- 形状清单 ------------------------------------------------------------------------------
-// 每个形状 = 一个真实 URL。路由自己会跑多条语句（列表 = 主查询 + COUNT），全部按序记录并逐条报读量。
+// 每个形状 = 一个真实 URL。路由自己会跑多条语句（配置探测 + 列表主查询；增量 28 步骤 2 之前的版本还带一条 COUNT），
+// 全部按序记录并逐条报读量。语句归类用 SQL 文本判断（见 printTable），不按「第几条」——路由增删语句时序号会漂。
 const SHAPES = [
   { id: 'default', label: '默认浏览（第 1 页，limit 20）', url: '/players?limit=20' },
   { id: 'page5', label: '第 5 页（cursor=100）', url: '/players?limit=20&cursor=100' },
@@ -190,10 +191,10 @@ const SHAPES = [
   { id: 'sort-age', label: 'sort=age（0027 表达式索引）', url: '/players?limit=20&sort=age' },
   { id: 'sort-market-value', label: 'sort=market_value（0027 表达式索引）', url: '/players?limit=20&sort=market_value' },
   { id: 'sort-ca-initial', label: 'view=initial + sort=ca（口径变了，0027 索引是否还命中）', url: '/players?limit=20&view=initial&sort=ca' },
-  { id: 'sort-club', label: 'sort=club（clubs.id 权重；有 club_id 列索引）', url: '/players?limit=20&sort=club' },
-  { id: 'sort-status', label: 'sort=status（CASE 权重；有 status 列索引）', url: '/players?limit=20&sort=status' },
+  { id: 'sort-club', label: 'sort=club（clubs.id 权重；0029 表达式索引）', url: '/players?limit=20&sort=club' },
+  { id: 'sort-status', label: 'sort=status（CASE 权重；0029 表达式索引）', url: '/players?limit=20&sort=status' },
   { id: 'sort-wage', label: 'sort=wage（contracts 表，无法静态索引）', url: '/players?limit=20&sort=wage' },
-  { id: 'sort-prestige', label: 'sort=prestige（无索引）', url: '/players?limit=20&sort=prestige' },
+  { id: 'sort-prestige', label: 'sort=prestige（0029 表达式索引）', url: '/players?limit=20&sort=prestige' },
   { id: 'sort-name', label: 'sort=name（无索引 + 折叠表达式）', url: '/players?limit=20&sort=name' },
   { id: 'sort-ps', label: 'sort=ps（15 槽计数表达式）', url: '/players?limit=20&sort=ps' },
   { id: 'sort-influence', label: 'sort=influence（CASE + ROUND 表达式）', url: '/players?limit=20&sort=influence' },
@@ -321,7 +322,21 @@ for (const shape of work) {
   }
   const total = metas.reduce((acc, m) => acc + (typeof m.rows_read === 'number' ? m.rows_read : 0), 0);
   const dur = metas.reduce((acc, m) => acc + (typeof m.duration_ms === 'number' ? m.duration_ms : 0), 0);
-  results.push({ ...shape, statements: inlined.length, metas, rows_read_total: total, duration_ms_total: Number(dur.toFixed(1)) });
+  // 语句归类按 SQL 文本、不按序号：列表主查询内联了 CURRENT_TICKS_SQL（自带 COUNT(*)），
+  // 用 /COUNT\(\*\)/ 会把它当成计数语句 ⇒ 计数判据必须锚在语句开头。
+  const rowsOf = (re) =>
+    inlined.reduce((acc, sql, i) => acc + (re.test(sql) && typeof metas[i]?.rows_read === 'number' ? metas[i].rows_read : 0), 0);
+  const listRows = rowsOf(/LEFT JOIN clubs cc/);
+  const countRows = rowsOf(/^\s*SELECT COUNT\(\*\) AS n FROM players/);
+  results.push({
+    ...shape,
+    statements: inlined.length,
+    metas,
+    rows_read_total: total,
+    duration_ms_total: Number(dur.toFixed(1)),
+    list_rows: listRows,
+    count_rows: countRows,
+  });
   const per = metas.map((m) => (m.error ? `ERR(${m.error.slice(0, 60)})` : `${m.rows_read}`)).join(' + ');
   console.error(`✓ ${shape.id.padEnd(18)} ${String(total).padStart(8)} 行  [${per}]  ${dur.toFixed(0)}ms  · ${shape.label}`);
 }
@@ -331,17 +346,21 @@ if (DUMP) {
 } else {
   const grand = results.reduce((acc, r) => acc + (r.rows_read_total ?? 0), 0);
   console.error(`\n合计读量：${grand.toLocaleString('en-US')} 行（本次测量消耗；免费档 5,000,000 行/日）`);
-  console.log('\n| 形状 | URL | 语句数 | 单次读量（行） | 其中 COUNT | 耗时 ms |');
-  console.log('| --- | --- | --- | --- | --- | --- |');
+  console.log('\n| 形状 | URL | 语句数 | 单次读量（行） | 列表 | 计数 | 其它 | 耗时 ms |');
+  console.log('| --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const r of results) {
     const cell = r.url ? `\`${r.url}\`` : '（手写）';
     if (r.error) {
-      console.log(`| ${r.label} | ${cell} | — | 失败：${r.error} | — | — |`);
+      console.log(`| ${r.label} | ${cell} | — | 失败：${r.error} | — | — | — | — |`);
       continue;
     }
-    const count = r.metas.slice(1).reduce((acc, m) => acc + (typeof m.rows_read === 'number' ? m.rows_read : 0), 0);
-    const countCell = r.metas.length > 1 ? String(count) : '—';
-    console.log(`| ${r.label} | ${cell} | ${r.statements} | ${r.rows_read_total} | ${countCell} | ${r.duration_ms_total} |`);
+    // 归类在采集时算好（见 rowsOf）；旧 JSON 条目没有这两个字段时按 0 处理
+    const listRows = r.list_rows ?? 0;
+    const countRows = r.count_rows ?? 0;
+    const other = r.rows_read_total - listRows - countRows;
+    console.log(
+      `| ${r.label} | ${cell} | ${r.statements} | ${r.rows_read_total} | ${listRows} | ${countRows} | ${other} | ${r.duration_ms_total} |`,
+    );
   }
 }
 

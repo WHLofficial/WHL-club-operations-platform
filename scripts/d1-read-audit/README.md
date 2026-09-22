@@ -82,6 +82,32 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 
 **注意几处「有索引也没用」**：`sort=club` / `sort=status` 的列索引服务不了它们的排序表达式；`ca_min=80` 的区间筛选不匹配 0027 的 `COALESCE(ca,0)` 表达式索引（56 行是主查询走 id 序提前停下，COUNT 那边照旧全表扫 18,582）。反之 `club_id=free`（`IS NULL`）能吃上 `idx_players_club`，主查询只读 22 行。
 
+### 3.1 步骤 4 复测（0029 三条索引，2026-09-22 生产实测）
+
+步骤 4 给 `prestige` / `club` / `status` 建了表达式索引（迁移 `0029_players_sort_indexes_batch2.sql`，三条共 ≈54,903 行写）。
+复测用同一脚本、同一 URL，但**列表已不带 COUNT 语句**（步骤 2 去掉），所以「建索引后」是纯主查询读量：
+
+| 形状 | 建索引前（§三基线，含 COUNT） | 建索引后（仅主查询） | 降幅 |
+| --- | --- | --- | --- |
+| `sort=prestige` | 56,398（主查询 37,635 + COUNT 18,763） | **53** | −99.9% |
+| `sort=club` | 56,398 | **43** | −99.9% |
+| `sort=status` | 56,398 | **22** | −99.9% |
+
+单次耗时 1.4–2.0ms（建索引前 135–152ms）。⇒ 验收目标「无索引形状 ≤1,000 行」在这三个形状上达成；与本地 `EXPLAIN QUERY PLAN` 探针（`scratch/idx-probe.mjs`：建索引前 `SCAN players … USE TEMP B-TREE FOR ORDER BY`、建索引后 `SCAN players USING INDEX …` 且无临时排序，带游标的页同样吃索引）结论一致。
+其余 8 个全表扫排序键（`view=initial&sort=ca`、`wage`、`name`、`ps`、`influence`、`uid`、`years`、`protected`）仍是 37,635 行/次，见 §5.1 分类与 §5.3 写配额张力。
+
+**已知缺口：「同一列既筛选又排序」时这三条索引用不上**（2026-09-22 本地 `EXPLAIN QUERY PLAN` 实测，20,000 行夹具）：
+
+| 查询 | 计划 |
+| --- | --- |
+| `WHERE players.status = ? ORDER BY <status CASE> DESC, id DESC` | `SEARCH players USING COVERING INDEX idx_players_status (status=?)` + `USE TEMP B-TREE FOR ORDER BY` |
+| `WHERE players.club_id = ? ORDER BY COALESCE(players.club_id,0) DESC, id DESC` | `SEARCH players USING COVERING INDEX idx_players_club (club_id=?)` + `USE TEMP B-TREE FOR ORDER BY` |
+| `WHERE players.ca >= ? ORDER BY COALESCE(players.ca,0) DESC, id DESC` | `SCAN players USING INDEX idx_players_sort_ca`（**无临时排序**，两条都吃上） |
+
+原因：`status` / `club_id` 的筛选条件写的是**裸列**（`players.status = ?`），与排序用的 CASE / `COALESCE(club_id,0)` 是**两个不同的表达式**，索引没法同时服务；优化器于是挑了 0001 建的窄列索引来过滤，再把命中的行丢进临时 B 树排序。`ca` 之所以两用都成，是因为它的筛选是范围（`>=`）、排序表达式又与索引同源，B 树顺序天然满足。
+
+**不阻断**：读量受「命中行数」约束（`status='normal'` 约 4 千、`club_id=?` 约 1 千），不是全表扫，所以验收目标「有索引形状 ≤70 行」在这类组合上不成立但也不会回到 37,635。要收掉它得让筛选也用同一表达式（`COALESCE(club_id,0) = ?`），那会改变 `club_id IS NULL` 的语义（0 与 NULL 混同）⇒ 本增量不动，登记为后续候选。
+
 ---
 
 ## 四、成本模型（6 个设计探针）
@@ -113,7 +139,8 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | 类别 | 键 | 单次主查询 | 能不能靠索引解决 |
 | --- | --- | --- | --- |
 | **已有 0027 表达式索引**（实测快） | `ca` 58、`pa` 61、`age` 22、`market_value` 22 | 22–61 | 已解决 |
-| **可建 players 单表表达式索引** | `prestige`、`base_ca`、`badges`、`growth_gap`、`uid`、`club`、`position`、`status`、`growable`、`foot`、`growth_tier`、`future_star`、`china_plan`、`agent_tier`、`fc_id`、`ps` | 37,635 | ✅ 可以（每条 ≈18,301 行写） |
+| **0029 已建（步骤 4）** | `prestige` **53**、`club` **43**、`status` **22** | 22–53 | ✅ 已解决 |
+| **可建 players 单表表达式索引（剩余 13 个）** | `base_ca`、`badges`、`growth_gap`、`uid`、`position`、`growable`、`foot`、`growth_tier`、`future_star`、`china_plan`、`agent_tier`、`fc_id`、`ps` | 37,635 | ✅ 可以（每条 ≈18,301 行写），按天分批 |
 | **表达式含 87 项链，深度存疑** | `name`（`sqlFold('players.name')`） | 37,635 | ⚠️ 表达式树深度上限 100（增量 26 的坑），建索引前必须用真引擎实测 |
 | **不能建静态表达式索引** | `wage`、`release_fee`、`contract_type`、`source`（在 `ct.*`）、`protected`、`years`（依赖 `ct.*` + `season_windows` 子查询）、`influence`（内联运行时 config 系数，系数一改索引全废） | 37,635–37,637 | ❌ 需物化列或改查询结构 |
 | **需物化子表** | `attr:<属性键>`（34 键，值在 `game_attrs` JSON 里） | 未实测（形状同全表扫） | ❌ 架构级 |
@@ -132,8 +159,8 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 
 **建议（步骤 4 按此执行）**：
 1. 先做**零写成本**的三件事（步骤 2/3/5）：把最常见的默认浏览路径从 18,819 行压到 56 行（命中缓存时 0 行）。
-2. 索引**分批 + 分天**，每批 ≤3 条。**第一批（3 条 = 54,903 行写，卡在 6 万预算内）**建议取表达式最安全、且前端列序/筛选面板直接暴露的键：`prestige`、`club`、`status`。选它们的理由不是热度（用户已裁决当前频次数据无意义），而是：都是单表纯列/COALESCE/CASE 表达式（不像 `ps` 有 15 项链、不像 `name` 有 87 项链），建索引风险最低，而它们又都是球员库默认列/默认排序下拉里可见的列。
-3. 剩余键登记为「**已量化、待配额**」的分天清单，不假装已解决。每批后跑一次 `--only=<形状>` 复测确认。
+2. 索引**分批 + 分天**，每批 ≤3 条。**第一批（3 条 = 54,903 行写，卡在 6 万预算内）**取表达式最安全、且前端列序/筛选面板直接暴露的键：`prestige`、`club`、`status`。选它们的理由不是热度（用户已裁决当前频次数据无意义），而是：都是单表纯列/COALESCE/CASE 表达式（不像 `ps` 有 15 项链、不像 `name` 有 87 项链），建索引风险最低，而它们又都是球员库默认列/默认排序下拉里可见的列。**→ 已于 2026-09-22 执行（迁移 `0029`，生产实测 53 / 43 / 22 行，见 §3.1）**；同源锁死见 `tests/players-sort-indexes.test.ts`。
+3. 剩余键登记为「**已量化、待配额**」的分天清单，不假装已解决（剩余 13 个可建索引的键 = 238k 行写 ≈ 4 天）。每批后跑一次 `--only=<形状>` 复测确认。
 4. `name` 索引先跑深度体检（`scripts/check-name-fold-depth.mjs` 同源思路）；`influence` / `years` / `protected` / `ct.*` 四个维度改判为「需物化列或改查询」，不在本增量做。
 
 ### 5.4 验收目标的修正（计划偏差，需记录）
@@ -154,5 +181,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements-after.json
 ```
 把新表与本报告第三节逐形状对比，逐条写明「改前 → 改后」。JSON 支持增量合并（`--only=` / `--probes` 分次跑不会互相覆盖，也不会让报错/`--dump` 的空壳条目覆盖已有测量），所以补测单个形状不必重跑全套。
+
+`measurements.json` 的字段随脚本演进而分层，读它时按 `list_rows` / `count_rows` 是否存在判断口径：**有**这两列的条目是步骤 2（去 COUNT）之后、用现行脚本跑的（目前是步骤 4 复测的 `sort-prestige` / `sort-club` / `sort-status` 三条，`list_rows` 即主查询读量）；**没有**的条目是步骤 1 的产物，只有 `statements` / `metas` / `rows_read_total`，其中 `metas[1]` 是当时的主查询、`metas[2]` 是当时还在的 COUNT。旧条目若被重打印，`list_rows` 缺省会显示为 0、整行读量落进「其它」列——不是数据错，是列口径不同。
 
 **本次测量总消耗：约 118 万行**（免费档 24%），其中 `measurements.json` 里逐形状最新值合计 **1,084,282 行**，差额来自重复运行（探针两次、补测 7 个新形状、`detail` 补测）与 wrangler 偶发失败后的重试。测量走管理通道，不占用、也不受限于当日免费档的**强制**上限。

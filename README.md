@@ -77,11 +77,11 @@ e2e 冒烟默认打 `http://127.0.0.1:8791`，用本机 Chrome（`C:/Program Fil
 
 ## 数据库迁移
 
-`src/db/migrations/` 下 28 个文件（`0001_init` … `0028_contract_window_ticks.sql`），由 `wrangler d1 migrations apply whl-club` 管理，只对 `DB` 生效（另两库只读）。
+`src/db/migrations/` 下 29 个文件（`0001_init` … `0029_players_sort_indexes_batch2.sql`），由 `wrangler d1 migrations apply whl-club` 管理，只对 `DB` 生效（另两库只读）。
 
 新增迁移要同时把文件名追加到 `tests/d1.ts` 的 `MIGRATION_FILES`，否则测试夹具与迁移会脱节。
 
-`0001`–`0028` 已 apply 到生产（`0022`–`0027` 于 2026-09-20 完成；`0028`（增量 25，纯加列，无回填）于 2026-09-21 随合同导入批完成）。提醒：`0027` 的四条表达式索引一次性写约 7.3 万行（4 × 18301 名球员），D1 免费档日写配额 10 万行——同类大迁移要单独安排，别和别的写叠加。
+`0001`–`0029` 已 apply 到生产（`0022`–`0027` 于 2026-09-20 完成；`0028`（增量 25，纯加列，无回填）于 2026-09-21 随合同导入批完成；`0029`（增量 28，三条表达式索引）于 2026-09-22 单独 apply）。提醒：`0027` 的四条表达式索引一次性写约 7.3 万行（4 × 18301 名球员）、`0029` 的三条约 5.5 万行，D1 免费档日写配额 10 万行——同类大迁移要单独安排，别和别的写叠加。**迁移一旦 apply 到生产就不得再改**（要改就新增下一个文件），否则线上 `d1_migrations` 记账与新环境重放会漂移。
 
 ## 测试
 
@@ -112,7 +112,7 @@ docs/          附属插件与集成说明
 npm run build && wrangler deploy
 ```
 
-生产状态（2026-09-22 查证 `wrangler deployments status --name whl-club`）：最新部署 Version **`31c58da7-6611-4634-8c22-678a0f9e6876`**（2026-09-22T02:17:47Z，Source `Secret Change`——2026-09-22 配 `CRON_KEY` secret 触发的换版，**代码与 `3455087e` 相同**，含增量 27）；上一版 `3455087e-4bdb-4a63-b40f-8df943d80892`（2026-09-21T17:13:35Z，含增量 27；`wrangler deploy` CLI 回显的 Current Version ID 为 `ff9c2e91-25a0-4ce1-be19-d9b50bc0a136`）；再上一版 `b83ec876-9fc7-4c16-8d01-0cba3d8ab5e5`（2026-09-21T14:39Z，含增量 25–26；CLI 回显 `81e93c74-228f-4fee-9d87-9fecf602d360`）；此前增量 17–24 为 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`、增量 16 为 `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0028_contract_window_ticks.sql`（2026-09-21 随合同导入批 apply；`d1 migrations list --remote` 报无需 apply）。生产数据：球员库 18301 人（全库入籍 570，其中 444 人于 2026-09-20 回填、481 人于 2026-09-21 按 s901 队籍对齐后归入 20 队；自由身 17731 全部 `status='free'`；16 人控队合同 462 行已于 2026-09-21 落库）。仍未执行的生产写：球员库 30 人缺字段补录。
+生产状态（2026-09-22 查证 `wrangler deployments status --name whl-club`）：最新部署 Version **`31c58da7-6611-4634-8c22-678a0f9e6876`**（2026-09-22T02:17:47Z，Source `Secret Change`——2026-09-22 配 `CRON_KEY` secret 触发的换版，**代码与 `3455087e` 相同**，含增量 27）；上一版 `3455087e-4bdb-4a63-b40f-8df943d80892`（2026-09-21T17:13:35Z，含增量 27；`wrangler deploy` CLI 回显的 Current Version ID 为 `ff9c2e91-25a0-4ce1-be19-d9b50bc0a136`）；再上一版 `b83ec876-9fc7-4c16-8d01-0cba3d8ab5e5`（2026-09-21T14:39Z，含增量 25–26；CLI 回显 `81e93c74-228f-4fee-9d87-9fecf602d360`）；此前增量 17–24 为 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`、增量 16 为 `6ed7446c-0a7e-40ed-b299-7e218b030dd5`、增量 15 为 `4d03eb57-cfd2-4d85-92e2-aa89f96528e2`。生产迁移已到 `0029_players_sort_indexes_batch2.sql`（2026-09-22 单独 apply，增量 28 步骤 4；`d1 migrations list --remote` 报无需 apply）。生产数据：球员库 18301 人（全库入籍 570，其中 444 人于 2026-09-20 回填、481 人于 2026-09-21 按 s901 队籍对齐后归入 20 队；自由身 17731 全部 `status='free'`；16 人控队合同 462 行已于 2026-09-21 落库）。仍未执行的生产写：球员库 30 人缺字段补录。
 
 ⚠️ **2026-09-21 生产 D1 免费档行读配额耗尽（当日事故）**：`scriptThrewException` 自 15:20:22Z 起、cron 每 5 分钟失败一次，`/api/players*` 一律 500，根因 `D1_ERROR: Your account has exceeded D1's free tier daily row read limit`（当日 whl-club `rowsRead` 4,350,235，免费档上限 5,000,000 行/日）。限额按 **UTC 零点**归零后自动恢复（2026-09-22T00:00:34Z 起 cron 恢复成功）。排查时注意：`/api/health`（只读 `sqlite_schema`）、`wrangler d1 execute --remote`（管理通道不受限）与 `/api/clubs/directory`（缓存键是固定串、stale 刷新还吞错）都**不能**用来判断 D1 是否可用。部署后的最小化生产回读已于 **2026-09-22T00:01:52Z 补做**：`/api/health`、`?sort=name`、`?ps=25`、`?ps=125`、`?ps=1,101`、`/api/players/roster` 全 200，银/金分槽语义实测成立。读消耗的量化与治理见 ROADMAP 增量 28。
 
