@@ -4,6 +4,45 @@
 
 各增量的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [未部署] · 增量 37 — 球队与俱乐部双向建档同步（tour + club 两仓）（2026-09-23）
+
+本轮两仓同时改（本仓 `WHL-club-operations-platform` + 赛事仓 `WHL-tournament-management-system`），代码完成、两仓本地全绿、**未提交未部署**。部署前两侧都要 `wrangler secret put TEAM_SYNC_SECRET`（**同值**）。
+
+**背景**：球队（`team.id`）与俱乐部（`clubs.id`）本来就是同一个号（游戏内球队编号，两库早前一起 rekey 过），但两边只能各建各的 —— 赛事系统建队不登记俱乐部；本仓建俱乐部又硬性要求「赛事系统里先有这支队」（否则 404「赛事系统里没有这支球队，请先在赛事系统建队」）。谁先建都得手工去另一侧补一次。
+
+**边界调整（增量 33 的例外）**：增量 33 定下「名册只拉不推」（赛事仓 `worker/lib/clubRoster.ts` 顶部原文），本轮只对**「球队建档」**这一个写动作破例放开对称推送，**名册仍一行都不推**。理由：建档是一次性事件、两侧都可能先发起、且赛事仓读不到本仓库（反向拉不出「本仓有而赛事无」）。赛事仓那段注释已原文保留并补上这次调整的声明。
+
+**新增**
+- `src/lib/hmac.ts`：`hmacHex` + `verifyTeamSync`（签名串 `` `POST|${path}|${ts}|${rawBody}` ``、头 `X-Timestamp`/`X-Sign`、HMAC-SHA256 小写 hex、时间窗 ±300s，与认证中心 `machine.ts` 同一口径）。本仓 `src/worker/notify.ts` 原先私有的 `hmacHex` 抽到这里共用。
+- `src/worker/tourClient.ts`：`pushTeamToTour`（**永不抛错**，失败回中文口径：未配基址 / 未配密钥 / 对方不可达 / 透传对方 message）。
+- `src/worker/routes/internal.ts`：`POST /api/internal/team-upsert`（幂等建档：同 id 已有则 200 `{created:false, nameDiffers}` **不覆写**）。未配密钥 → **503**（写端点 fail-closed，不像 `assertCronKey` 那样「没配就放行」）。
+- `src/worker/routes/admin/teamSync.ts`：`GET /api/admin/team-sync` 三段差异（只有赛事有 / 只有本仓有 / 两边名字不同）+ `POST /api/admin/team-sync/apply`（**每次重算 diff 再动手**，防照几分钟前的清单盲写；不匹配当前差异 → 409）。
+- 前端 `web/src/pages/admin/ClubsPage.tsx` 新增「球队同步对账」卡片（`web/src/lib/adminQueries.ts` 加 `TEAM_SYNC_KEY` / `fetchTeamSync`）。
+- `tests/team-sync.test.ts` 26 例：入站端点（正签建档 + 认证登记 + 审计 actor 留空 / 幂等 nameDiffers / 签名矩阵 错签·缺签·过期·非数字全 403 且不落库 / 换密钥 403 / 未配密钥 503 / 入参校验 400 / 名字被占 409）、公开缓存失效登记、`computeTeamSyncDiff` 纯函数、对账端点、出站 `pushTeamToTour`、**跨仓签名金标准**、**真实风险**各一组。
+
+**变更**
+- `src/worker/routes/admin/clubs.ts`：原 `POST /clubs` 的核心抽成导出的 `createClubFromTourTeam()`（名字 ≤40、`leagueTier` 只收 premier/second、id 撞号 409、名字重复 409、审计 `club_create`、`authRegisterTeam` 失败不回滚只置 `authLinked=false`）；`POST /clubs` 改为「赛事系统已有该队 → 原逻辑；没有 → **先推建队，成功再本地建档**；推送失败 → 502 且不建档」。原来的「赛事系统里没有这支球队」404 被自动建队取代。
+- `src/worker/env.ts` 加 `TEAM_SYNC_SECRET`；`src/worker/index.ts` 挂 `/api/internal`。
+- **`src/lib/cache-policy.ts` 的 `WRITE_SCOPE_PREFIXES` 加 `/api/internal`** —— 否则「建了俱乐部但公开目录最长陈旧 24h」。
+
+**赛事仓侧（tour，权威文档见其 `PRD.md` / `TECH_DESIGN.md` §4.5）**
+- 新增 `worker/lib/clubSync.ts`（出站 + 验签）、`worker/lib/teamBulk.ts`（「游戏球队 ID 队名」解析，`NAME_MAX = 40` / `BULK_MAX = 64`）、`worker/routes/internal.ts`（入站端点）。
+- `worker/routes/admin/teams.ts`：建队/批量建队改「游戏球队 ID + 队名」并推送（**队名上限 32 → 40** 对齐本仓 `clubs.name`），新增 `POST /:id/sync-club` 重试入口。
+- `worker/routes/admin/tournaments.ts`：批量报名同样改「ID + 队名」，**改为按 id 认队**（原先按名字），名字不一致进 `nameMismatch` 报告（登记以库里为准）。
+- 前端 `src/pages/AdminTeams.tsx`（游戏球队 ID 输入 + EA 目录软校验：命中显示官方队名、未命中黄字警告但允许建队；同步按钮 + 失败红字）、`src/pages/TournamentManage.tsx`。
+- 新增 `shared/fc26Teams.json`（由本仓 `web/assets/ref/team.json` 复制，696 条）+ `shared/fc26Teams.ts`（`fc26TeamName` / `isKnownFc26Team`）。
+
+**验收**
+- 本仓 `npm run typecheck` 全清（三个 tsconfig）；`npx vitest run` **50 文件 / 698 例全通过**。
+- 赛事仓 `npm run typecheck` 全清；`npx vitest run` **16 文件 204 例通过 + 1 文件 7 例跳过**。
+- **跨仓签名金标准**（两仓各一份、逐字同值）：`GOLDEN_SECRET = "increment-37-golden-secret"` / `GOLDEN_TS = 1767225600` / `GOLDEN_RAW = '{"id":700,"name":"Arsenal","operator":1}'` / `GOLDEN_HEX = "1437a305e893ae6c65364c50cc953a178e1edfa38f2f2040ae961966db065d30"`。hex 是 `node:crypto` 独立算出的**死值**（不是用被测代码算的），两侧任一方偷改算法/路径/签名串立刻红；两边还各有「入站接受对面那份金标准签名」的用例证明常量互通。
+
+**已知后果 / 真实风险（已测出并留痕）**
+- **推送不可撤销**：从本仓发起时先推、后本地建档；若推送成功而本地名字撞车 409，赛事系统那支队撤不回来，只能靠对账页的「只有赛事有」列出来处理。`tests/team-sync.test.ts` 的「真实风险」describe 钉住了这条可见性。
+- 认证中心 `club_id` 已被别的球队占用（`club_taken` 400）**不阻断建档**：`authLinked=false`、俱乐部行照落，管理端可点「重新登记」补。
+- 赛事仓 `UNIQUE(org_id, name)`：入站建档前先单查名字占用并 409 点名「队名「X」已被球队 #N 占用」（原 catch 回的是「球队 ID #N 已被占用」，会把本仓操作员带偏）。
+- **明确不做**：改名不联动（只在对账页显示 `nameDiffers`）；删队不联动（本仓没有删除端点）；球员名册仍严格只拉；报名、赛果、账目一律不动。
+
 ## [已上线] · 增量 36 — 赛事仓错误契约收口 + 账号投影对账（tour 单仓）（2026-09-23，Version 9c51052f-a50c-44c8-8078-b318fd7f226b）
 
 本轮**本仓没有任何代码改动**，交付全部落在赛事仓 `WHL-tournament-management-system`（其权威文档是 `PRD.md` / `TECH_DESIGN.md`，后者已随本轮补 §4.2 与 §8）；本节进本仓 CHANGELOG 是因为**增量编号是全项目共享序列，台账在本仓 `ROADMAP.md`**。赛事仓 2 个提交（`7f4d69a` 代码 + `952f470` 文档）**已 push**（`dee2292..952f470`），连同增量 33 的 4 个提交一并补齐，该仓 `origin/main` = `952f470`。部署：`9c51052f-…`，2026-09-23T13:02:42Z，Source `wrangler`，`Total Upload: 582.96 KiB / gzip: 133.33 KiB`。

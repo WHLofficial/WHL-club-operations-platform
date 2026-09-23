@@ -858,6 +858,37 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 **待办**：① ~~赛事仓 6 个提交是否 push~~ ✅ 已做（2026-09-23 `dee2292..952f470`；**口径更新**：用户同日明确「部署推送都得一块啊」⇒ 此后「部署」即同时授权该仓 push，不再需要第二次指令）；② 赛事仓未提交残留 `.superpowers/` / `.zcodeignore` / `scripts/fc26-id-rekey/prod-snapshot-20260916.sql`（非本轮产物，未动）。
 
 
+## 增量 37 · 球队与俱乐部双向建档同步（tour + club 两仓，2026-09-23）
+
+**状态**：代码完成、两仓本地全绿、**未提交未部署**（部署前两侧都要 `wrangler secret put TEAM_SYNC_SECRET`，同值；属需单独授权项）。
+
+**缘起（用户 m00582 原话）**：「探索 club 平台新建俱乐部方式，与之保持一致并实现联动」；随后澄清（m00620 原话）：「联动指的是 tour 平台建立球队后同步 club 平台建立俱乐部，反之亦然」。**机制由用户裁决为「推送 + 对账兼底」**（实时 HMAC 推送 + 对账页兜底存量差异）。
+
+**问题**：球队（`team.id`）与俱乐部（`clubs.id`）本来就是**同一个号**（游戏内球队编号，两库早前一起 rekey 过），但两边只能各建各的 —— 赛事系统建队不登记俱乐部；俱乐部平台建俱乐部又硬性要求「赛事系统里先有这支队」（否则 404「赛事系统里没有这支球队，请先在赛事系统建队」）。谁先建都得手工去另一侧补一次，漏补就出现「有队无俱乐部」或「有俱乐部无队」。
+
+**边界调整（本增量最需要记住的一条）**：增量 33 定下「名册只拉不推」，理由写在赛事仓 `worker/lib/clubRoster.ts` 顶部（不必在俱乐部平台里放第二个系统的写入凭据）。本增量对**「球队建档」**这一个写动作破例放开对称推送，**名册仍一行都不推**。三条理由：① 建档是一次性事件不是持续数据流；② 两侧管理端都可能先发起，纯拉取要等 1 小时 cron，而「我刚建的队去哪了」是当场要答案的事；③ 赛事系统读不到俱乐部平台库（只有单向只读），反向拉不出「俱乐部有、赛事无」。赛事仓那段注释已原文保留并补上这次调整的声明。
+
+**交付**
+- **对称契约**：`POST /api/internal/team-upsert`，体 `{ id, name, operator? }`，语义是**幂等建档** —— 已有同 id 就 200 回 `{ created:false, nameDiffers }` 且**不覆写**，没有才建。两侧各一个入站端点；出站基址复用既有变量（赛事仓用 `CLUB_API_BASE`，本仓用 `TOUR_API_BASE`），共用一把 `TEAM_SYNC_SECRET`。
+- **签名口径**：签名串 `` `POST|${path}|${ts}|${rawBody}` ``、头 `X-Timestamp` / `X-Sign`、HMAC-SHA256 小写 hex、时间窗 ±300s —— 与认证中心 `machine.ts`、本仓 `notify.ts` 完全一致，不另立一套。本仓 `src/worker/notify.ts` 原先私有的 `hmacHex` 抽到新的 `src/lib/hmac.ts` 共用。
+- **fail-closed 与可用性优先的分界**：入站未配 `TEAM_SYNC_SECRET` → **503 拒绝**（写端点不能像 `src/lib/guard.ts` 的 `assertCronKey` 那样「没配就放行」）；出站未配或对方不可达 → **不阻断本地操作**，只把结果标失败并在管理端显示红字 + 「同步」重试按钮。
+- **本仓（club）改动**：新增 `src/lib/hmac.ts`、`src/worker/tourClient.ts`（`pushTeamToTour`，永不抛错，失败给中文口径）、`src/worker/routes/internal.ts`（入站端点）、`src/worker/routes/admin/teamSync.ts`（`GET /api/admin/team-sync` 三段差异 + `POST /api/admin/team-sync/apply`，**每次重算 diff 再动手**，防照几分钟前的清单盲写）；`src/worker/routes/admin/clubs.ts` 把原 `POST /clubs` 核心抽成 `createClubFromTourTeam()`，`POST /clubs` 改为「赛事系统有 → 原逻辑；没有 → 先推建队，成功再本地建档；推送失败 → 502 且不建档」；`src/worker/env.ts` 加 `TEAM_SYNC_SECRET`；`src/worker/index.ts` 挂 `/api/internal`；**`src/lib/cache-policy.ts` 的 `WRITE_SCOPE_PREFIXES` 加 `/api/internal`**（否则建了俱乐部而公开目录最长陈旧 24h）。
+- **赛事仓（tour）改动**：新增 `worker/lib/clubSync.ts`（出站 + 验签）、`worker/lib/teamBulk.ts`（「游戏球队 ID 队名」解析，`NAME_MAX = 40` / `BULK_MAX = 64`）、`worker/routes/internal.ts`；`worker/routes/admin/teams.ts` 建队/批量建队改「ID + 队名」并推送（队名上限 32 → 40 对齐俱乐部侧 `clubs.name`），新增 `POST /:id/sync-club`；`worker/routes/admin/tournaments.ts` 批量报名同样改「ID + 队名」、**改为按 id 认队**（原先按名字），新增 `nameMismatch` 报告；前端 `src/pages/AdminTeams.tsx`（游戏球队 ID 输入 + EA 目录软校验 + 同步按钮/失败红字）、`src/pages/TournamentManage.tsx`；新增 `shared/fc26Teams.json`（由本仓 `web/assets/ref/team.json` 复制，696 条）+ `shared/fc26Teams.ts`（`fc26TeamName` / `isKnownFc26Team`）。
+- **对账兜底放本仓**（同时读得到两个库，diff 零成本）：`web/src/pages/admin/ClubsPage.tsx` 新增「球队同步对账」卡片，三段 = 只有赛事有（补建俱乐部）/ 只有俱乐部有（推给赛事）/ 两边名字不同（**只报不改**）。
+
+**验收（实测）**
+- 本仓 `npm run typecheck` 全清（三个 tsconfig）；`npx vitest run` **50 文件 / 698 例全通过**（含新增 `tests/team-sync.test.ts` 26 例）。
+- 赛事仓 `npm run typecheck` 全清；`npx vitest run` **16 文件 204 例通过 + 1 文件 7 例跳过**（含新增 `tests/clubTeamSync.test.ts` 57 例）。
+- **跨仓签名金标准**（两仓各一份，逐字同值）：`GOLDEN_SECRET = "increment-37-golden-secret"` / `GOLDEN_TS = 1767225600` / `GOLDEN_RAW = '{"id":700,"name":"Arsenal","operator":1}'` / `GOLDEN_HEX = "1437a305e893ae6c65364c50cc953a178e1edfa38f2f2040ae961966db065d30"`。hex 是用 `node:crypto` 独立算出的**死值**（不是用被测代码算的），两侧任一方偷改算法/路径/签名串立刻红；两边还各有「入站接受对面那份金标准签名」的用例，证明常量真的互通。
+- **真实风险已测出并留痕**（三条）：① **从本仓发起时先推、后本地建档，推送不可撤销** —— 推送成功而本地名字撞车 409 时，赛事系统那支队撤不回来，只能靠对账页的「只有赛事有」列出来处理（`tests/team-sync.test.ts` 的「真实风险」describe 钉住了这条可见性）；② **认证中心 `club_id` 已被别的球队占用**（`club_taken` 400）不阻断建档，`authLinked=false`、俱乐部行照落，管理端可点「重新登记」补；③ **赛事仓 `UNIQUE(org_id, name)`**：入站建档前先单查名字占用并 409 点名「队名「X」已被球队 #N 占用」（原先 catch 里回的是「球队 ID #N 已被占用」，会把俱乐部平台的操作员带偏）。
+
+**明确不做**：改名不联动（只在对账页显示 `nameDiffers`）；删队不联动（本仓没有删除端点）；球员名册仍严格只拉；报名、赛果、账目一律不动；不做无人值守的批量建档任务。
+
+**部署前置**：两侧各 `wrangler secret put TEAM_SYNC_SECRET`（**同值**）。只配一侧的结果是那侧入站 503、出站报「未配置」——不会静默半通。
+
+**待办**：① 两仓提交（未做）；② 部署 + 配 `TEAM_SYNC_SECRET`（需单独授权）；③ 部署后实测一条：赛事仓建队 → 本仓 `/api/admin/team-sync` 无差异；本仓建俱乐部（赛事仓无此队）→ 赛事仓 `/api/admin/teams` 能看到该队。
+
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |
