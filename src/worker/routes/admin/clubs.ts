@@ -5,6 +5,7 @@ import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
 import { authIssueTeamCode, authRegisterTeam, authUnbindTeam, AuthApiError } from '../../authClient.ts';
+import { pushTeamToTour } from '../../tourClient.ts';
 import { getBoundClub } from '../../binding.ts';
 import { getVisibleSeason } from '../../seasons.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../../home.ts';
@@ -12,6 +13,74 @@ import { deriveClubTier, tierCache } from '../../tier.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
+
+export interface CreatedClub {
+  club: { id: number; name: string; leagueTier: string | null; status: string; createdAt: string };
+  authLinked: boolean | null;
+}
+
+// 建俱乐部核心（增量 37 抽出，三个入口共用）：管理端手填游戏球队 ID、管理端自动在赛事系统建队后、
+// 赛事系统建队后经机器通道推过来（routes/internal.ts）。**只管本仓建档**——「tour 里有没有这支队」
+// 的判定留在调用方：两个管理端入口先保证 tour 有队，机器通道入口是 tour 刚建完才推来的。
+export async function createClubFromTourTeam(
+  env: Env,
+  {
+    gameTeamId,
+    name,
+    leagueTier,
+    operator,
+  }: { gameTeamId: number; name: string; leagueTier?: unknown; operator: number | null },
+): Promise<CreatedClub> {
+  if (!name) throw new HttpError(400, '俱乐部名字不能为空');
+  if (name.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
+  // 增量 9：级别由赛事报名派生（worker/tier.ts），建队不再定级； AUTH_DB 未配置的
+  // 回滚通道下仍接受显式定级写休眠列（与旧行为一致），派生通道忽略该参数。
+  if (leagueTier !== undefined && leagueTier !== null && leagueTier !== 'premier' && leagueTier !== 'second') {
+    throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
+  }
+  const writeTier = env.AUTH_DB ? null : (leagueTier ?? null);
+  // id 撞号先查（插入冲突会被名字冲突的 catch 混淆，给不出准话）
+  const idTaken = await env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(gameTeamId).first<{ id: number }>();
+  if (idTaken) throw new HttpError(409, `球队 ID #${gameTeamId} 已被登记册占用`);
+  const club = await env.DB.prepare(
+    `INSERT INTO clubs (id, name, league_tier, status, created_at)
+     VALUES (?, ?, ?, 'active', ${nowSql()})
+     RETURNING id, name, league_tier, status, created_at`,
+  )
+    .bind(gameTeamId, name, writeTier)
+    .first<{ id: number; name: string; league_tier: string | null; status: string; created_at: string }>()
+    .catch(() => null);
+  if (!club) throw new HttpError(409, '俱乐部名字已存在');
+  // actor 可空（audit_log.actor 允许 NULL）：机器通道推来的建档没有本仓管理员身份，
+  // 留 NULL 比伪造一个 actor 诚实；来源由调用方在 after 里自述。
+  await writeAudit(env.DB, {
+    actor: operator,
+    action: 'club_create',
+    targetType: 'club',
+    targetId: club.id,
+    after: { name, gameTeamId, leagueTier: writeTier },
+  });
+  // auth 目录自动建档（增量 17）：register upsert 幂等；失败不回滚 clubs 行，留「重新登记」重试
+  let authLinked: boolean | null = null;
+  if (env.AUTH_DB) {
+    try {
+      await authRegisterTeam(env, { tourTeamId: gameTeamId, name, clubId: club.id });
+      authLinked = true;
+    } catch {
+      authLinked = false;
+    }
+  }
+  return {
+    club: {
+      id: club.id,
+      name: club.name,
+      leagueTier: club.league_tier,
+      status: club.status,
+      createdAt: club.created_at,
+    },
+    authLinked,
+  };
+}
 
 app.post('/clubs', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
@@ -23,64 +92,30 @@ app.post('/clubs', async (c) => {
     throw new HttpError(400, '必须提供游戏球队 ID（与游戏内球队编号一致）');
   }
   if (!Number.isInteger(gameTeamId) || gameTeamId <= 0) throw new HttpError(400, '游戏球队 ID 应为正整数');
-  // tour 校验 + 队名预填：赛事系统里没有的队号不建（先去赛事系统建队）
+  const bodyName = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (bodyName.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
+  // tour 校验 + 队名预填：tour 里有这支队就照旧取它的队名；没有则**先推过去建队**（增量 37
+  // 双向同步的 club → tour 方向）。队名是推得动的先决条件——tour 没队又没填名字时无从建队，
+  // 直接挡下（不再要求先去赛事系统手工建队）。
   const tourTeam = await c.env.TOUR_DB.prepare('SELECT id, name FROM team WHERE id = ?')
     .bind(gameTeamId)
     .first<{ id: number; name: string }>();
-  if (!tourTeam) throw new HttpError(404, '赛事系统里没有这支球队，请先在赛事系统建队');
-  const bodyName = typeof body?.name === 'string' ? body.name.trim() : '';
-  const name = bodyName || tourTeam.name.trim();
-  if (!name) throw new HttpError(400, '俱乐部名字不能为空');
-  if (name.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
-  // 增量 9：级别由赛事报名派生（worker/tier.ts），建队不再定级； AUTH_DB 未配置的
-  // 回滚通道下仍接受显式定级写休眠列（与旧行为一致），派生通道忽略该参数。
-  const leagueTier = body?.leagueTier;
-  if (leagueTier !== undefined && leagueTier !== null && leagueTier !== 'premier' && leagueTier !== 'second') {
-    throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
+  const name = bodyName || tourTeam?.name.trim() || '';
+  if (!name) throw new HttpError(400, '赛事系统里没有这支球队，请填俱乐部名字（会自动在赛事系统建队）');
+  let pushedToTour = false;
+  if (!tourTeam) {
+    const push = await pushTeamToTour(c.env, { id: gameTeamId, name });
+    // 推不过去就不建档：两侧 id 空间一致，单边建档会留下「有俱乐部没球队」的错位
+    if (!push.ok) throw new HttpError(502, `赛事系统建队失败：${push.message}`);
+    pushedToTour = true;
   }
-  const writeTier = c.env.AUTH_DB ? null : (leagueTier ?? null);
-  // id 撞号先查（插入冲突会被名字冲突的 catch 混淆，给不出准话）
-  const idTaken = await c.env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(gameTeamId).first<{ id: number }>();
-  if (idTaken) throw new HttpError(409, `球队 ID #${gameTeamId} 已被登记册占用`);
-  const club = await c.env.DB.prepare(
-    `INSERT INTO clubs (id, name, league_tier, status, created_at)
-     VALUES (?, ?, ?, 'active', ${nowSql()})
-     RETURNING id, name, league_tier, status, created_at`,
-  )
-    .bind(gameTeamId, name, writeTier)
-    .first<{ id: number; name: string; league_tier: string; status: string; created_at: string }>()
-    .catch(() => null);
-  if (!club) throw new HttpError(409, '俱乐部名字已存在');
-  await writeAudit(c.env.DB, {
-    actor: user.id,
-    action: 'club_create',
-    targetType: 'club',
-    targetId: club.id,
-    after: { name, gameTeamId, leagueTier: writeTier },
+  const created = await createClubFromTourTeam(c.env, {
+    gameTeamId,
+    name,
+    leagueTier: body?.leagueTier,
+    operator: user.id,
   });
-  // auth 目录自动建档（增量 17）：register upsert 幂等；失败不回滚 clubs 行，留「重新登记」重试
-  let authLinked: boolean | null = null;
-  if (c.env.AUTH_DB) {
-    try {
-      await authRegisterTeam(c.env, { tourTeamId: gameTeamId, name, clubId: club.id });
-      authLinked = true;
-    } catch {
-      authLinked = false;
-    }
-  }
-  return c.json(
-    {
-      club: {
-        id: club.id,
-        name: club.name,
-        leagueTier: club.league_tier,
-        status: club.status,
-        createdAt: club.created_at,
-      },
-      authLinked,
-    },
-    201,
-  );
+  return c.json({ ...created, pushedToTour }, 201);
 });
 
 // 建队时队名预填（增量 17）：按游戏球队 ID 查赛事系统队名

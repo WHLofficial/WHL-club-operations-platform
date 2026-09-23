@@ -58,6 +58,9 @@ export const WRITE_SCOPE_PREFIXES: ReadonlyArray<readonly [string, readonly Cach
   ['/api/registration', PUBLIC_SCOPES],
   ['/api/growth', PUBLIC_SCOPES],
   ['/api/cron', PUBLIC_SCOPES],
+  // 增量 37 机器通道：赛事系统建队推过来会在本仓建 clubs 行（公开目录 + 名册的俱乐部归属都会变），
+  // 不登记就会「建了俱乐部但公开列表最长陈旧 24h」。
+  ['/api/internal', PUBLIC_SCOPES],
 ];
 
 // 前缀按「路径段边界」匹配：`/api/club` 命中 `/api/club` 与 `/api/club/squad`，

@@ -28,4 +28,7 @@ export interface Env {
   // 未配 = 排名区块整体降级（前端显示「排名暂不可用」），不查任何库。
   // 增量 34：填 apex whleague.win 不算降级——会真的发请求，每次都 530，排名区块永久不可用。
   TOUR_API_BASE?: string;
+  // 增量 37：球队建档双向同步的共享密钥（与赛事仓同值，wrangler secret put TEAM_SYNC_SECRET）。
+  // 出站未配 = 只记同步失败、不阻断本地建俱乐部；入站未配 = /api/internal/* 一律 503（写端点 fail-closed）。
+  TEAM_SYNC_SECRET?: string;
 }

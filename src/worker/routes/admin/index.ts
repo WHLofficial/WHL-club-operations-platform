@@ -12,6 +12,7 @@ import growthRoutes from './growth.ts';
 import marketRoutes from './market.ts';
 import reviewsRoutes from './reviews.ts';
 import overviewRoutes from './overview.ts';
+import teamSyncRoutes from './teamSync.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -24,5 +25,7 @@ app.route('/', growthRoutes);
 app.route('/', marketRoutes);
 app.route('/', reviewsRoutes);
 app.route('/', overviewRoutes);
+// 增量 37：球队建档双向同步的对账面（GET /api/admin/team-sync + POST /api/admin/team-sync/apply）
+app.route('/', teamSyncRoutes);
 
 export default app;

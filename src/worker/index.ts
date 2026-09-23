@@ -19,6 +19,7 @@ import notificationsRoutes from './routes/notifications.ts';
 import adminRoutes from './routes/admin/index.ts';
 import authRoutes from './routes/auth.ts';
 import mediaRoutes from './routes/media.ts';
+import internalRoutes from './routes/internal.ts';
 import { settleOverdue, type SettleSummary } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults } from './results.ts';
@@ -56,6 +57,9 @@ app.route('/api', authRoutes);
 // 媒体读取（增量 31）：镜像比赛系统的公开媒体路由，只读不写、不碰 D1（队徽/封面图同源取）
 app.route('/api/media', mediaRoutes);
 app.route('/api/admin', adminRoutes);
+// 机器通道入站（增量 37）：赛事系统建队推过来建俱乐部行。不走会话，只认 HMAC 签名；
+// 未配 TEAM_SYNC_SECRET 一律 503。写路径已在 cache-policy 登记（否则公开目录最长陈旧 24h）。
+app.route('/api/internal', internalRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {

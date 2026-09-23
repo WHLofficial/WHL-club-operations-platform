@@ -3,6 +3,7 @@
 // docs/astrbot-sync-api.md：X-Timestamp/X-Sign = HMAC-SHA256(SYNC_SECRET, `method|path|ts|body`)，
 // 时间窗 ±300s；文本在平台侧用纯代码模板渲染好，插件只负责发 QQ。
 import type { Env } from './env.ts';
+import { hmacHex } from '../lib/hmac.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -10,18 +11,6 @@ function nowSql() {
 
 const DISPATCH_LIMIT = 50; // 每轮 cron 最多投递条数（§17 硬 LIMIT 纪律）
 const NOTIFY_TIMEOUT_MS = 10_000;
-
-async function hmacHex(secret: string, message: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 /** 带签名的投递调用（竞猜 signAndFetch 同款规范串）。 */
 async function signAndPost(env: Env, path: string, body: unknown): Promise<Response> {
