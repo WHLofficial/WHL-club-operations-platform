@@ -4,9 +4,9 @@
 
 各增量的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [已上线] · 增量 35 — 显示名与球衣号落库：号码真源迁到 FC26 存档表（s901）+ D1 写通道整改（2026-09-23，数据已生效、无新版 Version）
+## [已上线] · 增量 35 — 显示名与球衣号落库：号码真源迁到 FC26 存档表（s901）+ D1 写通道整改（2026-09-23，Version 835031b5-1ddb-428e-9805-01ce3cc9a3c5）
 
-本轮**没有任何 `src/` 或 `web/src/` 代码改动**（表结构与读端点早在增量 32/34 上线），改动集中在 `scripts/player-names/` 两个脚本与文档；生产数据落库已执行并生效，`scripts/` 与文档的提交待推送。
+本轮**没有任何 `src/` 或 `web/src/` 代码改动**（表结构与读端点早在增量 32/34 上线），改动集中在 `scripts/player-names/` 两个脚本与文档；生产数据落库已执行并生效（不经 HTTP 写路径，早于部署即对用户可见）。`scripts/` 与文档已推送（`3f33aab..d4dcf34`）并随 Version `835031b5-…`（2026-09-23T12:12:42Z）部署上线，线上下发的 Worker 与资产同上一版（wrangler 报 `No updated asset files to upload`）。
 
 **修复**
 - **生产 `players` 五列落库**：`scripts/player-names/load.mjs --remote --yes-prod --numbers --purge` 执行 46 条语句（`display_name.sql` 44 条 / `number.sql` 2 条）全部成功、无重试。落库前 `display_name`/`first_name`/`number` 计数全 0，落库后 `total 18301 / display_name 17470 / first_name 17329 / last_name 17099 / common_name 2549 / number 570`。

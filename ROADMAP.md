@@ -784,7 +784,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## 增量 35 · 显示名与球衣号落库——号码真源迁到 FC26 存档表（s901）+ D1 写通道整改（2026-09-23）
 
-**状态**：2026-09-23 完成。**生产数据已落库**（46 条语句全部成功、公开缓存版本号 1 → 2），公开接口回读已验证；本轮**没有任何 `src/` 或 `web/src/` 代码改动** ⇒ 落库不经部署即已对用户生效。脚本（`scripts/player-names/`）与文档改动待提交推送。
+**状态**：2026-09-23 完成。**生产数据已落库**（46 条语句全部成功、公开缓存版本号 1 → 2），公开接口回读已验证；本轮**没有任何 `src/` 或 `web/src/` 代码改动** ⇒ 落库不经部署即已对用户生效。脚本（`scripts/player-names/`）与文档改动已推送（`3f33aab..d4dcf34`，2 个提交）并部署（Version `835031b5-1ddb-428e-9805-01ce3cc9a3c5`，2026-09-23T12:12:42Z，Source `wrangler`；线上资产与上一版逐字一致，wrangler 报 `No updated asset files to upload`），部署后已复读生产接口。
 
 **缘起**：用户 m00294「显示名和球员号码这一块怎么做」。答复：表结构（迁移 0032 五列 + 0033 表达式索引）与代码（Version `7a00c107`，2026-09-23T09:29:30Z）都已上线，只差数据落库（生产 `display_name` / `first_name` / `number` 计数全 0）。随后用户 m00362「一次做完，提到的小改动也做了」授权整条链路（预检 → 落库 → 缓存失效 → 校验 → 文档/记忆收口），并要求给 `load.mjs` 加 `--purge`。
 
@@ -823,6 +823,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - 点查 fc 20801 ⇒ `display_name 'Cristiano Ronaldo'`、`first_name 'C. Ronaldo'`、`last_name 'dos Santos Aveiro'`、`common_name 'Cristiano Ronaldo'`、`number '7'`；五例同人异名落库正确（200104 `Heung Min Son`#7、226456 `Pablo Fornals`#12、264432 `Abdessamad Ezzalzouli`#15、264846 `Mosquera`#4、276048 `Matias Fernandez-Pardo`#27）。
 - **独立复算**（按行解析生成 SQL 的 VALUES、处理 `''` 转义）：17,470 数据行、非 NULL 为 fn 17,329 / ln 17,099 / cn 2,548 / dn 17,470、重复 fc 0、行长异常 0。号码侧 570/570 s901 行都能在 `number.sql` 里找到「同 club_id 且持有该号码」的人，异常 0。
 - 公开回读：`GET https://club.whleague.win/api/squads` ⇒ 200 / 30,983 B，20 队 570 人、`number !== null` 者 **570**，抽样 `Cristiano Ronaldo`(20801, 7, 尤文图斯)、`Heung Min Son`(200104, 7, 皇家马德里)、`Johnny Cardoso`(259516, 14, 巴黎圣日耳曼)、`Matias Fernandez-Pardo`(276048, 27, 利物浦)；`GET /api/players?limit=2` ⇒ 200，行内含 `name:'Erling Haaland'`（显示名）与 `officialName:'E. Haaland'`（官方缩写名）⇒ 列表小字功能在生产有真值。
+- **推送部署后复读**（Version `835031b5-1ddb-428e-9805-01ce3cc9a3c5`，2026-09-23T12:12:42Z）：`/api/health` 200、`/api/squads` 200（31,311 B，20 队 570 人、号码非空 **570**，`Cristiano Ronaldo`(20801,#7,尤文图斯) 与 `Heung Min Son`(200104,#7,皇家马德里) 抽查一致）、`/api/clubs` 200、`/api/players?limit=2` 显示名与 `officialName` 仍具值；线上首页资产 `index-C6eShBli.js` + `index-CgbAjyeh.css` 与本地 `web/dist/assets/` 逐字一致 ⇒ 本轮部署未改变任何用户可见代码。
 - 回归：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **49 文件 / 667 例全绿，与增量 34 基线逐项一致**（本轮无 `src/` 与 `web/src/` 改动，一致性本身就是证据）。
 
 **两处口径差（已核实无影响，写进 README）**
