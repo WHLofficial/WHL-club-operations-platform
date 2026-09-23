@@ -13,3 +13,20 @@ export async function fetchAdminClubs(): Promise<AdminClubRow[]> {
 export async function fetchSeasonCurrent(): Promise<SeasonCurrent> {
   return api<SeasonCurrent>('/api/seasons/current');
 }
+
+// 增量 37：球队建档双向同步的对账清单（赛事系统 team ↔ 登记册 clubs 按 id 对齐）
+export const TEAM_SYNC_KEY = ['admin', 'team-sync'] as const;
+
+export interface TeamSyncDiff {
+  /** 赛事系统有球队、登记册里没有俱乐部 → 可一键建俱乐部 */
+  onlyTour: { id: number; name: string }[];
+  /** 登记册有俱乐部、赛事系统里没有球队 → 可一键推过去建队 */
+  onlyClub: { id: number; name: string }[];
+  /** 两侧都有但名字不一致 → 只展示，不自动改（改名不联动） */
+  nameDiffers: { id: number; tourName: string; clubName: string }[];
+  truncated: boolean;
+}
+
+export async function fetchTeamSync(): Promise<TeamSyncDiff> {
+  return api<TeamSyncDiff>('/api/admin/team-sync');
+}

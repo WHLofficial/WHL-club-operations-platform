@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiDelete, apiPost, type AdminClubRow, type StadiumAdmin } from '../../lib/api.ts';
-import { ADMIN_CLUBS_KEY, fetchAdminClubs } from '../../lib/adminQueries.ts';
+import { ADMIN_CLUBS_KEY, TEAM_SYNC_KEY, fetchAdminClubs, fetchTeamSync } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
@@ -13,6 +13,7 @@ export default function ClubsPage() {
   return (
     <div className="admin-page">
       <ClubsSection />
+      <TeamSyncSection />
     </div>
   );
 }
@@ -60,18 +61,24 @@ function ClubsSection() {
     if (creating) return;
     setCreating(true);
     try {
-      const res = await apiPost<{ club: { name: string }; authLinked: boolean | null }>('/api/admin/clubs', {
-        name: name.trim(),
-        gameTeamId: gameTeamId.trim(),
-      });
+      const res = await apiPost<{ club: { name: string }; authLinked: boolean | null; pushedToTour: boolean }>(
+        '/api/admin/clubs',
+        {
+          name: name.trim(),
+          gameTeamId: gameTeamId.trim(),
+        },
+      );
       setName('');
       setGameTeamId('');
       if (res.authLinked === false) {
         show(`${res.club.name} 已建，但认证中心目录登记失败——稍后点列表里的「重新登记」。`, true);
+      } else if (res.pushedToTour) {
+        show(`${res.club.name} 建好了，赛事系统里也建了同一号的球队。`);
       } else {
         show('俱乐部建好了，登记册上多了一页。');
       }
       reload();
+      queryClient.invalidateQueries({ queryKey: TEAM_SYNC_KEY });
     } catch (err) {
       show(err instanceof Error ? err.message : '建队失败', true);
     } finally {
@@ -197,8 +204,9 @@ function ClubsSection() {
         </button>
       </form>
       <p className="hint">
-        联赛级别不再建队时定死：由各队在本赛季报名的定级赛事（顶级/次级联赛）自动派生。球队 ID 必须与游戏内一致（赛事系统先建队），
-        俱乐部将以该 ID 建档并在认证中心自动登记；登记失败可稍后点「重新登记」。
+        联赛级别不再建队时定死：由各队在本赛季报名的定级赛事（顶级/次级联赛）自动派生。球队 ID 必须与游戏内一致——
+        赛事系统里还没有这支队时会自动在赛事系统建队（同一个号），两边一起建；俱乐部以该 ID 建档并在认证中心自动登记，
+        登记失败可稍后点「重新登记」。反过来在赛事系统建队，也会同步到这里建俱乐部。
       </p>
 
       {clubs === null ? (
@@ -332,6 +340,114 @@ function ClubsSection() {
           </button>
         </div>
       )}
+    </section>
+  );
+}
+
+// 球队同步对账（增量 37）：赛事系统 team ↔ 登记册 clubs 按同一个游戏球队 ID 对齐。
+// 推送是实时的，但它会因为密钥没配、对端不可达、队名撞车而失败——失败留下的差异在这里显形并一键补齐。
+function TeamSyncSection() {
+  const { show, toastNode } = useToast();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<number | null>(null);
+  const { data: diff, error } = useQuery({ queryKey: TEAM_SYNC_KEY, queryFn: fetchTeamSync });
+
+  useEffect(() => {
+    if (error) show(error instanceof Error ? error.message : '对账清单加载失败', true);
+  }, [error, show]);
+
+  async function apply(id: number, action: 'create-club' | 'create-tour') {
+    if (busy !== null) return;
+    setBusy(id);
+    try {
+      await apiPost('/api/admin/team-sync/apply', { id, action });
+      show(action === 'create-club' ? `#${id} 的俱乐部已补建。` : `#${id} 已推给赛事系统建队。`);
+      queryClient.invalidateQueries({ queryKey: TEAM_SYNC_KEY });
+      queryClient.invalidateQueries({ queryKey: ADMIN_CLUBS_KEY });
+    } catch (err) {
+      show(err instanceof Error ? err.message : '补齐失败', true);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const total = diff ? diff.onlyTour.length + diff.onlyClub.length + diff.nameDiffers.length : 0;
+
+  return (
+    <section className="card admin-section">
+      <h2>球队同步对账</h2>
+      {toastNode}
+      <p className="hint">
+        赛事系统的球队与这里的登记册按同一个游戏球队 ID 对齐。在任一侧新建都会实时推给另一侧；推送失败（密钥没配、对端不可达、队名撞车）
+        留下的差异会列在下面，点按钮补齐。改名不联动——两侧名字不一致只在这里显示，请到对应管理端各自改。
+      </p>
+      {!diff ? (
+        <p className="muted">正在核对两侧名单…</p>
+      ) : total === 0 ? (
+        <EmptyState>两侧已经对齐，没有要补的。</EmptyState>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>游戏球队 ID</th>
+                <th>差异</th>
+                <th>赛事系统</th>
+                <th>登记册</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diff.onlyTour.map((r) => (
+                <tr key={`t-${r.id}`}>
+                  <td className="mono">#{r.id}</td>
+                  <td>只有球队，没有俱乐部</td>
+                  <td>{r.name}</td>
+                  <td className="muted">—</td>
+                  <td>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => apply(r.id, 'create-club')}
+                    >
+                      补建俱乐部
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {diff.onlyClub.map((r) => (
+                <tr key={`c-${r.id}`}>
+                  <td className="mono">#{r.id}</td>
+                  <td>只有俱乐部，没有球队</td>
+                  <td className="muted">—</td>
+                  <td>{r.name}</td>
+                  <td>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => apply(r.id, 'create-tour')}
+                    >
+                      推给赛事系统
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {diff.nameDiffers.map((r) => (
+                <tr key={`n-${r.id}`}>
+                  <td className="mono">#{r.id}</td>
+                  <td>名字不一致</td>
+                  <td>{r.tourName}</td>
+                  <td>{r.clubName}</td>
+                  <td className="muted">改名不联动</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {diff?.truncated && <p className="hint">两侧名单各只看前 500 行，超出部分未核对。</p>}
     </section>
   );
 }
