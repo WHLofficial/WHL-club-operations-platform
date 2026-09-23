@@ -228,7 +228,7 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     const { env } = freshEnv(false);
     const login = await app.request('/api/auth/login', { method: 'GET' }, env);
     expect(login.status).toBe(302);
-    expect(login.headers.get('Location')).toBe('https://whleague.win/');
+    expect(login.headers.get('Location')).toBe('https://tour.whleague.win/');
 
     const cb = await app.request('/api/auth/callback?code=x&state=y', { method: 'GET' }, env);
     expect(cb.status).toBe(404);
@@ -237,7 +237,7 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
 
     const logout = await app.request('/api/auth/logout', { method: 'POST' }, env);
     expect(logout.status).toBe(302);
-    expect(logout.headers.get('Location')).toBe('https://whleague.win/');
+    expect(logout.headers.get('Location')).toBe('https://tour.whleague.win/');
 
     const me = await app.request('/api/me', { method: 'GET' }, env);
     expect(await me.json()).toEqual({ user: null, authMode: 'shared', authHome: null });

@@ -31,8 +31,9 @@ import {
 
 const authRoutes = new Hono<{ Bindings: Env }>();
 
-// 兼容模式下的旧入口：与 TopBar 的「去赛事系统登录」同一去处
-const TOUR_HOME = 'https://whleague.win/';
+// 兼容模式下的旧入口：与 TopBar 的「去赛事系统登录」同一去处（同一处口径见 web/src/lib/api.ts 的 TOUR_SITE_URL）。
+// 增量 34：tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录。
+const TOUR_HOME = 'https://tour.whleague.win/';
 
 type OidcEnv = Env & { OIDC_ISSUER: string; OIDC_CLIENT_ID: string };
 

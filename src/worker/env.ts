@@ -24,7 +24,8 @@ export interface Env {
   // 生产**不配**——分级口径在 `src/lib/cache-policy.ts`（players 1h / roster 24h / clubs 24h），
   // 新鲜度靠写路径 purge；测试配 '0' 让断言不受缓存影响。
   PUBLIC_CACHE_TTL_MS?: string;
-  // 增量 31：比赛系统公开基址（球队详情代理积分榜用，如 https://whleague.win）。
+  // 增量 31：比赛系统公开基址（球队详情代理积分榜用，如 https://tour.whleague.win）。
   // 未配 = 排名区块整体降级（前端显示「排名暂不可用」），不查任何库。
+  // 增量 34：填 apex whleague.win 不算降级——会真的发请求，每次都 530，排名区块永久不可用。
   TOUR_API_BASE?: string;
 }

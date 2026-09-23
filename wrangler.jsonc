@@ -61,7 +61,9 @@
     "OIDC_CLIENT_ID": "club",
     // 增量 31：球队详情代理比赛系统公开积分榜的基址（GET /api/public/tournaments/:id/standings）。
     // 与 src/worker/routes/auth.ts 的 TOUR_HOME 同一个源；撤掉这个变量 ⇒ 排名区块整体降级，页面照常。
-    "TOUR_API_BASE": "https://whleague.win"
+    // 增量 34：必须是 tour 子域——apex whleague.win 不部署任何服务、也无 A 记录（配 apex 时每次
+    // 代理都发一个必然 530 的请求，排名区块永久降级且只在日志里看得见）。
+    "TOUR_API_BASE": "https://tour.whleague.win"
   },
   // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑随增量 3+ 落地
   "triggers": {
