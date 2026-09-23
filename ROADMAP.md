@@ -700,7 +700,7 @@
 
 ## 增量 33 · 名册真源归位——`GET /api/squads` + 赛事平台拉取同步 + 球员写入口下线（跨仓）
 
-**状态**：2026-09-23 完成步骤 9–11（本仓 1 个提交 `aed2f67`，赛事仓 1 个提交 `ffcbc40`），两仓本地全绿。**未推送、未部署**，等令。步骤 12（部署与上线核对）属危险清单，需单独授权。
+**状态**：2026-09-23 完成步骤 9–11（本仓 1 个提交 `aed2f67`，赛事仓 1 个提交 `ffcbc40`），两仓本地全绿。**本仓部分已于 2026-09-23 随增量 34 推送并部署**（`/api/squads` 生产 200）；**赛事仓部分亦已部署**（当日 08:37Z / 08:47Z 两次 + 增量 36 的 13:02Z 一次），但赛事仓这 4 个提交至今**未 push**（见增量 36 节）。步骤 12（部署与上线核对）属危险清单，本轮部署由用户在增量 36 显式下令。
 
 **缘起**：增量 32 把球衣号的编辑入口搬回本平台（`POST /api/club/players/:id/number`）之后，赛事系统的 `player` 表（`name` + `number`）就成了第二份真源——两个写者互相覆盖。本增量把名册真源收到本平台：本仓出一个只读的全平台一线队名册端点，赛事仓改为按小时拉取同步，并把赛事仓全部球员写入口下线。
 
@@ -740,7 +740,7 @@
 - 赛事仓「伤停随球员级联删除」（`injury.player_id ON DELETE CASCADE`）**实际不可达**：伤停必须挂在一条 `match_event` 上，而 `match_event.player_id` 无 `ON DELETE`（NO ACTION）⇒ 有伤停的球员必然删不掉、行进 `kept`。仅当那个事件的球员后来被清空时，伤停与缺阵记录才会随之消失。
 - 赛事仓手动同步端点没有 UI，`/api/health` 也不含上次同步时间 ⇒ 每小时静默失败无处发现；`deleted` 计的是尝试数而非 `meta.changes`；分批 batch 无原子性（注释已声明）。
 
-**待办**：① 两仓部署（需单独授权）；② 首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期（计划预期：号码 0 改动、名字一批被改写、0 增 0 删）；③ 生产迁移 0032/0033 仍未 apply、生产数据未落库（见增量 32 待办）。
+**待办**：① ✅ **已做**（本仓随增量 34 于 2026-09-23 推送部署；赛事仓由增量 36 于同日部署）；② ⚠️ **未跑 dryRun 预演** —— cron 自行在整点执行，首次同步即覆盖（后果见增量 35 节）；③ ✅ **已做**（增量 34 apply 迁移 / 增量 35 落库）。
 
 
 ## 增量 34 · apex 域名收口（排名代理 530 根因）+ 边缘 504 归因（2026-09-23）
@@ -779,7 +779,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - 迁移 0033 的索引表达式含 **5 个不可见字符**（00ad 软连字符、0301 / 0308 组合记号），由 scripts 侧 `sqlFold()` 生成后落盘，**不得手改或重新格式化那一行**；另 SQLite **禁止索引表达式里出现 `.` 限定列名**（写 `players.display_name` 会报 `the "." operator prohibited in index expressions`）。
 - 本机 `wrangler` 走 IPv6 会卡住，需 `NODE_OPTIONS=--dns-result-order=ipv4first`。
 
-**待办**：① CF 分析按 24h 窗口确认 whleague.win 530 归零（需面板）；② ✅ **已做**（增量 35，2026-09-23）：生产数据落库已执行（46 条语句全过、`cache:epoch:public` 1→2），`/api/squads` 与 `/api/players` 回读已出显示名与球衣号；③ **赛事仓部署未做**（增量 33 跨仓部分），`/api/squads` 已上线但赛事侧同步尚未开跑，首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期。⚠️ **本轮已实证该 cron 的破坏力**：它按「姓名、号码一律以 club 为准」写库，`/api/squads` 一上线（Version `7a00c107`，2026-09-23T09:29:30Z）就在下一个整点把赛事库 `whl.player` 的 570 个号码刷成我方当时的 NULL 值 ⇒ 号码真源被迫改到本仓侧的 FC26 存档表（s901），详见增量 35 节。
+**待办**：① CF 分析按 24h 窗口确认 whleague.win 530 归零（需面板）；② ✅ **已做**（增量 35，2026-09-23）：生产数据落库已执行（46 条语句全过、`cache:epoch:public` 1→2），`/api/squads` 与 `/api/players` 回读已出显示名与球衣号；③ ✅ **已做**（增量 36，2026-09-23）：赛事仓已部署（`tour.whleague.win` 当日 08:37Z / 08:47Z 两次 + 增量 36 的 13:02Z 一次，Version `9c51052f-…`），名册同步 cron 已实际开跑 —— 赛事库 `whl.player` 实测 570 行 / 570 行具号码（`COUNT(DISTINCT number) = 71`）、`id 20801 = Cristiano Ronaldo #7`、`200104 = Heung Min Son #7`，姓名已换成本仓显示名 ⇒ 镜像方向正确。**未跑 `dryRun=1` 核对**（cron 自行在整点执行，未经人工预演）。⚠️ **本轮已实证该 cron 的破坏力**：它按「姓名、号码一律以 club 为准」写库，`/api/squads` 一上线（Version `7a00c107`，2026-09-23T09:29:30Z）就在下一个整点把赛事库 `whl.player` 的 570 个号码刷成我方当时的 NULL 值 ⇒ 号码真源被迫改到本仓侧的 FC26 存档表（s901），详见增量 35 节。
 
 
 ## 增量 35 · 显示名与球衣号落库——号码真源迁到 FC26 存档表（s901）+ D1 写通道整改（2026-09-23）
@@ -831,11 +831,31 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - `common_name` 落库 2,549 比 SQL 多 1 行：那一行库里本来就有值，`COALESCE(v.cn, players.common_name)` 按设计不覆盖。
 
 **已知后果**
-- **赛事库的号码会在下次同步后被改写一次**：赛事仓 cron 恢复运行时，会拿 `/api/squads` 的显示名与号码覆盖 `whl.player`（方向正确，号码恢复为 s901 口径、姓名由缩写名变显示名），但这也意味着**本仓是唯一真源，赛事库任何本地改动都会被下一次整点覆写**。
+- **赛事库的号码会在下次同步后被改写一次**：赛事仓 cron（**已于增量 36 开跑**，实测赛事库 `whl.player` 570/570 已具号码、姓名=本仓显示名）会拿 `/api/squads` 的显示名与号码覆盖 `whl.player`（方向正确，号码恢复为 s901 口径、姓名由缩写名变显示名），但这也意味着**本仓是唯一真源，赛事库任何本地改动都会被下一次整点覆写**。
 - 831 人回落官方缩写名（字典 `nameid > 41,189` 的 FC26 后期补丁长尾），本轮未动。
 - `data/tour-players.json` 缓存已被本轮 `--refresh` 覆盖成空号码版本，不能再当交叉校验源（号码校验源已换成 s901）。
 
-**待办**：① 提交推送本轮脚本 + 文档改动（本轮无部署需求）；② CF 分析按 24h 窗口确认 whleague.win 530 归零（增量 34 遗留，需面板）；③ 赛事仓部署 + 首次名册同步（增量 33 遗留，建议先跑 `POST /api/admin/sync-rosters?dryRun=1`）。
+**待办**：① ✅ **已做**：本轮脚本 + 文档改动已推送（`3f33aab..d4dcf34`）并部署（Version `835031b5-…`）；② CF 分析按 24h 窗口确认 whleague.win 530 归零（增量 34 遗留，需面板）；③ ✅ **已做**（增量 36，2026-09-23）：赛事仓已部署（含增量 33 名册同步代码），整点 cron 已开跑并把本仓显示名与 s901 号码写回赛事库（`whl.player` 570/570 具号码）。
+## 增量 36 · 赛事仓错误契约收口 + 账号投影对账（tour 单仓，2026-09-23）
+
+**状态**：2026-09-23 部署完成（Version `9c51052f-a50c-44c8-8078-b318fd7f226b`，2026-09-23T13:02:42Z，Source `wrangler`，`Total Upload: 582.96 KiB / gzip: 133.33 KiB`）。**本仓无任何代码改动**（本节是共享台账里的一条，赛事仓自身的权威文档是 `PRD.md` / `TECH_DESIGN.md`，后者已随本轮补 §4.2 与 §8）。赛事仓本地 2 个提交（`7f4d69a` 代码 + `952f470` 文档）**未 push**（用户只下令部署）；连同增量 33 的 4 个提交（`ffcbc40` / `aa74ab4` / `728f523` / `f91acc9`），赛事仓 `origin/main` 落后 6 个提交。
+
+**编号裁决**：增量编号是**全项目共享序列，台账在本仓 `ROADMAP.md`**（本仓增量 7 标「auth + tour + club 三仓」、增量 9 标「club 单仓」；赛事仓 commit message 用同一套号：增量 7 / 8 / 9C / 9D / 10C / 33）。赛事仓这一轮代码注释原写「增量 34」，而 34（apex 域名收口）与 35（显示名与球衣号落库）当日已被本仓占用 ⇒ **回填为增量 36**；赛事仓 `worker/index.ts`、`worker/routes/oidc.ts`、`tests/oidc.test.ts` 共 6 处标签由 34 改 36。撞号成因：那轮代码写于本地 08:15–08:22Z，当时台账最大号还是 33。
+
+**缘起（2026-09-23 线上 15 连发 500）**：账号真源收口到认证中心后，赛事库 `user` 表没有写入方，而 14 列外键仍指向 `user(id)`（`tactic.created_by` / `match_event.created_by` / `audit_log.actor_user_id` …）⇒ 新账号进站一写就 `FOREIGN KEY constraint failed`。同时 Hono 默认把未捕获异常压成 `text/plain` 的 `Internal Server Error`，前端 `src/api.ts` 的 `res.json()` 解析失败、只剩一句「请求失败（500）」，报错无明细，只能反查 D1 才定位到外键。
+
+**交付（均赛事仓）**
+- **① 错误文案收口**：`src/api.ts` 新增 `fallbackMessage(status)`（≥500「服务暂时不可用（N），请稍后重试」/ 404「内容不存在或已被删除」/ 401「登录已过期，请重新登录」/ 403「没有权限执行此操作」/ 其余「请求失败（N）」），并新增 `if (e instanceof TypeError) throw new ApiError("网络异常，请检查网络后重试", 0, "network")`（WebKit 报 `Load failed`、Chromium 报 `Failed to fetch`，原样抛会把英文糊上界面）；worker 侧统一 `{ error, message }` 形状（`worker/routes/portal.ts`「该比赛暂无战报（仅完赛场自动成文）」「该轮暂无综述」「轮次参数不合法」、`worker/routes/interact.ts`「比赛 id 不合法」、`worker/routes/admin/announcements.ts` 的 `bad_request` / `not_found` / `unauthorized` + 中文 message），19 个页面与组件消费。
+- **② 500 兜底**：`worker/index.ts` 新增 `app.onError((err, c) => { console.error(...); return c.json({ error: "internal", message: "服务异常，请稍后重试" }, 500); })`；同文件 `scheduled` 在 `ctx.waitUntil(runRosterSync(env))` 之后加 `ctx.waitUntil(runAccountMirror(env))`。
+- **③ 账号投影与定时对账**：新增 `worker/lib/accountMirror.ts`（`MIRROR_PASSWORD = "!oidc-no-password"` 哨兵口令；`mirrorAccountStmt` 是 `INSERT INTO user (id, name, password_hash, role, locked, created_at) VALUES (?, ?, ?, 'coach', ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, locked = excluded.locked, created_at = excluded.created_at`，**`role` 与 `password_hash` 绝不进 updater**；`runAccountMirror(env)` 对比 `AUTH_DB` 的 account 与本地 `user`，只补行与改名、不删行）；`worker/routes/oidc.ts` 的 callback 改为把账号投影与 `INSERT INTO oidc_session` 放同一批 `c.env.DB.batch([...])` 提交（否则症状是「登录一切正常，进站写存档或报分才撞外键 500」）。配 `scripts/oidc-user-mirror/20260923-backfill-user-13-17.sql`（幂等 `ON CONFLICT(id) DO NOTHING`，回填 user 13–17）。`tests/oidc.test.ts` 新增 3 例（登录回调投影账号 / 定时对账补行与改名且不删行 / 未捕获异常 500 回 JSON 且日志留方法与路径）。
+
+**验收（赛事仓实测）**：`npm run typecheck` 全清；`npx vitest run` **15 文件 / 147 例通过 + 1 文件 7 例跳过**（`tests/admin.live.test.ts` 属基线；增量 33 评审后基线 15/144 ⇒ +3 例）；build 成功（`dist/assets/index-CR7ktr7d.js` 444.71 kB / gzip 144.17 kB、`index-C4fgwNax.css` 69.80 kB）；`npx wrangler d1 migrations list whl --remote` ⇒ `✅ No migrations to apply!`。部署后回读：`/api/health` 200、`/api/public/announcement` 200、`/api/public/weekly` 200（`weekStart 2026-09-21` / `played 7` / `goals 20`）；`/api/public/matches/999999/report` ⇒ 404 `{"error":"not_found","message":"该比赛暂无战报（仅完赛场自动成文）"}`、`/api/public/tournaments/999/round/999/1` ⇒ 404 `{"error":"not_found","message":"该轮暂无综述"}` ⇒ 新错误契约在线；线上 `assets/index-CR7ktr7d.js` 内含「服务暂时不可用」「登录已过期，请重新登录」「网络异常，请检查网络后重试」⇒ 新前端文案在线。
+
+**名册同步已实际开跑（本轮顺带核实）**：赛事库 `whl.player` 实测 `{"total":570,"with_number":570,"distinct_num":71}`，`id 20801 = Cristiano Ronaldo / team 45 / #7`、`200104 = Heung Min Son / 243 / #7`、`259516 = Johnny Cardoso / 73 / #14`（**旧 id 241 / 243 已不存在** —— 增量 33 rekey 后 `player.id` = FC26 playerid）⇒ 本仓显示名与 s901 号码已被赛事库拉回，镜像方向正确。赛事库 `user` 表 17 行，13–17 已由整点对账自行补齐（与回填 SQL 预期逐字一致），1–12 的 `role` 未被改动 ⇒ 回填 SQL **未执行**（已无操作对象，幂等留着当恢复路径）。
+
+**踩坑**：① 门户路由挂在 `/api/public`（`worker/index.ts:32` 的 `app.route("/api/public", portalRoutes)`），**不是 `/api/portal`** —— 探 `/api/portal/*` 会落到无 message 的兜底 404，容易误判「新契约没上线」。② `wrangler deployments list` 列出的 id 是 **deployment id 不是 version id**，看版本要读 JSON 里 `versions[].version_id`。③ `wrangler deployments list --json` 显示赛事仓当日 **08:37:07Z（`71de6d01-…`）与 08:47:45Z（`49563d64-…`）已部署过两次** ⇒ 增量 33 + 本轮代码在本地提交之前就已经上线（这正是 09:29Z 之后整点 cron 覆盖赛事库号码成立的前提）。
+
+**待办**：① 赛事仓 6 个提交是否 push（需用户显式下令，按 2026-09-17 约定「push 与 deploy 等操作等确认后执行」）；② 赛事仓未提交残留 `.superpowers/` / `.zcodeignore` / `scripts/fc26-id-rekey/prod-snapshot-20260916.sql`（非本轮产物，未动）。
 
 
 ## 外部依赖与待输入
