@@ -67,7 +67,9 @@ export const apiPut = <T,>(path: string, body?: unknown) => apiSend<T>('PUT', pa
 export const apiPatch = <T,>(path: string, body?: unknown) => apiSend<T>('PATCH', path, body);
 export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELETE', path, body);
 
-export const TOUR_SITE_URL = 'https://whleague.win/';
+// 赛事系统入口。增量 34：用 tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录，
+// 指向它等于给用户一个连不上的按钮（TopBar / RequireUser / Home / AdminLayout 五处外链都用这个常量）。
+export const TOUR_SITE_URL = 'https://tour.whleague.win/';
 
 // ---- 增量 1 DTO（附录 A〔1〕）----
 
