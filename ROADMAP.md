@@ -695,7 +695,7 @@
 
 **验收（步骤 1–8 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **47 文件 / 659 例全绿**（增量 31 基线 46/642 ⇒ +1 文件 / +17 例）；`npm run build` 成功（`web/dist/assets/index-Bco7kOHW.js` **477.77 kB / gzip 150.38 kB**，增量 31 基线 474.57 kB）；`npm run test:e2e` **11/11 通过**（补齐本地迁移后）。变异验证四处均能定向变红：`idx_players_sort_name` 的表达式错一个字符（`'), 'Ó'` → `'), 'O'`）退化成 `TEMP B-TREE`；`results.ts` 的 `WHERE fc_id = ?` 加 `AND 0` ⇒ fc_id 归属用例失败；`transfers.ts` 两处 `number = NULL` 删掉 ⇒ 换队/解约两条用例各失败；球员链接回落顺序反转 ⇒ 新增的 ClubDetail 两条用例失败。
 
-**待办**：① 增量 33（跨仓：赛事平台球员表转只读、四写端点下线、阵容同步、`GET /api/squads`），需单独授权部署；② 生产落库未执行（`load.mjs --remote --yes-prod` 或先推送再跑），故生产目前仍是缩写名 + 无号码；③ 生产迁移 0032/0033 未 apply（推送部署时一次写 ≈ 18,301 行/条，审计要求索引批 ≤3 条/批、分天跑）；④ 831 人派生不出显示名（字典缺号长尾），若要补齐需更新版 FC26 字典；⑤ 赛事平台与本平台 5 人姓名写法不一致，同步时以 FC26 派生名为准（清单在 `scripts/player-names/README.md`）。
+**待办**：① 增量 33（跨仓：赛事平台球员表转只读、四写端点下线、阵容同步、`GET /api/squads`），需单独授权部署；② ✅ **已做**（增量 35）：生产落库已执行，生产 `players` 五列计数 17,470 / 17,329 / 17,099 / 2,549 与球衣号 570 已具值；③ ✅ **已做**（增量 34）：生产迁移 0032/0033 于 2026-09-23T09:29Z 一并 apply（`Executed 6 commands` / `Executed 2 commands`）；④ 831 人派生不出显示名（字典缺号长尾），若要补齐需更新版 FC26 字典；⑤ 赛事平台与本平台 5 人姓名写法不一致，同步时以 FC26 派生名为准（清单在 `scripts/player-names/README.md`）。**号码真源已于增量 35 由赛事库改为 FC26 存档表（s901）**，见该节。
 
 
 ## 增量 33 · 名册真源归位——`GET /api/squads` + 赛事平台拉取同步 + 球员写入口下线（跨仓）
@@ -779,7 +779,62 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - 迁移 0033 的索引表达式含 **5 个不可见字符**（00ad 软连字符、0301 / 0308 组合记号），由 scripts 侧 `sqlFold()` 生成后落盘，**不得手改或重新格式化那一行**；另 SQLite **禁止索引表达式里出现 `.` 限定列名**（写 `players.display_name` 会报 `the "." operator prohibited in index expressions`）。
 - 本机 `wrangler` 走 IPv6 会卡住，需 `NODE_OPTIONS=--dns-result-order=ipv4first`。
 
-**待办**：① CF 分析按 24h 窗口确认 whleague.win 530 归零（需面板）；② **生产数据落库未执行**（增量 32 的 `scripts/player-names/load.mjs --remote --yes-prod`）⇒ 显示名与球衣号功能对用户仍不可见（`COALESCE(display_name, name)` 回落缩写名，生产 18,301 行 `display_name` 全 NULL）；③ **赛事仓部署未做**（增量 33 跨仓部分），`/api/squads` 已上线但赛事侧同步尚未开跑，首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期。
+**待办**：① CF 分析按 24h 窗口确认 whleague.win 530 归零（需面板）；② ✅ **已做**（增量 35，2026-09-23）：生产数据落库已执行（46 条语句全过、`cache:epoch:public` 1→2），`/api/squads` 与 `/api/players` 回读已出显示名与球衣号；③ **赛事仓部署未做**（增量 33 跨仓部分），`/api/squads` 已上线但赛事侧同步尚未开跑，首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期。⚠️ **本轮已实证该 cron 的破坏力**：它按「姓名、号码一律以 club 为准」写库，`/api/squads` 一上线（Version `7a00c107`，2026-09-23T09:29:30Z）就在下一个整点把赛事库 `whl.player` 的 570 个号码刷成我方当时的 NULL 值 ⇒ 号码真源被迫改到本仓侧的 FC26 存档表（s901），详见增量 35 节。
+
+
+## 增量 35 · 显示名与球衣号落库——号码真源迁到 FC26 存档表（s901）+ D1 写通道整改（2026-09-23）
+
+**状态**：2026-09-23 完成。**生产数据已落库**（46 条语句全部成功、公开缓存版本号 1 → 2），公开接口回读已验证；本轮**没有任何 `src/` 或 `web/src/` 代码改动** ⇒ 落库不经部署即已对用户生效。脚本（`scripts/player-names/`）与文档改动待提交推送。
+
+**缘起**：用户 m00294「显示名和球员号码这一块怎么做」。答复：表结构（迁移 0032 五列 + 0033 表达式索引）与代码（Version `7a00c107`，2026-09-23T09:29:30Z）都已上线，只差数据落库（生产 `display_name` / `first_name` / `number` 计数全 0）。随后用户 m00362「一次做完，提到的小改动也做了」授权整条链路（预检 → 落库 → 缓存失效 → 校验 → 文档/记忆收口），并要求给 `load.mjs` 加 `--purge`。
+
+**范围与交付**
+- **生产落库**：`scripts/player-names/load.mjs --remote --yes-prod --numbers --purge` 执行 46 条语句（`display_name.sql` 44 条 / `number.sql` 2 条），无重试、全过。
+- **缓存失效**：`load.mjs` 新增 `--purge` —— `wrangler kv key get/put cache:epoch:public --binding SESSION_KV --remote`，读现值 +1（实测 1 → 2）。**这一步不是可选项**：脚本直写 D1 不走 HTTP，`src/worker/index.ts:25-42` 那套「写请求 + 响应 2xx + 路径命中 `WRITE_SCOPE_PREFIXES`」的 purge 中间件根本不触发，而 TTL 是 players 1h / roster 24h / clubs 24h（`src/lib/cache-policy.ts:15-19`，`/api/squads` 用 roster 档）⇒ 不 bump 版本号，公开读最长 24h 才看到新显示名。代际键里带版本号（`src/lib/guard.ts:105` 的 `cache:epoch:public`），bump 一次 L1 + L2 同时作废。
+- **号码真源迁移**：`scripts/player-names/derive.mjs` 的球衣号来源由赛事库 `whl.player` 改为 FC26 存档表（见下），产出 `out/number.sql`（570 条）。
+- **写通道整改**：`load.mjs` 由 `--file`（D1 异步 import 端点）改走 `--command`（同步 /query 端点）+ 注释行清洗 + 每条失败自动重试 3 次；`derive.mjs` 的 `BATCH` 由 1000 降到 400（每批约 22KB，要塞进 Windows 命令行）。
+- **`scripts/player-names/README.md` 整篇重写**：数据源表加 s901、记「赛事系统 `whl.player` 不再是号码来源」、球衣号四级阶梯、生产落库计数与回读结果、`--purge` 存在理由、踩坑清单由两条扩到四条。
+
+**缘起之下的关键转折（号码为什么换源）**：落库前的预检发现**赛事库 `whl.player` 的 570 个号码全空了**，`name` 还与本库 `players.name` **逐字相同 570/570**。定性：赛事仓 `worker/lib/clubRoster.ts`（增量 33 步骤 10）的文件头明写「对账语义：姓名、号码一律以 club 为准 → UPDATE」，触发源是赛事仓 `wrangler.jsonc:56-58` 的 `triggers.crons = ["0 * * * *"]`（每小时整点）。时间线闭合：`/api/squads` 系增量 33 步骤 9 新增、随增量 34 于 09:29:30Z 首次上线 ⇒ 下一个整点赛事侧 cron 拉到该端点，用我方当时的空号码覆盖了它原来的号码，同时把全名换成我方缩写名。**结论：号码不能再从赛事库派生**（那里已经没有真源，且将来每次同步都会以本仓为准再覆盖一次）。D1 时间点回读不可用（`wrangler d1 time-travel info` 能拿到 bookmark，但 REST `/query` 带 `bookmark` 被静默忽略），只能靠外部副本恢复。
+
+**恢复源（号码真源）**：`E:/BaiduNetdiskDownload/FC Editor by decoruiz Alpha v21.5_2/player_tables/s901/splitted` —— 20 个 xlsx，一队一份，文件名 `<FC26 club_id> - <队名>.xlsx`，**表体只有两列且无表头**（第 0 列球衣号、第 1 列球员全名），mtime Sep 5 与赛事库 `player` 行 `created_at` 2026-09-05 吻合。实测 570 人 / 20 队 / 号码空行 0 / 队内重号 0；与赛事仓 Sep16 独立副本 `WHL-tournament-management-system/scripts/fc26-id-rekey/players-dump.json` 按姓名对齐 **570/570 姓名与号码完全一致**，且本库 20 个 `club_id` 的球员数与各队文件逐队相等 ⇒ 两边 `club_id` 同一空间、映射天然 1:1。
+
+**技术路径**
+- **① 认人（s901 行 → 本库 fc_id）**：`readS901()` 用 `XLSX.readFile` + `sheet_to_json(sheet, { header: 1, defval: null })`（`xlsx@^0.18.5` 已在 `package.json:24`）；目录不存在、文件名不合 `/^(\d+) - (.+)\.xlsx$/`、球衣号为空一律 `exit 2`。认人按**四级阶梯顺序**执行，每级只认 `hit.length === 1`（`claimed` Set 防重复占用）：逐字相同 → 归一化相同（`normalize()` = 小写 + NFD 去变音符号 + 非字母数字转空格 + 折叠空白）→ 同队同姓唯一（`lastWord()`）→ 队内唯一余量（两侧各剩 1 人）。实测 **逐字 565 / 同队同姓唯一 3 / 队内唯一余量 2 / 未匹配 0**，另逐队对账球员数，`clubCountMismatch = 0`。
+- **② 5 例同人异名**（正是增量 32 记的那 5 个名称口径差，无新增意外）：club 243 `Cristhian Mosquera`#4 ↔「Mosquera」、club 449 `Fornals`#12 ↔「Pablo Fornals」、club 9 `Fernandez-Pardo`#27 ↔「Matias Fernandez-Pardo」（三例走同队同姓唯一）；club 243 `Son Heung Min`#7 ↔「Heung Min Son」、club 449 `Abde`#15 ↔「Abdessamad Ezzalzouli」（两例走队内唯一余量）。
+- **③ 语句形状保持幂等**：`WITH v(fc,fn,ln,cn,dn) AS (VALUES …) UPDATE players SET first_name = COALESCE(v.fn, players.first_name), … display_name = COALESCE(v.dn, players.display_name) FROM v WHERE players.fc_id = v.fc` ⇒ 空值写 NULL 不覆盖已有值，整份可安全重跑（重试也安全）。`splitStatements()` 按单引号切（人名里的分号不会切断、`''` 转义安全）。
+- **④ 写通道（本轮的坑）**：`--file` 走 D1 的**异步 import 端点**（wrangler 先 `POST .../import` 再轮询），对**合法** SQL 间歇性报假错 —— 已见 `X [ERROR] {"D1_RESET_DO":true}`、《SQL code did not contain a statement. [code: 7500]》、`syntax error` 且 offset 比文件本身还长、`X [ERROR] {` 截断；同一条语句隔 30 秒重跑就 `success:true / rows_written:400`，换成随机文件名、按 md5 去重与否都无关（wrangler 的 `File already uploaded` 是按内容 etag 去重，不是失败原因）。`WRANGLER_LOG_SANITIZE=false` 抓到的真实请求体证明请求侧完整无误。⇒ 弃用 `--file`，改走 `--command` 同步端点 + 失败重试 3 次（`sleep(2000)` 用 `Atomics.wait` 同步实现）+ `MAX_SQL_CHARS = 30_000` 上限保护。
+- **⑤ `--command` 的 yargs 坑**：生成文件每条语句都带文件头注释 `-- 由 scripts/player-names/derive.mjs 生成，请勿手改。`，而 `--command` 的 SQL 以 `--` 开头时 wrangler 的 yargs 会把它当命令行选项，报 `Unknown arguments:  由 scripts/player-names/derive,  由 scripts/playerNames/derive` 并直接打印 help。⇒ `cleanForCommand(sql)` 整行删掉 `^[ \t]*--[^\n]*$` 的注释行（数据行都以 `(` 开头，不会误删）+ 归一化结尾分号。
+- **⑥ 顺带修 `derive.mjs --refresh` 在本机崩溃**：`Error: spawnSync npx.cmd EINVAL`（errno -4071，Node v24.12.0），与增量 32 评审在 `load.mjs` 修掉的是同一类 bug（当时只修了 load.mjs）⇒ `remote()` 改用 `execFileSync(process.execPath, [WRANGLER, 'd1', 'execute', db, '--remote', '--json', '--command', sql], …)`，`WRANGLER = path.join(HERE, '..', '..', 'node_modules', 'wrangler', 'bin', 'wrangler.js')`，缺失 `exit 2`。
+- **⑦ REMOTE 收缩**：删掉 `tour-players`（db `whl`）与 `team-map`（db `whl-auth`）两项，只剩 `players`（db `whl-club`，`SELECT fc_id, name, club_id FROM players ORDER BY fc_id`）。「赛事系统 `player.id` 就是本库 `fc_id`」这个原假设随覆盖事件作废。审计 CSV 表头 `tour_name,tour_number` → `s901_name,s901_number`。退出码改为「球衣号条数 ≠ s901 人数、或队内人数对不上、或有未匹配」⇒ `1`。
+
+**裁决**
+- 号码真源 = FC26 存档表 s901（本仓侧独立出处），**不再反读赛事库**；赛事库的号码自此只是下游镜像。
+- 显示名口径不动（仍是 `commonname 原样 || 名+姓 || cards.csv || 空回落`），落库 SQL 的 COALESCE 语义不动。
+- 写 D1 一律走 `--command`（同步 /query），`--file` 不再使用。
+- 落库必须配 `--purge`（bump `cache:epoch:public`），因为它不经过 HTTP 写路径的 purge 中间件。
+
+**分步**：本轮的产出集中在两个脚本 + 一次生产执行，按「预检 → 落库 → 校验」推进，未拆 commit（用户授权「一次做完」）。
+
+**验收（实测）**
+- 预检：`load.mjs --dry-run --numbers --purge` ⇒ `display_name.sql: 44 条语句，最大 22645 B` / `number.sql: 2 条语句，最大 7062 B` / `共 46 条语句，977642 B。未连库（--purge 一并跳过）`；只给 `--remote` ⇒ `拒绝执行：写生产必须同时给 --remote --yes-prod。`；`derive.mjs` 全绿退出码 0。
+- 落库：`完成 46/46`（**无重试**）+ `公开缓存版本号 1 → 2（L1 + L2 一次作废）`，exit 0；KV 复核 `cache:epoch:public` = `2`。
+- 生产计数：`total 18301 / display_name 17470 / first_name 17329 / last_name 17099 / common_name 2549 / number 570`。
+- 点查 fc 20801 ⇒ `display_name 'Cristiano Ronaldo'`、`first_name 'C. Ronaldo'`、`last_name 'dos Santos Aveiro'`、`common_name 'Cristiano Ronaldo'`、`number '7'`；五例同人异名落库正确（200104 `Heung Min Son`#7、226456 `Pablo Fornals`#12、264432 `Abdessamad Ezzalzouli`#15、264846 `Mosquera`#4、276048 `Matias Fernandez-Pardo`#27）。
+- **独立复算**（按行解析生成 SQL 的 VALUES、处理 `''` 转义）：17,470 数据行、非 NULL 为 fn 17,329 / ln 17,099 / cn 2,548 / dn 17,470、重复 fc 0、行长异常 0。号码侧 570/570 s901 行都能在 `number.sql` 里找到「同 club_id 且持有该号码」的人，异常 0。
+- 公开回读：`GET https://club.whleague.win/api/squads` ⇒ 200 / 30,983 B，20 队 570 人、`number !== null` 者 **570**，抽样 `Cristiano Ronaldo`(20801, 7, 尤文图斯)、`Heung Min Son`(200104, 7, 皇家马德里)、`Johnny Cardoso`(259516, 14, 巴黎圣日耳曼)、`Matias Fernandez-Pardo`(276048, 27, 利物浦)；`GET /api/players?limit=2` ⇒ 200，行内含 `name:'Erling Haaland'`（显示名）与 `officialName:'E. Haaland'`（官方缩写名）⇒ 列表小字功能在生产有真值。
+- 回归：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **49 文件 / 667 例全绿，与增量 34 基线逐项一致**（本轮无 `src/` 与 `web/src/` 改动，一致性本身就是证据）。
+
+**两处口径差（已核实无影响，写进 README）**
+- `out/display-names.csv` 的 first_name / last_name 非空数（17,897 / 17,198）比落库多：这两列只有 CSV 审计快照在写，SQL 对「显示名取自 commonname」的行不发名/姓；且全仓没有任何代码读这两列（`grep -rn "first_name\|last_name" src/ web/src/` 只命中 `src/core/player-name.ts:5` 的注释）。
+- `common_name` 落库 2,549 比 SQL 多 1 行：那一行库里本来就有值，`COALESCE(v.cn, players.common_name)` 按设计不覆盖。
+
+**已知后果**
+- **赛事库的号码会在下次同步后被改写一次**：赛事仓 cron 恢复运行时，会拿 `/api/squads` 的显示名与号码覆盖 `whl.player`（方向正确，号码恢复为 s901 口径、姓名由缩写名变显示名），但这也意味着**本仓是唯一真源，赛事库任何本地改动都会被下一次整点覆写**。
+- 831 人回落官方缩写名（字典 `nameid > 41,189` 的 FC26 后期补丁长尾），本轮未动。
+- `data/tour-players.json` 缓存已被本轮 `--refresh` 覆盖成空号码版本，不能再当交叉校验源（号码校验源已换成 s901）。
+
+**待办**：① 提交推送本轮脚本 + 文档改动（本轮无部署需求）；② CF 分析按 24h 窗口确认 whleague.win 530 归零（增量 34 遗留，需面板）；③ 赛事仓部署 + 首次名册同步（增量 33 遗留，建议先跑 `POST /api/admin/sync-rosters?dryRun=1`）。
 
 
 ## 外部依赖与待输入
