@@ -6,7 +6,7 @@
 
 ## [已上线] · 增量 36 — 赛事仓错误契约收口 + 账号投影对账（tour 单仓）（2026-09-23，Version 9c51052f-a50c-44c8-8078-b318fd7f226b）
 
-本轮**本仓没有任何代码改动**，交付全部落在赛事仓 `WHL-tournament-management-system`（其权威文档是 `PRD.md` / `TECH_DESIGN.md`，后者已随本轮补 §4.2 与 §8）；本节进本仓 CHANGELOG 是因为**增量编号是全项目共享序列，台账在本仓 `ROADMAP.md`**。赛事仓本地 2 个提交（`7f4d69a` 代码 + `952f470` 文档）**未 push**（用户只下令部署）；连同增量 33 的 4 个提交，该仓 `origin/main` 落后 6 个提交。部署：`9c51052f-…`，2026-09-23T13:02:42Z，Source `wrangler`，`Total Upload: 582.96 KiB / gzip: 133.33 KiB`。
+本轮**本仓没有任何代码改动**，交付全部落在赛事仓 `WHL-tournament-management-system`（其权威文档是 `PRD.md` / `TECH_DESIGN.md`，后者已随本轮补 §4.2 与 §8）；本节进本仓 CHANGELOG 是因为**增量编号是全项目共享序列，台账在本仓 `ROADMAP.md`**。赛事仓 2 个提交（`7f4d69a` 代码 + `952f470` 文档）**已 push**（`dee2292..952f470`），连同增量 33 的 4 个提交一并补齐，该仓 `origin/main` = `952f470`。部署：`9c51052f-…`，2026-09-23T13:02:42Z，Source `wrangler`，`Total Upload: 582.96 KiB / gzip: 133.33 KiB`。
 
 **编号**：赛事仓那轮代码注释原写「增量 34」，而 34（apex 域名收口）与 35（显示名与球衣号落库）当日已被本仓占用 ⇒ **回填为增量 36**（改 6 处标签：`worker/index.ts`、`worker/routes/oidc.ts`、`tests/oidc.test.ts`）。
 
@@ -25,7 +25,7 @@
 - 名册同步已实际开跑：赛事库 `whl.player` 实测 `{"total":570,"with_number":570,"distinct_num":71}`，`id 20801 = Cristiano Ronaldo / team 45 / #7`（旧 id 241/243 已因增量 33 rekey 不存在）⇒ 赛事库是从本仓拉回显示名与 s901 号码的下游镜像。
 
 **已知后果**
-- 赛事仓 6 个提交未 push（按 2026-09-17 约定「push 与 deploy 等操作等确认后执行」，本轮用户只下令部署）。
+- ~~赛事仓 6 个提交未 push~~ —— **已订正**：2026-09-23 已 push（`dee2292..952f470`）。口径更新：用户同日明确「部署推送都得一块啊」，此后「部署」即同时授权该仓 push。
 - 赛事仓当日 **08:37:07Z（`71de6d01-…`）与 08:47:45Z（`49563d64-…`）已部署过两次** ⇒ 增量 33 + 本轮代码在本地提交之前就已上线（这也是整点 cron 覆盖赛事库号码成立的前提）。
 - 门户路由挂在 `/api/public`（`worker/index.ts:32` 的 `app.route("/api/public", portalRoutes)`），**不是 `/api/portal`**；`wrangler deployments list` 列的 id 是 deployment id 而非 version id（版本要读 JSON 的 `versions[].version_id`）。
 
