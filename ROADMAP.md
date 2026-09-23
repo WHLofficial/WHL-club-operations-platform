@@ -743,6 +743,45 @@
 **待办**：① 两仓部署（需单独授权）；② 首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期（计划预期：号码 0 改动、名字一批被改写、0 增 0 删）；③ 生产迁移 0032/0033 仍未 apply、生产数据未落库（见增量 32 待办）。
 
 
+## 增量 34 · apex 域名收口（排名代理 530 根因）+ 边缘 504 归因（2026-09-23）
+
+**状态**：2026-09-23 完成并上线。3 个提交（`9506d00` / `ea6d717` / `5ae73e8`）已推送（`2ad239b..5ae73e8`，共 18 个提交，含增量 32/33）并部署（Version **`7a00c107-214b-4ce0-8769-e9bcae7c4a55`**，2026-09-23T09:29:30Z）。**生产迁移 0032/0033 同轮 apply**（用户裁决「先 apply 0032+0033 再整条部署」）。
+
+**缘起**：用户指出 `whleague.win` 是主域 apex，但**不部署任何服务、DNS 也无 A 记录**（`nslookup -type=A whleague.win` 对 8.8.8.8 / 223.5.5.5 / 1.1.1.1 均无答案，`curl` 返回 000），赛事系统的正确入口是 `https://tour.whleague.win` ⇒ **本仓任何指向 apex 的引用都是 bug**。同时要求给 CF 分析 24h 的两处 504（`cache.whl-club.internal` 79 次、`club.whleague.win` 30 次）归因，并明确回答「是否需要改代码」。
+
+**范围与交付（Task A）**
+- **生产 5xx 根因**：`wrangler.jsonc` 的 `TOUR_API_BASE` 由 `https://whleague.win` 改为 `https://tour.whleague.win`。原先 `src/worker/routes/clubs.ts:574-575` 用它拼 `${base}/api/public/tournaments/${tournamentId}/standings` ⇒ 生产每次请求 `https://whleague.win/api/public/tournaments/2/standings`，CF 分析 24h 内各 17 次 / 15 次 **530**（cache=dynamic、ua=""）。注意 `clubs.ts:604` 的 `if (!c.env.TOUR_API_BASE) return c.json({ standing: null, note: '排名暂不可用' })` ⇒ **变量缺失会优雅降级，配了死地址才每次真发请求、每次都失败**；症状是球队详情页排名区块永久「排名暂不可用」（`clubs.ts:588-592` catch 转 `StandingUnavailable`，`:613-615` 返回 `{ standing: null, note: e.message }`）而其余区块正常，故长期不显眼。`wrangler.jsonc:62-63` 原注释「与 `src/worker/routes/auth.ts` 的 `TOUR_HOME` 同一个源」一并订正。
+- **前端两处用户可见死链**（明面按钮，比排名区块严重）：`web/src/lib/api.ts:70` 的 `TOUR_SITE_URL` 改 `'https://tour.whleague.win/'`，消费点实测 **6 处** —— `web/src/components/TopBar.tsx:92`、`web/src/components/RequireUser.tsx:27`、`web/src/pages/admin/AdminLayout.tsx:45`、`web/src/pages/Home.tsx:24` / `:42` / `:81`。
+- **服务端跳转常量**：`src/worker/routes/auth.ts:35` 的 `TOUR_HOME` 改 `'https://tour.whleague.win/'`，用在 `:52` / `:83` / `:274`（三处 `if (!isOidcMode(c.env)) return c.redirect(TOUR_HOME, 302)`）；生产 `AUTH_MODE=oidc` 暂不可达但潜伏，仍改，并同步 `tests/oidc.test.ts:231`（login）与 `:240`（logout）的断言。
+- `src/worker/env.ts:27-29` 注释示例改 tour 子域，并补一行「填 apex 不算降级——会真的发请求，每次都 530，排名区块永久不可用」。
+- 新增 `tests/domains.test.ts`（6 例）作回归锁：判据 `EFFECTIVE_APEX = /https:\/\/whleague\.win(?![a-z0-9.-])/`（后面不接 `[a-z0-9.-]` ⇒ 子域与注释里的裸 apex 不误伤）；四例锁 `TOUR_API_BASE` / `TOUR_SITE_URL` / `TOUR_HOME` 三个常量（非 apex 且是 `whleague.win` 子域），一例全仓扫描（`src` + `web/src` + `tests` + `wrangler.jsonc` + `web/index.html`，零排除项），一例锁 `src/lib/oidc.ts` 不出现真正的 `Domain=` 赋值且两个 `OIDC_*COOKIE` 都以 `__Host-` 开头。**关键设计**：本文件自己用 `APEX_URL` 拼接、绝不出现连续的 `https://whleague.win` 字面量，所以全仓扫描不需要排除本文件。
+- **明确不改**：`src/lib/oidc.ts:6` 注释里的 `Domain=whleague.win` —— 那是 cookie 域属性、跨子域共享会话的前提，apex 在此正确（两个 cookie 都是 `__Host-` 前缀，本身不许设 Domain）。
+
+**不做（Task A）**：赛事仓的 apex 残留注释 —— `WHL-tournament-management-system/worker/routes/oidc.ts:36` 仍写「线上 whleague.win」（实际是 tour 子域）。超本仓范围，只报不改。
+
+**验收（Task A，实测）**
+- `npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **49 文件 / 667 例全绿**（增量 33 基线 48/661 ⇒ +1 文件 / +6 例）；`npm run build` 成功（`web/dist/assets/index-C6eShBli.js` + `index-CgbAjyeh.css`）；dist 扫描只剩 `https://guess.whleague.win` 与 `https://tour.whleague.win`，无 apex。
+- 变异验证（用 /tmp 备份 + sed 改回 apex + 复原，`diff -q` 确认干净）：`wrangler.jsonc` 的 `TOUR_API_BASE` / `api.ts` 的 `TOUR_SITE_URL` / `auth.ts` 的 `TOUR_HOME` 各自改回 apex ⇒ 每次**恰好 2 例红**（对应常量例 + 全仓扫描例）。
+- 上线核对：`https://tour.whleague.win/api/public/tournaments/1/standings` 与 `/2/standings` 均 **200**（3403B / 7131B）；`whleague.win` 仍 **000**（无服务，符合前提）；`/api/health`、`/api/clubs`（3694B）、`/api/squads`（29670B）、`/api/players?view=initial`（25806B）、`/api/players/roster`（350268B）全 200；`/api/clubs/1` 与 `/api/clubs/1/standing` 匿名 401（符合裁决）；线上首页资产 `index-C6eShBli.js` + `index-CgbAjyeh.css` 与本地 `web/dist/assets/` 逐字一致；线上 JS 内域名只有 `guess.whleague.win` 与 `tour.whleague.win`。
+- **未验证（须在面板/登录态补）**：① `/api/clubs/:id/standing` 端到端（需登录会话，匿名 401），本轮只验证到上游 URL 200 + 部署回显 `env.TOUR_API_BASE ("https://tour.whleague.win")`；② CF 分析里 whleague.win 的 530 是否归零，需按 24h 窗口在面板观察（本机无 CF 分析 API）。
+
+**Task B：边缘 504 归因（结论 = 不需要改代码）**
+CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API 自身的操作记录**：
+- `cache.whl-club.internal` 79 次：该 host 只由 `src/lib/guard.ts:158` 的 `const L2_ORIGIN = 'https://cache.whl-club.internal/'` 合成（`l2Key()` 用 `new Request(\`${L2_ORIGIN}${encodeURIComponent(key)}\`)`），无 route、无 DNS，客户端不可能访问；分析里的路径正是 `l2Key` 输出格式（`clubs:v1:clubs:standing:112172` 15 次、`players:v1:players:club_id=241&limit=100` 10 次、`clubs:v1:clubs:standing:66` 5 次、`clubs:v1:clubs:standing:131681` 3 次、`clubs:v1:clubs:list` 2 次）。
+- `club.whleague.win` 30 次：同属一类，只是键用真实 URL —— `src/worker/routes/media.ts:43` / `:56` 用 `c.req.url` 当边缘缓存键，故它的 Cache API 操作落在 club host 上。这解释了 504 名单**按 host 精确二分**（club 侧清一色 `/api/media/team/<id>/<ts>.png`，零 `/api/clubs*`、零 `/api/players*`）——若真是用户请求超时，登录后必打的 standing 面不可能零 504。签名（空 UA、cache=miss/stale、origin=0）与同 zone 的 `tour.whleague.win` 同档，而后者已定性为边缘缓存自身行为、不改代码。
+- 已排除「媒体文件缺失」：`/api/media/team/4/1788576995420.png` 与 `/api/media/team/20/1788577038398.png` 在两个 host 上都 200（671166 / 457017 字节，image/png）。
+- **判定：不需要动 `src/lib/cache-policy.ts` 或 `cachedJson`。** standing 的 300s（`STANDING_TTL_MS`，`src/worker/routes/clubs.ts:490`）是全站最短 TTL，也是它在 `.internal` 操作里占多数的原因；5 分钟是排名产品语义，不是配置错。
+- **登记两处潜伏风险（本轮不改）**：① 冷回填 `await l2Put(...)` 在响应关键路径上（`src/lib/guard.ts:248`），media 侧已挪进 `waitUntil`（`media.ts:56`）而 JSON 侧没有；② `l2Match` / `l2Put` / `caches.default.match` / R2 `get` / `arrayBuffer` 全无超时（try/catch 只吞 reject、不吞挂起），目前未观察到造成用户可见 504。
+
+**踩坑**
+- **直接部署 main 会造成生产事故**：main 比生产基线多 18 个提交（增量 32/33/34），而生产迁移只到 0031。`sqlDisplayName` / `rowDisplayName` 调用点 **32 处分布在 12 个文件**（`src/worker/contracts-import.ts`、`src/worker/bypass.ts`、`src/worker/growth.ts`、`src/worker/negotiations.ts`、`src/worker/routes/market.ts`、`src/worker/routes/players.ts`、`src/worker/routes/growth.ts`、`src/worker/routes/clubs.ts`、`src/worker/routes/squads.ts`、`src/worker/routes/registration.ts`、`src/worker/routes/admin/reviews.ts` + `src/core/player-name.ts` 本体），缺列会让球员库 / 球队页 / squads / market / growth 大面积 500。故本轮先 apply 0032/0033 再整条部署（用户裁决）。
+- `wrangler d1 migrations apply --remote` 在非交互上下文会回显「Using fallback value in non-interactive context: yes」并继续，无需 `-y`；0032 报 `Executed 6 commands`（5 条 `ALTER TABLE ADD COLUMN` + 记账）、0033 报 `Executed 2 commands`（155.18ms）。apply 后实测：新增列 **5**、`idx_players_sort_name` 存在 **1**、`display_name` 非空 **0** / 总行 **18301**。
+- 迁移 0033 的索引表达式含 **5 个不可见字符**（00ad 软连字符、0301 / 0308 组合记号），由 scripts 侧 `sqlFold()` 生成后落盘，**不得手改或重新格式化那一行**；另 SQLite **禁止索引表达式里出现 `.` 限定列名**（写 `players.display_name` 会报 `the "." operator prohibited in index expressions`）。
+- 本机 `wrangler` 走 IPv6 会卡住，需 `NODE_OPTIONS=--dns-result-order=ipv4first`。
+
+**待办**：① CF 分析按 24h 窗口确认 whleague.win 530 归零（需面板）；② **生产数据落库未执行**（增量 32 的 `scripts/player-names/load.mjs --remote --yes-prod`）⇒ 显示名与球衣号功能对用户仍不可见（`COALESCE(display_name, name)` 回落缩写名，生产 18,301 行 `display_name` 全 NULL）；③ **赛事仓部署未做**（增量 33 跨仓部分），`/api/squads` 已上线但赛事侧同步尚未开跑，首次同步前先跑 `POST /api/admin/sync-rosters?dryRun=1` 核对预期。
+
+
 ## 外部依赖与待输入
 
 | 依赖 | 影响增量 | 状态 |

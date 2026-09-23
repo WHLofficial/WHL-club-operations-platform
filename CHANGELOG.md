@@ -4,9 +4,31 @@
 
 各增量的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [未上线] · 增量 33 — 名册真源归位：全平台一线队名册端点 + 赛事平台拉取同步 + 球员写入口下线（2026-09-23）
+## [已上线] · 增量 34 — apex 域名收口（排名代理 530 根因）+ 边缘 504 归因（2026-09-23，Version 7a00c107-214b-4ce0-8769-e9bcae7c4a55）
 
-本仓 2 个提交（`aed2f67` + 评审 `d84371d`）+ 赛事仓 2 个提交（`ffcbc40` + 评审 `728f523`），**未推送未部署**。增量 32 把球衣号编辑入口搬回本平台后，赛事系统的 `player` 表成了第二份真源（两个写者互相覆盖），本增量把名册真源收到本平台并关掉赛事侧的写路径。
+3 个提交（`9506d00` / `ea6d717` / `5ae73e8`）已推送（`2ad239b..5ae73e8`）并部署，**同轮把增量 32/33 一起带上线**；**生产迁移 0032/0033 同轮 apply**（用户裁决「先 apply 0032+0033 再整条部署」）。
+
+**修复**
+- `whleague.win`（主域 apex）不部署任何服务、DNS 也无 A 记录（`nslookup -type=A` 对 8.8.8.8 / 223.5.5.5 / 1.1.1.1 均无答案，`curl` 返回 000），赛事系统正确入口是 `tour.whleague.win`。三处生效引用改 tour 子域：`wrangler.jsonc` 的 `TOUR_API_BASE`、`web/src/lib/api.ts:70` 的 `TOUR_SITE_URL`（6 处外链：`TopBar.tsx:92` / `RequireUser.tsx:27` / `admin/AdminLayout.tsx:45` / `Home.tsx:24`、`:42`、`:81`）、`src/worker/routes/auth.ts:35` 的 `TOUR_HOME`（用在 `:52`/`:83`/`:274`，生产 `AUTH_MODE=oidc` 暂不可达）。
+- **生产 5xx 根因**：`TOUR_API_BASE` 配 apex 时，`src/worker/routes/clubs.ts:574-575` 每次都请求 `https://whleague.win/api/public/tournaments/<id>/standings` 并必然 **530**（CF 分析 24h 内 `/2/standings` 17 次、`/1/standings` 15 次）。因 `clubs.ts:604` 只在变量**缺失**时优雅降级（返回「排名暂不可用」），配了死地址反而每次真发请求、每次都失败 ⇒ 球队详情页排名区块永久不可用而其余区块正常，长期不显形。
+- 同步 `tests/oidc.test.ts:231`/`:240` 断言与 `src/worker/env.ts:27-29` 注释。
+
+**新增**
+- `tests/domains.test.ts`（6 例）域名回归锁：四例锁三个常量（非 apex 且是 `whleague.win` 子域）、一例全仓扫描（`src` + `web/src` + `tests` + `wrangler.jsonc` + `web/index.html`，零排除项）、一例锁 `src/lib/oidc.ts` 不出现真正的 `Domain=` 赋值且 `OIDC_*COOKIE` 都以 `__Host-` 开头。判据 `EFFECTIVE_APEX = /https:\/\/whleague\.win(?![a-z0-9.-])/` 不误伤子域与注释里的裸 apex；本文件自己用 `APEX_URL` 拼接、无连续 apex 字面量，故全仓扫描无需排除自身。
+
+**不改（含理由）**
+- `src/lib/oidc.ts:6` 注释里的 `Domain=whleague.win`：cookie 域属性、跨子域共享会话的前提，apex 在此正确（两个 cookie 都是 `__Host-` 前缀，本身不许设 Domain）。
+- 赛事仓 `WHL-tournament-management-system/worker/routes/oidc.ts:36` 注释仍写「线上 whleague.win」（实际 tour 子域）：超本仓范围，只报不改。
+
+**边缘 504 归因（结论：不改代码）**：CF 分析 24h 的 `cache.whl-club.internal` 79 次与 `club.whleague.win` 30 次**都不是用户请求**，而是边缘 Cache API 自身的操作记录 —— 前者 host 由 `src/lib/guard.ts:158` 的 `L2_ORIGIN` 合成（无 route、无 DNS，路径即 `l2Key` 输出格式），后者只是键改用真实 URL（`src/worker/routes/media.ts:43`/`:56` 用 `c.req.url`）。这解释了 504 名单按 host 精确二分（club 侧清一色 `/api/media/*`，零 `/api/clubs*` 与 `/api/players*`）。已排除媒体文件缺失（两个 504 样本 URL 在两个 host 上都 200）。**判定：不需要动 `src/lib/cache-policy.ts` 或 `cachedJson`**（standing 300s 是全站最短 TTL、也是它在 `.internal` 占多数的原因，5 分钟是排名产品语义）。登记两处潜伏风险不改：冷回填 `await l2Put` 在响应关键路径（`guard.ts:248`，media 侧已挪进 `waitUntil`）、`l2Match`/`l2Put`/`caches.default.match`/R2 `get`/`arrayBuffer` 全无超时。
+
+**验收**：`npm run typecheck` 三份全清；`npx vitest run` **49 文件 / 667 例全绿**（增量 33 基线 48/661 ⇒ +1 文件 / +6 例）；`npm run build` 成功（`index-C6eShBli.js` + `index-CgbAjyeh.css`）；dist 扫描无 apex。变异验证：三个常量各自改回 apex ⇒ 每次**恰好 2 例红**。上线核对：`tour.whleague.win/api/public/tournaments/{1,2}/standings` 均 **200**（3403B / 7131B）、`whleague.win` 仍 000、`/api/health` / `/api/clubs` / `/api/squads` / `/api/players?view=initial` / `/api/players/roster` 全 200、`/api/clubs/1` 与 `/api/clubs/1/standing` 匿名 401、线上资产与本地 dist 逐字一致、线上 JS 内域名只剩 `guess.whleague.win` 与 `tour.whleague.win`。**未验证**：`/api/clubs/:id/standing` 端到端（需登录会话，匿名 401）；CF 分析 530 归零需按 24h 窗口在面板观察。
+
+**已知后果**：生产 `players.display_name` 仍全 NULL（落库脚本未跑）⇒ 显示名与球衣号对用户仍不可见（回落缩写名）；赛事仓未部署 ⇒ `/api/squads` 已上线但赛事侧名册同步尚未开跑。
+
+## [已上线] · 增量 33 — 名册真源归位：全平台一线队名册端点 + 赛事平台拉取同步 + 球员写入口下线（2026-09-23，Version 7a00c107-214b-4ce0-8769-e9bcae7c4a55）
+
+本仓 2 个提交（`aed2f67` + 评审 `d84371d`）+ 赛事仓 2 个提交（`ffcbc40` + 评审 `728f523`）。**本仓部分已于 2026-09-23 随增量 34 一并推送并部署**（`/api/squads` 生产实测 200 / 29670B）；**赛事仓部分尚未部署**，故名册同步 cron 未开跑。增量 32 把球衣号编辑入口搬回本平台后，赛事系统的 `player` 表成了第二份真源（两个写者互相覆盖），本增量把名册真源收到本平台并关掉赛事侧的写路径。
 
 **新增**
 - 端点 `GET /api/squads`（`src/worker/routes/squads.ts`）：一次 JOIN 出 20 队 570 人的一线队名册，返回 `{ squads: [{ clubId, clubName, players: [{ fcId, name, number }] }] }`。公开只读，`assertPublicRate` + `cachedJson`（roster scope，24h）；姓名走 `sqlDisplayName()`，`ORDER BY c.name, p.fc_id` 后 JS 线性归并，不做 N+1。
@@ -25,9 +47,9 @@
 
 **已知后果（评审查出，本轮不改）**：没有一线队球员的俱乐部整个从 `squads` 数组消失（赛事仓只对快照里出现过的队做删除 ⇒ 被清空的队会留陈旧镜像行，失败方向是保留而非丢数据）；赛事仓自动删除球员后 `tactic.roster_json` / `tactic_submission.assign_json` 会留悬挂 id（JSON 无外键，教练下次保存战术会撞 400，手工删除时代同样存在）；伤停的 CASCADE 实际不可达（伤停必挂 `match_event`，而 `match_event.player_id` 是 NO ACTION ⇒ 删除会失败行进 `kept`）。
 
-## [未上线] · 增量 32 — 球员名口径改造：FC26 派生显示名 + 球衣号归属转移 + 档案页按 fc_id 寻址（2026-09-23）
+## [已上线] · 增量 32 — 球员名口径改造：FC26 派生显示名 + 球衣号归属转移 + 档案页按 fc_id 寻址（2026-09-23，Version 7a00c107-214b-4ce0-8769-e9bcae7c4a55）
 
-用户 m01803「开工」，任务 = 球员名口径改造（显示名取自 FC26 存档）+ 球衣号归属从赛事平台转回本平台 + 球员档案页 URL 改 fc_id + 两系统阵容同步 + D1 读额度优化。8 个提交（`c07c18a` / `54a98ef` / `341c7cd` / `e2d81ed` / `097cd34` / `6135bbc` / `770875b` / `0e6a524`），**未推送未部署**，生产迁移仍到 0031。跨仓部分（赛事平台转只读 + 阵容同步）另立增量 33。
+用户 m01803「开工」，任务 = 球员名口径改造（显示名取自 FC26 存档）+ 球衣号归属从赛事平台转回本平台 + 球员档案页 URL 改 fc_id + 两系统阵容同步 + D1 读额度优化。8 个提交（`c07c18a` / `54a98ef` / `341c7cd` / `e2d81ed` / `097cd34` / `6135bbc` / `770875b` / `0e6a524`）。**代码已于 2026-09-23 随增量 34 一并推送并部署，生产迁移 0032/0033 同轮 apply**（apply 后实测：新增列 5、`idx_players_sort_name` 存在、`display_name` 非空 0 / 总行 18301）；**生产数据落库（`scripts/player-names/load.mjs --remote --yes-prod`）仍未执行** ⇒ 显示名与球衣号功能对用户暂不可见（`COALESCE(display_name, name)` 回落缩写名）。跨仓部分（赛事平台转只读 + 阵容同步）另立增量 33。
 
 **新增**
 - 迁移 `0032_players_display_name_number.sql`：`players` 加 `first_name` / `last_name` / `common_name` / `display_name` / `number` 五列（全 TEXT）。`players.name` 语义不变（仍是 FC26db 官方缩写名，导入对齐键仍是 fc_id）。
