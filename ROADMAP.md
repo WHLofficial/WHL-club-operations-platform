@@ -904,7 +904,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **验收（实测）**：定点 `tests/players-sort-indexes.test.ts` **37 例全绿**；变异验证（initial-ca 只建内层 + `ps` 删一项）**8 例变红** ⇒ 锁不是空转；`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **50 文件 / 709 例全绿**。
 
-**待令（需单独授权）**：`0034` 的生产 apply —— 三条索引合计约 **54,903 行 `rows_written`**，须单独占一个 D1 配额日（自留预算 ≤6 万行/日）；收益（37,635 → 22–53 行/次）apply 后才兑现。清单上还剩 **11 个可建索引的键**（`base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`，每条 18,301 行写），按每天最多 3 条继续分批；`attr:*` 34 键与姓名子串查找属架构级（物化子表 / FTS5 trigram），不在此列。顺带订正：审计报告 §5.5 的 `sort=name` 候选**早已由迁移 `0033`（2026-09-23 apply）完成**，该行此前已过期。证据与逐条豁免理由见 `scripts/d1-read-audit/README.md` §5.3 / §5.5。
+**待令（需单独授权）**：`0034` 的生产 apply —— 三条索引合计约 **54,903 行 `rows_written`**，须单独占一个 D1 配额日（自留预算 ≤6 万行/日）；收益（37,635 → 22–53 行/次）apply 后才兑现。清单上还剩 **11 个可建索引的键**（`base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`，每条 18,301 行写），按每天最多 3 条继续分批；这 11 个之外还欠 `view=initial` 口径的 `pa` / `growth_gap` 两个变体（本批只做了该口径下的 `ca`）；`attr:*` 34 键与姓名子串查找属架构级（物化子表 / FTS5 trigram），不在此列。顺带订正：审计报告 §5.5 的 `sort=name` 候选**早已由迁移 `0033`（2026-09-23 apply）完成**，该行此前已过期。证据与逐条豁免理由见 `scripts/d1-read-audit/README.md` §5.3 / §5.5。
 
 ## 外部依赖与待输入
 
