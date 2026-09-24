@@ -897,7 +897,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **第 5 节结论（D1 读量治理后续批次）**：主体已在增量 28 治完（默认浏览 18,819 → 56 行、全站 21 条读面除 free-agents 与 admin/overview 外全部 ≤105 行/次），剩下的是「**写配额换读量**」的排期清单 —— 2026-09-22 搁置它的理由（当日写配额被 `0029`+`0030` 吃掉 73.2%）现已不成立（2026-09-24 实测当日写 10 行 / 读 2,969 行，免费档日配额 5,000,000 读 / 100,000 写按账号计、四库共享），故**建不建索引是产品判断而非配额判断**。用户裁决：海捞池契约（`LIMIT 300` 无分页无筛选）**另立完整增量**——球员页按球员归属加三类操作按钮（本队 = 解约/续约、外队 = 报价、自由身 = 海捞），本轮不涉及；其余按最小步开工一步。
 
-**本轮最小步交付**（本地提交，**未 push 未 deploy**）
+**本轮最小步交付**（已提交、已 push（`origin/main` = `6882e10`）、已部署上线（Version `a573ade7-b32f-4c85-bbaf-56a07e612281`，2026-09-24T03:37:52Z））
 - `scripts/check-sort-index-feasibility.mjs`：候选排序表达式体检器（本地 D1 逐条 `CREATE INDEX` 后 `DROP`，零配额）。15 个候选 **15/15 通过** ⇒ D1 表达式树深度上限 100 对这批形态不构成限制（`ps` 15 项链可通过），且 `json_extract` 可出现在索引表达式里。
 - `src/db/migrations/0034_players_sort_indexes_batch3.sql`（**2026-09-24 已 apply 到生产**）三条索引：`idx_players_sort_uid`（`COALESCE(CAST(SUBSTR(uid, 3) AS INTEGER), 0)`）、`idx_players_sort_ps`（15 项 `(json_extract(game_attrs,'$.PSIDn') IS NOT NULL)` 相加，与 `PS_COUNT_EXPR` 同源生成）、`idx_players_sort_initial_ca`（`COALESCE(COALESCE(base_ca, ca), 0)` —— 必须完整嵌套，只建内层匹配不上 `buildSortExprs` 套的外层 `COALESCE(…, 0)`）。
 - 同源测试锁：`tests/players-sort-indexes.test.ts` 的 `INDEXED_SORTS` 8 → **11 条**（改三元组支持 `&view=initial`），新增 2 条表达式同源锁；`tests/d1.ts` 的 `MIGRATION_FILES` 追加 `0034`。
