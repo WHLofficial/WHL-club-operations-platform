@@ -7,11 +7,13 @@ import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { resetGuards } from '../src/lib/guard.ts';
 import { sqlFold } from '../src/core/name-fold.ts';
+import { PS_SLOT_COUNT } from '../src/core/fc26.ts';
 import { applyMigrations, createTestD1, createTestKV } from './d1.ts';
 
-// [排序键, 索引名]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
+// [排序键, 索引名, 额外查询参数]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
 // + 0033 一条（name，增量 32 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
-const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string]> = [
+// + 0034 三条（uid / ps / view=initial 下的 ca，遗留项第 5 节 D1 读量治理的下一批次）
+const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?: string]> = [
   ['ca', 'idx_players_sort_ca'],
   ['pa', 'idx_players_sort_pa'],
   ['age', 'idx_players_sort_age'],
@@ -20,6 +22,10 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string]> = [
   ['club', 'idx_players_sort_club'],
   ['status', 'idx_players_sort_status'],
   ['name', 'idx_players_sort_name'],
+  ['uid', 'idx_players_sort_uid'],
+  ['ps', 'idx_players_sort_ps'],
+  // 初始视图把 ca 换成 COALESCE(base_ca, ca)，与 0027 的 COALESCE(ca, 0) 是两个表达式 ⇒ 单独一条索引
+  ['ca', 'idx_players_sort_initial_ca', '&view=initial'],
 ];
 
 let shared: DatabaseSync | null = null;
@@ -91,35 +97,36 @@ async function queryPlan(sort: string, extra = ''): Promise<string> {
 }
 
 describe('排序表达式索引与查询表达式同源（增量 28）', () => {
-  for (const [sort, index] of INDEXED_SORTS) {
-    it(`sort=${sort} 走 ${index}，不退回全表扫 + 临时排序`, async () => {
-      const plan = await queryPlan(sort);
+  for (const [sort, index, extra = ''] of INDEXED_SORTS) {
+    const label = `sort=${sort}${extra}`;
+    it(`${label} 走 ${index}，不退回全表扫 + 临时排序`, async () => {
+      const plan = await queryPlan(sort, extra);
       expect(plan).toContain(`USING INDEX ${index}`);
       expect(plan).not.toContain('TEMP B-TREE');
     });
 
-    it(`sort=${sort} 带游标翻页同样走 ${index}`, async () => {
-      const plan = await queryPlan(sort, '&cursor=5~7');
+    it(`${label} 带游标翻页同样走 ${index}`, async () => {
+      const plan = await queryPlan(sort, `&cursor=5~7${extra}`);
       expect(plan).toContain(`USING INDEX ${index}`);
       expect(plan).not.toContain('TEMP B-TREE');
     });
 
     // 升降两个方向都要能用同一条索引（索引尾列是 id，反向扫描合法）
-    it(`sort=${sort}&order=asc 同样走 ${index}`, async () => {
-      const plan = await queryPlan(sort, '&order=asc');
+    it(`${label}&order=asc 同样走 ${index}`, async () => {
+      const plan = await queryPlan(sort, `&order=asc${extra}`);
       expect(plan).toContain(`USING INDEX ${index}`);
       expect(plan).not.toContain('TEMP B-TREE');
     });
   }
 
-  it('八条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('十一条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
     const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
     const rows = sqlite
       .prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name IN (${names}) ORDER BY name`)
       .all() as { name: string; sql: string }[];
     expect(rows.map((r) => r.name)).toEqual([...INDEXED_SORTS.map(([, index]) => index)].sort());
-    for (const row of rows) expect(row.sql.replace(/\s+/g, ' ')).toMatch(/,\s*id\s*\)\s*$/);
+    for (const row of rows) expect(row.sql.replace(/\s+/g, ' ')).toMatch(/,\s*id\s*\)\s*;?\s*$/);
   });
 
   // 折叠表达式含 5 个不可见字符（00ad 软连字符、0301/0308 组合记号，见 src/core/name-fold.ts 的码位表），
@@ -134,5 +141,30 @@ describe('排序表达式索引与查询表达式同源（增量 28）', () => {
       .get() as { sql: string } | undefined;
     expect(row).toBeDefined();
     expect(row!.sql).toContain(sqlFold('COALESCE(display_name, name)'));
+  });
+
+  // 0034 的两条表达式同样手抄不得：ps 是 15 个近乎相同的项相加（漏一个、括号错一层，索引照样建得出来
+  // 但匹配不上查询），initial-ca 是嵌套 COALESCE（只建内层 COALESCE(base_ca, ca) 会静默失配，
+  // 0027 的 COALESCE(ca, 0) 就是这么漏掉初始视图的）。
+  it('PS 排序索引的槽计数表达式与 core 同源（PS_SLOT_COUNT 项，每项自带括号）', () => {
+    const sqlite = baseSqlite();
+    const row = sqlite
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_players_sort_ps'`)
+      .get() as { sql: string } | undefined;
+    expect(row).toBeDefined();
+    const expr = `(${Array.from(
+      { length: PS_SLOT_COUNT },
+      (_, i) => `(json_extract(game_attrs, '$.PSID${i + 1}') IS NOT NULL)`,
+    ).join(' + ')})`;
+    expect(row!.sql.replace(/\s+/g, ' ')).toContain(expr);
+  });
+
+  it('初始视图的 ca 索引建在完整排序键上（内层 COALESCE(base_ca, ca) 之外还有一层 COALESCE(…, 0)）', () => {
+    const sqlite = baseSqlite();
+    const row = sqlite
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_players_sort_initial_ca'`)
+      .get() as { sql: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.sql.replace(/\s+/g, ' ')).toContain('COALESCE(COALESCE(base_ca, ca), 0)');
   });
 });

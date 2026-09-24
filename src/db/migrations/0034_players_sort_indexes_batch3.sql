@@ -1,0 +1,34 @@
+-- 遗留项第 5 节（D1 读量治理）下一批次：球员库排序表达式索引 batch 3
+--
+-- 为什么现在做：增量 28 的读额度审计（scripts/d1-read-audit/README.md §5.5）把四条形状登记为
+-- 「下一批候选 = 形态允许静态索引、只差写配额」，其中 sort=name 已由迁移 0033（2026-09-23）完成。
+-- 剩下这三条实测各 37,635 行/次（全表扫 + 临时排序），建索引后应与同族形状同量级（22–53 行/次，见 §3.1）。
+--   1. view=initial&sort=ca：初始视图把 ca 换成 COALESCE(players.base_ca, players.ca)（routes/players.ts:507），
+--      与 0027 的 COALESCE(ca, 0) 是两个表达式 ⇒ 索引静默失配（61 → 37,635）。排序键最终是
+--      COALESCE(COALESCE(base_ca, ca), 0)（buildSortExprs 在 caExpr 外再套一层 COALESCE(…, 0)），
+--      所以索引必须建在这一层完整表达式上，只建内层 COALESCE(base_ca, ca) 匹配不上。
+--   2. sort=uid：COALESCE(CAST(SUBSTR(uid, 3) AS INTEGER), 0)（uid = 'fc' + fcId，排序按号不走字符串）。
+--   3. sort=ps：15 个 (json_extract(game_attrs, '$.PSIDn') IS NOT NULL) 相加（每项自带括号：SQLite 里
+--      + 的优先级高于 IS NOT NULL，不括起来会被解析成一整串比较）。
+--
+-- 形态体检（2026-09-24，scripts/check-sort-index-feasibility.mjs，本地 D1 真引擎）：
+-- 15 个候选表达式逐条试建 + 立刻 DROP，全部通过 —— 含 ps 的 15 项链与 json_extract 表达式。结论：
+--   · D1 的表达式树深度上限 100 对这批形态不构成限制（ps 15 项链；对照 name 折叠 87 项链也已通过）；
+--   · json_extract 可以出现在索引表达式里（确定性检查通过）；
+--   · 索引表达式里禁止 `.` 限定符（SQLite 硬要求，见 0032/0033 注记）⇒ 本文件一律写非限定列名，
+--     而查询侧仍写限定名；两者被优化器认作同一表达式这件事由 tests/players-sort-indexes.test.ts
+--     的 EXPLAIN QUERY PLAN 用例锁死（表达式一旦漂移，用例立刻红）。
+--
+-- 状态（2026-09-24）：文件已写好，测试库与 tests/players-sort-indexes.test.ts 全绿（该文件 37 例，
+--   含本批 9 条新 EXPLAIN 用例 + 2 条同源锁；并做了变异验证：故意改错表达式 ⇒ 8 例立刻变红）。
+--   **尚未 apply 到生产** —— 生产写需单独授权，apply 一次即写 ≈54903 行，须单独占一个配额日。
+--   ps 那一行不是手抄的：由 PS_SLOT_COUNT 生成，并由上面那条同源用例锁回「PS_SLOT_COUNT 项、每项自带括号」。
+--
+-- ⚠️ 部署核查：每条索引远端 apply 一次性写 ≈ 18301 行，三条合计 ≈ 54903 行
+--   （免费档 10 万行/日，本仓自留 ≤6 万行/日 ⇒ 一批 3 条正好卡在预算内，与 0029 同规）。
+-- 回滚：DROP INDEX idx_players_sort_uid;
+--       DROP INDEX idx_players_sort_ps;
+--       DROP INDEX idx_players_sort_initial_ca;
+CREATE INDEX idx_players_sort_uid ON players(COALESCE(CAST(SUBSTR(uid, 3) AS INTEGER), 0), id);
+CREATE INDEX idx_players_sort_ps ON players(((json_extract(game_attrs, '$.PSID1') IS NOT NULL) + (json_extract(game_attrs, '$.PSID2') IS NOT NULL) + (json_extract(game_attrs, '$.PSID3') IS NOT NULL) + (json_extract(game_attrs, '$.PSID4') IS NOT NULL) + (json_extract(game_attrs, '$.PSID5') IS NOT NULL) + (json_extract(game_attrs, '$.PSID6') IS NOT NULL) + (json_extract(game_attrs, '$.PSID7') IS NOT NULL) + (json_extract(game_attrs, '$.PSID8') IS NOT NULL) + (json_extract(game_attrs, '$.PSID9') IS NOT NULL) + (json_extract(game_attrs, '$.PSID10') IS NOT NULL) + (json_extract(game_attrs, '$.PSID11') IS NOT NULL) + (json_extract(game_attrs, '$.PSID12') IS NOT NULL) + (json_extract(game_attrs, '$.PSID13') IS NOT NULL) + (json_extract(game_attrs, '$.PSID14') IS NOT NULL) + (json_extract(game_attrs, '$.PSID15') IS NOT NULL)), id);
+CREATE INDEX idx_players_sort_initial_ca ON players(COALESCE(COALESCE(base_ca, ca), 0), id);
