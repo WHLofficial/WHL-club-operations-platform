@@ -860,7 +860,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## 增量 37 · 球队与俱乐部双向建档同步（tour + club 两仓，2026-09-23）
 
-**状态**：代码完成、两仓本地全绿、**未提交未部署**（部署前两侧都要 `wrangler secret put TEAM_SYNC_SECRET`，同值；属需单独授权项）。
+**状态**：**已收口上线**——两仓均已提交、推送并部署（本仓 4 提交 `be28524` / `ce49e77` / `8379508` / `f250c29`，`origin/main` = `f250c29`；赛事仓 4 提交 `ad80d75` / `588f384` / `1ab678a` / `5f07002`，该仓 `origin/main` = `5f07002`）。生产 Version 本仓 **`bd467125-2ccb-4516-86b4-f963bdc5fda6`**（2026-09-23T14:25:21Z，Source `wrangler`；线上首页资产 `index-CpdvAUf3.js` + `index-CgbAjyeh.css` 与本地 `web/dist/assets/` 逐字一致 ⇒ 对账页前端在线）、赛事仓 **`02590a8e-f314-4721-a823-147817a5ce17`**（2026-09-23T14:25:16Z）。两侧均已配 `TEAM_SYNC_SECRET`（`wrangler secret list` 实测；生产无签名探测两侧 `/api/internal/team-upsert` 都回 403 `bad_signature` ⇒ 密钥在位、fail-closed 生效，密钥缺失会回 503 故已排除「未配」）。
 
 **缘起（用户 m00582 原话）**：「探索 club 平台新建俱乐部方式，与之保持一致并实现联动」；随后澄清（m00620 原话）：「联动指的是 tour 平台建立球队后同步 club 平台建立俱乐部，反之亦然」。**机制由用户裁决为「推送 + 对账兼底」**（实时 HMAC 推送 + 对账页兜底存量差异）。
 
@@ -886,7 +886,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **部署前置**：两侧各 `wrangler secret put TEAM_SYNC_SECRET`（**同值**）。只配一侧的结果是那侧入站 503、出站报「未配置」——不会静默半通。
 
-**待办**：① 两仓提交（未做）；② 部署 + 配 `TEAM_SYNC_SECRET`（需单独授权）；③ 部署后实测一条：赛事仓建队 → 本仓 `/api/admin/team-sync` 无差异；本仓建俱乐部（赛事仓无此队）→ 赛事仓 `/api/admin/teams` 能看到该队。
+**待办**：① ~~两仓提交~~ ✅ 已做（本仓 `f250c29`、赛事仓 `5f07002`，两仓工作区干净）；② ~~部署 + 配 `TEAM_SYNC_SECRET`~~ ✅ 已做（2026-09-23 两侧同值配置 + 两仓部署，版本号见本节状态行）；③ **未验证**：部署后实测一条 —— 赛事仓建队 → 本仓 `/api/admin/team-sync` 无差异；本仓建俱乐部（赛事仓无此队）→ 赛事仓 `/api/admin/teams` 能看到该队（两条都需两侧管理端登录态，CLI 拿不到会话，未做）；「两侧密钥同值」也只能靠一次零写 upsert 探测证实（生产写动作，未授权不做）。
 
 
 ## 外部依赖与待输入
@@ -904,7 +904,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 | 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | 增量 12 后收口 | **已执行**（2026-09-20，444 行；复查全库 assigned 551 = CPU 4 队 107 + 本批 444） |
 | S9 窗基线工件（`scripts/prod-20260920-s9-window-baseline/`：直造一条已关季初常规窗 + 62 行 `result_confirmations` 与 50 行 `match_attendance` 的 `window_seq` 0→1） | 生产数据侧 | **已执行**（2026-09-20 经 `--command` 逐条跑：changes 1 / 62 / 50 与期望一致，验收 9 项全中 → `windows_s9=1, w1_closed=1, open_windows=0, rc_one=62, ma_one=50, season_status=preparing`；代价：该窗 ≈117.5m 维护费与死忠演化不会被任何关窗批收取） |
 | 20 队（含 CPU）队籍对齐工件（源 `FC Editor…/player_tables/s901` 队壳文件；`scripts/prod-20260920-s9-club-align/`：570 人按队壳对齐，481 条 `UPDATE players SET club_id`（改队 158 + 认领 323），只写队籍一列） | 生产数据侧 | **已于 2026-09-21 执行**（481 语句 / rows_written 962 / touched 481；验收：已对齐 570、剩余差异 0、入籍 874 = 551+323、自由身 17427，逐队人数与预估逐队吻合）；合同批的 84 行异队冲突已归零（16 队 462 行全部可导）；**遗留 304 人（275 人不在联盟世界任何一线队名单 + 29 人所在队在平台不存在）已于 2026-09-21 由 `scripts/prod-20260921-s9-free-leftover/` 释放自由身（`club_id = NULL` + `status = 'free'`）** |
-| 16 队合同导入（源 `E:\Downloads\一线队-S9.csv`；`scripts/prod-20260920-s9-contracts/`：生成器 + 462 条带守卫 `INSERT … SELECT` 10 片 + 执行器 `exec-shards.mjs` + 预检/验收/回滚/报告） | 生产数据侧 | **已于 2026-09-21 执行**（先 apply 迁移 0028；10 片 = 462 语句 / changes 462 / rows_written 1386；逐行复核 462 / 命中 462 / 差异 0；验收 11 列全中 —— 462 行全 `import`、formal 399 / trainee 63、`bad_*` 全 0；逐队 16 行与效力年分布（0 赛季 163…2.5 赛季 79）全中；`players` 未被本批改写、6 张守卫表仍 0）。刻度口径 `service_ticks = 当前刻度(1) − 2×效力年`、`protection_ticks = service_ticks + 3`（训练营 NULL）。**未部署增量 25**（本轮无部署令）⇒ 面板侧残留风险见该目录 README §11.8 |
+| 16 队合同导入（源 `E:\Downloads\一线队-S9.csv`；`scripts/prod-20260920-s9-contracts/`：生成器 + 462 条带守卫 `INSERT … SELECT` 10 片 + 执行器 `exec-shards.mjs` + 预检/验收/回滚/报告） | 生产数据侧 | **已于 2026-09-21 执行**（先 apply 迁移 0028；10 片 = 462 语句 / changes 462 / rows_written 1386；逐行复核 462 / 命中 462 / 差异 0；验收 11 列全中 —— 462 行全 `import`、formal 399 / trainee 63、`bad_*` 全 0；逐队 16 行与效力年分布（0 赛季 163…2.5 赛季 79）全中；`players` 未被本批改写、6 张守卫表仍 0）。刻度口径 `service_ticks = 当前刻度(1) − 2×效力年`、`protection_ticks = service_ticks + 3`（训练营 NULL）。**增量 25 已于 2026-09-21 上线（Version `b83ec876`，见本文件增量 25 节「遗留」）** ⇒ 面板侧残留风险已消除；该目录 README §11.8 首条已同口径订正 |
 | S9 遗留球员释放自由身（`scripts/prod-20260921-s9-free-leftover/`：304 名「在册但不在联盟世界 20 队名单」者 → `club_id = NULL` + `status = 'free'`，304 条幂等 UPDATE 2 片 + 回滚 + 预检/验收/报告/README） | 生产数据侧 | **已于 2026-09-21 执行**（用户 2026-09-21 裁定口径「clubID改null，status改free」；304 语句 / rows_written 912；验收六列全中：`want_rows` 304 / `still_rostered` 0 / `status_not_free` 0 / `null_club` 17731 / `rostered_now` 570 / `touched` 304，逐队名单回到联盟世界人数） |
 | 全部自由身补标 `status='free'`（`scripts/prod-20260921-s9-free-status/`：一条带守卫的批量 UPDATE，把其余 17427 名既存自由身补齐，只写 `status`/`updated_at`） | 生产数据侧 | **已于 2026-09-21 执行**（用户裁决「球员库里只要没在 20 队的 status 都应该是 free」；Rows written 34854 = 17427×2，`touched` 17427；验收七列全中 → 自由身 17731 全 `free`、在册 570 全 `normal`、`bad_free_with_club` 0、守卫表全 0）。现态：在册 570（全 `normal`）/ 自由身 17731（全 `free`） |
 | 20 队（含 CPU）能力导入（源 `FC Editor…/player_tables/s901`；`scripts/prod-20260920-s9-abilities/`，口径 **Case B**：只改现值 `ca`/`pa` + `json_set` 合并 34 项能力项与 `RoleID1-5`/`PSID1-15`，**不动 `base_ca`/`$.CA`/`$.PA`/队籍**） | 生产数据侧 | **已于 2026-09-21 执行**（两片 = 200 + 57 条语句 / rows_written 400 + 112 = 512 写；执行前 `--verify` 报差异 257 与语句数一致、执行后 **570 / 570 / 差异 0**；验收六列 `touched 257` / `delta_gt0 254` / `null_core 0` / `gold_rows 35` / `gold_slots 36` / `ca_vs_attr 254`）。涨幅以 delta = `ca`−`base_ca` 形式存在：换版按 delta 继承、解约被剥掉、报名合规停在换版前（口径已用户裁定接受）；`gold_rows/slots` 量的是「范围内持有金徽的行/槽」= 状态数，本批**变更**为 4 行 / 5 槽（原工件把 4/5 写成 SQL 期望，已更正） |
