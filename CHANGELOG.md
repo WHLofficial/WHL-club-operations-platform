@@ -4,6 +4,14 @@
 
 各增量的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [维护] · 上线口径订正：push 到 main 会触发 CF 自动部署（2026-09-24，文档：无运行时行为变化）
+
+2026-09-24 实测确认：本仓与 `tour` / `whl-auth` / `whl-guess` 四仓都接了 Cloudflare 的 Git 集成（Workers Builds）—— `git push origin main` 之后约 30–60 秒，CF 在服务端自动构建并部署对应 Worker，不需要任何本地命令。证据：同日三仓推送（用户只下令 push、未下令 deploy）后 `whl-club` 部署 `04:33:27.890Z`（Version `a65570f8-…`）、`whl-auth` `04:33:45.766Z`（`458e0e94-…`）、`whl-guess` `04:34:15.675Z`（`c6d741aa-…`），顺序与 push 顺序一致、间隔 30–60 秒；未推送的 `tour` 无新部署。同轮更早还有一次交叉验证：手动 `npm run deploy` 出的 `a573ade7`（03:37:53Z）两分钟后被 push 触发的 `c5e796f6`（03:40:13Z）顶掉。
+
+排除项与取证边界：四仓都没有 `.github/` ⇒ 不是 GitHub Actions，是 CF 服务端的集成；`wrangler deployments list` 的 Source 字段**不区分**来源（自动部署同样报 `wrangler` / `Unknown (deployment)`，因为构建容器里跑的就是 `wrangler deploy`）；构建日志拿不到 —— OAuth token 缺 `workers_builds` 读权限（`/accounts/<id>/builds/*` 一律 `Authentication error`，wrangler 无 `builds` 子命令）⇒ 构建命令是否含 typecheck 未能验证，只能看 CF 面板 Settings → Builds。
+
+⇒ `AGENTS.md` 危险清单的 `git push` 条与「部署即 push」段已同步订正：**push 即上线，「只推不部署」不存在；已 push 后不必再手动 `npm run deploy`（冗余且会被自动部署顶掉）；push 前必须本地 `npm run typecheck` + `npm test` 全绿。**
+
 ## [维护] · players 全量覆盖的写入成本口径订正（2026-09-24，文档：无运行时行为变化）
 
 用户 m02214 问「如果随后更新或者完全覆盖了 players 表，索引需要重写吗」⇒ 结论：走 `INSERT` / `UPDATE` / `DELETE`（含本仓导入用的 `INSERT ... ON CONFLICT(fc_id) DO UPDATE` upsert）时 SQLite 自动维护全部索引，无需 `REINDEX`；`UPDATE` 只为「SET 列表里出现过的列」所属的索引写新条目。唯一例外是 `DROP TABLE players` 式重建 —— 16 条索引一起消失，而 `d1_migrations` 仍记着 `0033`/`0034` 已 apply ⇒ `wrangler d1 migrations apply` 不会重跑，必须手工重建。

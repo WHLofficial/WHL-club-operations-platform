@@ -21,11 +21,11 @@ Cloudflare Worker（Hono）同时提供 API 与前端静态资源，前端是 Re
 - `npm run deploy`、`wrangler deploy`、任何 `--remote` 写操作（`d1 execute` / `d1 migrations apply` / `kv key put` / `r2`）。
 - 生产 D1 的迁移 apply、`scripts/prod-*/` 下任何 SQL 工件、`scripts/players-import/sql/` 分片导入。
 - 球员库全量**重**导入（首灌已于 2026-09-18 执行，入库 18301 人，勿重跑分片）、30 人缺字段补录（`overlay-missing.ts`）。16 队队籍回填（`scripts/prod-20260919-roster-backfill/`）已于 2026-09-20 执行完毕（444 人），工件内守卫 `club_id IS NULL` 使其幂等，但无新指令不要再跑。
-- `git push` 与发布。
+- `git push` 与发布 —— **push 到 main 会触发 CF 自动部署（Workers Builds），push 即上线**（2026-09-24 实测：三仓 push 后 30–60 秒各出一个新 Version，未推送的仓无动静）。
 
 一次授权不延续到下一轮。执行前先说明影响面（行数、配额、不可逆点）再等确认。
 
-**但用户说「部署 / 上线」就是同时授权 push**（2026-09-23 用户原话：「部署推送都得一块啊」）——被点名的是哪个仓就管哪个仓，deploy 与 push 一次做完，不要只部署再回来问要不要推送。用户没点名上线时，push 与 deploy 仍一律不做。
+**但用户说「部署 / 上线」就是同时授权 push**（2026-09-23 用户原话：「部署推送都得一块啊」）——被点名的是哪个仓就管哪个仓，deploy 与 push 一次做完，不要只部署再回来问要不要推送。用户没点名上线时，push 与 deploy 仍一律不做。**注意 push 本身就会上线**：main 上的 push 会被 CF 自动构建部署（约一分钟内，见上一节），所以「只推不部署」不存在 —— push 前必须本地 `npm run typecheck` + `npm test` 全绿；已 push 后不必再手动 `npm run deploy`（冗余，且会被自动部署顶掉）。
 
 只读查证是安全的，例如 `wrangler deployments list --name whl-club`、`wrangler d1 migrations list whl-club --remote`。
 
