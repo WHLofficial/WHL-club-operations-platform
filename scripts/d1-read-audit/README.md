@@ -193,8 +193,8 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 **建议（步骤 4 按此执行）**：
 1. 先做**零写成本**的三件事（步骤 2/3/5）：把最常见的默认浏览路径从 18,819 行压到 56 行（命中缓存时 0 行）。
 2. 索引**分批 + 分天**，每批 ≤3 条。**第一批（3 条 = 54,903 行写，卡在 6 万预算内）**取表达式最安全、且前端列序/筛选面板直接暴露的键：`prestige`、`club`、`status`。选它们的理由不是热度（用户已裁决当前频次数据无意义），而是：都是单表纯列/COALESCE/CASE 表达式（不像 `ps` 有 15 项链、不像 `name` 有 87 项链），建索引风险最低，而它们又都是球员库默认列/默认排序下拉里可见的列。**→ 已于 2026-09-22 执行（迁移 `0029`，生产实测 53 / 43 / 22 行，见 §3.1）**；同源锁死见 `tests/players-sort-indexes.test.ts`。
-3. 剩余键登记为「**已量化、待配额**」的分天清单，不假装已解决（剩余 13 个可建索引的键 = 238k 行写 ≈ 4 天）。每批后跑一次 `--only=<形状>` 复测确认。
-4. `name` 索引先跑深度体检（`scripts/check-name-fold-depth.mjs` 同源思路）；`influence` / `years` / `protected` / `ct.*` 四个维度改判为「需物化列或改查询」，不在本增量做。
+3. 剩余键登记为「**已量化、待配额**」的分天清单，不假装已解决（剩余 13 个可建索引的键 = 238k 行写 ≈ 4 天）。每批后跑一次 `--only=<形状>` 复测确认。**2026-09-24 进展**：§5.5 点名的下一批 3 条（`view=initial&sort=ca` / `sort=uid` / `sort=ps`）已写成迁移 `0034`（三条 ≈5.5 万行写，**未 apply**，须单独占一个配额日）；同批的 `sort=name` 更早已由迁移 `0033`（2026-09-23 apply）完成 ⇒ **§5.5 的「下一批候选」这一栏已清空**，清单上还剩 11 个可建索引的键（16 − 第一批 3 − 本批 2）。
+4. `name` 索引先跑深度体检（`scripts/check-name-fold-depth.mjs` 同源思路）—— **已于 2026-09-23（迁移 `0033`）完成**，87 项链在真引擎上通过；`influence` / `years` / `protected` / `ct.*` 四个维度改判为「需物化列或改查询」，不在本增量做。
 
 ### 5.4 验收目标的修正（计划偏差，需记录）
 
@@ -212,13 +212,13 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 
 | 形状 | 现读量 | 豁免理由 | 何时能收 |
 | --- | --- | --- | --- |
-| `view=initial&sort=ca` | 37,635 | 初始视图把 `ca` 换成 `COALESCE(players.base_ca, players.ca)`（`players.ts:215`），与 0027 的 `COALESCE(ca, 0)` **是两个表达式**，索引静默失配（61 → 37,635） | 下一批候选：建 `(COALESCE(base_ca, ca), id)` |
-| `sort=uid` | 37,635 | 表达式是 `CAST(SUBSTR(players.uid, 3) AS INTEGER)`，可静态索引，只是没排进第一批 | 下一批候选 |
-| `sort=ps` | 37,635 | `PS_COUNT_EXPR` 是 15 项 `(json_extract(…) IS NOT NULL)` 相加的长链（每项必须自带括号）；建索引前要先过**表达式树深度体检**（D1 上限 100，参照增量 27 姓名折叠 253 项链撞墙的教训） | 下一批候选（深度体检通过后） |
+| `view=initial&sort=ca` | 37,635 | 初始视图把 `ca` 换成 `COALESCE(players.base_ca, players.ca)`（`src/worker/routes/players.ts:507`），而 `buildSortExprs` 又把它套成 `COALESCE(${caExpr}, 0)`（`players.ts:71`），与 0027 的 `COALESCE(ca, 0)` **是两个表达式**，索引静默失配（61 → 37,635） | **已建索引**：迁移 `0034`（2026-09-24 写好，**未 apply**），表达式必须是完整的 `(COALESCE(COALESCE(base_ca, ca), 0), id)` —— 只建内层 `COALESCE(base_ca, ca)` 匹配不上外层那圈 `COALESCE(…, 0)` |
+| `sort=uid` | 37,635 | 表达式是 `CAST(SUBSTR(players.uid, 3) AS INTEGER)`，可静态索引，只是没排进第一批 | **已建索引**：迁移 `0034`（未 apply） |
+| `sort=ps` | 37,635 | `PS_COUNT_EXPR` 是 15 项 `(json_extract(…) IS NOT NULL)` 相加的长链（每项必须自带括号）；建索引前要先过**表达式树深度体检**（D1 上限 100，参照增量 27 姓名折叠 253 项链撞墙的教训） | **已建索引**：迁移 `0034`（未 apply）。深度体检已于 2026-09-24 通过：15 项链在真引擎上建得出来，`json_extract` 可进索引表达式（`scripts/check-sort-index-feasibility.mjs`） |
 | `sort=wage` / `release_fee` / `contract_type` / `source` | 37,635 | 排序键在 `contracts`（`ct.*`），players 单表索引无从下手；contracts 的排序键又依赖窗口刻度，不能静态索引 | 需物化列或改查询，本增量不做 |
 | `sort=years` / `protected` | 37,637 | 同上，且表达式还内联 `CURRENT_TICKS_SQL`（`season_windows` 子查询），随赛季推进变化 | 同上 |
 | `sort=influence` | 37,635 | 表达式内联**运行时 config 系数**（`attendance_model`），系数一改索引立刻失效 | 不能静态索引 |
-| `sort=name` | 37,635 | 排序表达式是 `sqlFold('players.name')`（87 项链折叠）；理论上可索引但要先过深度体检 | 下一批候选（深度体检通过后） |
+| `sort=name` | 37,635 | 排序表达式是 `sqlFold('players.name')`（87 项链折叠）；理论上可索引但要先过深度体检 | **已完成**：迁移 `0033`（2026-09-23 apply）—— 87 项链折叠在真引擎上通过，与显示名 5 列同轮落库 |
 | 姓名查找 `?name=sesko` | 18,304 | `LIKE '%sesko%'` 是**子串**查找，任何 B-tree 都用不了（含 `sqlFold` 折叠后的 LIKE）；唯一出路是 FTS5 trigram 虚表（架构级改动，名字段是低频操作、只在提交时发一次请求） | 独立主题，登记 |
 | `attr:<键>` 34 键排序/筛选 | 未单独实测 | 排序表达式 `COALESCE(json_extract(game_attrs,'$.<key>') + 0, 0)`，34 个键各要一条索引（62 万行写）或一个物化子表 | 需物化子表，本增量不做 |
 
