@@ -4,13 +4,13 @@
 
 各增量的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [维护] · 遗留项第 5 节最小步 —— 下一批排序索引写成迁移 0034（2026-09-24，**未部署、迁移未 apply**：无运行时行为变化）
+## [维护] · 遗留项第 5 节最小步 —— 下一批排序索引写成迁移 0034（2026-09-24，**worker 未重新部署**：无运行时行为变化；迁移 `0034` 已于同日 apply 到生产）
 
-遗留项普查第 5 节（D1 读量治理后续批次）的结论是「主体已在增量 28 治完，剩下的是**写配额换读量**的排期清单，属产品判断而非配额判断」（2026-09-22 搁置它的当日理由——写配额被 `0029`+`0030` 吃掉 73.2%——现已不成立：2026-09-24 实测当日写 10 行 / 读 2,969 行）。本轮只走最小步：先做候选表达式的真引擎体检，再写下一批索引与同源测试锁，**不动生产**。
+遗留项普查第 5 节（D1 读量治理后续批次）的结论是「主体已在增量 28 治完，剩下的是**写配额换读量**的排期清单，属产品判断而非配额判断」（2026-09-22 搁置它的当日理由——写配额被 `0029`+`0030` 吃掉 73.2%——现已不成立：2026-09-24 实测当日写 10 行 / 读 2,969 行）。本轮只走最小步：先做候选表达式的真引擎体检，再写下一批索引与同源测试锁，代码部分**不动生产**（迁移的 apply 于同日单独授权执行，见文末）。
 
 **新增**
 - `scripts/check-sort-index-feasibility.mjs`：候选排序表达式体检器（仿 `scripts/check-name-fold-depth.mjs`，`wrangler d1 execute --local --persist-to .wrangler/rehearsal` 逐条 `CREATE INDEX` 后立刻 `DROP`，零配额）。本轮 15 个候选（13 个可建索引键 + 初始视图 `ca` + `attr` 抽样）**15/15 通过** ⇒ D1 表达式树深度上限 100 对这批形态不构成限制（`ps` 的 15 项链可通过），且 **`json_extract` 可以出现在索引表达式里**（索引侧表达式禁止 `.` 限定符，故写非限定列名）。
-- `src/db/migrations/0034_players_sort_indexes_batch3.sql`（**已写好，未 apply**）三条排序索引：
+- `src/db/migrations/0034_players_sort_indexes_batch3.sql`（**2026-09-24 已 apply 到生产**）三条排序索引：
   - `idx_players_sort_uid ON players(COALESCE(CAST(SUBSTR(uid, 3) AS INTEGER), 0), id)`
   - `idx_players_sort_ps ON players(((json_extract(game_attrs, '$.PSID1') IS NOT NULL) + … + (… '$.PSID15' …)), id)`（15 项，逐字与 `src/worker/routes/players.ts` 的 `PS_COUNT_EXPR` 同源，由 `PS_SLOT_COUNT` 生成）
   - `idx_players_sort_initial_ca ON players(COALESCE(COALESCE(base_ca, ca), 0), id)` —— 必须是这层**完整嵌套**：`buildSortExprs` 在初始视图的 `caExpr = COALESCE(players.base_ca, players.ca)` 外还套了一层 `COALESCE(…, 0)`，只建内层匹配不上（这正是 `view=initial&sort=ca` 此前静默失配成 37,635 行/次的原因）。
@@ -20,9 +20,9 @@
 - 定点：`npx vitest run tests/players-sort-indexes.test.ts` **37 例全绿**（原 26 + 新 11）。
 - 变异验证（`scratch/mutate-0034.mjs`，已备份还原）：把 initial-ca 索引改成只建内层、`ps` 索引删掉 `PSID15` 一项 ⇒ **8 例变红**（两条形状各 3 条 EXPLAIN + 各 1 条同源锁）⇒ 新锁不是空转。
 - `npm run typecheck`（三份 tsconfig）全清；`npx vitest run` **50 文件 / 709 例全绿**（原 698 + 11）。
-- 文档同步：`README.md` 迁移 33 → **34**（并写明 `0034` 已写好未 apply、一次 ≈5.5 万行写须单独占配额日）、测试 698 → **709**；`scripts/d1-read-audit/README.md` §5.3 第 3/4 条与 §5.5 三行订正 —— 顺带查明 §5.5 的 `sort=name` 候选**早已由迁移 `0033`（2026-09-23 apply）完成**，该行此前已过期。
+- 文档同步：`README.md` 迁移 33 → **34**（当时写明 `0034` 已写好未 apply、一次 ≈5.5 万行写须单独占配额日；同日 apply 后已改为「已 apply」并写入实测数字）、测试 698 → **709**；`scripts/d1-read-audit/README.md` §5.3 第 3/4 条与 §5.5 三行订正 —— 顺带查明 §5.5 的 `sort=name` 候选**早已由迁移 `0033`（2026-09-23 apply）完成**，该行此前已过期。
 
-**未做（需单独授权）**：`0034` 的生产 apply（三条索引合计约 54,903 行 `rows_written`，须单独占一个 D1 配额日）；本批次只交付「索引 + 测试锁 + 体检器」，读量收益（37,635 → 22–53 行/次）要 apply 后才兑现。清单上还剩 11 个可建索引的键（`base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id` 一类），按每天最多 3 条继续分批。
+**生产 apply（2026-09-24 已执行，用户授权「0034应用」）**：`0034` 三条索引合计实测 **54,919 行 `rows_written`**（占当日写配额 54.9%，在自留预算 ≤6 万内）；生产侧核对 —— `sqlite_master` 里 `idx_players_sort_%` 共 11 条，三条新索引在 `EXPLAIN QUERY PLAN` 下均为 `SCAN players USING COVERING INDEX`；收益实测（读数落 `scripts/d1-read-audit/measurements-after.json`）：`view=initial&sort=ca` 37,635 → **54**、`sort=uid` → **24**、`sort=ps` → **22** 行/次。worker 未重新部署（无运行时代码变化）。清单上还剩 11 个可建索引的键（`base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id` 一类），按每天最多 3 条继续分批。
 
 
 

@@ -899,12 +899,12 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **本轮最小步交付**（本地提交，**未 push 未 deploy**）
 - `scripts/check-sort-index-feasibility.mjs`：候选排序表达式体检器（本地 D1 逐条 `CREATE INDEX` 后 `DROP`，零配额）。15 个候选 **15/15 通过** ⇒ D1 表达式树深度上限 100 对这批形态不构成限制（`ps` 15 项链可通过），且 `json_extract` 可出现在索引表达式里。
-- `src/db/migrations/0034_players_sort_indexes_batch3.sql`（**已写好，未 apply**）三条索引：`idx_players_sort_uid`（`COALESCE(CAST(SUBSTR(uid, 3) AS INTEGER), 0)`）、`idx_players_sort_ps`（15 项 `(json_extract(game_attrs,'$.PSIDn') IS NOT NULL)` 相加，与 `PS_COUNT_EXPR` 同源生成）、`idx_players_sort_initial_ca`（`COALESCE(COALESCE(base_ca, ca), 0)` —— 必须完整嵌套，只建内层匹配不上 `buildSortExprs` 套的外层 `COALESCE(…, 0)`）。
+- `src/db/migrations/0034_players_sort_indexes_batch3.sql`（**2026-09-24 已 apply 到生产**）三条索引：`idx_players_sort_uid`（`COALESCE(CAST(SUBSTR(uid, 3) AS INTEGER), 0)`）、`idx_players_sort_ps`（15 项 `(json_extract(game_attrs,'$.PSIDn') IS NOT NULL)` 相加，与 `PS_COUNT_EXPR` 同源生成）、`idx_players_sort_initial_ca`（`COALESCE(COALESCE(base_ca, ca), 0)` —— 必须完整嵌套，只建内层匹配不上 `buildSortExprs` 套的外层 `COALESCE(…, 0)`）。
 - 同源测试锁：`tests/players-sort-indexes.test.ts` 的 `INDEXED_SORTS` 8 → **11 条**（改三元组支持 `&view=initial`），新增 2 条表达式同源锁；`tests/d1.ts` 的 `MIGRATION_FILES` 追加 `0034`。
 
 **验收（实测）**：定点 `tests/players-sort-indexes.test.ts` **37 例全绿**；变异验证（initial-ca 只建内层 + `ps` 删一项）**8 例变红** ⇒ 锁不是空转；`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **50 文件 / 709 例全绿**。
 
-**待令（需单独授权）**：`0034` 的生产 apply —— 三条索引合计约 **54,903 行 `rows_written`**，须单独占一个 D1 配额日（自留预算 ≤6 万行/日）；收益（37,635 → 22–53 行/次）apply 后才兑现。清单上还剩 **11 个可建索引的键**（`base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`，每条 18,301 行写），按每天最多 3 条继续分批；这 11 个之外还欠 `view=initial` 口径的 `pa` / `growth_gap` 两个变体（本批只做了该口径下的 `ca`）；`attr:*` 34 键与姓名子串查找属架构级（物化子表 / FTS5 trigram），不在此列。顺带订正：审计报告 §5.5 的 `sort=name` 候选**早已由迁移 `0033`（2026-09-23 apply）完成**，该行此前已过期。证据与逐条豁免理由见 `scripts/d1-read-audit/README.md` §5.3 / §5.5。
+**生产 apply（2026-09-24 已执行，用户授权「0034应用」）**：三条索引合计实测 **54,919 行 `rows_written`**（占当日写配额 54.9%，在自留预算 ≤6 万行/日）；收益已兑现 —— 实测 `view=initial&sort=ca` 37,635 → **54** 行/次、`sort=uid` → **24**、`sort=ps` → **22**（`EXPLAIN QUERY PLAN` 三条均为 `SCAN players USING COVERING INDEX`，读数落 `scripts/d1-read-audit/measurements-after.json`）。清单上还剩 **11 个可建索引的键**（`base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`，每条 18,301 行写），按每天最多 3 条继续分批；这 11 个之外还欠 `view=initial` 口径的 `pa` / `growth_gap` 两个变体（本批只做了该口径下的 `ca`）；`attr:*` 34 键与姓名子串查找属架构级（物化子表 / FTS5 trigram），不在此列。顺带订正：审计报告 §5.5 的 `sort=name` 候选**早已由迁移 `0033`（2026-09-23 apply）完成**，该行此前已过期。证据与逐条豁免理由见 `scripts/d1-read-audit/README.md` §5.3 / §5.5。
 
 ## 外部依赖与待输入
 
