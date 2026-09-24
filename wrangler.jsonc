@@ -65,7 +65,8 @@
     // 代理都发一个必然 530 的请求，排名区块永久降级且只在日志里看得见）。
     "TOUR_API_BASE": "https://tour.whleague.win"
   },
-  // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑随增量 3+ 落地
+  // 惰性结算 cron 兜底（§6.5）；扫描与结算逻辑已在 src/worker/index.ts 的 scheduled() 里实现
+  // （runSettleTick：逾期结算 / 自动确认赛果 / 派发站内信；只有结算真写了公开数据才 purge 公开缓存）
   "triggers": {
     "crons": ["*/5 * * * *"]
   },

@@ -7,19 +7,6 @@ import roleRef from '../../assets/ref/role.json';
 import teamRef from '../../assets/ref/team.json';
 import { isGoldPlaystyleId, PS_SILVER_SLOT_COUNT, playstyleSlotsOf } from '../../../src/core/fc26.ts';
 
-export interface PlayStyleRow {
-  id: number;
-  en: string | null;
-  chs: string | null;
-  type: string | null;
-}
-
-export interface RoleRow {
-  id: number;
-  en: string | null;
-  chs: string | null;
-}
-
 function indexBy<T extends { id: number }>(rows: T[]): Map<number, T> {
   return new Map(rows.map((r) => [r.id, r]));
 }

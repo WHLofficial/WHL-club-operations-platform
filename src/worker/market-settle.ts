@@ -47,14 +47,6 @@ export interface ListingCore {
   window_seq: number | null;
 }
 
-// listings.type → transfers.type 词汇映射（激活挂牌成单记 activation、强制拍卖记 forced_auction，
-// 其余按普通转会）
-export function transferTypeFor(listingType: string | null | undefined): string {
-  if (listingType === 'activation') return 'activation';
-  if (listingType === 'forced') return 'forced_auction';
-  return 'transfer';
-}
-
 // → pending_review：transfer（idempotency_key = listing:{id}，UNIQUE 幂等）+ 审核任务
 // 成交买方/价格在 batch 执行时用子查询取「当时的活跃最高出价」，与并发出价请求在 D1 单写者下
 // 天然串行，不会漏掉刚落库的更高价。fromStatus 允许从 matched_pending（匹配放行/到期）收口。

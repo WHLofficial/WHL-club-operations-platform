@@ -9,7 +9,6 @@ import { loadTierTable, type TierEntry } from './home.ts';
 import { createConfigService } from '../core/config.ts';
 
 export const FACILITY_KEYS = ['commercial', 'broadcast', 'pitch', 'youth', 'medical'] as const;
-export type FacilityKey = (typeof FACILITY_KEYS)[number];
 
 export const EXPANSION_STEP = 100;
 

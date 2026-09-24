@@ -19,13 +19,6 @@ export function isSuperAdmin(user: MeUser | null | undefined): boolean {
 /** 登录入口模式（统一认证步骤②）：oidc=认证中心，shared=赛事系统共享会话（旧行为） */
 export type AuthMode = 'oidc' | 'shared';
 
-export interface MeResponse {
-  user: MeUser | null;
-  authMode: AuthMode;
-  /** 认证中心地址（OIDC 模式才有；改密等引导直链用） */
-  authHome?: string | null;
-}
-
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -64,7 +57,6 @@ export async function apiSend<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', pa
 
 export const apiPost = <T,>(path: string, body?: unknown) => apiSend<T>('POST', path, body);
 export const apiPut = <T,>(path: string, body?: unknown) => apiSend<T>('PUT', path, body);
-export const apiPatch = <T,>(path: string, body?: unknown) => apiSend<T>('PATCH', path, body);
 export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELETE', path, body);
 
 // 赛事系统入口。增量 34：用 tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录，
@@ -72,14 +64,6 @@ export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELET
 export const TOUR_SITE_URL = 'https://tour.whleague.win/';
 
 // ---- 增量 1 DTO（附录 A〔1〕）----
-
-export interface ClubDto {
-  id: number;
-  name: string;
-  leagueTier: string;
-  status: string;
-  createdAt?: string;
-}
 
 export interface MyClubOverview {
   club: { id: number; name: string; leagueTier: string | null; logoKey: string | null; status: string; transferBanned?: boolean } | null;
@@ -668,25 +652,6 @@ export interface MyBidRow {
   sellerClubName: string;
 }
 
-export interface TransferDetail {
-  transfer: {
-    id: number;
-    type: string;
-    status: string;
-    player: { id: number; fcId: number | null; name: string };
-    fromClub: { id: number; name: string } | null;
-    toClub: { id: number; name: string } | null;
-    fee: number | null;
-    tax: number | null;
-    extraFee: number | null;
-    matched: boolean;
-    season: number | null;
-    windowSeq: number | null;
-    createdAt: string | null;
-    completedAt: string | null;
-  };
-}
-
 export interface AdminReviewRow {
   id: number;
   status: string;
@@ -708,11 +673,6 @@ export interface AdminReviewRow {
 
 export interface AdminReviews {
   reviews: AdminReviewRow[];
-}
-
-export interface ReviewDecisionResult {
-  ok: boolean;
-  status: 'completed' | 'signing' | 'already' | 'rejected';
 }
 
 export interface NegotiationSession {

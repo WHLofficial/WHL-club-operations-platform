@@ -1,6 +1,6 @@
 // 赛果只读同步与确认（TECH_DESIGN §11）：平台跨库（TOUR_DB）读比赛系统完赛场次 →
 // 管理组确认 → 比分快照落 result_confirmations（此后比赛系统改判不影响已确认记录）。
-// 确认钩子：自动 XP 事件（§10.1，growth.ts）+ 后续 bot 通知（d4）。
+// 确认钩子：自动 XP 事件（§10.1，growth.ts）+ 站内信派发（queueClubNotification，见下方 notify.ts）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';

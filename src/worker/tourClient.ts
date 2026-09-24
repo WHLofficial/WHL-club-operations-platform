@@ -12,12 +12,8 @@ import { hmacHex } from '../lib/hmac.ts';
 export const TEAM_UPSERT_PATH = '/api/internal/team-upsert';
 const TIMEOUT_MS = 10_000;
 
-export type PushResult = { ok: true } | { ok: false; message: string };
-
 /** 出站失败一律只回报文案，不抛：本地建俱乐部优先，失败可重试、对账页兜底。 */
-export function pushError(r: PushResult): string | null {
-  return r.ok ? null : r.message;
-}
+export type PushResult = { ok: true } | { ok: false; message: string };
 
 export async function pushTeamToTour(env: Env, { id, name }: { id: number; name: string }): Promise<PushResult> {
   const base = (env.TOUR_API_BASE ?? '').replace(/\/+$/, '');
