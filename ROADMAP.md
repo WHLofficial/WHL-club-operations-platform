@@ -947,7 +947,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.1.1 · Sentry 错误追踪接入（club 试点；2026-09-25）
 
-**状态**：代码已提交本地（`b859314`，9 文件），**未 push 未部署**；生产 `SENTRY_DSN` 未配（Sentry 账号尚未注册），上线等「用户给 DSN → `wrangler secret put`（会换版本）→ push（=自动部署）→ probe 回读」逐项授权。**本仓首个第三方 SaaS 运行时依赖**。判级 patch：观测设施、无用户可见能力。
+**状态**：**2026-09-25 已上线**（Version **`b05e86db-…`**，10:24:56Z，Workers Builds 自动部署）。提交三枚：`b859314`（代码 9 文件）→ `6ff6d3e`（文档）→ `a502043`（前端 DSN）。生产 `SENTRY_DSN` 已配（Source `Secret Change`，Version `6066268f-…`，10:01:17Z）；Sentry 账号已建（**EU 区** org，DSN host `ingest.de.sentry.io`，6 项目）；前端 DSN 已填并实测 @sentry/react 进包 gzip 增量 **32.92 KB**（149,563 → 182,479 B，~35KB 硬线内贴线过）；上线回读 `/api/health` 200、`POST /api/cron/sentry-probe` 无 key 403（该路由只在 v6.1.1 代码 ⇒ 新代码生效）、线上首页资产 `index-DwvQl1O1.js` 与本地 dist 逐字一致。**待**：带生产 CRON_KEY 打 probe 在控制台见事件、Crons 页确认 `club-settle-tick` monitor（首个 `*/5` 整点自动创建）。**本仓首个第三方 SaaS 运行时依赖**。判级 patch：观测设施、无用户可见能力。
 
 **缘起**：2026-09-25 脑暴成熟技术方案可用性（结论见记忆 `chart-and-workflow-feasibility.md`），用户拍板「前后端都接（errors-only）、还没有账号、四仓都接入」。定位：2026-09-21 D1 配额事故当时只能靠 cron 日志逐条翻，Sentry 让同类异常主动推送带堆栈。
 
@@ -968,7 +968,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **验收（实测）**：`npm run typecheck` 三份全清；`npx vitest run` **51 文件 / 727 例全绿**（基线 50/724）；`npm run build` 成功，主 bundle `index-BqdBJFJR.js` 477,874 B / gzip 149,563 B **与改动前逐字节同 hash**；`npm run test:e2e` **11/11**（④ 首跑失败系 dev 冷启动偶发超时，复跑两次全过）；`npx wrangler deploy --dry-run` worker 打包通过且 `CF_VERSION_METADATA` 绑定被识别（纯本地构建校验，无部署）。
 
-**四仓蓝图**（约定全文见记忆 `sentry-four-repo-conventions.md`）：一个 Sentry org、6 项目（`whl-{club,tour}-{worker,web}` + `whl-auth-worker` + `whl-guess-worker`；guess 前端无构建不接）；包版本四仓对齐 v11；monitor slug `<repo>-<task>`；nodejs_compat 各仓自加自验；**errors 5k/月疑为 org 级共享、crons check-ins 免费档归属未验证（注册账号时核对）**。顺序 tour（同形态复用 + 名册同步/账号镜像的 cron 吞错是最大收益点）→ auth（HTML 错误页保持、无前端 SDK）→ guess（裸 Worker 用 withSentry 包 default export、两 cron 按 `event.cron` 分支）；每仓动工前各自立计划等指令。
+**四仓蓝图**（约定全文见记忆 `sentry-four-repo-conventions.md`）：一个 Sentry org、6 项目（`whl-{club,tour}-{worker,web}` + `whl-auth-worker` + `whl-guess-worker`；guess 前端无构建不接）；包版本四仓对齐 v11；monitor slug `<repo>-<task>`；nodejs_compat 各仓自加自验；**配额已核对（2026-09-25 官方文档）**：errors 5k/月 = org 级共享池（项目数不限，6 项目共用，防单项目吃光用 per-project rate limit + spike protection 默认开）；免费档全 org 只含 **1 个 cron monitor**（check-in 次数不占 errors 额度、速率 6 check-ins/分钟/monitor 绰绰有余）⇒ **蓝图订正：只留 `club-settle-tick` 挂 withMonitor**，tour/auth/guess 的 cron 在各自 catch 里显式 `captureException`（升付费档再逐个补 monitor）。顺序 tour（同形态复用 + 名册同步/账号镜像的 cron 吞错是最大收益点）→ auth（HTML 错误页保持、无前端 SDK）→ guess（裸 Worker 用 withSentry 包 default export、两 cron 按 `event.cron` 分支）；每仓动工前各自立计划等指令。
 
 **待办**：① 用户注册 Sentry 并建项目给 DSN；② `wrangler secret put SENTRY_DSN` + push + probe 回读（逐项授权）；③ 填 DSN 后重测前端 bundle；④ 免费档额度核对（errors org 级？crons 含否？）。
 
