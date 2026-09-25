@@ -1,4 +1,4 @@
-// 管理端 · 总览（增量 15）：轻计数卡（待审/赛果队列/活跃挂牌/俱乐部/球员，commit 6 新增）
+// 管理端 · 总览（v2.1.0）：轻计数卡（待审/赛果队列/活跃挂牌/俱乐部/球员，commit 6 新增）
 // + M0 货币监控（原 Admin.tsx M0Section）；数据层 TanStack Query（commit 3）
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';

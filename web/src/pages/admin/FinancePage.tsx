@@ -1,5 +1,5 @@
 // 管理端 · 财政页：期初余额导入（幂等）+ 手动记账（§7.1 / §9.1 奖金模板）
-// （原 Admin.tsx 两 section，增量 15 拆分；commit 3 数据层转 TanStack Query）
+// （原 Admin.tsx 两 section，v2.1.0 拆分；commit 3 数据层转 TanStack Query）
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiPost, MANUAL_LEDGER_KINDS, type ManualLedgerResult, type OpeningImportResult } from '../../lib/api.ts';

@@ -1,5 +1,5 @@
 // 旁路操作规则单测（规则 4.4.2/4.4.3/4.4.4/4.4.6，TECH_DESIGN §6.2/§6.3）
-// 增量 25：效力与保护期按转会窗刻度（1 个常规窗关窗 = 0.5 赛季）
+// v3.0.0：效力与保护期按转会窗刻度（1 个常规窗关窗 = 0.5 赛季）
 import { describe, expect, it } from 'vitest';
 import {
   activationFee,

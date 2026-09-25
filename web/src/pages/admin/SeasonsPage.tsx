@@ -1,5 +1,5 @@
-// 管理端 · 赛季页：赛季与赛事绑定（§11，增量 6.1 层级）+ 赛果确认（附录 A〔6〕，确认钩子触发 XP/通知）
-// （原 Admin.tsx 两 section，增量 15 拆分；commit 3 数据层转 TanStack Query）
+// 管理端 · 赛季页：赛季与赛事绑定（§11，v0.7.1 层级）+ 赛果确认（附录 A〔6〕，确认钩子触发 XP/通知）
+// （原 Admin.tsx 两 section，v2.1.0 拆分；commit 3 数据层转 TanStack Query）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -120,7 +120,7 @@ function SeasonsSection() {
     setBusy(true);
     try {
       const res = await apiPost<SeasonSettleResult>(`/api/admin/seasons/${seasonNo}/settle-season`, { acknowledged });
-      show(`赛季 ${seasonNo} 已结算：growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。（忠诚奖金自增量 25 起在赛季中期末关窗时发。）`);
+      show(`赛季 ${seasonNo} 已结算：growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。（忠诚奖金自v3.0.0 起在赛季中期末关窗时发。）`);
       setSettleCheck(null);
       reload();
     } catch (err) {
@@ -390,7 +390,7 @@ function ResultsSection() {
     }
   }
 
-  // 钩子重放（增量 21）：修完数据（补录球员等）后从这里补账，三钩子皆幂等
+  // 钩子重放（v2.7.0）：修完数据（补录球员等）后从这里补账，三钩子皆幂等
   async function replay(matchId: number) {
     if (busyId !== null) return;
     setBusyId(matchId);

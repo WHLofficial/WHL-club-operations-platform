@@ -1,4 +1,4 @@
--- 0031：PlayStyle 明细表 player_playstyles（增量 30，徽章 × PlayStyle 合并）
+-- 0031：PlayStyle 明细表 player_playstyles（v3.3.0，徽章 × PlayStyle 合并）
 --
 -- 背景：平台此前只有台账计数 players.badges_silver / badges_gold，PlayStyle 只以 PSID1-15 键躺在
 -- players.game_attrs 里（那是 FC 源数据，导入即整列覆盖）。于是升级方案、中国计划发出去的「银/金徽章」

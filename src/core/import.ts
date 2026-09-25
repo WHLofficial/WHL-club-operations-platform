@@ -1,7 +1,7 @@
 // 球员导入管线（TECH_DESIGN §5.4）：前端 SheetJS 解析出「表头→值」行，本模块在
 // Worker 侧做 schema 校验与归一化——预览与确认走同一函数，确认前必再校验一遍。
 // upsert 幂等只写 FC 源列（route 层），绝不触碰运营列（status/contracts/badges/growth/market_value/agent_tier）；
-// club_id 是唯一例外——新插入时写 CPU 队球员的队籍（增量 14），冲突时不更新，免得覆盖认领/解约后的归属。
+// club_id 是唯一例外——新插入时写 CPU 队球员的队籍（v2.0.0），冲突时不更新，免得覆盖认领/解约后的归属。
 import {
   CHINA_NA_ID,
   FC26_CPU_TEAM_IDS,
@@ -33,7 +33,7 @@ export interface NormalizedPlayer {
   age: number | null;
   foot: 0 | 1;
   position: string | null;
-  /** CPU 队球员的队籍（游戏真队 id，增量 14）；其余导入行 null——队籍由合同认领流程建立 */
+  /** CPU 队球员的队籍（游戏真队 id，v2.0.0）；其余导入行 null——队籍由合同认领流程建立 */
   clubId: number | null;
   prestige: number | null;
   chinaPlan: 0 | 1;
@@ -46,7 +46,7 @@ export interface NormalizedPlayer {
 export interface NormalizeOutcome {
   players: NormalizedPlayer[];
   errors: ImportRowError[];
-  /** 警告清单（增量 22 I4）：脏值已按安全口径落库但不静默——预览页展示供人工扫一眼，不挡确认 */
+  /** 警告清单（v2.8.0 I4）：脏值已按安全口径落库但不静默——预览页展示供人工扫一眼，不挡确认 */
   warnings: ImportRowError[];
 }
 
@@ -70,7 +70,7 @@ function missingColumns(rows: Record<string, unknown>[], required: readonly stri
   return required.filter((col) => !(col in rows[0]));
 }
 
-/** 导入时只给 CPU 队球员写队籍（增量 14）：4 支 CPU 队在平台有 clubs 行，其球员带 club_id。 */
+/** 导入时只给 CPU 队球员写队籍（v2.0.0）：4 支 CPU 队在平台有 clubs 行，其球员带 club_id。 */
 function clubIdForTeam(teamId: unknown): number | null {
   const id = normalizeTeamId(teamId);
   return id !== null && FC26_CPU_TEAM_IDS.has(id) ? id : null;
@@ -100,7 +100,7 @@ export function normalizeImportBatch(
     const rowNo = i + 1;
     const fail = (field: string, message: string) => errors.push({ row: rowNo, field, message });
     const warn = (field: string, message: string) => warnings.push({ row: rowNo, field, message });
-    // 折叠表覆盖闸（增量 26）：姓名里出现折叠表外的字母，按去变音搜它就搜不到（表外字符
+    // 折叠表覆盖闸（v3.1.0）：姓名里出现折叠表外的字母，按去变音搜它就搜不到（表外字符
     // 不会被 SQL 侧折叠）。只出警告不挡行——源数据冒出个新字母不该让整批导入失败，
     // 但必须在预览报告里看得见，别变成静默漏搜。补表见 src/core/name-fold.ts。
     const warnUnfoldable = (field: string, name: string) => {
@@ -127,7 +127,7 @@ export function normalizeImportBatch(
       if (ca === null || ca < 1 || ca > 99) return fail('CA', 'CA 须在 1-99 之间');
       if (pa === null || pa < 1 || pa > 99) return fail('PA', 'PA 须在 1-99 之间');
       if (naId === null) return fail('naID', 'naID 缺失');
-      // naID 值域（增量 22 I4）：NationID 是 1-1000 量级的整数，域外一定是源文件脏值
+      // naID 值域（v2.8.0 I4）：NationID 是 1-1000 量级的整数，域外一定是源文件脏值
       if (!Number.isInteger(naId)) return fail('naID', 'naID 必须是整数');
       if (naId < 1 || naId > 1000) return fail('naID', 'naID 须在 1-1000 之间');
       if (footId !== 1 && footId !== 2) return fail('FootID', 'FootID 只能是 1（右脚）或 2（左脚）');
@@ -144,7 +144,7 @@ export function normalizeImportBatch(
       const gameAttrs: Record<string, unknown> = {};
       for (const col of FC26_GAME_ATTR_COLUMNS) gameAttrs[col] = raw[col] ?? null;
       gameAttrs['TeamID'] = normalizeTeamId(raw['TeamID']);
-      // TeamID 脏值不挡行（按无队籍落库），但出警告清单供人工核对（增量 22 I4）
+      // TeamID 脏值不挡行（按无队籍落库），但出警告清单供人工核对（v2.8.0 I4）
       if (gameAttrs['TeamID'] === null && toStr(raw['TeamID']) !== '') {
         warn('TeamID', `TeamID「${toStr(raw['TeamID'])}」无法解析，按无队籍处理`);
       }

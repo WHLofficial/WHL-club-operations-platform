@@ -1,5 +1,5 @@
-// 球员库列表（增量 6.1 d6）：筛选（position/name/growable/CA·PA·年龄区间）、数值键 keyset 排序翻页、参数校验
-// + view=initial 的导入时口径（CA=base_ca、PA=导入值）；initial_club_id 已在增量 14 裁决 4 删除
+// 球员库列表（v0.7.1 d6）：筛选（position/name/growable/CA·PA·年龄区间）、数值键 keyset 排序翻页、参数校验
+// + view=initial 的导入时口径（CA=base_ca、PA=导入值）；initial_club_id 已在v2.0.0 裁决 4 删除
 import { describe, expect, it, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -9,7 +9,7 @@ import { resetConfigCache } from '../src/core/config.ts';
 import { resetGuards } from '../src/lib/guard.ts';
 import { foldName } from '../src/core/name-fold.ts';
 
-// 本文件密集打 /api/players，每个用例先清进程内限流计数（增量 23 守护）
+// 本文件密集打 /api/players，每个用例先清进程内限流计数（v2.8.1 守护）
 beforeEach(() => resetGuards());
 
 interface Fixture {
@@ -31,7 +31,7 @@ function freshEnv(): Fixture {
     } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
-    // 增量 28：未配 = 走分级 TTL（生产口径），这里显式旁路，让断言看到每次改库的结果
+    // v3.2.0：未配 = 走分级 TTL（生产口径），这里显式旁路，让断言看到每次改库的结果
     PUBLIC_CACHE_TTL_MS: '0',
   };
   return { env, sqlite };
@@ -81,7 +81,7 @@ function seedPlayers(sqlite: DatabaseSync): void {
   `);
 }
 
-describe('球员库列表（增量 6.1 d6）', () => {
+describe('球员库列表（v0.7.1 d6）', () => {
   it('筛选：position / growable / name 子串 / CA·PA·年龄区间，可叠加', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
@@ -107,7 +107,7 @@ describe('球员库列表（增量 6.1 d6）', () => {
     seedPlayers(fx.sqlite);
     const res = await list('/api/players?name=%25', fx.env);
     expect(res.players).toEqual([]);
-    // 增量 26：折叠改写后三个元字符的语义都没变，% 之外再钉 _ 与反斜杠
+    // v3.1.0：折叠改写后三个元字符的语义都没变，% 之外再钉 _ 与反斜杠
     expect((await list('/api/players?name=_', fx.env)).players).toEqual([]);
     expect((await list('/api/players?name=%5C', fx.env)).players).toEqual([]);
     expect((await list('/api/players?name=a%5Cb', fx.env)).players).toEqual([]);
@@ -134,7 +134,7 @@ describe('球员库列表（增量 6.1 d6）', () => {
     const unowned = await list('/api/players?name=狐步舞', fx.env);
     expect(unowned.players[0]!.clubName).toBeNull();
 
-    // 初始视图只改 CA/PA 口径，归属仍看 players.club_id（增量 14 裁决 4 删掉 initial_club_id）
+    // 初始视图只改 CA/PA 口径，归属仍看 players.club_id（v2.0.0 裁决 4 删掉 initial_club_id）
     const initial = await list('/api/players?view=initial&club_id=1', fx.env);
     expect(initial.players.map((p) => p.id)).toEqual([2, 7]);
     expect(initial.players[0]!.clubName).toBe('老东家 FC');
@@ -186,7 +186,7 @@ describe('球员库列表（增量 6.1 d6）', () => {
   it('参数校验：sort/growable/cursor/区间 400', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
-    // 增量 26：uid 变成合法排序键（表头可点），这里改用真的不存在的键
+    // v3.1.0：uid 变成合法排序键（表头可点），这里改用真的不存在的键
     expect((await get('/api/players?sort=没有这个键', fx.env)).status).toBe(400);
     expect((await get('/api/players?growable=yes', fx.env)).status).toBe(400);
     expect((await get('/api/players?sort=ca&cursor=oops', fx.env)).status).toBe(400);
@@ -195,7 +195,7 @@ describe('球员库列表（增量 6.1 d6）', () => {
   });
 });
 
-describe('初始归属字段的兴废（增量 6.1 d7 加、增量 14 裁决 4 删）', () => {
+describe('初始归属字段的兴废（v0.7.1 d7 加、v2.0.0 裁决 4 删）', () => {
   // 0015 回填测存量：先建到 0014 → 造历史归属数据 → 补跑 0015
   function freshEnvWithHistory(): Fixture {
     resetConfigCache();
@@ -310,7 +310,7 @@ describe('初始归属字段的兴废（增量 6.1 d7 加、增量 14 裁决 4 �
   });
 });
 
-// ---- 增量 17：计数、影响力、多位置、属性/徽章/合同维度筛选 ----
+// ---- v2.3.0：计数、影响力、多位置、属性/徽章/合同维度筛选 ----
 
 interface ListBody17 {
   players: {
@@ -335,7 +335,7 @@ async function list17(path: string, env: Env): Promise<ListBody17> {
   return (await res.json()) as ListBody17;
 }
 
-// 增量 28：公开列表不再回 total（每条整表 COUNT = 18,763 行，占单页读量 99.7%），
+// v3.2.0：公开列表不再回 total（每条整表 COUNT = 18,763 行，占单页读量 99.7%），
 // 「这个筛法下有多少人」改由内部计数端点提供 —— 计数用例全走这里。
 // 端点未配 CRON_KEY 就 403（fail-closed），所以这里必须带密钥头。
 async function count17(query: string, env: Env): Promise<number> {
@@ -351,7 +351,7 @@ async function count17(query: string, env: Env): Promise<number> {
 // 影响力手算依据（规则 4.1.2 十档 + 4.1.3 系数 0.25/0.13）：
 //   tier: >=93→10 >=90→9 >=87→8 >=84→7 >=80→6 >=75→5 >=70→4 >=65→3 >=60→2 else 1
 //   可成长=(CA档+PA档)/2×0.25×声望；非成长=CA档×0.13×声望
-describe('球员库 计数与新筛选（增量 17）', () => {
+describe('球员库 计数与新筛选（v2.3.0）', () => {
   it('内部计数端点返回筛选后的总数，不随 cursor / limit 变', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
@@ -548,7 +548,7 @@ describe('球员库 计数与新筛选（增量 17）', () => {
         (53, 's3', '无徽', NULL);
     `);
     expect((await list17('/api/players?ps=1', fx.env)).players.map((p) => p.id)).toEqual([51]);
-    // 增量 27 步骤 4 改语义：2 是银徽章 ID，52 号只有金槽的 102（=2+100），不再算命中
+    // v3.1.1 步骤 4 改语义：2 是银徽章 ID，52 号只有金槽的 102（=2+100），不再算命中
     expect((await list17('/api/players?ps=2', fx.env)).players.map((p) => p.id)).toEqual([]);
     const gold = await list17('/api/players?ps=102', fx.env);
     expect(gold.players.map((p) => p.id)).toEqual([52]);
@@ -596,13 +596,13 @@ describe('球员库 计数与新筛选（增量 17）', () => {
     expect((await get('/api/players?agent_tier=7', fx.env)).status).toBe(400);
     expect((await get('/api/players?has_contract=yes', fx.env)).status).toBe(400);
     expect((await get('/api/players?protected=maybe', fx.env)).status).toBe(400);
-    // 增量 26：uid 变成合法排序键（表头可点），这里改用真的不存在的键
+    // v3.1.0：uid 变成合法排序键（表头可点），这里改用真的不存在的键
     expect((await get('/api/players?sort=没有这个键', fx.env)).status).toBe(400);
   });
 });
 
-// 增量 26：去变音搜索（name 走 core/name-fold 折叠）+ 轻量名册端点
-describe('姓名去变音搜索与轻量名册（增量 26）', () => {
+// v3.1.0：去变音搜索（name 走 core/name-fold 折叠）+ 轻量名册端点
+describe('姓名去变音搜索与轻量名册（v3.1.0）', () => {
   // 库内是 FC 拉丁名：预合成、分解、软连字符混着来，另有中文名作回归
   // （分解用 char() 拼——把组合记号直接写进源码是审阅灾难，也是 name-fold 用码位建表的同一理由；
   //   这里用 U+0301，它是 2026-09-21 生产扫描实测存在的两个组合记号之一，表内收着）
@@ -746,14 +746,14 @@ describe('姓名去变音搜索与轻量名册（增量 26）', () => {
   });
 });
 
-// ---- 增量 32：显示名（FC26 派生的「常叫人名」）贯通各面 + 球员页按 fc_id 寻址 ----
+// ---- v4.0.0：显示名（FC26 派生的「常叫人名」）贯通各面 + 球员页按 fc_id 寻址 ----
 //
 // 口径（src/core/player-name.ts）：显示名 = COALESCE(display_name, name)。display_name 是导入侧
 // 从 FC26 存档派生的（commonname 原样 → 名+姓 → 卡片全名兜底，见 scripts/player-names/），
 // 而 players.name 仍是 FC26db 的官方缩写名（导入对齐键 fc_id 的伴生语义），语义没变、只是不再当显示名用。
 // 搜索必须**两列都打**：几百人的显示名是 FC26 单词常用名（Ederson / Isaac），只看显示名按姓搜不到；
 // 只看官方缩写名则「Erling Haaland」这种全名搜不到。
-describe('显示名与 fc_id 寻址（增量 32）', () => {
+describe('显示名与 fc_id 寻址（v4.0.0）', () => {
   function seedDisplay(sqlite: DatabaseSync): void {
     sqlite.exec(`
       INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '曼城', 'premier', 'active');
@@ -859,7 +859,7 @@ describe('显示名与 fc_id 寻址（增量 32）', () => {
   });
 });
 
-// ---- 增量 26：表头每一列可点（排序键扩到 28 个）+ 文本键游标 ----
+// ---- v3.1.0：表头每一列可点（排序键扩到 28 个）+ 文本键游标 ----
 
 // 期望顺序在 JS 侧独立重算：镜像的只有「权重表 + NULL 当 0」这两条口径，SQL 表达式不复用，
 // 否则测试会跟着实现一起错。8 名球员刻意在多数维度上打平，逼出 (值, id) 复合序的平局分支。
@@ -1020,7 +1020,7 @@ async function pageAll(key: string, dir: 'asc' | 'desc', env: Env, size: number)
   throw new Error(`排序键 ${key} 的游标翻页没有终止（疑似漏行/死循环）`);
 }
 
-describe('球员库排序键（增量 26）', () => {
+describe('球员库排序键（v3.1.0）', () => {
   it('除 id 外的 27 个键 × 升降两向：翻页不重不漏，顺序与 JS 侧独立重算一致', async () => {
     const fx = freshEnv();
     const rows = seedSortRows(fx.sqlite);

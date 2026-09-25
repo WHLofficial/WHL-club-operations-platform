@@ -1,4 +1,4 @@
-// 教练工作台（增量 2 + 增量 5 旁路，增量 31 步骤 8 从 pages/Club.tsx 整体搬入）：
+// 教练工作台（v0.3.0 + v0.6.0 旁路，v3.4.0 步骤 8 从 pages/Club.tsx 整体搬入）：
 // 球队头 + 注册工作台 + 续约/解约（规则 4.4.3/4.4.4）。
 // 挂载口径：只有 pages/ClubDetail.tsx 在「登录者正是本队教练」时才渲染本组件，
 // 所以页面外壳（container / h1）与「没绑俱乐部」分支都不在这里。
@@ -31,7 +31,7 @@ type Assignment = 'none' | 'first_team' | 'trainee';
 
 const SQUAD_FILTER_LABEL: Record<SquadFilter, string> = { all: '全部', first_team: '一线队', trainee: '训练营' };
 
-// 冠名期限按赛季展示（增量 25：库内按常规窗计数，1 赛季 = 2 个常规窗）
+// 冠名期限按赛季展示（v3.0.0：库内按常规窗计数，1 赛季 = 2 个常规窗）
 function seasonsOf(windows: number): string {
   const s = windows / 2;
   return Number.isInteger(s) ? String(s) : s.toFixed(1);
@@ -133,7 +133,7 @@ export default function CoachPanel() {
   );
 }
 
-/* ---------- 主场档案（增量 12，只读） ---------- */
+/* ---------- 主场档案（v1.5.0，只读） ---------- */
 
 const FACILITY_LABEL: Record<string, string> = {
   commercial: '商业区',
@@ -172,7 +172,7 @@ function StadiumCard({ home }: { home: StadiumInfo }) {
   );
 }
 
-/* ---------- 设施经营（增量 19）：扩建 / 升级 / 子设施 + 建设券 ---------- */
+/* ---------- 设施经营（v2.5.0）：扩建 / 升级 / 子设施 + 建设券 ---------- */
 
 function FacilityOpsCard() {
   const qc = useQueryClient();
@@ -310,7 +310,7 @@ function FacilityOpsCard() {
   );
 }
 
-/* ---------- 冠名市场（增量 20）：品牌池报价 / 签约 / 退约 ---------- */
+/* ---------- 冠名市场（v2.6.0）：品牌池报价 / 签约 / 退约 ---------- */
 
 function NamingCard() {
   const qc = useQueryClient();
@@ -468,7 +468,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
     });
   }, [squad.players, assign, filter]);
 
-  // 逐人标红（增量 16）：issues 里带 playerIds 的规则按球员展开；
+  // 逐人标红（v2.2.0）：issues 里带 playerIds 的规则按球员展开；
   // 规则级问题（人数/门将/工资帽）playerIds 为空，行上自然不命中，banner 兜底
   const flagged = useMemo(() => {
     const map = new Map<number, SquadIssue[]>();
@@ -673,7 +673,7 @@ function SquadRow({
   const traineeBlocked = !player.growable || (player.pa !== null && player.ca !== null && player.pa - player.ca <= 0);
   return (
     <tr className={`${value === 'trainee' ? 'row-trainee' : ''}${flags !== undefined && flags.length > 0 ? ' row-flagged' : ''}`.trim() || undefined}>
-      {/* 号码只读（增量 32）：定号/改号在球员卡的合同页签，那里才有归属校验的上下文 */}
+      {/* 号码只读（v4.0.0）：定号/改号在球员卡的合同页签，那里才有归属校验的上下文 */}
       <td className="num mono">{player.number ?? '—'}</td>
       <td>
         <Link to={playerPath(player)}>{player.name}</Link>
@@ -721,7 +721,7 @@ function SquadRow({
   );
 }
 
-/* ---------- 续约与解约（增量 5 旁路，规则 4.4.3 / 4.4.4） ---------- */
+/* ---------- 续约与解约（v0.6.0 旁路，规则 4.4.3 / 4.4.4） ---------- */
 
 function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: () => void }) {
   const { show, toastNode } = useToast();

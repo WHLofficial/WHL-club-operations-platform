@@ -1,4 +1,4 @@
-// 球员库（增量 6.1 d8 建，增量 17 改版，增量 26 拆出 FilterPanel）：全联盟公开名册 + SoFIFA 式可变列。
+// 球员库（v0.7.1 d8 建，v2.3.0 改版，v3.1.0 拆出 FilterPanel）：全联盟公开名册 + SoFIFA 式可变列。
 // 列与筛选双向联动：筛了什么就自动加什么列（手动调过列选择器后以手动为准，取消筛选也不再自动撤）；
 // 筛选条件全部进 URL query，刷新不丢、链接可分享。当前视图=现在的归属与能力；初始视图=导入时的底册。
 // 筛选模型（Filters / URL 互转 / 列系统）在 ../lib/players-library.ts，筛选控件在 ../components/FilterPanel.tsx。
@@ -60,12 +60,12 @@ function money(x: number | null): string {
   return x === null ? '—' : `${x.toFixed(2)} m`;
 }
 
-// 增量 25：效力时长按窗刻度存储（赛季数），不再由日期折算
+// v3.0.0：效力时长按窗刻度存储（赛季数），不再由日期折算
 
 // PlayStyle 槽位原值 → 显示名（psIds 与槽位对齐、缺槽 null；金徽=基础 ID+100，或金槽 13+）
 // 金徽判定与基础 ID 剥离都走 core/ref 的口径，别在这里再写一遍 >=100 / -100
 // slot 是数组下标（0 起），playstyleIsGold 收的是槽号（1 起）⇒ 这里 +1，否则下标 12 的 PSID13
-// 走不到「金槽」分支（增量 29：银段 ID 落在金槽时会显示成银，与属性页的 🥇 不一致）
+// 走不到「金槽」分支（v3.2.1：银段 ID 落在金槽时会显示成银，与属性页的 🥇 不一致）
 export function psNames(row: PlayerLibraryRow): string {
   if (!row.psIds || row.psIds.length === 0) return '—';
   const names = row.psIds
@@ -133,7 +133,7 @@ function renderCol(key: string, p: PlayerLibraryRow) {
   }
 }
 
-// 表头排序（增量 26 步骤 6）：整个表头是可点按钮，点一下按该列排，再点翻向；箭头只在当前排序列点亮。
+// 表头排序（v3.1.0 步骤 6）：整个表头是可点按钮，点一下按该列排，再点翻向；箭头只在当前排序列点亮。
 // aria-sort 给读屏（它就挂 th），箭头本身是装饰
 function SortHeader({
   label,
@@ -210,7 +210,7 @@ export default function PlayersLibrary() {
     initialPageParam: null as string | null,
     // nextCursor 到底时是 null；v5 里 null 仍是合法游标，必须转 undefined 才算「没有下一页」
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    // 增量 28：列表每页都是 D1 实读（默认浏览 56 行/页，贵形状数千行），60s 内复用已加载的页；
+    // v3.2.0：列表每页都是 D1 实读（默认浏览 56 行/页，贵形状数千行），60s 内复用已加载的页；
     // 写路径由服务端代际键 purge，前端改数据的地方仍用 invalidateQueries 强制重取
     staleTime: 60_000,
   });
@@ -223,7 +223,7 @@ export default function PlayersLibrary() {
   const pageCount = libQuery.data?.pages.length ?? 0;
   const currentPage = libQuery.data ? libQuery.data.pages[Math.min(pageIdx, pageCount) - 1] : undefined;
   const rows = currentPage?.players ?? null;
-  // 增量 28：服务端不再回 total（那条整表 COUNT 占单页读量的 99.7%），分页条改游标式：
+  // v3.2.0：服务端不再回 total（那条整表 COUNT 占单页读量的 99.7%），分页条改游标式：
   // 「已加载 N 名」= 本地已取回的所有页之和，「还有更多 / 已到末页」看 nextCursor 是否还有。
   const loadedCount = libQuery.data?.pages.reduce((n, p) => n + p.players.length, 0) ?? 0;
   const loadError = libQuery.isError ? (libQuery.error instanceof Error ? libQuery.error.message : '加载失败') : '';
@@ -494,7 +494,7 @@ export default function PlayersLibrary() {
 
             {loadError && <div className="banner warn">{loadError}</div>}
 
-            {/* 摘要条与翻页条合成一行（增量 27 步骤 5）：摘要在左、翻页贴右，表格上方不再
+            {/* 摘要条与翻页条合成一行（v3.1.1 步骤 5）：摘要在左、翻页贴右，表格上方不再
                 多占两行。摘要条在搬进这里的同时去掉了自己的 inert —— 整块 .library-main
                 在抽屉开着时已经 inert，夹在工具条与表格之间的那块背景区不再单独存在。
                 没有筛选条件时摘要整块不渲染：原先那句「未设筛选条件」占位只是把空白写得更显眼 */}
@@ -579,7 +579,7 @@ export default function PlayersLibrary() {
                           <Link to={playerPath(p)}>{p.name}</Link>
                         </td>
                         <td>
-                          {/* 归属球队链到球队页（增量 31）；自由身没有俱乐部，不给链接 */}
+                          {/* 归属球队链到球队页（v3.4.0）；自由身没有俱乐部，不给链接 */}
                           {p.clubId === null ? '自由身' : <Link to={`/clubs/${p.clubId}`}>{p.clubName ?? '未知球队'}</Link>}
                         </td>
                         <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>

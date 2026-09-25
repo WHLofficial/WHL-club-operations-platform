@@ -5,7 +5,7 @@ export interface MeUser {
   role: 'admin' | 'coach' | 'viewer';
   locked: boolean;
   mustChangePw: boolean;
-  /** 权限点随 /api/me 原样下发（增量 15）：超管凭 club.config.manage.super 判定 */
+  /** 权限点随 /api/me 原样下发（v2.1.0）：超管凭 club.config.manage.super 判定 */
   permissions?: string[];
 }
 
@@ -59,18 +59,18 @@ export const apiPost = <T,>(path: string, body?: unknown) => apiSend<T>('POST', 
 export const apiPut = <T,>(path: string, body?: unknown) => apiSend<T>('PUT', path, body);
 export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELETE', path, body);
 
-// 赛事系统入口。增量 34：用 tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录，
+// 赛事系统入口。v5.0.1：用 tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录，
 // 指向它等于给用户一个连不上的按钮（TopBar / RequireUser / Home / AdminLayout 五处外链都用这个常量）。
 export const TOUR_SITE_URL = 'https://tour.whleague.win/';
 
-// ---- 增量 1 DTO（附录 A〔1〕）----
+// ---- v0.2.0 DTO（附录 A〔1〕）----
 
 export interface MyClubOverview {
   club: { id: number; name: string; leagueTier: string | null; logoKey: string | null; status: string; transferBanned?: boolean } | null;
   balance: number | null;
   squadCount: number | null;
   window: { season: number; windowSeq: number } | null;
-  // 增量 12：主场档案（球场/设施/影响力构成）；无球场行 = null
+  // v1.5.0：主场档案（球场/设施/影响力构成）；无球场行 = null
   home: StadiumInfo | null;
 }
 
@@ -85,7 +85,7 @@ export interface StadiumInfo {
   facilities: { key: string; level: number }[];
 }
 
-// 增量 12：管理端球场档案（GET /clubs/:id/stadium）
+// v1.5.0：管理端球场档案（GET /clubs/:id/stadium）
 export interface StadiumAdmin {
   stadium: { clubId: number; name: string | null; capacity: number; tier: number; shellInfluence: number; bonusPoints: number; fans: number };
   tier: { name: string; min_seats: number; max_seats: number; base_maintenance: number; per_10k_rate: number; attend_coef: number; upgrade_cost: number } | null;
@@ -93,7 +93,7 @@ export interface StadiumAdmin {
   influence: { players: number; shell: number; bonus: number; total: number };
 }
 
-// ---- 球队页（增量 31）----
+// ---- 球队页（v3.4.0）----
 
 /** R2 媒体对象 key → 公开读取地址（服务端 GET /api/media/* 只读代理，不碰 D1） */
 export function mediaUrl(key: string | null | undefined): string | null {
@@ -175,7 +175,7 @@ export interface ClubTransferRow {
   type: string;
   /** transfers.player_id 无 NOT NULL ⇒ 可能为空，为 null 时页面只出球员名不链档案 */
   playerId: number | null;
-  /** 球员档案链接用的 FC26 ID（增量 32）；为空时回落 playerId */
+  /** 球员档案链接用的 FC26 ID（v4.0.0）；为空时回落 playerId */
   playerFcId: number | null;
   playerName: string | null;
   fromClubId: number | null;
@@ -239,11 +239,11 @@ export interface ClubStanding {
 export interface PlayerListItem {
   id: number;
   uid: string;
-  /** 显示名（增量 32）：FC26 存档派生的人名，派生不到（长尾球员）时回落官方缩写名 */
+  /** 显示名（v4.0.0）：FC26 存档派生的人名，派生不到（长尾球员）时回落官方缩写名 */
   name: string;
   /** FC26db 官方缩写名（`E. Haaland`）：与显示名不同时列在名字下方小字 */
   officialName?: string;
-  /** 球衣号（增量 32）：1–99 的字符串，由所属俱乐部设定；没定号或已换队（换队即清空）时为 null */
+  /** 球衣号（v4.0.0）：1–99 的字符串，由所属俱乐部设定；没定号或已换队（换队即清空）时为 null */
   number: string | null;
   clubId: number | null;
   position: string | null;
@@ -270,7 +270,7 @@ export interface ContractDto {
   source: string | null;
   signedAt: string | null;
   effectiveFrom: string | null;
-  // 增量 25 窗刻度：效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
+  // v3.0.0 窗刻度：效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
   serviceSeasons: number;
   protected: boolean;
   signedSeason: number | null;
@@ -290,7 +290,7 @@ export interface PlayerDetail {
   contract: ContractDto | null;
 }
 
-/** 转会记录（增量 30）：只含已完成单据，按完成时间倒序 */
+/** 转会记录（v3.3.0）：只含已完成单据，按完成时间倒序 */
 export interface PlayerTransferRow {
   id: number;
   type: string;
@@ -309,23 +309,23 @@ export interface PlayerTransfersResponse {
   transfers: PlayerTransferRow[];
 }
 
-// ---- 增量 6.1 d8：球员库（公开 /api/players，keyset 游标分页）----
+// ---- v0.7.1 d8：球员库（公开 /api/players，keyset 游标分页）----
 
 export interface PlayerLibraryRow extends PlayerListItem {
   growable: boolean;
   clubName: string | null;
-  // 增量 17：多位置槽（PosID1-4 槽位序去重）、球员影响力（规则 4.1.3 现值口径）、现行合同速览
+  // v2.3.0：多位置槽（PosID1-4 槽位序去重）、球员影响力（规则 4.1.3 现值口径）、现行合同速览
   positions: string[];
   influence: number;
   wage: number | null;
   releaseFee: number | null;
   contractType: string | null;
-  // 增量 17 列联动：筛什么就带什么字段回来（foot/baseCa/fcId 恒回，attrValue 只在 attr 筛选时出现）
+  // v2.3.0 列联动：筛什么就带什么字段回来（foot/baseCa/fcId 恒回，attrValue 只在 attr 筛选时出现）
   foot: number;
   baseCa: number | null;
   fcId: number | null;
   source: string | null;
-  // 增量 25 窗刻度：效力时长（赛季）；protected = 是否在保护期内（无合同 = null）
+  // v3.0.0 窗刻度：效力时长（赛季）；protected = 是否在保护期内（无合同 = null）
   serviceSeasons: number | null;
   protected: boolean;
   attrValue?: number;
@@ -335,7 +335,7 @@ export interface PlayerLibraryRow extends PlayerListItem {
 
 export interface PlayersLibraryResponse {
   players: PlayerLibraryRow[];
-  // 增量 28：服务端不再回 total（整表 COUNT 占单页读量 99.7%）；分页条用 nextCursor 判「还有更多」
+  // v3.2.0：服务端不再回 total（整表 COUNT 占单页读量 99.7%）；分页条用 nextCursor 判「还有更多」
   nextCursor: string | null;
 }
 
@@ -438,7 +438,7 @@ export interface AuditLogResponse {
   entries: AuditEntryRow[];
 }
 
-// ---- 增量 2 DTO（附录 A〔2〕：注册与体检；通道 C 合同导入）----
+// ---- v0.3.0 DTO（附录 A〔2〕：注册与体检；通道 C 合同导入）----
 
 export interface SquadRules {
   squadMin: number;
@@ -494,7 +494,7 @@ export interface SquadPlayerRow {
 export interface SquadOverview {
   club: { id: number; name: string; leagueTier: string | null } | null;
   season: number | null;
-  // 报名状态探测（增量 9）：true=已报定级赛事（leagueTier 非空）；false=未报名，提交会被 400 拦下
+  // 报名状态探测（v1.2.0）：true=已报定级赛事（leagueTier 非空）；false=未报名，提交会被 400 拦下
   registeredInTournament: boolean;
   players: SquadPlayerRow[];
   registration: { firstTeam: number[]; trainee: number[] } | null;
@@ -560,7 +560,7 @@ export interface ComplianceReport {
   }[];
 }
 
-// ---- 增量 3 DTO（附录 A〔3〕：转会市场挂牌竞价链）----
+// ---- v0.4.0 DTO（附录 A〔3〕：转会市场挂牌竞价链）----
 
 export type ListingStatus = 'listed' | 'bidding' | 'matched_pending' | 'pending_review' | 'delisted';
 
@@ -719,7 +719,7 @@ export interface TraineeSignResult {
   message: string;
 }
 
-// ---- 增量 5 DTO（附录 A〔5〕：旁路转会 + 匹配 + 窗口 + 强制拍卖）----
+// ---- v0.6.0 DTO（附录 A〔5〕：旁路转会 + 匹配 + 窗口 + 强制拍卖）----
 
 export interface FreeAgentRow {
   id: number;
@@ -729,7 +729,7 @@ export interface FreeAgentRow {
   age: number | null;
   ca: number | null;
   pa: number | null;
-  /** 现东家（增量 14：CPU 队球员可被海捞，名单里要能看出他为什么在海捞池） */
+  /** 现东家（v2.0.0：CPU 队球员可被海捞，名单里要能看出他为什么在海捞池） */
   clubName: string | null;
   bannedThisWindow: boolean;
 }
@@ -771,7 +771,7 @@ export interface WindowRow {
   season: number;
   windowSeq: number;
   status: string;
-  /** 增量 25：临时窗（效力与工资不推进、不收冠名费；维护费按本窗主场数照收） */
+  /** v3.0.0：临时窗（效力与工资不推进、不收冠名费；维护费按本窗主场数照收） */
   isTemporary: boolean;
   openedAt: string | null;
   closedAt: string | null;
@@ -786,7 +786,7 @@ export interface OpenWindowResult {
   ok: boolean;
   season: number;
   windowSeq: number;
-  /** 增量 25：本次开的是临时窗 */
+  /** v3.0.0：本次开的是临时窗 */
   isTemporary: boolean;
   rerolled: number;
   /** 开窗时勾选了「同时宣告新成长期」 */
@@ -797,7 +797,7 @@ export interface CloseWindowResult {
   ok: boolean;
   season: number;
   windowSeq: number;
-  /** 增量 25：本次关的是临时窗 */
+  /** v3.0.0：本次关的是临时窗 */
   isTemporary: boolean;
   loyalty: { count: number; total: number };
   forceSettled: number;
@@ -809,7 +809,7 @@ export interface ForcedAuctionResult {
   askPrice: number;
 }
 
-// ---- 增量 6 DTO（附录 A〔6〕：财政/赛季/赛果/成长/通知/监管）----
+// ---- v0.7.0 DTO（附录 A〔6〕：财政/赛季/赛果/成长/通知/监管）----
 
 export interface ClubBalance {
   club: { id: number; name: string } | null;
@@ -840,7 +840,7 @@ export interface ManualLedgerResult {
   balance: number;
 }
 
-// 站内信收件篮（增量 18）
+// 站内信收件篮（v2.4.0）
 export interface NotificationItem {
   id: number;
   template: string;
@@ -855,7 +855,7 @@ export interface NotificationsPage {
   unread: number;
 }
 
-// 设施经营预览（增量 19）
+// 设施经营预览（v2.5.0）
 export interface StadiumBuildInfo {
   credit: number;
   balance: number;
@@ -874,7 +874,7 @@ export interface BuildPaymentResult {
   refund: number;
 }
 
-// 冠名市场（增量 20）
+// 冠名市场（v2.6.0）
 export interface NamingPackage {
   packageNo: number;
   pkgName: string;
@@ -1110,7 +1110,7 @@ export const TOUR_STATUS_LABEL: Record<string, string> = {
   archived: '已归档',
 };
 
-// ---- 成长引擎（§10，增量 6） ----
+// ---- 成长引擎（§10，v0.7.0） ----
 
 export interface GrowthEventRow {
   id: number;
@@ -1130,7 +1130,7 @@ export interface UpgradePlanDto {
   gold: number;
 }
 
-/** 发放明细行（增量 30）：psid 是基础 ID（1-99），金徽由 kind 表示 */
+/** 发放明细行（v3.3.0）：psid 是基础 ID（1-99），金徽由 kind 表示 */
 export interface PlaystyleDetailRow {
   slot: number;
   kind: 'silver' | 'gold';

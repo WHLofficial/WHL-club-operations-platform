@@ -1,4 +1,4 @@
-// 球队同步对账（增量 37）：tour 的 team 与 club 的 clubs 按 id 对齐后看三类差异。
+// 球队同步对账（v6.1.0）：tour 的 team 与 club 的 clubs 按 id 对齐后看三类差异。
 // 为什么对账放在 club 侧：club 同时能读 TOUR_DB 和本库，diff 零成本；tour 读不到 club 库，
 // 反向拉不出「club 有 tour 无」。这也是**推送失败的兜底入口**——实时推送会因为未配密钥、
 // 对端不可达、队名撞车而失败，差异会在这里显形，一键补齐。
@@ -27,7 +27,7 @@ export interface TeamSyncDiff {
   truncated: boolean;
 }
 
-/** 纯函数：两侧按 id 对齐后分类（id 空间一致是增量 17 起的前提，不需要映射列）。 */
+/** 纯函数：两侧按 id 对齐后分类（id 空间一致是v2.3.0 起的前提，不需要映射列）。 */
 export function computeTeamSyncDiff(
   tourRows: { id: number; name: string }[],
   clubRows: { id: number; name: string }[],

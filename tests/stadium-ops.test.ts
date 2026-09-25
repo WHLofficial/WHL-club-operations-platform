@@ -1,4 +1,4 @@
-// 设施经营（增量 19）：扩建/升级/建设券拆分与返还、门槛闸（座位区间/开放进度/满级/余额）与路由
+// 设施经营（v2.5.0）：扩建/升级/建设券拆分与返还、门槛闸（座位区间/开放进度/满级/余额）与路由
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';

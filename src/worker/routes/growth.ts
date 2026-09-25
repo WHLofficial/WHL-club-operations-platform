@@ -41,7 +41,7 @@ app.get('/players/:id/growth', async (c) => {
   const xpPerLevel = (await config.getNumber('xp_per_level')) ?? 10;
   const pending = Math.max(0, Math.floor(player.growth_xp / xpPerLevel) - player.levels_applied);
   const plans = (await getUpgradePlans(c.env.DB))[player.growth_tier] ?? DEFAULT_UPGRADE_PLANS[player.growth_tier] ?? [];
-  // 发放明细（增量 30）：属性页清单 = FC 源槽 + 这一份，去重后展示；中国计划名额也靠它算
+  // 发放明细（v3.3.0）：属性页清单 = FC 源槽 + 这一份，去重后展示；中国计划名额也靠它算
   const playstyleDetails = await listPlayerPlaystyles(c.env.DB, playerId);
   const chinaQuota = (await config.getNumber('china_badges')) ?? 3;
   const chinaGranted = playstyleDetails.filter((d) => d.source === 'china').length;

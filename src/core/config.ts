@@ -96,10 +96,10 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   luxury_cash_rate: '0.20',
   luxury_value_threshold: '700',
   luxury_value_rate: '0.05',
-  // 增量 10：异常出价告警阈值（大额强制审 40m；短窗连续抬价/最小步长拉锯判据，JSON 可覆盖）
+  // v1.3.0：异常出价告警阈值（大额强制审 40m；短窗连续抬价/最小步长拉锯判据，JSON 可覆盖）
   review_amount_threshold: '40',
   bid_pattern_alert: '{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}',
-  // 增量 11：奖金表（TECH_DESIGN §9.1 原文，JSON 可覆盖）+ 忠诚奖金档位 [起效年限, RC 比例]
+  // v1.4.0：奖金表（TECH_DESIGN §9.1 原文，JSON 可覆盖）+ 忠诚奖金档位 [起效年限, RC 比例]
   prize_table: JSON.stringify({
     league_premier: { entry: 20, win: 8.5, draw: 6.6, loss: 4.7 },
     league_second: { entry: 7.5, win: 6.7, draw: 4.8, loss: 2.9 },
@@ -109,7 +109,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     super_cup: { win: 4.0, loss: 2.0 },
   }),
   loyalty_tiers: '[[0.5,0.05],[1.5,0.10],[2.5,0.20]]',
-  // 增量 12：主场收入引擎全套系数（revenue 插件移植，TECH_DESIGN §8；天气概率 40/30/20/10 用户裁决 2026-09-16；
+  // v1.5.0：主场收入引擎全套系数（revenue 插件移植，TECH_DESIGN §8；天气概率 40/30/20/10 用户裁决 2026-09-16；
   // 影响力系数=规则 4.1.3 原文可成长 0.25/非成长 0.13）
   attendance_model: JSON.stringify({
     weather_probabilities: { 晴: 0.4, 多云: 0.3, 雨: 0.2, 雪: 0.1 },
@@ -143,11 +143,11 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     4: { name: '国际级', min_seats: 50000, max_seats: 100000, base_maintenance: 14.0, per_10k_rate: 0.2, attend_coef: 1.4, upgrade_cost: 0.0 },
   }),
   voucher_refund: '0.25',
-  // 增量 19 设施经营：首位=扩建单价（M/100 座），后五位=子设施升到 1-5 级费用（插件 formula.py:407 口径）
+  // v2.5.0 设施经营：首位=扩建单价（M/100 座），后五位=子设施升到 1-5 级费用（插件 formula.py:407 口径）
   facility_prices: '0.1,3,5,8,12,16',
   // 球场档位开放进度（插件 max_open_tier 口径，S9 初仅开放 0→1）
   stadium_max_open_tier: '1',
-  // 增量 20 冠名市场：底价系数 + 三套餐条款（插件 _conf_schema naming_* 口径；行业系数不引入，一律 1.0）
+  // v2.6.0 冠名市场：底价系数 + 三套餐条款（插件 _conf_schema naming_* 口径；行业系数不引入，一律 1.0）
   naming_params: JSON.stringify({
     base: 0.5,
     perCapacityWan: 0.3,
@@ -157,14 +157,14 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     short: { windows: 2, factor: 1.25 },
     bet: { windows: 4, factor: 0.7, bonusRate: 0.7, attend: 0.8, fans: 0.03 },
   }),
-  // 增量 21 赛果自动化：cron 每 5 分钟自动确认完赛场次（异常场标人工复核）
+  // v2.7.0 赛果自动化：cron 每 5 分钟自动确认完赛场次（异常场标人工复核）
   results_auto_confirm: 'on',
   xp_per_level: '10',
   trainee_xp_full: '40',
   trainee_xp_half: '15',
   china_xp_bonus: '20',
   china_badges: '3',
-  // 增量 30：银徽上限与「12 个银槽」合并成一个口径（原先 15 只是台账计数上限，装不下第 13 个）
+  // v3.3.0：银徽上限与「12 个银槽」合并成一个口径（原先 15 只是台账计数上限，装不下第 13 个）
   badge_cap_silver: '12',
   badge_cap_gold: '3',
   wage_param_a: '0.02',
@@ -227,7 +227,7 @@ export interface ConfigService {
   set(key: ConfigKey, value: string | null): Promise<void>;
   /** 管理端视图：涉密键只给掩码 */
   listMasked(): Promise<{ key: string; value: string | null; secret: boolean }[]>;
-  /** 超管视图（增量 15）：全键明文，secret 标记保留供前端提示 */
+  /** 超管视图（v2.1.0）：全键明文，secret 标记保留供前端提示 */
   listRaw(): Promise<{ key: string; value: string | null; secret: boolean }[]>;
 }
 

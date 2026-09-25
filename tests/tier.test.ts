@@ -1,4 +1,4 @@
-// 增量 9：分级派生测试——级别真源=赛季定级赛事报名（auth 目录 → season_tournaments → TOUR_DB entry）。
+// v1.2.0：分级派生测试——级别真源=赛季定级赛事报名（auth 目录 → season_tournaments → TOUR_DB entry）。
 // 覆盖：三跳命中 premier/second、未报名 400 文案、杯赛报名不干扰、双定级 500、
 // second 梯度（ge87=3）端到端、建队端点双模（派生忽略/回滚写休眠列）、compliance tier_missing。
 import { describe, expect, it, beforeEach } from 'vitest';
@@ -105,7 +105,7 @@ beforeEach(() => {
   resetConfigCache();
 });
 
-describe('分级派生（增量 9：报名定级）', () => {
+describe('分级派生（v1.2.0：报名定级）', () => {
   it('报名顶级联赛 → 派生 premier，注册全链通过，探测字段与徽章数据齐', async () => {
     const fx = freshEnv();
     linkClubTeam(fx);

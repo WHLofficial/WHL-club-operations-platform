@@ -1,4 +1,4 @@
-// 我的 /market/mine（增量 16 拆页）：挂牌我的球员（原 ListSection）+ 我的出价（原 MyBidsSection）。
+// 我的 /market/mine（v2.2.0 拆页）：挂牌我的球员（原 ListSection）+ 我的出价（原 MyBidsSection）。
 // 需登录（路由守卫），操作要教练账号；数据层 TanStack Query（lib/queries.ts）。
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';

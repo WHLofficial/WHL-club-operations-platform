@@ -1,4 +1,4 @@
-// 管理端 · 建队与认证码（§3.2；原 admin.ts 建队域，增量 15 拆分，行为零变化）
+// 管理端 · 建队与认证码（§3.2；原 admin.ts 建队域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
@@ -19,7 +19,7 @@ export interface CreatedClub {
   authLinked: boolean | null;
 }
 
-// 建俱乐部核心（增量 37 抽出，三个入口共用）：管理端手填游戏球队 ID、管理端自动在赛事系统建队后、
+// 建俱乐部核心（v6.1.0 抽出，三个入口共用）：管理端手填游戏球队 ID、管理端自动在赛事系统建队后、
 // 赛事系统建队后经机器通道推过来（routes/internal.ts）。**只管本仓建档**——「tour 里有没有这支队」
 // 的判定留在调用方：两个管理端入口先保证 tour 有队，机器通道入口是 tour 刚建完才推来的。
 export async function createClubFromTourTeam(
@@ -33,7 +33,7 @@ export async function createClubFromTourTeam(
 ): Promise<CreatedClub> {
   if (!name) throw new HttpError(400, '俱乐部名字不能为空');
   if (name.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
-  // 增量 9：级别由赛事报名派生（worker/tier.ts），建队不再定级； AUTH_DB 未配置的
+  // v1.2.0：级别由赛事报名派生（worker/tier.ts），建队不再定级； AUTH_DB 未配置的
   // 回滚通道下仍接受显式定级写休眠列（与旧行为一致），派生通道忽略该参数。
   if (leagueTier !== undefined && leagueTier !== null && leagueTier !== 'premier' && leagueTier !== 'second') {
     throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
@@ -60,7 +60,7 @@ export async function createClubFromTourTeam(
     targetId: club.id,
     after: { name, gameTeamId, leagueTier: writeTier },
   });
-  // auth 目录自动建档（增量 17）：register upsert 幂等；失败不回滚 clubs 行，留「重新登记」重试
+  // auth 目录自动建档（v2.3.0）：register upsert 幂等；失败不回滚 clubs 行，留「重新登记」重试
   let authLinked: boolean | null = null;
   if (env.AUTH_DB) {
     try {
@@ -85,7 +85,7 @@ export async function createClubFromTourTeam(
 app.post('/clubs', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const body = (await readJson(c)) as { name?: unknown; leagueTier?: unknown; gameTeamId?: unknown } | null;
-  // 增量 17：游戏球队 ID 必填——四个 id 空间一致（tour team.id = auth team.tour_team_id = auth club_id = clubs.id），
+  // v2.3.0：游戏球队 ID 必填——四个 id 空间一致（tour team.id = auth team.tour_team_id = auth club_id = clubs.id），
   // 建队即指定 id，不再让 D1 自增产生第四套号
   const gameTeamId = Number(body?.gameTeamId);
   if (body?.gameTeamId === undefined || body?.gameTeamId === null || body?.gameTeamId === '') {
@@ -94,7 +94,7 @@ app.post('/clubs', async (c) => {
   if (!Number.isInteger(gameTeamId) || gameTeamId <= 0) throw new HttpError(400, '游戏球队 ID 应为正整数');
   const bodyName = typeof body?.name === 'string' ? body.name.trim() : '';
   if (bodyName.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
-  // tour 校验 + 队名预填：tour 里有这支队就照旧取它的队名；没有则**先推过去建队**（增量 37
+  // tour 校验 + 队名预填：tour 里有这支队就照旧取它的队名；没有则**先推过去建队**（v6.1.0
   // 双向同步的 club → tour 方向）。队名是推得动的先决条件——tour 没队又没填名字时无从建队，
   // 直接挡下（不再要求先去赛事系统手工建队）。
   const tourTeam = await c.env.TOUR_DB.prepare('SELECT id, name FROM team WHERE id = ?')
@@ -118,7 +118,7 @@ app.post('/clubs', async (c) => {
   return c.json({ ...created, pushedToTour }, 201);
 });
 
-// 建队时队名预填（增量 17）：按游戏球队 ID 查赛事系统队名
+// 建队时队名预填（v2.3.0）：按游戏球队 ID 查赛事系统队名
 app.get('/clubs/tour-team', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const teamId = Number(c.req.query('teamId'));
@@ -130,7 +130,7 @@ app.get('/clubs/tour-team', async (c) => {
   return c.json({ team: { id: row.id, name: row.name } });
 });
 
-// 建队后 auth 目录登记重试（增量 17）：register upsert 幂等，失败即可重按
+// 建队后 auth 目录登记重试（v2.3.0）：register upsert 幂等，失败即可重按
 app.post('/clubs/:id/register-auth', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const id = Number(c.req.param('id'));
@@ -152,7 +152,7 @@ app.get('/clubs', async (c) => {
   const clubs = await c.env.DB.prepare(
     'SELECT id, name, league_tier, status, transfer_banned, created_at FROM clubs ORDER BY id LIMIT 200',
   ).all<{ id: number; name: string; league_tier: string; status: string; transfer_banned: number; created_at: string }>();
-  // 绑定与认证码真源在 auth 库（增量 7）；AUTH_DB 未配置回落本地休眠表（回滚通道）。
+  // 绑定与认证码真源在 auth 库（v1.0.0）；AUTH_DB 未配置回落本地休眠表（回滚通道）。
   // 绑定人名字取 auth account.name，不再回查赛事库 user 表。
   const bindings = c.env.AUTH_DB
     ? await c.env.AUTH_DB.prepare(
@@ -173,7 +173,7 @@ app.get('/clubs', async (c) => {
         'SELECT club_id, expires_at, used_by, used_at, created_at FROM club_bind_code ORDER BY id DESC LIMIT 200',
       ).all<{ club_id: number; expires_at: string | null; used_by: number | null; used_at: string | null; created_at: string }>();
 
-  // 增量 17：多教练同队——一个俱乐部可挂多个绑定行，全部返回（前端逐个可解绑）
+  // v2.3.0：多教练同队——一个俱乐部可挂多个绑定行，全部返回（前端逐个可解绑）
   const byClub = new Map<number, { userId: number; userName: string | null; boundAt: string }[]>();
   for (const b of bindings.results) {
     const list = byClub.get(b.club_id) ?? [];
@@ -191,7 +191,7 @@ app.get('/clubs', async (c) => {
       });
     }
   }
-  // 增量 9：级别改报名派生（按当前可见赛季），休眠列不再回显
+  // v1.2.0：级别改报名派生（按当前可见赛季），休眠列不再回显
   const season = await getVisibleSeason(c.env.DB);
   const cache = tierCache();
   return c.json({
@@ -210,7 +210,7 @@ app.get('/clubs', async (c) => {
   });
 });
 
-// 转会禁令（增量 10）：冻结/解冻俱乐部转会权限。只拦新动作，既有市场单据走审核面板处置
+// 转会禁令（v1.3.0）：冻结/解冻俱乐部转会权限。只拦新动作，既有市场单据走审核面板处置
 app.post('/clubs/:id/transfer-ban', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const clubId = Number(c.req.param('id'));
@@ -245,7 +245,7 @@ app.delete('/clubs/:id/transfer-ban', async (c) => {
   return c.json({ ok: true });
 });
 
-// 主场域管理（增量 12）：球场档案查看 + 队壳影响力/奖励分/容量/档位维护（球员影响力按规则公式即时算，不落库）
+// 主场域管理（v1.5.0）：球场档案查看 + 队壳影响力/奖励分/容量/档位维护（球员影响力按规则公式即时算，不落库）
 app.get('/clubs/:id/stadium', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const clubId = Number(c.req.param('id'));
@@ -348,7 +348,7 @@ app.post('/clubs/:id/bindcode', async (c) => {
   if (!Number.isFinite(hours) || hours <= 0 || hours > 24 * 30) {
     throw new HttpError(400, '有效时长须在 1 小时到 30 天之间');
   }
-  // 发码走 auth 机器 API（增量 7 中央码表 team_bind_code，按 club_id 解析目录行）
+  // 发码走 auth 机器 API（v1.0.0 中央码表 team_bind_code，按 club_id 解析目录行）
   let issued: { code: string; expiresAt: string };
   try {
     issued = await authIssueTeamCode(c.env, { clubId, hours });

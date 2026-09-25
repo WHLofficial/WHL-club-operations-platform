@@ -83,7 +83,7 @@ afterEach(() => {
   (globalThis as { fetch: unknown }).fetch = undefined;
 });
 
-describe('通知排队（§12 + 增量 18 双通道）', () => {
+describe('通知排队（§12 + v2.4.0 双通道）', () => {
   it('每个绑定账号一条 web 行（收件篮）；绑了 QQ 的另加一条 pending 投递行', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`
@@ -119,7 +119,7 @@ describe('通知排队（§12 + 增量 18 双通道）', () => {
     expect(rows[2]).toMatchObject({ channel: 'web', user_id: 22, status: 'sent' });
   });
 
-  it('增量 7：绑定为真源在 AUTH_DB——按 club_id 派生绑定账号再查本地 qq_links', async () => {
+  it('v1.0.0：绑定为真源在 AUTH_DB——按 club_id 派生绑定账号再查本地 qq_links', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`
       INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active');
@@ -302,7 +302,7 @@ describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
   });
 });
 
-describe('站内信收件篮（增量 18）', () => {
+describe('站内信收件篮（v2.4.0）', () => {
   function seedInbox(sqlite: DatabaseSync) {
     sqlite.exec(`
       INSERT INTO notifications (id, club_id, user_id, channel, template, payload, status, created_at) VALUES

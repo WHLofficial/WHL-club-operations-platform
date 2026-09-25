@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 球队页（web/src/pages/Clubs.tsx，增量 31 步骤 4）的组件测试：分级分段、四项指标口径、
+// 球队页（web/src/pages/Clubs.tsx，v3.4.0 步骤 4）的组件测试：分级分段、四项指标口径、
 // CPU 标记、队徽有无两种形态、加载/错误态、以及整卡链接必须是 /clubs/:id（AGENTS.md 的 Q17 口径）。
 // 没打 CSS（jsdom 不跑样式表），视觉表现靠 e2e 截图看。
 import { cleanup, render, screen, within } from '@testing-library/react';
@@ -60,7 +60,7 @@ afterEach(() => {
   apiMock.mockReset();
 });
 
-describe('球队页（增量 31 步骤 4）', () => {
+describe('球队页（v3.4.0 步骤 4）', () => {
   it('按分级分段：顶级/次级/未定级各成一段，段内只放该级别的队', async () => {
     renderClubs();
 

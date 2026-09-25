@@ -124,7 +124,7 @@ function toConfirmedItem(r: {
   };
 }
 
-// 待确认队列：绑定的全部赛事（赛季级绑定，增量 6.1 修订）→ 该赛事 finished 场次，剔除已确认；每赛事硬 LIMIT（§17）
+// 待确认队列：绑定的全部赛事（赛季级绑定，v0.7.1 修订）→ 该赛事 finished 场次，剔除已确认；每赛事硬 LIMIT（§17）
 export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]; confirmed: ConfirmedResultItem[] }> {
   const pending = await scanPendingMatches(env);
 
@@ -288,7 +288,7 @@ export async function confirmResult(
   )
     .bind(matchId)
     .first();
-  // 确认钩子①-④（增量 21 起全部吞错不阻塞确认——快照已落库，钩子皆幂等可经 replay-hooks 重放）；
+  // 确认钩子①-④（v2.7.0 起全部吞错不阻塞确认——快照已落库，钩子皆幂等可经 replay-hooks 重放）；
   // 任一异常或 XP 没解析到位 → 标人工复核
   const hooks = await runHooks(env, matchId, m, ctx);
   const review = reviewOf(hooks);
@@ -307,7 +307,7 @@ export async function confirmResult(
   };
 }
 
-/** 确认钩子全集（增量 21）：XP / bot 通知 / 奖金 / 比赛日收入，逐个吞错收集。
+/** 确认钩子全集（v2.7.0）：XP / bot 通知 / 奖金 / 比赛日收入，逐个吞错收集。
  *  通知钩子无幂等锚（重复排队会扰民），重放时以 opts.notify=false 跳过。 */
 interface HookOutcome {
   xp: XpHookSummary;
@@ -373,7 +373,7 @@ async function runHooks(
   return out;
 }
 
-/** 人工复核判定（增量 21）：任一钩子异常或 XP 没解析到位 → 标复核。 */
+/** 人工复核判定（v2.7.0）：任一钩子异常或 XP 没解析到位 → 标复核。 */
 function reviewOf(hooks: HookOutcome): { needsReview: boolean; note: string | null } {
   const parts: string[] = [];
   if (hooks.xpError) parts.push('XP 事件入账失败');
@@ -386,7 +386,7 @@ function reviewOf(hooks: HookOutcome): { needsReview: boolean; note: string | nu
   return { needsReview: parts.length > 0, note: parts.length > 0 ? parts.join('；').slice(0, 300) : null };
 }
 
-/** cron 自动确认（增量 21）：完赛场次逐场入档（actor=0 系统），异常场标人工复核。 */
+/** cron 自动确认（v2.7.0）：完赛场次逐场入档（actor=0 系统），异常场标人工复核。 */
 export interface AutoConfirmSummary {
   skipped: boolean;
   confirmed: number;
@@ -415,7 +415,7 @@ export async function autoConfirmResults(env: Env, cap = 20): Promise<AutoConfir
   return summary;
 }
 
-/** 重放已确认场次的三钩子（增量 21，幂等：XP UNIQUE 锚 / 奖金账本闸 / 上座主键），并重算复核标记。
+/** 重放已确认场次的三钩子（v2.7.0，幂等：XP UNIQUE 锚 / 奖金账本闸 / 上座主键），并重算复核标记。
  *  通知钩子不重放（notifications 无去重锚，重排队会重复打扰用户）；原确认时通知失败的话信号保留在复核标记里。 */
 export async function replayHooksForMatch(env: Env, matchIdInput: unknown): Promise<ConfirmedResultItem> {
   const matchId = Number(matchIdInput);

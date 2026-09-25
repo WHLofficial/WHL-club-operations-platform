@@ -1,11 +1,11 @@
-// 球员库读量定标台（增量 28 步骤 1）：把真实查询打到生产 D1，读 meta.rows_read。
+// 球员库读量定标台（v3.2.0 步骤 1）：把真实查询打到生产 D1，读 meta.rows_read。
 //
 // 为什么不用手抄 SQL：读量的形状完全由路由拼出来的表达式决定（sqlFold 的 87 项链、
 // PS_COUNT_EXPR 的 15 槽计数、29 个排序表达式、各种 COALESCE/CAST/CASE），手抄一份必然与线上漂移，
 // 而且漂移是静默的 —— 数字看着合理，其实测的是另一个查询。所以这里**直接调真实路由**：
 // Hono 的 app.request() 在 Node 里可跑，注入一个只记录不执行的假 D1，把路由实际执行的 SQL
 // 与绑定参数抓下来，再把参数内联成字面量交给 `wrangler d1 execute --remote`。
-// 副作用（好的那个）：路由改了 SQL，重跑本脚本测到的就是新形状 —— 增量 28 步骤 7 的复测直接复用本脚本。
+// 副作用（好的那个）：路由改了 SQL，重跑本脚本测到的就是新形状 —— v3.2.0 步骤 7 的复测直接复用本脚本。
 //
 // 用法：
 //   node scripts/measure-d1-reads.mjs                  # 全量形状打生产
@@ -41,14 +41,14 @@ if (DUMP && JSON_OUT) {
 }
 const playersApp = (await import(new URL('src/worker/routes/players.ts', ROOT))).default;
 // ---- 共用机件（假 D1 / 参数内联 / 打 wrangler）----------------------------------------------
-// 增量 28 步骤 6 抽到 scripts/d1-read-audit/harness.mjs：读面普查脚本要用同一套机件，
+// v3.2.0 步骤 6 抽到 scripts/d1-read-audit/harness.mjs：读面普查脚本要用同一套机件，
 // 复制一份必然分叉（字符串字面量处理、% 的 cmd.exe 坑、Windows 偶发退出码都在细节里）。
 // 这里只留两个薄包装，主流程与形状清单逐字不动。
 const capture = (url, config) => captureSurface({ app: playersApp, url, config });
 const runWrangler = (sql) => runWranglerShared(sql, { local: LOCAL });
 
 // ---- 形状清单 ------------------------------------------------------------------------------
-// 每个形状 = 一个真实 URL。路由自己会跑多条语句（配置探测 + 列表主查询；增量 28 步骤 2 之前的版本还带一条 COUNT），
+// 每个形状 = 一个真实 URL。路由自己会跑多条语句（配置探测 + 列表主查询；v3.2.0 步骤 2 之前的版本还带一条 COUNT），
 // 全部按序记录并逐条报读量。语句归类用 SQL 文本判断（见 printTable），不按「第几条」——路由增删语句时序号会漂。
 const SHAPES = [
   { id: 'default', label: '默认浏览（第 1 页，limit 20）', url: '/players?limit=20' },

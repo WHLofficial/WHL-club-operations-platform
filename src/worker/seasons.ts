@@ -1,4 +1,4 @@
-// 赛季解析（§11：preparing → running → settled）。赛季管理端点属增量 6，
+// 赛季解析（§11：preparing → running → settled）。赛季管理端点属v0.7.0，
 // 注册增量只读 seasons 表：提交锁备赛期，查看放行备赛期/进行中。
 
 // 可提交注册的赛季：备赛期（preparing）

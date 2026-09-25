@@ -1,6 +1,6 @@
-// 主场收入域（增量 12，TECH_DESIGN §8 全按 revenue 插件移植 + 主规则 v5.2 §4.1.2/4.1.3/5.1）。
+// 主场收入域（v1.5.0，TECH_DESIGN §8 全按 revenue 插件移植 + 主规则 v5.2 §4.1.2/4.1.3/5.1）。
 // 数据流（用户裁决 2026-09-16）：赛果确认时当场掷天气→算上座→三分收入即时入账（钩子④，match_attendance
-// 主键+ledger 幂等双闸）；维护费与死忠演化在窗末并入关窗批。设施扩建/升级已随增量 19 落地
+// 主键+ledger 幂等双闸）；维护费与死忠演化在窗末并入关窗批。设施扩建/升级已随v2.5.0 落地
 // （见 src/worker/stadium-ops.ts：五类子设施 0-5 级 + 球场扩建/升级）。
 // 影响力 = 球员影响力总和（规则 4.1.3：系数×能力等级×国际声望，可成长 0.25/非成长 0.13，即时计算不落库）
 //        + 队壳影响力 + 奖励分（主规则 §5.1，管理组维护 stadiums 两列）。
@@ -244,7 +244,7 @@ function asRange(v: unknown): [number, number] | null {
 }
 
 /**
- * 赛果确认钩子④（增量 12）：主场三分收入即时入账。
+ * 赛果确认钩子④（v1.5.0）：主场三分收入即时入账。
  * 跳过条件（detail=null）：AUTH_DB 目录无主场映射 / 无球场行 / 已入过账。
  * 上座快照 INSERT match_attendance（match_id 主键）+ ledgerMovement(kind='revenue', ref='match') 同批双闸。
  */
@@ -337,10 +337,10 @@ export interface HomeWindowSummary {
 }
 
 /**
- * 窗末主场结算（增量 12，并入关窗批）：维护费 + 死忠演化 + 冠名收租。
+ * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠演化 + 冠名收租。
  * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；临时窗照收。
  * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训本期 0 级）——每种窗都演化。
- * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，增量 25 裁决）。
+ * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，v3.0.0 裁决）。
  * 幂等：ledger 走 'maintenance'/'naming_fee'/'window' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
  */
 export async function windowHomeStatements(
@@ -397,8 +397,8 @@ export async function windowHomeStatements(
       );
     }
 
-    // 窗末冠名收租（增量 20）：费用 + 剩余窗口递减/到期 + 对赌奖金，幂等靠账本闸（club 维度）；
-    // 临时窗不收租也不递减（增量 25 裁决）
+    // 窗末冠名收租（v2.6.0）：费用 + 剩余窗口递减/到期 + 对赌奖金，幂等靠账本闸（club 维度）；
+    // 临时窗不收租也不递减（v3.0.0 裁决）
     if (opts.chargeNaming) {
       const naming = await getActiveNaming(env.DB, s.club_id);
       if (naming) {

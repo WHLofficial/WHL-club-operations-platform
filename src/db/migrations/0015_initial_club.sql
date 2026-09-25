@@ -1,4 +1,4 @@
--- 0015 · 初始归属 initial_club_id（增量 6.1 裁决 2：初始球员库=导入时数据；
+-- 0015 · 初始归属 initial_club_id（v0.7.1 裁决 2：初始球员库=导入时数据；
 -- 导入数据里的归属仅供成长判断「本队」使用，XP 场次匹配仍按当前归属名单）
 -- 回填口径：最早一条归属变更（transfer/activation/match/forced_auction/termination，from_club_id 非空）的 from_club_id；
 -- 只海捞过（free_agent，from 为空）= 导入时无归属，留 NULL；完全没转过会 = 导入即现属。

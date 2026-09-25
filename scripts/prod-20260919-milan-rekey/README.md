@@ -6,7 +6,7 @@
 ## 为什么是 131681
 
 EAFC 26 里 AC米兰 未授权，游戏用「Milano FC」假名 + 新号 `131681`；第三方 fixed 快照与 EA 的 1..199 段仍带旧 FIFA 号 `47`（EA 的队名参考表里 `47` 与 `131681` 都叫 AC Milan，是两代编号）。
-平台侧 `clubs.id`/`players.club_id` 早在增量 14 就是 `131681`，auth 的 `club_id` 也是，只有 tour `team.id` 与 auth `tour_team_id` 还是 47
+平台侧 `clubs.id`/`players.club_id` 早在v2.0.0 就是 `131681`，auth 的 `club_id` 也是，只有 tour `team.id` 与 auth `tour_team_id` 还是 47
 （2026-09-16 的 `fc26-id-rekey` 只做了 tour 1..21 → FC id 的映射，当时米兰落在 47）。
 
 ## 执行结果（逐条复查通过）

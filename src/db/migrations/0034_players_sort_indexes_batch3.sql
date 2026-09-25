@@ -1,6 +1,6 @@
 -- 遗留项第 5 节（D1 读量治理）下一批次：球员库排序表达式索引 batch 3
 --
--- 为什么现在做：增量 28 的读额度审计（scripts/d1-read-audit/README.md §5.5）把四条形状登记为
+-- 为什么现在做：v3.2.0 的读额度审计（scripts/d1-read-audit/README.md §5.5）把四条形状登记为
 -- 「下一批候选 = 形态允许静态索引、只差写配额」，其中 sort=name 已由迁移 0033（2026-09-23）完成。
 -- 剩下这三条实测各 37,635 行/次（全表扫 + 临时排序），建索引后应与同族形状同量级（22–53 行/次，见 §3.1）。
 --   1. view=initial&sort=ca：初始视图把 ca 换成 COALESCE(players.base_ca, players.ca)（routes/players.ts:507），

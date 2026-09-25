@@ -1,5 +1,5 @@
-// 进程内守护（增量 23）：公开 GET 的固定窗口限流 + TTL SWR 缓存。
-// 增量 28：缓存加两层——L1 进程内（本文件）+ L2 边缘 Cache API（跨 isolate，同 colo 共享），
+// 进程内守护（v2.8.1）：公开 GET 的固定窗口限流 + TTL SWR 缓存。
+// v3.2.0：缓存加两层——L1 进程内（本文件）+ L2 边缘 Cache API（跨 isolate，同 colo 共享），
 // 键带「代际版本号」（存 KV）以便写路径一次性整体失效。
 import { HttpError } from './http.ts';
 import { EPOCH_FAIL_SHORT_MS, EPOCH_MEMO_MS, type CacheScope } from './cache-policy.ts';
@@ -33,7 +33,7 @@ export function assertPublicRate(c: { req: { header(name: string): string | unde
   }
 }
 
-// 内部端点密钥校验（增量 28 从 worker/index.ts 抽出来，供 /api/cron/* 共用）：
+// 内部端点密钥校验（v3.2.0 从 worker/index.ts 抽出来，供 /api/cron/* 共用）：
 // X-Cron-Key 头或 ?key= 对 c.env.CRON_KEY；本地/测试未配 secret 时放行便于联调。
 // 这些端点不挂公开限流与公开缓存（它们要么触发结算、要么跑整表 COUNT），守卫只有这一道。
 //
@@ -88,7 +88,7 @@ export function canonicalQuery(url: string): string {
   return entries.map(([k, v]) => `${k}=${v}`).join('&');
 }
 
-// ---- 代际版本号（增量 28）----
+// ---- 代际版本号（v3.2.0）----
 //
 // 为什么不能按键枚举 purge：`/api/players` 的键空间 = 筛选 × 排序 × 游标（无穷），
 // 而 Cache API 只有 match/put/delete、没有前缀删除；且 `cache.delete` 只作用于执行写请求的那个

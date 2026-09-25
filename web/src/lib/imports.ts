@@ -1,4 +1,4 @@
-// 管理端导入共用解析件（原 Admin.tsx 顶部 helper，增量 15 拆出供球员导入/合同导入两页共用）
+// 管理端导入共用解析件（原 Admin.tsx 顶部 helper，v2.1.0 拆出供球员导入/合同导入两页共用）
 // 每个请求带的行数上限：Worker 侧校验 + 落库都按小批走，前端切片
 import { apiPost } from './api.ts';
 
@@ -51,7 +51,7 @@ export function requiredColumns(channel: Channel): string[] {
   return channel === 'A' ? REQUIRED_A : channel === 'B' ? REQUIRED_B : REQUIRED_C;
 }
 
-// 分片预览 + 聚合（增量 15 commit 4 抽出：原 A/B/C 三处几乎相同的切片循环）
+// 分片预览 + 聚合（v2.1.0 commit 4 抽出：原 A/B/C 三处几乎相同的切片循环）
 // buildBody 决定通道差异（futureStarIds / clubId），进度文案沿用原口径；
 // 泛型兼容 ImportPreview（A/B）与 ContractImportPreview（C）
 interface PreviewAggLike {

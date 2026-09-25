@@ -1,5 +1,5 @@
-// 用户端数据层共享 keys 与 fetchers（增量 16 commit 4）。
-// 口径沿用增量 15 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
+// 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
+// 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type PlayersLibraryResponse, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
@@ -90,7 +90,7 @@ export function useBoard(filter: string) {
   });
 }
 
-// 球队列表（增量 31）：公开页，一屏 20 队一次取完；服务端 clubs scope 缓存 24h，前端再叠 30s 全局 staleTime
+// 球队列表（v3.4.0）：公开页，一屏 20 队一次取完；服务端 clubs scope 缓存 24h，前端再叠 30s 全局 staleTime
 export function useClubsList() {
   return useQuery({
     queryKey: qk.clubsList,
@@ -98,7 +98,7 @@ export function useClubsList() {
   });
 }
 
-// 球队详情：结构统计由服务端一次算完（增量 31 步骤 6），前端不再二次聚合。
+// 球队详情：结构统计由服务端一次算完（v3.4.0 步骤 6），前端不再二次聚合。
 // 生产实测 12 条语句 / 151–165 行，服务端按 clubs scope 缓存 24h，故这里不覆盖 staleTime。
 export function useClubDetail(id: number) {
   return useQuery({

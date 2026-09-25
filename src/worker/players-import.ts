@@ -82,7 +82,7 @@ async function fetchExisting(db: D1Database, fcIds: number[]): Promise<ExistingR
   return out;
 }
 
-// 换版影响统计（增量 22 I1）：成长增量 δ = ca − base_ca，δ>0 的行才是被换版规则触及的球员
+// 换版影响统计（v2.8.0 I1）：成长增量 δ = ca − base_ca，δ>0 的行才是被换版规则触及的球员
 function swapStats(existing: ExistingRow[], mode: ImportMode) {
   const growth = existing.filter((r) => (r.ca ?? 0) - (r.base_ca ?? 0) > 0);
   return {
@@ -132,12 +132,12 @@ export async function previewImport(env: Env, body: unknown) {
 // 导出供 scripts/players-import/generate-sql.ts 复用：离线导入脚本靠它取到与网页导入逐字相同的
 // SQL 文本与参数顺序，避免手抄一份 SQL 后与生产口径漂移。
 //
-// 换版模式（增量 22 I1，规则 §5.4 / TECH_DESIGN §10.4）。成长增量 δ = ca − base_ca（负值按 0）：
+// 换版模式（v2.8.0 I1，规则 §5.4 / TECH_DESIGN §10.4）。成长增量 δ = ca − base_ca（负值按 0）：
 // - minor 小换版：成长全保留，CA 增量平移 → ca = excluded.ca + δ；base_ca 刷到新源值。
 // - major 大换版：经验清零、成长 CA/徽章各保留 1/3（向上取整；SQLite 整数除法是 floor，
 //   (δ+2)/3 即 ceil(δ/3)），levels_applied 归零，base_ca 刷到新源值；徽章计数化，银/金各自折算。
 // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、growable（赛季结算重判）冲突时不更新。
-// club_id 只在新插入时写（CPU 队球员的队籍，增量 14）；冲突时不更新，免得覆盖认领/解约后的归属。
+// club_id 只在新插入时写（CPU 队球员的队籍，v2.0.0）；冲突时不更新，免得覆盖认领/解约后的归属。
 export function upsertStatement(db: D1Database, p: NormalizedPlayer, mode: ImportMode = 'minor'): D1PreparedStatement {
   const growthUpdate =
     mode === 'major'

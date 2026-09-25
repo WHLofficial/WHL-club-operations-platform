@@ -15,7 +15,7 @@ import { playerAbilityLevel } from '../home.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// 窗刻度基准（增量 25）：当前已关常规窗数——效力 = 0.5 ×(本值 − contracts.service_ticks)，
+// 窗刻度基准（v3.0.0）：当前已关常规窗数——效力 = 0.5 ×(本值 − contracts.service_ticks)，
 // 保护期判定 = 本值 < contracts.protection_ticks（季初/中期按同赛季非临时窗顺序派生，不入库）
 const CURRENT_TICKS_SQL = `(SELECT COUNT(*) FROM season_windows swe WHERE swe.status = 'closed' AND swe.is_temporary = 0)`;
 
@@ -27,12 +27,12 @@ const CONTRACT_SOURCES = ['negotiation', 'forced', 'direct', 'import'] as const;
 const ATTR_KEYS: readonly string[] = FC26_GAME_ATTR_COLUMNS.slice(FC26_GAME_ATTR_COLUMNS.indexOf('sprintspeed'));
 const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
 
-// 球员库排序键（增量 6.1 d6；增量 26 扩到表头每一列）：表本身在 src/core/players-sort.ts，
+// 球员库排序键（v0.7.1 d6；v3.1.0 扩到表头每一列）：表本身在 src/core/players-sort.ts，
 // 与前端 web/src/lib/players-library.ts 共用同一份 —— 两边各写一份字面量时，后端加键前端漏加没人会发现
 // 键的语义（数值 keyset / 文本游标 / 手写权重序）见那个文件，实现见下面的 buildSortExprs
-// influence（增量 17）：规则 4.1.3 球员影响力=系数×能力等级×国际声望，现值口径，ROUND 2 位
-// view=initial（增量 6.1 d7）：初始球员库=导入时数据——CA=base_ca、PA=导入 json 值（归属无「初始」维度，
-// 增量 14 裁决 4 删掉 initial_club_id：它从不参与成长判定，只是同一件事的第二种说法）
+// influence（v2.3.0）：规则 4.1.3 球员影响力=系数×能力等级×国际声望，现值口径，ROUND 2 位
+// view=initial（v0.7.1 d7）：初始球员库=导入时数据——CA=base_ca、PA=导入 json 值（归属无「初始」维度，
+// v2.0.0 裁决 4 删掉 initial_club_id：它从不参与成长判定，只是同一件事的第二种说法）
 type SortKey = SortKeyName;
 // 游标里文本值的长度上限：库里最长姓名 22 字符（生产实测），拦掉塞长串游标的玩法
 const TEXT_CURSOR_MAX = 120;
@@ -62,7 +62,7 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
     id: 'players.id',
     // uid = 'fc' + fcId（core/import.ts:154/218），表里显示的是去掉前缀的号，排序也按号不走字符串
     uid: "COALESCE(CAST(SUBSTR(players.uid, 3) AS INTEGER), 0)",
-    // 按显示名排（增量 32）：表里显示的是派生全名，排序就得按同一个值，否则「看着是 Erling Haaland
+    // 按显示名排（v4.0.0）：表里显示的是派生全名，排序就得按同一个值，否则「看着是 Erling Haaland
     // 却排在 E 段」。键名仍是 name（URL 参数不变）；表达式与迁移 0033 的索引必须逐字同源
     name: sqlFold(sqlDisplayName()),
     club: 'COALESCE(players.club_id, 0)',
@@ -90,7 +90,7 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
     release_fee: 'COALESCE(ct.release_fee, 0)',
     contract_type: "COALESCE(ct.contract_type, '')",
     source: "COALESCE(ct.source, '')",
-    // 与行映射里的 protected（增量 25）= 是否在保护期内，同一条判据
+    // 与行映射里的 protected（v3.0.0）= 是否在保护期内，同一条判据
     protected: `CASE WHEN ct.protection_ticks IS NOT NULL AND (${CURRENT_TICKS_SQL}) < ct.protection_ticks THEN 1 ELSE 0 END`,
     // 效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)，与 effective_years_* 筛选同源；
     // 无现行合同的球员没有签约基数可比，按 0 参与排序（不能拿 NULL 当键：keyset 的 NULL 比较恒为假，会漏行）
@@ -192,12 +192,12 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 //       growth_tier / is_future_star / china_plan / agent_tier / badges_silver_min / badges_gold_min /
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
-// 排序（增量 26 起表头每一列都可点，键名见 SORT_KEY_NAMES，属性列用 attr:<属性键>）：sort + order（id 固定 ASC 旧整数游标；
+// 排序（v3.1.0 起表头每一列都可点，键名见 SORT_KEY_NAMES，属性列用 attr:<属性键>）：sort + order（id 固定 ASC 旧整数游标；
 //       name / contract_type / source 三个文本键走文本游标，其余数值键走 keyset）
-// 增量 26：name 走去变音折叠（core/name-fold）——「sesko」能搜到「Šeško」
-// 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
+// v3.1.0：name 走去变音折叠（core/name-fold）——「sesko」能搜到「Šeško」
+// v2.8.1：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
 // 缓存键用归一后的查询串（canonicalQuery），条数上限由 guard 侧兜底
-// 增量 28：**响应不再带 total**。原先每次请求都多跑一条 `COUNT(*)`（实测 18,763 行/次，
+// v3.2.0：**响应不再带 total**。原先每次请求都多跑一条 `COUNT(*)`（实测 18,763 行/次，
 // 占单页读量的 99.7%，且不带 cursor ⇒ 每翻一页都重算整表）；分页条改游标式（第 K 页 ·
 // 已加载 N 名 · 还有更多/已到末页），总数口径移到内部端点 GET /api/cron/players-count。
 // 缓存走分级策略（`src/lib/cache-policy.ts`）：scope='players' 兜底 1h，键带代际版本号，
@@ -213,7 +213,7 @@ app.get('/players', async (c) => {
   return c.json(data);
 });
 
-// 筛选条件构造（增量 28）：列表查询与内部计数端点共用同一份。
+// 筛选条件构造（v3.2.0）：列表查询与内部计数端点共用同一份。
 // 两边各写一份必然漂移，而「计数和列表对不上」是最难发现的一类错——共用的意义就在这里。
 // cursor 不在这里：它只跟「翻到哪」有关，与「筛什么」无关（计数也不随翻页变）。
 function buildPlayerFilters(
@@ -271,10 +271,10 @@ function buildPlayerFilters(
     // 按原串判空会拼出 `%%`（匹配全库），搜索框语义被悄悄降级。
     const folded = foldNameQuery(name);
     if (folded === '') throw new HttpError(400, 'name 不能为空');
-    // 去变音搜索（增量 26）：库内是 FC 拉丁名（Šeško/Ødegaard/Çalhanoğlu…），查询词与列值
+    // 去变音搜索（v3.1.0）：库内是 FC 拉丁名（Šeško/Ødegaard/Çalhanoğlu…），查询词与列值
     // 都经 name-fold 折叠后比对，否则 sa 搜不到 Š 这类字母。折叠规则两侧同源（见 core/name-fold.ts）：
     // 参数侧走 JS foldName，列侧走同表生成的 REPLACE 链内联表达式，两侧都只做「查表 + ASCII 小写」。
-    // 显示名与缩写名两列都匹配（增量 32）：几百人的显示名是 FC26 单词常用名（`Ederson`、`Isaac`），
+    // 显示名与缩写名两列都匹配（v4.0.0）：几百人的显示名是 FC26 单词常用名（`Ederson`、`Isaac`），
     // 只看显示名按姓搜不到；反过来只看 name，`Erling Haaland` 这类派生全名搜不到。
     // 两条折叠表达式各自独立（深度各自 88 层，未叠加），行读量与单列相同（同一次全表扫）。
     const pattern = likeContains(folded);
@@ -398,7 +398,7 @@ function buildPlayerFilters(
       filterArgs.push(n);
     }
   }
-  // PlayStyle 多选（增量 27 步骤 4 改语义）：银徽章 ID（1-99）只命中银槽 1-12，
+  // PlayStyle 多选（v3.1.1 步骤 4 改语义）：银徽章 ID（1-99）只命中银槽 1-12，
   // 金徽章 ID（101-199，= 基础 ID+100）只命中金槽 13-15。
   // 改之前是 `IN (n, n+100)` 全槽匹配，于是「筛某银徽章」会把只挂了对应金徽章的球员
   // 一并捞出来（两类徽章在数据上是两件事，界面上分了两段，命中语义必须跟着分）；
@@ -467,7 +467,7 @@ function buildPlayerFilters(
   }
   const protectedQ = c.req.query('protected');
   if (protectedQ !== undefined) {
-    // 保护期按窗刻度（增量 25）：当前已关常规窗数 < protection_ticks 即在保护期内
+    // 保护期按窗刻度（v3.0.0）：当前已关常规窗数 < protection_ticks 即在保护期内
     if (protectedQ === 'in') {
       filters.push(`(${CURRENT_TICKS_SQL}) < ct.protection_ticks`);
     } else if (protectedQ === 'out') {
@@ -493,7 +493,7 @@ function buildPlayerFilters(
   return { filters, filterArgs, attrValueExpr, psSlotSelects };
 }
 
-// 视图口径（增量 28 抽出）：列表与内部计数端点必须用同一套表达式，否则「有多少人」会与
+// 视图口径（v3.2.0 抽出）：列表与内部计数端点必须用同一套表达式，否则「有多少人」会与
 // 列表实际筛出的人对不上。改动这里等于同时改两个端点。coefs 一并返回——响应里的 influence
 // 用 JS 镜像算，必须与 SQL 表达式同源。
 async function buildViewExprs(
@@ -656,7 +656,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   const players = rows.results.slice(0, limit).map((r) => ({
     id: r.id,
     uid: r.uid,
-    // 显示名与官方缩写名分开给（增量 32）：`name` = 派生显示名（表里显示的是它），
+    // 显示名与官方缩写名分开给（v4.0.0）：`name` = 派生显示名（表里显示的是它），
     // `officialName` = FC26db 缩写名，前端在标题下用小字标注，相同时不显示
     name: rowDisplayName(r),
     officialName: r.name,
@@ -688,7 +688,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     releaseFee: r.ct_release_fee,
     contractType: r.ct_contract_type,
     source: r.ct_source,
-    // 窗刻度（增量 25）：serviceSeasons = 效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
+    // 窗刻度（v3.0.0）：serviceSeasons = 效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
     serviceSeasons: r.ct_player_id === null ? null : serviceSeasons(r.ct_service_ticks ?? 0, r.current_ticks),
     protected: r.ct_protection_ticks !== null && r.current_ticks < r.ct_protection_ticks,
     attrValue: attrValueExpr ? (r.attr_value ?? null) : undefined,
@@ -715,7 +715,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   return { players, nextCursor };
 }
 
-// 内部计数端点（增量 28）：公开列表已不再回 total，但「这个筛法下有多少人」这个口径
+// 内部计数端点（v3.2.0）：公开列表已不再回 total，但「这个筛法下有多少人」这个口径
 // 运维/对账仍然要，所以留在这里复算同一份 filters —— 与列表共用 buildPlayerFilters，
 // 数字不可能和列表对不上。**不要挂公开限流与公开缓存**：它的唯一用途是低频人工查询，
 // 而每次都是整表 COUNT（实测 18,763 行/次），被公开流量反复打到就是又一次读配额事故。
@@ -733,7 +733,7 @@ export async function countPlayers(c: Context<{ Bindings: Env }>): Promise<numbe
   return row?.n ?? 0;
 }
 
-// 全库球员总数（无筛选）——管理端总览用（增量 28 步骤 6）。
+// 全库球员总数（无筛选）——管理端总览用（v3.2.0 步骤 6）。
 // 管理端总览原本直接 `SELECT COUNT(*) FROM players`（18,301 行/次，是全站第二重读面），
 // 只靠一个 isolate 级 60s 缓存挡着：多 isolate 时每个 isolate 每 60s 都要重读一次整表。
 // 这里再叠一层与列表同源的缓存（players 作用域 ⇒ 同一份代际键，写路径 purge 一起失效），
@@ -751,7 +751,7 @@ export async function countAllPlayers(c: Context<{ Bindings: Env }>): Promise<nu
   );
 }
 
-// GET /api/players/roster —— 轻量名册（增量 26，球员库搜索框的本地推荐用）
+// GET /api/players/roster —— 轻量名册（v3.1.0，球员库搜索框的本地推荐用）
 // 载荷 = 单行文本，每行「姓名|俱乐部ID|球员ID」（俱乐部为空则省略该段），换行分隔：
 // 姓名写在最前、两个数字在后，前端从行尾反向切分 ⇒ 姓名里出现「|」也不会串字段。
 // 姓名里的换行/回车在 SQL 里换成空格，否则一个球员会被拆成两行、行数与 count 对不上。
@@ -776,7 +776,7 @@ app.get('/players/roster', async (c) => {
 
 async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: string; count: number }> {
   const row = await c.env.DB.prepare(
-    // 姓名取显示名、第三字段取 fc_id（增量 32，前端据此拼规范球员页 URL）。fc_id 生产 18301 行全覆盖，
+    // 姓名取显示名、第三字段取 fc_id（v4.0.0，前端据此拼规范球员页 URL）。fc_id 生产 18301 行全覆盖，
     // COALESCE 兜底只为守住「行数 = count」这条不变量：`||` 遇 NULL 会把整行抹成 NULL，
     // group_concat 会静默少一行，那时行数与 count 对不上、前端反查就会错位。
     `SELECT COUNT(*) AS n, group_concat(line, char(10)) AS roster FROM (
@@ -859,7 +859,7 @@ app.get('/players/:id', async (c) => {
       }>(),
     c.env.DB.prepare(`SELECT ${CURRENT_TICKS_SQL} AS n`).first<{ n: number }>(),
   ]);
-  // 窗刻度（增量 25）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
+  // 窗刻度（v3.0.0）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
   const currentTicks = ticksRow?.n ?? 0;
 
   let gameAttrs: Record<string, unknown> | null = null;

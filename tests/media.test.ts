@@ -1,4 +1,4 @@
-// 增量 31：媒体读取路由（镜像比赛系统的公开媒体路由）——白名单、R2 未命中、长缓存头、边缘缓存旁路。
+// v3.4.0：媒体读取路由（镜像比赛系统的公开媒体路由）——白名单、R2 未命中、长缓存头、边缘缓存旁路。
 // 本路由是球队页唯一的零 D1 读面，测试里不建任何库：env 只给 MEDIA 桶。
 import { afterEach, describe, expect, it } from 'vitest';
 import { app } from '../src/worker/index.ts';
@@ -43,7 +43,7 @@ afterEach(() => {
   else G.caches = realCaches;
 });
 
-describe('GET /api/media/*（增量 31）', () => {
+describe('GET /api/media/*（v3.4.0）', () => {
   it('白名单内的 key 从 R2 取出，带 immutable 长缓存与 ETag', async () => {
     const { bucket, reads } = fakeBucket(['team/12/1712345678.png']);
     const res = await get('/api/media/team/12/1712345678.png', bucket);

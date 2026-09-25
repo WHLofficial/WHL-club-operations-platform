@@ -1,5 +1,5 @@
-// 管理端 · 球员页：注册快照与准入体检 + 球员批量维护（增量 10）+ 成长引擎（§10）
-// （原 Admin.tsx 三 section，增量 15 拆分；commit 3 数据层转 TanStack Query）
+// 管理端 · 球员页：注册快照与准入体检 + 球员批量维护（v1.3.0）+ 成长引擎（§10）
+// （原 Admin.tsx 三 section，v2.1.0 拆分；commit 3 数据层转 TanStack Query）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, MANUAL_GROWTH_TYPES, type AdminRegistrations, type ComplianceReport, type GrowthPeriodsResponse, type GrowthSettlementResult } from '../../lib/api.ts';
@@ -196,7 +196,7 @@ function RegistrationsSection() {
   );
 }
 
-/* ---------- 球员批量维护（增量 10） ---------- */
+/* ---------- 球员批量维护（v1.3.0） ---------- */
 
 // 每行一名球员：`id key=value ...`，key 与单改接口一致；marketValue/ca/baseCa/pa/prestige 可填 null
 const PLAYER_BATCH_KEYS = ['marketValue', 'status', 'growthTier', 'isFutureStar', 'growable', 'prestige', 'badgesSilver', 'badgesGold', 'ca', 'baseCa', 'pa'];

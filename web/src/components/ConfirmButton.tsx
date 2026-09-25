@@ -1,4 +1,4 @@
-// 管理端两段式确认按钮（增量 15 commit 4）：第一次点进入 armed 高亮态，再点才执行。
+// 管理端两段式确认按钮（v2.1.0 commit 4）：第一次点进入 armed 高亮态，再点才执行。
 // 失焦自动解除；disarmKey 变化（如表单输入）也解除，对齐原各 section 的 resetArm 习惯。
 import { useEffect, useState } from 'react';
 

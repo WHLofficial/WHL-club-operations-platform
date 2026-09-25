@@ -263,7 +263,7 @@ export async function defensivePositionsForClub(db: D1Database, clubId: number):
   return defensive;
 }
 
-// ---- CPU 队判定（用户规则 2026-09-18，队籍口径修订 增量 14）----
+// ---- CPU 队判定（用户规则 2026-09-18，队籍口径修订 v2.0.0）----
 
 /**
  * 比赛系统里队名以半角「(CPU)」结尾的队 = CPU 队。严格匹配，不做全角括号/大小写/空格容错：
@@ -274,14 +274,14 @@ export function isCpuTeam(teamName: string | null | undefined): boolean {
   return typeof teamName === 'string' && teamName.endsWith('(CPU)');
 }
 
-// CPU 判定列化（增量 22，迁移 0026）：clubs.is_cpu 由迁移按队名口径回填（substr(name,-5)='(CPU)'），
+// CPU 判定列化（v2.8.0，迁移 0026）：clubs.is_cpu 由迁移按队名口径回填（substr(name,-5)='(CPU)'），
 // 之后新增 CPU 队走管理端建 clubs 行时置列；队名后缀只活在 tour 库侧的 isCpuTeam。
 const CPU_CLUB_NAME_MATCH = 'is_cpu = 1';
 
 /** 同上的 SQL 谓词形态——在 WHERE 子句里当集合用（如 club_id IN (SELECT ...)）。 */
 export const CPU_CLUB_IDS_SQL = `(SELECT id FROM clubs WHERE ${CPU_CLUB_NAME_MATCH})`;
 
-/** CPU 队的俱乐部 id 集合（队名带 (CPU) 后缀）——入账与落位前的白名单判定用（增量 14）。 */
+/** CPU 队的俱乐部 id 集合（队名带 (CPU) 后缀）——入账与落位前的白名单判定用（v2.0.0）。 */
 export async function cpuClubIds(db: D1Database): Promise<Set<number>> {
   const rows = await db.prepare(`SELECT id FROM clubs WHERE ${CPU_CLUB_NAME_MATCH}`).all<{ id: number }>();
   return new Set(rows.results.map((r) => r.id));
@@ -473,7 +473,7 @@ async function scanRows<T>(db: D1Database, baseSql: string, cursorCol: string, p
   return out;
 }
 
-// ---- PlayStyle 发放明细（增量 30：徽章与 PlayStyle 合并）----
+// ---- PlayStyle 发放明细（v3.3.0：徽章与 PlayStyle 合并）----
 // 台账计数（players.badges_silver / badges_gold）说「发了几个」，明细表（player_playstyles）说
 // 「发了哪几个、落在哪个槽、谁发的、什么来源」。两侧口径必须同进同退：
 //   · 升级方案 / 中国计划发放 → 明细写行 + 台账加计数（同批）

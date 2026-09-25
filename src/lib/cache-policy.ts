@@ -1,4 +1,4 @@
-// 公开读缓存的分级策略（增量 28 裁决⑩）。
+// 公开读缓存的分级策略（v3.2.0 裁决⑩）。
 //
 // 两件事必须分清：
 // - **新鲜度**靠写路径 purge（见 WRITE_SCOPE_PREFIXES）——写后本 isolate 立即失效；
@@ -58,7 +58,7 @@ export const WRITE_SCOPE_PREFIXES: ReadonlyArray<readonly [string, readonly Cach
   ['/api/registration', PUBLIC_SCOPES],
   ['/api/growth', PUBLIC_SCOPES],
   ['/api/cron', PUBLIC_SCOPES],
-  // 增量 37 机器通道：赛事系统建队推过来会在本仓建 clubs 行（公开目录 + 名册的俱乐部归属都会变），
+  // v6.1.0 机器通道：赛事系统建队推过来会在本仓建 clubs 行（公开目录 + 名册的俱乐部归属都会变），
   // 不登记就会「建了俱乐部但公开列表最长陈旧 24h」。
   ['/api/internal', PUBLIC_SCOPES],
 ];

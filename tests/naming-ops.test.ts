@@ -1,4 +1,4 @@
-// 冠名市场（增量 20）：底价公式与三套餐、签约快照与双签闸、解约赔金、窗末收租/对赌奖金、路由冒烟
+// 冠名市场（v2.6.0）：底价公式与三套餐、签约快照与双签闸、解约赔金、窗末收租/对赌奖金、路由冒烟
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';

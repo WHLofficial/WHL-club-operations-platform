@@ -26,7 +26,7 @@ import { autoConfirmResults } from './results.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// 公开读缓存的中心化失效挂钩（增量 28）：**必须注册在路由之前**——Hono 的 compose 里路由
+// 公开读缓存的中心化失效挂钩（v3.2.0）：**必须注册在路由之前**——Hono 的 compose 里路由
 // 返回响应就结束链路，注册在后面的中间件根本不会执行。
 // 不在 27 个含写语句的文件里逐个接 purge：散接必漏，而漏接的代价是「列表最长陈旧 1h、
 // 名册/目录 24h」（兜底 TTL 自愈，有界但不新鲜）。判据只看「非 GET/HEAD + 响应 2xx +
@@ -50,14 +50,14 @@ app.route('/api', marketRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
 app.route('/api', growthRoutes);
-// 全平台一线队名册（增量 33）：赛事系统拉取同步的契约面，只读
+// 全平台一线队名册（v5.0.0）：赛事系统拉取同步的契约面，只读
 app.route('/api', squadsRoutes);
 app.route('/api', notificationsRoutes);
 app.route('/api', authRoutes);
-// 媒体读取（增量 31）：镜像比赛系统的公开媒体路由，只读不写、不碰 D1（队徽/封面图同源取）
+// 媒体读取（v3.4.0）：镜像比赛系统的公开媒体路由，只读不写、不碰 D1（队徽/封面图同源取）
 app.route('/api/media', mediaRoutes);
 app.route('/api/admin', adminRoutes);
-// 机器通道入站（增量 37）：赛事系统建队推过来建俱乐部行。不走会话，只认 HMAC 签名；
+// 机器通道入站（v6.1.0）：赛事系统建队推过来建俱乐部行。不走会话，只认 HMAC 签名；
 // 未配 TEAM_SYNC_SECRET 一律 503。写路径已在 cache-policy 登记（否则公开目录最长陈旧 24h）。
 app.route('/api/internal', internalRoutes);
 
@@ -125,7 +125,7 @@ app.post('/api/cron/tick', async (c) => {
   return c.json(await runSettleTick(c.env));
 });
 
-// 内部计数端点（增量 28）：公开列表去掉 total 后（每次请求多跑一条 18,763 行的整表 COUNT），
+// 内部计数端点（v3.2.0）：公开列表去掉 total 后（每次请求多跑一条 18,763 行的整表 COUNT），
 // 这个口径留给运维/对账。守卫比 tick 更严——**未配 CRON_KEY 就拒绝**，且只认 X-Cron-Key 头
 // （GET 带 ?key= 会把密钥写进访问日志）：这个端点每次调用都是整表 COUNT，放行等于公开一个读放大器。
 // 不进公开缓存、不挂公开限流。生产已于 2026-09-22 配好 CRON_KEY（此前 tick 是 fail-open 的）。
@@ -141,14 +141,14 @@ export { app };
 // 惰性结算统一入口（§6.5）：cron 与手动 tick 共用；幂等可重入
 async function runSettleTick(env: Env) {
   const summary = await settleOverdue(env);
-  // 赛果自动确认（增量 21）：完赛场次逐场入档，异常标人工；开关/上限在 results.ts
+  // 赛果自动确认（v2.7.0）：完赛场次逐场入档，异常标人工；开关/上限在 results.ts
   const autoResults = await autoConfirmResults(env);
   // bot 通知重试（§12）：失败留 pending，下轮再投
   const notify = await dispatchPendingNotifications(env);
   return { ok: true, ...summary, autoResults, notify };
 }
 
-// tick 是否真的动了**公开数据**（增量 28 的 purge 判据）：只看 settleOverdue 的
+// tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的
 // {settled,delisted,voided,notesUpdated,healed}——挂牌结算会写 contracts / players.club_id，
 // 正是列表的合同列与名册的俱乐部归属。**刻意不看 notify 与 autoResults**：前者只写 notifications、
 // 后者只写 result_confirmations，都不在公开 scope 里，算进来会让每个 tick 都可能白 purge 一次，

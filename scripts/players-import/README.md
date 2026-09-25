@@ -70,7 +70,7 @@ upsert 只需 14 行，是因为 `UPDATE` 只为「SET 列表里出现过的列�
   在线源（sofifa 转登录页、futbin/fut.gg/fifaindex 403、Wikipedia/Wikidata 出网被拦）均不可用。
   → 按「查不到的逐条报，不猜」搁置：清单在 `missing-fields-30.csv`，补值后用 `overlay-missing.ts` 一条命令入账（幂等）。
 - **`club_id` 导入时为 NULL**：导入只写 FC 源列，不碰运营列（§5.4）——本次首灌全体未归属。
-  2026-09-19 增量 14 已把 4 支 CPU 队（曼城/巴塞罗那/RB莱比锡/AC米兰）的 107 名球员回填 `club_id`
+  2026-09-19 v2.0.0 已把 4 支 CPU 队（曼城/巴塞罗那/RB莱比锡/AC米兰）的 107 名球员回填 `club_id`
   （`scripts/prod-20260919-increment14/02-backfill-cpu-club-id.sql`），此后导入侧按 `clubIdForTeam` 直接写 `club_id`。
 - **审计行未写**：绕过管理端即无 `players_import` 审计记录，本次以报告 + 分片 sha256 作为凭据。
 

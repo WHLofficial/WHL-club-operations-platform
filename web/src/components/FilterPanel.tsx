@@ -1,4 +1,4 @@
-// 球员库筛选面板（增量 26）：桌面左栏与窄屏抽屉共用同一份控件，只有栅格外层不同。
+// 球员库筛选面板（v3.1.0）：桌面左栏与窄屏抽屉共用同一份控件，只有栅格外层不同。
 // 面板只负责渲染与回调，筛选状态、URL 同步、列清单都在页面（pages/PlayersLibrary.tsx）手里。
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClubDirectoryRow } from '../lib/api.ts';
@@ -23,7 +23,7 @@ export interface FilterPanelProps {
   resetCols: () => void;
 }
 
-// PlayStyle 下拉数据（增量 27 步骤 4）：银徽章与金徽章是两件事——金徽在库里存「基础 ID+100」
+// PlayStyle 下拉数据（v3.1.1 步骤 4）：银徽章与金徽章是两件事——金徽在库里存「基础 ID+100」
 // 且只进金槽（core/fc26.ts 的两段 ID 口径），所以顶层分两段、段内再按 EA 的六类分组。
 // 段名排在 id 序之前：ref 表是按 id 升序的，不排序也能得到「先银后金」，但表一旦被重排就会串段。
 const PS_TYPE_CN: Record<string, string> = {
@@ -50,7 +50,7 @@ const PS_ITEMS: MultiSelectItem[] = [
   ...PS_ROWS.filter((r) => isGoldPlaystyleId(r.id)).map((r) => psItem(r, '金徽章')),
 ];
 
-// 位置与显示列的多选下拉条目（增量 27 步骤 3）；位置只有 12 个码位、不分段
+// 位置与显示列的多选下拉条目（v3.1.1 步骤 3）；位置只有 12 个码位、不分段
 const POSITION_ITEMS: MultiSelectItem[] = POSITIONS.map((p) => ({ value: p, label: p }));
 const COL_ITEMS: MultiSelectItem[] = COL_DEFS.map((d) => ({ value: d.key, label: d.label }));
 
@@ -68,7 +68,7 @@ export default function FilterPanel({
   toggleCol,
   resetCols,
 }: FilterPanelProps) {
-  // 成对区间输入（增量 27 步骤 2）：同属性的上下限并成一行两列，左「最低」右「最高」。
+  // 成对区间输入（v3.1.1 步骤 2）：同属性的上下限并成一行两列，左「最低」右「最高」。
   // 字段名与 URL 键一律不动（还是 caMin/caMax 这一套），这里只改版式与文案。
   // 摘要条那边不跟着合并（步骤 5 只并了位置与徽章）：上下限是两件独立的事，
   // 「CA ≥ 70」和「CA ≤ 90」各留一条 chip，删一个不会把另一个也带走。
@@ -135,7 +135,7 @@ export default function FilterPanel({
         </button>
       </div>
 
-      {/* 位置（增量 27 步骤 3）：改多选下拉，只有 12 个码位；原先的四个组 chip
+      {/* 位置（v3.1.1 步骤 3）：改多选下拉，只有 12 个码位；原先的四个组 chip
           （门将/后卫/中场/前锋）下线，一行铺 5 行的位置清单收成一行控件。 */}
       <div className="lib-chip-row">
         <MultiSelect label="位置" items={POSITION_ITEMS} selected={filters.positions} onToggle={togglePosition} onClear={() => set('positions', [])} />
@@ -168,7 +168,7 @@ export default function FilterPanel({
                   onChange={(e) => setFilters((f) => ({ ...f, attr: e.target.value, attrMin: '', attrMax: '' }))}
                 >
                   <option value="">不筛</option>
-                  {/* 增量 27 步骤 2：34 项按属性页的七组速查卡分组（单一来源 ref.ts），选项写中文名 */}
+                  {/* v3.1.1 步骤 2：34 项按属性页的七组速查卡分组（单一来源 ref.ts），选项写中文名 */}
                   {ATTR_GROUPS.map((g) => (
                     <optgroup key={g.key} label={g.label}>
                       {g.keys.map((k) => (
@@ -287,7 +287,7 @@ export default function FilterPanel({
         </div>
       </details>
 
-      {/* 显示列（增量 27 步骤 3）：与位置同一个多选下拉 —— 18 个 chip 铺开吃掉左栏一大片，
+      {/* 显示列（v3.1.1 步骤 3）：与位置同一个多选下拉 —— 18 个 chip 铺开吃掉左栏一大片，
           语义上本来就是「勾选哪些列」。手动改过列才在面板底部出现「恢复自动」。 */}
       <div className="lib-chip-row">
         <MultiSelect

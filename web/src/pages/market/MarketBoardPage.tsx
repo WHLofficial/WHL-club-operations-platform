@@ -1,4 +1,4 @@
-// 市场板 /market（增量 16 拆页）：挂牌板（卡柜）+ 单卡详情与出价历史 + 匹配决定（24h 窗）。
+// 市场板 /market（v2.2.0 拆页）：挂牌板（卡柜）+ 单卡详情与出价历史 + 匹配决定（24h 窗）。
 // 原 Market.tsx 的挂牌板与 DetailSection 原样搬迁；海捞/我的挂牌/我的出价分到 /market/free、/market/mine。
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';

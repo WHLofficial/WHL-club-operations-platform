@@ -36,11 +36,11 @@ const ADMIN_PERMS = [
   'club.compliance.view',
 ] as const;
 const COACH_PERMS = ['club.squad.manage', 'club.registrations.submit'] as const;
-// 超管独立权限点（增量 15）：不进 ADMIN_PERMS any 判定集——普通管理组六点不附带，
+// 超管独立权限点（v2.1.0）：不进 ADMIN_PERMS any 判定集——普通管理组六点不附带，
 // 只有认证中心 superadmin 角色（OIDC）或赛事库 superadmin 角色（兼容）才持有。
 export const SUPER_ADMIN_PERM = 'club.config.manage.super';
 
-// OIDC 模式 = AUTH_MODE 显式配 "oidc"（增量 9 显式化）+ 两项连接变量齐备；未配 AUTH_MODE =
+// OIDC 模式 = AUTH_MODE 显式配 "oidc"（v1.2.0 显式化）+ 两项连接变量齐备；未配 AUTH_MODE =
 // 兼容模式。不再靠 OIDC_ISSUER 的有无隐式判定——vars 随 wrangler.jsonc 一起部署，
 // 杜绝「忘配/半配悄悄改行为」。
 export function isOidc(env: Env): env is Env & { AUTH_MODE: string; OIDC_ISSUER: string; OIDC_CLIENT_ID: string } {
@@ -218,7 +218,7 @@ export async function requireUser(env: Env, request: Request): Promise<SessionUs
 export async function requireCoach(env: Env, request: Request, perm?: (typeof COACH_PERMS)[number]): Promise<SessionUser> {
   const user = await requireUser(env, request);
   if (isOidc(env)) {
-    // 教练判定（增量 7）：auth 对所有新账号自动发 club.coach，权限点无区分度，
+    // 教练判定（v1.0.0）：auth 对所有新账号自动发 club.coach，权限点无区分度，
     // 改以认证中心绑定为准——绑定了球队即教练；权限点保留为旁路，让未绑定的
     // 准教练也能进 /clubs/bind 这类绑前端点。管理点照旧先行。
     const perms = user.locked ? [] : user.permissions;
@@ -248,7 +248,7 @@ export async function requireAdmin(env: Env, request: Request, perm?: (typeof AD
   return user;
 }
 
-// 超管端点（平台参数全开，增量 15）：两模式统一按 permissions 判定——
+// 超管端点（平台参数全开，v2.1.0）：两模式统一按 permissions 判定——
 // 两种登录路径各自在会话解析时把 superadmin 角色投影成 SUPER_ADMIN_PERM
 export async function requireSuperAdmin(env: Env, request: Request): Promise<SessionUser> {
   const user = await requireUser(env, request);

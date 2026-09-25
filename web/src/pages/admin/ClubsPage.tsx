@@ -1,4 +1,4 @@
-// 管理端 · 俱乐部页：建队、绑定认证码、解绑、转会冻结、主场档案（原 Admin.tsx ClubsSection，增量 15 拆分）
+// 管理端 · 俱乐部页：建队、绑定认证码、解绑、转会冻结、主场档案（原 Admin.tsx ClubsSection，v2.1.0 拆分）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiDelete, apiPost, type AdminClubRow, type StadiumAdmin } from '../../lib/api.ts';
@@ -344,7 +344,7 @@ function ClubsSection() {
   );
 }
 
-// 球队同步对账（增量 37）：赛事系统 team ↔ 登记册 clubs 按同一个游戏球队 ID 对齐。
+// 球队同步对账（v6.1.0）：赛事系统 team ↔ 登记册 clubs 按同一个游戏球队 ID 对齐。
 // 推送是实时的，但它会因为密钥没配、对端不可达、队名撞车而失败——失败留下的差异在这里显形并一键补齐。
 function TeamSyncSection() {
   const { show, toastNode } = useToast();

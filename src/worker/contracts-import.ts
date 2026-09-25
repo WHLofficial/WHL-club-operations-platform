@@ -42,7 +42,7 @@ function runNormalize(rows: Record<string, unknown>[]): ReturnType<typeof normal
   }
 }
 
-// 目标俱乐部必须真实存在（增量 22 缺陷修复）：预览/确认都查，坏 clubId 原本会静默放行、
+// 目标俱乐部必须真实存在（v2.8.0 缺陷修复）：预览/确认都查，坏 clubId 原本会静默放行、
 // 落库才撞 contracts.club_id 外键炸 500
 async function requireClubExists(db: D1Database, clubId: number): Promise<void> {
   const club = await db.prepare('SELECT id FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
@@ -81,7 +81,7 @@ interface ClassifyResult {
 // 归一化结果 → 按库内归属/现行合同分类：create=新建合同，update=覆盖本队现行合同，
 // claim=新建合同并认领无归属球员。归属冲突进 errors。
 async function classify(db: D1Database, clubId: number, contracts: NormalizedContract[]): Promise<ClassifyResult> {
-  // CPU 队球员带 club_id 但照旧可被认领（增量 14，用户裁决）：认领 = 从 CPU 队转入本队
+  // CPU 队球员带 club_id 但照旧可被认领（v2.0.0，用户裁决）：认领 = 从 CPU 队转入本队
   const cpuIds = await cpuClubIds(db);
   const idRows = await lookupIn<{ id: number; fc_id: number; club_id: number | null; name: string; display_name: string | null }>(
     db,
@@ -189,7 +189,7 @@ function upsertContractStatement(
   c: Classified,
   baseTicks: number,
 ): D1PreparedStatement {
-  // 冲突时保 signed_at 原值；窗刻度（增量 25）：效力基数取该合同效力起点当年已关常规窗数，
+  // 冲突时保 signed_at 原值；窗刻度（v3.0.0）：效力基数取该合同效力起点当年已关常规窗数，
   // 保护期 = 基数 + 3 个常规窗（训练营无保护期）；导入不落 signed_season/signed_window_seq
   return db
     .prepare(
@@ -248,7 +248,7 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
       const ph = claimIds.map(() => '?').join(', ');
       statements.push(
         // 认领只作用于仍无归属、或仍挂 CPU 队的行：分类与落库之间被人抢走也不会错绑。
-        // 号码一并清空（增量 32）：换队即失效，新东家自己定号
+        // 号码一并清空（v4.0.0）：换队即失效，新东家自己定号
         env.DB.prepare(
           `UPDATE players SET club_id = ?, number = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
            WHERE id IN (${ph}) AND (club_id IS NULL OR club_id IN ${CPU_CLUB_IDS_SQL})`,

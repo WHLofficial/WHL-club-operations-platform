@@ -92,7 +92,7 @@ async function openWindowFor(fx: Fixture, season: number, windowSeq: number): Pr
   expect(res.status).toBe(201);
 }
 
-describe('赛季与赛事绑定（§11，增量 6.1 层级修订：赛事绑赛季、窗口只管转会准入）', () => {
+describe('赛季与赛事绑定（§11，v0.7.1 层级修订：赛事绑赛季、窗口只管转会准入）', () => {
   it('建赛季 → 开窗 → 绑赛事 → 公开端点可见；开窗把备赛期推进到进行中', async () => {
     const fx = freshEnv();
     seedTournament(fx);
@@ -297,7 +297,7 @@ describe('赛果只读同步与确认（附录 A〔6〕）', () => {
   });
 });
 
-describe('赛果自动确认（增量 21）：cron 扫完赛场次 + 异常标人工 + 钩子重放', () => {
+describe('赛果自动确认（v2.7.0）：cron 扫完赛场次 + 异常标人工 + 钩子重放', () => {
   async function bindTournament5(fx: Fixture): Promise<void> {
     await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
     await openWindowFor(fx, 3, 1);
@@ -336,7 +336,7 @@ describe('赛果自动确认（增量 21）：cron 扫完赛场次 + 异常标�
     expect(skipped).toEqual({ skipped: true, confirmed: 0, flagged: 0, failed: 0 });
   });
 
-  it('球员匹配优先走 fc_id：两侧名字写法不同也能对上（增量 32）', async () => {
+  it('球员匹配优先走 fc_id：两侧名字写法不同也能对上（v4.0.0）', async () => {
     const fx = freshEnv();
     seedTournament(fx);
     await bindTournament5(fx);

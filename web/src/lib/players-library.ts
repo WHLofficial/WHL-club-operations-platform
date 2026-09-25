@@ -1,4 +1,4 @@
-// 球员库的筛选模型与列模型（增量 26 从 pages/PlayersLibrary.tsx 拆出，供页面与 FilterPanel 共用）。
+// 球员库的筛选模型与列模型（v3.1.0 从 pages/PlayersLibrary.tsx 拆出，供页面与 FilterPanel 共用）。
 // 四件事都在这里：Filters 类型与默认值、URL query ↔ 筛选状态的互转、筛选 → 自动列的联动规则、
 // 生效条件摘要条（filterChips）。拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，
 // 留在页面里会形成页面 ↔ 组件的循环导入。
@@ -53,7 +53,7 @@ export const STATUS_BADGE: Record<string, string> = {
 };
 
 // 位置全集按 PositionID 升序（同 src/core/fc26.ts POSITION_BY_ID）。
-// 增量 27 前这里还有一份 POSITION_GROUPS（门将/后卫/中场/前锋整组选中的快捷 chip），
+// v3.1.1 前这里还有一份 POSITION_GROUPS（门将/后卫/中场/前锋整组选中的快捷 chip），
 // 位置改多选下拉后只剩 12 个码位，那份分组没有引用者了。
 export const POSITIONS = ['GK', 'RB', 'CB', 'LB', 'CDM', 'RM', 'CM', 'LM', 'CAM', 'RW', 'ST', 'LW'];
 
@@ -249,7 +249,7 @@ export function filtersToQuery(f: Filters): string {
   put('is_future_star', f.futureStar ? '1' : '');
   put('china_plan', f.chinaPlan ? '1' : '');
   put('agent_tier', f.agentTier);
-  // 金段 ID（101-199）也要发出去：银徽与金徽各查各的槽（增量 27 步骤 4）。
+  // 金段 ID（101-199）也要发出去：银徽与金徽各查各的槽（v3.1.1 步骤 4）。
   // 这里的过滤是防手改地址栏塞脏值 —— 后端会 400，整个列表变成错误态。
   put('ps', f.ps.filter((n) => isPlaystyleId(n)).join(','));
   put('has_contract', f.hasContract);
@@ -350,7 +350,7 @@ export function autoColsFor(f: Filters): string[] {
   return cols;
 }
 
-// ---- 生效条件摘要条（增量 26 步骤 5）：当前筛选翻成一行可删 chips ----
+// ---- 生效条件摘要条（v3.1.0 步骤 5）：当前筛选翻成一行可删 chips ----
 // 每个 chip 只带「把自己清掉」的补丁，页面合并回 Filters —— 这里保持纯函数，不碰状态也不碰 DOM。
 export interface FilterChip {
   id: string;

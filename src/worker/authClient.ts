@@ -1,4 +1,4 @@
-// 认证中心机器通道（增量 7 球队绑定上收）：绑定真源在 auth 库（team/team_bind_code/team_binding），
+// 认证中心机器通道（v1.0.0 球队绑定上收）：绑定真源在 auth 库（team/team_bind_code/team_binding），
 // 平台经只读 AUTH_DB 派生读（binding.ts），经这里写（发码/烧码/解绑）。
 // HMAC 契约与 auth machine.ts / tour 仓 authClient.ts 逐字一致：X-Sign = hex(HMAC-SHA256(secret, "POST|path|ts|raw"))，
 // X-Timestamp 秒级 ±300s。基地址复用 OIDC_ISSUER（同一台认证中心）；密钥 AUTH_BIND_SECRET 与 auth BIND_SECRET 同值。
@@ -77,7 +77,7 @@ export async function authUnbindTeam(env: Env, accountId: number): Promise<void>
   await machineCall(env, '/api/team/unbind', { account_id: accountId });
 }
 
-// 管理端建队自动建档（增量 17）：auth team 目录 upsert（ON CONFLICT(tour_team_id) 幂等），
+// 管理端建队自动建档（v2.3.0）：auth team 目录 upsert（ON CONFLICT(tour_team_id) 幂等），
 // 同步带上 club_id 关联；失败可重试（目录行已建时重复调用只更新 name/club_id）
 export async function authRegisterTeam(
   env: Env,

@@ -1,4 +1,4 @@
--- 增量 14（2026-09-19 生产执行）：认证中心目录补 4 支 CPU 队的 club_id
+-- v2.0.0（2026-09-19 生产执行）：认证中心目录补 4 支 CPU 队的 club_id
 -- 裁决 Q6：auth 目录「补上但禁止入账」——目录里登记 club_id 供赛程/展示，平台入账侧
 --   （prizes.ts clubIdByTourTeam）用 cpuClubIds 过滤，奖金与主场收入不发。
 -- 跑库：auth 生产库 whl-auth（在 WHL-auth-service 仓执行，或用 club 仓的 AUTH_DB 绑定名 whl-auth）。

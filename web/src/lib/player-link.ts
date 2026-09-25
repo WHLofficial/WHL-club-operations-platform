@@ -1,4 +1,4 @@
-// 球员档案的链接地址（增量 32）。
+// 球员档案的链接地址（v4.0.0）。
 //
 // 为什么不是直接 `/players/${p.id}`：`/api/players/:id` 现在按 **FC26 ID（fc_id）** 寻址，
 // 内部主键只是回落路径（见 src/worker/player-ref.ts）。fc_id 才是跨系统稳定的身份——

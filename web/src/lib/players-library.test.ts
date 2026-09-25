@@ -104,7 +104,7 @@ describe('URL → 筛选状态', () => {
       expect(f.positions).toEqual(['GK']);
       expect(f.ps).toEqual([3]);
     });
-    // 增量 27 步骤 4：金徽章 ID（基础 ID+100）合法，100 是两段之间的空档、200 越界
+    // v3.1.1 步骤 4：金徽章 ID（基础 ID+100）合法，100 是两段之间的空档、200 越界
     withQuery('ps=101,125,100,200,-1', () => {
       expect(filtersFromUrl().ps).toEqual([101, 125]);
     });

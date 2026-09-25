@@ -60,7 +60,7 @@ export async function listWindows(db: D1Database): Promise<{ seasons: { season: 
 
 /**
  * 开窗：无在开窗口（一次只有一个窗）；season 缺省取最新赛季、windowSeq 缺省顺延；
- * 赛季行不存在时自动按 running 建档（完整赛季管理随增量 6）。
+ * 赛季行不存在时自动按 running 建档（完整赛季管理随v0.7.0）。
  * 全球员经纪人性格重掷：roll < prob → 三档等概率（会话存续期性格恒定，E 已快照）。
  * declareGrowthPeriod=true（管理端勾选复选框）时同批宣告新成长期——不再与窗口绑定，
  * 只是把「开窗」当成一个常用时点；管理端也可以随时手动宣告（见 routes/admin/growth.ts 的 /growth/periods）。
@@ -101,7 +101,7 @@ export async function openWindow(
     if (!Number.isInteger(windowSeq) || windowSeq <= 0) throw new HttpError(400, 'windowSeq 应为正整数');
   }
 
-  // 窗类型（增量 25）：临时窗由管理端复选框指定；同赛季常规窗最多 2 个（季初 + 中期），
+  // 窗类型（v3.0.0）：临时窗由管理端复选框指定；同赛季常规窗最多 2 个（季初 + 中期），
   // 第 3 个非临时窗硬拦（要开就勾临时窗）；季初/中期不落库，按同赛季非临时窗顺序派生
   const isTemporary = temporaryInput === true;
   if (!isTemporary) {
@@ -270,12 +270,12 @@ export async function closeWindow(
   }
 
   const audit = createAuditStatement(db);
-  // 窗末扣款（增量 11；增量 25 按窗类型分支）：常规窗 = 富人税 → 工资 → 维护费 → 冠名收租；
+  // 窗末扣款（v1.4.0；v3.0.0 按窗类型分支）：常规窗 = 富人税 → 工资 → 维护费 → 冠名收租；
   // 临时窗 = 富人税 → 维护费（工资不扣、冠名不收不减）。全部并入关窗批（窗口状态 UPDATE 行数=原子闸）
   const payroll = await windowPayrollStatements(env, win.season, win.windowSeq, { chargeWages: !isTemporary });
-  // 窗末主场结算（增量 12）：维护费+死忠演化+冠名收租并入同批（幂等闸/原子语义与工资一致）
+  // 窗末主场结算（v1.5.0）：维护费+死忠演化+冠名收租并入同批（幂等闸/原子语义与工资一致）
   const home = await windowHomeStatements(env, win.season, win.windowSeq, { chargeNaming: !isTemporary });
-  // 忠诚奖金（规则 4.3.2；增量 25 改口径）：只在常规窗且同赛季第 2 个（中期）关窗时发，
+  // 忠诚奖金（规则 4.3.2；v3.0.0 改口径）：只在常规窗且同赛季第 2 个（中期）关窗时发，
   // 效力按关窗后窗刻度算（本窗 +0.5 已计入），逐队汇总，幂等 ref = window/season*100+windowSeq
   let loyalty: { statements: ReturnType<Env['DB']['prepare']>[]; summary: { count: number; total: number } } = {
     statements: [],

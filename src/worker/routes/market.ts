@@ -265,12 +265,12 @@ app.get('/market/free-agents', async (c) => {
   if (!club) return c.json({ club: null, freeAgents: [] });
 
   const win = await getOpenWindow(c.env.DB);
-  // 名单 = 真无归属的球员 + CPU 队球员（增量 14：CPU 队有 clubs 行、其球员带 club_id，但照旧可海捞）
-  // 上限 300：海捞池含 4 支 CPU 队约 107 人 + 待业球员（增量 28 步骤 6 普查时生产已有 17,731 名自由身，
+  // 名单 = 真无归属的球员 + CPU 队球员（v2.0.0：CPU 队有 clubs 行、其球员带 club_id，但照旧可海捞）
+  // 上限 300：海捞池含 4 支 CPU 队约 107 人 + 待业球员（v3.2.0 步骤 6 普查时生产已有 17,731 名自由身，
   //   即 LIMIT 300 只露 CA 最高的那 300 人 —— 池子规模与「藏起低 CA 那半截」的老理由已不成比例，
   //   分页/筛选是产品决策，登记在案未在本增量处理）
   //
-  // 两分支 top-N 重写（增量 28 步骤 6）：普查实测这条查询单次 36,274 行，是全站最大读放大器。
+  // 两分支 top-N 重写（v3.2.0 步骤 6）：普查实测这条查询单次 36,274 行，是全站最大读放大器。
   //   原写法 (club_id IS NULL OR club_id IN ...) 让 SQLite 走 MULTI-INDEX OR + 临时排序，必须读出
   //   全部 17,731 名自由身球员再排序，索引救不了它。拆成两支各取 top-N 再合并后（生产实测）：
   //   · 无归属支 300 行 —— 沿 idx_players_club_ca(club_id, ca DESC, id) 走 ca 序、第 300 行即停（迁移 0030）

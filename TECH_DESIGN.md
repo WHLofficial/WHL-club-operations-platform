@@ -67,9 +67,9 @@ web/          React SPA（挂牌板/球队中心/球员卡/管理端/审核队�
 4. 角色沿用：`coach`→教练，`admin`/`superadmin`→管理组，locked→只读。
 5. 平台库镜像最小用户信息（user_id、显示名），不写比赛系统 user 表。
 
-### 3.2 俱乐部绑定（增量 7 改判：真源上收认证中心）
+### 3.2 俱乐部绑定（v1.0.0 改判：真源上收认证中心）
 
-**增量 7 起绑定真源在 auth 库**（tour 与 club 的球队认证本不相通，裁决上收统一，见 auth TECH_DESIGN §5.3 改判）：auth 0008 三表——`team`（tour team ↔ club club 的目录，`tour_team_id`/`club_id` 唯一可空）、`team_bind_code`（中央码表）、`team_binding`（UNIQUE(account_id) 一账号一队，一队可多账号）。本侧流程不变：管理组建俱乐部 → 生成 8 位一次性认证码 → 教练网页提交 → 绑定；但发码/烧码/解绑都改走 auth 机器 API（`src/worker/authClient.ts`，HMAC X-Sign = hex(SHA-256(BIND_SECRET, "POST|path|ts|raw"))，错误映射 invalid_code→400 / already_bound→409 / 其余 502）；烧码在 auth 单事务原子。绑定关系经只读 `AUTH_DB` D1 绑定派生读（`binding.ts` 两跳：team_binding → team.club_id → 本地 clubs 补名）。OIDC 教练判定改「**绑定即教练**」（auth 对所有新账号自动发 club.coach，权限点无区分度；管理点仍走权限点，未绑定的准教练凭权限点保留旁路进绑前端点）。本地 `club_bind_code`/`club_bindings` 表**休眠保留防回滚**（代码不再读写；AUTH_DB 未配置时回落本地表即回滚通道）。管理端列表的绑定/最新码改读 AUTH_DB（绑定人姓名取 auth account.name）。通知收件人（§12）同步改两跳派生。存量迁移见 auth 仓 `scripts/migrate-team-bindings.mjs`（以 tour team_member 为基准，club 绑定校对，冲突/单边人工裁决）。
+**v1.0.0 起绑定真源在 auth 库**（tour 与 club 的球队认证本不相通，裁决上收统一，见 auth TECH_DESIGN §5.3 改判）：auth 0008 三表——`team`（tour team ↔ club club 的目录，`tour_team_id`/`club_id` 唯一可空）、`team_bind_code`（中央码表）、`team_binding`（UNIQUE(account_id) 一账号一队，一队可多账号）。本侧流程不变：管理组建俱乐部 → 生成 8 位一次性认证码 → 教练网页提交 → 绑定；但发码/烧码/解绑都改走 auth 机器 API（`src/worker/authClient.ts`，HMAC X-Sign = hex(SHA-256(BIND_SECRET, "POST|path|ts|raw"))，错误映射 invalid_code→400 / already_bound→409 / 其余 502）；烧码在 auth 单事务原子。绑定关系经只读 `AUTH_DB` D1 绑定派生读（`binding.ts` 两跳：team_binding → team.club_id → 本地 clubs 补名）。OIDC 教练判定改「**绑定即教练**」（auth 对所有新账号自动发 club.coach，权限点无区分度；管理点仍走权限点，未绑定的准教练凭权限点保留旁路进绑前端点）。本地 `club_bind_code`/`club_bindings` 表**休眠保留防回滚**（代码不再读写；AUTH_DB 未配置时回落本地表即回滚通道）。管理端列表的绑定/最新码改读 AUTH_DB（绑定人姓名取 auth account.name）。通知收件人（§12）同步改两跳派生。存量迁移见 auth 仓 `scripts/migrate-team-bindings.mjs`（以 tour team_member 为基准，club 绑定校对，冲突/单边人工裁决）。
 
 ### 3.3 QQ 桥（P1）
 
@@ -80,7 +80,7 @@ web/          React SPA（挂牌板/球队中心/球员卡/管理端/审核队�
 | 数据 | 谁写 | 谁读 | 说明 |
 |---|---|---|---|
 | user / 会话（比赛系统 D1 + 共享 KV） | 比赛系统 | 平台跨绑定只读 | 平台不写 user 表 |
-| **球队绑定（auth 库，增量 7）** | **auth（机器 API 写：发码/烧码/解绑/登记/关联）** | **平台 AUTH_DB 只读派生** | **平台不写 auth 库；写通道=机器端点** |
+| **球队绑定（auth 库，v1.0.0）** | **auth（机器 API 写：发码/烧码/解绑/登记/关联）** | **平台 AUTH_DB 只读派生** | **平台不写 auth 库；写通道=机器端点** |
 | 平台业务库（球员/合同/转会/账本/窗口/成长） | 平台 | 平台 | 唯一事实源 |
 | 赛程赛果 | 比赛系统 | 平台跨绑定只读（仅已绑定赛事） | 平台不回写 |
 | 赛果衍生数据（奖金/门票收入/XP） | 平台 | — | 赛果确认钩子生成，存平台库 |
@@ -111,7 +111,7 @@ CREATE TABLE players (
   id INTEGER PRIMARY KEY,
   uid TEXT UNIQUE NOT NULL,          -- 与现行球员 uid 体系一致
   name TEXT NOT NULL,
-  club_id INTEGER,                   -- NULL = 无归属（可海捞）；CPU 队球员建档即带 CPU 队 id，且同样可海捞（增量 14）
+  club_id INTEGER,                   -- NULL = 无归属（可海捞）；CPU 队球员建档即带 CPU 队 id，且同样可海捞（v2.0.0）
   position TEXT,                     -- GK/CB/LB/RB/CDM/CM/LM/RM/...（防守位置判定用）
   foot INTEGER DEFAULT 1,            -- 惯用脚 0=左脚 1=右脚（导入归一化：FC26db FootID 1右/2左、FC Editor preferredfoot 文本）
   age INTEGER,
@@ -126,7 +126,7 @@ CREATE TABLE players (
   china_plan INTEGER DEFAULT 0,      -- 中国球员加强计划（naID=155 China PR 自动判定，见 §5.2）
   agent_tier INTEGER DEFAULT 2,      -- 经纪人性格 1温和/2普通/3苛刻（公开属性，玩家可见；窗口推进以 0.3 概率重掷，见 §6.8）
   fc_id INTEGER,                     -- EA 球员 ID：FC Editor playerid = FC26db ID（同键已验证，导入对齐键）
-  badges_silver INTEGER DEFAULT 0,   -- 成长所得银徽章计数（CHECK 上限 15 留档；口径上限=badge_cap_silver 12，增量 30 起与 12 个银槽统一；明细见 player_playstyles，§5.2/§15#10）
+  badges_silver INTEGER DEFAULT 0,   -- 成长所得银徽章计数（CHECK 上限 15 留档；口径上限=badge_cap_silver 12，v3.3.0 起与 12 个银槽统一；明细见 player_playstyles，§5.2/§15#10）
   badges_gold INTEGER DEFAULT 0,     -- 成长所得金徽章计数（CHECK 上限 3，与 3 个金槽同口径）
   game_attrs TEXT,                   -- 当季 FC 源全量 JSON：FC26db Base 94 列（键=表头名）/ 历史赛季 FC Editor 61 列（清单见下）
   created_at TEXT, updated_at TEXT
@@ -135,7 +135,7 @@ CREATE TABLE players (
 
 > **FC 属性字段清单（v1.3 与 FC26db 去重合并 + 存储简化定稿）**：属性源双轨——**FC26db（FC26 赛季全库，`Base` 94 列，18408 球员）为当季主源**；FC Editor（s901 阵容版本，61 列，按俱乐部分文件如 `1 - Arsenal.xlsx`）为 FC25 历史赛季源。两源 **playerid = ID 同键**（已对队壳名单 30/30 全中验证）。
 >
-> **存储口径（简化裁决：查找类字段只存 ID，名称与图标由前端渲染）**：`game_attrs` 只存 ID 键列（`naID / TeamID / PosID1-4 / RoleID1-5 / PSID1-15 / NumofPS`）与非查找原值列（`ID / Name / Age / CA / PA / height / weight / weakfoot / skillmoves / hashighqualityhead / internationalrep` + 34 细分属性）；**惯用脚例外——归一化为平台列 `foot`（0=左脚 1=右脚，FC26db FootID 1右/2左、FC Editor preferredfoot 文本在导入时转换），FootID/Foot 不落库**。文本列（`nationality / Team / Position1-4 / Role1-5 / PlayStyles1-8 / PlayStyles+`）不落库。参考表（NationID 219 / PlayStyleID 73 / PositionID 13 / RoleID 100 / TeamID 693，约 1100 行）做成**随 SPA 版本发布的静态 JSON**，前端按 ID 渲染名称；**PlayStyleID 行含图标键，图标按 `assets/icons/playstyles/{id}.webp` 约定命名——前端徽章小图标能力就此预留**（图标资产包为实现阶段素材，缺图时降级为 🥇🥈 文本徽章）。已验证：PlayStyleID 覆盖 **0-156 双段**（银段 0-56、金段=基础 ID+100 且 `en`/`chs` 均带 ` +` 后缀，如 7→107 Low driven shot→Low driven shot +；随 SPA 发布的 `web/assets/ref/playstyle.json` 共 73 行 = 占位 0 + 银 36 + 金 36）；RoleID 完整编码角色+熟练度（如 141='ST Advanced Forward ++'）；**PSID 槽共 15 个 = 银槽 1-12 + 金槽 13-15**（金徽落库存「基础 ID + 100」，故银段 1-99、金段 101-199，100 是空档；槽位与段位常量由 `src/core/fc26.ts` 单一承载，增量 27 收口）；ID 槽(15)比文本槽(8)更全，弃文本零损失。FC Editor（FC25）历史源仅 position 文本在导入时规范化为 PositionID；role/playstyles 文本无 ID 反查表，归档保留原文（仅存档展示）。
+> **存储口径（简化裁决：查找类字段只存 ID，名称与图标由前端渲染）**：`game_attrs` 只存 ID 键列（`naID / TeamID / PosID1-4 / RoleID1-5 / PSID1-15 / NumofPS`）与非查找原值列（`ID / Name / Age / CA / PA / height / weight / weakfoot / skillmoves / hashighqualityhead / internationalrep` + 34 细分属性）；**惯用脚例外——归一化为平台列 `foot`（0=左脚 1=右脚，FC26db FootID 1右/2左、FC Editor preferredfoot 文本在导入时转换），FootID/Foot 不落库**。文本列（`nationality / Team / Position1-4 / Role1-5 / PlayStyles1-8 / PlayStyles+`）不落库。参考表（NationID 219 / PlayStyleID 73 / PositionID 13 / RoleID 100 / TeamID 693，约 1100 行）做成**随 SPA 版本发布的静态 JSON**，前端按 ID 渲染名称；**PlayStyleID 行含图标键，图标按 `assets/icons/playstyles/{id}.webp` 约定命名——前端徽章小图标能力就此预留**（图标资产包为实现阶段素材，缺图时降级为 🥇🥈 文本徽章）。已验证：PlayStyleID 覆盖 **0-156 双段**（银段 0-56、金段=基础 ID+100 且 `en`/`chs` 均带 ` +` 后缀，如 7→107 Low driven shot→Low driven shot +；随 SPA 发布的 `web/assets/ref/playstyle.json` 共 73 行 = 占位 0 + 银 36 + 金 36）；RoleID 完整编码角色+熟练度（如 141='ST Advanced Forward ++'）；**PSID 槽共 15 个 = 银槽 1-12 + 金槽 13-15**（金徽落库存「基础 ID + 100」，故银段 1-99、金段 101-199，100 是空档；槽位与段位常量由 `src/core/fc26.ts` 单一承载，v3.1.1 收口）；ID 槽(15)比文本槽(8)更全，弃文本零损失。FC Editor（FC25）历史源仅 position 文本在导入时规范化为 PositionID；role/playstyles 文本无 ID 反查表，归档保留原文（仅存档展示）。
 >
 > 合并清单 = FC26db 94 列 ∪ FC Editor 独有 4 列（birthdate/number/playerjointeamdate/contractvaliduntil，仅 FC25 归档；平台效力起点以 contracts.effective_from 为准）。下表字段另落独立列或参与平台逻辑：
 >
@@ -162,10 +162,10 @@ CREATE TABLE players (
 ```sql
 CREATE TABLE clubs (
   id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
-  league_tier TEXT,                 -- 增量 9 起休眠：级别由赛季定级赛事报名派生（worker/tier.ts）；AUTH_DB 未配置时回落读此列（回滚通道）
+  league_tier TEXT,                 -- v1.2.0 起休眠：级别由赛季定级赛事报名派生（worker/tier.ts）；AUTH_DB 未配置时回落读此列（回滚通道）
   logo_key TEXT, status TEXT, created_at TEXT
 );
-CREATE TABLE club_bindings (        -- 增量 7 起休眠（真源 auth team_binding；保留防回滚，AUTH_DB 未配置时回落读此表）
+CREATE TABLE club_bindings (        -- v1.0.0 起休眠（真源 auth team_binding；保留防回滚，AUTH_DB 未配置时回落读此表）
   club_id INTEGER REFERENCES clubs, user_id INTEGER UNIQUE,  -- 一账号一队
   bound_at TEXT
 );
@@ -182,10 +182,10 @@ CREATE TABLE contracts (
   contract_type TEXT DEFAULT 'formal',           -- formal/trainee
   source TEXT,                                   -- 成约方式：negotiation(报价成功)/forced(3轮强约)/direct(直败结算)；导入历史数据=import
   signed_at TEXT, effective_from TEXT,           -- 签约时点 / 效力起点（展示与审计留档）
-  service_ticks INTEGER NOT NULL DEFAULT 0,      -- 签约基数：签约时点已关常规窗数（增量 25，效力刻度）
+  service_ticks INTEGER NOT NULL DEFAULT 0,      -- 签约基数：签约时点已关常规窗数（v3.0.0，效力刻度）
   protection_ticks INTEGER,                      -- 保护期结束的绝对窗数 = 基数+3；NULL=无保护期（训练营）
   signed_season INTEGER, signed_window_seq INTEGER, -- 签约窗（展示用；导入不落）
-  protected_until TEXT,                          -- 旧口径列（signed_at+548 天），增量 25 起判定不再读，留档
+  protected_until TEXT,                          -- 旧口径列（signed_at+548 天），v3.0.0 起判定不再读，留档
   is_active INTEGER DEFAULT 1
 );
 
@@ -285,13 +285,13 @@ CREATE TABLE growth_events (                      -- XP 事件（自动+补录�
   recorded_by INTEGER, created_at TEXT,
   UNIQUE (player_id, match_ref, event_type)       -- 防重复记 XP
 );
-CREATE TABLE growth_periods (                      -- 成长期（增量 13）：里程碑只累计当期事件
+CREATE TABLE growth_periods (                      -- 成长期（v1.6.0）：里程碑只累计当期事件
   id INTEGER PRIMARY KEY,
   season INTEGER, start_event_id INTEGER NOT NULL, -- 界：只累计 growth_events.id > start_event_id
   source TEXT NOT NULL DEFAULT 'manual',           -- manual(管理组宣告)/window_open(开窗勾选)
   note TEXT, declared_by INTEGER, declared_at TEXT
 );
-CREATE TABLE player_playstyles (                   -- PlayStyle 明细（增量 30，迁移 0031）
+CREATE TABLE player_playstyles (                   -- PlayStyle 明细（v3.3.0，迁移 0031）
   id INTEGER PRIMARY KEY,
   player_id INTEGER NOT NULL,
   slot INTEGER NOT NULL,                          -- 1-15：银 1-12、金 13-15
@@ -350,7 +350,7 @@ CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);  -- 全
 | `is_future_star` | Growth+ 名单上传 → 预置建议值，**管理组核定后生效**（核定写 audit） | — |
 | `game_attrs` | §5.2 ID-only 口径全量 | 原文归档（role/playstyles 文本无反查表） |
 
-**upsert 幂等**（关键约束）：`ON CONFLICT(fc_id) DO UPDATE` **只写 FC 源列**（上表 + height/weight/weakfoot/skillmoves 等）；**绝不触碰运营列**——status、contracts、badges_silver/gold、growth_tier/xp、market_value、agent_tier、registrations、`player_playstyles` 明细（导入不写明细；只有大换版折算会删掉超额的三分之二，见 §10.4）。`club_id` 是唯一例外且只在**新插入**时写（增量 14，用户裁决：CPU 队球员的队籍，4 支 CPU 队之外的球员落 NULL）；冲突时不更新，免得覆盖认领/解约/转会后的事实归属。重复导入安全，运营数据零风险。
+**upsert 幂等**（关键约束）：`ON CONFLICT(fc_id) DO UPDATE` **只写 FC 源列**（上表 + height/weight/weakfoot/skillmoves 等）；**绝不触碰运营列**——status、contracts、badges_silver/gold、growth_tier/xp、market_value、agent_tier、registrations、`player_playstyles` 明细（导入不写明细；只有大换版折算会删掉超额的三分之二，见 §10.4）。`club_id` 是唯一例外且只在**新插入**时写（v2.0.0，用户裁决：CPU 队球员的队籍，4 支 CPU 队之外的球员落 NULL）；冲突时不更新，免得覆盖认领/解约/转会后的事实归属。重复导入安全，运营数据零风险。
 
 **参考表静态 JSON**：导入工具顺带从源文件生成 NationID/PlayStyleID(含图标键)/PositionID/RoleID/TeamID 五张 JSON 进 `web/assets/ref/`，随 SPA 版本发布（前端渲染名称与徽章小图标的数据源，换赛季重新生成）。
 
@@ -398,8 +398,8 @@ listed（挂牌中或任意球员）──激活(校验：一窗一球员一次�
 
 | 操作 | 关键校验 | 费用 |
 |---|---|---|
-| 海捞 | 目标球员无归属**或挂在 CPU 队名下**（增量 14；解约禁签名单内的本窗不可签）；**新违约金不设上下限**（裁决：自平衡——定得低签入费与工资都便宜，但球员随时可被激活撬走；定得高则签入费贵。原「定价人工审」取消）；复签翻新历史合同行（contracts.player_id 全局唯一，UPSERT） | 新 RC × 30% |
-| 解约 | 有合同、未挂牌/未激活挂牌/未在解约流程中 | 效力 ≥3 赛季（= 6 个常规窗关窗）免费；否则 RC×(3−效力)×0.1，效力=0.5×常规窗关窗数（增量 25 改窗刻度，假设 14）；本窗被解约球员全联盟禁签；CA 恢复 base_ca，成长数值（XP/已升级数/徽章计数）清零并写 reset 划断行（增量 13，假设 19）。**无工资谈判，审核通过直接 completed** |
+| 海捞 | 目标球员无归属**或挂在 CPU 队名下**（v2.0.0；解约禁签名单内的本窗不可签）；**新违约金不设上下限**（裁决：自平衡——定得低签入费与工资都便宜，但球员随时可被激活撬走；定得高则签入费贵。原「定价人工审」取消）；复签翻新历史合同行（contracts.player_id 全局唯一，UPSERT） | 新 RC × 30% |
+| 解约 | 有合同、未挂牌/未激活挂牌/未在解约流程中 | 效力 ≥3 赛季（= 6 个常规窗关窗）免费；否则 RC×(3−效力)×0.1，效力=0.5×常规窗关窗数（v3.0.0 改窗刻度，假设 14）；本窗被解约球员全联盟禁签；CA 恢复 base_ca，成长数值（XP/已升级数/徽章计数）清零并写 reset 划断行（v1.6.0，假设 19）。**无工资谈判，审核通过直接 completed** |
 | 续约（=规则 4.4.6 合同期内更改违约金，内部枚举 rc_change 不变） | 合同期内、未挂牌/未解约；幅度：RC≤20m→±10m、RC>20m→±50% | 提高=差额×30%；降低=免费；保护期收口到审核通过当下（`protection_ticks` = 当前已关常规窗数 → 判定恒不成立；`service_ticks` 效力基数不动）；工资重谈（预期工资加薪 5%-15%，见 §6.7） |
 | 强制拍卖 | 准入体检失败触发；管理方 1m 挂牌；人选队内 CA 前六（含并列、不含门将） | 交易税率 50%（特例）。走挂牌链，成交后同样进 signing |
 
@@ -589,11 +589,11 @@ p 低于该球员档位阈值时文案附加「（报价过低，有谈崩风险
 | 设施升级差价 | 等级 1→5 价格表 "3,5,8,12,16"（M）（formula.py:407）；五类设施 0-5 级 |
 | 事件（P2） | 0.4/事件/窗触发、上限 2 次/窗；14 效果键钳幅 money±8M、fans±5%、satisfaction±0.5 |
 
-**增量 12 实现状态（代码 a4a5dc0 + review 修复）**：全部进 `worker/home.ts`，系数进 config 键 `attendance_model`（天气概率用户裁决 **晴40/多云30/雨20/雪10**、form_coef_table、attendance_multiplier、三分单价、死忠带/涨掉粉系数、influence 系数）与 `tier_table`（球场 0-4 档）。
+**v1.5.0 实现状态（代码 a4a5dc0 + review 修复）**：全部进 `worker/home.ts`，系数进 config 键 `attendance_model`（天气概率用户裁决 **晴40/多云30/雨20/雪10**、form_coef_table、attendance_multiplier、三分单价、死忠带/涨掉粉系数、influence 系数）与 `tier_table`（球场 0-4 档）。
 
 - **影响力**（规则 v5.2 §4.1.2/4.1.3 + 主规则 v5.1 §5.1）：能力等级十档表（≥93→10 … ≤59→1），可成长=(CA档+PA档)/2、非成长=CA档；球员影响力=系数×能力等级×国际声望（可成长 0.25/非成长 0.13，规则原文；口径=在册现行合同，假设 32）；球队影响力=Σ球员+队壳影响力（管理组后台）+奖励分（管理组后台）。
 - **比赛日收入（确认即入账，用户裁决）**：赛果确认钩子④——AUTH_DB 目录映射主场 club → 无球场行/已入账则跳过；天气在确认时按概率掷出固化（假设 30）；上座=min(容量×U(0.985,0.999)，死忠×4.0×(1+0.35×档)×attend_coef×近3场系数×天气×对手×U(0.97,1.03))，对手系数=1+5%×客队影响力/主队影响力（主队≤0 取 1，revenue 口径）；三分=票房 1.5M/万+商业 0.1M/万×商业区级+转播 0.3M×灯光级；`ledgerMovement kind='revenue' ref='match'` + `match_attendance`（match_id 主键）双闸幂等；收入失败 revenueError 回显不阻塞确认。
-- **窗末结算（并入关窗批）**：维护费=档位基础(2.0-14)+每万座费率(0.8-0.2)×容量万×本窗已确认主场场次（假设 33，`kind='maintenance' ref='window'`）；死忠演化每队一轮（目标=影响力阶梯 26/22/15/12 逐带；涨 0.5×(0.6+0.4×上座率)×(1+3%青训)，掉 0.5×(1+0.8×(1−上座率))，战绩 Pts≥7 ×1.05/≤1 ×0.95，钳 [0,10000]）；冠名收租（增量 20）**仅常规窗**收，临时窗不收租也不递减 `windows_remaining`。维护费与死忠演化**每种窗都照做**（增量 25）。
+- **窗末结算（并入关窗批）**：维护费=档位基础(2.0-14)+每万座费率(0.8-0.2)×容量万×本窗已确认主场场次（假设 33，`kind='maintenance' ref='window'`）；死忠演化每队一轮（目标=影响力阶梯 26/22/15/12 逐带；涨 0.5×(0.6+0.4×上座率)×(1+3%青训)，掉 0.5×(1+0.8×(1−上座率))，战绩 Pts≥7 ×1.05/≤1 ×0.95，钳 [0,10000]）；冠名收租（v2.6.0）**仅常规窗**收，临时窗不收租也不递减 `windows_remaining`。维护费与死忠演化**每种窗都照做**（v3.0.0）。
 - **近 3 场战绩**（假设 31）：平台已确认赛果（不含本场），胜3平1负0，**点球决胜按平局计**（用户裁决 2026-09-16），弃权按 winner 记胜负，不足 3 场中性 4 分。
 - **设施经营（扩建/升级）留远期**：数据模型已建全（stadiums/club_facilities），操作界面与建设券扣款后续增量做。存量=revenue 插件库导出（scripts/revenue-import/，20 队容量/档位/死忠+设施 SQL，队壳/奖励分置 0 管理组维护）。
 - 管理端：GET/POST /clubs/:id/stadium（球场名/容量/档位/队壳影响力/奖励分，stadium_update 审计）；教练端 /me/club 带主场档案。冠名市场/活动档期/主场事件 P2 不做（用户确认）。
@@ -613,7 +613,7 @@ p 低于该球员档位阈值时文案附加「（报价过低，有谈崩风险
 
 P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待确认）；P1：绑定赛事赛果自动计算入账（资格赛/小组赛/淘汰赛状态由比赛系统 tournament→stage 结构判断）。
 
-**增量 11 实现状态（P1 已落地）**：config 键 `prize_table`（JSON，默认=上表原文）+ `worker/prizes.ts`。分界裁决（2026-09-16）：单场可定值的**逐场即时入账**（联赛胜平负/超级杯胜负/小组赛每胜平/淘汰赛晋级），随赛果确认钩子入俱乐部账；一次性项（入场奖金/资格赛止步保底/小组赛剩余池）走「赛事完结结算」按钮一次结清。tour 队 id → club_id 经 AUTH_DB 目录映射（`clubIdByTourTeam`），AUTH_DB 未配置不发奖金（回滚通道口径）；入账一律经 `ledgerMovement` 幂等闸，`ref_type='match_home'/'match_away'`、`ref_id=matchId`（同场重确认/重放不双发）；淘汰赛晋级按「赢下该场后所在轮的队伍数」推档（stage.config_json entry_count，8→7.5/4→10/2→12.5/1→champion+5，征程逐场各领各档）。
+**v1.4.0 实现状态（P1 已落地）**：config 键 `prize_table`（JSON，默认=上表原文）+ `worker/prizes.ts`。分界裁决（2026-09-16）：单场可定值的**逐场即时入账**（联赛胜平负/超级杯胜负/小组赛每胜平/淘汰赛晋级），随赛果确认钩子入俱乐部账；一次性项（入场奖金/资格赛止步保底/小组赛剩余池）走「赛事完结结算」按钮一次结清。tour 队 id → club_id 经 AUTH_DB 目录映射（`clubIdByTourTeam`），AUTH_DB 未配置不发奖金（回滚通道口径）；入账一律经 `ledgerMovement` 幂等闸，`ref_type='match_home'/'match_away'`、`ref_id=matchId`（同场重确认/重放不双发）；淘汰赛晋级按「赢下该场后所在轮的队伍数」推档（stage.config_json entry_count，8→7.5/4→10/2→12.5/1→champion+5，征程逐场各领各档）。
 
 **赛事完结结算**：`POST /api/admin/season-bindings/:id/stage-settle`（`settleTournamentStage`）。按绑定 competition_type 发：联赛=每参赛队入场奖金；qualifying=确认赛果里输过至少一场的队各得保底（假设 29）；champions_cup=仅当有过小组赛确认赛果时，剩余池=200−已即时发放（胜 7/平 2.5）按胜场占比分；super_cup 无一次性项只盖结算戳。幂等闸=`season_tournaments.stage_settled_at`（UPDATE NULL→now 原子闸，闸 0 行=并发重复，409）。
 
@@ -628,9 +628,9 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 
 平台可全量自动算（RC 在 contracts、资金在 ledger_accounts），窗口关闭时由窗口结算流程执行并入账。
 
-**增量 11 实现**：`worker/window-payroll.ts`，关窗批（closeWindow）并入：工资=Σ现行合同 wage 全额（一窗=半赛季扣全额）；`ref_type='window'`、`ref_id=season*100+windowSeq` 幂等闸（关窗状态 UPDATE 行数做原子闸，重放不双扣）；余额可扣成负（欠账下窗自然补扣）。维护费归增量 12（设施模型就位后插本批）。富人税只在窗末收，赛季结算不重复收（假设 28）。
+**v1.4.0 实现**：`worker/window-payroll.ts`，关窗批（closeWindow）并入：工资=Σ现行合同 wage 全额（一窗=半赛季扣全额）；`ref_type='window'`、`ref_id=season*100+windowSeq` 幂等闸（关窗状态 UPDATE 行数做原子闸，重放不双扣）；余额可扣成负（欠账下窗自然补扣）。维护费归v1.5.0（设施模型就位后插本批）。富人税只在窗末收，赛季结算不重复收（假设 28）。
 
-**增量 25 改口径**：①扣款顺序=**富人税 → 工资**（流水顺序同此），税基=`资金` 与 `ΣRC+资金`（**含未扣工资**，不再减本窗工资）——用户裁决「税最先扣，税基不含工资扣除」（假设 28）；②**按窗类型分支**：常规窗（`is_temporary=0`）扣富人税+工资+维护费+冠名收租，临时窗只扣富人税+维护费（不扣工资、不收也不递减冠名租金）；③忠诚奖金自本增量起在**赛季中期窗**（同赛季第 2 个常规窗）关窗时发，不再在赛季结算按钮里发（假设 39/40）。
+**v3.0.0 改口径**：①扣款顺序=**富人税 → 工资**（流水顺序同此），税基=`资金` 与 `ΣRC+资金`（**含未扣工资**，不再减本窗工资）——用户裁决「税最先扣，税基不含工资扣除」（假设 28）；②**按窗类型分支**：常规窗（`is_temporary=0`）扣富人税+工资+维护费+冠名收租，临时窗只扣富人税+维护费（不扣工资、不收也不递减冠名租金）；③忠诚奖金自本增量起在**赛季中期窗**（同赛季第 2 个常规窗）关窗时发，不再在赛季结算按钮里发（假设 39/40）。
 
 ### 9.3 其他约束
 
@@ -646,18 +646,18 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 | 出场 | 1/次 | 比赛系统自动 | 一线队，仅联赛与冠军杯小组赛 |
 | 评分 | 7.0-7.9→1；8.0-8.9→2；9.0-9.9→3；10.0→4 | 管理组补录 | 同上 |
 | 进球 / 助攻 | 各 0.5 | 比赛系统自动（match_event goal/assist） | 同上 |
-| 进+攻里程碑 | 5→+1；10→+2；15→+3；20→+4；之后每+5→+4 | 自动（累计计算） | 同上；**只累计当前成长期内**（增量 13） |
+| 进+攻里程碑 | 5→+1；10→+2；15→+3；20→+4；之后每+5→+4 | 自动（累计计算） | 同上；**只累计当前成长期内**（v1.6.0） |
 | 零封 | 0.5/次 | 自动/补录 | 仅防守球员：CDM/LB/CB/RB/GK；无 CDM 则 CM、无边卫则 LM/RM |
 | 夺回球权 | 每 12 次 1 | 管理组补录 | 仅防守球员 |
 | 扑救 | 每 8 次 1；单场 >8 次额外 1 | 管理组补录 | 仅门将 |
 | 训练营球员 | 固定 40/完整赛季；15/半赛季 | 结算时生成 | 不按场次 |
-| 中国球员计划 | 每赛季额外 20 | 结算时生成 | china_plan=1 **且在册现行合同**（增量 13） |
+| 中国球员计划 | 每赛季额外 20 | 结算时生成 | china_plan=1 **且在册现行合同**（v1.6.0） |
 
 去重：`UNIQUE(player_id, match_ref, event_type)`；自动事件由赛果确认钩子生成，补录走管理组界面并留痕。
 
-**成长期（增量 13，用户裁决 2026-09-18）**：里程碑的「累计」只算**当前成长期内**的进+攻。当前成长期 = `growth_periods` 里 id 最大的一行，界 = `start_event_id`（只累计 `growth_events.id > start_event_id` 的事件；**不读 window_seq——成长期与窗口解耦**）；一行都没有时退回全生涯口径（期号 0、界 0，兼容增量 13 之前的行为）。宣告方式两种：管理组在成长引擎「成长期」面板手动宣告（`source='manual'`，审计 `growth_period_declared`），或开窗时勾选「同时宣告新成长期」由 `openWindow` 同批宣告（`source='window_open'`，审计 `window_open` 的 after 带 `growthPeriodDeclared`）。里程碑去重锚 = `milestone:{期号}:{划断序号}:{阈值}`。
+**成长期（v1.6.0，用户裁决 2026-09-18）**：里程碑的「累计」只算**当前成长期内**的进+攻。当前成长期 = `growth_periods` 里 id 最大的一行，界 = `start_event_id`（只累计 `growth_events.id > start_event_id` 的事件；**不读 window_seq——成长期与窗口解耦**）；一行都没有时退回全生涯口径（期号 0、界 0，兼容v1.6.0 之前的行为）。宣告方式两种：管理组在成长引擎「成长期」面板手动宣告（`source='manual'`，审计 `growth_period_declared`），或开窗时勾选「同时宣告新成长期」由 `openWindow` 同批宣告（`source='window_open'`，审计 `window_open` 的 after 带 `growthPeriodDeclared`）。里程碑去重锚 = `milestone:{期号}:{划断序号}:{阈值}`。
 
-**解约重置（增量 13）**：解约（termination）批准时把 players 当前状态归零——`ca = COALESCE(base_ca, ca)`、`growth_xp = 0`、`levels_applied = 0`、`badges_silver = 0`、`badges_gold = 0`（= 恢复初始），同批写一条 `event_type='reset'`、value/xp 皆 0 的划断行（match_ref `termination:{transferId}`）。历史 `growth_events` 一行不删（成长史展示用）；里程碑只累计该球员**最后一次** reset 之后的事件，`reset_id` 进里程碑去重锚。
+**解约重置（v1.6.0）**：解约（termination）批准时把 players 当前状态归零——`ca = COALESCE(base_ca, ca)`、`growth_xp = 0`、`levels_applied = 0`、`badges_silver = 0`、`badges_gold = 0`（= 恢复初始），同批写一条 `event_type='reset'`、value/xp 皆 0 的划断行（match_ref `termination:{transferId}`）。历史 `growth_events` 一行不删（成长史展示用）；里程碑只累计该球员**最后一次** reset 之后的事件，`reset_id` 进里程碑去重锚。
 
 ### 10.2 升级与方案选择
 
@@ -671,7 +671,7 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
   档5: [5CA] | [3CA+1金徽章] / [3CA+2银]
 ```
 
-实现：结算生成「升级待办」→ 教练（或管理组）选方案 → **选满本方案要发的 PlayStyle**（档 3 起才有徽章方案；`POST /api/growth/levelup/:playerId` 带 `picks`）→ 同批写入 CA、台账计数（`badges_silver`/`badges_gold`，上限 **12 银/3 金**）与明细行 `player_playstyles`（`source='growth'`）→ 审计留痕。方案表存 config；徽章身份（具体 PlayStyle）**平台自己记账**（增量 30 起，见 §5.2 与决策表第 10 条），FC 阵容文件仍由管理组人工落实。
+实现：结算生成「升级待办」→ 教练（或管理组）选方案 → **选满本方案要发的 PlayStyle**（档 3 起才有徽章方案；`POST /api/growth/levelup/:playerId` 带 `picks`）→ 同批写入 CA、台账计数（`badges_silver`/`badges_gold`，上限 **12 银/3 金**）与明细行 `player_playstyles`（`source='growth'`）→ 审计留痕。方案表存 config；徽章身份（具体 PlayStyle）**平台自己记账**（v3.3.0 起，见 §5.2 与决策表第 10 条），FC 阵容文件仍由管理组人工落实。
 
 ### 10.3 成长档位（初始 1、上限 5，管理组核定）
 
@@ -688,7 +688,7 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 
 ## 11. 赛程绑定与窗口状态机
 
-增量 6.1 层级裁决：**赛季是上集，赛事和窗口是并列的下级**。赛事绑赛季（一赛季多座赛事，一座赛事只进一个赛季），窗口只管转会准入，不再挂赛事。
+v0.7.1 层级裁决：**赛季是上集，赛事和窗口是并列的下级**。赛事绑赛季（一赛季多座赛事，一座赛事只进一个赛季），窗口只管转会准入，不再挂赛事。
 
 ```
 seasons(season=N, status: preparing → running → settled)
@@ -698,8 +698,8 @@ seasons(season=N, status: preparing → running → settled)
 
 - 绑定后平台跨库拉取该 tournament 的 schedule/matches（只读），赛果 finished 后出现在「赛果确认」队列 → 管理组确认 → 触发奖金（P0 手动/P1 自动）、主场收入、XP 事件；确认时点记录窗口号（确认时刻的开放窗，否则最近一窗，否则 0，见假设 25）。
 - 窗口状态机驱动一切准入：窗口 open 才允许转会操作；窗口 closed 触发结算（富人税、维护费、工资）。
-- 赛季结算（增量 11 已实现按钮化；增量 25 忠诚奖金移出）：前置体检（硬阻断：窗口未关/审核未清/谈判 active/市场未收尾；软警示：未确认完赛果需 acknowledged=true）→ growable 重判（本季 seasons.age_cap，规则 4.1.1）→ seasons.status='settled'（UPDATE 原子闸，重复 409）。忠诚奖金自增量 25 起改在**赛季中期窗关窗时**发（现合同 `service_ticks` 起算到本窗关窗后的窗刻度，`loyalty_tiers` 取满足的最高档，逐队合并入俱乐部账，幂等 `kind='loyalty' ref_type='window'`）。富人税/工资在窗末收不重复（假设 28）；死忠演化留位增量 12；年龄+1/下季注册重置由「按季独立」天然承载（growable 在下季建档时按新上限重判）。
-- 赛事完结结算（增量 11）：绑定赛事全部赛果确认完后，管理组按绑定行点「完结结算」发放一次性项（§9.1），stage_settled_at 幂等。
+- 赛季结算（v1.4.0 已实现按钮化；v3.0.0 忠诚奖金移出）：前置体检（硬阻断：窗口未关/审核未清/谈判 active/市场未收尾；软警示：未确认完赛果需 acknowledged=true）→ growable 重判（本季 seasons.age_cap，规则 4.1.1）→ seasons.status='settled'（UPDATE 原子闸，重复 409）。忠诚奖金自v3.0.0 起改在**赛季中期窗关窗时**发（现合同 `service_ticks` 起算到本窗关窗后的窗刻度，`loyalty_tiers` 取满足的最高档，逐队合并入俱乐部账，幂等 `kind='loyalty' ref_type='window'`）。富人税/工资在窗末收不重复（假设 28）；死忠演化留位v1.5.0；年龄+1/下季注册重置由「按季独立」天然承载（growable 在下季建档时按新上限重判）。
+- 赛事完结结算（v1.4.0）：绑定赛事全部赛果确认完后，管理组按绑定行点「完结结算」发放一次性项（§9.1），stage_settled_at 幂等。
 - 存量迁移（0014）：旧 season_windows.tournament_id 的绑定回填进 season_tournaments，窗口上两列休眠保留。
 
 ## 12. 通知系统
@@ -714,7 +714,7 @@ seasons(season=N, status: preparing → running → settled)
 | 资金变动（大额） | 俱乐部教练 |
 | 窗口开启/关闭、结算完成 | 全体教练 |
 
-实现：`notifications` 表双通道（增量 18）——每个绑定账号一条 `channel='web'` 行（`status='sent'` 免投递，直接进 web 收件篮），绑了 QQ 的另加一条 `channel='qq'` 行由投递器发送（HMAC 签名 POST 到 AstrBot 接收插件，复用竞猜系统对接协议）→ 失败重试（惰性：下次 cron 扫 `channel='qq'` 的 pending）。模板渲染纯代码，无 LLM（P2 事件文案才用 LLM）。web 收件篮端点见附录 A〔18〕。
+实现：`notifications` 表双通道（v2.4.0）——每个绑定账号一条 `channel='web'` 行（`status='sent'` 免投递，直接进 web 收件篮），绑了 QQ 的另加一条 `channel='qq'` 行由投递器发送（HMAC 签名 POST 到 AstrBot 接收插件，复用竞猜系统对接协议）→ 失败重试（惰性：下次 cron 扫 `channel='qq'` 的 pending）。模板渲染纯代码，无 LLM（P2 事件文案才用 LLM）。web 收件篮端点见附录 A〔18〕。
 
 **AstrBot 侧接收插件规格**（新写一个约 30 行的小插件，协议照抄竞猜 `docs/astrbot-sync-api.md`）：
 
@@ -747,7 +747,7 @@ seasons(season=N, status: preparing → running → settled)
 | `ca_pa_limits` | json（premier:1/4/6；second:1/3/6，规则 4.2.2 原文） | CA/PA 限额梯度（premier/second 两套） |
 | `wage_cap` | `null` | 工资帽（m/半赛季，随赛季大名单填入） |
 | `prize_table` | json | 赛事奖金表（§9.1） |
-| `loyalty_tiers` | `[[0.5,0.05],[1.5,0.10],[2.5,0.20]]` | 忠诚奖金档位 [起效赛季, RC 比例]，取满足的最高档（§11；增量 25 单位由「年」改「赛季」，1 常规窗=0.5 赛季） |
+| `loyalty_tiers` | `[[0.5,0.05],[1.5,0.10],[2.5,0.20]]` | 忠诚奖金档位 [起效赛季, RC 比例]，取满足的最高档（§11；v3.0.0 单位由「年」改「赛季」，1 常规窗=0.5 赛季） |
 | `luxury_cash_threshold` / `luxury_cash_rate` | `125` / `0.20` | 富人税（资金） |
 | `luxury_value_threshold` / `luxury_value_rate` | `700` / `0.05` | 富人税（球队价值） |
 | `attendance_model` | json | 主场收入全套系数（revenue 移植，§8；天气概率 40/30/20/10） |
@@ -760,8 +760,8 @@ seasons(season=N, status: preparing → running → settled)
 | `tier_conditions` | json | 成长档位条件（§10.3） |
 | `trainee_xp_full` / `trainee_xp_half` | `40` / `15` | 训练营赛季/半赛季 XP |
 | `china_xp_bonus` | `20` | 中国计划赛季加成 |
-| `china_badges` | `3` | 中国计划自选银徽章数（离队失效；增量 30 起由 `POST /api/growth/china-playstyles/:playerId` 实际发放） |
-| `badge_cap_silver` / `badge_cap_gold` | `12` / `3` | 徽章持有上限（= 12 个银槽 / 3 个金槽，增量 30 起两口径统一；DB CHECK 仍是 0..15 / 0..3，历史台账不 clamp） |
+| `china_badges` | `3` | 中国计划自选银徽章数（离队失效；v3.3.0 起由 `POST /api/growth/china-playstyles/:playerId` 实际发放） |
+| `badge_cap_silver` / `badge_cap_gold` | `12` / `3` | 徽章持有上限（= 12 个银槽 / 3 个金槽，v3.3.0 起两口径统一；DB CHECK 仍是 0..15 / 0..3，历史台账不 clamp） |
 | `wage_param_a` 🔒 | `0.02` | 预期工资系数（§6.7） |
 | `wage_param_b` 🔒 | `1.9` | 同上 |
 | `wage_param_c` 🔒 | `0.45` | 同上 |
@@ -774,8 +774,8 @@ seasons(season=N, status: preparing → running → settled)
 | `max_attempts` | `3` | 报价轮数上限（非涉密） |
 | `young_blend_age` | `25` | 年轻球员等级混合年龄 |
 | `renewal_raise` | `0.05,0.15` | 续约加薪区间（规则 4.3.3） |
-| `review_amount_threshold` | `40` | 大额强制审阈值（m；增量 10 落地） |
-| `bid_pattern_alert` | `{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}` | 连续抬价/关联出价告警阈值（增量 10 落地） |
+| `review_amount_threshold` | `40` | 大额强制审阈值（m；v1.3.0 落地） |
+| `bid_pattern_alert` | `{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}` | 连续抬价/关联出价告警阈值（v1.3.0 落地） |
 | `window_force_settle` | `false` | 关窗遇活跃谈判会话时是否允许强制按 E 结算（假设 12 的开关）〔5〕 |
 | `market_bid_paused` | `false` | 全局暂停出价开关；单挂牌级另看 `listings.bid_paused` 列〔15〕 |
 | `stadium_max_open_tier` | `1` | 球场档位开放进度（S9 仅开放 0→1）〔19〕 |
@@ -825,39 +825,39 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | 7 | 假设 | 监管量化标准（规则引用的 8.1.1/8.1.4 不在手头）= 管理组裁量 + 阈值可配置 |
 | 8 | 假设 | 联网调研同类玩法（Hattrick/FPL/FM）未能成功（官方 wiki 403、FPL JS 渲染、Wikipedia 超时），经济参照以现行规则与 revenue 插件实测为准，未引入外部来源数值 |
 | 9 | 已解决 | CA=overallrating、PA=potential 映射：FC26db 官方列名直接为 CA/PA，且 playerid=ID 同键已验证（§5.2） |
-| 10 | 已解决 | 徽章闭环定稿：映射 银=银槽 `PSID1-12`、金=金槽 `PSID13-15`（PS+ ID=基础+100，§5.2）；台账计数 badges_silver/gold（CHECK 上限 15/3）+ **明细表 `player_playstyles`**（增量 30：一行一个槽，`psid` 存基础 ID 1-99、金徽由 `kind='gold'` 表示，`source` ∈ growth/china/manual）；**比赛效果由 FC 游戏引擎原生承担，平台无效果逻辑**（比赛在真实 FC 中进行，平台只读赛果）；发放时选具体 PlayStyle 属管理组操作（发放界面可给选择器生成落地清单，操作辅助非数值计算）；前端按 PlayStyleID 静态参考表渲染名称与小图标（`assets/icons/playstyles/{id}.webp` 约定，资产包实现阶段补，缺图降级 🥇🥈）。**筛选口径（增量 27 收口）**：筛银徽章**只比银槽**、筛金徽章**只比金槽**，不再「基础 ID 或其 +100 命中任一槽」（旧语义下筛银徽章会捞出只挂金徽章的球员）；参数白名单 = 银 1-99 ∪ 金 101-199（去重 + 上限 100 项）。**渲染口径（增量 29 收口）**：属性页与列表都按槽位渲染**全 15 槽**（银 `PSID1-12` + 金 `PSID13-15`），与筛选/导入同源（`PS_SLOT_KEYS` 由 `PS_SLOT_COUNT` 派生；原先的「属性页只渲染 `PSID1-7`+`PSID13-15` ⇒ `PSID8-12` 可筛不可见」已消除）；槽号是 **1 起**（列表 `psNames` 的数组下标须 `+1` 再传 `playstyleIsGold`）。徽章墙的「🥈 x/12」那个 **12 是台账计数上限** `badge_cap_silver`（config 默认 12，**增量 30 起与「12 个银槽」统一**——迁移 0031 已把配置值从 15 改写成 12；DDL CHECK 仍是 0..15，**历史台账不 clamp**，所以旧数据理论上可能显示成「🥈 15/12」）。**发放与回收口径（增量 30）**：升级方案带徽章时必须一并交 `picks`（银/金数量须与方案一致），发放走 `player_playstyles` 明细 + 台账同批；中国计划徽章由 `POST /api/growth/china-playstyles/:playerId` 一次发满名额（`china_badges` 默认 3，`source='china'`）；**离队即回收**——转会成约时删 `source='china'` 明细并同步减台账（`from_club_id IS NULL` 的海捞是**签入**不是离队，不动），解约时删该球员全部明细 |
+| 10 | 已解决 | 徽章闭环定稿：映射 银=银槽 `PSID1-12`、金=金槽 `PSID13-15`（PS+ ID=基础+100，§5.2）；台账计数 badges_silver/gold（CHECK 上限 15/3）+ **明细表 `player_playstyles`**（v3.3.0：一行一个槽，`psid` 存基础 ID 1-99、金徽由 `kind='gold'` 表示，`source` ∈ growth/china/manual）；**比赛效果由 FC 游戏引擎原生承担，平台无效果逻辑**（比赛在真实 FC 中进行，平台只读赛果）；发放时选具体 PlayStyle 属管理组操作（发放界面可给选择器生成落地清单，操作辅助非数值计算）；前端按 PlayStyleID 静态参考表渲染名称与小图标（`assets/icons/playstyles/{id}.webp` 约定，资产包实现阶段补，缺图降级 🥇🥈）。**筛选口径（v3.1.1 收口）**：筛银徽章**只比银槽**、筛金徽章**只比金槽**，不再「基础 ID 或其 +100 命中任一槽」（旧语义下筛银徽章会捞出只挂金徽章的球员）；参数白名单 = 银 1-99 ∪ 金 101-199（去重 + 上限 100 项）。**渲染口径（v3.2.1 收口）**：属性页与列表都按槽位渲染**全 15 槽**（银 `PSID1-12` + 金 `PSID13-15`），与筛选/导入同源（`PS_SLOT_KEYS` 由 `PS_SLOT_COUNT` 派生；原先的「属性页只渲染 `PSID1-7`+`PSID13-15` ⇒ `PSID8-12` 可筛不可见」已消除）；槽号是 **1 起**（列表 `psNames` 的数组下标须 `+1` 再传 `playstyleIsGold`）。徽章墙的「🥈 x/12」那个 **12 是台账计数上限** `badge_cap_silver`（config 默认 12，**v3.3.0 起与「12 个银槽」统一**——迁移 0031 已把配置值从 15 改写成 12；DDL CHECK 仍是 0..15，**历史台账不 clamp**，所以旧数据理论上可能显示成「🥈 15/12」）。**发放与回收口径（v3.3.0）**：升级方案带徽章时必须一并交 `picks`（银/金数量须与方案一致），发放走 `player_playstyles` 明细 + 台账同批；中国计划徽章由 `POST /api/growth/china-playstyles/:playerId` 一次发满名额（`china_badges` 默认 3，`source='china'`）；**离队即回收**——转会成约时删 `source='china'` 明细并同步减台账（`from_club_id IS NULL` 的海捞是**签入**不是离队，不动），解约时删该球员全部明细 |
 | 11 | 已解决 | 国籍代码表：FC26db 内嵌 NationID 219 国（中国=155 China PR），导入工具随源消费（§5.2） |
 | 12 | 假设 | 窗口推进遇活跃谈判会话默认阻塞，管理组可强制按 E 结算/取消后推进（§6.4 不变式 6），开关可配置 |
-| 13 | 已定（增量 25 改窗刻度） | 保护期判定 = **转会窗刻度**：`contracts.protection_ticks`（= 签约基数 + 3 个常规窗）×`season_windows.is_temporary=0`；`当前已关常规窗数 < protection_ticks` 即在保护期内。训练营合同无保护期（NULL）。旧列 `protected_until`（曾按 signed_at + 548 天）保留留档、判定不再读 |
-| 14 | 已定（增量 25 改窗刻度） | 效力 = **0.5 × (已关常规窗数 − contracts.service_ticks)**（1 个常规窗关窗 = 0.5 赛季，临时窗关窗不推进）；解约费阶梯、激活效力校验、忠诚奖金分档、球员库筛选共用此口径。旧口径「实际天数 ÷ 365.25、不足 1 年按 0 计」作废 |
+| 13 | 已定（v3.0.0 改窗刻度） | 保护期判定 = **转会窗刻度**：`contracts.protection_ticks`（= 签约基数 + 3 个常规窗）×`season_windows.is_temporary=0`；`当前已关常规窗数 < protection_ticks` 即在保护期内。训练营合同无保护期（NULL）。旧列 `protected_until`（曾按 signed_at + 548 天）保留留档、判定不再读 |
+| 14 | 已定（v3.0.0 改窗刻度） | 效力 = **0.5 × (已关常规窗数 − contracts.service_ticks)**（1 个常规窗关窗 = 0.5 赛季，临时窗关窗不推进）；解约费阶梯、激活效力校验、忠诚奖金分档、球员库筛选共用此口径。旧口径「实际天数 ÷ 365.25、不足 1 年按 0 计」作废 |
 | 15 | 已定 | 旁路附加费（续约费/解约费/海捞签入费/匹配差额）在审核通过时收，不随提交扣款；提交时只做可用余额预检；收费以 (kind, ref) 幂等闸防重试重复扣（§7.4） |
 | 16 | 已定 | 匹配新 RC 不受 4.4.6 幅度约束（新 RC 须 > 首价即可，差额销毁本身是代价）；生涯每名球员只能被匹配一次 |
 | 17 | 已定 | 激活挂牌无公开竞价段（§6.2 修正定稿）：5 分钟首价窗内激活方落价即成交价，首价后训练营球员直进待审、正式球员进 24h 匹配窗；激活挂牌永不开放后续竞价 |
 | 18 | 已定 | 4.4.10 窗内回滚口径：还原 RC 与保护期（仍归属原队时）+ 退还续约费（rc_change_refund）；工资不随回滚（已谈成的工资是谈判终局，恢复会破坏谈判快照口径） |
-| 19 | 已定（增量 13 补全「恢复初始」= 数值归零 + 历史留档） | 解约属性恢复：CA 恢复 base_ca（players.base_ca 缺省时保持现 CA），growth_xp / levels_applied / badges_silver / badges_gold 全部清零；同时写一条 `event_type='reset'`（value/xp=0，match_ref `termination:{id}`）作划断行，历史 growth_events 行保留供成长史展示，里程碑只累计最后一次 reset 之后的事件；合同行 is_active=0 留档（复签海捞走 UPSERT 翻新，contracts.player_id 全局唯一） |
-| 20 | 已定（增量 13 补 CPU 例外） | 自动 XP 球员匹配：比赛系统队名 = 平台俱乐部名 → 比赛系统球员名 = 平台名单名（clubs 无 tour team 键、tour player.id 与平台 uid/fc_id 无关，不建映射表）；解不开的进 confirm 响应 `xp.unresolved` 由管理组补录兜底；**CPU 队（队名带 (CPU)）例外：整队静默跳过，不进 unresolved**（假设 36） |
+| 19 | 已定（v1.6.0 补全「恢复初始」= 数值归零 + 历史留档） | 解约属性恢复：CA 恢复 base_ca（players.base_ca 缺省时保持现 CA），growth_xp / levels_applied / badges_silver / badges_gold 全部清零；同时写一条 `event_type='reset'`（value/xp=0，match_ref `termination:{id}`）作划断行，历史 growth_events 行保留供成长史展示，里程碑只累计最后一次 reset 之后的事件；合同行 is_active=0 留档（复签海捞走 UPSERT 翻新，contracts.player_id 全局唯一） |
+| 20 | 已定（v1.6.0 补 CPU 例外） | 自动 XP 球员匹配：比赛系统队名 = 平台俱乐部名 → 比赛系统球员名 = 平台名单名（clubs 无 tour team 键、tour player.id 与平台 uid/fc_id 无关，不建映射表）；解不开的进 confirm 响应 `xp.unresolved` 由管理组补录兜底；**CPU 队（队名带 (CPU)）例外：整队静默跳过，不进 unresolved**（假设 36） |
 | 21 | 已定 | own_goal / 红黄牌 / 伤停事件不记 XP（§10.1 无对应项）；同场同类型多事件按「球员×类型」聚合成一条（去重锚 UNIQUE(player_id, match_ref, event_type) 一场一类型只容一行，value 记次数、XP=单次×次数）；进球含 goal 与 pen_goal |
 | 22 | 已定 | XP 计入范围 = league_premier / league_second 全部场次 + champions_cup 仅 stage.kind='group'（小组赛）；super_cup / qualifying / 冠军杯淘汰赛不计；弃权场（walkover_side 非空）不计；训练营球员不按场次（走赛季结算固定 XP） |
-| 23 | 已定（增量 18 补 web 收件篮） | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮已在增量 18 落地（端点 `/api/notifications` 系列，非原设想的 `/api/me/notifications`），未读判定用独立列 `read_at` |
-| 24 | **已撤销**（增量 14 裁决 4） | 球员初始归属 `initial_club_id`（0015 立）**已删除**（迁移 0020 `DROP COLUMN`）：它从不参与成长判定（「本队」一律看 `players.club_id`），只是球员库初始视图一列 + 球员卡一行字，用户裁定「无意义，去掉」。球员库 `view=initial` 保留 CA=base_ca、PA=导入值的口径；归属列两种视图都显示**当前**归属 |
-| 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（增量 6.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
-| 26 | 已定（增量 7） | 球队绑定真源上收 auth（三表 team/team_bind_code/team_binding；机器端点五条 HMAC）；本侧旧表 club_bind_code/club_bindings 休眠保留防回滚，AUTH_DB 未配置时回落读本地表（回滚通道）；发码 team_not_found 不自动登记目录（提示先登记关联，与 tour 侧自愈 register 不同）；OIDC 教练判定=绑定即教练（管理点仍走权限点；未绑定的准教练凭 club.* 权限点保留旁路进绑前端点） |
-| 27 | 已定（增量 9） | 俱乐部分级不再建队时定死（clubs.league_tier 休眠）：当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（worker/tier.ts）；注册提交派生不到级别一律 400 拦下（tier_pending「尚未在赛事平台报名，请等待赛事平台管理员确认报名」），注册页带报名状态探测（红=未报名/绿=已报名）；同时报两座定级赛事视为数据异常 500；AUTH_DB 未配置时回落读休眠列（回滚通道）；升降级=换季报名哪座定级赛事就在哪级，club 库零人工写入 |
-| 28 | 已定（增量 11；增量 25 改税基） | 富人税/工资只在窗末（closeWindow 批）收，赛季结算不重复收（§11 结算顺序里「富人税」步即窗末已收项，结算按钮不再扣）；工资=Σ现行合同 wage 全额、一窗=半赛季扣全额；**税最先扣，税基取未扣工资的余额**（`资金` 与 `ΣRC+资金` 两项取多），临时窗只收富人税不扣工资 |
-| 29 | 已定（增量 11） | 资格赛止步保底口径：确认赛果里输过至少一场的队各得保底 7.5，多轮晋级失败口径一致（不区分止步轮次）；赢家不发 |
-| 30 | 已定（增量 12） | 比赛日天气在赛果确认时按概率掷出并固化（晴 40/多云 30/雨 20/雪 10），同场不重掷（§8 上座公式天气系数；确认即入账的输入之一） |
-| 31 | 已定（增量 12） | 近 3 场战绩口径 = 平台已确认赛果（不含本场）：胜 3 平 1 负 0，**点球决胜按平局计**（用户裁决 2026-09-16），弃权按 winner 记胜负，不足 3 场取中性 4 分 |
-| 32 | 已定（增量 12） | 球员影响力闸门 = 在册现行合同（`contracts.is_active=1 AND contracts.club_id = players.club_id`），**不看 players.club_id**；无合同/已解约不计入球队影响力 |
-| 33 | 已定（增量 12） | 维护费 = 档位基础(2.0-14) + 每万座费率(0.8-0.2)×容量(万) × 本窗已确认主场场次，并入关窗批，`kind='maintenance' ref='window'` 幂等 |
-| 34 | 已定（增量 13） | 成长期 = 里程碑累计边界（用户裁决 2026-09-18）：由管理组手动宣告或开窗时勾选自动宣告，**不与窗口绑定**（一个赛季可有多个成长期，通常落在两个窗口之间，也可能变）；界 = `growth_periods.start_event_id`（只累计其后事件），无宣告行时按全生涯口径 |
-| 35 | 已定（增量 13） | 中国球员计划 XP（每季 +20）闸门 = `china_plan=1` **且在册现行合同**（与训练营同口径，用户裁决 2026-09-18）；无归属/已解约的中国球员不发 XP |
-| 36 | 已定（增量 13 立、增量 14 收口） | CPU 队判定 = 比赛系统队名以半角「(CPU)」结尾（**严格匹配**，不做全角括号/大小写/首尾空格容错：队名即口径，改名即重新判定）。CPU 队球员**无成长**（`results.ts` 的 `resolve()` / `queueResultNotifications()` 两处队名→俱乐部解析整队静默跳过：不计 XP，也不进 `xp.unresolved`），但在**转会意义上视同海里球员**（可被海捞、可被认领）。增量 14 落地（用户裁决 2026-09-18 六问逐条）：①平台为 4 支 CPU 队建 clubs 行——`巴塞罗那(CPU)`/`曼城(CPU)`/`RB莱比锡(CPU)`/`AC米兰(CPU)`，name 与 tour 队名逐字一致，id = 游戏真队 id `241/10/112172/131681`；判定复用 `isCpuTeam` 的队名后缀口径（不加列、无迁移）。②其球员建档即带 `club_id`（建档导入只给 `FC26_CPU_TEAM_IDS` 写，见 §5.4），三处「海里球员 = `club_id IS NULL`」闸门放行：海捞名单 `GET /api/market/free-agents`（`src/worker/routes/market.ts:267`，全员附东家名）、海捞签入 `createFreeAgent`（`src/worker/bypass.ts:359`，且 `fromClubId` 记 CPU 队 id，过户守卫才摘得走人）、通道 C 合同导入认领（`src/worker/contracts-import.ts:122/135/212`）。③CPU 队**一律不入账**：`clubIdByTourTeam` 白名单过滤（`src/worker/prizes.ts:70`，auth 目录里 club_id 照补、但奖金与主场收入不发）、强制拍卖拒绝 CPU 队球员（`src/worker/bypass.ts:435`）；中国计划 XP 因无平台合同不发（假设 35），主场收入因无球场行天然不发，管理组手工补录不受限（人工判断）。实现：`growth.ts` 的 `isCpuTeam()` + `CPU_CLUB_IDS_SQL` + `cpuClubIds(db)`（SQL 侧用 `substr(name, -5) = '(CPU)'`，与 `isCpuTeam` 逐字对齐，避免 LIKE 的大小写不敏感造成两种口径分叉） |
-| 37 | 已定（增量 14 裁决 3） | 队 id 口径 = **游戏真 id**：EA 未授权的 4 支俱乐部在游戏里用假名 + 新号（AC Milan → `131681` Milano FC、Inter → `131682` Lombardia FC、Lazio → `115841` Latium、Atalanta → `115845` Bergamo Calcio），而第三方 fixed 快照（`FC26db20251217_fixed.xlsx`，即导入源与 `scripts/gen_ref_json.py` 的源）仍带旧 FIFA 号（`39/44/46/47`）——EAFC 26 IDs 表的 1..199 段里这 4 个号整段不存在（假名↔真身对应关系靠 FC Editor 的 `player_tables/{id} - {Team}.xlsx` 球员名单逐队核对确认）。口径：`clubs.id` 与 `players.club_id` 都落游戏真 id；`src/core/fc26.ts` 的 `FC26_TEAM_ID_ALIASES`（39→115845 / 44→131682 / 46→115841 / 47→131681）在导入归一化时一次性换号（同时写进 `game_attrs.TeamID`），保证**重跑导入落在同一 id 空间**；**对外显示名仍是真名**——`web/assets/ref/team.json` 补 4 条「真 id → 真名」，`scripts/gen_ref_json.py` 的 `TEAM_NAME_OVERRIDES` 保证再生成不丢，旧 id 条目刻意保留（未重键的历史 `game_attrs` 仍要显示得出队名）。受影响面：游戏表 1..199 段缺失号 ∩ 平台实际出现的号 = `{39,44,46,47}`。计数口径务必区分：**107 人** = 4 支 CPU 队球员（巴萨 28 + 曼城 26 + 莱比锡 29 + 米兰 24，假设 36）；**105 人** = 4 支游戏假名队球员（亚特兰大 27 + 国米 24 + 拉齐奥 30 + 米兰 24），两集合只在米兰 24 人重叠 |
-| 38 | 已执行（2026-09-19 生产） | 增量 14 的生产动作，全部跑完并逐条复查：①建 4 支 CPU 队 clubs 行（id `241/10/112172/131681`，name 如上，status='active'）；②107 名 CPU 队球员 `club_id` 回填（复查分布 10→26/241→28/112172→29/131681→24）+ 105 名假名队球员 `game_attrs.TeamID` 重键（复查 115841→30/115845→27/131681→24/131682→24，旧号 39/44/46/47 清零）；③auth 目录 `team` 补 4 行 club_id——**实测 tour_team_id 已是 FC id 空间**（10→10 / 241→241 / 112172→112172 / **47→131681**，米兰跨号映射；原计划的 tour 6/16/19/21 口径作废）；④迁移 0019+0020 已 apply（先补 0016–0018 三条记账，否则 `migrations apply` 会从 0016 重跑报对象已存在），worker 与前端已同批上线。工件 `scripts/prod-20260919-increment14/00..04-*.sql`（各带期望 changes 与回滚语句）。⑤**米兰队 id 收口 131681**（同日追加，`scripts/prod-20260919-milan-rekey/01-tour-rekey-team-id.sql` + `02-auth-tour-team-id.sql`）：tour `team.id 47→131681` 连带 `player.team_id` 25 行、`entry.team_id` 2 行（其余 6 张引用 `team(id)` 的表在 47 上 0 行），auth `team.tour_team_id 47→131681`（club_id 早已是 131681）；这样 tour id / auth `tour_team_id` / auth `club_id` / 平台 `clubs.id` 四个空间米兰全为 131681，平台按 tour id 反查不再需要跨号映射。执行通道约束：**必须 `--command`**（`PRAGMA defer_foreign_keys = ON` 在 `--file` 通道下失效 → 父行先改被 FK 立即拦下并整批回滚）；`audit_log.target_id=47` 的 10 行是 `target_type='match'`（比赛 id 撞号）**不得修改** |
-| 39 | 已定（增量 25） | 窗分型与效力推进点：转会窗分**常规窗**（季初/中期，同赛季最多 2 个——第 3 个非临时窗硬拦 409）与**临时窗**（管理端开窗勾选 `temporary`）；只有常规窗关窗推进效力（+0.5 赛季）与保护期计数（`season_windows.is_temporary=0`），临时窗关窗不推进。季初/中期不落库，按同赛季非临时窗的 `window_seq` 顺序派生（第 1 个=季初、第 2 个=中期，见 `src/worker/contract-ticks.ts`）。效力基数 `contracts.service_ticks` = 签约时点已关常规窗数（运行期签约取当下计数；导入历史合同按 `effective_from` 截断取值） |
-| 40 | 已定（增量 25） | 临时窗扣费口径 + 忠诚奖金中期发：临时窗关窗只扣**富人税 + 维护费**（死忠照演化），不扣工资、不收冠名租金也不递减 `windows_remaining`；常规窗扣富人税+工资+维护费+冠名收租。忠诚奖金在**赛季中期窗**（同赛季第 2 个常规窗）关窗时发一次（`loyalty_tiers` 按窗刻度赛季分档、逐队合并成一条流水、幂等 `kind='loyalty' ref_type='window' ref_id=season*100+seq`），赛季结算按钮不再发放 |
+| 23 | 已定（v2.4.0 补 web 收件篮） | 通知收件人解析 = 俱乐部绑定教练（club_bindings）→ qq_links.qq，未绑 QQ 静默跳过（§12 绑定率不强制）；通知排队与投递尽力而为，不阻塞确认/升级主流程；web 收件篮已在v2.4.0 落地（端点 `/api/notifications` 系列，非原设想的 `/api/me/notifications`），未读判定用独立列 `read_at` |
+| 24 | **已撤销**（v2.0.0 裁决 4） | 球员初始归属 `initial_club_id`（0015 立）**已删除**（迁移 0020 `DROP COLUMN`）：它从不参与成长判定（「本队」一律看 `players.club_id`），只是球员库初始视图一列 + 球员卡一行字，用户裁定「无意义，去掉」。球员库 `view=initial` 保留 CA=base_ca、PA=导入值的口径；归属列两种视图都显示**当前**归属 |
+| 25 | 已定 | 赛果确认记录的窗口号 = 确认时点：确认时刻的开放窗，否则最近一窗，否则 0（v0.7.1：绑定不再依赖窗口，窗口号仅作入账归属标记） |
+| 26 | 已定（v1.0.0） | 球队绑定真源上收 auth（三表 team/team_bind_code/team_binding；机器端点五条 HMAC）；本侧旧表 club_bind_code/club_bindings 休眠保留防回滚，AUTH_DB 未配置时回落读本地表（回滚通道）；发码 team_not_found 不自动登记目录（提示先登记关联，与 tour 侧自愈 register 不同）；OIDC 教练判定=绑定即教练（管理点仍走权限点；未绑定的准教练凭 club.* 权限点保留旁路进绑前端点） |
+| 27 | 已定（v1.2.0） | 俱乐部分级不再建队时定死（clubs.league_tier 休眠）：当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（worker/tier.ts）；注册提交派生不到级别一律 400 拦下（tier_pending「尚未在赛事平台报名，请等待赛事平台管理员确认报名」），注册页带报名状态探测（红=未报名/绿=已报名）；同时报两座定级赛事视为数据异常 500；AUTH_DB 未配置时回落读休眠列（回滚通道）；升降级=换季报名哪座定级赛事就在哪级，club 库零人工写入 |
+| 28 | 已定（v1.4.0；v3.0.0 改税基） | 富人税/工资只在窗末（closeWindow 批）收，赛季结算不重复收（§11 结算顺序里「富人税」步即窗末已收项，结算按钮不再扣）；工资=Σ现行合同 wage 全额、一窗=半赛季扣全额；**税最先扣，税基取未扣工资的余额**（`资金` 与 `ΣRC+资金` 两项取多），临时窗只收富人税不扣工资 |
+| 29 | 已定（v1.4.0） | 资格赛止步保底口径：确认赛果里输过至少一场的队各得保底 7.5，多轮晋级失败口径一致（不区分止步轮次）；赢家不发 |
+| 30 | 已定（v1.5.0） | 比赛日天气在赛果确认时按概率掷出并固化（晴 40/多云 30/雨 20/雪 10），同场不重掷（§8 上座公式天气系数；确认即入账的输入之一） |
+| 31 | 已定（v1.5.0） | 近 3 场战绩口径 = 平台已确认赛果（不含本场）：胜 3 平 1 负 0，**点球决胜按平局计**（用户裁决 2026-09-16），弃权按 winner 记胜负，不足 3 场取中性 4 分 |
+| 32 | 已定（v1.5.0） | 球员影响力闸门 = 在册现行合同（`contracts.is_active=1 AND contracts.club_id = players.club_id`），**不看 players.club_id**；无合同/已解约不计入球队影响力 |
+| 33 | 已定（v1.5.0） | 维护费 = 档位基础(2.0-14) + 每万座费率(0.8-0.2)×容量(万) × 本窗已确认主场场次，并入关窗批，`kind='maintenance' ref='window'` 幂等 |
+| 34 | 已定（v1.6.0） | 成长期 = 里程碑累计边界（用户裁决 2026-09-18）：由管理组手动宣告或开窗时勾选自动宣告，**不与窗口绑定**（一个赛季可有多个成长期，通常落在两个窗口之间，也可能变）；界 = `growth_periods.start_event_id`（只累计其后事件），无宣告行时按全生涯口径 |
+| 35 | 已定（v1.6.0） | 中国球员计划 XP（每季 +20）闸门 = `china_plan=1` **且在册现行合同**（与训练营同口径，用户裁决 2026-09-18）；无归属/已解约的中国球员不发 XP |
+| 36 | 已定（v1.6.0 立、v2.0.0 收口） | CPU 队判定 = 比赛系统队名以半角「(CPU)」结尾（**严格匹配**，不做全角括号/大小写/首尾空格容错：队名即口径，改名即重新判定）。CPU 队球员**无成长**（`results.ts` 的 `resolve()` / `queueResultNotifications()` 两处队名→俱乐部解析整队静默跳过：不计 XP，也不进 `xp.unresolved`），但在**转会意义上视同海里球员**（可被海捞、可被认领）。v2.0.0 落地（用户裁决 2026-09-18 六问逐条）：①平台为 4 支 CPU 队建 clubs 行——`巴塞罗那(CPU)`/`曼城(CPU)`/`RB莱比锡(CPU)`/`AC米兰(CPU)`，name 与 tour 队名逐字一致，id = 游戏真队 id `241/10/112172/131681`；判定复用 `isCpuTeam` 的队名后缀口径（不加列、无迁移）。②其球员建档即带 `club_id`（建档导入只给 `FC26_CPU_TEAM_IDS` 写，见 §5.4），三处「海里球员 = `club_id IS NULL`」闸门放行：海捞名单 `GET /api/market/free-agents`（`src/worker/routes/market.ts:267`，全员附东家名）、海捞签入 `createFreeAgent`（`src/worker/bypass.ts:359`，且 `fromClubId` 记 CPU 队 id，过户守卫才摘得走人）、通道 C 合同导入认领（`src/worker/contracts-import.ts:122/135/212`）。③CPU 队**一律不入账**：`clubIdByTourTeam` 白名单过滤（`src/worker/prizes.ts:70`，auth 目录里 club_id 照补、但奖金与主场收入不发）、强制拍卖拒绝 CPU 队球员（`src/worker/bypass.ts:435`）；中国计划 XP 因无平台合同不发（假设 35），主场收入因无球场行天然不发，管理组手工补录不受限（人工判断）。实现：`growth.ts` 的 `isCpuTeam()` + `CPU_CLUB_IDS_SQL` + `cpuClubIds(db)`（SQL 侧用 `substr(name, -5) = '(CPU)'`，与 `isCpuTeam` 逐字对齐，避免 LIKE 的大小写不敏感造成两种口径分叉） |
+| 37 | 已定（v2.0.0 裁决 3） | 队 id 口径 = **游戏真 id**：EA 未授权的 4 支俱乐部在游戏里用假名 + 新号（AC Milan → `131681` Milano FC、Inter → `131682` Lombardia FC、Lazio → `115841` Latium、Atalanta → `115845` Bergamo Calcio），而第三方 fixed 快照（`FC26db20251217_fixed.xlsx`，即导入源与 `scripts/gen_ref_json.py` 的源）仍带旧 FIFA 号（`39/44/46/47`）——EAFC 26 IDs 表的 1..199 段里这 4 个号整段不存在（假名↔真身对应关系靠 FC Editor 的 `player_tables/{id} - {Team}.xlsx` 球员名单逐队核对确认）。口径：`clubs.id` 与 `players.club_id` 都落游戏真 id；`src/core/fc26.ts` 的 `FC26_TEAM_ID_ALIASES`（39→115845 / 44→131682 / 46→115841 / 47→131681）在导入归一化时一次性换号（同时写进 `game_attrs.TeamID`），保证**重跑导入落在同一 id 空间**；**对外显示名仍是真名**——`web/assets/ref/team.json` 补 4 条「真 id → 真名」，`scripts/gen_ref_json.py` 的 `TEAM_NAME_OVERRIDES` 保证再生成不丢，旧 id 条目刻意保留（未重键的历史 `game_attrs` 仍要显示得出队名）。受影响面：游戏表 1..199 段缺失号 ∩ 平台实际出现的号 = `{39,44,46,47}`。计数口径务必区分：**107 人** = 4 支 CPU 队球员（巴萨 28 + 曼城 26 + 莱比锡 29 + 米兰 24，假设 36）；**105 人** = 4 支游戏假名队球员（亚特兰大 27 + 国米 24 + 拉齐奥 30 + 米兰 24），两集合只在米兰 24 人重叠 |
+| 38 | 已执行（2026-09-19 生产） | v2.0.0 的生产动作，全部跑完并逐条复查：①建 4 支 CPU 队 clubs 行（id `241/10/112172/131681`，name 如上，status='active'）；②107 名 CPU 队球员 `club_id` 回填（复查分布 10→26/241→28/112172→29/131681→24）+ 105 名假名队球员 `game_attrs.TeamID` 重键（复查 115841→30/115845→27/131681→24/131682→24，旧号 39/44/46/47 清零）；③auth 目录 `team` 补 4 行 club_id——**实测 tour_team_id 已是 FC id 空间**（10→10 / 241→241 / 112172→112172 / **47→131681**，米兰跨号映射；原计划的 tour 6/16/19/21 口径作废）；④迁移 0019+0020 已 apply（先补 0016–0018 三条记账，否则 `migrations apply` 会从 0016 重跑报对象已存在），worker 与前端已同批上线。工件 `scripts/prod-20260919-increment14/00..04-*.sql`（各带期望 changes 与回滚语句）。⑤**米兰队 id 收口 131681**（同日追加，`scripts/prod-20260919-milan-rekey/01-tour-rekey-team-id.sql` + `02-auth-tour-team-id.sql`）：tour `team.id 47→131681` 连带 `player.team_id` 25 行、`entry.team_id` 2 行（其余 6 张引用 `team(id)` 的表在 47 上 0 行），auth `team.tour_team_id 47→131681`（club_id 早已是 131681）；这样 tour id / auth `tour_team_id` / auth `club_id` / 平台 `clubs.id` 四个空间米兰全为 131681，平台按 tour id 反查不再需要跨号映射。执行通道约束：**必须 `--command`**（`PRAGMA defer_foreign_keys = ON` 在 `--file` 通道下失效 → 父行先改被 FK 立即拦下并整批回滚）；`audit_log.target_id=47` 的 10 行是 `target_type='match'`（比赛 id 撞号）**不得修改** |
+| 39 | 已定（v3.0.0） | 窗分型与效力推进点：转会窗分**常规窗**（季初/中期，同赛季最多 2 个——第 3 个非临时窗硬拦 409）与**临时窗**（管理端开窗勾选 `temporary`）；只有常规窗关窗推进效力（+0.5 赛季）与保护期计数（`season_windows.is_temporary=0`），临时窗关窗不推进。季初/中期不落库，按同赛季非临时窗的 `window_seq` 顺序派生（第 1 个=季初、第 2 个=中期，见 `src/worker/contract-ticks.ts`）。效力基数 `contracts.service_ticks` = 签约时点已关常规窗数（运行期签约取当下计数；导入历史合同按 `effective_from` 截断取值） |
+| 40 | 已定（v3.0.0） | 临时窗扣费口径 + 忠诚奖金中期发：临时窗关窗只扣**富人税 + 维护费**（死忠照演化），不扣工资、不收冠名租金也不递减 `windows_remaining`；常规窗扣富人税+工资+维护费+冠名收租。忠诚奖金在**赛季中期窗**（同赛季第 2 个常规窗）关窗时发一次（`loyalty_tiers` 按窗刻度赛季分档、逐队合并成一条流水、幂等 `kind='loyalty' ref_type='window' ref_id=season*100+seq`），赛季结算按钮不再发放 |
 
-**增量 14 实现状态（CPU 队与队籍口径，代码已推送、生产数据侧 2026-09-19 已执行）**：迁移 0020（删 `initial_club_id`）；`core/fc26.ts` 加 `FC26_TEAM_ID_ALIASES`/`normalizeTeamId`/`FC26_CPU_TEAM_IDS`；`core/import.ts` 的 `NormalizedPlayer` 增 `clubId`（`clubIdForTeam`：只有 4 支 CPU 队写）与两通道的 `gameAttrs.TeamID`/`teamid` 归一化；`players-import.ts` 的 `upsertStatement` INSERT 加 `club_id`（DO UPDATE 不含）；`growth.ts` 加 `CPU_CLUB_IDS_SQL`/`cpuClubIds`；`routes/market.ts` 海捞名单放行 CPU 队并返回 `clubName`（上限 100→300：池里多了 107 名 CPU 球员）；`bypass.ts` 海捞放行 + `fromClubId` 记原队、强制拍卖拒绝 CPU 队球员；`contracts-import.ts` 认领放行；`prizes.ts` 入账过滤；`routes/players.ts` 删 `initial_club_id` 出口（`view=initial` 保留 CA/PA 口径，归属列两视图都打当前归属）；前端 `web/src/lib/api.ts`、`pages/{PlayersLibrary,Player,Market}.tsx` 同步；`web/assets/ref/team.json` + `scripts/gen_ref_json.py` 补 4 条真名。测试：新增 6 组用例（队籍与别名、通道 C 认领 CPU 球员、海捞 CPU 球员全链、强制拍卖拒绝、CPU 侧不入奖金、`clubIdByTourTeam` 过滤）+ `players-library` 四处改造；**316 测试绿 + 三份 tsc 干净 + vite build 通过**。
+**v2.0.0 实现状态（CPU 队与队籍口径，代码已推送、生产数据侧 2026-09-19 已执行）**：迁移 0020（删 `initial_club_id`）；`core/fc26.ts` 加 `FC26_TEAM_ID_ALIASES`/`normalizeTeamId`/`FC26_CPU_TEAM_IDS`；`core/import.ts` 的 `NormalizedPlayer` 增 `clubId`（`clubIdForTeam`：只有 4 支 CPU 队写）与两通道的 `gameAttrs.TeamID`/`teamid` 归一化；`players-import.ts` 的 `upsertStatement` INSERT 加 `club_id`（DO UPDATE 不含）；`growth.ts` 加 `CPU_CLUB_IDS_SQL`/`cpuClubIds`；`routes/market.ts` 海捞名单放行 CPU 队并返回 `clubName`（上限 100→300：池里多了 107 名 CPU 球员）；`bypass.ts` 海捞放行 + `fromClubId` 记原队、强制拍卖拒绝 CPU 队球员；`contracts-import.ts` 认领放行；`prizes.ts` 入账过滤；`routes/players.ts` 删 `initial_club_id` 出口（`view=initial` 保留 CA/PA 口径，归属列两视图都打当前归属）；前端 `web/src/lib/api.ts`、`pages/{PlayersLibrary,Player,Market}.tsx` 同步；`web/assets/ref/team.json` + `scripts/gen_ref_json.py` 补 4 条真名。测试：新增 6 组用例（队籍与别名、通道 C 认领 CPU 球员、海捞 CPU 球员全链、强制拍卖拒绝、CPU 侧不入奖金、`clubIdByTourTeam` 过滤）+ `players-library` 四处改造；**316 测试绿 + 三份 tsc 干净 + vite build 通过**。
 
 ## 16. 测试策略
 
@@ -875,24 +875,24 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 1. 只增表（`ledger_entries` / `audit_log`）**上线即建** `(kind, id)`、`(target_type, target_id, id)` 型索引——比赛系统是配额报警后才补的，不重演。
 2. 高频过滤+排序的列表直接建带排序尾列的复合索引：`listings(status, listed_at DESC)`、`bids(listing_id, amount DESC)`、截止扫描专用 `listings(status, deadline_at)`——让「最新 N 条」与 cron 扫描只走索引区间，免全表扫、免排序。
 3. 外键列全部配索引；上线后定期清理与 UNIQUE 前缀重复的冗余索引（纯写放大）。
-4. 排序表达式里带 `COALESCE` 的列表建**表达式索引**：如球员库按 CA/PA/年龄/身价排序，建 `CREATE INDEX idx_players_sort_ca ON players(COALESCE(ca, 0), id)`（增量 23，迁移 0027，四条同构）——让「排序 + 游标」走覆盖索引，消掉全表扫与排序步骤（本地 `EXPLAIN QUERY PLAN` 实证为 `SCAN players USING COVERING INDEX idx_players_sort_*`）。增量 28 同法补 `0029`（声望 / 归属 `COALESCE(club_id,0)` / 状态 CASE 权重三条）与 `0030`（`players(club_id, ca DESC, id)`，为海捞名单的驱动表连接备）；**表达式必须与 `buildSortExprs` 逐字一致，否则优化器静默不用索引**（增量 28 实测：`sort=club`/`status` 在 0029 之前 37,635 行、之后 43/22 行）。三条纪律：① 一条索引 ≈ 全表一行写（18,301 名球员），免费档日写 10 万行 ⇒ 每天最多 3 条；② 表达式行数多的键（姓名折叠 87 项链、PlayStyle 15 槽计数）建前先过 **D1 表达式树深度上限 100** 的体检；③ **迁移一旦 apply 到生产就不得再改**。
+4. 排序表达式里带 `COALESCE` 的列表建**表达式索引**：如球员库按 CA/PA/年龄/身价排序，建 `CREATE INDEX idx_players_sort_ca ON players(COALESCE(ca, 0), id)`（v2.8.1，迁移 0027，四条同构）——让「排序 + 游标」走覆盖索引，消掉全表扫与排序步骤（本地 `EXPLAIN QUERY PLAN` 实证为 `SCAN players USING COVERING INDEX idx_players_sort_*`）。v3.2.0 同法补 `0029`（声望 / 归属 `COALESCE(club_id,0)` / 状态 CASE 权重三条）与 `0030`（`players(club_id, ca DESC, id)`，为海捞名单的驱动表连接备）；**表达式必须与 `buildSortExprs` 逐字一致，否则优化器静默不用索引**（v3.2.0 实测：`sort=club`/`status` 在 0029 之前 37,635 行、之后 43/22 行）。三条纪律：① 一条索引 ≈ 全表一行写（18,301 名球员），免费档日写 10 万行 ⇒ 每天最多 3 条；② 表达式行数多的键（姓名折叠 87 项链、PlayStyle 15 槽计数）建前先过 **D1 表达式树深度上限 100** 的体检；③ **迁移一旦 apply 到生产就不得再改**。
 
 ### 17.2 查询规约
 
 1. 禁 N+1：批量 `IN (...)` 取扁平行 + JS 里 Map 归组；D1 单查询 bind 上限 100，约定 **90 一批**分块、批间 `Promise.all` 并行。
 2. 显式列清单，禁 `SELECT *`。
-3. 列表页一律硬 LIMIT + 游标翻页（`before` 时间戳/序号），**不算总数、不用 OFFSET**；COUNT 仅用于廉价守卫（所有权校验、`n>0` 布尔）。审查口径（增量 28）：**响应契约里不带 `total`** —— `GET /api/players` 只回 `players` + `nextCursor`（一次 56 行），前端翻页条改游标式文案；确实需要总数的地方（管理端筛选计数）走带 `CRON_KEY` 的内部端点 `GET /api/cron/players-count`，或把 COUNT 挂到与列表同 scope 的两级缓存上（`countAllPlayers`）。**去 COUNT 是本项目读量治理的最大单笔**：默认浏览一页 18,819 行里 COUNT 占 18,763 行（99.7%），且它不带游标、每翻一页重算整表。
+3. 列表页一律硬 LIMIT + 游标翻页（`before` 时间戳/序号），**不算总数、不用 OFFSET**；COUNT 仅用于廉价守卫（所有权校验、`n>0` 布尔）。审查口径（v3.2.0）：**响应契约里不带 `total`** —— `GET /api/players` 只回 `players` + `nextCursor`（一次 56 行），前端翻页条改游标式文案；确实需要总数的地方（管理端筛选计数）走带 `CRON_KEY` 的内部端点 `GET /api/cron/players-count`，或把 COUNT 挂到与列表同 scope 的两级缓存上（`countAllPlayers`）。**去 COUNT 是本项目读量治理的最大单笔**：默认浏览一页 18,819 行里 COUNT 占 18,763 行（99.7%），且它不带游标、每翻一页重算整表。
 4. 单语句原子写消灭读-改-写：条件更新 `UPDATE ... SET balance = balance + ? WHERE ... AND balance + ? >= 0`；upsert `ON CONFLICT DO UPDATE ... RETURNING` 一条语句完成变更+回读。
 5. 资格/上下文校验压成一条 JOIN 查询，不串行多趟往返。
 6. 昂贵聚合**写时算**（仿比赛系统 standings：报分时全量重算派生表、与业务写入合并进同一 batch）；读路径只做索引点查/小区间 JOIN。
-7. **不能静态索引的表达式就换写法，别硬加索引**（增量 28 海捞名单实例）：`WHERE club_id IS NULL OR club_id IN (子查询) ORDER BY ca DESC LIMIT 300` 在生产 97% 球员无归属的数据下退化为 `MULTI-INDEX OR` + 临时排序 ⇒ 先试索引无效（4 种列组合都不消 `TEMP B-TREE`），改成 `UNION ALL` 两分支 + CPU 支用 **`FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id`**（小表当驱动、固定连接顺序）后 36,274 → 843 行，结果集逐行不变。SQLite 约束：复合 SELECT 的分支不能自带 `ORDER BY`/`LIMIT`，必须包一层子查询。
-8. **判断「D1 是否可用」不能用这三条**（增量 28 教训）：`/api/health` 只读 `sqlite_schema`、`wrangler d1 execute --remote` 是管理通道、`/api/clubs/directory` 缓存键固定且 stale 刷新吞错 —— 配额触顶时它们全是 200，而 worker 侧真实表读全 500。要看真错误文本：临时给 onError 加诊断字段 + `wrangler dev --remote`（本地代码 + 生产绑定，不需部署）。
+7. **不能静态索引的表达式就换写法，别硬加索引**（v3.2.0 海捞名单实例）：`WHERE club_id IS NULL OR club_id IN (子查询) ORDER BY ca DESC LIMIT 300` 在生产 97% 球员无归属的数据下退化为 `MULTI-INDEX OR` + 临时排序 ⇒ 先试索引无效（4 种列组合都不消 `TEMP B-TREE`），改成 `UNION ALL` 两分支 + CPU 支用 **`FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id`**（小表当驱动、固定连接顺序）后 36,274 → 843 行，结果集逐行不变。SQLite 约束：复合 SELECT 的分支不能自带 `ORDER BY`/`LIMIT`，必须包一层子查询。
+8. **判断「D1 是否可用」不能用这三条**（v3.2.0 教训）：`/api/health` 只读 `sqlite_schema`、`wrangler d1 execute --remote` 是管理通道、`/api/clubs/directory` 缓存键固定且 stale 刷新吞错 —— 配额触顶时它们全是 200，而 worker 侧真实表读全 500。要看真错误文本：临时给 onError 加诊断字段 + `wrangler dev --remote`（本地代码 + 生产绑定，不需部署）。
 
 ### 17.3 事务与缓存规约
 
 1. **钱的原子性比比赛系统更严**：一笔业务（流水 + 余额 + 审计）合并进单个 `db.batch`（隐式事务）一次提交；比赛系统终场「先写后重算」的两段式仅适用于幂等可重算的派生表，**账本禁用**。
-2. 公开 GET 走 `src/lib/guard.ts`（增量 23 起，增量 28 重做缓存层）：`assertPublicRate(c, scope)` 按同 IP 60 次/60 秒限流（超限 429）；`cachedJson(key, ttlMs, loader, { scope, env, ctx })` 是**两级缓存**——L1 进程内（`Map`，上限 64 条按插入序淘汰）+ L2 边缘 Cache API（跨 isolate，合成 URL 作键，`cache-control: max-age` 管过期，全程 try/catch 旁路）。TTL 口径单一来源 `src/lib/cache-policy.ts`：列表 1h、名册 24h、目录 24h（`PUBLIC_CACHE_TTL_MS` 退化为显式覆盖，配 `0` 即旁路、生产不配）。缓存键 = `${scope}:v${epoch}:${canonicalQuery}`（`canonicalQuery` 参数顺序无关）。
-3. **新鲜度靠写路径 purge，TTL 只是兜底**（增量 28 裁决⑩）：代际键 `cache:epoch:public` 存 KV（isolate 记忆 5s），写路径 bump 一次 = L1 与 L2 同时失效；键空间无穷（筛选 × 排序 × 游标）且 Cache API 无前缀删除、`cache.delete` 只作用于当前 colo，所以不能按键枚举 purge。挂钩只有两处：`src/worker/index.ts` 的 `/api/*` middleware（非 GET/HEAD + 响应 2xx + `scopesForWritePath` 命中）与 `scheduled()`（tick 真改了数据才 purge）。KV 读失败时本次请求按 60s 短 TTL（fail-short，宁可多读不可陈旧）。**不用 KV 存载荷**（增量 23 裁决仍成立）：KV 免费档写约 1k 次/天，且该绑定与登录会话共用，公开 GET 每请求写缓存会打爆写配额。
+2. 公开 GET 走 `src/lib/guard.ts`（v2.8.1 起，v3.2.0 重做缓存层）：`assertPublicRate(c, scope)` 按同 IP 60 次/60 秒限流（超限 429）；`cachedJson(key, ttlMs, loader, { scope, env, ctx })` 是**两级缓存**——L1 进程内（`Map`，上限 64 条按插入序淘汰）+ L2 边缘 Cache API（跨 isolate，合成 URL 作键，`cache-control: max-age` 管过期，全程 try/catch 旁路）。TTL 口径单一来源 `src/lib/cache-policy.ts`：列表 1h、名册 24h、目录 24h（`PUBLIC_CACHE_TTL_MS` 退化为显式覆盖，配 `0` 即旁路、生产不配）。缓存键 = `${scope}:v${epoch}:${canonicalQuery}`（`canonicalQuery` 参数顺序无关）。
+3. **新鲜度靠写路径 purge，TTL 只是兜底**（v3.2.0 裁决⑩）：代际键 `cache:epoch:public` 存 KV（isolate 记忆 5s），写路径 bump 一次 = L1 与 L2 同时失效；键空间无穷（筛选 × 排序 × 游标）且 Cache API 无前缀删除、`cache.delete` 只作用于当前 colo，所以不能按键枚举 purge。挂钩只有两处：`src/worker/index.ts` 的 `/api/*` middleware（非 GET/HEAD + 响应 2xx + `scopesForWritePath` 命中）与 `scheduled()`（tick 真改了数据才 purge）。KV 读失败时本次请求按 60s 短 TTL（fail-short，宁可多读不可陈旧）。**不用 KV 存载荷**（v2.8.1 裁决仍成立）：KV 免费档写约 1k 次/天，且该绑定与登录会话共用，公开 GET 每请求写缓存会打爆写配额。
 4. R2 媒体一律版本化 key + `Cache-Control: immutable` 长缓存，同 PoP 重复浏览不打 R2。
 5. 公开路径跳过会话检查（每请求省一次 KV get + D1 user 点查）。
 
@@ -907,7 +907,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 
 权限列：👤=coach 及以上 / 🛡=管理组 / 🌐=公开。分页一律硬 LIMIT + 游标（§17）；错误统一 `{error, code?}`。标〔增量 n〕= ROADMAP 对应增量交付。
 
-> **冻结范围**：本表冻结于增量 6 era（末次整体维护），增量 7 起新增/变更的端点**不回填本表**，以 ROADMAP 各增量节的「交付」段与 `src/worker/routes/` 现码为准——回填会造成文档与实现双轨漂移。增量 7+ 的主要新增面：认证四端点（`/api/auth/login|sync|callback|logout|backchannel-logout`，增量 7）、球员库扩展与批量维护（增量 17）、俱乐部目录与换队号（`/api/clubs/directory`、`/api/admin/clubs/tour-team`、`register-auth`、`transfer-ban`，增量 17）、通知三端点（增量 18）、设施与冠名（`/api/club/stadium/*`、`/api/club/facilities/upgrade`、`/api/club/naming/*`，增量 19/20）、赛果自动化（`/api/admin/results/:id/replay-hooks`，增量 21）、球员库姓名去变音搜索与轻量名册端点 `GET /api/players/roster`、排序键扩到 29 列（增量 26）、球员库 PlayStyle 筛选语义改「银值只比银槽 / 金值只比金槽」且 `ps` 白名单改「银 1-99 ∪ 金 101-199」（无新增端点，增量 27）、`/api/admin/overview` 与 `/api/admin/audit-log`（增量 15）、`GET /api/cron/players-count`（增量 28，内部计数端点：`CRON_KEY` fail-closed、只认 `X-Cron-Key` 头；同轮 `GET /api/players` 去掉响应里的 `total`，契约改为只有 `players` + `nextCursor`）。
+> **冻结范围**：本表冻结于v0.7.0 era（末次整体维护），v1.0.0 起新增/变更的端点**不回填本表**，以 ROADMAP 各增量节的「交付」段与 `src/worker/routes/` 现码为准——回填会造成文档与实现双轨漂移。v1.0.0+ 的主要新增面：认证四端点（`/api/auth/login|sync|callback|logout|backchannel-logout`，v1.0.0）、球员库扩展与批量维护（v2.3.0）、俱乐部目录与换队号（`/api/clubs/directory`、`/api/admin/clubs/tour-team`、`register-auth`、`transfer-ban`，v2.3.0）、通知三端点（v2.4.0）、设施与冠名（`/api/club/stadium/*`、`/api/club/facilities/upgrade`、`/api/club/naming/*`，v2.5.0/v2.6.0）、赛果自动化（`/api/admin/results/:id/replay-hooks`，v2.7.0）、球员库姓名去变音搜索与轻量名册端点 `GET /api/players/roster`、排序键扩到 29 列（v3.1.0）、球员库 PlayStyle 筛选语义改「银值只比银槽 / 金值只比金槽」且 `ps` 白名单改「银 1-99 ∪ 金 101-199」（无新增端点，v3.1.1）、`/api/admin/overview` 与 `/api/admin/audit-log`（v2.1.0）、`GET /api/cron/players-count`（v3.2.0，内部计数端点：`CRON_KEY` fail-closed、只认 `X-Cron-Key` 头；同轮 `GET /api/players` 去掉响应里的 `total`，契约改为只有 `players` + `nextCursor`）。
 
 | 模块 | 端点 | 权限 | 说明 |
 |---|---|---|---|
@@ -922,7 +922,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 系统 | GET `/api/admin/config` | 🛡 | config 键注册表（涉密键掩码，§13）〔1〕 |
 | 球员 | POST `/api/admin/players/import/preview` · `/confirm` | 🛡 | 导入管线两段式（§5.4）〔1〕 |
 | 球员 | GET `/api/players/:id` | 🌐 | 球员卡数据〔1〕 |
-| 球员 | GET `/api/players/:id/transfers` | 🌐 | 球员转会记录（只列 `status='completed'`，带双方队名，最近 50 条；增量 30）〔5〕 |
+| 球员 | GET `/api/players/:id/transfers` | 🌐 | 球员转会记录（只列 `status='completed'`，带双方队名，最近 50 条；v3.3.0）〔5〕 |
 | 球员 | GET `/api/players?club_id=&status=&cursor=` | 🌐 | 球员列表〔1〕 |
 | 球员 | PATCH `/api/admin/players/:id` | 🛡 | 改身价/状态/档位等（审计）〔1〕 |
 | 球员 | POST `/api/admin/players/attributes-batch` | 🛡 | 属性批量维护（P1）〔7+〕 |
@@ -956,9 +956,9 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | 财政 | POST `/api/admin/ledger/manual` | 🛡 | 手动记账兜底〔6〕 |
 | 成长 | GET `/api/players/:id/growth` | 🌐 | XP 事件与成长史〔6〕 |
 | 成长 | POST `/api/admin/growth/events` | 🛡 | 补录（评分/扑救/夺权）〔6〕 |
-| 成长 | POST `/api/admin/growth/settlement/run` | 🛡 | 赛季结算（XP/升级待办；忠诚奖金自增量 25 起在中期窗关窗发 P1）〔6〕 |
-| 成长 | POST `/api/growth/levelup/:playerId` | 👤 | 升级方案二选一（本队教练或管理组）；带徽章的方案须一并交 `picks`（增量 30）〔6〕 |
-| 成长 | POST `/api/growth/china-playstyles/:playerId` | 👤 | 中国计划徽章发放（名额一次发满，离队失效；增量 30）〔6〕 |
+| 成长 | POST `/api/admin/growth/settlement/run` | 🛡 | 赛季结算（XP/升级待办；忠诚奖金自v3.0.0 起在中期窗关窗发 P1）〔6〕 |
+| 成长 | POST `/api/growth/levelup/:playerId` | 👤 | 升级方案二选一（本队教练或管理组）；带徽章的方案须一并交 `picks`（v3.3.0）〔6〕 |
+| 成长 | POST `/api/growth/china-playstyles/:playerId` | 👤 | 中国计划徽章发放（名额一次发满，离队失效；v3.3.0）〔6〕 |
 | 成长 | POST `/api/admin/growth/:playerId/tier` | 🛡 | 档位核定 1-5（§10.3）〔6〕 |
 | 通知 | GET `/api/notifications?cursor=` · GET `/api/notifications/unread-count` · POST `/api/notifications/read` | 👤 | web 收件篮（只读本人 `channel='web'` 行，id 倒序游标 30/页；`read` 支持 ids/all，幂等）〔18〕 |
 | 通知 | bot 投递（无 web 端点）：cron 每 5 分钟扫 `channel='qq'` 的 pending → HMAC POST 到 AstrBot 插件（§12；写入点=赛果确认/升级，假设 23） | 内部 | QQ 推送〔6〕 |

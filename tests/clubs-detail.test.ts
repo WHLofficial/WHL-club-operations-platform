@@ -1,4 +1,4 @@
-// 增量 31 步骤 6：GET /api/clubs/:id 球队详情 + GET /api/clubs/:id/standing 排名代理。
+// v3.4.0 步骤 6：GET /api/clubs/:id 球队详情 + GET /api/clubs/:id/standing 排名代理。
 // 覆盖：队头（分级/队徽）、阵容结构（位置/年龄/CA 分档 + 六项均值/合计）、合同结构（保护期/效力分档）、
 // 转会往来（转入转出各 10 条）、近期战绩（90 分钟口径 + 弃权判负）、未登录 401 / 不存在 404、
 // 没有比赛系统映射时的降级、排名代理的三条降级路径（未配基址零查库 / 非 2xx 不写缓存 / 超时）。
@@ -266,7 +266,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('GET /api/clubs/:id 球队详情（增量 31 步骤 6）', () => {
+describe('GET /api/clubs/:id 球队详情（v3.4.0 步骤 6）', () => {
   it('队头 + 阵容结构（位置/年龄/CA 分档与六项均值）+ 合同结构（保护期/效力分档）', async () => {
     const fx = freshEnv();
     seededClub(fx);
@@ -497,7 +497,7 @@ function standingsPayload(names: string[]): unknown {
   };
 }
 
-describe('GET /api/clubs/:id/standing 排名代理（增量 31 步骤 6）', () => {
+describe('GET /api/clubs/:id/standing 排名代理（v3.4.0 步骤 6）', () => {
   it('未配 TOUR_API_BASE：一个库都不查，直接降级', async () => {
     const fx = freshEnv();
     seededClub(fx);

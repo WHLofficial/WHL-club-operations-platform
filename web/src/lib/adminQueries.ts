@@ -1,4 +1,4 @@
-// 管理端共享数据层（增量 15 commit 3）：
+// 管理端共享数据层（v2.1.0 commit 3）：
 // clubs 原来在俱乐部/合同导入/期初余额/手动记账四个 section 各拉一次，共享 key 自动去重；
 // /api/seasons/current 赛季页与球员页成长引擎都要用，同样共享。
 import { api, type AdminClubRow, type SeasonCurrent } from './api.ts';
@@ -14,7 +14,7 @@ export async function fetchSeasonCurrent(): Promise<SeasonCurrent> {
   return api<SeasonCurrent>('/api/seasons/current');
 }
 
-// 增量 37：球队建档双向同步的对账清单（赛事系统 team ↔ 登记册 clubs 按 id 对齐）
+// v6.1.0：球队建档双向同步的对账清单（赛事系统 team ↔ 登记册 clubs 按 id 对齐）
 export const TEAM_SYNC_KEY = ['admin', 'team-sync'] as const;
 
 export interface TeamSyncDiff {

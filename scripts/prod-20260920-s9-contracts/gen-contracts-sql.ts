@@ -6,7 +6,7 @@
 // 走通道 C 只能落 `service_ticks = closedRegularTicks(effective_from)`（本批数据下恒为 0 或 1），
 // 399 名「效力 ≥1.5 赛季」的球员解约成本会被大幅高估。故本批走离线 SQL，显式写刻度列。
 //
-// 刻度口径（增量 25 / 迁移 0028；src/worker/contract-ticks.ts:24-51）：
+// 刻度口径（v3.0.0 / 迁移 0028；src/worker/contract-ticks.ts:24-51）：
 //   效力（赛季）= 0.5 × (当前已关常规窗数 − service_ticks) ⇒ service_ticks = 当前刻度 − 2 × 效力年
 //   保护期结束点 protection_ticks = service_ticks + PROTECTION_TICKS(3)；训练营（trainee）无保护期 = NULL
 //   本批当前刻度 = 1（季初常规窗 2026-09-18T01:01Z 已关，其余季窗在库内不存在）
@@ -632,7 +632,7 @@ L.push('1. **前置**：`npx wrangler d1 migrations list whl-club --remote` 确�
 L.push('   ```');
 L.push('   npx wrangler d1 migrations apply whl-club --remote');
 L.push('   ```');
-L.push('   （0028 未 apply 时 INSERT 会报 `no such column: service_ticks`。本批**不需要**先部署增量 25 的 worker：');
+L.push('   （0028 未 apply 时 INSERT 会报 `no such column: service_ticks`。本批**不需要**先部署v3.0.0 的 worker：');
 L.push('   刻度列由本批 SQL 直接写；残余风险是 apply 后、部署前若有人从网页面板创建合同，旧 worker 会落默认刻度。）');
 L.push('2. **预检**（只读）：`node scratch/run-verify.mjs scripts/prod-20260920-s9-contracts/01-precheck.sql`');
 L.push('   期望 `contracts_rows=0`、`tick_cols=4`、`tick_cols_window=1`、`closed_windows=1`、`clubs_rows=20`、`players_found=462`。');

@@ -1,8 +1,8 @@
-# 球员库 D1 读量定标报告（增量 28 步骤 1；步骤 4/6/7 已补测）
+# 球员库 D1 读量定标报告（v3.2.0 步骤 1；步骤 4/6/7 已补测）
 
 **测量日期**：2026-09-22（UTC） · **目标**：生产 `whl-club`（`73154873-d5ae-42b0-a630-25f5ef60053d`）· **原始数据**：[`measurements.json`](./measurements.json)（30 形状 + 6 探针，步骤 1 基线）、[`measurements-after.json`](./measurements-after.json)（同 30 形状，步骤 7 验收复测）、[`surface-measurements.json`](./surface-measurements.json)（全站 21 条读面，步骤 6 普查）
 
-**为什么要这份报告**：2026-09-21 免费档 5,000,000 行/日读配额被耗尽，`/api/players*` 全线 500、cron 每 5 分钟失败。用户诉求原话：「目前球员库相对稳定，现在查找的 D1 读消耗过大！」治理前必须先知道「每个形状一次读多少行」——否则物化哪些列、缓存给多长 TTL 都只能靠猜。本报告是增量 28 步骤 4/5 的输入。
+**为什么要这份报告**：2026-09-21 免费档 5,000,000 行/日读配额被耗尽，`/api/players*` 全线 500、cron 每 5 分钟失败。用户诉求原话：「目前球员库相对稳定，现在查找的 D1 读消耗过大！」治理前必须先知道「每个形状一次读多少行」——否则物化哪些列、缓存给多长 TTL 都只能靠猜。本报告是v3.2.0 步骤 4/5 的输入。
 
 ---
 
@@ -199,7 +199,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | **已有 0027 表达式索引**（实测快） | `ca` 58、`pa` 61、`age` 22、`market_value` 22 | 22–61 | 已解决 |
 | **0029 已建（步骤 4）** | `prestige` **53**、`club` **43**、`status` **22** | 22–53 | ✅ 已解决 |
 | **可建 players 单表表达式索引** | **已建 7 个**：`uid`、`ps`（迁移 `0034`）、`position`、`growable`（`0035`）、`badges`、`base_ca`、`foot`（`0036`）；**剩余 6 个**：`growth_gap`、`growth_tier`、`future_star`、`china_plan`、`agent_tier`、`fc_id` | 37,635（改前） | ✅ 可以（每条 ≈18,301 行写），按天分批；已建各条的实测读数见 §3.3 与 §5.5 |
-| **表达式含 87 项链，深度存疑** | `name`（`sqlFold('players.name')`） | 37,635 | ⚠️ 表达式树深度上限 100（增量 26 的坑），建索引前必须用真引擎实测 |
+| **表达式含 87 项链，深度存疑** | `name`（`sqlFold('players.name')`） | 37,635 | ⚠️ 表达式树深度上限 100（v3.1.0 的坑），建索引前必须用真引擎实测 |
 | **不能建静态表达式索引** | `wage`、`release_fee`、`contract_type`、`source`（在 `ct.*`）、`protected`、`years`（依赖 `ct.*` + `season_windows` 子查询）、`influence`（内联运行时 config 系数，系数一改索引全废） | 37,635–37,637 | ❌ 需物化列或改查询结构 |
 | **需物化子表** | `attr:<属性键>`（34 键，值在 `game_attrs` JSON 里） | 未实测（形状同全表扫） | ❌ 架构级 |
 | **另一套口径** | `view=initial` 下的 `ca`/`pa`/`growth_gap`（`COALESCE(base_ca, ca)` / `COALESCE(json PA, pa)`） | 37,635（实测 `view=initial&sort=ca`） | ❌ 要用 initial 视图就得再建一套索引 |
@@ -244,7 +244,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | --- | --- | --- | --- |
 | `view=initial&sort=ca` | 37,635 | 初始视图把 `ca` 换成 `COALESCE(players.base_ca, players.ca)`（`src/worker/routes/players.ts:507`），而 `buildSortExprs` 又把它套成 `COALESCE(${caExpr}, 0)`（`players.ts:71`），与 0027 的 `COALESCE(ca, 0)` **是两个表达式**，索引静默失配（61 → 37,635） | **已收**：迁移 `0034`（2026-09-24 apply）—— 实测 37,635 → **54** 行/次。表达式必须是完整的 `(COALESCE(COALESCE(base_ca, ca), 0), id)` —— 只建内层 `COALESCE(base_ca, ca)` 匹配不上外层那圈 `COALESCE(…, 0)` |
 | `sort=uid` | 37,635 | 表达式是 `CAST(SUBSTR(players.uid, 3) AS INTEGER)`，可静态索引，只是没排进第一批 | **已收**：迁移 `0034`（2026-09-24 apply）—— 实测 37,635 → **24** 行/次 |
-| `sort=ps` | 37,635 | `PS_COUNT_EXPR` 是 15 项 `(json_extract(…) IS NOT NULL)` 相加的长链（每项必须自带括号）；建索引前要先过**表达式树深度体检**（D1 上限 100，参照增量 27 姓名折叠 253 项链撞墙的教训） | **已收**：迁移 `0034`（2026-09-24 apply）—— 实测 37,635 → **22** 行/次。深度体检已于 2026-09-24 通过：15 项链在真引擎上建得出来，`json_extract` 可进索引表达式（`scripts/check-sort-index-feasibility.mjs`） |
+| `sort=ps` | 37,635 | `PS_COUNT_EXPR` 是 15 项 `(json_extract(…) IS NOT NULL)` 相加的长链（每项必须自带括号）；建索引前要先过**表达式树深度体检**（D1 上限 100，参照v3.1.1 姓名折叠 253 项链撞墙的教训） | **已收**：迁移 `0034`（2026-09-24 apply）—— 实测 37,635 → **22** 行/次。深度体检已于 2026-09-24 通过：15 项链在真引擎上建得出来，`json_extract` 可进索引表达式（`scripts/check-sort-index-feasibility.mjs`） |
 | `sort=position` | 37,635 | 排序键是 12 项 `CASE position WHEN …`（`POSITION_SORT_CASE`），可静态索引，只是没排进第一批 | **已收**：迁移 `0035`（2026-09-24 apply）—— 实测 37,635 → **22** 行/次。索引侧必须去掉 `players.` 限定符，否则 SQLite 报 `the "." operator prohibited in index expressions` |
 | `sort=growable` | 37,635 | `COALESCE(growable, 0)`，可静态索引 | **已收**：迁移 `0035`（2026-09-24 apply）—— 实测 37,635 → **22** 行/次。它是表头 `FIXED_COLUMNS`（不可隐藏），暴露面最大，故优先 |
 | `sort=badges` | 37,635 | `(COALESCE(badges_silver, 0) + COALESCE(badges_gold, 0))`，可静态索引 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次。顺带把审计的「类级 37,635」从推断变成直接实测（生效前逐条实测恰为 37,635） |

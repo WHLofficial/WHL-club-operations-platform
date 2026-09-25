@@ -1,5 +1,5 @@
 // 管理端 · 球员修正与批量维护 + 导入管线两段式（§5.4：通道 A/B 球员，通道 C 名单合同模板；
-// 原 admin.ts 球员域，增量 15 拆分，行为零变化）
+// 原 admin.ts 球员域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
@@ -27,7 +27,7 @@ const PLAYER_PATCH_FIELDS = [
   'pa',
 ] as const;
 
-// PATCH /players/:id 与 /players/batch 共用的字段校验（增量 10 批量维护）
+// PATCH /players/:id 与 /players/batch 共用的字段校验（v1.3.0 批量维护）
 function parsePlayerUpdates(body: Record<string, unknown>): { updates: Record<string, unknown>; errors: string[] } {
   const updates: Record<string, unknown> = {};
   const errors: string[] = [];

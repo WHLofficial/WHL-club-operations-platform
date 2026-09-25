@@ -1,4 +1,4 @@
-// 机器通道入站（增量 37）：赛事系统建队后推过来，在本仓建俱乐部行。
+// 机器通道入站（v6.1.0）：赛事系统建队后推过来，在本仓建俱乐部行。
 // 挂 /api/internal，**不走会话**（没有管理员身份），只认 HMAC 签名；未配密钥一律 503（写端点 fail-closed）。
 // 出站方向见 tourClient.ts；两侧契约对称：POST /api/internal/team-upsert，body { id, name }。
 import { Hono } from 'hono';
@@ -42,7 +42,7 @@ app.post('/team-upsert', async (c) => {
   }
 
   // 幂等：本仓已有这号就只回报，不覆写。名字不一致留给对账页显示——静默改名会让
-  // 「谁的名字是对的」变成一次推送的副作用，改名不联动（增量 37 边界）。
+  // 「谁的名字是对的」变成一次推送的副作用，改名不联动（v6.1.0 边界）。
   const existing = await c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?')
     .bind(id)
     .first<{ id: number; name: string }>();

@@ -1,4 +1,4 @@
-// 管理端 · 赛季管理与赛果确认（附录 A〔6〕，§11；原 admin.ts 赛季域，增量 15 拆分，行为零变化）
+// 管理端 · 赛季管理与赛果确认（附录 A〔6〕，§11；原 admin.ts 赛季域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
@@ -35,7 +35,7 @@ app.post('/seasons', async (c) => {
   return c.json({ ok: true, season, growable }, 201);
 });
 
-// 赛季结算前置检查（增量 11）：硬阻断清单 + 软警示清单
+// 赛季结算前置检查（v1.4.0）：硬阻断清单 + 软警示清单
 app.get('/seasons/:id/settle-check', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const season = Number(c.req.param('id'));
@@ -45,7 +45,7 @@ app.get('/seasons/:id/settle-check', async (c) => {
   return c.json({ ok: true, season, ...check });
 });
 
-// 赛季结算（增量 11）：手动按钮——忠诚奖金 → growable 重判 → seasons.status='settled'。
+// 赛季结算（v1.4.0）：手动按钮——忠诚奖金 → growable 重判 → seasons.status='settled'。
 // 硬阻断 409；软警示需 acknowledged=true 确认后继续（返回体带提示清单）
 app.post('/seasons/:id/settle-season', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
@@ -53,7 +53,7 @@ app.post('/seasons/:id/settle-season', async (c) => {
   return c.json(await settleSeason(c.env, user.id, c.req.param('id'), body?.acknowledged === true));
 });
 
-// 赛事完结结算（增量 11）：入场奖金/资格赛保底/小组赛剩余池一次性发放，stage_settled_at 幂等
+// 赛事完结结算（v1.4.0）：入场奖金/资格赛保底/小组赛剩余池一次性发放，stage_settled_at 幂等
 app.post('/season-bindings/:id/stage-settle', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   return c.json(await settleTournamentStage(c.env, user.id, c.req.param('id')));
@@ -68,7 +68,7 @@ app.get('/seasons', async (c) => {
   return c.json({ seasons: rows.results });
 });
 
-// 绑定赛事到赛季（增量 6.1 层级修订：赛季是上级，赛事与窗口并列——赛事绑赛季、窗口只管转会准入）。
+// 绑定赛事到赛季（v0.7.1 层级修订：赛季是上级，赛事与窗口并列——赛事绑赛季、窗口只管转会准入）。
 // 一座赛事只进一个赛季（库上唯一约束，防同一场比赛双份进赛果队列）；赛季已结算后不得再绑
 app.post('/seasons/:id/bind-tournament', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
@@ -181,7 +181,7 @@ app.post('/results/:id/confirm', async (c) => {
   return c.json({ ok: true, result, xp }, 201);
 });
 
-// 重放已确认场次的三钩子（增量 21，幂等）：钩子失败/标了人工复核的场，修完数据后从这里补账
+// 重放已确认场次的三钩子（v2.7.0，幂等）：钩子失败/标了人工复核的场，修完数据后从这里补账
 app.post('/results/:id/replay-hooks', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const result = await replayHooksForMatch(c.env, c.req.param('id'));

@@ -1,4 +1,4 @@
-// 站内信收件篮（增量 18，UI_DESIGN「通知中心」）：web 通道通知的列表 / 未读数 / 标已读（👤 登录即本人收件篮）
+// 站内信收件篮（v2.4.0，UI_DESIGN「通知中心」）：web 通道通知的列表 / 未读数 / 标已读（👤 登录即本人收件篮）
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';

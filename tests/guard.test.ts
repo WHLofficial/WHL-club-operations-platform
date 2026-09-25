@@ -1,4 +1,4 @@
-// 进程内守护（增量 23）：固定窗口限流 + TTL SWR 缓存；公开 GET 挂点行为
+// 进程内守护（v2.8.1）：固定窗口限流 + TTL SWR 缓存；公开 GET 挂点行为
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -205,7 +205,7 @@ describe('公开 GET 挂点（限流 + 缓存）', () => {
   it('显式配 0：旁路，数据变更立即可见', async () => {
     resetGuards();
     const env = freshEnv();
-    // 增量 28：未配 = 走分级 TTL（生产口径），旁路必须显式声明
+    // v3.2.0：未配 = 走分级 TTL（生产口径），旁路必须显式声明
     env.PUBLIC_CACHE_TTL_MS = '0';
     const before = await (await get('/api/players?status=listed&limit=5', env)).json<{ players: unknown[] }>();
     expect(before.players.length).toBe(0);
@@ -224,7 +224,7 @@ describe('公开 GET 挂点（限流 + 缓存）', () => {
   });
 });
 
-describe('分级缓存口径（增量 28）', () => {
+describe('分级缓存口径（v3.2.0）', () => {
   it('ttlForScope：未配走分级表，显式给数（含 0）就照它，非法值回落', () => {
     expect(ttlForScope('players')).toBe(3_600_000);
     expect(ttlForScope('roster')).toBe(86_400_000);
@@ -264,7 +264,7 @@ describe('分级缓存口径（增量 28）', () => {
   });
 });
 
-describe('代际键 purge（增量 28）', () => {
+describe('代际键 purge（v3.2.0）', () => {
   it('purgePublicCaches 直接调用：版本号 +1 后列表立刻看到新数据', async () => {
     resetGuards();
     const env = freshEnv();
@@ -360,7 +360,7 @@ describe('代际键 purge（增量 28）', () => {
   });
 });
 
-describe('L2 边缘 Cache API（增量 28）', () => {
+describe('L2 边缘 Cache API（v3.2.0）', () => {
   // Node 里没有 caches 全局（实测 typeof caches === 'undefined'）⇒ 打桩验证跨 isolate 复用
   function stubCaches(): { store: Map<string, Response>; restore(): void } {
     const store = new Map<string, Response>();

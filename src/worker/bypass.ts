@@ -355,7 +355,7 @@ export async function createFreeAgent(
     .bind(playerId)
     .first<OwnPlayerRow>();
   if (!player) throw new HttpError(404, '球员不存在');
-  // 海捞 = 签无归属的球员（4.4.4）。CPU 队球员带 club_id 但仍是海里人（增量 14，用户裁决）：
+  // 海捞 = 签无归属的球员（4.4.4）。CPU 队球员带 club_id 但仍是海里人（v2.0.0，用户裁决）：
   // 出账与落位都按「从 CPU 队签走」处理（fromClubId 记 CPU 队 id），不给 CPU 队记任何账。
   const cpuIds = await cpuClubIds(db);
   if (player.club_id !== null && !cpuIds.has(player.club_id)) {
@@ -434,7 +434,7 @@ export async function createForcedAuction(
     .bind(playerId)
     .first<{ id: number; name: string; club_id: number | null; status: string; position: string | null; ca: number | null }>();
   if (!player || player.club_id === null) throw new HttpError(404, '球员不存在或没有归属');
-  // CPU 队不入账（增量 14，用户裁决）：CPU 队球员即整队都是「海里的」，不参与强制拍卖
+  // CPU 队不入账（v2.0.0，用户裁决）：CPU 队球员即整队都是「海里的」，不参与强制拍卖
   // （否则拍卖成交会把成交价记到 CPU 队头上；其前六资格也本是按 CPU 队阵容算的）
   if ((await cpuClubIds(db)).has(player.club_id)) {
     throw new HttpError(400, 'CPU 队球员不参与强制拍卖（CPU 队不入账）');

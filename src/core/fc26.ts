@@ -22,7 +22,7 @@ export const POSITION_BY_ID: Record<number, string> = {
 
 export const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
 
-// 位置四档（增量 31 步骤 11a，用户裁决 2026-09-22）：球队页讲结构只讲「门将/后卫/中场/前锋」，
+// 位置四档（v3.4.0 步骤 11a，用户裁决 2026-09-22）：球队页讲结构只讲「门将/后卫/中场/前锋」，
 // 细位（RB/CB/LB…）是数据、四档是叙事。细位表仍是 POSITION_BY_ID，这里只加一层归组，不改数据口径。
 export const POSITION_GROUP_BY_POSITION: Record<string, string> = {
   GK: 'GK',
@@ -47,7 +47,7 @@ export const POSITION_GROUPS: readonly { key: string; label: string }[] = [
   { key: 'FW', label: '前锋' },
 ];
 
-// 队 id 归一化（增量 14，用户裁决 2026-09-18）：游戏内必须用假名的 4 支俱乐部，第三方 fixed 快照
+// 队 id 归一化（v2.0.0，用户裁决 2026-09-18）：游戏内必须用假名的 4 支俱乐部，第三方 fixed 快照
 // （gen_ref_json.py 的源）仍带旧 FIFA 号，游戏真表（EAFC 26 IDs.xlsx）用新号。平台统一以游戏真 id
 // 为口径——clubs.id 与 players.club_id 都落真号，显示名由 web/assets/ref/team.json 给真名。
 export const FC26_TEAM_ID_ALIASES: Record<number, number> = {
@@ -154,7 +154,7 @@ export const FC26_GAME_ATTR_COLUMNS: readonly string[] = [
 // 后端筛选、前端下拉与两侧 URL 白名单共用这一份，别再各自写 1-99 这样的字面量。
 export const PS_SLOT_COUNT = 15;
 // 槽位键清单（PSID1..PSID15）。属性页原先手抄了 PSID1-7 + PSID13-15 十个键，落在 PSID8-12 的
-// 银徽章因此「可筛不可见」（增量 29 收口）；由槽数派生，免得多一个改段界时的漂移点。
+// 银徽章因此「可筛不可见」（v3.2.1 收口）；由槽数派生，免得多一个改段界时的漂移点。
 export const PS_SLOT_KEYS: readonly string[] = Array.from(
   { length: PS_SLOT_COUNT },
   (_, i) => `PSID${i + 1}`,
@@ -179,7 +179,7 @@ export function isGoldPlaystyleId(n: number): boolean {
   return n >= PS_GOLD_MIN;
 }
 
-// 可发放的 PlayStyle 基础 ID 白名单（增量 30）：FC26 一共 36 个基础项，金徽 = 基础 ID + 100，
+// 可发放的 PlayStyle 基础 ID 白名单（v3.3.0）：FC26 一共 36 个基础项，金徽 = 基础 ID + 100，
 // 一份 36 项清单同时管住两段；与 web/assets/ref/playstyle.json 的银段逐项对齐（测试守住）。
 // 升级方案与中国计划只从这里发放 —— 光有「银 1-99 ∪ 金 101-199」的段界拦不住库里没有的 ID。
 export const PS_GRANTABLE_BASE_IDS: readonly number[] = [

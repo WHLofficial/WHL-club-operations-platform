@@ -1,5 +1,5 @@
 // 管理端 · 转会页：审核队列（含市场干预）+ 暂停出价 + 强制拍卖（规则 4.4.5）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
-// （原 Admin.tsx 三 section，增量 15 拆分；暂停出价为增量 15 commit 5 新增）
+// （原 Admin.tsx 三 section，v2.1.0 拆分；暂停出价为v2.1.0 commit 5 新增）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
@@ -19,7 +19,7 @@ export default function MarketPage() {
   );
 }
 
-/* ---------- 审核队列（增量 3 成交确认 + 增量 5 旁路单据） ---------- */
+/* ---------- 审核队列（v0.4.0 成交确认 + v0.6.0 旁路单据） ---------- */
 
 // 旁路单据的摘要行（payload 由 createBypassTransfer / submitMatch 冻结）
 function bypassSummary(r: AdminReviewRow): string | null {
@@ -475,7 +475,7 @@ function ForcedAuctionSection() {
 
 const WINDOW_STATUS_LABEL: Record<string, string> = { open: '进行中', closed: '已关闭' };
 
-// 窗类型（增量 25）：只有「临时」落库；季初 / 中期按同赛季非临时窗的 window_seq 升序派生
+// 窗类型（v3.0.0）：只有「临时」落库；季初 / 中期按同赛季非临时窗的 window_seq 升序派生
 function windowKindLabel(w: WindowRow, all: WindowRow[]): string {
   if (w.isTemporary) return '临时窗';
   const regular = all

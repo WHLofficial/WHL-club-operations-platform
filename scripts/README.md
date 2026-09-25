@@ -18,19 +18,19 @@
 | `list_wrangler.ps1` | 列本机 wrangler 相关 node 进程的 PID 与命令行（排查端口占用） | PowerShell 直接跑 |
 | `smoke-oidc-local.mjs` | 双服务联调冒烟：club 8795（OIDC）× auth 8792（真认证中心），手推 authorize → 登录 → callback → `/api/me` → back-channel 登出 → end_session | 见文件头注释；需先起 auth 仓本地服务，注意 auth 登录限流 5 次/15 分钟 |
 | `e2e/smoke.mjs` | 平台 e2e 冒烟（9 场景），见下 | `npm run test:e2e` 或 `node scripts/e2e/smoke.mjs [baseUrl]` |
-| `measure-d1-reads.mjs` | **D1 读量定标**（增量 28 步骤 1）：用真实路由 + 假 D1 抓下它实际执行的 SQL，内联参数后打生产读 `meta.rows_read`。30 个球员库形状 + 6 个成本探针 | `node scripts/measure-d1-reads.mjs [--local] [--dump] [--only=<id>] [--probes] [--json-out=<path>]` |
-| `measure-surface-reads.mjs` | **全站读面普查**（增量 28 步骤 6）：同机制，覆盖 18 个 URL 读面 + 3 个 cron 任务；只执行 SELECT（GET 里可能藏 `settleOverdue` 的写） | `node scripts/measure-surface-reads.mjs [--local] [--dump] [--only=<id>] [--json-out=<path>]` |
+| `measure-d1-reads.mjs` | **D1 读量定标**（v3.2.0 步骤 1）：用真实路由 + 假 D1 抓下它实际执行的 SQL，内联参数后打生产读 `meta.rows_read`。30 个球员库形状 + 6 个成本探针 | `node scripts/measure-d1-reads.mjs [--local] [--dump] [--only=<id>] [--probes] [--json-out=<path>]` |
+| `measure-surface-reads.mjs` | **全站读面普查**（v3.2.0 步骤 6）：同机制，覆盖 18 个 URL 读面 + 3 个 cron 任务；只执行 SELECT（GET 里可能藏 `settleOverdue` 的写） | `node scripts/measure-surface-reads.mjs [--local] [--dump] [--only=<id>] [--json-out=<path>]` |
 | `d1-read-audit/` | 上面两支的**机件与报告**：`harness.mjs`（真实路由 + 假 D1 + 内联器 + 生产 `rows_read`）与 `README.md`（读量报告：形状表、成本模型、阈值与候选清单、普查与处置） | 见 `scripts/d1-read-audit/README.md` |
 
 ## e2e/
 
 `smoke.mjs` 用 `playwright-core` 驱动**本机 Chrome**（`C:/Program Files/Google/Chrome/Application/chrome.exe`，未装浏览器二进制）。前置：`npm run build` + `npm run dev`（默认打 `http://127.0.0.1:8791`，可用 `E2E_BASE` / `E2E_CHROME` 或第二个参数覆盖）。场景：首页渲染、`/api/me`、公开接口、球员库翻页与排序、市场页、管理端、收件篮、**球员库三视口（1280×900 / 900×800 / 375×812）截图与控件探针**、无未捕获前端错误；失败截图落 `scratch/e2e-fail-*.png`。
 
-第 8 个场景除了截图，还断言只有真浏览器才有意义的三类事实（增量 27 加）：① 多选下拉面板整块落在视口内、`document.elementFromPoint` 命中的是面板本身、面板与触发器不重叠、高度 ≥160（唯一能抓「Popover 没进 top layer ⇒ 面板看得见点不到」的判据）；② 工具条与左栏各自的同行控件**底边逐对齐**（`align-items: flex-end` 下顶边本就允许不同），并把「同行控件 N 对」打进日志以防空集静默通过；③ 把翻页条文案临时换成线上量级（「共 34835 名球员 · 共 1742 页 · 第 1 页」）后量**页面级**横向溢出（量 `.library-pager` 自身没用：CJK 会换行，`scrollWidth` 恒等于 `clientWidth`）。
+第 8 个场景除了截图，还断言只有真浏览器才有意义的三类事实（v3.1.1 加）：① 多选下拉面板整块落在视口内、`document.elementFromPoint` 命中的是面板本身、面板与触发器不重叠、高度 ≥160（唯一能抓「Popover 没进 top layer ⇒ 面板看得见点不到」的判据）；② 工具条与左栏各自的同行控件**底边逐对齐**（`align-items: flex-end` 下顶边本就允许不同），并把「同行控件 N 对」打进日志以防空集静默通过；③ 把翻页条文案临时换成线上量级（「共 34835 名球员 · 共 1742 页 · 第 1 页」）后量**页面级**横向溢出（量 `.library-pager` 自身没用：CJK 会换行，`scrollWidth` 恒等于 `clientWidth`）。
 
 本地 D1 必须是**迁移全量已 apply** 的状态（`.wrangler/state/v3` 中 `d1_migrations` 若为空这层就靠不住，详见根 README 快速开始的「两个本地坑」），缺列时 `/api/players` 报 500、场景 4/8 会失败。
 
-脚本会往**本地** KV 种一条 `sess:<随机 token>` 会话（`--local`，该命名空间与赛事/竞猜共用，`--remote` 等于生产写），结束时删除。**两条登录通道都种**（增量 27 起）：兼容模式走 KV `whl_session` → `sess:{token}`；OIDC 模式走 D1 `oidc_session` 行（`token_hash = sha256(cookie 值)`）+ `__Host-club_session` cookie，本地没有该表时那一半自动跳过，两个 cookie 同时带上。若 dev 用非默认 persist 目录（如 `wrangler dev --persist-to .wrangler/rehearsal`），必须用同一个目录跑 e2e（`E2E_PERSIST_TO=.wrangler/rehearsal`），否则会话种在另一边、页面会跳认证中心。
+脚本会往**本地** KV 种一条 `sess:<随机 token>` 会话（`--local`，该命名空间与赛事/竞猜共用，`--remote` 等于生产写），结束时删除。**两条登录通道都种**（v3.1.1 起）：兼容模式走 KV `whl_session` → `sess:{token}`；OIDC 模式走 D1 `oidc_session` 行（`token_hash = sha256(cookie 值)`）+ `__Host-club_session` cookie，本地没有该表时那一半自动跳过，两个 cookie 同时带上。若 dev 用非默认 persist 目录（如 `wrangler dev --persist-to .wrangler/rehearsal`），必须用同一个目录跑 e2e（`E2E_PERSIST_TO=.wrangler/rehearsal`），否则会话种在另一边、页面会跳认证中心。
 
 ## players-import/
 
@@ -83,7 +83,7 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 | `prod-20260920-s9-abilities/` | FC Editor s901 → 20 队（含 CPU）570 人现值能力（Case B：只改 `ca`/`pa` + `json_set` 合并 34 项能力项与 `RoleID1-5`/`PSID1-15`，**不动 `base_ca`/`$.CA`/`$.PA`/队籍**） | **已执行**（2026-09-21 经 `--file` 两片：200 + 57 条语句 / rows_written 400 + 112 / changes 201 + 58；逐行复核 `--verify` 源行 570 / 命中 570 / 差异 0；验收六列 —— `touched` 257、`delta_gt0` 254、`null_core` 0、`gold_rows` 35、`gold_slots` 36、`ca_vs_attr` 254；见该目录 README 第十三节） |
 | `prod-20260920-s9-contracts/` | 一线队-S9.csv → 16 人控队合同：队籍对齐后 **462 行全部可导**（原预测 378 = claim 298 + create 80 已归零）；462 条带守卫的 `INSERT … SELECT`（10 片）+ 生成器 `gen-contracts-sql.ts`（含 `--verify`）+ 执行器 `exec-shards.mjs` + 预检/验收/回滚/报告 | **已执行**（2026-09-21：先 apply 迁移 0028，再经 `exec-shards.mjs --remote` 跑 10 片 = 462 语句 / changes 462 / rows_written 1386；逐行复核 462 / 命中 462 / 差异 0；验收 11 列全中 + 逐队 16 行与效力年分布全中；`players` 未被动、守卫表仍 0；见该目录 README 第十一节） |
 
-四个目录都受上面「执行纪律」约束。硬前置（**均已满足**）：合同批要求 **迁移 0028 已 apply**（2026-09-21 已 apply；离线 SQL 通道显式写刻度列，**不需要**先部署增量 25 —— 该部署仍是网页面板通道的残留风险，见该目录 README §11.8）；能力批只依赖 `json_set`（已在生产只读验证可用）；队籍批只写 `players.club_id`（该列**无外键**，`--file` 可用）且要求 `contracts`/`listings`/`registrations`/`negotiation_sessions`/`transfers`/`bids` 全为 0（执行前 `01-precheck.sql` 复核）。
+四个目录都受上面「执行纪律」约束。硬前置（**均已满足**）：合同批要求 **迁移 0028 已 apply**（2026-09-21 已 apply；离线 SQL 通道显式写刻度列，**不需要**先部署v3.0.0 —— 该部署仍是网页面板通道的残留风险，见该目录 README §11.8）；能力批只依赖 `json_set`（已在生产只读验证可用）；队籍批只写 `players.club_id`（该列**无外键**，`--file` 可用）且要求 `contracts`/`listings`/`registrations`/`negotiation_sessions`/`transfers`/`bids` 全为 0（执行前 `01-precheck.sql` 复核）。
 
 建议顺序：**队籍对齐 → 合同 → 能力**（队籍先对，合同批才不带 84 行冲突；能力与另两批无依赖，可任意时点插入）。四批已于 2026-09-21 全部执行完毕。
 

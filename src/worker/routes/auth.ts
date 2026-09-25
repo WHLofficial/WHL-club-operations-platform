@@ -32,7 +32,7 @@ import {
 const authRoutes = new Hono<{ Bindings: Env }>();
 
 // 兼容模式下的旧入口：与 TopBar 的「去赛事系统登录」同一去处（同一处口径见 web/src/lib/api.ts 的 TOUR_SITE_URL）。
-// 增量 34：tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录。
+// v5.0.1：tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录。
 const TOUR_HOME = 'https://tour.whleague.win/';
 
 type OidcEnv = Env & { OIDC_ISSUER: string; OIDC_CLIENT_ID: string };
@@ -227,7 +227,7 @@ authRoutes.get('/auth/callback', async (c) => {
       new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(),
     )
     .run();
-  // auth 事件审计（增量 21）：登录成功（尽力而为，不阻塞建会话）
+  // auth 事件审计（v2.7.0）：登录成功（尽力而为，不阻塞建会话）
   await writeAudit(c.env.DB, {
     actor: Number(payload.sub),
     action: 'auth_login',
@@ -260,7 +260,7 @@ authRoutes.post('/auth/logout', async (c) => {
       .bind(new Date().toISOString(), tokenHash)
       .run();
     if (session) {
-      // auth 事件审计（增量 21）：主动登出（尽力而为）
+      // auth 事件审计（v2.7.0）：主动登出（尽力而为）
       await writeAudit(c.env.DB, {
         actor: Number(session.sub),
         action: 'auth_logout',
@@ -306,7 +306,7 @@ authRoutes.post('/auth/backchannel-logout', async (c) => {
   await c.env.DB.prepare('UPDATE oidc_session SET revoked_at = ? WHERE auth_sid = ? AND revoked_at IS NULL')
     .bind(new Date().toISOString(), payload.sid)
     .run();
-  // auth 事件审计（增量 21）：认证中心推送的全端登出（尽力而为；sid 无本地用户行，actor 记 0=系统）
+  // auth 事件审计（v2.7.0）：认证中心推送的全端登出（尽力而为；sid 无本地用户行，actor 记 0=系统）
   await writeAudit(c.env.DB, {
     actor: 0,
     action: 'auth_backchannel_logout',

@@ -70,7 +70,7 @@ function setNarrow(narrow: boolean): void {
   for (const listener of mediaListeners) listener({ matches: narrow } as MediaQueryListEvent);
 }
 
-// 游标式分页条（增量 28）：服务端不再回 total，「还有更多 / 已到末页」只能看 nextCursor。
+// 游标式分页条（v3.2.0）：服务端不再回 total，「还有更多 / 已到末页」只能看 nextCursor。
 let pageCursor: string | null = null;
 
 beforeEach(() => {
@@ -119,7 +119,7 @@ function open(url = '/players'): ReturnType<typeof userEvent.setup> {
   return userEvent.setup();
 }
 
-// 位置改多选下拉后（增量 27 步骤 3），选一个位置要先开面板、再勾码位
+// 位置改多选下拉后（v3.1.1 步骤 3），选一个位置要先开面板、再勾码位
 async function pickPosition(user: ReturnType<typeof userEvent.setup>, side: HTMLElement, pos: string): Promise<void> {
   await user.click(within(side).getByRole('button', { name: /^位置/ }));
   await user.click(within(side).getByRole('checkbox', { name: pos }));
@@ -230,7 +230,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
   it('选中一项筛选：出 chip、工具条计数跟着走，点 chip 的 × 撤掉', async () => {
     const user = open();
     await screen.findByRole('link', { name: 'Šeško' });
-    // 没有筛选条件时摘要条整块不渲染（增量 27 步骤 5 起不再留「未设筛选条件」占位）
+    // 没有筛选条件时摘要条整块不渲染（v3.1.1 步骤 5 起不再留「未设筛选条件」占位）
     expect(screen.queryByRole('group', { name: '已生效的筛选条件' })).toBeNull();
 
     const side = document.getElementById('library-side') as HTMLElement;
@@ -297,7 +297,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
   });
 });
 
-// 增量 28：服务端不再回 total（那条整表 COUNT 占单页读量 99.7%），分页条改游标式 ——
+// v3.2.0：服务端不再回 total（那条整表 COUNT 占单页读量 99.7%），分页条改游标式 ——
 // 「还有更多 / 已到末页」只能由 nextCursor 推出，这里把两种状态与翻页点击都锁住。
 describe('分页条（游标式）', () => {
   it('nextCursor 还在 ⇒ 显示「还有更多」，点下一页真的去取下一页', async () => {
@@ -329,7 +329,7 @@ describe('分页条（游标式）', () => {
   });
 });
 
-describe('增量 28：列表 staleTime（每次未命中都是 D1 实读）', () => {
+describe('v3.2.0：列表 staleTime（每次未命中都是 D1 实读）', () => {
   it('60s 内重新挂载页面复用缓存，不再重发列表请求', async () => {
     window.history.replaceState(null, '', '/players');
     // 这条要的是「缓存条目还活着」：只关重试，保留默认 gcTime（5 分钟）
@@ -456,7 +456,7 @@ describe('窄屏筛选抽屉', () => {
     await screen.findByRole('link', { name: 'Šeško' });
     const main = document.querySelector('.library-main') as HTMLElement;
     const toolbar = document.querySelector('.lib-toolbar') as HTMLElement;
-    // 摘要条（chip 是可聚焦按钮）自增量 27 步骤 5 起住在 .library-main 里，靠 main 的 inert 覆盖。
+    // 摘要条（chip 是可聚焦按钮）自v3.1.1 步骤 5 起住在 .library-main 里，靠 main 的 inert 覆盖。
     // 断言包含关系而不是它自己有没有 inert：一旦有人把摘要条搬回 main 外面，Shift+Tab 就又能
     // 落到 chip 上、在遮罩后面把筛选撤掉，而这条测试不会有任何反应
     const bar = document.querySelector('.lib-bar') as HTMLElement;
@@ -533,7 +533,7 @@ describe('窄屏筛选抽屉', () => {
   });
 });
 
-// 增量 29：列表的 PlayStyle 单元格。psNames 收的是「数组下标」，而 core/ref 的 playstyleIsGold
+// v3.2.1：列表的 PlayStyle 单元格。psNames 收的是「数组下标」，而 core/ref 的 playstyleIsGold
 // 收的是「槽号（1 起）」—— 传下标时下标 12（= PSID13，金槽）走不到「金槽」分支，银段 ID 落在金槽
 // 会被显示成银的，与属性页的 🥇 不一致。这条口径差只有异常数据才看得见，所以按纯函数直测。
 describe('psNames：槽号从 1 起', () => {

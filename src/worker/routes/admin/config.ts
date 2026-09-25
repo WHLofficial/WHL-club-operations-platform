@@ -1,5 +1,5 @@
-// 管理端 · 系统域（增量 15）：config 查看/超管写入口 + 审计日志查询
-// （原 admin.ts config 域；超管全开与审计日志为增量 15 commit 6 新增）
+// 管理端 · 系统域（v2.1.0）：config 查看/超管写入口 + 审计日志查询
+// （原 admin.ts config 域；超管全开与审计日志为v2.1.0 commit 6 新增）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { requireAdmin, requireSuperAdmin } from '../../../lib/session.ts';

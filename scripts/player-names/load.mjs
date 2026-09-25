@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把 derive.mjs 生成的 SQL 落到 D1（增量 32 · 步骤 2）
+ * 把 derive.mjs 生成的 SQL 落到 D1（v4.0.0 · 步骤 2）
  *
  *   node scripts/player-names/load.mjs --dry-run           只看语句数与体积，不连库
  *   node scripts/player-names/load.mjs --local             落到本地 D1（wrangler --local）

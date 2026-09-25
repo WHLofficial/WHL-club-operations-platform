@@ -58,7 +58,7 @@ export async function settleListingForReview(
 ): Promise<'settled' | 'already'> {
   const audit = createAuditStatement(db);
   const key = `listing:${listing.id}`;
-  // 增量 10：成交前异常出价打标（大额/连续抬价/最小步长拉锯）——只进审核单与审计，不拦结算
+  // v1.3.0：成交前异常出价打标（大额/连续抬价/最小步长拉锯）——只进审核单与审计，不拦结算
   const alerts = await detectBidAlerts(db, listing.id);
   const alertsJson = JSON.stringify(alerts);
   const statements = [

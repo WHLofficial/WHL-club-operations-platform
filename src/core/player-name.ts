@@ -1,4 +1,4 @@
-// 球员姓名口径（增量 32）
+// 球员姓名口径（v4.0.0）
 //
 //   players.name          FC26db 官方缩写名（`E. Haaland`），导入对齐键 fc_id 的伴生列，语义永不变
 //   players.display_name  FC26 存档派生的人名（`Erling Haaland`），来源与规则见 scripts/player-names/

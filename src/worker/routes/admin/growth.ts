@@ -1,5 +1,5 @@
 // 管理端 · 成长引擎管理端（附录 A〔6〕，§10；公开端点在 routes/growth.ts；
-// 原 admin.ts 成长域，增量 15 拆分，行为零变化）
+// 原 admin.ts 成长域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';

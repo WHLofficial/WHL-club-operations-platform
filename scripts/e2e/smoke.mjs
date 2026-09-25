@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 本地端到端冒烟（增量 23 建，增量 26 起兼顾 OIDC 模式 + 球员库三视口，增量 31 加球队页三视口）：
+// 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
 // 球队页（⑨⑩）例外：本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id），
@@ -215,7 +215,7 @@ async function main() {
     if (await page.locator('.multiselect-panel').count()) await page.keyboard.press('Escape');
   };
 
-  // 同一行控件的对齐（增量 27 步骤 1 的诉求）：.control-row 是 align-items:flex-end，
+  // 同一行控件的对齐（v3.1.1 步骤 1 的诉求）：.control-row 是 align-items:flex-end，
   // 所以「同一行」= 纵向范围相交、对齐判据 = 底边齐平（顶边可以不同：label 在上的 .field 比按钮高）。
   // .seg 曾经的 margin-bottom:8px 正是这样抬高了底边、被这条抓出来的。
   const controlRowAlign = (sel) =>
@@ -273,7 +273,7 @@ async function main() {
   // 线上量级的文案再量（与数据无关），量完立刻还原。
   // 判据是「页面不出横向滚动条」：翻页条自己不会横向溢出（文案是 CJK，会换行），
   // 真正要防的是有人给它加 nowrap 或塞进一个撑宽的元素。
-  // 表格单元格不折行（增量 29）：12 列挤在约 980px 里时，「Baseline Utd」会按空格断行、
+  // 表格单元格不折行（v3.2.1）：12 列挤在约 980px 里时，「Baseline Utd」会按空格断行、
   // 「2金7银」会按 CJK 任意断行。本机夹具只有 9 名球员、名字也短，折行在这里复现不出来 ⇒
   // 这组断言锁的是口径（td 的 computed white-space 一律 nowrap、容器允许横向滚动），不是布局本身。
   const tableLayoutProbe = () =>
@@ -314,7 +314,7 @@ async function main() {
       const span = pager?.querySelector('span');
       if (!pager || !span) return null;
       const before = span.textContent;
-      // 增量 28：翻页条改游标式文案；塞线上量级的极端值，量的是页面级横向溢出
+      // v3.2.0：翻页条改游标式文案；塞线上量级的极端值，量的是页面级横向溢出
       span.textContent = '第 1742 页 · 已加载 34835 名 · 还有更多';
       const doc = document.documentElement;
       const out = {
@@ -354,7 +354,7 @@ async function main() {
       const players = await page.request.get(`${BASE}/api/players?limit=5`);
       assert(players.status() === 200, `球员库状态码 ${players.status()}`);
       const pj = await players.json();
-      // 增量 28：列表不再回 total（每条整表 COUNT = 18,763 行，占单页读量 99.7%），
+      // v3.2.0：列表不再回 total（每条整表 COUNT = 18,763 行，占单页读量 99.7%），
       // 「还有更多」改由 nextCursor 判定 —— 所以这里断的是「没有 total、有 nextCursor」
       assert(
         Array.isArray(pj.players) && !('total' in pj) && 'nextCursor' in pj,
@@ -368,10 +368,10 @@ async function main() {
       // 等名册落地：加载中只有「正在翻名册…」，此时既没有表头也没有空态
       await page.locator('.library-main tbody tr, .library-main .empty-state').first().waitFor({ timeout: TIMEOUT });
       assert(await page.locator('.library-side').isVisible(), '宽屏下左栏不可见');
-      // 摘要条与翻页条同一行（增量 27 步骤 5）；没有筛选条件时摘要整块不渲染，只剩翻页
+      // 摘要条与翻页条同一行（v3.1.1 步骤 5）；没有筛选条件时摘要整块不渲染，只剩翻页
       assert(await page.locator('.lib-bar .library-pager').isVisible(), '翻页条不可见');
       assert((await page.locator('.lib-summary').count()) === 0, '未设筛选时不应有摘要条');
-      // 排序入口自增量 26 起是表头（工具栏的排序下拉与方向段控件已删除）
+      // 排序入口自v3.1.0 起是表头（工具栏的排序下拉与方向段控件已删除）
       const headers = page.locator('.library-main thead button.th-sort');
       if ((await headers.count()) === 0) {
         // 本地库为空 ⇒ 没有球员就没有表头，排序这条留给有夹具的环境
@@ -487,13 +487,13 @@ async function main() {
           assert(await side.isVisible(), `${label}：宽屏左栏应常驻可见`);
           assert((await page.locator('.lib-drawer-mask').count()) === 0, `${label}：宽屏不应出现遮罩`);
         }
-        // 多选下拉（增量 27 步骤 6）：左栏/抽屉里都要能打开、整块落在视口内、并且真的点得到
+        // 多选下拉（v3.1.1 步骤 6）：左栏/抽屉里都要能打开、整块落在视口内、并且真的点得到
         await openPanel('位置');
         const pos = await panelProbe();
         assertPanel(label, '位置', pos);
         await closePanel();
 
-        // 同行控件对齐（增量 27 步骤 1）：工具条一行、左栏一行，逐对量 top/bottom
+        // 同行控件对齐（v3.1.1 步骤 1）：工具条一行、左栏一行，逐对量 top/bottom
         await assertRowAligned(`${label} 工具条`, '.lib-toolbar.control-row');
         await assertRowAligned(`${label} 左栏`, '.library-side .control-row');
 
@@ -551,7 +551,7 @@ async function main() {
       console.log(`   截图：${shots.map((s) => s.replace(/\\/g, '/')).join(' / ')}`);
     });
 
-    // ---- 球队页（增量 31）----
+    // ---- 球队页（v3.4.0）----
     // 本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id）⇒ GET /api/clubs 与
     // GET /api/clubs/:id 在本机必然 500。后端响应形状与读量已由单测与 scripts/d1-read-audit/ 覆盖，
     // 这一组要验的是**真浏览器里的渲染与几何**——分段卡片、整卡可点、结构图不溢出、窄屏不出横向

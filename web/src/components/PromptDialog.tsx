@@ -1,4 +1,4 @@
-// 管理端对话框式 prompt（增量 15 commit 4）：替代 window.prompt（浏览器原生框无样式且不可控）。
+// 管理端对话框式 prompt（v2.1.0 commit 4）：替代 window.prompt（浏览器原生框无样式且不可控）。
 // 用法：const { ask, promptNode } = usePrompt(); const reason = await ask('原因：'); cancel 返回 null。
 import { useState } from 'react';
 

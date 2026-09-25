@@ -22,8 +22,8 @@ import { getVisibleSeason } from '../seasons.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 // 俱乐部目录（🌐 公开）：球员库筛选下拉用，只出 id/名称/级别，不含经营数据
-// 增量 23：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存
-// 增量 28：缓存走分级策略（scope='clubs'，兜底 24h）——固定键、载荷 1KB，写路径 purge 能精确失效
+// v2.8.1：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存
+// v3.2.0：缓存走分级策略（scope='clubs'，兜底 24h）——固定键、载荷 1KB，写路径 purge 能精确失效
 app.get('/clubs/directory', async (c) => {
   assertPublicRate(c, 'clubs-directory');
   const data = await cachedJson(
@@ -40,7 +40,7 @@ app.get('/clubs/directory', async (c) => {
   return c.json(data);
 });
 
-// 球队页列表（🌐 公开，增量 31）：全平台 active 俱乐部的四项指标 + 分级 + 队徽。
+// 球队页列表（🌐 公开，v3.4.0）：全平台 active 俱乐部的四项指标 + 分级 + 队徽。
 // 省 D1 额度在三处：① 阵容聚合一条语句算全平台（实测 1,032 行——`club_id IS NOT NULL` 被
 // SQLite 改写成范围扫 `club_id > ?`，天然跳过 17,731 条 NULL，所以不需要部分索引）；
 // ② club → tour team 映射与队徽各一条批量查询（20 + 40 行），不逐队查；
@@ -102,7 +102,7 @@ async function loadTeamLogos(env: Env, tourTeamIds: number[]): Promise<Map<numbe
   return out;
 }
 
-// 公开球队列表（增量 31）：一屏 20 队，一次算完 —— 固定 4 条 whl-club 语句 + AUTH_DB/TOUR_DB 各 1~2 条，无逐队查询。
+// 公开球队列表（v3.4.0）：一屏 20 队，一次算完 —— 固定 4 条 whl-club 语句 + AUTH_DB/TOUR_DB 各 1~2 条，无逐队查询。
 // tier 与 logo 派生自比赛系统（AUTH_DB.team / TOUR_DB.entry / TOUR_DB.team），那边改数据本 worker 收不到写事件、
 // 无从 purge ⇒ 最长陈旧 clubs scope 的 TTL（24h）。这是外源派生数据的已知代价，要即时生效只能等 TTL 过期。
 app.get('/clubs', async (c) => {
@@ -156,7 +156,7 @@ app.get('/clubs', async (c) => {
   return c.json(data);
 });
 
-// ---- 球队详情（增量 31，🔒 需登录）----
+// ---- 球队详情（v3.4.0，🔒 需登录）----
 
 // 单队 club_id → tour_team_id（AUTH_DB 一条）。列表用批量版 loadClubTourTeams；详情只查自己那一条。
 async function loadClubTourTeam(env: Env, clubId: number): Promise<number | null> {
@@ -200,7 +200,7 @@ interface Band {
 }
 
 // 分档口径只在这里定义一次，前端只画图（不在前端再分一次档，否则两处会漂）。
-// 年龄（增量 31 步骤 11a，用户裁决）：等宽 3 岁箱 + 竖直直方图 ⇒ 两端开口档、中间四档等宽。
+// 年龄（v3.4.0 步骤 11a，用户裁决）：等宽 3 岁箱 + 竖直直方图 ⇒ 两端开口档、中间四档等宽。
 // 代价是「成长年龄上限」（当季 seasons.age_cap，生产 25）不再是档界——直方图的前提是等宽箱，
 // 为守住一个档界把箱宽拉成 19 岁反而会让面积读错。
 const AGE_BANDS: readonly Band[] = [
@@ -384,7 +384,7 @@ app.get('/clubs/:id', async (c) => {
       // 身价与列表同一口径：一个人都没录过身价时给 null（前端显示「—」），不假装是 0
       const valueValues = rows.map((r) => r.market_value).filter((v): v is number => typeof v === 'number');
 
-      // 位置四档（增量 31 步骤 11a）：四档恒出（「0 门将」本身就是要看见的信号），档内明细按
+      // 位置四档（v3.4.0 步骤 11a）：四档恒出（「0 门将」本身就是要看见的信号），档内明细按
       // POSITION_BY_ID 的细位顺序给非零项。未知/空位置另起一档，不混进四档里。
       const byPosition = POSITION_GROUPS.map((g) => {
         const inGroup = rows.filter((r) => r.position !== null && POSITION_GROUP_BY_POSITION[r.position] === g.key);
@@ -631,7 +631,7 @@ app.post('/clubs/bind', async (c) => {
     throw new HttpError(400, '认证码格式不对，应为 8 位字母数字');
   }
 
-  // 烧码在 auth 认证中心单事务原子完成（增量 7：中央码表 team_bind_code + team_binding）；
+  // 烧码在 auth 认证中心单事务原子完成（v1.0.0：中央码表 team_bind_code + team_binding）；
   // 本地 club_bind_code 表休眠（保留防回滚，不再读写）
   try {
     await authBindTeam(c.env, { code, accountId: user.id });
@@ -659,7 +659,7 @@ app.post('/clubs/bind', async (c) => {
   return c.json({ ok: true, clubId: club.id }, 201);
 });
 
-// 我的球队概览（余额/名单数/窗口态）；窗口态在增量 6 落地，此前恒为 null
+// 我的球队概览（余额/名单数/窗口态）；窗口态在v0.7.0 落地，此前恒为 null
 app.get('/me/club', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const bound = await getBoundClub(c.env, user.id);
@@ -684,10 +684,10 @@ app.get('/me/club', async (c) => {
     c.env.DB.prepare(
       "SELECT season, window_seq FROM season_windows WHERE status = 'open' ORDER BY id DESC LIMIT 1",
     ).first<{ season: number; window_seq: number }>(),
-    // 增量 9：级别由报名派生（§3.2 改判），休眠列不再回显
+    // v1.2.0：级别由报名派生（§3.2 改判），休眠列不再回显
     deriveClubTier(c.env, await getVisibleSeason(c.env.DB), club.id),
   ]);
-  // 增量 12：主场档案（球场/设施/影响力构成）随 /me/club 一并下发（无球场行=null）
+  // v1.5.0：主场档案（球场/设施/影响力构成）随 /me/club 一并下发（无球场行=null）
   const stadium = await c.env.DB
     .prepare('SELECT name, capacity, tier, shell_influence, bonus_points, fans FROM stadiums WHERE club_id = ?')
     .bind(club.id)
@@ -812,7 +812,7 @@ app.get('/club/ledger', async (c) => {
   });
 });
 
-// 设施经营（增量 19）：build-info 一次拉全预览数据；扩建/升级操作即批即记账
+// 设施经营（v2.5.0）：build-info 一次拉全预览数据；扩建/升级操作即批即记账
 app.get('/club/stadium/build-info', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
@@ -890,7 +890,7 @@ app.post('/club/facilities/upgrade', async (c) => {
   return c.json(out, 201);
 });
 
-// 冠名市场（增量 20）：报价按本队队况逐品牌现算；合同费用条款签约时快照锁定
+// 冠名市场（v2.6.0）：报价按本队队况逐品牌现算；合同费用条款签约时快照锁定
 function namingContractDto(row: NonNullable<Awaited<ReturnType<typeof getActiveNaming>>>) {
   return {
     id: row.id,

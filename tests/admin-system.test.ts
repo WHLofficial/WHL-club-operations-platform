@@ -1,4 +1,4 @@
-// 管理端系统域路由测试（增量 15 commit 6）：config 超管全开 + 审计日志 + 总览轻计数
+// 管理端系统域路由测试（v2.1.0 commit 6）：config 超管全开 + 审计日志 + 总览轻计数
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -39,7 +39,7 @@ function freshEnv(): Fixture {
     } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
-    // 显式旁路两级缓存（增量 28 步骤 3 起默认是分级 TTL，不配不再等于旁路）：
+    // 显式旁路两级缓存（v3.2.0 步骤 3 起默认是分级 TTL，不配不再等于旁路）：
     // 本文件验的是 isolate 级缓存与鉴权，两级缓存本身由 guard.test.ts 覆盖
     PUBLIC_CACHE_TTL_MS: '0',
   };
@@ -60,7 +60,7 @@ function send(method: 'PUT' | 'POST', path: string, body: unknown, token: string
   );
 }
 
-describe('config 超管全开（增量 15）', () => {
+describe('config 超管全开（v2.1.0）', () => {
   it('GET /config：普通 admin 掩码涉密键；超管明文 + editable=true', async () => {
     const fx = freshEnv();
     // 涉密键落一个真值，验证掩码/明文差异
@@ -111,7 +111,7 @@ describe('config 超管全开（增量 15）', () => {
   });
 });
 
-describe('审计日志端点（增量 15）', () => {
+describe('审计日志端点（v2.1.0）', () => {
   it('倒序 + limit 钳制 + action 前缀过滤', async () => {
     const fx = freshEnv();
     // 造 6 条：3 条 config_set、3 条 listing_create，id 倒序返回
@@ -150,7 +150,7 @@ describe('审计日志端点（增量 15）', () => {
   });
 });
 
-describe('总览轻计数（增量 15）', () => {
+describe('总览轻计数（v2.1.0）', () => {
   it('计数正确；60s 缓存内不重算，?fresh=1 强拉', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(
@@ -187,7 +187,7 @@ describe('总览轻计数（增量 15）', () => {
     expect(fresh.activeListings).toBe(2);
   });
 
-  it('players 总数走两级缓存：隔掉 isolate 缓存后仍不重算整表 COUNT（增量 28 步骤 6）', async () => {
+  it('players 总数走两级缓存：隔掉 isolate 缓存后仍不重算整表 COUNT（v3.2.0 步骤 6）', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(
       `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES

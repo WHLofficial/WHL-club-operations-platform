@@ -1,4 +1,4 @@
-# 球员显示名与球衣号派生（增量 32，增量 34 扩充）
+# 球员显示名与球衣号派生（v4.0.0，v5.0.1 扩充）
 
 把 FC26 存档里的人名与球衣号派生成本库 `players` 的 `first_name` / `last_name` /
 `common_name` / `display_name` / `number` 五列（迁移见
@@ -23,7 +23,7 @@
 远端只读查询（`derive.mjs` 缓存到 `data/*.json`，`--refresh` 重拉）：只剩 `whl-club`
 `players(fc_id, name, club_id)` 一份。
 
-**赛事系统 `whl.player` 不再是号码来源。** 2026-09-23 赛事仓的名册同步（增量 33 步骤 10）按
+**赛事系统 `whl.player` 不再是号码来源。** 2026-09-23 赛事仓的名册同步（v5.0.0 步骤 10）按
 「姓名、号码一律以 club 为准」把我方当时的**空号码**写回了它自己的库：570 行 `number` 全空、
 `name` 变成我方缩写名。原始号码与全名自此只剩两份外部副本 —— s901 存档表（上表）与
 `WHL-tournament-management-system/scripts/fc26-id-rekey/players-dump.json`（2026-09-16 快照），

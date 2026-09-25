@@ -1,4 +1,4 @@
--- 增量 28 步骤 4：球员库排序表达式索引第二批（报告 scripts/d1-read-audit/README.md §5.1/§5.3 的第一批）
+-- v3.2.0 步骤 4：球员库排序表达式索引第二批（报告 scripts/d1-read-audit/README.md §5.1/§5.3 的第一批）
 -- 0027 已覆盖 ca / pa / age / market_value；步骤 1 实测里全表扫最贵的是 11 个排序键（各 56,398 行/次），
 -- 本批按「表达式最安全 + 前端默认暴露面」选三条（不按热度：系统未正式投用，频次分布无意义）：
 --   sort=prestige → COALESCE(players.prestige, 0)

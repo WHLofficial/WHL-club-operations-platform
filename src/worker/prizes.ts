@@ -1,4 +1,4 @@
-// 赛事奖金自动入账（增量 11，TECH_DESIGN §9.1）。
+// 赛事奖金自动入账（v1.4.0，TECH_DESIGN §9.1）。
 // 分界（用户裁决 2026-09-16）：单场可定值的即时入账（联赛胜平负/超级杯胜负/冠军杯小组赛每胜平/淘汰赛晋级）；
 // 赛事完结一次性项（入场奖金/资格赛止步保底/小组赛剩余池）走「赛事完结结算」端点，一次结清。
 // 入账一律经 ledgerMovement 幂等闸（ref_type 带侧别防同场双发），AUTH_DB 目录把 tour team id 映射 club_id；
@@ -64,7 +64,7 @@ export async function clubIdByTourTeam(env: Env, tourTeamIds: number[]): Promise
   )
     .bind(...ids)
     .all<{ tour_team_id: number; club_id: number | null }>();
-  // CPU 队禁止入账（增量 14，用户裁决）：目录里的 club_id 照样补上（赛程/展示要用），但奖金与主场收入不发。
+  // CPU 队禁止入账（v2.0.0，用户裁决）：目录里的 club_id 照样补上（赛程/展示要用），但奖金与主场收入不发。
   const cpuIds = await cpuClubIds(env.DB);
   for (const r of results) {
     if (r.club_id !== null && !cpuIds.has(r.club_id)) map.set(r.tour_team_id, r.club_id);

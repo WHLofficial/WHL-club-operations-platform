@@ -1,4 +1,4 @@
--- 增量 20 冠名市场：俱乐部与品牌的冠名合同（费用条款按签约时快照列化，整约锁定）
+-- v2.6.0 冠名市场：俱乐部与品牌的冠名合同（费用条款按签约时快照列化，整约锁定）
 -- 回滚：DROP TABLE naming_contracts;
 CREATE TABLE naming_contracts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

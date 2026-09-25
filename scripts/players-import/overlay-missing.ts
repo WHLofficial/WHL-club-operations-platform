@@ -1,4 +1,4 @@
-// 30 行缺字段球员的增量补录（增量13 任务 B 尾巴）：Base 源行 naID/FootID 为 #N/A、Not Found，
+// 30 行缺字段球员的增量补录（v1.6.0 任务 B 尾巴）：Base 源行 naID/FootID 为 #N/A、Not Found，
 // 校验拦下；人工/外部补齐这两列后，用本脚本按同一份端上归一化代码产增量 upsert SQL（幂等）。
 // 用法：node scripts/players-import/overlay-missing.ts [xlsx路径] [补值CSV]
 //   默认 xlsx = E:/Downloads/FC26db20251217_fixed.xlsx

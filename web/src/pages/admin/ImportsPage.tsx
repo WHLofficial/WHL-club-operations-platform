@@ -1,5 +1,5 @@
 // 管理端 · 导入页：球员导入（通道 A/B 两段式）+ 名单合同模板导入（通道 C）
-// （原 Admin.tsx 两 section，增量 15 拆分；commit 3 数据层接 TanStack Query，commit 4 换共享预览块/切片助手）
+// （原 Admin.tsx 两 section，v2.1.0 拆分；commit 3 数据层接 TanStack Query，commit 4 换共享预览块/切片助手）
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { type ContractImportConfirm, type ContractImportPreview, type ImportConfirm, type ImportPreview } from '../../lib/api.ts';
@@ -137,7 +137,7 @@ function ImportSection() {
       </div>
 
       <label className="field">
-        换版模式（增量 22：决定覆盖已有球员时平台成长怎么算；新插入球员两模式等价）
+        换版模式（v2.8.0：决定覆盖已有球员时平台成长怎么算；新插入球员两模式等价）
         <div className="seg" role="radiogroup" aria-label="换版模式">
           <button
             type="button"

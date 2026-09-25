@@ -1,4 +1,4 @@
-// 窗刻度助手（增量 25，src/worker/contract-ticks.ts）：效力/保护期的唯一计数源。
+// 窗刻度助手（v3.0.0，src/worker/contract-ticks.ts）：效力/保护期的唯一计数源。
 // 口径：刻度 = 已关常规窗数（season_windows.is_temporary = 0），临时窗关窗不推进；
 // 季初/中期不落库，按同赛季非临时窗顺序派生（第 1 个 = 季初、第 2 个 = 中期）。
 import { describe, expect, it } from 'vitest';

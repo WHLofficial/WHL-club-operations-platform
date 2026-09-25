@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 球员显示名与球衣号派生（增量 32 · 步骤 2；增量 34 评审改为 s901 存档表取号）
+ * 球员显示名与球衣号派生（v4.0.0 · 步骤 2；v5.0.1 评审改为 s901 存档表取号）
  *
  * 输入（本机只读，路径写死在 SOURCES 里）
  *   base_players.csv  playerid + firstnameid / lastnameid / commonnameid（四个文本列全空，只能走字典）
@@ -8,7 +8,7 @@
  *   cards.csv         playerid → 完整人名（字典缺号 / 缺栏时的兜底）
  *   s901/splitted/    FC Editor 导出的存档球员表，一队一份（文件名「<club_id> - <队名>.xlsx」），
  *                     表体两列：球衣号 + 球员全名。这是本仓球衣号的唯一真源
- *                     —— 增量 33 起赛事系统的名册改从本仓拉取，不能再反向去读它的号码。
+ *                     —— v5.0.0 起赛事系统的名册改从本仓拉取，不能再反向去读它的号码。
  *
  * 远端只读查询（结果缓存在 data/*.json，--refresh 重拉；全部是 SELECT，不写任何数据）
  *   whl-club players（fc_id / name / club_id）

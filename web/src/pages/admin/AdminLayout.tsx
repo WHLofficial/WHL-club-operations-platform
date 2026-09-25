@@ -1,4 +1,4 @@
-// 管理端壳布局：左侧栏 8 项导航 + 子路由出口（增量 15 拆分）。
+// 管理端壳布局：左侧栏 8 项导航 + 子路由出口（v2.1.0 拆分）。
 // 非 admin 看到的提示卡与旧 Admin.tsx 一致，不重定向。
 import { NavLink, Outlet } from 'react-router';
 import { TOUR_SITE_URL } from '../../lib/api.ts';

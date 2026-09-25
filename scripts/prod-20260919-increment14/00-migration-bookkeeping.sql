@@ -1,4 +1,4 @@
--- 增量 14（2026-09-19 生产执行）：补齐 d1_migrations 账目
+-- v2.0.0（2026-09-19 生产执行）：补齐 d1_migrations 账目
 -- 背景：0016/0017/0018 当初是直接 --file 执行的（未走 wrangler 记账），
 --       生产库 d1_migrations 只到 0015，而 schema 里三个迁移的效果（clubs.transfer_banned、
 --       seasons.age_cap、result_confirmations.home/away_team_id+stage_kind、

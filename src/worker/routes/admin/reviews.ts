@@ -1,5 +1,5 @@
 // 管理端 · 注册快照与准入体检（附录 A〔2〕）+ 成交审核队列（附录 A〔3〕：转会成交确认，关键节点人工审）
-// （原 admin.ts 注册/审核域，增量 15 拆分，行为零变化）
+// （原 admin.ts 注册/审核域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
@@ -52,7 +52,7 @@ app.get('/registrations', async (c) => {
       wage: number | null;
     }>();
 
-  // 增量 9：级别改报名派生，不再读 clubs.league_tier 休眠列
+  // v1.2.0：级别改报名派生，不再读 clubs.league_tier 休眠列
   const cache = tierCache();
   const tiers = new Map<number, 'premier' | 'second' | null>();
   for (const r of rows.results) {
@@ -127,7 +127,7 @@ app.get('/compliance', async (c) => {
   const report = await Promise.all(
     clubs.results.map(async (club) => {
       const mine = regRows.results.filter((r) => r.club_id === club.id);
-      // 增量 9：级别报名派生；派生不到（未报名定级赛事）标 tier_missing，不再静默当 premier
+      // v1.2.0：级别报名派生；派生不到（未报名定级赛事）标 tier_missing，不再静默当 premier
       const tier = await deriveClubTier(c.env, season, club.id, cache);
       if (mine.length === 0) {
         return {
@@ -257,7 +257,7 @@ async function loadOpenReviewTask(db: D1Database, taskId: number) {
 // POST /api/admin/reviews/:id/approve —— 批准成交（§6.3/§6.7）
 // 解约：无工资谈判，批准即过户；续约/匹配/海捞：先收附加费再进签约谈判（F 已定死）；
 // 普通成交/激活成交：进入签约谈判，由签入方谈成合同条款后成约过户（成约即过户）。
-// 增量 10 裁定扩权：普通成交/激活成交可在批准时改成交价（body.fee），税在过户时按新价重算，留审计。
+// v1.3.0 裁定扩权：普通成交/激活成交可在批准时改成交价（body.fee），税在过户时按新价重算，留审计。
 app.post('/reviews/:id/approve', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const taskId = Number(c.req.param('id'));

@@ -1,4 +1,4 @@
-// 增量 11：奖金自动入账 + 赛事完结结算 + 窗末扣款 + 赛季结算
+// v1.4.0：奖金自动入账 + 赛事完结结算 + 窗末扣款 + 赛季结算
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam } from './d1.ts';
@@ -98,7 +98,7 @@ function seedClubWithTeam(auth: DatabaseSync, sqlite: DatabaseSync, clubId: numb
 
 beforeEach(() => resetConfigCache());
 
-describe('赛果确认即时入账（增量 11 §9.1）', () => {
+describe('赛果确认即时入账（v1.4.0 §9.1）', () => {
   it('联赛主胜：主 8.5 / 客 4.7（kind=prize，ref_type 分侧幂等键）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
@@ -117,7 +117,7 @@ describe('赛果确认即时入账（增量 11 §9.1）', () => {
     await expect(confirmResult(fx.env, 1, 1)).rejects.toThrow();
   });
 
-  it('CPU 队一侧不入账：平台队打 CPU 队只发平台侧奖金（增量 14 裁决 6）', async () => {
+  it('CPU 队一侧不入账：平台队打 CPU 队只发平台侧奖金（v2.0.0 裁决 6）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 101);
@@ -257,7 +257,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
   });
 });
 
-describe('赛季结算（growable 重判+settled）与忠诚奖金（增量 25 移入中期窗）', () => {
+describe('赛季结算（growable 重判+settled）与忠诚奖金（v3.0.0 移入中期窗）', () => {
   it('硬阻断（开窗未关）409；growable 按 age_cap 重判；重复结算 409', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
@@ -275,7 +275,7 @@ describe('赛季结算（growable 重判+settled）与忠诚奖金（增量 25 �
       .run();
     const res = await settleSeason(fx.env, 1, 1, true);
     expect(res.growable).toBe(2); // p2 掉出（26>cap）、p3 掉出（CA=PA）；p1 保持可成长
-    // 赛季结算不再发忠诚奖金（增量 25：移到中期窗关窗批）
+    // 赛季结算不再发忠诚奖金（v3.0.0：移到中期窗关窗批）
     expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'loyalty'").get()).toEqual({ n: 0 });
     expect((fx.sqlite.prepare('SELECT status FROM seasons WHERE season=1').get() as { status: string }).status).toBe('settled');
     await expect(settleSeason(fx.env, 1, 1, true)).rejects.toThrow('已经结算过');

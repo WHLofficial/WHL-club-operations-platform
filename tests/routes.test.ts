@@ -1,5 +1,5 @@
 // 路由层测试（§16：内存 D1 跑迁移与断言）——绑定流程、球员查询、导入幂等、期初余额、注册合规。
-// 增量 7：绑定真源上收 auth——freshEnv 带只读 AUTH_DB 镜像库，stub fetch 仿真 auth 机器端点
+// v1.0.0：绑定真源上收 auth——freshEnv 带只读 AUTH_DB 镜像库，stub fetch 仿真 auth 机器端点
 // （HMAC 契约与 auth machine.ts 同构），本地 club_bindings/club_bind_code 只走回滚分支。
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHmac, createHash } from 'node:crypto';
@@ -16,7 +16,7 @@ interface Fixture {
   env: Env;
   sqlite: DatabaseSync;
   tour: DatabaseSync;
-  auth?: DatabaseSync; // 增量 7：AUTH_DB 镜像库，withAuth 按需创建（其余用例走本地回滚分支）
+  auth?: DatabaseSync; // v1.0.0：AUTH_DB 镜像库，withAuth 按需创建（其余用例走本地回滚分支）
   kv: Map<string, string>;
 }
 
@@ -46,7 +46,7 @@ function freshEnv(): Fixture {
     } as unknown as KVNamespace,
     MEDIA: {} as never,
     ASSETS: {} as never,
-    // 增量 28：未配 = 走分级 TTL（生产口径），这里显式旁路，让断言看到每次改库的结果
+    // v3.2.0：未配 = 走分级 TTL（生产口径），这里显式旁路，让断言看到每次改库的结果
     PUBLIC_CACHE_TTL_MS: '0',
   };
   for (const [uid, token] of [
@@ -64,7 +64,7 @@ function freshEnv(): Fixture {
 const AUTH_SECRET = 'test-bind-secret';
 const AUTH_BASE = 'http://auth.test';
 
-// 增量 7：给用例挂上认证中心通道——AUTH_DB 镜像库（account 1-5 与 tour user 同值同名）+
+// v1.0.0：给用例挂上认证中心通道——AUTH_DB 镜像库（account 1-5 与 tour user 同值同名）+
 // 机器通道密钥/基地址（只配 ISSUER 不配 CLIENT_ID，保持兼容模式）+ fetch 仿真 auth 机器端点。
 // 绑定/发码/解绑流程用例开头调用；其余用例不挂，本地表走回滚分支照旧。
 function withAuth(fx: Fixture): Fixture {
@@ -194,7 +194,7 @@ async function createClub(fx: Fixture, name: string, leagueTier = 'premier'): Pr
 }
 
 async function issueCode(fx: Fixture, clubId: number): Promise<string> {
-  // 增量 7：auth 目录须有该俱乐部的行才能发码——测试仿真直接补登记
+  // v1.0.0：auth 目录须有该俱乐部的行才能发码——测试仿真直接补登记
   // （生产对应 tour 侧发码自愈 register；team_not_found 负例用例绕开本助手直调端点）
   const club = fx.sqlite.prepare('SELECT name FROM clubs WHERE id = ?').get(clubId) as { name: string } | undefined;
   const has = fx.auth!.prepare('SELECT id FROM team WHERE club_id = ?').get(clubId);
@@ -248,7 +248,7 @@ describe('建队与认证码绑定（§3.2）', () => {
     expect(body.window).toBeNull();
   });
 
-  it('主场档案随概览下发：有球场行时带档位名/设施/影响力构成（增量 12 回归：曾漏 loadTierTable 导入）', async () => {
+  it('主场档案随概览下发：有球场行时带档位名/设施/影响力构成（v1.5.0 回归：曾漏 loadTierTable 导入）', async () => {
     const fx = withAuth(freshEnv());
     const clubId = await createClub(fx, '阿森纳');
     const code = await issueCode(fx, clubId);
@@ -524,7 +524,7 @@ describe('球员管理 PATCH（审计留痕）', () => {
   });
 });
 
-describe('球员批量维护（增量 10）', () => {
+describe('球员批量维护（v1.3.0）', () => {
   function seedTwo(fx: Fixture) {
     const stmt = fx.sqlite.prepare("INSERT INTO players (uid, name, ca, pa, fc_id) VALUES (?, ?, ?, ?, ?)");
     stmt.run('fc1', '球员一', 80, 90, 1);
@@ -706,7 +706,7 @@ describe('导入管线（§5.4）', () => {
     expect(p2).toMatchObject({ ca: 78, base_ca: 78, market_value: 55, status: 'listed', badges_gold: 2, growth_tier: 3 });
   });
 
-  it('队籍：CPU 队球员落队籍、老队 id 走别名，其余队导入不留归属（增量 14）', async () => {
+  it('队籍：CPU 队球员落队籍、老队 id 走别名，其余队导入不留归属（v2.0.0）', async () => {
     const fx = freshEnv();
     const rows = [
       channelARow({ ID: 277300, Name: '巴塞人', TeamID: 241 }), // 巴塞罗那(CPU)
@@ -883,7 +883,7 @@ describe('config 管理端点（§13）', () => {
   });
 });
 
-/* ---------- 增量 2：通道 C 合同导入 ---------- */
+/* ---------- v0.3.0：通道 C 合同导入 ---------- */
 
 describe('通道 C · 名单合同模板导入（§5.4）', () => {
   async function seedContractWorld(fx: Fixture) {
@@ -956,7 +956,7 @@ describe('通道 C · 名单合同模板导入（§5.4）', () => {
     expect(sqlAll(fx.sqlite, 'SELECT id FROM contracts').length).toBe(2); // UNIQUE(player_id)，无重复行
   });
 
-  it('CPU 队球员可被认领：预览 claim，确认后归属俱乐部（增量 14）', async () => {
+  it('CPU 队球员可被认领：预览 claim，确认后归属俱乐部（v2.0.0）', async () => {
     const fx = freshEnv();
     await seedContractWorld(fx);
     fx.sqlite.exec(
@@ -996,7 +996,7 @@ describe('通道 C · 名单合同模板导入（§5.4）', () => {
   });
 });
 
-/* ---------- 增量 2：阵容注册与合规（规则 4.2） ---------- */
+/* ---------- v0.3.0：阵容注册与合规（规则 4.2） ---------- */
 
 function regBody(firstTeam: number[], trainee: number[]) {
   return { firstTeam, trainee };
@@ -1192,9 +1192,9 @@ describe('注册名单提交与校验（附录 A〔2〕）', () => {
   });
 });
 
-// 球衣号（增量 32）：号码属于俱乐部——只有球员现属俱乐部的教练能改，
+// 球衣号（v4.0.0）：号码属于俱乐部——只有球员现属俱乐部的教练能改，
 // 同队不重复，换队/解约时由 transfers.ts 清空（那条在 negotiation-routes 里验）。
-describe('球衣号设定（增量 32）', () => {
+describe('球衣号设定（v4.0.0）', () => {
   const numberSql = 'SELECT number FROM players WHERE id = 1';
 
   it('定号/改号/清号：落库 + 审计留痕 + 阵容回显', async () => {

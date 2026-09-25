@@ -1,5 +1,5 @@
-// 管理端建队（增量 17 commit 4）：游戏球队 ID 必填 + tour 校验/队名预填 + auth 目录自动建档（可重试）
-// 增量 37 追加：tour 里没有这支队时不再 404 挡下，改为**先在赛事系统建队**（同一号）再本地建档；
+// 管理端建队（v2.3.0 commit 4）：游戏球队 ID 必填 + tour 校验/队名预填 + auth 目录自动建档（可重试）
+// v6.1.0 追加：tour 里没有这支队时不再 404 挡下，改为**先在赛事系统建队**（同一号）再本地建档；
 // 推送失败则 502 且不建档（两侧 id 空间一致，单边建档会留下错位）。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
@@ -83,11 +83,11 @@ function stubMachineFetch() {
 afterEach(() => {
   vi.unstubAllGlobals();
   machineRequests = [];
-  // machineReply 是模块级脚本变量，不重置会串到下一条用例（增量 37 新用例里改过它）
+  // machineReply 是模块级脚本变量，不重置会串到下一条用例（v6.1.0 新用例里改过它）
   machineReply = defaultReply;
 });
 
-describe('管理端建队：游戏球队 ID 必填（增量 17）', () => {
+describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
   it('缺 gameTeamId / 非正整数 → 400；tour 无队且没填名字 → 400（填了名字会自动去建队）', async () => {
     const fx = freshEnv();
     expect((await post('/api/admin/clubs', { name: '某队' }, fx.env)).status).toBe(400);

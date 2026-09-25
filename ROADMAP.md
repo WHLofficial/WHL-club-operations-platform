@@ -8,7 +8,63 @@
 
 ---
 
-## 增量 0 · 地基（纯 Worker + 共享登录 + schema + SPA 壳）
+## 版本口径（各仓语义化版本 · 2026-09-25 起）
+
+2026-09-25 起废止「全项目共享增量号」，改用**各仓自己的语义化版本**（赛事仓、认证中心、活动系统各有一套，互不占号）。判级口径：
+
+- **major**：破坏兼容 —— ①外部/跨仓契约或 URL 不兼容 ②生产数据真源或口径重定义、需重导 ③写入口下线、或必须多仓同轮上线
+- **minor**：新增用户可见能力（新域 / 新页面 / 新端点 / 新规则），向后兼容
+- **patch**：无新增能力 —— 缺陷修补、性能与读量治理、文档、内部重构、纯展示微调
+
+本文件的章节标题与代码注释里的旧增量号已按下表回填成版本号；**历史 commit message、`scripts/prod-*-incrementNN/` 目录名、迁移文件名保留原编号**，靠下表桥接。
+
+| 原增量 | 版本 | 判级依据 |
+|---|---|---|
+| 0 | v0.1.0 | 起点（地基，无生产数据） |
+| 1 | v0.2.0 | 球队与球员主数据 |
+| 2 | v0.3.0 | 阵容注册与合规 |
+| 3 | v0.4.0 | 转会市场（挂牌竞价链） |
+| 4 | v0.5.0 | 签约谈判（signing） |
+| 5 | v0.6.0 | 旁路操作 + 激活匹配 + 窗口 |
+| 6 | v0.7.0 | 财政、赛季与通知（MVP 收口） |
+| 6.1 | v0.7.1 | 走查修复与球员库（无新能力） |
+| 7 | **v1.0.0** | 破坏：账号绑定真源上收认证中心，auth + tour + club 三仓同轮 |
+| 8 | v1.1.0 | 球员库统一 + FC26 ID 对齐 |
+| 9 | v1.2.0 | 分级派生（报名定级） |
+| 10 | v1.3.0 | 异常告警 + 管理介入 + 批量维护 |
+| 11 | v1.4.0 | 赛季结算域 |
+| 12 | v1.5.0 | 主场收入域 |
+| 13 | v1.6.0 | 成长域校准 |
+| 14 | **v2.0.0** | 破坏：CPU 队与队籍口径重定义 + 生产数据重导 |
+| 15 | v2.1.0 | 管理端重构 |
+| 16 | v2.2.0 | 用户端重构（页面重组，契约未破） |
+| 17 | v2.3.0 | 体验修缮 + 俱乐部目录工具 |
+| 18 | v2.4.0 | 站内信 web 收件篮 |
+| 19 | v2.5.0 | 设施经营（球场 / 档位 / 子设施 + 建设券） |
+| 20 | v2.6.0 | 冠名市场 |
+| 21 | v2.7.0 | 赛果自动化 |
+| 22 | v2.8.0 | 换版机制与导入加固 |
+| 23 | v2.8.1 | 性能与守护（无新能力） |
+| 24 | v2.8.2 | 文档收口（无新能力） |
+| 25 | **v3.0.0** | 破坏：合同期 / 解约费 / 税 / 忠诚奖金口径重定义 |
+| 26 | v3.1.0 | 球员库筛选搬进左栏 |
+| 27 | v3.1.1 | 球员库左栏 UI 收口 |
+| 28 | v3.2.0 | 球员库 D1 读消耗量化与治理 |
+| 29 | v3.2.1 | 球员库 UI 缺陷收口 |
+| 30 | v3.3.0 | 球员面板专项整改 |
+| 31 | v3.4.0 | 球队页（公开列表 + 登录详情 + 自家队中心） |
+| 32 | **v4.0.0** | 破坏：档案页改按 `fc_id` 寻址 + 球衣号归属转移 |
+| 33 | **v5.0.0** | 破坏：球员写入口下线 + 名册真源归位（跨仓） |
+| 34 | v5.0.1 | apex 域名收口 + 边缘 504 归因（配置修正，无新能力） |
+| 35 | **v6.0.0** | 破坏：号码真源迁 FC26 存档表 + 生产落库 |
+| 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
+| 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
+
+**当前版本 v6.1.0**。已排期未开工的两个增量：球员页展示层 = **v6.2.0**、报价子系统 = **v6.3.0**（详见记忆目录 `plan-v6.2.0-player-page.md` / `design-v6.3.0-offer-negotiation.md`）。
+
+---
+
+## v0.1.0 · 地基（纯 Worker + 共享登录 + schema + SPA 壳）
 
 **交付**：
 - 纯 Worker 脚手架：wrangler.jsonc（assets + D1 平台库/TOUR_DB 只读 + 共享 KV + R2 + cron 5min + smart placement）、package.json、tsconfig×2、vite、.gitignore
@@ -19,7 +75,7 @@
 
 **验收**：wrangler dev 本地起；持赛事系统 cookie 打开自动认人、角色正确；`npm run typecheck && npm test` 绿。
 
-## 增量 1 · 球队与球员主数据（管理端最小集）
+## v0.2.0 · 球队与球员主数据（管理端最小集）
 
 **交付**：
 - config 服务（§13 键注册表：D1 config 表唯一来源 + isolate 内存缓存 60s + 涉密键掩码读取）
@@ -29,19 +85,19 @@
 
 **验收**：导入真实 FC26db 样例 → 球员卡 CA/PA/位置/国籍/徽章图标正确；绑队走通；运营列不被导入覆盖。
 
-## 增量 2 · 阵容注册与合规
+## v0.3.0 · 阵容注册与合规
 
 **交付**：注册名单提交、限额校验（20-30 人含门将 / 训练营 ≤7 / CA·PA 限额梯度 / 工资帽 P1 占位）、注册快照、准入体检报告（P1 首版）。
 
 **验收**：合规名单通过、三种违规名单各被拒且报错可读。
 
-## 增量 3 · 转会市场（挂牌竞价链）
+## v0.4.0 · 转会市场（挂牌竞价链）
 
 **交付**：挂牌（价格校验）/ 出价（资金冻结 fund_holds）/ 抬价 / 截止惰性判定 + 顺延（交易日历）/ 无人出价下架费 / 审核队列（成交确认）/ 交易税 / 划款过户（completed 幂等单点）；挂牌板（卡柜）+ 出价历史 + 我的出价（冻结章）。
 
 **验收**：双浏览器走通「挂牌→竞价→截止→审核→过户→账本可查」；并发出价不双花（§16 并发测试）。
 
-## 增量 4 · 签约谈判（signing）
+## v0.5.0 · 签约谈判（signing）
 
 **交付**：成交确认自动开会话、新 RC 提交（±10/±50% 校验）、E 快照（§6.7 全公式：幂律/续约加薪/sigmoid/衰减）、≤3 轮报价、满意度文案、直败与强约结算、成约即过户（transfer 单 signing→completed）、经纪人档位 + 窗口重掷、§6.10 保密规约落地（服务端隔离模块/API 面收敛/掩码/零注释/测试数值断言）。
 
@@ -49,9 +105,9 @@
 
 **验收**：谈判三终局（成功/强约/直败）各走通；保密审计清单逐条过（响应无 p/eff/阈值、SPA bundle 无判定常数、日志无判定值）。
 
-**状态**：主体完成（含直签训练营与激活成交入谈判）；窗口重掷随增量 6 窗口推进落地。
+**状态**：主体完成（含直签训练营与激活成交入谈判）；窗口重掷随v0.7.0 窗口推进落地。
 
-## 增量 5 · 旁路操作 + 激活匹配 + 窗口
+## v0.6.0 · 旁路操作 + 激活匹配 + 窗口
 
 **交付**：海捞（新 RC 不设限）、续约（改违约金，规则 4.4.6 全套）、解约、激活（一窗一次 + 5 分钟出价窗 + 24h 匹配窗 + 差额销毁）、强制拍卖（1m 挂牌特例）；窗口状态机（open/close/推进前置校验无活跃会话 + 强制结算开关）。
 
@@ -59,7 +115,7 @@
 
 **状态**：主体完成。旁路五入口（/api/transfers/*）+ 市场激活/匹配（首价即成交价、训练营直进待审、正式进 24h 匹配窗、差额审核时销毁）+ 强制拍卖（1m/CA 前六/税 50%）+ 窗口状态机（open/close/前置校验/window_force_settle 强结）+ 4.4.10 窗内回滚（RC+保护期还原+续约费退还）+ 前端全套（球队中心续约/解约、市场海捞与匹配面板、管理端窗口/强制拍卖/旁路审核单据渲染）；配套裁决与假设落 TECH_DESIGN §6.2/6.3/§15。
 
-## 增量 6 · 财政、赛季与通知（MVP 收口）
+## v0.7.0 · 财政、赛季与通知（MVP 收口）
 
 **交付**：流水账页（ledger-book）、手动记账兜底、赛季/窗口管理（绑定赛事）、赛果只读同步 + 确认钩子、XP 事件（自动 match_event + 补录）、成长结算首版（升级方案二选一 / 档位核定）、bot 通知（HMAC 投递 + AstrBot 接收插件）、M0 监控报表。
 
@@ -67,7 +123,7 @@
 
 **状态**：主体完成（8 commits：b76ea06…978dcf1，244 测试）。财政流水账+手动记账、赛季建档/绑定赛事、赛果确认（快照幂等+XP 自动钩子）、XP 补录与赛季结算（里程碑/训练营/中国计划）、升级二选一+档位核定、bot 通知（HMAC 投递+AstrBot 接收插件，写入点=赛果确认/升级）、M0 报表；口径裁决落 TECH_DESIGN §15 假设 20-23。「通知到达 QQ」需部署配 SYNC_* 后联调；web 通知收件篮 P1。
 
-## 增量 6.1 · 走查修复与球员库（四裁决落地）
+## v0.7.1 · 走查修复与球员库（四裁决落地）
 
 **交付**：走查四裁决落地——绑定层级重构（赛事绑赛季、窗口只管转会准入，0014 迁移+绑定管理端多赛事列表）、初始球员库（0015 initial_club_id+当前/初始双视图）、球员页页内页签（档案/属性/成长+六组细分卡/位置矩阵/星级行/角色带/六维雷达门将换轴）、家族用词表清扫+人数/工资卡口径（超上限红、低于下限蓝）；球员库公开页（筛选+keyset 游标分页）。
 
@@ -75,17 +131,17 @@
 
 **状态**：完成（12 commits：63d92db…b651278，259 测试）。裁决与口径落 TECH_DESIGN §11/§15 假设 24-25、PRD 4.7、UI_DESIGN §4.4/§5；review 修复球员库请求竞态与绑定列表排序。推送与部署待需求方确认。
 
-## 增量 7 · 球队绑定上收认证中心（auth + tour + club 三仓）
+## v1.0.0 · 球队绑定上收认证中心（auth + tour + club 三仓）
 
 **交付**：球队绑定真源上收 auth（推翻 auth TECH_DESIGN §5.3「球队不进 auth」旧裁定并改判记录）——auth 0008 迁移三表（team 目录 / team_bind_code 中央码表 / team_binding 绑定）+ 机器端点五条 HMAC；tour/club 双入口发码烧码写同一张中央表（烧码 auth 单事务原子），两侧旧绑定表休眠保留防回滚、经只读 AUTH_DB 派生读；club 教练判定改「绑定即教练」（auth 对新账号自动发 club.coach，权限点无区分度）；存量迁移脚本 `migrate-team-bindings.mjs` 以 tour team_member 为基准（目录按队名精确匹配，冲突/单边出报告人工裁决）。
 
 **验收**：tour 与 club 绑定/发码互通指向同一绑定关系；一账号一队全生态生效；三仓测试全绿（auth 96 / tour 16 / club 263）。
 
-**状态**：已上线（2026-09-15 部署）。三仓推送（club 8824c42+123846c+7f513ce、auth 32405a6+e5a94d1+47bd100+1eebbb1+726415b、tour 31850c6+471797e）+ code review 通过（修复烧码并发竞速双绑定——条件 INSERT...SELECT 原子闸；register/link 审计同批化）。生产：auth 0008 远端迁移 + 迁移 SQL 已执行（目录 20 队/绑定 10 条/冲突 0/单边 0，club 侧目录关联待 clubs 表有数据后用 /api/team/link 补）；BIND_SECRET 已轮换（AstrBot 插件 bind_secret 需同步，否则 QQ 绑定验签失败）；auth 94cf8114 / tour efc97d59 / club 0303622e，机器端点验签烟测通过（正确密钥进业务层、错密钥 401）。生产补数据：16 支真实俱乐部已建（id=**FC26 TeamID**、name=tour 中文队名，2026-09-18 核对 16/16；原文误记为 tour team id；CPU 4 队当时未建——2026-09-18 更正为应建，见增量13 CPU 待办；`seed-clubs.sql` 存档未提交）并经 /api/team/link 全部关联目录（linked 16/16，里昂→club 2 已验）。
+**状态**：已上线（2026-09-15 部署）。三仓推送（club 8824c42+123846c+7f513ce、auth 32405a6+e5a94d1+47bd100+1eebbb1+726415b、tour 31850c6+471797e）+ code review 通过（修复烧码并发竞速双绑定——条件 INSERT...SELECT 原子闸；register/link 审计同批化）。生产：auth 0008 远端迁移 + 迁移 SQL 已执行（目录 20 队/绑定 10 条/冲突 0/单边 0，club 侧目录关联待 clubs 表有数据后用 /api/team/link 补）；BIND_SECRET 已轮换（AstrBot 插件 bind_secret 需同步，否则 QQ 绑定验签失败）；auth 94cf8114 / tour efc97d59 / club 0303622e，机器端点验签烟测通过（正确密钥进业务层、错密钥 401）。生产补数据：16 支真实俱乐部已建（id=**FC26 TeamID**、name=tour 中文队名，2026-09-18 核对 16/16；原文误记为 tour team id；CPU 4 队当时未建——2026-09-18 更正为应建，见v1.6.0 CPU 待办；`seed-clubs.sql` 存档未提交）并经 /api/team/link 全部关联目录（linked 16/16，里昂→club 2 已验）。
 
-## 增量 8 · 球员库统一 + FC26 ID 对齐（进行中）
+## v1.1.0 · 球员库统一 + FC26 ID 对齐（进行中）
 
-方向已裁决：以 club 球员库为准、tour 只读取（tour 侧不再独立维护球员库）；增量 7 已把 auth team 目录（tour_team_id ↔ club_id）建好留路。XP 名字匹配不动。
+方向已裁决：以 club 球员库为准、tour 只读取（tour 侧不再独立维护球员库）；v1.0.0 已把 auth team 目录（tour_team_id ↔ club_id）建好留路。XP 名字匹配不动。
 
 **FC26 ID 对齐（2026-09-16 已执行）**：球员/球队真源改挂 FC26 数据库 id（用户四裁决：①club `clubs.id` 换 EA id；②tour `team.id` 整体换 id 级联历史；③球员库 18408 人**暂缓导入**，成熟后经 agent 导入；④tour 570 球员同步换 EA id）。执行与验证：
 
@@ -98,7 +154,7 @@
 
 **球员库首灌（2026-09-18 已执行）**：`E:/Downloads/FC26db20251217_fixed.xlsx` 的 `Base` 表（实际 **18407** 数据行，文档旧记 18408 含表头）+ Growth+ 名单，复用端上归一化代码（`src/core/import.ts` 的 `normalizeImportBatch`，按 1000 行切片，与 web 端 `web/src/lib/imports.ts` + `web/src/pages/admin/ImportsPage.tsx` 同口径）离线产 SQL 后 `wrangler d1 execute --file` 逐片直写生产（19 片）；**入库 18301 人**，被校验拦下 30 行（源值缺 `naID`=`#N/A` 与 `FootID`=`Not Found` 两列，本地与在线源均无源可补 → 搁置，生产至今 18301）。工具与报告在 `scripts/players-import/`（`generate-sql.ts` 产片、`overlay-missing.ts` 增量补录、`missing-fields-30.csv` 填值模板、`nation-id-reference.csv` 218 国、`players-import-report.md`），口径见该目录 README。另：主场存量（`scripts/revenue-import/`）16 球场 + 80 设施行同批直写生产；按 `name` 匹配俱乐部的旧脚本 `stadium-import.sql` 已删除（会给 4 支平台无档案球队造 NULL `club_id` 脏行），生产版只剩 `stadium-import-prod.sql`（显式 `club_id`，2026-09-18 执行）。
 
-## 增量 9 · 分级派生（报名定级，club 单仓）
+## v1.2.0 · 分级派生（报名定级，club 单仓）
 
 **交付**：联赛级别不再建队时定死（`clubs.league_tier` 休眠）——当季级别由「auth 目录 club_id↔tour_team_id → season_tournaments 定级赛事（仅 league_premier/league_second，杯赛不参与）→ TOUR_DB entry 报名」三跳派生（`src/worker/tier.ts`，同 request memo）；注册提交派生不到级别 400 拦下（tier_pending），注册页报名状态条（红=未报名提示等待/绿=已报名+级别徽章）；管理端建队删定级单选、列表/注册快照/准入体检改派生显示（体检未报名标 tier_missing），clubs 概览徽章空显「未定级」；建队端点双模（AUTH_DB 未配置回滚通道照旧写休眠列）。
 
@@ -106,9 +162,9 @@
 
 **状态**：完成（271 测试绿 + build ✓）。裁决与口径落 TECH_DESIGN §5.3/假设 27、PRD 4.3、UI_DESIGN 球队中心。推送与部署待需求方确认；生产上线前提：赛季开始前在 tour 建好甲级/乙级两座定级赛事并完成报名。
 
-## 增量 10 · 异常告警 + 管理介入 + 批量维护（已完成 1d83315+3aa1795）
+## v1.3.0 · 异常告警 + 管理介入 + 批量维护（已完成 1d83315+3aa1795）
 
-**裁决**（2026-09-16）：三域三增量排期=增量10（小件：告警+管理介入+批量维护）→增量11（赛季结算域：奖金自动+结算按钮+忠诚奖金+growable 重判+下季封存）→增量12（主场收入域：收入公式+设施经营+死忠演化，设施数据模型一次建全）；告警=强制审（命中进 review_tasks 打标，钱不动，宁误报不漏报）；管理介入四类全要（任意单据可撤/关+成交裁定扩权+俱乐部转会禁令+面板统一进审核页）；审核页批准可改裁定价。
+**裁决**（2026-09-16）：三域三增量排期=v1.3.0（小件：告警+管理介入+批量维护）→v1.4.0（赛季结算域：奖金自动+结算按钮+忠诚奖金+growable 重判+下季封存）→v1.5.0（主场收入域：收入公式+设施经营+死忠演化，设施数据模型一次建全）；告警=强制审（命中进 review_tasks 打标，钱不动，宁误报不漏报）；管理介入四类全要（任意单据可撤/关+成交裁定扩权+俱乐部转会禁令+面板统一进审核页）；审核页批准可改裁定价。
 
 **交付**：a 属性批量维护（POST /players/batch 整批原子 ≤200 + 前端文本行解析）；b 俱乐部转会禁令（clubs.transfer_ban 端点+守卫点买卖三 POST+谈判/签约，GET 不拦）；c 异常出价告警三判据（大额 review_amount_threshold 默认 40/短窗抬价/步长拉锯，结算时打标 review_tasks+审核页 ⚠️ 徽章，吞错不阻塞）；d 管理介入扩权（撤出价/强制送审/强制作废/强制成交/作废签约+审核页裁定价批准+admin_fee_adjust 审计）。
 
@@ -116,17 +172,17 @@
 
 **状态**：a/b/c/d 全部完成，code review 无阻塞项（284 测试绿 + tsc ✓ + build ✓）。
 
-## 增量 11 · 赛季结算域（已完成 6a9073d+c9aef8c）
+## v1.4.0 · 赛季结算域（已完成 6a9073d+c9aef8c）
 
-**裁决**（2026-09-16）：①奖金分界=逐场即时入账（联赛胜平负/超级杯胜负/小组赛每胜平/淘汰赛晋级）+「赛事完结结算」通用按钮（入场/资格赛保底/小组赛剩余池按胜场占比）；②工资在窗末自动扣（增量 11 实现关窗批并入）；③忠诚奖金=现合同 effective_from 起算到结算时点、入俱乐部账；④结算前置=硬阻断（窗口未关/审核未清/谈判 active/市场未收尾）+软警示（未确认完赛果 acknowledged=true 确认后放行）。
+**裁决**（2026-09-16）：①奖金分界=逐场即时入账（联赛胜平负/超级杯胜负/小组赛每胜平/淘汰赛晋级）+「赛事完结结算」通用按钮（入场/资格赛保底/小组赛剩余池按胜场占比）；②工资在窗末自动扣（v1.4.0 实现关窗批并入）；③忠诚奖金=现合同 effective_from 起算到结算时点、入俱乐部账；④结算前置=硬阻断（窗口未关/审核未清/谈判 active/市场未收尾）+软警示（未确认完赛果 acknowledged=true 确认后放行）。
 
 **交付**：迁移 0017（seasons.age_cap + season_tournaments.stage_settled_at + 赛果快照补两队 tour id/stage_kind）；config 新键 prize_table/loyalty_tiers；prizes.ts 即时入账（AUTH_DB 目录映射 club_id，ledgerMovement 幂等闸 ref_type 分侧）；season-settle.ts 完结结算（stage_settled_at 原子闸）/赛季结算（忠诚分档+growable 重判+settled）/体检；window-payroll.ts 窗末工资+富人税（税基=扣完工资后余额）并入关窗批；管理端四端点 + 前端建季年龄上限/结算体检/结算按钮/绑定行完结结算。
 
 **验收**：奖金幂等（同场重确认/重结算不双发）；完结结算 409 幂等；结算硬阻断 409、软警示需确认；忠诚档位 [[0.5,5%],[1.5,10%],[2.5,20%]] 取最高档；富人税=max(资金>125→20%，价值>700→5%)；growable=CA<PA 且 age≤本季上限。293 测试绿 + tsc ✓ + build ✓。
 
-**注**：下季封存初始化并入「按季独立」语义（growable 重判在结算批按本季 age_cap 执行，下季建档时再按新上限重判）；死忠演化留位增量 12。
+**注**：下季封存初始化并入「按季独立」语义（growable 重判在结算批按本季 age_cap 执行，下季建档时再按新上限重判）；死忠演化留位v1.5.0。
 
-## 增量 12 · 主场收入域（已完成 a4a5dc0 + review 修复）
+## v1.5.0 · 主场收入域（已完成 a4a5dc0 + review 修复）
 
 **裁决**（2026-09-16 两轮拍板）：①收入=赛果确认即时入账三分（维护费/死忠演化留窗末）；②天气按 40/30/20/10 概率确认时掷出固化；③存量=revenue 插件库导出一次性导入；④设施扩建/升级操作先不做留远期（数据模型一次建全）；⑤影响力=球员项按规则 v5.2 公式自动算（0.25/0.13）+队壳/奖励分管理组维护；⑥近3场=平台已确认赛果，点球决胜按平局计；⑦冠名市场/活动档期/主场事件 P2 不做。
 
@@ -134,7 +190,7 @@
 
 **验收**：上座/收入/维护费/演化公式与 revenue 插件逐系数一致（tests/home.test.ts 8 用例，rng 注入确定值断言）；确认/关窗幂等双闸；301 测试绿+tsc+build；规则出处=v5.2 §4.1.2/4.1.3+主规则 §5.1（假设 30-33 立档）。
 
-## 增量 13 · 成长域校准（成长期 / 解约清零 / 中国计划闸门）
+## v1.6.0 · 成长域校准（成长期 / 解约清零 / 中国计划闸门）
 
 **裁决**（2026-09-18，用户逐条给规则）：①只有在玩家队的球员才有成长；②解约立刻恢复初始，口径=**数值归零、历史留档**（用户追问确认）；③里程碑的「累计」只算**当前成长期内**的进+攻——成长期**可手动宣告，也可在开窗时勾选复选框自动宣告**，且**不与窗口绑定**（用户原话：一个赛季可以有多个成长期，通常是两个窗口之间，但有时可能改变）；④中国球员计划 XP 需**在册现行合同**；⑤tour 平台队名带「(CPU)」后缀的队伍自动识别为 CPU 队，其球员无成长。
 
@@ -142,17 +198,17 @@
 
 **验收**：成长期三用例（划断后重新累计、手动宣告、开窗勾选同批宣告）+ 多球员里程碑分组回归；**修掉一个 P0 潜伏 bug**——里程碑 totals 查询的 `GROUP BY ge.player_id` 与 `scanRows` 的游标条件拼在同一层，`GROUP BY` 后接 `AND ge.player_id > ?` 会被解析成分组表达式：游标为 0 时全表折成一组、非 0 时在两行间来回跳 → 两名以上有进/助攻事件的球员会**死循环（生产会挂住 worker）**，修法=外层再套一层 `SELECT … FROM (…GROUP BY…) x WHERE x.id > 0`。回归用例已实测能抓住该 bug（换回坏写法即失败）；CPU 队用例（阿森纳 vs 巴塞罗那(CPU)：只记玩家队 XP、CPU 队不进未匹配提示，撤掉守卫即失败）。**309 测试绿 + tsc ✓ + build ✓**。
 
-**待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）。→ **2026-09-19 已办**：0019 已 apply 生产（`d1_migrations` 记到 0020），worker 已由同一批部署上线（线上 `/api/players` 已回 `clubId`/`clubName`、`/api/admin/growth/periods` 有路由被 401 拦下＝增量13 路由在线上）。
+**待办**：迁移 0019 未 apply 生产、worker 未部署（与 `/me/club` 500 修复同批待部署）。→ **2026-09-19 已办**：0019 已 apply 生产（`d1_migrations` 记到 0020），worker 已由同一批部署上线（线上 `/api/players` 已回 `clubId`/`clubName`、`/api/admin/growth/periods` 有路由被 401 拦下＝v1.6.0 路由在线上）。
 
-**CPU 口径（2026-09-18）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员无成长（赛果整队静默跳过，已实现）。**2026-09-18 用户更正语义**：CPU 队球员「视同海里球员」只指**转会上视同**（即可海捞）——平台仍要为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建 clubs 行、其球员要带 `club_id`，并且海捞名单查询条件必须相应改造。本节先前的「不建行、按无归属留在海捞池」记载作废。六问细则已全部裁决并落地，见「增量 14」。
+**CPU 口径（2026-09-18）**：严格匹配队名半角后缀「(CPU)」（不做全角/大小写容错）+ CPU 队球员无成长（赛果整队静默跳过，已实现）。**2026-09-18 用户更正语义**：CPU 队球员「视同海里球员」只指**转会上视同**（即可海捞）——平台仍要为这 4 支 CPU 队（巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)）建 clubs 行、其球员要带 `club_id`，并且海捞名单查询条件必须相应改造。本节先前的「不建行、按无归属留在海捞池」记载作废。六问细则已全部裁决并落地，见「v2.0.0」。
 
 **CPU 六问的裁决记录（2026-09-18 逐条，来自本节原先的问题清单）**：1) 队名带「(CPU)」后缀、判定沿用 `isCpuTeam` 队名口径（**不加列、不做迁移**）；2) 存量 107 人 `club_id` = **导入逻辑写 + 一次性 SQL 回填**；3) 队 id 用**游戏真 id**（米兰 `131681`/国米 `131682`/拉齐奥 `115841`/亚特兰大 `115845`）+ 对外显示真名；4) `initial_club_id` **删除**（用户裁定「无意义」）；5) CPU 队球员代表 CPU 队出场**维持整队跳过、不计 XP**；6) auth 目录**补 4 行 club_id 但平台入账侧禁止 CPU 队入账**。原「已查明的事实」四条（三处「海里球员 = `club_id IS NULL`」闸门、平台 club id 与 tour 编号两套体系、clubs 无 CPU 标记列、`isCpuTeam` 吃队名）仍然有效，细节见 TECH_DESIGN 假设 36/37。
 
-**六问之前的两项关键澄清**：①平台 `clubs.id` = **FC26 TeamID**（16 支联盟队逐条对上）。**2026-09-19 更正**：原写「tour `team.id` 是另一套内部编号 1–21、4 支 CPU 队在 tour 侧是 id 6/16/19/21」与生产不符——tour 库与 auth 库的 `team` 表实测都已统一到 FC 队 id 空间（20 行：16 支联盟队 `id`/`tour_team_id` 逐条等于平台 `clubs.id`；4 支 CPU 队为 `10`/`47`/`241`/`112172`，其中米兰当时还带 legacy 号 47（须跨号映射到平台 `clubs.id 131681`）——**2026-09-19 已收口**：tour 与 auth 两侧的米兰都改成 `131681`，四个 id 空间（tour `team.id` / auth `tour_team_id` / auth `club_id` / 平台 `clubs.id`）完全一致，见增量 14「生产执行」⑥；国米/拉齐奥/亚特兰大 131682/115841/115845 在目录里没有行，仅存在于球员 `game_attrs.TeamID`）。②第三方 fixed 快照里 CPU 队与 4 支 EA 未授权队的编号（241/10/112172/47 与 39/44/46/47）与游戏真表不一致，本轮查清后统一到游戏真 id。
+**六问之前的两项关键澄清**：①平台 `clubs.id` = **FC26 TeamID**（16 支联盟队逐条对上）。**2026-09-19 更正**：原写「tour `team.id` 是另一套内部编号 1–21、4 支 CPU 队在 tour 侧是 id 6/16/19/21」与生产不符——tour 库与 auth 库的 `team` 表实测都已统一到 FC 队 id 空间（20 行：16 支联盟队 `id`/`tour_team_id` 逐条等于平台 `clubs.id`；4 支 CPU 队为 `10`/`47`/`241`/`112172`，其中米兰当时还带 legacy 号 47（须跨号映射到平台 `clubs.id 131681`）——**2026-09-19 已收口**：tour 与 auth 两侧的米兰都改成 `131681`，四个 id 空间（tour `team.id` / auth `tour_team_id` / auth `club_id` / 平台 `clubs.id`）完全一致，见v2.0.0「生产执行」⑥；国米/拉齐奥/亚特兰大 131682/115841/115845 在目录里没有行，仅存在于球员 `game_attrs.TeamID`）。②第三方 fixed 快照里 CPU 队与 4 支 EA 未授权队的编号（241/10/112172/47 与 39/44/46/47）与游戏真表不一致，本轮查清后统一到游戏真 id。
 
-## 增量 14 · CPU 队与队籍口径（代码已推送，生产数据侧 2026-09-19 已执行）
+## v2.0.0 · CPU 队与队籍口径（代码已推送，生产数据侧 2026-09-19 已执行）
 
-**裁决**（2026-09-18，承接增量 13 的 CPU 六问）：①CPU 队 clubs 行 name = `巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)`（与 tour 队名逐字一致），CPU 判定沿用 `isCpuTeam` 的队名半角「(CPU)」后缀口径——**不加列、不做迁移**；②存量 107 名 CPU 队球员的 `club_id` = **导入逻辑写 + 一次性 SQL 回填**；③4 支 EA 未授权队的队 id 用**游戏真 id**（米兰 `131681`、国米 `131682`、拉齐奥 `115841`、亚特兰大 `115845`）+ **对外显示真名**（用户原话：「球队名仍要是AC Milan。国米，拉齐奥，亚特兰大也是这样的情况，一并解决」）；④`initial_club_id` **删除**（用户：「所以这个无意义，可以去掉这一字段了」）；⑤被海捞签下的 CPU 球员，其代表 CPU 队出场的赛果**维持整队跳过（不计 XP）**；⑥auth 目录**补上 4 行 club_id 但平台入账侧禁止 CPU 队入账**。
+**裁决**（2026-09-18，承接v1.6.0 的 CPU 六问）：①CPU 队 clubs 行 name = `巴塞罗那(CPU)/曼城(CPU)/RB莱比锡(CPU)/AC米兰(CPU)`（与 tour 队名逐字一致），CPU 判定沿用 `isCpuTeam` 的队名半角「(CPU)」后缀口径——**不加列、不做迁移**；②存量 107 名 CPU 队球员的 `club_id` = **导入逻辑写 + 一次性 SQL 回填**；③4 支 EA 未授权队的队 id 用**游戏真 id**（米兰 `131681`、国米 `131682`、拉齐奥 `115841`、亚特兰大 `115845`）+ **对外显示真名**（用户原话：「球队名仍要是AC Milan。国米，拉齐奥，亚特兰大也是这样的情况，一并解决」）；④`initial_club_id` **删除**（用户：「所以这个无意义，可以去掉这一字段了」）；⑤被海捞签下的 CPU 球员，其代表 CPU 队出场的赛果**维持整队跳过（不计 XP）**；⑥auth 目录**补上 4 行 club_id 但平台入账侧禁止 CPU 队入账**。
 
 **交付**：迁移 0020（`ALTER TABLE players DROP COLUMN initial_club_id`）。`core/fc26.ts` 加 `FC26_TEAM_ID_ALIASES`（39→115845 / 44→131682 / 46→115841 / 47→131681）+ `normalizeTeamId`（legacy 号一次换真号）+ `FC26_CPU_TEAM_IDS`（10/241/112172/131681）；`core/import.ts` 的 `NormalizedPlayer` 增 `clubId`（`clubIdForTeam`：只有 4 支 CPU 队写，其余 NULL），两通道的 `gameAttrs.TeamID`/`teamid` 走归一化；`players-import.ts` 的 `upsertStatement` INSERT 加 `club_id`（`ON CONFLICT DO UPDATE` 不含它，免覆盖认领/解约后的事实归属）。三处「海里球员 = `club_id IS NULL`」闸门放行 CPU 队：海捞名单（`routes/market.ts`，全员附东家名、上限 100→300）、海捞签入（`bypass.ts` `createFreeAgent` 放行并把 `fromClubId` 记成 CPU 队 id——原为 null 时过户守卫 `club_id IS ?` 会更新 0 行、球员摘不走）、通道 C 认领（`contracts-import.ts`，classify 与落库闸同步）。CPU 队不入账：`prizes.ts` 的 `clubIdByTourTeam` 用 `cpuClubIds` 过滤（auth 目录里 club_id 照补，奖金/主场收入不发）、强制拍卖拒绝 CPU 队球员（`bypass.ts` `createForcedAuction`，理由=成交价会记到 CPU 队头上）。`growth.ts` 加 `CPU_CLUB_IDS_SQL`/`cpuClubIds`（SQL 侧 `substr(name, -5) = '(CPU)'`，与 `isCpuTeam` 逐字对齐）。删列出口：`routes/players.ts`（`view=initial` 保留 CA=base_ca、PA=导入值的口径；归属列两视图都打当前归属）+ 前端 `web/src/lib/api.ts`、`pages/{PlayersLibrary,Player,Market}.tsx`；`web/assets/ref/team.json` 补 4 条「真 id → 真名」+ `scripts/gen_ref_json.py` 的 `TEAM_NAME_OVERRIDES`（再生成不丢，旧 id 条目保留给未重键的历史 `game_attrs`）。
 
@@ -162,9 +218,9 @@
 
 ---
 
-## 增量 15 · 管理端重构（壳 + 8 子页 + admin 拆分 + config 超管全开 + 暂停出价；2026-09-19 已部署上线）
+## v2.1.0 · 管理端重构（壳 + 8 子页 + admin 拆分 + config 超管全开 + 暂停出价；2026-09-19 已部署上线）
 
-**裁决**（2026-09-19 脑暴，见 refactor-plan-decisions 记忆）：①管理端从 2993 行单页拆左侧栏壳 + 8 子路由（总览/赛季/球员/导入/转会/俱乐部/财政/系统），React.lazy 分包；②后端 `admin.ts`（1381 行/47 端点）拆 `routes/admin/` 八域，URL 零变；③数据层接 TanStack Query（仅管理端，用户端留增量 16）；④新增暂停出价（全局 config 开关 + 单挂牌列，两者都要——用户：「转会干预里增加暂停出价→两者都做」）；⑤config 超管全开零认证中心改动（超管权限点平台侧投影）；⑥批量维护结构化逐行预览，消灭静默剔除。
+**裁决**（2026-09-19 脑暴，见 refactor-plan-decisions 记忆）：①管理端从 2993 行单页拆左侧栏壳 + 8 子路由（总览/赛季/球员/导入/转会/俱乐部/财政/系统），React.lazy 分包；②后端 `admin.ts`（1381 行/47 端点）拆 `routes/admin/` 八域，URL 零变；③数据层接 TanStack Query（仅管理端，用户端留v2.2.0）；④新增暂停出价（全局 config 开关 + 单挂牌列，两者都要——用户：「转会干预里增加暂停出价→两者都做」）；⑤config 超管全开零认证中心改动（超管权限点平台侧投影）；⑥批量维护结构化逐行预览，消灭静默剔除。
 
 **交付**（6 个 commit）：`421ca8b` 八域拆分（47 端点逐字节等价，子代理审查通过）；`dd94c5b` 壳 + 8 页（section 原样搬迁，headless h2 计数对基线）；`148cf12` TanStack Query（共享 ADMIN_CLUBS_KEY 四处去重、写后 invalidate）；`a4c4418` ConfirmButton 统一 16 个两段式确认 + usePrompt 替代 2 处 window.prompt + 导入切片泛型助手 + 批量维护逐行预览表；`afc39b7` 暂停出价（迁移 0021 `listings.bid_paused` + config 键 `market_bid_paused` + 4 管理端点 + 出价入口 423 双码 `bid_paused`/`listing_bid_paused` + 板/详情透出 + 用户端禁用提示；语义：只挡新出价，不改变结算时刻）；`3519fea` config 超管全开（独立权限点 `club.config.manage.super`，两登录模式各自投影；GET 明文/PUT 逐键编辑 + 审计 `config_set`，涉密键审计只落掩码）+ `GET /api/admin/overview`（isolate 60s 缓存 + `?fresh=1` 强拉）+ `GET /api/admin/audit-log`（limit 钳 100、action 前缀过滤）+ 系统页编辑/审计日志区 + 总览计数卡 + 顶栏超管徽章。
 
@@ -172,7 +228,7 @@
 
 ---
 
-## 增量 16 · 用户端重构（Market 拆三页 + 登录守卫 + AuthContext + TanStack Query 铺开 + 注册逐人标红；2026-09-19 本地完成）
+## v2.2.0 · 用户端重构（Market 拆三页 + 登录守卫 + AuthContext + TanStack Query 铺开 + 注册逐人标红；2026-09-19 本地完成）
 
 **裁决**（refactor-plan-decisions 记忆）：①Market=子路由三页 `/market`（挂牌板+详情出价，公开）、`/market/free`（海捞签入+训练营激活，需登录）、`/market/mine`（挂牌我的球员+我的出价，需登录），seg 子导航切换；②用户页守卫 `RequireUser` 软卡不重定向（沿管理端 AdminLayout 风格），匿名显示对应登录入口（oidc 统一登录 / 兼容模式去赛事系统）；③AuthContext 落地——`/api/me` 全站单点拉取（useQuery `['me']`，staleTime Infinity，登录登出都是整页跳），TopBar/Home/AdminLayout 的 props 钻透退役；④用户端 8 页数据层全接 TanStack Query（key 设计沿用管理端口径，写后精确 invalidate，不引 useMutation）；⑤注册逐人标红——`SquadIssue.playerIds` 后端早有、前端从没用过，改后按球员展开行级红底 + 规则短标签 badge（title 悬浮完整 message），compliance 预检与 422 打回双源生效；⑥worker 侧零改动。
 
@@ -182,21 +238,21 @@
 
 ---
 
-## 增量 17 · 体验修缮 + 俱乐部目录工具（2026-09-19 本地完成；2026-09-20 已部署 Version 90bfd78f，生产队籍回填同日执行完毕）
+## v2.3.0 · 体验修缮 + 俱乐部目录工具（2026-09-19 本地完成；2026-09-20 已部署 Version 90bfd78f，生产队籍回填同日执行完毕）
 
-**裁决**（计划 `.zcode/plans/plan-sess_4cad139a-6977-4a40-9531-f7cf24c68499.md`）：①换队壳=换游戏队号（rekey 口径）；②新建俱乐部必填游戏队号+自动建 auth 目录；③多教练同权限、逐个解绑；④队籍回填只写队籍不造合同；⑤徽章筛=具体 PlayStyle 多选；⑥**列显示与筛选双向联动**（筛选激活→列自动加入，取消→自动移除，手动勾选过则手动为准）；⑦年龄快捷预设不做；⑧站内信顺延增量 18。
+**裁决**（计划 `.zcode/plans/plan-sess_4cad139a-6977-4a40-9531-f7cf24c68499.md`）：①换队壳=换游戏队号（rekey 口径）；②新建俱乐部必填游戏队号+自动建 auth 目录；③多教练同权限、逐个解绑；④队籍回填只写队籍不造合同；⑤徽章筛=具体 PlayStyle 多选；⑥**列显示与筛选双向联动**（筛选激活→列自动加入，取消→自动移除，手动勾选过则手动为准）；⑦年龄快捷预设不做；⑧站内信顺延v2.4.0。
 
 **交付**（9 个 commit）：`15f5950` TopBar 响应式重排（桌面单行、≤640px 品牌用户区/导航两行横滑）；`c158068` 球员库接口扩展（total+新增筛选：身价/声望/成长空间/初始 CA/惯用脚/成长档位/未来之星/中国计划/经纪人档位/PlayStyle 多选/位置四槽多选/34 细分属性区间/合同域全整套：has_contract+周薪+解约金+formal/trainee+成约方式+保护期+效力年限+UID/fc_id 精确查号）；`52bc412` 球员库改版（翻页条上移带「共 N 名 · 共 M 页 · 第 X 页」、每页 20、SoFIFA 式可变列双向联动、更多筛选折叠面板、URL query 持久化、UID 去 fc 前缀）；`09890a8`+`d0d8e3c` 新建俱乐部必填 gameTeamId（TOUR_DB 校验+队名预填+指定 id 建 clubs 行+`authRegisterTeam` upsert 建 auth 目录，失败不回滚可重试；双模 league_tier 保留；GET /clubs 改 bindings 数组+前端多教练逐个解绑）；`54a8e45`+`f9ee04c` 换队号 rekey 预演工具 `scripts/rekey-team/`（三库核查清单+硬闸+01/02/03 SQL 工件+README；f9ee04c 补换壳模式 auth `club_id` UNIQUE 撞号预演闸——`tour_team_id` 空闲但 `club_id` 被占执行期才炸，本地演练双向验证：干扰行在→exit 2 无工件、删→正常产出）；`05c8e06` 16 队队籍回填预检+SQL 工件 `scripts/prod-20260919-roster-backfill/`（444 人幂等 UPDATE，逐行期望数）。
 
 **验收**：**342 测试绿 + 三份 tsc 干净 + build 过**（新增 15 用例：游戏队号三库建档/缺号 404/重号 409/目录失败重试/多教练 bindings/球员库新筛选域）。本地冒烟：新建俱乐部三库落行、多教练双绑定显示与逐个解绑（stale dist 曾误显未绑定，重建后正常）、rekey 演练 A 执行+回滚、演练 B 负向闸 exit 2。收口 code review 修两项：测试夹具统一吃 gameTeamId（10 文件 106 失败→全绿）；rekey 换壳 club_id 撞号闸（上述 f9ee04c）。**Windows 踩坑**：`npx.cmd` spawnSync 无 shell EINVAL（Node 24）→ `execFileSync(process.execPath, [wrangler.js…])`；UNION ALL compound SELECT 实测 ~8 项上限 → 标量子查询别名 `'table.column'` 每批 100。
 
-**待办（已于 2026-09-20 全部完成）**：①push —— 增量 17 随增量 17–24 共 50 个提交一并推送（`9f05116..fe60273`）；②部署 —— 与 bindings 数组、前端 `AdminClubRow` 同代次发布，出 Version `90bfd78f`；③生产执行 16 队 roster backfill（444 人，`scripts/prod-20260919-roster-backfill/`）—— 同日下令执行，444 行写入、复查通过，记录见该目录 README。
+**待办（已于 2026-09-20 全部完成）**：①push —— v2.3.0 随v2.3.0–24 共 50 个提交一并推送（`9f05116..fe60273`）；②部署 —— 与 bindings 数组、前端 `AdminClubRow` 同代次发布，出 Version `90bfd78f`；③生产执行 16 队 roster backfill（444 人，`scripts/prod-20260919-roster-backfill/`）—— 同日下令执行，444 行写入、复查通过，记录见该目录 README。
 
 ---
 
-## 增量 18 · 站内信 web 收件篮（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
+## v2.4.0 · 站内信 web 收件篮（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
 
-**裁决**：原增量 17 顺延至此（增量 17 插队批顶替）；写入点不扩——赛果确认与升级两处照旧调 `queueClubNotification`，内部改双通道；未读判定独立列 `read_at`，不复用投递状态 `status`。
+**裁决**：原v2.3.0 顺延至此（v2.3.0 插队批顶替）；写入点不扩——赛果确认与升级两处照旧调 `queueClubNotification`，内部改双通道；未读判定独立列 `read_at`，不复用投递状态 `status`。
 
 **交付**（3 个 commit）：`14af2f3` 服务端——迁移 0022（`notifications.read_at`）；`queueClubNotification` 双通道：每个绑定账号一条 `channel='web'` 行（`status='sent'` 免投递，进收件篮），绑了 QQ 的另加一条 `qq` 投递行（两通道互不挤占，qq_links 未命中的教练也有站内信了）；`dispatchPendingNotifications` 加 `channel='qq'` 过滤双保险；新 `routes/notifications.ts` 三端点（列表 id 倒序游标 30/页 + 未读数、`unread-count`、`read` ids/all 双模式只动本人 web 行幂等）。`104fa97` 前端——`/notifications` 收件篮页（mono 时间 + 模板徽章摘要、未读 sky 蓝点加粗、点行标已读、全部已读、游标「再看 30 条」）+ TopBar 用户区收件篮入口与未读蓝点（60s 轮询 + 聚焦拉取）+ 顺手修 `--cream` 未定义变量（52bc412 潜伏 bug）。`999068d` review 修复——`read` 的 ids 超 D1 单查询绑定参数上限 100 会 500，改按 100 分块 `db.batch`（150 条用例）。
 
@@ -204,7 +260,7 @@
 
 ---
 
-## 增量 19 · 设施经营——球场扩建 / 档位升级 / 子设施升级 + 建设券（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
+## v2.5.0 · 设施经营——球场扩建 / 档位升级 / 子设施升级 + 建设券（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
 
 **规则口径**（revenue 插件 README §三/§四 + `_conf_schema.json` + formula.py:407）：扩建 0.1M/100 座、限当前档位座位区间；升级按**当前档** upgrade_cost、需容量 ≥ 新档 min_seats + `stadium_max_open_tier` 开放闸（默认 1，S9 只开 0→1）；子设施五类 0–5 级费用 `3,5,8,12,16`（config 键 `facility_prices` 六位串）。建设支出全额 × `voucher_refund`(0.25) 返建设券，券只抵后续建设支出（先券后钱）；混合支付时账本只记现金，memo 注明券抵。
 
@@ -214,7 +270,7 @@
 
 ---
 
-## 增量 20 · 冠名市场——品牌池报价 / 签约 / 退约 + 窗末收租（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
+## v2.6.0 · 冠名市场——品牌池报价 / 签约 / 退约 + 窗末收租（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
 
 **前置修复**：`801b422` 账本幂等闸补 club 维度——NOT EXISTS 原按 (kind, ref_type, ref_id) **全局**查重，而窗末结算给每个俱乐部记同 (kind, 'window', refId) 流水，多队关窗 wage/maintenance 只有第一队落账（生产未触发，下次关窗必炸）。闸改按 (club_id, kind, ref_type, ref_id)，全调用方核对无人依赖全局语义，补两俱乐部同 ref 回归用例。
 
@@ -228,7 +284,7 @@
 
 ---
 
-## 增量 21 · 赛果自动化——cron 自动确认 / 钩子重放 / 人工复核 / auth 审计（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
+## v2.7.0 · 赛果自动化——cron 自动确认 / 钩子重放 / 人工复核 / auth 审计（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
 
 **P0 修复**：确认钩子原本裸奔——XP/通知在快照落库后同步执行，任一失败把已入档的确认炸掉且 409 挡住重试。`b9dc6db` 把四钩子（XP/通知/奖金/上座）收进 `runHooks` 逐个吞错收集，确认主体不再被钩子拖死。
 
@@ -240,7 +296,7 @@
 
 ---
 
-## 增量 22 · 换版机制与导入加固——小/大换版模式 / 合同导入校验 / 预览警告 / CPU 列化（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
+## v2.8.0 · 换版机制与导入加固——小/大换版模式 / 合同导入校验 / 预览警告 / CPU 列化（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
 
 **I1 换版模式**（规则 §5.4 / TECH_DESIGN §10.4，`1161ee9`）：导入原 upsert 把 CA 拉回源值但保留 growth_xp/levels/徽章——既非小换版也非大换版的缺陷。`players_import` 加 `mode`：**小换版**（缺省）成长全保留、CA 增量平移（`ca = excluded.ca + max(ca−base_ca, 0)`）；**大换版**经验清零、成长 CA 与徽章各保留 1/3 向上取整（SQLite 整数除法 `(δ+2)/3` 即 ceil）、levels_applied 归零；`base_ca` 都刷到新源值；新插入路径两模式等价。预览统计加 growthPlayers（δ>0 将受影响人数）与 xpToWipe（大换版将清零经验总量）；确认审计批次带 mode。前端导入页加模式选择（大换版红色警示 + armed 二次确认沿用），预览块渲染换版统计与警告表。离线脚本 generate-sql.ts 加 `--mode`（`4ff6634` 分片头与报告记录模式，生产执行可追溯）。**档案划断口径**：成长字段归零 + 审计留痕，不插 growth_events/growth_periods 行（18k 行级插入会打爆 D1 写配额）。
 
@@ -250,7 +306,7 @@
 
 ---
 
-## 增量 23 · 性能与守护——排序表达式索引 / 进程内限流 / TTL SWR 缓存 / e2e 冒烟（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
+## v2.8.1 · 性能与守护——排序表达式索引 / 进程内限流 / TTL SWR 缓存 / e2e 冒烟（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
 
 **范围裁决**：脑暴原案是「KV 限流 + KV 缓存」，实测否决——KV 免费档写约 1k 次/天，公开 GET 每请求写计数或刷缓存会打爆写配额。改**进程内**（module 级 Map）实现，代价是 isolate 重启即清、多 isolate 不共享，朋友局流量可接受（口径写在 `src/lib/guard.ts` 头注释）。
 
@@ -268,7 +324,7 @@
 
 ---
 
-## 增量 24 · 文档收口——README / AGENTS.md / CHANGELOG / scripts 索引 / TECH_DESIGN 与现状对齐（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
+## v2.8.2 · 文档收口——README / AGENTS.md / CHANGELOG / scripts 索引 / TECH_DESIGN 与现状对齐（2026-09-20 本地完成；同日已部署 Version 90bfd78f）
 
 **范围**：不改任何运行时代码，只把仓库文档拉到与代码一致的现状，并清掉过期草稿。盘点发现三处空白——`README.md` 仅 30 字节标题（自 Initial commit 起未动）、无项目级 `AGENTS.md`、无 `CHANGELOG.md`；`TECH_DESIGN.md` 有五处与代码冲突（config 键表缺 5 键、§15 假设未分类、§17.3 仍写 KV SWR 方案、附录 A 通知行过期、§12 通知实现未记双通道）。
 
@@ -276,25 +332,25 @@
 
 **② 项目级 AGENTS.md 新建**（`97ffa68`）：三库权限表、危险清单（deploy / `--remote` 写 / 生产迁移 / `scripts/prod-*` 工件 / 球员库全量重导入 / 30 人补录 / 16 队队籍回填 / push）、开发口径（端口 8791/8795/8792；改前端不 build 看不到；AUTH_MODE 与兼容模式；会话解析在 `src/lib/session.ts`、cookie 名在 `src/lib/oidc.ts`）、测试与迁移纪律、代码与提交规范（Edit/Write 禁终端改文件、core/lib/worker/routes 分层、guard.ts 口径）、文档纪律、当前状态。用户级 AGENTS.md 仍先注入，本文件只做项目收窄。
 
-**③ CHANGELOG.md 新建**（`2d78587`）：Keep a Changelog 风格；本项目按增量推进、以 Cloudflare Version id 标记（仓库无 git tag）。[未发布] = 增量 17–24（自审后补 24）；[已上线] 增量 16（`6ed7446c`）与增量 15（`4d03eb57`）；早期增量 0–14 各一行标题。
+**③ CHANGELOG.md 新建**（`2d78587`）：Keep a Changelog 风格；本项目按增量推进、以 Cloudflare Version id 标记（仓库无 git tag）。[未发布] = v2.3.0–24（自审后补 24）；[已上线] v2.2.0（`6ed7446c`）与v2.1.0（`4d03eb57`）；早期v0.1.0–14 各一行标题。
 
 **④ scripts/README.md 新建**（`d99ae79`）：按性质分级（只读 / 产工件 / 写生产 / 未执行）+ 顶层脚本表 + 各子目录说明；生产工件状态逐个标注（increment14 已执行、increment15 已执行、milan-rekey 已执行、**roster-backfill 未执行**——该行状态后来在执行回填后已改为「已执行」）；执行纪律：含外键或大事务的工件必须 `--command` 或 D1 REST `/query`（`--file` 通道让 `PRAGMA defer_foreign_keys` 失效，会整批回滚）。
 
-**⑤ TECH_DESIGN 与现状对齐**（`3eec8e2`）：§13 把 `review_amount_threshold`（`40`）与 `bid_pattern_alert`（`{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}`）由「待定」改实值，补 5 个已落地键（`window_force_settle` / `market_bid_paused` / `stadium_max_open_tier` / `naming_params` / `results_auto_confirm`），`facility_prices` 改精确值，表尾补注册表口径（61 条登记 / 唯一键 59 / 无默认键）；§15 加分类口径（已定 / 假设 / 已解决 / 可配置 / 已执行 / 已撤销）并把 27 号归位到 26 号之后；§17.1 补表达式索引规约、§17.3 按 `src/lib/guard.ts` 现状改写（进程内限流 + TTL SWR，明确「不用 KV」的配额理由）；§12 记通知双通道、假设 23 由「假设」改「已定（增量 18 补 web 收件篮）」；附录 A 通知行拆为 web 三端点〔18〕与 qq 投递〔6〕，表头加「冻结于增量 6 era，增量 7+ 不回填」的范围说明。
+**⑤ TECH_DESIGN 与现状对齐**（`3eec8e2`）：§13 把 `review_amount_threshold`（`40`）与 `bid_pattern_alert`（`{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}`）由「待定」改实值，补 5 个已落地键（`window_force_settle` / `market_bid_paused` / `stadium_max_open_tier` / `naming_params` / `results_auto_confirm`），`facility_prices` 改精确值，表尾补注册表口径（61 条登记 / 唯一键 59 / 无默认键）；§15 加分类口径（已定 / 假设 / 已解决 / 可配置 / 已执行 / 已撤销）并把 27 号归位到 26 号之后；§17.1 补表达式索引规约、§17.3 按 `src/lib/guard.ts` 现状改写（进程内限流 + TTL SWR，明确「不用 KV」的配额理由）；§12 记通知双通道、假设 23 由「假设」改「已定（v2.4.0 补 web 收件篮）」；附录 A 通知行拆为 web 三端点〔18〕与 qq 投递〔6〕，表头加「冻结于v0.7.0 era，v1.0.0+ 不回填」的范围说明。
 
-**⑥ 过期草稿清理**：`handoff-20260916.md`（停在增量 12，四仓 HEAD 快照全过期）删除；其中仍有效的三条已迁走——球员库逐队源数据位置与字段口径、导入通道选择（离线脚本产 SQL 走 D1 REST `/query`）、`--file` 通道 FK 陷阱（后两条进 `scripts/README.md`，第一条进本节下方「外部依赖与待输入」表）。
+**⑥ 过期草稿清理**：`handoff-20260916.md`（停在v1.5.0，四仓 HEAD 快照全过期）删除；其中仍有效的三条已迁走——球员库逐队源数据位置与字段口径、导入通道选择（离线脚本产 SQL 走 D1 REST `/query`）、`--file` 通道 FK 陷阱（后两条进 `scripts/README.md`，第一条进本节下方「外部依赖与待输入」表）。
 
-**⑦ 自审修正**（`4de31df` / `b22ef5a`）：逐处核路径 / 命令 / 键名 / 版本号，抓到并修四处事实错——`scripts/README.md` 把球员库首灌写成「未执行」（实为 2026-09-18 已执行入库 18301，靠生产 `SELECT COUNT(*)` 定案）、`README.md` 把待 apply 迁移写成只有 0026/0027（实为 0022–0027）、`README.md` 写 admin 八域（实为九域）、`ROADMAP.md` 增量 12 段引用已不存在的 `web/src/pages/Admin.tsx`（改指 `web/src/lib/imports.ts` + `web/src/pages/admin/ImportsPage.tsx`）；另把「领先 39 个提交」这类硬编码改成实时口径，并顺手把下方「外部依赖与待输入」里已完成的依赖行（平台 D1、部署子域）改口径、`UI_DESIGN.md` 两处计划路径补上实现落点。
+**⑦ 自审修正**（`4de31df` / `b22ef5a`）：逐处核路径 / 命令 / 键名 / 版本号，抓到并修四处事实错——`scripts/README.md` 把球员库首灌写成「未执行」（实为 2026-09-18 已执行入库 18301，靠生产 `SELECT COUNT(*)` 定案）、`README.md` 把待 apply 迁移写成只有 0026/0027（实为 0022–0027）、`README.md` 写 admin 八域（实为九域）、`ROADMAP.md` v1.5.0 段引用已不存在的 `web/src/pages/Admin.tsx`（改指 `web/src/lib/imports.ts` + `web/src/pages/admin/ImportsPage.tsx`）；另把「领先 39 个提交」这类硬编码改成实时口径，并顺手把下方「外部依赖与待输入」里已完成的依赖行（平台 D1、部署子域）改口径、`UI_DESIGN.md` 两处计划路径补上实现落点。
 
-**验收**：文档里每处路径、命令、键名、版本号均以代码或联网只读查证为准（`wrangler deployments list --name whl-club` 实证生产最新 Version = 增量 16 的 `6ed7446c`，`wrangler d1 migrations list whl-club --remote` 实证生产迁移停在 0021，`SELECT COUNT(*) FROM players` 实证生产 18301 人、缺字段列为空——据此纠正了「球员库首灌未执行」的误记）；`npm test` 387 用例 / 30 文件不变（本轮不碰代码，仅 0027 头注释一行）。
+**验收**：文档里每处路径、命令、键名、版本号均以代码或联网只读查证为准（`wrangler deployments list --name whl-club` 实证生产最新 Version = v2.2.0 的 `6ed7446c`，`wrangler d1 migrations list whl-club --remote` 实证生产迁移停在 0021，`SELECT COUNT(*) FROM players` 实证生产 18301 人、缺字段列为空——据此纠正了「球员库首灌未执行」的误记）；`npm test` 387 用例 / 30 文件不变（本轮不碰代码，仅 0027 头注释一行）。
 
-**遗留**：附录 A 只修过期行、不回填增量 7+ 新增路由（表头已写明冻结范围）；TECH_DESIGN §15 各条只补落地增量号，未逐条回代码核位置；e2e 仍只覆盖兼容模式会话路径（增量 23 遗留）。
+**遗留**：附录 A 只修过期行、不回填v1.0.0+ 新增路由（表头已写明冻结范围）；TECH_DESIGN §15 各条只补落地增量号，未逐条回代码核位置；e2e 仍只覆盖兼容模式会话路径（v2.8.1 遗留）。
 
-**部署（2026-09-20，用户下令执行）**：推送 50 个提交（`9f05116..fe60273`）→ 生产 D1 apply 0022–0027（生产迁移现到 0027，0027 的四条索引一次性写约 7.3 万行）→ `npm run deploy` 出 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（取代增量 16 的 `6ed7446c`）。生产回读：`/api/health` 三资源 ok；`/api/me` 为 oidc 模式；首页与 `/api/clubs/directory`、`/api/players`（含 `sort=ca` 表达式索引路径）200；增量 17–23 新增路由（`/api/notifications*`、`/api/club/stadium/build-info`、`/api/club/naming/quote`、`/api/admin/overview`）返回 401 未登录而非 404，确认新代码已上线；0026 的 `clubs.is_cpu` 四个 CPU 队（id 10 / 241 / 112172 / 131681）核对均 `is_cpu=1`。**同日另批**：16 队队籍回填已单独执行完毕（444 行，见增量 17 节与 `scripts/prod-20260919-roster-backfill/README.md`）。仍未执行：30 人缺字段补录。
+**部署（2026-09-20，用户下令执行）**：推送 50 个提交（`9f05116..fe60273`）→ 生产 D1 apply 0022–0027（生产迁移现到 0027，0027 的四条索引一次性写约 7.3 万行）→ `npm run deploy` 出 Version `90bfd78f-fae4-4584-8d52-871486aa46c0`（取代v2.2.0 的 `6ed7446c`）。生产回读：`/api/health` 三资源 ok；`/api/me` 为 oidc 模式；首页与 `/api/clubs/directory`、`/api/players`（含 `sort=ca` 表达式索引路径）200；v2.3.0–23 新增路由（`/api/notifications*`、`/api/club/stadium/build-info`、`/api/club/naming/quote`、`/api/admin/overview`）返回 401 未登录而非 404，确认新代码已上线；0026 的 `clubs.is_cpu` 四个 CPU 队（id 10 / 241 / 112172 / 131681）核对均 `is_cpu=1`。**同日另批**：16 队队籍回填已单独执行完毕（444 行，见v2.3.0 节与 `scripts/prod-20260919-roster-backfill/README.md`）。仍未执行：30 人缺字段补录。
 
 ---
 
-## 增量 25 · 合同期与财政节点改窗刻度——效力/保护期/解约费按常规窗计时 + 窗分型（临时窗）+ 忠诚奖金移入中期窗 + 税最先扣（2026-09-20 本地完成，2026-09-21 随 Version b83ec876 上线）
+## v3.0.0 · 合同期与财政节点改窗刻度——效力/保护期/解约费按常规窗计时 + 窗分型（临时窗）+ 忠诚奖金移入中期窗 + 税最先扣（2026-09-20 本地完成，2026-09-21 随 Version b83ec876 上线）
 
 **范围**：规则以赛季/半赛季为主刻度（4.2.3 工资帽半赛季周期、4.3.1 保护期 1.5 赛季、4.3.2 忠诚奖金按赛季、4.4.4 效力满 3 年免费解约），原实现按自然日折算（`PROTECTION_DAYS = 548` 天、`(now − effective_from) ÷ 365.25` 年），属口径错；本轮把合同期与资金动账节点一并定时点。
 
@@ -309,13 +365,13 @@
 
 **验收**：`npm test` **31 文件 / 397 用例全绿**（原基线 30 / 387），`npm run typecheck`（三份 tsconfig）与 `npm run build` 过。自审（code-review-skill 四阶段）无阻断项：全部调用点核对无遗漏（`PROTECTION_DAYS` / `protected_until` / `365.25` 仅剩迁移注释与导入模板映射）；`currentWindow` 与原 `getOpenWindow` 的 SQL 逐字一致（只多读 `is_temporary`），无回归；`settleSeason` 的 `growable` 批次下标在语句数减少后仍正确。
 
-**遗留**：~~`0028` 未 apply~~ → **2026-09-21 已随合同导入批 apply 到生产（生产迁移现到 0028）**；~~worker 仍未部署~~ → **2026-09-21 已随 Version `b83ec876` 上线**（网页面板建合同不再落 DDL 默认刻度）；旧列 `protected_until`（signed_at + 548 天）保留留档、判定不再读；导入历史合同的签约基数按日期串截断，与签约同日关的窗不计（效力算得更年轻，已在 `closedRegularTicks` 注明）；e2e 冒烟未跑（本轮不涉页面结构，仍是增量 23 的 8 场景）。
+**遗留**：~~`0028` 未 apply~~ → **2026-09-21 已随合同导入批 apply 到生产（生产迁移现到 0028）**；~~worker 仍未部署~~ → **2026-09-21 已随 Version `b83ec876` 上线**（网页面板建合同不再落 DDL 默认刻度）；旧列 `protected_until`（signed_at + 548 天）保留留档、判定不再读；导入历史合同的签约基数按日期串截断，与签约同日关的窗不计（效力算得更年轻，已在 `closedRegularTicks` 注明）；e2e 冒烟未跑（本轮不涉页面结构，仍是v2.8.1 的 8 场景）。
 
-**文档**：TECH_DESIGN §6.3（窗内回滚还原 `protection_ticks`）、§8 窗末结算（临时窗不收冠名租金）、§11 结算段与关窗批（增量 25 改口径三条）、§13 `loyalty_tiers` 单位改赛季、§15 假设 13/14 重写为窗刻度 + 新增假设 39（窗分型与效力推进点）/40（临时窗扣费与忠诚奖金中期发）、附录 A 窗口两行与赛季结算行；PRD 合同台账/解约/续约/赛季结算/假设 5；UI_DESIGN 卷宗条款与「收口」文案；README 与 AGENTS.md 的迁移数与测试数；CHANGELOG [未发布] 增量 25 节。
+**文档**：TECH_DESIGN §6.3（窗内回滚还原 `protection_ticks`）、§8 窗末结算（临时窗不收冠名租金）、§11 结算段与关窗批（v3.0.0 改口径三条）、§13 `loyalty_tiers` 单位改赛季、§15 假设 13/14 重写为窗刻度 + 新增假设 39（窗分型与效力推进点）/40（临时窗扣费与忠诚奖金中期发）、附录 A 窗口两行与赛季结算行；PRD 合同台账/解约/续约/赛季结算/假设 5；UI_DESIGN 卷宗条款与「收口」文案；README 与 AGENTS.md 的迁移数与测试数；CHANGELOG [未发布] v3.0.0 节。
 
 ---
 
-## 增量 26 · 球员库筛选搬进左栏——筛选/显示列左置 + 表头点排序（29 键）+ 姓名去变音搜索 + 窄屏抽屉（2026-09-21 完成并随 Version b83ec876 上线）
+## v3.1.0 · 球员库筛选搬进左栏——筛选/显示列左置 + 表头点排序（29 键）+ 姓名去变音搜索 + 窄屏抽屉（2026-09-21 完成并随 Version b83ec876 上线）
 
 **范围**：球员库（`/players`）的筛选控件原先横铺在表格上方、随表格一起滚走；搜索只做裸 `LIKE`（「sesko」搜不到「Šeško」）；排序只有 6 个键、走下拉框。本轮把筛选与显示列搬进球员列左侧的固定栏（窄屏改抽屉）、搜索走去变音折叠、排序键扩到表头每一列且可点表头排序。**不写任何生产数据**；push 与部署等令（2026-09-21 已下令并执行，见本节的「上线」段与 `CHANGELOG.md` 顶部的 Version 记录）。
 
@@ -333,7 +389,7 @@
 - `776a777` 新增 `web/src/components/PlayerSearchBox.tsx` + `web/src/lib/roster.ts`（`parseRoster` / `suggestPlayers` / `ROSTER_SUGGEST_LIMIT = 8`）。
 - `23d37b5` 窄屏抽屉（新增 `web/src/lib/use-media.ts` 的 `useMediaQuery`，走 matchMedia 而非 resize）+ `web/src/components/TopBar.tsx` 用 ResizeObserver 实测回写 `--topbar-h`；`2aa3692` 过审修正（抽屉内不再误吸顶、抬头吸顶、背景 inert、锁滚不横跳、焦点归位）。
 - `23f6493` 前端组件测试基建（devDeps jsdom ^29.1.1 / @testing-library/react ^16.3.3 / @testing-library/dom ^10.4.2 / @testing-library/user-event ^14.6.7，package.json 里带 caret；`vitest.config.ts` 加 react 插件、include 扩到 `web/**/*.test.ts(x)`）+ `scripts/e2e/smoke.mjs` 三视口截图场景；`abbe1cb` 排序键表提到 `src/core/players-sort.ts`（零 import）前后端共用同一份 + `tests/core-zero-import.test.ts` 守卫；`30c77fa` 过审修正（Tab 焦点循环补全、摘要条 inert、e2e 断言补强）。
-- `a31997f` 与紧随的收口文档提交：`src/core/name-fold.ts` 头注释的悬空引用改指本节；ROADMAP 加本节、CHANGELOG 加 [未发布] 增量 26 节、README 测试数与 e2e 场景数、AGENTS 当前状态、UI_DESIGN 球员库行、TECH_DESIGN 附录 A 冻结说明。
+- `a31997f` 与紧随的收口文档提交：`src/core/name-fold.ts` 头注释的悬空引用改指本节；ROADMAP 加本节、CHANGELOG 加 [未发布] v3.1.0 节、README 测试数与 e2e 场景数、AGENTS 当前状态、UI_DESIGN 球员库行、TECH_DESIGN 附录 A 冻结说明。
 
 **验收**：`npm test` **36 文件 / 481 用例全绿**（原基线 31 / 397），`npm run typecheck`（三份 tsconfig）与 `npx vite build` 过（index gzip 141.75 kB）；`E2E_PERSIST_TO=.wrangler/rehearsal node scripts/e2e/smoke.mjs` **9/9 场景通过**（原 8）；真浏览器（本机 Chrome，375 / 900 / 1280 三视口）24 项断言全过——抽屉内 106 个 chip 无一被遮挡、表格+工具条+摘要条三块背景区 inert、`role=dialog` + `aria-modal=true`、连按 60 次 Tab 始终留在抽屉内（含顶栏）、已被内层消化的 Esc 不关抽屉、开关前后 `clientWidth` 375→375 无横跳、375↔1280 两个方向的焦点都交还入口按钮、console 错误 0（**真机手测**，探针在 gitignored 的 `scratch/verify-drawer-fix.mjs`，记录见记忆目录 `increment26-execution-state.md`；仓库未落脚本，`scripts/e2e/smoke.mjs` 的窄屏场景只覆盖其中 6 条）。
 **两个只有真引擎 / 真浏览器能抓到的真 bug**：① `sqlFold` 的 REPLACE 链撞 **D1 表达式树深度上限 100**（`D1_ERROR: Expression tree is too large (maximum depth 100)`，`?name=` 与 `sort=name` 直接 500；node:sqlite 上限 1000 所以本地单测**测不出**）⇒ 折叠表由 253 项裁到**生产实测 87 项**（18301 行姓名 / 3048 行含非 ASCII 逐位核对），新增 `SQL_FOLD_DEPTH_LIMIT = 100` / `SQL_FOLD_ENTRY_BUDGET = 92` 与 `scripts/check-name-fold-depth.mjs`（改表必跑）；② 焦点循环的清单不能用 `offsetParent !== null` 过滤收起 `<details>` 的内容（Chrome 对收起 details 内元素**不返回 null**），否则真实最后一个可聚焦元素是显示列的 `<summary>`、往后 Tab 无人拦（375 实测第 25 次 Tab 逃到 body）⇒ 改为显式排除 `details:not([open])` 后代、保留其 `:scope > summary`。
@@ -343,16 +399,16 @@
 
 **上线**（2026-09-21）：用户下令后推送 39 个提交（`29c8199..d17cbdd`）并部署，Version `b83ec876-9fc7-4c16-8d01-0cba3d8ab5e5`（`wrangler deploy` CLI 回显的 Current Version ID 为 `81e93c74-228f-4fee-9d87-9fecf602d360`，同一批相隔 5 秒）。生产迁移无需 apply（`d1 migrations list --remote` 报 No migrations to apply，已到 0028）。生产回读全部通过：`/api/health` 三资源 ok，`/api/players?sort=name` 200（修复前 500），`?name=sesko` 返回 `B. Šeško`，`/api/players/roster` 200 / 325262 字节，另四个排序键与三个筛选查询全 200。
 
-**文档**：本节 + `CHANGELOG.md` [未发布] 增量 26 节 + `README.md` 测试数与 e2e 场景数 + `AGENTS.md` 当前状态 + `src/core/name-fold.ts` 头注释（原「见 ROADMAP 的增量 26 记录」是悬空引用，由本节补上）+ 记忆目录 `increment26-plan.md` / `increment26-execution-state.md`。
+**文档**：本节 + `CHANGELOG.md` [未发布] v3.1.0 节 + `README.md` 测试数与 e2e 场景数 + `AGENTS.md` 当前状态 + `src/core/name-fold.ts` 头注释（原「见 ROADMAP 的v3.1.0 记录」是悬空引用，由本节补上）+ 记忆目录 `increment26-plan.md` / `increment26-execution-state.md`。
 
 ---
 
-## 增量 27 · 球员库左栏 UI 收口——多选下拉替代 chip 墙 + 区间成对 + PlayStyle 银/金分槽（2026-09-21 已上线，Version `3455087e`）
+## v3.1.1 · 球员库左栏 UI 收口——多选下拉替代 chip 墙 + 区间成对 + PlayStyle 银/金分槽（2026-09-21 已上线，Version `3455087e`）
 
-**范围**：增量 26 把筛选搬进左栏后，用户对实际观感提了 8 条反馈——同一行元素没对齐（工具条与左栏各一处）；球员列表上方空白太多；查找框灰字一整句太长；位置是 16 个 chip 铺 5 行；「更多筛选」里同一属性的最大值/最小值各占一行；属性下拉列的是 34 个英文键；「经纪人」叫法像人而不是性格；PlayStyle 与显示列也该是多选下拉。本轮把这 8 条逐条落地，并修掉随第 8 条暴露的**金徽筛选必然 400**。**不写任何生产数据、不碰缓存 / 限流 / 查询行为**。
+**范围**：v3.1.0 把筛选搬进左栏后，用户对实际观感提了 8 条反馈——同一行元素没对齐（工具条与左栏各一处）；球员列表上方空白太多；查找框灰字一整句太长；位置是 16 个 chip 铺 5 行；「更多筛选」里同一属性的最大值/最小值各占一行；属性下拉列的是 34 个英文键；「经纪人」叫法像人而不是性格；PlayStyle 与显示列也该是多选下拉。本轮把这 8 条逐条落地，并修掉随第 8 条暴露的**金徽筛选必然 400**。**不写任何生产数据、不碰缓存 / 限流 / 查询行为**。
 
 **裁决**（2026-09-21 用户一问一题逐条拍板，共 13 项；要点如下）：
-① 同行对齐走**控件行组件化**（工具条与左栏共用一套行布局与统一高度），不做零散 margin 微调；② 表格上方空白 = **摘要条与翻页条合并成一行** + **无筛选时不渲染摘要条**（「未设筛选条件」占位取消）；③ 搜索框灰字**只保留「查找」**；④ 属性下拉 label 改「属性」、选项写**中文名**、按**七组小标题**分组；⑤ 区间上下限：凡同一属性的最大/最小**合并成一对、一行两列**（左最小、右最大）；⑥ 「经纪人」→「**经纪人性格**」（仅筛选面板 label 与档案页；摘要条 chip 与表格列名仍叫「经纪人」）；⑦ 位置改**多选下拉**、**只放 12 个码位**（四个组 chip 下线，一键选「后卫」的能力随之消失，用户接受）；⑧ PlayStyle 也改多选下拉、**不带搜索框**、顶层分「**银徽章 / 金徽章**」两段（各 36 项）、段内按 EA 六类分组；⑨ **金徽不再算命中**（筛银徽章只看银槽 ⇒ 这是后端行为改动）；⑩ 显示列改同一个多选下拉；⑪ 摘要条粒度：**位置一条、银徽章一条、金徽章一条**（点 × 清掉整类），区间上下限仍各一条 chip（删一个不带走另一个）；⑫ 多选面板用**原生 Popover API**（进 top layer，不被窄屏抽屉裁切）；⑬ **生产读消耗的量化与治理整条挪到增量 28**——原计划第一步是打生产实测，但 2026-09-21 当日 D1 读额度已超限（免费档按 UTC 零点归零），用户裁决「步骤一先搁置」。
+① 同行对齐走**控件行组件化**（工具条与左栏共用一套行布局与统一高度），不做零散 margin 微调；② 表格上方空白 = **摘要条与翻页条合并成一行** + **无筛选时不渲染摘要条**（「未设筛选条件」占位取消）；③ 搜索框灰字**只保留「查找」**；④ 属性下拉 label 改「属性」、选项写**中文名**、按**七组小标题**分组；⑤ 区间上下限：凡同一属性的最大/最小**合并成一对、一行两列**（左最小、右最大）；⑥ 「经纪人」→「**经纪人性格**」（仅筛选面板 label 与档案页；摘要条 chip 与表格列名仍叫「经纪人」）；⑦ 位置改**多选下拉**、**只放 12 个码位**（四个组 chip 下线，一键选「后卫」的能力随之消失，用户接受）；⑧ PlayStyle 也改多选下拉、**不带搜索框**、顶层分「**银徽章 / 金徽章**」两段（各 36 项）、段内按 EA 六类分组；⑨ **金徽不再算命中**（筛银徽章只看银槽 ⇒ 这是后端行为改动）；⑩ 显示列改同一个多选下拉；⑪ 摘要条粒度：**位置一条、银徽章一条、金徽章一条**（点 × 清掉整类），区间上下限仍各一条 chip（删一个不带走另一个）；⑫ 多选面板用**原生 Popover API**（进 top layer，不被窄屏抽屉裁切）；⑬ **生产读消耗的量化与治理整条挪到v3.2.0**——原计划第一步是打生产实测，但 2026-09-21 当日 D1 读额度已超限（免费档按 UTC 零点归零），用户裁决「步骤一先搁置」。
 明确不做：不改缓存 / 限流数值、不改除 ps 外的后端语义、不引 UI 库、不动 `.admin-shell` 的 760px 断点、不写生产数据。
 
 **交付**（6 个 commit，每步一 commit + code-review-skill 过审）：
@@ -363,23 +419,23 @@
 - `53ef515` 步骤 5：摘要条与翻页条合并成 `.lib-bar` 一行（chips 靠左、翻页 `margin-left:auto` 靠右），无筛选不渲染摘要条；`filterChips` 的位置与银/金各合成一条 chip（`psChipName` 去掉参考表自带的 `" +"` 后缀）；`scripts/e2e/smoke.mjs` ④ 断言随之改写。
 - `016a1ba` 步骤 6：多选面板**下方不足 220px 时翻到触发器上方贴底**（落位抽成导出纯函数 `panelPlacement`，新增 4 例单测）+ 窄屏勾选框标签 `white-space: nowrap` + e2e ⑧ 新增面板几何/命中、同行控件底边对齐、翻页条按线上量级量页面横向溢出三组探针。
 
-**验收**：`npm run typecheck`（三份 tsconfig）全清；`npx vitest run` **38 文件 / 497 用例全绿**（增量 26 收口时 36 / 481，本增量 +2 文件 / +16 例：`ref.test.ts` 3 + `MultiSelect.test.tsx` 10 + 页面与 lib 的改写）；`npm run build` 成功（部署产物 `web/dist/assets/index-C3PsHajD.js` 451.03 kB / gzip 142.93 kB + `index-C87Bz2k9.css`）；`npm run test:e2e` **9/9 场景通过**（⑧ 三视口 1280×900 / 900×800 / 375×812）。e2e 新增断言的实测输出：`desktop 工具条 3 对 / 左栏 2 对，底边偏差 []`（对齐从「看着别扭」变成可失败的硬断言）、`位置 触发器底 403 面板 409–843（视口 900）`、`PlayStyle 触发器底 800 面板 8–760（视口 800）`、`翻页条：高度 30，页面 1265/1280`。真浏览器截图（`scratch/e2e-players-{desktop,tablet,mobile}[-multiselect[-ps]].png`，8 张）逐张复核：工具条三件套与左栏两行底边齐平、摘要条与翻页条合并成表格正上方一行、位置/显示列/PlayStyle 均为下拉、375px 抽屉里 CA/PA/成长空间/初始 CA/年龄/身价/影响力 各一行两列。
+**验收**：`npm run typecheck`（三份 tsconfig）全清；`npx vitest run` **38 文件 / 497 用例全绿**（v3.1.0 收口时 36 / 481，本增量 +2 文件 / +16 例：`ref.test.ts` 3 + `MultiSelect.test.tsx` 10 + 页面与 lib 的改写）；`npm run build` 成功（部署产物 `web/dist/assets/index-C3PsHajD.js` 451.03 kB / gzip 142.93 kB + `index-C87Bz2k9.css`）；`npm run test:e2e` **9/9 场景通过**（⑧ 三视口 1280×900 / 900×800 / 375×812）。e2e 新增断言的实测输出：`desktop 工具条 3 对 / 左栏 2 对，底边偏差 []`（对齐从「看着别扭」变成可失败的硬断言）、`位置 触发器底 403 面板 409–843（视口 900）`、`PlayStyle 触发器底 800 面板 8–760（视口 800）`、`翻页条：高度 30，页面 1265/1280`。真浏览器截图（`scratch/e2e-players-{desktop,tablet,mobile}[-multiselect[-ps]].png`，8 张）逐张复核：工具条三件套与左栏两行底边齐平、摘要条与翻页条合并成表格正上方一行、位置/显示列/PlayStyle 均为下拉、375px 抽屉里 CA/PA/成长空间/初始 CA/年龄/身价/影响力 各一行两列。
 
 **两个只有真浏览器能抓到的真 bug**：① **多选面板掉出视口**：把 PlayStyle 触发器滚到抽屉下沿后，面板落在 806–966 而视口高 800，掉在视口外、点不到也滚不到 ⇒ 加向上翻转；且**落位必须在 `showPopover()` 之后**——之前面板命中 `[popover]:not(:popover-open)`、UA 样式是 `display:none`，`offsetWidth` / `scrollHeight` 量到 0，「面板想要多高」恒为 0，翻转几乎永不触发（改用常量 `MIN_PANEL_ROOM = 220` 判据正是为了绕开这个坑，评审抓出后已修）。② **375px 抽屉里勾选框标签被拆成三行**：`.lib-adv-grid .field.check` 被 `flex: 1 1 96px` 压到 96px，「仅未来之星」渲染成「仅未 / 来之 / 星」⇒ `white-space: nowrap`。
 另有两条 e2e 断言被评审判定为**空洞**（`pagerProbe` 断 `scrollWidth > clientWidth` 不可能失败，CJK 会换行；同行判据按 `top` 归行会跳过底边对齐但顶边不同的成对控件）⇒ 改为「页面级横向溢出」与「纵向相交归行 + 只比底边 + 断言量到非空」，并把「同行控件 N 对」打进日志以证非空集。
 
-**上线（2026-09-21）**：7 个提交推送（`89e039d..30c7cdc`，`git rev-list --count origin/main..HEAD` = 0）；`npm run deploy` 成功（Total Upload 526.87 KiB / gzip 125.02 KiB，绑 5 资源 + `AUTH_MODE=oidc` + `PUBLIC_CACHE_TTL_MS=20000`，custom domain `club.whleague.win` + cron `*/5 * * * *`）。`wrangler deploy` CLI 回显 `ff9c2e91-25a0-4ce1-be19-d9b50bc0a136`，`wrangler deployments status --name whl-club` 显示生产 100% 流量 Version **`3455087e-4bdb-4a63-b40f-8df943d80892`**（2026-09-21T17:13:35Z）——与增量 26 一样，CLI 回显的 Current Version ID 与 deployments status 里的 Version 是两个值。
+**上线（2026-09-21）**：7 个提交推送（`89e039d..30c7cdc`，`git rev-list --count origin/main..HEAD` = 0）；`npm run deploy` 成功（Total Upload 526.87 KiB / gzip 125.02 KiB，绑 5 资源 + `AUTH_MODE=oidc` + `PUBLIC_CACHE_TTL_MS=20000`，custom domain `club.whleague.win` + cron `*/5 * * * *`）。`wrangler deploy` CLI 回显 `ff9c2e91-25a0-4ce1-be19-d9b50bc0a136`，`wrangler deployments status --name whl-club` 显示生产 100% 流量 Version **`3455087e-4bdb-4a63-b40f-8df943d80892`**（2026-09-21T17:13:35Z）——与v3.1.0 一样，CLI 回显的 Current Version ID 与 deployments status 里的 Version 是两个值。
 
 **部署后回读失败的真实原因（重要，非本增量引入）**：`/api/health` 200、`/api/clubs/directory` 200，但 `/api/players?limit=1` / `?sort=name` / `?ps=25` / `?ps=125` / `/api/players/roster` / `/api/players/1` **一律 500**（体 54 字节的统一兜底文案）。逐层排查确认是 **D1 免费档当日行读配额已耗尽**：临时把 `src/worker/index.ts` 的 onError 加上 `__diag` 字段、用 `npx wrangler dev --remote`（本地代码 + 生产绑定）打 `GET /api/players?limit=1`，拿到 `D1_ERROR: Your account has exceeded D1's free tier daily row read limit…`（该诊断补丁已还原，未部署）。旁证：Cloudflare 分析 API 的 `workersInvocationsAdaptive` 显示 `scriptThrewException` **自 2026-09-21T15:20:22Z 起**、其后每 5 分钟一条（cron 也全失败），**比本次部署早约 2 小时**；`d1AnalyticsAdaptiveGroups` 显示当日 whl-club `rowsRead` **4,350,235** / readQueries 5311（免费档上限 500 万行/日）。管理通道（`wrangler d1 execute --remote`）不受该限制，故 `SELECT COUNT(*) FROM players` = 18301、主列表 SELECT 原样都能跑通 —— **用管理通道或 `/api/health` 判断 D1 是否可用会得到假阳性**（`/api/clubs/directory` 的缓存键是固定串，`?x=1` 仍命中同一条目，且 stale 刷新分支 `.catch(() => {})` 吞掉 loader 错误）。限额按 UTC 零点归零 ⇒ 最小化生产回读（`/api/health` + `?sort=name` + `?ps=25` + `?ps=125`，≤6 请求）**顺延到额度归零之后**，未阻塞部署。
-**回读已补做（2026-09-22T00:01:52Z = 本地 08:01，归零后 1 分 52 秒）**：`/api/health`（三资源 ok）、`/api/players?sort=name&limit=1`、`?ps=25`、`?ps=125`、`?ps=1,101`、`/api/players/roster`（321693 字节）**六个端点全部 200**，`?sort=name` 200 也证明增量 26 的折叠表达式深度修复在生产生效。另花 2 次请求（合计 8 次，超出原预算 2 次）做语义实测：`?ps=125&limit=3` 返回 `total=4`、三行全部命中金槽 `PSID13=125` 且银槽无 25；`?ps=25&limit=3` 返回 `total=650`、行内 25 只出现在银槽（`PSID4` / `PSID3` / `PSID1`），这些球员的金槽值（142 / 103）**没有**被银值查询捞出来 ⇒ **「银值只比银槽、金值只比金槽」的新语义在生产成立**（列表响应形状 `{players, total, nextCursor}`）。cron 最后一次失败为 2026-09-21T23:55:17Z，**00:00:34Z 起恢复成功**（`workersInvocationsAdaptive`）。排查副作用一条：Cloudflare 分析 API 用的 wrangler OAuth 令牌于 2026-09-21T18:13:20Z 过期，`npx wrangler whoami` 会刷新它，之后 GraphQL 才可用。
+**回读已补做（2026-09-22T00:01:52Z = 本地 08:01，归零后 1 分 52 秒）**：`/api/health`（三资源 ok）、`/api/players?sort=name&limit=1`、`?ps=25`、`?ps=125`、`?ps=1,101`、`/api/players/roster`（321693 字节）**六个端点全部 200**，`?sort=name` 200 也证明v3.1.0 的折叠表达式深度修复在生产生效。另花 2 次请求（合计 8 次，超出原预算 2 次）做语义实测：`?ps=125&limit=3` 返回 `total=4`、三行全部命中金槽 `PSID13=125` 且银槽无 25；`?ps=25&limit=3` 返回 `total=650`、行内 25 只出现在银槽（`PSID4` / `PSID3` / `PSID1`），这些球员的金槽值（142 / 103）**没有**被银值查询捞出来 ⇒ **「银值只比银槽、金值只比金槽」的新语义在生产成立**（列表响应形状 `{players, total, nextCursor}`）。cron 最后一次失败为 2026-09-21T23:55:17Z，**00:00:34Z 起恢复成功**（`workersInvocationsAdaptive`）。排查副作用一条：Cloudflare 分析 API 用的 wrangler OAuth 令牌于 2026-09-21T18:13:20Z 过期，`npx wrangler whoami` 会刷新它，之后 GraphQL 才可用。
 
-**遗留**：① **球员库 D1 读消耗的量化与治理**（增量 28，含本增量被挪走的那部分）；② 档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15`，而筛选与导入口径是银槽 1-12 ⇒ 落在 `PSID8-12` 的银徽章「可筛不可见」（**增量 29 已修**：档案页按槽位扫全 15 槽）；③ 摘要条「筛选（N）」数的是 chip 条数，位置选 12 个仍显示 1（chip 粒度合并的必然结果，**增量 29 裁决维持现状**）；④ 多选面板内联 `maxHeight` 会覆盖 CSS 的 `min(70vh, 480px)`，内容超高时面板可长过 480px（**增量 29 已修**：上限收到组件常量，CSS 那条死规则删除）；⑤ 1280 宽下表格里「Baseline Utd」「20.00 m」「2金7银」会折行（列宽所致，非本轮引入；**增量 29 已修**：球员库单元格一律不折行，改由容器横向滚动）。
+**遗留**：① **球员库 D1 读消耗的量化与治理**（v3.2.0，含本增量被挪走的那部分）；② 档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15`，而筛选与导入口径是银槽 1-12 ⇒ 落在 `PSID8-12` 的银徽章「可筛不可见」（**v3.2.1 已修**：档案页按槽位扫全 15 槽）；③ 摘要条「筛选（N）」数的是 chip 条数，位置选 12 个仍显示 1（chip 粒度合并的必然结果，**v3.2.1 裁决维持现状**）；④ 多选面板内联 `maxHeight` 会覆盖 CSS 的 `min(70vh, 480px)`，内容超高时面板可长过 480px（**v3.2.1 已修**：上限收到组件常量，CSS 那条死规则删除）；⑤ 1280 宽下表格里「Baseline Utd」「20.00 m」「2金7银」会折行（列宽所致，非本轮引入；**v3.2.1 已修**：球员库单元格一律不折行，改由容器横向滚动）。
 
-**文档**：本节 + `CHANGELOG.md` [未发布] 增量 27 节 + `UI_DESIGN.md` 球员库行 + `TECH_DESIGN.md` 的 PlayStyle 槽位口径（原写「银槽 1-7 / 金槽 13 起」，改为「15 槽 = 银 1-12 + 金 13-15」）+ `README.md` 测试数与 e2e 场景描述 + `AGENTS.md` 当前状态。
+**文档**：本节 + `CHANGELOG.md` [未发布] v3.1.1 节 + `UI_DESIGN.md` 球员库行 + `TECH_DESIGN.md` 的 PlayStyle 槽位口径（原写「银槽 1-7 / 金槽 13 起」，改为「15 槽 = 银 1-12 + 金 13-15」）+ `README.md` 测试数与 e2e 场景描述 + `AGENTS.md` 当前状态。
 
 ---
 
-## 增量 28 · 球员库 D1 读消耗的量化与治理（2026-09-22 已上线，Version `7c5b5879`）
+## v3.2.0 · 球员库 D1 读消耗的量化与治理（2026-09-22 已上线，Version `7c5b5879`）
 
 **范围**：9/21 事故（免费档 5,000,000 行/日读配额耗尽、`/api/players*` 全 500、cron 每 5 分钟失败）的根治。已确认的读放大：默认浏览一页 = 主查询 7 行 + COUNT 18,763 行（**COUNT 占 99.96%**，且每翻一页重算整表）；筛选/排序形状全表扫约 55,000 行/次。D1 按**扫描行数**计费，只有能让查询走索引并提前停下的改动才真降读量。本增量做四件事：量化、去 COUNT、缓存层治理（分级 TTL + 边缘缓存 + 写路径主动失效）、物化昂贵形状；并把全站其余读面一并普查。**不做**：不新增线上观测端点、不新增回归门禁、不动除本主题外的后端语义。
 
@@ -411,7 +467,7 @@
 - **等价性验证**（一次性脚本，`scratch/` 已 gitignore）：`scratch/eq-check.mjs` 同时 import 改前（`git show HEAD:` 的副本）与改后路由，用假 D1 抓各自**实际执行的 SQL** 比对 ⇒ **28 个列表形状的主查询 SQL 与绑定参数逐字全等**（改前每形状 2 条语句 → 改后 1 条；roster 1 条、detail 4 条不变）；`scratch/eq-count.mjs` 把 `countPlayers` 挂最小 Hono app、打同一份形状 ⇒ **28 个形状的 COUNT SQL 与参数全等**。踩坑：两个 app 实例共用模块级缓存（config 服务、guard 的 cacheStore）⇒ 两次捕获之间必须 `resetGuards()`；COUNT 判别式必须锚在语句开头，因为主查询 SELECT 列表里内联的 `CURRENT_TICKS_SQL` 自带 `COUNT(*)`；`src/worker/index.ts` 因 `src/worker/authClient.ts` 的 TS 参数属性在 Node strip-only 模式下 import 不了（`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`），故计数端点用最小 Hono app 复现。
 - **测试**：`tests/players-library.test.ts` 计数用例改走 `count17`（带 `X-Cron-Key`），新增「未配 CRON_KEY ⇒ 403（fail-closed）」与「`?key=` 连对的也不收（只认头）」；`tests/guard.test.ts` 两条缓存用例的观测量从 `total` 换成 `players.length` + `status=listed` 筛选；`web/src/pages/PlayersLibrary.test.tsx` 新增游标式分页条两例（`nextCursor` 有值 ⇒「还有更多」+ 点下一页真去取下一页且 URL 带 `cursor=`；为 null ⇒「已到末页」+ 按钮禁用且点击不发请求）；`scripts/e2e/smoke.mjs` ③ 断言 `!('total' in pj)`、④ 分页文案正则与探针替换文案同步。
 - **验收**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **38 文件 / 501 例全绿**（步骤 1 后基线 497）；`npm run build` 成功（`web/dist/assets/index-CtmI3UpL.js` 451.04 kB / gzip 142.93 kB）；`npm run test:e2e` **9/9 通过**。
-- **生产 CRON_KEY（2026-09-22，用户裁决「保留 key」后执行）**：`npx wrangler secret put CRON_KEY --name whl-club` 配好 32 字节随机密钥（值不入库，本地 `.dev.vars` 同值、已 gitignore）。`wrangler secret list` 现为 `AUTH_BIND_SECRET` + `CRON_KEY`。**副作用与验证**：配 secret 会立刻生成一个新生产版本（Source `Secret Change`，代码不变）⇒ 生产 Version 由 `3455087e` 变为 **`31c58da7-6611-4634-8c22-678a0f9e6876`**（2026-09-22T02:17:47Z，100% 流量）；生产 `POST /api/cron/tick` 无密钥实测 **403 `{"error":"cron 密钥不对"}`**（敞口已关）、`/api/health` 200；本地 8791 实测计数端点：无密钥 403、`X-Cron-Key` 头 200 `{"count":9}`、`?key=` 403（header-only 生效）。注意：**fail-closed 的计数端点要等增量 28 部署后才在生产存在**，此刻生产上并没有这个端点。
+- **生产 CRON_KEY（2026-09-22，用户裁决「保留 key」后执行）**：`npx wrangler secret put CRON_KEY --name whl-club` 配好 32 字节随机密钥（值不入库，本地 `.dev.vars` 同值、已 gitignore）。`wrangler secret list` 现为 `AUTH_BIND_SECRET` + `CRON_KEY`。**副作用与验证**：配 secret 会立刻生成一个新生产版本（Source `Secret Change`，代码不变）⇒ 生产 Version 由 `3455087e` 变为 **`31c58da7-6611-4634-8c22-678a0f9e6876`**（2026-09-22T02:17:47Z，100% 流量）；生产 `POST /api/cron/tick` 无密钥实测 **403 `{"error":"cron 密钥不对"}`**（敞口已关）、`/api/health` 200；本地 8791 实测计数端点：无密钥 403、`X-Cron-Key` 头 200 `{"count":9}`、`?key=` 403（header-only 生效）。注意：**fail-closed 的计数端点要等v3.2.0 部署后才在生产存在**，此刻生产上并没有这个端点。
 - **只读评审（code-review-skill）**：**无 🔴、结论可合入**；4 条 🟡 全部处理 —— ① 计数端点 fail-open + 读放大 ⇒ 改 fail-closed + 只认头（并实测确认生产没配 CRON_KEY）；② `?key=` 会把密钥写进访问日志 ⇒ 同上；③ 列表与计数的表达式装配重复、将来必分叉 ⇒ 抽 `buildViewExprs`；④ 新分页文案缺点击/组件测试 ⇒ 补两例。评审确认：`buildPlayerFilters` 是逐字搬移、`filterArgs` 与占位符 lockstep、`nextCursor` 判定逻辑未动、`guard.test.ts` 改写后仍是真的回归护栏（非空洞断言）、全仓无其它 `total` 消费者。
 
 **步骤 3 记录（2026-09-22）**：分级缓存 + 边缘 Cache API + 代际键 purge + 中心化挂钩。
@@ -437,9 +493,9 @@
 - **写放大（评审 🟢，未量化，记录）**：三条索引对**后续** players 写路径（球员导入/全量重导、`growth` 的 `UPDATE players`、转会改 `club_id`/`status`）有长期写放大，目前只记录了 apply 期的 54,903 行；免费档日写 10 万行，将来大批量重导前要按「写行数 × 索引数」估一次。
 
 **步骤 5 记录（2026-09-22）**：前端请求节流（`staleTime`）。分页条文案已随步骤 2 的契约变更完成，所以本步只剩节流一件事。
-- **`web/src/main.tsx`**：QueryClient 全局默认加 `staleTime: 30_000`（保留增量 15 的 `retry: false`、`refetchOnWindowFocus: false`）。理由：同一页反复挂载、切走再回来不该重发请求——每次未命中都是 D1 实读；而写路径有两条保险（前端显式改数据处仍走 `invalidateQueries`，它绕过 `staleTime` 强制重取；服务端有写路径代际键 purge）。
+- **`web/src/main.tsx`**：QueryClient 全局默认加 `staleTime: 30_000`（保留v2.1.0 的 `retry: false`、`refetchOnWindowFocus: false`）。理由：同一页反复挂载、切走再回来不该重发请求——每次未命中都是 D1 实读；而写路径有两条保险（前端显式改数据处仍走 `invalidateQueries`，它绕过 `staleTime` 强制重取；服务端有写路径代际键 purge）。
 - **`web/src/pages/PlayersLibrary.tsx`**：列表 `useInfiniteQuery` 加 `staleTime: 60_000`（query 级覆盖客户端默认）。列表每页都是实读（默认浏览 56 行/页，贵形状数千行），60s 内复用已加载的页。
-- **新测试**（`web/src/pages/PlayersLibrary.test.tsx` 新增 describe「增量 28：列表 staleTime」）：用**同一个 QueryClient**（只关 `retry`，保留默认 `gcTime`，否则卸载即回收、测的就成了 gcTime）渲染 → 卸载 → 再渲染，断言 `/api/players?` 请求次数仍是 1；另一例用假计时器（`vi.useFakeTimers({ shouldAdvanceTime: true })`）把时钟推过 60s 后重新挂载，断言这次**必须**重取——只测「新鲜期内不重取」的话，`staleTime` 误设成 `Infinity` 也能过。**做过变异验证**：删掉 `staleTime: 60_000` 第一例立刻红；改成 `Infinity` 第二例立刻红 ⇒ 两条断言都不是空洞的。
+- **新测试**（`web/src/pages/PlayersLibrary.test.tsx` 新增 describe「v3.2.0：列表 staleTime」）：用**同一个 QueryClient**（只关 `retry`，保留默认 `gcTime`，否则卸载即回收、测的就成了 gcTime）渲染 → 卸载 → 再渲染，断言 `/api/players?` 请求次数仍是 1；另一例用假计时器（`vi.useFakeTimers({ shouldAdvanceTime: true })`）把时钟推过 60s 后重新挂载，断言这次**必须**重取——只测「新鲜期内不重取」的话，`staleTime` 误设成 `Infinity` 也能过。**做过变异验证**：删掉 `staleTime: 60_000` 第一例立刻红；改成 `Infinity` 第二例立刻红 ⇒ 两条断言都不是空洞的。
 - **只读评审（code-review-skill）**：结论「可合入、无 🔴」；语义面逐条核对通过（query 级覆盖客户端默认、新鲜期重新挂载不发请求、`invalidateQueries` 绕过 `staleTime`、`refetchInterval` 不受 `staleTime` 影响、客户端 30s/60s 均短于服务端分级 TTL ⇒ 方向安全）。两条 🟡 是「既存瑕疵被本改动放大」，本步顺手修掉：
   - `web/src/pages/admin/FinancePage.tsx`：期初导入与手动记账成功后只 `setResult`，不失效别的页面——管理员随即切到流水账页会在 30s 内看不到刚入的账。两处各补 `void qc.invalidateQueries({ queryKey: ['club', 'balance'] })` 与 `{ queryKey: ['ledger'] }`（`Ledger.tsx` 的键是 `['club','balance']` 与 `['ledger', kind]`）。
   - `web/src/pages/market/MarketFreePage.tsx`：海捞申请成功后不失效 `qk.freeAgents`（同文件 `ActivateSection` 有失效先例）。补 `void qc.invalidateQueries({ queryKey: qk.freeAgents })`。
@@ -449,7 +505,7 @@
 **部署与回读（2026-09-22，步骤 0–5 一起上线；原计划在步骤 7，经用户指示提前）**：
 - 推送 `994ded9..dbf55c7`（6 个提交），`git rev-list --count origin/main..HEAD` = 0。
 - `npm run deploy`：Total Upload **532.29 KiB / gzip 126.89 KiB**（上传 18 文件、5 个已存在），绑 5 资源 + `AUTH_MODE=oidc` + `OIDC_ISSUER` + `OIDC_CLIENT_ID`（**vars 里已无 `PUBLIC_CACHE_TTL_MS`**，符合步骤 3 的口径改动），custom domain `club.whleague.win` + cron `*/5 * * * *`，CLI 回显 `Current Version ID: 4d6119f4-aa22-47ea-979b-ce9a46c6736f`。
-- `npx wrangler deployments status --name whl-club`：生产 100% 流量 Version **`91635aca-92d3-4921-8208-d9f7912aaec7`**（Created 2026-09-22T04:19:18Z）。**与增量 26/27 一样，CLI 回显与 deployments status 是两个值**（`4d6119f4-…` vs `91635aca-…`）。
+- `npx wrangler deployments status --name whl-club`：生产 100% 流量 Version **`91635aca-92d3-4921-8208-d9f7912aaec7`**（Created 2026-09-22T04:19:18Z）。**与v3.1.0/v3.1.1 一样，CLI 回显与 deployments status 是两个值**（`4d6119f4-…` vs `91635aca-…`）。
 - 最小化回读 8 个请求（`scratch/readback28.mjs`）**全部符合预期**：`/api/health` 三资源 ok；`/api/players?limit=1` **响应已无 `total`** 且带 `nextCursor`（步骤 2 的契约在生产生效）；`?sort=name`、`?sort=prestige`、`?ps=125` 全 200；`/api/cron/players-count` 无密钥 **403 `cron 密钥不对`**、带 `X-Cron-Key` **200 `count=18301`**（fail-closed 守卫在生产生效）；`/api/players/roster` 200。
 - 线上前端产物核对：live `/players` 的 HTML 引用 **`index-DZu3s6Fn.js` + `index-C87Bz2k9.css`**，与本地 `web/dist/assets/` 同名 ⇒ 部署的正是本次构建。
 - 迁移：本步无新迁移（`0029` 已在步骤 4 apply），部署后 `d1 migrations list whl-club --remote` 仍报 No migrations to apply。
@@ -472,20 +528,20 @@
 - **全量验收复测**：`node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements-after.json` ⇒ **本次仅耗 338,980 行**（步骤 1 是 118 万，因为 COUNT 已不在）。逐条「改前 → 现在」表写入报告 **§3.2**。要点：默认浏览一页 18,819 → **56**（第 5 页 18,815 → 52、初始视图 → 56、`sort=id` → 56）；0027 四条 18,785–18,824 → **22 / 22 / 58 / 61**；0029 三条 56,398 → **53 / 43 / 22**；筛选 `club_id=5` 127 → 64、`club_id=free` 17,754 → 22、`status=normal` 1,090 → 58、`growable=1` 18,683 → 95、`position=ST` 18,507 → 110、`ps=25` 18,629 → 293、`attr=sprintspeed≥80` 18,593 → 88、`ca_min=80` 18,638 → 56；名册 18,301（命中 0，治理频次）、详情 4 不变。
 - **未达标与豁免（逐条写入报告 §5.5）**：8 个全表扫排序键 56,398–56,400 → **37,635–37,637**（只降 33% = 纯去 COUNT），姓名查找 36,606 → **18,304**。豁免理由分三类：① **下一批候选**（形态允许静态索引，只差写配额，每条 18,301 行写）——`view=initial&sort=ca`（ca 被换成 `COALESCE(base_ca, ca)`，与 0027 的 `COALESCE(ca, 0)` 是两个表达式 ⇒ 索引静默失配）、`sort=uid`、`sort=ps`（15 项链，须先过表达式树深度体检）、`sort=name`（87 项链折叠）；② **不能静态索引**——`wage`/`release_fee`/`contract_type`/`source` 键在 `ct.*`，`years`/`protected` 还内联 `CURRENT_TICKS_SQL`（随赛季推进变化），`influence` 内联运行时 config 系数（系数一改索引即失效）；③ **根本用不了 B-tree**——姓名查找是 `LIKE '%sesko%'` 子串匹配，唯一出路是 FTS5 trigram（独立主题、登记），`attr:<键>` 34 键需物化子表。无索引的筛选形状（`growable=1` 95 / `position=ST` 110 / `ps=25` 293 / `attr≥80` 88）虽 >70 但未列豁免：它们没有可用索引且读量受命中行数约束，已随去 COUNT 从 1.8 万降到百级。
 - **容量推演**：免费档 5,000,000 行/日下，默认浏览一页从 **265 次/日** 升到 **89,285 次/日**；最贵的仍可触发形状（37,635 行的 `sort=name`，只在用户点表头姓名列时发生）**133 次/日**。主指标（默认浏览 ≤70、有索引形状 ≤70）全部达成。
-- **部署**：先 push 步骤 6（`28bd8ba..d4aebc2`），再 `npm run deploy` ⇒ Total Upload **533.53 KiB / gzip 127.46 KiB**、Worker Startup 2ms、绑定 5 资源 + 3 个 vars（`AUTH_MODE`/`OIDC_ISSUER`/`OIDC_CLIENT_ID`，vars 里仍无 `PUBLIC_CACHE_TTL_MS`）、custom domain + cron 不变；`No updated asset files to upload`（前端产物与步骤 5 同 hash）。CLI 回显 `7cb80a9b-c213-4ed2-b2f3-183c304808ec` vs `deployments status` 的 **Version `7c5b5879-0003-421c-9bf2-6026a4674afe`**（Created 2026-09-22T05:25:16Z）——**又一个两值对照**（增量 26 `81e93c74` vs `b83ec876`；增量 27 `ff9c2e91` vs `3455087e`；本次 `7cb80a9b` vs `7c5b5879`）。
+- **部署**：先 push 步骤 6（`28bd8ba..d4aebc2`），再 `npm run deploy` ⇒ Total Upload **533.53 KiB / gzip 127.46 KiB**、Worker Startup 2ms、绑定 5 资源 + 3 个 vars（`AUTH_MODE`/`OIDC_ISSUER`/`OIDC_CLIENT_ID`，vars 里仍无 `PUBLIC_CACHE_TTL_MS`）、custom domain + cron 不变；`No updated asset files to upload`（前端产物与步骤 5 同 hash）。CLI 回显 `7cb80a9b-c213-4ed2-b2f3-183c304808ec` vs `deployments status` 的 **Version `7c5b5879-0003-421c-9bf2-6026a4674afe`**（Created 2026-09-22T05:25:16Z）——**又一个两值对照**（v3.1.0 `81e93c74` vs `b83ec876`；v3.1.1 `ff9c2e91` vs `3455087e`；本次 `7cb80a9b` vs `7c5b5879`）。
 - **最小化回读（8 请求，全部符合预期）**：`/api/health` 200；`/api/players?limit=1` 200 且**响应已无 `total`**、`nextCursor="1"`；`?sort=prestige&limit=1` 200 `nextCursor="5~22"`；`?sort=status&limit=1` 200 `nextCursor="4~18301"`（权重 4 = free）；`/api/players/roster` 200（321,693 字节）；`/api/clubs/directory` 200；`/api/market/free-agents` **401 `未登录`**、`/api/admin/overview` **401 `未登录`**（两者都需会话，401 而非 500 ⇒ 改写后的海捞名单查询与 overview 都未破坏路由）。
 - **额度**（`scratch/quota-check.mjs`，UTC 2026-09-22）：whl-club 读 **1,993,427 行（39.9%）**、写 **73,220 行（73.2%）**（写量含 0029 的 54,915 + 0030 的 18,301）。首次运行报 `getaddrinfo ENOTFOUND api.cloudflare.com`（已知 wrangler 网络抖动）⇒ 重试即过。
 - **文档**：报告新增 §3.2（30 形状改前/改后验收表 + 容量推演）与 §5.5（未达标形状豁免清单），标题与 §一 补「治理后现状见 §3.2/§5.5」的指引。
 
 **步骤 8 记录（2026-09-22）**：文档与记忆收口（纯文档提交）。
-- **repo 五处**：`CHANGELOG.md` 顶部新增增量 28 上线条目（新增/变更/修复/验收/待办 五段，含测量机件三约束、计数端点 fail-closed、分级缓存与代际键、`0029`/`0030`、同源锁死测试、去 `total` 契约、海捞改写、`AuthApiError` 改写、三个假阳性判据、验收数字与遗留）；`README.md` 四处（测试数 38/497 → **39/539**、迁移文件 29 → **30** 且 apply 段补 `0029`/`0030` 与写配额提醒、生产状态行改为最新 Version `7c5b5879` 并补增量 28 回读结论「列表无 `total`、一次 56 行」、本地坑①补 `0029`/`0030` 的手工补法）；`AGENTS.md` 两处（生产 Version 行补 `7c5b5879` 与两值对照第三组、增量 28 条目由「进行中」改「已全流程收口」）；`UI_DESIGN.md` 翻页条改游标式文案（不显示总数）；`TECH_DESIGN.md` 三处（§17.1 索引规约补 `0029`/`0030` 与三条纪律、§17.2 第 3 条补「响应契约不带 `total`」并新增第 7/8 条——不能静态索引就换写法（含 `CROSS JOIN` 实例）、判断 D1 可用性的三个假阳性判据、附录 A 冻结范围补 `GET /api/cron/players-count`）。
-- **记忆四处**：新建 `increment28-execution-state.md`（缘起/交付链/关键机件/验收数字/遗留）；`MEMORY.md` 插入索引行并把增量 28 计划行改「已全部落地」；`club-platform-project-state.md`（frontmatter description + 新增 2026-09-22 节）；`club-platform-d1-quota.md`（description + 治理成效与三条新纪律段）。
+- **repo 五处**：`CHANGELOG.md` 顶部新增v3.2.0 上线条目（新增/变更/修复/验收/待办 五段，含测量机件三约束、计数端点 fail-closed、分级缓存与代际键、`0029`/`0030`、同源锁死测试、去 `total` 契约、海捞改写、`AuthApiError` 改写、三个假阳性判据、验收数字与遗留）；`README.md` 四处（测试数 38/497 → **39/539**、迁移文件 29 → **30** 且 apply 段补 `0029`/`0030` 与写配额提醒、生产状态行改为最新 Version `7c5b5879` 并补v3.2.0 回读结论「列表无 `total`、一次 56 行」、本地坑①补 `0029`/`0030` 的手工补法）；`AGENTS.md` 两处（生产 Version 行补 `7c5b5879` 与两值对照第三组、v3.2.0 条目由「进行中」改「已全流程收口」）；`UI_DESIGN.md` 翻页条改游标式文案（不显示总数）；`TECH_DESIGN.md` 三处（§17.1 索引规约补 `0029`/`0030` 与三条纪律、§17.2 第 3 条补「响应契约不带 `total`」并新增第 7/8 条——不能静态索引就换写法（含 `CROSS JOIN` 实例）、判断 D1 可用性的三个假阳性判据、附录 A 冻结范围补 `GET /api/cron/players-count`）。
+- **记忆四处**：新建 `increment28-execution-state.md`（缘起/交付链/关键机件/验收数字/遗留）；`MEMORY.md` 插入索引行并把v3.2.0 计划行改「已全部落地」；`club-platform-project-state.md`（frontmatter description + 新增 2026-09-22 节）；`club-platform-d1-quota.md`（description + 治理成效与三条新纪律段）。
 
 
 
-## 增量 29 · 球员库 UI 缺陷收口——档案页 15 槽徽章 + 多选面板高度上限 + 表格不折行（2026-09-22 已上线，Version `627508e5`）
+## v3.2.1 · 球员库 UI 缺陷收口——档案页 15 槽徽章 + 多选面板高度上限 + 表格不折行（2026-09-22 已上线，Version `627508e5`）
 
-**缘起**：增量 27 遗留的五条 UI 瑕疵里，用户 m12257 指令「**建索引先搁置，因为今日写限额不足；海捞池后续会有新调整；球员库 UI 小瑕疵可以现在修**」⇒ 本增量只修球员库 UI 瑕疵，索引与海捞池契约都不动。
+**缘起**：v3.1.1 遗留的五条 UI 瑕疵里，用户 m12257 指令「**建索引先搁置，因为今日写限额不足；海捞池后续会有新调整；球员库 UI 小瑕疵可以现在修**」⇒ 本增量只修球员库 UI 瑕疵，索引与海捞池契约都不动。
 
 **范围**：三处真实缺陷 + 两处口径同步。① **档案页徽章槽位**：`web/src/pages/Player.tsx:336` 硬编码 `['PSID1'…'PSID7','PSID13','PSID14','PSID15']` + `i < 7 ? i + 1 : 13 + (i - 7)` 推槽号，而筛选/导入/后端口径是银槽 `PSID1-12` + 金槽 `PSID13-15`（`src/core/fc26.ts` 的 `PS_SLOT_COUNT = 15` / `PS_SILVER_SLOT_COUNT = 12`）⇒ 落在 `PSID8-12` 的银徽章「可筛不可见」（生产槽位分布实测：PSID8 = 3 人、PSID9-12 = 0 人，今天最多影响 3 人，但是真口径缺陷；列表徽章列读的是台账列 `players.badges_silver/badges_gold`，所以会出现「列表 8 银、档案页只列 7 个」）。② **多选面板高度上限**：`web/src/components/MultiSelect.tsx` 的 `place()` 每次把 `maxHeight: Math.max(160, 可用空间)` 写进内联样式、无 480px/70vh 上限 ⇒ `web/src/styles.css` 的 `.multiselect-panel { max-height: min(70vh, 480px) }` 是死规则（1200px 高窗口、触发器靠上时面板会被拉到约 1100px）。③ **表格折行**：`styles.css` 的 `th` 有 `white-space: nowrap`、**`td` 没有**，默认 12 列（FIXED 10 + 默认 `DEFAULT_COLS = ['marketValue','badges']`）挤在约 980px ⇒「Baseline Utd」「20.00 m」按空格断、「2金7银」按 CJK 任意断。**不做**：不建索引（用户指令搁置）、不动海捞池契约、不写生产数据、不动 `.admin-shell` 的 760px 断点、不改 `badge_cap_silver` 口径、不跑生产 API 回读。
 
@@ -525,25 +581,25 @@
 - 验收：typecheck 清；`npx vitest run` **39 文件 / 550 例全绿**；`npm run build` 成功（`web/dist/assets/index-C_n2o0KE.js` 451.12 kB / gzip 143.00 kB + `index-D-qmdoLZ.css` 27.62 kB / gzip 6.36 kB）；`npm run test:e2e` **9/9**。
 
 **步骤 4 记录（2026-09-22，纯文档提交）**：文档与记忆收口。
-- `ROADMAP.md`：新增本节；并把增量 27 遗留五条**逐条改口径**（② `PSID8-12` 可筛不可见 → **增量 29 已修**、③ 摘要条「筛选（N）」→ **增量 29 裁决维持现状**、④ 面板 `maxHeight` 顶掉 CSS 上限 → **已修**、⑤ 1280 宽折行 → **已修**；① D1 读消耗那条第 282 行早前已改为「增量 28」）。
-- `TECH_DESIGN.md`（徽章闭环决策表第 10 条）：末尾「已知渲染口径差：档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15` ⇒ `PSID8-12` 可筛不可见」整句替换为「**渲染口径（增量 29 收口）**：档案页与列表都按槽位渲染**全 15 槽**……与筛选/导入同源（`PS_SLOT_KEYS` 由 `PS_SLOT_COUNT` 派生）；槽号是 **1 起**（列表 `psNames` 的数组下标须 `+1` 再传 `playstyleIsGold`）。徽章墙的「🥈 x/15」那个 **15 是台账计数上限** `badge_cap_silver`（config，DDL CHECK 0..15），与「12 个银槽」是两个口径，别混」—— 这处正是只读评审 🟡2 指出的三处旧口径之一。
-- `UI_DESIGN.md`：球员详情行补「按槽位渲染全 15 槽（银 `PSID1-12` + 金 `PSID13-15`），只渲染有值的槽、不给空槽占位」；球员库行末尾的版本注记改为「（增量 26 改版、增量 27 收口、增量 29 补表格与槽位口径）」并补两句：**单元格一律不折行**（列宽不够改由 `.table-wrap` 横向滚动，实测表格最小宽 876px vs 桌面容器 854px）、**多选面板高度上限由组件守**（480px / 70vh）。
-- `CHANGELOG.md`：顶部新增 `## [未发布] · 增量 29 …（2026-09-22 本地完成，待部署）`（新增/变更/修复/验收/待办 五段）；并把增量 27 条目里那句「（既存问题，本增量不修）」改为「（既存问题，增量 27 未修；**增量 29 已修**）」。
-- `AGENTS.md`：当前状态补增量 29 一行（本地完成、4 commit `e3b5033`/`da875f1`/`b8739d5`/`fa29934`、未推送未部署、5 项裁决与两个顺带修的 bug）。
-- 记忆目录（`~/.zcode/cli/memories/projects/whl-club-operations-platform-59a36e78dc8d8fb3/memory/`）：新建 `increment29-plan.md`（评审指出的缺失：5 项裁决 + 5 步 + 边界 + 验收口径）与 `increment29-execution-state.md`（缘起/交付链/三处缺陷根因/三处修法/实测数字/两个顺带修的 bug/遗留）；`MEMORY.md` 顶部插两行索引；`club-platform-project-state.md` 的 frontmatter description 追加增量 29 段并新增「2026-09-22：增量 29」节。
+- `ROADMAP.md`：新增本节；并把v3.1.1 遗留五条**逐条改口径**（② `PSID8-12` 可筛不可见 → **v3.2.1 已修**、③ 摘要条「筛选（N）」→ **v3.2.1 裁决维持现状**、④ 面板 `maxHeight` 顶掉 CSS 上限 → **已修**、⑤ 1280 宽折行 → **已修**；① D1 读消耗那条第 282 行早前已改为「v3.2.0」）。
+- `TECH_DESIGN.md`（徽章闭环决策表第 10 条）：末尾「已知渲染口径差：档案页只渲染银槽 `PSID1-7` 与金槽 `PSID13-15` ⇒ `PSID8-12` 可筛不可见」整句替换为「**渲染口径（v3.2.1 收口）**：档案页与列表都按槽位渲染**全 15 槽**……与筛选/导入同源（`PS_SLOT_KEYS` 由 `PS_SLOT_COUNT` 派生）；槽号是 **1 起**（列表 `psNames` 的数组下标须 `+1` 再传 `playstyleIsGold`）。徽章墙的「🥈 x/15」那个 **15 是台账计数上限** `badge_cap_silver`（config，DDL CHECK 0..15），与「12 个银槽」是两个口径，别混」—— 这处正是只读评审 🟡2 指出的三处旧口径之一。
+- `UI_DESIGN.md`：球员详情行补「按槽位渲染全 15 槽（银 `PSID1-12` + 金 `PSID13-15`），只渲染有值的槽、不给空槽占位」；球员库行末尾的版本注记改为「（v3.1.0 改版、v3.1.1 收口、v3.2.1 补表格与槽位口径）」并补两句：**单元格一律不折行**（列宽不够改由 `.table-wrap` 横向滚动，实测表格最小宽 876px vs 桌面容器 854px）、**多选面板高度上限由组件守**（480px / 70vh）。
+- `CHANGELOG.md`：顶部新增 `## [未发布] · v3.2.1 …（2026-09-22 本地完成，待部署）`（新增/变更/修复/验收/待办 五段）；并把v3.1.1 条目里那句「（既存问题，本增量不修）」改为「（既存问题，v3.1.1 未修；**v3.2.1 已修**）」。
+- `AGENTS.md`：当前状态补v3.2.1 一行（本地完成、4 commit `e3b5033`/`da875f1`/`b8739d5`/`fa29934`、未推送未部署、5 项裁决与两个顺带修的 bug）。
+- 记忆目录（`~/.zcode/cli/memories/projects/whl-club-operations-platform-59a36e78dc8d8fb3/memory/`）：新建 `increment29-plan.md`（评审指出的缺失：5 项裁决 + 5 步 + 边界 + 验收口径）与 `increment29-execution-state.md`（缘起/交付链/三处缺陷根因/三处修法/实测数字/两个顺带修的 bug/遗留）；`MEMORY.md` 顶部插两行索引；`club-platform-project-state.md` 的 frontmatter description 追加v3.2.1 段并新增「2026-09-22：v3.2.1」节。
 - 验收：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 550 例全绿**（纯文档改动不影响）；`git status --short` 仅剩本次 5 个文档文件。
 
 **步骤 5 记录（2026-09-22）**：推送 + 部署 + 前端产物核对（本增量无后端改动，**刻意不跑生产 API 回读**以省 D1 读额度；当日写额度已用 73.2%）。
 - `git push origin main` ⇒ `76aaeb9..91bc2d3`（5 个提交：`e3b5033`/`da875f1`/`b8739d5`/`fa29934`/`91bc2d3`），`git rev-list --count origin/main..HEAD` = 0。
-- `npm run deploy` **第一次失败**：`Unable to resolve Cloudflare's API hostname (api.cloudflare.com or dash.cloudflare.com)`（既知的 wrangler → CF API DNS 抖动，与增量 27/28 同源）；**重试一次即成功** ⇒ Total Upload **533.62 KiB / gzip 127.47 KiB**、`Uploaded 19 files (4 already uploaded)`、绑 5 资源 + vars 不变、custom domain + cron 不变。
-- Version 口径：`wrangler deploy` CLI 回显 Current Version ID **`627508e5-f7c6-4e6d-90a2-5f95a82466bb`**；`wrangler deployments status --name whl-club` 的 Version 也是 **`627508e5-…`**（Created 2026-09-22T07:02:52Z，Author `p_h_han@foxmail.com`）—— **增量 26/27/28 每次都出现的「CLI 回显 ≠ deployments status」两值现象，本增量首次不成立**（上一版仍为 `7c5b5879-…`）。
-- 线上核对（不消耗 D1 读）：`GET https://club.whleague.win/players` 的 HTML 引用 `assets/index-C_n2o0KE.js` + `assets/index-D-qmdoLZ.css`，与本地 `web/dist/assets/` **同名** ⇒ 增量 29 前端已确认上线。
+- `npm run deploy` **第一次失败**：`Unable to resolve Cloudflare's API hostname (api.cloudflare.com or dash.cloudflare.com)`（既知的 wrangler → CF API DNS 抖动，与v3.1.1/v3.2.0 同源）；**重试一次即成功** ⇒ Total Upload **533.62 KiB / gzip 127.47 KiB**、`Uploaded 19 files (4 already uploaded)`、绑 5 资源 + vars 不变、custom domain + cron 不变。
+- Version 口径：`wrangler deploy` CLI 回显 Current Version ID **`627508e5-f7c6-4e6d-90a2-5f95a82466bb`**；`wrangler deployments status --name whl-club` 的 Version 也是 **`627508e5-…`**（Created 2026-09-22T07:02:52Z，Author `p_h_han@foxmail.com`）—— **v3.1.0/v3.1.1/v3.2.0 每次都出现的「CLI 回显 ≠ deployments status」两值现象，本增量首次不成立**（上一版仍为 `7c5b5879-…`）。
+- 线上核对（不消耗 D1 读）：`GET https://club.whleague.win/players` 的 HTML 引用 `assets/index-C_n2o0KE.js` + `assets/index-D-qmdoLZ.css`，与本地 `web/dist/assets/` **同名** ⇒ v3.2.1 前端已确认上线。
 - 验收（步骤 3 后已跑，纯文档改动不影响）：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **39 文件 / 550 例全绿**；`npm run build` 成功；`npm run test:e2e` **9/9**。
 
 
 ---
 
-## 增量 30 · 球员面板专项整改——术语三改 + 合同卷宗对齐 + 六维图与 PlayStyles 归位 + 徽章×PlayStyle 合并 + 转会记录页签（2026-09-22 已上线，Version `d266036d`）
+## v3.3.0 · 球员面板专项整改——术语三改 + 合同卷宗对齐 + 六维图与 PlayStyles 归位 + 徽章×PlayStyle 合并 + 转会记录页签（2026-09-22 已上线，Version `d266036d`）
 
 **缘起**：用户 m00004 一次下达六项球员面板整改（术语口径、合同卷宗排版、属性文案、布局归位、徽章与 PlayStyle 合并、转会记录功能）。前四项是 UI/文案，后两项要动数据层与端点。
 
@@ -560,7 +616,7 @@
 
 **第 6 项**：`GET /api/players/:id/transfers`（只列 `status='completed'`，LEFT JOIN clubs 出双方队名，最近 50 条）+ 球员详情第 4 页签「转会记录」；`TRANSFER_TYPE_LABEL` 从 `web/src/pages/admin/MarketPage.tsx` 抽到 `web/src/lib/ref.ts` 共用。
 
-**裁决**：① 术语「摘要条 chip 与表格列名仍叫『经纪人』」沿用增量 27 裁决（不动）；② 主题名「复古档案室」、容器名「档案卡 `.dossier`」、「主场/球场档案」不是本轮口径对象；③ 上限口径**统一为 12 银**（此前 `TECH_DESIGN.md` 写「15 与 12 是两个口径，别混」，本增量改写）；④ 明细行 `psid` **存基础 ID**、金徽由 `kind` 表示（读出来用 `playstyleIdOf` 还原）；⑤ 中国计划发放**同时加台账**，离队回收时同步减。
+**裁决**：① 术语「摘要条 chip 与表格列名仍叫『经纪人』」沿用v3.1.1 裁决（不动）；② 主题名「复古档案室」、容器名「档案卡 `.dossier`」、「主场/球场档案」不是本轮口径对象；③ 上限口径**统一为 12 银**（此前 `TECH_DESIGN.md` 写「15 与 12 是两个口径，别混」，本增量改写）；④ 明细行 `psid` **存基础 ID**、金徽由 `kind` 表示（读出来用 `playstyleIdOf` 还原）；⑤ 中国计划发放**同时加台账**，离队回收时同步减。
 
 **边界（计划期，不做）**：不部署、不 push、不 apply 生产迁移、不重导入球员库、不重建 players 表、不加依赖、不做顺手重构、不改 DDL CHECK(0..15)、不 clamp 历史台账。**注**：前三项为计划期边界，已于步骤 9 按用户明确指令（「推送部署」）执行。
 
@@ -576,9 +632,9 @@
 - 🟡 **真缺陷（已修）**：`src/worker/transfers.ts` 的 china 明细回收原先只 gate 在 `!amendment`，于是**海捞真自由身**（`type='free_agent'` 且 `from_club_id IS NULL`）会被当成离队 —— 签入即删掉他的 china 明细并扣台账。改为 `amendment || transfer.from_club_id === null ? 0 : (COUNT…)`（从 CPU 队摘人 `from_club_id` 不为空，照旧回收）。回归测试 `tests/bypass-routes.test.ts` 新增「海捞真自由身是签入不是离队」，**变异验证**（去掉守卫）⇒ 两行 china 明细被删、断言变红。
 - 🟢 **记录不改**（遗留）：① 台账可能 > 12（历史 cap 15 遗留），徽章墙会显示「🥈 15/12」（迁移注释已声明历史台账不 clamp）；② `Player.tsx` 徽章墙分母 12/3 是硬编码，改 config 不跟随（增量前也是硬编码）；③ 方案卡 `disabled={busy || (armedPlan === i && !picksReady)}` 让 `choosePlan` 里「先选满再确认」那条 toast 在 UI 上不可达（防御性死代码）；④ 双击发放/升级会撞 UNIQUE 让第二个请求 500，不会写脏数据；⑤ `resolvePlaystylePicks` 对「0 徽章方案」直接返回 `[]`，多传的 picks 被静默忽略（无状态变化）。
 
-**步骤 8 记录（2026-09-22，纯文档提交）**：文档与记忆收口 —— `TECH_DESIGN.md`（决策表第 10 条把「15 与 12 是两个口径，别混」改写为**已统一**并补发放/回收口径、`player_playstyles` DDL 入 §5 建表清单、§10.2/§10.4 补 picks 与明细折算、§5.4 upsert 幂等段补明细列、config 表 `badge_cap_silver` 改 12、端点表加 2 行）；`UI_DESIGN.md` 球员详情行改为四页签 + 左栏雷达卡 + PS 卡嵌网格 + 徽章墙 x/12；`ROADMAP.md` 本节；`CHANGELOG.md` 顶部新增增量 30 条目；`AGENTS.md` 当前状态补一行；记忆目录新建 `increment30-plan.md` / `increment30-execution-state.md`。
+**步骤 8 记录（2026-09-22，纯文档提交）**：文档与记忆收口 —— `TECH_DESIGN.md`（决策表第 10 条把「15 与 12 是两个口径，别混」改写为**已统一**并补发放/回收口径、`player_playstyles` DDL 入 §5 建表清单、§10.2/§10.4 补 picks 与明细折算、§5.4 upsert 幂等段补明细列、config 表 `badge_cap_silver` 改 12、端点表加 2 行）；`UI_DESIGN.md` 球员详情行改为四页签 + 左栏雷达卡 + PS 卡嵌网格 + 徽章墙 x/12；`ROADMAP.md` 本节；`CHANGELOG.md` 顶部新增v3.3.0 条目；`AGENTS.md` 当前状态补一行；记忆目录新建 `increment30-plan.md` / `increment30-execution-state.md`。
 
-**验收（步骤 1–7 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **40 文件 / 573 例全绿**（增量 29 基线 39/550 ⇒ core +12、worker 测试改 2 加 4 + 中国计划 3 + 折算 1 + 回收 1 + 海捞回归 1）；`npm run build` 成功（`web/dist/assets/index-C56W4cF9.js` 457.55 kB / gzip 145.20 kB）；变异验证 4 处（`flatMap` 类改动、槽号、折算 SQL、海捞守卫）均能变红。
+**验收（步骤 1–7 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **40 文件 / 573 例全绿**（v3.2.1 基线 39/550 ⇒ core +12、worker 测试改 2 加 4 + 中国计划 3 + 折算 1 + 回收 1 + 海捞回归 1）；`npm run build` 成功（`web/dist/assets/index-C56W4cF9.js` 457.55 kB / gzip 145.20 kB）；变异验证 4 处（`flatMap` 类改动、槽号、折算 SQL、海捞守卫）均能变红。
 
 **步骤 9 记录（2026-09-22，推送 + 部署 + 生产迁移）**：用户明确下令「推送部署」后执行。
 - 推送：`git push origin main` ⇒ `5394268..da7a1f6`（8 个提交），`git rev-list --left-right --count origin/main...HEAD` = `0 0`。
@@ -590,11 +646,11 @@
 **待办**：① 上述 5 条 🟢 遗留；② PlayStyle 图标资产包仍待供给（缺图降级 🥇🥈）；③ 生产库 `player_playstyles` 目前 0 行 —— 首次真实发放（升级选徽章方案 / 中国计划）建议人工跟一单核对明细落槽。
 
 
-## 增量 31 · 球队页（公开列表 + 登录详情 + 自家队中心合并）
+## v3.4.0 · 球队页（公开列表 + 登录详情 + 自家队中心合并）
 
 **状态**：2026-09-22 完成步骤 0–12（含 11a 结构分析整改与 11b 样式整改），**已推送并部署上线**（推送 `466df81..d759b86` 16 个提交 + `d759b86..2ad239b` 1 个；生产 Version `7a178d81-dccc-4696-a7d7-7d8c61eaa683` → `64020454-405c-479a-9a62-8197444f4f52` / `adb3a5ae-dbc5-4648-bf62-383e1108923d`）。**本增量不含迁移**（0032 在步骤 1 被裁掉），故推送无生产 DDL 耦合；生产迁移仍到 0031。
 
-**缘起**：用户 m12793 下达「新增球队页（列表 + 详情）」，并特别要求注意性能、省 D1 额度。经脑暴发散 → 一问一题裁决（Q1–Q17）→ 技术路径与用户操作动线 → 计划。计划稿 v1 被拒后修订重交（编号因增量 30 已占用改为 31，迁移号改 0032，后又在步骤 1 裁掉）。
+**缘起**：用户 m12793 下达「新增球队页（列表 + 详情）」，并特别要求注意性能、省 D1 额度。经脑暴发散 → 一问一题裁决（Q1–Q17）→ 技术路径与用户操作动线 → 计划。计划稿 v1 被拒后修订重交（编号因v3.3.0 已占用改为 31，迁移号改 0032，后又在步骤 1 裁掉）。
 
 **范围与交付**：公开 **`/clubs`** 列表页；需登录的 **`/clubs/:id`** 详情页；**`/club` 改重定向**到自家队详情，原「我的球队中心」（`web/src/pages/Club.tsx`，897 行）整体搬进详情页教练区块；入口四处；新增 `GET /api/clubs`、`GET /api/clubs/:id`（+ `GET /api/clubs/:id/standing`）、`GET /api/media/*` 三个端点。
 **不做**：改球员库或市场读面契约、国籍分布、详情页财政与主场组、改 `clubFormPts` 代码、引图表库、写生产数据、动 `.admin-shell` 断点。
@@ -605,7 +661,7 @@
 - **③ `GET /api/media/*`（公开）** —— 镜像比赛系统的公开媒体路由，**只读不写**，key 白名单 `/^(team|tournament)\/\d+\//` + 长度 ≤1024；边缘缓存（`caches.default`，jsdom/node 无 `caches` 时静默旁路）命中即返，`immutable` + ETag + `waitUntil(cache.put)`；残缺百分号编码不接住就是匿名 500，已 catch 回 `{error:'not_found'}`。**本路由不碰任何 D1**，是球队页里唯一的零 D1 读面。走本域而非直连比赛系统的理由：R2 桶 `whl-media` 已绑定本 Worker（`MEDIA`），同源取图省一次跨站请求与 DNS，也无 CORS / 混内容问题。**不加 `assertPublicRate`**：零 D1 读且命中边缘缓存后连 R2 都不打，而限流是 60/min/IP，一屏 20 个队徽会被正常浏览打成 429（比赛系统同样不限流）。
 - **前端** —— `web/src/pages/Clubs.tsx`（按顶级/次级/未定级三段出卡片，生产 20 队一屏放得下 ⇒ 无筛选无分页；整卡链 `/clubs/:id`；空段整段不渲染）；`web/src/pages/ClubDetail.tsx`（三组结构分析，每组「三格主指标 + 一行语义明细」，见下方步骤 11a）；`web/src/components/TeamLogo.tsx`（有 logoKey 出 `<img>` 走 `mediaUrl()`，否则按队名哈希出首字色块，同队三处同色）；路由 `/clubs` 进公开组、`/clubs/:id` 进 `RequireUser` 组、`/club` 改 `<Navigate>`。
 
-**裁决（Q1–Q17）**：列表公开 / 详情需登录；列表 4 指标（阵容人数拆一线队+训练营、平均 CA、总身价、工资总额）；按分级分段卡片；详情三组（阵容/运营/战绩），**不含财政与主场**；统一 `/clubs/:id` 且 `/club` 重定向；分级批量派生、未定级归第三段；队徽参照 tour 平台、镜像其 media 路由；入口四处；CPU 队显示带标记；训练营 = `players.status='trainee'`；结构分析全要，**年龄用 CSS 自绘柱状图不引图表库**；教练区块仅「已登录且绑定该队」渲染；**Q17 = 球队页 URL id 一律用平台库 `clubs.id`**（长期有效，已写进 `AGENTS.md`）。术语沿用增量 30：非成长 / 经纪人性格 / 合同 / 来源球队。
+**裁决（Q1–Q17）**：列表公开 / 详情需登录；列表 4 指标（阵容人数拆一线队+训练营、平均 CA、总身价、工资总额）；按分级分段卡片；详情三组（阵容/运营/战绩），**不含财政与主场**；统一 `/clubs/:id` 且 `/club` 重定向；分级批量派生、未定级归第三段；队徽参照 tour 平台、镜像其 media 路由；入口四处；CPU 队显示带标记；训练营 = `players.status='trainee'`；结构分析全要，**年龄用 CSS 自绘柱状图不引图表库**；教练区块仅「已登录且绑定该队」渲染；**Q17 = 球队页 URL id 一律用平台库 `clubs.id`**（长期有效，已写进 `AGENTS.md`）。术语沿用v3.3.0：非成长 / 经纪人性格 / 合同 / 来源球队。
 
 **分步**（每步一 commit + code-review-skill 过审）：0 生产只读事实核对 + 计划落盘（计划在 `.zcode/plans/plan-sess_4cad139a-6977-4a40-9531-f7cf24c68499.md`，`.zcode/` 已 gitignore）→ 1 读量实测（`70dc811`）→ 2 媒体路由（`e0411de`）→ 3 列表端点（`5dbfe41`）→ 4 `TeamLogo` + `/clubs` 列表页（`a84c748`）→ 5 入口四处（`779ee6b`）→ 6 详情端点 + 读量证据（`5b90031` + `32068be`）→ 7 详情页（`00092b4`）→ 8 教练区块迁移 + `/club` 重定向（`57e68a6`）→ 9 `clubFormPts` 只读核对（`829063f`）→ 10 文档收口（本节）。另有 `545ad90` 把 Q17 写进 `AGENTS.md`。
 
@@ -644,22 +700,22 @@
 - **未采纳**：运营组左列 summary 下方仍有约 150px 卡片留白（右列效力年限图更高）；改成居中/拉伸都更难看，判定为可接受的留白。
 
 **步骤 12 记录（推送 + 部署 + 最小化回读）**：
-- **推送**：用户 m15490「先推送部署再说」下令后执行。`git push origin main` → `466df81..d759b86`（增量 31 的 16 个提交），随后 totalValue 修复再推 `d759b86..2ad239b`。推送前用 `git diff --stat origin/main..HEAD -- src/db/migrations` 确认为空 ⇒ 零迁移。**本机沙箱会拦网络**：`npx wrangler ...` 报 `Unable to resolve Cloudflare's API hostname`，需 `dangerouslyDisableSandbox` **并加 `NODE_OPTIONS=--dns-result-order=ipv4first`**（`nslookup` 先回 IPv6，Node 默认 verbatim 顺序导致解析失败）。
+- **推送**：用户 m15490「先推送部署再说」下令后执行。`git push origin main` → `466df81..d759b86`（v3.4.0 的 16 个提交），随后 totalValue 修复再推 `d759b86..2ad239b`。推送前用 `git diff --stat origin/main..HEAD -- src/db/migrations` 确认为空 ⇒ 零迁移。**本机沙箱会拦网络**：`npx wrangler ...` 报 `Unable to resolve Cloudflare's API hostname`，需 `dangerouslyDisableSandbox` **并加 `NODE_OPTIONS=--dns-result-order=ipv4first`**（`nslookup` 先回 IPv6，Node 默认 verbatim 顺序导致解析失败）。
 - **部署**：`NODE_OPTIONS=--dns-result-order=ipv4first npm run deploy`（= `build && wrangler deploy`），上传 19 个资产、Total Upload 567.39 KiB / gzip 136.51 KiB。生产迁移查得 **「✅ No migrations to apply!」⇒ 已在 0031**（AGENTS.md 里「生产原在 0030」的说法已过时）。生产 vars 含 `TOUR_API_BASE="https://whleague.win"`（排名代理基址已配好）。
 - **回读（2026-09-22）**：`https://club.whleague.win/` 200，首页资产 `index-DdVd-lyb.js` + `index-BT5YAIcz.css` 与本地 build 逐字一致；匿名 `GET /api/clubs/1` → **401**（符合裁决 Q1）；`GET /api/clubs` → 200、**20 队**、`logoKey` 20/20 非空、`squad.senior` 23–37、`avgCa` 77.6–83.4、`totalWage` 有真实值（如利物浦 73.55）；4 支 CPU 队（131681 米兰 / 112172 莱比锡 / 241 巴萨 / 10 曼城）`totalWage` 与 `totalValue` 均 0（无合同，符合预期）。
 - **回读抓到一个生产可见缺陷（已修，commit `2ad239b`）**：20 队 `totalValue` **全为 0**（含 31 人、avgCa 80.7 的佛罗伦萨），而 `totalWage` 有真实值 ⇒ 列表页第 3 项指标「总身价」全站显示 `0.00 m`。生产只读实测根因：`SELECT COUNT(*) AS total, SUM(CASE WHEN market_value IS NULL THEN 1 ELSE 0 END) AS nulls, SUM(market_value) FROM players` → `{"total":18301,"nulls":18301,"zeros":0,"sumv":0}` ⇒ **`players.market_value` 生产 18,301 行全 NULL**（该列是运营列，`src/core/import.ts:3` 明写导入「绝不触碰运营列（status/contracts/badges/growth/market_value/agent_tier）」，只有 admin PATCH 会写）。缺陷本身在聚合口径：`CLUB_SQUAD_AGG_SQL` 写 `SUM(COALESCE(p.market_value, 0))`，把「没人录过」压成 0 这个具体的假话。**球员库早就处理对了**（`web/src/pages/PlayersLibrary.tsx:58` 的 `money(x: number | null)` 对 null 回 `—`）。修法：聚合改 `SUM(p.market_value)`（全 NULL 时 SUM 出 NULL）、两处 `totalValue` 类型改 `number | null` 并 `?? null`、详情页改「全队都没录身价 ⇒ null」、前端 `money(null)` 回 `—`；**`totalWage` 口径不变**（CPU 队无合同 ⇒ 0 是真话）。测试：`tests/clubs-list.test.ts` 新增「无身价队」（2 人有合同无 market_value ⇒ `totalValue` null / `totalWage` 5）+ 空队由 `toBe(0)` 改 `toBeNull()`，`tests/clubs-detail.test.ts` 新增同类用例，`web/src/pages/Clubs.test.tsx` 新增 `metric(card,label)` 辅助断言 CPU 卡「总身价 `—` / 工资总额 `0.00 m`」，`web/src/pages/ClubDetail.test.tsx` 新增「全队都没录身价时显示 —」，e2e ⑨ 新增巴萨卡「总身价 = `—`」断言。变异验证两条定向变红（后端改回 `COALESCE`、前端 `money(club.totalValue ?? 0)`）后复绿。重新部署后生产复验：20 队 `totalValue` 全 `null`，首页资产 `index-C7pOcE6p.js` 与本地逐字一致。
-- **观察到的版本记录怪象（非本增量引入）**：`wrangler deployments list` 显示每次 `wrangler deploy` 会落**两条**部署记录（增量 31 为 `67938a92-…` 17:42:21 与 `7a178d81-…` 17:42:22；修复那次为 `64020454-…` 17:58:08 与 `adb3a5ae-…` 17:58:17，CLI 回显的是前者、`deployments status` 的当前版是后者）。两次产物一致（线上资产 hash 与本地 build 相同），故不影响行为。
+- **观察到的版本记录怪象（非本增量引入）**：`wrangler deployments list` 显示每次 `wrangler deploy` 会落**两条**部署记录（v3.4.0 为 `67938a92-…` 17:42:21 与 `7a178d81-…` 17:42:22；修复那次为 `64020454-…` 17:58:08 与 `adb3a5ae-…` 17:58:17，CLI 回显的是前者、`deployments status` 的当前版是后者）。两次产物一致（线上资产 hash 与本地 build 相同），故不影响行为。
 
-**验收（步骤 1–12 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **46 文件 / 642 例全绿**（增量 30 基线 40/573 ⇒ 本增量 +6 文件 / +69 例）；`npm run build` 成功（`web/dist/assets/index-C7pOcE6p.js` **474.57 kB / gzip 149.44 kB**、`index-BT5YAIcz.css` 34.57 kB / gzip 7.58 kB）；`npm run test:e2e` **11/11 通过**（三视口；新增球队页两场景）。变异验证多处（教练区块身份判定、`/club` 两个 Navigate 目标、`failed` 分支、`平均成长空间`、积分榜 TTL、CA 条分母、直方图归一、图表溢出、后端 `COALESCE`、前端 `money(totalValue ?? 0)`）均能定向变红。
+**验收（步骤 1–12 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **46 文件 / 642 例全绿**（v3.3.0 基线 40/573 ⇒ 本增量 +6 文件 / +69 例）；`npm run build` 成功（`web/dist/assets/index-C7pOcE6p.js` **474.57 kB / gzip 149.44 kB**、`index-BT5YAIcz.css` 34.57 kB / gzip 7.58 kB）；`npm run test:e2e` **11/11 通过**（三视口；新增球队页两场景）。变异验证多处（教练区块身份判定、`/club` 两个 Navigate 目标、`failed` 分支、`平均成长空间`、积分榜 TTL、CA 条分母、直方图归一、图表溢出、后端 `COALESCE`、前端 `money(totalValue ?? 0)`）均能定向变红。
 
 **待办**：① `players.market_value` 生产 18,301 行全 NULL 且无录入入口 ⇒ 球队页「总身价」指标全站恒显示 `—`（产品级待决：运营补录 / 给派生公式 / 撤掉该指标，见步骤 12）；② `CoachPanel`（874 行）搬迁后无专属组件测试，只有经详情页的 2 条冒烟断言（搬迁前就存在的覆盖薄弱）；③ `clubFormPts` 的 id 口径可择机改成显式映射（见步骤 9）；④ 顶栏「球队中心」tab 仍指向 `/club`，重定向后高亮落在「球队」tab —— 已接受（给 TopBar 加 `useMyClub()` 会让每个登录用户每次加载多打一次 `/api/me/club`，与省 D1 额度主线相悖）；⑤ 年龄档界不再包含当季 `age_cap`（步骤 11a 的已知代价，等宽箱优先）；⑥ 本机 e2e 的球队页读端点仍是打桩（本地 TOUR_DB `team` 表 schema 陈旧），若将来本地库补到与生产同形，可撤桩改成真端到端；⑦ 运营组左列留白约 150px（步骤 11b 已知取舍）。
 
 
-## 增量 32 · 球员名口径改造——FC26 派生显示名 + 球衣号归属转移 + 档案页按 fc_id 寻址
+## v4.0.0 · 球员名口径改造——FC26 派生显示名 + 球衣号归属转移 + 档案页按 fc_id 寻址
 
-**状态**：2026-09-23 完成步骤 1–8（8 个提交），本地全绿（typecheck 三份 / vitest **47 文件 659 例** / build / e2e **11/11**）。~~**未推送、未部署**（生产迁移仍到 0031），等令~~ —— **已订正**：本增量代码随增量 34 于 2026-09-23 推送并部署（`2ad239b..5ae73e8`，生产迁移 0032/0033 同轮 apply），生产数据由增量 35 落库。跨仓部分（赛事平台转只读 + 阵容同步）另立增量 33。
+**状态**：2026-09-23 完成步骤 1–8（8 个提交），本地全绿（typecheck 三份 / vitest **47 文件 659 例** / build / e2e **11/11**）。~~**未推送、未部署**（生产迁移仍到 0031），等令~~ —— **已订正**：本增量代码随v5.0.1 于 2026-09-23 推送并部署（`2ad239b..5ae73e8`，生产迁移 0032/0033 同轮 apply），生产数据由v6.0.0 落库。跨仓部分（赛事平台转只读 + 阵容同步）另立v5.0.0。
 
-**缘起**：用户 m01803「开工」，任务 = 球员名口径改造（显示名取自 FC26 存档）+ 球衣号归属从赛事平台转回本平台 + 球员档案页 URL 改 fc_id + 两系统阵容同步 + D1 读额度优化。基线经两轮重查修订（计划稿假设 HEAD=`466df81`，实测已到 `d759b86` ⇒ 增量 31 球队页已推送部署，本增量编号由 31 改 32、迁移号仍 0032/0033）。
+**缘起**：用户 m01803「开工」，任务 = 球员名口径改造（显示名取自 FC26 存档）+ 球衣号归属从赛事平台转回本平台 + 球员档案页 URL 改 fc_id + 两系统阵容同步 + D1 读额度优化。基线经两轮重查修订（计划稿假设 HEAD=`466df81`，实测已到 `d759b86` ⇒ v3.4.0 球队页已推送部署，本增量编号由 31 改 32、迁移号仍 0032/0033）。
 
 **范围与交付**
 - 迁移 `0032_players_display_name_number.sql`：`players` 加 `first_name` / `last_name` / `common_name` / `display_name` / `number` 五列（全 TEXT）。
@@ -668,7 +724,7 @@
 - 端点：`POST /api/club/players/:id/number`（球衣号，仅所属俱乐部教练）；`GET /players/:id` 与 `/transfers`、`/growth` 三个读端点改按 **fc_id** 寻址（内部 id 回落）；列表/详情/roster/市场/谈判/审核/球队页等 11 个携带球员名的面全部出显示名。
 - 前端：球员档案页 URL 自动规范化到 fc_id、标题补官方缩写名小字；11 处球员链接统一走 `playerPath()`；合同页签恒有「球衣号」行（教练可改）；阵容表加只读号码列；谈判成约后弹「给新援定号」（可跳过）。
 
-**不做**：动 `players.name` 语义（仍是 FC26db 官方缩写名，导入对齐键仍是 fc_id）、给导入模板换显示名、赛事平台侧改动（属增量 33）、生产数据落库（`load.mjs --remote` 需双开关 + 用户授权）。
+**不做**：动 `players.name` 语义（仍是 FC26db 官方缩写名，导入对齐键仍是 fc_id）、给导入模板换显示名、赛事平台侧改动（属v5.0.0）、生产数据落库（`load.mjs --remote` 需双开关 + 用户授权）。
 
 **技术路径**
 - **① 显示名派生（三源优先级）** —— `commonname 原样 || (名 && 姓 ? 名+' '+姓) || cards.csv 完整人名（同 pid 多行名字矛盾则弃用） || 空`，空交回 SQL 回落 `players.name`。三源：`E:/FC26 LE v26.3.5/player_presets/base_players.csv`（22,348 行 × 149 列，四个文本姓名列**全空**，只有 nameid：`playerid`=0 / `firstnameid`=114 / `lastnameid`=145 / `playerjerseynameid`=146 / `commonnameid`=147）、`E:/FST存档修改器编辑器v1.2.0/config/playernames.txt`（UTF-16LE，41,190 条，max nameid 41,189）、`E:/FC26 LE v26.3.5/player_presets/cards.csv`（24,731 行，法定全名，18,850 个 pid）。**cards 只能兜底不能当主口径**：与赛事系统逐字命中只有 418/570（`Cristiano Ronaldo dos Santos Aveiro` vs tour `Cristiano Ronaldo`、`Li Hao` vs `Hao Li` 语序不同），且 21 个 pid 的多行名字自相矛盾。**不加「补姓」启发式**：俱乐部 149 个 commonname 里 51 人本就是单词（`Ederson`/`Rodrygo`/`Gabriel`/`Antony`/`Marquinhos`），tour 也正是这么写的，补姓会把它们全改坏（`Ederson` → `Ederson Santana de Moraes`）。
@@ -679,9 +735,9 @@
 - **⑥ 比赛结果按 fc_id 认人** —— `src/worker/results.ts` 的 `recordAutoXpForMatch` 原先靠 `club_id + name` 等值匹配，而 tour 存完整人名、本库存官方缩写名 ⇒ 两侧写法不同的人会漏。改为先 `WHERE fc_id = ?`（**不按 club_id 过滤** —— 事件归属的是「这个人」，转会后旧比赛仍算他的成长）、`??` 再姓名回落。队名仍按「队名 = 俱乐部名」解（零封要的是当场那支队的防守位置表）。
 - **⑦ 落库脚本** —— `derive.mjs` 产出 `out/display_name.sql`（17,470 条 / 959,842 B，每 1,000 行一条 `WITH v(fc,fn,ln,cn,dn) AS (VALUES …) UPDATE … FROM v WHERE players.fc_id = v.fc`）、`out/number.sql`（570 条）、`out/display-names.csv`（审计表）；空值写 NULL 而非空串（否则 `COALESCE` 不回落）。`load.mjs` 按单引号切语句（人名里的分号不会切断、`''` 转义安全）、逐条写临时文件走 `--file`（Windows 命令行放不下 50KB 的 `--command`）、`--dry-run` / `--local` / `--remote --yes-prod`（双开关）。
 
-**裁决**：`players.name` 语义不变、显示处一律 `COALESCE(display_name, name)`；显示名规则 = commonname 优先（不加补姓启发式）；cards.csv 只作兜底；`/players/:id` 的 `:id` 用裸数字 fc_id（内部 id 回落，前端 replace 成规范 URL）；号码 1–99、同队不重复、换队/解约清空；号码明细存基础 ID（增量 30 的 `player_playstyles` 口径不变）；赛事平台球员表转只读（增量 33）。
+**裁决**：`players.name` 语义不变、显示处一律 `COALESCE(display_name, name)`；显示名规则 = commonname 优先（不加补姓启发式）；cards.csv 只作兜底；`/players/:id` 的 `:id` 用裸数字 fc_id（内部 id 回落，前端 replace 成规范 URL）；号码 1–99、同队不重复、换队/解约清空；号码明细存基础 ID（v3.3.0 的 `player_playstyles` 口径不变）；赛事平台球员表转只读（v5.0.0）。
 
-**分步**（每步一 commit）：1 迁移 0032 + `tests/d1.ts`（`c07c18a`）→ 2 派生脚本（`54a98ef`）→ 3 显示名贯通后端 + 4 fc_id 寻址（`341c7cd`）→ 迁移 0033 + 排序索引锁死测试（`e2d81ed`）→ 5 号码端点与三处 UI（`097cd34`）→ 6 链接改 fcId + 官方名小字 + 旧 id 替换（`6135bbc`）→ 7 results 按 fc_id 归属（`770875b`）→ 8 验收复测 + 文档收口（本节）→ 评审修复（`0e6a524`）。另有 `0dd0784` / `c46d11c` 两个提交是增量 31 的文档收口订正。
+**分步**（每步一 commit）：1 迁移 0032 + `tests/d1.ts`（`c07c18a`）→ 2 派生脚本（`54a98ef`）→ 3 显示名贯通后端 + 4 fc_id 寻址（`341c7cd`）→ 迁移 0033 + 排序索引锁死测试（`e2d81ed`）→ 5 号码端点与三处 UI（`097cd34`）→ 6 链接改 fcId + 官方名小字 + 旧 id 替换（`6135bbc`）→ 7 results 按 fc_id 归属（`770875b`）→ 8 验收复测 + 文档收口（本节）→ 评审修复（`0e6a524`）。另有 `0dd0784` / `c46d11c` 两个提交是v3.4.0 的文档收口订正。
 
 **步骤 2 记录（派生实测）**：18,301 人 → 显示名 **17,470**（commonname 2,548 / 名+姓 14,527 / cards 兜底 395 / 空 831），回落 `players.name` 831；**570 名俱乐部球员全部有显示名**（149 / 420 / 1）；球衣号 **570/570** 按 fc_id 归属、归属不一致 **0**。派生不出的 1,236 人缺口全在球员库长尾：base_players.csv 引用了 29,638 个 nameid，其中 1,170 个 > 41,189（FC26 后期补丁新增，本机字典没有），FC25 的 `playernames.csv` 实测 0 命中。570 人里与 tour 逐字不一致 5 例（`Son Heung Min` 语序、`Fornals`、`Abde`、`Cristhian Mosquera`、`Fernandez-Pardo`），是 tour 自己的短名/语序，**后续跨系统同步以 FC26 派生名为准**。
 
@@ -693,16 +749,16 @@
 - **浏览器实测（本地 8791）**：`/players/9501`（内部 id）URL 自动变 `/players/260001`（fc_id）、标题出显示名 + 官方缩写名小字；`display_name` 为 NULL 的人不出小字；球员库列表链接实测走 fc_id；合同页签恒有「球衣号」行；`?name=erling` / `?name=haaland` / `?name=odegaard` 双列搜索都命中且未触发 D1 表达式深度上限。
 - **dev server 坑**：反复 `(npx wrangler dev &)` 会留多个 workerd 进程，端口 LISTENING 但请求全挂死（curl 000、日志已 Ready）⇒ 用 PowerShell 按命令行匹配 `wrangler|workerd|miniflare` 全杀后只起一个；`cachedJson` 的 L1 缓存（players scope TTL 1h）在进程内，种完数据必须重启才能看到。
 
-**验收（步骤 1–8 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **47 文件 / 659 例全绿**（增量 31 基线 46/642 ⇒ +1 文件 / +17 例）；`npm run build` 成功（`web/dist/assets/index-Bco7kOHW.js` **477.77 kB / gzip 150.38 kB**，增量 31 基线 474.57 kB）；`npm run test:e2e` **11/11 通过**（补齐本地迁移后）。变异验证四处均能定向变红：`idx_players_sort_name` 的表达式错一个字符（`'), 'Ó'` → `'), 'O'`）退化成 `TEMP B-TREE`；`results.ts` 的 `WHERE fc_id = ?` 加 `AND 0` ⇒ fc_id 归属用例失败；`transfers.ts` 两处 `number = NULL` 删掉 ⇒ 换队/解约两条用例各失败；球员链接回落顺序反转 ⇒ 新增的 ClubDetail 两条用例失败。
+**验收（步骤 1–8 实测）**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **47 文件 / 659 例全绿**（v3.4.0 基线 46/642 ⇒ +1 文件 / +17 例）；`npm run build` 成功（`web/dist/assets/index-Bco7kOHW.js` **477.77 kB / gzip 150.38 kB**，v3.4.0 基线 474.57 kB）；`npm run test:e2e` **11/11 通过**（补齐本地迁移后）。变异验证四处均能定向变红：`idx_players_sort_name` 的表达式错一个字符（`'), 'Ó'` → `'), 'O'`）退化成 `TEMP B-TREE`；`results.ts` 的 `WHERE fc_id = ?` 加 `AND 0` ⇒ fc_id 归属用例失败；`transfers.ts` 两处 `number = NULL` 删掉 ⇒ 换队/解约两条用例各失败；球员链接回落顺序反转 ⇒ 新增的 ClubDetail 两条用例失败。
 
-**待办**：① 增量 33（跨仓：赛事平台球员表转只读、四写端点下线、阵容同步、`GET /api/squads`），需单独授权部署；② ✅ **已做**（增量 35）：生产落库已执行，生产 `players` 五列计数 17,470 / 17,329 / 17,099 / 2,549 与球衣号 570 已具值；③ ✅ **已做**（增量 34）：生产迁移 0032/0033 于 2026-09-23T09:29Z 一并 apply（`Executed 6 commands` / `Executed 2 commands`）；④ 831 人派生不出显示名（字典缺号长尾），若要补齐需更新版 FC26 字典；⑤ 赛事平台与本平台 5 人姓名写法不一致，同步时以 FC26 派生名为准（清单在 `scripts/player-names/README.md`）。**号码真源已于增量 35 由赛事库改为 FC26 存档表（s901）**，见该节。
+**待办**：① v5.0.0（跨仓：赛事平台球员表转只读、四写端点下线、阵容同步、`GET /api/squads`），需单独授权部署；② ✅ **已做**（v6.0.0）：生产落库已执行，生产 `players` 五列计数 17,470 / 17,329 / 17,099 / 2,549 与球衣号 570 已具值；③ ✅ **已做**（v5.0.1）：生产迁移 0032/0033 于 2026-09-23T09:29Z 一并 apply（`Executed 6 commands` / `Executed 2 commands`）；④ 831 人派生不出显示名（字典缺号长尾），若要补齐需更新版 FC26 字典；⑤ 赛事平台与本平台 5 人姓名写法不一致，同步时以 FC26 派生名为准（清单在 `scripts/player-names/README.md`）。**号码真源已于v6.0.0 由赛事库改为 FC26 存档表（s901）**，见该节。
 
 
-## 增量 33 · 名册真源归位——`GET /api/squads` + 赛事平台拉取同步 + 球员写入口下线（跨仓）
+## v5.0.0 · 名册真源归位——`GET /api/squads` + 赛事平台拉取同步 + 球员写入口下线（跨仓）
 
-**状态**：2026-09-23 完成步骤 9–11（本仓 1 个提交 `aed2f67`，赛事仓 1 个提交 `ffcbc40`），两仓本地全绿。**本仓部分已于 2026-09-23 随增量 34 推送并部署**（`/api/squads` 生产 200）；**赛事仓部分亦已部署**（当日 08:37Z / 08:47Z 两次 + 增量 36 的 13:02Z 一次），但赛事仓这 4 个提交也已随增量 36 push 到 `origin/main`（见增量 36 节）。步骤 12（部署与上线核对）属危险清单，本轮部署由用户在增量 36 显式下令。
+**状态**：2026-09-23 完成步骤 9–11（本仓 1 个提交 `aed2f67`，赛事仓 1 个提交 `ffcbc40`），两仓本地全绿。**本仓部分已于 2026-09-23 随v5.0.1 推送并部署**（`/api/squads` 生产 200）；**赛事仓部分亦已部署**（当日 08:37Z / 08:47Z 两次 + tour 侧增量 的 13:02Z 一次），但赛事仓这 4 个提交也已随tour 侧增量 push 到 `origin/main`（见tour 侧增量 节）。步骤 12（部署与上线核对）属危险清单，本轮部署由用户在tour 侧增量 显式下令。
 
-**缘起**：增量 32 把球衣号的编辑入口搬回本平台（`POST /api/club/players/:id/number`）之后，赛事系统的 `player` 表（`name` + `number`）就成了第二份真源——两个写者互相覆盖。本增量把名册真源收到本平台：本仓出一个只读的全平台一线队名册端点，赛事仓改为按小时拉取同步，并把赛事仓全部球员写入口下线。
+**缘起**：v4.0.0 把球衣号的编辑入口搬回本平台（`POST /api/club/players/:id/number`）之后，赛事系统的 `player` 表（`name` + `number`）就成了第二份真源——两个写者互相覆盖。本增量把名册真源收到本平台：本仓出一个只读的全平台一线队名册端点，赛事仓改为按小时拉取同步，并把赛事仓全部球员写入口下线。
 
 **范围与交付（本仓，步骤 9）**
 - 新建 `src/worker/routes/squads.ts`，端点 `GET /api/squads`：一次 JOIN 出 20 队 570 人的一线队名册，返回 `{ squads: [{ clubId, clubName, players: [{ fcId, name, number }] }] }`。公开只读，走 `assertPublicRate(c, 'squads')` + `cachedJson('squads:all', ttlForScope('roster', c.env.PUBLIC_CACHE_TTL_MS), loader, { scope: 'roster', env, ctx })`。挂载在 `src/worker/index.ts`（growthRoutes 之后、notificationsRoutes 之前）。
@@ -718,8 +774,8 @@
 **不做**：动 `players.name` 语义（仍是 FC26db 官方缩写名）、给导入模板换显示名、在赛事仓保留任何球员写路径、生产迁移 apply、生产数据落库、部署（全部需单独下令）。
 
 **验收（步骤 9–11 实测）**
-- 本仓：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **48 文件 / 661 例全绿**（增量 32 基线 47/659 ⇒ +1 文件 / +2 例）；`npm run build` 成功（`web/dist/assets/index-Bco7kOHW.js` 477.77 kB / gzip 150.38 kB，**与增量 32 逐字同 hash** —— 步骤 9 只加后端路由，前端产物不该变）；`npm run test:e2e` **11/11 通过**。
-- 赛事仓：`npm run typecheck` 全清；`npx vitest run` **15 文件 / 142 例通过 + 1 文件跳过**（增量 33 前基线 14 文件 / 121 例 ⇒ +1 文件 / +21 例，新增 `tests/rosterSync.test.ts`）；`npm run build` 成功（`dist/assets/index-B9HQN9LX.js` 442.52 kB / gzip 143.49 kB）。
+- 本仓：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **48 文件 / 661 例全绿**（v4.0.0 基线 47/659 ⇒ +1 文件 / +2 例）；`npm run build` 成功（`web/dist/assets/index-Bco7kOHW.js` 477.77 kB / gzip 150.38 kB，**与v4.0.0 逐字同 hash** —— 步骤 9 只加后端路由，前端产物不该变）；`npm run test:e2e` **11/11 通过**。
+- 赛事仓：`npm run typecheck` 全清；`npx vitest run` **15 文件 / 142 例通过 + 1 文件跳过**（v5.0.0 前基线 14 文件 / 121 例 ⇒ +1 文件 / +21 例，新增 `tests/rosterSync.test.ts`）；`npm run build` 成功（`dist/assets/index-B9HQN9LX.js` 442.52 kB / gzip 143.49 kB）。
 - 读量：`EXPLAIN QUERY PLAN` 实测 = `SEARCH p USING INDEX idx_players_status (status=?)` + `SEARCH c USING INTEGER PRIMARY KEY (rowid=?)` + `USE TEMP B-TREE FOR ORDER BY`，**无 `SCAN p`**，读约 570 行。
 - 变异验证两处定向变红（赛事仓）：空快照守卫加 `&& false` ⇒ 「空快照整体跳过」用例失败；未知队过滤改成不过滤 ⇒ 「快照里的队本仓一支都没有」用例失败。
 - 本地实测：`GET /api/squads` 在 dev（8791）返回真实分组数据；赛事仓同步对账的 10 条用例覆盖首次建行 / 稳态零写 / 换队改名改号 / 删除 / 外键拦下 / 空快照 / 未知队 / 同人两队 / dryRun / 空串号码等价 null。
@@ -740,12 +796,12 @@
 - 赛事仓「伤停随球员级联删除」（`injury.player_id ON DELETE CASCADE`）**实际不可达**：伤停必须挂在一条 `match_event` 上，而 `match_event.player_id` 无 `ON DELETE`（NO ACTION）⇒ 有伤停的球员必然删不掉、行进 `kept`。仅当那个事件的球员后来被清空时，伤停与缺阵记录才会随之消失。
 - 赛事仓手动同步端点没有 UI，`/api/health` 也不含上次同步时间 ⇒ 每小时静默失败无处发现；`deleted` 计的是尝试数而非 `meta.changes`；分批 batch 无原子性（注释已声明）。
 
-**待办**：① ✅ **已做**（本仓随增量 34 于 2026-09-23 推送部署；赛事仓由增量 36 于同日部署）；② ⚠️ **未跑 dryRun 预演** —— cron 自行在整点执行，首次同步即覆盖（后果见增量 35 节）；③ ✅ **已做**（增量 34 apply 迁移 / 增量 35 落库）。
+**待办**：① ✅ **已做**（本仓随v5.0.1 于 2026-09-23 推送部署；赛事仓由tour 侧增量 于同日部署）；② ⚠️ **未跑 dryRun 预演** —— cron 自行在整点执行，首次同步即覆盖（后果见v6.0.0 节）；③ ✅ **已做**（v5.0.1 apply 迁移 / v6.0.0 落库）。
 
 
-## 增量 34 · apex 域名收口（排名代理 530 根因）+ 边缘 504 归因（2026-09-23）
+## v5.0.1 · apex 域名收口（排名代理 530 根因）+ 边缘 504 归因（2026-09-23）
 
-**状态**：2026-09-23 完成并上线。3 个提交（`9506d00` / `ea6d717` / `5ae73e8`）已推送（`2ad239b..5ae73e8`，共 18 个提交，含增量 32/33）并部署（Version **`7a00c107-214b-4ce0-8769-e9bcae7c4a55`**，2026-09-23T09:29:30Z）。**生产迁移 0032/0033 同轮 apply**（用户裁决「先 apply 0032+0033 再整条部署」）。
+**状态**：2026-09-23 完成并上线。3 个提交（`9506d00` / `ea6d717` / `5ae73e8`）已推送（`2ad239b..5ae73e8`，共 18 个提交，含v4.0.0/v5.0.0）并部署（Version **`7a00c107-214b-4ce0-8769-e9bcae7c4a55`**，2026-09-23T09:29:30Z）。**生产迁移 0032/0033 同轮 apply**（用户裁决「先 apply 0032+0033 再整条部署」）。
 
 **缘起**：用户指出 `whleague.win` 是主域 apex，但**不部署任何服务、DNS 也无 A 记录**（`nslookup -type=A whleague.win` 对 8.8.8.8 / 223.5.5.5 / 1.1.1.1 均无答案，`curl` 返回 000），赛事系统的正确入口是 `https://tour.whleague.win` ⇒ **本仓任何指向 apex 的引用都是 bug**。同时要求给 CF 分析 24h 的两处 504（`cache.whl-club.internal` 79 次、`club.whleague.win` 30 次）归因，并明确回答「是否需要改代码」。
 
@@ -760,7 +816,7 @@
 **不做（Task A）**：赛事仓的 apex 残留注释 —— `WHL-tournament-management-system/worker/routes/oidc.ts:36` 仍写「线上 whleague.win」（实际是 tour 子域）。超本仓范围，只报不改。
 
 **验收（Task A，实测）**
-- `npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **49 文件 / 667 例全绿**（增量 33 基线 48/661 ⇒ +1 文件 / +6 例）；`npm run build` 成功（`web/dist/assets/index-C6eShBli.js` + `index-CgbAjyeh.css`）；dist 扫描只剩 `https://guess.whleague.win` 与 `https://tour.whleague.win`，无 apex。
+- `npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **49 文件 / 667 例全绿**（v5.0.0 基线 48/661 ⇒ +1 文件 / +6 例）；`npm run build` 成功（`web/dist/assets/index-C6eShBli.js` + `index-CgbAjyeh.css`）；dist 扫描只剩 `https://guess.whleague.win` 与 `https://tour.whleague.win`，无 apex。
 - 变异验证（用 /tmp 备份 + sed 改回 apex + 复原，`diff -q` 确认干净）：`wrangler.jsonc` 的 `TOUR_API_BASE` / `api.ts` 的 `TOUR_SITE_URL` / `auth.ts` 的 `TOUR_HOME` 各自改回 apex ⇒ 每次**恰好 2 例红**（对应常量例 + 全仓扫描例）。
 - 上线核对：`https://tour.whleague.win/api/public/tournaments/1/standings` 与 `/2/standings` 均 **200**（3403B / 7131B）；`whleague.win` 仍 **000**（无服务，符合前提）；`/api/health`、`/api/clubs`（3694B）、`/api/squads`（29670B）、`/api/players?view=initial`（25806B）、`/api/players/roster`（350268B）全 200；`/api/clubs/1` 与 `/api/clubs/1/standing` 匿名 401（符合裁决）；线上首页资产 `index-C6eShBli.js` + `index-CgbAjyeh.css` 与本地 `web/dist/assets/` 逐字一致；线上 JS 内域名只有 `guess.whleague.win` 与 `tour.whleague.win`。
 - **未验证（须在面板/登录态补）**：① `/api/clubs/:id/standing` 端到端（需登录会话，匿名 401），本轮只验证到上游 URL 200 + 部署回显 `env.TOUR_API_BASE ("https://tour.whleague.win")`；② CF 分析里 whleague.win 的 530 是否归零，需按 24h 窗口在面板观察（本机无 CF 分析 API）。
@@ -774,15 +830,15 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - **登记两处潜伏风险（本轮不改）**：① 冷回填 `await l2Put(...)` 在响应关键路径上（`src/lib/guard.ts:248`），media 侧已挪进 `waitUntil`（`media.ts:56`）而 JSON 侧没有；② `l2Match` / `l2Put` / `caches.default.match` / R2 `get` / `arrayBuffer` 全无超时（try/catch 只吞 reject、不吞挂起），目前未观察到造成用户可见 504。
 
 **踩坑**
-- **直接部署 main 会造成生产事故**：main 比生产基线多 18 个提交（增量 32/33/34），而生产迁移只到 0031。`sqlDisplayName` / `rowDisplayName` 调用点 **32 处分布在 12 个文件**（`src/worker/contracts-import.ts`、`src/worker/bypass.ts`、`src/worker/growth.ts`、`src/worker/negotiations.ts`、`src/worker/routes/market.ts`、`src/worker/routes/players.ts`、`src/worker/routes/growth.ts`、`src/worker/routes/clubs.ts`、`src/worker/routes/squads.ts`、`src/worker/routes/registration.ts`、`src/worker/routes/admin/reviews.ts` + `src/core/player-name.ts` 本体），缺列会让球员库 / 球队页 / squads / market / growth 大面积 500。故本轮先 apply 0032/0033 再整条部署（用户裁决）。
+- **直接部署 main 会造成生产事故**：main 比生产基线多 18 个提交（v4.0.0/v5.0.0/v5.0.1），而生产迁移只到 0031。`sqlDisplayName` / `rowDisplayName` 调用点 **32 处分布在 12 个文件**（`src/worker/contracts-import.ts`、`src/worker/bypass.ts`、`src/worker/growth.ts`、`src/worker/negotiations.ts`、`src/worker/routes/market.ts`、`src/worker/routes/players.ts`、`src/worker/routes/growth.ts`、`src/worker/routes/clubs.ts`、`src/worker/routes/squads.ts`、`src/worker/routes/registration.ts`、`src/worker/routes/admin/reviews.ts` + `src/core/player-name.ts` 本体），缺列会让球员库 / 球队页 / squads / market / growth 大面积 500。故本轮先 apply 0032/0033 再整条部署（用户裁决）。
 - `wrangler d1 migrations apply --remote` 在非交互上下文会回显「Using fallback value in non-interactive context: yes」并继续，无需 `-y`；0032 报 `Executed 6 commands`（5 条 `ALTER TABLE ADD COLUMN` + 记账）、0033 报 `Executed 2 commands`（155.18ms）。apply 后实测：新增列 **5**、`idx_players_sort_name` 存在 **1**、`display_name` 非空 **0** / 总行 **18301**。
 - 迁移 0033 的索引表达式含 **5 个不可见字符**（00ad 软连字符、0301 / 0308 组合记号），由 scripts 侧 `sqlFold()` 生成后落盘，**不得手改或重新格式化那一行**；另 SQLite **禁止索引表达式里出现 `.` 限定列名**（写 `players.display_name` 会报 `the "." operator prohibited in index expressions`）。
 - 本机 `wrangler` 走 IPv6 会卡住，需 `NODE_OPTIONS=--dns-result-order=ipv4first`。
 
-**待办**：① CF 分析按 24h 窗口确认 whleague.win 530 归零（需面板）；② ✅ **已做**（增量 35，2026-09-23）：生产数据落库已执行（46 条语句全过、`cache:epoch:public` 1→2），`/api/squads` 与 `/api/players` 回读已出显示名与球衣号；③ ✅ **已做**（增量 36，2026-09-23）：赛事仓已部署（`tour.whleague.win` 当日 08:37Z / 08:47Z 两次 + 增量 36 的 13:02Z 一次，Version `9c51052f-…`），名册同步 cron 已实际开跑 —— 赛事库 `whl.player` 实测 570 行 / 570 行具号码（`COUNT(DISTINCT number) = 71`）、`id 20801 = Cristiano Ronaldo #7`、`200104 = Heung Min Son #7`，姓名已换成本仓显示名 ⇒ 镜像方向正确。**未跑 `dryRun=1` 核对**（cron 自行在整点执行，未经人工预演）。⚠️ **本轮已实证该 cron 的破坏力**：它按「姓名、号码一律以 club 为准」写库，`/api/squads` 一上线（Version `7a00c107`，2026-09-23T09:29:30Z）就在下一个整点把赛事库 `whl.player` 的 570 个号码刷成我方当时的 NULL 值 ⇒ 号码真源被迫改到本仓侧的 FC26 存档表（s901），详见增量 35 节。
+**待办**：① CF 分析按 24h 窗口确认 whleague.win 530 归零（需面板）；② ✅ **已做**（v6.0.0，2026-09-23）：生产数据落库已执行（46 条语句全过、`cache:epoch:public` 1→2），`/api/squads` 与 `/api/players` 回读已出显示名与球衣号；③ ✅ **已做**（tour 侧增量，2026-09-23）：赛事仓已部署（`tour.whleague.win` 当日 08:37Z / 08:47Z 两次 + tour 侧增量 的 13:02Z 一次，Version `9c51052f-…`），名册同步 cron 已实际开跑 —— 赛事库 `whl.player` 实测 570 行 / 570 行具号码（`COUNT(DISTINCT number) = 71`）、`id 20801 = Cristiano Ronaldo #7`、`200104 = Heung Min Son #7`，姓名已换成本仓显示名 ⇒ 镜像方向正确。**未跑 `dryRun=1` 核对**（cron 自行在整点执行，未经人工预演）。⚠️ **本轮已实证该 cron 的破坏力**：它按「姓名、号码一律以 club 为准」写库，`/api/squads` 一上线（Version `7a00c107`，2026-09-23T09:29:30Z）就在下一个整点把赛事库 `whl.player` 的 570 个号码刷成我方当时的 NULL 值 ⇒ 号码真源被迫改到本仓侧的 FC26 存档表（s901），详见v6.0.0 节。
 
 
-## 增量 35 · 显示名与球衣号落库——号码真源迁到 FC26 存档表（s901）+ D1 写通道整改（2026-09-23）
+## v6.0.0 · 显示名与球衣号落库——号码真源迁到 FC26 存档表（s901）+ D1 写通道整改（2026-09-23）
 
 **状态**：2026-09-23 完成。**生产数据已落库**（46 条语句全部成功、公开缓存版本号 1 → 2），公开接口回读已验证；本轮**没有任何 `src/` 或 `web/src/` 代码改动** ⇒ 落库不经部署即已对用户生效。脚本（`scripts/player-names/`）与文档改动已推送（`3f33aab..d4dcf34`，2 个提交）并部署（Version `835031b5-1ddb-428e-9805-01ce3cc9a3c5`，2026-09-23T12:12:42Z，Source `wrangler`；线上资产与上一版逐字一致，wrangler 报 `No updated asset files to upload`），部署后已复读生产接口。
 
@@ -795,17 +851,17 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - **写通道整改**：`load.mjs` 由 `--file`（D1 异步 import 端点）改走 `--command`（同步 /query 端点）+ 注释行清洗 + 每条失败自动重试 3 次；`derive.mjs` 的 `BATCH` 由 1000 降到 400（每批约 22KB，要塞进 Windows 命令行）。
 - **`scripts/player-names/README.md` 整篇重写**：数据源表加 s901、记「赛事系统 `whl.player` 不再是号码来源」、球衣号四级阶梯、生产落库计数与回读结果、`--purge` 存在理由、踩坑清单由两条扩到四条。
 
-**缘起之下的关键转折（号码为什么换源）**：落库前的预检发现**赛事库 `whl.player` 的 570 个号码全空了**，`name` 还与本库 `players.name` **逐字相同 570/570**。定性：赛事仓 `worker/lib/clubRoster.ts`（增量 33 步骤 10）的文件头明写「对账语义：姓名、号码一律以 club 为准 → UPDATE」，触发源是赛事仓 `wrangler.jsonc:56-58` 的 `triggers.crons = ["0 * * * *"]`（每小时整点）。时间线闭合：`/api/squads` 系增量 33 步骤 9 新增、随增量 34 于 09:29:30Z 首次上线 ⇒ 下一个整点赛事侧 cron 拉到该端点，用我方当时的空号码覆盖了它原来的号码，同时把全名换成我方缩写名。**结论：号码不能再从赛事库派生**（那里已经没有真源，且将来每次同步都会以本仓为准再覆盖一次）。D1 时间点回读不可用（`wrangler d1 time-travel info` 能拿到 bookmark，但 REST `/query` 带 `bookmark` 被静默忽略），只能靠外部副本恢复。
+**缘起之下的关键转折（号码为什么换源）**：落库前的预检发现**赛事库 `whl.player` 的 570 个号码全空了**，`name` 还与本库 `players.name` **逐字相同 570/570**。定性：赛事仓 `worker/lib/clubRoster.ts`（v5.0.0 步骤 10）的文件头明写「对账语义：姓名、号码一律以 club 为准 → UPDATE」，触发源是赛事仓 `wrangler.jsonc:56-58` 的 `triggers.crons = ["0 * * * *"]`（每小时整点）。时间线闭合：`/api/squads` 系v5.0.0 步骤 9 新增、随v5.0.1 于 09:29:30Z 首次上线 ⇒ 下一个整点赛事侧 cron 拉到该端点，用我方当时的空号码覆盖了它原来的号码，同时把全名换成我方缩写名。**结论：号码不能再从赛事库派生**（那里已经没有真源，且将来每次同步都会以本仓为准再覆盖一次）。D1 时间点回读不可用（`wrangler d1 time-travel info` 能拿到 bookmark，但 REST `/query` 带 `bookmark` 被静默忽略），只能靠外部副本恢复。
 
 **恢复源（号码真源）**：`E:/BaiduNetdiskDownload/FC Editor by decoruiz Alpha v21.5_2/player_tables/s901/splitted` —— 20 个 xlsx，一队一份，文件名 `<FC26 club_id> - <队名>.xlsx`，**表体只有两列且无表头**（第 0 列球衣号、第 1 列球员全名），mtime Sep 5 与赛事库 `player` 行 `created_at` 2026-09-05 吻合。实测 570 人 / 20 队 / 号码空行 0 / 队内重号 0；与赛事仓 Sep16 独立副本 `WHL-tournament-management-system/scripts/fc26-id-rekey/players-dump.json` 按姓名对齐 **570/570 姓名与号码完全一致**，且本库 20 个 `club_id` 的球员数与各队文件逐队相等 ⇒ 两边 `club_id` 同一空间、映射天然 1:1。
 
 **技术路径**
 - **① 认人（s901 行 → 本库 fc_id）**：`readS901()` 用 `XLSX.readFile` + `sheet_to_json(sheet, { header: 1, defval: null })`（`xlsx@^0.18.5` 已在 `package.json:24`）；目录不存在、文件名不合 `/^(\d+) - (.+)\.xlsx$/`、球衣号为空一律 `exit 2`。认人按**四级阶梯顺序**执行，每级只认 `hit.length === 1`（`claimed` Set 防重复占用）：逐字相同 → 归一化相同（`normalize()` = 小写 + NFD 去变音符号 + 非字母数字转空格 + 折叠空白）→ 同队同姓唯一（`lastWord()`）→ 队内唯一余量（两侧各剩 1 人）。实测 **逐字 565 / 同队同姓唯一 3 / 队内唯一余量 2 / 未匹配 0**，另逐队对账球员数，`clubCountMismatch = 0`。
-- **② 5 例同人异名**（正是增量 32 记的那 5 个名称口径差，无新增意外）：club 243 `Cristhian Mosquera`#4 ↔「Mosquera」、club 449 `Fornals`#12 ↔「Pablo Fornals」、club 9 `Fernandez-Pardo`#27 ↔「Matias Fernandez-Pardo」（三例走同队同姓唯一）；club 243 `Son Heung Min`#7 ↔「Heung Min Son」、club 449 `Abde`#15 ↔「Abdessamad Ezzalzouli」（两例走队内唯一余量）。
+- **② 5 例同人异名**（正是v4.0.0 记的那 5 个名称口径差，无新增意外）：club 243 `Cristhian Mosquera`#4 ↔「Mosquera」、club 449 `Fornals`#12 ↔「Pablo Fornals」、club 9 `Fernandez-Pardo`#27 ↔「Matias Fernandez-Pardo」（三例走同队同姓唯一）；club 243 `Son Heung Min`#7 ↔「Heung Min Son」、club 449 `Abde`#15 ↔「Abdessamad Ezzalzouli」（两例走队内唯一余量）。
 - **③ 语句形状保持幂等**：`WITH v(fc,fn,ln,cn,dn) AS (VALUES …) UPDATE players SET first_name = COALESCE(v.fn, players.first_name), … display_name = COALESCE(v.dn, players.display_name) FROM v WHERE players.fc_id = v.fc` ⇒ 空值写 NULL 不覆盖已有值，整份可安全重跑（重试也安全）。`splitStatements()` 按单引号切（人名里的分号不会切断、`''` 转义安全）。
 - **④ 写通道（本轮的坑）**：`--file` 走 D1 的**异步 import 端点**（wrangler 先 `POST .../import` 再轮询），对**合法** SQL 间歇性报假错 —— 已见 `X [ERROR] {"D1_RESET_DO":true}`、《SQL code did not contain a statement. [code: 7500]》、`syntax error` 且 offset 比文件本身还长、`X [ERROR] {` 截断；同一条语句隔 30 秒重跑就 `success:true / rows_written:400`，换成随机文件名、按 md5 去重与否都无关（wrangler 的 `File already uploaded` 是按内容 etag 去重，不是失败原因）。`WRANGLER_LOG_SANITIZE=false` 抓到的真实请求体证明请求侧完整无误。⇒ 弃用 `--file`，改走 `--command` 同步端点 + 失败重试 3 次（`sleep(2000)` 用 `Atomics.wait` 同步实现）+ `MAX_SQL_CHARS = 30_000` 上限保护。
 - **⑤ `--command` 的 yargs 坑**：生成文件每条语句都带文件头注释 `-- 由 scripts/player-names/derive.mjs 生成，请勿手改。`，而 `--command` 的 SQL 以 `--` 开头时 wrangler 的 yargs 会把它当命令行选项，报 `Unknown arguments:  由 scripts/player-names/derive,  由 scripts/playerNames/derive` 并直接打印 help。⇒ `cleanForCommand(sql)` 整行删掉 `^[ \t]*--[^\n]*$` 的注释行（数据行都以 `(` 开头，不会误删）+ 归一化结尾分号。
-- **⑥ 顺带修 `derive.mjs --refresh` 在本机崩溃**：`Error: spawnSync npx.cmd EINVAL`（errno -4071，Node v24.12.0），与增量 32 评审在 `load.mjs` 修掉的是同一类 bug（当时只修了 load.mjs）⇒ `remote()` 改用 `execFileSync(process.execPath, [WRANGLER, 'd1', 'execute', db, '--remote', '--json', '--command', sql], …)`，`WRANGLER = path.join(HERE, '..', '..', 'node_modules', 'wrangler', 'bin', 'wrangler.js')`，缺失 `exit 2`。
+- **⑥ 顺带修 `derive.mjs --refresh` 在本机崩溃**：`Error: spawnSync npx.cmd EINVAL`（errno -4071，Node v24.12.0），与v4.0.0 评审在 `load.mjs` 修掉的是同一类 bug（当时只修了 load.mjs）⇒ `remote()` 改用 `execFileSync(process.execPath, [WRANGLER, 'd1', 'execute', db, '--remote', '--json', '--command', sql], …)`，`WRANGLER = path.join(HERE, '..', '..', 'node_modules', 'wrangler', 'bin', 'wrangler.js')`，缺失 `exit 2`。
 - **⑦ REMOTE 收缩**：删掉 `tour-players`（db `whl`）与 `team-map`（db `whl-auth`）两项，只剩 `players`（db `whl-club`，`SELECT fc_id, name, club_id FROM players ORDER BY fc_id`）。「赛事系统 `player.id` 就是本库 `fc_id`」这个原假设随覆盖事件作废。审计 CSV 表头 `tour_name,tour_number` → `s901_name,s901_number`。退出码改为「球衣号条数 ≠ s901 人数、或队内人数对不上、或有未匹配」⇒ `1`。
 
 **裁决**
@@ -824,23 +880,23 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - **独立复算**（按行解析生成 SQL 的 VALUES、处理 `''` 转义）：17,470 数据行、非 NULL 为 fn 17,329 / ln 17,099 / cn 2,548 / dn 17,470、重复 fc 0、行长异常 0。号码侧 570/570 s901 行都能在 `number.sql` 里找到「同 club_id 且持有该号码」的人，异常 0。
 - 公开回读：`GET https://club.whleague.win/api/squads` ⇒ 200 / 30,983 B，20 队 570 人、`number !== null` 者 **570**，抽样 `Cristiano Ronaldo`(20801, 7, 尤文图斯)、`Heung Min Son`(200104, 7, 皇家马德里)、`Johnny Cardoso`(259516, 14, 巴黎圣日耳曼)、`Matias Fernandez-Pardo`(276048, 27, 利物浦)；`GET /api/players?limit=2` ⇒ 200，行内含 `name:'Erling Haaland'`（显示名）与 `officialName:'E. Haaland'`（官方缩写名）⇒ 列表小字功能在生产有真值。
 - **推送部署后复读**（Version `835031b5-1ddb-428e-9805-01ce3cc9a3c5`，2026-09-23T12:12:42Z）：`/api/health` 200、`/api/squads` 200（31,311 B，20 队 570 人、号码非空 **570**，`Cristiano Ronaldo`(20801,#7,尤文图斯) 与 `Heung Min Son`(200104,#7,皇家马德里) 抽查一致）、`/api/clubs` 200、`/api/players?limit=2` 显示名与 `officialName` 仍具值；线上首页资产 `index-C6eShBli.js` + `index-CgbAjyeh.css` 与本地 `web/dist/assets/` 逐字一致 ⇒ 本轮部署未改变任何用户可见代码。
-- 回归：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **49 文件 / 667 例全绿，与增量 34 基线逐项一致**（本轮无 `src/` 与 `web/src/` 改动，一致性本身就是证据）。
+- 回归：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **49 文件 / 667 例全绿，与v5.0.1 基线逐项一致**（本轮无 `src/` 与 `web/src/` 改动，一致性本身就是证据）。
 
 **两处口径差（已核实无影响，写进 README）**
 - `out/display-names.csv` 的 first_name / last_name 非空数（17,897 / 17,198）比落库多：这两列只有 CSV 审计快照在写，SQL 对「显示名取自 commonname」的行不发名/姓；且全仓没有任何代码读这两列（`grep -rn "first_name\|last_name" src/ web/src/` 只命中 `src/core/player-name.ts:5` 的注释）。
 - `common_name` 落库 2,549 比 SQL 多 1 行：那一行库里本来就有值，`COALESCE(v.cn, players.common_name)` 按设计不覆盖。
 
 **已知后果**
-- **赛事库的号码会在下次同步后被改写一次**：赛事仓 cron（**已于增量 36 开跑**，实测赛事库 `whl.player` 570/570 已具号码、姓名=本仓显示名）会拿 `/api/squads` 的显示名与号码覆盖 `whl.player`（方向正确，号码恢复为 s901 口径、姓名由缩写名变显示名），但这也意味着**本仓是唯一真源，赛事库任何本地改动都会被下一次整点覆写**。
+- **赛事库的号码会在下次同步后被改写一次**：赛事仓 cron（**已于tour 侧增量 开跑**，实测赛事库 `whl.player` 570/570 已具号码、姓名=本仓显示名）会拿 `/api/squads` 的显示名与号码覆盖 `whl.player`（方向正确，号码恢复为 s901 口径、姓名由缩写名变显示名），但这也意味着**本仓是唯一真源，赛事库任何本地改动都会被下一次整点覆写**。
 - 831 人回落官方缩写名（字典 `nameid > 41,189` 的 FC26 后期补丁长尾），本轮未动。
 - `data/tour-players.json` 缓存已被本轮 `--refresh` 覆盖成空号码版本，不能再当交叉校验源（号码校验源已换成 s901）。
 
-**待办**：① ✅ **已做**：本轮脚本 + 文档改动已推送（`3f33aab..d4dcf34`）并部署（Version `835031b5-…`）；② CF 分析按 24h 窗口确认 whleague.win 530 归零（增量 34 遗留，需面板）；③ ✅ **已做**（增量 36，2026-09-23）：赛事仓已部署（含增量 33 名册同步代码），整点 cron 已开跑并把本仓显示名与 s901 号码写回赛事库（`whl.player` 570/570 具号码）。
-## 增量 36 · 赛事仓错误契约收口 + 账号投影对账（tour 单仓，2026-09-23）
+**待办**：① ✅ **已做**：本轮脚本 + 文档改动已推送（`3f33aab..d4dcf34`）并部署（Version `835031b5-…`）；② CF 分析按 24h 窗口确认 whleague.win 530 归零（v5.0.1 遗留，需面板）；③ ✅ **已做**（tour 侧增量，2026-09-23）：赛事仓已部署（含v5.0.0 名册同步代码），整点 cron 已开跑并把本仓显示名与 s901 号码写回赛事库（`whl.player` 570/570 具号码）。
+## tour 侧增量 · 赛事仓错误契约收口 + 账号投影对账（tour 单仓，不占本仓版本号；2026-09-23）
 
-**状态**：2026-09-23 部署完成（Version `9c51052f-a50c-44c8-8078-b318fd7f226b`，2026-09-23T13:02:42Z，Source `wrangler`，`Total Upload: 582.96 KiB / gzip: 133.33 KiB`）。**本仓无任何代码改动**（本节是共享台账里的一条，赛事仓自身的权威文档是 `PRD.md` / `TECH_DESIGN.md`，后者已随本轮补 §4.2 与 §8）。赛事仓 2 个提交（`7f4d69a` 代码 + `952f470` 文档）**已 push**（`dee2292..952f470`），连同增量 33 的 4 个提交（`ffcbc40` / `aa74ab4` / `728f523` / `f91acc9`）一并补齐，赛事仓 `origin/main` = `952f470`（落后 0）。
+**状态**：2026-09-23 部署完成（Version `9c51052f-a50c-44c8-8078-b318fd7f226b`，2026-09-23T13:02:42Z，Source `wrangler`，`Total Upload: 582.96 KiB / gzip: 133.33 KiB`）。**本仓无任何代码改动**（本节是共享台账里的一条，赛事仓自身的权威文档是 `PRD.md` / `TECH_DESIGN.md`，后者已随本轮补 §4.2 与 §8）。赛事仓 2 个提交（`7f4d69a` 代码 + `952f470` 文档）**已 push**（`dee2292..952f470`），连同v5.0.0 的 4 个提交（`ffcbc40` / `aa74ab4` / `728f523` / `f91acc9`）一并补齐，赛事仓 `origin/main` = `952f470`（落后 0）。
 
-**编号裁决**：增量编号是**全项目共享序列，台账在本仓 `ROADMAP.md`**（本仓增量 7 标「auth + tour + club 三仓」、增量 9 标「club 单仓」；赛事仓 commit message 用同一套号：增量 7 / 8 / 9C / 9D / 10C / 33）。赛事仓这一轮代码注释原写「增量 34」，而 34（apex 域名收口）与 35（显示名与球衣号落库）当日已被本仓占用 ⇒ **回填为增量 36**；赛事仓 `worker/index.ts`、`worker/routes/oidc.ts`、`tests/oidc.test.ts` 共 6 处标签由 34 改 36。撞号成因：那轮代码写于本地 08:15–08:22Z，当时台账最大号还是 33。
+**编号说明**：本轮是 **tour 单仓增量**（本仓无任何代码改动），因此**不占本仓版本号**；本文件正文与 `CHANGELOG.md` 一律称它「tour 侧增量」。当时沿用「全项目共享增量号」旧规则记账（该规则已于 2026-09-25 废止，见顶部对照表）：赛事仓那一轮代码注释原写「34」，而本仓同日的 34（apex 域名收口）与 35（显示名与球衣号落库）已被占用 ⇒ 当时回填为「36」，赛事仓 `worker/index.ts`、`worker/routes/oidc.ts`、`tests/oidc.test.ts` 共 6 处标签由 34 改 36。撞号成因：那轮代码写于本地 08:15–08:22Z，当时台账最大号还是 33。
 
 **缘起（2026-09-23 线上 15 连发 500）**：账号真源收口到认证中心后，赛事库 `user` 表没有写入方，而 14 列外键仍指向 `user(id)`（`tactic.created_by` / `match_event.created_by` / `audit_log.actor_user_id` …）⇒ 新账号进站一写就 `FOREIGN KEY constraint failed`。同时 Hono 默认把未捕获异常压成 `text/plain` 的 `Internal Server Error`，前端 `src/api.ts` 的 `res.json()` 解析失败、只剩一句「请求失败（500）」，报错无明细，只能反查 D1 才定位到外键。
 
@@ -849,16 +905,16 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - **② 500 兜底**：`worker/index.ts` 新增 `app.onError((err, c) => { console.error(...); return c.json({ error: "internal", message: "服务异常，请稍后重试" }, 500); })`；同文件 `scheduled` 在 `ctx.waitUntil(runRosterSync(env))` 之后加 `ctx.waitUntil(runAccountMirror(env))`。
 - **③ 账号投影与定时对账**：新增 `worker/lib/accountMirror.ts`（`MIRROR_PASSWORD = "!oidc-no-password"` 哨兵口令；`mirrorAccountStmt` 是 `INSERT INTO user (id, name, password_hash, role, locked, created_at) VALUES (?, ?, ?, 'coach', ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, locked = excluded.locked, created_at = excluded.created_at`，**`role` 与 `password_hash` 绝不进 updater**；`runAccountMirror(env)` 对比 `AUTH_DB` 的 account 与本地 `user`，只补行与改名、不删行）；`worker/routes/oidc.ts` 的 callback 改为把账号投影与 `INSERT INTO oidc_session` 放同一批 `c.env.DB.batch([...])` 提交（否则症状是「登录一切正常，进站写存档或报分才撞外键 500」）。配 `scripts/oidc-user-mirror/20260923-backfill-user-13-17.sql`（幂等 `ON CONFLICT(id) DO NOTHING`，回填 user 13–17）。`tests/oidc.test.ts` 新增 3 例（登录回调投影账号 / 定时对账补行与改名且不删行 / 未捕获异常 500 回 JSON 且日志留方法与路径）。
 
-**验收（赛事仓实测）**：`npm run typecheck` 全清；`npx vitest run` **15 文件 / 147 例通过 + 1 文件 7 例跳过**（`tests/admin.live.test.ts` 属基线；增量 33 评审后基线 15/144 ⇒ +3 例）；build 成功（`dist/assets/index-CR7ktr7d.js` 444.71 kB / gzip 144.17 kB、`index-C4fgwNax.css` 69.80 kB）；`npx wrangler d1 migrations list whl --remote` ⇒ `✅ No migrations to apply!`。部署后回读：`/api/health` 200、`/api/public/announcement` 200、`/api/public/weekly` 200（`weekStart 2026-09-21` / `played 7` / `goals 20`）；`/api/public/matches/999999/report` ⇒ 404 `{"error":"not_found","message":"该比赛暂无战报（仅完赛场自动成文）"}`、`/api/public/tournaments/999/round/999/1` ⇒ 404 `{"error":"not_found","message":"该轮暂无综述"}` ⇒ 新错误契约在线；线上 `assets/index-CR7ktr7d.js` 内含「服务暂时不可用」「登录已过期，请重新登录」「网络异常，请检查网络后重试」⇒ 新前端文案在线。
+**验收（赛事仓实测）**：`npm run typecheck` 全清；`npx vitest run` **15 文件 / 147 例通过 + 1 文件 7 例跳过**（`tests/admin.live.test.ts` 属基线；v5.0.0 评审后基线 15/144 ⇒ +3 例）；build 成功（`dist/assets/index-CR7ktr7d.js` 444.71 kB / gzip 144.17 kB、`index-C4fgwNax.css` 69.80 kB）；`npx wrangler d1 migrations list whl --remote` ⇒ `✅ No migrations to apply!`。部署后回读：`/api/health` 200、`/api/public/announcement` 200、`/api/public/weekly` 200（`weekStart 2026-09-21` / `played 7` / `goals 20`）；`/api/public/matches/999999/report` ⇒ 404 `{"error":"not_found","message":"该比赛暂无战报（仅完赛场自动成文）"}`、`/api/public/tournaments/999/round/999/1` ⇒ 404 `{"error":"not_found","message":"该轮暂无综述"}` ⇒ 新错误契约在线；线上 `assets/index-CR7ktr7d.js` 内含「服务暂时不可用」「登录已过期，请重新登录」「网络异常，请检查网络后重试」⇒ 新前端文案在线。
 
-**名册同步已实际开跑（本轮顺带核实）**：赛事库 `whl.player` 实测 `{"total":570,"with_number":570,"distinct_num":71}`，`id 20801 = Cristiano Ronaldo / team 45 / #7`、`200104 = Heung Min Son / 243 / #7`、`259516 = Johnny Cardoso / 73 / #14`（**旧 id 241 / 243 已不存在** —— 增量 33 rekey 后 `player.id` = FC26 playerid）⇒ 本仓显示名与 s901 号码已被赛事库拉回，镜像方向正确。赛事库 `user` 表 17 行，13–17 已由整点对账自行补齐（与回填 SQL 预期逐字一致），1–12 的 `role` 未被改动 ⇒ 回填 SQL **未执行**（已无操作对象，幂等留着当恢复路径）。
+**名册同步已实际开跑（本轮顺带核实）**：赛事库 `whl.player` 实测 `{"total":570,"with_number":570,"distinct_num":71}`，`id 20801 = Cristiano Ronaldo / team 45 / #7`、`200104 = Heung Min Son / 243 / #7`、`259516 = Johnny Cardoso / 73 / #14`（**旧 id 241 / 243 已不存在** —— v5.0.0 rekey 后 `player.id` = FC26 playerid）⇒ 本仓显示名与 s901 号码已被赛事库拉回，镜像方向正确。赛事库 `user` 表 17 行，13–17 已由整点对账自行补齐（与回填 SQL 预期逐字一致），1–12 的 `role` 未被改动 ⇒ 回填 SQL **未执行**（已无操作对象，幂等留着当恢复路径）。
 
-**踩坑**：① 门户路由挂在 `/api/public`（`worker/index.ts:32` 的 `app.route("/api/public", portalRoutes)`），**不是 `/api/portal`** —— 探 `/api/portal/*` 会落到无 message 的兜底 404，容易误判「新契约没上线」。② `wrangler deployments list` 列出的 id 是 **deployment id 不是 version id**，看版本要读 JSON 里 `versions[].version_id`。③ `wrangler deployments list --json` 显示赛事仓当日 **08:37:07Z（`71de6d01-…`）与 08:47:45Z（`49563d64-…`）已部署过两次** ⇒ 增量 33 + 本轮代码在本地提交之前就已经上线（这正是 09:29Z 之后整点 cron 覆盖赛事库号码成立的前提）。
+**踩坑**：① 门户路由挂在 `/api/public`（`worker/index.ts:32` 的 `app.route("/api/public", portalRoutes)`），**不是 `/api/portal`** —— 探 `/api/portal/*` 会落到无 message 的兜底 404，容易误判「新契约没上线」。② `wrangler deployments list` 列出的 id 是 **deployment id 不是 version id**，看版本要读 JSON 里 `versions[].version_id`。③ `wrangler deployments list --json` 显示赛事仓当日 **08:37:07Z（`71de6d01-…`）与 08:47:45Z（`49563d64-…`）已部署过两次** ⇒ v5.0.0 + 本轮代码在本地提交之前就已经上线（这正是 09:29Z 之后整点 cron 覆盖赛事库号码成立的前提）。
 
 **待办**：① ~~赛事仓 6 个提交是否 push~~ ✅ 已做（2026-09-23 `dee2292..952f470`；**口径更新**：用户同日明确「部署推送都得一块啊」⇒ 此后「部署」即同时授权该仓 push，不再需要第二次指令）；② 赛事仓未提交残留 `.superpowers/` / `.zcodeignore` / `scripts/fc26-id-rekey/prod-snapshot-20260916.sql`（非本轮产物，未动）。
 
 
-## 增量 37 · 球队与俱乐部双向建档同步（tour + club 两仓，2026-09-23）
+## v6.1.0 · 球队与俱乐部双向建档同步（tour + club 两仓，2026-09-23）
 
 **状态**：**已收口上线**——两仓均已提交、推送并部署（本仓 4 提交 `be28524` / `ce49e77` / `8379508` / `f250c29`，`origin/main` = `f250c29`；赛事仓 4 提交 `ad80d75` / `588f384` / `1ab678a` / `5f07002`，该仓 `origin/main` = `5f07002`）。生产 Version 本仓 **`bd467125-2ccb-4516-86b4-f963bdc5fda6`**（2026-09-23T14:25:21Z，Source `wrangler`；线上首页资产 `index-CpdvAUf3.js` + `index-CgbAjyeh.css` 与本地 `web/dist/assets/` 逐字一致 ⇒ 对账页前端在线）、赛事仓 **`02590a8e-f314-4721-a823-147817a5ce17`**（2026-09-23T14:25:16Z）。两侧均已配 `TEAM_SYNC_SECRET`（`wrangler secret list` 实测；生产无签名探测两侧 `/api/internal/team-upsert` 都回 403 `bad_signature` ⇒ 密钥在位、fail-closed 生效，密钥缺失会回 503 故已排除「未配」）。
 
@@ -866,7 +922,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **问题**：球队（`team.id`）与俱乐部（`clubs.id`）本来就是**同一个号**（游戏内球队编号，两库早前一起 rekey 过），但两边只能各建各的 —— 赛事系统建队不登记俱乐部；俱乐部平台建俱乐部又硬性要求「赛事系统里先有这支队」（否则 404「赛事系统里没有这支球队，请先在赛事系统建队」）。谁先建都得手工去另一侧补一次，漏补就出现「有队无俱乐部」或「有俱乐部无队」。
 
-**边界调整（本增量最需要记住的一条）**：增量 33 定下「名册只拉不推」，理由写在赛事仓 `worker/lib/clubRoster.ts` 顶部（不必在俱乐部平台里放第二个系统的写入凭据）。本增量对**「球队建档」**这一个写动作破例放开对称推送，**名册仍一行都不推**。三条理由：① 建档是一次性事件不是持续数据流；② 两侧管理端都可能先发起，纯拉取要等 1 小时 cron，而「我刚建的队去哪了」是当场要答案的事；③ 赛事系统读不到俱乐部平台库（只有单向只读），反向拉不出「俱乐部有、赛事无」。赛事仓那段注释已原文保留并补上这次调整的声明。
+**边界调整（本增量最需要记住的一条）**：v5.0.0 定下「名册只拉不推」，理由写在赛事仓 `worker/lib/clubRoster.ts` 顶部（不必在俱乐部平台里放第二个系统的写入凭据）。本增量对**「球队建档」**这一个写动作破例放开对称推送，**名册仍一行都不推**。三条理由：① 建档是一次性事件不是持续数据流；② 两侧管理端都可能先发起，纯拉取要等 1 小时 cron，而「我刚建的队去哪了」是当场要答案的事；③ 赛事系统读不到俱乐部平台库（只有单向只读），反向拉不出「俱乐部有、赛事无」。赛事仓那段注释已原文保留并补上这次调整的声明。
 
 **交付**
 - **对称契约**：`POST /api/internal/team-upsert`，体 `{ id, name, operator? }`，语义是**幂等建档** —— 已有同 id 就 200 回 `{ created:false, nameDiffers }` 且**不覆写**，没有才建。两侧各一个入站端点；出站基址复用既有变量（赛事仓用 `CLUB_API_BASE`，本仓用 `TOUR_API_BASE`），共用一把 `TEAM_SYNC_SECRET`。
@@ -893,9 +949,9 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。
 
-**第 0/4/6 节已执行**（本地提交 `dc900fc` + `8078524`，**未 push 未 deploy**）：删 10 个零引用导出 + 订正 3 处过期注释；增量 37 的「未提交未部署」全部订正为已提交已推送已部署；数字漂移回填（迁移 30 → 33、测试 39/539 → 50/698、e2e 9 → 11、生产版本 `627508e5` → `bd467125`、迁移 `0030` → `0033`）；增量 25 的「未部署」残留风险订正为已于 2026-09-21 随 `b83ec876` 上线。明细见 CHANGELOG 同名条目。
+**第 0/4/6 节已执行**（本地提交 `dc900fc` + `8078524`，**未 push 未 deploy**）：删 10 个零引用导出 + 订正 3 处过期注释；v6.1.0 的「未提交未部署」全部订正为已提交已推送已部署；数字漂移回填（迁移 30 → 33、测试 39/539 → 50/698、e2e 9 → 11、生产版本 `627508e5` → `bd467125`、迁移 `0030` → `0033`）；v3.0.0 的「未部署」残留风险订正为已于 2026-09-21 随 `b83ec876` 上线。明细见 CHANGELOG 同名条目。
 
-**第 5 节结论（D1 读量治理后续批次）**：主体已在增量 28 治完（默认浏览 18,819 → 56 行、全站 21 条读面除 free-agents 与 admin/overview 外全部 ≤105 行/次），剩下的是「**写配额换读量**」的排期清单 —— 2026-09-22 搁置它的理由（当日写配额被 `0029`+`0030` 吃掉 73.2%）现已不成立（2026-09-24 实测当日写 10 行 / 读 2,969 行，免费档日配额 5,000,000 读 / 100,000 写按账号计、四库共享），故**建不建索引是产品判断而非配额判断**。用户裁决：海捞池契约（`LIMIT 300` 无分页无筛选）**另立完整增量**——球员页按球员归属加三类操作按钮（本队 = 解约/续约、外队 = 报价、自由身 = 海捞），本轮不涉及；其余按最小步开工一步。
+**第 5 节结论（D1 读量治理后续批次）**：主体已在v3.2.0 治完（默认浏览 18,819 → 56 行、全站 21 条读面除 free-agents 与 admin/overview 外全部 ≤105 行/次），剩下的是「**写配额换读量**」的排期清单 —— 2026-09-22 搁置它的理由（当日写配额被 `0029`+`0030` 吃掉 73.2%）现已不成立（2026-09-24 实测当日写 10 行 / 读 2,969 行，免费档日配额 5,000,000 读 / 100,000 写按账号计、四库共享），故**建不建索引是产品判断而非配额判断**。用户裁决：海捞池契约（`LIMIT 300` 无分页无筛选）**另立完整增量**——球员页按球员归属加三类操作按钮（本队 = 解约/续约、外队 = 报价、自由身 = 海捞），本轮不涉及；其余按最小步开工一步。
 
 **本轮最小步交付**（已提交、已 push（`origin/main` = `6882e10`）、已部署上线（Version `a573ade7-b32f-4c85-bbaf-56a07e612281`，2026-09-24T03:37:52Z））
 - `scripts/check-sort-index-feasibility.mjs`：候选排序表达式体检器（本地 D1 逐条 `CREATE INDEX` 后 `DROP`，零配额）。15 个候选 **15/15 通过** ⇒ D1 表达式树深度上限 100 对这批形态不构成限制（`ps` 15 项链可通过），且 `json_extract` 可出现在索引表达式里。
@@ -923,16 +979,16 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 |---|---|---|
 | 平台 D1 创建（wrangler d1 create whl-club） | 部署 | 已完成（`whl-club` / `73154873-d5ae-42b0-a630-25f5ef60053d`） |
 | 平台部署域必须是 .whleague.win 子域（共享 cookie） | 部署 | 已定并上线 `club.whleague.win` |
-| PlayStyle 图标资产包（`assets/icons/playstyles/{id}.webp`） | 增量 1 球员卡 | 待供给（缺图降级 🥇🥈；`web/public/assets/` 现只有 `brand/`） |
-| 工资帽数值（随赛季大名单） | 增量 2 工资帽 | config 项，不阻塞（`wage_cap` 无默认值） |
+| PlayStyle 图标资产包（`assets/icons/playstyles/{id}.webp`） | v0.2.0 球员卡 | 待供给（缺图降级 🥇🥈；`web/public/assets/` 现只有 `brand/`） |
+| 工资帽数值（随赛季大名单） | v0.3.0 工资帽 | config 项，不阻塞（`wage_cap` 无默认值） |
 | 球员库源数据（FC Editor 逐队导出）：`E:\BaiduNetdiskDownload\FC Editor by decoruiz Alpha v21.5_2\player_tables\`（每队一个 `{id} - {Team}.xlsx`）；口径 `fc_id` = EA id 为 upsert 键、`prestige` ← `internationalrep`(1-5)、`base_ca` = 导入时 CA、`game_attrs` = FC 源 61 列 | 后续增量补录 / 重导 | 参考路径：首灌已于 2026-09-18 执行（入库 18301）；此逐队源供后续核对与增量补录用 |
 | 球员库导入通道 | 球员库首灌 | 已裁决：管理端网页通道要 OIDC 会话（离线脚本拿不到），走 `scripts/players-import/generate-sql.ts` 产分片 SQL + D1 REST `/query`；`--file` 通道遇 FK / 大事务会因 `PRAGMA defer_foreign_keys` 失效整批回滚 |
 | 30 人缺字段补录工件（`scripts/players-import/overlay-missing.ts` + `missing-fields-30.csv`，源缺 `naID` / `FootID`，需人工填值） | 球员库收口 | **等令，未执行**（生产现 18301 人，2026-09-20 查证） |
-| 球员库 D1 读消耗的量化与治理（增量 27 步骤 1 原计划：生产 `rows_read` 抽样 + 按 URL 统计重复率与命中率 + 必要时只读统计端点；再据此选「缓存/查询微调 / 静态快照 / 只改前端」） | 增量 28 | **已完成（2026-09-22 上线，Version `7c5b5879`）**——30 形状生产实测（默认浏览一页 18,819 → **56 行**、容量 265 → 89,285 次/日、海捞名单 36,274 → **843**）＋去整表 COUNT（列表契约不再带 `total`）＋两级缓存与代际键 purge＋迁移 `0029`/`0030`；8 个全表扫排序键与姓名查找逐条豁免（报告 §5.5），FTS5 与 `attr:*` 物化子表登记为独立主题。范围 / 14 项裁决 / 分步 / 验收 / 风险见上方「增量 28」节 |
-| 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | 增量 12 后收口 | **已执行**（2026-09-20，444 行；复查全库 assigned 551 = CPU 4 队 107 + 本批 444） |
+| 球员库 D1 读消耗的量化与治理（v3.1.1 步骤 1 原计划：生产 `rows_read` 抽样 + 按 URL 统计重复率与命中率 + 必要时只读统计端点；再据此选「缓存/查询微调 / 静态快照 / 只改前端」） | v3.2.0 | **已完成（2026-09-22 上线，Version `7c5b5879`）**——30 形状生产实测（默认浏览一页 18,819 → **56 行**、容量 265 → 89,285 次/日、海捞名单 36,274 → **843**）＋去整表 COUNT（列表契约不再带 `total`）＋两级缓存与代际键 purge＋迁移 `0029`/`0030`；8 个全表扫排序键与姓名查找逐条豁免（报告 §5.5），FTS5 与 `attr:*` 物化子表登记为独立主题。范围 / 14 项裁决 / 分步 / 验收 / 风险见上方「v3.2.0」节 |
+| 16 队队籍回填工件（`scripts/prod-20260919-roster-backfill/01-roster-backfill-16.sql`，444 人幂等 UPDATE，只写队籍不造合同） | v1.5.0 后收口 | **已执行**（2026-09-20，444 行；复查全库 assigned 551 = CPU 4 队 107 + 本批 444） |
 | S9 窗基线工件（`scripts/prod-20260920-s9-window-baseline/`：直造一条已关季初常规窗 + 62 行 `result_confirmations` 与 50 行 `match_attendance` 的 `window_seq` 0→1） | 生产数据侧 | **已执行**（2026-09-20 经 `--command` 逐条跑：changes 1 / 62 / 50 与期望一致，验收 9 项全中 → `windows_s9=1, w1_closed=1, open_windows=0, rc_one=62, ma_one=50, season_status=preparing`；代价：该窗 ≈117.5m 维护费与死忠演化不会被任何关窗批收取） |
 | 20 队（含 CPU）队籍对齐工件（源 `FC Editor…/player_tables/s901` 队壳文件；`scripts/prod-20260920-s9-club-align/`：570 人按队壳对齐，481 条 `UPDATE players SET club_id`（改队 158 + 认领 323），只写队籍一列） | 生产数据侧 | **已于 2026-09-21 执行**（481 语句 / rows_written 962 / touched 481；验收：已对齐 570、剩余差异 0、入籍 874 = 551+323、自由身 17427，逐队人数与预估逐队吻合）；合同批的 84 行异队冲突已归零（16 队 462 行全部可导）；**遗留 304 人（275 人不在联盟世界任何一线队名单 + 29 人所在队在平台不存在）已于 2026-09-21 由 `scripts/prod-20260921-s9-free-leftover/` 释放自由身（`club_id = NULL` + `status = 'free'`）** |
-| 16 队合同导入（源 `E:\Downloads\一线队-S9.csv`；`scripts/prod-20260920-s9-contracts/`：生成器 + 462 条带守卫 `INSERT … SELECT` 10 片 + 执行器 `exec-shards.mjs` + 预检/验收/回滚/报告） | 生产数据侧 | **已于 2026-09-21 执行**（先 apply 迁移 0028；10 片 = 462 语句 / changes 462 / rows_written 1386；逐行复核 462 / 命中 462 / 差异 0；验收 11 列全中 —— 462 行全 `import`、formal 399 / trainee 63、`bad_*` 全 0；逐队 16 行与效力年分布（0 赛季 163…2.5 赛季 79）全中；`players` 未被本批改写、6 张守卫表仍 0）。刻度口径 `service_ticks = 当前刻度(1) − 2×效力年`、`protection_ticks = service_ticks + 3`（训练营 NULL）。**增量 25 已于 2026-09-21 上线（Version `b83ec876`，见本文件增量 25 节「遗留」）** ⇒ 面板侧残留风险已消除；该目录 README §11.8 首条已同口径订正 |
+| 16 队合同导入（源 `E:\Downloads\一线队-S9.csv`；`scripts/prod-20260920-s9-contracts/`：生成器 + 462 条带守卫 `INSERT … SELECT` 10 片 + 执行器 `exec-shards.mjs` + 预检/验收/回滚/报告） | 生产数据侧 | **已于 2026-09-21 执行**（先 apply 迁移 0028；10 片 = 462 语句 / changes 462 / rows_written 1386；逐行复核 462 / 命中 462 / 差异 0；验收 11 列全中 —— 462 行全 `import`、formal 399 / trainee 63、`bad_*` 全 0；逐队 16 行与效力年分布（0 赛季 163…2.5 赛季 79）全中；`players` 未被本批改写、6 张守卫表仍 0）。刻度口径 `service_ticks = 当前刻度(1) − 2×效力年`、`protection_ticks = service_ticks + 3`（训练营 NULL）。**v3.0.0 已于 2026-09-21 上线（Version `b83ec876`，见本文件v3.0.0 节「遗留」）** ⇒ 面板侧残留风险已消除；该目录 README §11.8 首条已同口径订正 |
 | S9 遗留球员释放自由身（`scripts/prod-20260921-s9-free-leftover/`：304 名「在册但不在联盟世界 20 队名单」者 → `club_id = NULL` + `status = 'free'`，304 条幂等 UPDATE 2 片 + 回滚 + 预检/验收/报告/README） | 生产数据侧 | **已于 2026-09-21 执行**（用户 2026-09-21 裁定口径「clubID改null，status改free」；304 语句 / rows_written 912；验收六列全中：`want_rows` 304 / `still_rostered` 0 / `status_not_free` 0 / `null_club` 17731 / `rostered_now` 570 / `touched` 304，逐队名单回到联盟世界人数） |
 | 全部自由身补标 `status='free'`（`scripts/prod-20260921-s9-free-status/`：一条带守卫的批量 UPDATE，把其余 17427 名既存自由身补齐，只写 `status`/`updated_at`） | 生产数据侧 | **已于 2026-09-21 执行**（用户裁决「球员库里只要没在 20 队的 status 都应该是 free」；Rows written 34854 = 17427×2，`touched` 17427；验收七列全中 → 自由身 17731 全 `free`、在册 570 全 `normal`、`bad_free_with_club` 0、守卫表全 0）。现态：在册 570（全 `normal`）/ 自由身 17731（全 `free`） |
 | 20 队（含 CPU）能力导入（源 `FC Editor…/player_tables/s901`；`scripts/prod-20260920-s9-abilities/`，口径 **Case B**：只改现值 `ca`/`pa` + `json_set` 合并 34 项能力项与 `RoleID1-5`/`PSID1-15`，**不动 `base_ca`/`$.CA`/`$.PA`/队籍**） | 生产数据侧 | **已于 2026-09-21 执行**（两片 = 200 + 57 条语句 / rows_written 400 + 112 = 512 写；执行前 `--verify` 报差异 257 与语句数一致、执行后 **570 / 570 / 差异 0**；验收六列 `touched 257` / `delta_gt0 254` / `null_core 0` / `gold_rows 35` / `gold_slots 36` / `ca_vs_attr 254`）。涨幅以 delta = `ca`−`base_ca` 形式存在：换版按 delta 继承、解约被剥掉、报名合规停在换版前（口径已用户裁定接受）；`gold_rows/slots` 量的是「范围内持有金徽的行/槽」= 状态数，本批**变更**为 4 行 / 5 槽（原工件把 4/5 写成 SQL 期望，已更正） |

@@ -1,5 +1,5 @@
 // 组装合规引擎的规则上下文（§13 config：squad_min/squad_max/gk_min/trainee_max/wage_cap/ca_pa_limits）
-// 增量 9：tier 改由报名派生（worker/tier.ts），调用方必须先解析出级别再进来——
+// v1.2.0：tier 改由报名派生（worker/tier.ts），调用方必须先解析出级别再进来——
 // 派生不到（未报名/未绑定）一律由上层 400 拦截，这里不再静默回退 premier。
 import { createConfigService } from '../core/config.ts';
 import { DEFAULT_CA_PA_LIMITS, type SquadLimits, type SquadRuleContext } from '../core/squad-rules.ts';

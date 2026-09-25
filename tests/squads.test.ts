@@ -1,4 +1,4 @@
-// 增量 33 步骤 9：GET /api/squads 全平台一线队名册（🌐 公开）。
+// v5.0.0 步骤 9：GET /api/squads 全平台一线队名册（🌐 公开）。
 // 这是赛事系统拉取同步的唯一契约面，所以三条口径必须钉死：
 // ① 只出一线队（`status IN ('normal','listed')`，训练营 trainee 与自由身 free 不出）；
 // ② 姓名走派生显示名（`display_name` 空则回落官方缩写名）—— 赛事系统原来存手工完整人名，
@@ -69,7 +69,7 @@ interface SquadsBody {
   squads: { clubId: number; clubName: string; players: { fcId: number; name: string; number: string | null }[] }[];
 }
 
-describe('全平台一线队名册（增量 33）', () => {
+describe('全平台一线队名册（v5.0.0）', () => {
   it('分组与口径：只出一线队、姓名走显示名回落、fc_id 为空的行不出', async () => {
     const fx = freshEnv();
     seed(fx);

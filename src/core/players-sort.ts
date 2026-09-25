@@ -1,4 +1,4 @@
-// 球员库的排序键白名单（增量 26 步骤 9 复审从 src/worker/routes/players.ts 提到 core）。
+// 球员库的排序键白名单（v3.1.0 步骤 9 复审从 src/worker/routes/players.ts 提到 core）。
 // 提到这里的原因：前端 web/src/lib/players-library.ts 也要同一份表做 URL 校验，
 // 原先两边各写一份字面量，测试比对的其实是硬编码副本 —— 后端加键、前端漏加不会有人发现。
 // 与 src/core/fc26.ts 同样保持零 import：它会被打进前端 bundle。

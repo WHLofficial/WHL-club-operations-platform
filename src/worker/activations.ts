@@ -57,7 +57,7 @@ export async function createActivation(
     .first<{ release_fee: number | null; contract_type: string; service_ticks: number; protection_ticks: number | null }>();
   if (!contract) throw new HttpError(400, '找不到这名球员的现行合同，先让管理组核对合同');
   const isTrainee = contract.contract_type === 'trainee';
-  // 效力与保护期按转会窗刻度（增量 25）：当前已关常规窗数 − 签约基数；训练营合同无保护期
+  // 效力与保护期按转会窗刻度（v3.0.0）：当前已关常规窗数 − 签约基数；训练营合同无保护期
   const currentTicks = await closedRegularTicks(db);
   const askPrice = isTrainee
     ? TRAINEE_ACTIVATION_FEE

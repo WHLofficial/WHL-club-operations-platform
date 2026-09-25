@@ -1,4 +1,4 @@
-// 收件篮（增量 18，UI_DESIGN「通知中心」）：mono 时间 + 模板摘要，未读 sky 小蓝点，点行标已读
+// 收件篮（v2.4.0，UI_DESIGN「通知中心」）：mono 时间 + 模板摘要，未读 sky 小蓝点，点行标已读
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { api, type NotificationsPage } from '../lib/api.ts';
 import { qk, useMarkNotificationsRead } from '../lib/queries.ts';

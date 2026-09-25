@@ -1,4 +1,4 @@
-// 用户端登录守卫（增量 16）：匿名看软提示卡，不重定向（与 AdminLayout 的管理端软卡同一风格）。
+// 用户端登录守卫（v2.2.0）：匿名看软提示卡，不重定向（与 AdminLayout 的管理端软卡同一风格）。
 // viewer（登录但无俱乐部）不挡——页面自己处理 club=null 的空态。
 import type { ReactNode } from 'react';
 import { TOUR_SITE_URL } from '../lib/api.ts';

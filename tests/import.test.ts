@@ -1,4 +1,4 @@
-// 球员/合同导入管线（TECH_DESIGN §5.4 + 增量 22 换版模式与加固）
+// 球员/合同导入管线（TECH_DESIGN §5.4 + v2.8.0 换版模式与加固）
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -58,7 +58,7 @@ function seedGrowingPlayer(sqlite: DatabaseSync, fcId = 100): void {
   `);
 }
 
-describe('导入归一化（增量 22 I4：naID 值域 + TeamID 脏值警告）', () => {
+describe('导入归一化（v2.8.0 I4：naID 值域 + TeamID 脏值警告）', () => {
   it('naID 非整数或超 1-1000 值域挡行；TeamID 脏值出警告不挡行', () => {
     const bad = normalizeImportBatch('A', [rowA(1, { naID: 0 }), rowA(2, { naID: 1001 }), rowA(3, { naID: 1.5 })]);
     expect(bad.errors.map((e) => [e.row, e.field])).toEqual([
@@ -83,7 +83,7 @@ describe('导入归一化（增量 22 I4：naID 值域 + TeamID 脏值警告）'
     expect(warned.warnings.map((w) => w.field)).toEqual(['teamid']);
   });
 
-  it('姓名折叠表外字符出警告不挡行（增量 26）；表内字母与汉字都不报', () => {
+  it('姓名折叠表外字符出警告不挡行（v3.1.0）；表内字母与汉字都不报', () => {
     // ẞ（U+1E9E）不在 name-fold 覆盖内 ⇒ 按去变音搜不到它
     const warned = normalizeImportBatch('A', [rowA(5, { Name: 'ẞtefan' })]);
     expect(warned.errors).toHaveLength(0);
@@ -106,7 +106,7 @@ describe('导入归一化（增量 22 I4：naID 值域 + TeamID 脏值警告）'
   });
 });
 
-describe('球员导入换版模式（增量 22 I1，规则 §5.4）', () => {
+describe('球员导入换版模式（v2.8.0 I1，规则 §5.4）', () => {
   it('小换版：CA 增量平移、成长字段全保留；新插入球员两模式等价', async () => {
     const fx = freshEnv();
     seedGrowingPlayer(fx.sqlite);
@@ -206,7 +206,7 @@ describe('球员导入换版模式（增量 22 I1，规则 §5.4）', () => {
   });
 });
 
-describe('合同导入目标俱乐部校验（增量 22 I3）', () => {
+describe('合同导入目标俱乐部校验（v2.8.0 I3）', () => {
   it('clubId 不存在：预览与确认都 404，不再静默放行到落库炸 FK', async () => {
     const fx = freshEnv();
     const rows = [{ uid: 'fc100', releaseFee: 10, wage: 2, effectiveFrom: '2026-09-01', contractType: 'formal' }];
@@ -217,7 +217,7 @@ describe('合同导入目标俱乐部校验（增量 22 I3）', () => {
   });
 });
 
-describe('CPU 判定列化（增量 22，0026）', () => {
+describe('CPU 判定列化（v2.8.0，0026）', () => {
   it('cpuClubIds 只认 is_cpu=1，不再扫队名后缀', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`

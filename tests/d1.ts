@@ -134,7 +134,7 @@ export function sqlAll<T>(sqlite: DatabaseSync, sql: string, ...params: SqlParam
   return sqlite.prepare(sql).all(...params) as T[];
 }
 
-// 增量 7：auth 库测试镜像（auth 仓 0001 account + 0008 team/team_bind_code/team_binding
+// v1.0.0：auth 库测试镜像（auth 仓 0001 account + 0008 team/team_bind_code/team_binding
 // 的最小列集）；机器端点仿真直接 SQL 读写，派生读路径用 createTestD1 包出来
 export function createAuthDb(): { sqlite: DatabaseSync; d1: D1Database } {
   const sqlite = new DatabaseSync(':memory:');
@@ -179,7 +179,7 @@ export function createAuthDb(): { sqlite: DatabaseSync; d1: D1Database } {
   return { sqlite, d1: createTestD1(sqlite) };
 }
 
-// ---- 增量 7：auth 机器通道测试台（绑定类测试文件共用） ----
+// ---- v1.0.0：auth 机器通道测试台（绑定类测试文件共用） ----
 // 与 routes.test.ts 的 withAuth 同构：挂 AUTH_DB 镜像 + 配置（只配 OIDC_ISSUER 作机器 API
 // 基地址，不配 CLIENT_ID 保持兼容模式）+ fetch 端点仿真（HMAC 契约断言）。
 export const AUTH_TEST_SECRET = 'test-bind-secret';

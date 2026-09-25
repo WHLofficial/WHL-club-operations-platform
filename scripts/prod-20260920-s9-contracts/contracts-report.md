@@ -545,7 +545,7 @@
    ```
    npx wrangler d1 migrations apply whl-club --remote
    ```
-   （0028 未 apply 时 INSERT 会报 `no such column: service_ticks`。本批**不需要**先部署增量 25 的 worker：
+   （0028 未 apply 时 INSERT 会报 `no such column: service_ticks`。本批**不需要**先部署v3.0.0 的 worker：
    刻度列由本批 SQL 直接写；残余风险是 apply 后、部署前若有人从网页面板创建合同，旧 worker 会落默认刻度。）
 2. **预检**（只读）：`node scratch/run-verify.mjs scripts/prod-20260920-s9-contracts/01-precheck.sql`
    期望 `contracts_rows=0`、`tick_cols=4`、`tick_cols_window=1`、`closed_windows=1`、`clubs_rows=20`、`players_found=462`。

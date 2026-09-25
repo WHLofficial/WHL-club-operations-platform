@@ -1,4 +1,4 @@
-// PlayStyle 发放口径（增量 30）：可发放基础 ID 白名单与前端参考表逐项一致、段界/落槽/去重规则。
+// PlayStyle 发放口径（v3.3.0）：可发放基础 ID 白名单与前端参考表逐项一致、段界/落槽/去重规则。
 // 白名单是「库里没有的 ID 发不出去」的唯一闸门（段界 1-99 ∪ 101-199 拦不住它），所以拿参考表守住。
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -96,7 +96,7 @@ describe('playstyleSlotsOf：从 game_attrs 扫全 15 槽', () => {
     // 槽号与 ID 段不一致时以任一边判金（脏数据也当金徽，免得渲染成银）
     expect(playstyleSlotsOf({ PSID13: 5 })).toEqual([{ slot: 13, psid: 5, gold: true }]);
     expect(playstyleSlotsOf({ PSID2: 102 })).toEqual([{ slot: 2, psid: 102, gold: true }]);
-    // PSID8-12 曾因手抄键清单而漏读（增量 29），这里守住扫全 15 槽
+    // PSID8-12 曾因手抄键清单而漏读（v3.2.1），这里守住扫全 15 槽
     expect(playstyleSlotsOf({ PSID9: 4, PSID12: 7, PSID15: 3 }).map((s) => s.slot)).toEqual([9, 12, 15]);
   });
 });

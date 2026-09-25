@@ -1,4 +1,4 @@
-// 守卫测试：赛事系统入口一律走 tour 子域，不许再出现 apex whleague.win（增量 34）。
+// 守卫测试：赛事系统入口一律走 tour 子域，不许再出现 apex whleague.win（v5.0.1）。
 //
 // 背景：whleague.win 是 zone 的 apex，但它不部署任何服务、DNS 也无 A 记录
 // （nslookup -type=A whleague.win 对 8.8.8.8 / 223.5.5.5 / 1.1.1.1 均无答案，curl 返回 000）。
@@ -15,7 +15,7 @@
 // 三处散在配置、后端、前端三地，改回去不会有任何编译或运行时信号，所以在这里锁死。
 //
 // 判据是「生效的 apex URL」：字符串里出现 https:// + apex，且后面不接域名续字符（`whleague.win.example`
-// 这类不算）。注释里可以留历史说明，但请照增量 34 的写法只写 `apex whleague.win`（不带 scheme），
+// 这类不算）。注释里可以留历史说明，但请照v5.0.1 的写法只写 `apex whleague.win`（不带 scheme），
 // 否则会命中下面的全仓扫描——宁枉勿纵，命中只会让人来看一眼。
 // 本文件自己也不写那个完整字符串（用 APEX_URL 拼），这样全仓扫描不需要任何排除项。
 //
@@ -66,14 +66,14 @@ function walk(dir: string): string[] {
   });
 }
 
-describe('赛事系统入口域名（增量 34）', () => {
+describe('赛事系统入口域名（v5.0.1）', () => {
   it('判据：只认生效的 apex URL，子域与注释里的裸 apex 不误伤', () => {
     expect(EFFECTIVE_APEX.test(`"TOUR_API_BASE": "${APEX_URL}"`)).toBe(true);
     expect(EFFECTIVE_APEX.test(`const TOUR_HOME = '${APEX_URL}/';`)).toBe(true);
     expect(EFFECTIVE_APEX.test(`"OIDC_ISSUER": "https://auth.${APEX}"`)).toBe(false);
     expect(EFFECTIVE_APEX.test(`const GUESS_URL = 'https://guess.${APEX}';`)).toBe(false);
     expect(EFFECTIVE_APEX.test(`// Domain=${APEX} 是 zone 的域属性`)).toBe(false);
-    expect(EFFECTIVE_APEX.test(`// 增量 34：apex ${APEX} 没有部署服务`)).toBe(false);
+    expect(EFFECTIVE_APEX.test(`// v5.0.1：apex ${APEX} 没有部署服务`)).toBe(false);
     expect(EFFECTIVE_APEX.test(`${APEX_URL}.example.com`)).toBe(false);
 
     expect(isApexHost(hostOf(`${APEX_URL}/`))).toBe(true);

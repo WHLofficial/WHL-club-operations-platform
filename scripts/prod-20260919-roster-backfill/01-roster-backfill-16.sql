@@ -1,12 +1,12 @@
--- 16 队队籍回填（增量 17，2026-09-19 预检通过；生产执行等管理组明确下令）
+-- 16 队队籍回填（v2.3.0，2026-09-19 预检通过；生产执行等管理组明确下令）
 --
 -- 口径：players.game_attrs 的快照 TeamID == clubs.id（16 支人控队逐一核对成立，
---       参照 web/assets/ref/team.json；AC米兰 TeamID=47 是 CPU 特例，增量 14 已入籍 24 人，不在本批）。
+--       参照 web/assets/ref/team.json；AC米兰 TeamID=47 是 CPU 特例，v2.0.0 已入籍 24 人，不在本批）。
 --       只写队籍（club_id），不造合同、不动 CPU 队与自由身。
 --
 -- 预检实测（2026-09-19，生产 whl-club）：
 --   16 队按 TeamID 合计 444 人，club_id 全部为 NULL；
---   4 支 CPU 队 107 人 club_id 已全部写好（增量 14）；
+--   4 支 CPU 队 107 人 club_id 已全部写好（v2.0.0）；
 --   其余 629 个 TeamID 共 17750 人是自由身/非联赛球员，保持 club_id IS NULL 不动。
 --   每条 UPDATE 都带 club_id IS NULL 守卫：重复执行不会覆盖任何既有队籍（幂等）。
 --

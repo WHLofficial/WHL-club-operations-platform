@@ -514,13 +514,13 @@ describe('我的出价（冻结状态章）', () => {
   });
 });
 
-// ---------- 转会禁令（增量 10） ----------
+// ---------- 转会禁令（v1.3.0） ----------
 
 function del(path: string, token: string | undefined, env: Env) {
   return app.request(path, { method: 'DELETE', headers: token ? { Cookie: `whl_session=${token}` } : {} }, env);
 }
 
-describe('转会禁令（增量 10）', () => {
+describe('转会禁令（v1.3.0）', () => {
   it('封禁后出价/海捞 403，谈判列表可看但报价 403；审计带原因；解封恢复出价', async () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);
@@ -559,9 +559,9 @@ describe('转会禁令（增量 10）', () => {
   });
 });
 
-// ---------- 异常出价告警（增量 10） ----------
+// ---------- 异常出价告警（v1.3.0） ----------
 
-describe('异常出价告警（增量 10）', () => {
+describe('异常出价告警（v1.3.0）', () => {
   it('大额阈值 + 短窗连续抬价同时命中：审核单带 alerts、审计 bid_pattern_alert', async () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);
@@ -607,13 +607,13 @@ describe('异常出价告警（增量 10）', () => {
   });
 });
 
-// ---------- 管理介入扩权（增量 10） ----------
+// ---------- 管理介入扩权（v1.3.0） ----------
 
 function adminPost(path: string, body: unknown, token: string | undefined, env: Env) {
   return post(path, body, token, env);
 }
 
-describe('管理介入扩权（增量 10）', () => {
+describe('管理介入扩权（v1.3.0）', () => {
   it('撤销活跃出价：资金解冻、出价 withdrawn、撤空后挂牌回 listed、审计带原因', async () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);
@@ -705,7 +705,7 @@ describe('管理介入扩权（增量 10）', () => {
   });
 });
 
-describe('暂停出价（增量 15：全局开关 + 单挂牌冻结）', () => {
+describe('暂停出价（v2.1.0：全局开关 + 单挂牌冻结）', () => {
   it('全局暂停：出价 423 code=bid_paused，恢复后可出价；开关留审计', async () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);
@@ -785,12 +785,12 @@ describe('暂停出价（增量 15：全局开关 + 单挂牌冻结）', () => {
   });
 });
 
-// 增量 28 步骤 6：海捞名单查询的执行计划护栏。
+// v3.2.0 步骤 6：海捞名单查询的执行计划护栏。
 // 这条查询曾是全站最大读放大器（生产实测 36,274 行/次）。重写成「两分支 top-N + 合并」后，便宜来自两个
 // 计划性质：无归属支沿 idx_players_club_ca(club_id, ca DESC, id) 走 ca 序、第 300 行即停；CPU 队支由 clubs
 // 驱动（CROSS JOIN 固定连接顺序，否则优化器改用 idx_players_status 扫全部自由身球员）。
 // 任一条退化都只体现在读量上——接口返回一模一样、功能用例全绿，所以这里不看结果，看执行计划。
-describe('海捞名单查询计划（增量 28 步骤 6）', () => {
+describe('海捞名单查询计划（v3.2.0 步骤 6）', () => {
   it('无归属支走 idx_players_club_ca；CPU 队支由 clubs 驱动；不再 MULTI-INDEX OR', async () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);

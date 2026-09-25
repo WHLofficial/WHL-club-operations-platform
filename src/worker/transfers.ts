@@ -5,7 +5,7 @@
 //
 // 类型分支（§6.3）：
 // - 归属变更（transfer/activation/forced_auction）：fee=成交价（货币），交易税按梯度
-//   （强制拍卖整单 50% 特例），新合同带保护期（增量 25 窗刻度：3 个常规窗关窗）。
+//   （强制拍卖整单 50% 特例），新合同带保护期（v3.0.0 窗刻度：3 个常规窗关窗）。
 // - 本队留人（rc_change 续约/match 匹配）：fee=新违约金（非货币，附加费已在审核通过时收），
 //   无划款无税，合同只改 RC/工资/成约方式并把保护期收口到当下（4.4.6/4.4.2.4，效力基数不动）。
 // - 海捞（free_agent）：fee=新违约金（非货币），球员无现行合同 → 新合同 INSERT，
@@ -108,7 +108,7 @@ export async function completeTransfer(
   const ownership = !amendment && !freeAgent;
   if (ownership && transfer.fee === null) throw new HttpError(409, '转会单缺成交价，数据不完整');
   const listingId = listingIdFromTransfer(transfer);
-  // 窗刻度（增量 25）：当下已关常规窗数 = 新合同的效力基数；保护期 = 基数 + 3 个常规窗
+  // 窗刻度（v3.0.0）：当下已关常规窗数 = 新合同的效力基数；保护期 = 基数 + 3 个常规窗
   const baseTicks = await closedRegularTicks(db);
 
   const ctx = await loadMarketContext(db);
@@ -203,7 +203,7 @@ export async function completeTransfer(
   }
   if (!amendment) {
     // 球员归属变更（普通/激活/拍卖/海捞）；本队留人不动 players。
-    // 号码随归属清空（增量 32）：球衣号是俱乐部的东西，换队后新东家重新定号，
+    // 号码随归属清空（v4.0.0）：球衣号是俱乐部的东西，换队后新东家重新定号，
     // 留着旧号会让「同队不重复」在两个队之间打架、也会把旧号带进新队的阵容表。
     statements.push(
       db
@@ -383,7 +383,7 @@ export async function completeTermination(
       )
       .bind(transfer.player_id, transfer.from_club_id),
     db.prepare(`UPDATE contracts SET is_active = 0 WHERE player_id = ? AND is_active = 1`).bind(transfer.player_id),
-    // 徽章明细一并归零（增量 30：台账在上一句已清零，明细表不能留残行，否则重签后又漂回两个口径）
+    // 徽章明细一并归零（v3.3.0：台账在上一句已清零，明细表不能留残行，否则重签后又漂回两个口径）
     db.prepare(`DELETE FROM player_playstyles WHERE player_id = ?`).bind(transfer.player_id),
     ...growthResetStatements(db, transfer.player_id, `termination:${transferId}`, transfer.season, transfer.window_seq),
   ];

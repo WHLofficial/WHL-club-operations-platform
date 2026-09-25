@@ -1,6 +1,6 @@
 -- 0030：海捞名单（/api/market/free-agents）的排序索引
 --
--- 背景（增量 28 步骤 6 全站读面普查实测）：该端点的球员名单查询是全站最大读放大器，
+-- 背景（v3.2.0 步骤 6 全站读面普查实测）：该端点的球员名单查询是全站最大读放大器，
 -- 单次 36,274 行 —— 生产 17,731 名球员 club_id IS NULL（自由身），查询要读出全部再按 ca 排序。
 --
 -- 为什么是 (club_id, ca DESC, id)：
@@ -10,6 +10,6 @@
 --   无归属那一支能 SEARCH ... USING INDEX 后直接停在第 300 行。
 --   尾列 id 是因为排序是 (ca, id) 双列比较（同 ca 时按 id 稳定）。
 --
--- ⚠️ 远端 apply 一次性写 ≈ 18,301 行（免费档 10 万行/日，增量 28 自留 6 万行/日）。
+-- ⚠️ 远端 apply 一次性写 ≈ 18,301 行（免费档 10 万行/日，v3.2.0 自留 6 万行/日）。
 -- 回滚：DROP INDEX idx_players_club_ca;
 CREATE INDEX idx_players_club_ca ON players(club_id, ca DESC, id);

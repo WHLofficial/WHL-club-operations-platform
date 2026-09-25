@@ -1,4 +1,4 @@
--- 增量 6.1：赛事绑定层级修订（需求方裁决 2026-09-14）——赛季是上级，赛事与窗口是并列下级：
+-- v0.7.1：赛事绑定层级修订（需求方裁决 2026-09-14）——赛季是上级，赛事与窗口是并列下级：
 -- 赛事绑定到赛季（一座赛事全库只能进一个赛季，重复绑会把同一场比赛双份放进赛果队列），窗口只管转会准入。
 -- season_windows.tournament_id / competition_type 两列休眠（SQLite 不便 DROP COLUMN），代码停用。
 CREATE TABLE season_tournaments (

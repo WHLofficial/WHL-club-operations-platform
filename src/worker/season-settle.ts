@@ -1,8 +1,8 @@
-// 赛季结算域（增量 11，PRD 4.8/TECH_DESIGN §11/§9.1-9.2）：
+// 赛季结算域（v1.4.0，PRD 4.8/TECH_DESIGN §11/§9.1-9.2）：
 // 1. 赛事完结结算：入场奖金（联赛）、资格赛止步保底、冠军杯小组赛剩余池按胜场占比——一次性项，stage_settled_at 原子闸幂等。
 // 2. 赛季结算按钮（手动 + 前置校验）：growable 重判（规则 4.1.1 本季 age_cap）→ 状态 settled。
-//    忠诚奖金自增量 25 起改在赛季中期窗（同赛季第 2 个常规窗）关窗时发（规则 4.3.2 + 窗刻度），见 loyaltyMovements。
-//    死忠演化归增量 12（主场收入域），此处留位不实现；富人税/工资在窗末（closeWindow）收，季末不重复（假设 28）。
+//    忠诚奖金自v3.0.0 起改在赛季中期窗（同赛季第 2 个常规窗）关窗时发（规则 4.3.2 + 窗刻度），见 loyaltyMovements。
+//    死忠演化归v1.5.0（主场收入域），此处留位不实现；富人税/工资在窗末（closeWindow）收，季末不重复（假设 28）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
@@ -73,7 +73,7 @@ function aggregateRecords(rows: ConfirmedRow[], clubMap: Map<number, number>): M
 }
 
 /**
- * 赛事完结结算（增量 11）：按 competition_type 发该赛事的一次性项。
+ * 赛事完结结算（v1.4.0）：按 competition_type 发该赛事的一次性项。
  * - league_premier/league_second：每支参赛队入场奖金；
  * - qualifying：止步保底（确认赛果里输过至少一场的队，多轮晋级失败口径一致，假设 29）；
  * - champions_cup：仅当该绑定有过小组赛（group/round_robin）确认赛果时，剩余池按胜场占比分；
@@ -298,7 +298,7 @@ export async function loyaltyMovements(
 
 /**
  * 赛季结算（手动按钮）：growable 重判 → seasons.status='settled'。
- * 忠诚奖金自增量 25 起在赛季中期窗关窗时发（见 loyaltyMovements），此处只做成长重判与状态收口。
+ * 忠诚奖金自v3.0.0 起在赛季中期窗关窗时发（见 loyaltyMovements），此处只做成长重判与状态收口。
  */
 export async function settleSeason(env: Env, actor: number, seasonInput: unknown, acknowledged: boolean): Promise<{ ok: true; growable: number; warnings: string[] }> {
   const season = Number(seasonInput);
@@ -317,7 +317,7 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
   const audit = createAuditStatement(db);
   const statements = [audit({ actor, action: 'season_settle', targetType: 'season', targetId: null, after: { season } })];
 
-  // 死忠演化步骤占位：归增量 12（主场收入域）实现后插入本批；
+  // 死忠演化步骤占位：归v1.5.0（主场收入域）实现后插入本批；
   // growable 重判并入主批（规则 4.1.1：按本季 age_cap 全量重算，只改有变化的行）
   const ageCapRow = await db.prepare('SELECT age_cap FROM seasons WHERE season = ?').bind(season).first<{ age_cap: number | null }>();
   const cap = ageCapRow?.age_cap ?? null;

@@ -41,8 +41,8 @@ export function renderNotification(template: string, data: Record<string, unknow
 
 /**
  * 给一个俱乐部排通知（尽力而为：排队失败不抛——通知绝不阻塞主流程，§12-2）。
- * 双通道（增量 18 站内信）：web 行按绑定账号逐人写（status='sent' 免投递，收件篮读）；
- * QQ 行照旧只写给 qq_links 命中的账号。绑定真源在 auth 库（增量 7）：先按 club_id 从
+ * 双通道（v2.4.0 站内信）：web 行按绑定账号逐人写（status='sent' 免投递，收件篮读）；
+ * QQ 行照旧只写给 qq_links 命中的账号。绑定真源在 auth 库（v1.0.0）：先按 club_id 从
  * AUTH_DB 取绑定账号，再查本地 qq_links；AUTH_DB 未配置回落本地休眠表（回滚通道）。
  */
 export async function queueClubNotification(

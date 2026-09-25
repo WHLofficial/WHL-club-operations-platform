@@ -1,4 +1,4 @@
-// 媒体读取（增量 31）：镜像比赛系统的公开媒体路由
+// 媒体读取（v3.4.0）：镜像比赛系统的公开媒体路由
 // （`WHL-tournament-management-system/worker/routes/media.ts`），**只读不写**——
 // 队徽/封面图全部由比赛系统上传，本平台按 key 取。
 //

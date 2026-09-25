@@ -1,4 +1,4 @@
-// 球队详情页（增量 31 步骤 7–8，结构分析在步骤 11a 按用户裁决整改）：
+// 球队详情页（v3.4.0 步骤 7–8，结构分析在步骤 11a 按用户裁决整改）：
 // 阵容组 + 运营组 + 战绩组，登录者正是本队教练时再挂教练工作台。
 // 每组内是「三格主指标 + 一行语义明细」，不是等权指标网格；三张结构图各用各的坐标语义（见文件中部注释）。
 // URL 口径：/clubs/:id 的 :id 就是平台库 clubs.id（AGENTS.md「代码与提交」节，长期有效）。
@@ -38,7 +38,7 @@ function seasons(x: number | null): string {
 const FORM_LABEL: Record<'win' | 'draw' | 'loss', string> = { win: '胜', draw: '平', loss: '负' };
 const FORM_BADGE: Record<'win' | 'draw' | 'loss', string> = { win: 'green', draw: 'gray', loss: 'red' };
 
-// 结构分析图全部 CSS 自绘（不引图表库）。三张图各用各的坐标语义（增量 31 步骤 11a，用户裁决）：
+// 结构分析图全部 CSS 自绘（不引图表库）。三张图各用各的坐标语义（v3.4.0 步骤 11a，用户裁决）：
 //   位置分布 → 不用图示，纯文字档位
 //   年龄结构 → 等宽 3 岁箱 ⇒ 竖直直方图（柱相邻、面积=人数）
 //   CA 结构  → 语义档不等宽（70–79 宽 10、80–84 宽 5）⇒ 一根水平柱按占比切段（100% 堆叠条）
@@ -134,7 +134,7 @@ function ShareBar({ bands, total, ariaLabel }: { bands: ClubBand[]; total: numbe
 
 // 主指标：大号数字，三格铺满一行。
 // 与下方明细同住一个 .club-summary（淡奶油底 + 左侧一道焦橙竖线），所以「大数字 + 小字」是一块东西，
-// 不是两块（增量 31 步骤 11b 用户反馈：小字与上方过于割裂）。
+// 不是两块（v3.4.0 步骤 11b 用户反馈：小字与上方过于割裂）。
 function HeroStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="club-hero-item">

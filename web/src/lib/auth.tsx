@@ -1,4 +1,4 @@
-// 登录态上下文（增量 16）：/api/me 全站只拉一次，useAuth() 取代 props 钻透。
+// 登录态上下文（v2.2.0）：/api/me 全站只拉一次，useAuth() 取代 props 钻透。
 // 登录/登出都是整页跳转，会话在页面生命周期内不变 → me 查询永不自动重取。
 import { createContext, useContext, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';

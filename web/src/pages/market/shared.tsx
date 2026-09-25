@@ -1,4 +1,4 @@
-// 市场三页共享件（增量 16 拆页）：常量、格式化、子导航。
+// 市场三页共享件（v2.2.0 拆页）：常量、格式化、子导航。
 // 数据层 hooks 在 lib/queries.ts（TanStack Query）。
 import { NavLink } from 'react-router';
 

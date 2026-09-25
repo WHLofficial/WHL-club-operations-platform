@@ -22,8 +22,8 @@
 
 ## 3. 硬前置（顺序不能反）
 
-1. **迁移 `0028_contract_window_ticks.sql` 必须已 apply**：`contracts.service_ticks` / `contracts.protection_ticks` 是增量 25 新增列，未 apply 时写不进去（`no such column`）。
-2. **增量 25 的 worker 必须已部署**：未部署时线上 `upsertContractStatement`（`src/worker/contracts-import.ts:185-213`）的 INSERT 不含刻度列，先导的合同会在 0028 apply 后落 DDL 默认值 `service_ticks = 0` / `protection_ticks = NULL`（= **无保护期**，语义错）。
+1. **迁移 `0028_contract_window_ticks.sql` 必须已 apply**：`contracts.service_ticks` / `contracts.protection_ticks` 是v3.0.0 新增列，未 apply 时写不进去（`no such column`）。
+2. **v3.0.0 的 worker 必须已部署**：未部署时线上 `upsertContractStatement`（`src/worker/contracts-import.ts:185-213`）的 INSERT 不含刻度列，先导的合同会在 0028 apply 后落 DDL 默认值 `service_ticks = 0` / `protection_ticks = NULL`（= **无保护期**，语义错）。
 3. **窗基线批先执行**：`windowBaseTicks(db, effective_from)` 数的是「`closed_at <= effective_from` 的已关常规窗」。基线的季初窗 `closed_at = 2026-09-18T01:01:00.000Z`，故 `effective_from >= 2026-09-18` 的合同基数 = 1 tick。
 4. **队籍对齐批先执行**（建议顺序：窗基线 → 队籍对齐 → 合同）：`classify` 规则②会把「球员现属队 ≠ 目标队且非 CPU」判为错误（`src/worker/contracts-import.ts:82-152`）。对齐后这 84 行变成普通 `create`，16 队 462 行零冲突。若不做对齐，只能按 §6-② 跳过 84 行。
 
@@ -93,7 +93,7 @@
 **① 导入范围**
 - A（推荐）：只导 16 人控队，378 行。
 - B：含 4 支 CPU 队，461 行。
-- 影响：B 会额外给 CPU 队建合同，且让 CPU 队球员有工资支出（CPU 队不入账逻辑见增量 11 口径），本批指令只说「16 队」。
+- 影响：B 会额外给 CPU 队建合同，且让 CPU 队球员有工资支出（CPU 队不入账逻辑见v1.4.0 口径），本批指令只说「16 队」。
 
 **② 84 行异队冲突怎么处置 —— 已裁决：先跑队籍对齐批**
 - **已选（2026-09-20）**：单开 `scripts/prod-20260920-s9-club-align/` 按 s901 对齐 570 人队籍，排在合同批之前；对齐后本批 462 行零冲突全可导（见 §5 末段）。这正是「先队籍对齐、再合同、后能力」顺序的来源。
@@ -153,7 +153,7 @@ DELETE FROM contracts WHERE source = 'import';
 
 ## 10. 风险
 
-- **保护期语义**：`protection_ticks = service_ticks + 3`，效力越老保护期越早结束（效力 2.5 → `protection_ticks = -1` → 已无保护期）。这是增量 25 的既有口径，符合直觉。
+- **保护期语义**：`protection_ticks = service_ticks + 3`，效力越老保护期越早结束（效力 2.5 → `protection_ticks = -1` → 已无保护期）。这是v3.0.0 的既有口径，符合直觉。
 - **认领会改变 16 队人数**（+378 行里的 298 人来自自由身池与 CPU 队）。导入后建议跑一次报名体检（`initialCa = base_ca ?? ca`，`src/core/squad-rules.ts:17-20`）。
 - **CSV 与 roster-backfill 的口径冲突**：roster 按 EA 队籍灌 444 人，CSV 是联盟转会后的世界；本批只补合同，不解决谁权威。
 - **`releaseFee = 0` 与文案不一致**：后端要求 `>0`，文案写「0-1000」，CSV 无 0 值，不受影响。
@@ -181,7 +181,7 @@ DELETE FROM contracts WHERE source = 'import';
 1. 执行前 `01-precheck.sql`（生产只读）：`contracts_rows 0`、`tick_cols 0`、`tick_cols_window 0`、`closed_windows 1`、`clubs_rows 20`、`players_found 462`。
 2. `npx wrangler d1 migrations apply whl-club --remote` → `0028_contract_window_ticks.sql` ✅（Executed 6 commands，3.09ms）。
 3. 执行后再跑预检：`tick_cols 4`、`tick_cols_window 1`，其余不变；`migrations list --remote` = 「No migrations to apply!」。
-4. **本批走离线 SQL 通道**：INSERT 显式写 `service_ticks` / `protection_ticks`，不依赖线上 worker 版本，故**不需要**先部署增量 25（§3-2 那条警告针对的是网页面板通道）。
+4. **本批走离线 SQL 通道**：INSERT 显式写 `service_ticks` / `protection_ticks`，不依赖线上 worker 版本，故**不需要**先部署v3.0.0（§3-2 那条警告针对的是网页面板通道）。
 
 ### 11.3 写入
 
@@ -241,9 +241,9 @@ node scripts/prod-20260920-s9-contracts/exec-shards.mjs \
 
 ### 11.8 残留风险
 
-- ~~**增量 25 未部署**（本轮指令只到「合同导入」，`git push` / `wrangler deploy` 都不在授权内）。0028 已 apply、线上 worker 若仍是旧版：此时**通过网页面板**创建合同会落 DDL 默认刻度（`service_ticks = 0`、`protection_ticks = NULL`）。窗口关闭期间无正常路径会在面板建合同（谈判/强制拍卖都要窗口），但**下次窗口开启前应先部署增量 25**。~~ → **已消除（2026-09-23 订正）**：增量 25 于 2026-09-21 随 Version `b83ec876` 上线（见 `ROADMAP.md` 增量 25 节「遗留」），网页面板建合同不再落 DDL 默认刻度。
+- ~~**v3.0.0 未部署**（本轮指令只到「合同导入」，`git push` / `wrangler deploy` 都不在授权内）。0028 已 apply、线上 worker 若仍是旧版：此时**通过网页面板**创建合同会落 DDL 默认刻度（`service_ticks = 0`、`protection_ticks = NULL`）。窗口关闭期间无正常路径会在面板建合同（谈判/强制拍卖都要窗口），但**下次窗口开启前应先部署v3.0.0**。~~ → **已消除（2026-09-23 订正）**：v3.0.0 于 2026-09-21 随 Version `b83ec876` 上线（见 `ROADMAP.md` v3.0.0 节「遗留」），网页面板建合同不再落 DDL 默认刻度。
 - **CPU 队 108 行、无平台队 164 行未导**（范围裁决 §6-①③），这 272 人暂时没有合同记录。
-- **保护期语义**沿用增量 25 口径：`protection_ticks = service_ticks + 3`，效力老的球员保护期已过期（`< 1` 即无保护），与本批刻度一致。
+- **保护期语义**沿用v3.0.0 口径：`protection_ticks = service_ticks + 3`，效力老的球员保护期已过期（`< 1` 即无保护），与本批刻度一致。
 - **CSV 状态列（col28）未映射**：该列在 16 队内只有 22 行有值（`已匹配` 18 / `已续约1` 4），其余全空；它既不承载训练营标记（63 个训练营行的状态列全空 ⇒ 训练营判定只用 col19/20，已在生成器注释里写死），也没有对应的合同列。若这 22 行的含义（是否意味着已续约过 1 次、影响保护期起算）需要反映，得另开一批处理。
 
 ### 11.9 复审修正（2026-09-21，code-review-skill 过审）

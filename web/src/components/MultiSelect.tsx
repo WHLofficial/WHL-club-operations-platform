@@ -1,4 +1,4 @@
-// 多选下拉（增量 27 步骤 3）：位置 / 显示列 / PlayStyle 三处共用同一个组件。
+// 多选下拉（v3.1.1 步骤 3）：位置 / 显示列 / PlayStyle 三处共用同一个组件。
 // 面板走原生 Popover API（top layer）：窄屏筛选抽屉是 position:fixed + overflow-y:auto 的滚动容器，
 // 普通绝对定位的面板会被它裁掉一截；top layer 不受任何祖先的 overflow/clip/transform 影响。
 // 浏览器的 light-dismiss 不依赖：勾选之后不能自动关（多选就是要连点几项），所以开关状态自己管，

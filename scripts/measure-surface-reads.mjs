@@ -1,4 +1,4 @@
-// 增量 28 步骤 6：球员库以外的读面普查（一次性测量台，产物进 scripts/d1-read-audit/README.md §7）。
+// v3.2.0 步骤 6：球员库以外的读面普查（一次性测量台，产物进 scripts/d1-read-audit/README.md §7）。
 //
 // 与 scripts/measure-d1-reads.mjs 的关系：同一个「调真实路由 + 假 D1 抓 SQL + 打生产读 meta」机制，
 // 机件共用 scripts/d1-read-audit/harness.mjs。区别在鉴权——球员库是公开端点，这里的读面大多在

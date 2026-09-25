@@ -1,4 +1,4 @@
-// /club 重定向壳（增量 31 步骤 8）：球队中心的正文已搬进 /clubs/:id 的教练区块。
+// /club 重定向壳（v3.4.0 步骤 8）：球队中心的正文已搬进 /clubs/:id 的教练区块。
 // 老入口（顶栏「我的球队」、绑定成功页、首页卡片、球员页回链）继续可用，只是到这里就转走。
 import { Navigate } from 'react-router';
 import { useMyClub } from '../lib/queries.ts';

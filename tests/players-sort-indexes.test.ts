@@ -1,4 +1,4 @@
-// 增量 28 步骤 4：排序表达式索引必须与查询表达式同源——用真实路由抓下来的 SQL 跑 EXPLAIN QUERY PLAN 锁死。
+// v3.2.0 步骤 4：排序表达式索引必须与查询表达式同源——用真实路由抓下来的 SQL 跑 EXPLAIN QUERY PLAN 锁死。
 // 表达式索引只有在表达式树逐字相等时才生效：排序表达式一改，索引就静默失效（退回全表扫 + 临时排序，
 // 读量涨约 1000 倍），而功能测试全绿、接口返回一模一样。所以这里不看结果，看执行计划。
 import { describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ import { PS_SLOT_COUNT } from '../src/core/fc26.ts';
 import { applyMigrations, createTestD1, createTestKV } from './d1.ts';
 
 // [排序键, 索引名, 额外查询参数]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
-// + 0033 一条（name，增量 32 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
+// + 0033 一条（name，v4.0.0 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
 // + 0034 三条（uid / ps / view=initial 下的 ca，遗留项第 5 节 D1 读量治理的下一批次）
 // + 0035 两条（position / growable，两条常驻列）+ 0036 三条（badges / base_ca / foot）
 const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?: string]> = [
@@ -104,7 +104,7 @@ async function queryPlan(sort: string, extra = ''): Promise<string> {
   return rows.map((r) => r.detail).join(' | ');
 }
 
-describe('排序表达式索引与查询表达式同源（增量 28）', () => {
+describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
   for (const [sort, index, extra = ''] of INDEXED_SORTS) {
     const label = `sort=${sort}${extra}`;
     it(`${label} 走 ${index}，不退回全表扫 + 临时排序`, async () => {

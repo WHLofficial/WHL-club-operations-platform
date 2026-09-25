@@ -1,9 +1,9 @@
-// 窗末结算扣款（增量 11，TECH_DESIGN §11「窗口 closed 触发结算」；增量 25 按窗类型分支）：
+// 窗末结算扣款（v1.4.0，TECH_DESIGN §11「窗口 closed 触发结算」；v3.0.0 按窗类型分支）：
 // 常规窗（is_temporary=0）：富人税 → 工资。工资 = Σ现行合同（is_active=1）wage（m/半赛季，一窗全额；
 //   训练营合同 wage 存 0.75 同口径）。
 // 临时窗（is_temporary=1）：只扣富人税，工资不扣（规则口径：临时窗不是半赛季节点）。
 // 富人税（§9.2）= max(资金>125m → 资金×20%，球队价值(ΣRC+资金)>700m → 价值×5%)；
-//   税基含未扣工资（增量 25 裁决：税最先扣，balance 不减本窗工资），故流水顺序税在前。
+//   税基含未扣工资（v3.0.0 裁决：税最先扣，balance 不减本窗工资），故流水顺序税在前。
 // 维护费在 home.ts 的 windowHomeStatements（临时窗照收，按本窗主场数）；余额可扣成负（欠账下窗自然补扣）；
 // 假设 28：富人税只在窗末收，赛季结算不重复收。
 // 幂等：ledgerMovement 幂等闸按 (club_id, kind, ref_type, ref_id)，ref_type='window'、ref_id=season*100+windowSeq；

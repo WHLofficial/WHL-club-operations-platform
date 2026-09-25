@@ -1,4 +1,4 @@
-// 增量 37：球队建档双向同步（club 侧）——入站验签矩阵、幂等、对账 diff、出站推送、缓存失效登记。
+// v6.1.0：球队建档双向同步（club 侧）——入站验签矩阵、幂等、对账 diff、出站推送、缓存失效登记。
 // 出站方向与赛事仓 tests/clubTeamSync.test.ts 是同一份契约的两半：签名串 POST|path|ts|raw、±300s 窗口。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
@@ -120,7 +120,7 @@ function adminPost(path: string, body: unknown, env: Env) {
   );
 }
 
-describe('入站机器端点 POST /api/internal/team-upsert（增量 37）', () => {
+describe('入站机器端点 POST /api/internal/team-upsert（v6.1.0）', () => {
   it('正签：建档 + auth 目录登记（带 club_id）+ 审计 actor 留空', async () => {
     const fx = freshEnv({ auth: true });
     stubFetch();
@@ -212,7 +212,7 @@ describe('入站机器端点 POST /api/internal/team-upsert（增量 37）', () 
   });
 });
 
-describe('公开缓存失效登记（增量 37）', () => {
+describe('公开缓存失效登记（v6.1.0）', () => {
   it('写路径 /api/internal 命中 PUBLIC_SCOPES——否则建了俱乐部公开目录最长陈旧 24h', () => {
     expect(scopesForWritePath('/api/internal/team-upsert')).toEqual(['players', 'roster', 'clubs']);
     expect(scopesForWritePath('/api/internal')).toEqual(['players', 'roster', 'clubs']);
@@ -247,7 +247,7 @@ describe('computeTeamSyncDiff 纯函数', () => {
   });
 });
 
-describe('对账端点 GET /api/admin/team-sync + POST /apply（增量 37）', () => {
+describe('对账端点 GET /api/admin/team-sync + POST /apply（v6.1.0）', () => {
   it('未登录 → 401', async () => {
     const fx = freshEnv();
     expect((await app.request('/api/admin/team-sync', { method: 'GET' }, fx.env)).status).toBe(401);
@@ -309,7 +309,7 @@ describe('对账端点 GET /api/admin/team-sync + POST /apply（增量 37）', (
 
 // 这条是本增量最要紧的一个真实风险：本地建档失败时，赛事系统那支已经建好的队撤不回来。
 // 推送不可撤销 → 只能靠对账页把它列进 onlyTour 让人补，所以「错位可见」必须钉在测试里。
-describe('真实风险：先推成功后本地建档失败 → 错位必须被对账页看得见（增量 37）', () => {
+describe('真实风险：先推成功后本地建档失败 → 错位必须被对账页看得见（v6.1.0）', () => {
   it('本地名字撞车 409，赛事系统那边已建队 → GET /team-sync 的 onlyTour 报出它', async () => {
     const fx = freshEnv();
     fx.sqlite.exec(`INSERT INTO clubs (id, name, status, created_at) VALUES (700, '撞名俱乐部', 'active', '2026-01-01T00:00:00Z')`);
@@ -333,7 +333,7 @@ describe('真实风险：先推成功后本地建档失败 → 错位必须被�
   });
 });
 
-describe('出站 pushTeamToTour（增量 37）', () => {
+describe('出站 pushTeamToTour（v6.1.0）', () => {
   it('未配 TOUR_API_BASE / TEAM_SYNC_SECRET → 只回报文案，不抛错', async () => {
     const fx = freshEnv();
     stubFetch();
@@ -379,7 +379,7 @@ describe('出站 pushTeamToTour（增量 37）', () => {
 // 它不是用被测代码算的，而是用 node:crypto 独立算出来写死的；所以两侧任一方偷改算法、
 // 路径或签名串都会红。赛事仓 tests/clubTeamSync.test.ts 里有逐字同值的一份（同样的
 // secret / ts / raw / hex），两仓的文件可以直接对读。
-describe('跨仓契约金标准（增量 37）', () => {
+describe('跨仓契约金标准（v6.1.0）', () => {
   const SECRET = 'increment-37-golden-secret';
   const GOLDEN_TS = '1767225600'; // 2026-01-01T00:00:00Z
   const GOLDEN_RAW = '{"id":700,"name":"Arsenal","operator":1}';

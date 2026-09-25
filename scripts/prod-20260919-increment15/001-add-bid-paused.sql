@@ -1,4 +1,4 @@
--- 增量 15（2026-09-19 生产执行）：listings 加 bid_paused 列（单挂牌暂停出价开关）
+-- v2.1.0（2026-09-19 生产执行）：listings 加 bid_paused 列（单挂牌暂停出价开关）
 -- 语义：bid_paused=1 时该挂牌拒绝新出价（423 listing_bid_paused），
 --   已出的价、到期结算、管理干预均不受影响；全局开关走 config 键 market_bid_paused，不动表结构。
 -- 本文件为工件留档；实际执行走迁移通道（账目随 d1_migrations 记录）：

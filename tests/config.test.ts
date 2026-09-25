@@ -30,7 +30,7 @@ describe('config 服务（§13）', () => {
   it('json/待定键缺省为 null（ca_pa_limits 除外，规则 4.2.2 有原文默认）', async () => {
     const { service } = setup();
     await expect(service.get('wage_cap')).resolves.toBeNull();
-    // 增量 11：prize_table 有 §9.1 原文默认（JSON 可覆盖），不再是缺省 null
+    // v1.4.0：prize_table 有 §9.1 原文默认（JSON 可覆盖），不再是缺省 null
     await expect(service.getJson<object>('prize_table')).resolves.toHaveProperty('league_premier');
     await expect(service.getJson<object>('ca_pa_limits')).resolves.toEqual({
       premier: { ge90: 1, ge87: 4, growthPa87: 6 },
@@ -120,7 +120,7 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 61 键（§13 + 增量 15/19/20/21 各域参数）', () => {
+  it('注册表 61 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0 各域参数）', () => {
     expect(CONFIG_KEYS.length).toBe(61);
   });
 });

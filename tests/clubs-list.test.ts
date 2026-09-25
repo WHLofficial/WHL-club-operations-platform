@@ -1,4 +1,4 @@
-// 增量 31 步骤 3：GET /api/clubs 球队列表端点。
+// v3.4.0 步骤 3：GET /api/clubs 球队列表端点。
 // 覆盖：四项指标（阵容拆一线队/训练营、平均 CA、总身价、工资总额）聚合口径、分级批量派生、
 // 队徽经比赛系统 team.logo_key、CPU 标记、空阵容回落、AUTH_DB 未配的休眠列回落、
 // 双定级数据冲突降级为未定级（不打死公开列表页）。
@@ -133,7 +133,7 @@ function recorder(env: Env): { env: Env; captured: string[] } {
   return { env: { ...env, DB } as Env, captured };
 }
 
-describe('GET /api/clubs 球队列表（增量 31 步骤 3）', () => {
+describe('GET /api/clubs 球队列表（v3.4.0 步骤 3）', () => {
   it('四项指标 + 分级 + 队徽 + CPU 标记；退役俱乐部不入列表', async () => {
     const fx = freshEnv();
     bindSeason(fx);

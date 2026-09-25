@@ -1,4 +1,4 @@
-// 海捞 /market/free（增量 16 拆页）：海捞自由球员签入（规则 4.4.4）+ 激活别队训练营球员（规则 4.4.2）。
+// 海捞 /market/free（v2.2.0 拆页）：海捞自由球员签入（规则 4.4.4）+ 激活别队训练营球员（规则 4.4.2）。
 // 原 Market.tsx 的 FreeAgentSection 与 ActivateSection 原样搬迁；需登录（路由守卫），操作要教练账号。
 import { useState } from 'react';
 import { Link } from 'react-router';

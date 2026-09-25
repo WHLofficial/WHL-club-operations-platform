@@ -1,4 +1,4 @@
--- 增量12 主场存量导入（生产 whl-club）：显式 club_id 版本（由 export_revenue.py 输出改写）
+-- v1.5.0 主场存量导入（生产 whl-club）：显式 club_id 版本（由 export_revenue.py 输出改写）
 -- 2026-09-18 已在生产执行：stadiums=16 / club_facilities=80，无孤儿行。
 -- 重跑会因 stadiums.club_id 主键冲突报错（不会静默重复）；回滚 = DELETE FROM club_facilities; DELETE FROM stadiums;
 -- 注意：同目录 stadium-import.sql 是旧版（按 clubs.name 子查询匹配），已被本文件取代，勿再使用——

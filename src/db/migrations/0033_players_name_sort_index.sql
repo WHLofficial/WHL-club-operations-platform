@@ -1,6 +1,6 @@
--- 增量 32 步骤 10：文本排序键（球员库表头「姓名」列）的表达式索引
+-- v4.0.0 步骤 10：文本排序键（球员库表头「姓名」列）的表达式索引
 --
--- 为什么现在做：增量 28 的读额度审计（scripts/d1-read-audit/README.md:64/221）把 sort=name 记为
+-- 为什么现在做：v3.2.0 的读额度审计（scripts/d1-read-audit/README.md:64/221）把 sort=name 记为
 -- 37,635 行/次的全表扫——0027 只覆盖 ca/pa/age/market_value，0029 只覆盖 prestige/club/status，
 -- 姓名列从来就没有过索引（0027 之前是裸列，之后是 sqlFold 折叠表达式，两者都用不上 B-tree）。
 -- 本增量的步骤 3 把排序键从折叠的官方缩写名改成折叠的**显示名**（COALESCE(display_name, name)，

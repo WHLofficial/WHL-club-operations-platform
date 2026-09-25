@@ -1,4 +1,4 @@
-// 签约谈判（增量 4，§6.7）：我的谈判会话——定新违约金、工资报价（≤3 轮）、直签训练营。
+// 签约谈判（v0.5.0，§6.7）：我的谈判会话——定新违约金、工资报价（≤3 轮）、直签训练营。
 // 满意度文案与结局由服务端给出（§6.10：前端不含任何判定参数，E 数值仅展示）。
 // 家族口径：mono 数字、口语化文案、操作 toast 反馈、两段式 busy 态。
 import { useMemo, useState } from 'react';
@@ -54,7 +54,7 @@ export default function Negotiations() {
   const active = useMemo(() => (sessions ?? []).filter((s) => s.status === 'active'), [sessions]);
   const done = useMemo(() => (sessions ?? []).filter((s) => s.status !== 'active'), [sessions]);
 
-  // 成约即过户 ⇒ 顺手把新援的球衣号定了（增量 32）。号码不是必填，所以留「先跳过」。
+  // 成约即过户 ⇒ 顺手把新援的球衣号定了（v4.0.0）。号码不是必填，所以留「先跳过」。
   async function afterSettled(msg: string, player: { id: number; name: string }) {
     show(msg);
     setJustSigned(player);
@@ -127,7 +127,7 @@ export default function Negotiations() {
   );
 }
 
-/* ---------- 成约后的球衣号（增量 32） ---------- */
+/* ---------- 成约后的球衣号（v4.0.0） ---------- */
 
 // 成约那一刻球员就过户了，号码是俱乐部的 ⇒ 就地让教练定号，省得回头翻球员卡。
 // 可以跳过：合同页签随时能补，所以这里不拦路，也不校验同队重复之外的东西（后端把关）。

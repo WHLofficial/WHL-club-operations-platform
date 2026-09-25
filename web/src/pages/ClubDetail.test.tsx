@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 球队详情页（web/src/pages/ClubDetail.tsx，增量 31 步骤 7）的组件测试：
+// 球队详情页（web/src/pages/ClubDetail.tsx，v3.4.0 步骤 7）的组件测试：
 // 三组（阵容 / 运营 / 战绩）的字段口径、柱状图归一、名单与转会链接口径（Q17：队链接一律 /clubs/:id）、
 // 排名降级文案、以及 id 非法 / 详情报错的兜底。
 // 没打 CSS（jsdom 不跑样式表），视觉表现靠 e2e 截图看；这里只钉结构与内联宽度。
@@ -302,7 +302,7 @@ afterEach(() => {
   authState.user = null;
 });
 
-describe('球队详情页（增量 31 步骤 7）', () => {
+describe('球队详情页（v3.4.0 步骤 7）', () => {
   it('队头：队名、分级徽章、队徽、排名徽章；未定级与 CPU 各出灰标', async () => {
     stubApi({ standing: { standing: { tournamentId: 101, stageName: '常规赛', groupName: 'A 组', position: 2, played: 3, won: 2, drawn: 0, lost: 1, goalsFor: 5, goalsAgainst: 3, pts: 6, pointsDeducted: 0 }, note: null } });
     renderDetail();
@@ -520,7 +520,7 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     expect((within(ops).getAllByText('张三')[0] as HTMLAnchorElement).getAttribute('href')).toBe('/players/7');
   });
 
-  it('阵容名单里的人链到 fc_id，不是内部 id（增量 32）', async () => {
+  it('阵容名单里的人链到 fc_id，不是内部 id（v4.0.0）', async () => {
     stubApi({
       roster: {
         players: [rosterRow({ id: 8, name: '李四', fcId: 239085 })],
@@ -535,7 +535,7 @@ describe('球队详情页（增量 31 步骤 7）', () => {
     expect(link.getAttribute('href')).toBe('/players/239085');
   });
 
-  it('转会记录里的人优先链 playerFcId（增量 32）', async () => {
+  it('转会记录里的人优先链 playerFcId（v4.0.0）', async () => {
     stubApi({
       detail: detailFixture({
         transfers: { incoming: [transfer({ id: 21, playerId: 7, playerFcId: 239085, playerName: '张三' })], outgoing: [] },

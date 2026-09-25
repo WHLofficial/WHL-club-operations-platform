@@ -126,7 +126,7 @@ async function bindSeason(fx: Fixture): Promise<void> {
     'tok-admin',
     fx.env,
   );
-  // 绑定已不依赖窗口（增量 6.1：赛事绑赛季）；仍开出窗口 2，让冠军杯场次的确认时点落在窗 2
+  // 绑定已不依赖窗口（v0.7.1：赛事绑赛季）；仍开出窗口 2，让冠军杯场次的确认时点落在窗 2
   await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
   await post('/api/admin/windows/open', { season: 3, windowSeq: 2 }, 'tok-admin', fx.env);
   await post(
@@ -575,7 +575,7 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
   });
 });
 
-describe('中国计划徽章发放（增量 30：中国计划自选 3 个银 PlayStyle）', () => {
+describe('中国计划徽章发放（v3.3.0：中国计划自选 3 个银 PlayStyle）', () => {
   it('本队教练一次发满 3 个：台账 +3、明细落槽 1-3、再发 409；鉴权与计划门槛各就各位', async () => {
     const fx = freshEnv();
     seedPlatform(fx);

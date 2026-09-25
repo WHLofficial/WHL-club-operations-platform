@@ -1,5 +1,5 @@
 // 管理端 · 财政域：期初余额导入（§14.1）/ 手动记账兜底（§7.1、§9.1）/ M0 货币监控
-// （原 admin.ts 财政域，增量 15 拆分，行为零变化）
+// （原 admin.ts 财政域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';

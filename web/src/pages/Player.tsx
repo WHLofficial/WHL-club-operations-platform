@@ -1,4 +1,4 @@
-// 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，增量 6.1 d9 改 E2 页内页签：
+// 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，v0.7.1 d9 改 E2 页内页签：
 // 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级；转会记录=单据流水）
 // 成长记录区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
 import { useEffect, useState } from 'react';
@@ -66,7 +66,7 @@ function starText(n: number): string {
   return '★'.repeat(Math.min(n, 5)) + '☆'.repeat(Math.max(0, 5 - n));
 }
 
-// 雷达轴（增量 6.1 d11，四裁决：外场 PAC/SHO/PAS/DRI/DEF/PHY；门将换轴 DIV/HAN/KIC/REF/POS/SPD，SPD=均(冲刺,加速)）
+// 雷达轴（v0.7.1 d11，四裁决：外场 PAC/SHO/PAS/DRI/DEF/PHY；门将换轴 DIV/HAN/KIC/REF/POS/SPD，SPD=均(冲刺,加速)）
 const GK_RADAR = [
   { key: 'DIV', label: '扑救', keys: ['gkdiving'] },
   { key: 'HAN', label: '手型', keys: ['gkhandling'] },
@@ -135,7 +135,7 @@ function PlaystyleBadge({ psid, gold }: { psid: number; gold: boolean }) {
   );
 }
 
-// PlayStyle 发放选择器（增量 30）：升级方案带徽章、中国计划自选徽章两处共用。
+// PlayStyle 发放选择器（v3.3.0）：升级方案带徽章、中国计划自选徽章两处共用。
 // 只列「可发放白名单 − 已拥有」，本段选满后其余项禁用 —— 发放数量必须与方案/名额严格相等，
 // 少选多选后端都会拒（400），所以在点确认之前就把可选范围收干净。
 function PlaystylePickGrid({
@@ -189,7 +189,7 @@ export default function Player() {
   const [picks, setPicks] = useState<number[]>([]);
   const [chinaPicks, setChinaPicks] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
-  // 球衣号草稿（增量 32）：null = 还没动过，显示服务端的值；改过之后是本地输入
+  // 球衣号草稿（v4.0.0）：null = 还没动过，显示服务端的值；改过之后是本地输入
   const [numberDraft, setNumberDraft] = useState<string | null>(null);
   const [numberBusy, setNumberBusy] = useState(false);
 
@@ -224,7 +224,7 @@ export default function Player() {
   const growth = growthQuery.data ?? null;
   const refreshAll = () => void qc.invalidateQueries({ queryKey: ['player', id ?? ''] });
 
-  // 规范 URL（增量 32）：地址栏里是内部 id（老分享链接、老缓存）时，换成 fc_id 的那条。
+  // 规范 URL（v4.0.0）：地址栏里是内部 id（老分享链接、老缓存）时，换成 fc_id 的那条。
   // 换完 queryKey 也跟着变（['player', id]），所以这一跳会多打一次详情请求——只发生在旧链接上，
   // 换来的是分享出去的地址稳定（内部 id 会随重导入变化）。
   const canonicalPath = data === null ? null : playerPath(data.player);
@@ -327,7 +327,7 @@ export default function Player() {
   }
 
   const { player, club, contract } = data;
-  // 球衣号（增量 32）：号码属于俱乐部，只有球员现属俱乐部的教练能改；
+  // 球衣号（v4.0.0）：号码属于俱乐部，只有球员现属俱乐部的教练能改；
   // 后端同样按「球员现在就在我的队里」把关，这里只是别把按钮露给外人
   const canEditNumber = isCoach && club !== null && myClubId === club.id;
 
@@ -351,11 +351,11 @@ export default function Player() {
   }
   const attrs = player.gameAttrs ?? {};
   const nation = nationName(attrs['naID']);
-  // 六维雷达：原在属性页签里（增量 6.1 d11），增量 30 搬到左栏球员卡下方常驻——数据仍在页面级算一次
+  // 六维雷达：原在属性页签里（v0.7.1 d11），v3.3.0 搬到左栏球员卡下方常驻——数据仍在页面级算一次
   const isGk = player.position === 'GK';
   const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
   const radarValues = radarAxes.map((g) => ({ key: g.key, label: g.label, value: groupAverage(g.keys, attrs) }));
-  // PlayStyle 清单 = FC 源槽 + 发放明细（增量 30）：明细存基础 ID，合并时换算成存库 ID 并去重
+  // PlayStyle 清单 = FC 源槽 + 发放明细（v3.3.0）：明细存基础 ID，合并时换算成存库 ID 并去重
   const playstyles = mergePlaystyleSlots(
     playstyleBadges(attrs),
     (growth?.playstyleDetails ?? []).map((d) => ({ slot: d.slot, kind: d.kind, psid: d.psid })),
@@ -384,7 +384,7 @@ export default function Player() {
             <div className="player-card-head">
               <h2>
                 {player.name}
-                {/* 官方缩写名（增量 32）：显示名派生自 FC26 存档，与 FC26db 的官方缩写名不同时
+                {/* 官方缩写名（v4.0.0）：显示名派生自 FC26 存档，与 FC26db 的官方缩写名不同时
                     在下面列一行小字——库里认人仍按官方名（`E. Haaland`），只是不再当标题 */}
                 {player.officialName !== undefined && player.officialName !== player.name && (
                   <span className="official-name">{player.officialName}</span>
@@ -459,7 +459,7 @@ export default function Player() {
               <div className="table-wrap">
                 <table className="dossier-table">
                   <tbody>
-                    {/* 球衣号（增量 32）：号码是俱乐部的东西，本队教练在这里填/改/清；
+                    {/* 球衣号（v4.0.0）：号码是俱乐部的东西，本队教练在这里填/改/清；
                         别人只读，没定号显示 —（换队/解约后后端会把它清空） */}
                     <tr>
                       <th>球衣号</th>
@@ -626,8 +626,8 @@ export default function Player() {
   );
 }
 
-// 属性页签（增量 6.1 d10）：位置矩阵 + 角色带 + 星级行 + 六组细分卡（门将七组）；
-// 六维雷达在增量 30 移到左栏球员卡下方常驻，这里只剩属性卡网格（PlayStyles 卡补第二行空位）
+// 属性页签（v0.7.1 d10）：位置矩阵 + 角色带 + 星级行 + 六组细分卡（门将七组）；
+// 六维雷达在v3.3.0 移到左栏球员卡下方常驻，这里只剩属性卡网格（PlayStyles 卡补第二行空位）
 function AttrSheet({
   attrs,
   position,

@@ -1,5 +1,5 @@
-// 管理端 · 市场干预（增量 10 扩权工具）/ 窗口状态机（§11/§6.4-6，增量 5）/ 强制拍卖（规则 4.4.5）
-// （原 admin.ts 市场域，增量 15 拆分，行为零变化）
+// 管理端 · 市场干预（v1.3.0 扩权工具）/ 窗口状态机（§11/§6.4-6，v0.6.0）/ 强制拍卖（规则 4.4.5）
+// （原 admin.ts 市场域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -13,7 +13,7 @@ import { readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// ---- 市场干预（增量 10：管理介入扩权，撤/关/裁定工具） ----
+// ---- 市场干预（v1.3.0：管理介入扩权，撤/关/裁定工具） ----
 
 app.post('/market/bids/:id/void', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
@@ -55,7 +55,7 @@ app.post('/negotiations/:id/void', async (c) => {
   return c.json({ ok: true, status });
 });
 
-// ---- 暂停出价（增量 15：全局开关 + 单挂牌冻结；只挡新出价，不改变结算时刻） ----
+// ---- 暂停出价（v2.1.0：全局开关 + 单挂牌冻结；只挡新出价，不改变结算时刻） ----
 
 // GET /api/admin/market/pause-bids —— 全局暂停状态
 app.get('/market/pause-bids', async (c) => {
@@ -112,7 +112,7 @@ for (const [suffix, paused] of [
   });
 }
 
-// ---- 窗口状态机（§11/§6.4-6，增量 5） ----
+// ---- 窗口状态机（§11/§6.4-6，v0.6.0） ----
 
 // GET /api/admin/windows —— 赛季与窗口列表
 app.get('/windows', async (c) => {

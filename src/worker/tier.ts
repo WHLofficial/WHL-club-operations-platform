@@ -1,4 +1,4 @@
-// 分级派生（增量 9）：当季级别以赛事报名为真源（TECH_DESIGN §3.2 改判）。
+// 分级派生（v1.2.0）：当季级别以赛事报名为真源（TECH_DESIGN §3.2 改判）。
 // 链路：auth 目录 club_id → tour_team_id → club season_tournaments（只认
 // league_premier/league_second 定级赛事，杯赛报名再多也不参与定级）→ TOUR_DB entry 报名行。
 // clubs.league_tier 单值列自此休眠；AUTH_DB 未配置时回落休眠列（回滚通道，仿 binding.ts）。
@@ -81,14 +81,14 @@ export interface ClubLeague {
   tournamentId: number | null;
 }
 
-// 批量派生（增量 31）：公开球队列表一屏就要算 20 队，逐队调 deriveClubTier 是 20×(1 AUTH_DB + 1 TOUR_DB)，
+// 批量派生（v3.4.0）：公开球队列表一屏就要算 20 队，逐队调 deriveClubTier 是 20×(1 AUTH_DB + 1 TOUR_DB)，
 // 其中 AUTH_DB 那条每队要扫 team 全表 20 行（实测 20 队 400 行），而集合形状只要 20 + 62 行。
 //
 // 规则与 derive() 同一份（TIER_BY_TYPE / loadLeagueList / 「报名行 → 级别」的映射），差别只有一处：
 // 一队同时报了多座定级赛事（derive 抛 HttpError(500)）在批量里**降级为 null** —— 单队数据问题
 // 不该打死整张公开列表页，但也不能静默，所以留一条 console.warn 给运维。
 //
-// 返回级别**与**报名赛事 id：球队详情（增量 31）要拿 tournamentId 去比赛系统取积分榜，而
+// 返回级别**与**报名赛事 id：球队详情（v3.4.0）要拿 tournamentId 去比赛系统取积分榜，而
 // 「哪座赛事参与定级」这件事只该有一份口径，所以两处共用这个函数（deriveClubTiers 是它的薄包装）。
 export async function deriveClubLeagues(
   env: Env,

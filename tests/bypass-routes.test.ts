@@ -83,7 +83,7 @@ interface BypassFixture extends Fixture {
   clubB: number;
 }
 
-// clubA（100m）/clubB（50m）+ 窗口开放 + clubA 名下三名球员（增量 25 起效力按常规窗刻度）：
+// clubA（100m）/clubB（50m）+ 窗口开放 + clubA 名下三名球员（v3.0.0 起效力按常规窗刻度）：
 // 已关常规窗 6 个（S1–S3 各 2），当前窗口 = S4 第 1 窗 → closedRegularTicks = 6
 // 20 乡贤 service_ticks 0（效力 3.0 赛季，解约免费）/ 21 老将 service_ticks 6（效力 0，解约收费）/ 22 新秀 训练营合同
 async function seedBypass(): Promise<BypassFixture> {
@@ -386,7 +386,7 @@ describe('海捞（free_agent）', () => {
     expect((await post('/api/transfers/free-agent', { playerId: 20, newReleaseFee: 7 }, 'tok-coach', fx.env)).status).toBe(400);
   });
 
-  it('CPU 队球员可海捞：名单带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（增量 14）', async () => {
+  it('CPU 队球员可海捞：名单带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（v2.0.0）', async () => {
     const fx = await seedBypass();
     const cpuClubId = 131681; // AC米兰(CPU)
     fx.sqlite.exec(
@@ -520,7 +520,7 @@ describe('海捞（free_agent）', () => {
     expect(term?.status).toBe('completed');
   });
 
-  it('海捞真自由身是签入不是离队：中国计划徽章一行不删、台账不动（增量 30）', async () => {
+  it('海捞真自由身是签入不是离队：中国计划徽章一行不删、台账不动（v3.3.0）', async () => {
     const fx = await seedBypass();
     fx.sqlite.exec(`
       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, china_plan, badges_silver) VALUES

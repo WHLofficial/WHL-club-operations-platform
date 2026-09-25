@@ -1,4 +1,4 @@
--- 增量 6：赛果确认（TECH_DESIGN §11）。平台只读同步比赛系统（TOUR_DB）完赛场次，
+-- v0.7.0：赛果确认（TECH_DESIGN §11）。平台只读同步比赛系统（TOUR_DB）完赛场次，
 -- 管理组确认时把比分快照落平台库——此后比赛系统改判不影响已确认记录（对账以快照为准）。
 -- 奖金 P0 走手动记账；XP 事件由确认钩子写入 growth_events（match_ref = 比赛系统 match id）。
 CREATE TABLE result_confirmations (

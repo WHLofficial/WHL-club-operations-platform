@@ -1,4 +1,4 @@
-// 冠名市场（增量 20，规则=revenue 插件 README §七 + brand_service.py / window_service.py / formula.py:462）：
+// 冠名市场（v2.6.0，规则=revenue 插件 README §七 + brand_service.py / window_service.py / formula.py:462）：
 // 品牌池 7 家（无排他，多队可签同一品牌）；底价/窗口 = (基准 + 容量系数×容量万 + 死忠系数×死忠万) × 热度，
 // 按签约时队况锁定整约；三套餐（稳健/进取/对赌）费用条款快照入合同；
 // 提前解约赔剩余窗口费用 30%；窗末收租 + 对赌奖金并入关窗批（windowHomeStatements）。

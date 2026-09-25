@@ -1,4 +1,4 @@
-// 增量 12：主场收入域——影响力公式（规则 4.1.2/4.1.3）、上座三分收入、确认钩子④、窗末维护费+死忠演化、管理端点
+// v1.5.0：主场收入域——影响力公式（规则 4.1.2/4.1.3）、上座三分收入、确认钩子④、窗末维护费+死忠演化、管理端点
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam } from './d1.ts';
@@ -194,7 +194,7 @@ describe('纯函数：天气/战绩/死忠', () => {
   });
 });
 
-describe('确认钩子④：三分收入即时入账（增量 12）', () => {
+describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
   it('主场确认→比赛日收入 ledger + 上座快照（rng=0.5 确定值）；无球场行跳过', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
@@ -250,7 +250,7 @@ describe('确认钩子④：三分收入即时入账（增量 12）', () => {
   });
 });
 
-describe('窗末主场结算：维护费+死忠演化（增量 12）', () => {
+describe('窗末主场结算：维护费+死忠演化（v1.5.0）', () => {
   it('维护费=基础+每万座费率×容量万×主场场次；死忠向上座率与影响力目标靠拢', async () => {
     const fx = freshEnv();
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
@@ -286,7 +286,7 @@ describe('窗末主场结算：维护费+死忠演化（增量 12）', () => {
   });
 });
 
-describe('管理端主场域端点（增量 12）', () => {
+describe('管理端主场域端点（v1.5.0）', () => {
   function kvEnv() {
     resetConfigCache();
     const sqlite = new DatabaseSync(':memory:');
@@ -361,7 +361,7 @@ describe('管理端主场域端点（增量 12）', () => {
   });
 });
 
-describe('CPU 队不入账（增量 14 裁决 6）', () => {
+describe('CPU 队不入账（v2.0.0 裁决 6）', () => {
   it('目录里 club_id 照样补上，但 clubIdByTourTeam 不返回 CPU 队（奖金/主场收入都发不出）', async () => {
     const fx = freshEnv();
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 7);

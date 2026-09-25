@@ -1,4 +1,4 @@
-// 球员库导入 SQL 生成器（增量13 任务 B）：读 FC26db Base 表 → 复用端上 normalizeImportBatch
+// 球员库导入 SQL 生成器（v1.6.0 任务 B）：读 FC26db Base 表 → 复用端上 normalizeImportBatch
 // → 产分片 SQL（每片 ≤ 片内语句数上限，规避单请求体积）+ 导入报告。
 // 用法：node scripts/players-import/generate-sql.ts [xlsx路径] [每片语句数] [--mode minor|major]
 //   --mode minor（缺省，小换版：成长全保留、CA 增量平移）| major（大换版：经验清零、CA/徽章各保留 1/3）

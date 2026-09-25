@@ -1,4 +1,4 @@
-// 机器通道签名（增量 37）：tour ↔ club 球队建档双向同步共用一把 TEAM_SYNC_SECRET。
+// 机器通道签名（v6.1.0）：tour ↔ club 球队建档双向同步共用一把 TEAM_SYNC_SECRET。
 // 规范串与 auth machine.ts / 本仓 notify.ts / 赛事仓 clubSync.ts 逐字一致：
 // X-Sign = hex(HMAC-SHA256(secret, `POST|path|ts|raw`))，X-Timestamp 秒级，窗口 ±300s。
 //

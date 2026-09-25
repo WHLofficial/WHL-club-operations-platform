@@ -1,4 +1,4 @@
-# rekey-team：换队号预演工具（增量 17）
+# rekey-team：换队号预演工具（v2.3.0）
 
 给定旧/新游戏队号，对三库做**只读预演**（不写任何数据），产出米兰口径（`../prod-20260919-milan-rekey`）的分步 SQL 工件 + 执行 README。真正的执行永远走 README 里印好的 wrangler 命令，由人工复核后进行；生产执行须管理组明确下令。
 
@@ -8,7 +8,7 @@
 |---|---|---|---|
 | tour | `whl` | `team.id` | 主键即游戏队号 |
 | auth | `whl-auth` | `team.tour_team_id`（`team.club_id`） | `team.id` 是内部序号 1..N，**不能**拿它对游戏队号 |
-| club | `whl-club` | `clubs.id` | 主键即游戏队号（增量 17 起新建队强制） |
+| club | `whl-club` | `clubs.id` | 主键即游戏队号（v2.3.0 起新建队强制） |
 
 ## 覆盖面（按列名自动发现，逐表计数）
 

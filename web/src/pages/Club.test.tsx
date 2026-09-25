@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// /club 重定向壳（web/src/pages/Club.tsx，增量 31 步骤 8）：
+// /club 重定向壳（web/src/pages/Club.tsx，v3.4.0 步骤 8）：
 // 球队中心正文搬进 /clubs/:id 后，老入口靠这里转走 —— 绑定过的转自己的队，没绑的转登记页。
 // 三种状态各钉一条：在途不闪跳、已绑定去 /clubs/:id、未绑定去 /bind。
 import { cleanup, render, screen } from '@testing-library/react';
@@ -60,7 +60,7 @@ afterEach(() => {
   authState.user = null;
 });
 
-describe('/club 重定向壳（增量 31 步骤 8）', () => {
+describe('/club 重定向壳（v3.4.0 步骤 8）', () => {
   it('绑定过的教练转到自己球队的详情页', async () => {
     authState.user = COACH;
     renderClub(meFixture(73));
