@@ -2384,6 +2384,15 @@ th.num .th-sort {
 
 /* 左栏五态骨架（v6.2.0）：报价设置 / 转会区信息 / 球队操作 / 我收到的报价；
    控件全部禁用（v6.3.0 报价子系统接线） */
+.side-closed-note {
+  border: 1px solid #f0d9ae;
+  border-radius: 10px;
+  background: #fdf0dc;
+  color: #92510a;
+  padding: 7px 10px;
+  font-size: 12px;
+  margin-top: 12px;
+}
 .side-sec {
   border: 1px solid var(--border);
   border-radius: 12px;

@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type PlayersLibraryResponse, type SquadOverview } from './api.ts';
+import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
@@ -11,6 +11,7 @@ export const qk = {
   clubsList: ['clubs', 'list'] as const,
   clubDetail: (id: number) => ['clubs', 'detail', id] as const,
   clubStanding: (id: number) => ['clubs', 'standing', id] as const,
+  seasonsCurrent: ['seasons', 'current'] as const,
   clubRoster: (id: number) => ['players', 'club-roster', id] as const,
   myBids: ['market', 'my-bids'] as const,
   board: (status: string) => ['market', 'board', status] as const,
@@ -95,6 +96,16 @@ export function useClubsList() {
   return useQuery({
     queryKey: qk.clubsList,
     queryFn: () => api<{ clubs: ClubSummary[] }>('/api/clubs'),
+  });
+}
+
+// 当前赛季与窗口（v6.2.0）：公开端点，球员页左栏按 window.status 门控转会操作提示；
+// 真正的开关在管理端市场页（/api/admin/windows/open|close），这里只读。
+export function useSeasonsCurrent() {
+  return useQuery({
+    queryKey: qk.seasonsCurrent,
+    queryFn: () => api<SeasonsCurrent>('/api/seasons/current'),
+    staleTime: 60_000,
   });
 }
 

@@ -44,7 +44,7 @@ import {
   type PlaystyleSlot,
 } from '../../../src/core/fc26.ts';
 import { useToast } from '../lib/toast.tsx';
-import { qk } from '../lib/queries.ts';
+import { qk, useSeasonsCurrent } from '../lib/queries.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { playerPath } from '../lib/player-link.ts';
 
@@ -234,6 +234,8 @@ export default function Player() {
     queryFn: () => api<{ clubs: ClubSummary[] }>('/api/clubs'),
     enabled: dataQuery.data?.club != null,
   });
+  // 转会窗状态（v6.2.0）：公开 /api/seasons/current 的 window.status；真正的开关在管理端市场页
+  const seasonsQuery = useSeasonsCurrent();
   const data = dataQuery.data ?? null;
   const growth = growthQuery.data ?? null;
   const refreshAll = () => void qc.invalidateQueries({ queryKey: ['player', id ?? ''] });
@@ -370,6 +372,8 @@ export default function Player() {
   // 左栏五态判据：本队 = 登录教练且现属俱乐部就是我的队；「非卖品」字段后端还没有（v6.3.0 报价子系统），运行时暂不可达
   const isMine = club !== null && myClubId === club.id;
   const isCpu = clubInfo?.isCpu ?? false;
+  // 转会窗开着吗（关窗时所有挂牌/报价/解约/海捞操作后端都回 409 no_window，前端同步给提示）
+  const windowOpen = seasonsQuery.data?.window?.status === 'open';
   // PlayStyle 清单 = FC 源槽 + 发放明细（v3.3.0）：明细存基础 ID，合并时换算成存库 ID 并去重
   const playstyles = mergePlaystyleSlots(
     playstyleBadges(attrs),
@@ -442,7 +446,7 @@ export default function Player() {
             <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
           </section>
 
-          <SideOps status={player.status} isMine={isMine} isFree={club === null} isCpu={isCpu} />
+          <SideOps status={player.status} isMine={isMine} isFree={club === null} isCpu={isCpu} windowOpen={windowOpen} />
         </div>
 
         <section className="dossier-file">
@@ -641,7 +645,9 @@ export default function Player() {
 //   C 别队真人队·未挂牌 = 报价 / 激活
 //   D 别队真人队·非卖品 = 报价禁用（后端还没有非卖品字段，运行时暂不可达，接线后自动生效）
 //   E CPU 队 / 自由身 = 海捞签入
-function SideOps({ status, isMine, isFree, isCpu }: { status: string; isMine: boolean; isFree: boolean; isCpu: boolean }) {
+// 关窗时（windowOpen=false）顶部出提示条：后端对挂牌/出价/续约/解约/海捞一律 409 no_window，
+// 开关在管理端市场页（/api/admin/windows/open|close），这里只同步状态。
+function SideOps({ status, isMine, isFree, isCpu, windowOpen }: { status: string; isMine: boolean; isFree: boolean; isCpu: boolean; windowOpen: boolean }) {
   const notForSale = false;
   let body: ReactElement;
   if (isMine && status === 'listed') {
@@ -771,7 +777,12 @@ function SideOps({ status, isMine, isFree, isCpu }: { status: string; isMine: bo
       </section>
     );
   }
-  return <div className="side-ops">{body}</div>;
+  return (
+    <div className="side-ops">
+      {!windowOpen && <div className="side-closed-note">转会窗未开放，转会相关操作暂不可用</div>}
+      {body}
+    </div>
+  );
 }
 
 // 属性页签（v0.7.1 d10）：头部两栏（左=标题/位置/角色，右=队徽 96px + 光图六维雷达，v6.2.0）

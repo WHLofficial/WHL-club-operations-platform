@@ -63,6 +63,13 @@ export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELET
 // 指向它等于给用户一个连不上的按钮（TopBar / RequireUser / Home / AdminLayout 五处外链都用这个常量）。
 export const TOUR_SITE_URL = 'https://tour.whleague.win/';
 
+/** 当前赛季与窗口（GET /api/seasons/current，公开）。球员页窗门控只消费 window.status */
+export interface SeasonsCurrent {
+  season: { season: number; status: string } | null;
+  window: { season: number; windowSeq: number; status: string; openedAt: string | null; closedAt: string | null } | null;
+  tournaments: { id: number; tournamentId: number; competitionType: string | null }[];
+}
+
 // ---- v0.2.0 DTO（附录 A〔1〕）----
 
 export interface MyClubOverview {
