@@ -6,7 +6,7 @@ import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
 import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
-import { getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
+import { getOpenWindow, getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, tierCache } from '../tier.ts';
@@ -162,12 +162,14 @@ app.get('/club/squad', async (c) => {
 
 // POST /api/club/players/:id/number —— 给本队球员定球衣号（v4.0.0；传 null / 空串 = 清号）
 // 号码属于俱乐部：换队与解约时由 transfers.ts 一并清空，所以这里只认「球员现在就在我的队里」。
+// v6.2.0 起归转会窗管（用户裁决：改号也是转会期操作）——关窗一律 409 no_window，与其他转会操作同口径。
 // 同队不重复是查后写：players 是全局表，D1 里没有「按 club_id 分区的唯一索引」可用
 //（唯一索引只认列与常量，不认关联子查询），20 队 / 570 人的规模上一次点查足够。
 app.post('/club/players/:id/number', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+  if (!(await getOpenWindow(c.env.DB))) throw new HttpError(409, '转会窗口没开，现在改不了号码', 'no_window');
   const playerId = Number(c.req.param('id'));
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
 

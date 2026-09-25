@@ -1194,12 +1194,17 @@ describe('注册名单提交与校验（附录 A〔2〕）', () => {
 
 // 球衣号（v4.0.0）：号码属于俱乐部——只有球员现属俱乐部的教练能改，
 // 同队不重复，换队/解约时由 transfers.ts 清空（那条在 negotiation-routes 里验）。
+// v6.2.0 起改号归转会窗管：种子要开一扇窗，另有关窗 409 用例。
 describe('球衣号设定（v4.0.0）', () => {
   const numberSql = 'SELECT number FROM players WHERE id = 1';
+  const openWindow = (fx: Fixture) => {
+    fx.sqlite.exec("INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z')");
+  };
 
   it('定号/改号/清号：落库 + 审计留痕 + 阵容回显', async () => {
     const fx = freshEnv();
     await seedRegistrationWorld(fx);
+    openWindow(fx);
 
     const set = await post('/api/club/players/1/number', { number: 9 }, 'tok-coach', fx.env);
     expect(set.status).toBe(200);
@@ -1238,6 +1243,7 @@ describe('球衣号设定（v4.0.0）', () => {
   it('越界与重复：1–99 之外 400、同队撞号 409、别队球员 404、观众 403', async () => {
     const fx = freshEnv();
     await seedRegistrationWorld(fx);
+    openWindow(fx);
 
     for (const bad of [0, 100, 1.5, -3]) {
       const res = await post('/api/club/players/1/number', { number: bad }, 'tok-coach', fx.env);
@@ -1261,6 +1267,22 @@ describe('球衣号设定（v4.0.0）', () => {
     expect((await post('/api/club/players/1/number', { number: 3 }, 'tok-coach2', fx.env)).status).toBe(404);
     expect((await post('/api/club/players/1/number', { number: 3 }, 'tok-viewer', fx.env)).status).toBe(403);
     expect((await post('/api/club/players/999/number', { number: 3 }, 'tok-coach', fx.env)).status).toBe(404);
+  });
+
+  it('关窗 409：改号是转会期操作（v6.2.0），无开窗时定号/清号都拒', async () => {
+    const fx = freshEnv();
+    await seedRegistrationWorld(fx);
+    // 不种窗 ⇒ 无开窗
+
+    const set = await post('/api/club/players/1/number', { number: 9 }, 'tok-coach', fx.env);
+    expect(set.status).toBe(409);
+    const setBody = (await set.json()) as { error: string; code?: string };
+    expect(setBody.error).toContain('转会窗口没开');
+    expect(setBody.code).toBe('no_window');
+    expect(sqlGet<{ number: string | null }>(fx.sqlite, numberSql)).toEqual({ number: null });
+
+    // 清号同样受窗管
+    expect((await post('/api/club/players/1/number', { number: null }, 'tok-coach', fx.env)).status).toBe(409);
   });
 });
 

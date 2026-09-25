@@ -2393,6 +2393,11 @@ th.num .th-sort {
   font-size: 12px;
   margin-top: 12px;
 }
+/* 合同卷宗号码行：关窗时给教练的改号提示（v6.2.0） */
+.number-window-note {
+  margin-left: 10px;
+  font-size: 12px;
+}
 .side-sec {
   border: 1px solid var(--border);
   border-radius: 12px;

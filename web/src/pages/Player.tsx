@@ -343,9 +343,12 @@ export default function Player() {
   }
 
   const { player, club, contract } = data;
+  // 转会窗开着吗（公开 /api/seasons/current；后端对改号与全部转会操作在关窗时一律 409 no_window）
+  const windowOpen = seasonsQuery.data?.window?.status === 'open';
   // 球衣号（v4.0.0）：号码属于俱乐部，只有球员现属俱乐部的教练能改；
-  // 后端同样按「球员现在就在我的队里」把关，这里只是别把按钮露给外人
-  const canEditNumber = isCoach && club !== null && myClubId === club.id;
+  // v6.2.0 起改号归转会窗管（用户裁决），关窗时编辑入口一并收起、只读展示；
+  // 后端同样按「球员现在就在我的队里」+ 开窗把关，这里只是别把按钮露给外人
+  const canEditNumber = isCoach && club !== null && myClubId === club.id && windowOpen;
 
   async function saveNumber(raw: string) {
     if (numberBusy) return;
@@ -372,8 +375,6 @@ export default function Player() {
   // 左栏五态判据：本队 = 登录教练且现属俱乐部就是我的队；「非卖品」字段后端还没有（v6.3.0 报价子系统），运行时暂不可达
   const isMine = club !== null && myClubId === club.id;
   const isCpu = clubInfo?.isCpu ?? false;
-  // 转会窗开着吗（关窗时所有挂牌/报价/解约/海捞操作后端都回 409 no_window，前端同步给提示）
-  const windowOpen = seasonsQuery.data?.window?.status === 'open';
   // PlayStyle 清单 = FC 源槽 + 发放明细（v3.3.0）：明细存基础 ID，合并时换算成存库 ID 并去重
   const playstyles = mergePlaystyleSlots(
     playstyleBadges(attrs),
@@ -494,6 +495,9 @@ export default function Player() {
                           </span>
                         ) : (
                           (player.number ?? '—')
+                        )}
+                        {isCoach && club !== null && myClubId === club.id && !windowOpen && (
+                          <span className="muted number-window-note">转会窗未开放，改号要等开窗</span>
                         )}
                       </td>
                     </tr>
