@@ -13,13 +13,14 @@ import Bind from './pages/Bind.tsx';
 import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
 import Notifications from './pages/Notifications.tsx';
+import { APP_VERSION } from './lib/version.ts';
 
-// 市场三页按页拆 chunk（增量 16）：市场板公开，海捞/我的要登录
+// 市场三页按页拆 chunk（v2.2.0）：市场板公开，海捞/我的要登录
 const MarketBoardPage = lazy(() => import('./pages/market/MarketBoardPage.tsx'));
 const MarketFreePage = lazy(() => import('./pages/market/MarketFreePage.tsx'));
 const MarketMinePage = lazy(() => import('./pages/market/MarketMinePage.tsx'));
 
-// 管理端按页拆 chunk（增量 15）：壳 + 8 子页全部懒加载，不再全量进主包
+// 管理端按页拆 chunk（v2.1.0）：壳 + 8 子页全部懒加载，不再全量进主包
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout.tsx'));
 const AdminOverviewPage = lazy(() => import('./pages/admin/OverviewPage.tsx'));
 const AdminSeasonsPage = lazy(() => import('./pages/admin/SeasonsPage.tsx'));
@@ -136,6 +137,7 @@ export default function App() {
           </Route>
         </Routes>
       </Suspense>
+      <footer className="app-footer">WHL 俱乐部运营平台 · v{APP_VERSION}</footer>
     </>
   );
 }
