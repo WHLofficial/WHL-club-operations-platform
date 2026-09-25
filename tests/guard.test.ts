@@ -248,7 +248,9 @@ describe('分级缓存口径（v3.2.0）', () => {
     // 只写通知 / 只写会话的路径不在公开 scope 里
     expect(scopesForWritePath('/api/notifications/read')).toEqual([]);
     expect(scopesForWritePath('/api/health')).toEqual([]);
-    expect(scopesForWritePath('/api/players')).toEqual([]);
+    // v6.3.0：/api/players 下挂了 PUT /players/:id/offer-settings（改报价标记），升为写路径；/api/offers 同批登记
+    expect(scopesForWritePath('/api/players')).toEqual([...PUBLIC_SCOPES]);
+    expect(scopesForWritePath('/api/offers')).toEqual([...PUBLIC_SCOPES]);
   });
 
   it('默认分级 TTL（不配变量）：players 1h 生效，同 query 第二次命中缓存', async () => {

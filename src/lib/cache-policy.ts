@@ -54,6 +54,10 @@ export const WRITE_SCOPE_PREFIXES: ReadonlyArray<readonly [string, readonly Cach
   ['/api/admin', PUBLIC_SCOPES],
   ['/api/transfers', PUBLIC_SCOPES],
   ['/api/market', PUBLIC_SCOPES],
+  // 报价 / 议价（v6.3.0）：同意即挂牌（新增挂牌行 + players.status）；offer-settings 挂在
+  // /api/players/:id/offer-settings（PUT），改球员的名单/最低价/非卖品标记。
+  ['/api/offers', PUBLIC_SCOPES],
+  ['/api/players', PUBLIC_SCOPES],
   ['/api/negotiations', PUBLIC_SCOPES],
   ['/api/registration', PUBLIC_SCOPES],
   ['/api/growth', PUBLIC_SCOPES],

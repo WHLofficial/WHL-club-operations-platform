@@ -12,6 +12,7 @@ import playersRoutes, { countPlayers } from './routes/players.ts';
 import registrationRoutes from './routes/registration.ts';
 import seasonsRoutes from './routes/seasons.ts';
 import marketRoutes from './routes/market.ts';
+import offersRoutes from './routes/offers.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
 import growthRoutes from './routes/growth.ts';
@@ -66,6 +67,8 @@ app.route('/api', playersRoutes);
 app.route('/api', registrationRoutes);
 app.route('/api', seasonsRoutes);
 app.route('/api', marketRoutes);
+// 报价 / 议价（v6.3.0）：全部私有端点；同意即挂牌走 /api/offers 写路径，写路径 purge 已在 cache-policy 登记
+app.route('/api', offersRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
 app.route('/api', growthRoutes);

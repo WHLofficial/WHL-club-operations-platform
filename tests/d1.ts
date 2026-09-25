@@ -101,6 +101,7 @@ const MIGRATION_FILES = [
   '0034_players_sort_indexes_batch3.sql',
   '0035_players_sort_indexes_batch4.sql',
   '0036_players_sort_indexes_batch5.sql',
+  '0037_offers.sql',
   '0038_players_sort_indexes_batch6.sql',
 ];
 

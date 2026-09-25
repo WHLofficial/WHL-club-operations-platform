@@ -34,6 +34,23 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `📋 赛果已确认：${data.home} ${data.score} ${data.away}（S${data.season}·窗${data.windowSeq}${data.competition ? ` · ${data.competition}` : ''}）。`;
     case 'levelup':
       return `🎉 ${data.player} 升级完成：+${data.ca} CA${data.silver ? `，银徽章 +${data.silver}` : ''}${data.gold ? `，金徽章 +${data.gold}` : ''}。`;
+    // 报价 / 议价（v6.3.0，设计 §5）：金额单位 m，均带 offerId 供跳转
+    case 'offer_received':
+      return `📩 收到报价：${data.amount} m 报 ${data.player}（对方已冻结资金），去谈判桌处理。`;
+    case 'offer_countered':
+      return `🔄 ${data.by}还价：${data.player} 报价抬到 ${data.amount} m，轮到你表态。`;
+    case 'offer_accepted':
+      return `🤝 报价已被同意：${data.player} 以 ${data.amount} m 达成协议，已自动挂牌并锁定你的出价为领先（成交等过户确认）。`;
+    case 'offer_rejected':
+      return `🚫 报价被拒：${data.player} ${data.amount != null ? `的 ${data.amount} m 报价` : '的报价'}被卖家拒绝${data.reason === 'not_for_sale' ? '（球员被设为非卖品）' : ''}，冻结已退回。`;
+    case 'offer_withdrawn':
+      return `↩️ 报价撤回：对方撤回了对 ${data.player} 的 ${data.amount} m 报价。`;
+    case 'offer_expired':
+      return `⌛ 报价过期：${data.player} 的报价已失效${data.reason === 'sold' ? '（球员已被卖家挂牌，报价通道关闭，冻结已退回）' : '（转会窗已关或球员状态已变）'}，冻结已退回。`;
+    case 'offer_auto_accepted':
+      return `🤝 自动同意：${data.player} 达到转会名单最低报价线 ${data.amount} m，已自动同意并挂牌（成交等过户确认）。`;
+    case 'offer_auto_rejected':
+      return `🚫 自动拒：${data.player} 的 ${data.amount} m 报价低于转会名单最低报价（${data.min} m），直接被拒，冻结已退回。`;
     default:
       return String(data.text ?? '');
   }

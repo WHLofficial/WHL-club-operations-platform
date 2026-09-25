@@ -10,6 +10,7 @@ import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext, type MarketContext } from './market-context.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { detectBidAlerts } from './bid-alerts.ts';
+import { expireStaleOffers } from './offers.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -222,6 +223,10 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
   const now = opts.now ?? new Date();
   const actor = opts.actor ?? null;
   const summary: SettleSummary = { settled: 0, delisted: 0, voided: 0, notesUpdated: 0, healed: 0 };
+
+  // 报价惰性过期 + 自愈（v6.3.0）：窗关 / 球员已不在卖方 / 同球员已挂牌的 pending 单收口；
+  // 先于市场结算跑（过期释放冻结，别让出价预检读到没释放的冻结）
+  await expireStaleOffers(env, { actor });
 
   // 激活首价窗失效（4.4.2.2）：先于窗尾收口处理，避免给卖家误收下架费
   const expired = await db
