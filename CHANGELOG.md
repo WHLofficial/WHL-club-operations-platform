@@ -4,6 +4,21 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.1.1] · Sentry 错误追踪接入（2026-09-25，代码已提交未部署：等 Sentry 账号与 DSN）
+
+**新增**
+- `wrangler.jsonc`：`compatibility_flags: ["nodejs_compat"]`（Sentry SDK 依赖 AsyncLocalStorage）+ `version_metadata` 绑定（Sentry release 自动 = Cloudflare 部署版本 ID）。
+- `src/worker/index.ts`：`@sentry/hono/cloudflare` 的 `sentry()` 中间件挂在一切路由之前（errors-only：`tracesSampleRate: 0`，SDK 默认过滤让带 status 的 3xx/4xx 业务错误不上报）；cron 从 `ctx.waitUntil` 改 `await` 并加 `withMonitor('club-settle-tick')`（Sentry Crons check-in 监控）；新增 `POST /api/cron/sentry-probe`（CRON_KEY 守卫）作上线验证探针。`app.onError` 与全部报错 JSON 形状不动。
+- `src/worker/env.ts`：`SENTRY_DSN?`（secret，未配 = SDK 完全不初始化、零上报零网络）、`SENTRY_ENVIRONMENT?`、`CF_VERSION_METADATA?`。
+- `web/src/lib/sentry.ts` + `main.tsx`：`@sentry/react` errors-only 初始化（不引 replay/ErrorBoundary）；DSN 空串 = 未接入。
+- `tests/sentry.test.ts` 3 例（DSN 未配旁路 / 探针 403 / 探针 500 JSON 形状）。
+
+**变更**
+- `tests/media.test.ts`：waitUntil 精确计数 `toHaveLength(1)` 放宽为 `≥1`——Sentry 会在同一 executionCtx 登记自己的 flush drain（生产语义：让 isolate 活到事件发完）。
+- `package.json` 版本 6.1.0 → 6.1.1；新增依赖 `@sentry/hono` / `@sentry/cloudflare` / `@sentry/react`（v11.0.0，首个第三方 SaaS 运行时依赖）。
+
+**实测**：typecheck 三份全清；vitest **51 文件 / 727 例全绿**（基线 724）；build 成功且主 bundle `index-BqdBJFJR.js`（477,874 B / gzip 149,563 B）**与改动前逐字节同 hash**——前端 DSN 为空串时 rollup 把整个 SDK 死代码消除，填 DSN 后须实测增量（硬线 ~35KB gzip）；e2e **11/11**；`wrangler deploy --dry-run` worker 打包通过。**未上线**：Sentry 账号未注册、DSN 未配、未 push（push 即自动部署）。
+
 ## [维护] · 排序索引 batch 4/5：迁移 `0035` / `0036`（2026-09-24 / 09-25，两个迁移已 apply 到生产：无运行时行为变化）
 
 用户 m04225 裁决「先看看剩余写限额，能推几条是几条」⇒ 先实测当日配额，再按余量把第 5 节清单上的排序索引推进生产。**不改 `src/` 与 `web/`**：只有两个迁移、测试与文档 ⇒ 运行时代码与前端产物零变化。

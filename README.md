@@ -69,7 +69,7 @@ e2e 冒烟默认打 `http://127.0.0.1:8791`，用本机 Chrome（`C:/Program Fil
 | `MEDIA` | R2 | whl-media | 媒体资源 |
 | `ASSETS` | Assets | `./web/dist` | 前端产物，SPA 回落，`/api/*` 优先走 worker |
 
-密钥（wrangler secret，不入库）：`CRON_KEY`（定时/结算接口的 `X-Cron-Key`；生产 2026-09-22 已配，本地联调写进 `.dev.vars`）、`AUTH_BIND_SECRET`（与认证中心 `BIND_SECRET` 同值）、`TEAM_SYNC_SECRET`（v6.1.0：`/api/internal/team-upsert` 的 HMAC 密钥，与赛事仓 `TEAM_SYNC_SECRET` **同值**；生产 2026-09-23 两侧已配）。
+密钥（wrangler secret，不入库）：`CRON_KEY`（定时/结算接口的 `X-Cron-Key`；生产 2026-09-22 已配，本地联调写进 `.dev.vars`）、`AUTH_BIND_SECRET`（与认证中心 `BIND_SECRET` 同值）、`TEAM_SYNC_SECRET`（v6.1.0：`/api/internal/team-upsert` 的 HMAC 密钥，与赛事仓 `TEAM_SYNC_SECRET` **同值**；生产 2026-09-23 两侧已配）、`SENTRY_DSN`（v6.1.1：Sentry 错误追踪；**未配 = SDK 完全不初始化、零上报零网络**；生产待 Sentry 建号后配置——配 secret 会生成 Source `Secret Change` 的新版本；本地联调如需上报，`.dev.vars` 里配 DSN 并加 `SENTRY_ENVIRONMENT=development`）。
 
 变量：`AUTH_MODE`、`OIDC_ISSUER`、`OIDC_CLIENT_ID`、`TOUR_API_BASE`（v5.0.1 起为 `https://tour.whleague.win`，排名代理与球队建档出站都用它）（`PUBLIC_CACHE_TTL_MS` 仍受支持，是缓存 TTL 的显式覆盖、配 `0` 即旁路；生产不配，口径在 `src/lib/cache-policy.ts`）。定时触发 `*/5 * * * *`（结算逾期、自动确认赛果、派发站内信）。
 

@@ -60,7 +60,7 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.1.0**。已排期未开工的两个增量：球员页展示层 = **v6.2.0**、报价子系统 = **v6.3.0**（详见记忆目录 `plan-v6.2.0-player-page.md` / `design-v6.3.0-offer-negotiation.md`）。
+**当前版本 v6.1.1**。已排期未开工的两个增量：球员页展示层 = **v6.2.0**、报价子系统 = **v6.3.0**（详见记忆目录 `plan-v6.2.0-player-page.md` / `design-v6.3.0-offer-negotiation.md`）。
 
 ---
 
@@ -944,6 +944,33 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **待办**：① ~~两仓提交~~ ✅ 已做（本仓 `f250c29`、赛事仓 `5f07002`，两仓工作区干净）；② ~~部署 + 配 `TEAM_SYNC_SECRET`~~ ✅ 已做（2026-09-23 两侧同值配置 + 两仓部署，版本号见本节状态行）；③ **未验证**：部署后实测一条 —— 赛事仓建队 → 本仓 `/api/admin/team-sync` 无差异；本仓建俱乐部（赛事仓无此队）→ 赛事仓 `/api/admin/teams` 能看到该队（两条都需两侧管理端登录态，CLI 拿不到会话，未做）；「两侧密钥同值」也只能靠一次零写 upsert 探测证实（生产写动作，未授权不做）。
 
+
+## v6.1.1 · Sentry 错误追踪接入（club 试点；2026-09-25）
+
+**状态**：代码已提交本地（`b859314`，9 文件），**未 push 未部署**；生产 `SENTRY_DSN` 未配（Sentry 账号尚未注册），上线等「用户给 DSN → `wrangler secret put`（会换版本）→ push（=自动部署）→ probe 回读」逐项授权。**本仓首个第三方 SaaS 运行时依赖**。判级 patch：观测设施、无用户可见能力。
+
+**缘起**：2026-09-25 脑暴成熟技术方案可用性（结论见记忆 `chart-and-workflow-feasibility.md`），用户拍板「前后端都接（errors-only）、还没有账号、四仓都接入」。定位：2026-09-21 D1 配额事故当时只能靠 cron 日志逐条翻，Sentry 让同类异常主动推送带堆栈。
+
+**交付**
+- `wrangler.jsonc`：`compatibility_flags: ["nodejs_compat"]`（SDK 依赖 AsyncLocalStorage；compatibility_date 2025-09-01 已满足硬前提）+ `version_metadata` 绑定（release 自动 = 部署版本 ID，零维护）。
+- `src/worker/env.ts`：`SENTRY_DSN?` / `SENTRY_ENVIRONMENT?`（未配 = SDK 不初始化，完全旁路）+ `CF_VERSION_METADATA?`。
+- `src/worker/index.ts`：`sentry(app, (env) => ({...}))` 中间件挂在一切中间件与路由之前（`tracesSampleRate: 0` ⇒ errors-only）；`scheduled` 以 `Object.assign(app, { scheduled })` **先挂再插桩**（withSentry 插桩时检查属性存在），cron 从 `ctx.waitUntil` 改为 **`await`**（包装器只 await 函数体本体，waitUntil 里的拒绝躲过捕获也躲过 flush）+ `withMonitor('club-settle-tick')`（Crons check-in：漏跑/超时可见）；新增 `POST /api/cron/sentry-probe`（assertCronKey 守卫，故意抛非 HttpError 的上线验证通道）。既有 `app.onError` 与报错 JSON 形状一字未动。
+- `web/src/lib/sentry.ts` + `main.tsx`：`@sentry/react` errors-only eager init（不引 replay/ErrorBoundary），DSN 空串 = 未接入。
+- `tests/sentry.test.ts` 3 例（旁路 / 守卫 403 / 探针 500 形状）。
+
+**实现期核实的机制（推广 tour / auth / guess 时照此）**
+- `withSentry(optionsFn, handler)` **原地改写** handler 的 fetch/scheduled/email/queue/tail 并返回原对象；`sentry(app, opts)` 返回 MiddlewareHandler 需 `app.use` 挂载，内部对 app 调 withSentry。
+- 初始化逐请求发生（`getFinalOptions(optionsCallback(env), env)`）⇒ DSN 后配即生效；过滤用 SDK 默认 `defaultShouldHandleError`：`error.status` 在 300–499 排除（HttpError 业务错误天然不上报），其余全收；敏感字段走内置 denylist。
+- wrapped fetch 每请求在 executionCtx 上登记一个 flush drain ⇒ 测试里显式传假 ctx 且精确计数的用例会 +1（`tests/media.test.ts` 放宽为 ≥1 并注明）。
+- **前端 DSN 空串时 rollup 把整个 SDK 当死代码摇掉** ⇒ bundle 零增量（同 hash 实测）；填 DSN 那天须实测增量（硬线 ~35KB gzip，超线回退懒加载）。
+
+**评审修掉**：cron 手动 `captureException` 与 `instrumentScheduled` 包装器的自动捕获**必然重复**（每次失败两条同指纹事件，白耗免费档 5k errors/月）——删手动层，只留包装器。
+
+**验收（实测）**：`npm run typecheck` 三份全清；`npx vitest run` **51 文件 / 727 例全绿**（基线 50/724）；`npm run build` 成功，主 bundle `index-BqdBJFJR.js` 477,874 B / gzip 149,563 B **与改动前逐字节同 hash**；`npm run test:e2e` **11/11**（④ 首跑失败系 dev 冷启动偶发超时，复跑两次全过）；`npx wrangler deploy --dry-run` worker 打包通过且 `CF_VERSION_METADATA` 绑定被识别（纯本地构建校验，无部署）。
+
+**四仓蓝图**（约定全文见记忆 `sentry-four-repo-conventions.md`）：一个 Sentry org、6 项目（`whl-{club,tour}-{worker,web}` + `whl-auth-worker` + `whl-guess-worker`；guess 前端无构建不接）；包版本四仓对齐 v11；monitor slug `<repo>-<task>`；nodejs_compat 各仓自加自验；**errors 5k/月疑为 org 级共享、crons check-ins 免费档归属未验证（注册账号时核对）**。顺序 tour（同形态复用 + 名册同步/账号镜像的 cron 吞错是最大收益点）→ auth（HTML 错误页保持、无前端 SDK）→ guess（裸 Worker 用 withSentry 包 default export、两 cron 按 `event.cron` 分支）；每仓动工前各自立计划等指令。
+
+**待办**：① 用户注册 Sentry 并建项目给 DSN；② `wrangler secret put SENTRY_DSN` + push + probe 回读（逐项授权）；③ 填 DSN 后重测前端 bundle；④ 免费档额度核对（errors org 级？crons 含否？）。
 
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
