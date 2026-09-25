@@ -31,4 +31,13 @@ export interface Env {
   // v6.1.0：球队建档双向同步的共享密钥（与赛事仓同值，wrangler secret put TEAM_SYNC_SECRET）。
   // 出站未配 = 只记同步失败、不阻断本地建俱乐部；入站未配 = /api/internal/* 一律 503（写端点 fail-closed）。
   TEAM_SYNC_SECRET?: string;
+  // v6.1.1：Sentry 错误追踪（@sentry/hono/cloudflare 中间件）。DSN 走 secret
+  // （wrangler secret put SENTRY_DSN；配 secret 会生成 Source=Secret Change 的新版本）。
+  // **未配 = 完全旁路**：SDK 不初始化、零上报零网络，本地 .dev.vars 不配即可。
+  // SENTRY_ENVIRONMENT 仅本地联调时配（如 'development'），生产缺省即 'production'。
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  // v6.1.1：wrangler version_metadata 绑定（只读）——Sentry SDK 从 env 自动检测该绑定的
+  // id 作为 release（优先级低于 SENTRY_RELEASE 环境变量，本仓不配后者）。
+  CF_VERSION_METADATA?: { id: string };
 }

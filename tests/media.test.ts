@@ -176,7 +176,10 @@ describe('GET /api/media/*（v3.4.0）', () => {
     );
 
     expect(res.status).toBe(200);
-    expect(pending).toHaveLength(1); // 回填登记在 waitUntil 上，响应不等它
+    // 回填登记在 waitUntil 上，响应不等它。v6.1.1 起 Sentry 会在同一 ctx 上多登记一个
+    // 自己的 flush drain（生产语义：借用 waitUntil 让 isolate 活到事件发完），
+    // 所以这里断言「至少 1 个」而不是精确计数。
+    expect(pending.length).toBeGreaterThanOrEqual(1);
     await Promise.all(pending);
     expect(put).toEqual(['http://localhost/api/media/team/1/a.png']);
   });

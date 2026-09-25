@@ -6,6 +6,15 @@
   "name": "whl-club",
   "main": "src/worker/index.ts",
   "compatibility_date": "2025-09-01",
+  // v6.1.1：Sentry SDK（@sentry/hono/cloudflare → @sentry/cloudflare）依赖 AsyncLocalStorage，
+  // 必须开 nodejs_compat（compatibility_date ≥ 2024-09-23 已满足）。
+  // 回滚 = 删掉本行 + 撤 src/worker/index.ts 的 sentry 中间件。
+  "compatibility_flags": ["nodejs_compat"],
+  // v6.1.1：Sentry release 自动带上部署版本（SDK 从该绑定读 CF_VERSION_METADATA.id，
+  // 优先级低于 SENTRY_RELEASE 环境变量，本仓不配后者）。
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
   "assets": {
     "directory": "./web/dist",
     "binding": "ASSETS",

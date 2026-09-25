@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { deleteCookie, getCookie } from 'hono/cookie';
+import { sentry, withMonitor } from '@sentry/hono/cloudflare';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { assertCronKey, purgePublicCaches, waitUntilOf } from '../lib/guard.ts';
@@ -25,6 +26,24 @@ import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults } from './results.ts';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// v6.1.1：cron 兜底入口必须在 sentry() **之前**挂到 app 上——withSentry 插桩时检查对象上
+// 是否已有 fetch/scheduled 属性，后挂的插桩不到（scheduledTick 是函数声明，提升可用）。
+Object.assign(app, { scheduled: scheduledTick });
+
+// v6.1.1：Sentry 错误追踪。挂点必须早于一切中间件与路由。DSN 未配 = SDK 不初始化
+// （完全旁路，本地与测试零网络）；默认过滤（defaultShouldHandleError）：带 status 的
+// 3xx/4xx 业务错误（HttpError）不上报，其余（D1 配额类、TypeError 等非 HttpError）全收；
+// 敏感字段（auth/password 等）走内置 denylist。tracesSampleRate=0 ⇒ errors-only；
+// release 由 CF_VERSION_METADATA 绑定自动带出部署版本 ID。
+app.use(
+  sentry(app, (env) => ({
+    dsn: env.SENTRY_DSN,
+    environment: env.SENTRY_ENVIRONMENT ?? 'production',
+    sampleRate: 1,
+    tracesSampleRate: 0,
+  })),
+);
 
 // 公开读缓存的中心化失效挂钩（v3.2.0）：**必须注册在路由之前**——Hono 的 compose 里路由
 // 返回响应就结束链路，注册在后面的中间件根本不会执行。
@@ -134,6 +153,14 @@ app.get('/api/cron/players-count', async (c) => {
   return c.json({ count: await countPlayers(c) });
 });
 
+// v6.1.1：Sentry 上报验证探针（守卫与 tick 同款 fail-open：生产配了 CRON_KEY 即受保护）。
+// 真实抛一个非 HttpError ⇒ 同时压两条路径：onError 回 500 JSON + Sentry 捕获（非 HttpError
+// 无 status ⇒ 默认过滤放行）。仅用于部署后核对「Sentry 控制台能看到事件」，平时无人调用。
+app.post('/api/cron/sentry-probe', (c) => {
+  assertCronKey(c);
+  throw new Error('sentry-probe：故意抛出的验证异常（v6.1.1）');
+});
+
 app.notFound((c) => c.json({ error: '接口不存在' }, 404));
 
 export { app };
@@ -164,15 +191,25 @@ function tickChanged(summary: SettleSummary): boolean {
   );
 }
 
-export default {
-  fetch: app.fetch,
-  // cron 兜底（wrangler.jsonc triggers */5）：扫描/结算全部挂牌状态机
-  scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
-    ctx.waitUntil(
-      runSettleTick(env).then(async (summary) => {
-        if (!tickChanged(summary)) return;
-        await purgePublicCaches(env).catch(() => {});
-      }),
-    );
-  },
-};
+// v6.1.1：cron 兜底入口（wrangler.jsonc triggers */5）。**await 而非 ctx.waitUntil**：
+// withSentry 的 scheduled 包装只 await 函数体本体——waitUntil 里的后台拒绝既躲过它的
+// captureException 也躲过收尾 flush（事件会丢）；await 让整个 tick 处于插桩上下文内
+// （5 分钟一跳、tick 秒级，不亏）。withMonitor 附带 check-in 监控（Sentry Crons：漏跑/
+// 超时可见；免费档若不含 crons，check-in 被静默丢弃，错误上报不受影响）。tick 抛错
+// 无需手动 captureException——外层包装器（instrumentScheduled）已捕获并收尾 flush，
+// 手动再发一遍只会产出重复事件白耗免费额度。
+// 回滚 = 撤 sentry 中间件与 nodejs_compat、本函数还原 waitUntil 版。
+async function scheduledTick(_event: unknown, env: Env, _ctx: { waitUntil(p: Promise<unknown>): void }) {
+  await withMonitor(
+    'club-settle-tick',
+    async () => {
+      const summary = await runSettleTick(env);
+      if (!tickChanged(summary)) return;
+      await purgePublicCaches(env).catch(() => {});
+    },
+    { schedule: { type: 'crontab', value: '*/5 * * * *' }, checkinMargin: 2, maxRuntime: 5 },
+  );
+}
+
+// 默认导出即 app 本体（scheduled 已 Object.assign 上去、fetch 已被 withSentry 原地包装）
+export default app;
