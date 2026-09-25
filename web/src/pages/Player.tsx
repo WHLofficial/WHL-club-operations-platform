@@ -1,7 +1,7 @@
 // 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，v0.7.1 d9 改 E2 页内页签：
 // 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级；转会记录=单据流水）
 // 成长记录区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -44,9 +44,10 @@ import {
   type PlaystyleSlot,
 } from '../../../src/core/fc26.ts';
 import { useToast } from '../lib/toast.tsx';
-import { qk, useSeasonsCurrent } from '../lib/queries.ts';
+import { qk, useOffersReceivedPending, useSeasonsCurrent } from '../lib/queries.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { playerPath } from '../lib/player-link.ts';
+import { SideOps } from './player/SideOps.tsx';
 
 type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers';
 
@@ -215,6 +216,8 @@ export default function Player() {
     enabled: isCoach,
   });
   const myClubId = myClubQuery.data?.club?.id ?? null;
+  // 我收到的报价（v6.3.0）：只为左栏入口徽标的待处理条数，登录教练才拉
+  const receivedPendingQuery = useOffersReceivedPending(isCoach);
   // 成长记录拉失败按 null 展示（旧行为 .catch(() => setGrowth(null))）
   const growthQuery = useQuery({
     queryKey: ['player', id ?? '', 'growth'],
@@ -447,7 +450,24 @@ export default function Player() {
             <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
           </section>
 
-          <SideOps status={player.status} isMine={isMine} isFree={club === null} isCpu={isCpu} windowOpen={windowOpen} />
+          <SideOps
+            player={{
+              id: player.id,
+              status: player.status,
+              transferListed: player.transferListed,
+              minOfferPrice: player.minOfferPrice,
+              notForSale: player.notForSale,
+            }}
+            contract={contract}
+            isMine={isMine}
+            isFree={club === null}
+            isCpu={isCpu}
+            isCoach={isCoach}
+            windowOpen={windowOpen}
+            pendingMine={receivedPendingQuery.data?.pendingMine ?? 0}
+            show={show}
+            refreshAll={refreshAll}
+          />
         </div>
 
         <section className="dossier-file">
@@ -642,152 +662,8 @@ export default function Player() {
   );
 }
 
-// 左栏五态骨架（v6.2.0）：报价设置 / 转会区信息 / 球队操作 / 我收到的报价，控件全按原型做出但一律禁用，
-// 真实数据与动作接线在 v6.3.0（报价子系统）落成时补上。五态判据：
-//   A 本队·未挂牌 = 报价设置 + 续约/挂牌/解约 + 我收到的报价
-//   B 本队·挂牌中 = 转会区信息（挂牌期间无任何操作）
-//   C 别队真人队·未挂牌 = 报价 / 激活
-//   D 别队真人队·非卖品 = 报价禁用（后端还没有非卖品字段，运行时暂不可达，接线后自动生效）
-//   E CPU 队 / 自由身 = 海捞签入
-// 关窗时（windowOpen=false）顶部出提示条：后端对挂牌/出价/续约/解约/海捞一律 409 no_window，
-// 开关在管理端市场页（/api/admin/windows/open|close），这里只同步状态。
-function SideOps({ status, isMine, isFree, isCpu, windowOpen }: { status: string; isMine: boolean; isFree: boolean; isCpu: boolean; windowOpen: boolean }) {
-  const notForSale = false;
-  let body: ReactElement;
-  if (isMine && status === 'listed') {
-    body = (
-      <section className="side-sec">
-        <div className="side-sec-head">转会区 · 本队挂牌中</div>
-        <div className="side-row">
-          <span className="attr-name">类型</span>
-          <span>
-            <span className="badge sky">转会挂牌</span>
-          </span>
-        </div>
-        <div className="side-row">
-          <span className="attr-name">要价</span>
-          <span className="mono">—</span>
-        </div>
-        <div className="side-row">
-          <span className="attr-name">最高出价</span>
-          <span className="mono">—</span>
-        </div>
-        <div className="side-btns">
-          <button type="button" className="btn btn-sm" disabled>
-            去转会区
-          </button>
-          <button type="button" className="btn btn-sm btn-ghost" disabled>
-            下架
-          </button>
-        </div>
-        <p className="side-sub">挂牌期间无任何操作</p>
-      </section>
-    );
-  } else if (isMine) {
-    body = (
-      <>
-        <section className="side-sec">
-          <div className="side-sec-head">报价设置</div>
-          <div className="side-row">
-            <span className="attr-name">转会名单</span>
-            <span className="seg seg-mini" role="radiogroup" aria-label="转会名单">
-              <button type="button" className="on" disabled>
-                是
-              </button>
-              <button type="button" disabled>
-                否
-              </button>
-            </span>
-          </div>
-          <p className="side-sub">达线自动同意，低于自动拒</p>
-          <label className="side-field">
-            <span className="side-lab">
-              <span>最低报价（万）</span>
-              <span className="side-range mono">—</span>
-            </span>
-            <input className="mono" type="number" disabled placeholder="v6.3.0 接线" aria-label="最低报价" />
-          </label>
-          <div className="side-row">
-            <span className="attr-name">非卖品</span>
-            <span className="seg seg-mini" role="radiogroup" aria-label="非卖品">
-              <button type="button" disabled>
-                是
-              </button>
-              <button type="button" className="on" disabled>
-                否
-              </button>
-            </span>
-          </div>
-          <p className="side-sub">一切报价自动拒</p>
-        </section>
-        <section className="side-sec">
-          <div className="side-sec-head">球队操作</div>
-          <div className="side-btns">
-            <button type="button" className="btn btn-sm" disabled>
-              续约
-            </button>
-            <button type="button" className="btn btn-sm btn-ghost" disabled>
-              挂牌
-            </button>
-            <button type="button" className="btn btn-sm btn-danger" disabled>
-              解约
-            </button>
-          </div>
-        </section>
-        <div className="side-entry">
-          <span>我收到的报价</span>
-          <span className="muted">共 — 条 ›</span>
-        </div>
-      </>
-    );
-  } else if (notForSale) {
-    body = (
-      <section className="side-sec">
-        <div className="side-sec-head">球队操作</div>
-        <div className="side-btns">
-          <button type="button" className="btn btn-sm" disabled>
-            报价
-          </button>
-          <button type="button" className="btn btn-sm btn-ghost" disabled>
-            激活
-          </button>
-        </div>
-        <p className="side-sub">此球员为非卖品！</p>
-      </section>
-    );
-  } else if (isFree || isCpu) {
-    body = (
-      <section className="side-sec">
-        <div className="side-sec-head">球队操作</div>
-        <div className="side-btns">
-          <button type="button" className="btn btn-sm" disabled>
-            海捞签入
-          </button>
-        </div>
-      </section>
-    );
-  } else {
-    body = (
-      <section className="side-sec">
-        <div className="side-sec-head">球队操作</div>
-        <div className="side-btns">
-          <button type="button" className="btn btn-sm" disabled>
-            报价
-          </button>
-          <button type="button" className="btn btn-sm btn-ghost" disabled>
-            激活
-          </button>
-        </div>
-      </section>
-    );
-  }
-  return (
-    <div className="side-ops">
-      {!windowOpen && <div className="side-closed-note">转会窗未开放，转会相关操作暂不可用</div>}
-      {body}
-    </div>
-  );
-}
+// 左栏五态操作区（v6.2.0 骨架 → v6.3.0 接真实端点）：实现独立成 web/src/pages/player/SideOps.tsx，
+// 数据（报价设置三字段 / 合同 / 窗状态 / 待处理徽标）由本页传下去，动作后的刷新回调 refreshAll。
 
 // 属性页签（v0.7.1 d10）：头部两栏（左=标题/位置/角色，右=队徽 96px + 光图六维雷达，v6.2.0）
 // + 星级行 + 六组细分卡（门将七组）；雷达不再套卡框，属性卡网格保持整宽

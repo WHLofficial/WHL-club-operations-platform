@@ -292,6 +292,10 @@ export interface PlayerDetail {
     gameAttrs: Record<string, unknown> | null;
     createdAt: string;
     updatedAt: string;
+    // 报价设置（v6.3.0）：转会名单 / 最低报价 / 非卖品——球员页左栏报价设置与五态判据吃这三个字段
+    transferListed: boolean;
+    minOfferPrice: number | null;
+    notForSale: boolean;
   };
   club: { id: number; name: string } | null;
   contract: ContractDto | null;
@@ -1245,4 +1249,53 @@ export interface M0Report {
   byKind: { kind: string; total: number; n: number }[];
   /** 按余额降序的俱乐部明细 */
   byClub: { id: number; name: string; balance: number }[];
+}
+
+// ---- v6.3.0：报价 / 议价（/api/offers，全部私有） ----
+
+export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
+
+export interface OfferListItem {
+  id: number;
+  player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null };
+  counterpart: { id: number; name: string };
+  role: 'buyer' | 'seller';
+  amount: number;
+  initAmount: number;
+  round: number;
+  note: string | null;
+  status: OfferStatus;
+  turn: 'buyer' | 'seller';
+  myTurn: boolean;
+  listingId: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OffersListResponse {
+  club: { id: number; name: string };
+  box: 'in' | 'out';
+  items: OfferListItem[];
+  nextCursor: string | null;
+  /** 轮到我表态的条数（球员页「我收到的报价」入口徽标用） */
+  pendingMine: number;
+}
+
+export interface OfferEventRow {
+  kind: string;
+  amount: number | null;
+  note: string | null;
+  at: string;
+  actor: { id: number; name: string } | null;
+}
+
+export interface OfferDetailResponse {
+  offer: OfferListItem & {
+    buyerClub: { id: number; name: string };
+    sellerClub: { id: number; name: string };
+    season: number;
+    windowSeq: number;
+    resolvedAt: string | null;
+  };
+  events: OfferEventRow[];
 }

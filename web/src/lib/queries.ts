@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
+import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
@@ -21,6 +21,8 @@ export const qk = {
   notifications: ['notifications'] as const,
   stadiumBuild: ['club', 'stadium-build'] as const,
   naming: ['club', 'naming'] as const,
+  offers: (box: 'in' | 'out', status: string) => ['offers', box, status] as const,
+  offer: (id: number) => ['offers', 'detail', id] as const,
 };
 
 export interface MarketMyClub {
@@ -181,5 +183,42 @@ export function useMarkNotificationsRead() {
     void qc.invalidateQueries({ queryKey: qk.notifications });
     void qc.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
     return out;
+  };
+}
+
+// ---- 报价 / 议价（v6.3.0）----
+
+// 报价清单（box=in 我收到的 / out 我送出的；status=pending|all）。写后整组失效（两个 box 都动）。
+export function useOffers(box: 'in' | 'out', status: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.offers(box, status),
+    queryFn: () => api<OffersListResponse>(`/api/offers?box=${box}&status=${status}`),
+    enabled,
+  });
+}
+
+// 球员页「我收到的报价」入口徽标：只要轮到我处理的条数，登录教练即拉（轻量端点）
+export function useOffersReceivedPending(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.offers('in', 'pending'),
+    queryFn: () => api<OffersListResponse>('/api/offers?box=in&status=pending'),
+    enabled,
+  });
+}
+
+export function useOfferDetail(id: number | null, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.offer(id ?? 0),
+    queryFn: () => api<OfferDetailResponse>(`/api/offers/${id}`),
+    enabled: enabled && id !== null,
+  });
+}
+
+// 报价动作后的联动失效：两个 box 的全部状态 + 单条详情 + 我的俱乐部（冻结影响可用余额）
+export function useOffersInvalidation() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ['offers'] });
+    void qc.invalidateQueries({ queryKey: qk.myClub });
   };
 }

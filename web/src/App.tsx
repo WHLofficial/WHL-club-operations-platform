@@ -13,6 +13,8 @@ import Bind from './pages/Bind.tsx';
 import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
 import Notifications from './pages/Notifications.tsx';
+// 报价 / 议价（v6.3.0）：登录后可见
+const Offers = lazy(() => import('./pages/Offers.tsx'));
 import { APP_VERSION } from './lib/version.ts';
 
 // 市场三页按页拆 chunk（v2.2.0）：市场板公开，海捞/我的要登录
@@ -106,6 +108,14 @@ export default function App() {
             element={
               <RequireUser>
                 <Negotiations />
+              </RequireUser>
+            }
+          />
+          <Route
+            path="/offers"
+            element={
+              <RequireUser>
+                <Offers />
               </RequireUser>
             }
           />

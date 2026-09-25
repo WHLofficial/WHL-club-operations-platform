@@ -50,6 +50,10 @@ export default function TopBar() {
           <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             转会市场
           </NavLink>
+          {/* 转会报价（v6.3.0）：教练在球员页与这里都能进；页面本身对非教练显示引导 */}
+          <NavLink to="/offers" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
+            转会报价
+          </NavLink>
           <NavLink to="/negotiations" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             签约谈判
           </NavLink>
