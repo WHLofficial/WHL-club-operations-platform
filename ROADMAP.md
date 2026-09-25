@@ -60,7 +60,7 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.1.1**。已排期未开工的两个增量：球员页展示层 = **v6.2.0**、报价子系统 = **v6.3.0**（详见记忆目录 `plan-v6.2.0-player-page.md` / `design-v6.3.0-offer-negotiation.md`）。
+**当前版本 v6.2.0**（本地已收口，未 push 未部署）。已排期未开工：报价子系统 = **v6.3.0**（详见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.2.0 埋的五态骨架控件由它接线）。
 
 ---
 
@@ -971,6 +971,22 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 **四仓蓝图**（约定全文见记忆 `sentry-four-repo-conventions.md`）：一个 Sentry org、6 项目（`whl-{club,tour}-{worker,web}` + `whl-auth-worker` + `whl-guess-worker`；guess 前端无构建不接）；包版本四仓对齐 v11；monitor slug `<repo>-<task>`；nodejs_compat 各仓自加自验；**配额已核对（2026-09-25 官方文档）**：errors 5k/月 = org 级共享池（项目数不限，6 项目共用，防单项目吃光用 per-project rate limit + spike protection 默认开）；免费档全 org 只含 **1 个 cron monitor**（check-in 次数不占 errors 额度、速率 6 check-ins/分钟/monitor 绰绰有余）⇒ **蓝图订正：只留 `club-settle-tick` 挂 withMonitor**，tour/auth/guess 的 cron 在各自 catch 里显式 `captureException`（升付费档再逐个补 monitor）。顺序 tour（同形态复用 + 名册同步/账号镜像的 cron 吞错是最大收益点）→ auth（HTML 错误页保持、无前端 SDK）→ guess（裸 Worker 用 withSentry 包 default export、两 cron 按 `event.cron` 分支）；每仓动工前各自立计划等指令。
 
 **待办**：① 用户注册 Sentry 并建项目给 DSN；② `wrangler secret put SENTRY_DSN` + push + probe 回读（逐项授权）；③ 填 DSN 后重测前端 bundle；④ 免费档额度核对（errors org 级？crons 含否？）。
+
+## v6.2.0 · 球员页展示层改版（六维图 · 队徽 · 术语 · 状态词 · 左栏五态骨架；2026-09-25）
+
+**状态**：代码完成、本地全绿，**未 push 未部署**（push 即触发 CF 自动部署）。判级 minor：展示层改版、有用户可见变化；纯前端 + 注释，零迁移、零后端行为变化。原型对照屏（用户已确认）：`player-attrs-v4.html` / `player-side-v5.html`（brainstorm 4466）。
+
+**缘起**：v6.3.0 报价子系统开工前的展示层先行——属性页签头部一直有块空区，六维雷达却占着左栏一整块卡；术语「挂牌板 / 挂牌单」与状态词「正常 / 无归属」两套旧口径收口，给 v6.3.0 的报价按钮矩阵腾出干净地基。
+
+**交付**
+- `web/src/pages/Player.tsx`：① `AttrRadar` 压成 **232×156 光图**（viewBox 232×156 / R=48，无卡框无 legend），**轴标签改三字母 + 数值**（`tspan.radar-axis-key` + `tspan.radar-axis-val`）；雷达从左栏 `.radar-card` 移入**属性页签头部右格**，`AttrSheet` 头部改两栏（左 = 标题/位置/角色，右 = 队徽 96px + 12px + 雷达），花式行与属性卡网格保持整宽。② 左栏五态骨架组件 `SideOps`：本队未挂牌 = 报价设置（转会名单 seg / 最低报价输入 + 区间位 / 非卖品 seg，全部禁用）+ 续约/挂牌/解约 + 「我收到的报价」入口；本队挂牌中 = 「转会区 · 本队挂牌中」信息卡（类型/要价/最高出价 + 去转会区/下架 + 「挂牌期间无任何操作」）；别队真人 = 报价/激活；非卖品 = 报价禁用 + 「此球员为非卖品！」；CPU 队/自由身 = 海捞签入。**控件一律禁用，真实数据与动作接线在 v6.3.0**（「非卖品」字段后端还没有，D 态运行时暂不可达）。③ 状态词两表合一：`ref.ts` 的 `STATUS_LABEL`（正常/无归属）删除，统一用 `players-library.ts` 那套（在队/自由身）。④ 队徽与 CPU 判据来自公开 `GET /api/clubs`（`ClubSummary.isCpu`/`logoKey`，与球队页共用 `qk.clubsList` 缓存键，服务端 24h scope 缓存；仅对有归属球员的详情启用）。
+- `web/src/styles.css`：删 `.radar-card` / `.radar-card .attr-radar` / `.radar-card .attr-radar-svg` / `.attr-radar` / `.radar-legend` 四条族；`.attr-radar-svg` 改 232px 自适应；新增 `.attr-head` 两栏 grid（≤760px 单列堆叠）、`.radar-axis-key`/`.radar-axis-val`、左栏骨架一族 `.side-*`。
+- 术语改名：「挂牌板 / 挂牌单」→「转会区」——界面文案 1 处（`MarketBoardPage.tsx` 的 `<h3>`）+ 注释 6 处（`MarketBoardPage.tsx:1-2`、`queries.ts:84`、`market.ts:1/:82/:255`、`activations.ts:137`）；页面大标题「转会市场」按裁决不动。**全仓 `src/`+`web/src` 已无「挂牌板/挂牌单」**。
+- `package.json` 版本 6.1.1 → 6.2.0。
+
+**实测与验收**：typecheck 三份全清；vitest **51 文件 / 727 例全绿**（基线 727）；build 成功（主 bundle gzip 183.15 KB，较 v6.1.1 +0.7 KB）；e2e **11/11**。浏览器手测（playwright-core + 本机 Chrome，会话种子复用 e2e 做法，夹具用本地 D1 临时翻转、测后即还原）：A/B/C/CPU-E/自由身 E 五态截图落 `scratch/manual-*.png`，逐态断言期望文本全中 + 侧栏按钮全禁用 + `.radar-card`/`.radar-legend` 计数 0 + 队徽 96px + 375 窄屏零溢出（首测报的 23px 溢出是 resize 不刷新的瞬态假象，fresh load `scrollWidth=375`）。
+
+**遗留与边界**：D 态（非卖品）后端无字段、运行时不可达，v6.3.0 接线时自动生效；`PlayerDetail.club` 不含 `logoKey`，队徽图 key 借公开球队列表取（自由身无队徽、与列表/详情同色哈希块兜底）；本地夹具两处陈旧已顺手修（TOUR_DB `team` 缺 `logo_key` 列已补；`.wrangler` 本地 D1 缺的 0029/0034/0035/0036 索引已补打）——均只动本地 `.wrangler/state`，不涉生产。v6.3.0 开工时：删禁用态、接真实报价端点、D 态判据接上。
 
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
