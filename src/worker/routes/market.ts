@@ -1,4 +1,4 @@
-// 转会市场路由（附录 A〔3〕）：挂牌板（公开）、挂牌/出价（教练）、我的出价、单据详情。
+// 转会市场路由（附录 A〔3〕）：转会区（公开）、挂牌/出价（教练）、我的出价、单据详情。
 // 惰性结算（§6.5）在列表与出价入口先跑；挂牌校验全在 core/market-rules，
 // 出价的资金/步长闸由 0005 触发器在同一事务兜底，路由层做可读的前置校验。
 import { Hono } from 'hono';
@@ -79,7 +79,7 @@ function statusFilter(raw: string | undefined): string[] {
   }
 }
 
-// GET /api/market/listings?status=&cursor= —— 挂牌板（卡柜）
+// GET /api/market/listings?status=&cursor= —— 转会区（卡柜）
 app.get('/market/listings', async (c) => {
   await settleOverdue(c.env);
   const statuses = statusFilter(c.req.query('status'));
@@ -252,7 +252,7 @@ app.post('/market/listings', async (c) => {
   if (!inserted) throw new HttpError(409, '挂牌没落库，球员状态可能刚被改过，刷新再试');
   const listingId = Number(results[0].meta.last_row_id);
 
-  // 4.4.10：挂牌提交即触发本窗续约回滚（触发 ref = 挂牌单）
+  // 4.4.10：挂牌提交即触发本窗续约回滚（触发 ref = 转会区挂牌记录）
   await rollbackRcChangeForPlayer(c.env, playerId, user.id, { refType: 'listing', refId: listingId });
 
   return c.json({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);

@@ -134,7 +134,7 @@ export async function createActivation(
   }
   const listingId = Number(results[1].meta.last_row_id);
 
-  // 4.4.10：激活挂牌提交即触发本窗续约回滚（触发 ref = 挂牌单）
+  // 4.4.10：激活挂牌提交即触发本窗续约回滚（触发 ref = 转会区挂牌记录）
   await rollbackRcChangeForPlayer(env, playerId, actor, { refType: 'listing', refId: listingId });
 
   return { ok: true, listingId, askPrice, kind: isTrainee ? 'trainee' : 'normal', firstBidDeadline: deadline.toISOString() };

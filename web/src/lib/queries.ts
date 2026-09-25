@@ -81,7 +81,7 @@ export function useSquad(isCoach: boolean): SquadOverview | null {
   return data ?? null;
 }
 
-// 挂牌板：状态切换用 keepPreviousData 防闪「正在翻卡柜」
+// 转会区：状态切换用 keepPreviousData 防闪「正在翻卡柜」
 export function useBoard(filter: string) {
   return useQuery({
     queryKey: qk.board(filter),

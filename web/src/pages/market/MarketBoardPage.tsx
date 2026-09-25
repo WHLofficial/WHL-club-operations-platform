@@ -1,5 +1,5 @@
-// 市场板 /market（v2.2.0 拆页）：挂牌板（卡柜）+ 单卡详情与出价历史 + 匹配决定（24h 窗）。
-// 原 Market.tsx 的挂牌板与 DetailSection 原样搬迁；海捞/我的挂牌/我的出价分到 /market/free、/market/mine。
+// 市场板 /market（v2.2.0 拆页）：转会区（卡柜）+ 单卡详情与出价历史 + 匹配决定（24h 窗）。
+// 原 Market.tsx 的转会区与 DetailSection 原样搬迁；海捞/我的挂牌/我的出价分到 /market/free、/market/mine。
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { apiPost, type BidPlaceResult, type MarketListing, type MarketListingDetail, type MatchDecisionResult } from '../../lib/api.ts';
@@ -58,7 +58,7 @@ export default function MarketBoardPage() {
       <MarketNav />
 
       <section className="card">
-        <h3>挂牌板</h3>
+        <h3>转会区</h3>
         <div className="seg" role="radiogroup" aria-label="按状态筛选挂牌">
           {(Object.keys(FILTER_LABEL) as ListingFilter[]).map((f) => (
             <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>
