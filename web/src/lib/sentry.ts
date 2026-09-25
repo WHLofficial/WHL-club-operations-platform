@@ -1,8 +1,9 @@
 import * as Sentry from '@sentry/react';
 
-// v6.1.1：whl-club-web 项目的 DSN。Sentry 的 DSN 是设计上的公开标识（可进前端产物），
-// 空串 = 未接入（init 直接跳过、零开销），Sentry 建号后填入即启用。
-const SENTRY_WEB_DSN = '';
+// v6.1.1：whl-club-web 项目的 DSN（EU 区 ingest）。Sentry 的 DSN 是设计上的公开标识
+// （可进前端产物），空串 = 旁路（init 直接跳过、SDK 被 rollup 摇掉）。
+const SENTRY_WEB_DSN =
+  'https://a5914c6da75e84dc381847bd898bf73a@o4512146377736192.ingest.de.sentry.io/4512146409259088';
 
 // errors-only：不引 performance/replay，控 bundle 体积与免费档额度（5k errors/月）。
 // 覆盖面：渲染崩溃（React 渲染期异常）、未处理 rejection、事件回调里漏接的异常；
