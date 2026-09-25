@@ -1,13 +1,14 @@
 // 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，v0.7.1 d9 改 E2 页内页签：
 // 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级；转会记录=单据流水）
 // 成长记录区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   apiPost,
   GROWTH_EVENT_LABEL,
+  type ClubSummary,
   type GrowthDetail,
   type LevelUpResult,
   type MyClubOverview,
@@ -21,7 +22,6 @@ import {
   ATTR_LABELS,
   CONTRACT_TYPE_LABEL,
   SOURCE_LABEL,
-  STATUS_LABEL,
   TRANSFER_TYPE_LABEL,
   nationName,
   playstyleBadges,
@@ -31,6 +31,9 @@ import {
   roleChs,
   teamName,
 } from '../lib/ref.ts';
+// 状态词统一用球员库那套（v6.2.0 两表合一：ref.ts 的旧表已删，normal=在队 / free=自由身）
+import { STATUS_LABEL } from '../lib/players-library.ts';
+import { TeamLogo } from '../components/TeamLogo.tsx';
 import {
   PS_GOLD_BASE,
   PS_GRANTABLE_BASE_IDS,
@@ -81,11 +84,12 @@ function groupAverage(keys: readonly string[], attrs: Record<string, unknown>): 
   return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
 }
 
-// 六维雷达（静态 SVG，无动画）：组值=组内平均，归一到 99
-function AttrRadar({ values }: { values: { key: string; label: string; value: number | null }[] }) {
-  const cx = 100;
-  const cy = 100;
-  const R = 70;
+// 六维雷达（静态 SVG，无动画）：组值=组内平均，归一到 99。
+// v6.2.0 起压进属性页签头部右格：232×156 光图（无卡框、无文字 legend），轴标签 = 三字母简称 + 数值
+function AttrRadar({ values }: { values: { key: string; value: number | null }[] }) {
+  const cx = 116;
+  const cy = 78;
+  const R = 48;
   const n = values.length;
   const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
   const pt = (i: number, r: number) => `${(cx + r * Math.cos(angle(i))).toFixed(2)},${(cy + r * Math.sin(angle(i))).toFixed(2)}`;
@@ -93,19 +97,22 @@ function AttrRadar({ values }: { values: { key: string; label: string; value: nu
     .map((v, i) => pt(i, (R * Math.min(Math.max(v.value ?? 0, 0), 99)) / 99))
     .join(' ');
   return (
-    <svg className="attr-radar-svg" viewBox="0 0 200 200" role="img" aria-label="六维雷达">
+    <svg className="attr-radar-svg" viewBox="0 0 232 156" role="img" aria-label="六维雷达">
       {[0.25, 0.5, 0.75, 1].map((f) => (
         <polygon key={f} className="radar-grid" points={values.map((_, i) => pt(i, R * f)).join(' ')} />
       ))}
       {values.map((v, i) => {
-        const x = cx + (R + 13) * Math.cos(angle(i));
-        const y = cy + (R + 13) * Math.sin(angle(i));
+        const x = cx + (R + 11) * Math.cos(angle(i));
+        const y = cy + (R + 11) * Math.sin(angle(i));
         const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? 'middle' : Math.cos(angle(i)) > 0 ? 'start' : 'end';
         return (
           <g key={v.key}>
             <line className="radar-axis" x1={cx} y1={cy} x2={cx + R * Math.cos(angle(i))} y2={cy + R * Math.sin(angle(i))} />
             <text className="radar-label" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">
-              {v.key}
+              <tspan className="radar-axis-key">{v.key}</tspan>
+              <tspan className="radar-axis-val" dx="3">
+                {v.value ?? '—'}
+              </tspan>
             </text>
           </g>
         );
@@ -219,6 +226,13 @@ export default function Player() {
     queryKey: ['player', id ?? '', 'transfers'],
     queryFn: () => api<PlayerTransfersResponse>(`/api/players/${id}/transfers`),
     enabled: id !== undefined && tab === 'transfers',
+  });
+  // 球队列表（v6.2.0）：只为属性页签的队徽 logoKey 与左栏五态的 CPU 判据；
+  // 公开端点、服务端 24h scope 缓存 + 两级缓存，与球队页共用 queryKey，只有有归属球员的详情才拉
+  const clubsListQuery = useQuery({
+    queryKey: qk.clubsList,
+    queryFn: () => api<{ clubs: ClubSummary[] }>('/api/clubs'),
+    enabled: dataQuery.data?.club != null,
   });
   const data = dataQuery.data ?? null;
   const growth = growthQuery.data ?? null;
@@ -351,10 +365,11 @@ export default function Player() {
   }
   const attrs = player.gameAttrs ?? {};
   const nation = nationName(attrs['naID']);
-  // 六维雷达：原在属性页签里（v0.7.1 d11），v3.3.0 搬到左栏球员卡下方常驻——数据仍在页面级算一次
-  const isGk = player.position === 'GK';
-  const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
-  const radarValues = radarAxes.map((g) => ({ key: g.key, label: g.label, value: groupAverage(g.keys, attrs) }));
+  // 队徽与 CPU 判据（v6.2.0）：公开球队列表里查现属俱乐部；列表没回（缓存未落）时按真人队兜底
+  const clubInfo = club ? (clubsListQuery.data?.clubs.find((s) => s.id === club.id) ?? null) : null;
+  // 左栏五态判据：本队 = 登录教练且现属俱乐部就是我的队；「非卖品」字段后端还没有（v6.3.0 报价子系统），运行时暂不可达
+  const isMine = club !== null && myClubId === club.id;
+  const isCpu = clubInfo?.isCpu ?? false;
   // PlayStyle 清单 = FC 源槽 + 发放明细（v3.3.0）：明细存基础 ID，合并时换算成存库 ID 并去重
   const playstyles = mergePlaystyleSlots(
     playstyleBadges(attrs),
@@ -427,21 +442,7 @@ export default function Player() {
             <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
           </section>
 
-          <section className="radar-card">
-            <div className="attr-radar">
-              <AttrRadar values={radarValues} />
-              <div className="radar-legend">
-                <h4>{isGk ? '门将六维' : '外场六维'}</h4>
-                {radarValues.map((v) => (
-                  <div key={v.key} className="radar-legend-row">
-                    <span className="mono radar-legend-key">{v.key}</span>
-                    <span className="attr-name">{v.label}</span>
-                    <span className={`mono ${v.value !== null ? attrClass(v.value) : ''}`}>{v.value ?? '—'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
+          <SideOps status={player.status} isMine={isMine} isFree={club === null} isCpu={isCpu} />
         </div>
 
         <section className="dossier-file">
@@ -546,7 +547,14 @@ export default function Player() {
           )}
 
           {tab === 'attrs' && player.gameAttrs && (
-            <AttrSheet attrs={attrs} position={player.position} prestige={player.prestige} playstyles={playstyles} />
+            <AttrSheet
+              attrs={attrs}
+              position={player.position}
+              prestige={player.prestige}
+              playstyles={playstyles}
+              club={club}
+              crestLogoKey={clubInfo?.logoKey ?? null}
+            />
           )}
 
           {tab === 'growth' && growth && (
@@ -626,19 +634,165 @@ export default function Player() {
   );
 }
 
-// 属性页签（v0.7.1 d10）：位置矩阵 + 角色带 + 星级行 + 六组细分卡（门将七组）；
-// 六维雷达在v3.3.0 移到左栏球员卡下方常驻，这里只剩属性卡网格（PlayStyles 卡补第二行空位）
+// 左栏五态骨架（v6.2.0）：报价设置 / 转会区信息 / 球队操作 / 我收到的报价，控件全按原型做出但一律禁用，
+// 真实数据与动作接线在 v6.3.0（报价子系统）落成时补上。五态判据：
+//   A 本队·未挂牌 = 报价设置 + 续约/挂牌/解约 + 我收到的报价
+//   B 本队·挂牌中 = 转会区信息（挂牌期间无任何操作）
+//   C 别队真人队·未挂牌 = 报价 / 激活
+//   D 别队真人队·非卖品 = 报价禁用（后端还没有非卖品字段，运行时暂不可达，接线后自动生效）
+//   E CPU 队 / 自由身 = 海捞签入
+function SideOps({ status, isMine, isFree, isCpu }: { status: string; isMine: boolean; isFree: boolean; isCpu: boolean }) {
+  const notForSale = false;
+  let body: ReactElement;
+  if (isMine && status === 'listed') {
+    body = (
+      <section className="side-sec">
+        <div className="side-sec-head">转会区 · 本队挂牌中</div>
+        <div className="side-row">
+          <span className="attr-name">类型</span>
+          <span>
+            <span className="badge sky">转会挂牌</span>
+          </span>
+        </div>
+        <div className="side-row">
+          <span className="attr-name">要价</span>
+          <span className="mono">—</span>
+        </div>
+        <div className="side-row">
+          <span className="attr-name">最高出价</span>
+          <span className="mono">—</span>
+        </div>
+        <div className="side-btns">
+          <button type="button" className="btn btn-sm" disabled>
+            去转会区
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" disabled>
+            下架
+          </button>
+        </div>
+        <p className="side-sub">挂牌期间无任何操作</p>
+      </section>
+    );
+  } else if (isMine) {
+    body = (
+      <>
+        <section className="side-sec">
+          <div className="side-sec-head">报价设置</div>
+          <div className="side-row">
+            <span className="attr-name">转会名单</span>
+            <span className="seg seg-mini" role="radiogroup" aria-label="转会名单">
+              <button type="button" className="on" disabled>
+                是
+              </button>
+              <button type="button" disabled>
+                否
+              </button>
+            </span>
+          </div>
+          <p className="side-sub">达线自动同意，低于自动拒</p>
+          <label className="side-field">
+            <span className="side-lab">
+              <span>最低报价（万）</span>
+              <span className="side-range mono">—</span>
+            </span>
+            <input className="mono" type="number" disabled placeholder="v6.3.0 接线" aria-label="最低报价" />
+          </label>
+          <div className="side-row">
+            <span className="attr-name">非卖品</span>
+            <span className="seg seg-mini" role="radiogroup" aria-label="非卖品">
+              <button type="button" disabled>
+                是
+              </button>
+              <button type="button" className="on" disabled>
+                否
+              </button>
+            </span>
+          </div>
+          <p className="side-sub">一切报价自动拒</p>
+        </section>
+        <section className="side-sec">
+          <div className="side-sec-head">球队操作</div>
+          <div className="side-btns">
+            <button type="button" className="btn btn-sm" disabled>
+              续约
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" disabled>
+              挂牌
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" disabled>
+              解约
+            </button>
+          </div>
+        </section>
+        <div className="side-entry">
+          <span>我收到的报价</span>
+          <span className="muted">共 — 条 ›</span>
+        </div>
+      </>
+    );
+  } else if (notForSale) {
+    body = (
+      <section className="side-sec">
+        <div className="side-sec-head">球队操作</div>
+        <div className="side-btns">
+          <button type="button" className="btn btn-sm" disabled>
+            报价
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" disabled>
+            激活
+          </button>
+        </div>
+        <p className="side-sub">此球员为非卖品！</p>
+      </section>
+    );
+  } else if (isFree || isCpu) {
+    body = (
+      <section className="side-sec">
+        <div className="side-sec-head">球队操作</div>
+        <div className="side-btns">
+          <button type="button" className="btn btn-sm" disabled>
+            海捞签入
+          </button>
+        </div>
+      </section>
+    );
+  } else {
+    body = (
+      <section className="side-sec">
+        <div className="side-sec-head">球队操作</div>
+        <div className="side-btns">
+          <button type="button" className="btn btn-sm" disabled>
+            报价
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" disabled>
+            激活
+          </button>
+        </div>
+      </section>
+    );
+  }
+  return <div className="side-ops">{body}</div>;
+}
+
+// 属性页签（v0.7.1 d10）：头部两栏（左=标题/位置/角色，右=队徽 96px + 光图六维雷达，v6.2.0）
+// + 星级行 + 六组细分卡（门将七组）；雷达不再套卡框，属性卡网格保持整宽
 function AttrSheet({
   attrs,
   position,
   prestige,
   playstyles,
+  club,
+  crestLogoKey,
 }: {
   attrs: Record<string, unknown>;
   position: string | null;
   prestige: number | null;
   /** FC 源槽 + 发放明细合并后的清单（页面级算一次，成长页签的候选也要用同一份） */
   playstyles: PlaystyleSlot[];
+  /** 现属俱乐部（自由身为 null ⇒ 头部不出队徽，雷达贴右） */
+  club: { id: number; name: string } | null;
+  /** 队徽图 key（公开球队列表带回；没拿到时 TeamLogo 自动回落队名哈希色块，与列表/详情同色） */
+  crestLogoKey: string | null;
 }) {
   const team = teamName(attrs['TeamID']);
   const posChips = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
@@ -651,35 +805,46 @@ function AttrSheet({
   const skillmoves = Number(attrs['skillmoves']);
   const isGk = position === 'GK';
   const groups = ATTR_GROUPS.filter((g) => isGk || g.key !== 'GKP');
+  // 六维雷达（v6.2.0 移回属性页签头部）：轴与组值沿用同一段口径
+  const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
+  const radarValues = radarAxes.map((g) => ({ key: g.key, value: groupAverage(g.keys, attrs) }));
   return (
     <>
-      <h3>FC 属性（当季源数据）</h3>
-      <div className="pos-row">
-        <div className="pos-chips">
-          {posChips.length > 0 ? (
-            posChips.map((p, i) => (
-              <span key={p} className={i === 0 ? 'pos-chip pos-chip-main' : 'pos-chip'}>
-                {p}
-              </span>
-            ))
-          ) : (
-            <span className="pos-chip">—</span>
+      <div className="attr-head">
+        <div>
+          <h3>FC 属性（当季源数据）</h3>
+          <div className="pos-row">
+            <div className="pos-chips">
+              {posChips.length > 0 ? (
+                posChips.map((p, i) => (
+                  <span key={p} className={i === 0 ? 'pos-chip pos-chip-main' : 'pos-chip'}>
+                    {p}
+                  </span>
+                ))
+              ) : (
+                <span className="pos-chip">—</span>
+              )}
+            </div>
+            {team && <span className="pos-team">来源球队 {team}</span>}
+          </div>
+          {roles.length > 0 && (
+            <div className="role-chips">
+              {roles.map((r, i) => (
+                <span
+                  key={`${r}-${i}`}
+                  className={r.includes('++') ? 'role-chip role-plusplus' : /\+\s*$/.test(r) ? 'role-chip role-plus' : 'role-chip'}
+                >
+                  {r}
+                </span>
+              ))}
+            </div>
           )}
         </div>
-        {team && <span className="pos-team">来源球队 {team}</span>}
-      </div>
-      {roles.length > 0 && (
-        <div className="role-chips">
-          {roles.map((r, i) => (
-            <span
-              key={`${r}-${i}`}
-              className={r.includes('++') ? 'role-chip role-plusplus' : /\+\s*$/.test(r) ? 'role-chip role-plus' : 'role-chip'}
-            >
-              {r}
-            </span>
-          ))}
+        <div className="attr-head-side">
+          {club && <TeamLogo name={club.name} logoKey={crestLogoKey} size={96} />}
+          <AttrRadar values={radarValues} />
         </div>
-      )}
+      </div>
       <div className="star-line">
         <div className="star-cell">
           <span className="attr-name">花式</span>

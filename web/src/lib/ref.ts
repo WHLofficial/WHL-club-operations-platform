@@ -121,13 +121,8 @@ export const ATTR_GROUPS = [
 
 export const AGENT_TIER_LABEL = ['', '温和', '普通', '苛刻'] as const;
 
-export const STATUS_LABEL: Record<string, string> = {
-  normal: '正常',
-  listed: '挂牌中',
-  trainee: '训练营',
-  free: '无归属',
-  retired: '退役',
-};
+// 球员状态词统一用 players-library.ts 的 STATUS_LABEL（v6.2.0 两表合一：normal=在队 / free=自由身），
+// 这张旧表（正常/无归属）已删除，别在这里再建一份。
 
 export const SOURCE_LABEL: Record<string, string> = {
   negotiation: '报价成约',

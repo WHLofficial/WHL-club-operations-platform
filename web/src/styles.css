@@ -2326,34 +2326,8 @@ th.num .th-sort {
   color: var(--bad);
 }
 
-/* 六维雷达（v0.7.1 d11）：静态 SVG，无动画；v3.3.0 起挂左栏 .radar-card，改竖排（280px 栏内） */
-.radar-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-}
-.radar-card .attr-radar {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-  margin-bottom: 0;
-}
-.radar-card .attr-radar-svg {
-  margin: 0 auto;
-}
-.attr-radar {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
-}
-.attr-radar-svg {
-  width: 200px;
-  height: 200px;
-  flex: none;
-}
+/* 六维雷达（v0.7.1 d11）：静态 SVG，无动画；v6.2.0 起压进属性页签头部右格 —— 232×156 光图，
+   无卡框（.radar-card 已删）、无文字 legend（.radar-legend 已删），轴标签 = 三字母 + 数值 */
 .radar-grid {
   fill: none;
   stroke: var(--border);
@@ -2371,23 +2345,104 @@ th.num .th-sort {
   font-size: 10px;
   fill: var(--muted);
 }
-.radar-legend {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.radar-axis-key {
+  fill: var(--muted);
 }
-.radar-legend h4 {
-  margin-bottom: 4px;
-}
-.radar-legend-row {
-  display: grid;
-  grid-template-columns: 34px 1fr auto;
-  gap: 10px;
-  align-items: baseline;
-  min-width: 170px;
-}
-.radar-legend-key {
+.radar-axis-val {
+  fill: var(--ink);
   font-weight: 700;
+}
+.attr-radar-svg {
+  width: 232px;
+  height: auto;
+  flex: none;
+  display: block;
+}
+
+/* 属性页签头部两栏（v6.2.0）：左 = 标题/位置/角色，右 = 队徽 96px + 12px + 雷达；
+   星级行与属性卡网格不在这个 grid 里，保持整宽 */
+.attr-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+}
+.attr-head-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .attr-head {
+    grid-template-columns: 1fr;
+  }
+  .attr-head-side {
+    justify-content: flex-start;
+  }
+}
+
+/* 左栏五态骨架（v6.2.0）：报价设置 / 转会区信息 / 球队操作 / 我收到的报价；
+   控件全部禁用（v6.3.0 报价子系统接线） */
+.side-sec {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+.side-sec-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.side-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0;
+}
+.side-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin: -2px 0 8px;
+}
+.side-lab {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.side-range {
+  font-size: 12px;
+  color: var(--muted);
+}
+.side-field {
+  display: block;
+  margin: 6px 0;
+}
+.side-field input {
+  width: 100%;
+}
+.side-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.side-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 8px 10px;
+  margin-top: 12px;
+  font-size: 13px;
 }
 
 /* ---- 管理端壳布局（v2.1.0：左深可可侧栏 + 右子页内容） ---- */
