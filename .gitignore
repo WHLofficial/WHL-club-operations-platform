@@ -11,6 +11,10 @@ __pycache__/
 scratch/
 handoff-*.md
 
+# 脑暴视觉伴侣的会话目录（.superpowers/brainstorm/<session>/ 下是本轮原型的 HTML 与状态）：
+# 本地预览产物，不是仓库资产，不入库。
+.superpowers/
+
 # 离线导入生成物（30MB 级 SQL 分片）：可由 scripts/players-import/generate-sql.ts 逐字节复现，
 # 入库的审计凭据是报告里的 sha256 清单，故分片本体不入库。
 scripts/players-import/sql/
