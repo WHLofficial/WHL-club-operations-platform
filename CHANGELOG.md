@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.3.0] · 报价 / 议价子系统（2026-09-26，本地已收口：未 push 未部署）
+
+**新增**
+- 迁移 **`0037_offers.sql`**：`players` 加三列（`transfer_listed` / `min_offer_price` / `not_for_sale`，报价设置）；`offers` 报价单表（多买方可并发同挂一球员，partial unique `idx_offers_active_pair` 只拦同买方重复）+ `offer_events` 谈判桌事件流 + 触发器 `fund_holds_offer_guard`（与 0005 同形：offer 仍 pending / 冻结额与报价单一致 / 可用资金足额，错误码 `WHL_OFFER_REJECT_*`）。
+- 纯逻辑 `src/core/offer-rules.ts`：金额边界（下限 1 m、上限 1.5×违约金）、严格抬高、轮次判定、名单自动应答（达线 auto_accept / 低于 auto_reject）。
+- 业务编排 `src/worker/offers.ts`：送报价（报价即冻结 + 名单球员立即自动应答）/ 还价（买方还价顶替冻结、卖方还价不动资金）/ **同意即挂牌事务**（占用批 + 履约批：建挂牌 → hold 转正 → 领先出价 → 球员 listed → 兄弟单 expired 释放冻结；幂等可重入，崩溃窗口由 `expireStaleOffers` 自愈补履约）/ 拒绝 / 撤回 / 惰性过期（窗关 / 球员状态变 / 同球员已挂牌三因）/ 报价设置。买方接受卖方抬价后的还价时先补足冻结再占用。
+- 路由 `src/worker/routes/offers.ts`：`GET /offers`（box in|out + 状态筛选 + 游标分页 + `pendingMine` 徽标数）、`GET /offers/:id`（含事件时间线，买卖双方可见）、`POST /offers`、`POST /offers/:id/counter|accept|reject|withdraw`、`PUT /players/:id/offer-settings`。触发器兜底裸错（`WHL_OFFER_REJECT_*` / partial unique）在业务层映射为可读 4xx（与 market 的 `WHL_BID_REJECT_*` 同形）。
+- 通知 8 模板（`offer_received/countered/accepted/rejected/withdrawn/expired/auto_accepted/auto_rejected`）；「同意即挂牌，成交要等过户确认」口径（用户裁决 2026-09-25）贯穿通知、徽章与按钮文案。
+- 前端：`/offers` 转会报价页（两页签 + 状态筛选 + 清单表格 + 谈判桌），顶栏「转会报价」入口；球员页左栏 `SideOps` 五态骨架接线真实端点（拆出 `web/src/pages/player/SideOps.tsx`）——报价设置真实读写、续约/挂牌/解约/报价/激活/海捞全可用、B 态显示真实要价与最高出价、D 态非卖品报价禁用。
+
+**变更**
+- `src/worker/market-settle.ts`：`settleOverdue` 开头先跑 `expireStaleOffers`（cron / 窗开关 / 读路径三处调用点全覆盖）。
+- `src/lib/cache-policy.ts`：`WRITE_SCOPE_PREFIXES` 加 `/api/offers` 与 `/api/players`（offer-settings 挂后者）。
+- `src/worker/routes/players.ts`：球员详情响应加 `transferListed / minOfferPrice / notForSale` 三字段。
+- **随批交付（独立改动线）**：迁移 **`0038_players_sort_indexes_batch6.sql`** 两条排序索引（`growth_tier` / `future_star`），并把这两列的等值筛选侧改成与索引同源的 `COALESCE(col, 0) = ?`——一条索引同时收排序与筛选（`tests/players-sort-indexes.test.ts` 新增「seek 不是全索引扫」断言锁死）。
+
+**实测**：typecheck 三份全清；vitest **52 文件 / 762 例全绿**（v6.2.0 基线 51/728，含新增 `tests/offers.test.ts` 26 例与变异验证三件套：删严格抬高 / 删 partial unique / 删触发器各定向变红）；build 成功（主 bundle `index-DFG2gxUk.js` 584.84 KB / gzip 185.35 KB，较 v6.2.0 +2.2 KB）；e2e **11/11**；双会话浏览器手测全链路 PASS（报价 → 收件 → 同意 → 挂牌 B 态 → 非卖品 D 态 → 海捞 E 态 → offer-settings 保存与清回），截图落 `scratch/manual-v63-*.png`。迁移 0037 已在本地 D1 apply。
+
 ## [v6.2.0] · 球员页展示层改版（2026-09-25，本地已收口：未 push 未部署）
 
 **新增**

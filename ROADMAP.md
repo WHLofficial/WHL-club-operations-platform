@@ -60,7 +60,7 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.2.0**（本地已收口，未 push 未部署）。已排期未开工：报价子系统 = **v6.3.0**（详见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.2.0 埋的五态骨架控件由它接线）。
+**当前版本 v6.3.0**（本地已收口，未 push 未部署；v6.2.0 同样未 push）。设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`。
 
 ---
 
@@ -988,6 +988,26 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 **实测与验收**：typecheck 三份全清；vitest **51 文件 / 728 例全绿**（基线 727，+1 关窗 409 用例）；build 成功（主 bundle gzip 183.15 KB，较 v6.1.1 +0.7 KB）；e2e **11/11**（两轮）。浏览器手测（playwright-core + 本机 Chrome，会话种子复用 e2e 做法，夹具用本地 D1 临时翻转、测后即还原）：A/B/C/CPU-E/自由身 E 五态截图落 `scratch/manual-*.png`，逐态断言期望文本全中 + 侧栏按钮全禁用 + `.radar-card`/`.radar-legend` 计数 0 + 队徽 96px + 375 窄屏零溢出（首测报的 23px 溢出是 resize 不刷新的瞬态假象，fresh load `scrollWidth=375`）；窗关/窗开两态翻转实测提示条与改号入口同步（关窗 409 `no_window` + 提示条 + 号码只读，开窗全数回归）。
 
 **遗留与边界**：D 态（非卖品）后端无字段、运行时不可达，v6.3.0 接线时自动生效；`PlayerDetail.club` 不含 `logoKey`，队徽图 key 借公开球队列表取（自由身无队徽、与列表/详情同色哈希块兜底）；本地夹具两处陈旧已顺手修（TOUR_DB `team` 缺 `logo_key` 列已补；`.wrangler` 本地 D1 缺的 0029/0034/0035/0036 索引已补打）——均只动本地 `.wrangler/state`，不涉生产。v6.3.0 开工时：删禁用态、接真实报价端点、D 态判据接上。
+
+## v6.3.0 · 报价 / 议价子系统（2026-09-26）
+
+**状态**：代码完成、本地全绿，**未 push 未部署**（push 即触发 CF 自动部署；迁移 0037 也尚未 apply 到生产）。判级 minor：新子系统、有用户可见能力。设计定稿：记忆 `design-v6.3.0-offer-negotiation.md`（用户逐节裁决），实施计划 `plan-v6.3.0-offer-subsystem.md`。
+
+**裁决要点**：① 允许多队同时对一球员报价，partial unique 只拦同买方重复；② **同意即挂牌，成交要等过户确认**（用户裁决 2026-09-25：一份报价被同意 = 球员自动挂牌 + 该买方价锁成领先出价，其余 pending 单转 expired 并释放冻结，其买方收「球员已被卖家挂牌」通知）；③ 报价设置三字段互斥（进名单必给最低报价、置非卖品自动拒既有 pending）；④ 报价即冻结（上限 1.5×违约金，与挂牌同源）；⑤ 名单球员收到报价立即自动应答（达线 auto_accept、低于 auto_reject），无名单走人工谈判。
+
+**交付**
+- 迁移 `0037_offers.sql`：players 三列 + offers / offer_events 两表 + partial unique `idx_offers_active_pair` + 触发器 `fund_holds_offer_guard`（与 0005 逐字同形，`WHL_OFFER_REJECT_CLOSED/AMOUNT/FUNDS`）。
+- `src/core/offer-rules.ts`（纯逻辑）+ `src/worker/offers.ts`（编排：placeOffer / counterOffer / acceptOffer·acceptOfferCore·fulfillAcceptedOffer / rejectOffer / withdrawOffer / expireStaleOffers（含 accepted 无挂牌孤儿单自愈）/ setOfferSettings）+ `src/worker/routes/offers.ts`（7 端点，全部 `requireCoach('club.squad.manage')` + `getBoundClub`，写端点 `assertTradable`）。
+- 关键并发设计：占用批（单守卫 UPDATE pending→accepted）+ 履约批（全语句以 `status='accepted' AND listing_id IS NULL` 为守卫、INSERT listings 条件化 + `last_insert_rowid()` 陈值防护），**players UPDATE 必须排在 INSERT listings 之后**（同批内守卫要求 status='normal'，先改后查必然 0 行——node:sqlite 最小复现定位）；买方接受卖方抬价后的还价先补足冻结（触发器只放行 pending，必须在占用批之前）。
+- 挂载与缓存：`index.ts` 挂 `/api/offers`；`cache-policy.ts` 的 `WRITE_SCOPE_PREFIXES` 加 `/api/offers` 与 `/api/players`；`market-settle.ts` 的 `settleOverdue` 开头先跑 `expireStaleOffers`（cron / 窗开关 / 读路径全覆盖）。
+- 通知 8 模板 + 前端 `/offers` 页（顶栏入口）+ 球员页左栏 `SideOps` 五态接线（拆出 `web/src/pages/player/SideOps.tsx`；草稿 useEffect 只随 `player.id` 重置——保存后数据刷新窗口内不覆盖用户操作）；球员详情响应加 `transferListed / minOfferPrice / notForSale`。
+- **随批独立线**：迁移 `0038` 两条排序索引（growth_tier / future_star）+ 筛选侧同源化（`COALESCE(col,0) = ?`，一条索引同时收排序与筛选；测试新增 seek 断言）。
+
+**评审修掉**（code-review 2026-09-26）：🔴 触发器兜底裸错未映射（market 有 `WHL_BID_REJECT_*` 同形 catch 而 offers 漏）→ `mapOfferTriggerError` 映射为可读 4xx + partial unique 撞车 409；🟡 `isMyTurn` / `OFFER_FINAL_STATUSES` / `OFFER_ERROR_CODES` / `runOfferExpiry` 四个零引用导出 → 删；🟡 `/offers` 页 `club?.isCoach` 要等 `/me/club` 回来、加载帧误显「只对教练开放」→ 改用 useAuth 同步角色；🟡 徽章/按钮/通知的「成交」措辞 → 统一「已挂牌 / 同意挂牌 / 自动同意（成交等过户确认）」；🟢 非卖品拒绝通知 amount 空时文案破相；🟢 兄弟单「已挂牌」通知误发给历史 expired 单买方 → 只通知本次转 expired 的；🟢 测试 16 处 `SqlParam` 类型错误（上轮收口漏测 tests tsconfig）。
+
+**实测与验收**：typecheck 三份全清；vitest **52 文件 / 762 例全绿**（v6.2.0 基线 51/728；新增 `tests/offers.test.ts` 26 例，变异验证三件套——删严格抬高 / 删 partial unique / 删触发器各定向变红）；build 成功（主 bundle `index-DFG2gxUk.js` 584.84 KB / gzip 185.35 KB，较 v6.2.0 +2.2 KB）；e2e **11/11**；双会话浏览器手测全链路 PASS（报价 → 收件 → 同意 → 挂牌 B 态 → 非卖品 D 态 → 海捞 E 态 → offer-settings 保存与清回），截图落 `scratch/manual-v63-*.png`；迁移 0037/0038 已在本地 D1 apply。
+
+**遗留与边界**：迁移 0037/0038 生产 apply 与 push 均等用户指令（0037 先 apply 再部署——`transfer_listed` 等三列未就位时详情端点会 500，同 v5.0.1 教训）；本地 dev 库有手测脏数据（球员状态 / 合同 / 账本 / offers / listings 残留），已登记不进提交；海捞池 `LIMIT 300` 契约改造另立增量（用户裁决）。
 
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
