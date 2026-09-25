@@ -13,6 +13,7 @@ import { applyMigrations, createTestD1, createTestKV } from './d1.ts';
 // [排序键, 索引名, 额外查询参数]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
 // + 0033 一条（name，增量 32 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
 // + 0034 三条（uid / ps / view=initial 下的 ca，遗留项第 5 节 D1 读量治理的下一批次）
+// + 0035 两条（position / growable，两条常驻列）+ 0036 三条（badges / base_ca / foot）
 const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?: string]> = [
   ['ca', 'idx_players_sort_ca'],
   ['pa', 'idx_players_sort_pa'],
@@ -26,6 +27,13 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?
   ['ps', 'idx_players_sort_ps'],
   // 初始视图把 ca 换成 COALESCE(base_ca, ca)，与 0027 的 COALESCE(ca, 0) 是两个表达式 ⇒ 单独一条索引
   ['ca', 'idx_players_sort_initial_ca', '&view=initial'],
+  // 0035 两条常驻列（FIXED_COLUMNS —— 永远在表头，用户不必打开列面板就能点到）
+  ['position', 'idx_players_sort_position'],
+  ['growable', 'idx_players_sort_growable'],
+  // 0036 可选列面板里表达式最安全的三条；growth_gap 因与 view=initial 口径耦合，留到与 pa 变体同轮
+  ['badges', 'idx_players_sort_badges'],
+  ['base_ca', 'idx_players_sort_base_ca'],
+  ['foot', 'idx_players_sort_foot'],
 ];
 
 let shared: DatabaseSync | null = null;
@@ -119,7 +127,7 @@ describe('排序表达式索引与查询表达式同源（增量 28）', () => {
     });
   }
 
-  it('十一条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('十六条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
     const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
     const rows = sqlite

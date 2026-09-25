@@ -70,6 +70,14 @@ const SHAPES = [
   { id: 'sort-uid', label: 'sort=uid（CAST/SUBSTR 表达式）', url: '/players?limit=20&sort=uid' },
   { id: 'sort-years', label: 'sort=years（含窗刻度子查询）', url: '/players?limit=20&sort=years' },
   { id: 'sort-protected', label: 'sort=protected（含窗刻度子查询）', url: '/players?limit=20&sort=protected' },
+  // 遗留项第 5 节后续批次（迁移 0035 / 0036）的键。audit 报告 §5.1 只写了「剩余 13 个单表排序键各
+  // 37,635 行/次」这个类级结论，从没给这 11 个键各自的探针 ⇒ 补齐：这 5 条既是 0035 的验收证据，
+  // 也是 0036 的改前基线（0036 那三条在 apply 前跑出来就是「改前」）。
+  { id: 'sort-position', label: 'sort=position（CASE 权重；0035 表达式索引）', url: '/players?limit=20&sort=position' },
+  { id: 'sort-growable', label: 'sort=growable（0035 表达式索引）', url: '/players?limit=20&sort=growable' },
+  { id: 'sort-badges', label: 'sort=badges（银+金相加；0036 表达式索引）', url: '/players?limit=20&sort=badges' },
+  { id: 'sort-base-ca', label: 'sort=base_ca（0036 表达式索引）', url: '/players?limit=20&sort=base_ca' },
+  { id: 'sort-foot', label: 'sort=foot（0036 表达式索引）', url: '/players?limit=20&sort=foot' },
   { id: 'filter-club', label: 'club_id=5（有索引）', url: '/players?limit=20&club_id=5' },
   { id: 'filter-club-free', label: 'club_id=free（club_id IS NULL，17,731 名自由身）', url: '/players?limit=20&club_id=free' },
   { id: 'filter-status', label: 'status=normal（有索引）', url: '/players?limit=20&status=normal' },

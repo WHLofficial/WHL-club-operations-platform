@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-24T03:31:19.428Z",
+  "generatedAt": "2026-09-25T00:01:47.265Z",
   "target": "remote",
   "results": [
     {
@@ -550,6 +550,116 @@
       "rows_read_total": 4,
       "duration_ms_total": 1.6,
       "list_rows": 0,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-position",
+      "label": "sort=position（CASE 权重；0035 表达式索引）",
+      "url": "/players?limit=20&sort=position",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2847
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 1.6268
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 1.9,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-growable",
+      "label": "sort=growable（0035 表达式索引）",
+      "url": "/players?limit=20&sort=growable",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2394
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 1.3623
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 1.6,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-badges",
+      "label": "sort=badges（银+金相加；0036 表达式索引）",
+      "url": "/players?limit=20&sort=badges",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.3462
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 1.3807
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 1.7,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-base-ca",
+      "label": "sort=base_ca（0036 表达式索引）",
+      "url": "/players?limit=20&sort=base_ca",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2438
+        },
+        {
+          "rows_read": 54,
+          "rows_written": 0,
+          "duration_ms": 1.5361
+        }
+      ],
+      "rows_read_total": 54,
+      "duration_ms_total": 1.8,
+      "list_rows": 54,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-foot",
+      "label": "sort=foot（0036 表达式索引）",
+      "url": "/players?limit=20&sort=foot",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2511
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 2.2581
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 2.5,
+      "list_rows": 22,
       "count_rows": 0
     }
   ]
