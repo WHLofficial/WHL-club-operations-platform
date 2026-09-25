@@ -47,18 +47,18 @@ npx wrangler d1 execute whl-club --remote --file scripts/players-import/sql/play
 `idx_players_club`、`idx_players_status`），故每名球员 = 1 行表 + 4 行索引 = **5 次写入**，本次 18301 × 5 ≈ 91.5k 行
 （Workers Free 档上限 10 万行/天）。别为验证反复重跑。
 
-**重跑成本已随索引增多放大（2026-09-24 实测订正）**：`players` 现在挂着 **16 个索引**（14 条显式：`idx_players_club`、`idx_players_club_ca`、11 条 `idx_players_sort_*`、`idx_players_status`，加 `uid` / `fc_id` 两个 UNIQUE 自动索引），按 18301 人算全量覆盖的记账：
+**重跑成本已随索引增多放大（2026-09-25 实测订正）**：`players` 现在挂着 **21 个索引**（19 条显式：`idx_players_club`、`idx_players_club_ca`、**16 条 `idx_players_sort_*`**、`idx_players_status`，加 `uid` / `fc_id` 两个 UNIQUE 自动索引），按 18301 人算全量覆盖的记账：
 
 | 覆盖方式 | 每名球员行写 | 18301 人合计 | 自留预算 ≤6 万/日 |
 |---|---|---|---|
-| 新插入一行 | 1 + 16 = 17 | 311,117 | ≈6 天 |
-| 本文件的 upsert 重跑 | 1 + 10 = **11** | **201,311** | ≈4 天 |
-| `DELETE FROM players` 全清 | 1 + 16 = 17 | 311,117 | ≈6 天 |
-| 全清 + 重新 INSERT | 17 + 17 = 34 | 622,234 | ≈11 天 |
+| 新插入一行 | 1 + 21 = 22 | 402,622 | ≈7 天 |
+| 本文件的 upsert 重跑 | 1 + 13 = **14** | **256,214** | ≈5 天 |
+| `DELETE FROM players` 全清 | 1 + 21 = 22 | 402,622 | ≈7 天 |
+| 全清 + 重新 INSERT | 22 + 22 = 44 | 805,244 | ≈14 天 |
 
-upsert 只需 11 行，是因为 `UPDATE` 只为「SET 列表里出现过的列」所属的索引写新条目——本文件的 upsert 覆盖 `uid` / `name` / `ca` / `base_ca`（major 模式）/ `pa` / `age` / `prestige` / `game_attrs`，命中的是 `idx_players_sort_uid`、`idx_players_sort_name`、`idx_players_sort_ca`、`idx_players_sort_initial_ca`、`idx_players_sort_pa`、`idx_players_sort_age`、`idx_players_sort_prestige`、`idx_players_sort_ps`、`idx_players_club_ca` 与 `uid` 自动索引共 10 条；`club_id` / `market_value` / `status` / `fc_id` 那 6 条不受影响。
+upsert 只需 14 行，是因为 `UPDATE` 只为「SET 列表里出现过的列」所属的索引写新条目——`src/worker/players-import.ts` 的 `upsertStatement` 覆盖 `uid` / `name` / `ca` / `base_ca` / `pa` / `age` / `foot` / `position` / `prestige` / `china_plan` / `game_attrs`（major 模式另加 `growth_xp` / `levels_applied` / `badges_silver` / `badges_gold`），命中的是 `idx_players_sort_uid`、`idx_players_sort_name`、`idx_players_sort_ca`、`idx_players_sort_initial_ca`、`idx_players_sort_base_ca`、`idx_players_sort_pa`、`idx_players_sort_age`、`idx_players_sort_prestige`、`idx_players_sort_position`、`idx_players_sort_foot`、`idx_players_sort_ps`、`idx_players_club_ca` 与 `uid` 自动索引共 **13 条**（major 模式再命中 `idx_players_sort_badges` ⇒ 1 + 14 = 15 行/人）；`market_value` / `club_id` / `status` / `growable` / `badges` / `fc_id` 那 8 条不受影响（`growable` 与 `is_future_star` 只在 INSERT 列里、不在 SET 列表里）。
 
-⇒ **一次全量重导已不可能在一天内做完**（首灌 91.5k 一天塞得下，现在 201k 起），须按 19 个分片跨 3–4 个 UTC 日推进；players 每再加一条索引，重导成本就 +18301 行。好消息是 upsert 幂等（`ON CONFLICT(fc_id) DO UPDATE`），中途撞配额可以第二天接着跑、不会弄坏数据——反过来 `DELETE FROM players;` 那条路一旦中断就是半空表、没有回滚点，**不要用它做覆盖**（该语句仅作首灌回滚记录保留）。也**不要**用 `DROP TABLE players` 重建：索引会一起消失，而 `d1_migrations` 仍记着 `0033`/`0034` 已 apply，`wrangler d1 migrations apply` 不会重跑，得手工把那 16 条索引建回来。
+⇒ **一次全量重导已不可能在一天内做完**（首灌 91.5k 一天塞得下，现在 256k 起），须按 19 个分片跨 5 个 UTC 日推进；players 每再加一条索引，重导成本就 +18301 行（`0035`/`0036` 两批共加了 5 条，把 upsert 重跑从 201,311 推到 256,214）。好消息是 upsert 幂等（`ON CONFLICT(fc_id) DO UPDATE`），中途撞配额可以第二天接着跑、不会弄坏数据——反过来 `DELETE FROM players;` 那条路一旦中断就是半空表、没有回滚点，**不要用它做覆盖**（该语句仅作首灌回滚记录保留）。也**不要**用 `DROP TABLE players` 重建：索引会一起消失，而 `d1_migrations` 仍记着 `0033`–`0036` 已 apply，`wrangler d1 migrations apply` 不会重跑，得手工把那 21 条索引建回来。
 
 ## 未入库的输入
 

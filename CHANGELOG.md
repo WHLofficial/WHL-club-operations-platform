@@ -4,6 +4,44 @@
 
 各增量的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [维护] · 排序索引 batch 4/5：迁移 `0035` / `0036`（2026-09-24 / 09-25，两个迁移已 apply 到生产：无运行时行为变化）
+
+用户 m04225 裁决「先看看剩余写限额，能推几条是几条」⇒ 先实测当日配额，再按余量把第 5 节清单上的排序索引推进生产。**不改 `src/` 与 `web/`**：只有两个迁移、测试与文档 ⇒ 运行时代码与前端产物零变化。
+
+**新增**
+- `src/db/migrations/0035_players_sort_indexes_batch4.sql`（**2026-09-24T23:54Z apply，UTC 归零前 6 分钟**，报 `Executed 3 commands`）：`idx_players_sort_position`（12 项 `CASE position WHEN 'GK' THEN 1 … ELSE 0 END, id`，逐字等于 `src/worker/routes/players.ts` 的 `POSITION_SORT_CASE`，**索引侧必须去掉 `players.` 限定符**，否则 SQLite 报 `the "." operator prohibited in index expressions`）+ `idx_players_sort_growable`（`COALESCE(growable, 0), id`）。选这两条的理由：它们是 `web/src/lib/players-library.ts` 的 `FIXED_COLUMNS`（位置 / 成长，永远在表头、不可隐藏），暴露面最大，表达式也最安全。
+- `src/db/migrations/0036_players_sort_indexes_batch5.sql`（**2026-09-25T00:00Z 归零后 apply**，报 `Executed 4 commands`）：`idx_players_sort_badges`（`(COALESCE(badges_silver, 0) + COALESCE(badges_gold, 0)), id`）、`idx_players_sort_base_ca`（`COALESCE(base_ca, 0), id`）、`idx_players_sort_foot`（`COALESCE(foot, 0), id`）。**刻意跳过 `growth_gap`**（理由写进迁移注释）：它在默认视图下可静态索引，但 `view=initial` 口径下 pa/ca 换成另一套表达式，单独建默认视图那条只覆盖一半场景 ⇒ 与 `view=initial` 的 `pa` 变体同轮处理。
+- `scripts/measure-d1-reads.mjs` 补 5 条探针：`sort-position` / `sort-growable` / `sort-badges` / `sort-base-ca` / `sort-foot`（原 SHAPES 里没有这 5 个键，不补就没有「改后」读数可对）。
+- `tests/players-sort-indexes.test.ts` 的 `INDEXED_SORTS` 11 → **16 条**（新增 5 条各带 cursor / `order=asc` 三形状），`tests/d1.ts` 的 `MIGRATION_FILES` 追加 `0035` / `0036`。
+
+**配额实测**（`scratch/quota-check.mjs`，走 Cloudflare GraphQL `d1AnalyticsAdaptiveGroups`）
+- 2026-09-24T23:49Z：`whl-club` 读 221,080（4.4%）/ 写 54,997（55.0%）；**账号池余量 ≈44,541 行 ⇒ 2 条索引（36,602）放得下、3 条（54,903）会超** —— 这是把本批拆成 `0035`（2 条）/ `0036`（3 条）并跨归零点分两次 apply 的根本原因。
+- 2026-09-24 终值：`whl-club` 写 **91,604 行 = 91.6%**（`0034` 的 54,919 + `0035` 的 36,602 + 零头），当日写额度贴顶用满。
+- 2026-09-25（归零后）：`whl-club` 写 **54,909 行 = 54.9%**（`0036` 的 3 条）。
+- 顺带修了脚本里**过期的库名映射**（实际 `whl` = `ec3cc695-70bc-47ab-a454-5ca62ec22dd6`、`whl-auth` = `8f48bd5e-5d1b-4d62-ba4f-bf9b0cdb09eb`、第四个库 `b76d1129-77ae-4844-931c-1c7b00a9b048`；`whl-club` 一直是对的），并支持 `node scratch/quota-check.mjs 2026-09-24` 查指定 UTC 日期。
+
+**收益实测**（`scripts/d1-read-audit/measurements-after.json`，改前 → 改后）
+
+| 形状 | 索引来源 | 改前 | 改后 |
+| --- | --- | --- | --- |
+| `sort=position` | `0035` | 37,635 | **22** |
+| `sort=growable` | `0035` | 37,635 | **22** |
+| `sort=badges` | `0036` | 37,635 | **22** |
+| `sort=base_ca` | `0036` | 37,635 | **54** |
+| `sort=foot` | `0036` | 37,635 | **22** |
+
+**副产品**：`0036` 生效**前**实测 `sort=badges` / `sort=base_ca` / `sort=foot` 三条恰好各 **37,635 行**，把审计报告 §5.1 那句「剩余键各 37,635 行/次」的类级推断变成了直接实测。一次测量假象：`sort=foot` 首跑报 `0 行 [0 + undefined]`（statements 0 条、0ms），重跑即得 22 行 —— 是 wrangler 偶发抓取失败，不是索引问题。
+
+**生产核对**：`sqlite_master` 里 `idx_players_sort_%` **11 → 16 条**（两次只读 `wrangler d1 execute --remote`，`rows_written: 0`）；`players` 表索引总数 **16 → 21**。
+
+**操作技巧（下次复用）**：`wrangler d1 migrations apply` 会把目录里**所有 pending 一次做完**，所以为了在归零前只推 `0035`，先把 `0036` 临时 `mv` 到 `scratch/0036-pending.sql`，`npx wrangler d1 migrations list whl-club --remote` 确认只剩 `0035`，apply 后再 `mv` 回 `src/db/migrations/`。首次 apply 撞了一次 `AuthenticationError`（wrangler 日志 `"errorType":"AuthenticationError"`、`durationMs:2699`），**直接重试同一条命令即成功**（令牌抖动，不是权限问题）。
+
+**验收**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **50 文件 / 724 例全绿**（`0034` 批之后是 709，本批 +15 = 5 条形状 × 3）。
+
+**文档同步**：`scripts/d1-read-audit/README.md` 新增 §3.3（三批收益合并表 + 探针口径 + 写入记账）、§5.1 分类行改为「已建 7 / 剩余 6」、§5.3 第 3 条补 2026-09-25 进展、§5.5 补 5 行「已收」、§六 补 `--only=` 只接一个形状与 5 条新探针的说明；`scripts/players-import/README.md` 写入成本口径 **16 → 21 索引**（upsert 重跑 11 → **14 行/人 = 256,214**，全量重导须跨 **5** 个 UTC 日）；`README.md` 迁移 34 → **36**；`ROADMAP.md` 维护节加 batch 4/5 段；`AGENTS.md` 生产迁移段 `0034` → `0036` 与当前状态 bullet。
+
+**下一批待令**：清单上还剩 **6** 个可建索引的键（`growth_gap` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`），仍按「每天最多 3 条」分批；`view=initial` 口径另欠 `pa` / `growth_gap` 两个变体。
+
 ## [维护] · 上线口径订正：push 到 main 会触发 CF 自动部署（2026-09-24，文档：无运行时行为变化）
 
 2026-09-24 实测确认：本仓与 `tour` / `whl-auth` / `whl-guess` 四仓都接了 Cloudflare 的 Git 集成（Workers Builds）—— `git push origin main` 之后约 30–60 秒，CF 在服务端自动构建并部署对应 Worker，不需要任何本地命令。证据：同日三仓推送（用户只下令 push、未下令 deploy）后 `whl-club` 部署 `04:33:27.890Z`（Version `a65570f8-…`）、`whl-auth` `04:33:45.766Z`（`458e0e94-…`）、`whl-guess` `04:34:15.675Z`（`c6d741aa-…`），顺序与 push 顺序一致、间隔 30–60 秒；未推送的 `tour` 无新部署。同轮更早还有一次交叉验证：手动 `npm run deploy` 出的 `a573ade7`（03:37:53Z）两分钟后被 push 触发的 `c5e796f6`（03:40:13Z）顶掉。
@@ -14,9 +52,9 @@
 
 ## [维护] · players 全量覆盖的写入成本口径订正（2026-09-24，文档：无运行时行为变化）
 
-用户 m02214 问「如果随后更新或者完全覆盖了 players 表，索引需要重写吗」⇒ 结论：走 `INSERT` / `UPDATE` / `DELETE`（含本仓导入用的 `INSERT ... ON CONFLICT(fc_id) DO UPDATE` upsert）时 SQLite 自动维护全部索引，无需 `REINDEX`；`UPDATE` 只为「SET 列表里出现过的列」所属的索引写新条目。唯一例外是 `DROP TABLE players` 式重建 —— 16 条索引一起消失，而 `d1_migrations` 仍记着 `0033`/`0034` 已 apply ⇒ `wrangler d1 migrations apply` 不会重跑，必须手工重建。
+用户 m02214 问「如果随后更新或者完全覆盖了 players 表，索引需要重写吗」⇒ 结论：走 `INSERT` / `UPDATE` / `DELETE`（含本仓导入用的 `INSERT ... ON CONFLICT(fc_id) DO UPDATE` upsert）时 SQLite 自动维护全部索引，无需 `REINDEX`；`UPDATE` 只为「SET 列表里出现过的列」所属的索引写新条目。唯一例外是 `DROP TABLE players` 式重建 —— 索引一起消失（本条目写作时是 16 条，`0035`/`0036` 之后是 **21 条**），而 `d1_migrations` 仍记着 `0033`–`0036` 已 apply ⇒ `wrangler d1 migrations apply` 不会重跑，必须手工重建。
 
-`scripts/players-import/README.md` 的「写入成本」段此前仍写首灌当时的「4 个索引 / 每人 5 次写入 / 91.5k」，现已拆为「（首灌当时）」+ 新增「重跑成本已随索引增多放大（2026-09-24 实测订正）」小节：16 索引清单（14 条显式 + `uid` / `fc_id` 两个 UNIQUE 自动索引）、四种覆盖方式的成本表（新插入 17 行/人 = 311,117；本文件的 upsert 重跑 11 行/人 = **201,311**；`DELETE FROM players` 全清 17 行/人 = 311,117；全清 + 重灌 34 行/人 = 622,234），以及两条纪律 —— 不要用 `DELETE FROM players;` 做覆盖（中断即半空表、无回滚点，该语句仅作首灌回滚记录保留；upsert 幂等可中断续跑）、不要用 `DROP TABLE` 重建。⇒ 全量重导已不可能一天做完（201k 起，须按 19 个分片跨 3–4 个 UTC 日；首灌当时 91.5k 一天塞得下，该数字已不可复现）。
+`scripts/players-import/README.md` 的「写入成本」段此前仍写首灌当时的「4 个索引 / 每人 5 次写入 / 91.5k」，现已拆为「（首灌当时）」+ 新增「重跑成本已随索引增多放大（2026-09-24 实测订正）」小节：16 索引清单（14 条显式 + `uid` / `fc_id` 两个 UNIQUE 自动索引）、四种覆盖方式的成本表（新插入 17 行/人 = 311,117；本文件的 upsert 重跑 11 行/人 = **201,311**；`DELETE FROM players` 全清 17 行/人 = 311,117；全清 + 重灌 34 行/人 = 622,234），以及两条纪律 —— 不要用 `DELETE FROM players;` 做覆盖（中断即半空表、无回滚点，该语句仅作首灌回滚记录保留；upsert 幂等可中断续跑）、不要用 `DROP TABLE` 重建。⇒ 全量重导已不可能一天做完（201k 起，须按 19 个分片跨 3–4 个 UTC 日；首灌当时 91.5k 一天塞得下，该数字已不可复现）。（2026-09-25 起该口径已随 `0035`/`0036` 再订正为 **21 索引**：新插入 22 行/人 = 402,622、upsert 重跑 **14 行/人 = 256,214**、全清 22 行/人、全清+重灌 44 行/人 = 805,244，须跨 5 个 UTC 日；详见本文件同批「排序索引 batch 4/5」条目。）
 
 ## [维护] · 遗留项第 5 节最小步 —— 下一批排序索引写成迁移 0034（2026-09-24，迁移 `0034` 已 apply 到生产并部署上线（Version `a573ade7-…`）：无运行时行为变化）
 

@@ -889,7 +889,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 **待办**：① ~~两仓提交~~ ✅ 已做（本仓 `f250c29`、赛事仓 `5f07002`，两仓工作区干净）；② ~~部署 + 配 `TEAM_SYNC_SECRET`~~ ✅ 已做（2026-09-23 两侧同值配置 + 两仓部署，版本号见本节状态行）；③ **未验证**：部署后实测一条 —— 赛事仓建队 → 本仓 `/api/admin/team-sync` 无差异；本仓建俱乐部（赛事仓无此队）→ 赛事仓 `/api/admin/teams` 能看到该队（两条都需两侧管理端登录态，CLI 拿不到会话，未做）；「两侧密钥同值」也只能靠一次零写 upsert 探测证实（生产写动作，未授权不做）。
 
 
-## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24，**未部署**）
+## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。
 
@@ -905,6 +905,17 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 **验收（实测）**：定点 `tests/players-sort-indexes.test.ts` **37 例全绿**；变异验证（initial-ca 只建内层 + `ps` 删一项）**8 例变红** ⇒ 锁不是空转；`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **50 文件 / 709 例全绿**。
 
 **生产 apply（2026-09-24 已执行，用户授权「0034应用」）**：三条索引合计实测 **54,919 行 `rows_written`**（占当日写配额 54.9%，在自留预算 ≤6 万行/日）；收益已兑现 —— 实测 `view=initial&sort=ca` 37,635 → **54** 行/次、`sort=uid` → **24**、`sort=ps` → **22**（`EXPLAIN QUERY PLAN` 三条均为 `SCAN players USING COVERING INDEX`，读数落 `scripts/d1-read-audit/measurements-after.json`）。清单上还剩 **11 个可建索引的键**（`base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`，每条 18,301 行写），按每天最多 3 条继续分批；这 11 个之外还欠 `view=initial` 口径的 `pa` / `growth_gap` 两个变体（本批只做了该口径下的 `ca`）；`attr:*` 34 键与姓名子串查找属架构级（物化子表 / FTS5 trigram），不在此列。顺带订正：审计报告 §5.5 的 `sort=name` 候选**早已由迁移 `0033`（2026-09-23 apply）完成**，该行此前已过期。证据与逐条豁免理由见 `scripts/d1-read-audit/README.md` §5.3 / §5.5。
+
+**第 5 节续做 · 排序索引 batch 4/5（2026-09-24 / 09-25 已 apply 到生产）**：排期由用户裁决「先看看剩余写限额，能推几条是几条」驱动 —— 先实测当日配额余量再决定推几条，因此这一批是**配额判断**（不是产品判断）。
+
+- 配额实测（`scratch/quota-check.mjs`，走 Cloudflare GraphQL `d1AnalyticsAdaptiveGroups`）：2026-09-24T23:49Z `whl-club` 读 221,080（4.4%）/ 写 54,997（55.0%），**账号池当日余量 ≈44,541 行 ⇒ 2 条索引（36,602）放得下、3 条（54,903）会超** ⇒ 拆成 `0035`（2 条，UTC 归零前 apply）与 `0036`（3 条，归零后 apply）。当日终值 `whl-club` 写 **91,604 行 = 91.6%**（贴顶用满）；次日 `0036` 写 **54,909 行 = 54.9%**。
+- `src/db/migrations/0035_players_sort_indexes_batch4.sql`（**2026-09-24T23:54Z apply**）：`idx_players_sort_position`（12 项 `CASE position WHEN …`，即 `POSITION_SORT_CASE` 去掉 `players.` 限定符 —— SQLite 索引表达式里禁用 `.` 运算符）、`idx_players_sort_growable`。选这两条的理由：它们是 `web/src/lib/players-library.ts` 的 `FIXED_COLUMNS`（表头常驻、不可隐藏），暴露面最大，表达式也最安全。
+- `src/db/migrations/0036_players_sort_indexes_batch5.sql`（**2026-09-25T00:00Z apply**）：`idx_players_sort_badges`（`(COALESCE(badges_silver,0) + COALESCE(badges_gold,0))`）、`idx_players_sort_base_ca`、`idx_players_sort_foot`。**刻意跳过 `growth_gap`**：它在默认视图下可静态索引，但 `view=initial` 口径下 pa/ca 换成另一套表达式，单独建默认视图那条只覆盖一半场景 ⇒ 与 `view=initial` 的 `pa` 变体同轮处理（理由写进迁移注释）。
+- 操作技巧（可复用）：`wrangler d1 migrations apply` 会把目录里所有 pending 一次做完，为在归零前只推 0035，先把 0036 **临时 `mv` 到 `scratch/0036-pending.sql`**，`wrangler d1 migrations list whl-club --remote` 确认只剩 0035，apply 后再 mv 回。
+- 同源锁：`scripts/measure-d1-reads.mjs` 补 5 条探针（`sort-position` / `sort-growable` / `sort-badges` / `sort-base-ca` / `sort-foot`，此前这 5 个键**根本没有探针**）；`tests/players-sort-indexes.test.ts` 的 `INDEXED_SORTS` 11 → **16 条**（schema 断言用例名同步改「十六条」）；`tests/d1.ts` 的 `MIGRATION_FILES` 追加两个文件。
+- **收益实测**：`sort=position` 37,635 → **22**、`sort=growable` → **22**、`sort=badges` → **22**、`sort=base_ca` → **54**、`sort=foot` → **22**。**副产品**：0036 生效前实测这三条恰好各 37,635 行，把审计报告 §5.1 那句「剩余 13 个单表排序键各 37,635 行/次」的**类级推断变成直接实测**。
+- **验收**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **50 文件 / 724 例全绿**；生产 `sqlite_master` 核对 `idx_players_sort_%` **11 → 16 条**（只读查询，`rows_written: 0`）。
+- **还剩 6 个**（`growth_gap` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`），仍按每天最多 3 条分批；`view=initial` 口径另欠 `pa` / `growth_gap` 两个变体。**代价**：`players` 索引 16 → **21** 条，全量重导 upsert 成本随之从 201,311 涨到 **256,214** 行（口径见 `scripts/players-import/README.md`）。证据与逐条豁免理由见 `scripts/d1-read-audit/README.md` §3.3 / §5.1 / §5.3 / §5.5。
 
 ## 外部依赖与待输入
 

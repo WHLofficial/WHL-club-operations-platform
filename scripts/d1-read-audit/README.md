@@ -139,7 +139,32 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | **8 个全表扫排序键** | 56,398–56,400 | 37,635–37,637 | 仅 −33%（去 COUNT） | ❌ **逐条豁免，见 §5.5** |
 | **姓名查找 `name=sesko`** | 36,606 | 18,304 | −50% | ❌ **豁免（子串查找用不了 B-tree）** |
 
-**容量推演**（免费档 5,000,000 行/日）：默认浏览一页从 **265 次/日** 升到 **89,285 次/日**；最贵的仍可触发的形状（37,635 行的 `sort=name`）**133 次/日**，而它只在用户点了表头姓名列时才发生。**结论：本增量的主指标（默认浏览 ≤70、有索引形状 ≤70）全部达成；无索引的 8 个排序键与姓名查找按计划记豁免理由（写配额 + 表达式形态决定）。**
+**容量推演**（免费档 5,000,000 行/日）：默认浏览一页从 **265 次/日** 升到 **89,285 次/日**；最贵的仍可触发的形状（37,635 行的 `sort=name`）**133 次/日**，而它只在用户点了表头姓名列时才发生。**结论：本增量的主指标（默认浏览 ≤70、有索引形状 ≤70）全部达成；无索引的 8 个排序键与姓名查找按计划记豁免理由（写配额 + 表达式形态决定）。**（此后又分两批收掉其中 5 个，见 §3.3。）
+
+---
+
+### 3.3 后续批次排序索引复测（2026-09-24 / 09-25 生产实测）
+
+§3.2 之后又 apply 了迁移 `0034`（3 条）、`0035`（2 条）、`0036`（3 条）。本表把三批的收益并成一张（读数落 `measurements-after.json`）：
+
+| 形状 | 索引来源 | 改前 | 现在 | 降幅 |
+| --- | --- | --- | --- | --- |
+| `view=initial&sort=ca` | `0034` | 37,635 | **54** | −99.9% |
+| `sort=uid` | `0034` | 37,635 | **24** | −99.9% |
+| `sort=ps` | `0034` | 37,635 | **22** | −99.9% |
+| `sort=position` | `0035` | 37,635 | **22** | −99.9% |
+| `sort=growable` | `0035` | 37,635 | **22** | −99.9% |
+| `sort=badges` | `0036` | 37,635 | **22** | −99.9% |
+| `sort=base_ca` | `0036` | 37,635 | **54** | −99.9% |
+| `sort=foot` | `0036` | 37,635 | **22** | −99.9% |
+
+口径与坑：
+
+- **探针是补出来的**：`scripts/measure-d1-reads.mjs` 原本**没有**这 5 个键的探针（SHAPES 只有 sort-ca/pa/age/market-value/club/status/wage/prestige/name/ps/influence/uid/years/protected 等），本轮在 `sort-protected` 之后补了 `sort-position` / `sort-growable` / `sort-badges` / `sort-base-ca` / `sort-foot` 五条，否则「改后」无读数可对。
+- 每条形状是 **2 条语句**（第 1 条读数 0 = config 探测，第 2 条才是主查询）。`sort=foot` 首跑报 `0 行 [0 + undefined]`（statements 0 条）是 wrangler 偶发抓取失败，重跑即得 22 行——报错条目不会覆盖已有读数，所以不会污染 JSON。
+- **副产品**：`0036` 生效**前**实测 `sort=badges` / `sort=base_ca` / `sort=foot` 三条恰好各 **37,635 行**，把 §5.1 那句「每条 37,635 行/次」从类级推断变成了直接实测。
+- 生产侧核对（`wrangler d1 execute --remote` 只读查询 `sqlite_master`，`rows_written: 0`）：`idx_players_sort_%` 由 **11 条 → 16 条**；`players` 表索引总数 **16 → 21**。
+- 写入记账：`0035` **36,602 行**（2026-09-24，把当日 `whl-club` 写推到 91,604 行 = 91.6% 配额）、`0036` **54,909 行**（2026-09-25，54.9%）。
 
 ---
 
@@ -173,7 +198,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | --- | --- | --- | --- |
 | **已有 0027 表达式索引**（实测快） | `ca` 58、`pa` 61、`age` 22、`market_value` 22 | 22–61 | 已解决 |
 | **0029 已建（步骤 4）** | `prestige` **53**、`club` **43**、`status` **22** | 22–53 | ✅ 已解决 |
-| **可建 players 单表表达式索引（剩余 13 个）** | `base_ca`、`badges`、`growth_gap`、`uid`、`position`、`growable`、`foot`、`growth_tier`、`future_star`、`china_plan`、`agent_tier`、`fc_id`、`ps` | 37,635 | ✅ 可以（每条 ≈18,301 行写），按天分批 |
+| **可建 players 单表表达式索引** | **已建 7 个**：`uid`、`ps`（迁移 `0034`）、`position`、`growable`（`0035`）、`badges`、`base_ca`、`foot`（`0036`）；**剩余 6 个**：`growth_gap`、`growth_tier`、`future_star`、`china_plan`、`agent_tier`、`fc_id` | 37,635（改前） | ✅ 可以（每条 ≈18,301 行写），按天分批；已建各条的实测读数见 §3.3 与 §5.5 |
 | **表达式含 87 项链，深度存疑** | `name`（`sqlFold('players.name')`） | 37,635 | ⚠️ 表达式树深度上限 100（增量 26 的坑），建索引前必须用真引擎实测 |
 | **不能建静态表达式索引** | `wage`、`release_fee`、`contract_type`、`source`（在 `ct.*`）、`protected`、`years`（依赖 `ct.*` + `season_windows` 子查询）、`influence`（内联运行时 config 系数，系数一改索引全废） | 37,635–37,637 | ❌ 需物化列或改查询结构 |
 | **需物化子表** | `attr:<属性键>`（34 键，值在 `game_attrs` JSON 里） | 未实测（形状同全表扫） | ❌ 架构级 |
@@ -196,6 +221,11 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 3. 剩余键登记为「**已量化、待配额**」的分天清单，不假装已解决（剩余 13 个可建索引的键 = 238k 行写 ≈ 4 天）。每批后跑一次 `--only=<形状>` 复测确认。**2026-09-24 进展**：§5.5 点名的下一批 3 条（`view=initial&sort=ca` / `sort=uid` / `sort=ps`）已写成迁移 `0034`（三条 ≈5.5 万行写，**已于 2026-09-24 apply 到生产**，实测记账 54,919 行 `rows_written`）；同批的 `sort=name` 更早已由迁移 `0033`（2026-09-23 apply）完成 ⇒ **§5.5 的「下一批候选」这一栏已清空**，清单上还剩 **11** 个可建索引的键 = §5.1 那一行的 13 个单表排序键 − 本批的 `uid` / `ps` 2 个（即 `base_ca` / `badges` / `growth_gap` / `position` / `growable` / `foot` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`）。两个**不在**这 11 里的口径：① §5.1 的 `view=initial` 另一套口径还剩 `pa` / `growth_gap` 两个变体（本批只做了该口径下的 `ca`）；② `name` 已由 `0033` 完成。
 4. `name` 索引先跑深度体检（`scripts/check-name-fold-depth.mjs` 同源思路）—— **已于 2026-09-23（迁移 `0033`）完成**，87 项链在真引擎上通过；`influence` / `years` / `protected` / `ct.*` 四个维度改判为「需物化列或改查询」，不在本增量做。
 
+**2026-09-25 进展（batch 4/5，用户裁决「先看看剩余写限额，能推几条是几条」）**：体检器已证明 §5.1 那批候选**全部可建**（15/15 通过），所以剩余项只受当日写余量约束。当日 UTC 2026-09-24 23:49 实测账号池余量 ≈44,541 行 ⇒ 2 条放得下、3 条会超，于是拆两批、跨归零点执行：
+- 迁移 `0035`（`position` / `growable`）**2026-09-24T23:54Z apply**（归零前 6 分钟），实测记账 **36,602 行写**，把当日 `whl-club` 写推到 **91,604 行 = 91.6% 配额**（当日额度用满，是贴着上限走的）。选这两条的理由：它们是 `web/src/lib/players-library.ts` 的 `FIXED_COLUMNS`（位置 / 成长，永远在表头、不可隐藏），暴露面最大。
+- 迁移 `0036`（`badges` / `base_ca` / `foot`）**2026-09-25T00:00Z 归零后 apply**，实测记账 **54,909 行 = 54.9% 配额**。**刻意跳过 `growth_gap`**：它在默认视图下可静态索引，但 `view=initial` 口径下 pa/ca 换成另一套表达式，单独建默认视图那条只覆盖一半场景 ⇒ 与 `view=initial` 的 `pa` 变体同轮处理（理由写进迁移注释）。
+- 清单上还剩 **6** 个可建索引的键（`growth_gap` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`），仍按「每天最多 3 条」分批。**注意索引数在涨**：`players` 已从 16 条索引涨到 **21 条**，`players` 每多一条索引，全量重导的写入成本就 +18,301 行（口径见 `scripts/players-import/README.md`）。
+
 ### 5.4 验收目标的修正（计划偏差，需记录）
 
 计划写的「默认浏览一页 ≤20 行」**按实测不可达**：limit 20 会取 21 行，每输出一行至少读 1 行玩家数据（走 PK 索引时约 2.7 行/行，含两处字段来源）⇒ 实测 `sort=id` 主查询 **56 行**。有索引的排序下限是 21–64 行（`sort=age` 22、`sort=market_value` 22、`sort=ca` 58、`filter-club` 64）。
@@ -215,6 +245,11 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | `view=initial&sort=ca` | 37,635 | 初始视图把 `ca` 换成 `COALESCE(players.base_ca, players.ca)`（`src/worker/routes/players.ts:507`），而 `buildSortExprs` 又把它套成 `COALESCE(${caExpr}, 0)`（`players.ts:71`），与 0027 的 `COALESCE(ca, 0)` **是两个表达式**，索引静默失配（61 → 37,635） | **已收**：迁移 `0034`（2026-09-24 apply）—— 实测 37,635 → **54** 行/次。表达式必须是完整的 `(COALESCE(COALESCE(base_ca, ca), 0), id)` —— 只建内层 `COALESCE(base_ca, ca)` 匹配不上外层那圈 `COALESCE(…, 0)` |
 | `sort=uid` | 37,635 | 表达式是 `CAST(SUBSTR(players.uid, 3) AS INTEGER)`，可静态索引，只是没排进第一批 | **已收**：迁移 `0034`（2026-09-24 apply）—— 实测 37,635 → **24** 行/次 |
 | `sort=ps` | 37,635 | `PS_COUNT_EXPR` 是 15 项 `(json_extract(…) IS NOT NULL)` 相加的长链（每项必须自带括号）；建索引前要先过**表达式树深度体检**（D1 上限 100，参照增量 27 姓名折叠 253 项链撞墙的教训） | **已收**：迁移 `0034`（2026-09-24 apply）—— 实测 37,635 → **22** 行/次。深度体检已于 2026-09-24 通过：15 项链在真引擎上建得出来，`json_extract` 可进索引表达式（`scripts/check-sort-index-feasibility.mjs`） |
+| `sort=position` | 37,635 | 排序键是 12 项 `CASE position WHEN …`（`POSITION_SORT_CASE`），可静态索引，只是没排进第一批 | **已收**：迁移 `0035`（2026-09-24 apply）—— 实测 37,635 → **22** 行/次。索引侧必须去掉 `players.` 限定符，否则 SQLite 报 `the "." operator prohibited in index expressions` |
+| `sort=growable` | 37,635 | `COALESCE(growable, 0)`，可静态索引 | **已收**：迁移 `0035`（2026-09-24 apply）—— 实测 37,635 → **22** 行/次。它是表头 `FIXED_COLUMNS`（不可隐藏），暴露面最大，故优先 |
+| `sort=badges` | 37,635 | `(COALESCE(badges_silver, 0) + COALESCE(badges_gold, 0))`，可静态索引 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次。顺带把审计的「类级 37,635」从推断变成直接实测（生效前逐条实测恰为 37,635） |
+| `sort=base_ca` | 37,635 | `COALESCE(base_ca, 0)`，可静态索引；与 `view=initial` 那条 `COALESCE(COALESCE(base_ca, ca), 0)` 是**两条不同索引**，不能互相顶替 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **54** 行/次 |
+| `sort=foot` | 37,635 | `COALESCE(foot, 0)`，可静态索引 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次 |
 | `sort=wage` / `release_fee` / `contract_type` / `source` | 37,635 | 排序键在 `contracts`（`ct.*`），players 单表索引无从下手；contracts 的排序键又依赖窗口刻度，不能静态索引 | 需物化列或改查询，本增量不做 |
 | `sort=years` / `protected` | 37,637 | 同上，且表达式还内联 `CURRENT_TICKS_SQL`（`season_windows` 子查询），随赛季推进变化 | 同上 |
 | `sort=influence` | 37,635 | 表达式内联**运行时 config 系数**（`attendance_model`），系数一改索引立刻失效 | 不能静态索引 |
@@ -231,7 +266,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 ```bash
 node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements-after.json
 ```
-把新表与本报告第三节逐形状对比，逐条写明「改前 → 改后」。JSON 支持增量合并（`--only=` / `--probes` 分次跑不会互相覆盖，也不会让报错/`--dump` 的空壳条目覆盖已有测量），所以补测单个形状不必重跑全套。
+把新表与本报告第三节逐形状对比，逐条写明「改前 → 改后」。JSON 支持增量合并（`--only=` / `--probes` 分次跑不会互相覆盖，也不会让报错/`--dump` 的空壳条目覆盖已有测量），所以补测单个形状不必重跑全套。注意 `--only=` **只接一个形状 id**，补测多个形状要逐个跑（`for s in a b c; do node scripts/measure-d1-reads.mjs --only=$s --json-out=scripts/d1-read-audit/measurements-after.json; done`，结果按 id 增量合并）；2026-09-24 给 `0035`/`0036` 的 5 个键补的探针（`sort-position` / `sort-growable` / `sort-badges` / `sort-base-ca` / `sort-foot`）就是这么加进去的。
 
 `measurements.json` 的字段随脚本演进而分层，读它时按 `list_rows` / `count_rows` 是否存在判断口径：**有**这两列的条目是步骤 2（去 COUNT）之后、用现行脚本跑的（目前是步骤 4 复测的 `sort-prestige` / `sort-club` / `sort-status` 三条，`list_rows` 即主查询读量）；**没有**的条目是步骤 1 的产物，只有 `statements` / `metas` / `rows_read_total`，其中 `metas[1]` 是当时的主查询、`metas[2]` 是当时还在的 COUNT。旧条目若被重打印，`list_rows` 缺省会显示为 0、整行读量落进「其它」列——不是数据错，是列口径不同。
 
