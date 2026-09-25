@@ -36,6 +36,27 @@
 
 **上线（2026-09-25）**：Sentry 账号已建（EU 区 org，6 项目）；生产 `SENTRY_DSN` 已配（Source `Secret Change`，Version `6066268f-…`，10:01:17Z）；前端 DSN 已填（提交 `a502043`）并实测 @sentry/react 进包 gzip 增量 **32.92 KB**（149,563 → 182,479 B，硬线内贴线过）；push 后 Workers Builds 自动部署 Version **`b05e86db-…`**（10:24:56Z），回读 `/api/health` 200、`POST /api/cron/sentry-probe` 无 key 403（该路由只在 v6.1.1 代码 ⇒ 新代码生效）、线上首页资产 `index-DwvQl1O1.js` 与本地 dist 逐字一致。**待回读**：带生产 CRON_KEY 打 probe 在控制台见事件、Crons 页确认 `club-settle-tick` monitor（首个 `*/5` 整点自动创建）。配额口径：errors 5k/月 = org 级共享池（6 项目共用，官方文档核对）；免费档全 org 只含 1 个 cron monitor（check-in 次数不占 errors 额度）。
 
+## [维护] · 排序索引 batch 6：迁移 `0038`（2026-09-25 已 apply 到生产：无运行时行为变化）
+
+**缘起（本批换了选键依据）**：batch 4/5 是「配额能推几条推几条」，本批先查清「这 6 个键到底有没有人用」再选，结果**推翻了原计划**：① `web/src/lib/players-library.ts:273` 的 `DEFAULT_COLS = ['marketValue', 'badges']` ⇒ 这 6 个键**一个都不是默认可见列**，排序要用户先手动挑列才发生；② 用户真正会做的是**筛选**，而筛选侧走**裸列**（`players.growth_tier = ?`，`src/worker/routes/players.ts:295-320`）与排序侧的 `COALESCE(col, 0)`（`:80-88` `buildSortExprs`）**不同源** ⇒ 表达式索引帮不上筛选 —— 这就是「排序降了、筛选没降」的机制。
+
+**设计裁决**：排序侧不动（仍 `COALESCE(col, 0)`），索引建 `(COALESCE(col, 0), id)`，**筛选侧改成 `COALESCE(col, 0) = ?` 与索引同源**。否掉原计划的「排序改裸列 + 普通列索引」：keyset 游标拿排序表达式当键，裸列一旦为 NULL 比较恒为假会**静默漏行**（`src/worker/routes/players.ts:96` 的 years 注释写明这条规矩），而这五列在 `src/db/migrations/0001_init.sql:18-23` 是可空的（生产当前 NULL 数 0，但口径不该依赖数据现状）；两条路的写配额相同。
+
+**交付**
+- `src/db/migrations/0038_players_sort_indexes_batch6.sql`（**2026-09-25 已 apply**，报 `Executed 3 commands in 62.85ms`）：`idx_players_sort_growth_tier`（`COALESCE(growth_tier, 0), id`）、`idx_players_sort_future_star`（`COALESCE(is_future_star, 0), id`）。**apply 绕开未授权的 `0037`**：`0037_offers.sql` 是另一会话在途的报价子系统迁移，用仓库配置跑 `d1 migrations apply` 会把它一起 apply ⇒ 临时配置 `scratch/wrangler-0038.jsonc`（`migrations_dir: "migrate-0038"`，目录里只放 0038）先 `migrations list --remote` 确认只剩 0038 再 apply；apply 后账本核对最新 = `0038`、上一条 = `0036` ⇒ 0037 未被 apply。
+- `src/worker/routes/players.ts`：筛选侧 `filters.push('COALESCE(players.growth_tier, 0) = ?')` + 循环里 `['is_future_star', 'COALESCE(players.is_future_star, 0)']`。
+- 同源锁：`tests/players-sort-indexes.test.ts` 元组加第 4 元素 `filter`、新增 2 条「等值筛选走同一条索引」用例、`INDEXED_SORTS` 16 → **18 条**；`tests/d1.ts` 的 `MIGRATION_FILES` 追加 `0038`；`scripts/measure-d1-reads.mjs` 补 **9 条探针**（6 个未建索引键 + `view=initial&sort=pa` + 2 条筛选形状）。
+
+**关键发现（SQLite 计划器）**：索引首列被等值约束时，SQLite **不再用它出 ORDER BY** —— `scratch/probe-0038-plan.mjs` 七种组合实测：只排序 → `SCAN … USING COVERING INDEX`（有序、无临时排序）；筛选 + 同键排序（含 ASC / 无 id 尾列变体）→ `SEARCH … USING COVERING INDEX (…=?)` + **`USE TEMP B-TREE FOR ORDER BY`**。⇒ 筛选侧收益是「读量从全表扫降到命中子集」，不是提前停；用例因此只锁 `SEARCH`，不断言无临时排序。
+
+**收益实测**（读数落 `scripts/d1-read-audit/measurements-after.json`）：`sort=growth_tier` 37,635 → **22**、`sort=future_star` → **22**、`sort=growth_tier&growth_tier=3` 18,302 → **1**、`sort=future_star&is_future_star=1` 18,504 → **307**。未建索引的 `china_plan` / `agent_tier` / `fc_id` / `growth_gap` / `view=initial&sort=pa` 五条仍 37,635（把 §5.1 的类级推断再实测一次）。生产 `sqlite_master` 核对 `idx_players_sort_%` **16 → 18 条**；生产 EXPLAIN：排序 `SCAN players USING COVERING INDEX idx_players_sort_growth_tier`、筛选 `SEARCH players USING COVERING INDEX idx_players_sort_growth_tier (<expr>=?)`。
+
+**写入记账**：本次 apply 实写 **≈36,607 行**（apply 前当日 `whl-club` 写 55,075 → apply 后 **91,682 = 91.7%**）⇒ **当日写额度已贴顶，剩余 ~8,318 行放不下第三条索引（18,301）**，本批到此为止。
+
+**验收**：`npm run typecheck` 三份 tsconfig 全清（当时 16 个错误全落在另一会话在途的 `tests/offers.test.ts`，本批四个文件零错误）；`npx vitest run` **52 文件 / 762 例全绿**（基线 50/724，多出的 2 文件来自另一会话在途的 offers 测试）；`npm run build` 成功。
+
+**还剩**：`china_plan` / `agent_tier` / `fc_id` / `growth_gap` 四个键 + `view=initial` 口径的 `pa` / `growth_gap` 两个变体；这四个键与 `growth_tier` 同性质（排序表达式 + 裸列筛选），可照本批配方用一条索引收两面。**代价**：`players` 索引 21 → **23** 条（upsert 重导成本口径需按同一方法重算，本批未做）。
+
 ## [维护] · 排序索引 batch 4/5：迁移 `0035` / `0036`（2026-09-24 / 09-25，两个迁移已 apply 到生产：无运行时行为变化）
 
 用户 m04225 裁决「先看看剩余写限额，能推几条是几条」⇒ 先实测当日配额，再按余量把第 5 节清单上的排序索引推进生产。**不改 `src/` 与 `web/`**：只有两个迁移、测试与文档 ⇒ 运行时代码与前端产物零变化。

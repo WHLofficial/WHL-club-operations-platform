@@ -198,7 +198,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | --- | --- | --- | --- |
 | **已有 0027 表达式索引**（实测快） | `ca` 58、`pa` 61、`age` 22、`market_value` 22 | 22–61 | 已解决 |
 | **0029 已建（步骤 4）** | `prestige` **53**、`club` **43**、`status` **22** | 22–53 | ✅ 已解决 |
-| **可建 players 单表表达式索引** | **已建 7 个**：`uid`、`ps`（迁移 `0034`）、`position`、`growable`（`0035`）、`badges`、`base_ca`、`foot`（`0036`）；**剩余 6 个**：`growth_gap`、`growth_tier`、`future_star`、`china_plan`、`agent_tier`、`fc_id` | 37,635（改前） | ✅ 可以（每条 ≈18,301 行写），按天分批；已建各条的实测读数见 §3.3 与 §5.5 |
+| **可建 players 单表表达式索引** | **已建 9 个**：`uid`、`ps`（迁移 `0034`）、`position`、`growable`（`0035`）、`badges`、`base_ca`、`foot`（`0036`）、`growth_tier`、`future_star`（`0038`）；**剩余 4 个**：`growth_gap`、`china_plan`、`agent_tier`、`fc_id` | 37,635（改前）→ 已建各条 22（`base_ca` 54） | ✅ 可以（每条 ≈18,301 行写），按天分批；已建各条的实测读数见 §3.3 与 §5.5；`growth_tier` / `future_star` 那两条**同时收了筛选侧**（配方见 §5.2 与 §5.3 的 batch 6） |
 | **表达式含 87 项链，深度存疑** | `name`（`sqlFold('players.name')`） | 37,635 | ⚠️ 表达式树深度上限 100（v3.1.0 的坑），建索引前必须用真引擎实测 |
 | **不能建静态表达式索引** | `wage`、`release_fee`、`contract_type`、`source`（在 `ct.*`）、`protected`、`years`（依赖 `ct.*` + `season_windows` 子查询）、`influence`（内联运行时 config 系数，系数一改索引全废） | 37,635–37,637 | ❌ 需物化列或改查询结构 |
 | **需物化子表** | `attr:<属性键>`（34 键，值在 `game_attrs` JSON 里） | 未实测（形状同全表扫） | ❌ 架构级 |
@@ -207,7 +207,8 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 ### 5.2 筛选分类
 
 - **有索引**：`club_id`（`=5` 127 行、`IS NULL` 17,754 行）、`status`（1,090 行）。
-- **无索引**（主查询 18.4k–18.6k，COUNT 另算）：`growable`、`position`（4 槽 OR）、`ps`（12–15 槽 OR）、`attr`、`ca`/`pa`/`age`/`prestige`/`base_ca`/`market_value` 区间（不匹配 0027 的 COALESCE 表达式索引）、`badges_*`、`foot`、`growth_tier`、`is_future_star`、`china_plan`、`agent_tier`、`fc_id`、`has_contract`、全部 `ct.*` 维度。
+- **无索引**（主查询 18.4k–18.6k，COUNT 另算）：`growable`、`position`（4 槽 OR）、`ps`（12–15 槽 OR）、`attr`、`ca`/`pa`/`age`/`prestige`/`base_ca`/`market_value` 区间（不匹配 0027 的 COALESCE 表达式索引）、`badges_*`、`foot`、`china_plan`、`agent_tier`、`fc_id`、`has_contract`、全部 `ct.*` 维度。
+  - **`growth_tier` / `is_future_star` 已于 2026-09-25（迁移 `0038`）收口**：这两列排序走 `COALESCE(col, 0)` 而筛选原先走裸列，**不同源** ⇒ 表达式索引帮不上筛选。修法是筛选侧也写 `COALESCE(col, 0) = ?` 与索引同源；实测 `filter-growth-tier` 18,302 → **1**、`filter-future-star` 18,504 → **307** 行/次。剩余 4 个键（`china_plan` / `agent_tier` / `fc_id` / `growth_gap`）与它们同性质，照此配方可一条索引收两面。
 - **`name` 折叠 LIKE**：36,606 行，且 `LIKE '%x%'` **B-tree 索引无效**，要降只能上 FTS5 + trigram。豁免理由：低频（前端只在提交时发一次，不是打字即请求）。
 
 ### 5.3 写配额张力（步骤 4 前必须裁决）
@@ -224,7 +225,14 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 **2026-09-25 进展（batch 4/5，用户裁决「先看看剩余写限额，能推几条是几条」）**：体检器已证明 §5.1 那批候选**全部可建**（15/15 通过），所以剩余项只受当日写余量约束。当日 UTC 2026-09-24 23:49 实测账号池余量 ≈44,541 行 ⇒ 2 条放得下、3 条会超，于是拆两批、跨归零点执行：
 - 迁移 `0035`（`position` / `growable`）**2026-09-24T23:54Z apply**（归零前 6 分钟），实测记账 **36,602 行写**，把当日 `whl-club` 写推到 **91,604 行 = 91.6% 配额**（当日额度用满，是贴着上限走的）。选这两条的理由：它们是 `web/src/lib/players-library.ts` 的 `FIXED_COLUMNS`（位置 / 成长，永远在表头、不可隐藏），暴露面最大。
 - 迁移 `0036`（`badges` / `base_ca` / `foot`）**2026-09-25T00:00Z 归零后 apply**，实测记账 **54,909 行 = 54.9% 配额**。**刻意跳过 `growth_gap`**：它在默认视图下可静态索引，但 `view=initial` 口径下 pa/ca 换成另一套表达式，单独建默认视图那条只覆盖一半场景 ⇒ 与 `view=initial` 的 `pa` 变体同轮处理（理由写进迁移注释）。
-- 清单上还剩 **6** 个可建索引的键（`growth_gap` / `growth_tier` / `future_star` / `china_plan` / `agent_tier` / `fc_id`），仍按「每天最多 3 条」分批。**注意索引数在涨**：`players` 已从 16 条索引涨到 **21 条**，`players` 每多一条索引，全量重导的写入成本就 +18,301 行（口径见 `scripts/players-import/README.md`）。
+- 清单上还剩 **4** 个可建索引的键（`growth_gap` / `china_plan` / `agent_tier` / `fc_id`），仍按「每天最多 3 条」分批。**注意索引数在涨**：`players` 已从 16 条索引涨到 **23 条**，`players` 每多一条索引，全量重导的写入成本就 +18,301 行（口径见 `scripts/players-import/README.md`）。
+
+**2026-09-25 进展（batch 6，迁移 `0038`：`growth_tier` / `future_star`）**：本批**换了选键依据** —— batch 4/5 是「配额能推几条推几条」，本批先查清「这 6 个键到底有没有人用」再选，结果推翻了原计划。
+- **查证否掉原计划**：① `web/src/lib/players-library.ts:273` 的 `DEFAULT_COLS = ['marketValue', 'badges']` ⇒ 这 6 个键**一个都不是默认可见列**，排序要用户先手动挑列才发生；② 用户真正会做的是**筛选**，而筛选侧走**裸列**（`players.growth_tier = ?`，`src/worker/routes/players.ts:295-320`）与排序侧的 `COALESCE(col, 0)`（`:80-88` `buildSortExprs`）**不同源** ⇒ 表达式索引帮不上筛选。这就是「排序降了、筛选没降」的机制。
+- **设计裁决**：排序侧不动（仍 `COALESCE(col, 0)`），索引建 `(COALESCE(col, 0), id)`，**筛选侧改成 `COALESCE(col, 0) = ?` 与索引同源**。否掉原计划的「排序改裸列 + 普通列索引」：keyset 游标拿排序表达式当键，裸列一旦为 NULL 比较恒为假会**静默漏行**（`src/worker/routes/players.ts:96` 的 years 注释写明这条规矩），而这五列在 `src/db/migrations/0001_init.sql:18-23` 是可空的（生产当前 NULL 数 0，但口径不该依赖数据现状）。两条路的写配额相同。
+- **apply 绕开未授权的 `0037`**：`0037_offers.sql` 是另一会话在途的报价子系统迁移，用仓库配置跑 `d1 migrations apply` 会把它一起 apply ⇒ 临时配置 `scratch/wrangler-0038.jsonc`（`migrations_dir: "migrate-0038"`，目录里只放 0038）先 `migrations list --remote` 确认只剩 0038 再 apply，报 `Executed 3 commands in 62.85ms`；apply 后账本核对最新 = `0038`、上一条 = `0036` ⇒ 0037 未被 apply。生产 `sqlite_master` 里 `idx_players_sort_%` 共 **18 条**。
+- **关键发现（SQLite 计划器）**：索引首列被等值约束时，SQLite **不再用它出 ORDER BY** —— `scratch/probe-0038-plan.mjs` 七种组合实测：只排序 → `SCAN … USING COVERING INDEX`（有序、无临时排序）；筛选 + 同键排序（含 ASC / 无 id 尾列变体）→ `SEARCH … USING COVERING INDEX (…=?)` + **`USE TEMP B-TREE FOR ORDER BY`**。⇒ 筛选侧收益是「读量从全表扫降到命中子集」，不是提前停；同源锁用例因此只断言 `SEARCH`，不断言无临时排序。
+- **实写记账 ≈36,607 行**（apply 前当日 `whl-club` 写 55,075 → apply 后 **91,682 = 91.7%**，贴顶）⇒ **剩余 ~8,318 行放不下第三条索引（18,301）**，本批到此为止。
 
 ### 5.4 验收目标的修正（计划偏差，需记录）
 
@@ -250,6 +258,10 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | `sort=badges` | 37,635 | `(COALESCE(badges_silver, 0) + COALESCE(badges_gold, 0))`，可静态索引 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次。顺带把审计的「类级 37,635」从推断变成直接实测（生效前逐条实测恰为 37,635） |
 | `sort=base_ca` | 37,635 | `COALESCE(base_ca, 0)`，可静态索引；与 `view=initial` 那条 `COALESCE(COALESCE(base_ca, ca), 0)` 是**两条不同索引**，不能互相顶替 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **54** 行/次 |
 | `sort=foot` | 37,635 | `COALESCE(foot, 0)`，可静态索引 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次 |
+| `sort=growth_tier` | 37,635 | `COALESCE(growth_tier, 0)`，可静态索引 | **已收**：迁移 `0038`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次。**同一条索引还收了筛选侧**（见下两行）：筛选原先走裸列 `players.growth_tier = ?`，与排序表达式不同源 |
+| `sort=future_star` | 37,635 | `COALESCE(is_future_star, 0)`，可静态索引 | **已收**：迁移 `0038`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次，筛选侧同上 |
+| `growth_tier=3`（筛选） | 18,302 | 筛选侧走**裸列**，与排序侧 `COALESCE(col, 0)` **不同源** ⇒ 表达式索引帮不上等值筛选。这就是「排序降了、筛选没降」的机制 | **已收**：迁移 `0038`（2026-09-25 apply）—— 筛选侧改写成 `COALESCE(col, 0) = ?` 与索引同源，实测 18,302 → **1** 行/次 |
+| `is_future_star=1`（筛选） | 18,504 | 同上 | **已收**：迁移 `0038`（2026-09-25 apply）—— 实测 18,504 → **307** 行/次 |
 | `sort=wage` / `release_fee` / `contract_type` / `source` | 37,635 | 排序键在 `contracts`（`ct.*`），players 单表索引无从下手；contracts 的排序键又依赖窗口刻度，不能静态索引 | 需物化列或改查询，本增量不做 |
 | `sort=years` / `protected` | 37,637 | 同上，且表达式还内联 `CURRENT_TICKS_SQL`（`season_windows` 子查询），随赛季推进变化 | 同上 |
 | `sort=influence` | 37,635 | 表达式内联**运行时 config 系数**（`attendance_model`），系数一改索引立刻失效 | 不能静态索引 |
@@ -258,6 +270,11 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | `attr:<键>` 34 键排序/筛选 | 未单独实测 | 排序表达式 `COALESCE(json_extract(game_attrs,'$.<key>') + 0, 0)`，34 个键各要一条索引（62 万行写）或一个物化子表 | 需物化子表，本增量不做 |
 
 无筛选的筛选形状（`growable=1` 95、`position=ST` 110、`ps=25` 293、`attr≥80` 88）虽然也 >70，但它们**没有索引可用且读量受命中行数约束**，未列入豁免——它们已随去 COUNT 从 1.8 万降到百级，再降需要子表/物化列（§5.2），属计划外。
+
+**batch 6 的两个额外发现**（2026-09-25，迁移 `0038`）：
+1. **筛选侧必须与索引同源**：筛选原先走裸列（`players.growth_tier = ?`），与排序侧的 `COALESCE(col, 0)` 不同源，表达式索引对等值筛选**完全无效**；改成 `COALESCE(col, 0) = ?` 后同一条索引同时收排序与筛选。剩余 4 个键（`growth_gap` / `china_plan` / `agent_tier` / `fc_id`）与 `growth_tier` 同性质，可照此配方一条索引收两面（写配额仍按每条 18,301 行计）。
+2. **索引首列被等值约束时，SQLite 不再用它出 ORDER BY**：`scratch/probe-0038-plan.mjs` 七种组合实测 —— 只排序 → `SCAN … USING COVERING INDEX`（有序、无临时排序）；筛选 + 同键排序（含 ASC / 无 id 尾列变体）→ `SEARCH … USING COVERING INDEX (…=?)` + **`USE TEMP B-TREE FOR ORDER BY`**。⇒ 筛选侧的收益是「读量从全表扫降到命中子集」，**不是**提前停；同源锁用例因此只断言 `SEARCH`，不断言无临时排序。
+3. **未选「排序改裸列 + 普通列索引」的原因**（本批原计划）：keyset 游标拿排序表达式当键，裸列一旦为 NULL 比较恒为假会**静默漏行**（`src/worker/routes/players.ts:96` 的 years 注释写明这条规矩），而这五列在 `src/db/migrations/0001_init.sql:18-23` 是可空的（生产当前 NULL 数 0，但口径不该依赖数据现状）；两条路的写配额相同。
 
 ---
 

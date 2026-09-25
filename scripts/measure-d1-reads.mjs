@@ -78,6 +78,22 @@ const SHAPES = [
   { id: 'sort-badges', label: 'sort=badges（银+金相加；0036 表达式索引）', url: '/players?limit=20&sort=badges' },
   { id: 'sort-base-ca', label: 'sort=base_ca（0036 表达式索引）', url: '/players?limit=20&sort=base_ca' },
   { id: 'sort-foot', label: 'sort=foot（0036 表达式索引）', url: '/players?limit=20&sort=foot' },
+  // 遗留项第 5 节最后一批的键（迁移 0038）。这 6 条既是 0038 的改前基线，也是「排序键没探针」
+  // 这个缺口的补齐 —— §5.1 只给了「剩余键各 37,635 行/次」的类级结论。
+  { id: 'sort-growth-tier', label: 'sort=growth_tier（0038 普通列索引）', url: '/players?limit=20&sort=growth_tier' },
+  { id: 'sort-future-star', label: 'sort=future_star（0038 普通列索引）', url: '/players?limit=20&sort=future_star' },
+  { id: 'sort-china-plan', label: 'sort=china_plan（未建索引）', url: '/players?limit=20&sort=china_plan' },
+  { id: 'sort-agent-tier', label: 'sort=agent_tier（未建索引）', url: '/players?limit=20&sort=agent_tier' },
+  { id: 'sort-fc-id', label: 'sort=fc_id（未建索引；fc_id 自带 UNIQUE 索引）', url: '/players?limit=20&sort=fc_id' },
+  { id: 'sort-growth-gap', label: 'sort=growth_gap（PA−CA 差值表达式，未建索引）', url: '/players?limit=20&sort=growth_gap' },
+  // view=initial 口径的 pa 变体：0027 的 idx_players_sort_pa 是普通列的，这里排的是
+  // COALESCE(json_extract(game_attrs,'$.PA'), players.pa) —— 口径不同，索引是否还命中要单独测。
+  { id: 'sort-pa-initial', label: 'view=initial & sort=pa（口径与 0027 索引不同）', url: '/players?limit=20&view=initial&sort=pa' },
+  // 0038 的另一半收益：等值筛选从全表扫变 seek。这两条 URL 带同键排序，正是索引能同时服务
+  // 「筛选 + 排序」的形状（实测 SQLite 在索引首列被约束时不会再用它出顺序，所以命中后仍有一次
+  // 对子集的临时排序 —— 收益在读量降到命中子集，不在提前停）。
+  { id: 'filter-growth-tier', label: 'growth_tier=3 且按同键排序（0038 索引 seek）', url: '/players?limit=20&sort=growth_tier&growth_tier=3' },
+  { id: 'filter-future-star', label: 'is_future_star=1 且按同键排序（0038 索引 seek）', url: '/players?limit=20&sort=future_star&is_future_star=1' },
   { id: 'filter-club', label: 'club_id=5（有索引）', url: '/players?limit=20&club_id=5' },
   { id: 'filter-club-free', label: 'club_id=free（club_id IS NULL，17,731 名自由身）', url: '/players?limit=20&club_id=free' },
   { id: 'filter-status', label: 'status=normal（有索引）', url: '/players?limit=20&status=normal' },

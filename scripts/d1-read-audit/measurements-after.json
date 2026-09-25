@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-25T00:01:47.265Z",
+  "generatedAt": "2026-09-25T15:53:40.349Z",
   "target": "remote",
   "results": [
     {
@@ -660,6 +660,204 @@
       "rows_read_total": 22,
       "duration_ms_total": 2.5,
       "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-growth-tier",
+      "label": "sort=growth_tier（0038 普通列索引）",
+      "url": "/players?limit=20&sort=growth_tier",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2009
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 1.0421
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 1.2,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-future-star",
+      "label": "sort=future_star（0038 普通列索引）",
+      "url": "/players?limit=20&sort=future_star",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1254
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 2.1377
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 2.3,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-china-plan",
+      "label": "sort=china_plan（未建索引）",
+      "url": "/players?limit=20&sort=china_plan",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1414
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 77.8456
+        }
+      ],
+      "rows_read_total": 37635,
+      "duration_ms_total": 78,
+      "list_rows": 37635,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-agent-tier",
+      "label": "sort=agent_tier（未建索引）",
+      "url": "/players?limit=20&sort=agent_tier",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.196
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 134.7649
+        }
+      ],
+      "rows_read_total": 37635,
+      "duration_ms_total": 135,
+      "list_rows": 37635,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-fc-id",
+      "label": "sort=fc_id（未建索引；fc_id 自带 UNIQUE 索引）",
+      "url": "/players?limit=20&sort=fc_id",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.2507
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 31.1246
+        }
+      ],
+      "rows_read_total": 37635,
+      "duration_ms_total": 31.4,
+      "list_rows": 37635,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-growth-gap",
+      "label": "sort=growth_gap（PA−CA 差值表达式，未建索引）",
+      "url": "/players?limit=20&sort=growth_gap",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1647
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 29.4344
+        }
+      ],
+      "rows_read_total": 37635,
+      "duration_ms_total": 29.6,
+      "list_rows": 37635,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-pa-initial",
+      "label": "view=initial & sort=pa（口径与 0027 索引不同）",
+      "url": "/players?limit=20&view=initial&sort=pa",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1429
+        },
+        {
+          "rows_read": 37635,
+          "rows_written": 0,
+          "duration_ms": 84.22
+        }
+      ],
+      "rows_read_total": 37635,
+      "duration_ms_total": 84.4,
+      "list_rows": 37635,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-growth-tier",
+      "label": "growth_tier=3 且按同键排序（0038 索引 seek）",
+      "url": "/players?limit=20&sort=growth_tier&growth_tier=3",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1809
+        },
+        {
+          "rows_read": 1,
+          "rows_written": 0,
+          "duration_ms": 0.5925
+        }
+      ],
+      "rows_read_total": 1,
+      "duration_ms_total": 0.8,
+      "list_rows": 1,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-future-star",
+      "label": "is_future_star=1 且按同键排序（0038 索引 seek）",
+      "url": "/players?limit=20&sort=future_star&is_future_star=1",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1579
+        },
+        {
+          "rows_read": 307,
+          "rows_written": 0,
+          "duration_ms": 3.859
+        }
+      ],
+      "rows_read_total": 307,
+      "duration_ms_total": 4,
+      "list_rows": 307,
       "count_rows": 0
     }
   ]

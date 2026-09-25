@@ -1,0 +1,27 @@
+-- 遗留项第 5 节（D1 读量治理）下一批次：球员库排序表达式索引 batch 6 —— 可选列面板的两条天赋维度
+--
+-- 承 0034（uid / ps / 初始视图 ca）、0035（position / growable）、0036（badges / base_ca / foot）。
+-- 本批取 web/src/lib/players-library.ts 的 COL_DEFS 里相邻的两条：
+--   sort=growth_tier → COALESCE(growth_tier, 0)（成长档位 1-5）
+--   sort=future_star → COALESCE(is_future_star, 0)（未来之星 0/1）
+-- 剩下的 china_plan / agent_tier / fc_id / growth_gap 与 view=initial 口径的 pa 变体继续按天分批
+-- （每条索引 apply 一次性写 ≈18,301 行，免费档 10 万行/日按账号计）。
+--
+-- 本批与前三批的关键差别：**这两条索引同时收「排序」与「等值筛选」**。
+-- 左栏筛选面板对这两列发的就是等值条件，但筛选侧原先写的是裸列（players.growth_tier = ?），
+-- 与排序侧的 COALESCE(col, 0) 不同源 ⇒ 表达式索引帮不上筛选（这就是「排序降了、筛选没降」的原因）。
+-- 所以本批把筛选侧也改成 COALESCE(col, 0) = ?（src/worker/routes/players.ts），一条索引服务两个形状。
+-- 为什么不反过来「裸列排序 + 普通列索引」：keyset 游标拿排序表达式当键，裸列一旦为 NULL，
+-- 比较恒为假会**静默漏行**（buildSortExprs 里 years 那条的注释写着这条规矩），而这五列在
+-- 0001_init.sql 里是可空的。生产当前 18,301 行这几列 NULL 数为 0，但口径不该依赖数据现状。
+--
+-- 表达式取自 buildSortExprs，索引侧写**非限定列名**（SQLite 硬要求：索引表达式里出现 `players.`
+-- 会报 `the "." operator prohibited in index expressions`），查询侧写限定名；
+-- 同源性由 tests/players-sort-indexes.test.ts 的 EXPLAIN QUERY PLAN 用例锁死。
+-- 尾列带 id：keyset 游标是 (排序键, id) 双列比较，缺了它带 cursor 的页仍会临时排序。
+--
+-- ⚠️ 部署核查：每条索引远端 apply 一次性写 ≈18,301 行，两条合计 ≈36,602 行。
+-- 回滚：DROP INDEX idx_players_sort_growth_tier;
+--       DROP INDEX idx_players_sort_future_star;
+CREATE INDEX idx_players_sort_growth_tier ON players(COALESCE(growth_tier, 0), id);
+CREATE INDEX idx_players_sort_future_star ON players(COALESCE(is_future_star, 0), id);
