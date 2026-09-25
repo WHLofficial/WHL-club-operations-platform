@@ -10,11 +10,12 @@ import { sqlFold } from '../src/core/name-fold.ts';
 import { PS_SLOT_COUNT } from '../src/core/fc26.ts';
 import { applyMigrations, createTestD1, createTestKV } from './d1.ts';
 
-// [排序键, 索引名, 额外查询参数]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
+// [排序键, 索引名, 额外查询参数, 等值筛选参数]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
 // + 0033 一条（name，v4.0.0 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
 // + 0034 三条（uid / ps / view=initial 下的 ca，遗留项第 5 节 D1 读量治理的下一批次）
 // + 0035 两条（position / growable，两条常驻列）+ 0036 三条（badges / base_ca / foot）
-const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?: string]> = [
+// + 0038 两条（growth_tier / future_star —— 这两条把筛选侧也改成与索引同源，故带第 4 个元素）
+const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?: string, filter?: string]> = [
   ['ca', 'idx_players_sort_ca'],
   ['pa', 'idx_players_sort_pa'],
   ['age', 'idx_players_sort_age'],
@@ -34,6 +35,9 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?
   ['badges', 'idx_players_sort_badges'],
   ['base_ca', 'idx_players_sort_base_ca'],
   ['foot', 'idx_players_sort_foot'],
+  // 0038 两条天赋维度：首批把「等值筛选」也收到同一条索引上的键（筛选侧改成 COALESCE(col, 0) = ?）
+  ['growth_tier', 'idx_players_sort_growth_tier', '', 'growth_tier=3'],
+  ['future_star', 'idx_players_sort_future_star', '', 'is_future_star=1'],
 ];
 
 let shared: DatabaseSync | null = null;
@@ -105,7 +109,7 @@ async function queryPlan(sort: string, extra = ''): Promise<string> {
 }
 
 describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
-  for (const [sort, index, extra = ''] of INDEXED_SORTS) {
+  for (const [sort, index, extra = '', filter] of INDEXED_SORTS) {
     const label = `sort=${sort}${extra}`;
     it(`${label} 走 ${index}，不退回全表扫 + 临时排序`, async () => {
       const plan = await queryPlan(sort, extra);
@@ -125,9 +129,22 @@ describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
       expect(plan).toContain(`USING INDEX ${index}`);
       expect(plan).not.toContain('TEMP B-TREE');
     });
+
+    // 0038 起：等值筛选也要走同一条索引，且必须是 SEARCH（seek）而不是「拿索引出顺序」（scan）——
+    // 筛选侧若退回裸列（players.growth_tier = ?），优化器只能拿索引排序、把 18,301 行全扫一遍，
+    // 这时 USING INDEX 断言照样通过，只有 SEARCH 能把它抓出来。
+    // 这里**不**断言没有临时排序：实测 SQLite 在索引首列被等值约束时不会再用它出 ORDER BY
+    // （scratch/probe-0038-plan.mjs 的七种组合全落临时排序），于是命中后对命中子集排一次序。
+    // 收益在「读量从全表扫降到命中子集」，不在提前停 —— 生产读数见 d1-read-audit/README.md §5.5。
+    if (filter) {
+      it(`${label} 的等值筛选（${filter}）走 ${index} 且是 seek 不是全索引扫`, async () => {
+        const plan = await queryPlan(sort, `&${filter}`);
+        expect(plan).toContain(`SEARCH players USING INDEX ${index}`);
+      });
+    }
   }
 
-  it('十六条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('十八条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
     const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
     const rows = sqlite

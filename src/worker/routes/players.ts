@@ -299,11 +299,13 @@ function buildPlayerFilters(
   if (growthTier !== undefined) {
     const n = Number(growthTier);
     if (!Number.isInteger(n) || n < 1 || n > 5) throw new HttpError(400, 'growth_tier 只能是 1-5');
-    filters.push('players.growth_tier = ?');
+    // 与排序同源（COALESCE(col, 0)，见迁移 0038）：筛选写裸列时表达式索引帮不上，等值条件退回全表扫
+    filters.push('COALESCE(players.growth_tier, 0) = ?');
     filterArgs.push(n);
   }
+  // is_future_star 的列名写成与迁移 0038 索引逐字同源的表达式（同上）；china_plan 尚未建索引，保持裸列
   for (const [param, col] of [
-    ['is_future_star', 'players.is_future_star'],
+    ['is_future_star', 'COALESCE(players.is_future_star, 0)'],
     ['china_plan', 'players.china_plan'],
   ] as const) {
     const raw = c.req.query(param);
