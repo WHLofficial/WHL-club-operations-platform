@@ -106,7 +106,7 @@ describe('赛果确认即时入账（v1.4.0 §9.1）', () => {
     seedClubWithTeam(fx.auth, fx.sqlite, 2, 102);
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 101, awayTeamId: 102, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
-    const res = await confirmResult(fx.env, 1, 1);
+    const res = await confirmResult(fx.env, 1, 1, 'user');
     expect(res.prizeError).toBeNull();
     const rows = fx.sqlite.prepare('SELECT club_id, amount, ref_type, ref_id FROM ledger_entries WHERE kind = ? ORDER BY club_id').all('prize') as { club_id: number; amount: number; ref_type: string; ref_id: number }[];
     expect(rows).toEqual([
@@ -114,7 +114,7 @@ describe('赛果确认即时入账（v1.4.0 §9.1）', () => {
       { club_id: 2, amount: 4.7, ref_type: 'match_away', ref_id: 1 },
     ]);
     // 幂等：重放确认同场奖金不双发（confirmResult 409，但直接重放语句也安全）
-    await expect(confirmResult(fx.env, 1, 1)).rejects.toThrow();
+    await expect(confirmResult(fx.env, 1, 1, 'user')).rejects.toThrow();
   });
 
   it('CPU 队一侧不入账：平台队打 CPU 队只发平台侧奖金（v2.0.0 裁决 6）', async () => {
@@ -126,7 +126,7 @@ describe('赛果确认即时入账（v1.4.0 §9.1）', () => {
     authRegisterClubTeam(fx.auth, 6, 241, '巴塞罗那(CPU)');
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 101, awayTeamId: 6, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
-    const res = await confirmResult(fx.env, 1, 1);
+    const res = await confirmResult(fx.env, 1, 1, 'user');
     expect(res.prizeError).toBeNull();
     const rows = fx.sqlite.prepare('SELECT club_id, amount, ref_type FROM ledger_entries WHERE kind = ?').all('prize') as { club_id: number; amount: number; ref_type: string }[];
     expect(rows).toEqual([{ club_id: 1, amount: 8.5, ref_type: 'match_home' }]);
@@ -140,14 +140,14 @@ describe('赛果确认即时入账（v1.4.0 §9.1）', () => {
     // 平局
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 1, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_second');
-    await confirmResult(fx.env, 1, 1);
+    await confirmResult(fx.env, 1, 1, 'user');
     // 小组赛客胜
     insertMatch(fx.tour, { matchId: 2, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 12, scoreHome: 0, scoreAway: 3, stageKind: 'group' });
     insertBinding(fx.sqlite, 1, 6, 'champions_cup');
-    await confirmResult(fx.env, 1, 2);
+    await confirmResult(fx.env, 1, 2, 'user');
     // 淘汰赛决赛：entryCount=2、round=0，主胜→after=1→champion +5
     insertMatch(fx.tour, { matchId: 3, tournamentId: 6, stageId: 61, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 0, stageKind: 'elim', round: 0, entryCount: 2 });
-    await confirmResult(fx.env, 1, 3);
+    await confirmResult(fx.env, 1, 3, 'user');
     const rows = fx.sqlite.prepare('SELECT club_id, amount FROM ledger_entries WHERE kind = ? ORDER BY id').all('prize') as { club_id: number; amount: number }[];
     expect(rows).toEqual([
       { club_id: 1, amount: 4.8 }, // 次级平局
@@ -163,7 +163,7 @@ describe('赛果确认即时入账（v1.4.0 §9.1）', () => {
     seedTourSchema(fx.tour);
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 1, awayTeamId: 2, scoreHome: 1, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
-    const res = await confirmResult(fx.env, 1, 1);
+    const res = await confirmResult(fx.env, 1, 1, 'user');
     expect(res.prizeError).toBeNull();
     expect((fx.sqlite.prepare("SELECT COUNT(*) AS n FROM ledger_entries WHERE kind='prize'").get() as { n: number }).n).toBe(0);
   });
@@ -177,7 +177,7 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
     seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 1, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
-    await confirmResult(fx.env, 1, 1);
+    await confirmResult(fx.env, 1, 1, 'user');
     const res = await settleTournamentStage(fx.env, 1, 1);
     expect(res.items).toBe(2); // 两队入场各 20
     const amounts = fx.sqlite.prepare("SELECT club_id, amount FROM ledger_entries WHERE memo LIKE '联赛入场%' ORDER BY club_id").all() as { club_id: number; amount: number }[];
@@ -196,7 +196,7 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
     // 资格赛：主队胜 → 客队止步
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 0, stageKind: 'elim', entryCount: 4 });
     insertBinding(fx.sqlite, 1, 5, 'qualifying');
-    await confirmResult(fx.env, 1, 1);
+    await confirmResult(fx.env, 1, 1, 'user');
     const res = await settleTournamentStage(fx.env, 1, 1);
     expect(res.items).toBe(1);
     expect(fx.sqlite.prepare("SELECT club_id, amount FROM ledger_entries WHERE memo LIKE '冠军杯资格赛%'").get()).toMatchObject({ club_id: 2, amount: 7.5 });
@@ -209,8 +209,8 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
     insertMatch(fx2.tour, { matchId: 1, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 1, stageKind: 'group' });
     insertMatch(fx2.tour, { matchId: 2, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 12, scoreHome: 3, scoreAway: 0, stageKind: 'group' });
     insertBinding(fx2.sqlite, 1, 6, 'champions_cup');
-    await confirmResult(fx2.env, 1, 1);
-    await confirmResult(fx2.env, 1, 2);
+    await confirmResult(fx2.env, 1, 1, 'user');
+    await confirmResult(fx2.env, 1, 2, 'user');
     const res2 = await settleTournamentStage(fx2.env, 1, 1);
     expect(res2.items).toBe(1);
     expect(fx2.sqlite.prepare("SELECT amount FROM ledger_entries WHERE memo LIKE '冠军杯小组赛剩余池%'").get()).toMatchObject({ amount: 186 });

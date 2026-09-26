@@ -3,7 +3,7 @@
 // 确认钩子：自动 XP 事件（§10.1，growth.ts）+ 站内信派发（queueClubNotification，见下方 notify.ts）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { createAuditStatement } from '../lib/audit.ts';
+import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { recordGrowthEventStatements, defensivePositionsForClub, isCpuTeam, type GrowthEventInput } from './growth.ts';
 import { queueClubNotification } from './notify.ts';
 import { matchPrizeStatements } from './prizes.ts';
@@ -195,8 +195,9 @@ async function scanPendingMatches(
 // 没有开放窗口（关窗后补确认）取最近一窗，一次窗口都没开过则记 0。
 export async function confirmResult(
   env: Env,
-  actor: number,
+  actor: number | null,
   matchIdInput: unknown,
+  origin: AuditOrigin,
 ): Promise<{
   result: ConfirmedResultItem;
   xp: XpHookSummary;
@@ -266,6 +267,7 @@ export async function confirmResult(
         action: 'result_confirm',
         targetType: 'match',
         targetId: matchId,
+        origin,
         after: {
           season: ctx.season,
           windowSeq: ctx.window_seq,
@@ -386,7 +388,7 @@ function reviewOf(hooks: HookOutcome): { needsReview: boolean; note: string | nu
   return { needsReview: parts.length > 0, note: parts.length > 0 ? parts.join('；').slice(0, 300) : null };
 }
 
-/** cron 自动确认（v2.7.0）：完赛场次逐场入档（actor=0 系统），异常场标人工复核。 */
+/** cron 自动确认（v2.7.0）：完赛场次逐场入档（actor=null 系统行为，origin='cron_tick'），异常场标人工复核。 */
 export interface AutoConfirmSummary {
   skipped: boolean;
   confirmed: number;
@@ -404,7 +406,7 @@ export async function autoConfirmResults(env: Env, cap = 20): Promise<AutoConfir
   const summary: AutoConfirmSummary = { skipped: false, confirmed: 0, flagged: 0, failed: 0 };
   for (const item of pending) {
     try {
-      const out = await confirmResult(env, 0, item.m.id);
+      const out = await confirmResult(env, null, item.m.id, 'cron_tick');
       summary.confirmed++;
       if (out.needsReview) summary.flagged++;
     } catch {

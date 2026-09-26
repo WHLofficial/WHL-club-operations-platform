@@ -4,6 +4,51 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.3.2] · 审计来源通道（`origin`）与 actor 契约收口（2026-09-26，本地已收口：未 push 未部署）
+
+**缘起**：v6.3.1 补齐了「钱动了，谁认领」的人类留痕，但普查暴露两件事：① cron / 惰性结算触发的审计 `actor` 是 NULL 或 0，「无人可归因」与「忘了传 actor」在日志里长得一样；② `actor` 只能回答「谁做的」，回答不了「**哪条入口**触发的」——同一笔惰性结算，可能是管理员关窗顺手跑的，也可能是某个用户 GET 列表顺手跑的，排查时无法区分。本版给 `audit_log` 加 `origin` 列正面回答通道，并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」。
+
+**新增**
+- 迁移 `src/db/migrations/0039_audit_origin.sql`：`ALTER TABLE audit_log ADD COLUMN origin TEXT`（可空）+ `CREATE INDEX idx_audit_log_origin ON audit_log (origin, id DESC)`；`tests/d1.ts` 的 `MIGRATION_FILES` 追加 `0039`。
+- `src/lib/audit.ts` 导出 `export type AuditOrigin = 'user' | 'cron_tick' | 'lazy_settle' | 'backchannel' | 'machine'`；`AuditEntry.origin` **必填**（TS 层强制，新增审计点漏写编译不过）。
+- 管理端审计日志新增 `?origin=` 精确过滤（与既有 `?action=` 前缀过滤并列，AND 语义），响应加 `origin` 字段；前端「来源」下拉 + 五值中文标签（`AUDIT_ORIGIN_LABELS`），操作者单元格改为「操作者 · 来源」。
+- `scripts/prod-20260926-audit-origin-backfill/`：历史行回填工件（`01-precheck` / `02-backfill` / `03-verify` / `99-rollback` / README），**只建工件 + 只读预检，未执行生产写**。
+- 同源锁扩 4 例：`src/**` 内 `actor: 0` 哨兵绝迹、两处手写 `INSERT INTO audit_log` 的列清单必须含 `origin`（tsc 管不到手写 SQL）、`AuditOrigin` 五值在场、四个机器常量确实被用上。
+
+**变更**
+- **`actor` 契约**：机器行为一律 NULL，`0` 哨兵退役（自动赛果确认与认证中心全端登出原先写 0，现写 NULL）；`result_confirmations.confirmed_by` 新行写 NULL（列可空）。读侧仍兼容显示历史 `0` 为「系统」。
+- **全部审计写入点声明来源通道**（约 60 处 / 22 文件）：管理端 / 教练自助 / 玩家操作 ⇒ `user`；`runSettleTick`（cron 与 `POST /api/cron/tick` 共用）与 `autoConfirmResults` ⇒ `cron_tick`；市场 / 报价 / 谈判 GET 顺手结算 ⇒ `lazy_settle`（**actor 保持 NULL，不把惰性结算记到触发用户头上**）；认证中心推送的全端登出 ⇒ `backchannel`；内部机器通道建队 ⇒ `machine`。关窗时管理员触发的惰性结算记 `user`（触发者是人，不新造 `window_close` 值）。
+- 共享 helper 一律**穿参**而非硬编码：`settleOverdue` / `settleListingForReview` / `expireStaleOffers` / `finalizeOffer` / `rejectOfferCore` / `confirmResult` / `completeTransfer` / `completeTermination` / `rejectTransfer` / `healSettlement` / `createBypassTransfer` / `createClubFromTourTeam`；两处手写 SQL（`src/lib/audit.ts`、`src/worker/bypass.ts` 的 `chargeBypassFee`）列清单同步加 `origin`。
+- 顺带（用户插入的 UI 请求）：市场板与谈判页的「位置 · CA · PA」行改为「位置 · 年龄 岁 · CA · PA」并去掉 CA/PA 文字标签（`web/src/pages/market/MarketBoardPage.tsx`、`web/src/pages/Negotiations.tsx`）。
+- 契约写入 `TECH_DESIGN.md` **§17.6 actor / origin 契约**（两列分工表 + 五值判据 + 部署顺序硬约束），§17.5「已知次级缺陷」标为已修；`scripts/ledger-audit/README.md` 覆盖表加 origin 列、§5-1 标已修、§6 补二次普查快照；`coverage.sql` 加 S11 / S12 两条 origin 查询；`scripts/README.md` 加新工件索引；`package.json` 6.3.1 → 6.3.2。
+
+**生产只读预检（2026-09-26，`Rows written = 0`）**：`audit_log` 共 **100 行 / max_id 100**，分布 `result_confirm 74（actor=0）` / `auth_login 15` / `auth_backchannel_logout 3（actor=0）` / `season_bind_tournament 3` / `club_bind 3` / `auth_logout 1` / `season_create 1`；**财政类审计仍 0 条**。回填期望：`lazy_settle 0` / `cron_tick 74` / `backchannel 3` / `user 23`，合计 100 行、回填后无 NULL 残留（第 ④ 条 `actor IS NOT NULL ⇒ user` 的依据：旧代码只有机器路径写 `actor = 0`，没有任何机器路径会传非空 actor）。
+
+**实测**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **53 文件 / 772 例全绿**（v6.3.1 基线 53/767，新增 5 = 同源锁 +4、admin-system +1）；全新内存库跑全部 39 个迁移，`audit_log` 末列为 `origin:TEXT`、`idx_audit_log_origin (origin, id DESC)` 在场；`npm run build` 成功（主 bundle `index-Dx2i3s22.js` 584.87 KB / gzip 186.23 KB；hash 随 `__APP_VERSION__` 注入的版本号变化）。**`npm run db:migrate:local` 未跑成**：本地 `.wrangler/state/v3/d1` 被在跑的 dev server（workerd）占用，且该库处于「schema 已在、`d1_migrations` 为空」的陈旧态（报 `table players already exists`），与本次改动无关 ⇒ 0039 的干净落地改由两条路证明：① 全新内存库跑全部迁移（`tests/d1.ts` 的 `applyMigrations`）；② `npx wrangler d1 migrations apply whl-club --local --persist-to scratch/d1-check` —— 39/39 全 ✅，随后查得 `audit_log` 末列为 `origin:TEXT`、索引 SQL 为 `CREATE INDEX idx_audit_log_origin ON audit_log (origin, id DESC)`。
+
+**上线（未部署）**：**部署顺序硬约束**——代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**无迁移步骤**）⇒ **push 前必须先 `npm run db:migrate:remote`**，否则生产审计 INSERT 报 `no such column: origin`。历史行回填另需授权（`02-backfill.sql` 只建工件、未执行）。push 与部署等用户指令。
+
+## [v6.3.1] · 财政域留痕补齐与一笔线上订正（2026-09-26，本地已收口：未 push 未部署）
+
+**缘起**：生产普查（报告落 `scripts/ledger-audit/`）发现账本只保证「钱对不对」，不保证「人认不认领」——除自动奖金（`prize`）与自动主场收入（`revenue`）外，生产上唯一一笔支出是慕尼黑1860（club 33）的球场扩建 −0.50M，而 `audit_log` 里**零留痕**，操作人只能靠相邻的 `club_bind` 审计行反推。本版补齐人类触发路径的留痕，并把那笔支出按补偿分录口径订正。
+
+**新增**
+- `tests/ledger-audit-lock.test.ts`（5 例，同源锁）：静态扫描 `src/**` 强制四条约束——白名单外凡含 `ledgerMovement(` 的文件必须同时具备审计能力（`createAuditStatement` / `writeAudit`）；白名单文件必须**仍然**在写账本（防豁免区腐烂）；`INSERT INTO audit_log` 只许出现在 `src/lib/audit.ts` 与 `src/worker/bypass.ts`；`src/worker/routes/clubs.ts` 四个自助财政端点必须传 `user.id`，`window_close` 审计必须带 `payroll` / `home` 汇总。
+- `scripts/ledger-audit/`：`README.md` 财政域留痕普查报告（每个 kind 的写入点 / 审计 action / actor 来源、白名单理由、已知次级缺陷、生产实证、权威锚点）与 `coverage.sql`（10 条只读复核查询，S3 是 `Σbalance − Σamount = 0` 守恒硬断言）。
+- `scripts/prod-20260926-rollback-stadium-expand/`：线上订正工件（`01-precheck.sql` / `02-rollback.sql` / `03-verify.sql` / `99-rollback.sql` / `README.md`）。
+
+**变更**
+- **球场三端点留痕**：`expandStadium` / `upgradeStadiumTier` / `upgradeFacilityLevel` 各加必填末参 `actor`，同批写 `stadium_expand` / `stadium_upgrade` / `facility_upgrade` 审计（`target_type='stadium'`，`before` 为改动前三列、`after` 为新值 + `seats`/`cost`/`creditUsed`/`cash`/`refund`）；`src/worker/routes/clubs.ts` 三处端点传 `user.id`。守卫取值改为按语句下标显式定位。
+- **冠名解约留痕**：`terminateNaming(env, clubId, actor)` 写 `naming_terminate`（`target_type='naming_contract'`，赔款为 0 也留痕）；路由端点传 `user.id`。
+- **审核类附加费留痕**：`chargeBypassFee` 加第 7 参 `actor`，手写条件 INSERT `bypass_fee`——`createAuditStatement` 表达不了 `WHERE`，而该审计必须与账本自己的幂等闸及批内余额/状态守卫**逐字一致**，否则审核重放或并发动用余额时会留下「钱没扣、审计说扣了」的失实行；故排在账本之前落库，守卫取末条 `transfers` UPDATE 的 `meta.changes`。这是全仓第二处手写 `INSERT INTO audit_log`（第一处是 `src/lib/audit.ts` 自己）。
+- **关窗批汇总**：`window_close` 审计的 `after` 增两个键 `payroll`（`PayrollSummary`：`wageClubs`/`wageTotal`/`taxClubs`/`taxTotal`）与 `home`（`HomeWindowSummary`：`maintenanceClubs`/`maintenanceTotal`/`fansClubs`/`namingClubs`/`namingTotal`），让自动扣款也归因到「谁关的窗」。
+- 留痕判据三档写入 `TECH_DESIGN.md` §17.5（人类触发必留痕 / 自动但可重建锚回业务对象 / 账本原语分层不留痕）；`scripts/README.md` 加 `ledger-audit/` 与 `prod-20260926-*` 两处索引。
+- `package.json` 版本 6.3.0 → 6.3.1。
+
+**实测**：typecheck 三份全清；vitest **53 文件 / 767 例全绿**（v6.3.0 基线 52/762，含新增锁测试 5 例与 stadium/naming/window/bypass 四处行为断言）；build 成功（主 bundle `index-D8FGDNfM.js` 584.84 KB / gzip 186.22 KB；前端版本号由 `vite.config.ts` 的 `__APP_VERSION__` 从 package.json 注入，故 hash 随 6.3.0→6.3.1 变化、字节数不变）。
+
+**上线（2026-09-26：生产库已订正，代码未部署）**：`02-rollback.sql` 经 `--file` 执行 `changes=4` / `last_row_id=163`；`03-verify.sql` 十列全中——club 33 容量回到 **12000**、建设券 **0**、余额 **56.51**、`manual_adjust` **1** 条、原 `stadium_expand` 流水**仍在**、**守恒 `drift = 0`**、流水共 **163** 笔（`prize` 103 / `revenue` 58）。订正口径为**补偿分录**：新增 `manual_adjust` +0.5（id=163，memo 指回原流水 id=141），`ledger_accounts.balance` 差额加回，**原流水未删未改**（账本只增，删行会破坏 `balance_after` 链）。不可逆影响面为空：该队历史最大上座 **10140** < 原容量 12000，扩建从未影响过任何一场的上座与收入。
+
 ## [v6.3.0] · 报价 / 议价子系统（2026-09-26，本地已收口：未 push 未部署）
 
 **新增**

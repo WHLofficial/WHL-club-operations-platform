@@ -233,6 +233,14 @@ describe('续约（rc_change）', () => {
       `SELECT kind, amount FROM ledger_entries WHERE club_id = ${fx.clubA} AND kind != 'opening_import' ORDER BY id`,
     );
     expect(kinds).toEqual([{ kind: 'rc_change_fee', amount: -1.5 }]); // 无转会划款，只有续约费
+    // 附加费留痕（v6.2.1）：actor = 审批的管理员，指向该单据与收费口径
+    const feeAudit = sqlAll<{ actor: number | null; target_type: string; target_id: number; before: string | null; after: string }>(
+      fx.sqlite,
+      "SELECT actor, target_type, target_id, before, after FROM audit_log WHERE action = 'bypass_fee'",
+    );
+    expect(feeAudit).toHaveLength(1);
+    expect(feeAudit[0]).toMatchObject({ actor: 1, target_type: 'transfer', target_id: transferId, before: null });
+    expect(JSON.parse(feeAudit[0]!.after)).toMatchObject({ kind: 'rc_change_fee', amount: 1.5, clubId: fx.clubA });
   });
 
   it('审核驳回：不扣费、单据落 rejected', async () => {
@@ -246,6 +254,8 @@ describe('续约（rc_change）', () => {
     expect(t?.status).toBe('rejected');
     const fees = sqlAll<{ kind: string }>(fx.sqlite, `SELECT kind FROM ledger_entries WHERE club_id = ${fx.clubA} AND kind = 'rc_change_fee'`);
     expect(fees).toEqual([]);
+    // 没扣钱就不能留「已扣费」的痕（审计与账本共用守卫，同一个批里评估）
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action = 'bypass_fee'")).toEqual([]);
   });
 });
 

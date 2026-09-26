@@ -55,7 +55,7 @@ app.get('/offers', async (c) => {
   if (!(OFFER_STATUS_FILTERS as readonly string[]).includes(statusRaw)) {
     throw new HttpError(400, 'status 只能是 pending / accepted / rejected / withdrawn / expired / all');
   }
-  await settleOverdue(c.env);
+  await settleOverdue(c.env, { origin: 'lazy_settle' });
 
   const cursorRaw = c.req.query('cursor');
   let cursor: { at: string; id: number } | null = null;
@@ -126,7 +126,7 @@ app.get('/offers/:id', async (c) => {
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '报价 ID 不对');
-  await settleOverdue(c.env);
+  await settleOverdue(c.env, { origin: 'lazy_settle' });
 
   const r = await c.env.DB.prepare(
     `SELECT o.*, ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.ca, p.pa,

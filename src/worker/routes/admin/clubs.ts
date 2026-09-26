@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
-import { writeAudit } from '../../../lib/audit.ts';
+import { writeAudit, type AuditOrigin } from '../../../lib/audit.ts';
 import { authIssueTeamCode, authRegisterTeam, authUnbindTeam, AuthApiError } from '../../authClient.ts';
 import { pushTeamToTour } from '../../tourClient.ts';
 import { getBoundClub } from '../../binding.ts';
@@ -29,7 +29,8 @@ export async function createClubFromTourTeam(
     name,
     leagueTier,
     operator,
-  }: { gameTeamId: number; name: string; leagueTier?: unknown; operator: number | null },
+    origin,
+  }: { gameTeamId: number; name: string; leagueTier?: unknown; operator: number | null; origin: AuditOrigin },
 ): Promise<CreatedClub> {
   if (!name) throw new HttpError(400, '俱乐部名字不能为空');
   if (name.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
@@ -52,12 +53,13 @@ export async function createClubFromTourTeam(
     .catch(() => null);
   if (!club) throw new HttpError(409, '俱乐部名字已存在');
   // actor 可空（audit_log.actor 允许 NULL）：机器通道推来的建档没有本仓管理员身份，
-  // 留 NULL 比伪造一个 actor 诚实；来源由调用方在 after 里自述。
+  // 留 NULL 比伪造一个 actor 诚实；是哪条入口推来的由 origin 记。
   await writeAudit(env.DB, {
     actor: operator,
     action: 'club_create',
     targetType: 'club',
     targetId: club.id,
+    origin,
     after: { name, gameTeamId, leagueTier: writeTier },
   });
   // auth 目录自动建档（v2.3.0）：register upsert 幂等；失败不回滚 clubs 行，留「重新登记」重试
@@ -114,6 +116,7 @@ app.post('/clubs', async (c) => {
     name,
     leagueTier: body?.leagueTier,
     operator: user.id,
+    origin: 'user',
   });
   return c.json({ ...created, pushedToTour }, 201);
 });
@@ -225,6 +228,7 @@ app.post('/clubs/:id/transfer-ban', async (c) => {
     action: 'transfer_ban',
     targetType: 'club',
     targetId: clubId,
+    origin: 'user',
     after: { reason },
   });
   return c.json({ ok: true });
@@ -241,6 +245,7 @@ app.delete('/clubs/:id/transfer-ban', async (c) => {
     action: 'transfer_unban',
     targetType: 'club',
     targetId: clubId,
+    origin: 'user',
   });
   return c.json({ ok: true });
 });
@@ -331,6 +336,7 @@ app.post('/clubs/:id/stadium', async (c) => {
     action: 'stadium_update',
     targetType: 'stadium',
     targetId: clubId,
+    origin: 'user',
     after: body as Record<string, unknown>,
   });
   return c.json({ ok: true });
@@ -368,6 +374,7 @@ app.post('/clubs/:id/bindcode', async (c) => {
     action: 'club_bindcode_create',
     targetType: 'club',
     targetId: clubId,
+    origin: 'user',
     after: { expiresAt: issued.expiresAt },
   });
   return c.json({ code: issued.code, expiresAt: issued.expiresAt }, 201);
@@ -396,6 +403,7 @@ app.post('/bindings/unbind', async (c) => {
     action: 'club_unbind',
     targetType: 'club',
     targetId: club.id,
+    origin: 'user',
     before: { userId },
   });
   return c.json({ ok: true });

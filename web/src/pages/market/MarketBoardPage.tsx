@@ -150,7 +150,8 @@ function MarketCard({
         </span>
       </div>
       <div className="market-card-sub">
-        {listing.player.position ?? '—'} · CA <span className="mono">{listing.player.ca ?? '—'}</span> · PA{' '}
+        {listing.player.position ?? '—'} · {listing.player.age ?? '—'} 岁 ·{' '}
+        <span className="mono">{listing.player.ca ?? '—'}</span> ·{' '}
         <span className="mono">{listing.player.pa ?? '—'}</span>
       </div>
       <div className="market-card-price">

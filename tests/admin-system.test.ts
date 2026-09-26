@@ -133,6 +133,38 @@ describe('审计日志端点（v2.1.0）', () => {
     expect((await get('/api/admin/audit-log?limit=999', 'tok-admin', fx.env)).status).toBe(200);
   });
 
+  it('origin 精确过滤 + 返回 origin 字段（v6.3.2）', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(
+      `INSERT INTO audit_log (actor, action, target_type, target_id, origin, before, after, at)
+       VALUES (1, 'listing_create', 'listing', 1, 'user', NULL, NULL, '2026-09-19T00:01:00Z'),
+              (NULL, 'result_confirm', 'match', 2, 'cron_tick', NULL, NULL, '2026-09-19T00:02:00Z'),
+              (NULL, 'listing_settle', 'listing', 3, 'lazy_settle', NULL, NULL, '2026-09-19T00:03:00Z'),
+              (1, 'config_set', 'config', NULL, NULL, NULL, NULL, '2026-09-19T00:04:00Z')`,
+    );
+    // 倒序返回，且历史行（无 origin）是 null —— 不拿哨兵值糊过去
+    const all = (await (await get('/api/admin/audit-log', 'tok-admin', fx.env)).json()) as {
+      entries: { action: string; origin: string | null }[];
+    };
+    expect(all.entries.map((e) => e.origin)).toEqual([null, 'lazy_settle', 'cron_tick', 'user']);
+
+    // origin 精确匹配（不是前缀）
+    const lazy = (await (await get('/api/admin/audit-log?origin=lazy_settle', 'tok-admin', fx.env)).json()) as {
+      entries: { action: string }[];
+    };
+    expect(lazy.entries.map((e) => e.action)).toEqual(['listing_settle']);
+
+    // action 前缀与 origin 叠加是 AND：listing% + lazy_settle 只剩惰性结算那条
+    const both = (await (await get('/api/admin/audit-log?action=listing&origin=lazy_settle', 'tok-admin', fx.env)).json()) as {
+      entries: { action: string }[];
+    };
+    expect(both.entries.map((e) => e.action)).toEqual(['listing_settle']);
+    const none = (await (await get('/api/admin/audit-log?action=config&origin=lazy_settle', 'tok-admin', fx.env)).json()) as {
+      entries: unknown[];
+    };
+    expect(none.entries.length).toBe(0);
+  });
+
   it('config_set 里涉密键的值：写入侧已只落掩码（§6.10），超管与非超管看到的都是掩码', async () => {
     const fx = freshEnv();
     await send('PUT', '/api/admin/config', { key: 'wage_param_b', value: '1.9' }, 'tok-super', fx.env);

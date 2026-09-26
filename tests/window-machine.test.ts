@@ -147,6 +147,41 @@ describe('关窗', () => {
     expect(win?.status).toBe('closed');
     const listing = sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1');
     expect(listing?.status).toBe('pending_review');
+
+    // 关窗审计（v6.2.1）：actor = 操作的管理员，且逐类汇总与同批实际落库的流水对得上
+    const audit = sqlGet<{ actor: number | null; target_type: string; target_id: number | null; after: string }>(
+      fx.sqlite,
+      "SELECT actor, target_type, target_id, after FROM audit_log WHERE action = 'window_close'",
+    )!;
+    expect(audit).toMatchObject({ actor: 1, target_type: 'season_window', target_id: null });
+    const after = JSON.parse(audit.after) as {
+      season: number;
+      windowSeq: number;
+      isTemporary: boolean;
+      forceSettled: number;
+      loyaltyCount: number;
+      loyaltyTotal: number;
+      payroll: Record<string, number>;
+      home: Record<string, number>;
+    };
+    expect(after).toMatchObject({ season: 1, windowSeq: 1, isTemporary: false, forceSettled: 0, loyaltyCount: 0, loyaltyTotal: 0 });
+    // 汇总口径 = 本批该窗（ref_type 'window' / ref_id = season×100+window_seq）的流水合计
+    const windowLedger = (kind: string) =>
+      sqlGet<{ n: number; total: number }>(
+        fx.sqlite,
+        `SELECT COUNT(*) AS n, COALESCE(ROUND(-SUM(amount), 2), 0) AS total FROM ledger_entries
+          WHERE ref_type = 'window' AND ref_id = 101 AND kind = '${kind}'`,
+      )!;
+    const wage = windowLedger('wage');
+    const tax = windowLedger('luxury_tax');
+    const maintenance = windowLedger('maintenance');
+    const namingFee = windowLedger('naming_fee');
+    expect(after.payroll).toMatchObject({ wageClubs: wage.n, taxClubs: tax.n });
+    expect(after.payroll.wageTotal).toBeCloseTo(wage.total, 2);
+    expect(after.payroll.taxTotal).toBeCloseTo(tax.total, 2);
+    expect(after.home).toMatchObject({ maintenanceClubs: maintenance.n, namingClubs: namingFee.n });
+    expect(after.home.maintenanceTotal).toBeCloseTo(maintenance.total, 2);
+    expect(after.home.namingTotal).toBeCloseTo(namingFee.total, 2);
   });
 
   it('已有关键节点未决（活跃谈判会话）挡关窗；force + window_force_settle=true 时按 E 强结并完成过户', async () => {

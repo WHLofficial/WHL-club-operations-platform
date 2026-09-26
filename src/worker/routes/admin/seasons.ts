@@ -24,7 +24,7 @@ app.post('/seasons', async (c) => {
   try {
     await c.env.DB.batch([
       c.env.DB.prepare(`INSERT INTO seasons (season, status, age_cap, created_at) VALUES (?, 'preparing', ?, ${nowSql()})`).bind(season, ageCap),
-      audit({ actor: user.id, action: 'season_create', targetType: 'season', targetId: season, after: ageCap !== null ? { ageCap } : undefined }),
+      audit({ actor: user.id, action: 'season_create', targetType: 'season', targetId: season, origin: 'user', after: ageCap !== null ? { ageCap } : undefined }),
     ]);
   } catch (err) {
     if (String(err).includes('UNIQUE')) throw new HttpError(409, '这个赛季已经存在');
@@ -102,6 +102,7 @@ app.post('/seasons/:id/bind-tournament', async (c) => {
         action: 'season_bind_tournament',
         targetType: 'season',
         targetId: season,
+        origin: 'user',
         after: { season, tournamentId, competitionType },
       }),
     ]);
@@ -153,6 +154,7 @@ app.post('/seasons/:id/unbind-tournament', async (c) => {
       action: 'season_unbind_tournament',
       targetType: 'season',
       targetId: season,
+      origin: 'user',
       after: { season, tournamentId },
     }),
   ]);
@@ -177,7 +179,7 @@ app.get('/results/queue', async (c) => {
 
 app.post('/results/:id/confirm', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
-  const { result, xp } = await confirmResult(c.env, user.id, c.req.param('id'));
+  const { result, xp } = await confirmResult(c.env, user.id, c.req.param('id'), 'user');
   return c.json({ ok: true, result, xp }, 201);
 });
 

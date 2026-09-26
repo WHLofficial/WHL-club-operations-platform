@@ -8,7 +8,7 @@ import type { Env } from './env.ts';
 import { bidDeadline, delistFee, type TradeCalendar } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext, type MarketContext } from './market-context.ts';
-import { createAuditStatement } from '../lib/audit.ts';
+import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { detectBidAlerts } from './bid-alerts.ts';
 import { expireStaleOffers } from './offers.ts';
 
@@ -55,6 +55,7 @@ export async function settleListingForReview(
   db: D1Database,
   listing: ListingCore,
   actor: number | null,
+  origin: AuditOrigin,
   fromStatus: 'bidding' | 'matched_pending' | 'listed' = 'bidding',
 ): Promise<'settled' | 'already'> {
   const audit = createAuditStatement(db);
@@ -102,6 +103,7 @@ export async function settleListingForReview(
       action: 'listing_settle',
       targetType: 'listing',
       targetId: listing.id,
+      origin,
       after: { playerId: listing.player_id, season: listing.season, windowSeq: listing.window_seq },
     }),
     ...(alerts.length > 0
@@ -111,6 +113,7 @@ export async function settleListingForReview(
             action: 'bid_pattern_alert',
             targetType: 'listing',
             targetId: listing.id,
+            origin,
             after: { alerts },
           }),
         ]
@@ -134,6 +137,7 @@ export async function delistUnbid(
   listing: ListingCore,
   ctx: MarketContext,
   actor: number | null,
+  origin: AuditOrigin,
 ): Promise<'delisted' | 'already'> {
   const isActivation = listing.type === 'activation';
   const fee = isActivation ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
@@ -172,6 +176,7 @@ export async function delistUnbid(
       action: 'listing_delist',
       targetType: 'listing',
       targetId: listing.id,
+      origin,
       after: { fee, reason: isActivation ? 'activation_invalid' : 'window_end_no_bid' },
     }),
   ];
@@ -181,7 +186,13 @@ export async function delistUnbid(
 
 // 激活出价窗失效（4.4.2.2）：激活方未在窗口内落价 → 激活无效。卖家没收下架费，
 // 球员按合同类型还原（训练营→trainee、正式→normal）；一窗一次额度已消耗（§6.2 假设，文档定稿口径）。
-export async function voidExpiredActivation(db: D1Database, listingId: number, playerId: number, actor: number | null): Promise<boolean> {
+export async function voidExpiredActivation(
+  db: D1Database,
+  listingId: number,
+  playerId: number,
+  actor: number | null,
+  origin: AuditOrigin,
+): Promise<boolean> {
   const audit = createAuditStatement(db);
   const statements = [
     db
@@ -203,6 +214,7 @@ export async function voidExpiredActivation(db: D1Database, listingId: number, p
       action: 'activation_void',
       targetType: 'listing',
       targetId: listingId,
+      origin,
       after: { playerId, reason: 'activator_no_bid' },
     }),
   ];
@@ -216,17 +228,22 @@ function noteText(day: string, hours: [number, number], calendar: TradeCalendar)
   return `截止判定：${Number(m)}月${Number(d)}日 ${hours[0]}:00-${hours[1]}:00${suffix}`;
 }
 
-// 全量惰性结算入口：市场相关请求与 cron tick 都走这里
-export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number | null } = {}): Promise<SettleSummary> {
+// 全量惰性结算入口：市场相关请求与 cron tick 都走这里。
+// origin 必填：这条结算到底是哪条入口触发的，由调用方声明（见 lib/audit.ts 的通道取值）。
+export async function settleOverdue(
+  env: Env,
+  opts: { origin: AuditOrigin; now?: Date; actor?: number | null },
+): Promise<SettleSummary> {
   const db = env.DB;
   const ctx = await loadMarketContext(db);
   const now = opts.now ?? new Date();
   const actor = opts.actor ?? null;
+  const origin = opts.origin;
   const summary: SettleSummary = { settled: 0, delisted: 0, voided: 0, notesUpdated: 0, healed: 0 };
 
   // 报价惰性过期 + 自愈（v6.3.0）：窗关 / 球员已不在卖方 / 同球员已挂牌的 pending 单收口；
   // 先于市场结算跑（过期释放冻结，别让出价预检读到没释放的冻结）
-  await expireStaleOffers(env, { actor });
+  await expireStaleOffers(env, { actor, origin });
 
   // 激活首价窗失效（4.4.2.2）：先于窗尾收口处理，避免给卖家误收下架费
   const expired = await db
@@ -240,7 +257,7 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
     .bind(now.toISOString())
     .all<{ id: number; player_id: number }>();
   for (const row of expired.results) {
-    if (await voidExpiredActivation(db, row.id, row.player_id, actor)) summary.voided++;
+    if (await voidExpiredActivation(db, row.id, row.player_id, actor, origin)) summary.voided++;
   }
 
   // 激活首价已落但未收口（收口前崩溃的残留）：listed 已过期且带出价、或 bidding → 直接进待审
@@ -258,7 +275,7 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
     .bind(now.toISOString())
     .all<ListingCore & { status: string }>();
   for (const row of remnants.results) {
-    if ((await settleListingForReview(db, row, actor, row.status === 'bidding' ? 'bidding' : 'listed')) === 'settled') {
+    if ((await settleListingForReview(db, row, actor, origin, row.status === 'bidding' ? 'bidding' : 'listed')) === 'settled') {
       summary.settled++;
     }
   }
@@ -275,7 +292,7 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
     .bind(now.toISOString())
     .all<ListingCore>();
   for (const row of matchExpired.results) {
-    if ((await settleListingForReview(db, row, actor, 'matched_pending')) === 'settled') summary.settled++;
+    if ((await settleListingForReview(db, row, actor, origin, 'matched_pending')) === 'settled') summary.settled++;
   }
 
   const active = await db
@@ -303,8 +320,8 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
     if (windowClosed) {
       // 窗尾收口：没人出价的下架收费；还有竞价的强制进待审（成交确认交管理组裁量）
       if (row.status === 'listed') {
-        if ((await delistUnbid(db, core, ctx, actor)) === 'delisted') summary.delisted++;
-      } else if ((await settleListingForReview(db, core, actor)) === 'settled') summary.settled++;
+        if ((await delistUnbid(db, core, ctx, actor, origin)) === 'delisted') summary.delisted++;
+      } else if ((await settleListingForReview(db, core, actor, origin)) === 'settled') summary.settled++;
       continue;
     }
     if (row.status !== 'bidding') continue; // listed 且窗未关：等窗尾
@@ -318,7 +335,7 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
       calendar: ctx.calendar,
     });
     if (deadline.met) {
-      if ((await settleListingForReview(db, core, actor)) === 'settled') summary.settled++;
+      if ((await settleListingForReview(db, core, actor, origin)) === 'settled') summary.settled++;
       continue;
     }
     const note = noteText(deadline.deadlineDay, ctx.deadlineHours, ctx.calendar);
@@ -340,7 +357,7 @@ export async function settleOverdue(env: Env, opts: { now?: Date; actor?: number
     )
     .all<ListingCore>();
   for (const row of broken.results) {
-    if ((await settleListingForReview(db, row, actor)) === 'settled') summary.healed++;
+    if ((await settleListingForReview(db, row, actor, origin)) === 'settled') summary.healed++;
   }
 
   return summary;

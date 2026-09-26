@@ -503,7 +503,7 @@ describe('惰性过期与自愈（expireStaleOffers 挂 settleOverdue）', () =>
     fx.sqlite.exec('UPDATE players SET club_id = NULL, status = \'free\' WHERE id = 1');
     await fx.env.DB.prepare('SELECT 1').first(); // no-op 保持 d1 通道活跃
     const { expireStaleOffers } = await import('../src/worker/offers.ts');
-    const summary = await expireStaleOffers(fx.env);
+    const summary = await expireStaleOffers(fx.env, { origin: 'user' });
     expect(summary.expired).toBeGreaterThanOrEqual(1);
     expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', id)).toMatchObject({ status: 'expired' });
 
@@ -513,7 +513,7 @@ describe('惰性过期与自愈（expireStaleOffers 挂 settleOverdue）', () =>
     fx.sqlite.exec(
       "INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, season, window_seq) VALUES (2, 2, 'normal', 25, 'listed', '2026-07-01T00:00:00Z', '2026-07-01', 1, 1)",
     );
-    await expireStaleOffers(fx.env);
+    await expireStaleOffers(fx.env, { origin: 'user' });
     expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', id2)).toMatchObject({ status: 'expired' });
   });
 
@@ -525,7 +525,7 @@ describe('惰性过期与自愈（expireStaleOffers 挂 settleOverdue）', () =>
     // 模拟「占用成功、履约没跑」：直接把单打成 accepted、listing_id NULL、球员保持 normal
     fx.sqlite.exec(`UPDATE offers SET status = 'accepted' WHERE id = ${id}`);
     const { settleOverdue } = await import('../src/worker/market-settle.ts');
-    await settleOverdue(fx.env);
+    await settleOverdue(fx.env, { origin: 'user' });
     const listingId = sqlGet<{ listing_id: number | null }>(fx.sqlite, 'SELECT listing_id FROM offers WHERE id = ?', id)?.listing_id;
     expect(listingId).not.toBeNull();
     expect(sqlGet(fx.sqlite, 'SELECT status, ask_price FROM listings WHERE id = ?', listingId as number)).toMatchObject({ status: 'listed', ask_price: 30 });

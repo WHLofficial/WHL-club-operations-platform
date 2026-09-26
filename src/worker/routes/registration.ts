@@ -211,6 +211,7 @@ app.post('/club/players/:id/number', async (c) => {
       action: 'player_number',
       targetType: 'player',
       targetId: playerId,
+      origin: 'user',
       before: { number: owned.number },
       after: { number },
     }),
@@ -317,6 +318,7 @@ app.post('/club/registrations', async (c) => {
       action: 'registration_submit',
       targetType: 'club',
       targetId: club.id,
+      origin: 'user',
       after: { season, firstTeam: firstTeamIds.length, trainee: traineeIds.length },
     }),
   );

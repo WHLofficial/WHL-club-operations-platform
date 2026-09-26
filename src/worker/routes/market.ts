@@ -81,7 +81,7 @@ function statusFilter(raw: string | undefined): string[] {
 
 // GET /api/market/listings?status=&cursor= —— 转会区（卡柜）
 app.get('/market/listings', async (c) => {
-  await settleOverdue(c.env);
+  await settleOverdue(c.env, { origin: 'lazy_settle' });
   const statuses = statusFilter(c.req.query('status'));
   const cursorRaw = c.req.query('cursor');
   let cursor: number | null = null;
@@ -244,6 +244,7 @@ app.post('/market/listings', async (c) => {
       action: 'listing_create',
       targetType: 'listing',
       targetId: null,
+      origin: 'user',
       after: { playerId, clubId: club.id, askPrice, season: win.season, windowSeq: win.windowSeq },
     }),
   ];
@@ -390,7 +391,7 @@ app.post('/market/activations', async (c) => {
 
 // GET /api/market/listings/:id —— 详情 + 出价历史
 app.get('/market/listings/:id', async (c) => {
-  await settleOverdue(c.env);
+  await settleOverdue(c.env, { origin: 'lazy_settle' });
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
   const listing = await c.env.DB.prepare(
@@ -501,7 +502,7 @@ app.post('/market/listings/:id/bids', async (c) => {
   if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, '出价金额须为正数（单位 m）');
 
   // 惰性结算先跑：可能这单刚好截止，出价要被拒
-  await settleOverdue(c.env);
+  await settleOverdue(c.env, { origin: 'lazy_settle' });
 
   // 全局暂停出价（管理端干预开关；已出的价与到期结算不受影响）
   if ((await createConfigService(c.env.DB).get('market_bid_paused')) === 'true') {
@@ -623,6 +624,7 @@ app.post('/market/listings/:id/bids', async (c) => {
       action: 'bid_place',
       targetType: 'listing',
       targetId: id,
+      origin: 'user',
       after: { clubId: club.id, amount: round2(amount) },
     }),
   ];
@@ -649,6 +651,7 @@ app.post('/market/listings/:id/bids', async (c) => {
       c.env.DB,
       { id, player_id: listing.player_id, seller_club_id: listing.seller_club_id, ask_price: listing.ask_price, season: listing.season, window_seq: listing.window_seq },
       user.id,
+      'user',
       'bidding',
     );
     settledForReview = settled === 'settled';

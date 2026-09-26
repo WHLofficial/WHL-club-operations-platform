@@ -21,6 +21,7 @@
 | `measure-d1-reads.mjs` | **D1 读量定标**（v3.2.0 步骤 1）：用真实路由 + 假 D1 抓下它实际执行的 SQL，内联参数后打生产读 `meta.rows_read`。30 个球员库形状 + 6 个成本探针 | `node scripts/measure-d1-reads.mjs [--local] [--dump] [--only=<id>] [--probes] [--json-out=<path>]` |
 | `measure-surface-reads.mjs` | **全站读面普查**（v3.2.0 步骤 6）：同机制，覆盖 18 个 URL 读面 + 3 个 cron 任务；只执行 SELECT（GET 里可能藏 `settleOverdue` 的写） | `node scripts/measure-surface-reads.mjs [--local] [--dump] [--only=<id>] [--json-out=<path>]` |
 | `d1-read-audit/` | 上面两支的**机件与报告**：`harness.mjs`（真实路由 + 假 D1 + 内联器 + 生产 `rows_read`）与 `README.md`（读量报告：形状表、成本模型、阈值与候选清单、普查与处置） | 见 `scripts/d1-read-audit/README.md` |
+| `ledger-audit/` | **财政域留痕覆盖**（v6.3.1，v6.3.2 补 origin 列）：`README.md` 是普查报告（每个账本 kind 的写入点 / 审计 action / actor 来源 / 来源通道 origin、白名单理由、已知次级缺陷、生产实证），`coverage.sql` 是 12 条只读复核查询（含 `Σbalance − Σamount = 0` 守恒硬断言，S11 / S12 查 v6.3.2 的 origin 分布） | 见 `scripts/ledger-audit/README.md` |
 
 ## e2e/
 
@@ -95,6 +96,15 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 | `prod-20260921-s9-free-status/` | 全部自由身补标 `status = 'free'`（用户 2026-09-21 裁决「球员库里只要没在 20 队的 status 都应该是 free」）：一条带守卫的批量 UPDATE，把其余 **17427** 名既存自由身（`status` 仍为 `normal`）补齐；只写 `status`/`updated_at` 两列，回滚按 `updated_at` 时间戳精确圈定 | **已执行**（2026-09-21：单条 UPDATE / rows_written 34854 / `touched` 17427；验收七列全中 —— 自由身 17731 全 `free`、在册 570 全 `normal`、`bad_free_with_club` 0、守卫表全 0） |
 
 两批都只写 `players.club_id` / `players.status`（两列都**无外键**，`--file` 可用），要求 6 张守卫表全 0；排在合同批之前、与另两批无 fc_id 交集。详见各自 README（含逐队分布、验收判据与本地演练记录）。
+
+## prod-20260926-*（一次性生产工件）
+
+| 目录 | 内容 | 状态 |
+|---|---|---|
+| `prod-20260926-rollback-stadium-expand/` | 回滚 2026-09-21 慕尼黑1860（club 33）那笔球场扩建：`stadiums` 容量 12500→12000、建设券 0.13→0；**按补偿分录口径**给 `ledger_accounts.balance` 加回 0.50 并插一条 `manual_adjust` 流水指回原流水（**不删不改原 id=141**，账本只增，删行会破坏 `balance_after` 链）。3 句同批 + 预检 / 验收 / 反向回滚 / README | **已执行**（2026-09-26 经 `--file`：`changes=4`、`last_row_id=163`；验收全绿 —— 容量 12000 / 券 0 / club 33 余额 56.51 / `manual_adjust` 1 条 / 原 `stadium_expand` 仍在 / **守恒断言 `Σbalance − Σamount = 0`**） |
+| `prod-20260926-audit-origin-backfill/` | **审计来源通道回填**（v6.3.2）：把迁移 `0039` 之前的历史 `audit_log` 行（100 行）的 `origin` 按旧代码能确凿认定的通道填上 —— `lazy_settle`（actor 为 NULL 的结算类）/ `cron_tick`（`actor = 0` 的自动赛果确认）/ `backchannel`（`actor = 0` 的全端登出）/ `user`（`actor` 非空 ⇒ 人类入口）。每条都带 `origin IS NULL` 守卫（可重跑），回滚用 `id <= 100` 边界。预检 / 回填 / 验收 / 回滚 / README | **工件就绪，未执行**（只跑过只读预检：100 行 / 命中 `cron_tick` 74、`backchannel` 3、`lazy_settle` 0、`user` 23；执行需先 `npm run db:migrate:remote` 并另行授权） |
+
+口径详见该目录 README。触发原因与留痕普查见 [`ledger-audit/README.md`](./ledger-audit/README.md)：这是一笔**没有审计留痕**的支出（操作人靠邻行 `club_bind` 反推），v6.3.1 已把球场三端点、冠名解约、审核附加费与关窗批的留痕补齐，并用 `tests/ledger-audit-lock.test.ts` 锁死。
 
 ## revenue-import/
 

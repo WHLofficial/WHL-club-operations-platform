@@ -6,7 +6,7 @@
 // 送报价等入口的惰性过期由路由层先跑一遍 settleOverdue。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { createAuditStatement } from '../lib/audit.ts';
+import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import {
   autoRespondKind,
   minOfferPriceBounds,
@@ -197,6 +197,7 @@ export async function placeOffer(
       action: 'offer_place',
       targetType: 'offer',
       targetId: null,
+      origin: 'user',
       after: { playerId: input.playerId, buyerClubId: input.clubId, sellerClubId: p.club_id, amount },
     }),
     ]);
@@ -221,7 +222,7 @@ export async function placeOffer(
   }
   if (auto === 'auto_reject') {
     const offer = await loadOffer(db, offerId);
-    await rejectOfferCore(env, offer, p.club_id ?? 0, null, 'auto_reject');
+    await rejectOfferCore(env, offer, p.club_id ?? 0, null, 'auto_reject', 'user');
     await queueClubNotification(env, input.clubId, 'offer_auto_rejected', { player: p.name, amount, min: p.min_offer_price });
     return { offerId, status: 'rejected', auto };
   }
@@ -316,6 +317,7 @@ export async function counterOffer(
       action: 'offer_counter',
       targetType: 'offer',
       targetId: offer.id,
+      origin: 'user',
       after: { amount, round: offer.round + 1, by: role },
     }),
     ]);
@@ -441,6 +443,7 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
       action: 'offer_accept',
       targetType: 'offer',
       targetId: offer.id,
+      origin: 'user',
       after: { playerId: offer.player_id, amount: offer.amount, season: offer.season, windowSeq: offer.window_seq },
     }),
   ]);
@@ -534,6 +537,7 @@ async function finalizeOffer(
     status: 'rejected' | 'withdrawn' | 'expired';
     actorClubId: number | null;
     actor: number | null;
+    origin: AuditOrigin;
     kind: 'reject' | 'withdraw' | 'auto_reject' | 'expire';
     note?: string | null;
   },
@@ -555,6 +559,7 @@ async function finalizeOffer(
       action: `offer_${opts.kind}`,
       targetType: 'offer',
       targetId: offer.id,
+      origin: opts.origin,
       after: { status: opts.status, amount: offer.amount, actorClubId: opts.actorClubId },
     }),
   ]);
@@ -568,7 +573,7 @@ export async function rejectOffer(env: Env, input: { offerId: number; clubId: nu
   const role = roleOf(offer, input.clubId);
   if (offer.status !== 'pending') throw new HttpError(409, '这条报价已经了结');
   if (role !== 'seller') throw new HttpError(403, '只有卖方能拒绝；买方要终止请用撤回', 'not_seller');
-  const changed = await finalizeOffer(env, offer, { status: 'rejected', actorClubId: input.clubId, actor: input.actor, kind: 'reject' });
+  const changed = await finalizeOffer(env, offer, { status: 'rejected', actorClubId: input.clubId, actor: input.actor, origin: 'user', kind: 'reject' });
   if (!changed) throw new HttpError(409, '这条报价刚被处理过了，刷新看看');
   await queueClubNotification(env, offer.buyer_club_id, 'offer_rejected', { player: offer.player_name, amount: offer.amount });
   return { ok: true };
@@ -581,15 +586,22 @@ export async function withdrawOffer(env: Env, input: { offerId: number; clubId: 
   const role = roleOf(offer, input.clubId);
   if (offer.status !== 'pending') throw new HttpError(409, '这条报价已经了结');
   if (role !== 'buyer') throw new HttpError(403, '只有买方能撤回报价', 'not_seller');
-  const changed = await finalizeOffer(env, offer, { status: 'withdrawn', actorClubId: input.clubId, actor: input.actor, kind: 'withdraw' });
+  const changed = await finalizeOffer(env, offer, { status: 'withdrawn', actorClubId: input.clubId, actor: input.actor, origin: 'user', kind: 'withdraw' });
   if (!changed) throw new HttpError(409, '这条报价刚被处理过了，刷新看看');
   await queueClubNotification(env, offer.seller_club_id, 'offer_withdrawn', { player: offer.player_name, amount: offer.amount });
   return { ok: true };
 }
 
 /** 名单自动拒绝（设计 §2.3：系统应答，actor_club_id = NULL） */
-async function rejectOfferCore(env: Env, offer: OfferRow, _sellerClubId: number, actor: number | null, kind: 'auto_reject'): Promise<void> {
-  await finalizeOffer(env, offer, { status: 'rejected', actorClubId: null, actor, kind });
+async function rejectOfferCore(
+  env: Env,
+  offer: OfferRow,
+  _sellerClubId: number,
+  actor: number | null,
+  kind: 'auto_reject',
+  origin: AuditOrigin,
+): Promise<void> {
+  await finalizeOffer(env, offer, { status: 'rejected', actorClubId: null, actor, origin, kind });
 }
 
 // ---- 惰性过期（设计 §3）+ 自愈：挂进 settleOverdue（cron / 窗开关 / 读路径共用）----
@@ -599,9 +611,11 @@ export interface ExpireSummary {
   fulfilled: number;
 }
 
-export async function expireStaleOffers(env: Env, opts: { actor?: number | null } = {}): Promise<ExpireSummary> {
+// origin 必填：这条惰性过期是哪条入口触发的（cron tick 或某次市场请求的惰性结算）。
+export async function expireStaleOffers(env: Env, opts: { origin: AuditOrigin; actor?: number | null }): Promise<ExpireSummary> {
   const db = env.DB;
   const actor = opts.actor ?? null;
+  const origin = opts.origin;
   const summary: ExpireSummary = { expired: 0, fulfilled: 0 };
 
   // 自愈：同意占用成功但履约没跑完（accepted 且无挂牌）→ 补履约；补不动（球员状态坏）转 expired
@@ -614,7 +628,7 @@ export async function expireStaleOffers(env: Env, opts: { actor?: number | null 
       summary.fulfilled++;
     } else {
       const offer = await db.prepare(`SELECT * FROM offers WHERE id = ?`).bind(row.id).first<OfferRow>();
-      if (offer && (await finalizeOffer(env, offer, { status: 'expired', actorClubId: null, actor, kind: 'expire', note: '球员状态已变，无法成约' }))) {
+      if (offer && (await finalizeOffer(env, offer, { status: 'expired', actorClubId: null, actor, origin, kind: 'expire', note: '球员状态已变，无法成约' }))) {
         summary.expired++;
       }
     }
@@ -654,7 +668,7 @@ export async function expireStaleOffers(env: Env, opts: { actor?: number | null 
     if (!stale) continue;
     const offer = await db.prepare(`SELECT * FROM offers WHERE id = ? AND status = 'pending'`).bind(row.id).first<OfferRow>();
     if (!offer) continue;
-    if (await finalizeOffer(env, offer, { status: 'expired', actorClubId: null, actor, kind: 'expire' })) {
+    if (await finalizeOffer(env, offer, { status: 'expired', actorClubId: null, actor, origin, kind: 'expire' })) {
       summary.expired++;
       await queueClubNotification(env, offer.buyer_club_id, 'offer_expired', { player: row.player_name, reason: 'window' });
       await queueClubNotification(env, offer.seller_club_id, 'offer_expired', { player: row.player_name, reason: 'window' });
@@ -727,6 +741,7 @@ export async function setOfferSettings(
       action: 'offer_settings',
       targetType: 'player',
       targetId: input.playerId,
+      origin: 'user',
       after: {
         transferListed: input.transferListed,
         minOfferPrice,

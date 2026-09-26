@@ -437,6 +437,7 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
     action: 'growth_settlement',
     targetType: 'season',
     targetId: season,
+    origin: 'user',
     after: { half, growthPeriodId: period.id, traineeCount: trainees.length, chinaCount: china.length, milestonesGranted },
   });
 
@@ -639,6 +640,7 @@ export async function applyLevelUp(
     action: 'growth_levelup',
     targetType: 'player',
     targetId: playerId,
+    origin: 'user',
     after: { tier: player.growth_tier, planIndex, plan, playstyles: grants },
   });
   // 通知教练（§12；尽力而为，没绑 QQ 静默跳过）
@@ -685,6 +687,7 @@ export async function grantChinaPlaystyles(
     action: 'growth_china_playstyles',
     targetType: 'player',
     targetId: playerId,
+    origin: 'user',
     after: { quota, playstyles: grants },
   });
   return { ok: true, playstyles: grants, granted: grants.length, left: need - grants.length };

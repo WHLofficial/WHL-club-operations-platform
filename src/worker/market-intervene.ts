@@ -68,6 +68,7 @@ export async function adminVoidBid(env: Env, bidId: number, actor: number, reaso
       action: 'admin_bid_void',
       targetType: 'bid',
       targetId: bidId,
+      origin: 'user',
       after: { reason, listingId: bid.listing_id, clubId: bid.club_id, amount: bid.amount },
     }),
   ]);
@@ -83,11 +84,11 @@ export async function adminForceSettle(env: Env, listingId: number, actor: numbe
   if (status.status !== 'bidding' && status.status !== 'matched_pending') {
     throw new HttpError(409, `挂牌当前状态是 ${status.status}，不能强制送审（待审单据请直接在审核队列处理）`);
   }
-  const result = await settleListingForReview(env.DB, listing, actor, status.status === 'matched_pending' ? 'matched_pending' : 'bidding');
+  const result = await settleListingForReview(env.DB, listing, actor, 'user', status.status === 'matched_pending' ? 'matched_pending' : 'bidding');
   if (result === 'settled') {
     const audit = createAuditStatement(env.DB);
     await env.DB.batch([
-      audit({ actor, action: 'admin_force_settle', targetType: 'listing', targetId: listingId, after: { reason } }),
+      audit({ actor, action: 'admin_force_settle', targetType: 'listing', targetId: listingId, origin: 'user', after: { reason } }),
     ]);
   }
   return result;
@@ -113,7 +114,7 @@ export async function adminForceVoid(env: Env, listingId: number, actor: number,
     db.prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`).bind(listingId),
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
     playerRestoreSql(db, listing.player_id),
-    audit({ actor, action: 'admin_force_void', targetType: 'listing', targetId: listingId, after: { reason, playerId: listing.player_id } }),
+    audit({ actor, action: 'admin_force_void', targetType: 'listing', targetId: listingId, origin: 'user', after: { reason, playerId: listing.player_id } }),
   ]);
   return (results[0]?.meta.changes ?? 0) > 0 ? 'done' : 'already';
 }
@@ -132,7 +133,7 @@ export async function adminForceSign(env: Env, sessionId: number, actor: number,
   if (ok) {
     const audit = createAuditStatement(db);
     await db.batch([
-      audit({ actor, action: 'admin_force_sign', targetType: 'negotiation', targetId: sessionId, after: { reason, transferId: session.transfer_id, wage: session.expected_wage } }),
+      audit({ actor, action: 'admin_force_sign', targetType: 'negotiation', targetId: sessionId, origin: 'user', after: { reason, transferId: session.transfer_id, wage: session.expected_wage } }),
     ]);
   }
   return ok ? 'done' : 'already';
@@ -163,6 +164,7 @@ export async function adminCancelSigning(env: Env, sessionId: number, actor: num
       action: 'admin_negotiation_void',
       targetType: 'negotiation',
       targetId: sessionId,
+      origin: 'user',
       after: { reason, transferId: transfer.id, playerId: transfer.player_id },
     }),
   ]);

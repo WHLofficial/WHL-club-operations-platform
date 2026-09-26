@@ -8,6 +8,7 @@ import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { getOpenWindow } from './seasons.ts';
+import { createAuditStatement } from '../lib/audit.ts';
 
 export interface BrandDef {
   brand: string;
@@ -176,6 +177,7 @@ export async function signNaming(
 export async function terminateNaming(
   env: Env,
   clubId: number,
+  actor: number | null,
 ): Promise<{ brand: string; penalty: number; windowsRemaining: number }> {
   const win = await getOpenWindow(env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，退约也办不了');
@@ -206,6 +208,18 @@ export async function terminateNaming(
       }),
     );
   }
+  // 解约留痕：状态变更 + 赔款金额同批入审计（赔款为 0 时也留，状态变更本身要可追溯）
+  statements.push(
+    createAuditStatement(env.DB)({
+      actor,
+      action: 'naming_terminate',
+      targetType: 'naming_contract',
+      targetId: row.id,
+      origin: 'user',
+      before: { status: 'active', windowsRemaining: row.windows_remaining },
+      after: { status: 'terminated', windowsRemaining: row.windows_remaining, penalty, remainingWindowsCharged: remaining },
+    }),
+  );
   const outs = await env.DB.batch(statements);
   if ((outs[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '冠名状态刚被并发改动，请重试');
   return { brand: row.brand, penalty, windowsRemaining: row.windows_remaining };

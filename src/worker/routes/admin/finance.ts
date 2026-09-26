@@ -76,6 +76,7 @@ app.post('/ledger/opening-import', async (c) => {
         actor: user.id,
         action: 'ledger_opening_import',
         targetType: 'ledger',
+        origin: 'user',
         after: { written: todo.length, skipped: parsed.length - todo.length },
       }),
     );
@@ -124,6 +125,7 @@ app.post('/ledger/manual', async (c) => {
       action: 'ledger_manual',
       targetType: 'club',
       targetId: clubId,
+      origin: 'user',
       after: { kind, amount, memo },
     }),
   ]);

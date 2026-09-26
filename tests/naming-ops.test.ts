@@ -127,23 +127,34 @@ describe('签约与解约', () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     await signNaming(fx.env, 1, '可口可乐', 1); // fee = 0.5×0.85=0.425×... 实算 (0.5+0.6+0.216)×1.0=1.316 → 1.316? heat 1.0 → 1.316
-    const out = await terminateNaming(fx.env, 1);
+    const out = await terminateNaming(fx.env, 1, 1);
     // 稳健 fee = 1.316×0.85 = 1.119；赔 (6−1)×1.119×0.3 = 1.6785 → 1.678
     expect(out).toEqual({ brand: '可口可乐', penalty: 1.678, windowsRemaining: 6 });
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM naming_contracts WHERE club_id = 1')).toMatchObject({ status: 'terminated' });
     const entries = sqlAll<{ kind: string; amount: number }>(fx.sqlite, "SELECT kind, amount FROM ledger_entries WHERE kind = 'naming_penalty'");
     expect(entries).toEqual([{ kind: 'naming_penalty', amount: -1.678 }]);
+    // 留痕：操作人 + 状态变更 + 赔款口径（既赔了几窗、赔了多少）
+    const audit = sqlGet<{ actor: number | null; target_type: string; target_id: number; before: string; after: string }>(
+      fx.sqlite,
+      "SELECT actor, target_type, target_id, before, after FROM audit_log WHERE action = 'naming_terminate'",
+    )!;
+    expect(audit).toMatchObject({ actor: 1, target_type: 'naming_contract' });
+    expect(JSON.parse(audit.before)).toEqual({ status: 'active', windowsRemaining: 6 });
+    expect(JSON.parse(audit.after)).toEqual({ status: 'terminated', windowsRemaining: 6, penalty: 1.678, remainingWindowsCharged: 5 });
 
-    await expect(terminateNaming(fx.env, 1)).rejects.toMatchObject({ status: 404 });
+    await expect(terminateNaming(fx.env, 1, 1)).rejects.toMatchObject({ status: 404 });
   });
 
   it('剩最后 1 窗退约：赔金 0，不产生流水', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     seedContract(fx.sqlite, { windowsRemaining: 1 });
-    const out = await terminateNaming(fx.env, 1);
+    const out = await terminateNaming(fx.env, 1, 1);
     expect(out.penalty).toBe(0);
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'naming_penalty'")?.n).toBe(0);
+    // 赔金为 0 也留痕：状态变更本身要可追溯
+    const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'naming_terminate'")!;
+    expect(JSON.parse(audit.after)).toMatchObject({ status: 'terminated', penalty: 0, remainingWindowsCharged: 0 });
   });
 });
 

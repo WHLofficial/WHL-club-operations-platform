@@ -309,20 +309,20 @@ describe('赛果自动确认（v2.7.0）：cron 扫完赛场次 + 异常标人�
     );
   }
 
-  it('无事件的干净场自动入档（confirmed_by=0 系统留痕）；开关 off 跳过', async () => {
+  it('无事件的干净场自动入档（confirmed_by=null 系统留痕）；开关 off 跳过', async () => {
     const fx = freshEnv();
     seedTournament(fx);
     await bindTournament5(fx);
 
     const out = await autoConfirmResults(fx.env);
     expect(out).toEqual({ skipped: false, confirmed: 2, flagged: 0, failed: 0 });
-    const rows = sqlAll<{ confirmed_by: number; needs_review: number }>(fx.sqlite, 'SELECT confirmed_by, needs_review FROM result_confirmations');
+    const rows = sqlAll<{ confirmed_by: number | null; needs_review: number }>(fx.sqlite, 'SELECT confirmed_by, needs_review FROM result_confirmations');
     expect(rows).toEqual([
-      { confirmed_by: 0, needs_review: 0 },
-      { confirmed_by: 0, needs_review: 0 },
+      { confirmed_by: null, needs_review: 0 },
+      { confirmed_by: null, needs_review: 0 },
     ]);
-    // 自动确认的审计 actor=0（系统），确认端点 409 语义不受影响
-    expect(sqlGet<{ actor: number }>(fx.sqlite, "SELECT actor FROM audit_log WHERE action = 'result_confirm' ORDER BY id LIMIT 1")).toMatchObject({ actor: 0 });
+    // 自动确认的审计 actor=null（机器，不是某个人的行为）、origin='cron_tick'（哪条入口触发的），确认端点 409 语义不受影响
+    expect(sqlGet<{ actor: number | null; origin: string }>(fx.sqlite, "SELECT actor, origin FROM audit_log WHERE action = 'result_confirm' ORDER BY id LIMIT 1")).toMatchObject({ actor: null, origin: 'cron_tick' });
     const again = await post('/api/admin/results/900/confirm', {}, 'tok-admin', fx.env);
     expect(again.status).toBe(409);
 

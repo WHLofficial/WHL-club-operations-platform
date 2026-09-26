@@ -77,6 +77,7 @@ app.post('/market/pause-bids', async (c) => {
       actor: user.id,
       action: 'market_bid_pause',
       targetType: 'market',
+      origin: 'user',
       before: { paused: before },
       after: { paused: body.paused },
     });
@@ -106,6 +107,7 @@ for (const [suffix, paused] of [
       action: 'market_listing_bid_pause',
       targetType: 'listing',
       targetId: id,
+      origin: 'user',
       after: { bidPaused: paused },
     });
     return c.json({ ok: true, bidPaused: paused });

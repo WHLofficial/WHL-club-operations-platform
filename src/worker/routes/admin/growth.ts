@@ -52,6 +52,7 @@ app.post('/growth/events', async (c) => {
     action: 'growth_manual_event',
     targetType: 'player',
     targetId: playerId,
+    origin: 'user',
     after: { eventType, value, xp, matchRef, duplicate: !recorded },
   });
   return c.json({ ok: true, xp, duplicate: !recorded }, recorded ? 201 : 200);
@@ -90,6 +91,7 @@ app.post('/growth/periods', async (c) => {
       action: 'growth_period_declared',
       targetType: 'growth_period',
       targetId: null,
+      origin: 'user',
       after: { season, note, source: 'manual' },
     }),
   ]);
@@ -113,6 +115,7 @@ app.post('/growth/:playerId/tier', async (c) => {
       action: 'growth_tier_set',
       targetType: 'player',
       targetId: playerId,
+      origin: 'user',
       after: { tier },
     }),
   ]);

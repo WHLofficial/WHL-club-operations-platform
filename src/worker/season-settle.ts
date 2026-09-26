@@ -156,7 +156,7 @@ export async function settleTournamentStage(env: Env, actor: number, stageIdInpu
     ...movements.flatMap((m) =>
       ledgerMovement(db, { clubId: m.clubId, delta: m.amount, kind: 'prize', refType: 'stage', refId: stageId, memo: m.memo, idempotent: false }),
     ),
-    audit({ actor, action: 'tournament_stage_settle', targetType: 'season_tournament', targetId: stageId, after: { season: binding.season, type, items: movements.length } }),
+    audit({ actor, action: 'tournament_stage_settle', targetType: 'season_tournament', targetId: stageId, origin: 'user', after: { season: binding.season, type, items: movements.length } }),
   ];
   const results = await db.batch(statements);
   if ((results[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '这座赛事刚被结算过了');
@@ -289,6 +289,7 @@ export async function loyaltyMovements(
         action: 'loyalty_bonus',
         targetType: 'club',
         targetId: clubId,
+        origin: 'user',
         after: { season, windowSeq, contracts: agg.count, amount: agg.amount },
       }),
     );
@@ -315,7 +316,7 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
   }
 
   const audit = createAuditStatement(db);
-  const statements = [audit({ actor, action: 'season_settle', targetType: 'season', targetId: null, after: { season } })];
+  const statements = [audit({ actor, action: 'season_settle', targetType: 'season', targetId: null, origin: 'user', after: { season } })];
 
   // 死忠演化步骤占位：归v1.5.0（主场收入域）实现后插入本批；
   // growable 重判并入主批（规则 4.1.1：按本季 age_cap 全量重算，只改有变化的行）

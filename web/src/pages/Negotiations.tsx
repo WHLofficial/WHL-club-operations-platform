@@ -213,7 +213,8 @@ function SessionCard({
       </h3>
       <p className="hint">
         {s.fromClubName ?? '—'} → <b>{s.toClubName ?? '—'}</b> · 成交价 <span className="mono">{money(s.transfer.fee)}</span> m ·
-        {s.player.position ?? '—'} · CA <span className="mono">{s.player.ca ?? '—'}</span> · PA{' '}
+        {s.player.position ?? '—'} · {s.player.age ?? '—'} 岁 ·{' '}
+        <span className="mono">{s.player.ca ?? '—'}</span> ·{' '}
         <span className="mono">{s.player.pa ?? '—'}</span>
       </p>
 

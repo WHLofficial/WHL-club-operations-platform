@@ -18,7 +18,7 @@ import { closedRegularTicks } from './contract-ticks.ts';
 import { round2 } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext } from './market-context.ts';
-import { createAuditStatement } from '../lib/audit.ts';
+import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { growthResetStatements } from './growth.ts';
 
 function nowSql() {
@@ -91,6 +91,7 @@ export async function completeTransfer(
   env: Env,
   transferId: number,
   actor: number | null,
+  origin: AuditOrigin,
   review?: ReviewDecision,
   terms?: ContractTerms,
 ): Promise<{ status: 'completed' | 'already' }> {
@@ -319,6 +320,7 @@ export async function completeTransfer(
       action: 'transfer_complete',
       targetType: 'transfer',
       targetId: transferId,
+      origin,
       after: {
         fee: transfer.fee,
         tax,
@@ -343,6 +345,7 @@ export async function completeTermination(
   env: Env,
   transferId: number,
   actor: number | null,
+  origin: AuditOrigin,
   review?: ReviewDecision,
 ): Promise<{ status: 'completed' | 'already' }> {
   const db = env.DB;
@@ -410,6 +413,7 @@ export async function completeTermination(
       action: 'transfer_complete',
       targetType: 'transfer',
       targetId: transferId,
+      origin,
       after: { type: 'termination', fee, playerId: transfer.player_id, fromClubId: transfer.from_club_id },
     }),
   );
@@ -426,6 +430,7 @@ export async function rejectTransfer(
   env: Env,
   transferId: number,
   actor: number | null,
+  origin: AuditOrigin,
   review: ReviewDecision,
 ): Promise<{ status: 'rejected' | 'already' }> {
   const db = env.DB;
@@ -469,6 +474,7 @@ export async function rejectTransfer(
       action: 'transfer_reject',
       targetType: 'transfer',
       targetId: transferId,
+      origin,
       after: { note: review.note ?? null, playerId: transfer.player_id },
     }),
   );

@@ -446,8 +446,8 @@ describe('统一认证接入（步骤② OIDC RP）', () => {
     expect(await ok.text()).toBe('');
     const row = sqlGet<{ revoked_at: string | null }>(sqlite, 'SELECT revoked_at FROM oidc_session');
     expect(row?.revoked_at).not.toBeNull();
-    // auth 事件审计（v2.7.0）：backchannel 全端登出留痕（actor=0 系统）
-    expect(sqlGet<{ actor: number }>(sqlite, "SELECT actor FROM audit_log WHERE action = 'auth_backchannel_logout'")).toMatchObject({ actor: 0 });
+    // auth 事件审计（v2.7.0）：backchannel 全端登出留痕（actor=null 无本地行为人、origin='backchannel'）
+    expect(sqlGet<{ actor: number | null; origin: string }>(sqlite, "SELECT actor, origin FROM audit_log WHERE action = 'auth_backchannel_logout'")).toMatchObject({ actor: null, origin: 'backchannel' });
     const me = await app.request('/api/me', { method: 'GET', headers: { Cookie: `__Host-club_session=${session}` } }, env);
     expect(((await me.json()) as { user: unknown }).user).toBeNull();
 

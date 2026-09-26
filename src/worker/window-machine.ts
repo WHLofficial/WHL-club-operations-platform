@@ -184,6 +184,7 @@ export async function openWindow(
       action: 'window_open',
       targetType: 'season_window',
       targetId: null,
+      origin: 'user',
       after: {
         season,
         windowSeq,
@@ -235,7 +236,8 @@ export async function closeWindow(
   const isTemporary = win.isTemporary === 1;
 
   // 截止判定/激活失效/匹配到期先收一遍，让该进待审的进待审
-  await settleOverdue(env, { actor });
+  // origin='user'：这次惰性结算由管理员的开窗请求触发（actor 是管理员），不是定时任务
+  await settleOverdue(env, { actor, origin: 'user' });
 
   const matched = await db
     .prepare(`SELECT COUNT(*) AS n FROM listings WHERE status = 'matched_pending'`)
@@ -296,6 +298,7 @@ export async function closeWindow(
       action: 'window_close',
       targetType: 'season_window',
       targetId: null,
+      origin: 'user',
       after: {
         season: win.season,
         windowSeq: win.windowSeq,
@@ -303,6 +306,9 @@ export async function closeWindow(
         forceSettled,
         loyaltyCount: loyalty.summary.count,
         loyaltyTotal: loyalty.summary.total,
+        // 同批扣款的逐类汇总：逐笔流水已各自带 memo/ref，此处补「这次关窗一共扣了多少」的可核对口径
+        payroll: payroll.summary,
+        home: home.summary,
       },
     }),
     ...payroll.statements,
@@ -311,7 +317,8 @@ export async function closeWindow(
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '窗口刚被关过了');
   // 窗尾收口（4.4.7）：无人出价下架收费、仍在竞价的强制进待审
-  await settleOverdue(env, { actor });
+  // origin='user'：管理员关窗触发的惰性结算（actor 就是这位管理员）
+  await settleOverdue(env, { actor, origin: 'user' });
   return {
     ok: true,
     season: win.season,

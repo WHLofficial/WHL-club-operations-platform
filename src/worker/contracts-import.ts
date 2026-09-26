@@ -261,6 +261,7 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
         action: 'contracts_import',
         targetType: 'club',
         targetId: payload.clubId,
+        origin: 'user',
         after: { batchNo: i / CHUNK_ROWS + 1, rows: slice.length, insertEstimate: insertCount, updateEstimate: slice.length - insertCount },
       }),
     );

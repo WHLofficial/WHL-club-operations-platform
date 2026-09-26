@@ -82,7 +82,7 @@ app.post('/team-sync/apply', async (c) => {
   if (action === 'create-club') {
     const row = diff.onlyTour.find((r) => r.id === id);
     if (!row) throw new HttpError(409, '这支队在赛事系统与登记册里已对齐，无需补齐');
-    const created = await createClubFromTourTeam(c.env, { gameTeamId: id, name: row.name, operator: user.id });
+    const created = await createClubFromTourTeam(c.env, { gameTeamId: id, name: row.name, operator: user.id, origin: 'user' });
     return c.json({ ok: true, ...created }, 201);
   }
   const row = diff.onlyClub.find((r) => r.id === id);

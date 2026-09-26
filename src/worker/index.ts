@@ -168,9 +168,10 @@ app.notFound((c) => c.json({ error: '接口不存在' }, 404));
 
 export { app };
 
-// 惰性结算统一入口（§6.5）：cron 与手动 tick 共用；幂等可重入
+// 惰性结算统一入口（§6.5）：cron 与手动 tick 共用；幂等可重入。
+// origin 一律 'cron_tick'：两条入口都是机器触发（定时 cron / X-Cron-Key 手动 tick），没有人类行为人。
 async function runSettleTick(env: Env) {
-  const summary = await settleOverdue(env);
+  const summary = await settleOverdue(env, { origin: 'cron_tick' });
   // 赛果自动确认（v2.7.0）：完赛场次逐场入档，异常标人工；开关/上限在 results.ts
   const autoResults = await autoConfirmResults(env);
   // bot 通知重试（§12）：失败留 pending，下轮再投

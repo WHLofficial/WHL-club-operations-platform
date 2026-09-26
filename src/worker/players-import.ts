@@ -214,6 +214,7 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
         actor,
         action: 'players_import',
         targetType: 'players',
+        origin: 'user',
         after: {
           channel: payload.channel,
           mode: payload.mode,

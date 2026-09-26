@@ -51,7 +51,7 @@ app.post('/team-upsert', async (c) => {
   }
 
   try {
-    const created = await createClubFromTourTeam(c.env, { gameTeamId: id, name, operator: null });
+    const created = await createClubFromTourTeam(c.env, { gameTeamId: id, name, operator: null, origin: 'machine' });
     console.log(`[internal] team-upsert id=${id} name=${name} authLinked=${created.authLinked}`);
     return c.json({ ok: true, created: true, ...created }, 201);
   } catch (e) {

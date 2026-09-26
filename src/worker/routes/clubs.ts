@@ -654,6 +654,7 @@ app.post('/clubs/bind', async (c) => {
     action: 'club_bind',
     targetType: 'club',
     targetId: club.id,
+    origin: 'user',
     after: { userId: user.id },
   });
   return c.json({ ok: true, clubId: club.id }, 201);
@@ -868,7 +869,7 @@ app.post('/club/stadium/expand', async (c) => {
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   const body = (await c.req.raw.json().catch(() => null)) as { seats?: unknown } | null;
-  const out = await expandStadium(c.env, club.id, Number(body?.seats));
+  const out = await expandStadium(c.env, club.id, Number(body?.seats), user.id);
   return c.json(out, 201);
 });
 
@@ -876,7 +877,7 @@ app.post('/club/stadium/upgrade', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
-  const out = await upgradeStadiumTier(c.env, club.id);
+  const out = await upgradeStadiumTier(c.env, club.id, user.id);
   return c.json(out, 201);
 });
 
@@ -886,7 +887,7 @@ app.post('/club/facilities/upgrade', async (c) => {
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   const body = (await c.req.raw.json().catch(() => null)) as { key?: unknown } | null;
   if (typeof body?.key !== 'string') throw new HttpError(400, '缺设施类型');
-  const out = await upgradeFacilityLevel(c.env, club.id, body.key);
+  const out = await upgradeFacilityLevel(c.env, club.id, body.key, user.id);
   return c.json(out, 201);
 });
 
@@ -940,7 +941,7 @@ app.post('/club/naming/terminate', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
-  const out = await terminateNaming(c.env, club.id);
+  const out = await terminateNaming(c.env, club.id, user.id);
   return c.json(out, 201);
 });
 

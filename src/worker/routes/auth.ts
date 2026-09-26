@@ -233,6 +233,7 @@ authRoutes.get('/auth/callback', async (c) => {
     action: 'auth_login',
     targetType: 'oidc_session',
     targetId: null,
+    origin: 'user',
     after: { sub: payload.sub, sid: payload.sid, name: claims.name },
   }).catch(() => {});
 
@@ -266,6 +267,7 @@ authRoutes.post('/auth/logout', async (c) => {
         action: 'auth_logout',
         targetType: 'oidc_session',
         targetId: null,
+        origin: 'user',
         after: { sub: session.sub },
       }).catch(() => {});
     }
@@ -306,12 +308,13 @@ authRoutes.post('/auth/backchannel-logout', async (c) => {
   await c.env.DB.prepare('UPDATE oidc_session SET revoked_at = ? WHERE auth_sid = ? AND revoked_at IS NULL')
     .bind(new Date().toISOString(), payload.sid)
     .run();
-  // auth 事件审计（v2.7.0）：认证中心推送的全端登出（尽力而为；sid 无本地用户行，actor 记 0=系统）
+  // auth 事件审计（v2.7.0）：认证中心推送的全端登出（尽力而为；sid 无本地用户行 ⇒ actor 为 null，来源是 backchannel）
   await writeAudit(c.env.DB, {
-    actor: 0,
+    actor: null,
     action: 'auth_backchannel_logout',
     targetType: 'oidc_session',
     targetId: null,
+    origin: 'backchannel',
     after: { sid: payload.sid },
   }).catch(() => {});
   // 规范要求：成功回 200 空体（未知 sid 也算成功），失败回 400

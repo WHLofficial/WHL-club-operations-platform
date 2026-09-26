@@ -903,6 +903,40 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 3. 两段式非原子写——对积分可幂等自愈，对钱禁止。
 4. 每次写全量重写大派生表——写放大 O(集合大小)，需自知规模边界。
 
+### 17.5 财政域留痕覆盖（v6.3.1）
+
+**规约**：任何写 `ledger_entries` 的路径都必须回答「钱动了，谁认领」。判据分三档：
+
+1. **人类触发** ⇒ 必须同批写一条 `audit_log`，`actor` = 发起人 id（教练自助端点传 `user.id`，管理端点传管理员 id）。含：球场扩建 / 升级 / 设施升级、冠名解约赔款、审核类附加费（`bypass_fee`）、关窗批（`wage` / `luxury_tax` / `naming_fee` / `naming_bonus` 的逐类汇总进 `window_close` 审计的 `after`）。
+2. **自动触发但可重建** ⇒ 不留痕，但 `ref_type` / `ref_id` 必须锚回可查证的业务对象（赛果确认的 `prize` / `revenue` 锚回 match，维护与冠名租金锚回 window）；此档为**接受设计**，白名单与理由登记在 `scripts/ledger-audit/README.md` §4。
+3. **账本原语自身**（`src/worker/ledger.ts`）不写审计——留痕是调用点的责任（分层）；审计语句用 `createAuditStatement(db)` 与账本语句 `push` 进**同一个 `db.batch`**（§17.3-1）。
+
+**唯一手写例外**：`src/worker/bypass.ts` 的 `chargeBypassFee`。`createAuditStatement` 表达不了 `WHERE`，而这条审计必须与账本自己的幂等闸（同 kind + ref_type + ref_id 是否已有流水）及批内余额 / 状态守卫**逐字一致**，否则审核重放或并发动用余额时会留下「钱没扣、审计说扣了」的失实行；故该 INSERT 手写、排在账本之前评估同一份库存状态，守卫取末条 `transfers` UPDATE 的 `meta.changes`。
+
+**同源锁**：`tests/ledger-audit-lock.test.ts` 静态扫描 `src/**` 强制上述判据——白名单外凡含 `ledgerMovement(` 的文件必须含审计能力；`INSERT INTO audit_log` 只许出现在 `src/lib/audit.ts` 与 `src/worker/bypass.ts`；`src/worker/routes/clubs.ts` 四个自助财政端点必须把 `user.id` 传下去；`window_close` 审计必须带 `payroll` / `home` 汇总。**新增财政写入路径时忘了配审计，这条测试直接红。** 普查表与生产实证见 [scripts/ledger-audit/README.md](./scripts/ledger-audit/README.md)。
+
+**已知次级缺陷（v6.3.1 登记，v6.3.2 已修）**：cron 触发的审计 `actor` 曾为 NULL（`settleOverdue` 的 `actor = opts.actor ?? null`）或 0（自动赛果确认，原 `src/worker/results.ts:407`）——「无人可归因」是事实，但会与「忘了传 actor」在日志里混淆。v6.3.2 起由 `origin` 正面回答通道（`cron_tick` / `lazy_settle`），`actor` 统一为 NULL，两者不再混淆。
+
+### 17.6 actor / origin 契约（v6.3.2）
+
+`audit_log` 两列分工，**互相不可替代**：
+
+- **`actor`（人类行为人 id）**：机器行为一律 `NULL`；`0` 哨兵**退役**（自动赛果确认与认证中心全端登出原先写 `0`，现写 `NULL`，`src/worker/results.ts` / `src/worker/routes/auth.ts`）。`0` 只作为历史值被读侧兼容（前端按「系统」显示），**新代码不许再写 0**——由 `tests/ledger-audit-lock.test.ts` 静态钉住。列可空（历史行本就无行为人）。
+- **`origin`（来源通道，v6.3.2 新增，迁移 `src/db/migrations/0039_audit_origin.sql`）**：`export type AuditOrigin = 'user' | 'cron_tick' | 'lazy_settle' | 'backchannel' | 'machine'`（`src/lib/audit.ts`）。规则是「**origin 描述哪条入口触发的，不描述谁做的**」：
+
+| origin | 何时记 |
+|---|---|
+| `user` | 人类请求直接触发（管理端、教练自助、玩家操作），含它们内部顺带写的辅助审计；**关窗时管理员触发的惰性结算也记 `user`**（触发者是人，v6.3.1 已有 actor 语义，不新造值） |
+| `cron_tick` | 定时兜底：`runSettleTick`（cron 与 `POST /api/cron/tick` 共用，`src/worker/index.ts`）与 `autoConfirmResults` |
+| `lazy_settle` | 业务请求顺手结算过期项（读市场 / 报价 / 谈判列表时触发）——`actor` 保持 `NULL`，**不把惰性结算记到触发用户头上** |
+| `backchannel` | 认证中心推送的全端登出（OIDC backchannel logout，无本地用户行 ⇒ `actor` 为 NULL） |
+| `machine` | 内部机器通道（如 `src/worker/routes/internal.ts` 建队，operator 为 null） |
+
+- **TS 层必填、DB 层可空**：`AuditEntry.origin` 必填（新增审计点漏写 `origin` 编译不过，这是「机械补齐」的驱动力）；列本身可空——`NULL` = 迁移前的历史行 / 未知。**不要**改成 `NOT NULL` 再回填假值。历史行回填工件见 `scripts/prod-20260926-audit-origin-backfill/`（回填口径与实测快照在该目录 README）。
+- **读侧**：`GET /api/admin/audit-log` 支持 `?origin=` 精确过滤（与既有 `?action=` 前缀过滤并列，AND 语义）；前端「来源」下拉与管理端「操作者 · 来源」单元格见 `web/src/pages/admin/SystemPage.tsx`。
+
+**部署顺序硬约束**：代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**没有迁移步骤**）⇒ **push 前必须先 `npm run db:migrate:remote`**，否则生产审计 INSERT 报 `no such column: origin`。
+
 ## 附录 A · API 路由清单（契约冻结首层）
 
 权限列：👤=coach 及以上 / 🛡=管理组 / 🌐=公开。分页一律硬 LIMIT + 游标（§17）；错误统一 `{error, code?}`。标〔增量 n〕= ROADMAP 对应增量交付。

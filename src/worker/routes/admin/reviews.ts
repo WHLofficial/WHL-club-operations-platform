@@ -285,6 +285,7 @@ app.post('/reviews/:id/approve', async (c) => {
       action: 'admin_fee_adjust',
       targetType: 'transfer',
       targetId: task.ref_id,
+      origin: 'user',
       after: { reason: note, oldFee: transfer.fee, newFee: fee },
     });
   }
@@ -305,7 +306,7 @@ app.post('/reviews/:id/reject', async (c) => {
   const body = (await readJson(c)) as { note?: unknown } | null;
   const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
   const task = await loadOpenReviewTask(c.env.DB, taskId);
-  const result = await rejectTransfer(c.env, task.ref_id, user.id, {
+  const result = await rejectTransfer(c.env, task.ref_id, user.id, 'user', {
     taskId,
     decidedBy: user.id,
     decision: 'rejected',

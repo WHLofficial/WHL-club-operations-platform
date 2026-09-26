@@ -109,6 +109,7 @@ export async function createActivation(
       action: 'activation_create',
       targetType: 'listing',
       targetId: null,
+      origin: 'user',
       after: {
         playerId,
         sellerClubId: player.club_id,
@@ -180,7 +181,7 @@ export async function submitMatch(
 
   if (newFeeInput === undefined || newFeeInput === null || newFeeInput === 'pass') {
     // 放行：按激活价成交，转待审
-    await settleListingForReview(db, { id: listing.id, player_id: listing.player_id, seller_club_id: listing.seller_club_id, ask_price: bid.amount, season: listing.season, window_seq: listing.window_seq }, actor, 'matched_pending');
+    await settleListingForReview(db, { id: listing.id, player_id: listing.player_id, seller_club_id: listing.seller_club_id, ask_price: bid.amount, season: listing.season, window_seq: listing.window_seq }, actor, 'user', 'matched_pending');
     return { ok: true, decision: 'pass' };
   }
 
@@ -267,6 +268,7 @@ export async function submitMatch(
       action: 'match_submit',
       targetType: 'transfer',
       targetId: Number(results[0].meta.last_row_id),
+      origin: 'user',
       after: { listingId, playerId: listing.player_id, newReleaseFee: newFee, diff },
     }),
   ]);

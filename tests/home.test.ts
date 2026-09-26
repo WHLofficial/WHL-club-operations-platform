@@ -206,7 +206,7 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
     // 客队无球场行 → 客队影响力走默认 90
     insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
-    const res = await confirmResult(fx.env, 1, 1);
+    const res = await confirmResult(fx.env, 1, 1, 'user');
     expect(res.revenueError).toBeNull();
     expect(res.prizeError).toBeNull();
 
@@ -235,7 +235,7 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
     expect(rev).toEqual({ club_id: 1, amount: 2.15, ref_type: 'match', ref_id: 1 });
 
     // 重复确认 409（result_confirmations UNIQUE），上座快照不重复
-    await expect(confirmResult(fx.env, 1, 1)).rejects.toThrow();
+    await expect(confirmResult(fx.env, 1, 1, 'user')).rejects.toThrow();
 
     // 反向：无球场行的俱乐部作主场 → 跳过（无 revenue 流水）
     const fx2 = freshEnv();
@@ -244,7 +244,7 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
     seedClubWithTeam(fx2.auth, fx2.sqlite, 4, 12);
     insertMatch(fx2.tour, { matchId: 9, tournamentId: 5, stageId: 50, homeTeamId: 12, awayTeamId: 11, scoreHome: 1, scoreAway: 0, stageKind: 'round_robin' });
     insertBinding(fx2.sqlite, 1, 5, 'league_premier');
-    const res2 = await confirmResult(fx2.env, 1, 9);
+    const res2 = await confirmResult(fx2.env, 1, 9, 'user');
     expect(res2.revenueError).toBeNull();
     expect(fx2.sqlite.prepare("SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'revenue'").get()).toEqual({ n: 0 });
   });

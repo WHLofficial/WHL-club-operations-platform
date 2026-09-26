@@ -440,6 +440,8 @@ export interface AuditEntryRow {
   action: string;
   targetType: string;
   targetId: number | null;
+  // 触发通道（v6.3.2）：'user'/'cron_tick'/'lazy_settle'/'backchannel'/'machine'；历史行为 null
+  origin: string | null;
   before: string | null;
   after: string | null;
   at: string;

@@ -7,6 +7,7 @@ import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadTierTable, type TierEntry } from './home.ts';
 import { createConfigService } from '../core/config.ts';
+import { createAuditStatement } from '../lib/audit.ts';
 
 export const FACILITY_KEYS = ['commercial', 'broadcast', 'pitch', 'youth', 'medical'] as const;
 
@@ -97,6 +98,7 @@ export async function expandStadium(
   env: Env,
   clubId: number,
   seats: number,
+  actor: number | null,
 ): Promise<{ cost: number; creditUsed: number; cash: number; refund: number; capacity: number }> {
   if (!Number.isInteger(seats) || seats <= 0 || seats % EXPANSION_STEP !== 0) {
     throw new HttpError(400, `扩建量必须是 ${EXPANSION_STEP} 座的整数倍`);
@@ -113,26 +115,48 @@ export async function expandStadium(
   const ratio = (await config.getNumber('voucher_refund')) ?? 0.25;
   const { creditUsed, cash, refund } = await payAndRefund(env, clubId, cost, stadium.build_credit, ratio);
 
+  const ledger = ledgerMovement(env.DB, {
+    clubId,
+    delta: -cash,
+    kind: 'stadium_expand',
+    refType: 'stadium',
+    refId: clubId,
+    memo: `球场扩建 +${seats} 座（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，建设券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
+    idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
+  });
+  const guard = env.DB
+    .prepare(
+      `UPDATE stadiums SET capacity = capacity + ?, build_credit = build_credit - ? + ?,
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE club_id = ? AND capacity + ? <= ?`,
+    )
+    .bind(seats, creditUsed, refund, clubId, seats, tierEntry.max_seats);
+  // 保护住的写与审计和账本同批提交（TECH_DESIGN:893「流水+余额+审计」单批不变量）；
+  // 审计追加在末尾，故守卫改按显式下标取结果，不能用 outs.length-1
   const statements = [
-    ...ledgerMovement(env.DB, {
-      clubId,
-      delta: -cash,
-      kind: 'stadium_expand',
-      refType: 'stadium',
-      refId: clubId,
-      memo: `球场扩建 +${seats} 座（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，建设券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
-      idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
+    ...ledger,
+    guard,
+    createAuditStatement(env.DB)({
+      actor,
+      action: 'stadium_expand',
+      targetType: 'stadium',
+      targetId: clubId,
+      origin: 'user',
+      before: { capacity: stadium.capacity, tier: stadium.tier, buildCredit: stadium.build_credit },
+      after: {
+        capacity: nextCapacity,
+        tier: stadium.tier,
+        buildCredit: round2(stadium.build_credit - creditUsed + refund),
+        seats,
+        cost,
+        creditUsed,
+        cash,
+        refund,
+      },
     }),
-    env.DB
-      .prepare(
-        `UPDATE stadiums SET capacity = capacity + ?, build_credit = build_credit - ? + ?,
-         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE club_id = ? AND capacity + ? <= ?`,
-      )
-      .bind(seats, creditUsed, refund, clubId, seats, tierEntry.max_seats),
   ];
   const outs = await env.DB.batch(statements);
-  if ((outs[outs.length - 1]?.meta.changes ?? 0) === 0) throw new HttpError(409, '扩建落库被拦（座位区间校验未过或并发改动），请重试');
+  if ((outs[ledger.length]?.meta.changes ?? 0) === 0) throw new HttpError(409, '扩建落库被拦（座位区间校验未过或并发改动），请重试');
   return { cost, creditUsed, cash, refund, capacity: nextCapacity };
 }
 
@@ -140,6 +164,7 @@ export async function expandStadium(
 export async function upgradeStadiumTier(
   env: Env,
   clubId: number,
+  actor: number | null,
 ): Promise<{ cost: number; creditUsed: number; cash: number; refund: number; tier: number }> {
   const stadium = await loadStadium(env.DB, clubId);
   const tierTable = await loadTierTable(env.DB);
@@ -158,26 +183,46 @@ export async function upgradeStadiumTier(
   const ratio = (await config.getNumber('voucher_refund')) ?? 0.25;
   const { creditUsed, cash, refund } = await payAndRefund(env, clubId, cost, stadium.build_credit, ratio);
 
+  const ledger = ledgerMovement(env.DB, {
+    clubId,
+    delta: -cash,
+    kind: 'stadium_upgrade',
+    refType: 'stadium',
+    refId: clubId,
+    memo: `球场升级 → ${nextEntry.name}（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，建设券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
+    idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
+  });
+  const guard = env.DB
+    .prepare(
+      `UPDATE stadiums SET tier = tier + 1, build_credit = build_credit - ? + ?,
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE club_id = ? AND tier = ?`,
+    )
+    .bind(creditUsed, refund, clubId, stadium.tier);
   const statements = [
-    ...ledgerMovement(env.DB, {
-      clubId,
-      delta: -cash,
-      kind: 'stadium_upgrade',
-      refType: 'stadium',
-      refId: clubId,
-      memo: `球场升级 → ${nextEntry.name}（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，建设券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
-      idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
+    ...ledger,
+    guard,
+    createAuditStatement(env.DB)({
+      actor,
+      action: 'stadium_upgrade',
+      targetType: 'stadium',
+      targetId: clubId,
+      origin: 'user',
+      before: { capacity: stadium.capacity, tier: stadium.tier, buildCredit: stadium.build_credit },
+      after: {
+        capacity: stadium.capacity,
+        tier: stadium.tier + 1,
+        buildCredit: round2(stadium.build_credit - creditUsed + refund),
+        tierName: nextEntry.name,
+        cost,
+        creditUsed,
+        cash,
+        refund,
+      },
     }),
-    env.DB
-      .prepare(
-        `UPDATE stadiums SET tier = tier + 1, build_credit = build_credit - ? + ?,
-         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE club_id = ? AND tier = ?`,
-      )
-      .bind(creditUsed, refund, clubId, stadium.tier),
   ];
   const outs = await env.DB.batch(statements);
-  if ((outs[outs.length - 1]?.meta.changes ?? 0) === 0) throw new HttpError(409, '升级落库被拦（档位已被并发改动），请重试');
+  if ((outs[ledger.length]?.meta.changes ?? 0) === 0) throw new HttpError(409, '升级落库被拦（档位已被并发改动），请重试');
   return { cost, creditUsed, cash, refund, tier: stadium.tier + 1 };
 }
 
@@ -186,6 +231,7 @@ export async function upgradeFacilityLevel(
   env: Env,
   clubId: number,
   key: string,
+  actor: number | null,
 ): Promise<{ cost: number; creditUsed: number; cash: number; refund: number; level: number }> {
   if (!(FACILITY_KEYS as readonly string[]).includes(key)) throw new HttpError(400, '设施类型不对');
   const prices = await loadFacilityPrices(env.DB);
@@ -201,33 +247,53 @@ export async function upgradeFacilityLevel(
   const stadium = await loadStadium(env.DB, clubId);
   const { creditUsed, cash, refund } = await payAndRefund(env, clubId, cost, stadium.build_credit, ratio);
 
+  const ledger = ledgerMovement(env.DB, {
+    clubId,
+    delta: -cash,
+    kind: 'facility_upgrade',
+    refType: 'facility',
+    refId: clubId,
+    memo: `${key} 设施升到 ${level + 1} 级（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，建设券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
+    idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
+  });
+  const creditUpdate = env.DB
+    .prepare(
+      `UPDATE stadiums SET build_credit = build_credit - ? + ?,
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`,
+    )
+    .bind(creditUsed, refund, clubId);
+  const facilityUpsert = env.DB
+    .prepare(
+      `INSERT INTO club_facilities (club_id, facility_key, level, updated_at)
+       VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       ON CONFLICT(club_id, facility_key) DO UPDATE SET
+         level = club_facilities.level + 1, updated_at = excluded.updated_at
+       WHERE club_facilities.level = ?`,
+    )
+    .bind(clubId, key, level + 1, level);
   const statements = [
-    ...ledgerMovement(env.DB, {
-      clubId,
-      delta: -cash,
-      kind: 'facility_upgrade',
-      refType: 'facility',
-      refId: clubId,
-      memo: `${key} 设施升到 ${level + 1} 级（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，建设券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
-      idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
+    ...ledger,
+    creditUpdate,
+    facilityUpsert,
+    createAuditStatement(env.DB)({
+      actor,
+      action: 'facility_upgrade',
+      targetType: 'stadium',
+      targetId: clubId,
+      origin: 'user',
+      before: { facility: key, level },
+      after: {
+        facility: key,
+        level: level + 1,
+        buildCredit: round2(stadium.build_credit - creditUsed + refund),
+        cost,
+        creditUsed,
+        cash,
+        refund,
+      },
     }),
-    env.DB
-      .prepare(
-        `UPDATE stadiums SET build_credit = build_credit - ? + ?,
-         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`,
-      )
-      .bind(creditUsed, refund, clubId),
-    env.DB
-      .prepare(
-        `INSERT INTO club_facilities (club_id, facility_key, level, updated_at)
-         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT(club_id, facility_key) DO UPDATE SET
-           level = club_facilities.level + 1, updated_at = excluded.updated_at
-         WHERE club_facilities.level = ?`,
-      )
-      .bind(clubId, key, level + 1, level),
   ];
   const outs = await env.DB.batch(statements);
-  if ((outs[outs.length - 1]?.meta.changes ?? 0) === 0) throw new HttpError(409, '设施升级落库被拦（等级已被并发改动），请重试');
+  if ((outs[ledger.length + 1]?.meta.changes ?? 0) === 0) throw new HttpError(409, '设施升级落库被拦（等级已被并发改动），请重试');
   return { cost, creditUsed, cash, refund, level: level + 1 };
 }

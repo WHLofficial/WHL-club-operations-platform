@@ -10,7 +10,7 @@ import { round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
-import { createAuditStatement } from '../lib/audit.ts';
+import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import {
   completeTermination,
   loadTransfer,
@@ -63,32 +63,49 @@ async function chargeBypassFee(
   amount: number,
   kind: string,
   memo: string,
+  actor: number | null,
 ): Promise<void> {
   const db = env.DB;
   const available = await availableBalance(db, clubId);
   if (round2(available) < amount) {
     throw new HttpError(409, `俱乐部可用资金不足：这笔费用要 ${round2(amount)} m，当前可支配 ${round2(available)} m`);
   }
-  const results = await db.batch([
-    ...ledgerMovement(db, {
-      clubId,
-      delta: -amount,
-      kind,
-      refType: 'transfer',
-      refId: transferId,
-      memo,
-      guardSql:
-        `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'` +
-        ` AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
-        ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0) >= ?`,
-      guardParams: [transferId, clubId, clubId, amount],
-    }),
+  const guardSql =
+    `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'` +
+    ` AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
+    ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0) >= ?`;
+  const guardParams = [transferId, clubId, clubId, amount];
+  // 留痕与账本共用同一套守卫，且**排在账本之前**落库：两者评估的是同一份库存状态，
+  // 故「是否真扣到这笔费」的判断完全一致 —— 审核重放（该 kind 已有流水）或批内余额守卫
+  // 没过时都不会留下失实的 bypass_fee 行（createAuditStatement 无法表达 WHERE，此处手写）
+  const auditStmt = db
+    .prepare(
+      `INSERT INTO audit_log (actor, action, target_type, target_id, origin, before, after, at)
+       SELECT ?, 'bypass_fee', 'transfer', ?, 'user', NULL, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE NOT EXISTS (SELECT 1 FROM ledger_entries WHERE kind = ? AND ref_type IS 'transfer' AND ref_id IS ?)
+          AND ${guardSql}`,
+    )
+    .bind(actor, transferId, JSON.stringify({ kind, amount, clubId, memo }), kind, transferId, ...guardParams);
+  const ledger = ledgerMovement(db, {
+    clubId,
+    delta: -amount,
+    kind,
+    refType: 'transfer',
+    refId: transferId,
+    memo,
+    guardSql,
+    guardParams,
+  });
+  const statements = [
+    auditStmt,
+    ...ledger,
     db
       .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'pending_review' AND extra_fee IS NULL`)
       .bind(amount, transferId),
-  ]);
+  ];
+  const results = await db.batch(statements);
   // 流水没落：要么这笔已收过（幂等重试，静默返回），要么批内余额/状态守卫没过（资金刚被并发动用）
-  if ((results[1]?.meta.changes ?? 0) === 0) {
+  if ((results[statements.length - 1]?.meta.changes ?? 0) === 0) {
     const already = await db
       .prepare(`SELECT id FROM ledger_entries WHERE kind = ? AND ref_type IS 'transfer' AND ref_id IS ?`)
       .bind(kind, transferId)
@@ -114,6 +131,7 @@ async function createBypassTransfer(
     evidence: Record<string, unknown>;
     payload: Record<string, unknown>;
     action: string;
+    origin: AuditOrigin;
   },
 ): Promise<{ transferId: number }> {
   const db = env.DB;
@@ -155,6 +173,7 @@ async function createBypassTransfer(
       action: opts.action,
       targetType: 'transfer',
       targetId: transferId,
+      origin: opts.origin,
       after: { ...opts.payload },
     }),
   ]);
@@ -223,6 +242,7 @@ export async function createRcChange(
 
   const { transferId } = await createBypassTransfer(env, {
     actor,
+    origin: 'user',
     type: 'rc_change',
     playerId,
     fromClubId: clubId,
@@ -300,6 +320,7 @@ export async function createTermination(
 
   const { transferId } = await createBypassTransfer(env, {
     actor,
+    origin: 'user',
     type: 'termination',
     playerId,
     fromClubId: clubId,
@@ -381,6 +402,7 @@ export async function createFreeAgent(
 
   const { transferId } = await createBypassTransfer(env, {
     actor,
+    origin: 'user',
     type: 'free_agent',
     playerId,
     fromClubId: player.club_id, // CPU 队球员记原队，过户守卫才能把球员从 CPU 队名下摘走；真无归属仍是 null
@@ -474,6 +496,7 @@ export async function createForcedAuction(
       action: 'forced_auction_create',
       targetType: 'listing',
       targetId: null,
+      origin: 'user',
       after: { playerId, sellerClubId: player.club_id, askPrice: FORCED_AUCTION_PRICE, season: win.season, windowSeq: win.windowSeq },
     }),
   ];
@@ -520,6 +543,7 @@ export async function cancelForcedAuction(env: Env, actor: number, listingIdInpu
       action: 'forced_auction_cancel',
       targetType: 'listing',
       targetId: listingId,
+      origin: 'user',
       after: { playerId: listing.player_id },
     }),
   ]);
@@ -538,7 +562,7 @@ export async function approveTransferDeal(
   if (!transfer) throw new HttpError(404, '转会单不存在');
   switch (transfer.type) {
     case 'termination':
-      return completeTermination(env, transferId, actor, review);
+      return completeTermination(env, transferId, actor, 'user', review);
     case 'rc_change': {
       const ev = transferEvidence<RcChangeEvidence>(transfer);
       const fee = rcChangeFee(ev?.oldReleaseFee ?? 0, transfer.fee ?? 0);
@@ -550,6 +574,7 @@ export async function approveTransferDeal(
           fee,
           'rc_change_fee',
           `续约费（违约金 ${ev?.oldReleaseFee ?? '?'}m → ${transfer.fee}m 差额 30%，销毁）`,
+          actor,
         );
       }
       // F 提交时已定死：开会即快照 E（× 续约加薪区间，规则 4.3.3）
@@ -562,7 +587,15 @@ export async function approveTransferDeal(
     case 'free_agent': {
       const f = transfer.fee ?? 0;
       if (f > 0 && transfer.to_club_id !== null) {
-        await chargeBypassFee(env, transferId, transfer.to_club_id, freeAgentFee(f), 'free_agent_fee', `海捞签入费（新违约金 ${f}m × 30%，销毁）`);
+        await chargeBypassFee(
+          env,
+          transferId,
+          transfer.to_club_id,
+          freeAgentFee(f),
+          'free_agent_fee',
+          `海捞签入费（新违约金 ${f}m × 30%，销毁）`,
+          actor,
+        );
       }
       // F 提交时已定死：开会即快照 E（不乘续约加薪）
       const opened = await openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: f || undefined });
@@ -577,7 +610,15 @@ export async function approveTransferDeal(
       const f = transfer.fee ?? 0;
       const diff = matchDiff(ev?.oldReleaseFee ?? 0, f);
       if (transfer.to_club_id !== null) {
-        await chargeBypassFee(env, transferId, transfer.to_club_id, diff, 'match_diff_burn', `匹配差额（违约金 ${ev?.oldReleaseFee ?? '?'}m → ${f}m，销毁）`);
+        await chargeBypassFee(
+          env,
+          transferId,
+          transfer.to_club_id,
+          diff,
+          'match_diff_burn',
+          `匹配差额（违约金 ${ev?.oldReleaseFee ?? '?'}m → ${f}m，销毁）`,
+          actor,
+        );
       }
       // F 提交时已定死：开会即快照 E（匹配不乘续约加薪）
       const opened = await openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: f || undefined });
@@ -660,6 +701,7 @@ export async function rollbackRcChangeForPlayer(
       action: 'rc_change_rollback',
       targetType: 'player',
       targetId: playerId,
+      origin: 'user',
       after: {
         restoredReleaseFee: stillOwned ? ev.oldReleaseFee : null,
         restoredProtectionTicks: stillOwned ? ev.oldProtectionTicks : null,

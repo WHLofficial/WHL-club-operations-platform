@@ -49,28 +49,43 @@ app.put('/config', async (c) => {
     action: 'config_set',
     targetType: 'config',
     targetId: null,
+    origin: 'user',
     before: { key, value: mask(before) },
     after: { key, value: mask(value) },
   });
   return c.json({ ok: true, key, value: mask(value) });
 });
 
-// GET /api/admin/audit-log?limit=&action= —— 最近审计（id DESC，limit 缺省 100 上限 100，
-// action 前缀过滤）。非超管请求者：config_set 里涉密键的值再掩一道（写入侧已掩，双保险 §6.10）
+// GET /api/admin/audit-log?limit=&action=&origin= —— 最近审计（id DESC，limit 缺省 100 上限 100，
+// action 前缀过滤、origin 精确过滤）。非超管请求者：config_set 里涉密键的值再掩一道（写入侧已掩，双保险 §6.10）
 app.get('/audit-log', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const isSuper = user.permissions.includes('club.config.manage.super');
   const limitRaw = Number(c.req.query('limit') ?? 100);
   const limit = Number.isInteger(limitRaw) && limitRaw >= 1 && limitRaw <= 100 ? limitRaw : 100;
   const action = (c.req.query('action') ?? '').trim();
+  // origin 精确匹配（'user'/'cron_tick'/'lazy_settle'/'backchannel'/'machine'）；历史行 NULL，传 origin=null 不匹配
+  const origin = (c.req.query('origin') ?? '').trim();
+
+  const where: string[] = [];
+  const binds: (string | number)[] = [];
+  if (action) {
+    where.push('action LIKE ?');
+    binds.push(`${action}%`);
+  }
+  if (origin) {
+    where.push('origin = ?');
+    binds.push(origin);
+  }
+  binds.push(limit);
 
   const rows = await c.env.DB.prepare(
-    `SELECT id, actor, action, target_type, target_id, before, after, at
-     FROM audit_log ${action ? 'WHERE action LIKE ?' : ''}
+    `SELECT id, actor, action, target_type, target_id, origin, before, after, at
+     FROM audit_log ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
      ORDER BY id DESC LIMIT ?`,
   )
-    .bind(...(action ? [`${action}%`, limit] : [limit]))
-    .all<{ id: number; actor: number | null; action: string; target_type: string; target_id: number | null; before: string | null; after: string | null; at: string }>();
+    .bind(...binds)
+    .all<{ id: number; actor: number | null; action: string; target_type: string; target_id: number | null; origin: string | null; before: string | null; after: string | null; at: string }>();
 
   return c.json({
     entries: rows.results.map((r) => {
@@ -92,6 +107,7 @@ app.get('/audit-log', async (c) => {
         action: r.action,
         targetType: r.target_type,
         targetId: r.target_id,
+        origin: r.origin,
         before: maskSecret(r.before),
         after: maskSecret(r.after),
         at: r.at,

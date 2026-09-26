@@ -56,6 +56,15 @@ function stadiumRow(sqlite: DatabaseSync) {
   return sqlGet<{ capacity: number; tier: number; build_credit: number }>(sqlite, 'SELECT capacity, tier, build_credit FROM stadiums WHERE club_id = 1')!;
 }
 
+/** 设施经营的审计留痕（v6.2.1）：actor 必须是操作人，before/after 要能还原改动前后取值
+ *  （v6.3.2 起还断言 origin：教练自助路径写的是 'user'） */
+function auditRow(sqlite: DatabaseSync, action: string) {
+  return sqlGet<{ actor: number | null; target_type: string; target_id: number; origin: string | null; before: string; after: string }>(
+    sqlite,
+    `SELECT actor, target_type, target_id, origin, before, after FROM audit_log WHERE action = '${action}'`,
+  )!;
+}
+
 describe('建设券拆分与返还（纯函数）', () => {
   it('先券后钱：券足额全抵、券不足补现金、负券按 0', () => {
     expect(splitPayment(1.0, 0.4)).toEqual({ creditUsed: 0.4, cash: 0.6 });
@@ -75,30 +84,46 @@ describe('球场扩建', () => {
   it('券抵部分现金、返 25% 入券；账本记现金部分；可连续扩建', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
-    const r1 = await expandStadium(fx.env, 1, 1000);
+    const r1 = await expandStadium(fx.env, 1, 1000, 1);
     expect(r1).toEqual({ cost: 1, creditUsed: 0.4, cash: 0.6, refund: 0.25, capacity: 21000 });
     expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 21000, tier: 0, build_credit: 0.25 });
     expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(4.4);
     const entry = sqlGet<{ kind: string; amount: number; memo: string }>(fx.sqlite, "SELECT kind, amount, memo FROM ledger_entries WHERE kind='stadium_expand'");
     expect(entry).toMatchObject({ kind: 'stadium_expand', amount: -0.6 });
+    // 留痕：操作人 + 改动前后球场状态（扩建前 20000 座/0.4 券 → 后 21000 座/0.25 券）
+    const a1 = auditRow(fx.sqlite, 'stadium_expand');
+    expect(a1).toMatchObject({ actor: 1, target_type: 'stadium', target_id: 1, origin: 'user' });
+    expect(JSON.parse(a1.before)).toEqual({ capacity: 20000, tier: 0, buildCredit: 0.4 });
+    expect(JSON.parse(a1.after)).toMatchObject({ capacity: 21000, buildCredit: 0.25, seats: 1000, cost: 1, creditUsed: 0.4, cash: 0.6, refund: 0.25 });
 
     // 第二次扩建（0 券余 → 全现金 + 返券），幂等闸不得拦
-    const r2 = await expandStadium(fx.env, 1, 100);
+    const r2 = await expandStadium(fx.env, 1, 100, 1);
     expect(r2).toEqual({ cost: 0.1, creditUsed: 0.1, cash: 0, refund: 0.03, capacity: 21100 });
     expect(stadiumRow(fx.sqlite).build_credit).toBeCloseTo(0.18, 5);
     expect(sqlAll(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind='stadium_expand'").length).toBe(2);
+    // 可重复发生的操作：每次各留一条，第二次 before 取上一次的落库值
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(2);
+    const latest = sqlGet<{ before: string; after: string }>(
+      fx.sqlite,
+      "SELECT before, after FROM audit_log WHERE action='stadium_expand' ORDER BY id DESC LIMIT 1",
+    )!;
+    expect(JSON.parse(latest.before)).toEqual({ capacity: 21000, tier: 0, buildCredit: 0.25 });
+    expect(JSON.parse(latest.after)).toMatchObject({ capacity: 21100, buildCredit: 0.18, seats: 100, cost: 0.1, cash: 0 });
   });
 
   it('非 100 倍数 / 超档位座位上限 / 余额不足（券也不够）各被拒', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
-    await expect(expandStadium(fx.env, 1, 150)).rejects.toMatchObject({ status: 400 });
-    await expect(expandStadium(fx.env, 1, 6000)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('座位上限') });
-    await expect(expandStadium(fx.env, 1, 0)).rejects.toMatchObject({ status: 400 });
+    await expect(expandStadium(fx.env, 1, 150, 1)).rejects.toMatchObject({ status: 400 });
+    await expect(expandStadium(fx.env, 1, 6000, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('座位上限') });
+    await expect(expandStadium(fx.env, 1, 0, 1)).rejects.toMatchObject({ status: 400 });
 
     const broke = freshEnv();
     seedClub(broke.sqlite, { credit: 0, balance: 0.05 });
-    await expect(expandStadium(broke.env, 1, 100)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('资金不够') });
+    await expect(expandStadium(broke.env, 1, 100, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('资金不够') });
+    // 被拒的请求不落任何留痕（审计在批内，参数校验/余额不足在批前就抛了）
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
+    expect(sqlAll(broke.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
   });
 });
 
@@ -106,22 +131,28 @@ describe('球场升级', () => {
   it('容量达标 + 档位开放 → 扣当前档升级费，tier+1；开放进度闸拦二次升级', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, { credit: 1 });
-    const r = await upgradeStadiumTier(fx.env, 1);
+    const r = await upgradeStadiumTier(fx.env, 1, 1);
     expect(r).toEqual({ cost: 3, creditUsed: 1, cash: 2, refund: 0.75, tier: 1 });
     expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 1, build_credit: 0.75 });
+    const a = auditRow(fx.sqlite, 'stadium_upgrade');
+    expect(a).toMatchObject({ actor: 1, target_type: 'stadium', target_id: 1 });
+    expect(JSON.parse(a.before)).toEqual({ capacity: 20000, tier: 0, buildCredit: 1 });
+    expect(JSON.parse(a.after)).toMatchObject({ capacity: 20000, tier: 1, buildCredit: 0.75, tierName: '地区级', cost: 3, cash: 2 });
 
     // 默认 max_open_tier=1：再升第 2 档被开放进度拦
-    await expect(upgradeStadiumTier(fx.env, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('暂未开放') });
+    await expect(upgradeStadiumTier(fx.env, 1, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('暂未开放') });
   });
 
   it('容量不足升新档被拒；最高档再升被拒', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, { capacity: 12000 });
-    await expect(upgradeStadiumTier(fx.env, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('容量不足') });
+    await expect(upgradeStadiumTier(fx.env, 1, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('容量不足') });
 
     const top = freshEnv();
     seedClub(top.sqlite, { tier: 4, capacity: 60000 });
-    await expect(upgradeStadiumTier(top.env, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('最高档位') });
+    await expect(upgradeStadiumTier(top.env, 1, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('最高档位') });
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_upgrade'").length).toBe(0);
+    expect(sqlAll(top.sqlite, "SELECT id FROM audit_log WHERE action='stadium_upgrade'").length).toBe(0);
   });
 });
 
@@ -129,19 +160,25 @@ describe('子设施升级', () => {
   it('无行从 0 级起升（费用 3M），逐级抬价；满级被拒；非法 key 被拒', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, { credit: 2, balance: 10 });
-    const r1 = await upgradeFacilityLevel(fx.env, 1, 'commercial');
+    const r1 = await upgradeFacilityLevel(fx.env, 1, 'commercial', 1);
     expect(r1).toEqual({ cost: 3, creditUsed: 2, cash: 1, refund: 0.75, level: 1 });
     expect(sqlGet<{ level: number }>(fx.sqlite, "SELECT level FROM club_facilities WHERE club_id=1 AND facility_key='commercial'")?.level).toBe(1);
     // 券余额 = 种子 2M − 抵扣 2M + 返还 0.75M（费用 3M × 0.25）
     expect(sqlGet<{ build_credit: number }>(fx.sqlite, 'SELECT build_credit FROM stadiums WHERE club_id=1')?.build_credit).toBeCloseTo(0.75, 5);
+    const a = auditRow(fx.sqlite, 'facility_upgrade');
+    expect(a).toMatchObject({ actor: 1, target_type: 'stadium', target_id: 1 });
+    expect(JSON.parse(a.before)).toEqual({ facility: 'commercial', level: 0 });
+    expect(JSON.parse(a.after)).toMatchObject({ facility: 'commercial', level: 1, buildCredit: 0.75, cost: 3, cash: 1 });
 
-    const r2 = await upgradeFacilityLevel(fx.env, 1, 'commercial');
+    const r2 = await upgradeFacilityLevel(fx.env, 1, 'commercial', 1);
     expect(r2.cost).toBe(5); // 1→2 级费用
     expect(sqlGet<{ level: number }>(fx.sqlite, "SELECT level FROM club_facilities WHERE club_id=1 AND facility_key='commercial'")?.level).toBe(2);
 
     fx.sqlite.exec("UPDATE club_facilities SET level = 5 WHERE club_id=1 AND facility_key='commercial'");
-    await expect(upgradeFacilityLevel(fx.env, 1, 'commercial')).rejects.toMatchObject({ status: 400, message: expect.stringContaining('满级') });
-    await expect(upgradeFacilityLevel(fx.env, 1, 'casino')).rejects.toMatchObject({ status: 400 });
+    await expect(upgradeFacilityLevel(fx.env, 1, 'commercial', 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('满级') });
+    await expect(upgradeFacilityLevel(fx.env, 1, 'casino', 1)).rejects.toMatchObject({ status: 400 });
+    // 两次成功各一条留痕；满级/非法 key 在批前抛，不留痕
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='facility_upgrade'").length).toBe(2);
   });
 });
 
@@ -175,6 +212,8 @@ describe('路由（requireCoach + getBoundClub + build-info）', () => {
     );
     expect(expand.status).toBe(201);
     expect(((await expand.json()) as { capacity: number }).capacity).toBe(20500);
+    // 走端点的留痕 actor = 登录教练（route 把 user.id 传进了 expandStadium）
+    expect(auditRow(fx.sqlite, 'stadium_expand')).toMatchObject({ actor: 1, target_type: 'stadium', target_id: 1 });
 
     const anon = await get('/api/club/stadium/build-info', 'tok-none');
     expect(anon.status).toBe(401);

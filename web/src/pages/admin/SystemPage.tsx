@@ -131,6 +131,16 @@ function ConfigSection({ editable }: { editable: boolean }) {
 
 /* ---------- 审计日志 ---------- */
 
+// origin 记的是「哪条入口触发的」，不是「谁做的」：管理员点开窗口引发的惰性结算仍是 user。
+// 历史行（v6.3.2 之前写入）没有来源，显示为「—（历史行）」。
+const AUDIT_ORIGIN_LABELS: Record<string, string> = {
+  user: '用户操作',
+  cron_tick: '定时任务',
+  lazy_settle: '惰性结算',
+  backchannel: '认证中心',
+  machine: '机器通道',
+};
+
 function formatValue(raw: string | null): string {
   if (raw === null) return '—';
   try {
@@ -143,20 +153,35 @@ function formatValue(raw: string | null): string {
 function AuditLogSection() {
   const [filter, setFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
+  const [origin, setOrigin] = useState('');
+  const [activeOrigin, setActiveOrigin] = useState('');
+
+  const applyFilter = () => {
+    setActiveFilter(filter.trim());
+    setActiveOrigin(origin);
+  };
 
   const { data } = useQuery({
-    queryKey: ['admin', 'audit-log', activeFilter],
-    queryFn: () =>
-      api<AuditLogResponse>(`/api/admin/audit-log${activeFilter ? `?action=${encodeURIComponent(activeFilter)}` : ''}`).catch(
+    queryKey: ['admin', 'audit-log', activeFilter, activeOrigin],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (activeFilter) params.set('action', activeFilter);
+      if (activeOrigin) params.set('origin', activeOrigin);
+      const qs = params.toString();
+      return api<AuditLogResponse>(`/api/admin/audit-log${qs ? `?${qs}` : ''}`).catch(
         () => ({ entries: [] }) as AuditLogResponse,
-      ),
+      );
+    },
   });
   const entries = data?.entries ?? [];
 
   return (
     <section className="card admin-section">
       <h2>审计日志</h2>
-      <p className="hint">敏感操作留痕（最近 100 条，按时间倒序）。按 action 前缀过滤，例如 config_set、market_bid_pause、listing_create。</p>
+      <p className="hint">
+        敏感操作留痕（最近 100 条，按时间倒序）。按 action 前缀过滤，例如 config_set、market_bid_pause、listing_create；
+        来源按触发通道过滤，与「谁做的」无关。
+      </p>
       <div className="inline-form">
         <div className="field">
           <label htmlFor="audit-action">action 前缀（留空看全部）</label>
@@ -167,11 +192,29 @@ function AuditLogSection() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') setActiveFilter(filter.trim());
+              if (e.key === 'Enter') applyFilter();
             }}
           />
         </div>
-        <button className="btn" type="button" onClick={() => setActiveFilter(filter.trim())}>
+        <div className="field">
+          <label htmlFor="audit-origin">来源</label>
+          <select
+            id="audit-origin"
+            value={origin}
+            onChange={(e) => {
+              setOrigin(e.target.value);
+              setActiveOrigin(e.target.value);
+            }}
+          >
+            <option value="">全部</option>
+            {Object.entries(AUDIT_ORIGIN_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button className="btn" type="button" onClick={applyFilter}>
           查询
         </button>
       </div>
@@ -193,7 +236,10 @@ function AuditLogSection() {
               {entries.map((e) => (
                 <tr key={e.id}>
                   <td className="mono">{e.at.slice(0, 19).replace('T', ' ')}</td>
-                  <td className="num mono">{e.actor === null ? '—' : e.actor === 0 ? '系统' : e.actor}</td>
+                  <td className="num mono">
+                    {e.actor === null || e.actor === 0 ? '系统' : e.actor}
+                    <span className="muted"> · {e.origin === null ? '—（历史行）' : (AUDIT_ORIGIN_LABELS[e.origin] ?? e.origin)}</span>
+                  </td>
                   <td className="mono">{e.action}</td>
                   <td className="mono">
                     {e.targetType}

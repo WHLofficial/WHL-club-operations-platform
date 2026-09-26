@@ -13,7 +13,7 @@ import { AGENT_TIER_LABELS } from '../core/negotiation-rules.ts';
 import { attemptExpected, directFail, expectedWage, satisfactionText, successRate } from './negotiation-secret.ts';
 import { loadNegotiationContext, type AgentTierParams } from './negotiation-context.ts';
 import { completeTransfer, loadTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
-import { createAuditStatement } from '../lib/audit.ts';
+import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
@@ -161,6 +161,7 @@ export async function openNegotiationSession(
       action: 'negotiation_open',
       targetType: 'negotiation',
       targetId: transferId,
+      origin: 'user',
       after: {
         playerId: transfer.player_id,
         clubId: transfer.to_club_id,
@@ -179,11 +180,11 @@ export async function openNegotiationSession(
 }
 
 // 会话已结算但过户未跟上（两 batch 之间崩溃）→ 按会话快照重放过户（幂等）
-export async function healSettlement(env: Env, session: SessionRow, actor: number | null): Promise<void> {
+export async function healSettlement(env: Env, session: SessionRow, actor: number | null, origin: AuditOrigin): Promise<void> {
   if (session.status !== 'settled' || !session.settle_source) return;
   const transfer = await loadTransfer(env.DB, session.transfer_id);
   if (!transfer || transfer.status !== 'signing') return;
-  await completeTransfer(env, session.transfer_id, actor, undefined, {
+  await completeTransfer(env, session.transfer_id, actor, origin, undefined, {
     wage: session.settled_wage ?? TRAINEE_WAGE,
     releaseFee: session.release_fee ?? TRAINEE_RELEASE_FEE,
     source: session.settle_source,
@@ -211,7 +212,7 @@ async function requireMyActiveSession(
       .run();
     session.status = 'settled';
   }
-  await healSettlement(env, session, actor);
+  await healSettlement(env, session, actor, 'user');
   if (session.status !== 'active') throw new HttpError(409, '这场谈判已经结束了');
   if (transfer.status !== 'signing') throw new HttpError(409, '这单转会不在签约阶段');
   return { session, transfer };
@@ -241,7 +242,7 @@ export async function submitReleaseFee(
   if (session.club_id !== clubId) throw new HttpError(403, '只有签约方可以操作这次谈判');
   if (session.status !== 'active') {
     // 崩溃窗口（会话已结算、过户未跟上）也要在这里补过户，不留僵死单
-    await healSettlement(env, session, actor);
+    await healSettlement(env, session, actor, 'user');
     throw new HttpError(409, '这场谈判已经结束了');
   }
 
@@ -273,6 +274,7 @@ export async function submitReleaseFee(
       action: 'negotiation_fee',
       targetType: 'negotiation',
       targetId: session.id,
+      origin: 'user',
       after: { releaseFee: fee },
     }),
   ]);
@@ -416,6 +418,7 @@ async function settleActiveSession(
       action: attempt ? 'negotiation_offer' : settleSource === 'trainee' ? 'negotiation_trainee' : 'negotiation_settle',
       targetType: 'negotiation',
       targetId: session.id,
+      origin: 'user',
       after: attempt ? { attemptNo: attempt.attemptNo, result: attempt.result } : { settleSource },
     }),
   );
@@ -429,7 +432,7 @@ async function settleActiveSession(
     throw err;
   }
   if (settleSource !== 'record') {
-    await completeTransfer(env, session.transfer_id, actor, undefined, {
+    await completeTransfer(env, session.transfer_id, actor, 'user', undefined, {
       wage: settleWage ?? TRAINEE_WAGE,
       releaseFee: settleSource === 'trainee' ? TRAINEE_RELEASE_FEE : session.release_fee ?? TRAINEE_RELEASE_FEE,
       source: settleSource,
@@ -510,6 +513,8 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
           settle_source: row.settle_source,
         },
         null,
+        // GET 顺手自愈：不是人类主动触发，记惰性结算
+        'lazy_settle',
       );
     }
   }
