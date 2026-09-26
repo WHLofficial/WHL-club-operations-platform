@@ -11,6 +11,7 @@ import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
+import { MARKER_VALUES, MARKER_WEIGHT, markerOf, markerWeightSql, type PlayerMarker } from '../../core/squad-rules.ts';
 import { playerAbilityLevel } from '../home.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -77,6 +78,9 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
     badges: '(COALESCE(players.badges_silver, 0) + COALESCE(players.badges_gold, 0))',
     prestige: 'COALESCE(players.prestige, 0)',
     base_ca: 'COALESCE(players.base_ca, 0)',
+    // 标记（v6.5.0）：规则 4.2.2 三档的互斥权重（🔴3 → 🟡2 → 🟢1 → 无标记 0），与迁移 0042 的索引同源。
+    // 刻意不吃 ctx 的视图口径：标记的初始CA 恒为 COALESCE(base_ca, ca)、PA 恒取现值，view=initial 下也一样
+    marker: markerWeightSql(true),
     growth_gap: `(COALESCE(${ctx.paExpr}, 0) - COALESCE(${ctx.caExpr}, 0))`,
     foot: 'COALESCE(players.foot, 0)',
     growth_tier: 'COALESCE(players.growth_tier, 0)',
@@ -196,7 +200,8 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 
 // GET /api/players —— 球员库列表
 // 筛选：view / club_id / status / position（逗号分隔多值，含 PosID2-4 槽）/ name / growable / foot /
-//       growth_tier / is_future_star / china_plan / agent_tier / badges_silver_min / badges_gold_min /
+//       growth_tier / is_future_star / china_plan / agent_tier / marker（逗号多值，v6.5.0）/
+//       badges_silver_min / badges_gold_min /
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
 // 排序（v3.1.0 起表头每一列都可点，键名见 SORT_KEY_NAMES，属性列用 attr:<属性键>）：sort + order（id 固定 ASC 旧整数游标；
@@ -348,6 +353,22 @@ function buildPlayerFilters(
     if (!Number.isInteger(n) || n < 1 || n > 3) throw new HttpError(400, 'agent_tier 只能是 1-3');
     filters.push('players.agent_tier = ?');
     filterArgs.push(n);
+  }
+  // 标记（v6.5.0）：逗号多值（ge90/ge87/growth），映射成同源权重表达式 IN (…)。
+  // 标记是派生值、没有裸列可走 eqFilter 的两种写法，权重表达式与迁移 0042 的索引逐字同源，
+  // 筛选/排序/索引三处共用同一份（markerWeightSql）——同源性由 players-sort-indexes 的 EXPLAIN 锁死
+  const markerQ = c.req.query('marker');
+  if (markerQ !== undefined) {
+    const list = [...new Set(markerQ.split(',').map((m) => m.trim()).filter((m) => m !== ''))];
+    if (list.length === 0) throw new HttpError(400, 'marker 不能为空');
+    for (const m of list) {
+      if (!(MARKER_VALUES as readonly string[]).includes(m)) {
+        throw new HttpError(400, `marker 只能是 ${MARKER_VALUES.join(' / ')}`);
+      }
+    }
+    const marks = list.map(() => '?').join(',');
+    filters.push(`${markerWeightSql(true)} IN (${marks})`);
+    filterArgs.push(...list.map((m) => MARKER_WEIGHT[m as PlayerMarker]));
   }
   const badgesSilverMin = c.req.query('badges_silver_min');
   if (badgesSilverMin !== undefined) {
@@ -718,6 +739,9 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     marketValue: r.market_value,
     status: r.status,
     growthTier: r.growth_tier,
+    // 标记（v6.5.0）：用原始列现算（base_ca 缺省回 cur_ca=players.ca、PA 取现值），与 view 口径无关；
+    // 判定纯函数与 SQL 筛选/排序同源（core/squad-rules）
+    marker: markerOf(r.base_ca ?? r.cur_ca, r.cur_pa, r.growable === 1),
     isFutureStar: r.is_future_star === 1,
     chinaPlan: r.china_plan === 1,
     agentTier: r.agent_tier,
@@ -844,6 +868,7 @@ interface PlayerDetailRow {
   age: number | null;
   ca: number;
   pa: number;
+  base_ca: number | null;
   growable: number;
   prestige: number | null;
   market_value: number | null;
@@ -865,7 +890,7 @@ interface PlayerDetailRow {
 }
 
 const PLAYER_DETAIL_COLUMNS =
-  `id, fc_id, uid, name, display_name, number, club_id, position, foot, age, ca, pa, growable, prestige, market_value,
+  `id, fc_id, uid, name, display_name, number, club_id, position, foot, age, ca, pa, base_ca, growable, prestige, market_value,
    status, growth_tier, growth_xp, is_future_star, china_plan, agent_tier,
    badges_silver, badges_gold, transfer_listed, min_offer_price, offer_auto, not_for_sale, game_attrs, created_at, updated_at`;
 
@@ -929,6 +954,8 @@ app.get('/players/:id', async (c) => {
       age: p.age,
       ca: p.ca,
       pa: p.pa,
+      // 标记（v6.5.0）：初始CA = base_ca 缺省回 ca，与列表响应同一纯函数
+      marker: markerOf(p.base_ca ?? p.ca, p.pa, p.growable === 1),
       growable: p.growable === 1,
       prestige: p.prestige,
       marketValue: p.market_value,

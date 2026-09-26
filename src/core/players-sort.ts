@@ -25,6 +25,7 @@ export const SORT_KEY_NAMES = [
   'badges',
   'prestige',
   'base_ca',
+  'marker',
   'growth_gap',
   'foot',
   'growth_tier',

@@ -1,0 +1,15 @@
+-- 球员「标记」（v6.5.0）：规则 4.2.2 三档梯度互斥切分的排序/筛选索引
+--
+-- 标记是派生值，不落库：权重 CASE（🔴 ge90=3 → 🟡 ge87=2 → 🟢 growth=1 → 无标记 0）写在
+-- src/core/squad-rules.ts 的 markerWeightSql，列表的 ORDER BY / WHERE 与本索引共用同一份。
+-- 索引侧写**非限定列名**（SQLite 硬要求：索引表达式里出现 `players.` 会报
+-- `the "." operator prohibited in index expressions`），查询侧写限定名；
+-- 同源性由 tests/players-sort-indexes.test.ts 的 EXPLAIN QUERY PLAN 用例锁死。
+-- 尾列带 id：keyset 游标是 (排序键, id) 双列比较，缺了它带 cursor 的页仍会临时排序。
+--
+-- 初始CA 口径 = COALESCE(base_ca, ca)（与 squad-rules 三档计数一致）；初始CA 为 NULL 的行
+-- 三个 WHEN 全部落空得权重 0 = 无标记，与 JS 侧 markerOf(null) 一致。
+--
+-- ⚠️ 部署核查：apply 一次性写 ≈18,301 行（免费档 10 万行/日按账号计，占 18.3%）。
+-- 回滚：DROP INDEX idx_players_sort_marker;
+CREATE INDEX idx_players_sort_marker ON players(CASE WHEN COALESCE(base_ca, ca) >= 90 THEN 3 WHEN COALESCE(base_ca, ca) >= 87 THEN 2 WHEN COALESCE(base_ca, ca) < 87 AND pa >= 87 AND growable = 1 THEN 1 ELSE 0 END, id);

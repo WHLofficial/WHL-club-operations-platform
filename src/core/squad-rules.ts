@@ -75,6 +75,34 @@ export interface SquadCheckResult {
 
 const TIER_LABEL: Record<'premier' | 'second', string> = { premier: '顶级联赛', second: '次级联赛' };
 
+// ---- 标记（v6.5.0）：规则 4.2.2 三档梯度的互斥切分，球员库/球员页的展示属性 ----
+// 判定与 checkSquad 的三档计数同源：初始CA = COALESCE(base_ca, ca)（口径注释见文件头），
+// PA 与可成长取现值。三档互斥后语义：🔴=顶级梯度（≥90）、🟡=次级梯度（87-89，规则里计入 ≥87 名额）、
+// 🟢=潜力梯度（＜87 且 PA≥87 且可成长，计入 growth 名额）。不落任何一档的球员无标记（null）。
+export type PlayerMarker = 'ge90' | 'ge87' | 'growth';
+export const MARKER_VALUES: readonly PlayerMarker[] = ['ge90', 'ge87', 'growth'];
+
+// 排序/索引用的数值权重：🔴 3 → 🟡 2 → 🟢 1 → 无标记 0（无标记排最后，与「栏位空置」语义一致）
+export const MARKER_WEIGHT: Record<PlayerMarker, number> = { ge90: 3, ge87: 2, growth: 1 };
+
+export function markerOf(initialCa: number | null, pa: number | null, growable: boolean): PlayerMarker | null {
+  if (initialCa === null) return null;
+  if (initialCa >= 90) return 'ge90';
+  if (initialCa >= 87) return 'ge87';
+  if (pa !== null && pa >= 87 && growable) return 'growth';
+  return null;
+}
+
+// SQL 侧同源表达式（players 列表筛选/排序与迁移 0042 的索引共用）：
+// qualified=true 时列名带 players. 前缀（查询侧），false 为非限定名（索引侧——SQLite 硬要求，
+// 见迁移 0038 注释）。初始CA 为 NULL 时三个 WHEN 全部落空 → 权重 0 = 无标记，与 markerOf(null) 一致。
+export function markerWeightSql(qualified: boolean): string {
+  const p = qualified ? 'players.' : '';
+  const ca = `COALESCE(${p}base_ca, ${p}ca)`;
+  return `CASE WHEN ${ca} >= 90 THEN ${MARKER_WEIGHT.ge90} WHEN ${ca} >= 87 THEN ${MARKER_WEIGHT.ge87}
+    WHEN ${ca} < 87 AND ${p}pa >= 87 AND ${p}growable = 1 THEN ${MARKER_WEIGHT.growth} ELSE 0 END`;
+}
+
 // 报错点名：最多列 5 人，更多的用「等」收尾
 function nameList(players: SquadPlayer[]): string {
   const names = players.map((p) => p.name);

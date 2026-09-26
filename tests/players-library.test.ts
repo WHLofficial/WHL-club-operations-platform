@@ -52,6 +52,7 @@ interface ListBody {
     growable: boolean;
     marketValue: number | null;
     clubName: string | null;
+    marker: string | null;
   }[];
   nextCursor: string | null;
 }
@@ -1102,6 +1103,68 @@ describe('球员库排序键（v3.1.0）', () => {
       .sort((a, b) => a.pa - (a.baseCa ?? 0) - (b.pa - (b.baseCa ?? 0)) || a.id - b.id)
       .map((r) => r.id);
     expect(initGap).toEqual(expectedGap);
+  });
+});
+
+// 标记（v6.5.0）：规则 4.2.2 三档互斥切分的路由级行为——筛选多值、排序、响应字段、参数校验。
+// 初始CA 恒按 COALESCE(base_ca, ca)（与 view 无关）、PA 恒取现值；base_ca 与 ca 刻意错开验证这一点
+describe('标记（v6.5.0）', () => {
+  function seedMarkerRows(sqlite: DatabaseSync): void {
+    sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, base_ca, growable, status) VALUES
+        (41, 'm1', '甲', 1, 'ST', 20, 70, 70, 90, 0, 'normal'),
+        (42, 'm2', '乙', 1, 'ST', 20, 80, 80, 87, 0, 'normal'),
+        (43, 'm3', '丙', 1, 'ST', 20, 80, 87, 86, 1, 'normal'),
+        (44, 'm4', '丁', 1, 'ST', 20, 86, 86, NULL, 1, 'normal'),
+        (45, 'm5', '戊', 1, 'ST', 20, 90, 90, NULL, 0, 'normal'),
+        (46, 'm6', '己', 1, 'ST', 20, NULL, 99, NULL, 1, 'normal');
+    `);
+  }
+
+  it('marker 响应字段按三档互斥切分，初始CA 用 base_ca 回落 ca', async () => {
+    const fx = freshEnv();
+    seedMarkerRows(fx.sqlite);
+    const body = await list('/api/players?sort=id&order=asc&limit=100', fx.env);
+    expect(body.players.map((p) => [p.id, p.marker])).toEqual([
+      [41, 'ge90'],
+      [42, 'ge87'],
+      [43, 'growth'],
+      [44, null],
+      [45, 'ge90'],
+      [46, null],
+    ]);
+    // PA 恒取现值：46 的初始CA 为 NULL ⇒ 无标记（SQL 三个 WHEN 全落空、JS markerOf(null) 同判）
+    expect(body.players.find((p) => p.id === 44)!.marker).toBeNull();
+  });
+
+  it('marker 筛选：单值 / 逗号多值 / 无值与坏值 400', async () => {
+    const fx = freshEnv();
+    seedMarkerRows(fx.sqlite);
+    const idsOf = (path: string) =>
+      list(path, fx.env).then((body) => body.players.map((p) => p.id));
+    expect(await idsOf('/api/players?marker=ge90&sort=id&order=asc')).toEqual([41, 45]);
+    expect(await idsOf('/api/players?marker=ge87,growth&sort=id&order=asc')).toEqual([42, 43]);
+    expect((await get('/api/players?marker=', fx.env)).status).toBe(400);
+    expect((await get('/api/players?marker=red', fx.env)).status).toBe(400);
+  });
+
+  it('sort=marker 按权重排（🔴 → 🟡 → 🟢 → 无标记），升降两向', async () => {
+    const fx = freshEnv();
+    seedMarkerRows(fx.sqlite);
+    const desc = await list('/api/players?sort=marker&limit=100', fx.env);
+    // 同权重组内按 id DESC（ORDER BY 权重 DESC, id DESC）：ge90 组 [45,41]、无标记组 [46,44]
+    expect(desc.players.map((p) => p.id)).toEqual([45, 41, 42, 43, 46, 44]);
+    const asc = await list('/api/players?sort=marker&order=asc&limit=100', fx.env);
+    expect(asc.players.map((p) => p.id)).toEqual([44, 46, 43, 42, 41, 45]);
+  });
+
+  it('详情响应带 marker', async () => {
+    const fx = freshEnv();
+    seedMarkerRows(fx.sqlite);
+    const res = await get('/api/players/43', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { player: { marker: string | null } };
+    expect(body.player.marker).toBe('growth');
   });
 });
 

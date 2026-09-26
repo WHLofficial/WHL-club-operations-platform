@@ -5,6 +5,15 @@
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from './ref.ts';
 import { FC26_GAME_ATTR_COLUMNS, isGoldPlaystyleId, isPlaystyleId } from '../../../src/core/fc26.ts';
 import { SORT_KEY_NAMES } from '../../../src/core/players-sort.ts';
+import { MARKER_VALUES, type PlayerMarker } from '../../../src/core/squad-rules.ts';
+
+// 标记（v6.5.0）的展示文案：emoji 是标记本体，title/hover 出全称
+export const MARKER_EMOJI: Record<PlayerMarker, string> = { ge90: '🔴', ge87: '🟡', growth: '🟢' };
+export const MARKER_LABEL: Record<PlayerMarker, string> = {
+  ge90: '初始CA ≥ 90',
+  ge87: '初始CA 87-89',
+  growth: '初始CA < 87 且 PA ≥ 87 可成长',
+};
 
 // 细分属性白名单：与后端同一份来源（core/fc26 的 sprintspeed 起 34 项，players.ts 也这么切）。
 // 前端只用它做校验与下拉展示 —— 硬校验仍在后端；但校验口径必须一致，否则一个手改的
@@ -90,6 +99,7 @@ export interface Filters {
   futureStar: boolean;
   chinaPlan: boolean;
   agentTier: string;
+  marker: '' | PlayerMarker;
   ps: number[];
   hasContract: '' | '1' | '0';
   wageMin: string;
@@ -136,6 +146,7 @@ export const EMPTY_FILTERS: Filters = {
   futureStar: false,
   chinaPlan: false,
   agentTier: '',
+  marker: '',
   ps: [],
   hasContract: '',
   wageMin: '',
@@ -202,6 +213,7 @@ export function filtersFromUrl(): Filters {
   f.futureStar = str('is_future_star') === '1';
   f.chinaPlan = str('china_plan') === '1';
   f.agentTier = str('agent_tier').replace(/\D/g, '');
+  f.marker = (MARKER_VALUES as readonly string[]).includes(str('marker')) ? (str('marker') as PlayerMarker) : '';
   f.ps = str('ps') ? [...new Set(str('ps').split(',').map(Number).filter((n) => isPlaystyleId(n)))] : [];
   if (str('has_contract') === '1' || str('has_contract') === '0') f.hasContract = str('has_contract') as '1' | '0';
   f.rcNone = str('release_fee_none') === '1';
@@ -249,6 +261,7 @@ export function filtersToQuery(f: Filters): string {
   put('is_future_star', f.futureStar ? '1' : '');
   put('china_plan', f.chinaPlan ? '1' : '');
   put('agent_tier', f.agentTier);
+  put('marker', f.marker);
   // 金段 ID（101-199）也要发出去：银徽与金徽各查各的槽（v3.1.1 步骤 4）。
   // 这里的过滤是防手改地址栏塞脏值 —— 后端会 400，整个列表变成错误态。
   put('ps', f.ps.filter((n) => isPlaystyleId(n)).join(','));
@@ -297,6 +310,7 @@ export const COL_DEFS: { key: string; label: string; sort: SortKey; num?: boolea
   { key: 'futureStar', label: '未来之星', sort: 'future_star' },
   { key: 'chinaPlan', label: '中国计划', sort: 'china_plan' },
   { key: 'agentTier', label: '经纪人', sort: 'agent_tier' },
+  { key: 'marker', label: '标记', sort: 'marker' },
   { key: 'ps', label: 'PlayStyle', sort: 'ps' },
   { key: 'fcId', label: 'FC ID', sort: 'fc_id', num: true },
   { key: 'wage', label: '工资（半赛季）', sort: 'wage', num: true },
@@ -340,6 +354,7 @@ export function autoColsFor(f: Filters): string[] {
   if (f.futureStar) cols.push('futureStar');
   if (f.chinaPlan) cols.push('chinaPlan');
   if (f.agentTier) cols.push('agentTier');
+  if (f.marker) cols.push('marker');
   if (f.ps.length > 0) cols.push('ps');
   if (f.fcId) cols.push('fcId');
   if (f.hasContract || f.wageMin || f.wageMax || f.contractType) cols.push('wage', 'contractType');
@@ -410,6 +425,7 @@ export function filterChips(f: Filters, clubs: readonly { id: number; name: stri
   if (f.foot) push('foot', f.foot === '0' ? '左脚' : '右脚', { foot: '' });
   if (f.growthTier) push('growthTier', `成长档位：${f.growthTier} 档`, { growthTier: '' });
   if (f.agentTier) push('agentTier', `经纪人：${AGENT_TIER_LABEL[Number(f.agentTier)] ?? f.agentTier}`, { agentTier: '' });
+  if (f.marker) push('marker', `标记：${MARKER_EMOJI[f.marker]} ${MARKER_LABEL[f.marker]}`, { marker: '' });
   if (f.futureStar) push('futureStar', '仅未来之星', { futureStar: false });
   if (f.chinaPlan) push('chinaPlan', '仅中国计划', { chinaPlan: false });
   const silverPs = f.ps.filter((n) => !isGoldPlaystyleId(n));

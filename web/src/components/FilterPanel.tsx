@@ -4,8 +4,9 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { ClubDirectoryRow } from '../lib/api.ts';
 import MultiSelect, { type MultiSelectItem } from './MultiSelect.tsx';
 import { ATTR_GROUPS, ATTR_LABELS, playstyleById, SOURCE_LABEL } from '../lib/ref.ts';
-import { COL_DEFS, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
+import { COL_DEFS, MARKER_EMOJI, MARKER_LABEL, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
 import { isGoldPlaystyleId } from '../../../src/core/fc26.ts';
+import { MARKER_VALUES, type PlayerMarker } from '../../../src/core/squad-rules.ts';
 
 export interface FilterPanelProps {
   filters: Filters;
@@ -212,6 +213,17 @@ export default function FilterPanel({
                   <option value="1">温和</option>
                   <option value="2">普通</option>
                   <option value="3">苛刻</option>
+                </select>
+              </label>
+              <label className="field">
+                标记
+                <select value={filters.marker} onChange={(e) => set('marker', e.target.value as Filters['marker'])}>
+                  <option value="">全部</option>
+                  {(MARKER_VALUES as readonly string[]).map((m) => (
+                    <option key={m} value={m}>
+                      {MARKER_EMOJI[m as PlayerMarker]} {MARKER_LABEL[m as PlayerMarker]}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="field check">

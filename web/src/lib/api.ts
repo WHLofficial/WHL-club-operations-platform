@@ -1,4 +1,6 @@
 // API 约定（附录 A）：错误统一 {error, code?}；前端消费的 DTO 在此层冻结
+import type { PlayerMarker } from '../../../src/core/squad-rules.ts';
+
 export interface MeUser {
   id: number;
   name: string;
@@ -276,6 +278,8 @@ export interface PlayerListItem {
   agentTier: number;
   badgesSilver: number;
   badgesGold: number;
+  /** 标记（v6.5.0）：规则 4.2.2 三档互斥切分，初始CA 恒按 COALESCE(base_ca, ca)、PA 取现值；不落档为 null */
+  marker: PlayerMarker | null;
 }
 
 export interface ContractDto {

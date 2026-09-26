@@ -162,6 +162,7 @@ function rosterRow(patch: Partial<PlayerLibraryRow> & { id: number; name: string
     isFutureStar: false,
     chinaPlan: false,
     agentTier: 0,
+    marker: null,
     badgesSilver: 0,
     badgesGold: 0,
     growable: true,

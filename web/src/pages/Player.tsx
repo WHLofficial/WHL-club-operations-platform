@@ -32,7 +32,7 @@ import {
   teamName,
 } from '../lib/ref.ts';
 // 状态词统一用球员库那套（v6.2.0 两表合一：ref.ts 的旧表已删，normal=在队 / free=自由身）
-import { STATUS_LABEL } from '../lib/players-library.ts';
+import { MARKER_EMOJI, MARKER_LABEL, STATUS_LABEL } from '../lib/players-library.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 import {
   PS_GOLD_BASE,
@@ -415,6 +415,12 @@ export default function Player() {
                 )}
               </h2>
               <span className="player-card-badges">
+                {/* 标记（v6.5.0）：规则 4.2.2 三档互斥切分，悬停出全称；不落档不显示 */}
+                {player.marker && (
+                  <span className="player-marker" title={`标记：${MARKER_LABEL[player.marker]}`}>
+                    {MARKER_EMOJI[player.marker]}
+                  </span>
+                )}
                 {player.badgesGold > 0 && <span title="金徽章">🥇×{player.badgesGold}</span>}
                 {player.badgesSilver > 0 && <span title="银徽章">🥈×{player.badgesSilver}</span>}
               </span>

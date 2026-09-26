@@ -1,6 +1,6 @@
 // 合规引擎单测（规则 4.2）：人数/门将/训练营/CA·PA 梯度/工资帽/合同
 import { describe, expect, it } from 'vitest';
-import { checkSquad, DEFAULT_CA_PA_LIMITS, TRAINEE_WAGE, type SquadPlayer, type SquadRuleContext } from '../src/core/squad-rules.ts';
+import { checkSquad, DEFAULT_CA_PA_LIMITS, MARKER_WEIGHT, markerOf, markerWeightSql, TRAINEE_WAGE, type SquadPlayer, type SquadRuleContext } from '../src/core/squad-rules.ts';
 
 function player(overrides: Partial<SquadPlayer> = {}): SquadPlayer {
   return {
@@ -166,5 +166,44 @@ describe('阵容注册合规引擎（规则 4.2）', () => {
     const res = checkSquad(firstTeam(20), [], ctx({ tier: null }));
     expect(res.pass).toBe(true);
     expect(res.stats.ge87).toBe(0);
+  });
+});
+
+// 标记（v6.5.0）：三档互斥切分的边界。与 checkSquad 的三档计数同口径，改判定两边要一起改
+describe('markerOf 三档互斥切分', () => {
+  it('🔴 初始CA≥90（90 是下界）', () => {
+    expect(markerOf(90, null, false)).toBe('ge90');
+    expect(markerOf(95, 60, false)).toBe('ge90');
+  });
+
+  it('🟡 初始CA 87-89（87 是下界、90 让位给 🔴）', () => {
+    expect(markerOf(87, null, false)).toBe('ge87');
+    expect(markerOf(89, null, false)).toBe('ge87');
+  });
+
+  it('🟢 初始CA＜87 且 PA≥87 且可成长（PA 87 是下界、三条件缺一不可）', () => {
+    expect(markerOf(86, 87, true)).toBe('growth');
+    expect(markerOf(0, 99, true)).toBe('growth');
+    expect(markerOf(86, 86, true)).toBeNull();
+    expect(markerOf(86, 87, false)).toBeNull();
+  });
+
+  it('不落档 / 初始CA 缺失 / PA 缺失：无标记', () => {
+    expect(markerOf(86, 80, true)).toBeNull();
+    expect(markerOf(null, 99, true)).toBeNull();
+    expect(markerOf(86, null, true)).toBeNull();
+  });
+
+  it('SQL 权重表达式与 JS 判定同源（阈值与权重取自同一常量）', () => {
+    const sql = markerWeightSql(true);
+    expect(sql).toContain('COALESCE(players.base_ca, players.ca) >= 90');
+    expect(sql).toContain(`THEN ${MARKER_WEIGHT.ge90}`);
+    expect(sql).toContain(`THEN ${MARKER_WEIGHT.ge87}`);
+    expect(sql).toContain(`THEN ${MARKER_WEIGHT.growth}`);
+    expect(sql).toContain('players.pa >= 87 AND players.growable = 1');
+    // 索引侧（迁移 0042）必须是非限定列名——SQLite 禁止索引表达式里的限定名
+    const bare = markerWeightSql(false);
+    expect(bare).not.toContain('players.');
+    expect(bare).toContain('COALESCE(base_ca, ca) >= 90');
   });
 });

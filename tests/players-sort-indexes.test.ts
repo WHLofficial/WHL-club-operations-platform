@@ -9,6 +9,7 @@ import { resetGuards } from '../src/lib/guard.ts';
 import { sqlFold } from '../src/core/name-fold.ts';
 import { PS_SLOT_COUNT } from '../src/core/fc26.ts';
 import { applyMigrations, createTestD1, createTestKV } from './d1.ts';
+import { markerWeightSql } from '../src/core/squad-rules.ts';
 
 // [排序键, 索引名, 额外查询参数, 等值筛选参数]：0027 四条（ca/pa/age/market_value）+ 0029 三条（prestige/club/status）
 // + 0033 一条（name，v4.0.0 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
@@ -39,6 +40,8 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?
   // 0038 两条天赋维度（筛选侧写法由 v6.4.1 的用例覆盖）
   ['growth_tier', 'idx_players_sort_growth_tier'],
   ['future_star', 'idx_players_sort_future_star'],
+  // v6.5.0 标记：三档互斥权重 CASE，索引/排序/筛选共用 core/squad-rules 的同一份表达式
+  ['marker', 'idx_players_sort_marker'],
 ];
 
 let shared: DatabaseSync | null = null;
@@ -138,7 +141,7 @@ describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
 
   }
 
-  it('十八条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('十九条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
     const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
     const rows = sqlite
@@ -185,6 +188,24 @@ describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
       .get() as { sql: string } | undefined;
     expect(row).toBeDefined();
     expect(row!.sql.replace(/\s+/g, ' ')).toContain('COALESCE(COALESCE(base_ca, ca), 0)');
+  });
+
+  // v6.5.0 标记：权重表达式三处共用（core/squad-rules 的 markerWeightSql 生成查询侧限定名形式
+  // 与索引侧非限定名形式），手抄进迁移必错——直接锁迁移 SQL 与 core 输出逐字一致（空白归一后）。
+  it('标记索引的权重表达式与 core 同源（迁移 0042，索引侧非限定列名）', () => {
+    const sqlite = baseSqlite();
+    const row = sqlite
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_players_sort_marker'`)
+      .get() as { sql: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.sql.replace(/\s+/g, ' ')).toContain(markerWeightSql(false).replace(/\s+/g, ' '));
+  });
+
+  // 标记筛选是派生值、没有裸列，WHERE 写的就是同源权重表达式 ⇒ 即使 sort=id（异键）也要 seek 进索引
+  it('marker 筛选（sort=id 异键）seek 进 idx_players_sort_marker，不整表扫', async () => {
+    const { sql } = await mainQuery('id', '&marker=ge90,ge87');
+    expect(sql).toContain('COALESCE(players.base_ca, players.ca) >= 90');
+    expect(await queryPlan('id', '&marker=ge90,ge87')).toContain('SEARCH players USING INDEX idx_players_sort_marker');
   });
 });
 

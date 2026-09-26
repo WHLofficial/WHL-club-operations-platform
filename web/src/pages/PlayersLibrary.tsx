@@ -24,6 +24,7 @@ import {
   filtersFromUrl,
   filtersToQuery,
   firstOrderFor,
+  MARKER_EMOJI,
   parseColsParam,
   sortColumnVisible,
   type FilterChip,
@@ -112,6 +113,9 @@ function renderCol(key: string, p: PlayerLibraryRow) {
       return <td key={key}>{p.chinaPlan ? '✓' : '—'}</td>;
     case 'agentTier':
       return <td key={key}>{AGENT_TIER_LABEL[p.agentTier] ?? '—'}</td>;
+    case 'marker':
+      // 不落三档的球员整格空置（不出「—」占位），与筛选「无标记」的语义分开
+      return <td key={key} className="marker-cell">{p.marker ? MARKER_EMOJI[p.marker] : ''}</td>;
     case 'ps':
       return <td key={key} className="mono ps-cell">{psNames(p)}</td>;
     case 'fcId':

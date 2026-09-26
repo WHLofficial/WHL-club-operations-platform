@@ -37,6 +37,7 @@ function row(patch: Partial<PlayerLibraryRow> & { id: number; name: string }): P
     isFutureStar: false,
     chinaPlan: false,
     agentTier: 2,
+    marker: null,
     badgesSilver: 1,
     badgesGold: 0,
     clubName: '阿森纳',
