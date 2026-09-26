@@ -62,6 +62,7 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 
 ## 文档纪律
 
+- **收口/上线记录的 `docs:` 枚只做本地 commit，一律不 push**（2026-09-26 用户指令）：push 即触发 CF 自动部署，纯文档提交跟着上线是白部署一次。docs 枚攒到下一次被授权 push 时随代码一起走。
 - 每个增量完成后：`ROADMAP.md` 加一节（裁决 / 交付 / 验收 / 待办），`CHANGELOG.md` 加条目，测试与用例数写实测值。
 - 跨会话可复用结论写进记忆目录 `~/.zcode/cli/memories/projects/whl-club-operations-platform-59a36e78dc8d8fb3/memory/`，并在其 `MEMORY.md` 加一行索引。
 - 每个增量开工前先在记忆目录落一份计划文件（目标、交付物、步骤、验收口径、风险边界）再动手。
