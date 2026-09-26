@@ -1112,6 +1112,33 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **部署边界（等指令）**：先 apply `0042`（≈18,301 行写，占日配额 18.3%）→ push（CF 自动部署）；部署后量 `marker` 筛选/排序读数落 `measurements-after.json`。
 
+## v6.6.0 · 球员库按角色筛选（五槽 OR，不建索引）（2026-09-26）
+
+**状态**：本地已完成（typecheck / vitest / 变异验证全过），**未 push 未部署**（等指令）。**零迁移、零生产写**。判级 minor：新增用户可见能力（角色筛选下拉 / `?role=` 参数 / 摘要 chip），不改既有结果集。
+
+**缘起与裁决**：用户脑暴提出「球员库按角色筛选」。口径三点：① `+`（1-49）与 `++`（101-149）是同一角色的两档，但**筛选时当两个独立值、互不命中**（照 PlayStyle 银/金裁决），不做家族合并；② **任一槽命中即算**（RoleID1-5 五槽 OR，槽位与档位无对应关系，不能像 ps 那样按槽段切分）；③ 角色下拉放在「更多筛选」的 PlayStyle 旁，分 `角色 +` / `角色 ++` 两段。
+
+用户随后下指令「先做索引批」⇒ 原计划走**路线 A**（5 条部分表达式索引 + `sort=id` 惰性 UNION 驱动，配方见计划 §6.7）。动工前把路线 A 钉死，三条实测把它否掉：
+
+1. **§6.7 的驱动形状带其它筛选会静默漏行**：形状把「其它筛选」留在外层 WHERE、内层 UNION 带 `LIMIT ?`，内层先按 id 截断到前 N 条、外层再筛 ⇒ 只返回「前 N 条里恰好也满足其它筛选」的人，且 `nextCursor` 落在错的 id 上，翻页会跳过角色命中集里第 N 条之后又满足其它筛选的人。**只在「角色是唯一筛选」时正确**。
+2. **唯一正确的变体（筛选 + 游标全量下推进 5 支分支）在带 `ct.*` / 非索引筛选时计划退化**：本地真引擎 `EXPLAIN QUERY PLAN` 实测 —— 加 `ct.wage > 0` 后优化器改从 `ct` 驱动（`SCAN ct` + 每支 `USE TEMP B-TREE FOR ORDER BY`）；加非索引 json 筛选后第 1 支落 `SCAN p`。只有「角色唯一筛选」与「纯游标推进」两种情形保持惰性（`SEARCH … USING COVERING INDEX idx_p_prole1..5` + `MERGE (UNION ALL)`，无临时排序）。
+3. **即便形状成立，收益方向也反了**：生产只读实测（`role=11`，2,772 人持有）—— §6.7 驱动形状 **21,626 行/次**（生产未建配套索引，内层 5 支各扫一遍全表），五槽 OR 形态靠 `ORDER BY players.id ASC LIMIT 21` **早停只读 188 行/次**。驱动要先花 33,742 行写建 5 条部分索引，才在**稀有角色**上换成「几十行/次」；常见角色反而慢两个数量级。
+
+**裁决 = 路线 C**：纯五槽 OR 普通表达式谓词，不建索引、不做迁移、不消耗 33,742 行写配额（当日账号池余量 81,001 行）。计划 §6.5 原本就建议 C；索引批登记为「**已量化、待配额**」的独立候选（`scripts/d1-read-audit/README.md` §5.3），需要时按计划 §6.7 配方单独成批。
+
+**交付**
+- `src/core/fc26.ts`：角色常量与纯函数（`ROLE_SLOT_COUNT` / `ROLE_SLOT_KEYS` / `ROLE_BASE_MAX` / `ROLE_PLUS_BASE` / `ROLE_PLUS_MIN` / `ROLE_PLUS_MAX` / `isRoleId` / `isRolePlusId` / `ROLE_FILTER_MAX_ITEMS`），紧挨 PS 块、照其惯例；**不硬编码 49 项清单**，改由测试对齐 `role.json`。
+- `src/worker/routes/players.ts`：`buildPlayerFilters` 加 role 分支（逗号多值 → 去重去 0 → 空 400 / >100 项 400 / 非 `isRoleId` 400 → 五槽 OR，每槽 `json_extract(players.game_attrs, '$.RoleIDn') IN (…)`，args 铺 5 份）；`countPlayers` 自动获得（同一个 `buildPlayerFilters`）。**不动** `ATTR_KEYS`、`players-sort.ts` 白名单、`buildPlayerFilters` 返回形状。
+- 前端：`players-library.ts`（`Filters.roles` + `EMPTY_FILTERS.roles` + URL 互转 + 摘要 chip 一条「角色：…」，不拆两段）；`FilterPanel.tsx`（`ROLE_ITEMS` 取 `roleById` 里 `id > 0`，按 `isRolePlusId` 分两段、段内按名字首段位置码分组，与 PlayStyle 下拉并列）；`PlayersLibrary.tsx`（`toggleRole` 照抄 `togglePs`）；`styles.css` 的 `.lib-adv-ps` 改 `flex` + `wrap`（两个下拉并列，放不下换行）。**不加角色列**（`autoColsFor` / `COL_DEFS` 不动）；`ref.ts` 无需改动。
+- `tests/players-library.test.ts`：新增 describe「角色筛选（v6.6.0）」7 例 —— 五槽任一命中 / `+` 与 `++` 互不命中 / 槽里脏值 999 与无属性行不误命中 / 与位置叠加是 AND 且计数端点同源 / 参数校验（空·`abc`·0·100·150·7.5·>100 项）/ `isRoleId`·`isRolePlusId` 边界 / `role.json` 对齐（base 1-49、plus 101-149、`id+100` 逐条成对、剥尾缀后名字逐条一致）。
+- `scripts/d1-read-audit/probe-role-filter.mjs`（新，只读证据生成器）+ `scripts/d1-read-audit/README.md` §3 / §5.2 / §5.3 / §5.5 订正与新增第九节。
+
+**明确不做**：不做 role 排序（RoleID 数值序无业务含义，要手写权重 `CASE` 并先定语义）；不加角色列；不做 `+`/`++` 家族合并；不动 `ATTR_KEYS` 与 `players-sort.ts` 白名单。
+
+**实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 810 例全绿**（v6.5.0 基线 53/803，净 +7 = 新增角色 7 例）；build 成功；e2e **11/11**。变异验证两处 —— role 分支砍成一槽（`ROLE_SLOT_KEYS.slice(0, 1)`）⇒ **3 例红**；值清单改成家族匹配（`IN (n, n+100)`）⇒ **4 例红**；还原后 `diff` 与改前逐字一致。生产只读实测（管理通道，零写）：五槽占用 RoleID1 **18,301** / RoleID2 **9,670** / RoleID3 **4,850** / RoleID4 **881** / RoleID5 **40**；95 个合法值持有中（98 − 3 个 0 持有），46 个持有 <21 人（单页取不满）。角色唯一筛选首屏（`sort=id`、LIMIT 21）行读：持有 1 / 5 人 **18,301**、24 人 **4,455**、130 人 **2,623**、490 人 **873**、2,772 人 **188**；COUNT 恒 ≈18,301。⇒ 常见角色已满足 §5.4 的 ≤1,000 行验收线（靠 `ORDER BY id` 早停），稀有值 >1,000 的逐条进豁免清单。
+
+**部署边界（等指令）**：无迁移、无生产写 ⇒ 直接 push 即可（CF 自动部署）；部署后按 README §6 口径重跑 `scripts/measure-d1-reads.mjs` 补 role 形状到 `measurements-after.json`。
+
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。

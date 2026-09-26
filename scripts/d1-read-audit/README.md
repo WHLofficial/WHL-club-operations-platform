@@ -1,4 +1,4 @@
-# 球员库 D1 读量定标报告（v3.2.0 步骤 1；步骤 4/6/7 已补测）
+# 球员库 D1 读量定标报告（v3.2.0 步骤 1；步骤 4/6/7 已补测，第八/九节为 v6.4.1 / v6.6.0 补测）
 
 **测量日期**：2026-09-22（UTC） · **目标**：生产 `whl-club`（`73154873-d5ae-42b0-a630-25f5ef60053d`）· **原始数据**：[`measurements.json`](./measurements.json)（30 形状 + 6 探针，步骤 1 基线）、[`measurements-after.json`](./measurements-after.json)（同 30 形状，步骤 7 验收复测）、[`surface-measurements.json`](./surface-measurements.json)（全站 21 条读面，步骤 6 普查）
 
@@ -42,7 +42,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 
 ---
 
-## 三、形状实测（30 个）
+## 三、形状实测（32 个）
 
 「主查询 / COUNT」是把每条语句的 `rows_read` 拆开（配置探测恒为 0 行、约每分钟一次，已从表里剔除）。「容量」= `5,000,000 ÷ 合计`，即该形状**单独**把免费档日读量吃满所需的请求数。
 
@@ -78,6 +78,12 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | **name=sesko（折叠 LIKE）** | `/players?limit=20&name=sesko` | **18,304** | 18,302 | **36,606** | **136** | 273 |
 | 名册端点（固定键，group_concat 全表） | `/players/roster` | 18,301 | — | 18,301 | 273 | 273 |
 | 球员详情（4 条 PK 窄查询） | `/players/1` | 4（1+1+1+1） | — | 4 | 1,250,000 | 1,250,000 |
+| role=11（五槽 OR，2,772 人持有；**2026-09-26 补测**） | `/players?limit=20&role=11` | 188 | 18,362 | 18,550 | 269 | 26,595 |
+| **role=104（五槽 OR，仅 1 人持有；2026-09-26 补测）** | `/players?limit=20&role=104` | **18,301** | 18,302 | **36,603** | **136** | 273 |
+
+**单次耗时**（同表 `duration` 合计，供参考）：索引路径 1–11ms；全表扫 19–46ms；`sort=ps` 258ms、`sort=years` 152ms、`sort=status` 152ms、`sort=wage` 135ms（表达式复杂时 CPU 也上来了，但 D1 按行计费，不是按 CPU）。
+
+**角色筛选两行（v6.6.0，2026-09-26 补测）**：`role` 走五槽 OR 普通表达式谓词、**没有配套索引**（为什么没建见 §5.2 与 §9）。数字由 `scripts/d1-read-audit/probe-role-filter.mjs` 直接量同形 SQL 得到（不是打线上端点）：**常见值靠 `ORDER BY players.id ASC` 早停**（2,772 人持有只读 188 行），**稀有值全表扫**（1 人持有读 18,301 行）；COUNT 侧一律全表（≈18,301）。完整的分档扫描见 §5.5。
 
 **单次耗时**（同表 `duration` 合计，供参考）：索引路径 1–11ms；全表扫 19–46ms；`sort=ps` 258ms、`sort=years` 152ms、`sort=status` 152ms、`sort=wage` 135ms（表达式复杂时 CPU 也上来了，但 D1 按行计费，不是按 CPU）。
 
@@ -207,8 +213,10 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 ### 5.2 筛选分类
 
 - **有索引**：`club_id`（`=5` 127 行、`IS NULL` 17,754 行）、`status`（1,090 行）。
-- **无索引**（主查询 18.4k–18.6k，COUNT 另算）：`growable`、`position`（4 槽 OR）、`ps`（12–15 槽 OR）、`attr`、`ca`/`pa`/`age`/`prestige`/`base_ca`/`market_value` 区间（不匹配 0027 的 COALESCE 表达式索引）、`badges_*`、`foot`、`china_plan`、`agent_tier`、`fc_id`、`has_contract`、全部 `ct.*` 维度。
+- **无索引**（主查询 18.4k–18.6k，COUNT 另算）：`growable`、`position`（4 槽 OR）、`ps`（12–15 槽 OR）、`role`（5 槽 OR，v6.6.0）、`attr`、`ca`/`pa`/`age`/`prestige`/`base_ca`/`market_value` 区间（不匹配 0027 的 COALESCE 表达式索引）、`badges_*`、`foot`、`china_plan`、`agent_tier`、`fc_id`、`has_contract`、全部 `ct.*` 维度。
   - **`growth_tier` / `is_future_star` 已于 2026-09-25（迁移 `0038`）收口**：这两列排序走 `COALESCE(col, 0)` 而筛选原先走裸列，**不同源** ⇒ 表达式索引帮不上筛选。修法是筛选侧也写 `COALESCE(col, 0) = ?` 与索引同源；实测 `filter-growth-tier` 18,302 → **1**、`filter-future-star` 18,504 → **307** 行/次。剩余 4 个键（`china_plan` / `agent_tier` / `fc_id` / `growth_gap`）与它们同性质，照此配方可一条索引收两面。
+  - **`role` 是「OR 链 + ORDER BY」这一类，表达式索引对它不可用**（v6.6.0 实测，`scripts/d1-read-audit/probe-role-filter.mjs`）：五槽 OR 无论带不带 `AND expr > 0` 守卫，只要配 `ORDER BY players.id ASC LIMIT ?` 就落 **`SCAN players`**（表达式索引完全不被选）；去掉 ORDER BY 才落 `MULTI-INDEX OR`。⇒ 想用上索引只能改成 UNION 驱动，而那条路只在「角色是唯一筛选」时语义正确（见 §9）。同理 **`position`（4 槽 OR）与 `ps`（12–15 槽 OR）也是这一类**，别再指望给它们建表达式索引。
+  - **两条平台结论（D1 真引擎实测，写查询前先记住）**：① **compound SELECT 的分支上限是 5** —— 第 6 支报 `too many terms in compound SELECT: SQLITE_ERROR`（UNION 驱动因此最多 5 支；`ps` 有 15 槽，用不上这条路）；② **分支里写多值 `IN (v1, v2)` 会落 `USE TEMP B-TREE FOR ORDER BY`**（生产代理单支两值 36,605 行）⇒ UNION 驱动只有在**每支单值**时才保持惰性。
 - **`name` 折叠 LIKE**：36,606 行，且 `LIKE '%x%'` **B-tree 索引无效**，要降只能上 FTS5 + trigram。豁免理由：低频（前端只在提交时发一次，不是打字即请求）。
 
 ### 5.3 写配额张力（步骤 4 前必须裁决）
@@ -233,6 +241,11 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 - **apply 绕开未授权的 `0037`**：`0037_offers.sql` 是另一会话在途的报价子系统迁移，用仓库配置跑 `d1 migrations apply` 会把它一起 apply ⇒ 临时配置 `scratch/wrangler-0038.jsonc`（`migrations_dir: "migrate-0038"`，目录里只放 0038）先 `migrations list --remote` 确认只剩 0038 再 apply，报 `Executed 3 commands in 62.85ms`；apply 后账本核对最新 = `0038`、上一条 = `0036` ⇒ 0037 未被 apply。生产 `sqlite_master` 里 `idx_players_sort_%` 共 **18 条**。
 - **关键发现（SQLite 计划器）**：索引首列被等值约束时，SQLite **不再用它出 ORDER BY** —— `scratch/probe-0038-plan.mjs` 七种组合实测：只排序 → `SCAN … USING COVERING INDEX`（有序、无临时排序）；筛选 + 同键排序（含 ASC / 无 id 尾列变体）→ `SEARCH … USING COVERING INDEX (…=?)` + **`USE TEMP B-TREE FOR ORDER BY`**。⇒ 筛选侧收益是「读量从全表扫降到命中子集」，不是提前停；同源锁用例因此只断言 `SEARCH`，不断言无临时排序。
 - **实写记账 ≈36,607 行**（apply 前当日 `whl-club` 写 55,075 → apply 后 **91,682 = 91.7%**，贴顶）⇒ **剩余 ~8,318 行放不下第三条索引（18,301）**，本批到此为止。
+
+**2026-09-26 登记（v6.6.0 角色筛选的索引批 = 路线 A）**：角色筛选（`?role=`，五槽 OR）本增量走**纯 OR、不建索引**，索引批登记为「**已量化、待配额**」的独立候选：
+- **5 条部分表达式索引** `idx_players_role1..5 ON players(json_extract(game_attrs, '$.RoleIDn'), id) WHERE json_extract(game_attrs, '$.RoleIDn') > 0`；写量 = 五槽占用之和 **33,742 行**（RoleID1 18,301 + RoleID2 9,670 + RoleID3 4,850 + RoleID4 881 + RoleID5 40）。**部分索引的谓词是省钱的关键**：照常规「一条全表索引」写法建是 5 × 18,301 = **91,505 行**（≈2.7 倍）。谓词必须**逐字**写 `> 0`（写 `= 1` 推不出 `> 0`，蕴含证明器不认）。
+- **为什么没随本增量建**（三条实测见 §9）：① 索引只有配 UNION 驱动才用得上，而那个驱动形状只在「角色是唯一筛选」时语义正确；② 唯一正确的全量下推变体在带 `ct.*` / 非索引筛选时计划退化；③ 常见角色反而更贵（驱动 21,626 vs OR 188 行/次），收益只覆盖稀有角色。计划 §6.5 原本就建议先走零写的 OR。
+- 配方（DDL + 驱动 SQL 形状 + 三条硬约束：谓词逐字 `> 0`、`LIMIT` 必须在 UNION 子查询内、支数 ≤5）见计划 §6.7。若将来真要建，注意 **`players` 索引数会从 23 涨到 28**，且每条索引让全量重导成本 +18,301 行。
 
 ### 5.4 验收目标的修正（计划偏差，需记录）
 
@@ -268,6 +281,16 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | `sort=name` | 37,635 | 排序表达式是 `sqlFold('players.name')`（87 项链折叠）；理论上可索引但要先过深度体检 | **已完成**：迁移 `0033`（2026-09-23 apply）—— 87 项链折叠在真引擎上通过，与显示名 5 列同轮落库 |
 | 姓名查找 `?name=sesko` | 18,304 | `LIKE '%sesko%'` 是**子串**查找，任何 B-tree 都用不了（含 `sqlFold` 折叠后的 LIKE）；唯一出路是 FTS5 trigram 虚表（架构级改动，名字段是低频操作、只在提交时发一次请求） | 独立主题，登记 |
 | `attr:<键>` 34 键排序/筛选 | 未单独实测 | 排序表达式 `COALESCE(json_extract(game_attrs,'$.<key>') + 0, 0)`，34 个键各要一条索引（62 万行写）或一个物化子表 | 需物化子表，本增量不做 |
+| `role=<稀有值>`（筛选，v6.6.0） | 18,301（COUNT 另 18,302） | 五槽 OR 普通表达式谓词、**无配套索引**。索引路已实测否掉：`OR` 链 + `ORDER BY` 会让优化器弃用表达式索引，而唯一能用上索引的 UNION 驱动只在「角色是唯一筛选」时才正确（带其它筛选会静默漏行，见 §9）；且驱动只对稀有角色有正收益 | 已登记候选（§5.3 的 5 条部分索引 = 33,742 行写，配方见计划 §6.7）；只在「角色是唯一筛选」时值得建，否则收益为负 |
+
+**角色筛选的分档实测（v6.6.0，`probe-role-filter.mjs`）**：角色是唯一筛选、`sort=id` 默认序、LIMIT 21 ——
+
+| 该角色持有数 | 1 | 5 | 24 | 130 | 490 | 2,772 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 首屏行读 | 18,301 | 18,301 | 4,455 | 2,623 | **873** | **188** |
+| COUNT 行读 | 18,302 | 18,305 | 18,305 | 18,302 | 18,316 | 18,362 |
+
+⇒ **持有 ≥~490 人的角色已满足 §5.4 的 ≤1,000 行验收线**（靠 `ORDER BY players.id ASC` 早停，命中越多反而越早停下），不列入豁免；**持有 ≤~130 人的角色超线**（46 个值持有 <21 人，是这一档的主体），逐条进上表豁免行。COUNT 侧与持有数无关，恒 ≈18,301（全表扫，只受 §5.4 的频次控制约束）。
 
 无筛选的筛选形状（`growable=1` 95、`position=ST` 110、`ps=25` 293、`attr≥80` 88）虽然也 >70，但它们**没有索引可用且读量受命中行数约束**，未列入豁免——它们已随去 COUNT 从 1.8 万降到百级，再降需要子表/物化列（§5.2），属计划外。
 
@@ -415,5 +438,53 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements-
 **复现**：`node scripts/d1-read-audit/probe-samesource.mjs`（只读，走管理通道，不受免费档行读上限约束）。
 
 **端点级复测待部署**：`measurements-after.json` 由 `scripts/measure-d1-reads.mjs` 打**线上端点**产生，v6.4.1 部署前它仍反映旧代码；部署后按第六节口径重跑并与本表核对。
+
+---
+
+## 九、角色筛选（v6.6.0）—— 索引路（路线 A）为什么被弃用
+
+**缘起**：球员库新增「角色」筛选（`?role=`，逗号多值）。角色值在 `players.game_attrs` 的 `RoleID1-5` 五个槽里，语义是「任一槽命中即算」⇒ 天然是**五槽 OR**。用户下的指令是「先做索引批」，原计划因此走**路线 A**：5 条部分表达式索引 + 一条 `sort=id` 惰性 UNION 驱动（配方见计划 `plan-v6.6.0-role-filter.md` §6.7，本地真引擎上该形状量到 **98 行/次**）。动工前把它逐条钉死，三条实测否掉了它 —— 结论是**改走纯 OR（路线 C）**，零迁移、零写。
+
+**发现 1：计划 §6.7 的驱动形状带其它筛选会静默漏行（正确性缺陷）**。原形状把「其它筛选」留在外层 WHERE、内层 UNION 带 `LIMIT ?`：
+
+```sql
+SELECT players.id FROM players
+ WHERE players.id IN (SELECT id FROM (<5 支 UNION ALL>) ORDER BY id ASC LIMIT ?)
+   AND <其它筛选> ORDER BY players.id ASC LIMIT ?
+```
+
+内层先按 id 截断到前 N 条、外层再套筛选 ⇒ 只返回「前 N 条里恰好也满足其它筛选」的人：行数偏少，且 `nextCursor` 落在错的 id 上，**翻页会跳过角色命中集里第 N 条之后又满足其它筛选的人**。该形状**只在「角色是唯一筛选」时正确**。另有一条假修法也已排除：只下推 players 侧筛选、`ct.*` 侧留外层 —— 内层 `LIMIT 21` 只给出 21 条超集候选，ct 筛选后不足 21 条，仍然错。
+
+**发现 2：唯一正确的变体（筛选 + 游标全量下推进 5 支分支）在带 `ct.*` / 非索引筛选时计划退化**。本地真引擎 `EXPLAIN QUERY PLAN`（分支 = `SELECT p.id FROM p LEFT JOIN contracts ct ON ct.player_id = p.id AND ct.is_active = 1 WHERE json_extract(p.game_attrs,'$.RoleIDn') IN (v) AND json_extract(...) > 0 <extra>`，5 支 UNION ALL，外层 `SELECT id FROM (...) ORDER BY id ASC LIMIT 21`）：
+
+| 情形 | 计划 |
+| --- | --- |
+| 角色唯一筛选 | ✅ 惰性：`SEARCH p USING COVERING INDEX idx_p_prole1..5 (<expr>=?)` + `MERGE (UNION ALL)`，**无 TEMP B-TREE** |
+| 再加 `ct.wage > 0`（推进分支） | ❌ 退化：`SCAN ct` + 每支 `USE TEMP B-TREE FOR ORDER BY`（优化器改从 `ct` 驱动） |
+| 再加游标（`p.id > 1000`） | ✅ 干净：`SEARCH p USING COVERING INDEX idx_p_prole1 (<expr>=? AND id>?)`，无 TEMP |
+| 再加非索引 json 筛选 | ❌ 部分退化：第 1 支 `SCAN p`，其余支落非覆盖 `USING INDEX idx_p_prole2..5` |
+| 单支两值 `IN (18,149)` | ❌ 每支 `USE TEMP B-TREE FOR ORDER BY`（见 §5.2 平台结论②） |
+
+**发现 3：即便形状成立，收益方向也反了**（生产只读实测，`probe-role-filter.mjs`）。生产**没有**这 5 条索引，所以驱动形状的内层 UNION 要各扫一遍全表：
+
+| 形状（`role=11`，2,772 人持有，角色唯一筛选） | rows_read | 计划 |
+| --- | --- | --- |
+| §6.7 驱动形状（生产未建配套索引） | **21,626** | `SEARCH USING INTEGER PRIMARY KEY (rowid=?)` |
+| 五槽 OR 形态 | **188** | `SCAN players`（靠 `ORDER BY id` 早停） |
+
+⇒ 驱动要先花 33,742 行写建 5 条部分索引，才在**稀有角色**上换成「几十行/次」；**常见角色反而慢两个数量级**。而 §5.5 的分档实测显示常见角色本来就已达标（持有 ≥~490 人时 188–873 行/次 ≤ 1,000），也就是说索引路的净收益只覆盖「46 个持有 <21 人的稀有值 + 持有 ≤~130 人的一档」，代价是 33,742 行写（占当日账号池余量 81,001 行的 41.6%）。
+
+**裁决**：**路线 A 弃用，改走路线 C** —— 纯五槽 OR 普通表达式谓词，不建索引、不做迁移、零生产写。计划 §6.5 原本就建议 C。索引批不删除、登记为「已量化、待配额」的独立候选（§5.3），需要时按计划 §6.7 配方单独成批。
+
+**留档：路线 A 的配方（未实施，将来要建时照此）**
+- DDL（谓词必须**逐字**写 `> 0`；索引表达式**禁止 `.` 限定符**，连第二列 `p.id` 也算，否则报 `the "." operator prohibited in index expressions`）：
+  `CREATE INDEX idx_players_role1 ON players(json_extract(game_attrs, '$.RoleID1'), id) WHERE json_extract(game_attrs, '$.RoleID1') > 0;`（RoleID2..5 同形；合计 33,742 行写）
+- 三条硬约束：① 分支谓词逐字写 `> 0`；② `LIMIT` 必须在 UNION 子查询内（放外层 ⇒ 每支 `USE TEMP B-TREE FOR ORDER BY`，实测 54,884 行）；③ 支数 ≤ 5（§5.2 平台结论①）。
+- 残余（即便建了也修不到）：① 只修 `sort=id`（换排序键落 MATERIALIZE/TEMP，比现状更贵）；② 多值退化（每支单值才惰性）；③ 15 槽的 `ps` 用不上这条路。
+
+**测试锁**：角色筛选的语义锁在 `tests/players-library.test.ts` 的 describe「角色筛选（v6.6.0）」（7 例：五槽任一命中 / `+` 与 `++` 互不命中 / 脏值不误命中 / 与位置叠加 AND 且计数端点同源 / 参数校验 / `isRoleId`·`isRolePlusId` 边界 / `role.json` 对齐）。**没有 EXPLAIN 计划锁** —— 角色筛选是普通谓词、不带索引，`EXPLAIN` 断言无从下手（这与 §8 的 `players-sort-indexes.test.ts` 不同）。变异验证两处：role 分支砍成一槽 ⇒ **3 例红**、值清单改成家族匹配（`IN (n, n+100)`）⇒ **4 例红**。
+
+**复现**：`node scripts/d1-read-audit/probe-role-filter.mjs`（只读，走管理通道，不受免费档行读上限约束）。
+
 
 
