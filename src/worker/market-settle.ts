@@ -11,6 +11,8 @@ import { loadMarketContext, type MarketContext } from './market-context.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { detectBidAlerts } from './bid-alerts.ts';
 import { expireStaleOffers } from './offers.ts';
+import { queueClubNotification } from './notify.ts';
+import { sqlDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -284,16 +286,23 @@ export async function settleOverdue(
   // 匹配窗到期（4.4.2.4）：被激活方 24h 内未提交匹配 → 按激活价（首价）成交进待审
   const matchExpired = await db
     .prepare(
-      `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.season, l.window_seq
+      `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.activated_by, l.season, l.window_seq,
+              ${sqlDisplayName('p')} AS player_name
        FROM listings l
+       JOIN players p ON p.id = l.player_id
        WHERE l.type = 'activation' AND l.status = 'matched_pending'
          AND l.match_deadline IS NOT NULL AND l.match_deadline < ?
        ORDER BY l.id LIMIT 100`,
     )
     .bind(now.toISOString())
-    .all<ListingCore>();
+    .all<ListingCore & { activated_by: number | null; player_name: string }>();
   for (const row of matchExpired.results) {
-    if ((await settleListingForReview(db, row, actor, origin, 'matched_pending')) === 'settled') summary.settled++;
+    if ((await settleListingForReview(db, row, actor, origin, 'matched_pending')) === 'settled') {
+      summary.settled++;
+      // 证据制配套通知（v6.4.0 改动 4）：匹配窗到期未匹配，两边各知会一声
+      await queueClubNotification(env, row.activated_by, 'activation_match_expired', { listingId: row.id, player: row.player_name });
+      await queueClubNotification(env, row.seller_club_id, 'activation_match_expired', { listingId: row.id, player: row.player_name });
+    }
   }
 
   const active = await db

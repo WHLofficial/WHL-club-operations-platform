@@ -14,10 +14,15 @@ import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
 import { settleListingForReview } from './market-settle.ts';
+import { queueClubNotification } from './notify.ts';
+import { sqlDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
+
+// 激活证据截图 key（v6.4.0 改动 4）：POST /api/media/activation 生成，路径里的 club_id 必须是激活方自己
+const PROOF_KEY_PATTERN = /^activation\/(\d+)\/[A-Za-z0-9._-]+$/;
 
 export interface ActivationResult {
   ok: true;
@@ -27,24 +32,34 @@ export interface ActivationResult {
   firstBidDeadline: string;
 }
 
-// 激活挂牌：训练营与普通球员统一入口（附录 A POST /api/transfers/activation）
+// 激活挂牌：训练营与普通球员统一入口（附录 A POST /api/transfers/activation）。
+// v6.4.0 改动 4：proofMediaKey 必填（激活方上传的 QQ 通知截图）——激活时就要证明已在 QQ
+// 通知过被激活方；落库到 listings.activation_proof 并随站内信告知被激活方（可举报）。
 export async function createActivation(
   env: Env,
   clubId: number,
   actor: number,
   playerIdInput: unknown,
+  proofMediaKeyInput: unknown,
 ): Promise<ActivationResult> {
   const db = env.DB;
   const playerId = Number(playerIdInput);
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
+  if (typeof proofMediaKeyInput !== 'string' || !PROOF_KEY_PATTERN.test(proofMediaKeyInput)) {
+    throw new HttpError(400, '要先上传 QQ 通知截图再激活（证据制：证明你已在 QQ 通知对方）');
+  }
+  if (Number(PROOF_KEY_PATTERN.exec(proofMediaKeyInput)![1]) !== clubId) {
+    throw new HttpError(400, '截图不属于你的俱乐部，先重新上传');
+  }
+  const proofMediaKey = proofMediaKeyInput;
 
   const win = await getOpenWindow(db);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能激活', 'no_window');
 
   const player = await db
-    .prepare('SELECT id, name, club_id, status FROM players WHERE id = ?')
+    .prepare(`SELECT p.id, p.name, p.club_id, p.status, ${sqlDisplayName('p')} AS display_name FROM players p WHERE p.id = ?`)
     .bind(playerId)
-    .first<{ id: number; name: string; club_id: number | null; status: string }>();
+    .first<{ id: number; name: string; display_name: string; club_id: number | null; status: string }>();
   if (!player || player.club_id === null) throw new HttpError(404, '球员不存在或没有归属');
   if (player.club_id === clubId) throw new HttpError(400, '不能激活自己队里的球员');
   if (player.status !== 'normal' && player.status !== 'trainee') {
@@ -91,8 +106,8 @@ export async function createActivation(
       .bind(playerId, player.club_id),
     db
       .prepare(
-        `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, activated_by, activation_deadline, season, window_seq)
-         VALUES (?, ?, 'activation', ?, 'listed', ${nowSql()}, ?, ?, ?, ?, ?)`,
+        `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, activated_by, activation_deadline, season, window_seq, activation_proof)
+         VALUES (?, ?, 'activation', ?, 'listed', ${nowSql()}, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         playerId,
@@ -103,6 +118,7 @@ export async function createActivation(
         deadline.toISOString(),
         win.season,
         win.windowSeq,
+        proofMediaKey,
       ),
     audit({
       actor,
@@ -138,6 +154,16 @@ export async function createActivation(
   // 4.4.10：激活挂牌提交即触发本窗续约回滚（触发 ref = 转会区挂牌记录）
   await rollbackRcChangeForPlayer(env, playerId, actor, { refType: 'listing', refId: listingId });
 
+  // 站内信通知被激活方（v6.4.0 改动 4 证据制）：告知谁激活了谁、附证据 key，可举报（不冻结窗）
+  const activatorName = (await db.prepare('SELECT name FROM clubs WHERE id = ?').bind(clubId).first<{ name: string }>())?.name ?? '对方';
+  await queueClubNotification(env, player.club_id, 'activation_notice', {
+    player: player.display_name || player.name,
+    activatorName,
+    fee: askPrice,
+    listingId,
+    proofKey: proofMediaKey,
+  });
+
   return { ok: true, listingId, askPrice, kind: isTrainee ? 'trainee' : 'normal', firstBidDeadline: deadline.toISOString() };
 }
 
@@ -166,9 +192,9 @@ export async function submitMatch(
   if (!Number.isInteger(listingId) || listingId <= 0) throw new HttpError(400, 'listingId 应为挂牌 ID');
 
   const listing = await db
-    .prepare(`SELECT id, player_id, seller_club_id, status, season, window_seq FROM listings WHERE id = ?`)
+    .prepare(`SELECT id, player_id, seller_club_id, activated_by, status, season, window_seq FROM listings WHERE id = ?`)
     .bind(listingId)
-    .first<{ id: number; player_id: number; seller_club_id: number; status: string; season: number | null; window_seq: number | null }>();
+    .first<{ id: number; player_id: number; seller_club_id: number; activated_by: number | null; status: string; season: number | null; window_seq: number | null }>();
   if (!listing) throw new HttpError(404, '挂牌不存在');
   if (listing.seller_club_id !== sellerClubId) throw new HttpError(403, '只有被激活方可以决定是否匹配');
   if (listing.status !== 'matched_pending') throw new HttpError(409, '这单激活不在匹配等待期');
@@ -182,6 +208,7 @@ export async function submitMatch(
   if (newFeeInput === undefined || newFeeInput === null || newFeeInput === 'pass') {
     // 放行：按激活价成交，转待审
     await settleListingForReview(db, { id: listing.id, player_id: listing.player_id, seller_club_id: listing.seller_club_id, ask_price: bid.amount, season: listing.season, window_seq: listing.window_seq }, actor, 'user', 'matched_pending');
+    await queueClubNotification(env, listing.activated_by, 'activation_passed', { listingId: listing.id });
     return { ok: true, decision: 'pass' };
   }
 
@@ -274,6 +301,13 @@ export async function submitMatch(
   ]);
 
   // 匹配后若之前同窗有续约单……匹配不是挂牌/解约，不触发 4.4.10 回滚（规则仅列三类）
+
+  // 通知激活方：被激活方选择匹配留队（v6.4.0 改动 4）
+  await queueClubNotification(env, listing.activated_by, 'activation_matched', {
+    listingId: listing.id,
+    newReleaseFee: newFee,
+    previousBid: bid.amount,
+  });
 
   return { ok: true, decision: 'match', newReleaseFee: newFee, diff };
 }

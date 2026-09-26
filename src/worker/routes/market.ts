@@ -22,6 +22,7 @@ import { sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue, settleListingForReview } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { createActivation } from '../activations.ts';
+import { queueClubNotification } from '../notify.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -388,9 +389,57 @@ app.post('/market/activations', async (c) => {
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
 
-  const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown } | null;
+  const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown; proofMediaKey?: unknown } | null;
   if (!body) throw new HttpError(400, '请求格式不对');
-  return c.json(await createActivation(c.env, club.id, user.id, body.playerId), 201);
+  return c.json(await createActivation(c.env, club.id, user.id, body.playerId, body.proofMediaKey), 201);
+});
+
+// POST /api/market/listings/:id/activation-report —— 激活通知举报（v6.4.0 改动 4，仅被激活方）
+// 用户裁决：被激活方可以举报「没在 QQ 收到激活通知」。举报只建管理核查任务 + 通知激活方，
+// 不改挂牌状态、不冻结匹配窗（匹配与到期照常走）；是否影响成交由管理组裁量（不自动改数据）。
+app.post('/market/listings/:id/activation-report', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
+
+  const listing = await c.env.DB.prepare(
+    `SELECT id, player_id, seller_club_id, activated_by, status, activation_proof FROM listings WHERE id = ? AND type = 'activation'`,
+  )
+    .bind(id)
+    .first<{ id: number; player_id: number; seller_club_id: number; activated_by: number | null; status: string; activation_proof: string | null }>();
+  if (!listing) throw new HttpError(404, '这单激活挂牌不存在');
+  if (listing.seller_club_id !== club.id) throw new HttpError(403, '只有被激活方可以举报这份激活通知');
+  if (listing.activated_by === null || !['listed', 'bidding', 'matched_pending'].includes(listing.status)) {
+    throw new HttpError(409, '这单激活已经结束，不用再举报了');
+  }
+  const dup = await c.env.DB
+    .prepare(`SELECT id FROM review_tasks WHERE type = 'activation_report' AND ref_id = ? AND status = 'open' LIMIT 1`)
+    .bind(id)
+    .first<{ id: number }>();
+  if (dup) throw new HttpError(409, '这单激活已经有人在核查了，等管理组处理');
+
+  const audit = createAuditStatement(c.env.DB);
+  const results = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO review_tasks (type, ref_id, payload, status) VALUES ('activation_report', ?, ?, 'open')`,
+    ).bind(
+      id,
+      JSON.stringify({ listingId: id, playerId: listing.player_id, activatorClubId: listing.activated_by, sellerClubId: listing.seller_club_id, proofKey: listing.activation_proof }),
+    ),
+    audit({
+      actor: user.id,
+      action: 'activation_report',
+      targetType: 'listing',
+      targetId: id,
+      origin: 'user',
+      after: { playerId: listing.player_id, activatorClubId: listing.activated_by, byClubId: club.id },
+    }),
+  ]);
+  if ((results[0].meta.changes ?? 0) !== 1) throw new HttpError(409, '举报没落库，刷新再试');
+  await queueClubNotification(c.env, listing.activated_by, 'activation_reported', { listingId: id });
+  return c.json({ ok: true }, 201);
 });
 
 // GET /api/market/listings/:id —— 详情 + 出价历史

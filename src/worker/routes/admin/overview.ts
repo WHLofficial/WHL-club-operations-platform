@@ -34,7 +34,7 @@ app.get('/overview', async (c) => {
   const now = Date.now();
   if (!cache || fresh || now - cache.at >= OVERVIEW_TTL_MS) {
     const [openReviews, activeListings, clubs, players, results] = await Promise.all([
-      c.env.DB.prepare(`SELECT COUNT(*) AS n FROM review_tasks WHERE type = 'transfer_confirm' AND status = 'open'`).first<{ n: number }>(),
+      c.env.DB.prepare(`SELECT COUNT(*) AS n FROM review_tasks WHERE type IN ('transfer_confirm', 'activation_report') AND status = 'open'`).first<{ n: number }>(),
       c.env.DB.prepare(`SELECT COUNT(*) AS n FROM listings WHERE status IN ('listed', 'bidding', 'matched_pending')`).first<{ n: number }>(),
       c.env.DB.prepare('SELECT COUNT(*) AS n FROM clubs').first<{ n: number }>(),
       countAllPlayers(c),

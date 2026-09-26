@@ -59,6 +59,16 @@ export const apiPost = <T,>(path: string, body?: unknown) => apiSend<T>('POST', 
 export const apiPut = <T,>(path: string, body?: unknown) => apiSend<T>('PUT', path, body);
 export const apiDelete = <T,>(path: string, body?: unknown) => apiSend<T>('DELETE', path, body);
 
+/** 原始字节上传（v6.4.0 激活证据截图用）：不走 JSON 序列化，Content-Type 由调用方给 */
+export async function apiUpload<T>(path: string, contentType: string, body: Blob): Promise<T> {
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': contentType }, body });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiError(res.status, data?.error ?? '请求失败', data?.code);
+  }
+  return data as T;
+}
+
 // 赛事系统入口。v5.0.1：用 tour 子域而不是 apex——apex whleague.win 没有部署服务、也无 A 记录，
 // 指向它等于给用户一个连不上的按钮（TopBar / RequireUser / Home / AdminLayout 五处外链都用这个常量）。
 export const TOUR_SITE_URL = 'https://tour.whleague.win/';
@@ -668,10 +678,13 @@ export interface MyBidRow {
 
 export interface AdminReviewRow {
   id: number;
+  kind: string;
   status: string;
   payload: Record<string, unknown> | null;
   note: string | null;
   decidedAt: string | null;
+  // 激活举报核查任务（v6.4.0 改动 4）；transfer_confirm 行为 null
+  report: { listingStatus: string | null; askPrice: number | null; proofKey: string | null; activatorClubName: string | null } | null;
   transfer: {
     id: number;
     type: string;

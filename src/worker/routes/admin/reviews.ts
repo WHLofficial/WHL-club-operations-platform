@@ -16,6 +16,10 @@ import { readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
+function nowSql() {
+  return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+}
+
 // ---- 注册快照与准入体检（附录 A〔2〕） ----
 
 // GET /api/admin/registrations?season= —— 注册快照按俱乐部分组；season 缺省取最新有快照的赛季
@@ -181,6 +185,7 @@ app.get('/compliance', async (c) => {
 
 interface ReviewTaskRow {
   id: number;
+  type: string;
   status: string;
   payload: string | null;
   decided_by: number | null;
@@ -192,6 +197,10 @@ interface ReviewTaskRow {
   fee: number | null;
   tax: number | null;
   extra_fee: number | null;
+  listing_status: string | null;
+  ask_price: number | null;
+  activation_proof: string | null;
+  activator_name: string | null;
   player_id: number;
   player_name: string;
   position: string | null;
@@ -201,22 +210,27 @@ interface ReviewTaskRow {
   to_name: string | null;
 }
 
-// GET /api/admin/reviews?status=open —— 成交确认队列
+// GET /api/admin/reviews?status=open —— 成交确认队列 + 激活举报核查（v6.4.0 改动 4）
+// 两类任务共用一张表：transfer_confirm 的 ref_id 是 transfer，activation_report 的 ref_id 是 listing；
+// 列表把 report 行也填成 transfer 形状（player/from=seller/to=activator），前端按 kind 分流渲染。
 app.get('/reviews', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const status = c.req.query('status') ?? 'open';
   if (!['open', 'approved', 'rejected', 'all'].includes(status)) throw new HttpError(400, 'status 只能是 open / approved / rejected / all');
-  const where = status === 'all' ? "rt.type = 'transfer_confirm'" : `rt.type = 'transfer_confirm' AND rt.status = ?`;
+  const where = status === 'all' ? `rt.type IN ('transfer_confirm', 'activation_report')` : `rt.type IN ('transfer_confirm', 'activation_report') AND rt.status = ?`;
   const rows = await c.env.DB.prepare(
-    `SELECT rt.id, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
+    `SELECT rt.id, rt.type, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
             t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax, t.extra_fee,
-            t.player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
-            cf.name AS from_name, ct.name AS to_name
+            l.status AS listing_status, l.ask_price, l.activation_proof,
+            p.id AS player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
+            cf.name AS from_name, ct.name AS to_name, ca2.name AS activator_name
      FROM review_tasks rt
-     JOIN transfers t ON t.id = rt.ref_id
-     JOIN players p ON p.id = t.player_id
-     LEFT JOIN clubs cf ON cf.id = t.from_club_id
-     LEFT JOIN clubs ct ON ct.id = t.to_club_id
+     LEFT JOIN transfers t ON t.id = rt.ref_id AND rt.type = 'transfer_confirm'
+     LEFT JOIN listings l ON l.id = rt.ref_id AND rt.type = 'activation_report'
+     JOIN players p ON p.id = COALESCE(t.player_id, l.player_id)
+     LEFT JOIN clubs cf ON cf.id = COALESCE(t.from_club_id, l.seller_club_id)
+     LEFT JOIN clubs ct ON ct.id = COALESCE(t.to_club_id, l.activated_by)
+     LEFT JOIN clubs ca2 ON ca2.id = l.activated_by
      WHERE ${where}
      ORDER BY rt.id DESC LIMIT 100`,
   )
@@ -225,10 +239,15 @@ app.get('/reviews', async (c) => {
   return c.json({
     reviews: rows.results.map((r) => ({
       id: r.id,
+      kind: r.type,
       status: r.status,
       payload: r.payload ? (JSON.parse(r.payload) as Record<string, unknown>) : null,
       note: r.note,
       decidedAt: r.decided_at,
+      report:
+        r.type === 'activation_report'
+          ? { listingStatus: r.listing_status, askPrice: r.ask_price, proofKey: r.activation_proof, activatorClubName: r.activator_name }
+          : null,
       transfer: {
         id: r.transfer_id,
         type: r.transfer_type,
@@ -313,6 +332,36 @@ app.post('/reviews/:id/reject', async (c) => {
     note: note ?? undefined,
   });
   return c.json({ ok: true, ...result });
+});
+
+// POST /api/admin/reviews/:id/resolve —— 激活举报核查收口（v6.4.0 改动 4）
+// 用户裁决：举报不自动改数据——管理组核对截图后标记处理完毕，裁定写进备注与审计；
+// 是否影响成交另行处理（该停就驳回对应成交单），本端点只关任务。
+app.post('/reviews/:id/resolve', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const taskId = Number(c.req.param('id'));
+  if (!Number.isInteger(taskId)) throw new HttpError(400, '审核任务 ID 不对');
+  const body = (await readJson(c)) as { note?: unknown } | null;
+  const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
+  const task = await c.env.DB.prepare(`SELECT id, ref_id, status FROM review_tasks WHERE id = ? AND type = 'activation_report'`)
+    .bind(taskId)
+    .first<{ id: number; ref_id: number; status: string }>();
+  if (!task) throw new HttpError(404, '举报核查任务不存在');
+  if (task.status !== 'open') throw new HttpError(409, '这条举报已经处理过了');
+  const result = await c.env.DB
+    .prepare(`UPDATE review_tasks SET status = 'approved', decided_by = ?, decided_at = ${nowSql()}, note = ? WHERE id = ? AND status = 'open'`)
+    .bind(user.id, note, taskId)
+    .run();
+  if ((result.meta.changes ?? 0) !== 1) throw new HttpError(409, '这条举报刚被处理过，刷新看看');
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'activation_report_resolve',
+    targetType: 'review_task',
+    targetId: taskId,
+    origin: 'user',
+    after: { listingId: task.ref_id, note },
+  });
+  return c.json({ ok: true, status: 'approved' });
 });
 
 export default app;

@@ -105,6 +105,21 @@ function ReviewsSection() {
     }
   }
 
+  // 激活举报核查收口（v6.4.0 改动 4）：只关任务不自动改数据，裁定写进备注
+  async function resolveReport(row: AdminReviewRow) {
+    if (busyId !== null) return;
+    setBusyId(row.id);
+    try {
+      await apiPost<{ ok: boolean }>(`/api/admin/reviews/${row.id}/resolve`, { note: notes[row.id] ?? undefined });
+      show(`举报核查已收口：${row.transfer.player.name} 的激活单。`);
+      await reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '操作失败', true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <section className="card admin-section">
       <h2>审核队列</h2>
@@ -141,6 +156,56 @@ function ReviewsSection() {
             </thead>
             <tbody>
               {reviews.map((r) => {
+                // 激活举报核查行（v6.4.0 改动 4）：与成交单共用表格，按 kind 分流
+                if (r.report !== null) {
+                  return (
+                    <tr key={r.id}>
+                      <td>
+                        {r.transfer.player.name}
+                        <span className="muted">（CA {r.transfer.player.ca ?? '—'}）</span>
+                      </td>
+                      <td>
+                        <span className="badge purple">激活举报</span>
+                      </td>
+                      <td>
+                        被激活方举报未收到 QQ 通知；激活方 <b>{r.report.activatorClubName ?? '—'}</b>
+                        {r.report.proofKey ? (
+                          <>
+                            {' · '}
+                            <a href={`/api/media/${r.report.proofKey}`} target="_blank" rel="noreferrer">
+                              查看截图
+                            </a>
+                          </>
+                        ) : (
+                          ' · 无截图记录'
+                        )}
+                        <span className="muted">（激活单状态 {r.report.listingStatus ?? '—'}）</span>
+                      </td>
+                      <td className="num mono">{r.report.askPrice?.toFixed(2) ?? '—'}</td>
+                      <td>
+                        <span className={`badge ${r.status === 'open' ? 'sky' : 'gold'}`}>{r.status === 'open' ? '待核查' : '已处理'}</span>
+                      </td>
+                      <td>
+                        {r.status === 'open' ? (
+                          <div className="inline-form">
+                            <input
+                              className="field"
+                              type="text"
+                              placeholder="核查结论（建议填写）"
+                              value={notes[r.id] ?? ''}
+                              onChange={(e) => setNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                            />
+                            <button className="btn btn-sm" type="button" disabled={busyId === r.id} onClick={() => resolveReport(r)}>
+                              {busyId === r.id ? '处理中…' : '处理完毕'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="muted">{r.note ?? '—'}</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                }
                 const summary = bypassSummary(r);
                 const alerts = Array.isArray(r.payload?.alerts) ? ((r.payload!.alerts) as { kind: string; text: string }[]) : [];
                 return (

@@ -80,6 +80,9 @@ interface MatchFixture extends Fixture {
   buyerClub: number;
 }
 
+// 证据截图 key（v6.4.0 改动 4）：路径里的 club_id 必须等于激活方，激活请求必带
+const proofKey = (clubId: number) => `activation/${clubId}/t${Math.random().toString(36).slice(2, 8)}.png`;
+
 // 被激活方（100m）+ 激活方（50m）+ 开放窗口；正式球员 RC10、保护期内（signed_at 近期）
 async function seedActivation(fx: Fixture): Promise<MatchFixture> {
   const ownerClub = await createClub(fx, '原东家');
@@ -113,7 +116,7 @@ async function seedActivation(fx: Fixture): Promise<MatchFixture> {
 }
 
 async function activateCore(fx: MatchFixture): Promise<{ status: number; body: { ok?: boolean; listingId?: number; askPrice?: number; kind?: string; error?: string } }> {
-  const res = await post('/api/transfers/activation', { playerId: 30 }, 'tok-coach2', fx.env);
+  const res = await post('/api/transfers/activation', { playerId: 30, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
   return { status: res.status, body: (await res.json()) as { ok?: boolean; listingId?: number; askPrice?: number; kind?: string; error?: string } };
 }
 
@@ -167,7 +170,7 @@ describe('普通球员激活（倍数价）', () => {
        INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
          (2, 31, ${fx.ownerClub}, 30, 3, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01', 0, 3);`,
     );
-    const big = await post('/api/transfers/activation', { playerId: 31 }, 'tok-coach2', fx.env);
+    const big = await post('/api/transfers/activation', { playerId: 31, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
     expect(big.status).toBe(201);
     expect(((await big.json()) as { askPrice: number }).askPrice).toBe(45); // 30 × 1.5
 
@@ -177,7 +180,7 @@ describe('普通球员激活（倍数价）', () => {
        INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
          (3, 32, ${fx.ownerClub}, 10, 1, 'formal', 1, '2024-01-01T00:00:00Z', '2024-01-01', 0, NULL);`,
     );
-    const vet = await post('/api/transfers/activation', { playerId: 32 }, 'tok-coach2', fx.env);
+    const vet = await post('/api/transfers/activation', { playerId: 32, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
     expect(vet.status).toBe(201);
     expect(((await vet.json()) as { askPrice: number }).askPrice).toBe(10);
   });

@@ -51,6 +51,17 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `🤝 自动同意：${data.player} 的 ${data.amount} m 报价达到最低报价线，已自动同意并挂牌。`;
     case 'offer_auto_rejected':
       return `🚫 自动拒：${data.player} 的 ${data.amount} m 报价低于最低报价线（${data.min} m），直接被拒，冻结已退回。`;
+    // 激活通知证据制（v6.4.0 改动 4）：激活必附 QQ 通知截图，被激活方可举报（举报不冻结匹配窗）
+    case 'activation_notice':
+      return `📣 激活通知：你的球员 ${data.player} 被「${data.activatorName}」按激活转会激活（金额 ${data.fee} m）。对方已提交 QQ 通知截图（管理端可查），如未收到 QQ 通知请到该球员页举报。`;
+    case 'activation_reported':
+      return `⚠️ 举报：对方俱乐部举报未收到激活的 QQ 通知（挂牌 #${data.listingId}），管理组将核查你提交的截图。`;
+    case 'activation_matched':
+      return `🛡 匹配：#${data.listingId} 的激活被对方匹配留队（新违约金 ${data.newReleaseFee} m > 你的出价 ${data.previousBid} m），资金已解冻。`;
+    case 'activation_passed':
+      return `✅ 放行：#${data.listingId} 的激活被对方放行，按激活价成交进审核。`;
+    case 'activation_match_expired':
+      return `⌛ 匹配窗结束：#${data.listingId} 的激活匹配窗到期未匹配，按激活价成交进审核。`;
     default:
       return String(data.text ?? '');
   }

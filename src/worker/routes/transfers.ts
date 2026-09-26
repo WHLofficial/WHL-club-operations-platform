@@ -50,7 +50,7 @@ app.post('/transfers/free-agent', async (c) => {
 app.post('/transfers/activation', async (c) => {
   const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
   const body = await readJson(c);
-  const result = await createActivation(c.env, clubId, user.id, body?.playerId);
+  const result = await createActivation(c.env, clubId, user.id, body?.playerId, body?.proofMediaKey);
   return c.json(result, 201);
 });
 

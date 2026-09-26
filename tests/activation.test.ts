@@ -68,6 +68,9 @@ function post(path: string, body: unknown, token: string | undefined, env: Env) 
   );
 }
 
+// 证据截图 key（v6.4.0 改动 4）：路径里的 club_id 必须等于激活方，激活请求必带
+const proofKey = (clubId: number) => `activation/${clubId}/t${Math.random().toString(36).slice(2, 8)}.png`;
+
 let clubSeq = 9000;
 async function createClub(fx: Fixture, name: string): Promise<number> {
   clubSeq += 1;
@@ -119,8 +122,8 @@ async function seedTrainee(fx: Fixture): Promise<ActivationFixture> {
   return { ...fx, ownerClub, buyerClub, rivalClub, traineeId: 20 };
 }
 
-async function activateTrainee(fx: Fixture): Promise<{ status: number; body: { ok?: boolean; listingId?: number; askPrice?: number; firstBidDeadline?: string; error?: string } }> {
-  const res = await post('/api/market/activations', { playerId: 20 }, 'tok-coach2', fx.env);
+async function activateTrainee(fx: ActivationFixture): Promise<{ status: number; body: { ok?: boolean; listingId?: number; askPrice?: number; firstBidDeadline?: string; error?: string } }> {
+  const res = await post('/api/market/activations', { playerId: 20, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
   return { status: res.status, body: (await res.json()) as { ok?: boolean; listingId?: number; askPrice?: number; firstBidDeadline?: string; error?: string } };
 }
 
@@ -167,7 +170,7 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
 
   it('自己队的球员不可激活；无合同的训练营球员不可激活；正式球员现在可按倍数价激活', async () => {
     const fx = await seedTrainee(freshEnv());
-    const own = await post('/api/market/activations', { playerId: 20 }, 'tok-coach', fx.env);
+    const own = await post('/api/market/activations', { playerId: 20, proofMediaKey: proofKey(fx.ownerClub) }, 'tok-coach', fx.env);
     expect(own.status).toBe(400);
 
     fx.sqlite.exec(
@@ -178,10 +181,10 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
        INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
          (22, 'fc22', '没合同', ${fx.ownerClub}, 'GK', 19, 60, 80, 8, 'trainee');`,
     );
-    const noContract = await post('/api/market/activations', { playerId: 22 }, 'tok-coach2', fx.env);
+    const noContract = await post('/api/market/activations', { playerId: 22, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
     expect(noContract.status).toBe(400);
     // §6.2：正式球员同样可被激活（导入遗留合同无保护期刻度 protection_ticks=NULL → 保护期外 1 倍价 20m）
-    const formal = await post('/api/market/activations', { playerId: 21 }, 'tok-coach2', fx.env);
+    const formal = await post('/api/market/activations', { playerId: 21, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
     expect(formal.status).toBe(201);
     expect(((await formal.json()) as { askPrice: number }).askPrice).toBe(20);
   });
@@ -267,7 +270,7 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
        INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
          (2, 21, ${fx.ownerClub}, 20, 2, 'formal', 1, '2026-06-01');`,
     );
-    const formal = await post('/api/market/activations', { playerId: 21 }, 'tok-coach2', fx.env);
+    const formal = await post('/api/market/activations', { playerId: 21, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
     expect(formal.status).toBe(201);
     const { listingId } = (await formal.json()) as { listingId: number };
     await expireActivationWindow(fx, listingId);
@@ -389,5 +392,85 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     const res = await post('/api/market/listings', { playerId: 20, askPrice: 5 }, 'tok-coach', fx.env);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain('训练营球员不挂牌');
+  });
+});
+
+describe('激活通知证据制（v6.4.0 改动 4）', () => {
+  function rawPost(path: string, contentType: string, body: string, token: string, env: Env) {
+    return app.request(path, { method: 'POST', headers: { 'content-type': contentType, Cookie: `whl_session=${token}` }, body }, env);
+  }
+
+  function stubR2(env: Env): Map<string, string> {
+    const store = new Map<string, string>();
+    (env as { MEDIA: unknown }).MEDIA = {
+      put: async (key: string, _value: ArrayBuffer, opts: { httpMetadata: { contentType: string } }) => {
+        store.set(key, opts.httpMetadata.contentType);
+        return key;
+      },
+      get: async (key: string) =>
+        store.has(key)
+          ? { httpMetadata: { contentType: store.get(key) }, writeHttpMetadata: () => {}, arrayBuffer: async () => new ArrayBuffer(1), httpEtag: null }
+          : null,
+    };
+    return store;
+  }
+
+  it('上传端点：图片过、key 归属激活方、非图片 400；截图必填与归属校验；落库 + 站内信', async () => {
+    const fx = await seedTrainee(freshEnv());
+    stubR2(fx.env);
+    const badType = await rawPost('/api/media/activation', 'text/plain', 'x', 'tok-coach2', fx.env);
+    expect(badType.status).toBe(400);
+    const up = await rawPost('/api/media/activation', 'image/png', 'fakepng', 'tok-coach2', fx.env);
+    expect(up.status).toBe(201);
+    const { key } = (await up.json()) as { key: string };
+    expect(key).toMatch(new RegExp(`^activation/${fx.buyerClub}/`));
+
+    const noProof = await post('/api/market/activations', { playerId: 20 }, 'tok-coach2', fx.env);
+    expect(noProof.status).toBe(400);
+    expect(((await noProof.json()) as { error: string }).error).toContain('截图');
+    const foreign = await post('/api/market/activations', { playerId: 20, proofMediaKey: proofKey(fx.ownerClub) }, 'tok-coach2', fx.env);
+    expect(foreign.status).toBe(400);
+
+    const ok = await post('/api/market/activations', { playerId: 20, proofMediaKey: key }, 'tok-coach2', fx.env);
+    expect(ok.status).toBe(201);
+    const { listingId } = (await ok.json()) as { listingId: number };
+    const stored = sqlGet<{ activation_proof: string | null }>(fx.sqlite, 'SELECT activation_proof FROM listings WHERE id = ?', listingId);
+    expect(stored?.activation_proof).toBe(key);
+    expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'activation_notice'")).toBeDefined();
+  });
+
+  it('举报：只建核查任务不改挂牌状态、重复 409、非被激活方 403、通知激活方、管理端 resolve 收口', async () => {
+    const fx = await seedTrainee(freshEnv());
+    const { body } = await activateTrainee(fx);
+    const listingId = body.listingId!;
+    // 落首价 → matched_pending（正式合同没有，训练营直接进待审；这里用 listed 态举报同样成立）
+    const report = await post(`/api/market/listings/${listingId}/activation-report`, {}, 'tok-coach', fx.env);
+    expect(report.status).toBe(201);
+    const task = sqlGet<{ id: number; status: string; payload: string }>(fx.sqlite, "SELECT id, status, payload FROM review_tasks WHERE type = 'activation_report'");
+    expect(task).toMatchObject({ status: 'open' });
+    expect(JSON.parse(task!.payload)).toMatchObject({ activatorClubId: fx.buyerClub, sellerClubId: fx.ownerClub });
+    // 举报不冻结：挂牌状态原样（不自动改数据）
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)).toMatchObject({ status: 'listed' });
+    // 重复举报 409；激活方不能举报自己提交的激活 403
+    expect((await post(`/api/market/listings/${listingId}/activation-report`, {}, 'tok-coach', fx.env)).status).toBe(409);
+    expect((await post(`/api/market/listings/${listingId}/activation-report`, {}, 'tok-coach2', fx.env)).status).toBe(403);
+    expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'activation_reported'")).toBeDefined();
+    // 管理端队列可见 report 行，resolve 收口
+    const queue = await get('/api/admin/reviews?status=open', 'tok-admin', fx.env);
+    const row = ((await queue.json()) as { reviews: { id: number; kind: string; report: { proofKey: string | null } | null }[] }).reviews.find((r) => r.kind === 'activation_report');
+    expect(row?.report).toMatchObject({ proofKey: sqlGet<{ activation_proof: string }>(fx.sqlite, 'SELECT activation_proof FROM listings WHERE id = ?', listingId)?.activation_proof ?? null });
+    const resolve = await post(`/api/admin/reviews/${row!.id}/resolve`, { note: '截图属实' }, 'tok-admin', fx.env);
+    expect(resolve.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM review_tasks WHERE id = ?', row!.id)).toMatchObject({ status: 'approved' });
+    expect((await post(`/api/admin/reviews/${row!.id}/resolve`, {}, 'tok-admin', fx.env)).status).toBe(409);
+  });
+
+  it('匹配路径通知：匹配 / 放行 / 到期各发对应模板（notification 模板渲染冒烟）', async () => {
+    const { renderNotification } = await import('../src/worker/notify.ts');
+    expect(renderNotification('activation_notice', { player: '小将', activatorName: '激活队', fee: 5 })).toContain('截图');
+    expect(renderNotification('activation_matched', { listingId: 1, newReleaseFee: 8, previousBid: 5 })).toContain('匹配');
+    expect(renderNotification('activation_passed', { listingId: 1 })).toContain('放行');
+    expect(renderNotification('activation_match_expired', { listingId: 1, player: '小将' })).toContain('匹配窗');
+    expect(renderNotification('activation_reported', { listingId: 1 })).toContain('举报');
   });
 });

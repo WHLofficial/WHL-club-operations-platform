@@ -10,7 +10,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiPost, apiPut, type ContractDto } from '../../lib/api.ts';
+import { apiPost, apiPut, apiUpload, type ContractDto } from '../../lib/api.ts';
 import { qk, useBoard, useOffersInvalidation } from '../../lib/queries.ts';
 
 export interface SideOpsPlayer {
@@ -22,7 +22,7 @@ export interface SideOpsPlayer {
   notForSale: boolean;
 }
 
-type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent';
+type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'activate';
 
 function round2(x: number): number {
   return Math.round((x + Number.EPSILON) * 100) / 100;
@@ -68,6 +68,8 @@ export function SideOps({
   const [renewFee, setRenewFee] = useState('');
   const [askPrice, setAskPrice] = useState('');
   const [freeFee, setFreeFee] = useState('');
+  // 激活证据截图（v6.4.0 改动 4：证据制，激活必附 QQ 通知截图）
+  const [proofFile, setProofFile] = useState<File | null>(null);
 
   // 草稿只在换球员时重置：保存后数据刷新（player 字段值变化）会把用户在刷新窗口内的
   // 下一次操作覆盖掉（草稿回跳、保存按钮失效），所以刻意不依赖字段值。
@@ -78,6 +80,7 @@ export function SideOps({
     setNfsDraft(player.notForSale);
     setPanel(null);
     setArmed(false);
+    setProofFile(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上：只跟随 player.id
   }, [player.id]);
 
@@ -127,6 +130,42 @@ export function SideOps({
       return '报价设置已保存。';
     });
   }
+
+  // 激活提交（v6.4.0 改动 4）：先传 QQ 通知截图拿 key，再带 key 建激活挂牌
+  function submitActivation() {
+    if (!proofFile) return;
+    void run(async () => {
+      const up = await apiUpload<{ key: string }>('/api/media/activation', proofFile.type, proofFile);
+      await apiPost('/api/market/activations', { playerId: player.id, proofMediaKey: up.key });
+      return '激活挂牌已提交：出价窗内落首价才算数。';
+    });
+  }
+
+  const activatePanel = (
+    <>
+      <label className="side-field">
+        <span className="side-lab">
+          <span>QQ 通知截图</span>
+          <span className="side-range mono">≤ 5MB</span>
+        </span>
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
+          aria-label="QQ 通知截图"
+        />
+      </label>
+      <p className="side-sub">证据制：先上传你在 QQ 里通知对方俱乐部的截图（png / jpg / webp），再提交激活。对方如未收到通知可以举报，管理组会核查截图。</p>
+      <div className="side-btns">
+        <button type="button" className="btn btn-sm" disabled={busy || !proofFile} onClick={submitActivation}>
+          提交激活
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => setPanel(null)}>
+          取消
+        </button>
+      </div>
+    </>
+  );
 
   let body: ReactElement | null;
   if (!isCoach) {
@@ -394,24 +433,18 @@ export function SideOps({
     body = (
       <section className="side-sec">
         <div className="side-sec-head">球队操作</div>
-        <div className="side-btns">
-          <button type="button" className="btn btn-sm" disabled title="此球员为非卖品">
-            报价
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
-            disabled={busy || !windowOpen}
-            onClick={() =>
-              void run(async () => {
-                await apiPost('/api/market/activations', { playerId: player.id });
-                return '激活挂牌已提交：出价窗内落首价（固定 5m）才算数。';
-              })
-            }
-          >
-            激活
-          </button>
-        </div>
+        {panel === 'activate' ? (
+          activatePanel
+        ) : (
+          <div className="side-btns">
+            <button type="button" className="btn btn-sm" disabled title="此球员为非卖品">
+              报价
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen} onClick={() => setPanel('activate')}>
+              激活
+            </button>
+          </div>
+        )}
         <p className="side-sub">此球员为非卖品！激活不受非卖品限制。</p>
       </section>
     );
@@ -527,27 +560,15 @@ export function SideOps({
               </button>
             </div>
           </>
+        ) : panel === 'activate' ? (
+          activatePanel
         ) : (
           <div className="side-btns">
             <button type="button" className="btn btn-sm" disabled={busy || !windowOpen} onClick={() => setPanel('offer')}>
               报价
             </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              disabled={busy || !windowOpen}
-              onClick={() => {
-                if (!armed) {
-                  setArmed(true);
-                  return;
-                }
-                void run(async () => {
-                  await apiPost('/api/market/activations', { playerId: player.id });
-                  return '激活挂牌已提交：出价窗内落首价才算数。';
-                });
-              }}
-            >
-              {armed ? '确认激活' : '激活'}
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen} onClick={() => setPanel('activate')}>
+              激活
             </button>
           </div>
         )}
