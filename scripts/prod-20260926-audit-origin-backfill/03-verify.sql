@@ -4,6 +4,8 @@
 --   user = 23、cron_tick = 74、backchannel = 3、lazy_settle = 0、machine = 0、其它 = 0，
 --   bad1 / bad2 / bad3 / bad4 全为 0。
 -- 若你跑 02 的时间晚于 2026-09-26，total 与 user 桶会更大（新增的人类行），其余不变。
+-- 2026-09-26 实测（回填后）：total 100、null_origin 0、user 23、cron_tick 74、backchannel 3、
+--   lazy_settle 0、machine 0、other 0，bad1–bad4 全 0 —— 与期望逐项一致。
 
 SELECT
   (SELECT COUNT(*) FROM audit_log) AS total,

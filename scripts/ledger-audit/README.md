@@ -67,6 +67,7 @@ v6.3.0 之前，账本（`ledger_entries`）只保证**钱对不对**（流水 +
 - 该笔扩建的实际影响面：`club 33` 历史最大上座 **10140** < 原 `capacity 12000` < 扩建后 `12500` ⇒ 从未影响过任何一场的上座或收入，回滚的业务影响为零。
 - 订正后（v6.3.1 已在生产执行，见 `scripts/prod-20260926-rollback-stadium-expand/README.md`）：`stadiums` club 33 回到 `capacity=12000`/`build_credit=0`；`ledger_entries` 163 笔，新增补偿流水 `id=163`（`manual_adjust` +0.5，`balance_after=56.51`，memo 指回原流水 `id=141`）；**原流水 id=141 未删未改**（账本只增，删行会破坏 `balance_after` 链）；守恒断言 `Σbalance − Σamount = 0`。
 - `audit_log` 二次普查（2026-09-26，v6.3.2 回填预检，只读 `Rows written = 0`）：共 **100 行 / max_id 100**，action 分布 `result_confirm 74（actor=0）` / `auth_login 15` / `auth_backchannel_logout 3（actor=0）` / `season_bind_tournament 3` / `club_bind 3` / `auth_logout 1` / `season_create 1`；**财政类审计仍为 0 条**（v6.3.1 的三处人类留痕尚未在生产产生过数据，因为此后没有球场/冠名/审核类操作）。origin 回填口径与期望值见 `scripts/prod-20260926-audit-origin-backfill/README.md`。
+- `audit_log` 三次普查（2026-09-26，**回填已执行后**，只读）：仍 **100 行 / max_id 100**，`origin` 无 NULL 残留 —— `cron_tick 74`（`result_confirm`，actor=0）/ `user 23`（`auth_login` 15、`season_bind_tournament` 3、`club_bind` 3、`auth_logout` 1、`season_create` 1）/ `backchannel 3`（`auth_backchannel_logout`，actor=0）/ `lazy_settle 0`（尚无市场成交）/ `machine 0`；反例 `bad1`–`bad4` 全 0。执行记录见 `scripts/prod-20260926-audit-origin-backfill/README.md` §执行结果。
 
 ## 7. 权威锚点
 

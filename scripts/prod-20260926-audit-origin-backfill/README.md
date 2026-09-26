@@ -1,6 +1,6 @@
 # 生产数据订正 · audit_log.origin 历史行回填
 
-**状态：工件已就绪，未执行生产写。** 执行前需单独授权。
+**状态：已执行（2026-09-26）。** 100 行全部回填，验收 `null_origin = 0`、`bad1`–`bad4` 全 0（见「执行结果」）。回滚见 `99-rollback.sql`。
 
 ## 背景
 
@@ -97,6 +97,45 @@ npx wrangler d1 execute whl-club --remote --json \
 | `other_rows` | 0 |
 | `bad1` / `bad2` / `bad3` / `bad4` | 全 0 |
 
+## 执行结果（2026-09-26，已落地生产）
+
+回填前再次只读预检，确认工件假设仍成立：`total = 100`、`max_id = 100`、`origin IS NULL = 100`、`origin IS NOT NULL = 0`（⇒ 迁移与新代码上线后还没有新审计行写入）、`id > 100` 的 NULL 行 **0** 条（⇒ `99-rollback.sql` 的 `id <= 100` 边界仍准确）。
+
+`02-backfill.sql` 执行（`npx wrangler d1 execute whl-club --remote --yes --file=…`）：
+
+```
+Total queries executed: 4    Rows read: 452    Rows written: 200    Database size: 31.37 MB
+sql_duration_ms 4.10   changed_db true   served_by v3-prod (APAC / KIX)
+```
+
+`03-verify.sql` 第一条回读（只读，`Rows written = 0`）：**与期望逐项一致**。
+
+| 字段 | 期望 | 实测 |
+| --- | --- | --- |
+| `total` | 100 | **100** |
+| `null_origin` | 0 | **0** |
+| `user_rows` | 23 | **23** |
+| `cron_tick_rows` | 74 | **74** |
+| `backchannel_rows` | 3 | **3** |
+| `lazy_settle_rows` | 0 | **0** |
+| `machine_rows` | 0 | **0** |
+| `other_rows` | 0 | **0** |
+| `bad1` / `bad2` / `bad3` / `bad4` | 全 0 | **全 0** |
+
+回填后按 (origin, action, actor) 的分布（回填后实测）：
+
+| origin | action | actor | 行数 | 时间跨度 |
+| --- | --- | --- | --- | --- |
+| `backchannel` | `auth_backchannel_logout` | 0 | 3 | 2026-09-20T05:49:18.629Z → 2026-09-23T04:52:49.193Z |
+| `cron_tick` | `result_confirm` | 0 | 74 | 2026-09-20T05:45:06.359Z → 2026-09-25T13:15:37.697Z |
+| `user` | `auth_login` | 1 / 13 / 14 / 18 | 7 / 6 / 1 / 1 | 2026-09-20T05:49:36.836Z → 2026-09-26T05:08:41.884Z |
+| `user` | `season_bind_tournament` | 1 | 3 | 2026-09-18T00:32:30.356Z → 2026-09-18T00:32:41.709Z |
+| `user` | `auth_logout` | 1 | 1 | 2026-09-20T05:49:14.804Z |
+| `user` | `club_bind` | 13 / 14 / 18 | 1 / 1 / 1 | 2026-09-21T07:38:28.546Z → 2026-09-24T04:50:13.677Z |
+| `user` | `season_create` | 1 | 1 | 2026-09-18T00:32:17.537Z |
+
+**未执行**：`99-rollback.sql`（不需要）。**未做**：`actor = 0` 的历史哨兵保持原样（见「回填口径」的刻意不做）。
+
 ## 回滚
 
 ```bash
@@ -112,4 +151,6 @@ npx wrangler d1 execute whl-club --remote --file=scripts/prod-20260926-audit-ori
 | 工件（01/02/03/99 + 本 README） | ✅ 已就绪 |
 | 只读预检（本 README 的快照） | ✅ 已跑（2026-09-26，Rows written = 0） |
 | `npm run db:migrate:remote`（加 origin 列） | ✅ 已执行（2026-09-26T08:26Z 前，`Executed 3 commands in 2.13ms`；回读 `audit_log` 末列 `origin:TEXT`、`idx_audit_log_origin (origin, id DESC)` 在场，100 行 `origin` 全 NULL） |
-| `02-backfill.sql`（写生产） | ⬜ 未执行，需单独授权 |
+| `02-backfill.sql`（写生产） | ✅ 已执行（2026-09-26，`Rows written = 200`、`Total queries executed = 4`、`changed_db true`） |
+| `03-verify.sql`（只读验收） | ✅ 已执行（2026-09-26，`null_origin = 0`、五个桶 23/74/3/0/0、`bad1`–`bad4` 全 0） |
+| `99-rollback.sql` | ⬜ 未执行（无需回滚） |

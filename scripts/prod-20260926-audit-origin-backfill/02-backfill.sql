@@ -4,6 +4,7 @@
 -- 口径：只填「按旧代码能确凿认定触发通道」的行；认不出的留 NULL（NULL = 历史行 / 未知，不猜）。
 -- 每条都带 `origin IS NULL` 守卫 ⇒ 重跑时 changes 全为 0。
 -- 2026-09-26 预检快照（100 行）：① 0 条、② 74 条、③ 3 条、④ 23 条，合计 100 条，回填后无 NULL 残留。
+-- 2026-09-26 已执行：Total queries executed = 4、Rows written = 200、changed_db true；验收 null_origin = 0、bad1–bad4 全 0（结果见 README §执行结果）。
 
 -- ① 惰性结算：业务请求顺手结算过期项（读市场 / 报价 / 谈判列表时触发）。
 --    旧代码这条路径的 actor 就是 NULL（settleOverdue 无 actor）；actor 非空的同类 action 是人类入口，走 ④。
