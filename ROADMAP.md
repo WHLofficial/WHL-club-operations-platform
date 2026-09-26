@@ -1095,6 +1095,23 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **部署边界（等指令）**：无迁移、无生产写 ⇒ 直接 push 即可（CF 自动部署）；部署后按 README §6 口径重跑 `scripts/measure-d1-reads.mjs` 更新 `measurements-after.json`（该文件反映线上端点，未部署前仍是旧代码读数）。
 
+## v6.5.0 · 球员「标记」属性（🔴🟡🟢）+ 队徽方框修复（2026-09-26）
+
+**状态**：代码完成、本地全绿，**未 push 未部署**（等指令）。判级 minor：新增用户可见能力（标记列/筛选/排序/球员卡徽标）+ 迁移 `0042`。**含生产 DDL**（表达式索引，apply 一次性写 ≈18,301 行）⇒ 部署有「先 apply 0042 再 push」顺序约束（代码 SELECT/筛选引用同源表达式，但表达式不依赖新列——**严格说 push 不依赖迁移**，索引只服务读量优化；仍按惯例先迁移后 push）。
+
+**缘起与裁决**：用户脑暴提出把注册合规的三档限制映射为 🔴🟡🟢 标记展示到球员列表与面板，并探查「能否实时计算而非落库」。三个裁决点（AskUserQuestion + 追加消息）：① **阈值沿用 squad-rules 现行三档**（🔴 ge90=初始CA≥90 / 🟡 ge87=87-89 / 🟢 growth=＜87 且 PA≥87 且可成长；用户最初口径 ≥87/84-86/＜84&PA≥84 与实现不一致，经确认按实现为准）；② **要筛选+排序** ⇒ 后端 CASE 表达式（不落库）+ 迁移 0042 表达式索引随本批建（用户「要随本批建立索引」）；③ 属性名就叫「**标记**」；面板侧标记放**球员卡右上**（用户中途改定）。**实时计算结论成立**：标记是 `COALESCE(base_ca, ca)` + `pa` + `growable` 的纯函数，前端列表响应本就带回全部原料，展示层零存储；只有筛选/排序需要 SQL 表达式与索引。
+
+**交付**（提交 `0221e29` + `f0e959f`，前者后走过 code-review）
+- `src/core/squad-rules.ts`：`PlayerMarker` 三值类型 + `MARKER_WEIGHT`（🔴3→🟡2→🟢1→无标记0）+ `markerOf()` 纯函数 + `markerWeightSql(qualified)`（查询侧限定名 / 索引侧非限定名——SQLite 禁止索引表达式里的限定列名，0038 已踩过）；判定与 `checkSquad` 三档计数同口径。
+- 迁移 `0042_players_marker_index.sql`：`idx_players_sort_marker` 权重 CASE 表达式索引（尾列带 id 供 keyset 游标）；回滚 `DROP INDEX idx_players_sort_marker`。
+- `src/worker/routes/players.ts`：排序键 `marker`（权重 keyset）；筛选 `?marker=ge90,ge87` 逗号多值 → 权重表达式 `IN (…)`（标记是派生值没有裸列，不走 `eqFilter` 双写法）；列表响应 `marker`（JS 侧 `markerOf` 现算，与 view 口径无关）+ 详情响应 `marker`（`PLAYER_DETAIL_COLUMNS` 加 `base_ca`）；`SORT_KEY_NAMES` 29 → 30。
+- 前端：`players-library.ts` 加「标记」可选列（`MARKER_EMOJI`/`MARKER_LABEL`）+ 筛选状态 + URL 互转 + 摘要条 chip；`PlayersLibrary.tsx` 列渲染（**不落三档整格空置**，不出「—」）；`FilterPanel.tsx` 「标记」下拉；`Player.tsx` 球员卡右上徽标（悬停出全称，不落档不显示）。
+- **队徽方框修复（`f0e959f`）**：v6.4.0 改动 7 把 `border-radius:50%` 抽进 `.team-logo-round` 后，`.team-logo` 常驻的 `1px var(--border)` 在方形徽上显形成方框（圆角时代边框贴圆走所以隐形）；边框跟着圆角搬进 `.team-logo-round`，球队列表圆形徽外观不变。
+
+**实测与验收**：typecheck 三份全清；vitest **53 文件 / 803 例全绿**（v6.4.1 基线 53/789，净 +14 = markerOf 边界 5 + 路由 4 + 同源锁/EXPLAIN 3 + 前端夹具补字段；`INDEXED_SORTS` 19 条）；build 成功；e2e **11/11**（首轮 ④ 抖动为 dev server 冷启动，复跑两轮全过）；本地 D1 已跑 0042（`--local --file`），`/api/players?marker=ge90` 冒烟出 `marker:"ge90"`。**评审发现（定性可接受）**：`sort=marker&marker=ge90` 同键组合落 `TEMP B-TREE FOR ORDER BY`——被排序的只是等值命中组（🔴 组受每队 1 名约束全联盟 ≤20 人、🟡≤~80、🟢≤~120），代价可忽略；标记无裸列，v6.4.1 的裸列写法不适用，EXPLAIN 锁只锁 `sort=marker` 纯排序与 `marker=…` 纯筛选（异键）两形状。
+
+**部署边界（等指令）**：先 apply `0042`（≈18,301 行写，占日配额 18.3%）→ push（CF 自动部署）；部署后量 `marker` 筛选/排序读数落 `measurements-after.json`。
+
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。

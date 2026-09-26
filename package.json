@@ -2,7 +2,7 @@
   "name": "whl-club",
   "private": true,
   "type": "module",
-  "version": "6.4.1",
+  "version": "6.5.0",
   "scripts": {
     "dev": "wrangler dev --port 8791",
     "dev:oidc": "wrangler dev --port 8795 --var OIDC_ISSUER:http://127.0.0.1:8792 --var OIDC_CLIENT_ID:club",
