@@ -81,7 +81,8 @@ function statusFilter(raw: string | undefined): string[] {
   }
 }
 
-// GET /api/market/listings?status=&cursor= —— 转会区（卡柜）
+// GET /api/market/listings?status=&cursor=&player_id= —— 转会区（卡柜）
+// player_id（v6.4.0 改动 6）：按球员查现行挂牌（球员页左栏出价途径用），与 status 过滤叠加。
 app.get('/market/listings', async (c) => {
   await settleOverdue(c.env, { origin: 'lazy_settle' });
   const statuses = statusFilter(c.req.query('status'));
@@ -92,6 +93,12 @@ app.get('/market/listings', async (c) => {
     if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'cursor 不对');
     cursor = n;
   }
+  let playerId: number | null = null;
+  if (c.req.query('player_id') !== undefined) {
+    const n = Number(c.req.query('player_id'));
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'player_id 应为球员 ID');
+    playerId = n;
+  }
   const ph = statuses.map(() => '?').join(', ');
   const rows = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
@@ -101,15 +108,17 @@ app.get('/market/listings', async (c) => {
      FROM listings l
      JOIN players p ON p.id = l.player_id
      JOIN clubs cl ON cl.id = l.seller_club_id
-     WHERE l.status IN (${ph}) ${cursor !== null ? 'AND l.id < ?' : ''}
+     WHERE l.status IN (${ph}) ${cursor !== null ? 'AND l.id < ?' : ''} ${playerId !== null ? 'AND l.player_id = ?' : ''}
      ORDER BY l.id DESC LIMIT 50`,
   )
-    .bind(...statuses, ...(cursor !== null ? [cursor] : []))
+    .bind(...statuses, ...(cursor !== null ? [cursor] : []), ...(playerId !== null ? [playerId] : []))
     .all<ListingRow>();
 
-  // 出价聚合（最高价 + 出价次数），IN 分块 ≤90（§17）
+  // 出价聚合（最高价 + 出价次数 + 领先出价方，改动 5），IN 分块 ≤90（§17）。
+  // 领先出价方 = active 出价（每单至多一条：新出价落库即把旧 active 全部 superseded）。
   const ids = rows.results.map((r) => r.id);
   const agg = new Map<number, { highest: number; count: number }>();
+  const leader = new Map<number, { id: number; name: string }>();
   for (let i = 0; i < ids.length; i += 90) {
     const slice = ids.slice(i, i + 90);
     const ph2 = slice.map(() => '?').join(', ');
@@ -119,6 +128,14 @@ app.get('/market/listings', async (c) => {
       .bind(...slice)
       .all<{ listing_id: number; highest: number; count: number }>();
     for (const b of bidRows.results) agg.set(b.listing_id, { highest: b.highest, count: b.count });
+    const activeRows = await c.env.DB.prepare(
+      `SELECT b.listing_id, b.club_id, cl.name AS club_name
+       FROM bids b JOIN clubs cl ON cl.id = b.club_id
+       WHERE b.listing_id IN (${ph2}) AND b.status = 'active'`,
+    )
+      .bind(...slice)
+      .all<{ listing_id: number; club_id: number; club_name: string }>();
+    for (const b of activeRows.results) leader.set(b.listing_id, { id: b.club_id, name: b.club_name });
   }
 
   const ctx = await loadMarketContext(c.env.DB);
@@ -151,6 +168,7 @@ app.get('/market/listings', async (c) => {
         lastBidAt: r.last_bid_at,
         bidPaused: r.bid_paused === 1,
         highestBid: a?.highest ?? null,
+        highestBidder: leader.get(r.id) ?? null,
         bidCount: a?.count ?? 0,
         activatedBy: r.activated_by,
         activationDeadline: r.activation_deadline,

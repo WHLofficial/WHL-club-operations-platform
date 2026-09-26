@@ -302,8 +302,29 @@ describe('出价与资金冻结（§6.4-1 / §7.4）', () => {
     ).toThrow(/WHL_BID_REJECT_DEADLINE/);
   });
 
-  it('卖家不能自抬价；资金只够一单时第二单被拒（不双花，§16）', async () => {
+  it('列表聚合带领先出价方队名 + player_id 过滤（v6.4.0 改动 5/6）', async () => {
     const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
+
+    const res = await get('/api/market/listings?status=all', 'tok-viewer', fx.env);
+    const body = (await res.json()) as { listings: { player: { id: number }; highestBid: number | null; highestBidder: { id: number; name: string } | null }[] };
+    const row = body.listings.find((l) => l.player.id === 10);
+    expect(row?.highestBid).toBe(15);
+    expect(row?.highestBidder).toMatchObject({ id: mf.bidderClub, name: '竞标队' });
+
+    const byPlayer = await get('/api/market/listings?status=all&player_id=10', 'tok-viewer', fx.env);
+    const bp = (await byPlayer.json()) as { listings: { player: { id: number } }[] };
+    expect(bp.listings).toHaveLength(1);
+    expect(bp.listings[0].player.id).toBe(10);
+    const miss = await get('/api/market/listings?status=all&player_id=11', 'tok-viewer', fx.env);
+    expect(((await miss.json()) as { listings: unknown[] }).listings).toHaveLength(0);
+    const bad = await get('/api/market/listings?status=all&player_id=abc', 'tok-viewer', fx.env);
+    expect(bad.status).toBe(400);
+  });
+
+  it('卖家不能自抬价；资金只够一单时第二单被拒（不双花，§16）', async () => {    const fx = freshEnv();
     const mf = await seedMarket(fx);
     await listPlayer(mf, 10, 15);
     const self = await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach', fx.env);

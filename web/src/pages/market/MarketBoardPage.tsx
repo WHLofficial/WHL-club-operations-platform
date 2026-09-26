@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { apiPost, type BidPlaceResult, type MarketListing, type MarketListingDetail, type MatchDecisionResult } from '../../lib/api.ts';
+import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import { useListingDetail, useMarketInvalidation, useBoard, useMyBids, useMyClub, type MarketMyClub } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { playerPath } from '../../lib/player-link.ts';
@@ -160,7 +161,9 @@ function MarketCard({
       </div>
       <div className="market-card-price">
         <span className="stat-label">当前最高</span>
-        <span className="mono gold-text">{money(listing.highestBid)} m</span>
+        <span className="mono gold-text">
+          {listing.highestBidder ? `${listing.highestBidder.name} · ${money(listing.highestBid)} m` : `${money(listing.highestBid)} m`}
+        </span>
       </div>
       <div className="market-card-foot">
         <span>
@@ -203,8 +206,6 @@ function DetailSection({
   onError: (msg: string) => void;
 }) {
   const l = detail.listing;
-  const [amount, setAmount] = useState<string>(String(l.nextMinBid));
-  const [busy, setBusy] = useState(false);
   const [matchFee, setMatchFee] = useState<string>('');
   const [matchBusy, setMatchBusy] = useState(false);
   const [passArmed, setPassArmed] = useState(false);
@@ -238,14 +239,9 @@ function DetailSection({
               ? `激活首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价（${deadlineText(l.activationDeadline, '')} 前须落价）。`
               : null;
 
-  async function submit() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await onBid(l.firstBidPending && isActivator ? l.askPrice : Number(amount));
-    } finally {
-      setBusy(false);
-    }
+  // 激活首价金额固定为挂牌价（mode 交给共享表单），普通竞价金额由表单输入
+  async function submit(amount: number) {
+    await onBid(amount);
   }
 
   // 被激活方的匹配决定：新 RC 必须高于首价（整数 m），差额在审核通过时销毁
@@ -301,37 +297,16 @@ function DetailSection({
       {bidHint && <p className="hint">{bidHint}</p>}
 
       {canBid && l.firstBidPending && isActivator && (
-        <div className="inline-form">
-          <button className="btn" type="button" disabled={busy} onClick={submit}>
-            {busy ? '出价中…' : `落激活首价（${money(l.askPrice)} m）`}
-          </button>
+        <>
+          <MarketBidForm mode="activation-first" askPrice={l.askPrice} nextMinBid={l.nextMinBid} available={available} onBid={submit} />
           <span className="hint">
-            激活金额固定，出价即冻结；{deadlineText(l.activationDeadline, '')} 前不落价，激活作废还占本窗额度。
+            {deadlineText(l.activationDeadline, '')} 前不落价，激活作废还占本窗额度。
           </span>
-        </div>
+        </>
       )}
 
       {canBid && !l.firstBidPending && l.matchPhase === null && (
-        <div className="inline-form">
-          <div className="field">
-            <label htmlFor="bid-amount">出价（m）</label>
-            <input
-              id="bid-amount"
-              className="mono"
-              type="number"
-              min={l.nextMinBid}
-              step="0.5"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </div>
-          <button className="btn" type="button" disabled={busy || Number(amount) < l.nextMinBid} onClick={submit}>
-            {busy ? '出价中…' : `出价（至少 ${l.nextMinBid.toFixed(2)} m）`}
-          </button>
-          <span className="hint">
-            出价即冻结资金{available !== null ? <>，当前可支配 {money(available)} m</> : null}。
-          </span>
-        </div>
+        <MarketBidForm mode="normal" askPrice={l.askPrice} nextMinBid={l.nextMinBid} available={available} onBid={submit} />
       )}
 
       {isSeller && l.matchPhase === 'matching' && (

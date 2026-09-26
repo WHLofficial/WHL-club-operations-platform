@@ -2541,12 +2541,16 @@ th.num .th-sort {
 
 /* ---------- 球队页（v3.4.0）：分级分段卡片 ---------- */
 
-/* 队徽：有图出圆形图，没有就按队名哈希出首字色块（镜像赛事平台 TeamLogo） */
+/* 队徽：有图出徽图，没有就按队名哈希出首字色块（镜像赛事平台 TeamLogo）。
+   v6.4.0 改动 7：圆形抽进 .team-logo-round —— 用户裁决「除了球队列表，其他都去掉」，
+   Clubs 列表照旧圆形，详情页与球员页用方形徽。 */
 .team-logo {
   flex: none;
-  border-radius: 50%;
   object-fit: cover;
   border: 1px solid var(--border);
+}
+.team-logo-round {
+  border-radius: 50%;
 }
 .team-logo-fallback {
   display: inline-flex;

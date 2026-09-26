@@ -297,7 +297,7 @@ export default function ClubDetail() {
   return (
     <div className="container">
       <div className="club-detail-head">
-        <TeamLogo name={club.name} logoKey={club.logoKey} size={48} />
+        <TeamLogo name={club.name} logoKey={club.logoKey} size={48} circle={false} />
         <div className="club-detail-title">
           <h1>{club.name}</h1>
           <div className="club-detail-meta">

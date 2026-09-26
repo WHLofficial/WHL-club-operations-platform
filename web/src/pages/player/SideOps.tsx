@@ -11,7 +11,9 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, apiPut, apiUpload, type ContractDto } from '../../lib/api.ts';
-import { qk, useBoard, useOffersInvalidation } from '../../lib/queries.ts';
+import { qk, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation } from '../../lib/queries.ts';
+import { MarketBidForm } from '../../components/MarketBidForm.tsx';
+import { money } from '../market/shared.tsx';
 
 export interface SideOpsPlayer {
   id: number;
@@ -35,6 +37,7 @@ export function SideOps({
   isFree,
   isCpu,
   isCoach,
+  myClubId,
   windowOpen,
   pendingMine,
   show,
@@ -46,6 +49,8 @@ export function SideOps({
   isFree: boolean;
   isCpu: boolean;
   isCoach: boolean;
+  /** 我的俱乐部 id（举报判据：本队球员被别队激活时才知道「激活方不是我」） */
+  myClubId: number | null;
   windowOpen: boolean;
   /** 轮到我处理的收到报价条数（/api/offers?box=in 的 pendingMine） */
   pendingMine: number;
@@ -54,8 +59,10 @@ export function SideOps({
 }) {
   const qc = useQueryClient();
   const invalidateOffers = useOffersInvalidation();
+  const invalidateMarket = useMarketInvalidation();
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
+  const [bidBusy, setBidBusy] = useState(false);
   const [armed, setArmed] = useState(false); // 解约 / 激活这类不可逆动作的第二击
   // 报价设置草稿（v6.4.0 改动 B：最低报价/自动应答与转会名单解耦；非卖品与名单互斥自动清对方）
   const [listDraft, setListDraft] = useState(player.transferListed);
@@ -84,10 +91,11 @@ export function SideOps({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上：只跟随 player.id
   }, [player.id]);
 
-  // B 态信息源：转会区列表（公开端点两级缓存，市场页拉过就复用）
-  const boardQuery = useBoard('active');
-  const myListing =
-    player.status === 'listed' ? (boardQuery.data?.listings.find((l) => l.player.id === player.id) ?? null) : null;
+  // 挂牌态信息源（v6.4.0 改动 6）：按球员查现行挂牌（公开端点），详情给下一步最低价与出价历史。
+  // 只有教练 + 挂牌中的球员才启用查询，其余态零请求。
+  const playerListingQuery = usePlayerListing(player.id, isCoach && player.status === 'listed');
+  const activeListingId = playerListingQuery.data?.listings[0]?.id ?? null;
+  const listedDetailQuery = useListingDetail(activeListingId);
 
   const releaseFee = contract?.releaseFee ?? null;
   const offerCap = releaseFee !== null && releaseFee > 0 ? round2(releaseFee * 1.5) : null;
@@ -111,6 +119,7 @@ export function SideOps({
       void qc.invalidateQueries({ queryKey: qk.myClub });
       void qc.invalidateQueries({ queryKey: qk.squad });
       void qc.invalidateQueries({ queryKey: ['market', 'board'] });
+      void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
       refreshAll();
     } catch (err) {
       show(err instanceof Error ? err.message : '操作失败', true);
@@ -138,6 +147,31 @@ export function SideOps({
       const up = await apiUpload<{ key: string }>('/api/media/activation', proofFile.type, proofFile);
       await apiPost('/api/market/activations', { playerId: player.id, proofMediaKey: up.key });
       return '激活挂牌已提交：出价窗内落首价才算数。';
+    });
+  }
+
+  // 出价提交（v6.4.0 改动 6，别队挂牌分支）：与转会区详情同一端点，成功后联动失效
+  async function submitBid(amount: number) {
+    if (activeListingId === null || bidBusy) return;
+    setBidBusy(true);
+    try {
+      await apiPost(`/api/market/listings/${activeListingId}/bids`, { amount });
+      show('出价已提交，资金冻结中。');
+      invalidateMarket(activeListingId);
+      void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
+      refreshAll();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '出价失败', true);
+    } finally {
+      setBidBusy(false);
+    }
+  }
+
+  // 举报激活通知（v6.4.0 改动 4，被激活方）：只建管理核查任务，不冻结匹配窗
+  function reportActivation() {
+    void run(async () => {
+      await apiPost(`/api/market/listings/${activeListingId}/activation-report`, {});
+      return '举报已提交，管理组会核查对方的 QQ 通知截图。';
     });
   }
 
@@ -171,23 +205,106 @@ export function SideOps({
   if (!isCoach) {
     body = null;
   } else if (isMine && player.status === 'listed') {
+    // 本队挂牌中（含训练营球员被别队激活）：挂牌信息 + 被激活方的举报入口（v6.4.0 改动 4/6）
+    const ld = listedDetailQuery.data ?? null;
+    const l = ld?.listing ?? null;
+    const activatedByOther = l !== null && l.type === 'activation' && l.activatedBy !== null && l.activatedBy !== myClubId;
+    const leaderBid = ld?.bids.find((b) => b.status === 'active') ?? null;
     body = (
       <section className="side-sec">
         <div className="side-sec-head">转会区 · 本队挂牌中</div>
         <div className="side-row">
           <span className="attr-name">要价</span>
-          <span className="mono">{myListing ? `${myListing.askPrice.toFixed(2)} m` : '—'}</span>
+          <span className="mono">{l ? `${money(l.askPrice)} m` : '—'}</span>
         </div>
         <div className="side-row">
           <span className="attr-name">最高出价</span>
-          <span className="mono">{myListing?.highestBid != null ? `${myListing.highestBid.toFixed(2)} m` : '暂无出价'}</span>
+          <span className="mono">{l?.highestBid != null ? `${money(l.highestBid)} m` : '暂无出价'}</span>
         </div>
+        {leaderBid && (
+          <div className="side-row">
+            <span className="attr-name">领先出价方</span>
+            <span>{leaderBid.clubName}</span>
+          </div>
+        )}
         <div className="side-btns">
           <Link className="btn btn-sm" to="/market">
             去转会区
           </Link>
+          {activatedByOther && (
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={reportActivation}>
+              举报（没收到 QQ 通知）
+            </button>
+          )}
         </div>
-        <p className="side-sub">挂牌期间无任何操作；窗口结束无人出价会自动下架（收下架费）。</p>
+        {activatedByOther ? (
+          <p className="side-sub">本队球员被激活：对方声称已在 QQ 通知并提交了截图。如未收到通知可举报，管理组会核查（不影响匹配窗）。</p>
+        ) : (
+          <p className="side-sub">挂牌期间无任何操作；窗口结束无人出价会自动下架（收下架费）。</p>
+        )}
+      </section>
+    );
+  } else if (!isMine && player.status === 'listed') {
+    // 别队挂牌（v6.4.0 改动 6）：挂牌信息 + 出价途径——修掉此前落 C 态暴露必 4xx 报价/激活按钮的真缺陷
+    const ld = listedDetailQuery.data ?? null;
+    const l = ld?.listing ?? null;
+    const isActivator = myClubId !== null && l?.activatedBy === myClubId;
+    const canBid =
+      l !== null &&
+      (l.status === 'listed' || l.status === 'bidding') &&
+      l.windowOpen &&
+      !l.bidPaused &&
+      !ld?.marketBidPaused &&
+      !(l.firstBidPending && !isActivator);
+    body = (
+      <section className="side-sec">
+        <div className="side-sec-head">转会区 · 外队挂牌中</div>
+        {l === null ? (
+          <p className="side-sub">正在查这单挂牌…</p>
+        ) : (
+          <>
+            <div className="side-row">
+              <span className="attr-name">挂牌方</span>
+              <span>{l.sellerClub.name}</span>
+            </div>
+            <div className="side-row">
+              <span className="attr-name">{l.type === 'activation' ? '激活价' : '挂牌价'}</span>
+              <span className="mono">{money(l.askPrice)} m</span>
+            </div>
+            <div className="side-row">
+              <span className="attr-name">当前最高</span>
+              <span className="mono gold-text">
+                {l.highestBidder ? `${l.highestBidder.name} · ${money(l.highestBid)} m` : l.highestBid != null ? `${money(l.highestBid)} m` : '暂无出价'}
+              </span>
+            </div>
+            {canBid ? (
+              <MarketBidForm
+                mode={l.firstBidPending && isActivator ? 'activation-first' : 'normal'}
+                askPrice={l.askPrice}
+                nextMinBid={l.nextMinBid}
+                available={null}
+                onBid={submitBid}
+              />
+            ) : (
+              <p className="side-sub">
+                {!l.windowOpen
+                  ? '这单所属的转会窗口已经关了。'
+                  : l.status === 'pending_review'
+                    ? '这单已截止，正在等管理组审核。'
+                    : l.status === 'matched_pending'
+                      ? '首价已落定，正在等被激活方决定是否匹配。'
+                      : l.firstBidPending
+                        ? `激活首价窗内只有激活方可以出价。`
+                        : '这单暂时不能出价。'}
+              </p>
+            )}
+            <div className="side-btns">
+              <Link className="btn btn-sm btn-ghost" to="/market">
+                去转会区看详情
+              </Link>
+            </div>
+          </>
+        )}
       </section>
     );
   } else if (isMine && !isTrainee) {

@@ -93,6 +93,17 @@ export function useBoard(filter: string) {
   });
 }
 
+// 按球员查现行挂牌（v6.4.0 改动 6）：球员页左栏出价途径与举报入口用。
+// 只看 active（listed/bidding/matched_pending）；球员不在挂牌流程时返回空列表。
+export function usePlayerListing(playerId: number, enabled = true) {
+  return useQuery({
+    queryKey: ['market', 'listing-by-player', playerId],
+    queryFn: () => api<MarketListings>(`/api/market/listings?status=active&player_id=${playerId}`),
+    enabled: enabled && Number.isInteger(playerId) && playerId > 0,
+    staleTime: 30_000,
+  });
+}
+
 // 球队列表（v3.4.0）：公开页，一屏 20 队一次取完；服务端 clubs scope 缓存 24h，前端再叠 30s 全局 staleTime
 export function useClubsList() {
   return useQuery({

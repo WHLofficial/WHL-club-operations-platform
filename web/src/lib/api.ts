@@ -601,6 +601,8 @@ export interface MarketListing {
   lastBidAt: string | null;
   bidPaused: boolean;
   highestBid: number | null;
+  /** 领先出价方（v6.4.0 改动 5）：active 出价的俱乐部，出价历史里每单至多一条 active */
+  highestBidder: { id: number; name: string } | null;
   bidCount: number;
   activatedBy: number | null;
   activationDeadline: string | null;

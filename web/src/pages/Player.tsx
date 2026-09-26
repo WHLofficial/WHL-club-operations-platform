@@ -191,7 +191,8 @@ export default function Player() {
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<PlayerTab>('profile');
+  // 右栏默认展示属性页签（v6.4.0 改动 7，用户裁决：属性才是高频内容）
+  const [tab, setTab] = useState<PlayerTab>('attrs');
   const { show, toastNode } = useToast();
   const [armedPlan, setArmedPlan] = useState<number | null>(null);
   const [picks, setPicks] = useState<number[]>([]);
@@ -464,6 +465,7 @@ export default function Player() {
             isFree={club === null}
             isCpu={isCpu}
             isCoach={isCoach}
+            myClubId={myClubId}
             windowOpen={windowOpen}
             pendingMine={receivedPendingQuery.data?.pendingMine ?? 0}
             show={show}
@@ -733,7 +735,7 @@ function AttrSheet({
           )}
         </div>
         <div className="attr-head-side">
-          {club && <TeamLogo name={club.name} logoKey={crestLogoKey} size={96} />}
+          {club && <TeamLogo name={club.name} logoKey={crestLogoKey} size={96} circle={false} />}
           <AttrRadar values={radarValues} />
         </div>
       </div>
