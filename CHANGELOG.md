@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.5.0] · 球员「标记」属性（🔴🟡🟢）+ 队徽方框修复（2026-09-26，本地完成，未 push 未部署）
+## [v6.5.0] · 球员「标记」属性（🔴🟡🟢）+ 队徽方框修复（2026-09-26，已上线：迁移 `0042` 先 apply，push `e95122c..a8bb833` 后 CF 自动部署 Version `3bea29d7`）
 
 **新增**
 - 球员「标记」：把注册合规的三档梯度（规则 4.2.2）互斥切分成 🔴（初始CA≥90）/ 🟡（87-89）/ 🟢（＜87 且 PA≥87 且可成长），不落档无标记。**实时计算不落库**——判定是 `COALESCE(base_ca, ca)` + PA + growable 的纯函数（`src/core/squad-rules.ts` 的 `markerOf`），列表与详情响应由服务端现算（`marker` 字段）。
@@ -15,7 +15,7 @@
 **修复**
 - 队徽方框：v6.4.0 改动 7 抽走圆形后，`.team-logo` 常驻的 1px 边框在方形徽（球员页/球队详情页）上显形成方框；边框移入 `.team-logo-round`，球队列表圆形徽外观不变。
 
-**实测与验收**：typecheck 三份全清；vitest **53 文件 / 803 例全绿**（v6.4.1 基线 53/789）；`INDEXED_SORTS` 18 → 19 条；build 成功；e2e **11/11**。已知形状：`sort=marker&marker=…` 同键组合落 TEMP B-TREE，但只排等值命中组（≤~120 行）代价可忽略。**部署**：先 apply `0042` 再 push（迁移 apply 待单独授权）。
+**实测与验收**：typecheck 三份全清；vitest **53 文件 / 803 例全绿**（v6.4.1 基线 53/789）；`INDEXED_SORTS` 18 → 19 条；build 成功；e2e **11/11**。已知形状：`sort=marker&marker=…` 同键组合落 TEMP B-TREE，但只排等值命中组（≤~120 行）代价可忽略。**部署**：迁移 `0042` 先 apply（`Executed 2 commands in 47.58ms`，索引 SQL 只读核验一致）→ push 后 CF 自动部署 Version `3bea29d7`；上线回读 marker 筛选/排序全 200、线上资产 `index-BdMUWht2.js` 与本地 dist 逐字一致。
 
 ## [v6.4.1] · 筛选侧同源化——等值键按排序口径分写法（2026-09-26，本地完成，未 push 未部署）
 
