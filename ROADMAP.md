@@ -1139,6 +1139,29 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **部署边界（等指令）**：无迁移、无生产写 ⇒ 直接 push 即可（CF 自动部署）；部署后按 README §6 口径重跑 `scripts/measure-d1-reads.mjs` 补 role 形状到 `measurements-after.json`。
 
+## v6.6.1 · 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个口径）+ 成长空间筛选同源（2026-09-26）
+
+**状态**：本地已完成（typecheck / vitest / 变异验证全过），**迁移 `0043` 已 apply 到生产**（用户放行当日写额度），**未 push 未部署**（等指令）。判级 patch：结果集逐格不变，只改执行计划与读量，另加 4 条索引。
+
+**缘起与裁决**：`scripts/d1-read-audit/README.md` §5.3 的候选清单还剩 4 个可建索引的键（`growth_gap` / `china_plan` / `agent_tier` / `fc_id`）。用户裁决（原话）「现在是半夜，写额度可以尽可能全用」⇒ 不再受「自留 ≤6 万行/日」约束，按当日写额度排满 **4 条**（4 × 18,301 = 73,204；5 条必超）。选键依据都从当前代码抄：`src/core/players-sort.ts:12-43` 的 `SORT_KEY_NAMES` 里仍未建索引的可建键 = `china_plan` / `agent_tier` / `fc_id` / `growth_gap` / `influence`；四个前端可点表头列（`web/src/lib/players-library.ts:313` growth_gap / `:317` china_plan / `:318` agent_tier / `:321` fc_id）里取前三个。
+
+- **`fc_id` 顺延**：`sqlite_autoindex_players_2` 已让筛选侧 seek，只差排序侧，价值最低。
+- **`growth_gap` 两个口径同轮建**：迁移 `0036` 的注释已定下规矩 —— 只建默认视图那条，`view=initial` 仍整表扫（37,635 行/次），等于「同一列维护两条索引的一半工作却只覆盖一半场景」。
+- **明确排除**：`influence`（排序表达式是运行时参数化的 `influenceExpr(coefs)`，系数取自库里的 `influence_coef_growable` / `influence_coef_static` ⇒ 系数一改索引即失配）；合同维度键（`wage` / `release_fee` / `contract_type` / `source` / `protected` / `years` 挂在 JOIN 的 `contracts` 上，`players` 索引覆盖不到）。
+
+**交付**
+- 迁移 `src/db/migrations/0043_players_sort_indexes_batch7.sql`：`idx_players_sort_china_plan`（`COALESCE(china_plan, 0)`）、`idx_players_sort_agent_tier`（`COALESCE(agent_tier, 0)`）、`idx_players_sort_growth_gap`（`COALESCE(pa, 0) - COALESCE(ca, 0)`）、`idx_players_sort_initial_growth_gap`（初始视图口径的同一差值），均尾列 `id`；表达式侧写**非限定列名**（SQLite 报 `the "." operator prohibited in index expressions`）。
+- `tests/d1.ts` 的 `MIGRATION_FILES` 追加 `0043`；`scripts/check-sort-index-feasibility.mjs` 追加 `view-initial-pa` 与 `view-initial-growth-gap` 两条候选，真引擎 **17/17 通过**（零配额）。
+- `src/worker/routes/players.ts` 筛选侧同源化：`china_plan` / `agent_tier` 从裸列改走 `eqFilter`（同键裸列、异键同源，口径同 v6.4.1）；`growth_gap` 区间从裸差值改成 `((COALESCE(${paExpr}, 0) - COALESCE(${caExpr}, 0)) ${op} ? AND (${paExpr}) IS NOT NULL AND (${caExpr}) IS NOT NULL)` —— 差值两侧各套一层 `COALESCE` 才与索引首列逐字同源（同源前生产计划是 `SCAN`，同源后变 `SEARCH … USING INDEX`），双侧 `IS NOT NULL` 是**语义守卫**（裸差值任一侧 NULL 整行被排除，套了 `COALESCE` 会把「两边都没录」的行当成 0 放进来）。
+- `scripts/measure-d1-reads.mjs`：四条形状标签从「未建索引」改成「0043 表达式索引」，`sort-fc-id` 标注顺延，新增形状 `sort-growth-gap-initial`（`/players?limit=20&view=initial&sort=growth_gap`）。
+- `scripts/d1-read-audit/verify-0043.mjs`（新，结构 + EXPLAIN 的只读证据生成器，从 `scratch/` 提升）+ `scripts/d1-read-audit/README.md` §5.3 订正与新增第十节。
+
+**实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 826 例全绿**（v6.6.0 台账 53/810）；`tests/players-sort-indexes.test.ts` 本文件 **91 例全绿**。变异验证两处 —— 删掉 growth_gap 的双侧守卫 ⇒ **恰好 2 例红**（守卫文本锁 + NULL 语义夹具）；删掉 `eqFilter` 的同键分支 ⇒ **恰好 6 例红**；均非空转，改动后 `cp` 备份还原。
+
+**生产（2026-09-26）**：apply `echo y | npx wrangler d1 migrations apply whl-club --remote` ⇒ `Executed 5 commands in 215.43ms`、状态 ✅。**实写记账 +73,211 行**（apply 前 `whl-club` 当日写 18,721 → apply 后 **91,932 = 91.9%**；预估 73,228，差 17 是校验开销）。结构核对：`idx_players_sort_%` **19 → 23**、`tbl_name='players'` 的索引 **24 → 28**、`d1_migrations` **43** 条（末条 `0043`）。计划形状：四条纯排序均 `SCAN players USING COVERING INDEX <新索引>`（覆盖索引，只读 21 行）；`growth_gap` 区间 + 同键排序在两个视图口径下各自 `SEARCH players USING INDEX idx_players_sort_growth_gap` / `… USING COVERING INDEX idx_players_sort_initial_growth_gap`；同键等值（`china_plan=1 & sort=china_plan`、`agent_tier=2 & sort=agent_tier`）仍是 `SCAN players USING INDEX …`（裸列写法靠早停，v6.4.1 的裁决不变）。收益：`sort=china_plan` / `sort=agent_tier` / `sort=growth_gap` / `view=initial&sort=growth_gap` 四条 **37,635 → 22 行/次**（各 2 条语句、计数 0，已增量合并进 `measurements-after.json`）。
+
+**部署边界（等指令）**：迁移已 apply 到生产 ⇒ push 前不必再跑迁移；部署后按 README §6 口径重跑 `measure-d1-reads.mjs` 复核端点级读数。
+
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。

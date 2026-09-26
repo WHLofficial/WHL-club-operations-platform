@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.6.1] · 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个口径）+ 成长空间筛选同源（2026-09-26，迁移已 apply 到生产，未 push 未部署）
+
+**缘起与裁决**：`scripts/d1-read-audit/README.md` §5.3 的候选清单还剩 4 个可建索引的键，用户裁决「现在是半夜，写额度可以尽可能全用」⇒ 按当日写额度排满 **4 条**（4 × 18,301 = 73,204；5 条必超）。选 `china_plan` / `agent_tier` / `growth_gap` **两个视图口径**；`fc_id` 顺延（`sqlite_autoindex_players_2` 已让筛选侧 seek，只差排序侧）；`growth_gap` 按迁移 `0036` 定下的规矩两个口径同轮建；明确排除 `influence`（排序表达式是运行时参数化的 `influenceExpr(coefs)`，系数取自库表 ⇒ 系数一改索引即失配）与合同维度键（挂 JOIN 的 `contracts` 上，`players` 索引覆盖不到）。
+
+**新增**
+- 迁移 `0043_players_sort_indexes_batch7.sql`：`idx_players_sort_china_plan`（`COALESCE(china_plan, 0)`）、`idx_players_sort_agent_tier`（`COALESCE(agent_tier, 0)`）、`idx_players_sort_growth_gap`（`COALESCE(pa, 0) - COALESCE(ca, 0)`）、`idx_players_sort_initial_growth_gap`（初始视图口径的同一差值），均尾列 `id`；`tests/d1.ts` 的 `MIGRATION_FILES` 追加。
+- `scripts/d1-read-audit/verify-0043.mjs`（结构 + EXPLAIN 的只读证据生成器，从 `scratch/` 提升为受版本管理的工件）。
+
+**修正**
+- `src/worker/routes/players.ts`：`china_plan` / `agent_tier` 从裸列改走 `eqFilter`（同键裸列、异键同源，口径同 v6.4.1）；`growth_gap` 区间从裸差值改成两侧各套 `COALESCE` 的**同源**写法 + 双侧 `IS NOT NULL` 守卫 —— 裸差值任一侧为 NULL 整行被排除，套了 `COALESCE` 会把「两边都没录」的行当成 0 放进来。
+- `scripts/measure-d1-reads.mjs`：四条形状标签从「未建索引」改成「0043 表达式索引」，`sort-fc-id` 标注顺延，新增形状 `sort-growth-gap-initial`。
+
+**实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 826 例全绿**（v6.6.0 台账 53/810）。变异验证两处：删掉 growth_gap 的双侧守卫 ⇒ **恰好 2 例红**；删掉 `eqFilter` 的同键分支 ⇒ **恰好 6 例红**。零配额前置 `scripts/check-sort-index-feasibility.mjs` **17/17 通过**。apply（用户已放行当日写额度）：`Executed 5 commands in 215.43ms`；实写 **+73,211 行**（当日写 18,721 → **91,932 = 91.9%**）。生产核对：`idx_players_sort_%` **19 → 23**、`tbl_name='players'` 的索引 **24 → 28**、`d1_migrations` **43** 条；四条纯排序 `SCAN players USING COVERING INDEX <新索引>`（21 行/次），`growth_gap` 区间 + 同键排序在两个视图口径下各自 `SEARCH … USING INDEX`。收益：`sort=china_plan` / `sort=agent_tier` / `sort=growth_gap` / `view=initial&sort=growth_gap` 四条 **37,635 → 22 行/次**。
+
+**部署边界**：迁移已 apply 到生产，**未 push 未部署**（本仓纪律：没明说就不 push；且 push 即 CF 自动部署）。部署后按 `scripts/d1-read-audit/README.md` §6 口径重跑 `measure-d1-reads.mjs` 复核端点级读数。
+
 ## [v6.6.0] · 球员库按角色筛选（五槽 OR，不建索引）（2026-09-26，本地完成，未 push 未部署）
 
 **新增**
