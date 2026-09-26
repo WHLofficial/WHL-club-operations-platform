@@ -334,25 +334,25 @@ function buildPlayerFilters(
     filters.push(eqFilter('players.growth_tier', 'growth_tier', n, sortKey));
     filterArgs.push(n);
   }
-  // is_future_star 与迁移 0038 的索引同源（写法见 eqFilter；参数名是 is_future_star，排序键名是 future_star）；
-  // china_plan 尚未建索引，保持裸列，等 batch 7 建了索引再一起同源化
+  // is_future_star 与迁移 0038 的索引同源（写法见 eqFilter；参数名是 is_future_star，排序键名是 future_star）
   const futureStar = c.req.query('is_future_star');
   if (futureStar !== undefined) {
     if (futureStar !== '0' && futureStar !== '1') throw new HttpError(400, 'is_future_star 只能是 0 或 1');
     filters.push(eqFilter('players.is_future_star', 'future_star', Number(futureStar), sortKey));
     filterArgs.push(Number(futureStar));
   }
+  // china_plan / agent_tier 的索引在迁移 0043（batch 7）建好后一并同源化（同 0038 那两条的写法）
   const chinaPlan = c.req.query('china_plan');
   if (chinaPlan !== undefined) {
     if (chinaPlan !== '0' && chinaPlan !== '1') throw new HttpError(400, 'china_plan 只能是 0 或 1');
-    filters.push('players.china_plan = ?');
+    filters.push(eqFilter('players.china_plan', 'china_plan', Number(chinaPlan), sortKey));
     filterArgs.push(Number(chinaPlan));
   }
   const agentTier = c.req.query('agent_tier');
   if (agentTier !== undefined) {
     const n = Number(agentTier);
     if (!Number.isInteger(n) || n < 1 || n > 3) throw new HttpError(400, 'agent_tier 只能是 1-3');
-    filters.push('players.agent_tier = ?');
+    filters.push(eqFilter('players.agent_tier', 'agent_tier', n, sortKey));
     filterArgs.push(n);
   }
   // 标记（v6.5.0）：逗号多值（ge90/ge87/growth），映射成同源权重表达式 IN (…)。
@@ -406,7 +406,10 @@ function buildPlayerFilters(
     filters.push(`(${spec.src} ${spec.op} ? AND ${spec.col} IS NOT NULL)`);
     filterArgs.push(n);
   }
-  // 成长空间（PA−CA，随视图口径）
+  // 成长空间（PA−CA，随视图口径）。写法与迁移 0043 的索引逐字同源：差值两侧各套一层 COALESCE(…, 0)
+  // （裸差值匹配不上索引首列，只能拿索引出顺序把全部行走一遍），同时补两列各自的 IS NOT NULL ——
+  // 裸差值任一侧为 NULL 整行就被排除，而 COALESCE 把 NULL 当 0 会凭空放进「两边都没录」的行
+  // （同 RANGE_PARAMS 的守卫理由）。默认视图 / view=initial 各有一条索引，两种口径都能 seek。
   for (const [suffix, op] of [
     ['min', '>='],
     ['max', '<='],
@@ -415,7 +418,7 @@ function buildPlayerFilters(
     if (raw === undefined) continue;
     const n = Number(raw);
     if (!Number.isFinite(n)) throw new HttpError(400, `growth_gap_${suffix} 应为数字`);
-    filters.push(`((${paExpr}) - (${caExpr})) ${op} ?`);
+    filters.push(`((COALESCE(${paExpr}, 0) - COALESCE(${caExpr}, 0)) ${op} ? AND (${paExpr}) IS NOT NULL AND (${caExpr}) IS NOT NULL)`);
     filterArgs.push(n);
   }
   // 影响力区间（现值口径）

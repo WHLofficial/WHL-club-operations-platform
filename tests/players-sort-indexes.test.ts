@@ -15,7 +15,8 @@ import { markerWeightSql } from '../src/core/squad-rules.ts';
 // + 0033 一条（name，v4.0.0 把排序键从折叠的官方缩写名换成折叠的显示名时一并补上）
 // + 0034 三条（uid / ps / view=initial 下的 ca，遗留项第 5 节 D1 读量治理的下一批次）
 // + 0035 两条（position / growable，两条常驻列）+ 0036 三条（badges / base_ca / foot）
-// + 0038 两条（growth_tier / future_star）。等值筛选用哪种写法（同键裸列 / 异键同源）由下面 v6.4.1 的
+// + 0038 两条（growth_tier / future_star）+ 0043 四条（china_plan / agent_tier，以及 growth_gap 的默认与
+// view=initial 两个口径 —— batch 7）。等值筛选用哪种写法（同键裸列 / 异键同源）由下面 v6.4.1 的
 // describe 单独锁 —— 本列表只管排序表达式与索引同源这一件事。
 const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?: string]> = [
   ['ca', 'idx_players_sort_ca'],
@@ -42,6 +43,12 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?
   ['future_star', 'idx_players_sort_future_star'],
   // v6.5.0 标记：三档互斥权重 CASE，索引/排序/筛选共用 core/squad-rules 的同一份表达式
   ['marker', 'idx_players_sort_marker'],
+  // 0043 四条（batch 7）：两条常驻列 + 成长空间按 0036 定下的规矩两个口径同轮 —— 只建默认视图那条，
+  // 初始视图仍会整表扫，等于同一列维护两条索引的一半工作却只覆盖一半场景
+  ['china_plan', 'idx_players_sort_china_plan'],
+  ['agent_tier', 'idx_players_sort_agent_tier'],
+  ['growth_gap', 'idx_players_sort_growth_gap'],
+  ['growth_gap', 'idx_players_sort_initial_growth_gap', '&view=initial'],
 ];
 
 let shared: DatabaseSync | null = null;
@@ -141,7 +148,7 @@ describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
 
   }
 
-  it('十九条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('二十三条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
     const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
     const rows = sqlite
@@ -235,11 +242,15 @@ describe('筛选侧与排序表达式索引同源（v6.4.1）', () => {
   // 就得整组读完再临时排序（生产实测 growable=1 21 → 20,948 行、growth_tier=1 21 → 36,602 行 = 2 × 组大小）；
   // 裸列写法顺着索引走、凑满 LIMIT 即停。这是 batch 6 无条件同源引入的条件性回归锁。
   // 注意 is_future_star 的参数名与排序键名不同（future_star），同键判定要认排序键名。
+  // 0043（batch 7）把 china_plan / agent_tier 也纳入同一格：两条的排序侧本来就是 COALESCE(col, 0)，
+  // 建索引后若还写裸列，就等于「索引白建」（等值 + 同键排序那一格是裸列更省，见上）。
   const SAME_KEY_EQ: ReadonlyArray<readonly [sort: string, col: string, param: string]> = [
     ['growable', 'players.growable', 'growable'],
     ['foot', 'players.foot', 'foot'],
     ['growth_tier', 'players.growth_tier', 'growth_tier'],
     ['future_star', 'players.is_future_star', 'is_future_star'],
+    ['china_plan', 'players.china_plan', 'china_plan'],
+    ['agent_tier', 'players.agent_tier', 'agent_tier'],
   ];
   for (const [sort, col, param] of SAME_KEY_EQ) {
     it(`等值筛选与排序键相同（sort=${sort}&${param}=1）写裸列、不临时排序`, async () => {
@@ -264,6 +275,29 @@ describe('筛选侧与排序表达式索引同源（v6.4.1）', () => {
     // 异键时才是「同源赢」的形状：优化器 seek 进命中子集，而不是顺着索引把全部行走一遍
     // （生产 growth_tier=3：18,301 → 0 行读；is_future_star=1：924 → 21）
     expect(await queryPlan('id', '&growth_tier=3')).toContain('SEARCH players USING INDEX idx_players_sort_growth_tier');
+    expect(await queryPlan('id', '&china_plan=1')).toContain('SEARCH players USING INDEX idx_players_sort_china_plan');
+    expect(await queryPlan('id', '&agent_tier=1')).toContain('SEARCH players USING INDEX idx_players_sort_agent_tier');
+  });
+
+  // 成长空间是唯一「差值」形态的排序键（其余都是单列套 COALESCE），所以筛选侧要比别处多一层：
+  // 差值两侧各套一层 COALESCE(…, 0) 才与 0043 的索引首列逐字同源，同时还得补两列各自的 IS NOT NULL ——
+  // 裸差值任一侧为 NULL 整行就被排除，而 COALESCE 把 NULL 当 0 会凭空放进「两边都没录」的行。
+  // 两个口径各有一条索引，各自都要能 seek（0036 定下的规矩：同一列的两个口径同轮建）。
+  it('成长空间区间筛选与索引同源、带双侧 NULL 守卫，两个视图口径各 seek 进自己的索引', async () => {
+    const { sql } = await mainQuery('growth_gap', '&growth_gap_min=10');
+    expect(sql).toContain('(COALESCE(players.pa, 0) - COALESCE(players.ca, 0)) >= ?');
+    expect(sql).toContain('(players.pa) IS NOT NULL AND (players.ca) IS NOT NULL');
+
+    expect(await queryPlan('growth_gap', '&growth_gap_min=10')).toContain('SEARCH players USING INDEX idx_players_sort_growth_gap');
+    expect(await queryPlan('growth_gap', '&view=initial&growth_gap_min=10')).toContain(
+      'SEARCH players USING INDEX idx_players_sort_initial_growth_gap',
+    );
+
+    // 初始视图口径的写法换成 json PA / 嵌套 base_ca，守卫跟着换成同一对表达式
+    const { sql: initial } = await mainQuery('growth_gap', '&view=initial&growth_gap_max=50');
+    expect(initial).toContain("COALESCE(COALESCE(json_extract(players.game_attrs, '$.PA'), players.pa), 0)");
+    expect(initial).toContain('COALESCE(players.base_ca, players.ca)');
+    expect(initial).not.toContain('TEMP B-TREE');
   });
 
   it('区间筛选一律带 IS NOT NULL 守卫（COALESCE 把 NULL 当 0 会凭空放进 NULL 行）', async () => {
@@ -309,5 +343,39 @@ describe('筛选侧与排序表达式索引同源（v6.4.1）', () => {
     expect(await names('sort=market_value&market_value_max=500')).toEqual(['身价一百']);
     expect(await names('sort=id&market_value_min=0')).toEqual(['身价一百']);
     expect(await names('sort=market_value&market_value_min=0')).toEqual(['身价一百']);
+  });
+
+  // 成长空间的双侧守卫端到端版：夹具三行 —— 甲只录了上限（缺 CA）、乙只录了当前（缺 PA）、丙两样齐全。
+  // 缺一侧是「没录过」不是 0，所以甲与乙都不该参与比较：少了守卫，甲会冒进下界 10（100 − 0），
+  // 乙会冒进上界 0（0 − 100）。生产当前形态下两列都没有 NULL，这层守卫是为将来出现 NULL 时不漂移。
+  it('成长空间缺一侧数据的行不得被当成 0 参与比较（两种排序键结果一致）', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    applyMigrations(sqlite);
+    const ins = sqlite.prepare(`INSERT INTO players (uid, name, ca, pa) VALUES (?, ?, ?, ?)`);
+    ins.run('fc-gap-a', '只录了上限', null, 100);
+    ins.run('fc-gap-b', '只录了当前', 100, null);
+    ins.run('fc-gap-c', '两样齐全', 100, 130);
+    const db = createTestD1(sqlite);
+    const env = {
+      DB: db,
+      TOUR_DB: db,
+      SESSION_KV: createTestKV() as unknown as KVNamespace,
+      MEDIA: {} as never,
+      ASSETS: {} as never,
+      PUBLIC_CACHE_TTL_MS: '0',
+    } as unknown as Env;
+    const names = async (qs: string): Promise<string[]> => {
+      resetGuards();
+      const res = await app.request(`http://localhost/api/players?limit=20&${qs}`, {}, env);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { players: { name: string }[] };
+      return body.players.map((p) => p.name);
+    };
+    expect(await names('sort=id&growth_gap_min=10')).toEqual(['两样齐全']);
+    expect(await names('sort=growth_gap&growth_gap_min=10')).toEqual(['两样齐全']);
+    expect(await names('sort=id&growth_gap_max=0')).toEqual([]);
+    expect(await names('sort=growth_gap&growth_gap_max=0')).toEqual([]);
+    // 初始视图口径走另一对表达式（json PA / 嵌套 base_ca），守卫同样要生效
+    expect(await names('sort=growth_gap&view=initial&growth_gap_min=10')).toEqual(['两样齐全']);
   });
 });

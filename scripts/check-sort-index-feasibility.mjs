@@ -30,6 +30,7 @@ const POSITION_CASE = `CASE position
   ELSE 0 END`;
 
 // 2026-09-24 体检（迁移 0034 的依据）：buildSortExprs 里当时还没有索引的 15 个形态
+// 2026-09-26 batch 7 追加两条 view=initial 口径（json PA / 嵌套 COALESCE）：成长空间差值、PA 变体
 const CANDIDATES = [
   ['base_ca', 'COALESCE(base_ca, 0)'],
   ['badges', '(COALESCE(badges_silver, 0) + COALESCE(badges_gold, 0))'],
@@ -46,6 +47,8 @@ const CANDIDATES = [
   ['ps', PS],
   ['view-initial-ca', 'COALESCE(COALESCE(base_ca, ca), 0)'],
   ['attr-sample', "COALESCE(json_extract(game_attrs, '$.sprintspeed') + 0, 0)"],
+  ['view-initial-pa', "COALESCE(COALESCE(json_extract(game_attrs, '$.PA'), pa), 0)"],
+  ['view-initial-growth-gap', "(COALESCE(COALESCE(json_extract(game_attrs, '$.PA'), pa), 0) - COALESCE(COALESCE(base_ca, ca), 0))"],
 ];
 
 function run(sql) {

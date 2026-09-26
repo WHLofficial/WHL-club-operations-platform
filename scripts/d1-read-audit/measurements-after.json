@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-25T15:53:40.349Z",
+  "generatedAt": "2026-09-26T17:22:14.075Z",
   "target": "remote",
   "results": [
     {
@@ -708,46 +708,46 @@
     },
     {
       "id": "sort-china-plan",
-      "label": "sort=china_plan（未建索引）",
+      "label": "sort=china_plan（0043 表达式索引）",
       "url": "/players?limit=20&sort=china_plan",
       "statements": 2,
       "metas": [
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.1414
+          "duration_ms": 0.112
         },
         {
-          "rows_read": 37635,
+          "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 77.8456
+          "duration_ms": 1.0886
         }
       ],
-      "rows_read_total": 37635,
-      "duration_ms_total": 78,
-      "list_rows": 37635,
+      "rows_read_total": 22,
+      "duration_ms_total": 1.2,
+      "list_rows": 22,
       "count_rows": 0
     },
     {
       "id": "sort-agent-tier",
-      "label": "sort=agent_tier（未建索引）",
+      "label": "sort=agent_tier（0043 表达式索引）",
       "url": "/players?limit=20&sort=agent_tier",
       "statements": 2,
       "metas": [
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.196
+          "duration_ms": 0.1267
         },
         {
-          "rows_read": 37635,
+          "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 134.7649
+          "duration_ms": 0.8923
         }
       ],
-      "rows_read_total": 37635,
-      "duration_ms_total": 135,
-      "list_rows": 37635,
+      "rows_read_total": 22,
+      "duration_ms_total": 1,
+      "list_rows": 22,
       "count_rows": 0
     },
     {
@@ -774,24 +774,24 @@
     },
     {
       "id": "sort-growth-gap",
-      "label": "sort=growth_gap（PA−CA 差值表达式，未建索引）",
+      "label": "sort=growth_gap（PA−CA 差值表达式；0043 默认口径索引）",
       "url": "/players?limit=20&sort=growth_gap",
       "statements": 2,
       "metas": [
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.1647
+          "duration_ms": 0.1298
         },
         {
-          "rows_read": 37635,
+          "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 29.4344
+          "duration_ms": 1.2343
         }
       ],
-      "rows_read_total": 37635,
-      "duration_ms_total": 29.6,
-      "list_rows": 37635,
+      "rows_read_total": 22,
+      "duration_ms_total": 1.4,
+      "list_rows": 22,
       "count_rows": 0
     },
     {
@@ -858,6 +858,28 @@
       "rows_read_total": 307,
       "duration_ms_total": 4,
       "list_rows": 307,
+      "count_rows": 0
+    },
+    {
+      "id": "sort-growth-gap-initial",
+      "label": "view=initial & sort=growth_gap（0043 初始口径索引；两个口径同轮建）",
+      "url": "/players?limit=20&view=initial&sort=growth_gap",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1113
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 0.9341
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 1,
+      "list_rows": 22,
       "count_rows": 0
     }
   ]
