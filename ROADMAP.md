@@ -1060,7 +1060,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.4.0 · 报价设置解耦 + 激活通知证据制 + 竞价截止绝对时刻化（2026-09-26）
 
-**状态**：代码完成、本地全绿，**未 push 未部署**；迁移 `0040` / `0041` 已落地本地 dev 库与测试夹具，**生产 apply 待授权**。判级 minor：新增用户可见能力（证据制举报、设置解耦、出价途径）+ 两份迁移。提交五枚：`cbca904`（改动 A）/ `fd4d441`（改动 B+3）/ `8d9ddd3`（改动 4）/ `377ce21`（改动 5+6+7）/ docs 本枚。逐 commit 走过 code-review。
+**状态**：**已上线（2026-09-26，Version `2c4a81e6-953b-489a-8f54-d36b8982d21c`，11:28:01Z，Workers Builds 自动部署）**——迁移 `0040` / `0041` 已于 push 前 apply 到生产（`Executed 2 commands`；只读核验 listing 新列 2 / player 新列 1 / 触发器 1 全在场），push `6dc0eb5..5d5beb6`（5 个提交）约一分钟后自动部署；上线回读 health / players / market / clubs / squads 全 200，线上首页资产 `index-C68fzOUs.js` 与本地 dist 逐字一致。判级 minor：新增用户可见能力（证据制举报、设置解耦、出价途径）+ 两份迁移。提交五枚：`cbca904`（改动 A）/ `fd4d441`（改动 B+3）/ `8d9ddd3`（改动 4）/ `377ce21`（改动 5+6+7）/ docs 本枚。逐 commit 走过 code-review。
 
 **缘起与裁决**（计划期三轮定稿，裁决原话见 CHANGELOG 同名节）：四项既定整改（A 截止绝对时刻化 / B 报价设置与转会名单解耦 / 3 文案 / 4 激活证据制）+ 三项 UI 改动（5 当前最高带队名 / 6 球员页挂牌出价途径 / 7 右栏默认属性 + 队徽去圆）。计划期完成 D1 性能账（新增读面 ≈ 0）与基线重核（v6.2.0–v6.3.2 已上线、迁移编号顺延 0040/0041、审计 origin 必填）。
 
@@ -1072,7 +1072,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **实测与验收**：typecheck 三份全清；vitest **53 文件 / 779 例全绿**（基线 53/772）；build 成功（`index-C68fzOUs.js` 592.10 KB / gzip 188.26 KB）；e2e **11/11**。D1 新增读面 ≈ 0（列表聚合 +1 条分块查询 ≤90、player_id 过滤零新增形状、举报/上传各 1–2 行写）。
 
-**部署边界（等指令）**：先 apply 0040/0041 生产 → push（自动部署）；与 v6.3.2 同理「先迁移后 push」硬约束（代码 SELECT 新列）。
+**上线执行（用户指令「上线」）**：按硬约束执行——① `wrangler d1 migrations list --remote` 确认待应用仅 0040/0041 → ② `npm run db:migrate:remote` 报 `Executed 2 commands in 1.39ms`、两条 ✅ → ③ 只读核验 `pragma_table_info` 新列 2+1、触发器 1 全在场 → ④ `git push origin main`（`6dc0eb5..5d5beb6`）→ ⑤ 约 1 分钟后 Workers Builds 出 Version `2c4a81e6-…`（11:28:01Z），回读 health / players / market / clubs / squads 全 200、线上首页资产 `index-C68fzOUs.js` 与本地 dist 逐字一致。
 
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
