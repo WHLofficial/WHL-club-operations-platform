@@ -40,7 +40,7 @@ export function renderNotification(template: string, data: Record<string, unknow
     case 'offer_countered':
       return `🔄 ${data.by}还价：${data.player} 报价抬到 ${data.amount} m，轮到你表态。`;
     case 'offer_accepted':
-      return `🤝 报价已被同意：${data.player} 以 ${data.amount} m 达成协议，已自动挂牌并锁定你的出价为领先（成交等过户确认）。`;
+      return `🤝 报价已被同意：${data.player} 以 ${data.amount} m 达成协议，已自动挂牌并锁定你的出价为领先。`;
     case 'offer_rejected':
       return `🚫 报价被拒：${data.player} ${data.amount != null ? `的 ${data.amount} m 报价` : '的报价'}被卖家拒绝${data.reason === 'not_for_sale' ? '（球员被设为非卖品）' : ''}，冻结已退回。`;
     case 'offer_withdrawn':
@@ -48,9 +48,9 @@ export function renderNotification(template: string, data: Record<string, unknow
     case 'offer_expired':
       return `⌛ 报价过期：${data.player} 的报价已失效${data.reason === 'sold' ? '（球员已被卖家挂牌，报价通道关闭，冻结已退回）' : '（转会窗已关或球员状态已变）'}，冻结已退回。`;
     case 'offer_auto_accepted':
-      return `🤝 自动同意：${data.player} 达到转会名单最低报价线 ${data.amount} m，已自动同意并挂牌（成交等过户确认）。`;
+      return `🤝 自动同意：${data.player} 的 ${data.amount} m 报价达到最低报价线，已自动同意并挂牌。`;
     case 'offer_auto_rejected':
-      return `🚫 自动拒：${data.player} 的 ${data.amount} m 报价低于转会名单最低报价（${data.min} m），直接被拒，冻结已退回。`;
+      return `🚫 自动拒：${data.player} 的 ${data.amount} m 报价低于最低报价线（${data.min} m），直接被拒，冻结已退回。`;
     default:
       return String(data.text ?? '');
   }

@@ -42,10 +42,12 @@ export function otherTurn(turn: OfferTurn): OfferTurn {
 }
 
 /**
- * 名单球员自动应答判定（设计 §3）：≥ 线 auto_accept、< 线 auto_reject；
- * 没进名单（transfer_listed != 1 或没有最低报价）返回 null，走人工谈判。
+ * 自动应答判定（v6.4.0 改动 B：与转会名单解耦，用户裁决 2026-09-25）：设了最低报价即生效——
+ * < 线一律 auto_reject（与开关无关，即时退回）；≥ 线且 offer_auto=1 才 auto_accept，
+ * 否则返回 null 走人工谈判。没设最低报价（min_offer_price 为 null）返回 null。
  */
-export function autoRespondKind(transferListed: number | null, minOfferPrice: number | null, amount: number): 'auto_accept' | 'auto_reject' | null {
-  if (transferListed !== 1 || minOfferPrice === null || !Number.isFinite(minOfferPrice)) return null;
-  return amount >= minOfferPrice ? 'auto_accept' : 'auto_reject';
+export function autoRespondKind(minOfferPrice: number | null, offerAuto: number | null, amount: number): 'auto_accept' | 'auto_reject' | null {
+  if (minOfferPrice === null || !Number.isFinite(minOfferPrice)) return null;
+  if (amount < minOfferPrice) return 'auto_reject';
+  return offerAuto === 1 ? 'auto_accept' : null;
 }

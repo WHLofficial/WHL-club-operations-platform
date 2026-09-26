@@ -292,9 +292,10 @@ export interface PlayerDetail {
     gameAttrs: Record<string, unknown> | null;
     createdAt: string;
     updatedAt: string;
-    // 报价设置（v6.3.0）：转会名单 / 最低报价 / 非卖品——球员页左栏报价设置与五态判据吃这三个字段
+    // 报价设置（v6.3.0；v6.4.0 加 offer_auto 与名单解耦）——球员页左栏报价设置与五态判据吃这几个字段
     transferListed: boolean;
     minOfferPrice: number | null;
+    offerAuto: boolean;
     notForSale: boolean;
   };
   club: { id: number; name: string } | null;

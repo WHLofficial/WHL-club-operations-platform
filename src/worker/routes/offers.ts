@@ -284,7 +284,7 @@ app.post('/offers/:id/withdraw', async (c) => {
   return c.json(await withdrawOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
-// PUT /api/players/:id/offer-settings —— 报价设置（设计 §2.1，仅本队教练）
+// PUT /api/players/:id/offer-settings —— 报价设置（设计 §2.1 + v6.4.0 改动 B 解耦，仅本队教练）
 app.put('/players/:id/offer-settings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
@@ -293,7 +293,7 @@ app.put('/players/:id/offer-settings', async (c) => {
   const playerId = Number(c.req.param('id'));
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
   const body = (await c.req.raw.json().catch(() => null)) as
-    | { transferListed?: unknown; minOfferPrice?: unknown; notForSale?: unknown }
+    | { transferListed?: unknown; minOfferPrice?: unknown; offerAuto?: unknown; notForSale?: unknown }
     | null;
   if (!body) throw new HttpError(400, '请求格式不对');
   if (typeof body.transferListed !== 'boolean' || typeof body.notForSale !== 'boolean') {
@@ -310,6 +310,7 @@ app.put('/players/:id/offer-settings', async (c) => {
     playerId,
     transferListed: body.transferListed,
     minOfferPrice,
+    offerAuto: body.offerAuto === true,
     notForSale: body.notForSale,
   });
   return c.json(out);

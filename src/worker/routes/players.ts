@@ -819,6 +819,7 @@ interface PlayerDetailRow {
   badges_gold: number;
   transfer_listed: number;
   min_offer_price: number | null;
+  offer_auto: number;
   not_for_sale: number;
   game_attrs: string | null;
   created_at: string;
@@ -828,7 +829,7 @@ interface PlayerDetailRow {
 const PLAYER_DETAIL_COLUMNS =
   `id, fc_id, uid, name, display_name, number, club_id, position, foot, age, ca, pa, growable, prestige, market_value,
    status, growth_tier, growth_xp, is_future_star, china_plan, agent_tier,
-   badges_silver, badges_gold, transfer_listed, min_offer_price, not_for_sale, game_attrs, created_at, updated_at`;
+   badges_silver, badges_gold, transfer_listed, min_offer_price, offer_auto, not_for_sale, game_attrs, created_at, updated_at`;
 
 app.get('/players/:id', async (c) => {
   const ref = Number(c.req.param('id'));
@@ -901,9 +902,10 @@ app.get('/players/:id', async (c) => {
       agentTier: p.agent_tier,
       badgesSilver: p.badges_silver,
       badgesGold: p.badges_gold,
-      // 报价设置（v6.3.0）：转会名单 / 最低报价 / 非卖品——球员页左栏报价设置与五态判据吃这三个字段
+      // 报价设置（v6.3.0；v6.4.0 加 offer_auto 与名单解耦）：球员页左栏报价设置与五态判据吃这几个字段
       transferListed: p.transfer_listed === 1,
       minOfferPrice: p.min_offer_price,
+      offerAuto: p.offer_auto === 1,
       notForSale: p.not_for_sale === 1,
       gameAttrs,
       createdAt: p.created_at,

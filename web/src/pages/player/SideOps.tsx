@@ -18,6 +18,7 @@ export interface SideOpsPlayer {
   status: string;
   transferListed: boolean;
   minOfferPrice: number | null;
+  offerAuto: boolean;
   notForSale: boolean;
 }
 
@@ -56,9 +57,10 @@ export function SideOps({
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(false); // 解约 / 激活这类不可逆动作的第二击
-  // 报价设置草稿（后端三字段互斥自动清对方，前端同形预览）
+  // 报价设置草稿（v6.4.0 改动 B：最低报价/自动应答与转会名单解耦；非卖品与名单互斥自动清对方）
   const [listDraft, setListDraft] = useState(player.transferListed);
   const [minDraft, setMinDraft] = useState(player.minOfferPrice === null ? '' : String(player.minOfferPrice));
+  const [autoDraft, setAutoDraft] = useState(player.offerAuto);
   const [nfsDraft, setNfsDraft] = useState(player.notForSale);
   // 操作草稿
   const [offerAmount, setOfferAmount] = useState('');
@@ -72,6 +74,7 @@ export function SideOps({
   useEffect(() => {
     setListDraft(player.transferListed);
     setMinDraft(player.minOfferPrice === null ? '' : String(player.minOfferPrice));
+    setAutoDraft(player.offerAuto);
     setNfsDraft(player.notForSale);
     setPanel(null);
     setArmed(false);
@@ -86,11 +89,13 @@ export function SideOps({
   const releaseFee = contract?.releaseFee ?? null;
   const offerCap = releaseFee !== null && releaseFee > 0 ? round2(releaseFee * 1.5) : null;
   const isTrainee = contract?.contractType === 'trainee';
+  // v6.4.0 改动 B：线与开关独立于转会名单，脏判按「草稿 ≠ 现值」逐字段比
+  const minDraftValue = minDraft === '' ? null : Number(minDraft);
   const settingsDirty =
     listDraft !== player.transferListed ||
     nfsDraft !== player.notForSale ||
-    (listDraft && minDraft !== '' && Number(minDraft) !== player.minOfferPrice) ||
-    (!listDraft && player.minOfferPrice !== null);
+    minDraftValue !== player.minOfferPrice ||
+    autoDraft !== player.offerAuto;
 
   async function run(fn: () => Promise<string>) {
     if (busy) return;
@@ -115,7 +120,8 @@ export function SideOps({
     void run(async () => {
       await apiPut(`/api/players/${player.id}/offer-settings`, {
         transferListed: listDraft,
-        minOfferPrice: listDraft && minDraft !== '' ? Number(minDraft) : null,
+        minOfferPrice: minDraftValue,
+        offerAuto: autoDraft,
         notForSale: nfsDraft,
       });
       return '报价设置已保存。';
@@ -169,24 +175,46 @@ export function SideOps({
               </button>
             </span>
           </div>
-          {listDraft && (
-            <label className="side-field">
-              <span className="side-lab">
-                <span>最低报价（m）</span>
-                <span className="side-range mono">{offerCap !== null ? `≤ ${offerCap}` : '—'}</span>
-              </span>
-              <input
-                className="mono"
-                inputMode="decimal"
-                min="1"
-                step="0.5"
-                value={minDraft}
-                onChange={(e) => setMinDraft(e.target.value.replace(/[^0-9.]/g, ''))}
-                aria-label="最低报价"
-              />
-            </label>
-          )}
-          {listDraft && <p className="side-sub">达线自动同意，低于自动拒</p>}
+          <label className="side-field">
+            <span className="side-lab">
+              <span>最低报价（m）</span>
+              <span className="side-range mono">{offerCap !== null ? `≤ ${offerCap}` : '—'}</span>
+            </span>
+            <input
+              className="mono"
+              inputMode="decimal"
+              min="1"
+              step="0.5"
+              placeholder="留空 = 不设线"
+              value={minDraft}
+              onChange={(e) => setMinDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+              aria-label="最低报价"
+            />
+          </label>
+          <div className="side-row">
+            <span className="attr-name">达线自动同意</span>
+            <span className="seg seg-mini" role="radiogroup" aria-label="达线自动同意">
+              <button
+                type="button"
+                className={autoDraft ? 'on' : ''}
+                disabled={busy || minDraftValue === null}
+                onClick={() => setAutoDraft(true)}
+              >
+                是
+              </button>
+              <button
+                type="button"
+                className={!autoDraft ? 'on' : ''}
+                disabled={busy || minDraftValue === null}
+                onClick={() => setAutoDraft(false)}
+              >
+                否
+              </button>
+            </span>
+          </div>
+          <p className="side-sub">
+            低于最低报价一律自动拒（与开关无关）；达线且开关开着才自动同意，否则进人工谈判。两者都不必进转会名单{listDraft ? '，但进名单必须设线' : ''}。
+          </p>
           <div className="side-row">
             <span className="attr-name">非卖品</span>
             <span className="seg seg-mini" role="radiogroup" aria-label="非卖品">
@@ -468,8 +496,8 @@ export function SideOps({
                 placeholder="给卖家的一句话"
               />
             </label>
-            {player.transferListed && player.minOfferPrice !== null && (
-              <p className="side-sub">对方转会名单线 {player.minOfferPrice} m：达线自动同意，低于自动拒。</p>
+            {player.minOfferPrice !== null && (
+              <p className="side-sub">对方最低报价线 {player.minOfferPrice} m：低于线自动拒；达线且对方开了自动同意才直接成交，否则进人工谈判。</p>
             )}
             <p className="side-sub">报价即冻结资金；对方同意即自动挂牌，你的价锁成领先出价。</p>
             <div className="side-btns">
@@ -485,9 +513,9 @@ export function SideOps({
                       note: offerNote || undefined,
                     });
                     return r.status === 'accepted'
-                      ? '达到对方名单线，已自动同意并挂牌！'
+                      ? '达到对方最低报价线，已自动同意并挂牌！'
                       : r.status === 'rejected'
-                        ? '低于对方名单线，报价被自动拒绝。'
+                        ? '低于对方最低报价线，报价被自动拒绝。'
                         : `报价已送出（#${r.offerId}），等卖家表态。`;
                   })
                 }

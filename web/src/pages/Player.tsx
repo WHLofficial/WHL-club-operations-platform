@@ -456,6 +456,7 @@ export default function Player() {
               status: player.status,
               transferListed: player.transferListed,
               minOfferPrice: player.minOfferPrice,
+              offerAuto: player.offerAuto,
               notForSale: player.notForSale,
             }}
             contract={contract}

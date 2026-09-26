@@ -348,12 +348,12 @@ describe('拒绝 / 撤回', () => {
   });
 });
 
-describe('名单自动应答（设计 §3）', () => {
-  function listPlayer(fx: Fixture, min = 40): void {
-    fx.sqlite.exec(`UPDATE players SET transfer_listed = 1, min_offer_price = ${min} WHERE id = 1`);
+describe('自动应答（v6.4.0 改动 B：与转会名单解耦）', () => {
+  function listPlayer(fx: Fixture, min = 40, offerAuto = 1): void {
+    fx.sqlite.exec(`UPDATE players SET transfer_listed = 1, min_offer_price = ${min}, offer_auto = ${offerAuto} WHERE id = 1`);
   }
 
-  it('报价 ≥ 线：auto_accept + 挂牌 + 领先出价 + auto_accept 事件', async () => {
+  it('报价 ≥ 线且开关开：auto_accept + 挂牌 + 领先出价 + auto_accept 事件', async () => {
     const fx = freshEnv();
     seedWorld(fx);
     listPlayer(fx, 40);
@@ -369,10 +369,10 @@ describe('名单自动应答（设计 §3）', () => {
     expect(sqlGet(fx.sqlite, "SELECT status, ref_type FROM fund_holds WHERE ref_type = 'listing' AND ref_id = ?", listing!.id)).toMatchObject({ status: 'held', ref_type: 'listing' });
   });
 
-  it('报价 < 线：auto_reject + 释放 + 事件 + 通知（无冻结残留）', async () => {
+  it('报价 < 线：auto_reject + 释放 + 事件 + 通知（开关关着也一样拒，低于线一律自动拒）', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    listPlayer(fx, 40);
+    listPlayer(fx, 40, 0);
     const res = await place(fx, 1, 35);
     expect(res.status).toBe(201);
     const out = (await res.json()) as OfferOut;
@@ -383,7 +383,16 @@ describe('名单自动应答（设计 §3）', () => {
     expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'offer_auto_rejected'")).toBeDefined();
   });
 
-  it('没进名单走人工：pending 不自动应答', async () => {
+  it('达线但开关关：走人工谈判（pending）——名单与否不再影响', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    listPlayer(fx, 40, 0);
+    const res = await place(fx, 1, 45);
+    const out = (await res.json()) as OfferOut;
+    expect(out).toMatchObject({ status: 'pending', auto: null });
+  });
+
+  it('没设线走人工：pending 不自动应答', async () => {
     const fx = freshEnv();
     seedWorld(fx);
     const res = await place(fx, 1, 45);
@@ -424,6 +433,25 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
     expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', id)).toMatchObject({ status: 'rejected' });
     expect(sqlGet(fx.sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ?", id)).toMatchObject({ status: 'released' });
     expect(sqlGet(fx.sqlite, "SELECT kind FROM offer_events WHERE offer_id = ? AND kind = 'reject'", id)).toBeDefined();
+  });
+
+  it('解耦（v6.4.0 改动 B）：不进名单也能设线与开关；无线开关被清；非卖品压掉线与开关', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    // 不进名单：线 35 + 开关开 → 全部落库
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: 35, offerAuto: true, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, min_offer_price, offer_auto, not_for_sale FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, min_offer_price: 35, offer_auto: 1, not_for_sale: 0 });
+
+    // 只开开关不给线：开关存 0（没线的开关无效）
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: null, offerAuto: true, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT min_offer_price, offer_auto FROM players WHERE id = 1')).toMatchObject({ min_offer_price: null, offer_auto: 0 });
+
+    // 非卖品：给线也给开关照样被压掉
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: 35, offerAuto: true, notForSale: true }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT min_offer_price, offer_auto, not_for_sale FROM players WHERE id = 1')).toMatchObject({ min_offer_price: null, offer_auto: 0, not_for_sale: 1 });
   });
 
   it('挂牌中锁定 / 别人队 404', async () => {
