@@ -146,7 +146,7 @@ export function SideOps({
     void run(async () => {
       const up = await apiUpload<{ key: string }>('/api/media/activation', proofFile.type, proofFile);
       await apiPost('/api/market/activations', { playerId: player.id, proofMediaKey: up.key });
-      return '激活挂牌已提交：出价窗内落首价才算数。';
+      return '激活挂牌已提交：5 分钟内出首价才算数。';
     });
   }
 
