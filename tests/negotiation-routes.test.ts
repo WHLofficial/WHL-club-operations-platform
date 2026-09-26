@@ -116,7 +116,7 @@ async function seedSigning(fx: Fixture): Promise<SigningFixture> {
   expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
   fx.sqlite.exec(
     `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
-                          listed_day = strftime('%Y-%m-%d', 'now', '-12 days') WHERE id = 1`,
+                          listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = 1`,
   );
   await get('/api/market/listings?status=pending_review', 'tok-viewer', fx.env);
   const queue = await get('/api/admin/reviews', 'tok-admin', fx.env);

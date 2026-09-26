@@ -46,6 +46,7 @@ interface ListingRow {
   listed_at: string;
   last_bid_at: string | null;
   listed_day: string | null;
+  deadline_at: string | null;
   deadline_note: string | null;
   season: number | null;
   window_seq: number | null;
@@ -93,7 +94,7 @@ app.get('/market/listings', async (c) => {
   const ph = statuses.map(() => '?').join(', ');
   const rows = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
-            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
+            l.listed_day, l.deadline_at, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
             ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name
      FROM listings l
@@ -126,14 +127,17 @@ app.get('/market/listings', async (c) => {
       const a = agg.get(r.id) ?? null;
       let deadlineAt: string | null = null;
       if (r.status === 'bidding' && r.listed_day !== null) {
-        deadlineAt = bidDeadline({
-          lastBidAt: r.last_bid_at,
-          listedDay: r.listed_day,
-          now,
-          deadlineHours: ctx.deadlineHours,
-          silenceHours: ctx.silenceHours,
-          calendar: ctx.calendar,
-        }).deadlineAt;
+        // 截止绝对时刻化（v6.4.0）：优先读落库列（出价时按 bidDeadline 算定），存量行 NULL 回落实时算
+        deadlineAt =
+          r.deadline_at ??
+          bidDeadline({
+            lastBidAt: r.last_bid_at,
+            listedDay: r.listed_day,
+            now,
+            deadlineHours: ctx.deadlineHours,
+            silenceHours: ctx.silenceHours,
+            calendar: ctx.calendar,
+          }).deadlineAt;
       }
       return {
         id: r.id,
@@ -396,7 +400,7 @@ app.get('/market/listings/:id', async (c) => {
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
   const listing = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
-            l.listed_day, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
+            l.listed_day, l.deadline_at, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
             ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name, ca2.name AS activator_name
      FROM listings l
@@ -426,14 +430,17 @@ app.get('/market/listings/:id', async (c) => {
 
   let deadlineAt: string | null = null;
   if (listing.status === 'bidding' && listing.listed_day !== null) {
-    deadlineAt = bidDeadline({
-      lastBidAt: listing.last_bid_at,
-      listedDay: listing.listed_day,
-      now: new Date(),
-      deadlineHours: ctx.deadlineHours,
-      silenceHours: ctx.silenceHours,
-      calendar: ctx.calendar,
-    }).deadlineAt;
+    // 优先读落库列（v6.4.0 改动 A），存量行 NULL 回落实时算
+    deadlineAt =
+      listing.deadline_at ??
+      bidDeadline({
+        lastBidAt: listing.last_bid_at,
+        listedDay: listing.listed_day,
+        now: new Date(),
+        deadlineHours: ctx.deadlineHours,
+        silenceHours: ctx.silenceHours,
+        calendar: ctx.calendar,
+      }).deadlineAt;
   }
   const highestActive = await c.env.DB
     .prepare(`SELECT MAX(amount) AS highest FROM bids WHERE listing_id = ? AND status = 'active'`)
@@ -510,7 +517,7 @@ app.post('/market/listings/:id/bids', async (c) => {
   }
 
   const listing = await c.env.DB.prepare(
-    `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.activated_by, l.activation_deadline, l.season, l.window_seq, l.bid_paused,
+    `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_day, l.deadline_at, l.activated_by, l.activation_deadline, l.season, l.window_seq, l.bid_paused,
             ct.contract_type AS player_contract_type
      FROM listings l
      LEFT JOIN contracts ct ON ct.player_id = l.player_id AND ct.is_active = 1
@@ -524,6 +531,8 @@ app.post('/market/listings/:id/bids', async (c) => {
       type: string;
       ask_price: number;
       status: string;
+      listed_day: string | null;
+      deadline_at: string | null;
       activated_by: number | null;
       activation_deadline: string | null;
       season: number | null;
@@ -533,6 +542,10 @@ app.post('/market/listings/:id/bids', async (c) => {
     }>();
   if (!listing) throw new HttpError(404, '这单挂牌不存在');
   if (listing.bid_paused === 1) throw new HttpError(423, '这单被管理组暂停出价，恢复后再来', 'listing_bid_paused');
+  // 截止绝对时刻化（v6.4.0）：过线可读拒绝（触发器 fund_holds_bid_deadline_guard 在事务内兜底）
+  if (listing.deadline_at !== null && listing.deadline_at <= new Date().toISOString()) {
+    throw new HttpError(409, '这单竞价已截止，等结算进审核', 'bid_deadline_passed');
+  }
   if (listing.seller_club_id === club.id) throw new HttpError(403, '不能对自己俱乐部的挂牌出价');
   if (listing.type === 'activation' && listing.status === 'matched_pending') {
     throw new HttpError(409, '首价已落定，被激活方正在考虑是否匹配，这单不开放竞价');
@@ -582,19 +595,34 @@ app.post('/market/listings/:id/bids', async (c) => {
   // 激活首价落定后的去向：训练营合同直接进待审（固定条款无匹配可言）；
   // 正式合同进匹配等待（被激活方 24h 匹配窗，4.4.2.4）。普通挂牌照旧进竞价。
   const activationTrainee = isActivation && listing.player_contract_type === 'trainee';
+  const mctx = await loadMarketContext(c.env.DB);
   let matchDeadlineIso: string | null = null;
-  if (isActivation && !activationTrainee) {
-    const mctx = await loadMarketContext(c.env.DB);
-    matchDeadlineIso = new Date(Date.now() + mctx.matchWindowHours * 3600_000).toISOString();
+  let nextDeadlineIso: string | null = null;
+  if (isActivation) {
+    if (!activationTrainee) {
+      matchDeadlineIso = new Date(Date.now() + mctx.matchWindowHours * 3600_000).toISOString();
+    }
+  } else if (listing.listed_day !== null) {
+    // 改动 A：出价成功即把新一段静默期的绝对截止时刻落库（以本次出价为静默起点），
+    // 此后展示与结算都读列，不再各自实时计算（5 分钟漂移归零）
+    nextDeadlineIso = bidDeadline({
+      lastBidAt: new Date().toISOString(),
+      listedDay: listing.listed_day,
+      now: new Date(),
+      deadlineHours: mctx.deadlineHours,
+      silenceHours: mctx.silenceHours,
+      calendar: mctx.calendar,
+    }).deadlineAt;
   }
+  // 普通出价推进带过线守卫（deadline_at 已过 = 拒绝刷新；触发器 WHL_BID_REJECT_DEADLINE 先行拦截）
   const listingAdvance = isActivation
     ? activationTrainee
-      ? `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}, activation_deadline = NULL
+      ? `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}, activation_deadline = NULL, deadline_at = NULL
          WHERE id = ? AND status IN ('listed', 'bidding')`
-      : `UPDATE listings SET status = 'matched_pending', last_bid_at = ${nowSql()}, activation_deadline = NULL, match_deadline = ?
+      : `UPDATE listings SET status = 'matched_pending', last_bid_at = ${nowSql()}, activation_deadline = NULL, match_deadline = ?, deadline_at = NULL
          WHERE id = ? AND status IN ('listed', 'bidding')`
-    : `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}
-       WHERE id = ? AND status IN ('listed', 'bidding')`;
+    : `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}, deadline_at = ?
+       WHERE id = ? AND status IN ('listed', 'bidding') AND (deadline_at IS NULL OR deadline_at > ${nowSql()})`;
   const statements = [
     // 1) 冻结：触发器校验挂牌在竞价/金额达步长/可用资金，任一不满足 ABORT 回滚整批
     c.env.DB.prepare(
@@ -615,10 +643,12 @@ app.post('/market/listings/:id/bids', async (c) => {
        WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'
          AND id NOT IN (SELECT hold_id FROM bids WHERE listing_id = ? AND status = 'active' AND hold_id IS NOT NULL)`,
     ).bind(id, id),
-    // 5) 挂牌推进（普通 → 竞价；激活训练营 → 待审中转；激活正式 → 匹配等待）
-    matchDeadlineIso !== null
-      ? c.env.DB.prepare(listingAdvance).bind(matchDeadlineIso, id)
-      : c.env.DB.prepare(listingAdvance).bind(id),
+    // 5) 挂牌推进（普通 → 竞价并落新截止时刻；激活训练营 → 待审中转；激活正式 → 匹配等待）
+    isActivation
+      ? matchDeadlineIso !== null
+        ? c.env.DB.prepare(listingAdvance).bind(matchDeadlineIso, id)
+        : c.env.DB.prepare(listingAdvance).bind(id)
+      : c.env.DB.prepare(listingAdvance).bind(nextDeadlineIso, id),
     audit({
       actor: user.id,
       action: 'bid_place',
@@ -635,6 +665,7 @@ app.post('/market/listings/:id/bids', async (c) => {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('WHL_BID_REJECT_FUNDS')) throw new HttpError(400, '可用资金不足：出价即冻结，冻结没过账这单就不算数');
     if (msg.includes('WHL_BID_REJECT_AMOUNT')) throw new HttpError(409, '出价没赶上：刚有人出了更高的价，或金额没达到当前最低要求');
+    if (msg.includes('WHL_BID_REJECT_DEADLINE')) throw new HttpError(409, '这单竞价刚好截止，出价没赶上，等结算进审核', 'bid_deadline_passed');
     if (msg.includes('WHL_BID_REJECT_CLOSED')) throw new HttpError(409, '这单刚好不在竞价状态了，刷新看看');
     throw err;
   }

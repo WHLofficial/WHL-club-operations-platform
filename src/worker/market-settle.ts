@@ -5,7 +5,7 @@
 // 4) pending_review 缺单据的自愈（结算与建单非原子崩溃后补齐）
 // 全部幂等：状态迁移走守卫 UPDATE，重复执行无副作用。
 import type { Env } from './env.ts';
-import { bidDeadline, delistFee, type TradeCalendar } from '../core/market-rules.ts';
+import { bidDeadline, delistFee, shanghaiDateStr, type TradeCalendar } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext, type MarketContext } from './market-context.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
@@ -33,6 +33,7 @@ interface ActiveListingRow {
   status: string;
   listed_day: string | null;
   last_bid_at: string | null;
+  deadline_at: string | null;
   season: number | null;
   window_seq: number | null;
   window_status: string | null;
@@ -64,7 +65,7 @@ export async function settleListingForReview(
   const alerts = await detectBidAlerts(db, listing.id);
   const alertsJson = JSON.stringify(alerts);
   const statements = [
-    db.prepare(`UPDATE listings SET status = 'pending_review', match_deadline = NULL WHERE id = ? AND status = ?`).bind(listing.id, fromStatus),
+    db.prepare(`UPDATE listings SET status = 'pending_review', match_deadline = NULL, deadline_at = NULL WHERE id = ? AND status = ?`).bind(listing.id, fromStatus),
     db
       .prepare(
         `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
@@ -297,7 +298,7 @@ export async function settleOverdue(
 
   const active = await db
     .prepare(
-      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_day, l.last_bid_at, l.season, l.window_seq,
+      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_day, l.last_bid_at, l.deadline_at, l.season, l.window_seq,
               sw.status AS window_status
        FROM listings l
        LEFT JOIN season_windows sw ON sw.season = l.season AND sw.window_seq = l.window_seq
@@ -325,20 +326,30 @@ export async function settleOverdue(
       continue;
     }
     if (row.status !== 'bidding') continue; // listed 且窗未关：等窗尾
-    if (row.listed_day === null) continue;
-    const deadline = bidDeadline({
-      lastBidAt: row.last_bid_at,
-      listedDay: row.listed_day,
-      now,
-      deadlineHours: ctx.deadlineHours,
-      silenceHours: ctx.silenceHours,
-      calendar: ctx.calendar,
-    });
-    if (deadline.met) {
+    // 改动 A 两级判定：落库列优先（出价时刻算定的绝对截止，不容漂移），存量行 NULL 回落实时算
+    let met: boolean;
+    let noteDay: string;
+    if (row.deadline_at !== null) {
+      met = row.deadline_at <= now.toISOString();
+      noteDay = shanghaiDateStr(Date.parse(row.deadline_at));
+    } else {
+      if (row.listed_day === null) continue;
+      const deadline = bidDeadline({
+        lastBidAt: row.last_bid_at,
+        listedDay: row.listed_day,
+        now,
+        deadlineHours: ctx.deadlineHours,
+        silenceHours: ctx.silenceHours,
+        calendar: ctx.calendar,
+      });
+      met = deadline.met;
+      noteDay = deadline.deadlineDay;
+    }
+    if (met) {
       if ((await settleListingForReview(db, core, actor, origin)) === 'settled') summary.settled++;
       continue;
     }
-    const note = noteText(deadline.deadlineDay, ctx.deadlineHours, ctx.calendar);
+    const note = noteText(noteDay, ctx.deadlineHours, ctx.calendar);
     const r = await db
       .prepare(`UPDATE listings SET deadline_note = ? WHERE id = ? AND status = 'bidding' AND (deadline_note IS NULL OR deadline_note != ?)`)
       .bind(note, row.id, note)

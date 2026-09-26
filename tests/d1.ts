@@ -104,6 +104,7 @@ const MIGRATION_FILES = [
   '0037_offers.sql',
   '0038_players_sort_indexes_batch6.sql',
   '0039_audit_origin.sql',
+  '0040_listing_deadline_activation_proof.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

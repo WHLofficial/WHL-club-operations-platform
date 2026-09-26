@@ -173,10 +173,10 @@ describe('强制拍卖（4.4.5）', () => {
     const listingId = ((await create.json()) as { listingId: number }).listingId;
 
     expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
-    // 拨到过去触发截止（4.4.7 静默判定）
+    // 拨到过去触发截止（4.4.7 静默判定；deadline_at 清空 = 模拟落库列之前的存量行）
     fx.sqlite.exec(
       `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
-                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days') WHERE id = ${listingId}`,
+                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
     );
     await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
     const transferRow = sqlGet<{ id: number; type: string; status: string; fee: number }>(

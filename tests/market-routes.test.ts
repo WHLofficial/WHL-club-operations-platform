@@ -131,11 +131,13 @@ async function listPlayer(mf: MarketFixture, playerId: number, askPrice: number,
   return post('/api/market/listings', { playerId, askPrice }, token, mf.env);
 }
 
-// 把 1 号挂牌的静默计时拨回 11 天前（远早于任何 now 的 18-23 点判定窗），再触发访问结算
+// 把 1 号挂牌的静默计时拨回 11 天前（远早于任何 now 的 18-23 点判定窗），再触发访问结算。
+// deadline_at 一并清空：v6.4.0 起出价会把未来截止时刻落库，模拟的是「落库列之前的存量行」，
+// 结算走 NULL 回落实时算的兼容分支。
 async function ageListingForDeadline(fx: Fixture, listingId = 1): Promise<void> {
   fx.sqlite.exec(
     `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
-                          listed_day = strftime('%Y-%m-%d', 'now', '-12 days') WHERE id = ${listingId}`,
+                          listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
   );
   await get('/api/market/listings?status=pending_review', 'tok-viewer', fx.env);
 }
@@ -270,6 +272,34 @@ describe('出价与资金冻结（§6.4-1 / §7.4）', () => {
     const small = await post('/api/market/listings/1/bids', { amount: 17.5 }, 'tok-coach2', fx.env);
     expect(small.status).toBe(400);
     expect(((await small.json()) as { error: string }).error).toContain('抬价至少要比当前最高价多 1 m');
+  });
+
+  it('截止绝对时刻化（v6.4.0）：出价落库 deadline_at；过线出价 409，触发器在冻结语句兜底', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    const ok = await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
+    expect(ok.status).toBe(201);
+    const stored = sqlGet<{ deadline_at: string | null }>(fx.sqlite, 'SELECT deadline_at FROM listings WHERE id = 1');
+    expect(stored?.deadline_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(Date.parse(stored?.deadline_at ?? '')).toBeGreaterThan(Date.now());
+    // 落库列拨到过去：惰性结算先把它收进待审，出价落进「已截止」409 分支
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = 1`);
+    const late = await post('/api/market/listings/1/bids', { amount: 16 }, 'tok-coach2', fx.env);
+    expect(late.status).toBe(409);
+    expect(((await late.json()) as { error: string }).error).toContain('截止');
+    // 触发器兜底（并发竞态：预检之后列才过线）→ 冻结 INSERT 被 ABORT。
+    // 惰性结算会把过线的 deadline_at 清掉，这里把状态与过线列一并拨回（0005 的 CLOSED 闸
+    // 按创建序先跑，须放行它才轮到 0040 的 DEADLINE 闸）
+    fx.sqlite.exec(
+      `UPDATE listings SET status = 'bidding', deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = 1`,
+    );
+    expect(() =>
+      fx.sqlite.exec(
+        `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+         VALUES ((SELECT id FROM clubs WHERE is_cpu = 0 AND id != (SELECT seller_club_id FROM listings WHERE id = 1) LIMIT 1), 16, 'held', 'listing', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+      ),
+    ).toThrow(/WHL_BID_REJECT_DEADLINE/);
   });
 
   it('卖家不能自抬价；资金只够一单时第二单被拒（不双花，§16）', async () => {
