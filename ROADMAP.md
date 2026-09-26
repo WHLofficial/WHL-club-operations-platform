@@ -1058,6 +1058,22 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **历史行 `origin` 回填（2026-09-26 已执行，用户授权「做历史origin回填」）**：回填前复跑只读预检，工件假设仍成立（`total = 100` / `max_id = 100` / `origin IS NULL = 100` / `origin IS NOT NULL = 0` / `id > 100` 的 NULL 行 0 条 ⇒ 迁移与新代码上线后尚无新审计行写入，`99-rollback.sql` 的 `id <= 100` 边界仍准确）。执行 `02-backfill.sql`（`--yes` 非交互）报 `Total queries executed = 4`、`Rows written = 200`、`sql_duration_ms 4.10`、`changed_db true`；`03-verify.sql` 只读验收**逐项与期望一致**：`total 100` / `null_origin 0` / `user 23` / `cron_tick 74` / `backchannel 3` / `lazy_settle 0` / `machine 0` / `other 0`，反例 `bad1`–`bad4` 全 0。回填后分布：`cron_tick·result_confirm·actor=0` 74（2026-09-20T05:45:06.359Z → 2026-09-25T13:15:37.697Z）、`backchannel·auth_backchannel_logout·actor=0` 3、`user` 23（`auth_login` 15 / `season_bind_tournament` 3 / `club_bind` 3 / `auth_logout` 1 / `season_create` 1）。**刻意未做**：`actor = 0` 的历史哨兵保持原样。**未执行回滚**（不需要）。
 
+## v6.4.0 · 报价设置解耦 + 激活通知证据制 + 竞价截止绝对时刻化（2026-09-26）
+
+**状态**：代码完成、本地全绿，**未 push 未部署**；迁移 `0040` / `0041` 已落地本地 dev 库与测试夹具，**生产 apply 待授权**。判级 minor：新增用户可见能力（证据制举报、设置解耦、出价途径）+ 两份迁移。提交五枚：`cbca904`（改动 A）/ `fd4d441`（改动 B+3）/ `8d9ddd3`（改动 4）/ `377ce21`（改动 5+6+7）/ docs 本枚。逐 commit 走过 code-review。
+
+**缘起与裁决**（计划期三轮定稿，裁决原话见 CHANGELOG 同名节）：四项既定整改（A 截止绝对时刻化 / B 报价设置与转会名单解耦 / 3 文案 / 4 激活证据制）+ 三项 UI 改动（5 当前最高带队名 / 6 球员页挂牌出价途径 / 7 右栏默认属性 + 队徽去圆）。计划期完成 D1 性能账（新增读面 ≈ 0）与基线重核（v6.2.0–v6.3.2 已上线、迁移编号顺延 0040/0041、审计 origin 必填）。
+
+**交付**（明细见 CHANGELOG）
+- **A**：迁移 0040（listings.`deadline_at` + `activation_proof` + 触发器 `fund_holds_bid_deadline_guard`）；出价落库绝对截止（普通推进带过线守卫）；读路径与惰性结算两级判定（列优先，存量 NULL 回落实时算）。
+- **B+3**：迁移 0041（players.`offer_auto`）；`autoRespondKind` 重写（低于线一律 auto_reject 与开关无关；达线且开关开才 auto_accept）；`setOfferSettings` 解耦（线/开关不必进名单，进名单必填线，非卖品压掉线与开关）；SideOps 设置面板常显线与开关；文案去「（成交等过户确认）」与「转会名单」字样。
+- **4**：`POST /api/media/activation`（R2 写端点，教练鉴权，5MB 图片）；激活必附 QQ 截图（`listings.activation_proof`）；站内信五模板；举报端点（仅被激活方，建 `activation_report` 核查任务，**不冻结匹配窗、不自动改数据**）；管理端队列分流渲染 + `/resolve` 收口。
+- **5+6+7**：列表聚合带 `highestBidder`；`player_id` 过滤参数 + `usePlayerListing`；`MarketBidForm` 共享组件；SideOps「外队挂牌中」分支（修真缺陷：别队挂牌球员此前落 C 态暴露必 4xx 的报价/激活按钮）+ B 态举报入口；右栏默认「属性」页签；`TeamLogo` circle prop（Clubs 列表保留圆形）。
+
+**实测与验收**：typecheck 三份全清；vitest **53 文件 / 779 例全绿**（基线 53/772）；build 成功（`index-C68fzOUs.js` 592.10 KB / gzip 188.26 KB）；e2e **11/11**。D1 新增读面 ≈ 0（列表聚合 +1 条分块查询 ≤90、player_id 过滤零新增形状、举报/上传各 1–2 行写）。
+
+**部署边界（等指令）**：先 apply 0040/0041 生产 → push（自动部署）；与 v6.3.2 同理「先迁移后 push」硬约束（代码 SELECT 新列）。
+
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。

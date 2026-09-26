@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.4.0] · 报价设置解耦 + 激活通知证据制 + 竞价截止绝对时刻化（2026-09-26，本地收口：未 push 未部署）
+
+**缘起**：四项既定整改 + 三项 UI 改动打包。用户裁决逐条：「截止的语义就是经计算后的绝对时刻，不容 5 分钟差错」「没进转会名单的应该也可以设置最低报价和是否自动应答」「低于线都按自动拒绝」「激活通知应当是除了站内信外，激活方要在激活时证明他在 QQ 给被激活方发了激活通知，而且被激活方可以举报（聚宝）」「举报不冻结匹配窗」「去掉『（成交等过户确认）』」「当前最高要带当前最高的队名」「球员被挂牌时左栏下方也该有转会信息与出价途径，不然用户在哪里出价」「右栏默认展示改属性、队徽的圆圈除了球队列表都去掉」。D1 性能逐项算清：新增读面 ≈ 0。
+
+**新增**
+- 迁移 `0040_listing_deadline_activation_proof.sql`：listings 加 `deadline_at`（落库的绝对截止时刻）+ `activation_proof`（激活 QQ 通知截图 key）+ 触发器 `fund_holds_bid_deadline_guard`（冻结语句原子拦过线出价，`WHL_BID_REJECT_DEADLINE`）；`0041_players_offer_auto.sql`：players 加 `offer_auto`（达线自动同意开关）。`tests/d1.ts` 追加两者（41 个）。
+- **改动 A 截止绝对时刻化**：出价成功即按 `bidDeadline()` 把新静默期的绝对截止落库（普通出价推进带 `deadline_at > now` 过线守卫）；激活推进与结算收口清列；读路径（列表/详情）与惰性结算两级判定——先读列、存量行 NULL 回落实时算（兼容）。
+- **改动 B 报价设置解耦**：`autoRespondKind` 重写为 `(minOfferPrice, offerAuto, amount)`——低于线一律 auto_reject（与开关无关、即时退回），达线且 `offer_auto=1` 才 auto_accept，没设线走人工；`transfer_listed` 不再参与判定。`setOfferSettings` 解耦：最低报价/开关不必进名单，进名单仍必填线；无线时开关存 0；非卖品压掉线与开关。PUT 端点加 `offerAuto`，players 详情透出。
+- **改动 3 文案**：`offer_accepted` / `offer_auto_accepted` 去「（成交等过户确认）」，auto 两模板去「转会名单」字样。
+- **改动 4 激活通知证据制**：`POST /api/media/activation`（本仓首个 R2 写端点：教练鉴权、key 服务端生成 `activation/<clubId>/`、限 png/jpg/webp 与 5MB）；`createActivation` 必填 `proofMediaKey`（两个激活入口同步），落 `listings.activation_proof`；站内信五模板（`activation_notice` 附证据 / `activation_reported` / `activation_matched` / `activation_passed` / `activation_match_expired`）；举报端点 `POST /api/market/listings/:id/activation-report`（仅被激活方）——只建 `activation_report` 核查任务 + 通知激活方，**不改挂牌状态、不冻结匹配窗**；管理端审核队列扩 IN 两值（report 行按 kind 分流渲染 + 截图链接）、`POST /api/admin/reviews/:id/resolve` 收口（裁定不自动改数据，写备注进审计）、overview 计数同步。
+- **改动 5**：转会区列表聚合补领先出价方（active 出价每单至多一条），`MarketListing.highestBidder`，卡片「当前最高」显示「队名 · 金额」。
+- **改动 6**：`GET /api/market/listings?player_id=` 按球员查现行挂牌；`usePlayerListing` hook；出价表单抽成共享组件 `MarketBidForm`；SideOps 挂牌态换数据源（修 useBoard 客户端 find 的分页截断漏单），B 态（本队挂牌，含训练营球员被别队激活）加举报入口，**新增「外队挂牌中」分支（挂牌信息 + 出价表单）——顺带修掉别队挂牌球员落 C 态、暴露必 4xx 报价/激活按钮的真缺陷**。
+- **改动 7**：球员页右栏默认页签改「属性」；`TeamLogo` 加 `circle` prop（默认 true：Clubs 列表照旧圆形；ClubDetail 与球员页传 false 出方形徽）；圆形样式抽 `.team-logo-round`。
+
+**实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 779 例全绿**（v6.3.2 基线 53/772；自动应答 describe 重写四例、解耦设置用例、证据制三例、出价落库 deadline_at + 触发器兜底、列表聚合与 player_id 过滤等新增 7 例）；`npm run build` 成功（主 bundle `index-C68fzOUs.js` 592.10 KB / gzip 188.26 KB）；e2e **11/11**。定向变异已由同源测试锁覆盖（触发器 `WHL_BID_REJECT_DEADLINE` 在用例内直接验证）。**教训**：media 子应用挂在 `/api/media`，新端点路径要写 `/activation`（写 `/media/activation` 会 404）；本地 `.wrangler/state` 的 D1 处于「schema 已在、`d1_migrations` 为空」陈旧态，`npm run db:migrate:local` 必然报错，新列直接 `npx wrangler d1 execute whl-club --local --file …` 落地。
+
+**部署边界（等指令）**：上线序列 = 先 apply 迁移 `0040`/`0041` 到生产 → push（CF 自动部署）；代码读 `deadline_at`/`activation_proof`/`offer_auto` 列，与 v6.3.2 同理有「先迁移后 push」硬约束。
+
 ## [v6.3.2] · 审计来源通道（`origin`）与 actor 契约收口（2026-09-26，已上线：迁移 `0039` 先 apply，push `eb7adb7..1f6ea16` 后 CF 自动部署 Version `70ce7423`）
 
 **缘起**：v6.3.1 补齐了「钱动了，谁认领」的人类留痕，但普查暴露两件事：① cron / 惰性结算触发的审计 `actor` 是 NULL 或 0，「无人可归因」与「忘了传 actor」在日志里长得一样；② `actor` 只能回答「谁做的」，回答不了「**哪条入口**触发的」——同一笔惰性结算，可能是管理员关窗顺手跑的，也可能是某个用户 GET 列表顺手跑的，排查时无法区分。本版给 `audit_log` 加 `origin` 列正面回答通道，并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」。
