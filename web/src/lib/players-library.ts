@@ -2,8 +2,8 @@
 // 四件事都在这里：Filters 类型与默认值、URL query ↔ 筛选状态的互转、筛选 → 自动列的联动规则、
 // 生效条件摘要条（filterChips）。拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，
 // 留在页面里会形成页面 ↔ 组件的循环导入。
-import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById } from './ref.ts';
-import { FC26_GAME_ATTR_COLUMNS, isGoldPlaystyleId, isPlaystyleId } from '../../../src/core/fc26.ts';
+import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, roleChs } from './ref.ts';
+import { FC26_GAME_ATTR_COLUMNS, isGoldPlaystyleId, isPlaystyleId, isRoleId } from '../../../src/core/fc26.ts';
 import { SORT_KEY_NAMES } from '../../../src/core/players-sort.ts';
 import { MARKER_VALUES, type PlayerMarker } from '../../../src/core/squad-rules.ts';
 
@@ -72,6 +72,8 @@ export interface Filters {
   view: View;
   name: string;
   positions: string[];
+  // 角色多选（v6.6.0）：存库 ID 原值（`+` 1-49 / `++` 101-149），与 ps 一样不做家族合并
+  roles: number[];
   status: string;
   growable: 'all' | '1' | '0';
   sort: SortKey;
@@ -119,6 +121,7 @@ export const EMPTY_FILTERS: Filters = {
   view: 'current',
   name: '',
   positions: [],
+  roles: [],
   status: '',
   growable: 'all',
   sort: 'id',
@@ -198,6 +201,7 @@ export function filtersFromUrl(): Filters {
   f.name = str('name');
   // 去重：URL 里手写 ?position=GK,GK 会出重复项（摘要条上就是两个一样的 chip、React key 也重复）
   f.positions = str('position') ? [...new Set(str('position').split(',').filter((p) => POSITIONS.includes(p)))] : [];
+  f.roles = str('role') ? [...new Set(str('role').split(',').map(Number).filter((n) => isRoleId(n)))] : [];
   f.status = str('status');
   if (str('growable') === '1' || str('growable') === '0') f.growable = str('growable') as '1' | '0';
   const sortParam = str('sort');
@@ -265,6 +269,8 @@ export function filtersToQuery(f: Filters): string {
   // 金段 ID（101-199）也要发出去：银徽与金徽各查各的槽（v3.1.1 步骤 4）。
   // 这里的过滤是防手改地址栏塞脏值 —— 后端会 400，整个列表变成错误态。
   put('ps', f.ps.filter((n) => isPlaystyleId(n)).join(','));
+  // 同 ps：过滤只为防手改地址栏塞脏值（后端会 400，整个列表变成错误态）
+  put('role', f.roles.filter((n) => isRoleId(n)).join(','));
   put('has_contract', f.hasContract);
   put('wage_min', f.wageMin);
   put('wage_max', f.wageMax);
@@ -435,6 +441,11 @@ export function filterChips(f: Filters, clubs: readonly { id: number; name: stri
   }
   if (goldPs.length > 0) {
     push('ps:gold', `金徽章：${goldPs.map((n) => psChipName(n, true)).join('、')}`, { ps: silverPs });
+  }
+  // 角色只此一条（不按 `+`/`++` 拆两段）：两档在数据上是两个独立值，但用户在面板上勾的
+  // 是「角色」这一类，拆成两条 chip 只会让摘要条变长。
+  if (f.roles.length > 0) {
+    push('roles', `角色：${f.roles.map((n) => roleChs(n) ?? String(n)).join('、')}`, { roles: [] });
   }
   if (f.hasContract) push('hasContract', f.hasContract === '1' ? '仅有合同' : '仅无合同', { hasContract: '' });
   if (f.rcNone) push('rcNone', '无解约金条款', { rcNone: false });

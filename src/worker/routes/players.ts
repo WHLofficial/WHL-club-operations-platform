@@ -5,7 +5,7 @@ import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
 import { createConfigService } from '../../core/config.ts';
-import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, isGoldPlaystyleId, isPlaystyleId } from '../../core/fc26.ts';
+import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId } from '../../core/fc26.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
@@ -201,6 +201,7 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 // GET /api/players —— 球员库列表
 // 筛选：view / club_id / status / position（逗号分隔多值，含 PosID2-4 槽）/ name / growable / foot /
 //       growth_tier / is_future_star / china_plan / agent_tier / marker（逗号多值，v6.5.0）/
+//       role（逗号多值，v6.6.0：五槽 OR，`+` 与 `++` 互不命中）/
 //       badges_silver_min / badges_gold_min /
 //       badges_none / fc_id / ca·pa·age·prestige·base_ca·market_value·成长空间·影响力·细分属性·合同维度区间 /
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
@@ -484,6 +485,35 @@ function buildPlayerFilters(
     }
     filters.push(`(${checks.join(' OR ')})`);
     psSlotSelects = psSlots.map((s, i) => `, ${s} AS ps${i + 1}`).join('');
+  }
+  // 角色多选（v6.6.0）：RoleID1-5 五槽 OR —— 任一槽持有该 ID 即命中。
+  // 槽位与档位没有对应关系（`++` 档能落在任何一槽），所以不像 ps 那样按槽段切分；
+  // `+`(1-49) 与 `++`(101-149) 是两个独立值、互不命中（同 ps 银/金裁决），不做家族合并。
+  // 走的是普通表达式谓词，没有配套索引：OR 链 + ORDER BY id 会让优化器放弃表达式索引，
+  // 而唯一能用上索引的 UNION 驱动只在「角色是唯一筛选」时才正确（见计划 §6.7 订正）。
+  const roleRaw = c.req.query('role');
+  if (roleRaw !== undefined) {
+    const list = [
+      ...new Set(
+        roleRaw
+          .split(',')
+          .map((r) => Number(r.trim()))
+          .filter((r) => r !== 0),
+      ),
+    ];
+    if (list.length === 0) throw new HttpError(400, 'role 不能为空');
+    // 一个值要铺 5 个槽位条件，重复值会成倍放大 OR 链与绑定参数（地址栏手改能塞进来）
+    if (list.length > ROLE_FILTER_MAX_ITEMS) throw new HttpError(400, `role 最多 ${ROLE_FILTER_MAX_ITEMS} 项`);
+    if (list.some((n) => !isRoleId(n))) {
+      throw new HttpError(400, `role 应为角色 ID（1-${ROLE_BASE_MAX}）或进阶角色 ID（${ROLE_PLUS_MIN}-${ROLE_PLUS_MAX}）`);
+    }
+    const marks = list.map(() => '?').join(', ');
+    const checks: string[] = [];
+    for (const slot of ROLE_SLOT_KEYS) {
+      checks.push(`json_extract(players.game_attrs, '$.${slot}') IN (${marks})`);
+      filterArgs.push(...list);
+    }
+    filters.push(`(${checks.join(' OR ')})`);
   }
   // 合同维度（现行合同：player_id UNIQUE 不产生重复行）
   const hasContract = c.req.query('has_contract');

@@ -325,6 +325,34 @@ export function mergePlaystyleSlots(
   return out.sort((a, b) => a.slot - b.slot);
 }
 
+// 角色槽位与两段 ID 口径（v6.6.0）：RoleID1-5 五个槽，**槽位与档位没有对应关系** —— 生产里
+// `++` 档落在 RoleID1、RoleID5 的 40 人全是 `+` 档，所以筛选只铺「五槽 OR」，不按档位分段。
+// ID 沿用 PlayStyle 的「+100 = 进阶档」编码：基础段 1-49、`++` 段 101-149（100 是空档）。
+// `+` 与 `++` 筛选时当两个独立值、互不命中（同 ps 银/金裁决），不做家族合并。
+export const ROLE_SLOT_COUNT = 5;
+// 槽位键清单（RoleID1..RoleID5），由槽数派生，免得改槽数时多一个漂移点
+export const ROLE_SLOT_KEYS: readonly string[] = Array.from(
+  { length: ROLE_SLOT_COUNT },
+  (_, i) => `RoleID${i + 1}`,
+);
+export const ROLE_PLUS_BASE = 100;
+export const ROLE_BASE_MAX = 49;
+export const ROLE_PLUS_MIN = ROLE_PLUS_BASE + 1;
+export const ROLE_PLUS_MAX = ROLE_PLUS_BASE + ROLE_BASE_MAX;
+
+// 合法的角色筛选值：基础段 1-49 或 `++` 段 101-149
+export function isRoleId(n: number): boolean {
+  return Number.isInteger(n) && ((n >= 1 && n <= ROLE_BASE_MAX) || (n >= ROLE_PLUS_MIN && n <= ROLE_PLUS_MAX));
+}
+
+// `++` 档：ID 落在进阶段
+export function isRolePlusId(n: number): boolean {
+  return n >= ROLE_PLUS_MIN;
+}
+
+// role 筛选一次最多接受多少个值：每个值要铺 5 个槽位条件，地址栏手改能塞进任意长的清单
+export const ROLE_FILTER_MAX_ITEMS = 100;
+
 // 通道 B（FC Editor s901）必需列；姓名列 commonname/firstname/lastname 缺一可用
 export const FC_EDITOR_REQUIRED_COLUMNS = [
   'playerid',

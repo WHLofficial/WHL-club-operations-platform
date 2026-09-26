@@ -257,6 +257,10 @@ export default function PlayersLibrary() {
     setFilters((f) => ({ ...f, ps: f.ps.includes(id) ? f.ps.filter((n) => n !== id) : [...f.ps, id] }));
   };
 
+  const toggleRole = (id: number) => {
+    setFilters((f) => ({ ...f, roles: f.roles.includes(id) ? f.roles.filter((n) => n !== id) : [...f.roles, id] }));
+  };
+
   const autoCols = useMemo(() => autoColsFor(filters), [filters]);
   const activeCols: string[] = useMemo(() => {
     const cols = manualCols ?? [...DEFAULT_COLS, ...autoCols];
@@ -482,6 +486,7 @@ export default function PlayersLibrary() {
               clubs={clubsQuery.data?.clubs ?? []}
               togglePosition={togglePosition}
               togglePs={togglePs}
+              toggleRole={toggleRole}
               resetAll={resetAll}
               activeCount={chips.length}
               activeCols={activeCols}

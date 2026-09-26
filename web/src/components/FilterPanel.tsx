@@ -3,9 +3,9 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClubDirectoryRow } from '../lib/api.ts';
 import MultiSelect, { type MultiSelectItem } from './MultiSelect.tsx';
-import { ATTR_GROUPS, ATTR_LABELS, playstyleById, SOURCE_LABEL } from '../lib/ref.ts';
+import { ATTR_GROUPS, ATTR_LABELS, playstyleById, roleById, SOURCE_LABEL } from '../lib/ref.ts';
 import { COL_DEFS, MARKER_EMOJI, MARKER_LABEL, POSITIONS, STATUS_LABEL, type Filters } from '../lib/players-library.ts';
-import { isGoldPlaystyleId } from '../../../src/core/fc26.ts';
+import { isGoldPlaystyleId, isRolePlusId } from '../../../src/core/fc26.ts';
 import { MARKER_VALUES, type PlayerMarker } from '../../../src/core/squad-rules.ts';
 
 export interface FilterPanelProps {
@@ -15,6 +15,7 @@ export interface FilterPanelProps {
   clubs: ClubDirectoryRow[];
   togglePosition: (pos: string) => void;
   togglePs: (id: number) => void;
+  toggleRole: (id: number) => void;
   resetAll: () => void;
   // 生效条件条数（与工具条按钮上的数字同一个来源：页面把摘要条的 chips.length 传进来）
   activeCount: number;
@@ -51,6 +52,21 @@ const PS_ITEMS: MultiSelectItem[] = [
   ...PS_ROWS.filter((r) => isGoldPlaystyleId(r.id)).map((r) => psItem(r, '金徽章')),
 ];
 
+// 角色下拉数据（v6.6.0）：`+`（1-49）与 `++`（101-149）是同一角色的两档，但库里就是两个
+// 不同的 ID、筛选时互不命中（同 PS 银/金裁决），所以顶层分两段、段内再按名字首段的位置码
+// 分组（"CM 全能中场 +" → CM）—— 与 PlayStyle 的六类分组同形。RoleID1-5 是五个槽，槽位与
+// 档位没有对应关系，所以下拉里一个角色只出现一次，命中哪个槽由后端五槽 OR 负责。
+function roleItem(row: { id: number; chs?: string; en?: string }, section: string): MultiSelectItem {
+  const name = row.chs ?? row.en ?? String(row.id);
+  return { value: String(row.id), label: name, section, group: name.split(' ')[0] };
+}
+
+const ROLE_ROWS = [...roleById.values()].filter((r) => r.id > 0);
+const ROLE_ITEMS: MultiSelectItem[] = [
+  ...ROLE_ROWS.filter((r) => !isRolePlusId(r.id)).map((r) => roleItem(r, '角色 +')),
+  ...ROLE_ROWS.filter((r) => isRolePlusId(r.id)).map((r) => roleItem(r, '角色 ++')),
+];
+
 // 位置与显示列的多选下拉条目（v3.1.1 步骤 3）；位置只有 12 个码位、不分段
 const POSITION_ITEMS: MultiSelectItem[] = POSITIONS.map((p) => ({ value: p, label: p }));
 const COL_ITEMS: MultiSelectItem[] = COL_DEFS.map((d) => ({ value: d.key, label: d.label }));
@@ -62,6 +78,7 @@ export default function FilterPanel({
   clubs,
   togglePosition,
   togglePs,
+  toggleRole,
   resetAll,
   activeCount,
   activeCols,
@@ -246,6 +263,13 @@ export default function FilterPanel({
                 selected={filters.ps.map(String)}
                 onToggle={(v) => togglePs(Number(v))}
                 onClear={() => set('ps', [])}
+              />
+              <MultiSelect
+                label="角色"
+                items={ROLE_ITEMS}
+                selected={filters.roles.map(String)}
+                onToggle={(v) => toggleRole(Number(v))}
+                onClear={() => set('roles', [])}
               />
             </div>
           </div>

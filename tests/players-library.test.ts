@@ -1,6 +1,8 @@
 // 球员库列表（v0.7.1 d6）：筛选（position/name/growable/CA·PA·年龄区间）、数值键 keyset 排序翻页、参数校验
 // + view=initial 的导入时口径（CA=base_ca、PA=导入值）；initial_club_id 已在v2.0.0 裁决 4 删除
 import { describe, expect, it, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
@@ -8,6 +10,16 @@ import { createTestD1, applyMigrations, runMigration } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { resetGuards } from '../src/lib/guard.ts';
 import { foldName } from '../src/core/name-fold.ts';
+import {
+  ROLE_BASE_MAX,
+  ROLE_PLUS_BASE,
+  ROLE_PLUS_MAX,
+  ROLE_PLUS_MIN,
+  ROLE_SLOT_COUNT,
+  ROLE_SLOT_KEYS,
+  isRoleId,
+  isRolePlusId,
+} from '../src/core/fc26.ts';
 
 // 本文件密集打 /api/players，每个用例先清进程内限流计数（v2.8.1 守护）
 beforeEach(() => resetGuards());
@@ -1165,6 +1177,124 @@ describe('标记（v6.5.0）', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { player: { marker: string | null } };
     expect(body.player.marker).toBe('growth');
+  });
+});
+
+// 角色筛选（v6.6.0）：RoleID1-5 五个槽，任一槽持有该 ID 就算命中（不是「只在 1 号槽看」）；
+// `+`（1-49）与 `++`（101-149）在库里就是两个不同的 ID、筛选时互不命中（同 PS 银/金裁决），
+// 不做家族合并。夹具按「命中槽位」铺开：61/62 靠非 1 号槽命中、63 只在 RoleID3 且是 `++` 档、
+// 64 与 61 同位置（LB）但角色不同、65 槽里是脏值 999、66 没有 game_attrs。
+describe('角色筛选（v6.6.0）', () => {
+  function seedRoleRows(sqlite: DatabaseSync): void {
+    sqlite.exec(`
+      INSERT INTO players (id, uid, name, position, game_attrs) VALUES
+        (61, 'r1', '槽一命中',     'LB', '{"RoleID1":7}'),
+        (62, 'r2', '槽二命中',     'CM', '{"RoleID2":7}'),
+        (63, 'r3', '进阶档命中',   'LB', '{"RoleID3":107}'),
+        (64, 'r4', '同位置异角色', 'LB', '{"RoleID1":8}'),
+        (65, 'r5', '槽里脏值',     'LB', '{"RoleID5":999}'),
+        (66, 'r6', '无属性',       'LB', NULL);
+    `);
+  }
+
+  // sort=id&order=asc：这些夹具的 ca/pa 都是 NULL，用默认排序键取不到稳定序
+  const idsOf = (query: string, env: Env) =>
+    list(`/api/players?${query}&sort=id&order=asc&limit=100`, env).then((body) => body.players.map((p) => p.id));
+
+  it('五槽任一命中即算：只看 RoleID1 会漏掉把角色放在 RoleID2/3 的人', async () => {
+    const fx = freshEnv();
+    seedRoleRows(fx.sqlite);
+    // 62 只把 7 放在 RoleID2 —— 把 OR 砍成「只查 RoleID1」这条断言就红
+    expect(await idsOf('role=7', fx.env)).toEqual([61, 62]);
+    expect(await idsOf('role=7,107', fx.env)).toEqual([61, 62, 63]);
+  });
+
+  it('`+` 与 `++` 是两个独立值、互不命中', async () => {
+    const fx = freshEnv();
+    seedRoleRows(fx.sqlite);
+    // 61/62 持有基础段 7，63 持有进阶段 107：两个方向都捞不到对方
+    expect(await idsOf('role=107', fx.env)).toEqual([63]);
+    expect(await idsOf('role=7', fx.env)).toEqual([61, 62]);
+    expect(await idsOf('role=8', fx.env)).toEqual([64]);
+    // 不是「7 命中 7 与 107 整个家族」：若把谓词写成 IN (n, n+100)，role=7 会把 63 也带出来
+    expect(await idsOf('role=7', fx.env)).not.toContain(63);
+  });
+
+  it('槽里的脏值 999 与无属性行都不误命中', async () => {
+    const fx = freshEnv();
+    seedRoleRows(fx.sqlite);
+    // 65 的 RoleID5 是 999（不是任何合法角色 ID）、66 没有 game_attrs：任何合法值都捞不到它们
+    for (const q of ['role=1', 'role=7', 'role=8', 'role=107', 'role=1,7,8,107,149']) {
+      const ids = await idsOf(q, fx.env);
+      expect(ids).not.toContain(65);
+      expect(ids).not.toContain(66);
+    }
+    // 999 不是「筛不出来」而是非法值：白名单在端点就拦掉
+    expect((await get('/api/players?role=999', fx.env)).status).toBe(400);
+  });
+
+  it('与位置等筛选叠加是 AND，计数端点走同一份 filters', async () => {
+    const fx = freshEnv();
+    seedRoleRows(fx.sqlite);
+    // 61/62 都持有 7，但 62 的位置是 CM：位置把角色命中集再收窄
+    expect(await idsOf('role=7', fx.env)).toEqual([61, 62]);
+    expect(await idsOf('role=7&position=LB', fx.env)).toEqual([61]);
+    // 64 与 61 同位置（LB）但角色是 8，位置+角色不会把它带进来
+    expect(await idsOf('role=7&position=LB', fx.env)).not.toContain(64);
+    // countPlayers 与列表共用 buildPlayerFilters，数字必须逐一对上
+    expect(await count17('?role=7', fx.env)).toBe(2);
+    expect(await count17('?role=7&position=LB', fx.env)).toBe(1);
+  });
+
+  it('参数校验：空 / 非数字 / 空档 100 / 越界 / 超量都 400', async () => {
+    const fx = freshEnv();
+    expect((await get('/api/players?role=', fx.env)).status).toBe(400);
+    expect((await get('/api/players?role=abc', fx.env)).status).toBe(400);
+    // 0 是「未设置」不是角色：全 0 的清单按空清单处理
+    expect((await get('/api/players?role=0', fx.env)).status).toBe(400);
+    // 100 夹在两段之间（`+` 1-49 / `++` 101-149），150 越上界
+    expect((await get('/api/players?role=100', fx.env)).status).toBe(400);
+    expect((await get('/api/players?role=150', fx.env)).status).toBe(400);
+    // 一个坏值就整条请求 400（不做「丢弃坏值、留下好的」的静默降级）
+    expect((await get('/api/players?role=7,abc', fx.env)).status).toBe(400);
+    expect((await get('/api/players?role=7.5', fx.env)).status).toBe(400);
+    // 合法 ID 总共只有 98 个（49 + 49），所以上限拦的是 SQL 参数规模而不是用户勾选：
+    // 断言错误文案，把「先撞上限」与「先撞白名单」区分开（去掉上限检查这条会红）
+    const over = await get(`/api/players?role=${Array.from({ length: 101 }, (_, i) => i + 1).join(',')}`, fx.env);
+    expect(over.status).toBe(400);
+    expect(((await over.json()) as { error: string }).error).toContain('最多');
+  });
+
+  it('isRoleId / isRolePlusId：两段之间留 100 空档，非整数一律不收', () => {
+    for (const n of [1, 25, 49, 101, 125, 149]) expect(isRoleId(n)).toBe(true);
+    for (const n of [0, 50, 99, 100, 150, 999, -7, 7.5, NaN]) expect(isRoleId(n)).toBe(false);
+    // 档位只由 ID 自己决定，与它落在哪个槽无关
+    expect(isRolePlusId(ROLE_PLUS_MIN)).toBe(true);
+    expect(isRolePlusId(ROLE_PLUS_MAX)).toBe(true);
+    expect(isRolePlusId(ROLE_BASE_MAX)).toBe(false);
+    expect(ROLE_PLUS_MIN).toBe(ROLE_PLUS_BASE + 1);
+    expect(ROLE_PLUS_MAX).toBe(ROLE_PLUS_BASE + ROLE_BASE_MAX);
+    expect(ROLE_SLOT_KEYS).toHaveLength(ROLE_SLOT_COUNT);
+    expect(ROLE_SLOT_KEYS[0]).toBe('RoleID1');
+    expect(ROLE_SLOT_KEYS[ROLE_SLOT_COUNT - 1]).toBe('RoleID5');
+  });
+
+  it('参考表对齐：`+` 1-49 与 `++` 101-149 各 49 条且逐条 id+100 成对', () => {
+    const rows = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../web/assets/ref/role.json', import.meta.url).href), 'utf8'),
+    ) as { id: number; chs: string; en: string }[];
+    expect(rows.filter((r) => r.id === 0).map((r) => r.chs)).toEqual(['-']); // 0 = 未设置，不是角色
+    const base = rows.filter((r) => r.id >= 1 && r.id <= ROLE_BASE_MAX);
+    const plus = rows.filter((r) => r.id >= ROLE_PLUS_MIN && r.id <= ROLE_PLUS_MAX);
+    expect(base.map((r) => r.id)).toEqual(Array.from({ length: ROLE_BASE_MAX }, (_, i) => i + 1));
+    expect(plus.map((r) => r.id)).toEqual(base.map((r) => r.id + ROLE_PLUS_BASE));
+    // 两段名字只差尾缀，本体逐条一致 —— 同一角色的两档，不是两套角色
+    // （`++` 段的尾缀是两个加号，所以剥的是「尾部的空白与加号」而不是一个 `+`）
+    const strip = (s: string) => s.replace(/[\s+]+$/, '');
+    expect(plus.map((r) => strip(r.chs))).toEqual(base.map((r) => strip(r.chs)));
+    // 段界放行、参考表守住：两段之间没有空号（98 个合法 ID 全在表里）
+    expect(base).toHaveLength(ROLE_BASE_MAX);
+    expect(plus).toHaveLength(ROLE_BASE_MAX);
   });
 });
 
