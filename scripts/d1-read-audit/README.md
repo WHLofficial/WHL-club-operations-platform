@@ -260,8 +260,8 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 | `sort=foot` | 37,635 | `COALESCE(foot, 0)`，可静态索引 | **已收**：迁移 `0036`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次 |
 | `sort=growth_tier` | 37,635 | `COALESCE(growth_tier, 0)`，可静态索引 | **已收**：迁移 `0038`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次。**同一条索引还收了筛选侧**（见下两行）：筛选原先走裸列 `players.growth_tier = ?`，与排序表达式不同源 |
 | `sort=future_star` | 37,635 | `COALESCE(is_future_star, 0)`，可静态索引 | **已收**：迁移 `0038`（2026-09-25 apply）—— 实测 37,635 → **22** 行/次，筛选侧同上 |
-| `growth_tier=3`（筛选） | 18,302 | 筛选侧走**裸列**，与排序侧 `COALESCE(col, 0)` **不同源** ⇒ 表达式索引帮不上等值筛选。这就是「排序降了、筛选没降」的机制 | **已收**：迁移 `0038`（2026-09-25 apply）—— 筛选侧改写成 `COALESCE(col, 0) = ?` 与索引同源，实测 18,302 → **1** 行/次 |
-| `is_future_star=1`（筛选） | 18,504 | 同上 | **已收**：迁移 `0038`（2026-09-25 apply）—— 实测 18,504 → **307** 行/次 |
+| `growth_tier=3`（筛选） | 18,302 | 筛选侧走**裸列**，与排序侧 `COALESCE(col, 0)` **不同源** ⇒ 表达式索引帮不上等值筛选。这就是「排序降了、筛选没降」的机制 | **已收**：迁移 `0038`（2026-09-25 apply）—— 筛选侧改写成 `COALESCE(col, 0) = ?` 与索引同源，实测 18,302 → **1** 行/次。⚠️ **该数字带条件**：只在筛选键 ≠ 排序键时成立；同键排序（`sort=growth_tier&growth_tier=3`）时同源写法落 `+TEMP` 整组重排、上界 2 × 表（36,602），v6.4.1 已改成同键走裸列（见第八节） |
+| `is_future_star=1`（筛选） | 18,504 | 同上 | **已收**：迁移 `0038`（2026-09-25 apply）—— 实测 18,504 → **307** 行/次。⚠️ 同 `growth_tier=3`：该数字带条件，同键排序时同源写法上界 2 × 表，v6.4.1 已改成同键走裸列（见第八节） |
 | `sort=wage` / `release_fee` / `contract_type` / `source` | 37,635 | 排序键在 `contracts`（`ct.*`），players 单表索引无从下手；contracts 的排序键又依赖窗口刻度，不能静态索引 | 需物化列或改查询，本增量不做 |
 | `sort=years` / `protected` | 37,637 | 同上，且表达式还内联 `CURRENT_TICKS_SQL`（`season_windows` 子查询），随赛季推进变化 | 同上 |
 | `sort=influence` | 37,635 | 表达式内联**运行时 config 系数**（`attendance_model`），系数一改索引立刻失效 | 不能静态索引 |
@@ -272,7 +272,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 无筛选的筛选形状（`growable=1` 95、`position=ST` 110、`ps=25` 293、`attr≥80` 88）虽然也 >70，但它们**没有索引可用且读量受命中行数约束**，未列入豁免——它们已随去 COUNT 从 1.8 万降到百级，再降需要子表/物化列（§5.2），属计划外。
 
 **batch 6 的两个额外发现**（2026-09-25，迁移 `0038`）：
-1. **筛选侧必须与索引同源**：筛选原先走裸列（`players.growth_tier = ?`），与排序侧的 `COALESCE(col, 0)` 不同源，表达式索引对等值筛选**完全无效**；改成 `COALESCE(col, 0) = ?` 后同一条索引同时收排序与筛选。剩余 4 个键（`growth_gap` / `china_plan` / `agent_tier` / `fc_id`）与 `growth_tier` 同性质，可照此配方一条索引收两面（写配额仍按每条 18,301 行计）。
+1. **筛选侧必须与索引同源**：筛选原先走裸列（`players.growth_tier = ?`），与排序侧的 `COALESCE(col, 0)` 不同源，表达式索引对等值筛选**完全无效**；改成 `COALESCE(col, 0) = ?` 后同一条索引同时收排序与筛选。剩余 4 个键（`growth_gap` / `china_plan` / `agent_tier` / `fc_id`）与 `growth_tier` 同性质，可照此配方一条索引收两面（写配额仍按每条 18,301 行计）。**v6.4.1 修正**：该配方只在筛选键 ≠ 排序键时适用，同键等值必须改回裸列（否则落 `+TEMP` 整组重排，上界 2 × 表）—— 照此配方给这 4 个键动筛选侧时，同样要按两个排序口径分别取写法，见第八节。
 2. **索引首列被等值约束时，SQLite 不再用它出 ORDER BY**：`scratch/probe-0038-plan.mjs` 七种组合实测 —— 只排序 → `SCAN … USING COVERING INDEX`（有序、无临时排序）；筛选 + 同键排序（含 ASC / 无 id 尾列变体）→ `SEARCH … USING COVERING INDEX (…=?)` + **`USE TEMP B-TREE FOR ORDER BY`**。⇒ 筛选侧的收益是「读量从全表扫降到命中子集」，**不是**提前停；同源锁用例因此只断言 `SEARCH`，不断言无临时排序。
 3. **未选「排序改裸列 + 普通列索引」的原因**（本批原计划）：keyset 游标拿排序表达式当键，裸列一旦为 NULL 比较恒为假会**静默漏行**（`src/worker/routes/players.ts:96` 的 years 注释写明这条规矩），而这五列在 `src/db/migrations/0001_init.sql:18-23` 是可空的（生产当前 NULL 数 0，但口径不该依赖数据现状）；两条路的写配额相同。
 
@@ -359,4 +359,61 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements-
 ### 7.4 顺带修掉的工具障碍
 
 `src/worker/authClient.ts` 的 `AuthApiError` 原本用 TS **参数属性**（`constructor(public code: string, …)`）—— 那是唯一需要「代码生成」的 TS 语法，Node 的类型剥离不支持（`TypeScript parameter property is not supported in strip-only mode`）⇒ 凡 import 它的模块在 Node 里都加载不了，`/api/clubs/directory`、`/api/me/club`、`/api/club/balance`、`/api/club/ledger`、`/api/club/stadium/build-info` 五个读面抓不到 SQL。改成显式字段赋值后 18 个读面全部可测。
+
+---
+
+## 八、筛选侧同源化（v6.4.1，2026-09-26 生产实测）
+
+**缘起**：batch 6（迁移 `0038`）把筛选侧无条件改成与排序表达式同源（`COALESCE(col, 0) = ?`），当次只量了 `sort=growth_tier&growth_tier=3` 这一格（18,302 → 1），于是把「同源」当成了无条件更优。按最坏情况复核（用户口径：任何测试都要以最坏的情况做打算）发现它只在**筛选键 ≠ 排序键**时成立：筛选键就是排序键时索引首列被等值钉死，同源写法反而落 `+TEMP B-TREE` 把整组重排。
+
+**机制**（`scripts/d1-read-audit/probe-samesource.mjs` 实测）：
+- 等值 + **排序键不同**：同源 → `SEARCH … (<expr>=?)`，读量 = 命中行数；裸列 → `SCAN players`，读量 = 全表。
+- 等值 + **排序键相同**：裸列 → `SCAN USING INDEX …`，顺着索引走、凑满 LIMIT 即停（上界 1 × 表）；同源 → `SEARCH … (<expr>=?) +TEMP`，读完整个同值组再排 = **2 × 组大小**（上界 2 × 表）。
+- 区间 + **排序键相同**：同源 → `SEARCH … (<expr> op ?)`，命中越少越省；裸列 → `SCAN USING INDEX` 全索引扫。
+- 区间 + `sort=id`（默认排序）：**两种写法都不省** —— 计划器不肯为区间表达式 seek 索引（`SCAN players`），要强推得用 `INDEXED BY`，属另一项改动。
+
+**实测矩阵（生产 18,301 行 / LIMIT 21）**：
+
+| 形状 | 裸列写法 | 同源写法 | 本版选 | 本版读量 |
+| --- | --- | --- | --- | --- |
+| `ca>=100` + 同键排序 | 18,301 | **1** | 同源 | 1 |
+| `ca<=200` + 同键排序 | 21 | 21 | 同源 | 21 |
+| `pa>=60` + 同键排序 | 21 | 21 | 同源 | 21 |
+| `age>=20` + 同键排序 | 21 | 21 | 同源 | 21 |
+| `prestige>=5` + 同键排序 | 18,301 | **15** | 同源 | 15 |
+| `market_value<=500` + 同键排序 | 18,301 | 18,301 | 同源 | 18,301（该列全 NULL ⇒ `0 <= 500` 命中全表，无收益；守卫让返回仍是 0 行） |
+| `base_ca>=100` + 同键排序 | 18,301 | **1** | 同源 | 1 |
+| 上述 7 条 + `sort=id` | 18,301 / 21 | 同左 | 同源 | 不变（计划器不 seek，见机制第 4 条） |
+| `growth_tier=3` + `sort=id` | 18,301 | **0** | 同源 | 0 |
+| `growth_tier=1` + `sort=id` | 21 | 21 | 同源 | 21 |
+| `growable=0` + `sort=id` | 35 | **21** | 同源 | 21 |
+| `growable=1` + `sort=id` | 55 | **21** | 同源 | 21 |
+| `foot=0` + `sort=id` | 80 | **21** | 同源 | 21 |
+| `foot=1` + `sort=id` | 29 | **21** | 同源 | 21 |
+| `is_future_star=0` + `sort=id` | 22 | **21** | 同源 | 21 |
+| `is_future_star=1` + `sort=id` | 924 | **21** | 同源 | 21 |
+| `growth_tier=3` + 同键排序 | 18,301 | 1 | 裸列 | 18,301 |
+| `growth_tier=1` + 同键排序 | **21** | 36,602 | 裸列 | 21 |
+| `growable=0` + 同键排序 | **10,495** | 15,655 | 裸列 | 10,495 |
+| `growable=1` + 同键排序 | **21** | 20,948 | 裸列 | 21 |
+| `foot=0` + 同键排序 | 13,884 | **8,877** | 裸列 | 13,884（同源更省，但见裁决依据） |
+| `foot=1` + 同键排序 | **21** | 27,726 | 裸列 | 21 |
+| `is_future_star=0` + 同键排序 | **125** | 36,395 | 裸列 | 125 |
+| `is_future_star=1` + 同键排序 | **21** | 208 | 裸列 | 21 |
+
+**裁决依据 = 最坏情况**：同键等值时裸列的读量上界是 1 × 表（18,301，顺着索引扫一遍就停），同源的上界是 2 × 表（36,602）。逐格看有 2 格同源更省（`foot=0` 8,877、`growth_tier=3` 1），但那是「命中组小」的运气 —— 值域会变（`agent_tier` 每窗重随、`market_value` 会有赋值与改动），故按最坏情况取裸列。
+
+**净效果（v6.4.0 线上 → v6.4.1）**：
+- 区间：`ca>=100` 18,301 → **1**、`prestige>=5` 18,301 → **15**、`base_ca>=100` 18,301 → **1**（均为同键排序时；`sort=id` 时不变）。
+- 等值异键：`is_future_star=1` 924 → **21**、`growth_tier=3` 18,301 → **0**；`growable` / `foot` 此前是裸列 ⇒ 55/35/80/29 → **21**（batch 6 只覆盖了 `growth_tier` / `is_future_star` 两个键）。
+- 等值同键：`growth_tier=1` 36,602 → **21**、`growable=1` 20,948 → **21**、`foot=1` 27,726 → **21**、`is_future_star=0` 36,395 → **125**、`is_future_star=1` 208 → **21**（收掉 batch 6 的条件性回归）；两格变差：`growth_tier=3` 1 → 18,301、`foot=0` 8,877 → 13,884。
+
+**语义守卫**：`COALESCE(col, 0)` 会把「没录过」（NULL）算成 0，所以区间条件一律加 `AND col IS NOT NULL`；等值条件在值为 0 时加同一守卫（`growable=0` 不该命中 NULL 行）。生产当前只有 `market_value` 全 NULL（18,301），其余 11 列 NULL 数**全为 0** ⇒ 守卫在现有数据上是空转，防的是将来 NULL 出现时结果集静默变大。
+
+**测试锁**：`tests/players-sort-indexes.test.ts` 70 例 —— 5 条区间 SEARCH 锁、4 条同键等值「写裸列且不得 TEMP B-TREE」、1 条异键同源文本 + SEARCH 锁、1 条区间守卫文本锁、1 条 NULL 身价端到端语义锁（自建夹具：两行 NULL + 一行 100，四种口径只看到「一百」那行）。变异验证两处：同键分支失效 ⇒ **恰好 4 例红**；区间守卫删掉 ⇒ **恰好 2 例红**。
+
+**复现**：`node scripts/d1-read-audit/probe-samesource.mjs`（只读，走管理通道，不受免费档行读上限约束）。
+
+**端点级复测待部署**：`measurements-after.json` 由 `scripts/measure-d1-reads.mjs` 打**线上端点**产生，v6.4.1 部署前它仍反映旧代码；部署后按第六节口径重跑并与本表核对。
+
 

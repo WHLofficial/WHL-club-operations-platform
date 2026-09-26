@@ -1074,6 +1074,27 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **上线执行（用户指令「上线」）**：按硬约束执行——① `wrangler d1 migrations list --remote` 确认待应用仅 0040/0041 → ② `npm run db:migrate:remote` 报 `Executed 2 commands in 1.39ms`、两条 ✅ → ③ 只读核验 `pragma_table_info` 新列 2+1、触发器 1 全在场 → ④ `git push origin main`（`6dc0eb5..5d5beb6`）→ ⑤ 约 1 分钟后 Workers Builds 出 Version `2c4a81e6-…`（11:28:01Z），回读 health / players / market / clubs / squads 全 200、线上首页资产 `index-C68fzOUs.js` 与本地 dist 逐字一致。
 
+## v6.4.1 · 筛选侧同源化——等值键按排序口径分写法（2026-09-26）
+
+**状态**：本地已完成（typecheck / vitest / 变异验证全过），**未 push 未部署**（等指令）。纯代码改动，**零迁移、零生产写**。判级 patch：修正 batch 6 引入的条件性回归，不改用户可见行为（结果集逐格相同，仅执行计划与读量变化）。
+
+**缘起**：batch 6（迁移 `0038`）把筛选侧无条件改成与排序表达式同源（`COALESCE(col, 0) = ?`），当次只量了 `sort=growth_tier&growth_tier=3` 一格（18,302 → 1）就把「同源」当成无条件更优。用户要求按最坏情况复核（原话：「`agent_tier` 每个窗口都会重随，总有不是全 2 的时候；`marketvalue` 也会有赋值和改动，重新评估」「测试的时候要以最坏的情况做打算，底线思维」「任何测试都是这样」），复核推翻了原结论。
+
+**裁决（按最坏情况取写法）**
+- **区间键一律同源**（`SEARCH … (<expr> op ?)`，命中越少越省），并加 `AND col IS NOT NULL` 守卫 —— `COALESCE` 会把「没录过」算成 0，不加守卫 `market_value<=500` 会把全 NULL 的 18,301 行都算命中。
+- **等值键分排序口径**：筛选键 ≠ 排序键 → 同源（`SEARCH (<expr>=?)`，读量 = 命中行数）；筛选键 = 排序键 → **裸列**（`SCAN USING INDEX` 顺索引早停，上界 1 × 表）—— 同源在此时落 `+TEMP B-TREE` 把整个同值组读完再排，上界 **2 × 表**（实测 `growth_tier=1` 36,602、`is_future_star=0` 36,395）。
+- 逐格看有 2 格同源更省（`foot=0` 8,877、`growth_tier=3` 1），但那是「命中组小」的运气，值域会变（`agent_tier` 每窗重随、`market_value` 会有赋值与改动）⇒ 按上界取裸列。
+
+**交付**
+- `src/worker/routes/players.ts`：`RANGE_PARAMS` 每条加 `src`（同源表达式）+ 区间循环改写；新增 `eqFilter(col, key, value, sortKey)` 与 `parseSortKey(c)`；`growable` / `foot` / `growth_tier` / `is_future_star` 改走 `eqFilter`（`china_plan` 保持裸列）；`countPlayers` 传 `'id'`（COUNT 无 ORDER BY ⇒ 等值键一律同源）。
+- `tests/players-sort-indexes.test.ts`：新增 describe「筛选侧与排序表达式索引同源（v6.4.1）」= 5 条区间 SEARCH 锁 + 4 条同键等值「写裸列且不得 TEMP B-TREE」+ 异键同源 SEARCH 锁 + 区间守卫文本锁 + NULL 身价端到端语义锁（自建 3 行夹具）；同时删掉 batch 6 已被设计反转的旧断言。
+- `scripts/d1-read-audit/probe-samesource.mjs`（新，只读证据生成器）；`scripts/d1-read-audit/README.md` 追加第八节（机制四条 + 24 行实测矩阵 + 裁决依据 + 净效果逐键 + 语义守卫 + 测试锁 + 复现命令），§5.5 三处订正（两行「已收」数字标为**带条件**、batch 6「配方」补修正）。
+- 记忆目录：`d1-index-eval-worstcase.md`（六轴清单 + 机制 + 实测矩阵 + 生产分布快照）、`testing-worstcase-principle.md`（按测试类型的最坏情况口径 + 铁律）。
+
+**实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 789 例全绿**（v6.4.0 基线 53/779，净 +10 = 新增 12 − 删掉 2）；变异验证两处 —— `eqFilter` 同键分支失效 ⇒ **恰好 4 例红**、区间守卫删掉 ⇒ **恰好 2 例红**（均非空转）。生产只读复测（管理通道）24 格逐格与 README §8 一致；净效果：`ca>=100` 18,301→**1**、`prestige>=5` 18,301→**15**、`base_ca>=100` 18,301→**1**、`is_future_star=1`+`sort=id` 924→**21**、`growth_tier=1`+同键排序 36,602→**21**、`foot=1`+同键排序 27,726→**21**。
+
+**部署边界（等指令）**：无迁移、无生产写 ⇒ 直接 push 即可（CF 自动部署）；部署后按 README §6 口径重跑 `scripts/measure-d1-reads.mjs` 更新 `measurements-after.json`（该文件反映线上端点，未部署前仍是旧代码读数）。
+
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。

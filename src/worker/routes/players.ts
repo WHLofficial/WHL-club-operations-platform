@@ -108,19 +108,26 @@ function attrSortExpr(key: string): string {
 
 // 编 cursor 用的行内字段：非 id 排序时 SELECT 额外带出 `sort_key`（与 ORDER BY 同一表达式，保证游标值与排序值逐位一致）
 
+// 区间筛选的两种写法（v6.3.1 筛选侧同源）：
+//   `col` 是语义口径（裸列 / 视图表达式），`src` 是与已有排序表达式索引逐字同源的写法。
+//   区间一律走 `src`：索引首列被钉在同一个表达式上优化器才能 seek，否则只能拿索引出顺序、把 18,301 行
+//   全走一遍（生产实测 ca>=100 18,301 → 1、prestige>=5 18,301 → 15、base_ca>=100 18,301 → 1 行读）。
+//   同时补 `col IS NOT NULL`：COALESCE 把 NULL 当 0，`>= 0` / `<= 任何非负数` 会凭空把 NULL 行放进来
+//   （生产 market_value 全为 NULL，不补守卫就从「0 行」变成「全表」），补上后与裸列逐行一致。
+// base_ca 的 src 用迁移 0034 的 initial-ca 表达式（嵌套 COALESCE），它同时服务 view=initial 的 ca 口径。
 const RANGE_PARAMS = {
-  ca_min: { col: 'players.ca', op: '>=' },
-  ca_max: { col: 'players.ca', op: '<=' },
-  pa_min: { col: 'players.pa', op: '>=' },
-  pa_max: { col: 'players.pa', op: '<=' },
-  age_min: { col: 'players.age', op: '>=' },
-  age_max: { col: 'players.age', op: '<=' },
-  prestige_min: { col: 'players.prestige', op: '>=' },
-  prestige_max: { col: 'players.prestige', op: '<=' },
-  market_value_min: { col: 'players.market_value', op: '>=' },
-  market_value_max: { col: 'players.market_value', op: '<=' },
-  base_ca_min: { col: 'COALESCE(players.base_ca, players.ca)', op: '>=' },
-  base_ca_max: { col: 'COALESCE(players.base_ca, players.ca)', op: '<=' },
+  ca_min: { col: 'players.ca', src: 'COALESCE(players.ca, 0)', op: '>=' },
+  ca_max: { col: 'players.ca', src: 'COALESCE(players.ca, 0)', op: '<=' },
+  pa_min: { col: 'players.pa', src: 'COALESCE(players.pa, 0)', op: '>=' },
+  pa_max: { col: 'players.pa', src: 'COALESCE(players.pa, 0)', op: '<=' },
+  age_min: { col: 'players.age', src: 'COALESCE(players.age, 0)', op: '>=' },
+  age_max: { col: 'players.age', src: 'COALESCE(players.age, 0)', op: '<=' },
+  prestige_min: { col: 'players.prestige', src: 'COALESCE(players.prestige, 0)', op: '>=' },
+  prestige_max: { col: 'players.prestige', src: 'COALESCE(players.prestige, 0)', op: '<=' },
+  market_value_min: { col: 'players.market_value', src: 'COALESCE(players.market_value, 0)', op: '>=' },
+  market_value_max: { col: 'players.market_value', src: 'COALESCE(players.market_value, 0)', op: '<=' },
+  base_ca_min: { col: 'COALESCE(players.base_ca, players.ca)', src: 'COALESCE(COALESCE(players.base_ca, players.ca), 0)', op: '>=' },
+  base_ca_max: { col: 'COALESCE(players.base_ca, players.ca)', src: 'COALESCE(COALESCE(players.base_ca, players.ca), 0)', op: '<=' },
 } as const;
 
 const CONTRACT_RANGE_PARAMS = {
@@ -194,6 +201,8 @@ async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> 
 //       has_contract / wage·release_fee 区间 / release_fee_none / contract_type / source / protected / effective_years
 // 排序（v3.1.0 起表头每一列都可点，键名见 SORT_KEY_NAMES，属性列用 attr:<属性键>）：sort + order（id 固定 ASC 旧整数游标；
 //       name / contract_type / source 三个文本键走文本游标，其余数值键走 keyset）
+// v6.3.1：筛选侧与排序表达式索引同源 —— 区间条件一律写 src（见 RANGE_PARAMS）+ `col IS NOT NULL` 守卫；
+//       等值条件按「筛选键是否就是排序键」择优选写法（见 eqFilter：同键写裸列、异键写 COALESCE 同源形式）
 // v3.1.0：name 走去变音折叠（core/name-fold）——「sesko」能搜到「Šeško」
 // v2.8.1：公开 GET 挂进程内限流（60/min/IP）+ TTL SWR 缓存（PUBLIC_CACHE_TTL_MS，未配=旁路）；
 // 缓存键用归一后的查询串（canonicalQuery），条数上限由 guard 侧兜底
@@ -213,12 +222,28 @@ app.get('/players', async (c) => {
   return c.json(data);
 });
 
+// 等值筛选的写法（v6.3.1 筛选侧同源）：筛选键就是排序键时写裸列，否则写与索引同源的 COALESCE 形式。
+// 两种写法读量差两个数量级，且方向相反（生产 18,301 行 / LIMIT 21 实测，见 scripts/d1-read-audit/README.md §5.5）：
+//   筛选键 = 排序键 → 裸列：优化器能反向走索引 + 残差过滤，凑满 LIMIT 即停（growth_tier=1 21 行读）；
+//                    此时写同源形式反而被迫整组读完再排（同一形状 36,602 行 = 2 × 组大小 —— 索引首列被
+//                    等值钉死后只剩 id 升序，要别的次序就得临时排序）。
+//   筛选键 ≠ 排序键 → 同源形式：seek 进命中子集即停（growth_tier=3 18,301 → 0、is_future_star=1 924 → 21）。
+// 值为 0 时补 `col IS NOT NULL`：COALESCE 把 NULL 当 0，不补会把「未设置」也算成 0（生产这些列现无 NULL，
+// 守卫是为将来真出现 NULL 时筛出的人不随排序键漂移）。
+function eqFilter(col: string, key: string, value: number, sortKey: string): string {
+  if (sortKey === key) return `${col} = ?`;
+  const src = `COALESCE(${col}, 0)`;
+  return value === 0 ? `(${src} = ? AND ${col} IS NOT NULL)` : `${src} = ?`;
+}
+
 // 筛选条件构造（v3.2.0）：列表查询与内部计数端点共用同一份。
 // 两边各写一份必然漂移，而「计数和列表对不上」是最难发现的一类错——共用的意义就在这里。
 // cursor 不在这里：它只跟「翻到哪」有关，与「筛什么」无关（计数也不随翻页变）。
+// sortKey 只决定等值键用哪种写法（见 eqFilter），不参与筛选语义 —— 两种写法筛出的人相同。
 function buildPlayerFilters(
   c: Context<{ Bindings: Env }>,
   exprs: { caExpr: string; paExpr: string; inflExpr: string },
+  sortKey: string,
 ): { filters: string[]; filterArgs: unknown[]; attrValueExpr: string | null; psSlotSelects: string } {
   const { caExpr, paExpr, inflExpr } = exprs;
   const filters: string[] = [];
@@ -286,33 +311,36 @@ function buildPlayerFilters(
   const growable = c.req.query('growable');
   if (growable !== undefined) {
     if (growable !== '1' && growable !== '0') throw new HttpError(400, 'growable 只能是 1 或 0');
-    filters.push('players.growable = ?');
+    filters.push(eqFilter('players.growable', 'growable', Number(growable), sortKey));
     filterArgs.push(Number(growable));
   }
   const foot = c.req.query('foot');
   if (foot !== undefined) {
     if (foot !== '0' && foot !== '1') throw new HttpError(400, 'foot 只能是 0（左脚）或 1（右脚）');
-    filters.push('players.foot = ?');
+    filters.push(eqFilter('players.foot', 'foot', Number(foot), sortKey));
     filterArgs.push(Number(foot));
   }
   const growthTier = c.req.query('growth_tier');
   if (growthTier !== undefined) {
     const n = Number(growthTier);
     if (!Number.isInteger(n) || n < 1 || n > 5) throw new HttpError(400, 'growth_tier 只能是 1-5');
-    // 与排序同源（COALESCE(col, 0)，见迁移 0038）：筛选写裸列时表达式索引帮不上，等值条件退回全表扫
-    filters.push('COALESCE(players.growth_tier, 0) = ?');
+    // 与迁移 0038 的索引同源；写法按「筛选键是否就是排序键」选（见 eqFilter）
+    filters.push(eqFilter('players.growth_tier', 'growth_tier', n, sortKey));
     filterArgs.push(n);
   }
-  // is_future_star 的列名写成与迁移 0038 索引逐字同源的表达式（同上）；china_plan 尚未建索引，保持裸列
-  for (const [param, col] of [
-    ['is_future_star', 'COALESCE(players.is_future_star, 0)'],
-    ['china_plan', 'players.china_plan'],
-  ] as const) {
-    const raw = c.req.query(param);
-    if (raw === undefined) continue;
-    if (raw !== '0' && raw !== '1') throw new HttpError(400, `${param} 只能是 0 或 1`);
-    filters.push(`${col} = ?`);
-    filterArgs.push(Number(raw));
+  // is_future_star 与迁移 0038 的索引同源（写法见 eqFilter；参数名是 is_future_star，排序键名是 future_star）；
+  // china_plan 尚未建索引，保持裸列，等 batch 7 建了索引再一起同源化
+  const futureStar = c.req.query('is_future_star');
+  if (futureStar !== undefined) {
+    if (futureStar !== '0' && futureStar !== '1') throw new HttpError(400, 'is_future_star 只能是 0 或 1');
+    filters.push(eqFilter('players.is_future_star', 'future_star', Number(futureStar), sortKey));
+    filterArgs.push(Number(futureStar));
+  }
+  const chinaPlan = c.req.query('china_plan');
+  if (chinaPlan !== undefined) {
+    if (chinaPlan !== '0' && chinaPlan !== '1') throw new HttpError(400, 'china_plan 只能是 0 或 1');
+    filters.push('players.china_plan = ?');
+    filterArgs.push(Number(chinaPlan));
   }
   const agentTier = c.req.query('agent_tier');
   if (agentTier !== undefined) {
@@ -352,7 +380,8 @@ function buildPlayerFilters(
     if (raw === undefined) continue;
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${param} 应为非负数`);
-    filters.push(`${spec.col} ${spec.op} ?`);
+    // 同源表达式走索引，`col IS NOT NULL` 保住裸列的 NULL 语义（两者必须成对出现，见 RANGE_PARAMS 注释）
+    filters.push(`(${spec.src} ${spec.op} ? AND ${spec.col} IS NOT NULL)`);
     filterArgs.push(n);
   }
   // 成长空间（PA−CA，随视图口径）
@@ -513,18 +542,10 @@ async function buildViewExprs(
   };
 }
 
-async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
-  players: unknown[];
-  nextCursor: string | null;
-}> {
-  const exprs = await buildViewExprs(c);
-  const { caExpr, paExpr, inflExpr, coefs } = exprs;
-  const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
-  const { filters, filterArgs, attrValueExpr, psSlotSelects } = buildPlayerFilters(c, exprs);
-  const cursorConds: string[] = [];
-  const cursorArgs: unknown[] = [];
-
-  // 排序键：SORT_KEY_NAMES 里的 29 个固定键，外加 `attr:<属性键>`（表头每个属性列都可点，键同样过白名单）
+// 排序键解析（v6.3.1 抽出）：筛选侧要按「筛选键是否就是排序键」选写法（见 eqFilter），
+// 所以排序键必须在构造筛选之前定下来。解析与校验只有这一份，列表与计数两个调用点共用。
+function parseSortKey(c: Context<{ Bindings: Env }>): string {
+  // SORT_KEY_NAMES 里的 29 个固定键，外加 `attr:<属性键>`（表头每个属性列都可点，键同样过白名单）
   const sortRaw = c.req.query('sort') ?? 'id';
   const attrSort = sortRaw.startsWith('attr:') ? sortRaw.slice(5) : null;
   if (attrSort !== null) {
@@ -532,6 +553,22 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   } else if (!(SORT_KEY_NAMES as readonly string[]).includes(sortRaw)) {
     throw new HttpError(400, `sort 只能是 ${SORT_KEY_NAMES.join(' / ')} 或 attr:<属性键>`);
   }
+  return sortRaw;
+}
+
+async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
+  players: unknown[];
+  nextCursor: string | null;
+}> {
+  const exprs = await buildViewExprs(c);
+  const { caExpr, paExpr, inflExpr, coefs } = exprs;
+  const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
+  const sortRaw = parseSortKey(c);
+  const { filters, filterArgs, attrValueExpr, psSlotSelects } = buildPlayerFilters(c, exprs, sortRaw);
+  const cursorConds: string[] = [];
+  const cursorArgs: unknown[] = [];
+
+  const attrSort = sortRaw.startsWith('attr:') ? sortRaw.slice(5) : null;
   const sort = sortRaw as SortKey;
   // id 键固定 ASC（旧调用兼容），其 URL 参数由前端清掉，所以它同时也是「无排序参数」的默认态
   const order = sortRaw === 'id' || c.req.query('order') === 'asc' ? 'asc' : 'desc';
@@ -724,7 +761,8 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
 // 守卫由调用方（src/worker/index.ts 的 /api/cron/players-count）用 assertCronKey 加。
 export async function countPlayers(c: Context<{ Bindings: Env }>): Promise<number> {
   const exprs = await buildViewExprs(c);
-  const { filters, filterArgs } = buildPlayerFilters(c, exprs);
+  // 计数没有 ORDER BY ⇒ 等值键一律走同源形式（COUNT 本来就要数完整个命中组，两种写法读量相同）
+  const { filters, filterArgs } = buildPlayerFilters(c, exprs, 'id');
   const row = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM players
      LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1
