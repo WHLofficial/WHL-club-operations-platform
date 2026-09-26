@@ -60,7 +60,7 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.3.2**（本地已收口并提交，未 push 未部署；v6.3.1 同为本地已提交、未部署）。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正，代码未部署）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 0039，部署有顺序约束）。
+**当前版本 v6.3.2**（已 push `eb7adb7..1f6ea16` 并随 CF 自动部署上线，Version `70ce7423-a61b-44ca-bc1e-b6c58be99370`，2026-09-26T08:26:51Z；迁移 `0039` 已**先于 push** apply 到生产）。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正，代码与 v6.3.2 同轮部署）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 0039，部署有顺序约束）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）。
 
 ---
 
@@ -974,7 +974,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.2.0 · 球员页展示层改版（六维图 · 队徽 · 术语 · 状态词 · 左栏五态骨架；2026-09-25）
 
-**状态**：代码完成、本地全绿，**未 push 未部署**（push 即触发 CF 自动部署）。判级 minor：展示层改版、有用户可见变化；纯前端 + 注释，零迁移、零后端行为变化。原型对照屏（用户已确认）：`player-attrs-v4.html` / `player-side-v5.html`（brainstorm 4466）。
+**状态**：代码完成、本地全绿，**已 push 并随 CF 自动部署上线**（本次 push 前的线上 Version `fefd7366-1ebc-48c2-8d5a-2c455868afeb`，2026-09-26T02:31:00Z 已含本版；收口时误记为「未 push 未部署」，2026-09-26 订正）。判级 minor：展示层改版、有用户可见变化；纯前端 + 注释，零迁移、零后端行为变化。原型对照屏（用户已确认）：`player-attrs-v4.html` / `player-side-v5.html`（brainstorm 4466）。
 
 **缘起**：v6.3.0 报价子系统开工前的展示层先行——属性页签头部一直有块空区，六维雷达却占着左栏一整块卡；术语「挂牌板 / 挂牌单」与状态词「正常 / 无归属」两套旧口径收口，给 v6.3.0 的报价按钮矩阵腾出干净地基。
 
@@ -991,7 +991,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.3.0 · 报价 / 议价子系统（2026-09-26）
 
-**状态**：代码完成、本地全绿，**未 push 未部署**（push 即触发 CF 自动部署；迁移 0037 也尚未 apply 到生产）。判级 minor：新子系统、有用户可见能力。设计定稿：记忆 `design-v6.3.0-offer-negotiation.md`（用户逐节裁决），实施计划 `plan-v6.3.0-offer-subsystem.md`。
+**状态**：代码完成、本地全绿，**已 push 并随 CF 自动部署上线**（本次 push 前的线上 Version `fefd7366-1ebc-48c2-8d5a-2c455868afeb`，2026-09-26T02:31:00Z；迁移 `0037` 亦已 apply 到生产——2026-09-26 实测 `migrations list --remote` 待应用项只剩 `0039`。收口时误记为「未 push、0037 未 apply」，同日订正）。判级 minor：新子系统、有用户可见能力。设计定稿：记忆 `design-v6.3.0-offer-negotiation.md`（用户逐节裁决），实施计划 `plan-v6.3.0-offer-subsystem.md`。
 
 **裁决要点**：① 允许多队同时对一球员报价，partial unique 只拦同买方重复；② **同意即挂牌，成交要等过户确认**（用户裁决 2026-09-25：一份报价被同意 = 球员自动挂牌 + 该买方价锁成领先出价，其余 pending 单转 expired 并释放冻结，其买方收「球员已被卖家挂牌」通知）；③ 报价设置三字段互斥（进名单必给最低报价、置非卖品自动拒既有 pending）；④ 报价即冻结（上限 1.5×违约金，与挂牌同源）；⑤ 名单球员收到报价立即自动应答（达线 auto_accept、低于 auto_reject），无名单走人工谈判。
 
@@ -1011,7 +1011,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.3.1 · 财政域留痕补齐与一笔线上订正（2026-09-26）
 
-**状态**：代码完成、本地全绿，**未 push 未部署**；**生产库已订正**（2026-09-26 执行 `scripts/prod-20260926-rollback-stadium-expand/`）。判级 patch：无新能力、无迁移、不改响应契约，只补审计留痕与一次数据订正。
+**状态**：代码完成、本地全绿，**已 push 并随 CF 自动部署上线**（与 v6.3.2 同轮，Version `70ce7423-a61b-44ca-bc1e-b6c58be99370`，2026-09-26T08:26:51Z）；**生产库已订正**（2026-09-26 执行 `scripts/prod-20260926-rollback-stadium-expand/`）。判级 patch：无新能力、无迁移、不改响应契约，只补审计留痕与一次数据订正。
 
 **缘起**：用户令（2026-09-26）「检查财政项目审计留痕，并回滚此 stadium_expand」。生产普查结论（报告落 `scripts/ledger-audit/`）：账本只保证钱对，不保证人认领——除自动奖金（`prize` 98+5 笔）与自动主场收入（`revenue` 55+3 笔）外，生产上唯一一笔支出是慕尼黑1860（club 33）的球场扩建 −0.50M，而 `audit_log` 里**零财政类留痕**，操作人只能靠相邻的 `club_bind actor=13 @2026-09-21T07:38:28.546Z` 反推。
 
@@ -1028,11 +1028,11 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **生产执行（2026-09-26，用户授权）**：`01-precheck.sql` 只读快照（162 笔 / 16 户 / 余额合计 715.56；`audit_log` 96 行无财政类）→ `02-rollback.sql` 经 `--file` 单事务执行，`changes=4` / `last_row_id=163` → `03-verify.sql` 十列全中：club 33 容量 **12000**、建设券 **0**、余额 **56.51**、`manual_adjust` **1** 条、原 `stadium_expand` **仍在**、**守恒 `drift = 0`**、流水 **163** 笔（`prize` 103 / `revenue` 58）。新增补偿流水 id=163（`manual_adjust` +0.5，memo「回滚 2026-09-21 球场扩建（原流水 id=141…）」，`balance_after=56.51`）。**不可逆影响面为空**：该队历史最大上座 **10140** < 原容量 12000，扩建从未影响过任何一场的上座与收入，故不追溯重算 `match_attendance` / `revenue`。**不 bump `cache:epoch:public`**：`capacity` 与账本都不在任何 `cachedJson` 公开端点的响应里（clubs 目录/列表/详情/排名、`squads`、players 均不含）。
 
-**遗留与边界**：① cron 触发的审计 `actor` 仍为 NULL（`settleOverdue` 的 `actor = opts.actor ?? null`）或 0（自动赛果确认），本次未修——「无人可归因」是事实，判据是 action 名是否属 cron 专属集合（登记在 `scripts/ledger-audit/README.md` §5-1）；② push 与部署等用户指令（push 到 main 即触发 CF 自动部署）。
+**遗留与边界**：① cron 触发的审计 `actor` 仍为 NULL（`settleOverdue` 的 `actor = opts.actor ?? null`）或 0（自动赛果确认），本次未修——「无人可归因」是事实，判据是 action 名是否属 cron 专属集合（登记在 `scripts/ledger-audit/README.md` §5-1）；② ~~push 与部署等用户指令（push 到 main 即触发 CF 自动部署）~~ → **已于 2026-09-26 与 v6.3.2 同轮 push 并部署**（Version `70ce7423`）。
 
 ## v6.3.2 · 审计来源通道（`origin`）与 actor 契约收口（2026-09-26）
 
-**状态**：代码完成、本地全绿，**未 push 未部署**；**生产库未动**（回填工件已就绪，只跑过只读预检）。判级 patch：无新能力、响应契约只增字段与可选过滤参数；**含迁移 `0039`**（加列 + 索引），故部署有顺序约束。
+**状态**：代码完成、本地全绿，**已 push 并随 CF 自动部署上线**（Version `70ce7423-a61b-44ca-bc1e-b6c58be99370`，2026-09-26T08:26:51Z）；**生产库：迁移 `0039` 已 apply，历史行 `origin` 回填未执行**（回填工件已就绪，只跑过只读预检）。判级 patch：无新能力、响应契约只增字段与可选过滤参数；**含迁移 `0039`**（加列 + 索引），故部署有顺序约束。
 
 **缘起**：v6.3.1 补齐了「钱动了，谁认领」的人类留痕，但普查暴露两件事：① cron / 惰性结算触发的审计 `actor` 是 NULL 或 0，「无人可归因」与「忘了传 actor」在日志里长得一样（即 v6.3.1 的遗留项 ①）；② `actor` 只能回答「谁做的」，回答不了「**哪条入口**触发的」——同一笔惰性结算，可能是管理员关窗顺手跑的，也可能是某个用户 GET 列表顺手跑的。用户裁决：给 `audit_log` 加 `origin` 列正面回答通道。
 
@@ -1054,7 +1054,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **实测与验收**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **53 文件 / 772 例全绿**（v6.3.1 基线 53/767，新增 5 = 同源锁 +4、admin-system +1）；全新内存库跑全部 39 个迁移，`audit_log` 末列为 `origin:TEXT`、`idx_audit_log_origin (origin, id DESC)` 在场；`npm run build` 成功（主 bundle `index-Dx2i3s22.js` 584.87 KB / gzip 186.23 KB，hash 随 `__APP_VERSION__` 注入的版本号变化）。**`npm run db:migrate:local` 未跑成**：本地 `.wrangler/state/v3/d1` 被在跑的 dev server（workerd）占用，且该库处于「schema 已在、`d1_migrations` 为空」的陈旧态（报 `table players already exists`），与本次改动无关 ⇒ 0039 的干净落地改由两条路证明：① 全新内存库跑全部迁移（`tests/d1.ts` 的 `applyMigrations` 就是这条路）；② `npx wrangler d1 migrations apply whl-club --local --persist-to scratch/d1-check` —— 39/39 全 ✅，随后查得 `audit_log` 末列为 `origin:TEXT`、索引 SQL 为 `CREATE INDEX idx_audit_log_origin ON audit_log (origin, id DESC)`。
 
-**上线（未部署）**：**部署顺序硬约束**——代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**无迁移步骤**）⇒ **push 前必须先 `npm run db:migrate:remote`**，否则生产审计 INSERT 报 `no such column: origin`。历史行回填另需授权（`02-backfill.sql` 只建工件、未执行）。push 与部署等用户指令。
+**上线（2026-09-26 已部署，Version `70ce7423-a61b-44ca-bc1e-b6c58be99370`，08:26:51Z）**：**部署顺序硬约束**——代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**无迁移步骤**）⇒ **先 apply 迁移、再 push**。本轮按此执行：① `npx wrangler d1 migrations list whl-club --remote` 实测待应用项只有 `0039_audit_origin.sql`；② `npm run db:migrate:remote` 报 `Executed 3 commands in 2.13ms`、`0039_audit_origin.sql ✅`；③ 生产只读回读 `audit_log` 末列 `origin:TEXT`、`idx_audit_log_origin (origin, id DESC)` 在场、`COUNT(*) = 100` 且 `origin IS NULL = 100`（历史行待回填）；④ `git push origin main`（`eb7adb7..1f6ea16`）；⑤ 线上首页资产由 `index-Ccub4jvf.js` 变为 `index-Dx2i3s22.js`（= 本地 dist 产物）⇒ 部署落地。**历史行回填未执行**（`02-backfill.sql` 只建工件，需单独授权）。
 
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 

@@ -935,7 +935,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 - **TS 层必填、DB 层可空**：`AuditEntry.origin` 必填（新增审计点漏写 `origin` 编译不过，这是「机械补齐」的驱动力）；列本身可空——`NULL` = 迁移前的历史行 / 未知。**不要**改成 `NOT NULL` 再回填假值。历史行回填工件见 `scripts/prod-20260926-audit-origin-backfill/`（回填口径与实测快照在该目录 README）。
 - **读侧**：`GET /api/admin/audit-log` 支持 `?origin=` 精确过滤（与既有 `?action=` 前缀过滤并列，AND 语义）；前端「来源」下拉与管理端「操作者 · 来源」单元格见 `web/src/pages/admin/SystemPage.tsx`。
 
-**部署顺序硬约束**：代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**没有迁移步骤**）⇒ **push 前必须先 `npm run db:migrate:remote`**，否则生产审计 INSERT 报 `no such column: origin`。
+**部署顺序硬约束**：代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**没有迁移步骤**）⇒ **push 前必须先 `npm run db:migrate:remote`**，否则生产审计 INSERT 报 `no such column: origin`。（2026-09-26 已按此执行：迁移 `0039` 先 apply，随后 push `eb7adb7..1f6ea16` 并自动部署 Version `70ce7423`。）
 
 ## 附录 A · API 路由清单（契约冻结首层）
 

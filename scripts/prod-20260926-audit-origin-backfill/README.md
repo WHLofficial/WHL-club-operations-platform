@@ -111,5 +111,5 @@ npx wrangler d1 execute whl-club --remote --file=scripts/prod-20260926-audit-ori
 | --- | --- |
 | 工件（01/02/03/99 + 本 README） | ✅ 已就绪 |
 | 只读预检（本 README 的快照） | ✅ 已跑（2026-09-26，Rows written = 0） |
-| `npm run db:migrate:remote`（加 origin 列） | ⬜ 未执行 |
+| `npm run db:migrate:remote`（加 origin 列） | ✅ 已执行（2026-09-26T08:26Z 前，`Executed 3 commands in 2.13ms`；回读 `audit_log` 末列 `origin:TEXT`、`idx_audit_log_origin (origin, id DESC)` 在场，100 行 `origin` 全 NULL） |
 | `02-backfill.sql`（写生产） | ⬜ 未执行，需单独授权 |

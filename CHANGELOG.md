@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.3.2] · 审计来源通道（`origin`）与 actor 契约收口（2026-09-26，本地已收口：未 push 未部署）
+## [v6.3.2] · 审计来源通道（`origin`）与 actor 契约收口（2026-09-26，已上线：迁移 `0039` 先 apply，push `eb7adb7..1f6ea16` 后 CF 自动部署 Version `70ce7423`）
 
 **缘起**：v6.3.1 补齐了「钱动了，谁认领」的人类留痕，但普查暴露两件事：① cron / 惰性结算触发的审计 `actor` 是 NULL 或 0，「无人可归因」与「忘了传 actor」在日志里长得一样；② `actor` 只能回答「谁做的」，回答不了「**哪条入口**触发的」——同一笔惰性结算，可能是管理员关窗顺手跑的，也可能是某个用户 GET 列表顺手跑的，排查时无法区分。本版给 `audit_log` 加 `origin` 列正面回答通道，并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」。
 
@@ -26,9 +26,9 @@
 
 **实测**：`npm run typecheck` 三份 tsconfig 全清；`npx vitest run` **53 文件 / 772 例全绿**（v6.3.1 基线 53/767，新增 5 = 同源锁 +4、admin-system +1）；全新内存库跑全部 39 个迁移，`audit_log` 末列为 `origin:TEXT`、`idx_audit_log_origin (origin, id DESC)` 在场；`npm run build` 成功（主 bundle `index-Dx2i3s22.js` 584.87 KB / gzip 186.23 KB；hash 随 `__APP_VERSION__` 注入的版本号变化）。**`npm run db:migrate:local` 未跑成**：本地 `.wrangler/state/v3/d1` 被在跑的 dev server（workerd）占用，且该库处于「schema 已在、`d1_migrations` 为空」的陈旧态（报 `table players already exists`），与本次改动无关 ⇒ 0039 的干净落地改由两条路证明：① 全新内存库跑全部迁移（`tests/d1.ts` 的 `applyMigrations`）；② `npx wrangler d1 migrations apply whl-club --local --persist-to scratch/d1-check` —— 39/39 全 ✅，随后查得 `audit_log` 末列为 `origin:TEXT`、索引 SQL 为 `CREATE INDEX idx_audit_log_origin ON audit_log (origin, id DESC)`。
 
-**上线（未部署）**：**部署顺序硬约束**——代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**无迁移步骤**）⇒ **push 前必须先 `npm run db:migrate:remote`**，否则生产审计 INSERT 报 `no such column: origin`。历史行回填另需授权（`02-backfill.sql` 只建工件、未执行）。push 与部署等用户指令。
+**上线（2026-09-26 已部署，Version `70ce7423-a61b-44ca-bc1e-b6c58be99370`，08:26:51Z）**：**部署顺序硬约束**——代码引用 `origin` 列，而 CF Workers Builds 只跑 `vite build && wrangler deploy`（**无迁移步骤**）⇒ **先 apply 迁移、再 push**。本轮按此执行：① `npx wrangler d1 migrations list whl-club --remote` 实测待应用项只有 `0039_audit_origin.sql`；② `npm run db:migrate:remote` 报 `Executed 3 commands in 2.13ms`、`0039_audit_origin.sql ✅`；③ 生产只读回读 `audit_log` 末列 `origin:TEXT`、`idx_audit_log_origin (origin, id DESC)` 在场、`COUNT(*) = 100` 且 `origin IS NULL = 100`（历史行待回填）；④ `git push origin main`（`eb7adb7..1f6ea16`）；⑤ 线上首页资产由 `index-Ccub4jvf.js` 变为 `index-Dx2i3s22.js`（= 本地 dist 产物）⇒ 部署落地。**历史行回填未执行**（`02-backfill.sql` 只建工件，需单独授权）。
 
-## [v6.3.1] · 财政域留痕补齐与一笔线上订正（2026-09-26，本地已收口：未 push 未部署）
+## [v6.3.1] · 财政域留痕补齐与一笔线上订正（2026-09-26，已上线：与 v6.3.2 同轮部署，Version `70ce7423`）
 
 **缘起**：生产普查（报告落 `scripts/ledger-audit/`）发现账本只保证「钱对不对」，不保证「人认不认领」——除自动奖金（`prize`）与自动主场收入（`revenue`）外，生产上唯一一笔支出是慕尼黑1860（club 33）的球场扩建 −0.50M，而 `audit_log` 里**零留痕**，操作人只能靠相邻的 `club_bind` 审计行反推。本版补齐人类触发路径的留痕，并把那笔支出按补偿分录口径订正。
 
@@ -47,9 +47,9 @@
 
 **实测**：typecheck 三份全清；vitest **53 文件 / 767 例全绿**（v6.3.0 基线 52/762，含新增锁测试 5 例与 stadium/naming/window/bypass 四处行为断言）；build 成功（主 bundle `index-D8FGDNfM.js` 584.84 KB / gzip 186.22 KB；前端版本号由 `vite.config.ts` 的 `__APP_VERSION__` 从 package.json 注入，故 hash 随 6.3.0→6.3.1 变化、字节数不变）。
 
-**上线（2026-09-26：生产库已订正，代码未部署）**：`02-rollback.sql` 经 `--file` 执行 `changes=4` / `last_row_id=163`；`03-verify.sql` 十列全中——club 33 容量回到 **12000**、建设券 **0**、余额 **56.51**、`manual_adjust` **1** 条、原 `stadium_expand` 流水**仍在**、**守恒 `drift = 0`**、流水共 **163** 笔（`prize` 103 / `revenue` 58）。订正口径为**补偿分录**：新增 `manual_adjust` +0.5（id=163，memo 指回原流水 id=141），`ledger_accounts.balance` 差额加回，**原流水未删未改**（账本只增，删行会破坏 `balance_after` 链）。不可逆影响面为空：该队历史最大上座 **10140** < 原容量 12000，扩建从未影响过任何一场的上座与收入。
+**上线（2026-09-26：生产库已订正；代码与 v6.3.2 同轮部署，Version `70ce7423`）**：`02-rollback.sql` 经 `--file` 执行 `changes=4` / `last_row_id=163`；`03-verify.sql` 十列全中——club 33 容量回到 **12000**、建设券 **0**、余额 **56.51**、`manual_adjust` **1** 条、原 `stadium_expand` 流水**仍在**、**守恒 `drift = 0`**、流水共 **163** 笔（`prize` 103 / `revenue` 58）。订正口径为**补偿分录**：新增 `manual_adjust` +0.5（id=163，memo 指回原流水 id=141），`ledger_accounts.balance` 差额加回，**原流水未删未改**（账本只增，删行会破坏 `balance_after` 链）。不可逆影响面为空：该队历史最大上座 **10140** < 原容量 12000，扩建从未影响过任何一场的上座与收入。
 
-## [v6.3.0] · 报价 / 议价子系统（2026-09-26，本地已收口：未 push 未部署）
+## [v6.3.0] · 报价 / 议价子系统（2026-09-26，已上线：本次 push 前线上 Version `fefd7366`，02:31Z；迁移 `0037` 已 apply 到生产）
 
 **新增**
 - 迁移 **`0037_offers.sql`**：`players` 加三列（`transfer_listed` / `min_offer_price` / `not_for_sale`，报价设置）；`offers` 报价单表（多买方可并发同挂一球员，partial unique `idx_offers_active_pair` 只拦同买方重复）+ `offer_events` 谈判桌事件流 + 触发器 `fund_holds_offer_guard`（与 0005 同形：offer 仍 pending / 冻结额与报价单一致 / 可用资金足额，错误码 `WHL_OFFER_REJECT_*`）。
@@ -67,7 +67,7 @@
 
 **实测**：typecheck 三份全清；vitest **52 文件 / 762 例全绿**（v6.2.0 基线 51/728，含新增 `tests/offers.test.ts` 26 例与变异验证三件套：删严格抬高 / 删 partial unique / 删触发器各定向变红）；build 成功（主 bundle `index-DFG2gxUk.js` 584.84 KB / gzip 185.35 KB，较 v6.2.0 +2.2 KB）；e2e **11/11**；双会话浏览器手测全链路 PASS（报价 → 收件 → 同意 → 挂牌 B 态 → 非卖品 D 态 → 海捞 E 态 → offer-settings 保存与清回），截图落 `scratch/manual-v63-*.png`。迁移 0037 已在本地 D1 apply。
 
-## [v6.2.0] · 球员页展示层改版（2026-09-25，本地已收口：未 push 未部署）
+## [v6.2.0] · 球员页展示层改版（2026-09-25，已上线：本次 push 前线上 Version `fefd7366` 已含本版）
 
 **新增**
 - 球员页左栏五态骨架 `SideOps`（`web/src/pages/Player.tsx`）：本队未挂牌 = 报价设置（转会名单 / 最低报价 / 非卖品，全禁用）+ 续约/挂牌/解约 + 「我收到的报价」入口；本队挂牌中 = 「转会区 · 本队挂牌中」信息卡；别队真人 = 报价/激活；非卖品 = 报价禁用（后端暂无字段，运行时不可达）；CPU 队/自由身 = 海捞签入。**控件全部禁用，真实数据与动作接线在 v6.3.0 报价子系统。**
