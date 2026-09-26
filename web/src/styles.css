@@ -2547,10 +2547,11 @@ th.num .th-sort {
 .team-logo {
   flex: none;
   object-fit: cover;
-  border: 1px solid var(--border);
 }
+/* 边框只跟圆形走（v6.5.0）：圆角在时 1px 边框贴着圆走、几乎隐形；方形徽带上它就是一圈突兀的方框 */
 .team-logo-round {
   border-radius: 50%;
+  border: 1px solid var(--border);
 }
 .team-logo-fallback {
   display: inline-flex;
@@ -2559,6 +2560,14 @@ th.num .th-sort {
   color: #fff;
   font-weight: 700;
   line-height: 1;
+}
+
+/* 标记（v6.5.0）：列表单元格居中、空置即整格空白；球员卡右上与徽章同行 */
+.marker-cell {
+  text-align: center;
+}
+.player-marker {
+  font-size: 1.05em;
 }
 
 .club-segment {
