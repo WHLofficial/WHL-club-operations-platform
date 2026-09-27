@@ -60,7 +60,7 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.6.1**（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z；生产迁移已到 `0043`）。v6.6.1 = 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源，见下文同名节；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
+**当前版本 v6.6.2**（迁移 `0044` 已于 2026-09-27 apply 到生产；本批只加两条索引与测试锁、无 `src/` 运行时改动 ⇒ 收益即时生效，**未 push 未部署**；生产迁移已到 `0044`）。v6.6.2 = 排序索引 batch 8（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体）+ `fc_id` 筛选保持裸列的实测例外，见下文同名节；v6.6.1（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z）= 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
 
 ---
 
@@ -1161,6 +1161,26 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 **生产（2026-09-26）**：apply `echo y | npx wrangler d1 migrations apply whl-club --remote` ⇒ `Executed 5 commands in 215.43ms`、状态 ✅。**实写记账 +73,211 行**（apply 前 `whl-club` 当日写 18,721 → apply 后 **91,932 = 91.9%**；预估 73,228，差 17 是校验开销）。结构核对：`idx_players_sort_%` **19 → 23**、`tbl_name='players'` 的索引 **24 → 28**、`d1_migrations` **43** 条（末条 `0043`）。计划形状：四条纯排序均 `SCAN players USING COVERING INDEX <新索引>`（覆盖索引，只读 21 行）；`growth_gap` 区间 + 同键排序在两个视图口径下各自 `SEARCH players USING INDEX idx_players_sort_growth_gap` / `… USING COVERING INDEX idx_players_sort_initial_growth_gap`；同键等值（`china_plan=1 & sort=china_plan`、`agent_tier=2 & sort=agent_tier`）仍是 `SCAN players USING INDEX …`（裸列写法靠早停，v6.4.1 的裁决不变）。收益：`sort=china_plan` / `sort=agent_tier` / `sort=growth_gap` / `view=initial&sort=growth_gap` 四条 **37,635 → 22 行/次**（各 2 条语句、计数 0，已增量合并进 `measurements-after.json`）。
 
 **部署（2026-09-27 已执行）**：迁移已 apply 到生产 ⇒ push 前不必再跑迁移。push `49e6802..6925cbd`（同轮带上尚未推送的 v6.6.0 三枚提交）触发 CF 自动部署，Version **`1f5498c5-569e-41e9-8544-7901c1beae65`**（Created `2026-09-27T08:11:24Z`）。上线核对：线上入口资产 `assets/index-DWMy6Pr5.js` / `assets/index-BY0ef8kg.css` 与本地在 6.6.1 下 `npm run build` 的产物**逐字同名**、线上 JS 版本串 `6.6.1`；`/api/health`、三个新排序键、`growth_gap_min` 筛选全 200，`/api/offers` 401（私有路由在位）。部署后按 README §6 口径重跑 `measure-d1-reads.mjs`：排序侧四格仍 **22 行/次**；另补测筛选面 6 个形状（README §10），其中 `growth_gap` 区间 + 同键排序两个视图口径 **37,635 → 22** 行/次。
+
+## v6.6.2 · 排序索引 batch 8（`fc_id` 排序侧 + 初始视图 `pa`）+ `fc_id` 筛选保持裸列的实测例外（2026-09-27）
+
+**状态**：迁移 `0044` **已于 2026-09-27 apply 到生产**；**未 push 未部署**。判级 patch：结果集逐格不变，只加 2 条索引（无 `src/` 运行时改动 ⇒ 索引与线上已有的排序表达式同源，**收益即时生效，不需要部署**）。候选清单到此清空，索引批次结束。
+
+**缘起与裁决**：`scripts/d1-read-audit/README.md` §5.3 / §10 的候选清单只剩 2 个可建索引的键（`fc_id` 排序侧、`view=initial` 的 `pa` 变体，2 × 18,301 = 36,602 行写）。当日配额（UTC 2026-09-27T09:19）实测：账号合计读 314,949（6.3%）/ 写 1,032（1.0%）⇒ 写余 98,968 行，两条占 37%。
+
+- 探针 `scratch/probe-batch8.mjs`（只读管理通道，九格）量出 `fc_id` 的现状：纯排序 **36,602 行**（`SCAN players USING INDEX idx_players_club` + 临时排序）、第 2 页游标 **27,175 行**；而它的**筛选**只要 **1 行**（`SEARCH … sqlite_autoindex_players_2 (fc_id=?)`）。
+- 两条裁决（详见 CHANGELOG）：① **筛选保持裸列** —— 同源化会认不出 UNIQUE 索引、1 → 18,301 行 ⇒ 给 §8 规则补实测例外「筛选列自带 UNIQUE 索引时必须保持裸列」；② **排序侧建索引**而不是把排序表达式改裸列（方案乙零写、实测纯排序 21 行 / 第 2 页 22 行可用，但 keyset 游标 + 可空列 ⇒ 将来 NULL 会静默漏行）。
+- 结构性排除不变：`id`（rowid）、`influence`（运行时参数化系数）、6 个合同维度键（挂 JOIN 的 `contracts`）。
+
+**交付**：迁移 `0044_players_sort_indexes_batch8.sql`（两条索引，注释含选键理由、两条裁决、写代价、回滚语句）；`tests/d1.ts` 追加；`tests/players-sort-indexes.test.ts` 的 `INDEXED_SORTS` **23 → 25**、schema 用例名改「二十五条」、新增 fc_id 例外锁；`scripts/measure-d1-reads.mjs` 两条标签改口径；`scripts/d1-read-audit/verify-0044.mjs`（新）。
+
+**实测与验收**：零配额前置 `scripts/check-sort-index-feasibility.mjs` **17/17 通过**；`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 833 例全绿**（v6.6.1 台账 53/826，净 +7）；本文件 **98 例全绿**。变异验证：删掉 0044 的 fc_id `CREATE INDEX` ⇒ **恰好 4 例红**；把 fc_id 筛选改成同源 ⇒ **恰好 1 例红**（均非空转）。
+
+**生产（2026-09-27）**：apply ⇒ `Executed 3 commands in 157.33ms`、状态 ✅；**实写 +36,621 行**（当日 `whl-club` 写 268 → **36,889 = 36.9%**；预估 36,602，差 19 是校验开销）。结构：`idx_players_sort_%` **23 → 25**、`players` 索引 **28 → 30**、`d1_migrations` **44**（末条 `0044`）。计划：两条纯排序 `SCAN players USING COVERING INDEX <新索引>`、带 keyset 游标的第 2 页 `SEARCH … USING COVERING INDEX <新索引> (<expr><?`；`fc_id` 裸列筛选仍 `SEARCH … sqlite_autoindex_players_2 (fc_id=?)`（**注意**：同源反例现在也变成 `SEARCH … idx_players_sort_fc_id (<expr>=?)` 而不再是全表扫 —— 新索引给了它一个 seek，但唯一值情形下两者等价，裸列仍「不劣于」）。收益：`sort=fc_id` **36,602 → 24 行/次**、`view=initial&sort=pa` **36,602 → 61 行/次**。
+
+**登记未改**：`view=initial` 只影响排序与显示口径、**不影响 ca/pa 的区间筛选** —— `RANGE_PARAMS` 的 `src` 是写死的存量列（`COALESCE(players.pa, 0)`），而初始视图显示的是 `json PA` ⇒ 初始视图下按 `ca_min=100` 筛会按存量 CA 过滤、却显示初始 CA（用户能看到「显示的 CA 不到 100 的行被筛掉」）。属索引批次之前就有的口径不一致，改它是行为变更，登记待办。
+
+**部署边界（等指令）**：无运行时改动 ⇒ 收益已生效；要 push 时按仓库纪律把攒下的 docs 提交一起带走。
 
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 

@@ -237,6 +237,8 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements.
 
 **2026-09-26 进展（batch 7，迁移 `0043`）**：上面剩的 4 个键里做完 3 个（`china_plan` / `agent_tier` / `growth_gap` **两个视图口径**），**只剩 `fc_id`**（顺延：`sqlite_autoindex_players_2` 已让筛选侧 seek，只差排序侧）。本批实写 **+73,211 行**（当日 `whl-club` 写 18,721 → **91,932 = 91.9%**，贴顶）；`idx_players_sort_%` **19 → 23**、`tbl_name='players'` 的索引 **24 → 28** ⇒ 全量重导成本相应再 +4 × 18,301 行。四条形状实测 **37,635 → 22 行/次**。详见 §10。
 
+**2026-09-27 进展（batch 8，迁移 `0044`）**：上面剩的 2 个键（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体）做完，**候选清单清空，索引批次到此结束**。本批实写 **+36,621 行**（当日 `whl-club` 写 268 → **36,889 = 36.9%**，额度充裕）；`idx_players_sort_%` **23 → 25**、`tbl_name='players'` 的索引 **28 → 30** ⇒ 全量重导成本再 +2 × 18,301 行。两条形状实测 **36,602 → 24 / 61 行/次**。**新记一条例外**：`fc_id` 自带 UNIQUE 索引（`src/db/migrations/0001_init.sql:23`），筛选侧**必须保持裸列**（裸列 1 行 vs 同源 18,301 行）—— §8 的「等值键异键时同源」有这条实测例外。详见 §11。
+
 **2026-09-25 进展（batch 6，迁移 `0038`：`growth_tier` / `future_star`）**：本批**换了选键依据** —— batch 4/5 是「配额能推几条推几条」，本批先查清「这 6 个键到底有没有人用」再选，结果推翻了原计划。
 - **查证否掉原计划**：① `web/src/lib/players-library.ts:273` 的 `DEFAULT_COLS = ['marketValue', 'badges']` ⇒ 这 6 个键**一个都不是默认可见列**，排序要用户先手动挑列才发生；② 用户真正会做的是**筛选**，而筛选侧走**裸列**（`players.growth_tier = ?`，`src/worker/routes/players.ts:295-320`）与排序侧的 `COALESCE(col, 0)`（`:80-88` `buildSortExprs`）**不同源** ⇒ 表达式索引帮不上筛选。这就是「排序降了、筛选没降」的机制。
 - **设计裁决**：排序侧不动（仍 `COALESCE(col, 0)`），索引建 `(COALESCE(col, 0), id)`，**筛选侧改成 `COALESCE(col, 0) = ?` 与索引同源**。否掉原计划的「排序改裸列 + 普通列索引」：keyset 游标拿排序表达式当键，裸列一旦为 NULL 比较恒为假会**静默漏行**（`src/worker/routes/players.ts:96` 的 years 注释写明这条规矩），而这五列在 `src/db/migrations/0001_init.sql:18-23` 是可空的（生产当前 NULL 数 0，但口径不该依赖数据现状）。两条路的写配额相同。
@@ -530,6 +532,42 @@ SELECT players.id FROM players
 **测试锁与验收**：`tests/players-sort-indexes.test.ts` 的 `INDEXED_SORTS` **19 → 23**（新增 china_plan / agent_tier / growth_gap / `['growth_gap','idx_players_sort_initial_growth_gap','&view=initial']`），schema 用例名「十九条」→「二十三条」；`SAME_KEY_EQ` **4 → 6** 条（加 china_plan / agent_tier）；异键 seek 锁补两条；新增「成长空间区间筛选与索引同源、带双侧 NULL 守卫，两个视图口径各 seek 进自己的索引」与「成长空间缺一侧数据的行不得被当成 0 参与比较」（自建三行夹具：只录 PA / 只录 CA / 两样齐全）。`npm run typecheck` 三份全清；本文件 **91 例全绿**；全量 `npx vitest run` **53 文件 / 826 例全绿**（v6.6.0 台账 53/810）。变异验证两处：删掉 growth_gap 的双侧守卫 ⇒ **恰好 2 例红**；删掉 `eqFilter` 的同键分支 ⇒ **恰好 6 例红**（均非空转）。
 
 **复现**：`node scripts/d1-read-audit/verify-0043.mjs`（只读结构 + EXPLAIN）、`node scripts/measure-d1-reads.mjs --only=<id> --json-out=scripts/d1-read-audit/measurements-after.json`（`--only` 一次只收一个 id；SQL 抓自本地源码、执行在生产 D1，所以**部署前后读数应当一致** —— 2026-09-27 部署后已逐格复跑确认）。本批的形状 id：排序侧 `sort-china-plan` / `sort-agent-tier` / `sort-growth-gap` / `sort-growth-gap-initial`，筛选侧 `filter-china-plan` / `filter-china-plan-sorted` / `filter-agent-tier` / `filter-growth-gap` / `filter-growth-gap-sorted` / `filter-growth-gap-initial`。
+
+## 十一、排序索引 batch 8（v6.6.2）—— `fc_id` 排序侧 + 初始视图 `pa`，候选清单清空
+
+**缘起与选键**：§5.3 / §10 之后只剩 2 个可建索引的键（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体，2 × 18,301 = 36,602 行写），本批收口。当日配额（UTC 2026-09-27T09:19，`node scratch/quota-check.mjs`）实测：账号合计读 314,949（6.3%）/ 写 1,032（1.0%）⇒ 写余 98,968 行、读余 4,685,051；两条索引占写余 37%。（探针 token 过期时先跑一次 `npx wrangler whoami` 刷新。）
+
+**探针实测（`scratch/probe-batch8.mjs`，只读管理通道；SELECT 与主查询同形，含两个 LEFT JOIN、`LIMIT 21`；`fc_id` 样本 239085、NULL 0/18,301）**
+
+| 格 | 形状 | 读量（行） | 计划 |
+| --- | --- | --- | --- |
+| A | 纯排序 `sort=fc_id` | **36,602** | `SCAN players USING INDEX idx_players_club` + `USE TEMP B-TREE FOR ORDER BY` |
+| B | `view=initial&sort=pa` | **36,602** | 同 A 形状 |
+| C | 裸列 `fc_id=?` + `sort=id` | **1** | `SEARCH … sqlite_autoindex_players_2 (fc_id=?)` |
+| D | 同源 `COALESCE(fc_id,0)=?` + `sort=id` | **18,301** | `SCAN players` |
+| E | 裸列 + `sort=fc_id` | **1** | unique seek（组内 1 行，无需 TEMP） |
+| F | 同源 + `sort=fc_id` | **18,302** | + `TEMP B-TREE` |
+| G | 备选·排序表达式改裸列（不建新索引） | **21** | `SCAN players USING INDEX sqlite_autoindex_players_2` |
+| H | 备选·同上 + 第 2 页游标 | **22** | `SEARCH … sqlite_autoindex_players_2 (fc_id>?)` |
+| I | 现口径·同源排序 + 第 2 页游标 | **27,175** | + `TEMP B-TREE` |
+
+**两条裁决**
+- **`fc_id` 筛选保持裸列**（C 1 行 vs D 18,301 行）：该列自带 UNIQUE 索引（`src/db/migrations/0001_init.sql:23` 的 `fc_id INTEGER UNIQUE`），同源写法认不出它 ⇒ 给 §8 补一条实测例外：**筛选列自带 UNIQUE 索引时必须保持裸列**。`src/worker/routes/players.ts` 的 fc_id 筛选一行未动，只加测试锁。
+- **`fc_id` 排序侧建索引**，而不是采用 G/H 那套零写的「排序表达式改裸列」：keyset 游标拿排序表达式当键，裸列遇 NULL 比较恒假会**静默漏行 / 翻页截断**，而 `fc_id` 在 `0001_init.sql:23` 可空（今天 0/18,301 NULL 是运气，值域会变）。写额度充裕，不值得为省 18,301 行写换这个上界。
+
+**交付**：迁移 `0044_players_sort_indexes_batch8.sql`（`idx_players_sort_fc_id` = `COALESCE(fc_id, 0)`、`idx_players_sort_initial_pa` = `COALESCE(COALESCE(json_extract(game_attrs, '$.PA'), pa), 0)`，均尾列 `id`；索引表达式侧写非限定列名）；`tests/d1.ts` 的 `MIGRATION_FILES` 追加；`INDEXED_SORTS` **23 → 25**、schema 用例名「二十三条」→「二十五条」、新增 fc_id 例外锁（断言 SQL 写裸列 `players.fc_id = ?`、不含 `COALESCE(players.fc_id, 0) = ?`，计划含 `sqlite_autoindex_players_2` 且不含 `SCAN players`）；`scripts/measure-d1-reads.mjs` 两条标签改「0044 表达式索引」；`scripts/d1-read-audit/verify-0044.mjs`（新）。
+
+**实测（生产，2026-09-27）**
+- apply：`echo y | npx wrangler d1 migrations apply whl-club --remote` ⇒ 只列 `0044`、`Executed 3 commands in 157.33ms`、状态 ✅。**实写 +36,621 行**（apply 前当日 `whl-club` 写 268 → apply 后 **36,889 = 36.9%**；预估 36,602，差 19 是校验开销）。
+- 结构（`verify-0044.mjs`）：`idx_players_sort_%` **23 → 25**；`tbl_name='players'` 的索引 **28 → 30**；`d1_migrations` **44** 条（末条 `0044_players_sort_indexes_batch8.sql`）。
+- 计划：`sort=fc_id` 与 `view=initial&sort=pa` 两条纯排序均 `SCAN players USING COVERING INDEX <新索引>`；带 keyset 游标的第 2 页 `SEARCH players USING COVERING INDEX <新索引> (<expr><?`（尾列 `id` 确实进了索引）；`fc_id` 裸列筛选仍 `SEARCH … sqlite_autoindex_players_2 (fc_id=?)`。**同源反例已变**：现在也走 `SEARCH … idx_players_sort_fc_id (<expr>=?)`（新索引给了它 seek），不再是 §10 那种全表扫 —— 唯一值情形下与裸列等价，裸列仍「不劣于」，所以例外锁断言的是**裸列 + 自动索引**，不是读量。
+- 收益（`measure-d1-reads.mjs`，增量合并进 `measurements-after.json`，累计 51 条）：`sort-fc-id`（`/players?limit=20&sort=fc_id`）**36,602 → 24 行/次**；`sort-pa-initial`（`/players?limit=20&view=initial&sort=pa`）**36,602 → 61 行/次**（各 2 条语句、计数 0、约 2ms）。
+
+**测试锁与验收**：零配额前置 `check-sort-index-feasibility.mjs` **17/17 通过**；`npm run typecheck` 三份全清；本文件 **98 例全绿**（原 91）；全量 `npx vitest run` **53 文件 / 833 例全绿**（v6.6.1 台账 53/826）。变异验证：删掉 0044 的 fc_id `CREATE INDEX` ⇒ **恰好 4 例红**；把 fc_id 筛选改成同源 ⇒ **恰好 1 例红**。
+
+**候选清单状态**：**清空**。仍不可建的结构性键：`id`（rowid）、`influence`（运行时参数化系数）、6 个合同维度键（`wage` / `release_fee` / `contract_type` / `source` / `protected` / `years`，挂 JOIN 的 `contracts`）。另登记一条与索引无关的口径不一致：`view=initial` 不影响 ca/pa 区间筛选（`RANGE_PARAMS` 的 `src` 写死为存量列）。
+
+**复现**：`node scripts/d1-read-audit/verify-0044.mjs`、`node scripts/measure-d1-reads.mjs --only=sort-fc-id --json-out=scripts/d1-read-audit/measurements-after.json`（`--only` 一次只收一个 id，`sort-pa-initial` 同理）。
 
 
 

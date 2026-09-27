@@ -4,6 +4,29 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.6.2] · 排序索引 batch 8（`fc_id` 排序侧 + 初始视图 `pa`）+ `fc_id` 筛选保持裸列的实测例外（2026-09-27）
+
+**缘起与裁决**：`scripts/d1-read-audit/README.md` §5.3 / §10 的候选清单只剩 **2** 个可建索引的键（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体，2 × 18,301 = 36,602 行写），本批收口，索引批次到此结束。当日配额（UTC 2026-09-27T09:19）实测：账号合计读 314,949（6.3%）/ 写 1,032（1.0%）⇒ 写余 98,968 行，两条索引占 37%，额度无压力。
+
+**新增**
+- 迁移 `0044_players_sort_indexes_batch8.sql`：`idx_players_sort_fc_id`（`COALESCE(fc_id, 0)`）、`idx_players_sort_initial_pa`（`COALESCE(COALESCE(json_extract(game_attrs, '$.PA'), pa), 0)`），均尾列 `id`；`tests/d1.ts` 的 `MIGRATION_FILES` 追加。
+- `scripts/d1-read-audit/verify-0044.mjs`（结构 + EXPLAIN 的只读证据生成器，口径同 `verify-0043.mjs`）。
+
+**修正**
+- `scripts/measure-d1-reads.mjs`：`sort-fc-id` 与 `sort-pa-initial` 两条标签从「顺延 / 未建索引」改成「0044 表达式索引」。
+
+**两条裁决（均以实测为准）**
+- **`fc_id` 筛选保持裸列**：该列自带 UNIQUE 索引（`src/db/migrations/0001_init.sql:23` 的 `fc_id INTEGER UNIQUE`），裸列等值筛选是 **1 行**读（`SEARCH … sqlite_autoindex_players_2 (fc_id=?)`）；按 §8 的「等值键异键时同源」写法改成 `COALESCE(fc_id, 0) = ?` 会认不出 UNIQUE 索引 ⇒ 掉到 **18,301 行**。⇒ 给 §8 规则补一条实测例外：**筛选列自带 UNIQUE 索引时必须保持裸列**。`src/worker/routes/players.ts` 的 fc_id 筛选一行未动，只加测试锁钉住。
+- **`fc_id` 排序侧建索引**，而不是把排序表达式改裸列去吃 UNIQUE 索引（方案乙零写、实测纯排序 21 行 / 第 2 页 22 行确实可用）：keyset 游标拿排序表达式当键，裸列遇 NULL 比较恒假会**静默漏行 / 翻页截断**，而 `fc_id` 在 DDL 里可空 ⇒ 按最坏情况取上界；写额度充裕，不值得为省 18,301 行写换这个上界。
+
+**实测与验收**：零配额前置 `scripts/check-sort-index-feasibility.mjs` **17/17 通过**；`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 833 例全绿**（v6.6.1 台账 53/826，净 +7）；`tests/players-sort-indexes.test.ts` 本文件 **98 例全绿**（原 91）。变异验证两处：删掉 0044 的 fc_id `CREATE INDEX` ⇒ **恰好 4 例红**（三条 `sort=fc_id` 计划用例 + schema 计数用例）；把 fc_id 筛选改成同源 ⇒ **恰好 1 例红**（新加的例外锁）；均非空转，改动后还原。
+
+**生产（2026-09-27）**：apply `echo y | npx wrangler d1 migrations apply whl-club --remote` ⇒ 只列 `0044`、`Executed 3 commands in 157.33ms`、状态 ✅；**实写记账 +36,621 行**（当日 `whl-club` 写 268 → **36,889 = 36.9%**；预估 36,602，差 19 是校验开销）。结构核对（`verify-0044.mjs`）：`idx_players_sort_%` **23 → 25**、`tbl_name='players'` 的索引 **28 → 30**、`d1_migrations` **44** 条（末条 `0044`）。计划形状：`sort=fc_id` 与 `view=initial&sort=pa` 两条纯排序均 `SCAN players USING COVERING INDEX <新索引>`，带 keyset 游标的第 2 页 `SEARCH … USING COVERING INDEX <新索引> (<expr><?`（尾列 `id` 确实进了索引，否则仍会临时排序）。收益（`measure-d1-reads.mjs`，增量合并进 `measurements-after.json`）：`sort=fc_id` **36,602 → 24 行/次**、`view=initial&sort=pa` **36,602 → 61 行/次**。
+
+**登记未改**：`view=initial` 只影响排序与显示口径、**不影响 ca/pa 的区间筛选**（`RANGE_PARAMS` 的 `src` 写死为存量列）⇒ 初始视图下按 `ca_min=100` 筛会按存量 CA 过滤、却显示初始 CA。属索引批次之前就有的口径不一致，改它是行为变更，登记待办不顺手改。
+
+**部署边界（等指令）**：本批**无 `src/` 运行时改动**（只加两条索引 + 测试锁 + 脚本）⇒ 索引与线上已有的排序表达式同源，**收益即时生效，不需要部署**；要 push 时按仓库纪律把攒下的 docs 提交一起带走。
+
 ## [v6.6.1] · 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个口径）+ 成长空间筛选同源（2026-09-26 完成，2026-09-27 上线）
 
 **缘起与裁决**：`scripts/d1-read-audit/README.md` §5.3 的候选清单还剩 4 个可建索引的键，用户裁决「现在是半夜，写额度可以尽可能全用」⇒ 按当日写额度排满 **4 条**（4 × 18,301 = 73,204；5 条必超）。选 `china_plan` / `agent_tier` / `growth_gap` **两个视图口径**；`fc_id` 顺延（`sqlite_autoindex_players_2` 已让筛选侧 seek，只差排序侧）；`growth_gap` 按迁移 `0036` 定下的规矩两个口径同轮建；明确排除 `influence`（排序表达式是运行时参数化的 `influenceExpr(coefs)`，系数取自库表 ⇒ 系数一改索引即失配）与合同维度键（挂 JOIN 的 `contracts` 上，`players` 索引覆盖不到）。
