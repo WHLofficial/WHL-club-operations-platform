@@ -562,6 +562,7 @@ SELECT players.id FROM players
 - 结构（`verify-0044.mjs`）：`idx_players_sort_%` **23 → 25**；`tbl_name='players'` 的索引 **28 → 30**；`d1_migrations` **44** 条（末条 `0044_players_sort_indexes_batch8.sql`）。
 - 计划：`sort=fc_id` 与 `view=initial&sort=pa` 两条纯排序均 `SCAN players USING COVERING INDEX <新索引>`；带 keyset 游标的第 2 页 `SEARCH players USING COVERING INDEX <新索引> (<expr><?`（尾列 `id` 确实进了索引）；`fc_id` 裸列筛选仍 `SEARCH … sqlite_autoindex_players_2 (fc_id=?)`。**同源反例已变**：现在也走 `SEARCH … idx_players_sort_fc_id (<expr>=?)`（新索引给了它 seek），不再是 §10 那种全表扫 —— 唯一值情形下与裸列等价，裸列仍「不劣于」，所以例外锁断言的是**裸列 + 自动索引**，不是读量。
 - 收益（`measure-d1-reads.mjs`，增量合并进 `measurements-after.json`，累计 51 条）：`sort-fc-id`（`/players?limit=20&sort=fc_id`）**36,602 → 24 行/次**；`sort-pa-initial`（`/players?limit=20&view=initial&sort=pa`）**36,602 → 61 行/次**（各 2 条语句、计数 0、约 2ms）。
+- 上线（2026-09-27T16:25:37Z）：push `6925cbd..68fc154` 触发 CF 自动部署，Version **`c15bb1ea-5d3c-4619-9730-687e99fbeaae`**；线上入口资产 `assets/index-DkUnWIV2.js` / `assets/index-BY0ef8kg.css` 与本地在 6.6.2 下 `npm run build` 的产物**逐字同名**、线上 JS 内版本串 `6.6.2`；抽检 `/api/health` / `?sort=fc_id` / `?view=initial&sort=pa` 全 200、`/api/offers` 401。
 
 **测试锁与验收**：零配额前置 `check-sort-index-feasibility.mjs` **17/17 通过**；`npm run typecheck` 三份全清；本文件 **98 例全绿**（原 91）；全量 `npx vitest run` **53 文件 / 833 例全绿**（v6.6.1 台账 53/826）。变异验证：删掉 0044 的 fc_id `CREATE INDEX` ⇒ **恰好 4 例红**；把 fc_id 筛选改成同源 ⇒ **恰好 1 例红**。
 
