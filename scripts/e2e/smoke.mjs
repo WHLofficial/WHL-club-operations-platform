@@ -385,6 +385,13 @@ async function main() {
       assert(/第 \d+ 页 · 已加载 \d+ 名 · (还有更多|已到末页)/.test(await text()), '翻页信息文案不符合预期');
       await headers.filter({ hasText: /^CA/ }).first().click();
       await page.waitForFunction(() => location.search.includes('sort=ca'), null, { timeout: TIMEOUT });
+      // URL 由 replaceState 同步生效，表头 aria-sort 随 React 重渲染提交（BUG-1：两者有一帧级窗口，
+      // URL 命中就断言会踩进窗口假红）—— 先等状态落 DOM，再断言保留可读报错
+      await page
+        .locator('.library-main thead [aria-sort="descending"]')
+        .first()
+        .waitFor({ timeout: TIMEOUT })
+        .catch(() => {});
       assert(
         (await page.locator('.library-main thead [aria-sort="descending"]').count()) > 0,
         '点 CA 表头后没有列标为降序',
