@@ -16,8 +16,9 @@ import { markerWeightSql } from '../src/core/squad-rules.ts';
 // + 0034 三条（uid / ps / view=initial 下的 ca，遗留项第 5 节 D1 读量治理的下一批次）
 // + 0035 两条（position / growable，两条常驻列）+ 0036 三条（badges / base_ca / foot）
 // + 0038 两条（growth_tier / future_star）+ 0043 四条（china_plan / agent_tier，以及 growth_gap 的默认与
-// view=initial 两个口径 —— batch 7）。等值筛选用哪种写法（同键裸列 / 异键同源）由下面 v6.4.1 的
-// describe 单独锁 —— 本列表只管排序表达式与索引同源这一件事。
+// view=initial 两个口径 —— batch 7）+ 0044 两条（fc_id 排序侧、view=initial 的 pa 变体 —— batch 8，清单收口）。
+// 等值筛选用哪种写法（同键裸列 / 异键同源，以及「筛选列自带 UNIQUE 索引时保持裸列」这条例外）由下面
+// v6.4.1 的 describe 单独锁 —— 本列表只管排序表达式与索引同源这一件事。
 const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?: string]> = [
   ['ca', 'idx_players_sort_ca'],
   ['pa', 'idx_players_sort_pa'],
@@ -49,6 +50,10 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?
   ['agent_tier', 'idx_players_sort_agent_tier'],
   ['growth_gap', 'idx_players_sort_growth_gap'],
   ['growth_gap', 'idx_players_sort_initial_growth_gap', '&view=initial'],
+  // 0044 两条（batch 8，清单收口）：fc_id 走建索引而不是把排序表达式改裸列 —— 该列 DDL 可空，裸列游标遇
+  // NULL 比较恒假会静默漏行；初始视图的 pa 换成 json PA 后是另一个表达式，与 0027 的 COALESCE(pa, 0) 不同源
+  ['fc_id', 'idx_players_sort_fc_id'],
+  ['pa', 'idx_players_sort_initial_pa', '&view=initial'],
 ];
 
 let shared: DatabaseSync | null = null;
@@ -148,7 +153,7 @@ describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
 
   }
 
-  it('二十三条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('二十五条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
     const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
     const rows = sqlite
@@ -277,6 +282,19 @@ describe('筛选侧与排序表达式索引同源（v6.4.1）', () => {
     expect(await queryPlan('id', '&growth_tier=3')).toContain('SEARCH players USING INDEX idx_players_sort_growth_tier');
     expect(await queryPlan('id', '&china_plan=1')).toContain('SEARCH players USING INDEX idx_players_sort_china_plan');
     expect(await queryPlan('id', '&agent_tier=1')).toContain('SEARCH players USING INDEX idx_players_sort_agent_tier');
+  });
+
+  // 0044（batch 8）的例外：筛选列自带 UNIQUE 索引时必须保持裸列，不能同源。fc_id 的 DDL 是
+  // `INTEGER UNIQUE`（0001_init.sql:23）⇒ 裸列等值筛选走 sqlite_autoindex_players_2 是 1 行读（unique seek）；
+  // 换成 COALESCE(fc_id, 0) = ? 就认不出 UNIQUE 索引了，生产实测 1 → 18,301 行（SCAN players）。
+  it('筛选列自带 UNIQUE 索引（fc_id）时保持裸列，走 UNIQUE 索引 seek 而不是同源全表扫', async () => {
+    const { sql } = await mainQuery('id', '&fc_id=239085');
+    expect(sql).toContain('players.fc_id = ?');
+    expect(sql).not.toContain('COALESCE(players.fc_id, 0) = ?');
+
+    const plan = await queryPlan('id', '&fc_id=239085');
+    expect(plan).toContain('sqlite_autoindex_players_2');
+    expect(plan).not.toContain('SCAN players');
   });
 
   // 成长空间是唯一「差值」形态的排序键（其余都是单列套 COALESCE），所以筛选侧要比别处多一层：

@@ -1,0 +1,33 @@
+-- 遗留项第 5 节（D1 读量治理）最后一批：球员库排序表达式索引 batch 8 —— 两条索引，清单收口
+--
+-- 承 0035 / 0036 / 0043（batch 4/5/7）。做完本批，SORT_KEY_NAMES 30 键里除「不需要索引」与「结构性排除」之外全部有索引：
+--   sort=fc_id                → COALESCE(fc_id, 0)                                     （「FC ID」列）
+--   sort=pa（view=initial）   → COALESCE(COALESCE(json_extract(game_attrs, '$.PA'), pa), 0)
+--
+-- 为什么 fc_id 走「建索引」而不是「排序表达式改裸列」（后者零写，2026-09-27 实测也能顺 sqlite_autoindex_players_2
+-- 出序：纯排序 21 行、带游标 22 行）：fc_id 在 0001_init.sql:23 是 `INTEGER UNIQUE`（**可空**），而 keyset 游标
+-- 拿排序表达式当键 —— 一旦出现 NULL 行，裸列比较 `fc_id > ?` 恒假，会静默漏行 / 翻页截断（同 years /
+-- market_value 五列已定过的规矩，见 routes/players.ts 的注释）。今天 0/18,301 NULL 是运气，值域会变 ⇒ 按最坏
+-- 情况取上界；COALESCE 写法下 NULL 行按 0 参与排序与游标，与现状语义一致。当日写额度充裕（余 98,968 行），
+-- 不值得为省 18,301 行写换一个静默漏行的上界。
+--
+-- ⚠️ fc_id 的**筛选侧不改**（routes/players.ts 保持裸列 `players.fc_id = ?`）：该列自带 UNIQUE 索引，
+--   裸列等值筛选是 1 行读（unique seek）；换成 v6.4.1 的「异键同源」写法会掉到 18,301 行（SCAN players）。
+--   这是 v6.4.1 规则的一条实测例外：**筛选列自带 UNIQUE 索引时必须保持裸列**。
+--
+-- 表达式取自 buildSortExprs / buildViewExprs，索引侧写**非限定列名**（SQLite 硬要求：索引表达式里出现 `players.`
+-- 会报 `the "." operator prohibited in index expressions`），查询侧写限定名；同源性由
+-- tests/players-sort-indexes.test.ts 的 EXPLAIN QUERY PLAN 用例锁死。
+-- 尾列带 id：keyset 游标是 (排序键, id) 双列比较，缺了它带 cursor 的页仍会临时排序。
+--
+-- 收益（2026-09-27 apply 后实测，LIMIT 21，`scripts/measure-d1-reads.mjs`）：
+--   sort=fc_id                 36,602 → 24 行/次（apply 前预估 ≈21）
+--   view=initial&sort=pa       36,602 → 61 行/次（apply 前预估 ≈22 —— 比纯排序键多读，成因未单独取证）
+--   带游标的第 2 页 27,175 → 未单测读数（EXPLAIN 形状见 scripts/d1-read-audit/verify-0044.mjs）
+--
+-- ⚠️ 部署核查：每条索引远端 apply 一次性写 ≈18,301 行，两条合计 ≈36,602 行（免费档 10 万行/日、按账号计；
+--   2026-09-27T09:19Z 实测账号写余 98,968 行 ⇒ 本批占 37%）。apply 自身另吃约 36,602 行读（当日读 6.3%）。
+-- 回滚：DROP INDEX idx_players_sort_fc_id;
+--       DROP INDEX idx_players_sort_initial_pa;
+CREATE INDEX idx_players_sort_fc_id ON players(COALESCE(fc_id, 0), id);
+CREATE INDEX idx_players_sort_initial_pa ON players(COALESCE(COALESCE(json_extract(game_attrs, '$.PA'), pa), 0), id);

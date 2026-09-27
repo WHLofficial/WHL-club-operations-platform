@@ -84,12 +84,12 @@ const SHAPES = [
   { id: 'sort-future-star', label: 'sort=future_star（0038 普通列索引）', url: '/players?limit=20&sort=future_star' },
   { id: 'sort-china-plan', label: 'sort=china_plan（0043 表达式索引）', url: '/players?limit=20&sort=china_plan' },
   { id: 'sort-agent-tier', label: 'sort=agent_tier（0043 表达式索引）', url: '/players?limit=20&sort=agent_tier' },
-  { id: 'sort-fc-id', label: 'sort=fc_id（未建索引；fc_id 自带 UNIQUE 索引，排序侧顺延到下一批）', url: '/players?limit=20&sort=fc_id' },
+  { id: 'sort-fc-id', label: 'sort=fc_id（0044 表达式索引；筛选侧保持裸列走 UNIQUE 自动索引）', url: '/players?limit=20&sort=fc_id' },
   { id: 'sort-growth-gap', label: 'sort=growth_gap（PA−CA 差值表达式；0043 默认口径索引）', url: '/players?limit=20&sort=growth_gap' },
   { id: 'sort-growth-gap-initial', label: 'view=initial & sort=growth_gap（0043 初始口径索引；两个口径同轮建）', url: '/players?limit=20&view=initial&sort=growth_gap' },
   // view=initial 口径的 pa 变体：0027 的 idx_players_sort_pa 是普通列的，这里排的是
-  // COALESCE(json_extract(game_attrs,'$.PA'), players.pa) —— 口径不同，索引是否还命中要单独测。
-  { id: 'sort-pa-initial', label: 'view=initial & sort=pa（口径与 0027 索引不同）', url: '/players?limit=20&view=initial&sort=pa' },
+  // COALESCE(json_extract(game_attrs,'$.PA'), players.pa) —— 口径不同，0044 单独建了初始口径索引。
+  { id: 'sort-pa-initial', label: 'view=initial & sort=pa（0044 初始口径索引：json PA 口径）', url: '/players?limit=20&view=initial&sort=pa' },
   // 0038 的另一半收益：等值筛选从全表扫变 seek。这两条 URL 带同键排序，正是索引能同时服务
   // 「筛选 + 排序」的形状（实测 SQLite 在索引首列被约束时不会再用它出顺序，所以命中后仍有一次
   // 对子集的临时排序 —— 收益在读量降到命中子集，不在提前停）。
