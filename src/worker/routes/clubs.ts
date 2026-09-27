@@ -278,8 +278,7 @@ interface ClubTransferRow {
 
 // 近期战绩：平台已确认赛果（快照表，无索引但全表 69 行，该 OR 查询实测读 76 行，可忽略）。
 // ⚠️ home_team_id / away_team_id 存的是**比赛系统队 id**（迁移 0017），不是 club id——这里绑的是 tourTeamId。
-// 生产实测（2026-09-22）两套 id 逐队相等（20/20），所以 src/worker/home.ts 的 clubFormPts 绑 club id
-// 也能命中；那是数值巧合而非口径，别照抄，新写查询一律绑 tourTeamId。
+// v6.6.3 起统一口径：home.ts 的 clubFormPts 也只认 tour 队 id（此前绑 club id 靠两套 id 逐队相等的巧合命中）。
 const CLUB_FORM_SQL = `SELECT match_id, season, competition_type, stage_name, round,
          home_team_id, away_team_id, home_team, away_team,
          score_home, score_away, pen_home, pen_away, walkover_side, finished_at

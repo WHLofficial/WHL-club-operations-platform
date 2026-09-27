@@ -8,7 +8,7 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
-import { clubIdByTourTeam } from './prizes.ts';
+import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
 import { getActiveNaming, windowNamingStatements } from './naming-ops.ts';
 
 export interface AttendanceModel {
@@ -173,20 +173,18 @@ export function formPtsOf(
   return pts;
 }
 
-// ⚠️ 这里绑的是 club id，而 result_confirmations.home_team_id / away_team_id 存的是**比赛系统队 id**
-// （迁移 0017）。生产实测（2026-09-22）两套 id 逐队相等（20/20，AUTH_DB team 的 club_id = tour_team_id），
-// 且 20 队各有 6-7 条已确认赛果，所以现在算得出真值、不是恒中性。但这是数值巧合：米兰的 tour_team_id
-// 曾长期是 legacy 47 而 club_id 是 131681，那段时间本函数恒返中性 4。将来若有 club 的 id 不等于其
-// tour 队 id，本函数会静默退化成「永远中性」，届时按 prizes.ts 的 clubIdByTourTeam 先做映射再查。
-export async function clubFormPts(env: Env, clubId: number, excludeMatchId: number): Promise<number> {
+// 参数是**比赛系统队 id**：result_confirmations.home_team_id / away_team_id 存的就是它（迁移 0017）。
+// v6.6.3 订正：原先绑 club id，靠生产 20/20「club_id = tour_team_id」的数值巧合才命中（米兰 legacy 47
+// vs 131681 期间恒返中性 4）；现在调用方自行映射，本函数只认 tour 队 id。
+export async function clubFormPts(env: Env, tourTeamId: number, excludeMatchId: number): Promise<number> {
   const { results } = await env.DB.prepare(
     `SELECT home_team_id, away_team_id, score_home, score_away, pen_home, pen_away, walkover_side
      FROM result_confirmations WHERE (home_team_id = ? OR away_team_id = ?) AND match_id != ?
      ORDER BY id DESC LIMIT 9`,
   )
-    .bind(clubId, clubId, excludeMatchId)
+    .bind(tourTeamId, tourTeamId, excludeMatchId)
     .all();
-  return formPtsOf(results as Parameters<typeof formPtsOf>[0], clubId);
+  return formPtsOf(results as Parameters<typeof formPtsOf>[0], tourTeamId);
 }
 
 /** 死忠目标：影响力-死忠阶梯分段线性逐带累计（斜率递减，max_influence 0 = 开放段恒排末尾） */
@@ -267,8 +265,8 @@ export async function matchAttendanceStatements(
   const wxRange = asRange(model.weather_ranges[weather]);
   const wx = wxRange ? uniform(rng, wxRange[0], wxRange[1]) : 1;
 
-  // 近 3 场战绩（平台已确认赛果，不含本场，假设 31）
-  const formPts = await clubFormPts(env, clubId, input.matchId);
+  // 近 3 场战绩（平台已确认赛果，不含本场，假设 31）；赛果表存 tour 队 id，直接用主队 tour id 查
+  const formPts = await clubFormPts(env, input.homeTeamId, input.matchId);
   const form = model.form_coef_table[String(Math.min(Math.max(formPts, 0), 9))] ?? 1;
 
   const tierTable = await loadTierTable(env.DB);
@@ -339,7 +337,7 @@ export interface HomeWindowSummary {
 /**
  * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠演化 + 冠名收租。
  * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；临时窗照收。
- * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训本期 0 级）——每种窗都演化。
+ * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训等级涨粉系数 ×(1+0.03n)，v6.6.3 接入）——每种窗都演化。
  * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，v3.0.0 裁决）。
  * 幂等：ledger 走 'maintenance'/'naming_fee'/'window' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
  */
@@ -353,6 +351,10 @@ export async function windowHomeStatements(
   const tierTable = await loadTierTable(env.DB);
 
   const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans FROM stadiums').all<StadiumRow>();
+  // 青训等级一次批量查（evolveFans 涨粉系数 ×(1+0.03n)；无设施行 = 0 级）；club → tour 队 id 反向映射（战绩查询用）
+  const youthRows = await env.DB.prepare(`SELECT club_id, level FROM club_facilities WHERE facility_key = 'youth'`).all<{ club_id: number; level: number }>();
+  const youthLevels = new Map(youthRows.results.map((r) => [r.club_id, r.level]));
+  const tourMap = await tourTeamIdsByClub(env, stadiums.results.map((s) => s.club_id));
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
   const summary: HomeWindowSummary = { maintenanceClubs: 0, maintenanceTotal: 0, fansClubs: 0, namingClubs: 0, namingTotal: 0 };
 
@@ -386,8 +388,10 @@ export async function windowHomeStatements(
 
     const influence = teamInfluence(s, await playerInfluenceSum(env, s.club_id, model));
     const target = diehardTarget(model, influence);
-    const formPts = await clubFormPts(env, s.club_id, 0);
-    const nextFans = evolveFans(model, s.fans, target, attendRate, formPts);
+    // 战绩按 tour 队 id 查赛果表；目录无映射 → 中性 4（与「赛果不足 3 场」同口径）
+    const tourTeamId = tourMap.get(s.club_id);
+    const formPts = tourTeamId === undefined ? 4 : await clubFormPts(env, tourTeamId, 0);
+    const nextFans = evolveFans(model, s.fans, target, attendRate, formPts, youthLevels.get(s.club_id) ?? 0);
     if (Math.abs(nextFans - s.fans) >= 0.5) {
       summary.fansClubs++;
       statements.push(

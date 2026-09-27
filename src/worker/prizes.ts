@@ -72,6 +72,23 @@ export async function clubIdByTourTeam(env: Env, tourTeamIds: number[]): Promise
   return map;
 }
 
+/** club_id → tour 队 id（AUTH_DB team 目录反向查；无目录行 / tour_team_id 为空 → 不入 Map）。
+ *  与 clubIdByTourTeam 刻意不同：**不做 CPU 队过滤**——那是发钱闸；这里的消费方（clubFormPts 战绩口径）
+ *  是描述性的，CPU 队的真实赛果照样该算。 */
+export async function tourTeamIdsByClub(env: Env, clubIds: number[]): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  if (!env.AUTH_DB || clubIds.length === 0) return map;
+  const ids = [...new Set(clubIds.filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length === 0) return map;
+  const { results } = await env.AUTH_DB.prepare(
+    `SELECT club_id, tour_team_id FROM team WHERE club_id IN (${ids.map(() => '?').join(',')}) AND tour_team_id IS NOT NULL`,
+  )
+    .bind(...ids)
+    .all<{ club_id: number; tour_team_id: number }>();
+  for (const r of results) map.set(r.club_id, r.tour_team_id);
+  return map;
+}
+
 /** 单场比分→胜负平（walkover/点球按 winner 定，平局含点球战前平比分的点球胜负已由 winner 区分） */
 function outcome(m: MatchPrizeInput): 'home' | 'away' | 'draw' | null {
   if (m.walkoverSide === 'home') return 'home';
