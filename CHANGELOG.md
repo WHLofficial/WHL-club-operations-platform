@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.6.1] · 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个口径）+ 成长空间筛选同源（2026-09-26，迁移已 apply 到生产，未 push 未部署）
+## [v6.6.1] · 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个口径）+ 成长空间筛选同源（2026-09-26 完成，2026-09-27 上线）
 
 **缘起与裁决**：`scripts/d1-read-audit/README.md` §5.3 的候选清单还剩 4 个可建索引的键，用户裁决「现在是半夜，写额度可以尽可能全用」⇒ 按当日写额度排满 **4 条**（4 × 18,301 = 73,204；5 条必超）。选 `china_plan` / `agent_tier` / `growth_gap` **两个视图口径**；`fc_id` 顺延（`sqlite_autoindex_players_2` 已让筛选侧 seek，只差排序侧）；`growth_gap` 按迁移 `0036` 定下的规矩两个口径同轮建；明确排除 `influence`（排序表达式是运行时参数化的 `influenceExpr(coefs)`，系数取自库表 ⇒ 系数一改索引即失配）与合同维度键（挂 JOIN 的 `contracts` 上，`players` 索引覆盖不到）。
 
@@ -18,9 +18,9 @@
 
 **实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 826 例全绿**（v6.6.0 台账 53/810）。变异验证两处：删掉 growth_gap 的双侧守卫 ⇒ **恰好 2 例红**；删掉 `eqFilter` 的同键分支 ⇒ **恰好 6 例红**。零配额前置 `scripts/check-sort-index-feasibility.mjs` **17/17 通过**。apply（用户已放行当日写额度）：`Executed 5 commands in 215.43ms`；实写 **+73,211 行**（当日写 18,721 → **91,932 = 91.9%**）。生产核对：`idx_players_sort_%` **19 → 23**、`tbl_name='players'` 的索引 **24 → 28**、`d1_migrations` **43** 条；四条纯排序 `SCAN players USING COVERING INDEX <新索引>`（21 行/次），`growth_gap` 区间 + 同键排序在两个视图口径下各自 `SEARCH … USING INDEX`。收益：`sort=china_plan` / `sort=agent_tier` / `sort=growth_gap` / `view=initial&sort=growth_gap` 四条 **37,635 → 22 行/次**。
 
-**部署边界**：迁移已 apply 到生产，**未 push 未部署**（本仓纪律：没明说就不 push；且 push 即 CF 自动部署）。部署后按 `scripts/d1-read-audit/README.md` §6 口径重跑 `measure-d1-reads.mjs` 复核端点级读数。
+**部署（2026-09-27 已执行）**：迁移先于 2026-09-26 apply 到生产；代码随后于 **2026-09-27 推送**（`49e6802..6925cbd`，同轮带上尚未推送的 v6.6.0 三枚提交）⇒ CF 自动部署 Version **`1f5498c5-569e-41e9-8544-7901c1beae65`**（Created `2026-09-27T08:11:24Z`）。上线核对：线上入口资产 `assets/index-DWMy6Pr5.js` / `assets/index-BY0ef8kg.css` 与本地在 6.6.1 下构建的产物**逐字同名**、线上 JS 版本串 `6.6.1`；`/api/health`、三个新排序键、`growth_gap_min` 筛选全 200，`/api/offers` 401。部署后按 `scripts/d1-read-audit/README.md` §6 口径重跑了端点级读数：排序侧四格仍 **22 行/次**；另补测筛选面 6 个形状（README §10），其中 `growth_gap` 区间 + 同键排序两个视图口径 **37,635 → 22**。
 
-## [v6.6.0] · 球员库按角色筛选（五槽 OR，不建索引）（2026-09-26，本地完成，未 push 未部署）
+## [v6.6.0] · 球员库按角色筛选（五槽 OR，不建索引）（2026-09-26 完成，2026-09-27 随 v6.6.1 的推送一起上线）
 
 **新增**
 - 球员库：左栏「更多筛选」的 PlayStyle 旁新增「角色」多选下拉（`?role=7,107` 逗号多值），分 `角色 +`（ID 1-49）与 `角色 ++`（ID 101-149）两段、段内按名字首段的位置码分组；摘要条一条 chip「角色：…」（不拆两段）。
@@ -48,7 +48,7 @@
 
 **实测与验收**：typecheck 三份全清；vitest **53 文件 / 803 例全绿**（v6.4.1 基线 53/789）；`INDEXED_SORTS` 18 → 19 条；build 成功；e2e **11/11**。已知形状：`sort=marker&marker=…` 同键组合落 TEMP B-TREE，但只排等值命中组（≤~120 行）代价可忽略。**部署**：迁移 `0042` 先 apply（`Executed 2 commands in 47.58ms`，索引 SQL 只读核验一致）→ push 后 CF 自动部署 Version `3bea29d7`；上线回读 marker 筛选/排序全 200、线上资产 `index-BdMUWht2.js` 与本地 dist 逐字一致。
 
-## [v6.4.1] · 筛选侧同源化——等值键按排序口径分写法（2026-09-26，本地完成，未 push 未部署）
+## [v6.4.1] · 筛选侧同源化——等值键按排序口径分写法（2026-09-26 完成，随 v6.5.0 的推送上线）
 
 **缘起**：batch 6（迁移 `0038`）把筛选侧无条件改成与排序表达式同源（`COALESCE(col, 0) = ?`），当次只量了 `sort=growth_tier&growth_tier=3` 一格（18,302 → 1）就当成无条件更优。用户要求按最坏情况复核（原话：「`agent_tier` 每个窗口都会重随，总有不是全 2 的时候；`marketvalue` 也会有赋值和改动，重新评估」「测试的时候要以最坏的情况做打算，底线思维」「任何测试都是这样」），复核推翻了原结论。
 

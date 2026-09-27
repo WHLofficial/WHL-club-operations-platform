@@ -60,7 +60,7 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.3.2**（已 push `eb7adb7..1f6ea16` 并随 CF 自动部署上线，Version `70ce7423-a61b-44ca-bc1e-b6c58be99370`，2026-09-26T08:26:51Z；迁移 `0039` 已**先于 push** apply 到生产）。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正，代码与 v6.3.2 同轮部署）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 0039，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）。
+**当前版本 v6.6.1**（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z；生产迁移已到 `0043`）。v6.6.1 = 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源，见下文同名节；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
 
 ---
 
@@ -1076,7 +1076,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.4.1 · 筛选侧同源化——等值键按排序口径分写法（2026-09-26）
 
-**状态**：本地已完成（typecheck / vitest / 变异验证全过），**未 push 未部署**（等指令）。纯代码改动，**零迁移、零生产写**。判级 patch：修正 batch 6 引入的条件性回归，不改用户可见行为（结果集逐格相同，仅执行计划与读量变化）。
+**状态**：代码完成、本地全绿后，**已于 2026-09-26 随 v6.5.0 的推送上线**（push `e95122c..a8bb833`，CF Version `3bea29d7-4cca-403e-b0b1-34ddeae0154a`，2026-09-26T12:45:07Z；收口时误记为「未 push 未部署」，2026-09-27 订正）。纯代码改动，**零迁移、零生产写**。判级 patch：修正 batch 6 引入的条件性回归，不改用户可见行为（结果集逐格相同，仅执行计划与读量变化）。
 
 **缘起**：batch 6（迁移 `0038`）把筛选侧无条件改成与排序表达式同源（`COALESCE(col, 0) = ?`），当次只量了 `sort=growth_tier&growth_tier=3` 一格（18,302 → 1）就把「同源」当成无条件更优。用户要求按最坏情况复核（原话：「`agent_tier` 每个窗口都会重随，总有不是全 2 的时候；`marketvalue` 也会有赋值和改动，重新评估」「测试的时候要以最坏的情况做打算，底线思维」「任何测试都是这样」），复核推翻了原结论。
 
@@ -1093,7 +1093,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **53 文件 / 789 例全绿**（v6.4.0 基线 53/779，净 +10 = 新增 12 − 删掉 2）；变异验证两处 —— `eqFilter` 同键分支失效 ⇒ **恰好 4 例红**、区间守卫删掉 ⇒ **恰好 2 例红**（均非空转）。生产只读复测（管理通道）24 格逐格与 README §8 一致；净效果：`ca>=100` 18,301→**1**、`prestige>=5` 18,301→**15**、`base_ca>=100` 18,301→**1**、`is_future_star=1`+`sort=id` 924→**21**、`growth_tier=1`+同键排序 36,602→**21**、`foot=1`+同键排序 27,726→**21**。
 
-**部署边界（等指令）**：无迁移、无生产写 ⇒ 直接 push 即可（CF 自动部署）；部署后按 README §6 口径重跑 `scripts/measure-d1-reads.mjs` 更新 `measurements-after.json`（该文件反映线上端点，未部署前仍是旧代码读数）。
+**部署（2026-09-26 已执行）**：无迁移、无生产写 ⇒ push 即上线（CF 自动部署，Version `3bea29d7-4cca-403e-b0b1-34ddeae0154a`）。部署后按 README §6 口径重跑 `scripts/measure-d1-reads.mjs` 更新 `measurements-after.json`；口径订正见 README §8（SQL 抓自本地源码、执行在生产 D1，所以部署前后读数应当一致）。
 
 ## v6.5.0 · 球员「标记」属性（🔴🟡🟢）+ 队徽方框修复（2026-09-26）
 
@@ -1114,7 +1114,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.6.0 · 球员库按角色筛选（五槽 OR，不建索引）（2026-09-26）
 
-**状态**：本地已完成（typecheck / vitest / 变异验证全过），**未 push 未部署**（等指令）。**零迁移、零生产写**。判级 minor：新增用户可见能力（角色筛选下拉 / `?role=` 参数 / 摘要 chip），不改既有结果集。
+**状态**：本地完成（typecheck / vitest / 变异验证全过）后，随 v6.6.1 的推送于 **2026-09-27 一起上线**（push `49e6802..6925cbd`，同一 Version `1f5498c5-569e-41e9-8544-7901c1beae65`；收口时记为「未 push 未部署」，同日订正）。**零迁移、零生产写**。判级 minor：新增用户可见能力（角色筛选下拉 / `?role=` 参数 / 摘要 chip），不改既有结果集。
 
 **缘起与裁决**：用户脑暴提出「球员库按角色筛选」。口径三点：① `+`（1-49）与 `++`（101-149）是同一角色的两档，但**筛选时当两个独立值、互不命中**（照 PlayStyle 银/金裁决），不做家族合并；② **任一槽命中即算**（RoleID1-5 五槽 OR，槽位与档位无对应关系，不能像 ps 那样按槽段切分）；③ 角色下拉放在「更多筛选」的 PlayStyle 旁，分 `角色 +` / `角色 ++` 两段。
 
@@ -1141,7 +1141,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.6.1 · 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个口径）+ 成长空间筛选同源（2026-09-26）
 
-**状态**：本地已完成（typecheck / vitest / 变异验证全过），**迁移 `0043` 已 apply 到生产**（用户放行当日写额度），**未 push 未部署**（等指令）。判级 patch：结果集逐格不变，只改执行计划与读量，另加 4 条索引。
+**状态**：**已 push 并随 CF 自动部署上线**（2026-09-27；push `49e6802..6925cbd`，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，Created `2026-09-27T08:11:24Z`）。迁移 `0043` 先于 2026-09-26 apply 到生产（用户放行当日写额度）。判级 patch：结果集逐格不变，只改执行计划与读量，另加 4 条索引。
 
 **缘起与裁决**：`scripts/d1-read-audit/README.md` §5.3 的候选清单还剩 4 个可建索引的键（`growth_gap` / `china_plan` / `agent_tier` / `fc_id`）。用户裁决（原话）「现在是半夜，写额度可以尽可能全用」⇒ 不再受「自留 ≤6 万行/日」约束，按当日写额度排满 **4 条**（4 × 18,301 = 73,204；5 条必超）。选键依据都从当前代码抄：`src/core/players-sort.ts:12-43` 的 `SORT_KEY_NAMES` 里仍未建索引的可建键 = `china_plan` / `agent_tier` / `fc_id` / `growth_gap` / `influence`；四个前端可点表头列（`web/src/lib/players-library.ts:313` growth_gap / `:317` china_plan / `:318` agent_tier / `:321` fc_id）里取前三个。
 
@@ -1160,7 +1160,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **生产（2026-09-26）**：apply `echo y | npx wrangler d1 migrations apply whl-club --remote` ⇒ `Executed 5 commands in 215.43ms`、状态 ✅。**实写记账 +73,211 行**（apply 前 `whl-club` 当日写 18,721 → apply 后 **91,932 = 91.9%**；预估 73,228，差 17 是校验开销）。结构核对：`idx_players_sort_%` **19 → 23**、`tbl_name='players'` 的索引 **24 → 28**、`d1_migrations` **43** 条（末条 `0043`）。计划形状：四条纯排序均 `SCAN players USING COVERING INDEX <新索引>`（覆盖索引，只读 21 行）；`growth_gap` 区间 + 同键排序在两个视图口径下各自 `SEARCH players USING INDEX idx_players_sort_growth_gap` / `… USING COVERING INDEX idx_players_sort_initial_growth_gap`；同键等值（`china_plan=1 & sort=china_plan`、`agent_tier=2 & sort=agent_tier`）仍是 `SCAN players USING INDEX …`（裸列写法靠早停，v6.4.1 的裁决不变）。收益：`sort=china_plan` / `sort=agent_tier` / `sort=growth_gap` / `view=initial&sort=growth_gap` 四条 **37,635 → 22 行/次**（各 2 条语句、计数 0，已增量合并进 `measurements-after.json`）。
 
-**部署边界（等指令）**：迁移已 apply 到生产 ⇒ push 前不必再跑迁移；部署后按 README §6 口径重跑 `measure-d1-reads.mjs` 复核端点级读数。
+**部署（2026-09-27 已执行）**：迁移已 apply 到生产 ⇒ push 前不必再跑迁移。push `49e6802..6925cbd`（同轮带上尚未推送的 v6.6.0 三枚提交）触发 CF 自动部署，Version **`1f5498c5-569e-41e9-8544-7901c1beae65`**（Created `2026-09-27T08:11:24Z`）。上线核对：线上入口资产 `assets/index-DWMy6Pr5.js` / `assets/index-BY0ef8kg.css` 与本地在 6.6.1 下 `npm run build` 的产物**逐字同名**、线上 JS 版本串 `6.6.1`；`/api/health`、三个新排序键、`growth_gap_min` 筛选全 200，`/api/offers` 401（私有路由在位）。部署后按 README §6 口径重跑 `measure-d1-reads.mjs`：排序侧四格仍 **22 行/次**；另补测筛选面 6 个形状（README §10），其中 `growth_gap` 区间 + 同键排序两个视图口径 **37,635 → 22** 行/次。
 
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 

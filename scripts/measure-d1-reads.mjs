@@ -104,6 +104,14 @@ const SHAPES = [
   { id: 'filter-attr', label: 'attr=sprintspeed & attr_min=80', url: '/players?limit=20&attr=sprintspeed&attr_min=80' },
   { id: 'filter-ca', label: 'ca_min=80（不匹配 0027 表达式索引）', url: '/players?limit=20&ca_min=80' },
   { id: 'filter-name', label: 'name=sesko（折叠 LIKE）', url: '/players?limit=20&name=sesko' },
+  // v6.6.1 筛选侧同源化（batch 7 的筛选面）：迁移 0043 的四条索引能不能在筛选侧被 seek，取决于
+  // 筛选键与排序键是否同键 —— 同键写裸列靠索引序早停，异键写同源表达式才可能 seek（v6.4.1 裁决）。
+  { id: 'filter-china-plan', label: 'china_plan=1（默认 sort=id ⇒ 异键同源，0043 索引 seek）', url: '/players?limit=20&china_plan=1' },
+  { id: 'filter-china-plan-sorted', label: 'china_plan=1 且按同键排序（裸列 ⇒ 顺索引早停、无 TEMP）', url: '/players?limit=20&sort=china_plan&china_plan=1' },
+  { id: 'filter-agent-tier', label: 'agent_tier=2（默认 sort=id ⇒ 异键同源；生产全表都是 2）', url: '/players?limit=20&agent_tier=2' },
+  { id: 'filter-growth-gap', label: 'growth_gap_min=10（区间 + 默认 sort=id ⇒ 计划器不肯 seek 区间表达式）', url: '/players?limit=20&growth_gap_min=10' },
+  { id: 'filter-growth-gap-sorted', label: 'growth_gap_min=10 且按同键排序（0043 默认口径索引 seek）', url: '/players?limit=20&sort=growth_gap&growth_gap_min=10' },
+  { id: 'filter-growth-gap-initial', label: 'growth_gap_min=10 + view=initial 且按同键排序（0043 初始口径索引 seek）', url: '/players?limit=20&view=initial&sort=growth_gap&growth_gap_min=10' },
   { id: 'roster', label: '名册端点（固定键，group_concat 全表）', url: '/players/roster' },
   { id: 'detail', label: '球员详情（4 条窄查询）', url: '/players/1' },
 ];

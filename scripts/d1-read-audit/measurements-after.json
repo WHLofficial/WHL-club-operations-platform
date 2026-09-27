@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-26T17:22:14.075Z",
+  "generatedAt": "2026-09-27T08:49:50.043Z",
   "target": "remote",
   "results": [
     {
@@ -715,16 +715,16 @@
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.112
+          "duration_ms": 0.2268
         },
         {
           "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 1.0886
+          "duration_ms": 2.9801
         }
       ],
       "rows_read_total": 22,
-      "duration_ms_total": 1.2,
+      "duration_ms_total": 3.2,
       "list_rows": 22,
       "count_rows": 0
     },
@@ -737,16 +737,16 @@
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.1267
+          "duration_ms": 0.12
         },
         {
           "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 0.8923
+          "duration_ms": 0.9882
         }
       ],
       "rows_read_total": 22,
-      "duration_ms_total": 1,
+      "duration_ms_total": 1.1,
       "list_rows": 22,
       "count_rows": 0
     },
@@ -781,16 +781,16 @@
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.1298
+          "duration_ms": 0.1361
         },
         {
           "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 1.2343
+          "duration_ms": 0.8241
         }
       ],
       "rows_read_total": 22,
-      "duration_ms_total": 1.4,
+      "duration_ms_total": 1,
       "list_rows": 22,
       "count_rows": 0
     },
@@ -869,16 +869,148 @@
         {
           "rows_read": 0,
           "rows_written": 0,
-          "duration_ms": 0.1113
+          "duration_ms": 0.0927
         },
         {
           "rows_read": 22,
           "rows_written": 0,
-          "duration_ms": 0.9341
+          "duration_ms": 1.1118
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 1.2,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-china-plan",
+      "label": "china_plan=1（默认 sort=id ⇒ 异键同源，0043 索引 seek）",
+      "url": "/players?limit=20&china_plan=1",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1212
+        },
+        {
+          "rows_read": 24,
+          "rows_written": 0,
+          "duration_ms": 3.8122
+        }
+      ],
+      "rows_read_total": 24,
+      "duration_ms_total": 3.9,
+      "list_rows": 24,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-china-plan-sorted",
+      "label": "china_plan=1 且按同键排序（裸列 ⇒ 顺索引早停、无 TEMP）",
+      "url": "/players?limit=20&sort=china_plan&china_plan=1",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1419
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 0.8192
         }
       ],
       "rows_read_total": 22,
       "duration_ms_total": 1,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-agent-tier",
+      "label": "agent_tier=2（默认 sort=id ⇒ 异键同源；生产全表都是 2）",
+      "url": "/players?limit=20&agent_tier=2",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1546
+        },
+        {
+          "rows_read": 56,
+          "rows_written": 0,
+          "duration_ms": 3.1301
+        }
+      ],
+      "rows_read_total": 56,
+      "duration_ms_total": 3.3,
+      "list_rows": 56,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-growth-gap",
+      "label": "growth_gap_min=10（区间 + 默认 sort=id ⇒ 计划器不肯 seek 区间表达式）",
+      "url": "/players?limit=20&growth_gap_min=10",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1064
+        },
+        {
+          "rows_read": 1824,
+          "rows_written": 0,
+          "duration_ms": 13.133
+        }
+      ],
+      "rows_read_total": 1824,
+      "duration_ms_total": 13.2,
+      "list_rows": 1824,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-growth-gap-sorted",
+      "label": "growth_gap_min=10 且按同键排序（0043 默认口径索引 seek）",
+      "url": "/players?limit=20&sort=growth_gap&growth_gap_min=10",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.109
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 1.0905
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 1.2,
+      "list_rows": 22,
+      "count_rows": 0
+    },
+    {
+      "id": "filter-growth-gap-initial",
+      "label": "growth_gap_min=10 + view=initial 且按同键排序（0043 初始口径索引 seek）",
+      "url": "/players?limit=20&view=initial&sort=growth_gap&growth_gap_min=10",
+      "statements": 2,
+      "metas": [
+        {
+          "rows_read": 0,
+          "rows_written": 0,
+          "duration_ms": 0.1203
+        },
+        {
+          "rows_read": 22,
+          "rows_written": 0,
+          "duration_ms": 4.4122
+        }
+      ],
+      "rows_read_total": 22,
+      "duration_ms_total": 4.5,
       "list_rows": 22,
       "count_rows": 0
     }

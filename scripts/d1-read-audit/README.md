@@ -439,7 +439,7 @@ node scripts/measure-d1-reads.mjs --json-out=scripts/d1-read-audit/measurements-
 
 **复现**：`node scripts/d1-read-audit/probe-samesource.mjs`（只读，走管理通道，不受免费档行读上限约束）。
 
-**端点级复测待部署**：`measurements-after.json` 由 `scripts/measure-d1-reads.mjs` 打**线上端点**产生，v6.4.1 部署前它仍反映旧代码；部署后按第六节口径重跑并与本表核对。
+**端点级复测（2026-09-27 已重跑）**：`measurements-after.json` 由 `scripts/measure-d1-reads.mjs` 产生，**口径要说清** —— SQL 是从**本地路由源码**抓的、执行在**生产 D1** 上，所以读量反映的是「这份 SQL + 生产索引」，与是否部署无关；部署只决定线上真正发出去的是哪份 SQL。v6.4.1 的代码**早在 2026-09-26 就随 v6.5.0 的推送上线**（push `e95122c..a8bb833`，CF Version `3bea29d7-4cca-403e-b0b1-34ddeae0154a`，2026-09-26T12:45:07Z —— 本版收口时误记为「未 push 未部署」，2026-09-27 订正）；2026-09-27 又随 v6.6.1 上线一次（Version `1f5498c5-569e-41e9-8544-7901c1beae65`），该次线上入口资产 `assets/index-DWMy6Pr5.js` / `assets/index-BY0ef8kg.css` 与本地在 6.6.1 下构建的产物**逐字同名** ⇒ 线上跑的就是本表测的这份 SQL。重跑后本表 30 形状读数逐格未变（新增的筛选面 6 个形状记在 §10）。
 
 ---
 
@@ -512,10 +512,24 @@ SELECT players.id FROM players
 - 结构：`idx_players_sort_%` **19 → 23**；`tbl_name='players'` 的索引 **24 → 28**；`d1_migrations` **43** 条（末条 `0043_players_sort_indexes_batch7.sql`）。
 - 计划形状（`verify-0043.mjs`）：四条纯排序均 `SCAN players USING COVERING INDEX <新索引>`（覆盖索引，只读 21 行）；`growth_gap` 区间 + 同键排序在两个视图口径下各自 `SEARCH players USING INDEX idx_players_sort_growth_gap` / `… USING COVERING INDEX idx_players_sort_initial_growth_gap`；同键等值（`china_plan=1 & sort=china_plan`、`agent_tier=2 & sort=agent_tier`）仍是 `SCAN players USING INDEX …`（裸列写法靠早停，§8 的裁决不变）。
 - 收益（`measure-d1-reads.mjs`，已增量合并进 `measurements-after.json`）：`sort=china_plan` / `sort=agent_tier` / `sort=growth_gap` / `view=initial&sort=growth_gap` 四条 **37,635 → 22 行/次**（各 2 条语句、计数 0）。
+- **筛选面（2026-09-27 部署后新增 6 个形状，端点级实测）**：本批的筛选侧同源化原先**没有任何形状覆盖**，补测后读数如下。真正需要同源化才拿得到的是 `growth_gap` 区间那一对：同键排序下 **37,635 → 22** 行/次。
+
+| 形状 | URL | 读量（行/次） | 说明 |
+| --- | --- | --- | --- |
+| `filter-china-plan` | `/players?limit=20&china_plan=1` | **24** | 默认 `sort=id` ⇒ 异键同源，seek 进 `idx_players_sort_china_plan`（建索引前该列无索引可用） |
+| `filter-china-plan-sorted` | `…&sort=china_plan&china_plan=1` | **22** | 同键 ⇒ 裸列，顺索引早停、无 `TEMP B-TREE`（§8 裁决不变） |
+| `filter-agent-tier` | `/players?limit=20&agent_tier=2` | **56** | 生产该列**全表都是 2** ⇒ 命中全表，靠 `(key, id)` 索引序按 id 早停；这是「全命中」的退化情形，不代表选择性 |
+| `filter-growth-gap` | `/players?limit=20&growth_gap_min=10` | **1,824** | 区间 + 默认 `sort=id` ⇒ 计划器不肯为区间表达式 seek（§8 已记录的现象），按 id 序扫到凑满 21 条为止 |
+| `filter-growth-gap-sorted` | `…&sort=growth_gap&growth_gap_min=10` | **22** | 同键 ⇒ seek 进 `idx_players_sort_growth_gap`（建索引前 **37,635**） |
+| `filter-growth-gap-initial` | `…&view=initial&sort=growth_gap&growth_gap_min=10` | **22** | 初始视图口径 seek 进 `idx_players_sort_initial_growth_gap`（建索引前 **37,635**） |
+
+  读这六格时注意三件事：① `filter-growth-gap` 的 1,824 是**选择性**决定的（生产只有约 1.1% 的行满足 `PA − CA ≥ 10`），不是收益，也不是损失；② `filter-agent-tier` 的 56 是「全表命中」的退化格，换成稀有值才看得出索引价值（生产 `agent_tier` 恒为 2，稀有值要等数据变了才出现）；③ 六格里只有后三格的 `sort=` 与筛选键**同键**，前两格是异键同源 —— 这正是 §8 那条「筛选/排序性能必须分两个口径量」的实例。
+
+- 上线：随 v6.6.1 推送（`49e6802..6925cbd`）触发 CF 自动部署，Version **`1f5498c5-569e-41e9-8544-7901c1beae65`**（Created `2026-09-27T08:11:24Z`）；线上入口资产 `assets/index-DWMy6Pr5.js` / `assets/index-BY0ef8kg.css` 与本地在 6.6.1 下 `npm run build` 的产物逐字同名，线上 JS 内版本串为 `6.6.1`；抽检 `/api/health` / 三个新排序键 / `growth_gap_min` 筛选全 200、`/api/offers` 401（私有路由在位）。
 
 **测试锁与验收**：`tests/players-sort-indexes.test.ts` 的 `INDEXED_SORTS` **19 → 23**（新增 china_plan / agent_tier / growth_gap / `['growth_gap','idx_players_sort_initial_growth_gap','&view=initial']`），schema 用例名「十九条」→「二十三条」；`SAME_KEY_EQ` **4 → 6** 条（加 china_plan / agent_tier）；异键 seek 锁补两条；新增「成长空间区间筛选与索引同源、带双侧 NULL 守卫，两个视图口径各 seek 进自己的索引」与「成长空间缺一侧数据的行不得被当成 0 参与比较」（自建三行夹具：只录 PA / 只录 CA / 两样齐全）。`npm run typecheck` 三份全清；本文件 **91 例全绿**；全量 `npx vitest run` **53 文件 / 826 例全绿**（v6.6.0 台账 53/810）。变异验证两处：删掉 growth_gap 的双侧守卫 ⇒ **恰好 2 例红**；删掉 `eqFilter` 的同键分支 ⇒ **恰好 6 例红**（均非空转）。
 
-**复现**：`node scripts/d1-read-audit/verify-0043.mjs`（只读结构 + EXPLAIN）、`node scripts/measure-d1-reads.mjs --only=<id> --json-out=scripts/d1-read-audit/measurements-after.json`（读量打**线上端点** ⇒ 需部署后重跑）。
+**复现**：`node scripts/d1-read-audit/verify-0043.mjs`（只读结构 + EXPLAIN）、`node scripts/measure-d1-reads.mjs --only=<id> --json-out=scripts/d1-read-audit/measurements-after.json`（`--only` 一次只收一个 id；SQL 抓自本地源码、执行在生产 D1，所以**部署前后读数应当一致** —— 2026-09-27 部署后已逐格复跑确认）。本批的形状 id：排序侧 `sort-china-plan` / `sort-agent-tier` / `sort-growth-gap` / `sort-growth-gap-initial`，筛选侧 `filter-china-plan` / `filter-china-plan-sorted` / `filter-agent-tier` / `filter-growth-gap` / `filter-growth-gap-sorted` / `filter-growth-gap-initial`。
 
 
 
