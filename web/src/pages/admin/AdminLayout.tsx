@@ -1,4 +1,4 @@
-// 管理端壳布局：左侧栏 8 项导航 + 子路由出口（v2.1.0 拆分）。
+// 管理端壳布局：左侧栏 9 项导航 + 子路由出口（v2.1.0 拆分；v6.8.0 加「品牌池」）。
 // 非 admin 看到的提示卡与旧 Admin.tsx 一致，不重定向。
 import { NavLink, Outlet } from 'react-router';
 import { TOUR_SITE_URL } from '../../lib/api.ts';
@@ -11,6 +11,7 @@ const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
   { to: '/admin/imports', label: '导入' },
   { to: '/admin/market', label: '转会' },
   { to: '/admin/clubs', label: '俱乐部' },
+  { to: '/admin/brands', label: '品牌池' },
   { to: '/admin/finance', label: '财政' },
   { to: '/admin/system', label: '系统' },
 ];

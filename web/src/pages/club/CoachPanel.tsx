@@ -420,6 +420,22 @@ function NamingCard() {
     }
   }
 
+  async function renew(packageNo: number, pkgName: string) {
+    setBusy(true);
+    try {
+      const out = await apiPost<{ contract: { brand: string; feePerWindow: number; windowsTotal: number } }>(
+        '/api/club/naming/renew',
+        { packageNo },
+      );
+      refresh();
+      show(`已与 ${out.contract.brand} 续约（${pkgName}）：每窗 ${out.contract.feePerWindow.toFixed(2)}M × ${seasonsOf(out.contract.windowsTotal)} 赛季。`);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '续约失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function terminate() {
     if (!window.confirm('提前解约要赔剩余窗口费用（当窗照收后的 30%）。确定退冠名？')) return;
     setBusy(true);
@@ -470,6 +486,30 @@ function NamingCard() {
           <p className="hint">
             冠名费在常规窗关窗时自动入账（1 赛季 = 2 个常规窗，临时窗不计）；提前解约赔剩余期间的 30%（当窗费用照收）。
           </p>
+          {contract.windowsRemaining === 1 && (
+            quote.renewal ? (
+              <p>
+                <b>续约</b>
+                <span className="hint">（仅剩最后 1 窗可续；续约价按当前队况与品牌热度重算，剩余窗数重置）</span>
+                {quote.renewal.packages.map((p) => (
+                  <span key={p.packageNo} style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      disabled={busy}
+                      title={`${seasonsOf(p.windows)} 赛季 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`}
+                      onClick={() => void renew(p.packageNo, p.pkgName)}
+                    >
+                      {p.pkgName} {p.feePerWindow.toFixed(2)}M×{seasonsOf(p.windows)}赛季
+                    </button>
+                  </span>
+                ))}
+                <span className="hint">（品牌现热度 {quote.renewal.heat}）</span>
+              </p>
+            ) : (
+              <p className="hint">仅剩最后 1 窗，但品牌已不在池中，无法续约——到期后合同自然失效。</p>
+            )
+          )}
           <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void terminate()}>
             退冠名
           </button>

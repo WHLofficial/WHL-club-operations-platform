@@ -999,6 +999,8 @@ export interface NamingContract {
 
 export interface NamingQuoteResponse {
   contract?: NamingContract;
+  /** 续约候选（有现约时下发）：按当前队况与品牌现热度现算的同一品牌报价；品牌已弃用则缺省 */
+  renewal?: BrandQuote | null;
   brands?: BrandQuote[];
 }
 

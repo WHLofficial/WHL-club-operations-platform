@@ -120,7 +120,7 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 61 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0 各域参数）', () => {
-    expect(CONFIG_KEYS.length).toBe(61);
+  it('注册表 63 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0 各域参数）', () => {
+    expect(CONFIG_KEYS.length).toBe(63);
   });
 });

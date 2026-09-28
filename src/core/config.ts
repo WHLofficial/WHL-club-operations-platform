@@ -62,6 +62,8 @@ export const CONFIG_KEYS = [
   'market_bid_paused',
   'stadium_max_open_tier',
   'naming_params',
+  'naming_industry_factors',
+  'market_heat_rules',
   'results_auto_confirm',
   'review_amount_threshold',
   'bid_pattern_alert',
@@ -147,7 +149,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   facility_prices: '0.1,3,5,8,12,16',
   // 球场档位开放进度（插件 max_open_tier 口径，S9 初仅开放 0→1）
   stadium_max_open_tier: '1',
-  // v2.6.0 冠名市场：底价系数 + 三套餐条款（插件 _conf_schema naming_* 口径；行业系数不引入，一律 1.0）
+  // v2.6.0 冠名市场：底价系数 + 三套餐条款（插件 _conf_schema naming_* 口径）
   naming_params: JSON.stringify({
     base: 0.5,
     perCapacityWan: 0.3,
@@ -157,6 +159,10 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     short: { windows: 2, factor: 1.25 },
     bet: { windows: 4, factor: 0.7, bonusRate: 0.7, attend: 0.8, fans: 0.03 },
   }),
+  // v6.8.0 冠名活化：行业系数（插件 market_industry_templates 出厂全 1.0，这里给真实默认表；
+  // 未登记行业回 1.0）+ 品牌热度动态规则（近 3 场全胜/全败，钳制边界）
+  naming_industry_factors: JSON.stringify({ 医疗: 1.2, 运动: 1.1, 科技: 1.3, 饮食: 1.0 }),
+  market_heat_rules: JSON.stringify({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5 }),
   // v2.7.0 赛果自动化：cron 每 5 分钟自动确认完赛场次（异常场标人工复核）
   results_auto_confirm: 'on',
   xp_per_level: '10',

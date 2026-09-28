@@ -30,6 +30,7 @@ const AdminPlayersPage = lazy(() => import('./pages/admin/PlayersPage.tsx'));
 const AdminImportsPage = lazy(() => import('./pages/admin/ImportsPage.tsx'));
 const AdminMarketPage = lazy(() => import('./pages/admin/MarketPage.tsx'));
 const AdminClubsPage = lazy(() => import('./pages/admin/ClubsPage.tsx'));
+const AdminBrandsPage = lazy(() => import('./pages/admin/BrandsPage.tsx'));
 const AdminFinancePage = lazy(() => import('./pages/admin/FinancePage.tsx'));
 const AdminSystemPage = lazy(() => import('./pages/admin/SystemPage.tsx'));
 
@@ -142,6 +143,7 @@ export default function App() {
             <Route path="imports" element={<AdminImportsPage />} />
             <Route path="market" element={<AdminMarketPage />} />
             <Route path="clubs" element={<AdminClubsPage />} />
+            <Route path="brands" element={<AdminBrandsPage />} />
             <Route path="finance" element={<AdminFinancePage />} />
             <Route path="system" element={<AdminSystemPage />} />
           </Route>

@@ -13,6 +13,7 @@ import marketRoutes from './market.ts';
 import reviewsRoutes from './reviews.ts';
 import overviewRoutes from './overview.ts';
 import teamSyncRoutes from './teamSync.ts';
+import brandsRoutes from './brands.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -27,5 +28,7 @@ app.route('/', reviewsRoutes);
 app.route('/', overviewRoutes);
 // v6.1.0：球队建档双向同步的对账面（GET /api/admin/team-sync + POST /api/admin/team-sync/apply）
 app.route('/', teamSyncRoutes);
+// v6.8.0：品牌池管理（冠名活化，GET/POST /api/admin/brands + PATCH /api/admin/brands/:id）
+app.route('/', brandsRoutes);
 
 export default app;

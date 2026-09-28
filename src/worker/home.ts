@@ -9,7 +9,7 @@ import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
-import { getActiveNaming, windowNamingStatements } from './naming-ops.ts';
+import { getActiveNaming, windowNamingStatements, windowBrandHeatStatement } from './naming-ops.ts';
 
 export interface AttendanceModel {
   weather_probabilities: Record<string, number>;
@@ -338,7 +338,8 @@ export interface HomeWindowSummary {
  * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠演化 + 冠名收租。
  * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；临时窗照收。
  * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训等级涨粉系数 ×(1+0.03n)，v6.6.3 接入）——每种窗都演化。
- * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，v3.0.0 裁决）。
+ * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，v3.0.0 裁决）；
+ * 品牌热度动态随收租批走（近 3 场全胜/全败调 brand_pool.heat，v6.8.0）。
  * 幂等：ledger 走 'maintenance'/'naming_fee'/'window' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
  */
 export async function windowHomeStatements(
@@ -410,6 +411,11 @@ export async function windowHomeStatements(
         statements.push(...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth));
         summary.namingClubs++;
         summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
+        // 品牌热度动态（v6.8.0）：本队近 3 场全胜/全败调 brand_pool.heat（目录无映射的队跳过）
+        if (tourTeamId !== undefined) {
+          const heatStmt = await windowBrandHeatStatement(env, naming, tourTeamId);
+          if (heatStmt) statements.push(heatStmt);
+        }
       }
     }
   }

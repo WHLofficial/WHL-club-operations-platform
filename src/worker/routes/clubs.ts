@@ -16,7 +16,7 @@ import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence }
 import { createConfigService } from '../../core/config.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
-import { quoteBrands, signNaming, terminateNaming, getActiveNaming, loadNamingParams } from '../naming-ops.ts';
+import { quoteBrands, signNaming, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors } from '../naming-ops.ts';
 import { getVisibleSeason } from '../seasons.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -1124,14 +1124,33 @@ app.get('/club/naming/quote', async (c) => {
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const contract = await getActiveNaming(c.env.DB, club.id);
-  if (contract) return c.json({ contract: namingContractDto(contract) });
+  const [params, brands, factors] = await Promise.all([
+    loadNamingParams(c.env.DB),
+    loadAdoptedBrands(c.env.DB),
+    loadIndustryFactors(c.env.DB),
+  ]);
   const stadium = await c.env.DB
     .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
     .bind(club.id)
     .first<{ capacity: number; fans: number }>();
+  if (contract) {
+    // 续约候选（剩最后 1 窗时前端用）：按当前队况与品牌现热度现算；品牌已弃用则不给（renewal 缺省）
+    const renewal = stadium
+      ? quoteBrands(params, brands, stadium.capacity, stadium.fans, factors).find((b) => b.brand === contract.brand) ?? null
+      : null;
+    return c.json({ contract: namingContractDto(contract), renewal });
+  }
   if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
-  const params = await loadNamingParams(c.env.DB);
-  return c.json({ brands: quoteBrands(params, stadium.capacity, stadium.fans) });
+  return c.json({ brands: quoteBrands(params, brands, stadium.capacity, stadium.fans, factors) });
+});
+
+app.post('/club/naming/renew', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
+  const body = (await c.req.raw.json().catch(() => null)) as { packageNo?: unknown } | null;
+  const contract = await renewNaming(c.env, club.id, Number(body?.packageNo), user.id);
+  return c.json({ contract: namingContractDto(contract) }, 201);
 });
 
 app.post('/club/naming/sign', async (c) => {
