@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.7.0] · B 块可见性：近期主场战报 + 窗口财务汇总（2026-09-28）
+
+差异排期 B 块（参考 AstrBot 插件「主场收入系统」的可见性能力搬到网页端）。零迁移、零生产写，纯只读端点 + 前端展示。
+
+**Added**
+- `GET /api/club/home-matches`（教练端）：最近 10 场主场的天气 / 上座（含上座率）/ 票务 / 商业 / 转播 / 合计收入与对手比分赛果（胜/平/负/点球/弃权）。对手名用 `result_confirmations.away_team` 确认时快照；`match_id` UNIQUE 保证 JOIN 不放大行。此前 `match_attendance`（迁移 0018）没有任何读端点。
+- `GET /api/club/finance-summary?season=`（教练端，缺省当前可见赛季）：比赛日收入按 `match_attendance (season, window_seq)` 精确归窗；其余流水按 `created_at` 折叠进 `season_windows [opened_at, closed_at]`（两端含、在开窗口吃掉其后全部），出每窗 byKind / 净额 / 期末余额；窗外流水进 `outside` 不计入赛季合计。closingBalance 按 `(created_at, id)` 取末笔，不假设 id 与时间同序。
+- 前端：教练面板新增「近期主场战报」卡（主场档案卡之后）；财政账本页新增「窗口财务汇总」卡（教练可见，工资/维护费/冠名/富人税固定列 + 其他归并 + 赛季合计行）；`queries.ts` 加 `useHomeMatches` / `useFinanceSummary`。
+- 测试 `tests/club-visibility.test.ts` 10 例：六态赛果、上座率、LIMIT 截断、窗端点边界（恰等 opened_at / closed_at）、在开窗口吞流水、窗外归 outside、乱序插入、跨季混入、期末余额回退与浮点尾差收口。
+
+**评审修复**（commit `5327b27`）：金额求和统一 round2（0.1+0.2 尾差）；赛季期末余额回退到最后一笔有流水的窗口；前端「冠名」列补 `naming_penalty`（违约罚金）。
+
+**验收**：typecheck 三份全清、vitest **54 文件 / 847 例全绿**（v6.6.3 基线 53/837）、build 成功；变异验证 4 处（含端改开区间 / closingBalance 退化按 id / matchday 漏赛季过滤 / 胜负判定取反）各恰好 1 红。
+
 ## [v6.6.3] · fix 订正：青训等级接入死忠演化 + 战绩查询按 tour 队 id 认人（2026-09-28）
 
 **Fixed**

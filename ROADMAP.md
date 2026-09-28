@@ -60,7 +60,26 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.6.3**（fix 订正：青训等级接入死忠演化 + 战绩查询按 tour 队 id 认人；零迁移零生产写，**本地已提交 `1dd3924`，未 push**——push 即上线，随下次被授权 push 走，见下文同名节）。上一版本 v6.6.2（迁移 `0044` 已于 2026-09-27 apply 到生产；本批只加两条索引与测试锁、无 `src/` 运行时改动 ⇒ 收益即时生效；**已 push `6925cbd..68fc154` 并随 CF 自动部署上线**，Version `c15bb1ea-5d3c-4619-9730-687e99fbeaae`，2026-09-27T16:25:37Z，同批带上 v6.6.1 上线记录与另一会话的 e2e 修复 `68fc154`；生产迁移已到 `0044`）。v6.6.2 = 排序索引 batch 8（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体）+ `fc_id` 筛选保持裸列的实测例外，见下文同名节；v6.6.1（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z）= 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
+**当前版本 v6.7.0**（B 块可见性：近期主场战报 + 窗口财务汇总；零迁移零生产写，**本地已提交 `51a2380` + `5327b27`，未 push**——push 即上线，随下次被授权 push 走，见下文同名节）。上一版本 v6.6.3（fix 订正：青训等级接入死忠演化 + 战绩查询按 tour 队 id 认人；本地 `1dd3924`，同样未 push，见下文同名节）。再上一版本 v6.6.2（迁移 `0044` 已于 2026-09-27 apply 到生产；本批只加两条索引与测试锁、无 `src/` 运行时改动 ⇒ 收益即时生效；**已 push `6925cbd..68fc154` 并随 CF 自动部署上线**，Version `c15bb1ea-5d3c-4619-9730-687e99fbeaae`，2026-09-27T16:25:37Z，同批带上 v6.6.1 上线记录与另一会话的 e2e 修复 `68fc154`；生产迁移已到 `0044`）。v6.6.2 = 排序索引 batch 8（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体）+ `fc_id` 筛选保持裸列的实测例外，见下文同名节；v6.6.1（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z）= 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
+
+---
+
+## v6.7.0 · B 块可见性（近期主场战报 + 窗口财务汇总）
+
+**状态**：零迁移、零生产写，本地已提交 `51a2380`（feat）+ `5327b27`（评审修复），**未 push**——push 即上线，随下次被授权 push 走。
+
+**缘起与裁决**：差异排期 B 块——参考插件的可见性能力搬到网页端，把已落库但用户看不见的数据亮出来。排期即裁决：B1 教练端近期主场收入、B2 窗口/赛季财务聚合；图表不做（内联 SVG 组件以后要用再抽）；UI 只展示当前赛季（API 留 `season` 参数不做切换器）。
+
+**交付**：
+- `GET /api/club/home-matches`（`src/worker/routes/clubs.ts`）：最近 10 场主场，`match_attendance` LEFT JOIN `stadiums`（容量→上座率）LEFT JOIN `result_confirmations`（`match_id` UNIQUE 不放大行）。对手恒为 `away_team_id`（attendance 行只在「本队是主队」时写入）；对手名用确认时快照 `rc.away_team`（评审中否掉了跨库查名的初版——AUTH_DB `team.id` 不是 tour 队 id，且快照本来就够）。六态赛果：胜/平/负/点球胜/点球负/弃权胜/弃权负 + 无赛果「待定」；合计金额 round2。
+- `GET /api/club/finance-summary?season=`（缺省 `getVisibleSeason()`，非法参数 400）：比赛日按 `match_attendance (season, window_seq)` 聚合（写入时带窗口号，精确）；其余流水按 `created_at` 折叠进 `season_windows [opened_at, closed_at]`（两端含、在开窗口吃掉其后全部），一次折叠覆盖所有 kind，不逐 `ref_type` 猜；窗外流水进 `outside` 不计 totals；closingBalance 按 `(created_at, id)` 取末笔。三条查询 `Promise.all` 并行，流水量级每队数百行。
+- 前端：`web/src/lib/queries.ts` 加 `qk.homeMatches` / `qk.financeSummary` + 两个 hook；`web/src/pages/club/CoachPanel.tsx` 新增「近期主场战报」卡（主场档案卡之后、home-only）；`web/src/pages/Ledger.tsx` 新增「窗口财务汇总」卡（教练可见：窗口行 + 赛季合计行，工资/维护费/冠名/富人税固定列 + 其余 kind 归「其他」，窗外流水行外注记）；`web/src/lib/api.ts` 加 `HomeMatchesResponse` / `FinanceSummaryResponse` 类型。
+
+**评审修复（`5327b27`）**：① B2 金额求和统一 round2（与 B1 合计同口径，0.1+0.2 尾差收口）；② `totals.closingBalance` 回退到最后一笔有流水的窗口（末窗无流水不再把真值丢成 null）；③ 前端「冠名」列补 `naming_penalty`（违约罚金，负值），不再落「其他」。
+
+**实测与验收**：typecheck 三份全清；vitest **54 文件 / 847 例全绿**（v6.6.3 基线 53/837，新增 `tests/club-visibility.test.ts` 10 例）；build 成功。变异验证 4 处各恰好 1 红：含端改开区间 → 边界例红；closingBalance 退化按 id → 乱序例红；matchday 漏赛季过滤 → 跨季混入例红；胜负判定取反 → 六态例红。
+
+**生效面**：push 后即可用——教练面板 `/clubs/:id`（本队）新增战报卡，`/ledger` 新增窗口汇总卡。无迁移、无生产写、无配置变更。
 
 ---
 
