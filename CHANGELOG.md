@@ -6,7 +6,7 @@
 
 ## [v6.12.0] · D3 随机事件域：满意度与经营信号消费端 + LLM 草稿工坊 + 种子扩池（2026-09-28）
 
-差异排期 D 块第三块。含迁移 `0051_naming_satisfaction.sql` / `0052_event_seeds_batch2.sql` / `0053_event_drafts.sql`，并直接编辑了尚未 apply 的 `0047_event_pool.sql`（补 satisfaction / signals）——**本地已提交未 push**，push 前须连同 `0045`–`0050` 一起 apply 到生产（先 apply 再 push，顺序不可反）。
+差异排期 D 块第三块。含迁移 `0051_naming_satisfaction.sql` / `0052_event_seeds_batch2.sql` / `0053_event_drafts.sql`，并直接编辑了尚未 apply 的 `0047_event_pool.sql`（补 satisfaction / signals）。**已随 2026-09-28 发布批次上线**：`0045`–`0053` 共 9 枚迁移于 push 前 apply 到生产，push `68fc154..77f6eea` 触发 CF 自动部署（Version `55a54d84-9ca6-4b7d-999f-27064197238d`，2026-09-28T10:02:19Z）；线上资产 `index-CF1Lyhhj.js` 与本地 v6.12.0 构建逐字节一致。
 
 **Added**
 - **品牌方情绪真落库**：`naming_contracts.satisfaction`（`0051`，默认 1.0）；事件 `satisfaction` 效果按 `event_clamps.satisfaction=0.5` 钳幅、`MAX(0, MIN(2, …))` 累加、PENDING_GUARD 幂等，无生效冠名播报落空；冠名卡展示「品牌方情绪：低落 / 平静 / 高涨」（数值 + 状态标签，阈值纯展示）。
@@ -28,7 +28,7 @@
 
 ## [v6.11.0] · D2 随机事件域：选择型事件 + 玩家互动 + 超时兜底（2026-09-28）
 
-差异排期 D 块第二块（参考 AstrBot 插件 `event_engine.py` 的 `_resolve_choice` / `_roll_option` 与倒计时式选项处理）。含迁移 `0050_event_occurrence_reminded.sql`——**本地已提交未 push**，push 前须连同 `0045`–`0049` 一起 apply 到生产。
+差异排期 D 块第二块（参考 AstrBot 插件 `event_engine.py` 的 `_resolve_choice` / `_roll_option` 与倒计时式选项处理）。含迁移 `0050_event_occurrence_reminded.sql`，已随 2026-09-28 发布批次 apply 到生产并上线（Version `55a54d84-…`）。
 
 **Added**
 - 迁移 `0050_event_occurrence_reminded.sql`：`event_occurrences` 加 `reminded_at TEXT NOT NULL DEFAULT ''`——cron 每 5 分钟一跳，靠这一列保证同一条待选只提醒一次。选择型的 `choice_no` / `outcome_json` / `deadline_at` 在 `0048` 一次建全 ⇒ **本版零结构改动**（0048 的设计目标在此兑现）。
@@ -63,14 +63,14 @@
 **生效面**：迁移 apply + push 后——玩家（教练）在球队中心能看到待选事件并选定，逾期由 cron 按资金最差自动结算并广播回执，距时限 24h 收到提醒。
 
 **后续（详见 `ROADMAP.md` 同名节「下一步（待令）」）**：
-- 发布需单独授权：先 apply `0045`–`0050` 到生产（现停在 `0044`），再 push；本地领先 `origin/main`（`68fc154`）**13 个提交**（A / B / C1 / E / D1 / D2 六块）。
+- ~~发布需单独授权~~ —— **已于 2026-09-28 随 v6.12.0 发布批次上线**（`0045`–`0050` 先 apply 到生产，再 push `68fc154..77f6eea`，Version `55a54d84-…`）。
 - D3（v6.12.0）：`satisfaction` / `signals` / `offer_spawn` 三类消费端落库 + LLM 文案（仅管理端生成 + 落库审校）+ 种子池扩到 ~30；一并评估超时残行终态化与 `expired` 语义、选择型占比 ~77% 是否设待选上限、空 options 窄口、视图分页口径。
 - 待确认（跨仓）：`event_resolved` / `event_deadline` 模板名是否被插件按白名单拒收。
 - 更远：C2 冠名深度（满意度三信号 / 品牌主动解约 / 档位性格）、C3 招商轮。
 
 ## [v6.10.0] · D1 随机事件域：事件池 + 管理端触发 + 11 键效果即时结算（2026-09-28）
 
-差异排期 D 块第一块（参考 AstrBot 插件 `event_engine.py` / `event_effects.py` 搬到本仓）。含迁移 `0047_event_pool.sql` / `0048_event_occurrences.sql` / `0049_stadium_event_pending.sql`——**本地已提交未 push**，push 前须连同 `0045`/`0046` 一起 apply 到生产。
+差异排期 D 块第一块（参考 AstrBot 插件 `event_engine.py` / `event_effects.py` 搬到本仓）。含迁移 `0047_event_pool.sql` / `0048_event_occurrences.sql` / `0049_stadium_event_pending.sql`，已随 2026-09-28 发布批次 apply 到生产并上线（Version `55a54d84-…`）。
 
 **Added**
 - 迁移 `0047_event_pool.sql`：`event_pool (id, event_id UNIQUE, name, category, weight, event_type, conditions_json, effects_json, options_json, soft_conditions, template, source, status, created_at)` + 24 条种子（6 即发 + 18 选择，逐字同插件 `DEFAULT_EVENTS`）。迁移 `0048_event_occurrences.sql`：`event_occurrences`（选择型的 `choice_no` / `outcome_json` / `deadline_at` 一次建全 ⇒ D2 零迁移）+ 两索引。迁移 `0049_stadium_event_pending.sql`：`stadiums` 加 `next_attendance_mod`（默认 1）与 `next_weather`（默认空）。
@@ -91,7 +91,7 @@
 
 ## [v6.9.0] · E 块球场档期：活动预订 + 关窗结算入账（2026-09-28）
 
-差异排期 E 块（参考 AstrBot 插件球场档期域搬到本仓）。含迁移 `0046_venue_bookings.sql`——**本地已提交未 push**，push 前须连同 `0045` 一起 apply 到生产。
+差异排期 E 块（参考 AstrBot 插件球场档期域搬到本仓）。含迁移 `0046_venue_bookings.sql`，已随 2026-09-28 发布批次 apply 到生产并上线（Version `55a54d84-…`）。
 
 **Added**
 - 迁移 `0046_venue_bookings.sql`：`venue_bookings (id, club_id, season, window_seq, slot_no, activity_type, booked_by, created_at)` + `UNIQUE (club_id, season, window_seq, slot_no)`（唯一约束自带索引，按队+赛季+窗查档期走索引；参考插件无索引）。
@@ -109,7 +109,7 @@
 
 ## [v6.8.0] · C1 冠名活化：品牌池落库 + 行业系数 + 续约 + 热度动态（2026-09-28）
 
-差异排期 C1 块（参考 AstrBot 插件冠名域的深度搬到本仓）。含迁移 `0045_brand_pool.sql`——**本地已提交未 push**，push 前须先 apply 到生产。
+差异排期 C1 块（参考 AstrBot 插件冠名域的深度搬到本仓）。含迁移 `0045_brand_pool.sql`，已随 2026-09-28 发布批次 apply 到生产并上线（Version `55a54d84-…`）。
 
 **Added**
 - 迁移 `0045_brand_pool.sql`：`brand_pool (id, brand UNIQUE, heat, source, status, industry, created_at)` + 7 家种子（`INSERT OR IGNORE`，品牌名/热度/行业与插件 `brand_service.py:17-25` 逐字同）。此前 7 家品牌硬编码在 `src/worker/naming-ops.ts` 的 `DEFAULT_BRANDS` 常量里。
@@ -146,7 +146,7 @@
 - **青训设施等级接入死忠演化**（`src/worker/home.ts`）：`windowHomeStatements` 调 `evolveFans` 此前没传 `youthLevel`（默认 0 级），青训设施买到 5 级（累计 44M）对死忠涨粉零作用。现循环前一条批量查询建 Map 传入，涨粉系数 ×(1+0.03n)；掉粉路径不受青训影响（插件 fans_service 同口径）。
 - **`clubFormPts` 队 id 语义订正**（`src/worker/home.ts` + `src/worker/prizes.ts` 新增 `tourTeamIdsByClub`）：赛果快照表存比赛系统队 id，函数原先拿 club id 查、靠生产 20/20「两套 id 逐队相等」的巧合命中（米兰 legacy 47 vs 131681 期间恒返中性 4）。现参数改认 tour 队 id：确认钩子直接用主队 tour id（零额外查询），窗末结算走 AUTH_DB 反向映射（**刻意不做 CPU 过滤**——战绩是描述性口径不是发钱闸）；无映射回中性 4 分。
 
-**验收**：零迁移零生产写、无前端改动。typecheck 三份全清；vitest **53 文件 / 837 例全绿**（v6.6.2 台账 53/833，净 +4）；变异验证三处各恰好 1 红。生产当前 20/20 id 相等 ⇒ A2 在生产数值上零变化，纯防将来 rekey/扩队再翻车。**本地已提交未 push**（随下次被授权 push 上线）。
+**验收**：零迁移零生产写、无前端改动。typecheck 三份全清；vitest **53 文件 / 837 例全绿**（v6.6.2 台账 53/833，净 +4）；变异验证三处各恰好 1 红。生产当前 20/20 id 相等 ⇒ A2 在生产数值上零变化，纯防将来 rekey/扩队再翻车。**已随 2026-09-28 发布批次上线**（Version `55a54d84-…`）。
 
 ## [v6.6.2] · 排序索引 batch 8（`fc_id` 排序侧 + 初始视图 `pa`）+ `fc_id` 筛选保持裸列的实测例外（2026-09-27）
 
