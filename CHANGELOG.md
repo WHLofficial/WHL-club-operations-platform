@@ -4,6 +4,28 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.12.0] · D3 随机事件域：满意度与经营信号消费端 + LLM 草稿工坊 + 种子扩池（2026-09-28）
+
+差异排期 D 块第三块。含迁移 `0051_naming_satisfaction.sql` / `0052_event_seeds_batch2.sql` / `0053_event_drafts.sql`，并直接编辑了尚未 apply 的 `0047_event_pool.sql`（补 satisfaction / signals）——**本地已提交未 push**，push 前须连同 `0045`–`0050` 一起 apply 到生产（先 apply 再 push，顺序不可反）。
+
+**Added**
+- **品牌方情绪真落库**：`naming_contracts.satisfaction`（`0051`，默认 1.0）；事件 `satisfaction` 效果按 `event_clamps.satisfaction=0.5` 钳幅、`MAX(0, MIN(2, …))` 累加、PENDING_GUARD 幂等，无生效冠名播报落空；冠名卡展示「品牌方情绪：低落 / 平静 / 高涨」（数值 + 状态标签，阈值纯展示）。
+- **经营信号三消费点**：config 新键 `event_signals`（`fan_mood` step ±2 / `upkeep` mult 0.5–2 / `fee_mod` mult 0.5–2，同插件 `SIGNAL_DEFAULTS`）；效果值经 `cleanSignals` 清洗后入 `effects_json`，关窗批 `collectWindowSignals` 聚合（step 求和 / mult 连乘后终钳）——维护费 ×upkeep、死忠演化 ×(1+fan_mood/100)、冠名费 ×fee_mod，账本 memo 带信号说明，有非中性信号的队另收 `window_signals` 站内信。
+- **LLM 草稿工坊**（管理端 only，不进玩家请求路径）：`src/lib/llm.ts`（OpenAI 兼容通用接入，`LLM_API_BASE` / `LLM_API_KEY`（secret）/ `LLM_MODEL` 三变量，未配 503 旁路、失败 502 带原文）；`event_drafts` 表（`0053`）+ 6 个管理端点：生成（text 改写文案 / struct 结构草稿过 `clampEventDraft` 钳制）、草稿列表、修订（PATCH，struct 重过钳制）、采纳（text 写 `event_pool.template` / struct INSERT 池，event_id 撞车 409）、废弃；全程审计。管理端事件页新增「草稿工坊」区。
+- **种子扩池 24 → 30**（`0052`，主题与效果经用户确认）：名宿回访 / 赞助商突击考察（即发）+ 吉祥物出道 / 广告牌争议 / 看台 Wi-Fi 升级 / 城市嘉年华（选择）；存量 `0047` 种子补 satisfaction（brand_crisis / brand_anniv）与 signals（tifo_viral / bad_press / new_wave / merch_hit / scalper_raid / food_fest / derby_buzz）。
+- **同队待选上限**：`event_rules.maxPending=3`——随机抽取达上限跳过（计 capped）、点名触发 409。
+- `pickEvent` 剔除「选择型无选项且不设时限」的永久 pending 窄口；教练端事件视图 pending 分页口径统一钳 1..50。
+
+**Changed**
+- 超时兜底状态改记 **`expired`**（`0048` 列注释原义「expired = 超时兜底」归位；玩家 / 管理员结算仍 `resolved`，读侧 `status <> 'pending'` 兼容），结算回执与流水带「（超时自动结算）」；事件流水状态列加「超时结算」徽标。
+- `runSettleTick` 把超时兜底挪到通知补发之后并各自 try/catch（v6.11.0 登记的可选改进兑现：迁移未 apply 类故障只挂兜底一环，不再连坐通知与缓存 purge）。
+- 选项概率表的「（v6.12.0 生效）」标注收窄为只剩 `offer_spawn` 带「（C3 生效）」（satisfaction / signals 本版起真落库）。
+- `resolveEvent` 白读收敛：无选项 / 选项均无结果的跳过路径不再装队况与效果依赖。
+
+**Fixed**（变异验证 13 处全命中；首轮 2 处空转按最坏情况口径补强测试后命中——维护费信号加金额对账断言、llm-status 加「部分配置 = 未配置」用例；code-review 修复 2 条：非草稿行隐藏无效操作按钮、移除未用的 `loadEventRules` 装载）
+
+**已知不改**：`window_signals` 通知无去重闸（关窗批失败重试可能重发，信号内容幂等）；选择型拖到归档窗关闭后结算的信号不消费（幅度小，登记接受）；`window_signals` 模板名同样待跨仓白名单确认。
+
 ## [v6.11.0] · D2 随机事件域：选择型事件 + 玩家互动 + 超时兜底（2026-09-28）
 
 差异排期 D 块第二块（参考 AstrBot 插件 `event_engine.py` 的 `_resolve_choice` / `_roll_option` 与倒计时式选项处理）。含迁移 `0050_event_occurrence_reminded.sql`——**本地已提交未 push**，push 前须连同 `0045`–`0049` 一起 apply 到生产。
