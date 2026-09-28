@@ -402,9 +402,11 @@ function DraftSection() {
                     <td>{draftBadge(d.status)}</td>
                     <td className="mono muted">{d.updated_at.slice(5, 16).replace('T', ' ')}</td>
                     <td className="actions">
-                      <button className="btn btn-sm btn-ghost" type="button" disabled={busy} onClick={() => openDraft(d)}>
-                        {openId === d.id ? '收起' : '查看 / 修订'}
-                      </button>
+                      {d.status === 'draft' && (
+                        <button className="btn btn-sm btn-ghost" type="button" disabled={busy} onClick={() => openDraft(d)}>
+                          {openId === d.id ? '收起' : '查看 / 修订'}
+                        </button>
+                      )}
                       {d.status === 'draft' && (
                         <>
                           <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void adopt(d)}>

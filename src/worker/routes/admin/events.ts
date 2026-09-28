@@ -11,7 +11,7 @@ import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
 import { llmChat, llmChatJson, llmConfigured } from '../../../lib/llm.ts';
 import { getOpenWindow, getVisibleSeason } from '../../seasons.ts';
-import { clampEventDraft, loadEventById, loadEventClamps, loadEventRules, loadEventSignals, loadWeatherKeys, triggerEventBatch, type EventDraftStruct } from '../../event-ops.ts';
+import { clampEventDraft, loadEventById, loadEventClamps, loadEventSignals, loadWeatherKeys, triggerEventBatch, type EventDraftStruct } from '../../event-ops.ts';
 import { readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -165,8 +165,7 @@ app.post('/events/llm-draft', async (c) => {
   }
 
   // struct：让模型按 schema 出 JSON，再过 clampEventDraft 钳制（LLM 的数字不可信，钳完才算数）
-  const [rules, clamps, signalDefs, weatherKeys] = await Promise.all([
-    loadEventRules(c.env.DB),
+  const [clamps, signalDefs, weatherKeys] = await Promise.all([
     loadEventClamps(c.env.DB),
     loadEventSignals(c.env.DB),
     loadWeatherKeys(c.env.DB),
@@ -183,7 +182,6 @@ app.post('/events/llm-draft', async (c) => {
     maxTokens: 1200,
   });
   const clamped = clampEventDraft(struct, { clamps, signalDefs, weatherKeys });
-  void rules;
   const payload = clamped.event;
   const noteParts = [hint, ...clamped.adjustments].filter((s) => s !== '').join('；');
   const res = await c.env.DB
