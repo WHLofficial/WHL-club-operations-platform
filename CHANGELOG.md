@@ -6,7 +6,7 @@
 
 ## [v6.13.0] · C2 冠名深度：档位性格 + 情绪演化 + 品牌主动解约 + 联赛冠军加成（2026-09-28）
 
-差异排期 C 块第二块。含迁移 `0054_brand_tiers.sql`（`brand_pool` 加 `tier` CHECK 三档 / `tier_locked`，种子按校准规则预设 3 头部 2 新兴）——**未 push 未部署，push 前须先 apply 到生产**。判级 minor。测试计划首次按 qa-test-planner 约定设计（`docs/test-plans/v6.13.0-c2.md`）。插件只当参照系，可玩性偏离逐条留痕（见 ROADMAP v6.13.0 节）。
+差异排期 C 块第二块。含迁移 `0054_brand_tiers.sql`（`brand_pool` 加 `tier` CHECK 三档 / `tier_locked`，种子按校准规则预设 3 头部 2 新兴）——**已随 2026-09-28 发布批次上线**：`0054` 于 push 前 apply 到生产（`Executed 5 commands in 3.56ms`；只读核验 `brand_pool` 3 头部 / 2 新兴 / 2 口碑、`d1_migrations` 末条 `0054_brand_tiers.sql`），随后 push `77f6eea..07f050c`（14 个提交）触发 CF Workers Builds 自动部署，生产 Version `1e3cc95a-7f43-41ee-8fd4-93fe69169774`（2026-09-28T15:50:43Z）；线上资产 `index-nK5xirMD.js` + `index-BY0ef8kg.css` 与本地 v6.13.0 构建 sha256 逐字节一致（线上 JS 版本串 `6.13.0`），公开端点 200 / 匿名探针 401 回读全过。判级 minor。测试计划首次按 qa-test-planner 约定设计（`docs/test-plans/v6.13.0-c2.md`）。插件只当参照系，可玩性偏离逐条留痕（见 ROADMAP v6.13.0 节）。
 
 **Added**
 - **品牌档位**：头部 / 新兴 / 口碑三档（config `market_tier_profiles` 全参数性格：情绪地板 0.7/0.6/0.5、负向敏感 ×1.5/1.0/0.75、活动收入加成 +2%（头部）、死忠涨粉加成 +0.5%（口碑））；config `market_tier_rules`（topSeatRatio 8 / emergingSlots 2 / topHeatFloor 1.0 / emergingHeatFloor 0.9）；关窗批首自动校准——热度降序前 ceil(俱乐部数/8) 家且 heat≥1.0 → 头部、≥0.9 → 新兴、其余口碑；**头部可空缺不注水**；`tier_locked=1` 锁档跳过校准；管理端品牌池页档位下拉 + 锁定开关（审计带前后档位）。
