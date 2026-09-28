@@ -73,6 +73,13 @@ export function renderNotification(template: string, data: Record<string, unknow
     // 经营信号注记（v6.12.0，D3）：关窗批给有非中性信号的队单发一条；data.lines 已是人话注记行
     case 'window_signals':
       return `📶 ${data.club} 本窗（${data.window}）经营信号生效：${data.lines}。`;
+    // 冠名深度（v6.13.0，C2）：情绪演化回执 / 品牌主动解约 / 联赛冠军加成
+    case 'naming_mood':
+      return `💙 品牌方情绪：${data.brand} ${data.from} → ${data.to}（${data.reason}）。`;
+    case 'naming_terminated':
+      return `💔 品牌「${data.brand}」对 ${data.club} 的满意度降至 ${data.satisfaction}（低于${data.tier}档地板 ${data.floor}），已解除冠名（无赔偿），可另签新品牌。`;
+    case 'naming_champion':
+      return `🏆 恭喜 ${data.club} 夺得 S${data.season} 联赛冠军！${data.brand ? `品牌「${data.brand}」热度 +${data.heat}，品牌方情绪 +${data.sat}。` : '（该队无生效冠名，加成无落点）'}`;
     default:
       return String(data.text ?? '');
   }

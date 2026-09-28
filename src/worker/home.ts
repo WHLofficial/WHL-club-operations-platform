@@ -9,7 +9,16 @@ import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
-import { getActiveNaming, windowNamingStatements, windowBrandHeatStatement } from './naming-ops.ts';
+import {
+  evolveSatisfactionForClub,
+  loadSatisfyConfig,
+  loadTierProfiles,
+  recalibrateTierStatements,
+  windowNamingStatements,
+  windowBrandHeatStatement,
+  type BrandTier,
+  type NamingContractRow,
+} from './naming-ops.ts';
 import { loadActivityCatalog, windowActivityStatements } from './venue-ops.ts';
 import {
   collectWindowSignals,
@@ -209,13 +218,15 @@ export function diehardTarget(model: AttendanceModel, influence: number): number
   return target;
 }
 
-/** 死忠演化（非对称靠拢；青训每级 +3% 涨粉；战绩 Pts≥7 ×1.05/≤1 ×0.95；钳 [0, 上限]） */
-export function evolveFans(model: AttendanceModel, fans: number, target: number, attendRate: number, formPts: number, youthLevel = 0): number {
+/** 死忠演化（非对称靠拢；青训每级 +3% 涨粉；战绩 Pts≥7 ×1.05/≤1 ×0.95；钳 [0, 上限]）。
+ *  fansBuff = 生效冠名品牌的档位死忠增长加成（v6.13.0 C2，口碑 +0.5%）——只乘涨粉系数、掉粉不受影响。 */
+export function evolveFans(model: AttendanceModel, fans: number, target: number, attendRate: number, formPts: number, youthLevel = 0, fansBuff = 0): number {
   const diff = target - fans;
   let next: number;
   if (diff > 0) {
     let coef = model.fans_grow_rate * (model.fans_grow_heat_base + model.fans_grow_heat_span * attendRate);
     coef *= 1 + 0.03 * youthLevel;
+    coef *= 1 + fansBuff;
     next = fans + diff * coef;
   } else {
     const coef = model.fans_drop_rate * (1 + model.fans_drop_heat_extra * (1 - attendRate));
@@ -358,30 +369,58 @@ export interface HomeWindowSummary {
   namingTotal: number;
   activityClubs: number;
   activityTotal: number;
+  moodClubs: number;
+  terminatedClubs: number;
+}
+
+/** 批后补排的俱乐部通知（关窗批提交成功后由调用方逐条 queueClubNotification）。 */
+export interface PendingClubNotification {
+  clubId: number;
+  template: string;
+  data: Record<string, unknown>;
 }
 
 /**
  * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠演化 + 冠名收租 + 档期活动。
  * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；临时窗照收。
- * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训等级涨粉系数 ×(1+0.03n)，v6.6.3 接入）——每种窗都演化。
+ * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训等级涨粉系数 ×(1+0.03n)，v6.6.3 接入；
+ * 品牌档位 fansBuff 只乘涨粉侧，v6.13.0 C2）——每种窗都演化。
  * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，v3.0.0 裁决）；
- * 品牌热度动态随收租批走（近 3 场全胜/全败调 brand_pool.heat，v6.8.0）。
+ * 品牌热度动态随收租批走（近 3 场全胜/全败调 brand_pool.heat，v6.8.0）；
+ * 档位自动校准批首跑一次（v6.13.0 C2，热度降序 + 头部准入下限，锁档跳过）；
+ * 品牌方情绪两信号演化 + 跌破地板主动解约随收租批走（v6.13.0 C2，剩 1 窗的合同本窗到期不再演化）。
  * 档期活动（v6.9.0）：本窗已订档位按确定性伪随机结算收入与草皮损坏；临时窗**照算**（预订时窗是开的，
  * 活动本身与转会议题无关），但只算当窗已订的槽位。
  * 幂等：ledger 走 'maintenance'/'naming_fee'/'activity'/'booking' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
+ * notifications 返回批后通知（情绪变化 / 品牌解约），调用方在批提交成功后排队——批回滚不发假通知。
  */
 export async function windowHomeStatements(
   env: Env,
   season: number,
   windowSeq: number,
   opts: { chargeNaming: boolean },
-): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; summary: HomeWindowSummary }> {
+): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; summary: HomeWindowSummary; notifications: PendingClubNotification[] }> {
   const model = await loadAttendanceModel(env.DB);
   const tierTable = await loadTierTable(env.DB);
   const activityCatalog = await loadActivityCatalog(env.DB);
   // v6.12.0 D3 经营信号：本窗触发事件沉淀的 fan_mood / upkeep / fee_mod，按队消费
   const signalDefs = await loadEventSignals(env.DB);
   const signalsByClub = await collectWindowSignals(env.DB, season, windowSeq, signalDefs);
+
+  // v6.13.0 C2：生效冠名一次批量取（含 satisfaction）+ 品牌实时档位映射——省逐队点查，也给 buff/演化供料
+  const namingRows = opts.chargeNaming
+    ? (await env.DB.prepare(`SELECT * FROM naming_contracts WHERE status = 'active'`).all<NamingContractRow>()).results
+    : [];
+  const namingByClub = new Map(namingRows.map((r) => [r.club_id, r]));
+  const brandTier = new Map(
+    opts.chargeNaming
+      ? (
+          await env.DB.prepare(`SELECT brand, tier FROM brand_pool WHERE status = 'adopted'`).all<{ brand: string; tier: string }>()
+        ).results.map((r) => [r.brand, r.tier as BrandTier])
+      : [],
+  );
+  const profiles = opts.chargeNaming ? await loadTierProfiles(env.DB) : null;
+  const satisfyCfg = opts.chargeNaming ? await loadSatisfyConfig(env.DB) : null;
 
   const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans FROM stadiums').all<StadiumRow>();
   // 设施等级一次批量查（青训级 → evolveFans 涨粉系数 ×(1+0.03n)，v6.6.3；草皮级 → 档期活动的收入加成与损坏减免，v6.9.0）
@@ -392,6 +431,9 @@ export async function windowHomeStatements(
   const pitchLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'pitch').map((r) => [r.club_id, r.level]));
   const tourMap = await tourTeamIdsByClub(env, stadiums.results.map((s) => s.club_id));
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
+  const notifications: PendingClubNotification[] = [];
+  const moodReports: import('./naming-ops.ts').SatisfactionReport[] = [];
+  const terminatedReports: import('./naming-ops.ts').SatisfactionReport[] = [];
   const summary: HomeWindowSummary = {
     maintenanceClubs: 0,
     maintenanceTotal: 0,
@@ -400,7 +442,15 @@ export async function windowHomeStatements(
     namingTotal: 0,
     activityClubs: 0,
     activityTotal: 0,
+    moodClubs: 0,
+    terminatedClubs: 0,
   };
+
+  // 档位自动校准（v6.13.0 C2）：常规窗批首跑一次（按校准时刻的热度排名；本批热度演化结果下窗生效）
+  if (opts.chargeNaming) {
+    const recal = await recalibrateTierStatements(env.DB);
+    statements.push(...recal.statements);
+  }
 
   for (const s of stadiums.results) {
     const tierEntry = tierTable[String(s.tier)];
@@ -434,12 +484,15 @@ export async function windowHomeStatements(
       );
     }
 
+    const naming = namingByClub.get(s.club_id) ?? null;
+    const profile = naming && profiles ? profiles[(brandTier.get(naming.brand) ?? '口碑') as BrandTier] : null;
+
     const influence = teamInfluence(s, await playerInfluenceSum(env, s.club_id, model));
     const target = diehardTarget(model, influence);
     // 战绩按 tour 队 id 查赛果表；目录无映射 → 中性 4（与「赛果不足 3 场」同口径）
     const tourTeamId = tourMap.get(s.club_id);
     const formPts = tourTeamId === undefined ? 4 : await clubFormPts(env, tourTeamId, 0);
-    const nextFans = evolveFans(model, s.fans, target, attendRate, formPts, youthLevels.get(s.club_id) ?? 0);
+    const nextFans = evolveFans(model, s.fans, target, attendRate, formPts, youthLevels.get(s.club_id) ?? 0, profile?.fansBuff ?? 0);
     // fan_mood 信号（v6.12.0 D3，插件 fans_service.evolve 同口径）：演化结果 ×(1+Σ/100) 后钳 [0, 上限]
     const mood = sig?.steps.fan_mood ?? 0;
     const nextFansWithMood = mood !== 0 ? Math.min(Math.max(nextFans * (1 + mood / 100), 0), model.fans_cap) : nextFans;
@@ -454,27 +507,43 @@ export async function windowHomeStatements(
 
     // 窗末冠名收租（v2.6.0）：费用 + 剩余窗口递减/到期 + 对赌奖金，幂等靠账本闸（club 维度）；
     // 临时窗不收租也不递减（v3.0.0 裁决）
-    if (opts.chargeNaming) {
-      const naming = await getActiveNaming(env.DB, s.club_id);
-      if (naming) {
-        const fansGrowth = s.fans > 0 ? (nextFansWithMood - s.fans) / s.fans : 0;
-        statements.push(
-          ...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth, { feeFactor: sig?.mults.fee_mod ?? 1 }),
-        );
-        summary.namingClubs++;
-        summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
-        // 品牌热度动态（v6.8.0）：本队近 3 场全胜/全败调 brand_pool.heat（目录无映射的队跳过）
-        if (tourTeamId !== undefined) {
-          const heatStmt = await windowBrandHeatStatement(env, naming, tourTeamId);
-          if (heatStmt) statements.push(heatStmt);
+    if (opts.chargeNaming && naming) {
+      const fansGrowth = s.fans > 0 ? (nextFansWithMood - s.fans) / s.fans : 0;
+      statements.push(
+        ...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth, { feeFactor: sig?.mults.fee_mod ?? 1 }),
+      );
+      summary.namingClubs++;
+      summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
+      // 品牌热度动态（v6.8.0）：本队近 3 场全胜/全败调 brand_pool.heat（目录无映射的队跳过）
+      if (tourTeamId !== undefined) {
+        const heatStmt = await windowBrandHeatStatement(env, naming, tourTeamId);
+        if (heatStmt) statements.push(heatStmt);
+      }
+      // 品牌方情绪两信号演化（v6.13.0 C2）：收租语句在前（本窗到期的合同先 expire，演化按 status='active'
+      // 守卫自然跳过）；本窗之后仍存活的合同才演化（剩 1 窗本窗到期，情绪步进无意义）。
+      if (profile && satisfyCfg && naming.windows_remaining > 1) {
+        // 上座信号按「有无主场场次」定（无场次中性 0，不借中性上座率 1.0 白拿达标）
+        const sAttend = played > 0 ? (attendRate >= profile.goodAttend ? 1 : attendRate <= profile.badAttend ? -1 : 0) : 0;
+        const evolution = await evolveSatisfactionForClub(env, naming, tourTeamId, season, windowSeq, sAttend, profile, satisfyCfg);
+        statements.push(...evolution.statements);
+        const rep = evolution.report;
+        if (rep.to !== rep.from) {
+          summary.moodClubs++;
+          moodReports.push(rep);
+        }
+        if (rep.terminated) {
+          summary.terminatedClubs++;
+          terminatedReports.push(rep);
         }
       }
     }
 
-    // 档期活动结算（v6.9.0）：本窗已订档位的收入与草皮损坏（确定性伪随机；无订单则零开销）
+    // 档期活动结算（v6.9.0）：本窗已订档位的收入与草皮损坏（确定性伪随机；无订单则零开销）；
+    // attendBuff = 生效冠名品牌档位的活动收入加成（v6.13.0 C2，头部 +2%）
     const activity = await windowActivityStatements(env, s.club_id, season, windowSeq, activityCatalog, {
       pitch: pitchLevels.get(s.club_id) ?? 0,
       youth: youthLevels.get(s.club_id) ?? 0,
+      attendBuff: profile?.attendBuff ?? 0,
     });
     if (activity.statements.length > 0) {
       statements.push(...activity.statements);
@@ -485,5 +554,44 @@ export async function windowHomeStatements(
   // 经营信号注记（v6.12.0 D3）：给本窗有非中性信号的队各排一条通知（本仓没有关窗汇总通知，
   // 教练感知面 = 这条通知 + 维护费/冠名费流水 memo 里的信号说明）
   await queueWindowSignalNotes(env, season, windowSeq, signalDefs);
-  return { statements, summary };
+  // 情绪变化 / 品牌解约通知（v6.13.0 C2）：批后由调用方排队（批回滚则不发）
+  const affected = [...new Set([...moodReports, ...terminatedReports].map((r) => r.clubId))];
+  if (affected.length > 0) {
+    const clubRows = (
+      await env.DB
+        .prepare(`SELECT id, name FROM clubs WHERE id IN (${affected.map(() => '?').join(',')})`)
+        .bind(...affected)
+        .all<{ id: number; name: string }>()
+    ).results;
+    const nameOf = (id: number) => clubRows.find((c) => c.id === id)?.name ?? `俱乐部${id}`;
+    const sigText = (v: number, pos: string, neg: string) => (v > 0 ? pos : v < 0 ? neg : '持平');
+    for (const rep of moodReports) {
+      notifications.push({
+        clubId: rep.clubId,
+        template: 'naming_mood',
+        data: {
+          club: nameOf(rep.clubId),
+          brand: rep.brand,
+          from: rep.from.toFixed(2),
+          to: rep.to.toFixed(2),
+          reason: `上座${sigText(rep.attendSignal, '达标', '低迷')}，战绩${sigText(rep.resultSignal, '走高', '走低')}，${rep.delta >= 0 ? '+' : ''}${rep.delta.toFixed(3)}`,
+        },
+      });
+    }
+    for (const rep of terminatedReports) {
+      const profile = profiles?.[(brandTier.get(rep.brand) ?? '口碑') as BrandTier];
+      notifications.push({
+        clubId: rep.clubId,
+        template: 'naming_terminated',
+        data: {
+          club: nameOf(rep.clubId),
+          brand: rep.brand,
+          satisfaction: rep.to.toFixed(2),
+          tier: brandTier.get(rep.brand) ?? '口碑',
+          floor: (profile?.satisfyFloor ?? 0.5).toFixed(2),
+        },
+      });
+    }
+  }
+  return { statements, summary, notifications };
 }

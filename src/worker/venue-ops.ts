@@ -4,7 +4,7 @@
 // —— 草皮损坏**刻意不共用**基础维护费的 ('maintenance','window',season*100+windowSeq) 闸，防两条流水互吞。
 // 本仓无插件那套 window_summaries 强制重算（redo），所以随机数改成**确定性伪随机**：
 // 同 (队, 赛季, 窗, 槽, 用途) 逐字恒定，关窗批重跑不漂移（幂等最终仍由账本闸兜住）。
-// 不做（登记）：开放日的 fans_pct 死忠加成（插件本身也未实现）、品牌档位 attend_buff（缓议 C2）。
+// 不做（登记）：开放日的 fans_pct 死忠加成（插件本身也未实现）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
@@ -126,7 +126,8 @@ export interface ActivityRolls {
 /**
  * 档期结算（纯函数，插件 activity_income 口径）：
  * 区间型收入 uniform(min,max)；草皮损坏概率 ×(1 − 0.15×草皮级) 后判定，损坏额 uniform(damage_min,damage_max)；
- * 演唱会收入 ×(1 + 0.1×草皮级)（**在损坏判定之后**，与插件同序）；青训夏令营 ×(1 + 系数×青训级)。
+ * 演唱会收入 ×(1 + 0.1×草皮级)（**在损坏判定之后**，与插件同序）；青训夏令营 ×(1 + 系数×青训级)；
+ * 品牌档位 attend_buff 最后乘（v6.13.0 C2，插件 window_service income×(1+attend_buff) 同口径；默认 0 与原行为一致）。
  */
 export function activityIncome(
   def: ActivityDef,
@@ -134,6 +135,7 @@ export function activityIncome(
   pitchLevel: number,
   youthLevel: number,
   rolls: ActivityRolls,
+  attendBuff = 0,
 ): { income: number; extraMaintenance: number } {
   let income = def.incomeMin !== null && def.incomeMax !== null ? def.incomeMin + rolls.income * (def.incomeMax - def.incomeMin) : (def.income ?? 0);
   let extra = 0;
@@ -143,6 +145,7 @@ export function activityIncome(
   }
   if (activityType === 'concert') income *= 1 + PITCH_CONCERT_BOOST_PER_LEVEL * pitchLevel;
   if (activityType === 'youth_camp') income *= 1 + def.youthLevelFactor * youthLevel;
+  if (attendBuff !== 0) income *= 1 + attendBuff;
   return { income: Math.round(income * 1000) / 1000, extraMaintenance: Math.round(extra * 1000) / 1000 };
 }
 
@@ -153,6 +156,7 @@ export function bookingSettlement(
   catalog: ActivityCatalog,
   pitchLevel: number,
   youthLevel: number,
+  attendBuff = 0,
 ): { statements: ReturnType<Env['DB']['prepare']>[]; income: number; extraMaintenance: number } {
   const def = catalog.types[row.activity_type];
   if (!def) return { statements: [], income: 0, extraMaintenance: 0 };
@@ -162,7 +166,7 @@ export function bookingSettlement(
     damage: seededUnit(seed, 1),
     damageRoll: seededUnit(seed, 2),
   };
-  const { income, extraMaintenance } = activityIncome(def, row.activity_type, pitchLevel, youthLevel, rolls);
+  const { income, extraMaintenance } = activityIncome(def, row.activity_type, pitchLevel, youthLevel, rolls, attendBuff);
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
   if (income !== 0) {
     statements.push(
@@ -172,7 +176,7 @@ export function bookingSettlement(
         kind: 'activity',
         refType: 'booking',
         refId: row.id,
-        memo: `${def.name}（S${row.season} 第 ${row.window_seq} 窗 ${row.slot_no} 号档期）`,
+        memo: `${def.name}（S${row.season} 第 ${row.window_seq} 窗 ${row.slot_no} 号档期${attendBuff !== 0 ? `，品牌档位加成 ×${(1 + attendBuff).toFixed(2)}` : ''}）`,
       }),
     );
   }
@@ -191,21 +195,22 @@ export function bookingSettlement(
   return { statements, income, extraMaintenance };
 }
 
-/** 本队本窗全部档位的结算流水（关窗批用）；返回合计便于汇总。 */
+/** 本队本窗全部档位的结算流水（关窗批用）；返回合计便于汇总。
+ *  levels.attendBuff = 生效冠名品牌的档位活动收入加成（v6.13.0 C2，头部 +2%；缺省 0 与原行为一致）。 */
 export async function windowActivityStatements(
   env: Env,
   clubId: number,
   season: number,
   windowSeq: number,
   catalog: ActivityCatalog,
-  levels: { pitch: number; youth: number },
+  levels: { pitch: number; youth: number; attendBuff?: number },
 ): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; income: number; extraMaintenance: number; slots: number }> {
   const rows = await listBookings(env.DB, clubId, season, windowSeq);
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
   let income = 0;
   let extraMaintenance = 0;
   for (const row of rows) {
-    const out = bookingSettlement(env, row, catalog, levels.pitch, levels.youth);
+    const out = bookingSettlement(env, row, catalog, levels.pitch, levels.youth, levels.attendBuff ?? 0);
     statements.push(...out.statements);
     income = Math.round((income + out.income) * 1000) / 1000;
     extraMaintenance = Math.round((extraMaintenance + out.extraMaintenance) * 1000) / 1000;

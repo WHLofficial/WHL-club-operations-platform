@@ -110,7 +110,7 @@ describe('底价与三套餐（纯函数，formula.py:462 / build_packages 口�
     expect(industryFactor(factors, '不存在行业')).toBe(1.0);
     // 亚马逊（科技 1.3）：namingBaseFee 1.711 × 1.3 = 2.2243 → 2.224
     const pool = [
-      { id: 1, brand: '亚马逊', heat: 1.3, source: 'builtin', status: 'adopted', industry: '科技', created_at: 'x' },
+      { id: 1, brand: '亚马逊', heat: 1.3, source: 'builtin', status: 'adopted', industry: '科技', tier: '头部', tier_locked: 0, created_at: 'x' },
     ];
     const quotes = quoteBrands(PARAMS, pool, 20000, 18000, factors);
     expect(quotes[0]!.baseFee).toBe(2.224);
@@ -313,7 +313,7 @@ describe('续约（v6.8.0：剩最后 1 窗按当期队况重算，插件 renew 
 });
 
 describe('品牌热度动态（近 3 场全胜/全败，v6.8.0）', () => {
-  const RULES: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5 };
+  const RULES: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 };
   const r = (h: number | null, a: number | null, extra: Record<string, unknown> = {}) => ({
     home_team_id: 9001, away_team_id: 9002, score_home: h, score_away: a, walkover_side: null, ...extra,
   });

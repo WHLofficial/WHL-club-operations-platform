@@ -898,7 +898,7 @@ describe('occurrence 状态闸：整批重放安全', () => {
       { money: 5, fans_pct: 0.03, build_credit: 2, attendance_mod: 0.9 },
       {
         clamps: EVENT_CLAMPS_DEFAULT,
-        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5 },
+        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 },
         weatherKeys: new Set(['晴', '多云', '雨', '雪']),
         catalog: null,
         openWindow: { season: 1, windowSeq: 1 },
@@ -928,7 +928,7 @@ describe('occurrence 状态闸：整批重放安全', () => {
       { money: 4 },
       {
         clamps: EVENT_CLAMPS_DEFAULT,
-        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5 },
+        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 },
         weatherKeys: new Set(['晴', '多云', '雨', '雪']),
         catalog: null,
         openWindow: null,
