@@ -40,6 +40,12 @@
 
 **生效面**：迁移 apply + push 后——玩家（教练）在球队中心能看到待选事件并选定，逾期由 cron 按资金最差自动结算并广播回执，距时限 24h 收到提醒。
 
+**后续（详见 `ROADMAP.md` 同名节「下一步（待令）」）**：
+- 发布需单独授权：先 apply `0045`–`0050` 到生产（现停在 `0044`），再 push；本地领先 `origin/main`（`68fc154`）**13 个提交**（A / B / C1 / E / D1 / D2 六块）。
+- D3（v6.12.0）：`satisfaction` / `signals` / `offer_spawn` 三类消费端落库 + LLM 文案（仅管理端生成 + 落库审校）+ 种子池扩到 ~30；一并评估超时残行终态化与 `expired` 语义、选择型占比 ~77% 是否设待选上限、空 options 窄口、视图分页口径。
+- 待确认（跨仓）：`event_resolved` / `event_deadline` 模板名是否被插件按白名单拒收。
+- 更远：C2 冠名深度（满意度三信号 / 品牌主动解约 / 档位性格）、C3 招商轮。
+
 ## [v6.10.0] · D1 随机事件域：事件池 + 管理端触发 + 11 键效果即时结算（2026-09-28）
 
 差异排期 D 块第一块（参考 AstrBot 插件 `event_engine.py` / `event_effects.py` 搬到本仓）。含迁移 `0047_event_pool.sql` / `0048_event_occurrences.sql` / `0049_stadium_event_pending.sql`——**本地已提交未 push**，push 前须连同 `0045`/`0046` 一起 apply 到生产。
