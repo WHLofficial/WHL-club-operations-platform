@@ -68,6 +68,7 @@ export const CONFIG_KEYS = [
   'activity_config',
   'event_rules',
   'event_clamps',
+  'event_signals',
   'results_auto_confirm',
   'review_amount_threshold',
   'bid_pattern_alert',
@@ -180,7 +181,15 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   // 与效果钳幅（money/fans_pct/maintenance/brand_heat/build_credit/influence/booking_cancel）
   // —— 插件 event_hit_probability / event_max_occurrences / event_soft_condition_factor / event_*_clamp 同值。
   event_rules: JSON.stringify({ hitProbability: 0.4, maxPerClub: 1, maxOccurrences: 2, softConditionFactor: 0.25, choiceDeadlineHours: 72 }),
-  event_clamps: JSON.stringify({ money: 8, fansPct: 0.05, maintenance: 5, brandHeat: 0.3, buildCredit: 5, influence: 10, bookingCancel: 2 }),
+  event_clamps: JSON.stringify({ money: 8, fansPct: 0.05, maintenance: 5, brandHeat: 0.3, buildCredit: 5, influence: 10, bookingCancel: 2, satisfaction: 0.5 }),
+  // v6.12.0 D3 经营信号三键（插件 event_effects.py SIGNAL_DEFAULTS 同值）：
+  // fan_mood 步进（求和，单值钳 ±clamp）→ 死忠演化 ×(1+Σ/100)；upkeep / fee_mod 乘数（连乘后钳 [low,high]）
+  // → 维护费 / 冠名费。label 供注记与流水展示。
+  event_signals: JSON.stringify({
+    fan_mood: { label: '粉丝情绪', type: 'step', clamp: 2.0 },
+    upkeep: { label: '维护负担', type: 'mult', low: 0.5, high: 2.0 },
+    fee_mod: { label: '冠名费', type: 'mult', low: 0.5, high: 2.0 },
+  }),
   // v2.7.0 赛果自动化：cron 每 5 分钟自动确认完赛场次（异常场标人工复核）
   results_auto_confirm: 'on',
   xp_per_level: '10',

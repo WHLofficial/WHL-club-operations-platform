@@ -13,12 +13,16 @@ import {
   ATTENDANCE_MOD_MIN,
   EVENT_CLAMPS_DEFAULT,
   EVENT_RULES_DEFAULT,
+  EVENT_SIGNALS_DEFAULT,
   applyEventEffects,
+  cleanSignals,
+  collectWindowSignals,
   conditionOk,
   lastResultOf,
   loadEventClamps,
   loadEventContexts,
   loadEventPool,
+  loadEventSignals,
   loadEventRules,
   pickEvent,
   renderEventText,
@@ -120,6 +124,18 @@ function openWindow(sqlite: DatabaseSync) {
     .run();
 }
 
+/** 把教练账号（userId）绑到 clubId：让通知落得下来（AUTH_DB team_binding → 本地 qq_links） */
+function bindAccount(fx: Fixture, clubId: number, userId: number, qq = '') {
+  const team = fx.auth.prepare('SELECT id FROM team WHERE club_id = ?').get(clubId) as { id: number } | undefined;
+  if (!team) throw new Error(`club ${clubId} 没有 auth team 行`);
+  fx.auth
+    .prepare(`INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES (?, ?, 'web', '2026-01-01T00:00:00Z')`)
+    .run(userId, team.id);
+  if (qq !== '') {
+    fx.sqlite.prepare(`INSERT INTO qq_links (user_id, qq, verified_at) VALUES (?, ?, '2026-01-01T00:00:00Z')`).run(userId, qq);
+  }
+}
+
 /** 插一条自定义即发型事件（source='custom'，便于逐键验证效果） */
 function addEvent(
   sqlite: DatabaseSync,
@@ -171,6 +187,8 @@ function ctxOf(patch: Partial<EventClubContext> = {}): EventClubContext {
     balance: 50,
     facilities: new Map<string, number>(),
     brand: null,
+    namingId: null,
+    satisfaction: null,
     activities: [],
     lastResult: null,
     tourTeamId: 11,
@@ -188,20 +206,30 @@ async function fireNamed(fx: Fixture, eventId: string, effects: Record<string, u
 beforeEach(() => resetConfigCache());
 
 describe('事件池种子（迁移 0047，插件 DEFAULT_EVENTS 逐字同）', () => {
-  it('24 条 = 6 即发型 + 18 选择型；即发型名单与 storm_buzz 效果一致', async () => {
+  it('30 条 = 8 即发型 + 22 选择型（0047 的 24 + 0052 新种子 6）；即发型名单与 storm_buzz 效果一致', async () => {
     const fx = freshEnv();
     const pool = await loadEventPool(fx.env.DB);
-    expect(pool).toHaveLength(24);
+    expect(pool).toHaveLength(30);
     const instant = pool.filter((r) => r.event_type === 'instant');
-    expect(instant.map((r) => r.event_id)).toEqual(['storm_buzz', 'tifo_viral', 'bad_press', 'relic_found', 'subsidy', 'security_break']);
+    expect(instant.map((r) => r.event_id)).toEqual([
+      'storm_buzz', 'tifo_viral', 'bad_press', 'relic_found', 'subsidy', 'security_break', 'legend_visit', 'sponsor_audit',
+    ]);
     expect(JSON.parse(instant[0]!.effects_json)).toEqual({ attendance_mod: 0.85 });
     expect(instant.every((r) => r.source === 'builtin' && r.status === 'adopted' && r.soft_conditions === 0)).toBe(true);
     // 选择型带选项表，且 requires_naming / requires_activity 条件落在冠名/档期联动那几条上
     const choice = pool.filter((r) => r.event_type === 'choice');
-    expect(choice).toHaveLength(18);
+    expect(choice).toHaveLength(22);
     expect(choice.every((r) => (JSON.parse(r.options_json) as unknown[]).length >= 2)).toBe(true);
     expect(JSON.parse(choice.find((r) => r.event_id === 'brand_crisis')!.conditions_json)).toEqual({ requires_naming: true });
     expect(JSON.parse(choice.find((r) => r.event_id === 'guest_ghost')!.conditions_json)).toEqual({ requires_activity: 'concert' });
+    // v6.12.0（D3）：新种子覆盖 satisfaction / signals；0047 存量补丁也带上了（未 apply 前的直接编辑）
+    expect(choice.find((r) => r.event_id === 'adboard_row')!.options_json).toContain('satisfaction');
+    expect(choice.find((r) => r.event_id === 'brand_crisis')!.options_json).toContain('satisfaction');
+    expect(choice.find((r) => r.event_id === 'brand_anniv')!.options_json).toContain('satisfaction');
+    const withSignals = pool.filter((r) => r.effects_json.includes('signals') || r.options_json.includes('signals'));
+    expect(withSignals.map((r) => r.event_id)).toEqual(
+      expect.arrayContaining(['legend_visit', 'sponsor_audit', 'tifo_viral', 'bad_press', 'new_wave', 'merch_hit', 'scalper_raid', 'food_fest', 'derby_buzz']),
+    );
   });
 
   it('种子句重跑幂等（INSERT OR IGNORE 不重复）', async () => {
@@ -211,11 +239,11 @@ describe('事件池种子（迁移 0047，插件 DEFAULT_EVENTS 逐字同）', (
          soft_conditions, template, source, status, created_at)
        VALUES ('storm_buzz', '暴雨滂沱', '天气衍生', 8, 'instant', '{}', '{"attendance_mod":0.85}', '[]', 0, 'x', 'builtin', 'adopted', '2026-01-01T00:00:00Z')`,
     );
-    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM event_pool`)!.n).toBe(24);
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM event_pool`)!.n).toBe(30);
   });
 });
 
-describe('规则与钳幅配置（config event_rules / event_clamps）', () => {
+describe('规则与钳幅配置（config event_rules / event_clamps / event_signals）', () => {
   it('缺行回默认；非法/越界字段逐字段回落并按界钳制', async () => {
     const fx = freshEnv();
     expect(await loadEventRules(fx.env.DB)).toEqual(EVENT_RULES_DEFAULT);
@@ -228,6 +256,7 @@ describe('规则与钳幅配置（config event_rules / event_clamps）', () => {
       maxOccurrences: 20, // 越界钳到 20
       softConditionFactor: 0, // 越界钳到 0
       choiceDeadlineHours: EVENT_RULES_DEFAULT.choiceDeadlineHours, // 非数字回落默认
+      maxPending: EVENT_RULES_DEFAULT.maxPending, // 缺字段回落默认
     });
 
     // 钳幅一律取绝对值（负值抬 0 由效果侧处理）
@@ -236,6 +265,17 @@ describe('规则与钳幅配置（config event_rules / event_clamps）', () => {
     expect(clamps.money).toBe(9);
     expect(clamps.fansPct).toBe(0.02);
     expect(clamps.maintenance).toBe(EVENT_CLAMPS_DEFAULT.maintenance);
+    expect(clamps.satisfaction).toBe(EVENT_CLAMPS_DEFAULT.satisfaction);
+  });
+
+  it('maxPending 可覆盖（0 = 不限）；event_signals 定义可覆盖 label 与钳幅', async () => {
+    const fx = freshEnv();
+    overrideConfig(fx.sqlite, 'event_rules', { maxPending: 0 });
+    expect((await loadEventRules(fx.env.DB)).maxPending).toBe(0);
+    overrideConfig(fx.sqlite, 'event_signals', { fan_mood: { label: '舆情', type: 'step', clamp: 1 } });
+    const defs = await loadEventSignals(fx.env.DB);
+    expect(defs.fan_mood).toEqual({ label: '舆情', type: 'step', clamp: 1 });
+    expect(defs.upkeep).toEqual(EVENT_SIGNALS_DEFAULT.upkeep); // 未覆盖键回落默认
   });
 });
 
@@ -774,22 +814,52 @@ describe('11 键效果与钳幅（点名触发逐键验证）', () => {
     expect(noWin.event.notes).toEqual(['赠档 演唱会（现在没有开着的窗口，落空）']);
   });
 
-  it('satisfaction / signals / offer_spawn：v6.10.0 只播报不落库', async () => {
+  it('satisfaction：落 naming_contracts（钳 ±0.5、[0,2]、PENDING_GUARD），无冠名落空', async () => {
     const fx = freshEnv();
     seedClub(fx.auth, fx.sqlite, 1, 11);
-    const res = await fireNamed(fx, 'later_ev', {
-      satisfaction: -0.1,
-      signals: { upkeep: 1.2, fee_mod: 0.9, fan_mood: 2 },
+    // 无冠名：播报落空，不写库
+    const none = await fireNamed(fx, 'sat_none', { satisfaction: -0.4 });
+    expect(none.event.notes).toEqual(['品牌方情绪 -0.40（本队没有生效冠名，落空）']);
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM naming_contracts`)!.n).toBe(0);
+
+    // 有生效冠名：累加进 satisfaction，钳 [0,2]
+    fx.sqlite.exec(
+      `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
+         windows_total, windows_remaining, status, started_season, started_window, created_at, updated_at, satisfaction)
+       VALUES (1, '可口可乐', 1.0, 2.0, 1, '稳健', 2.0, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1.8)`,
+    );
+    const up = await fireNamed(fx, 'sat_up', { satisfaction: 0.5 });
+    expect(up.event.notes).toEqual(['品牌方情绪 +0.50']);
+    expect(up.event.effects).toEqual({ satisfaction: 0.5 });
+    expect(sqlGet<{ satisfaction: number }>(fx.sqlite, `SELECT satisfaction FROM naming_contracts WHERE club_id = 1`)!.satisfaction).toBeCloseTo(2.0, 6); // 1.8+0.5 钳到 2
+
+    const down = await fireNamed(fx, 'sat_down', { satisfaction: -0.3 });
+    expect(sqlGet<{ satisfaction: number }>(fx.sqlite, `SELECT satisfaction FROM naming_contracts WHERE club_id = 1`)!.satisfaction).toBeCloseTo(1.7, 6);
+    void down;
+  });
+
+  it('signals：按 event_signals 清洗（未知名丢弃、step 对称钳、mult 区间钳、0 丢弃）后入 effects_json', async () => {
+    const fx = freshEnv();
+    seedClub(fx.auth, fx.sqlite, 1, 11);
+    const res = await fireNamed(fx, 'sig_ev', {
+      signals: { upkeep: 1.5, fan_mood: 9, fee_mod: 0.2, 未知信号: 3, bad_key: 0 },
       offer_spawn: { count: 2 },
     });
-    expect(res.event.effects).toMatchObject({ satisfaction: -0.1, signals: { upkeep: 1.2, fee_mod: 0.9, fan_mood: 2 }, offer_spawn: { count: 2 } });
-    expect(res.event.notes).toEqual([
-      '品牌满意度 -0.10（v6.12.0 落库，本次只播报）',
-      '经营信号 {"upkeep":1.2,"fee_mod":0.9,"fan_mood":2}（v6.12.0 接入消费点，本次只播报）',
-      '上门报价 {"count":2}（v6.12.0 生成限时冠名报价，本次只播报）',
-    ]);
-    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries`)!.n).toBe(0);
-    expect(sqlGet<{ fans: number; build_credit: number }>(fx.sqlite, `SELECT fans, build_credit FROM stadiums WHERE club_id = 1`)).toEqual({ fans: 1800, build_credit: 0 });
+    expect(res.event.effects).toEqual({ signals: { upkeep: 1.5, fan_mood: 2, fee_mod: 0.5 } });
+    expect(res.event.notes).toEqual(['经营信号 维护负担 ×1.5、粉丝情绪 +2.00、冠名费 ×0.5', '当前无开放招商轮次，品牌上门落空']);
+    // 全部不可识别 → 落空
+    const empty = await fireNamed(fx, 'sig_empty', { signals: { 未知: 1 } });
+    expect(empty.event.notes).toEqual(['经营信号（没有可识别的信号键，落空）']);
+  });
+
+  it('cleanSignals 纯函数：mult 钳区间、step 钳对称、空表回 null', () => {
+    expect(cleanSignals({ fan_mood: -9, upkeep: 0.1, fee_mod: 5 }, EVENT_SIGNALS_DEFAULT)).toEqual({
+      fan_mood: -2,
+      upkeep: 0.5,
+      fee_mod: 2,
+    });
+    expect(cleanSignals({}, EVENT_SIGNALS_DEFAULT)).toBeNull();
+    expect(cleanSignals('bad', EVENT_SIGNALS_DEFAULT)).toBeNull();
   });
 
   it('未知效果键只记备注，不影响同批其它键', async () => {
@@ -832,6 +902,7 @@ describe('occurrence 状态闸：整批重放安全', () => {
         weatherKeys: new Set(['晴', '多云', '雨', '雪']),
         catalog: null,
         openWindow: { season: 1, windowSeq: 1 },
+        signalDefs: EVENT_SIGNALS_DEFAULT,
       },
     );
     await fx.env.DB.batch(run.statements);
@@ -861,6 +932,7 @@ describe('occurrence 状态闸：整批重放安全', () => {
         weatherKeys: new Set(['晴', '多云', '雨', '雪']),
         catalog: null,
         openWindow: null,
+        signalDefs: EVENT_SIGNALS_DEFAULT,
       },
     );
     await fx.env.DB.batch(again.statements);
@@ -975,7 +1047,7 @@ describe('管理端事件路由（v6.10.0）', () => {
     const list = await getAs('/api/admin/events/pool', fx.env, 'whl_session=tok-admin');
     expect(list.status).toBe(200);
     const body = (await list.json()) as { events: { id: number; event_id: string; status: string }[] };
-    expect(body.events).toHaveLength(24);
+    expect(body.events).toHaveLength(30);
 
     const id = body.events.find((e) => e.event_id === 'storm_buzz')!.id;
     const off = await send('PATCH', `/api/admin/events/pool/${id}`, fx.env, { status: 'discarded' });
@@ -1056,5 +1128,130 @@ describe('管理端事件路由（v6.10.0）', () => {
     expect((await send('POST', '/api/admin/events/trigger', fx.env, {}, 'whl_session=tok-coach')).status).toBe(403);
     expect((await getAs('/api/admin/events/pool', fx.env, '')).status).toBe(401);
     expect((await getAs('/api/admin/events/occurrences', fx.env, '')).status).toBe(401);
+  });
+});
+
+// ---- v6.12.0（D3）：待选上限 / expired 终态 / 经营信号收集 ----
+
+describe('D3 同队待选上限（maxPending，默认 3）', () => {
+  function addChoice(sqlite: DatabaseSync, eventId: string) {
+    sqlite
+      .prepare(
+        `INSERT INTO event_pool (event_id, name, category, weight, event_type, conditions_json, effects_json, options_json,
+                                 soft_conditions, template, source, status, created_at)
+         VALUES (?, ?, '测试', 10, 'choice', '{}', '{}', '[{"no":1,"name":"a","desc":"","outcomes":[{"w":1,"effects":{"money":1}}]},{"no":2,"name":"b","desc":"","outcomes":[{"w":1,"effects":{"money":-1}}]}]', 0, 'x', 'custom', 'adopted', '2026-01-01T00:00:00Z')`,
+      )
+      .run(eventId, `事件${eventId}`);
+  }
+
+  it('点名触发：待选已满回 409；未满可继续，触发后计数 +1', async () => {
+    const fx = freshEnv();
+    seedClub(fx.auth, fx.sqlite, 1, 11);
+    addChoice(fx.sqlite, 'cap_ev');
+    // 预置 3 条待选（上限 3）
+    for (let i = 0; i < 3; i++) {
+      fx.sqlite
+        .prepare(
+          `INSERT INTO event_occurrences (club_id, season, window_seq, event_id, event_name, event_type, status, effects_json, notes_json, choice_no, outcome_json, deadline_at, resolved_by, resolved_at, text, created_at)
+           VALUES (1, 1, 1, 'cap_ev', '事件', 'choice', 'pending', '{}', '[]', NULL, '{}', '2026-07-01T00:00:00Z', '', NULL, 'x', '2026-01-01T00:00:00Z')`,
+        )
+        .run();
+    }
+    await expect(
+      triggerEventBatch(fx.env, { season: 1, windowSeq: 1, actor: 2, origin: 'user', clubIds: [1], eventId: 'cap_ev' }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('随机抽取：达上限的队跳过（计 capped），即发型不受影响', async () => {
+    const fx = freshEnv();
+    seedClub(fx.auth, fx.sqlite, 1, 11);
+    onlyCustom(fx.sqlite);
+    addChoice(fx.sqlite, 'cap_choice');
+    addEvent(fx.sqlite, 'cap_instant', { money: 1 });
+    for (let i = 0; i < 3; i++) {
+      fx.sqlite
+        .prepare(
+          `INSERT INTO event_occurrences (club_id, season, window_seq, event_id, event_name, event_type, status, effects_json, notes_json, choice_no, outcome_json, deadline_at, resolved_by, resolved_at, text, created_at)
+           VALUES (1, 1, 1, 'cap_choice', '事件', 'choice', 'pending', '{}', '[]', NULL, '{}', '2026-07-01T00:00:00Z', '', NULL, 'x', '2026-01-01T00:00:00Z')`,
+        )
+        .run();
+    }
+    // rng 恒 0.1 < 0.4 命中，pickEvent 单候选时选 choice → 达上限跳过
+    const res = await triggerEventBatch(fx.env, { season: 1, windowSeq: 1, actor: 2, origin: 'user', clubIds: [1], eventId: undefined, rng: () => 0.1 });
+    expect(res.triggered).toBe(0);
+    expect(res.capped).toBe(1);
+  });
+});
+
+describe('D3 经营信号收集与关窗消费', () => {
+  it('collectWindowSignals：step 求和、mult 连乘后终钳，只认 resolved/expired 的归档窗', async () => {
+    const fx = freshEnv();
+    seedClub(fx.auth, fx.sqlite, 1, 11);
+    const insert = (status: string, season: number, windowSeq: number, effects: Record<string, unknown>) =>
+      fx.sqlite
+        .prepare(
+          `INSERT INTO event_occurrences (club_id, season, window_seq, event_id, event_name, event_type, status, effects_json, notes_json, choice_no, outcome_json, deadline_at, resolved_by, resolved_at, text, created_at)
+           VALUES (1, ?, ?, 'sig_ev', '事件', 'instant', ?, ?, '[]', NULL, '{}', NULL, '', NULL, 'x', '2026-01-01T00:00:00Z')`,
+        )
+        .run(season, windowSeq, status, JSON.stringify(effects));
+    insert('resolved', 1, 1, { signals: { fan_mood: 2, upkeep: 1.5 } });
+    insert('expired', 1, 1, { signals: { fan_mood: 1.5, upkeep: 1.5, fee_mod: 0.4 } });
+    insert('resolved', 1, 2, { signals: { fan_mood: 9 } }); // 别的窗
+    insert('pending', 1, 1, { signals: { fan_mood: 9 } }); // 未结算不算
+
+    const map = await collectWindowSignals(fx.env.DB, 1, 1);
+    const sig = map.get(1)!;
+    expect(sig.steps.fan_mood).toBe(3.5);
+    expect(sig.mults.upkeep).toBe(2); // 1.5×1.5=2.25 终钳 [0.5,2]
+    expect(sig.mults.fee_mod).toBe(0.5); // 0.4 终钳下界
+  });
+
+  it('关窗批消费：维护费 ×upkeep（memo 带注记）、死忠 ×(1+mood/100)、冠名费 ×fee_mod（memo 带注记）+ 通知', async () => {
+    const fx = freshEnv();
+    seedClub(fx.auth, fx.sqlite, 1, 11);
+    bindAccount(fx, 1, 1);
+    openWindow(fx.sqlite);
+    fx.sqlite
+      .prepare(
+        `INSERT INTO event_occurrences (club_id, season, window_seq, event_id, event_name, event_type, status, effects_json, notes_json, choice_no, outcome_json, deadline_at, resolved_by, resolved_at, text, created_at)
+         VALUES (1, 1, 1, 'sig_ev', '事件', 'instant', 'resolved', ?, '[]', NULL, '{}', NULL, '', NULL, 'x', '2026-01-01T00:00:00Z')`,
+      )
+      .run(JSON.stringify({ signals: { fan_mood: 2, upkeep: 1.5, fee_mod: 0.8 } }));
+    fx.sqlite.exec(
+      `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
+         windows_total, windows_remaining, status, started_season, started_window, created_at, updated_at)
+       VALUES (1, '可口可乐', 1.0, 2.0, 1, '稳健', 2.0, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+    );
+    // 抬高影响力让死忠朝目标增长（默认 0 影响力是流失方向，mood 乘数方向不好断言）
+    fx.sqlite.exec(`UPDATE stadiums SET shell_influence = 400 WHERE club_id = 1`);
+    // 死忠 = evolveFans(...) ×(1+2/100)：先取演化前的输入，跑完关窗批后与纯函数逐位对账
+    const home = await import('../src/worker/home.ts');
+    const model = await home.loadAttendanceModel(fx.env.DB);
+    const stadium = sqlGet<{ shell_influence: number; fans: number }>(fx.sqlite, `SELECT shell_influence, fans FROM stadiums WHERE club_id = 1`)!;
+
+    const { statements } = await home.windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
+    await fx.env.DB.batch(statements);
+
+    const maint = sqlGet<{ memo: string }>(
+      fx.sqlite,
+      `SELECT memo FROM ledger_entries WHERE kind = 'maintenance' AND ref_type = 'window'`,
+    )!;
+    expect(maint.memo).toContain('经营信号：维护负担 ×1.5');
+    const naming = sqlGet<{ memo: string; amount: number }>(
+      fx.sqlite,
+      `SELECT memo, amount FROM ledger_entries WHERE kind = 'naming_fee'`,
+    )!;
+    expect(naming.memo).toContain('经营信号：冠名费 ×0.8');
+    expect(naming.amount).toBeCloseTo(1.6, 3); // 2.0 × 0.8
+
+    const base = home.evolveFans(model, stadium.fans, home.diehardTarget(model, stadium.shell_influence), 1, 4, 0);
+    const fansAfter = sqlGet<{ fans: number }>(fx.sqlite, `SELECT fans FROM stadiums WHERE club_id = 1`)!.fans;
+    expect(fansAfter).toBeCloseTo(Math.min(base * 1.02, model.fans_cap), 6);
+
+    const notice = sqlGet<{ template: string; payload: string }>(
+      fx.sqlite,
+      `SELECT template, payload FROM notifications WHERE template = 'window_signals'`,
+    )!;
+    expect(JSON.parse(notice.payload).text).toContain('粉丝情绪 +2.00');
   });
 });

@@ -171,14 +171,22 @@ export { app };
 
 // 惰性结算统一入口（§6.5）：cron 与手动 tick 共用；幂等可重入。
 // origin 一律 'cron_tick'：两条入口都是机器触发（定时 cron / X-Cron-Key 手动 tick），没有人类行为人。
+// v6.12.0（D3）：兜底与通知补发各自 try/catch 隔离、兜底挪到通知之后——某一环挂了（典型：迁移
+// 未 apply 时 expirePendingEvents 引用新列抛 SQL 错）只影响那一环，不再连坐整个 tick 停摆。
+// 失败环节在返回值里标 error 供手动 tick 排查；tickChanged 不看 error（未执行 ≠ 变更）。
 async function runSettleTick(env: Env) {
   const summary = await settleOverdue(env, { origin: 'cron_tick' });
   // 赛果自动确认（v2.7.0）：完赛场次逐场入档，异常标人工；开关/上限在 results.ts
   const autoResults = await autoConfirmResults(env);
-  // 选择型事件兜底（v6.11.0，D2）：超时未选按净额最差结算 + 距时限 24h 提醒
-  const events = await expirePendingEvents(env);
   // bot 通知重试（§12）：失败留 pending，下轮再投
   const notify = await dispatchPendingNotifications(env);
+  // 选择型事件兜底（v6.11.0，D2）：超时未选按净额最差结算 + 距时限 24h 提醒（D3 起在通知之后跑）
+  let events: Awaited<ReturnType<typeof expirePendingEvents>> | { error: string };
+  try {
+    events = await expirePendingEvents(env);
+  } catch (err) {
+    events = { error: err instanceof Error ? err.message : String(err) };
+  }
   return { ok: true, ...summary, autoResults, events, notify };
 }
 
@@ -214,7 +222,7 @@ async function scheduledTick(_event: unknown, env: Env, _ctx: { waitUntil(p: Pro
     'club-settle-tick',
     async () => {
       const tick = await runSettleTick(env);
-      if (!tickChanged(tick, tick.events)) return;
+      if (!('expired' in tick.events) || !tickChanged(tick, tick.events)) return;
       await purgePublicCaches(env).catch(() => {});
     },
     { schedule: { type: 'crontab', value: '*/5 * * * *' }, checkinMargin: 2, maxRuntime: 5 },

@@ -323,7 +323,8 @@ export async function terminateNaming(
 }
 
 /** 窗末冠名结算语句（并入关窗批）：收租 + 剩余窗口递减 + 到期 + 对赌奖金，幂等靠账本闸。
- *  attendRate/fansGrowth 由调用方传入（windowHomeStatements 循环里现成）。 */
+ *  attendRate/fansGrowth 由调用方传入（windowHomeStatements 循环里现成）。
+ *  opts.feeFactor = fee_mod 经营信号乘数（v6.12.0 D3，连乘积已终钳；缺省 1 与原行为逐字一致）。 */
 export function windowNamingStatements(
   env: Env,
   row: NamingContractRow,
@@ -331,16 +332,20 @@ export function windowNamingStatements(
   windowSeq: number,
   attendRate: number,
   fansGrowth: number,
+  opts: { feeFactor?: number } = {},
 ): ReturnType<Env['DB']['prepare']>[] {
   const refId = season * 100 + windowSeq;
+  const feeFactor = opts.feeFactor ?? 1;
+  const fee = Math.round(row.fee_per_window * feeFactor * 1000) / 1000;
+  const feeNote = feeFactor !== 1 ? `，经营信号：冠名费 ×${feeFactor}` : '';
   const statements = [
     ...ledgerMovement(env.DB, {
       clubId: row.club_id,
-      delta: row.fee_per_window,
+      delta: fee,
       kind: 'naming_fee',
       refType: 'window',
       refId,
-      memo: `${row.brand} 冠名费（${row.pkg_name}套餐，剩 ${row.windows_remaining} 窗）`,
+      memo: `${row.brand} 冠名费（${row.pkg_name}套餐，剩 ${row.windows_remaining} 窗${feeNote}）`,
     }),
     env.DB
       .prepare(

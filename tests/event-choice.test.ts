@@ -217,6 +217,8 @@ function ctxOf(patch: Partial<EventClubContext> = {}): EventClubContext {
     balance: 50,
     facilities: new Map<string, number>(),
     brand: null,
+    namingId: null,
+    satisfaction: null,
     activities: [],
     lastResult: null,
     tourTeamId: 11,
@@ -418,7 +420,7 @@ describe('广播文案 renderChoiceText / 效果描述 describeEffects', () => {
     expect(lines[3]).toBe('5. 五号方案：100% 死忠 +5.0%');
   });
 
-  it('概率按权重归一（不是把原始 w 当百分数）；未落账的键带「v6.12.0 生效」标注', () => {
+  it('概率按权重归一（不是把原始 w 当百分数）；依赖 C3 的 offer_spawn 带「（C3 生效）」标注', () => {
     const event = { name: 'E', category: 'C', template: '' } as Parameters<typeof renderChoiceText>[0];
     const options = parseEventOptions(
       JSON.stringify([
@@ -434,10 +436,12 @@ describe('广播文案 renderChoiceText / 效果描述 describeEffects', () => {
       ]),
     );
     const lines = renderChoiceText(event, ctxOf(), options, 12).split('\n');
-    expect(lines[3]).toBe('① 含糊其辞：75% 资金 -1.0 m / 25% 资金 -2.0 m、品牌满意度 +0.15（v6.12.0 生效）');
-    // 展示侧才标注：结算备注（describeEffects 默认口径）保持原样
-    expect(describeEffects({ satisfaction: 0.15 })).toBe('品牌满意度 +0.15');
-    expect(describeEffect('satisfaction', 0.15, true)).toBe('品牌满意度 +0.15（v6.12.0 生效）');
+    // v6.12.0（D3）起 satisfaction 真落库，不再带待生效标注
+    expect(lines[3]).toBe('① 含糊其辞：75% 资金 -1.0 m / 25% 资金 -2.0 m、品牌方情绪 +0.15');
+    // 展示侧标注只剩 offer_spawn（C3 生效）
+    expect(describeEffect('satisfaction', 0.15, true)).toBe('品牌方情绪 +0.15');
+    expect(describeEffect('offer_spawn', { pkg: 1 }, true)).toBe('上门报价 {"pkg":1}（C3 生效）');
+    expect(describeEffects({ satisfaction: 0.15 })).toBe('品牌方情绪 +0.15');
   });
 
   it('describeEffect 逐键；describeEffects 空表 → 无变化、未知键不出现', () => {
@@ -702,7 +706,7 @@ describe('cron 兜底 expirePendingEvents（只挑 deadline_at IS NOT NULL 的�
 
     const tick = await expirePendingEvents(fx.env, NOW);
     expect(tick).toMatchObject({ expired: 1, reminded: 0, skipped: 0 }); // 到期行被结算后不再走 24h 提醒
-    expect(occurrenceRow(fx.sqlite, due)!.status).toBe('resolved');
+    expect(occurrenceRow(fx.sqlite, due)!.status).toBe('expired'); // D3 起超时兜底记 expired 终态（0048 注释原义）
     expect(occurrenceRow(fx.sqlite, due)!.resolved_by).toBe('auto');
     expect(occurrenceRow(fx.sqlite, future)!.status).toBe('pending');
     expect(occurrenceRow(fx.sqlite, leftover)!.status).toBe('pending');

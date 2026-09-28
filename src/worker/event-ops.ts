@@ -13,8 +13,9 @@
 //    账本效果另有 (club, kind, ref_type, ref_id) 查重闸 ⇒ 整批重放安全。
 //  · last_result 比的是「最近一场任意场地的已确认赛果」（本仓没有主场索引），插件比的是最近一场主场。
 // v6.10.0 只开放即发型（event_type='instant'）；选择型 v6.11.0 开放（表结构已建全，届时零迁移）。
-// 未接入（D 块计划留给 v6.12.0）：satisfaction（落 naming_contracts）、signals（落 club_signals）、
-// offer_spawn（生成限时折扣冠名报价）——三条都在 notes 里留痕播报，不静默吞掉。
+// v6.12.0（D3）起 14 键里 13 键真落库：satisfaction → naming_contracts.satisfaction（0051，钳 [0,2]）；
+// signals → 效果值按 event_signals 清洗后入 effects_json，关窗批三消费点（home.ts：fan_mood 死忠、
+// upkeep 维护费、fee_mod 冠名费）；offer_spawn 挪 C3（招商轮），触发到该键播报落空。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createConfigService } from '../core/config.ts';
@@ -90,6 +91,8 @@ export interface EventRules {
   softConditionFactor: number;
   /** 选择型事件的选项时限（小时；v6.11.0 用） */
   choiceDeadlineHours: number;
+  /** 同队同时最多几条待选事件（0 = 不限；随机抽取达上限跳过、点名触发 409） */
+  maxPending: number;
 }
 
 export const EVENT_RULES_DEFAULT: EventRules = {
@@ -98,6 +101,7 @@ export const EVENT_RULES_DEFAULT: EventRules = {
   maxOccurrences: 2,
   softConditionFactor: 0.25,
   choiceDeadlineHours: 72,
+  maxPending: 3,
 };
 
 export interface EventClamps {
@@ -108,6 +112,8 @@ export interface EventClamps {
   buildCredit: number;
   influence: number;
   bookingCancel: number;
+  /** 品牌方情绪单次变化上界（±，插件 _clamp_satisfaction 默认 0.5） */
+  satisfaction: number;
 }
 
 export const EVENT_CLAMPS_DEFAULT: EventClamps = {
@@ -118,6 +124,7 @@ export const EVENT_CLAMPS_DEFAULT: EventClamps = {
   buildCredit: 5,
   influence: 10,
   bookingCancel: 2,
+  satisfaction: 0.5,
 };
 
 /** 事件规则（config event_rules，JSON）：缺行或单字段非法按默认逐字段回落。 */
@@ -134,6 +141,7 @@ export async function loadEventRules(db: Env['DB']): Promise<EventRules> {
     maxOccurrences: Math.trunc(pick(raw?.maxOccurrences, 1, 20, d.maxOccurrences)),
     softConditionFactor: pick(raw?.softConditionFactor, 0, 1, d.softConditionFactor),
     choiceDeadlineHours: pick(raw?.choiceDeadlineHours, 0, 720, d.choiceDeadlineHours),
+    maxPending: Math.trunc(pick(raw?.maxPending, 0, 50, d.maxPending)),
   };
 }
 
@@ -153,11 +161,77 @@ export async function loadEventClamps(db: Env['DB']): Promise<EventClamps> {
     buildCredit: pick(raw?.buildCredit, d.buildCredit),
     influence: pick(raw?.influence, d.influence),
     bookingCancel: pick(raw?.bookingCancel, d.bookingCancel),
+    satisfaction: pick(raw?.satisfaction, d.satisfaction),
   };
 }
 
+/** 经营信号定义（config event_signals，JSON）：type=step 步进求和（单值对称钳 clamp）、
+ *  type=mult 乘数连乘（积钳 [low, high]）。label 供注记与流水展示。 */
+export interface EventSignalDef {
+  label: string;
+  type: 'step' | 'mult';
+  /** step 型：单值对称钳上界 */
+  clamp?: number;
+  /** mult 型：积钳区间 */
+  low?: number;
+  high?: number;
+}
+
+export type EventSignalDefs = Record<string, EventSignalDef>;
+
+export const EVENT_SIGNALS_DEFAULT: EventSignalDefs = {
+  fan_mood: { label: '粉丝情绪', type: 'step', clamp: 2.0 },
+  upkeep: { label: '维护负担', type: 'mult', low: 0.5, high: 2.0 },
+  fee_mod: { label: '冠名费', type: 'mult', low: 0.5, high: 2.0 },
+};
+
+/** 经营信号定义（config event_signals）：缺行或单键非法按默认逐键回落，未登记键忽略。 */
+export async function loadEventSignals(db: Env['DB']): Promise<EventSignalDefs> {
+  const raw = await createConfigService(db).getJson<Record<string, unknown>>('event_signals');
+  const out: EventSignalDefs = {};
+  for (const [key, def] of Object.entries(EVENT_SIGNALS_DEFAULT)) {
+    const r = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>)[key] : null;
+    const rec = r !== null && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>) : {};
+    const label = typeof rec.label === 'string' && rec.label !== '' ? rec.label : def.label;
+    const type = rec.type === 'step' || rec.type === 'mult' ? rec.type : def.type;
+    const clamp = numOf(rec.clamp) ?? def.clamp;
+    const low = numOf(rec.low) ?? def.low;
+    const high = numOf(rec.high) ?? def.high;
+    out[key] =
+      type === 'step'
+        ? { label, type, clamp: clamp !== undefined && clamp > 0 ? clamp : 2.0 }
+        : { label, type, low: low ?? 0.5, high: high ?? 2.0 };
+  }
+  return out;
+}
+
+/**
+ * 效果里的 signals 值清洗（插件 `_clamp_signals` 同口径）：未登记的信号名丢弃、非数值丢弃、
+ * step 型对称钳 ±clamp、mult 型钳 [low, high]、清完为 0 的键丢弃。全空返回 null（调用方按落空播报）。
+ */
+export function cleanSignals(value: unknown, defs: EventSignalDefs): Record<string, number> | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const def = defs[key];
+    if (def === undefined) continue;
+    const n = numOf(raw);
+    if (n === null || n === 0) continue;
+    out[key] = def.type === 'step' ? clampNum(n, -(def.clamp ?? 2.0), def.clamp ?? 2.0) : clampNum(n, def.low ?? 0.5, def.high ?? 2.0);
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** 信号的人类可读描述（结算备注 / 选项概率表同口径）：step 印带符号值、mult 印乘数。 */
+export function describeSignals(signals: Record<string, number> | null, defs: EventSignalDefs = EVENT_SIGNALS_DEFAULT): string {
+  if (signals === null) return '';
+  return Object.entries(signals)
+    .map(([key, v]) => `${defs[key]?.label ?? key} ${defs[key]?.type === 'mult' ? `×${v}` : signedNum(v)}`)
+    .join('、');
+}
+
 /** 天气键集合（config attendance_model.weather_probabilities）：weather_set 只认表里有的天气。 */
-async function loadWeatherKeys(db: Env['DB']): Promise<Set<string>> {
+export async function loadWeatherKeys(db: Env['DB']): Promise<Set<string>> {
   const model = await createConfigService(db).getJson<{ weather_probabilities?: Record<string, number> }>('attendance_model');
   return new Set(Object.keys(model?.weather_probabilities ?? {}));
 }
@@ -227,6 +301,10 @@ export interface EventClubContext {
   facilities: Map<string, number>;
   /** 生效冠名品牌（无冠名 = null） */
   brand: string | null;
+  /** 生效冠名合同行 id（无冠名 = null；satisfaction 效果的落库锚点） */
+  namingId: number | null;
+  /** 生效冠名的品牌方情绪现值（无冠名 = null） */
+  satisfaction: number | null;
   /** 触发窗已排的档期活动类型 */
   activities: string[];
   lastResult: 'W' | 'D' | 'L' | null;
@@ -290,9 +368,9 @@ export async function loadEventContexts(
       .bind(...ids)
       .all<{ club_id: number; facility_key: string; level: number }>(),
     env.DB
-      .prepare(`SELECT club_id, brand FROM naming_contracts WHERE status = 'active' AND club_id IN (${inList})`)
+      .prepare(`SELECT club_id, id, brand, satisfaction FROM naming_contracts WHERE status = 'active' AND club_id IN (${inList})`)
       .bind(...ids)
-      .all<{ club_id: number; brand: string }>(),
+      .all<{ club_id: number; id: number; brand: string; satisfaction: number }>(),
     env.DB
       .prepare(`SELECT club_id, activity_type FROM venue_bookings WHERE season = ? AND window_seq = ? AND club_id IN (${inList})`)
       .bind(season, windowSeq, ...ids)
@@ -343,6 +421,8 @@ export async function loadEventContexts(
       balance: accounts.results.find((a) => a.club_id === clubId)?.balance ?? 0,
       facilities: facilityMap,
       brand: naming.results.find((n) => n.club_id === clubId)?.brand ?? null,
+      namingId: naming.results.find((n) => n.club_id === clubId)?.id ?? null,
+      satisfaction: naming.results.find((n) => n.club_id === clubId)?.satisfaction ?? null,
       activities: bookings.results.filter((b) => b.club_id === clubId).map((b) => b.activity_type),
       lastResult: tourTeamId === null ? null : lastResultOf(resultRows, tourTeamId),
       tourTeamId,
@@ -403,7 +483,8 @@ export function conditionOk(ctx: EventClubContext, cond: Record<string, unknown>
 }
 
 /** 加权单抽（插件 random.choices 同语义）：硬条件不满足剔除；soft_conditions=1 的按
- *  权重×softConditionFactor 衰减参与；已达 maxOccurrences 的事件剔除。无候选返 null。 */
+ *  权重×softConditionFactor 衰减参与；已达 maxOccurrences 的事件剔除；选择型没有选项且
+ *  不设时限的剔除（触发后永远无法结算的永久 pending 窄口）。无候选返 null。 */
 export function pickEvent(
   pool: EventRow[],
   ctx: EventClubContext,
@@ -415,6 +496,7 @@ export function pickEvent(
   for (const row of pool) {
     if (row.status !== 'adopted') continue;
     if ((used[row.event_id] ?? 0) >= rules.maxOccurrences) continue;
+    if (row.event_type === 'choice' && rules.choiceDeadlineHours <= 0 && parseEventOptions(row.options_json).length === 0) continue;
     const cond = parseJson<Record<string, unknown>>(row.conditions_json, {});
     const ok = conditionOk(ctx, cond);
     if (!ok && row.soft_conditions !== 1) continue;
@@ -490,23 +572,23 @@ export function parseEventOptions(raw: string | null | undefined): EventOption[]
 }
 
 /**
- * 选择型概率表里要打「尚未生效」标记的键：这三键（品牌满意度 / 经营信号 / 上门报价）
- * 属于 v6.12.0 的消费端，本版 `applyEventEffects` 一条 SQL 都不产生、只在备注里播报。
- * 种子（`0047_event_pool.sql`）里它们被写进选项分支当卖点，不标出来玩家会以为签了就涨。
+ * 选项概率表里要打「尚未生效」标记的键：offer_spawn（上门报价）依赖招商轮（C3），
+ * D3 触发到它一律按「无开放招商轮次」落空。satisfaction / signals 自 v6.12.0 起真落库，不再标注。
  */
-const PENDING_EFFECT_KEYS = new Set(['satisfaction', 'signals', 'offer_spawn']);
+const PENDING_EFFECT_KEYS = new Set(['offer_spawn']);
+const PENDING_LABEL = '（C3 生效）';
 
 /**
  * 选项概率表用的人类可读效果描述（与结算备注同口径；只读效果表，不依赖队况与配置）。
- * `markPending` 只在**展示**侧打开：给本版尚未落账的三键补一句「（v6.12.0 生效）」。
+ * `markPending` 只在**展示**侧打开：给依赖 C3 的 offer_spawn 补一句「（C3 生效）」。
  */
-export function describeEffect(key: string, value: unknown, markPending = false): string {
-  const desc = describeEffectPlain(key, value);
+export function describeEffect(key: string, value: unknown, markPending = false, signalDefs?: EventSignalDefs): string {
+  const desc = describeEffectPlain(key, value, signalDefs);
   if (desc === '') return '';
-  return markPending && PENDING_EFFECT_KEYS.has(key) ? `${desc}（v6.12.0 生效）` : desc;
+  return markPending && PENDING_EFFECT_KEYS.has(key) ? `${desc}${PENDING_LABEL}` : desc;
 }
 
-function describeEffectPlain(key: string, value: unknown): string {
+function describeEffectPlain(key: string, value: unknown, signalDefs?: EventSignalDefs): string {
   switch (key) {
     case 'money':
       return `资金 ${signedMoney(numOf(value) ?? 0)}`;
@@ -517,15 +599,17 @@ function describeEffectPlain(key: string, value: unknown): string {
     case 'attendance_mod':
       return `下一场上座 ×${(numOf(value) ?? 1).toFixed(2)}`;
     case 'satisfaction':
-      return `品牌满意度 ${signedNum(numOf(value) ?? 0)}`;
+      return `品牌方情绪 ${signedNum(numOf(value) ?? 0)}`;
     case 'brand_heat':
       return `品牌热度 ${signedNum(numOf(value) ?? 0)}`;
     case 'build_credit':
       return `建设券 ${signedNum(numOf(value) ?? 0)}`;
     case 'influence':
       return `队壳影响力 ${signedNum(numOf(value) ?? 0)}`;
-    case 'signals':
-      return `经营信号 ${JSON.stringify(value)}`;
+    case 'signals': {
+      const cleaned = value !== null && typeof value === 'object' && !Array.isArray(value) ? cleanSignals(value, signalDefs ?? EVENT_SIGNALS_DEFAULT) : null;
+      return cleaned !== null ? `经营信号 ${describeSignals(cleaned, signalDefs)}` : '';
+    }
     case 'offer_spawn':
       return `上门报价 ${JSON.stringify(value)}`;
     case 'weather_set': {
@@ -549,10 +633,10 @@ function describeEffectPlain(key: string, value: unknown): string {
   }
 }
 
-export function describeEffects(effects: Record<string, unknown>, markPending = false): string {
+export function describeEffects(effects: Record<string, unknown>, markPending = false, signalDefs?: EventSignalDefs): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(effects)) {
-    const desc = describeEffect(key, value, markPending);
+    const desc = describeEffect(key, value, markPending, signalDefs);
     if (desc !== '') parts.push(desc);
   }
   return parts.length > 0 ? parts.join('、') : '无变化';
@@ -616,12 +700,13 @@ export function shortDeadline(iso: string): string {
   return iso.slice(5, 16).replace('T', ' ');
 }
 
-/** 选择型触发时的广播文案：叙述段 + 确定性选项概率表（玩家按选项号回复；本版不落账的键带「v6.12.0 生效」标注） */
+/** 选择型触发时的广播文案：叙述段 + 确定性选项概率表（玩家按选项号回复；依赖 C3 的键带「（C3 生效）」标注） */
 export function renderChoiceText(
   event: EventRow,
   ctx: EventClubContext,
   options: EventOption[],
   deadlineHours: number,
+  signalDefs?: EventSignalDefs,
 ): string {
   const stadium = ctx.stadium.name !== '' ? ctx.stadium.name : `${ctx.name}主场`;
   const lines = [
@@ -635,7 +720,7 @@ export function renderChoiceText(
     const weights = opt.outcomes.map((o) => Math.max(1, Math.trunc(o.w)));
     const total = weights.reduce((s, w) => s + w, 0);
     const odds = opt.outcomes
-      .map((o, i) => `${total > 0 ? Math.round((weights[i]! / total) * 100) : 0}% ${describeEffects(o.effects, true)}`)
+      .map((o, i) => `${total > 0 ? Math.round((weights[i]! / total) * 100) : 0}% ${describeEffects(o.effects, true, signalDefs)}`)
       .join(' / ');
     lines.push(
       `${OPTION_GLYPH[opt.no] ?? `${opt.no}.`} ${opt.name}` +
@@ -655,6 +740,8 @@ export interface EffectRunContext {
   /** 活动目录（config 不可用时为 null ⇒ 档期类效果落空而不是整批失败） */
   catalog: ActivityCatalog | null;
   openWindow: OpenWindow | null;
+  /** 经营信号定义（清洗与播报用） */
+  signalDefs: EventSignalDefs;
 }
 
 export interface EffectRun {
@@ -761,11 +848,22 @@ export async function applyEventEffects(
         notes.push(`下一场上座 ×${v}`);
         break;
       }
-      // 品牌满意度：v6.12.0 落 naming_contracts（本批只播报）
+      // 品牌方情绪：累加进生效冠名的 satisfaction（钳 [0,2]，插件 evolve 侧同钳）；无冠名落空
       case 'satisfaction': {
-        const v = numOf(value) ?? 0;
+        const v = clampNum(numOf(value) ?? 0, -ec.clamps.satisfaction, ec.clamps.satisfaction);
+        if (v === 0) break;
+        if (ctx.namingId === null) {
+          notes.push(`品牌方情绪 ${signedNum(v)}（本队没有生效冠名，落空）`);
+          break;
+        }
+        statements.push(
+          guarded(`UPDATE naming_contracts SET satisfaction = MAX(0, MIN(2, ROUND(satisfaction + ?, 3))), updated_at = ${nowSql()} WHERE id = ?`, [
+            v,
+            ctx.namingId,
+          ]),
+        );
         applied.satisfaction = v;
-        notes.push(`品牌满意度 ${signedNum(v)}（v6.12.0 落库，本次只播报）`);
+        notes.push(`品牌方情绪 ${signedNum(v)}`);
         break;
       }
       // 品牌热度：取该队生效冠名品牌，钳 [clampLow, clampHigh]；无冠名落空
@@ -816,10 +914,15 @@ export async function applyEventEffects(
         notes.push(`队壳影响力 ${signedNum(v)}`);
         break;
       }
-      // 经营信号：v6.12.0 落 club_signals（本批只播报）
+      // 经营信号：按 event_signals 定义清洗后记进 applied（effects_json），关窗批消费三键
       case 'signals': {
-        applied.signals = value;
-        notes.push(`经营信号 ${JSON.stringify(value)}（v6.12.0 接入消费点，本次只播报）`);
+        const cleaned = cleanSignals(value, ec.signalDefs);
+        if (cleaned === null) {
+          notes.push('经营信号（没有可识别的信号键，落空）');
+          break;
+        }
+        applied.signals = cleaned;
+        notes.push(`经营信号 ${describeSignals(cleaned, ec.signalDefs)}`);
         break;
       }
       // 设施升降级：{key, delta}，delta 收敛 ±1，钳 [0, 5]，行缺失同批补 0 级行
@@ -939,10 +1042,9 @@ export async function applyEventEffects(
         notes.push(`下一场天气 → ${w}`);
         break;
       }
-      // 上门报价：v6.12.0 生成限时折扣冠名报价（本批只播报）
+      // 上门报价：依赖招商轮（C3 才建），本版恒按「无开放轮次」落空（插件无轮次时同文案）
       case 'offer_spawn': {
-        applied.offer_spawn = value;
-        notes.push(`上门报价 ${JSON.stringify(value)}（v6.12.0 生成限时冠名报价，本次只播报）`);
+        notes.push('当前无开放招商轮次，品牌上门落空');
         break;
       }
       default:
@@ -996,7 +1098,7 @@ export interface TriggerResult {
  */
 export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<TriggerResult> {
   const rng = input.rng ?? env.rng ?? Math.random;
-  const [rules, clamps, pool, heatRules, catalog, openWindow, weatherKeys] = await Promise.all([
+  const [rules, clamps, pool, heatRules, catalog, openWindow, weatherKeys, signalDefs] = await Promise.all([
     loadEventRules(env.DB),
     loadEventClamps(env.DB),
     loadEventPool(env.DB),
@@ -1005,6 +1107,7 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
     loadActivityCatalog(env.DB).catch(() => null),
     getOpenWindow(env.DB),
     loadWeatherKeys(env.DB),
+    loadEventSignals(env.DB),
   ]);
 
   let named: EventRow | null = null;
@@ -1012,6 +1115,10 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
     named = pool.find((r) => r.event_id === input.eventId) ?? null;
     if (named === null) throw new HttpError(404, `没有「${input.eventId}」这个事件`);
     if (named.status !== 'adopted') throw new HttpError(400, `事件「${named.name}」已停用，先启用再触发`);
+    // 选择型没有选项且不设时限 = 结算不出任何结果，触发只会留一条永久 pending（窄口封死）
+    if (named.event_type === 'choice' && rules.choiceDeadlineHours <= 0 && parseEventOptions(named.options_json).length === 0) {
+      throw new HttpError(400, `事件「${named.name}」没有选项且未设时限，触发后无法结算；先配置选项或时限`);
+    }
   }
 
   const clubIds =
@@ -1020,6 +1127,19 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
   if (clubIds.length === 0) return { clubs: 0, triggered: 0, capped: 0, events: [] };
 
   const contexts = await loadEventContexts(env, clubIds, input.season, input.windowSeq);
+  // 同队待选上限：随机抽取达上限跳过本轮（事件流向没满的队），点名触发 409（管理员要明确感知）
+  const pendingCounts = new Map<number, number>();
+  if (rules.maxPending > 0) {
+    const inList = clubIds.map(() => '?').join(',');
+    const rows = await env.DB
+      .prepare(
+        `SELECT club_id, COUNT(*) AS n FROM event_occurrences
+         WHERE status = 'pending' AND event_type = 'choice' AND club_id IN (${inList}) GROUP BY club_id`,
+      )
+      .bind(...clubIds)
+      .all<{ club_id: number; n: number }>();
+    for (const r of rows.results) pendingCounts.set(r.club_id, r.n);
+  }
   // v6.11.0（D2）起两类都参与抽取：即发型当刻结算，选择型进待定等玩家选
   const used: Record<string, number> = {};
   const events: TriggeredEvent[] = [];
@@ -1033,11 +1153,18 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
     for (let i = 0; i < attempts; i++) {
       let event: EventRow | null;
       if (named !== null) {
+        if (named.event_type === 'choice' && rules.maxPending > 0 && (pendingCounts.get(clubId) ?? 0) >= rules.maxPending) {
+          throw new HttpError(409, `「${ctx.name}」的待选事件已达上限（${rules.maxPending} 条），先处理再点名`);
+        }
         event = named;
       } else {
         if (rng() >= rules.hitProbability) break;
         event = pickEvent(pool, ctx, rules, rng, used);
         if (event === null) {
+          capped++;
+          break;
+        }
+        if (event.event_type === 'choice' && rules.maxPending > 0 && (pendingCounts.get(clubId) ?? 0) >= rules.maxPending) {
           capped++;
           break;
         }
@@ -1050,7 +1177,7 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
           : null;
       const options = parseEventOptions(event.options_json);
       const text = isChoice
-        ? renderChoiceText(event, ctx, options, rules.choiceDeadlineHours)
+        ? renderChoiceText(event, ctx, options, rules.choiceDeadlineHours, signalDefs)
         : renderEventText(event, ctx);
       // 先落 occurrence 拿 id（效果语句的幂等闸挂在它身上），再同一批落效果 + 置 resolved + 审计
       const inserted = await env.DB
@@ -1065,6 +1192,7 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
       const occurrenceId = Number(inserted.meta.last_row_id ?? 0);
       if (isChoice) {
         // 选择型只进待定，不落任何效果——玩家选定或超时兜底时才兑现（插件 _trigger_choice 同）
+        pendingCounts.set(clubId, (pendingCounts.get(clubId) ?? 0) + 1);
         await env.DB.batch([
           createAuditStatement(env.DB)({
             actor: input.actor,
@@ -1113,7 +1241,7 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
         ctx,
         { id: occurrenceId, season: input.season, windowSeq: input.windowSeq, name: event.name },
         effects,
-        { clamps, heatRules, weatherKeys, catalog, openWindow },
+        { clamps, heatRules, weatherKeys, catalog, openWindow, signalDefs },
       );
       await env.DB.batch([
         ...run.statements,
@@ -1228,17 +1356,6 @@ export async function resolveEvent(env: Env, input: ResolveInput): Promise<Resol
   const event = await loadEventById(env.DB, row.event_id);
   const eventName = event !== null ? event.name : row.event_name;
   const options = parseEventOptions(event?.options_json);
-  const ctx = (await loadEventContexts(env, [row.club_id], row.season, row.window_seq)).get(row.club_id);
-  if (ctx === undefined) throw new HttpError(409, '这个俱乐部已经不在册，事件无法结算');
-
-  const [clamps, heatRules, catalog, openWindow, weatherKeys] = await Promise.all([
-    loadEventClamps(env.DB),
-    loadHeatRules(env.DB),
-    loadActivityCatalog(env.DB).catch(() => null),
-    getOpenWindow(env.DB),
-    loadWeatherKeys(env.DB),
-  ]);
-
   const asked = input.choiceNo === null || input.choiceNo === undefined ? null : input.choiceNo;
   let option: EventOption | null = null;
   let outcome: EventOutcome | null = null;
@@ -1271,24 +1388,43 @@ export async function resolveEvent(env: Env, input: ResolveInput): Promise<Resol
     }
   }
 
-  const effects = skipped ? {} : (outcome !== null ? outcome.effects : {});
-  const label = option === null ? eventName : `${eventName}·${option.name}`;
-  const run = await applyEventEffects(
-    env,
-    ctx,
-    { id: row.id, season: row.season, windowSeq: row.window_seq, name: label },
-    effects,
-    { clamps, heatRules, weatherKeys, catalog, openWindow },
-  );
+  // 队况与效果依赖（6 次读）只在真要落效果时装：无选项 / 选项均无结果的跳过路径不白读
+  let ctx: EventClubContext | undefined;
+  let ec: EffectRunContext | null = null;
+  if (!skipped) {
+    ctx = (await loadEventContexts(env, [row.club_id], row.season, row.window_seq)).get(row.club_id);
+    if (ctx === undefined) throw new HttpError(409, '这个俱乐部已经不在册，事件无法结算');
+    const [clamps, heatRules, catalog, openWindow, weatherKeys, signalDefs] = await Promise.all([
+      loadEventClamps(env.DB),
+      loadHeatRules(env.DB),
+      loadActivityCatalog(env.DB).catch(() => null),
+      getOpenWindow(env.DB),
+      loadWeatherKeys(env.DB),
+      loadEventSignals(env.DB),
+    ]);
+    ec = { clamps, heatRules, weatherKeys, catalog, openWindow, signalDefs };
+  }
+
+  const run: EffectRun = skipped
+    ? { statements: [], notes: [], applied: {} }
+    : await applyEventEffects(
+        env,
+        ctx!,
+        { id: row.id, season: row.season, windowSeq: row.window_seq, name: option === null ? eventName : `${eventName}·${option.name}` },
+        outcome !== null ? outcome.effects : {},
+        ec!,
+      );
   const notes = [...run.notes];
   if (!skipped && outcome === null) notes.push('选项无结果配置，按无效果结算');
   const optionNo = skipped ? null : (option?.no ?? null);
   const optionName = option?.name ?? '';
-  const outcomeJson = skipped ? { skipped: true } : { option: optionNo, option_name: optionName, auto, effects };
+  const outcomeJson = skipped ? { skipped: true } : { option: optionNo, option_name: optionName, auto, effects: outcome !== null ? outcome.effects : {} };
   const text = skipped
     ? `「${eventName}」${how}`
-    : `${label}：${how}${notes.length > 0 ? `（${notes.join('；')}）` : ''}`;
+    : `${option === null ? eventName : `${eventName}·${option.name}`}：${how}${notes.length > 0 ? `（${notes.join('；')}）` : ''}`;
   const resolvedBy = input.auto === true ? 'auto' : input.actor === null ? 'system' : String(input.actor);
+  // 超时兜底记 expired（0048 的状态注释原义「expired=超时兜底」），玩家/管理员结算记 resolved
+  const finalStatus = input.auto === true ? 'expired' : 'resolved';
 
   // 审计排在批次首位、挂 PENDING_GUARD：它与状态 UPDATE 在同一批里求值，守卫没过就一行不留
   // （并发抢同一条时，抢输的一方账本被挡下，审计也必须一起挡下，否则留下失实的 after 快照）。
@@ -1308,10 +1444,11 @@ export async function resolveEvent(env: Env, input: ResolveInput): Promise<Resol
     ...run.statements,
     env.DB
       .prepare(
-        `UPDATE event_occurrences SET status = 'resolved', choice_no = ?, outcome_json = ?, effects_json = ?,
+        `UPDATE event_occurrences SET status = ?, choice_no = ?, outcome_json = ?, effects_json = ?,
                 notes_json = ?, resolved_by = ?, resolved_at = ${nowSql()}, text = ? WHERE id = ? AND status = 'pending'`,
       )
       .bind(
+        finalStatus,
         optionNo,
         JSON.stringify(outcomeJson),
         JSON.stringify(run.applied),
@@ -1325,16 +1462,16 @@ export async function resolveEvent(env: Env, input: ResolveInput): Promise<Resol
   if (claimed === 0) throw new HttpError(409, '这条事件刚被并发结算，请刷新');
 
   await queueClubNotification(env, row.club_id, 'event_resolved', {
-    club: ctx.name,
+    club: ctx !== undefined ? ctx.name : row.club_name !== null && row.club_name !== '' ? row.club_name : `俱乐部${row.club_id}`,
     name: eventName,
-    how,
+    how: finalStatus === 'expired' ? `${how}（超时自动结算）` : how,
     notes: notes.join('；'),
   });
 
   return {
     occurrenceId: row.id,
     clubId: row.club_id,
-    clubName: ctx.name,
+    clubName: ctx !== undefined ? ctx.name : row.club_name !== null && row.club_name !== '' ? row.club_name : `俱乐部${row.club_id}`,
     eventId: row.event_id,
     eventName,
     optionNo,
@@ -1367,7 +1504,8 @@ const EVENT_TICK_LIMIT = 50;
 export async function expirePendingEvents(env: Env, nowIso?: string): Promise<EventTickResult> {
   const now = nowIso ?? new Date().toISOString();
   // 下界 7 天：结算不掉的残行（唯一可达来源是「俱乐部已不在册」）会一直留在 pending、deadline 已过期，
-  // 而本查询是 `ORDER BY id LIMIT`，积够 50 条就把整个超时兜底挤停摆。终态化留 D3，这里先把伤害限住。
+  // 而本查询是 `ORDER BY id LIMIT`，积够 50 条就把整个超时兜底挤停摆。超时兜底自 D3 起记 `expired`
+  // 终态（resolveEvent auto 路径），但这类结算必然失败的残行仍到不了终态，7 天下界继续限伤。
   const floor = new Date(Date.parse(now) - 7 * 24 * 3600_000).toISOString();
   const due = await env.DB.prepare(
     `SELECT id FROM event_occurrences
@@ -1458,16 +1596,16 @@ export interface ClubEventsView {
   pending: ClubEventPending[];
   recent: ClubEventRecent[];
 }
-/** 教练端事件视图：待选（选择型未结）+ 最近已结（含即发型，按 id 倒序） */
+/** 教练端事件视图：待选（选择型未结）+ 最近已结（含即发型，按 id 倒序）；两个列表同走 limit 钳 1..50 */
 export async function listClubEvents(env: Env, clubId: number, recentLimit = 10): Promise<ClubEventsView> {
   const limit = Math.max(1, Math.min(50, Math.trunc(recentLimit)));
   const [pendRows, recentRows, pool] = await Promise.all([
     env.DB.prepare(
       `SELECT id, event_id, event_name, deadline_at, text FROM event_occurrences
        WHERE club_id = ? AND status = 'pending' AND event_type = 'choice'
-       ORDER BY id DESC LIMIT 20`,
+       ORDER BY id DESC LIMIT ?`,
     )
-      .bind(clubId)
+      .bind(clubId, limit)
       .all<{ id: number; event_id: string; event_name: string; deadline_at: string | null; text: string }>(),
     env.DB.prepare(
       `SELECT id, event_id, event_name, event_type, choice_no, outcome_json, notes_json, text,
@@ -1530,5 +1668,326 @@ export async function listClubEvents(env: Env, clubId: number, recentLimit = 10)
         createdAt: r.created_at,
       };
     }),
+  };
+}
+
+// ---- 关窗批消费经营信号（v6.12.0，D3）----
+
+export interface WindowSignalFactors {
+  /** step 型信号求和（fan_mood） */
+  steps: Record<string, number>;
+  /** mult 型信号连乘积（已按 [low, high] 终钳；upkeep / fee_mod） */
+  mults: Record<string, number>;
+}
+
+/**
+ * 收集某窗触发的事件里沉淀的经营信号（插件 `collect_window_signals` 同思路：只读事件日志不落状态，
+ * 首结与重算同源）。信号值在效果落账时已按 event_signals 清洗过（单值钳幅），这里做聚合：
+ * step 求和、mult 连乘后再终钳 [low, high]。没有信号记录的队不在返回 Map 里。
+ *
+ * 已知边界：信号按 occurrence 归档的 (season, window_seq) 归窗——选择型若拖到归档窗关闭之后才结算，
+ * 其信号会落在已关的窗里、不再被消费（幅度小：fan_mood ±2 / 乘数 ≤2，登记接受）。
+ */
+export async function collectWindowSignals(
+  db: Env['DB'],
+  season: number,
+  windowSeq: number,
+  defs: EventSignalDefs = EVENT_SIGNALS_DEFAULT,
+): Promise<Map<number, WindowSignalFactors>> {
+  const { results } = await db
+    .prepare(
+      `SELECT club_id, effects_json FROM event_occurrences
+       WHERE season = ? AND window_seq = ? AND status IN ('resolved', 'expired') ORDER BY id`,
+    )
+    .bind(season, windowSeq)
+    .all<{ club_id: number; effects_json: string }>();
+  const out = new Map<number, WindowSignalFactors>();
+  for (const r of results) {
+    const effects = parseJson<Record<string, unknown>>(r.effects_json, {});
+    const signals = effects.signals;
+    if (signals === null || typeof signals !== 'object' || Array.isArray(signals)) continue;
+    const acc = out.get(r.club_id) ?? { steps: {}, mults: {} };
+    for (const [key, raw] of Object.entries(signals as Record<string, unknown>)) {
+      const def = defs[key];
+      const n = numOf(raw);
+      if (def === undefined || n === null) continue;
+      if (def.type === 'step') acc.steps[key] = (acc.steps[key] ?? 0) + n;
+      else acc.mults[key] = (acc.mults[key] ?? 1) * n;
+    }
+    out.set(r.club_id, acc);
+  }
+  // mult 终钳（插件 mult_factor 同口径）：逐队逐键钳 [low, high]
+  for (const acc of out.values()) {
+    for (const [key, v] of Object.entries(acc.mults)) {
+      const def = defs[key];
+      acc.mults[key] = clampNum(v, def?.low ?? 0.5, def?.high ?? 2.0);
+    }
+  }
+  return out;
+}
+
+/** 结算通知 / 账本注记用的人类可读信号行（只列非中性项）。 */
+export function windowSignalNoteLines(sig: WindowSignalFactors, defs: EventSignalDefs): string[] {
+  const lines: string[] = [];
+  for (const [key, v] of Object.entries(sig.steps)) {
+    if (v === 0) continue;
+    const label = defs[key]?.label ?? key;
+    lines.push(`${label} ${signedNum(v)}（死忠演化 ×${(1 + v / 100).toFixed(2)}）`);
+  }
+  for (const [key, v] of Object.entries(sig.mults)) {
+    if (v === 1) continue;
+    const label = defs[key]?.label ?? key;
+    const surface = key === 'upkeep' ? '维护费' : key === 'fee_mod' ? '冠名收入' : '相关费用';
+    lines.push(`${label} ×${v}（本窗${surface}${v > 1 ? '上浮' : '下浮'}）`);
+  }
+  return lines;
+}
+
+/** 关窗批尾部调用：给本窗有非中性经营信号的队各排一条「经营信号」通知（尽力而为，失败不阻断）。 */
+export async function queueWindowSignalNotes(
+  env: Env,
+  season: number,
+  windowSeq: number,
+  defs: EventSignalDefs,
+): Promise<void> {
+  const signals = await collectWindowSignals(env.DB, season, windowSeq, defs);
+  if (signals.size === 0) return;
+  const ids = [...signals.keys()];
+  const clubs = await env.DB
+    .prepare(`SELECT id, name FROM clubs WHERE id IN (${ids.map(() => '?').join(',')})`)
+    .bind(...ids)
+    .all<{ id: number; name: string }>();
+  for (const [clubId, sig] of signals) {
+    const lines = windowSignalNoteLines(sig, defs);
+    if (lines.length === 0) continue;
+    const name = clubs.results.find((c) => c.id === clubId)?.name ?? `俱乐部${clubId}`;
+    await queueClubNotification(env, clubId, 'window_signals', {
+      club: name,
+      window: `S${season} 第 ${windowSeq} 窗`,
+      lines: lines.join('；'),
+    });
+  }
+}
+
+// ---- LLM 结构草稿钳制（v6.12.0，D3；管理端 only）----
+
+/** LLM 草稿允许出现的条件键（conditionOk 认得的全部） */
+const DRAFT_CONDITION_KEYS = new Set([
+  'min_tier', 'max_tier', 'min_capacity', 'max_capacity', 'min_fans', 'max_fans', 'min_balance', 'max_balance',
+  'facility_min', 'weather_is', 'last_result', 'requires_naming', 'requires_activity',
+]);
+
+const DRAFT_CONDITION_NUM_RANGE: Record<string, [number, number]> = {
+  min_tier: [0, 4],
+  max_tier: [0, 4],
+  min_capacity: [0, 200_000],
+  max_capacity: [0, 200_000],
+  min_fans: [0, 100_000],
+  max_fans: [0, 100_000],
+  min_balance: [0, 10_000],
+  max_balance: [0, 10_000],
+};
+
+export interface EventDraftStruct {
+  event_id: string;
+  name: string;
+  category: string;
+  weight: number;
+  event_type: 'instant' | 'choice';
+  conditions: Record<string, unknown>;
+  effects: Record<string, unknown>;
+  options: { no: number; name: string; desc: string; outcomes: { w: number; effects: Record<string, unknown> }[] }[];
+  template: string;
+}
+
+/**
+ * LLM 生成的事件结构草稿过钳制闸（插件 design_events 的 `_clamp_event` 同思路）：
+ * 未登记键丢弃、数值全部钳进 event_clamps / 信号定义区间、结构不合最低要求直接报错。
+ * 返回钳后的结构 + 调整清单（管理端展示「哪些被改了」）；抛 HttpError(400) = 草稿不可救。
+ */
+export function clampEventDraft(
+  raw: unknown,
+  ec: { clamps: EventClamps; signalDefs: EventSignalDefs; weatherKeys: Set<string> },
+): { event: EventDraftStruct; adjustments: string[] } {
+  const adjustments: string[] = [];
+  const src = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const drop = (what: string) => adjustments.push(`丢弃 ${what}`);
+
+  const eventId = typeof src.event_id === 'string' && /^[a-z][a-z0-9_]{2,31}$/.test(src.event_id) ? src.event_id : '';
+  if (eventId === '') throw new HttpError(400, 'event_id 缺失或不合规范（小写字母开头，3-32 位小写字母/数字/下划线）');
+  const name = typeof src.name === 'string' ? src.name.trim().slice(0, 20) : '';
+  if (name === '') throw new HttpError(400, 'name 缺失');
+  const category = typeof src.category === 'string' && src.category.trim() !== '' ? src.category.trim().slice(0, 12) : '通用';
+  const weightRaw = numOf(src.weight) ?? 10;
+  const weight = Math.trunc(clampNum(weightRaw, 1, 10));
+  if (weight !== weightRaw) adjustments.push(`weight 钳到 ${weight}`);
+  const eventType = src.event_type === 'choice' ? 'choice' : src.event_type === 'instant' ? 'instant' : '';
+  if (eventType === '') throw new HttpError(400, 'event_type 只能是 instant 或 choice');
+
+  // 条件：白名单 + 数值区间；未知键丢弃
+  const conditions: Record<string, unknown> = {};
+  const rawCond = src.conditions !== null && typeof src.conditions === 'object' && !Array.isArray(src.conditions) ? (src.conditions as Record<string, unknown>) : {};
+  for (const [key, value] of Object.entries(rawCond)) {
+    if (!DRAFT_CONDITION_KEYS.has(key)) {
+      drop(`条件「${key}」`);
+      continue;
+    }
+    if (key === 'requires_naming') {
+      if (value === true) conditions[key] = true;
+      continue;
+    }
+    if (key === 'facility_min') {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const fac: Record<string, number> = {};
+        for (const [fk, fv] of Object.entries(value as Record<string, unknown>)) {
+          if ((FACILITY_KEYS as readonly string[]).includes(fk) && numOf(fv) !== null) fac[fk] = clampNum(Math.trunc(numOf(fv)!), 0, FACILITY_MAX_LEVEL);
+        }
+        if (Object.keys(fac).length > 0) conditions[key] = fac;
+      }
+      continue;
+    }
+    const range = DRAFT_CONDITION_NUM_RANGE[key];
+    if (range !== undefined) {
+      const n = numOf(value);
+      if (n !== null) conditions[key] = clampNum(n, range[0], range[1]);
+      continue;
+    }
+    if (key === 'weather_is' && typeof value === 'string') {
+      if (ec.weatherKeys.has(value)) conditions[key] = value;
+      else drop(`条件 weather_is「${value}」（不在天气表）`);
+      continue;
+    }
+    if (key === 'last_result' && typeof value === 'string') {
+      if (LAST_RESULT_ALIAS[value.toLowerCase()] !== undefined) conditions[key] = value;
+      else drop(`条件 last_result「${value}」`);
+      continue;
+    }
+    if (key === 'requires_activity' && typeof value === 'string' && value !== '') conditions[key] = value.slice(0, 20);
+  }
+
+  /** 效果表钳制：即时效果与选项分支共用 */
+  const clampEffects = (rawEffects: unknown, where: string): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    if (rawEffects === null || typeof rawEffects !== 'object' || Array.isArray(rawEffects)) return out;
+    for (const [key, value] of Object.entries(rawEffects as Record<string, unknown>)) {
+      switch (key) {
+        case 'money': {
+          const n = clampNum(numOf(value) ?? 0, -ec.clamps.money, ec.clamps.money);
+          if (n !== 0) out[key] = Math.round(n * 10) / 10;
+          break;
+        }
+        case 'maintenance': {
+          const n = clampNum(numOf(value) ?? 0, 0, ec.clamps.maintenance);
+          if (n !== 0) out[key] = Math.round(n * 10) / 10;
+          break;
+        }
+        case 'fans_pct': {
+          const n = clampNum(numOf(value) ?? 0, -ec.clamps.fansPct, ec.clamps.fansPct);
+          if (n !== 0) out[key] = Math.round(n * 1000) / 1000;
+          break;
+        }
+        case 'attendance_mod': {
+          const n = clampNum(numOf(value) ?? 1, ATTENDANCE_MOD_MIN, ATTENDANCE_MOD_MAX);
+          if (n !== 1) out[key] = Math.round(n * 1000) / 1000;
+          break;
+        }
+        case 'satisfaction': {
+          const n = clampNum(numOf(value) ?? 0, -ec.clamps.satisfaction, ec.clamps.satisfaction);
+          if (n !== 0) out[key] = Math.round(n * 1000) / 1000;
+          break;
+        }
+        case 'brand_heat': {
+          const n = clampNum(numOf(value) ?? 0, -ec.clamps.brandHeat, ec.clamps.brandHeat);
+          if (n !== 0) out[key] = Math.round(n * 1000) / 1000;
+          break;
+        }
+        case 'build_credit': {
+          const n = clampNum(numOf(value) ?? 0, -ec.clamps.buildCredit, ec.clamps.buildCredit);
+          if (n !== 0) out[key] = Math.round(n * 10) / 10;
+          break;
+        }
+        case 'influence': {
+          const n = clampNum(numOf(value) ?? 0, -ec.clamps.influence, ec.clamps.influence);
+          if (n !== 0) out[key] = Math.round(n * 10) / 10;
+          break;
+        }
+        case 'weather_set': {
+          const w = (value as { weather?: unknown } | null)?.weather;
+          if (typeof w === 'string' && ec.weatherKeys.has(w)) out[key] = { weather: w };
+          else drop(`${where} 的 weather_set（不在天气表）`);
+          break;
+        }
+        case 'facility': {
+          const f = value as { key?: unknown; delta?: unknown } | null;
+          const fkey = typeof f?.key === 'string' ? f.key : '';
+          const delta = Math.sign(numOf(f?.delta) ?? 0);
+          if ((FACILITY_KEYS as readonly string[]).includes(fkey) && delta !== 0) out[key] = { key: fkey, delta };
+          else drop(`${where} 的 facility`);
+          break;
+        }
+        case 'booking_cancel': {
+          const c = Math.trunc(clampNum(numOf((value as { count?: unknown } | null)?.count) ?? 0, 0, ec.clamps.bookingCancel));
+          if (c !== 0) out[key] = { count: c };
+          break;
+        }
+        case 'booking_gift': {
+          const t = (value as { type?: unknown } | null)?.type;
+          if (typeof t === 'string' && t !== '') out[key] = { type: t.slice(0, 20) };
+          break;
+        }
+        case 'signals': {
+          const cleaned = cleanSignals(value, ec.signalDefs);
+          if (cleaned !== null) out[key] = cleaned;
+          break;
+        }
+        default:
+          drop(`${where} 的效果键「${key}」`);
+      }
+    }
+    return out;
+  };
+
+  let effects: Record<string, unknown> = {};
+  let options: EventDraftStruct['options'] = [];
+  if (eventType === 'instant') {
+    effects = clampEffects(src.effects, '即时效果');
+    if (Object.keys(effects).length === 0) throw new HttpError(400, '即时型草稿没有任何合法效果键');
+  } else {
+    const rawOptions = Array.isArray(src.options) ? src.options : [];
+    const seenNo = new Set<number>();
+    for (const rawOpt of rawOptions.slice(0, 4)) {
+      if (rawOpt === null || typeof rawOpt !== 'object' || Array.isArray(rawOpt)) continue;
+      const o = rawOpt as Record<string, unknown>;
+      const no = numOf(o.no);
+      if (no === null || !Number.isInteger(no) || no < 1 || no > 9 || seenNo.has(no)) {
+        drop('一个选项（no 越界或重复）');
+        continue;
+      }
+      seenNo.add(no);
+      const outcomes: { w: number; effects: Record<string, unknown> }[] = [];
+      for (const rawOutcome of (Array.isArray(o.outcomes) ? o.outcomes : []).slice(0, 4)) {
+        if (rawOutcome === null || typeof rawOutcome !== 'object' || Array.isArray(rawOutcome)) continue;
+        const r = rawOutcome as Record<string, unknown>;
+        const w = Math.trunc(clampNum(numOf(r.w) ?? 1, 1, 100));
+        outcomes.push({ w, effects: clampEffects(r.effects, `选项${no}分支`) });
+      }
+      if (outcomes.length === 0) {
+        drop(`选项${no}（没有任何合法结果分支）`);
+        continue;
+      }
+      options.push({
+        no,
+        name: typeof o.name === 'string' && o.name.trim() !== '' ? o.name.trim().slice(0, 30) : `选项${no}`,
+        desc: typeof o.desc === 'string' ? o.desc.slice(0, 60) : '',
+        outcomes,
+      });
+    }
+    if (options.length < 2) throw new HttpError(400, '选择型草稿至少要 2 个合法选项');
+  }
+
+  const template = typeof src.template === 'string' ? src.template.slice(0, 120) : '';
+  return {
+    event: { event_id: eventId, name, category, weight, event_type: eventType, conditions, effects, options, template },
+    adjustments,
   };
 }

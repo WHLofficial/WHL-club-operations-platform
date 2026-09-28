@@ -1,6 +1,9 @@
 -- 0047_event_pool.sql · v6.10.0 随机事件（D 块）
--- 事件池：与参考插件 services/event_engine.py DEFAULT_EVENTS 逐字同的种子（插件注释写「22 条」是陈旧的，
--- 实际清点 **24 条 = 6 即发型 + 18 选择型**）。conditions/effects/options 都存 JSON 文本，
+-- 事件池：种子原与参考插件 services/event_engine.py DEFAULT_EVENTS 逐字同（插件注释写「22 条」是陈旧的，
+-- 实际清点 **24 条 = 6 即发型 + 18 选择型**）。
+-- v6.12.0（D3）起不再逐字同：本仓在未 apply 前直接给种子补了 satisfaction / signals 效果
+-- （brand_crisis / brand_anniv 补满意度；tifo_viral / bad_press / new_wave / merch_hit / scalper_raid /
+--  food_fest / derby_buzz 补经营信号），与插件核对时要记得这层差异。新种子见 0052。conditions/effects/options 都存 JSON 文本，
 -- 由 event-ops.ts 解析：conditions 走 conditionOk（硬条件），effects 走 11 键效果表，options 是选择型的分支表。
 -- soft_conditions=1 时条件不满足按 权重×event_rules.softConditionFactor 衰减参与抽取，而非硬剔除（种子全为 0）。
 -- v6.10.0 只开放即发型触发；选择型（event_type='choice'）在 v6.11.0 开放（表结构已建全，届时零迁移）。
@@ -29,9 +32,9 @@ VALUES
   -- ─── 即发型（6 条） ─────────────────────────
   ('storm_buzz', '暴雨滂沱', '天气衍生', 8, 'instant', '{}', '{"attendance_mod":0.85}', '[]', 0,
    '暴雨突袭，{stadium} 门前的长队湿了一半，{team} 球迷热情不减。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  ('tifo_viral', 'TIFO出圈', '球迷舆情', 7, 'instant', '{}', '{"fans_pct":0.03,"money":1.0}', '[]', 0,
+  ('tifo_viral', 'TIFO出圈', '球迷舆情', 7, 'instant', '{}', '{"fans_pct":0.03,"money":1.0,"signals":{"fan_mood":1.0}}', '[]', 0,
    '{team} 球迷的巨型 TIFO 刷爆社交平台，{stadium} 一夜出圈。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  ('bad_press', '负面报道', '媒体', 5, 'instant', '{}', '{"fans_pct":-0.02}', '[]', 0,
+  ('bad_press', '负面报道', '媒体', 5, 'instant', '{}', '{"fans_pct":-0.02,"signals":{"fan_mood":-1.0}}', '[]', 0,
    '一篇关于 {team} 的更衣室传闻登上头条，部分球迷表示要冷静观望。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('relic_found', '球场挖出文物', '意外之财', 2, 'instant', '{}', '{"money":6.0}', '[]', 0,
    '施工队在 {stadium} 地下挖到疑似文物，随后文旅部门送来一笔补偿金。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -53,16 +56,16 @@ VALUES
    '[{"no":1,"name":"高调道歉并处罚","desc":"平息舆论，成本高","outcomes":[{"w":60,"effects":{"money":-4.0,"fans_pct":0.02}},{"w":40,"effects":{"money":-6.0,"fans_pct":-0.01}}]},{"no":2,"name":"低调冷处理","desc":"省事但风险大","outcomes":[{"w":40,"effects":{"money":-1.0}},{"w":60,"effects":{"money":-5.0,"fans_pct":-0.03}}]}]',
    0, '客队球迷与主队球迷在 {stadium} 外发生冲突，{team} 要尽快表态。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('new_wave', '新球迷浪潮', '球迷舆情', 6, 'choice', '{}', '{}',
-   '[{"no":1,"name":"办球迷开放日","desc":"小投入拉口碑","outcomes":[{"w":70,"effects":{"fans_pct":0.04,"money":-0.5}},{"w":30,"effects":{"fans_pct":0.01,"money":-1.5}}]},{"no":2,"name":"推出低价学生票","desc":"薄利多销搏长期","outcomes":[{"w":50,"effects":{"fans_pct":0.05,"money":-1.0}},{"w":50,"effects":{"money":0.5,"fans_pct":-0.01}}]}]',
+   '[{"no":1,"name":"办球迷开放日","desc":"小投入拉口碑","outcomes":[{"w":70,"effects":{"fans_pct":0.04,"money":-0.5,"signals":{"fan_mood":1.0}}},{"w":30,"effects":{"fans_pct":0.01,"money":-1.5}}]},{"no":2,"name":"推出低价学生票","desc":"薄利多销搏长期","outcomes":[{"w":50,"effects":{"fans_pct":0.05,"money":-1.0,"signals":{"fan_mood":1.0}}},{"w":50,"effects":{"money":0.5,"fans_pct":-0.01}}]}]',
    0, '社区推广见效，一群年轻人把 {stadium} 当成了周末打卡地，怎么接住?', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('merch_hit', '周边爆款', '商业机会', 7, 'choice', '{}', '{}',
-   '[{"no":1,"name":"加班加单补货","desc":"趁热度冲一波销售","outcomes":[{"w":60,"effects":{"money":5.0,"maintenance":1.0}},{"w":40,"effects":{"money":-1.5,"maintenance":3.0}}]},{"no":2,"name":"线上限量抽签","desc":"饥饿营销保口碑","outcomes":[{"w":50,"effects":{"money":4.0,"fans_pct":0.02}},{"w":50,"effects":{"money":0.5,"fans_pct":-0.02}}]}]',
+   '[{"no":1,"name":"加班加单补货","desc":"趁热度冲一波销售","outcomes":[{"w":60,"effects":{"money":5.0,"maintenance":1.0,"signals":{"fee_mod":1.1}}},{"w":40,"effects":{"money":-1.5,"maintenance":3.0}}]},{"no":2,"name":"线上限量抽签","desc":"饥饿营销保口碑","outcomes":[{"w":50,"effects":{"money":4.0,"fans_pct":0.02,"signals":{"fee_mod":1.1}}},{"w":50,"effects":{"money":0.5,"fans_pct":-0.02}}]}]',
    0, '{team} 新年款围巾脱销，周边商品盈利大涨，要不要趁机加码?', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('scalper_raid', '黄牛泛滥', '商业机会', 5, 'choice', '{}', '{}',
-   '[{"no":1,"name":"实名购票+人脸入场","desc":"动真格清理黄牛","outcomes":[{"w":60,"effects":{"money":-2.0,"fans_pct":0.03}},{"w":40,"effects":{"maintenance":4.0,"fans_pct":0.01}}]},{"no":2,"name":"与票务平台合作","desc":"技术封堵，成本中等","outcomes":[{"w":70,"effects":{"money":-1.0,"fans_pct":0.02}},{"w":30,"effects":{"money":-3.0,"fans_pct":-0.02}}]}]',
+   '[{"no":1,"name":"实名购票+人脸入场","desc":"动真格清理黄牛","outcomes":[{"w":60,"effects":{"money":-2.0,"fans_pct":0.03}},{"w":40,"effects":{"maintenance":4.0,"fans_pct":0.01,"signals":{"fan_mood":-2.0}}}]},{"no":2,"name":"与票务平台合作","desc":"技术封堵，成本中等","outcomes":[{"w":70,"effects":{"money":-1.0,"fans_pct":0.02}},{"w":30,"effects":{"money":-3.0,"fans_pct":-0.02,"signals":{"fan_mood":-2.0}}}]}]',
    0, '黄牛把 {team} 主场球票炒到三倍，俱乐部打算清理。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('food_fest', '球场美食节', '商业机会', 6, 'choice', '{}', '{}',
-   '[{"no":1,"name":"自营加放15个摊","desc":"摊租全收","outcomes":[{"w":60,"effects":{"money":3.0}},{"w":40,"effects":{"money":-1.0,"maintenance":1.5}}]},{"no":2,"name":"免铺租换流量","desc":"让利引流","outcomes":[{"w":60,"effects":{"fans_pct":0.03,"money":1.0}},{"w":40,"effects":{"money":-2.0}}]}]',
+   '[{"no":1,"name":"自营加放15个摊","desc":"摊租全收","outcomes":[{"w":60,"effects":{"money":3.0}},{"w":40,"effects":{"money":-1.0,"maintenance":1.5}}]},{"no":2,"name":"免铺租换流量","desc":"让利引流","outcomes":[{"w":60,"effects":{"fans_pct":0.03,"money":1.0,"signals":{"fan_mood":1.0}}},{"w":40,"effects":{"money":-2.0}}]}]',
    0, '{stadium} 美食节开了 18 个小吃摊，怎么运营赚得更多?', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('doc_film', '纪录片取景', '媒体', 5, 'choice', '{}', '{}',
    '[{"no":1,"name":"免费借景","desc":"换口碑曝光","outcomes":[{"w":70,"effects":{"fans_pct":0.03,"money":-1.0}},{"w":30,"effects":{"fans_pct":0.01,"money":-2.5}}]},{"no":2,"name":"收取拍摄场地费","desc":"明码标价","outcomes":[{"w":50,"effects":{"money":2.0}},{"w":50,"effects":{"money":-0.5,"fans_pct":-0.01}}]}]',
@@ -77,13 +80,13 @@ VALUES
    '[{"no":1,"name":"加开一场","desc":"吃满热度","outcomes":[{"w":60,"effects":{"money":5.0,"maintenance":1.5}},{"w":40,"effects":{"money":-1.0,"maintenance":4.0}}]},{"no":2,"name":"不加场，卖贵一点","desc":"物以稀为贵","outcomes":[{"w":60,"effects":{"money":3.0,"fans_pct":-0.01}},{"w":40,"effects":{"money":-1.0}}]}]',
    0, '{stadium} 演唱会门票秒空，主办方问要不要加场。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('brand_crisis', '冠名品牌危机', '冠名联动', 4, 'choice', '{"requires_naming":true}', '{}',
-   '[{"no":1,"name":"声援品牌共渡难关","desc":"留人情换长约","outcomes":[{"w":60,"effects":{"money":-3.0,"fans_pct":0.02}},{"w":40,"effects":{"money":-4.0,"fans_pct":-0.02}}]},{"no":2,"name":"紧急换广告位","desc":"切割风险","outcomes":[{"w":50,"effects":{"money":-4.0,"fans_pct":0.02}},{"w":50,"effects":{"money":1.0}}]}]',
+   '[{"no":1,"name":"声援品牌共渡难关","desc":"留人情换长约","outcomes":[{"w":60,"effects":{"money":-3.0,"fans_pct":0.02,"satisfaction":0.2}},{"w":40,"effects":{"money":-4.0,"fans_pct":-0.02,"satisfaction":0.1}}]},{"no":2,"name":"紧急换广告位","desc":"切割风险","outcomes":[{"w":50,"effects":{"money":-4.0,"fans_pct":0.02,"satisfaction":-0.4}},{"w":50,"effects":{"money":1.0,"satisfaction":-0.4}}]}]',
    0, '冠名品牌出事了，{team} 的球场广告位被下架整改。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('brand_anniv', '冠名周年庆', '冠名联动', 4, 'choice', '{"requires_naming":true}', '{}',
-   '[{"no":1,"name":"全力赞助庆典","desc":"借势营销","outcomes":[{"w":70,"effects":{"money":4.0,"fans_pct":0.02,"maintenance":0.5}},{"w":30,"effects":{"money":-1.0,"fans_pct":-0.01}}]},{"no":2,"name":"只提供场地","desc":"稳赚不亏","outcomes":[{"w":60,"effects":{"money":2.5}},{"w":40,"effects":{"money":-0.5,"maintenance":1.0}}]}]',
+   '[{"no":1,"name":"全力赞助庆典","desc":"借势营销","outcomes":[{"w":70,"effects":{"money":4.0,"fans_pct":0.02,"maintenance":0.5,"satisfaction":0.3}},{"w":30,"effects":{"money":-1.0,"fans_pct":-0.01,"satisfaction":0.15}}]},{"no":2,"name":"只提供场地","desc":"稳赚不亏","outcomes":[{"w":60,"effects":{"money":2.5,"satisfaction":0.1}},{"w":40,"effects":{"money":-0.5,"maintenance":1.0,"satisfaction":0.05}}]}]',
    0, '冠名品牌在 {stadium} 办周年嘉年华，赠送 {team} 一笔营销赞助。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('derby_buzz', '德比热度', '商业机会', 6, 'choice', '{}', '{}',
-   '[{"no":1,"name":"加急印限量球衣","desc":"抢德比财","outcomes":[{"w":60,"effects":{"money":6.0,"maintenance":1.0}},{"w":40,"effects":{"money":-2.0,"maintenance":2.0}}]},{"no":2,"name":"提高包厢价格","desc":"趁热抬价","outcomes":[{"w":50,"effects":{"money":4.0,"fans_pct":-0.01}},{"w":50,"effects":{"money":-1.5,"fans_pct":-0.02}}]}]',
+   '[{"no":1,"name":"加急印限量球衣","desc":"抢德比财","outcomes":[{"w":60,"effects":{"money":6.0,"maintenance":1.0,"signals":{"fan_mood":2.0}}},{"w":40,"effects":{"money":-2.0,"maintenance":2.0}}]},{"no":2,"name":"提高包厢价格","desc":"趁热抬价","outcomes":[{"w":50,"effects":{"money":4.0,"fans_pct":-0.01,"signals":{"fan_mood":2.0}}},{"w":50,"effects":{"money":-1.5,"fans_pct":-0.02}}]}]',
    0, '德比大战将至，{stadium} 的球票一票难求，气氛提前被点燃。', 'builtin', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('vip_luxury', 'VIP礼遇升级', '商业机会', 4, 'choice', '{}', '{}',
    '[{"no":1,"name":"升级包厢软装","desc":"高投入高回报","outcomes":[{"w":60,"effects":{"money":4.0,"maintenance":2.0}},{"w":40,"effects":{"money":-3.0,"maintenance":3.0}}]},{"no":2,"name":"与豪华酒店联名","desc":"借名头少投入","outcomes":[{"w":60,"effects":{"money":3.0,"fans_pct":0.01}},{"w":40,"effects":{"money":-1.5,"fans_pct":-0.01}}]}]',

@@ -115,6 +115,9 @@ const MIGRATION_FILES = [
   '0048_event_occurrences.sql',
   '0049_stadium_event_pending.sql',
   '0050_event_occurrence_reminded.sql',
+  '0051_naming_satisfaction.sql',
+  '0052_event_seeds_batch2.sql',
+  '0053_event_drafts.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

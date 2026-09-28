@@ -11,6 +11,11 @@ import { createConfigService } from '../core/config.ts';
 import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
 import { getActiveNaming, windowNamingStatements, windowBrandHeatStatement } from './naming-ops.ts';
 import { loadActivityCatalog, windowActivityStatements } from './venue-ops.ts';
+import {
+  collectWindowSignals,
+  loadEventSignals,
+  queueWindowSignalNotes,
+} from './event-ops.ts';
 
 export interface AttendanceModel {
   weather_probabilities: Record<string, number>;
@@ -374,6 +379,9 @@ export async function windowHomeStatements(
   const model = await loadAttendanceModel(env.DB);
   const tierTable = await loadTierTable(env.DB);
   const activityCatalog = await loadActivityCatalog(env.DB);
+  // v6.12.0 D3 经营信号：本窗触发事件沉淀的 fan_mood / upkeep / fee_mod，按队消费
+  const signalDefs = await loadEventSignals(env.DB);
+  const signalsByClub = await collectWindowSignals(env.DB, season, windowSeq, signalDefs);
 
   const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans FROM stadiums').all<StadiumRow>();
   // 设施等级一次批量查（青训级 → evolveFans 涨粉系数 ×(1+0.03n)，v6.6.3；草皮级 → 档期活动的收入加成与损坏减免，v6.9.0）
@@ -406,7 +414,11 @@ export async function windowHomeStatements(
     const attendTotal = homeMatches?.total ?? 0;
     const attendRate = played > 0 && s.capacity > 0 ? attendTotal / (s.capacity * played) : 1;
 
-    const maintenance = Math.round((tierEntry.base_maintenance + tierEntry.per_10k_rate * (s.capacity / 10000) * played) * 100) / 100;
+    // upkeep 信号乘数（v6.12.0 D3，插件 window_service 同序：先算基础维护费再乘、积已终钳）
+    const sig = signalsByClub.get(s.club_id);
+    const upkeepF = sig?.mults.upkeep ?? 1;
+    const maintenanceBase = Math.round((tierEntry.base_maintenance + tierEntry.per_10k_rate * (s.capacity / 10000) * played) * 100) / 100;
+    const maintenance = upkeepF !== 1 ? Math.round(maintenanceBase * upkeepF * 1000) / 1000 : maintenanceBase;
     if (maintenance > 0) {
       summary.maintenanceClubs++;
       summary.maintenanceTotal = Math.round((summary.maintenanceTotal + maintenance) * 100) / 100;
@@ -417,7 +429,7 @@ export async function windowHomeStatements(
           kind: 'maintenance',
           refType: 'window',
           refId: season * 100 + windowSeq,
-          memo: `球场维护（S${season} 第 ${windowSeq} 窗，${played} 场主场）`,
+          memo: `球场维护（S${season} 第 ${windowSeq} 窗，${played} 场主场${upkeepF !== 1 ? `，经营信号：维护负担 ×${upkeepF}` : ''}）`,
         }),
       );
     }
@@ -428,12 +440,15 @@ export async function windowHomeStatements(
     const tourTeamId = tourMap.get(s.club_id);
     const formPts = tourTeamId === undefined ? 4 : await clubFormPts(env, tourTeamId, 0);
     const nextFans = evolveFans(model, s.fans, target, attendRate, formPts, youthLevels.get(s.club_id) ?? 0);
-    if (Math.abs(nextFans - s.fans) >= 0.5) {
+    // fan_mood 信号（v6.12.0 D3，插件 fans_service.evolve 同口径）：演化结果 ×(1+Σ/100) 后钳 [0, 上限]
+    const mood = sig?.steps.fan_mood ?? 0;
+    const nextFansWithMood = mood !== 0 ? Math.min(Math.max(nextFans * (1 + mood / 100), 0), model.fans_cap) : nextFans;
+    if (Math.abs(nextFansWithMood - s.fans) >= 0.5) {
       summary.fansClubs++;
       statements.push(
         env.DB
           .prepare(`UPDATE stadiums SET fans = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`)
-          .bind(nextFans, s.club_id),
+          .bind(nextFansWithMood, s.club_id),
       );
     }
 
@@ -442,8 +457,10 @@ export async function windowHomeStatements(
     if (opts.chargeNaming) {
       const naming = await getActiveNaming(env.DB, s.club_id);
       if (naming) {
-        const fansGrowth = s.fans > 0 ? (nextFans - s.fans) / s.fans : 0;
-        statements.push(...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth));
+        const fansGrowth = s.fans > 0 ? (nextFansWithMood - s.fans) / s.fans : 0;
+        statements.push(
+          ...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth, { feeFactor: sig?.mults.fee_mod ?? 1 }),
+        );
         summary.namingClubs++;
         summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
         // 品牌热度动态（v6.8.0）：本队近 3 场全胜/全败调 brand_pool.heat（目录无映射的队跳过）
@@ -465,5 +482,8 @@ export async function windowHomeStatements(
       summary.activityTotal = Math.round((summary.activityTotal + activity.income - activity.extraMaintenance) * 100) / 100;
     }
   }
+  // 经营信号注记（v6.12.0 D3）：给本窗有非中性信号的队各排一条通知（本仓没有关窗汇总通知，
+  // 教练感知面 = 这条通知 + 维护费/冠名费流水 memo 里的信号说明）
+  await queueWindowSignalNotes(env, season, windowSeq, signalDefs);
   return { statements, summary };
 }

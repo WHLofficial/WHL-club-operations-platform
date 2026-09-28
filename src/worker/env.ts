@@ -40,4 +40,9 @@ export interface Env {
   // v6.1.1：wrangler version_metadata 绑定（只读）——Sentry SDK 从 env 自动检测该绑定的
   // id 作为 release（优先级低于 SENTRY_RELEASE 环境变量，本仓不配后者）。
   CF_VERSION_METADATA?: { id: string };
+  // v6.12.0（D3）：LLM 草稿工坊（管理端 only）——OpenAI 兼容 chat/completions，三变量都不绑具体厂商。
+  // 未配 LLM_API_KEY（或 BASE/MODEL）= 端点 503 旁路；LLM_API_KEY 走 secret（wrangler secret put）。
+  LLM_API_BASE?: string;
+  LLM_API_KEY?: string;
+  LLM_MODEL?: string;
 }

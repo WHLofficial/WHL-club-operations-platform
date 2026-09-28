@@ -2,13 +2,16 @@
 // 计划裁决：不做自定义事件编辑 / 改 JSON（池只允许启停），触发是管理端驱动的（没有玩家自助入口）。
 // 事件不绑窗口：触发时把当前所处的 (赛季, 窗) 归档进 occurrence，缺省取开着的窗口，
 // 两窗之间（赛季进行中）取可见赛季 + 窗号 0。
+// v6.12.0（D3）：LLM 草稿工坊（管理端 only）——生成文案/结构草稿 → 独立草稿表审校 →
+// 采纳才进 event_pool；LLM 只碰文案与创意，数值效果由 clampEventDraft 钳制（不进玩家请求路径）。
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
+import { llmChat, llmChatJson, llmConfigured } from '../../../lib/llm.ts';
 import { getOpenWindow, getVisibleSeason } from '../../seasons.ts';
-import { triggerEventBatch } from '../../event-ops.ts';
+import { clampEventDraft, loadEventById, loadEventClamps, loadEventRules, loadEventSignals, loadWeatherKeys, triggerEventBatch, type EventDraftStruct } from '../../event-ops.ts';
 import { readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -112,6 +115,183 @@ app.get('/events/occurrences', async (c) => {
       .all()
   ).results;
   return c.json({ season, occurrences: rows });
+});
+
+// ---- LLM 草稿工坊（v6.12.0，D3；管理端 only）----
+
+interface DraftRow {
+  id: number;
+  kind: string;
+  payload_json: string;
+  source_event_id: string | null;
+  note: string;
+  status: string;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function draftView(row: DraftRow) {
+  return { ...row, payload: JSON.parse(row.payload_json) as unknown };
+}
+
+/** LLM 生成事件文案 / 结构草稿，落 event_drafts（status=draft）；采纳前不进 event_pool。 */
+app.post('/events/llm-draft', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const body = (await readJson(c)) as { kind?: unknown; eventId?: unknown; hint?: unknown } | null;
+  if (body?.kind !== 'text' && body?.kind !== 'struct') throw new HttpError(400, 'kind 只能是 text（改文案）或 struct（新事件草稿）');
+  const hint = typeof body.hint === 'string' ? body.hint.trim().slice(0, 500) : '';
+
+  if (body.kind === 'text') {
+    if (typeof body.eventId !== 'string' || body.eventId.trim() === '') throw new HttpError(400, 'text 草稿要给 eventId（改写对象）');
+    const event = await loadEventById(c.env.DB, body.eventId.trim());
+    if (event === null) throw new HttpError(404, '没有这个事件');
+    const text = await llmChat(c.env, {
+      system:
+        '你是足球俱乐部经营游戏的文案写手。改写事件的播报文案：一两句话、不超过 80 字、有画面感。' +
+        '禁止出现任何数字、金额、百分比（数值由系统另行结算公布）；可用 {team} 与 {stadium} 两个占位符。',
+      user: `事件「${event.name}」（${event.category}）。现有文案：${event.template || '（无）'}。${hint ? `要求：${hint}` : '请给出一份新的改写。'}`,
+      maxTokens: 300,
+    });
+    const payload = { template: text.slice(0, 120) };
+    const res = await c.env.DB
+      .prepare(
+        `INSERT INTO event_drafts (kind, payload_json, source_event_id, note, status, created_by, created_at, updated_at)
+         VALUES ('text', ?, ?, ?, 'draft', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      )
+      .bind(JSON.stringify(payload), event.event_id, hint, user.id)
+      .run();
+    return c.json({ id: Number(res.meta.last_row_id ?? 0), kind: 'text', payload, adjustments: [] }, 201);
+  }
+
+  // struct：让模型按 schema 出 JSON，再过 clampEventDraft 钳制（LLM 的数字不可信，钳完才算数）
+  const [rules, clamps, signalDefs, weatherKeys] = await Promise.all([
+    loadEventRules(c.env.DB),
+    loadEventClamps(c.env.DB),
+    loadEventSignals(c.env.DB),
+    loadWeatherKeys(c.env.DB),
+  ]);
+  const struct = await llmChatJson<unknown>(c.env, {
+    system:
+      '你是足球俱乐部经营游戏的事件策划。产出一条新事件的 JSON 草稿，字段：' +
+      'event_id（小写蛇形）、name（≤20字）、category、weight(1-10)、event_type("instant"|"choice")、' +
+      'conditions（可含 min_tier/max_tier/requires_naming/requires_activity 等）、' +
+      'instant 型给 effects（money 单位 m，±8；maintenance 0-5；fans_pct ±0.05；attendance_mod 0.5-2；satisfaction ±0.5；signals 的 fan_mood ±2、upkeep/fee_mod 0.5-2）；' +
+      'choice 型给 options（2-4 个，每个 no/name/desc/outcomes:[{w,effects}]，outcomes 1-4 个）；' +
+      'template（≤120字，可用 {team}/{stadium}，禁数字）。只回 JSON。',
+    user: hint !== '' ? hint : '设计一条球迷舆情或商业机会类的球场经营事件。',
+    maxTokens: 1200,
+  });
+  const clamped = clampEventDraft(struct, { clamps, signalDefs, weatherKeys });
+  void rules;
+  const payload = clamped.event;
+  const noteParts = [hint, ...clamped.adjustments].filter((s) => s !== '').join('；');
+  const res = await c.env.DB
+    .prepare(
+      `INSERT INTO event_drafts (kind, payload_json, source_event_id, note, status, created_by, created_at, updated_at)
+       VALUES ('struct', ?, NULL, ?, 'draft', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+    )
+    .bind(JSON.stringify(payload), noteParts, user.id)
+    .run();
+  return c.json({ id: Number(res.meta.last_row_id ?? 0), kind: 'struct', payload, adjustments: clamped.adjustments }, 201);
+});
+
+app.get('/events/drafts', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const statusParam = c.req.query('status');
+  const status = statusParam === 'draft' || statusParam === 'adopted' || statusParam === 'discarded' ? statusParam : null;
+  const rows = (
+    await c.env.DB
+      .prepare(
+        `SELECT id, kind, payload_json, source_event_id, note, status, created_by, created_at, updated_at
+         FROM event_drafts ${status !== null ? 'WHERE status = ?' : ''} ORDER BY id DESC LIMIT 50`,
+      )
+      .bind(...(status !== null ? [status] : []))
+      .all<DraftRow>()
+  ).results;
+  return c.json({ drafts: rows.map(draftView) });
+});
+
+/** 采纳草稿：text 改写 event_pool.template；struct INSERT event_pool（event_id 撞车 409）。 */
+app.post('/events/drafts/:id/adopt', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '草稿 id 不对');
+  const row = await c.env.DB.prepare(`SELECT id, kind, payload_json, source_event_id, status FROM event_drafts WHERE id = ?`)
+    .bind(id)
+    .first<DraftRow>();
+  if (!row) throw new HttpError(404, '没有这条草稿');
+  if (row.status !== 'draft') throw new HttpError(409, '这条草稿已经处理过了');
+
+  let targetId: string;
+  if (row.kind === 'text') {
+    const payload = JSON.parse(row.payload_json) as { template?: unknown };
+    if (typeof payload.template !== 'string' || payload.template.trim() === '') throw new HttpError(400, '草稿里没有文案');
+    const event = row.source_event_id !== null ? await loadEventById(c.env.DB, row.source_event_id) : null;
+    if (event === null) throw new HttpError(404, '草稿指向的原事件已不存在');
+    await c.env.DB.prepare(`UPDATE event_pool SET template = ? WHERE event_id = ?`)
+      .bind(payload.template.trim().slice(0, 120), event.event_id)
+      .run();
+    targetId = event.event_id;
+  } else {
+    const event = JSON.parse(row.payload_json) as EventDraftStruct;
+    const clash = await c.env.DB.prepare('SELECT id FROM event_pool WHERE event_id = ?').bind(event.event_id).first();
+    if (clash) throw new HttpError(409, `事件标识「${event.event_id}」已在池里，换个 event_id`);
+    await c.env.DB
+      .prepare(
+        `INSERT INTO event_pool (event_id, name, category, weight, event_type, conditions_json, effects_json, options_json,
+                                 soft_conditions, template, source, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'custom', 'adopted', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      )
+      .bind(
+        event.event_id,
+        event.name,
+        event.category,
+        event.weight,
+        event.event_type,
+        JSON.stringify(event.conditions),
+        JSON.stringify(event.effects),
+        JSON.stringify(event.options),
+        event.template,
+      )
+      .run();
+    targetId = event.event_id;
+  }
+  await c.env.DB.prepare(`UPDATE event_drafts SET status = 'adopted', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`).bind(id).run();
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'event_draft_adopt',
+    targetType: 'event_draft',
+    targetId: id,
+    origin: 'user',
+    after: { kind: row.kind, target: targetId },
+  });
+  return c.json({ id, kind: row.kind, target: targetId });
+});
+
+app.post('/events/drafts/:id/discard', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '草稿 id 不对');
+  const row = await c.env.DB.prepare(`SELECT id, status FROM event_drafts WHERE id = ?`).bind(id).first<DraftRow>();
+  if (!row) throw new HttpError(404, '没有这条草稿');
+  if (row.status !== 'draft') throw new HttpError(409, '这条草稿已经处理过了');
+  await c.env.DB.prepare(`UPDATE event_drafts SET status = 'discarded', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`).bind(id).run();
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'event_draft_discard',
+    targetType: 'event_draft',
+    targetId: id,
+    origin: 'user',
+    after: { status: 'discarded' },
+  });
+  return c.json({ id, status: 'discarded' });
+});
+
+/** 生成入口的可用性探针：前端用它决定「生成」按钮是可点还是置灰提示。 */
+app.get('/events/llm-status', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  return c.json({ configured: llmConfigured(c.env) });
 });
 
 export default app;

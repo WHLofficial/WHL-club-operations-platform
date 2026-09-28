@@ -65,11 +65,14 @@ export function renderNotification(template: string, data: Record<string, unknow
     // 随机事件（v6.10.0，D 块）：即发型触发即广播；data.notes 是效果播报（资金/死忠/设施…）
     case 'event_triggered':
       return `🎲 ${data.club} 触发事件「${data.name}」：${data.text}${data.notes ? `（${data.notes}）` : ''}`;
-    // 选择型（v6.11.0，D2）：结算回执 + 距时限 24h 提醒
+    // 选择型（v6.11.0，D2）：结算回执 + 距时限 24h 提醒；data.how 已由结算方带「（超时自动结算）」尾注
     case 'event_resolved':
       return `🎲 ${data.club} 的事件「${data.name}」已结算：${data.how}${data.notes ? `（${data.notes}）` : ''}`;
     case 'event_deadline':
       return `⏳ ${data.club} 的事件「${data.name}」还有不到 24 小时可选（截止 ${data.deadline}），过期按资金最差结果自动结算。`;
+    // 经营信号注记（v6.12.0，D3）：关窗批给有非中性信号的队单发一条；data.lines 已是人话注记行
+    case 'window_signals':
+      return `📶 ${data.club} 本窗（${data.window}）经营信号生效：${data.lines}。`;
     default:
       return String(data.text ?? '');
   }
