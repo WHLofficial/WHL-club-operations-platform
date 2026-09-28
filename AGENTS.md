@@ -43,7 +43,8 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 
 ## 测试
 
-- `npm test`（Vitest，当前 53 文件 / 833 用例）、`npm run typecheck`（三份 tsconfig）、`npm run build`——功能点提交前至少跑 test + typecheck。
+- `npm test`（Vitest，当前 58 文件 / 964 用例）、`npm run typecheck`（三份 tsconfig）、`npm run build`——功能点提交前至少跑 test + typecheck。
+- **测试计划统一用 qa-test-planner skill 设计**（2026-09-28 用户指令「以后测试统一利用qa-test-planner设计」）：每个增量先产出 `docs/test-plans/<版本>-<主题>.md`（TC 编号 + 前置/步骤/预期/优先级 + 回归套件）随 docs 枚提交；vitest / 变异验证 / 最坏情况口径 / e2e 照旧作执行层，按测试计划逐条落实。
 - `npm run test:e2e`：需要先 `npm run build` 且 `npm run dev` 在跑，用本机 Chrome（`playwright-core`，未装浏览器二进制）。
 - `tests/d1.ts` 用本地 SQLite 执行真实迁移：**新增迁移必须把文件名追加进它的 `MIGRATION_FILES`**，否则夹具与迁移脱节。
 - 夹具里的赛事库/认证库数据在 `tests/tour-team-seed.ts` 等处，按需扩充，不要连远端。
