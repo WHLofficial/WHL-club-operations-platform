@@ -45,7 +45,8 @@ function money2(n: number): string {
 // 窗口财务汇总（v6.7.0，B2）：比赛日收入按上座记录精确归窗，其余流水按时间落进各窗。
 // 固定列只放结算大头（工资/维护/冠名/活动/富人税），其余 kind 并进「其他」；季前与窗外流水不进表。
 // v6.9.0 加「活动」列：球场档期活动的收入（草皮损坏仍归维护费列，kind 同为 maintenance）。
-const FINANCE_NAMED_KINDS = ['wage', 'maintenance', 'naming_fee', 'naming_bonus', 'naming_penalty', 'activity', 'luxury_tax'] as const;
+// v6.10.0 加「事件」列：随机事件的资金流水（kind='event'，可为负；maintenance/fans 等效果不进本列）。
+const FINANCE_NAMED_KINDS = ['wage', 'maintenance', 'naming_fee', 'naming_bonus', 'naming_penalty', 'activity', 'event', 'luxury_tax'] as const;
 
 function otherKindsSum(byKind: Record<string, number>): number {
   return Object.entries(byKind).reduce((s, [k, v]) => (FINANCE_NAMED_KINDS.includes(k as never) ? s : s + v), 0);
@@ -95,6 +96,7 @@ function FinanceSummaryCard() {
                 <th className="num">维护费</th>
                 <th className="num">冠名</th>
                 <th className="num">活动</th>
+                <th className="num">事件</th>
                 <th className="num">富人税</th>
                 <th className="num">其他</th>
                 <th className="num">净额</th>
@@ -113,6 +115,7 @@ function FinanceSummaryCard() {
                   <td className="num mono">{money2(-(w.byKind['maintenance'] ?? 0))}</td>
                   <td className="num mono">{money2(namingNet(w.byKind))}</td>
                   <td className="num mono">{money2(w.byKind['activity'] ?? 0)}</td>
+                  <td className="num mono">{money2(w.byKind['event'] ?? 0)}</td>
                   <td className="num mono">{money2(-(w.byKind['luxury_tax'] ?? 0))}</td>
                   <td className="num mono">{money2(otherKindsSum(w.byKind))}</td>
                   <td className={`num mono ${w.net >= 0 ? 'ledger-in' : 'ledger-out'}`}>{fmtAmount(w.net)}</td>
@@ -129,6 +132,7 @@ function FinanceSummaryCard() {
                   <td className="num mono">{money2(-windows.reduce((s, w) => s + (w.byKind['maintenance'] ?? 0), 0))}</td>
                   <td className="num mono">{money2(windows.reduce((s, w) => s + namingNet(w.byKind), 0))}</td>
                   <td className="num mono">{money2(windows.reduce((s, w) => s + (w.byKind['activity'] ?? 0), 0))}</td>
+                  <td className="num mono">{money2(windows.reduce((s, w) => s + (w.byKind['event'] ?? 0), 0))}</td>
                   <td className="num mono">{money2(-windows.reduce((s, w) => s + (w.byKind['luxury_tax'] ?? 0), 0))}</td>
                   <td className="num mono">{money2(windows.reduce((s, w) => s + otherKindsSum(w.byKind), 0))}</td>
                   <td className={`num mono ${totals.net >= 0 ? 'ledger-in' : 'ledger-out'}`}>{fmtAmount(totals.net)}</td>

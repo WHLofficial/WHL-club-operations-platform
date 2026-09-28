@@ -62,6 +62,9 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `✅ 放行：#${data.listingId} 的激活被对方放行，按激活价成交进审核。`;
     case 'activation_match_expired':
       return `⌛ 匹配窗结束：#${data.listingId} 的激活匹配窗到期未匹配，按激活价成交进审核。`;
+    // 随机事件（v6.10.0，D 块）：即发型触发即广播；data.notes 是效果播报（资金/死忠/设施…）
+    case 'event_triggered':
+      return `🎲 ${data.club} 触发事件「${data.name}」：${data.text}${data.notes ? `（${data.notes}）` : ''}`;
     default:
       return String(data.text ?? '');
   }

@@ -246,6 +246,7 @@ function asRange(v: unknown): [number, number] | null {
  * 赛果确认钩子④（v1.5.0）：主场三分收入即时入账。
  * 跳过条件（detail=null）：AUTH_DB 目录无主场映射 / 无球场行 / 已入过账。
  * 上座快照 INSERT match_attendance（match_id 主键）+ ledgerMovement(kind='revenue', ref='match') 同批双闸。
+ * v6.10.0：随机事件的预置上座乘数（next_attendance_mod）与预置天气（next_weather）在这里消费，同批清零。
  */
 export async function matchAttendanceStatements(
   env: Env,
@@ -259,10 +260,18 @@ export async function matchAttendanceStatements(
   if (clubId === undefined) return { statements: [], detail: null };
   const existing = await env.DB.prepare('SELECT 1 AS x FROM match_attendance WHERE match_id = ?').bind(input.matchId).first();
   if (existing) return { statements: [], detail: null };
-  const stadium = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans FROM stadiums WHERE club_id = ?').bind(clubId).first<StadiumRow>();
+  const stadium = await env.DB
+    .prepare(
+      'SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, next_attendance_mod, next_weather FROM stadiums WHERE club_id = ?',
+    )
+    .bind(clubId)
+    .first<StadiumRow & { next_attendance_mod: number; next_weather: string }>();
   if (!stadium) return { statements: [], detail: null };
 
-  const weather = rollWeather(rng, model.weather_probabilities);
+  // v6.10.0 随机事件预置（一次性消费）：weather_set 写了 next_weather 就用预置天气，否则现掷
+  const presetWeather =
+    stadium.next_weather !== '' && model.weather_probabilities[stadium.next_weather] !== undefined ? stadium.next_weather : null;
+  const weather = presetWeather ?? rollWeather(rng, model.weather_probabilities);
   const wxRange = asRange(model.weather_ranges[weather]);
   const wx = wxRange ? uniform(rng, wxRange[0], wxRange[1]) : 1;
 
@@ -293,6 +302,7 @@ export async function matchAttendanceStatements(
     form *
     wx *
     opp *
+    stadium.next_attendance_mod * // v6.10.0 随机事件：下一场上座乘数（默认 1，用完即清）
     uniform(rng, model.perturbation[0], model.perturbation[1]);
   const fill = uniform(rng, model.sell_out_fill[0], model.sell_out_fill[1]);
   const attendance = demand >= stadium.capacity ? Math.floor(stadium.capacity * fill) : Math.floor(Math.max(0, demand));
@@ -313,7 +323,7 @@ export async function matchAttendanceStatements(
       kind: 'revenue',
       refType: 'match',
       refId: input.matchId,
-      memo: `比赛日收入（比赛 #${input.matchId}，上座 ${attendance}/${stadium.capacity}，${weather}；票 ${ticket}/商 ${commercial}/播 ${broadcast}）`,
+      memo: `比赛日收入（比赛 #${input.matchId}，上座 ${attendance}/${stadium.capacity}，${weather}${presetWeather ? '（事件预置）' : ''}；票 ${ticket}/商 ${commercial}/播 ${broadcast}）`,
     }),
   );
   statements.push(
@@ -323,6 +333,14 @@ export async function matchAttendanceStatements(
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
       )
       .bind(input.matchId, clubId, input.season, input.windowSeq, weather, attendance, ticket, commercial, broadcast),
+  );
+  // 事件预置是一次性的：本场消费掉即清零（同批原子；没预置时这两条也是写回默认值）
+  statements.push(
+    env.DB
+      .prepare(
+        `UPDATE stadiums SET next_attendance_mod = 1, next_weather = '', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`,
+      )
+      .bind(clubId),
   );
   return { statements, detail: { clubId, weather, attendance, ticket, commercial, broadcast } };
 }

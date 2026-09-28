@@ -1046,6 +1046,70 @@ export interface BookingResult {
   previous: BookingRow | null;
 }
 
+/** 随机事件（v6.10.0，D 块）：池只读启停 + 管理端触发 + 流水 */
+export interface AdminEventPoolRow {
+  id: number;
+  event_id: string;
+  name: string;
+  category: string;
+  weight: number;
+  /** instant = 触发即结算；choice = 选项型（v6.11.0 开放） */
+  event_type: string;
+  conditions_json: string;
+  effects_json: string;
+  options_json: string | null;
+  soft_conditions: number;
+  template: string;
+  source: string;
+  /** adopted | discarded */
+  status: string;
+  created_at: string;
+}
+
+export interface AdminEventOccurrence {
+  id: number;
+  club_id: number;
+  club_name: string | null;
+  season: number;
+  window_seq: number;
+  event_id: string;
+  event_name: string;
+  event_type: string;
+  /** pending | resolved */
+  status: string;
+  effects_json: string;
+  notes_json: string | null;
+  choice_no: number | null;
+  deadline_at: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  text: string | null;
+  created_at: string;
+}
+
+export interface AdminEventTriggeredRow {
+  occurrenceId: number;
+  clubId: number;
+  clubName: string;
+  eventId: string;
+  eventName: string;
+  text: string;
+  notes: string[];
+  effects: Record<string, unknown>;
+}
+
+export interface AdminEventTriggerResult {
+  season: number;
+  windowSeq: number;
+  /** 参与掷点的队数 */
+  clubs: number;
+  /** 实际触发条数 */
+  triggered: number;
+  /** 掷中但没有可用候选（条件全挡或已达单事件上限）的队数 */
+  capped: number;
+  events: AdminEventTriggeredRow[];
+}
+
 /** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
 export const LEDGER_KIND_LABELS: Record<string, string> = {
   opening_import: '期初导入',
@@ -1072,6 +1136,7 @@ export const LEDGER_KIND_LABELS: Record<string, string> = {
   naming_bonus: '对赌奖金',
   naming_penalty: '冠名解约赔款',
   luxury_tax: '富人税',
+  event: '随机事件',
 };
 
 export function ledgerKindLabel(kind: string): string {

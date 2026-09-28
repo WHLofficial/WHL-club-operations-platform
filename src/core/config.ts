@@ -66,6 +66,8 @@ export const CONFIG_KEYS = [
   'market_heat_rules',
   'activity_slots',
   'activity_config',
+  'event_rules',
+  'event_clamps',
   'results_auto_confirm',
   'review_amount_threshold',
   'bid_pattern_alert',
@@ -174,6 +176,11 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     youth_camp: { name: '青训夏令营', income: 1.0, youth_level_factor: 0.1 },
     idle: { name: '空置', income: 0.0 },
   }),
+  // v6.10.0 随机事件：触发规则（命中概率 / 每队上限 / 同事件分配上限 / 软条件权重衰减 / 选项时限小时）
+  // 与效果钳幅（money/fans_pct/maintenance/brand_heat/build_credit/influence/booking_cancel）
+  // —— 插件 event_hit_probability / event_max_occurrences / event_soft_condition_factor / event_*_clamp 同值。
+  event_rules: JSON.stringify({ hitProbability: 0.4, maxPerClub: 1, maxOccurrences: 2, softConditionFactor: 0.25, choiceDeadlineHours: 72 }),
+  event_clamps: JSON.stringify({ money: 8, fansPct: 0.05, maintenance: 5, brandHeat: 0.3, buildCredit: 5, influence: 10, bookingCancel: 2 }),
   // v2.7.0 赛果自动化：cron 每 5 分钟自动确认完赛场次（异常场标人工复核）
   results_auto_confirm: 'on',
   xp_per_level: '10',
