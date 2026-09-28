@@ -1232,11 +1232,15 @@ describe('D3 经营信号收集与关窗消费', () => {
     const { statements } = await home.windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
     await fx.env.DB.batch(statements);
 
-    const maint = sqlGet<{ memo: string }>(
+    const maint = sqlGet<{ memo: string; amount: number }>(
       fx.sqlite,
-      `SELECT memo FROM ledger_entries WHERE kind = 'maintenance' AND ref_type = 'window'`,
+      `SELECT memo, amount FROM ledger_entries WHERE kind = 'maintenance' AND ref_type = 'window'`,
     )!;
     expect(maint.memo).toContain('经营信号：维护负担 ×1.5');
+    // 金额也要对账（只锁 memo 锁不住乘数丢乘）：tier 0 / 20000 容量 / 0 场主场 → 基础维护费 ×1.5
+    const tierEntry = (await home.loadTierTable(fx.env.DB))['0']!;
+    const maintBase = Math.round(tierEntry.base_maintenance * 100) / 100;
+    expect(maint.amount).toBeCloseTo(-Math.round(maintBase * 1.5 * 1000) / 1000, 3); // 支出为负
     const naming = sqlGet<{ memo: string; amount: number }>(
       fx.sqlite,
       `SELECT memo, amount FROM ledger_entries WHERE kind = 'naming_fee'`,

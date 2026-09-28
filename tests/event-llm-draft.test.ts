@@ -60,6 +60,9 @@ describe('LLM 草稿工坊（管理端 only）', () => {
     expect(await (await send('GET', '/api/admin/events/llm-status', fx.env)).json()).toMatchObject({ configured: false });
     const fx2 = freshEnv({ base: 'https://llm.example/v1', key: 'k', model: 'm' });
     expect(await (await send('GET', '/api/admin/events/llm-status', fx2.env)).json()).toMatchObject({ configured: true });
+    // 部分配置（缺 model）也算未配置：不齐的配置会在真调用时才失败，探针要提前拦住
+    const fx3 = freshEnv({ base: 'https://llm.example/v1', key: 'k' });
+    expect(await (await send('GET', '/api/admin/events/llm-status', fx3.env)).json()).toMatchObject({ configured: false });
     const anon = await app.request('/api/admin/events/llm-status', {}, freshEnv().env);
     expect(anon.status).toBe(401);
   });
