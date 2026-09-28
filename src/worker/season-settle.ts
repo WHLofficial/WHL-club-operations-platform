@@ -10,6 +10,8 @@ import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { serviceSeasons } from '../core/bypass-rules.ts';
 import { clubIdByTourTeam, loadPrizeTable } from './prizes.ts';
+import { getActiveNaming, loadHeatRules, loadSatisfyConfig } from './naming-ops.ts';
+import { queueClubNotification } from './notify.ts';
 
 function nowSql(): string {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -297,11 +299,194 @@ export async function loyaltyMovements(
   return { statements, summary: { count, total } };
 }
 
+// ─── 联赛冠军加成（v6.13.0 C2）───────────────────────────────────────────────
+
+export interface ChampionBonusDetail {
+  applied: boolean;
+  /** 跳过原因（applied=false 时给人看的口径，进结算 warnings 触发 acknowledged 流程） */
+  note: string | null;
+  clubId: number | null;
+  clubName: string | null;
+  brand: string | null;
+  heatDelta: number;
+  satDelta: number;
+}
+
+interface StandingsRow {
+  teamId: number;
+  pts: number;
+  gd: number;
+}
+
+/** 已确认赛果 → 积分表（胜 3 平 1 负 0；**点球决胜按平局计**，与 formPtsOf 战绩口径一致；
+ *  弃权按 walkover_side 判负、净胜球按 3:0；双方弃权 / 无有效结果不计） */
+export function leagueStandings(rows: ConfirmedRow[]): StandingsRow[] {
+  const table = new Map<number, StandingsRow>();
+  const touch = (teamId: number): StandingsRow => {
+    let r = table.get(teamId);
+    if (!r) {
+      r = { teamId, pts: 0, gd: 0 };
+      table.set(teamId, r);
+    }
+    return r;
+  };
+  for (const row of rows) {
+    if (row.home_team_id === null || row.away_team_id === null) continue;
+    const home = touch(row.home_team_id);
+    const away = touch(row.away_team_id);
+    if (row.walkover_side === 'home') {
+      home.pts += 3;
+      home.gd += 3;
+      away.gd -= 3;
+    } else if (row.walkover_side === 'away') {
+      away.pts += 3;
+      away.gd += 3;
+      home.gd -= 3;
+    } else if (row.score_home !== null && row.score_away !== null) {
+      if (row.score_home === row.score_away) {
+        home.pts += 1;
+        away.pts += 1;
+      } else {
+        const winner = row.score_home > row.score_away ? home : away;
+        const loser = row.score_home > row.score_away ? away : home;
+        winner.pts += 3;
+        const diff = Math.abs(row.score_home - row.score_away);
+        winner.gd += diff;
+        loser.gd -= diff;
+      }
+    }
+    // 其余（双方弃权、比分缺失）不计
+  }
+  return [...table.values()];
+}
+
+/** tour 队 id → 队名（AUTH_DB team 目录；目录缺行不入 Map，tiebreak 回落队 id） */
+async function tourTeamNames(env: Env, teamIds: number[]): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  if (!env.AUTH_DB || teamIds.length === 0) return map;
+  const { results } = await env.AUTH_DB.prepare(
+    `SELECT tour_team_id, name FROM team WHERE tour_team_id IN (${teamIds.map(() => '?').join(',')})`,
+  )
+    .bind(...teamIds)
+    .all<{ tour_team_id: number; name: string }>();
+  for (const r of results) map.set(r.tour_team_id, r.name);
+  return map;
+}
+
+/**
+ * 联赛冠军加成（v6.13.0 C2，插件 champion_bonuses 口径）：定位本季 league_premier 绑定
+ * （0 条或 >1 条 → 跳过进 notes），自算积分表取榜首（积分 → 净胜球 → 队名），
+ * 冠军队有 active 冠名则品牌热度 + champion（钳 [clampLow, clampHigh]）、
+ * 满意度 + championSatisfaction（钳 [0, 2]）；无冠名只发 🏆 站内信（热度加成无落点）。
+ * 幂等：语句挂 `(SELECT status FROM seasons WHERE season = ?) != 'settled'` 守卫，
+ * 与批尾 seasons 状态 UPDATE 同闸——结算重放 / 并发抢行零改行。
+ */
+export async function championBonusStatements(
+  env: Env,
+  season: number,
+  actor: number,
+): Promise<{ statements: D1PreparedStatement[]; detail: ChampionBonusDetail }> {
+  const skip = (note: string): { statements: D1PreparedStatement[]; detail: ChampionBonusDetail } => ({
+    statements: [],
+    detail: { applied: false, note, clubId: null, clubName: null, brand: null, heatDelta: 0, satDelta: 0 },
+  });
+  const db = env.DB;
+  const bindings = await db
+    .prepare(`SELECT id, tournament_id FROM season_tournaments WHERE season = ? AND competition_type = 'league_premier'`)
+    .bind(season)
+    .all<{ id: number; tournament_id: number }>();
+  if (bindings.results.length === 0) return skip('本季没有联赛（league_premier）绑定，跳过冠军加成');
+  if (bindings.results.length > 1) return skip(`本季有 ${bindings.results.length} 条联赛绑定，冠军无法唯一判定，跳过冠军加成`);
+  const binding = bindings.results[0]!;
+
+  const { results } = await db
+    .prepare(
+      `SELECT home_team_id, away_team_id, score_home, score_away, pen_home, pen_away, walkover_side, winner_team
+       FROM result_confirmations WHERE tournament_id = ? AND season = ?`,
+    )
+    .bind(binding.tournament_id, season)
+    .all<ConfirmedRow>();
+  const standings = leagueStandings(results);
+  if (standings.length === 0) return skip('该联赛绑定没有已确认赛果，跳过冠军加成');
+
+  const names = await tourTeamNames(env, standings.map((r) => r.teamId));
+  standings.sort((a, b) => b.pts - a.pts || b.gd - a.gd || (names.get(a.teamId) ?? '').localeCompare(names.get(b.teamId) ?? '') || a.teamId - b.teamId);
+  const championTeam = standings[0]!;
+
+  const clubMap = await clubIdByTourTeam(env, [championTeam.teamId]);
+  const clubId = clubMap.get(championTeam.teamId) ?? null;
+  if (clubId === null) return skip(`联赛冠军（tour 队 ${championTeam.teamId}）是 CPU 队或无俱乐部映射，加成无落点`);
+
+  const clubRow = await db.prepare('SELECT name FROM clubs WHERE id = ?').bind(clubId).first<{ name: string }>();
+  const naming = await getActiveNaming(db, clubId);
+  if (!naming) {
+    return {
+      statements: [],
+      detail: {
+        applied: false,
+        note: `联赛冠军 ${clubRow?.name ?? clubId} 无生效冠名，热度加成无落点（站内信照发）`,
+        clubId,
+        clubName: clubRow?.name ?? null,
+        brand: null,
+        heatDelta: 0,
+        satDelta: 0,
+      },
+    };
+  }
+
+  const rules = await loadHeatRules(db);
+  const cfg = await loadSatisfyConfig(db);
+  const seasonGuard = `(SELECT status FROM seasons WHERE season = ?) != 'settled'`;
+  const audit = createAuditStatement(db);
+  const statements = [
+    db
+      .prepare(
+        `UPDATE brand_pool SET heat = MAX(?, MIN(?, ROUND(heat + ?, 3)))
+         WHERE brand = ? AND status = 'adopted' AND ${seasonGuard}`,
+      )
+      .bind(rules.clampLow, rules.clampHigh, rules.champion, naming.brand, season),
+    db
+      .prepare(
+        `UPDATE naming_contracts SET satisfaction = MAX(0, MIN(2, ROUND(satisfaction + ?, 3)))
+         WHERE id = ? AND status = 'active' AND ${seasonGuard}`,
+      )
+      .bind(cfg.championSatisfaction, naming.id, season),
+    audit({
+      actor,
+      action: 'champion_bonus',
+      targetType: 'season',
+      targetId: season,
+      origin: 'user',
+      after: { season, clubId, brand: naming.brand, heatDelta: rules.champion, satDelta: cfg.championSatisfaction, standingsTop: championTeam },
+      guardSql: seasonGuard,
+      guardParams: [season],
+    }),
+  ];
+  return {
+    statements,
+    detail: {
+      applied: true,
+      note: null,
+      clubId,
+      clubName: clubRow?.name ?? null,
+      brand: naming.brand,
+      heatDelta: rules.champion,
+      satDelta: cfg.championSatisfaction,
+    },
+  };
+}
+
 /**
  * 赛季结算（手动按钮）：growable 重判 → seasons.status='settled'。
- * 忠诚奖金自v3.0.0 起在赛季中期窗关窗时发（见 loyaltyMovements），此处只做成长重判与状态收口。
+ * 忠诚奖金自v3.0.0 起在赛季中期窗关窗时发（见 loyaltyMovements）。
+ * 冠军加成（v6.13.0 C2）并入本批：跳过原因并进 warnings 触发 acknowledged 流程。
  */
-export async function settleSeason(env: Env, actor: number, seasonInput: unknown, acknowledged: boolean): Promise<{ ok: true; growable: number; warnings: string[] }> {
+export async function settleSeason(
+  env: Env,
+  actor: number,
+  seasonInput: unknown,
+  acknowledged: boolean,
+): Promise<{ ok: true; growable: number; warnings: string[]; champion: ChampionBonusDetail }> {
   const season = Number(seasonInput);
   if (!Number.isInteger(season)) throw new HttpError(400, '赛季号不对');
   const db = env.DB;
@@ -311,8 +496,11 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
 
   const check = await checkSeasonSettle(env, season);
   if (check.blockers.length > 0) throw new HttpError(409, `结算前置不满足：${check.blockers.join('；')}`);
-  if (check.warnings.length > 0 && !acknowledged) {
-    throw new HttpError(409, `待确认提示：${check.warnings.join('；')}。确认继续请带 acknowledged=true`);
+  // 冠军加成预演算（v6.13.0 C2）：跳过原因并进 warnings，第一次调用会被 acknowledged 流程拦下
+  const champion = await championBonusStatements(env, season, actor);
+  const warnings = [...check.warnings, ...(champion.detail.note ? [champion.detail.note] : [])];
+  if (warnings.length > 0 && !acknowledged) {
+    throw new HttpError(409, `待确认提示：${warnings.join('；')}。确认继续请带 acknowledged=true`);
   }
 
   const audit = createAuditStatement(db);
@@ -327,9 +515,20 @@ export async function settleSeason(env: Env, actor: number, seasonInput: unknown
   const batchResults = await db.batch([
     ...statements,
     ...(growableStmt ? [growableStmt] : []),
+    ...champion.statements,
     db.prepare(`UPDATE seasons SET status = 'settled', settled_at = ${nowSql()} WHERE season = ? AND status != 'settled'`).bind(season),
   ]);
   const growable = growableStmt ? (batchResults[statements.length]?.meta.changes ?? 0) : 0;
-  return { ok: true, growable, warnings: check.warnings };
+  // 结算真发生（批尾 seasons 状态 UPDATE 改了行）才发冠军站内信；无冠名走「无落点」文案分支
+  if ((batchResults[batchResults.length - 1]?.meta.changes ?? 0) > 0 && champion.detail.clubId !== null) {
+    await queueClubNotification(env, champion.detail.clubId, 'naming_champion', {
+      club: champion.detail.clubName ?? `俱乐部 #${champion.detail.clubId}`,
+      season,
+      brand: champion.detail.brand,
+      heat: champion.detail.heatDelta,
+      sat: champion.detail.satDelta,
+    });
+  }
+  return { ok: true, growable, warnings, champion: champion.detail };
 }
 
