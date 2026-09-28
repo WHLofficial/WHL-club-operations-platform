@@ -4,6 +4,42 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.11.0] · D2 随机事件域：选择型事件 + 玩家互动 + 超时兜底（2026-09-28）
+
+差异排期 D 块第二块（参考 AstrBot 插件 `event_engine.py` 的 `_resolve_choice` / `_roll_option` 与倒计时式选项处理）。含迁移 `0050_event_occurrence_reminded.sql`——**本地已提交未 push**，push 前须连同 `0045`–`0049` 一起 apply 到生产。
+
+**Added**
+- 迁移 `0050_event_occurrence_reminded.sql`：`event_occurrences` 加 `reminded_at TEXT NOT NULL DEFAULT ''`——cron 每 5 分钟一跳，靠这一列保证同一条待选只提醒一次。选择型的 `choice_no` / `outcome_json` / `deadline_at` 在 `0048` 一次建全 ⇒ **本版零结构改动**（0048 的设计目标在此兑现）。
+- `src/worker/event-ops.ts`：`worstOption`（净额 = `money − maintenance` 取最小，并列按选项号、结果下标升序）/ `rollOptionOutcome`（选项内 `w` 加权选结果，权重 `max(1, trunc(w))`，抽样种子钉在 `[occurrenceId, choiceNo]` 上 ⇒ 「确定性伪随机替代插件的强制重算」在本仓同样成立，重放同结果）/ `renderChoiceText` / `shortDeadline`；`resolveEvent`（玩家选定 / 净额最差兜底 / 选项号越界同样按最差兜底 / 无选项信息跳过；效果语句与状态 UPDATE 放**同一批**，幂等以 occurrence 行的 `pending` 为闸，并发抢行改 0 行 ⇒ 409）/ `expirePendingEvents`（cron 兜底 + 24h 提醒，**只挑 `deadline_at IS NOT NULL`** 的行——D1 已知残留的即发型 `pending` 行不会被误结算）/ `listClubEvents`（教练端待选 + 最近已结）。
+- 抽取侧放开选择型：`triggerEventBatch` 的随机路径不再只抽即发型（抽中只挂待选、当刻不落效果），点名触发对选择型同样放行（D1 的「要等 v6.11.0（D2）开放」400 已撤）。
+- 端点（权限键 `club.squad.manage`）：`GET /api/club/events`（待选含选项全文 + 最近已结）、`POST /api/club/events/:id/choose`（归属 403 / 已结 409 / 选项号越界 400 在**路由层**拦下；引擎层的宽容兜底留给超时与无效号路径，玩家自己点错号码不该静默吃最差结果）。
+- cron 接线（`src/worker/index.ts`）：`runSettleTick` 加 `expirePendingEvents`；`tickChanged` 加 `events.expired > 0`（兜底会落死忠/影响力等公开列）；24h 提醒只写 `notifications` 与 `reminded_at`，**不算公开数据变更**、不触发 purge。
+- 通知模板（`src/worker/notify.ts`）：`event_resolved`（结算回执，含口径与效果播报）、`event_deadline`（距时限 24h 提醒）。
+- 前端：`web/src/pages/club/CoachPanel.tsx` 新增「事件」卡（待选逐条列选项 + 一键选定、最近已结表，结算后失效刷新）；`web/src/lib/api.ts` / `queries.ts` 补类型与 `qk.events`；管理端 `web/src/pages/admin/EventsPage.tsx` 点名下拉放开选择型并标出「即发 / 选择」。
+
+**Changed**
+- `tests/event-ops.test.ts` 两例按 v6.11.0 语义订正：选择型参与随机抽取（D1 断言「池里只有选择型 ⇒ 掷中也不触发」已反转）、点名触发选择型不再 400。
+- 超时口径文案统一改为「按**资金**最差结果自动结算」（触发通知 / `event_deadline` 模板 / 教练端卡片两处）：`worstOption` 只比 `money − maintenance` 净额，不含死忠与影响力，原文案说「最差」会让玩家按错预期。
+- 选项概率表按权重**归一**后印百分比（原来是「把原始 `w` 当百分数」，只在同一选项内合计 100 时才等价）。
+
+**Fixed**（code-review-skill 只读评审：**无 P0**——不会重复加钱 / 丢钱 / 公开数据错乱；共 2 P1 / 6 P2 / 9 P3）
+- 概率表不再把本版**不落账**的三键当卖点：`satisfaction` / `signals` / `offer_spawn` 在展示侧带「（v6.12.0 生效）」标注（种子 `0047_event_pool.sql` 里 brand 系选项就有「65% 品牌满意度 +0.15」，本版一条 SQL 都不产生）。
+- 超时扫描加下界 `deadline_at >= now − 7 天`：结算不掉的残行（「俱乐部已不在册」）会永久 pending 且 deadline 已过期，而扫描是 `ORDER BY id LIMIT 50` ⇒ 积满 50 条后整个超时兜底会静默停摆（终态化留 D3）。
+- 24h 提醒查询补下界 `deadline_at > now`：否则会给已过期的行推「还有不到 24 小时可选」。
+- 结算审计挂 `PENDING_GUARD` 并挪到批次首位（`AuditEntry` 新增可选 `guardSql` / `guardParams`，`src/lib/audit.ts` 带守卫时走 `INSERT…SELECT…WHERE`，与 `src/worker/bypass.ts` 手写那版同形）：原来并发抢输的一方会留下一条 `after` 快照并未生效的审计行。
+- 结算 UPDATE 补写 `effects_json`（原来恒 `'{}'`，而 `0048` 的列注释写明「选择型为选中分支的效果」，管理端 occurrences 视图读它）。
+- 教练端选定事件后补 invalidate `qk.myClub` + `['club','balance']`：事件效果改死忠 / 影响力，同页「主场档案」卡直接渲染它们，与设施升级 / 冠名同口径。
+- `parseEventOptions` 按 `no` 去重丢后者：路由结算用 `find` 取第一个同号选项，重复号会让「按钮显示 A、实际结算到另一个 A」。
+- `EVENT_TICK_LIMIT` 由字符串拼进 SQL 改为绑定参数。
+
+**记为已知、本轮不改**：`runSettleTick` 无 try/catch 且 `expirePendingEvents` 排在通知补发之前 ⇒ 若 `0050` 未 apply，引用 `reminded_at` 的普通 SQL 错误会每 5 分钟把整个 tick 打断（**靠「先 apply 再 push」的纪律解决**，可选改进是挪到通知之后 + 各自 try/catch）；新通知模板名是否被插件按白名单拒收**本地无法证实**（插件仓 grep 不到 `/notify` 路由实现）⇒ 待确认；空 `options` + `choiceDeadlineHours <= 0` ⇒ 永久 pending（窄口）；INSERT occurrence 与触发审计分两批；视图分页口径不一（pending 硬编码 `LIMIT 20` vs recent 钳 1..50）；**随机池不再滤即时型**后掷中约 77% 是选择型（`0047` 权重即时型 28 / 选择型 94），且无「同队同时最多 N 条待选」上限 ⇒ D3 一并评估。
+
+**验收**
+- `npm run typecheck` 三份全清；`npx vitest run` **57 文件 / 950 例全绿**（v6.10.0 基线 56/916，净 +1 文件 / +34 例，全在新建的 `tests/event-choice.test.ts`）；`npm run build` = `dist/assets/index-DLnw5qCr.js` 608.24 kB / gzip 192.43 kB。
+- 变异验证两轮。D2 本体 9 处：**7 处命中**——最差挑成最好 3 红 / 选项内权重被忽略 1 红 / cron 兜底连 `deadline_at IS NULL` 的即发型残留行也吃 1 红 / 路由不拦越界选项号 1 红 / 路由不校验归属 1 红 / 教练端 pending 不看 `event_type` 1 红 / `choiceDeadlineHours=0` 也设时限 1 红。**2 处未命中**（`resolveEvent` 的 UPDATE 闸、24h 提醒的抢闸）：同一不变量各被两道守卫守着（前者有 `row.status !== 'pending'` 早检，后者有查询里的 `reminded_at = ''` 过滤），单线程测试不可独立观测 —— 两处守卫的代码注释均已写明职责是**并发与重放**防线，不因未命中而删除。首轮这两条脚本报 `NO SUMMARY` 是脚本把成功路径的 stdout 清空了，重跑后确认是「变异未被捕获」而非「脚本空转」。评审修复新增 7 处**全命中**：展示标注 1 红 / 7 天下界 1 红 / 提醒下界 1 红 / 审计守卫 1 红 / `effects_json` 1 红 / 概率归一 3 红 / 选项去重 1 红。
+
+**生效面**：迁移 apply + push 后——玩家（教练）在球队中心能看到待选事件并选定，逾期由 cron 按资金最差自动结算并广播回执，距时限 24h 收到提醒。
+
 ## [v6.10.0] · D1 随机事件域：事件池 + 管理端触发 + 11 键效果即时结算（2026-09-28）
 
 差异排期 D 块第一块（参考 AstrBot 插件 `event_engine.py` / `event_effects.py` 搬到本仓）。含迁移 `0047_event_pool.sql` / `0048_event_occurrences.sql` / `0049_stadium_event_pending.sql`——**本地已提交未 push**，push 前须连同 `0045`/`0046` 一起 apply 到生产。
