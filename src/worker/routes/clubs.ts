@@ -16,7 +16,7 @@ import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence }
 import { createConfigService } from '../../core/config.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
-import { quoteBrands, signNaming, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierRules, tierQuotaOf } from '../naming-ops.ts';
+import { quoteBrands, signNaming, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierRules, loadTierProfiles, tierQuotaOf } from '../naming-ops.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
 import { bookSlot, listBookings, loadActivityCatalog, type VenueBookingRow } from '../venue-ops.ts';
 import { listClubEvents, parseEventOptions, resolveEvent } from '../event-ops.ts';
@@ -1148,11 +1148,18 @@ app.get('/club/naming/quote', async (c) => {
     .bind(club.id)
     .first<{ capacity: number; fans: number }>();
   if (contract) {
+    // 档位与情绪地板随约下发（v6.13.0 C2，前端低情绪预警用）；品牌被弃用回口碑兜底
+    const profiles = await loadTierProfiles(c.env.DB);
+    const brandTier = brands.find((b) => b.brand === contract.brand)?.tier ?? '口碑';
+    const tierKey = brandTier as keyof typeof profiles;
     // 续约候选（剩最后 1 窗时前端用）：按当前队况与品牌现热度现算；品牌已弃用则不给（renewal 缺省）
     const renewal = stadium
       ? withQuota(quoteBrands(params, brands, stadium.capacity, stadium.fans, factors)).find((b) => b.brand === contract.brand) ?? null
       : null;
-    return c.json({ contract: namingContractDto(contract), renewal });
+    return c.json({
+      contract: { ...namingContractDto(contract), tier: brandTier, satisfyFloor: profiles[tierKey]?.satisfyFloor ?? null },
+      renewal,
+    });
   }
   if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
   return c.json({ brands: withQuota(quoteBrands(params, brands, stadium.capacity, stadium.fans, factors)) });

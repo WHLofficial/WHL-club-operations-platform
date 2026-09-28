@@ -414,6 +414,13 @@ function NamingCard() {
   });
   const [busy, setBusy] = useState(false);
   const quote = quoteQuery.data ?? null;
+  // 档位徽标配色（v6.13.0 C2）：头部紫 / 新兴天蓝 / 口碑灰
+  const TIER_BADGE: Record<string, string> = { 头部: 'purple', 新兴: 'sky', 口碑: 'gray' };
+  const TIER_PERK: Record<string, string> = {
+    头部: '头部档：情绪地板 0.70，敏感（负向 ×1.5），活动收入 +2%',
+    新兴: '新兴档：情绪地板 0.60，性格标准，无加成',
+    口碑: '口碑档：情绪地板 0.50，宽容（负向 ×0.75），死忠涨粉 +0.5%',
+  };
 
   function refresh() {
     void qc.invalidateQueries({ queryKey: qk.naming });
@@ -488,7 +495,11 @@ function NamingCard() {
       {contract ? (
         <>
           <p>
-            现约 <b>{contract.brand}</b>（{contract.pkgName}套餐）：每窗{' '}
+            现约 <b>{contract.brand}</b>
+            <span className={`badge ${TIER_BADGE[contract.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[contract.tier] ?? ''}>
+              {contract.tier}档
+            </span>
+            （{contract.pkgName}套餐）：每窗{' '}
             <span className="mono">{contract.feePerWindow.toFixed(2)}</span> M，还剩{' '}
             <span className="mono">{seasonsOf(contract.windowsRemaining)}</span>/
             <span className="mono">{seasonsOf(contract.windowsTotal)}</span> 赛季
@@ -503,9 +514,20 @@ function NamingCard() {
           <p>
             品牌方情绪：<b>{moodLabel(contract.satisfaction)}</b>
             <span className="hint">
-              （<span className="mono">{contract.satisfaction.toFixed(2)}</span> / 2.00；冠名类事件会影响，只作展示）
+              （<span className="mono">{contract.satisfaction.toFixed(2)}</span> / 2.00；每窗按上座与战绩演化，冠名类事件即时影响）
             </span>
           </p>
+          {contract.satisfyFloor !== null && contract.satisfaction <= contract.satisfyFloor + 0.1 && (
+            <p>
+              <span className="badge red" title={`情绪地板 ${contract.satisfyFloor.toFixed(2)}，跌破即被品牌主动解约（无赔偿）`}>
+                低情绪预警
+              </span>
+              <span className="hint">
+                {' '}距离地板 {contract.satisfyFloor.toFixed(2)} 只剩 {Math.max(0, Math.round((contract.satisfaction - contract.satisfyFloor) * 100) / 100).toFixed(2)}
+                ，改善上座与战绩，或考虑主动退约止损。
+              </span>
+            </p>
+          )}
           <p className="hint">
             冠名费在常规窗关窗时自动入账（1 赛季 = 2 个常规窗，临时窗不计）；提前解约赔剩余期间的 30%（当窗费用照收）。
           </p>
@@ -540,26 +562,41 @@ function NamingCard() {
       ) : (
         <>
           <p className="hint">签下品牌冠名，常规窗关窗时按合同金额入账。同一时间只能有一份生效冠名。</p>
-          {quote.brands!.map((b) => (
-            <p key={b.brand}>
-              <b>{b.brand}</b>
-              <span className="hint">（{b.industry} · 热度 {b.heat}）底价 </span>
-              <span className="mono">{b.baseFee.toFixed(2)}</span> M/窗
-              {b.packages.map((p) => (
-                <span key={p.packageNo} style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    type="button"
-                    disabled={busy}
-                    title={`${seasonsOf(p.windows)} 赛季 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`}
-                    onClick={() => void sign(b.brand, p.packageNo, p.pkgName)}
-                  >
-                    {p.pkgName} {p.feePerWindow.toFixed(2)}M×{seasonsOf(p.windows)}赛季
-                  </button>
+          {quote.brands!.map((b) => {
+            const full = b.quotaLeft === 0;
+            return (
+              <p key={b.brand}>
+                <b>{b.brand}</b>
+                <span className={`badge ${TIER_BADGE[b.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[b.tier] ?? ''}>
+                  {b.tier}档
                 </span>
-              ))}
-            </p>
-          ))}
+                {b.quotaLeft !== null && (
+                  <span className="hint" style={{ marginLeft: 6 }}>
+                    {full ? '名额已满' : `名额余 ${b.quotaLeft}`}
+                  </span>
+                )}
+                <span className="hint">（{b.industry} · 热度 {b.heat}）底价 </span>
+                <span className="mono">{b.baseFee.toFixed(2)}</span> M/窗
+                {b.packages.map((p) => (
+                  <span key={p.packageNo} style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      disabled={busy || full}
+                      title={
+                        full
+                          ? '该品牌档位名额已满（头部 1 队 / 新兴 2 队），等现有合同到期或解约'
+                          : `${seasonsOf(p.windows)} 赛季 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`
+                      }
+                      onClick={() => void sign(b.brand, p.packageNo, p.pkgName)}
+                    >
+                      {p.pkgName} {p.feePerWindow.toFixed(2)}M×{seasonsOf(p.windows)}赛季
+                    </button>
+                  </span>
+                ))}
+              </p>
+            );
+          })}
         </>
       )}
     </section>

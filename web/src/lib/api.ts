@@ -975,6 +975,10 @@ export interface BrandQuote {
   brand: string;
   heat: number;
   industry: string;
+  /** 品牌档位（v6.13.0 C2）：头部 / 新兴 / 口碑 */
+  tier: string;
+  /** 档位名额余量（v6.13.0 C2）：null = 不限（口碑档）；0 = 已满不可签 */
+  quotaLeft: number | null;
   baseFee: number;
   packages: NamingPackage[];
 }
@@ -995,8 +999,12 @@ export interface NamingContract {
   status: string;
   startedSeason: number;
   startedWindow: number;
-  /** 品牌方情绪（v6.12.0）：0–2，<0.8 低落 / 0.8–1.2 平静 / >1.2 高涨（纯展示，C2 接管行为） */
+  /** 品牌方情绪（v6.12.0）：0–2，<0.8 低落 / 0.8–1.2 平静 / >1.2 高涨（C2 起按窗演化） */
   satisfaction: number;
+  /** 品牌档位（v6.13.0 C2）：头部 / 新兴 / 口碑 */
+  tier: string;
+  /** 当前档位的情绪地板（v6.13.0 C2，低情绪预警用）；品牌不在池中时为 null */
+  satisfyFloor: number | null;
 }
 
 export interface NamingQuoteResponse {
