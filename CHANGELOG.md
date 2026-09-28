@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.13.0] · C2 冠名深度：档位性格 + 情绪演化 + 品牌主动解约 + 联赛冠军加成（2026-09-28）
+
+差异排期 C 块第二块。含迁移 `0054_brand_tiers.sql`（`brand_pool` 加 `tier` CHECK 三档 / `tier_locked`，种子按校准规则预设 3 头部 2 新兴）——**未 push 未部署，push 前须先 apply 到生产**。判级 minor。测试计划首次按 qa-test-planner 约定设计（`docs/test-plans/v6.13.0-c2.md`）。插件只当参照系，可玩性偏离逐条留痕（见 ROADMAP v6.13.0 节）。
+
+**Added**
+- **品牌档位**：头部 / 新兴 / 口碑三档（config `market_tier_profiles` 全参数性格：情绪地板 0.7/0.6/0.5、负向敏感 ×1.5/1.0/0.75、活动收入加成 +2%（头部）、死忠涨粉加成 +0.5%（口碑））；config `market_tier_rules`（topSeatRatio 8 / emergingSlots 2 / topHeatFloor 1.0 / emergingHeatFloor 0.9）；关窗批首自动校准——热度降序前 ceil(俱乐部数/8) 家且 heat≥1.0 → 头部、≥0.9 → 新兴、其余口碑；**头部可空缺不注水**；`tier_locked=1` 锁档跳过校准；管理端品牌池页档位下拉 + 锁定开关（审计带前后档位）。
+- **品牌方情绪演化**（接管 v6.12.0 的纯展示）：两信号步进——上座（≥goodAttend +1 / ≤badAttend −1 / 无主场场次 0，不借中性上座率拿正向）+ 战绩（窗内胜率 ≥0.55 +1 / ≤0.45 −1，点球按平、弃权按取胜方，与 formPtsOf 同口径）；delta = 0.5×0.05×s_attend + 0.3×0.05×s_result，负向 ×档位 penaltyMult，钳 [0,2] round3；剩 1 窗的合同本窗到期不演化（防与 expire 抢行）；事件情绪即时落库（v6.12.0）保留、不进演化（Q2 裁决，避免双记账）。关窗后教练收 `naming_mood` 站内信（含两信号人话注记）。
+- **品牌主动解约**：演化后 satisfaction 跌破当前档位地板 → 同批 terminated（windows_remaining=0、ended 刻定格），无赔偿；`naming_terminated` 站内信；冠名卡 sat ≤ 地板 +0.1 出「低情绪预警」红标（地板随约下发）。
+- **签约档位名额**：头部 1 队 / 新兴 2 队 / 口碑不限；预检 409（文案点名档位限数）+ INSERT 原子 COUNT 守卫双保险（并发不超卖）；报价端点透出 `tier` 与 `quotaLeft`（口碑 null），签约列表徽标 + 名额提示、满额禁用。**修复真缺陷**：守卫初版对不限额档 bind 0 使 `COUNT < 0` 恒假——口碑档品牌签约恒 409，由测试抓出并修正（不限额档不加子查询）。
+- **联赛冠军加成**（挂既有赛季结算按钮）：`settleSeason` 批内定位 `league_premier` 绑定（0 或 >1 条 → note 进 warnings 走 acknowledged），`result_confirmations` 自算积分表（胜 3 平 1 负 0、点球按平、弃权判负净胜球 3:0、双方弃权不计），榜首 tiebreak 积分 → 净胜球 → 队名（AUTH 目录名，缺行回落队 id）；冠军队有 active 冠名则品牌热度 +`champion`（0.10，钳 [0.5,1.5]）+ 满意度 +`championSatisfaction`（0.10，钳 [0,2]），全部语句挂 `(SELECT status FROM seasons WHERE season=?) != 'settled'` 守卫（重放 / 并发零改行）；审计 `champion_bonus` 同闸；结算返回体带冠军明细；冠军队收 `naming_champion` 站内信（无冠名走「无落点」分支）。
+- **buff 生效点**：档期活动收入 ×(1+attendBuff)（头部 +2%，memo 带加成标注）；死忠演化涨粉系数 ×(1+fansBuff)（口碑 +0.5%），掉粉不受影响。
+
+**Fixed**
+- `signNaming`：口碑档（不限额）签约恒 409 的真缺陷（名额守卫在不限额档 bind 0，`naming-tiers` TC-QUOTA-04 抓出）。
+
+**Changed**
+- config 注册表 68 → 71（`market_satisfy_config` / `market_tier_profiles` / `market_tier_rules`），`market_heat_rules` 默认加 `champion: 0.10`。
+
 ## [v6.12.0] · D3 随机事件域：满意度与经营信号消费端 + LLM 草稿工坊 + 种子扩池（2026-09-28）
 
 差异排期 D 块第三块。含迁移 `0051_naming_satisfaction.sql` / `0052_event_seeds_batch2.sql` / `0053_event_drafts.sql`，并直接编辑了尚未 apply 的 `0047_event_pool.sql`（补 satisfaction / signals）。**已随 2026-09-28 发布批次上线**：`0045`–`0053` 共 9 枚迁移于 push 前 apply 到生产，push `68fc154..77f6eea` 触发 CF 自动部署（Version `55a54d84-9ca6-4b7d-999f-27064197238d`，2026-09-28T10:02:19Z）；线上资产 `index-CF1Lyhhj.js` 与本地 v6.12.0 构建逐字节一致。
