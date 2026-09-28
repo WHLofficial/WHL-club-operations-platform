@@ -60,7 +60,31 @@
 | 36 | — | **tour 单仓增量，不占本仓版本号**（赛事仓错误契约收口 + 账号投影对账，2026-09-23；本文件正文与 CHANGELOG 称「tour 侧增量」） |
 | 37 | v6.1.0 | 球队与俱乐部双向建档同步（tour + club） |
 
-**当前版本 v6.7.0**（B 块可见性：近期主场战报 + 窗口财务汇总；零迁移零生产写，**本地已提交 `51a2380` + `5327b27`，未 push**——push 即上线，随下次被授权 push 走，见下文同名节）。上一版本 v6.6.3（fix 订正：青训等级接入死忠演化 + 战绩查询按 tour 队 id 认人；本地 `1dd3924`，同样未 push，见下文同名节）。再上一版本 v6.6.2（迁移 `0044` 已于 2026-09-27 apply 到生产；本批只加两条索引与测试锁、无 `src/` 运行时改动 ⇒ 收益即时生效；**已 push `6925cbd..68fc154` 并随 CF 自动部署上线**，Version `c15bb1ea-5d3c-4619-9730-687e99fbeaae`，2026-09-27T16:25:37Z，同批带上 v6.6.1 上线记录与另一会话的 e2e 修复 `68fc154`；生产迁移已到 `0044`）。v6.6.2 = 排序索引 batch 8（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体）+ `fc_id` 筛选保持裸列的实测例外，见下文同名节；v6.6.1（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z）= 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
+**当前版本 v6.8.0**（C1 冠名活化：品牌池落库 + 行业系数 + 续约 + 热度动态；含迁移 `0045`，**本地已提交未 push**——push 前须先把 `0045` apply 到生产，见下文同名节）。上一版本 v6.7.0（B 块可见性：近期主场战报 + 窗口财务汇总；零迁移零生产写，**本地已提交 `51a2380` + `5327b27`，未 push**——push 即上线，随下次被授权 push 走，见下文同名节）。再上一版本 v6.6.3（fix 订正：青训等级接入死忠演化 + 战绩查询按 tour 队 id 认人；本地 `1dd3924`，同样未 push，见下文同名节）。再上一版本 v6.6.2（迁移 `0044` 已于 2026-09-27 apply 到生产；本批只加两条索引与测试锁、无 `src/` 运行时改动 ⇒ 收益即时生效；**已 push `6925cbd..68fc154` 并随 CF 自动部署上线**，Version `c15bb1ea-5d3c-4619-9730-687e99fbeaae`，2026-09-27T16:25:37Z，同批带上 v6.6.1 上线记录与另一会话的 e2e 修复 `68fc154`；生产迁移已到 `0044`）。v6.6.2 = 排序索引 batch 8（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体）+ `fc_id` 筛选保持裸列的实测例外，见下文同名节；v6.6.1（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z）= 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
+
+---
+
+## v6.8.0 · C1 冠名活化（品牌池落库 + 行业系数 + 续约 + 热度动态）
+
+**状态**：本地完成（typecheck 三份 / vitest / build / 变异验证全过），**未 push**。含迁移 `0045_brand_pool.sql`——push 前须先 `npm run db:migrate:remote` apply 到生产（否则线上冠名报价查询会打在不存在的表上）。判级 **minor**：新增用户可见能力（管理端品牌池页 / 教练端续约 / 行业系数 / 热度演化），向后兼容（既有合同条款是签约快照，不受影响）。
+
+**缘起与裁决**：差异排期 C1 块——参考插件（`astrbot_plugin_whleague_revenue_system`）的冠名域深度搬到本仓。两块**缓议**（用户裁决留 C2）：满意度体系（三信号满意度 / 过低品牌主动解约 / 档位性格 attend_buff·fans_buff）；招商轮（C3）。本轮**不做**：夺冠/成交/被冷落的热度触发（插件里这些挂在事件与市场成交上，归 D 块事件域）、事件 `brand_heat` 效果、插件活动开放日的 `fans_pct`。
+
+**交付**：
+- 迁移 `src/db/migrations/0045_brand_pool.sql`：`brand_pool (id, brand UNIQUE, heat, source, status, industry, created_at)` + 7 家种子（`INSERT OR IGNORE`，品牌名/热度/行业与插件 `brand_service.py:17-25` 逐字同：麒麟生物 1.2 医疗 / 阿迪达斯 1.1 运动 / 亚马逊 1.3 科技 / 可口可乐 1.0 饮食 / 海底捞 0.9 饮食 / 星海通讯 0.8 科技 / CVS Health 0.7 医疗）。插件的 `tier` / `packages_json` / `tier_locked` 三列留 C2（档位性格与自定义套餐）。
+- config 两键（注册表 61 → **63**）：`naming_industry_factors`（`{医疗:1.2, 运动:1.1, 科技:1.3, 饮食:1.0}`；插件出厂 `market_industry_templates` 是空表 ⇒ 全 1.0，这里给真实默认表；未登记行业回 1.0，非法值剔除）；`market_heat_rules`（`{winStreak:0.03, slump:0.02, clampLow:0.5, clampHigh:1.5}`）。
+- `src/worker/naming-ops.ts`：删硬编码 `DEFAULT_BRANDS`，改 `loadAdoptedBrands` 从 `brand_pool WHERE status='adopted'` 读；`quoteBrands` 增品牌数组与行业系数两个入参，`baseFee = round3(namingBaseFee(...) × industryFactor)`；`signNaming` 品牌改查池（弃用品牌 → 400「不在品牌池」）；新增 `renewNaming`（只剩最后 1 窗可续，按当前队况与品牌现热度重算三套餐，原地换约并更新 `started_season/window`；并发守卫 `WHERE id=? AND status='active' AND windows_remaining=1`，0 行 → 409）；新增热度三件套——`loadHeatRules`（缺行/非法回默认）、`brandHeatDelta`（纯函数，近 3 场记号：胜/平/负，全胜 `+winStreak`、全败 `−slump`、其余 null）、`windowBrandHeatStatement`（查近 9 行赛果 → 出 SQL 侧钳制累加语句 `heat = MAX(low, MIN(high, ROUND(heat + delta, 3)))`，同品牌多队同窗互不覆盖，弃用品牌不动）。
+- `src/worker/home.ts`：关窗批里冠名分支接热度语句（仅常规窗随收租批走；`tourTeamId` 无映射的队跳过）。
+- 端点：`GET /api/club/naming/quote` 有现约时多下发 `renewal`（同品牌按当前队况现算；品牌已弃用则 null）；新增 `POST /api/club/naming/renew`（教练权限键 `club.squad.manage`，与 quote/sign/terminate 同键）；管理端 `GET /api/admin/brands`（列表 + `active_contracts`）、`POST /api/admin/brands`（品牌名 1-20 字、热度界内、行业 ≤10 字，重名 409）、`PATCH /api/admin/brands/:id`（heat / industry / status 部分更新；**弃用守卫**：还有 active 合同 → 409「先等合同到期或解约再弃用」，插件没这校验、本仓补）。三者权限键 `club.clubs.manage`。
+- 前端：`web/src/pages/club/CoachPanel.tsx` 冠名卡在 `windowsRemaining === 1` 时渲染续约套餐按钮组（品牌已弃用则提示「无法续约」）；新建 `web/src/pages/admin/BrandsPage.tsx`（内联改行业/热度 + 保存、弃用/恢复带确认、新增自定义品牌表单）+ `App.tsx` 路由 `/admin/brands` + `AdminLayout` 导航第 9 项「品牌池」；`api.ts` 加 `NamingQuoteResponse.renewal`。
+
+**口径与幂等**：热度调整**无独立幂等闸**，靠关窗批第一句窗口状态原子闸（失败整批回滚）——与 fans UPDATE 同机制；点球决胜按平、弃权按取胜方（与 `home.ts formPtsOf:161-162` 战绩口径一致）；不足 3 场不动。合同费用是签约快照，热度只影响之后的报价与续约。
+
+**评审修复**（code-review-skill）：① `GET /admin/brands` 的生效冠名数由按品牌相关子查询改一次 `LEFT JOIN` 聚合（品牌名无索引，7 家会重复扫 `naming_contracts`）；② `PATCH /admin/brands/:id` 空 body / 只带无关字段 → 400（原先会落一次空转 UPDATE 加一条审计）；③ `renewNaming` 审计改为 UPDATE 真改行之后才写（并发 0 行时不再留一条描述未发生变更的审计）。
+
+**实测与验收**：`npm run typecheck` 三份全清；`npx vitest run` **54 文件 / 859 例全绿**（v6.7.0 基线 54/847，净 +12，集中在 `tests/naming-ops.test.ts` 23 例）；`npm run build` 成功。变异验证 5 处：报价去掉行业系数 → **3 红**；续约放开「仅剩 1 窗」限制 → **2 红**；热度演化不钳上限 → **1 红**；连败改成升温 → **2 红**；弃用品牌仍可签约 → **首轮空转（0 红）**，补测试（`signNaming` 弃用品牌 400 + 恢复后可签）后 **1 红**。
+
+**生效面**：迁移 apply + push 后——教练面板 `/clubs/<本队>` 冠名卡出现续约入口（仅剩最后 1 窗时）、管理端侧栏多「品牌池」页；关窗时各队品牌热度按近 3 场演化。
 
 ---
 

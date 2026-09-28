@@ -4,6 +4,25 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.8.0] · C1 冠名活化：品牌池落库 + 行业系数 + 续约 + 热度动态（2026-09-28）
+
+差异排期 C1 块（参考 AstrBot 插件冠名域的深度搬到本仓）。含迁移 `0045_brand_pool.sql`——**本地已提交未 push**，push 前须先 apply 到生产。
+
+**Added**
+- 迁移 `0045_brand_pool.sql`：`brand_pool (id, brand UNIQUE, heat, source, status, industry, created_at)` + 7 家种子（`INSERT OR IGNORE`，品牌名/热度/行业与插件 `brand_service.py:17-25` 逐字同）。此前 7 家品牌硬编码在 `src/worker/naming-ops.ts` 的 `DEFAULT_BRANDS` 常量里。
+- config 两键：`naming_industry_factors`（医疗 1.2 / 运动 1.1 / 科技 1.3 / 饮食 1.0，未登记行业回 1.0）与 `market_heat_rules`（连胜 +0.03 / 连败 −0.02 / 热度钳制 0.5–1.5）；注册表 61 → 63。
+- 冠名报价乘行业系数（`baseFee = round3(namingBaseFee(...) × industryFactor)`）；签约改查品牌池，弃用品牌回 400「不在品牌池」。
+- `renewNaming`：只剩最后 1 窗可续，按当前队况与品牌现热度重算三套餐、原地换约，审计 `action='naming_renew'`。端点 `POST /api/club/naming/renew`；`GET /api/club/naming/quote` 有现约时多下发 `renewal`（品牌已弃用则 null）。
+- 热度动态：关窗时按近 3 场战绩演化品牌热度（全胜 +0.03 / 全败 −0.02 / 其余不动；点球按平、弃权按取胜方），SQL 侧 `MAX/MIN` 钳制，同品牌多队同窗累加互不覆盖。
+- 管理端品牌池三端点（`GET/POST /api/admin/brands`、`PATCH /api/admin/brands/:id`，权限键 `club.clubs.manage`）：列表带生效冠名数、新增自定义品牌（热度界内、行业 ≤10 字）、改热度/行业/弃用；**弃用守卫**——还有 active 合同的品牌不可弃用（插件无此校验，本仓补）。
+- 前端：新建 `web/src/pages/admin/BrandsPage.tsx`（侧栏第 9 项「品牌池」）；教练端冠名卡在 `windowsRemaining === 1` 时出现续约入口。
+
+**评审修复**（code-review-skill）：`GET /admin/brands` 生效冠名数改一次 `LEFT JOIN` 聚合（原按品牌相关子查询无索引可依）；`PATCH /admin/brands/:id` 空 body → 400（原先落空转 UPDATE + 审计）；`renewNaming` 审计改在 UPDATE 真改行之后写（并发 0 行不再留描述未发生变更的审计）。
+
+**口径**：热度调整无独立幂等闸，靠关窗批首句窗口状态原子闸（失败整批回滚），与 fans UPDATE 同机制；合同费用是签约快照，热度只影响之后的报价与续约。
+
+**验收**：typecheck 三份全清、vitest **54 文件 / 859 例全绿**（v6.7.0 基线 54/847，净 +12）、build 成功；变异验证 5 处（去行业系数 3 红 / 续约放开仅剩 1 窗 2 红 / 热度不钳上限 1 红 / 连败改升温 2 红 / 弃用品牌仍可签约 1 红——末条首轮空转，补测后命中）。
+
 ## [v6.7.0] · B 块可见性：近期主场战报 + 窗口财务汇总（2026-09-28）
 
 差异排期 B 块（参考 AstrBot 插件「主场收入系统」的可见性能力搬到网页端）。零迁移、零生产写，纯只读端点 + 前端展示。
