@@ -69,8 +69,8 @@ function TriggerSection() {
     queryKey: POOL_KEY,
     queryFn: () => api<{ events: AdminEventPoolRow[] }>('/api/admin/events/pool'),
   });
-  // 只有启用的即发型能点名（选择型与已停用的点名会被后端 400 拦下）
-  const namedOptions = (data?.events ?? []).filter((e) => e.event_type === 'instant' && e.status === 'adopted');
+  // 启用的都能点名（v6.11.0 起选择型也可点名：只挂待选，不落效果）
+  const namedOptions = (data?.events ?? []).filter((e) => e.status === 'adopted');
 
   async function run(named: boolean) {
     if (busy) return;
@@ -106,7 +106,7 @@ function TriggerSection() {
       <h2>触发事件</h2>
       {toastNode}
       <p className="hint">
-        按概率触发：每队独立掷一次命中概率（config <code>event_rules.hitProbability</code>，默认 0.4），命中后按权重抽一条即发型事件并当刻结算。
+        按概率触发：每队独立掷一次命中概率（config <code>event_rules.hitProbability</code>，默认 0.4），命中后按权重抽一条事件；即发型当刻结算，选择型只挂出待选（等玩家选或到期自动兜底）。
         点名触发：绕过概率与条件，直接给指定队伍上演指定事件。事件不绑窗口，流水按触发时所在的赛季/窗口归档。
       </p>
       <div className="inline-form">
@@ -120,7 +120,7 @@ function TriggerSection() {
             <option value="">（不点名 · 按概率抽）</option>
             {namedOptions.map((e) => (
               <option key={e.id} value={e.event_id}>
-                {e.name}（权重 {e.weight}）
+                {e.name}（{e.event_type === 'instant' ? '即发' : '选择'} · 权重 {e.weight}）
               </option>
             ))}
           </select>
@@ -146,6 +146,7 @@ function TriggerSection() {
               {result.events.map((e) => (
                 <li key={e.occurrenceId}>
                   <b>{e.clubName}</b> · {e.eventName}
+                  {e.eventType === 'choice' && <span className="badge sky">待选</span>}
                   {e.notes.length > 0 && <span className="muted">（{e.notes.join('；')}）</span>}
                   <div className="muted">{e.text}</div>
                 </li>
@@ -193,7 +194,7 @@ function PoolSection() {
       <h2>事件池</h2>
       {toastNode}
       <p className="hint">
-        池内容随版本走，这里只能启停：停用的事件不再被抽中，也不能点名触发。选择型事件（触发后给玩家选项、有选择时限）在 v6.11.0 开放。
+        池内容随版本走，这里只能启停：停用的事件不再被抽中，也不能点名触发。选择型事件（触发后给玩家选项、有选择时限）自 v6.11.0 起参与随机抽取，玩家在教练工作台「随机事件」卡里选。
       </p>
       {events.length === 0 ? (
         <p className="muted">事件池是空的。</p>
@@ -291,6 +292,9 @@ function OccurrenceSection() {
                   <td className="muted">
                     {resolvedByText(o.resolved_by)}
                     {o.choice_no !== null && <div className="mono">选项 {o.choice_no}</div>}
+                    {o.status === 'pending' && o.deadline_at !== null && (
+                      <div className="mono">截止 {o.deadline_at.slice(5, 16).replace('T', ' ')}</div>
+                    )}
                   </td>
                   <td>
                     {parseNotes(o.notes_json).join('；') || <span className="muted">（无落账效果）</span>}

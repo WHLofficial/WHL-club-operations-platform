@@ -19,6 +19,7 @@ import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPr
 import { quoteBrands, signNaming, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors } from '../naming-ops.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
 import { bookSlot, listBookings, loadActivityCatalog, type VenueBookingRow } from '../venue-ops.ts';
+import { listClubEvents, parseEventOptions, resolveEvent } from '../event-ops.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -1252,6 +1253,63 @@ app.post('/club/bookings', async (c) => {
     { booking: bookingDto(out.booking, nameOf), previous: out.previous ? bookingDto(out.previous, nameOf) : null },
     201,
   );
+});
+
+/* ---------- 随机事件（v6.11.0，D2）：待选事件 + 玩家选定 ---------- */
+
+app.get('/club/events', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再看事件');
+  const view = await listClubEvents(c.env, club.id);
+  return c.json({ clubId: club.id, ...view });
+});
+
+app.post('/club/events/:id/choose', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再选事件');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '事件 id 必须是正整数');
+  const body = (await c.req.raw.json().catch(() => null)) as { choiceNo?: unknown } | null;
+  const choiceNo = Number(body?.choiceNo);
+  if (!Number.isInteger(choiceNo)) throw new HttpError(400, 'choiceNo 要给选项号');
+  // 归属、状态、选项号先在本路由拦掉：引擎层对越界选项是「按最差兜底」的宽容口径（超时路径要用），
+  // 玩家自己点错号码不该静默吃最差结果，这里直接 400/403/409。
+  const row = await c.env.DB.prepare(
+    `SELECT o.id, o.club_id, o.status, o.event_type, e.options_json
+     FROM event_occurrences o LEFT JOIN event_pool e ON e.event_id = o.event_id
+     WHERE o.id = ?`,
+  )
+    .bind(id)
+    .first<{
+      id: number;
+      club_id: number;
+      status: string;
+      event_type: string;
+      options_json: string | null;
+    }>();
+  if (row === null) throw new HttpError(404, '没有这条事件记录');
+  if (row.club_id !== club.id) throw new HttpError(403, '这条事件不属于你的俱乐部');
+  if (row.status !== 'pending') throw new HttpError(409, '这条事件已经结算过了');
+  if (row.event_type !== 'choice') throw new HttpError(409, '即发型事件没有可选项');
+  const options = parseEventOptions(row.options_json);
+  if (!options.some((o) => o.no === choiceNo)) throw new HttpError(400, `没有「${choiceNo}」号选项`);
+  // 过了时限但 cron 还没跑到也能选（时限只驱动自动兜底，不锁玩家）
+  const resolved = await resolveEvent(c.env, { occurrenceId: id, choiceNo, actor: user.id, origin: 'user' });
+  return c.json({
+    event: {
+      id: resolved.occurrenceId,
+      eventId: resolved.eventId,
+      eventName: resolved.eventName,
+      optionNo: resolved.optionNo,
+      optionName: resolved.optionName,
+      auto: resolved.auto,
+      effects: resolved.effects,
+      notes: resolved.notes,
+      text: resolved.text,
+    },
+  });
 });
 
 export default app;

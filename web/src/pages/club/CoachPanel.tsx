@@ -13,6 +13,9 @@ import {
   type BookingResult,
   type BookingsResponse,
   type BuildPaymentResult,
+  type ClubEventChooseResult,
+  type ClubEventRecent,
+  type ClubEventsResponse,
   type NamingQuoteResponse,
   type NamingTerminateResult,
   type RcChangeResult,
@@ -127,6 +130,8 @@ export default function CoachPanel() {
       {home && <NamingCard />}
 
       {home && <BookingsCard />}
+
+      <EventsCard />
 
       {squad && <RegistrationSection squad={squad} onRefresh={refreshSquad} />}
 
@@ -659,6 +664,122 @@ function BookingsCard() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------- 随机事件（v6.11.0）：需要拿主意的待选事件 + 近期结算 ---------- */
+
+// 时限按 UTC 分钟展示（与通知文案的 shortDeadline 同口径）
+function eventTimeText(iso: string): string {
+  return iso.slice(5, 16).replace('T', ' ');
+}
+
+function eventResultText(r: ClubEventRecent): string {
+  if (r.skipped) return '无效果结算';
+  if (r.auto) return r.optionName === '' ? '超时兜底' : `超时兜底：${r.optionName}`;
+  if (r.choiceNo === null) return '已结算';
+  return `${r.choiceNo}. ${r.optionName}`;
+}
+
+function EventsCard() {
+  const qc = useQueryClient();
+  const { show, toastNode } = useToast();
+  const listQuery = useQuery({
+    queryKey: qk.clubEvents,
+    queryFn: () => api<ClubEventsResponse>('/api/club/events'),
+    retry: false,
+  });
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const data = listQuery.data ?? null;
+
+  async function choose(id: number, choiceNo: number, label: string) {
+    setBusyId(id);
+    try {
+      const out = await apiPost<ClubEventChooseResult>(`/api/club/events/${id}/choose`, { choiceNo });
+      void qc.invalidateQueries({ queryKey: qk.clubEvents });
+      void qc.invalidateQueries({ queryKey: ['club', 'finance-summary'] });
+      // 事件效果会改死忠/影响力（同页「主场档案」卡直接渲染它们）与余额，跟设施升级/冠名同口径
+      void qc.invalidateQueries({ queryKey: qk.myClub });
+      void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+      const notes = out.event.notes.length > 0 ? `（${out.event.notes.join('；')}）` : '';
+      show(`已选「${label}」：${out.event.text}${notes}`);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '选项提交失败', true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (listQuery.isPending) return null;
+  if (listQuery.isError || !data) {
+    return (
+      <section className="card">
+        <h3>随机事件</h3>
+        <p className="muted">{listQuery.error instanceof Error ? listQuery.error.message : '事件读不出来'}</p>
+      </section>
+    );
+  }
+  if (data.pending.length === 0 && data.recent.length === 0) return null;
+
+  return (
+    <section className="card">
+      <h3>随机事件</h3>
+      {toastNode}
+      <p className="hint">
+        赛季进行中会随机撞上事件。需要你拿主意的会列在下面：选定后立刻结算，到期没选就按资金最差结果自动结算。
+      </p>
+      {data.pending.map((ev) => (
+        <div key={ev.id} className="banner warn" style={{ marginBottom: 8 }}>
+          <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+            {ev.text}
+          </pre>
+          <div className="inline-form" style={{ marginTop: 8 }}>
+            {ev.options.map((o) => (
+              <button
+                key={o.no}
+                className="btn btn-sm"
+                type="button"
+                disabled={busyId !== null}
+                title={o.desc}
+                onClick={() => void choose(ev.id, o.no, o.name)}
+              >
+                {busyId === ev.id ? '提交中…' : `${o.no}. ${o.name}`}
+              </button>
+            ))}
+          </div>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            {ev.deadlineAt === null
+              ? '这条没设选定时限，不会自动结算。'
+              : `截止 ${eventTimeText(ev.deadlineAt)}（UTC），超时按资金最差结果自动结算。`}
+          </p>
+        </div>
+      ))}
+      {data.pending.length === 0 && <p className="muted">现在没有待你选择的事件。</p>}
+      {data.recent.length > 0 && (
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>事件</th>
+                <th>结果</th>
+                <th>变化</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.recent.map((r) => (
+                <tr key={r.id}>
+                  <td className="mono muted">{eventTimeText(r.createdAt)}</td>
+                  <td>{r.eventName}</td>
+                  <td>{eventResultText(r)}</td>
+                  <td>{r.notes.length > 0 ? r.notes.join('；') : <span className="muted">—</span>}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

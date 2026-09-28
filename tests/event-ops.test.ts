@@ -433,7 +433,7 @@ describe('触发批 triggerEventBatch', () => {
     expect(res2.events.map((e) => e.eventId)).toEqual(['cap_a', 'cap_b']);
   });
 
-  it('掷中但无候选 → 计入 capped；选择型不参与随机抽取', async () => {
+  it('掷中但无候选 → 计入 capped；选择型自 v6.11.0 起也参与随机抽取', async () => {
     const fx = freshEnv();
     seedClub(fx.auth, fx.sqlite, 1, 11);
     fx.sqlite.exec(`UPDATE event_pool SET status = 'discarded'`);
@@ -441,16 +441,17 @@ describe('触发批 triggerEventBatch', () => {
     const res = await triggerEventBatch(fx.env, { season: 1, windowSeq: 1, actor: 2, origin: 'user', clubIds: [1], rng: () => 0 });
     expect(res).toMatchObject({ clubs: 1, triggered: 0, capped: 1 });
 
-    // 池里只有选择型 → 掷中也不触发（v6.10.0 只抽即发型）
+    // 池里只有选择型 → v6.11.0（D2）起也抽，抽中只挂待选（不落效果）
     const fx2 = freshEnv();
     seedClub(fx2.auth, fx2.sqlite, 1, 11);
     fx2.sqlite.exec(`UPDATE event_pool SET status = 'discarded'`);
     addEvent(fx2.sqlite, 'choice_only', {}, { eventType: 'choice' });
     const res2 = await triggerEventBatch(fx2.env, { season: 1, windowSeq: 1, actor: 2, origin: 'user', clubIds: [1], rng: () => 0 });
-    expect(res2).toMatchObject({ triggered: 0, capped: 1 });
+    expect(res2).toMatchObject({ triggered: 1, capped: 0 });
+    expect(res2.events[0]!.eventType).toBe('choice');
   });
 
-  it('点名触发绕过命中概率与条件；不存在 404、停用 400、选择型 400', async () => {
+  it('点名触发绕过命中概率与条件；不存在 404、停用 400、选择型自 v6.11.0 起可点名', async () => {
     const fx = freshEnv();
     seedClub(fx.auth, fx.sqlite, 1, 11);
     fx.sqlite.exec(`UPDATE event_pool SET status = 'discarded'`);
@@ -470,9 +471,9 @@ describe('触发批 triggerEventBatch', () => {
     ).rejects.toThrow('已停用，先启用再触发');
 
     addEvent(fx.sqlite, 'choice_one', {}, { eventType: 'choice' });
-    await expect(
-      triggerEventBatch(fx.env, { season: 1, windowSeq: 1, actor: 2, origin: 'user', clubIds: [1], eventId: 'choice_one' }),
-    ).rejects.toThrow('要等 v6.11.0（D2）开放');
+    const namedChoice = await triggerEventBatch(fx.env, { season: 1, windowSeq: 1, actor: 2, origin: 'user', clubIds: [1], eventId: 'choice_one' });
+    expect(namedChoice.triggered).toBe(1);
+    expect(namedChoice.events[0]!.eventType).toBe('choice');
   });
 
   it('cron_tick 触发：审计 origin 走 cron 通道（actor 为 null 时 resolved_by 记 system）', async () => {

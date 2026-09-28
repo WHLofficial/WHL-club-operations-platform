@@ -23,24 +23,45 @@ export interface AuditEntry {
   origin: AuditOrigin;
   before?: unknown;
   after?: unknown;
+  /**
+   * 同批守卫（可选）：只有这段 SQL 成立才留痕。与同批的效果/账本语句共用**同一个闸**，
+   * 于是「守卫没过、什么也没干」的一方不会留下一条失实的 after 快照（v6.11.0 引入，
+   * 起因：并发抢同一条事件时，抢输的一方账本被挡下、审计却照写）。
+   * `guardParams` 的绑定排在 entry 自身七个参数之后，与 SQL 里 `?` 出现的先后一致。
+   */
+  guardSql?: string;
+  guardParams?: unknown[];
 }
 
 export function createAuditStatement(db: D1Database) {
-  return (entry: AuditEntry): D1PreparedStatement =>
-    db
+  return (entry: AuditEntry): D1PreparedStatement => {
+    const binds = [
+      entry.actor,
+      entry.action,
+      entry.targetType,
+      entry.targetId ?? null,
+      entry.origin,
+      entry.before === undefined ? null : JSON.stringify(entry.before),
+      entry.after === undefined ? null : JSON.stringify(entry.after),
+    ];
+    // 带守卫时改走 INSERT…SELECT…WHERE（与 worker/bypass.ts 手写那版同形）：普通 INSERT 的
+    // VALUES 里塞不下 WHERE，而留痕必须与它所描述的那次写入同生共死。
+    if (entry.guardSql !== undefined) {
+      return db
+        .prepare(
+          `INSERT INTO audit_log (actor, action, target_type, target_id, origin, before, after, at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE ${entry.guardSql}`,
+        )
+        .bind(...binds, ...(entry.guardParams ?? []));
+    }
+    return db
       .prepare(
         `INSERT INTO audit_log (actor, action, target_type, target_id, origin, before, after, at)
          VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
       )
-      .bind(
-        entry.actor,
-        entry.action,
-        entry.targetType,
-        entry.targetId ?? null,
-        entry.origin,
-        entry.before === undefined ? null : JSON.stringify(entry.before),
-        entry.after === undefined ? null : JSON.stringify(entry.after),
-      );
+      .bind(...binds);
+  };
 }
 
 export async function writeAudit(db: D1Database, entry: AuditEntry): Promise<void> {

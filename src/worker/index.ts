@@ -25,6 +25,7 @@ import internalRoutes from './routes/internal.ts';
 import { settleOverdue, type SettleSummary } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults } from './results.ts';
+import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -174,9 +175,11 @@ async function runSettleTick(env: Env) {
   const summary = await settleOverdue(env, { origin: 'cron_tick' });
   // 赛果自动确认（v2.7.0）：完赛场次逐场入档，异常标人工；开关/上限在 results.ts
   const autoResults = await autoConfirmResults(env);
+  // 选择型事件兜底（v6.11.0，D2）：超时未选按净额最差结算 + 距时限 24h 提醒
+  const events = await expirePendingEvents(env);
   // bot 通知重试（§12）：失败留 pending，下轮再投
   const notify = await dispatchPendingNotifications(env);
-  return { ok: true, ...summary, autoResults, notify };
+  return { ok: true, ...summary, autoResults, events, notify };
 }
 
 // tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的
@@ -185,13 +188,16 @@ async function runSettleTick(env: Env) {
 // 后者只写 result_confirmations，都不在公开 scope 里，算进来会让每个 tick 都可能白 purge 一次，
 // 而每次 purge 之后第一个名册请求就要全表扫 18301 行（288 次/天 ≈ 527 万行，单这一项就吃掉免费档）。
 // tick 每 5 分钟一次、空跑占多数，空跑还 purge 等于白付一次 KV 写并让名册重新全表扫。
-function tickChanged(summary: SettleSummary): boolean {
+// v6.11.0 加 events.expired：超时兜底会落效果（死忠/影响力/建设券…），公开目录里能看到这些列；
+// reminded 只写 notifications 与 event_occurrences.reminded_at，不算进来。
+function tickChanged(summary: SettleSummary, events: EventTickResult): boolean {
   return (
     summary.settled > 0 ||
     summary.delisted > 0 ||
     summary.voided > 0 ||
     summary.notesUpdated > 0 ||
-    summary.healed > 0
+    summary.healed > 0 ||
+    events.expired > 0
   );
 }
 
@@ -207,8 +213,8 @@ async function scheduledTick(_event: unknown, env: Env, _ctx: { waitUntil(p: Pro
   await withMonitor(
     'club-settle-tick',
     async () => {
-      const summary = await runSettleTick(env);
-      if (!tickChanged(summary)) return;
+      const tick = await runSettleTick(env);
+      if (!tickChanged(tick, tick.events)) return;
       await purgePublicCaches(env).catch(() => {});
     },
     { schedule: { type: 'crontab', value: '*/5 * * * *' }, checkinMargin: 2, maxRuntime: 5 },

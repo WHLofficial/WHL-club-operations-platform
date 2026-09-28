@@ -1093,6 +1093,10 @@ export interface AdminEventTriggeredRow {
   clubName: string;
   eventId: string;
   eventName: string;
+  /** instant | choice（v6.11.0 起选择型也可点名触发） */
+  eventType?: string;
+  /** 选择型的选定时限（ISO；不设时限为 null） */
+  deadlineAt?: string | null;
   text: string;
   notes: string[];
   effects: Record<string, unknown>;
@@ -1108,6 +1112,67 @@ export interface AdminEventTriggerResult {
   /** 掷中但没有可用候选（条件全挡或已达单事件上限）的队数 */
   capped: number;
   events: AdminEventTriggeredRow[];
+}
+
+/** 玩家侧随机事件（v6.11.0，D2）：待选 + 近期已结算 */
+export interface ClubEventOptionOutcome {
+  w: number;
+  effects: Record<string, unknown>;
+}
+
+export interface ClubEventOption {
+  no: number;
+  name: string;
+  desc: string;
+  outcomes: ClubEventOptionOutcome[];
+}
+
+export interface ClubEventPending {
+  id: number;
+  eventId: string;
+  eventName: string;
+  /** 选定时限（ISO；null = 不设时限、不会自动兜底） */
+  deadlineAt: string | null;
+  text: string;
+  options: ClubEventOption[];
+}
+
+export interface ClubEventRecent {
+  id: number;
+  eventId: string;
+  eventName: string;
+  eventType: string;
+  choiceNo: number | null;
+  optionName: string;
+  /** true = 超时/无效选项号按最差结果兜底 */
+  auto: boolean;
+  skipped: boolean;
+  effects: Record<string, unknown>;
+  notes: string[];
+  text: string;
+  resolvedBy: string;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface ClubEventsResponse {
+  clubId: number;
+  pending: ClubEventPending[];
+  recent: ClubEventRecent[];
+}
+
+export interface ClubEventChooseResult {
+  event: {
+    id: number;
+    eventId: string;
+    eventName: string;
+    optionNo: number | null;
+    optionName: string;
+    auto: boolean;
+    effects: Record<string, unknown>;
+    notes: string[];
+    text: string;
+  };
 }
 
 /** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
