@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
+import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
@@ -23,6 +23,8 @@ export const qk = {
   naming: ['club', 'naming'] as const,
   offers: (box: 'in' | 'out', status: string) => ['offers', box, status] as const,
   offer: (id: number) => ['offers', 'detail', id] as const,
+  homeMatches: ['club', 'home-matches'] as const,
+  financeSummary: (season?: number) => ['club', 'finance-summary', season ?? 'current'] as const,
 };
 
 export interface MarketMyClub {
@@ -232,4 +234,24 @@ export function useOffersInvalidation() {
     void qc.invalidateQueries({ queryKey: ['offers'] });
     void qc.invalidateQueries({ queryKey: qk.myClub });
   };
+}
+
+// ---- 主场战报 / 窗口财务（v6.7.0，B 块可见性）----
+
+// 近期主场战报（教练端）：最近 10 场主场的天气/上座/票务/商业/转播与比分对手
+export function useHomeMatches(isCoach: boolean) {
+  return useQuery({
+    queryKey: qk.homeMatches,
+    queryFn: () => api<HomeMatchesResponse>('/api/club/home-matches'),
+    enabled: isCoach,
+  });
+}
+
+// 窗口财务汇总（教练端）：赛季缺省由服务端取当前赛季，前端不传 season
+export function useFinanceSummary(isCoach: boolean, season?: number) {
+  return useQuery({
+    queryKey: qk.financeSummary(season),
+    queryFn: () => api<FinanceSummaryResponse>(season !== undefined ? `/api/club/finance-summary?season=${season}` : '/api/club/finance-summary'),
+    enabled: isCoach,
+  });
 }

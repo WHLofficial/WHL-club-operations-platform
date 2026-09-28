@@ -873,6 +873,59 @@ export interface ManualLedgerResult {
   balance: number;
 }
 
+// 近期主场战报（v6.7.0，B1）：本队主场比赛的天气/上座/三项收入 + 对手与比分
+export interface HomeMatchRow {
+  matchId: number;
+  season: number;
+  windowSeq: number;
+  weather: string | null;
+  attendance: number;
+  attendanceRate: number | null;
+  ticket: number;
+  commercial: number;
+  broadcast: number;
+  total: number;
+  opponentId: number | null;
+  opponentName: string | null;
+  scoreText: string | null;
+  result: string | null;
+}
+
+export interface HomeMatchesResponse {
+  club: { id: number; name: string } | null;
+  matches: HomeMatchRow[];
+}
+
+// 窗口财务汇总（v6.7.0，B2）：比赛日按 match_attendance 精确归窗，其余流水按 created_at 落窗
+export interface FinanceMatchday {
+  matches: number;
+  attendance: number;
+  ticket: number;
+  commercial: number;
+  broadcast: number;
+  total: number;
+}
+
+export interface FinanceWindow {
+  windowSeq: number;
+  status: string;
+  isTemporary: boolean;
+  openedAt: string;
+  closedAt: string | null;
+  matchday: FinanceMatchday;
+  byKind: Record<string, number>;
+  net: number;
+  closingBalance: number | null;
+}
+
+export interface FinanceSummaryResponse {
+  club: { id: number; name: string } | null;
+  season: number | null;
+  windows: FinanceWindow[];
+  outside: { byKind: Record<string, number>; net: number; total: number } | null;
+  totals: { matchday: FinanceMatchday; net: number; closingBalance: number | null } | null;
+}
+
 // 站内信收件篮（v2.4.0）
 export interface NotificationItem {
   id: number;

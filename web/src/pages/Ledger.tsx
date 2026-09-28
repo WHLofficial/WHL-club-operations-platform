@@ -1,4 +1,4 @@
-// 流水账（附录 A〔6〕，UI_DESIGN §4.2 .ledger-book）：余额大字置顶 + 收支手账 + 类型筛选 + 翻页
+// 流水账（附录 A〔6〕，UI_DESIGN §4.2 .ledger-book）：余额大字置顶 + 窗口财务汇总 + 收支手账 + 类型筛选 + 翻页
 import { useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import {
@@ -8,6 +8,9 @@ import {
   type ClubBalance,
   type LedgerPage,
 } from '../lib/api.ts';
+import { useAuth } from '../lib/auth.tsx';
+import { useFinanceSummary } from '../lib/queries.ts';
+import type { FinanceWindow } from '../lib/api.ts';
 
 /** 类型筛选选项：§7.1 枚举 + 奖金模板（prize_*），顺序按常见收支在前 */
 const KIND_OPTIONS = [
@@ -35,8 +38,109 @@ function fmtAmount(n: number): string {
   return n >= 0 ? `+${s}` : `−${s}`;
 }
 
+function money2(n: number): string {
+  return `${n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} m`;
+}
+
+// 窗口财务汇总（v6.7.0，B2）：比赛日收入按上座记录精确归窗，其余流水按时间落进各窗。
+// 固定列只放结算大头（工资/维护/冠名/富人税），其余 kind 并进「其他」；季前与窗外流水不进表。
+const FINANCE_NAMED_KINDS = ['wage', 'maintenance', 'naming_fee', 'naming_bonus', 'luxury_tax'] as const;
+
+function otherKindsSum(byKind: Record<string, number>): number {
+  return Object.entries(byKind).reduce((s, [k, v]) => (FINANCE_NAMED_KINDS.includes(k as never) ? s : s + v), 0);
+}
+
+function FinanceSummaryCard() {
+  const { data, isPending, isError } = useFinanceSummary(true);
+  if (isPending) {
+    return (
+      <div className="card">
+        <h3>窗口财务汇总</h3>
+        <p className="muted">正在算账…</p>
+      </div>
+    );
+  }
+  if (isError || !data || data.season === null) {
+    return (
+      <div className="card">
+        <h3>窗口财务汇总</h3>
+        <p className="muted">{isError ? '汇总读不出来，稍后再试。' : '还没有可展示的赛季。'}</p>
+      </div>
+    );
+  }
+  const windows = data.windows;
+  const totals = data.totals;
+  return (
+    <div className="card">
+      <h3>窗口财务汇总</h3>
+      <p className="hint">
+        第 {data.season} 赛季各窗口的收支一览：比赛日 = 上座记录的票务 + 商业 + 转播；其余流水按发生时间归窗。净额 = 收入 − 支出。
+      </p>
+      {windows.length === 0 ? (
+        <p className="muted">这个赛季还没开过窗口。</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>窗口</th>
+                <th className="num">比赛日</th>
+                <th className="num">工资</th>
+                <th className="num">维护费</th>
+                <th className="num">冠名</th>
+                <th className="num">富人税</th>
+                <th className="num">其他</th>
+                <th className="num">净额</th>
+                <th className="num">期末余额</th>
+              </tr>
+            </thead>
+            <tbody>
+              {windows.map((w: FinanceWindow) => (
+                <tr key={w.windowSeq}>
+                  <td>
+                    窗口 {w.windowSeq} {w.isTemporary && <span className="badge sky">临时</span>}
+                    {w.status === 'open' && <span className="badge green">进行中</span>}
+                  </td>
+                  <td className="num mono">{money2(w.matchday.total)}</td>
+                  <td className="num mono">{money2(-(w.byKind['wage'] ?? 0))}</td>
+                  <td className="num mono">{money2(-(w.byKind['maintenance'] ?? 0))}</td>
+                  <td className="num mono">{money2((w.byKind['naming_fee'] ?? 0) + (w.byKind['naming_bonus'] ?? 0))}</td>
+                  <td className="num mono">{money2(-(w.byKind['luxury_tax'] ?? 0))}</td>
+                  <td className="num mono">{money2(otherKindsSum(w.byKind))}</td>
+                  <td className={`num mono ${w.net >= 0 ? 'ledger-in' : 'ledger-out'}`}>{fmtAmount(w.net)}</td>
+                  <td className="num mono">{w.closingBalance === null ? '—' : w.closingBalance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}</td>
+                </tr>
+              ))}
+              {totals && (
+                <tr>
+                  <td>
+                    <b>赛季合计</b>
+                  </td>
+                  <td className="num mono">{money2(totals.matchday.total)}</td>
+                  <td className="num mono">{money2(-windows.reduce((s, w) => s + (w.byKind['wage'] ?? 0), 0))}</td>
+                  <td className="num mono">{money2(-windows.reduce((s, w) => s + (w.byKind['maintenance'] ?? 0), 0))}</td>
+                  <td className="num mono">{money2(windows.reduce((s, w) => s + (w.byKind['naming_fee'] ?? 0) + (w.byKind['naming_bonus'] ?? 0), 0))}</td>
+                  <td className="num mono">{money2(-windows.reduce((s, w) => s + (w.byKind['luxury_tax'] ?? 0), 0))}</td>
+                  <td className="num mono">{money2(windows.reduce((s, w) => s + otherKindsSum(w.byKind), 0))}</td>
+                  <td className={`num mono ${totals.net >= 0 ? 'ledger-in' : 'ledger-out'}`}>{fmtAmount(totals.net)}</td>
+                  <td className="num mono">{totals.closingBalance === null ? '—' : totals.closingBalance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {data.outside && (
+        <p className="hint">窗口外流水（季前开档等）共 {money2(data.outside.total)}，不计入上面的合计。</p>
+      )}
+    </div>
+  );
+}
+
 export default function Ledger() {
   const [kind, setKind] = useState('');
+  const { user } = useAuth();
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
   // 余额拉失败按「全空」展示（旧行为 .catch 落全 null）
   const balanceQuery = useQuery({
     queryKey: ['club', 'balance'],
@@ -87,6 +191,8 @@ export default function Ledger() {
               冻结中 {balance?.held?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'} m
             </div>
           </div>
+
+          {isCoach && <FinanceSummaryCard />}
 
           <div className="card">
             <label className="field">

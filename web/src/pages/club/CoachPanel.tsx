@@ -22,7 +22,7 @@ import {
   type TerminationResult,
 } from '../../lib/api.ts';
 import { CONTRACT_TYPE_LABEL, LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
-import { qk, useMyClubOverview } from '../../lib/queries.ts';
+import { qk, useHomeMatches, useMyClubOverview } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { playerPath } from '../../lib/player-link.ts';
 
@@ -117,6 +117,8 @@ export default function CoachPanel() {
 
       {home && <StadiumCard home={home} />}
 
+      {home && <HomeMatchesCard />}
+
       {home && <FacilityOpsCard />}
 
       {home && <NamingCard />}
@@ -167,6 +169,79 @@ function StadiumCard({ home }: { home: StadiumInfo }) {
             </span>
           ))}
         </p>
+      )}
+    </section>
+  );
+}
+
+/* ---------- 近期主场战报（v6.7.0，B1）：天气/上座/票务/商业/转播 ---------- */
+
+const WEATHER_ICON: Record<string, string> = { 晴: '☀️', 多云: '⛅', 雨: '🌧️', 雪: '❄️' };
+
+const RESULT_BADGE: Record<string, string> = {
+  胜: 'green',
+  点球胜: 'green',
+  弃权胜: 'green',
+  平: 'gray',
+  负: 'red',
+  点球负: 'red',
+  弃权负: 'red',
+};
+
+function money2(n: number | null): string {
+  return n === null ? '—' : `${n.toFixed(2)} m`;
+}
+
+function HomeMatchesCard() {
+  const { data, isPending, isError } = useHomeMatches(true);
+  const matches = data?.matches ?? [];
+  return (
+    <section className="card">
+      <h3>近期主场战报</h3>
+      <p className="hint">最近 {matches.length > 0 ? matches.length : 10} 场主场的上座与比赛日收入（票务 + 商业 + 转播），赛果确认后即时入账。</p>
+      {isPending && <p className="muted">正在翻战报…</p>}
+      {isError && <p className="error-msg">战报读不出来，稍后再试。</p>}
+      {!isPending && !isError && matches.length === 0 && <p className="muted">还没有主场收入记录。赛果确认之后，这里会列出每场的天气、上座与收入。</p>}
+      {matches.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>窗口</th>
+                <th>对手</th>
+                <th>比分</th>
+                <th>赛果</th>
+                <th>天气</th>
+                <th className="num">上座</th>
+                <th className="num">票务</th>
+                <th className="num">商业</th>
+                <th className="num">转播</th>
+                <th className="num">合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matches.map((m) => (
+                <tr key={m.matchId}>
+                  <td className="mono">
+                    S{m.season} · 窗{m.windowSeq}
+                  </td>
+                  <td>{m.opponentName ?? (m.opponentId !== null ? `对手 #${m.opponentId}` : '—')}</td>
+                  <td className="mono">{m.scoreText ?? '—'}</td>
+                  <td>{m.result ? <span className={`badge ${RESULT_BADGE[m.result] ?? 'gray'}`}>{m.result}</span> : <span className="badge gray">待定</span>}</td>
+                  <td>{m.weather ? `${WEATHER_ICON[m.weather] ?? ''} ${m.weather}` : '—'}</td>
+                  <td className="num mono">
+                    {m.attendance.toLocaleString()}
+                    {m.attendanceRate !== null && <span className="muted">（{Math.round(m.attendanceRate * 100)}%）</span>}
+                  </td>
+                  <td className="num mono">{money2(m.ticket)}</td>
+                  <td className="num mono">{money2(m.commercial)}</td>
+                  <td className="num mono">{money2(m.broadcast)}</td>
+                  <td className="num mono gold-text">{money2(m.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

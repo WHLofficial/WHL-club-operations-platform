@@ -812,6 +812,210 @@ app.get('/club/ledger', async (c) => {
   });
 });
 
+// 近期主场战报（v6.7.0，B1）：match_attendance（迁移 0018）此前没有任何读端点，教练在页面上
+// 看不到每场主场的天气/上座/票务/商业/转播。attendance 行只在「本队是主队」时写入（home.ts 确认钩子④），
+// 所以对手恒为 away_team_id；比分/弃权/点球从 result_confirmations 取（match_id UNIQUE，JOIN 不放大行）。
+const HOME_MATCHES_LIMIT = 10;
+
+app.get('/club/home-matches', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) return c.json({ club: null, matches: [] });
+
+  const rows = await c.env.DB.prepare(
+    `SELECT a.match_id, a.season, a.window_seq, a.weather, a.attendance, a.ticket, a.commercial, a.broadcast,
+            s.capacity AS capacity,
+            rc.away_team_id, rc.away_team, rc.score_home, rc.score_away, rc.pen_home, rc.pen_away, rc.walkover_side
+     FROM match_attendance a
+     LEFT JOIN stadiums s ON s.club_id = a.club_id
+     LEFT JOIN result_confirmations rc ON rc.match_id = a.match_id
+     WHERE a.club_id = ?
+     ORDER BY a.created_at DESC, a.match_id DESC
+     LIMIT ?`,
+  )
+    .bind(club.id, HOME_MATCHES_LIMIT)
+    .all<{
+      match_id: number;
+      season: number;
+      window_seq: number;
+      weather: string | null;
+      attendance: number;
+      ticket: number;
+      commercial: number;
+      broadcast: number;
+      capacity: number | null;
+      away_team_id: number | null;
+      away_team: string | null;
+      score_home: number | null;
+      score_away: number | null;
+      pen_home: number | null;
+      pen_away: number | null;
+      walkover_side: string | null;
+    }>();
+
+  const matches = rows.results.map((r) => {
+    let result: string | null = null;
+    let scoreText: string | null = null;
+    if (r.walkover_side === 'home') result = '弃权胜';
+    else if (r.walkover_side === 'away') result = '弃权负';
+    else if (r.score_home !== null && r.score_away !== null) {
+      scoreText = `${r.score_home}:${r.score_away}`;
+      if (r.pen_home !== null && r.pen_away !== null) result = r.pen_home > r.pen_away ? '点球胜' : r.pen_home < r.pen_away ? '点球负' : '平';
+      else result = r.score_home > r.score_away ? '胜' : r.score_home < r.score_away ? '负' : '平';
+    }
+    return {
+      matchId: r.match_id,
+      season: r.season,
+      windowSeq: r.window_seq,
+      weather: r.weather,
+      attendance: r.attendance,
+      attendanceRate: r.capacity ? r.attendance / r.capacity : null,
+      ticket: r.ticket,
+      commercial: r.commercial,
+      broadcast: r.broadcast,
+      // 金额口径两位小数（与账本一致），浮点加法尾差在这里收掉
+      total: Math.round((r.ticket + r.commercial + r.broadcast) * 100) / 100,
+      opponentId: r.away_team_id,
+      // 对手名用确认时的快照（rc.away_team，v0.7.0 起就在）；老行快照缺失回退前端「对手 #id」
+      opponentName: r.away_team,
+      scoreText,
+      result,
+    };
+  });
+  return c.json({ club: { id: club.id, name: club.name }, matches });
+});
+
+// 窗口财务汇总（v6.7.0，B2）：账本 ledger_entries 没有窗口列，归窗口径分三层——
+// ① 比赛日收入按 match_attendance 的 (season, window_seq) 聚合（写入时就带窗口号，精确）；
+// ② wage/luxury_tax/maintenance/naming_* 结算时 ref_type='window'，但这里不用 ref：
+//    统一按 created_at 落进 season_windows 的 [opened_at, closed_at]（两端含；在开窗口 closed_at 为
+//    NULL，吃掉其后全部），一次折叠覆盖所有 kind，不用逐 ref_type 猜；
+// ③ 落不进本季任何窗口的流水进 outside（季前开档、跨季残留），只单列不计入 totals。
+// closingBalance 按 (created_at, id) 取末笔的 balance_after——流水 id 顺序与时间顺序不做强假设。
+app.get('/club/finance-summary', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) return c.json({ club: null, season: null, windows: [], outside: null, totals: null });
+
+  const seasonParam = c.req.query('season');
+  let season: number;
+  if (seasonParam !== undefined && seasonParam !== '') {
+    const n = Number(seasonParam);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'season 参数不对');
+    season = n;
+  } else {
+    const visible = await getVisibleSeason(c.env.DB);
+    if (visible === null) return c.json({ club: { id: club.id, name: club.name }, season: null, windows: [], outside: null, totals: null });
+    season = visible;
+  }
+
+  const [winRows, matchRows, entryRows] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT window_seq, status, is_temporary, opened_at, closed_at
+       FROM season_windows WHERE season = ? ORDER BY window_seq`,
+    )
+      .bind(season)
+      .all<{ window_seq: number; status: string; is_temporary: number; opened_at: string; closed_at: string | null }>(),
+    c.env.DB.prepare(
+      `SELECT window_seq, COUNT(*) AS matches, SUM(attendance) AS attendance,
+              SUM(ticket) AS ticket, SUM(commercial) AS commercial, SUM(broadcast) AS broadcast
+       FROM match_attendance WHERE club_id = ? AND season = ? GROUP BY window_seq`,
+    )
+      .bind(club.id, season)
+      .all<{ window_seq: number; matches: number; attendance: number; ticket: number; commercial: number; broadcast: number }>(),
+    c.env.DB.prepare(
+      `SELECT id, kind, amount, balance_after, created_at
+       FROM ledger_entries WHERE club_id = ? ORDER BY id`,
+    )
+      .bind(club.id)
+      .all<{ id: number; kind: string; amount: number; balance_after: number; created_at: string }>(),
+  ]);
+
+  interface WindowBucket {
+    windowSeq: number;
+    status: string;
+    isTemporary: boolean;
+    openedAt: string;
+    closedAt: string | null;
+    byKind: Record<string, number>;
+    net: number;
+    closingBalance: number | null;
+    lastCreatedAt: string | null;
+    lastId: number;
+  }
+  const buckets: WindowBucket[] = winRows.results.map((w) => ({
+    windowSeq: w.window_seq,
+    status: w.status,
+    isTemporary: w.is_temporary === 1,
+    openedAt: w.opened_at,
+    closedAt: w.closed_at,
+    byKind: {},
+    net: 0,
+    closingBalance: null,
+    lastCreatedAt: null,
+    lastId: 0,
+  }));
+  const outside: { byKind: Record<string, number>; net: number } = { byKind: {}, net: 0 };
+  const addTo = (b: { byKind: Record<string, number>; net: number }, kind: string, amount: number) => {
+    b.byKind[kind] = (b.byKind[kind] ?? 0) + amount;
+    b.net += amount;
+  };
+  for (const e of entryRows.results) {
+    const bucket = buckets.find((w) => e.created_at >= w.openedAt && (w.closedAt === null || e.created_at <= w.closedAt));
+    if (bucket) {
+      addTo(bucket, e.kind, e.amount);
+      // 末笔按 (created_at, id)：created_at 同值时靠 id 分先后（entries 已按 id 升序，到这里只会更大）
+      if (bucket.lastCreatedAt === null || e.created_at > bucket.lastCreatedAt || (e.created_at === bucket.lastCreatedAt && e.id > bucket.lastId)) {
+        bucket.lastCreatedAt = e.created_at;
+        bucket.lastId = e.id;
+        bucket.closingBalance = e.balance_after;
+      }
+    } else {
+      addTo(outside, e.kind, e.amount);
+    }
+  }
+
+  const matchBySeq = new Map(matchRows.results.map((r) => [r.window_seq, r]));
+  const sumKind = (rec: Record<string, number>) => Object.values(rec).reduce((s, v) => s + v, 0);
+  const windows = buckets.map((w) => {
+    const m = matchBySeq.get(w.windowSeq);
+    const matchday = {
+      matches: m?.matches ?? 0,
+      attendance: m?.attendance ?? 0,
+      ticket: m?.ticket ?? 0,
+      commercial: m?.commercial ?? 0,
+      broadcast: m?.broadcast ?? 0,
+      total: (m?.ticket ?? 0) + (m?.commercial ?? 0) + (m?.broadcast ?? 0),
+    };
+    const { lastCreatedAt: _lca, lastId: _li, ...rest } = w;
+    return { ...rest, matchday };
+  });
+  const totals = windows.length > 0
+    ? {
+        matchday: windows.reduce(
+          (a, w) => ({
+            matches: a.matches + w.matchday.matches,
+            attendance: a.attendance + w.matchday.attendance,
+            ticket: a.ticket + w.matchday.ticket,
+            commercial: a.commercial + w.matchday.commercial,
+            broadcast: a.broadcast + w.matchday.broadcast,
+            total: a.total + w.matchday.total,
+          }),
+          { matches: 0, attendance: 0, ticket: 0, commercial: 0, broadcast: 0, total: 0 },
+        ),
+        net: windows.reduce((s, w) => s + w.net, 0),
+        closingBalance: windows[windows.length - 1].closingBalance,
+      }
+    : null;
+  return c.json({
+    club: { id: club.id, name: club.name },
+    season,
+    windows,
+    outside: Object.keys(outside.byKind).length > 0 ? { ...outside, total: sumKind(outside.byKind) } : null,
+    totals,
+  });
+});
+
 // 设施经营（v2.5.0）：build-info 一次拉全预览数据；扩建/升级操作即批即记账
 app.get('/club/stadium/build-info', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
