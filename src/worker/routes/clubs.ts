@@ -977,41 +977,45 @@ app.get('/club/finance-summary', async (c) => {
 
   const matchBySeq = new Map(matchRows.results.map((r) => [r.window_seq, r]));
   const sumKind = (rec: Record<string, number>) => Object.values(rec).reduce((s, v) => s + v, 0);
+  // 金额口径两位小数（与账本一致），REAL 求和的浮点尾差在这里收掉
+  const round2 = (n: number) => Math.round(n * 100) / 100;
   const windows = buckets.map((w) => {
     const m = matchBySeq.get(w.windowSeq);
     const matchday = {
       matches: m?.matches ?? 0,
       attendance: m?.attendance ?? 0,
-      ticket: m?.ticket ?? 0,
-      commercial: m?.commercial ?? 0,
-      broadcast: m?.broadcast ?? 0,
-      total: (m?.ticket ?? 0) + (m?.commercial ?? 0) + (m?.broadcast ?? 0),
+      ticket: round2(m?.ticket ?? 0),
+      commercial: round2(m?.commercial ?? 0),
+      broadcast: round2(m?.broadcast ?? 0),
+      total: round2((m?.ticket ?? 0) + (m?.commercial ?? 0) + (m?.broadcast ?? 0)),
     };
     const { lastCreatedAt: _lca, lastId: _li, ...rest } = w;
-    return { ...rest, matchday };
+    return { ...rest, matchday, net: round2(w.net) };
   });
+  // 赛季期末余额 = 时间上最后一笔「有流水窗口」的期末（末窗可能一场流水都没有，别把真值丢成 null）
+  const seasonClosing = [...windows].reverse().find((w) => w.closingBalance !== null)?.closingBalance ?? null;
   const totals = windows.length > 0
     ? {
         matchday: windows.reduce(
           (a, w) => ({
             matches: a.matches + w.matchday.matches,
             attendance: a.attendance + w.matchday.attendance,
-            ticket: a.ticket + w.matchday.ticket,
-            commercial: a.commercial + w.matchday.commercial,
-            broadcast: a.broadcast + w.matchday.broadcast,
-            total: a.total + w.matchday.total,
+            ticket: round2(a.ticket + w.matchday.ticket),
+            commercial: round2(a.commercial + w.matchday.commercial),
+            broadcast: round2(a.broadcast + w.matchday.broadcast),
+            total: round2(a.total + w.matchday.total),
           }),
           { matches: 0, attendance: 0, ticket: 0, commercial: 0, broadcast: 0, total: 0 },
         ),
-        net: windows.reduce((s, w) => s + w.net, 0),
-        closingBalance: windows[windows.length - 1].closingBalance,
+        net: round2(windows.reduce((s, w) => s + w.net, 0)),
+        closingBalance: seasonClosing,
       }
     : null;
   return c.json({
     club: { id: club.id, name: club.name },
     season,
     windows,
-    outside: Object.keys(outside.byKind).length > 0 ? { ...outside, total: sumKind(outside.byKind) } : null,
+    outside: Object.keys(outside.byKind).length > 0 ? { ...outside, net: round2(outside.net), total: round2(sumKind(outside.byKind)) } : null,
     totals,
   });
 });

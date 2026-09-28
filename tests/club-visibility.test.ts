@@ -336,6 +336,26 @@ describe('GET /api/club/finance-summary（v6.7.0 B2 窗口财务汇总）', () =
     expect(body.totals).toBeNull();
   });
 
+  it('赛季期末余额回退到最后一笔有流水的窗口；金额求和收两位小数尾差', async () => {
+    const fx = freshEnv();
+    const clubId = await bindCoach(fx);
+    seedWindowsAndSeason(fx.sqlite);
+    seedEntries(fx.sqlite, clubId, [
+      // 0.1 + 0.2 的浮点尾差必须被收口（window.net 与 totals.net 都要 0.3 而不是 0.30000000000000004）
+      { kind: 'manual_adjust', amount: 0.1, balanceAfter: 0.1, createdAt: '2026-01-05T00:00:00Z' },
+      { kind: 'manual_adjust', amount: 0.2, balanceAfter: 0.3, createdAt: '2026-01-06T00:00:00Z' },
+    ]);
+    const res = await get('/api/club/finance-summary', 'tok-coach', fx.env);
+    const body = (await res.json()) as { windows: { net: number; closingBalance: number | null }[]; totals: { net: number; closingBalance: number | null } | null };
+    expect(body.windows).toHaveLength(2);
+    expect(body.windows[0]!.net).toBe(0.3);
+    expect(body.windows[0]!.closingBalance).toBeCloseTo(0.3, 6);
+    // 窗 2 全季无流水：closingBalance null，但赛季合计要回退到窗 1 的 0.3，不是 null
+    expect(body.windows[1]!.closingBalance).toBeNull();
+    expect(body.totals!.net).toBe(0.3);
+    expect(body.totals!.closingBalance).toBeCloseTo(0.3, 6);
+  });
+
   it('赛季不存在（无 seasons 行且无 season 参数）→ season null 空档', async () => {
     const fx = freshEnv();
     await bindCoach(fx);
