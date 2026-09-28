@@ -1118,6 +1118,7 @@ function namingContractDto(row: NonNullable<Awaited<ReturnType<typeof getActiveN
     status: row.status,
     startedSeason: row.started_season,
     startedWindow: row.started_window,
+    satisfaction: row.satisfaction,
   };
 }
 

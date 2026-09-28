@@ -135,6 +135,46 @@ describe('LLM 草稿工坊（管理端 only）', () => {
     expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM event_drafts`)!.n).toBe(0);
   });
 
+  it('草稿修订（PATCH）：text 改 template / struct 重钳 / 已处理 409 / 非对象 payload 400', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(
+      `INSERT INTO event_drafts (kind, payload_json, source_event_id, note, status, created_by, created_at, updated_at)
+       VALUES ('text', '{"template":"旧文案"}', 'storm_buzz', '', 'draft', 2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+              ('struct', '{"event_id":"llm_fix","name":"修订","category":"测试","weight":5,"event_type":"instant","conditions":{},"effects":{"money":1},"options":[],"template":"t"}', NULL, '', 'draft', 2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+    );
+    const ids = (await (await send('GET', '/api/admin/events/drafts', fx.env)).json()) as { drafts: { id: number; kind: string }[] };
+    const textId = ids.drafts.find((d) => d.kind === 'text')!.id;
+    const structId = ids.drafts.find((d) => d.kind === 'struct')!.id;
+
+    // text：改 template（超 120 截断服务端做）
+    const patchText = await send('PATCH', `/api/admin/events/drafts/${textId}`, fx.env, { payload: { template: '  新文案  ' } });
+    expect(patchText.status).toBe(200);
+    expect(sqlGet<{ payload_json: string }>(fx.sqlite, `SELECT payload_json FROM event_drafts WHERE id = ${textId}`)!.payload_json).toBe(
+      JSON.stringify({ template: '新文案' }),
+    );
+    // text：空文案 400
+    expect((await send('PATCH', `/api/admin/events/drafts/${textId}`, fx.env, { payload: { template: '   ' } })).status).toBe(400);
+
+    // struct：越界数值重过钳制（money 999 → 8 静默钳掉），未登记键丢弃并记进 note
+    const patchStruct = await send('PATCH', `/api/admin/events/drafts/${structId}`, fx.env, {
+      payload: { event_id: 'llm_fix', name: '修订', event_type: 'instant', effects: { money: 999, 神奇键: 1 } },
+    });
+    expect(patchStruct.status).toBe(200);
+    const patched = (await patchStruct.json()) as { payload: { effects: { money: number } } };
+    expect(patched.payload.effects.money).toBe(8);
+    expect(sqlGet<{ note: string }>(fx.sqlite, `SELECT note FROM event_drafts WHERE id = ${structId}`)!.note).toContain('丢弃');
+    // struct：缺 event_id（不可救）→ 400
+    expect((await send('PATCH', `/api/admin/events/drafts/${structId}`, fx.env, { payload: { name: '缺标识' } })).status).toBe(400);
+    // payload 非对象 → 400
+    expect((await send('PATCH', `/api/admin/events/drafts/${textId}`, fx.env, { payload: 'x' })).status).toBe(400);
+
+    // 已处理（废弃后）不能再改
+    await send('POST', `/api/admin/events/drafts/${textId}/discard`, fx.env);
+    expect((await send('PATCH', `/api/admin/events/drafts/${textId}`, fx.env, { payload: { template: '再改' } })).status).toBe(409);
+    // 不存在的草稿
+    expect((await send('PATCH', '/api/admin/events/drafts/99999', fx.env, { payload: { template: 'x' } })).status).toBe(404);
+  });
+
   it('废弃草稿：status=discarded + 审计；已处理 409；权限：教练 403', async () => {
     const fx = freshEnv({ base: 'https://llm.example/v1', key: 'k', model: 'm' });
     fx.sqlite.exec(

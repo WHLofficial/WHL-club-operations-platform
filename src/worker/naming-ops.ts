@@ -99,6 +99,7 @@ export interface NamingContractRow {
   status: string;
   started_season: number;
   started_window: number;
+  satisfaction: number;
 }
 
 export async function getActiveNaming(db: Env['DB'], clubId: number): Promise<NamingContractRow | null> {

@@ -397,6 +397,13 @@ function FacilityOpsCard() {
 
 /* ---------- 冠名市场（v2.6.0）：品牌池报价 / 签约 / 退约 ---------- */
 
+/** 品牌方情绪（v6.12.0）：满意度 0–2 映射三档文案，纯展示（C2 才接管行为） */
+function moodLabel(satisfaction: number): string {
+  if (satisfaction < 0.8) return '低落';
+  if (satisfaction <= 1.2) return '平静';
+  return '高涨';
+}
+
 function NamingCard() {
   const qc = useQueryClient();
   const { show } = useToast();
@@ -492,6 +499,12 @@ function NamingCard() {
                 <span className="mono">{contract.betFans}</span>）
               </>
             )}
+          </p>
+          <p>
+            品牌方情绪：<b>{moodLabel(contract.satisfaction)}</b>
+            <span className="hint">
+              （<span className="mono">{contract.satisfaction.toFixed(2)}</span> / 2.00；冠名类事件会影响，只作展示）
+            </span>
           </p>
           <p className="hint">
             冠名费在常规窗关窗时自动入账（1 赛季 = 2 个常规窗，临时窗不计）；提前解约赔剩余期间的 30%（当窗费用照收）。

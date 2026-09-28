@@ -212,6 +212,62 @@ app.get('/events/drafts', async (c) => {
   return c.json({ drafts: rows.map(draftView) });
 });
 
+/** 草稿修订（采纳前）：text 改 template、struct 重过 clampEventDraft 再入库。 */
+app.patch('/events/drafts/:id', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '草稿 id 不对');
+  const row = await c.env.DB.prepare('SELECT id, kind, payload_json, note, status FROM event_drafts WHERE id = ?')
+    .bind(id)
+    .first<DraftRow>();
+  if (!row) throw new HttpError(404, '没有这条草稿');
+  if (row.status !== 'draft') throw new HttpError(409, '已处理的草稿不能再改');
+  const body = (await readJson(c)) as { payload?: unknown } | null;
+  if (body === null || body.payload === null || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
+    throw new HttpError(400, '要给 payload 对象');
+  }
+
+  let payload: unknown;
+  if (row.kind === 'text') {
+    const p = body.payload as { template?: unknown };
+    if (typeof p.template !== 'string' || p.template.trim() === '') throw new HttpError(400, 'template 要给非空文案');
+    payload = { template: p.template.trim().slice(0, 120) };
+  } else {
+    const [clamps, signalDefs, weatherKeys] = await Promise.all([
+      loadEventClamps(c.env.DB),
+      loadEventSignals(c.env.DB),
+      loadWeatherKeys(c.env.DB),
+    ]);
+    let clamped;
+    try {
+      clamped = clampEventDraft(body.payload, { clamps, signalDefs, weatherKeys });
+    } catch (err) {
+      // 人工修订的 JSON 往往半成品：把钳制器的报错透传成 400，让前端提示哪不合格
+      throw new HttpError(400, err instanceof Error ? err.message : '草稿结构不合格');
+    }
+    payload = clamped.event;
+    const extra = clamped.adjustments.filter((s) => !(row.note ?? '').includes(s));
+    if (extra.length > 0) {
+      await c.env.DB.prepare('UPDATE event_drafts SET note = ? WHERE id = ?')
+        .bind([row.note, ...extra].filter((s) => s !== '').join('；'), id)
+        .run();
+    }
+  }
+  await c.env.DB
+    .prepare(`UPDATE event_drafts SET payload_json = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`)
+    .bind(JSON.stringify(payload), id)
+    .run();
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'event_draft_update',
+    targetType: 'event_draft',
+    targetId: id,
+    origin: 'user',
+    after: { kind: row.kind },
+  });
+  return c.json({ id, kind: row.kind, payload });
+});
+
 /** 采纳草稿：text 改写 event_pool.template；struct INSERT event_pool（event_id 撞车 409）。 */
 app.post('/events/drafts/:id/adopt', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');

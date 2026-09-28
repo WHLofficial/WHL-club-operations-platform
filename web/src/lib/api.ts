@@ -995,6 +995,8 @@ export interface NamingContract {
   status: string;
   startedSeason: number;
   startedWindow: number;
+  /** 品牌方情绪（v6.12.0）：0–2，<0.8 低落 / 0.8–1.2 平静 / >1.2 高涨（纯展示，C2 接管行为） */
+  satisfaction: number;
 }
 
 export interface NamingQuoteResponse {
@@ -1109,9 +1111,56 @@ export interface AdminEventTriggerResult {
   clubs: number;
   /** 实际触发条数 */
   triggered: number;
-  /** 掷中但没有可用候选（条件全挡或已达单事件上限）的队数 */
+  /** 掷中但没有候选可用（条件全挡、已达单事件上限或待选事件已满）的队数 */
   capped: number;
   events: AdminEventTriggeredRow[];
+}
+
+/** LLM 草稿工坊（v6.12.0，D3）：生成 → 审校修订 → 采纳进池 / 废弃 */
+export interface LlmStatus {
+  configured: boolean;
+}
+
+/** struct 草稿 / 自定义事件的规范化结构（数值已过 clampEventDraft 钳制） */
+export interface EventDraftStruct {
+  event_id: string;
+  name: string;
+  category: string;
+  weight: number;
+  event_type: 'instant' | 'choice';
+  conditions: Record<string, unknown>;
+  effects: Record<string, unknown>;
+  options: { no: number; name: string; desc: string; outcomes: { w: number; effects: Record<string, unknown> }[] }[];
+  template: string;
+}
+
+export interface AdminEventDraft {
+  id: number;
+  /** text = 改写现有事件文案；struct = 新事件结构草稿 */
+  kind: string;
+  payload_json: string;
+  payload: unknown;
+  source_event_id: string | null;
+  note: string;
+  /** draft | adopted | discarded */
+  status: string;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LlmDraftResult {
+  id: number;
+  kind: string;
+  payload: unknown;
+  adjustments: string[];
+}
+
+export interface EventDraftAdoptResult {
+  id: number;
+  kind: string;
+  /** text = 被改写的事件 event_id；struct = 新入池事件的 event_id */
+  target: string;
 }
 
 /** 玩家侧随机事件（v6.11.0，D2）：待选 + 近期已结算 */
