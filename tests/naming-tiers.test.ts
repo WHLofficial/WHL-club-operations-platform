@@ -187,6 +187,7 @@ describe('两信号情绪演化（TC-EVO）', () => {
       row({ home: 104, away: 101, scoreHome: 2, scoreAway: 0 }),
     ];
     expect(windowWinRate(rows, 101)).toBeCloseTo(1 / 3);
+    expect(windowWinRate(rows, 103)).toBe(0); // 点球战胜方按平计：103 不拿胜场（变异防线：只看 101 抓不到）
     // 双方弃权（无弃权侧无比分）与队 id 缺失的脏行不计名额
     const rows2 = [
       row({ home: 101, away: 102 }),
@@ -236,9 +237,9 @@ describe('两信号情绪演化（TC-EVO）', () => {
     seedClub(fx.sqlite, 1);
     await signNaming(fx.env, 1, '阿迪达斯', 1);
     const naming = (await getActiveNaming(fx.env.DB, 1))!;
-    const { statements, report } = await evolveSatisfactionForClub(fx.env, { ...naming, satisfaction: 0.76 }, undefined, 1, 1, -1, HEAD_PROFILE, SAT);
-    expect(report.to).toBeGreaterThan(0.7); // 0.76 − 0.0375 ≈ 0.722，仍高于地板 0.7
-    expect(report.to).toBeLessThan(0.75);
+    // 0.7375 − 0.0375（sAttend=−1 头部 ×1.5）= 0.700 精确落地板
+    const { statements, report } = await evolveSatisfactionForClub(fx.env, { ...naming, satisfaction: 0.7375 }, undefined, 1, 1, -1, HEAD_PROFILE, SAT);
+    expect(report.to).toBeCloseTo(0.7);
     expect(report.terminated).toBe(false);
     expect(statements).toHaveLength(1);
   });
@@ -340,14 +341,15 @@ describe('联赛冠军加成（TC-CHAMP）', () => {
   });
 
   it('TC-CHAMP-02 tiebreak：净胜球反超积分同分队；再同则队名小者先（AUTH 目录名）', async () => {
-    // 净胜球路径：同 3 分，11 净胜 +2（2:0）、12 净胜 +1（1:0）→ 11 冠
+    // 净胜球路径：同 3 分，11 净胜 +1（1:0）、12 净胜 +2（2:0）→ 12 冠。
+    // 名字序（阿森纳 < 切尔西）与净胜球序刻意相反，去掉 gd 的变异会被名字序掩盖而漏抓
     const fx = freshEnv({ auth: true });
     authRegisterClubTeam(fx.auth, 11, 1, '阿森纳');
     authRegisterClubTeam(fx.auth, 12, 2, '切尔西');
     seedBinding(fx.sqlite, 1, 5, 'league_premier');
-    seedResult(fx.sqlite, { matchId: 1, tournamentId: 5, home: 11, away: 13, scoreHome: 2, scoreAway: 0 });
-    seedResult(fx.sqlite, { matchId: 2, tournamentId: 5, home: 12, away: 14, scoreHome: 1, scoreAway: 0 });
-    expect((await championBonusStatements(fx.env, 1, 1)).detail.clubId).toBe(1);
+    seedResult(fx.sqlite, { matchId: 1, tournamentId: 5, home: 11, away: 13, scoreHome: 1, scoreAway: 0 });
+    seedResult(fx.sqlite, { matchId: 2, tournamentId: 5, home: 12, away: 14, scoreHome: 2, scoreAway: 0 });
+    expect((await championBonusStatements(fx.env, 1, 1)).detail.clubId).toBe(2);
     // 队名路径：同 3 分同净胜，localeCompare 拼音序「阿森纳」(a) < 「拜仁」(bai) → 阿森纳（club 4）冠
     const fx2 = freshEnv({ auth: true });
     authRegisterClubTeam(fx2.auth, 21, 3, '拜仁');
@@ -405,6 +407,11 @@ describe('联赛冠军加成（TC-CHAMP）', () => {
     expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '阿迪达斯'`)!.heat).toBeCloseTo(heatBefore + 0.1);
     expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM audit_log WHERE action = 'champion_bonus'`)?.n).toBe(1);
     await expect(settleSeason(fx.env, 1, 1, true)).rejects.toThrow('已经结算过');
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM audit_log WHERE action = 'champion_bonus'`)?.n).toBe(1);
+    // 守卫重放：已 settled 的赛季再跑加成语句必须是零改行（热度不再 +0.1、审计不再 +1）
+    const replay = await championBonusStatements(fx.env, 1, 1);
+    for (const s of replay.statements) await s.run();
+    expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '阿迪达斯'`)!.heat).toBeCloseTo(heatBefore + 0.1);
     expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM audit_log WHERE action = 'champion_bonus'`)?.n).toBe(1);
   });
 });
