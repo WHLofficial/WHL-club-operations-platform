@@ -4,6 +4,27 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.10.0] · D1 随机事件域：事件池 + 管理端触发 + 11 键效果即时结算（2026-09-28）
+
+差异排期 D 块第一块（参考 AstrBot 插件 `event_engine.py` / `event_effects.py` 搬到本仓）。含迁移 `0047_event_pool.sql` / `0048_event_occurrences.sql` / `0049_stadium_event_pending.sql`——**本地已提交未 push**，push 前须连同 `0045`/`0046` 一起 apply 到生产。
+
+**Added**
+- 迁移 `0047_event_pool.sql`：`event_pool (id, event_id UNIQUE, name, category, weight, event_type, conditions_json, effects_json, options_json, soft_conditions, template, source, status, created_at)` + 24 条种子（6 即发 + 18 选择，逐字同插件 `DEFAULT_EVENTS`）。迁移 `0048_event_occurrences.sql`：`event_occurrences`（选择型的 `choice_no` / `outcome_json` / `deadline_at` 一次建全 ⇒ D2 零迁移）+ 两索引。迁移 `0049_stadium_event_pending.sql`：`stadiums` 加 `next_attendance_mod`（默认 1）与 `next_weather`（默认空）。
+- config 两键：`event_rules`（命中概率 0.4 / 每队 1 次 / 同事件上限 2 队 / 软条件衰减 0.25 / 选项时限 72h）与 `event_clamps`（money 8、fans_pct 0.05、maintenance 5、brand_heat 0.3、build_credit 5、influence 10、booking_cancel 2）；注册表 65 → **67**。
+- `src/worker/event-ops.ts`：条件判定（tier / capacity（**max_capacity 为本仓补**）/ fans / balance / facility_min / `weather_is` 读预置 / `last_result` / `requires_naming` / `requires_activity`）→ 加权单抽（软条件按 `softConditionFactor` 衰减参与、同事件 `maxOccurrences` 上限）→ **11 键效果**（`money` 记 `kind='event'`、`maintenance` 本仓改记 `kind='maintenance'`、`fans_pct` / `attendance_mod` 乘法叠加 / `brand_heat` / `build_credit` / `influence` / `facility` ±1 级 / `booking_cancel` 降序撤档 / `booking_gift` 补空档 / `weather_set`；`satisfaction` / `signals` / `offer_spawn` 留 v6.12.0，本批只播报）。
+- **幂等以 occurrence 行自己当闸**（本仓事件没有关窗批可依附）：非账本效果语句一律追加 `AND (SELECT status FROM event_occurrences WHERE id = ?) = 'pending'`，同批末句置 `resolved`；批次自带审计 `action='event_trigger'`（`origin` = `user` / `cron_tick`）。
+- 关窗消费：`home.ts matchAttendanceStatements` 读 `next_weather`（合法则替代现掷天气）与 `next_attendance_mod`（乘进需求），同批清零——**一次性，只对下一场主场生效**。
+- 端点（权限键 `club.clubs.manage`）：`GET/PATCH /api/admin/events/pool`（池只读 + 启停）、`POST /api/admin/events/trigger`（无参按概率给所有队各掷一次；`clubIds` + `eventId` 点名绕过概率与条件）、`GET /api/admin/events/occurrences`。
+- 前端：新建 `web/src/pages/admin/EventsPage.tsx`（侧栏第 10 项「事件」：触发区 + 池表启停 + 流水表）；账本加「事件」列；通知模板 `event_triggered`（即时型触发即广播）。
+
+**评审修复**（code-review-skill）：① `loadEventContexts` 原先给 `clubIds` 里任何 id 都装上下文，管理端点名写错 id 会留下幽灵 occurrence 与流水 ⇒ 改为只给 `clubs` 表里真实存在的 id 装；② `GET /events/occurrences` 的 `?season=` / `?limit=` 空串被 `Number('')` 吃成 0（静默回落空列表 / limit 钳成 1 条）⇒ 空串按没给算。
+
+**口径**：事件**不绑窗口**（两仓窗口语义不同，用户裁决），发生在赛季进行中、可多次触发，occurrence 只归档触发时的 (赛季, 窗)；D1 只开放即发型，选择型点名触发回 400「要等 v6.11.0（D2）开放」。**不做**：自定义事件编辑、招商轮（C3）、品牌主动解约与档位性格（C2 后段）、LLM 进玩家请求路径（D3 只做管理端生成 + 落库审校）。**已知残留**：occurrence 的 INSERT 与效果批不是同一批（先 INSERT 拿 id 再落效果），进程中途挂掉会留 `status='pending'` 的即发型残留行 ⇒ D2 的 `expirePendingEvents` 必须只挑 `deadline_at IS NOT NULL` 的选择型。
+
+**验收**：typecheck 三份全清、vitest **56 文件 / 916 例全绿**（v6.9.0 基线 55/873，净 +1 文件 / +43 例）、build 成功（`dist/assets/index-Txp-AYZf.js` 605.38 kB / gzip 191.68 kB）；变异验证 12 处全命中（`requires_naming` 失效 / `maxOccurrences` 失效 / money 不钳幅 / `PENDING_GUARD` 失效 / 抽取不过滤即发型 / 撤档取最小档位 / 弃权记失败方 / 不消费 `next_weather` / 不乘 `next_attendance_mod` / 幽灵队守卫失效 / `?limit=` 空串 / `?season=` 空串）。
+
+
+
 ## [v6.9.0] · E 块球场档期：活动预订 + 关窗结算入账（2026-09-28）
 
 差异排期 E 块（参考 AstrBot 插件球场档期域搬到本仓）。含迁移 `0046_venue_bookings.sql`——**本地已提交未 push**，push 前须连同 `0045` 一起 apply 到生产。
