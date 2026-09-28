@@ -64,6 +64,9 @@ export const CONFIG_KEYS = [
   'naming_params',
   'naming_industry_factors',
   'market_heat_rules',
+  'market_satisfy_config',
+  'market_tier_profiles',
+  'market_tier_rules',
   'activity_slots',
   'activity_config',
   'event_rules',
@@ -167,7 +170,16 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   // v6.8.0 冠名活化：行业系数（插件 market_industry_templates 出厂全 1.0，这里给真实默认表；
   // 未登记行业回 1.0）+ 品牌热度动态规则（近 3 场全胜/全败，钳制边界）
   naming_industry_factors: JSON.stringify({ 医疗: 1.2, 运动: 1.1, 科技: 1.3, 饮食: 1.0 }),
-  market_heat_rules: JSON.stringify({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5 }),
+  market_heat_rules: JSON.stringify({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 }),
+  // v6.13.0 C2 冠名深度：情绪演化两信号权重（事件效果走即时落库不进演化，故无 eventWeight）+
+  // 三档性格参数（插件 market_satisfy_config / market_tier_profiles 同值）+ 校准与名额规则。
+  market_satisfy_config: JSON.stringify({ attendWeight: 0.5, resultWeight: 0.3, lineBuffer: 0.05, championSatisfaction: 0.1 }),
+  market_tier_profiles: JSON.stringify({
+    头部: { satisfyFloor: 0.7, goodAttend: 0.95, badAttend: 0.6, penaltyMult: 1.5, attendBuff: 0.02, fansBuff: 0 },
+    新兴: { satisfyFloor: 0.6, goodAttend: 0.9, badAttend: 0.6, penaltyMult: 1.0, attendBuff: 0, fansBuff: 0 },
+    口碑: { satisfyFloor: 0.5, goodAttend: 0.85, badAttend: 0.5, penaltyMult: 0.75, attendBuff: 0, fansBuff: 0.005 },
+  }),
+  market_tier_rules: JSON.stringify({ topSeatRatio: 8, emergingSlots: 2, topHeatFloor: 1.0, emergingHeatFloor: 0.9 }),
   // v6.9.0 球场档期：每窗非比赛日档位数 + 活动目录（插件 _conf_schema activity_slots / activity_config 口径）
   activity_slots: '2',
   activity_config: JSON.stringify({

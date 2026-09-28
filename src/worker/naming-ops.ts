@@ -385,15 +385,23 @@ export interface HeatRules {
   slump: number;
   clampLow: number;
   clampHigh: number;
+  champion: number;
 }
 
-/** 热度规则（config market_heat_rules，JSON）：缺行或缺字段回默认（插件 market_heat_config 出厂值）。 */
+/** 热度规则（config market_heat_rules，JSON）：缺行或缺字段回默认（插件 market_heat_config 出厂值）。
+ *  champion = 赛季冠军品牌热度加成（v6.13.0 C2，插件 champion_bonuses 口径 0.10）。 */
 export async function loadHeatRules(db: Env['DB']): Promise<HeatRules> {
-  const defaults: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5 };
+  const defaults: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 };
   const config = createConfigService(db);
   const r = await config.getJson<Partial<HeatRules>>('market_heat_rules');
   if (r && [r.winStreak, r.slump, r.clampLow, r.clampHigh].every((v) => typeof v === 'number' && Number.isFinite(v))) {
-    return r as HeatRules;
+    return {
+      winStreak: r.winStreak,
+      slump: r.slump,
+      clampLow: r.clampLow,
+      clampHigh: r.clampHigh,
+      champion: typeof r.champion === 'number' && Number.isFinite(r.champion) ? r.champion : defaults.champion,
+    };
   }
   return defaults;
 }
