@@ -277,7 +277,8 @@ export async function closeWindow(
   // 临时窗 = 富人税 → 维护费（工资不扣、冠名不收不减）。全部并入关窗批（窗口状态 UPDATE 行数=原子闸）
   const payroll = await windowPayrollStatements(env, win.season, win.windowSeq, { chargeWages: !isTemporary });
   // 窗末主场结算（v1.5.0）：维护费+死忠演化+冠名收租并入同批（幂等闸/原子语义与工资一致）
-  const home = await windowHomeStatements(env, win.season, win.windowSeq, { chargeNaming: !isTemporary });  // 忠诚奖金（规则 4.3.2；v3.0.0 改口径）：只在常规窗且同赛季第 2 个（中期）关窗时发，
+  const home = await windowHomeStatements(env, win.season, win.windowSeq, { chargeNaming: !isTemporary });
+  // 忠诚奖金（规则 4.3.2；v3.0.0 改口径）：只在常规窗且同赛季第 2 个（中期）关窗时发，
   // 效力按关窗后窗刻度算（本窗 +0.5 已计入），逐队汇总，幂等 ref = window/season*100+windowSeq
   let loyalty: { statements: ReturnType<Env['DB']['prepare']>[]; summary: { count: number; total: number } } = {
     statements: [],
