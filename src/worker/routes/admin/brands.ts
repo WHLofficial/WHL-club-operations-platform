@@ -1,13 +1,14 @@
-// 品牌池管理（v6.8.0 冠名活化）：列表 / 新增自定义品牌 / 调热度·行业·弃用。
+// 品牌池管理（v6.8.0 冠名活化）：列表 / 新增自定义品牌 / 调热度·行业·档位·弃用。
 // 热度界 0.5–1.5（与 market_heat_rules 钳制边界一致）；弃用守卫：有 active 合同的品牌禁弃
 // （插件没这校验，我们补——弃了会让该合同续不了约、热度也不再演化）。
+// 档位（v6.13.0 C2）：tier 三档枚举校验 + tier_locked 手动锁档（锁住的行关窗自动校准跳过）。
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
 import { nowSql, readJson } from './shared.ts';
-import { loadHeatRules } from '../../naming-ops.ts';
+import { loadHeatRules, BRAND_TIERS } from '../../naming-ops.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -24,7 +25,7 @@ app.get('/brands', async (c) => {
   const rows = (
     await c.env.DB
       .prepare(
-        `SELECT b.id, b.brand, b.heat, b.source, b.status, b.industry, b.created_at,
+        `SELECT b.id, b.brand, b.heat, b.source, b.status, b.industry, b.tier, b.tier_locked, b.created_at,
                 COUNT(nc.id) AS active_contracts
          FROM brand_pool b
          LEFT JOIN naming_contracts nc ON nc.brand = b.brand AND nc.status = 'active'
@@ -55,9 +56,9 @@ app.post('/brands', async (c) => {
   ]);
   if ((out[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, `品牌「${name}」已存在`);
   const row = await c.env.DB
-    .prepare(`SELECT id, brand, heat, source, status, industry, created_at FROM brand_pool WHERE brand = ?`)
+    .prepare(`SELECT id, brand, heat, source, status, industry, tier, tier_locked, created_at FROM brand_pool WHERE brand = ?`)
     .bind(name)
-    .first<{ id: number; brand: string; heat: number; source: string; status: string; industry: string; created_at: string }>();
+    .first<{ id: number; brand: string; heat: number; source: string; status: string; industry: string; tier: string; tier_locked: number; created_at: string }>();
   await writeAudit(c.env.DB, {
     actor: user.id,
     action: 'brand_create',
@@ -74,7 +75,7 @@ app.patch('/brands/:id', async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '品牌 id 不对');
   const row = await c.env.DB
-    .prepare(`SELECT id, brand, heat, source, status, industry FROM brand_pool WHERE id = ?`)
+    .prepare(`SELECT id, brand, heat, source, status, industry, tier, tier_locked FROM brand_pool WHERE id = ?`)
     .bind(id)
     .first<{
       id: number;
@@ -83,11 +84,13 @@ app.patch('/brands/:id', async (c) => {
       source: string;
       status: string;
       industry: string;
+      tier: string;
+      tier_locked: number;
     }>();
   if (!row) throw new HttpError(404, '品牌不存在');
-  const body = (await readJson(c)) as { heat?: unknown; industry?: unknown; status?: unknown } | null;
-  if (body?.heat === undefined && body?.industry === undefined && body?.status === undefined) {
-    throw new HttpError(400, '没有要改的字段（heat / industry / status 至少给一个）');
+  const body = (await readJson(c)) as { heat?: unknown; industry?: unknown; status?: unknown; tier?: unknown; tierLocked?: unknown } | null;
+  if (body?.heat === undefined && body?.industry === undefined && body?.status === undefined && body?.tier === undefined && body?.tierLocked === undefined) {
+    throw new HttpError(400, '没有要改的字段（heat / industry / status / tier / tierLocked 至少给一个）');
   }
 
   let heat = row.heat;
@@ -114,11 +117,23 @@ app.patch('/brands/:id', async (c) => {
     }
     status = body.status;
   }
+  let tier = row.tier;
+  if (body?.tier !== undefined) {
+    if (typeof body.tier !== 'string' || !BRAND_TIERS.includes(body.tier as never)) {
+      throw new HttpError(400, `tier 只能是 ${BRAND_TIERS.join(' / ')}`);
+    }
+    tier = body.tier;
+  }
+  let tierLocked = row.tier_locked;
+  if (body?.tierLocked !== undefined) {
+    if (body.tierLocked !== 0 && body.tierLocked !== 1) throw new HttpError(400, 'tierLocked 只能是 0（跟随自动校准）或 1（锁档）');
+    tierLocked = body.tierLocked;
+  }
 
   await c.env.DB.batch([
     c.env.DB
-      .prepare(`UPDATE brand_pool SET heat = ?, industry = ?, status = ? WHERE id = ?`)
-      .bind(heat, industry, status, id),
+      .prepare(`UPDATE brand_pool SET heat = ?, industry = ?, status = ?, tier = ?, tier_locked = ? WHERE id = ?`)
+      .bind(heat, industry, status, tier, tierLocked, id),
   ]);
   await writeAudit(c.env.DB, {
     actor: user.id,
@@ -126,10 +141,10 @@ app.patch('/brands/:id', async (c) => {
     targetType: 'brand_pool',
     targetId: id,
     origin: 'user',
-    before: { brand: row.brand, heat: row.heat, industry: row.industry, status: row.status },
-    after: { brand: row.brand, heat, industry, status },
+    before: { brand: row.brand, heat: row.heat, industry: row.industry, status: row.status, tier: row.tier, tier_locked: row.tier_locked },
+    after: { brand: row.brand, heat, industry, status, tier, tier_locked: tierLocked },
   });
-  return c.json({ brand: { ...row, heat, industry, status } });
+  return c.json({ brand: { ...row, heat, industry, status, tier, tier_locked: tierLocked } });
 });
 
 export default app;

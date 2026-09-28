@@ -16,7 +16,7 @@ import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence }
 import { createConfigService } from '../../core/config.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
-import { quoteBrands, signNaming, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors } from '../naming-ops.ts';
+import { quoteBrands, signNaming, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierRules, tierQuotaOf } from '../naming-ops.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
 import { bookSlot, listBookings, loadActivityCatalog, type VenueBookingRow } from '../venue-ops.ts';
 import { listClubEvents, parseEventOptions, resolveEvent } from '../event-ops.ts';
@@ -1127,11 +1127,22 @@ app.get('/club/naming/quote', async (c) => {
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const contract = await getActiveNaming(c.env.DB, club.id);
-  const [params, brands, factors] = await Promise.all([
+  // 名额余量（v6.13.0 C2）：一次 GROUP BY 聚合全品牌生效冠名数，配档位名额算 quotaLeft（口碑档 null = 不限）
+  const [params, brands, factors, tierRules, signed] = await Promise.all([
     loadNamingParams(c.env.DB),
     loadAdoptedBrands(c.env.DB),
     loadIndustryFactors(c.env.DB),
+    loadTierRules(c.env.DB),
+    c.env.DB
+      .prepare(`SELECT brand, COUNT(*) AS n FROM naming_contracts WHERE status = 'active' GROUP BY brand`)
+      .all<{ brand: string; n: number }>(),
   ]);
+  const signedByBrand = new Map(signed.results.map((r) => [r.brand, r.n]));
+  const withQuota = (quotes: ReturnType<typeof quoteBrands>) =>
+    quotes.map((q) => {
+      const quota = tierQuotaOf(q.tier, tierRules);
+      return { ...q, quotaLeft: quota === null ? null : Math.max(0, quota - (signedByBrand.get(q.brand) ?? 0)) };
+    });
   const stadium = await c.env.DB
     .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
     .bind(club.id)
@@ -1139,12 +1150,12 @@ app.get('/club/naming/quote', async (c) => {
   if (contract) {
     // 续约候选（剩最后 1 窗时前端用）：按当前队况与品牌现热度现算；品牌已弃用则不给（renewal 缺省）
     const renewal = stadium
-      ? quoteBrands(params, brands, stadium.capacity, stadium.fans, factors).find((b) => b.brand === contract.brand) ?? null
+      ? withQuota(quoteBrands(params, brands, stadium.capacity, stadium.fans, factors)).find((b) => b.brand === contract.brand) ?? null
       : null;
     return c.json({ contract: namingContractDto(contract), renewal });
   }
   if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
-  return c.json({ brands: quoteBrands(params, brands, stadium.capacity, stadium.fans, factors) });
+  return c.json({ brands: withQuota(quoteBrands(params, brands, stadium.capacity, stadium.fans, factors)) });
 });
 
 app.post('/club/naming/renew', async (c) => {
