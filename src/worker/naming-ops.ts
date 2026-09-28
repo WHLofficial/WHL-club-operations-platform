@@ -204,6 +204,9 @@ export async function signNaming(
   const factors = await loadIndustryFactors(env.DB);
   const baseFee = round3(namingBaseFee(params, stadium.capacity, stadium.fans, def.heat) * industryFactor(factors, def.industry));
   const pkg = buildPackages(params, baseFee)[packageNo - 1]!;
+  // 名额原子守卫（v6.13.0）：与预检同口径的原子防线，并发下不超卖；口碑档不限额时不加子查询——
+  // 若 bind 0 会让 COUNT < 0 恒假，口碑档品牌永远签不出去（tests/naming-tiers TC-QUOTA-04 抓到的真缺陷）
+  const quotaGuard = quota === null ? '' : ` AND (SELECT COUNT(*) FROM naming_contracts WHERE brand = ? AND status = 'active') < ?`;
   const now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
   const out = await env.DB.batch([
     env.DB
@@ -213,13 +216,12 @@ export async function signNaming(
           windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status,
           started_season, started_window, created_at, updated_at)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ${now}, ${now}
-         WHERE NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')
-           AND (SELECT COUNT(*) FROM naming_contracts WHERE brand = ? AND status = 'active') < ?`,
+         WHERE NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}`,
       )
       .bind(
         clubId, brand, def.heat, baseFee, pkg.packageNo, pkg.pkgName, pkg.feePerWindow,
         pkg.windows, pkg.windows, pkg.bonusAmount, pkg.betAttend, pkg.betFans,
-        win.season, win.windowSeq, clubId, brand, quota ?? 0,
+        win.season, win.windowSeq, clubId, ...(quota === null ? [] : [brand, quota]),
       ),
   ]);
   if ((out[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '已有生效冠名，先退约再签新约');
@@ -688,6 +690,7 @@ export interface SatisfactionReport {
   brand: string;
   from: number;
   to: number;
+  delta: number;
   attendSignal: number;
   resultSignal: number;
   terminated: boolean;
@@ -741,6 +744,7 @@ export async function evolveSatisfactionForClub(
     brand: naming.brand,
     from: naming.satisfaction,
     to,
+    delta,
     attendSignal: sAttend,
     resultSignal: sResult,
     terminated: false,
