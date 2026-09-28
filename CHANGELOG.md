@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.9.0] · E 块球场档期：活动预订 + 关窗结算入账（2026-09-28）
+
+差异排期 E 块（参考 AstrBot 插件球场档期域搬到本仓）。含迁移 `0046_venue_bookings.sql`——**本地已提交未 push**，push 前须连同 `0045` 一起 apply 到生产。
+
+**Added**
+- 迁移 `0046_venue_bookings.sql`：`venue_bookings (id, club_id, season, window_seq, slot_no, activity_type, booked_by, created_at)` + `UNIQUE (club_id, season, window_seq, slot_no)`（唯一约束自带索引，按队+赛季+窗查档期走索引；参考插件无索引）。
+- config 两键：`activity_slots`（默认 2，界 0–20）与 `activity_config`（演唱会 3.0–8.0 + 损坏概率 0.15 / 损坏 2.0–5.0、电竞赛事 2.0–4.0、球迷开放日 0.5、青训夏令营 1.0 + 青训系数 0.1、空置 0，逐字同插件）；注册表 63 → **65**。
+- `src/worker/venue-ops.ts`：档位活动的确定性结算——`seededUnit(seed, draw)`（FNV-1a + splitmix32）把「收入 / 损坏额 / 损坏判定」三次抽取钉在 `[club_id, season, window_seq, slot_no]` 上；`activityIncome` 与插件 `formula.py:497` 严格同序（先收入 → 草皮损坏（概率 ×(1−0.15×pitch_level)）→ concert 收入 ×(1+0.1×pitch_level) / youth_camp ×(1+0.1×youth_level)）；`bookSlot` 同槽位改订走 `ON CONFLICT DO UPDATE` 并回传原档期。
+- 关窗结算：活动收入 `kind='activity'`、草皮损坏 `kind='maintenance'`，**都挂 `ref_type='booking'` `ref_id=档位行 id`**（与基础维护费的 `('maintenance','window',…)` 闸分离，互不干扰）；关窗批内每队结算，临时窗照算；`HomeWindowSummary` 增 `activityClubs` / `activityTotal`。
+- 端点：`GET /api/club/bookings`（当前开窗或 `?season=&windowSeq=` 历史查询）+ `POST /api/club/bookings`（201 回 `{booking, previous}`；越界/未知活动 400、非开窗 409），权限键 `club.squad.manage`。
+- 前端：教练面板新增「主场档期」卡（每队每窗按 `activity_slots` 排活动，非开窗只读）；账本新增「活动」列；`api.ts` / `queries.ts` 补 `BookingsResponse` / `BookingResult` / `qk.bookings`。
+
+**评审修复**（code-review-skill）：`GET /api/club/bookings` 的显式历史参数原先 `Number('')` → 0、`Number('abc')` → NaN 都静默回落到当前开窗；改为成对校验（缺一参 400、非整数 400），`getOpenWindow` 收敛成一次调用。`tests/ledger-audit-lock.test.ts` 白名单加 `worker/venue-ops.ts`（自动路径并入关窗批，ref 锚回档位行，可重建）。
+
+**口径**：预订免费不收钱，收益只在窗末入账；同一档位重复关窗时账本闸按 `(kind,'booking',档位 id)` 拦下，汇总数是「本窗生成额」口径（与维护费/冠名一致）；活动类型窗内可反复改（同一行、闸不变）。**不做**：插件 `open_day` 的 `fans_pct`（插件自身未实现）、档期与比赛日冲突校验（插件也没有）。
+
+**验收**：typecheck 三份全清、vitest **55 文件 / 873 例全绿**（v6.8.0 基线 54/859，净 +1 文件 / +14 例）、build 成功；变异验证 8 处全命中（草皮减免 / concert 加成 / 青训加成 / `seededUnit` 丢 draw / 损坏挂错闸 / 越界忽略 `activity_slots` / 去开窗校验 / 关窗批不并入档期）。
+
 ## [v6.8.0] · C1 冠名活化：品牌池落库 + 行业系数 + 续约 + 热度动态（2026-09-28）
 
 差异排期 C1 块（参考 AstrBot 插件冠名域的深度搬到本仓）。含迁移 `0045_brand_pool.sql`——**本地已提交未 push**，push 前须先 apply 到生产。
