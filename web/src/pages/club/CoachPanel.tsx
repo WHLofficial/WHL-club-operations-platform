@@ -9,6 +9,9 @@ import {
   ApiError,
   api,
   apiPost,
+  type BookingActivityOption,
+  type BookingResult,
+  type BookingsResponse,
   type BuildPaymentResult,
   type NamingQuoteResponse,
   type NamingTerminateResult,
@@ -122,6 +125,8 @@ export default function CoachPanel() {
       {home && <FacilityOpsCard />}
 
       {home && <NamingCard />}
+
+      {home && <BookingsCard />}
 
       {squad && <RegistrationSection squad={squad} onRefresh={refreshSquad} />}
 
@@ -538,6 +543,125 @@ function NamingCard() {
             </p>
           ))}
         </>
+      )}
+    </section>
+  );
+}
+
+/* ---------- 主场档期（v6.9.0）：每窗非比赛日档位的活动预订 ---------- */
+
+function BookingsCard() {
+  const qc = useQueryClient();
+  const { show } = useToast();
+  const listQuery = useQuery({
+    queryKey: qk.bookings,
+    queryFn: () => api<BookingsResponse>('/api/club/bookings'),
+    retry: false,
+  });
+  const [busySlot, setBusySlot] = useState<number | null>(null);
+  // 每档位未提交的选择（不提交不改）；键缺省时回落到已排活动
+  const [choice, setChoice] = useState<Record<number, string>>({});
+  const data = listQuery.data ?? null;
+
+  function refresh() {
+    void qc.invalidateQueries({ queryKey: qk.bookings });
+    void qc.invalidateQueries({ queryKey: ['club', 'finance-summary'] });
+  }
+
+  async function book(slotNo: number, activityType: string, activityName: string) {
+    setBusySlot(slotNo);
+    try {
+      const out = await apiPost<BookingResult>('/api/club/bookings', { slotNo, activityType });
+      refresh();
+      show(
+        out.previous
+          ? `${slotNo} 号档期改排「${activityName}」，原「${out.previous.activityName}」已撤。`
+          : `${slotNo} 号档期已排「${activityName}」，收益在窗末结算。`,
+      );
+    } catch (err) {
+      show(err instanceof Error ? err.message : '排档期失败', true);
+    } finally {
+      setBusySlot(null);
+    }
+  }
+
+  if (listQuery.isPending) return null;
+  if (listQuery.isError || !data) {
+    return (
+      <section className="card">
+        <h3>球场档期</h3>
+        <p className="muted">{listQuery.error instanceof Error ? listQuery.error.message : '档期读不出来'}</p>
+      </section>
+    );
+  }
+
+  const bySlot = new Map(data.bookings.map((b) => [b.slotNo, b]));
+  const slotNos = Array.from({ length: Math.max(0, data.slots) }, (_, i) => i + 1);
+  const fallbackKey = data.catalog.find((o) => o.key === 'idle')?.key ?? data.catalog[0]?.key ?? '';
+  const incomeText = (o: BookingActivityOption) =>
+    o.incomeMin === o.incomeMax ? money2(o.incomeMin) : `${o.incomeMin.toFixed(2)}–${o.incomeMax.toFixed(2)} m`;
+
+  return (
+    <section className="card">
+      <h3>球场档期</h3>
+      <p className="hint">
+        每窗有 <span className="mono">{data.slots}</span> 个非比赛日档位，可以排演唱会、电竞、开放日、青训营这类活动；收益与草皮损坏都在关窗时一起结算。
+        {!data.open && (data.season !== null ? '当前看的是已关窗口的档期，只能看不能改。' : '现在没有开着的窗口，开窗后才能排档期。')}
+      </p>
+      {slotNos.length === 0 ? (
+        <p className="muted">本季每窗 0 个档位（activity_slots = 0），不开放档期预订。</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>档位</th>
+                <th>已排活动</th>
+                <th className="num">预计收入</th>
+                <th>改排为</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {slotNos.map((slotNo) => {
+                const current = bySlot.get(slotNo);
+                const currentOption = current ? data.catalog.find((o) => o.key === current.activityType) : undefined;
+                const picked = choice[slotNo] ?? current?.activityType ?? fallbackKey;
+                const pickedOption = data.catalog.find((o) => o.key === picked);
+                return (
+                  <tr key={slotNo}>
+                    <td className="mono">{slotNo} 号</td>
+                    <td>{current ? current.activityName : <span className="muted">空闲</span>}</td>
+                    <td className="num mono">{currentOption ? incomeText(currentOption) : '—'}</td>
+                    <td>
+                      <select
+                        value={picked}
+                        disabled={!data.open || busySlot !== null}
+                        onChange={(e) => setChoice((prev) => ({ ...prev, [slotNo]: e.target.value }))}
+                      >
+                        {data.catalog.map((o) => (
+                          <option key={o.key} value={o.key}>
+                            {o.name}（{incomeText(o)}）
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        type="button"
+                        disabled={!data.open || busySlot !== null || pickedOption === undefined}
+                        onClick={() => void book(slotNo, picked, pickedOption?.name ?? picked)}
+                      >
+                        {busySlot === slotNo ? '提交中…' : current ? '改排' : '排上'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

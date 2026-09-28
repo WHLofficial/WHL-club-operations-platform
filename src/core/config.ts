@@ -64,6 +64,8 @@ export const CONFIG_KEYS = [
   'naming_params',
   'naming_industry_factors',
   'market_heat_rules',
+  'activity_slots',
+  'activity_config',
   'results_auto_confirm',
   'review_amount_threshold',
   'bid_pattern_alert',
@@ -163,6 +165,15 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   // 未登记行业回 1.0）+ 品牌热度动态规则（近 3 场全胜/全败，钳制边界）
   naming_industry_factors: JSON.stringify({ 医疗: 1.2, 运动: 1.1, 科技: 1.3, 饮食: 1.0 }),
   market_heat_rules: JSON.stringify({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5 }),
+  // v6.9.0 球场档期：每窗非比赛日档位数 + 活动目录（插件 _conf_schema activity_slots / activity_config 口径）
+  activity_slots: '2',
+  activity_config: JSON.stringify({
+    concert: { name: '演唱会', income_min: 3.0, income_max: 8.0, pitch_damage_prob: 0.15, damage_min: 2.0, damage_max: 5.0 },
+    esports: { name: '电竞赛事', income_min: 2.0, income_max: 4.0 },
+    open_day: { name: '球迷开放日', income: 0.5 },
+    youth_camp: { name: '青训夏令营', income: 1.0, youth_level_factor: 0.1 },
+    idle: { name: '空置', income: 0.0 },
+  }),
   // v2.7.0 赛果自动化：cron 每 5 分钟自动确认完赛场次（异常场标人工复核）
   results_auto_confirm: 'on',
   xp_per_level: '10',

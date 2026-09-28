@@ -10,6 +10,7 @@ import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
 import { getActiveNaming, windowNamingStatements, windowBrandHeatStatement } from './naming-ops.ts';
+import { loadActivityCatalog, windowActivityStatements } from './venue-ops.ts';
 
 export interface AttendanceModel {
   weather_probabilities: Record<string, number>;
@@ -332,15 +333,19 @@ export interface HomeWindowSummary {
   fansClubs: number;
   namingClubs: number;
   namingTotal: number;
+  activityClubs: number;
+  activityTotal: number;
 }
 
 /**
- * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠演化 + 冠名收租。
+ * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠演化 + 冠名收租 + 档期活动。
  * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；临时窗照收。
  * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训等级涨粉系数 ×(1+0.03n)，v6.6.3 接入）——每种窗都演化。
  * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，v3.0.0 裁决）；
  * 品牌热度动态随收租批走（近 3 场全胜/全败调 brand_pool.heat，v6.8.0）。
- * 幂等：ledger 走 'maintenance'/'naming_fee'/'window' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
+ * 档期活动（v6.9.0）：本窗已订档位按确定性伪随机结算收入与草皮损坏；临时窗**照算**（预订时窗是开的，
+ * 活动本身与转会议题无关），但只算当窗已订的槽位。
+ * 幂等：ledger 走 'maintenance'/'naming_fee'/'activity'/'booking' 闸；fans UPDATE 幂等由关窗状态原子闸保证（整批回滚）。
  */
 export async function windowHomeStatements(
   env: Env,
@@ -350,14 +355,26 @@ export async function windowHomeStatements(
 ): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; summary: HomeWindowSummary }> {
   const model = await loadAttendanceModel(env.DB);
   const tierTable = await loadTierTable(env.DB);
+  const activityCatalog = await loadActivityCatalog(env.DB);
 
   const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans FROM stadiums').all<StadiumRow>();
-  // 青训等级一次批量查（evolveFans 涨粉系数 ×(1+0.03n)；无设施行 = 0 级）；club → tour 队 id 反向映射（战绩查询用）
-  const youthRows = await env.DB.prepare(`SELECT club_id, level FROM club_facilities WHERE facility_key = 'youth'`).all<{ club_id: number; level: number }>();
-  const youthLevels = new Map(youthRows.results.map((r) => [r.club_id, r.level]));
+  // 设施等级一次批量查（青训级 → evolveFans 涨粉系数 ×(1+0.03n)，v6.6.3；草皮级 → 档期活动的收入加成与损坏减免，v6.9.0）
+  const facilityRows = await env.DB
+    .prepare(`SELECT club_id, facility_key, level FROM club_facilities WHERE facility_key IN ('youth', 'pitch')`)
+    .all<{ club_id: number; facility_key: string; level: number }>();
+  const youthLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'youth').map((r) => [r.club_id, r.level]));
+  const pitchLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'pitch').map((r) => [r.club_id, r.level]));
   const tourMap = await tourTeamIdsByClub(env, stadiums.results.map((s) => s.club_id));
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
-  const summary: HomeWindowSummary = { maintenanceClubs: 0, maintenanceTotal: 0, fansClubs: 0, namingClubs: 0, namingTotal: 0 };
+  const summary: HomeWindowSummary = {
+    maintenanceClubs: 0,
+    maintenanceTotal: 0,
+    fansClubs: 0,
+    namingClubs: 0,
+    namingTotal: 0,
+    activityClubs: 0,
+    activityTotal: 0,
+  };
 
   for (const s of stadiums.results) {
     const tierEntry = tierTable[String(s.tier)];
@@ -417,6 +434,17 @@ export async function windowHomeStatements(
           if (heatStmt) statements.push(heatStmt);
         }
       }
+    }
+
+    // 档期活动结算（v6.9.0）：本窗已订档位的收入与草皮损坏（确定性伪随机；无订单则零开销）
+    const activity = await windowActivityStatements(env, s.club_id, season, windowSeq, activityCatalog, {
+      pitch: pitchLevels.get(s.club_id) ?? 0,
+      youth: youthLevels.get(s.club_id) ?? 0,
+    });
+    if (activity.statements.length > 0) {
+      statements.push(...activity.statements);
+      summary.activityClubs++;
+      summary.activityTotal = Math.round((summary.activityTotal + activity.income - activity.extraMaintenance) * 100) / 100;
     }
   }
   return { statements, summary };

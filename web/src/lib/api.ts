@@ -1010,6 +1010,42 @@ export interface NamingTerminateResult {
   windowsRemaining: number;
 }
 
+/** 主场档期（v6.9.0）：每窗非比赛日档位的活动预订，收益在窗末随关窗结算 */
+export interface BookingActivityOption {
+  key: string;
+  name: string;
+  /** 预计收入区间（固定收入活动上下界相同）；实际值窗末按档位种子结算 */
+  incomeMin: number;
+  incomeMax: number;
+}
+
+export interface BookingRow {
+  id: number;
+  slotNo: number;
+  activityType: string;
+  activityName: string;
+  bookedBy: string;
+  createdAt: string;
+}
+
+export interface BookingsResponse {
+  clubId: number;
+  /** 查的这一窗是否就是当前开窗（关了的历史窗只能看不能改） */
+  open: boolean;
+  season: number | null;
+  windowSeq: number | null;
+  /** 每窗档位总数（config activity_slots） */
+  slots: number;
+  catalog: BookingActivityOption[];
+  bookings: BookingRow[];
+}
+
+export interface BookingResult {
+  booking: BookingRow;
+  /** 同一档位被改订时原活动（首次预订为 null） */
+  previous: BookingRow | null;
+}
+
 /** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
 export const LEDGER_KIND_LABELS: Record<string, string> = {
   opening_import: '期初导入',

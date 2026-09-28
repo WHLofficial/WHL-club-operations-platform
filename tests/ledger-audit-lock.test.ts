@@ -32,6 +32,7 @@ const NO_OWN_AUDIT: Record<string, string> = {
   'worker/home.ts': '自动路径（比赛日收入/球场维护）：ref 锚回 match 或 window，可重建；无人类操作语义',
   'worker/prizes.ts': '自动路径（逐场奖金）：赛果确认触发，ref 锚回 match，可重建',
   'worker/window-payroll.ts': '工资/富人税：并入关窗批，逐类汇总写进 window_close 审计的 after',
+  'worker/venue-ops.ts': '自动路径（档位活动收入/草皮损坏）：并入关窗批的 home 段，ref 锚回 venue_bookings 档位行，可重建；预订本身不写账本',
 };
 
 describe('财政域留痕同源锁', () => {

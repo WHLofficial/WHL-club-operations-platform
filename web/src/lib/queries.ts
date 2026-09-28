@@ -21,6 +21,7 @@ export const qk = {
   notifications: ['notifications'] as const,
   stadiumBuild: ['club', 'stadium-build'] as const,
   naming: ['club', 'naming'] as const,
+  bookings: ['club', 'bookings'] as const,
   offers: (box: 'in' | 'out', status: string) => ['offers', box, status] as const,
   offer: (id: number) => ['offers', 'detail', id] as const,
   homeMatches: ['club', 'home-matches'] as const,

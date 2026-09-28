@@ -17,7 +17,8 @@ import { createConfigService } from '../../core/config.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
 import { quoteBrands, signNaming, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors } from '../naming-ops.ts';
-import { getVisibleSeason } from '../seasons.ts';
+import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
+import { bookSlot, listBookings, loadActivityCatalog, type VenueBookingRow } from '../venue-ops.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -1169,6 +1170,88 @@ app.post('/club/naming/terminate', async (c) => {
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const out = await terminateNaming(c.env, club.id, user.id);
   return c.json(out, 201);
+});
+
+// 球场档期（v6.9.0）：每窗非比赛日档位的活动预订；收益与草皮损坏在窗末随关窗批结算
+function bookingDto(row: VenueBookingRow, nameOf: (key: string) => string) {
+  return {
+    id: row.id,
+    slotNo: row.slot_no,
+    activityType: row.activity_type,
+    activityName: nameOf(row.activity_type),
+    bookedBy: row.booked_by,
+    createdAt: row.created_at,
+  };
+}
+
+app.get('/club/bookings', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再排档期');
+  const catalog = await loadActivityCatalog(c.env.DB);
+  const nameOf = (key: string) => catalog.types[key]?.name ?? key;
+  // 缺省看当前开窗；也可显式查历史（season + windowSeq 必须成对给，给了就得是整数，给错宁可报错也不静默换窗）
+  const seasonRaw = c.req.query('season');
+  const windowRaw = c.req.query('windowSeq');
+  const hasQuery = seasonRaw !== undefined || windowRaw !== undefined;
+  if (hasQuery && (seasonRaw === undefined || windowRaw === undefined)) {
+    throw new HttpError(400, '查历史档期要 season 与 windowSeq 成对给');
+  }
+  const seasonParam = Number(seasonRaw);
+  const windowParam = Number(windowRaw);
+  if (seasonRaw !== undefined && (!Number.isInteger(seasonParam) || !Number.isInteger(windowParam))) {
+    throw new HttpError(400, 'season / windowSeq 必须是整数');
+  }
+  const current = await getOpenWindow(c.env.DB);
+  const target = seasonRaw !== undefined ? { season: seasonParam, windowSeq: windowParam } : current;
+  const isOpen = !!target && !!current && current.season === target.season && current.windowSeq === target.windowSeq;
+  const rows = target ? await listBookings(c.env.DB, club.id, target.season, target.windowSeq) : [];
+  return c.json({
+    clubId: club.id,
+    open: isOpen,
+    season: target?.season ?? null,
+    windowSeq: target?.windowSeq ?? null,
+    slots: catalog.slots,
+    catalog: Object.entries(catalog.types).map(([key, def]) => ({
+      key,
+      name: def.name,
+      // 预计收入区间（固定收入活动上下界相同）；实际值在窗末按档位种子结算
+      incomeMin: def.incomeMin ?? def.income ?? 0,
+      incomeMax: def.incomeMax ?? def.income ?? 0,
+    })),
+    bookings: rows.map((r) => bookingDto(r, nameOf)),
+  });
+});
+
+app.post('/club/bookings', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再排档期');
+  const body = (await c.req.raw.json().catch(() => null)) as { slotNo?: unknown; activityType?: unknown; season?: unknown; windowSeq?: unknown } | null;
+  if (typeof body?.activityType !== 'string') throw new HttpError(400, '缺活动类型');
+  const open = await getOpenWindow(c.env.DB);
+  if (!open) throw new HttpError(409, '现在没有开着的窗口，订不了档期');
+  if (body.season !== undefined && Number(body.season) !== open.season) throw new HttpError(409, '只能订当前开窗的档期');
+  if (body.windowSeq !== undefined && Number(body.windowSeq) !== open.windowSeq) throw new HttpError(409, '只能订当前开窗的档期');
+  const catalog = await loadActivityCatalog(c.env.DB);
+  const out = await bookSlot(
+    c.env,
+    {
+      clubId: club.id,
+      season: open.season,
+      windowSeq: open.windowSeq,
+      slotNo: Number(body.slotNo),
+      activityType: body.activityType,
+      actor: user.id,
+    },
+    catalog,
+  );
+  const nameOf = (key: string) => catalog.types[key]?.name ?? key;
+  // previous 供前端提示「原档期「演唱会」已被取代」
+  return c.json(
+    { booking: bookingDto(out.booking, nameOf), previous: out.previous ? bookingDto(out.previous, nameOf) : null },
+    201,
+  );
 });
 
 export default app;
