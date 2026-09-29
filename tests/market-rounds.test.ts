@@ -1,6 +1,6 @@
 // v6.14.0 C3 招商轮（market_rounds / market_offers）：清盘与开轮、定向递价、签约/接班/换签、上门事件递价、配置与路由
 // 计划：docs/test-plans/v6.14.0-c3.md
-//   覆盖 TC-ROUND-01..09 / TC-OFFER-01..11 / TC-ACCEPT-01..15 / TC-QUEUED-01..08 / TC-SPAWN-01..11 / TC-CFG-01..03 / TC-ROUTE-01..07
+//   覆盖 TC-ROUND-01..09 / TC-OFFER-01..11 / TC-ACCEPT-01..15（含 09B/09C 评审加固）/ TC-QUEUED-01..08 / TC-SPAWN-01..11 / TC-CFG-01..03 / TC-ROUTE-01..07
 //   （TC-ACCEPT-16 与 TC-UI-01..04 为人工/e2e，不在本文件）
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
@@ -29,6 +29,7 @@ import type { NamingContractRow } from '../src/worker/naming-ops.ts';
 import { windowHomeStatements } from '../src/worker/home.ts';
 import { renderNotification } from '../src/worker/notify.ts';
 import { seededUnit } from '../src/worker/venue-ops.ts';
+import { ledgerMovement } from '../src/worker/ledger.ts';
 import {
   conditionOk,
   describeEffect,
@@ -170,6 +171,31 @@ async function rejectsHttp(p: Promise<unknown>, status: number, message: string)
   expect(err, '应抛 HttpError').not.toBeNull();
   expect(err?.status).toBe(status);
   expect(err?.message).toBe(message);
+}
+
+/**
+ * 竞态复现夹具（评审 P0-1 测试用）：第 1 次 batch 提交前先跑 inject——
+ * 模拟「预检已过、批提交前被并发抢先落库」这一窗口，不依赖调度时序。只包 batch，其余直通
+ * （测试 D1 替身的方法闭包持 sqlite、不依赖 this，Reflect.get 直取安全）。
+ */
+function racingEnv(fx: Fixture, inject: () => void): Env {
+  const real = fx.env.DB;
+  let armed = true;
+  const db = new Proxy(real, {
+    get(target, prop) {
+      if (prop === 'batch') {
+        return async (statements: ReturnType<Env['DB']['prepare']>[]) => {
+          if (armed) {
+            armed = false;
+            inject();
+          }
+          return target.batch(statements);
+        };
+      }
+      return Reflect.get(target, prop) as unknown;
+    },
+  }) as Env['DB'];
+  return { ...fx.env, DB: db };
 }
 
 /** 源码顺序锁：各片段必须依次出现（用于批序/语句顺序这类只能靠源码表达的契约） */
@@ -441,7 +467,7 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
       'statements.push(...round.openStatements, ...activation.statements);',
     );
     expect(home).toContain('const round = opts.chargeNaming ? await buildRoundStatements(env, season, windowSeq) : null;');
-    expect(home).toContain('const activation = await activateQueuedStatements(env, season, windowSeq, \'user\', null);');
+    expect(home).toContain('const activation = await activateQueuedStatements(env, season, windowSeq, \'user\', opts.actor ?? null);');
     // 临时窗不带 market 段（chargeNaming=false 由关窗机传）
     const machine = readFileSync(MACHINE_SRC, 'utf8');
     expect(machine).toContain('chargeNaming: !isTemporary');
@@ -824,14 +850,19 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
 
   it('TC-ACCEPT-09 并发抢锁三层：抢赢见合同、抢输 409 且零改行（热度不双加）', async () => {
     const src = readFileSync(MARKET_SRC, 'utf8');
-    // ① 抢锁语句本身（WHERE status = 'pending'）+ ② 合同/热度/审计各自的守卫
-    expect(src).toContain("UPDATE market_offers SET status = 'accepted' WHERE id = ? AND status = 'pending'");
-    // ② 合同 INSERT 守卫（片段唯一化到 acceptOffer 这一处：offer 状态 + 无 active + quotaGuard 尾）
-    expect(src).toContain(
-      "WHERE (SELECT status FROM market_offers WHERE id = ?) = 'accepted'" +
-        "\n           AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}${",
-    );
-    expect(src).toContain("WHERE id = ? AND status = 'adopted' AND (SELECT status FROM market_offers WHERE id = ?) = 'accepted'");
+    // ① 抢锁句本身（pending → accepted，顺带写批内归属令牌）；② 下游语句一律挂同一个 claim 守卫
+    expect(src).toContain("UPDATE market_offers SET status = 'accepted', claim_token = ?");
+    expect(src).toContain("WHERE id = ? AND status = 'pending'");
+    expect(src).toContain('const claimGuard = `(SELECT claim_token FROM market_offers WHERE id = ?) = ?`;');
+    // ② 合同 INSERT 守卫＝claim（terminate 分支再叠加 无 active + quotaGuard 尾；signed 把它上提到抢锁句）
+    expect(src).toContain('WHERE ${claimGuard}${');
+    expect(src).toContain(" AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}");
+    expect(src).toContain("WHERE id = ? AND status = 'active' AND ${claimGuard}");
+    expect(src).toContain("WHERE id = ? AND status = 'adopted' AND ${claimGuard}");
+    expect(src).toContain('guardSql: claimGuard,');
+    // 批后判定只剩抢锁一处（旧的「报价刚被处理过，请刷新」已退役）
+    expect(src).toContain("throw new HttpError(409, '报价已被处理或条件已变化，请刷新后重试')");
+    expect(src).not.toContain('报价刚被处理过，请刷新');
 
     const fx = freshEnv();
     seedClub(fx.sqlite);
@@ -848,7 +879,28 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(1);
     expect(brandHeat(fx.sqlite, '可口可乐')).toBe(1.02);
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_offer_accept'")).toBe(auditsAfterWin);
-    expect(src).toContain("throw new HttpError(409, '报价刚被处理过，请刷新')");
+  });
+
+  it('TC-ACCEPT-09B 抢锁守卫假 ⇒ 整批零落：批前冒出 active，合同/热度/审计一行不落', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    await seedOpenRound(fx.env);
+    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const heat0 = brandHeat(fx.sqlite, '可口可乐');
+    // 预检已过、批提交前被抢先落下一纸 active：抢锁句守卫假 ⇒ claim 未写入 ⇒ 下游语句全挂同一令牌，整批零改行
+    const env = racingEnv(fx, () => {
+      fx.sqlite.exec(`INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name,
+        fee_per_window, windows_total, windows_remaining, status, started_season, started_window, created_at, updated_at)
+        VALUES (1, '海底捞', 0.9, 1.0, 1, '稳健', 0.85, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`);
+    });
+    await rejectsHttp(acceptOffer(env, offerId, 1, undefined, null), 409, '报价已被处理或条件已变化，请刷新后重试');
+    expect(offerRow(fx.sqlite, offerId).status).toBe('pending');
+    expect(sqlGet<{ claim_token: string }>(fx.sqlite, 'SELECT claim_token FROM market_offers WHERE id = ?', offerId)!.claim_token).toBe('');
+    expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(1); // 只有抢先那纸
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '可口可乐'")).toBe(0);
+    expect(brandHeat(fx.sqlite, '可口可乐')).toBe(heat0); // 热度不 +deal
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_offer_accept'")).toBe(0);
   });
 
   it('TC-ACCEPT-10 换签 terminate：解约赔款 = (剩窗−1)×窗费×0.3，账本 kind=naming_penalty', async () => {
@@ -876,8 +928,8 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
       "SELECT kind, amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'naming_penalty'",
     )!;
     expect(entry.amount).toBe(-1.746);
-    expect(entry.ref_type).toBe('naming');
-    expect(entry.ref_id).toBe(old.id);
+    expect(entry.ref_type).toBe('offer'); // 幂等键＝本报价（重放不再赔）
+    expect(entry.ref_id).toBe(offerId);
     expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')!.balance).toBe(48.254);
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE club_id = 1 AND status = 'active'")).toBe(1);
     // 审计 after 带 penalty（有赔款才带）
@@ -969,6 +1021,42 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     expect(out.contract!.brand).toBe('亚马逊');
     expect(brandHeat(fx.sqlite, '亚马逊')).toBe(1.3); // WHERE status = 'adopted' 挡住 deal
   });
+
+  it('TC-ACCEPT-09C 换签赔款守卫与幂等：claim 挂账本闸、幂等键＝本报价（同键重放不双赔）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    await seedOpenRound(fx.env);
+    await signViaOffer(fx.env, 1, '星海通讯', 1);
+    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const out = await acceptOffer(fx.env, offerId, 1, 'terminate', null);
+    expect(out.penalty).toBe(1.746);
+    const src = readFileSync(MARKET_SRC, 'utf8');
+    // 赔款流水：幂等键＝本报价 + claim 守卫（抢锁输方本批不入账）
+    expect(src).toContain("refType: 'offer',");
+    expect(src).toContain('idempotent: true,');
+    expect(src).toContain('guardSql: claimGuard,');
+    const entry = sqlGet<{ ref_type: string; ref_id: number }>(
+      fx.sqlite,
+      "SELECT ref_type, ref_id FROM ledger_entries WHERE kind = 'naming_penalty'",
+    )!;
+    expect([entry.ref_type, entry.ref_id]).toEqual(['offer', offerId]);
+    // 同键重放（同批重放/重复提交）：按同 (kind, ref_type, ref_id, club_id) 再走一遍 ledgerMovement，整段不动
+    const before = sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')!.balance;
+    const replay = await fx.env.DB.batch(
+      ledgerMovement(fx.env.DB, {
+        clubId: 1,
+        delta: -1.746,
+        kind: 'naming_penalty',
+        refType: 'offer',
+        refId: offerId,
+        memo: '换签解约赔款（同键重放）',
+      }),
+    );
+    expect(replay.map((o) => o.meta.changes)).toEqual([0, 0]);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')!.balance).toBe(before);
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'naming_penalty'")).toBe(1);
+  });
 });
 
 // ================= TC-QUEUED：接班转正 =================
@@ -1004,7 +1092,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(1);
   });
 
-  it('TC-QUEUED-02 仍有 active 的队跳过（留在 queued 等下一次）', async () => {
+  it('TC-QUEUED-02 仍有 active 的队跳过（语句照生成、执行期零改行、留在 queued）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
@@ -1013,13 +1101,18 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     const offerId = await seedOffer(fx.env, 1, 'CVS Health', 1);
     await acceptOffer(fx.env, offerId, 1, 'queued', null);
     const activation = await activateQueuedStatements(fx.env, 1, 2, 'user', null);
-    expect(activation.statements).toHaveLength(0);
+    // 评审 P1-3：语句一律生成（3 条：占坑 / 合同 / 审计），落不落由执行期「本队无 active」守卫决定
+    expect(activation.statements).toHaveLength(3);
     expect(activation.activated).toHaveLength(0);
+    const outs = await fx.env.DB.batch(activation.statements);
+    expect(outs.map((o) => o.meta.changes)).toEqual([0, 0, 0]);
     expect(offerRow(fx.sqlite, offerId).status).toBe('queued');
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = 'CVS Health'")).toBe(0);
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(0);
     expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('星海通讯');
   });
 
-  it('TC-QUEUED-03 同队双接班被 uq_market_offer_queued 拦（第二条只能停在 pending）', async () => {
+  it('TC-QUEUED-03 同队双接班：预检给可读 409（uq_market_offer_queued 仍是竞态最终防线）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
@@ -1028,12 +1121,15 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     const offerA = await seedOffer(fx.env, 1, 'CVS Health', 1);
     const offerB = await seedOffer(fx.env, 1, '亚马逊', 2);
     await acceptOffer(fx.env, offerA, 1, 'queued', null);
-    // 口碑不限额 ⇒ 第二条的守卫过得去，真正的闸是部分唯一索引
-    await expect(acceptOffer(fx.env, offerB, 1, 'queued', null)).rejects.toThrow(/UNIQUE/i);
+    // 口碑不限额 ⇒ 名额守卫过得去，闸门是「同队已有 queued」；评审 P1-1：直撞唯一索引是 500，先预检给 409
+    await rejectsHttp(acceptOffer(fx.env, offerB, 1, 'queued', null), 409, '已有一份待接替报价，先处理它再排新的');
     expect(offerRow(fx.sqlite, offerB).status).toBe('pending');
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM market_offers WHERE club_id = 1 AND status = 'queued'")).toBe(1);
     const sql = readFileSync('src/db/migrations/0055_market_rounds.sql', 'utf8');
     expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS uq_market_offer_queued ON market_offers (club_id) WHERE status = 'queued';");
+    const src = readFileSync(MARKET_SRC, 'utf8');
+    expect(src).toContain("SELECT 1 AS n FROM market_offers WHERE club_id = ? AND status = 'queued' AND id <> ? LIMIT 1");
+    expect(src).toContain("throw new HttpError(409, '已有一份待接替报价，先处理它再排新的')");
   });
 
   it('TC-QUEUED-04 转正不超卖：active+queued 总数守恒、绝不同时两纸 active', async () => {
@@ -1097,7 +1193,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     expect(src).toContain("` AND o.club_id IN (${clubIds.map(() => '?').join(',')})`");
   });
 
-  it('TC-QUEUED-06 批尾时点：构建期读 active ⇒ 同批内刚到期者不转正，下次批才放行', async () => {
+  it('TC-QUEUED-06 批尾时点：同批刚到期者本批即转正（语句无条件生成、执行期守卫放行）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
@@ -1108,17 +1204,16 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     fx.sqlite.exec(`UPDATE naming_contracts SET windows_remaining = 1 WHERE id = ${old.id}`);
     const contract = sqlGet<NamingContractRow>(fx.sqlite, 'SELECT * FROM naming_contracts WHERE id = ?', old.id)!;
 
-    // 批内顺序：收租（旧约 expire）在前、转正语句在后；但转正语句是「构建期」按 active 过滤的，
-    // 所以同一批里刚到期的队不会转正（源码注释：留在 queued 等下一次）
+    // 评审 P1-3：转正语句不再按构建期 active 过滤——语句一律生成（3 条），批内顺序
+    // 「收租 expire 旧约在前、转正语句在后」⇒ 同一批里刚到期的队当批即转正
     const sameBatch = await activateQueuedStatements(fx.env, 1, 1, 'user', null);
-    expect(sameBatch.statements).toHaveLength(0);
+    expect(sameBatch.statements).toHaveLength(3);
+    // 构建期仍读到 active ⇒ 不进通知列表（通知只喂「已腾清」的队，避免假通知）
+    expect(sameBatch.activated).toHaveLength(0);
     const rent = await windowNamingStatements(fx.env, contract, 1, 1, 0.9, 0.01);
-    await fx.env.DB.batch(rent);
+    await fx.env.DB.batch([...rent, ...sameBatch.statements]);
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM naming_contracts WHERE id = ?', old.id)!.status).toBe('expired');
-    expect(offerRow(fx.sqlite, offerId).status).toBe('queued');
-
-    const nextBatch = await activateQueuedStatements(fx.env, 1, 2, 'user', null);
-    await fx.env.DB.batch(nextBatch.statements);
+    expect(offerRow(fx.sqlite, offerId).status).toBe('accepted');
     expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('CVS Health');
   });
 
@@ -1264,7 +1359,7 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     expect(spawn.notes).toEqual(['品牌池里没有可上门的品牌，本次落空']);
   });
 
-  it('TC-SPAWN-04 唯一键去重：同轮同队同品牌已有 pending ⇒ 落空', async () => {
+  it('TC-SPAWN-04 唯一键去重：同轮同队同品牌已有报价（pending/queued 皆然）⇒ 落空不抛', async () => {
     const fx = freshEnv({ rng: () => 0 });
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
@@ -1275,6 +1370,23 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     expect(spawn.applied).toBeNull();
     expect(spawn.notes).toEqual(['品牌「麒麟生物」已有待处理的上门报价，本次落空']);
     expect(offerRows(fx.sqlite)).toHaveLength(1);
+
+    // 评审 P1-2：去重子查询去掉 status 谓词后与 idx_market_offers_round 同口径——
+    // 旧行已是 queued/accepted 也照样落空（否则重发会直撞唯一索引报 500）
+    const fx2 = freshEnv({ rng: () => 0 });
+    seedClub(fx2.sqlite);
+    openWindow(fx2.sqlite);
+    await seedOpenRound(fx2.env);
+    await signViaOffer(fx2.env, 1, '海底捞', 1); // 有约才能排接班；海底捞有 active ⇒ 不在候选池
+    const queuedId = await seedOffer(fx2.env, 1, '麒麟生物', 1);
+    await acceptOffer(fx2.env, queuedId, 1, 'queued', null);
+    const occ2 = seedOccurrence(fx2.sqlite);
+    const spawn2 = await spawnVisitOffer(fx2.env, { clubId: 1, capacity: 20000, fans: 18000 }, occ2, PENDING_GUARD);
+    expect(spawn2.applied).toBeNull();
+    expect(spawn2.notes).toEqual(['品牌「麒麟生物」已有待处理的上门报价，本次落空']);
+    expect(offerRows(fx2.sqlite)).toHaveLength(2); // 海底捞 + 麒麟生物排队报价，没有新行
+    const src = readFileSync(MARKET_SRC, 'utf8');
+    expect(src).toContain('SELECT 1 FROM market_offers WHERE round_id = ? AND brand_id = ? AND club_id = ?');
   });
 
   it('TC-SPAWN-05 热度 0 的品牌权重 0（env.rng 注入决定抽签，不落 Math.random）', async () => {

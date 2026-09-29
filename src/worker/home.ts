@@ -402,7 +402,7 @@ export async function windowHomeStatements(
   env: Env,
   season: number,
   windowSeq: number,
-  opts: { chargeNaming: boolean },
+  opts: { chargeNaming: boolean; actor?: number | null },
 ): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; summary: HomeWindowSummary; notifications: PendingClubNotification[] }> {
   const model = await loadAttendanceModel(env.DB);
   const tierTable = await loadTierTable(env.DB);
@@ -565,12 +565,14 @@ export async function windowHomeStatements(
   // 经营信号注记（v6.12.0 D3）：给本窗有非中性信号的队各排一条通知（本仓没有关窗汇总通知，
   // 教练感知面 = 这条通知 + 维护费/冠名费流水 memo 里的信号说明）
   await queueWindowSignalNotes(env, season, windowSeq, signalDefs);
-  // v6.14.0 C3 招商轮·批尾：接班转正（收租/演化/解约语句之后——到期合同已 expired，转正守卫放行）
+  // v6.14.0 C3 招商轮·批尾：接班转正（收租/演化/解约语句之后）——转正语句一律生成，
+  // 落不落由执行期守卫（无生效约）决定：本批刚腾出/刚到期的位当批即转正；只有通知列表按构建期状态过滤
   // → 开新轮定向递价（round_id 标量子查询取本批刚开的轮）
   const offerNotified: { clubId: number; brands: string[] }[] = [];
   const activated: import('./market-ops.ts').QueuedActivation[] = [];
   if (round) {
-    const activation = await activateQueuedStatements(env, season, windowSeq, 'user', null);
+    // 评审 P2-1：actor 透传（origin 'user' 配 actor 记真操作人；缺省 null = 系统口径）
+    const activation = await activateQueuedStatements(env, season, windowSeq, 'user', opts.actor ?? null);
     statements.push(...round.openStatements, ...activation.statements);
     summary.marketOffers = round.offerCount;
     summary.activatedClubs = activation.activated.length;

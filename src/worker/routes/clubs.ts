@@ -1144,11 +1144,12 @@ app.get('/club/naming/quote', async (c) => {
   const contract = await getActiveNaming(c.env.DB, club.id);
   // 收到的报价（v6.14.0 C3）：待签（轮 open 内）+ 排队接班（queued），签约入口只此一处
   const offers = (await listClubOffers(c.env.DB, club.id)).map(offerDto);
-  const stadium = await c.env.DB
-    .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
-    .bind(club.id)
-    .first<{ capacity: number; fans: number }>();
   if (contract) {
+    // 队况只在有现约（续约候选要按容量/死忠现算）时才读，无约分支不白读一行（评审 P3-1）
+    const stadium = await c.env.DB
+      .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
+      .bind(club.id)
+      .first<{ capacity: number; fans: number }>();
     // 档位与情绪地板随约下发（v6.13.0 C2，前端低情绪预警用）；品牌被弃用回口碑兜底
     const [brands, profiles, factors] = await Promise.all([
       loadAdoptedBrands(c.env.DB),

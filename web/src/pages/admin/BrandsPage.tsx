@@ -262,7 +262,9 @@ export default function BrandsPage() {
         </p>
         {marketQuery.isPending && <p className="muted">加载中…</p>}
         {marketQuery.isError && <p className="muted">{marketQuery.error instanceof Error ? marketQuery.error.message : '读不出来'}</p>}
-        {marketQuery.data && !marketRound && <p className="muted">还没有开过招商轮——等下一次常规窗关窗时会自动开一轮。</p>}
+        {marketQuery.data && !marketRound && (
+          <p className="muted">还没有开过招商轮——等下一次常规窗关窗时会自动开一轮（也可用下面按钮直接开一轮）。</p>
+        )}
         {marketRound && (
           <>
             <p>
@@ -315,13 +317,20 @@ export default function BrandsPage() {
               </table>
             </div>
             <p>
-              <button className="btn btn-sm" type="button" disabled={busy || marketQuery.isPending} onClick={() => void reopenRound()}>
-                手动重开一轮
-              </button>
-              <span className="hint"> 清盘当前轮：未签报价作废、整轮无人签的品牌热度 −0.03，随后按当刻队况重开一轮。</span>
+              <span className="hint">
+                {marketRound
+                  ? '清盘当前轮：未签报价作废、整轮无人签的品牌热度 −0.03，随后按当刻队况重开一轮。'
+                  : '当前没有招商轮：点了按当刻队况直接开一轮。'}
+              </span>
             </p>
           </>
         )}
+        <p>
+          <button className="btn btn-sm" type="button" disabled={busy || marketQuery.isPending} onClick={() => void reopenRound()}>
+            手动重开一轮
+          </button>
+          <span className="hint"> 清盘/开轮口径见上；递出报价数会在操作后提示。</span>
+        </p>
       </section>
     </div>
   );

@@ -511,7 +511,13 @@ function NamingCard() {
         )}
         <span className="hint">（套餐 {o.packageNo}）</span> <span className="mono">{o.amount.toFixed(2)}</span> M/窗 ×{' '}
         <span className="mono">{seasonsOf(o.windows)}</span> 赛季
-        <span className="hint"> · 有效期至 {o.expireAt.slice(0, 16).replace('T', ' ')}</span>
+        <span className="hint">
+          {' '}
+          ·{' '}
+          {o.expireAt.startsWith('9999')
+            ? '本轮内有效'
+            : `有效期至 ${o.expireAt.slice(0, 16).replace('T', ' ')}`}
+        </span>
         {o.status === 'queued' ? null : contract ? (
           pickId === o.id ? (
             <>

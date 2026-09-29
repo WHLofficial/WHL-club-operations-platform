@@ -26,6 +26,7 @@ import {
   loadNamingParams,
   loadTierRules,
   namingBaseFee,
+  terminatePenaltyOf,
   tierQuotaOf,
   type NamingContractRow,
 } from './naming-ops.ts';
@@ -288,6 +289,9 @@ export interface QueuedActivation {
  * 球队退约 / 品牌侧解约后也可单队调用）。转正前提：该队 queued 报价 + 无 active 冠名；
  * 合同按报价快照入账（金额/窗数/套餐条款都是发放时锁定），INSERT 与 offer 状态 UPDATE 互为守卫。
  * 名额不复查：queued 与 active 合并计名额，转正只是迁移、合计不变。
+ * 语句对每份 queued 报价无条件生成（评审 P1-3）：关窗批里「同批刚被腾出的 active 位」（到期/解约语句
+ * 排在转正之前）本批即转正，落不落由执行期守卫（NOT EXISTS active）定；`activated` 仍按构建期
+ * 「无 active」过滤——它只喂批后通知，不能给不会转正的队发假通知。
  */
 export async function activateQueuedStatements(
   env: Env,
@@ -319,9 +323,11 @@ export async function activateQueuedStatements(
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
   const activated: QueuedActivation[] = [];
   for (const q of queued) {
-    if (actives.has(q.club_id)) continue; // 仍有生效冠名（演化解约被并发抢先等），留在 queued 等下一次
     const snap = parsePkgJson(q.package_json, q.package_no, q.amount);
-    activated.push({ clubId: q.club_id, offerId: q.id, brand: q.brand, feePerWindow: q.amount, windows: q.windows, pkgName: snap.pkgName });
+    // 构建期仍有 active 的队不进通知列表（语句照生成，执行期守卫决定落不落）
+    if (!actives.has(q.club_id)) {
+      activated.push({ clubId: q.club_id, offerId: q.id, brand: q.brand, feePerWindow: q.amount, windows: q.windows, pkgName: snap.pkgName });
+    }
     statements.push(
       // 先占坑：offer queued→accepted（NOT EXISTS active 挡跨批竞态——别批刚插了 active 合同则本队不再转正）
       db
@@ -491,13 +497,21 @@ export async function acceptOffer(
   const quotaParams = quota === null ? [] : [offer.brand_id, offer.brand_id, quota];
 
   if (active && mode === 'queued') {
+    // 评审 P1-1：同队已有 queued 报价时，抢锁句会撞 uq_market_offer_queued 唯一索引（D1 直接报错 → 500），
+    // 这里先预检给出可读 409（唯一索引仍是最终防线；预检与抢锁之间的竞态窗口由索引兜成 500，概率可忽略）
+    const otherQueued = await db
+      .prepare(`SELECT 1 AS n FROM market_offers WHERE club_id = ? AND status = 'queued' AND id <> ? LIMIT 1`)
+      .bind(clubId, offerId)
+      .first<{ n: number }>();
+    if (otherQueued) throw new HttpError(409, '已有一份待接替报价，先处理它再排新的');
+    const claim = crypto.randomUUID();
     const statements = [
       db
         .prepare(
-          `UPDATE market_offers SET status = 'queued'
+          `UPDATE market_offers SET status = 'queued', claim_token = ?
            WHERE id = ? AND status = 'pending'${quotaGuard}`,
         )
-        .bind(offerId, ...quotaParams),
+        .bind(claim, offerId, ...quotaParams),
       audit({
         actor,
         action: 'naming_offer_accept',
@@ -506,8 +520,8 @@ export async function acceptOffer(
         origin: 'user',
         before: { mode: 'queued', oldContractId: active.id, oldBrand: active.brand },
         after: { brand: offer.brand, feePerWindow: offer.amount, windows: offer.windows, packageNo: offer.package_no, queued: true },
-        guardSql: `(SELECT status FROM market_offers WHERE id = ?) = 'queued'`,
-        guardParams: [offerId],
+        guardSql: `(SELECT claim_token FROM market_offers WHERE id = ?) = ?`,
+        guardParams: [offerId, claim],
       }),
     ];
     const outs = await db.batch(statements);
@@ -520,18 +534,23 @@ export async function acceptOffer(
   // signed / terminate：立即成约（terminate 先在同批退掉现约并收赔偿）
   if (!win) throw new HttpError(409, '转会窗口没开，签不了冠名合同');
   const params = await loadNamingParams(db);
+  // 批内归属令牌（评审 P0-1）：抢锁句写进 offer 行，同批后续语句全部以它为守卫——
+  // 抢锁赢但下游守卫假时整批零落，抢输方也不产生热度/审计/赔款副作用
+  const claim = crypto.randomUUID();
+  const claimGuard = `(SELECT claim_token FROM market_offers WHERE id = ?) = ?`;
+  const claimParams = [offerId, claim];
   let penalty = 0;
   const terminateStatements: ReturnType<Env['DB']['prepare']>[] = [];
   if (active && mode === 'terminate') {
     const remaining = Math.max(0, active.windows_remaining - 1);
-    penalty = round3(remaining * active.fee_per_window * params.terminatePenalty);
+    penalty = terminatePenaltyOf(params, active.windows_remaining, active.fee_per_window);
     terminateStatements.push(
       db
         .prepare(
           `UPDATE naming_contracts SET status = 'terminated', ended_season = ?, ended_window = ?, updated_at = ${nowSql}
-           WHERE id = ? AND status = 'active'`,
+           WHERE id = ? AND status = 'active' AND ${claimGuard}`,
         )
-        .bind(win.season, win.windowSeq, active.id),
+        .bind(win.season, win.windowSeq, active.id, ...claimParams),
     );
     if (penalty > 0) {
       terminateStatements.push(
@@ -539,20 +558,41 @@ export async function acceptOffer(
           clubId,
           delta: -penalty,
           kind: 'naming_penalty',
-          refType: 'naming',
-          refId: active.id,
+          refType: 'offer',
+          refId: offerId,
           memo: `换签解约赔款（${active.brand}，剩 ${remaining} 窗 × ${active.fee_per_window}M × ${params.terminatePenalty}）`,
-          idempotent: false,
-          // 只在上一句真把旧约改成 terminated 时入账（并发下不收冤枉钱）
-          guardSql: `(SELECT status FROM naming_contracts WHERE id = ?) = 'terminated'`,
-          guardParams: [active.id],
+          // 幂等键＝本报价（同批重放/重复提交只赔一次）；claim 守卫＝只在抢锁方本批走到这一步时入账
+          idempotent: true,
+          guardSql: claimGuard,
+          guardParams: claimParams,
         }),
       );
     }
   }
+  // 抢锁句（评审 P0-1）：signed 直签把「会失败的守卫」（无 active 冠名 + 名额）全部上提到此，守卫假则整批零落；
+  // terminate 换签旧约此刻仍 active（名额会把自己算进去）⇒ 名额/无 active 守卫留在下方 INSERT 上
+  const lockStatement = active
+    ? db
+        .prepare(
+          `UPDATE market_offers SET status = 'accepted', claim_token = ?
+           WHERE id = ? AND status = 'pending'`,
+        )
+        .bind(claim, offerId)
+    : db
+        .prepare(
+          `UPDATE market_offers SET status = 'accepted', claim_token = ?
+           WHERE id = ? AND status = 'pending'
+             AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}`,
+        )
+        .bind(claim, offerId, clubId, ...quotaParams);
+  const contractCols = [
+    clubId, offer.brand, snap.brandHeat, snap.baseFee, offer.package_no, snap.pkgName, offer.amount,
+    offer.windows, offer.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
+    win.season, win.windowSeq,
+  ];
   const statements = [
-    // 抢锁：并发同刻只一方能把 pending 改掉，后续语句全部守卫假
-    db.prepare(`UPDATE market_offers SET status = 'accepted' WHERE id = ? AND status = 'pending'`).bind(offerId),
+    // 抢锁：并发同刻只一方能把 pending 改掉（claim_token 同时记下本批归属）
+    lockStatement,
     ...terminateStatements,
     db
       .prepare(
@@ -561,24 +601,20 @@ export async function acceptOffer(
           windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status,
           started_season, started_window, created_at, updated_at)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ${nowSql}, ${nowSql}
-         WHERE (SELECT status FROM market_offers WHERE id = ?) = 'accepted'
-           AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}${
-          active ? ` AND (SELECT status FROM naming_contracts WHERE id = ?) = 'terminated'` : ''
+         WHERE ${claimGuard}${
+          active
+            ? ` AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}`
+            : ''
         }`,
       )
-      .bind(
-        clubId, offer.brand, snap.brandHeat, snap.baseFee, offer.package_no, snap.pkgName, offer.amount,
-        offer.windows, offer.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
-        win.season, win.windowSeq,
-        offerId, clubId, ...quotaParams, ...(active ? [active.id] : []),
-      ),
-    // 签约成交：品牌热度 +deal（SQL 侧钳制累加；守卫钉在 offer 状态上，抢输方不动热度）
+      .bind(...contractCols, ...claimParams, ...(active ? [clubId, ...quotaParams] : [])),
+    // 签约成交：品牌热度 +deal（SQL 侧钳制累加；守卫钉在 claim 上，抢输方不动热度）
     db
       .prepare(
         `UPDATE brand_pool SET heat = MAX(?, MIN(?, ROUND(heat + ?, 3)))
-         WHERE id = ? AND status = 'adopted' AND (SELECT status FROM market_offers WHERE id = ?) = 'accepted'`,
+         WHERE id = ? AND status = 'adopted' AND ${claimGuard}`,
       )
-      .bind(heatRules.clampLow, heatRules.clampHigh, heatRules.deal, offer.brand_id, offerId),
+      .bind(heatRules.clampLow, heatRules.clampHigh, heatRules.deal, offer.brand_id, ...claimParams),
     audit({
       actor,
       action: 'naming_offer_accept',
@@ -593,16 +629,13 @@ export async function acceptOffer(
         packageNo: offer.package_no,
         ...(penalty > 0 ? { penalty } : {}),
       },
-      guardSql: `(SELECT status FROM market_offers WHERE id = ?) = 'accepted'`,
-      guardParams: [offerId],
+      guardSql: claimGuard,
+      guardParams: claimParams,
     }),
   ];
   const outs = await db.batch(statements);
-  if ((outs[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '报价刚被处理过，请刷新');
-  const contractIdx = terminateStatements.length + 1;
-  if ((outs[contractIdx]?.meta.changes ?? 0) === 0) {
-    throw new HttpError(409, active ? '换签刚被并发改动，请重试' : '已有生效冠名或名额已满，请刷新后重试');
-  }
+  // 守卫假只发生在抢锁句：claim 方案下后续语句挂同一令牌，抢锁成败即整批成败
+  if ((outs[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '报价已被处理或条件已变化，请刷新后重试');
   const contract = await getActiveNaming(db, clubId);
   if (!contract) throw new HttpError(500, '冠名合同落库后读不回来');
   return { result: active ? 'terminated' : 'signed', contract, penalty };
@@ -660,10 +693,12 @@ export async function spawnVisitOffer(
   const expireAt = rules.offerTtlHours > 0 ? new Date(Date.now() + rules.offerTtlHours * 3_600_000).toISOString() : '9999-12-31T00:00:00.000Z';
   const out = await db
     .prepare(
+      // 去重子查询不带 status 谓词（评审 P1-2）：与 idx_market_offers_round (round_id, brand_id, club_id) 唯一索引
+      // 同口径——本轮内该品牌对该队递过任何状态的报价就不再递（重发走落空播报，不会撞索引报 500）
       `INSERT INTO market_offers (round_id, brand_id, club_id, package_no, amount, windows, package_json, status, created_at, expire_at)
        SELECT ?, ?, ?, 1, ?, ?, ?, 'pending', ${nowSql}, ?
        WHERE NOT EXISTS (
-         SELECT 1 FROM market_offers WHERE round_id = ? AND brand_id = ? AND club_id = ? AND status = 'pending'
+         SELECT 1 FROM market_offers WHERE round_id = ? AND brand_id = ? AND club_id = ?
        ) AND ${guardSql}`,
     )
     .bind(

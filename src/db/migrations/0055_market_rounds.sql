@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS market_offers (
   windows INTEGER NOT NULL,
   package_json TEXT NOT NULL DEFAULT '{}',     -- 套餐快照 + slot 语义
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'queued', 'expired')),
+  claim_token TEXT NOT NULL DEFAULT '',        -- 批内归属令牌——acceptOffer 抢锁句写入，同批后续语句以它为守卫，防「抢锁赢但下游守卫假」的半笔提交与抢输方副作用
   created_at TEXT NOT NULL,
   expire_at TEXT NOT NULL
 );
