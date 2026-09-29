@@ -323,6 +323,14 @@ export async function activateQueuedStatements(
     const snap = parsePkgJson(q.package_json, q.package_no, q.amount);
     activated.push({ clubId: q.club_id, offerId: q.id, brand: q.brand, feePerWindow: q.amount, windows: q.windows, pkgName: snap.pkgName });
     statements.push(
+      // 先占坑：offer queued→accepted（NOT EXISTS active 挡跨批竞态——别批刚插了 active 合同则本队不再转正）
+      db
+        .prepare(
+          `UPDATE market_offers SET status = 'accepted'
+           WHERE id = ? AND status = 'queued'
+             AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')`,
+        )
+        .bind(q.id, q.club_id),
       db
         .prepare(
           `INSERT INTO naming_contracts
@@ -331,20 +339,13 @@ export async function activateQueuedStatements(
             started_season, started_window, created_at, updated_at)
            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ${nowSql}, ${nowSql}
            WHERE NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')
-             AND (SELECT status FROM market_offers WHERE id = ?) = 'queued'`,
+             AND (SELECT status FROM market_offers WHERE id = ?) = 'accepted'`,
         )
         .bind(
           q.club_id, q.brand, snap.brandHeat, snap.baseFee, q.package_no, snap.pkgName, q.amount,
           q.windows, q.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
           season, windowSeq, q.club_id, q.id,
         ),
-      db
-        .prepare(
-          `UPDATE market_offers SET status = 'accepted'
-           WHERE id = ? AND status = 'queued'
-             AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')`,
-        )
-        .bind(q.id, q.club_id),
       audit({
         actor,
         action: 'naming_activated',
