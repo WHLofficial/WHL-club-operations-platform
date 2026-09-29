@@ -6,7 +6,7 @@
 
 ## [v6.14.0] · C3 招商轮：品牌报价制 + 主动签约退役（2026-09-29）
 
-差异排期 C 块第三块（参照插件 `market_service` / `market_rounds` / `market_offers`）。含迁移 `0055_market_rounds.sql`（`market_rounds` + `market_offers` 两表与三个部分唯一索引；`claim_token` 抢锁列在未 apply 窗口期直接加入本迁移）与 `0056_event_seed_brand_visit.sql`（即发种子「品牌上门」，池 30 → 31）。**未发布（待令）**：本地 6 枚提交 `ec3fa98..2dddef2` 均未 push、迁移未 apply 生产——**发布顺序硬约束：`0055`/`0056` 先 apply 生产再 push（push 即 CF Workers Builds 自动部署，顺序不可反）**。判级 minor（新增用户可见能力；`POST /api/club/naming/sign` 退役为同仓 web 客户端同批替换、无跨仓消费）。测试计划 `docs/test-plans/v6.14.0-c3.md`（69 TC = P0 46 / P1 19 / P2 3 / P3 1）；vitest 60 文件 / 1062 例全绿（基线 59/990，净 +1 文件 / +72 例）、e2e 11/11、变异验证 17 处 + 评审修复后 2 处全命中。
+差异排期 C 块第三块（参照插件 `market_service` / `market_rounds` / `market_offers`）。含迁移 `0055_market_rounds.sql`（`market_rounds` + `market_offers` 两表与三个部分唯一索引；`claim_token` 抢锁列在未 apply 窗口期直接加入本迁移）与 `0056_event_seed_brand_visit.sql`（即发种子「品牌上门」，池 30 → 31）。**已上线**（2026-09-29 发布）：迁移先 apply 生产、push `07f050c..8cf8f12`（7 枚）触发 CF 自动部署，Version `df0640af-…` @2026-09-29T10:09:11Z；上线回读公开端点 200 / 匿名探针 401 / 旧 sign 404 / 线上资产 sha256 与本地一致。判级 minor（新增用户可见能力；`POST /api/club/naming/sign` 退役为同仓 web 客户端同批替换、无跨仓消费）。测试计划 `docs/test-plans/v6.14.0-c3.md`（69 TC = P0 46 / P1 19 / P2 3 / P3 1）；vitest 60 文件 / 1062 例全绿（基线 59/990，净 +1 文件 / +72 例）、e2e 11/11、变异验证 17 处 + 评审修复后 2 处全命中。
 
 **Added**
 - **招商轮与定向报价**：关窗批清盘旧轮（`pending` → `expired`；整轮无人签品牌热度 −`ignored` 钳 [0.5,1.5]）+ 开新轮；每品牌每轮向三档挑出的 3 支球队各发 1 份报价（头部盯估值最高的 `min(2, offersPerBrand)` 队 / 新兴盯中游 / 口碑广撒零报价队兜底；估值 = `namingBaseFee` × 行业系数；头部进取 pkg2、其余稳健 pkg1）；TTL 72h（config `market_round_rules {offersPerBrand:3, offerTtlHours:72}`，注册表 71 → 72）；`uq_market_round_open` 部分唯一索引保全局最多一个 open 轮。
