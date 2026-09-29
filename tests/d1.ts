@@ -119,6 +119,8 @@ const MIGRATION_FILES = [
   '0052_event_seeds_batch2.sql',
   '0053_event_drafts.sql',
   '0054_brand_tiers.sql',
+  '0055_market_rounds.sql',
+  '0056_event_seed_brand_visit.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {
