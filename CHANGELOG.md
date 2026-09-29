@@ -4,6 +4,31 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.14.0] · C3 招商轮：品牌报价制 + 主动签约退役（2026-09-29）
+
+差异排期 C 块第三块（参照插件 `market_service` / `market_rounds` / `market_offers`）。含迁移 `0055_market_rounds.sql`（`market_rounds` + `market_offers` 两表与三个部分唯一索引；`claim_token` 抢锁列在未 apply 窗口期直接加入本迁移）与 `0056_event_seed_brand_visit.sql`（即发种子「品牌上门」，池 30 → 31）。**未发布（待令）**：本地 6 枚提交 `ec3fa98..2dddef2` 均未 push、迁移未 apply 生产——**发布顺序硬约束：`0055`/`0056` 先 apply 生产再 push（push 即 CF Workers Builds 自动部署，顺序不可反）**。判级 minor（新增用户可见能力；`POST /api/club/naming/sign` 退役为同仓 web 客户端同批替换、无跨仓消费）。测试计划 `docs/test-plans/v6.14.0-c3.md`（69 TC = P0 46 / P1 19 / P2 3 / P3 1）；vitest 60 文件 / 1062 例全绿（基线 59/990，净 +1 文件 / +72 例）、e2e 11/11、变异验证 17 处 + 评审修复后 2 处全命中。
+
+**Added**
+- **招商轮与定向报价**：关窗批清盘旧轮（`pending` → `expired`；整轮无人签品牌热度 −`ignored` 钳 [0.5,1.5]）+ 开新轮；每品牌每轮向三档挑出的 3 支球队各发 1 份报价（头部盯估值最高的 `min(2, offersPerBrand)` 队 / 新兴盯中游 / 口碑广撒零报价队兜底；估值 = `namingBaseFee` × 行业系数；头部进取 pkg2、其余稳健 pkg1）；TTL 72h（config `market_round_rules {offersPerBrand:3, offerTtlHours:72}`，注册表 71 → 72）；`uq_market_round_open` 部分唯一索引保全局最多一个 open 轮。
+- **报价收件箱与 accept 端点**：`GET /club/naming/quote` 改造为「当前合同 + 续约 + 收到的报价」（无约只回 `{offers}`）；新增 `POST /club/naming/offers/:id/accept`——无约直接签约；有约 `mode: queued`（现合同到期后接替，`uq_market_offer_queued` 一队一接班位）或 `mode: terminate`（解除当前合约、赔付沿用既有口径后即签）；queued 转正三触发点（关窗批尾 / 退约路由 / 关窗兜底）。
+- **管理端招商轮视图**：`GET /brands/market-round`（轮状态 + 全状态报价流水）+ `POST /brands/market-round/reopen`（手动清盘重开，审计 `market_round_reopen`）；BrandsPage 招商轮区块（四状态徽标 + 手动重开）。
+- **`offer_spawn` 真落库**：`brand_visit`「品牌上门」即发种子（新条件键 `requires_no_naming`，池 30 → 31）；事件递价经 `spawnVisitOffer` 挂当前开放轮（无开放轮 / 撞唯一索引走落空播报）；LLM 草稿条件白名单同步。
+- **通知**：`naming_offer`（收到报价）与 `naming_offer_activated`（接替生效）两模板。
+- **品牌热度**：`market_heat_rules` 加 `deal: 0.02`（签约）/ `ignored: -0.03`（整轮无人签）。
+
+**Fixed**
+- **转正批语句顺序缺陷（测试轮实测抓出）**：`activateQueuedStatements` 的 offer 占坑 UPDATE 排在合同 INSERT 之后 ⇒ 守卫读不到本批状态而恒假（offer 永停 queued、审计不落、queued 唯一位永不释放）；改为占坑 UPDATE 提前到合同 INSERT 之前。
+- **`acceptOffer` 抢锁闭环（claim_token）**：原抢锁批「抢锁赢家与下游守卫不一致」可半笔提交、抢输方非零改行 ⇒ `market_offers` 加 `claim_token` 列，signed 路径守卫全上提抢锁句、后续语句统一 claim 守卫、批后按抢锁句 `meta.changes` 判 409「报价已被处理或条件已变化」；terminate 赔款改 `ref('offer', offerId)` 幂等 + claim 守卫。
+- queued 分支撞 `uq_market_offer_queued` 由 500 改预检 409「已有一份待接替报价」；`spawnVisitOffer` 去重谓词与唯一索引同口径（去 `status` 谓词）；转正语句无条件生成（同批被腾出的冠名位当窗即转正）。
+
+**Changed**
+- **签约入口唯一化**：删 `POST /api/club/naming/sign`，冠名获取只走招商轮报价；冠名卡签约区改「收到的报价」（有约换约行内二选一）。
+- `offer_spawn` 由「恒落空播报」改真落库（`PENDING_EFFECT_KEYS` 空集，前端展示不再标注「C3 生效」）。
+- config 注册表 71 → 72（新键 `market_round_rules`）；事件池种子 30 → 31（`brand_visit`）；`tests/d1.ts` MIGRATION_FILES +2。
+
+**已知不改**
+- `spawnVisitOffer` 的 INSERT 在事件批之外（进程中途挂掉留孤儿报价）；queued 转正不复查品牌名额；转正审计双路径重复行；terminate 换约残余竞态（名额预检与抢锁之间名额被抢 → 退约成功而无新约，极小概率）。
+
 ## [v6.13.0] · C2 冠名深度：档位性格 + 情绪演化 + 品牌主动解约 + 联赛冠军加成（2026-09-28）
 
 差异排期 C 块第二块。含迁移 `0054_brand_tiers.sql`（`brand_pool` 加 `tier` CHECK 三档 / `tier_locked`，种子按校准规则预设 3 头部 2 新兴）——**已随 2026-09-28 发布批次上线**：`0054` 于 push 前 apply 到生产（`Executed 5 commands in 3.56ms`；只读核验 `brand_pool` 3 头部 / 2 新兴 / 2 口碑、`d1_migrations` 末条 `0054_brand_tiers.sql`），随后 push `77f6eea..07f050c`（14 个提交）触发 CF Workers Builds 自动部署，生产 Version `1e3cc95a-7f43-41ee-8fd4-93fe69169774`（2026-09-28T15:50:43Z）；线上资产 `index-nK5xirMD.js` + `index-BY0ef8kg.css` 与本地 v6.13.0 构建 sha256 逐字节一致（线上 JS 版本串 `6.13.0`），公开端点 200 / 匿名探针 401 回读全过。判级 minor。测试计划首次按 qa-test-planner 约定设计（`docs/test-plans/v6.13.0-c2.md`）。插件只当参照系，可玩性偏离逐条留痕（见 ROADMAP v6.13.0 节）。
