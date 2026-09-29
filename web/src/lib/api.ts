@@ -983,7 +983,7 @@ export interface BrandQuote {
   packages: NamingPackage[];
 }
 
-export interface NamingContract {
+export interface NamingContractBase {
   id: number;
   clubId: number;
   brand: string;
@@ -1001,23 +1001,87 @@ export interface NamingContract {
   startedWindow: number;
   /** 品牌方情绪（v6.12.0）：0–2，<0.8 低落 / 0.8–1.2 平静 / >1.2 高涨（C2 起按窗演化） */
   satisfaction: number;
+}
+
+/** 读端点（quote）在基础字段上附加档位与情绪地板；accept 端点只回基础字段（v6.14.0 C3） */
+export interface NamingContract extends NamingContractBase {
   /** 品牌档位（v6.13.0 C2）：头部 / 新兴 / 口碑 */
   tier: string;
   /** 当前档位的情绪地板（v6.13.0 C2，低情绪预警用）；品牌不在池中时为 null */
   satisfyFloor: number | null;
 }
 
+/** 招商轮收到的报价（v6.14.0 C3）：pending = 待签；queued = 已选「到期后自动接替」排队中 */
+export interface ClubOffer {
+  id: number;
+  brand: string;
+  tier: string;
+  packageNo: number;
+  amount: number;
+  windows: number;
+  status: 'pending' | 'queued';
+  /** 过期时刻（ISO）；过期后读端点不再下发，签约时后端也会拦 */
+  expireAt: string;
+}
+
 export interface NamingQuoteResponse {
   contract?: NamingContract;
   /** 续约候选（有现约时下发）：按当前队况与品牌现热度现算的同一品牌报价；品牌已弃用则缺省 */
   renewal?: BrandQuote | null;
-  brands?: BrandQuote[];
+  /** 收到的报价（v6.14.0 C3）：签约入口只此一处（品牌直签列表已退役） */
+  offers: ClubOffer[];
 }
 
 export interface NamingTerminateResult {
   brand: string;
   penalty: number;
   windowsRemaining: number;
+}
+
+/** 接报价结果（v6.14.0 C3）：signed 直接签；terminated 解约旧约再签（带赔金）；queued 登记到期接替 */
+export interface NamingOfferAcceptResult {
+  result: 'signed' | 'terminated' | 'queued';
+  penalty: number;
+  contract: NamingContractBase | null;
+}
+
+// ---- 招商轮（v6.14.0 C3，管理端只读视图 + 手动「清盘+开轮」）----
+
+export interface MarketRound {
+  id: number;
+  opened_season: number;
+  opened_window: number;
+  status: 'open' | 'settled';
+  opened_at: string;
+  settled_at: string | null;
+}
+
+/** 报价流水（含已签/已废全状态）；club_name 为 null = 队伍已不在登记册 */
+export interface MarketOfferRow {
+  id: number;
+  round_id: number;
+  club_id: number;
+  package_no: number;
+  amount: number;
+  windows: number;
+  status: 'pending' | 'accepted' | 'queued' | 'expired';
+  created_at: string;
+  expire_at: string;
+  brand: string;
+  club_name: string | null;
+}
+
+export interface MarketRoundResponse {
+  /** 当前 open 轮优先，没有则最近一条已结轮；一次都没开过时为 null */
+  round: MarketRound | null;
+  offers: MarketOfferRow[];
+}
+
+export interface MarketRoundReopenResult {
+  ok: boolean;
+  hadOpenRound: boolean;
+  offerCount: number;
+  offersPerClub: { clubId: number; brands: string[] }[];
 }
 
 /** 主场档期（v6.9.0）：每窗非比赛日档位的活动预订，收益在窗末随关窗结算 */

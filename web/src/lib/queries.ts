@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
+import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
@@ -256,4 +256,25 @@ export function useFinanceSummary(isCoach: boolean, season?: number) {
     queryFn: () => api<FinanceSummaryResponse>(season !== undefined ? `/api/club/finance-summary?season=${season}` : '/api/club/finance-summary'),
     enabled: isCoach,
   });
+}
+
+// ---- 冠名市场（v6.14.0 C3）----
+
+// 冠名全量：现合同 + 续约候选 + 收到的报价（招商轮报价随这个端点一次下发，不另开 query）
+export function useNamingQuote() {
+  return useQuery({
+    queryKey: qk.naming,
+    queryFn: () => api<NamingQuoteResponse>('/api/club/naming/quote'),
+    retry: false,
+  });
+}
+
+// 冠名动作后的联动失效：报价 + 我的俱乐部 + 余额（签约费/赔金影响可用余额，口径同设施升级）
+export function useNamingInvalidation() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.naming });
+    void qc.invalidateQueries({ queryKey: qk.myClub });
+    void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+  };
 }

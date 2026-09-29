@@ -16,7 +16,8 @@ import {
   type ClubEventChooseResult,
   type ClubEventRecent,
   type ClubEventsResponse,
-  type NamingQuoteResponse,
+  type ClubOffer,
+  type NamingOfferAcceptResult,
   type NamingTerminateResult,
   type RcChangeResult,
   type RegistrationResult,
@@ -28,7 +29,7 @@ import {
   type TerminationResult,
 } from '../../lib/api.ts';
 import { CONTRACT_TYPE_LABEL, LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
-import { qk, useHomeMatches, useMyClubOverview } from '../../lib/queries.ts';
+import { qk, useHomeMatches, useMyClubOverview, useNamingInvalidation, useNamingQuote } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { playerPath } from '../../lib/player-link.ts';
 
@@ -405,14 +406,12 @@ function moodLabel(satisfaction: number): string {
 }
 
 function NamingCard() {
-  const qc = useQueryClient();
   const { show } = useToast();
-  const quoteQuery = useQuery({
-    queryKey: qk.naming,
-    queryFn: () => api<NamingQuoteResponse>('/api/club/naming/quote'),
-    retry: false,
-  });
+  const quoteQuery = useNamingQuote();
+  const refresh = useNamingInvalidation();
   const [busy, setBusy] = useState(false);
+  // 有现约时接报价要二选一：正在选模式的报价 id（行内展开）
+  const [pickId, setPickId] = useState<number | null>(null);
   const quote = quoteQuery.data ?? null;
   // 档位徽标配色（v6.13.0 C2）：头部紫 / 新兴天蓝 / 口碑灰
   const TIER_BADGE: Record<string, string> = { 头部: 'purple', 新兴: 'sky', 口碑: 'gray' };
@@ -422,25 +421,32 @@ function NamingCard() {
     口碑: '口碑档：情绪地板 0.50，宽容（负向 ×0.75），死忠涨粉 +0.5%',
   };
 
-  function refresh() {
-    void qc.invalidateQueries({ queryKey: qk.naming });
-    void qc.invalidateQueries({ queryKey: qk.myClub });
-    void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
-  }
-
-  async function sign(brand: string, packageNo: number, pkgName: string) {
+  // 接报价（v6.14.0 C3）：无现约不带 mode 直接签；有现约必选 queued（到期接替）/ terminate（解约换签）
+  async function accept(offer: ClubOffer, mode?: 'queued' | 'terminate') {
+    if (mode === 'terminate' && !window.confirm('换约要提前解约现合同：赔金按剩余窗口费的 30% 计（当窗费用照收）。确定解约当前并签新？')) return;
     setBusy(true);
     try {
-      const out = await apiPost<{ contract: { brand: string; feePerWindow: number; windowsTotal: number } }>(
-        '/api/club/naming/sign',
-        { brand, packageNo },
-      );
+      const out = await apiPost<NamingOfferAcceptResult>(`/api/club/naming/offers/${offer.id}/accept`, mode ? { mode } : {});
       refresh();
-      show(`已签下 ${out.contract.brand}（${pkgName}）：每窗 ${out.contract.feePerWindow.toFixed(2)}M × ${seasonsOf(out.contract.windowsTotal)} 赛季，常规窗关窗入账。`);
+      if (out.result === 'queued') {
+        show(`已登记接替：${quote?.contract?.brand ?? '现合同'} 到期后自动换 ${offer.brand}（每窗 ${offer.amount.toFixed(2)}M × ${seasonsOf(offer.windows)} 赛季）。`);
+      } else if (out.result === 'terminated') {
+        show(
+          out.penalty > 0
+            ? `已解约旧冠名（赔金 ${out.penalty.toFixed(2)}M 已从余额扣除）并签下 ${offer.brand}：每窗 ${offer.amount.toFixed(2)}M × ${seasonsOf(offer.windows)} 赛季。`
+            : `已解约旧冠名（无赔金）并签下 ${offer.brand}：每窗 ${offer.amount.toFixed(2)}M × ${seasonsOf(offer.windows)} 赛季。`,
+        );
+      } else {
+        const c = out.contract;
+        show(
+          `已签下 ${c?.brand ?? offer.brand}（${c?.pkgName ?? `套餐 ${offer.packageNo}`}）：每窗 ${(c?.feePerWindow ?? offer.amount).toFixed(2)}M × ${seasonsOf(c?.windowsTotal ?? offer.windows)} 赛季，常规窗关窗入账。`,
+        );
+      }
     } catch (err) {
-      show(err instanceof Error ? err.message : '签约失败', true);
+      show(err instanceof Error ? err.message : '接报价失败', true);
     } finally {
       setBusy(false);
+      setPickId(null);
     }
   }
 
@@ -489,6 +495,50 @@ function NamingCard() {
   }
 
   const contract = quote.contract;
+
+  // 报价行（v6.14.0 C3）：待签可接受；已登记接班只展示；有现约时接受要先选「到期接替」或「解约换签」
+  function offerRow(o: ClubOffer) {
+    return (
+      <p key={o.id}>
+        <b>{o.brand}</b>
+        <span className={`badge ${TIER_BADGE[o.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[o.tier] ?? ''}>
+          {o.tier}档
+        </span>
+        {o.status === 'queued' && (
+          <span className="badge sky" style={{ marginLeft: 6 }}>
+            待接替
+          </span>
+        )}
+        <span className="hint">（套餐 {o.packageNo}）</span> <span className="mono">{o.amount.toFixed(2)}</span> M/窗 ×{' '}
+        <span className="mono">{seasonsOf(o.windows)}</span> 赛季
+        <span className="hint"> · 有效期至 {o.expireAt.slice(0, 16).replace('T', ' ')}</span>
+        {o.status === 'queued' ? null : contract ? (
+          pickId === o.id ? (
+            <>
+              <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o, 'queued')}>
+                现合同到期后自动接替
+              </button>
+              <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => void accept(o, 'terminate')}>
+                解约当前并签新
+              </button>
+              <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => setPickId(null)}>
+                取消
+              </button>
+            </>
+          ) : (
+            <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => setPickId(o.id)}>
+              接受
+            </button>
+          )
+        ) : (
+          <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o)}>
+            接受签约
+          </button>
+        )}
+      </p>
+    );
+  }
+
   return (
     <section className="card">
       <h3>冠名市场</h3>
@@ -555,48 +605,25 @@ function NamingCard() {
               <p className="hint">仅剩最后 1 窗，但品牌已不在池中，无法续约——到期后合同自然失效。</p>
             )
           )}
+          <p>
+            <b>收到的报价</b>
+            <span className="hint">（有生效冠名：接受时选「到期后自动接替」或「解约当前并签新」）</span>
+          </p>
+          {quote.offers.length === 0 ? <p className="hint">暂无待签报价。</p> : quote.offers.map(offerRow)}
           <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void terminate()}>
             退冠名
           </button>
         </>
       ) : (
         <>
-          <p className="hint">签下品牌冠名，常规窗关窗时按合同金额入账。同一时间只能有一份生效冠名。</p>
-          {quote.brands!.map((b) => {
-            const full = b.quotaLeft === 0;
-            return (
-              <p key={b.brand}>
-                <b>{b.brand}</b>
-                <span className={`badge ${TIER_BADGE[b.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[b.tier] ?? ''}>
-                  {b.tier}档
-                </span>
-                {b.quotaLeft !== null && (
-                  <span className="hint" style={{ marginLeft: 6 }}>
-                    {full ? '名额已满' : `名额余 ${b.quotaLeft}`}
-                  </span>
-                )}
-                <span className="hint">（{b.industry} · 热度 {b.heat}）底价 </span>
-                <span className="mono">{b.baseFee.toFixed(2)}</span> M/窗
-                {b.packages.map((p) => (
-                  <span key={p.packageNo} style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      type="button"
-                      disabled={busy || full}
-                      title={
-                        full
-                          ? '该品牌档位名额已满（头部 1 队 / 新兴 2 队），等现有合同到期或解约'
-                          : `${seasonsOf(p.windows)} 赛季 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`
-                      }
-                      onClick={() => void sign(b.brand, p.packageNo, p.pkgName)}
-                    >
-                      {p.pkgName} {p.feePerWindow.toFixed(2)}M×{seasonsOf(p.windows)}赛季
-                    </button>
-                  </span>
-                ))}
-              </p>
-            );
-          })}
+          <p className="hint">
+            冠名只能从收到的品牌报价里签（关窗时品牌按当刻队况定向递价，「品牌上门」事件也可能带一份）；签下后常规窗关窗时按合同金额入账，同一时间只能有一份生效冠名。
+          </p>
+          {quote.offers.length === 0 ? (
+            <p className="hint">暂无待签报价——等下一次关窗后品牌递价，或抽到「品牌上门」事件。</p>
+          ) : (
+            quote.offers.map(offerRow)
+          )}
         </>
       )}
     </section>

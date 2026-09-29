@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiSend } from '../../lib/api.ts';
+import { fetchMarketRound, MARKET_ROUND_KEY, reopenMarketRound } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
 
 interface BrandRow {
@@ -24,6 +25,24 @@ const HEAT_MIN = 0.5;
 const HEAT_MAX = 1.5;
 const TIERS = ['头部', '新兴', '口碑'] as const;
 
+// 招商轮报价状态徽标（v6.14.0 C3）：pending 待签 / accepted 已签 / queued 待接替 / expired 已过期
+const MARKET_OFFER_STATUS: Record<string, { text: string; badge: string }> = {
+  pending: { text: '待签', badge: 'gray' },
+  accepted: { text: '已签', badge: 'green' },
+  queued: { text: '待接替', badge: 'sky' },
+  expired: { text: '已过期', badge: 'orange' },
+};
+
+// 报价期限按赛季展示（库内按常规窗计数，1 赛季 = 2 个常规窗）
+function seasonsText(windows: number): string {
+  const s = windows / 2;
+  return Number.isInteger(s) ? String(s) : s.toFixed(1);
+}
+
+function stampOf(iso: string): string {
+  return iso.slice(0, 16).replace('T', ' ');
+}
+
 export default function BrandsPage() {
   const qc = useQueryClient();
   const { show, toastNode } = useToast();
@@ -39,6 +58,26 @@ export default function BrandsPage() {
 
   const brands = data?.brands ?? [];
   const refresh = () => qc.invalidateQueries({ queryKey: BRANDS_KEY });
+
+  // 招商轮（v6.14.0 C3）：当前 open 轮优先、否则最近已结轮 + 全状态报价流水；只读 + 手动恢复按钮
+  const marketQuery = useQuery({ queryKey: MARKET_ROUND_KEY, queryFn: fetchMarketRound });
+  const marketRound = marketQuery.data?.round ?? null;
+  const marketOffers = marketQuery.data?.offers ?? [];
+
+  async function reopenRound() {
+    if (!window.confirm('清盘当前招商轮并立即开新一轮？当前轮未签的报价全部作废（整轮无人签的品牌热度 −0.03），随后按当刻队况重新定向递价。')) return;
+    setBusy(true);
+    try {
+      const out = await reopenMarketRound();
+      void qc.invalidateQueries({ queryKey: MARKET_ROUND_KEY });
+      refresh();
+      show(out.hadOpenRound ? `已清盘旧轮并开出新轮，递出 ${out.offerCount} 份报价。` : `已开出新一轮，递出 ${out.offerCount} 份报价。`);
+    } catch (err) {
+      show(err instanceof Error ? err.message : '重开招商轮失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function fieldOf(row: BrandRow) {
     return draft[row.id] ?? { heat: String(row.heat), industry: row.industry };
@@ -214,6 +253,75 @@ export default function BrandsPage() {
           </button>
         </p>
         <p className="hint">热度区间 {HEAT_MIN}–{HEAT_MAX}；行业名未登记在行业系数表时按 1.0 计。</p>
+      </section>
+
+      <section className="card">
+        <h3>招商轮</h3>
+        <p className="hint">
+          非临时窗关窗时自动清盘旧轮、按当刻队况向品牌合作范围内的球队定向递价；报价在有效期内由教练在「冠名市场」签（有现约时选到期接替或解约换签）。
+        </p>
+        {marketQuery.isPending && <p className="muted">加载中…</p>}
+        {marketQuery.isError && <p className="muted">{marketQuery.error instanceof Error ? marketQuery.error.message : '读不出来'}</p>}
+        {marketQuery.data && !marketRound && <p className="muted">还没有开过招商轮——等下一次常规窗关窗时会自动开一轮。</p>}
+        {marketRound && (
+          <>
+            <p>
+              <span className={`badge ${marketRound.status === 'open' ? 'green' : 'gray'}`}>{marketRound.status === 'open' ? '进行中' : '已结轮'}</span>
+              <span className="hint">
+                {' '}
+                · 开轮于 {marketRound.opened_season} 赛季第 {marketRound.opened_window} 窗（{stampOf(marketRound.opened_at)}）
+                {marketRound.settled_at ? `，结轮 ${stampOf(marketRound.settled_at)}` : ''} · 本轮报价 {marketOffers.length} 份
+              </span>
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>品牌</th>
+                    <th>球队</th>
+                    <th>金额</th>
+                    <th>套餐</th>
+                    <th>状态</th>
+                    <th>到期</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {marketOffers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="muted">
+                        本轮没有递出报价。
+                      </td>
+                    </tr>
+                  ) : (
+                    marketOffers.map((o) => {
+                      const st = MARKET_OFFER_STATUS[o.status] ?? { text: o.status, badge: 'gray' };
+                      return (
+                        <tr key={o.id}>
+                          <td>{o.brand}</td>
+                          <td>{o.club_name ?? `俱乐部 #${o.club_id}`}</td>
+                          <td className="mono">
+                            {o.amount.toFixed(2)} M/窗 × {seasonsText(o.windows)} 赛季
+                          </td>
+                          <td>套餐 {o.package_no}</td>
+                          <td>
+                            <span className={`badge ${st.badge}`}>{st.text}</span>
+                          </td>
+                          <td className="mono">{stampOf(o.expire_at)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <button className="btn btn-sm" type="button" disabled={busy || marketQuery.isPending} onClick={() => void reopenRound()}>
+                手动重开一轮
+              </button>
+              <span className="hint"> 清盘当前轮：未签报价作废、整轮无人签的品牌热度 −0.03，随后按当刻队况重开一轮。</span>
+            </p>
+          </>
+        )}
       </section>
     </div>
   );
