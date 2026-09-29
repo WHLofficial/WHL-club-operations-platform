@@ -206,13 +206,13 @@ async function fireNamed(fx: Fixture, eventId: string, effects: Record<string, u
 beforeEach(() => resetConfigCache());
 
 describe('事件池种子（迁移 0047，插件 DEFAULT_EVENTS 逐字同）', () => {
-  it('30 条 = 8 即发型 + 22 选择型（0047 的 24 + 0052 新种子 6）；即发型名单与 storm_buzz 效果一致', async () => {
+  it('31 条 = 9 即发型 + 22 选择型（0047 的 24 + 0052 的 6 + 0056 brand_visit）；即发型名单与 storm_buzz 效果一致', async () => {
     const fx = freshEnv();
     const pool = await loadEventPool(fx.env.DB);
-    expect(pool).toHaveLength(30);
+    expect(pool).toHaveLength(31);
     const instant = pool.filter((r) => r.event_type === 'instant');
     expect(instant.map((r) => r.event_id)).toEqual([
-      'storm_buzz', 'tifo_viral', 'bad_press', 'relic_found', 'subsidy', 'security_break', 'legend_visit', 'sponsor_audit',
+      'storm_buzz', 'tifo_viral', 'bad_press', 'relic_found', 'subsidy', 'security_break', 'legend_visit', 'sponsor_audit', 'brand_visit',
     ]);
     expect(JSON.parse(instant[0]!.effects_json)).toEqual({ attendance_mod: 0.85 });
     expect(instant.every((r) => r.source === 'builtin' && r.status === 'adopted' && r.soft_conditions === 0)).toBe(true);
@@ -239,7 +239,7 @@ describe('事件池种子（迁移 0047，插件 DEFAULT_EVENTS 逐字同）', (
          soft_conditions, template, source, status, created_at)
        VALUES ('storm_buzz', '暴雨滂沱', '天气衍生', 8, 'instant', '{}', '{"attendance_mod":0.85}', '[]', 0, 'x', 'builtin', 'adopted', '2026-01-01T00:00:00Z')`,
     );
-    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM event_pool`)!.n).toBe(30);
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM event_pool`)!.n).toBe(31);
   });
 });
 
@@ -898,7 +898,7 @@ describe('occurrence 状态闸：整批重放安全', () => {
       { money: 5, fans_pct: 0.03, build_credit: 2, attendance_mod: 0.9 },
       {
         clamps: EVENT_CLAMPS_DEFAULT,
-        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 },
+        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 },
         weatherKeys: new Set(['晴', '多云', '雨', '雪']),
         catalog: null,
         openWindow: { season: 1, windowSeq: 1 },
@@ -928,7 +928,7 @@ describe('occurrence 状态闸：整批重放安全', () => {
       { money: 4 },
       {
         clamps: EVENT_CLAMPS_DEFAULT,
-        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 },
+        heatRules: { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 },
         weatherKeys: new Set(['晴', '多云', '雨', '雪']),
         catalog: null,
         openWindow: null,
@@ -1047,7 +1047,7 @@ describe('管理端事件路由（v6.10.0）', () => {
     const list = await getAs('/api/admin/events/pool', fx.env, 'whl_session=tok-admin');
     expect(list.status).toBe(200);
     const body = (await list.json()) as { events: { id: number; event_id: string; status: string }[] };
-    expect(body.events).toHaveLength(30);
+    expect(body.events).toHaveLength(31);
 
     const id = body.events.find((e) => e.event_id === 'storm_buzz')!.id;
     const off = await send('PATCH', `/api/admin/events/pool/${id}`, fx.env, { status: 'discarded' });

@@ -2,13 +2,17 @@
 // 热度界 0.5–1.5（与 market_heat_rules 钳制边界一致）；弃用守卫：有 active 合同的品牌禁弃
 // （插件没这校验，我们补——弃了会让该合同续不了约、热度也不再演化）。
 // 档位（v6.13.0 C2）：tier 三档枚举校验 + tier_locked 手动锁档（锁住的行关窗自动校准跳过）。
+// 招商轮（v6.14.0 C3）：当前轮与报价流水只读 + 手动「清盘+开轮」恢复按钮（幂等语义：每次执行
+// 都会清掉当前 open 轮未签报价并重开一轮，重复执行得到新轮，审计留痕）。
 import { Hono } from 'hono';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
-import { writeAudit } from '../../../lib/audit.ts';
+import { createAuditStatement, writeAudit } from '../../../lib/audit.ts';
 import { nowSql, readJson } from './shared.ts';
 import { loadHeatRules, BRAND_TIERS } from '../../naming-ops.ts';
+import { getOpenWindow } from '../../seasons.ts';
+import { buildRoundStatements, getOpenRound } from '../../market-ops.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -145,6 +149,60 @@ app.patch('/brands/:id', async (c) => {
     after: { brand: row.brand, heat, industry, status, tier, tier_locked: tierLocked },
   });
   return c.json({ brand: { ...row, heat, industry, status, tier, tier_locked: tierLocked } });
+});
+
+// 招商轮视图：当前 open 轮优先，否则最近一条已结轮；报价流水含已签/已废全状态
+app.get('/brands/market-round', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const round =
+    (await getOpenRound(c.env.DB)) ??
+    (await c.env.DB
+      .prepare(`SELECT id, opened_season, opened_window, status, opened_at, settled_at FROM market_rounds ORDER BY id DESC LIMIT 1`)
+      .first<{ id: number; opened_season: number; opened_window: number; status: string; opened_at: string; settled_at: string | null }>());
+  const offers = round
+    ? (
+        await c.env.DB
+          .prepare(
+            `SELECT o.id, o.round_id, o.club_id, o.package_no, o.amount, o.windows, o.status, o.created_at, o.expire_at,
+                    b.brand, cl.name AS club_name
+             FROM market_offers o
+             JOIN brand_pool b ON b.id = o.brand_id
+             LEFT JOIN clubs cl ON cl.id = o.club_id
+             WHERE o.round_id = ? ORDER BY o.id`,
+          )
+          .bind(round.id)
+          .all()
+      ).results
+    : [];
+  return c.json({ round, offers });
+});
+
+// 手动「清盘+开轮」：自动链路的恢复路径。语义 = 清掉当前 open 轮（未签 pending 作废 + 无人签品牌
+// 热度 −ignored）并按当刻队况重开一轮；无开着的窗口时 409（轮没有可归属的窗口期）。
+app.post('/brands/market-round/reopen', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const win = await getOpenWindow(c.env.DB);
+  if (!win) throw new HttpError(409, '当前没有开着的窗口，开不了招商轮');
+  const build = await buildRoundStatements(c.env, win.season, win.windowSeq);
+  const statements = [...build.settleStatements, ...build.openStatements];
+  const audit = createAuditStatement(c.env.DB);
+  statements.push(
+    audit({
+      actor: user.id,
+      action: 'market_round_reopen',
+      targetType: 'market_round',
+      targetId: null,
+      origin: 'user',
+      after: { season: win.season, windowSeq: win.windowSeq, hadOpenRound: build.hadOpenRound, offerCount: build.offerCount },
+    }),
+  );
+  await c.env.DB.batch(statements);
+  return c.json({
+    ok: true,
+    hadOpenRound: build.hadOpenRound,
+    offerCount: build.offerCount,
+    offersPerClub: build.offersPerClub,
+  });
 });
 
 export default app;

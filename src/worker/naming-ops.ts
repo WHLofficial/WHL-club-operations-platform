@@ -7,7 +7,8 @@
 // 档位性格与情绪演化（v6.13.0 C2）：brand_pool 三档（头部/新兴/口碑），关窗批自动校准（热度降序 +
 // 头部准入下限，可空缺）+ 管理端锁档；满意度按上座/战绩两信号每窗演化（事件效果 v6.12.0 起即时落库，
 // 不进演化，避免同一笔事件记两次账）；跌破档位地板品牌主动解约（无赔偿）；签约按品牌档位名额原子守卫。
-// 不做（缓议）：招商轮（C3）、事件信号参与演化、被冷落热度触发。
+// 招商轮（v6.14.0 C3）：主动签约（signNaming）退役，冠名获取只走 market-ops.ts 的招商轮报价
+// ——本文件保留合同域（续约/退约/收租/演化/名额口径），签约入口在 market-ops.acceptOffer（快照供料）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
@@ -164,70 +165,10 @@ export function quoteBrands(
   });
 }
 
-/** 签约：费用条款按当期队况快照入合同（需开放窗口）。
- *  档位名额守卫（v6.13.0 C2）：头部 1 队/品牌、新兴 emergingSlots 队、口碑不限——预检查给出明确
- *  409 文案，INSERT 内再叠一次原子计数守卫（跨队并发同品牌签约不超卖），只管新签约不追溯存量。 */
-export async function signNaming(
-  env: Env,
-  clubId: number,
-  brand: string,
-  packageNo: number,
-): Promise<NamingContractRow> {
-  if (!Number.isInteger(packageNo) || packageNo < 1 || packageNo > 3) {
-    throw new HttpError(400, '套餐号需为 1-3（1=稳健 2=进取 3=对赌）');
-  }
-  const win = await getOpenWindow(env.DB);
-  if (!win) throw new HttpError(409, '转会窗口没开，签不了冠名合同');
-  const stadium = await env.DB
-    .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
-    .bind(clubId)
-    .first<{ capacity: number; fans: number }>();
-  if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
-  const def = await env.DB
-    .prepare(`SELECT heat, industry, tier FROM brand_pool WHERE brand = ? AND status = 'adopted'`)
-    .bind(brand)
-    .first<{ heat: number; industry: string; tier: string }>();
-  if (!def) throw new HttpError(400, `品牌「${brand}」不在品牌池`);
-  const tierRules = await loadTierRules(env.DB);
-  const quota = tierQuotaOf(def.tier, tierRules);
-  if (await getActiveNaming(env.DB, clubId)) throw new HttpError(409, '已有生效冠名，先退约再签新约');
-  if (quota !== null) {
-    const signed = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = ? AND status = 'active'`)
-      .bind(brand)
-      .first<{ n: number }>();
-    if ((signed?.n ?? 0) >= quota) {
-      throw new HttpError(409, `品牌「${brand}」档位名额已满（${def.tier}档限 ${quota} 队）`);
-    }
-  }
-  const params = await loadNamingParams(env.DB);
-  const factors = await loadIndustryFactors(env.DB);
-  const baseFee = round3(namingBaseFee(params, stadium.capacity, stadium.fans, def.heat) * industryFactor(factors, def.industry));
-  const pkg = buildPackages(params, baseFee)[packageNo - 1]!;
-  // 名额原子守卫（v6.13.0）：与预检同口径的原子防线，并发下不超卖；口碑档不限额时不加子查询——
-  // 若 bind 0 会让 COUNT < 0 恒假，口碑档品牌永远签不出去（tests/naming-tiers TC-QUOTA-04 抓到的真缺陷）
-  const quotaGuard = quota === null ? '' : ` AND (SELECT COUNT(*) FROM naming_contracts WHERE brand = ? AND status = 'active') < ?`;
-  const now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
-  const out = await env.DB.batch([
-    env.DB
-      .prepare(
-        `INSERT INTO naming_contracts
-         (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
-          windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status,
-          started_season, started_window, created_at, updated_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ${now}, ${now}
-         WHERE NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}`,
-      )
-      .bind(
-        clubId, brand, def.heat, baseFee, pkg.packageNo, pkg.pkgName, pkg.feePerWindow,
-        pkg.windows, pkg.windows, pkg.bonusAmount, pkg.betAttend, pkg.betFans,
-        win.season, win.windowSeq, clubId, ...(quota === null ? [] : [brand, quota]),
-      ),
-  ]);
-  if ((out[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '已有生效冠名，先退约再签新约');
-  const row = await getActiveNaming(env.DB, clubId);
-  if (!row) throw new HttpError(500, '冠名合同落库后读不回来');
-  return row;
+/** 提前解约赔款口径（terminateNaming 与 C3 换签 acceptOffer 共用）：剩余窗口(减 1) × 每窗费 × terminatePenalty。 */
+export function terminatePenaltyOf(params: NamingParams, windowsRemaining: number, feePerWindow: number): number {
+  const remaining = Math.max(0, windowsRemaining - 1);
+  return round3(remaining * feePerWindow * params.terminatePenalty);
 }
 
 /** 续约（v6.8.0，插件 brand_service.py renew 口径）：只剩最后 1 窗可续；按当前队况与品牌现热度
@@ -306,7 +247,7 @@ export async function terminateNaming(
   if (!row) throw new HttpError(404, '该队没有生效冠名');
   const params = await loadNamingParams(env.DB);
   const remaining = Math.max(0, row.windows_remaining - 1);
-  const penalty = round3(remaining * row.fee_per_window * params.terminatePenalty);
+  const penalty = terminatePenaltyOf(params, row.windows_remaining, row.fee_per_window);
   const statements = [
     env.DB
       .prepare(
@@ -409,12 +350,15 @@ export interface HeatRules {
   clampLow: number;
   clampHigh: number;
   champion: number;
+  /** v6.14.0 C3：招商轮签约成交 +deal / 整轮无人递价被冷落 −ignored（插件 market_heat_config deal/ignored 同值） */
+  deal: number;
+  ignored: number;
 }
 
 /** 热度规则（config market_heat_rules，JSON）：缺行或缺字段回默认（插件 market_heat_config 出厂值）。
  *  champion = 赛季冠军品牌热度加成（v6.13.0 C2，插件 champion_bonuses 口径 0.10）。 */
 export async function loadHeatRules(db: Env['DB']): Promise<HeatRules> {
-  const defaults: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 };
+  const defaults: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 };
   const config = createConfigService(db);
   const r = await config.getJson<Partial<HeatRules>>('market_heat_rules');
   if (!r || typeof r !== 'object') return defaults;
@@ -424,6 +368,8 @@ export async function loadHeatRules(db: Env['DB']): Promise<HeatRules> {
     clampLow: finiteOr(r.clampLow, defaults.clampLow),
     clampHigh: finiteOr(r.clampHigh, defaults.clampHigh),
     champion: finiteOr(r.champion, defaults.champion),
+    deal: finiteOr(r.deal, defaults.deal),
+    ignored: finiteOr(r.ignored, defaults.ignored),
   };
 }
 

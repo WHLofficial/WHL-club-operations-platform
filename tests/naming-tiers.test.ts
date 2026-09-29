@@ -9,8 +9,9 @@ import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam, sqlG
 import { resetConfigCache, CONFIG_KEYS } from '../src/core/config.ts';
 import {
   recalibrateTierStatements, tierQuotaOf, satisfactionDelta, clampSatisfaction, windowWinRate,
-  evolveSatisfactionForClub, signNaming, getActiveNaming, loadTierProfiles, loadSatisfyConfig, loadHeatRules,
+  evolveSatisfactionForClub, getActiveNaming, loadTierProfiles, loadSatisfyConfig, loadHeatRules,
 } from '../src/worker/naming-ops.ts';
+import { signViaOffer } from './market-helpers.ts';
 import type { TierProfile, SatisfyConfig } from '../src/worker/naming-ops.ts';
 import { championBonusStatements, leagueStandings, settleSeason } from '../src/worker/season-settle.ts';
 import { activityIncome } from '../src/worker/venue-ops.ts';
@@ -105,10 +106,10 @@ const RULES = { topSeatRatio: 8, emergingSlots: 2, topHeatFloor: 1.0, emergingHe
 // ─── TC-CFG ──────────────────────────────────────────────────────────────────
 
 describe('config 三新键与 champion 键（TC-CFG）', () => {
-  it('注册表 68→71，market_heat_rules 默认带 champion=0.1，三档 profile 出厂值', async () => {
-    expect(CONFIG_KEYS).toHaveLength(71);
+  it('注册表 68→72，market_heat_rules 默认带 champion/deal/ignored，三档 profile 出厂值', async () => {
+    expect(CONFIG_KEYS).toHaveLength(72);
     const fx = freshEnv();
-    expect(await loadHeatRules(fx.env.DB)).toEqual({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 });
+    expect(await loadHeatRules(fx.env.DB)).toEqual({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 });
     expect(await loadSatisfyConfig(fx.env.DB)).toEqual({ attendWeight: 0.5, resultWeight: 0.3, lineBuffer: 0.05, championSatisfaction: 0.1 });
     const profiles = await loadTierProfiles(fx.env.DB);
     expect(profiles['头部']!.satisfyFloor).toBe(0.7);
@@ -201,7 +202,7 @@ describe('两信号情绪演化（TC-EVO）', () => {
   it('TC-EVO-03 落库：战绩信号按窗内赛果现算（season+window_seq 过滤），satisfaction 更新', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, 1);
-    await signNaming(fx.env, 1, '阿迪达斯', 1);
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1);
     const naming = (await getActiveNaming(fx.env.DB, 1))!;
     seedResult(fx.sqlite, { matchId: 1, home: 101, away: 102, scoreHome: 2, scoreAway: 0 });
     seedResult(fx.sqlite, { matchId: 2, home: 103, away: 101, scoreHome: 1, scoreAway: 0 });
@@ -217,7 +218,7 @@ describe('两信号情绪演化（TC-EVO）', () => {
   it('TC-EVO-04 跌破地板 → 品牌主动解约语句（terminated + windows_remaining=0 + ended 刻）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, 1);
-    await signNaming(fx.env, 1, '阿迪达斯', 1);
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1);
     const naming = (await getActiveNaming(fx.env.DB, 1))!;
     fx.sqlite.exec(`UPDATE naming_contracts SET satisfaction = 0.72 WHERE id = ${naming.id}`);
     const { statements, report } = await evolveSatisfactionForClub(fx.env, { ...naming, satisfaction: 0.72 }, undefined, 1, 1, -1, HEAD_PROFILE, SAT);
@@ -235,7 +236,7 @@ describe('两信号情绪演化（TC-EVO）', () => {
   it('TC-EVO-05 恰在地板不解约（严格小于）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, 1);
-    await signNaming(fx.env, 1, '阿迪达斯', 1);
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1);
     const naming = (await getActiveNaming(fx.env.DB, 1))!;
     // 0.7375 − 0.0375（sAttend=−1 头部 ×1.5）= 0.700 精确落地板
     const { statements, report } = await evolveSatisfactionForClub(fx.env, { ...naming, satisfaction: 0.7375 }, undefined, 1, 1, -1, HEAD_PROFILE, SAT);
@@ -253,7 +254,7 @@ describe('两信号情绪演化（TC-EVO）', () => {
   it('TC-EVO-07 无主场比赛（sAttend=0）不借中性上座率拿正向信号', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, 1);
-    await signNaming(fx.env, 1, '阿迪达斯', 1);
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1);
     const naming = (await getActiveNaming(fx.env.DB, 1))!;
     const { report } = await evolveSatisfactionForClub(fx.env, naming, undefined, 1, 1, 0, HEAD_PROFILE, SAT);
     expect(report.attendSignal).toBe(0);
@@ -273,26 +274,29 @@ describe('签约档位名额守卫（TC-QUOTA）', () => {
   it('TC-QUOTA-02 头部第 2 队 409、新兴第 3 队 409，文案点名档位限数', async () => {
     const fx = freshEnv();
     for (const id of [1, 2, 3, 4]) seedClub(fx.sqlite, id);
-    await signNaming(fx.env, 1, '阿迪达斯', 1); // 头部
-    await expect(signNaming(fx.env, 2, '阿迪达斯', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('头部档限 1 队') });
-    await signNaming(fx.env, 2, '可口可乐', 1); // 新兴
-    await signNaming(fx.env, 3, '可口可乐', 1);
-    await expect(signNaming(fx.env, 4, '可口可乐', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('新兴档限 2 队') });
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1); // 头部
+    await expect(signViaOffer(fx.env, 2, '阿迪达斯', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('头部档限 1 队') });
+    await signViaOffer(fx.env, 2, '可口可乐', 1); // 新兴
+    await signViaOffer(fx.env, 3, '可口可乐', 1);
+    await expect(signViaOffer(fx.env, 4, '可口可乐', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('新兴档限 2 队') });
   });
 
-  it('TC-QUOTA-03 名额原子守卫：INSERT 带 COUNT 子查询防线（并发超卖不进库，源码文本锁）', () => {
-    const src = readFileSync('src/worker/naming-ops.ts', 'utf8');
-    expect(src).toContain(`AND (SELECT COUNT(*) FROM naming_contracts WHERE brand = ? AND status = 'active') < ?`);
+  it('TC-QUOTA-03 名额原子守卫：accept 语句带 active+queued 合并 COUNT 子查询防线（并发超卖不进库，源码文本锁）', () => {
+    const src = readFileSync('src/worker/market-ops.ts', 'utf8');
+    expect(src).toContain(
+      `AND (SELECT COUNT(*) FROM naming_contracts WHERE brand = (SELECT brand FROM brand_pool WHERE id = ?) AND status = 'active')
+            + (SELECT COUNT(*) FROM market_offers WHERE brand_id = ? AND status = 'queued') < ?`,
+    );
   });
 
-  it('TC-QUOTA-04 口碑档不限额可多签；解约释放名额后头部可再签', async () => {
+  it('TC-QUOTA-04 口碑档不限额可多签；解约释放名额后头部可再签（守卫按 active+queued 合并计，terminated 不占）', async () => {
     const fx = freshEnv();
     for (const id of [1, 2, 3]) seedClub(fx.sqlite, id);
     const woman = sqlGet<{ brand: string }>(fx.sqlite, `SELECT brand FROM brand_pool WHERE tier = '口碑' ORDER BY id LIMIT 1`)!.brand;
-    for (const id of [1, 2, 3]) await signNaming(fx.env, id, woman, 1);
+    for (const id of [1, 2, 3]) await signViaOffer(fx.env, id, woman, 1);
     expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '${woman}' AND status = 'active'`)?.n).toBe(3);
     fx.sqlite.exec(`UPDATE naming_contracts SET status = 'terminated', windows_remaining = 0 WHERE club_id = 1`);
-    await signNaming(fx.env, 1, '阿迪达斯', 1); // 名额守卫只数 active，释放后可签头部
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1); // terminated 不占名额，释放后可签头部
   });
 });
 
@@ -379,7 +383,7 @@ describe('联赛冠军加成（TC-CHAMP）', () => {
     authRegisterClubTeam(fx.auth, 11, 1, '阿森纳');
     seedBinding(fx.sqlite, 1, 5, 'league_premier');
     seedResult(fx.sqlite, { matchId: 1, tournamentId: 5, home: 11, away: 12, scoreHome: 2, scoreAway: 0 });
-    await signNaming(fx.env, 1, '阿迪达斯', 1);
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1);
     fx.sqlite.exec(`INSERT INTO seasons (season, status, created_at) VALUES (1, 'running', '2026-01-01T00:00:00Z')`);
     const heatBefore = sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '阿迪达斯'`)!.heat;
     const out = await championBonusStatements(fx.env, 1, 1);
@@ -396,7 +400,7 @@ describe('联赛冠军加成（TC-CHAMP）', () => {
     authRegisterClubTeam(fx.auth, 11, 1, '阿森纳');
     seedBinding(fx.sqlite, 1, 5, 'league_premier');
     seedResult(fx.sqlite, { matchId: 1, tournamentId: 5, home: 11, away: 12, scoreHome: 1, scoreAway: 0 });
-    await signNaming(fx.env, 1, '阿迪达斯', 1); // 要开窗，先签后关
+    await signViaOffer(fx.env, 1, '阿迪达斯', 1); // 要开窗，先签后关
     fx.sqlite.exec(`INSERT INTO seasons (season, status, age_cap, created_at) VALUES (1, 'running', 24, '2026-01-01T00:00:00Z')`);
     fx.sqlite.exec(`UPDATE season_windows SET status = 'closed' WHERE season = 1`);
     const heatBefore = sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '阿迪达斯'`)!.heat;

@@ -20,6 +20,7 @@ import {
   type NamingContractRow,
 } from './naming-ops.ts';
 import { loadActivityCatalog, windowActivityStatements } from './venue-ops.ts';
+import { activateQueuedStatements, buildRoundStatements } from './market-ops.ts';
 import {
   collectWindowSignals,
   loadEventSignals,
@@ -371,6 +372,9 @@ export interface HomeWindowSummary {
   activityTotal: number;
   moodClubs: number;
   terminatedClubs: number;
+  /** v6.14.0 C3 招商轮：本轮定向递出的报价数 / 接班转正的队数（临时窗恒 0） */
+  marketOffers: number;
+  activatedClubs: number;
 }
 
 /** 批后补排的俱乐部通知（关窗批提交成功后由调用方逐条 queueClubNotification）。 */
@@ -444,7 +448,14 @@ export async function windowHomeStatements(
     activityTotal: 0,
     moodClubs: 0,
     terminatedClubs: 0,
+    marketOffers: 0,
+    activatedClubs: 0,
   };
+
+  // v6.14.0 C3 招商轮·清盘段（常规窗）：未签 pending 作废 + 整轮无人签品牌热度 −ignored +
+  // 旧轮置 settled——在档位校准之前（插件 run_window 的 close → recalibrate → open 同序）
+  const round = opts.chargeNaming ? await buildRoundStatements(env, season, windowSeq) : null;
+  if (round) statements.push(...round.settleStatements);
 
   // 档位自动校准（v6.13.0 C2）：常规窗批首跑一次（按校准时刻的热度排名；本批热度演化结果下窗生效）
   if (opts.chargeNaming) {
@@ -554,6 +565,18 @@ export async function windowHomeStatements(
   // 经营信号注记（v6.12.0 D3）：给本窗有非中性信号的队各排一条通知（本仓没有关窗汇总通知，
   // 教练感知面 = 这条通知 + 维护费/冠名费流水 memo 里的信号说明）
   await queueWindowSignalNotes(env, season, windowSeq, signalDefs);
+  // v6.14.0 C3 招商轮·批尾：接班转正（收租/演化/解约语句之后——到期合同已 expired，转正守卫放行）
+  // → 开新轮定向递价（round_id 标量子查询取本批刚开的轮）
+  const offerNotified: { clubId: number; brands: string[] }[] = [];
+  const activated: import('./market-ops.ts').QueuedActivation[] = [];
+  if (round) {
+    const activation = await activateQueuedStatements(env, season, windowSeq, 'user', null);
+    statements.push(...round.openStatements, ...activation.statements);
+    summary.marketOffers = round.offerCount;
+    summary.activatedClubs = activation.activated.length;
+    offerNotified.push(...round.offersPerClub);
+    activated.push(...activation.activated);
+  }
   // 情绪变化 / 品牌解约通知（v6.13.0 C2）：批后由调用方排队（批回滚则不发）
   const affected = [...new Set([...moodReports, ...terminatedReports].map((r) => r.clubId))];
   if (affected.length > 0) {
@@ -590,6 +613,31 @@ export async function windowHomeStatements(
           tier: brandTier.get(rep.brand) ?? '口碑',
           floor: (profile?.satisfyFloor ?? 0.5).toFixed(2),
         },
+      });
+    }
+  }
+  // 招商轮通知（v6.14.0 C3）：逐队收价汇总 + 接班转正回执，批后排队（批回滚不发假通知）
+  const marketIds = [...new Set([...offerNotified.map((p) => p.clubId), ...activated.map((a) => a.clubId)])];
+  if (marketIds.length > 0) {
+    const marketClubs = (
+      await env.DB
+        .prepare(`SELECT id, name FROM clubs WHERE id IN (${marketIds.map(() => '?').join(',')})`)
+        .bind(...marketIds)
+        .all<{ id: number; name: string }>()
+    ).results;
+    const marketName = (id: number) => marketClubs.find((cl) => cl.id === id)?.name ?? `俱乐部${id}`;
+    for (const p of offerNotified) {
+      notifications.push({
+        clubId: p.clubId,
+        template: 'naming_offer',
+        data: { club: marketName(p.clubId), count: p.brands.length, brands: p.brands.join('、') },
+      });
+    }
+    for (const a of activated) {
+      notifications.push({
+        clubId: a.clubId,
+        template: 'naming_offer_activated',
+        data: { club: marketName(a.clubId), brand: a.brand, feePerWindow: a.feePerWindow, windows: a.windows, pkgName: a.pkgName },
       });
     }
   }

@@ -15,7 +15,7 @@
 // v6.10.0 只开放即发型（event_type='instant'）；选择型 v6.11.0 开放（表结构已建全，届时零迁移）。
 // v6.12.0（D3）起 14 键里 13 键真落库：satisfaction → naming_contracts.satisfaction（0051，钳 [0,2]）；
 // signals → 效果值按 event_signals 清洗后入 effects_json，关窗批三消费点（home.ts：fan_mood 死忠、
-// upkeep 维护费、fee_mod 冠名费）；offer_spawn 挪 C3（招商轮），触发到该键播报落空。
+// upkeep 维护费、fee_mod 冠名费）；offer_spawn 真落库（v6.14.0 C3：往当前开放招商轮塞上门报价，market-ops.spawnVisitOffer）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createConfigService } from '../core/config.ts';
@@ -25,6 +25,7 @@ import { getOpenWindow, type OpenWindow } from './seasons.ts';
 import { SLOT_MIN, listBookings, loadActivityCatalog, seededUnit, type ActivityCatalog } from './venue-ops.ts';
 import { tourTeamIdsByClub } from './prizes.ts';
 import { loadHeatRules, type HeatRules } from './naming-ops.ts';
+import { spawnVisitOffer } from './market-ops.ts';
 import { FACILITY_KEYS } from './stadium-ops.ts';
 import { queueClubNotification } from './notify.ts';
 
@@ -478,6 +479,8 @@ export function conditionOk(ctx: EventClubContext, cond: Record<string, unknown>
     if (want === undefined || ctx.lastResult !== want) return false;
   }
   if (cond.requires_naming === true && ctx.brand === null) return false;
+  // requires_no_naming（v6.14.0 C3）：无生效冠名才触发（品牌上门类事件；比插件的效果侧落空兜底干净）
+  if (cond.requires_no_naming === true && ctx.brand !== null) return false;
   if (typeof cond.requires_activity === 'string' && !ctx.activities.includes(cond.requires_activity)) return false;
   return true;
 }
@@ -572,20 +575,15 @@ export function parseEventOptions(raw: string | null | undefined): EventOption[]
 }
 
 /**
- * 选项概率表里要打「尚未生效」标记的键：offer_spawn（上门报价）依赖招商轮（C3），
- * D3 触发到它一律按「无开放招商轮次」落空。satisfaction / signals 自 v6.12.0 起真落库，不再标注。
+ * 选项概率表展示口径：全部效果键 v6.14.0 起都真实落库（offer_spawn 随 C3 招商轮落库），无「尚未生效」标注。
+ * `markPending` 参数保留（展示侧调用形状不变），当前为空集恒不标注。
  */
-const PENDING_EFFECT_KEYS = new Set(['offer_spawn']);
-const PENDING_LABEL = '（C3 生效）';
+const PENDING_EFFECT_KEYS = new Set<string>(['none']);
 
-/**
- * 选项概率表用的人类可读效果描述（与结算备注同口径；只读效果表，不依赖队况与配置）。
- * `markPending` 只在**展示**侧打开：给依赖 C3 的 offer_spawn 补一句「（C3 生效）」。
- */
 export function describeEffect(key: string, value: unknown, markPending = false, signalDefs?: EventSignalDefs): string {
   const desc = describeEffectPlain(key, value, signalDefs);
   if (desc === '') return '';
-  return markPending && PENDING_EFFECT_KEYS.has(key) ? `${desc}${PENDING_LABEL}` : desc;
+  return markPending && PENDING_EFFECT_KEYS.has(key) ? `${desc}（尚未生效）` : desc;
 }
 
 function describeEffectPlain(key: string, value: unknown, signalDefs?: EventSignalDefs): string {
@@ -611,7 +609,7 @@ function describeEffectPlain(key: string, value: unknown, signalDefs?: EventSign
       return cleaned !== null ? `经营信号 ${describeSignals(cleaned, signalDefs)}` : '';
     }
     case 'offer_spawn':
-      return `上门报价 ${JSON.stringify(value)}`;
+      return '品牌上门递价（挂当前招商轮）';
     case 'weather_set': {
       const w = (value as { weather?: unknown } | null)?.weather;
       return `下一场天气 → ${typeof w === 'string' ? w : ''}`;
@@ -1042,9 +1040,18 @@ export async function applyEventEffects(
         notes.push(`下一场天气 → ${w}`);
         break;
       }
-      // 上门报价：依赖招商轮（C3 才建），本版恒按「无开放轮次」落空（插件无轮次时同文案）
+      // 上门报价（v6.14.0 C3）：往当前开放招商轮塞一份上门报价（market-ops.spawnVisitOffer，
+      // 插件 offer_spawn 口径：稳健套餐、无轮/撞待处理唯一键落空播报；INSERT 在此处独立执行，
+      // occurrence pending 守卫由 guardSql 传入，效果批重放不重复递价）
       case 'offer_spawn': {
-        notes.push('当前无开放招商轮次，品牌上门落空');
+        const spawn = await spawnVisitOffer(
+          env,
+          { clubId: ctx.clubId, capacity: ctx.stadium.capacity, fans: ctx.stadium.fans },
+          occ.id,
+          PENDING_GUARD,
+        );
+        if (spawn.applied) applied.offer_spawn = spawn.applied;
+        notes.push(...spawn.notes);
         break;
       }
       default:
@@ -1774,7 +1781,7 @@ export async function queueWindowSignalNotes(
 /** LLM 草稿允许出现的条件键（conditionOk 认得的全部） */
 const DRAFT_CONDITION_KEYS = new Set([
   'min_tier', 'max_tier', 'min_capacity', 'max_capacity', 'min_fans', 'max_fans', 'min_balance', 'max_balance',
-  'facility_min', 'weather_is', 'last_result', 'requires_naming', 'requires_activity',
+  'facility_min', 'weather_is', 'last_result', 'requires_naming', 'requires_no_naming', 'requires_activity',
 ]);
 
 const DRAFT_CONDITION_NUM_RANGE: Record<string, [number, number]> = {
@@ -1832,7 +1839,7 @@ export function clampEventDraft(
       drop(`条件「${key}」`);
       continue;
     }
-    if (key === 'requires_naming') {
+    if (key === 'requires_naming' || key === 'requires_no_naming') {
       if (value === true) conditions[key] = true;
       continue;
     }

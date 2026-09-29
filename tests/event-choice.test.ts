@@ -438,9 +438,9 @@ describe('广播文案 renderChoiceText / 效果描述 describeEffects', () => {
     const lines = renderChoiceText(event, ctxOf(), options, 12).split('\n');
     // v6.12.0（D3）起 satisfaction 真落库，不再带待生效标注
     expect(lines[3]).toBe('① 含糊其辞：75% 资金 -1.0 m / 25% 资金 -2.0 m、品牌方情绪 +0.15');
-    // 展示侧标注只剩 offer_spawn（C3 生效）
+    // v6.14.0（C3）起 offer_spawn 真落库，全部效果键不再有待生效标注
     expect(describeEffect('satisfaction', 0.15, true)).toBe('品牌方情绪 +0.15');
-    expect(describeEffect('offer_spawn', { pkg: 1 }, true)).toBe('上门报价 {"pkg":1}（C3 生效）');
+    expect(describeEffect('offer_spawn', { pkg: 1 }, true)).toBe('品牌上门递价（挂当前招商轮）');
     expect(describeEffects({ satisfaction: 0.15 })).toBe('品牌方情绪 +0.15');
   });
 

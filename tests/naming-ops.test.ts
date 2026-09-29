@@ -7,9 +7,11 @@ import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import {
-  namingBaseFee, buildPackages, signNaming, terminateNaming, renewNaming, windowNamingStatements,
+  namingBaseFee, buildPackages, terminateNaming, renewNaming, windowNamingStatements,
   quoteBrands, loadIndustryFactors, industryFactor, brandHeatDelta, windowBrandHeatStatement,
 } from '../src/worker/naming-ops.ts';
+import { signViaOffer, seedOffer } from './market-helpers.ts';
+import { acceptOffer } from '../src/worker/market-ops.ts';
 import type { NamingParams, HeatRules } from '../src/worker/naming-ops.ts';
 
 interface Fixture {
@@ -122,7 +124,7 @@ describe('签约与解约', () => {
   it('签约：条款快照入合同（底价/套餐金额/窗口数/达线），无排他但一队一份', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
-    const row = await signNaming(fx.env, 1, '亚马逊', 3);
+    const row = await signViaOffer(fx.env, 1, '亚马逊', 3);
     expect(row).toMatchObject({
       club_id: 1,
       brand: '亚马逊',
@@ -140,35 +142,39 @@ describe('签约与解约', () => {
     });
   });
 
-  it('闸：重复签约 409、品牌不在池 400、套餐号非法 400、窗口没开 409', async () => {
+  it('闸：重复签约要显式换约 mode（400）、品牌不在池 400、套餐号非法 400、窗口没开 409', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
-    await signNaming(fx.env, 1, '可口可乐', 1);
-    await expect(signNaming(fx.env, 1, '阿迪达斯', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('已有生效冠名') });
-    await expect(signNaming(fx.env, 1, '某个野牌子', 1)).rejects.toMatchObject({ status: 400 });
-    await expect(signNaming(fx.env, 1, '阿迪达斯', 5)).rejects.toMatchObject({ status: 400 });
+    await signViaOffer(fx.env, 1, '可口可乐', 1);
+    // v6.14.0 C3：已有生效冠名时 acceptOffer 要求显式 mode（queued/terminate），隐式「先退再签」不复存在
+    const dupOffer = await seedOffer(fx.env, 1, '阿迪达斯', 1);
+    await expect(acceptOffer(fx.env, dupOffer, 1, undefined, null)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('已有生效冠名') });
+    await expect(signViaOffer(fx.env, 1, '某个野牌子', 1)).rejects.toMatchObject({ status: 400 });
+    await expect(signViaOffer(fx.env, 1, '阿迪达斯', 5)).rejects.toMatchObject({ status: 400 });
 
+    // 先退掉现约（mode 检查先于窗口检查，挂着 active 合同永远到不了窗口分支）
+    fx.sqlite.exec("UPDATE naming_contracts SET status = 'terminated', windows_remaining = 0 WHERE club_id = 1");
     fx.sqlite.exec("UPDATE season_windows SET status = 'closed' WHERE season = 1 AND window_seq = 1");
-    await expect(signNaming(fx.env, 1, '阿迪达斯', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('窗口没开') });
+    await expect(signViaOffer(fx.env, 1, '海底捞', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('窗口没开') });
   });
 
   it('闸：弃用品牌签约 400（品牌池 status 过滤，不只看名字存在）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     fx.sqlite.exec("UPDATE brand_pool SET status = 'discarded' WHERE brand = '阿迪达斯'");
-    await expect(signNaming(fx.env, 1, '阿迪达斯', 1)).rejects.toMatchObject({
+    await expect(signViaOffer(fx.env, 1, '阿迪达斯', 1)).rejects.toMatchObject({
       status: 400,
       message: expect.stringContaining('不在品牌池'),
     });
     // 恢复后同一品牌即可签
     fx.sqlite.exec("UPDATE brand_pool SET status = 'adopted' WHERE brand = '阿迪达斯'");
-    await expect(signNaming(fx.env, 1, '阿迪达斯', 1)).resolves.toMatchObject({ brand: '阿迪达斯' });
+    await expect(signViaOffer(fx.env, 1, '阿迪达斯', 1)).resolves.toMatchObject({ brand: '阿迪达斯' });
   });
 
   it('提前解约：赔剩余窗口费用 30%（remaining−1），账本记 naming_penalty；无赔金只改状态', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
-    await signNaming(fx.env, 1, '可口可乐', 1); // fee = 0.5×0.85=0.425×... 实算 (0.5+0.6+0.216)×1.0=1.316 → 1.316? heat 1.0 → 1.316
+    await signViaOffer(fx.env, 1, '可口可乐', 1); // fee = 0.5×0.85=0.425×... 实算 (0.5+0.6+0.216)×1.0=1.316 → 1.316? heat 1.0 → 1.316
     const out = await terminateNaming(fx.env, 1, 1);
     // 稳健 fee = 1.316×0.85 = 1.119；赔 (6−1)×1.119×0.3 = 1.6785 → 1.678
     expect(out).toEqual({ brand: '可口可乐', penalty: 1.678, windowsRemaining: 6 });
@@ -313,7 +319,7 @@ describe('续约（v6.8.0：剩最后 1 窗按当期队况重算，插件 renew 
 });
 
 describe('品牌热度动态（近 3 场全胜/全败，v6.8.0）', () => {
-  const RULES: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1 };
+  const RULES: HeatRules = { winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 };
   const r = (h: number | null, a: number | null, extra: Record<string, unknown> = {}) => ({
     home_team_id: 9001, away_team_id: 9002, score_home: h, score_away: a, walkover_side: null, ...extra,
   });
@@ -418,15 +424,13 @@ describe('品牌池管理路由（v6.8.0）', () => {
     expect((await getAs('/api/admin/brands', fx.env, 'whl_session=none')).status).toBe(401);
   });
 
-  it('弃用品牌退出报价池（quote 只出 adopted）；续约路由：剩 1 窗 201，续后非最后窗 400', async () => {
+  it('quote 无约回空收件箱（offer_spawn/发放只出 adopted，弃用品牌不再被递价）；续约路由：剩 1 窗 201，续后非最后窗 400', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     const id2 = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM brand_pool WHERE brand = '海底捞'")!.id;
     await send('PATCH', `/api/admin/brands/${id2}`, fx.env, { status: 'discarded' });
     const quote = await getAs('/api/club/naming/quote', fx.env, 'whl_session=tok-coach');
-    const qb = (await quote.json()) as { brands: { brand: string }[] };
-    expect(qb.brands).toHaveLength(6);
-    expect(qb.brands.map((b) => b.brand)).not.toContain('海底捞');
+    expect(((await quote.json()) as { offers: unknown[] }).offers).toEqual([]);
 
     seedContract(fx.sqlite, { windowsRemaining: 1 });
     const renew = await send('POST', '/api/club/naming/renew', fx.env, { packageNo: 2 }, 'whl_session=tok-coach');
@@ -438,7 +442,7 @@ describe('品牌池管理路由（v6.8.0）', () => {
 });
 
 describe('冠名路由', () => {
-  it('quote 无约回 7 品牌报价；sign 后回现约；/me/club 下发 namingBrand', async () => {
+  it('quote 无约回空报价收件箱（品牌直签已退役）；accept 招商报价后回现约；/me/club 下发 namingBrand', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     const get = (path: string) => app.request(path, { headers: { Cookie: 'whl_session=tok-coach' } }, fx.env);
@@ -447,13 +451,13 @@ describe('冠名路由', () => {
 
     const quote = await get('/api/club/naming/quote');
     expect(quote.status).toBe(200);
-    const qBody = (await quote.json()) as { brands: { brand: string; baseFee: number; packages: unknown[] }[] };
-    expect(qBody.brands).toHaveLength(7);
-    expect(qBody.brands[0]!.packages).toHaveLength(3);
+    expect(((await quote.json()) as { offers: unknown[] }).offers).toEqual([]);
 
-    const sign = await post('/api/club/naming/sign', { brand: '亚马逊', packageNo: 2 });
-    expect(sign.status).toBe(201);
-    expect(((await sign.json()) as { contract: { brand: string } }).contract.brand).toBe('亚马逊');
+    // v6.14.0 C3：签约只走招商轮——造一份进取套餐报价并 accept
+    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const accept = await post(`/api/club/naming/offers/${offerId}/accept`, {});
+    expect(accept.status).toBe(201);
+    expect(((await accept.json()) as { contract: { brand: string } }).contract.brand).toBe('亚马逊');
 
     const quote2 = await get('/api/club/naming/quote');
     expect(((await quote2.json()) as { contract?: { brand: string } }).contract?.brand).toBe('亚马逊');
@@ -462,21 +466,20 @@ describe('冠名路由', () => {
     expect(((await me.json()) as { home: { namingBrand: string | null } }).home.namingBrand).toBe('亚马逊');
   });
 
-  it('解约路由出赔金；重复签约 409；匿名 401', async () => {
+  it('解约路由出赔金；accept 端点匿名 401', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     const post = (path: string, body: unknown, cookie = 'whl_session=tok-coach') =>
       app.request(path, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: cookie }, body: JSON.stringify(body) }, fx.env);
 
-    await post('/api/club/naming/sign', { brand: '亚马逊', packageNo: 2 });
-    const again = await post('/api/club/naming/sign', { brand: '海底捞', packageNo: 1 });
-    expect(again.status).toBe(409);
+    await signViaOffer(fx.env, 1, '亚马逊', 2);
 
     const term = await post('/api/club/naming/terminate', {});
     expect(term.status).toBe(201);
     expect(((await term.json()) as { penalty: number }).penalty).toBeGreaterThan(0);
 
-    const anon = await post('/api/club/naming/sign', { brand: '海底捞', packageNo: 1 }, 'whl_session=none');
+    const offerId = await seedOffer(fx.env, 1, '海底捞', 1);
+    const anon = await post(`/api/club/naming/offers/${offerId}/accept`, {}, 'whl_session=none');
     expect(anon.status).toBe(401);
   });
 });

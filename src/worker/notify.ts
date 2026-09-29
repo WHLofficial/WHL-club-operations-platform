@@ -80,6 +80,11 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `💔 品牌「${data.brand}」对 ${data.club} 的满意度降至 ${data.satisfaction}（低于${data.tier}档地板 ${data.floor}），已解除冠名（无赔偿），可另签新品牌。`;
     case 'naming_champion':
       return `🏆 恭喜 ${data.club} 夺得 S${data.season} 联赛冠军！${data.brand ? `品牌「${data.brand}」热度 +${data.heat}，品牌方情绪 +${data.sat}。` : '（该队无生效冠名，加成无落点）'}`;
+    // 招商轮（v6.14.0，C3）：开轮定向递价汇总 / 接班合同转正生效
+    case 'naming_offer':
+      return `📣 招商期开启：${data.club} 收到 ${data.count} 份品牌报价（${data.brands}），去「冠名市场」查看签约。`;
+    case 'naming_offer_activated':
+      return `✅ 品牌接替生效：「${data.brand}」冠名 ${data.club} 正式生效（${data.pkgName}套餐，${data.feePerWindow}M/窗 × ${data.windows} 窗）。`;
     default:
       return String(data.text ?? '');
   }
