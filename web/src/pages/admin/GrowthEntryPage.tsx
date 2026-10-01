@@ -358,7 +358,7 @@ function MatchEntrySection() {
                         <td colSpan={6}>
                           {pending && (
                             <div className="banner warn entry-confirm">
-                              <span>录入面板有未保存的改动，切换后将丢失。</span>
+                              <span>录入面板有未保存的改动：收起面板或切换比赛会丢弃；换队侧则草稿保留（不提交）。</span>
                               <button type="button" className="btn btn-sm" onClick={() => setPending(null)}>
                                 继续编辑
                               </button>
@@ -371,7 +371,7 @@ function MatchEntrySection() {
                                   act();
                                 }}
                               >
-                                放弃改动
+                                不保存，继续
                               </button>
                             </div>
                           )}

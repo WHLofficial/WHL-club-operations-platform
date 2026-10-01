@@ -316,6 +316,9 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   const body = (await readJson(c)) as { entries?: unknown } | null;
   const entries = body?.entries;
   if (!Array.isArray(entries) || entries.length === 0) throw new HttpError(400, 'entries 要是非空数组');
+  // 上限 50 行（一侧花名册 ~25 人绰绰有余）：既保 IN 点查绑参数量在 D1 每查 100 参数之内，
+  // 也把单批语句量（行数×5 项×2 条 + 审计）钉在安全区间。
+  if (entries.length > 50) throw new HttpError(400, '一次最多补录 50 行，分两侧提交');
 
   const cache = new Map<string, number | null>();
   const home = await resolveEntrySide(c.env.DB, row.home_team, cache);
@@ -361,7 +364,9 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   const season = await getVisibleSeason(c.env.DB);
 
   // 审计的 after 要在一批里写死，所以先读一次本场已有的去重锚（同锚 = 球员 × 赛事 × 事件类型）；
-  // 同一批里同锚出现两次时，第二次也是 duplicate（与批内 NOT EXISTS 闸的判定一致）
+  // 同一批里同锚出现两次时，第二次也是 duplicate（与批内 NOT EXISTS 闸的判定一致）。
+  // 已知边界：锚预读与 batch 执行之间若另一请求插了同锚，after.written 会比实际多计一格
+  // （响应里的 written/duplicates 用批后 meta.changes 实数，不受影响；库里状态恒正确）。
   const existing = await c.env.DB.prepare('SELECT player_id, event_type FROM growth_events WHERE match_ref = ?')
     .bind(matchRef)
     .all<{ player_id: number; event_type: string }>();
