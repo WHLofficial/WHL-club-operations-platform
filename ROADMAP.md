@@ -1453,6 +1453,25 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **待办**：迁移 0057 apply 生产 + push 上线等指令；tour 侧接入 `/api/fixtures` 展示另行排期。
 
+## v6.16.0 · 管理端成长批量补录台（按场比赛花名册行内编辑，2026-10-01）
+
+**状态**：**本地完成，未 push 未部署**（零迁移、零生产写——push 即 CF 自动上线，等指令）。本地 5 提交：`0330846` docs(test-plans) + `40aae25` feat 后端 + `6febd94` feat 前端 + `81d0d38` chore 版本 bump 6.16.0 + `ff27943` fix 评审。判级 minor（管理端新端点 ×3 + 新页面，向后兼容：单人端点行为逐字不变、无 UI 删除风险——旧表单整块移除但端点保留）。
+
+**缘起与裁决**：用户指令「核查现有成长录入方式。目标：做成像 growth 插件的 webui 相似的录入界面」。核查结论：本仓成长录入原有三条路径——① 自动（赛果确认钩子 `recordAutoXpForMatch`，`results.ts:549`，matchRef=比赛 id）；② 管理端单人补录（`POST /api/admin/growth/events`，一人一事件一表单）；③ 教练端消费升级。补一场 18 人名单要重复操作 18 次。参照件为 `astrbot_plugin_whleague_growth_system`（`C:/Users/bhdjb/whlPointSystem/AstrBot/data/plugins/`）console 页，其中 **fixtures.js 的行内编辑 + 脏检测 + 全部保存**是最重要交互范本。用户裁决：① 版本号 6.16.0（6.15.0 已被天气预报占用）；② **范围只做管理端补录改造，球员卡成长页签不动**（增量 B 被砍）；③ 比赛锚定选真实比赛（result_confirmations，matchRef 与自动通道同锚）；④ 重活派两枚 subagent 并行（后端端点 / 前端页面），主模型负责整合、评审、变异与验收。
+
+**关键机制**：`growth_events` 的 `UNIQUE(player_id, match_ref, event_type)` + `recordGrowthEventStatements`（`growth.ts:137`，XP UPDATE 带 NOT EXISTS 闸 + INSERT ON CONFLICT DO NOTHING）⇒ 补录 `matchRef=String(matchId)` 与自动通道同锚，重复提交天然 no-op、XP 永不重复加、已录值不可覆盖（平台本无删除通道，面板如实锁定并标注）；可计 XP 口径写成一份 SQL 片段 `MATCH_ENTRY_WHERE` 三端点共用（`league_premier`/`league_second` 全阶段 + `champions_cup` `stage_kind='group'` + 排弃权，与 `results.ts:556` 同源）；club 解析同自动钩子口径（队名=`clubs.name`，CPU 队无归属、chip 置灰）。
+
+**交付**：
+- 后端（`src/worker/routes/admin/growth.ts`，+325 行）：`GET /api/admin/growth/match-entry`（列表近 50 场，每场带 recorded 事件数 + 双方 clubId 解析 + isCpu 标记）；`GET /api/admin/growth/match-entry/:matchId`（面板：双方花名册 `normal/listed/trainee` + 已录事件预填 + trainee 标记）；`POST /api/admin/growth/match-entry/:matchId`（批量：entries ≤50 行保 D1 每查 100 绑参内、校验全前置整批 400、单 `db.batch` 原子写、审计 `growth_manual_event_batch` 恰一条、响应 `written/duplicates/perPlayer` 用批后 `meta.changes` 实数）。单人端点校验抽 `manualEventOf` 共用（行为逐字不变）。
+- 前端：新页 `web/src/pages/admin/GrowthEntryPage.tsx`（~600 行：列表卡 → 行内展开面板 → 主/客队 chip → 花名册行内编辑（出场 checkbox / 评分 7.0–10.0 / 零封 checkbox / 夺回球权 / 扑救 / 进球助攻只读 / 本场 XP 实时复算）→ 基线脏检测 + 未保存确认条 → 单行 + 全部保存（只提交脏行）→ 逐行结果徽标与顶栏合计 → 「查看」全锁定只读标来源）+ `web/src/lib/growth-xp.ts`（复算纯函数，与后端 `xpForEvent` 同口径、头注释互指）+ 侧栏第 3 项「成长录入」+ 路由 `/admin/growth` + `api.ts`/`adminQueries.ts` 类型与 query + `styles.css` entry-panel 块；**PlayersPage 删旧单人补录表单**（档位核定/宣告成长期/赛季结算/批量维护留原地）。
+- 测试：`tests/growth-match-entry.test.ts` 17 例（TC-LIST 4 / TC-PANEL 3 / TC-BATCH 10）+ `web/src/lib/growth-xp.test.ts` 10 例；计划 `docs/test-plans/v6.16.0-growth-entry.md`（34 TC = P0 24 / P1 8 / P2 2 + 5 变异清单 + 最坏情况口径）。
+
+**实测与验收**：typecheck 三份全清；vitest **64 文件 / 1140 例全绿**（v6.15.0 基线 62/1113，净 +2 文件 / +27 例）；build 成功（入口资产 `index-DzKR-MbB.js` 611,604 B + `index-BEeZYo1m.css`）；e2e **11/11**。**变异验证 5/5 全命中**：matchRef 改 `manual:` 前缀时间戳 → 5 红（同锚去重是 XP 防重的根）；删 club 归属校验 → 1 红；去 walkover 过滤 → 2 红；训练营球员静默跳过 → 1 红；前端复算评分分档 `>=8`→`>8` → 恰红 TC-UI-XP；撤销全复绿。**code-review**：修 2（entries 上限 50 / 未保存确认条文案——换侧草稿实为保留）+ 1 并发边界写进代码注释（审计 `after.written` 用锚预读，预读与批执行之间同锚并发可差一格；响应 written 用批后实数不受影响）；前端 3 项 🟢 登记不改（锁定 checkbox 不可达防御分支、评分字符串比较 `"8.5"≠"8.50"`、锁定 checkbox 防御条件）。
+
+**已知不改**：已录值不可修改/删除（平台无成长事件删除通道，UI 如实锁定标注来源）；单人端点保留但 UI 口子已删——无比赛关联的补录从此无界面入口（补录必须锚真实比赛）；球员卡成长页签零改动（增量 B 被砍）。
+
+**待办**：push 上线等指令；进球/助攻的手工补录通道、成长事件删除/纠正通道留待日后评估。
+
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。

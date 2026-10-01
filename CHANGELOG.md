@@ -4,6 +4,17 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.16.0] · 管理端成长批量补录台（2026-10-01）
+
+把「一人一事件」的单人补录表单升级为**按场比赛、花名册行内批量补录**（参照 growth 插件 webui 的 fixtures 页交互）。选一场已确认比赛 → 内嵌面板 → 主/客队花名册一行一人行内编辑（出场 / 评分 / 零封 / 夺回球权 / 扑救，进球助攻只读）→ 本场 XP 实时复算 → 脏检测确认条 → 单行 + 全部保存（只提交脏行）。补录 `matchRef=比赛 id` 与自动通道同锚，`UNIQUE(player_id, match_ref, event_type)` 天然防重复发 XP；已录格锁定（平台无删除/纠正通道，如实标注来源）。零迁移、零生产写。**未 push 未部署**（等指令）。判级 minor。测试计划 `docs/test-plans/v6.16.0-growth-entry.md`（34 TC = P0 24 / P1 8 / P2 2，5 变异）；vitest 64 文件 / 1140 例全绿（基线 62/1113，净 +2 文件 / +27 例）、e2e 11/11、变异验证 5/5 全命中、code-review 修 2（entries 上限 50 行 / 未保存确认条文案）+ 1 并发边界注释。
+
+**Added**
+- 管理端三端点（`src/worker/routes/admin/growth.ts`）：`GET /api/admin/growth/match-entry`（比赛列表：可计 XP 场近 50 场，口径与自动钩子同源 `MATCH_ENTRY_WHERE`——联赛两级全阶段 + 冠军杯小组赛 + 排弃权；每场带已录事件数与双方 clubId/CPU 标记）、`GET /api/admin/growth/match-entry/:matchId`（双方花名册 + 已录事件预填）、`POST /api/admin/growth/match-entry/:matchId`（批量补录：校验全前置、单 `db.batch` 原子、审计 `growth_manual_event_batch` 恰一条、entries ≤50 行）。
+- 管理端侧栏第 3 项「成长录入」`/admin/growth`（GrowthEntryPage）+ 前端 XP 复算纯函数 `web/src/lib/growth-xp.ts`（与后端 `xpForEvent` 同口径，头注释互指）。
+
+**Changed**
+- PlayersPage 成长引擎卡：移除旧单人补录表单（档位核定/宣告成长期/赛季结算/批量维护不动）。`POST /api/admin/growth/events` 端点保留（校验抽 `manualEventOf` 与批量共用，行为逐字不变），但无比赛关联的补录从此无 UI 入口。
+
 ## [v6.15.0] · 场次天气预报（revenue 插件触发口径）+ 预留 tour 展示接口（2026-10-01）
 
 天气从「赛果确认时逐场现掷」改为「管理员按轮手动预报」（参照插件 `fixture_service.forecast_round`），**预报时天气类型与系数 wx 一并提前抽定落库**（用户裁决）；确认钩子按「事件预置 > 场次预报 > 现掷」消费，无预报场次行为逐字不变。概率/区间/上座公式**零数值改动**（40/30/20/10 为 2026-09-16 用户裁决值）。含迁移 `0057_match_weather.sql`。**已上线**（2026-10-01 发布）：迁移 `0057` 先 apply 生产、push `8cf8f12..748803d`（4 提交）触发 CF 自动部署，Version `20c24c71-…` @2026-10-01T11:50:15Z；上线回读 `/api/health` / 公开 `/api/fixtures` 200、匿名探针 401、线上资产 sha256 与本地 6.15.0 重构建逐字节一致。判级 minor。测试计划 `docs/test-plans/v6.15.0-weather-forecast.md`（50 TC = P0 34 / P1 13 / P2 3）；vitest 62 文件 / 1113 例全绿（基线 60/1062，净 +2 文件 / +51 例）、变异验证 5 处全命中、code-review 独立评审 0 blocking（5 important 已修）。
