@@ -1433,7 +1433,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.15.0 · 场次天气预报（revenue 插件触发口径）+ 预留 tour 展示接口（2026-10-01）
 
-**状态**：本地已提交（`ee5fd4b` feat + `3d062fc` 评审修复），**未 push、未部署、迁移 0057 未 apply 生产**——按纪律等用户指令。含迁移 `0057_match_weather.sql`（`match_weather` 表 + `(tournament_id, round)` 索引）。判级 minor（新端点 + 新表 + 确认钩子行为分支，向后兼容：无预报场次行为逐字不变）。
+**状态**：**已上线（2026-10-01 发布，用户下令「上线」）**：迁移 `0057` 于 push 前 apply 生产（`Executed 3 commands in 1.59ms`，核验 9 列 + 索引在场、`d1_migrations` 57 条）；push `8cf8f12..748803d`（4 提交）触发 CF 自动部署，生产 Version **`20c24c71-b138-481d-a34f-a57365c01605`** @2026-10-01T11:50:15Z（Workers Builds）；上线回读 `/api/health` / 公开 `GET /api/fixtures` 200、匿名 `/api/admin/weather/forecast` 401；线上资产 `index-BdPHY4TL.js`（sha256 `b480af9c…`）与本地 6.15.0 重构建逐字节一致。本地提交 `ee5fd4b` feat + `3d062fc` 评审修复 + `748803d` docs 收口。含迁移 `0057_match_weather.sql`（`match_weather` 表 + `(tournament_id, round)` 索引）。判级 minor（新端点 + 新表 + 确认钩子行为分支，向后兼容：无预报场次行为逐字不变）。
 
 **缘起与裁决**：
 - 用户指令「核查现有天气和上座计算，改成和 revenue 插件一样的管理员手动触发按轮随机天气，预留向 tour 平台展示场次天气和球场信息、上座信息的接口」+ 补充「概率等数值在本仓不变化」「不仅是天气类型提前锁定，是整个系数就预先抽」。

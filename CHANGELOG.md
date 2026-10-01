@@ -6,7 +6,7 @@
 
 ## [v6.15.0] · 场次天气预报（revenue 插件触发口径）+ 预留 tour 展示接口（2026-10-01）
 
-天气从「赛果确认时逐场现掷」改为「管理员按轮手动预报」（参照插件 `fixture_service.forecast_round`），**预报时天气类型与系数 wx 一并提前抽定落库**（用户裁决）；确认钩子按「事件预置 > 场次预报 > 现掷」消费，无预报场次行为逐字不变。概率/区间/上座公式**零数值改动**（40/30/20/10 为 2026-09-16 用户裁决值）。含迁移 `0057_match_weather.sql`。**未上线**：本地提交（`ee5fd4b` + `3d062fc`），迁移与 push 均等指令。判级 minor。测试计划 `docs/test-plans/v6.15.0-weather-forecast.md`（50 TC = P0 34 / P1 13 / P2 3）；vitest 62 文件 / 1113 例全绿（基线 60/1062，净 +2 文件 / +51 例）、变异验证 5 处全命中、code-review 独立评审 0 blocking（5 important 已修）。
+天气从「赛果确认时逐场现掷」改为「管理员按轮手动预报」（参照插件 `fixture_service.forecast_round`），**预报时天气类型与系数 wx 一并提前抽定落库**（用户裁决）；确认钩子按「事件预置 > 场次预报 > 现掷」消费，无预报场次行为逐字不变。概率/区间/上座公式**零数值改动**（40/30/20/10 为 2026-09-16 用户裁决值）。含迁移 `0057_match_weather.sql`。**已上线**（2026-10-01 发布）：迁移 `0057` 先 apply 生产、push `8cf8f12..748803d`（4 提交）触发 CF 自动部署，Version `20c24c71-…` @2026-10-01T11:50:15Z；上线回读 `/api/health` / 公开 `/api/fixtures` 200、匿名探针 401、线上资产 sha256 与本地 6.15.0 重构建逐字节一致。判级 minor。测试计划 `docs/test-plans/v6.15.0-weather-forecast.md`（50 TC = P0 34 / P1 13 / P2 3）；vitest 62 文件 / 1113 例全绿（基线 60/1062，净 +2 文件 / +51 例）、变异验证 5 处全命中、code-review 独立评审 0 blocking（5 important 已修）。
 
 **Added**
 - **按轮预报**：`GET/POST /api/admin/weather/forecast?tournament_id=&round=`（预览零 rng 零落库 / 触发对未预报未确认的主队场次逐场抽类型 + `uniform(weather_ranges[weather])` 抽系数落库；定位键 `(tournament_id, round)`，season 由赛季绑定解析，无绑定 409；已预报保留、已确认跳过、CPU 队与无球场队跳过；审计 `weather_forecast` origin='user'）。权限键 `club.registrations.manage`。
