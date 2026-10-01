@@ -4,6 +4,27 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.15.0] · 场次天气预报（revenue 插件触发口径）+ 预留 tour 展示接口（2026-10-01）
+
+天气从「赛果确认时逐场现掷」改为「管理员按轮手动预报」（参照插件 `fixture_service.forecast_round`），**预报时天气类型与系数 wx 一并提前抽定落库**（用户裁决）；确认钩子按「事件预置 > 场次预报 > 现掷」消费，无预报场次行为逐字不变。概率/区间/上座公式**零数值改动**（40/30/20/10 为 2026-09-16 用户裁决值）。含迁移 `0057_match_weather.sql`。**未上线**：本地提交（`ee5fd4b` + `3d062fc`），迁移与 push 均等指令。判级 minor。测试计划 `docs/test-plans/v6.15.0-weather-forecast.md`（50 TC = P0 34 / P1 13 / P2 3）；vitest 62 文件 / 1113 例全绿（基线 60/1062，净 +2 文件 / +51 例）、变异验证 5 处全命中、code-review 独立评审 0 blocking（5 important 已修）。
+
+**Added**
+- **按轮预报**：`GET/POST /api/admin/weather/forecast?tournament_id=&round=`（预览零 rng 零落库 / 触发对未预报未确认的主队场次逐场抽类型 + `uniform(weather_ranges[weather])` 抽系数落库；定位键 `(tournament_id, round)`，season 由赛季绑定解析，无绑定 409；已预报保留、已确认跳过、CPU 队与无球场队跳过；审计 `weather_forecast` origin='user'）。权限键 `club.registrations.manage`。
+- **公开预留接口**：`GET /api/fixtures?tournament_id=&round=`（🌐 匿名 + `assertPublicRate` + `cachedJson`，新 `CacheScope` `'fixtures'` TTL 1h）——该轮主场比赛的天气（已确认取实际、否则预报、都无 null）、球场（名/容量/档位）、上座；收入三件套刻意不在白名单（评审收窄，经营数据只进管理端预览）。供 tour 平台将来拉取展示。
+- **管理端「天气预报」卡**（SeasonsPage）：赛事下拉 + 轮次 + 预览表（四态：已确认/已预报/未预报/跳过）+ 生成预报（四段结果横幅）。
+
+**Changed**
+- 确认钩子（`home.ts` `matchAttendanceStatements`）：预报命中时天气与 wx 直取 `match_weather` 落库值（rng 剩 perturbation+fill 两口），memo 标「（赛前预报）」；预报行校验 club_id（改期/换边不错配）、消费后保留。事件预置命中时跳过预报点查。
+- `cache-policy.ts`：`CacheScope` 加 `'fixtures'`（PUBLIC_SCOPES 3→4，一次 purge 仍只花一次 KV 写）；`rollWeather`/`uniform`/`asRange` 自 home.ts 导出共用。
+
+**Fixed**（评审修复 `3d062fc`）
+- 轮次参数严格解析：`Number('')`/`Number(null)` 均为 0——空串 `?round=` 或 body `round:null` 原会真的对第 0 轮抽定落库；改 `parseRoundParams` 严格校验 + round 上界 200，GET/POST 文案统一。
+- 公开面/预览的预报行校验 club_id（与消费端同口径），改期/换边后旧预报不再展示（新增 TC-PUB-03b 锁）。
+- 审计 after `forecasted` → `attempted`（并发撞闸时 batch 内无法回写实际数）；raced 回读缺行不再给空天气。
+
+**已知不改**
+- 淘汰赛/无轮号（`match.round` NULL）场次不在预报范围（触发四段全空，与该轮没排赛不可区分）；`wx_coef`/`weather` 无 CHECK 约束（人工改库文本 wx → 收入整批失败进 needsReview，实测无 NaN 落库）；tour 侧消费端、教练端天气展示未做（本轮只在本仓开口子）。
+
 ## [v6.14.0] · C3 招商轮：品牌报价制 + 主动签约退役（2026-09-29）
 
 差异排期 C 块第三块（参照插件 `market_service` / `market_rounds` / `market_offers`）。含迁移 `0055_market_rounds.sql`（`market_rounds` + `market_offers` 两表与三个部分唯一索引；`claim_token` 抢锁列在未 apply 窗口期直接加入本迁移）与 `0056_event_seed_brand_visit.sql`（即发种子「品牌上门」，池 30 → 31）。**已上线**（2026-09-29 发布）：迁移先 apply 生产、push `07f050c..8cf8f12`（7 枚）触发 CF 自动部署，Version `df0640af-…` @2026-09-29T10:09:11Z；上线回读公开端点 200 / 匿名探针 401 / 旧 sign 404 / 线上资产 sha256 与本地一致。判级 minor（新增用户可见能力；`POST /api/club/naming/sign` 退役为同仓 web 客户端同批替换、无跨仓消费）。测试计划 `docs/test-plans/v6.14.0-c3.md`（69 TC = P0 46 / P1 19 / P2 3 / P3 1）；vitest 60 文件 / 1062 例全绿（基线 59/990，净 +1 文件 / +72 例）、e2e 11/11、变异验证 17 处 + 评审修复后 2 处全命中。

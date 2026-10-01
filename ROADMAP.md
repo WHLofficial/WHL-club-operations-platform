@@ -1431,6 +1431,28 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **生效面（部署后）**：青训买过的队死忠涨粉速度按等级放大；战绩分从「碰巧正确」变成「按口径正确」——生产当前 20/20 id 相等，故 A2 在生产数值上零变化，纯防将来 rekey/扩队再翻车。
 
+## v6.15.0 · 场次天气预报（revenue 插件触发口径）+ 预留 tour 展示接口（2026-10-01）
+
+**状态**：本地已提交（`ee5fd4b` feat + `3d062fc` 评审修复），**未 push、未部署、迁移 0057 未 apply 生产**——按纪律等用户指令。含迁移 `0057_match_weather.sql`（`match_weather` 表 + `(tournament_id, round)` 索引）。判级 minor（新端点 + 新表 + 确认钩子行为分支，向后兼容：无预报场次行为逐字不变）。
+
+**缘起与裁决**：
+- 用户指令「核查现有天气和上座计算，改成和 revenue 插件一样的管理员手动触发按轮随机天气，预留向 tour 平台展示场次天气和球场信息、上座信息的接口」+ 补充「概率等数值在本仓不变化」「不仅是天气类型提前锁定，是整个系数就预先抽」。
+- **核查结论**：上座公式/概率/区间/满座 fill 与插件 `formula.py` 已同构（v1.5.0 移植 + 后续对齐），唯一差异是生成时机——本仓赛果确认时逐场现掷（`home.ts`），插件是 `/主场天气 <轮次>` 管理员预报（`fixture_service.forecast_round`）。
+- **口径**：① 定位键 `(tournament_id, round)`（tour `match.round` 为整数、跨锦标赛轮号会撞）；season 由 `season_tournaments` 绑定解析（无绑定 409，与赛果确认同口径）。② 预报范围 = 主队可解析且有球场行（`clubIdByTourTeam` 自带 CPU 队过滤）；已预报保留（幂等）、已确认跳过。③ 消费优先级：**事件预置（wx 现抽）> 场次预报（类型 + wx 都取预报落库值，rng 零天气消费）> 现掷**；预报行校验 club_id、消费后保留。④ 预报只覆盖有轮号的联赛式赛程（`match.round` NULL 的淘汰赛场次不在范围，触发四段全空——口径已写进路由注释）。⑤ 公开面 `/api/fixtures` 白名单收窄到「天气 + 球场 + 上座」（收入三件套属经营数据，只进管理端预览——评审 #4）。
+
+**交付**：
+- 迁移 `0057`：`match_weather(match_id PK, club_id, season, tournament_id, round, weather, wx_coef, forecast_by, created_at)`；主键 + `ON CONFLICT DO NOTHING` + 分类守卫 + raced 回读四层幂等。
+- `src/worker/weather-ops.ts`（新）：`buildRoundView`（预览/触发/公开面共用收集视图）、`previewRound`（零 rng 零落库）、`forecastRound`（逐场 `rollWeather` + `uniform(weather_ranges[weather])` 抽定落库，审计 `weather_forecast` origin='user'，after 记 attempted）、`parseRoundParams`（严格解析：空串/null 不落 0 轮，round 界 [0,200]）。
+- `src/worker/routes/admin/weather.ts`（新）：`GET/POST /api/admin/weather/forecast`，权限 `club.registrations.manage`；`src/worker/routes/fixtures.ts`（新）：公开 `GET /api/fixtures?tournament_id=&round=`（`assertPublicRate('fixtures')` + `cachedJson`）；`home.ts` 消费端三档优先级 + memo「（赛前预报）」；`cache-policy.ts` 加 `fixtures` scope（TTL 1h，PUBLIC_SCOPES 3→4，purge 零额外 KV 写）。
+- 前端：`SeasonsPage.tsx` 新增「天气预报」卡（赛事下拉 + 轮次 + 预览表 + 生成预报，四段结果横幅）；`api.ts`/`adminQueries.ts` 补类型与 query key。
+- 测试计划 `docs/test-plans/v6.15.0-weather-forecast.md`（50 TC = P0 34 / P1 13 / P2 3，10 变异清单，5 最坏情况口径，执行留痕已回填）。
+
+**实测与验收**：typecheck 三份全清；vitest **62 文件 / 1113 例全绿**（基线 60/1062，净 +2 文件 / +51 例：新增 `tests/weather-forecast.test.ts` 33 例 + `tests/fixtures.test.ts` 18 例，含评审修复后补的 TC-PUB-03b）；build 成功；v6.10.0 预置消费既有四例（event-ops.test.ts:989-1033）逐字全绿（无预报路径零行为变化）。**变异验证 5 处全命中**：删预报优先级 4 红 / 幂等破坏红（三层纵深——分类守卫、SQL ON CONFLICT、raced 回读，需双层变异才穿）/ 消费端 wx 改回现场抽 4 红 / fixtures 漏 scope 3 红 / 概率表被调 TC-FC-12 红。**code-review-skill 独立评审**：0 blocking / 5 important / 14 nit，裁决 Comment；5 项 important 全修（严格参数解析、公开白名单收窄、预报行 club_id 错配不展示、测试计划入库时序随收口解决、淘汰赛口径写明）+ 4 项便宜 nit，修复后复测全绿。**最坏情况取数**：并发双触发幂等成立（落库恰 N 行；夹具 500 为单连接事务嵌套产物，生产未实测——已知未测项）；文本 wx_coef（人工改库）→ 收入整批失败进 needsReview，无 NaN 落库；club_id 错配预报不消费。
+
+**已知不改**：淘汰赛（round NULL）无预报能力（口径见上）；`wx_coef`/`weather` 无 CHECK 约束（0057 未 apply 仍可收紧，暂留）；tour 侧消费端与通知/教练端展示未做（预留接口本轮只在本仓开口子）；`ttlForScope(scope,'')` 回 0 为既有行为。
+
+**待办**：迁移 0057 apply 生产 + push 上线等指令；tour 侧接入 `/api/fixtures` 展示另行排期。
+
 ## 维护 · 遗留项普查（第 0–8 节）与第 5 节最小步（2026-09-23 / 09-24 / 09-25，已 push 已部署）
 
 **起因**：2026-09-23 用三路深度搜索（文档层 / 代码层 / 记忆层）把本仓遗留项按 0–8 节登记（0 过期表述、1 等拍板、2 未验证、3 已登记不改、4 代码层清理、5 D1 读量治理后续批次、6 文档数字漂移、7 未执行的生产写、8 赛事仓挂账）。
