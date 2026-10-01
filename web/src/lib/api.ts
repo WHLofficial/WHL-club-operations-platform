@@ -1661,14 +1661,92 @@ export const GROWTH_EVENT_LABEL: Record<string, string> = {
   reset: '解约重置', // 解约清零的划断标记（值/XP 都是 0）：成长史里说明为什么累计从头开始
 };
 
-/** 管理组可补录的事件类型（比赛系统没有的数据或漏记兜底），hint 是 §10.1 折算口径 */
-export const MANUAL_GROWTH_TYPES: { type: string; label: string; hint: string; needsValue: boolean }[] = [
-  { type: 'appearance', label: '出场', hint: '固定 1 XP', needsValue: false },
-  { type: 'rating', label: '评分', hint: '7.0-10.0：7 档 1 · 8 档 2 · 9 档 3 · 10 档 4', needsValue: true },
-  { type: 'clean_sheet', label: '零封', hint: '固定 0.5 XP', needsValue: false },
-  { type: 'duels_won', label: '夺回球权', hint: '每 12 次 1 XP', needsValue: true },
-  { type: 'saves', label: '扑救', hint: '每 8 次 1 XP，单场超 8 额外 +1', needsValue: true },
-];
+// ---- v6.16.0：管理端「成长录入」（按场补录，/api/admin/growth/match-entry） ----
+
+/** 可补录比赛列表行（近 50 场，已按可计 XP 口径过滤，按确认时间倒序） */
+export interface MatchEntryListItem {
+  matchId: number;
+  season: number;
+  windowSeq: number;
+  competitionType: string;
+  stageName: string;
+  stageKind: string;
+  round: number;
+  homeTeam: string;
+  awayTeam: string;
+  scoreHome: number;
+  scoreAway: number;
+  finishedAt: string | null;
+  confirmedAt: string | null;
+  homeClubId: number | null;
+  awayClubId: number | null;
+  homeIsCpu: boolean;
+  awayIsCpu: boolean;
+  /** 该场已录成长事件条数（列表徽标用） */
+  recorded: number;
+}
+
+export interface MatchEntryListResponse {
+  matches: MatchEntryListItem[];
+}
+
+/** 一队侧花名册里的球员（status = 'trainee' 即训练营，不按场次计） */
+export interface MatchEntryPlayer {
+  id: number;
+  name: string;
+  displayName: string;
+  position: string | null;
+  status: string;
+}
+
+export interface MatchEntrySide {
+  clubId: number | null;
+  isCpu: boolean;
+  players: MatchEntryPlayer[];
+}
+
+/** 已录成长事件行（eventType 见 GROWTH_EVENT_LABEL；source: manual = 管理组补录，其余 = 赛果同步） */
+export interface MatchEntryRecordedRow {
+  playerId: number;
+  eventType: string;
+  value: number;
+  xp: number;
+  source: string;
+}
+
+/** 单场录入面板（GET /api/admin/growth/match-entry/:matchId） */
+export interface MatchEntryPanel {
+  match: MatchEntryListItem;
+  sides: { home: MatchEntrySide; away: MatchEntrySide };
+  recorded: MatchEntryRecordedRow[];
+}
+
+/** 单名球员的单场录入（只传有值的字段；后端按 event_type 去重，重复的跳过） */
+export interface MatchEntryInput {
+  playerId: number;
+  appearance?: boolean;
+  rating?: number;
+  cleanSheet?: boolean;
+  duelsWon?: number;
+  saves?: number;
+}
+
+export interface MatchEntryPerPlayerResult {
+  playerId: number;
+  name: string;
+  xp: number;
+  written: number;
+  duplicates: number;
+}
+
+/** POST /api/admin/growth/match-entry/:matchId 的响应；400 时 body 带 { message } 中文原因 */
+export interface MatchEntrySubmitResult {
+  ok: boolean;
+  written: number;
+  duplicates: number;
+  totalXp: number;
+  perPlayer: MatchEntryPerPlayerResult[];
+}
 
 // ---- M0 货币监控（PRD：Σ俱乐部余额报表，观察通胀） ----
 

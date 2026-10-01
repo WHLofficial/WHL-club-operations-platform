@@ -8,6 +8,7 @@ const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
   { to: '/admin', label: '总览', end: true },
   { to: '/admin/seasons', label: '赛季' },
   { to: '/admin/players', label: '球员' },
+  { to: '/admin/growth', label: '成长录入' },
   { to: '/admin/imports', label: '导入' },
   { to: '/admin/market', label: '转会' },
   { to: '/admin/clubs', label: '俱乐部' },

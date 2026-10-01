@@ -1277,6 +1277,82 @@ tbody tr:hover td {
   background: #fbe9e7;
 }
 
+/* ---- 成长录入（v6.16.0）：按场补录面板——已录格子底色 / 非法输入标红 / 面板排版 ---- */
+
+.match-entry-actions {
+  white-space: nowrap;
+}
+
+.match-entry-actions .btn + .btn {
+  margin-left: 6px;
+}
+
+.entry-panel .entry-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.entry-panel .entry-head .seg {
+  margin-bottom: 0;
+}
+
+.entry-panel .entry-head-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+}
+
+/* 未保存改动确认条：plugin fixtures 同语义（继续编辑 / 放弃改动） */
+.entry-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.entry-table input.entry-num {
+  width: 76px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.entry-table input.entry-num:focus {
+  outline: none;
+  border-color: var(--terracotta);
+}
+
+/* 已录（锁定）格子：内容退成纯文本感，底色标明「已录」 */
+.entry-table input.entry-num:read-only {
+  background: transparent;
+  border-color: transparent;
+}
+
+.entry-table td.recorded {
+  background: #f4f0e6;
+}
+
+.entry-table input.invalid {
+  border-color: var(--bad);
+}
+
+.entry-panel .entry-src {
+  font-size: 12px;
+}
+
+.entry-panel .entry-result {
+  margin-top: 6px;
+}
+
 .cap-bar {
   height: 8px;
   border-radius: 999px;

@@ -27,6 +27,7 @@ const AdminLayout = lazy(() => import('./pages/admin/AdminLayout.tsx'));
 const AdminOverviewPage = lazy(() => import('./pages/admin/OverviewPage.tsx'));
 const AdminSeasonsPage = lazy(() => import('./pages/admin/SeasonsPage.tsx'));
 const AdminPlayersPage = lazy(() => import('./pages/admin/PlayersPage.tsx'));
+const AdminGrowthPage = lazy(() => import('./pages/admin/GrowthEntryPage.tsx'));
 const AdminImportsPage = lazy(() => import('./pages/admin/ImportsPage.tsx'));
 const AdminMarketPage = lazy(() => import('./pages/admin/MarketPage.tsx'));
 const AdminClubsPage = lazy(() => import('./pages/admin/ClubsPage.tsx'));
@@ -141,6 +142,7 @@ export default function App() {
             <Route index element={<AdminOverviewPage />} />
             <Route path="seasons" element={<AdminSeasonsPage />} />
             <Route path="players" element={<AdminPlayersPage />} />
+            <Route path="growth" element={<AdminGrowthPage />} />
             <Route path="imports" element={<AdminImportsPage />} />
             <Route path="market" element={<AdminMarketPage />} />
             <Route path="clubs" element={<AdminClubsPage />} />

@@ -2,7 +2,7 @@
 // （原 Admin.tsx 三 section，v2.1.0 拆分；commit 3 数据层转 TanStack Query）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, MANUAL_GROWTH_TYPES, type AdminRegistrations, type ComplianceReport, type GrowthPeriodsResponse, type GrowthSettlementResult } from '../../lib/api.ts';
+import { api, apiPost, type AdminRegistrations, type ComplianceReport, type GrowthPeriodsResponse, type GrowthSettlementResult } from '../../lib/api.ts';
 import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
@@ -349,10 +349,6 @@ function PlayerBatchSection() {
 function GrowthSection() {
   const { show, toastNode } = useToast();
   const queryClient = useQueryClient();
-  const [playerId, setPlayerId] = useState('');
-  const [eventType, setEventType] = useState(MANUAL_GROWTH_TYPES[1]!.type);
-  const [value, setValue] = useState('');
-  const [matchRef, setMatchRef] = useState('');
   const [settleSeason, setSettleSeason] = useState('');
   const [half, setHalf] = useState(false);
   const [summary, setSummary] = useState<GrowthSettlementResult | null>(null);
@@ -379,9 +375,6 @@ function GrowthSection() {
     if (current?.season) setSettleSeason(String(current.season.season));
   }, [current]);
 
-  const pid = Number(playerId);
-  const eventValid = Number.isInteger(pid) && pid > 0;
-  const selectedType = MANUAL_GROWTH_TYPES.find((t) => t.type === eventType);
   const settleValid = Number.isInteger(Number(settleSeason)) && Number(settleSeason) > 0;
   const tierValid = Number.isInteger(Number(tierPlayerId)) && Number(tierPlayerId) > 0;
 
@@ -397,28 +390,6 @@ function GrowthSection() {
       reloadPeriods();
     } catch (err) {
       show(err instanceof Error ? err.message : '宣告失败', true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function recordEvent() {
-    if (busy || !eventValid) return;
-    setBusy(true);
-    try {
-      const body: Record<string, unknown> = { playerId: pid, eventType };
-      if (selectedType?.needsValue) body.value = Number(value);
-      if (matchRef.trim() !== '') body.matchRef = matchRef.trim();
-      const r = await apiPost<{ ok: boolean; xp: number; duplicate: boolean }>('/api/admin/growth/events', body);
-      show(
-        r.duplicate
-          ? '这笔之前记过（同一球员同一场次同一事件），没有重复入账。'
-          : `已补录，+${r.xp} XP。`,
-      );
-      setValue('');
-      setMatchRef('');
-    } catch (err) {
-      show(err instanceof Error ? err.message : '补录失败', true);
     } finally {
       setBusy(false);
     }
@@ -460,48 +431,6 @@ function GrowthSection() {
     <section className="card admin-section">
       <h2>成长引擎（XP / 升级 / 档位）</h2>
       {toastNode}
-
-      <h3>补录 XP 事件</h3>
-      <p className="hint">比赛系统没有的数据（评分、扑救、夺回球权）或漏记的兜底；XP 按规则表自动折算。赛果确认时已自动入账的不用补。</p>
-      <div className="inline-form">
-        <label className="field">
-          球员 ID
-          <input
-            value={playerId}
-            onChange={(e) => setPlayerId(e.target.value)}
-            placeholder="如 12"
-          />
-        </label>
-        <label className="field">
-          事件类型
-          <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
-            {MANUAL_GROWTH_TYPES.map((t) => (
-              <option key={t.type} value={t.type}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {selectedType?.needsValue && (
-          <label className="field">
-            数值
-            <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={eventType === 'rating' ? '8.5' : '次数'} />
-          </label>
-        )}
-        <label className="field">
-          关联场次（可选）
-          <input value={matchRef} onChange={(e) => setMatchRef(e.target.value)} placeholder="比赛 ID，同场同事件靠它去重" />
-        </label>
-        <ConfirmButton
-          label="补录"
-          confirmLabel="确认补录（再点一次）"
-          busy={busy}
-          disabled={!eventValid || (selectedType?.needsValue === true && value.trim() === '')}
-          disarmKey={`${playerId}|${eventType}|${value}|${matchRef}`}
-          onConfirm={recordEvent}
-        />
-      </div>
-      {selectedType && <p className="hint">折算口径：{selectedType.hint}。</p>}
 
       <h3>成长期</h3>
       <p className="hint">
