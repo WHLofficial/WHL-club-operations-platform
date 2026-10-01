@@ -1,7 +1,7 @@
 // 管理端共享数据层（v2.1.0 commit 3）：
 // clubs 原来在俱乐部/合同导入/期初余额/手动记账四个 section 各拉一次，共享 key 自动去重；
 // /api/seasons/current 赛季页与球员页成长引擎都要用，同样共享。
-import { api, apiSend, type AdminClubRow, type MarketRoundReopenResult, type MarketRoundResponse, type SeasonCurrent } from './api.ts';
+import { api, apiSend, type AdminClubRow, type MarketRoundReopenResult, type MarketRoundResponse, type SeasonCurrent, type WeatherForecastPreview } from './api.ts';
 
 export const ADMIN_CLUBS_KEY = ['admin', 'clubs'] as const;
 export const SEASON_CURRENT_KEY = ['seasons', 'current'] as const;
@@ -41,4 +41,11 @@ export async function fetchMarketRound(): Promise<MarketRoundResponse> {
 // 手动「清盘+开轮」：清掉当前 open 轮的未签报价并按当刻队况重开一轮（没有开着的窗口时后端 409）
 export async function reopenMarketRound(): Promise<MarketRoundReopenResult> {
   return apiSend<MarketRoundReopenResult>('POST', '/api/admin/brands/market-round/reopen', {});
+}
+
+// v6.15.0 场次天气预报表：按 (赛事, 轮次) 预览该轮主场比赛的预报/确认状态（不掷随机）
+export const weatherForecastKey = (tournamentId: number, round: number) => ['admin', 'weather-forecast', tournamentId, round] as const;
+
+export async function fetchWeatherForecast(tournamentId: number, round: number): Promise<WeatherForecastPreview> {
+  return api<WeatherForecastPreview>(`/api/admin/weather/forecast?tournament_id=${tournamentId}&round=${round}`);
 }

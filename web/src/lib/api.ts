@@ -1469,6 +1469,71 @@ export interface ConfirmResultResult {
   xp: { granted: number; unresolved: string[] };
 }
 
+// ---- 场次天气预报（v6.15.0）：管理员按 (赛事, 轮次) 预览 / 触发本轮主场预报 ----
+
+/** 预览行：预报值（match_weather）与已确认实际天气（match_attendance）可能同时存在 */
+export interface WeatherForecastPreviewMatch {
+  matchId: number;
+  /** 主队平台俱乐部；tour 主队无映射（CPU 队 / 信息缺失）时为 null */
+  homeClubId: number | null;
+  homeClubName: string | null;
+  awayTeamName: string | null;
+  stageName: string | null;
+  /** 比赛系统侧是否已完赛 */
+  finished: boolean;
+  /** 预报天气；未预报为 null */
+  weather: string | null;
+  /** 预报时抽定的天气系数；未预报为 null */
+  wxCoef: number | null;
+  /** 已确认的实际天气（有 match_attendance 行）；未确认为 null */
+  confirmedWeather: string | null;
+  /** 已确认的上座；未确认为 null */
+  attendance: number | null;
+  /** 跳过原因（无平台映射 / 无球场行）；可预报的场次为 null */
+  skippedReason: string | null;
+}
+
+export interface WeatherForecastPreview {
+  tournamentId: number;
+  round: number;
+  matches: WeatherForecastPreviewMatch[];
+}
+
+/** 触发结果里本次新落库（forecast）与先前已存在（existing）的预报行 */
+export interface WeatherForecastRow {
+  matchId: number;
+  homeClubName: string | null;
+  awayTeamName: string | null;
+  weather: string;
+  wxCoef: number;
+}
+
+/** 已确认（有 match_attendance 行）而跳过的场次 */
+export interface WeatherForecastConfirmedRow {
+  matchId: number;
+  homeClubName: string | null;
+  awayTeamName: string | null;
+  weather: string | null;
+}
+
+/** 无法预报的场次及原因 */
+export interface WeatherForecastSkippedRow {
+  matchId: number;
+  homeClubName: string | null;
+  awayTeamName: string | null;
+  reason: string;
+}
+
+/** POST /api/admin/weather/forecast 返回：四段各自独立计数 */
+export interface WeatherForecastTriggerResult {
+  tournamentId: number;
+  round: number;
+  forecast: WeatherForecastRow[];
+  existing: WeatherForecastRow[];
+  confirmed: WeatherForecastConfirmedRow[];
+  skipped: WeatherForecastSkippedRow[];
+}
+
 /** season_windows.competition_type 中文标签（§11） */
 export const COMPETITION_TYPE_LABEL: Record<string, string> = {
   league_premier: '顶级联赛',

@@ -17,6 +17,7 @@ import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
 import growthRoutes from './routes/growth.ts';
 import squadsRoutes from './routes/squads.ts';
+import fixturesRoutes from './routes/fixtures.ts';
 import notificationsRoutes from './routes/notifications.ts';
 import adminRoutes from './routes/admin/index.ts';
 import authRoutes from './routes/auth.ts';
@@ -75,6 +76,8 @@ app.route('/api/negotiations', negotiationRoutes);
 app.route('/api', growthRoutes);
 // 全平台一线队名册（v5.0.0）：赛事系统拉取同步的契约面，只读
 app.route('/api', squadsRoutes);
+// 场次天气/球场/上座公开只读面（v6.15.0）：预留向赛事平台展示的契约接口
+app.route('/api', fixturesRoutes);
 app.route('/api', notificationsRoutes);
 app.route('/api', authRoutes);
 // 媒体读取（v3.4.0）：镜像比赛系统的公开媒体路由，只读不写、不碰 D1（队徽/封面图同源取）

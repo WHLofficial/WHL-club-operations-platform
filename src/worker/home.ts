@@ -149,7 +149,8 @@ export function rollWeather(rng: () => number, probabilities: Record<string, num
   return items[items.length - 1][0];
 }
 
-function uniform(rng: () => number, lo: number, hi: number): number {
+/** 区间均匀抽（v6.15.0 导出：预报侧抽天气系数与消费端同源） */
+export function uniform(rng: () => number, lo: number, hi: number): number {
   return lo + rng() * (hi - lo);
 }
 
@@ -285,12 +286,19 @@ export async function matchAttendanceStatements(
     .first<StadiumRow & { next_attendance_mod: number; next_weather: string }>();
   if (!stadium) return { statements: [], detail: null };
 
-  // v6.10.0 随机事件预置（一次性消费）：weather_set 写了 next_weather 就用预置天气，否则现掷
+  // v6.10.0 随机事件预置（一次性消费）：weather_set 写了 next_weather 就用预置天气。
+  // v6.15.0 场次预报：管理员按轮提前抽定的类型+系数（match_weather），优先级事件 > 预报 > 现掷；
+  // 预报命中时类型与系数整笔不抽（rng 零消费），wx 直用落库值（表外天气也直用，人工改库不防御）。
+  // 预报行校验 club_id——改期/换边后别把别队的预报用上；预报行消费后保留（公开面回看用）。
   const presetWeather =
     stadium.next_weather !== '' && model.weather_probabilities[stadium.next_weather] !== undefined ? stadium.next_weather : null;
-  const weather = presetWeather ?? rollWeather(rng, model.weather_probabilities);
+  const forecastRow = await env.DB
+    .prepare('SELECT weather, wx_coef FROM match_weather WHERE match_id = ? AND club_id = ?')
+    .bind(input.matchId, clubId)
+    .first<{ weather: string; wx_coef: number }>();
+  const weather = presetWeather ?? forecastRow?.weather ?? rollWeather(rng, model.weather_probabilities);
   const wxRange = asRange(model.weather_ranges[weather]);
-  const wx = wxRange ? uniform(rng, wxRange[0], wxRange[1]) : 1;
+  const wx = forecastRow && !presetWeather ? forecastRow.wx_coef : wxRange ? uniform(rng, wxRange[0], wxRange[1]) : 1;
 
   // 近 3 场战绩（平台已确认赛果，不含本场，假设 31）；赛果表存 tour 队 id，直接用主队 tour id 查
   const formPts = await clubFormPts(env, input.homeTeamId, input.matchId);
@@ -340,7 +348,7 @@ export async function matchAttendanceStatements(
       kind: 'revenue',
       refType: 'match',
       refId: input.matchId,
-      memo: `比赛日收入（比赛 #${input.matchId}，上座 ${attendance}/${stadium.capacity}，${weather}${presetWeather ? '（事件预置）' : ''}；票 ${ticket}/商 ${commercial}/播 ${broadcast}）`,
+      memo: `比赛日收入（比赛 #${input.matchId}，上座 ${attendance}/${stadium.capacity}，${weather}${presetWeather ? '（事件预置）' : forecastRow ? '（赛前预报）' : ''}；票 ${ticket}/商 ${commercial}/播 ${broadcast}）`,
     }),
   );
   statements.push(

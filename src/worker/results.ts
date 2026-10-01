@@ -14,7 +14,7 @@ function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
 
-interface TourMatchRow {
+export interface TourMatchRow {
   id: number;
   status: string;
   tournament_id: number;
@@ -37,7 +37,8 @@ interface TourMatchRow {
 }
 
 // match→stage 两跳到 tournament；队名/胜者经 entry→team 解析（比赛系统只存 ID）
-const MATCH_SELECT = `
+// v6.15.0 导出：天气预报（weather-ops.ts）按同一 SELECT 口径查该轮主队场
+export const MATCH_SELECT = `
   SELECT m.id, m.status, s.tournament_id, s.kind AS stage_kind,
          eh.team_id AS home_team_id, ea.team_id AS away_team_id,
          m.round, s.name AS stage_name, s.config_json AS stage_config,

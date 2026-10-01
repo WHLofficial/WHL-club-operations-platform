@@ -18,8 +18,11 @@ import {
   type SettleCheckResult,
   type StageSettleResult,
   type TournamentRow,
+  type WeatherForecastPreview,
+  type WeatherForecastPreviewMatch,
+  type WeatherForecastTriggerResult,
 } from '../../lib/api.ts';
-import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.ts';
+import { SEASON_CURRENT_KEY, fetchSeasonCurrent, fetchWeatherForecast, weatherForecastKey } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 
@@ -27,6 +30,7 @@ export default function SeasonsPage() {
   return (
     <div className="admin-page">
       <SeasonsSection />
+      <WeatherForecastSection />
       <ResultsSection />
     </div>
   );
@@ -516,6 +520,263 @@ function ResultsSection() {
           </div>
         </details>
       )}
+    </section>
+  );
+}
+
+// ---- 场次天气预报（v6.15.0）：按 (赛事, 轮次) 预览 / 生成该轮主场比赛的预报天气 ----
+
+/** 预报行四态：已确认（有实际天气）> 已预报 > 未预报；有跳过原因的算跳过态 */
+type WeatherRowState = 'confirmed' | 'forecast' | 'pending' | 'skipped';
+
+function weatherRowState(m: WeatherForecastPreviewMatch): WeatherRowState {
+  if (m.skippedReason !== null) return 'skipped';
+  if (m.confirmedWeather !== null) return 'confirmed';
+  if (m.weather !== null) return 'forecast';
+  return 'pending';
+}
+
+const WEATHER_STATE: Record<WeatherRowState, { label: string; className: string }> = {
+  confirmed: { label: '已确认', className: 'badge green' },
+  forecast: { label: '已预报', className: 'badge sky' },
+  pending: { label: '未预报', className: 'badge gray' },
+  skipped: { label: '跳过', className: 'badge red' },
+};
+
+/** 对阵文案；主队无平台映射（CPU 队）或客队未定时用 — 占位（与赛果行的口径一致） */
+function forecastPair(homeClubName: string | null, awayTeamName: string | null): string {
+  return `${homeClubName ?? '—'} vs ${awayTeamName ?? '—'}`;
+}
+
+/** 天气系数是区间内的随机浮点，展示收三位小数避免长尾 */
+function fmtCoef(coef: number): string {
+  return String(Math.round(coef * 1000) / 1000);
+}
+
+function WeatherPreviewTable({ preview }: { preview: WeatherForecastPreview }) {
+  if (preview.matches.length === 0) {
+    return <p className="muted">该轮没有可展示的主场比赛（未排赛程，或全是无平台映射 / 无球场行的场次）。</p>;
+  }
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>主队 vs 客队</th>
+            <th>状态</th>
+            <th>天气</th>
+            <th>上座</th>
+          </tr>
+        </thead>
+        <tbody>
+          {preview.matches.map((m) => {
+            const state = weatherRowState(m);
+            return (
+              <tr key={m.matchId}>
+                <td>
+                  {forecastPair(m.homeClubName, m.awayTeamName)}
+                  {m.stageName && <span className="muted"> · {m.stageName}</span>}
+                </td>
+                <td>
+                  <span className={WEATHER_STATE[state].className}>{WEATHER_STATE[state].label}</span>
+                  {state === 'skipped' && m.skippedReason && <span className="muted"> {m.skippedReason}</span>}
+                  {m.finished && <span className="muted"> 已完赛</span>}
+                </td>
+                <td className="mono">
+                  {state === 'confirmed' ? (
+                    <>
+                      {m.confirmedWeather} <span className="badge green">实际</span>
+                    </>
+                  ) : state === 'forecast' && m.weather !== null && m.wxCoef !== null ? (
+                    <>
+                      {m.weather}
+                      <span className="muted"> ×{fmtCoef(m.wxCoef)}</span>
+                    </>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
+                <td className="mono">{m.attendance ?? '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function WeatherForecastSection() {
+  const { show, toastNode } = useToast();
+  const queryClient = useQueryClient();
+  const [tournamentId, setTournamentId] = useState('');
+  const [round, setRound] = useState('0');
+  const [busy, setBusy] = useState(false);
+  // 预览跟着「点过查预览 / 生成预报」的参数走：边改输入边打接口反而费解，所见即上次所选
+  const [previewParams, setPreviewParams] = useState<{ tournamentId: number; round: number } | null>(null);
+  const [result, setResult] = useState<WeatherForecastTriggerResult | null>(null);
+
+  const { data: tournaments = [] } = useQuery({
+    queryKey: ['admin', 'tournaments'],
+    queryFn: () => api<{ tournaments: TournamentRow[] }>('/api/admin/tournaments').then((d) => d.tournaments).catch(() => [] as TournamentRow[]),
+  });
+
+  const tournamentNo = Number(tournamentId);
+  const roundNo = Number(round);
+  // 空串会被 Number() 转成 0，而 0 是合法轮次，所以轮次要单独拦空串
+  const paramsValid = Number.isInteger(tournamentNo) && tournamentNo > 0 && round.trim() !== '' && Number.isInteger(roundNo) && roundNo >= 0;
+
+  const { data: preview, isFetching, error: previewError } = useQuery({
+    queryKey: weatherForecastKey(previewParams?.tournamentId ?? 0, previewParams?.round ?? 0),
+    queryFn: () => {
+      if (!previewParams) throw new Error('还没有查询参数');
+      return fetchWeatherForecast(previewParams.tournamentId, previewParams.round);
+    },
+    enabled: previewParams !== null,
+  });
+
+  function appliedParams(): { tournamentId: number; round: number } | null {
+    return paramsValid ? { tournamentId: tournamentNo, round: roundNo } : null;
+  }
+
+  function runPreview() {
+    const p = appliedParams();
+    if (!p) return;
+    setPreviewParams(p);
+    // 同参数再点一次也要重新拉（key 没变，靠 invalidate 触发）
+    queryClient.invalidateQueries({ queryKey: weatherForecastKey(p.tournamentId, p.round) });
+  }
+
+  async function runForecast() {
+    const p = appliedParams();
+    if (!p || busy) return;
+    setBusy(true);
+    try {
+      const res = await apiPost<WeatherForecastTriggerResult>('/api/admin/weather/forecast', {
+        tournamentId: p.tournamentId,
+        round: p.round,
+      });
+      setResult(res);
+      setPreviewParams(p); // 触发后预览跟着刷新成最新状态
+      show(`#${p.tournamentId} 第 ${p.round} 轮预报完成：新预报 ${res.forecast.length} 场、已存在 ${res.existing.length} 场。`);
+      queryClient.invalidateQueries({ queryKey: weatherForecastKey(p.tournamentId, p.round) });
+    } catch (err) {
+      // 409「赛事还没绑定到赛季」等后端 message 原样展示
+      show(err instanceof Error ? err.message : '预报失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 触发结果四段：新预报 / 已存在 / 已确认跳过 / 跳过
+  const groups = result
+    ? [
+        {
+          title: `新预报 ${result.forecast.length} 场`,
+          items: result.forecast.map((m) => ({ key: `f-${m.matchId}`, text: `${forecastPair(m.homeClubName, m.awayTeamName)} · ${m.weather}（系数 ${fmtCoef(m.wxCoef)}）` })),
+        },
+        {
+          title: `已存在 ${result.existing.length} 场（保留原预报）`,
+          items: result.existing.map((m) => ({ key: `e-${m.matchId}`, text: `${forecastPair(m.homeClubName, m.awayTeamName)} · ${m.weather}（系数 ${fmtCoef(m.wxCoef)}）` })),
+        },
+        {
+          title: `已确认跳过 ${result.confirmed.length} 场`,
+          items: result.confirmed.map((m) => ({ key: `c-${m.matchId}`, text: `${forecastPair(m.homeClubName, m.awayTeamName)} · 实际 ${m.weather ?? '—'}` })),
+        },
+        {
+          title: `跳过 ${result.skipped.length} 场`,
+          items: result.skipped.map((m) => ({ key: `s-${m.matchId}`, text: `${forecastPair(m.homeClubName, m.awayTeamName)} · ${m.reason}` })),
+        },
+      ]
+    : [];
+
+  return (
+    <section className="card admin-section">
+      <h2>天气预报</h2>
+      {toastNode}
+      <p className="hint">
+        按「赛事 + 轮次」给该轮主场比赛提前抽定天气与系数；赛果确认时直接取用预报值（不再消费随机数），已确认的场次会跳过，重复触发保留原预报。
+      </p>
+      <div className="inline-form">
+        <label className="field">
+          赛事（比赛系统）
+          <select
+            value={tournamentId}
+            onChange={(e) => {
+              setTournamentId(e.target.value);
+            }}
+          >
+            <option value="">选赛事…</option>
+            {tournaments.map((t) => (
+              <option key={t.id} value={t.id}>
+                #{t.id} {t.name}（{TOUR_STATUS_LABEL[t.status] ?? t.status}）
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          轮次
+          <input
+            value={round}
+            onChange={(e) => {
+              setRound(e.target.value);
+            }}
+            placeholder="0"
+            className="mono"
+          />
+        </label>
+        <button className="btn" type="button" disabled={!paramsValid || isFetching} onClick={runPreview}>
+          {isFetching ? '查询中…' : '查预览'}
+        </button>
+        <button className="btn btn-ghost" type="button" disabled={!paramsValid || busy} onClick={() => void runForecast()}>
+          {busy ? '预报中…' : '生成预报'}
+        </button>
+      </div>
+
+      {previewParams !== null && (
+        <>
+          <p className="hint">
+            预览：#{previewParams.tournamentId} 第 {previewParams.round} 轮
+          </p>
+          {previewError ? (
+            <p className="badge red">{previewError instanceof Error ? previewError.message : '预览失败'}</p>
+          ) : preview === undefined ? (
+            <p className="muted">读取中…</p>
+          ) : (
+            <WeatherPreviewTable preview={preview} />
+          )}
+        </>
+      )}
+
+      {result && (
+        <div className="banner info">
+          <b>
+            #{result.tournamentId} 第 {result.round} 轮：新预报 {result.forecast.length} 场 · 已存在 {result.existing.length} 场 · 已确认跳过{' '}
+            {result.confirmed.length} 场 · 跳过 {result.skipped.length} 场
+          </b>
+          {groups.map((g) => (
+            <div key={g.title}>
+              <p>
+                {g.title}
+                {g.items.length === 0 && <span className="muted">（无）</span>}
+              </p>
+              {g.items.length > 0 && (
+                <ul>
+                  {g.items.map((it) => (
+                    <li key={it.key} className="mono">
+                      {it.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="hint">
+        赛事要先绑进赛季才能预报（没绑会直接报「赛事还没绑定到赛季」）；确认赛果时按「事件预置 &gt; 场次预报 &gt; 现掷」的顺序取天气。
+      </p>
     </section>
   );
 }
