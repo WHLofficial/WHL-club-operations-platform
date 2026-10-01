@@ -6,7 +6,7 @@
 
 ## [v6.16.0] · 管理端成长批量补录台（2026-10-01）
 
-把「一人一事件」的单人补录表单升级为**按场比赛、花名册行内批量补录**（参照 growth 插件 webui 的 fixtures 页交互）。选一场已确认比赛 → 内嵌面板 → 主/客队花名册一行一人行内编辑（出场 / 评分 / 零封 / 夺回球权 / 扑救，进球助攻只读）→ 本场 XP 实时复算 → 脏检测确认条 → 单行 + 全部保存（只提交脏行）。补录 `matchRef=比赛 id` 与自动通道同锚，`UNIQUE(player_id, match_ref, event_type)` 天然防重复发 XP；已录格锁定（平台无删除/纠正通道，如实标注来源）。零迁移、零生产写。**未 push 未部署**（等指令）。判级 minor。测试计划 `docs/test-plans/v6.16.0-growth-entry.md`（34 TC = P0 24 / P1 8 / P2 2，5 变异）；vitest 64 文件 / 1140 例全绿（基线 62/1113，净 +2 文件 / +27 例）、e2e 11/11、变异验证 5/5 全命中、code-review 修 2（entries 上限 50 行 / 未保存确认条文案）+ 1 并发边界注释。
+把「一人一事件」的单人补录表单升级为**按场比赛、花名册行内批量补录**（参照 growth 插件 webui 的 fixtures 页交互）。选一场已确认比赛 → 内嵌面板 → 主/客队花名册一行一人行内编辑（出场 / 评分 / 零封 / 夺回球权 / 扑救，进球助攻只读）→ 本场 XP 实时复算 → 脏检测确认条 → 单行 + 全部保存（只提交脏行）。补录 `matchRef=比赛 id` 与自动通道同锚，`UNIQUE(player_id, match_ref, event_type)` 天然防重复发 XP；已录格锁定（平台无删除/纠正通道，如实标注来源）。零迁移、零生产写。**已上线**（2026-10-01 发布，用户下令「推送」）：push `748803d..7891561`（7 提交 = v6.15.0 发布记录 docs 枚 + v6.16.0 六枚）触发 CF 自动部署，Version `5cddbf5b-…` @2026-10-01T12:38:10Z；上线回读 `/api/health` / `/api/clubs` / 公开 `/api/fixtures` 全 200、匿名探针三个新端点均 401（挂载且守卫生效）、线上资产 `index-DzKR-MbB.js`（sha256 `27ee8e14…`）与本地构建逐字节一致。判级 minor。测试计划 `docs/test-plans/v6.16.0-growth-entry.md`（34 TC = P0 24 / P1 8 / P2 2，5 变异）；vitest 64 文件 / 1140 例全绿（基线 62/1113，净 +2 文件 / +27 例）、e2e 11/11、变异验证 5/5 全命中、code-review 修 2（entries 上限 50 行 / 未保存确认条文案）+ 1 并发边界注释。
 
 **Added**
 - 管理端三端点（`src/worker/routes/admin/growth.ts`）：`GET /api/admin/growth/match-entry`（比赛列表：可计 XP 场近 50 场，口径与自动钩子同源 `MATCH_ENTRY_WHERE`——联赛两级全阶段 + 冠军杯小组赛 + 排弃权；每场带已录事件数与双方 clubId/CPU 标记）、`GET /api/admin/growth/match-entry/:matchId`（双方花名册 + 已录事件预填）、`POST /api/admin/growth/match-entry/:matchId`（批量补录：校验全前置、单 `db.batch` 原子、审计 `growth_manual_event_batch` 恰一条、entries ≤50 行）。
