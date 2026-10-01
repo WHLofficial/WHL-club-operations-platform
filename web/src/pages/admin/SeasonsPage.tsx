@@ -526,7 +526,9 @@ function ResultsSection() {
 
 // ---- 场次天气预报（v6.15.0）：按 (赛事, 轮次) 预览 / 生成该轮主场比赛的预报天气 ----
 
-/** 预报行四态：已确认（有实际天气）> 已预报 > 未预报；有跳过原因的算跳过态 */
+/** 预报行四态：已确认（有实际天气）> 已预报 > 未预报；有跳过原因的算跳过态。
+ *  判定序 skipped 在前与后端分类序（confirmed > existing > skipped）不同但互不冲突：
+ *  confirmed 需 match_attendance 行，有该行必有球场 ⇒ skipped 与 confirmed 生产上互斥。 */
 type WeatherRowState = 'confirmed' | 'forecast' | 'pending' | 'skipped';
 
 function weatherRowState(m: WeatherForecastPreviewMatch): WeatherRowState {
@@ -643,6 +645,7 @@ function WeatherForecastSection() {
     const p = appliedParams();
     if (!p) return;
     setPreviewParams(p);
+    setResult(null); // 换参数重查时清掉旧轮次的触发横幅，避免「输入第 7 轮、横幅还是第 5 轮结果」
     // 同参数再点一次也要重新拉（key 没变，靠 invalidate 触发）
     queryClient.invalidateQueries({ queryKey: weatherForecastKey(p.tournamentId, p.round) });
   }

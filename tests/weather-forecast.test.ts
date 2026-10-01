@@ -446,11 +446,15 @@ describe('TC-FC · 预报触发 POST /api/admin/weather/forecast', () => {
   it('TC-FC-08 参数校验 400（逐例点名非法字段）', async () => {
     const fx = seedForecastFixture();
     const cases: [unknown, string][] = [
-      [{ round: 0 }, 'tournamentId'],
-      [{ tournamentId: 'abc', round: 0 }, 'tournamentId'],
+      [{ round: 0 }, 'tournament_id'],
+      [{ tournamentId: 'abc', round: 0 }, 'tournament_id'],
       [{ tournamentId: 5 }, 'round'],
       [{ tournamentId: 5, round: 1.5 }, 'round'],
       [{ tournamentId: 5, round: '二' }, 'round'],
+      // 严格解析（评审 #1）：Number(null)/Number('') 都是 0，不得落成第 0 轮真的抽定落库
+      [{ tournamentId: 5, round: null }, 'round'],
+      [{ tournamentId: 5, round: '' }, 'round'],
+      [{ tournamentId: 5, round: 201 }, 'round'],
     ];
     for (const [body, field] of cases) {
       const res = await postForecast(fx, body);
@@ -461,17 +465,17 @@ describe('TC-FC · 预报触发 POST /api/admin/weather/forecast', () => {
     expect(auditCount(fx)).toBe(0);
   });
 
-  it('TC-FC-09 该轮无主场比赛 → 200 四段全空（审计仍写 forecasted:0）', async () => {
+  it('TC-FC-09 该轮无主场比赛 → 200 四段全空（审计仍写 attempted:0）', async () => {
     const fx = seedForecastFixture();
     const res = await postForecast(fx, { tournamentId: 5, round: 7 });
     expect(res.status).toBe(200);
     const body = (await res.json()) as ForecastResult;
     expect(body).toEqual({ tournamentId: 5, round: 7, forecast: [], existing: [], confirmed: [], skipped: [] });
     expect(forecastCount(fx)).toBe(0);
-    // 实现口径（首跑实测）：无待预报场次也走审计分支，after.forecasted = 0
+    // 实现口径（首跑实测）：无待预报场次也走审计分支；v6.15.0 评审后 after 记 attempted（尝试数）
     const audit = sqlAll<{ action: string; after: string }>(fx.sqlite, `SELECT action, after FROM audit_log WHERE action = 'weather_forecast'`);
     expect(audit).toHaveLength(1);
-    expect(JSON.parse(audit[0]!.after)).toEqual({ round: 7, forecasted: 0 });
+    expect(JSON.parse(audit[0]!.after)).toEqual({ round: 7, attempted: 0 });
   });
 
   it('TC-FC-10 审计 weather_forecast（origin=user，after 含轮次与场次数）', async () => {
@@ -489,7 +493,7 @@ describe('TC-FC · 预报触发 POST /api/admin/weather/forecast', () => {
       target_id: 5,
       origin: 'user',
     });
-    expect(JSON.parse(rows[0]!.after)).toEqual({ round: 0, forecasted: 2 });
+    expect(JSON.parse(rows[0]!.after)).toEqual({ round: 0, attempted: 2 });
   });
 
   it('TC-FC-11 权限：非管理员拒绝（POST 与 GET 一致），零落行', async () => {

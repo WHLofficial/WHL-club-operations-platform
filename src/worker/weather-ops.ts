@@ -12,9 +12,25 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
-import { loadAttendanceModel, rollWeather, uniform } from './home.ts';
+import { loadAttendanceModel, rollWeather, uniform, asRange } from './home.ts';
 import { clubIdByTourTeam } from './prizes.ts';
 import { MATCH_SELECT, type TourMatchRow } from './results.ts';
+
+/** 轮次定位参数的严格解析（GET query 字符串与 POST body 数字两形态共用）：
+ *  `Number('')`/`Number(null)` 都是 0——不拦的话 `?round=` 会被当成第 0 轮、
+ *  body `round:null` 会对第 0 轮真的抽定落库（评审 #1）。round 上界 200 防缓存键空间被刷（评审 nit）。 */
+export function parseRoundParams(
+  rawTournamentId: unknown,
+  rawRound: unknown,
+): { tournamentId: number; round: number } {
+  const toInt = (raw: unknown): number =>
+    typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  const tournamentId = toInt(rawTournamentId);
+  const round = toInt(rawRound);
+  if (!Number.isInteger(tournamentId) || tournamentId <= 0) throw new HttpError(400, 'tournament_id 应为正整数');
+  if (!Number.isInteger(round) || round < 0 || round > 200) throw new HttpError(400, 'round 应为 0-200 的整数');
+  return { tournamentId, round };
+}
 
 /** 该轮一场比赛的完整视图：tour 行 + 平台侧状态（映射/球场/预报/确认） */
 export interface RoundMatchView {
@@ -93,10 +109,10 @@ export async function buildRoundView(env: Env, tournamentId: number, round: numb
   const forecastRows = new Map(
     (
       await env.DB.prepare(
-        'SELECT match_id, weather, wx_coef FROM match_weather WHERE tournament_id = ? AND round = ?',
+        'SELECT match_id, club_id, weather, wx_coef FROM match_weather WHERE tournament_id = ? AND round = ?',
       )
         .bind(tournamentId, round)
-        .all<{ match_id: number; weather: string; wx_coef: number }>()
+        .all<{ match_id: number; club_id: number; weather: string; wx_coef: number }>()
     ).results.map((r) => [r.match_id, r]),
   );
   const matchIds = matches.map((m) => m.id);
@@ -116,7 +132,6 @@ export async function buildRoundView(env: Env, tournamentId: number, round: numb
   return matches.map((m) => {
     const clubId = m.home_team_id === null ? undefined : clubMap.get(m.home_team_id);
     const confirmed = confirmedRows.get(m.id);
-    const forecast = forecastRows.get(m.id);
     const skippedReason =
       clubId === undefined
         ? m.home_team_id === null
@@ -126,6 +141,10 @@ export async function buildRoundView(env: Env, tournamentId: number, round: numb
           ? '主队没有球场'
           : null;
     const stadium = clubId !== undefined ? (stadiumMap.get(clubId) ?? null) : null;
+    // 预报行只在 club_id 与解析出的主队一致时才有效——改期/换边后旧预报不展示（评审 #2），
+    // 与消费端 `AND club_id = ?` 同口径；错配行数据保留（管理端触发回读可见）
+    const rawForecast = forecastRows.get(m.id);
+    const forecast = rawForecast && rawForecast.club_id === clubId ? rawForecast : undefined;
     return {
       matchId: m.id,
       homeClubId: clubId ?? null,
@@ -170,8 +189,8 @@ export async function forecastRound(env: Env, actor: number | null, tournamentId
       result.skipped.push({ matchId: v.matchId, homeClubName: v.homeClubName, awayTeamName: v.awayTeamName, reason: v.skippedReason });
     } else {
       const weather = rollWeather(rng, model.weather_probabilities);
-      const range = model.weather_ranges[weather];
-      const wx = Array.isArray(range) && range.length === 2 ? uniform(rng, range[0], range[1]) : 1;
+      const range = asRange(model.weather_ranges[weather]);
+      const wx = range ? uniform(rng, range[0], range[1]) : 1;
       pending.push({ view: v, weather, wx });
     }
   }
@@ -194,7 +213,8 @@ export async function forecastRound(env: Env, actor: number | null, tournamentId
         targetType: 'tournament',
         targetId: tournamentId,
         origin: 'user',
-        after: { round, forecasted: pending.length },
+        // attempted 而非 forecasted：并发撞闸（changes=0）的场次没落库，审计在 batch 内无法回写实际数
+        after: { round, attempted: pending.length },
       }),
     );
     const outcomes = await env.DB.batch(statements);
@@ -218,12 +238,14 @@ export async function forecastRound(env: Env, actor: number | null, tournamentId
       );
       for (const { view: v } of raced) {
         const row = racedRows.get(v.matchId);
+        // 回读缺行（理论不可达：changes=0 只能是撞上已存在行）不进返回段，避免给管理员看空天气
+        if (!row) continue;
         result.existing.push({
           matchId: v.matchId,
           homeClubName: v.homeClubName,
           awayTeamName: v.awayTeamName,
-          weather: row?.weather ?? '',
-          wxCoef: row?.wx_coef ?? 0,
+          weather: row.weather,
+          wxCoef: row.wx_coef,
         });
       }
     }
@@ -235,7 +257,7 @@ export async function forecastRound(env: Env, actor: number | null, tournamentId
       targetType: 'tournament',
       targetId: tournamentId,
       origin: 'user',
-      after: { round, forecasted: 0 },
+      after: { round, attempted: 0 },
     }).run();
   }
   return result;

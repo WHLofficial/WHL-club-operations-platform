@@ -1481,14 +1481,19 @@ export interface WeatherForecastPreviewMatch {
   stageName: string | null;
   /** 比赛系统侧是否已完赛 */
   finished: boolean;
+  /** 主场球场；无球场行（含 CPU 队）为 null */
+  stadium: { name: string | null; capacity: number; tier: number } | null;
   /** 预报天气；未预报为 null */
   weather: string | null;
   /** 预报时抽定的天气系数；未预报为 null */
   wxCoef: number | null;
   /** 已确认的实际天气（有 match_attendance 行）；未确认为 null */
   confirmedWeather: string | null;
-  /** 已确认的上座；未确认为 null */
+  /** 已确认的上座与三分收入；未确认为 null（收入四件套只在管理端预览出，公开 /api/fixtures 不带） */
   attendance: number | null;
+  ticket: number | null;
+  commercial: number | null;
+  broadcast: number | null;
   /** 跳过原因（无平台映射 / 无球场行）；可预报的场次为 null */
   skippedReason: string | null;
 }

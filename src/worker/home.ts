@@ -154,6 +154,11 @@ export function uniform(rng: () => number, lo: number, hi: number): number {
   return lo + rng() * (hi - lo);
 }
 
+/** [lo, hi] 二元数值区间校验（v6.15.0 导出：weather-ops 预报抽系数与消费端共用，防两处漂移） */
+export function asRange(v: unknown): [number, number] | null {
+  return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' ? [v[0], v[1]] : null;
+}
+
 /** 近 3 场战绩 Pts（胜3平1负0；弃权按 winner 记胜负；**点球决胜按平局计**——用户裁决 2026-09-16；
  * 不足 3 场中性 4 分，假设 31） */
 export function formPtsOf(
@@ -256,10 +261,6 @@ export interface AttendanceDetail {
   broadcast: number;
 }
 
-function asRange(v: unknown): [number, number] | null {
-  return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' ? [v[0], v[1]] : null;
-}
-
 /**
  * 赛果确认钩子④（v1.5.0）：主场三分收入即时入账。
  * 跳过条件（detail=null）：AUTH_DB 目录无主场映射 / 无球场行 / 已入过账。
@@ -288,17 +289,21 @@ export async function matchAttendanceStatements(
 
   // v6.10.0 随机事件预置（一次性消费）：weather_set 写了 next_weather 就用预置天气。
   // v6.15.0 场次预报：管理员按轮提前抽定的类型+系数（match_weather），优先级事件 > 预报 > 现掷；
-  // 预报命中时类型与系数整笔不抽（rng 零消费），wx 直用落库值（表外天气也直用，人工改库不防御）。
+  // 预报命中时天气相关的随机整笔不抽（weather/wx 不再滚，rng 仍剩 perturbation+fill 两口），
+  // wx 直用落库值（表外天气也直用，人工改库不防御）。
   // 预报行校验 club_id——改期/换边后别把别队的预报用上；预报行消费后保留（公开面回看用）。
   const presetWeather =
     stadium.next_weather !== '' && model.weather_probabilities[stadium.next_weather] !== undefined ? stadium.next_weather : null;
-  const forecastRow = await env.DB
-    .prepare('SELECT weather, wx_coef FROM match_weather WHERE match_id = ? AND club_id = ?')
-    .bind(input.matchId, clubId)
-    .first<{ weather: string; wx_coef: number }>();
+  // 事件预置命中时预报行完全不被使用（wx 现抽、memo 走「事件预置」），点查直接跳过
+  const forecastRow =
+    presetWeather !== null
+      ? null
+      : await env.DB.prepare('SELECT weather, wx_coef FROM match_weather WHERE match_id = ? AND club_id = ?')
+          .bind(input.matchId, clubId)
+          .first<{ weather: string; wx_coef: number }>();
   const weather = presetWeather ?? forecastRow?.weather ?? rollWeather(rng, model.weather_probabilities);
   const wxRange = asRange(model.weather_ranges[weather]);
-  const wx = forecastRow && !presetWeather ? forecastRow.wx_coef : wxRange ? uniform(rng, wxRange[0], wxRange[1]) : 1;
+  const wx = forecastRow ? forecastRow.wx_coef : wxRange ? uniform(rng, wxRange[0], wxRange[1]) : 1;
 
   // 近 3 场战绩（平台已确认赛果，不含本场，假设 31）；赛果表存 tour 队 id，直接用主队 tour id 查
   const formPts = await clubFormPts(env, input.homeTeamId, input.matchId);

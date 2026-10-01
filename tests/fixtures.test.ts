@@ -31,9 +31,6 @@ interface PublicMatch {
   stadium: { name: string | null; capacity: number; tier: number } | null;
   weather: string | null;
   attendance: number | null;
-  ticket: number | null;
-  commercial: number | null;
-  broadcast: number | null;
 }
 
 interface FixturesBody {
@@ -45,15 +42,12 @@ interface FixturesBody {
 const MATCH_KEYS = [
   'attendance',
   'awayTeamName',
-  'broadcast',
-  'commercial',
   'finished',
   'homeClub',
   'matchId',
   'round',
   'stadium',
   'stageName',
-  'ticket',
   'tournamentId',
   'weather',
 ].sort();
@@ -223,8 +217,8 @@ describe('TC-PUB · 公开只读 GET /api/fixtures', () => {
     expect(m.finished).toBe(true);
     expect(m.stadium).toEqual({ name: '球场1', capacity: 20000, tier: 0 });
     expect(m.weather).toBe('晴'); // 未确认 → 取预报值
-    // 未确认：上座与三项收入四值全 null
-    expect([m.attendance, m.ticket, m.commercial, m.broadcast]).toEqual([null, null, null, null]);
+    // 未确认：上座 null；收入三件套已收窄出公开面（评审 #4），白名单由 MATCH_KEYS 锁死
+    expect(m.attendance).toBeNull();
   });
 
   it('TC-PUB-02 匿名 200：与带 token 请求逐字一致', async () => {
@@ -249,17 +243,24 @@ describe('TC-PUB · 公开只读 GET /api/fixtures', () => {
     expect(byId.get(2)!.weather).toBe('雨'); // 已确认 → 实际值
   });
 
+  it('TC-PUB-03b 预报行 club_id 与主队错配 → 不展示（与消费端 AND club_id 同口径，评审 #2）', async () => {
+    const fx = seedPublicFixture();
+    addForecastRow(fx, '晴', 1.11, { matchId: 1, clubId: 2 }); // 主队是俱乐部 1，预报行挂在 2 上（改期/换边形态）
+    const body = (await (await get(fixturesUrl(5, 0), fx)).json()) as FixturesBody;
+    expect(body.matches[0]!.weather).toBeNull();
+  });
+
   it('TC-PUB-04 都无 → weather=null（不现掷兜底）', async () => {
     const fx = seedPublicFixture();
     const body = (await (await get(fixturesUrl(5, 0), fx)).json()) as FixturesBody;
     const m = body.matches[0]!;
     expect(m.weather).toBeNull();
-    expect([m.attendance, m.ticket, m.commercial, m.broadcast]).toEqual([null, null, null, null]);
+    expect(m.attendance).toBeNull();
   });
 
-  it('TC-PUB-05 参数校验 400', async () => {
+  it('TC-PUB-05 参数校验 400（含空串落 0 与 round 上界，评审 #1/nit）', async () => {
     const fx = seedPublicFixture();
-    for (const url of [fixturesUrl(undefined, 0), fixturesUrl(5, 1.5), fixturesUrl(5, 'x')]) {
+    for (const url of [fixturesUrl(undefined, 0), fixturesUrl(5, 1.5), fixturesUrl(5, 'x'), fixturesUrl(5, ''), fixturesUrl(5, 201)]) {
       const res = await get(url, fx);
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toMatch(/tournament_id|round/);
