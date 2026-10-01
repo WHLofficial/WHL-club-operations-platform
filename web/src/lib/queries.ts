@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
+import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type CpuBoardResponse, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeaSignsResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 export const qk = {
@@ -16,7 +16,8 @@ export const qk = {
   myBids: ['market', 'my-bids'] as const,
   board: (status: string) => ['market', 'board', status] as const,
   listing: (id: number) => ['market', 'listing', id] as const,
-  freeAgents: ['market', 'free-agents'] as const,
+  seaSigns: ['market', 'sea-signs'] as const,
+  cpuBoard: ['market', 'cpu-board'] as const,
   trainees: ['market', 'trainees'] as const,
   notifications: ['notifications'] as const,
   stadiumBuild: ['club', 'stadium-build'] as const,
@@ -176,6 +177,24 @@ export function useMarketInvalidation() {
     void qc.invalidateQueries({ queryKey: qk.myBids });
     if (listingId !== null) void qc.invalidateQueries({ queryKey: qk.listing(listingId) });
   };
+}
+
+// 海捞情报台（v6.17.0）：成交动态（全服已完成海捞单据倒序 ≤30）与 CPU 捞人榜（CA 降序）。
+// 两个都是教练端点（club.squad.manage），调用方市场页已按身份门控，挂载即请求。
+export function useSeaSigns() {
+  return useQuery({
+    queryKey: qk.seaSigns,
+    queryFn: async () => (await api<SeaSignsResponse>('/api/market/sea-signs')).seaSigns,
+    retry: false,
+  });
+}
+
+export function useCpuBoard() {
+  return useQuery({
+    queryKey: qk.cpuBoard,
+    queryFn: async () => (await api<CpuBoardResponse>('/api/market/cpu-board')).cpuBoard,
+    retry: false,
+  });
 }
 
 // 未读数（顶栏小蓝点）：60s 轮询 + 窗口聚焦即拉；登录态才启用

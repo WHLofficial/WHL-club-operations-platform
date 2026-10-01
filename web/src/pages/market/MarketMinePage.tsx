@@ -138,7 +138,7 @@ function ListSection({
           规则价：下限 {bounds.min.toFixed(2)} m（违约金/身价五折取低，不低于 1m）、上限 {bounds.max.toFixed(2)} m（违约金 1.5 倍）。
         </p>
       )}
-      <p className="hint">训练营里的孩子不能自己挂出去——他们只能被别队激活带走（见「海捞」页的激活转会）。</p>
+      <p className="hint">训练营里的孩子不能自己挂出去——他们只能被别队激活带走（见「海捞情报」页的激活转会）。</p>
     </section>
   );
 }
@@ -168,7 +168,7 @@ function MyBidsSection({ bids, available, balance }: { bids: MyBidRow[]; availab
             {bids.length === 0 ? (
               <tr>
                 <td colSpan={5} className="muted">
-                  还没出过价。去市场板挑一件挂单，或到海捞页激活别家小将。
+                  还没出过价。去市场板挑一件挂单，或到海捞情报页激活别家小将。
                 </td>
               </tr>
             ) : (

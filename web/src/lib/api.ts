@@ -314,6 +314,37 @@ export interface PlayerDetail {
   };
   club: { id: number; name: string } | null;
   contract: ContractDto | null;
+  /** 海捞资格（v6.17.0）：与后端 createFreeAgent 守卫链同源，左栏海捞按钮的可用性与原因都吃它 */
+  seaSign: SeaSignEligibility;
+  /** 海捞成交参照（v6.17.0）：违约金输入框下方的定价锚 */
+  seaComps: SeaComps;
+}
+
+/** 海捞资格判定（v6.17.0） */
+export interface SeaSignEligibility {
+  eligible: boolean;
+  /** 不可海捞的原因（后端原文）；可签时为 null */
+  reason: string | null;
+}
+
+/** 海捞成交参照行（v6.17.0） */
+export interface SeaCompRow {
+  playerId: number;
+  playerName: string;
+  playerCa: number | null;
+  fromClubName: string | null;
+  toClubName: string | null;
+  newReleaseFee: number | null;
+  signFee: number | null;
+  season: number | null;
+  windowSeq: number | null;
+  completedAt: string | null;
+}
+
+export interface SeaComps {
+  /** same_tier=同档成交（CA±5）；global=同档空时回落全局最近；none=没有参照 */
+  scope: 'same_tier' | 'global' | 'none';
+  rows: SeaCompRow[];
 }
 
 /** 转会记录（v3.3.0）：只含已完成单据，按完成时间倒序 */
@@ -754,7 +785,34 @@ export interface TraineeSignResult {
 
 // ---- v0.6.0 DTO（附录 A〔5〕：旁路转会 + 匹配 + 窗口 + 强制拍卖）----
 
-export interface FreeAgentRow {
+// ---- v6.17.0：海捞情报台（/api/market/sea-signs、/api/market/cpu-board）----
+// 旧的 FreeAgentRow/FreeAgentsResponse 已随 /api/market/free-agents 下线：
+// 「可捞名单」与球员库纯重复，海捞入口收进球员档案左栏（SideOps E 态）。
+
+/** 海捞成交动态行（全服已完成海捞单据，completed_at 倒序 ≤30 条） */
+export interface SeaSignRow {
+  id: number;
+  playerId: number;
+  playerName: string;
+  playerCa: number | null;
+  /** 原东家；null = 无归属真自由身（前端显示「自由身」） */
+  fromClubName: string | null;
+  toClubName: string | null;
+  /** 成交时定的新违约金（free_agent 单据的 fee 就是它） */
+  newReleaseFee: number | null;
+  /** 海捞签入费 = 新违约金 × 30%（后端 freeAgentFee 随行下发） */
+  signFee: number | null;
+  season: number | null;
+  windowSeq: number | null;
+  completedAt: string | null;
+}
+
+export interface SeaSignsResponse {
+  seaSigns: SeaSignRow[];
+}
+
+/** CPU 捞人榜行（各 CPU 队 free/normal 球员，CA 降序 ≤500） */
+export interface CpuBoardRow {
   id: number;
   fcId: number | null;
   name: string;
@@ -762,14 +820,11 @@ export interface FreeAgentRow {
   age: number | null;
   ca: number | null;
   pa: number | null;
-  /** 现东家（v2.0.0：CPU 队球员可被海捞，名单里要能看出他为什么在海捞池） */
   clubName: string | null;
-  bannedThisWindow: boolean;
 }
 
-export interface FreeAgentsResponse {
-  club: { id: number; name: string } | null;
-  freeAgents: FreeAgentRow[];
+export interface CpuBoardResponse {
+  cpuBoard: CpuBoardRow[];
 }
 
 export interface RcChangeResult {

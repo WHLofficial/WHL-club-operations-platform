@@ -3,14 +3,16 @@
 //   B 本队·挂牌中 = 转会区信息（要价/最高出价来自转会区列表缓存）；主动下架无端点，窗尾自动收口
 //   C 别队真人·未挂牌 = 报价（POST /api/offers，报价即冻结）/ 激活（POST /api/market/activations）
 //   D 别队真人·非卖品 = 报价置灰「此球员为非卖品！」；激活不受非卖品限制
-//   E CPU 队 / 自由身 = 海捞签入（POST /api/transfers/free-agent，带新违约金）
+//   E CPU 队 / 自由身 = 海捞签入（POST /api/transfers/free-agent，带新违约金）；v6.17.0 起
+//     可用性与不可签原因以详情下发的 seaSign 为准（后端 createFreeAgent 守卫链同源），
+//     违约金输入框下嵌 seaComps 成交参照
 // 窗门控（v6.2.0 延续）：转会动作后端一律 409 no_window，前端关窗时同步置灰；
 // 报价设置是意图标记不锁窗，关窗时也能改。
 // 训练营球员（contractType=trainee）：合同固定、只能被激活带走，不显示报价设置与挂牌/续约。
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiPost, apiPut, apiUpload, type ContractDto } from '../../lib/api.ts';
+import { apiPost, apiPut, apiUpload, type ContractDto, type FreeAgentResult, type SeaComps, type SeaSignEligibility } from '../../lib/api.ts';
 import { qk, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import { money } from '../market/shared.tsx';
@@ -39,6 +41,8 @@ export function SideOps({
   isCoach,
   myClubId,
   windowOpen,
+  seaSign,
+  seaComps,
   pendingMine,
   show,
   refreshAll,
@@ -52,6 +56,10 @@ export function SideOps({
   /** 我的俱乐部 id（举报判据：本队球员被别队激活时才知道「激活方不是我」） */
   myClubId: number | null;
   windowOpen: boolean;
+  /** 海捞资格（v6.17.0，详情 seaSign）：E 态按钮开关与不可签原因都由它下发 */
+  seaSign: SeaSignEligibility;
+  /** 海捞成交参照（v6.17.0，详情 seaComps）：违约金输入框下方的定价锚 */
+  seaComps: SeaComps;
   /** 轮到我处理的收到报价条数（/api/offers?box=in 的 pendingMine） */
   pendingMine: number;
   show: (text: string, err?: boolean) => void;
@@ -566,6 +574,8 @@ export function SideOps({
       </section>
     );
   } else if (isFree || isCpu) {
+    // E 态（v6.17.0）：开关不再看 windowOpen，以 seaSign 为准——窗口、归属、在途、本窗被解约
+    // 这些拦截都在后端守卫链里判过一遍，前端只负责原样禁用并展示原因。
     body = (
       <section className="side-sec">
         <div className="side-sec-head">球队操作</div>
@@ -583,19 +593,20 @@ export function SideOps({
                 aria-label="新违约金"
               />
             </label>
+            <SeaCompsBlock seaComps={seaComps} />
             <p className="side-sub">签入即付海捞费并定新合同；签完本窗内他队还能竞价挖角。</p>
             <div className="side-btns">
               <button
                 type="button"
                 className="btn btn-sm"
-                disabled={busy || freeFee === ''}
+                disabled={busy || !seaSign.eligible || freeFee === ''}
                 onClick={() =>
                   void run(async () => {
-                    const r = await apiPost<{ fee: number }>('/api/transfers/free-agent', {
+                    const r = await apiPost<FreeAgentResult>('/api/transfers/free-agent', {
                       playerId: player.id,
                       newReleaseFee: Number(freeFee),
                     });
-                    return `海捞签入成功，海捞费 ${r.fee?.toFixed(2) ?? '—'} m。`;
+                    return `海捞申请已提交：新违约金 ${r.newReleaseFee.toFixed(2)} m，签入费 ${r.signFee.toFixed(2)} m（新违约金的 30%）待审核时收，等管理组批准。`;
                   })
                 }
               >
@@ -608,11 +619,12 @@ export function SideOps({
           </>
         ) : (
           <div className="side-btns">
-            <button type="button" className="btn btn-sm" disabled={busy || !windowOpen} onClick={() => setPanel('freeagent')}>
+            <button type="button" className="btn btn-sm" disabled={busy || !seaSign.eligible} onClick={() => setPanel('freeagent')}>
               海捞签入
             </button>
           </div>
         )}
+        {seaSign.reason !== null && <p className="side-sub">{seaSign.reason}</p>}
       </section>
     );
   } else {
@@ -697,6 +709,43 @@ export function SideOps({
     <div className="side-ops">
       {!windowOpen && <div className="side-closed-note">转会窗未开放，转会相关操作暂不可用</div>}
       {body}
+    </div>
+  );
+}
+
+/* ---------- 近期成交参照（v6.17.0） ---------- */
+
+/**
+ * 违约金输入框下方的定价锚：同档成交（CA±5）、同档空时回落全局最近成交，一笔都没有就一句话空态。
+ * 只在面板展开时渲染——收着的时候不占地方。
+ */
+function SeaCompsBlock({ seaComps }: { seaComps: SeaComps }) {
+  if (seaComps.rows.length === 0) {
+    // scope='none' 有两种来源（后端同形下发，无从区分，文案就不下断言）：
+    // ①全服还没有海捞成交；②这名球员没过 ownership/status 关，后端按「没有参照意义」跳过计算
+    return (
+      <div className="sea-comps">
+        <p className="side-sub">暂无成交参照。先自己定价——这笔成交之后就成了别人的锚。</p>
+      </div>
+    );
+  }
+  const scopeLabel = seaComps.scope === 'same_tier' ? '同档成交（CA±5）' : '全局最近成交';
+  return (
+    <div className="sea-comps">
+      <p className="side-sub">
+        近期成交参照 · {scopeLabel}：违约金 → 海捞费
+      </p>
+      {seaComps.rows.map((c, i) => (
+        <div key={`${c.playerId}-${i}`} className="side-row">
+          <span>
+            {c.playerName}
+            {c.playerCa !== null && <span className="muted mono"> CA {c.playerCa}</span>}
+          </span>
+          <span className="mono">
+            {money(c.newReleaseFee)} → {money(c.signFee)}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

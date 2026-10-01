@@ -51,7 +51,7 @@ export function MarketNav() {
         市场板
       </NavLink>
       <NavLink to="/market/free" className={({ isActive }) => (isActive ? 'on' : '')}>
-        海捞
+        海捞情报
       </NavLink>
       <NavLink to="/market/mine" className={({ isActive }) => (isActive ? 'on' : '')}>
         我的

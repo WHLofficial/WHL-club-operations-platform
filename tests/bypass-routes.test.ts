@@ -357,22 +357,26 @@ describe('解约（termination）', () => {
 });
 
 describe('海捞（free_agent）', () => {
-  // 24 无归属自由球员；25 无归属但本窗解约过（由用例自行布置）
-  it('自由球员名单：无归属可见、本窗解约标禁签', async () => {
+  // 24 无归属自由球员（由用例自行布置）。旧「自由球员名单」接口（free-agents + bannedThisWindow 批查）
+  // 已随 v6.17.0 情报台退役，禁签口径改由两处断言：详情 seaSign 的原因 + 提交守卫的 409。
+  it('本窗被解约：详情 seaSign 标禁签原因，提交 409 且文案同源', async () => {
     const fx = await seedBypass();
-    fx.sqlite.exec(
-      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
-         (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free'),
-         (25, 'fc25', '旧将', NULL, 'CM', 30, 74, 74, 'free');
-       INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq)
-         VALUES ('termination', 25, ${fx.clubA}, NULL, 0, 'completed', 4, 1);`,
-    );
-    const res = await get('/api/market/free-agents', 'tok-coach', fx.env);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { freeAgents: { id: number; bannedThisWindow: boolean }[] };
-    const ids = Object.fromEntries(body.freeAgents.map((r) => [r.id, r.bannedThisWindow]));
-    expect(ids[24]).toBe(false);
-    expect(ids[25]).toBe(true);
+    // 乡贤免费解约走完整链：批准后 20 无归属，但本窗（S4W1）被解约过
+    expect((await post('/api/transfers/termination', { playerId: 20 }, 'tok-coach', fx.env)).status).toBe(201);
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+
+    const detail = await get('/api/players/20', 'tok-coach', fx.env);
+    expect(detail.status).toBe(200);
+    const seen = (await detail.json()) as { seaSign: { eligible: boolean; reason: string } };
+    expect(seen.seaSign).toEqual({
+      eligible: false,
+      reason: '这名球员本窗口被解约过，本窗口所有球队都不能签他',
+    });
+
+    const ban = await post('/api/transfers/free-agent', { playerId: 20, newReleaseFee: 5 }, 'tok-coach2', fx.env);
+    expect(ban.status).toBe(409);
+    expect(((await ban.json()) as { error: string }).error).toBe(seen.seaSign.reason);
   });
 
   it('提交：新 RC 不设上下限、签入费预检、归属校验', async () => {
@@ -396,7 +400,7 @@ describe('海捞（free_agent）', () => {
     expect((await post('/api/transfers/free-agent', { playerId: 20, newReleaseFee: 7 }, 'tok-coach', fx.env)).status).toBe(400);
   });
 
-  it('CPU 队球员可海捞：名单带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（v2.0.0）', async () => {
+  it('CPU 队球员可海捞：捞人榜带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（v2.0.0）', async () => {
     const fx = await seedBypass();
     const cpuClubId = 131681; // AC米兰(CPU)
     fx.sqlite.exec(
@@ -405,10 +409,10 @@ describe('海捞（free_agent）', () => {
          (26, 'fc26', '米兰人', ${cpuClubId}, 'ST', 27, 78, 80, 'normal');`,
     );
 
-    const listed = await get('/api/market/free-agents', 'tok-coach', fx.env);
-    expect(listed.status).toBe(200);
-    const pool = (await listed.json()) as { freeAgents: { id: number; clubName: string | null }[] };
-    expect(pool.freeAgents.find((r) => r.id === 26)?.clubName).toBe('AC米兰(CPU)');
+    const board = await get('/api/market/cpu-board', 'tok-coach', fx.env);
+    expect(board.status).toBe(200);
+    const pool = (await board.json()) as { cpuBoard: { id: number; clubName: string | null }[] };
+    expect(pool.cpuBoard.find((r) => r.id === 26)?.clubName).toBe('AC米兰(CPU)');
 
     fx.env.rng = () => 0.9;
     const submit = await post('/api/transfers/free-agent', { playerId: 26, newReleaseFee: 6 }, 'tok-coach2', fx.env);

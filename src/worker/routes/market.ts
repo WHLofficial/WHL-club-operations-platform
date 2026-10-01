@@ -15,6 +15,7 @@ import {
   TRAINEE_ACTIVATION_FEE,
 } from '../../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from '../seasons.ts';
+import { freeAgentFee } from '../../core/bypass-rules.ts';
 import { loadMarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
 import { availableBalance } from '../ledger.ts';
@@ -32,9 +33,6 @@ function nowSql() {
 }
 
 const LISTING_STATUSES = ['listed', 'bidding', 'matched_pending', 'pending_review', 'delisted'] as const;
-
-/** 海捞名单上限：两分支各自取这么多再合并（见 /market/free-agents 的 top-N 重写） */
-const FREE_AGENT_LIMIT = 300;
 
 interface ListingRow {
   id: number;
@@ -282,65 +280,89 @@ app.post('/market/listings', async (c) => {
   return c.json({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);
 });
 
-// GET /api/market/free-agents —— 自由球员（可海捞名单，教练侧）；本窗被解约的标禁签
-app.get('/market/free-agents', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
-  if (!club) return c.json({ club: null, freeAgents: [] });
+// GET /api/market/sea-signs —— 海捞成交动态（v6.17.0 情报台）：全服已完成海捞单据，最近优先。
+// 情报价值：成交价（新违约金）就是别人的定价锚，海捞费 = 违约金 × 30%（freeAgentFee 同源）。
+// 读量注：transfers 只收用户交易单据（旁路/竞价成交/激活三处写入，无比赛流水），全表几百到
+// 几千行的量级，无 (type,status) 索引直接扫不构成读放大——零迁移是本增量的既定约束。
+app.get('/market/sea-signs', async (c) => {
+  await requireCoach(c.env, c.req.raw, 'club.squad.manage');
 
-  const win = await getOpenWindow(c.env.DB);
-  // 名单 = 真无归属的球员 + CPU 队球员（v2.0.0：CPU 队有 clubs 行、其球员带 club_id，但照旧可海捞）
-  // 上限 300：海捞池含 4 支 CPU 队约 107 人 + 待业球员（v3.2.0 步骤 6 普查时生产已有 17,731 名自由身，
-  //   即 LIMIT 300 只露 CA 最高的那 300 人 —— 池子规模与「藏起低 CA 那半截」的老理由已不成比例，
-  //   分页/筛选是产品决策，登记在案未在本增量处理）
-  //
-  // 两分支 top-N 重写（v3.2.0 步骤 6）：普查实测这条查询单次 36,274 行，是全站最大读放大器。
-  //   原写法 (club_id IS NULL OR club_id IN ...) 让 SQLite 走 MULTI-INDEX OR + 临时排序，必须读出
-  //   全部 17,731 名自由身球员再排序，索引救不了它。拆成两支各取 top-N 再合并后（生产实测）：
-  //   · 无归属支 300 行 —— 沿 idx_players_club_ca(club_id, ca DESC, id) 走 ca 序、第 300 行即停（迁移 0030）
-  //   · CPU 队支 239 行 —— 必须让 clubs 当驱动表（CROSS JOIN 固定连接顺序）。写成 `club_id IN (子查询)`
-  //     时优化器会改用 idx_players_status 扫全部自由身球员（18,540 行）再过滤，CROSS JOIN 才把它掰过来。
-  //   等价性：club_id IS NULL 与 club_id ∈ CPU 队互斥（NULL 不等于任何值），两分支无重叠，
-  //   且全局 top-300 必然包含在各分支的 top-300 之内。
-  const nullClubBranch =
-    `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cl.name AS club_name
-     FROM players p
-     LEFT JOIN clubs cl ON cl.id = p.club_id
-     WHERE p.club_id IS NULL AND p.status IN ('free', 'normal')
-     ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
-  // CPU 队球员的东家就是 cp 本身，所以 club_name 取 cp.name，不必再 LEFT JOIN 一次 clubs
-  const cpuClubBranch =
+  const conds = [`t.type = 'free_agent'`, `t.status = 'completed'`];
+  const binds: (number | string)[] = [];
+  const season = c.req.query('season');
+  if (season !== undefined) {
+    if (!Number.isInteger(Number(season)) || Number(season) <= 0) throw new HttpError(400, 'season 应为正整数');
+    conds.push('t.season = ?');
+    binds.push(Number(season));
+  }
+  const windowSeq = c.req.query('windowSeq');
+  if (windowSeq !== undefined) {
+    if (!Number.isInteger(Number(windowSeq)) || Number(windowSeq) <= 0) throw new HttpError(400, 'windowSeq 应为正整数');
+    conds.push('t.window_seq = ?');
+    binds.push(Number(windowSeq));
+  }
+
+  const rows = await c.env.DB.prepare(
+    `SELECT t.id, t.player_id, t.fee, t.season, t.window_seq, t.completed_at,
+            ${sqlDisplayName('p')} AS player_name, p.ca AS player_ca,
+            cf.name AS from_club_name, ct.name AS to_club_name
+     FROM transfers t
+     JOIN players p ON p.id = t.player_id
+     LEFT JOIN clubs cf ON cf.id = t.from_club_id
+     JOIN clubs ct ON ct.id = t.to_club_id
+     WHERE ${conds.join(' AND ')}
+     ORDER BY t.completed_at DESC, t.id DESC
+     LIMIT 30`,
+  )
+    .bind(...binds)
+    .all<{
+      id: number;
+      player_id: number;
+      fee: number | null;
+      season: number | null;
+      window_seq: number | null;
+      completed_at: string | null;
+      player_name: string;
+      player_ca: number | null;
+      from_club_name: string | null;
+      to_club_name: string | null;
+    }>();
+
+  return c.json({
+    seaSigns: rows.results.map((r) => ({
+      id: r.id,
+      playerId: r.player_id,
+      playerName: r.player_name,
+      playerCa: r.player_ca,
+      // 真自由身（from_club_id IS NULL）没有原东家名，前端显示「自由身」
+      fromClubName: r.from_club_name,
+      toClubName: r.to_club_name,
+      // free_agent 单据的 fee 就是成交时定的新违约金（createFreeAgent 落库口径）
+      newReleaseFee: r.fee,
+      signFee: r.fee != null ? freeAgentFee(r.fee) : null,
+      season: r.season,
+      windowSeq: r.window_seq,
+      completedAt: r.completed_at,
+    })),
+  });
+});
+
+// GET /api/market/cpu-board —— CPU 捞人榜（v6.17.0 情报台）：CPU 队可海捞球员按 CA 降序全量。
+// 延续 v3.2.0 步骤 6 的 CROSS JOIN 写法：必须让 clubs 当驱动表，否则优化器改用 idx_players_status
+// 扫全部自由身球员（生产 17,731 名）。CPU 队约 107 人，LIMIT 500 只是防 CPU 队扩容的读量上界，
+// 不是产品分页。禁签不做内容展示（v6.17.0 用户裁决）：CPU 队不解约球员，榜上天然没有禁签球员。
+app.get('/market/cpu-board', async (c) => {
+  await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+
+  const rows = await c.env.DB.prepare(
     `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cp.name AS club_name
      FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id
      WHERE cp.is_cpu = 1 AND p.status IN ('free', 'normal')
-     ORDER BY p.ca DESC, p.id LIMIT ${FREE_AGENT_LIMIT}`;
-  const rows = await c.env.DB.prepare(
-    `SELECT * FROM (
-       SELECT * FROM (${nullClubBranch})
-       UNION ALL
-       SELECT * FROM (${cpuClubBranch})
-     ) ORDER BY ca DESC, id LIMIT ${FREE_AGENT_LIMIT}`,
+     ORDER BY p.ca DESC, p.id LIMIT 500`,
   ).all<{ id: number; fc_id: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_name: string | null }>();
 
-  const banned = new Set<number>();
-  if (win && rows.results.length > 0) {
-    const ids = rows.results.map((r) => r.id);
-    for (let i = 0; i < ids.length; i += 90) {
-      const slice = ids.slice(i, i + 90);
-      const rowsBanned = await c.env.DB.prepare(
-        `SELECT DISTINCT player_id FROM transfers
-         WHERE type = 'termination' AND status = 'completed' AND season = ? AND window_seq = ?
-           AND player_id IN (${slice.map(() => '?').join(', ')})`,
-      )
-        .bind(win.season, win.windowSeq, ...slice)
-        .all<{ player_id: number }>();
-      for (const r of rowsBanned.results) banned.add(r.player_id);
-    }
-  }
-
   return c.json({
-    club: { id: club.id, name: club.name },
-    freeAgents: rows.results.map((r) => ({
+    cpuBoard: rows.results.map((r) => ({
       id: r.id,
       fcId: r.fc_id,
       name: r.name,
@@ -349,7 +371,6 @@ app.get('/market/free-agents', async (c) => {
       ca: r.ca,
       pa: r.pa,
       clubName: r.club_name,
-      bannedThisWindow: banned.has(r.id),
     })),
   });
 });

@@ -473,6 +473,8 @@ export default function Player() {
             isCoach={isCoach}
             myClubId={myClubId}
             windowOpen={windowOpen}
+            seaSign={data.seaSign}
+            seaComps={data.seaComps}
             pendingMine={receivedPendingQuery.data?.pendingMine ?? 0}
             show={show}
             refreshAll={refreshAll}

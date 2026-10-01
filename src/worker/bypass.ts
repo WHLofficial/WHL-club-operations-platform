@@ -8,7 +8,7 @@ import { releaseFeeBounds } from '../core/negotiation-rules.ts';
 import { rcChangeFee, terminationFee, freeAgentFee, matchDiff, FORCED_AUCTION_PRICE } from '../core/bypass-rules.ts';
 import { round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
-import { getOpenWindow } from './seasons.ts';
+import { getOpenWindow, type OpenWindow } from './seasons.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import {
@@ -39,19 +39,82 @@ interface OwnPlayerRow {
 }
 
 // 球员已在市场/审核流程里的一票否决（4.4.10「正在被挂牌、解约的球员不可更改违约金」同源）
-async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void> {
+async function findInFlight(db: D1Database, playerId: number): Promise<'listing' | 'pending' | null> {
   const listing = await db
     .prepare(
       `SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'matched_pending', 'pending_review') LIMIT 1`,
     )
     .bind(playerId)
     .first<{ id: number }>();
-  if (listing) throw new HttpError(400, '这名球员已经有一单在市场流程里了，等它结束再操作');
+  if (listing) return 'listing';
   const pending = await db
     .prepare(`SELECT id FROM transfers WHERE player_id = ? AND status = 'pending_review' LIMIT 1`)
     .bind(playerId)
     .first<{ id: number }>();
-  if (pending) throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
+  if (pending) return 'pending';
+  return null;
+}
+
+async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void> {
+  const kind = await findInFlight(db, playerId);
+  if (kind === 'listing') throw new HttpError(400, '这名球员已经有一单在市场流程里了，等它结束再操作');
+  if (kind === 'pending') throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
+}
+
+export type SeaSignStage = 'window' | 'ownership' | 'status' | 'banned' | 'listing' | 'pending' | 'ok';
+
+export interface SeaSignVerdict {
+  stage: SeaSignStage;
+  ok: boolean;
+  /** ok=false 时调用方应抛的 HttpError 状态码 */
+  status: number;
+  /** ok=false 时给用户看的中文原因 */
+  reason: string;
+  errCode?: string;
+}
+
+/**
+ * 海捞资格判定（v6.17.0）：与 createFreeAgent 的守卫链同源——它不是镜像，createFreeAgent
+ * 直接吃这里的 verdict 抛错，判定口径永不漂移。stage 供球员详情的 seaComps 决定要不要算
+ * 成交参照（被 ownership/status 两关拦下的球员没有参照意义）。守卫顺序不得调整：用户看到的
+ * 拦截原因取决于第一道亮红灯的关（如先查归属再查状态）。
+ */
+export async function checkSeaSignEligible(
+  db: D1Database,
+  player: { id: number; club_id: number | null; status: string },
+  win: OpenWindow | null,
+): Promise<SeaSignVerdict> {
+  if (!win)
+    return { stage: 'window', ok: false, status: 409, reason: '转会窗口没开，现在不能海捞', errCode: 'no_window' };
+  // 海捞 = 签无归属的球员（4.4.4）。CPU 队球员带 club_id 但仍是海里人（v2.0.0，用户裁决）：
+  // 出账与落位都按「从 CPU 队签走」处理，不给 CPU 队记任何账。
+  const cpuIds = await cpuClubIds(db);
+  if (player.club_id !== null && !cpuIds.has(player.club_id)) {
+    return { stage: 'ownership', ok: false, status: 400, reason: '海捞只能签无归属的球员（这名球员有东家）' };
+  }
+  if (player.status === 'retired' || player.status === 'listed')
+    return { stage: 'status', ok: false, status: 400, reason: '当前状态不能海捞' };
+  // 4.4.4：本转会窗被解约的球员，所有球队本窗都无法签入
+  const banned = await db
+    .prepare(
+      `SELECT id FROM transfers WHERE player_id = ? AND type = 'termination' AND status = 'completed'
+         AND season = ? AND window_seq = ? LIMIT 1`,
+    )
+    .bind(player.id, win.season, win.windowSeq)
+    .first<{ id: number }>();
+  if (banned)
+    return {
+      stage: 'banned',
+      ok: false,
+      status: 409,
+      reason: '这名球员本窗口被解约过，本窗口所有球队都不能签他',
+    };
+  const inFlight = await findInFlight(db, player.id);
+  if (inFlight === 'listing')
+    return { stage: 'listing', ok: false, status: 400, reason: '这名球员已经有一单在市场流程里了，等它结束再操作' };
+  if (inFlight === 'pending')
+    return { stage: 'pending', ok: false, status: 400, reason: '这名球员有一张单据正在等管理组审核，先等审核结果' };
+  return { stage: 'ok', ok: true, status: 200, reason: '' };
 }
 
 // 旁路附加费扣收：流水幂等闸（kind+ref 只记一次）+ 单据守卫 + 批内可用余额守卫
@@ -376,23 +439,10 @@ export async function createFreeAgent(
     .bind(playerId)
     .first<OwnPlayerRow>();
   if (!player) throw new HttpError(404, '球员不存在');
-  // 海捞 = 签无归属的球员（4.4.4）。CPU 队球员带 club_id 但仍是海里人（v2.0.0，用户裁决）：
-  // 出账与落位都按「从 CPU 队签走」处理（fromClubId 记 CPU 队 id），不给 CPU 队记任何账。
-  const cpuIds = await cpuClubIds(db);
-  if (player.club_id !== null && !cpuIds.has(player.club_id)) {
-    throw new HttpError(400, '海捞只能签无归属的球员（这名球员有东家）');
-  }
-  if (player.status === 'retired' || player.status === 'listed') throw new HttpError(400, '当前状态不能海捞');
-  // 4.4.4：本转会窗被解约的球员，所有球队本窗都无法签入
-  const banned = await db
-    .prepare(
-      `SELECT id FROM transfers WHERE player_id = ? AND type = 'termination' AND status = 'completed'
-         AND season = ? AND window_seq = ? LIMIT 1`,
-    )
-    .bind(playerId, win.season, win.windowSeq)
-    .first<{ id: number }>();
-  if (banned) throw new HttpError(409, '这名球员本窗口被解约过，本窗口所有球队都不能签他');
-  await ensureNotInFlight(db, playerId);
+  // 守卫链（窗口 → 归属 → 状态 → 本窗禁签 → 在途）整体收进 checkSeaSignEligible，
+  // 球员详情的 seaSign 前置判定吃同一个函数（v6.17.0），两边口径不会漂移
+  const verdict = await checkSeaSignEligible(db, player, win);
+  if (!verdict.ok) throw new HttpError(verdict.status, verdict.reason, verdict.errCode);
 
   const signFee = freeAgentFee(newFee);
   const available = await availableBalance(db, clubId);

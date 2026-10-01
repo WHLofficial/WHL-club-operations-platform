@@ -6,10 +6,12 @@ import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../..
 import { ttlForScope } from '../../lib/cache-policy.ts';
 import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId } from '../../core/fc26.ts';
-import { serviceSeasons } from '../../core/bypass-rules.ts';
+import { serviceSeasons, freeAgentFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
+import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
+import { getOpenWindow } from '../seasons.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
 import { MARKER_VALUES, MARKER_WEIGHT, markerOf, markerWeightSql, type PlayerMarker } from '../../core/squad-rules.ts';
 import { playerAbilityLevel } from '../home.ts';
@@ -964,6 +966,84 @@ app.get('/players/:id', async (c) => {
   // 窗刻度（v3.0.0）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
   const currentTicks = ticksRow?.n ?? 0;
 
+  // 海捞情报（v6.17.0）：资格判定与 createFreeAgent 守卫链同源——checkSeaSignEligible 就是那条链，
+  // 不是镜像。成交参照只对守卫链全过的球员才算：详情是公开面，参照在前端只出现在
+  // 「可签 → 展开海捞面板」这一条路径里，非 ok 状态算了也无人消费（评审 P1，6.17.0）；
+  // 同档 = 成交球员现值 CA ±5 内最近 ≤5 笔，没有同类则回落全局最近 3 笔，一笔都没有就空态。
+  const seaWin = await getOpenWindow(c.env.DB);
+  const verdict: SeaSignVerdict = await checkSeaSignEligible(c.env.DB, p, seaWin);
+  const compsSkip = verdict.stage !== 'ok';
+  const seaComps: {
+    scope: 'same_tier' | 'global' | 'none';
+    rows: {
+      playerId: number;
+      playerName: string;
+      playerCa: number | null;
+      fromClubName: string | null;
+      toClubName: string | null;
+      newReleaseFee: number | null;
+      signFee: number | null;
+      season: number | null;
+      windowSeq: number | null;
+      completedAt: string | null;
+    }[];
+  } = { scope: 'none', rows: [] };
+  if (!compsSkip) {
+    // 读量注：transfers 只收用户交易单据（旁路/竞价成交/激活三处写入），全表几百到几千行，
+    // 无 (type,status) 索引直接扫不构成读放大——零迁移是本增量的既定约束
+    const compsSelect = `SELECT t.id, t.player_id, t.fee, t.season, t.window_seq, t.completed_at,
+            ${sqlDisplayName('p')} AS player_name, p.ca AS player_ca,
+            cf.name AS from_club_name, ct.name AS to_club_name
+     FROM transfers t
+     JOIN players p ON p.id = t.player_id
+     LEFT JOIN clubs cf ON cf.id = t.from_club_id
+     JOIN clubs ct ON ct.id = t.to_club_id
+     WHERE t.type = 'free_agent' AND t.status = 'completed'`;
+    const toComp = (r: {
+      player_id: number;
+      fee: number | null;
+      season: number | null;
+      window_seq: number | null;
+      completed_at: string | null;
+      player_name: string;
+      player_ca: number | null;
+      from_club_name: string | null;
+      to_club_name: string | null;
+    }) => ({
+      playerId: r.player_id,
+      playerName: r.player_name,
+      playerCa: r.player_ca,
+      fromClubName: r.from_club_name,
+      toClubName: r.to_club_name,
+      newReleaseFee: r.fee,
+      signFee: r.fee != null ? freeAgentFee(r.fee) : null,
+      season: r.season,
+      windowSeq: r.window_seq,
+      completedAt: r.completed_at,
+    });
+    const caBase = p.ca;
+    const sameTier =
+      caBase != null
+        ? await c.env.DB.prepare(
+            `${compsSelect} AND p.ca BETWEEN ? AND ? ORDER BY t.completed_at DESC, t.id DESC LIMIT 5`,
+          )
+            .bind(caBase - 5, caBase + 5)
+            .all<Parameters<typeof toComp>[0]>()
+        : { results: [] as Parameters<typeof toComp>[0][] };
+    if (sameTier.results.length > 0) {
+      seaComps.scope = 'same_tier';
+      seaComps.rows = sameTier.results.map(toComp);
+    } else {
+      const global = await c.env.DB.prepare(
+        `${compsSelect} ORDER BY t.completed_at DESC, t.id DESC LIMIT 3`,
+      ).all<Parameters<typeof toComp>[0]>();
+      if (global.results.length > 0) {
+        seaComps.scope = 'global';
+        seaComps.rows = global.results.map(toComp);
+      }
+    }
+  }
+
   let gameAttrs: Record<string, unknown> | null = null;
   if (p.game_attrs) {
     try {
@@ -1025,7 +1105,10 @@ app.get('/players/:id', async (c) => {
           signedSeason: contract.signed_season,
           signedWindowSeq: contract.signed_window_seq,
         }
-      : null,
+        : null,
+    // 海捞情报（v6.17.0）：可签/不可签 + 原因（与 createFreeAgent 守卫链同源）；seaComps 见上方注释
+    seaSign: { eligible: verdict.ok, reason: verdict.ok ? null : verdict.reason },
+    seaComps,
   });
 });
 
