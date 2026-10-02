@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.22.0] · 窄屏整治第三批：公开阅读页——球员页事件卡 + 参考型宽表粘列 + 顶栏渐隐提档（2026-10-02）
+
+窄屏整治第三批（spec `docs/superpowers/specs/2026-10-02-mobile-public-reading-design.md`，含用户操作流线九条）。**Player 转会/成长两表 ≤760 卡片化**（`useMediaQuery` 两端 DOM 互斥，桌面 1280 逐字节零变化；卡片字段语义逐条照抄表格版）；**参考型宽表粘前两列** `.table-sticky-2` ≤760（市场情报成交表 / 出价历史 / 阵容名单三张裸表，首列三态定宽 `--stky-c1` + `:has()` 认表逐表覆盖）；**`.dossier` 单列断点 640→900**；**顶栏页签渐隐 mask 提档 ≤640→≤1024**（挪走非复制，中屏同样需要滚动提示；TopBar JS 零改动）；**toast 点击穿透**（`pointer-events:none` + 成长录入汇总条在场时 `body:has()` 上抬）。e2e 15→16（⑯ 公开阅读几何：dossier 单列 + 页签横滑 computed 断言 + 事件卡 fit ±1px + intel 粘列第二列留视口 + 无缝 ≤1px）；`tests/mobile-baseline.test.ts` 增 v6.22.0 五例 + 媒体块归属例。零迁移零生产写。判级 minor。测试计划 `docs/test-plans/v6.22.0-public-reading-mobile.md`（33 TC + 6 变异）；vitest 69 文件 / 1225 例全绿（v6.21.0 基线 69/1219，净 +6 例）、e2e 16/16、code-review P0 0 / P1 1 / P2 3 / P3 3（修登分明）。
+
+**Added**
+- Player.tsx 转会记录/成长事件 ≤760 卡片流（event-cards/event-card/event-card-head/event-card-grid/event-card-foot）。
+- 三张参考型宽表挂 `className="table-sticky-2"`（MarketIntelPage / MarketBoardPage / ClubDetail）。
+- e2e ⑯ 公开阅读几何；静态闸门 v6.22.0 五例 + 媒体块归属例。
+
+**Changed**
+- styles.css 新增五块：≤900 dossier 单列 / ≤760 dossier-tabs 横滑 / ≤760 event-cards 铭牌卡 / ≤760 table-sticky-2 粘前两列（`--stky-c1` 默认 6em + `:has()` 逐表 8em/9em）/ toast pointer-events + `body:has(.entry-sumbar)` 上抬；≤1024 顶栏渐隐 mask 块（自 ≤640 挪入）。
+- TopBar 页签渐隐从 ≤640 提档到 ≤1024（mask 规则整体挪移，641–1024 中屏同样生效；TopBar JS 无改动）。
+- `.dossier` 单列断点 640→900（>900 双栏 280px+1fr 桌面零变化）。
+
 ## [v6.21.0] · 窄屏整治第二批：编辑面板卡片化 + 品牌卡 + 教练台粘性列（2026-10-02）
 
 窄屏整治第二批（spec `docs/superpowers/specs/2026-10-02-mobile-remediation-batch2.md`，含用户操作流线与两轮订正记录）。**成长录入 ≤760px 卡片化**：表格/卡片互斥分支（`useMediaQuery`），铭牌卡语言字段网格 2 列（评分 `inputMode=decimal`），已录/训练营/校验问题/脏行状态语义逐条照抄表格版，进球/助攻只读标「自动」；常驻汇总条（本场合计 XP + 脏行数 + 全部保存）`createPortal` 挂 body、`position:fixed` 贴视口底（sticky 在 `.table-wrap` 滚动容器内无行程，评审期再修面板出宽：`container-type:inline-size` + `width:100cqw`，e2e fit ±1px 断言锁死）。**BrandsPage 赞助表 ≤760 卡片化**：brand-card 四控件网格 + brand-card-meta 来源/状态/生效冠名与桌面 8 列对等 + 窄屏新增品牌表单；桌面表格分支含白名单 96/72/84 逐字节保留。**CoachPanel 财务/花名册表 ≤640 粘性前两列**（`coach-sticky`，显式底色防透底）。ImportsPage 核查零改动。e2e 13→15（⑭ 成长补录卡片流含 fit 几何 + POST 拦截 + 回滚幂等、⑮ coach-sticky 条件几何）；`tests/mobile-baseline.test.ts` 增 TC-SWP-05 与 v6.21.0 五静态例。零迁移零生产写。**已上线**（2026-10-02 发布，与 v6.20.0 同一次 push/部署）。判级 minor。测试计划 `docs/test-plans/v6.21.0-edit-panel-mobile.md`（33 TC + 6 变异）；vitest 69 文件 / 1219 例全绿（v6.20.0 基线 69/1213，净 +6 例）、e2e 15/15、code-review P0 0 / P1 2 / P2 5 / P3 3（修登分明）。
