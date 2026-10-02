@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口，v6.19.0 球员库窄屏卡片化）：
+// 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口，
+// v6.19.0 球员库窄屏卡片化，v6.20.0 加全路由 375 零溢出扫描⑫ + 管理抽屉开合⑬）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
 // 球队页（⑨⑩）例外：本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id），
@@ -958,6 +959,111 @@ async function main() {
         `捕获到 ${pageErrors.length} 条：\n  ${pageErrors.slice(0, 5).join('\n  ')}`,
       );
       assert(unexpected.length === 0, `出现非预期失败请求：\n  ${unexpected.slice(0, 5).join('\n  ')}`);
+    });
+
+    // ---- v6.20.0：全站保底 + 管理抽屉 ----
+    // ⑫⑬ 放在 ⑪ 之后是有意的：扫描会踩过本地 TOUR_DB 旧 schema 的已知 500（EMPTY_TOUR_DB_PATHS
+    // 之外还有一批 admin 读端点），若放在 ⑪ 之前就得逐条进白名单；放在 ⑪ 之后，⑪ 断言已定格，
+    // 这些噪声自然不参与判定。
+
+    await check('⑫ 全路由 375×812 零溢出扫描（公开 + 登录 + admin 11 子页）', async () => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      // 路由清单 = App.tsx 全量注册（v6.20.0 spec §3 的保底口径）：/clubs/1、/players/1 是两个
+      // 详情取样。本地读端点 500 的页面会落错误横幅——壳照样渲染，横滚照样要量，失败横幅不豁免。
+      const ROUTES = [
+        '/', '/players', '/players/1', '/clubs', '/clubs/1',
+        '/market', '/market/free', '/market/intel', '/market/mine',
+        '/club', '/negotiations', '/offers', '/ledger', '/notifications',
+        '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
+        '/admin/market', '/admin/clubs', '/admin/brands', '/admin/events', '/admin/finance',
+        '/admin/system',
+      ];
+      const bad = [];
+      for (const route of ROUTES) {
+        await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle' });
+        const ov = await page.evaluate(() => {
+          const d = document.documentElement;
+          return { scrollW: d.scrollWidth, clientW: d.clientWidth };
+        });
+        console.log(`   ${route}：${ov.scrollW}/${ov.clientW}`);
+        if (ov.scrollW > ov.clientW + 1) bad.push(`${route}（${ov.scrollW} > ${ov.clientW}）`);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      assert(bad.length === 0, `${bad.length}/${ROUTES.length} 个路由在 375 宽下撑破文档：${bad.join('、')}`);
+    });
+
+    await check('⑬ 管理端窄屏抽屉：开合 / Esc / 路由自动关 / 遮罩关；宽屏零变化', async () => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${BASE}/admin/clubs`, { waitUntil: 'networkidle' });
+      // 关着的抽屉是 translateX(-105%)，仍有 boundingBox ⇒ 用 x 判在场，不能用 isVisible（⑧ 同款）
+      const sideX = () =>
+        page.evaluate(() => document.querySelector('.admin-sidebar')?.getBoundingClientRect().x ?? null);
+      const sideOffscreen = () =>
+        page.waitForFunction(
+          () => {
+            const el = document.querySelector('.admin-sidebar');
+            return !!el && el.getBoundingClientRect().x < 0;
+          },
+          null,
+          { timeout: TIMEOUT },
+        );
+      const toggle = page.locator('button.admin-nav-toggle');
+      assert(await toggle.isVisible(), '窄屏没有渲染导航切换钮');
+      assert(!(await page.locator('.admin-drawer-mask').isVisible().catch(() => false)), '抽屉关着时不应有遮罩');
+      const closedX = await sideX();
+      assert(closedX === null || closedX < 0, `抽屉关着时应移出视口（x=${closedX}）`);
+
+      // 点钮开：滑入 + .open 类 + 锁滚 + 焦点落在关闭钮（与球员库抽屉同款契约）
+      await toggle.click();
+      await page.locator('.admin-drawer-mask').waitFor({ timeout: TIMEOUT });
+      await page.waitForFunction(
+        () => {
+          const el = document.querySelector('.admin-sidebar');
+          return !!el && el.getBoundingClientRect().x >= 0;
+        },
+        null,
+        { timeout: TIMEOUT },
+      );
+      assert((await page.locator('.admin-sidebar.open').count()) === 1, '开态应有 .open 类');
+      assert(
+        (await page.evaluate(() => document.body.style.overflow)) === 'hidden',
+        '抽屉开着时背景未锁滚',
+      );
+      const focused = await page.evaluate(() => document.activeElement?.className ?? 'null');
+      assert(
+        String(focused).includes('admin-drawer-close'),
+        `打开抽屉后焦点应在关闭钮上（实际 ${focused}）`,
+      );
+
+      // Esc 关
+      await page.keyboard.press('Escape');
+      await sideOffscreen();
+
+      // 点链接导航 → 自动关（抽屉必须不挡路由跳转后的屏幕）
+      await toggle.click();
+      await page.locator('.admin-drawer-mask').waitFor({ timeout: TIMEOUT });
+      await page.locator('.admin-sidebar a[href="/admin/players"]').first().click();
+      await page.waitForFunction(() => location.pathname === '/admin/players', null, { timeout: TIMEOUT });
+      await sideOffscreen();
+
+      // 遮罩点击关（点遮罩右缘，别点到盖在上面的抽屉面板）
+      await toggle.click();
+      await page.locator('.admin-drawer-mask').waitFor({ timeout: TIMEOUT });
+      await page.locator('.admin-drawer-mask').click({ position: { x: 340, y: 300 } });
+      await sideOffscreen();
+      assert(
+        !(await page.locator('.admin-drawer-mask').isVisible().catch(() => false)),
+        '关闭后遮罩应消失',
+      );
+
+      // 桌面零变化铁律：宽屏不渲染切换钮、无遮罩、侧栏常驻（DOM 口径，非样式抽查）
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`${BASE}/admin/clubs`, { waitUntil: 'networkidle' });
+      assert((await page.locator('button.admin-nav-toggle').count()) === 0, '宽屏不应渲染切换钮');
+      assert((await page.locator('.admin-drawer-mask').count()) === 0, '宽屏不应有遮罩');
+      assert(await page.locator('.admin-sidebar').isVisible(), '宽屏侧栏应常驻可见');
+      const t = await text();
+      assert(t.includes('管理端'), '宽屏管理端壳渲染异常');
     });
   } finally {
     await browser.close();
