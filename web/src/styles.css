@@ -243,6 +243,9 @@ h3 {
 
 .inbox-text {
   flex: 1;
+  /* flex item 默认 min-width:auto，长摘要会把时间戳顶出视口（375 下 /notifications 溢出 3px） */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .inbox-time {
@@ -714,6 +717,27 @@ tbody tr:hover td {
     overflow-x: auto;
     padding-bottom: 2px;
     scrollbar-width: none;
+    /* v6.20.0：横滑页签此前没有任何滚动提示，右边界还有没有页面用户看不见。
+       渐隐由 TopBar 按滚动位置贴类（can-left / can-right）：只有「那一侧确实还有没露出来的
+       页签」时才渐隐，滚到头的一侧提示自己消失。mask 只做 paint：不占位、不挡点击
+       （伪元素方案要另处理 pointer-events 与溢出裁剪）。只渐隐最外侧 16px，页签文字仍完整可读。 */
+  }
+
+  .nav-links.can-left.can-right {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  }
+
+  /* 已滚到最左：右侧还有没露出来的页签 */
+  .nav-links.can-right:not(.can-left) {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+  }
+
+  /* 已滚到最右：左侧还有没露出来的页签 */
+  .nav-links.can-left:not(.can-right) {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px);
   }
 
   .nav-tab {
@@ -727,6 +751,14 @@ tbody tr:hover td {
   .btn,
   .nav-tab {
     min-height: 36px;
+  }
+
+  /* v6.20.0：推荐下拉是绝对定位、锚在搜索框左边缘，而 .library-search 靠 margin-left:auto 贴右，
+     面板（≥260px）比搜索框宽 ⇒ 右边缘伸出视口被裁。窄屏改成贴搜索框右边缘展开，宽度再按视口收口。 */
+  .search-suggest {
+    left: auto;
+    right: 0;
+    max-width: min(360px, 86vw);
   }
 }
 
@@ -1507,6 +1539,8 @@ tbody tr:hover td {
 
 .ledger-book {
   display: grid;
+  /* minmax(0,1fr)：隐式列会被 .table-wrap 的 max-content 撑到视口外（375 下 /ledger 溢出），锁回容器宽 */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   max-width: 960px;
 }
@@ -1758,7 +1792,8 @@ tbody tr:hover td {
   left: 0;
   /* 在顶栏（z-index 20）之下、表格之上：滚动到顶栏相接时下拉从顶栏下方滑走，不盖住导航 */
   z-index: 10;
-  min-width: 260px;
+  /* v6.20.0：面板至少要 260px 才放得下「姓名 + 俱乐部」，视口比它还窄时取 86vw（同 .multiselect-panel 先例） */
+  min-width: min(260px, 86vw);
   max-width: 360px;
   max-height: 300px;
   overflow-y: auto;
@@ -2605,14 +2640,91 @@ th.num .th-sort {
   flex-direction: column;
   gap: 16px;
 }
+/* ---- 窄屏抽屉部件（v6.20.0，只在 ≤760 渲染/生效；桌面不渲染这些节点） ---- */
+/* 抽屉入口：.admin-shell 的栅格子项默认会被拉满整列，收回内容宽 */
+.admin-nav-toggle {
+  justify-self: start;
+}
+/* 抬头（含唯一的 ×）在抽屉里吸顶：抽屉内容一长就滚，关闭入口不能跟着滚走。
+   负边距把抬头摊到侧栏内边距之外，滚动时内容不会从抬头上方露出来。 */
+.admin-drawer-head {
+  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: -12px -14px 10px;
+  padding: 12px 14px 10px;
+  font-size: 14px;
+  color: rgba(253, 244, 227, 0.78);
+  background: var(--cocoa);
+}
+.admin-drawer-close {
+  padding: 2px 10px;
+  border: 1px solid rgba(253, 244, 227, 0.35);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--paper);
+  font-size: 16px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.admin-drawer-close:hover {
+  border-color: var(--paper);
+  color: #fff;
+}
+/* 遮罩配色与 .modal-mask / .lib-drawer-mask 一致（用户已认识这个「后面不能点」的视觉语言）；
+   z-index 在顶栏（20）之上、抽屉（30）之下 */
+.admin-drawer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: rgba(43, 29, 18, 0.45);
+}
+/* 窄屏（v6.20.0）：11 项链接挤三行的 static 行改成左侧滑出抽屉，做法与 .library-side 一致
+   （v3.1.0 决策 7/15/16）。关着的时候靠 React 的 inert 让它不可点不可 Tab，不用 visibility 过渡：
+   过渡在 t=0 仍是 hidden，会让「打开就把焦点移进抽屉」那一步静默失败。
+   top 让开顶栏：--topbar-h 由 TopBar 用 ResizeObserver 实测回写（样式表里的 54/102px 只是默认字号下的常量）。 */
 @media (max-width: 760px) {
   .admin-shell {
     grid-template-columns: 1fr;
   }
   .admin-sidebar {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
+    position: fixed;
+    top: var(--topbar-h);
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(280px, 85vw);
+    overflow-y: auto;
+    padding: 12px 14px 32px;
+    border-radius: 0 10px 10px 0;
+    box-shadow: 0 0 24px rgba(43, 29, 18, 0.18);
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+    /* 抽屉滚到底后继续滑不把整页带着滚（iOS 上 body 的 overflow: hidden 挡不住） */
+    overscroll-behavior: contain;
+  }
+  .admin-sidebar.open {
+    transform: none;
+  }
+  /* 触控目标抬到 36px（与窄屏的 .btn / .nav-tab 同口径），文字垂直居中 */
+  .admin-sidebar .admin-nav-link {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+  }
+  .admin-drawer-head {
+    display: flex;
+  }
+}
+
+/* 与管理端抽屉同一理由（见样式表上方 .library-side 那条）：动效关掉时抽屉直接出现 */
+@media (prefers-reduced-motion: reduce) {
+  .admin-sidebar {
+    transition: none;
   }
 }
 
