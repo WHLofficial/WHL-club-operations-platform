@@ -1495,6 +1495,18 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.21.0 · 窄屏整治第二批：编辑面板卡片化 + 品牌卡 + 教练台粘性列（2026-10-02）
+
+**状态**：**本地完成，未发布（发布等令，与 v6.20.0 一次 push）**。零迁移零生产写（纯前端 + e2e + 静态闸门，后端零改动）。typecheck 三份全清、vitest **69 文件 / 1219 例**全绿（v6.20.0 基线 69/1213，净 +6 例 = e2e 配套静态闸门五例 + TC-SWP-05）、build 成功、e2e **15/15**（⑭⑮ 新增）、测试计划 `docs/test-plans/v6.21.0-edit-panel-mobile.md`（33 TC = P0 14 / P1 11 / P2 8，分组 TC-ENT/TC-BRD/TC-IMP/TC-CCH/TC-E2E/TC-REG + 变异 V1–V6；V3 口径实施期反转：汇总条 fixed 是正解，退回流内才是变异）、code-review-skill 独立评审 P0 0 / P1 2 / P2 5 / P3 3（除登记不改外全修）。
+
+**缘起与裁决**：v6.20.0 批次路线第二批（spec `docs/superpowers/specs/2026-10-02-mobile-remediation-batch2.md`，含用户操作流线：管理端成长录入 → 比赛列表「录数据」行内展开 → 窄屏卡片逐行编辑 → 常驻汇总条 → 全部保存；§0 记录实施期与评审期两轮订正）。① GrowthEntryPage ≤760 表格/卡片互斥分支（`useMediaQuery`，`ENTRY_CARDS_QUERY='(max-width: 760px)'`），卡片照球员库铭牌语言（#fffdf7 底/#e6dcc8 描边/焦橙 focus），字段网格 2 列（评分 `inputMode=decimal`、扑救/夺回球权 numeric）、进球/助攻只读标「自动」、已录/训练营/校验问题状态语义逐条照抄表格版、脏行焦橙描边；≤380 单列回落。② BrandsPage 赞助表 ≤760 卡片化（brand-cards/brand-card/brand-card-grid/brand-new-form + brand-card-meta 来源/状态/生效冠名与桌面 8 列对等），**桌面表格分支含白名单 96/72/84 逐字节保留**（v6.20.0 白名单双向核对契约不破）。③ CoachPanel 财务表/花名册表 `<table>` 加 `coach-sticky`（恰 2 处），≤640 粘前两列 th+td（显式底色三态防透底、右缘描边阴影）。④ ImportsPage 核查后零改动（label.field 已 block 全宽、预览表已包裹）。实现动线：A GrowthEntry+styles / B Brands+CoachPanel / C 测试计划三个 subagent（文件集不相交），主会话 spec / e2e ⑭⑮ / 整合 / 评审修复。
+
+**关键陷阱（评审 P1-1，已修）**：补录面板活在主比赛表 `td colSpan=6` 内，td 宽随主表 min-content（nowrap 表头 ≈500–580px）→ 375 下卡片约 1.5× 视口、卡脚保存钮出屏；⑫ 只量 `documentElement.scrollWidth` 吃掉了溢出故机械闸门绿。修法三层：≤760 块 `.table-wrap{container-type:inline-size}` + `.entry-row>td{padding:0}` + `.entry-panel{position:sticky;left:0;width:100cqw}`（cqw 无支持回退旧态）；**container-type 蕴含布局包容 → .table-wrap 成为 fixed 后代包含块 → 汇总条必须 `createPortal` 逃到 `document.body`**。另有实施期陷阱：sumbar 原 `position:sticky;bottom:0` 只贴外层 `.table-wrap`（overflow-x:auto 是滚动容器）纵轴无行程，改 `position:fixed` 视口底横条 + `.entry-panel padding-bottom` 脱流补偿；⑭ 加「汇总条贴视口底 ±2px」几何断言锁死。本地 dev（wrangler dev）直服预构建 web/dist，改源码必须先 `vite build` 再跑 e2e。
+
+**e2e 13→15**：⑭ 成长补录卡片流（宽屏表格分支互斥 → 375 卡片流 + fit 几何断言（面板左右缘在视口 ±1px）→ 拦 POST 写入 → 查看模式全锁定 → 回滚 SQL 幂等）；⑮ coach-sticky 条件几何（≤640 computed sticky + 横滚后第 2 列留视口 + 1280 static；本地教练台真渲染走完整几何路径，无降级）+ 静态闸门 TC-SWP-05（coach-sticky className 形态计数 + styles.css ≤640 sticky 规则）与 v6.21.0 五静态例（TC-ENT-03/09、TC-REG-02、TC-BRD-02、TC-IMP-03：类名 token 正则 + 互斥 + 状态语义 + inputMode 计数 + 白名单不回归）。
+
+**登记（评审 P3，不改）**：coach-sticky 列宽假设 4.5em（表头文案变更需同步）；toast z-index 100 短暂盖汇总条 15；⑭ 回滚只处理 perPlayer[0]（单行写入足够）。
+
 ## v6.20.0 · 窄屏整治第一批：管理壳抽屉骨架 + 全站保底横扫（2026-10-02）
 
 **状态**：**本地完成，未发布（发布等令）**。零迁移零生产写（纯前端 + e2e，后端零改动），发布时直接 push 即可。typecheck 三份全清、vitest **69 文件 / 1213 例**全绿（v6.19.0 基线 68/1209，净 +1 文件 / +4 例 = 静态闸门 `tests/mobile-baseline.test.ts`）、build 成功、e2e **13/13**（⑫ 26/26 路由零溢出）、测试计划 `docs/test-plans/v6.20.0-mobile-skeleton-baseline.md`（31 TC = P0 12 / P1 12 / P2 7 + 变异 V1–V6；P1-2 落地后基线数字已同步 69/1213）、code-review-skill 独立评审 P0 1 / P1 3 / P2 4 / P3 6（除登记不改外全修）。
