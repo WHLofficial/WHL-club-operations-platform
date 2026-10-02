@@ -5,6 +5,9 @@
 //   降级），粘性回归由本例兜住；判据按 className 形态计数（P2-2：文本计数会把注释误算进去）。
 // - TC-ENT-03/09、TC-REG-02、TC-BRD-02、TC-IMP-03（P1-2：测试计划承诺的静态用例落地）——
 //   卡片流类名契约与窄屏/桌面互斥、inputMode、卡片状态枚举、品牌卡对等元信息行、imports 表单重排。
+// v6.22.0 增补（计划 docs/test-plans/v6.22.0-public-reading-mobile.md，spec §4）：
+// - 公开阅读页（Player 事件卡 / table-sticky-2 三表 / TopBar 渐隐提档 ≤1024 / toast 让位 / dossier 900 档）
+//   的静态契约；e2e ⑯ 只在真渲染时红，这里兜「类名/规则被下批重构删掉」的回归。
 //
 // 为什么要文本级扫描：这三条约定只活在 JSX/CSS 文本里——表格少包一层 `.table-wrap`、重构时又写回
 // `style={{ width: 320 }}`、抽屉关闭钮的 36px 命中区被删——组件测试与单测都不会红；e2e ⑫ 也只在
@@ -31,6 +34,10 @@ const COACH_PANEL = `${WEB_SRC}/pages/club/CoachPanel.tsx`;
 const GROWTH_ENTRY = `${WEB_SRC}/pages/admin/GrowthEntryPage.tsx`;
 const BRANDS_PAGE = `${WEB_SRC}/pages/admin/BrandsPage.tsx`;
 const IMPORTS_PAGE = `${WEB_SRC}/pages/admin/ImportsPage.tsx`;
+const PLAYER_PAGE = `${WEB_SRC}/pages/Player.tsx`;
+const MARKET_INTEL = `${WEB_SRC}/pages/market/MarketIntelPage.tsx`;
+const MARKET_BOARD = `${WEB_SRC}/pages/market/MarketBoardPage.tsx`;
+const CLUB_DETAIL = `${WEB_SRC}/pages/ClubDetail.tsx`;
 
 /** 递归收集 web/src 全树 .tsx（含 *.test.tsx）；路径统一成 `/`，与 git/文档口径一致 */
 function collectTsx(dir: string, out: string[] = []): string[] {
@@ -484,8 +491,97 @@ describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-
     expect(src, 'ImportsPage 缺 admin-section 段（.admin-section label.field 前提失效）').toContain('card admin-section');
 
     const css = read(STYLES_CSS);
-    const tail = css.slice(css.lastIndexOf('(max-width: 760px)'));
+    // 按块头注释锚定（v6.22.0 后文件尾部又追加了新的 ≤760 块，lastIndexOf 会锚错块）
+    const anchor = css.indexOf('/* ---- ③ 导入页表单重排（v6.21.0）');
+    expect(anchor, 'styles.css 找不到 ③ imports 块头注释——块被改名/挪动，锚点需同步').toBeGreaterThan(-1);
+    const tail = css.slice(anchor);
     expect(tail, '≤760 块缺 .admin-section label.field 单列全宽规则').toMatch(/\.admin-section label\.field\s*\{[^}]*width:\s*100%/);
     expect(tail, '≤760 块缺 .admin-section label.field .seg 折行规则').toMatch(/\.admin-section label\.field \.seg\s*\{[^}]*flex-wrap:\s*wrap/);
+  });
+});
+
+describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-public-reading-mobile.md，spec §4）', () => {
+  /** 类名独立记号匹配（防 table-sticky-2-broken 式子串假绿，与上方 token 同口径） */
+  const token = (cls: string) => new RegExp(`(?<![\\w-])${cls}(?![\\w-])`);
+  const rules = () => cssRules(read(STYLES_CSS));
+
+  it('公开阅读 · 球员页事件卡契约（TC-PLR）：断点字面 + 卡片/表格互斥 + 类名规则在 CSS + transfer-table nowrap 保留', () => {
+    const src = read(PLAYER_PAGE);
+    // 断点常量字面（V2 同款变异：改 800 会在 761 档漏卡片流）
+    expect(src).toContain("const PLAYER_CARDS_QUERY = '(max-width: 760px)'");
+    // 互斥分支：narrow ? 事件卡 : .transfer-table 表格（卡片在前、else 接表格；转会页签）
+    const cardsAt = src.indexOf('<div className="event-cards">');
+    const elseAt = src.indexOf(') : (', cardsAt);
+    const tableAt = src.indexOf('transfer-table', elseAt);
+    expect(cardsAt, 'Player.tsx 缺事件卡分支 event-cards').toBeGreaterThan(-1);
+    expect(elseAt, '事件卡与表格之间找不到三元 else').toBeGreaterThan(cardsAt);
+    expect(tableAt, 'Player.tsx 桌面分支缺 .transfer-table 表格').toBeGreaterThan(elseAt);
+    expect(tableAt - elseAt, 'else 与 transfer-table 距离过远——互斥断言可能匹配到别的三元').toBeLessThan(2000);
+
+    // styles.css 规则级：五类名各有规则块（TSX 有类、CSS 没规则 = 死类名）
+    for (const cls of ['event-cards', 'event-card', 'event-card-head', 'event-card-grid', 'event-card-foot']) {
+      const hit = rules().filter((r) => token(cls).test(r.selector));
+      expect(hit.length, `styles.css 找不到 .${cls} 规则块（v6.22.0 事件卡类名契约）`).toBeGreaterThan(0);
+    }
+    // 桌面 1280 零变化的锚：.transfer-table 的 nowrap 规则不许被顺手删掉
+    const nowrap = rules().filter((r) => r.selector.includes('transfer-table') && /white-space:\s*nowrap/.test(r.body));
+    expect(nowrap.length, '.transfer-table 的 nowrap 规则缺失（桌面表格分支被改）').toBeGreaterThan(0);
+  });
+
+  it('公开阅读 · table-sticky-2 三表挂类 + ≤760 粘性规则 + coach-sticky 原块仍在（TC-STK）', () => {
+    // 三张参考型宽表各恰好挂一次（ClubDetail 的转会记录表 transfer-table 不许被卷进来）
+    for (const [file, name] of [
+      [MARKET_INTEL, 'MarketIntelPage'],
+      [MARKET_BOARD, 'MarketBoardPage'],
+      [CLUB_DETAIL, 'ClubDetail'],
+    ] as const) {
+      const hits = read(file).match(/className="table-sticky-2"/g)?.length ?? 0;
+      expect(hits, `${name} 应恰好挂一处 className="table-sticky-2"，实挂 ${hits}`).toBe(1);
+    }
+    // ≤760 块：sticky 规则 + 列宽变量定义
+    const stky = rules().filter((r) => token('table-sticky-2').test(r.selector) && /position:\s*sticky/.test(r.body));
+    expect(stky.length, 'styles.css 缺 .table-sticky-2 的 position:sticky 规则（≤760 块）').toBeGreaterThan(0);
+    const varDef = rules().filter((r) => token('table-sticky-2').test(r.selector) && /--stky-c1/.test(r.body));
+    expect(varDef.length, 'styles.css 缺 .table-sticky-2 的 --stky-c1 列宽变量定义').toBeGreaterThan(0);
+    // coach-sticky（≤640，v6.21.0）原块不动：粘性规则仍在（TC-SWP-05 的同类断言再兜一层）
+    const coach = rules().filter((r) => token('coach-sticky').test(r.selector) && /position:\s*sticky/.test(r.body));
+    expect(coach.length, 'styles.css 缺 .coach-sticky 的 position:sticky 规则（≤640 原块被动了）').toBeGreaterThan(0);
+  });
+
+  it('公开阅读 · TopBar 渐隐提档 ≤1024：mask 规则整体挪入 1024 块（TC-TOP）', () => {
+    // 横滑容器（.nav-links overflow-x:auto + contain:inline-size）是全局基础规则，无需提档；
+    // 提档的只有「还有页签没露出来」的渐隐 mask（原 ≤640 块）。
+    const css = read(STYLES_CSS);
+    const i1024 = css.indexOf('(max-width: 1024px)');
+    expect(i1024, 'styles.css 缺 (max-width: 1024px) 块（渐隐提档）').toBeGreaterThan(-1);
+    const after = css.slice(i1024 + '(max-width: 1024px)'.length);
+    const nextMedia = after.indexOf('@media');
+    const block = nextMedia === -1 ? after : after.slice(0, nextMedia);
+    expect(block, '≤1024 块缺 .nav-links.can-left 渐隐 mask 规则').toMatch(/\.nav-links\.can-left/);
+    // 挪走而非复制：.nav-links.can-left 的每一处出现都落在 1024 块内（两块规则漂移比缺失更难查）
+    const idxs = [...css.matchAll(/\.nav-links\.can-left/g)].map((m) => m.index ?? 0);
+    expect(idxs.length, 'styles.css 找不到 .nav-links.can-left 渐隐规则').toBeGreaterThan(0);
+    for (const i of idxs) {
+      expect(i, `.nav-links.can-left 出现在 ≤1024 块之外（index=${i} < ${i1024}）——渐隐应整体提档而非复制`).toBeGreaterThanOrEqual(i1024);
+    }
+  });
+
+  it('公开阅读 · toast 不再吃点击：pointer-events 让位（TC-TST，spec ⑤）', () => {
+    const decls = declarations(rules(), 'toast', 'pointer-events');
+    expect(
+      decls.some((d) => d.value === 'none'),
+      `.toast 应 pointer-events: none（z-index 100 盖住 fixed 汇总条时点击要穿透），实见 ${JSON.stringify(decls)}`,
+    ).toBe(true);
+  });
+
+  it('公开阅读 · dossier 单列断点 640→900：900 块单列规则在场（TC-PLR）', () => {
+    const css = read(STYLES_CSS);
+    // lastIndexOf：文件里 900 块有多个（v3.1.0 抽屉 / v6.19 图书馆域在前），dossier 块是最新追加的最后一个
+    const i900 = css.lastIndexOf('(max-width: 900px)');
+    expect(i900, 'styles.css 缺 (max-width: 900px) 块（dossier 单列提档）').toBeGreaterThan(-1);
+    const after = css.slice(i900 + '(max-width: 900px)'.length);
+    const nextMedia = after.indexOf('@media');
+    const block = nextMedia === -1 ? after : after.slice(0, nextMedia);
+    expect(block, '≤900 块缺 .dossier 单列 grid 规则').toMatch(/\.dossier\s*\{[^}]*grid-template-columns:[^;}]*1fr/);
   });
 });

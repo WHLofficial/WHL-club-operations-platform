@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口，
 // v6.19.0 球员库窄屏卡片化，v6.20.0 加全路由 375 零溢出扫描⑫ + 管理抽屉开合⑬，
-// v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮）：
+// v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮；v6.22.0 加公开阅读几何⑯）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
 // 球队页（⑨⑩）例外：本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id），
@@ -1300,6 +1300,128 @@ async function main() {
         return th ? getComputedStyle(th).position : null;
       });
       assert(wide === 'static', `1280 应取消粘性（computed=${wide}）`);
+    });
+
+    await check('⑯ 公开阅读几何：玩家页 dossier/事件卡 + intel 粘性首列（spec §4）', async () => {
+      // 取样球员：/api/players?limit=1 首行（本地 = 9001 阿大，4 条 completed 转会 ⇒ 转会页签卡片非空）
+      const pid = await page.evaluate(async () => {
+        const r = await fetch('/api/players?limit=1');
+        const j = await r.json();
+        const p = j.players?.[0];
+        return p ? (p.fcId ?? p.id) : null;
+      });
+      assert(pid, '取样球员失败（/api/players?limit=1 无数据）——⑯ 玩家页断言前提不成立');
+
+      // —— 375：档案单列（900 档）+ 页签不撑破文档 + 转会事件卡互斥且 fit ——
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${BASE}/players/${pid}`, { waitUntil: 'networkidle' });
+      const d375 = await page.evaluate(() => {
+        const d = document.querySelector('.dossier');
+        return d ? getComputedStyle(d).gridTemplateColumns : null;
+      });
+      assert(d375 && !d375.includes(' '), `375 .dossier 应单列（grid-template-columns="${d375}"）`);
+      const ovTabs = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      assert(ovTabs <= 1, `375 玩家页文档级横向溢出 ${ovTabs}px（页签行应横滑而非撑破文档）`);
+      await page.locator('.dossier-tabs button', { hasText: '转会' }).first().click();
+      await page.locator('.event-card').first().waitFor({ state: 'visible', timeout: TIMEOUT });
+      const excl375 = await page.evaluate(() => ({
+        cards: document.querySelectorAll('.event-card').length,
+        tables: document.querySelectorAll('.transfer-table').length,
+      }));
+      assert(excl375.cards > 0 && excl375.tables === 0, `375 转会页签应卡片化（cards=${excl375.cards} transfer-table=${excl375.tables}）`);
+      const fit = await page.evaluate(() => {
+        const vw = document.documentElement.clientWidth;
+        const bad = [];
+        document.querySelectorAll('.event-card').forEach((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.left < -1 || r.right > vw + 1) bad.push(`${Math.round(r.left)}..${Math.round(r.right)}`);
+        });
+        return { vw, bad };
+      });
+      assert(fit.bad.length === 0, `375 事件卡超出视口 ±1px：${fit.bad.join(',')}（vw=${fit.vw}）`);
+      // 成长页签（本地 9001 无成长事件种子 ⇒ 只断言不撑破；卡片在场与否依赖种子，静态闸门兜底）
+      await page.locator('.dossier-tabs button', { hasText: '成长' }).first().click();
+      await page.waitForTimeout(200);
+      const ovGrow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      assert(ovGrow <= 1, `375 成长页签文档级横向溢出 ${ovGrow}px`);
+
+      // —— 768：900 档单列保持 + 表格分支回归（>760）——
+      await page.setViewportSize({ width: 768, height: 900 });
+      await page.locator('.dossier-tabs button', { hasText: '转会' }).first().click();
+      await page.waitForTimeout(200);
+      const d768 = await page.evaluate(() => {
+        const d = document.querySelector('.dossier');
+        return {
+          cols: d ? getComputedStyle(d).gridTemplateColumns : null,
+          cards: document.querySelectorAll('.event-card').length,
+          tbl: document.querySelectorAll('.transfer-table').length,
+        };
+      });
+      assert(d768.cols && !d768.cols.includes(' '), `768 .dossier 应仍单列（900 档覆盖）（="${d768.cols}"）`);
+      assert(d768.tbl > 0 && d768.cards === 0, `768 应回表格分支（transfer-table=${d768.tbl} event-cards=${d768.cards}）`);
+
+      // —— 1280：桌面双栏 280px+1fr + 表格分支 ——
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.waitForTimeout(200);
+      const d1280 = await page.evaluate(() => {
+        const d = document.querySelector('.dossier');
+        return {
+          cols: d ? getComputedStyle(d).gridTemplateColumns : null,
+          cards: document.querySelectorAll('.event-card').length,
+          tbl: document.querySelectorAll('.transfer-table').length,
+        };
+      });
+      assert(d1280.cols && d1280.cols.startsWith('280px'), `1280 .dossier 应双栏 280px+1fr（="${d1280.cols}"）`);
+      assert(d1280.tbl > 0 && d1280.cards === 0, `1280 应表格分支（transfer-table=${d1280.tbl} event-cards=${d1280.cards}）`);
+
+      // —— 375 /market/intel：成交表粘前两列（本地 4 条 completed ⇒ 表非空）——
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${BASE}/market/intel`, { waitUntil: 'networkidle' });
+      let sticky2 = 0;
+      try {
+        await page.locator('table.table-sticky-2').first().waitFor({ state: 'visible', timeout: 3000 });
+        sticky2 = await page.locator('table.table-sticky-2').count();
+      } catch {
+        sticky2 = 0;
+      }
+      if (sticky2 === 0) {
+        console.warn('（⑯ 备注：intel 成交表无数据/未挂 table-sticky-2，粘性几何降级——静态闸门兜底）');
+      } else {
+        const st = await page.evaluate(() => {
+          const th2 = document.querySelector('table.table-sticky-2')?.querySelector('thead tr th:nth-child(2)');
+          return { th2: th2 ? getComputedStyle(th2).position : null };
+        });
+        assert(st.th2 === 'sticky', `375 intel 第二列应 sticky（computed=${st.th2}）`);
+        const scrollable = await page.evaluate(() => {
+          const wrap = document.querySelector('table.table-sticky-2')?.closest('.table-wrap');
+          return wrap ? { sw: wrap.scrollWidth, cw: wrap.clientWidth } : null;
+        });
+        assert(scrollable && scrollable.sw > scrollable.cw, `intel 表外层 .table-wrap 不可横滚（sw=${scrollable?.sw} cw=${scrollable?.cw}）——粘性几何无从验证`);
+        await page.evaluate(() => {
+          const wrap = document.querySelector('table.table-sticky-2')?.closest('.table-wrap');
+          if (wrap) wrap.scrollLeft = 400;
+        });
+        await page.waitForTimeout(300);
+        const after = await page.evaluate(() => {
+          const wrap = document.querySelector('table.table-sticky-2')?.closest('.table-wrap');
+          const th = document.querySelector('table.table-sticky-2')?.querySelector('thead tr th:nth-child(2)');
+          const r = th?.getBoundingClientRect();
+          return r ? { left: r.left, right: r.right, vw: document.documentElement.clientWidth, scrolled: wrap?.scrollLeft ?? 0 } : null;
+        });
+        assert(after && after.scrolled > 0, `intel wrap scrollLeft=${after?.scrolled}——滚动没生效，后续断言不可信`);
+        assert(after && after.left >= -1 && after.right <= after.vw + 1, `intel 横滚后第二列被滚出视口（left=${after?.left} right=${after?.right}）`);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.waitForTimeout(200);
+        const wide2 = await page.evaluate(() => {
+          const th = document.querySelector('table.table-sticky-2')?.querySelector('thead tr th:nth-child(2)');
+          return th ? getComputedStyle(th).position : null;
+        });
+        assert(wide2 === 'static', `1280 intel 应取消粘性（computed=${wide2}）`);
+      }
     });
   } finally {
     await browser.close();
