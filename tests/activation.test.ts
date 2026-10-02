@@ -139,11 +139,11 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
   it('激活挂牌走通：固定 5m、记激活方与出价窗、球员转挂牌态', async () => {
     const fx = await seedTrainee(freshEnv());
 
-    // 激活前：可激活名单能看到这名训练营球员
-    const before = await get('/api/market/trainees', 'tok-coach2', fx.env);
-    const beforeRows = ((await before.json()) as { trainees: { id: number; activationFee: number; activatedThisWindow: boolean; club: { name: string } }[] }).trainees;
+    // 激活前：可激活名单能看到这名训练营球员（v6.18.0：/market/trainees → /market/activatable?mode=trainee，键名 trainees → players）
+    const before = await get('/api/market/activatable?mode=trainee', 'tok-coach2', fx.env);
+    const beforeRows = ((await before.json()) as { players: { id: number; activationFee: number; activatedThisWindow: boolean; club: { id: number; name: string } }[] }).players;
     expect(beforeRows).toHaveLength(1);
-    expect(beforeRows[0]).toMatchObject({ id: 20, activationFee: 5, activatedThisWindow: false, club: { name: '青训营' } });
+    expect(beforeRows[0]).toMatchObject({ id: 20, activationFee: 5, activatedThisWindow: false, club: { id: fx.ownerClub, name: '青训营' } });
 
     const { status, body } = await activateTrainee(fx);
     expect(status).toBe(201);
@@ -163,8 +163,8 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect(player!.status).toBe('listed');
 
     // 激活后：球员已在挂牌流程，不再出现在训练营可激活名单里
-    const list = await get('/api/market/trainees', 'tok-coach2', fx.env);
-    const trainees = ((await list.json()) as { trainees: { id: number }[] }).trainees;
+    const list = await get('/api/market/activatable?mode=trainee', 'tok-coach2', fx.env);
+    const trainees = ((await list.json()) as { players: { id: number }[] }).players;
     expect(trainees).toHaveLength(0);
   });
 
@@ -196,6 +196,26 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     const { status, body } = await activateTrainee(fx);
     expect(status).toBe(409);
     expect((body as { error?: string }).error).toContain('刚签约的球员不可被激活');
+  });
+
+  it('正式合同缺违约金（release_fee NULL）→ 409 补合同文案，不再 500（v6.18.0 回归）', async () => {
+    const fx = await seedTrainee(freshEnv());
+    // 正式合同 release_fee=NULL：activationFee 对非正数抛 RangeError，曾致提交链 500
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
+         (23, 'fc23', '没违约金', ${fx.ownerClub}, 'CB', 28, 78, 78, 12, 'normal');
+       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
+         (3, 23, ${fx.ownerClub}, NULL, 2, 'formal', 1, '2026-06-01');`,
+    );
+    const res = await post(
+      '/api/market/activations',
+      { playerId: 23, proofMediaKey: proofKey(fx.buyerClub) },
+      'tok-coach2',
+      fx.env,
+    );
+    const body = (await res.json()) as { error?: string };
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('球员没有含违约金的现行合同，先让管理组补合同');
   });
 
   it('激活方可支配资金不足 5m 时直接拒绝', async () => {
@@ -288,8 +308,8 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     await expireActivationWindow(fx, first.body.listingId!);
 
     // 失效后球员回到训练营名单，但本窗口额度已消耗
-    const list = await get('/api/market/trainees', 'tok-coach2', fx.env);
-    const rows = ((await list.json()) as { trainees: { id: number; activatedThisWindow: boolean }[] }).trainees;
+    const list = await get('/api/market/activatable?mode=trainee', 'tok-coach2', fx.env);
+    const rows = ((await list.json()) as { players: { id: number; activatedThisWindow: boolean }[] }).players;
     expect(rows).toHaveLength(1);
     expect(rows[0].activatedThisWindow).toBe(true);
 

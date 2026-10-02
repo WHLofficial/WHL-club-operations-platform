@@ -1,8 +1,11 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ClubDetail, type ClubStanding, type ClubSummary, type CpuBoardResponse, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type SeaSignsResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
+
+/** 可激活名单模式（v6.18.0）：all=全部可激活 / trainee=仅训练营 */
+export type ActivatableMode = 'all' | 'trainee';
 
 export const qk = {
   me: ['me'] as const,
@@ -16,9 +19,10 @@ export const qk = {
   myBids: ['market', 'my-bids'] as const,
   board: (status: string) => ['market', 'board', status] as const,
   listing: (id: number) => ['market', 'listing', id] as const,
-  seaSigns: ['market', 'sea-signs'] as const,
-  cpuBoard: ['market', 'cpu-board'] as const,
-  trainees: ['market', 'trainees'] as const,
+  rumors: ['market', 'rumors'] as const,
+  deals: ['market', 'deals'] as const,
+  seaLookup: (q: string) => ['market', 'sea-lookup', q] as const,
+  activatable: (mode: ActivatableMode, q: string) => ['market', 'activatable', mode, q] as const,
   notifications: ['notifications'] as const,
   stadiumBuild: ['club', 'stadium-build'] as const,
   naming: ['club', 'naming'] as const,
@@ -179,20 +183,44 @@ export function useMarketInvalidation() {
   };
 }
 
-// 海捞情报台（v6.17.0）：成交动态（全服已完成海捞单据倒序 ≤30）与 CPU 捞人榜（CA 降序）。
-// 两个都是教练端点（club.squad.manage），调用方市场页已按身份门控，挂载即请求。
-export function useSeaSigns() {
+// ---- v6.18.0：市场情报 / 海捞资格 / 激活球员 ----
+
+// 转会传闻（公开）：系统按窗口派生，服务端挂 1h 缓存；失败不重试，页面按 isError 出 banner
+export function useRumors() {
   return useQuery({
-    queryKey: qk.seaSigns,
-    queryFn: async () => (await api<SeaSignsResponse>('/api/market/sea-signs')).seaSigns,
+    queryKey: qk.rumors,
+    queryFn: async () => (await api<RumorsResponse>('/api/market/rumors')).rumors,
     retry: false,
   });
 }
 
-export function useCpuBoard() {
+// 已达成交易（公开）：completed 全类型倒序 ≤50 条
+export function useMarketDeals() {
   return useQuery({
-    queryKey: qk.cpuBoard,
-    queryFn: async () => (await api<CpuBoardResponse>('/api/market/cpu-board')).cpuBoard,
+    queryKey: qk.deals,
+    queryFn: async () => (await api<MarketDealsResponse>('/api/market/deals')).deals,
+    retry: false,
+  });
+}
+
+// 海捞资格查询（教练端点）：q 空不发请求（提交后才带非空 q），结果按输入参数化缓存
+export function useSeaLookup(q: string) {
+  const query = q.trim();
+  return useQuery({
+    queryKey: qk.seaLookup(query),
+    queryFn: async () => (await api<SeaLookupResponse>(`/api/market/sea-lookup?q=${encodeURIComponent(query)}`)).results,
+    enabled: query !== '',
+    retry: false,
+  });
+}
+
+// 可激活球员（教练端点）：mode=all/trainee，q 为可选名字筛选；不传 limit 走服务端缺省 100
+export function useActivatable(mode: ActivatableMode, q: string) {
+  const query = q.trim();
+  return useQuery({
+    queryKey: qk.activatable(mode, query),
+    queryFn: () =>
+      api<ActivatableResponse>(`/api/market/activatable?mode=${mode}${query === '' ? '' : `&q=${encodeURIComponent(query)}`}`),
     retry: false,
   });
 }

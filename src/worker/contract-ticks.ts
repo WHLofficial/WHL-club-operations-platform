@@ -44,6 +44,14 @@ export async function closedRegularTicks(db: D1Database, atIso?: string | null):
   return row?.n ?? 0;
 }
 
+/**
+ * SQL 片段版「截至当下的已关常规窗数」（v6.18.0 从 routes/players.ts 收拢）：给「同一条 SQL 里
+ * 要内联窗刻度」的查询用（players.ts 的列表/详情筛排、market.ts 的 activatable）。
+ * 与上面 closedRegularTicks 是同一口径的两种形态：那边是异步查询（无 AND 条件的 COUNT），
+ * 这边是可嵌入子查询的 SQL 片段——两处口径必须一致，改一处就得改另一处。
+ */
+export const CURRENT_TICKS_SQL = `(SELECT COUNT(*) FROM season_windows swe WHERE swe.status = 'closed' AND swe.is_temporary = 0)`;
+
 /** 签约基数：签约时点已关的常规窗数（运行期签约与导入的历史合同共用这一条公式） */
 export async function windowBaseTicks(db: D1Database, signedAt: string | null): Promise<number> {
   if (!signedAt) return closedRegularTicks(db);

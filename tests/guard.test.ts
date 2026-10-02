@@ -284,7 +284,7 @@ describe('代际键 purge（v3.2.0）', () => {
   it('一次 purge 只花一次 KV 写：四个 scope 共用同一个版本号', async () => {
     resetGuards();
     const env = freshEnv();
-    expect(PUBLIC_SCOPES.length).toBe(4); // v6.15.0 加 fixtures
+    expect(PUBLIC_SCOPES.length).toBe(5); // v6.15.0 加 fixtures，v6.18.0 加 market
     let puts = 0;
     env.SESSION_KV = {
       get: async () => null,

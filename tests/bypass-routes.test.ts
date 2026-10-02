@@ -400,7 +400,7 @@ describe('海捞（free_agent）', () => {
     expect((await post('/api/transfers/free-agent', { playerId: 20, newReleaseFee: 7 }, 'tok-coach', fx.env)).status).toBe(400);
   });
 
-  it('CPU 队球员可海捞：捞人榜带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（v2.0.0）', async () => {
+  it('CPU 队球员可海捞：海捞速查带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（v2.0.0）', async () => {
     const fx = await seedBypass();
     const cpuClubId = 131681; // AC米兰(CPU)
     fx.sqlite.exec(
@@ -409,10 +409,11 @@ describe('海捞（free_agent）', () => {
          (26, 'fc26', '米兰人', ${cpuClubId}, 'ST', 27, 78, 80, 'normal');`,
     );
 
-    const board = await get('/api/market/cpu-board', 'tok-coach', fx.env);
-    expect(board.status).toBe(200);
-    const pool = (await board.json()) as { cpuBoard: { id: number; clubName: string | null }[] };
-    expect(pool.cpuBoard.find((r) => r.id === 26)?.clubName).toBe('AC米兰(CPU)');
+    // v6.18.0：CPU 捞人榜退役，东家信息改由海捞速查给出
+    const lookup = await get('/api/market/sea-lookup?q=26', 'tok-coach', fx.env);
+    expect(lookup.status).toBe(200);
+    const pool = (await lookup.json()) as { results: { id: number; clubName: string | null }[] };
+    expect(pool.results.find((r) => r.id === 26)?.clubName).toBe('AC米兰(CPU)');
 
     fx.env.rng = () => 0.9;
     const submit = await post('/api/transfers/free-agent', { playerId: 26, newReleaseFee: 6 }, 'tok-coach2', fx.env);

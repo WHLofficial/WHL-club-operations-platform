@@ -1,9 +1,10 @@
-// 海捞情报台测试（v6.17.0）：成交动态（GET /market/sea-signs）/ CPU 捞人榜（GET /market/cpu-board）/
-// 详情可签判定 seaSign 与成交参照 seaComps（GET /players/:id 公开面）。
-// 用例名与 docs/test-plans/v6.17.0-sea-sign-intel.md 的 TC 编号一一对应（TC-BOARD-06 计划护栏
-// 沿用原位留在 tests/market-routes.test.ts，理由见计划文档）。
+// 海捞详情面测试（v6.17.0 建立，v6.18.0 收口）：详情可签判定 seaSign 与成交参照 seaComps
+// （GET /players/:id 公开面）+ 回归锚点（TC-REG：海捞提交链、激活名单）。
+// v6.18.0 市场改版后 /market/sea-signs 与 /market/cpu-board 已退役：原 TC-SEA / TC-BOARD 用例
+// 换成 tests/market-intel.test.ts 的 TC-REG-01（退役三端点 404）与 TC-LOOKUP-*（海捞速查），
+// 端点级行为不再在本文件断言。用例名与 docs/test-plans/v6.18.0-market-ia.md 的 TC 编号一一对应。
 // fixture 自建：两队 + 教练绑甲队（100m）+ 赛季 1-3 已结算 / 4 进行中 + S4 第 1 窗开放；
-// 不预置任何成交单据与 CPU 队，让「只收已完成」「无 CPU 队空榜」「参照空态」这些断言从零基数出发。
+// 不预置任何成交单据与 CPU 队，让「参照空态」这类断言从零基数出发。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -190,57 +191,6 @@ function addListing(fx: Fixture, playerId: number, status: string, type = 'norma
     .run(playerId, CLUB_A, type, status, season, windowSeq);
 }
 
-// 捕获 env.DB.prepare 的 SQL 文本（沿用 market-routes 计划护栏的包装写法）
-function captureSql(fx: Fixture): string[] {
-  const captured: string[] = [];
-  const real = fx.env.DB;
-  fx.env.DB = {
-    prepare(sql: string) {
-      captured.push(sql);
-      return real.prepare(sql);
-    },
-    batch: real.batch.bind(real),
-  } as unknown as D1Database;
-  return captured;
-}
-
-interface SeaSignRow {
-  id: number;
-  playerId: number;
-  playerName: string;
-  playerCa: number | null;
-  fromClubName: string | null;
-  toClubName: string | null;
-  newReleaseFee: number | null;
-  signFee: number | null;
-  season: number | null;
-  windowSeq: number | null;
-  completedAt: string | null;
-}
-
-async function seaSigns(fx: Fixture, query = '', token: string | undefined = 'tok-coach'): Promise<SeaSignRow[]> {
-  const res = await get(`/api/market/sea-signs${query}`, token, fx.env);
-  expect(res.status).toBe(200);
-  return ((await res.json()) as { seaSigns: SeaSignRow[] }).seaSigns;
-}
-
-interface BoardRow {
-  id: number;
-  fcId: number | null;
-  name: string;
-  position: string | null;
-  age: number | null;
-  ca: number | null;
-  pa: number | null;
-  clubName: string | null;
-}
-
-async function board(fx: Fixture, token: string | undefined = 'tok-coach'): Promise<BoardRow[]> {
-  const res = await get('/api/market/cpu-board', token, fx.env);
-  expect(res.status).toBe(200);
-  return ((await res.json()) as { cpuBoard: BoardRow[] }).cpuBoard;
-}
-
 interface CompsRow {
   playerId: number;
   playerName: string;
@@ -266,193 +216,6 @@ async function detail(
     seaComps: { scope: string; rows: CompsRow[] };
   };
 }
-
-describe('TC-SEA 海捞成交动态（GET /market/sea-signs）', () => {
-  it('TC-SEA-01 只收已完成的海捞单据：待审核/解约/续约都不进动态', async () => {
-    const fx = seedIntel();
-    const hit = addTransfer(fx, { playerId: 20, fee: 6 });
-    addTransfer(fx, { playerId: 20, fee: 6, status: 'pending_review' });
-    addTransfer(fx, { playerId: 20, fee: 0, type: 'termination' });
-    addTransfer(fx, { playerId: 20, fee: 3, type: 'rc_change' });
-    const rows = await seaSigns(fx);
-    expect(rows.map((r) => r.id)).toEqual([hit]);
-  });
-
-  it('TC-SEA-02 最近优先：completed_at DESC → id DESC，只回最近 30 条', async () => {
-    const fx = seedIntel();
-    // completed_at 与 id 故意反向（第 1 笔时间最新）+ 最后两笔同一时刻：
-    // 纯 id DESC / 纯 completed_at DESC 的改法都会在这个序列上露馅
-    const ids: number[] = [];
-    for (let k = 1; k <= 32; k += 1) {
-      const at = k <= 30 ? `2026-06-${String(31 - k).padStart(2, '0')}T00:00:00Z` : '2026-07-01T00:00:00Z';
-      ids.push(addTransfer(fx, { playerId: 20, fee: 5, completedAt: at }));
-    }
-    const rows = await seaSigns(fx);
-    expect(rows.length).toBe(30);
-    // 同刻两笔按 id 倒序 → 第 1 笔（时间最新但 id 最小）→ 其余按时间递减；最旧两笔被截掉
-    expect(rows.map((r) => r.id)).toEqual([ids[31], ids[30], ...ids.slice(0, 28)]);
-  });
-
-  it('TC-SEA-03 season / windowSeq 过滤与非法参数 400', async () => {
-    const fx = seedIntel();
-    const s4w1 = addTransfer(fx, { playerId: 20, fee: 5, season: 4, windowSeq: 1, completedAt: '2026-07-02T00:00:00Z' });
-    const s4w2 = addTransfer(fx, { playerId: 20, fee: 5, season: 4, windowSeq: 2, completedAt: '2026-08-02T00:00:00Z' });
-    const s3w1 = addTransfer(fx, { playerId: 20, fee: 5, season: 3, windowSeq: 1, completedAt: '2026-05-02T00:00:00Z' });
-    expect((await seaSigns(fx, '?season=4')).map((r) => r.id)).toEqual([s4w2, s4w1]);
-    expect((await seaSigns(fx, '?season=4&windowSeq=1')).map((r) => r.id)).toEqual([s4w1]);
-    expect((await seaSigns(fx, '?windowSeq=1')).map((r) => r.id)).toEqual([s4w1, s3w1]);
-    for (const [query, message] of [
-      ['?season=0', 'season 应为正整数'],
-      ['?season=abc', 'season 应为正整数'],
-      ['?season=1.5', 'season 应为正整数'],
-      ['?windowSeq=0', 'windowSeq 应为正整数'],
-      ['?windowSeq=abc', 'windowSeq 应为正整数'],
-    ] as const) {
-      const res = await get(`/api/market/sea-signs${query}`, 'tok-coach', fx.env);
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as { error: string }).error).toBe(message);
-    }
-  });
-
-  it('TC-SEA-04 signFee = 新违约金 × 30%，无值回 null', async () => {
-    const fx = seedIntel();
-    addTransfer(fx, { playerId: 20, fee: 6, completedAt: '2026-07-04T00:00:00Z' });
-    addTransfer(fx, { playerId: 20, fee: 7, completedAt: '2026-07-03T00:00:00Z' });
-    addTransfer(fx, { playerId: 20, fee: null, completedAt: '2026-07-02T00:00:00Z' });
-    const rows = await seaSigns(fx);
-    expect(rows.map((r) => [r.newReleaseFee, r.signFee])).toEqual([
-      [6, 1.8],
-      [7, 2.1],
-      [null, null],
-    ]);
-  });
-
-  it('TC-SEA-05 原东家/捞入队名与显示名口径（真自由身 null、CPU 队名、display_name 优先）', async () => {
-    const fx = seedIntel();
-    addCpuClub(fx);
-    addPlayer(fx, { id: 30, name: '浪人', displayName: '浪人·显', ca: 78 });
-    addPlayer(fx, { id: 31, name: '米兰人', clubId: CPU_CLUB, ca: 79 });
-    const free = addTransfer(fx, {
-      playerId: 30,
-      toClubId: CLUB_B,
-      fee: 6,
-      completedAt: '2026-07-04T00:00:00Z',
-    });
-    const fromCpu = addTransfer(fx, {
-      playerId: 31,
-      fromClubId: CPU_CLUB,
-      toClubId: CLUB_A,
-      fee: 7,
-      completedAt: '2026-07-03T00:00:00Z',
-    });
-    const rows = await seaSigns(fx);
-    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
-    expect(byId[free]).toEqual({
-      id: free,
-      playerId: 30,
-      playerName: '浪人·显', // COALESCE(display_name, name)
-      playerCa: 78,
-      fromClubName: null, // 真自由身没有原东家
-      toClubName: '乙队',
-      newReleaseFee: 6,
-      signFee: 1.8,
-      season: 4,
-      windowSeq: 1,
-      completedAt: '2026-07-04T00:00:00Z',
-    });
-    expect(byId[fromCpu]).toMatchObject({
-      playerId: 31,
-      playerName: '米兰人', // 无 display_name 回落到 name
-      playerCa: 79,
-      fromClubName: 'AC米兰(CPU)',
-      toClubName: '甲队',
-      signFee: 2.1,
-    });
-  });
-
-  it('TC-SEA-06 读量口径：排序与 LIMIT 30 写死在 SQL（全表扫是零迁移下的既定口径）', async () => {
-    const fx = seedIntel();
-    addTransfer(fx, { playerId: 20, fee: 5 });
-    const captured = captureSql(fx);
-    await seaSigns(fx);
-    const sql = captured.find((s) => s.includes("t.type = 'free_agent'") && s.includes('FROM transfers'));
-    expect(sql).toBeDefined();
-    expect(sql ?? '').toContain('ORDER BY t.completed_at DESC, t.id DESC');
-    expect(sql ?? '').toContain('LIMIT 30');
-  });
-
-  it('TC-SEA-07 鉴权：匿名 401 / 观众 403 / 教练与管理组 200', async () => {
-    const fx = seedIntel();
-    expect((await get('/api/market/sea-signs', undefined, fx.env)).status).toBe(401);
-    const viewer = await get('/api/market/sea-signs', 'tok-viewer', fx.env);
-    expect(viewer.status).toBe(403);
-    expect(((await viewer.json()) as { error: string }).error).toBe('没有权限进行此操作');
-    expect((await get('/api/market/sea-signs', 'tok-coach', fx.env)).status).toBe(200);
-    expect((await get('/api/market/sea-signs', 'tok-admin', fx.env)).status).toBe(200);
-  });
-});
-
-describe('TC-BOARD CPU 捞人榜（GET /market/cpu-board）', () => {
-  it('TC-BOARD-01 只列 CPU 队，且状态限 free/normal', async () => {
-    const fx = seedIntel();
-    addCpuClub(fx);
-    addPlayer(fx, { id: 60, name: '米兰锋', clubId: CPU_CLUB, ca: 78, status: 'normal' });
-    addPlayer(fx, { id: 61, name: '米兰卫', clubId: CPU_CLUB, ca: 76, status: 'free' });
-    addPlayer(fx, { id: 62, name: '米兰苗', clubId: CPU_CLUB, ca: 99, status: 'trainee' });
-    addPlayer(fx, { id: 63, name: '米兰退', clubId: CPU_CLUB, ca: 99, status: 'retired' });
-    addPlayer(fx, { id: 64, name: '米兰挂', clubId: CPU_CLUB, ca: 99, status: 'listed' });
-    addPlayer(fx, { id: 65, name: '甲队王牌', clubId: CLUB_A, ca: 99 });
-    addPlayer(fx, { id: 66, name: '真自由身', ca: 99 });
-    const rows = await board(fx);
-    expect(rows.map((r) => r.id)).toEqual([60, 61]);
-  });
-
-  it('TC-BOARD-02 CA 降序，同 CA 按 id 升序', async () => {
-    const fx = seedIntel();
-    addCpuClub(fx);
-    addPlayer(fx, { id: 71, name: '米兰乙', clubId: CPU_CLUB, ca: 90 });
-    addPlayer(fx, { id: 70, name: '米兰甲', clubId: CPU_CLUB, ca: 90 });
-    addPlayer(fx, { id: 72, name: '米兰丙', clubId: CPU_CLUB, ca: 78 });
-    const rows = await board(fx);
-    expect(rows.map((r) => [r.id, r.ca])).toEqual([
-      [70, 90],
-      [71, 90],
-      [72, 78],
-    ]);
-  });
-
-  it('TC-BOARD-03 字段齐全与显示名口径', async () => {
-    const fx = seedIntel();
-    addCpuClub(fx);
-    addPlayer(fx, {
-      id: 80,
-      name: '米兰新星',
-      displayName: '新星·显',
-      clubId: CPU_CLUB,
-      ca: 80,
-      pa: 88,
-      position: 'CM',
-      age: 22,
-      fcId: 555001,
-    });
-    const rows = await board(fx);
-    expect(rows).toEqual([
-      { id: 80, fcId: 555001, name: '新星·显', position: 'CM', age: 22, ca: 80, pa: 88, clubName: 'AC米兰(CPU)' },
-    ]);
-  });
-
-  it('TC-BOARD-04 无 CPU 队时空榜不报错', async () => {
-    const fx = seedIntel();
-    expect(await board(fx)).toEqual([]);
-  });
-
-  it('TC-BOARD-05 鉴权：匿名 401 / 观众 403 / 教练 200', async () => {
-    const fx = seedIntel();
-    expect((await get('/api/market/cpu-board', undefined, fx.env)).status).toBe(401);
-    expect((await get('/api/market/cpu-board', 'tok-viewer', fx.env)).status).toBe(403);
-    expect((await get('/api/market/cpu-board', 'tok-coach', fx.env)).status).toBe(200);
-  });
-});
 
 describe('TC-JUDGE 详情可签判定 seaSign（GET /players/:id，公开只读）', () => {
   it('TC-JUDGE-01 窗口没开', async () => {
@@ -750,26 +513,42 @@ describe('TC-REG 回归（海捞提交链与训练营通道）', () => {
     expect((await ok.json()) as { signFee: number }).toMatchObject({ newReleaseFee: 7, signFee: 2.1 });
   });
 
-  it('TC-REG-02 trainees 列表与激活标记不受情报台影响', async () => {
+  it('TC-REG-02 青训名单等价迁移（Activatable 版）', async () => {
     const fx = seedIntel();
     addPlayer(fx, { id: 960, name: '他队苗', clubId: CLUB_B, status: 'trainee' });
     addPlayer(fx, { id: 961, name: '本队苗', clubId: CLUB_A, status: 'trainee' });
     addPlayer(fx, { id: 962, name: '已激活苗', clubId: CLUB_B, status: 'trainee' });
+    // v6.18.0 的 activatable 以「生效合同」为硬前置（退役的 /market/trainees 不看合同）
+    const addTraineeContract = (playerId: number, clubId: number) => {
+      fx.sqlite
+        .prepare(
+          `INSERT INTO contracts (player_id, club_id, release_fee, contract_type, service_ticks, is_active)
+           VALUES (?, ?, 5, 'trainee', 0, 1)`,
+        )
+        .run(playerId, clubId);
+    };
+    addTraineeContract(960, CLUB_B);
+    addTraineeContract(962, CLUB_B);
     addListing(fx, 962, 'listed', 'activation', 4, 1);
-    const res = await get('/api/market/trainees', 'tok-coach', fx.env);
+    const res = await get('/api/market/activatable?mode=trainee', 'tok-coach', fx.env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       club: { id: number; name: string } | null;
-      trainees: { id: number; club: { id: number }; activationFee: number; activatedThisWindow: boolean }[];
+      players: { id: number; club: { id: number; name: string }; activationFee: number; activatedThisWindow: boolean }[];
     };
+    // 等价迁移口径：club 由字符串升为 {id,name}、键名 trainees → players，行集与标记不变
     expect(body.club).toEqual({ id: CLUB_A, name: '甲队' });
-    expect(body.trainees.map((t) => [t.id, t.activatedThisWindow])).toEqual([
+    expect(body.players.map((p) => [p.id, p.activatedThisWindow])).toEqual([
       [960, false],
       [962, true],
     ]);
-    expect(typeof body.trainees[0].activationFee).toBe('number');
-    const unbound = await get('/api/market/trainees', 'tok-coach2', fx.env);
+    expect(body.players.map((p) => p.club)).toEqual([
+      { id: CLUB_B, name: '乙队' },
+      { id: CLUB_B, name: '乙队' },
+    ]);
+    expect(typeof body.players[0].activationFee).toBe('number');
+    const unbound = await get('/api/market/activatable?mode=trainee', 'tok-coach2', fx.env);
     expect(unbound.status).toBe(200);
-    expect(await unbound.json()).toEqual({ club: null, trainees: [] });
+    expect(await unbound.json()).toEqual({ club: null, players: [] });
   });
 });

@@ -122,6 +122,7 @@ const MIGRATION_FILES = [
   '0055_market_rounds.sql',
   '0056_event_seed_brand_visit.sql',
   '0057_match_weather.sql',
+  '0058_transfers_status_time.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

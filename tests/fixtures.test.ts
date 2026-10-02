@@ -340,19 +340,20 @@ describe('TC-CACHE · 缓存治理（fixtures scope）', () => {
     expect(CACHE_TTL_MS.fixtures).not.toBe(CACHE_TTL_MS.roster); // 不是 24h 档
   });
 
-  it('TC-CACHE-02 PUBLIC_SCOPES 含 fixtures（3→4），写路径覆盖预报端点', () => {
-    expect(PUBLIC_SCOPES).toHaveLength(4);
+  it('TC-CACHE-02 PUBLIC_SCOPES 含 fixtures 与 market（5），写路径覆盖预报端点', () => {
+    expect(PUBLIC_SCOPES).toHaveLength(5);
     expect(PUBLIC_SCOPES).toContain('fixtures');
-    expect(scopesForWritePath('/api/admin/weather/forecast')).toEqual(['players', 'roster', 'clubs', 'fixtures']);
+    expect(PUBLIC_SCOPES).toContain('market'); // v6.18.0 市场信息架构改版新增
+    expect(scopesForWritePath('/api/admin/weather/forecast')).toEqual(['players', 'roster', 'clubs', 'fixtures', 'market']);
   });
 
-  it('TC-CACHE-03 既有 3 元素断言已同步为 4，且边界不误伤', () => {
+  it('TC-CACHE-03 既有元素数断言已同步为 5，且边界不误伤', () => {
     // 断言同步的机读锚点（运行期等价性由这两个文件自身跑绿保证）
     const guardSrc = readFileSync(fileURLToPath(new URL('./guard.test.ts', import.meta.url).href), 'utf8');
     const teamSyncSrc = readFileSync(fileURLToPath(new URL('./team-sync.test.ts', import.meta.url).href), 'utf8');
-    expect(guardSrc).toContain('expect(PUBLIC_SCOPES.length).toBe(4)');
+    expect(guardSrc).toContain('expect(PUBLIC_SCOPES.length).toBe(5)');
     expect(guardSrc).toContain(`expect(scopesForWritePath('/api/club')).toEqual([...PUBLIC_SCOPES])`);
-    expect(teamSyncSrc).toContain(`expect(scopesForWritePath('/api/internal/team-upsert')).toEqual(['players', 'roster', 'clubs', 'fixtures'])`);
+    expect(teamSyncSrc).toContain(`expect(scopesForWritePath('/api/internal/team-upsert')).toEqual(['players', 'roster', 'clubs', 'fixtures', 'market'])`);
     // 边界：公开只读目录与只写通知的路径不进 scope 列表
     expect(scopesForWritePath('/api/clubs/directory')).toEqual([]);
     expect(scopesForWritePath('/api/notifications/read')).toEqual([]);

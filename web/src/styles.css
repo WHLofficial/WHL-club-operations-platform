@@ -658,11 +658,6 @@ tbody tr:hover td {
   background: #f7f0e0;
 }
 
-/* 海捞情报台（v6.17.0）：本窗成交行高亮——放在 :hover 之后，悬停时也保持淡蓝底 */
-tbody tr.win-now td {
-  background: #e8f1f5;
-}
-
 /* ---- Toast（家族：底部胶囊） ---- */
 
 .toast {

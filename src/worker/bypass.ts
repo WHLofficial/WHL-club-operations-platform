@@ -78,6 +78,8 @@ export interface SeaSignVerdict {
  * 直接吃这里的 verdict 抛错，判定口径永不漂移。stage 供球员详情的 seaComps 决定要不要算
  * 成交参照（被 ownership/status 两关拦下的球员没有参照意义）。守卫顺序不得调整：用户看到的
  * 拦截原因取决于第一道亮红灯的关（如先查归属再查状态）。
+ * v6.18.0：routes/market.ts 的 GET /market/sea-lookup 有一份批量快照副本（同一条守卫链摊成
+ * 4 条批量查询），两处口径必须同步改，tests 有跨实现一致性用例锁。
  */
 export async function checkSeaSignEligible(
   db: D1Database,

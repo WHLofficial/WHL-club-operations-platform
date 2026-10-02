@@ -12,6 +12,7 @@ import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
 import { getOpenWindow } from '../seasons.ts';
+import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
 import { MARKER_VALUES, MARKER_WEIGHT, markerOf, markerWeightSql, type PlayerMarker } from '../../core/squad-rules.ts';
 import { playerAbilityLevel } from '../home.ts';
@@ -19,8 +20,8 @@ import { playerAbilityLevel } from '../home.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 // 窗刻度基准（v3.0.0）：当前已关常规窗数——效力 = 0.5 ×(本值 − contracts.service_ticks)，
-// 保护期判定 = 本值 < contracts.protection_ticks（季初/中期按同赛季非临时窗顺序派生，不入库）
-const CURRENT_TICKS_SQL = `(SELECT COUNT(*) FROM season_windows swe WHERE swe.status = 'closed' AND swe.is_temporary = 0)`;
+// 保护期判定 = 本值 < contracts.protection_ticks（季初/中期按同赛季非临时窗顺序派生，不入库）。
+// v6.18.0：SQL 片段收进 contract-ticks.ts（与 closedRegularTicks 同口径，两处必须一起改）
 
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 const CONTRACT_TYPES = ['formal', 'trainee'] as const;

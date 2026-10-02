@@ -665,24 +665,6 @@ export interface MarketListingDetail {
   bids: { id: number; clubId: number; clubName: string; amount: number; createdAt: string; status: string }[];
 }
 
-export interface ActivatableTrainee {
-  id: number;
-  fcId: number | null;
-  name: string;
-  position: string | null;
-  age: number | null;
-  ca: number | null;
-  pa: number | null;
-  club: { id: number; name: string };
-  activationFee: number;
-  activatedThisWindow: boolean;
-}
-
-export interface TraineesResponse {
-  club: { id: number; name: string } | null;
-  trainees: ActivatableTrainee[];
-}
-
 export interface ActivationResult {
   ok: boolean;
   listingId: number;
@@ -785,34 +767,49 @@ export interface TraineeSignResult {
 
 // ---- v0.6.0 DTO（附录 A〔5〕：旁路转会 + 匹配 + 窗口 + 强制拍卖）----
 
-// ---- v6.17.0：海捞情报台（/api/market/sea-signs、/api/market/cpu-board）----
-// 旧的 FreeAgentRow/FreeAgentsResponse 已随 /api/market/free-agents 下线：
-// 「可捞名单」与球员库纯重复，海捞入口收进球员档案左栏（SideOps E 态）。
+// ---- v6.18.0：市场情报（传闻 / 已达成交易 / 海捞资格 / 激活球员）----
+// v6.17.0 的 /api/market/sea-signs、cpu-board、trainees 三个端点已退役：成交情报迁进 /market/intel
+// （rumors + deals），可激活名单换成 /api/market/activatable，海捞资格查询走 /api/market/sea-lookup。
+// 更早的 FreeAgentRow/FreeAgentsResponse 已随 /api/market/free-agents 下线，别再复活。
 
-/** 海捞成交动态行（全服已完成海捞单据，completed_at 倒序 ≤30 条） */
-export interface SeaSignRow {
-  id: number;
+/** 转会传闻（GET /api/market/rumors，公开）：系统按窗口派生，真真假假，不下发真假字段 */
+export interface RumorItem {
+  id: string;
+  text: string;
   playerId: number;
   playerName: string;
-  playerCa: number | null;
-  /** 原东家；null = 无归属真自由身（前端显示「自由身」） */
+  clubName: string;
+}
+
+export interface RumorsResponse {
+  rumors: RumorItem[];
+}
+
+/** 已达成交易行（GET /api/market/deals，公开，completed_at 倒序 ≤50 条） */
+export interface MarketDealsRow {
+  id: number;
+  type: string;
+  playerId: number;
+  playerName: string;
+  /** 原东家；null = 无归属（真自由身） */
   fromClubName: string | null;
+  /** 去向；null = 球员去自由身 */
   toClubName: string | null;
-  /** 成交时定的新违约金（free_agent 单据的 fee 就是它） */
-  newReleaseFee: number | null;
-  /** 海捞签入费 = 新违约金 × 30%（后端 freeAgentFee 随行下发） */
-  signFee: number | null;
+  /** 金额语义随 type：transfer/activation/forced_auction=成交价；free_agent/rc_change/match=新违约金；termination=0（前端显示 —） */
+  fee: number | null;
+  /** 附加销毁费（如匹配差额回收） */
+  extraFee: number | null;
   season: number | null;
   windowSeq: number | null;
   completedAt: string | null;
 }
 
-export interface SeaSignsResponse {
-  seaSigns: SeaSignRow[];
+export interface MarketDealsResponse {
+  deals: MarketDealsRow[];
 }
 
-/** CPU 捞人榜行（各 CPU 队 free/normal 球员，CA 降序 ≤500） */
-export interface CpuBoardRow {
+/** 海捞资格查询行（GET /api/market/sea-lookup，教练：ID 点查或名字 LIKE，≤8 条） */
+export interface SeaLookupRow {
   id: number;
   fcId: number | null;
   name: string;
@@ -821,10 +818,35 @@ export interface CpuBoardRow {
   ca: number | null;
   pa: number | null;
   clubName: string | null;
+  seaSign: { eligible: boolean; reason: string | null };
 }
 
-export interface CpuBoardResponse {
-  cpuBoard: CpuBoardRow[];
+export interface SeaLookupResponse {
+  results: SeaLookupRow[];
+}
+
+/** 可激活球员行（GET /api/market/activatable，教练：外队球员 CA 降序 ≤100 条） */
+export interface ActivatablePlayer {
+  id: number;
+  fcId: number | null;
+  name: string;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  status: string;
+  club: { id: number; name: string };
+  contractType: 'formal' | 'trainee';
+  /** 激活费：训练营固定 5m，正式球员按违约金与保护期计；正式合同缺违约金时为 null（不可激活） */
+  activationFee: number | null;
+  activatedThisWindow: boolean;
+  /** 刚签约（服务刻度内）：本窗不能被激活 */
+  justSigned: boolean;
+}
+
+export interface ActivatableResponse {
+  club: { id: number; name: string } | null;
+  players: ActivatablePlayer[];
 }
 
 export interface RcChangeResult {

@@ -17,9 +17,10 @@ import Notifications from './pages/Notifications.tsx';
 const Offers = lazy(() => import('./pages/Offers.tsx'));
 import { APP_VERSION } from './lib/version.ts';
 
-// 市场三页按页拆 chunk（v2.2.0）：市场板公开，海捞/我的要登录
+// 市场四页按页拆 chunk（v2.2.0 起三页，v6.18.0 加市场情报）：在售市场/市场情报公开，海捞/我的要登录
 const MarketBoardPage = lazy(() => import('./pages/market/MarketBoardPage.tsx'));
 const MarketFreePage = lazy(() => import('./pages/market/MarketFreePage.tsx'));
+const MarketIntelPage = lazy(() => import('./pages/market/MarketIntelPage.tsx'));
 const MarketMinePage = lazy(() => import('./pages/market/MarketMinePage.tsx'));
 
 // 管理端按页拆 chunk（v2.1.0）：壳 + 8 子页全部懒加载，不再全量进主包
@@ -98,6 +99,7 @@ export default function App() {
               </RequireUser>
             }
           />
+          <Route path="/market/intel" element={<MarketIntelPage />} />
           <Route
             path="/market/mine"
             element={

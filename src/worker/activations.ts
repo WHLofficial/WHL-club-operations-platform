@@ -72,6 +72,11 @@ export async function createActivation(
     .first<{ release_fee: number | null; contract_type: string; service_ticks: number; protection_ticks: number | null }>();
   if (!contract) throw new HttpError(400, '找不到这名球员的现行合同，先让管理组核对合同');
   const isTrainee = contract.contract_type === 'trainee';
+  // 正式合同无违约金（release_fee NULL/0）无法定价（activationFee 对非正数抛 RangeError）——
+  // 与 bypass.ts 的解约/续约同口径 409（v6.18.0 测试轮发现 activatable 名单曾因此整页 500）
+  if (!isTrainee && (contract.release_fee === null || contract.release_fee <= 0)) {
+    throw new HttpError(409, '球员没有含违约金的现行合同，先让管理组补合同');
+  }
   // 效力与保护期按转会窗刻度（v3.0.0）：当前已关常规窗数 − 签约基数；训练营合同无保护期
   const currentTicks = await closedRegularTicks(db);
   const askPrice = isTrainee

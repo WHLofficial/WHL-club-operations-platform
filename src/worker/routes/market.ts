@@ -1,10 +1,15 @@
 // 转会市场路由（附录 A〔3〕）：转会区（公开）、挂牌/出价（教练）、我的出价、单据详情。
 // 惰性结算（§6.5）在列表与出价入口先跑；挂牌校验全在 core/market-rules，
 // 出价的资金/步长闸由 0005 触发器在同一事务兜底，路由层做可读的前置校验。
+// v6.18.0（市场信息架构改版）：公开情报改为 /market/rumors（传闻流）+ /market/deals（最近成交），
+// 教练侧情报台改为 /market/sea-lookup（按 ID/名字速查可捞性）+ /market/activatable（可激活球员）；
+// 退役 /market/sea-signs、/market/cpu-board、/market/trainees 三端点。
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
+import { assertPublicRate, cachedJson, waitUntilOf } from '../../lib/guard.ts';
+import { ttlForScope } from '../../lib/cache-policy.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
 import {
   bidDeadline,
@@ -15,7 +20,12 @@ import {
   TRAINEE_ACTIVATION_FEE,
 } from '../../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from '../seasons.ts';
-import { freeAgentFee } from '../../core/bypass-rules.ts';
+import { activationFee } from '../../core/bypass-rules.ts';
+import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
+import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
+import { buildRumors, resolveRumorWindow } from '../rumors.ts';
+import { cpuClubIds } from '../growth.ts';
+import { firstPlayerByRef } from '../player-ref.ts';
 import { loadMarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
 import { availableBalance } from '../ledger.ts';
@@ -280,118 +290,240 @@ app.post('/market/listings', async (c) => {
   return c.json({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);
 });
 
-// GET /api/market/sea-signs —— 海捞成交动态（v6.17.0 情报台）：全服已完成海捞单据，最近优先。
-// 情报价值：成交价（新违约金）就是别人的定价锚，海捞费 = 违约金 × 30%（freeAgentFee 同源）。
-// 读量注：transfers 只收用户交易单据（旁路/竞价成交/激活三处写入，无比赛流水），全表几百到
-// 几千行的量级，无 (type,status) 索引直接扫不构成读放大——零迁移是本增量的既定约束。
-app.get('/market/sea-signs', async (c) => {
-  await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-
-  const conds = [`t.type = 'free_agent'`, `t.status = 'completed'`];
-  const binds: (number | string)[] = [];
-  const season = c.req.query('season');
-  if (season !== undefined) {
-    if (!Number.isInteger(Number(season)) || Number(season) <= 0) throw new HttpError(400, 'season 应为正整数');
-    conds.push('t.season = ?');
-    binds.push(Number(season));
-  }
-  const windowSeq = c.req.query('windowSeq');
-  if (windowSeq !== undefined) {
-    if (!Number.isInteger(Number(windowSeq)) || Number(windowSeq) <= 0) throw new HttpError(400, 'windowSeq 应为正整数');
-    conds.push('t.window_seq = ?');
-    binds.push(Number(windowSeq));
-  }
-
-  const rows = await c.env.DB.prepare(
-    `SELECT t.id, t.player_id, t.fee, t.season, t.window_seq, t.completed_at,
-            ${sqlDisplayName('p')} AS player_name, p.ca AS player_ca,
-            cf.name AS from_club_name, ct.name AS to_club_name
-     FROM transfers t
-     JOIN players p ON p.id = t.player_id
-     LEFT JOIN clubs cf ON cf.id = t.from_club_id
-     JOIN clubs ct ON ct.id = t.to_club_id
-     WHERE ${conds.join(' AND ')}
-     ORDER BY t.completed_at DESC, t.id DESC
-     LIMIT 30`,
-  )
-    .bind(...binds)
-    .all<{
-      id: number;
-      player_id: number;
-      fee: number | null;
-      season: number | null;
-      window_seq: number | null;
-      completed_at: string | null;
-      player_name: string;
-      player_ca: number | null;
-      from_club_name: string | null;
-      to_club_name: string | null;
-    }>();
-
-  return c.json({
-    seaSigns: rows.results.map((r) => ({
-      id: r.id,
-      playerId: r.player_id,
-      playerName: r.player_name,
-      playerCa: r.player_ca,
-      // 真自由身（from_club_id IS NULL）没有原东家名，前端显示「自由身」
-      fromClubName: r.from_club_name,
-      toClubName: r.to_club_name,
-      // free_agent 单据的 fee 就是成交时定的新违约金（createFreeAgent 落库口径）
-      newReleaseFee: r.fee,
-      signFee: r.fee != null ? freeAgentFee(r.fee) : null,
-      season: r.season,
-      windowSeq: r.window_seq,
-      completedAt: r.completed_at,
-    })),
-  });
+// GET /api/market/rumors —— 传闻流（v6.18.0 公开情报）：窗口种子固定的真/假混排传闻（6~8 条）。
+// 种子 = resolveRumorWindow（开窗取开窗；两窗之间取可见赛季 + windowSeq 0），同窗载荷恒定 ⇒ 键含种子。
+// 市场写路径（/api/market、/api/admin）的 purge 挂钩负责写后失效，1h TTL 只是兜底自愈上限。
+app.get('/market/rumors', async (c) => {
+  assertPublicRate(c, 'market');
+  const win = await resolveRumorWindow(c.env.DB);
+  const data = await cachedJson(
+    `market-rumors:${win.season}:${win.windowSeq}`,
+    ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS),
+    () => buildRumors(c.env.DB, win),
+    { scope: 'market', env: c.env, ctx: waitUntilOf(c) },
+  );
+  return c.json({ rumors: data });
 });
 
-// GET /api/market/cpu-board —— CPU 捞人榜（v6.17.0 情报台）：CPU 队可海捞球员按 CA 降序全量。
-// 延续 v3.2.0 步骤 6 的 CROSS JOIN 写法：必须让 clubs 当驱动表，否则优化器改用 idx_players_status
-// 扫全部自由身球员（生产 17,731 名）。CPU 队约 107 人，LIMIT 500 只是防 CPU 队扩容的读量上界，
-// 不是产品分页。禁签不做内容展示（v6.17.0 用户裁决）：CPU 队不解约球员，榜上天然没有禁签球员。
-app.get('/market/cpu-board', async (c) => {
-  await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-
-  const rows = await c.env.DB.prepare(
-    `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, cp.name AS club_name
-     FROM clubs cp CROSS JOIN players p ON p.club_id = cp.id
-     WHERE cp.is_cpu = 1 AND p.status IN ('free', 'normal')
-     ORDER BY p.ca DESC, p.id LIMIT 500`,
-  ).all<{ id: number; fc_id: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_name: string | null }>();
-
-  return c.json({
-    cpuBoard: rows.results.map((r) => ({
-      id: r.id,
-      fcId: r.fc_id,
-      name: r.name,
-      position: r.position,
-      age: r.age,
-      ca: r.ca,
-      pa: r.pa,
-      clubName: r.club_name,
-    })),
-  });
+// GET /api/market/deals —— 最近成交（v6.18.0 公开情报）：已完成单据最近 50 条。
+// 走 0058 的 idx_transfers_status_time 早停（≈50 行索引条目 + 50 次 players 点查）。
+// 金额语义按 type 不同：transfer/activation/forced_auction 的 fee = 成交价；free_agent/rc_change/match
+// 的 fee = 新违约金；termination 的 fee = 0；extra_fee = 审核销毁的附加费（解约费/续约费/海捞费/匹配差额）。
+// 中文标签由前端 TRANSFER_TYPE_LABEL 负责。to_club 侧必须 LEFT JOIN：termination 行 to_club_id 为 NULL，
+// INNER JOIN 会把解约单整行丢掉。
+app.get('/market/deals', async (c) => {
+  assertPublicRate(c, 'market');
+  const data = await cachedJson(
+    'market-deals',
+    ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS),
+    async () => {
+      const rows = await c.env.DB.prepare(
+        `SELECT t.id, t.type, t.player_id, t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at,
+                ${sqlDisplayName('p')} AS player_name,
+                cf.name AS from_club_name, ct.name AS to_club_name
+         FROM transfers t
+         JOIN players p ON p.id = t.player_id
+         LEFT JOIN clubs cf ON cf.id = t.from_club_id
+         LEFT JOIN clubs ct ON ct.id = t.to_club_id
+         WHERE t.status = 'completed'
+         ORDER BY t.completed_at DESC, t.id DESC
+         LIMIT 50`,
+      ).all<{
+        id: number;
+        type: string;
+        player_id: number;
+        fee: number | null;
+        extra_fee: number | null;
+        season: number | null;
+        window_seq: number | null;
+        completed_at: string | null;
+        player_name: string;
+        from_club_name: string | null;
+        to_club_name: string | null;
+      }>();
+      return rows.results.map((r) => ({
+        id: r.id,
+        type: r.type,
+        playerId: r.player_id,
+        playerName: r.player_name,
+        fromClubName: r.from_club_name,
+        toClubName: r.to_club_name,
+        fee: r.fee,
+        extraFee: r.extra_fee,
+        season: r.season,
+        windowSeq: r.window_seq,
+        completedAt: r.completed_at,
+      }));
+    },
+    { scope: 'market', env: c.env, ctx: waitUntilOf(c) },
+  );
+  return c.json({ deals: data });
 });
 
-// GET /api/market/trainees —— 各队训练营球员（可被激活名单，教练侧）
-app.get('/market/trainees', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
-  if (!club) return c.json({ club: null, trainees: [] });
+interface SeaLookupRow {
+  id: number;
+  fc_id: number | null;
+  name: string;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  club_id: number | null;
+  status: string;
+  club_name: string | null;
+}
+
+// GET /api/market/sea-lookup —— 海捞速查（v6.18.0 教练情报台）：按球员 ID（fc_id 优先、内部 id 兜底）
+// 或名字查 ≤8 名候选，各带可捞判定。⚠️ 本批量判定是 bypass.ts checkSeaSignEligible（单条真源：
+// 球员详情 seaSign + createFreeAgent 提交链）的情报台快照副本：守卫顺序与文案逐字对齐，
+// 两处口径必须同步改（tests 有跨实现一致性用例锁）。守卫链摊成 4 条批量查询：cpuClubIds / 本窗禁签 /
+// 挂牌在途 / 审核在途。
+app.get('/market/sea-lookup', async (c) => {
+  await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+
+  const q = (c.req.query('q') ?? '').trim();
+  if (q === '') throw new HttpError(400, '请输入球员 ID 或名字');
 
   const win = await getOpenWindow(c.env.DB);
-  const rows = await c.env.DB.prepare(
-    `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa, p.club_id, cl.name AS club_name
-     FROM players p JOIN clubs cl ON cl.id = p.club_id
-     WHERE p.status = 'trainee' AND p.club_id IS NOT NULL AND p.club_id != ?
-     ORDER BY cl.name, p.id LIMIT 50`,
+  const rowSql = `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa,
+            p.club_id, p.status, cl.name AS club_name
+     FROM players p LEFT JOIN clubs cl ON cl.id = p.club_id`;
+  let candidates: SeaLookupRow[] = [];
+  if (/^\d+$/.test(q)) {
+    const hit = await firstPlayerByRef<{ id: number }>(c.env.DB, 'id', Number(q));
+    if (hit) {
+      const row = await c.env.DB.prepare(`${rowSql} WHERE p.id = ?`).bind(hit.id).first<SeaLookupRow>();
+      if (row) candidates = [row];
+    }
+  } else {
+    const pattern = likeContains(foldNameQuery(q));
+    const rows = await c.env.DB.prepare(
+      `${rowSql}
+       WHERE (${sqlFold(sqlDisplayName('p'))} LIKE ? ESCAPE '\\' OR ${sqlFold('p.name')} LIKE ? ESCAPE '\\')
+       ORDER BY p.ca DESC, p.id LIMIT 8`,
+    )
+      .bind(pattern, pattern)
+      .all<SeaLookupRow>();
+    candidates = rows.results;
+  }
+  if (candidates.length === 0) return c.json({ results: [] });
+
+  const ids = candidates.map((r) => r.id);
+  const ph = ids.map(() => '?').join(', ');
+  const cpuIds = await cpuClubIds(c.env.DB);
+  const banned = new Set<number>();
+  if (win) {
+    const rows = await c.env.DB.prepare(
+      `SELECT player_id FROM transfers WHERE type = 'termination' AND status = 'completed'
+         AND season = ? AND window_seq = ? AND player_id IN (${ph})`,
+    )
+      .bind(win.season, win.windowSeq, ...ids)
+      .all<{ player_id: number }>();
+    for (const r of rows.results) banned.add(r.player_id);
+  }
+  const listed = new Set<number>();
+  const usedListings = await c.env.DB.prepare(
+    `SELECT player_id FROM listings WHERE status IN ('listed', 'bidding', 'matched_pending', 'pending_review')
+       AND player_id IN (${ph})`,
   )
-    .bind(club.id)
-    .all<{ id: number; fc_id: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; club_id: number; club_name: string }>();
+    .bind(...ids)
+    .all<{ player_id: number }>();
+  for (const r of usedListings.results) listed.add(r.player_id);
+  const pending = new Set<number>();
+  const usedPending = await c.env.DB.prepare(
+    `SELECT player_id FROM transfers WHERE status = 'pending_review' AND player_id IN (${ph})`,
+  )
+    .bind(...ids)
+    .all<{ player_id: number }>();
+  for (const r of usedPending.results) pending.add(r.player_id);
+
+  return c.json({
+    results: candidates.map((r) => {
+      // 阶段顺序与 checkSeaSignEligible 一致：window → ownership → status → banned → listing → pending
+      let reason: string | null = null;
+      if (!win) reason = '转会窗口没开，现在不能海捞';
+      else if (r.club_id !== null && !cpuIds.has(r.club_id)) reason = '海捞只能签无归属的球员（这名球员有东家）';
+      else if (r.status === 'retired' || r.status === 'listed') reason = '当前状态不能海捞';
+      else if (banned.has(r.id)) reason = '这名球员本窗口被解约过，本窗口所有球队都不能签他';
+      else if (listed.has(r.id)) reason = '这名球员已经有一单在市场流程里了，等它结束再操作';
+      else if (pending.has(r.id)) reason = '这名球员有一张单据正在等管理组审核，先等审核结果';
+      return {
+        id: r.id,
+        fcId: r.fc_id,
+        name: r.name,
+        position: r.position,
+        age: r.age,
+        ca: r.ca,
+        pa: r.pa,
+        clubName: r.club_name,
+        seaSign: { eligible: reason === null, reason },
+      };
+    }),
+  });
+});
+
+// GET /api/market/activatable —— 可激活球员（v6.18.0，替换退役的 /market/trainees）：教练侧列出
+// 自己队以外的 normal/trainee 球员（?mode=trainee 只看训练营），附激活费与状态标记。
+// activationFee 口径 = activations.ts 的 askPrice（训练营固定 5m；正式合同按保护期倍数，4.4.2.3）；
+// justSigned 口径 = activations.ts「刚签约不可激活」409 前置（效力为 0）；activatedThisWindow 口径 =
+// 4.4.2.1 一窗一次（失效激活也占额，批量化查询照搬退役 trainees 实现）。
+app.get('/market/activatable', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) return c.json({ club: null, players: [] });
+
+  const mode = c.req.query('mode');
+  const statusSql = mode === 'trainee' ? `'trainee'` : `'normal', 'trainee'`;
+  // 空串按没给算（Number('')===0 会把 ?limit= 钳成 1 行，v6.18.0 评审 P3）
+  const limitRaw = c.req.query('limit');
+  const limit = limitRaw !== undefined && limitRaw.trim() !== '' && Number.isInteger(Number(limitRaw))
+    ? Math.min(100, Math.max(1, Number(limitRaw)))
+    : 100;
+
+  const filters = [`p.club_id IS NOT NULL`, `p.club_id != ?`, `p.status IN (${statusSql})`];
+  const args: (number | string)[] = [club.id];
+  const q = (c.req.query('q') ?? '').trim();
+  if (q !== '') {
+    const pattern = likeContains(foldNameQuery(q));
+    filters.push(`(${sqlFold(sqlDisplayName('p'))} LIKE ? ESCAPE '\\' OR ${sqlFold('p.name')} LIKE ? ESCAPE '\\')`);
+    args.push(pattern, pattern);
+  }
+
+  const rows = await c.env.DB.prepare(
+    `SELECT p.id, p.fc_id, ${sqlDisplayName('p')} AS name, p.position, p.age, p.ca, p.pa,
+            p.status, cl.id AS club_id, cl.name AS club_name,
+            ct.contract_type, ct.release_fee, ct.protection_ticks, ct.service_ticks
+     FROM players p
+     JOIN clubs cl ON cl.id = p.club_id
+     JOIN contracts ct ON ct.player_id = p.id AND ct.is_active = 1
+     WHERE ${filters.join(' AND ')}
+     ORDER BY p.ca DESC, p.id
+     LIMIT ?`,
+  )
+    .bind(...args, limit)
+    .all<{
+      id: number;
+      fc_id: number | null;
+      name: string;
+      position: string | null;
+      age: number | null;
+      ca: number | null;
+      pa: number | null;
+      status: string;
+      club_id: number;
+      club_name: string;
+      contract_type: string;
+      release_fee: number | null;
+      protection_ticks: number | null;
+      service_ticks: number | null;
+    }>();
+
+  // 窗刻度（v3.0.0）：保护期倍数与 justSigned 都要它；SQL 片段口径与 closedRegularTicks 一致
+  const ticks = await c.env.DB.prepare(`SELECT ${CURRENT_TICKS_SQL} AS n`).first<{ n: number }>();
+  const currentTicks = ticks?.n ?? 0;
 
   // 本窗口已被激活过的标记（4.4.2.1 一窗一次；失效激活也占额）
+  const win = await getOpenWindow(c.env.DB);
   const activated = new Set<number>();
   if (win) {
     const used = await c.env.DB.prepare(
@@ -404,7 +536,7 @@ app.get('/market/trainees', async (c) => {
 
   return c.json({
     club: { id: club.id, name: club.name },
-    trainees: rows.results.map((r) => ({
+    players: rows.results.map((r) => ({
       id: r.id,
       fcId: r.fc_id,
       name: r.name,
@@ -412,9 +544,19 @@ app.get('/market/trainees', async (c) => {
       age: r.age,
       ca: r.ca,
       pa: r.pa,
+      status: r.status,
       club: { id: r.club_id, name: r.club_name },
-      activationFee: TRAINEE_ACTIVATION_FEE,
+      contractType: r.contract_type,
+      // 正式合同缺违约金（release_fee NULL/0）→ 费用 null：行级兜底，不许整页 500
+      //（v6.18.0 测试轮实测过：一名这样的球员曾让名单打不开）；提交端另有同口径 409 兜底
+      activationFee:
+        r.contract_type === 'trainee'
+          ? TRAINEE_ACTIVATION_FEE
+          : r.release_fee != null && r.release_fee > 0
+            ? activationFee(r.release_fee, r.protection_ticks, currentTicks)
+            : null,
       activatedThisWindow: activated.has(r.id),
+      justSigned: currentTicks <= (r.service_ticks ?? 0),
     })),
   });
 });

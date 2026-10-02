@@ -1,4 +1,4 @@
-// 市场三页共享件（v2.2.0 拆页）：常量、格式化、子导航。
+// 市场四页共享件（v2.2.0 拆页，v6.18.0 扩为四页）：常量、格式化、子导航。
 // 数据层 hooks 在 lib/queries.ts（TanStack Query）。
 import { NavLink } from 'react-router';
 
@@ -48,10 +48,13 @@ export function MarketNav() {
   return (
     <nav className="seg" aria-label="市场分区">
       <NavLink to="/market" end className={({ isActive }) => (isActive ? 'on' : '')}>
-        市场板
+        在售市场
       </NavLink>
       <NavLink to="/market/free" className={({ isActive }) => (isActive ? 'on' : '')}>
-        海捞情报
+        海捞
+      </NavLink>
+      <NavLink to="/market/intel" className={({ isActive }) => (isActive ? 'on' : '')}>
+        市场情报
       </NavLink>
       <NavLink to="/market/mine" className={({ isActive }) => (isActive ? 'on' : '')}>
         我的

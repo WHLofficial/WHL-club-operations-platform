@@ -836,53 +836,5 @@ describe('暂停出价（v2.1.0：全局开关 + 单挂牌冻结）', () => {
   });
 });
 
-// v6.17.0：CPU 捞人榜查询的执行计划护栏（沿用 v3.2.0 步骤 6 的护栏手法，护栏对象换成 cpu-board）。
-// 这条查询的贵在「驱动表选错」：clubs 当驱动（CROSS JOIN 固定连接顺序）时按 club_id 点查 CPU 队百来人；
-// 一旦被「等价改写」成普通 JOIN / IN 子查询，优化器改用 idx_players_status 扫全部自由身球员（生产 17,731 名）。
-// 任一条退化都只体现在读量上——接口返回一模一样、功能用例全绿，所以这里不看结果，看执行计划。
-describe('TC-BOARD-06 CPU 捞人榜查询计划（v6.17.0）', () => {
-  it('TC-BOARD-06 clubs 驱动、按 club_id 走球员索引，不扫自由身全表', async () => {
-    const fx = freshEnv();
-    const mf = await seedMarket(fx);
-    const cpuClub = await createClub(fx, 'AC米兰(CPU)');
-    fx.sqlite.exec(`UPDATE clubs SET is_cpu = 1 WHERE id = ${cpuClub}`);
-    // 灌足量行：优化器在小表上会挑别的计划，而生产是 17,731 名自由身 + 4 支 CPU 队约 107 人
-    const ins = fx.sqlite.prepare(
-      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status)
-       VALUES (?, ?, ?, ?, 'ST', 25, ?, 70, 1, 'free')`,
-    );
-    for (let i = 0; i < 400; i += 1) ins.run(2000 + i, `fa${i}`, `自由${i}`, null, 40 + (i % 50));
-    for (let i = 0; i < 20; i += 1) ins.run(3000 + i, `cp${i}`, `米兰${i}`, cpuClub, 50 + i);
-
-    const captured: string[] = [];
-    const real = fx.env.DB;
-    const env = {
-      ...mf.env,
-      DB: {
-        prepare(sql: string) {
-          captured.push(sql);
-          return real.prepare(sql);
-        },
-        batch: real.batch.bind(real),
-      } as unknown as D1Database,
-    };
-    const res = await get('/api/market/cpu-board', 'tok-coach', env);
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { cpuBoard: unknown[] }).cpuBoard.length).toBe(20);
-
-    const sql = captured.find((s) => s.includes('CROSS JOIN'));
-    expect(sql).toBeDefined();
-    expect(sql ?? '').toContain('ORDER BY p.ca DESC, p.id');
-    expect(sql ?? '').toContain('LIMIT 500');
-    const plan = sqlAll<{ detail: string }>(fx.sqlite, `EXPLAIN QUERY PLAN ${sql}`)
-      .map((r) => r.detail)
-      .join(' | ');
-    expect(plan).toContain('SCAN cp'); // clubs 当驱动表（CROSS JOIN 的真实作用）
-    // 实测源 SQL 走 idx_players_club(club_id=?)：ORDER BY 跨多队合并不可能靠 club_ca 索引省掉临时 B-TREE，
-    // 优化器不为它换索引；断言只锁 idx_players_club 前缀，将来换成 idx_players_club_ca 也仍是同一性质
-    expect(plan).toMatch(/SEARCH p USING INDEX idx_players_club/);
-    expect(plan).not.toContain('SCAN p');
-    expect(plan).not.toContain('idx_players_status'); // 退化的签名：扫全部 free/normal
-    expect(plan).not.toContain('MULTI-INDEX OR');
-  });
-});
+// v6.18.0：/api/market/cpu-board 已退役，原 TC-BOARD-06 执行计划护栏随之删除。
+// 同类护栏改挂在成交公示（GET /api/market/deals）上，见 tests/market-intel.test.ts 的 TC-DEAL-06。

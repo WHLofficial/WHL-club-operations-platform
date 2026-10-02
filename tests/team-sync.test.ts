@@ -214,8 +214,8 @@ describe('入站机器端点 POST /api/internal/team-upsert（v6.1.0）', () => 
 
 describe('公开缓存失效登记（v6.1.0）', () => {
   it('写路径 /api/internal 命中 PUBLIC_SCOPES——否则建了俱乐部公开目录最长陈旧 24h', () => {
-    expect(scopesForWritePath('/api/internal/team-upsert')).toEqual(['players', 'roster', 'clubs', 'fixtures']);
-    expect(scopesForWritePath('/api/internal')).toEqual(['players', 'roster', 'clubs', 'fixtures']);
+    expect(scopesForWritePath('/api/internal/team-upsert')).toEqual(['players', 'roster', 'clubs', 'fixtures', 'market']);
+    expect(scopesForWritePath('/api/internal')).toEqual(['players', 'roster', 'clubs', 'fixtures', 'market']);
     // 边界：前缀只按路径段匹配，/api/internals 不该命中
     expect(scopesForWritePath('/api/internals')).toEqual([]);
   });

@@ -5,7 +5,7 @@
 // - **TTL 只是 purge 失效时的自愈上限**：每天最坏重读次数 = 86400 ÷ TTL（每形状、每 colo）。
 //   所以 TTL 决定的是「漏 purge / KV 抖动的代价」，不是新鲜度的来源。1h/24h 这种长兜底能成立，
 //   前提正是 purge 挂钩在（否则列表会陈旧 1 小时）。
-export type CacheScope = 'players' | 'roster' | 'clubs' | 'fixtures';
+export type CacheScope = 'players' | 'roster' | 'clubs' | 'fixtures' | 'market';
 
 // 为什么分级而不是一个数：三个形状的「单次读量 × 键空间」差三个数量级。
 // - players（列表）：键空间 = 筛选 × 排序 × 游标，无法枚举，只能靠代际键整体失效；单次 7~5.6 万行；
@@ -19,6 +19,9 @@ export const CACHE_TTL_MS: Record<CacheScope, number> = {
   // v6.15.0 场次天气/球场/上座：键空间有限（赛事×轮次），写路径 purge 已覆盖预报与确认；
   // 1h 与 players 档同级——赛前情报不宜按 24h 兜底。
   fixtures: 3_600_000,
+  // v6.18.0 市场情报（rumors / deals）：键空间有限（rumors 键含窗口种子、deals 固定键），
+  // loader 读量百行级；成交写路径在 /api/admin（审核过户）⇒ purge 后即时失效，1h 只是兜底。
+  market: 3_600_000,
 };
 
 // 代际版本号**读失败**时，本次请求按这个短 TTL 处理：
@@ -31,7 +34,7 @@ export const EPOCH_FAIL_SHORT_MS = 60_000;
 export const EPOCH_MEMO_MS = 5_000;
 
 // 公开读缓存覆盖的全部 scope（purge 时一起失效）。
-export const PUBLIC_SCOPES: readonly CacheScope[] = ['players', 'roster', 'clubs', 'fixtures'];
+export const PUBLIC_SCOPES: readonly CacheScope[] = ['players', 'roster', 'clubs', 'fixtures', 'market'];
 
 // 环境变量覆盖：显式给数（含 0 = 旁路）就照它，未配则用分级表。
 // 生产不再配这个变量（`wrangler.jsonc` 里的 20000 已删）——分级表才是生产口径；
