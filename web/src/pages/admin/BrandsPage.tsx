@@ -205,14 +205,14 @@ export default function BrandsPage() {
                     <tr key={row.id}>
                       <td>{row.brand}</td>
                       <td>
-                        {/* v6.20.0 窄屏：本页输入/下拉一律「最宽 N，窄屏按容器收缩」，避免 375px 下把表格撑宽 */}
-                        <input className="input input-sm" style={{ width: 'min(96px, 100%)' }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
+                        {/* v6.20.0：表格内控件保持定宽——min(N,100%) 的百分比分量会改变桌面列宽分配（评审 P0-1），窄屏保底由 .table-wrap 横滚承担 */}
+                        <input className="input input-sm" style={{ width: 96 }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
                       </td>
                       <td>
-                        <input className="input input-sm mono" style={{ width: 'min(72px, 100%)' }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
+                        <input className="input input-sm mono" style={{ width: 72 }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
-                        <select className="input input-sm" style={{ width: 'min(84px, 100%)' }} value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
+                        <select className="input input-sm" style={{ width: 84 }} value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
                           {TIERS.map((t) => (
                             <option key={t} value={t}>
                               {t}

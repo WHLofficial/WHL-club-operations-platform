@@ -21,7 +21,11 @@ export default function TopBar() {
     const nav = navRef.current;
     const active = nav ? nav.querySelector<HTMLElement>('.nav-tab.is-active') : null;
     if (active && typeof active.scrollIntoView === 'function') {
-      active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+      // 尊重 reduced-motion（与抽屉过渡同口径，评审 P3-1）：减弱动效时滚入改即时跳转
+      const reduce =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
     }
   }, [pathname]);
 

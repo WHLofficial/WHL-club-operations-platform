@@ -93,8 +93,14 @@ export default function AdminLayout() {
     }
     restoreFocus.current = false;
     setDrawerOpen(false);
-    // 变宽时入口按钮随窄屏分支一起卸载，这里不再手动接焦点：侧栏本身恢复常驻，
-    // 焦点若在导航链接上会自然留着（同一个 DOM 节点）。
+    // 变宽时入口按钮随窄屏分支一起卸载；焦点若真在抽屉里，inert 翻转的当帧会被浏览器踢到 body
+    // （评审 P2-1 实测 activeElement=BODY），这里接回侧栏当前活动链接——宽屏该节点常驻。
+    // 顺带清掉标记（评审 P2-2）：若不接回任何元素，陈旧的 true 会让之后任意一次「变窄」
+    // 在用户毫无交互的情况下把焦点抢到 toggle 上。
+    if (focusInSide.current) {
+      focusInSide.current = false;
+      sidebarRef.current?.querySelector<HTMLElement>('.admin-nav-link.on')?.focus();
+    }
   }, [narrow]);
 
   // 抽屉开着时：锁背景滚动（不然滑抽屉会带着页面一起滚；iOS 上光靠 body 的 overflow: hidden

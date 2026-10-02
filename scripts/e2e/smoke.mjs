@@ -970,8 +970,30 @@ async function main() {
       await page.setViewportSize({ width: 375, height: 812 });
       // 路由清单 = App.tsx 全量注册（v6.20.0 spec §3 的保底口径）：/clubs/1、/players/1 是两个
       // 详情取样。本地读端点 500 的页面会落错误横幅——壳照样渲染，横滚照样要量，失败横幅不豁免。
+      // 详情取样 id 从列表 API 首行取（评审 P2-3：不硬编码——硬编码 id 在种子数据缺行时会扫到空/错态假绿）
+      const ids = await page.evaluate(async () => {
+        const out = { player: '1', club: '1', notes: [] };
+        try {
+          const r = await fetch('/api/players?limit=1');
+          if (r.ok) {
+            const j = await r.json();
+            if (j.players?.[0]?.fcId != null) out.player = String(j.players[0].fcId);
+            else out.notes.push('players 列表空，/players/:id 用兜底 1');
+          } else out.notes.push(`/api/players ${r.status}，/players/:id 用兜底 1`);
+        } catch { out.notes.push('players 列表取首行失败，/players/:id 用兜底 1'); }
+        try {
+          const r = await fetch('/api/clubs');
+          if (r.ok) {
+            const j = await r.json();
+            if (j.clubs?.[0]?.id != null) out.club = String(j.clubs[0].id);
+            else out.notes.push('clubs 目录空，/clubs/:id 用兜底 1');
+          } else out.notes.push(`/api/clubs ${r.status}，/clubs/:id 用兜底 1`);
+        } catch { out.notes.push('clubs 目录取首行失败，/clubs/:id 用兜底 1'); }
+        return out;
+      });
+      for (const note of ids.notes) console.log(`   ⑫ 备注：${note}`);
       const ROUTES = [
-        '/', '/players', '/players/1', '/clubs', '/clubs/1',
+        '/', '/players', `/players/${ids.player}`, '/clubs', `/clubs/${ids.club}`, '/bind',
         '/market', '/market/free', '/market/intel', '/market/mine',
         '/club', '/negotiations', '/offers', '/ledger', '/notifications',
         '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
@@ -1035,9 +1057,42 @@ async function main() {
         `打开抽屉后焦点应在关闭钮上（实际 ${focused}）`,
       );
 
-      // Esc 关
+      // 焦点循环（TC-DRW-08）：抽屉内可聚焦元素 11 链接 + 关闭钮 = 12 个，连按 12 次 Tab / 4 次
+      // Shift+Tab 后焦点都必须仍在抽屉里（焦点陷阱把 Tab 挡在侧栏 + 入口钮之内）
+      for (let i = 0; i < 12; i++) await page.keyboard.press('Tab');
+      assert(
+        await page.evaluate(() => !!document.querySelector('.admin-sidebar')?.contains(document.activeElement)),
+        'Tab 连按 12 次后焦点应仍在抽屉内',
+      );
+      for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+Tab');
+      assert(
+        await page.evaluate(() => !!document.querySelector('.admin-sidebar')?.contains(document.activeElement)),
+        'Shift+Tab 反向循环后焦点应仍在抽屉内',
+      );
+
+      // Esc 关：焦点回切换钮 + 锁滚复原（TC-DRW-05 为 P0）
       await page.keyboard.press('Escape');
       await sideOffscreen();
+      const focusAfterEsc = await page.evaluate(() => document.activeElement?.className ?? 'null');
+      assert(
+        String(focusAfterEsc).includes('admin-nav-toggle'),
+        `Esc 关闭后焦点应回切换钮（实际 ${focusAfterEsc}）`,
+      );
+      assert(
+        (await page.evaluate(() => document.body.style.overflow)) !== 'hidden',
+        'Esc 关闭后背景锁滚应复原',
+      );
+
+      // × 关闭（TC-DRW-07）：同样焦点回切换钮
+      await toggle.click();
+      await page.locator('.admin-drawer-mask').waitFor({ timeout: TIMEOUT });
+      await page.locator('.admin-drawer-close').click();
+      await sideOffscreen();
+      const focusAfterX = await page.evaluate(() => document.activeElement?.className ?? 'null');
+      assert(
+        String(focusAfterX).includes('admin-nav-toggle'),
+        `× 关闭后焦点应回切换钮（实际 ${focusAfterX}）`,
+      );
 
       // 点链接导航 → 自动关（抽屉必须不挡路由跳转后的屏幕）
       await toggle.click();
