@@ -4,6 +4,23 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.20.0] · 窄屏整治第一批：管理壳抽屉骨架 + 全站保底横扫（2026-10-02）
+
+全站移动端窄屏整治第一批（设计 spec `docs/superpowers/specs/2026-10-02-mobile-remediation-design.md`，批次路线 v6.21 编辑面板卡片化 + CoachPanel 粘性列、v6.22 公开阅读页 + iOS 真机抽验）。**管理壳 ≤760px 侧栏收抽屉**：切换钮「☰ 管理导航 · 当前页名」+ 固定抽屉（宽 min(280px,85vw)）+ 遮罩，焦点陷阱 / 锁滚 / 焦点归位照球员库抽屉范式，Esc / 遮罩 / × / 路由切换四条关闭路径；>760px 桌面 DOM 零变化。**顶栏 ≤640px 页签横滑**：贴边渐隐 + active 页签 scrollIntoView 居中（尊重 prefers-reduced-motion）。**全站保底横扫**：内联固定宽 10 处收 `min(N,100%)`（其中表格内 4 处经评审回退定宽——百分比分量会改变 ≥761px 桌面列宽分配，窄屏保底由 `.table-wrap` 横滚承担）；48 张表格核实全部已有 `.table-wrap` 包裹（立项探查「约 9 页裸表」系误报）；`.ledger-book` / `.inbox-text` 两处窄屏残余溢出修复。**e2e 11→13**：新增 ⑫ 全路由 375×812 零溢出扫描（26 路由）与 ⑬ 管理抽屉全交互 + 宽屏零变化铁律；静态闸门 `tests/mobile-baseline.test.ts` 把表格包裹 / 固定宽禁令（白名单双向核对）/ 触控 ≥36 固化为 vitest 红线。零迁移零生产写。**未发布**（本地完成，发布等令）。判级 minor。测试计划 `docs/test-plans/v6.20.0-mobile-skeleton-baseline.md`（31 TC + 6 变异）；vitest 69 文件 / 1213 例全绿（v6.19.0 基线 68/1209，净 +1 文件 / +4 例）、e2e 13/13、code-review P0 1 / P1 3 / P2 4 / P3 6（修登分明）。
+
+**Added**
+- 管理壳窄屏抽屉（类名契约 `admin-nav-toggle` / `admin-sidebar.open` / `admin-drawer-mask` / `admin-drawer-close`，e2e ⑬ 锁定）。
+- `tests/mobile-baseline.test.ts` 静态闸门 4 例（表格保底穷尽扫描 / 内联固定宽禁令 + 允许清单 5 条双向核对 / styles.css 触控 ≥36 规则级锁 / 判据自检）。
+- e2e ⑫ 全路由 375 零溢出扫描、⑬ 管理抽屉开合 / 焦点循环 / 四条关闭路径 / 宽屏 DOM 零变化。
+
+**Changed**
+- 顶栏 ≤640 页签横滑加贴边渐隐与 active 居中（reduced-motion 降级）；`.search-suggest` 浮层窄屏 min(260px,86vw)。
+- BrandsPage / admin MarketPage / OverviewPage / SystemPage / CoachPanel 共 10 处内联固定宽收窄屏保底（表格内 4 处评审后回退定宽，白名单登记）。
+- `UI_DESIGN.md` 断点口径订正：「单一 640px」→ 实际三档 640/760/900。
+
+**Fixed**
+- `.ledger-book` 窄屏隐式列撑破（`minmax(0,1fr)`）；`.inbox-text` 缺 `min-width:0` 溢出 3px；`.admin-drawer-close` / `.lib-drawer-close` 命中区 <36 补足 36×36。
+
 ## [v6.19.0] · 球员库移动端卡片化 + 全仓数值五档分段配色（2026-10-02）
 
 球员库 `/players` 在 ≤900px（与筛选抽屉同断点）把 12 列横向滚动表格整表换成**铭牌卡网格**：左竖轨位置药丸（主位独占 + 副位两枚一行、奇数孤行自动居中）与 CA/PA 大字，卡身姓名（长名换行不出省略号）+ 标记 emoji + 队徽/俱乐部/年龄/状态徽章（自由身灰 chip），下部固定行序属性列表（身价/违约金/徽章 chips/影响力）+ 受筛选项透镜行（attr 筛选优先恰 1 条，排序键/筛选维度按白名单补位，去重上限 2）；窄屏新增排序行（30 键 + attr 动态项 + 升降切换），显示列窄屏隐藏。桌面 >900px DOM 零变化——唯一例外：**标记列从可选列提为固定第二列（UID 后）**，且 CA/PA/初始 CA 列字色随五档变化。**数值分段配色全仓统一**：sofifa.com 实测五档（≤50 红 / ≤60 橙 / ≤70 琥珀金 `#b7892b`——原档黄 `#fcc419` 在奶油底上 ~1.6:1 不可读，唯一替换档 / ≤80 榈绿 / ≥81 绿），`attrClass` 收归 `web/src/lib/players-library.ts` 共享，球员面板头部 CA/PA、六维雷达轴数值、属性页签与分组均值、球员库表格、移动端卡片同源。零迁移零生产写（后端零改动，卡片所需字段列表端点已全部返回）。**已发布**（2026-10-02，push `368a1e0..7e14248` 触发 CF 自动部署，生产 Version `9e371144`，上线回读与资产比对全过）。判级 minor。测试计划 `docs/test-plans/v6.19.0-players-mobile-cards.md`（19 TC + 5 变异全命中）；vitest 68 文件 / 1209 例全绿（v6.18.0 基线 67/1194，净 +1 文件 / +15 例）、e2e 11/11、code-review P0 0 / P1 0 / nit 三条登记。
