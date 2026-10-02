@@ -1,13 +1,13 @@
-// 签约谈判（v0.5.0，§6.7）：我的谈判会话——定新违约金、工资报价（≤3 轮）、直签训练营。
-// 满意度文案与结局由服务端给出（§6.10：前端不含任何判定参数，E 数值仅展示）。
+// 转会台 · 谈判区（v6.23.0）：原 pages/Negotiations.tsx 主体搬入，逻辑行为不变。
 // 家族口径：mono 数字、口语化文案、操作 toast 反馈、两段式 busy 态。
+// v6.23.0 新增：会话卡头部阶段徽标（第一步 · 定违约金 / 工资谈判 · 剩 N 轮），只用现有字段推导。
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../lib/api.ts';
-import { useToast } from '../lib/toast.tsx';
-import { qk } from '../lib/queries.ts';
-import { playerPath } from '../lib/player-link.ts';
+import { api, apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../../../lib/api.ts';
+import { useToast } from '../../../lib/toast.tsx';
+import { useMyClub, qk } from '../../../lib/queries.ts';
+import { playerPath } from '../../../lib/player-link.ts';
 
 const SOURCE_LABEL: Record<string, string> = {
   negotiation: '报价成约',
@@ -35,13 +35,20 @@ function money(x: number | null | undefined): string {
   return x === null || x === undefined ? '—' : x.toFixed(2);
 }
 
-export default function Negotiations() {
-  const { show, toastNode } = useToast();
-  const qc = useQueryClient();
-  const sessionsQuery = useQuery({
+// 我的谈判会话（desk 待办计数与谈判区共用同一个 query 键，命中缓存不重复发请求）
+export function useMyNegotiations(isCoach: boolean) {
+  return useQuery({
     queryKey: ['negotiations', 'mine'],
     queryFn: async () => (await api<{ sessions: NegotiationSession[] }>('/api/negotiations?mine=1')).sessions,
+    enabled: isCoach,
   });
+}
+
+export default function NegotiationsSection() {
+  const { show, toastNode } = useToast();
+  const { isCoach } = useMyClub();
+  const qc = useQueryClient();
+  const sessionsQuery = useMyNegotiations(isCoach);
   const sessions = sessionsQuery.data ?? null;
   const loadError = sessionsQuery.isError
     ? sessionsQuery.error instanceof Error
@@ -62,8 +69,8 @@ export default function Negotiations() {
   }
 
   return (
-    <div className="container">
-      <h1>签约谈判</h1>
+    <section id="desk-nego" aria-label="签约谈判">
+      <h3>签约谈判</h3>
       <p className="hint">
         成交单获管理组批准后，谈判会话自动开在这里：先定新违约金（幅度受限），再按经纪人预期工资谈工资，最多{' '}
         <span className="mono">3</span> 轮；任何时候都可以直接签训练营合同（固定 <span className="mono">0.75</span> m /
@@ -72,7 +79,7 @@ export default function Negotiations() {
       {loadError && <div className="banner warn">{loadError}</div>}
       {toastNode}
 
-      {justSigned !== null && <NumberPrompt player={justSigned} onDone={() => setJustSigned(null)} />}
+      {justSigned !== null && <NumberPrompt player={justSigned} onDone={() => setJustSigned(null)} show={show} />}
 
       {sessions === null && !loadError && <p className="muted">正在翻谈判夹…</p>}
 
@@ -83,7 +90,14 @@ export default function Negotiations() {
       )}
 
       {active.map((s) => (
-        <SessionCard key={s.id} session={s} onChanged={refresh} onSettled={afterSettled} onError={(m) => show(m, true)} />
+        <SessionCard
+          key={s.id}
+          session={s}
+          onChanged={refresh}
+          onSettled={afterSettled}
+          onError={(m) => show(m, true)}
+          show={show}
+        />
       ))}
 
       {done.length > 0 && (
@@ -123,7 +137,7 @@ export default function Negotiations() {
           </div>
         </section>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -131,8 +145,16 @@ export default function Negotiations() {
 
 // 成约那一刻球员就过户了，号码是俱乐部的 ⇒ 就地让教练定号，省得回头翻球员卡。
 // 可以跳过：合同页签随时能补，所以这里不拦路，也不校验同队重复之外的东西（后端把关）。
-function NumberPrompt({ player, onDone }: { player: { id: number; name: string }; onDone: () => void }) {
-  const { show } = useToast();
+// v6.23.0：toast 由区块级 useToast 渲染，show 从这里传下去（原先子组件各自 useToast 却不渲染 node，消息看不见）。
+function NumberPrompt({
+  player,
+  onDone,
+  show,
+}: {
+  player: { id: number; name: string };
+  onDone: () => void;
+  show: (text: string, err?: boolean) => void;
+}) {
   const qc = useQueryClient();
   const [num, setNum] = useState('');
   const [busy, setBusy] = useState(false);
@@ -195,11 +217,13 @@ function SessionCard({
   onChanged,
   onSettled,
   onError,
+  show,
 }: {
   session: NegotiationSession;
   onChanged: () => Promise<void>;
   onSettled: (msg: string, player: { id: number; name: string }) => Promise<void>;
   onError: (msg: string) => void;
+  show: (text: string, err?: boolean) => void;
 }) {
   const s = session;
   const lastOffer = s.attempts.length > 0 ? s.attempts[s.attempts.length - 1].offeredWage : null;
@@ -209,6 +233,12 @@ function SessionCard({
       <h3>
         <Link to={playerPath(s.player)}>{s.player.name}</Link> · 签约谈判
         <span className="badge purple">谈判中</span>
+        {/* v6.23.0 阶段徽标：违约金未定 = 第一步，定了才进工资谈判 */}
+        {s.releaseFee === null ? (
+          <span className="badge sky">第一步 · 定违约金</span>
+        ) : (
+          <span className="badge gold">工资谈判 · 剩 {s.remaining} 轮</span>
+        )}
         <span className={`badge ${TIER_BADGE[s.agentTier] ?? 'gray'}`}>经纪人{s.agentTierLabel}</span>
       </h3>
       <p className="hint">
@@ -219,9 +249,9 @@ function SessionCard({
       </p>
 
       {s.releaseFee === null ? (
-        <ReleaseFeeStep session={s} onChanged={onChanged} onError={onError} />
+        <ReleaseFeeStep session={s} onChanged={onChanged} onError={onError} show={show} />
       ) : (
-        <OfferStep session={s} lastOffer={lastOffer} onChanged={onChanged} onSettled={onSettled} onError={onError} />
+        <OfferStep session={s} lastOffer={lastOffer} onChanged={onChanged} onSettled={onSettled} onError={onError} show={show} />
       )}
 
       {s.attempts.length > 0 && (
@@ -268,12 +298,13 @@ function ReleaseFeeStep({
   session,
   onChanged,
   onError,
+  show,
 }: {
   session: NegotiationSession;
   onChanged: () => Promise<void>;
   onError: (msg: string) => void;
+  show: (text: string, err?: boolean) => void;
 }) {
-  const { show } = useToast();
   const [fee, setFee] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -329,14 +360,15 @@ function OfferStep({
   onChanged,
   onSettled,
   onError,
+  show,
 }: {
   session: NegotiationSession;
   lastOffer: number | null;
   onChanged: () => Promise<void>;
   onSettled: (msg: string, player: { id: number; name: string }) => Promise<void>;
   onError: (msg: string) => void;
+  show: (text: string, err?: boolean) => void;
 }) {
-  const { show } = useToast();
   const [wage, setWage] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmTrainee, setConfirmTrainee] = useState(false);

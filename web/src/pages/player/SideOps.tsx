@@ -538,7 +538,7 @@ export function SideOps({
           )}
           {releaseFee === null && <p className="side-sub">没有含违约金的现行合同，续约/挂牌先找管理组补合同。</p>}
         </section>
-        <Link className="side-entry" to="/offers?box=in">
+        <Link className="side-entry" to="/market/desk?tab=offers&box=in">
           <span>我收到的报价</span>
           <span className={pendingMine > 0 ? 'mono gold-text' : 'muted'}>
             {pendingMine > 0 ? `${pendingMine} 条待处理 ›` : '暂无待处理 ›'}

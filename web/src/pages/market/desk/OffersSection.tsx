@@ -1,17 +1,18 @@
-// 转会报价页（v6.3.0）：两个页签（我收到的 / 我送出的）+ 状态筛选 + 清单表格，
-// 点开单条出谈判桌（事件时间线）与操作（同意 / 还价 / 拒绝 / 撤回）。
-// 入口：顶栏「转会报价」+ 球员页左栏「我收到的报价」徽标（/offers?box=in）。
-import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+// 转会台 · 报价区（v6.23.0）：原 pages/Offers.tsx 整体搬入，逻辑行为不变。
+// 与旧页的区别只有两点：① box/status 由 desk 页统一持在 searchParams（本组件受控）；
+// ② 页级 h1 退役，区块标题改用 h3，toastNode 留在本区块内渲染。
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiPost, type OfferDetailResponse, type OfferListItem, type OfferStatus } from '../lib/api.ts';
-import { playerPath } from '../lib/player-link.ts';
-import { useMyClub, useOfferDetail, useOffers, useOffersInvalidation } from '../lib/queries.ts';
-import { useToast } from '../lib/toast.tsx';
+import { apiPost, type OfferDetailResponse, type OfferListItem, type OfferStatus } from '../../../lib/api.ts';
+import { playerPath } from '../../../lib/player-link.ts';
+import { useOfferDetail, useOffers, useOffersInvalidation } from '../../../lib/queries.ts';
+import { useToast } from '../../../lib/toast.tsx';
 
 const STATUS_BADGE: Record<OfferStatus, { label: string; cls: string }> = {
   pending: { label: '待回复', cls: 'sky' },
-  accepted: { label: '已挂牌', cls: 'green' },
+  // v6.23.0 阶段徽标：同意报价即自动挂牌，文案点明「已进入竞价」，免得与成约混淆
+  accepted: { label: '已接受·挂牌竞价中', cls: 'green' },
   rejected: { label: '被拒绝', cls: 'red' },
   withdrawn: { label: '已撤回', cls: 'gray' },
   expired: { label: '已过期', cls: 'gray' },
@@ -36,51 +37,42 @@ function shortTime(iso: string): string {
   return iso.slice(5, 16).replace('T', ' ');
 }
 
-export default function Offers() {
-  const [params, setParams] = useSearchParams();
-  const box = params.get('box') === 'out' ? 'out' : 'in';
-  const status = params.get('status') === 'all' ? 'all' : 'pending';
-  // isCoach 从 useAuth 角色同步取（club?.isCoach 要等 /me/club 回来，加载帧会误显「只对教练开放」）
-  const { isCoach } = useMyClub();
-  const { show } = useToast();
+export default function OffersSection({
+  box,
+  status,
+  onBoxChange,
+  onStatusChange,
+}: {
+  box: 'in' | 'out';
+  status: 'pending' | 'all';
+  onBoxChange: (next: 'in' | 'out') => void;
+  onStatusChange: (next: 'pending' | 'all') => void;
+}) {
+  const { show, toastNode } = useToast();
   const qc = useQueryClient();
   const invalidateOffers = useOffersInvalidation();
 
-  const list = useOffers(box, status, isCoach);
+  const list = useOffers(box, status, true);
   const [openId, setOpenId] = useState<number | null>(null);
-  const detail = useOfferDetail(openId, isCoach);
+  const detail = useOfferDetail(openId, true);
   const [counterDraft, setCounterDraft] = useState('');
   const [busy, setBusy] = useState(false);
 
-  if (!isCoach) {
-    return (
-      <div className="container">
-        <h1>转会报价</h1>
-        <div className="card empty-state">
-          <p className="muted">这里只对教练开放。先绑定俱乐部，再来谈报价。</p>
-        </div>
-      </div>
-    );
-  }
+  // 切换页签/筛选时收起谈判桌（旧页在 switchBox / switchStatus 里同步做，这里随受控入参走）
+  useEffect(() => {
+    setOpenId(null);
+  }, [box, status]);
 
   const items = list.data?.items ?? null;
   const pendingMine = list.data?.pendingMine ?? 0;
 
   function switchBox(next: 'in' | 'out') {
-    setParams((p) => {
-      const np = new URLSearchParams(p);
-      np.set('box', next);
-      return np;
-    });
+    onBoxChange(next);
     setOpenId(null);
   }
 
   function switchStatus(next: 'pending' | 'all') {
-    setParams((p) => {
-      const np = new URLSearchParams(p);
-      np.set('status', next);
-      return np;
-    });
+    onStatusChange(next);
     setOpenId(null);
   }
 
@@ -114,12 +106,13 @@ export default function Offers() {
   const detailData = detail.data ?? null;
 
   return (
-    <div className="container">
-      <h1>转会报价</h1>
+    <section id="desk-offers" aria-label="转会报价">
+      <h3>转会报价</h3>
       <p className="hint">
         私下议价：对别队真人球员送报价，双方轮流出价，<span className="mono">同意</span>即自动挂牌并把报价方锁成领先出价；
         报价即冻结资金，了结（成交 / 拒绝 / 撤回 / 过期）后自动退回。进转会名单的球员达线自动同意、低于自动拒。
       </p>
+      {toastNode}
 
       <div className="seg" role="radiogroup" aria-label="报价页签">
         <button type="button" className={box === 'in' ? 'on' : ''} onClick={() => switchBox('in')}>
@@ -177,7 +170,7 @@ export default function Offers() {
                       <td>
                         {o.status === 'pending' ? (
                           o.myTurn ? (
-                            <span className="badge gold">轮到你</span>
+                            <span className="badge gold">待你表态</span>
                           ) : (
                             <span className="muted">等对方</span>
                           )
@@ -218,7 +211,7 @@ export default function Offers() {
           onClose={() => setOpenId(null)}
         />
       )}
-    </div>
+    </section>
   );
 }
 

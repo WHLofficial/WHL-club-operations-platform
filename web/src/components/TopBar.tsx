@@ -88,15 +88,9 @@ export default function TopBar() {
           <NavLink to="/clubs" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             球队
           </NavLink>
+          {/* 转会中心（v6.23.0）：市场 / 报价 / 谈判三处入口并成一条，仍指向 /market，内部由 MarketNav 分流 */}
           <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            转会市场
-          </NavLink>
-          {/* 转会报价（v6.3.0）：教练在球员页与这里都能进；页面本身对非教练显示引导 */}
-          <NavLink to="/offers" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            转会报价
-          </NavLink>
-          <NavLink to="/negotiations" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            签约谈判
+            转会中心
           </NavLink>
           <NavLink to="/ledger" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             财政账本

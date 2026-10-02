@@ -1,5 +1,5 @@
 // 在售市场 /market（v2.2.0 拆页，v6.18.0 改名）：转会区（卡柜）+ 单卡详情与出价历史 + 匹配决定（24h 窗）。
-// 原 Market.tsx 的转会区与 DetailSection 原样搬迁；海捞/我的挂牌/我的出价分到 /market/free、/market/mine，市场情报在 /market/intel。
+// 原 Market.tsx 的转会区与 DetailSection 原样搬迁；海捞在 /market/free，挂牌+出价+报价+谈判在 /market/desk（v6.23.0 合并），市场情报在 /market/intel。
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { apiPost, type BidPlaceResult, type MarketListing, type MarketListingDetail, type MatchDecisionResult } from '../../lib/api.ts';

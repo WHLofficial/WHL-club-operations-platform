@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router';
+import { Navigate, Route, Routes, useSearchParams } from 'react-router';
 import TopBar from './components/TopBar.tsx';
 import RequireUser from './components/RequireUser.tsx';
 import { useAuth } from './lib/auth.tsx';
@@ -10,18 +10,28 @@ import PlayersLibrary from './pages/PlayersLibrary.tsx';
 import Clubs from './pages/Clubs.tsx';
 import ClubDetail from './pages/ClubDetail.tsx';
 import Bind from './pages/Bind.tsx';
-import Negotiations from './pages/Negotiations.tsx';
 import Ledger from './pages/Ledger.tsx';
 import Notifications from './pages/Notifications.tsx';
-// 报价 / 议价（v6.3.0）：登录后可见
-const Offers = lazy(() => import('./pages/Offers.tsx'));
 import { APP_VERSION } from './lib/version.ts';
 
-// 市场四页按页拆 chunk（v2.2.0 起三页，v6.18.0 加市场情报）：在售市场/市场情报公开，海捞/我的要登录
+// 市场四页按页拆 chunk（v2.2.0 起三页，v6.18.0 加市场情报）：在售市场/市场情报公开，海捞/转会台要登录
 const MarketBoardPage = lazy(() => import('./pages/market/MarketBoardPage.tsx'));
 const MarketFreePage = lazy(() => import('./pages/market/MarketFreePage.tsx'));
 const MarketIntelPage = lazy(() => import('./pages/market/MarketIntelPage.tsx'));
-const MarketMinePage = lazy(() => import('./pages/market/MarketMinePage.tsx'));
+// 转会台（v6.23.0）：市场「我的」+ 转会报价 + 签约谈判三域合并成一页
+const MarketDeskPage = lazy(() => import('./pages/market/desk/MarketDeskPage.tsx'));
+
+// 旧路由退役（v6.23.0）：/offers 与 /negotiations 换址到转会台，保留 box 参数、replace 不留历史栈；
+// 登录拦截交给 desk 路由自己（RequireUser）。/market/mine 一并退役，不再保留路由。
+function OffersRedirect() {
+  const [params] = useSearchParams();
+  const box = params.get('box') === 'out' ? 'out' : 'in';
+  return <Navigate replace to={`/market/desk?tab=offers&box=${box}`} />;
+}
+
+function NegotiationsRedirect() {
+  return <Navigate replace to="/market/desk?tab=nego" />;
+}
 
 // 管理端按页拆 chunk（v2.1.0）：壳 + 8 子页全部懒加载，不再全量进主包
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout.tsx'));
@@ -100,30 +110,18 @@ export default function App() {
             }
           />
           <Route path="/market/intel" element={<MarketIntelPage />} />
+          {/* 转会台（v6.23.0）：原「我的」(/market/mine) + /offers + /negotiations 三处入口合并到这里 */}
           <Route
-            path="/market/mine"
+            path="/market/desk"
             element={
               <RequireUser>
-                <MarketMinePage />
+                <MarketDeskPage />
               </RequireUser>
             }
           />
-          <Route
-            path="/negotiations"
-            element={
-              <RequireUser>
-                <Negotiations />
-              </RequireUser>
-            }
-          />
-          <Route
-            path="/offers"
-            element={
-              <RequireUser>
-                <Offers />
-              </RequireUser>
-            }
-          />
+          {/* 旧地址换址：不需要登录拦截，desk 路由自己会拦；replace 不留历史栈 */}
+          <Route path="/offers" element={<OffersRedirect />} />
+          <Route path="/negotiations" element={<NegotiationsRedirect />} />
           <Route
             path="/ledger"
             element={

@@ -1,16 +1,23 @@
-// 我的 /market/mine（v2.2.0 拆页）：挂牌我的球员（原 ListSection）+ 我的出价（原 MyBidsSection）。
-// 需登录（路由守卫），操作要教练账号；数据层 TanStack Query（lib/queries.ts）。
+// 转会台 · 挂牌 + 出价区（v6.23.0）：原 pages/market/MarketMinePage.tsx 的挂牌表单 + 我的出价整体搬入，
+// 逻辑行为不变（v2.2.0 拆页时来自 ListSection / MyBidsSection）。
+// v6.23.0 新增：成交出价若停在「挂牌待审核」阶段，徽标改「待审核」（listingStatus 推导，不加请求）。
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { apiPost, type MyBidRow, type SquadOverview } from '../../lib/api.ts';
-import { useMarketInvalidation, useMyBids, useMyClub, useSquad } from '../../lib/queries.ts';
-import { useToast } from '../../lib/toast.tsx';
-import { playerPath } from '../../lib/player-link.ts';
-import { BID_STATUS_LABEL, MarketNav, money } from './shared.tsx';
+import { apiPost, type MyBidRow, type SquadOverview } from '../../../lib/api.ts';
+import { useMarketInvalidation, useMyBids, useMyClub, useSquad } from '../../../lib/queries.ts';
+import { useToast } from '../../../lib/toast.tsx';
+import { playerPath } from '../../../lib/player-link.ts';
+import { BID_STATUS_LABEL, money } from '../shared.tsx';
 
-export default function MarketMinePage() {
+/** 出价行徽标：成交但挂牌还在审核 → 「待审核」，其余沿用 BID_STATUS_LABEL 四态 */
+function bidBadge(b: MyBidRow): { label: string; cls: string } {
+  if (b.status === 'won' && b.listingStatus === 'pending_review') return { label: '待审核', cls: 'purple' };
+  return { label: BID_STATUS_LABEL[b.status] ?? b.status, cls: b.status === 'active' ? 'sky' : b.status === 'won' ? 'gold' : 'gray' };
+}
+
+export default function ListingsBidsSection() {
   const { show, toastNode } = useToast();
-  const { loading, isCoach, club: myClub } = useMyClub();
+  const { isCoach, club: myClub } = useMyClub();
   const { bids: myBids, refresh: refreshMine } = useMyBids(isCoach);
   const squad = useSquad(isCoach);
   const invalidateMarket = useMarketInvalidation();
@@ -19,33 +26,19 @@ export default function MarketMinePage() {
   const available = myClub?.balance !== null && myClub !== null ? (myClub.balance ?? 0) - heldTotal : null;
 
   return (
-    <div className="container">
-      <h1>转会市场 · 我的</h1>
+    <section id="desk-mine" aria-label="我的挂牌与出价">
       {toastNode}
-      <MarketNav />
-      {loading ? (
-        <p className="muted">正在确认你的俱乐部身份…</p>
-      ) : !isCoach || myClub === null ? (
-        <div className="card empty-state">
-          <p className="muted">
-            {isCoach ? '还没有绑定俱乐部。先到球队中心完成绑定，再来挂牌和盯价。' : '挂牌球员与出价都是教练操作，观众视角看看就好。'}
-          </p>
-        </div>
-      ) : (
-        <>
-          <ListSection
-            squad={squad}
-            onDone={(msg) => {
-              show(msg);
-              invalidateMarket(null);
-              refreshMine();
-            }}
-            onError={(m) => show(m, true)}
-          />
-          {myBids !== null && <MyBidsSection bids={myBids} available={available} balance={myClub.balance} />}
-        </>
-      )}
-    </div>
+      <ListSection
+        squad={squad}
+        onDone={(msg) => {
+          show(msg);
+          invalidateMarket(null);
+          refreshMine();
+        }}
+        onError={(m) => show(m, true)}
+      />
+      {myBids !== null && <MyBidsSection bids={myBids} available={available} balance={myClub?.balance ?? null} />}
+    </section>
   );
 }
 
@@ -172,26 +165,27 @@ function MyBidsSection({ bids, available, balance }: { bids: MyBidRow[]; availab
                 </td>
               </tr>
             ) : (
-              bids.map((b) => (
-                <tr key={b.id}>
-                  <td>
-                    <Link to={playerPath(b.player)}>{b.player.name}</Link>
-                  </td>
-                  <td>{b.sellerClubName}</td>
-                  <td className="num mono">{money(b.amount)}</td>
-                  <td>
-                    <span className={`badge ${b.status === 'active' ? 'sky' : b.status === 'won' ? 'gold' : 'gray'}`}>
-                      {BID_STATUS_LABEL[b.status] ?? b.status}
-                    </span>
-                  </td>
-                  <td>
-                    {b.holdStatus === 'held' && <span className="stamp stamp-hold stamp-inline">冻结中</span>}
-                    {b.holdStatus === 'released' && <span className="stamp-inline stamp-inline-ok">已解冻</span>}
-                    {b.holdStatus === 'settled' && <span className="stamp stamp-hold stamp-inline">已划转</span>}
-                    {b.holdStatus === null && <span className="muted">—</span>}
-                  </td>
-                </tr>
-              ))
+              bids.map((b) => {
+                const badge = bidBadge(b);
+                return (
+                  <tr key={b.id}>
+                    <td>
+                      <Link to={playerPath(b.player)}>{b.player.name}</Link>
+                    </td>
+                    <td>{b.sellerClubName}</td>
+                    <td className="num mono">{money(b.amount)}</td>
+                    <td>
+                      <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                    </td>
+                    <td>
+                      {b.holdStatus === 'held' && <span className="stamp stamp-hold stamp-inline">冻结中</span>}
+                      {b.holdStatus === 'released' && <span className="stamp-inline stamp-inline-ok">已解冻</span>}
+                      {b.holdStatus === 'settled' && <span className="stamp stamp-hold stamp-inline">已划转</span>}
+                      {b.holdStatus === null && <span className="muted">—</span>}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

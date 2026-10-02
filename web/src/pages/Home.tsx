@@ -58,8 +58,8 @@ export default function Home() {
           <p className="muted">阵容名单、注册合规与球队资金，以后都在这一页打理。</p>
         </NavLink>
         <NavLink to="/market" className="card nav-card">
-          <h3>转会市场</h3>
-          <p className="muted">还没有挂牌。窗口开了之后，这里就是市场。</p>
+          <h3>转会中心</h3>
+          <p className="muted">在售市场、收到的报价与签约谈判都收在这一处，我的转会台盯着待办。</p>
         </NavLink>
         <NavLink to="/clubs" className="card nav-card">
           <h3>球队</h3>

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口，
 // v6.19.0 球员库窄屏卡片化，v6.20.0 加全路由 375 零溢出扫描⑫ + 管理抽屉开合⑬，
-// v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮；v6.22.0 加公开阅读几何⑯）：
+// v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮；v6.22.0 加公开阅读几何⑯；
+// v6.23.0 转会合并：/offers 与 /negotiations 换址到 /market/desk，加 ⑤b 换址 / ⑤c 转会台结构 / ⑤d 匿名）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
 // 球队页（⑨⑩）例外：本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id），
@@ -404,6 +405,257 @@ async function main() {
     await check('⑤ 市场页渲染', async () => {
       await page.goto(`${BASE}/market`, { waitUntil: 'networkidle' });
       assert(await page.locator('h1', { hasText: '转会市场' }).first().isVisible(), '市场 h1 不可见');
+    });
+
+    // ---- 转会中心（v6.23.0）：/offers 与 /negotiations 换址到 /market/desk，市场「我的」并入转会台 ----
+    // 带 admin 会话进 desk，页面会拉 /api/me/club、两侧 /api/offers、/api/negotiations?mine=1、
+    // /api/me/bids、/api/club/squad 六条：本地库未必都 200，不钉住就会把噪声带进 ⑪ 的判定
+    // （⑫ 那种「放 ⑪ 之后」的办法在这里用不上——换址验的就是 URL，得真导航）。
+    const DESK_ME_CLUB = {
+      club: { id: 1, name: '阿森纳', leagueTier: 'premier', logoKey: null, status: 'normal' },
+      balance: 100, squadCount: 3, window: { season: 9, windowSeq: 1 }, home: null,
+    };
+    const deskOffer = (over) => ({
+      id: 1,
+      player: { id: 5, fcId: 100005, name: '边锋戊', position: 'ST', ca: 70, pa: 80 },
+      counterpart: { id: 73, name: '巴黎圣日耳曼' },
+      role: 'seller', amount: 12.5, initAmount: 10, round: 2, note: null,
+      status: 'pending', turn: 'seller', myTurn: false, listingId: 11,
+      createdAt: '2026-09-20T10:00:00Z', updatedAt: '2026-09-20T10:00:00Z',
+      ...over,
+    });
+    const DESK_OFFERS_IN = {
+      club: { id: 1, name: '阿森纳' }, box: 'in', nextCursor: null, pendingMine: 1,
+      items: [
+        deskOffer({ id: 1, myTurn: true }),
+        // 同侧第二条 pending 但不是我回合：待办计数若改成「按清单行数/去掉 myTurn 过滤」就会 1→2（V4 红点）
+        deskOffer({ id: 2, myTurn: false, turn: 'buyer' }),
+        // 报价被接受 ≠ 成交：这一行要出「已接受·挂牌竞价中」（V7 红点）
+        deskOffer({ id: 3, status: 'accepted', turn: 'buyer' }),
+      ],
+    };
+    const DESK_OFFERS_OUT = {
+      club: { id: 1, name: '阿森纳' }, box: 'out', nextCursor: null, pendingMine: 0,
+      items: [deskOffer({ id: 4, role: 'buyer', counterpart: { id: 241, name: '巴塞罗那' }, amount: 20, turn: 'seller' })],
+    };
+    const deskNego = (over) => ({
+      id: 21, transferId: 31, status: 'active',
+      transfer: { type: 'transfer', status: 'pending_review', fee: 12.5 },
+      fromClubName: '阿森纳', toClubName: '巴塞罗那',
+      player: { id: 7, fcId: 100007, name: '中场丙', position: 'CM', age: 24, ca: 74, pa: 82 },
+      agentTier: 2, agentTierLabel: '二级经纪人',
+      releaseFee: null, rcBounds: [4, 8], expectedWage: 5.5,
+      attemptsUsed: 0, remaining: 3, lastSatisfaction: null, lastRisk: false, attempts: [], settled: null,
+      ...over,
+    });
+    const DESK_NEGO = {
+      sessions: [
+        deskNego({}), // 违约金未定 ⇒ 阶段徽标「第一步 · 定违约金」
+        deskNego({
+          id: 22, transferId: 32, releaseFee: 9, rcBounds: [6, 12], remaining: 2, attemptsUsed: 1,
+          attempts: [{ attemptNo: 1, offeredWage: 5, result: 'fail' }],
+        }), // 违约金已定 ⇒ 「工资谈判 · 剩 2 轮」
+        deskNego({
+          id: 23, transferId: 33, status: 'settled', releaseFee: 9, remaining: 0, attemptsUsed: 1,
+          settled: { wage: 6.25, source: 'negotiation', message: '谈妥签约' },
+          player: { id: 8, fcId: 100008, name: '前锋丁', position: 'ST', age: 26, ca: 78, pa: 80 },
+        }),
+      ],
+    };
+    const DESK_BIDS = {
+      bids: [
+        { id: 51, listingId: 11, amount: 8, createdAt: '2026-09-20T09:00:00Z', status: 'active', holdStatus: 'held',
+          listingStatus: 'bidding', askPrice: 7, sellerClubName: '巴黎圣日耳曼',
+          player: { id: 5, fcId: 100005, name: '边锋戊', position: 'ST', ca: 70, pa: 80 } },
+        // 赢了但挂牌还压在管理组审核 ⇒ 徽标改「待审核」（v6.23.0 新推导）
+        { id: 52, listingId: 12, amount: 15, createdAt: '2026-09-19T09:00:00Z', status: 'won', holdStatus: 'held',
+          listingStatus: 'pending_review', askPrice: 14, sellerClubName: '巴塞罗那',
+          player: { id: 7, fcId: 100007, name: '中场丙', position: 'CM', ca: 74, pa: 82 } },
+        { id: 53, listingId: 13, amount: 6, createdAt: '2026-09-18T09:00:00Z', status: 'won', holdStatus: 'settled',
+          listingStatus: 'matched_pending', askPrice: 6, sellerClubName: 'AC米兰',
+          player: { id: 9, fcId: 100009, name: '后卫己', position: 'CB', ca: 72, pa: 76 } },
+      ],
+    };
+    const DESK_SQUAD = {
+      club: { id: 1, name: '阿森纳', leagueTier: 'premier' }, season: 9, registeredInTournament: true,
+      players: [
+        { id: 5, fcId: 100005, name: '边锋戊', number: '7', position: 'ST', age: 22, ca: 70, pa: 80, growable: true,
+          isFutureStar: false, chinaPlan: false, status: 'normal', marketValue: 20, wage: 3.5, releaseFee: 16,
+          contractType: 'senior', hasContract: true, squad: 'first_team' },
+        { id: 6, fcId: 100006, name: '小将庚', number: null, position: 'CM', age: 17, ca: 55, pa: 88, growable: true,
+          isFutureStar: true, chinaPlan: false, status: 'trainee', marketValue: 5, wage: null, releaseFee: null,
+          contractType: null, hasContract: false, squad: 'trainee' },
+      ],
+      registration: null, compliance: null, rules: null,
+    };
+    const DESK_STUBS = [
+      [/\/api\/me\/club(\?|$)/, DESK_ME_CLUB],
+      [/\/api\/offers\?box=in/, DESK_OFFERS_IN],
+      [/\/api\/offers\?box=out/, DESK_OFFERS_OUT],
+      [/\/api\/negotiations\?mine=1/, DESK_NEGO],
+      [/\/api\/me\/bids/, DESK_BIDS],
+      [/\/api\/club\/squad/, DESK_SQUAD],
+    ];
+    const deskOk = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    const stubDesk = async () => {
+      for (const [pattern, body] of DESK_STUBS) await page.route(pattern, (r) => r.fulfill(deskOk(body)));
+    };
+    const unstubDesk = async () => {
+      for (const [pattern] of DESK_STUBS) await page.unroute(pattern);
+    };
+    // 区块顶部对齐视口顶（top≈0）；sticky 顶栏与滚动余量给 ±40px 容差
+    const secTop = (id) => page.evaluate((x) => document.getElementById(x)?.getBoundingClientRect().top ?? null, id);
+
+    await check('⑤b 旧报价/谈判路由换址到转会台（box 映射与默认值）', async () => {
+      await stubDesk();
+      try {
+        await page.goto(`${BASE}/offers?box=out`, { waitUntil: 'networkidle' });
+        const u1 = new URL(page.url());
+        assert(u1.pathname === '/market/desk', `/offers 没换址到 /market/desk（落在 ${u1.pathname}）`);
+        assert(u1.searchParams.get('tab') === 'offers' && u1.searchParams.get('box') === 'out',
+          `/offers?box=out 换址丢了参数（${u1.search}）`);
+
+        await page.goto(`${BASE}/offers`, { waitUntil: 'networkidle' });
+        const u2 = new URL(page.url());
+        assert(u2.pathname === '/market/desk' && u2.searchParams.get('box') === 'in',
+          `/offers 不带 box 时该按 in（${u2.search}）`);
+
+        await page.goto(`${BASE}/negotiations`, { waitUntil: 'networkidle' });
+        const u3 = new URL(page.url());
+        assert(u3.pathname === '/market/desk' && u3.searchParams.get('tab') === 'nego',
+          `/negotiations 没换址到 tab=nego（${u3.search}）`);
+
+        // 旧的「我的」退役：无路由 ⇒ 壳还在但没有挂牌表单（TC-RED-03 后半条）
+        await page.goto(`${BASE}/market/mine`, { waitUntil: 'networkidle' });
+        assert(!(await text()).includes('挂牌我的球员'), '/market/mine 仍渲染旧「我的」页内容');
+      } finally {
+        await unstubDesk();
+      }
+    });
+
+    await check('⑤c 转会台结构：流水线说明条 / 三区锚点 / 待办计数 / 阶段徽标 / 深链', async () => {
+      await stubDesk();
+      try {
+        await page.goto(`${BASE}/market/desk`, { waitUntil: 'networkidle' });
+        assert(await page.locator('h1', { hasText: '转会台' }).first().isVisible(), '转会台 h1 不可见');
+
+        // 顶栏收敛：一条「转会中心」，旧的两个入口退役（V3 红点）
+        const tabs = page.locator('nav.nav-links a.nav-tab');
+        assert(JSON.stringify(await tabs.allInnerTexts()) !== '[]', '顶栏没有渲染导航空');
+        assert((await tabs.filter({ hasText: '转会中心' }).count()) === 1, '顶栏没有「转会中心」入口');
+        assert((await tabs.filter({ hasText: '转会报价' }).count()) === 0, '顶栏仍留着「转会报价」旧入口');
+        assert((await tabs.filter({ hasText: '签约谈判' }).count()) === 0, '顶栏仍留着「签约谈判」旧入口');
+
+        // MarketNav 四项（顺序与指向；旧「我的」不在）：NavLink 指错就红（V5 红点）
+        const nav = page.locator('nav[aria-label="市场分区"] a');
+        assert(JSON.stringify(await nav.allInnerTexts()) === JSON.stringify(['在售市场', '我的转会台', '海捞', '市场情报']),
+          `MarketNav 文案/顺序不对：${(await nav.allInnerTexts()).join(' / ')}`);
+        assert(JSON.stringify(await nav.evaluateAll((els) => els.map((e) => e.getAttribute('href')))) ===
+          JSON.stringify(['/market', '/market/desk', '/market/free', '/market/intel']),
+          `MarketNav 指向不对：${(await nav.evaluateAll((els) => els.map((e) => e.getAttribute('href')))).join(' / ')}`);
+
+        // 流水线说明条（V6 红点：整块删就没这句）
+        const pipe = await page.locator('[aria-label="转会流水线"]').innerText();
+        assert(pipe.includes('报价被接受 ≠ 成交') && pipe.includes('管理组审核') && pipe.includes('签约谈判'),
+          `流水线说明条文案不全：${pipe.replace(/\s+/g, ' ')}`);
+
+        // 三区块齐、顺序固定（谈判 → 报价 → 挂牌+出价）
+        const ids = await page.evaluate(() => [...document.querySelectorAll('[id^="desk-"]')].map((e) => e.id));
+        assert(JSON.stringify(ids) === JSON.stringify(['desk-nego', 'desk-offers', 'desk-mine']),
+          `区块顺序/锚点不对：${ids.join(' / ')}`);
+
+        // 待办速览：三个计数全由区块自身数据派生（夹具 in=1/out=0、2 场 active、1 条 active 出价）
+        const segBtn = async (label) =>
+          (await page.locator('[aria-label="待办速览"] button', { hasText: label }).innerText()).replace(/\s+/g, '');
+        assert((await segBtn('轮到我')) === '轮到我1', `「轮到我」计数不对（夹具 pendingMine=1/0）：${await segBtn('轮到我')}`);
+        assert((await segBtn('进行中谈判')) === '进行中谈判2', `「进行中谈判」计数不对（夹具 2 场 active）：${await segBtn('进行中谈判')}`);
+        assert((await segBtn('竞价中')) === '竞价中1', `「竞价中」计数不对（夹具 1 条 active 出价）：${await segBtn('竞价中')}`);
+
+        // 阶段徽标（V7：accepted 文案一改回「已挂牌」这条就红）
+        const offerRows = page.locator('#desk-offers tbody tr');
+        assert((await offerRows.filter({ hasText: '已接受·挂牌竞价中' }).count()) === 1, '报价行没出「已接受·挂牌竞价中」徽标');
+        assert((await offerRows.filter({ hasText: '待你表态' }).count()) === 1, '轮到我的报价行没出「待你表态」');
+        assert((await offerRows.filter({ hasText: '等对方' }).count()) === 1, '不该我表态的 pending 行没出「等对方」');
+        const negoText = await page.locator('#desk-nego').innerText();
+        assert((negoText.match(/第一步 · 定违约金/g) ?? []).length === 1, '违约金未定的谈判卡没出阶段徽标');
+        assert(negoText.includes('工资谈判 · 剩 2 轮'), '违约金已定的谈判卡没出「工资谈判 · 剩 N 轮」');
+        assert(negoText.includes('已落定的谈判') && negoText.includes('前锋丁'), '已落定谈判表丢了（旧页数据）');
+        assert((await page.locator('#desk-mine tbody tr', { hasText: '待审核' }).count()) === 1, 'won+挂牌待审核的出价行没出「待审核」');
+        assert((await page.locator('#desk-mine tbody tr', { hasText: '领先中' }).count()) === 1, 'active 出价行没出「领先中」');
+        assert(await page.locator('#desk-mine select').isVisible(), '挂牌表单的下拉没渲染（squad 夹具未被用上）');
+
+        // 深链：?tab=offers&box=out 既滚到报价区，也把 box 带到 out 侧
+        await page.goto(`${BASE}/market/desk?tab=offers&box=out`, { waitUntil: 'networkidle' });
+        await page.locator('#desk-offers').waitFor({ timeout: TIMEOUT });
+        await page.waitForFunction(
+          () => {
+            const el = document.getElementById('desk-offers');
+            return !!el && el.getBoundingClientRect().top <= 40;
+          },
+          null,
+          { timeout: TIMEOUT },
+        ).catch(() => {});
+        const offTop = await secTop('desk-offers');
+        assert(offTop !== null && offTop <= 40 && offTop >= -40, `?tab=offers 没把报价区滚到位（top=${offTop}）`);
+        assert((await text()).includes('巴塞罗那'), '?box=out 没生效（out 侧报价行未渲染）');
+        assert((await page.locator('#desk-offers [aria-label="报价页签"] button.on').first().innerText()).includes('我送出的'),
+          '?box=out 时「我送出的」页签未选中');
+
+        // 点待办计数切区块：tab 进 URL 且把挂牌+出价区滚进视野
+        await page.locator('[aria-label="待办速览"] button', { hasText: '竞价中' }).click();
+        await page.waitForFunction(() => location.search.includes('tab=mine'), null, { timeout: TIMEOUT });
+        await page.waitForFunction(
+          () => {
+            const el = document.getElementById('desk-mine');
+            if (!el) return false;
+            const d = document.documentElement;
+            return el.getBoundingClientRect().top <= 40 || d.scrollHeight - (window.scrollY + window.innerHeight) <= 40;
+          },
+          null,
+          { timeout: TIMEOUT },
+        ).catch(() => {});
+        const mineGeom = await page.evaluate(() => {
+          const el = document.getElementById('desk-mine');
+          const d = document.documentElement;
+          return {
+            top: el?.getBoundingClientRect().top ?? null,
+            gap: d.scrollHeight - (window.scrollY + window.innerHeight),
+            vh: window.innerHeight,
+          };
+        });
+        assert(mineGeom.top !== null, '挂牌+出价区没渲染');
+        // 它是页面最末一段，下面没有内容可滚，够不到视口顶；「滚到底 + 露在视口里」才是合格的到位判据
+        assert(mineGeom.top <= 40 || (mineGeom.gap <= 40 && mineGeom.top < mineGeom.vh - 200),
+          `点「竞价中」没把挂牌+出价区滚进视野（top=${mineGeom.top}，距底 ${mineGeom.gap}）`);
+      } finally {
+        await unstubDesk();
+      }
+    });
+
+    await check('⑤d 转会台：匿名只给登录引导，不泄露区块内容', async () => {
+      // 同 ⑩：本地 AUTH_MODE=oidc 时匿名会先被 syncProbe 整页跳 /api/auth/sync，钉住 /api/me 才落回守卫
+      const anon = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      try {
+        const ap = await anon.newPage();
+        await ap.route(/\/api\/me(\?|$)/, (r) =>
+          r.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ user: null, authMode: 'shared', authHome: null }),
+          }),
+        );
+        await ap.goto(`${BASE}/market/desk`, { waitUntil: 'networkidle' });
+        const t = await ap.locator('body').innerText();
+        assert(t.includes('这个页面要登录后才能用'), `匿名进 /market/desk 没给登录引导：${t.slice(0, 120)}`);
+        assert((await ap.locator('[id^="desk-"]').count()) === 0, '匿名竟然渲染出了转会台区块');
+        assert((await ap.locator('[aria-label="待办速览"]').count()) === 0, '匿名竟然渲染出了待办速览');
+        // 匿名从旧地址进来：换址本身不拦（重定向路由无 RequireUser），落到 desk 后由 desk 的软提示接住
+        await ap.goto(`${BASE}/offers?box=out`, { waitUntil: 'networkidle' });
+        assert(ap.url().includes('/market/desk') && ap.url().includes('tab=offers') && ap.url().includes('box=out'), `匿名 /offers 换址参数丢失：${ap.url()}`);
+        assert((await ap.locator('body').innerText()).includes('这个页面要登录后才能用'), '匿名经 /offers 换址后没给登录引导');
+      } finally {
+        await anon.close();
+      }
     });
 
     await check('⑥ 管理端可达（带会话）', async () => {
@@ -995,8 +1247,8 @@ async function main() {
       for (const note of ids.notes) console.log(`   ⑫ 备注：${note}`);
       const ROUTES = [
         '/', '/players', `/players/${ids.player}`, '/clubs', `/clubs/${ids.club}`, '/bind',
-        '/market', '/market/free', '/market/intel', '/market/mine',
-        '/club', '/negotiations', '/offers', '/ledger', '/notifications',
+        '/market', '/market/free', '/market/intel', '/market/desk',
+        '/club', '/ledger', '/notifications',
         '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
         '/admin/market', '/admin/clubs', '/admin/brands', '/admin/events', '/admin/finance',
         '/admin/system',

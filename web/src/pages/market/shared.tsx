@@ -50,14 +50,15 @@ export function MarketNav() {
       <NavLink to="/market" end className={({ isActive }) => (isActive ? 'on' : '')}>
         在售市场
       </NavLink>
+      {/* v6.23.0：旧「我的」(/market/mine) 并入转会台，NavLink 不用 end —— desk 内切 tab 时本项保持高亮 */}
+      <NavLink to="/market/desk" className={({ isActive }) => (isActive ? 'on' : '')}>
+        我的转会台
+      </NavLink>
       <NavLink to="/market/free" className={({ isActive }) => (isActive ? 'on' : '')}>
         海捞
       </NavLink>
       <NavLink to="/market/intel" className={({ isActive }) => (isActive ? 'on' : '')}>
         市场情报
-      </NavLink>
-      <NavLink to="/market/mine" className={({ isActive }) => (isActive ? 'on' : '')}>
-        我的
       </NavLink>
     </nav>
   );
