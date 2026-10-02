@@ -20,7 +20,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 | WHL 竞猜系统 | 品牌蓝 `#1652f0` | 原生 JS + 单文件 style.css（249 行） |
 | **WHL 俱乐部（本站）** | **徽章焦橙 + 巧克力棕 + 奶油纸** | React 19 + 全局 styles.css（估 700-800 行） |
 
-结构级照抄清单（来自两参照站的「同构词汇」）：`topbar`（整条色底 + `inset 0 -3px 0` 底部描边）、`brand / nav-links / nav-tab.is-active / userbox / role-badge`、`card / a.card`、`auth-card`（顶边 3px 主色）、`label.field`、胶囊徽章（999px）、`seg` 分段、`table-wrap + td.num`（tabular-nums）、`banner.info/warn/bad`、toast（底部胶囊、busy 态「处理中…」、两段式确认）、dashed 分隔线、640px 单断点、`prefers-reduced-motion` 全关。
+结构级照抄清单（来自两参照站的「同构词汇」）：`topbar`（整条色底 + `inset 0 -3px 0` 底部描边）、`brand / nav-links / nav-tab.is-active / userbox / role-badge`、`card / a.card`、`auth-card`（顶边 3px 主色）、`label.field`、胶囊徽章（999px）、`seg` 分段、`table-wrap + td.num`（tabular-nums）、`banner.info/warn/bad`、toast（底部胶囊、busy 态「处理中…」、两段式确认）、dashed 分隔线、640/760/900 三档断点、`prefers-reduced-motion` 全关。
 
 **个性来源 = WHL 徽章本体**（复古贴纸风：焦橙底 / 奶油白球体 / 巧克力棕字母 / 浅蓝衬底；原图 `E:\DeskBox\bhdjb\图片\微信图片_20251130151009_220_160.jpg`，实现阶段拷入仓库资产目录）。全站主题 = **复古档案室**：奶油纸背景 + 棕墨文字 + 合同卷宗 + 印章意象，铺满球员、市场、账本、审核全部页面。
 
@@ -29,7 +29,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 - **栈**：React 19 + react-router 7 + Vite（与赛事系统同栈，PRD 已定 React SPA）；**不引 Tailwind / 组件库 / CSS-in-JS**。
 - **样式架构**：全局单文件 `src/styles.css`（估 700-800 行 = 家族基础 ~250 + 档案室主题扩展 ~500），设计令牌全部集中在 `:root`；动态值才用 inline style。（实现落在 `web/src/styles.css`。）
 - **浅色主题，无暗色切换**（家族硬惯例）；`index.html` 的 `theme-color` = 顶栏棕。
-- **移动端**：单一断点 `@media (max-width: 640px)`，CSS-only 适配（卡柜单列、表格 `overflow-x:auto` 横滚、触摸目标 ≥36px）；`viewport-fit=cover`。
+- **移动端**：CSS-only 适配，三档断点（v6.20.0 起与 styles.css 实际口径一致）：640 公开内容重排、760 管理壳（侧栏收抽屉）、900 球员库级重排；卡柜单列、表格 `overflow-x:auto` 横滚、触摸目标 ≥36px；`viewport-fit=cover`。
 - **动效纪律**：家族克制——本站唯一新增 keyframe 是**盖章 scale-in**（§4.1）；live 类动效沿赛事 `livepulse` 若被复用，同样尊重 reduced-motion；其余动效仅 hover/过渡。
 - **纸张质感**：全站底噪 = SVG `feTurbulence` data-uri 背景层，透明度 ≤4%（照赛事头条对撞卡的颗粒做法）；不引入任何外部纹理图片。
 
@@ -145,7 +145,7 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 | 成长页 | XP 棕墨进度条（焦橙填充）；升级二选一 = 双卡对比（方案表）；徽章墙 = 🥇🥈收集格；档位核定记录入卷宗；成长史时间线里 `reset` 事件显示「解约重置」（说明累计为何从头开始） |
 | 成长期（增量 13，管理端） | 成长引擎页「成长期」面板：当前期一行（第 N 期 + 来源：开窗自动宣告/手动宣告 + 宣告时间 + 备注），未宣告显「还没宣告过」；备注输入 + 两段式确认「宣告新成长期」（点击先 arm 再确认，文案讲清「里程碑从此刻起重新累计」）；期数 >1 时列历史期表（期号/赛季/来源/备注/宣告时间）。赛季结算 hint 标注「只算当前成长期内」，结算 toast 带「成长期 第 N 期 / 未宣告」。开窗表单加复选框「同时宣告新成长期」（附注「里程碑从开窗时点重新累计；成长期不绑窗口，之后也可以手动宣告」） |
 | 通知中心 | 收件篮列表（mono 时间 + 模板摘要）；未读小蓝点用 `--sky` |
-| 移动端（全局） | 640px 断点：卡柜/档案单列、表格横滚、顶栏换行、触摸目标 ≥36px；微信内观感优先（家族策略） |
+| 移动端（全局） | 三档断点 640（公开内容重排）/760（管理壳抽屉）/900（球员库级重排）：卡柜/档案单列、表格横滚、顶栏换行、触摸目标 ≥36px；微信内观感优先（家族策略） |
 
 ## 6. 实现阶段校色与待办
 
