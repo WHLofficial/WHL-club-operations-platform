@@ -1,5 +1,7 @@
 // 守卫测试：v6.20.0「系统范围手机版窄屏整治」第一批的静态扫描闸门。
 // 测试计划：docs/test-plans/v6.20.0-mobile-skeleton-baseline.md（TC-SWP-01 P0、TC-SWP-02/03 P1、TC-SWP-04 P1）。
+// v6.21.0 增补 TC-SWP-05（计划 docs/test-plans/v6.21.0-edit-panel-mobile.md）：coach-sticky 粘性首列的
+// 静态闸门——e2e ⑮ 在本地观众登录下不渲染教练台（几何断言条件降级），粘性回归由本例兜住。
 //
 // 为什么要文本级扫描：这三条约定只活在 JSX/CSS 文本里——表格少包一层 `.table-wrap`、重构时又写回
 // `style={{ width: 320 }}`、抽屉关闭钮的 36px 命中区被删——组件测试与单测都不会红；e2e ⑫ 也只在
@@ -22,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 const WEB_SRC = 'web/src'; // vitest 的 cwd = 仓库根（与 tests/core-zero-import.test.ts 同样的相对路径口径）
 const STYLES_CSS = `${WEB_SRC}/styles.css`;
 const ADMIN_LAYOUT = `${WEB_SRC}/pages/admin/AdminLayout.tsx`;
+const COACH_PANEL = `${WEB_SRC}/pages/club/CoachPanel.tsx`;
 
 /** 递归收集 web/src 全树 .tsx（含 *.test.tsx）；路径统一成 `/`，与 git/文档口径一致 */
 function collectTsx(dir: string, out: string[] = []): string[] {
@@ -318,6 +321,21 @@ describe('v6.20.0 窄屏整治静态扫描闸门（docs/test-plans/v6.20.0-mobil
     expect(tokens, `${ADMIN_LAYOUT} 的 admin-nav-toggle 必须同时带 btn（它的 ≥36px 命中区由 .btn 提供）`).toContain('btn');
     const btnH = minAtLeast(rules, '.btn', 'min-height', 36, true);
     expect(btnH.ok, `.btn 缺 min-height ≥36（${btnH.seen}）：admin-nav-toggle 的触控高度靠它`).toBe(true);
+  });
+
+  it('TC-SWP-05 · coach-sticky 粘性首列：CoachPanel 恰 2 处挂类 + styles.css ≤640 块含 sticky 规则（v6.21.0）', () => {
+    // e2e ⑮ 在本地观众登录下教练台不渲染，几何断言条件降级——粘性回归（摘类、删规则）在这里红。
+    const coachPanel = read(COACH_PANEL);
+    const hits = coachPanel.match(/coach-sticky/g)?.length ?? 0;
+    expect(hits, `${COACH_PANEL} 的 coach-sticky 挂类应为恰 2 处（财务表 + 花名册表）：实测 ${hits}`).toBe(2);
+
+    // 规则必须活在最后一个 (max-width: 640px) 媒体块之后（即 ≤640 规则域内），且真有 position: sticky
+    const css = read(STYLES_CSS);
+    const at = css.lastIndexOf('(max-width: 640px)');
+    expect(at, 'styles.css 找不到 (max-width: 640px) 媒体块').toBeGreaterThan(-1);
+    const tail = css.slice(at);
+    expect(tail.includes('.coach-sticky'), 'styles.css 的 ≤640 域内没有 .coach-sticky 规则（粘性首列被删？）').toBe(true);
+    expect(tail, 'styles.css 的 .coach-sticky 规则缺 position: sticky').toMatch(/\.coach-sticky[^{}]*\{[^}]*position:\s*sticky/s);
   });
 
   it('判据自检 · 固定宽字面量与表格包裹识别的最小正反例（防扫描器空转）', () => {

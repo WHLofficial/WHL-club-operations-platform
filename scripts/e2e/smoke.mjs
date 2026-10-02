@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口，
-// v6.19.0 球员库窄屏卡片化，v6.20.0 加全路由 375 零溢出扫描⑫ + 管理抽屉开合⑬）：
+// v6.19.0 球员库窄屏卡片化，v6.20.0 加全路由 375 零溢出扫描⑫ + 管理抽屉开合⑬，
+// v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
 // 球队页（⑨⑩）例外：本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id），
@@ -1119,6 +1120,155 @@ async function main() {
       assert(await page.locator('.admin-sidebar').isVisible(), '宽屏侧栏应常驻可见');
       const t = await text();
       assert(t.includes('管理端'), '宽屏管理端壳渲染异常');
+    });
+
+    await check('⑭ 成长补录台：宽屏表格分支 / 窄屏卡片流（XP 实时复算 + 保存锁定 + 汇总条，截图落 scratch/）', async () => {
+      // ---- 宽屏：表格分支（与卡片 DOM 互斥，桌面零变化契约） ----
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`${BASE}/admin/growth`, { waitUntil: 'networkidle' });
+      const editBtns = page.getByRole('button', { name: '录数据' });
+      assert((await editBtns.count()) > 0, '本地种子缺已确认比赛：/admin/growth 没有任何「录数据」行（⑭ 前置缺失）');
+      await editBtns.first().click();
+      await page.locator('.entry-table').waitFor({ timeout: TIMEOUT });
+      assert((await page.locator('.entry-cards').count()) === 0, '宽屏不应渲染 entry-cards（DOM 互斥）');
+      assert((await page.locator('.entry-sumbar').count()) === 0, '宽屏不应渲染 entry-sumbar（汇总条只属窄屏）');
+      await page.locator('.entry-head').getByRole('button', { name: '收起' }).click();
+      await page.locator('.entry-panel').waitFor({ state: 'detached', timeout: TIMEOUT });
+
+      // ---- 窄屏：卡片流 ----
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${BASE}/admin/growth`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: '录数据' }).first().click();
+      await page.locator('.entry-cards').waitFor({ timeout: TIMEOUT });
+      assert((await page.locator('.entry-table').count()) === 0, '窄屏不应渲染 entry-table（DOM 互斥）');
+      const sumbar = page.locator('.entry-sumbar');
+      assert(await sumbar.isVisible(), '窄屏应渲染 entry-sumbar 汇总条');
+      assert(await sumbar.getByRole('button', { name: '全部保存' }).isVisible(), '汇总条里没有「全部保存」');
+      await page.screenshot({ path: join(SHOT_DIR, 'e2e-growth-entry-375.png'), fullPage: false });
+
+      // 设计意图：汇总条常驻视口底——卡片再长也不用滚到面板底才够得着「全部保存」。
+      // entry-panel 挂在比赛表 td 里，外层 .table-wrap 是横向滚动容器 ⇒ sticky 只贴容器不贴视口，
+      // 窄屏正解是 fixed（spec §0-2 实测裁决）。
+      await page.evaluate(() => document.querySelector('.entry-cards')?.scrollIntoView({ block: 'start' }));
+      await page.waitForTimeout(200);
+      const pin = await page.evaluate(() => {
+        const r = document.querySelector('.entry-sumbar')?.getBoundingClientRect();
+        return r ? { top: Math.round(r.top), bottom: Math.round(r.bottom), vh: document.documentElement.clientHeight } : null;
+      });
+      assert(
+        pin && Math.abs(pin.bottom - pin.vh) <= 2 && pin.top < pin.vh,
+        `汇总条应常驻视口底部（bottom=${pin?.bottom} vs 视口高=${pin?.vh}）——sticky 陷阱或 fixed 被摘`,
+      );
+
+      // 拦截保存响应拿 playerId/xp，跑完把写入退掉（烟测可重复：不消费掉球员的评分格）
+      let savedPid = null;
+      let savedXp = 0;
+      const onSave = async (r) => {
+        if (r.url().includes('/api/admin/growth/match-entry/') && r.request().method() === 'POST') {
+          try {
+            const j = await r.json();
+            savedPid = j.perPlayer?.[0]?.playerId ?? null;
+            savedXp = j.perPlayer?.[0]?.xp ?? 0;
+          } catch { /* 响应体解析失败不影响断言 */ }
+        }
+      };
+      page.on('response', onSave);
+
+      // 挑一张评分格未锁的卡，改评分 → 卡脚 XP 徽标实时变（TC-ENT-05）
+      const cardIndex = await page.evaluate(() => {
+        const cards = [...document.querySelectorAll('.entry-card')];
+        return cards.findIndex((c) => c.querySelector('input[inputmode="decimal"]:enabled'));
+      });
+      assert(cardIndex >= 0, '没有任何评分格可编辑（全锁/训练营？）——⑭ 前置缺失');
+      const card = page.locator('.entry-card').nth(cardIndex);
+      const head = (await card.locator('.entry-card-head').innerText()).trim();
+      const foot = card.locator('.entry-card-foot');
+      const footBefore = await foot.innerText();
+      await card.locator('input[inputmode="decimal"]').first().fill('8');
+      const footAfter = await foot.innerText();
+      assert(footBefore !== footAfter, `填评分 8 后卡脚 XP 徽标没实时变（「${head.split('\n')[0]}」：前「${footBefore.replace(/\n/g, ' ')}」后「${footAfter.replace(/\n/g, ' ')}」）`);
+
+      // 本行保存 → 该卡评分格进入锁定态（TC-ENT-06；已录值不可改是 v6.16.0 语义）
+      await foot.getByRole('button').first().click();
+      await page.waitForFunction(
+        (idx) => {
+          const c = document.querySelectorAll('.entry-card')[idx];
+          if (!c) return false;
+          const inputs = c.querySelectorAll('input[inputmode="decimal"]');
+          return inputs.length === 0 || [...inputs].every((el) => el.disabled);
+        },
+        cardIndex,
+        { timeout: TIMEOUT },
+      );
+
+      // 查看模式：全部控件只读（TC-ENT-04 的另一面）
+      page.off('response', onSave);
+      await page.locator('.entry-head').getByRole('button', { name: '收起' }).click();
+      await page.locator('.entry-panel').waitFor({ state: 'detached', timeout: TIMEOUT });
+      await page.getByRole('button', { name: '查看' }).first().click();
+      await page.locator('.entry-cards').waitFor({ timeout: TIMEOUT });
+      const editableInView = await page.evaluate(() =>
+        [...document.querySelectorAll('.entry-panel input')].filter((el) => !el.disabled && !el.readOnly).length,
+      );
+      assert(editableInView === 0, `查看模式仍有 ${editableInView} 个可编辑控件`);
+
+      // 退掉本次写入：删事件 + 退 XP，恢复「该球员评分格未录」的原状（烟测幂等）
+      if (savedPid != null) {
+        const startIso = new Date(Date.now() - 10 * 60_000).toISOString();
+        const sql =
+          `DELETE FROM growth_events WHERE player_id = ${Number(savedPid)} AND source = 'manual' AND created_at >= '${startIso}';\n` +
+          `UPDATE players SET growth_xp = MAX(0, growth_xp - ${Number(savedXp) || 0}) WHERE id = ${Number(savedPid)};`;
+        const f = join(SHOT_DIR, 'e2e-growth-rollback.sql');
+        writeFileSync(f, sql, 'utf8');
+        try {
+          wrangler(['d1', 'execute', 'whl-club', '--local', '--file', f, '--json']);
+        } catch (e) {
+          console.warn(`（⑭ 回滚写入失败（不影响断言，只影响重复跑）：${String(e).slice(0, 120)}）`);
+        }
+      }
+    });
+
+    await check('⑮ 教练台粘性首列：≤640 sticky 几何 / 1280 static（本地无教练台则备注降级）', async () => {
+      // CoachPanel 只挂给本队教练（本地观众登录 + TOUR_DB 旧 schema ⇒ 不渲染）。
+      // 桩教练台全家桶（squad/stadium/bookings/events/naming…）成本失衡，故：表在场就跑几何，
+      // 不在场则显式备注降级，确定性回归由 tests/mobile-baseline.test.ts TC-SWP-05 静态闸门兜住。
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${BASE}/clubs/1`, { waitUntil: 'networkidle' });
+      const stickyTables = await page.locator('table.coach-sticky').count();
+      if (stickyTables === 0) {
+        console.log('（⑮ 备注：本地教练工作台不渲染（观众登录/TOUR_DB 旧 schema），几何断言降级——静态闸门 = tests/mobile-baseline.test.ts TC-SWP-05）');
+        return;
+      }
+      const geom = await page.evaluate(() => {
+        const table = document.querySelector('table.coach-sticky');
+        const td = table?.querySelector('tbody tr td:nth-child(2)');
+        const th = table?.querySelector('thead tr th:nth-child(2)');
+        return {
+          tdSticky: td ? getComputedStyle(td).position : null,
+          thSticky: th ? getComputedStyle(th).position : null,
+        };
+      });
+      assert(geom.thSticky === 'sticky' && geom.tdSticky === 'sticky', `≤640 应 th/td 均 sticky（th=${geom.thSticky} td=${geom.tdSticky}）`);
+      // 横滚后第二列（对手）仍应留在视口内（粘住 = 滚不走）
+      await page.evaluate(() => {
+        const wrap = document.querySelector('table.coach-sticky')?.closest('.table-wrap');
+        if (wrap) wrap.scrollLeft = 400;
+      });
+      await page.waitForTimeout(300);
+      const after = await page.evaluate(() => {
+        const td = document.querySelector('table.coach-sticky')?.querySelector('tbody tr td:nth-child(2)');
+        const r = td?.getBoundingClientRect();
+        return r ? { left: r.left, right: r.right, vw: document.documentElement.clientWidth } : null;
+      });
+      assert(after && after.left >= -1 && after.right <= after.vw + 1, `横滚 400px 后粘性列被滚出视口（left=${after?.left} right=${after?.right}）`);
+      // 宽屏取消粘性（computed static，不是只看媒体块存在）
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.waitForTimeout(200);
+      const wide = await page.evaluate(() => {
+        const th = document.querySelector('table.coach-sticky')?.querySelector('thead tr th:nth-child(2)');
+        return th ? getComputedStyle(th).position : null;
+      });
+      assert(wide === 'static', `1280 应取消粘性（computed=${wide}）`);
     });
   } finally {
     await browser.close();
