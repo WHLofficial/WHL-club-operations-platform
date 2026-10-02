@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口）：
+// 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口，v6.19.0 球员库窄屏卡片化）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
 // 球队页（⑨⑩）例外：本地 TOUR_DB（whl）的 team 表是旧 schema（没有 logo_key / club_id），
@@ -416,7 +416,7 @@ async function main() {
       assert(await page.locator('h1', { hasText: '收件篮' }).first().isVisible(), '收件篮 h1 不可见');
     });
 
-    await check('⑧ 球员库三视口：宽屏左栏 / 窄屏抽屉（截图落 scratch/）', async () => {
+    await check('⑧ 球员库三视口：宽屏表格左栏 / 窄屏抽屉 + 铭牌卡（截图落 scratch/）', async () => {
       const shots = [];
       const viewports = [
         [1280, 900, 'desktop'],
@@ -427,10 +427,34 @@ async function main() {
         await page.setViewportSize({ width, height });
         await page.goto(`${BASE}/players`, { waitUntil: 'domcontentloaded' });
         await page.locator('.library-shell').first().waitFor({ timeout: TIMEOUT });
-        // 等名册落地再截：否则截到「正在翻名册…」的空表格（空库时等空态）
-        await page.locator('.library-main tbody tr, .library-main .empty-state').first().waitFor({ timeout: TIMEOUT });
+        // 等名册落地再截：否则截到「正在翻名册…」的空表格（空库时等空态）。
+        // v6.19.0：≤900px 整表换成铭牌卡网格（tbody 不存在），等待目标按断点分流。
+        if (width <= 900) {
+          await page.locator('.library-main .lib-cards .lib-card').first().waitFor({ timeout: TIMEOUT });
+        } else {
+          await page.locator('.library-main tbody tr, .library-main .empty-state').first().waitFor({ timeout: TIMEOUT });
+        }
         const side = page.locator('.library-side');
         if (width <= 900) {
+          // v6.19.0 卡片化：首卡要有姓名与 CA/PA（数值 + 小标），表格整块不在，排序行在、显示列不在
+          const cards = page.locator('.library-main .lib-cards .lib-card');
+          assert((await cards.count()) > 0, `${label}：窄屏没有渲染铭牌卡`);
+          const firstCard = cards.first();
+          assert((await firstCard.locator('.lib-card-name').innerText()).trim() !== '', `${label}：首卡姓名是空的`);
+          assert((await firstCard.locator('.lib-card-ca').innerText()).trim() !== '', `${label}：首卡 CA 是空的`);
+          assert((await firstCard.locator('.lib-card-pa').innerText()).trim() !== '', `${label}：首卡 PA 是空的`);
+          assert((await firstCard.locator('.lib-card-lab').count()) >= 2, `${label}：首卡缺 CA/PA 小标`);
+          assert((await page.locator('.library-main table').count()) === 0, `${label}：窄屏不应再有表格`);
+          assert(await page.locator('.lib-sortrow').isVisible(), `${label}：窄屏排序行不可见`);
+          // 「显示列」窄屏隐藏（列概念只属于桌面表格）；「位置」那一行仍要在（筛选抽屉里最主要的控件）
+          assert(
+            !(await page.locator('.library-side button.multiselect', { hasText: '显示列' }).isVisible()),
+            `${label}：显示列多选在窄屏应隐藏`,
+          );
+          assert(
+            await page.locator('.library-side button.multiselect', { hasText: '位置' }).first().isVisible(),
+            `${label}：位置多选在窄屏不应被连坐隐藏`,
+          );
           // 关着的抽屉是 translateX(-100%)，仍有 boundingBox ⇒ 不能用 isVisible 判在场
           const closed = await side.boundingBox();
           assert(!closed || closed.x < 0, `${label}：抽屉关着时应移出视口（x=${closed?.x}）`);
@@ -493,6 +517,13 @@ async function main() {
         } else {
           assert(await side.isVisible(), `${label}：宽屏左栏应常驻可见`);
           assert((await page.locator('.lib-drawer-mask').count()) === 0, `${label}：宽屏不应出现遮罩`);
+          // v6.19.0 反向断言：卡片网格与窄屏排序行只在窄屏渲染，宽屏 DOM 零变化
+          assert((await page.locator('.lib-cards').count()) === 0, `${label}：宽屏不应出现卡片网格`);
+          assert((await page.locator('.lib-sortrow').count()) === 0, `${label}：宽屏不应出现窄屏排序行`);
+          assert(
+            await page.locator('.library-side button.multiselect', { hasText: '显示列' }).isVisible(),
+            `${label}：宽屏显示列多选应可见`,
+          );
         }
         // 多选下拉（v3.1.1 步骤 6）：左栏/抽屉里都要能打开、整块落在视口内、并且真的点得到
         await openPanel('位置');
@@ -548,11 +579,22 @@ async function main() {
           `${label}：翻页条把页面撑出横向滚动（${pager.docScrollW} > ${pager.docClientW}）`,
         );
 
-        assertTableNoWrap(label, await tableLayoutProbe());
+        // 表格不折行的口径只在宽屏有表格可量（窄屏是卡片网格，探针会量到空集）
+        if (width > 900) assertTableNoWrap(label, await tableLayoutProbe());
 
         const shot = join(SHOT_DIR, `e2e-players-${label}.png`);
         await page.screenshot({ path: shot, fullPage: false });
         shots.push(shot);
+
+        // 窄屏排序行换键（放在截图之后，别让重取的中间态进截图）：URL 要带上 sort=，
+        // 换完键卡片还要回来。selectOption('ca') 选固定键 CA：窄屏已豁免「排序列不可见就撤回
+        // 默认」那条 effect，动态列键同样留得住，但固定列键最稳、探针量不到这层。
+        if (width <= 900) {
+          await page.locator('.lib-sortrow select').selectOption('ca');
+          await page.waitForFunction(() => location.search.includes('sort='), null, { timeout: TIMEOUT });
+          assert(page.url().includes('sort='), `${label}：窄屏换排序键后 URL 未带 sort=（${page.url()}）`);
+          await page.locator('.library-main .lib-cards .lib-card').first().waitFor({ timeout: TIMEOUT });
+        }
       }
       await page.setViewportSize({ width: 1440, height: 900 });
       console.log(`   截图：${shots.map((s) => s.replace(/\\/g, '/')).join(' / ')}`);

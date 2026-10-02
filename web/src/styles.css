@@ -2184,6 +2184,15 @@ tbody tr:hover td {
     z-index: 6;
     background: var(--card);
   }
+
+  /* 「显示列」在窄屏隐藏（v6.19.0）：列概念只属于桌面表格（窄屏没有列，卡片只展示固定字段）。
+     不能直接写 .lib-chip-row { display: none; } —— 「位置」多选下拉（FilterPanel.tsx:158）
+     包在同一个类名里，窄屏抽屉里它仍要用（筛选抽屉里最主要的控件），整类隐藏会把它一起藏掉。
+     按触发器 title 前缀只命中「显示列」那一行：MultiSelect 的触发器不带 aria-label，
+     title 是唯一可区分的属性（选中列后变成「显示列：…」，前缀仍匹配）。 */
+  .lib-chip-row:has(button.multiselect[title^='显示列']) {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3115,4 +3124,219 @@ th.num .th-sort {
   display: inline-flex;
   align-items: baseline;
   gap: 8px;
+}
+
+/* ==== 窄屏球员铭牌卡（v6.19.0）==================================================
+   ≤900px 球员库整表换成卡片网格（PlayersLibrary.tsx 的 narrow 分支），>900px 仍渲染表格。
+   视觉参数照抄样机 .superpowers/brainstorm/2986-1790927418/content/sofifa-color-v14.html 的 .bc-*，
+   类名一律 lib-cards / lib-card- / lib-sortrow 前缀 —— 教训（spec §7）：通用词会撞已有规则
+   （详情页 .player-card、companion 框架 .main{flex:1} 撞车史），排查一次要按小时算。 */
+.lib-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+
+.lib-card {
+  display: flex;
+  overflow: hidden;
+  background: #fffdf7;
+  border: 1px solid #e6dcc8;
+  border-radius: 12px;
+  box-shadow: 0 1px 5px rgba(43, 29, 18, 0.1);
+  color: #2b1d12;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  /* 整卡是 <a>：全局 a 规则只给颜色，不下划线得显式清掉（卡里所有文字都会被下划线串起来） */
+  text-decoration: none;
+}
+.lib-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(43, 29, 18, 0.16);
+}
+/* 键盘可达（spec §2.3）：焦橙描边。站内此前没有 :focus-visible 规则，这是第一条 */
+.lib-card:focus-visible {
+  outline: 2px solid var(--terracotta);
+  outline-offset: 2px;
+}
+
+.lib-card-rail {
+  flex: 0 0 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 4px;
+  background: #f7e3cd;
+  border-right: 1px solid #ecd5b4;
+}
+.lib-card-pos-main {
+  padding: 1px 9px;
+  border: 1px solid #b07a45;
+  border-radius: 999px;
+  background: #fffdf7;
+  color: #8e5426;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+/* 副位 flex-wrap：两枚一行、奇数时孤行自动居中（0/1/2/3 个副位都不特判——样机口径） */
+.lib-card-pos-sub {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  max-width: 100%;
+}
+.lib-card-pos-sec {
+  padding: 1px 5px;
+  border: 1px solid #e3cda4;
+  border-radius: 999px;
+  color: #a5764a;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.lib-card-gap {
+  height: 5px;
+}
+/* CA/PA 五档色由 .attr-* 落在同一个元素上（与表格 CA/PA 列、详情页同源 attrClass） */
+.lib-card-ca {
+  font-family: var(--mono);
+  font-size: 24px;
+  line-height: 1.05;
+}
+.lib-card-pa {
+  font-family: var(--mono);
+  font-size: 17px;
+  line-height: 1.05;
+}
+.lib-card-lab {
+  color: #8e5426;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+.lib-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+}
+.lib-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+/* 长复合名允许换行、永不出省略号（生产有 20+ 字符的复合名） */
+.lib-card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lib-card-marker {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: help;
+}
+.lib-card-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: #7a6a5a;
+  font-size: 12.5px;
+}
+
+/* 自由身 chip 与徽章「N金/N银」chip 同族（样机 .bc-free / .bc-gold / .bc-silver 的口径） */
+.lib-card-free,
+.lib-card-chip {
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.lib-card-free {
+  background: #e9e2d3;
+  border: 1px solid #e6dcc8;
+  color: #7a6a5a;
+}
+.lib-card-chip + .lib-card-chip {
+  margin-left: 4px;
+}
+.lib-card-chip-gold {
+  background: #f5e5bf;
+  border: 1px solid #e2c98f;
+  color: #8a5a00;
+}
+.lib-card-chip-silver {
+  background: #eeeae2;
+  border: 1px solid #d8d2c4;
+  color: #6b665c;
+}
+
+.lib-card-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+}
+.lib-card-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12.5px;
+}
+.lib-card-row + .lib-card-row {
+  border-top: 1px dashed #efe6d2;
+}
+/* 标签列 56px 定宽、值 mono 紧跟左对齐（否决 space-between 右对齐：短值「—」与标签间死区大） */
+.lib-card-bl {
+  flex: 0 0 56px;
+  color: #7a6a5a;
+  white-space: nowrap;
+}
+.lib-card-bv {
+  font-family: var(--mono);
+}
+.lib-card-lens .lib-card-bl {
+  color: #8e5426;
+  font-weight: 700;
+}
+.lib-card-lens .lib-card-bv {
+  font-weight: 700;
+}
+
+/* 窄屏排序行（v6.19.0）：表格头点排序在窄屏不存在（整表换成卡片），补 select + 升降按钮。
+   只在 narrow 渲染（JS 条件），宽屏 DOM 与交互零变化。 */
+.lib-sortrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.lib-sortrow-select {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* 用 --card/--ink（站内下拉的既有口径，label.field select 同款）；--panel/--text 在本站没有定义 */
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.lib-sortrow-dir {
+  min-width: 42px;
 }

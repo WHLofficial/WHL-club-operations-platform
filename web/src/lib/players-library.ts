@@ -2,10 +2,12 @@
 // 四件事都在这里：Filters 类型与默认值、URL query ↔ 筛选状态的互转、筛选 → 自动列的联动规则、
 // 生效条件摘要条（filterChips）。拆出来的原因：控件搬进左栏后页面与面板都要用这套模型，
 // 留在页面里会形成页面 ↔ 组件的循环导入。
-import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, roleChs } from './ref.ts';
+import { AGENT_TIER_LABEL, ATTR_LABELS, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, roleChs } from './ref.ts';
 import { FC26_GAME_ATTR_COLUMNS, isGoldPlaystyleId, isPlaystyleId, isRoleId } from '../../../src/core/fc26.ts';
 import { SORT_KEY_NAMES } from '../../../src/core/players-sort.ts';
 import { MARKER_VALUES, type PlayerMarker } from '../../../src/core/squad-rules.ts';
+// 只借类型：透镜的 row 形参是后端行的前端形状（api.ts 本身只 import core，不会成环）
+import type { PlayerLibraryRow } from './api.ts';
 
 // 标记（v6.5.0）的展示文案：emoji 是标记本体，title/hover 出全称
 export const MARKER_EMOJI: Record<PlayerMarker, string> = { ge90: '🔴', ge87: '🟡', growth: '🟢' };
@@ -304,9 +306,11 @@ export function filtersToQuery(f: Filters): string {
 
 export const DEFAULT_COLS = ['marketValue', 'badges'];
 
-// 固定 10 列（标签 / 排序键 / 是否数值列）。数组顺序就是表头与单元格的渲染顺序，改动前先看页面行渲染同序
+// 固定 11 列（标签 / 排序键 / 是否数值列）。数组顺序就是表头与单元格的渲染顺序，改动前先看页面行渲染同序。
+// 标记列 v6.19.0 从可选列提为固定列（用户指令：放 UID 后面第二列），COL_DEFS 里的同名行已退役
 export const FIXED_COLUMNS: { label: string; sort: SortKey; num?: boolean }[] = [
   { label: 'UID', sort: 'uid' },
+  { label: '标记', sort: 'marker' },
   { label: '姓名', sort: 'name' },
   { label: '所属球队', sort: 'club' },
   { label: '位置', sort: 'position' },
@@ -329,7 +333,6 @@ export const COL_DEFS: { key: string; label: string; sort: SortKey; num?: boolea
   { key: 'futureStar', label: '未来之星', sort: 'future_star' },
   { key: 'chinaPlan', label: '中国计划', sort: 'china_plan' },
   { key: 'agentTier', label: '经纪人', sort: 'agent_tier' },
-  { key: 'marker', label: '标记', sort: 'marker' },
   { key: 'ps', label: 'PlayStyle', sort: 'ps' },
   { key: 'fcId', label: 'FC ID', sort: 'fc_id', num: true },
   { key: 'wage', label: '工资（半赛季）', sort: 'wage', num: true },
@@ -373,7 +376,6 @@ export function autoColsFor(f: Filters): string[] {
   if (f.futureStar) cols.push('futureStar');
   if (f.chinaPlan) cols.push('chinaPlan');
   if (f.agentTier) cols.push('agentTier');
-  if (f.marker) cols.push('marker');
   if (f.ps.length > 0) cols.push('ps');
   if (f.fcId) cols.push('fcId');
   if (f.hasContract || f.wageMin || f.wageMax || f.contractType) cols.push('wage', 'contractType');
@@ -468,4 +470,150 @@ export function filterChips(f: Filters, clubs: readonly { id: number; name: stri
   if (f.fcId) push('fcId', `FC ID：${f.fcId}`, { fcId: '' });
 
   return chips;
+}
+
+// ---- v6.19.0 窄屏卡片：排序行文案与「受筛选项」透镜（纯函数，页面与卡片共用） ----
+
+// 金额显示：与页面（pages/PlayersLibrary.tsx）原本地副本逐字一致，v6.19.0 起页面改用这份。
+// null 出「—」而不是 0 ——「没有合同」与「0 工资」是两回事。
+export function money(x: number | null): string {
+  return x === null ? '—' : `${x.toFixed(2)} m`;
+}
+
+// 排序下拉的中文标签（窄屏排序行）：30 个固定键全覆盖 —— 29 个非 id 键的文案就是承载它的表头列
+// label（FIXED_COLUMNS / COL_DEFS 逐一对齐，players-library.test.ts 的「29 个键都有列承载」锁住
+// 这层对应），id 没有列承载（它就是「没有点任何列」的默认态），在这里手写。TC-SKL-01 锁全量覆盖：
+// 后端往 core/players-sort.ts 加键而这里漏加时，排序下拉会出现 undefined 选项 —— 这条锁会红。
+export const SORT_KEY_LABELS: Record<string, string> = {
+  id: '默认顺序',
+  uid: 'UID',
+  name: '姓名',
+  club: '所属球队',
+  position: '位置',
+  age: '年龄',
+  ca: 'CA',
+  pa: 'PA',
+  growable: '成长',
+  influence: '影响力',
+  status: '状态',
+  market_value: '身价',
+  badges: '徽章',
+  prestige: '声望',
+  base_ca: '初始 CA',
+  marker: '标记',
+  growth_gap: '成长空间',
+  foot: '惯用脚',
+  growth_tier: '成长档位',
+  future_star: '未来之星',
+  china_plan: '中国计划',
+  agent_tier: '经纪人',
+  ps: 'PlayStyle',
+  fc_id: 'FC ID',
+  wage: '工资（半赛季）',
+  release_fee: '解约金',
+  contract_type: '合同类型',
+  source: '成约方式',
+  protected: '保护期',
+  years: '效力时长',
+};
+
+// 排序键 → 展示文案：固定键与 id 查表；`attr:<键>` 拼「属性·<中文名>」（属性名走 ref 的
+// ATTR_LABELS，与筛选面板同一份），非白名单属性键原样返回 —— `?sort=attr:foo` 是手改 URL 的
+// 非法态，别拼出「属性·undefined」。
+export function sortLabel(key: SortKey | 'id'): string {
+  if (key.startsWith('attr:')) {
+    const attr = key.slice('attr:'.length);
+    return ATTR_KEYS.includes(attr) ? `属性·${ATTR_LABELS[attr] ?? attr}` : key;
+  }
+  return SORT_KEY_LABELS[key] ?? key;
+}
+
+// 透镜（卡片属性列表末尾的「受筛选项」行）白名单：卡面已经展示的维度（身价 / 影响力 / 徽章 /
+// CA / PA / 年龄等）不再占位，剩这 7 个才在卡片上补一行（spec §3）。
+export const LENS_WHITELIST = ['prestige', 'base_ca', 'growth_gap', 'wage', 'release_fee', 'years', 'agent_tier'] as const;
+
+const LENS_SET: ReadonlySet<string> = new Set(LENS_WHITELIST);
+
+// 白名单键的卡片文案：表头 label 是列宽态（「工资（半赛季）」太长、解约金/违约金两处叫法不一），
+// 卡片用短版本，与 spec §3 的括注一致。
+const LENS_LABELS: Record<string, string> = {
+  prestige: '声望',
+  base_ca: '初始 CA',
+  growth_gap: '成长空间',
+  wage: '工资',
+  release_fee: '违约金',
+  years: '效力时长',
+  agent_tier: '经纪人',
+};
+
+export interface LensChip {
+  label: string;
+  value: string;
+  /** 数值原值（null = 无值）；只有 colored 为真时 UI 才拿它去 attrClass() 套五档色 */
+  raw: number | null;
+  colored: boolean;
+}
+
+// 单个白名单维度 → chip。colored 只对 0-99 能力值刻度开放（属性筛选 / 初始 CA）：金额、声望、
+// 效力时长、成长空间差值套上五档色只会被误读成能力值（attrClass 注释里同一口径）。
+function lensChipFor(key: string, row: PlayerLibraryRow): LensChip {
+  const label = LENS_LABELS[key] ?? key;
+  switch (key) {
+    case 'prestige':
+      return { label, value: row.prestige === null ? '—' : String(row.prestige), raw: row.prestige, colored: false };
+    case 'base_ca':
+      // 初始 CA 与 CA/PA 同为 0-99 域，套色；老数据没存 base_ca 时出「—」（colored 留给 UI 判 raw）
+      return { label, value: row.baseCa === null ? '—' : String(row.baseCa), raw: row.baseCa, colored: true };
+    case 'growth_gap':
+      // PA - CA 是差值不是能力值刻度：90-60=30 套成「弱」色是误读
+      return { label, value: String(row.pa - row.ca), raw: row.pa - row.ca, colored: false };
+    case 'wage':
+      return { label, value: money(row.wage), raw: row.wage, colored: false };
+    case 'release_fee':
+      return { label, value: money(row.releaseFee), raw: row.releaseFee, colored: false };
+    case 'years':
+      // 无合同 = 效力时长 null（后端 join 不到合同就是这个形状），别渲染成「null 赛季」
+      return { label, value: row.serviceSeasons === null ? '—' : `${row.serviceSeasons} 赛季`, raw: row.serviceSeasons, colored: false };
+    case 'agent_tier':
+      // 与页面既有渲染同一口径：AGENT_TIER_LABEL[0] 是空串，只有下标越界才落 '—'
+      return { label, value: AGENT_TIER_LABEL[row.agentTier] ?? '—', raw: row.agentTier, colored: false };
+    default:
+      return { label, value: '—', raw: null, colored: false };
+  }
+}
+
+// 生效筛选维度 → 透镜候选键，顺序固定（补位顺序就是它）。判定沿用 autoColsFor / filtersToQuery
+// 的既有口径：区间 min/max 任一有值即生效，枚举非空即生效 —— 不另发明第二套判定。
+// 声望没有筛选字段（只有排序入口）；身份类筛选（姓名 / 位置 / 俱乐部 / 状态…）不在白名单，不列。
+function activeLensFilters(f: Filters): string[] {
+  const dims: string[] = [];
+  if (f.baseCaMin || f.baseCaMax) dims.push('base_ca');
+  if (f.gapMin || f.gapMax) dims.push('growth_gap');
+  if (f.wageMin || f.wageMax) dims.push('wage');
+  if (f.rcMin || f.rcMax || f.rcNone) dims.push('release_fee');
+  if (f.yearsMin || f.yearsMax) dims.push('years');
+  if (f.agentTier) dims.push('agent_tier');
+  return dims;
+}
+
+// 卡片透镜（spec §3）：`filters.attr` 非空时属性筛选压制一切 —— 后端单 attr 限制下它就是用户
+// 此刻盯着的那个数，恰出一条；否则排序键（∈ 白名单时）先占位、生效筛选维度按固定顺序补位，
+// 同一维度只出一条（排序键优先），上限 2 条；无命中返回空数组（卡片不渲染这一行）。
+export function lensChips(filters: Filters, row: PlayerLibraryRow): LensChip[] {
+  if (filters.attr) {
+    const v = row.attrValue;
+    return [{
+      label: ATTR_LABELS[filters.attr] ?? filters.attr,
+      value: v == null ? '—' : String(v),
+      raw: v ?? null,
+      colored: v != null,
+    }];
+  }
+  const keys: string[] = [];
+  const add = (k: string) => {
+    if (LENS_SET.has(k) && !keys.includes(k)) keys.push(k);
+  };
+  add(filters.sort);
+  for (const k of activeLensFilters(filters)) add(k);
+  return keys.slice(0, 2).map((k) => lensChipFor(k, row));
 }

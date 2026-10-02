@@ -14,7 +14,12 @@ import type { ClubDirectoryRow, PlayerLibraryRow, PlayersLibraryResponse } from 
 import PlayersLibrary, { psNames } from './PlayersLibrary.tsx';
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
-vi.mock('../lib/api.ts', () => ({ api: apiMock }));
+// mediaUrl 必须给：v6.19.0 窄屏卡片引入 TeamLogo，它 import 本模块的 mediaUrl；mock 工厂缺该
+// 导出时 Vitest 在「取未定义导出」处直接抛错（照 Clubs.test.tsx 的 mock 惯例补）
+vi.mock('../lib/api.ts', () => ({
+  api: apiMock,
+  mediaUrl: (key: string | null | undefined) => (key ? `/api/media/${key}` : null),
+}));
 
 const CLUBS: ClubDirectoryRow[] = [
   { id: 1, name: '阿森纳', leagueTier: 'top' },
@@ -153,12 +158,12 @@ function headerTh(label: string): HTMLTableCellElement {
 describe('默认态与表头排序', () => {
   it('默认态不给任何列打 active；点 UID 从升序开始，再点翻向', async () => {
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
 
     // 默认走 players.id（源表注册顺序），没有哪一列真的在排序 —— 全列 ↕，不算假事实
     expect(headerTh('UID').getAttribute('aria-sort')).toBe('none');
     expect(document.querySelectorAll('thead th[aria-sort]:not([aria-sort="none"])')).toHaveLength(0);
-    expect(headerButtons()).toHaveLength(12); // 固定 10 列 + 默认两列（身价、徽章）
+    expect(headerButtons()).toHaveLength(13); // 固定 11 列（v6.19.0 标记提为固定列）+ 默认两列（身价、徽章）
     expect(search()).toBe('?limit=20');
 
     await user.click(headerButton('UID'));
@@ -173,7 +178,7 @@ describe('默认态与表头排序', () => {
   it('筛出来的列也能点排序；删掉该条件后排序与列一起回落默认（否决「排一个看不见的键」）', async () => {
     // 用「效力时长」当样本：它只由筛选带出来（身价/徽章是默认两列，撤掉筛选列也还在，测不出回落）
     const user = open('/players?effective_years_min=0&limit=20');
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     expect(headerButton('效力时长')).toBeTruthy();
 
     await user.click(headerButton('效力时长'));
@@ -188,7 +193,7 @@ describe('默认态与表头排序', () => {
 
   it('固定列的排序不受别的筛选影响（删掉筛出的列不会误伤）', async () => {
     const user = open('/players?effective_years_min=0&sort=ca&order=desc&limit=20');
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     await user.click(screen.getByRole('button', { name: '移除筛选：效力时长 ≥ 0 赛季' }));
     await waitFor(() => expect(search()).toBe('?sort=ca&order=desc&limit=20'));
     expect(headerTh('CA').getAttribute('aria-sort')).toBe('descending');
@@ -196,7 +201,7 @@ describe('默认态与表头排序', () => {
 
   it('属性列（attr:）用列名做标签，可点排序', async () => {
     const user = open('/players?attr=sprintspeed&limit=20');
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     await user.click(headerButton('sprintspeed'));
     await waitFor(() => expect(search()).toBe('?sort=attr%3Asprintspeed&order=desc&attr=sprintspeed&limit=20'));
     expect(lastListQuery()).toContain('sort=attr%3Asprintspeed');
@@ -206,7 +211,7 @@ describe('默认态与表头排序', () => {
 describe('左栏开合与摘要条（宽屏）', () => {
   it('收起/展开把选择记在本地，且不出现遮罩', async () => {
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const toggle = screen.getByRole('button', { name: /^筛选/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(document.querySelector('.lib-drawer-mask')).toBeNull();
@@ -224,13 +229,13 @@ describe('左栏开合与摘要条（宽屏）', () => {
   it('上次收起过就默认收起（本地记忆生效）', async () => {
     localStorage.setItem('players-library:side', 'closed');
     open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     expect(document.querySelector('.library-shell.collapsed')).not.toBeNull();
   });
 
   it('选中一项筛选：出 chip、工具条计数跟着走，点 chip 的 × 撤掉', async () => {
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     // 没有筛选条件时摘要条整块不渲染（v3.1.1 步骤 5 起不再留「未设筛选条件」占位）
     expect(screen.queryByRole('group', { name: '已生效的筛选条件' })).toBeNull();
 
@@ -249,7 +254,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
 
   it('撤掉「姓名」chip 时搜索框缓冲一起清空（否则再点「找」条件会复活）', async () => {
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const box = screen.getByPlaceholderText('查找');
 
     await user.type(box, 'sesko');
@@ -265,7 +270,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
 
   it('PlayStyle 下拉：面板分银/金两段，选金徽章发的是金段 ID（101 = 基础 ID+100）', async () => {
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const side = document.getElementById('library-side') as HTMLElement;
     // 「更多筛选」默认收起（jsdom 里直接置 open，真实的点摘要动作交给 e2e）
     (side.querySelector('details.lib-adv') as HTMLDetailsElement).open = true;
@@ -286,7 +291,7 @@ describe('左栏开合与摘要条（宽屏）', () => {
 
   it('显示列下拉：手动去掉一列后出现「恢复自动」，恢复后回到自动清单', async () => {
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const side = document.getElementById('library-side') as HTMLElement;
     await user.click(within(side).getByRole('button', { name: /^显示列/ }));
     await user.click(within(side).getByRole('checkbox', { name: '徽章' }));
@@ -304,7 +309,7 @@ describe('分页条（游标式）', () => {
   it('nextCursor 还在 ⇒ 显示「还有更多」，点下一页真的去取下一页', async () => {
     pageCursor = 'c1';
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
 
     expect(screen.getByText('第 1 页 · 已加载 2 名 · 还有更多')).toBeTruthy();
     const next = screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement;
@@ -318,7 +323,7 @@ describe('分页条（游标式）', () => {
 
   it('nextCursor 为 null ⇒ 显示「已到末页」，下一页按钮禁用（不再白发请求）', async () => {
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
 
     expect(screen.getByText('第 1 页 · 已加载 2 名 · 已到末页')).toBeTruthy();
     expect((screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement).disabled).toBe(true);
@@ -346,13 +351,13 @@ describe('v3.2.0：列表 staleTime（每次未命中都是 D1 实读）', () =>
       apiMock.mock.calls.map((call) => String(call[0])).filter((path) => path.startsWith('/api/players?')).length;
 
     const first = render(tree);
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     expect(listCalls()).toBe(1);
 
     // 切走再回来：仍在 60s 新鲜期内 ⇒ 不该再打一次列表（否则每次进页面都是一轮 D1 实读）
     first.unmount();
     render(tree);
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     expect(listCalls()).toBe(1);
   });
 
@@ -374,7 +379,7 @@ describe('v3.2.0：列表 staleTime（每次未命中都是 D1 实读）', () =>
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const first = render(tree);
-      await screen.findByRole('link', { name: 'Šeško' });
+      await screen.findByRole('link', { name: /Šeško/ });
       expect(listCalls()).toBe(1);
 
       first.unmount();
@@ -391,7 +396,7 @@ describe('窄屏筛选抽屉', () => {
   it('开抽屉：遮罩出现、背景锁滚、焦点进抽屉；Esc 关闭并把焦点还给入口按钮', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const toggle = screen.getByRole('button', { name: /^筛选/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(document.querySelector('.lib-drawer-mask')).toBeNull();
@@ -412,7 +417,7 @@ describe('窄屏筛选抽屉', () => {
   it('点遮罩、点 × 都能关，且都把焦点还给入口按钮', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const toggle = screen.getByRole('button', { name: /^筛选/ });
 
     await user.click(toggle);
@@ -429,7 +434,7 @@ describe('窄屏筛选抽屉', () => {
   it('抽屉里改筛选不动抽屉本身，摘要条立刻跟上', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
 
     const side = document.getElementById('library-side') as HTMLElement;
@@ -443,7 +448,7 @@ describe('窄屏筛选抽屉', () => {
   it('窄屏关着时抽屉 inert（屏幕外那几十个控件不进 Tab 序），宽屏不加', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const aside = document.getElementById('library-side') as HTMLElement;
     expect(aside.hasAttribute('inert')).toBe(true);
 
@@ -454,7 +459,7 @@ describe('窄屏筛选抽屉', () => {
   it('开着时抽屉是模态：背景三块区域都 inert，关掉就还原', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const main = document.querySelector('.library-main') as HTMLElement;
     const toolbar = document.querySelector('.lib-toolbar') as HTMLElement;
     // 摘要条（chip 是可聚焦按钮）自v3.1.1 步骤 5 起住在 .library-main 里，靠 main 的 inert 覆盖。
@@ -479,7 +484,7 @@ describe('窄屏筛选抽屉', () => {
 
   it('变窄时焦点若在左栏里，交给入口按钮（变窄后左栏是 inert 子树，焦点会被踢到 body）', async () => {
     open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const toggle = screen.getByRole('button', { name: /^筛选/ });
     // 宽屏左栏常驻，先在里头落个焦点（focusin 委托靠这个记录「焦点在左栏」）
     const aside = document.getElementById('library-side') as HTMLElement;
@@ -494,7 +499,7 @@ describe('窄屏筛选抽屉', () => {
   it('内层已消化的 Esc 不再顺带关抽屉（搜索框按 Esc 只收下拉）', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
 
     const consumed = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
@@ -509,7 +514,7 @@ describe('窄屏筛选抽屉', () => {
   it('回到宽屏自动放掉抽屉（否则一改窗口尺寸就带遮罩）', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
     expect(document.querySelector('.library-shell.drawer-open')).not.toBeNull();
 
@@ -524,7 +529,7 @@ describe('窄屏筛选抽屉', () => {
   it('拉宽时焦点若在抽屉里（× 一拉宽就没了）交还入口按钮，不掉到 body', async () => {
     setNarrow(true);
     const user = open();
-    await screen.findByRole('link', { name: 'Šeško' });
+    await screen.findByRole('link', { name: /Šeško/ });
     const toggle = screen.getByRole('button', { name: /^筛选/ });
     await user.click(toggle);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '关闭筛选抽屉' }));

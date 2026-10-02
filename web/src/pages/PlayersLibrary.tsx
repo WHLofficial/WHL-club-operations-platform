@@ -6,17 +6,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
-import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, playstyleIsGold } from '../lib/ref.ts';
+import { AGENT_TIER_LABEL, ATTR_LABELS, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, playstyleIsGold } from '../lib/ref.ts';
 import { PS_GOLD_BASE, isGoldPlaystyleId } from '../../../src/core/fc26.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { playerPath } from '../lib/player-link.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
 import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
+import { TeamLogo } from '../components/TeamLogo.tsx';
 import {
   COL_DEFS,
   DEFAULT_COLS,
   EMPTY_FILTERS,
   FIXED_COLUMNS,
+  SORT_KEYS,
   STATUS_BADGE,
   STATUS_LABEL,
   attrClass,
@@ -25,9 +27,13 @@ import {
   filtersFromUrl,
   filtersToQuery,
   firstOrderFor,
+  lensChips,
+  money,
   MARKER_EMOJI,
+  MARKER_LABEL,
   parseColsParam,
   sortColumnVisible,
+  sortLabel,
   type FilterChip,
   type Filters,
   type SortKey,
@@ -58,9 +64,7 @@ function writeSideOpen(open: boolean): void {
     /* 存不了就只是不记住，不打扰用户 */
   }
 }
-function money(x: number | null): string {
-  return x === null ? '—' : `${x.toFixed(2)} m`;
-}
+// money 在 v6.19.0 挪去 ../lib/players-library.ts（卡片与表格同一份格式），本地不再保留
 
 // v3.0.0：效力时长按窗刻度存储（赛季数），不再由日期折算
 
@@ -114,9 +118,6 @@ function renderCol(key: string, p: PlayerLibraryRow) {
       return <td key={key}>{p.chinaPlan ? '✓' : '—'}</td>;
     case 'agentTier':
       return <td key={key}>{AGENT_TIER_LABEL[p.agentTier] ?? '—'}</td>;
-    case 'marker':
-      // 不落三档的球员整格空置（不出「—」占位），与筛选「无标记」的语义分开
-      return <td key={key} className="marker-cell">{p.marker ? MARKER_EMOJI[p.marker] : ''}</td>;
     case 'ps':
       return <td key={key} className="mono ps-cell">{psNames(p)}</td>;
     case 'fcId':
@@ -309,12 +310,15 @@ export default function PlayersLibrary() {
 
   // 排序列随筛选消失时把排序撤回默认（例如按「身价」排完再删掉身价 chip：列没了、指示也没了，
   // 否则表格按一个看不见也取消不掉的键排）。固定列永远在，不受影响。
+  // 窄屏豁免（v6.19.0）：卡片没有列的概念，排序键由排序行的 select 自己显示，不存在「看不见的
+  // 键」——不豁免的话，30 个固定键里 19 个动态列键一选中就被这条立刻弹回默认顺序。
   useEffect(() => {
     const key = filters.sort;
     if (key === 'id') return;
+    if (narrow) return;
     if (sortColumnVisible(key, activeCols)) return;
     setFilters((f) => (f.sort === key ? { ...f, sort: EMPTY_FILTERS.sort, order: EMPTY_FILTERS.order } : f));
-  }, [filters.sort, activeCols, setFilters]);
+  }, [filters.sort, activeCols, narrow, setFilters]);
 
   const toggleSide = () => {
     const next = !sideOpen;
@@ -452,6 +456,45 @@ export default function PlayersLibrary() {
           />
         </div>
 
+        {/* 窄屏排序行（v6.19.0）：窄屏没有表头可点，排序改由一个 select + 升降按钮承担。
+            只在窄屏渲染 —— 宽屏 DOM 与交互保持零变化（表头点排序不动）。
+            选项 = 30 个固定键 + 当前生效的 attr 键（filters.attr 非空才有这一项）；
+            固定键的中文名走 lib 的 sortLabel，attr 项用 ref 的 ATTR_LABELS 现拼。 */}
+        {narrow && (
+          <div className="lib-sortrow">
+            <select
+              className="lib-sortrow-select"
+              value={filters.sort}
+              aria-label="排序方式"
+              onChange={(e) => {
+                const key = e.target.value as SortKey;
+                /* 重选当前键不动方向（方向交给旁边按钮，别把降序悄悄掰回升序） */
+                if (key === filters.sort) return;
+                setFilters((f) => ({ ...f, sort: key, order: firstOrderFor(key) }));
+              }}
+            >
+              {SORT_KEYS.map((k) => (
+                <option key={k} value={k}>
+                  {k === 'id' ? '默认顺序' : sortLabel(k)}
+                </option>
+              ))}
+              {filters.attr !== '' && (
+                <option value={`attr:${filters.attr}`}>{`属性·${ATTR_LABELS[filters.attr] ?? filters.attr}`}</option>
+              )}
+            </select>
+            <button
+              type="button"
+              className="btn btn-sm lib-sortrow-dir"
+              /* 默认顺序是 players.id 的固定顺序，没有方向可翻 */
+              disabled={filters.sort === 'id'}
+              aria-label={filters.order === 'asc' ? '当前升序，切换为降序' : '当前降序，切换为升序'}
+              onClick={() => set('order', filters.order === 'asc' ? 'desc' : 'asc')}
+            >
+              {filters.order === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
+        )}
+
         {drawerOpen && narrow ? <div className="lib-drawer-mask" aria-hidden="true" onClick={closeDrawer} /> : null}
 
         <div className={`${sideOpen ? 'library-shell' : 'library-shell collapsed'}${drawerOpen ? ' drawer-open' : ''}`}>
@@ -545,6 +588,103 @@ export default function PlayersLibrary() {
               <div className="empty-state">
                 <p className="muted">这个筛法下没有球员。放宽条件，或者换个词再找。</p>
               </div>
+            ) : narrow ? (
+              /* 窄屏铭牌卡（v6.19.0）：12 列表格在 375px 上只能横向滚动、姓名与 CA/PA 的关系
+                 一眼看不到，整表换成卡片网格；桌面（>900px）仍渲染下面同一棵表格树，
+                 DOM 与交互零变化。类名一律 lib-card- 前缀（通用词会撞详情页 .player-card 等）。 */
+              <div className="lib-cards">
+                {rows.map((p) => {
+                  const lens = lensChips(filters, p);
+                  /* 行序固定：身价 → 违约金 → 徽章 → 影响力 → 受筛选项（lens）；
+                     徽章金银全 0 时整行不出现。徽章值是「N金/N银」小 chip（spec §2.2）。 */
+                  const fields = [
+                    { k: '身价', v: money(p.marketValue) },
+                    { k: '违约金', v: money(p.releaseFee) },
+                    ...(p.badgesGold > 0 || p.badgesSilver > 0
+                      ? [
+                          {
+                            k: '徽章',
+                            v: (
+                              <>
+                                {p.badgesGold > 0 && <span className="lib-card-chip lib-card-chip-gold">{p.badgesGold}金</span>}
+                                {p.badgesSilver > 0 && <span className="lib-card-chip lib-card-chip-silver">{p.badgesSilver}银</span>}
+                              </>
+                            ),
+                          },
+                        ]
+                      : []),
+                    { k: '影响力', v: p.influence.toFixed(2) },
+                  ];
+                  return (
+                    <Link key={p.id} to={playerPath(p)} className="lib-card">
+                      <div className="lib-card-rail">
+                        {p.positions.length > 0 && (
+                          <>
+                            <span className="lib-card-pos-main">{p.positions[0]}</span>
+                            {p.positions.length > 1 && (
+                              <span className="lib-card-pos-sub">
+                                {p.positions.slice(1).map((pos) => (
+                                  <span key={pos} className="lib-card-pos-sec">
+                                    {pos}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        <span className="lib-card-gap" />
+                        <span className={`lib-card-ca ${attrClass(p.ca)}`}>{p.ca}</span>
+                        <span className="lib-card-lab">CA</span>
+                        <span className="lib-card-gap" />
+                        <span className={`lib-card-pa ${attrClass(p.pa)}`}>{p.pa}</span>
+                        <span className="lib-card-lab">PA</span>
+                      </div>
+                      <div className="lib-card-body">
+                        <div className="lib-card-head">
+                          <span className="lib-card-name">{p.name}</span>
+                          {p.marker && (
+                            <span className="lib-card-marker" title={MARKER_LABEL[p.marker]}>
+                              {MARKER_EMOJI[p.marker]}
+                            </span>
+                          )}
+                        </div>
+                        <div className="lib-card-sub">
+                          {p.status === 'free' ? (
+                            <span className="lib-card-free">自由身</span>
+                          ) : (
+                            <>
+                              <TeamLogo name={p.clubName ?? ''} size={18} circle={false} />
+                              <span>{p.clubName}</span>
+                              {p.age !== null && <span>· {p.age}岁</span>}
+                            </>
+                          )}
+                          {p.status !== 'normal' && p.status !== 'free' && (
+                            <span className={`badge ${STATUS_BADGE[p.status] ?? 'gray'}`}>
+                              {STATUS_LABEL[p.status] ?? p.status}
+                            </span>
+                          )}
+                        </div>
+                        <div className="lib-card-list">
+                          {fields.map(({ k, v }) => (
+                            <div key={k} className="lib-card-row">
+                              <span className="lib-card-bl">{k}</span>
+                              <span className="lib-card-bv">{v}</span>
+                            </div>
+                          ))}
+                          {lens.map((c) => (
+                            <div key={c.label} className="lib-card-row lib-card-lens">
+                              <span className="lib-card-bl">{c.label}</span>
+                              <span className={`lib-card-bv${c.colored && c.raw !== null ? ` ${attrClass(c.raw)}` : ''}`}>
+                                {c.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
             ) : (
               <div className="table-wrap">
                 <table>
@@ -585,6 +725,7 @@ export default function PlayersLibrary() {
                     {rows.map((p) => (
                       <tr key={p.id}>
                         <td className="mono">{p.uid.replace(/^fc/, '')}</td>
+                        <td className="marker-cell">{p.marker ? MARKER_EMOJI[p.marker] : ''}</td>
                         <td>
                           <Link to={playerPath(p)}>{p.name}</Link>
                         </td>
