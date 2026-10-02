@@ -39,8 +39,8 @@
 
 ## §4 e2e ⑯ 与静态闸门（主会话自留）
 
-- **⑯ 公开阅读几何**：375 下 `/players/:id`（id 取自 `/api/players?limit=1`）`.dossier` 单列 + `.event-cards` 在场/`.transfer-table` 不在场 + 卡 fit ±1px + 页签无文档级溢出；768 同断言（900 档覆盖）；1280 双栏 280px+1fr + 表格分支在场 + event-cards count 0；375 `/market/intel` 成交表横滑后首列留视口 + computed sticky + 1280 static。
-- **静态闸门**（tests/mobile-baseline.test.ts 增例）：`.table-sticky-2` 规则级断言（≤760 块）+ `.coach-sticky` 原块仍在；event-cards 类名 token 正则 + narrow/桌面互斥 + `PLAYER_CARDS_QUERY` 字面；≤1024 渐隐 mask 规则在场；既有白名单双向核对不回归。
+- **⑯ 公开阅读几何**：375 下 `/players/:id`（id 取自 `/api/players?limit=1`）`.dossier` 单列 + `.dossier-tabs` 横滑规则真生效（computed `overflow-x:auto + flex-wrap:nowrap`，评审 P1-1 补：375 实测页签内容 ~245px 不溢出，几何断言不成立，钉 computed 才拦得住删块/挪块）+ `.event-cards` 在场/`.transfer-table` 不在场 + 卡 fit ±1px + 页签无文档级溢出；768 同断言（900 档覆盖）；1280 双栏 280px+1fr + 表格分支在场 + event-cards count 0；375 `/market/intel` 成交表横滑后**第二列**留视口（强于首列 left=0：粘性失效时第二列必被滚走）+ 首列/第二列无缝 |th1.right−th2.left|≤1px（评审 P2-2 补：:has 认表与 --stky-c1 错位时红）+ computed sticky + 1280 static。
+- **静态闸门**（tests/mobile-baseline.test.ts 增例）：`.table-sticky-2` 规则级断言（≤760 块）+ `.coach-sticky` 原块仍在；event-cards 类名 token 正则 + narrow/桌面互斥 + `PLAYER_CARDS_QUERY` 字面；≤1024 渐隐 mask 规则在场 + 全局 `.nav-links` 可横滑规则级红线（评审 P3）；**媒体块归属**：② 页签横滑 / ③ 事件卡五类名 / ④ sticky-2 规则必须钉在各自的 ≤760 块内（评审 P1-1/P2-1 补，V4 类挪块变异只有归属断言能拦）；既有白名单双向核对不回归。
 
 ## §5 验收
 

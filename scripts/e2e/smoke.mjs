@@ -1324,6 +1324,17 @@ async function main() {
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
       assert(ovTabs <= 1, `375 玩家页文档级横向溢出 ${ovTabs}px（页签行应横滑而非撑破文档）`);
+      // 页签横滑红线（评审 P1-1）：折行/删块不产生文档级溢出，直接钉行为——② 块被删或挪出 ≤760 时
+      // computed 立即变。注意不能用 scrollWidth>clientWidth：实测 375 下页签内容仅 ~245px 不溢出，
+      // 几何断言只在更窄视口/更长标签下才成立；静态闸门（tests/mobile-baseline.test.ts 媒体块归属例）
+      // 钉「规则在 ② 块内」，这里钉「375 下规则真生效」，两层互补。
+      const tabsCss = await page.evaluate(() => {
+        const t = document.querySelector('.dossier-tabs');
+        if (!t) return null;
+        const cs = getComputedStyle(t);
+        return { ovx: cs.overflowX, wrap: cs.flexWrap };
+      });
+      assert(tabsCss && tabsCss.ovx === 'auto' && tabsCss.wrap === 'nowrap', `375 .dossier-tabs 应启用横滑（overflow-x:auto + flex-wrap:nowrap），实见 ${JSON.stringify(tabsCss)}——② 块被删/挪块时红`);
       await page.locator('.dossier-tabs button', { hasText: '转会' }).first().click();
       await page.locator('.event-card').first().waitFor({ state: 'visible', timeout: TIMEOUT });
       const excl375 = await page.evaluate(() => ({
@@ -1392,10 +1403,20 @@ async function main() {
         console.warn('（⑯ 备注：intel 成交表无数据/未挂 table-sticky-2，粘性几何降级——静态闸门兜底）');
       } else {
         const st = await page.evaluate(() => {
-          const th2 = document.querySelector('table.table-sticky-2')?.querySelector('thead tr th:nth-child(2)');
-          return { th2: th2 ? getComputedStyle(th2).position : null };
+          const tbl = document.querySelector('table.table-sticky-2');
+          const th1 = tbl?.querySelector('thead tr th:nth-child(1)');
+          const th2 = tbl?.querySelector('thead tr th:nth-child(2)');
+          const r1 = th1?.getBoundingClientRect();
+          const r2 = th2?.getBoundingClientRect();
+          return {
+            th2: th2 ? getComputedStyle(th2).position : null,
+            seam: r1 && r2 ? Math.abs(r1.right - r2.left) : null,
+          };
         });
         assert(st.th2 === 'sticky', `375 intel 第二列应 sticky（computed=${st.th2}）`);
+        // 粘列无缝（评审 P2-2）：|th1.right − th2.left| 应 ≤1px——:has 认表选择器与 --stky-c1
+        // 列宽错位（如某表列结构变更后变量跳档）时此断言红，overflow:hidden 会开始裁字
+        assert(st.seam !== null && st.seam <= 1, `intel 粘列无缝检查失败：|th1.right−th2.left|=${st.seam}px（首列定宽与第二列 left 错位）`);
         const scrollable = await page.evaluate(() => {
           const wrap = document.querySelector('table.table-sticky-2')?.closest('.table-wrap');
           return wrap ? { sw: wrap.scrollWidth, cw: wrap.clientWidth } : null;
