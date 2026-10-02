@@ -61,6 +61,19 @@ export const STATUS_BADGE: Record<string, string> = {
   retired: 'gray',
 };
 
+// 数值分段配色（v6.19.0 全仓统一）：sofifa.com 实测五档（页面内联脚本常量与 awsm.min.js 的
+// color(point) 函数同阈值互证，2026-10-02 抓取），阈值 50/60/70/80。唯一替换档是 61-70：
+// sofifa 原档黄 #fcc419 在本站奶油底上对比度仅 ~1.6:1 不可读，换陶土同族的琥珀金 #b7892b。
+// 只适用 0-99 能力值刻度（CA / PA / 细分属性 / 分组均值 / 初始 CA）；金额、影响力、声望、
+// 效力时长、成长空间差值不适用，一律保持中性墨色。
+export function attrClass(v: number): string {
+  if (v <= 50) return 'attr-bad';
+  if (v <= 60) return 'attr-weak';
+  if (v <= 70) return 'attr-mid';
+  if (v <= 80) return 'attr-solid';
+  return 'attr-good';
+}
+
 // 位置全集按 PositionID 升序（同 src/core/fc26.ts POSITION_BY_ID）。
 // v3.1.1 前这里还有一份 POSITION_GROUPS（门将/后卫/中场/前锋整组选中的快捷 chip），
 // 位置改多选下拉后只剩 12 个码位，那份分组没有引用者了。

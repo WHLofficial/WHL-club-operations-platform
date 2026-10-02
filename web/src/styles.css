@@ -2396,14 +2396,21 @@ th.num .th-sort {
   flex-direction: column;
   gap: 2px;
 }
-.attr-good {
-  color: var(--ok);
+/* 数值分段配色（v6.19.0 全仓统一）：sofifa 实测五档，阈值口径与来源见 web/src/lib/players-library.ts attrClass */
+.attr-bad {
+  color: #e03131;
+}
+.attr-weak {
+  color: #fd7e14;
 }
 .attr-mid {
-  color: var(--warn);
+  color: #b7892b;
 }
-.attr-low {
-  color: var(--bad);
+.attr-solid {
+  color: #66a80f;
+}
+.attr-good {
+  color: #2b8a3e;
 }
 
 /* 六维雷达（v0.7.1 d11）：静态 SVG，无动画；v6.2.0 起压进属性页签头部右格 —— 232×156 光图，

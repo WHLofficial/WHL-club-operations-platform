@@ -32,7 +32,8 @@ import {
   teamName,
 } from '../lib/ref.ts';
 // 状态词统一用球员库那套（v6.2.0 两表合一：ref.ts 的旧表已删，normal=在队 / free=自由身）
-import { MARKER_EMOJI, MARKER_LABEL, STATUS_LABEL } from '../lib/players-library.ts';
+// attrClass 五档分段（v6.19.0 全仓统一口径）也在这里
+import { MARKER_EMOJI, MARKER_LABEL, STATUS_LABEL, attrClass } from '../lib/players-library.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 import {
   PS_GOLD_BASE,
@@ -58,12 +59,6 @@ const TAB_LABEL: Record<PlayerTab, string> = {
   transfers: '转会记录',
 };
 
-// 细分色阶（四裁决：绿>=70 / 橙 50-69 / 红<50）
-function attrClass(v: number): string {
-  if (v >= 70) return 'attr-good';
-  if (v >= 50) return 'attr-mid';
-  return 'attr-low';
-}
 
 function starText(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '—';
@@ -111,7 +106,7 @@ function AttrRadar({ values }: { values: { key: string; value: number | null }[]
             <line className="radar-axis" x1={cx} y1={cy} x2={cx + R * Math.cos(angle(i))} y2={cy + R * Math.sin(angle(i))} />
             <text className="radar-label" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">
               <tspan className="radar-axis-key">{v.key}</tspan>
-              <tspan className="radar-axis-val" dx="3">
+              <tspan className={`radar-axis-val${v.value === null ? '' : ` ${attrClass(v.value)}`}`} dx="3">
                 {v.value ?? '—'}
               </tspan>
             </text>
@@ -432,11 +427,11 @@ export default function Player() {
             <div className="player-card-numbers">
               <div>
                 <span className="stat-label">CA</span>
-                <span className="mono ca-pa">{player.ca}</span>
+                <span className={`mono ca-pa ${attrClass(player.ca)}`}>{player.ca}</span>
               </div>
               <div>
                 <span className="stat-label">PA</span>
-                <span className="mono ca-pa">{player.pa}</span>
+                <span className={`mono ca-pa ${attrClass(player.pa)}`}>{player.pa}</span>
               </div>
               <div>
                 <span className="stat-label">身价</span>

@@ -19,6 +19,7 @@ import {
   FIXED_COLUMNS,
   STATUS_BADGE,
   STATUS_LABEL,
+  attrClass,
   autoColsFor,
   filterChips,
   filtersFromUrl,
@@ -100,7 +101,7 @@ function renderCol(key: string, p: PlayerLibraryRow) {
     case 'prestige':
       return <td key={key} className="num mono">{p.prestige ?? '—'}</td>;
     case 'baseCa':
-      return <td key={key} className="num mono">{p.baseCa ?? '—'}</td>;
+      return <td key={key} className={`num mono${p.baseCa === null ? '' : ` ${attrClass(p.baseCa)}`}`}>{p.baseCa ?? '—'}</td>;
     case 'growthGap':
       return <td key={key} className="num mono">{p.pa - p.ca}</td>;
     case 'foot':
@@ -593,8 +594,8 @@ export default function PlayersLibrary() {
                         </td>
                         <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>
                         <td className="num mono">{p.age ?? '—'}</td>
-                          <td className="num mono">{p.ca}</td>
-                          <td className="num mono">{p.pa}</td>
+                          <td className={`num mono ${attrClass(p.ca)}`}>{p.ca}</td>
+                          <td className={`num mono ${attrClass(p.pa)}`}>{p.pa}</td>
                           <td>{p.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}</td>
                           <td className="num mono">{p.influence.toFixed(2)}</td>
                           <td>
