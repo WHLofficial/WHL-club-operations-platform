@@ -4,6 +4,23 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.19.0] · 球员库移动端卡片化 + 全仓数值五档分段配色（2026-10-02）
+
+球员库 `/players` 在 ≤900px（与筛选抽屉同断点）把 12 列横向滚动表格整表换成**铭牌卡网格**：左竖轨位置药丸（主位独占 + 副位两枚一行、奇数孤行自动居中）与 CA/PA 大字，卡身姓名（长名换行不出省略号）+ 标记 emoji + 队徽/俱乐部/年龄/状态徽章（自由身灰 chip），下部固定行序属性列表（身价/违约金/徽章 chips/影响力）+ 受筛选项透镜行（attr 筛选优先恰 1 条，排序键/筛选维度按白名单补位，去重上限 2）；窄屏新增排序行（30 键 + attr 动态项 + 升降切换），显示列窄屏隐藏。桌面 >900px DOM 零变化——唯一例外：**标记列从可选列提为固定第二列（UID 后）**，且 CA/PA/初始 CA 列字色随五档变化。**数值分段配色全仓统一**：sofifa.com 实测五档（≤50 红 / ≤60 橙 / ≤70 琥珀金 `#b7892b`——原档黄 `#fcc419` 在奶油底上 ~1.6:1 不可读，唯一替换档 / ≤80 榈绿 / ≥81 绿），`attrClass` 收归 `web/src/lib/players-library.ts` 共享，球员面板头部 CA/PA、六维雷达轴数值、属性页签与分组均值、球员库表格、移动端卡片同源。零迁移零生产写（后端零改动，卡片所需字段列表端点已全部返回）。**未发布**（本地完成，push 即 CF 自动上线）。判级 minor。测试计划 `docs/test-plans/v6.19.0-players-mobile-cards.md`（19 TC + 5 变异全命中）；vitest 68 文件 / 1209 例全绿（v6.18.0 基线 67/1194，净 +1 文件 / +15 例）、e2e 11/11、code-review P0 0 / P1 0 / nit 三条登记。
+
+**Added**
+- 窄屏铭牌卡网格 `.lib-cards` 与窄屏排序行 `.lib-sortrow`（`PlayersLibrary.tsx` narrow 分支；类名一律 `lib-card-` 前缀防撞既有规则）。
+- `web/src/lib/players-library.ts`：`attrClass` 五档分段、`money`（自页面移入）、`SORT_KEY_LABELS`、`sortLabel`、`LENS_WHITELIST`、`LensChip`/`lensChips` 透镜纯函数。
+- `web/src/lib/players-lens.test.ts` 15 例（attrClass 边界 / lensChips 口径 / 排序标签全集 / money）。
+
+**Changed**
+- 桌面表格：标记列从可选列提为固定第二列（UID 之后），`COL_DEFS`/`autoColsFor`/`renderCol` 的 marker 行退役。
+- `.attr-good/.attr-mid/.attr-low` 三档类改五档 `.attr-bad/attr-weak/attr-mid/attr-solid/attr-good`（sofifa 实测色值，`attr-low` 退役）。
+- e2e ⑧ 球员库三视口：窄视口等待与断言切到卡片列（`.lib-cards .lib-card`），宽屏追加卡片/排序行不存在的反向断言。
+
+**Fixed**
+- `PlayersLibrary.test.tsx` 的 api mock 缺 `mediaUrl`（窄屏卡片引入 TeamLogo 后取未定义导出直接抛错，9 例红）。
+
 ## [v6.18.0] · 市场信息架构改版（2026-10-02）
 
 市场 nav 四项：**在售市场**（原「市场板」改名）/ **海捞**（成交动态与 CPU 捞人榜撤、改海捞区 + 激活球员）/ **市场情报**（新第四 tab，匿名可读）/ 我的。**海捞区** = 输入 ID 或名字搜索（数字点查 / 名字折叠搜索 LIMIT 8），信息条带「可捞 / 不可捞 + 原因」（批量判定与详情 seaSign 同源，一致性测试锁）。**激活球员** = 全部可激活球员（外队 normal+trainee，正式合同缺违约金的行标「缺违约金合同」置灰）+ 保留仅训练营模式；激活补齐证据上传链路（先传 QQ 通知截图拿 `proofMediaKey` 再提交——此前按钮缺该字段必 400）。**市场情报** = 传闻（系统自动派生、真真假假：种子钉 `[season, windowSeq]` 同窗稳定下窗换血，真料按事实方向分族套不确定语气、假料随机组合带不撞真实关系守卫，响应不下发真假字段）+ 已达成交易（全部 completed 单据倒序 50 条，走迁移 `0058` 的 `idx_transfers_status_time` 索引早停，≈150 行/次）。退役三端点：`/api/market/sea-signs`、`/api/market/cpu-board`、`/api/market/trainees`。**未发布**（本地完成，发布时迁移 `0058` 先 apply 生产再 push）。判级 minor。测试计划 `docs/test-plans/v6.18.0-market-ia.md`；vitest 67 文件 / 1194 例全绿（v6.17.0 基线 65/1169，净 +2 文件 / +25 例）、e2e 11/11、变异 V1–V15 全命中、code-review P0 0 / P1 2（已修）/ P2-P3 登记或小修。
