@@ -195,6 +195,12 @@ export default function BrandsPage() {
               return (
                 <div className="brand-card" key={row.id}>
                   <b>{row.brand}</b>
+                  {/* P2-4（评审）：与桌面表格「来源/状态/生效冠名」三列对等的元信息行 */}
+                  <div className="brand-card-meta">
+                    <span>来源 {row.source === 'custom' ? '自定义' : '种子'}</span>
+                    <span>状态 {row.status === 'adopted' ? '在池' : '已弃用'}</span>
+                    <span>生效冠名 {row.active_contracts}</span>
+                  </div>
                   <div className="brand-card-grid">
                     <input className="input input-sm" aria-label="行业" value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
                     <input className="input input-sm mono" aria-label="热度" value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />

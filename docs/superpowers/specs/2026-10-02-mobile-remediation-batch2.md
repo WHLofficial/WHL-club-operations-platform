@@ -18,6 +18,8 @@
 
 **实施期订正（e2e ⑭ 实测裁决，2026-10-02）**：§2.①.5 的「面板内 sticky」落空——entry-panel 挂在主比赛表 `<td colSpan=6>` 内，外层 `.table-wrap{overflow-x:auto}` 是滚动容器，sticky 只贴该容器（实测 `bottom=3713` vs 视口 812，毫无行程），常驻汇总条的设计意图落空。改 **`position: fixed` 视口底横条**（全宽、上缘描边+阴影、`env(safe-area-inset-bottom)` 内垫、z-index 15 在顶栏 20/抽屉遮罩 30 之下），面板加底垫 `padding-bottom` 补偿脱流。e2e ⑭ 增加几何断言：滚动到卡片中部后汇总条底缘必须贴视口底（±2px）。测试计划 V3 口径随此订正（fixed 全宽是正解，不是变异）。
 
+**评审期订正（code-review 修复，2026-10-02）**：面板展开后仍受主比赛表宽度约束（评审 P1-1）——td 宽随主表 min-content（nowrap 表头 ≈500–580px）走，375 下卡片 ≈1.5× 视口、卡脚保存钮出屏，且 ⑫ 只量 `documentElement.scrollWidth` 察觉不到（横滚吃掉溢出）。修法：≤760 块内 `.table-wrap` 升格 `container-type: inline-size`，`.entry-panel` 改 `position: sticky; left: 0; width: 100cqw`（cqw 无支持回退 auto = 旧态），面板脱出主表宽度约束、列表横滚时保持完整可见；⑭ 加面板 fit 几何断言（左右缘都在视口内）。配套：**汇总条 portal 到 `document.body`**——`container-type` 蕴含的布局包容会把 `.table-wrap` 变成 fixed 后代的包含块，面板内 fixed 汇总条会改贴容器盒而非视口，必须 portal 逃出包容子树。另：§3 契约补 `brand-new-form` / `brand-card-meta`（评审 P2-3）；品牌池卡删除死规则 `.brand-card-head` / `.brand-card-foot`（TSX 实际用 `<b>` / `.btn-row`），并补「来源/状态/生效冠名」元信息行 `brand-card-meta` 与桌面三列对等（评审 P2-4）。
+
 ## 1. 设计裁决
 
 - **CoachPanel 选「粘性首列」否决「列分组」**：粘性保住 P-表格保底（密集阅读 = 规范横滚），零新增状态、零隐藏数据；列分组要折叠状态机 + 隐藏数据，触控成本与回归风险都高。
@@ -50,7 +52,7 @@ label.field 单列全宽、textarea/select 100%；两小表保持横滚。CSS �
 
 ## 3. 类名契约（e2e 依赖）
 
-`entry-cards` / `entry-card` / `entry-card-head` / `entry-card-grid` / `entry-card-foot` / `entry-sumbar`；`brand-cards` / `brand-card` / `brand-card-grid`；`coach-sticky`（table 级 opt-in）。
+`entry-cards` / `entry-card` / `entry-card-head` / `entry-card-grid` / `entry-card-foot` / `entry-sumbar`；`brand-cards` / `brand-card` / `brand-card-grid` / `brand-card-meta`（评审 P2-4 对等元信息行）/ `brand-new-form`（评审 P2-3 补登）；`coach-sticky`（table 级 opt-in）。
 
 ## 4. e2e 与测试联动
 

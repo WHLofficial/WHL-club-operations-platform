@@ -1160,6 +1160,19 @@ async function main() {
         `汇总条应常驻视口底部（bottom=${pin?.bottom} vs 视口高=${pin?.vh}）——sticky 陷阱或 fixed 被摘`,
       );
 
+      // P1-1 闸门（评审）：面板活在主比赛表 <td colSpan=6> 里，td 宽随主表 min-content（nowrap 表头）
+      // 走 ⇒ 旧缺陷下面板 ≈1.5× 视口、卡脚保存钮出屏；⑫ 只量 documentElement.scrollWidth 察觉不到
+      // （横滚吃掉了溢出）。修法 = .entry-panel sticky left:0 + width:100cqw，这里量几何：
+      // 面板左右缘都必须在视口内（放行 1px 描边容差）。
+      const fit = await page.evaluate(() => {
+        const r = document.querySelector('.entry-panel')?.getBoundingClientRect();
+        return r ? { left: r.left, right: r.right, vw: document.documentElement.clientWidth } : null;
+      });
+      assert(
+        fit && fit.left >= -1 && fit.right <= fit.vw + 1,
+        `entry-panel 应完整落在视口内（left=${fit?.left} right=${fit?.right} vs 视口=${fit?.vw}）——P1-1 出宽修法（sticky+100cqw）失效`,
+      );
+
       // 拦截保存响应拿 playerId/xp，跑完把写入退掉（烟测可重复：不消费掉球员的评分格）
       let savedPid = null;
       let savedXp = 0;
@@ -1234,9 +1247,16 @@ async function main() {
       // 不在场则显式备注降级，确定性回归由 tests/mobile-baseline.test.ts TC-SWP-05 静态闸门兜住。
       await page.setViewportSize({ width: 375, height: 812 });
       await page.goto(`${BASE}/clubs/1`, { waitUntil: 'networkidle' });
-      const stickyTables = await page.locator('table.coach-sticky').count();
+      // P2-1（评审）：count() 不等待——渲染晚一步就会把「在场」误判成降级。先给 3s 窗口等它出现。
+      let stickyTables = 0;
+      try {
+        await page.locator('table.coach-sticky').first().waitFor({ state: 'visible', timeout: 3000 });
+        stickyTables = await page.locator('table.coach-sticky').count();
+      } catch {
+        stickyTables = 0;
+      }
       if (stickyTables === 0) {
-        console.log('（⑮ 备注：本地教练工作台不渲染（观众登录/TOUR_DB 旧 schema），几何断言降级——静态闸门 = tests/mobile-baseline.test.ts TC-SWP-05）');
+        console.warn('（⑮ 备注：本地教练工作台不渲染（观众登录/TOUR_DB 旧 schema），几何断言降级——静态闸门 = tests/mobile-baseline.test.ts TC-SWP-05）');
         return;
       }
       const geom = await page.evaluate(() => {
@@ -1249,17 +1269,28 @@ async function main() {
         };
       });
       assert(geom.thSticky === 'sticky' && geom.tdSticky === 'sticky', `≤640 应 th/td 均 sticky（th=${geom.thSticky} td=${geom.tdSticky}）`);
-      // 横滚后第二列（对手）仍应留在视口内（粘住 = 滚不走）
+      // P2-1（评审）：先验外层 wrap 真可横滚——不可滚时下面的「滚后仍在视口」是平凡绿（根本没滚）
+      const scrollable = await page.evaluate(() => {
+        const wrap = document.querySelector('table.coach-sticky')?.closest('.table-wrap');
+        return wrap ? { sw: wrap.scrollWidth, cw: wrap.clientWidth } : null;
+      });
+      assert(
+        scrollable && scrollable.sw > scrollable.cw,
+        `coach-sticky 表外层 .table-wrap 不可横滚（scrollWidth=${scrollable?.sw} ≤ clientWidth=${scrollable?.cw}）——粘性几何无从验证`,
+      );
+      // 横滚后第二列（对手）仍应留在视口内（粘住 = 滚不走）；同时确认滚动真发生了
       await page.evaluate(() => {
         const wrap = document.querySelector('table.coach-sticky')?.closest('.table-wrap');
         if (wrap) wrap.scrollLeft = 400;
       });
       await page.waitForTimeout(300);
       const after = await page.evaluate(() => {
+        const wrap = document.querySelector('table.coach-sticky')?.closest('.table-wrap');
         const td = document.querySelector('table.coach-sticky')?.querySelector('tbody tr td:nth-child(2)');
         const r = td?.getBoundingClientRect();
-        return r ? { left: r.left, right: r.right, vw: document.documentElement.clientWidth } : null;
+        return r ? { left: r.left, right: r.right, vw: document.documentElement.clientWidth, scrolled: wrap?.scrollLeft ?? 0 } : null;
       });
+      assert(after && after.scrolled > 0, `设置 scrollLeft=400 后 wrap.scrollLeft=${after?.scrolled}——滚动没生效，后续断言不可信`);
       assert(after && after.left >= -1 && after.right <= after.vw + 1, `横滚 400px 后粘性列被滚出视口（left=${after?.left} right=${after?.right}）`);
       // 宽屏取消粘性（computed static，不是只看媒体块存在）
       await page.setViewportSize({ width: 1280, height: 900 });

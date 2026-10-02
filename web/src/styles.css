@@ -3627,7 +3627,7 @@ th.num .th-sort {
     margin-top: 0;
   }
   /* 汇总条：常驻视口底的 fixed 横条（spec §0-2 实测裁决改 sticky→fixed）。
-     面板嵌在主比赛表 <td colSpan=6> 内、外层 .table-wrap{overflow-x:auto} 是滚动容器——
+     面板嵌在主比赛表 <td colSpan=6> 内、外层 .table-wrap overflow-x:auto 是滚动容器——
      e2e ⑭ 实测 sticky 在其中毫无行程（bottom=3713 vs 视口 812），贴不到视口；fixed 才是真吸附。
      层级：内容之上（5+），顶栏（20）/抽屉遮罩（30）之下。 */
   .entry-sumbar {
@@ -3651,8 +3651,24 @@ th.num .th-sort {
   .entry-sumbar .btn {
     margin-left: auto;
   }
-  /* 脱流补偿：汇总条不再占面板流内高度，给面板留出底垫，最后一张卡不被横条盖住 */
+  /* P1-1（评审）：面板活在主比赛表 <td colSpan=6> 里，td 宽随主表 min-content（nowrap 表头 ≈500-580px）
+     走，375 下卡片约 1.5 倍视口宽、卡脚保存钮出屏。修法：面板 position:sticky left:0 钉在滚动容器
+     可视左缘、宽取容器内联尺寸（.table-wrap 同时升格为 inline-size 容器，cqw 无支持时回退 auto=旧态），
+     面板脱出主表宽度约束且列表横滚时保持完整可见；td colSpan 结构保留，桌面零变化。
+     汇总条 fixed 常驻视口底（spec §0 实施期订正：sticky 在滚动容器纵轴无行程），层级 15
+     在顶栏（20）/抽屉遮罩（30）之下；面板底垫补偿其脱流，最后一张卡不被横条盖住。 */
+  .table-wrap {
+    container-type: inline-size;
+  }
+  .entry-row > td {
+    padding: 0;
+  }
   .entry-panel {
+    position: sticky;
+    left: 0;
+    width: 100cqw;
+    margin-top: 10px;
+    padding: 10px 12px;
     padding-bottom: calc(76px + env(safe-area-inset-bottom));
   }
 }
@@ -3686,15 +3702,14 @@ th.num .th-sort {
     box-shadow: 0 1px 5px rgba(43, 29, 18, 0.1);
     color: #2b1d12;
   }
-  .brand-card-head {
+  /* P2-4（评审）：与桌面表格「来源/状态/生效冠名」三列对等的元信息行（TSX .brand-card-meta） */
+  .brand-card-meta {
     display: flex;
-    align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
+    gap: 4px 12px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
   }
   .brand-card-grid {
     display: grid;
@@ -3733,16 +3748,6 @@ th.num .th-sort {
     width: 20px;
     height: 20px;
     min-height: 0;
-  }
-  .brand-card-foot {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  /* 卡脚末个按钮（保存）推到右缘；删除等在前，样式复用全局 .btn */
-  .brand-card-foot .btn:last-child {
-    margin-left: auto;
   }
   /* 新增品牌表单：全宽堆叠（原横排到窄屏会挤） */
   .brand-new-form {

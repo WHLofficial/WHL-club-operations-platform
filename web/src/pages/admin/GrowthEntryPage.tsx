@@ -2,6 +2,7 @@
 // 交互对照参考插件 fixtures 编辑器：行内编辑 + 基线脏检测 + 只提交有改动的行 + 未保存切换要确认；
 // 页面结构 = 比赛列表卡（近 50 场）+ 行内按钮在该行下方展开的内嵌面板（不弹窗、不跳页）。
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   type MatchEntryInput,
@@ -945,21 +946,26 @@ function EntryPanel({
       {activeRows.length === 0 && <EmptyState>该队侧没有已建档球员，不能录入。</EmptyState>}
       {narrow && (
         /* v6.21.0 汇总条（≤760 才渲染）：fixed 常驻视口底，落在拇指区（面板在 .table-wrap 滚动容器内，
-           sticky 贴不到视口——e2e ⑭ 实测裁决，见 spec §0-2）；
+           sticky 贴不到视口——e2e ⑭ 实测裁决，见 spec §0-2）。
+           portal 到 body：≤760 时 .table-wrap 升格 container-type:inline-size（评审 P1-1 面板出宽度
+           约束的前提），其布局包容含块会让面板内的 fixed 后代改贴容器盒而非视口——portal 逃出包容子树。
            沿用 saveAll（只提交脏行，不合法行会提示跳过），与表头「全部保存」同一动作。 */
-        <div className="entry-sumbar">
-          <span className="badge gold">本场合计 +{fmtXp(totalXp)} XP</span>
-          <span className="muted">脏行 {dirtyCount}</span>
-          <button
-            type="button"
-            className="btn btn-sm"
-            disabled={saving !== null || !hasDirty}
-            title={hasDirty ? '只提交有改动的行' : '当前没有改动'}
-            onClick={saveAll}
-          >
-            {saving === 'all' ? '保存中…' : '全部保存'}
-          </button>
-        </div>
+        createPortal(
+          <div className="entry-sumbar">
+            <span className="badge gold">本场合计 +{fmtXp(totalXp)} XP</span>
+            <span className="muted">脏行 {dirtyCount}</span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={saving !== null || !hasDirty}
+              title={hasDirty ? '只提交有改动的行' : '当前没有改动'}
+              onClick={saveAll}
+            >
+              {saving === 'all' ? '保存中…' : '全部保存'}
+            </button>
+          </div>,
+          document.body,
+        )
       )}
     </div>
   );
