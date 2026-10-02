@@ -101,5 +101,5 @@
 
 - typecheck 三份全清；vitest 全绿（基线 67 文件 / 1194 例，v6.18.0 台账）；build 成功；e2e 全绿（基线 11/11，smoke.mjs 补窄视口用例）。
 - 桌面 DOM 零变化（`narrow=false` 不渲染卡片；例外：CA/PA/初始 CA 列字色随 §5 变化，属预期）；D1 读量零变化（零后端改动）。
-- `lensChips` 纯函数单测（新建 `tests/players-lens.test.ts`）：attr 优先 / 排序键命中 / 筛选维度补位 / 去重 / 上限 2 / 空集不渲染 / null 值。
+- `lensChips` 纯函数单测（新建 `web/src/lib/players-lens.test.ts`——与被测模块同目录：tests/ 是 node+workers-types 语义，import 用 `window` 的 web 模块会 TS2304、tsconfig.tests 加 DOM lib 又与 workers-types 的 CacheStorage 冲突）：attr 优先 / 排序键命中 / 筛选维度补位 / 去重 / 上限 2 / 空集不渲染 / null 值。
 - `attrClass` 五档边界单测：50/51、60/61、70/71、80/81 八个边界值各归对档；变异验证按最坏情况口径——按将来最可能的重构方式弄坏（退回面板旧三档阈值 50/70），确认恰是边界例变红。
