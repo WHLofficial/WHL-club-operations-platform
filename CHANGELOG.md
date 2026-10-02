@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.18.0] · 市场信息架构改版（2026-10-02）
+
+市场 nav 四项：**在售市场**（原「市场板」改名）/ **海捞**（成交动态与 CPU 捞人榜撤、改海捞区 + 激活球员）/ **市场情报**（新第四 tab，匿名可读）/ 我的。**海捞区** = 输入 ID 或名字搜索（数字点查 / 名字折叠搜索 LIMIT 8），信息条带「可捞 / 不可捞 + 原因」（批量判定与详情 seaSign 同源，一致性测试锁）。**激活球员** = 全部可激活球员（外队 normal+trainee，正式合同缺违约金的行标「缺违约金合同」置灰）+ 保留仅训练营模式；激活补齐证据上传链路（先传 QQ 通知截图拿 `proofMediaKey` 再提交——此前按钮缺该字段必 400）。**市场情报** = 传闻（系统自动派生、真真假假：种子钉 `[season, windowSeq]` 同窗稳定下窗换血，真料按事实方向分族套不确定语气、假料随机组合带不撞真实关系守卫，响应不下发真假字段）+ 已达成交易（全部 completed 单据倒序 50 条，走迁移 `0058` 的 `idx_transfers_status_time` 索引早停，≈150 行/次）。退役三端点：`/api/market/sea-signs`、`/api/market/cpu-board`、`/api/market/trainees`。**未发布**（本地完成，发布时迁移 `0058` 先 apply 生产再 push）。判级 minor。测试计划 `docs/test-plans/v6.18.0-market-ia.md`；vitest 67 文件 / 1194 例全绿（v6.17.0 基线 65/1169，净 +2 文件 / +25 例）、e2e 11/11、变异 V1–V15 全命中、code-review P0 0 / P1 2（已修）/ P2-P3 登记或小修。
+
+**Added**
+- `GET /api/market/rumors`（公开 + guard）：传闻生成器 `src/worker/rumors.ts`（seededUnit 确定性抽签；假料球员 seededUnit 随机 id 主键点查，零全表扫）。
+- `GET /api/market/deals`（公开 + guard）：全部 completed 转会单据倒序 50 条（transfer/activation/forced_auction/free_agent/rc_change/termination/match，中文标签前端 `TRANSFER_TYPE_LABEL`）。
+- `GET /api/market/sea-lookup?q=`（教练）：数字 → `firstPlayerByRef` 点查（fc_id 优先）；名字 → 双列折叠 LIKE；批量可捞判定 4 查询，stage 顺序与文案逐字对齐 `checkSeaSignEligible`（一致性用例锁跨实现相等）。
+- `GET /api/market/activatable`（教练）：替换 trainees；`mode=all|trainee` + `q` + `limit` 钳 1..100；行带 activationFee 两口径（trainee 5m / 正式按保护期倍数）、`justSigned`、`activatedThisWindow`（批量）。
+- 迁移 **`0058_transfers_status_time.sql`**（transfers 全表扫的治理索引）+ cache scope `'market'`（TTL 1h，PUBLIC_SCOPES 4→5）。
+
+**Fixed**
+- 正式合同 `release_fee` NULL/0 的球员曾让 activatable 名单整页 500（`activationFee` 对非正数抛 RangeError 未捕获）→ 行级费用 null + 前端「缺违约金合同」置灰 + 提交链同口径 409（对齐 bypass.ts 既有文案）。
+- 激活按钮链路断裂：MarketFreePage 只发 `playerId` 而后端强制 `proofMediaKey`（证据制）⇒ 必 400——补齐截图上传→提交流程（复用 SideOps 的 `apiUpload` 通道）。
+- rumors 假料球员查询 `p.club_id` 未别名成 `clubId` ⇒ 「不指向现效力队」守卫因键名不匹配从未生效（被旧池序的抽签运气掩盖，`ORDER BY p.id` 落地后暴露）——别名修复。
+
 ## [v6.17.0] · 海捞情报台（2026-10-01，2026-10-02 上线 · Version `e500cbd9-…`）
 
 市场「海捞」tab 从自由球员名单改版为**教练决策情报页**。三段：**成交动态**（全服已完成海捞倒序 30 条：球员+CA / 原东家→捞入队 / 新违约金 / 海捞费 / 窗，本窗行高亮）、**CPU 捞人榜**（CPU 队可捞名单 CA 降序，行内违约金输入实时试算 30% 海捞费，点击进球员页）、**训练营激活原样保留**。球员详情新增 `seaSign`（资格判定与 `createFreeAgent` 守卫链同源：窗口 / 归属 / 状态 / 本窗禁签 / 在途单据，不可签原因原文下发）与 `seaComps`（成交定价锚：现值 CA±5 内最近 ≤5 笔同档成交，无同类回落全局最近 3 笔；仅判定 ok 时计算）。禁签按用户裁决不做内容展示（「这个窗签不了，对经理的意义有限」；CPU 榜天然不含禁签球员）。零迁移、零生产写。**已上线**（2026-10-02 发布：零迁移直接 push `b9ecda1..376ad12` 触发 CF 自动部署，生产 Version `e500cbd9-3da8-4b3e-92ef-8cba9cff1671` @2026-10-01T16:15:38Z；上线回读全过——基础端点 200、两新端点匿名 401、free-agents 404、公开详情出 `seaSign`/`seaComps` 新字段、线上资产与本地逐字节一致）。判级 minor。测试计划 `docs/test-plans/v6.17.0-sea-sign-intel.md`（30 TC = P0 19 / P1 9 / P2 2，8 变异）；vitest 65 文件 / 1169 例全绿（v6.16.0 基线 64/1140，净 +1 文件 / +29 例）、e2e 11/11、code-review P0 0 / P1 1（公开详情面白算参照，一行修）已修、P2/P3 登记（见 ROADMAP v6.17.0 节）。
