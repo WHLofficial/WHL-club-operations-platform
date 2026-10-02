@@ -363,7 +363,7 @@ function DetailSection({
         <p className="muted">还没有出价记录。第一口价就是挂牌价起。</p>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="table-sticky-2">
             <thead>
               <tr>
                 <th>出价方</th>

@@ -87,7 +87,7 @@ function DealsSection() {
         <p className="hint">还没有已达成交易。成交、续约、解约、海捞签入都会记在这里。</p>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="table-sticky-2">
             <thead>
               <tr>
                 <th>完成时间</th>

@@ -392,7 +392,7 @@ export default function ClubDetail() {
           ) : (
             <>
               <div className="table-wrap">
-                <table>
+                <table className="table-sticky-2">
                   <thead>
                     <tr>
                       <th>编号</th>
