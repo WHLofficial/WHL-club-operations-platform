@@ -717,27 +717,6 @@ tbody tr:hover td {
     overflow-x: auto;
     padding-bottom: 2px;
     scrollbar-width: none;
-    /* v6.20.0：横滑页签此前没有任何滚动提示，右边界还有没有页面用户看不见。
-       渐隐由 TopBar 按滚动位置贴类（can-left / can-right）：只有「那一侧确实还有没露出来的
-       页签」时才渐隐，滚到头的一侧提示自己消失。mask 只做 paint：不占位、不挡点击
-       （伪元素方案要另处理 pointer-events 与溢出裁剪）。只渐隐最外侧 16px，页签文字仍完整可读。 */
-  }
-
-  .nav-links.can-left.can-right {
-    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
-    mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
-  }
-
-  /* 已滚到最左：右侧还有没露出来的页签 */
-  .nav-links.can-right:not(.can-left) {
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
-    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
-  }
-
-  /* 已滚到最右：左侧还有没露出来的页签 */
-  .nav-links.can-left:not(.can-right) {
-    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
-    mask-image: linear-gradient(to right, transparent 0, #000 16px);
   }
 
   .nav-tab {
@@ -3839,5 +3818,238 @@ th.num .th-sort {
   }
   table.coach-sticky tbody tr:hover td:nth-child(-n + 2) {
     background: #f7f0e0;
+  }
+}
+
+/* ============================================================================
+   v6.22.0 窄屏整治第三批（球员公开页事件卡 + 参考型宽表粘列）。新块集中在本段末尾，桌面零变化：
+   ① 球员卷宗单列 ≤900（.dossier 由 280px 1fr 塌成单列）
+   ② 卷宗页签横滑 ≤760（只命中 .dossier-tabs，不动全局 .seg）
+   ③ 事件卡片流 ≤760（Player.tsx 转会/成长两表 narrow 分支，与桌面表格 DOM 互斥）
+   ④ 参考型宽表粘前两列 ≤760（.table-sticky-2：市场情报成交表 / 出价历史 / 阵容名单）
+   ⑤ Toast 让位（点击穿透 + 成长录入汇总条在场时上抬）
+   ============================================================================ */
+
+/* ---- ① 球员卷宗单列（v6.22.0）---------------------------------------------
+   ≤900 卷宗从「左球员卡 280px + 右页签区」塌成单列（900 是既有档位，不是新断点）。
+   >900（含 1280 桌面）仍是 280px 1fr，零变化。原 ≤640 补充块里的 .dossier 单列规则保留不动：
+   那个块还带着 .club-head-numbers / .inline-form / .code-display 三条，不能整块改断点。 */
+@media (max-width: 900px) {
+  .dossier {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- ② 卷宗页签横滑（v6.22.0）---------------------------------------------
+   ≤760 四个页签并排会挤出视口：整条 .dossier-tabs 改成横向滚动（子项不收缩 + 细滚动条）。
+   只命中 .dossier-tabs，页面里其它 .seg（筛选项等）保持原样。 */
+@media (max-width: 760px) {
+  .dossier-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    scrollbar-width: thin;
+  }
+  .dossier-tabs > * {
+    flex: 0 0 auto;
+  }
+  .dossier-tabs::-webkit-scrollbar {
+    height: 6px;
+  }
+}
+
+/* ---- ③ 事件卡片流（v6.22.0）-----------------------------------------------
+   Player.tsx 的转会记录表与成长事件表 ≤760 换成 .event-cards 卡片流（useMediaQuery 分支，
+   两端 DOM 互斥）；视觉语言照 v6.19.0 铭牌卡 .lib-card / v6.21.0 .entry-card：#fffdf7 底 /
+   #e6dcc8 描边 / 12px 圆角 / 淡投影。类名契约：event-cards / event-card / event-card-head /
+   event-card-grid / event-card-foot（字段层 event-field / event-flabel / event-fval；
+   转会卡「转出 → 转入」整行占宽用 event-field-wide；成长卡事件名用 event-card-title）。 */
+@media (max-width: 760px) {
+  .event-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .event-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    background: #fffdf7;
+    border: 1px solid #e6dcc8;
+    border-radius: 12px;
+    box-shadow: 0 1px 5px rgba(43, 29, 18, 0.1);
+    color: #2b1d12;
+  }
+  .event-card:focus-visible {
+    outline: 2px solid var(--terracotta);
+    outline-offset: 2px;
+  }
+  .event-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+  /* 成长卡右上事件名（milestone 带「进+攻 N」后缀）：可折行，不撑破卡宽 */
+  .event-card-title {
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .event-card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+  }
+  .event-card-grid > * {
+    min-width: 0;
+  }
+  /* 字段层：标签小字 + 值（值走桌面表格同口径的 .mono，由 TSX 带类） */
+  .event-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .event-field-wide {
+    grid-column: 1 / -1;
+  }
+  .event-flabel {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .event-fval {
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  /* 卡脚：XP 金徽标右对齐（与 v6.21.0 .entry-card-foot 的「本场 +X XP」同款） */
+  .event-card-foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+/* ≤380：字段网格回落单列（375 上两列时「转出 → 转入」会贴着卡缘） */
+@media (max-width: 380px) {
+  .event-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- ④ 参考型宽表粘前两列（v6.22.0）---------------------------------------
+   ≤760 起，挂 table-sticky-2 的三张参考型宽表（市场情报「已达成交易」、在售市场「出价历史」、
+   俱乐部页「阵容名单」）横向滚动时前两列钉在左缘。规则内容照抄 v6.21.0 的 .coach-sticky ≤640 块
+   （coach-sticky 自己的块保持 640 不动），只换类名与断点。
+   列宽：第 1 列钉在 --stky-c1（默认 6em ≈ 84px，td 14px 口径），第 2 列 left 用同一个变量，
+   所以第 1 列必须三态定宽：内容再宽也只折行（overflow 兜底 ellipsis），不许被 min-content 撑开，
+   否则第 2 列与第 1 列错位。逐表覆盖按实测首列内容宽：
+   ·「已达成交易」首列是 16 字时间戳（mono 10 字 ≈ 84px + 左右内边距 24px ≈ 7.7em）→ 8em，
+     让它折成「2026-10-02 / 12:34」两行，而不是贴着连字符断成三行；
+   ·「出价历史」首列是俱乐部名（链接）：9em ≈ 126px，7 个汉字一行；
+   ·「阵容名单」首列是号码（uid 去掉 fc 前缀，最多 6 位数字 ≈ 50px + 24px ≈ 5.3em）→ 用默认 6em。
+   三张表都没有现成容器类做祖先选择器，逐表覆盖用 :has() 按结构认表（全站已有先例）。 */
+@media (max-width: 760px) {
+  table.table-sticky-2 {
+    --stky-c1: 6em;
+  }
+  /* 第 1 列：钉最左 + 三态定宽；显式底色防透底 */
+  table.table-sticky-2 th:nth-child(1),
+  table.table-sticky-2 td:nth-child(1) {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: var(--stky-c1);
+    min-width: var(--stky-c1);
+    max-width: var(--stky-c1);
+    background: var(--card);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* 第 2 列：紧随第 1 列；右缘分割线 + 细阴影标出冻结边 */
+  table.table-sticky-2 th:nth-child(2),
+  table.table-sticky-2 td:nth-child(2) {
+    position: sticky;
+    left: var(--stky-c1);
+    z-index: 2;
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    box-shadow: 2px 0 6px rgba(43, 29, 18, 0.12);
+  }
+  /* 表头粘性格：底色与全局 th 一致，层级高于表体粘性格 */
+  table.table-sticky-2 thead th:nth-child(-n + 2) {
+    z-index: 3;
+    background: #f3ead9;
+  }
+  /* 行底色三态透上来（权重压过上面的默认底色），顺序 trainee → flagged → hover，与全站一致 */
+  .table-sticky-2 tr.row-trainee td:nth-child(-n + 2) {
+    background: #f6effa;
+  }
+  .table-sticky-2 tr.row-flagged td:nth-child(-n + 2) {
+    background: #fbe9e7;
+  }
+  table.table-sticky-2 tbody tr:hover td:nth-child(-n + 2) {
+    background: #f7f0e0;
+  }
+  /* 已达成交易：首列 16 字时间戳（第 3 列是球员档案链接，据它认表） */
+  table.table-sticky-2:has(tbody td:nth-child(3) a) {
+    --stky-c1: 8em;
+  }
+  /* 出价历史：首列俱乐部名链接（第 1 列带链接，据它认表） */
+  table.table-sticky-2:has(tbody td:nth-child(1) a) {
+    --stky-c1: 9em;
+  }
+}
+
+/* ---- ⑤ Toast 让位（v6.22.0）-----------------------------------------------
+   toast 只是反馈，不该截点击：整条 pointer-events:none（useToast 只渲染单节点、没有容器，
+   也没有可交互子元素，所以不需要「容器 none + 单条 auto」那套）。
+   另外成长录入页 ≤760 有常驻视口底的汇总条 .entry-sumbar（fixed、z-index 15、约 76px 高），
+   toast（z-index 100、bottom 28px）会盖住「全部保存」——汇总条走 createPortal 挂在 body 下，
+   用 body:has(.entry-sumbar) 选到同页 toast 上抬 88px（76px 汇总条 + 12px 间隙），
+   桌面与其它页面不受影响。 */
+.toast {
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  body:has(.entry-sumbar) .toast {
+    bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---- ⑥ 顶栏页签渐隐提档 ≤1024（v6.22.0）------------------------------------
+   v6.20.0 的渐隐 mask 原在 ≤640 块；但横滑容器（.nav-links overflow-x:auto +
+   contain:inline-size）本就是全局基础规则，641–1024 的中屏页签同样会溢出、同样需要
+   「还有页签没露出来」的滚动提示。故把 mask 三条从 640 块整体挪入本块（挪走而非复制，
+   勿两处并存）。TopBar 按滚动位置贴 can-left / can-right：只有那一侧确实还有没露出来的
+   页签时才渐隐，滚到头的一侧提示自己消失。mask 只做 paint：不占位、不挡点击。
+   只渐隐最外侧 16px，页签文字仍完整可读。 */
+@media (max-width: 1024px) {
+  .nav-links.can-left.can-right {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  }
+
+  /* 已滚到最左：右侧还有没露出来的页签 */
+  .nav-links.can-right:not(.can-left) {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+  }
+
+  /* 已滚到最右：左侧还有没露出来的页签 */
+  .nav-links.can-left:not(.can-right) {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px);
   }
 }

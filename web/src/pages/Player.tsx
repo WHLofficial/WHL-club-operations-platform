@@ -48,6 +48,7 @@ import { useToast } from '../lib/toast.tsx';
 import { qk, useOffersReceivedPending, useSeasonsCurrent } from '../lib/queries.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { playerPath } from '../lib/player-link.ts';
+import { useMediaQuery } from '../lib/use-media.ts';
 import { SideOps } from './player/SideOps.tsx';
 
 type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers';
@@ -58,6 +59,9 @@ const TAB_LABEL: Record<PlayerTab, string> = {
   growth: '成长',
   transfers: '转会记录',
 };
+
+// 窄屏卡片断点（v6.22.0）：≤760 转会/成长两张事件表改卡片流，与桌面表格 DOM 互斥
+const PLAYER_CARDS_QUERY = '(max-width: 760px)';
 
 
 function starText(n: number): string {
@@ -196,6 +200,8 @@ export default function Player() {
   // 球衣号草稿（v4.0.0）：null = 还没动过，显示服务端的值；改过之后是本地输入
   const [numberDraft, setNumberDraft] = useState<string | null>(null);
   const [numberBusy, setNumberBusy] = useState(false);
+  // 窄屏（≤760）走卡片流（v6.22.0）：只决定渲染分支，数据与状态完全复用
+  const narrow = useMediaQuery(PLAYER_CARDS_QUERY);
 
   const dataQuery = useQuery({
     queryKey: ['player', id ?? ''],
@@ -627,6 +633,40 @@ export default function Player() {
                 <div className="empty-state">
                   <p className="muted">卷宗里还没有转会记录。成交、解约、海捞签入之后，单据都会收录在这里。</p>
                 </div>
+              ) : narrow ? (
+                /* v6.22.0 窄屏卡片流（≤760）：与下方桌面表格 DOM 互斥；字段语义（时间 slice(0,10)、
+                   类型标签、转出/转入缺省自由身、费用含附加费、S{season} 第 {windowSeq} 窗）逐条一致 */
+                <div className="event-cards">
+                  {transfers.map((t) => (
+                    <div className="event-card" key={t.id}>
+                      <div className="event-card-head">
+                        <span className="mono">{t.completedAt === null ? '—' : t.completedAt.slice(0, 10)}</span>
+                        <span className="badge gray">{TRANSFER_TYPE_LABEL[t.type] ?? t.type}</span>
+                      </div>
+                      <div className="event-card-grid">
+                        <div className="event-field event-field-wide">
+                          <span className="event-flabel">转出 → 转入</span>
+                          <span className="event-fval">
+                            {t.fromClubName ?? '自由身'} → {t.toClubName ?? '自由身'}
+                          </span>
+                        </div>
+                        <div className="event-field">
+                          <span className="event-flabel">费用</span>
+                          <span className="event-fval mono">
+                            {t.fee === null ? '—' : `${t.fee.toFixed(2)} m`}
+                            {t.extraFee !== null && t.extraFee > 0 ? ` +${t.extraFee.toFixed(2)}` : ''}
+                          </span>
+                        </div>
+                        <div className="event-field">
+                          <span className="event-flabel">赛季</span>
+                          <span className="event-fval mono">
+                            {t.season === null ? '—' : `S${t.season}${t.windowSeq ? ` 第 ${t.windowSeq} 窗` : ''}`}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div className="table-wrap">
                   <table className="transfer-table">
@@ -837,6 +877,8 @@ function GrowthBlock({
   onToggleChinaPick: (psid: number, limit: number) => void;
   onGrantChina: (left: number) => void;
 }) {
+  // 窄屏（≤760）事件表走卡片流（v6.22.0），与桌面表格 DOM 互斥
+  const narrow = useMediaQuery(PLAYER_CARDS_QUERY);
   const p = growth.player;
   const xpInLevel = Math.floor(p.growthXp) % p.xpPerLevel;
   const pct = Math.min(100, Math.round((xpInLevel / p.xpPerLevel) * 100));
@@ -959,6 +1001,36 @@ function GrowthBlock({
         </div>
       )}
       {growth.events.length > 0 ? (
+        narrow ? (
+          /* v6.22.0 窄屏卡片流（≤760）：事件名进卡头右侧（milestone 附「进+攻」后缀），数值/来源进
+             两列网格，XP 用金徽标收进卡脚；与下方桌面表格的字段逐条一致 */
+          <div className="event-cards">
+            {growth.events.map((e) => (
+              <div className="event-card" key={e.id}>
+                <div className="event-card-head">
+                  <span className="mono">{e.createdAt.slice(0, 10)}</span>
+                  <span className="event-card-title">
+                    {GROWTH_EVENT_LABEL[e.eventType] ?? e.eventType}
+                    {e.eventType === 'milestone' ? `（进+攻 ${e.value}）` : ''}
+                  </span>
+                </div>
+                <div className="event-card-grid">
+                  <div className="event-field">
+                    <span className="event-flabel">数值</span>
+                    <span className="event-fval mono">{e.value}</span>
+                  </div>
+                  <div className="event-field">
+                    <span className="event-flabel">来源</span>
+                    <span className="event-fval">{e.source === 'manual' ? '管理组补录' : '赛果同步'}</span>
+                  </div>
+                </div>
+                <div className="event-card-foot">
+                  <span className="badge gold">+{e.xp} XP</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="table-wrap">
           <table>
             <thead>
@@ -986,6 +1058,8 @@ function GrowthBlock({
             </tbody>
           </table>
         </div>
+        )
+        /* v6.22.0 桌面（>760）用表格，上面的窄屏卡片流与这里 DOM 互斥 */
       ) : (
         <p className="muted">还没有成长记录。出场比赛、赛果确认之后会自动入账。</p>
       )}

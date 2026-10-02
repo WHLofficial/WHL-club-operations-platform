@@ -29,8 +29,9 @@ export default function TopBar() {
     }
   }, [pathname]);
 
-  // v6.20.0：窄屏页签行的两侧渐隐提示只在「那一侧确实还有没露出来的页签」时出现（样式表 ≤640 块
-  // 用 .can-left / .can-right 挂 mask）。滚到头的提示得消失，否则一条永久渐隐会让首尾页签看起来是灰的。
+  // v6.20.0：窄屏页签行的两侧渐隐提示只在「那一侧确实还有没露出来的页签」时出现（样式表
+  // v6.22.0 起提档到 ≤1024 块，用 .can-left / .can-right 挂 mask）。滚到头的提示得消失，
+  // 否则一条永久渐隐会让首尾页签看起来是灰的。
   // 1px 容差：scrollLeft 是浮点数，整除到边界时可能留 0.5 的残量；宽屏没有横向溢出，两个类都不贴。
   const [navEdges, setNavEdges] = useState({ left: false, right: false });
   useEffect(() => {
