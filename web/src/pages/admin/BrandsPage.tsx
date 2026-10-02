@@ -205,13 +205,14 @@ export default function BrandsPage() {
                     <tr key={row.id}>
                       <td>{row.brand}</td>
                       <td>
-                        <input className="input input-sm" style={{ width: 96 }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
+                        {/* v6.20.0 窄屏：本页输入/下拉一律「最宽 N，窄屏按容器收缩」，避免 375px 下把表格撑宽 */}
+                        <input className="input input-sm" style={{ width: 'min(96px, 100%)' }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
                       </td>
                       <td>
-                        <input className="input input-sm mono" style={{ width: 72 }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
+                        <input className="input input-sm mono" style={{ width: 'min(72px, 100%)' }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
-                        <select className="input input-sm" style={{ width: 84 }} value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
+                        <select className="input input-sm" style={{ width: 'min(84px, 100%)' }} value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
                           {TIERS.map((t) => (
                             <option key={t} value={t}>
                               {t}
@@ -245,9 +246,9 @@ export default function BrandsPage() {
       <section className="card">
         <h3>新增自定义品牌</h3>
         <p>
-          <input className="input input-sm" style={{ width: 160 }} placeholder="品牌名（1-20 字）" value={newName} maxLength={20} onChange={(e) => setNewName(e.target.value)} />
-          <input className="input input-sm" style={{ width: 120, marginLeft: 8 }} placeholder="行业（如 科技）" value={newIndustry} maxLength={10} onChange={(e) => setNewIndustry(e.target.value)} />
-          <input className="input input-sm mono" style={{ width: 80, marginLeft: 8 }} placeholder="热度" value={newHeat} onChange={(e) => setNewHeat(e.target.value)} />
+          <input className="input input-sm" style={{ width: 'min(160px, 100%)' }} placeholder="品牌名（1-20 字）" value={newName} maxLength={20} onChange={(e) => setNewName(e.target.value)} />
+          <input className="input input-sm" style={{ width: 'min(120px, 100%)', marginLeft: 8 }} placeholder="行业（如 科技）" value={newIndustry} maxLength={10} onChange={(e) => setNewIndustry(e.target.value)} />
+          <input className="input input-sm mono" style={{ width: 'min(80px, 100%)', marginLeft: 8 }} placeholder="热度" value={newHeat} onChange={(e) => setNewHeat(e.target.value)} />
           <button className="btn btn-sm" style={{ marginLeft: 8 }} type="button" disabled={busy} onClick={() => void addBrand()}>
             新增
           </button>

@@ -323,9 +323,10 @@ function FacilityOpsCard() {
 
       <p>
         <b>扩建</b>（当前 {info.tier.capacity.toLocaleString()} 座 / 档位上限 {info.tier.maxSeats?.toLocaleString() ?? '—'}）：
+        {/* v6.20.0 窄屏：座位数输入最宽 90px，窄屏按容器收缩 */}
         <input
           className="mono"
-          style={{ width: 90, marginLeft: 6 }}
+          style={{ width: 'min(90px, 100%)', marginLeft: 6 }}
           inputMode="numeric"
           value={seats}
           onChange={(e) => setSeats(e.target.value.replace(/[^\d]/g, ''))}

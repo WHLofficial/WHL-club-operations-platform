@@ -67,8 +67,9 @@ function OverviewCountsSection() {
         <p className="muted">正在点数…</p>
       ) : (
         <div className="inline-form" style={{ alignItems: 'stretch' }}>
+          {/* v6.20.0 窄屏：卡片最宽 9rem，容器比它还窄时收缩（.inline-form 本就会换行兜底） */}
           {COUNT_CARDS.map((c) => (
-            <div key={c.key} className="field" style={{ minWidth: '9rem' }}>
+            <div key={c.key} className="field" style={{ minWidth: 'min(9rem, 100%)' }}>
               <span>{c.label}</span>
               {c.to ? (
                 <Link to={c.to} className="ledger-balance-num mono" style={{ fontSize: '1.5rem' }}>

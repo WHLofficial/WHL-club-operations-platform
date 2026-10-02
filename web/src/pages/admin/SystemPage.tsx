@@ -77,6 +77,7 @@ function ConfigSection({ editable }: { editable: boolean }) {
                     {r.key} {r.secret && <span className="badge gray">涉密</span>}
                   </td>
                   <td className="mono">
+                    {/* v6.20.0 窄屏：改配置的输入最宽 18rem，窄屏按单元格收缩，避免把表格撑得更宽 */}
                     {editingKey === r.key ? (
                       <input
                         className="field mono"
@@ -88,7 +89,7 @@ function ConfigSection({ editable }: { editable: boolean }) {
                           if (e.key === 'Enter') void save(r);
                           if (e.key === 'Escape') setEditingKey(null);
                         }}
-                        style={{ minWidth: '18rem' }}
+                        style={{ minWidth: 'min(18rem, 100%)' }}
                       />
                     ) : (
                       (r.value ?? '（默认）')

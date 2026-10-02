@@ -259,11 +259,12 @@ function ReviewsSection() {
                             onChange={(e) => setNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
                           />
                           {(r.transfer.type === 'transfer' || r.transfer.type === 'activation') && (
+                            // v6.20.0 窄屏：裁定价输入最宽 7rem，窄屏按容器收缩，不撑破 .inline-form
                             <input
                               className="field mono"
                               type="number"
                               step="0.01"
-                              style={{ width: '7rem' }}
+                              style={{ width: 'min(7rem, 100%)' }}
                               placeholder={`裁定价 ${r.transfer.fee ?? '—'}`}
                               value={feeDrafts[r.id] ?? ''}
                               onChange={(e) => setFeeDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
