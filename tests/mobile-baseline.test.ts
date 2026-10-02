@@ -494,9 +494,12 @@ describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-
     // 按块头注释锚定（v6.22.0 后文件尾部又追加了新的 ≤760 块，lastIndexOf 会锚错块）
     const anchor = css.indexOf('/* ---- ③ 导入页表单重排（v6.21.0）');
     expect(anchor, 'styles.css 找不到 ③ imports 块头注释——块被改名/挪动，锚点需同步').toBeGreaterThan(-1);
-    const tail = css.slice(anchor);
-    expect(tail, '≤760 块缺 .admin-section label.field 单列全宽规则').toMatch(/\.admin-section label\.field\s*\{[^}]*width:\s*100%/);
-    expect(tail, '≤760 块缺 .admin-section label.field .seg 折行规则').toMatch(/\.admin-section label\.field \.seg\s*\{[^}]*flex-wrap:\s*wrap/);
+    // P2-3：tail 切到本块为止（原来切到 EOF，规则被挪进后面的其他媒体块时仍然绿）
+    const start = css.indexOf('@media', anchor);
+    const next = css.indexOf('@media', start + 1);
+    const block = css.slice(start, next === -1 ? undefined : next);
+    expect(block, '≤760 块缺 .admin-section label.field 单列全宽规则').toMatch(/\.admin-section label\.field\s*\{[^}]*width:\s*100%/);
+    expect(block, '≤760 块缺 .admin-section label.field .seg 折行规则').toMatch(/\.admin-section label\.field \.seg\s*\{[^}]*flex-wrap:\s*wrap/);
   });
 });
 
@@ -558,6 +561,12 @@ describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-publi
     const nextMedia = after.indexOf('@media');
     const block = nextMedia === -1 ? after : after.slice(0, nextMedia);
     expect(block, '≤1024 块缺 .nav-links.can-left 渐隐 mask 规则').toMatch(/\.nav-links\.can-left/);
+    // 计划 TC-TOP-01 字面还要求「可横滑」：横滑能力（.nav-links overflow-x:auto + min-width:0）
+    // 是全局基础规则，无人钉住时删掉它 mask 无从谈起、全套仍绿（评审 P3 补齐）
+    const ovx = declarations(rules(), 'nav-links', 'overflow-x');
+    expect(ovx.some((d) => d.value === 'auto'), `.nav-links 应有全局 overflow-x:auto（横滑容器能力），实见 ${JSON.stringify(ovx)}`).toBe(true);
+    const minw = declarations(rules(), 'nav-links', 'min-width');
+    expect(minw.some((d) => d.value === '0' || d.value === '0px'), `.nav-links 应有 min-width:0（允许收缩进顶栏），实见 ${JSON.stringify(minw)}`).toBe(true);
     // 挪走而非复制：.nav-links.can-left 的每一处出现都落在 1024 块内（两块规则漂移比缺失更难查）
     const idxs = [...css.matchAll(/\.nav-links\.can-left/g)].map((m) => m.index ?? 0);
     expect(idxs.length, 'styles.css 找不到 .nav-links.can-left 渐隐规则').toBeGreaterThan(0);
@@ -576,12 +585,40 @@ describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-publi
 
   it('公开阅读 · dossier 单列断点 640→900：900 块单列规则在场（TC-PLR）', () => {
     const css = read(STYLES_CSS);
-    // lastIndexOf：文件里 900 块有多个（v3.1.0 抽屉 / v6.19 图书馆域在前），dossier 块是最新追加的最后一个
-    const i900 = css.lastIndexOf('(max-width: 900px)');
-    expect(i900, 'styles.css 缺 (max-width: 900px) 块（dossier 单列提档）').toBeGreaterThan(-1);
-    const after = css.slice(i900 + '(max-width: 900px)'.length);
-    const nextMedia = after.indexOf('@media');
-    const block = nextMedia === -1 ? after : after.slice(0, nextMedia);
+    // 块头注释锚（P2-3：lastIndexOf 在文件尾部追加新 900 块时会锚错块，与 TC-IMP-03 同款隐患）
+    const anchor = css.indexOf('/* ---- ① 球员卷宗单列（v6.22.0）');
+    expect(anchor, 'styles.css 找不到 ① dossier 块头注释——块被改名/挪动，锚点需同步').toBeGreaterThan(-1);
+    const start = css.indexOf('@media', anchor);
+    const next = css.indexOf('@media', start + 1);
+    const block = css.slice(start, next === -1 ? undefined : next);
     expect(block, '≤900 块缺 .dossier 单列 grid 规则').toMatch(/\.dossier\s*\{[^}]*grid-template-columns:[^;}]*1fr/);
+  });
+
+  it('公开阅读 · 媒体块归属（P1-1/P2-1）：② 页签横滑 / ③ 事件卡 / ④ sticky-2 规则必须钉在各自的 ≤760 块内', () => {
+    // V4 类变异（把规则从 ≤760 挪进 ≤640 等别的块）对 375 几何断言免疫（641–760 区间「DOM 有、
+    // 样式不在」仍全绿）、对全局规则扫描也免疫（只查「存在」不查「在哪个块」）。锚 = v6.22.0 段头
+    // 注释（styles.css 尾部新块全部带「---- 」注释头）；块体 = 首个 @media 起到下一个 @media。
+    const css = read(STYLES_CSS);
+    const blockOf = (header: string, label: string) => {
+      const at = css.indexOf(header);
+      expect(at, `styles.css 找不到 ${label} 块头注释「${header}」——块被改名/挪动，锚点需同步`).toBeGreaterThan(-1);
+      const start = css.indexOf('@media', at);
+      expect(start, `${label} 块头注释后找不到 @media`).toBeGreaterThan(at);
+      const next = css.indexOf('@media', start + 1);
+      return css.slice(start, next === -1 ? undefined : next);
+    };
+    // ② 页签横滑：overflow-x:auto + flex-wrap:nowrap——删任一条页签会折行，375 文档溢出断言察觉不到
+    const b2 = blockOf('/* ---- ② 卷宗页签横滑（v6.22.0）', '②');
+    expect(b2, '② ≤760 块缺 .dossier-tabs overflow-x:auto（页签横滑规则被挪块/删除）').toMatch(/\.dossier-tabs\s*\{[^}]*overflow-x:\s*auto/);
+    expect(b2, '② ≤760 块缺 .dossier-tabs flex-wrap:nowrap（页签横滑规则被挪块/删除）').toMatch(/\.dossier-tabs\s*\{[^}]*flex-wrap:\s*nowrap/);
+    // ③ 事件卡：五类名规则都必须落在 ③ 块内
+    const b3 = blockOf('/* ---- ③ 事件卡片流（v6.22.0）', '③');
+    for (const cls of ['event-cards', 'event-card', 'event-card-head', 'event-card-grid', 'event-card-foot']) {
+      expect(b3, `③ ≤760 块内找不到 .${cls} 规则（媒体块归属被挪走）`).toMatch(token(cls));
+    }
+    // ④ sticky-2：粘性规则 + 列宽变量都必须落在 ④ 块内
+    const b4 = blockOf('/* ---- ④ 参考型宽表粘前两列（v6.22.0）', '④');
+    expect(b4, '④ ≤760 块内找不到 table-sticky-2 粘性规则（媒体块归属被挪走）').toMatch(/table\.table-sticky-2 th:nth-child\(1\)[^}]*position:\s*sticky/);
+    expect(b4, '④ ≤760 块内找不到 --stky-c1 列宽变量（媒体块归属被挪走）').toContain('--stky-c1');
   });
 });
