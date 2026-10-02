@@ -3464,3 +3464,375 @@ th.num .th-sort {
 .lib-sortrow-dir {
   min-width: 42px;
 }
+
+/* ============================================================================
+   v6.21.0 窄屏整治第二批（编辑面板与教练端重排）。新块全部集中在本段末尾，桌面零变化：
+   ① entry 卡片流 ≤760（GrowthEntryPage.tsx narrow 分支，与桌面表格 DOM 互斥）
+   ② 品牌池卡片流 ≤760（BrandsPage.tsx narrow 分支，类名按契约由 subagent B 落地 TSX）
+   ③ 导入页表单重排 ≤760（ImportsPage.tsx，纯 CSS）
+   ④ 教练端粘性前两列 ≤640（CoachPanel.tsx 表格 opt-in .coach-sticky）
+   ============================================================================ */
+
+/* ---- ① 成长录入卡片流（v6.21.0）--------------------------------------------
+   ≤760 渲染 .entry-cards 卡片流，桌面渲染原 .entry-table（useMediaQuery 分支，两端 DOM 互斥）；
+   视觉语言照 v6.19.0 铭牌卡 .lib-card：#fffdf7 底 / #e6dcc8 描边 / 12px 圆角 / 淡投影。
+   类名是 e2e 契约，拼写不可改：entry-cards / entry-card / entry-card-head / entry-card-grid /
+   entry-card-foot / entry-sumbar。触控：字段格 ≥40px（label 整格可点），数值输入 ≥36px。 */
+@media (max-width: 760px) {
+  .entry-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .entry-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    background: #fffdf7;
+    border: 1px solid #e6dcc8;
+    border-radius: 12px;
+    box-shadow: 0 1px 5px rgba(43, 29, 18, 0.1);
+    color: #2b1d12;
+  }
+  /* 训练营球员整卡置灰（与桌面 .row-trainee td 同色），字段全禁用 */
+  .entry-card.row-trainee {
+    background: #f6effa;
+  }
+  /* 脏行高亮：焦橙描边 + 淡光晕（桌面表格无此态，只在卡片流出现） */
+  .entry-card.dirty {
+    border-color: var(--terracotta);
+    box-shadow: 0 0 0 2px rgba(164, 97, 44, 0.16);
+  }
+  .entry-card.dirty .entry-card-foot .btn:not(:disabled) {
+    font-weight: 700;
+  }
+  .entry-card-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .entry-card-name {
+    min-width: 0;
+    font-size: 15.5px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .entry-card-pos {
+    flex: 0 0 auto;
+    padding: 1px 9px;
+    border: 1px solid #b07a45;
+    border-radius: 999px;
+    background: #fffdf7;
+    color: #8e5426;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.5;
+  }
+  .entry-card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+  }
+  /* 字段格整格是 label：点哪都能操作，命中区 ≥40px */
+  .entry-card-field {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 40px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fffdf7;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  /* 已录（锁定）字段：与桌面 td.recorded 同色 */
+  .entry-card-field.recorded {
+    background: #f4f0e6;
+  }
+  .entry-card-flabel {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  /* 数值输入：视觉照抄 .entry-table input.entry-num，只把宽度改成铺满格子 */
+  .entry-card-field input.entry-num {
+    width: 100%;
+    min-height: 36px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--ink);
+    font: inherit;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+  .entry-card-field input.entry-num:focus {
+    outline: none;
+    border-color: var(--terracotta);
+  }
+  .entry-card-field input.entry-num:read-only {
+    background: transparent;
+    border-color: transparent;
+  }
+  .entry-card-field input.invalid {
+    border-color: var(--bad);
+  }
+  /* 出场 / 零封 checkbox：20px 视觉；命中区由 .entry-card-field 整格提供 */
+  .entry-card-check {
+    width: 20px;
+    height: 20px;
+    margin: 4px 0;
+  }
+  /* 自动通道条（进球 / 助攻，赛果同步已录，只读不可改） */
+  .entry-card-auto {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #faf6ec;
+    font-size: 12px;
+  }
+  .entry-card-auto .badge {
+    margin-left: auto;
+  }
+  .entry-card-auto-val {
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .entry-card-foot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .entry-card-foot .btn {
+    margin-left: auto;
+  }
+  /* 校验原因 / 保存结果：另起一行占满卡宽，不挤保存按钮 */
+  .entry-card-foot .entry-result {
+    width: 100%;
+    margin-top: 0;
+  }
+  /* 汇总条：常驻视口底的 fixed 横条（spec §0-2 实测裁决改 sticky→fixed）。
+     面板嵌在主比赛表 <td colSpan=6> 内、外层 .table-wrap{overflow-x:auto} 是滚动容器——
+     e2e ⑭ 实测 sticky 在其中毫无行程（bottom=3713 vs 视口 812），贴不到视口；fixed 才是真吸附。
+     层级：内容之上（5+），顶栏（20）/抽屉遮罩（30）之下。 */
+  .entry-sumbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 15;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    background: #fffdf7;
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    box-shadow: 0 -3px 10px rgba(43, 29, 18, 0.14);
+  }
+  .entry-sumbar .btn {
+    margin-left: auto;
+  }
+  /* 脱流补偿：汇总条不再占面板流内高度，给面板留出底垫，最后一张卡不被横条盖住 */
+  .entry-panel {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ≤380：字段网格回落单列（375 上 2 列时「夺回球权」+ 输入已到临界） */
+@media (max-width: 380px) {
+  .entry-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- ② 品牌池卡片流（v6.21.0）----------------------------------------------
+   ≤760 BrandsPage.tsx 渲染卡片流，桌面仍渲染原表格（含内联定宽，mobile-baseline 白名单不动）。
+   类名契约：brand-cards / brand-card / brand-card-grid / brand-new-form（TSX 由 subagent B 写）。
+   视觉语言同 .lib-card / .entry-card。假设：brand-card-grid 内第 1 格=行业、第 2 格=热度、
+   第 3 格=档位（select + 锁 checkbox 同排）——第 3 格跨两列；若实际顺序不同，改这里即可。 */
+@media (max-width: 760px) {
+  .brand-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .brand-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    background: #fffdf7;
+    border: 1px solid #e6dcc8;
+    border-radius: 12px;
+    box-shadow: 0 1px 5px rgba(43, 29, 18, 0.1);
+    color: #2b1d12;
+  }
+  .brand-card-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .brand-card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+  }
+  .brand-card-grid > * {
+    min-width: 0;
+  }
+  .brand-card-grid > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .brand-card-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .brand-card-grid input,
+  .brand-card-grid select {
+    width: 100%;
+    min-height: 36px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+  }
+  /* 锁品牌 checkbox：保持 20px，不铺满（flex 行内） */
+  .brand-card-grid input[type='checkbox'] {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    min-height: 0;
+  }
+  .brand-card-foot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  /* 卡脚末个按钮（保存）推到右缘；删除等在前，样式复用全局 .btn */
+  .brand-card-foot .btn:last-child {
+    margin-left: auto;
+  }
+  /* 新增品牌表单：全宽堆叠（原横排到窄屏会挤） */
+  .brand-new-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .brand-new-form .field {
+    width: 100%;
+    margin: 0;
+  }
+  .brand-new-form input,
+  .brand-new-form select {
+    width: 100%;
+    min-height: 36px;
+  }
+}
+
+/* ---- ③ 导入页表单重排（v6.21.0）--------------------------------------------
+   ImportsPage.tsx 的表单是裸 label.field：窄屏收成单列全宽、控件铺满行宽；
+   换版模式的 .seg（两枚长按钮）允许折行；若某管理页表单用了 .inline-form 横排也改单列堆叠。
+   纯 CSS，无 TSX 改动；两小表仍走 .table-wrap 横滚。 */
+@media (max-width: 760px) {
+  .admin-section label.field {
+    width: 100%;
+    margin: 12px 0;
+  }
+  .admin-section label.field input,
+  .admin-section label.field select,
+  .admin-section label.field textarea {
+    width: 100%;
+    margin-top: 6px;
+  }
+  .admin-section label.field .seg {
+    flex-wrap: wrap;
+  }
+  .admin-section .inline-form {
+    display: block;
+  }
+  .admin-section .inline-form .field {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* ---- ④ 教练端粘性前两列（v6.21.0）------------------------------------------
+   ≤640 起，CoachPanel.tsx 里 opt-in 了 class 的表（table.coach-sticky：财务「近期主场战报」、
+   花名册）横向滚动时前两列钉在左缘，滚到右边也能对上球员/窗口。
+   列宽假设：第 1 列统一用 --coach-sticky-c1（默认 4.5em ≈ 63px）——财务首列「窗口」
+   （S{season} · 窗{windowSeq}）与花名册首列「号码」（1–2 位数）折行后 min-content 都在 4.5em 内，
+   故两表共用；若某表首列出现更长的不可折行内容（内容宽 > 约 39px），该列会被 min-content 撑宽、
+   与第 2 列的 left 错位 —— 给该表覆盖变量即可：table.coach-sticky { --coach-sticky-c1: 7em; }。
+   桌面零变化：规则全部在 ≤640 媒体块内且只作用于 .coach-sticky。 */
+@media (max-width: 640px) {
+  table.coach-sticky {
+    --coach-sticky-c1: 4.5em;
+  }
+  /* 第 1 列（号码 / 窗口）：钉最左；显式底色防透底 */
+  table.coach-sticky th:nth-child(1),
+  table.coach-sticky td:nth-child(1) {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: var(--coach-sticky-c1);
+    min-width: var(--coach-sticky-c1);
+    background: var(--card);
+  }
+  /* 第 2 列（球员 / 对手）：紧随第 1 列；右缘分割线 + 细阴影标出冻结边 */
+  table.coach-sticky th:nth-child(2),
+  table.coach-sticky td:nth-child(2) {
+    position: sticky;
+    left: var(--coach-sticky-c1);
+    z-index: 2;
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    box-shadow: 2px 0 6px rgba(43, 29, 18, 0.12);
+  }
+  /* 表头粘性格：底色与全局 th 一致，层级高于表体粘性格 */
+  table.coach-sticky thead th:nth-child(-n + 2) {
+    z-index: 3;
+    background: #f3ead9;
+  }
+  /* 行底色三态透上来（权重压过上面的默认底色）；顺序 trainee → flagged → hover，与全站一致 */
+  .coach-sticky tr.row-trainee td:nth-child(-n + 2) {
+    background: #f6effa;
+  }
+  .coach-sticky tr.row-flagged td:nth-child(-n + 2) {
+    background: #fbe9e7;
+  }
+  table.coach-sticky tbody tr:hover td:nth-child(-n + 2) {
+    background: #f7f0e0;
+  }
+}

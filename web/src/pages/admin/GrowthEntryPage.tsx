@@ -18,10 +18,14 @@ import {
 } from '../../lib/adminQueries.ts';
 import { entryXp, type GrowthEntryDraft } from '../../lib/growth-xp.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { useMediaQuery } from '../../lib/use-media.ts';
 import EmptyState from '../../components/EmptyState.tsx';
 
 type Side = 'home' | 'away';
 type Mode = 'edit' | 'view';
+
+/** v6.21.0 窄屏卡片流断点：与 styles.css 管理端 ≤760 媒体块同档，也与 AdminLayout 抽屉断点一致 */
+const ENTRY_CARDS_QUERY = '(max-width: 760px)';
 
 interface FieldNum {
   value: string;
@@ -423,6 +427,8 @@ function EntryPanel({
   const [saving, setSaving] = useState<number | 'all' | null>(null);
   const [lastSummary, setLastSummary] = useState<{ written: number; duplicates: number; totalXp: number } | null>(null);
   const builtRef = useRef<string | null>(null);
+  /** 窄屏（≤760）改渲染卡片流；桌面仍渲染原表格（两端 DOM 互斥，桌面零变化） */
+  const narrow = useMediaQuery(ENTRY_CARDS_QUERY);
 
   // 只在 (比赛, 模式) 首次拿到数据时建行：保存后的 invalidate 重拉不会覆盖本地脏状态与结果徽标
   useEffect(() => {
@@ -456,6 +462,8 @@ function EntryPanel({
   const activeRows = rows[side];
   const totalXp = activeRows.reduce((sum, r) => sum + rowXp(r), 0);
   const hasDirty = (['home', 'away'] as Side[]).some((s) => rows[s].some(rowDirty));
+  /** 当前队侧脏行数（窄屏汇总条展示用；saveAll 也只提交当前队侧的脏行） */
+  const dirtyCount = activeRows.filter(rowDirty).length;
 
   function updateRow(playerId: number, fn: (r: RowDraft) => RowDraft) {
     setRows((prev) => (prev ? { ...prev, [side]: prev[side].map((r) => (r.playerId === playerId ? fn(r) : r)) } : prev));
@@ -572,15 +580,18 @@ function EntryPanel({
           </span>
         )}
         <span className="entry-head-actions">
-          <button
-            type="button"
-            className="btn btn-sm"
-            disabled={saving !== null || !hasDirty}
-            title={hasDirty ? '只提交有改动的行' : '当前没有改动'}
-            onClick={saveAll}
-          >
-            {saving === 'all' ? '保存中…' : '全部保存'}
-          </button>
+          {/* 窄屏（≤760）「全部保存」移入粘性汇总条 entry-sumbar，头里只留「收起」 */}
+          {!narrow && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={saving !== null || !hasDirty}
+              title={hasDirty ? '只提交有改动的行' : '当前没有改动'}
+              onClick={saveAll}
+            >
+              {saving === 'all' ? '保存中…' : '全部保存'}
+            </button>
+          )}
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => guard(onClose)}>
             收起
           </button>
@@ -589,6 +600,181 @@ function EntryPanel({
 
       {mode === 'view' && <p className="hint">只读查看：所有格子已锁定，已录值不可修改。</p>}
 
+      {narrow ? (
+        /* v6.21.0 窄屏卡片流（≤760）：与桌面表格 DOM 互斥；状态判据、格子锁定规则、
+           保存按钮禁用条件与下方表格逐条一致，state 复用同一套 updateRow/rowIssues/rowDirty。 */
+        <div className="entry-cards">
+          {activeRows.map((r) => {
+            const issues = rowIssues(r);
+            const dirtyRow = rowDirty(r);
+            const ro = r.trainee;
+            const ratingBad =
+              !r.rating.locked &&
+              r.rating.value.trim() !== '' &&
+              !(Number.isFinite(Number(r.rating.value)) && Number(r.rating.value) >= 7 && Number(r.rating.value) <= 10);
+            const duelsBad = !r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isPositiveInt(r.duelsWon.value);
+            const savesBad = !r.saves.locked && r.saves.value.trim() !== '' && !isPositiveInt(r.saves.value);
+            return (
+              <div
+                key={r.playerId}
+                className={`entry-card${ro ? ' row-trainee' : ''}${dirtyRow ? ' dirty' : ''}`}
+                title={ro ? '训练营不按场次计' : undefined}
+              >
+                <div className="entry-card-head">
+                  <span className="entry-card-name">{r.name}</span>
+                  <span className="entry-card-pos">{r.position ?? '—'}</span>
+                  {r.sources.length > 0 && <span className="badge gray">已录 · {r.sources.join('、')}</span>}
+                  {ro && <span className="badge gray">训练营不按场次计</span>}
+                  {issues.length > 0 && (
+                    <span className="badge red" title={issues.join('；')}>
+                      校验问题
+                    </span>
+                  )}
+                </div>
+                <div className="entry-card-grid">
+                  <label className={`entry-card-field${r.appearance.locked ? ' recorded' : ''}`}>
+                    <span className="entry-card-flabel">出场</span>
+                    {r.appearance.locked ? (
+                      r.base.appearance || mode === 'edit' ? (
+                        <input type="checkbox" checked={r.appearance.checked} disabled />
+                      ) : (
+                        <span className="muted">—</span>
+                      )
+                    ) : (
+                      <input
+                        type="checkbox"
+                        className="entry-card-check"
+                        checked={r.appearance.checked}
+                        disabled={ro}
+                        onChange={(e) =>
+                          updateRow(r.playerId, (row) => ({
+                            ...row,
+                            appearance: { ...row.appearance, checked: e.target.checked },
+                            result: null,
+                          }))
+                        }
+                      />
+                    )}
+                  </label>
+                  <label className={`entry-card-field${r.rating.locked ? ' recorded' : ''}`}>
+                    <span className="entry-card-flabel">评分</span>
+                    {r.rating.locked ? (
+                      r.base.rating === '' && mode === 'view' ? (
+                        <span className="muted">—</span>
+                      ) : (
+                        <input className="entry-num mono" value={r.rating.value} readOnly tabIndex={-1} />
+                      )
+                    ) : (
+                      <input
+                        className={`entry-num mono${ratingBad ? ' invalid' : ''}`}
+                        value={r.rating.value}
+                        disabled={ro}
+                        inputMode="decimal"
+                        placeholder="7.0–10.0"
+                        onChange={(e) => updateRow(r.playerId, (row) => ({ ...row, rating: { ...row.rating, value: e.target.value }, result: null }))}
+                      />
+                    )}
+                  </label>
+                  <label className={`entry-card-field${r.cleanSheet.locked ? ' recorded' : ''}`}>
+                    <span className="entry-card-flabel">零封</span>
+                    {r.cleanSheet.locked ? (
+                      r.base.cleanSheet || mode === 'edit' ? (
+                        <input type="checkbox" checked={r.cleanSheet.checked} disabled />
+                      ) : (
+                        <span className="muted">—</span>
+                      )
+                    ) : (
+                      <input
+                        type="checkbox"
+                        className="entry-card-check"
+                        checked={r.cleanSheet.checked}
+                        disabled={ro}
+                        onChange={(e) =>
+                          updateRow(r.playerId, (row) => ({
+                            ...row,
+                            cleanSheet: { ...row.cleanSheet, checked: e.target.checked },
+                            result: null,
+                          }))
+                        }
+                      />
+                    )}
+                  </label>
+                  <label className={`entry-card-field${r.duelsWon.locked ? ' recorded' : ''}`}>
+                    <span className="entry-card-flabel">夺回球权</span>
+                    {r.duelsWon.locked ? (
+                      r.base.duelsWon === '' && mode === 'view' ? (
+                        <span className="muted">—</span>
+                      ) : (
+                        <input className="entry-num mono" value={r.duelsWon.value} readOnly tabIndex={-1} />
+                      )
+                    ) : (
+                      <input
+                        className={`entry-num mono${duelsBad ? ' invalid' : ''}`}
+                        value={r.duelsWon.value}
+                        disabled={ro}
+                        inputMode="numeric"
+                        placeholder="次数"
+                        onChange={(e) =>
+                          updateRow(r.playerId, (row) => ({ ...row, duelsWon: { ...row.duelsWon, value: e.target.value }, result: null }))
+                        }
+                      />
+                    )}
+                  </label>
+                  <label className={`entry-card-field${r.saves.locked ? ' recorded' : ''}`}>
+                    <span className="entry-card-flabel">扑救</span>
+                    {r.saves.locked ? (
+                      r.base.saves === '' && mode === 'view' ? (
+                        <span className="muted">—</span>
+                      ) : (
+                        <input className="entry-num mono" value={r.saves.value} readOnly tabIndex={-1} />
+                      )
+                    ) : (
+                      <input
+                        className={`entry-num mono${savesBad ? ' invalid' : ''}`}
+                        value={r.saves.value}
+                        disabled={ro}
+                        inputMode="numeric"
+                        placeholder="次数"
+                        onChange={(e) =>
+                          updateRow(r.playerId, (row) => ({ ...row, saves: { ...row.saves, value: e.target.value }, result: null }))
+                        }
+                      />
+                    )}
+                  </label>
+                </div>
+                {/* 自动通道（赛果同步）已录的进球 / 助攻：只读展示，卡片里不提供录入 */}
+                <div className="entry-card-auto">
+                  <span className="entry-card-flabel">进球 / 助攻</span>
+                  <span className="entry-card-auto-val">
+                    {r.goals > 0 ? r.goals : '—'} / {r.assists > 0 ? r.assists : '—'}
+                  </span>
+                  <span className="badge gray">自动</span>
+                </div>
+                <div className="entry-card-foot">
+                  <span className="badge gold">本场 +{fmtXp(rowXp(r))} XP</span>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={ro || saving !== null || !dirtyRow || issues.length > 0}
+                    title={ro ? '训练营不按场次计' : issues.length > 0 ? issues[0] : dirtyRow ? '提交这一行' : '没有改动'}
+                    onClick={() => void saveRows([r], r.playerId)}
+                  >
+                    {saving === r.playerId ? '保存中…' : '保存'}
+                  </button>
+                  {issues.length > 0 && <div className="bad-text entry-result">{issues[0]}</div>}
+                  {r.result && (
+                    <div className="entry-result">
+                      <span className={`badge ${r.result.kind === 'ok' ? 'green' : r.result.kind === 'dup' ? 'gray' : 'red'}`}>
+                        {r.result.text}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
       <div className="table-wrap">
         <table className="entry-table">
           <thead>
@@ -755,7 +941,26 @@ function EntryPanel({
           </tbody>
         </table>
       </div>
+      )}
       {activeRows.length === 0 && <EmptyState>该队侧没有已建档球员，不能录入。</EmptyState>}
+      {narrow && (
+        /* v6.21.0 汇总条（≤760 才渲染）：fixed 常驻视口底，落在拇指区（面板在 .table-wrap 滚动容器内，
+           sticky 贴不到视口——e2e ⑭ 实测裁决，见 spec §0-2）；
+           沿用 saveAll（只提交脏行，不合法行会提示跳过），与表头「全部保存」同一动作。 */
+        <div className="entry-sumbar">
+          <span className="badge gold">本场合计 +{fmtXp(totalXp)} XP</span>
+          <span className="muted">脏行 {dirtyCount}</span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={saving !== null || !hasDirty}
+            title={hasDirty ? '只提交有改动的行' : '当前没有改动'}
+            onClick={saveAll}
+          >
+            {saving === 'all' ? '保存中…' : '全部保存'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
