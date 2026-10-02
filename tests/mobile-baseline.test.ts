@@ -1,7 +1,10 @@
 // 守卫测试：v6.20.0「系统范围手机版窄屏整治」第一批的静态扫描闸门。
 // 测试计划：docs/test-plans/v6.20.0-mobile-skeleton-baseline.md（TC-SWP-01 P0、TC-SWP-02/03 P1、TC-SWP-04 P1）。
-// v6.21.0 增补 TC-SWP-05（计划 docs/test-plans/v6.21.0-edit-panel-mobile.md）：coach-sticky 粘性首列的
-// 静态闸门——e2e ⑮ 在本地观众登录下不渲染教练台（几何断言条件降级），粘性回归由本例兜住。
+// v6.21.0 增补（计划 docs/test-plans/v6.21.0-edit-panel-mobile.md）：
+// - TC-SWP-05：coach-sticky 粘性首列的静态闸门——e2e ⑮ 在本地观众登录下不渲染教练台（几何断言条件
+//   降级），粘性回归由本例兜住；判据按 className 形态计数（P2-2：文本计数会把注释误算进去）。
+// - TC-ENT-03/09、TC-REG-02、TC-BRD-02、TC-IMP-03（P1-2：测试计划承诺的静态用例落地）——
+//   卡片流类名契约与窄屏/桌面互斥、inputMode、卡片状态枚举、品牌卡对等元信息行、imports 表单重排。
 //
 // 为什么要文本级扫描：这三条约定只活在 JSX/CSS 文本里——表格少包一层 `.table-wrap`、重构时又写回
 // `style={{ width: 320 }}`、抽屉关闭钮的 36px 命中区被删——组件测试与单测都不会红；e2e ⑫ 也只在
@@ -25,6 +28,9 @@ const WEB_SRC = 'web/src'; // vitest 的 cwd = 仓库根（与 tests/core-zero-i
 const STYLES_CSS = `${WEB_SRC}/styles.css`;
 const ADMIN_LAYOUT = `${WEB_SRC}/pages/admin/AdminLayout.tsx`;
 const COACH_PANEL = `${WEB_SRC}/pages/club/CoachPanel.tsx`;
+const GROWTH_ENTRY = `${WEB_SRC}/pages/admin/GrowthEntryPage.tsx`;
+const BRANDS_PAGE = `${WEB_SRC}/pages/admin/BrandsPage.tsx`;
+const IMPORTS_PAGE = `${WEB_SRC}/pages/admin/ImportsPage.tsx`;
 
 /** 递归收集 web/src 全树 .tsx（含 *.test.tsx）；路径统一成 `/`，与 git/文档口径一致 */
 function collectTsx(dir: string, out: string[] = []): string[] {
@@ -326,8 +332,9 @@ describe('v6.20.0 窄屏整治静态扫描闸门（docs/test-plans/v6.20.0-mobil
   it('TC-SWP-05 · coach-sticky 粘性首列：CoachPanel 恰 2 处挂类 + styles.css ≤640 块含 sticky 规则（v6.21.0）', () => {
     // e2e ⑮ 在本地观众登录下教练台不渲染，几何断言条件降级——粘性回归（摘类、删规则）在这里红。
     const coachPanel = read(COACH_PANEL);
-    const hits = coachPanel.match(/coach-sticky/g)?.length ?? 0;
-    expect(hits, `${COACH_PANEL} 的 coach-sticky 挂类应为恰 2 处（财务表 + 花名册表）：实测 ${hits}`).toBe(2);
+    // P2-2（评审）：按 className 形态计数——文本级 /coach-sticky/g 会把注释里的提及误算进去
+    const hits = coachPanel.match(/className="[^"]*\bcoach-sticky\b/g)?.length ?? 0;
+    expect(hits, `${COACH_PANEL} 的 coach-sticky 挂类（className 形态）应为恰 2 处（财务表 + 花名册表）：实测 ${hits}`).toBe(2);
 
     // 规则必须活在最后一个 (max-width: 640px) 媒体块之后（即 ≤640 规则域内），且真有 position: sticky
     const css = read(STYLES_CSS);
@@ -356,5 +363,129 @@ describe('v6.20.0 窄屏整治静态扫描闸门（docs/test-plans/v6.20.0-mobil
     const hit = tablesMissingWrap('x.tsx', naked);
     expect(hit.length).toBe(1);
     expect(hit[0]).toContain('x.tsx:2');
+  });
+});
+
+describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-panel-mobile.md，P1-2 落地）', () => {
+  /** 类名独立记号匹配（防 table-wrap-broken 式子串假绿，与 TABLE_WRAP_RE 同口径） */
+  const token = (cls: string) => new RegExp(`(?<![\\w-])${cls}(?![\\w-])`);
+
+  it('TC-ENT-03 · 成长补录卡片流：六类名契约 + 窄屏/桌面互斥 + sumbar portal（GrowthEntryPage + styles.css）', () => {
+    const src = read(GROWTH_ENTRY);
+
+    // 断点常量与 760 档一致（V2 变异：改成 800 会在 761 档漏卡片流）
+    expect(src).toContain("const ENTRY_CARDS_QUERY = '(max-width: 760px)'");
+    expect(src).toContain('const narrow = useMediaQuery(ENTRY_CARDS_QUERY);');
+
+    // 互斥分支：narrow ? 卡片流 : 表格流——卡片分支在前、else 接表格
+    const cardsAt = src.indexOf('<div className="entry-cards">');
+    const elseAt = src.indexOf(') : (', cardsAt);
+    const tableAt = src.indexOf('<table className="entry-table">');
+    expect(cardsAt, 'GrowthEntryPage 缺卡片流分支 entry-cards').toBeGreaterThan(-1);
+    expect(elseAt, '卡片流与表格流之间找不到三元 else').toBeGreaterThan(cardsAt);
+    expect(tableAt, 'GrowthEntryPage 缺桌面表格分支 entry-table').toBeGreaterThan(elseAt);
+
+    // 表头「全部保存」只留在桌面（≤760 移入汇总条）；汇总条仅窄屏且 portal 到 body
+    // （P1-1：.table-wrap 升格容器后布局包容含块会吃掉面板内 fixed 的视口定位，portal 逃出包容子树）
+    expect(src).toContain('{!narrow && (');
+    expect(src).toContain('{narrow && (');
+    expect(src).toContain('createPortal(');
+    expect(src).toContain('document.body');
+
+    // styles.css 规则级：六类名各有规则块（TSX 有类、CSS 没规则 = 死类名）
+    const rules = cssRules(read(STYLES_CSS));
+    for (const cls of ['entry-cards', 'entry-card', 'entry-card-head', 'entry-card-grid', 'entry-card-foot', 'entry-sumbar']) {
+      const hit = rules.filter((r) => token(cls).test(r.selector));
+      expect(hit.length, `styles.css 找不到 .${cls} 规则块（v6.21.0 卡片流类名契约）`).toBeGreaterThan(0);
+    }
+    // 汇总条 fixed 是正解（spec §0-2 实测裁决；V3 口径反转：回流内 sticky 才是变异），面板 sticky+100cqw
+    // 是 P1-1 的出宽约束修法，容器升格是 100cqw 的前提——三处缺一即红。
+    // 按独立选择器取规则（.entry-panel .entry-head 这类后代选择器不计入）；cssRules 的选择器捕获
+    // 会带上紧邻的注释文本，先剥注释再比对
+    const byExact = (cls: string) =>
+      rules.filter((r) => r.selector.split(',').some((s) => s.replace(/\/\*[\s\S]*?\*\//g, '').trim() === `.${cls}`));
+    const sumbar = byExact('entry-sumbar')[0];
+    expect(sumbar, 'styles.css 缺独立 .entry-sumbar 规则').toBeTruthy();
+    expect(sumbar?.body, '.entry-sumbar 应为 position: fixed 常驻视口底').toMatch(/position:\s*fixed/);
+    const panel = byExact('entry-panel')[0];
+    expect(panel, 'styles.css 缺独立 .entry-panel 规则').toBeTruthy();
+    expect(panel?.body, '.entry-panel 应 sticky left:0 + width:100cqw（评审 P1-1 出宽）').toMatch(/position:\s*sticky[\s\S]*left:\s*0[\s\S]*width:\s*100cqw|left:\s*0[\s\S]*position:\s*sticky/);
+    const wrap = byExact('table-wrap').find((r) => /container-type/.test(r.body));
+    expect(wrap, '.table-wrap 应升格 container-type: inline-size（100cqw 的容器前提）').toBeTruthy();
+  });
+
+  it('TC-ENT-09 · 评分 inputMode="decimal"、整数格 inputMode="numeric"（卡片/表格两分支各就位）', () => {
+    const src = read(GROWTH_ENTRY);
+    // 卡片流与表格流两分支语义逐条一致：评分 1 处 decimal、夺回球权+扑救各 1 处 numeric（每分支）
+    const decimal = src.match(/inputMode="decimal"/g)?.length ?? 0;
+    const numeric = src.match(/inputMode="numeric"/g)?.length ?? 0;
+    expect(decimal, `inputMode="decimal" 实测 ${decimal} 处（应 2：卡片流+表格流各 1）`).toBe(2);
+    expect(numeric, `inputMode="numeric" 实测 ${numeric} 处（应 4：两分支 × 夺回球权/扑救）`).toBe(4);
+  });
+
+  it('TC-REG-02 · 卡片状态枚举：已录/训练营/校验/只读/脏行/行保存禁用（P0 净增，卡片分支内）', () => {
+    const src = read(GROWTH_ENTRY);
+    const cardsAt = src.indexOf('<div className="entry-cards">');
+    const tableAt = src.indexOf('<table className="entry-table">');
+    expect(cardsAt).toBeGreaterThan(-1);
+    expect(tableAt).toBeGreaterThan(cardsAt);
+    const branch = src.slice(cardsAt, tableAt); // 卡片分支源码（互斥断言由 TC-ENT-03 兜住）
+
+    // 已录格：来源徽标（同锚去重，无纠正通道如实标注）
+    expect(branch, '卡片缺「已录」来源徽标').toContain('badge gray">已录 · ');
+    // 训练营：整卡置灰类 + 说明 title
+    expect(branch, '卡片缺 row-trainee 置灰类').toContain("row-trainee");
+    expect(branch, '卡片缺「训练营不按场次计」标注').toContain('训练营不按场次计');
+    // 校验问题：徽标 + invalid 类（评分 7-10 闸）
+    expect(branch, '卡片缺「校验问题」徽标').toContain('校验问题');
+    expect(branch, '卡片缺 invalid 校验类').toContain("' invalid' : ''");
+    // 已录格锁定：只读数值格
+    expect(branch, '卡片缺 readOnly 锁定格（entry-num）').toContain('readOnly tabIndex={-1}');
+    // 脏行：dirty 描边类 + 行保存禁用条件与桌面一致（ro/保存中/无脏行/有校验问题）
+    expect(branch, '卡片缺 dirty 脏行类').toContain("' dirty' : ''");
+    expect(branch, '卡片行保存禁用条件与桌面表格不一致').toContain('disabled={ro || saving !== null || !dirtyRow || issues.length > 0}');
+  });
+
+  it('TC-BRD-02 · 品牌卡片流契约：类名 + 对等元信息行（P2-4）+ 死规则不回归（P2-3）', () => {
+    const src = read(BRANDS_PAGE);
+    expect(src).toContain("const NARROW_QUERY = '(max-width: 760px)'");
+    expect(src).toContain('className="brand-cards"');
+    expect(src).toContain('className="brand-card"');
+    expect(src).toContain('className="brand-card-grid"');
+    expect(src).toContain('className="brand-new-form"');
+
+    // P2-4：窄屏卡与桌面「来源/状态/生效冠名」三列对等（判定式与桌面 td 同式）
+    expect(src, '品牌卡缺 brand-card-meta 元信息行').toContain('className="brand-card-meta"');
+    expect(src, '品牌卡缺「来源」判定式（与桌面 td 同口径）').toContain("row.source === 'custom' ? '自定义' : '种子'");
+    expect(src, '品牌卡缺「状态」判定式（与桌面 td 同口径）').toContain("row.status === 'adopted' ? '在池' : '已弃用'");
+    expect(src, '品牌卡缺「生效冠名」字段').toContain('row.active_contracts');
+
+    // 互斥：窄屏卡片流在前、桌面表格流在后
+    const cardsAt = src.indexOf('className="brand-cards"');
+    const tableAt = src.indexOf('<div className="table-wrap">');
+    expect(cardsAt).toBeGreaterThan(-1);
+    expect(tableAt).toBeGreaterThan(cardsAt);
+
+    // styles.css：卡片流规则齐 + 死规则（P2-3 已删）不再回来
+    const rules = cssRules(read(STYLES_CSS));
+    for (const cls of ['brand-cards', 'brand-card', 'brand-card-grid', 'brand-new-form', 'brand-card-meta']) {
+      const hit = rules.filter((r) => token(cls).test(r.selector));
+      expect(hit.length, `styles.css 找不到 .${cls} 规则块（v6.21.0 品牌卡类名契约）`).toBeGreaterThan(0);
+    }
+    const css = read(STYLES_CSS);
+    expect(css, '.brand-card-head 是死规则（TSX 用 <b>，P2-3 已删），不许回来').not.toMatch(token('brand-card-head'));
+    expect(css, '.brand-card-foot 是死规则（TSX 用 .btn-row，P2-3 已删），不许回来').not.toMatch(token('brand-card-foot'));
+  });
+
+  it('TC-IMP-03 · imports 表单 ≤760 重排：.admin-section label.field 单列全宽 + .seg 折行（styles.css）', () => {
+    // 规则活在最后一个 ≤760 媒体块（③ imports 块）；面里对得上——ImportsPage 真在用这些类
+    const src = read(IMPORTS_PAGE);
+    expect((src.match(/className="field"/g) ?? []).length, 'ImportsPage 的 label.field 面变少了，CSS 块前提失效').toBeGreaterThanOrEqual(5);
+    expect(src, 'ImportsPage 缺 admin-section 段（.admin-section label.field 前提失效）').toContain('card admin-section');
+
+    const css = read(STYLES_CSS);
+    const tail = css.slice(css.lastIndexOf('(max-width: 760px)'));
+    expect(tail, '≤760 块缺 .admin-section label.field 单列全宽规则').toMatch(/\.admin-section label\.field\s*\{[^}]*width:\s*100%/);
+    expect(tail, '≤760 块缺 .admin-section label.field .seg 折行规则').toMatch(/\.admin-section label\.field \.seg\s*\{[^}]*flex-wrap:\s*wrap/);
   });
 });
