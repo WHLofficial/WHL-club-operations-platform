@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiSend } from '../../lib/api.ts';
 import { fetchMarketRound, MARKET_ROUND_KEY, reopenMarketRound } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { useMediaQuery } from '../../lib/use-media.ts';
 
 interface BrandRow {
   id: number;
@@ -24,6 +25,8 @@ const BRANDS_KEY = ['admin', 'brands'] as const;
 const HEAT_MIN = 0.5;
 const HEAT_MAX = 1.5;
 const TIERS = ['头部', '新兴', '口碑'] as const;
+// v6.21.0 ②：赞助品牌表窄屏改卡片流的断点——与 AdminLayout 抽屉 / styles.css 管理端媒体块同为 ≤760
+const NARROW_QUERY = '(max-width: 760px)';
 
 // 招商轮报价状态徽标（v6.14.0 C3）：pending 待签 / accepted 已签 / queued 待接替 / expired 已过期
 const MARKET_OFFER_STATUS: Record<string, { text: string; badge: string }> = {
@@ -46,6 +49,7 @@ function stampOf(iso: string): string {
 export default function BrandsPage() {
   const qc = useQueryClient();
   const { show, toastNode } = useToast();
+  const narrow = useMediaQuery(NARROW_QUERY);
   const { data, isPending, isError, error } = useQuery({
     queryKey: BRANDS_KEY,
     queryFn: () => api<{ brands: BrandRow[] }>('/api/admin/brands'),
@@ -183,7 +187,42 @@ export default function BrandsPage() {
         </p>
         {isPending && <p className="muted">加载中…</p>}
         {isError && <p className="muted">{error instanceof Error ? error.message : '读不出来'}</p>}
-        {!isPending && !isError && (
+        {/* v6.21.0 ②：窄屏（≤760）改卡片流；桌面表格分支原样保留（含内联定宽，mobile-baseline 白名单） */}
+        {narrow && !isPending && !isError && (
+          <div className="brand-cards">
+            {brands.map((row) => {
+              const f = fieldOf(row);
+              return (
+                <div className="brand-card" key={row.id}>
+                  <b>{row.brand}</b>
+                  <div className="brand-card-grid">
+                    <input className="input input-sm" aria-label="行业" value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
+                    <input className="input input-sm mono" aria-label="热度" value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
+                    <select className="input input-sm" aria-label="档位" value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
+                      {TIERS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="hint">
+                      <input type="checkbox" checked={row.tier_locked === 1} disabled={busy} onChange={() => void toggleTierLock(row)} /> 锁
+                    </label>
+                  </div>
+                  <div className="btn-row">
+                    <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void saveBrand(row)}>
+                      保存
+                    </button>
+                    <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void toggleStatus(row)}>
+                      {row.status === 'adopted' ? '弃用' : '恢复'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {!narrow && !isPending && !isError && (
           <div className="table-wrap">
             <table>
               <thead>
@@ -245,14 +284,26 @@ export default function BrandsPage() {
 
       <section className="card">
         <h3>新增自定义品牌</h3>
-        <p>
-          <input className="input input-sm" style={{ width: 'min(160px, 100%)' }} placeholder="品牌名（1-20 字）" value={newName} maxLength={20} onChange={(e) => setNewName(e.target.value)} />
-          <input className="input input-sm" style={{ width: 'min(120px, 100%)', marginLeft: 8 }} placeholder="行业（如 科技）" value={newIndustry} maxLength={10} onChange={(e) => setNewIndustry(e.target.value)} />
-          <input className="input input-sm mono" style={{ width: 'min(80px, 100%)', marginLeft: 8 }} placeholder="热度" value={newHeat} onChange={(e) => setNewHeat(e.target.value)} />
-          <button className="btn btn-sm" style={{ marginLeft: 8 }} type="button" disabled={busy} onClick={() => void addBrand()}>
-            新增
-          </button>
-        </p>
+        {/* v6.21.0 ②：窄屏三字段全宽堆叠（样式在 styles.css 的 .brand-new-form 媒体块）；桌面 <p> 原样 */}
+        {narrow ? (
+          <div className="brand-new-form">
+            <input className="input input-sm" placeholder="品牌名（1-20 字）" value={newName} maxLength={20} onChange={(e) => setNewName(e.target.value)} />
+            <input className="input input-sm" placeholder="行业（如 科技）" value={newIndustry} maxLength={10} onChange={(e) => setNewIndustry(e.target.value)} />
+            <input className="input input-sm mono" placeholder="热度" value={newHeat} onChange={(e) => setNewHeat(e.target.value)} />
+            <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void addBrand()}>
+              新增
+            </button>
+          </div>
+        ) : (
+          <p>
+            <input className="input input-sm" style={{ width: 'min(160px, 100%)' }} placeholder="品牌名（1-20 字）" value={newName} maxLength={20} onChange={(e) => setNewName(e.target.value)} />
+            <input className="input input-sm" style={{ width: 'min(120px, 100%)', marginLeft: 8 }} placeholder="行业（如 科技）" value={newIndustry} maxLength={10} onChange={(e) => setNewIndustry(e.target.value)} />
+            <input className="input input-sm mono" style={{ width: 'min(80px, 100%)', marginLeft: 8 }} placeholder="热度" value={newHeat} onChange={(e) => setNewHeat(e.target.value)} />
+            <button className="btn btn-sm" style={{ marginLeft: 8 }} type="button" disabled={busy} onClick={() => void addBrand()}>
+              新增
+            </button>
+          </p>
+        )}
         <p className="hint">热度区间 {HEAT_MIN}–{HEAT_MAX}；行业名未登记在行业系数表时按 1.0 计。</p>
       </section>
 

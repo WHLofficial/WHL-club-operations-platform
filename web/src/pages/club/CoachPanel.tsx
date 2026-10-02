@@ -215,7 +215,7 @@ function HomeMatchesCard() {
       {!isPending && !isError && matches.length === 0 && <p className="muted">还没有主场收入记录。赛果确认之后，这里会列出每场的天气、上座与收入。</p>}
       {matches.length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="coach-sticky">
             <thead>
               <tr>
                 <th>窗口</th>
@@ -1038,7 +1038,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             </div>
           ) : (
             <div className="table-wrap">
-              <table>
+              <table className="coach-sticky">
                 <thead>
                   <tr>
                     <th className="num">号码</th>
