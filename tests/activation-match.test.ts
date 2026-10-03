@@ -26,7 +26,8 @@ function freshEnv(): Fixture {
      INSERT INTO user (id, name, role, locked, must_change_pw) VALUES
        (1, '管理组甲', 'admin', 0, 0),
        (2, '教练乙', 'coach', 0, 0),
-       (3, '教练丙', 'coach', 0, 0);`,
+       (3, '教练丙', 'coach', 0, 0),
+       (4, '教练丁', 'coach', 0, 0);`,
   );
   tour.exec(TOUR_TEAM_SEED_SQL);
   const kv = new Map<string, string>();
@@ -45,6 +46,7 @@ function freshEnv(): Fixture {
     [1, 'tok-admin'],
     [2, 'tok-coach'],
     [3, 'tok-coach2'],
+    [4, 'tok-coach3'],
   ] as const) {
     kv.set(`sess:${token}`, JSON.stringify({ userId: uid }));
   }
@@ -78,19 +80,22 @@ async function createClub(fx: Fixture, name: string): Promise<number> {
 interface MatchFixture extends Fixture {
   ownerClub: number;
   buyerClub: number;
+  rivalClub: number;
 }
 
 // 证据截图 key（v6.4.0 改动 4）：路径里的 club_id 必须等于激活方，激活请求必带
 const proofKey = (clubId: number) => `activation/${clubId}/t${Math.random().toString(36).slice(2, 8)}.png`;
 
-// 被激活方（100m）+ 激活方（50m）+ 开放窗口；正式球员 RC10、保护期内（signed_at 近期）
+// 被激活方（100m）+ 激活方（50m）+ 抬价第三队（30m）+ 开放窗口；正式球员 RC10、保护期内（signed_at 近期）
 async function seedActivation(fx: Fixture): Promise<MatchFixture> {
   const ownerClub = await createClub(fx, '原东家');
   const buyerClub = await createClub(fx, '撬人队');
+  const rivalClub = await createClub(fx, '抬价队');
   const auth = attachAuthChannel(fx.env);
   for (const [clubId, token] of [
     [ownerClub, 'tok-coach'],
     [buyerClub, 'tok-coach2'],
+    [rivalClub, 'tok-coach3'],
   ] as const) {
     authRegisterClubTeam(auth, clubId, clubId, `队${clubId}`);
     const res = await post(`/api/admin/clubs/${clubId}/bindcode`, {}, 'tok-admin', fx.env);
@@ -99,10 +104,11 @@ async function seedActivation(fx: Fixture): Promise<MatchFixture> {
   }
   fx.sqlite.exec(
     `INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES
-       (${ownerClub}, 100, '2026-07-01T00:00:00Z'), (${buyerClub}, 50, '2026-07-01T00:00:00Z');
+       (${ownerClub}, 100, '2026-07-01T00:00:00Z'), (${buyerClub}, 50, '2026-07-01T00:00:00Z'), (${rivalClub}, 30, '2026-07-01T00:00:00Z');
      INSERT INTO ledger_entries (club_id, kind, amount, balance_after, memo, created_at) VALUES
        (${ownerClub}, 'opening_import', 100, 100, '期初', '2026-07-01T00:00:00Z'),
-       (${buyerClub}, 'opening_import', 50, 50, '期初', '2026-07-01T00:00:00Z');
+       (${buyerClub}, 'opening_import', 50, 50, '期初', '2026-07-01T00:00:00Z'),
+       (${rivalClub}, 'opening_import', 30, 30, '期初', '2026-07-01T00:00:00Z');
      INSERT INTO seasons (season, status) VALUES (1, 'running');
      INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at, closed_at) VALUES
        (1, 1, 'closed', 0, '2026-05-01T00:00:00Z', '2026-06-01T00:00:00Z');
@@ -112,7 +118,7 @@ async function seedActivation(fx: Fixture): Promise<MatchFixture> {
      INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
        (1, 30, ${ownerClub}, 10, 1, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01', 0, 3);`,
   );
-  return { ...fx, ownerClub, buyerClub };
+  return { ...fx, ownerClub, buyerClub, rivalClub };
 }
 
 async function activateCore(fx: MatchFixture): Promise<{ status: number; body: { ok?: boolean; listingId?: number; askPrice?: number; kind?: string; error?: string } }> {
@@ -120,13 +126,20 @@ async function activateCore(fx: MatchFixture): Promise<{ status: number; body: {
   return { status: res.status, body: (await res.json()) as { ok?: boolean; listingId?: number; askPrice?: number; kind?: string; error?: string } };
 }
 
-// 激活 + 首价落定 → matched_pending 的现成局面
-async function seedMatchPending(): Promise<MatchFixture & { listingId: number }> {
+// 激活 + 首价落定 + 竞价截止（正式合同）→ matched_pending 的现成局面。
+// v6.24.0：首价落定只进公开竞价，匹配等待由结算期按合同类型分流，故这里要先把截止时刻拨过去。
+async function seedMatchPending(extraBid?: { amount: number; token: string }): Promise<MatchFixture & { listingId: number }> {
   const fx = await seedActivation(freshEnv());
   const act = await activateCore(fx);
   expect(act.status).toBe(201);
   const listingId = act.body.listingId!;
   expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 20 }, 'tok-coach2', fx.env)).status).toBe(201);
+  if (extraBid) {
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: extraBid.amount }, extraBid.token, fx.env)).status).toBe(201);
+  }
+  fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+  expect((await get('/api/market/listings', undefined, fx.env)).status).toBe(200);
+  expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('matched_pending');
   return { ...fx, listingId };
 }
 
@@ -138,7 +151,7 @@ async function openReviewTaskId(fx: Fixture): Promise<number> {
 }
 
 describe('普通球员激活（倍数价）', () => {
-  it('保护期内 RC≤20 → 2 倍价；首价落定 → matched_pending（24h 匹配窗）', async () => {
+  it('保护期内 RC≤20 → 2 倍价；首价落定转公开竞价（截止时刻落库，匹配等待在结算期）', async () => {
     const fx = await seedActivation(freshEnv());
     const act = await activateCore(fx);
     expect(act.status).toBe(201);
@@ -148,15 +161,21 @@ describe('普通球员激活（倍数价）', () => {
 
     const bid = await post(`/api/market/listings/${listingId}/bids`, { amount: 20 }, 'tok-coach2', fx.env);
     expect(bid.status).toBe(201);
-    expect(((await bid.json()) as { matchPhase: string }).matchPhase).toBe('matching');
+    expect(((await bid.json()) as { matchPhase: string }).matchPhase).toBe('bidding');
 
-    const listing = sqlGet<{ status: string; match_deadline: string | null; activation_deadline: string | null }>(
+    const listing = sqlGet<{
+      status: string;
+      deadline_at: string | null;
+      match_deadline: string | null;
+      activation_deadline: string | null;
+    }>(
       fx.sqlite,
-      'SELECT status, match_deadline, activation_deadline FROM listings WHERE id = ?',
+      'SELECT status, deadline_at, match_deadline, activation_deadline FROM listings WHERE id = ?',
       listingId,
     );
-    expect(listing?.status).toBe('matched_pending');
-    expect(listing?.match_deadline).not.toBeNull();
+    expect(listing?.status).toBe('bidding');
+    expect(listing?.deadline_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(listing?.match_deadline).toBeNull(); // 匹配等待由结算期落，不在落价时
     expect(listing?.activation_deadline).toBeNull();
     const player = sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 30');
     expect(player?.status).toBe('listed');
@@ -204,7 +223,7 @@ describe('匹配 / 放行 / 到期', () => {
     expect((await post('/api/transfers/match', { listingId: fx2.listingId }, 'tok-coach2', fx2.env)).status).toBe(403);
   });
 
-  it('匹配：单批收口（首价解冻、球员还原）、非被激活方 403、新 RC 必须高于首价', async () => {
+  it('匹配：单批收口（首价解冻、球员还原）、非被激活方 403、新 RC 必须高于最高出价', async () => {
     const fx = await seedMatchPending();
     const match = await post('/api/transfers/match', { listingId: fx.listingId, newReleaseFee: 25 }, 'tok-coach', fx.env);
     expect(match.status).toBe(201);
@@ -290,7 +309,7 @@ describe('匹配 / 放行 / 到期', () => {
     expect(((await res.json()) as { error: string }).error).toContain('可用资金不足');
   });
 
-  it('24h 匹配窗到期未决定 → 按激活价成交进待审（惰性结算）', async () => {
+  it('24h 匹配窗到期未决定 → 按竞价最高价成交进待审（惰性结算）', async () => {
     const fx = await seedMatchPending();
     fx.sqlite.exec(`UPDATE listings SET match_deadline = '2026-07-01T01:00:00Z' WHERE id = ${fx.listingId}`);
     // 任何市场入口都先跑惰性结算
@@ -303,6 +322,57 @@ describe('匹配 / 放行 / 到期', () => {
       `listing:${fx.listingId}`,
     );
     expect(transfer).toMatchObject({ type: 'activation', fee: 20, status: 'pending_review', to_club_id: fx.buyerClub });
+  });
+
+  it('TC-A10：竞价截止分流——正式合同进 24h 匹配等待，此时不建过户单', async () => {
+    const fx = await seedActivation(freshEnv());
+    const act = await activateCore(fx);
+    expect(act.status).toBe(201);
+    const listingId = act.body.listingId!;
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 20 }, 'tok-coach2', fx.env)).status).toBe(201);
+
+    // 竞价到点（惰性结算触发）
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    const before = Date.now();
+    await get('/api/market/listings', undefined, fx.env);
+
+    const listing = sqlGet<{ status: string; match_deadline: string | null; deadline_at: string | null }>(
+      fx.sqlite,
+      'SELECT status, match_deadline, deadline_at FROM listings WHERE id = ?',
+      listingId,
+    );
+    expect(listing?.status).toBe('matched_pending');
+    expect(listing?.deadline_at).toBeNull(); // 竞价截止时刻收口，换成匹配窗截止
+    const ms = Date.parse(listing?.match_deadline ?? '');
+    expect(ms - before).toBeGreaterThanOrEqual(24 * 3600_000 - 60_000);
+    expect(ms - before).toBeLessThanOrEqual(24 * 3600_000 + 60_000);
+    // 还没成交：过户要等被激活方放行 / 匹配窗到期（v6.24.0 把收口点从落价挪到结算期）
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM transfers')?.n).toBe(0);
+  });
+
+  it('TC-A11：匹配窗到期按竞价最高价成交（不是激活价），两端收到到期通知', async () => {
+    // 抬价队把价格从首价 20 抬到 24，随后激活方既不匹配也不放行
+    const fx = await seedMatchPending({ amount: 24, token: 'tok-coach3' });
+    // 基准即最高价：新违约金必须高于 24（若错用首价/激活价 20，这条会 400 文案里出现 20）
+    const low = await post('/api/transfers/match', { listingId: fx.listingId, newReleaseFee: 24 }, 'tok-coach', fx.env);
+    expect(low.status).toBe(400);
+    expect(((await low.json()) as { error: string }).error).toContain('24');
+
+    fx.sqlite.exec(`UPDATE listings SET match_deadline = '2026-07-01T01:00:00Z' WHERE id = ${fx.listingId}`);
+    await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
+
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', fx.listingId)?.status).toBe('pending_review');
+    const transfer = sqlGet<{ type: string; fee: number; status: string; to_club_id: number }>(
+      fx.sqlite,
+      'SELECT type, fee, status, to_club_id FROM transfers WHERE idempotency_key = ?',
+      `listing:${fx.listingId}`,
+    );
+    expect(transfer).toMatchObject({ type: 'activation', fee: 24, status: 'pending_review', to_club_id: fx.rivalClub });
+    const notices = sqlAll<{ club_id: number }>(
+      fx.sqlite,
+      "SELECT club_id FROM notifications WHERE template = 'activation_match_expired' ORDER BY club_id",
+    );
+    expect(notices.map((n) => n.club_id).sort((a, b) => a - b)).toEqual([fx.ownerClub, fx.buyerClub].sort((a, b) => a - b));
   });
 
   it('生涯只可被匹配一次（4.4.2.4）', async () => {
@@ -323,7 +393,12 @@ describe('匹配 / 放行 / 到期', () => {
     expect(act2.status).toBe(201);
     const listingId2 = act2.body.listingId!;
     expect((await post(`/api/market/listings/${listingId2}/bids`, { amount: 25 }, 'tok-coach2', fx.env)).status).toBe(201);
+    // 先走到匹配等待期，这样 409 命中「生涯一次」而不是「不在匹配等待期」
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId2}`);
+    await get('/api/market/listings', undefined, fx.env);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId2)?.status).toBe('matched_pending');
     const rematch = await post('/api/transfers/match', { listingId: listingId2, newReleaseFee: 60 }, 'tok-coach', fx.env);
     expect(rematch.status).toBe(409);
+    expect(((await rematch.json()) as { error: string }).error).toContain('匹配过一次');
   });
 });

@@ -29,13 +29,29 @@ describe('挂牌价边界（规则 4.4.1.1）', () => {
 describe('出价校验（规则 4.4.1.2）', () => {
   it('首笔出价不低于挂牌价', () => {
     expect(validateBidAmount(20, null, 20)).toBeNull();
-    expect(validateBidAmount(19.99, null, 20)).toBe('首笔出价不得低于挂牌价 20 m');
+    expect(validateBidAmount(19, null, 20)).toBe('首笔出价不得低于挂牌价 20 m');
   });
 
   it('抬价至少比当前最高多一个步长', () => {
     expect(validateBidAmount(31, 30, 20, 1)).toBeNull();
-    expect(validateBidAmount(30.5, 30, 20, 1)).toBe('抬价至少要比当前最高价多 1 m（当前最高 30 m）');
+    expect(validateBidAmount(29, 30, 20, 1)).toBe('抬价至少要比当前最高价多 1 m（当前最高 30 m）');
     expect(validateBidAmount(35, 30, 20, 5)).toBeNull();
+  });
+
+  // v6.24.0 批次 A（规则 4.4.1.2）：出价只收整数，小数一律拒
+  it('出价必须为整数（TC-A01）', () => {
+    expect(validateBidAmount(120.5, null, 100)).toBe('出价必须为整数');
+    expect(validateBidAmount(120, null, 100)).toBeNull();
+  });
+
+  // TC-A02：整数分支插在「有限且为正」校验之后，非法值与会吞语义不受影响
+  it('非法金额仍走既有文案，整数分支不吞掉它们的语义（TC-A02）', () => {
+    expect(validateBidAmount(0, null, 100)).toBe('出价金额不对');
+    expect(validateBidAmount(Number.NaN, null, 100)).toBe('出价金额不对');
+    expect(validateBidAmount(-3, null, 100)).toBe('出价金额不对');
+    expect(validateBidAmount(Number.POSITIVE_INFINITY, null, 100)).toBe('出价金额不对');
+    // 正数小数落在整数分支（插入位置决定）：文案是「出价必须为整数」而非区间/抬价文案
+    expect(validateBidAmount(0.5, null, 100)).toBe('出价必须为整数');
   });
 });
 

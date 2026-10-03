@@ -7,6 +7,7 @@ import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
+import { bidDeadline } from '../src/core/market-rules.ts';
 
 interface Fixture {
   env: Env;
@@ -226,34 +227,49 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect((body as { error?: string }).error).toContain('可用资金不足');
   });
 
-  it('出价窗内他队出价无效，激活方首价必须恰好 5m，落价即收口进待审（训练营无匹配）', async () => {
+  it('首价窗内他队出价无效、激活方首价必须恰好 5m；落价转公开竞价，截止后按训练营条款直接待审（TC-A04/A05/A10）', async () => {
     const fx = await seedTrainee(freshEnv());
     const { body } = await activateTrainee(fx);
     const listingId = body.listingId!;
 
-    const foreign = await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach', fx.env);
+    // 首价窗（5 分钟）：只有激活方能出价，且金额锁死激活价
+    const foreign = await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach3', fx.env);
     expect(foreign.status).toBe(403);
+    expect(((await foreign.json()) as { error: string }).error).toContain('等激活方出价后再看结果');
 
     const overpay = await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach2', fx.env);
     expect(overpay.status).toBe(400);
-    expect(((await overpay.json()) as { error: string }).error).toContain('固定为 5 m');
+    expect(((await overpay.json()) as { error: string }).error).toContain('激活方首价固定为激活价');
 
+    // 激活方落首价：listed → bidding，首算截止时刻落库、首价窗清空、冻结生效（v6.24.0：不再当场收口）
     const ok = await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env);
     expect(ok.status).toBe(201);
-
-    // 首价落定：训练营合同无匹配可言，直接收口进待审（transfer + 审核任务），出价窗清空
-    const after = sqlGet<{ status: string; activation_deadline: string | null }>(
+    const after = sqlGet<{
+      status: string;
+      activation_deadline: string | null;
+      match_deadline: string | null;
+      deadline_at: string | null;
+      listed_day: string | null;
+      last_bid_at: string | null;
+    }>(
       fx.sqlite,
-      'SELECT status, activation_deadline FROM listings WHERE id = ?',
+      'SELECT status, activation_deadline, match_deadline, deadline_at, listed_day, last_bid_at FROM listings WHERE id = ?',
       listingId,
     );
-    expect(after).toEqual({ status: 'pending_review', activation_deadline: null });
-    const transfer = sqlGet<{ type: string; status: string; fee: number; to_club_id: number }>(
-      fx.sqlite,
-      'SELECT type, status, fee, to_club_id FROM transfers WHERE idempotency_key = ?',
-      `listing:${listingId}`,
+    expect(after?.status).toBe('bidding');
+    expect(after?.activation_deadline).toBeNull();
+    expect(after?.match_deadline).toBeNull();
+    expect(after?.deadline_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(after?.deadline_at).toBe(
+      bidDeadline({
+        lastBidAt: after!.last_bid_at,
+        listedDay: after!.listed_day!,
+        now: new Date(after!.last_bid_at!),
+        deadlineHours: [18, 23],
+        silenceHours: 3,
+        calendar: 'none',
+      }).deadlineAt,
     );
-    expect(transfer).toMatchObject({ type: 'activation', status: 'pending_review', fee: 5, to_club_id: fx.buyerClub });
     const hold = sqlGet<{ amount: number; status: string }>(
       fx.sqlite,
       `SELECT amount, status FROM fund_holds WHERE club_id = ? AND ref_type = 'listing' AND ref_id = ? AND status = 'held'`,
@@ -261,10 +277,49 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
       listingId,
     );
     expect(hold).toEqual({ amount: 5, status: 'held' });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM bids WHERE listing_id = ? AND status = ?', listingId, 'active')?.n).toBe(1);
 
-    // 激活挂牌不开放后续竞价（首价即成交价）
-    const outbid = await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach3', fx.env);
-    expect(outbid.status).toBe(409);
+    // 落价后与普通挂牌同场公开竞价：他队可以抬价
+    const rival = await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach3', fx.env);
+    expect(rival.status).toBe(201);
+
+    // 竞价截止（拨过去）→ 被激活方是训练营合同：无匹配可言，直接进待审，成交价=最终最高价
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    expect((await get('/api/market/listings', undefined, fx.env)).status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('pending_review');
+    const transfer = sqlGet<{ type: string; status: string; fee: number; to_club_id: number }>(
+      fx.sqlite,
+      'SELECT type, status, fee, to_club_id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    expect(transfer).toMatchObject({ type: 'activation', status: 'pending_review', fee: 6, to_club_id: fx.rivalClub });
+  });
+
+  it('首价窗过线：冻结触发器兜并发 ABORT、出价 409；窗内没落价的激活被作废（TC-A06）', async () => {
+    const fx = await seedTrainee(freshEnv());
+    const { body } = await activateTrainee(fx);
+    const listingId = body.listingId!;
+    fx.sqlite.exec(`UPDATE listings SET activation_deadline = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+
+    // 并发竞态兜底（0059 新增 OR 分支）：预检通过后窗才过线 → 冻结 INSERT 被 ABORT
+    expect(() =>
+      fx.sqlite.exec(
+        `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+         VALUES (${fx.buyerClub}, 5, 'held', 'listing', ${listingId}, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+      ),
+    ).toThrow(/WHL_BID_REJECT_DEADLINE/);
+
+    // 走 HTTP：过线后不再收出价（惰性结算先按 4.4.2 把激活作废），也不留冻结
+    const late = await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env);
+    expect(late.status).toBe(409);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM fund_holds WHERE ref_id = ?', listingId)?.n).toBe(0);
+    const listing = sqlGet<{ status: string; deadline_note: string | null }>(
+      fx.sqlite,
+      'SELECT status, deadline_note FROM listings WHERE id = ?',
+      listingId,
+    );
+    expect(listing?.status).toBe('delisted');
+    expect(listing?.deadline_note).toContain('激活无效');
   });
 
   it('出价窗过了激活方没落价 → 激活无效：下架不收费、球员还原训练营态', async () => {
@@ -325,8 +380,8 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     const bid = await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env);
     expect(bid.status).toBe(201);
 
-    // 拨回静默时段触发截止判定
-    fx.sqlite.exec(`UPDATE listings SET listed_day = '2026-07-01', last_bid_at = '2026-07-02T18:00:00.000Z' WHERE id = ${listingId}`);
+    // 拨到过去触发截止判定（v6.24.0：落价后 deadline_at 已落库，判定只认这一列）
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
     const settleRes = await get('/api/market/listings', undefined, fx.env);
     await settleRes.json();
 
@@ -390,7 +445,7 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     const { body } = await activateTrainee(fx);
     const listingId = body.listingId!;
     await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env);
-    fx.sqlite.exec(`UPDATE listings SET listed_day = '2026-07-01', last_bid_at = '2026-07-02T18:00:00.000Z' WHERE id = ${listingId}`);
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
     const settleRes = await get('/api/market/listings', undefined, fx.env);
     await settleRes.json();
 

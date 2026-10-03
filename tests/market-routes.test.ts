@@ -1,5 +1,5 @@
 // 市场路由测试（§16：挂牌/出价冻结/截止结算/窗尾收口/审核过户/并发不双花）
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
@@ -72,7 +72,9 @@ function post(path: string, body: unknown, token: string | undefined, env: Env) 
 let clubSeq = 9000;
 async function createClub(fx: Fixture, name: string): Promise<number> {
   clubSeq += 1;
-  const res = await post('/api/admin/clubs', { name, leagueTier: 'premier', gameTeamId: clubSeq }, 'tok-admin', fx.env);
+  // 巡测队种子只有 9001-9100：本文件跨用例累计的序号要折回这段区间，否则越界后建队 502
+  const gameTeamId = 9001 + ((clubSeq - 9001) % 100);
+  const res = await post('/api/admin/clubs', { name, leagueTier: 'premier', gameTeamId }, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   return ((await res.json()) as { club: { id: number } }).club.id;
 }
@@ -230,9 +232,13 @@ describe('出价与资金冻结（§6.4-1 / §7.4）', () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);
     await listPlayer(mf, 10, 15);
-    const low = await post('/api/market/listings/1/bids', { amount: 14.9 }, 'tok-coach2', fx.env);
+    const low = await post('/api/market/listings/1/bids', { amount: 14 }, 'tok-coach2', fx.env);
     expect(low.status).toBe(400);
     expect(((await low.json()) as { error: string }).error).toContain('首笔出价不得低于挂牌价 15 m');
+    // v6.24.0：出价只收整数，小数在金额分支就被挡下
+    const frac = await post('/api/market/listings/1/bids', { amount: 14.5 }, 'tok-coach2', fx.env);
+    expect(frac.status).toBe(400);
+    expect(((await frac.json()) as { error: string }).error).toBe('出价必须为整数');
 
     const ok = await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
     expect(ok.status).toBe(201);
@@ -269,9 +275,12 @@ describe('出价与资金冻结（§6.4-1 / §7.4）', () => {
       { status: 'released', amount: 15 },
       { status: 'held', amount: 17 },
     ]);
-    const small = await post('/api/market/listings/1/bids', { amount: 17.5 }, 'tok-coach2', fx.env);
+    const small = await post('/api/market/listings/1/bids', { amount: 17 }, 'tok-coach2', fx.env);
     expect(small.status).toBe(400);
     expect(((await small.json()) as { error: string }).error).toContain('抬价至少要比当前最高价多 1 m');
+    const smallFrac = await post('/api/market/listings/1/bids', { amount: 17.5 }, 'tok-coach2', fx.env);
+    expect(smallFrac.status).toBe(400);
+    expect(((await smallFrac.json()) as { error: string }).error).toBe('出价必须为整数');
   });
 
   it('截止绝对时刻化（v6.4.0）：出价落库 deadline_at；过线出价 409，触发器在冻结语句兜底', async () => {
@@ -413,6 +422,79 @@ describe('截止惰性结算与窗尾收口（§6.5 / 4.4.7）', () => {
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 2')?.status).toBe('pending_review');
     await post('/api/cron/tick', {}, undefined, fx.env);
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'delist_fee'")?.n).toBe(1);
+  });
+});
+
+// v6.24.0 批次 A：挂牌创建即落绝对截止时刻（listed 也参与惰性收口）
+describe('挂牌即落截止时刻（v6.24.0）', () => {
+  it('TC-A03：19:00 挂牌 → 次日 21:00 落库；当日访问不误下架，列表回截止时刻', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-01T11:00:00.000Z')); // 上海 7/1 19:00
+    try {
+      expect((await listPlayer(mf, 10, 15)).status).toBe(201);
+      const row = sqlGet<{ listed_day: string; deadline_at: string | null }>(
+        fx.sqlite,
+        'SELECT listed_day, deadline_at FROM listings WHERE id = 1',
+      );
+      expect(row?.listed_day).toBe('2026-07-01');
+      // 静默起点=挂牌时刻（19:00 在 18-23 窗内），顺延到次日 18-23 窗内静默满 3h → 次日 21:00（+08）
+      expect(row?.deadline_at).toBe('2026-07-02T13:00:00.000Z');
+      const list = await get('/api/market/listings?status=active', 'tok-viewer', fx.env);
+      const body = (await list.json()) as { listings: { id: number; status: string; deadlineAt: string | null }[] };
+      expect(list.status).toBe(200);
+      expect(body.listings[0]).toMatchObject({ status: 'listed', deadlineAt: '2026-07-02T13:00:00.000Z' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('TC-A08：listed 无人出价、截止时刻已过 → 提前下架收费并还原球员（tick 计 delisted）', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    expect((await listPlayer(mf, 10, 15)).status).toBe(201);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')?.status).toBe('listed');
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = 1`);
+    const tick = await post('/api/cron/tick', {}, undefined, fx.env);
+    expect((await tick.json()) as { delisted: number }).toMatchObject({ delisted: 1 });
+    const row = sqlGet<{ status: string; deadline_note: string | null }>(
+      fx.sqlite,
+      'SELECT status, deadline_note FROM listings WHERE id = 1',
+    );
+    expect(row?.status).toBe('delisted');
+    expect(row?.deadline_note ?? '').toContain('无人出价');
+    expect(sqlGet<{ amount: number }>(fx.sqlite, "SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND ref_id = 1")?.amount).toBe(-1.5);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 10')?.status).toBe('normal');
+  });
+
+  it('TC-A09：listed 未到期 → 状态不变，deadline_note 刷新（status 守卫含 listed）', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    expect((await listPlayer(mf, 10, 15)).status).toBe(201);
+    const list = await get('/api/market/listings?status=active', 'tok-viewer', fx.env);
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { listings: { id: number; status: string; deadlineNote: string | null }[] };
+    expect(body.listings[0]?.status).toBe('listed');
+    const row = sqlGet<{ status: string; deadline_note: string | null }>(
+      fx.sqlite,
+      'SELECT status, deadline_note FROM listings WHERE id = 1',
+    );
+    expect(row?.status).toBe('listed');
+    expect(row?.deadline_note ?? '').toContain('截止判定');
+  });
+
+  it('TC-A12：存量 listed 行 deadline_at=NULL → 回落实时算仍收口', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    expect((await listPlayer(mf, 10, 15)).status).toBe(201);
+    fx.sqlite.exec(
+      `UPDATE listings SET deadline_at = NULL, last_bid_at = NULL,
+         listed_day = strftime('%Y-%m-%d', 'now', '-12 days') WHERE id = 1`,
+    );
+    const tick = await post('/api/cron/tick', {}, undefined, fx.env);
+    expect((await tick.json()) as { delisted: number }).toMatchObject({ delisted: 1 });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')?.status).toBe('delisted');
   });
 });
 
