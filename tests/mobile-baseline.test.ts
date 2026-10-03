@@ -36,7 +36,8 @@ const BRANDS_PAGE = `${WEB_SRC}/pages/admin/BrandsPage.tsx`;
 const IMPORTS_PAGE = `${WEB_SRC}/pages/admin/ImportsPage.tsx`;
 const PLAYER_PAGE = `${WEB_SRC}/pages/Player.tsx`;
 const MARKET_INTEL = `${WEB_SRC}/pages/market/MarketIntelPage.tsx`;
-const MARKET_BOARD = `${WEB_SRC}/pages/market/MarketBoardPage.tsx`;
+// v6.24.0 批次 B：出价历史表从 MarketBoardPage 搬进 MarketListingOverlay 浮层，TC-STK 挂类点随表走
+const MARKET_OVERLAY = `${WEB_SRC}/pages/market/MarketListingOverlay.tsx`;
 const CLUB_DETAIL = `${WEB_SRC}/pages/ClubDetail.tsx`;
 
 /** 递归收集 web/src 全树 .tsx（含 *.test.tsx）；路径统一成 `/`，与 git/文档口径一致 */
@@ -86,7 +87,7 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   'web/src/pages/admin/SeasonsPage.tsx': 3,
   'web/src/pages/admin/SystemPage.tsx': 2,
   'web/src/pages/club/CoachPanel.tsx': 4,
-  'web/src/pages/market/MarketBoardPage.tsx': 1,
+  'web/src/pages/market/MarketListingOverlay.tsx': 1,
   'web/src/pages/market/MarketFreePage.tsx': 1,
   'web/src/pages/market/MarketIntelPage.tsx': 1,
   // v6.23.0 转会台：原 Negotiations/Offers/MarketMinePage 三页的表格随代码搬进 desk 三区（条数不变）
@@ -536,7 +537,7 @@ describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-publi
     // 三张参考型宽表各恰好挂一次（ClubDetail 的转会记录表 transfer-table 不许被卷进来）
     for (const [file, name] of [
       [MARKET_INTEL, 'MarketIntelPage'],
-      [MARKET_BOARD, 'MarketBoardPage'],
+      [MARKET_OVERLAY, 'MarketListingOverlay'],
       [CLUB_DETAIL, 'ClubDetail'],
     ] as const) {
       const hits = read(file).match(/className="table-sticky-2"/g)?.length ?? 0;
