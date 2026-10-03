@@ -4,6 +4,10 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.24.1] · 强制拍卖并入统一截止规则（2026-10-03）
+
+用户裁决：除激活首价窗外，一切挂牌都遵循同一套截止时间规则，强制拍卖也不例外（反转 v6.24.0 评审 P0-2 的豁免口径——当时为躲「幻影倒计时」选择不落列不显示，正确做法是创建时补落列）。`bypass.ts` createForcedAuction 创建即按 `bidDeadline` 首算落 `deadline_at`；列表/详情展示条件与结算提前收口同步放开 forced（激活 listed 仍豁免，由首价窗判线）。到期无人出价 → 提前下架 + 10% 下架费；窗尾收口与管理方取消出口保留；`ledgerMovement` 幂等闸防双扣费。验收：typecheck 三份清、vitest 72 文件 / 1259 例全绿、变异 2 处恰好各自目标断言红。判级 minor（同仓语义闭环，无跨仓消费）。**本地收口待发布**（零迁移，push 即 CF 自动部署）。
+
 ## [v6.24.0] · 转会市场改版：三入口统一竞价 + 卡片浮层改版（2026-10-03）
 
 转会规则闭环改版（brainstorming 多轮拍板 + spec 九节 + 计划含九条用户操作流线）：废除「激活跳过竞价」这唯一例外——激活挂牌先进首价窗（5 分钟、仅激活方、价格锁定激活价）落价后转 `bidding` 公开竞价，截止判定与普通挂牌同轨；竞价截止后按卖方合同类型分流（训练营直进待审 / 正式合同开 24h 匹配窗，**匹配基准=竞价最终最高价**，原为首价）。挂牌创建即落 `deadline_at`（listed 也落、无人出价也显示倒计时）、listed 到期提前收口（activation/forced 例外）。**出价只收整数**（激活首价豁免）、出价框预填符合规则的最低出价（ceil 口径）、成功文案「✓ 出价成功（N m），截止时刻已刷新。」。**归零即拒三层**：客户端倒计时归零禁提交、服务端时钟校验过线 409、触发器 `fund_holds_bid_deadline_guard`（迁移 `0059` 重建，新增激活首价窗过线分支）事务内最后防线；结算兜底收口。**前端**：在售市场卡片改 rail 骨架 A（左栏 CA/PA 大数字、`attrClass` 同源五档色阶、TeamLogo、三态徽标、hh:mm:ss 读秒——`use-countdown` 全局单例 + performance 单调差值防校时回拨）；点击开浮层（桌面居中弹层 / ≤760 底部抽屉，出价历史与匹配决定搬入）；转会台 tab 改「签约谈判 / 收到报价 / 我的出价」并删挂牌表单（`?tab=mine` alias）；激活独立页 `/market/activation`（含首价窗出价入口）；MarketNav 五项；暗黑模式修复（`color-scheme: light` + 显式色）与 375px 防折行。**code-review-skill 评审修 2×P0 + 4×P1 + 4×P2**：非整数激活价首价死锁（ask_price 可为 31.5 类保护期倍率，首价路径脱离整数校验）、强制拍卖单被提前下架收费（listed 收口仅对 normal）、结算批内守卫补齐（players/fund_holds/audit 加 EXISTS 守卫）、listed 无活跃出价卡无单据 pending_review + 审计刷行、`BidPlaceResult` 契约同步（deadlineAt/matchPhase:'bidding'）、文案订正（「按竞价最高价成交」）。测试计划 `docs/test-plans/v6.24.0-market-revamp.md`（qa-test-planner：TC-A/B/C 三组 25 例 + 变异 M1–M10 全红 + 评审增补 TC-R01–R08）。typecheck 三份全清、vitest **72 文件 / 1258 例**全绿（v6.23.0 基线 69/1228，净 +3 文件 / +30 例）、e2e **19/19**、build 成功。判级 minor（新增用户可见能力 + 竞价规则闭环；无跨仓消费）。**本地收口待发布**（迁移 `0059` 生产未 apply，发布顺序 = 先 `npm run db:migrate:remote` 再 push；push 即 CF 自动部署上线）。
