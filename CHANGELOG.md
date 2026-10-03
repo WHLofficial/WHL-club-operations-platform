@@ -6,11 +6,11 @@
 
 ## [v6.25.0] · 显示时区偏好化：内部 UTC 达标 + 外部显示可调默认北京（2026-10-03）
 
-四仓时区普查确认存储层已一致 UTC ISO TEXT ⇒ 内部零改动；本版只做展示层。新增 `web/src/lib/datetime.ts` 共享时区层：偏好三档（北京时间默认 / UTC / 跟随浏览器）存 localStorage 键 `whl.tz`，`whl:tz-change` 自定义事件 + `storage` 事件双同步（本页即切、跨标签页跟随），消费端唯一入口 `useTimeFmt()`（`time/dateTime/date/label`），Intl zh-CN `formatToParts` 短横线格式、null/非法 ISO 统一 `'—'`。顶栏时钟图标下拉（未登录也可见）+ 收件篮信封图标化（未读红点锚图标右上、条数播报不变）。全站时间消费点收敛 22 处：裸切片 18 + 纯日期切片 4 + 浏览器本地 `getHours` 2 处，CoachPanel 硬编码「（UTC）」改随档标注；静态锁 `tests/datetime-display.test.ts` 锁死 Intl 单点化与裸切片清零。倒计时读秒不动（绝对时刻差与时区无关）。e2e ⑰：时钟下拉切 UTC 时间串即变 + 收件篮图标化 + Esc 关闭。验收：typecheck 三份清、vitest 74 文件 / 1271 例全绿、e2e 20/20、code-review 修 4 处（含 ClubsPage 过期时间死分支）。判级 minor（纯展示层，服务端判定零改动）。**本地收口待发布**（零迁移，与 v6.24.1 同批 push 即上线）。
+四仓时区普查确认存储层已一致 UTC ISO TEXT ⇒ 内部零改动；本版只做展示层。新增 `web/src/lib/datetime.ts` 共享时区层：偏好三档（北京时间默认 / UTC / 跟随浏览器）存 localStorage 键 `whl.tz`，`whl:tz-change` 自定义事件 + `storage` 事件双同步（本页即切、跨标签页跟随），消费端唯一入口 `useTimeFmt()`（`time/dateTime/date/label`），Intl zh-CN `formatToParts` 短横线格式、null/非法 ISO 统一 `'—'`。顶栏时钟图标下拉（未登录也可见）+ 收件篮信封图标化（未读红点锚图标右上、条数播报不变）。全站时间消费点收敛 22 处：裸切片 18 + 纯日期切片 4 + 浏览器本地 `getHours` 2 处，CoachPanel 硬编码「（UTC）」改随档标注；静态锁 `tests/datetime-display.test.ts` 锁死 Intl 单点化与裸切片清零。倒计时读秒不动（绝对时刻差与时区无关）。e2e ⑰：时钟下拉切 UTC 时间串即变 + 收件篮图标化 + Esc 关闭。验收：typecheck 三份清、vitest 74 文件 / 1271 例全绿、e2e 20/20、code-review 修 4 处（含 ClubsPage 过期时间死分支）。判级 minor（纯展示层，服务端判定零改动）。**已上线**（2026-10-03 与 v6.24.1 同批 push `3842154..b75cff5`，CF 自动部署 Version `cfb72cf3-b23d-45fa-82a0-256110468917` @2026-10-03T16:36:14Z；线上资产与本地构建 sha256 一致、线上版本串 `6.25.0`）。
 
 ## [v6.24.1] · 强制拍卖并入统一截止规则（2026-10-03）
 
-用户裁决：除激活首价窗外，一切挂牌都遵循同一套截止时间规则，强制拍卖也不例外（反转 v6.24.0 评审 P0-2 的豁免口径——当时为躲「幻影倒计时」选择不落列不显示，正确做法是创建时补落列）。`bypass.ts` createForcedAuction 创建即按 `bidDeadline` 首算落 `deadline_at`；列表/详情展示条件与结算提前收口同步放开 forced（激活 listed 仍豁免，由首价窗判线）。到期无人出价 → 提前下架 + 10% 下架费；窗尾收口与管理方取消出口保留；`ledgerMovement` 幂等闸防双扣费。验收：typecheck 三份清、vitest 72 文件 / 1259 例全绿、变异 2 处恰好各自目标断言红。判级 minor（同仓语义闭环，无跨仓消费）。**本地收口待发布**（零迁移，push 即 CF 自动部署）。
+用户裁决：除激活首价窗外，一切挂牌都遵循同一套截止时间规则，强制拍卖也不例外（反转 v6.24.0 评审 P0-2 的豁免口径——当时为躲「幻影倒计时」选择不落列不显示，正确做法是创建时补落列）。`bypass.ts` createForcedAuction 创建即按 `bidDeadline` 首算落 `deadline_at`；列表/详情展示条件与结算提前收口同步放开 forced（激活 listed 仍豁免，由首价窗判线）。到期无人出价 → 提前下架 + 10% 下架费；窗尾收口与管理方取消出口保留；`ledgerMovement` 幂等闸防双扣费。验收：typecheck 三份清、vitest 72 文件 / 1259 例全绿、变异 2 处恰好各自目标断言红。判级 minor（同仓语义闭环，无跨仓消费）。**已上线**（2026-10-03 与 v6.25.0 同批 push，生产 Version `cfb72cf3-…` @2026-10-03T16:36:14Z）。
 
 ## [v6.24.0] · 转会市场改版：三入口统一竞价 + 卡片浮层改版（2026-10-03）
 
