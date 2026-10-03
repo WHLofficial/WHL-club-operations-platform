@@ -91,12 +91,13 @@ function FirstBidSection({
   async function placeFirstBid(amount: number) {
     try {
       const res = await apiPost<BidPlaceResult>(`/api/market/listings/${pending.listingId}/bids`, { amount });
+      // v6.24.0 评审修复（P1-3）：激活首价落定只转入公开竞价，成交/匹配由截止后的结算分流决定
       onDone(
-        res.matchPhase === 'review'
-          ? `首价 ${money(amount)} m 已落定：训练营球员成交，单子已送管理组审核。`
-          : `首价 ${money(amount)} m 已落定：进入 24 小时匹配窗，等原属俱乐部决定是否匹配。`,
+        res.matchPhase === 'bidding'
+          ? `首价 ${money(amount)} m 已落定，转入公开竞价。`
+          : `✓ 出价成功（${money(amount)} m），截止时刻已刷新。`,
       );
-      // 挂牌转入公开竞价（或待审核）：在售板与我的出价一并刷新
+      // 挂牌转入公开竞价：在售板与我的出价一并刷新
       invalidateMarket(pending.listingId);
     } catch (err) {
       onError(err instanceof Error ? err.message : '落首价失败');
@@ -109,8 +110,8 @@ function FirstBidSection({
       <p className="hint">
         已激活 {pending.playerName}，挂牌 {money(pending.askPrice)} m：请在 {deadlineText(pending.firstBidDeadline, '')} 前落首价，
         {pending.kind === 'trainee'
-          ? '落价即成交（训练营球员直进管理组审核）。'
-          : '落价后进 24 小时匹配窗，等原属俱乐部决定是否匹配。'}
+          ? '落价后转入公开竞价；竞价截止后训练营合同直进管理组审核。'
+          : '落价后转入公开竞价；竞价截止后进 24 小时匹配窗，等原属俱乐部决定是否匹配（基准=竞价最高价）。'}
         逾期激活作废（还占本窗激活额度）。
       </p>
       <MarketBidForm

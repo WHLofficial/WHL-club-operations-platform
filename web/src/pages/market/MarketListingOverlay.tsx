@@ -85,10 +85,9 @@ export function MarketListingOverlay({
     try {
       const res = await apiPost<BidPlaceResult>(`/api/market/listings/${l.id}/bids`, { amount });
       if (res.ok) {
-        if (res.matchPhase === 'review') {
-          show(`首价 ${money(amount)} m 已落定：训练营球员成交，单子已送管理组审核。`);
-        } else if (res.matchPhase === 'matching') {
-          show(`首价 ${money(amount)} m 已落定：进入 24 小时匹配窗，等 ${l.sellerClub.name} 决定是否匹配。`);
+        // v6.24.0 评审修复（P1-3）：激活首价落定不再当场成交/进匹配窗，只转入公开竞价
+        if (res.matchPhase === 'bidding') {
+          show(`首价 ${money(amount)} m 已落定，转入公开竞价。`);
         } else {
           setSuccess(`✓ 出价成功（${money(amount)} m），截止时刻已刷新。`);
         }
@@ -111,7 +110,7 @@ export function MarketListingOverlay({
       });
       show(
         res.decision === 'pass'
-          ? '已放行：按激活价成交，转管理组审核。'
+          ? '已放行：按竞价最高价成交，转管理组审核。'
           : `已提交匹配：新违约金 ${(res.newReleaseFee ?? 0).toFixed(2)} m，差额 ${(res.diff ?? 0).toFixed(2)} m 待审核时回收，球员留队。`,
       );
       setPassArmed(false);
@@ -240,7 +239,7 @@ function OverlayBody({
   const note = isSeller
     ? '这是你的挂牌：竞价截止后最高价进审核过户；可在球员页维护报价设置。窗尾无人出价将自动下架（收下架费）。'
     : l.matchPhase === 'matching' && halfPrice !== null
-      ? `竞价已截止。被激活方 ${l.activatorName ?? l.sellerClub.name} 可在匹配窗内付「新违约金 > ${money(halfPrice)} m」的差额把球员留下，到期未匹配则按 ${money(halfPrice)} m 成交。`
+      ? `竞价已截止。被激活方 ${l.sellerClub.name} 可在匹配窗内付「新违约金 > ${money(halfPrice)} m」的差额把球员留下，到期未匹配则按 ${money(halfPrice)} m 成交。`
       : l.firstBidPending
         ? `首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价，金额固定为激活价；落价后进入公开竞价。`
         : null;
@@ -294,7 +293,7 @@ function OverlayBody({
       {note !== null && <p className="mkt-ov-note">{note}</p>}
       {l.type === 'activation' && (
         <p className="mkt-ov-note">
-          激活价落定首价即成交价（激活挂牌不开放后续竞价）：训练营合同直进待审；正式合同进 24 小时匹配窗，由{' '}
+          激活价落定后进入公开竞价；竞价截止后：训练营合同直进待审，正式合同进 24 小时匹配窗（基准=竞价最高价），由{' '}
           {l.sellerClub.name} 决定匹配（球员留队）还是放行。买方签约时可直签训练营合同（不占下放名额）或谈正式合同。
         </p>
       )}
@@ -315,9 +314,9 @@ function OverlayBody({
         <div className="admin-section">
           <h4>匹配决定（被激活方）</h4>
           <p className="hint">
-            匹配：给球员一份新违约金（整数 m，须高于首价 {money(l.highestBid)} m，不受幅度限制），审核通过时回收新旧差额
+            匹配：给球员一份新违约金（整数 m，须高于当前最高价 {money(l.highestBid)} m，不受幅度限制），审核通过时回收新旧差额
             {oldRc > 0 ? <>（现违约金 {money(oldRc)} m）</> : null}，球员留队且本球员生涯只能被匹配这一次。
-            放行：按激活价成交送管理组审核。
+            放行：按竞价最高价成交送管理组审核。
           </p>
           <div className="inline-form">
             <div className="field">

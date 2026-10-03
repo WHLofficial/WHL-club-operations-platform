@@ -676,10 +676,10 @@ export interface ActivationResult {
 export interface BidPlaceResult {
   ok: boolean;
   bid: { id: number; amount: number; createdAt: string };
-  /** 激活单落首价后的去向：review=训练营直进待审，matching=正式合同进 24h 匹配窗 */
-  matchPhase?: 'review' | 'matching';
-  matchDeadline?: string | null;
-  settledForReview?: boolean;
+  /** 落定后刷新的绝对截止时刻（激活首价落定即转入公开竞价，同口径刷新；存量无 listed_day 时为 null） */
+  deadlineAt: string | null;
+  /** 激活单落首价后的去向（v6.24.0）：bidding = 已转入公开竞价，截止后由结算按合同类型分流 */
+  matchPhase?: 'bidding';
 }
 
 export interface MyBidRow {
