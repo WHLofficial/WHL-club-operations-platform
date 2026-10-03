@@ -1500,6 +1500,32 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.26.0 · 消费中心 + 外部工单：五类商品工单审核制 + 球场消费三卡迁入（2026-10-04）
+
+**状态**：**本地收口待发布**（未 push；push 即 CF 自动部署上线）。提交四枚：feat(shop) 后端 + feat(shop) 前端 + test(shop) + fix(shop) 评审修复。**发布顺序硬约束：迁移 `0060` 必须先于 push apply 到生产**（`npm run db:migrate:remote`，与 v6.3.2 同规矩）。验收：typecheck 三份全清、vitest **75 文件 / 1297 例**全绿（v6.25.0 基线 74/1271，净 +1 文件 / +26 例，全在新建 `tests/shop-orders.test.ts`）、build 成功、e2e **21/21**（⑱ 新增；⑫ 溢出扫描路由清单补 `/shop` 与 `/admin/shop`）。测试计划 `docs/test-plans/v6.26.0-shop.md`（qa-test-planner：TC-A/B/C 矩阵 + 变异 M1–M8）。判级 minor（新增用户可见能力；无跨仓消费）。
+
+**缘起与拍板**（brainstorming 多轮 + visual companion 五屏定稿 + 计划文件 `memory/plan-v6.26.0-shop.md`，版本改号 v6.26.0 因 v6.25.0 被显示时区偏好化占用）：教练端新增消费模块——**工单审核制**（提交即扣费 → 管理组审核 → 通过自动改数据 / 拒绝自动退款）收五类商品：买 PA（15m/点，PA ≤ fc26_pa_cap=95）、徽章（银 4m / 金 8m / 银升金 6m，3 金 12 银）、角色（新增 +5m / ++12m / 单升双 10m / 去除 5m，上限 5 个、只能在注册位置下新增）、位置热区（增 5m / 去除 5m / 替换 8m，主位不可动、GK 三禁、上限 4 个、新增须相邻、去除连带清角色）、队壳申请（5m，豪门名单进 config 只拦不收、系统收款 + 管理组线下建壳交付绑定码）；**外部工单**（管理组代录积分兑换 / 奖励等外部增益）：纯效果单不进账本（amount NULL）、创建 → 确认两步、五类全含。球场消费三卡（设施经营 / 冠名市场 / 球场档期）自 CoachPanel 整体迁入消费中心。价格全部进 `shop_prices` config JSON（12 键），「数值仅为示例可配置化」。
+
+**相邻关系定稿（固定常量，只按图不用 FC 官方）**：位置相邻关系图 313×211 像素实测（Explore agent 连通域 + 虚线检测）——块间一律 2px 虚线带、无大空白，左右列与中列错位重叠区均相接，共 **22 条边**（比目测版多 LW-CAM / RW-CAM / LM-CM / RM-CM / LM-CDM / RM-CDM / LB-CDM / RB-CDM 八条）。常量落 `src/core/shop.ts` 的 `POSITION_ADJACENCY`（web 直引同一份，tests 逐值锁 + 自反对称锁 + 22 边计数锁），`areAdjacent` 为判定唯一入口。角色归属位置 `ROLE_POSITION_BY_ID`（49 条）与角色/PlayStyle 中文名落同一文件，tests 与 `web/assets/ref/{role,playstyle}.json` 逐条同值锁。
+
+**交付（后端）**：
+- **迁移 `0060_shop_orders.sql`**：`shop_orders`（source club/external、category 六类 CHECK、payload_json、amount 提交时锁价、status pending/approved/rejected、note / reviewed_by / reject_reason；索引 (club_id, created_at DESC) + (status, created_at DESC)）+ `player_purchases`（已购属性台账：pa / role / position 三 field，value_json 记槽位与前后值；索引 (player_id, field)）+ 三 config 键 upsert（注册表 72→75）。**徽章不进台账**——`player_playstyles` 本身就是明细，source 白名单加 'shop'/'external'（列无 CHECK，代码白名单）。
+- **效果引擎 `src/worker/shop-ops.ts`**：六类商品的 payload 结构校验（提交 + 审批双重校验，审批校验失败 → 409 `shop_order_stale` 带原因让管理组明示拒绝）+ 语义校验（球员归属 / growable / PA 上限 / 徽章白名单 `PS_GRANTABLE_BASE_IDS` 与段内不重复（FC 源 + 发放明细合并判定）/ 角色归属位置 ∈ 热区 + 基础段不重复 / 位置相邻 + GK 三禁 + 槽位占用）+ 效果语句（game_attrs 一律 SQL `json_set` 字面量整数，空槽写 `json('null')` 与导入 `?? null` 同语义；徽章走明细表 INSERT/UPDATE + 台账计数 MIN 钳界）。**审批批结构**：效果 / 台账 / 审计全部挂 `PENDING_GUARD`（`(SELECT status FROM shop_orders WHERE id=?)='pending'`）→ 状态流转放批末（WHERE status='pending'）→ 末句 changes=0 即 409——守卫压 'pending' 而非 'approved'，并发抢单时后到批整段 no-op（v6.11.0 教训的结构化重放）。**扣费**：先 INSERT 工单锁价拿 id → 批内 `ledgerMovement(-amount, kind='shop_purchase', refType='shop_order', guardSql 余额守卫)` + 审计，守卫没过删单报「余额不足」；**退款**：`refType='shop_refund'` 吃默认幂等闸 + pending 守卫（防重复退、防给已生效单退款）。队壳单通过 = 纯状态流转 + 交付壳名写 note + 通知。
+- **ledgerMovement 语句结构订正（本次重要副产）**：原「账户 upsert 批首 + 流水批次、两条共用守卫」在带余额守卫的扣费场景有结构缺陷——流水语句读到的是本批扣完后的余额，被自己的守卫拦掉（流水缺失）。现改为：账户 upsert 留批首（幂等闸 + guardSql 对批前状态求值），流水改以 `changes() > 0` 为闸（账户真动了账才落流水，两段同生共死），balance_after 语义不变（读同批更新后余额）。全仓 12+ 调用点语义兼容（其余守卫均为状态守卫，与顺序无关）。
+- **导入保护重放（players-import.ts）**：confirmImport 每 chunk 批内 upsert 之后，按 `player_purchases` 台账重放——pa = MIN(pa + 台账SUM, fc26_pa_cap)、role / position 按槽位 json_set 回写（含清除槽 null 与 clearedRoleSlots）；「导入 + 重放」整体幂等（重跑 = 基线重置 + 再重放，tests 双跑锁定）；徽章独立明细表不受整列覆盖影响无需重放；响应带 `replayed` 计数、审计 after 带 replayedPurchases。
+- **端点**：教练端 `GET /api/shop/catalog`（价目 / PA 上限 / 豪门名单）+ `GET /api/shop/squad-state`（全队表单状态：定长 4 位热区、角色槽、徽章占用——下拉只出合法项）+ `GET/POST /api/shop/orders`（requireCoach + 绑定）；管理端 `GET/POST /api/admin/shop/orders`（status/source 筛选；代录只校验不生效）+ `POST /api/admin/shop/orders/:id/approve|reject`（权限键 `club.ledger.manage`）。通知模板 `shop_order_approved`（含外部录入标记与备注）/ `shop_order_rejected`（含理由与退款标记）。
+
+**交付（前端）**：
+- **`/shop` 消费中心（B 布局，visual companion 定稿）**：余额条 + 流水线说明条；左主栏五类商品页签（`?tab=` 深链，球员 / 角色 / 位置 / 徽章下拉全部按 squad-state 服务端规则过滤，非法选项根本不下发；提交弹确认框——拍板⑨）+ 底部球场三卡（`venueCards.tsx` 自 CoachPanel 原样迁入，端点与 invalidate 不动）；右栏我的工单常驻（待审金色置顶、行内展开看参数 / 备注 / 审核信息、拒绝理由红字）。CoachPanel 删三卡与专属 helpers，club-head 加消费中心入口卡；Home 加入口卡；路由 `/shop`（RequireUser，页内沿用 desk 三分支门禁）。
+- **管理端 `/admin/shop`（侧栏「消费」）**：工单队列（状态 / 来源 seg 筛选、来源徽标、教练单「通过 / 拒绝」与外部单「确认执行 / 作废」文案分流、拒绝必填理由 prompt、队壳单通过时 prompt 收交付壳名写 note）+ 外部录入折叠卡（俱乐部 id + 类别 + 动态参数表单 + 来源说明，创建后仍待审）。
+- **账本「消费」列**：`FINANCE_NAMED_KINDS` + `LEDGER_KIND_LABELS` 加 `shop_purchase`（扣费为负，拒绝退款同 kind 正向流水同列相抵）。
+
+**测试**：`tests/shop-orders.test.ts` 26 例——六类提交校验矩阵（含余额不足删单、豪门 403、队壳 pending 上限）、相邻判定（LB→CDM / LW→CAM 错位边合法、LM↛RW 非法）、扣费退款原子性、审批并发状态闸（引擎级：status 已翻后效果语句重放 no-op）、审批重校验 409（球员离队不静默转拒）、外部两步流、json_set 空槽语义、导入重放幂等（双跑结果一致）、相邻表 / 角色归属 / PlayStyle 名称与 ref.json 同值锁。**变异验证 M1–M8：7 处命中**（M2/M3 连带多红属同批结构，目标断言均各自红）；**M5（GK 锁）未命中 = 覆盖缺口**（该行被相邻判定 / 空槽守卫兜底），按最坏情况口径补 TC-A09b2「主位 GK + 槽 2 已有位置 → remove」钉死（此时 GK 锁是唯一拦截者）。联动基线更新：config 75 键（3 文件）、MIGRATION_FILES 尾 0060（weather-forecast TC-MIG-03 同步）、CoachPanel 表基线 4→3。e2e ⑱：/shop 页结构 + ?tab= 深链 + 匿名登录引导 + 管理端消费页（CoachPanel 入口断言本地种子无教练台时备注降级，同 ⑮ 口径）。
+
+**code-review-skill 评审修 2 处**：🔴 `squad-state` 的 zones 压缩空槽导致前端按 zones[n-1] 定位槽位时打错槽（改定长 4 位、空槽 null，展示与相邻判定补 Boolean 过滤）；🟡 徽章购买 / 银升金台账计数裸 ±1 会被 0031 前不 clamp 的历史台账顶破 DDL CHECK（改 MIN(cap, x±1)，与 growth 同款）。
+
+**记为已知不改**：拒绝通知摘要不带球员名（工单列表带，通知里是「球员 #id」占位）；`changes()` 依赖 D1 batch 同连接顺序执行语义（本地 node:sqlite 已验，生产 D1 同为单事务顺序执行）；工单无过期自动拒绝（拍板「不做」）；外部代录 club_shell 不受豪门名单限制（管理组代录本就含线下裁决留痕）。
+
 ## v6.25.0 · 显示时区偏好化：内部 UTC 达标 + 外部显示可调默认北京（2026-10-03）
 
 **状态**：**已上线**（2026-10-03 发布：与 v6.24.1 同批 push `3842154..b75cff5`（7 枚）触发 CF 自动部署 Version `cfb72cf3-b23d-45fa-82a0-256110468917` @2026-10-03T16:36:14Z；上线回读 health/players/clubs/squads/market-listings 全 200、线上入口资产与本地 6.25.0 构建 sha256 逐字节一致、线上 JS 版本串 `6.25.0`）。提交：`191e67c` feat(web) + `4a86b78` test + `5b3b387` fix(评审修复) + docs 收口枚（spec `92a1bab` 先行）。验收：typecheck 三份全清、vitest **74 文件 / 1271 例**全绿（v6.24.0 基线 72/1259，净 +2 文件 / +12 例 = 新建 `web/src/lib/datetime.test.tsx` 9 例 + `tests/datetime-display.test.ts` 3 例）、build 成功、e2e **20/20**（⑰ 新增）。测试计划 `docs/test-plans/v6.25.0-timezone-display.md`（TC-A/B/C/D/E 五组 + 变异 V1–V6 + 最坏情况口径）。判级 minor（新增用户可见能力；纯展示层）。
