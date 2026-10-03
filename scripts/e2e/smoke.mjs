@@ -1270,9 +1270,9 @@ async function main() {
       const ROUTES = [
         '/', '/players', `/players/${ids.player}`, '/clubs', `/clubs/${ids.club}`, '/bind',
         '/market', '/market/free', '/market/activation', '/market/intel', '/market/desk',
-        '/club', '/ledger', '/notifications',
+        '/shop', '/club', '/ledger', '/notifications',
         '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
-        '/admin/market', '/admin/clubs', '/admin/brands', '/admin/events', '/admin/finance',
+        '/admin/market', '/admin/clubs', '/admin/brands', '/admin/events', '/admin/shop', '/admin/finance',
         '/admin/system',
       ];
       const bad = [];
@@ -1770,6 +1770,62 @@ async function main() {
       await tzBtn.click();
       await page.keyboard.press('Escape');
       assert((await page.locator('.tz-pop').count()) === 0, 'Esc 未关闭时区下拉');
+    });
+
+    await check('⑱ 消费中心：页结构 / 匿名引导 / CoachPanel 入口 / 管理端侧栏「消费」', async () => {
+      // 教练视角（本地种子会话是管理员，含 coach 权限）：页签 + 右栏工单 + 球场三卡在位
+      await page.goto(`${BASE}/shop`, { waitUntil: 'networkidle' });
+      const t = await text();
+      assert(t.includes('消费中心'), '没进消费中心');
+      for (const tab of ['买 PA', '徽章', '角色（职责）', '位置热区', '队壳申请']) {
+        assert(t.includes(tab), `消费中心缺页签：${tab}`);
+      }
+      assert(t.includes('我的工单'), '消费中心右栏缺工单列表');
+      assert(t.includes('设施经营') && t.includes('冠名市场') && t.includes('球场档期'), '消费中心缺球场三卡');
+      // ?tab= 深链落在对应页签
+      await page.goto(`${BASE}/shop?tab=position`, { waitUntil: 'networkidle' });
+      assert(await page.locator('.seg button.on', { hasText: '位置热区' }).first().isVisible(), '?tab=position 深链没落页签');
+      // CoachPanel 消费中心入口（只挂给本队教练；本地种子会话若无教练台则备注降级，同 ⑮ 口径）
+      await page.goto(`${BASE}/clubs`, { waitUntil: 'networkidle' });
+      const clubLink = page.locator('a[href^="/clubs/"]').first();
+      await clubLink.click();
+      await page.waitForLoadState('networkidle');
+      let coachPanelVisible = false;
+      try {
+        await page.locator('text=注册工作台').first().waitFor({ state: 'visible', timeout: 3000 });
+        coachPanelVisible = true;
+      } catch {
+        coachPanelVisible = false;
+      }
+      if (coachPanelVisible) {
+        assert((await text()).includes('消费中心'), 'CoachPanel 缺「消费中心」入口卡');
+      } else {
+        console.warn('（⑱ 备注：本地教练工作台不渲染（会话非该队教练），CoachPanel 入口断言降级——组件结构由 ShopPage 用例与 CoachPanel 源码静态锁覆盖）');
+      }
+      // 匿名：登录引导，不泄露商品表单（同 ⑤d 的 /api/me 探针法）
+      const anon = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      try {
+        const ap = await anon.newPage();
+        await ap.route(/\/api\/me(\?|$)/, (r) =>
+          r.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ user: null, authMode: 'shared', authHome: null }),
+          }),
+        );
+        await ap.goto(`${BASE}/shop`, { waitUntil: 'networkidle' });
+        const anonText = await ap.locator('body').innerText();
+        assert(anonText.includes('这个页面要登录后才能用'), `匿名进 /shop 没给登录引导：${anonText.slice(0, 120)}`);
+        assert(!anonText.includes('队壳申请'), '匿名竟然看到了商品表单');
+      } finally {
+        await anon.close();
+      }
+      // 管理端侧栏第 11 项「消费」+ 页可达
+      await page.goto(`${BASE}/admin/shop`, { waitUntil: 'networkidle' });
+      const adminText = await text();
+      assert(adminText.includes('工单队列'), '管理端消费页缺工单队列');
+      assert(adminText.includes('外部录入'), '管理端消费页缺外部录入折叠卡');
+      assert((await page.locator('.admin-nav-link', { hasText: '消费' }).count()) > 0, '管理端侧栏缺「消费」项');
     });
   } finally {
     await browser.close();

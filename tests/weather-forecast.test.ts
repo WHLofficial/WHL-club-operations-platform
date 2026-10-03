@@ -272,10 +272,10 @@ describe('TC-MIG · 迁移与结构', () => {
     expect(rows[0]!.created_at).toBe('2026-09-16T00:00:00Z');
   });
 
-  it('TC-MIG-03 MIGRATION_FILES 尾部追加 0059 且全量迁移可跑', () => {
+  it('TC-MIG-03 MIGRATION_FILES 尾部追加 0060 且全量迁移可跑', () => {
     // MIGRATION_FILES 未导出（tests/d1.ts:67 为模块内常量）：读源码文本锁「尾部追加」这一动作
     const src = readFileSync(fileURLToPath(new URL('./d1.ts', import.meta.url).href), 'utf8');
-    expect(src).toMatch(/'0059_bid_guard_activation\.sql',?\s*\];/);
+    expect(src).toMatch(/'0060_shop_orders\.sql',?\s*\];/);
     const sqlite = new DatabaseSync(':memory:');
     expect(() => applyMigrations(sqlite)).not.toThrow();
     expect(

@@ -86,7 +86,8 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   'web/src/pages/admin/PlayersPage.tsx': 5,
   'web/src/pages/admin/SeasonsPage.tsx': 3,
   'web/src/pages/admin/SystemPage.tsx': 2,
-  'web/src/pages/club/CoachPanel.tsx': 4,
+  // v6.26.0：球场档期表随 BookingsCard 迁入消费中心（venueCards 三卡与 AdminShopPage 无表）
+  'web/src/pages/club/CoachPanel.tsx': 3,
   'web/src/pages/market/MarketListingOverlay.tsx': 1,
   // v6.24.0：可激活名单表随 ActivateSection 从 MarketFreePage 搬进新激活页（全树表数不变）
   'web/src/pages/market/MarketActivationPage.tsx': 1,

@@ -106,8 +106,8 @@ const RULES = { topSeatRatio: 8, emergingSlots: 2, topHeatFloor: 1.0, emergingHe
 // ─── TC-CFG ──────────────────────────────────────────────────────────────────
 
 describe('config 三新键与 champion 键（TC-CFG）', () => {
-  it('注册表 68→72，market_heat_rules 默认带 champion/deal/ignored，三档 profile 出厂值', async () => {
-    expect(CONFIG_KEYS).toHaveLength(72);
+  it('注册表 68→75，market_heat_rules 默认带 champion/deal/ignored，三档 profile 出厂值', async () => {
+    expect(CONFIG_KEYS).toHaveLength(75);
     const fx = freshEnv();
     expect(await loadHeatRules(fx.env.DB)).toEqual({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 });
     expect(await loadSatisfyConfig(fx.env.DB)).toEqual({ attendWeight: 0.5, resultWeight: 0.3, lineBuffer: 0.05, championSatisfaction: 0.1 });
