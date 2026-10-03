@@ -1718,6 +1718,59 @@ async function main() {
         assert(wide2 === 'static', `1280 intel 应取消粘性（computed=${wide2}）`);
       }
     });
+
+    // v6.25.0：显示时区偏好化——顶栏时钟图标下拉即切即生效（重渲染链 whl:tz-change → useTzPref）、
+    // 收件篮信封图标化。跑在 1280 宽屏（⑰ 前各场景已把视口拨回）。
+    await check('⑰ 显示时区：时钟下拉切 UTC 时间串即变 + 收件篮图标化 + Esc 关闭', async () => {
+      await page.goto(`${BASE}/ledger`, { waitUntil: 'networkidle' });
+      const tzBtn = page.locator('button.tz-btn');
+      assert(await tzBtn.isVisible(), '顶栏时钟图标（button.tz-btn）不可见');
+      const inbox = page.locator('a.inbox-link[aria-label="站内信收件篮"]');
+      assert(await inbox.isVisible(), '收件篮信封图标（a.inbox-link）不可见');
+
+      // 未读红点：有无取决于会话未读数（>0 才渲染），在场时必须带条数播报
+      if (await page.locator('.inbox-link .inbox-unread-dot').count() > 0) {
+        const dotLabel = await page.locator('.inbox-unread-dot').first().getAttribute('aria-label');
+        assert(dotLabel && /\d+ 条未读/.test(dotLabel), `红点缺 aria-label 条数播报（=${dotLabel}）`);
+      } else {
+        console.warn('（⑰ 备注：会话无未读，红点断言降级——静态与单测兜底）');
+      }
+
+      // 打开下拉：默认档必须是北京时间
+      await tzBtn.click();
+      const pop = page.locator('.tz-pop');
+      assert(await pop.isVisible(), '时区下拉未弹出');
+      const checked = await pop.locator('button[aria-checked="true"]').innerText();
+      assert(checked.includes('北京时间'), `默认选中档应为北京时间（实际=${checked.trim()}）`);
+
+      // 账本首行时间串：切 UTC 后必须变（同一条流水北京时间 21:xx vs UTC 13:xx）
+      const cell = page.locator('td.mono.ledger-time').first();
+      const hasRow = (await cell.count()) > 0;
+      if (!hasRow) {
+        console.warn('（⑰ 备注：账本无流水行，时间串变化断言降级——单测 datetime.test 已钉死口径）');
+      } else {
+        const before = (await cell.innerText()).trim();
+        await pop.locator('button', { hasText: 'UTC' }).click();
+        assert(
+          (await page.evaluate(() => localStorage.getItem('whl.tz'))) === 'utc',
+          '切 UTC 后 localStorage whl.tz 未写入 utc',
+        );
+        await page.waitForTimeout(300); // React 重渲染
+        const after = (await cell.innerText()).trim();
+        assert(after !== before, `切 UTC 后时间串未变化（前后都=${before}）——whl:tz-change 重渲染链失效`);
+      }
+
+      // 切回默认档 + Esc 关闭下拉
+      await tzBtn.click();
+      await page.locator('.tz-pop button', { hasText: '北京时间' }).click();
+      assert(
+        (await page.evaluate(() => localStorage.getItem('whl.tz'))) === 'asia/shanghai',
+        '切回北京时间失败',
+      );
+      await tzBtn.click();
+      await page.keyboard.press('Escape');
+      assert((await page.locator('.tz-pop').count()) === 0, 'Esc 未关闭时区下拉');
+    });
   } finally {
     await browser.close();
     clearSession();
