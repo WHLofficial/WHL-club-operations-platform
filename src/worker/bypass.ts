@@ -6,7 +6,8 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { releaseFeeBounds } from '../core/negotiation-rules.ts';
 import { rcChangeFee, terminationFee, freeAgentFee, matchDiff, FORCED_AUCTION_PRICE } from '../core/bypass-rules.ts';
-import { round2, shanghaiDateStr } from '../core/market-rules.ts';
+import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
+import { loadMarketContext } from './market-context.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
@@ -533,16 +534,29 @@ export async function createForcedAuction(
   await ensureNotInFlight(db, playerId);
 
   const audit = createAuditStatement(db);
+  // v6.24.1：强制拍并入统一截止规则——创建即按 bidDeadline 首算落 deadline_at（无人出价同计静默），
+  // 与普通挂牌同轨：卡片读秒、到期提前下架收费；出口仍保留窗尾收口与管理方取消
+  const listedAt = new Date();
+  const listedDay = shanghaiDateStr(listedAt.getTime());
+  const marketCtx = await loadMarketContext(db);
+  const firstDeadline = bidDeadline({
+    lastBidAt: null,
+    listedDay,
+    now: listedAt,
+    deadlineHours: marketCtx.deadlineHours,
+    silenceHours: marketCtx.silenceHours,
+    calendar: marketCtx.calendar,
+  }).deadlineAt;
   const statements = [
     db
       .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`)
       .bind(playerId, player.club_id),
     db
       .prepare(
-        `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, season, window_seq)
-         VALUES (?, ?, 'forced', ?, 'listed', ${nowSql()}, ?, ?, ?)`,
+        `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, deadline_at, season, window_seq)
+         VALUES (?, ?, 'forced', ?, 'listed', ${nowSql()}, ?, ?, ?, ?)`,
       )
-      .bind(playerId, player.club_id, FORCED_AUCTION_PRICE, shanghaiDateStr(Date.now()), win.season, win.windowSeq),
+      .bind(playerId, player.club_id, FORCED_AUCTION_PRICE, listedDay, firstDeadline, win.season, win.windowSeq),
     audit({
       actor,
       action: 'forced_auction_create',

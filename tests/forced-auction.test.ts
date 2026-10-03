@@ -219,27 +219,39 @@ describe('强制拍卖（4.4.5）', () => {
     expect(player).toEqual({ club_id: fx.buyer, status: 'normal' });
   });
 
-  it('评审修复 P0-2：强制拍 listed 到「次日 21:00」也不提前下架（出口只有窗尾收口/管理方取消）', async () => {
+  it('v6.24.1：创建即按 bidDeadline 首算落 deadline_at，列表回传落库列（与普通挂牌同轨）', async () => {
     const fx = await seedAuction();
     const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
     expect(create.status).toBe(201);
     const listingId = ((await create.json()) as { listingId: number }).listingId;
-    // 强制拍挂牌不落 deadline_at；把挂牌与静默计时拨到 12 天前，实时算口径下早已「到期」
+    const row = sqlGet<{ deadline_at: string | null }>(fx.sqlite, 'SELECT deadline_at FROM listings WHERE id = ?', listingId);
+    expect(row?.deadline_at).not.toBeNull();
+    const list = await get('/api/market/listings?status=all', 'tok-admin', fx.env);
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { listings: { id: number; deadlineAt: string | null }[] };
+    // 回传的是落库列本身，不是实时另算的幻影
+    expect(body.listings.find((r) => r.id === listingId)?.deadlineAt).toBe(row?.deadline_at);
+  });
+
+  it('v6.24.1：forced listed 到期无人出价 → 提前下架 + 10% 下架费（0.1m），球员还原', async () => {
+    const fx = await seedAuction();
+    const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    // 列优先口径：把落库截止拨到过去（模拟到期），不动 listed_day / last_bid_at
     fx.sqlite.exec(
-      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
-                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
+      `UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour') WHERE id = ${listingId}`,
     );
     const list = await get('/api/market/listings?status=all', 'tok-admin', fx.env);
     expect(list.status).toBe(200);
-    const body = (await list.json()) as { listings: { id: number; status: string; deadlineAt: string | null }[] };
-    const row = body.listings.find((r) => r.id === listingId);
-    expect(row?.status).toBe('listed'); // 不被判到期下架
-    expect(row?.deadlineAt ?? null).toBeNull(); // 也不回传实时算出的幻影倒计时
+    expect(sqlGet<{ status: string; deadline_note: string }>(fx.sqlite, 'SELECT status, deadline_note FROM listings WHERE id = ?', listingId)).toMatchObject({
+      status: 'delisted',
+      deadline_note: '截止时刻无人出价',
+    });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 45')?.status).toBe('normal');
     expect(
-      sqlGet<{ status: string; deadline_note: string | null }>(fx.sqlite, 'SELECT status, deadline_note FROM listings WHERE id = ?', listingId),
-    ).toMatchObject({ status: 'listed', deadline_note: null });
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 45')?.status).toBe('listed');
-    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'delist_fee'")?.n).toBe(0);
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND club_id = ${fx.club}`)?.amount,
+    ).toBe(-0.1);
   });
 
   it('窗尾无人出价 → 下架收 10% 挂牌费（0.1m）', async () => {

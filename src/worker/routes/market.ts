@@ -154,10 +154,9 @@ app.get('/market/listings', async (c) => {
       let deadlineAt: string | null = null;
       // 截止绝对时刻化（v6.4.0）：优先读落库列（出价时按 bidDeadline 算定），存量行 NULL 回落实时算。
       // v6.24.0：挂牌即落 deadline_at，listed 的普通挂牌也回截止时刻（卡片倒计时锚点）；
-      // 激活挂牌的首价窗看 activationDeadline，不进本判定
-      // 评审修复（P0-2）：listed 提前收口/回传截止时刻只对普通挂牌生效；activation 看首价窗列，
-      // forced 在首笔出价前没有 deadline_at（挂牌不落列），实时算出来的「次日 21:00」是幻影倒计时
-      if ((r.status === 'bidding' || (r.status === 'listed' && r.type === 'normal')) && r.listed_day !== null) {
+      // v6.24.1：强制拍卖创建即落列，与普通挂牌同轨回传；
+      // 激活挂牌的首价窗看 activationDeadline，不进本判定（唯一豁免）
+      if ((r.status === 'bidding' || (r.status === 'listed' && r.type !== 'activation')) && r.listed_day !== null) {
         deadlineAt =
           r.deadline_at ??
           bidDeadline({
@@ -675,8 +674,8 @@ app.get('/market/listings/:id', async (c) => {
 
   let deadlineAt: string | null = null;
   // v6.24.0：listed 的普通挂牌也回截止时刻（挂牌即落 deadline_at）；激活首价窗看 activationDeadline
-  // 评审修复（P0-2）：与列表口径一致——listed 的 forced 不给倒计时（首笔出价前无截止时刻）
-  if ((listing.status === 'bidding' || (listing.status === 'listed' && listing.type === 'normal')) && listing.listed_day !== null) {
+  // v6.24.1：与列表口径一致——强制拍卖创建即落列，listed 同轨回传（激活仍豁免，看首价窗列）
+  if ((listing.status === 'bidding' || (listing.status === 'listed' && listing.type !== 'activation')) && listing.listed_day !== null) {
     // 优先读落库列（v6.4.0 改动 A），存量行 NULL 回落实时算
     deadlineAt =
       listing.deadline_at ??

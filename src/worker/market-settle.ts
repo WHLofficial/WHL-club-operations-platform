@@ -388,10 +388,10 @@ export async function settleOverdue(
       }
       continue;
     }
-    // v6.24.0 评审修复（P0-2）：listed 的提前收口只对普通挂牌生效。激活挂牌首价窗由上方
-    // expired / remnants 两段处理；强制拍卖挂牌不落 deadline_at（首笔出价才落），
-    // 若按实时算会被判「挂牌次日 21:00 到期」而提前下架收费——它的合法出口只有窗尾收口与管理方取消
-    if (row.status === 'listed' && row.type !== 'normal') continue;
+    // v6.24.1：listed 的提前收口只豁免激活挂牌——首价窗由上方 expired / remnants 两段处理；
+    // 强制拍卖自创建即落 deadline_at（bypass.ts），与普通挂牌同轨：到期无人出价 → 提前下架收费，
+    // 出口仍保留窗尾收口与管理方取消
+    if (row.status === 'listed' && row.type === 'activation') continue;
     // 改动 A 两级判定：落库列优先（出价时刻算定的绝对截止，不容漂移），存量行 NULL 回落实时算
     let met: boolean;
     let noteDay: string;
