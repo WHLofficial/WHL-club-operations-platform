@@ -186,8 +186,8 @@ export interface SquadStatePlayer {
   growable: boolean;
   pa: number | null;
   position: string | null;
-  /** 热区（主位在前；名称口径与效果引擎同一份 POSITION_BY_ID） */
-  zones: string[];
+  /** 热区，定长 4 位（下标 = 槽号 - 1，主位在前，空槽 null） */
+  zones: (string | null)[];
   roles: { slot: number; roleId: number }[];
   /** 已拥有的徽章（基础 ID，FC 源 + 发放明细合并去重） */
   ownedSilver: number[];
@@ -218,6 +218,9 @@ export function squadStateOf(
     for (const s of usedSlots) if (s >= min && s <= max) n += 1;
     return n;
   };
+  // zones 定长 4 位（下标 = 槽号 - 1，空槽 null）：前端按 zones[n-1] 定位槽位，压缩空槽会打错槽
+  const zoneSlots: (string | null)[] = zones.slotIds.map((id) => (id !== null ? POSITION_BY_ID[id] ?? null : null));
+  if (zoneSlots[0] === null) zoneSlots[0] = core.position ?? null;
   return {
     id: row.id,
     name: row.display_name ?? row.name,
@@ -225,7 +228,7 @@ export function squadStateOf(
     growable: row.growable === 1,
     pa: row.pa,
     position: row.position,
-    zones: zones.names,
+    zones: zoneSlots,
     roles: roles.flatMap((r, i) => (r !== null ? [{ slot: i + 1, roleId: r }] : [])),
     ownedSilver: [...ownedSilver].sort((a, b) => a - b),
     ownedGold: [...ownedGold].sort((a, b) => a - b),
@@ -310,7 +313,7 @@ export async function prepareShopPlan(
             .bind(actor, orderId),
           db2
             .prepare(
-              `UPDATE players SET ${capCol} = ${capCol} + 1, updated_at = ${nowSql()}
+              `UPDATE players SET ${capCol} = MIN(${capCol} + 1, ${kind === 'silver' ? 15 : 3}), updated_at = ${nowSql()}
                WHERE id = ${player.id} AND ${pendingGuard()}`,
             )
             .bind(orderId),
@@ -345,7 +348,7 @@ export async function prepareShopPlan(
             .bind(orderId),
           db2
             .prepare(
-              `UPDATE players SET badges_silver = MAX(badges_silver - 1, 0), badges_gold = badges_gold + 1, updated_at = ${nowSql()}
+              `UPDATE players SET badges_silver = MAX(badges_silver - 1, 0), badges_gold = MIN(badges_gold + 1, 3), updated_at = ${nowSql()}
                WHERE id = ${player.id} AND ${pendingGuard()}`,
             )
             .bind(orderId),

@@ -1920,7 +1920,8 @@ export interface ShopSquadStatePlayer {
   growable: boolean;
   pa: number | null;
   position: string | null;
-  zones: string[];
+  /** 热区，定长 4 位（下标 = 槽号 - 1，主位在前，空槽 null） */
+  zones: (string | null)[];
   roles: { slot: number; roleId: number }[];
   ownedSilver: number[];
   ownedGold: number[];

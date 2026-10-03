@@ -434,7 +434,7 @@ function RoleCard({ prices, players, loading }: { prices: ShopPrices; players: S
       </div>
       {player && (
         <p className="hint" style={{ marginBottom: 0 }}>
-          热区 {player.zones.join(' / ')} · 现有角色{' '}
+          热区 {player.zones.filter(Boolean).join(' / ')} · 现有角色{' '}
           {player.roles.length === 0 ? (
             <span>无</span>
           ) : (
@@ -579,7 +579,7 @@ function PositionCard({ prices, players, loading }: { prices: ShopPrices; player
           <span className="badge" title="第一位置不可动">
             🔒 {player.zones[0]}（主位）
           </span>
-          {player.zones.slice(1).map((z, i) => (
+          {player.zones.slice(1).filter(Boolean).map((z, i) => (
             <span key={i} className="badge" style={{ marginLeft: 6 }}>
               {z}
             </span>
