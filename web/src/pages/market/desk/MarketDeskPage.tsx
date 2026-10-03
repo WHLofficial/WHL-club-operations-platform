@@ -1,6 +1,7 @@
 // 转会台 · 我的转会台 /market/desk（v6.23.0）：市场 / 报价 / 谈判三域前端合并的落点（纯前端信息架构）。
-// 区块顺序：流水线说明条 → 待办速览 → 谈判区 → 报价区 → 挂牌+出价区；
-// ?tab=nego|offers|mine 负责深链定位（进入/切换时把对应区块滚进视野），box/status 也持在本页 searchParams。
+// 区块顺序：流水线说明条 → 待办速览 → 签约谈判 → 收到报价 → 我的出价；
+// ?tab=nego|offers|bids 负责深链定位（进入/切换时把对应区块滚进视野），box/status 也持在本页 searchParams；
+// v6.24.0：出价区 tab 键 mine → bids（锚 id 同步 desk-bids），旧链 ?tab=mine 作为 alias 仍落到 bids。
 import { useEffect, useRef } from 'react';
 import { useIsFetching } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
@@ -10,12 +11,13 @@ import ListingsBidsSection from './ListingsBidsSection.tsx';
 import NegotiationsSection, { useMyNegotiations } from './NegotiationsSection.tsx';
 import OffersSection from './OffersSection.tsx';
 
-type DeskTab = 'nego' | 'offers' | 'mine';
+type DeskTab = 'nego' | 'offers' | 'bids';
 
 export default function MarketDeskPage() {
   const [params, setParams] = useSearchParams();
   const tabRaw = params.get('tab');
-  const tab: DeskTab = tabRaw === 'offers' || tabRaw === 'mine' ? tabRaw : 'nego';
+  // v6.24.0：出价区键 mine → bids；旧链接 ?tab=mine 是 alias（直接渲染出价区，不改写 URL、不发重定向）
+  const tab: DeskTab = tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine' ? (tabRaw === 'mine' ? 'bids' : tabRaw) : 'nego';
   const box = params.get('box') === 'out' ? 'out' : 'in';
   const status = params.get('status') === 'all' ? 'all' : 'pending';
 
@@ -112,7 +114,7 @@ export default function MarketDeskPage() {
       ) : !isCoach || myClub === null ? (
         <div className="card empty-state">
           <p className="muted">
-            {isCoach ? '还没有绑定俱乐部。先到球队中心完成绑定，再来挂牌和盯价。' : '这里只对教练开放。挂牌、报价与谈判都是教练操作，观众视角看看就好。'}
+            {isCoach ? '还没有绑定俱乐部。先到球队中心完成绑定，再来盯价和谈判。' : '这里只对教练开放。报价、出价与谈判都是教练操作，观众视角看看就好。'}
           </p>
         </div>
       ) : (
@@ -137,7 +139,7 @@ export default function MarketDeskPage() {
             <button type="button" className={tab === 'nego' ? 'on' : ''} onClick={() => goTab('nego')}>
               进行中谈判 <span className="mono">{activeNegoCount}</span>
             </button>
-            <button type="button" className={tab === 'mine' ? 'on' : ''} onClick={() => goTab('mine')}>
+            <button type="button" className={tab === 'bids' ? 'on' : ''} onClick={() => goTab('bids')}>
               竞价中 <span className="mono">{activeBidCount}</span>
             </button>
           </div>

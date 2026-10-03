@@ -106,8 +106,8 @@ export default function OffersSection({
   const detailData = detail.data ?? null;
 
   return (
-    <section id="desk-offers" aria-label="转会报价">
-      <h3>转会报价</h3>
+    <section id="desk-offers" aria-label="收到报价">
+      <h3>收到报价</h3>
       <p className="hint">
         私下议价：对别队真人球员送报价，双方轮流出价，<span className="mono">同意</span>即自动挂牌并把报价方锁成领先出价；
         报价即冻结资金，了结（成交 / 拒绝 / 撤回 / 过期）后自动退回。进转会名单的球员达线自动同意、低于自动拒。

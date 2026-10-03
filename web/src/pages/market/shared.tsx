@@ -1,4 +1,4 @@
-// 市场四页共享件（v2.2.0 拆页，v6.18.0 扩为四页）：常量、格式化、子导航。
+// 市场共享件（v2.2.0 拆页，v6.18.0 扩为四页，v6.24.0 扩为五页）：常量、格式化、子导航。
 // 数据层 hooks 在 lib/queries.ts（TanStack Query）。
 import { NavLink } from 'react-router';
 
@@ -50,12 +50,16 @@ export function MarketNav() {
       <NavLink to="/market" end className={({ isActive }) => (isActive ? 'on' : '')}>
         在售市场
       </NavLink>
+      <NavLink to="/market/free" className={({ isActive }) => (isActive ? 'on' : '')}>
+        海捞
+      </NavLink>
+      {/* v6.24.0：独立成页（激活挂牌 + 首价落定） */}
+      <NavLink to="/market/activation" className={({ isActive }) => (isActive ? 'on' : '')}>
+        激活
+      </NavLink>
       {/* v6.23.0：旧「我的」(/market/mine) 并入转会台，NavLink 不用 end —— desk 内切 tab 时本项保持高亮 */}
       <NavLink to="/market/desk" className={({ isActive }) => (isActive ? 'on' : '')}>
         我的转会台
-      </NavLink>
-      <NavLink to="/market/free" className={({ isActive }) => (isActive ? 'on' : '')}>
-        海捞
       </NavLink>
       <NavLink to="/market/intel" className={({ isActive }) => (isActive ? 'on' : '')}>
         市场情报

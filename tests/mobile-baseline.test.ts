@@ -13,7 +13,7 @@
 // `style={{ width: 320 }}`、抽屉关闭钮的 36px 命中区被删——组件测试与单测都不会红；e2e ⑫ 也只在
 // 375 视口真溢出时才红（等看见破版已经晚了）。所以用扫描兜住「下批重构的回归」。
 //
-// 口径（测试计划「最坏情况口径」）：遍历 web/src 全树 *.tsx（含 *.test.tsx，不抽样，当前 51 个）逐文件扫；
+// 口径（测试计划「最坏情况口径」）：遍历 web/src 全树 *.tsx（含 *.test.tsx，不抽样，当前 52 个）逐文件扫；
 // 失败信息统一 `文件:行 …`，让 TC-SWP 能直接点名。
 //
 // 已知边界（宁枉勿纵：命中只让人来看一眼，与 tests/core-zero-import.test.ts 同风格）：
@@ -51,8 +51,8 @@ function collectTsx(dir: string, out: string[] = []): string[] {
 }
 
 const TSX_FILES = collectTsx(WEB_SRC).sort();
-/** 本批实测全树数（51，含 5 个 *.test.tsx；v6.23.0 转会台 +4 新 -3 旧）：只增不减——跌破只可能是遍历器漏目录（最大组口径，不许抽样） */
-const TSX_BASELINE = 51;
+/** 本批实测全树数（52，含 5 个 *.test.tsx；v6.23.0 转会台 +4 新 -3 旧，v6.24.0 激活页 +1）：只增不减——跌破只可能是遍历器漏目录（最大组口径，不许抽样） */
+const TSX_BASELINE = 52;
 
 function read(relPath: string): string {
   return readFileSync(relPath, 'utf8');
@@ -88,7 +88,8 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   'web/src/pages/admin/SystemPage.tsx': 2,
   'web/src/pages/club/CoachPanel.tsx': 4,
   'web/src/pages/market/MarketListingOverlay.tsx': 1,
-  'web/src/pages/market/MarketFreePage.tsx': 1,
+  // v6.24.0：可激活名单表随 ActivateSection 从 MarketFreePage 搬进新激活页（全树表数不变）
+  'web/src/pages/market/MarketActivationPage.tsx': 1,
   'web/src/pages/market/MarketIntelPage.tsx': 1,
   // v6.23.0 转会台：原 Negotiations/Offers/MarketMinePage 三页的表格随代码搬进 desk 三区（条数不变）
   'web/src/pages/market/desk/ListingsBidsSection.tsx': 1,
@@ -649,14 +650,14 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     expect(read(SHARED), 'MarketNav 的「我的转会台」应指向 /market/desk').toContain('to="/market/desk"');
   });
 
-  it('导航收敛：TopBar 单入口「转会中心」、MarketNav 四项（V3/V5 红点）', () => {
+  it('导航收敛：TopBar 单入口「转会中心」、MarketNav 五项（V3/V5 红点）', () => {
     const top = read(TOPBAR);
     expect(top, 'TopBar 缺「转会中心」入口').toContain('转会中心');
     expect(top, 'TopBar 仍留着「转会报价」旧入口').not.toContain('转会报价');
     expect(top, 'TopBar 仍留着「签约谈判」旧入口').not.toContain('签约谈判');
 
     const nav = read(SHARED);
-    const labels = ['在售市场', '我的转会台', '海捞', '市场情报'];
+    const labels = ['在售市场', '海捞', '激活', '我的转会台', '市场情报'];
     let prev = -1;
     for (const label of labels) {
       const at = nav.indexOf(label);
@@ -664,7 +665,7 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
       expect(at, `MarketNav「${label}」顺序不对（应排在上一项之后）`).toBeGreaterThan(prev);
       prev = at;
     }
-    for (const href of ['to="/market"', 'to="/market/free"', 'to="/market/intel"']) {
+    for (const href of ['to="/market"', 'to="/market/free"', 'to="/market/activation"', 'to="/market/desk"', 'to="/market/intel"']) {
       expect(nav, `MarketNav 缺 ${href} 入口`).toContain(href);
     }
   });
@@ -678,20 +679,35 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     expect(app, 'App.tsx 不应再挂 /market/mine 路由').not.toContain('path="/market/mine"');
 
     const desk = read(DESK);
-    expect(desk, '?tab 只认 nego|offers|mine，缺省应落 nego').toContain("tabRaw === 'offers' || tabRaw === 'mine' ? tabRaw : 'nego'");
+    expect(desk, '?tab 只认 nego|offers|bids（mine 是 bids 的 alias），缺省应落 nego').toContain(
+      "tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine' ? (tabRaw === 'mine' ? 'bids' : tabRaw) : 'nego'",
+    );
     // 流水线说明条与三区块锚（V6：整块删掉就红；e2e ⑤c 另有真渲染断言）
     expect(desk, '转会台缺流水线说明条').toContain('aria-label="转会流水线"');
     expect(desk, '流水线说明条缺「报价被接受 ≠ 成交」机制句').toContain('报价被接受 ≠ 成交');
-    // 三个锚 id 分别住在三区组件里，desk 页负责顺序（谈判 → 报价 → 挂牌+出价）
+    // 三个锚 id 分别住在三区组件里，desk 页负责顺序（签约谈判 → 收到报价 → 我的出价）
     for (const [file, id] of [
       ['web/src/pages/market/desk/NegotiationsSection.tsx', 'desk-nego'],
       ['web/src/pages/market/desk/OffersSection.tsx', 'desk-offers'],
-      ['web/src/pages/market/desk/ListingsBidsSection.tsx', 'desk-mine'],
+      ['web/src/pages/market/desk/ListingsBidsSection.tsx', 'desk-bids'],
     ] as const) {
       expect(read(file), `${file} 缺区块锚 id="${id}"`).toContain(`id="${id}"`);
     }
     const order = ['<NegotiationsSection', '<OffersSection', '<ListingsBidsSection'].map((tag) => desk.indexOf(tag));
     expect(order.every((i) => i > -1), '转会台缺区块组件渲染').toBe(true);
-    expect(order, '区块顺序应为 谈判 → 报价 → 挂牌+出价').toEqual([...order].sort((a, b) => a - b));
+    expect(order, '区块顺序应为 签约谈判 → 收到报价 → 我的出价').toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('激活拆成独立页：/market/activation 路由 + 首价入口；海捞页只剩查询（TC-C03）', () => {
+    const app = read(APP);
+    expect(app, 'App.tsx 缺 /market/activation 路由').toContain('path="/market/activation"');
+
+    const activation = read(`${WEB_SRC}/pages/market/MarketActivationPage.tsx`);
+    expect(activation, '激活页缺激活端点调用').toContain('/api/market/activations');
+    expect(activation, '激活页缺「落激活首价」入口（activation-first）').toContain('mode="activation-first"');
+
+    const free = read(`${WEB_SRC}/pages/market/MarketFreePage.tsx`);
+    expect(free, '海捞页仍留着激活逻辑（应只剩海捞查询）').not.toContain('/api/market/activations');
+    expect(free, '海捞页缺海捞查询区').toContain('SeaLookupSection');
   });
 });

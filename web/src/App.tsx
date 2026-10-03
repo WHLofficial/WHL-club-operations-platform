@@ -14,9 +14,11 @@ import Ledger from './pages/Ledger.tsx';
 import Notifications from './pages/Notifications.tsx';
 import { APP_VERSION } from './lib/version.ts';
 
-// 市场四页按页拆 chunk（v2.2.0 起三页，v6.18.0 加市场情报）：在售市场/市场情报公开，海捞/转会台要登录
+// 市场五页按页拆 chunk（v2.2.0 起三页，v6.18.0 加市场情报，v6.24.0 加激活页）：在售市场/市场情报公开，海捞/激活/转会台要登录
 const MarketBoardPage = lazy(() => import('./pages/market/MarketBoardPage.tsx'));
 const MarketFreePage = lazy(() => import('./pages/market/MarketFreePage.tsx'));
+// 激活（v6.24.0）：从海捞页拆出，激活挂牌 + 首价落定一页走完
+const MarketActivationPage = lazy(() => import('./pages/market/MarketActivationPage.tsx'));
 const MarketIntelPage = lazy(() => import('./pages/market/MarketIntelPage.tsx'));
 // 转会台（v6.23.0）：市场「我的」+ 转会报价 + 签约谈判三域合并成一页
 const MarketDeskPage = lazy(() => import('./pages/market/desk/MarketDeskPage.tsx'));
@@ -106,6 +108,15 @@ export default function App() {
             element={
               <RequireUser>
                 <MarketFreePage />
+              </RequireUser>
+            }
+          />
+          {/* 激活（v6.24.0）：从海捞页拆出，须登录 */}
+          <Route
+            path="/market/activation"
+            element={
+              <RequireUser>
+                <MarketActivationPage />
               </RequireUser>
             }
           />
