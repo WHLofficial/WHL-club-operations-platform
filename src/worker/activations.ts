@@ -204,6 +204,8 @@ export async function submitMatch(
   if (listing.seller_club_id !== sellerClubId) throw new HttpError(403, '只有被激活方可以决定是否匹配');
   if (listing.status !== 'matched_pending') throw new HttpError(409, '这单激活不在匹配等待期');
 
+  // 匹配 / 放行的基准都是「当前 active 最高出价」（v6.24.0：激活落价后进公开竞价，
+  // 结算期把最高价定格进 matched_pending，故这里取到的就是竞价最终价，不是首价/激活价）
   const bid = await db
     .prepare(`SELECT id, club_id, amount FROM bids WHERE listing_id = ? AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1`)
     .bind(listingId)

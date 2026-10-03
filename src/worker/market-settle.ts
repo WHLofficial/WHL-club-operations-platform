@@ -1,7 +1,9 @@
 // 惰性结算（TECH_DESIGN §6.5）：任何挂牌相关请求与 cron tick 都先跑一遍 settleOverdue。
-// 1) bidding 且交易时段静默满 3h → pending_review（transfer + 审核任务一并建好，UNIQUE 幂等）
+// 1) bidding 且交易时段静默满 3h → pending_review（transfer + 审核任务一并建好，UNIQUE 幂等）；
+//    v6.24.0 起挂牌即落 deadline_at，listed 也走同一到期判定：到期无人出价 → 提前下架收费
 // 2) 挂牌所属窗口已 closed：listed（无人出价）→ delisted + 下架费；bidding → 强制进入待审
-// 3) 激活挂牌（4.4.2.2）出价窗已过而激活方未落价 → 激活无效（不收费，球员还原训练营态）
+// 3) 激活挂牌（4.4.2.2）出价窗已过而激活方未落价 → 激活无效（不收费，球员还原训练营态）；
+//    激活方落价后转公开竞价，截止后按被激活方合同类型分流（训练营 → 待审；正式 → 24h 匹配等待）
 // 4) pending_review 缺单据的自愈（结算与建单非原子崩溃后补齐）
 // 全部幂等：状态迁移走守卫 UPDATE，重复执行无副作用。
 import type { Env } from './env.ts';
@@ -39,6 +41,7 @@ interface ActiveListingRow {
   season: number | null;
   window_seq: number | null;
   window_status: string | null;
+  bid_count: number;
 }
 
 export interface ListingCore {
@@ -231,6 +234,36 @@ function noteText(day: string, hours: [number, number], calendar: TradeCalendar)
   return `截止判定：${Number(m)}月${Number(d)}日 ${hours[0]}:00-${hours[1]}:00${suffix}`;
 }
 
+// v6.24.0：截止后按合同类型分流（只对激活挂牌）——被激活方对该球员的现行合同是正式合同
+// （即非训练营）时，先给 24h 匹配等待（match_deadline = now + matchWindowHours，匹配基准 = 竞价最高价）；
+// 训练营合同条款固定（固定 5m，无匹配可言）与普通挂牌照旧直接进待审。
+// 返回 matching = 已转匹配等待，settled/already 与 settleListingForReview 同义。
+async function settleByContractType(
+  env: Env,
+  core: ListingCore,
+  actor: number | null,
+  origin: AuditOrigin,
+  fromStatus: 'bidding' | 'listed',
+  ctx: MarketContext,
+): Promise<'settled' | 'matching' | 'already'> {
+  if (core.type === 'activation') {
+    const contract = await env.DB.prepare('SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1 LIMIT 1')
+      .bind(core.player_id)
+      .first<{ contract_type: string | null }>();
+    if (contract?.contract_type !== 'trainee') {
+      const matchDeadline = new Date(Date.now() + ctx.matchWindowHours * 3600_000).toISOString();
+      const r = await env.DB.prepare(
+        `UPDATE listings SET status = 'matched_pending', match_deadline = ?, deadline_at = NULL, deadline_note = NULL
+         WHERE id = ? AND status = ?`,
+      )
+        .bind(matchDeadline, core.id, fromStatus)
+        .run();
+      return (r.meta.changes ?? 0) > 0 ? 'matching' : 'already';
+    }
+  }
+  return settleListingForReview(env.DB, core, actor, origin, fromStatus);
+}
+
 // 全量惰性结算入口：市场相关请求与 cron tick 都走这里。
 // origin 必填：这条结算到底是哪条入口触发的，由调用方声明（见 lib/audit.ts 的通道取值）。
 export async function settleOverdue(
@@ -263,24 +296,22 @@ export async function settleOverdue(
     if (await voidExpiredActivation(db, row.id, row.player_id, actor, origin)) summary.voided++;
   }
 
-  // 激活首价已落但未收口（收口前崩溃的残留）：listed 已过期且带出价、或 bidding → 直接进待审
+  // 激活首价已落但未收口（收口前崩溃的残留）：listed 已过期且带出价（v6.24.0 后新单不会停在此态，
+  // 仅存量/异常残留）→ 与正常截止同口径分流（正式合同进匹配等待，训练营直接进待审）
   const remnants = await db
     .prepare(
-      `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.status, l.season, l.window_seq
+      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.season, l.window_seq
        FROM listings l
-       WHERE l.type = 'activation' AND (
-         (l.status = 'listed' AND l.activation_deadline IS NOT NULL AND l.activation_deadline < ?
-           AND EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id))
-         OR l.status = 'bidding'
-       )
+       WHERE l.type = 'activation' AND l.status = 'listed'
+         AND l.activation_deadline IS NOT NULL AND l.activation_deadline < ?
+         AND EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id)
        ORDER BY l.id LIMIT 100`,
     )
     .bind(now.toISOString())
     .all<ListingCore & { status: string }>();
   for (const row of remnants.results) {
-    if ((await settleListingForReview(db, row, actor, origin, row.status === 'bidding' ? 'bidding' : 'listed')) === 'settled') {
-      summary.settled++;
-    }
+    const r = await settleByContractType(env, row, actor, origin, 'listed', ctx);
+    if (r === 'settled') summary.settled++;
   }
 
   // 匹配窗到期（4.4.2.4）：被激活方 24h 内未提交匹配 → 按激活价（首价）成交进待审
@@ -308,7 +339,8 @@ export async function settleOverdue(
   const active = await db
     .prepare(
       `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_day, l.last_bid_at, l.deadline_at, l.season, l.window_seq,
-              sw.status AS window_status
+              sw.status AS window_status,
+              (SELECT COUNT(*) FROM bids WHERE listing_id = l.id) AS bid_count
        FROM listings l
        LEFT JOIN season_windows sw ON sw.season = l.season AND sw.window_seq = l.window_seq
        WHERE l.status IN ('listed', 'bidding')
@@ -328,13 +360,17 @@ export async function settleOverdue(
     };
     const windowClosed = row.window_status === 'closed';
     if (windowClosed) {
-      // 窗尾收口：没人出价的下架收费；还有竞价的强制进待审（成交确认交管理组裁量）
+      // 窗尾收口：没人出价的下架收费；还有竞价的强制收口（成交确认交管理组裁量）
       if (row.status === 'listed') {
         if ((await delistUnbid(db, core, ctx, actor, origin)) === 'delisted') summary.delisted++;
-      } else if ((await settleListingForReview(db, core, actor, origin)) === 'settled') summary.settled++;
+      } else {
+        const r = await settleByContractType(env, core, actor, origin, 'bidding', ctx);
+        if (r === 'settled') summary.settled++;
+      }
       continue;
     }
-    if (row.status !== 'bidding') continue; // listed 且窗未关：等窗尾
+    // v6.24.0：激活挂牌的首价窗（activation_deadline）由上方 expired / remnants 两段处理，不进本判定
+    if (row.status === 'listed' && row.type === 'activation') continue;
     // 改动 A 两级判定：落库列优先（出价时刻算定的绝对截止，不容漂移），存量行 NULL 回落实时算
     let met: boolean;
     let noteDay: string;
@@ -355,12 +391,19 @@ export async function settleOverdue(
       noteDay = deadline.deadlineDay;
     }
     if (met) {
-      if ((await settleListingForReview(db, core, actor, origin)) === 'settled') summary.settled++;
+      // v6.24.0：listed 到期同样收口——无人出价 → 提前下架（原窗尾口径）；
+      // 有人出价（报价成交自动挂牌等特殊路径）走原静默结算并按合同类型分流
+      if (row.status === 'listed' && row.bid_count === 0) {
+        if ((await delistUnbid(db, core, ctx, actor, origin)) === 'delisted') summary.delisted++;
+      } else {
+        const r = await settleByContractType(env, core, actor, origin, row.status === 'bidding' ? 'bidding' : 'listed', ctx);
+        if (r === 'settled') summary.settled++;
+      }
       continue;
     }
     const note = noteText(noteDay, ctx.deadlineHours, ctx.calendar);
     const r = await db
-      .prepare(`UPDATE listings SET deadline_note = ? WHERE id = ? AND status = 'bidding' AND (deadline_note IS NULL OR deadline_note != ?)`)
+      .prepare(`UPDATE listings SET deadline_note = ? WHERE id = ? AND status IN ('listed', 'bidding') AND (deadline_note IS NULL OR deadline_note != ?)`)
       .bind(note, row.id, note)
       .run();
     if (r.meta.changes > 0) summary.notesUpdated++;

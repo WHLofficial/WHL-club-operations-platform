@@ -15,12 +15,13 @@ import {
   validateStrictRaise,
   type OfferTurn,
 } from '../core/offer-rules.ts';
-import { round2, shanghaiDateStr } from '../core/market-rules.ts';
+import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from './seasons.ts';
 import { availableBalance } from './ledger.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
+import { loadMarketContext } from './market-context.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -374,6 +375,16 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
   if (!offer) return null;
   if (offer.listing_id !== null) return offer.listing_id; // 已履约
   const listedDay = shanghaiDateStr(Date.now());
+  // v6.24.0：挂牌即落绝对截止时刻（与 POST /market/listings 同口径；此单同批还会落一份已接受的出价）
+  const octx = await loadMarketContext(db);
+  const listingDeadline = bidDeadline({
+    lastBidAt: null,
+    listedDay,
+    now: new Date(),
+    deadlineHours: octx.deadlineHours,
+    silenceHours: octx.silenceHours,
+    calendar: octx.calendar,
+  }).deadlineAt;
   const audit = createAuditStatement(db);
   // 履约守卫：offer 已占用且还没建挂牌；fresh listing = last_insert_rowid 确实是本次建出的那张
   const freshListing =
@@ -384,13 +395,13 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
   const results = await db.batch([
     db
       .prepare(
-        `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, season, window_seq)
-         SELECT player_id, seller_club_id, 'normal', amount, 'listed', ${nowSql()}, ?, season, window_seq
+        `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, deadline_at, season, window_seq)
+         SELECT player_id, seller_club_id, 'normal', amount, 'listed', ${nowSql()}, ?, ?, season, window_seq
          FROM offers
          WHERE id = ? AND status = 'accepted' AND listing_id IS NULL
            AND EXISTS (SELECT 1 FROM players WHERE id = offers.player_id AND club_id = offers.seller_club_id AND status = 'normal')`,
       )
-      .bind(listedDay, offerId),
+      .bind(listedDay, listingDeadline, offerId),
     // players 的 listed 化必须排在 INSERT 之后：守卫要求 status='normal'，同批内先改后查必然 0 行
     db
       .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`)

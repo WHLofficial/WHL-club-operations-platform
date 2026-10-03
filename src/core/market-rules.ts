@@ -43,6 +43,7 @@ export function validateBidAmount(
   stepMin = 1,
 ): string | null {
   if (!Number.isFinite(amount) || amount <= 0) return '出价金额不对';
+  if (!Number.isInteger(amount)) return '出价必须为整数';
   if (highestActive === null) {
     if (amount < askPrice) return `首笔出价不得低于挂牌价 ${round2(askPrice)} m`;
     return null;
@@ -93,7 +94,7 @@ export interface BidDeadlineResult {
 
 // 截止判定（4.4.7）：挂牌次日起，在交易日 {start}:00-{end}:00 时段内找「自上一出价起
 // 连续 silenceHours 小时无新出价」且整段落在时段内的最早时刻；落不下就顺延到下一交易日。
-// 无人出价的挂牌不走本判定（等到窗尾按 4.4.7 下架），lastBidAt 为 null 时以挂牌时刻为静默起点。
+// 无人出价的挂牌同样判定（v6.24.0：挂牌即落 deadline_at），lastBidAt 为 null 时以挂牌时刻为静默起点。
 export function bidDeadline(input: BidDeadlineInput): BidDeadlineResult {
   const [startHour, endHour] = input.deadlineHours;
   const lastBidMs = input.lastBidAt !== null ? Date.parse(input.lastBidAt) : Date.parse(`${input.listedDay}T00:00:00+08:00`);

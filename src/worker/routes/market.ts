@@ -30,7 +30,7 @@ import { loadMarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
 import { availableBalance } from '../ledger.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
-import { settleOverdue, settleListingForReview } from '../market-settle.ts';
+import { settleOverdue } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { createActivation } from '../activations.ts';
 import { queueClubNotification } from '../notify.ts';
@@ -152,8 +152,10 @@ app.get('/market/listings', async (c) => {
     listings: rows.results.map((r) => {
       const a = agg.get(r.id) ?? null;
       let deadlineAt: string | null = null;
-      if (r.status === 'bidding' && r.listed_day !== null) {
-        // 截止绝对时刻化（v6.4.0）：优先读落库列（出价时按 bidDeadline 算定），存量行 NULL 回落实时算
+      // 截止绝对时刻化（v6.4.0）：优先读落库列（出价时按 bidDeadline 算定），存量行 NULL 回落实时算。
+      // v6.24.0：挂牌即落 deadline_at，listed 的普通挂牌也回截止时刻（卡片倒计时锚点）；
+      // 激活挂牌的首价窗看 activationDeadline，不进本判定
+      if ((r.status === 'bidding' || (r.status === 'listed' && r.type !== 'activation')) && r.listed_day !== null) {
         deadlineAt =
           r.deadline_at ??
           bidDeadline({
@@ -261,11 +263,22 @@ app.post('/market/listings', async (c) => {
 
   const audit = createAuditStatement(c.env.DB);
   const listedAt = new Date().toISOString();
+  const listedDay = shanghaiDateStr(Date.parse(listedAt));
+  // v6.24.0：挂牌即落绝对截止时刻（无人出价同样计静默，到点由惰性结算下架）
+  const ctx = await loadMarketContext(c.env.DB);
+  const firstDeadline = bidDeadline({
+    lastBidAt: null,
+    listedDay,
+    now: new Date(listedAt),
+    deadlineHours: ctx.deadlineHours,
+    silenceHours: ctx.silenceHours,
+    calendar: ctx.calendar,
+  }).deadlineAt;
   const statements = [
     c.env.DB.prepare(
-      `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, season, window_seq)
-       VALUES (?, ?, 'normal', ?, 'listed', ${nowSql()}, ?, ?, ?)`,
-    ).bind(playerId, club.id, round2(askPrice), shanghaiDateStr(Date.parse(listedAt)), win.season, win.windowSeq),
+      `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, deadline_at, season, window_seq)
+       VALUES (?, ?, 'normal', ?, 'listed', ${nowSql()}, ?, ?, ?, ?)`,
+    ).bind(playerId, club.id, round2(askPrice), listedDay, firstDeadline, win.season, win.windowSeq),
     c.env.DB.prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`).bind(
       playerId,
       club.id,
@@ -659,7 +672,8 @@ app.get('/market/listings/:id', async (c) => {
   ]);
 
   let deadlineAt: string | null = null;
-  if (listing.status === 'bidding' && listing.listed_day !== null) {
+  // v6.24.0：listed 的普通挂牌也回截止时刻（挂牌即落 deadline_at）；激活首价窗看 activationDeadline
+  if ((listing.status === 'bidding' || (listing.status === 'listed' && listing.type !== 'activation')) && listing.listed_day !== null) {
     // 优先读落库列（v6.4.0 改动 A），存量行 NULL 回落实时算
     deadlineAt =
       listing.deadline_at ??
@@ -776,9 +790,14 @@ app.post('/market/listings/:id/bids', async (c) => {
   if (listing.deadline_at !== null && listing.deadline_at <= new Date().toISOString()) {
     throw new HttpError(409, '这单竞价已截止，等结算进审核', 'bid_deadline_passed');
   }
+  // v6.24.0：激活首价窗内 deadline_at 为 NULL，过线判定改看 activation_deadline（触发器 0059 兜底）；
+  // 出价窗已过则该单会被惰性结算 void，这里先给可读 409
+  if (listing.activation_deadline !== null && listing.activation_deadline <= new Date().toISOString()) {
+    throw new HttpError(409, '激活出价窗已过，这单不再接受出价', 'bid_deadline_passed');
+  }
   if (listing.seller_club_id === club.id) throw new HttpError(403, '不能对自己俱乐部的挂牌出价');
   if (listing.type === 'activation' && listing.status === 'matched_pending') {
-    throw new HttpError(409, '首价已落定，被激活方正在考虑是否匹配，这单不开放竞价');
+    throw new HttpError(409, '竞价已截止，被激活方正在考虑是否匹配，这单不开放竞价');
   }
   if (listing.status !== 'listed' && listing.status !== 'bidding') {
     throw new HttpError(409, listing.status === 'pending_review' ? '这单已经截止，正在等管理组审核' : '这单已经结束，不能再出价');
@@ -792,18 +811,15 @@ app.post('/market/listings/:id/bids', async (c) => {
     .bind(id)
     .first<{ highest: number | null; total: number }>();
   const highest = bidStats?.highest ?? null;
+  // v6.24.0：首价窗 = 激活挂牌还没人落首价；激活方落首价后照常公开竞价（首价即起拍价）
   const firstBidPending = isActivation && (bidStats?.total ?? 0) === 0;
-  if (isActivation && !firstBidPending) {
-    // 4.4.2.3：激活金额按公式定死，激活挂牌不开放后续竞价（首价即成交价）
-    throw new HttpError(409, '激活挂牌不开放竞价：激活方的首价就是成交价，等匹配窗结束');
-  }
   if (firstBidPending) {
     // 4.4.2.2：出价窗内只有激活方能落首价，他队出价无效；出价窗已过则该单已被惰性结算作废
     if (listing.activated_by !== club.id) {
-      throw new HttpError(403, '激活挂牌的首价窗内只有激活方可以出价，等激活方落价后再看结果');
+      throw new HttpError(403, '激活挂牌的首价窗内只有激活方可以出价，等激活方出价后再看结果');
     }
     if (amount !== listing.ask_price) {
-      throw new HttpError(400, `激活出价固定为 ${listing.ask_price} m（激活金额按规则计算，不受竞价调整）`);
+      throw new HttpError(400, '激活方首价固定为激活价');
     }
   }
 
@@ -822,21 +838,14 @@ app.post('/market/listings/:id/bids', async (c) => {
   }
 
   const audit = createAuditStatement(c.env.DB);
-  // 激活首价落定后的去向：训练营合同直接进待审（固定条款无匹配可言）；
-  // 正式合同进匹配等待（被激活方 24h 匹配窗，4.4.2.4）。普通挂牌照旧进竞价。
-  const activationTrainee = isActivation && listing.player_contract_type === 'trainee';
   const mctx = await loadMarketContext(c.env.DB);
-  let matchDeadlineIso: string | null = null;
+  const nowIso = new Date().toISOString();
+  // 出价成功即把新一段静默期的绝对截止时刻落库（静默起点 = 本次出价；v6.24.0 起激活首价同样如此）。
+  // 此后展示与结算都读列，不再各自实时计算（5 分钟漂移归零）
   let nextDeadlineIso: string | null = null;
-  if (isActivation) {
-    if (!activationTrainee) {
-      matchDeadlineIso = new Date(Date.now() + mctx.matchWindowHours * 3600_000).toISOString();
-    }
-  } else if (listing.listed_day !== null) {
-    // 改动 A：出价成功即把新一段静默期的绝对截止时刻落库（以本次出价为静默起点），
-    // 此后展示与结算都读列，不再各自实时计算（5 分钟漂移归零）
+  if (listing.listed_day !== null) {
     nextDeadlineIso = bidDeadline({
-      lastBidAt: new Date().toISOString(),
+      lastBidAt: nowIso,
       listedDay: listing.listed_day,
       now: new Date(),
       deadlineHours: mctx.deadlineHours,
@@ -844,15 +853,12 @@ app.post('/market/listings/:id/bids', async (c) => {
       calendar: mctx.calendar,
     }).deadlineAt;
   }
-  // 普通出价推进带过线守卫（deadline_at 已过 = 拒绝刷新；触发器 WHL_BID_REJECT_DEADLINE 先行拦截）
-  const listingAdvance = isActivation
-    ? activationTrainee
-      ? `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}, activation_deadline = NULL, deadline_at = NULL
-         WHERE id = ? AND status IN ('listed', 'bidding')`
-      : `UPDATE listings SET status = 'matched_pending', last_bid_at = ${nowSql()}, activation_deadline = NULL, match_deadline = ?, deadline_at = NULL
-         WHERE id = ? AND status IN ('listed', 'bidding')`
-    : `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}, deadline_at = ?
-       WHERE id = ? AND status IN ('listed', 'bidding') AND (deadline_at IS NULL OR deadline_at > ${nowSql()})`;
+  // 出价推进带过线守卫（竞价 deadline_at 或激活首价窗 activation_deadline 已过 = 拒绝刷新；
+  // 触发器 WHL_BID_REJECT_DEADLINE（0059 版）在冻结语句上先行拦截）
+  const listingAdvance = `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}, activation_deadline = NULL, deadline_at = ?
+     WHERE id = ? AND status IN ('listed', 'bidding')
+       AND (deadline_at IS NULL OR deadline_at > ${nowSql()})
+       AND (activation_deadline IS NULL OR activation_deadline > ${nowSql()})`;
   const statements = [
     // 1) 冻结：触发器校验挂牌在竞价/金额达步长/可用资金，任一不满足 ABORT 回滚整批
     c.env.DB.prepare(
@@ -873,12 +879,8 @@ app.post('/market/listings/:id/bids', async (c) => {
        WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'
          AND id NOT IN (SELECT hold_id FROM bids WHERE listing_id = ? AND status = 'active' AND hold_id IS NOT NULL)`,
     ).bind(id, id),
-    // 5) 挂牌推进（普通 → 竞价并落新截止时刻；激活训练营 → 待审中转；激活正式 → 匹配等待）
-    isActivation
-      ? matchDeadlineIso !== null
-        ? c.env.DB.prepare(listingAdvance).bind(matchDeadlineIso, id)
-        : c.env.DB.prepare(listingAdvance).bind(id)
-      : c.env.DB.prepare(listingAdvance).bind(nextDeadlineIso, id),
+    // 5) 挂牌推进：一律转入公开竞价并落新截止时刻（激活首价落定同样进竞价）
+    c.env.DB.prepare(listingAdvance).bind(nextDeadlineIso, id),
     audit({
       actor: user.id,
       action: 'bid_place',
@@ -905,23 +907,8 @@ app.post('/market/listings/:id/bids', async (c) => {
     .bind(id, club.id)
     .first<{ id: number; amount: number; created_at: string }>();
 
-  // 训练营激活首价落定即收口进待审（同请求内收口，崩溃由惰性结算自愈兜底）
-  let settledForReview = false;
-  if (activationTrainee) {
-    const settled = await settleListingForReview(
-      c.env.DB,
-      { id, player_id: listing.player_id, seller_club_id: listing.seller_club_id, ask_price: listing.ask_price, season: listing.season, window_seq: listing.window_seq },
-      user.id,
-      'user',
-      'bidding',
-    );
-    settledForReview = settled === 'settled';
-  }
-
-  return c.json(
-    { ok: true, bid, ...(isActivation ? { matchPhase: activationTrainee ? 'review' : 'matching', matchDeadline: matchDeadlineIso, settledForReview } : {}) },
-    201,
-  );
+  // v6.24.0：激活方落首价不再当场收口——转入公开竞价，截止后由惰性结算按合同类型分流
+  return c.json({ ok: true, bid, deadlineAt: nextDeadlineIso, ...(isActivation ? { matchPhase: 'bidding' } : {}) }, 201);
 });
 
 // GET /api/me/bids —— 我的出价（含冻结状态章）
