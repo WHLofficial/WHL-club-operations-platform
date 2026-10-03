@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type SquadOverview } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 /** 可激活名单模式（v6.18.0）：all=全部可激活 / trainee=仅训练营 */
@@ -32,6 +32,10 @@ export const qk = {
   offer: (id: number) => ['offers', 'detail', id] as const,
   homeMatches: ['club', 'home-matches'] as const,
   financeSummary: (season?: number) => ['club', 'finance-summary', season ?? 'current'] as const,
+  // 消费中心（v6.26.0）
+  shopCatalog: ['shop', 'catalog'] as const,
+  shopSquadState: ['shop', 'squad-state'] as const,
+  shopOrders: ['shop', 'orders'] as const,
 };
 
 export interface MarketMyClub {
@@ -321,6 +325,49 @@ export function useNamingInvalidation() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: qk.naming });
+    void qc.invalidateQueries({ queryKey: qk.myClub });
+    void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+  };
+}
+
+// ---- 消费中心（v6.26.0）----
+
+// 价目 / PA 上限 / 豪门名单（登录即可读，页面按教练身份再收表单）
+export function useShopCatalog(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.shopCatalog,
+    queryFn: () => api<ShopCatalog>('/api/shop/catalog'),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+// 全队表单状态：热区 / 角色 / 徽章占用由服务端按效果引擎同一套规则算好
+export function useShopSquadState(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.shopSquadState,
+    queryFn: () => api<ShopSquadStateResponse>('/api/shop/squad-state'),
+    enabled,
+    retry: false,
+  });
+}
+
+// 我的消费工单（含管理组代录的 external 单）
+export function useShopOrders(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.shopOrders,
+    queryFn: () => api<ShopOrdersResponse>('/api/shop/orders'),
+    enabled,
+    retry: false,
+  });
+}
+
+// 提交/审核动作后的联动失效：工单列表 + 表单状态 + 余额（扣费/退款都动余额）
+export function useShopInvalidation() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.shopOrders });
+    void qc.invalidateQueries({ queryKey: qk.shopSquadState });
     void qc.invalidateQueries({ queryKey: qk.myClub });
     void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
   };

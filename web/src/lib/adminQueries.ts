@@ -1,7 +1,7 @@
 // 管理端共享数据层（v2.1.0 commit 3）：
 // clubs 原来在俱乐部/合同导入/期初余额/手动记账四个 section 各拉一次，共享 key 自动去重；
 // /api/seasons/current 赛季页与球员页成长引擎都要用，同样共享。
-import { api, apiSend, type AdminClubRow, type MarketRoundReopenResult, type MarketRoundResponse, type MatchEntryInput, type MatchEntryListResponse, type MatchEntryPanel, type MatchEntrySubmitResult, type SeasonCurrent, type WeatherForecastPreview } from './api.ts';
+import { api, apiSend, type AdminClubRow, type AdminShopOrdersResponse, type MarketRoundReopenResult, type MarketRoundResponse, type MatchEntryInput, type MatchEntryListResponse, type MatchEntryPanel, type MatchEntrySubmitResult, type SeasonCurrent, type WeatherForecastPreview } from './api.ts';
 
 export const ADMIN_CLUBS_KEY = ['admin', 'clubs'] as const;
 export const SEASON_CURRENT_KEY = ['seasons', 'current'] as const;
@@ -66,4 +66,15 @@ export async function fetchMatchEntryPanel(matchId: number): Promise<MatchEntryP
 /** 批量提交单场录入；400 的中文原因由 ApiError.message 带出（worker 侧统一 { error } 形状） */
 export async function submitMatchEntry(matchId: number, entries: MatchEntryInput[]): Promise<MatchEntrySubmitResult> {
   return apiSend<MatchEntrySubmitResult>('POST', `/api/admin/growth/match-entry/${matchId}`, { entries });
+}
+
+// v6.26.0 消费中心：管理端工单队列（待审 / 外部代录 / 历史筛选）
+export const ADMIN_SHOP_KEY = (status: string, source: string) => ['admin', 'shop-orders', status, source] as const;
+
+export async function fetchAdminShopOrders(status: string, source: string): Promise<AdminShopOrdersResponse> {
+  const q = new URLSearchParams();
+  if (status) q.set('status', status);
+  if (source) q.set('source', source);
+  const qs = q.toString();
+  return api<AdminShopOrdersResponse>(`/api/admin/shop/orders${qs ? `?${qs}` : ''}`);
 }

@@ -46,6 +46,8 @@ const AdminMarketPage = lazy(() => import('./pages/admin/MarketPage.tsx'));
 const AdminClubsPage = lazy(() => import('./pages/admin/ClubsPage.tsx'));
 const AdminBrandsPage = lazy(() => import('./pages/admin/BrandsPage.tsx'));
 const AdminEventsPage = lazy(() => import('./pages/admin/EventsPage.tsx'));
+const AdminShopPage = lazy(() => import('./pages/admin/AdminShopPage.tsx'));
+const ShopPage = lazy(() => import('./pages/shop/ShopPage.tsx'));
 const AdminFinancePage = lazy(() => import('./pages/admin/FinancePage.tsx'));
 const AdminSystemPage = lazy(() => import('./pages/admin/SystemPage.tsx'));
 
@@ -130,6 +132,15 @@ export default function App() {
               </RequireUser>
             }
           />
+          {/* 消费中心（v6.26.0）：五类商品 + 球场消费三卡；须登录（页内按教练身份收表单） */}
+          <Route
+            path="/shop"
+            element={
+              <RequireUser>
+                <ShopPage />
+              </RequireUser>
+            }
+          />
           {/* 旧地址换址：不需要登录拦截，desk 路由自己会拦；replace 不留历史栈 */}
           <Route path="/offers" element={<OffersRedirect />} />
           <Route path="/negotiations" element={<NegotiationsRedirect />} />
@@ -159,6 +170,7 @@ export default function App() {
             <Route path="clubs" element={<AdminClubsPage />} />
             <Route path="brands" element={<AdminBrandsPage />} />
             <Route path="events" element={<AdminEventsPage />} />
+            <Route path="shop" element={<AdminShopPage />} />
             <Route path="finance" element={<AdminFinancePage />} />
             <Route path="system" element={<AdminSystemPage />} />
           </Route>

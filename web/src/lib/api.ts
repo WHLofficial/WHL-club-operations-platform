@@ -1400,6 +1400,7 @@ export const LEDGER_KIND_LABELS: Record<string, string> = {
   naming_penalty: '冠名解约赔款',
   luxury_tax: '富人税',
   event: '随机事件',
+  shop_purchase: '消费',
 };
 
 export function ledgerKindLabel(kind: string): string {
@@ -1887,4 +1888,80 @@ export interface OfferDetailResponse {
     resolvedAt: string | null;
   };
   events: OfferEventRow[];
+}
+
+// ---- 消费中心（v6.26.0）----
+
+export interface ShopPrices {
+  paPerPoint: number;
+  clubShell: number;
+  badgeSilver: number;
+  badgeGold: number;
+  badgeSilverToGold: number;
+  roleAddPlus: number;
+  roleAddPlusPlus: number;
+  roleUpgrade: number;
+  roleRemove: number;
+  positionAdd: number;
+  positionRemove: number;
+  positionReplace: number;
+}
+
+export interface ShopCatalog {
+  prices: ShopPrices;
+  paCap: number;
+  hpremiumClubIds: number[];
+}
+
+export interface ShopSquadStatePlayer {
+  id: number;
+  name: string;
+  number: number | null;
+  growable: boolean;
+  pa: number | null;
+  position: string | null;
+  zones: string[];
+  roles: { slot: number; roleId: number }[];
+  ownedSilver: number[];
+  ownedGold: number[];
+  silverUsed: number;
+  goldUsed: number;
+}
+
+export interface ShopSquadStateResponse {
+  clubId: number;
+  players: ShopSquadStatePlayer[];
+}
+
+export type ShopOrderStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ShopOrderDto {
+  id: number;
+  source: 'club' | 'external';
+  clubId: number;
+  orderedBy: number;
+  category: 'pa' | 'badge' | 'badge_upgrade' | 'role' | 'position' | 'club_shell';
+  categoryLabel: string;
+  payload: Record<string, unknown> | null;
+  summary: string;
+  amount: number | null;
+  status: ShopOrderStatus;
+  note: string | null;
+  reviewedBy: number | null;
+  reviewedAt: string | null;
+  rejectReason: string | null;
+  createdAt: string;
+}
+
+export interface ShopOrdersResponse {
+  clubId: number;
+  orders: ShopOrderDto[];
+}
+
+export interface AdminShopOrderRow extends ShopOrderDto {
+  clubName: string | null;
+}
+
+export interface AdminShopOrdersResponse {
+  orders: AdminShopOrderRow[];
 }

@@ -61,6 +61,10 @@ export default function Home() {
           <h3>转会中心</h3>
           <p className="muted">在售市场、收到的报价与签约谈判都收在这一处，我的转会台盯着待办。</p>
         </NavLink>
+        <NavLink to="/shop" className="card nav-card">
+          <h3>消费中心</h3>
+          <p className="muted">买 PA、徽章、角色、位置热区、队壳申请，加上设施经营、冠名与球场档期，消费都在这一页。</p>
+        </NavLink>
         <NavLink to="/clubs" className="card nav-card">
           <h3>球队</h3>
           <p className="muted">全联盟球队总览：阵容人数、平均 CA、身价与工资，点开看单队详情。</p>

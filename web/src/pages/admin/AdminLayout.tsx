@@ -17,6 +17,7 @@ const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
   { to: '/admin/clubs', label: '俱乐部' },
   { to: '/admin/brands', label: '品牌池' },
   { to: '/admin/events', label: '事件' },
+  { to: '/admin/shop', label: '消费' },
   { to: '/admin/finance', label: '财政' },
   { to: '/admin/system', label: '系统' },
 ];
