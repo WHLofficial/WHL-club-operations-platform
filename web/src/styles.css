@@ -29,6 +29,9 @@
   /* 顶栏实际高度（浏览器实测：≥641px 宽 54px，≤640px 折两行 102px）。
      顶栏 sticky 且不透明，任何吸顶元素都得跳过它，见 .library-side、步骤 8 的抽屉 */
   --topbar-h: 54px;
+  /* v6.24.0 暗色可读性修复①：站点是奶油浅色主题，显式声明 light 阻止浏览器强制暗色化
+     （否则用户系统暗色 + 浏览器自动暗色会把浅底文字一起压暗，出现不可读的低对比） */
+  color-scheme: light;
 }
 
 @media (max-width: 640px) {
@@ -4051,5 +4054,418 @@ th.num .th-sort {
   .nav-links.can-left:not(.can-right) {
     -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
     mask-image: linear-gradient(to right, transparent 0, #000 16px);
+  }
+}
+
+/* ---- ⑦ 在售市场卡柜与挂牌浮层（v6.24.0）------------------------------------
+   卡片 = rail 骨架 A（左栏 CA/PA 两枚大数字，五档配色复用全仓 .attr-* 的 color）；
+   底部读秒走 tabular-nums 防跳字；三态徽标（竞价中 / 等激活方出价 / 等待匹配）用 .mkt-badge-*。
+   浮层：桌面居中弹层，≤760 变底部抽屉（上滑出 + 安全区内边距）。
+   分类一律 mkt- 前缀，与退役中的旧 .market-card 互不交叉（旧类仍有 desk 消费方，勿删）。
+   暗色可读性修复②：本块所有文字都显式给 color，不留裸继承；③ 拒绝折行的标签 / 金额 /
+   倒计时全部 white-space: nowrap，队名走 ellipsis 截断。 */
+
+.mkt-grid {
+  display: grid;
+  gap: 12px;
+  /* 窄屏自适应交给 auto-fill（不新增 ≤640 媒体块：TC-SWP-05 依赖文件里最后一个 640 块的尾部） */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+}
+
+.mkt-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.mkt-card:hover,
+.mkt-card:focus-visible {
+  border-color: var(--terracotta);
+  box-shadow: 0 6px 18px rgba(43, 29, 18, .12);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+/* 自家挂牌：左侧一道陶土色标，一眼认出「这单是我的」 */
+.mkt-card.mkt-mine {
+  border-left: 3px solid var(--terracotta);
+}
+
+.mkt-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mkt-nm {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mkt-nm:hover {
+  color: var(--terracotta-deep);
+  text-decoration: underline;
+}
+
+.mkt-card-head .badge-stack {
+  margin-left: auto;
+}
+
+.mkt-card-sub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* rail 骨架 A：CA / PA 大数字（颜色来自 .attr-*，这里只管排版） */
+.mkt-rail {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  padding: 6px 0 6px 12px;
+  border-left: 3px solid var(--terracotta-tint);
+}
+
+.mkt-rail-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mkt-rail-lab {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.mkt-rail-num {
+  font-size: 27px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.mkt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mkt-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.mkt-labr {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.mkt-val {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.mkt-val.mkt-hi {
+  color: var(--gold-deep);
+}
+
+.mkt-val.mkt-count {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.mkt-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.mkt-timer {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cocoa);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 剩不到 1 小时：红字提醒 */
+.mkt-timer.mkt-soon {
+  color: var(--bad);
+}
+
+.mkt-tn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mkt-tn-txt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 三态徽标（v6.24.0）：不看是否已有人出价，只看挂单状态与首价窗 */
+.mkt-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.mkt-badge-bid {
+  color: #8e5426;
+  background: var(--terracotta-tint);
+  border-color: #e6cfae;
+}
+
+.mkt-badge-actwait {
+  color: #6b3fa0;
+  background: #f3e8fb;
+  border-color: #e0cdf0;
+}
+
+.mkt-badge-wait {
+  color: var(--sky-deep);
+  background: #e8eef3;
+  border-color: #cbd8e1;
+}
+
+.mkt-badge-plain {
+  color: var(--muted);
+  background: #f1ece1;
+  border-color: var(--border);
+}
+
+/* ---- 浮层：桌面居中弹层 ---- */
+
+.mkt-ov {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(43, 29, 18, .45);
+}
+
+.mkt-ov-panel {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  max-height: min(86vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 16px 20px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(43, 29, 18, .28);
+}
+
+.mkt-ov-grab {
+  width: 38px;
+  height: 4px;
+  margin: 0 auto 10px;
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.mkt-ov-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mkt-ov-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 17px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mkt-ov-x {
+  margin-left: auto;
+  padding: 4px 7px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.mkt-ov-x:hover {
+  color: var(--ink);
+  background: var(--terracotta-tint);
+}
+
+.mkt-ov-sub {
+  margin: 4px 0 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.mkt-ov-sub a {
+  color: var(--terracotta-deep);
+}
+
+.mkt-ov-rows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 0 0 12px;
+}
+
+.mkt-ov-rows dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mkt-ov-rows dd {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.mkt-ov-rows dd.mkt-ov-hi {
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+
+.mkt-ov-abs {
+  margin-left: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.mkt-ov-club {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.mkt-ov-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--cocoa-deep);
+  background: var(--terracotta-tint);
+  border: 1px solid #e6cfae;
+  border-radius: 10px;
+}
+
+.mkt-ov-ok {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ok);
+}
+
+.mkt-ov-body h4 {
+  margin: 14px 0 6px;
+  color: var(--ink);
+}
+
+.mkt-ov-body .hint,
+.mkt-ov-body .muted {
+  color: var(--muted);
+}
+
+.mkt-ov-body .table-wrap {
+  margin-bottom: 4px;
+}
+
+.mkt-ov-bidder {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ---- 浮层：≤760 底部抽屉（上滑出，含安全区） ---- */
+@media (max-width: 760px) {
+  .mkt-ov-drawer {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .mkt-ov-drawer .mkt-ov-panel {
+    max-width: none;
+    max-height: 88vh;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    border-radius: 16px 16px 0 0;
+    animation: mkt-drawer-up .22s ease-out;
+  }
+
+  .mkt-ov-drawer .mkt-ov-rows {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@keyframes mkt-drawer-up {
+  from {
+    transform: translateY(18px);
+    opacity: .55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mkt-card {
+    transition: none;
+  }
+
+  .mkt-ov-drawer .mkt-ov-panel {
+    animation: none;
   }
 }
