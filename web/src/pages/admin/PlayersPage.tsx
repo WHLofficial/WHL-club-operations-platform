@@ -8,6 +8,7 @@ import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
+import { useTimeFmt } from '../../lib/datetime.ts';
 
 export default function PlayersPage() {
   return (
@@ -348,6 +349,7 @@ function PlayerBatchSection() {
 
 function GrowthSection() {
   const { show, toastNode } = useToast();
+  const { dateTime } = useTimeFmt();
   const queryClient = useQueryClient();
   const [settleSeason, setSettleSeason] = useState('');
   const [half, setHalf] = useState(false);
@@ -484,7 +486,7 @@ function GrowthSection() {
                   <td className="mono">{p.season ?? '—'}</td>
                   <td>{p.source === 'window_open' ? '开窗自动' : '手动'}</td>
                   <td>{p.note ?? <span className="muted">—</span>}</td>
-                  <td className="mono muted">{p.declaredAt?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                  <td className="mono muted">{dateTime(p.declaredAt)}</td>
                 </tr>
               ))}
             </tbody>

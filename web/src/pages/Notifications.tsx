@@ -1,14 +1,13 @@
 // 收件篮（v2.4.0，UI_DESIGN「通知中心」）：mono 时间 + 模板摘要，未读 sky 小蓝点，点行标已读
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { api, type NotificationsPage } from '../lib/api.ts';
+import { useTimeFmt } from '../lib/datetime.ts';
 import { qk, useMarkNotificationsRead } from '../lib/queries.ts';
 import EmptyState from '../components/EmptyState.tsx';
 
-function fmtTime(iso: string): string {
-  return iso.slice(0, 16).replace('T', ' ');
-}
-
 export default function Notifications() {
+  // v6.25.0：时间显示走共享时区层（默认北京时间，顶栏时钟图标可切）
+  const { dateTime } = useTimeFmt();
   const inboxQuery = useInfiniteQuery({
     queryKey: qk.notifications,
     queryFn: ({ pageParam }) =>
@@ -71,7 +70,7 @@ export default function Notifications() {
                   {!n.readAt && <span className="inbox-dot" aria-label="未读" />}
                   <span className="badge">{n.template === 'result_confirmed' ? '赛果' : n.template === 'levelup' ? '成长' : n.template}</span>
                   <span className="inbox-text">{n.text}</span>
-                  <span className="mono inbox-time">{fmtTime(n.createdAt)}</span>
+                  <span className="mono inbox-time">{dateTime(n.createdAt)}</span>
                 </button>
               </li>
             ))}

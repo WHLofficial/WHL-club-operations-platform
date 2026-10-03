@@ -8,6 +8,7 @@ import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
 import { usePrompt } from '../../components/PromptDialog.tsx';
+import { useTimeFmt } from '../../lib/datetime.ts';
 
 export default function MarketPage() {
   return (
@@ -553,6 +554,7 @@ function windowKindLabel(w: WindowRow, all: WindowRow[]): string {
 
 function WindowsSection() {
   const { show, toastNode } = useToast();
+  const { dateTime } = useTimeFmt();
   const queryClient = useQueryClient();
   const [season, setSeason] = useState('');
   const [seq, setSeq] = useState('');
@@ -696,8 +698,8 @@ function WindowsSection() {
                   <td>
                     <span className={`badge ${w.status === 'open' ? 'sky' : 'gray'}`}>{WINDOW_STATUS_LABEL[w.status] ?? w.status}</span>
                   </td>
-                  <td className="mono">{w.openedAt?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
-                  <td className="mono">{w.closedAt?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                  <td className="mono">{dateTime(w.openedAt)}</td>
+                  <td className="mono">{dateTime(w.closedAt)}</td>
                 </tr>
               ))}
             </tbody>

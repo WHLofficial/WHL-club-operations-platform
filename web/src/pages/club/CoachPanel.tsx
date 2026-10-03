@@ -32,6 +32,7 @@ import { CONTRACT_TYPE_LABEL, LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { qk, useHomeMatches, useMyClubOverview, useNamingInvalidation, useNamingQuote } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { playerPath } from '../../lib/player-link.ts';
+import { useTimeFmt } from '../../lib/datetime.ts';
 
 type SquadFilter = 'all' | 'first_team' | 'trainee';
 type Assignment = 'none' | 'first_team' | 'trainee';
@@ -408,6 +409,7 @@ function moodLabel(satisfaction: number): string {
 
 function NamingCard() {
   const { show } = useToast();
+  const { dateTime } = useTimeFmt();
   const quoteQuery = useNamingQuote();
   const refresh = useNamingInvalidation();
   const [busy, setBusy] = useState(false);
@@ -517,7 +519,7 @@ function NamingCard() {
           ·{' '}
           {o.expireAt.startsWith('9999')
             ? '本轮内有效'
-            : `有效期至 ${o.expireAt.slice(0, 16).replace('T', ' ')}`}
+            : `有效期至 ${dateTime(o.expireAt)}`}
         </span>
         {o.status === 'queued' ? null : contract ? (
           pickId === o.id ? (
@@ -758,11 +760,6 @@ function BookingsCard() {
 
 /* ---------- 随机事件（v6.11.0）：需要拿主意的待选事件 + 近期结算 ---------- */
 
-// 时限按 UTC 分钟展示（与通知文案的 shortDeadline 同口径）
-function eventTimeText(iso: string): string {
-  return iso.slice(5, 16).replace('T', ' ');
-}
-
 function eventResultText(r: ClubEventRecent): string {
   if (r.skipped) return '无效果结算';
   if (r.auto) return r.optionName === '' ? '超时兜底' : `超时兜底：${r.optionName}`;
@@ -773,6 +770,7 @@ function eventResultText(r: ClubEventRecent): string {
 function EventsCard() {
   const qc = useQueryClient();
   const { show, toastNode } = useToast();
+  const { time, label } = useTimeFmt();
   const listQuery = useQuery({
     queryKey: qk.clubEvents,
     queryFn: () => api<ClubEventsResponse>('/api/club/events'),
@@ -839,7 +837,7 @@ function EventsCard() {
           <p className="hint" style={{ marginBottom: 0 }}>
             {ev.deadlineAt === null
               ? '这条没设选定时限，不会自动结算。'
-              : `截止 ${eventTimeText(ev.deadlineAt)}（UTC），超时按资金最差结果自动结算。`}
+              : `截止 ${time(ev.deadlineAt)}（${label}），超时按资金最差结果自动结算。`}
           </p>
         </div>
       ))}
@@ -858,7 +856,7 @@ function EventsCard() {
             <tbody>
               {data.recent.map((r) => (
                 <tr key={r.id}>
-                  <td className="mono muted">{eventTimeText(r.createdAt)}</td>
+                  <td className="mono muted">{time(r.createdAt)}</td>
                   <td>{r.eventName}</td>
                   <td>{eventResultText(r)}</td>
                   <td>{r.notes.length > 0 ? r.notes.join('；') : <span className="muted">—</span>}</td>

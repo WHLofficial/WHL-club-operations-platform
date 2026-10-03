@@ -10,7 +10,8 @@ import { useActivatable, useMarketInvalidation, useMyClub, type ActivatableMode 
 import { useToast } from '../../lib/toast.tsx';
 import { playerPath } from '../../lib/player-link.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
-import { MarketNav, deadlineText, money } from './shared.tsx';
+import { useTimeFmt } from '../../lib/datetime.ts';
+import { MarketNav, money } from './shared.tsx';
 
 /** 激活成功、待落首价的挂牌（v6.24.0：激活方须在首价窗内自己落首价） */
 type PendingFirstBid = {
@@ -23,6 +24,7 @@ type PendingFirstBid = {
 
 export default function MarketActivationPage() {
   const { show, toastNode } = useToast();
+  const { dateTime } = useTimeFmt();
   const { loading, isCoach, club } = useMyClub();
   const [pending, setPending] = useState<PendingFirstBid | null>(null);
 
@@ -57,7 +59,7 @@ export default function MarketActivationPage() {
             onActivated={(p) => {
               setPending(p);
               show(
-                `已激活 ${p.playerName}：请在 ${deadlineText(p.firstBidDeadline, '')} 前落激活首价（表单已摆到页面上方），逾期激活作废（还占本窗激活额度）。`,
+                `已激活 ${p.playerName}：请在 ${dateTime(p.firstBidDeadline)} 前落激活首价（表单已摆到页面上方），逾期激活作废（还占本窗激活额度）。`,
               );
             }}
             onError={(m) => show(m, true)}
@@ -80,6 +82,7 @@ function FirstBidSection({
   onError: (msg: string) => void;
 }) {
   const invalidateMarket = useMarketInvalidation();
+  const { dateTime } = useTimeFmt();
   const ref = useRef<HTMLElement | null>(null);
 
   // 激活按钮在长表格下方，表单出现在页面上方：摆出后滚进视野（jsdom 没实现 scrollIntoView，先探测再调）
@@ -108,7 +111,7 @@ function FirstBidSection({
     <section ref={ref} className="card admin-section" aria-label="落激活首价">
       <h3>落激活首价</h3>
       <p className="hint">
-        已激活 {pending.playerName}，挂牌 {money(pending.askPrice)} m：请在 {deadlineText(pending.firstBidDeadline, '')} 前落首价，
+        已激活 {pending.playerName}，挂牌 {money(pending.askPrice)} m：请在 {dateTime(pending.firstBidDeadline)} 前落首价，
         {pending.kind === 'trainee'
           ? '落价后转入公开竞价；竞价截止后训练营合同直进管理组审核。'
           : '落价后转入公开竞价；竞价截止后进 24 小时匹配窗，等原属俱乐部决定是否匹配（基准=竞价最高价）。'}

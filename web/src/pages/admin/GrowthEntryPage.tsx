@@ -18,6 +18,7 @@ import {
   submitMatchEntry,
 } from '../../lib/adminQueries.ts';
 import { entryXp, type GrowthEntryDraft } from '../../lib/growth-xp.ts';
+import { useTimeFmt } from '../../lib/datetime.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { useMediaQuery } from '../../lib/use-media.ts';
 import EmptyState from '../../components/EmptyState.tsx';
@@ -70,8 +71,6 @@ interface RowDraft {
 }
 
 const fmtXp = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
-
-const fmtTime = (s: string | null): string => (s ? s.slice(0, 16).replace('T', ' ') : '—');
 
 /** recorded.source 的展示标注：manual = 管理组补录，其余一律按赛果同步理解 */
 const sourceLabel = (source: string): string => (source === 'manual' ? '管理组补录' : '赛果同步');
@@ -270,6 +269,8 @@ export default function GrowthEntryPage() {
 
 function MatchEntrySection() {
   const { show, toastNode } = useToast();
+  // v6.25.0：确认时刻显示走共享时区层（默认北京时间）
+  const { dateTime } = useTimeFmt();
   const { data, error } = useQuery({ queryKey: MATCH_ENTRY_LIST_KEY, queryFn: fetchMatchEntryList });
   const [open, setOpen] = useState<{ matchId: number; mode: Mode } | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -339,7 +340,7 @@ function MatchEntrySection() {
                       <td className="num mono">
                         {m.scoreHome} : {m.scoreAway}
                       </td>
-                      <td className="muted">{fmtTime(m.confirmedAt)}</td>
+                      <td className="muted">{dateTime(m.confirmedAt)}</td>
                       <td>
                         {m.recorded > 0 ? (
                           <span className="badge green">已录 {m.recorded} 项</span>

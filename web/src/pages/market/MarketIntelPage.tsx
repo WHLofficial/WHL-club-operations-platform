@@ -5,6 +5,7 @@ import type { MarketDealsRow, RumorItem } from '../../lib/api.ts';
 import { useMarketDeals, useRumors } from '../../lib/queries.ts';
 import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
 import { playerPath } from '../../lib/player-link.ts';
+import { useTimeFmt } from '../../lib/datetime.ts';
 import { MarketNav, money } from './shared.tsx';
 
 // 交易类型徽标配色（复用全局 .badge 色板；未知类型走灰）
@@ -76,6 +77,7 @@ function RumorText({ rumor }: { rumor: RumorItem }) {
 
 function DealsSection() {
   const { data, isError, error } = useMarketDeals();
+  const { dateTime } = useTimeFmt();
   return (
     <section className="card">
       <h3>已达成交易</h3>
@@ -102,7 +104,7 @@ function DealsSection() {
             <tbody>
               {data.map((d) => (
                 <tr key={d.id}>
-                  <td className="mono">{d.completedAt ? d.completedAt.slice(0, 16).replace('T', ' ') : '—'}</td>
+                  <td className="mono">{dateTime(d.completedAt)}</td>
                   <td>
                     <span className={`badge ${DEAL_TYPE_BADGE[d.type] ?? 'gray'}`}>{TRANSFER_TYPE_LABEL[d.type] ?? d.type}</span>
                   </td>

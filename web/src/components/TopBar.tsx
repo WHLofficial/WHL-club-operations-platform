@@ -2,9 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { isSuperAdmin, TOUR_SITE_URL, type MeUser } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
+import { setTzPref, tzLabel, useTzPref, type TzPref } from '../lib/datetime.ts';
 import { useUnreadCount } from '../lib/queries.ts';
 
 const ROLE_LABEL: Record<MeUser['role'], string> = { admin: '管理组', coach: '教练', viewer: '观众' };
+
+// v6.25.0：显示时区三档，默认北京时间（偏好持久化在 localStorage，见 lib/datetime.ts）
+const TZ_OPTIONS: readonly [TzPref, string][] = [
+  ['asia/shanghai', '北京时间'],
+  ['utc', 'UTC'],
+  ['system', '跟随浏览器'],
+];
 
 export default function TopBar() {
   const { user, authMode } = useAuth();
@@ -12,6 +20,26 @@ export default function TopBar() {
   const barRef = useRef<HTMLElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
+  // v6.25.0：时区切换下拉（未登录也可见——球员库 / 球队页是公开的，时间显示对所有访客生效）
+  const tz = useTzPref();
+  const [tzOpen, setTzOpen] = useState(false);
+  const tzRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!tzOpen) return;
+    // 外点 / Esc 关闭（与 MultiSelect 的 Popover 同款交互）
+    const onDown = (e: MouseEvent) => {
+      if (tzRef.current && !tzRef.current.contains(e.target as Node)) setTzOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTzOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [tzOpen]);
 
   // v6.20.0：窄屏顶栏第二行是横滑页签，当前页签可能停在视口外（用户看不出自己在哪）。
   // 路由变化后把 .is-active 滚进视野并居中，只动横向：inline 居中，block 用 'nearest' ——
@@ -102,10 +130,49 @@ export default function TopBar() {
           )}
         </nav>
         <div className="userbox">
+          {/* v6.25.0：显示时区切换——时钟图标 + 下拉，偏好本地持久化、全站时间随档即时刷新 */}
+          <div className="tz-wrap" ref={tzRef}>
+            <button
+              type="button"
+              className="tz-btn"
+              aria-label="显示时区"
+              aria-expanded={tzOpen}
+              title={`显示时区：${tzLabel(tz)}`}
+              onClick={() => setTzOpen((v) => !v)}
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+                <path d="M12 7v5l3.5 2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            {tzOpen && (
+              <div className="tz-pop" role="menu">
+                {TZ_OPTIONS.map(([value, text]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={tz === value}
+                    onClick={() => {
+                      setTzPref(value);
+                      setTzOpen(false);
+                    }}
+                  >
+                    {tz === value ? '✓ ' : ''}
+                    {text}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {user === undefined ? null : user ? (
             <>
-              <NavLink to="/notifications" className="inbox-link" title="站内信收件篮">
-                收件篮
+              {/* v6.25.0：文字链接换信封图标，未读红点锚图标右上（原 .inbox-unread-dot 语义不变） */}
+              <NavLink to="/notifications" className="inbox-link" title="站内信收件篮" aria-label="站内信收件篮">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <path d="m3 7 9 6 9-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
                 {unread > 0 && <span className="inbox-unread-dot" aria-label={`${unread} 条未读`} />}
               </NavLink>
               <span className="userbox-name">{user.name}</span>

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiSend } from '../../lib/api.ts';
 import { fetchMarketRound, MARKET_ROUND_KEY, reopenMarketRound } from '../../lib/adminQueries.ts';
+import { useTimeFmt } from '../../lib/datetime.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { useMediaQuery } from '../../lib/use-media.ts';
 
@@ -42,11 +43,9 @@ function seasonsText(windows: number): string {
   return Number.isInteger(s) ? String(s) : s.toFixed(1);
 }
 
-function stampOf(iso: string): string {
-  return iso.slice(0, 16).replace('T', ' ');
-}
-
 export default function BrandsPage() {
+  // v6.25.0：开轮 / 结轮 / 报价截止时刻走共享时区层（默认北京时间）
+  const { dateTime } = useTimeFmt();
   const qc = useQueryClient();
   const { show, toastNode } = useToast();
   const narrow = useMediaQuery(NARROW_QUERY);
@@ -329,8 +328,8 @@ export default function BrandsPage() {
               <span className={`badge ${marketRound.status === 'open' ? 'green' : 'gray'}`}>{marketRound.status === 'open' ? '进行中' : '已结轮'}</span>
               <span className="hint">
                 {' '}
-                · 开轮于 {marketRound.opened_season} 赛季第 {marketRound.opened_window} 窗（{stampOf(marketRound.opened_at)}）
-                {marketRound.settled_at ? `，结轮 ${stampOf(marketRound.settled_at)}` : ''} · 本轮报价 {marketOffers.length} 份
+                · 开轮于 {marketRound.opened_season} 赛季第 {marketRound.opened_window} 窗（{dateTime(marketRound.opened_at)}）
+                {marketRound.settled_at ? `，结轮 ${dateTime(marketRound.settled_at)}` : ''} · 本轮报价 {marketOffers.length} 份
               </span>
             </p>
             <div className="table-wrap">
@@ -366,7 +365,7 @@ export default function BrandsPage() {
                           <td>
                             <span className={`badge ${st.badge}`}>{st.text}</span>
                           </td>
-                          <td className="mono">{stampOf(o.expire_at)}</td>
+                          <td className="mono">{dateTime(o.expire_at)}</td>
                         </tr>
                       );
                     })

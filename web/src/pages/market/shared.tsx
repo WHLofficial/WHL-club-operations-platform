@@ -38,12 +38,6 @@ export function money(x: number | null | undefined): string {
   return x === null || x === undefined ? '—' : x.toFixed(2);
 }
 
-export function deadlineText(iso: string | null, suffix = ' 判定'): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}${suffix}`;
-}
-
 export function MarketNav() {
   return (
     <nav className="seg" aria-label="市场分区">

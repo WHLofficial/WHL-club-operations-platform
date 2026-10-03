@@ -19,6 +19,7 @@ import {
   type LlmStatus,
 } from '../../lib/api.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { useTimeFmt } from '../../lib/datetime.ts';
 
 const POOL_KEY = ['admin', 'events', 'pool'] as const;
 const OCC_KEY = ['admin', 'events', 'occurrences'] as const;
@@ -192,6 +193,8 @@ function structSummary(payload: unknown): string {
 
 function DraftSection() {
   const { show, toastNode } = useToast();
+  // v6.25.0：草稿时间显示走共享时区层（默认北京时间）
+  const { dateTime: fmtDateTime } = useTimeFmt();
   const queryClient = useQueryClient();
   const llmQuery = useQuery({
     queryKey: LLM_KEY,
@@ -400,7 +403,7 @@ function DraftSection() {
                     </td>
                     <td className="muted">{d.note || '—'}</td>
                     <td>{draftBadge(d.status)}</td>
-                    <td className="mono muted">{d.updated_at.slice(5, 16).replace('T', ' ')}</td>
+                    <td className="mono muted">{fmtDateTime(d.updated_at)}</td>
                     <td className="actions">
                       {d.status === 'draft' && (
                         <button className="btn btn-sm btn-ghost" type="button" disabled={busy} onClick={() => openDraft(d)}>
@@ -546,6 +549,8 @@ function PoolSection() {
 
 function OccurrenceSection() {
   const { show, toastNode } = useToast();
+  // v6.25.0：流水时刻与截止显示走共享时区层（默认北京时间）
+  const { dateTime: fmtDateTime, time: fmtTime } = useTimeFmt();
   const { data, error } = useQuery({
     queryKey: OCC_KEY,
     queryFn: () => api<{ season: number | null; occurrences: AdminEventOccurrence[] }>('/api/admin/events/occurrences'),
@@ -586,7 +591,7 @@ function OccurrenceSection() {
             <tbody>
               {rows.map((o) => (
                 <tr key={o.id}>
-                  <td className="mono">{o.created_at.slice(0, 16).replace('T', ' ')}</td>
+                  <td className="mono">{fmtDateTime(o.created_at)}</td>
                   <td>
                     {o.club_name ?? `#${o.club_id}`}
                     <div className="muted mono">#{o.club_id}</div>
@@ -606,7 +611,7 @@ function OccurrenceSection() {
                     {resolvedByText(o.resolved_by)}
                     {o.choice_no !== null && <div className="mono">选项 {o.choice_no}</div>}
                     {o.status === 'pending' && o.deadline_at !== null && (
-                      <div className="mono">截止 {o.deadline_at.slice(5, 16).replace('T', ' ')}</div>
+                      <div className="mono">截止 {fmtTime(o.deadline_at)}</div>
                     )}
                   </td>
                   <td>

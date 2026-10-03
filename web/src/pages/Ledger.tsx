@@ -9,6 +9,7 @@ import {
   type LedgerPage,
 } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
+import { useTimeFmt } from '../lib/datetime.ts';
 import { useFinanceSummary } from '../lib/queries.ts';
 import type { FinanceWindow } from '../lib/api.ts';
 
@@ -27,10 +28,6 @@ const KIND_OPTIONS = [
   'delist_fee',
   ...MANUAL_LEDGER_KINDS.filter((k) => k.value.startsWith('prize_')).map((k) => k.value),
 ];
-
-function fmtTime(iso: string): string {
-  return iso.slice(0, 16).replace('T', ' ');
-}
 
 function fmtAmount(n: number): string {
   const abs = Math.abs(n);
@@ -151,6 +148,8 @@ function FinanceSummaryCard() {
 }
 
 export default function Ledger() {
+  // v6.25.0：时间显示走共享时区层（默认北京时间，顶栏时钟图标可切）
+  const { dateTime } = useTimeFmt();
   const [kind, setKind] = useState('');
   const { user } = useAuth();
   const isCoach = user?.role === 'coach' || user?.role === 'admin';
@@ -248,7 +247,7 @@ export default function Ledger() {
                         </td>
                         <td className={`num mono ${e.amount >= 0 ? 'ledger-in' : 'ledger-out'}`}>{fmtAmount(e.amount)}</td>
                         <td className="num mono">{e.balanceAfter.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}</td>
-                        <td className="mono ledger-time">{fmtTime(e.createdAt)}</td>
+                        <td className="mono ledger-time">{dateTime(e.createdAt)}</td>
                       </tr>
                     ))}
                   </tbody>

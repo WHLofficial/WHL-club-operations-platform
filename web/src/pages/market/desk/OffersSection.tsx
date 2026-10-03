@@ -8,6 +8,7 @@ import { apiPost, type OfferDetailResponse, type OfferListItem, type OfferStatus
 import { playerPath } from '../../../lib/player-link.ts';
 import { useOfferDetail, useOffers, useOffersInvalidation } from '../../../lib/queries.ts';
 import { useToast } from '../../../lib/toast.tsx';
+import { useTimeFmt } from '../../../lib/datetime.ts';
 
 const STATUS_BADGE: Record<OfferStatus, { label: string; cls: string }> = {
   pending: { label: '待回复', cls: 'sky' },
@@ -33,10 +34,6 @@ function money(v: number | null | undefined): string {
   return v === null || v === undefined ? '—' : v.toFixed(2);
 }
 
-function shortTime(iso: string): string {
-  return iso.slice(5, 16).replace('T', ' ');
-}
-
 export default function OffersSection({
   box,
   status,
@@ -49,6 +46,7 @@ export default function OffersSection({
   onStatusChange: (next: 'pending' | 'all') => void;
 }) {
   const { show, toastNode } = useToast();
+  const { time } = useTimeFmt();
   const qc = useQueryClient();
   const invalidateOffers = useOffersInvalidation();
 
@@ -181,7 +179,7 @@ export default function OffersSection({
                       <td>
                         <span className={`badge ${badge.cls}`}>{badge.label}</span>
                       </td>
-                      <td className="muted">{shortTime(o.updatedAt)}</td>
+                      <td className="muted">{time(o.updatedAt)}</td>
                       <td>
                         <button type="button" className="btn btn-sm btn-ghost" onClick={() => setOpenId(openId === o.id ? null : o.id)}>
                           {openId === o.id ? '收起' : '谈判桌'}
@@ -235,6 +233,7 @@ function OfferDesk({
   onAct: (offer: OfferListItem, action: 'accept' | 'reject' | 'withdraw' | 'counter', amount?: number) => Promise<void>;
   onClose: () => void;
 }) {
+  const { time } = useTimeFmt();
   if (loading) {
     return (
       <section className="card">
@@ -297,7 +296,7 @@ function OfferDesk({
             <tbody>
               {events.map((e, i) => (
                 <tr key={i}>
-                  <td className="mono">{shortTime(e.at)}</td>
+                  <td className="mono">{time(e.at)}</td>
                   <td>{EVENT_LABEL[e.kind] ?? e.kind}</td>
                   <td>{e.actor ? e.actor.name : '系统'}</td>
                   <td className="num mono">{money(e.amount)}</td>

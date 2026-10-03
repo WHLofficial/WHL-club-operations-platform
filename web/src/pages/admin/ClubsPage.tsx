@@ -8,6 +8,7 @@ import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
 import { usePrompt } from '../../components/PromptDialog.tsx';
+import { useTimeFmt } from '../../lib/datetime.ts';
 
 export default function ClubsPage() {
   return (
@@ -20,6 +21,7 @@ export default function ClubsPage() {
 
 function ClubsSection() {
   const { show, toastNode } = useToast();
+  const { dateTime } = useTimeFmt();
   const { ask, promptNode } = usePrompt();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
@@ -325,7 +327,7 @@ function ClubsSection() {
       {newCode && (
         <div className="code-card">
           <p>
-            <b>{newCode.club}</b> 的绑定认证码（明码只显示这一次，过期时间 {newCode.expiresAt.slice(0, 16).replace('T', ' ')}）：
+            <b>{newCode.club}</b> 的绑定认证码（明码只显示这一次，过期时间 {dateTime(newCode.expiresAt)}）：
           </p>
           <div className="code-display mono">{newCode.code}</div>
           <button

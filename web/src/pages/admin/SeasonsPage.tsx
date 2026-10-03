@@ -25,6 +25,7 @@ import {
 import { SEASON_CURRENT_KEY, fetchSeasonCurrent, fetchWeatherForecast, weatherForecastKey } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
+import { useTimeFmt } from '../../lib/datetime.ts';
 
 export default function SeasonsPage() {
   return (
@@ -365,6 +366,7 @@ function resultScoreLine(r: { homeTeam: string | null; awayTeam: string | null; 
 
 function ResultsSection() {
   const { show, toastNode } = useToast();
+  const { dateTime } = useTimeFmt();
   const queryClient = useQueryClient();
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -449,7 +451,7 @@ function ResultsSection() {
                     {r.walkoverSide && r.walkoverSide !== '' && <span className="badge">弃权</span>}
                     {r.winnerTeam && <span className="muted">，胜者 {r.winnerTeam}</span>}
                   </td>
-                  <td className="mono">{r.finishedAt?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                  <td className="mono">{dateTime(r.finishedAt)}</td>
                   <td>
                     <ConfirmButton
                       className="btn-sm"
@@ -491,7 +493,7 @@ function ResultsSection() {
                       {resultScoreLine(r)}
                       {r.winnerTeam && <span className="muted">，胜者 {r.winnerTeam}</span>}
                     </td>
-                    <td className="mono">{r.confirmedAt.slice(0, 16).replace('T', ' ')}</td>
+                    <td className="mono">{dateTime(r.confirmedAt)}</td>
                     <td>
                       {r.needsReview ? (
                         <span className="badge" title={r.reviewNote ?? undefined}>

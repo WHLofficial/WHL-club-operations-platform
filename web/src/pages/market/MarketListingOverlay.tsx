@@ -13,6 +13,7 @@ import { useListingDetail, useMarketInvalidation, type MarketMyClub } from '../.
 import { useToast } from '../../lib/toast.tsx';
 import { useMediaQuery } from '../../lib/use-media.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
+import { useTimeFmt } from '../../lib/datetime.ts';
 import { BID_STATUS_LABEL, money } from './shared.tsx';
 
 /** 卡片 / 浮层共用的状态徽标：三态统一，不看是否已有人出价（内部 listed/bidding 留给结算）。 */
@@ -34,15 +35,6 @@ export function pickDeadline(
   if (l.matchPhase === 'matching') return l.matchDeadline ?? null;
   if (l.firstBidPending) return l.activationDeadline ?? null;
   return l.deadlineAt ?? null;
-}
-
-/** 绝对截止时刻（浮层里「（M月D日 HH:MM 判定）」用）。 */
-export function deadlineAbsolute(iso: string | null): string {
-  if (iso === null) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function MarketListingOverlay({
@@ -205,6 +197,7 @@ function OverlayBody({
   onDecide: (newFee: number | null) => void;
   onPassArm: (v: boolean) => void;
 }) {
+  const { dateTime } = useTimeFmt();
   const badge = listingBadge(l);
   const deadline = pickDeadline(l);
   const isActivator = myClub !== null && l.activatedBy === myClub.id;
@@ -227,13 +220,13 @@ function OverlayBody({
         : l.status === 'pending_review'
           ? '这单已截止，正在等管理组审核。'
           : l.status === 'matched_pending'
-            ? `首价已落定，24 小时匹配窗内等 ${l.sellerClub.name} 决定是否匹配（${deadlineAbsolute(l.matchDeadline)} 截止）。`
+            ? `首价已落定，24 小时匹配窗内等 ${l.sellerClub.name} 决定是否匹配（${dateTime(l.matchDeadline)} 截止）。`
             : l.status === 'delisted'
               ? '这单已经下架。'
               : isSeller
                 ? '自家的挂牌，等别人来出价。'
                 : l.firstBidPending && !isActivator
-                  ? `激活首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价（${deadlineAbsolute(l.activationDeadline)} 前须落价）。`
+                  ? `激活首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价（${dateTime(l.activationDeadline)} 前须落价）。`
                   : null;
   const halfPrice = l.matchPhase === 'matching' ? (l.highestBid ?? l.askPrice) : null;
   const note = isSeller
@@ -279,7 +272,7 @@ function OverlayBody({
           <dt>截止</dt>
           <dd className="mono">
             {remaining === null ? '—' : `⏱ 剩 ${fmtClock(remaining)}`}
-            {deadline !== null && <span className="mkt-ov-abs">（{deadlineAbsolute(deadline)} 判定）</span>}
+            {deadline !== null && <span className="mkt-ov-abs">（{dateTime(deadline)} 判定）</span>}
           </dd>
         </div>
         <div>
@@ -303,7 +296,7 @@ function OverlayBody({
       {canBid && l.firstBidPending && isActivator && (
         <>
           <MarketBidForm mode="activation-first" askPrice={l.askPrice} nextMinBid={l.nextMinBid} available={available} onBid={onBid} />
-          <span className="hint">{deadlineAbsolute(l.activationDeadline)} 前不落价，激活作废还占本窗额度。</span>
+          <span className="hint">{dateTime(l.activationDeadline)} 前不落价，激活作废还占本窗额度。</span>
         </>
       )}
       {canBid && !l.firstBidPending && l.matchPhase === null && (
@@ -383,7 +376,7 @@ function OverlayBody({
                     </span>
                   </td>
                   <td className="num mono">{money(b.amount)}</td>
-                  <td className="mono">{b.createdAt.slice(0, 16).replace('T', ' ')}</td>
+                  <td className="mono">{dateTime(b.createdAt)}</td>
                   <td>
                     <span className={`badge ${b.status === 'active' ? 'sky' : b.status === 'won' ? 'gold' : 'gray'}`}>
                       {BID_STATUS_LABEL[b.status] ?? b.status}
