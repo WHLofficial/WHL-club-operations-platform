@@ -349,7 +349,7 @@ function PlayerBatchSection() {
 
 function GrowthSection() {
   const { show, toastNode } = useToast();
-  const { dateTime } = useTimeFmt();
+  const { dateTime, date } = useTimeFmt();
   const queryClient = useQueryClient();
   const [settleSeason, setSettleSeason] = useState('');
   const [half, setHalf] = useState(false);
@@ -446,7 +446,7 @@ function GrowthSection() {
             <strong className="mono"> 第 {periods.current.id} 期</strong>
             <span className="muted">
               （{periods.current.source === 'window_open' ? '开窗自动宣告' : '手动宣告'}
-              {periods.current.declaredAt ? ` · ${periods.current.declaredAt.slice(0, 10)}` : ''}
+              {periods.current.declaredAt ? ` · ${date(periods.current.declaredAt)}` : ''}
               {periods.current.note ? ` · ${periods.current.note}` : ''}）
             </span>
           </>

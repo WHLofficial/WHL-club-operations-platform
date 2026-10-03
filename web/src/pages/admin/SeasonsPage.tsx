@@ -39,6 +39,8 @@ export default function SeasonsPage() {
 
 function SeasonsSection() {
   const { show, toastNode } = useToast();
+  // v6.25.0：结算日期显示走共享时区层（默认北京时间）
+  const { date } = useTimeFmt();
   const queryClient = useQueryClient();
   const [selectedSeason, setSelectedSeason] = useState('');
   const [newSeason, setNewSeason] = useState('');
@@ -342,7 +344,7 @@ function SeasonsSection() {
               />
               {b.stageSettledAt ? (
                 <span className="badge" title="入场/保底/剩余池已一次性发放">
-                  已完结结算 {b.stageSettledAt.slice(0, 10)}
+                  已完结结算 {date(b.stageSettledAt)}
                 </span>
               ) : (
                 <button className="btn btn-sm" type="button" disabled={busy} onClick={() => runStageSettle(b)}>

@@ -21,7 +21,7 @@ export default function ClubsPage() {
 
 function ClubsSection() {
   const { show, toastNode } = useToast();
-  const { dateTime } = useTimeFmt();
+  const { dateTime, date } = useTimeFmt();
   const { ask, promptNode } = usePrompt();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
@@ -256,8 +256,10 @@ function ClubsSection() {
                   <td className="hint">
                     {club.latestCode
                       ? club.latestCode.usedAt
-                        ? `已用（${club.latestCode.usedAt.slice(0, 10)}）`
-                        : `未用 · 至 ${club.latestCode.expiresAt?.slice(0, 16) ?? '长期'}`
+                        ? `已用（${date(club.latestCode.usedAt)}）`
+                        : club.latestCode.expiresAt
+                          ? `未用 · 至 ${dateTime(club.latestCode.expiresAt)}`
+                          : '未用 · 至 长期'
                       : '—'}
                   </td>
                   <td>
