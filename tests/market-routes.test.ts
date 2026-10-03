@@ -920,3 +920,78 @@ describe('暂停出价（v2.1.0：全局开关 + 单挂牌冻结）', () => {
 
 // v6.18.0：/api/market/cpu-board 已退役，原 TC-BOARD-06 执行计划护栏随之删除。
 // 同类护栏改挂在成交公示（GET /api/market/deals）上，见 tests/market-intel.test.ts 的 TC-DEAL-06。
+
+// 评审修复（P1-1/P1-2/P2-④）：结算批次守卫、active 计数口径与下架文案来源
+describe('结算守卫与活跃口径（评审修复 P1-1/P1-2/P2-④）', () => {
+  it('P1-2①：listed 只余非活跃出价 → 截止到点按「截止时刻无人出价」下架，不卡无单据 pending_review', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    expect((await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env)).status).toBe(201);
+    // 管理方撤掉唯一活跃出价：挂牌被 adminVoidBid 送回 listed，出价转 withdrawn（真实状态来源）
+    const bidId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM bids WHERE listing_id = 1 AND status = 'active'")!.id;
+    expect((await adminPost(`/api/admin/market/bids/${bidId}/void`, { reason: '撤空看结算口径' }, 'tok-admin', fx.env)).status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')?.status).toBe('listed');
+    // 截止时刻拨到过去 → cron tick 惰性结算
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = 1`);
+    const tick = await post('/api/cron/tick', {}, undefined, fx.env);
+    expect(((await tick.json()) as { delisted: number }).delisted).toBe(1);
+    const row = sqlGet<{ status: string; deadline_note: string | null }>(
+      fx.sqlite,
+      'SELECT status, deadline_note FROM listings WHERE id = 1',
+    );
+    // 旧口径把「仅 withdrawn/superseded 出价」算成有人出价 → 卡成无单据 pending_review 并每次刷审计
+    expect(row?.status).toBe('delisted');
+    expect(row?.deadline_note).toBe('截止时刻无人出价'); // P2-④：与窗尾收口的「窗口结束无人出价」区分
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM transfers')?.n).toBe(0);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM review_tasks')?.n).toBe(0);
+    expect(sqlGet<{ amount: number }>(fx.sqlite, "SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND ref_id = 1")?.amount).toBe(-1.5);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 10')?.status).toBe('normal');
+    const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'listing_delist'");
+    expect(JSON.parse(audit!.after)).toMatchObject({ reason: 'deadline_no_bid', fee: 1.5 });
+  });
+
+  it('P1-2②：无活跃出价的 pending_review 卡单不再空跑刷 listing_settle 审计', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
+    // 造出旧口径卡出的残留：出价全灭 + 挂牌 pending_review 但无 transfer（active 出价也不存在）
+    fx.sqlite.exec("UPDATE bids SET status = 'withdrawn' WHERE listing_id = 1");
+    fx.sqlite.exec("UPDATE listings SET status = 'pending_review', deadline_at = NULL WHERE id = 1");
+    const settleAudits = () =>
+      sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'listing_settle'")?.n ?? 0;
+    expect(settleAudits()).toBe(0);
+    await post('/api/cron/tick', {}, undefined, fx.env);
+    await post('/api/cron/tick', {}, undefined, fx.env);
+    // 自愈扫描必须排除「补不出单据」的行：否则每轮 settleListingForReview 空跑，guardSql 恒真照写审计
+    expect(settleAudits()).toBe(0);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM transfers')?.n).toBe(0);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM review_tasks')?.n).toBe(0);
+  });
+
+  it('P1-2②对照组：有活跃出价的 pending_review 卡单仍被自愈补单，且只留一条审计', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
+    // 模拟「建单前崩溃」：挂牌已 pending_review、出价仍活跃，但 transfer / 审核任务缺失
+    fx.sqlite.exec("UPDATE listings SET status = 'pending_review', deadline_at = NULL WHERE id = 1");
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM transfers')?.n).toBe(0);
+    const tick = await post('/api/cron/tick', {}, undefined, fx.env);
+    expect(((await tick.json()) as { healed: number }).healed).toBe(1);
+    expect(
+      sqlGet<{ type: string; status: string; fee: number; to_club_id: number }>(
+        fx.sqlite,
+        'SELECT type, status, fee, to_club_id FROM transfers WHERE idempotency_key = ?',
+        'listing:1',
+      ),
+    ).toMatchObject({ type: 'transfer', status: 'pending_review', fee: 15, to_club_id: mf.bidderClub });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM review_tasks WHERE type = 'transfer_confirm'")?.n).toBe(1);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'listing_settle'")?.n).toBe(1);
+    // 再跑一轮：单据已齐，不重复补单也不重复留痕
+    const again = await post('/api/cron/tick', {}, undefined, fx.env);
+    expect(((await again.json()) as { healed: number }).healed).toBe(0);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'listing_settle'")?.n).toBe(1);
+  });
+});

@@ -155,7 +155,9 @@ app.get('/market/listings', async (c) => {
       // 截止绝对时刻化（v6.4.0）：优先读落库列（出价时按 bidDeadline 算定），存量行 NULL 回落实时算。
       // v6.24.0：挂牌即落 deadline_at，listed 的普通挂牌也回截止时刻（卡片倒计时锚点）；
       // 激活挂牌的首价窗看 activationDeadline，不进本判定
-      if ((r.status === 'bidding' || (r.status === 'listed' && r.type !== 'activation')) && r.listed_day !== null) {
+      // 评审修复（P0-2）：listed 提前收口/回传截止时刻只对普通挂牌生效；activation 看首价窗列，
+      // forced 在首笔出价前没有 deadline_at（挂牌不落列），实时算出来的「次日 21:00」是幻影倒计时
+      if ((r.status === 'bidding' || (r.status === 'listed' && r.type === 'normal')) && r.listed_day !== null) {
         deadlineAt =
           r.deadline_at ??
           bidDeadline({
@@ -673,7 +675,8 @@ app.get('/market/listings/:id', async (c) => {
 
   let deadlineAt: string | null = null;
   // v6.24.0：listed 的普通挂牌也回截止时刻（挂牌即落 deadline_at）；激活首价窗看 activationDeadline
-  if ((listing.status === 'bidding' || (listing.status === 'listed' && listing.type !== 'activation')) && listing.listed_day !== null) {
+  // 评审修复（P0-2）：与列表口径一致——listed 的 forced 不给倒计时（首笔出价前无截止时刻）
+  if ((listing.status === 'bidding' || (listing.status === 'listed' && listing.type === 'normal')) && listing.listed_day !== null) {
     // 优先读落库列（v6.4.0 改动 A），存量行 NULL 回落实时算
     deadlineAt =
       listing.deadline_at ??
@@ -690,10 +693,12 @@ app.get('/market/listings/:id', async (c) => {
     .prepare(`SELECT MAX(amount) AS highest FROM bids WHERE listing_id = ? AND status = 'active'`)
     .bind(id)
     .first<{ highest: number | null }>();
+  // 评审修复（P2-②）：出价必须为整数，最低可出价向上取整——ceil(最高价+步长) / ceil(挂牌价)，
+  // 与 validateBidAmount（整数准入）和表单预填口径一致，避免前端预填一个提交必被拒的小数
   const nextMinBid =
     highestActive?.highest !== null && highestActive?.highest !== undefined
-      ? round2(highestActive.highest + ctx.bidStepMin)
-      : round2(listing.ask_price);
+      ? Math.ceil(highestActive.highest + ctx.bidStepMin)
+      : Math.ceil(listing.ask_price);
 
   return c.json({
     marketBidPaused: (await createConfigService(c.env.DB).get('market_bid_paused')) === 'true',
@@ -797,7 +802,7 @@ app.post('/market/listings/:id/bids', async (c) => {
   }
   if (listing.seller_club_id === club.id) throw new HttpError(403, '不能对自己俱乐部的挂牌出价');
   if (listing.type === 'activation' && listing.status === 'matched_pending') {
-    throw new HttpError(409, '竞价已截止，被激活方正在考虑是否匹配，这单不开放竞价');
+    throw new HttpError(409, '竞价已截止，被激活方正在考虑是否匹配，这单已停止接受出价');
   }
   if (listing.status !== 'listed' && listing.status !== 'bidding') {
     throw new HttpError(409, listing.status === 'pending_review' ? '这单已经截止，正在等管理组审核' : '这单已经结束，不能再出价');
@@ -807,7 +812,14 @@ app.post('/market/listings/:id/bids', async (c) => {
   }
 
   const isActivation = listing.type === 'activation';
-  const bidStats = await c.env.DB.prepare(`SELECT MAX(amount) AS highest, COUNT(*) AS total FROM bids WHERE listing_id = ?`)
+  // 评审修复（P2-③）：highest/total 只认 active 出价——与冻结触发器（0005）、结算分流
+  // （market-settle 的 active 计数）口径一致；撤销/被覆盖的历史出价不再影响首价判定与最低抬价
+  const bidStats = await c.env.DB
+    .prepare(
+      `SELECT MAX(CASE WHEN status = 'active' THEN amount END) AS highest,
+              COUNT(CASE WHEN status = 'active' THEN 1 END) AS total
+       FROM bids WHERE listing_id = ?`,
+    )
     .bind(id)
     .first<{ highest: number | null; total: number }>();
   const highest = bidStats?.highest ?? null;
@@ -818,13 +830,17 @@ app.post('/market/listings/:id/bids', async (c) => {
     if (listing.activated_by !== club.id) {
       throw new HttpError(403, '激活挂牌的首价窗内只有激活方可以出价，等激活方出价后再看结果');
     }
+    // 评审修复（P0-1）：首价 = 激活价，而激活价本身可能是非整数（保护期 releaseFee>20 → 1.5 倍
+    // 如 31.5；导入通道不要求整数）。首价路径不能过 validateBidAmount 的整数准入，
+    // 否则非整数激活单永远落不了首价：窗到期作废、额度白耗、文案冤枉激活方。
+    // 「有限且为正」已在上方统一校验，这里只做等值判定；抬价路径（已有 active 出价）仍走整数校验
     if (amount !== listing.ask_price) {
       throw new HttpError(400, '激活方首价固定为激活价');
     }
+  } else {
+    const bidError = validateBidAmount(amount, highest, listing.ask_price);
+    if (bidError) throw new HttpError(400, bidError);
   }
-
-  const bidError = validateBidAmount(amount, highest, listing.ask_price);
-  if (bidError) throw new HttpError(400, bidError);
 
   // 可用余额预检（触发器 0005 在事务内兜底同一公式，这里给可读报错）
   const myHold = await c.env.DB
@@ -893,6 +909,12 @@ app.post('/market/listings/:id/bids', async (c) => {
   try {
     const results = await c.env.DB.batch(statements);
     if ((results[1].meta.changes ?? 0) !== 1) throw new HttpError(409, '出价没落库，行情刚变过，刷新再试');
+    // 评审修复（P2-①）：推进挂牌（results[4]）必须恰好改到 1 行——守卫漂移（将来谁放宽了那段
+    // SQL）时显式报 'already'，不留「冻结/出价已落库但挂牌没推进」的静默半笔。真正的并发竞态
+    // 由触发器 0005/0059 在事务内先整批拦下（那一步才是原子回滚），这里是最后一层可读断言
+    if ((results[4].meta.changes ?? 0) !== 1) {
+      throw new HttpError(400, '出价没落库：这单刚被结算或作废，刷新再试', 'already');
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('WHL_BID_REJECT_FUNDS')) throw new HttpError(400, '可用资金不足：出价即冻结，冻结没过账这单就不算数');

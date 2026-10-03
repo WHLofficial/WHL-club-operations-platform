@@ -59,9 +59,9 @@ export function renderNotification(template: string, data: Record<string, unknow
     case 'activation_matched':
       return `🛡 匹配：#${data.listingId} 的激活被对方匹配留队（新违约金 ${data.newReleaseFee} m > 你的出价 ${data.previousBid} m），资金已解冻。`;
     case 'activation_passed':
-      return `✅ 放行：#${data.listingId} 的激活被对方放行，按激活价成交进审核。`;
+      return `✅ 放行：#${data.listingId} 的激活被对方放行，按竞价最高价成交进审核。`;
     case 'activation_match_expired':
-      return `⌛ 匹配窗结束：#${data.listingId} 的激活匹配窗到期未匹配，按激活价成交进审核。`;
+      return `⌛ 匹配窗结束：#${data.listingId} 的激活匹配窗到期未匹配，按竞价最高价成交进审核。`;
     // 随机事件（v6.10.0，D 块）：即发型触发即广播；data.notes 是效果播报（资金/死忠/设施…）
     case 'event_triggered':
       return `🎲 ${data.club} 触发事件「${data.name}」：${data.text}${data.notes ? `（${data.notes}）` : ''}`;

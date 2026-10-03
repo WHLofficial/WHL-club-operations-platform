@@ -2,7 +2,7 @@
 // 训练营球员固定 5m（4.4.2.3(3)）；普通球员保护期内 RC≤20→2 倍、>20→1.5 倍、保护期外 1 倍。
 // 流程：激活挂牌 → 激活方 5 分钟内落首价（他队出价无效）→ 训练营合同直接进待审
 //（固定条款无匹配可言）；正式合同进 matched_pending（被激活方 24h 匹配窗）：
-// 匹配 = 新 RC > 首价 + 付差额（销毁，每名球员生涯限一次），放行/到期 = 按激活价成交。
+// 匹配 = 新 RC > 首价 + 付差额（销毁，每名球员生涯限一次），放行/到期 = 按竞价最高价成交。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { activationFee, matchDiff } from '../core/bypass-rules.ts';
@@ -180,7 +180,7 @@ export interface MatchResult {
 }
 
 /**
- * 被激活方的匹配决定（24h 窗内）：newReleaseFee 缺省 = 放行（按激活价成交）。
+ * 被激活方的匹配决定（24h 窗内）：newReleaseFee 缺省 = 放行（按竞价最高价成交）。
  * 匹配：新 RC 必须高于当前首价（整数 m，不受 4.4.6 幅度约束——差额本身是代价），
  * 生涯只能被匹配一次；差额在审核通过时销毁（这里预检资金）。单批原子：
  * match 单 + 审核任务 + 挂牌收口 + 首价出价作废解冻 + 球员还原。
@@ -213,7 +213,7 @@ export async function submitMatch(
   if (!bid) throw new HttpError(409, '找不到激活方的出价，数据不完整');
 
   if (newFeeInput === undefined || newFeeInput === null || newFeeInput === 'pass') {
-    // 放行：按激活价成交，转待审
+    // 放行：按竞价最高价成交，转待审
     await settleListingForReview(db, { id: listing.id, player_id: listing.player_id, seller_club_id: listing.seller_club_id, ask_price: bid.amount, season: listing.season, window_seq: listing.window_seq }, actor, 'user', 'matched_pending');
     await queueClubNotification(env, listing.activated_by, 'activation_passed', { listingId: listing.id });
     return { ok: true, decision: 'pass' };
