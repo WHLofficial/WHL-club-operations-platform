@@ -595,8 +595,23 @@ async function main() {
           null,
           { timeout: TIMEOUT },
         ).catch(() => {});
-        const offTop = await secTop('desk-offers');
-        assert(offTop !== null && offTop <= 40 && offTop >= -40, `?tab=offers 没把报价区滚到位（top=${offTop}）`);
+        // v6.24.0 删挂牌表单后 desk-bids 变矮：desk-offers 下方内容不够滚时，浏览器只能滚到底
+        //（实测 max scroll 934 < 该区绝对位 1132 ⇒ 视口顶最多到 198）。「够不到顶」时按
+        // 下方 desk-bids 深链同款判据验收：已滚到底（gap≤40）且区块露在视口内。
+        const offGeom = await page.evaluate(() => {
+          const el = document.getElementById('desk-offers');
+          const d = document.documentElement;
+          return {
+            top: el?.getBoundingClientRect().top ?? null,
+            gap: d.scrollHeight - (window.scrollY + window.innerHeight),
+            vh: window.innerHeight,
+          };
+        });
+        assert(
+          offGeom.top !== null &&
+            (offGeom.top <= 40 || (offGeom.gap <= 40 && offGeom.top < offGeom.vh - 200)),
+          `?tab=offers 没把报价区滚到位（top=${offGeom.top}，距底 ${offGeom.gap}）`,
+        );
         assert((await text()).includes('巴塞罗那'), '?box=out 没生效（out 侧报价行未渲染）');
         assert((await page.locator('#desk-offers [aria-label="报价页签"] button.on').first().innerText()).includes('我送出的'),
           '?box=out 时「我送出的」页签未选中');
