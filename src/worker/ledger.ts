@@ -1,7 +1,8 @@
 // 账本原语（TECH_DESIGN §7.4，仿 revenue 插件 claim_* 模式）：
-// 余额变更 = 账户 upsert（按差额）+ 流水（balance_after 在同一 batch 内读更新后余额），
-// 两条语句必须进同一个 D1 batch 才是原子的。流水自带幂等闸：同一 (club, kind, ref) 只记一次，
-// 并发重放时第二条的 NOT EXISTS 闸不通过，整段不落账（完成过户/下架费等自动路径靠它防重复记账）。
+// 余额变更 = 账户 upsert（批首，幂等闸 + guardSql 对批前状态求值）+ 流水（以账户 changes()>0 为闸，
+// balance_after 读同批更新后的余额）。两条语句必须进同一个 D1 batch 才是原子的。
+// 流水自带幂等闸：同一 (club, kind, ref) 只记一次，并发重放时账户的 NOT EXISTS 闸不通过、
+// changes()=0，流水整段不落（完成过户/下架费等自动路径靠它防重复记账）。
 export interface MovementInput {
   clubId: number;
   /** 正=入账 负=出账（m） */
@@ -39,7 +40,8 @@ export function ledgerMovement(db: D1Database, input: MovementInput): D1Prepared
   const where = guardParts.join(' AND ');
 
   return [
-    // 1) 账户差额 upsert：INSERT 分支与 UPDATE 分支都挂幂等闸，重放时整段不动。
+    // 1) 账户差额 upsert（批首）：幂等闸 + guardSql 都在这里对**批前状态**求值——余额类守卫
+    //    （如消费扣费）必须在这一条上判断，否则流水语句会读到本批扣完的余额（v6.26.0 教训）。
     //    守卫在语句里出现两次，占位符也按两次绑定（node:sqlite/D1 缺位绑定会静默落 NULL）。
     db
       .prepare(
@@ -49,14 +51,14 @@ export function ledgerMovement(db: D1Database, input: MovementInput): D1Prepared
          WHERE ${where}`,
       )
       .bind(input.clubId, input.delta, ...guardParams, ...guardParams),
-    // 2) 流水：balance_after 读同事务内更新后的余额，防错账（§7.4）
+    // 2) 流水：以「账户语句真的动了账（changes() > 0）」为闸——幂等重放 / 守卫没过时账户
+    //    changes=0，流水整段不落，两段始终同生共死。balance_after 读同批更新后的余额（§7.4 防错账）。
     db
       .prepare(
         `INSERT INTO ledger_entries (club_id, kind, amount, balance_after, ref_type, ref_id, memo, created_at)
-         SELECT ?, ?, ?, (SELECT balance FROM ledger_accounts WHERE club_id = ?), ?, ?, ?, ${nowSql()}
-         WHERE ${where}`,
+         SELECT ?, ?, ?, (SELECT balance FROM ledger_accounts WHERE club_id = ?), ?, ?, ?, ${nowSql()} WHERE changes() > 0`,
       )
-      .bind(input.clubId, input.kind, input.delta, input.clubId, input.refType, input.refId, input.memo, ...guardParams),
+      .bind(input.clubId, input.kind, input.delta, input.clubId, input.refType, input.refId, input.memo),
   ];
 }
 

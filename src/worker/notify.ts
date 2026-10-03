@@ -85,6 +85,11 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `📣 招商期开启：${data.club} 收到 ${data.count} 份品牌报价（${data.brands}），去「冠名市场」查看签约。`;
     case 'naming_offer_activated':
       return `✅ 品牌接替生效：「${data.brand}」冠名 ${data.club} 正式生效（${data.pkgName}套餐，${data.feePerWindow}M/窗 × ${data.windows} 窗）。`;
+    // 消费中心（v6.26.0）：工单生效回执 / 拒绝退款
+    case 'shop_order_approved':
+      return `🛒 消费工单已生效：${data.summary}${data.note ? `（备注：${data.note}）` : ''}${data.external ? '（外部录入）' : ''}。`;
+    case 'shop_order_rejected':
+      return `🛒 消费工单被拒绝：${data.summary}。理由：${data.reason}${data.refund ? '（费用已退回余额）' : ''}。`;
     default:
       return String(data.text ?? '');
   }

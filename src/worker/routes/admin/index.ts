@@ -16,6 +16,7 @@ import teamSyncRoutes from './teamSync.ts';
 import brandsRoutes from './brands.ts';
 import eventsRoutes from './events.ts';
 import weatherRoutes from './weather.ts';
+import shopRoutes from './shop.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -36,5 +37,7 @@ app.route('/', brandsRoutes);
 app.route('/', eventsRoutes);
 // v6.15.0：场次天气预报（GET/POST /api/admin/weather/forecast，按轮预览与触发）
 app.route('/', weatherRoutes);
+// v6.26.0：消费中心管理端（GET/POST /api/admin/shop/orders + POST /api/admin/shop/orders/:id/approve|reject）
+app.route('/', shopRoutes);
 
 export default app;

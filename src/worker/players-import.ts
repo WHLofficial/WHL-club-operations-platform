@@ -3,7 +3,9 @@
 import { HttpError } from '../lib/http.ts';
 import type { Env } from './env.ts';
 import { createAuditStatement } from '../lib/audit.ts';
+import { createConfigService } from '../core/config.ts';
 import { IMPORT_ROW_LIMIT, normalizeImportBatch, type ImportChannel, type NormalizedPlayer } from '../core/import.ts';
+import { fetchPurchases, replayStatements } from './shop-ops.ts';
 
 export type ImportMode = 'minor' | 'major';
 
@@ -60,8 +62,10 @@ function runNormalize(payload: ImportPayload) {
   }
 }
 
-// 库内现状（IN ≤90 一批，§17.2-1）——预览的换版统计与确认的插入/覆盖预估共用
+// 库内现状（IN ≤90 一批，§17.2-1）——预览的换版统计与确认的插入/覆盖预估共用。
+// id / pa 供消费台账重放用（v6.26.0）：upsert 整列覆盖 pa / game_attrs 后按台账把已购属性加回去。
 interface ExistingRow {
+  id: number;
   fc_id: number;
   ca: number | null;
   base_ca: number | null;
@@ -74,7 +78,7 @@ async function fetchExisting(db: D1Database, fcIds: number[]): Promise<ExistingR
     const slice = fcIds.slice(i, i + 90);
     const placeholders = slice.map(() => '?').join(', ');
     const rows = await db
-      .prepare(`SELECT fc_id, ca, base_ca, growth_xp FROM players WHERE fc_id IN (${placeholders})`)
+      .prepare(`SELECT id, fc_id, ca, base_ca, growth_xp FROM players WHERE fc_id IN (${placeholders})`)
       .bind(...slice)
       .all<ExistingRow>();
     out.push(...rows.results);
@@ -199,9 +203,14 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
   }
 
   const audit = createAuditStatement(env.DB);
+  // 消费台账重放（v6.26.0）：upsert 整列覆盖 pa / game_attrs，已购的 PA 点 / 角色 / 位置热区
+  // 按台账在每 chunk 批内加回去（与 upsert 同批 ⇒ 「导入 + 重放」整体幂等）。徽章是独立
+  // 明细表（player_playstyles），不受整列覆盖影响，无需重放。
+  const paCap = (await createConfigService(env.DB).getNumber('fc26_pa_cap')) ?? 95;
   let written = 0;
   let inserted = 0;
   let growthPlayers = 0;
+  let replayed = 0;
   const batchCount = Math.ceil(outcome.players.length / CHUNK_ROWS);
   for (let i = 0; i < outcome.players.length; i += CHUNK_ROWS) {
     const slice = outcome.players.slice(i, i + CHUNK_ROWS);
@@ -209,6 +218,12 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
     inserted += slice.length - existing.length;
     growthPlayers += swapStats(existing, payload.mode).growthPlayers;
     const statements = slice.map((p) => upsertStatement(env.DB, p, payload.mode));
+    // 重放只对「库里已存在且有台账」的行有意义：新插入的球员不可能有已购属性
+    const purchases = await fetchPurchases(env.DB, existing.map((r) => r.id));
+    if (purchases.length > 0) {
+      replayed += new Set(purchases.map((r) => r.player_id)).size;
+      statements.push(...replayStatements(env.DB, purchases, paCap));
+    }
     statements.push(
       audit({
         actor,
@@ -223,6 +238,7 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
           insertEstimate: slice.length - existing.length,
           updateEstimate: existing.length,
           growthPlayers: swapStats(existing, payload.mode).growthPlayers,
+          replayedPurchases: purchases.length,
         },
       }),
     );
@@ -239,5 +255,6 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
     channel: payload.channel,
     mode: payload.mode,
     growthPlayers,
+    replayed,
   };
 }

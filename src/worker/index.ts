@@ -16,6 +16,7 @@ import offersRoutes from './routes/offers.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
 import growthRoutes from './routes/growth.ts';
+import shopRoutes from './routes/shop.ts';
 import squadsRoutes from './routes/squads.ts';
 import fixturesRoutes from './routes/fixtures.ts';
 import notificationsRoutes from './routes/notifications.ts';
@@ -74,6 +75,8 @@ app.route('/api', offersRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
 app.route('/api', growthRoutes);
+// 消费中心教练端（v6.26.0）：目录 / 我的工单 / 提交工单（提交即扣费）
+app.route('/api', shopRoutes);
 // 全平台一线队名册（v5.0.0）：赛事系统拉取同步的契约面，只读
 app.route('/api', squadsRoutes);
 // 场次天气/球场/上座公开只读面（v6.15.0）：预留向赛事平台展示的契约接口

@@ -73,6 +73,9 @@ export const CONFIG_KEYS = [
   'event_rules',
   'event_clamps',
   'event_signals',
+  'shop_prices',
+  'shop_hpremium_clubs',
+  'fc26_pa_cap',
   'results_auto_confirm',
   'review_amount_threshold',
   'bid_pattern_alert',
@@ -232,6 +235,24 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   renewal_raise: '0.05,0.15',
   window_force_settle: 'false',
   market_bid_paused: 'false',
+  // v6.26.0 消费中心：五类商品价目（M；JSON 可覆盖，键语义见 shop-ops）+ 豪门俱乐部名单
+  //（队壳申请走群内咨询，系统只拦不收）+ FC26 当前版本 PA 上限（买 PA 不得超过）。
+  shop_prices: JSON.stringify({
+    paPerPoint: 15,
+    clubShell: 5,
+    badgeSilver: 4,
+    badgeGold: 8,
+    badgeSilverToGold: 6,
+    roleAddPlus: 5,
+    roleAddPlusPlus: 12,
+    roleUpgrade: 10,
+    roleRemove: 5,
+    positionAdd: 5,
+    positionRemove: 5,
+    positionReplace: 8,
+  }),
+  shop_hpremium_clubs: '[]',
+  fc26_pa_cap: '95',
 };
 
 export const CONFIG_SECRET_KEYS: ReadonlySet<string> = new Set([
