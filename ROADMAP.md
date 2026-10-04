@@ -1500,6 +1500,24 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.29.0 · 关窗期报价与意向单 + 消费提交开窗闸（2026-10-04）
+
+**状态**：**本地收口待发布**（2026-10-04 收口；迁移 `0063` 生产未 apply——发布顺序硬约束 = 先 `npm run db:migrate:remote` 再 push，push 即 CF 自动部署）。同工作区并行流「球队中心页签化 + 三类施工开窗闸」经用户裁决另立 **v6.30.0**，两版共用 `409 no_window` 口径但分枚提交、互不夹带：本版只落消费工单闸，施工三闸（`src/worker/stadium-ops.ts:117/189/255`）与球队中心页签化归 v6.30.0。验收：typecheck 三份全清、vitest **85 文件 / 1419 例**全绿（含并行流用例；本版净增：offer-intents 15 / offers 改写 2 / window-machine +1 / shop-orders +5 / OffersSection 6）；判级 **minor**（新增用户可见能力 + 本仓迁移 `0063`、零跨仓）。测试计划 `docs/test-plans/v6.29.0-offer-intent-shop-gate.md`；计划文件 `memory/plan-v6.29.0-consumption-gate-offer-intent.md`。
+
+**缘起与拍板**：用户令「消费项目也是开窗才能做，同时未开窗时开放报价，如果成交挂为意向单，开窗时提醒双方。」**范围裁决**（AskUserQuestion 三问）：① 消费与转会两块都改；② 意向单开窗后**只提醒、卖方手动确认**——不自动推进、不直接过户，卖方开窗后手动再点一次同意才生成挂牌，买方随时可撤、卖方开窗后可放弃；③ 消费闸含设施升级一并闸（五类商品 + 设施升级；档期 / 冠名照旧；已提交待审工单照常审）。
+
+**设计要点（主会话两处自加口子，用户未否决）**：a) **一球员一意向单**——`enterIntent` 带 `NOT EXISTS` 原子闸 + 挂牌端点同码拦下（否则同一球员可能挂出两张意向单，开窗后双确认会互相踩）；b) **卖方确认前也能放弃**（否则窗口未开时卖方被单方面锁死，只能等买方撤回）。
+
+**交付（后端）**：`src/worker/offers.ts`——`placeOffer`（`:117`）/ `counterOffer`（`:252`）删窗闸、`acceptOffer`（`:563`）按窗态分流（开窗 → `fulfillAcceptedOffer`；关窗 → `enterIntent`（`:524`）落 `status='intent'`）、`expireStaleOffers`（`:628-691`）删「窗关即过期」条件；`src/worker/routes/offers.ts`（accept 复用同一入口：关窗态 intent 的卖方确认、买方撤回）、`src/worker/routes/market.ts:240`（挂牌前的意向单闸 → 409 `intent_exists`）、`src/worker/notify.ts`（4 个模板）、`src/worker/window-machine.ts:206-224`（开窗批提交成功后双方排队提醒，各自 try/catch 吞异常）、`src/worker/routes/shop.ts:97`（消费开窗闸）。迁移 `src/db/migrations/0063_offers_intent.sql`。错误码：`intent_exists` / `intent_seller_only` / `no_window`（统一体 `{ error, code }`，`src/worker/index.ts:93-101` 序列化）。
+
+**交付（前端）**：`web/src/pages/market/desk/OffersSection.tsx`（徽标「意向单·等开窗」、谈判桌动作按角色分派）、`OffersSection.test.tsx`（6 例 jsdom + mock `lib/api`）、`MarketDeskPage.tsx`（`OFFER_STATUS_FILTERS` 加 `intent` + `intentsMine`）、`web/src/pages/player/SideOps.tsx:696`（报价按钮关窗不再置灰）、`web/src/pages/shop/ShopPage.tsx`、`web/src/lib/api.ts`（`OfferStatus` 加 `'intent'` + `intentsMine`）。
+
+**测试与变异**：`tests/offer-intents.test.ts`（新，15 例 = 关窗期同意落意向单 3 / 一球员一意向单 3 / 卖方确认 3 / 两种了结与自动收口 5 / 清单 1）、`tests/shop-orders.test.ts:626-677`（TC-D01–D05：关窗 409 不扣费不落单不写台账 / 无窗口行同 409 / 开窗 201 / 存量 pending 仍可审拒 / GET 与管理端代录不受限）、`tests/window-machine.test.ts:139`（开窗提醒）、`tests/offers.test.ts` 改写两例（窗关不再过期 pending；球员状态变化 / 已有挂牌过期）、`OffersSection.test.tsx`。变异 V1–V10 逐条座实（`placeOffer` 恢复窗闸 / 关窗分支写死 season / `enterIntent` 删通知 / 删 `NOT EXISTS` 唯一闸 / 删卖方角色 409 / 关窗分支改回落挂牌 / `openWindow` 删提醒 / `expireStaleOffers` 只留 pending / 消费闸 `if (false)` / 前端徽标与动作还原），红的都是对应断言。
+
+**登记已知不改**：① 前端不吃本地窗态预置灰（靠后端 409 + toast；窗态可能中途翻转，服务端为准）；② `SideOps` 入口徽标仍只数 `pendingMine`（意向单入口统一在转会桌「我收到的」页签）；③ 消费闸在路由层而施工闸在 ops 层（口径一致、落点由各自模块结构决定）；④ `MIGRATION_FILES` 校验改为版本无关，不再锁死具体末位迁移。
+
+**踩坑**：① `tests/weather-forecast.test.ts` 的 TC-MIG-03 原本锁「末位 = 0062」，加 0063 必红 ⇒ 改写成读 `src/db/migrations` 目录按名排序取最新一枚、与 `tests/d1.ts` 源码里最后登记的迁移名比对（删掉登记即变红，已验证咬得住）；② 关窗期达线自动同意若沿用开窗分支会写出 `season`/`window_seq` 为 NULL 的挂牌 ⇒ 关窗分支必须先于 auto_accept 判定（变异 ⑥ 座实）；③ 与并行流同工作区并发编辑 ⇒ 收口只写本版文档节，`package.json` 版本号先后由用户裁决（本版 6.29.0、并行流 6.30.0）。
+
 ## v6.28.0 · 影响力体系：级别系数 + 死忠每场演化（2026-10-04）
 
 **状态**：**已上线**（2026-10-04 发布记录，用户令「1发布2执行 3皇马奖励分是0」；发布顺序硬约束执行到位：**先 `npm run db:migrate:remote` apply 迁移 `0062` @11:21:42Z 再 push**——回读列 `REAL NOT NULL DEFAULT 0` + 16 行 `fans_window_start = fans`）。**发布**：push `2736413..03b0513`（6 提交，含 v6.27.0 发布记录枚 `d1b7fcc`）⇒ 本仓 Version **`7ecb15a1-a8f6-4b16-974c-f810bed52370`** @2026-10-04T11:22:42.102Z（deployment `22d383f5-07d1-4632-973e-57067c911612`；CF API `workers/scripts/whl-club/deployments` 取证）。**上线回读**：`/api/health` 三检 ok；入口 `assets/index-C_-lc4t5.js`（含版本串 `6.28.0`）、CSS `index-d1JcVntj.css`（含 `.admin-nav-group-title`）、懒加载块 `AdminLayout-DlR4_BEm.js` / `OverviewPage-DC5o3RDb.js` 的 sha256 与本地 `web/dist` **逐字节一致**；线上 worker 代码（CF API `/accounts/{acc}/workers/scripts/whl-club/content/v2`，`/content` 报 `method_not_allowed`）含 `influence_tier_coefs` ×3 / `fans_window_start` ×5 / `fans_grow_rate_per_match` ×3；`/admin`、`/admin/shop` 200；`/api/admin/overview|clubs|config` 未认证 401「未登录」。验收：typecheck 三份全清、vitest **82 文件 / 1369 例**全绿（v6.27.0 基线 78/1331，净 +4 文件 / +38 例）、build 成功 3.62s（唯一警告既有 chunk > 500 kB）、e2e **21/21**（⑫ 375 宽零溢出扫描 28 条路由，含 `/admin/clubs/cpu-convert` 360/375）；变异 **M1–M17 十九条全命中**（M9 含 a/c/d 三变体；红在对应断言）。判级 **minor**（新增用户可见能力；本仓有迁移 `0062`、无跨仓改动）。**C 段生产数据批已执行**（见交付 C 段）。**实现分工**：后端 A+B / 前端 D+E / 数据批 C / 测试计划四个 subagent 并行（文件面不相交），主会话集成验收 + 评审 + 修复（用户指令「可分工给子代理」）。计划文件 `memory/plan-v6.28.0-influence-system.md`。
