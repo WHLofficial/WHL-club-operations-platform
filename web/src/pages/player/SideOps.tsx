@@ -8,6 +8,8 @@
 //     违约金输入框下嵌 seaComps 成交参照
 // 窗门控（v6.2.0 延续）：转会动作后端一律 409 no_window，前端关窗时同步置灰；
 // 报价设置是意图标记不锁窗，关窗时也能改。
+// v6.29.0：报价（POST /api/offers）移出窗门控——关窗期也能送报价/还价/同意，
+// 关窗期谈成先挂「意向单」（status=intent），开窗后由卖方确认才挂牌。
 // 训练营球员（contractType=trainee）：合同固定、只能被激活带走，不显示报价设置与挂牌/续约。
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
@@ -296,7 +298,7 @@ export function SideOps({
             ) : (
               <p className="side-sub">
                 {!l.windowOpen
-                  ? '这单所属的转会窗口已经关了。'
+                  ? '这单所属的转会窗口已经关了，暂不能出价；开窗后再来。'
                   : l.status === 'pending_review'
                     ? '这单已截止，正在等管理组审核。'
                     : l.status === 'matched_pending'
@@ -661,7 +663,12 @@ export function SideOps({
             {player.minOfferPrice !== null && (
               <p className="side-sub">对方最低报价线 {player.minOfferPrice} m：低于线自动拒；达线且对方开了自动同意才直接成交，否则进人工谈判。</p>
             )}
-            <p className="side-sub">报价即冻结资金；对方同意即自动挂牌，你的价锁成领先出价。</p>
+            <p className="side-sub">
+              报价即冻结资金；
+              {windowOpen
+                ? '对方同意即自动挂牌，你的价锁成领先出价。'
+                : '关窗期同意先挂「意向单」（不生成挂牌、冻结继续），开窗后由卖方确认才挂牌。'}
+            </p>
             <div className="side-btns">
               <button
                 type="button"
@@ -674,11 +681,13 @@ export function SideOps({
                       amount: Number(offerAmount),
                       note: offerNote || undefined,
                     });
-                    return r.status === 'accepted'
-                      ? '达到对方最低报价线，已自动同意并挂牌！'
-                      : r.status === 'rejected'
-                        ? '低于对方最低报价线，报价被自动拒绝。'
-                        : `报价已送出（#${r.offerId}），等卖家表态。`;
+                    return r.status === 'intent'
+                      ? '关窗期谈成：已挂意向单（资金继续冻结），开窗后由卖方确认才挂牌。'
+                      : r.status === 'accepted'
+                        ? '达到对方最低报价线，已自动同意并挂牌！'
+                        : r.status === 'rejected'
+                          ? '低于对方最低报价线，报价被自动拒绝。'
+                          : `报价已送出（#${r.offerId}），等卖家表态。`;
                   })
                 }
               >
@@ -693,7 +702,7 @@ export function SideOps({
           activatePanel
         ) : (
           <div className="side-btns">
-            <button type="button" className="btn btn-sm" disabled={busy || !windowOpen} onClick={() => setPanel('offer')}>
+            <button type="button" className="btn btn-sm" disabled={busy} onClick={() => setPanel('offer')}>
               报价
             </button>
             <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen} onClick={() => setPanel('activate')}>
@@ -707,7 +716,11 @@ export function SideOps({
 
   return (
     <div className="side-ops">
-      {!windowOpen && <div className="side-closed-note">转会窗未开放，转会相关操作暂不可用</div>}
+      {!windowOpen && (
+        <div className="side-closed-note">
+          转会窗未开放：续约 / 挂牌 / 解约 / 激活暂不可用；报价仍可送出，关窗期谈成先挂意向单，开窗后由卖方确认才挂牌
+        </div>
+      )}
       {body}
     </div>
   );
