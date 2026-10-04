@@ -1500,6 +1500,34 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.26.1 · 绿标「练满去标」+ 球员库吸底横向滚动条 + 顶栏消费中心入口（2026-10-03）
+
+**状态**：**本地收口待发布**（四枚 commit：fix(marker) + feat(scrollbar) + fix(topbar) + docs；**发布顺序硬约束：迁移 `0061` 必须先于 push apply 到生产**）。验收：typecheck 三份全清、vitest **75 文件 / 1298 例**全绿（v6.26.0 基线 75/1297，净 +1 例）、build 成功、e2e **21/21**（⑪/⑧ 表格探针补双向同步断言）。测试计划 `docs/test-plans/v6.26.1-marker-scrollbar.md`（qa-test-planner：15 TC + 变异 M1–M4）。判级 patch（三项现有行为修正）。**实现分工**：A 块（绿标后端）与 B 块（吸底滚动条前端）文件面不相交，两个 subagent 并行实现、主会话集成验收与评审（用户指令「实现可以分工给 subagent」）。
+
+**缘起与拍板**：用户三项修正指令——① 绿标球员练满即去掉绿标；② 电脑端球员库表格只有滚到最下方才能左右滑动；③ 消费中心在 TopBar 没有入口（v6.26.0 漏项）。① 的产品口径经 AskUserQuestion 拍板**注册合规 🟢 名额与标记同步改**（练满球员不显示绿标、也不占 🟢 注册名额；`squad-rules.ts` 注释本就要求两边一起改）；② 的方案经 visual companion 三方案**可操作演示**（现状对照 + 吸底镜像轨 / 悬浮胶囊滑块 / 表格窗口化，各带真滚动真同步的迷你窗口）拍板 **A 吸底镜像滚动条**；版本号用户裁 **v6.26.1**（两项都是现有行为修正，patch 级；迁移仍独立编号 0061 不回改历史）。计划文件 `memory/plan-v6.26.1-marker-scrollbar.md`（用户要求**含关键实现**）。
+
+**根因（绿标）**：🟢 = 初始 CA<87（`COALESCE(base_ca, ca)`）且 PA≥87 且 `growable=1`；`growable` 只在赛季结算/建季重算（`season-settle.ts:168`：`ca<pa 且 age≤cap`），`applyLevelUp`（`growth.ts:621`）抬 CA **不钳 pa、不即时归零 growable** ⇒ 练满球员（现值 `ca >= pa`）到下次结算前一直挂绿标。「练满」= 现值 `ca >= pa`（与训练营条款 `pa-ca>0` 同口径）。
+
+**交付（A 绿标练满去标）**：
+- `src/core/squad-rules.ts` 三处同步：`markerOf` 加第 4 参 `currentCa`（growth 分支加 `currentCa !== null && currentCa < pa`，ca NULL 不落绿与 SQL NULL 语义一致）；`markerWeightSql` 两形态第三 WHEN 加 `AND ${p}ca < ${p}pa`；`checkSquad` growth filter 加练满判定（用户拍板同步名额口径），注释订正「长满的球员仍占坑」旧说法。`SquadPlayer` 已有 `ca` 字段 ⇒ 3 调用方（registration ×2、admin/reviews）零改动。
+- **迁移 `0061_players_marker_index_rebuild.sql`**：`DROP INDEX IF EXISTS` + 新表达式重建 `idx_players_sort_marker`（尾列 `id` 保留、索引侧非限定名）。**表达式索引与查询侧逐字同源才 seek**——不重建则 `sort=marker` / `?marker=` 退化整表扫（≈18,301 行/次，`tests/players-sort-indexes.test.ts` 同源锁 + 4 条 EXPLAIN 锁会红）。apply 写量 ≈18.3k（占日配额 ~18.3%）；keyset 游标结构不变（权重值域仍 3/2/1/0，只是哪些行落 1 变了）。`tests/d1.ts` MIGRATION_FILES 追加、`tests/weather-forecast.test.ts` TC-MIG-03 尾断言 0060→0061。
+- 调用点补参：`players.ts` 列表（`r.cur_ca`）与详情（`p.ca`）两处 `markerOf` 补第 4 参。文案：`MARKER_LABEL.growth` 与 CoachPanel 注册规则行加「且未练满」。
+- **语义注（不改）**：练满但 `growable` 未重算期间仍可买 PA（校验只看 growable=1），PA 抬高后 `ca<pa` 重新成立 ⇒ 绿标回归；离队恢复初始 CA（`transfers.ts` `ca = COALESCE(base_ca, ca)`）后同理——设计使然。
+
+**交付（B 吸底镜像滚动条）**：
+- 新建 `web/src/components/StickyScrollbar.tsx`：props 接 `.table-wrap` ref；镜像轨 `position:sticky; bottom:0` + 双向 scrollLeft 同步（`syncing` 标志防回环——同值赋值不派发事件 ⇒ 即便异步回声漏过标志也自终止）+ ResizeObserver 盯表格宽度（内层宽运行时赋值，不碰 TC-SWP-02/03 内联 `width/minWidth` 字面量闸）；不用 aria-hidden（Chrome 把可滚动容器变可聚焦元素，aria-hidden-focus 违规）。
+- `PlayersLibrary.tsx`：`.table-wrap` 加 ref，`!narrow`（>900px，窄屏是卡片网格无表格）时在其后作**兄弟节点**渲染（表格分支包 fragment）——**不得插在 wrap 与 table 之间**（TC-SWP-01 锁 table 紧邻上一行必须是 table-wrap；插进 wrap 内则 sticky 的滚动祖先变成那个横向滚动容器、钉不到视口底）。`.table-wrap` 的 overflow/position 一字不动（e2e ⑪ 依赖它做横滚容器；`table-sticky-2` 粘列靠它的滚动上下文）。
+- `styles.css`：`.sticky-xbar`（z-index 5 低于 topbar 的 20、高 17px 容纳原生横向滚动条、`var(--card)`/`var(--border)`）。其余 50+ `.table-wrap` 页面本轮不动（组件通用，后续按需挂）。
+- e2e `smoke.mjs` ⑪/⑧ 表格探针补**双向**同步断言（wrap→bar 与 bar→wrap 各自真断言、量完归零）。
+
+**交付（C TopBar 入口）**：`TopBar.tsx` nav 区「转会中心」后加「消费中心」NavLink（主会话顺手修）。nav 渐隐是测量驱动（navEdges）+ mobile-baseline 锁的是 CSS 能力非 tab 清单 ⇒ 加 tab 零测试闸。
+
+**测试与变异**：`tests/squad-rules.test.ts` 补 markerOf 四边界（练满 `(86,87,true,88/87)`→null、`(86,87,true,80)`→growth、`(86,87,true,null)`→null）+ SQL 文本锁加 `ca < pa` 片段 + checkSquad 练满不占名额用例；`tests/players-library.test.ts` 夹具补 id47（练满）断言 marker=null 且 `?marker=growth` 不含它。变异 M1（删 markerOf 练满条件）2 红 / M2（删 SQL `ca<pa`）6 红（文本锁 + 同源锁 + 4 EXPLAIN 连锁）——红的正是目标断言；**M4（删镜像轨 bar→wrap 同步）首轮未命中**，根因是 e2e 探针只量 wrap→bar 单向（真实覆盖缺口）⇒ 补反向探针与断言后做微变异复验，**恰好红在 ⑧「镜像滚动条反向不同步（镜像 83，表格 0）」**，还原后 21/21 复绿。
+
+**code-review 结论**：无必修项；JS/SQL/名额三处同源一致、NULL 语义两侧对齐、迁移注释含部署写量与回滚。登记不改两条：表格不溢出时镜像轨为空轨（17px 视觉噪音；生产 18,301 人表格最小宽 1018 > 容器 854 必溢出，仅本地小夹具形状）；页面滚到底时分页器与镜像轨交叠 17px（A 方案演示同款行为，已拍板）。
+
+**踩坑**：A 块 subagent 发现本地 `.wrangler/state` D1 处于对象/记账脱节的陈旧态（`d1_migrations` 22 行 head=0058 但 0059 触发器在场、0060 两表缺失），`npm run db:migrate:local` 报 `table players already exists`——按 v6.4.0 先例改用 `d1 execute --local --file` 逐个落地 0060/0061 后 e2e 方可跑（主会话补齐）。
+
 ## v6.26.0 · 消费中心 + 外部工单：五类商品工单审核制 + 球场消费三卡迁入（2026-10-04）
 
 **状态**：**已上线**（2026-10-04 发布：迁移 `0060` 已先 apply 到生产——`npm run db:migrate:remote` 报 `Executed 9 commands in 3.82ms`，只读核验两表 + 三索引 + 三 config 键在场、`d1_migrations` 到 60；随后用户下令「push」，push `b75cff5..7381009`（6 个提交 = v6.26.0 五枚 + v6.25.0/v6.24.1 发布记录 docs 枚 `908dc0f`）触发 CF 自动部署，生产 Version **`9c1eb258-8524-4869-bb0e-9c7369f0a11a`** @2026-10-04T00:10:15Z（100%，经 REST API 补查——wrangler 当时内部 DNS 持续抽风、系统解析正常）；上线回读：health / players 全 200，`/api/shop/catalog`、`/api/shop/orders`、`/api/admin/shop/orders` 匿名均 401（挂载且守卫生效）；线上入口资产 `index-CV17Qivu.js` + `index-CVbmy9gz.css` 与本地 dist 同名、线上 JS 版本串 `6.26.0`）。提交五枚：feat(shop) 后端 `2d22a58` + feat(shop) 前端 `837349e` + test(shop) `76af89f` + fix(shop) 评审修复 `6d1ab57` + docs 收口 `7381009`。验收：typecheck 三份全清、vitest **75 文件 / 1297 例**全绿（v6.25.0 基线 74/1271，净 +1 文件 / +26 例，全在新建 `tests/shop-orders.test.ts`）、build 成功、e2e **21/21**（⑱ 新增；⑫ 溢出扫描路由清单补 `/shop` 与 `/admin/shop`）。测试计划 `docs/test-plans/v6.26.0-shop.md`（qa-test-planner：TC-A/B/C 矩阵 + 变异 M1–M8）。判级 minor（新增用户可见能力；无跨仓消费）。
