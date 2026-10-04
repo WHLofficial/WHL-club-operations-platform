@@ -280,6 +280,11 @@ export interface PlayerListItem {
   prestige: number | null;
   marketValue: number | null;
   status: string;
+  /** 转会设置（v6.30.0，列表行口径）：挂牌中 / 非卖品 */
+  transferListed: boolean;
+  notForSale: boolean;
+  /** 是否设过最低报价的摘要：列表端点只给布尔，min_offer_price 数值不下发（详情端点给数值 minOfferPrice，故详情对象上没有本键） */
+  transferPriced?: boolean;
   growthTier: number;
   isFutureStar: boolean;
   chinaPlan: boolean;
@@ -583,20 +588,35 @@ export interface SquadCompliance {
 export interface SquadPlayerRow {
   id: number;
   fcId: number | null;
+  uid: string;
   name: string;
   number: string | null;
   position: string | null;
   age: number | null;
   ca: number | null;
   pa: number | null;
+  baseCa: number | null;
+  // v6.30.0 C 段：注册工作台的固定列（标记/UID）与可选列池要用的字段，口径同 PlayerListItem
+  marker: PlayerMarker | null;
   growable: boolean;
   isFutureStar: boolean;
   chinaPlan: boolean;
+  prestige: number | null;
   status: string;
   marketValue: number | null;
+  foot: number | null;
+  growthTier: number;
+  agentTier: number;
+  badgesSilver: number;
+  badgesGold: number;
   wage: number | null;
   releaseFee: number | null;
   contractType: string | null;
+  source: string | null;
+  serviceSeasons: number | null;
+  protected: boolean;
+  /** PlayStyle 槽位原值（15 槽、缺槽 null）；只有本端点无条件下发 */
+  psIds: (number | null)[];
   hasContract: boolean;
   squad: 'first_team' | 'trainee' | null;
 }
@@ -1076,6 +1096,8 @@ export interface StadiumBuildInfo {
   expansionPer100: number;
   maxOpenTier: number;
   refundRatio: number;
+  /** v6.30.0 施工开窗闸：当前是否有开着的转会窗口——关窗时三类施工按钮全部置灰（后端同口径 409 no_window） */
+  open: boolean;
   tier: { level: number; name: string | null; capacity: number; minSeats: number | null; maxSeats: number | null };
   nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean; capacityOk: boolean } | null;
   facilities: { key: string; level: number; nextCost: number | null }[];

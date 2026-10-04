@@ -1,7 +1,7 @@
 // 守卫测试：前端时间显示只走共享时区层 lib/datetime.ts（v6.25.0，docs/test-plans/v6.25.0-timezone-display.md D 组）。
 //
 // 背景：v6.25.0 之前 web/src 里有三种并存的时间写法——裸切片 `iso.slice(0, 16).replace('T', ' ')`
-// （恒 UTC，换显示时区后就是错的）、浏览器本地 `d.getHours()`（随设备漂移）、CoachPanel 的硬编码
+// （恒 UTC，换显示时区后就是错的）、浏览器本地 `d.getHours()`（随设备漂移）、原 club/CoachPanel 的硬编码
 // UTC 切片 +「（UTC）」标注。全部收敛到 datetime.ts（偏好三档、默认北京）之后，这里锁两条不变量：
 //   1. Intl.DateTimeFormat / timeZone: 只允许出现在 datetime.ts —— 时区口径单点化，别的文件
 //      各写各的 Intl 就等于把三种写法换个地方复发；

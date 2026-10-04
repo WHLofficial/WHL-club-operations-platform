@@ -925,7 +925,7 @@ async function main() {
       /\/api\/me\/club(\?|$)/,
     ];
 
-    await check('⑨ 球队页三视口：列表分段 / 详情三组 / 结构图不溢出（截图落 scratch/）', async () => {
+    await check('⑨ 球队页三视口：列表分段 / 详情三页签逐一点开 / 结构图不溢出（截图落 scratch/）', async () => {
       const clubsFixture = {
         clubs: [
           { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 5, trainee: 1 }, avgCa: 78.4, totalValue: 412.5, totalWage: 33.4 },
@@ -992,13 +992,15 @@ async function main() {
           wins: 1, draws: 1, losses: 1,
         },
       };
+      // v6.30.0 C 段：阵容名单列集重定后，行里要读的字段补齐（号码/违约金/身价 + 转会状态三布尔），
+      // 五个人恰好覆盖转会状态四态 + 空态：已标价 / 挂牌中 / 转会名单 / 非卖品 / —
       const rosterFixture = {
         players: [
-          { id: 1, uid: 'fc100001', name: '门将甲', positions: ['GK'], age: 27, ca: 80, pa: 84, status: 'normal', wage: 6.5 },
-          { id: 2, uid: 'fc100002', name: '后卫乙', positions: ['CB', 'LB'], age: 24, ca: 76, pa: 85, status: 'normal', wage: 5.25 },
-          { id: 3, uid: 'fc100003', name: '中场丙', positions: ['CM'], age: 31, ca: 74, pa: 74, status: 'listed', wage: 4.75 },
-          { id: 4, uid: 'fc100004', name: '前锋丁', positions: ['ST'], age: 19, ca: 65, pa: 88, status: 'trainee', wage: null },
-          { id: 5, uid: 'fc100005', name: '边锋戊', positions: [], age: null, ca: 61, pa: 70, status: 'normal', wage: 1.2 },
+          { id: 1, uid: 'fc100001', name: '门将甲', number: '1', positions: ['GK'], age: 27, ca: 80, pa: 84, status: 'normal', wage: 6.5, releaseFee: 12, marketValue: 30, transferListed: false, notForSale: false, transferPriced: false },
+          { id: 2, uid: 'fc100002', name: '后卫乙', number: '4', positions: ['CB', 'LB'], age: 24, ca: 76, pa: 85, status: 'normal', wage: 5.25, releaseFee: 8, marketValue: 22, transferListed: false, notForSale: false, transferPriced: true },
+          { id: 3, uid: 'fc100003', name: '中场丙', number: '8', positions: ['CM'], age: 31, ca: 74, pa: 74, status: 'listed', wage: 4.75, releaseFee: null, marketValue: 9.5, transferListed: false, notForSale: false, transferPriced: false },
+          { id: 4, uid: 'fc100004', name: '前锋丁', number: null, positions: ['ST'], age: 19, ca: 65, pa: 88, status: 'trainee', wage: null, releaseFee: null, marketValue: 5, transferListed: true, notForSale: false, transferPriced: false },
+          { id: 5, uid: 'fc100005', name: '边锋戊', number: '11', positions: [], age: null, ca: 61, pa: 70, status: 'normal', wage: 1.2, releaseFee: 3, marketValue: 4, transferListed: false, notForSale: true, transferPriced: false },
         ],
         nextCursor: null,
       };
@@ -1057,52 +1059,63 @@ async function main() {
           await page.screenshot({ path: listShot, fullPage: false });
           shots.push(listShot);
 
-          // ---- 详情页：三组 + 结构图不溢出 ----
+          // ---- 详情页：页签壳 + 三组各自成页（v6.30.0 A 段）----
+          // 详情页改页签式后三组不再同屏：登录者是观众（club: null）⇒ 只有三个公开页签、默认落「阵容」，
+          // 三组的断言必须逐一点开再跑（覆盖不减，每条先落到它所在的页签）。
           await page.goto(`${BASE}/clubs/1`, { waitUntil: 'domcontentloaded' });
           await page.locator('.club-block').first().waitFor({ timeout: TIMEOUT });
           assert(await page.locator('h1', { hasText: '阿森纳' }).first().isVisible(), `${label}：详情页 h1 不是队名`);
-          const groups = await page.locator('.club-block h3').allInnerTexts();
-          for (const g of ['阵容组', '运营组', '战绩组']) {
-            assert(groups.includes(g), `${label}：缺「${g}」组（实际 ${groups.join('、')}）`);
-          }
           assert(
-            (await page.locator('.club-block h3', { hasText: '教练工作台' }).count()) === 0,
-            `${label}：登录者不是本队教练，不该看到教练工作台`,
+            (await page.locator('.club-block h3', { hasText: '注册工作台' }).count()) === 0,
+            `${label}：登录者不是本队教练，不该看到工作台内容`,
           );
-          // 三组结构分析各出一种图：年龄 = 竖直直方图、CA = 100% 堆叠条、效力 = 横向条形图
+          const tabLabels = (await page.locator('.dossier-tabs button').allInnerTexts()).map((s) => s.trim());
+          assert(
+            tabLabels.join('/') === '阵容/转会/战绩',
+            `${label}：观众只该看到三个公开页签（实际 ${tabLabels.join('/')}）——自家页签（工作台/主场）漏给访客了`,
+          );
+          assert(
+            (await page.locator('.dossier-tabs button.on').innerText()).trim() === '阵容',
+            `${label}：无 ?tab= 时应落默认页签「阵容」`,
+          );
+          const groups = await page.locator('.club-block h3').allInnerTexts();
+          assert(groups.includes('阵容组'), `${label}：阵容页签缺「阵容组」（实际 ${groups.join('、')}）`);
+          // 结构分析各出一种图，且各自在它所在的页签里：年龄 = 竖直直方图、CA = 100% 堆叠条（阵容页签）、
+          // 效力 = 横向条形图（转会页签，未点开时不该渲染）
           assert((await page.locator('.club-histogram').count()) === 1, `${label}：年龄应出一张竖直直方图`);
           assert((await page.locator('.club-share-stack').count()) === 1, `${label}：CA 应出一根 100% 堆叠条`);
-          assert((await page.locator('.band-chart').count()) === 1, `${label}：效力应出一张横向条形图`);
+          assert(
+            (await page.locator('.band-chart').count()) === 0,
+            `${label}：效力条形图属转会页签，停在阵容页签时不该渲染（按需加载）`,
+          );
 
           // 几何：三张图宽高都按百分比给，窄屏只该压轨道。要验的是「图不撑破卡片、图自己不出横向滚动」。
           // 别拿「条形右缘 ≤ 轨道右缘」当断言——全局 box-sizing:border-box 下那是盒模型保证的，永远为真。
           // 并排容器（.club-figures / .club-split）也一起量：网格轨道撑破卡片时图自己是不会滚的。
-          const CHART_SELECTORS = ['.club-figures', '.club-split', '.club-histogram', '.club-share-plot', '.band-chart'];
-          const charts = await page.evaluate((selectors) => {
-            const out = [];
-            for (const sel of selectors) {
-              for (const el of document.querySelectorAll(sel)) {
-                const r = el.getBoundingClientRect();
-                const block = el.closest('.club-block');
-                const br = block ? block.getBoundingClientRect() : null;
-                out.push({
-                  sel,
-                  left: r.left,
-                  right: r.right,
-                  blockLeft: br ? br.left : null,
-                  blockRight: br ? br.right : null,
-                  scrollW: el.scrollWidth,
-                  clientW: el.clientWidth,
-                });
+          // v6.30.0 A 段：.club-figures 在阵容页签、.club-split 在转会页签 ⇒ 分两次量再合并复核（总数仍 5）。
+          const measureCharts = (selectors) =>
+            page.evaluate((sels) => {
+              const out = [];
+              for (const sel of sels) {
+                for (const el of document.querySelectorAll(sel)) {
+                  const r = el.getBoundingClientRect();
+                  const block = el.closest('.club-block');
+                  const br = block ? block.getBoundingClientRect() : null;
+                  out.push({
+                    sel,
+                    left: r.left,
+                    right: r.right,
+                    blockLeft: br ? br.left : null,
+                    blockRight: br ? br.right : null,
+                    scrollW: el.scrollWidth,
+                    clientW: el.clientWidth,
+                  });
+                }
               }
-            }
-            return out;
-          }, CHART_SELECTORS);
-          assert(charts.length === 5, `${label}：应量到 5 个结构分析容器，实际 ${charts.length}`);
-          const chartOut = charts.filter((c) => c.blockRight === null || c.right > c.blockRight + 1 || c.left < c.blockLeft - 1);
-          assert(chartOut.length === 0, `${label}：有结构图超出所在卡片 ${JSON.stringify(chartOut)}`);
-          const chartScroll = charts.filter((c) => c.scrollW > c.clientW + 1);
-          assert(chartScroll.length === 0, `${label}：有结构图自身出了横向滚动 ${JSON.stringify(chartScroll)}`);
+              return out;
+            }, selectors);
+          const charts = await measureCharts(['.club-figures', '.club-histogram', '.club-share-plot']);
+          assert(charts.length === 3, `${label}：阵容页签应量到 3 个结构分析容器，实际 ${charts.length}`);
 
           // 直方图柱高确实按「人数 / 最高档人数」算：最高档占满轨道、0 人档不出柱。
           // 轨道有 1px 下边框（box-sizing 下算进 128px 高度），故留 3% 容差。
@@ -1170,25 +1183,114 @@ async function main() {
           });
           assert(axisOut !== null && axisOut.length === 0, `${label}：占比刻度戳出图外：${JSON.stringify(axisOut)}`);
 
-          // 位置分布：四档纯文字（按裁决不用图示），四档恒出
-          const pos = await page.locator('.club-position-list dt').allInnerTexts();
-          assert(pos.join(',') === '门将,后卫,中场,前锋', `${label}：位置档位应是门将/后卫/中场/前锋，实际 ${pos.join(',')}`);
+          // 位置分布：四档纯文字、一行收束（按裁决不用图示），四档恒出
+          // v6.30.0 A 段：原来的三列 dl.club-position-list 改成一行 .club-position-line
+          const pos = (await page.locator('.club-position-line').innerText()).replace(/\s+/g, ' ').trim();
           assert(
-            (await page.locator('.club-position-list .band-bar, .club-position-list .club-hist-bar, .club-position-list .club-share-seg').count()) === 0,
+            pos === detailFixture.squad.byPosition.map((b) => `${b.label} ${b.count} 人`).join(' · '),
+            `${label}：位置分布一行文字不符（实际「${pos}」）`,
+          );
+          assert(
+            (await page.locator('.club-position-line .band-bar, .club-position-line .club-hist-bar, .club-position-line .club-share-seg').count()) === 0,
             `${label}：位置分布按裁决不用图示，不该出现条`,
           );
           // 阵容名单表（运营组那两张是 .transfer-table，要排除）
           const rows = await page.locator('.club-block .table-wrap table:not(.transfer-table) tbody tr').count();
           assert(rows === rosterFixture.players.length, `${label}：阵容名单 ${rows} 行 ≠ 夹具 ${rosterFixture.players.length} 行`);
+          // v6.30.0 C 段：11 列固定列序 + 转会状态图标列（只出图标）+ 表下图例 + 「列」开关（写 ?cols=）
+          const squadTable = '.club-block .table-wrap table:not(.transfer-table)';
+          const heads = (await page.locator(`${squadTable} thead th`).allInnerTexts()).map((t) => t.trim());
+          assert(
+            heads.join('|') === ['标记', '号码', 'UID', '姓名', '年龄', '位置', 'CA', 'PA', '违约金', '工资', '转会状态'].join('|'),
+            `${label}：阵容名单表头不符（${heads.join('|')}）`,
+          );
+          const gloss = await page.locator(`${squadTable} thead th`).last().getAttribute('title');
+          assert(
+            gloss === '拍卖锤 挂牌中 · 清单 转会名单 · 欧元 已标价 · 锁 非卖品',
+            `${label}：转会状态表头缺整张词表（${gloss}）`,
+          );
+          const wantStatus = [null, '已标价', '挂牌中', '转会名单', '非卖品'];
+          const statusCells = await page
+            .locator(`${squadTable} tbody tr td:nth-child(11) .transfer-status`)
+            .evaluateAll((els) =>
+              els.map((e) => ({
+                title: e.getAttribute('title'),
+                text: (e.textContent ?? '').trim(),
+                icons: e.querySelectorAll('svg').length,
+              })),
+            );
+          assert(statusCells.length === wantStatus.length, `${label}：转会状态格 ${statusCells.length} 个 ≠ 夹具 ${wantStatus.length} 行`);
+          statusCells.forEach((cell, i) => {
+            const want = wantStatus[i];
+            assert(cell.title === want, `${label}：第 ${i + 1} 行转会状态 title「${cell.title}」≠「${want}」`);
+            assert(cell.icons === (want === null ? 0 : 1), `${label}：第 ${i + 1} 行转会状态图标 ${cell.icons} 枚（${want ?? '空态'}）`);
+            assert(cell.text === (want === null ? '—' : ''), `${label}：第 ${i + 1} 行转会状态格多出文字「${cell.text}」（只该出图标）`);
+          });
+          const legend = (await page.locator('.transfer-status-legend .transfer-legend-item').allInnerTexts()).map((t) =>
+            t.replace(/\s+/g, ' ').trim(),
+          );
+          assert(
+            legend.join(' · ') === '拍卖锤 挂牌中 · 清单 转会名单 · 欧元 已标价 · 锁 非卖品',
+            `${label}：转会状态图例不符（${legend.join(' · ')}）`,
+          );
+          // 「列」开关：勾选写进 ?cols= 且列立刻出现，再点一次收回去（别把下面的横向溢出断言带歪）
+          await page.locator('.club-block .multiselect').first().click();
+          const colItem = page.locator('.multiselect-panel .multiselect-item', { hasText: '身价' }).first();
+          await colItem.click();
+          await page.locator(`${squadTable} thead th`).nth(11).waitFor({ timeout: TIMEOUT });
+          assert(page.url().includes('cols=marketValue'), `${label}：勾选可选列没写进 ?cols=（${page.url()}）`);
+          await colItem.click();
+          await page.locator(`${squadTable} thead th`).nth(11).waitFor({ state: 'detached', timeout: TIMEOUT });
+          assert(!page.url().includes('cols='), `${label}：取消勾选后 ?cols= 没清掉（${page.url()}）`);
+          assert((await page.locator(`${squadTable} thead th`).count()) === 11, `${label}：取消勾选后列数 ≠ 11`);
+          const ovSquad = await docOverflow();
+          assert(ovSquad.scrollW <= ovSquad.clientW + 1, `${label}：阵容页签被撑出横向滚动（${ovSquad.scrollW} > ${ovSquad.clientW}）`);
+
+          // ---- 转会页签：运营组（含效力条形图）----
+          await page.locator('.dossier-tabs button', { hasText: '转会' }).first().click();
+          await page.locator('.transfer-table').first().waitFor({ timeout: TIMEOUT });
+          assert(
+            (await page.locator('.dossier-tabs button.on').innerText()).trim() === '转会',
+            `${label}：点页签后没切到转会`,
+          );
+          const opGroups = await page.locator('.club-block h3').allInnerTexts();
+          assert(opGroups.includes('运营组'), `${label}：转会页签缺「运营组」（实际 ${opGroups.join('、')}）`);
+          assert(
+            (await page.locator('.band-chart').count()) === 1,
+            `${label}：转会页签应出一张效力横向条形图`,
+          );
+          charts.push(...(await measureCharts(['.club-split', '.band-chart'])));
+          assert(
+            charts.length === 5,
+            `${label}：阵容 + 转会两个页签合计应量到 5 个结构分析容器，实际 ${charts.length}`,
+          );
+          const chartOut = charts.filter((c) => c.blockRight === null || c.right > c.blockRight + 1 || c.left < c.blockLeft - 1);
+          assert(chartOut.length === 0, `${label}：有结构图超出所在卡片 ${JSON.stringify(chartOut)}`);
+          const chartScroll = charts.filter((c) => c.scrollW > c.clientW + 1);
+          assert(chartScroll.length === 0, `${label}：有结构图自身出了横向滚动 ${JSON.stringify(chartScroll)}`);
           assert((await page.locator('.transfer-table').count()) === 2, `${label}：转入/转出两张表都应渲染`);
           assert((await page.locator('a[href="/players/null"]').count()) === 0, `${label}：playerId 为空时链出了 /players/null`);
+          const ovTransfers = await docOverflow();
+          assert(
+            ovTransfers.scrollW <= ovTransfers.clientW + 1,
+            `${label}：转会页签被撑出横向滚动（${ovTransfers.scrollW} > ${ovTransfers.clientW}）`,
+          );
+
+          // ---- 战绩页签：排名 + 近期战绩 ----
+          await page.locator('.dossier-tabs button', { hasText: '战绩' }).first().click();
+          await page.locator('.form-list').first().waitFor({ timeout: TIMEOUT });
+          const resGroups = await page.locator('.club-block h3').allInnerTexts();
+          assert(resGroups.includes('战绩组'), `${label}：战绩页签缺「战绩组」（实际 ${resGroups.join('、')}）`);
           assert(
             (await page.locator('.form-list .form-row').count()) === detailFixture.form.recent.length,
             `${label}：近期战绩行数 ≠ 夹具`,
           );
           assert(await page.locator('.badge', { hasText: '联赛第 3 名' }).first().isVisible(), `${label}：排名徽章缺失`);
-          const ovDetail = await docOverflow();
-          assert(ovDetail.scrollW <= ovDetail.clientW + 1, `${label}：详情页被撑出横向滚动（${ovDetail.scrollW} > ${ovDetail.clientW}）`);
+          const ovResults = await docOverflow();
+          assert(
+            ovResults.scrollW <= ovResults.clientW + 1,
+            `${label}：战绩页签被撑出横向滚动（${ovResults.scrollW} > ${ovResults.clientW}）`,
+          );
           const detailShot = join(SHOT_DIR, `e2e-clubs-detail-${label}.png`);
           await page.screenshot({ path: detailShot, fullPage: false });
           shots.push(detailShot);
@@ -1552,13 +1654,16 @@ async function main() {
     });
 
     await check('⑮ 教练台粘性首列：≤640 sticky 几何 / 1280 static（本地无教练台则备注降级）', async () => {
-      // CoachPanel 只挂给本队教练（本地观众登录 + TOUR_DB 旧 schema ⇒ 不渲染）。
+      // 教练台（v6.30.0 起 = 详情页「工作台」页签）只挂给本队教练（本地观众登录 + TOUR_DB 旧 schema ⇒ 不渲染）。
       // 桩教练台全家桶（squad/stadium/bookings/events/naming…）成本失衡，故：表在场就跑几何，
       // 不在场则显式备注降级，确定性回归由 tests/mobile-baseline.test.ts TC-SWP-05 静态闸门兜住。
       await page.setViewportSize({ width: 375, height: 812 });
       await page.goto(`${BASE}/clubs/1`, { waitUntil: 'networkidle' });
       // P2-1（评审）：count() 不等待——渲染晚一步就会把「在场」误判成降级。先给 3s 窗口等它出现。
       let stickyTables = 0;
+      // v6.30.0 A 段：教练台拆进「工作台」页签，本队教练的默认页签就是它（显式点一下防止深链/回落变化）
+      const deskTabBtn = page.locator('.dossier-tabs button', { hasText: '工作台' }).first();
+      if ((await deskTabBtn.count()) > 0) await deskTabBtn.click();
       try {
         await page.locator('table.coach-sticky').first().waitFor({ state: 'visible', timeout: 3000 });
         stickyTables = await page.locator('table.coach-sticky').count();
@@ -1569,16 +1674,31 @@ async function main() {
         console.warn('（⑮ 备注：本地教练工作台不渲染（观众登录/TOUR_DB 旧 schema），几何断言降级——静态闸门 = tests/mobile-baseline.test.ts TC-SWP-05）');
         return;
       }
+      // v6.30.0 C 段：注册名单列集重定（分配开关最左），冻结点从「第 1+2 列」挪到「第 1 列 + 第 5 列（姓名）」，
+      // 夹在中间的标记/号码/UID 横向滚动时从姓名下面滑过（不钉）—— 判据跟着平移，旧口径断第 2 列。
       const geom = await page.evaluate(() => {
         const table = document.querySelector('table.coach-sticky');
-        const td = table?.querySelector('tbody tr td:nth-child(2)');
-        const th = table?.querySelector('thead tr th:nth-child(2)');
+        const pos = (sel) => {
+          const el = table?.querySelector(sel);
+          return el ? getComputedStyle(el).position : null;
+        };
         return {
-          tdSticky: td ? getComputedStyle(td).position : null,
-          thSticky: th ? getComputedStyle(th).position : null,
+          c1th: pos('thead tr th:nth-child(1)'),
+          c1td: pos('tbody tr td:nth-child(1)'),
+          c2th: pos('thead tr th:nth-child(2)'),
+          c5th: pos('thead tr th:nth-child(5)'),
+          c5td: pos('tbody tr td:nth-child(5)'),
         };
       });
-      assert(geom.thSticky === 'sticky' && geom.tdSticky === 'sticky', `≤640 应 th/td 均 sticky（th=${geom.thSticky} td=${geom.tdSticky}）`);
+      assert(
+        geom.c1th === 'sticky' && geom.c1td === 'sticky',
+        `≤640 分配列（第 1 列）应 th/td 均 sticky（th=${geom.c1th} td=${geom.c1td}）`,
+      );
+      assert(
+        geom.c5th === 'sticky' && geom.c5td === 'sticky',
+        `≤640 姓名列（第 5 列）应 th/td 均 sticky（th=${geom.c5th} td=${geom.c5td}）`,
+      );
+      assert(geom.c2th === 'static', `≤640 标记列（第 2 列）应让位成 static（computed=${geom.c2th}）——冻结块中间不该再钉一列`);
       // P2-1（评审）：先验外层 wrap 真可横滚——不可滚时下面的「滚后仍在视口」是平凡绿（根本没滚）
       const scrollable = await page.evaluate(() => {
         const wrap = document.querySelector('table.coach-sticky')?.closest('.table-wrap');
@@ -1588,7 +1708,7 @@ async function main() {
         scrollable && scrollable.sw > scrollable.cw,
         `coach-sticky 表外层 .table-wrap 不可横滚（scrollWidth=${scrollable?.sw} ≤ clientWidth=${scrollable?.cw}）——粘性几何无从验证`,
       );
-      // 横滚后第二列（对手）仍应留在视口内（粘住 = 滚不走）；同时确认滚动真发生了
+      // 横滚后姓名列（第 5 列，冻结点）仍应留在视口内（粘住 = 滚不走）；同时确认滚动真发生了
       await page.evaluate(() => {
         const wrap = document.querySelector('table.coach-sticky')?.closest('.table-wrap');
         if (wrap) wrap.scrollLeft = 400;
@@ -1596,17 +1716,17 @@ async function main() {
       await page.waitForTimeout(300);
       const after = await page.evaluate(() => {
         const wrap = document.querySelector('table.coach-sticky')?.closest('.table-wrap');
-        const td = document.querySelector('table.coach-sticky')?.querySelector('tbody tr td:nth-child(2)');
+        const td = document.querySelector('table.coach-sticky')?.querySelector('tbody tr td:nth-child(5)');
         const r = td?.getBoundingClientRect();
         return r ? { left: r.left, right: r.right, vw: document.documentElement.clientWidth, scrolled: wrap?.scrollLeft ?? 0 } : null;
       });
       assert(after && after.scrolled > 0, `设置 scrollLeft=400 后 wrap.scrollLeft=${after?.scrolled}——滚动没生效，后续断言不可信`);
-      assert(after && after.left >= -1 && after.right <= after.vw + 1, `横滚 400px 后粘性列被滚出视口（left=${after?.left} right=${after?.right}）`);
-      // 宽屏取消粘性（computed static，不是只看媒体块存在）
+      assert(after && after.left >= -1 && after.right <= after.vw + 1, `横滚 400px 后粘性姓名列被滚出视口（left=${after?.left} right=${after?.right}）`);
+      // 宽屏取消粘性（computed static，不是只看媒体块存在）——断真正粘的那一列（第 1 列）
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.waitForTimeout(200);
       const wide = await page.evaluate(() => {
-        const th = document.querySelector('table.coach-sticky')?.querySelector('thead tr th:nth-child(2)');
+        const th = document.querySelector('table.coach-sticky')?.querySelector('thead tr th:nth-child(1)');
         return th ? getComputedStyle(th).position : null;
       });
       assert(wide === 'static', `1280 应取消粘性（computed=${wide}）`);
@@ -1808,7 +1928,7 @@ async function main() {
       assert((await page.locator('.tz-pop').count()) === 0, 'Esc 未关闭时区下拉');
     });
 
-    await check('⑱ 消费中心：页结构 / 匿名引导 / CoachPanel 入口 / 管理端侧栏「消费」', async () => {
+    await check('⑱ 消费中心：页结构 / 匿名引导 / 工作台与主场入口 / 管理端侧栏「消费」', async () => {
       // 教练视角（本地种子会话是管理员，含 coach 权限）：页签 + 右栏工单 + 球场三卡在位
       await page.goto(`${BASE}/shop`, { waitUntil: 'networkidle' });
       const t = await text();
@@ -1821,7 +1941,7 @@ async function main() {
       // ?tab= 深链落在对应页签
       await page.goto(`${BASE}/shop?tab=position`, { waitUntil: 'networkidle' });
       assert(await page.locator('.seg button.on', { hasText: '位置热区' }).first().isVisible(), '?tab=position 深链没落页签');
-      // CoachPanel 消费中心入口（只挂给本队教练；本地种子会话若无教练台则备注降级，同 ⑮ 口径）
+      // 工作台/主场页签的入口（只挂给本队教练；本地种子会话若无教练台则备注降级，同 ⑮ 口径）
       await page.goto(`${BASE}/clubs`, { waitUntil: 'networkidle' });
       const clubLink = page.locator('a[href^="/clubs/"]').first();
       await clubLink.click();
@@ -1834,9 +1954,12 @@ async function main() {
         coachPanelVisible = false;
       }
       if (coachPanelVisible) {
-        assert((await text()).includes('消费中心'), 'CoachPanel 缺「消费中心」入口卡');
+        // v6.30.0 A 段：原 CoachPanel 的「消费中心」大卡换成「主场」页签里的一行入口链接
+        await page.locator('.dossier-tabs button', { hasText: '主场' }).first().click();
+        await page.locator('a[href="/shop"]').first().waitFor({ state: 'visible', timeout: 3000 });
+        assert((await text()).includes('消费中心'), '主场页签缺「消费中心」入口链接');
       } else {
-        console.warn('（⑱ 备注：本地教练工作台不渲染（会话非该队教练），CoachPanel 入口断言降级——组件结构由 ShopPage 用例与 CoachPanel 源码静态锁覆盖）');
+        console.warn('（⑱ 备注：本地教练工作台不渲染（会话非该队教练），工作台/主场入口断言降级——结构由 web/src/pages/ClubDetail.test.tsx 与 club/ 各 Tab 源码静态锁覆盖）');
       }
       // 匿名：登录引导，不泄露商品表单（同 ⑤d 的 /api/me 探针法）
       const anon = await browser.newContext({ viewport: { width: 1280, height: 900 } });
