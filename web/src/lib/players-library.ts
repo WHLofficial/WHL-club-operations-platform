@@ -14,7 +14,7 @@ export const MARKER_EMOJI: Record<PlayerMarker, string> = { ge90: '🔴', ge87: 
 export const MARKER_LABEL: Record<PlayerMarker, string> = {
   ge90: '初始CA ≥ 90',
   ge87: '初始CA 87-89',
-  growth: '初始CA < 87 且 PA ≥ 87 可成长',
+  growth: '初始CA < 87 且 PA ≥ 87 且未练满可成长',
 };
 
 // 细分属性白名单：与后端同一份来源（core/fc26 的 sprintspeed 起 34 项，players.ts 也这么切）。

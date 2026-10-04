@@ -776,8 +776,8 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     status: r.status,
     growthTier: r.growth_tier,
     // 标记（v6.5.0）：用原始列现算（base_ca 缺省回 cur_ca=players.ca、PA 取现值），与 view 口径无关；
-    // 判定纯函数与 SQL 筛选/排序同源（core/squad-rules）
-    marker: markerOf(r.base_ca ?? r.cur_ca, r.cur_pa, r.growable === 1),
+    // 判定纯函数与 SQL 筛选/排序同源（core/squad-rules）；v6.26.1 起第 4 参现值 CA 未练满才落绿
+    marker: markerOf(r.base_ca ?? r.cur_ca, r.cur_pa, r.growable === 1, r.cur_ca),
     isFutureStar: r.is_future_star === 1,
     chinaPlan: r.china_plan === 1,
     agentTier: r.agent_tier,
@@ -1068,8 +1068,8 @@ app.get('/players/:id', async (c) => {
       age: p.age,
       ca: p.ca,
       pa: p.pa,
-      // 标记（v6.5.0）：初始CA = base_ca 缺省回 ca，与列表响应同一纯函数
-      marker: markerOf(p.base_ca ?? p.ca, p.pa, p.growable === 1),
+      // 标记（v6.5.0）：初始CA = base_ca 缺省回 ca，与列表响应同一纯函数（v6.26.1 起含未练满判定）
+      marker: markerOf(p.base_ca ?? p.ca, p.pa, p.growable === 1, p.ca),
       growable: p.growable === 1,
       prestige: p.prestige,
       marketValue: p.market_value,

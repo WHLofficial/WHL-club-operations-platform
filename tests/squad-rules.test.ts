@@ -97,15 +97,28 @@ describe('阵容注册合规引擎（规则 4.2）', () => {
     expect(caIssue[0].playerIds).toEqual([2, 3]);
   });
 
-  it('梯度按初始CA计：入会后长到 90 的球员不占 ≥90 档，仍占 ＜87 高潜档', () => {
+  it('梯度按初始CA计：入会后长到 90 的球员不占 ≥90/≥87 档', () => {
     const team = firstTeam(20);
-    // 入会时 86，已长到 92：不占 ≥90/≥87 档；PA 92≥87 且可成长 → 占第三档
+    // 入会时 86，已长到 92：不占 ≥90/≥87 档（练满不占第三档见下一条专测）
     team[1] = player({ playerId: 2, name: '成长股', initialCa: 86, ca: 92, pa: 92 });
     const res = checkSquad(team, [], ctx());
     expect(res.stats.ge90).toBe(0);
     expect(res.stats.ge87).toBe(0);
-    expect(res.stats.growthPa87).toBe(1);
     expect(res.issues).toHaveLength(0);
+  });
+
+  it('练满（现值 ca >= pa）不占 growth 名额，未练满的对照仍占（v6.26.1 拍板）', () => {
+    const team = firstTeam(20);
+    // initialCa 86＜87、PA 90≥87、growable=true，但 ca=pa=90 已练满 → 不计入 growthPa87、无 issue
+    team[1] = player({ playerId: 2, name: '练满', initialCa: 86, ca: 90, pa: 90 });
+    const maxed = checkSquad(team, [], ctx());
+    expect(maxed.stats.growthPa87).toBe(0);
+    expect(maxed.issues).toHaveLength(0);
+    // 未练满对照（ca 88 < pa 90）计入第三档
+    team[2] = player({ playerId: 3, name: '未练满', initialCa: 86, ca: 88, pa: 90 });
+    const mixed = checkSquad(team, [], ctx());
+    expect(mixed.stats.growthPa87).toBe(1);
+    expect(mixed.issues).toHaveLength(0);
   });
 
   it('初始CA≥87 梯度：顶级 4 名上限，次级 3 名（计数含 ≥90）', () => {
@@ -172,26 +185,33 @@ describe('阵容注册合规引擎（规则 4.2）', () => {
 // 标记（v6.5.0）：三档互斥切分的边界。与 checkSquad 的三档计数同口径，改判定两边要一起改
 describe('markerOf 三档互斥切分', () => {
   it('🔴 初始CA≥90（90 是下界）', () => {
-    expect(markerOf(90, null, false)).toBe('ge90');
-    expect(markerOf(95, 60, false)).toBe('ge90');
+    expect(markerOf(90, null, false, null)).toBe('ge90');
+    expect(markerOf(95, 60, false, 60)).toBe('ge90');
   });
 
   it('🟡 初始CA 87-89（87 是下界、90 让位给 🔴）', () => {
-    expect(markerOf(87, null, false)).toBe('ge87');
-    expect(markerOf(89, null, false)).toBe('ge87');
+    expect(markerOf(87, null, false, null)).toBe('ge87');
+    expect(markerOf(89, null, false, null)).toBe('ge87');
   });
 
-  it('🟢 初始CA＜87 且 PA≥87 且可成长（PA 87 是下界、三条件缺一不可）', () => {
-    expect(markerOf(86, 87, true)).toBe('growth');
-    expect(markerOf(0, 99, true)).toBe('growth');
-    expect(markerOf(86, 86, true)).toBeNull();
-    expect(markerOf(86, 87, false)).toBeNull();
+  it('🟢 初始CA＜87 且 PA≥87 且可成长且未练满（PA 87 是下界、四条件缺一不可）', () => {
+    expect(markerOf(86, 87, true, 80)).toBe('growth');
+    expect(markerOf(86, 87, true, 86)).toBe('growth');
+    expect(markerOf(0, 99, true, 0)).toBe('growth');
+    expect(markerOf(86, 86, true, 80)).toBeNull();
+    expect(markerOf(86, 87, false, 80)).toBeNull();
+    // v6.26.1 未练满：ca < pa 才落绿；ca=87/88/90（练满或反超）→ null（练满去绿标）
+    expect(markerOf(86, 87, true, 87)).toBeNull();
+    expect(markerOf(86, 87, true, 88)).toBeNull();
+    expect(markerOf(86, 87, true, 90)).toBeNull();
   });
 
   it('不落档 / 初始CA 缺失 / PA 缺失：无标记', () => {
-    expect(markerOf(86, 80, true)).toBeNull();
-    expect(markerOf(null, 99, true)).toBeNull();
-    expect(markerOf(86, null, true)).toBeNull();
+    expect(markerOf(86, 80, true, 80)).toBeNull();
+    expect(markerOf(null, 99, true, 90)).toBeNull();
+    expect(markerOf(86, null, true, 86)).toBeNull();
+    // 现值 CA 缺失（NULL）不落绿：与 SQL 侧 `ca < pa` 的 NULL→ELSE 0 同语义
+    expect(markerOf(86, 87, true, null)).toBeNull();
   });
 
   it('SQL 权重表达式与 JS 判定同源（阈值与权重取自同一常量）', () => {
@@ -200,10 +220,11 @@ describe('markerOf 三档互斥切分', () => {
     expect(sql).toContain(`THEN ${MARKER_WEIGHT.ge90}`);
     expect(sql).toContain(`THEN ${MARKER_WEIGHT.ge87}`);
     expect(sql).toContain(`THEN ${MARKER_WEIGHT.growth}`);
-    expect(sql).toContain('players.pa >= 87 AND players.growable = 1');
-    // 索引侧（迁移 0042）必须是非限定列名——SQLite 禁止索引表达式里的限定名
+    expect(sql).toContain('players.pa >= 87 AND players.growable = 1 AND players.ca < players.pa');
+    // 索引侧（迁移 0061）必须是非限定列名——SQLite 禁止索引表达式里的限定名
     const bare = markerWeightSql(false);
     expect(bare).not.toContain('players.');
     expect(bare).toContain('COALESCE(base_ca, ca) >= 90');
+    expect(bare).toContain('pa >= 87 AND growable = 1 AND ca < pa');
   });
 });
