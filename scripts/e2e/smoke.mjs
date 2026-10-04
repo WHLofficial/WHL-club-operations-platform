@@ -279,12 +279,32 @@ async function main() {
   // 表格单元格不折行（v3.2.1）：12 列挤在约 980px 里时，「Baseline Utd」会按空格断行、
   // 「2金7银」会按 CJK 任意断行。本机夹具只有 9 名球员、名字也短，折行在这里复现不出来 ⇒
   // 这组断言锁的是口径（td 的 computed white-space 一律 nowrap、容器允许横向滚动），不是布局本身。
+  // v6.26.1 B 块：顺带量吸底镜像横向滚动条（.sticky-xbar）——存在性 + 双向同步：把表格 scrollLeft
+  // 设到中段，等两帧（scroll 事件在 rAF 回调之前派发），镜像轨要跟到同一位置（±1 容忍取整）；
+  // 无溢出夹具下两侧都被钳到 0，同步断言同样成立，存在性才是硬断言。量完滚回 0，别让截图带着滚过的表格。
   const tableLayoutProbe = () =>
-    page.evaluate(() => {
+    page.evaluate(async () => {
       const wrap = document.querySelector('.library-main .table-wrap');
       const table = wrap ? wrap.querySelector('table') : null;
       const cells = [...document.querySelectorAll('.library-main tbody td')];
       const head = document.querySelector('.library-main thead th');
+      const bar = document.querySelector('.sticky-xbar');
+      let barSync = null;
+      if (wrap && bar) {
+        const target = Math.round(Math.max(50, (wrap.scrollWidth - wrap.clientWidth) / 2));
+        wrap.scrollLeft = target;
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        barSync = { target: wrap.scrollLeft, bar: Math.round(bar.scrollLeft) };
+        wrap.scrollLeft = 0;
+        await new Promise((r) => requestAnimationFrame(r));
+        // 反向（bar→wrap）：拖镜像轨也要带表格走——两个方向各自真断言，缺一向的同步就不算双向
+        const target2 = Math.round(Math.max(50, (bar.scrollWidth - bar.clientWidth) / 2));
+        bar.scrollLeft = target2;
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        barSync.barToWrap = { target: bar.scrollLeft, wrap: Math.round(wrap.scrollLeft) };
+        bar.scrollLeft = 0;
+        await new Promise((r) => requestAnimationFrame(r));
+      }
       return {
         cells: cells.length,
         notNowrap: cells.filter((el) => getComputedStyle(el).whiteSpace !== 'nowrap').length,
@@ -293,13 +313,16 @@ async function main() {
         // 不折行的代价：表格最小宽度超过容器就要横向滚动（口径是「宁可横滚，不要断行」）
         tableW: table ? Math.round(table.getBoundingClientRect().width) : 0,
         wrapW: wrap ? Math.round(wrap.getBoundingClientRect().width) : 0,
+        barPresent: !!bar,
+        barSync,
       };
     });
 
   const assertTableNoWrap = (label, t) => {
     console.log(
       `   ${label} 表格：${t.cells} 个单元格，非 nowrap ${t.notNowrap}，表头 nowrap ${t.headNowrap}，` +
-        `容器 overflow-x ${t.overflowX}，宽 ${t.tableW}/${t.wrapW}`,
+        `容器 overflow-x ${t.overflowX}，宽 ${t.tableW}/${t.wrapW}，` +
+        `吸底镜像轨 ${t.barPresent ? `在（同步 ${t.barSync?.bar}/${t.barSync?.target}）` : '缺失'}`,
     );
     // 空集静默通过 = 什么都没验（比如表格没渲染出来）
     assert(t.cells > 0, `${label}：没量到球员库表格单元格`);
@@ -308,6 +331,18 @@ async function main() {
     assert(
       t.overflowX === 'auto' || t.overflowX === 'scroll',
       `${label}：表格容器不横向滚动（${t.overflowX}），单元格不折行会把内容压出容器`,
+    );
+    // v6.26.1 B 块：吸底镜像横向滚动条必须存在且与表格双向同步
+    assert(t.barPresent, `${label}：桌面球员库没渲染吸底镜像横向滚动条 .sticky-xbar`);
+    assert(t.barSync, `${label}：镜像滚动条同步探针没取到读数（.table-wrap 或 .sticky-xbar 缺失）`);
+    assert(
+      Math.abs(t.barSync.bar - t.barSync.target) <= 1,
+      `${label}：镜像滚动条不同步（表格 scrollLeft ${t.barSync.target}，镜像 ${t.barSync.bar}）`,
+    );
+    // 反向：拖镜像轨必须带表格走（只覆盖 wrap→bar 的单向同步不算双向）
+    assert(
+      Math.abs(t.barSync.barToWrap.wrap - t.barSync.barToWrap.target) <= 1,
+      `${label}：镜像滚动条反向不同步（镜像 scrollLeft ${t.barSync.barToWrap.target}，表格 ${t.barSync.barToWrap.wrap}）`,
     );
   };
 

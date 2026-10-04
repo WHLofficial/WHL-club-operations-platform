@@ -12,6 +12,7 @@ import { useMediaQuery } from '../lib/use-media.ts';
 import { playerPath } from '../lib/player-link.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
 import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
+import StickyScrollbar from '../components/StickyScrollbar.tsx';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 import {
   COL_DEFS,
@@ -183,6 +184,8 @@ export default function PlayersLibrary() {
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const asideRef = useRef<HTMLElement | null>(null);
+  // 吸底镜像横向滚动条（v6.26.1）要同步的表格容器；窄屏是卡片网格、不渲染镜像轨
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
   // 关抽屉时是否要把焦点交还入口按钮（见下面 closeDrawer 的注释）
   const restoreFocus = useRef(false);
   // 上一次焦点是否落在左栏/抽屉里。宽度变化时用它决定要不要把焦点接回来——
@@ -686,7 +689,11 @@ export default function PlayersLibrary() {
                 })}
               </div>
             ) : (
-              <div className="table-wrap">
+              <>
+              {/* 吸底镜像横向滚动条（v6.26.1）必须作 .table-wrap 的兄弟节点、排在其后：
+                  插进 .table-wrap 与 <table> 之间会被 TC-SWP-01 静态闸拦下，
+                  放 .table-wrap 里则 sticky 的滚动祖先变成那个横向滚动容器、钉不到视口底 */}
+              <div className="table-wrap" ref={tableWrapRef}>
                 <table>
                   <thead>
                     <tr>
@@ -748,7 +755,9 @@ export default function PlayersLibrary() {
                     </tbody>
                   </table>
                 </div>
-              )}
+                {!narrow && <StickyScrollbar target={tableWrapRef} />}
+              </>
+            )}
           </div>
         </div>
       </section>

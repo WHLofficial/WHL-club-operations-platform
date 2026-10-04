@@ -653,6 +653,26 @@ label.field textarea:focus {
   border-radius: 12px;
 }
 
+/* 吸底镜像横向滚动条（v6.26.1）：只随 PlayersLibrary 表格渲染（桌面 >900），
+   钉在视口底、与 .table-wrap 双向同步；z-index 低于 .topbar 的 20。
+   .table-wrap 的 overflow/position 保持原样（e2e ⑪ 依赖），横向滚动仍由它承担。 */
+.sticky-xbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 17px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 6px;
+}
+/* 撑出与表格同宽的可滚动内容；宽度由组件运行时赋给内联 style */
+.sticky-xbar-inner {
+  height: 1px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
