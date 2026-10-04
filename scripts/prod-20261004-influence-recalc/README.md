@@ -38,7 +38,7 @@
 
 - 图值由用户 2026-10-04 拍板（20 队 = 级别 / 队壳影响力 / 奖励分），写在 `values.json`。
 - `bonus_points` 为空的队（诺丁汉森林 14、RB莱比锡 112172）按 **0** 处理。
-- **皇家马德里（club 243）的奖励分在图值里被截断** ⇒ 缺 `--allow-missing` 时 `plan` 直接中止并报「243 奖励分待用户补值」；带 flag 时按 0 处理并在 `report.md` §3 显著标注（该队影响力/死忠/上座会**偏低**，补值后必须重跑本批）。
+- **皇家马德里（club 243）的奖励分**：图值原被截断，2026-10-04 用户补值为 **0** ⇒ `values.json` 已按 `bonus_source: "given"` 落定，plan 不再需要 `--allow-missing`（`pending` 条目数 = 0）。
 - 4 支 CPU 队（10 / 241 / 112172 / 131681）**不写库**，只做与 `src/worker/routes/admin/clubs.ts:25` 的 `CPU_SEED_PRESETS` **逐字一致性断言**（不一致则中止）。
 
 ---
@@ -71,7 +71,7 @@ node scripts/prod-20261004-influence-recalc/recalc.mjs apply --yes
 node scripts/prod-20261004-influence-recalc/recalc.mjs verify
 ```
 
-- flags：`--account`、`--token`（否则依次读 `WRANGLER_OAUTH_TOKEN` → wrangler 配置）、`--allow-missing`（243 按 0）、
+- flags：`--account`、`--token`（否则依次读 `WRANGLER_OAUTH_TOKEN` → wrangler 配置）、`--allow-missing`（图值待补时按 0 放行；243 已补值，本批不需要）、
   `--initials=default|prod`（初值一律 1800 / 用生产现值）、`--assume-migrated`（仅离线看数）、`--yes`、`--force`。
   参数支持 `--name=value` 与 `--name value` 两种写法，**推荐一律用 `=`**（早期版本空格形式会被静默忽略，已修）。
 - `apply` 行为：无 `--yes` 只打印将要执行的 SQL；有 `--yes` 时先把 `stadiums / match_attendance / ledger_entries / ledger_accounts` 全量导出到 `backup/<ISO时间戳>/`（含 `manifest.json`），再逐文件 `npx wrangler d1 execute whl-club --remote --file=<abs>`，成功后落 `applied.marker` 并自动跑一次 `verify`。

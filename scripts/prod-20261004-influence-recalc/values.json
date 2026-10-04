@@ -35,10 +35,8 @@
       "cpu": false,
       "shell_influence": 37.0,
       "bonus_points": 0,
-      "bonus_source": "pending",
-      "pending": true,
-      "field": "bonus_points",
-      "note": "图值在用户消息里被截断，奖励分未知 ⇒ 缺 --allow-missing 时 plan 中止并报「243 奖励分待用户补值」；带 --allow-missing 时按 0 处理并在 report 显著标注"
+      "bonus_source": "given",
+      "note": "用户 2026-10-04 补值：奖励分为 0（此前图值截断待补，现已确认，plan 不再需要 --allow-missing）"
     }
   ],
   "cpu_seed_presets_expectation": {
