@@ -1,4 +1,5 @@
-// 管理端 · 消费 /admin/shop（v6.26.0）：待审工单（通过=重校验后自动生效 / 拒绝=必填理由并自动退款）
+// 管理端 · 消费工单 /admin/shop（v6.26.0；v6.28.0 页面名从「消费」改「消费工单」——
+// 侧栏与页标题同口径，路由 /admin/shop 与文件名不动）：待审工单（通过=重校验后自动生效 / 拒绝=必填理由并自动退款）
 // + 外部增益代录折叠卡（创建→确认两步，纯效果单不进账本）+ 历史工单筛选。
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -82,7 +83,7 @@ export default function AdminShopPage() {
 
   return (
     <>
-      <h1>消费</h1>
+      <h1>消费工单</h1>
       <section className="card">
         <p className="hint" style={{ marginBottom: 0 }}>
           教练工单提交即扣费，通过才生效、拒绝自动退款；外部录入是纯效果单（积分兑换 / 奖励等），不进账本。审批时工单参数会按当前球员状态重校验，状态已变的单会拦下并给原因。

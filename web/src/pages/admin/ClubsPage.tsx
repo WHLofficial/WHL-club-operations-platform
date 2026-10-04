@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import { api, apiDelete, apiPost, type AdminClubRow, type StadiumAdmin } from '../../lib/api.ts';
 import { ADMIN_CLUBS_KEY, TEAM_SYNC_KEY, fetchAdminClubs, fetchTeamSync } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
+import { influenceCoefText } from '../../lib/influence.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
@@ -297,7 +298,7 @@ function ClubsSection() {
         <div className="code-card">
           <p>
             <b>{stadium.club}</b> 的主场档案 —— 死忠 <span className="mono">{Math.round(stadium.fans).toLocaleString()}</span>，影响力{' '}
-            <span className="mono">{stadium.influence.total.toFixed(1)}</span>（球员 {stadium.influence.players.toFixed(1)} + 队壳 {stadium.influence.shell.toFixed(1)} + 奖励分 {stadium.influence.bonus.toFixed(1)}，球员项按规则公式自动算）
+            <span className="mono">{stadium.influence.total.toFixed(1)}</span>（（球员 {stadium.influence.players.toFixed(1)} + 队壳 {stadium.influence.shell.toFixed(1)}）× 级别系数 {influenceCoefText(stadium.influence.tierCoef)} + 奖励分 {stadium.influence.bonus.toFixed(1)}，球员项按规则公式自动算）
           </p>
           <div className="import-grid">
             <label className="field">

@@ -1,4 +1,5 @@
-// 管理端 · 总览（v2.1.0）：轻计数卡（待审/赛果队列/活跃挂牌/俱乐部/球员，commit 6 新增）
+// 管理端 · 总览（v2.1.0）：轻计数卡（待审/赛果队列/活跃挂牌/俱乐部/球员，commit 6 新增；
+// v6.27.0 加 CPU 队；v6.28.0 加待审消费工单/待选事件两卡，共 8 卡）
 // + M0 货币监控（原 Admin.tsx M0Section）；数据层 TanStack Query（commit 3）
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,6 +22,9 @@ const COUNT_CARDS: { key: keyof Omit<AdminOverview, 'at'>; label: string; hint: 
   { key: 'clubs', label: '俱乐部', hint: '注册俱乐部总数', to: '/admin/clubs' },
   { key: 'cpuClubs', label: 'CPU 队', hint: '待接管的电脑队', to: '/admin/clubs/cpu-convert' },
   { key: 'players', label: '球员', hint: '球员库总人数', to: '/players' },
+  // v6.28.0 待办两卡：计数口径在后端 overview.ts（与各自列表页同一筛选），卡片只负责跳转
+  { key: 'pendingShopOrders', label: '待审消费工单', hint: '等管理组审核的购买工单', to: '/admin/shop' },
+  { key: 'pendingEvents', label: '待选事件', hint: '等教练做选择的事件', to: '/admin/events' },
 ];
 
 function OverviewCountsSection() {

@@ -1,26 +1,53 @@
-// 管理端壳布局：左侧栏 10 项导航 + 子路由出口（v2.1.0 拆分；v6.8.0 加「品牌池」；v6.10.0 加「事件」；
-// v6.20.0 窄屏（≤760px）侧栏改左侧滑出抽屉，桌面 DOM 与样式保持 v6.19.0 不动）。
+// 管理端壳布局：左侧栏 12 项导航 + 子路由出口（v2.1.0 拆分；v6.8.0 加「品牌池」；v6.10.0 加「事件」；
+// v6.20.0 窄屏（≤760px）侧栏改左侧滑出抽屉，桌面 DOM 与样式保持 v6.19.0 不动；
+// v6.28.0 起按域分组（总览单独成首项，其余归四域），路由路径与分组前逐字一致，「消费」改「消费工单」）。
 // 非 admin 看到的提示卡与旧 Admin.tsx 一致，不重定向。
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import { TOUR_SITE_URL } from '../../lib/api.ts';
 import { useAuth } from '../../lib/auth.tsx';
 import { useMediaQuery } from '../../lib/use-media.ts';
 
-const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
-  { to: '/admin', label: '总览', end: true },
-  { to: '/admin/seasons', label: '赛季' },
-  { to: '/admin/players', label: '球员' },
-  { to: '/admin/growth', label: '成长录入' },
-  { to: '/admin/imports', label: '导入' },
-  { to: '/admin/market', label: '转会' },
-  { to: '/admin/clubs', label: '俱乐部' },
-  { to: '/admin/brands', label: '品牌池' },
-  { to: '/admin/events', label: '事件' },
-  { to: '/admin/shop', label: '消费' },
-  { to: '/admin/finance', label: '财政' },
-  { to: '/admin/system', label: '系统' },
+interface NavItem {
+  to: string;
+  label: string;
+  end?: boolean;
+}
+
+// 分组只是展示层：路径与标签的单一真源仍在这里，查找类逻辑一律走下面的派生平铺表。
+// 总览（title: null）不套组标题——它是管理端落点，不属于任何业务域。
+const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
+  { title: null, items: [{ to: '/admin', label: '总览', end: true }] },
+  {
+    title: '赛事运营',
+    items: [
+      { to: '/admin/seasons', label: '赛季' },
+      { to: '/admin/events', label: '事件' },
+    ],
+  },
+  {
+    title: '球队与名册',
+    items: [
+      { to: '/admin/clubs', label: '俱乐部' },
+      { to: '/admin/players', label: '球员' },
+      { to: '/admin/growth', label: '成长录入' },
+      { to: '/admin/imports', label: '导入' },
+    ],
+  },
+  {
+    title: '转会与经营',
+    items: [
+      { to: '/admin/market', label: '转会' },
+      { to: '/admin/brands', label: '品牌池' },
+      { to: '/admin/shop', label: '消费工单' },
+      { to: '/admin/finance', label: '财政' },
+    ],
+  },
+  { title: '系统', items: [{ to: '/admin/system', label: '系统' }] },
 ];
+
+// 派生平铺表：入口按钮的当前页名（navLabelOf）等既有查询都走它，分组不影响这些行为
+const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
 
 // 抽屉断点与 styles.css 的管理端媒体块（≤760px）一一对应
 const DRAWER_QUERY = '(max-width: 760px)';
@@ -194,15 +221,21 @@ export default function AdminLayout() {
                 </button>
               </div>
             )}
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => `admin-nav-link${isActive ? ' on' : ''}`}
-              >
-                {item.label}
-              </NavLink>
+            {NAV_GROUPS.map((group) => (
+              // key 用组标题（总览组无标题，用固定串兜底）；分组是纯展示层，链接结构逐项不变
+              <Fragment key={group.title ?? 'nav-home'}>
+                {group.title !== null && <div className="admin-nav-group-title">{group.title}</div>}
+                {group.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    className={({ isActive }) => `admin-nav-link${isActive ? ' on' : ''}`}
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </Fragment>
             ))}
           </nav>
           <main className="admin-main" inert={narrow && drawerOpen}>

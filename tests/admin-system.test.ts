@@ -196,7 +196,16 @@ describe('总览轻计数（v2.1.0）', () => {
        INSERT INTO review_tasks (id, type, ref_id, status) VALUES (1, 'transfer_confirm', 1, 'open'), (2, 'transfer_confirm', 2, 'approved');
        INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at, window_seq, season)
          VALUES (1, 10, 1, 'normal', 15, 'bidding', '2026-09-01T00:00:00Z', 1, 1),
-                (2, 11, 2, 'normal', 10, 'delisted', '2026-09-01T00:00:00Z', 1, 1);`,
+                (2, 11, 2, 'normal', 10, 'delisted', '2026-09-01T00:00:00Z', 1, 1);
+       INSERT INTO shop_orders (id, source, club_id, ordered_by, category, payload_json, amount, status, created_at) VALUES
+         (1, 'club', 1, 1, 'pa', '{}', 15, 'pending', '2026-09-01T00:00:00Z'),
+         (2, 'club', 2, 2, 'badge', '{}', 4, 'pending', '2026-09-01T00:00:00Z'),
+         (3, 'club', 1, 1, 'role', '{}', 5, 'approved', '2026-09-01T00:00:00Z');
+       INSERT INTO event_occurrences (id, club_id, season, window_seq, event_id, event_name, event_type, status, created_at) VALUES
+         (1, 1, 1, 1, 'ev-choice-a', '选择事件甲', 'choice', 'pending', '2026-09-01T00:00:00Z'),
+         (2, 2, 1, 1, 'ev-choice-b', '选择事件乙', 'choice', 'pending', '2026-09-01T00:00:00Z'),
+         (3, 1, 1, 1, 'ev-choice-c', '已结算的选择事件', 'choice', 'resolved', '2026-09-01T00:00:00Z'),
+         (4, 2, 1, 1, 'ev-instant-d', '即发型残留 pending（不属待选）', 'instant', 'pending', '2026-09-01T00:00:00Z');`,
     );
 
     const first = (await (await get('/api/admin/overview', 'tok-admin', fx.env)).json()) as {
@@ -205,8 +214,19 @@ describe('总览轻计数（v2.1.0）', () => {
       activeListings: number;
       clubs: number;
       players: number;
+      pendingShopOrders: number;
+      pendingEvents: number;
     };
-    expect(first).toMatchObject({ openReviews: 1, activeListings: 1, clubs: 2, players: 3 });
+    // v6.28.0 两个待办计数必须与列表页筛选同口径：消费工单只算 pending（2 待审 + 1 已生效），
+    // 事件只算选择型 pending（2 待选 + 1 已结算 + 1 即发型残留）——口径错一个数就偏。
+    expect(first).toMatchObject({
+      openReviews: 1,
+      activeListings: 1,
+      clubs: 2,
+      players: 3,
+      pendingShopOrders: 2,
+      pendingEvents: 2,
+    });
 
     // 缓存窗口内再挂一单：默认读还是旧值；fresh=1 立即重算
     fx.sqlite.exec(

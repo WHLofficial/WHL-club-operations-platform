@@ -1367,12 +1367,13 @@ async function main() {
         `打开抽屉后焦点应在关闭钮上（实际 ${focused}）`,
       );
 
-      // 焦点循环（TC-DRW-08）：抽屉内可聚焦元素 11 链接 + 关闭钮 = 12 个，连按 12 次 Tab / 4 次
-      // Shift+Tab 后焦点都必须仍在抽屉里（焦点陷阱把 Tab 挡在侧栏 + 入口钮之内）
-      for (let i = 0; i < 12; i++) await page.keyboard.press('Tab');
+      // 焦点循环（TC-DRW-08）：抽屉内可聚焦元素 12 链接 + 关闭钮 = 13 个（v6.28.0 起侧栏 12 项），
+      // 连按 13 次 Tab / 4 次 Shift+Tab 后焦点都必须仍在抽屉里
+      //（焦点陷阱把 Tab 挡在侧栏 + 入口钮之内）
+      for (let i = 0; i < 13; i++) await page.keyboard.press('Tab');
       assert(
         await page.evaluate(() => !!document.querySelector('.admin-sidebar')?.contains(document.activeElement)),
-        'Tab 连按 12 次后焦点应仍在抽屉内',
+        'Tab 连按 13 次后焦点应仍在抽屉内',
       );
       for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+Tab');
       assert(
@@ -1855,12 +1856,20 @@ async function main() {
       } finally {
         await anon.close();
       }
-      // 管理端侧栏第 11 项「消费」+ 页可达
+      // 管理端侧栏「消费工单」项 + 页可达
       await page.goto(`${BASE}/admin/shop`, { waitUntil: 'networkidle' });
       const adminText = await text();
       assert(adminText.includes('工单队列'), '管理端消费页缺工单队列');
       assert(adminText.includes('外部录入'), '管理端消费页缺外部录入折叠卡');
-      assert((await page.locator('.admin-nav-link', { hasText: '消费' }).count()) > 0, '管理端侧栏缺「消费」项');
+      // v6.28.0：侧栏项从「消费」改名「消费工单」。这里必须用**精确文本**判——原先的
+      // hasText('消费') 是子串匹配，「消费工单」照样命中，改名前后的断言都绿，等于没测。
+      const navLabels = (await page.locator('.admin-nav-link').allInnerTexts()).map((s) => s.trim());
+      assert(navLabels.includes('消费工单'), `管理端侧栏缺「消费工单」项（实际：${navLabels.join('/')}）`);
+      // 四域分组标题（v6.28.0 D 段）：只验组标题在场，路由与链接顺序由单测管
+      const groupTitles = (await page.locator('.admin-nav-group-title').allInnerTexts()).map((s) => s.trim());
+      for (const t of ['赛事运营', '球队与名册', '转会与经营', '系统']) {
+        assert(groupTitles.includes(t), `管理端侧栏缺分组标题「${t}」（实际：${groupTitles.join('/')}）`);
+      }
     });
   } finally {
     await browser.close();

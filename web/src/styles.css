@@ -2703,6 +2703,19 @@ th.num .th-sort {
   background: var(--terracotta);
   color: #fff;
 }
+/* v6.28.0 侧栏四域分组：组标题 + 组间细分隔线。颜色/字号都沿用深可可底上既有的一套
+   （rgba(253,244,227,…) 纸色低透明度，与 .admin-drawer-head 同色系），不引新色；
+   375 宽抽屉里标题是块级文本，最长 5 字，不会造成横向溢出。 */
+.admin-nav-group-title {
+  margin: 8px 4px 2px;
+  padding: 7px 8px 0;
+  border-top: 1px solid rgba(253, 244, 227, 0.16);
+  color: rgba(253, 244, 227, 0.66);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+}
 .admin-main {
   min-width: 0;
 }

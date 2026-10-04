@@ -24,6 +24,7 @@ import { CONTRACT_TYPE_LABEL, LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { qk, useHomeMatches, useMyClubOverview } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { playerPath } from '../../lib/player-link.ts';
+import { influenceCoefText } from '../../lib/influence.ts';
 import { useTimeFmt } from '../../lib/datetime.ts';
 
 type SquadFilter = 'all' | 'first_team' | 'trainee';
@@ -155,9 +156,10 @@ function StadiumCard({ home }: { home: StadiumInfo }) {
         <span className="mono">{Math.round(home.fans).toLocaleString()}</span>
       </p>
       <p className="hint">
-        球队影响力 <span className="mono">{home.influence.total.toFixed(1)}</span>（球员{' '}
+        球队影响力 <span className="mono">{home.influence.total.toFixed(1)}</span>（（球员{' '}
         <span className="mono">{home.influence.players.toFixed(1)}</span> + 队壳{' '}
-        <span className="mono">{home.influence.shell.toFixed(1)}</span> + 奖励分{' '}
+        <span className="mono">{home.influence.shell.toFixed(1)}</span>）× 级别系数{' '}
+        <span className="mono">{influenceCoefText(home.influence.tierCoef)}</span> + 奖励分{' '}
         <span className="mono">{home.influence.bonus.toFixed(1)}</span>）——影响上座率与比赛日收入
       </p>
       {home.facilities.length > 0 && (

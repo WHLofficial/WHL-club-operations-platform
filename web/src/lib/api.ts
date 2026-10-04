@@ -108,7 +108,7 @@ export interface StadiumInfo {
   tier: number;
   tierName: string | null;
   fans: number;
-  influence: { players: number; shell: number; bonus: number; total: number };
+  influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
   facilities: { key: string; level: number }[];
 }
 
@@ -117,7 +117,7 @@ export interface StadiumAdmin {
   stadium: { clubId: number; name: string | null; capacity: number; tier: number; shellInfluence: number; bonusPoints: number; fans: number };
   tier: { name: string; min_seats: number; max_seats: number; base_maintenance: number; per_10k_rate: number; attend_coef: number; upgrade_cost: number } | null;
   facilities: { key: string; level: number }[];
-  influence: { players: number; shell: number; bonus: number; total: number };
+  influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
 }
 
 // ---- 球队页（v3.4.0）----
@@ -524,6 +524,10 @@ export interface AdminOverview {
   /** 待接管的电脑队数（v6.27.0） */
   cpuClubs: number;
   players: number;
+  /** 待审消费工单数（v6.28.0，shop_orders.status='pending'） */
+  pendingShopOrders: number;
+  /** 待选事件数（v6.28.0，选择型 pending 的 event_occurrences） */
+  pendingEvents: number;
   at: string;
 }
 
