@@ -50,8 +50,9 @@
 
 1. **迁移 0062 必须先 apply**：本批 `01` 会写 `stadiums.fans_window_start`。**2026-10-04T11:21:42Z 已 apply**（回读：列 `REAL NOT NULL DEFAULT 0`、16 行 `fans_window_start = fans`）。没有该列且未加 `--assume-migrated` 时 `plan` 直接中止。
 2. **先上线 v6.28.0 代码（A/B 段）再执行本批**：本批把历史重记成新公式的值；代码未上线时管理端/公开面仍按旧公式解读这些数据，且新比赛的钩子仍按旧口径写库。
-3. `snapshot`（只读）→ `plan`（离线）→ **人工复核 `report.md`** → `apply --yes`（先备份 + 落 marker）→ `verify`（只读守恒断言）。
-4. 243 补值后重跑（`UPDATE` 是绝对赋值，可重复收敛；也可先 `99-rollback.sql` 再重跑）。
+3. `snapshot`（只读）→ `plan`（离线）→ **人工复核 `report.md`** → `apply --yes`（先备份 + 落 marker）→ `verify`（只读守恒断言）→ **purge 公开读缓存**（见下条）。
+4. **执行后必须 purge 公开读缓存**：本批经 `wrangler d1 execute` 直写 D1，**绕过了 worker 的写路径**，所以 `purgePublicCaches`（src/lib/guard.ts:139）不会自动跑——而公开读缓存的新鲜度靠写路径 purge，TTL 只是兜底上限（`fixtures` 1h、`clubs` 24h，见 src/lib/cache-policy.ts:15-25）。`/api/fixtures` 会下发 `attendance`，不 purge 就要等最长 1h 才自然过期。**2026-10-04 实际处置**：CF REST `PUT /accounts/{acc}/storage/kv/namespaces/{SESSION_KV}/values/cache:epoch:public` 把代际号 **6 → 7**（与任一管理端写操作同效，只导致重读、无数据风险）。
+5. 243 补值后重跑（`UPDATE` 是绝对赋值，可重复收敛；也可先 `99-rollback.sql` 再重跑）。
 
 ---
 
@@ -92,6 +93,9 @@ node scripts/prod-20261004-influence-recalc/recalc.mjs verify
 **verify 9/9 PASS**：① 账户余额 = 队内末条 `balance_after`（16 队）② 队内流水累加 = 每条 `balance_after`（210 行全链）③ 非比赛收入流水金额不变（132 行 diff 空）④ 每队余额非负（16 队）⑤ `match_attendance` 行数/主键集合不变（78 行）⑥ 每场上座 ≤ 容量（78 场）⑦ stadiums 与 plan 一致（壳/奖励分/fans/fans_window_start，16 队）⑧ `match_attendance` 与 plan 一致（78 场）⑨ 流水金额/余额与 plan 一致（210 行）。
 
 **独立通道回读**（CF REST API `POST /accounts/{acc}/d1/database/{db}/query`，与 wrangler 不同路径）：stadiums 16 行 / fans 合计 **52024.143496** / `fans_window_start` 同值 / 壳合计 779.27 / 奖励分合计 516；`match_attendance` 78 行 / 上座 **972885** / 收入 **145.96**；`ledger_entries` 210 行 / `ledger_accounts` 余额合计 **960.16** = 流水金额合计。**逐队核对**：16 队的壳/奖励分与 `values.json` 图值逐字相等、`fans` 与 `plan.json` 的 `finalFans` 逐位相等；4 支 CPU 队无 stadium 行（正确）。
+
+**线上端到端对拍（purge 后，公开读路径）**：代际号 6 → 7 后，用浏览器 UA 遍历公开端点 `GET /api/fixtures?tournament_id={1,2,3}&round=1..7`，共取到 **78 场有上座的场次**（= `match_attendance` 全量），逐场与 `plan.json` 的 `matchPlans[].after.attendance` 对拍：**一致 78 / 不一致 0 / 不在 plan 内 0**——即新数据已经由线上 worker 经公开读缓存路径原样下发（不是只躺在 D1 里）。
+（取证提示：`/api/fixtures` 是公开端点但 CF 会对 `python-urllib` 这类 UA 返回 403，脚本探针要带浏览器 UA；`/api/clubs/:id`、`/api/me/club` 等含影响力的端点要登录态，匿名只能靠 DB 回读 + worker 代码直读 + 本端点对拍。）
 
 **联盟合计**
 
