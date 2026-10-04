@@ -5,6 +5,7 @@ import { HttpError } from '../../lib/http.ts';
 import { requireCoach, requireUser } from '../../lib/session.ts';
 import { getBoundClub } from '../binding.ts';
 import { SHOP_CATEGORIES, type ShopCategory } from '../../core/shop.ts';
+import { getOpenWindow } from '../seasons.ts';
 import {
   createClubOrder,
   loadShopSettings,
@@ -92,6 +93,8 @@ app.post('/shop/orders', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再提交消费工单');
+  // v6.29.0 开窗闸：消费提交与转会操作同口径（关窗 409；GET 与管理端代录不受限）
+  if (!(await getOpenWindow(c.env.DB))) throw new HttpError(409, '转会窗口没开，现在不能提交消费工单', 'no_window');
   const body = (await c.req.raw.json().catch(() => null)) as { category?: unknown; payload?: unknown; note?: unknown } | null;
   if (!body || typeof body.category !== 'string' || !SHOP_CATEGORIES.includes(body.category as ShopCategory)) {
     throw new HttpError(400, 'category 只能是 pa / badge / badge_upgrade / role / position / club_shell');

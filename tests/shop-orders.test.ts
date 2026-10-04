@@ -54,11 +54,23 @@ function freshEnv(): Fixture {
 const COACH = 'whl_session=tok-coach';
 const ADMIN = 'whl_session=tok-admin';
 
+// v6.29.0 开窗闸：俱乐部自助提交只在窗内放行，种子默认开一个窗（关窗用 closeWindows）
+function openWindow(fx: Fixture) {
+  fx.sqlite
+    .prepare(`INSERT OR IGNORE INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z')`)
+    .run();
+}
+
+function closeWindows(fx: Fixture) {
+  fx.sqlite.prepare(`UPDATE season_windows SET status = 'closed', closed_at = '2026-07-02T00:00:00Z'`).run();
+}
+
 function seedClub(fx: Fixture, clubId: number, balance = 50, bindCoach = true) {
   fx.sqlite.prepare(`INSERT INTO clubs (id, name, league_tier, status) VALUES (?, ?, 'premier', 'active')`).run(clubId, `俱乐部${clubId}`);
   fx.sqlite
     .prepare(`INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (?, ?, '2026-01-01T00:00:00Z')`)
     .run(clubId, balance);
+  openWindow(fx);
   authRegisterClubTeam(fx.auth, clubId, clubId, `队${clubId}`);
   // 教练（userId 1）绑到该俱乐部（getBoundClub 走 AUTH_DB team_binding；account_id 唯一，别队用例传 false）
   if (!bindCoach) return;
@@ -607,5 +619,79 @@ describe('TC-C 数据语义与同值锁', () => {
     for (const [id, name] of Object.entries(SHOP_PS_NAMES)) {
       expect(psMap.get(Number(id))).toBe(name);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TC-D：v6.29.0 开窗闸（消费提交与转会操作同口径；GET 与管理端代录不受限）
+
+describe('TC-D 开窗闸', () => {
+  it('TC-D01 关窗提交 409 no_window：不扣费、不落工单、不写台账', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101 });
+    closeWindows(fx);
+    const res = await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 1 } });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error?: string; code?: string };
+    expect(body.code).toBe('no_window');
+    expect(body.error).toBe('转会窗口没开，现在不能提交消费工单');
+    expect(balanceOf(fx, 101)).toBe(50);
+    expect((fx.sqlite.prepare('SELECT COUNT(*) AS n FROM shop_orders').get() as { n: number }).n).toBe(0);
+    expect((fx.sqlite.prepare('SELECT COUNT(*) AS n FROM ledger_entries').get() as { n: number }).n).toBe(0);
+  });
+
+  it('TC-D02 从未开过窗（无窗口行）同样 409', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101 });
+    fx.sqlite.prepare('DELETE FROM season_windows').run();
+    const res = await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 1 } });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code?: string }).code).toBe('no_window');
+  });
+
+  it('TC-D03 开窗提交 201（闸不误伤正常下单）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101 });
+    const res = await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 2 } });
+    expect(res.status).toBe(201);
+    expect(balanceOf(fx, 101)).toBe(20);
+  });
+
+  it('TC-D04 关窗前提交的 pending 单，关窗后仍可审批 / 拒绝', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101, pa: 88 });
+    const id1 = ((await (await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 1 } })).json()) as { order: { id: number } }).order.id;
+    const id2 = ((await (await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 2 } })).json()) as { order: { id: number } }).order.id;
+    closeWindows(fx);
+    expect((await approve(fx, id1)).status).toBe(200);
+    expect((fx.sqlite.prepare('SELECT pa FROM players WHERE id = 1').get() as { pa: number }).pa).toBe(89);
+    expect((await reject(fx, id2, '关窗后的窗内单')).status).toBe(200);
+    // 只扣了已生效的 id1（15M），id2 已退款
+    expect(balanceOf(fx, 101)).toBe(35);
+  });
+
+  it('TC-D05 关窗不影响 GET（目录 / 队况 / 我的工单）与管理端代录', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101 });
+    expect((await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 1 } })).status).toBe(201);
+    closeWindows(fx);
+    for (const path of ['/api/shop/catalog', '/api/shop/squad-state', '/api/shop/orders']) {
+      expect((await app.request(path, { headers: { Cookie: COACH } }, fx.env)).status).toBe(200);
+    }
+    const list = await app.request('/api/shop/orders', { headers: { Cookie: COACH } }, fx.env);
+    expect(((await list.json()) as { orders: unknown[] }).orders).toHaveLength(1);
+    // 管理端代录 external：关窗照收，且不扣费（金额确认在审批步）
+    const admin = await app.request(
+      '/api/admin/shop/orders',
+      { method: 'POST', headers: { 'content-type': 'application/json', Cookie: ADMIN }, body: JSON.stringify({ clubId: 101, category: 'pa', payload: { playerId: 1, points: 1 } }) },
+      fx.env,
+    );
+    expect(admin.status).toBe(201);
+    expect(balanceOf(fx, 101)).toBe(35);
   });
 });
