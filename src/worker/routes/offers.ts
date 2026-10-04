@@ -19,7 +19,7 @@ import { sqlDisplayName } from '../../core/player-name.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
-const OFFER_STATUS_FILTERS = ['pending', 'accepted', 'rejected', 'withdrawn', 'expired', 'all'] as const;
+const OFFER_STATUS_FILTERS = ['pending', 'intent', 'accepted', 'rejected', 'withdrawn', 'expired', 'all'] as const;
 
 interface OfferListRow {
   id: number;
@@ -53,7 +53,7 @@ app.get('/offers', async (c) => {
   if (box !== 'in' && box !== 'out') throw new HttpError(400, 'box 只能是 in（我收到的）或 out（我送出的）');
   const statusRaw = c.req.query('status') || 'pending';
   if (!(OFFER_STATUS_FILTERS as readonly string[]).includes(statusRaw)) {
-    throw new HttpError(400, 'status 只能是 pending / accepted / rejected / withdrawn / expired / all');
+    throw new HttpError(400, 'status 只能是 pending / intent / accepted / rejected / withdrawn / expired / all');
   }
   await settleOverdue(c.env, { origin: 'lazy_settle' });
 
@@ -93,6 +93,12 @@ app.get('/offers', async (c) => {
   )
     .bind(club.id, box === 'in' ? 'seller' : 'buyer')
     .first<{ n: number }>();
+  // 意向单徽标（v6.29.0）：这条 box 里等开窗的意向单条数（卖方要确认、买方要决定等不等）
+  const intentsMineRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM offers o WHERE ${roleCol} = ? AND status = 'intent'`,
+  )
+    .bind(club.id)
+    .first<{ n: number }>();
 
   const last = rows.results[rows.results.length - 1];
   return c.json({
@@ -116,6 +122,7 @@ app.get('/offers', async (c) => {
     })),
     nextCursor: rows.results.length === 50 && last ? `${last.updated_at}~${last.id}` : null,
     pendingMine: pendingMineRow?.n ?? 0,
+    intentsMine: intentsMineRow?.n ?? 0,
   });
 });
 
@@ -151,8 +158,8 @@ app.get('/offers/:id', async (c) => {
       turn: string;
       hold_id: number | null;
       listing_id: number | null;
-      season: number;
-      window_seq: number;
+      season: number | null;
+      window_seq: number | null;
       created_at: string;
       updated_at: string;
       resolved_at: string | null;

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { createTestD1, applyMigrations, sqlGet, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
+import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { createConfigService } from '../src/core/config.ts';
@@ -134,6 +134,31 @@ describe('开窗', () => {
     const fx = await seedWindow();
     const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
     expect(res.status).toBe(409);
+  });
+
+  it('开窗提醒等开窗的意向单：双方各排一条 offer_intent_window_open（v6.29.0）', async () => {
+    const fx = await seedWindow();
+    // 先关掉窗 1，再走「关窗期报价 → 卖方同意 → 意向单」
+    fx.sqlite.exec("UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 1 AND window_seq = 1");
+    const offerRes = await post('/api/offers', { playerId: 50, amount: 15 }, 'tok-coach2', fx.env);
+    expect(offerRes.status).toBe(201);
+    const offerId = ((await offerRes.json()) as { offerId: number }).offerId;
+    const intentRes = await post(`/api/offers/${offerId}/accept`, {}, 'tok-coach', fx.env);
+    expect(intentRes.status).toBe(200);
+    expect(((await intentRes.json()) as { status: string }).status).toBe('intent');
+
+    fx.env.rng = () => 0.99; // 不重掷，稳定开窗
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    // 卖方（去确认）与买方（知道窗口开了）各一条，模板文案落在 payload.text 里
+    const notices = sqlAll<{ club_id: number; payload: string }>(
+      fx.sqlite,
+      "SELECT club_id, payload FROM notifications WHERE template = 'offer_intent_window_open' ORDER BY club_id",
+    );
+    expect(notices.map((n) => n.club_id)).toEqual([fx.clubA, fx.clubB].sort((a, b) => a - b));
+    expect(notices[0].payload).toContain('意向单');
+    // 提醒只是提醒：意向单还挂着，等卖方点确认
+    expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', offerId)).toMatchObject({ status: 'intent' });
   });
 });
 

@@ -46,11 +46,20 @@ export function renderNotification(template: string, data: Record<string, unknow
     case 'offer_withdrawn':
       return `↩️ 报价撤回：对方撤回了对 ${data.player} 的 ${data.amount} m 报价。`;
     case 'offer_expired':
-      return `⌛ 报价过期：${data.player} 的报价已失效${data.reason === 'sold' ? '（球员已被卖家挂牌，报价通道关闭，冻结已退回）' : '（转会窗已关或球员状态已变）'}，冻结已退回。`;
+      return `⌛ 报价过期：${data.player} 的报价已失效${data.reason === 'sold' ? '（球员已被卖家挂牌，报价通道关闭，冻结已退回）' : '（球员状态已变）'}，冻结已退回。`;
     case 'offer_auto_accepted':
       return `🤝 自动同意：${data.player} 的 ${data.amount} m 报价达到最低报价线，已自动同意并挂牌。`;
     case 'offer_auto_rejected':
       return `🚫 自动拒：${data.player} 的 ${data.amount} m 报价低于最低报价线（${data.min} m），直接被拒，冻结已退回。`;
+    // 关窗期报价 / 意向单（v6.29.0）：同意不挂牌、开窗提醒、卖方确认挂牌、任一方了结（双方各收一条）
+    case 'offer_intent_created':
+      return `📝 意向单：${data.player} 的 ${data.amount} m 已谈拢，但转会窗没开——先挂成意向单，开窗后由卖方确认才生成挂牌。`;
+    case 'offer_intent_window_open':
+      return `🔔 转会窗已开：${data.player} 的意向单（${data.amount} m）可以推进了——卖方到谈判桌点确认即挂牌，不确认就继续挂着。`;
+    case 'offer_intent_confirmed':
+      return `🤝 意向单已确认：${data.player} 以 ${data.amount} m 达成协议，已自动挂牌并锁定你的出价为领先。`;
+    case 'offer_intent_closed':
+      return `↩️ 意向单了结：${data.player} 的 ${data.amount} m 意向单已被对方${data.action}，冻结已退回。`;
     // 激活通知证据制（v6.4.0 改动 4）：激活必附 QQ 通知截图，被激活方可举报（举报不冻结匹配窗）
     case 'activation_notice':
       return `📣 激活通知：你的球员 ${data.player} 被「${data.activatorName}」按激活转会激活（金额 ${data.fee} m）。对方已提交 QQ 通知截图（管理端可查），如未收到 QQ 通知请到该球员页举报。`;

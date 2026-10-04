@@ -1894,7 +1894,8 @@ export interface M0Report {
 
 // ---- v6.3.0：报价 / 议价（/api/offers，全部私有） ----
 
-export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
+// v6.29.0：intent = 意向单（关窗期双方谈成，资金继续冻结；开窗后由卖方确认才物化挂牌）
+export type OfferStatus = 'pending' | 'intent' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
 
 export interface OfferListItem {
   id: number;
@@ -1920,6 +1921,8 @@ export interface OffersListResponse {
   nextCursor: string | null;
   /** 轮到我表态的条数（球员页「我收到的报价」入口徽标用） */
   pendingMine: number;
+  /** v6.29.0：我是卖方、等我确认挂牌（或放弃）的意向单条数 */
+  intentsMine: number;
 }
 
 export interface OfferEventRow {

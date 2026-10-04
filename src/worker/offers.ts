@@ -56,8 +56,8 @@ export interface OfferRow {
   turn: string;
   hold_id: number | null;
   listing_id: number | null;
-  season: number;
-  window_seq: number;
+  season: number | null;      // NULL = 关窗期发起，尚未归窗（v6.29.0）
+  window_seq: number | null;  // 同上
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
@@ -112,8 +112,9 @@ export async function placeOffer(
   input: PlaceOfferInput,
 ): Promise<{ offerId: number; status: string; auto: 'auto_accept' | 'auto_reject' | null }> {
   const db = env.DB;
+  // v6.29.0：关窗期也能报价——win 为空时 season/window_seq 落 NULL（「未归窗」）；
+  // 关窗期被同意会转成意向单，等开窗卖方点确认时再把窗口写回来。
   const win = await getOpenWindow(db);
-  if (!win) throw new HttpError(409, '转会窗口没开，现在不能报价', 'no_window');
   const amount = round2(input.amount);
 
   const p = await db
@@ -175,7 +176,7 @@ export async function placeOffer(
         `INSERT INTO offers (player_id, buyer_club_id, seller_club_id, amount, init_amount, round, note, status, turn, season, window_seq, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 0, ?, 'pending', 'seller', ?, ?, ${nowSql()}, ${nowSql()})`,
       )
-      .bind(input.playerId, input.clubId, p.club_id, amount, amount, note, win.season, win.windowSeq),
+      .bind(input.playerId, input.clubId, p.club_id, amount, amount, note, win?.season ?? null, win?.windowSeq ?? null),
     db
       .prepare(
         `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
@@ -214,6 +215,15 @@ export async function placeOffer(
   const auto = autoRespondKind(p.min_offer_price, p.offer_auto, amount);
   if (auto === 'auto_accept') {
     const offer = await loadOffer(db, offerId);
+    // v6.29.0：关窗期没有挂牌落点，达线自动同意同样只能落意向单（等开窗卖方点确认）；
+    // 否则 listings.season/window_seq 会被写成 NULL，凭空造出一张窗外挂牌。
+    if (!win) {
+      if (!(await enterIntent(env, offer, input.clubId, input.actor))) {
+        throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
+      }
+      await notifyIntentCreated(env, offer);
+      return { offerId, status: 'intent', auto };
+    }
     await acceptOfferCore(env, offer, input.actor, 'seller', 'auto_accept');
     await queueClubNotification(env, input.clubId, 'offer_auto_accepted', {
       player: p.name,
@@ -249,9 +259,7 @@ export async function counterOffer(
   const role = roleOf(offer, input.clubId);
   if (offer.status !== 'pending') throw new HttpError(409, '这条报价已经了结，不能再还价');
   if (offer.turn !== role) throw new HttpError(409, '还没轮到你出价', 'not_your_turn');
-  if (!(await isWindowOpen(db, offer.season, offer.window_seq))) {
-    throw new HttpError(409, '报价所属的转会窗口已经关了', 'no_window');
-  }
+  // v6.29.0：窗口关不关不再挡还价（关窗期谈价是常态），报价单自身状态与球员状态才是闸
   if (offer.player_club_id !== offer.seller_club_id || offer.player_status !== 'normal') {
     throw new HttpError(409, '球员已不在卖家阵容里，这条报价马上会被过期收口');
   }
@@ -347,7 +355,7 @@ export async function counterOffer(
  * 「status='accepted' AND listing_id IS NULL」，并发方与自愈重跑都进不来第二条挂牌。
  * 崩溃窗口（占用成功、履约没跑）由 expireStaleOffers 的自愈分支补齐。
  */
-async function acceptOfferCore(env: Env, offer: OfferContextRow, actor: number | null, byTurn: OfferTurn, eventKind: 'accept' | 'auto_accept' = 'accept'): Promise<number> {
+async function acceptOfferCore(env: Env, offer: OfferContextRow, actor: number | null, byTurn: OfferTurn, eventKind: 'accept' | 'auto_accept' | 'confirm' = 'accept'): Promise<number> {
   const db = env.DB;
   const occupy = await db
     .prepare(`UPDATE offers SET status = 'accepted', updated_at = ${nowSql()} WHERE id = ? AND status = 'pending' AND turn = ?`)
@@ -369,7 +377,7 @@ async function acceptOfferCore(env: Env, offer: OfferContextRow, actor: number |
  * last_insert_rowid()，0 行场景下该值是本连接的陈值 ⇒ 两条语句都带「last_insert_rowid
  * 指向的挂牌确属本球员/本卖家/本价」的存在性守卫，陈值场景全批 0 行、不落脏数据。
  */
-async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | null, eventKind: 'accept' | 'auto_accept' = 'accept'): Promise<number | null> {
+async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | null, eventKind: 'accept' | 'auto_accept' | 'confirm' = 'accept'): Promise<number | null> {
   const db = env.DB;
   const offer = await db.prepare(`SELECT * FROM offers WHERE id = ?`).bind(offerId).first<OfferRow>();
   if (!offer) return null;
@@ -471,54 +479,157 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
   return null;
 }
 
-/** 路由层入口：会话校验后的同意（买卖双方都走这里，轮到谁谁同意） */
-export async function acceptOffer(env: Env, input: { offerId: number; clubId: number; actor: number }): Promise<{ ok: true; listingId: number }> {
+/**
+ * 卖方还价抬高过 → 买方的冻结还停在旧额：同意前先补足到当前报价额（触发器校验 pending + 金额一致 + 资金）。
+ * 必须在占用批之前做——触发器只放行 pending 单，占用/转意向之后 INSERT 会被 WHL_OFFER_REJECT_CLOSED 拦。
+ */
+async function topUpBuyerHold(env: Env, offer: OfferContextRow, buyerClubId: number): Promise<void> {
+  const db = env.DB;
+  if (offer.hold_id === null) return;
+  const holdRow = await db.prepare(`SELECT amount FROM fund_holds WHERE id = ? AND status = 'held'`).bind(offer.hold_id).first<{ amount: number }>();
+  if (!holdRow || round2(holdRow.amount) === round2(offer.amount)) return;
+  const available = await availableBalance(db, buyerClubId);
+  if (offer.amount > round2(available + holdRow.amount + Number.EPSILON)) {
+    throw new HttpError(
+      400,
+      `可用资金不足：接受这个还价需要 ${round2(offer.amount)} m（可支配 ${round2(available + holdRow.amount)} m，旧价冻结 ${round2(holdRow.amount)} m 会被顶替）`,
+    );
+  }
+  try {
+    await db.batch([
+      db.prepare(`UPDATE fund_holds SET status = 'released' WHERE id = ? AND status = 'held'`).bind(offer.hold_id),
+      db
+        .prepare(
+          `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+           VALUES (?, ?, 'held', 'offer', ?, ${nowSql()})`,
+        )
+        .bind(buyerClubId, offer.amount, offer.id),
+      db
+        .prepare(
+          `UPDATE offers SET hold_id = (SELECT id FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ? AND status = 'held' ORDER BY id DESC LIMIT 1)
+           WHERE id = ?`,
+        )
+        .bind(offer.id, offer.id),
+    ]);
+  } catch (err) {
+    mapOfferTriggerError(err);
+  }
+}
+
+/**
+ * 关窗期同意 = 落意向单（v6.29.0）：占用守卫仍是「pending + 轮到你」，另加球员级唯一
+ * （同一球员同时只允许一条 intent）的 NOT EXISTS 原子闸；不建挂牌、不动兄弟单、冻结保持 held。
+ * 返回 false 表示原子闸没放行（调用方再查一次给可读报错）。
+ */
+async function enterIntent(env: Env, offer: OfferContextRow, actorClubId: number, actor: number | null): Promise<boolean> {
+  const db = env.DB;
+  const occupy = await db
+    .prepare(
+      `UPDATE offers SET status = 'intent', updated_at = ${nowSql()}
+       WHERE id = ? AND status = 'pending' AND turn = ?
+         AND NOT EXISTS (SELECT 1 FROM offers x WHERE x.player_id = offers.player_id AND x.status = 'intent')`,
+    )
+    .bind(offer.id, offer.turn)
+    .run();
+  if ((occupy.meta.changes ?? 0) !== 1) return false;
+  const audit = createAuditStatement(db);
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO offer_events (offer_id, actor_club_id, kind, amount, note, at)
+         VALUES (?, ?, 'intent', ?, ?, ${nowSql()})`,
+      )
+      .bind(offer.id, actorClubId, offer.amount, '转会窗口未开，先落意向单，开窗后由卖方确认挂牌'),
+    audit({
+      actor,
+      action: 'offer_intent',
+      targetType: 'offer',
+      targetId: offer.id,
+      origin: 'user',
+      after: { playerId: offer.player_id, amount: offer.amount, season: offer.season, windowSeq: offer.window_seq },
+    }),
+  ]);
+  return true;
+}
+
+/** 意向单落成/开窗提醒都发双方：卖方等开窗点确认，买方等卖方 */
+async function notifyIntentCreated(env: Env, offer: OfferContextRow): Promise<void> {
+  const data = { player: offer.player_name, amount: offer.amount, offerId: offer.id };
+  await queueClubNotification(env, offer.buyer_club_id, 'offer_intent_created', data);
+  await queueClubNotification(env, offer.seller_club_id, 'offer_intent_created', data);
+}
+
+/** 路由层入口：同意。开窗期 → 挂牌链路（轮到谁谁同意）；关窗期 → 落意向单（不挂牌，等开窗卖方确认） */
+export async function acceptOffer(
+  env: Env,
+  input: { offerId: number; clubId: number; actor: number },
+): Promise<{ ok: true; status: 'accepted' | 'intent'; listingId: number | null }> {
   const db = env.DB;
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
+
+  // ---- 意向单：开窗后由卖方确认挂牌（turn 不再是闸；买方来点直接 409）----
+  if (offer.status === 'intent') {
+    if (role !== 'seller') throw new HttpError(409, '这是意向单：开窗后只有卖方能确认挂牌', 'intent_seller_only');
+    if (offer.not_for_sale === 1) throw new HttpError(403, '球员刚被设为非卖品，这条意向单会被自动收口', 'not_for_sale');
+    if (offer.player_club_id !== offer.seller_club_id || offer.player_status !== 'normal') {
+      throw new HttpError(409, '球员已不在卖家阵容里，这条意向单马上会被过期收口');
+    }
+    if (offer.hold_id === null) throw new HttpError(409, '这条意向单的资金冻结缺失，不能确认');
+    const win = await getOpenWindow(db);
+    if (!win) throw new HttpError(409, '转会窗口没开，意向单要等开窗后再确认', 'no_window');
+    // 兄弟 pending 单此刻才转 expired（同开窗期同意）：先记下买方，确认后只通知他们
+    const siblingBuyers = await db
+      .prepare(`SELECT DISTINCT buyer_club_id FROM offers WHERE player_id = ? AND status = 'pending' AND id != ?`)
+      .bind(offer.player_id, offer.id)
+      .all<{ buyer_club_id: number }>();
+    // 归窗占用：season/window_seq 写回当前开着的窗，随后履约批照旧（挂牌 / hold 转正 / 领先出价 / 兄弟单过期）
+    const occupy = await db
+      .prepare(`UPDATE offers SET status = 'accepted', season = ?, window_seq = ?, updated_at = ${nowSql()} WHERE id = ? AND status = 'intent'`)
+      .bind(win.season, win.windowSeq, offer.id)
+      .run();
+    if ((occupy.meta.changes ?? 0) !== 1) throw new HttpError(409, '这条意向单刚被处理过了，刷新看看');
+    const listingId = await fulfillAcceptedOffer(env, offer.id, input.actor, 'confirm');
+    if (listingId === null) throw new HttpError(409, '球员状态刚被改过，这条意向单稍后会自动收口');
+    await queueClubNotification(env, offer.buyer_club_id, 'offer_intent_confirmed', {
+      player: offer.player_name,
+      amount: offer.amount,
+      listingId,
+    });
+    for (const row of siblingBuyers.results) {
+      if (row.buyer_club_id !== offer.buyer_club_id) {
+        await queueClubNotification(env, row.buyer_club_id, 'offer_expired', { player: offer.player_name, reason: 'sold' });
+      }
+    }
+    return { ok: true, status: 'accepted', listingId };
+  }
+
+  // ---- pending 单 ----
   if (offer.status !== 'pending') throw new HttpError(409, '这条报价已经了结，不能再同意');
   if (offer.turn !== role) throw new HttpError(409, '还没轮到你，轮到对方处理', 'not_your_turn');
-  if (!(await isWindowOpen(db, offer.season, offer.window_seq))) {
-    throw new HttpError(409, '报价所属的转会窗口已经关了', 'no_window');
-  }
   if (offer.not_for_sale === 1) throw new HttpError(403, '球员刚被设为非卖品，这条报价会被自动拒', 'not_for_sale');
   if (offer.player_club_id !== offer.seller_club_id || offer.player_status !== 'normal') {
     throw new HttpError(409, '球员已不在卖家阵容里，这条报价马上会被过期收口');
   }
   if (offer.hold_id === null) throw new HttpError(409, '这条报价的资金冻结缺失，不能同意');
 
-  // 卖方还价抬高过 → 买方的冻结还停在旧额：接受前先补足到当前报价额（触发器校验 pending + 金额一致 + 资金）。
-  // 必须在占用批之前做——触发器只放行 pending 单，占用后 INSERT 会被 WHL_OFFER_REJECT_CLOSED 拦。
-  if (role === 'buyer') {
-    const holdRow = await db.prepare('SELECT amount FROM fund_holds WHERE id = ? AND status = \'held\'').bind(offer.hold_id).first<{ amount: number }>();
-    if (holdRow && round2(holdRow.amount) !== round2(offer.amount)) {
-      const available = await availableBalance(db, input.clubId);
-      if (offer.amount > round2(available + holdRow.amount + Number.EPSILON)) {
-        throw new HttpError(
-          400,
-          `可用资金不足：接受这个还价需要 ${round2(offer.amount)} m（可支配 ${round2(available + holdRow.amount)} m，旧价冻结 ${round2(holdRow.amount)} m 会被顶替）`,
-        );
-      }
-      try {
-        await db.batch([
-          db.prepare(`UPDATE fund_holds SET status = 'released' WHERE id = ? AND status = 'held'`).bind(offer.hold_id),
-          db
-            .prepare(
-              `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
-               VALUES (?, ?, 'held', 'offer', ?, ${nowSql()})`,
-            )
-            .bind(input.clubId, offer.amount, offer.id),
-          db
-            .prepare(
-              `UPDATE offers SET hold_id = (SELECT id FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ? AND status = 'held' ORDER BY id DESC LIMIT 1)
-               WHERE id = ?`,
-            )
-            .bind(offer.id, offer.id),
-        ]);
-      } catch (err) {
-        mapOfferTriggerError(err);
-      }
+  // 卖方还价抬高过 → 买方的冻结还停在旧额：接受前先补足到当前报价额（占用/转意向之前）
+  if (role === 'buyer') await topUpBuyerHold(env, offer, input.clubId);
+
+  // 关窗期同意 → 落意向单：不挂牌、不动兄弟单、冻结保持 held；球员级唯一先给可读报错
+  if (!(await isWindowOpen(db, offer.season, offer.window_seq))) {
+    const intentRef = `SELECT id FROM offers WHERE player_id = ? AND status = 'intent' LIMIT 1`;
+    if (await db.prepare(intentRef).bind(offer.player_id).first<{ id: number }>()) {
+      throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
     }
+    if (!(await enterIntent(env, offer, input.clubId, input.actor))) {
+      if (await db.prepare(intentRef).bind(offer.player_id).first<{ id: number }>()) {
+        throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
+      }
+      throw new HttpError(409, '这条报价刚被处理过了，或还没轮到你同意', 'not_your_turn');
+    }
+    await notifyIntentCreated(env, offer);
+    return { ok: true, status: 'intent', listingId: null };
   }
 
   // 本次同意会把这些 pending 兄弟单转 expired（设计 §3 同意即挂牌的副作用）：先记下买方，
@@ -538,10 +649,10 @@ export async function acceptOffer(env: Env, input: { offerId: number; clubId: nu
       await queueClubNotification(env, row.buyer_club_id, 'offer_expired', { player: offer.player_name, reason: 'sold' });
     }
   }
-  return { ok: true, listingId };
+  return { ok: true, status: 'accepted', listingId };
 }
 
-// ---- 拒绝 / 撤回（终态化 + 释放冻结，同一形状）----
+// ---- 拒绝 / 撤回（终态化 + 释放冻结，同一形状）；v6.29.0 起 pending 与 intent 共用 ----
 
 async function finalizeOffer(
   env: Env,
@@ -553,14 +664,15 @@ async function finalizeOffer(
     origin: AuditOrigin;
     kind: 'reject' | 'withdraw' | 'auto_reject' | 'expire';
     note?: string | null;
+    fromStatus?: 'pending' | 'intent'; // 缺省 pending；了结意向单必须显式给 'intent'
   },
 ): Promise<boolean> {
   const db = env.DB;
   const audit = createAuditStatement(db);
   const results = await db.batch([
     db
-      .prepare(`UPDATE offers SET status = ?, resolved_at = ${nowSql()}, updated_at = ${nowSql()} WHERE id = ? AND status = 'pending'`)
-      .bind(opts.status, offer.id),
+      .prepare(`UPDATE offers SET status = ?, resolved_at = ${nowSql()}, updated_at = ${nowSql()} WHERE id = ? AND status = ?`)
+      .bind(opts.status, offer.id, opts.fromStatus ?? 'pending'),
     db.prepare(`UPDATE fund_holds SET status = 'released' WHERE id = (SELECT hold_id FROM offers WHERE id = ?) AND status = 'held'`).bind(offer.id),
     db
       .prepare(
@@ -579,26 +691,56 @@ async function finalizeOffer(
   return (results[0].meta.changes ?? 0) > 0;
 }
 
-/** 卖方拒绝（任意轮次都能拒，设计 §3） */
+/** 卖方拒绝（pending 任意轮次都能拒；关窗期的 intent 则是「放弃」，设计 §3 + v6.29.0） */
 export async function rejectOffer(env: Env, input: { offerId: number; clubId: number; actor: number }): Promise<{ ok: true }> {
   const db = env.DB;
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
-  if (offer.status !== 'pending') throw new HttpError(409, '这条报价已经了结');
+  if (offer.status !== 'pending' && offer.status !== 'intent') throw new HttpError(409, '这条报价已经了结');
   if (role !== 'seller') throw new HttpError(403, '只有卖方能拒绝；买方要终止请用撤回', 'not_seller');
+  if (offer.status === 'intent') {
+    // 意向单放弃：终态 rejected + 释放冻结 + 通知买方
+    const changed = await finalizeOffer(env, offer, {
+      status: 'rejected',
+      fromStatus: 'intent',
+      actorClubId: input.clubId,
+      actor: input.actor,
+      origin: 'user',
+      kind: 'reject',
+      note: '卖方放弃意向单',
+    });
+    if (!changed) throw new HttpError(409, '这条意向单刚被处理过了，刷新看看');
+    await queueClubNotification(env, offer.buyer_club_id, 'offer_intent_closed', { player: offer.player_name, amount: offer.amount, action: '放弃' });
+    return { ok: true };
+  }
   const changed = await finalizeOffer(env, offer, { status: 'rejected', actorClubId: input.clubId, actor: input.actor, origin: 'user', kind: 'reject' });
   if (!changed) throw new HttpError(409, '这条报价刚被处理过了，刷新看看');
   await queueClubNotification(env, offer.buyer_club_id, 'offer_rejected', { player: offer.player_name, amount: offer.amount });
   return { ok: true };
 }
 
-/** 买方撤回（pending 期间随时可撤，设计 §3） */
+/** 买方撤回（pending 期间随时可撤；intent 同样可撤，v6.29.0） */
 export async function withdrawOffer(env: Env, input: { offerId: number; clubId: number; actor: number }): Promise<{ ok: true }> {
   const db = env.DB;
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
-  if (offer.status !== 'pending') throw new HttpError(409, '这条报价已经了结');
+  if (offer.status !== 'pending' && offer.status !== 'intent') throw new HttpError(409, '这条报价已经了结');
   if (role !== 'buyer') throw new HttpError(403, '只有买方能撤回报价', 'not_seller');
+  if (offer.status === 'intent') {
+    // 意向单撤回：终态 withdrawn + 释放冻结 + 通知卖方
+    const changed = await finalizeOffer(env, offer, {
+      status: 'withdrawn',
+      fromStatus: 'intent',
+      actorClubId: input.clubId,
+      actor: input.actor,
+      origin: 'user',
+      kind: 'withdraw',
+      note: '买方撤回意向单',
+    });
+    if (!changed) throw new HttpError(409, '这条意向单刚被处理过了，刷新看看');
+    await queueClubNotification(env, offer.seller_club_id, 'offer_intent_closed', { player: offer.player_name, amount: offer.amount, action: '撤回' });
+    return { ok: true };
+  }
   const changed = await finalizeOffer(env, offer, { status: 'withdrawn', actorClubId: input.clubId, actor: input.actor, origin: 'user', kind: 'withdraw' });
   if (!changed) throw new HttpError(409, '这条报价刚被处理过了，刷新看看');
   await queueClubNotification(env, offer.seller_club_id, 'offer_withdrawn', { player: offer.player_name, amount: offer.amount });
@@ -647,44 +789,43 @@ export async function expireStaleOffers(env: Env, opts: { origin: AuditOrigin; a
     }
   }
 
-  // 过期三因（设计 §3）：窗已关 / 球员不在卖方或非 normal / 同球员已有生效挂牌
+  // 过期两因（v6.29.0 去掉「窗已关」一因：关窗期报价与意向单都要活着）：
+  // 球员不在卖方或非 normal / 同球员已有生效挂牌。pending 与 intent 同一口径收口。
   const candidates = await db
     .prepare(
-      `SELECT o.id, o.player_id, o.amount, o.buyer_club_id, o.seller_club_id, p.status AS player_status, p.club_id AS player_club_id,
-              sw.status AS window_status,
+      `SELECT o.id, o.status AS offer_status, o.player_id, o.amount, o.buyer_club_id, o.seller_club_id, p.status AS player_status, p.club_id AS player_club_id,
               (SELECT l.id FROM listings l WHERE l.player_id = o.player_id AND l.status IN ${ACTIVE_LISTING_STATUSES} LIMIT 1) AS active_listing_id,
               ${sqlDisplayName('p')} AS player_name
        FROM offers o
        JOIN players p ON p.id = o.player_id
-       LEFT JOIN season_windows sw ON sw.season = o.season AND sw.window_seq = o.window_seq
-       WHERE o.status = 'pending'
+       WHERE o.status IN ('pending', 'intent')
        ORDER BY o.id LIMIT 200`,
     )
     .all<{
       id: number;
+      offer_status: 'pending' | 'intent';
       player_id: number;
       amount: number;
       buyer_club_id: number;
       seller_club_id: number;
       player_status: string;
       player_club_id: number | null;
-      window_status: string | null;
       active_listing_id: number | null;
       player_name: string;
     }>();
   for (const row of candidates.results) {
     const stale =
-      row.window_status !== 'open' ||
       row.player_club_id !== row.seller_club_id ||
       row.player_status !== 'normal' ||
       row.active_listing_id !== null;
     if (!stale) continue;
-    const offer = await db.prepare(`SELECT * FROM offers WHERE id = ? AND status = 'pending'`).bind(row.id).first<OfferRow>();
+    const offer = await db.prepare(`SELECT * FROM offers WHERE id = ? AND status = ?`).bind(row.id, row.offer_status).first<OfferRow>();
     if (!offer) continue;
-    if (await finalizeOffer(env, offer, { status: 'expired', actorClubId: null, actor, origin, kind: 'expire' })) {
+    const note = row.offer_status === 'intent' ? '球员状态已变，意向单无法成约' : null;
+    if (await finalizeOffer(env, offer, { status: 'expired', fromStatus: row.offer_status, actorClubId: null, actor, origin, kind: 'expire', note })) {
       summary.expired++;
-      await queueClubNotification(env, offer.buyer_club_id, 'offer_expired', { player: row.player_name, reason: 'window' });
-      await queueClubNotification(env, offer.seller_club_id, 'offer_expired', { player: row.player_name, reason: 'window' });
+      await queueClubNotification(env, offer.buyer_club_id, 'offer_expired', { player: row.player_name, reason: 'state' });
+      await queueClubNotification(env, offer.seller_club_id, 'offer_expired', { player: row.player_name, reason: 'state' });
     }
   }
   return summary;
@@ -739,11 +880,11 @@ export async function setOfferSettings(
   const effectiveMin = input.notForSale ? null : minOfferPrice;
   const effectiveAuto = input.notForSale || effectiveMin === null ? false : input.offerAuto;
 
-  // 置非卖品 = 一切报价自动拒：把既有 pending 一并自动拒 + 释放冻结
+  // 置非卖品 = 一切报价自动拒：把既有 pending 与关窗期意向单一并自动拒 + 释放冻结（v6.29.0）
   const wasNotForSale = p.not_for_sale === 1;
   const pendingBuyers = !wasNotForSale && input.notForSale
     ? await db
-        .prepare(`SELECT DISTINCT buyer_club_id FROM offers WHERE player_id = ? AND status = 'pending'`)
+        .prepare(`SELECT DISTINCT buyer_club_id FROM offers WHERE player_id = ? AND status IN ('pending', 'intent')`)
         .bind(input.playerId)
         .all<{ buyer_club_id: number }>()
     : { results: [] as { buyer_club_id: number }[] };
@@ -774,7 +915,7 @@ export async function setOfferSettings(
     statements.push(
       db
         .prepare(
-          `UPDATE offers SET status = 'rejected', resolved_at = ${nowSql()}, updated_at = ${nowSql()} WHERE player_id = ? AND status = 'pending'`,
+          `UPDATE offers SET status = 'rejected', resolved_at = ${nowSql()}, updated_at = ${nowSql()} WHERE player_id = ? AND status IN ('pending', 'intent')`,
         )
         .bind(input.playerId),
       db

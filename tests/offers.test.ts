@@ -129,12 +129,22 @@ describe('送报价（设计 §8 六拒 + 冻结）', () => {
     expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'offer_received'")).toBeDefined();
   });
 
-  it('窗关 409 no_window（独立 fixture）', async () => {
+  it('窗关不再拦报价（v6.29.0）：无窗照落 pending、season/window_seq 为 NULL、冻结照旧', async () => {
     const fx = freshEnv();
     seedWorld(fx, { windowOpen: false });
     const res = await place(fx, 1, 30);
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as OfferOut).code).toBe('no_window');
+    expect(res.status).toBe(201);
+    const out = (await res.json()) as OfferOut;
+    expect(out).toMatchObject({ ok: true, status: 'pending', auto: null });
+    // 关窗期发起：不为窗口打标（NULL = 尚未归窗），等卖方同意时才知道落到哪个窗
+    expect(sqlGet(fx.sqlite, 'SELECT status, turn, season, window_seq FROM offers WHERE id = ?', out.offerId as number)).toMatchObject({
+      status: 'pending',
+      turn: 'seller',
+      season: null,
+      window_seq: null,
+    });
+    expect(sqlGet(fx.sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ?", out.offerId as number)).toMatchObject({ status: 'held' });
+    expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'offer_received'")).toBeDefined();
   });
 
   it('自由身 / CPU 队 / 本队球员各有可读拒绝', async () => {
@@ -508,7 +518,7 @@ describe('触发器同源锁（0037 fund_holds_offer_guard）', () => {
 });
 
 describe('惰性过期与自愈（expireStaleOffers 挂 settleOverdue）', () => {
-  it('窗关后 pending 单过期 + 释放 + 双方通知；cron tick 同路', async () => {
+  it('窗关不再过期 pending（v6.29.0）：单子活着、冻结保持、没有 window 原因的过期通知；cron tick 同路', async () => {
     const fx = freshEnv();
     seedWorld(fx);
     const res = await place(fx, 1, 30);
@@ -518,8 +528,9 @@ describe('惰性过期与自愈（expireStaleOffers 挂 settleOverdue）', () =>
     // tick 未配 CRON_KEY：本地 fail-open 放行（assertCronKey 缺省）
     expect([200, 403]).toContain(tick.status);
     if (tick.status === 200) {
-      expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', id)).toMatchObject({ status: 'expired' });
-      expect(sqlGet(fx.sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ?", id)).toMatchObject({ status: 'released' });
+      expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', id)).toMatchObject({ status: 'pending' });
+      expect(sqlGet(fx.sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ?", id)).toMatchObject({ status: 'held' });
+      expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'offer_expired'")?.n).toBe(0);
     }
   });
 

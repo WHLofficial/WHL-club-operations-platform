@@ -234,6 +234,14 @@ app.post('/market/listings', async (c) => {
     );
   }
 
+  // 意向单硬锁（v6.29.0）：同球员有 status='intent' 的单子时不能再挂牌——先了结意向单
+  // （等开窗由卖方确认挂牌，或任一方撤回/放弃），否则同一球员会同时有挂牌与意向单两条成交通道。
+  // idx_offers_player (player_id, status) 上的一次索引查询，不改变挂牌其余流程。
+  const intent = await c.env.DB.prepare(`SELECT id FROM offers WHERE player_id = ? AND status = 'intent' LIMIT 1`)
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (intent) throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再挂牌', 'intent_exists');
+
   const dup = await c.env.DB.prepare(`SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'pending_review') LIMIT 1`)
     .bind(playerId)
     .first<{ id: number }>();

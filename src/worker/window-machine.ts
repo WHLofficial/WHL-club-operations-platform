@@ -16,6 +16,7 @@ import { loyaltyMovements } from './season-settle.ts';
 import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 import { queueClubNotification } from './notify.ts';
+import { sqlDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -201,6 +202,25 @@ export async function openWindow(
   } catch (err) {
     if (String(err).includes('UNIQUE')) throw new HttpError(409, '这个窗口已经存在');
     throw err;
+  }
+  // 开窗给意向单双方排提醒（v6.29.0）：提交成功后才排队，与 closeWindow 的通知口径一致。
+  // 这里是刻意吞掉的尽力而为——此刻窗口已提交，通知失败不该让调用方以为开窗失败；
+  // 失败只影响提醒（不回溯、不重试），排查靠通知表缺行，业务异常在下面各语句里都已各自报错。
+  try {
+    const intents = await db
+      .prepare(
+        `SELECT o.id, o.amount, o.buyer_club_id, o.seller_club_id, ${sqlDisplayName('p')} AS player_name
+         FROM offers o JOIN players p ON p.id = o.player_id
+         WHERE o.status = 'intent' ORDER BY o.id LIMIT 200`,
+      )
+      .all<{ id: number; amount: number; buyer_club_id: number; seller_club_id: number; player_name: string }>();
+    for (const it of intents.results) {
+      const data = { player: it.player_name, amount: it.amount, offerId: it.id, season, windowSeq };
+      await queueClubNotification(env, it.buyer_club_id, 'offer_intent_window_open', data);
+      await queueClubNotification(env, it.seller_club_id, 'offer_intent_window_open', data);
+    }
+  } catch {
+    // 见上：仅提醒，吞掉
   }
   return {
     ok: true,
