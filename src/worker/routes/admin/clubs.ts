@@ -5,11 +5,12 @@ import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit, type AuditOrigin } from '../../../lib/audit.ts';
 import { authIssueTeamCode, authRegisterTeam, authUnbindTeam, AuthApiError } from '../../authClient.ts';
-import { pushTeamToTour } from '../../tourClient.ts';
+import { pushTeamToTour, pushTeamRename } from '../../tourClient.ts';
 import { getBoundClub } from '../../binding.ts';
 import { getVisibleSeason } from '../../seasons.ts';
-import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../../home.ts';
+import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, diehardTarget } from '../../home.ts';
 import { deriveClubTier, tierCache } from '../../tier.ts';
+import { FACILITY_KEYS } from '../../stadium-ops.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -18,6 +19,15 @@ export interface CreatedClub {
   club: { id: number; name: string; leagueTier: string | null; status: string; createdAt: string };
   authLinked: boolean | null;
 }
+
+// v6.27.0 CPU 接管向导：四支 CPU 队的预填种子（来源「v6.27.0 用户表格图」）。
+// 级别 1 → premier、级别 2 → second；RB 莱比锡奖励分空按 0 记；表外的队给 null/0，由管理端手填。
+const CPU_SEED_PRESETS: Record<number, { leagueTier: 'premier' | 'second'; shellInfluence: number; bonusPoints: number }> = {
+  10: { leagueTier: 'second', shellInfluence: 65.75, bonusPoints: 15 },
+  241: { leagueTier: 'premier', shellInfluence: 38.65, bonusPoints: 30 },
+  112172: { leagueTier: 'second', shellInfluence: 25.57, bonusPoints: 0 },
+  131681: { leagueTier: 'premier', shellInfluence: 52.95, bonusPoints: 10 },
+};
 
 // 建俱乐部核心（v6.1.0 抽出，三个入口共用）：管理端手填游戏球队 ID、管理端自动在赛事系统建队后、
 // 赛事系统建队后经机器通道推过来（routes/internal.ts）。**只管本仓建档**——「tour 里有没有这支队」
@@ -153,8 +163,8 @@ app.post('/clubs/:id/register-auth', async (c) => {
 app.get('/clubs', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const clubs = await c.env.DB.prepare(
-    'SELECT id, name, league_tier, status, transfer_banned, created_at FROM clubs ORDER BY id LIMIT 200',
-  ).all<{ id: number; name: string; league_tier: string; status: string; transfer_banned: number; created_at: string }>();
+    'SELECT id, name, league_tier, status, transfer_banned, is_cpu, created_at FROM clubs ORDER BY id LIMIT 200',
+  ).all<{ id: number; name: string; league_tier: string; status: string; transfer_banned: number; is_cpu: number; created_at: string }>();
   // 绑定与认证码真源在 auth 库（v1.0.0）；AUTH_DB 未配置回落本地休眠表（回滚通道）。
   // 绑定人名字取 auth account.name，不再回查赛事库 user 表。
   const bindings = c.env.AUTH_DB
@@ -205,6 +215,7 @@ app.get('/clubs', async (c) => {
           leagueTier: await deriveClubTier(c.env, season, r.id, cache),
           status: r.status,
           transferBanned: r.transfer_banned === 1,
+          isCpu: r.is_cpu === 1,
           createdAt: r.created_at,
           bindings: byClub.get(r.id) ?? [],
           latestCode: latestCode.get(r.id) ?? null,
@@ -340,6 +351,196 @@ app.post('/clubs/:id/stadium', async (c) => {
     after: body as Record<string, unknown>,
   });
   return c.json({ ok: true });
+});
+
+// ---- v6.27.0 CPU 接管向导（管理端四步：读现状 → 改 tour 侧队名 → 改本仓队名 → 铺主场基建）----
+
+// ① 只读聚合：接管前把队况 / tour 侧队 / 基建现状 / 绑定人 / 预填建议一次给全
+app.get('/clubs/:id/cpu-convert', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id, name, is_cpu, league_tier, status FROM clubs WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; name: string; is_cpu: number; league_tier: string | null; status: string }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  const tourTeam = await c.env.TOUR_DB.prepare('SELECT id, name FROM team WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; name: string }>();
+  const stadium = await c.env.DB.prepare('SELECT club_id FROM stadiums WHERE club_id = ?').bind(clubId).first();
+  const ledger = await c.env.DB.prepare('SELECT club_id FROM ledger_accounts WHERE club_id = ?').bind(clubId).first();
+  const facilities = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM club_facilities WHERE club_id = ?')
+    .bind(clubId)
+    .first<{ n: number }>();
+  // 绑定人单队版（与 GET /clubs 同口径：AUTH_DB 优先，未配置回落本地休眠表）
+  const binding = c.env.AUTH_DB
+    ? await c.env.AUTH_DB.prepare(
+        `SELECT b.account_id AS user_id, a.name AS user_name, b.bound_at
+         FROM team_binding b JOIN team t ON t.id = b.team_id JOIN account a ON a.id = b.account_id
+         WHERE t.club_id = ? ORDER BY b.account_id LIMIT 1`,
+      )
+        .bind(clubId)
+        .first<{ user_id: number; user_name: string | null; bound_at: string }>()
+    : await c.env.DB.prepare('SELECT user_id, user_name, bound_at FROM club_bindings WHERE club_id = ? LIMIT 1')
+        .bind(clubId)
+        .first<{ user_id: number; user_name: string | null; bound_at: string }>();
+  // 建议新队名：去掉结尾「(CPU)」后缀；整名都被剥空就退回原名
+  const stripped = club.name.replace(/\s*\(CPU\)\s*$/, '');
+  const preset = CPU_SEED_PRESETS[clubId] ?? null;
+  const shellInfluence = preset?.shellInfluence ?? 0;
+  const bonusPoints = preset?.bonusPoints ?? 0;
+  const model = await loadAttendanceModel(c.env.DB);
+  const playerSum = await playerInfluenceSum(c.env, clubId, model);
+  return c.json({
+    club: { id: club.id, name: club.name, isCpu: club.is_cpu === 1, leagueTier: club.league_tier, status: club.status },
+    tour: tourTeam ? { id: tourTeam.id, name: tourTeam.name } : null,
+    infra: { stadium: !!stadium, ledger: !!ledger, facilities: facilities?.n ?? 0 },
+    binding: binding
+      ? { bound: true, userId: binding.user_id, userName: binding.user_name, boundAt: binding.bound_at }
+      : { bound: false, userId: null, userName: null, boundAt: null },
+    suggest: {
+      newName: stripped || club.name,
+      shellInfluence,
+      bonusPoints,
+      leagueTier: preset?.leagueTier ?? null,
+      diehardTarget: diehardTarget(
+        model,
+        teamInfluence({ shell_influence: shellInfluence, bonus_points: bonusPoints }, playerSum),
+      ),
+    },
+  });
+});
+
+// ② 改 tour 侧队名：失败本仓零改动、无审计（可重试）
+app.post('/clubs/:id/rename-tour', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id, is_cpu FROM clubs WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; is_cpu: number }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  if (club.is_cpu !== 1) return c.json({ error: 'not_cpu', message: '该俱乐部不是 CPU 队，无需接管' }, 409);
+  const body = (await readJson(c)) as { name?: unknown } | null;
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name) throw new HttpError(400, '队名不能为空');
+  if (name.length > 40) throw new HttpError(400, '队名最多 40 个字');
+  const push = await pushTeamRename(c.env, { id: clubId, name });
+  if (!push.ok) {
+    return c.json({ error: 'tour_sync_failed', message: push.message || '对手方改名失败，请稍后重试' }, 502);
+  }
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'club_cpu_rename_tour',
+    targetType: 'club',
+    targetId: clubId,
+    origin: 'user',
+    after: { name },
+  });
+  return c.json({ ok: true, renamed: push.renamed, name: push.name ?? name });
+});
+
+// ③ 改本仓队名并摘掉 CPU 标记：幂等（重放返回 changed:false），撞 clubs.name UNIQUE 给 409
+app.post('/clubs/:id/rename-local', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  const body = (await readJson(c)) as { name?: unknown } | null;
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name) throw new HttpError(400, '队名不能为空');
+  if (name.length > 40) throw new HttpError(400, '队名最多 40 个字');
+  let changed = false;
+  try {
+    const res = await c.env.DB.prepare('UPDATE clubs SET name = ?, is_cpu = 0 WHERE id = ? AND is_cpu = 1')
+      .bind(name, clubId)
+      .run();
+    changed = (res.meta.changes ?? 0) > 0;
+  } catch (e) {
+    // 撞名给可判别的 409；别的 SQL 错误照旧冒泡 500
+    if (/UNIQUE/i.test(String((e as Error)?.message ?? ''))) {
+      return c.json({ error: 'name_taken', message: '已有俱乐部使用该名字' }, 409);
+    }
+    throw e;
+  }
+  if (!changed) return c.json({ ok: true, changed: false });
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'club_cpu_rename_local',
+    targetType: 'club',
+    targetId: clubId,
+    origin: 'user',
+    after: { name },
+  });
+  return c.json({ ok: true, changed: true, name });
+});
+
+// ④ 铺主场基建：球场 + 账本 + 五类设施 + 联赛级别，一次 batch 全幂等。
+// 只建不改：已有行一律 DO NOTHING（重放零写入、updated_at 不变）；改值走主场/设施既有入口。
+app.post('/clubs/:id/seed-ops', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  const body = (await readJson(c)) as {
+    stadiumName?: unknown;
+    shellInfluence?: unknown;
+    bonusPoints?: unknown;
+    leagueTier?: unknown;
+  } | null;
+  const stadiumName = typeof body?.stadiumName === 'string' ? body.stadiumName.trim() : '';
+  if (!stadiumName) throw new HttpError(400, '球场名字不能为空');
+  if (stadiumName.length > 60) throw new HttpError(400, '球场名字最多 60 个字');
+  const shellInfluence = Number(body?.shellInfluence);
+  if (!Number.isFinite(shellInfluence) || shellInfluence < 0 || shellInfluence > 10000) {
+    throw new HttpError(400, '队壳影响力应为 0-10000 的数值');
+  }
+  const bonusPoints = Number(body?.bonusPoints);
+  if (!Number.isFinite(bonusPoints) || bonusPoints < 0 || bonusPoints > 10000) {
+    throw new HttpError(400, '奖励分应为 0-10000 的数值');
+  }
+  const leagueTier = body?.leagueTier === 'premier' ? 'premier' : body?.leagueTier === 'second' ? 'second' : null;
+  if (!leagueTier) throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
+  const model = await loadAttendanceModel(c.env.DB);
+  const playerSum = await playerInfluenceSum(c.env, clubId, model);
+  const fans = diehardTarget(
+    model,
+    teamInfluence({ shell_influence: shellInfluence, bonus_points: bonusPoints }, playerSum),
+  );
+  const stmts = [
+    c.env.DB.prepare(
+      `INSERT INTO stadiums (club_id, name, capacity, tier, shell_influence, bonus_points, fans, created_at, updated_at)
+       VALUES (?, ?, 12000, 0, ?, ?, ?, ${nowSql()}, ${nowSql()}) ON CONFLICT(club_id) DO NOTHING`,
+    ).bind(clubId, stadiumName, shellInfluence, bonusPoints, fans),
+    c.env.DB.prepare(
+      `INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (?, 0, ${nowSql()}) ON CONFLICT(club_id) DO NOTHING`,
+    ).bind(clubId),
+    ...FACILITY_KEYS.map((key) =>
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO club_facilities (club_id, facility_key, level, updated_at) VALUES (?, ?, 0, ${nowSql()})`,
+      ).bind(clubId, key),
+    ),
+    c.env.DB.prepare('UPDATE clubs SET league_tier = ? WHERE id = ?').bind(leagueTier, clubId),
+  ];
+  const results = await c.env.DB.batch(stmts);
+  const created = {
+    stadium: (results[0]?.meta.changes ?? 0) > 0,
+    ledger: (results[1]?.meta.changes ?? 0) > 0,
+    facilities: results.slice(2, 2 + FACILITY_KEYS.length).filter((r) => (r?.meta.changes ?? 0) > 0).length,
+  };
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'club_cpu_seed_ops',
+    targetType: 'club',
+    targetId: clubId,
+    origin: 'user',
+    // stadiumCreated=false 表示球场行本就存在、上面的壳/奖励/fans 没落库（只建不改）；
+    // 联赛级别那条是无条件 UPDATE，永远生效。
+    after: { shellInfluence, bonusPoints, leagueTier, fans, stadiumCreated: created.stadium },
+  });
+  return c.json({ ok: true, created, leagueTier });
 });
 
 app.post('/clubs/:id/bindcode', async (c) => {
