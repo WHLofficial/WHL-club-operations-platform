@@ -43,6 +43,10 @@ function row(patch: Partial<PlayerLibraryRow> & { id: number; name: string }): P
     chinaPlan: false,
     agentTier: 2,
     marker: null,
+    // v6.30.0 列表行新增的转会三态摘要（PlayerListItem 必填）
+    transferListed: false,
+    notForSale: false,
+    transferPriced: false,
     badgesSilver: 1,
     badgesGold: 0,
     clubName: '阿森纳',

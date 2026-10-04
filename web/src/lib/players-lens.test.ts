@@ -65,6 +65,10 @@ function row(patch: Partial<PlayerLibraryRow> = {}): PlayerLibraryRow {
     badgesSilver: 0,
     badgesGold: 0,
     marker: null,
+    // v6.30.0 列表行新增的转会三态摘要（PlayerListItem 必填）
+    transferListed: false,
+    notForSale: false,
+    transferPriced: false,
     growable: true,
     clubName: null,
     positions: ['ST'],

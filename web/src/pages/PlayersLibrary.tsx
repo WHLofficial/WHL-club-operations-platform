@@ -5,9 +5,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
-import { AGENT_TIER_LABEL, ATTR_LABELS, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleById, playstyleIsGold } from '../lib/ref.ts';
-import { PS_GOLD_BASE, isGoldPlaystyleId } from '../../../src/core/fc26.ts';
+import { api, type ClubDirectoryRow, type PlayersLibraryResponse } from '../lib/api.ts';
+import { ATTR_LABELS } from '../lib/ref.ts';
+// v6.30.0 C 段：PlayStyle 显示名（psNames）与可变列单元格渲染（renderClubCol）挪去 ../lib/club-columns.tsx，
+// 球队页两张球员表与本页共用同一份实现；这里 re-export 保持球员库自己的对外形状不变
+import { renderClubCol } from '../lib/club-columns.tsx';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { playerPath } from '../lib/player-link.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
@@ -69,76 +71,9 @@ function writeSideOpen(open: boolean): void {
 
 // v3.0.0：效力时长按窗刻度存储（赛季数），不再由日期折算
 
-// PlayStyle 槽位原值 → 显示名（psIds 与槽位对齐、缺槽 null；金徽=基础 ID+100，或金槽 13+）
-// 金徽判定与基础 ID 剥离都走 core/ref 的口径，别在这里再写一遍 >=100 / -100
-// slot 是数组下标（0 起），playstyleIsGold 收的是槽号（1 起）⇒ 这里 +1，否则下标 12 的 PSID13
-// 走不到「金槽」分支（v3.2.1：银段 ID 落在金槽时会显示成银，与属性页的 🥇 不一致）
-export function psNames(row: PlayerLibraryRow): string {
-  if (!row.psIds || row.psIds.length === 0) return '—';
-  const names = row.psIds
-    .map((v, slot) => {
-      if (v === null) return null;
-      const gold = playstyleIsGold(v, slot + 1);
-      const base = isGoldPlaystyleId(v) ? v - PS_GOLD_BASE : v;
-      const ref = playstyleById.get(base);
-      const name = ref?.chs ?? ref?.en ?? String(v);
-      return gold ? `金·${name}` : name;
-    })
-    .filter((n): n is string => n !== null);
-  return names.length > 0 ? names.join('、') : '—';
-}
-
-function renderCol(key: string, p: PlayerLibraryRow) {
-  if (key.startsWith('attr:')) return <td key={key} className="num mono">{p.attrValue ?? '—'}</td>;
-  switch (key) {
-    case 'marketValue':
-      return <td key={key} className="num mono">{money(p.marketValue)}</td>;
-    case 'badges':
-      return (
-        <td key={key} className="mono">
-          {p.badgesSilver === 0 && p.badgesGold === 0
-            ? '—'
-            : [p.badgesGold > 0 ? `${p.badgesGold}金` : '', p.badgesSilver > 0 ? `${p.badgesSilver}银` : '']
-                .filter(Boolean)
-                .join(' ')}
-        </td>
-      );
-    case 'prestige':
-      return <td key={key} className="num mono">{p.prestige ?? '—'}</td>;
-    case 'baseCa':
-      return <td key={key} className={`num mono${p.baseCa === null ? '' : ` ${attrClass(p.baseCa)}`}`}>{p.baseCa ?? '—'}</td>;
-    case 'growthGap':
-      return <td key={key} className="num mono">{p.pa - p.ca}</td>;
-    case 'foot':
-      return <td key={key}>{p.foot === 0 ? '左脚' : '右脚'}</td>;
-    case 'growthTier':
-      return <td key={key} className="num mono">{p.growthTier} 档</td>;
-    case 'futureStar':
-      return <td key={key}>{p.isFutureStar ? '★' : '—'}</td>;
-    case 'chinaPlan':
-      return <td key={key}>{p.chinaPlan ? '✓' : '—'}</td>;
-    case 'agentTier':
-      return <td key={key}>{AGENT_TIER_LABEL[p.agentTier] ?? '—'}</td>;
-    case 'ps':
-      return <td key={key} className="mono ps-cell">{psNames(p)}</td>;
-    case 'fcId':
-      return <td key={key} className="mono">{p.fcId ?? '—'}</td>;
-    case 'wage':
-      return <td key={key} className="num mono">{money(p.wage)}</td>;
-    case 'releaseFee':
-      return <td key={key} className="num mono">{p.releaseFee === null ? '—' : money(p.releaseFee)}</td>;
-    case 'contractType':
-      return <td key={key}>{p.contractType ? (CONTRACT_TYPE_LABEL[p.contractType] ?? p.contractType) : '—'}</td>;
-    case 'source':
-      return <td key={key}>{p.source ? (SOURCE_LABEL[p.source] ?? p.source) : '—'}</td>;
-    case 'protected':
-      return <td key={key} className="mono">{p.contractType ? (p.protected ? '保护中' : '非保护') : '—'}</td>;
-    case 'years':
-      return <td key={key} className="num mono">{p.serviceSeasons === null ? '—' : `${p.serviceSeasons.toFixed(1)} 赛季`}</td>;
-    default:
-      return <td key={key}>—</td>;
-  }
-}
+// v6.30.0 C 段：psNames 与本页原来的 renderCol 已提取到 ../lib/club-columns.tsx（球队页共用），
+// 逻辑一字未改；psNames 继续从这里 re-export，免得既有引用（含测试）改路径。
+export { psNames } from '../lib/club-columns.tsx';
 
 // 表头排序（v3.1.0 步骤 6）：整个表头是可点按钮，点一下按该列排，再点翻向；箭头只在当前排序列点亮。
 // aria-sort 给读屏（它就挂 th），箭头本身是装饰
@@ -749,7 +684,7 @@ export default function PlayersLibrary() {
                           <td>
                             <span className={`badge ${STATUS_BADGE[p.status] ?? 'gray'}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
                           </td>
-                          {activeCols.map((key) => renderCol(key, p))}
+                          {activeCols.map((key) => renderClubCol(key, p))}
                         </tr>
                       ))}
                     </tbody>

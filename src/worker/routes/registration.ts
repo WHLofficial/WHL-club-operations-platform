@@ -5,7 +5,10 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
-import { checkSquad, type SquadPlayer } from '../../core/squad-rules.ts';
+import { checkSquad, markerOf, type SquadPlayer } from '../../core/squad-rules.ts';
+import { serviceSeasons } from '../../core/bypass-rules.ts';
+import { PS_SLOT_COUNT } from '../../core/fc26.ts';
+import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { getOpenWindow, getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { getBoundClub } from '../binding.ts';
@@ -34,11 +37,27 @@ interface OwnedPlayerRow {
   china_plan: number;
   status: string;
   market_value: number | null;
+  // v6.30.0 C 段：注册工作台的可选列要用的原始列（口径同 routes/players.ts 的列表行）
+  uid: string;
+  prestige: number | null;
+  foot: number | null;
+  growth_tier: number;
+  agent_tier: number;
+  badges_silver: number;
+  badges_gold: number;
 }
+
+// v6.30.0 C 段：PlayStyle 15 槽（口径同 routes/players.ts:482 的 psSlots —— 那边只在 ps 筛选时才取，
+// 注册工作台的可选列随时可能被勾出来，所以这里无条件带上，15 个 json_extract 对 ≤500 行可以忽略）
+const PS_SLOT_SELECTS = Array.from(
+  { length: PS_SLOT_COUNT },
+  (_, i) => `, json_extract(game_attrs, '$.PSID${i + 1}') AS ps${i + 1}`,
+).join('');
 
 async function loadOwnedPlayers(env: Env, clubId: number): Promise<OwnedPlayerRow[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, fc_id, name, display_name, number, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status, market_value
+    `SELECT id, fc_id, name, display_name, number, position, age, ca, pa, base_ca, growable, is_future_star, china_plan, status,
+            market_value, uid, prestige, foot, growth_tier, agent_tier, badges_silver, badges_gold${PS_SLOT_SELECTS}
      FROM players WHERE club_id = ? ORDER BY id LIMIT 500`,
   )
     .bind(clubId)
@@ -50,16 +69,42 @@ interface ContractInfo {
   wage: number;
   releaseFee: number | null;
   contractType: string;
+  // v6.30.0 C 段：可选列要用的合同侧字段
+  source: string | null;
+  serviceSeasons: number | null;
+  protected: boolean;
 }
 
 async function loadContractMap(env: Env, clubId: number): Promise<Map<number, ContractInfo>> {
   const rows = await env.DB.prepare(
-    `SELECT player_id, wage, release_fee, contract_type FROM contracts WHERE club_id = ? AND is_active = 1 LIMIT 500`,
+    `SELECT player_id, wage, release_fee, contract_type, source, service_ticks, protection_ticks,
+            ${CURRENT_TICKS_SQL} AS current_ticks
+     FROM contracts WHERE club_id = ? AND is_active = 1 LIMIT 500`,
   )
     .bind(clubId)
-    .all<{ player_id: number; wage: number | null; release_fee: number | null; contract_type: string }>();
+    .all<{
+      player_id: number;
+      wage: number | null;
+      release_fee: number | null;
+      contract_type: string;
+      source: string | null;
+      service_ticks: number | null;
+      protection_ticks: number | null;
+      current_ticks: number;
+    }>();
   return new Map(
-    rows.results.map((r) => [r.player_id, { wage: r.wage ?? 0, releaseFee: r.release_fee, contractType: r.contract_type }]),
+    rows.results.map((r) => [
+      r.player_id,
+      {
+        wage: r.wage ?? 0,
+        releaseFee: r.release_fee,
+        contractType: r.contract_type,
+        source: r.source,
+        // 效力时长（赛季）与保护期口径同 routes/players.ts:799-800
+        serviceSeasons: serviceSeasons(r.service_ticks ?? 0, r.current_ticks),
+        protected: r.protection_ticks !== null && r.current_ticks < r.protection_ticks,
+      },
+    ]),
   );
 }
 
@@ -121,20 +166,38 @@ app.get('/club/squad', async (c) => {
       return {
         id: p.id,
         fcId: p.fc_id,
+        uid: p.uid,
         name: rowDisplayName(p),
         number: p.number,
         position: p.position,
         age: p.age,
         ca: p.ca,
         pa: p.pa,
+        baseCa: p.base_ca,
+        // 标记（v6.30.0 C 段）：纯函数与 /api/players 同一口径（初始 CA 缺省回现值）
+        marker: markerOf(p.base_ca ?? p.ca, p.pa, p.growable === 1, p.ca),
         growable: p.growable === 1,
         isFutureStar: p.is_future_star === 1,
         chinaPlan: p.china_plan === 1,
+        prestige: p.prestige,
         status: p.status,
         marketValue: p.market_value,
+        foot: p.foot,
+        growthTier: p.growth_tier,
+        agentTier: p.agent_tier,
+        badgesSilver: p.badges_silver,
+        badgesGold: p.badges_gold,
         wage: contract?.wage ?? null,
         releaseFee: contract?.releaseFee ?? null,
         contractType: contract?.contractType ?? null,
+        source: contract?.source ?? null,
+        serviceSeasons: contract?.serviceSeasons ?? null,
+        protected: contract?.protected ?? false,
+        // 槽位对齐：保留 15 长度、缺槽为 null（前端金徽判定要按真实槽位，口径同 routes/players.ts:802-808）
+        psIds: Array.from({ length: PS_SLOT_COUNT }, (_, i) => {
+          const v = (p as unknown as Record<string, unknown>)[`ps${i + 1}`];
+          return v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
+        }),
         hasContract: contract !== null,
         squad: squadByPlayer.get(p.id) ?? null,
       };

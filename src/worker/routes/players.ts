@@ -670,6 +670,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
             players.prestige, players.market_value, players.status,
             players.growth_tier, players.growable, players.is_future_star, players.china_plan, players.agent_tier,
             players.badges_silver, players.badges_gold,
+            players.transfer_listed, players.not_for_sale, players.min_offer_price,
             json_extract(players.game_attrs, '$.PosID1') AS pos1,
             json_extract(players.game_attrs, '$.PosID2') AS pos2,
             json_extract(players.game_attrs, '$.PosID3') AS pos3,
@@ -711,6 +712,9 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       agent_tier: number;
       badges_silver: number;
       badges_gold: number;
+      transfer_listed: number;
+      not_for_sale: number;
+      min_offer_price: number | null;
       pos1: number | null;
       pos2: number | null;
       pos3: number | null;
@@ -774,6 +778,10 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     influence: influenceOf(coefs, r.cur_ca, r.cur_pa, r.growable === 1, r.prestige),
     marketValue: r.market_value,
     status: r.status,
+    // 转会设置（v6.30.0）：列表行只给布尔摘要——min_offer_price 数值绝不下发（隐藏门槛不进公开面）
+    transferListed: r.transfer_listed === 1,
+    notForSale: r.not_for_sale === 1,
+    transferPriced: r.min_offer_price !== null,
     growthTier: r.growth_tier,
     // 标记（v6.5.0）：用原始列现算（base_ca 缺省回 cur_ca=players.ca、PA 取现值），与 view 口径无关；
     // 判定纯函数与 SQL 筛选/排序同源（core/squad-rules）；v6.26.1 起第 4 参现值 CA 未练满才落绿

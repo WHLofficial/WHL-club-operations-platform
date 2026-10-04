@@ -65,6 +65,9 @@ interface ListBody {
     marketValue: number | null;
     clubName: string | null;
     marker: string | null;
+    transferListed: boolean;
+    notForSale: boolean;
+    transferPriced: boolean;
   }[];
   nextCursor: string | null;
 }
@@ -205,6 +208,50 @@ describe('球员库列表（v0.7.1 d6）', () => {
     expect((await get('/api/players?sort=ca&cursor=oops', fx.env)).status).toBe(400);
     expect((await get('/api/players?ca_min=-1', fx.env)).status).toBe(400);
     expect((await get('/api/players?name=', fx.env)).status).toBe(400);
+  });
+});
+
+// v6.30.0：列表行补转会设置摘要（挂牌 / 非卖品 / 是否标过价）；min_offer_price 数值是隐藏门槛，不进公开列表
+describe('转会设置摘要（v6.30.0）', () => {
+  it('四态齐全：挂牌 / 非卖品 / 已标价 / 无设置都出布尔摘要', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    fx.sqlite.exec(`
+      UPDATE players SET transfer_listed = 1, min_offer_price = 50 WHERE id = 1;
+      UPDATE players SET not_for_sale = 1 WHERE id = 2;
+      UPDATE players SET min_offer_price = 33.5 WHERE id = 3;
+    `);
+    const body = await list('/api/players?limit=100', fx.env);
+    const byId = new Map(body.players.map((p) => [p.id, p]));
+    expect(byId.get(1)).toMatchObject({ transferListed: true, notForSale: false, transferPriced: true });
+    expect(byId.get(2)).toMatchObject({ transferListed: false, notForSale: true, transferPriced: false });
+    expect(byId.get(3)).toMatchObject({ transferListed: false, notForSale: false, transferPriced: true });
+    expect(byId.get(4)).toMatchObject({ transferListed: false, notForSale: false, transferPriced: false });
+  });
+
+  it('min_offer_price 的键与数值都不进列表响应（隐藏门槛不进公开面）', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    fx.sqlite.exec('UPDATE players SET transfer_listed = 1, min_offer_price = 50 WHERE id = 1');
+    const body = await list('/api/players?limit=100', fx.env);
+    for (const p of body.players) {
+      expect('minOfferPrice' in p).toBe(false);
+      expect('min_offer_price' in p).toBe(false);
+    }
+    expect(JSON.stringify(body)).not.toContain('minOfferPrice');
+    expect(JSON.stringify(body)).not.toContain('min_offer_price');
+    // 数值本身（50）也不许借排序键 / 附加列漏出去
+    expect(JSON.stringify(body)).not.toContain('50');
+  });
+
+  it('详情端点照旧给数值 minOfferPrice（列表口径不外扩成详情缩水）', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    fx.sqlite.exec('UPDATE players SET transfer_listed = 1, min_offer_price = 50 WHERE id = 1');
+    const res = await get('/api/players/1', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { player: { transferListed: boolean; notForSale: boolean; minOfferPrice: number | null } };
+    expect(body.player).toMatchObject({ transferListed: true, notForSale: false, minOfferPrice: 50 });
   });
 });
 
