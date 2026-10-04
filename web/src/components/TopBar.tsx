@@ -120,6 +120,10 @@ export default function TopBar() {
           <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             转会中心
           </NavLink>
+          {/* 消费中心（v6.26.0）：五类商品工单 + 球场消费三卡；v6.26.1 补顶栏入口（原先只有首页/球队中心卡片） */}
+          <NavLink to="/shop" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
+            消费中心
+          </NavLink>
           <NavLink to="/ledger" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             财政账本
           </NavLink>
