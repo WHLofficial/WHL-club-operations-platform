@@ -83,6 +83,10 @@ export const CONFIG_KEYS = [
   'loyalty_tiers',
   'attendance_model',
   'tier_table',
+  // v6.28.0 影响力体系：A 段级别系数表 + B 段死忠每场演化涨/掉系数
+  'influence_tier_coefs',
+  'fans_grow_rate_per_match',
+  'fans_drop_rate_per_match',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -253,6 +257,13 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   }),
   shop_hpremium_clubs: '[]',
   fc26_pa_cap: '95',
+  // v6.28.0 影响力体系 A 段：级别系数（总影响力 =（队壳 + 阵容）× 系数 + 奖励分；
+  // 未登记/未定级运行期一律回 1.0）
+  influence_tier_coefs: JSON.stringify({ premier: 1.2, second: 1.0 }),
+  // v6.28.0 死忠每场演化 B 段：per-match 涨/掉系数 = 窗系数 0.5 × 0.4
+  //（一窗约 2–3 场主场，观察几窗再定标；关窗兜底仍走 attendance_model 的窗系数）
+  fans_grow_rate_per_match: '0.2',
+  fans_drop_rate_per_match: '0.2',
 };
 
 export const CONFIG_SECRET_KEYS: ReadonlySet<string> = new Set([

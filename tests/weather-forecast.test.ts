@@ -1,6 +1,7 @@
 // v6.15.0 天气预报表（迁移 0057 · 按轮预报触发/预览 · 上座消费端三档优先级）。
 // 用例编号与 docs/test-plans/v6.15.0-weather-forecast.md 一一对应（TC-MIG / TC-FC / TC-PV / TC-PRI），
-// 数值基线（rng=0.5）：K = 1800×4.0×1.0×1.0×1.05 = 7560；多云 wx=0.97 → 上座 7333。
+// 数值基线（rng=0.5）：v6.28.0 A 段起主队级别系数 1.2 → 队壳 90 → 主队影响力 108 →
+// 对手系数 1+0.05×(90/108)=1.0417；K = 1800×4.0×1.0×1.0×1.0417 = 7500；多云 wx=0.97 → 上座 7275。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
@@ -175,7 +176,7 @@ function seedForecastFixture(): Fixture {
   return fx;
 }
 
-/** 上座消费端夹具（对齐 tests/event-ops.test.ts:975-987）：主队影响力 90 → 对手系数 1.05 → K = 7560 */
+/** 上座消费端夹具（对齐 tests/event-ops.test.ts:975-987）：主队 premier 系数 1.2 → 影响力 108 → 对手系数 1.0417 → K = 7500 */
 function seedMatchFixture(opts: { nextMod?: number; nextWeather?: string } = {}): Fixture {
   const fx = freshEnv();
   addTournament(fx, 5, 50);
@@ -207,9 +208,10 @@ const attendanceOf = (fx: Fixture) =>
   sqlGet<{ weather: string; attendance: number; club_id: number }>(fx.sqlite, 'SELECT weather, attendance, club_id FROM match_attendance WHERE match_id = 1');
 const revenueMemo = (fx: Fixture) => sqlGet<{ memo: string }>(fx.sqlite, `SELECT memo FROM ledger_entries WHERE kind = 'revenue' ORDER BY id DESC LIMIT 1`)!.memo;
 
-/** 需求公式（与 home.ts 同序相乘；rng=0.5 时 K=7560）——只用于反推期望上座，不替代被测实现 */
+/** 需求公式（与 home.ts 同序相乘；rng=0.5 时 K=7500）——只用于反推期望上座，不替代被测实现 */
 function demandOf(wx: number, perturbation: number, nextMod = 1): number {
-  return 1800 * 4.0 * 1.0 * 1.0 * wx * 1.05 * nextMod * perturbation;
+  // 对手系数 = 1+0.05×(客队影响力/主队影响力)；主队 premier 系数 1.2 → 90×1.2=108，客队无球场行走默认 90
+  return 1800 * 4.0 * 1.0 * 1.0 * wx * (1 + 0.05 * (90 / 108)) * nextMod * perturbation;
 }
 
 describe('TC-MIG · 迁移与结构', () => {
@@ -272,10 +274,10 @@ describe('TC-MIG · 迁移与结构', () => {
     expect(rows[0]!.created_at).toBe('2026-09-16T00:00:00Z');
   });
 
-  it('TC-MIG-03 MIGRATION_FILES 尾部追加 0061 且全量迁移可跑', () => {
+  it('TC-MIG-03 MIGRATION_FILES 尾部追加 0062 且全量迁移可跑', () => {
     // MIGRATION_FILES 未导出（tests/d1.ts:67 为模块内常量）：读源码文本锁「尾部追加」这一动作
     const src = readFileSync(fileURLToPath(new URL('./d1.ts', import.meta.url).href), 'utf8');
-    expect(src).toMatch(/'0061_players_marker_index_rebuild\.sql',?\s*\];/);
+    expect(src).toMatch(/'0062_stadiums_fans_window_start\.sql',?\s*\];/);
     const sqlite = new DatabaseSync(':memory:');
     expect(() => applyMigrations(sqlite)).not.toThrow();
     expect(
@@ -691,7 +693,7 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     await confirmResult(fx.env, 1, 1, 'user');
     const row = attendanceOf(fx)!;
     expect(row.weather).toBe('晴');
-    expect(row.attendance).toBe(8391); // floor(7560 × 1.11)
+    expect(row.attendance).toBe(8325); // floor(7500 × 1.11)
     expect(row.attendance).toBe(Math.floor(demandOf(1.11, 1.0)));
     expect(calls).toBe(2); // 预报命中：只抽 perturbation + sell_out_fill
   });
@@ -704,16 +706,16 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     expect(memo).toContain('（赛前预报）');
     expect(memo).not.toContain('（事件预置）');
     expect(memo).toContain('晴');
-    expect(memo).toContain('8391');
+    expect(memo).toContain('8325');
   });
 
-  it('TC-PRI-03 事件预置优先于预报（雨 6388，预报行保留）', async () => {
+  it('TC-PRI-03 事件预置优先于预报（雨 6337，预报行保留）', async () => {
     const fx = seedMatchFixture({ nextWeather: '雨' });
     addForecastRow(fx, '晴', 1.11);
     await confirmResult(fx.env, 1, 1, 'user');
     const row = attendanceOf(fx)!;
     expect(row.weather).toBe('雨');
-    expect(row.attendance).toBe(6388); // wx=0.845 现抽
+    expect(row.attendance).toBe(6337); // wx=0.845 现抽
     const memo = revenueMemo(fx);
     expect(memo).toContain('（事件预置）');
     expect(memo).not.toContain('（赛前预报）');
@@ -730,7 +732,7 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     await confirmResult(fx.env, 1, 1, 'user');
     const row = attendanceOf(fx)!;
     expect(row.weather).toBe('多云');
-    expect(row.attendance).toBe(7333);
+    expect(row.attendance).toBe(7275);
     expect(revenueMemo(fx)).not.toContain('（赛前预报）');
     expect(revenueMemo(fx)).not.toContain('（事件预置）');
   });
@@ -741,7 +743,7 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     await confirmResult(fx.env, 1, 1, 'user');
     const row = attendanceOf(fx)!;
     expect(row.weather).toBe('台风'); // 实测口径：消费端不校验天气表，直用
-    expect(row.attendance).toBe(7560); // wx_coef=1.0 → K
+    expect(row.attendance).toBe(7500); // wx_coef=1.0 → K
     expect(sqlGet<{ next_weather: string }>(fx.sqlite, 'SELECT next_weather FROM stadiums WHERE club_id = 1')!.next_weather).toBe('');
   });
 
@@ -756,13 +758,13 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     expect(sqlGet(fx.sqlite, 'SELECT weather, wx_coef, created_at FROM match_weather WHERE match_id = 1')).toEqual(before);
   });
 
-  it('TC-PRI-07 wx_coef 被人工改成中性 1.0 → 直用（7560）', async () => {
+  it('TC-PRI-07 wx_coef 被人工改成中性 1.0 → 直用（7500）', async () => {
     const fx = seedMatchFixture();
     addForecastRow(fx, '多云', 1.0);
     await confirmResult(fx.env, 1, 1, 'user');
     const row = attendanceOf(fx)!;
     expect(row.weather).toBe('多云');
-    expect(row.attendance).toBe(7560); // 不特判 1.0、不回退区间中点 0.97
+    expect(row.attendance).toBe(7500); // 不特判 1.0、不回退区间中点 0.97
   });
 
   it('TC-PRI-08 随机序列位置不变性（有预报 2 口 vs 无预报 4 口）', async () => {
@@ -773,7 +775,7 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     let callsA = 0;
     fa.env.rng = () => seqA[callsA++ % seqA.length]!;
     await confirmResult(fa.env, 1, 1, 'user');
-    expect(attendanceOf(fa)!.attendance).toBe(7560); // 0.97+0.5×0.06 = 1.0（第 1 口）
+    expect(attendanceOf(fa)!.attendance).toBe(7500); // 0.97+0.5×0.06 = 1.0（第 1 口）
     expect(callsA).toBe(2);
 
     // B：无预报 → weather 第 1 口、wx 第 2 口、perturbation 第 3 口、fill 第 4 口
@@ -784,7 +786,7 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     await confirmResult(fb.env, 1, 1, 'user');
     const rowB = attendanceOf(fb)!;
     expect(rowB.weather).toBe('多云'); // 第 1 口 0.5
-    expect(rowB.attendance).toBe(7744); // wx=1.04（第 2 口）× perturbation 0.985（第 3 口）
+    expect(rowB.attendance).toBe(7683); // wx=1.04（第 2 口）× perturbation 0.985（第 3 口）
     expect(rowB.attendance).toBe(Math.floor(demandOf(1.04, 0.985)));
     expect(callsB).toBe(4);
   });
@@ -810,10 +812,10 @@ describe('TC-PRI · 消费端三档优先级（home.ts matchAttendanceStatements
     addForecastRow(fx, '晴', 1.11, { clubId: 2 }); // 预报落在俱乐部 2，主场却是俱乐部 1
     await confirmResult(fx.env, 1, 1, 'user');
     const row = attendanceOf(fx)!;
-    // 实现口径（实测）：消费端查询带 AND club_id = ?，错配行不消费 → 回落现掷多云/7333
+    // 实现口径（实测）：消费端查询带 AND club_id = ?，错配行不消费 → 回落现掷多云/7275
     expect(row.club_id).toBe(1);
     expect(row.weather).toBe('多云');
-    expect(row.attendance).toBe(7333);
+    expect(row.attendance).toBe(7275);
     expect(revenueMemo(fx)).not.toContain('（赛前预报）');
   });
 });

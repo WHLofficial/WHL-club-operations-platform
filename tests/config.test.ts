@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { createConfigService, resetConfigCache, CONFIG_MASK, CONFIG_KEYS } from '../src/core/config.ts';
+import { createConfigService, resetConfigCache, CONFIG_DEFAULTS, CONFIG_MASK, CONFIG_KEYS } from '../src/core/config.ts';
 import { createTestDb } from './d1.ts';
 
 // 模块级缓存跨用例共享（与 isolate 行为一致），每个用例前清场
@@ -120,7 +120,25 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 75 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0 各域参数）', () => {
-    expect(CONFIG_KEYS.length).toBe(75);
+  it('注册表 78 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0/v6.28.0 各域参数）', () => {
+    expect(CONFIG_KEYS.length).toBe(78);
+  });
+
+  // v6.28.0 A/B 段：级别系数（影响力公式）与每场死忠系数
+  it('influence_tier_coefs / fans per-match 键在册、默认值与 CONFIG_DEFAULTS 同源、列表不掩码', async () => {
+    expect(CONFIG_KEYS).toContain('influence_tier_coefs');
+    expect(CONFIG_KEYS).toContain('fans_grow_rate_per_match');
+    expect(CONFIG_KEYS).toContain('fans_drop_rate_per_match');
+    const { service } = setup();
+    const coefs = await service.getJson<{ premier: number; second: number }>('influence_tier_coefs');
+    expect(coefs).toEqual({ premier: 1.2, second: 1.0 });
+    // 同源锁：服务返回值 = CONFIG_DEFAULTS 里的那份（别在别处再写一张表）
+    expect(coefs).toEqual(JSON.parse(CONFIG_DEFAULTS.influence_tier_coefs!));
+    await expect(service.getNumber('fans_grow_rate_per_match')).resolves.toBe(0.2);
+    await expect(service.getNumber('fans_drop_rate_per_match')).resolves.toBe(0.2);
+    // 非涉密：管理端视图出真值，级别系数要能在配置页看见并改
+    const rows = await service.listMasked();
+    expect(rows.find((r) => r.key === 'influence_tier_coefs')).toMatchObject({ secret: false, value: CONFIG_DEFAULTS.influence_tier_coefs });
+    expect(rows.find((r) => r.key === 'fans_grow_rate_per_match')).toMatchObject({ secret: false, value: '0.2' });
   });
 });

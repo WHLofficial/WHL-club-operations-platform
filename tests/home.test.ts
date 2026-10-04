@@ -14,7 +14,10 @@ import {
   formPtsOf,
   diehardTarget,
   evolveFans,
+  influenceTierCoef,
   loadAttendanceModel,
+  loadInfluenceTierCoefs,
+  matchAttendanceStatements,
   windowHomeStatements,
 } from '../src/worker/home.ts';
 import { app } from '../src/worker/index.ts';
@@ -129,7 +132,7 @@ describe('影响力公式（规则 v5.2 4.1.2/4.1.3）', () => {
     expect(playerAbilityLevel(null, 95, 1)).toBe(1);
   });
 
-  it('球员影响力总和：可成长 0.25/非成长 0.13 × 等级 × 声望；球队影响力=Σ球员+队壳+奖励分', async () => {
+  it('球员影响力总和：可成长 0.25/非成长 0.13 × 等级 × 声望；球队影响力=(Σ球员+队壳)×级别系数+奖励分（v6.28.0）', async () => {
     const fx = freshEnv();
     fx.sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (1, '甲', 'active')`).run();
     seedPlayer(fx.sqlite, 1, 1, { ca: 80, pa: 92, prestige: 4, growable: 1 }); // 0.25×7.5×4=7.5
@@ -137,7 +140,8 @@ describe('影响力公式（规则 v5.2 4.1.2/4.1.3）', () => {
     const model = await loadAttendanceModel(fx.env.DB);
     expect(await playerInfluenceSum(fx.env, 1, model)).toBeCloseTo(14);
     const s = { shell_influence: 30, bonus_points: 10 };
-    expect(teamInfluence(s, 14)).toBe(54);
+    expect(teamInfluence(s, 14, 1.0)).toBe(54); // 未定级/未登记 → 系数 1.0（旧口径回归锁）
+    expect(teamInfluence(s, 14, 1.2)).toBeCloseTo(62.8); // premier：(30+14)×1.2+10
   });
 });
 
@@ -210,7 +214,7 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
     seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
-    // 主队球场：队壳 90 → 影响力 90（无球员）→ 对手系数 1+0.05×90/90=1.05
+    // 主队球场：队壳 90 → premier 级别系数 1.2 → 主队影响力 108 → 对手系数 1+0.05×90/108=1.0417
     seedStadium(fx.sqlite, 1, { shell: 90 });
     fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (1, 'commercial', 2), (1, 'broadcast', 3)`).run();
     // 客队无球场行 → 客队影响力走默认 90
@@ -221,7 +225,9 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
     expect(res.prizeError).toBeNull();
 
     // rng=0.5：天气多云（0.5 落在 0.4-0.7 段）、wx=0.97、扰动=1.0；战中性 4→系数 1.0；
-    // 对手系数 = 1+0.05×(90/90)=1.05；需求 = 1800×4.0×1×0.97×1.05 = 7333.2 → 上座 7333
+    // 对手系数 = 1+0.05×(90/108)=1.0416667；需求 = 1800×4.0×1×0.97×1.0416667 = 7275.0 → 上座 7275
+    // 每场演化（v6.28.0 B 段）：目标 = diehardTarget(108)=2808，diff=1008，上座率 7275/20000=0.36375
+    // → 涨粉系数 = 0.2×(0.6+0.4×0.36375)=0.1491 → fans = 1800+1008×0.1491 ≈ 1950.29
     const att = fx.sqlite.prepare('SELECT * FROM match_attendance WHERE match_id = 1').get() as {
       club_id: number;
       weather: string;
@@ -232,8 +238,8 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
     };
     expect(att.club_id).toBe(1);
     expect(att.weather).toBe('多云');
-    expect(att.attendance).toBe(7333);
-    expect(att.ticket).toBeCloseTo(1.1, 2);
+    expect(att.attendance).toBe(7275);
+    expect(att.ticket).toBeCloseTo(1.09, 2);
     expect(att.commercial).toBeCloseTo(0.15, 2);
     expect(att.broadcast).toBeCloseTo(0.9, 2);
     const rev = fx.sqlite.prepare("SELECT club_id, amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'revenue'").get() as {
@@ -242,7 +248,11 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
       ref_type: string;
       ref_id: number;
     };
-    expect(rev).toEqual({ club_id: 1, amount: 2.15, ref_type: 'match', ref_id: 1 });
+    expect(rev).toEqual({ club_id: 1, amount: 2.14, ref_type: 'match', ref_id: 1 });
+
+    // 同批落账：上座快照 → 三分收入 ledger → 死忠演化（v6.28.0 B 段每场演化，不消费 fan_mood）
+    const fansSnap = fx.sqlite.prepare('SELECT fans FROM stadiums WHERE club_id = 1').get() as { fans: number };
+    expect(fansSnap.fans).toBeCloseTo(1950.29, 2);
 
     // 重复确认 409（result_confirmations UNIQUE），上座快照不重复
     await expect(confirmResult(fx.env, 1, 1, 'user')).rejects.toThrow();
@@ -260,24 +270,28 @@ describe('确认钩子④：三分收入即时入账（v1.5.0）', () => {
   });
 });
 
-describe('窗末主场结算：维护费+死忠演化（v1.5.0）', () => {
-  it('维护费=基础+每万座费率×容量万×主场场次；死忠向上座率与影响力目标靠拢', async () => {
+describe('窗末主场结算：维护费 + 死忠演化防双记账（v1.5.0 / v6.28.0）', () => {
+  it('维护费=基础+每万座费率×容量万×主场场次；本窗有主场场次的队只推进窗初快照、不再演化', async () => {
     const fx = freshEnv();
+    seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
     seedPlayer(fx.sqlite, 1, 1, { ca: 80, pa: 92, prestige: 4, growable: 1 }); // 影响力 7.5
-    seedStadium(fx.sqlite, 1, { shell: 90, fans: 1800 }); // 总影响力 97.5 → 目标 97.5×26=2535
-    // 本窗 1 场主场：上座 7333 → 上座率 0.36665
-    fx.sqlite
-      .prepare(
-        `INSERT INTO match_attendance (match_id, club_id, season, window_seq, weather, attendance, ticket, commercial, broadcast, created_at)
-         VALUES (1, 1, 1, 1, '多云', 7333, 1, 0, 0, '2026-09-16T00:00:00Z')`,
-      )
-      .run();
+    seedStadium(fx.sqlite, 1, { shell: 90, fans: 1800 }); // 总影响力 (90+7.5)×1.2=117 → 目标 3042
+    insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
+    insertBinding(fx.sqlite, 1, 5, 'league_premier');
+    // 钩子④的 window_seq 取自可见窗（results.ts:228 查 season_windows）——补一行让上座快照落在 S1 第 1 窗
+    fx.sqlite.prepare(`INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z')`).run();
+    // 本窗唯一一场主场走确认钩子：对手系数 1+0.05×(90/117)=1.0384615 → 上座 7252、上座率 0.3626
+    await confirmResult(fx.env, 1, 1, 'user');
+    const afterMatch = fx.sqlite.prepare('SELECT fans FROM stadiums WHERE club_id = 1').get() as { fans: number };
+    expect(afterMatch.fans).toBeCloseTo(1985.07, 2); // 1800+1242×[0.2×(0.6+0.4×0.3626)]
+
     const { statements, summary } = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
-    // 维护费：tier0 = 2.0 + 0.8 × 2万 × 1 场 = 3.6
+    // 维护费：tier0 = 2.0 + 0.8 × 2万 × 1 场 = 3.6；有主场场次的队关窗不演化 → fansClubs 0
     expect(summary.maintenanceClubs).toBe(1);
     expect(summary.maintenanceTotal).toBeCloseTo(3.6, 2);
-    expect(summary.fansClubs).toBe(1);
+    expect(summary.fansClubs).toBe(0);
     await fx.env.DB.batch(statements);
     const led = fx.sqlite.prepare("SELECT club_id, amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'maintenance'").get() as {
       club_id: number;
@@ -286,9 +300,14 @@ describe('窗末主场结算：维护费+死忠演化（v1.5.0）', () => {
       ref_id: number;
     };
     expect(led).toEqual({ club_id: 1, amount: -3.6, ref_type: 'window', ref_id: 101 });
-    // 演化：diff=2535-1800=735，coef=0.5×(0.6+0.4×0.36665)=0.37333 → 1800+735×0.37333≈2074.4（战绩 4 不修正）
-    const fans = fx.sqlite.prepare('SELECT fans FROM stadiums WHERE club_id = 1').get() as { fans: number };
-    expect(fans.fans).toBeCloseTo(2074.4, 1);
+    // 双记账探针：关窗再按窗系数演化一次会变成 1800+1242×0.37333≈2263.6，必须是每场演化后的值
+    const fans = fx.sqlite.prepare('SELECT fans, fans_window_start FROM stadiums WHERE club_id = 1').get() as {
+      fans: number;
+      fans_window_start: number;
+    };
+    expect(fans.fans).toBeCloseTo(1985.07, 2);
+    // 窗初快照推进到窗末值，供下窗与对赌增长率比较用
+    expect(fans.fans_window_start).toBeCloseTo(1985.07, 2);
     // 幂等：同窗重放维护费不双扣（ledger 闸）
     const again = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
     await fx.env.DB.batch(again.statements);
@@ -297,15 +316,6 @@ describe('窗末主场结算：维护费+死忠演化（v1.5.0）', () => {
 });
 
 describe('v6.6.3 订正：青训等级接入死忠演化 + 战绩按 tour 队 id 查赛果', () => {
-  function seedAttendanceRow(sqlite: DatabaseSync, clubId: number, matchId: number) {
-    // 本窗 1 场主场：上座 7333 / 容量 20000 → 上座率 0.36665（与既有窗末结算用例同口径）
-    sqlite
-      .prepare(
-        `INSERT INTO match_attendance (match_id, club_id, season, window_seq, weather, attendance, ticket, commercial, broadcast, created_at)
-         VALUES (?, ?, 1, 1, '多云', 7333, 1, 0, 0, '2026-09-16T00:00:00Z')`,
-      )
-      .run(matchId, clubId);
-  }
   function seedFormWins(sqlite: DatabaseSync, count: number) {
     // tour 队 11 近 N 场全胜（club 1 ↔ tour 11 刻意不等，赛果表只认 tour id）
     const ins = sqlite.prepare(
@@ -318,14 +328,14 @@ describe('v6.6.3 订正：青训等级接入死忠演化 + 战绩按 tour 队 id
   it('A1：青训 3 级 → 涨粉系数 ×1.09（变异锚点：调用侧改回不传等级此断言必红）', async () => {
     const fx = freshEnv();
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
-    seedStadium(fx.sqlite, 1, { shell: 90, fans: 1800 }); // 影响力 90 → 目标 2340，diff 540
+    seedStadium(fx.sqlite, 1, { shell: 90, fans: 1800 }); // 无报名定级赛事 → 级别系数 1.0 → 影响力 90 → 目标 2340，diff 540
     fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (1, 'youth', 3)`).run();
-    seedAttendanceRow(fx.sqlite, 1, 1);
+    // 本窗无主场场次 → 关窗按窗系数兜底演化一次（中性上座率 1.0）
     const { statements } = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: false });
     await fx.env.DB.batch(statements);
-    // 0 级基线 = 1800+540×0.37333=2001.6；青训 3 级 = 1800+540×0.37333×1.09≈2019.7
+    // 0 级基线 = 1800+540×0.5 = 2070；青训 3 级 = 1800+540×0.5×1.09 = 2094.3
     const fans = fx.sqlite.prepare('SELECT fans FROM stadiums WHERE club_id = 1').get() as { fans: number };
-    expect(fans.fans).toBeCloseTo(2019.7, 1);
+    expect(fans.fans).toBeCloseTo(2094.3, 1);
   });
 
   it('A2：窗末战绩按 tour 队 id 查赛果（club id ≠ tour id 算真值）；无映射俱乐部中性 4', async () => {
@@ -337,15 +347,14 @@ describe('v6.6.3 订正：青训等级接入死忠演化 + 战绩按 tour 队 id
     fx.sqlite.prepare(`INSERT INTO ledger_accounts (club_id, balance) VALUES (2, 0)`).run();
     seedStadium(fx.sqlite, 2, { shell: 90, fans: 1800 });
     seedFormWins(fx.sqlite, 3); // formPts 9 ≥ 7 → ×1.05
-    seedAttendanceRow(fx.sqlite, 1, 1);
-    seedAttendanceRow(fx.sqlite, 2, 2);
+    // 两队本窗均无主场场次 → 关窗按窗系数兜底演化一次（中性上座率 1.0）
     const { statements } = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: false });
     await fx.env.DB.batch(statements);
-    // 基线 2001.6：club 1 ×1.05 ≈ 2101.7；club 2 无映射 → 2001.6
+    // 窗系数基线 2070：club 1 ×1.05 = 2173.5；club 2 无映射 → 2070
     const fans1 = fx.sqlite.prepare('SELECT fans FROM stadiums WHERE club_id = 1').get() as { fans: number };
-    expect(fans1.fans).toBeCloseTo(2101.7, 1);
+    expect(fans1.fans).toBeCloseTo(2173.5, 1);
     const fans2 = fx.sqlite.prepare('SELECT fans FROM stadiums WHERE club_id = 2').get() as { fans: number };
-    expect(fans2.fans).toBeCloseTo(2001.6, 1);
+    expect(fans2.fans).toBeCloseTo(2070, 1);
   });
 
   it('A2：确认钩子上座需求按 tour 队 id 取战绩（3 胜局 → 系数 1.25；绑 club id 时恒中性）', async () => {
@@ -359,9 +368,9 @@ describe('v6.6.3 订正：青训等级接入死忠演化 + 战绩按 tour 队 id
     insertBinding(fx.sqlite, 1, 5, 'league_premier');
     const res = await confirmResult(fx.env, 1, 1, 'user');
     expect(res.revenueError).toBeNull();
-    // 基线需求 7333.2（form 中性 1.0）× 1.25 = 9166.5 → 上座 9166
+    // 基线需求 7275.0（form 中性 1.0）× 1.25 = 9093.75 → 上座 9093
     const att = fx.sqlite.prepare('SELECT attendance FROM match_attendance WHERE match_id = 1').get() as { attendance: number };
-    expect(att.attendance).toBe(9166);
+    expect(att.attendance).toBe(9093);
   });
 });
 
@@ -410,13 +419,16 @@ describe('管理端主场域端点（v1.5.0）', () => {
     expect(got.status).toBe(200);
     const body = (await got.json()) as {
       stadium: { shellInfluence: number; bonusPoints: number; fans: number; tier: number };
-      influence: { players: number; total: number };
+      influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
       tier: { name: string } | null;
       facilities: { key: string; level: number }[];
     };
     expect(body.stadium.fans).toBe(2000);
     expect(body.influence.players).toBeCloseTo(6.5, 5);
     expect(body.influence.total).toBeCloseTo(51.5, 5);
+    // 未报名（派生级别 null）→ 系数 1.0：构成文案里「× 级别系数 1」与各项之和一致
+    expect(body.influence.tierCoef).toBe(1);
+    expect(body.influence.total).toBeCloseTo((body.influence.players + body.influence.shell) * body.influence.tierCoef + body.influence.bonus, 5);
     expect(body.tier?.name).toBe('地区级');
 
     const put = await post('/api/admin/clubs/1/stadium', { shellInfluence: 60, bonusPoints: 15, capacity: 25000, tier: 1 }, 'tok-admin', fx.env);
@@ -438,6 +450,29 @@ describe('管理端主场域端点（v1.5.0）', () => {
     const bad3 = await post('/api/admin/clubs/2/stadium', { shellInfluence: 1 }, 'tok-admin', fx.env);
     expect(bad3.status).toBe(404);
   });
+
+  it('主场档案影响力构成带级别系数（v6.28.0 A 段）：premier → 总 = (球员+队壳)×1.2+奖励分；未定级系数 1', async () => {
+    const fx = kvEnv();
+    // kvEnv 无 AUTH_DB ⇒ 级别走 clubs.league_tier 回落通道（src/worker/tier.ts:32），无需 tour 夹具
+    fx.sqlite.prepare(`INSERT INTO seasons (season, status) VALUES (1, 'running')`).run();
+    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status, league_tier) VALUES (1, '甲', 'active', 'premier')`).run();
+    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status) VALUES (2, '乙', 'active')`).run();
+    seedStadium(fx.sqlite, 1, { shell: 40, bonus: 5, fans: 2000, tier: 1 });
+    seedStadium(fx.sqlite, 2, { shell: 40, bonus: 5, fans: 2000, tier: 1 });
+
+    const premier = (await (await get('/api/admin/clubs/1/stadium', 'tok-admin', fx.env)).json()) as {
+      influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
+    };
+    expect(premier.influence.tierCoef).toBe(1.2);
+    // 前端构成文案按这个恒等式渲染「(球员+队壳)×级别系数+奖励分」，系数丢了/没下发都会红
+    expect(premier.influence.total).toBeCloseTo((premier.influence.players + premier.influence.shell) * premier.influence.tierCoef + premier.influence.bonus, 5);
+
+    const unranked = (await (await get('/api/admin/clubs/2/stadium', 'tok-admin', fx.env)).json()) as {
+      influence: { tierCoef: number; total: number };
+    };
+    expect(unranked.influence.tierCoef).toBe(1);
+    expect(unranked.influence.total).toBeCloseTo(45, 5);
+  });
 });
 
 describe('CPU 队不入账（v2.0.0 裁决 6）', () => {
@@ -451,5 +486,141 @@ describe('CPU 队不入账（v2.0.0 裁决 6）', () => {
     expect(map.size).toBe(1);
     expect(map.get(7)).toBe(1);
     expect(map.has(6)).toBe(false);
+  });
+});
+
+describe('v6.28.0 A/B 段：级别系数 + 每场死忠演化（防双记账）', () => {
+  /** 配置直接写表后清缓存（createConfigService 有 60s 模块级缓存，见 config.ts CONFIG_TTL_MS） */
+  function setConfig(fx: ReturnType<typeof freshEnv>, key: string, value: string) {
+    fx.sqlite
+      .prepare(`INSERT INTO config (key, value, updated_at) VALUES (?, ?, '2026-01-01T00:00:00Z') ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(key, value);
+    resetConfigCache();
+  }
+
+  /** 钩子夹具：主队（tour 11）+ 客队（tour 12，无球场行 → 影响力走默认 90） */
+  function seedHookFixture(fx: ReturnType<typeof freshEnv>) {
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    seedStadium(fx.sqlite, 1, { shell: 90 });
+    insertMatch(fx.tour, { matchId: 1, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 2, scoreAway: 0, stageKind: 'round_robin' });
+    return fx;
+  }
+
+  function stadiumOf(sqlite: DatabaseSync, clubId = 1) {
+    return sqlite.prepare('SELECT fans, fans_window_start FROM stadiums WHERE club_id = ?').get(clubId) as {
+      fans: number;
+      fans_window_start: number;
+    };
+  }
+
+  it('级别系数：premier 1.2 / second 1.0 / 未定级与未登记一律 1.0；缺键、非有限数回 1.0', () => {
+    const coefs = { premier: 1.2, second: 1.0 };
+    expect(influenceTierCoef(coefs, 'premier')).toBe(1.2);
+    expect(influenceTierCoef(coefs, 'second')).toBe(1.0);
+    expect(influenceTierCoef(coefs, null)).toBe(1);
+    expect(influenceTierCoef(null, 'premier')).toBe(1);
+    expect(influenceTierCoef({}, 'premier')).toBe(1);
+    expect(influenceTierCoef({ premier: Number.NaN }, 'premier')).toBe(1);
+    expect(influenceTierCoef({ premier: Number.POSITIVE_INFINITY }, 'premier')).toBe(1);
+    expect(influenceTierCoef({ premier: 0 }, 'premier')).toBe(0); // 0 是有限数：配置显式清零要生效
+  });
+
+  it('loadInfluenceTierCoefs：缺行回出厂值；坏 JSON 整段回；单档坏值逐档兜底；配置改动即时生效', async () => {
+    const fx = freshEnv();
+    expect(await loadInfluenceTierCoefs(fx.env.DB)).toEqual({ premier: 1.2, second: 1.0 });
+    setConfig(fx, 'influence_tier_coefs', '不是 JSON');
+    expect(await loadInfluenceTierCoefs(fx.env.DB)).toEqual({ premier: 1.2, second: 1.0 });
+    setConfig(fx, 'influence_tier_coefs', JSON.stringify({ premier: 'x', second: 1.5 }));
+    expect(await loadInfluenceTierCoefs(fx.env.DB)).toEqual({ premier: 1.2, second: 1.5 });
+    setConfig(fx, 'influence_tier_coefs', JSON.stringify({ premier: 2, second: 1 }));
+    expect(await loadInfluenceTierCoefs(fx.env.DB)).toEqual({ premier: 2, second: 1 });
+  });
+
+  it('second 档系数 1.0：与旧口径逐字一致（上座 7333、fans 1880.64）', async () => {
+    const fx = seedHookFixture(freshEnv());
+    insertBinding(fx.sqlite, 1, 5, 'league_second');
+    await confirmResult(fx.env, 1, 1, 'user');
+    // 对手系数 1+0.05×(90/90)=1.05 → 需求 7200×0.97×1.05=7333.2 → 上座 7333；目标 2340，diff 540
+    const att = fx.sqlite.prepare('SELECT attendance FROM match_attendance WHERE match_id = 1').get() as { attendance: number };
+    expect(att.attendance).toBe(7333);
+    expect(stadiumOf(fx.sqlite).fans).toBeCloseTo(1880.64, 1); // 1800+540×[0.2×(0.6+0.4×0.36665)]
+  });
+
+  it('同源锁：把 premier 改成 2.0 后，上座 demand 与死忠目标同时跟着变（两处掉一处即红）', async () => {
+    const fx = seedHookFixture(freshEnv());
+    insertBinding(fx.sqlite, 1, 5, 'league_premier');
+    setConfig(fx, 'influence_tier_coefs', JSON.stringify({ premier: 2, second: 1 }));
+    await confirmResult(fx.env, 1, 1, 'user');
+    // 主队影响力 90×2=180 → 对手系数 1+0.05×(90/180)=1.025 → 需求 7200×0.97×1.025=7158.6 → 上座 7158
+    const att = fx.sqlite.prepare('SELECT attendance FROM match_attendance WHERE match_id = 1').get() as { attendance: number };
+    expect(att.attendance).toBe(7158);
+    // 目标 diehardTarget(180)=120×26+40×22+20×15=4300，diff 2500，上座率 0.3579 → 1800+2500×0.148632
+    expect(stadiumOf(fx.sqlite).fans).toBeCloseTo(2171.58, 1);
+  });
+
+  it('每场演化接青训与品牌 fansBuff：青训 3 级 ×1.09、口碑档 ×1.005（只乘涨粉侧）', async () => {
+    const fx = seedHookFixture(freshEnv());
+    insertBinding(fx.sqlite, 1, 5, 'league_premier');
+    fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (1, 'youth', 3)`).run();
+    // 生效冠名 → 品牌档位（口碑 fansBuff 0.005，loadTierProfiles 缺配置时用 DEFAULT_TIER_PROFILES）
+    fx.sqlite.prepare(`INSERT INTO brand_pool (brand, heat, source, status, industry, created_at, tier) VALUES ('测试品牌', 1.0, 'custom', 'adopted', '通用', '2026-01-01T00:00:00Z', '口碑')`).run();
+    fx.sqlite
+      .prepare(
+        `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window, windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status, started_season, started_window, created_at, updated_at)
+         VALUES (1, '测试品牌', 1.0, 1, 1, '标准', 1, 3, 3, 0, NULL, NULL, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    await confirmResult(fx.env, 1, 1, 'user');
+    // 上座仍 7275；目标 2808，diff 1008，coef 0.1491×1.09×1.005=0.1633316 → 1800+164.64
+    const att = fx.sqlite.prepare('SELECT attendance FROM match_attendance WHERE match_id = 1').get() as { attendance: number };
+    expect(att.attendance).toBe(7275);
+    expect(stadiumOf(fx.sqlite).fans).toBeCloseTo(1964.64, 1);
+  });
+
+  it('幂等闸：同一场重放钩子不再演化（match_attendance 已有行 → 直接早退，不叠加死忠）', async () => {
+    const fx = seedHookFixture(freshEnv());
+    insertBinding(fx.sqlite, 1, 5, 'league_premier');
+    await confirmResult(fx.env, 1, 1, 'user');
+    const afterFirst = stadiumOf(fx.sqlite).fans;
+    // 目标 diehardTarget(108)=2808，diff 1008，上座率 7275/20000 → 1800+1008×0.1491
+    expect(afterFirst).toBeCloseTo(1950.29, 1);
+    // replay-hooks 会重跑上座钩子；幂等靠 match_attendance 主键（写在钩子批内，故重放必须整批早退）
+    const replay = await matchAttendanceStatements(fx.env, { matchId: 1, season: 1, windowSeq: 1, homeTeamId: 11, awayTeamId: 12 });
+    expect(replay.statements).toHaveLength(0);
+    expect(replay.detail).toBeNull();
+    expect(stadiumOf(fx.sqlite).fans).toBeCloseTo(afterFirst, 2);
+  });
+
+  it('关窗批对赌增长率按窗初快照：本窗已有主场场次（现值即窗末）也能达线发奖', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedStadium(fx.sqlite, 1, { shell: 42, fans: 1100 });
+    // 窗初快照 1000 → 本窗每场演化已把 fans 抬到 1100（+10%），关窗不再演化
+    fx.sqlite.prepare('UPDATE stadiums SET fans_window_start = 1000 WHERE club_id = 1').run();
+    fx.sqlite
+      .prepare(
+        `INSERT INTO match_attendance (match_id, club_id, season, window_seq, weather, attendance, ticket, commercial, broadcast, created_at)
+         VALUES (1, 1, 1, 1, '多云', 7000, 1, 0, 0, '2026-09-16T00:00:00Z')`,
+      )
+      .run();
+    // 对赌合同：package_no=3、bet_fans 5%，bet_attend 留空 → 只看死忠增长率
+    fx.sqlite.prepare(`INSERT INTO brand_pool (brand, heat, source, status, industry, created_at, tier) VALUES ('测试品牌', 1.0, 'custom', 'adopted', '通用', '2026-01-01T00:00:00Z', '口碑')`).run();
+    fx.sqlite
+      .prepare(
+        `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window, windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status, started_season, started_window, created_at, updated_at)
+         VALUES (1, '测试品牌', 1.0, 1, 3, '对赌', 1, 3, 3, 5, NULL, 0.05, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    const { statements, summary } = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
+    await fx.env.DB.batch(statements);
+    expect(summary.fansClubs).toBe(0); // 有主场场次 → 关窗不演化（防双记账）
+    const s = stadiumOf(fx.sqlite);
+    expect(s.fans).toBeCloseTo(1100, 2);
+    expect(s.fans_window_start).toBeCloseTo(1100, 2); // 快照推进到窗末
+    // 增长率 = (1100−1000)/1000 = 10% ≥ 5% → 发全额奖金；变异锚点：拿现值 1100 当基准会算成 0 → 不发
+    const bonus = fx.sqlite.prepare("SELECT amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'naming_bonus'").get();
+    expect(bonus).toEqual({ amount: 5, ref_type: 'window', ref_id: 101 });
   });
 });

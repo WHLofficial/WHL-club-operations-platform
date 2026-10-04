@@ -270,12 +270,12 @@ describe('建队与认证码绑定（§3.2）', () => {
         tier: number;
         tierName: string | null;
         fans: number;
-        influence: { players: number; shell: number; bonus: number; total: number };
+        influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
         facilities: { key: string; level: number }[];
       } | null;
     };
     expect(body.home).toMatchObject({ name: '酋长球场', capacity: 22000, tier: 1, tierName: '地区级', fans: 2000 });
-    expect(body.home?.influence).toEqual({ players: 0, shell: 40, bonus: 5, total: 45 });
+    expect(body.home?.influence).toEqual({ players: 0, shell: 40, bonus: 5, tierCoef: 1, total: 45 });
     expect(body.home?.facilities).toEqual([{ key: 'commercial', level: 2 }]);
   });
 

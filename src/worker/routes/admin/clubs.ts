@@ -8,7 +8,7 @@ import { authIssueTeamCode, authRegisterTeam, authUnbindTeam, AuthApiError } fro
 import { pushTeamToTour, pushTeamRename } from '../../tourClient.ts';
 import { getBoundClub } from '../../binding.ts';
 import { getVisibleSeason } from '../../seasons.ts';
-import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, diehardTarget } from '../../home.ts';
+import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, diehardTarget, influenceTierCoef, loadInfluenceTierCoefs } from '../../home.ts';
 import { deriveClubTier, tierCache } from '../../tier.ts';
 import { FACILITY_KEYS } from '../../stadium-ops.ts';
 import { nowSql, readJson } from './shared.ts';
@@ -273,6 +273,8 @@ app.get('/clubs/:id/stadium', async (c) => {
   if (!stadium) throw new HttpError(404, '该俱乐部还没有球场档案（存量导入后自动生成）');
   const model = await loadAttendanceModel(c.env.DB);
   const playerSum = await playerInfluenceSum(c.env, clubId, model);
+  // v6.28.0 A 段：级别按报名派生（CPU 队/未报名 → null → 系数 1.0，与运行时同口径）
+  const tierCoef = influenceTierCoef(await loadInfluenceTierCoefs(c.env.DB), await deriveClubTier(c.env, await getVisibleSeason(c.env.DB), clubId));
   const facilities = await c.env.DB
     .prepare('SELECT facility_key, level FROM club_facilities WHERE club_id = ? ORDER BY facility_key')
     .bind(clubId)
@@ -290,7 +292,13 @@ app.get('/clubs/:id/stadium', async (c) => {
     },
     tier: tierTable[String(stadium.tier)] ?? null,
     facilities: facilities.results.map((f) => ({ key: f.facility_key, level: f.level })),
-    influence: { players: playerSum, shell: stadium.shell_influence, bonus: stadium.bonus_points, total: teamInfluence(stadium, playerSum) },
+    influence: {
+      players: playerSum,
+      shell: stadium.shell_influence,
+      bonus: stadium.bonus_points,
+      tierCoef,
+      total: teamInfluence(stadium, playerSum, tierCoef),
+    },
   });
 });
 
@@ -391,6 +399,9 @@ app.get('/clubs/:id/cpu-convert', async (c) => {
   const bonusPoints = preset?.bonusPoints ?? 0;
   const model = await loadAttendanceModel(c.env.DB);
   const playerSum = await playerInfluenceSum(c.env, clubId, model);
+  // v6.28.0 A 段：预览与 seed-ops 用同一套系数——级别按报名派生（CPU 队未报名定级赛事 → null → 1.0），
+  // 不拿向导预填的 preset.leagueTier：那份只是给人填表看的建议值，运行时（上座/关窗）也按派生级别算。
+  const tierCoef = influenceTierCoef(await loadInfluenceTierCoefs(c.env.DB), await deriveClubTier(c.env, await getVisibleSeason(c.env.DB), clubId));
   return c.json({
     club: { id: club.id, name: club.name, isCpu: club.is_cpu === 1, leagueTier: club.league_tier, status: club.status },
     tour: tourTeam ? { id: tourTeam.id, name: tourTeam.name } : null,
@@ -405,7 +416,7 @@ app.get('/clubs/:id/cpu-convert', async (c) => {
       leagueTier: preset?.leagueTier ?? null,
       diehardTarget: diehardTarget(
         model,
-        teamInfluence({ shell_influence: shellInfluence, bonus_points: bonusPoints }, playerSum),
+        teamInfluence({ shell_influence: shellInfluence, bonus_points: bonusPoints }, playerSum, tierCoef),
       ),
     },
   });
@@ -505,9 +516,11 @@ app.post('/clubs/:id/seed-ops', async (c) => {
   if (!leagueTier) throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
   const model = await loadAttendanceModel(c.env.DB);
   const playerSum = await playerInfluenceSum(c.env, clubId, model);
+  // v6.28.0 A 段：与 cpu-convert 预览必须同一套系数（否则向导预填的 diehardTarget 与实际写入不一致）
+  const tierCoef = influenceTierCoef(await loadInfluenceTierCoefs(c.env.DB), await deriveClubTier(c.env, await getVisibleSeason(c.env.DB), clubId));
   const fans = diehardTarget(
     model,
-    teamInfluence({ shell_influence: shellInfluence, bonus_points: bonusPoints }, playerSum),
+    teamInfluence({ shell_influence: shellInfluence, bonus_points: bonusPoints }, playerSum, tierCoef),
   );
   const stmts = [
     c.env.DB.prepare(

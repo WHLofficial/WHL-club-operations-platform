@@ -126,9 +126,10 @@ describe('GET /api/admin/clubs/:id/cpu-convert（只读聚合）', () => {
     const res = await get('/api/admin/clubs/10/cpu-convert', fx.env);
     expect(res.status).toBe(200);
     // 死忠目标不是抄来的常量：用同一套公式现算一遍（shell 65.75 + bonus 15，无球员影响力）
+    // 夹具无 AUTH_DB → deriveClubTier 回落休眠列 clubs.league_tier（未设 = NULL）→ 级别系数 1.0
     const model = await loadAttendanceModel(fx.env.DB);
     const playerSum = await playerInfluenceSum(fx.env, 10, model);
-    const expectedFans = diehardTarget(model, teamInfluence({ shell_influence: 65.75, bonus_points: 15 }, playerSum));
+    const expectedFans = diehardTarget(model, teamInfluence({ shell_influence: 65.75, bonus_points: 15 }, playerSum, 1));
     expect(await res.json()).toEqual({
       // 队名与 tour 侧队名逐字回显；leagueTier 是休眠列原始值（此处空），不等于建议级别
       club: { id: 10, name: '曼城 (CPU)', isCpu: true, leagueTier: null, status: 'active' },
@@ -349,7 +350,8 @@ describe('POST /api/admin/clubs/:id/seed-ops（铺主场基建，一次 batch �
     seedCpuClub(fx, 10, '曼城 (CPU)');
     const model = await loadAttendanceModel(fx.env.DB);
     const playerSum = await playerInfluenceSum(fx.env, 10, model);
-    const expectedFans = diehardTarget(model, teamInfluence({ shell_influence: 65.75, bonus_points: 15 }, playerSum));
+    // 路由侧同源：无 AUTH_DB → 派生级别回落休眠列 NULL → 系数 1.0（与 cpu-convert 预览同一套）
+    const expectedFans = diehardTarget(model, teamInfluence({ shell_influence: 65.75, bonus_points: 15 }, playerSum, 1));
     const res = await post('/api/admin/clubs/10/seed-ops', SEED_BODY, fx.env);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -420,6 +422,15 @@ describe('POST /api/admin/clubs/:id/seed-ops（铺主场基建，一次 batch �
       leagueTier: 'premier',
     });
     expect(sqlGet(fx.sqlite, 'SELECT league_tier FROM clubs WHERE id = 241')).toEqual({ league_tier: 'premier' });
+    // 级别系数真源是派生级别（无 AUTH_DB → 回落休眠列 NULL → 1.0），表单里的 premier 只写休眠列：
+    // 若 seed-ops 拿表单级别当系数（1.2），写入的 fans 就会与 cpu-convert 预览的 diehardTarget 分叉——
+    // 这两条断言（本仓写入 vs 纯函数、本仓写入 vs 预览）就是 TC-IN-08 的闸
+    const model = await loadAttendanceModel(fx.env.DB);
+    const playerSum = await playerInfluenceSum(fx.env, 241, model);
+    const expectedFans = diehardTarget(model, teamInfluence({ shell_influence: 38.65, bonus_points: 30 }, playerSum, 1));
+    expect(sqlGet(fx.sqlite, 'SELECT fans FROM stadiums WHERE club_id = 241')).toEqual({ fans: expectedFans });
+    const preview = (await (await get('/api/admin/clubs/241/cpu-convert', fx.env)).json()) as { suggest: { diehardTarget: number } };
+    expect(preview.suggest.diehardTarget).toBe(expectedFans);
   });
 
   it('入参校验全挡（球场名 0/61 字、壳 -1/10001、奖励 -1/10001、级别 third/缺省）→ 400 且库内零写入', async () => {

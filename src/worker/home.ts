@@ -1,14 +1,17 @@
 // 主场收入域（v1.5.0，TECH_DESIGN §8 全按 revenue 插件移植 + 主规则 v5.2 §4.1.2/4.1.3/5.1）。
 // 数据流（用户裁决 2026-09-16）：赛果确认时当场掷天气→算上座→三分收入即时入账（钩子④，match_attendance
-// 主键+ledger 幂等双闸）；维护费与死忠演化在窗末并入关窗批。设施扩建/升级已随v2.5.0 落地
+// 主键+ledger 幂等双闸），v6.28.0 起死忠同批每场演化（上座→收入→死忠原子落账，比赛日体感）；
+// 维护费与「本窗无主场场次」的死忠兜底演化在窗末并入关窗批。设施扩建/升级已随v2.5.0 落地
 // （见 src/worker/stadium-ops.ts：五类子设施 0-5 级 + 球场扩建/升级）。
-// 影响力 = 球员影响力总和（规则 4.1.3：系数×能力等级×国际声望，可成长 0.25/非成长 0.13，即时计算不落库）
-//        + 队壳影响力 + 奖励分（主规则 §5.1，管理组维护 stadiums 两列）。
+// 影响力 =（球员影响力总和（规则 4.1.3：系数×能力等级×国际声望，可成长 0.25/非成长 0.13，即时计算不落库）
+//        + 队壳影响力）× 级别系数 + 奖励分（v6.28.0 A 段用户拍板图口径；级别 premier 1.2 / second 1.0、
+//        未定级回 1.0，级别真源是 deriveClubTier 的报名派生，管理组维护 stadiums 两列）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
+import { deriveClubLeagues, deriveClubTier, tierCache, type Tier } from './tier.ts';
 import {
   evolveSatisfactionForClub,
   loadSatisfyConfig,
@@ -69,6 +72,8 @@ export interface StadiumRow {
   shell_influence: number;
   bonus_points: number;
   fans: number;
+  /** v6.28.0：本窗开始时的 fans 快照（关窗批写为窗末值，供下一窗 fansGrowth 基准）；老数据 0 = 无快照 */
+  fans_window_start: number;
 }
 
 export async function loadAttendanceModel(db: Env['DB']): Promise<AttendanceModel> {
@@ -131,9 +136,33 @@ export async function playerInfluenceSum(env: Env, clubId: number, model: Attend
   return sum;
 }
 
-/** 球队影响力 = Σ球员 + 队壳 + 奖励分（主规则 §5.1） */
-export function teamInfluence(stadium: { shell_influence: number; bonus_points: number }, playerSum: number): number {
-  return playerSum + stadium.shell_influence + stadium.bonus_points;
+/** 球队影响力 =（队壳 + Σ球员）× 级别系数 + 奖励分（v6.28.0 A 段用户拍板图口径）。
+ *  tierCoef 必填不留默认值：漏传会静默按旧加法口径算，宁可在编译期报错。 */
+export function teamInfluence(
+  stadium: { shell_influence: number; bonus_points: number },
+  playerSum: number,
+  tierCoef: number,
+): number {
+  return (stadium.shell_influence + playerSum) * tierCoef + stadium.bonus_points;
+}
+
+/** 级别系数取值：未登记级别（tier=null / 缺键 / 非有限数）一律回 1.0（用户口径）。 */
+export function influenceTierCoef(coefs: { premier?: number; second?: number } | null, tier: Tier | null): number {
+  const v = tier === null ? undefined : coefs?.[tier];
+  return typeof v === 'number' && Number.isFinite(v) ? v : 1;
+}
+
+// 与 CONFIG_DEFAULTS.influence_tier_coefs 同值（config 缺键/坏值时兜底，运行期不留第二份口径表）
+const INFLUENCE_TIER_COEF_DEFAULTS: Record<Tier, number> = { premier: 1.2, second: 1.0 };
+
+/** 级别系数表（config influence_tier_coefs）：逐档兜底，坏值不炸上座钩子/关窗批。 */
+export async function loadInfluenceTierCoefs(db: Env['DB']): Promise<Record<Tier, number>> {
+  const raw = await createConfigService(db).getJson<Partial<Record<Tier, number>>>('influence_tier_coefs');
+  const pick = (tier: Tier): number => {
+    const v = raw?.[tier];
+    return typeof v === 'number' && Number.isFinite(v) ? v : INFLUENCE_TIER_COEF_DEFAULTS[tier];
+  };
+  return { premier: pick('premier'), second: pick('second') };
 }
 
 /** 天气掷出（概率表 40/30/20/10 用户裁决） */
@@ -226,17 +255,29 @@ export function diehardTarget(model: AttendanceModel, influence: number): number
 }
 
 /** 死忠演化（非对称靠拢；青训每级 +3% 涨粉；战绩 Pts≥7 ×1.05/≤1 ×0.95；钳 [0, 上限]）。
- *  fansBuff = 生效冠名品牌的档位死忠增长加成（v6.13.0 C2，口碑 +0.5%）——只乘涨粉系数、掉粉不受影响。 */
-export function evolveFans(model: AttendanceModel, fans: number, target: number, attendRate: number, formPts: number, youthLevel = 0, fansBuff = 0): number {
+ *  fansBuff = 生效冠名品牌的档位死忠增长加成（v6.13.0 C2，口碑 +0.5%）——只乘涨粉系数、掉粉不受影响。
+ *  v6.28.0 B 段：opts.growRate/dropRate 覆盖两侧系数（每场演化传 per-match 键；缺省沿用窗系数，公式内核不变）。 */
+export function evolveFans(
+  model: AttendanceModel,
+  fans: number,
+  target: number,
+  attendRate: number,
+  formPts: number,
+  youthLevel = 0,
+  fansBuff = 0,
+  opts: { growRate?: number; dropRate?: number } = {},
+): number {
+  const growRate = opts.growRate ?? model.fans_grow_rate;
+  const dropRate = opts.dropRate ?? model.fans_drop_rate;
   const diff = target - fans;
   let next: number;
   if (diff > 0) {
-    let coef = model.fans_grow_rate * (model.fans_grow_heat_base + model.fans_grow_heat_span * attendRate);
+    let coef = growRate * (model.fans_grow_heat_base + model.fans_grow_heat_span * attendRate);
     coef *= 1 + 0.03 * youthLevel;
     coef *= 1 + fansBuff;
     next = fans + diff * coef;
   } else {
-    const coef = model.fans_drop_rate * (1 + model.fans_drop_heat_extra * (1 - attendRate));
+    const coef = dropRate * (1 + model.fans_drop_heat_extra * (1 - attendRate));
     next = fans + diff * coef;
   }
   if (formPts >= 7) next *= 1.05;
@@ -281,7 +322,7 @@ export async function matchAttendanceStatements(
   if (existing) return { statements: [], detail: null };
   const stadium = await env.DB
     .prepare(
-      'SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, next_attendance_mod, next_weather FROM stadiums WHERE club_id = ?',
+      'SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, fans_window_start, next_attendance_mod, next_weather FROM stadiums WHERE club_id = ?',
     )
     .bind(clubId)
     .first<StadiumRow & { next_attendance_mod: number; next_weather: string }>();
@@ -314,15 +355,23 @@ export async function matchAttendanceStatements(
   const tierCoef = tierEntry?.attend_coef ?? 1;
   const multiplier = model.attendance_multiplier_base * (1 + model.attendance_multiplier_per_tier * stadium.tier);
 
+  // v6.28.0 A 段：级别系数一次取；级别按 deriveClubTier 报名派生（tierCache 同请求内复用，主客队各一次）
+  const influenceCoefs = await loadInfluenceTierCoefs(env.DB);
+  const tierMem = tierCache();
+
   // 客队影响力：目录映射到俱乐部→其球队影响力；缺球场行→默认值（revenue default_influence）
   let awayInfluence = model.default_influence;
   const awayClubId = (await clubIdByTourTeam(env, [input.awayTeamId])).get(input.awayTeamId);
   if (awayClubId !== undefined) {
     const awayStadium = await env.DB.prepare('SELECT shell_influence, bonus_points FROM stadiums WHERE club_id = ?').bind(awayClubId).first<{ shell_influence: number; bonus_points: number }>();
-    if (awayStadium) awayInfluence = teamInfluence(awayStadium, await playerInfluenceSum(env, awayClubId, model));
+    if (awayStadium) {
+      const awayTier = await deriveClubTier(env, input.season, awayClubId, tierMem);
+      awayInfluence = teamInfluence(awayStadium, await playerInfluenceSum(env, awayClubId, model), influenceTierCoef(influenceCoefs, awayTier));
+    }
   }
   // 对手系数（revenue 口径）：主队影响力 ≤0 时取 1.0（不放大需求）
-  const homeInfluence = teamInfluence(stadium, await playerInfluenceSum(env, clubId, model));
+  const homeTier = await deriveClubTier(env, input.season, clubId, tierMem);
+  const homeInfluence = teamInfluence(stadium, await playerInfluenceSum(env, clubId, model), influenceTierCoef(influenceCoefs, homeTier));
   const opp = homeInfluence <= 0 ? 1 : 1 + 0.05 * (awayInfluence / homeInfluence);
 
   const demand =
@@ -344,6 +393,34 @@ export async function matchAttendanceStatements(
   const commercial = Math.round(wan * model.commercial_per_10k_per_level * levelOf('commercial') * 100) / 100;
   const broadcast = Math.round(model.broadcast_per_match_per_level * levelOf('broadcast') * 100) / 100;
   const total = Math.round((ticket + commercial + broadcast) * 100) / 100;
+
+  // v6.28.0 B 段：每场死忠演化（比赛日体感）——与上座/收入同批原子落账；幂等闸是 match_attendance 主键（上面已查过）。
+  // 系数走 per-match 键（初值 0.2 = 窗系数 0.5 × 0.4）；fan_mood 是窗级事件信号，这里不消费（关窗批按窗生效一次）。
+  const cfg = createConfigService(env.DB);
+  const perMatchGrow = (await cfg.getNumber('fans_grow_rate_per_match')) ?? model.fans_grow_rate * 0.4;
+  const perMatchDrop = (await cfg.getNumber('fans_drop_rate_per_match')) ?? model.fans_drop_rate * 0.4;
+  // fansBuff = 生效冠名品牌档位性格（与关窗批同口径）：active 合同 → brand_pool.tier → config 三档参数；无合同 0
+  const activeNaming = await env.DB
+    .prepare(`SELECT brand FROM naming_contracts WHERE club_id = ? AND status = 'active' LIMIT 1`)
+    .bind(clubId)
+    .first<{ brand: string }>();
+  let fansBuff = 0;
+  if (activeNaming) {
+    const brandRow = await env.DB.prepare('SELECT tier FROM brand_pool WHERE brand = ?').bind(activeNaming.brand).first<{ tier: string }>();
+    fansBuff = (await loadTierProfiles(env.DB))[(brandRow?.tier ?? '口碑') as BrandTier].fansBuff;
+  }
+  const perMatchAttendRate = stadium.capacity > 0 ? attendance / stadium.capacity : 1;
+  const nextFans = evolveFans(
+    model,
+    stadium.fans,
+    // 死忠目标与上座 demand 的影响力同源：都用本钩子算出的 homeInfluence（含级别系数）
+    diehardTarget(model, homeInfluence),
+    perMatchAttendRate,
+    formPts,
+    levelOf('youth'),
+    fansBuff,
+    { growRate: perMatchGrow, dropRate: perMatchDrop },
+  );
 
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
   statements.push(
@@ -372,6 +449,12 @@ export async function matchAttendanceStatements(
       )
       .bind(clubId),
   );
+  // 死忠每场演化落账（v6.28.0 B 段，与上座/收入同批；跳过条件同函数既有口径）
+  statements.push(
+    env.DB
+      .prepare(`UPDATE stadiums SET fans = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`)
+      .bind(nextFans, clubId),
+  );
   return { statements, detail: { clubId, weather, attendance, ticket, commercial, broadcast } };
 }
 
@@ -398,10 +481,13 @@ export interface PendingClubNotification {
 }
 
 /**
- * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠演化 + 冠名收租 + 档期活动。
+ * 窗末主场结算（v1.5.0，并入关窗批）：维护费 + 死忠兜底演化 + 冠名收租 + 档期活动。
  * 维护费 = 档位基础 + 每万座费率 × 容量万 × 本窗主场场次（已确认口径，假设 33）；临时窗照收。
- * 死忠演化每队一轮（上座率=本窗平均，无场次中性 1.0；青训等级涨粉系数 ×(1+0.03n)，v6.6.3 接入；
- * 品牌档位 fansBuff 只乘涨粉侧，v6.13.0 C2）——每种窗都演化。
+ * 死忠（v6.28.0 B 段）：本窗有主场场次的队已在钩子④按 per-match 系数演化过，这里**不再演化**（防双记账，
+ * 只推进 fans_window_start 快照）；无主场场次的队按窗系数兜底一次（上座率中性 1.0；青训等级涨粉系数
+ * ×(1+0.03n)，v6.6.3 接入；品牌档位 fansBuff 只乘涨粉侧，v6.13.0 C2）；fan_mood 事件信号对所有队
+ * 按窗生效一次（演化之后，v6.12.0 D3）——每种窗都跑。
+ * 影响力走 v6.28.0 A 段口径（队壳+球员）× 级别系数 + 奖励分，级别由 deriveClubLeagues 批量派生。
  * 冠名收租仅常规窗（临时窗 chargeNaming=false：不收租、不减剩余窗数，v3.0.0 裁决）；
  * 品牌热度动态随收租批走（近 3 场全胜/全败调 brand_pool.heat，v6.8.0）；
  * 档位自动校准批首跑一次（v6.13.0 C2，热度降序 + 头部准入下限，锁档跳过）；
@@ -420,6 +506,8 @@ export async function windowHomeStatements(
   const model = await loadAttendanceModel(env.DB);
   const tierTable = await loadTierTable(env.DB);
   const activityCatalog = await loadActivityCatalog(env.DB);
+  // v6.28.0 A 段：级别系数一次取（批次内共用，别进循环）
+  const influenceCoefs = await loadInfluenceTierCoefs(env.DB);
   // v6.12.0 D3 经营信号：本窗触发事件沉淀的 fan_mood / upkeep / fee_mod，按队消费
   const signalDefs = await loadEventSignals(env.DB);
   const signalsByClub = await collectWindowSignals(env.DB, season, windowSeq, signalDefs);
@@ -439,7 +527,7 @@ export async function windowHomeStatements(
   const profiles = opts.chargeNaming ? await loadTierProfiles(env.DB) : null;
   const satisfyCfg = opts.chargeNaming ? await loadSatisfyConfig(env.DB) : null;
 
-  const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans FROM stadiums').all<StadiumRow>();
+  const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, fans_window_start FROM stadiums').all<StadiumRow>();
   // 设施等级一次批量查（青训级 → evolveFans 涨粉系数 ×(1+0.03n)，v6.6.3；草皮级 → 档期活动的收入加成与损坏减免，v6.9.0）
   const facilityRows = await env.DB
     .prepare(`SELECT club_id, facility_key, level FROM club_facilities WHERE facility_key IN ('youth', 'pitch')`)
@@ -447,6 +535,8 @@ export async function windowHomeStatements(
   const youthLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'youth').map((r) => [r.club_id, r.level]));
   const pitchLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'pitch').map((r) => [r.club_id, r.level]));
   const tourMap = await tourTeamIdsByClub(env, stadiums.results.map((s) => s.club_id));
+  // v6.28.0 A 段：级别批量派生（预载 tour 映射 → 一次 AUTH_DB + 一次 TOUR_DB，别逐队派生 20 次）
+  const leagues = await deriveClubLeagues(env, season, stadiums.results.map((s) => s.club_id), tourMap);
   const statements: ReturnType<Env['DB']['prepare']>[] = [];
   const notifications: PendingClubNotification[] = [];
   const moodReports: import('./naming-ops.ts').SatisfactionReport[] = [];
@@ -478,7 +568,16 @@ export async function windowHomeStatements(
 
   for (const s of stadiums.results) {
     const tierEntry = tierTable[String(s.tier)];
-    if (!tierEntry) continue;
+    if (!tierEntry) {
+      // 档位表缺该档位（配置异常）：本批照旧不演化/不收租，但窗初快照要推进到窗末现值，
+      // 否则下一窗 fansGrowth 会从更早的窗初起算（现值已含每场演化）
+      statements.push(
+        env.DB
+          .prepare(`UPDATE stadiums SET fans_window_start = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`)
+          .bind(s.fans, s.club_id),
+      );
+      continue;
+    }
     const homeMatches = await env.DB.prepare(
       `SELECT COALESCE(SUM(attendance), 0) AS total, COUNT(*) AS n FROM match_attendance WHERE club_id = ? AND season = ? AND window_seq = ?`,
     )
@@ -511,28 +610,33 @@ export async function windowHomeStatements(
     const naming = namingByClub.get(s.club_id) ?? null;
     const profile = naming && profiles ? profiles[(brandTier.get(naming.brand) ?? '口碑') as BrandTier] : null;
 
-    const influence = teamInfluence(s, await playerInfluenceSum(env, s.club_id, model));
+    const influence = teamInfluence(s, await playerInfluenceSum(env, s.club_id, model), influenceTierCoef(influenceCoefs, leagues.get(s.club_id)?.tier ?? null));
     const target = diehardTarget(model, influence);
     // 战绩按 tour 队 id 查赛果表；目录无映射 → 中性 4（与「赛果不足 3 场」同口径）
     const tourTeamId = tourMap.get(s.club_id);
     const formPts = tourTeamId === undefined ? 4 : await clubFormPts(env, tourTeamId, 0);
-    const nextFans = evolveFans(model, s.fans, target, attendRate, formPts, youthLevels.get(s.club_id) ?? 0, profile?.fansBuff ?? 0);
-    // fan_mood 信号（v6.12.0 D3，插件 fans_service.evolve 同口径）：演化结果 ×(1+Σ/100) 后钳 [0, 上限]
+    // v6.28.0 B 段：本窗有主场场次的队已在钩子④按 per-match 系数演化过 → 关窗不再演化（防双记账），
+    // 现值 s.fans 即窗末值；无主场场次的队按窗系数（evolveFans 缺省）兜底演化一次。
+    const evolved = played > 0 ? s.fans : evolveFans(model, s.fans, target, attendRate, formPts, youthLevels.get(s.club_id) ?? 0, profile?.fansBuff ?? 0);
+    // fan_mood 信号（v6.12.0 D3，插件 fans_service.evolve 同口径）：演化结果 ×(1+Σ/100) 后钳 [0, 上限]。
+    // 窗级事件信号对所有队按窗生效一次——放在演化之后，不随每场演化重复。
     const mood = sig?.steps.fan_mood ?? 0;
-    const nextFansWithMood = mood !== 0 ? Math.min(Math.max(nextFans * (1 + mood / 100), 0), model.fans_cap) : nextFans;
-    if (Math.abs(nextFansWithMood - s.fans) >= 0.5) {
-      summary.fansClubs++;
-      statements.push(
-        env.DB
-          .prepare(`UPDATE stadiums SET fans = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`)
-          .bind(nextFansWithMood, s.club_id),
-      );
-    }
+    const nextFansWithMood = mood !== 0 ? Math.min(Math.max(evolved * (1 + mood / 100), 0), model.fans_cap) : evolved;
+    // 差值闸只管计数（既有口径：fansClubs = 本批真改动的队数）；UPDATE 每队都发——
+    // fans_window_start 快照要跟着窗末推进，否则下一窗的 fansGrowth 基准会越算越偏。
+    if (Math.abs(nextFansWithMood - s.fans) >= 0.5) summary.fansClubs++;
+    statements.push(
+      env.DB
+        .prepare(`UPDATE stadiums SET fans = ?, fans_window_start = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`)
+        .bind(nextFansWithMood, nextFansWithMood, s.club_id),
+    );
 
     // 窗末冠名收租（v2.6.0）：费用 + 剩余窗口递减/到期 + 对赌奖金，幂等靠账本闸（club 维度）；
     // 临时窗不收租也不递减（v3.0.0 裁决）
     if (opts.chargeNaming && naming) {
-      const fansGrowth = s.fans > 0 ? (nextFansWithMood - s.fans) / s.fans : 0;
+      // 对赌奖金增长率按「窗初快照 → 窗末」算（v6.28.0）：每场演化已即时改 fans，拿现值当基准会把增长率算成 0
+      const fansStart = s.fans_window_start > 0 ? s.fans_window_start : s.fans;
+      const fansGrowth = fansStart > 0 ? (nextFansWithMood - fansStart) / fansStart : 0;
       statements.push(
         ...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth, { feeFactor: sig?.mults.fee_mod ?? 1 }),
       );

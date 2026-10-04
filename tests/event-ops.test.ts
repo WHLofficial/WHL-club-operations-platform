@@ -971,12 +971,12 @@ describe('关窗批消费预置上座乘数 / 天气（home.ts matchAttendanceSt
       .run(matchId, homeEntry, awayEntry);
   }
 
-  /** 主队球场（影响力 90 → 对手系数 1.05）+ 商业/转播设施，客队无球场行 */
+  /** 主队球场（premier 级别系数 1.2 → 影响力 90×1.2=108 → 对手系数 1.0417）+ 商业/转播设施，客队无球场行 */
   function seedMatchFixture(opts: { nextMod?: number; nextWeather?: string } = {}) {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClub(fx.auth, fx.sqlite, 1, 11, { shell: 90, ...opts });
-    // 客队不建球场行 → 对手影响力走 default_influence 90（系数 1.05），与 home.test.ts 基线同
+    // 客队不建球场行 → 对手影响力走 default_influence 90（系数 1+0.05×90/108=1.0417），与 home.test.ts 基线同
     seedClub(fx.auth, fx.sqlite, 2, 12, { stadium: false });
     fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (1, 'commercial', 2), (1, 'broadcast', 3)`).run();
     insertMatch(fx.tour, 1, 11, 12);
@@ -986,7 +986,7 @@ describe('关窗批消费预置上座乘数 / 天气（home.ts matchAttendanceSt
     return fx;
   }
 
-  it('无预置：rng=0.5 现掷多云，上座 7333（基线）', async () => {
+  it('无预置：rng=0.5 现掷多云，上座 7275（基线）', async () => {
     const fx = seedMatchFixture();
     await confirmResult(fx.env, 1, 1, 'user');
     const att = sqlGet<{ weather: string; attendance: number; memo: string }>(
@@ -994,11 +994,11 @@ describe('关窗批消费预置上座乘数 / 天气（home.ts matchAttendanceSt
       `SELECT a.weather, a.attendance, (SELECT memo FROM ledger_entries WHERE kind = 'revenue') AS memo FROM match_attendance a WHERE a.match_id = 1`,
     )!;
     expect(att.weather).toBe('多云');
-    expect(att.attendance).toBe(7333);
+    expect(att.attendance).toBe(7275);
     expect(att.memo).not.toContain('事件预置');
   });
 
-  it('预置 next_attendance_mod=1.5 乘进需求（7333×1.5→10999），并在同批清零', async () => {
+  it('预置 next_attendance_mod=1.5 乘进需求（7275×1.5→10912），并在同批清零', async () => {
     const fx = seedMatchFixture({ nextMod: 1.5, nextWeather: '多云' });
     await confirmResult(fx.env, 1, 1, 'user');
     const att = sqlGet<{ weather: string; attendance: number; memo: string }>(
@@ -1006,7 +1006,7 @@ describe('关窗批消费预置上座乘数 / 天气（home.ts matchAttendanceSt
       `SELECT a.weather, a.attendance, (SELECT memo FROM ledger_entries WHERE kind = 'revenue') AS memo FROM match_attendance a WHERE a.match_id = 1`,
     )!;
     expect(att.weather).toBe('多云');
-    expect(att.attendance).toBe(10999);
+    expect(att.attendance).toBe(10912);
     expect(att.memo).toContain('（事件预置）');
     // 一次性：用完即清
     expect(sqlGet<{ next_attendance_mod: number; next_weather: string }>(fx.sqlite, `SELECT next_attendance_mod, next_weather FROM stadiums WHERE club_id = 1`)).toEqual({
@@ -1015,12 +1015,12 @@ describe('关窗批消费预置上座乘数 / 天气（home.ts matchAttendanceSt
     });
   });
 
-  it('预置 next_weather=雨 替代现掷天气（wx 0.845 → 上座 6388）', async () => {
+  it('预置 next_weather=雨 替代现掷天气（wx 0.845 → 上座 6337）', async () => {
     const fx = seedMatchFixture({ nextWeather: '雨' });
     await confirmResult(fx.env, 1, 1, 'user');
     const att = sqlGet<{ weather: string; attendance: number }>(fx.sqlite, `SELECT weather, attendance FROM match_attendance WHERE match_id = 1`)!;
     expect(att.weather).toBe('雨');
-    expect(att.attendance).toBe(6388);
+    expect(att.attendance).toBe(6337);
     expect(sqlGet<{ next_weather: string }>(fx.sqlite, `SELECT next_weather FROM stadiums WHERE club_id = 1`)!.next_weather).toBe('');
   });
 
@@ -1029,7 +1029,7 @@ describe('关窗批消费预置上座乘数 / 天气（home.ts matchAttendanceSt
     await confirmResult(fx.env, 1, 1, 'user');
     const att = sqlGet<{ weather: string; attendance: number }>(fx.sqlite, `SELECT weather, attendance FROM match_attendance WHERE match_id = 1`)!;
     expect(att.weather).toBe('多云');
-    expect(att.attendance).toBe(7333);
+    expect(att.attendance).toBe(7275);
   });
 });
 

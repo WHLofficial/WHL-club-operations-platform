@@ -12,7 +12,7 @@ import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, deriveClubLeagues, deriveClubTiers } from '../tier.ts';
 import { closedRegularTicks } from '../contract-ticks.ts';
 import { POSITION_BY_ID, POSITION_GROUP_BY_POSITION, POSITION_GROUPS } from '../../core/fc26.ts';
-import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence } from '../home.ts';
+import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, influenceTierCoef, loadInfluenceTierCoefs } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
@@ -703,12 +703,14 @@ app.get('/me/club', async (c) => {
     tier: number;
     tierName: string | null;
     fans: number;
-    influence: { players: number; shell: number; bonus: number; total: number };
+    influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
     facilities: { key: string; level: number }[];
   } | null = null;
   if (stadium) {
     const model = await loadAttendanceModel(c.env.DB);
     const playerSum = await playerInfluenceSum(c.env, club.id, model);
+    // v6.28.0 A 段：级别系数来自 config；级别复用上面 Promise.all 里已派生的 tier（未定级 → 1.0）
+    const tierCoef = influenceTierCoef(await loadInfluenceTierCoefs(c.env.DB), tier);
     const facilities = await c.env.DB
       .prepare('SELECT facility_key, level FROM club_facilities WHERE club_id = ? ORDER BY facility_key')
       .bind(club.id)
@@ -722,7 +724,13 @@ app.get('/me/club', async (c) => {
       tier: stadium.tier,
       tierName: tierTable[String(stadium.tier)]?.name ?? null,
       fans: stadium.fans,
-      influence: { players: playerSum, shell: stadium.shell_influence, bonus: stadium.bonus_points, total: teamInfluence(stadium, playerSum) },
+      influence: {
+        players: playerSum,
+        shell: stadium.shell_influence,
+        bonus: stadium.bonus_points,
+        tierCoef,
+        total: teamInfluence(stadium, playerSum, tierCoef),
+      },
       facilities: facilities.results.map((f) => ({ key: f.facility_key, level: f.level })),
     };
   }

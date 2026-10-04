@@ -126,6 +126,7 @@ const MIGRATION_FILES = [
   '0059_bid_guard_activation.sql',
   '0060_shop_orders.sql',
   '0061_players_marker_index_rebuild.sql',
+  '0062_stadiums_fans_window_start.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {
