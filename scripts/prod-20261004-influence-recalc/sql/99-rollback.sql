@@ -1,24 +1,24 @@
 -- 99 回滚：按快照逐行还原 stadiums / match_attendance / ledger_entries / ledger_accounts
--- 由 scripts/prod-20261004-influence-recalc/recalc.mjs plan 生成（2026-10-04T06:41:11.515Z）
+-- 由 scripts/prod-20261004-influence-recalc/recalc.mjs plan 生成（2026-10-04T11:24:12.425Z）
 -- 口径真源：src/worker/home.ts（v6.28.0）；重演随机项取区间中点、天气取库中已记录值
 -- 本文件不自动执行：apply 默认只打印，需要显式 --yes
 
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 1;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 2;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 5;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 9;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1764, fans_window_start = 0 WHERE club_id = 11;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 13;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 14;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1782, fans_window_start = 0 WHERE club_id = 21;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 33;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1836, fans_window_start = 0 WHERE club_id = 45;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 66;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1872, fans_window_start = 0 WHERE club_id = 73;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 243;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 280;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 449;
-UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 0 WHERE club_id = 110374;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 1;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 2;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 5;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 9;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1764, fans_window_start = 1764 WHERE club_id = 11;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 13;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 14;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1782, fans_window_start = 1782 WHERE club_id = 21;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 33;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1836, fans_window_start = 1836 WHERE club_id = 45;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 66;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1872, fans_window_start = 1872 WHERE club_id = 73;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 243;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 280;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 449;
+UPDATE stadiums SET shell_influence = 0, bonus_points = 0, fans = 1800, fans_window_start = 1800 WHERE club_id = 110374;
 UPDATE match_attendance SET attendance = 5820, ticket = 0.87, commercial = 0, broadcast = 0 WHERE match_id = 1;
 UPDATE match_attendance SET attendance = 7463, ticket = 1.12, commercial = 0, broadcast = 0 WHERE match_id = 2;
 UPDATE match_attendance SET attendance = 13430, ticket = 2.01, commercial = 0, broadcast = 0 WHERE match_id = 3;
@@ -142,7 +142,7 @@ UPDATE ledger_entries SET amount = 1.94, memo = '比赛日收入（比赛 #38，
 UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比赛 #42）', balance_after = 13.2 WHERE id = 43;
 UPDATE ledger_entries SET amount = 4.7, memo = '联赛出场补贴（比赛 #42）', balance_after = 15.620000000000001 WHERE id = 44;
 UPDATE ledger_entries SET amount = 1.19, memo = '比赛日收入（比赛 #42，上座 7914/12000，晴；票 1.19/商 0/播 0）', balance_after = 14.389999999999999 WHERE id = 45;
-UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比�� #44）', balance_after = 24.12 WHERE id = 46;
+UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比赛 #44）', balance_after = 24.12 WHERE id = 46;
 UPDATE ledger_entries SET amount = 1.33, memo = '比赛日收入（比赛 #44，上座 8875/35000，晴；票 1.33/商 0/播 0）', balance_after = 25.450000000000003 WHERE id = 47;
 UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比赛 #45）', balance_after = 34.75 WHERE id = 48;
 UPDATE ledger_entries SET amount = 4.7, memo = '联赛出场补贴（比赛 #45）', balance_after = 19.09 WHERE id = 49;
@@ -207,7 +207,7 @@ UPDATE ledger_entries SET amount = 1.23, memo = '比赛日收入（比赛 #50，
 UPDATE ledger_entries SET amount = 2.9, memo = '联赛出场补贴（比赛 #176）', balance_after = 24.58 WHERE id = 108;
 UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比赛 #51）', balance_after = 30.13 WHERE id = 109;
 UPDATE ledger_entries SET amount = 1.3, memo = '比赛日收入（比赛 #51，上座 8673/22000，雨；票 1.3/商 0/播 0）', balance_after = 31.43 WHERE id = 110;
-UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比�� #54）', balance_after = 32.489999999999995 WHERE id = 111;
+UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比赛 #54）', balance_after = 32.489999999999995 WHERE id = 111;
 UPDATE ledger_entries SET amount = 1.07, memo = '比赛日收入（比赛 #54，上座 7165/12000，多云；票 1.07/商 0/播 0）', balance_after = 33.559999999999995 WHERE id = 112;
 UPDATE ledger_entries SET amount = 4.8, memo = '联赛平局奖金（比赛 #181）', balance_after = 29.38 WHERE id = 113;
 UPDATE ledger_entries SET amount = 4.8, memo = '联赛平局奖金（比赛 #181）', balance_after = 39.169999999999995 WHERE id = 114;
@@ -278,7 +278,7 @@ UPDATE ledger_entries SET amount = 2.05, memo = '比赛日收入（比赛 #63，
 UPDATE ledger_entries SET amount = 6.6, memo = '联赛平局奖金（比赛 #72）', balance_after = 62.07000000000001 WHERE id = 179;
 UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比赛 #69）', balance_after = 70.96000000000001 WHERE id = 180;
 UPDATE ledger_entries SET amount = 4.7, memo = '联赛出场补贴（比赛 #69）', balance_after = 55.96000000000001 WHERE id = 181;
-UPDATE ledger_entries SET amount = 0.99, memo = '比赛日收入（比赛 #69，上座 6615/12000，雨；票 0.99/商 0/播 0）', balance_after = 71.95 WHERE id = 182;
+UPDATE ledger_entries SET amount = 0.99, memo = '比赛日收入（比赛 #69，上座 6615/12000，��；票 0.99/商 0/播 0）', balance_after = 71.95 WHERE id = 182;
 UPDATE ledger_entries SET amount = 8.5, memo = '联赛胜场奖金（比赛 #68）', balance_after = 67.34 WHERE id = 183;
 UPDATE ledger_entries SET amount = 4.7, memo = '联赛出场补贴（比赛 #68）', balance_after = 56.82 WHERE id = 184;
 UPDATE ledger_entries SET amount = 1.19, memo = '比赛日收入（比赛 #68，上座 7947/22000，雪；票 1.19/商 0/播 0）', balance_after = 68.53 WHERE id = 185;
@@ -303,7 +303,7 @@ UPDATE ledger_entries SET amount = 1.52, memo = '比赛日收入（比赛 #22，
 UPDATE ledger_entries SET amount = 7, memo = '冠军杯小组赛胜场奖金（比赛 #26）', balance_after = 31.759999999999998 WHERE id = 204;
 UPDATE ledger_entries SET amount = 1.52, memo = '比赛日收入（比赛 #26，上座 10103/35000，晴；票 1.52/商 0/播 0）', balance_after = 32.93 WHERE id = 205;
 UPDATE ledger_entries SET amount = 7, memo = '冠军杯小组赛胜场奖金（比赛 #21）', balance_after = 70.5 WHERE id = 206;
-UPDATE ledger_entries SET amount = 1.42, memo = '比赛日收入（比赛 #21，上座 9453/12000，多云；票 1.42/商 0/播 0���', balance_after = 71.92 WHERE id = 207;
+UPDATE ledger_entries SET amount = 1.42, memo = '比赛日收入（比赛 #21，上座 9453/12000，多云；票 1.42/商 0/播 0）', balance_after = 71.92 WHERE id = 207;
 UPDATE ledger_entries SET amount = 2.08, memo = '比赛日收入（比赛 #27，上座 13834/22000，晴；票 2.08/商 0/播 0）', balance_after = 61.059999999999995 WHERE id = 208;
 UPDATE ledger_entries SET amount = 7, memo = '冠军杯小组赛胜场奖金（比赛 #23）', balance_after = 66.08 WHERE id = 209;
 UPDATE ledger_entries SET amount = 1.06, memo = '比赛日收入（比赛 #23，上座 7087/35000，多云；票 1.06/商 0/播 0）', balance_after = 63.320000000000014 WHERE id = 210;

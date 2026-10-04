@@ -1,0 +1,3 @@
+# 每次 apply 生成的「执行前全量备份」（生产数据工件，不入库）
+# 留档真源：snapshot.json（执行前快照）+ sql/99-rollback.sql（逐行还原语句）
+backup/

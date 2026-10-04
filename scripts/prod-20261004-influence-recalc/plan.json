@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-10-04T06:41:11.515Z",
-  "snapshotFetchedAt": "2026-10-04T06:32:04.283Z",
-  "allowMissing": true,
+  "generatedAt": "2026-10-04T11:24:12.425Z",
+  "snapshotFetchedAt": "2026-10-04T11:24:08.034Z",
+  "allowMissing": false,
   "initialsMode": "default",
   "configNotes": [
     "attendance_model 生产未配置 ⇒ 运行期同样走出厂默认（config.ts:132）",
@@ -20,9 +20,9 @@
   "windowSeq": 1,
   "checks": [
     {
-      "name": "迁移 0062 已 apply",
-      "ok": false,
-      "detail": "快照显示 fans_window_start 列不存在；本次带 --assume-migrated 只为离线看数，执行前必须先 apply 0062"
+      "name": "迁移 0062 已 apply（fans_window_start 列存在）",
+      "ok": true,
+      "detail": "是"
     },
     {
       "name": "match_weather 为空（无赛前预报 ⇒ wx 全程取区间中点）",
@@ -61,8 +61,8 @@
     },
     {
       "name": "图值待补",
-      "ok": false,
-      "detail": "243 bonus_points 按 0 处理（--allow-missing）"
+      "ok": true,
+      "detail": "无"
     },
     {
       "name": "上座快照覆盖全部窗口行",
@@ -117,20 +117,7 @@
       "detail": "78 场旧值均 ≤ 容量"
     }
   ],
-  "pendingValues": [
-    {
-      "club_id": 243,
-      "name": "皇家马德里",
-      "tier": "second",
-      "cpu": false,
-      "shell_influence": 37,
-      "bonus_points": 0,
-      "bonus_source": "pending",
-      "pending": true,
-      "field": "bonus_points",
-      "note": "图值在用户消息里被截断，奖励分未知 ⇒ 缺 --allow-missing 时 plan 中止并报「243 奖励分待用户补值」；带 --allow-missing 时按 0 处理并在 report 显著标注"
-    }
-  ],
+  "pendingValues": [],
   "clubPlans": [
     {
       "clubId": 1,
@@ -150,7 +137,7 @@
       "initialFans": 1800,
       "finalFans": 1968.0176760928,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 23751,
       "attendanceAfter": 26268,
       "revenueBefore": 3.56,
@@ -174,7 +161,7 @@
       "initialFans": 1800,
       "finalFans": 2853.9086388941546,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 27641,
       "attendanceAfter": 33703,
       "revenueBefore": 4.15,
@@ -198,7 +185,7 @@
       "initialFans": 1800,
       "finalFans": 3283.567536048574,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 49305,
       "attendanceAfter": 71776,
       "revenueBefore": 7.39,
@@ -222,7 +209,7 @@
       "initialFans": 1800,
       "finalFans": 4179.917368032389,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 67499,
       "attendanceAfter": 112012,
       "revenueBefore": 10.12,
@@ -246,7 +233,7 @@
       "initialFans": 1800,
       "finalFans": 4424.5449990810675,
       "prodFans": 1764,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1764,
       "attendanceBefore": 64218,
       "attendanceAfter": 107919,
       "revenueBefore": 9.63,
@@ -270,7 +257,7 @@
       "initialFans": 1800,
       "finalFans": 3375.9415920468855,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 39298,
       "attendanceAfter": 49729,
       "revenueBefore": 5.88,
@@ -294,7 +281,7 @@
       "initialFans": 1800,
       "finalFans": 2431.349477597109,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 28203,
       "attendanceAfter": 34952,
       "revenueBefore": 4.23,
@@ -318,7 +305,7 @@
       "initialFans": 1800,
       "finalFans": 2600.84198050185,
       "prodFans": 1782,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1782,
       "attendanceBefore": 40194,
       "attendanceAfter": 49070,
       "revenueBefore": 6.03,
@@ -342,7 +329,7 @@
       "initialFans": 1800,
       "finalFans": 3756.3486662153127,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 47258,
       "attendanceAfter": 66005,
       "revenueBefore": 7.09,
@@ -366,7 +353,7 @@
       "initialFans": 1800,
       "finalFans": 3305.7049728568913,
       "prodFans": 1836,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1836,
       "attendanceBefore": 55168,
       "attendanceAfter": 74374,
       "revenueBefore": 8.29,
@@ -390,7 +377,7 @@
       "initialFans": 1800,
       "finalFans": 4600.97105646187,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 44183,
       "attendanceAfter": 62477,
       "revenueBefore": 6.62,
@@ -414,7 +401,7 @@
       "initialFans": 1800,
       "finalFans": 3923.911173770798,
       "prodFans": 1872,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1872,
       "attendanceBefore": 53929,
       "attendanceAfter": 80723,
       "revenueBefore": 8.08,
@@ -427,7 +414,7 @@
       "cpu": false,
       "shellInfluence": 37,
       "bonusPoints": 0,
-      "bonusSource": "pending",
+      "bonusSource": "given",
       "playerSum": 72.78500000000001,
       "influence": 109.78500000000001,
       "oldInfluence": 72.78500000000001,
@@ -438,7 +425,7 @@
       "initialFans": 1800,
       "finalFans": 2692.7741650027942,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 34942,
       "attendanceAfter": 41386,
       "revenueBefore": 5.25,
@@ -462,7 +449,7 @@
       "initialFans": 1800,
       "finalFans": 2193.5304833968344,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 26437,
       "attendanceAfter": 29870,
       "revenueBefore": 3.96,
@@ -486,7 +473,7 @@
       "initialFans": 1800,
       "finalFans": 2849.9323965412214,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 36831,
       "attendanceAfter": 48055,
       "revenueBefore": 5.52,
@@ -510,7 +497,7 @@
       "initialFans": 1800,
       "finalFans": 3582.881313403389,
       "prodFans": 1800,
-      "prodFansWindowStart": null,
+      "prodFansWindowStart": 1800,
       "attendanceBefore": 61064,
       "attendanceAfter": 84566,
       "revenueBefore": 9.16,
@@ -4558,8 +4545,8 @@
           "amountAfter": 8.5,
           "balanceBefore": 32.489999999999995,
           "balanceAfter": 32.79,
-          "memoBefore": "联赛胜场奖金（比�� #54）",
-          "memoAfter": "联赛胜场奖金（比�� #54）",
+          "memoBefore": "联赛胜场奖金（比赛 #54）",
+          "memoAfter": "联赛胜场奖金（比赛 #54）",
           "changed": false
         },
         {
@@ -5190,7 +5177,7 @@
           "amountAfter": 1.79,
           "balanceBefore": 71.95,
           "balanceAfter": 74.03000000000002,
-          "memoBefore": "比赛日收入（比赛 #69，上座 6615/12000，雨；票 0.99/商 0/播 0）",
+          "memoBefore": "比赛日收入（比赛 #69，上座 6615/12000，��；票 0.99/商 0/播 0）",
           "memoAfter": "比赛日收入（比赛 #69，上座 11904/12000，雨；票 1.79/商 0/播 0）",
           "changed": true
         },
@@ -5607,7 +5594,7 @@
           "amountAfter": 1.79,
           "balanceBefore": 71.92,
           "balanceAfter": 74.68,
-          "memoBefore": "比赛日收入（比赛 #21，上座 9453/12000，多云；票 1.42/商 0/播 0���",
+          "memoBefore": "比赛日收入（比赛 #21，上座 9453/12000，多云；票 1.42/商 0/播 0）",
           "memoAfter": "比赛日收入（比赛 #21，上座 11904/12000，多云；票 1.79/商 0/播 0）",
           "changed": true
         }
@@ -5679,8 +5666,8 @@
           "amountAfter": 8.5,
           "balanceBefore": 24.12,
           "balanceAfter": 24.21,
-          "memoBefore": "联赛胜场奖金（比�� #44）",
-          "memoAfter": "联赛胜场奖金（比�� #44）",
+          "memoBefore": "联赛胜场奖金（比赛 #44）",
+          "memoAfter": "联赛胜场奖金（比赛 #44）",
           "changed": false
         },
         {

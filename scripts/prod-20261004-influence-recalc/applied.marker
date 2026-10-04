@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-04T11:26:03.237Z",
+  "files": [
+    "01-stadiums-values.sql",
+    "02-match-attendance-revenue.sql",
+    "03-ledger-amounts.sql",
+    "04-ledger-balance-chain.sql",
+    "05-ledger-accounts.sql"
+  ],
+  "backup": "C:\\Users\\bhdjb\\whlProgram\\WHL-club-operations-platform\\scripts\\prod-20261004-influence-recalc\\backup\\2026-10-04T11-25-23-869Z",
+  "statements": 293
+}

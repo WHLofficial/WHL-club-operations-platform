@@ -1,8 +1,9 @@
 # v6.28.0 C 段数据批：影响力图值导入 + 死忠重算 + 历史链式重演
 
-> **授权状态：未授权执行（只交付脚本 + 离线干跑证据）**
-> 本目录除 `snapshot` 的**只读**查询外，没有对生产库执行过任何写操作；`apply` 未运行、`applied.marker` 不存在。
-> 真正落库需要用户单独下令。生产三库：`whl-club`（唯一可写，`73154873-d5ae-42b0-a630-25f5ef60053d`）、`whl`（tour，只读）、`whl-auth`（只读）。
+> **授权状态：已执行（2026-10-04T11:26:03.237Z，用户令「1发布2执行 3皇马奖励分是0」）**
+> 执行顺序硬约束按序完成：迁移 `0062` apply（11:21:42Z）→ v6.28.0 代码上线（Version `7ecb15a1-a8f6-4b16-974c-f810bed52370` @11:22:42Z）→ 本批 `apply --yes`（11:26:03Z，**293 条语句 / 5 个 SQL 文件**）→ `verify` **9/9 PASS**。
+> 落库前自动全量备份在 `backup/2026-10-04T11-25-23-869Z/`（stadiums / match_attendance / ledger_entries / ledger_accounts + `manifest.json`）；`applied.marker` 已落，重跑需 `--force`。
+> 生产三库：`whl-club`（唯一可写，`73154873-d5ae-42b0-a630-25f5ef60053d`）、`whl`（tour，只读）、`whl-auth`（只读）。
 
 ---
 
@@ -13,10 +14,12 @@
 | `engine.mjs` | 纯函数重演引擎（**逐因子镜像 `src/worker/home.ts`**，零 I/O、零依赖，可离线/在测试里直接 import） |
 | `values.json` | 20 队影响力图值（shell_influence / bonus_points / 级别 / 是否 CPU / 待补标记） |
 | `recalc.mjs` | CLI：`snapshot` / `plan` / `apply` / `verify` 四个子命令 |
-| `snapshot.json` | 只读拉取的生产现状（2026-10-04T06:32:04Z） |
-| `plan.json` · `report.md` · `sql/` | 离线干跑产物（**未执行**），口径 `--initials=default`（初值一律 1800） |
+| `snapshot.json` | 只读拉取的生产现状（**执行前快照** 2026-10-04T11:24:08.034Z；旧值见 `backup/` 与 `sql/99-rollback.sql`） |
+| `plan.json` · `report.md` · `sql/` | 执行产物（**已 apply** 2026-10-04T11:26:03Z），口径 `--initials=default`（初值一律 1800） |
 | `sql/01..05` + `sql/99-rollback.sql` | apply 用的分步 SQL（01 stadiums / 02 上座+收入 / 03 流水金额 / 04 余额链 / 05 账户余额 / 99 回滚） |
-| `../tests/influence-recalc-engine.test.ts` | **交叉验证闸**：engine 与运行期 `home.ts` 逐位对拍（17 测试） |
+| `applied.marker` | 执行记录（时间戳 / 5 个文件名 / 备份路径 / 293 条语句）；存在即防重，重跑需 `--force` |
+| `backup/<ISO>/` | 落库前的全量 JSON 备份 + `manifest.json`（**本地工件，不入库**，见同目录 `.gitignore`） |
+| `../tests/influence-recalc-engine.test.ts` | **交叉验证闸**：engine 与运行期 `home.ts` 逐位对拍（19 测试） |
 
 ---
 
@@ -45,7 +48,7 @@
 
 ## 2. 前置条件与执行顺序
 
-1. **迁移 0062 必须先 apply**：本批 `01` 会写 `stadiums.fans_window_start`，而快照显示生产**还没有这一列**。没有该列且未加 `--assume-migrated` 时 `plan` 直接中止。
+1. **迁移 0062 必须先 apply**：本批 `01` 会写 `stadiums.fans_window_start`。**2026-10-04T11:21:42Z 已 apply**（回读：列 `REAL NOT NULL DEFAULT 0`、16 行 `fans_window_start = fans`）。没有该列且未加 `--assume-migrated` 时 `plan` 直接中止。
 2. **先上线 v6.28.0 代码（A/B 段）再执行本批**：本批把历史重记成新公式的值；代码未上线时管理端/公开面仍按旧公式解读这些数据，且新比赛的钩子仍按旧口径写库。
 3. `snapshot`（只读）→ `plan`（离线）→ **人工复核 `report.md`** → `apply --yes`（先备份 + 落 marker）→ `verify`（只读守恒断言）。
 4. 243 补值后重跑（`UPDATE` 是绝对赋值，可重复收敛；也可先 `99-rollback.sql` 再重跑）。
@@ -80,9 +83,15 @@ node scripts/prod-20261004-influence-recalc/recalc.mjs verify
 
 ---
 
-## 4. 离线干跑实测（只读，2026-10-04）
+## 4. 执行实测（2026-10-04）
 
-口径 `--initials=default`（fans 初值一律 1800），除「0062 未 apply」「243 待补」两条 FAIL 外，其余 **17 项断言全 PASS**（含空表断言、窗口 1 行、16 队 stadium 齐、CPU 4 队无 stadium 行且与 `CPU_SEED_PRESETS` 逐字一致、级别派生 16/16、生产账本链 210 行自洽、守恒断言 ①-⑥⑥b）。
+**执行记录**：`snapshot` 11:24:08.034Z（只读）→ `plan` 11:24:12.425Z → `apply --yes` **11:26:03.237Z**（备份 11:25:23.869Z，293 条语句，5 个 SQL 文件全部 `success: true`）→ `verify` **9/9 PASS**。
+
+**plan 断言 19/19 全 PASS**（0062 已 apply、match_weather 空、窗口 1 行 closed、16/16 队有 stadium 行、CPU 4 队无 stadium 行且与 `CPU_SEED_PRESETS` 逐字一致、级别派生 16/16、图值待补 0 条、上座快照覆盖 78 行、生产账本链 210 行自洽、created_at 与 id 同序、守恒断言 ①-⑥⑥b）。
+
+**verify 9/9 PASS**：① 账户余额 = 队内末条 `balance_after`（16 队）② 队内流水累加 = 每条 `balance_after`（210 行全链）③ 非比赛收入流水金额不变（132 行 diff 空）④ 每队余额非负（16 队）⑤ `match_attendance` 行数/主键集合不变（78 行）⑥ 每场上座 ≤ 容量（78 场）⑦ stadiums 与 plan 一致（壳/奖励分/fans/fans_window_start，16 队）⑧ `match_attendance` 与 plan 一致（78 场）⑨ 流水金额/余额与 plan 一致（210 行）。
+
+**独立通道回读**（CF REST API `POST /accounts/{acc}/d1/database/{db}/query`，与 wrangler 不同路径）：stadiums 16 行 / fans 合计 **52024.143496** / `fans_window_start` 同值 / 壳合计 779.27 / 奖励分合计 516；`match_attendance` 78 行 / 上座 **972885** / 收入 **145.96**；`ledger_entries` 210 行 / `ledger_accounts` 余额合计 **960.16** = 流水金额合计。**逐队核对**：16 队的壳/奖励分与 `values.json` 图值逐字相等、`fans` 与 `plan.json` 的 `finalFans` 逐位相等；4 支 CPU 队无 stadium 行（正确）。
 
 **联盟合计**
 
@@ -115,7 +124,7 @@ node scripts/prod-20261004-influence-recalc/recalc.mjs verify
 
 prod 口径下 4 队的窗末 fans：曼联 4410.9 / 拜仁 2590.52 / 尤文 3323.98 / 巴黎 3961.38。
 
-> **口径取舍说明**：任务要求「S9 W1 初值一律 1800」，所以**留档产物用的是 default 口径**（`plan.json` / `report.md` / `sql/` 当前均为 default）。
+> **口径取舍说明**：任务要求「S9 W1 初值一律 1800」，所以**实际执行与留档产物都用 default 口径**（`plan.json` / `report.md` / `sql/` 均为 default，`plan.initialsMode = "default"`）。生产 4 队现值与 1800 的差异已在 §6.2 登记为「导入工件原文」，不改变本批口径。
 
 ---
 
@@ -124,7 +133,7 @@ prod 口径下 4 队的窗末 fans：曼联 4410.9 / 拜仁 2590.52 / 尤文 332
 - `sql/99-rollback.sql`（320 条语句）按 `snapshot.json` 把四张表**逐行还原**（stadiums 取值、match_attendance 上座/收入、ledger_entries 金额+memo+balance_after、ledger_accounts 余额），可反复执行。
 - `apply --yes` 前已自动落 `backup/<ISO时间戳>/` 全量 JSON 备份 + `manifest.json`；两条路都可用，`backup/` 更贴近"执行那一刻"的真值。
 - 恢复后建议跑一次 `verify`（会报 plan 与实际不一致，属正常）或直接对比 `snapshot.json`。
-- 二次执行：删掉 `applied.marker` 或用 `--force`（`UPDATE` 绝对赋值 ⇒ 收敛到同一结果）。
+- 二次执行：删掉 `applied.marker` 或用 `--force`（`UPDATE` 绝对赋值 ⇒ 收敛到同一结果）。**当前 `applied.marker` 已在库（11:26:03.237Z），重跑必须显式 `--force`**；`99-rollback.sql` 仍可反复执行。
 
 ---
 
@@ -143,11 +152,11 @@ prod 口径下 4 队的窗末 fans：曼联 4410.9 / 拜仁 2590.52 / 尤文 332
 ## 7. 交叉验证测试（交付子代理自证）
 
 ```bash
-npx vitest run tests/influence-recalc-engine.test.ts   # 17 passed
+npx vitest run tests/influence-recalc-engine.test.ts   # 19 passed
 npx tsc -p tsconfig.tests.json --noEmit                # 类型干净
 ```
 
-覆盖：①`attendance_model` 镜像**双向键集合相等 + 逐键相等**（防日后新增因子漏搬）＋ tier_table / influence_tier_coefs / per-match 系数对拍；②纯函数矩阵（`abilityTier` 边界含 null、`playerAbilityLevel`、`playerInfluenceSum` 对库内实算、`diehardTarget` 0..600 全扫含 120/160/200 阶梯、`evolveFans` 10080 组合逐位相等、`formPtsOf`/`rollWeather`/`uniform`/`asRange`）；③钩子级场景 A-E（晴/premier/3 胜、雨/second/3 败+青训 3、雪/premier/中性+冠名口碑 buff 0.005+带球员、多云/premier/容量 3000 爆仓、多云/second/掉粉侧）+ 容量 0 退化场，断言 `attendance/ticket/commercial/broadcast/流水 amount/stadiums.fans` 全部 `toBe`；④`formPtsBefore` 时间切面；⑤关窗两条分支 + `fan_mood` 修正。
+覆盖：①`attendance_model` 镜像**双向键集合相等 + 逐键相等**（防日后新增因子漏搬）＋ tier_table / influence_tier_coefs / per-match 系数对拍；②纯函数矩阵（`abilityTier` 边界含 null、`playerAbilityLevel`、`playerInfluenceSum` 对库内实算、`diehardTarget` 0..600 全扫含 120/160/200 阶梯、`evolveFans` 10080 组合逐位相等、`formPtsOf`/`rollWeather`/`uniform`/`asRange`）；③钩子级场景 A-E（晴/premier/3 胜、雨/second/3 败+青训 3、雪/premier/中性+冠名口碑 buff 0.005+带球员、多云/premier/容量 3000 爆仓、多云/second/掉粉侧）+ 容量 0 退化场，断言 `attendance/ticket/commercial/broadcast/流水 amount/stadiums.fans` 全部 `toBe`；④`formPtsBefore` 时间切面；⑤关窗两条分支 + `fan_mood` 修正；⑥**链式推进**（同一对阵连打两场，逐场把上一场 `nextFans` 喂给下一场，与运行期 `matchAttendanceStatements` 的 `stadiums.fans` 逐位对拍，并反证「第二场仍用初值 1800」必不相等）；⑦**账本链重放**（不改金额时幂等；改一条金额后整链 `balance_after` 全变；裸 binary64 不取整锁 `0.1+0.2 !== 0.3`）。
 
 踩过的坑（改测试时注意）：`engine.mjs` 的相对路径是 `../scripts/...`（从 `tests/` 出发）；容量 0 场景 engine 必须**显式**传 per-match 系数 0.2（否则走窗系数 0.5）；想测「钳回 0」必须给 `dropRate: 1`（默认 0.5 时 coef ≤ 0.9 算不出负数）；`formPtsOf` 里**弃权场次也占 3 场名额**（胜 3 + 平 1 + 弃权负 0 = 4 分）。
 

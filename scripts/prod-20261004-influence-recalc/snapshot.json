@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-10-04T06:32:04.283Z",
+  "fetchedAt": "2026-10-04T11:24:08.034Z",
   "account": "47f02bad5907ee6539e8aff008a01cec",
   "tokenFrom": "C:\\Users\\bhdjb\\AppData\\Roaming\\xdg.config\\.wrangler\\config\\default.toml",
   "databases": {
@@ -34,7 +34,7 @@
     "event_occurrences",
     "venue_bookings"
   ],
-  "stadiumsHasFansWindowStart": false,
+  "stadiumsHasFansWindowStart": true,
   "tables": {
     "clubs": [
       {
@@ -251,7 +251,8 @@
         "updated_at": "2026-09-18T00:46:31.534Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 2,
@@ -265,7 +266,8 @@
         "updated_at": "2026-10-03T09:21:08.348Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 5,
@@ -279,7 +281,8 @@
         "updated_at": "2026-10-03T04:11:11.440Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 9,
@@ -293,7 +296,8 @@
         "updated_at": "2026-10-03T14:15:40.446Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 11,
@@ -307,7 +311,8 @@
         "updated_at": "2026-09-28T14:56:23.384Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1764
       },
       {
         "club_id": 13,
@@ -321,7 +326,8 @@
         "updated_at": "2026-09-18T00:46:31.534Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 14,
@@ -335,7 +341,8 @@
         "updated_at": "2026-09-18T00:46:31.534Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 21,
@@ -349,7 +356,8 @@
         "updated_at": "2026-10-03T10:01:36.884Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1782
       },
       {
         "club_id": 33,
@@ -363,7 +371,8 @@
         "updated_at": "2026-10-02T05:50:46.080Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 45,
@@ -377,7 +386,8 @@
         "updated_at": "2026-10-01T15:35:46.665Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1836
       },
       {
         "club_id": 66,
@@ -391,7 +401,8 @@
         "updated_at": "2026-10-03T10:31:16.377Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 73,
@@ -405,7 +416,8 @@
         "updated_at": "2026-10-01T14:55:47.300Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1872
       },
       {
         "club_id": 243,
@@ -419,7 +431,8 @@
         "updated_at": "2026-09-18T00:46:31.534Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 280,
@@ -433,7 +446,8 @@
         "updated_at": "2026-10-01T05:40:45.185Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 449,
@@ -447,7 +461,8 @@
         "updated_at": "2026-09-18T00:46:31.534Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       },
       {
         "club_id": 110374,
@@ -461,7 +476,8 @@
         "updated_at": "2026-10-03T13:20:38.272Z",
         "build_credit": 0,
         "next_attendance_mod": 1,
-        "next_weather": ""
+        "next_weather": "",
+        "fans_window_start": 1800
       }
     ],
     "club_facilities": [
@@ -2389,7 +2405,7 @@
         "balance_after": 24.12,
         "ref_type": "match_home",
         "ref_id": 44,
-        "memo": "联赛胜场奖金（比�� #44）",
+        "memo": "联赛胜场奖金（比赛 #44）",
         "created_at": "2026-09-20T05:46:08.936Z"
       },
       {
@@ -3104,7 +3120,7 @@
         "balance_after": 32.489999999999995,
         "ref_type": "match_home",
         "ref_id": 54,
-        "memo": "联赛胜场奖金（比�� #54）",
+        "memo": "联赛胜场奖金（比赛 #54）",
         "created_at": "2026-09-20T05:56:56.071Z"
       },
       {
@@ -3885,7 +3901,7 @@
         "balance_after": 71.95,
         "ref_type": "match",
         "ref_id": 69,
-        "memo": "比赛日收入（比赛 #69，上座 6615/12000，雨；票 0.99/商 0/播 0）",
+        "memo": "比赛日收入（比赛 #69，上座 6615/12000，��；票 0.99/商 0/播 0）",
         "created_at": "2026-09-28T14:21:23.915Z"
       },
       {
@@ -4160,7 +4176,7 @@
         "balance_after": 71.92,
         "ref_type": "match",
         "ref_id": 21,
-        "memo": "比赛日收入（比赛 #21，上座 9453/12000，多云；票 1.42/商 0/播 0���",
+        "memo": "比赛日收入（比赛 #21，上座 9453/12000，多云；票 1.42/商 0/播 0）",
         "created_at": "2026-10-03T10:31:16.377Z"
       },
       {

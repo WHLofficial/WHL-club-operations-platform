@@ -1,5 +1,5 @@
 -- 02 match_attendance：上座与三分收入重算（78 场；weather 保持库中已记录值不变）
--- 由 scripts/prod-20261004-influence-recalc/recalc.mjs plan 生成（2026-10-04T06:41:11.515Z）
+-- 由 scripts/prod-20261004-influence-recalc/recalc.mjs plan 生成（2026-10-04T11:24:12.425Z）
 -- 口径真源：src/worker/home.ts（v6.28.0）；重演随机项取区间中点、天气取库中已记录值
 -- 本文件不自动执行：apply 默认只打印，需要显式 --yes
 
