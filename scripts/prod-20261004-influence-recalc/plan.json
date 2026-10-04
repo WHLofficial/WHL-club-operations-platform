@@ -1,0 +1,6486 @@
+{
+  "generatedAt": "2026-10-04T06:41:11.515Z",
+  "snapshotFetchedAt": "2026-10-04T06:32:04.283Z",
+  "allowMissing": true,
+  "initialsMode": "default",
+  "configNotes": [
+    "attendance_model 生产未配置 ⇒ 运行期同样走出厂默认（config.ts:132）",
+    "tier_table 生产未配置 ⇒ 出厂默认",
+    "influence_tier_coefs 生产未配置 ⇒ 出厂 {premier:1.2, second:1.0}"
+  ],
+  "perMatch": {
+    "growRate": 0.2,
+    "dropRate": 0.2
+  },
+  "influenceCoefs": {
+    "premier": 1.2,
+    "second": 1
+  },
+  "season": 9,
+  "windowSeq": 1,
+  "checks": [
+    {
+      "name": "迁移 0062 已 apply",
+      "ok": false,
+      "detail": "快照显示 fans_window_start 列不存在；本次带 --assume-migrated 只为离线看数，执行前必须先 apply 0062"
+    },
+    {
+      "name": "match_weather 为空（无赛前预报 ⇒ wx 全程取区间中点）",
+      "ok": true,
+      "detail": "0 行"
+    },
+    {
+      "name": "season_windows 只有 1 行",
+      "ok": true,
+      "detail": "[{\"id\":1,\"season\":9,\"seq\":1,\"status\":\"closed\"}]"
+    },
+    {
+      "name": "人类队都有 stadium 行",
+      "ok": true,
+      "detail": "16/16"
+    },
+    {
+      "name": "stadiums 行都在图值表内",
+      "ok": true,
+      "detail": "16 行"
+    },
+    {
+      "name": "CPU 队无 stadium 行（本批不写）",
+      "ok": true,
+      "detail": "4 队均无"
+    },
+    {
+      "name": "CPU 图值与 CPU_SEED_PRESETS 逐字一致",
+      "ok": true,
+      "detail": "4/4 一致"
+    },
+    {
+      "name": "级别与报名派生逐队一致（16 队）",
+      "ok": true,
+      "detail": "16/16 一致"
+    },
+    {
+      "name": "图值待补",
+      "ok": false,
+      "detail": "243 bonus_points 按 0 处理（--allow-missing）"
+    },
+    {
+      "name": "上座快照覆盖全部窗口行",
+      "ok": true,
+      "detail": "78 行"
+    },
+    {
+      "name": "生产现有账本链自洽（逐行累加 == balance_after）",
+      "ok": true,
+      "detail": "210 行全部一致"
+    },
+    {
+      "name": "生产账本 created_at 与 id 同序",
+      "ok": true,
+      "detail": "共 210 行"
+    }
+  ],
+  "assertions": [
+    {
+      "name": "① ledger_accounts.balance == 队内末条 balance_after",
+      "ok": true,
+      "detail": "16 队一致"
+    },
+    {
+      "name": "② 队内流水累加 == 每一条 balance_after",
+      "ok": true,
+      "detail": "按 id 序重放（构造性成立，verify 会再核一次）"
+    },
+    {
+      "name": "③ 非比赛收入流水金额不变",
+      "ok": true,
+      "detail": "逐行 diff 为空"
+    },
+    {
+      "name": "④ 每队最终余额不为负",
+      "ok": true,
+      "detail": "16 队余额均为正"
+    },
+    {
+      "name": "⑤ match_attendance 行数/主键集合不变",
+      "ok": true,
+      "detail": "78 行（只 UPDATE，无 INSERT/DELETE）"
+    },
+    {
+      "name": "⑥ 每场上座 ≤ 容量（含 fill 口径）",
+      "ok": true,
+      "detail": "78 场全部 ≤ 容量"
+    },
+    {
+      "name": "⑥b 生产旧值同样 ≤ 容量（对照）",
+      "ok": true,
+      "detail": "78 场旧值均 ≤ 容量"
+    }
+  ],
+  "pendingValues": [
+    {
+      "club_id": 243,
+      "name": "皇家马德里",
+      "tier": "second",
+      "cpu": false,
+      "shell_influence": 37,
+      "bonus_points": 0,
+      "bonus_source": "pending",
+      "pending": true,
+      "field": "bonus_points",
+      "note": "图值在用户消息里被截断，奖励分未知 ⇒ 缺 --allow-missing 时 plan 中止并报「243 奖励分待用户补值」；带 --allow-missing 时按 0 处理并在 report 显著标注"
+    }
+  ],
+  "clubPlans": [
+    {
+      "clubId": 1,
+      "name": "阿森纳",
+      "tier": "second",
+      "cpu": false,
+      "shellInfluence": 33.87,
+      "bonusPoints": 10,
+      "bonusSource": "given",
+      "playerSum": 57.69999999999999,
+      "influence": 101.57,
+      "oldInfluence": 57.69999999999999,
+      "diehardTarget": 2640.8199999999997,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 4,
+      "initialFans": 1800,
+      "finalFans": 1968.0176760928,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 23751,
+      "attendanceAfter": 26268,
+      "revenueBefore": 3.56,
+      "revenueAfter": 3.94
+    },
+    {
+      "clubId": 2,
+      "name": "阿斯顿维拉",
+      "tier": "second",
+      "cpu": false,
+      "shellInfluence": 47.29,
+      "bonusPoints": 28,
+      "bonusSource": "given",
+      "playerSum": 82.63500000000002,
+      "influence": 157.925,
+      "oldInfluence": 82.63500000000002,
+      "diehardTarget": 3954.3500000000004,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 4,
+      "initialFans": 1800,
+      "finalFans": 2853.9086388941546,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 27641,
+      "attendanceAfter": 33703,
+      "revenueBefore": 4.15,
+      "revenueAfter": 5.07
+    },
+    {
+      "clubId": 5,
+      "name": "切尔西",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 57.89,
+      "bonusPoints": 30,
+      "bonusSource": "given",
+      "playerSum": 63.02,
+      "influence": 175.09199999999998,
+      "oldInfluence": 75.624,
+      "diehardTarget": 4226.38,
+      "capacity": 22000,
+      "stadiumTier": 1,
+      "homeMatches": 5,
+      "initialFans": 1800,
+      "finalFans": 3283.567536048574,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 49305,
+      "attendanceAfter": 71776,
+      "revenueBefore": 7.39,
+      "revenueAfter": 10.77
+    },
+    {
+      "clubId": 9,
+      "name": "利物浦",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 71.86,
+      "bonusPoints": 90,
+      "bonusSource": "given",
+      "playerSum": 87.29,
+      "influence": 280.98,
+      "oldInfluence": 104.748,
+      "diehardTarget": 5571.76,
+      "capacity": 35000,
+      "stadiumTier": 1,
+      "homeMatches": 6,
+      "initialFans": 1800,
+      "finalFans": 4179.917368032389,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 67499,
+      "attendanceAfter": 112012,
+      "revenueBefore": 10.12,
+      "revenueAfter": 16.8
+    },
+    {
+      "clubId": 11,
+      "name": "曼联",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 73.41,
+      "bonusPoints": 45,
+      "bonusSource": "given",
+      "playerSum": 98.245,
+      "influence": 250.986,
+      "oldInfluence": 117.894,
+      "diehardTarget": 5211.832,
+      "capacity": 22000,
+      "stadiumTier": 1,
+      "homeMatches": 6,
+      "initialFans": 1800,
+      "finalFans": 4424.5449990810675,
+      "prodFans": 1764,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 64218,
+      "attendanceAfter": 107919,
+      "revenueBefore": 9.63,
+      "revenueAfter": 16.18
+    },
+    {
+      "clubId": 13,
+      "name": "纽卡斯尔联",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 37.92,
+      "bonusPoints": 35,
+      "bonusSource": "given",
+      "playerSum": 80.065,
+      "influence": 176.582,
+      "oldInfluence": 96.07799999999999,
+      "diehardTarget": 4248.73,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 5,
+      "initialFans": 1800,
+      "finalFans": 3375.9415920468855,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 39298,
+      "attendanceAfter": 49729,
+      "revenueBefore": 5.88,
+      "revenueAfter": 7.46
+    },
+    {
+      "clubId": 14,
+      "name": "诺丁汉森林",
+      "tier": "second",
+      "cpu": false,
+      "shellInfluence": 36.77,
+      "bonusPoints": 0,
+      "bonusSource": "empty_as_zero",
+      "playerSum": 77.09500000000001,
+      "influence": 113.86500000000001,
+      "oldInfluence": 77.09500000000001,
+      "diehardTarget": 2960.4900000000002,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 4,
+      "initialFans": 1800,
+      "finalFans": 2431.349477597109,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 28203,
+      "attendanceAfter": 34952,
+      "revenueBefore": 4.23,
+      "revenueAfter": 5.24
+    },
+    {
+      "clubId": 21,
+      "name": "拜仁慕尼黑",
+      "tier": "second",
+      "cpu": false,
+      "shellInfluence": 32.91,
+      "bonusPoints": 23,
+      "bonusSource": "given",
+      "playerSum": 81.02,
+      "influence": 136.93,
+      "oldInfluence": 81.02,
+      "diehardTarget": 3492.46,
+      "capacity": 35000,
+      "stadiumTier": 1,
+      "homeMatches": 4,
+      "initialFans": 1800,
+      "finalFans": 2600.84198050185,
+      "prodFans": 1782,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 40194,
+      "attendanceAfter": 49070,
+      "revenueBefore": 6.03,
+      "revenueAfter": 7.35
+    },
+    {
+      "clubId": 33,
+      "name": "慕尼黑1860",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 28.66,
+      "bonusPoints": 35,
+      "bonusSource": "given",
+      "playerSum": 85.05500000000002,
+      "influence": 171.45800000000003,
+      "oldInfluence": 102.06600000000002,
+      "diehardTarget": 4171.870000000001,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 6,
+      "initialFans": 1800,
+      "finalFans": 3756.3486662153127,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 47258,
+      "attendanceAfter": 66005,
+      "revenueBefore": 7.09,
+      "revenueAfter": 9.92
+    },
+    {
+      "clubId": 45,
+      "name": "尤文图斯",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 66.24,
+      "bonusPoints": 20,
+      "bonusSource": "given",
+      "playerSum": 75.82000000000001,
+      "influence": 190.472,
+      "oldInfluence": 90.98400000000001,
+      "diehardTarget": 4457.08,
+      "capacity": 35000,
+      "stadiumTier": 1,
+      "homeMatches": 5,
+      "initialFans": 1800,
+      "finalFans": 3305.7049728568913,
+      "prodFans": 1836,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 55168,
+      "attendanceAfter": 74374,
+      "revenueBefore": 8.29,
+      "revenueAfter": 11.15
+    },
+    {
+      "clubId": 66,
+      "name": "里昂",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 78,
+      "bonusPoints": 50,
+      "bonusSource": "given",
+      "playerSum": 102.82000000000002,
+      "influence": 266.98400000000004,
+      "oldInfluence": 123.38400000000001,
+      "diehardTarget": 5403.808000000001,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 6,
+      "initialFans": 1800,
+      "finalFans": 4600.97105646187,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 44183,
+      "attendanceAfter": 62477,
+      "revenueBefore": 6.62,
+      "revenueAfter": 9.38
+    },
+    {
+      "clubId": 73,
+      "name": "巴黎圣日耳曼",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 55.51,
+      "bonusPoints": 70,
+      "bonusSource": "given",
+      "playerSum": 102.24000000000002,
+      "influence": 259.30000000000007,
+      "oldInfluence": 122.68800000000002,
+      "diehardTarget": 5311.6,
+      "capacity": 35000,
+      "stadiumTier": 1,
+      "homeMatches": 5,
+      "initialFans": 1800,
+      "finalFans": 3923.911173770798,
+      "prodFans": 1872,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 53929,
+      "attendanceAfter": 80723,
+      "revenueBefore": 8.08,
+      "revenueAfter": 12.11
+    },
+    {
+      "clubId": 243,
+      "name": "皇家马德里",
+      "tier": "second",
+      "cpu": false,
+      "shellInfluence": 37,
+      "bonusPoints": 0,
+      "bonusSource": "pending",
+      "playerSum": 72.78500000000001,
+      "influence": 109.78500000000001,
+      "oldInfluence": 72.78500000000001,
+      "diehardTarget": 2854.4100000000003,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 4,
+      "initialFans": 1800,
+      "finalFans": 2692.7741650027942,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 34942,
+      "attendanceAfter": 41386,
+      "revenueBefore": 5.25,
+      "revenueAfter": 6.21
+    },
+    {
+      "clubId": 280,
+      "name": "奥林匹亚科斯",
+      "tier": "second",
+      "cpu": false,
+      "shellInfluence": 50.35,
+      "bonusPoints": 5,
+      "bonusSource": "given",
+      "playerSum": 42.714999999999996,
+      "influence": 98.065,
+      "oldInfluence": 42.714999999999996,
+      "diehardTarget": 2549.69,
+      "capacity": 12000,
+      "stadiumTier": 0,
+      "homeMatches": 4,
+      "initialFans": 1800,
+      "finalFans": 2193.5304833968344,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 26437,
+      "attendanceAfter": 29870,
+      "revenueBefore": 3.96,
+      "revenueAfter": 4.49
+    },
+    {
+      "clubId": 449,
+      "name": "皇家贝蒂斯",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 35.32,
+      "bonusPoints": 25,
+      "bonusSource": "given",
+      "playerSum": 63.81,
+      "influence": 143.956,
+      "oldInfluence": 76.572,
+      "diehardTarget": 3647.0319999999997,
+      "capacity": 17000,
+      "stadiumTier": 0,
+      "homeMatches": 5,
+      "initialFans": 1800,
+      "finalFans": 2849.9323965412214,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 36831,
+      "attendanceAfter": 48055,
+      "revenueBefore": 5.52,
+      "revenueAfter": 7.21
+    },
+    {
+      "clubId": 110374,
+      "name": "佛罗伦萨",
+      "tier": "premier",
+      "cpu": false,
+      "shellInfluence": 36.27,
+      "bonusPoints": 50,
+      "bonusSource": "given",
+      "playerSum": 89.89500000000002,
+      "influence": 201.39800000000002,
+      "oldInfluence": 107.87400000000002,
+      "diehardTarget": 4616.776,
+      "capacity": 22000,
+      "stadiumTier": 1,
+      "homeMatches": 5,
+      "initialFans": 1800,
+      "finalFans": 3582.881313403389,
+      "prodFans": 1800,
+      "prodFansWindowStart": null,
+      "attendanceBefore": 61064,
+      "attendanceAfter": 84566,
+      "revenueBefore": 9.16,
+      "revenueAfter": 12.68
+    }
+  ],
+  "matchPlans": [
+    {
+      "matchId": 33,
+      "clubId": 5,
+      "clubName": "切尔西",
+      "rcId": 1,
+      "weather": "雨",
+      "formPts": 4,
+      "capacity": 22000,
+      "awayClubId": 110374,
+      "awayInfluence": 201.39800000000002,
+      "before": {
+        "attendance": 8842,
+        "ticket": 1.33,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.33,
+      "after": {
+        "attendance": 9554,
+        "ticket": 1.43,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.43,
+      "factors": {
+        "demand": 9554.346425913234,
+        "wx": 0.845,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0575120508075755,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2175.4624528,
+        "attendRate": 0.43427272727272725,
+        "target": 4226.38
+      }
+    },
+    {
+      "matchId": 36,
+      "clubId": 9,
+      "clubName": "利物浦",
+      "rcId": 2,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 11,
+      "awayInfluence": 250.986,
+      "before": {
+        "attendance": 10743,
+        "ticket": 1.61,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.61,
+      "after": {
+        "attendance": 10834,
+        "ticket": 1.63,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.63,
+      "factors": {
+        "demand": 10834.446641511851,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0446626094383942,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2346.0129093485716,
+        "attendRate": 0.3095428571428571,
+        "target": 5571.76
+      }
+    },
+    {
+      "matchId": 32,
+      "clubId": 45,
+      "clubName": "尤文图斯",
+      "rcId": 3,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 66,
+      "awayInfluence": 266.98400000000004,
+      "before": {
+        "attendance": 13186,
+        "ticket": 1.98,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.98,
+      "after": {
+        "attendance": 13157,
+        "ticket": 1.97,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.97,
+      "factors": {
+        "demand": 13157.549198622368,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.070084841866521,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2198.756346422857,
+        "attendRate": 0.3759142857142857,
+        "target": 4457.08
+      }
+    },
+    {
+      "matchId": 52,
+      "clubId": 5,
+      "clubName": "切尔西",
+      "rcId": 4,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 22000,
+      "awayClubId": 45,
+      "awayInfluence": 190.472,
+      "before": {
+        "attendance": 11689,
+        "ticket": 1.75,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.75,
+      "after": {
+        "attendance": 15668,
+        "ticket": 2.35,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.35,
+      "factors": {
+        "demand": 15668.88055590097,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.054391976789345,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2175.4624528,
+        "after": 2538.422653480471,
+        "attendRate": 0.7121818181818181,
+        "target": 4226.38
+      }
+    },
+    {
+      "matchId": 49,
+      "clubId": 11,
+      "clubName": "曼联",
+      "rcId": 5,
+      "weather": "雪",
+      "formPts": 4,
+      "capacity": 22000,
+      "awayClubId": 73,
+      "awayInfluence": 259.30000000000007,
+      "before": {
+        "attendance": 8085,
+        "ticket": 1.21,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.21,
+      "after": {
+        "attendance": 8658,
+        "ticket": 1.3,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.3,
+      "factors": {
+        "demand": 8658.117786808825,
+        "wx": 0.77,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.051656267680269,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2316.8367180218183,
+        "attendRate": 0.39354545454545453,
+        "target": 5211.832
+      }
+    },
+    {
+      "matchId": 34,
+      "clubId": 73,
+      "clubName": "巴黎圣日耳曼",
+      "rcId": 6,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 13,
+      "awayInfluence": 176.582,
+      "before": {
+        "attendance": 10130,
+        "ticket": 1.52,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.52,
+      "after": {
+        "attendance": 10724,
+        "ticket": 1.61,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.61,
+      "factors": {
+        "demand": 10724.378122190512,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.034049749325106,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2307.4683392,
+        "attendRate": 0.3064,
+        "target": 5311.6
+      }
+    },
+    {
+      "matchId": 41,
+      "clubId": 5,
+      "clubName": "切尔西",
+      "rcId": 8,
+      "weather": "雨",
+      "formPts": 4,
+      "capacity": 22000,
+      "awayClubId": 131681,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 8831,
+        "ticket": 1.32,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.32,
+      "after": {
+        "attendance": 13068,
+        "ticket": 1.96,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.96,
+      "factors": {
+        "demand": 13068.5610859558,
+        "wx": 0.845,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0257007744500035,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2538.422653480471,
+        "after": 2821.1892681694226,
+        "attendRate": 0.594,
+        "target": 4226.38
+      }
+    },
+    {
+      "matchId": 31,
+      "clubId": 449,
+      "clubName": "皇家贝蒂斯",
+      "rcId": 10,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 17000,
+      "awayClubId": 241,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 6942,
+        "ticket": 1.04,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.04,
+      "after": {
+        "attendance": 7202,
+        "ticket": 1.08,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.08,
+      "factors": {
+        "demand": 7202.316707882965,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.031259551529634,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2084.2430139482353,
+        "attendRate": 0.42364705882352943,
+        "target": 3647.0319999999997
+      }
+    },
+    {
+      "matchId": 163,
+      "clubId": 280,
+      "clubName": "奥林匹亚科斯",
+      "rcId": 11,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 243,
+      "awayInfluence": 109.78500000000001,
+      "before": {
+        "attendance": 7029,
+        "ticket": 1.05,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.05,
+      "after": {
+        "attendance": 7374,
+        "ticket": 1.11,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.11,
+      "factors": {
+        "demand": 7374.933788813543,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0559756284097284,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 1926.8175604,
+        "attendRate": 0.6145,
+        "target": 2549.69
+      }
+    },
+    {
+      "matchId": 164,
+      "clubId": 2,
+      "clubName": "阿斯顿维拉",
+      "rcId": 12,
+      "weather": "雨",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 14,
+      "awayInfluence": 113.86500000000001,
+      "before": {
+        "attendance": 6117,
+        "ticket": 0.92,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.92,
+      "after": {
+        "attendance": 6303,
+        "ticket": 0.95,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 0.95,
+      "factors": {
+        "demand": 6303.330270698117,
+        "wx": 0.845,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0360503403514327,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2149.047787,
+        "attendRate": 0.52525,
+        "target": 3954.3500000000004
+      }
+    },
+    {
+      "matchId": 165,
+      "clubId": 21,
+      "clubName": "拜仁慕尼黑",
+      "rcId": 13,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 10,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 12208,
+        "ticket": 1.83,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.83,
+      "after": {
+        "attendance": 12699,
+        "ticket": 1.9,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.9,
+      "factors": {
+        "demand": 12699.883108157454,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0328635069013365,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2052.22102752,
+        "attendRate": 0.36282857142857144,
+        "target": 3492.46
+      }
+    },
+    {
+      "matchId": 40,
+      "clubId": 33,
+      "clubName": "慕尼黑1860",
+      "rcId": 15,
+      "weather": "多���",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 9,
+      "awayInfluence": 280.98,
+      "before": {
+        "attendance": 7057,
+        "ticket": 1.06,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.06,
+      "after": {
+        "attendance": 7789,
+        "ticket": 1.17,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.17,
+      "factors": {
+        "demand": 7789.956724095696,
+        "wx": 1,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.08193843390218,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2207.7877028666667,
+        "attendRate": 0.6490833333333333,
+        "target": 4171.870000000001
+      }
+    },
+    {
+      "matchId": 39,
+      "clubId": 11,
+      "clubName": "曼联",
+      "rcId": 16,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 22000,
+      "awayClubId": 45,
+      "awayInfluence": 190.472,
+      "before": {
+        "attendance": 9578,
+        "ticket": 1.44,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.44,
+      "after": {
+        "attendance": 13855,
+        "ticket": 2.08,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.08,
+      "factors": {
+        "demand": 13855.679899406969,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0379447459220834,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2316.8367180218183,
+        "after": 2810.091277793046,
+        "attendRate": 0.6297727272727273,
+        "target": 5211.832
+      }
+    },
+    {
+      "matchId": 38,
+      "clubId": 110374,
+      "clubName": "佛罗伦萨",
+      "rcId": 17,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 22000,
+      "awayClubId": 449,
+      "awayInfluence": 143.956,
+      "before": {
+        "attendance": 12927,
+        "ticket": 1.94,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.94,
+      "after": {
+        "attendance": 12735,
+        "ticket": 1.91,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.91,
+      "factors": {
+        "demand": 12735.241847684683,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0357391831100606,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2268.4554558545456,
+        "attendRate": 0.5788636363636364,
+        "target": 4616.776
+      }
+    },
+    {
+      "matchId": 42,
+      "clubId": 66,
+      "clubName": "里昂",
+      "rcId": 18,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 73,
+      "awayInfluence": 259.30000000000007,
+      "before": {
+        "attendance": 7914,
+        "ticket": 1.19,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.19,
+      "after": {
+        "attendance": 8682,
+        "ticket": 1.3,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.3,
+      "factors": {
+        "demand": 8682.084769124742,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.048560962454679,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2441.04536704,
+        "attendRate": 0.7235,
+        "target": 5403.808000000001
+      }
+    },
+    {
+      "matchId": 44,
+      "clubId": 73,
+      "clubName": "巴黎圣日耳曼",
+      "rcId": 19,
+      "weather": "晴",
+      "formPts": 0,
+      "capacity": 35000,
+      "awayClubId": 241,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 8875,
+        "ticket": 1.33,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.33,
+      "after": {
+        "attendance": 11225,
+        "ticket": 1.68,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.68,
+      "factors": {
+        "demand": 11225.103409650546,
+        "wx": 1.15,
+        "form": 0.7,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0173544157346703,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2307.4683392,
+        "after": 2607.789494994871,
+        "attendRate": 0.32071428571428573,
+        "target": 5311.6
+      }
+    },
+    {
+      "matchId": 45,
+      "clubId": 66,
+      "clubName": "里昂",
+      "rcId": 20,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 11,
+      "awayInfluence": 250.986,
+      "before": {
+        "attendance": 6477,
+        "ticket": 0.97,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.97,
+      "after": {
+        "attendance": 9916,
+        "ticket": 1.49,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.49,
+      "factors": {
+        "demand": 9916.442376943192,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0470039403110298,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2441.04536704,
+        "after": 2992.4352447847427,
+        "attendRate": 0.8263333333333334,
+        "target": 5403.808000000001
+      }
+    },
+    {
+      "matchId": 46,
+      "clubId": 45,
+      "clubName": "尤文图斯",
+      "rcId": 21,
+      "weather": "雨",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 33,
+      "awayInfluence": 171.45800000000003,
+      "before": {
+        "attendance": 9304,
+        "ticket": 1.4,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.4,
+      "after": {
+        "attendance": 11532,
+        "ticket": 1.73,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.73,
+      "factors": {
+        "demand": 11532.943710185791,
+        "wx": 0.845,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0450087151917342,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2198.756346422857,
+        "after": 2529.2820154190895,
+        "attendRate": 0.32948571428571427,
+        "target": 4457.08
+      }
+    },
+    {
+      "matchId": 43,
+      "clubId": 9,
+      "clubName": "利物浦",
+      "rcId": 22,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 5,
+      "awayInfluence": 175.09199999999998,
+      "before": {
+        "attendance": 11193,
+        "ticket": 1.68,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.68,
+      "after": {
+        "attendance": 13938,
+        "ticket": 2.09,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.09,
+      "factors": {
+        "demand": 13938.419469210174,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.031157377749306,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2346.0129093485716,
+        "after": 2835.8693326827424,
+        "attendRate": 0.39822857142857143,
+        "target": 5571.76
+      }
+    },
+    {
+      "matchId": 47,
+      "clubId": 13,
+      "clubName": "纽卡斯尔联",
+      "rcId": 23,
+      "weather": "雪",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 110374,
+      "awayInfluence": 201.39800000000002,
+      "before": {
+        "attendance": 5727,
+        "ticket": 0.86,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.86,
+      "after": {
+        "attendance": 5860,
+        "ticket": 0.88,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 0.88,
+      "factors": {
+        "demand": 5860.156378339809,
+        "wx": 0.77,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0570267637698068,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2189.5113186666667,
+        "attendRate": 0.48833333333333334,
+        "target": 4248.73
+      }
+    },
+    {
+      "matchId": 172,
+      "clubId": 2,
+      "clubName": "阿斯顿维拉",
+      "rcId": 26,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 112172,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 6616,
+        "ticket": 0.99,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.99,
+      "after": {
+        "attendance": 8575,
+        "ticket": 1.29,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.29,
+      "factors": {
+        "demand": 8575.901578581497,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0284945385467785,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2149.047787,
+        "after": 2468.8871624031667,
+        "attendRate": 0.7145833333333333,
+        "target": 3954.3500000000004
+      }
+    },
+    {
+      "matchId": 170,
+      "clubId": 14,
+      "clubName": "诺丁汉森林",
+      "rcId": 28,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 280,
+      "awayInfluence": 98.065,
+      "before": {
+        "attendance": 7620,
+        "ticket": 1.14,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.14,
+      "after": {
+        "attendance": 8636,
+        "ticket": 1.3,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.3,
+      "factors": {
+        "demand": 8636.553023317087,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0430619593378123,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 2006.0720776,
+        "attendRate": 0.7196666666666667,
+        "target": 2960.4900000000002
+      }
+    },
+    {
+      "matchId": 167,
+      "clubId": 1,
+      "clubName": "阿森纳",
+      "rcId": 29,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 243,
+      "awayInfluence": 109.78500000000001,
+      "before": {
+        "attendance": 8317,
+        "ticket": 1.25,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.25,
+      "after": {
+        "attendance": 8727,
+        "ticket": 1.31,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.31,
+      "factors": {
+        "demand": 8727.484394998524,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0540440090577927,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 1949.8173076,
+        "attendRate": 0.72725,
+        "target": 2640.8199999999997
+      }
+    },
+    {
+      "matchId": 171,
+      "clubId": 280,
+      "clubName": "奥林匹亚科斯",
+      "rcId": 30,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 1,
+      "awayInfluence": 101.57,
+      "before": {
+        "attendance": 7068,
+        "ticket": 1.06,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.06,
+      "after": {
+        "attendance": 7863,
+        "ticket": 1.18,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.18,
+      "factors": {
+        "demand": 7863.215044302611,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0517870799979605,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1926.8175604,
+        "after": 2034.213226435832,
+        "attendRate": 0.65525,
+        "target": 2549.69
+      }
+    },
+    {
+      "matchId": 173,
+      "clubId": 14,
+      "clubName": "诺丁汉森林",
+      "rcId": 31,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 10,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 6912,
+        "ticket": 1.04,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.04,
+      "after": {
+        "attendance": 8091,
+        "ticket": 1.21,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.21,
+      "factors": {
+        "demand": 8091.169712244158,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0395204847846133,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2006.0720776,
+        "after": 2172.083531022256,
+        "attendRate": 0.67425,
+        "target": 2960.4900000000002
+      }
+    },
+    {
+      "matchId": 174,
+      "clubId": 243,
+      "clubName": "皇家马德里",
+      "rcId": 32,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 21,
+      "awayInfluence": 136.93,
+      "before": {
+        "attendance": 7103,
+        "ticket": 1.07,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.07,
+      "after": {
+        "attendance": 7419,
+        "ticket": 1.11,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.11,
+      "factors": {
+        "demand": 7419.541795327231,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0623628000182175,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1800,
+        "after": 1978.6803186,
+        "attendRate": 0.61825,
+        "target": 2854.4100000000003
+      }
+    },
+    {
+      "matchId": 175,
+      "clubId": 243,
+      "clubName": "皇家马德里",
+      "rcId": 33,
+      "weather": "晴",
+      "formPts": 7,
+      "capacity": 12000,
+      "awayClubId": 2,
+      "awayInfluence": 157.925,
+      "before": {
+        "attendance": 9351,
+        "ticket": 1.4,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.4,
+      "after": {
+        "attendance": 11610,
+        "ticket": 1.74,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.74,
+      "factors": {
+        "demand": 11610.333469358562,
+        "wx": 1.15,
+        "form": 1.19,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0719246709477614,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1978.6803186,
+        "after": 2259.126825593778,
+        "attendRate": 0.9675,
+        "target": 2854.4100000000003
+      }
+    },
+    {
+      "matchId": 10,
+      "clubId": 11,
+      "clubName": "曼联",
+      "rcId": 35,
+      "weather": "晴",
+      "formPts": 9,
+      "capacity": 22000,
+      "awayClubId": 280,
+      "awayInfluence": 98.065,
+      "before": {
+        "attendance": 15351,
+        "ticket": 2.3,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 2.3,
+      "after": {
+        "attendance": 21824,
+        "ticket": 3.27,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 3.27,
+      "factors": {
+        "demand": 24463.42551614191,
+        "wx": 1.15,
+        "form": 1.25,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0195359502123624,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 2810.091277793046,
+        "after": 3453.3474235808358,
+        "attendRate": 0.992,
+        "target": 5211.832
+      }
+    },
+    {
+      "matchId": 9,
+      "clubId": 73,
+      "clubName": "巴黎圣日耳曼",
+      "rcId": 36,
+      "weather": "雨",
+      "formPts": 3,
+      "capacity": 35000,
+      "awayClubId": 5,
+      "awayInfluence": 175.09199999999998,
+      "before": {
+        "attendance": 8689,
+        "ticket": 1.3,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.3,
+      "after": {
+        "attendance": 12719,
+        "ticket": 1.91,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.91,
+      "factors": {
+        "demand": 12719.33151003028,
+        "wx": 0.845,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0337624373312766,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2607.789494994871,
+        "after": 3010.8519345969958,
+        "attendRate": 0.3634,
+        "target": 5311.6
+      }
+    },
+    {
+      "matchId": 5,
+      "clubId": 33,
+      "clubName": "慕尼黑1860",
+      "rcId": 37,
+      "weather": "多云",
+      "formPts": 7,
+      "capacity": 12000,
+      "awayClubId": 21,
+      "awayInfluence": 136.93,
+      "before": {
+        "attendance": 8174,
+        "ticket": 1.23,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.23,
+      "after": {
+        "attendance": 10600,
+        "ticket": 1.59,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.59,
+      "factors": {
+        "demand": 10600.846535250868,
+        "wx": 0.97,
+        "form": 1.19,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.039931061834385,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2207.7877028666667,
+        "after": 2711.386363896094,
+        "attendRate": 0.8833333333333333,
+        "target": 4171.870000000001
+      }
+    },
+    {
+      "matchId": 7,
+      "clubId": 110374,
+      "clubName": "佛罗伦萨",
+      "rcId": 38,
+      "weather": "晴",
+      "formPts": 3,
+      "capacity": 22000,
+      "awayClubId": 45,
+      "awayInfluence": 190.472,
+      "before": {
+        "attendance": 11961,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.79,
+      "after": {
+        "attendance": 15254,
+        "ticket": 2.29,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.29,
+      "factors": {
+        "demand": 15254.862530868611,
+        "wx": 1.15,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0472874606500562,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2268.4554558545456,
+        "after": 2680.5131268988903,
+        "attendRate": 0.6933636363636364,
+        "target": 4616.776
+      }
+    },
+    {
+      "matchId": 4,
+      "clubId": 13,
+      "clubName": "纽卡斯尔联",
+      "rcId": 39,
+      "weather": "晴",
+      "formPts": 6,
+      "capacity": 12000,
+      "awayClubId": 243,
+      "awayInfluence": 109.78500000000001,
+      "before": {
+        "attendance": 9557,
+        "ticket": 1.43,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.43,
+      "after": {
+        "attendance": 11423,
+        "ticket": 1.71,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.71,
+      "factors": {
+        "demand": 11423.32818268379,
+        "wx": 1.15,
+        "form": 1.1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0310861242935294,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2189.5113186666667,
+        "after": 2593.4339270724713,
+        "attendRate": 0.9519166666666666,
+        "target": 4248.73
+      }
+    },
+    {
+      "matchId": 1,
+      "clubId": 66,
+      "clubName": "里昂",
+      "rcId": 40,
+      "weather": "雨",
+      "formPts": 3,
+      "capacity": 12000,
+      "awayClubId": 2,
+      "awayInfluence": 157.925,
+      "before": {
+        "attendance": 5820,
+        "ticket": 0.87,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.87,
+      "after": {
+        "attendance": 9788,
+        "ticket": 1.47,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.47,
+      "factors": {
+        "demand": 9788.75856038534,
+        "wx": 0.845,
+        "form": 0.94,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0295757423665837,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2992.4352447847427,
+        "after": 3439.1500855975532,
+        "attendRate": 0.8156666666666667,
+        "target": 5403.808000000001
+      }
+    },
+    {
+      "matchId": 3,
+      "clubId": 9,
+      "clubName": "利物浦",
+      "rcId": 42,
+      "weather": "晴",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 10,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 13430,
+        "ticket": 2.01,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 2.01,
+      "after": {
+        "attendance": 19682,
+        "ticket": 2.95,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.95,
+      "factors": {
+        "demand": 19682.07042327195,
+        "wx": 1.15,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0160153747597693,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2835.8693326827424,
+        "after": 3287.2568987359864,
+        "attendRate": 0.5623428571428571,
+        "target": 5571.76
+      }
+    },
+    {
+      "matchId": 2,
+      "clubId": 449,
+      "clubName": "皇家贝蒂斯",
+      "rcId": 43,
+      "weather": "雨",
+      "formPts": 9,
+      "capacity": 17000,
+      "awayClubId": 112172,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 7463,
+        "ticket": 1.12,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.12,
+      "after": {
+        "attendance": 9081,
+        "ticket": 1.36,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.36,
+      "factors": {
+        "demand": 9081.196054436801,
+        "wx": 0.845,
+        "form": 1.25,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.031259551529634,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2084.2430139482353,
+        "after": 2455.4902056950064,
+        "attendRate": 0.5341764705882353,
+        "target": 3647.0319999999997
+      }
+    },
+    {
+      "matchId": 53,
+      "clubId": 33,
+      "clubName": "慕尼黑1860",
+      "rcId": 44,
+      "weather": "晴",
+      "formPts": 7,
+      "capacity": 12000,
+      "awayClubId": 66,
+      "awayInfluence": 266.98400000000004,
+      "before": {
+        "attendance": 10140,
+        "ticket": 1.52,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.52,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 15997.692113469331,
+        "wx": 1.15,
+        "form": 1.19,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0778569678871794,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 2711.386363896094,
+        "after": 3152.675800669257,
+        "attendRate": 0.992,
+        "target": 4171.870000000001
+      }
+    },
+    {
+      "matchId": 178,
+      "clubId": 1,
+      "clubName": "阿森纳",
+      "rcId": 45,
+      "weather": "雨",
+      "formPts": 1,
+      "capacity": 12000,
+      "awayClubId": 21,
+      "awayInfluence": 136.93,
+      "before": {
+        "attendance": 4480,
+        "ticket": 0.67,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.67,
+      "after": {
+        "attendance": 5205,
+        "ticket": 0.78,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 0.78,
+      "factors": {
+        "demand": 5205.617713550199,
+        "wx": 0.845,
+        "form": 0.74,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.067406714581077,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1949.8173076,
+        "after": 1953.8796529085657,
+        "attendRate": 0.43375,
+        "target": 2640.8199999999997
+      }
+    },
+    {
+      "matchId": 50,
+      "clubId": 449,
+      "clubName": "皇家贝蒂斯",
+      "rcId": 47,
+      "weather": "多云",
+      "formPts": 6,
+      "capacity": 17000,
+      "awayClubId": 9,
+      "awayInfluence": 280.98,
+      "before": {
+        "attendance": 8213,
+        "ticket": 1.23,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.23,
+      "after": {
+        "attendance": 11502,
+        "ticket": 1.73,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.73,
+      "factors": {
+        "demand": 11502.802852470082,
+        "wx": 0.97,
+        "form": 1.1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0975923198755175,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2455.4902056950064,
+        "after": 2662.969873802646,
+        "attendRate": 0.6765882352941176,
+        "target": 3647.0319999999997
+      }
+    },
+    {
+      "matchId": 51,
+      "clubId": 110374,
+      "clubName": "佛罗伦萨",
+      "rcId": 49,
+      "weather": "雨",
+      "formPts": 3,
+      "capacity": 22000,
+      "awayClubId": 241,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 8673,
+        "ticket": 1.3,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.3,
+      "after": {
+        "attendance": 12929,
+        "ticket": 1.94,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.94,
+      "factors": {
+        "demand": 12929.624744378527,
+        "wx": 0.845,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0223438167211194,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2680.5131268988903,
+        "after": 3003.8971905303843,
+        "attendRate": 0.5876818181818182,
+        "target": 4616.776
+      }
+    },
+    {
+      "matchId": 54,
+      "clubId": 13,
+      "clubName": "纽卡斯尔联",
+      "rcId": 50,
+      "weather": "多云",
+      "formPts": 3,
+      "capacity": 12000,
+      "awayClubId": 131681,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 7165,
+        "ticket": 1.07,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.07,
+      "after": {
+        "attendance": 9699,
+        "ticket": 1.45,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.45,
+      "factors": {
+        "demand": 9699.818729701388,
+        "wx": 0.97,
+        "form": 0.94,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0254839111574225,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2593.4339270724713,
+        "after": 2899.100899899269,
+        "attendRate": 0.80825,
+        "target": 4248.73
+      }
+    },
+    {
+      "matchId": 181,
+      "clubId": 14,
+      "clubName": "诺丁汉森林",
+      "rcId": 51,
+      "weather": "雨",
+      "formPts": 6,
+      "capacity": 12000,
+      "awayClubId": 243,
+      "awayInfluence": 109.78500000000001,
+      "before": {
+        "attendance": 6513,
+        "ticket": 0.98,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.98,
+      "after": {
+        "attendance": 8465,
+        "ticket": 1.27,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.27,
+      "factors": {
+        "demand": 8465.128319583575,
+        "wx": 0.845,
+        "form": 1.1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0482084046897642,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2172.083531022256,
+        "after": 2311.1847123655625,
+        "attendRate": 0.7054166666666667,
+        "target": 2960.4900000000002
+      }
+    },
+    {
+      "matchId": 59,
+      "clubId": 66,
+      "clubName": "里昂",
+      "rcId": 52,
+      "weather": "雪",
+      "formPts": 3,
+      "capacity": 12000,
+      "awayClubId": 5,
+      "awayInfluence": 175.09199999999998,
+      "before": {
+        "attendance": 5159,
+        "ticket": 0.77,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.77,
+      "after": {
+        "attendance": 10283,
+        "ticket": 1.54,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.54,
+      "factors": {
+        "demand": 10283.525512897362,
+        "wx": 0.77,
+        "form": 0.94,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0327907290324514,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 3439.1500855975532,
+        "after": 3809.5928842178496,
+        "attendRate": 0.8569166666666667,
+        "target": 5403.808000000001
+      }
+    },
+    {
+      "matchId": 60,
+      "clubId": 73,
+      "clubName": "巴黎圣日耳曼",
+      "rcId": 53,
+      "weather": "雨",
+      "formPts": 6,
+      "capacity": 35000,
+      "awayClubId": 110374,
+      "awayInfluence": 201.39800000000002,
+      "before": {
+        "attendance": 10139,
+        "ticket": 1.52,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.52,
+      "after": {
+        "attendance": 17269,
+        "ticket": 2.59,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.59,
+      "factors": {
+        "demand": 17269.18277320988,
+        "wx": 0.845,
+        "form": 1.1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0388349402236792,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 3010.8519345969958,
+        "after": 3377.756830082944,
+        "attendRate": 0.4934,
+        "target": 5311.6
+      }
+    },
+    {
+      "matchId": 58,
+      "clubId": 11,
+      "clubName": "曼联",
+      "rcId": 54,
+      "weather": "多云",
+      "formPts": 7,
+      "capacity": 22000,
+      "awayClubId": 33,
+      "awayInfluence": 171.45800000000003,
+      "before": {
+        "attendance": 12547,
+        "ticket": 1.88,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.88,
+      "after": {
+        "attendance": 21824,
+        "ticket": 3.27,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 3.27,
+      "factors": {
+        "demand": 24486.789118704648,
+        "wx": 0.97,
+        "form": 1.19,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0341568852445953,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3453.3474235808358,
+        "after": 3994.114854172549,
+        "attendRate": 0.992,
+        "target": 5211.832
+      }
+    },
+    {
+      "matchId": 55,
+      "clubId": 45,
+      "clubName": "尤文图斯",
+      "rcId": 56,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 35000,
+      "awayClubId": 449,
+      "awayInfluence": 143.956,
+      "before": {
+        "attendance": 10704,
+        "ticket": 1.61,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.61,
+      "after": {
+        "attendance": 15123,
+        "ticket": 2.27,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.27,
+      "factors": {
+        "demand": 15123.928518436356,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.03778928136419,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2529.2820154190895,
+        "after": 2827.255691102095,
+        "attendRate": 0.4320857142857143,
+        "target": 4457.08
+      }
+    },
+    {
+      "matchId": 180,
+      "clubId": 21,
+      "clubName": "拜仁慕尼黑",
+      "rcId": 57,
+      "weather": "多云",
+      "formPts": 2,
+      "capacity": 35000,
+      "awayClubId": 280,
+      "awayInfluence": 98.065,
+      "before": {
+        "attendance": 9224,
+        "ticket": 1.38,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.38,
+      "after": {
+        "attendance": 10410,
+        "ticket": 1.56,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.56,
+      "factors": {
+        "demand": 10410.718043544643,
+        "wx": 0.97,
+        "form": 0.85,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0358084422697729,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2052.22102752,
+        "after": 2259.3191618256383,
+        "attendRate": 0.29742857142857143,
+        "target": 3492.46
+      }
+    },
+    {
+      "matchId": 56,
+      "clubId": 9,
+      "clubName": "利物浦",
+      "rcId": 59,
+      "weather": "多云",
+      "formPts": 9,
+      "capacity": 35000,
+      "awayClubId": 13,
+      "awayInfluence": 176.582,
+      "before": {
+        "attendance": 13476,
+        "ticket": 2.02,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 2.02,
+      "after": {
+        "attendance": 24419,
+        "ticket": 3.66,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 3.66,
+      "factors": {
+        "demand": 24419.5944866751,
+        "wx": 0.97,
+        "form": 1.25,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0314225211758843,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 3287.2568987359864,
+        "after": 3873.35180938349,
+        "attendRate": 0.6976857142857142,
+        "target": 5571.76
+      }
+    },
+    {
+      "matchId": 179,
+      "clubId": 2,
+      "clubName": "阿斯顿维拉",
+      "rcId": 60,
+      "weather": "多云",
+      "formPts": 0,
+      "capacity": 12000,
+      "awayClubId": 1,
+      "awayInfluence": 101.57,
+      "before": {
+        "attendance": 4775,
+        "ticket": 0.72,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.72,
+      "after": {
+        "attendance": 6921,
+        "ticket": 1.04,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.04,
+      "factors": {
+        "demand": 6921.13070846634,
+        "wx": 0.97,
+        "form": 0.7,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0321576697799588,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2468.8871624031667,
+        "after": 2579.8978603294295,
+        "attendRate": 0.57675,
+        "target": 3954.3500000000004
+      }
+    },
+    {
+      "matchId": 13,
+      "clubId": 243,
+      "clubName": "皇家马德里",
+      "rcId": 61,
+      "weather": "晴",
+      "formPts": 7,
+      "capacity": 12000,
+      "awayClubId": 9,
+      "awayInfluence": 280.98,
+      "before": {
+        "attendance": 10781,
+        "ticket": 1.62,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.62,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 13948.975158435618,
+        "wx": 1.15,
+        "form": 1.19,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.1279683016805575,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 2259.126825593778,
+        "after": 2496.6926032055726,
+        "attendRate": 0.992,
+        "target": 2854.4100000000003
+      }
+    },
+    {
+      "matchId": 20,
+      "clubId": 11,
+      "clubName": "曼联",
+      "rcId": 62,
+      "weather": "多云",
+      "formPts": 5,
+      "capacity": 22000,
+      "awayClubId": 5,
+      "awayInfluence": 175.09199999999998,
+      "before": {
+        "attendance": 10710,
+        "ticket": 1.61,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.61,
+      "after": {
+        "attendance": 21824,
+        "ticket": 3.27,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 3.27,
+      "factors": {
+        "demand": 24768.654203147322,
+        "wx": 0.97,
+        "form": 1.04,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0348808300064545,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3994.114854172549,
+        "after": 4236.878944364709,
+        "attendRate": 0.992,
+        "target": 5211.832
+      }
+    },
+    {
+      "matchId": 15,
+      "clubId": 1,
+      "clubName": "阿森纳",
+      "rcId": 63,
+      "weather": "雨",
+      "formPts": 1,
+      "capacity": 12000,
+      "awayClubId": 33,
+      "awayInfluence": 171.45800000000003,
+      "before": {
+        "attendance": 4859,
+        "ticket": 0.73,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.73,
+      "after": {
+        "attendance": 5299,
+        "ticket": 0.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 0.79,
+      "factors": {
+        "demand": 5299.529144642355,
+        "wx": 0.845,
+        "form": 0.74,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0844038594073053,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1953.8796529085657,
+        "after": 1957.5508168600647,
+        "attendRate": 0.4415833333333333,
+        "target": 2640.8199999999997
+      }
+    },
+    {
+      "matchId": 17,
+      "clubId": 14,
+      "clubName": "诺丁汉森林",
+      "rcId": 66,
+      "weather": "多云",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 110374,
+      "awayInfluence": 201.39800000000002,
+      "before": {
+        "attendance": 7158,
+        "ticket": 1.07,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.07,
+      "after": {
+        "attendance": 9760,
+        "ticket": 1.46,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.46,
+      "factors": {
+        "demand": 9760.447997972971,
+        "wx": 0.97,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0884371843850174,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2311.1847123655625,
+        "after": 2431.349477597109,
+        "attendRate": 0.8133333333333334,
+        "target": 2960.4900000000002
+      }
+    },
+    {
+      "matchId": 11,
+      "clubId": 449,
+      "clubName": "皇家贝蒂斯",
+      "rcId": 68,
+      "weather": "多云",
+      "formPts": 0,
+      "capacity": 17000,
+      "awayClubId": 2,
+      "awayInfluence": 157.925,
+      "before": {
+        "attendance": 5339,
+        "ticket": 0.8,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.8,
+      "after": {
+        "attendance": 7629,
+        "ticket": 1.14,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.14,
+      "factors": {
+        "demand": 7629.348956792392,
+        "wx": 0.97,
+        "form": 0.7,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0548518297257496,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2662.969873802646,
+        "after": 2675.5670011471134,
+        "attendRate": 0.44876470588235295,
+        "target": 3647.0319999999997
+      }
+    },
+    {
+      "matchId": 19,
+      "clubId": 280,
+      "clubName": "奥林匹亚科斯",
+      "rcId": 69,
+      "weather": "雨",
+      "formPts": 3,
+      "capacity": 12000,
+      "awayClubId": 73,
+      "awayInfluence": 259.30000000000007,
+      "before": {
+        "attendance": 6130,
+        "ticket": 0.92,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.92,
+      "after": {
+        "attendance": 7317,
+        "ticket": 1.1,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.1,
+      "factors": {
+        "demand": 7317.577568596692,
+        "wx": 0.845,
+        "form": 0.94,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.132208229235711,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2034.213226435832,
+        "after": 2121.215396277992,
+        "attendRate": 0.60975,
+        "target": 2549.69
+      }
+    },
+    {
+      "matchId": 65,
+      "clubId": 449,
+      "clubName": "皇家贝蒂斯",
+      "rcId": 71,
+      "weather": "晴",
+      "formPts": 3,
+      "capacity": 17000,
+      "awayClubId": 66,
+      "awayInfluence": 266.98400000000004,
+      "before": {
+        "attendance": 8874,
+        "ticket": 1.33,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.33,
+      "after": {
+        "attendance": 12641,
+        "ticket": 1.9,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.9,
+      "factors": {
+        "demand": 12641.972019488827,
+        "wx": 1.15,
+        "form": 0.94,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.092731112284309,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2675.5670011471134,
+        "after": 2849.9323965412214,
+        "attendRate": 0.7435882352941177,
+        "target": 3647.0319999999997
+      }
+    },
+    {
+      "matchId": 62,
+      "clubId": 5,
+      "clubName": "切尔西",
+      "rcId": 72,
+      "weather": "多云",
+      "formPts": 3,
+      "capacity": 22000,
+      "awayClubId": 11,
+      "awayInfluence": 250.986,
+      "before": {
+        "attendance": 10380,
+        "ticket": 1.56,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.56,
+      "after": {
+        "attendance": 16374,
+        "ticket": 2.46,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.46,
+      "factors": {
+        "demand": 16374.96519541357,
+        "wx": 0.97,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0716726064012063,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2821.1892681694226,
+        "after": 3073.479767054524,
+        "attendRate": 0.7442727272727273,
+        "target": 4226.38
+      }
+    },
+    {
+      "matchId": 14,
+      "clubId": 13,
+      "clubName": "纽卡斯尔联",
+      "rcId": 73,
+      "weather": "多云",
+      "formPts": 3,
+      "capacity": 12000,
+      "awayClubId": 10,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 7020,
+        "ticket": 1.05,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.05,
+      "after": {
+        "attendance": 10843,
+        "ticket": 1.63,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.63,
+      "factors": {
+        "demand": 10843.057505567702,
+        "wx": 0.97,
+        "form": 0.94,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0254839111574225,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2899.100899899269,
+        "after": 3158.6165807939715,
+        "attendRate": 0.9035833333333333,
+        "target": 4248.73
+      }
+    },
+    {
+      "matchId": 66,
+      "clubId": 13,
+      "clubName": "纽卡斯尔联",
+      "rcId": 74,
+      "weather": "晴",
+      "formPts": 6,
+      "capacity": 12000,
+      "awayClubId": 45,
+      "awayInfluence": 190.472,
+      "before": {
+        "attendance": 9829,
+        "ticket": 1.47,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.47,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 16844.589730150125,
+        "wx": 1.15,
+        "form": 1.1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0539330169552956,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3158.6165807939715,
+        "after": 3375.9415920468855,
+        "attendRate": 0.992,
+        "target": 4248.73
+      }
+    },
+    {
+      "matchId": 64,
+      "clubId": 33,
+      "clubName": "慕尼黑1860",
+      "rcId": 75,
+      "weather": "多云",
+      "formPts": 7,
+      "capacity": 12000,
+      "awayClubId": 73,
+      "awayInfluence": 259.30000000000007,
+      "before": {
+        "attendance": 8318,
+        "ticket": 1.25,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.25,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 15657.244341129692,
+        "wx": 0.97,
+        "form": 1.19,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0756161858880893,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3152.675800669257,
+        "after": 3523.655474060226,
+        "attendRate": 0.992,
+        "target": 4171.870000000001
+      }
+    },
+    {
+      "matchId": 67,
+      "clubId": 66,
+      "clubName": "里昂",
+      "rcId": 76,
+      "weather": "晴",
+      "formPts": 6,
+      "capacity": 12000,
+      "awayClubId": 13,
+      "awayInfluence": 176.582,
+      "before": {
+        "attendance": 9360,
+        "ticket": 1.4,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.4,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 19914.010776145293,
+        "wx": 1.15,
+        "form": 1.1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0330697719713542,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3809.5928842178496,
+        "after": 4127.41560970018,
+        "attendRate": 0.992,
+        "target": 5403.808000000001
+      }
+    },
+    {
+      "matchId": 186,
+      "clubId": 1,
+      "clubName": "阿森纳",
+      "rcId": 77,
+      "weather": "晴",
+      "formPts": 1,
+      "capacity": 12000,
+      "awayClubId": 14,
+      "awayInfluence": 113.86500000000001,
+      "before": {
+        "attendance": 6095,
+        "ticket": 0.91,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.91,
+      "after": {
+        "attendance": 7037,
+        "ticket": 1.06,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.06,
+      "factors": {
+        "demand": 7037.008822319074,
+        "wx": 1.15,
+        "form": 0.74,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.05605247612484,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 1957.5508168600647,
+        "after": 1968.0176760928,
+        "attendRate": 0.5864166666666667,
+        "target": 2640.8199999999997
+      }
+    },
+    {
+      "matchId": 70,
+      "clubId": 45,
+      "clubName": "尤文图斯",
+      "rcId": 78,
+      "weather": "多云",
+      "formPts": 5,
+      "capacity": 35000,
+      "awayClubId": 241,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 12325,
+        "ticket": 1.85,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.85,
+      "after": {
+        "attendance": 17341,
+        "ticket": 2.6,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.6,
+      "factors": {
+        "demand": 17341.941231099474,
+        "wx": 0.97,
+        "form": 1.04,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0236255197614348,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2827.255691102095,
+        "after": 3087.4352558054975,
+        "attendRate": 0.4954571428571429,
+        "target": 4457.08
+      }
+    },
+    {
+      "matchId": 185,
+      "clubId": 243,
+      "clubName": "皇家马德里",
+      "rcId": 79,
+      "weather": "雨",
+      "formPts": 7,
+      "capacity": 12000,
+      "awayClubId": 10,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 7707,
+        "ticket": 1.16,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.16,
+      "after": {
+        "attendance": 10453,
+        "ticket": 1.57,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.57,
+      "factors": {
+        "demand": 10453.818671436797,
+        "wx": 0.845,
+        "form": 1.19,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0409892061757071,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2496.6926032055726,
+        "after": 2692.7741650027942,
+        "attendRate": 0.8710833333333333,
+        "target": 2854.4100000000003
+      }
+    },
+    {
+      "matchId": 63,
+      "clubId": 110374,
+      "clubName": "佛罗伦萨",
+      "rcId": 80,
+      "weather": "晴",
+      "formPts": 6,
+      "capacity": 22000,
+      "awayClubId": 131681,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 13669,
+        "ticket": 2.05,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 2.05,
+      "after": {
+        "attendance": 21824,
+        "ticket": 3.27,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 3.27,
+      "factors": {
+        "demand": 23075.919212670255,
+        "wx": 1.15,
+        "form": 1.1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0223438167211194,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3003.8971905303843,
+        "after": 3325.440709986247,
+        "attendRate": 0.992,
+        "target": 4616.776
+      }
+    },
+    {
+      "matchId": 69,
+      "clubId": 33,
+      "clubName": "慕尼黑1860",
+      "rcId": 82,
+      "weather": "雨",
+      "formPts": 4,
+      "capacity": 12000,
+      "awayClubId": 5,
+      "awayInfluence": 175.09199999999998,
+      "before": {
+        "attendance": 6615,
+        "ticket": 0.99,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.99,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 12518.074671103332,
+        "wx": 0.845,
+        "form": 1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0510597347455353,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3523.655474060226,
+        "after": 3652.8835219515795,
+        "attendRate": 0.992,
+        "target": 4171.870000000001
+      }
+    },
+    {
+      "matchId": 68,
+      "clubId": 11,
+      "clubName": "曼联",
+      "rcId": 83,
+      "weather": "雪",
+      "formPts": 4,
+      "capacity": 22000,
+      "awayClubId": 449,
+      "awayInfluence": 143.956,
+      "before": {
+        "attendance": 7947,
+        "ticket": 1.19,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.19,
+      "after": {
+        "attendance": 19934,
+        "ticket": 2.99,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.99,
+      "factors": {
+        "demand": 19934.37927902282,
+        "wx": 0.77,
+        "form": 1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0286780935988462,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 4236.878944364709,
+        "after": 4424.5449990810675,
+        "attendRate": 0.9060909090909091,
+        "target": 5211.832
+      }
+    },
+    {
+      "matchId": 184,
+      "clubId": 21,
+      "clubName": "拜仁慕尼黑",
+      "rcId": 84,
+      "weather": "雨",
+      "formPts": 3,
+      "capacity": 35000,
+      "awayClubId": 2,
+      "awayInfluence": 157.925,
+      "before": {
+        "attendance": 8659,
+        "ticket": 1.3,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.3,
+      "after": {
+        "attendance": 11274,
+        "ticket": 1.69,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.69,
+      "factors": {
+        "demand": 11274.499473481508,
+        "wx": 0.845,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0576663258599284,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2259.3191618256383,
+        "after": 2439.073044828454,
+        "attendRate": 0.32211428571428574,
+        "target": 3492.46
+      }
+    },
+    {
+      "matchId": 71,
+      "clubId": 9,
+      "clubName": "利物浦",
+      "rcId": 85,
+      "weather": "晴",
+      "formPts": 3,
+      "capacity": 35000,
+      "awayClubId": 110374,
+      "awayInfluence": 201.39800000000002,
+      "before": {
+        "attendance": 11570,
+        "ticket": 1.74,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.74,
+      "after": {
+        "attendance": 25762,
+        "ticket": 3.86,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 3.86,
+      "factors": {
+        "demand": 25762.685396234996,
+        "wx": 1.15,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.035838493842978,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 3873.35180938349,
+        "after": 4177.1708306727,
+        "attendRate": 0.7360571428571429,
+        "target": 5571.76
+      }
+    },
+    {
+      "matchId": 183,
+      "clubId": 280,
+      "clubName": "奥林匹亚科斯",
+      "rcId": 86,
+      "weather": "多云",
+      "formPts": 2,
+      "capacity": 12000,
+      "awayClubId": 112172,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 6210,
+        "ticket": 0.93,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 0.93,
+      "after": {
+        "attendance": 7316,
+        "ticket": 1.1,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.1,
+      "factors": {
+        "demand": 7316.789716813277,
+        "wx": 0.97,
+        "form": 0.85,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0458879314740224,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2121.215396277992,
+        "after": 2193.5304833968344,
+        "attendRate": 0.6096666666666667,
+        "target": 2549.69
+      }
+    },
+    {
+      "matchId": 29,
+      "clubId": 73,
+      "clubName": "巴黎圣日耳曼",
+      "rcId": 88,
+      "weather": "晴",
+      "formPts": 7,
+      "capacity": 35000,
+      "awayClubId": 11,
+      "awayInfluence": 250.986,
+      "before": {
+        "attendance": 16096,
+        "ticket": 2.41,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 2.41,
+      "after": {
+        "attendance": 28786,
+        "ticket": 4.32,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 4.32,
+      "factors": {
+        "demand": 28786.265712235647,
+        "wx": 1.15,
+        "form": 1.19,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0483968376397994,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 3377.756830082944,
+        "after": 3923.911173770798,
+        "attendRate": 0.8224571428571429,
+        "target": 5311.6
+      }
+    },
+    {
+      "matchId": 28,
+      "clubId": 45,
+      "clubName": "尤文图斯",
+      "rcId": 89,
+      "weather": "多云",
+      "formPts": 3,
+      "capacity": 35000,
+      "awayClubId": 14,
+      "awayInfluence": 113.86500000000001,
+      "before": {
+        "attendance": 9649,
+        "ticket": 1.45,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.45,
+      "after": {
+        "attendance": 17221,
+        "ticket": 2.58,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.58,
+      "factors": {
+        "demand": 17221.65266971991,
+        "wx": 0.97,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0298902200848419,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 3087.4352558054975,
+        "after": 3305.7049728568913,
+        "attendRate": 0.4920285714285714,
+        "target": 4457.08
+      }
+    },
+    {
+      "matchId": 25,
+      "clubId": 33,
+      "clubName": "慕尼黑1860",
+      "rcId": 90,
+      "weather": "雨",
+      "formPts": 6,
+      "capacity": 12000,
+      "awayClubId": 131681,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 6954,
+        "ticket": 1.04,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.04,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 13937.87204337597,
+        "wx": 0.845,
+        "form": 1.1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.02624549452344,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3652.8835219515795,
+        "after": 3756.3486662153127,
+        "attendRate": 0.992,
+        "target": 4171.870000000001
+      }
+    },
+    {
+      "matchId": 30,
+      "clubId": 5,
+      "clubName": "切尔西",
+      "rcId": 91,
+      "weather": "多云",
+      "formPts": 3,
+      "capacity": 22000,
+      "awayClubId": 280,
+      "awayInfluence": 98.065,
+      "before": {
+        "attendance": 9563,
+        "ticket": 1.43,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.43,
+      "after": {
+        "attendance": 17112,
+        "ticket": 2.57,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.57,
+      "factors": {
+        "demand": 17112.40823365693,
+        "wx": 0.97,
+        "form": 0.94,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0280038494048842,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 3073.479767054524,
+        "after": 3283.567536048574,
+        "attendRate": 0.7778181818181819,
+        "target": 4226.38
+      }
+    },
+    {
+      "matchId": 22,
+      "clubId": 2,
+      "clubName": "阿斯顿维拉",
+      "rcId": 92,
+      "weather": "晴",
+      "formPts": 6,
+      "capacity": 12000,
+      "awayClubId": 112172,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 10133,
+        "ticket": 1.52,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.52,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 13426.258948348132,
+        "wx": 1.15,
+        "form": 1.1,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0284945385467785,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 2579.8978603294295,
+        "after": 2853.9086388941546,
+        "attendRate": 0.992,
+        "target": 3954.3500000000004
+      }
+    },
+    {
+      "matchId": 26,
+      "clubId": 21,
+      "clubName": "拜仁慕尼黑",
+      "rcId": 93,
+      "weather": "晴",
+      "formPts": 2,
+      "capacity": 35000,
+      "awayClubId": 1,
+      "awayInfluence": 101.57,
+      "before": {
+        "attendance": 10103,
+        "ticket": 1.52,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.52,
+      "after": {
+        "attendance": 14687,
+        "ticket": 2.2,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.2,
+      "factors": {
+        "demand": 14687.36032889297,
+        "wx": 1.15,
+        "form": 0.85,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0370882932885417,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 2439.073044828454,
+        "after": 2600.84198050185,
+        "attendRate": 0.4196285714285714,
+        "target": 3492.46
+      }
+    },
+    {
+      "matchId": 21,
+      "clubId": 66,
+      "clubName": "里昂",
+      "rcId": 94,
+      "weather": "多云",
+      "formPts": 9,
+      "capacity": 12000,
+      "awayClubId": 449,
+      "awayInfluence": 143.956,
+      "before": {
+        "attendance": 9453,
+        "ticket": 1.42,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.42,
+      "after": {
+        "attendance": 11904,
+        "ticket": 1.79,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 1.79,
+      "factors": {
+        "demand": 20557.64341644484,
+        "wx": 0.97,
+        "form": 1.25,
+        "tierCoef": 1,
+        "multiplier": 4,
+        "opp": 1.0269596679950859,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 4127.41560970018,
+        "after": 4600.97105646187,
+        "attendRate": 0.992,
+        "target": 5403.808000000001
+      }
+    },
+    {
+      "matchId": 27,
+      "clubId": 110374,
+      "clubName": "佛罗伦萨",
+      "rcId": 95,
+      "weather": "晴",
+      "formPts": 6,
+      "capacity": 22000,
+      "awayClubId": 241,
+      "awayInfluence": 90,
+      "before": {
+        "attendance": 13834,
+        "ticket": 2.08,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 2.08,
+      "after": {
+        "attendance": 21824,
+        "ticket": 3.27,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 3.27,
+      "factors": {
+        "demand": 25546.014494796415,
+        "wx": 1.15,
+        "form": 1.1,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0223438167211194,
+        "soldOut": true
+      },
+      "fans": {
+        "before": 3325.440709986247,
+        "after": 3582.881313403389,
+        "attendRate": 0.992,
+        "target": 4616.776
+      }
+    },
+    {
+      "matchId": 23,
+      "clubId": 9,
+      "clubName": "利物浦",
+      "rcId": 96,
+      "weather": "多云",
+      "formPts": 0,
+      "capacity": 35000,
+      "awayClubId": 13,
+      "awayInfluence": 176.582,
+      "before": {
+        "attendance": 7087,
+        "ticket": 1.06,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "beforeTotal": 1.06,
+      "after": {
+        "attendance": 17377,
+        "ticket": 2.61,
+        "commercial": 0,
+        "broadcast": 0
+      },
+      "afterTotal": 2.61,
+      "factors": {
+        "demand": 17377.01059581259,
+        "wx": 0.97,
+        "form": 0.7,
+        "tierCoef": 1.1,
+        "multiplier": 5.4,
+        "opp": 1.0314225211758843,
+        "soldOut": false
+      },
+      "fans": {
+        "before": 4177.1708306727,
+        "after": 4179.917368032389,
+        "attendRate": 0.4964857142857143,
+        "target": 5571.76
+      }
+    }
+  ],
+  "ledgerPlans": [
+    {
+      "clubId": 1,
+      "entries": [
+        {
+          "id": 33,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 166,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 2.9,
+          "balanceAfter": 2.9,
+          "memoBefore": "联赛出场补贴（比赛 #166）",
+          "memoAfter": "联赛出场补贴（比赛 #166）",
+          "changed": false
+        },
+        {
+          "id": 69,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 167,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 5.8,
+          "balanceAfter": 5.8,
+          "memoBefore": "联赛出场补贴（比赛 #167）",
+          "memoAfter": "联赛出场补贴（比赛 #167）",
+          "changed": false
+        },
+        {
+          "id": 70,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 167,
+          "amountBefore": 1.25,
+          "amountAfter": 1.31,
+          "balanceBefore": 7.05,
+          "balanceAfter": 7.109999999999999,
+          "memoBefore": "比赛日收入（比赛 #167，上座 8317/12000，晴；票 1.25/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #167，上座 8727/12000，晴；票 1.31/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 72,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 171,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 11.85,
+          "balanceAfter": 11.91,
+          "memoBefore": "联赛平局奖金（比赛 #171）",
+          "memoAfter": "联赛平局奖金（比赛 #171）",
+          "changed": false
+        },
+        {
+          "id": 101,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 178,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 16.65,
+          "balanceAfter": 16.71,
+          "memoBefore": "联赛平局奖金（比赛 #178）",
+          "memoAfter": "联赛平局奖金（比赛 #178）",
+          "changed": false
+        },
+        {
+          "id": 103,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 178,
+          "amountBefore": 0.67,
+          "amountAfter": 0.78,
+          "balanceBefore": 17.32,
+          "balanceAfter": 17.490000000000002,
+          "memoBefore": "比赛日收入（比赛 #178，上座 4480/12000，雨；票 0.67/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #178，上座 5205/12000，雨；票 0.78/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 135,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 179,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 20.22,
+          "balanceAfter": 20.39,
+          "memoBefore": "联赛出场补贴（比赛 #179）",
+          "memoAfter": "联赛出场补贴（比赛 #179）",
+          "changed": false
+        },
+        {
+          "id": 143,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 15,
+          "amountBefore": 0.73,
+          "amountAfter": 0.79,
+          "balanceBefore": 20.95,
+          "balanceAfter": 21.18,
+          "memoBefore": "比赛日收入（比赛 #15，上座 4859/12000，雨；票 0.73/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #15，上座 5299/12000，雨；票 0.79/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 171,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 186,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 23.849999999999998,
+          "balanceAfter": 24.08,
+          "memoBefore": "联赛出场补贴（比赛 #186）",
+          "memoAfter": "联赛出场补贴（比赛 #186）",
+          "changed": false
+        },
+        {
+          "id": 172,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 186,
+          "amountBefore": 0.91,
+          "amountAfter": 1.06,
+          "balanceBefore": 24.759999999999998,
+          "balanceAfter": 25.139999999999997,
+          "memoBefore": "比赛日收入（比赛 #186，上座 6095/12000，晴；票 0.91/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #186，上座 7037/12000，晴；票 1.06/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 204,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 26,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 31.759999999999998,
+          "balanceAfter": 32.14,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #26）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #26）",
+          "changed": false
+        }
+      ],
+      "accountBalanceBefore": 31.759999999999998,
+      "accountBalanceAfter": 32.14
+    },
+    {
+      "clubId": 2,
+      "entries": [
+        {
+          "id": 28,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 164,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 6.7,
+          "balanceAfter": 6.7,
+          "memoBefore": "联赛胜场奖金（比赛 #164）",
+          "memoAfter": "联赛胜场奖金（比赛 #164）",
+          "changed": false
+        },
+        {
+          "id": 30,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 164,
+          "amountBefore": 0.92,
+          "amountAfter": 0.95,
+          "balanceBefore": 7.62,
+          "balanceAfter": 7.65,
+          "memoBefore": "比赛日收入（比赛 #164，上座 6117/12000，雨；票 0.92/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #164，上座 6303/12000，雨；票 0.95/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 61,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 168,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 10.52,
+          "balanceAfter": 10.55,
+          "memoBefore": "联赛出场补贴（比赛 #168）",
+          "memoAfter": "联赛出场补贴（比赛 #168）",
+          "changed": false
+        },
+        {
+          "id": 62,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 172,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 13.42,
+          "balanceAfter": 13.450000000000001,
+          "memoBefore": "联赛出场补贴（比赛 #172）",
+          "memoAfter": "联赛出场补贴（比赛 #172）",
+          "changed": false
+        },
+        {
+          "id": 63,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 172,
+          "amountBefore": 0.99,
+          "amountAfter": 1.29,
+          "balanceBefore": 14.41,
+          "balanceAfter": 14.740000000000002,
+          "memoBefore": "比赛日收入（比赛 #172，上座 6616/12000，多云；票 0.99/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #172，上座 8575/12000，多云；票 1.29/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 80,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 175,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 17.31,
+          "balanceAfter": 17.64,
+          "memoBefore": "联赛出场补贴（比赛 #175）",
+          "memoAfter": "联赛出场补贴（比赛 #175）",
+          "changed": false
+        },
+        {
+          "id": 134,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 179,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 24.009999999999998,
+          "balanceAfter": 24.34,
+          "memoBefore": "联赛胜场奖金（比赛 #179）",
+          "memoAfter": "联赛胜场奖金（比赛 #179）",
+          "changed": false
+        },
+        {
+          "id": 136,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 179,
+          "amountBefore": 0.72,
+          "amountAfter": 1.04,
+          "balanceBefore": 24.729999999999997,
+          "balanceAfter": 25.38,
+          "memoBefore": "比赛日收入（比赛 #179，上座 4775/12000，多云；票 0.72/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #179，上座 6921/12000，多云；票 1.04/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 186,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 184,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 31.429999999999996,
+          "balanceAfter": 32.08,
+          "memoBefore": "联赛胜场奖金（比赛 #184）",
+          "memoAfter": "联赛胜场奖金（比赛 #184）",
+          "changed": false
+        },
+        {
+          "id": 203,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 22,
+          "amountBefore": 1.52,
+          "amountAfter": 1.79,
+          "balanceBefore": 32.949999999999996,
+          "balanceAfter": 33.87,
+          "memoBefore": "比赛日收入（比赛 #22，上座 10133/12000，晴；票 1.52/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #22，上座 11904/12000，晴；票 1.79/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 32.949999999999996,
+      "accountBalanceAfter": 33.87
+    },
+    {
+      "clubId": 5,
+      "entries": [
+        {
+          "id": 1,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 33,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 8.5,
+          "balanceAfter": 8.5,
+          "memoBefore": "联赛胜场奖金（比赛 #33）",
+          "memoAfter": "联赛胜场奖金（比赛 #33）",
+          "changed": false
+        },
+        {
+          "id": 3,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 33,
+          "amountBefore": 1.33,
+          "amountAfter": 1.43,
+          "balanceBefore": 9.83,
+          "balanceAfter": 9.93,
+          "memoBefore": "比赛日收入（比赛 #33，上座 8842/22000，雨；票 1.33/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #33，上座 9554/22000，雨；票 1.43/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 10,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 52,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 16.43,
+          "balanceAfter": 16.53,
+          "memoBefore": "联赛平局奖金（比赛 #52）",
+          "memoAfter": "联赛平局奖金（比赛 #52）",
+          "changed": false
+        },
+        {
+          "id": 12,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 52,
+          "amountBefore": 1.75,
+          "amountAfter": 2.35,
+          "balanceBefore": 18.18,
+          "balanceAfter": 18.880000000000003,
+          "memoBefore": "比赛日收入（比赛 #52，上座 11689/22000，晴；票 1.75/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #52，上座 15668/22000，晴；票 2.35/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 20,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 41,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 26.68,
+          "balanceAfter": 27.380000000000003,
+          "memoBefore": "联赛胜场奖金（比赛 #41）",
+          "memoAfter": "联赛胜场奖金（比赛 #41）",
+          "changed": false
+        },
+        {
+          "id": 21,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 41,
+          "amountBefore": 1.32,
+          "amountAfter": 1.96,
+          "balanceBefore": 28,
+          "balanceAfter": 29.340000000000003,
+          "memoBefore": "比赛日收入（比赛 #41，上座 8831/22000，雨；票 1.32/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #41，上座 13068/22000，雨；票 1.96/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 55,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 43,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 32.7,
+          "balanceAfter": 34.040000000000006,
+          "memoBefore": "联赛出场补贴（比赛 #43）",
+          "memoAfter": "联赛出场补贴（比赛 #43）",
+          "changed": false
+        },
+        {
+          "id": 116,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 59,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 41.2,
+          "balanceAfter": 42.540000000000006,
+          "memoBefore": "联赛胜场奖金（比赛 #59）",
+          "memoAfter": "联赛胜场奖金（比赛 #59）",
+          "changed": false
+        },
+        {
+          "id": 155,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 62,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 49.7,
+          "balanceAfter": 51.040000000000006,
+          "memoBefore": "联赛胜场奖金（比赛 #62）",
+          "memoAfter": "联赛胜场奖金（比赛 #62）",
+          "changed": false
+        },
+        {
+          "id": 157,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 62,
+          "amountBefore": 1.56,
+          "amountAfter": 2.46,
+          "balanceBefore": 51.260000000000005,
+          "balanceAfter": 53.50000000000001,
+          "memoBefore": "比赛日收入（比赛 #62，上座 10380/22000，多云；票 1.56/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #62，上座 16374/22000，多云；票 2.46/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 181,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 69,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 55.96000000000001,
+          "balanceAfter": 58.20000000000001,
+          "memoBefore": "联赛出场补贴（比赛 #69）",
+          "memoAfter": "联赛出场补贴（比赛 #69）",
+          "changed": false
+        },
+        {
+          "id": 201,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 30,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 62.96000000000001,
+          "balanceAfter": 65.20000000000002,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #30）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #30）",
+          "changed": false
+        },
+        {
+          "id": 202,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 30,
+          "amountBefore": 1.43,
+          "amountAfter": 2.57,
+          "balanceBefore": 64.39000000000001,
+          "balanceAfter": 67.77000000000001,
+          "memoBefore": "比赛日收入（比赛 #30，上座 9563/22000，多云；票 1.43/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #30，上座 17112/22000，多云；票 2.57/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 64.39000000000001,
+      "accountBalanceAfter": 67.77000000000001
+    },
+    {
+      "clubId": 9,
+      "entries": [
+        {
+          "id": 4,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 36,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 6.6,
+          "balanceAfter": 6.6,
+          "memoBefore": "联赛平局奖金（比赛 #36）",
+          "memoAfter": "联赛平局奖金（比赛 #36）",
+          "changed": false
+        },
+        {
+          "id": 6,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 36,
+          "amountBefore": 1.61,
+          "amountAfter": 1.63,
+          "balanceBefore": 8.209999999999999,
+          "balanceAfter": 8.23,
+          "memoBefore": "比赛日收入（比赛 #36，上座 10743/35000，多云；票 1.61/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #36，上座 10834/35000，多云；票 1.63/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 35,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 40,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 12.91,
+          "balanceAfter": 12.93,
+          "memoBefore": "联赛出场补贴（比赛 #40）",
+          "memoAfter": "联赛出场补贴（比赛 #40）",
+          "changed": false
+        },
+        {
+          "id": 54,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 43,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 21.41,
+          "balanceAfter": 21.43,
+          "memoBefore": "联赛胜场奖金（比赛 #43）",
+          "memoAfter": "联赛胜场奖金（比赛 #43）",
+          "changed": false
+        },
+        {
+          "id": 56,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 43,
+          "amountBefore": 1.68,
+          "amountAfter": 2.09,
+          "balanceBefore": 23.09,
+          "balanceAfter": 23.52,
+          "memoBefore": "比赛日收入（比赛 #43，上座 11193/35000，多云；票 1.68/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #43，上座 13938/35000，多云；票 2.09/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 95,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 3,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 30.09,
+          "balanceAfter": 30.52,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #3）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #3）",
+          "changed": false
+        },
+        {
+          "id": 96,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 3,
+          "amountBefore": 2.01,
+          "amountAfter": 2.95,
+          "balanceBefore": 32.1,
+          "balanceAfter": 33.47,
+          "memoBefore": "比赛日收入（比赛 #3，上座 13430/35000，晴；票 2.01/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #3，上座 19682/35000，晴；票 2.95/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 105,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 50,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 40.6,
+          "balanceAfter": 41.97,
+          "memoBefore": "联赛胜场奖金（比赛 #50）",
+          "memoAfter": "联赛胜场奖金（比赛 #50）",
+          "changed": false
+        },
+        {
+          "id": 131,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 56,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 49.1,
+          "balanceAfter": 50.47,
+          "memoBefore": "联赛胜场奖金（比赛 #56）",
+          "memoAfter": "联赛胜场奖金（比赛 #56）",
+          "changed": false
+        },
+        {
+          "id": 133,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 56,
+          "amountBefore": 2.02,
+          "amountAfter": 3.66,
+          "balanceBefore": 51.120000000000005,
+          "balanceAfter": 54.129999999999995,
+          "memoBefore": "比赛日收入（比赛 #56，上座 13476/35000，多云；票 2.02/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #56，上座 24419/35000，多云；票 3.66/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 151,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 61,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 55.82000000000001,
+          "balanceAfter": 58.83,
+          "memoBefore": "联赛出场补贴（比赛 #61）",
+          "memoAfter": "联赛出场补贴（比赛 #61）",
+          "changed": false
+        },
+        {
+          "id": 190,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 71,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 60.52000000000001,
+          "balanceAfter": 63.53,
+          "memoBefore": "联赛出场补贴（比赛 #71）",
+          "memoAfter": "联赛出场补贴（比赛 #71）",
+          "changed": false
+        },
+        {
+          "id": 191,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 71,
+          "amountBefore": 1.74,
+          "amountAfter": 3.86,
+          "balanceBefore": 62.26000000000001,
+          "balanceAfter": 67.39,
+          "memoBefore": "比赛日收入（比赛 #71，上座 11570/35000，晴；票 1.74/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #71，上座 25762/35000，晴；票 3.86/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 210,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 23,
+          "amountBefore": 1.06,
+          "amountAfter": 2.61,
+          "balanceBefore": 63.320000000000014,
+          "balanceAfter": 70,
+          "memoBefore": "比赛日收入（比赛 #23，上座 7087/35000，多云；票 1.06/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #23，上座 17377/35000，多云；票 2.61/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 63.320000000000014,
+      "accountBalanceAfter": 70
+    },
+    {
+      "clubId": 11,
+      "entries": [
+        {
+          "id": 5,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 36,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 6.6,
+          "balanceAfter": 6.6,
+          "memoBefore": "联赛平局奖金（比赛 #36）",
+          "memoAfter": "联赛平局奖金（比赛 #36）",
+          "changed": false
+        },
+        {
+          "id": 13,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 49,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 15.1,
+          "balanceAfter": 15.1,
+          "memoBefore": "联赛胜场奖金（比赛 #49）",
+          "memoAfter": "联赛胜场奖金（比赛 #49）",
+          "changed": false
+        },
+        {
+          "id": 15,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 49,
+          "amountBefore": 1.21,
+          "amountAfter": 1.3,
+          "balanceBefore": 16.31,
+          "balanceAfter": 16.4,
+          "memoBefore": "比赛日收入（比赛 #49，上座 8085/22000，雪；票 1.21/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #49，上座 8658/22000，雪；票 1.3/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 37,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 39,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 24.81,
+          "balanceAfter": 24.9,
+          "memoBefore": "联赛胜场奖金（比赛 #39）",
+          "memoAfter": "联赛胜场奖金（比赛 #39）",
+          "changed": false
+        },
+        {
+          "id": 39,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 39,
+          "amountBefore": 1.44,
+          "amountAfter": 2.08,
+          "balanceBefore": 26.25,
+          "balanceAfter": 26.979999999999997,
+          "memoBefore": "比赛日收入（比赛 #39，上座 9578/22000，多云；票 1.44/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #39，上座 13855/22000，多云；票 2.08/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 48,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 45,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 34.75,
+          "balanceAfter": 35.48,
+          "memoBefore": "联赛胜场奖金（比赛 #45）",
+          "memoAfter": "联赛胜场奖金（比赛 #45）",
+          "changed": false
+        },
+        {
+          "id": 84,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 10,
+          "amountBefore": 2.3,
+          "amountAfter": 3.27,
+          "balanceBefore": 37.05,
+          "balanceAfter": 38.75,
+          "memoBefore": "比赛日收入（比赛 #10，上座 15351/22000，晴；票 2.3/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #10，上座 21824/22000，晴；票 3.27/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 122,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 58,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 43.65,
+          "balanceAfter": 45.35,
+          "memoBefore": "联赛平局奖金（比赛 #58）",
+          "memoAfter": "联赛平局奖金（比赛 #58）",
+          "changed": false
+        },
+        {
+          "id": 124,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 58,
+          "amountBefore": 1.88,
+          "amountAfter": 3.27,
+          "balanceBefore": 45.53,
+          "balanceAfter": 48.620000000000005,
+          "memoBefore": "比赛日收入（比赛 #58，上座 12547/22000，多云；票 1.88/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #58，上座 21824/22000，多云；票 3.27/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 139,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 20,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 52.53,
+          "balanceAfter": 55.620000000000005,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #20）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #20）",
+          "changed": false
+        },
+        {
+          "id": 140,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 20,
+          "amountBefore": 1.61,
+          "amountAfter": 3.27,
+          "balanceBefore": 54.14,
+          "balanceAfter": 58.89000000000001,
+          "memoBefore": "比赛日收入（比赛 #20，上座 10710/22000，多云；票 1.61/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #20，上座 21824/22000，多云；票 3.27/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 156,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 62,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 58.84,
+          "balanceAfter": 63.59000000000001,
+          "memoBefore": "联赛出场补贴（比赛 #62）",
+          "memoAfter": "联赛出场补贴（比赛 #62）",
+          "changed": false
+        },
+        {
+          "id": 183,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 68,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 67.34,
+          "balanceAfter": 72.09,
+          "memoBefore": "联赛胜场奖金（比赛 #68）",
+          "memoAfter": "联赛胜场奖金（比赛 #68）",
+          "changed": false
+        },
+        {
+          "id": 185,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 68,
+          "amountBefore": 1.19,
+          "amountAfter": 2.99,
+          "balanceBefore": 68.53,
+          "balanceAfter": 75.08,
+          "memoBefore": "比赛日收入（比赛 #68，上座 7947/22000，雪；票 1.19/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #68，上座 19934/22000，雪；票 2.99/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 68.53,
+      "accountBalanceAfter": 75.08
+    },
+    {
+      "clubId": 13,
+      "entries": [
+        {
+          "id": 16,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 34,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 8.5,
+          "balanceAfter": 8.5,
+          "memoBefore": "联赛胜场奖金（比赛 #34）",
+          "memoAfter": "联赛胜场奖金（比赛 #34）",
+          "changed": false
+        },
+        {
+          "id": 22,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 37,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 17,
+          "balanceAfter": 17,
+          "memoBefore": "联赛胜场奖金（比赛 #37）",
+          "memoAfter": "联赛胜场奖金（比赛 #37）",
+          "changed": false
+        },
+        {
+          "id": 58,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 47,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 21.7,
+          "balanceAfter": 21.7,
+          "memoBefore": "联赛出场补贴（比赛 #47）",
+          "memoAfter": "联赛出场补贴（比赛 #47）",
+          "changed": false
+        },
+        {
+          "id": 59,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 47,
+          "amountBefore": 0.86,
+          "amountAfter": 0.88,
+          "balanceBefore": 22.56,
+          "balanceAfter": 22.58,
+          "memoBefore": "比赛日收入（比赛 #47，上座 5727/12000，雪；票 0.86/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #47，上座 5860/12000，雪；票 0.88/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 92,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 4,
+          "amountBefore": 1.43,
+          "amountAfter": 1.71,
+          "balanceBefore": 23.99,
+          "balanceAfter": 24.29,
+          "memoBefore": "比赛日收入（比赛 #4，上座 9557/12000，晴；票 1.43/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #4，上座 11423/12000，晴；票 1.71/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 111,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 54,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 32.489999999999995,
+          "balanceAfter": 32.79,
+          "memoBefore": "联赛胜场奖金（比�� #54）",
+          "memoAfter": "联赛胜场奖金（比�� #54）",
+          "changed": false
+        },
+        {
+          "id": 112,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 54,
+          "amountBefore": 1.07,
+          "amountAfter": 1.45,
+          "balanceBefore": 33.559999999999995,
+          "balanceAfter": 34.24,
+          "memoBefore": "比赛日收入（比赛 #54，上座 7165/12000，多云；票 1.07/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #54，上座 9699/12000，多云；票 1.45/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 132,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 56,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 38.26,
+          "balanceAfter": 38.940000000000005,
+          "memoBefore": "联赛出场补贴（比赛 #56）",
+          "memoAfter": "联赛出场补贴（比赛 #56）",
+          "changed": false
+        },
+        {
+          "id": 158,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 14,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 45.26,
+          "balanceAfter": 45.940000000000005,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #14）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #14）",
+          "changed": false
+        },
+        {
+          "id": 159,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 14,
+          "amountBefore": 1.05,
+          "amountAfter": 1.63,
+          "balanceBefore": 46.309999999999995,
+          "balanceAfter": 47.57000000000001,
+          "memoBefore": "比赛日收入（比赛 #14，上座 7020/12000，多云；票 1.05/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #14，上座 10843/12000，多云；票 1.63/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 160,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 66,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 52.91,
+          "balanceAfter": 54.17000000000001,
+          "memoBefore": "联赛平局奖金（比赛 #66）",
+          "memoAfter": "联赛平局奖金（比赛 #66）",
+          "changed": false
+        },
+        {
+          "id": 162,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 66,
+          "amountBefore": 1.47,
+          "amountAfter": 1.79,
+          "balanceBefore": 54.379999999999995,
+          "balanceAfter": 55.96000000000001,
+          "memoBefore": "比赛日收入（比赛 #66，上座 9829/12000，晴；票 1.47/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #66，上座 11904/12000，晴；票 1.79/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 168,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 67,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 59.08,
+          "balanceAfter": 60.66000000000001,
+          "memoBefore": "联赛出场补贴（比赛 #67）",
+          "memoAfter": "联赛出场补贴（比赛 #67）",
+          "changed": false
+        },
+        {
+          "id": 209,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 23,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 66.08,
+          "balanceAfter": 67.66000000000001,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #23）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #23）",
+          "changed": false
+        }
+      ],
+      "accountBalanceBefore": 66.08,
+      "accountBalanceAfter": 67.66000000000001
+    },
+    {
+      "clubId": 14,
+      "entries": [
+        {
+          "id": 29,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 164,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 2.9,
+          "balanceAfter": 2.9,
+          "memoBefore": "联赛出场补贴（比赛 #164）",
+          "memoAfter": "联赛出场补贴（比赛 #164）",
+          "changed": false
+        },
+        {
+          "id": 66,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 170,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 5.8,
+          "balanceAfter": 5.8,
+          "memoBefore": "联赛出场补贴（比赛 #170）",
+          "memoAfter": "联赛出场补贴（比赛 #170）",
+          "changed": false
+        },
+        {
+          "id": 67,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 170,
+          "amountBefore": 1.14,
+          "amountAfter": 1.3,
+          "balanceBefore": 6.9399999999999995,
+          "balanceAfter": 7.1,
+          "memoBefore": "比赛日收入（比赛 #170，上座 7620/12000，晴；票 1.14/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #170，上座 8636/12000，晴；票 1.3/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 74,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 173,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 13.64,
+          "balanceAfter": 13.8,
+          "memoBefore": "联赛胜场奖金（比赛 #173）",
+          "memoAfter": "联赛胜场奖金（比赛 #173）",
+          "changed": false
+        },
+        {
+          "id": 75,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 173,
+          "amountBefore": 1.04,
+          "amountAfter": 1.21,
+          "balanceBefore": 14.68,
+          "balanceAfter": 15.010000000000002,
+          "memoBefore": "比赛日收入（比赛 #173，上座 6912/12000，多云；票 1.04/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #173，上座 8091/12000，多云；票 1.21/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 82,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 8,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 21.68,
+          "balanceAfter": 22.01,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #8）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #8）",
+          "changed": false
+        },
+        {
+          "id": 108,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 176,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 24.58,
+          "balanceAfter": 24.91,
+          "memoBefore": "联赛出场补贴（比赛 #176）",
+          "memoAfter": "联赛出场补贴（比赛 #176）",
+          "changed": false
+        },
+        {
+          "id": 113,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 181,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 29.38,
+          "balanceAfter": 29.71,
+          "memoBefore": "联赛平局奖金（比赛 #181）",
+          "memoAfter": "联赛平局奖金（比赛 #181）",
+          "changed": false
+        },
+        {
+          "id": 115,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 181,
+          "amountBefore": 0.98,
+          "amountAfter": 1.27,
+          "balanceBefore": 30.36,
+          "balanceAfter": 30.98,
+          "memoBefore": "比赛日收入（比赛 #181，上座 6513/12000，雨；票 0.98/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #181，上座 8465/12000，雨；票 1.27/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 145,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 17,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 37.36,
+          "balanceAfter": 37.980000000000004,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #17）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #17）",
+          "changed": false
+        },
+        {
+          "id": 146,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 17,
+          "amountBefore": 1.07,
+          "amountAfter": 1.46,
+          "balanceBefore": 38.43,
+          "balanceAfter": 39.440000000000005,
+          "memoBefore": "比赛日收入（比赛 #17，上座 7158/12000，多云；票 1.07/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #17，上座 9760/12000，多云；票 1.46/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 170,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 186,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 45.13,
+          "balanceAfter": 46.14000000000001,
+          "memoBefore": "联赛胜场奖金（比赛 #186）",
+          "memoAfter": "联赛胜场奖金（比赛 #186）",
+          "changed": false
+        },
+        {
+          "id": 197,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 28,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 52.13,
+          "balanceAfter": 53.14000000000001,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #28）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #28）",
+          "changed": false
+        }
+      ],
+      "accountBalanceBefore": 52.13,
+      "accountBalanceAfter": 53.14000000000001
+    },
+    {
+      "clubId": 21,
+      "entries": [
+        {
+          "id": 31,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 165,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 6.7,
+          "balanceAfter": 6.7,
+          "memoBefore": "联赛胜场奖金（比赛 #165）",
+          "memoAfter": "联赛胜场奖金（比赛 #165）",
+          "changed": false
+        },
+        {
+          "id": 32,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 165,
+          "amountBefore": 1.83,
+          "amountAfter": 1.9,
+          "balanceBefore": 8.530000000000001,
+          "balanceAfter": 8.6,
+          "memoBefore": "比赛日收入（比赛 #165，上座 12208/35000，晴；票 1.83/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #165，上座 12699/35000，晴；票 1.9/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 64,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 169,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 11.430000000000001,
+          "balanceAfter": 11.5,
+          "memoBefore": "联赛出场补贴（比赛 #169）",
+          "memoAfter": "联赛出场补贴（比赛 #169）",
+          "changed": false
+        },
+        {
+          "id": 77,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 174,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 16.23,
+          "balanceAfter": 16.3,
+          "memoBefore": "联赛平局奖金（比赛 #174）",
+          "memoAfter": "联赛平局奖金（比赛 #174）",
+          "changed": false
+        },
+        {
+          "id": 102,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 178,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 21.03,
+          "balanceAfter": 21.1,
+          "memoBefore": "联赛平局奖金（比赛 #178）",
+          "memoAfter": "联赛平局奖金（比赛 #178）",
+          "changed": false
+        },
+        {
+          "id": 128,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 180,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 25.830000000000002,
+          "balanceAfter": 25.900000000000002,
+          "memoBefore": "联赛平局奖金（比赛 #180）",
+          "memoAfter": "联赛平局奖金（比赛 #180）",
+          "changed": false
+        },
+        {
+          "id": 130,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 180,
+          "amountBefore": 1.38,
+          "amountAfter": 1.56,
+          "balanceBefore": 27.21,
+          "balanceAfter": 27.46,
+          "memoBefore": "比赛日收入（比赛 #180，上座 9224/35000，多云；票 1.38/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #180，上座 10410/35000，多云；票 1.56/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 187,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 184,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 30.11,
+          "balanceAfter": 30.36,
+          "memoBefore": "联赛出场补贴（比赛 #184）",
+          "memoAfter": "联赛出场补贴（比赛 #184）",
+          "changed": false
+        },
+        {
+          "id": 188,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 184,
+          "amountBefore": 1.3,
+          "amountAfter": 1.69,
+          "balanceBefore": 31.41,
+          "balanceAfter": 32.05,
+          "memoBefore": "比赛日收入（比赛 #184，上座 8659/35000，雨；票 1.3/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #184，上座 11274/35000，雨；票 1.69/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 205,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 26,
+          "amountBefore": 1.52,
+          "amountAfter": 2.2,
+          "balanceBefore": 32.93,
+          "balanceAfter": 34.25,
+          "memoBefore": "比赛日收入（比赛 #26，上座 10103/35000，晴；票 1.52/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #26，上座 14687/35000，晴；票 2.2/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 32.93,
+      "accountBalanceAfter": 34.25
+    },
+    {
+      "clubId": 33,
+      "entries": [
+        {
+          "id": 19,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 35,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 8.5,
+          "balanceAfter": 8.5,
+          "memoBefore": "联赛胜场奖金（比赛 #35）",
+          "memoAfter": "联赛胜场奖金（比赛 #35）",
+          "changed": false
+        },
+        {
+          "id": 34,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 40,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 17,
+          "balanceAfter": 17,
+          "memoBefore": "联赛胜场奖金（比赛 #40）",
+          "memoAfter": "联赛胜场奖金（比赛 #40）",
+          "changed": false
+        },
+        {
+          "id": 36,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 40,
+          "amountBefore": 1.06,
+          "amountAfter": 1.17,
+          "balanceBefore": 18.06,
+          "balanceAfter": 18.17,
+          "memoBefore": "比赛日收入（比赛 #40，上座 7057/12000，多云；票 1.06/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #40，上座 7789/12000，多���；票 1.17/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 52,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 46,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 24.659999999999997,
+          "balanceAfter": 24.770000000000003,
+          "memoBefore": "联赛平局奖金（比赛 #46）",
+          "memoAfter": "联赛平局奖金（比赛 #46）",
+          "changed": false
+        },
+        {
+          "id": 87,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 5,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 31.659999999999997,
+          "balanceAfter": 31.770000000000003,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #5）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #5）",
+          "changed": false
+        },
+        {
+          "id": 88,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 5,
+          "amountBefore": 1.23,
+          "amountAfter": 1.59,
+          "balanceBefore": 32.88999999999999,
+          "balanceAfter": 33.36000000000001,
+          "memoBefore": "比赛日收入（比赛 #5，上座 8174/12000，多云；票 1.23/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #5，上座 10600/12000，多云；票 1.59/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 98,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 53,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 41.38999999999999,
+          "balanceAfter": 41.86000000000001,
+          "memoBefore": "联赛胜场奖金（比赛 #53）",
+          "memoAfter": "联赛胜场奖金（比赛 #53）",
+          "changed": false
+        },
+        {
+          "id": 100,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 53,
+          "amountBefore": 1.52,
+          "amountAfter": 1.79,
+          "balanceBefore": 42.91,
+          "balanceAfter": 43.650000000000006,
+          "memoBefore": "比赛日收入（比赛 #53，上座 10140/12000，晴；票 1.52/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #53，上座 11904/12000，晴；票 1.79/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 123,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 58,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 49.51,
+          "balanceAfter": 50.25000000000001,
+          "memoBefore": "联赛平局奖金（比赛 #58）",
+          "memoAfter": "联赛平局奖金（比赛 #58）",
+          "changed": false
+        },
+        {
+          "id": 141,
+          "kind": "stadium_expand",
+          "refType": "stadium",
+          "refId": 33,
+          "amountBefore": -0.5,
+          "amountAfter": -0.5,
+          "balanceBefore": 49.01,
+          "balanceAfter": 49.75000000000001,
+          "memoBefore": "球场扩建 +500 座（费用 0.50M）",
+          "memoAfter": "球场扩建 +500 座（费用 0.50M）",
+          "changed": false
+        },
+        {
+          "id": 142,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 15,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 56.01,
+          "balanceAfter": 56.75000000000001,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #15）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #15）",
+          "changed": false
+        },
+        {
+          "id": 163,
+          "kind": "manual_adjust",
+          "refType": "stadium",
+          "refId": 33,
+          "amountBefore": 0.5,
+          "amountAfter": 0.5,
+          "balanceBefore": 56.51,
+          "balanceAfter": 57.25000000000001,
+          "memoBefore": "回滚 2026-09-21 球场扩建（原流水 id=141，-0.50M；capacity 12500→12000、build_credit 0.13→0）",
+          "memoAfter": "回滚 2026-09-21 球场扩建（原流水 id=141，-0.50M；capacity 12500→12000、build_credit 0.13→0）",
+          "changed": false
+        },
+        {
+          "id": 165,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 64,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 61.21,
+          "balanceAfter": 61.95000000000001,
+          "memoBefore": "联赛出场补贴（比赛 #64）",
+          "memoAfter": "联赛出场补贴（比赛 #64）",
+          "changed": false
+        },
+        {
+          "id": 166,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 64,
+          "amountBefore": 1.25,
+          "amountAfter": 1.79,
+          "balanceBefore": 62.46,
+          "balanceAfter": 63.74000000000001,
+          "memoBefore": "比赛日收入（比赛 #64，上座 8318/12000，多云；票 1.25/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #64，上座 11904/12000，多云；票 1.79/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 180,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 69,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 70.96000000000001,
+          "balanceAfter": 72.24000000000001,
+          "memoBefore": "联赛胜场奖金（比赛 #69）",
+          "memoAfter": "联赛胜场奖金（比赛 #69）",
+          "changed": false
+        },
+        {
+          "id": 182,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 69,
+          "amountBefore": 0.99,
+          "amountAfter": 1.79,
+          "balanceBefore": 71.95,
+          "balanceAfter": 74.03000000000002,
+          "memoBefore": "比赛日收入（比赛 #69，上座 6615/12000，雨；票 0.99/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #69，上座 11904/12000，雨；票 1.79/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 199,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 25,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 78.95,
+          "balanceAfter": 81.03000000000002,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #25）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #25）",
+          "changed": false
+        },
+        {
+          "id": 200,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 25,
+          "amountBefore": 1.04,
+          "amountAfter": 1.79,
+          "balanceBefore": 79.99000000000001,
+          "balanceAfter": 82.82000000000002,
+          "memoBefore": "比赛日收入（比赛 #25，上座 6954/12000，雨；票 1.04/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #25，上座 11904/12000，雨；票 1.79/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 79.99000000000001,
+      "accountBalanceAfter": 82.82000000000002
+    },
+    {
+      "clubId": 45,
+      "entries": [
+        {
+          "id": 7,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 32,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 8.5,
+          "balanceAfter": 8.5,
+          "memoBefore": "联赛胜场奖金（比赛 #32）",
+          "memoAfter": "联赛胜场奖金（比赛 #32）",
+          "changed": false
+        },
+        {
+          "id": 9,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 32,
+          "amountBefore": 1.98,
+          "amountAfter": 1.97,
+          "balanceBefore": 10.48,
+          "balanceAfter": 10.47,
+          "memoBefore": "比赛日收入（比赛 #32，上座 13186/35000，晴；票 1.98/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #32，上座 13157/35000，晴；票 1.97/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 11,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 52,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 17.08,
+          "balanceAfter": 17.07,
+          "memoBefore": "联赛平局奖金（比赛 #52）",
+          "memoAfter": "联赛平局奖金（比赛 #52）",
+          "changed": false
+        },
+        {
+          "id": 38,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 39,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 21.779999999999998,
+          "balanceAfter": 21.77,
+          "memoBefore": "联赛出场补贴（比赛 #39）",
+          "memoAfter": "联赛出场补贴（比赛 #39）",
+          "changed": false
+        },
+        {
+          "id": 51,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 46,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 28.379999999999995,
+          "balanceAfter": 28.369999999999997,
+          "memoBefore": "联赛平局奖金（比赛 #46）",
+          "memoAfter": "联赛平局奖金（比赛 #46）",
+          "changed": false
+        },
+        {
+          "id": 53,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 46,
+          "amountBefore": 1.4,
+          "amountAfter": 1.73,
+          "balanceBefore": 29.779999999999994,
+          "balanceAfter": 30.099999999999998,
+          "memoBefore": "比赛日收入（比赛 #46，上座 9304/35000，雨；票 1.4/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #46，上座 11532/35000，雨；票 1.73/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 89,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 7,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 36.779999999999994,
+          "balanceAfter": 37.099999999999994,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #7）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #7）",
+          "changed": false
+        },
+        {
+          "id": 125,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 55,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 45.279999999999994,
+          "balanceAfter": 45.599999999999994,
+          "memoBefore": "联赛胜场奖金（比赛 #55）",
+          "memoAfter": "联赛胜场奖金（比赛 #55）",
+          "changed": false
+        },
+        {
+          "id": 127,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 55,
+          "amountBefore": 1.61,
+          "amountAfter": 2.27,
+          "balanceBefore": 46.88999999999999,
+          "balanceAfter": 47.87,
+          "memoBefore": "比赛日收入（比赛 #55，上座 10704/35000，多云；票 1.61/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #55，上座 15123/35000，多云；票 2.27/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 161,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 66,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 53.489999999999995,
+          "balanceAfter": 54.47,
+          "memoBefore": "联赛平局奖金（比赛 #66）",
+          "memoAfter": "联赛平局奖金（比赛 #66）",
+          "changed": false
+        },
+        {
+          "id": 173,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 70,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 60.089999999999996,
+          "balanceAfter": 61.07,
+          "memoBefore": "联赛平局奖金（比赛 #70）",
+          "memoAfter": "联赛平局奖金（比赛 #70）",
+          "changed": false
+        },
+        {
+          "id": 174,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 70,
+          "amountBefore": 1.85,
+          "amountAfter": 2.6,
+          "balanceBefore": 61.94,
+          "balanceAfter": 63.67,
+          "memoBefore": "比赛日收入（比赛 #70，上座 12325/35000，多云；票 1.85/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #70，上座 17341/35000，多云；票 2.6/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 198,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 28,
+          "amountBefore": 1.45,
+          "amountAfter": 2.58,
+          "balanceBefore": 63.39,
+          "balanceAfter": 66.25,
+          "memoBefore": "比赛日收入（比赛 #28，上座 9649/35000，多云；票 1.45/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #28，上座 17221/35000，多云；票 2.58/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 63.39,
+      "accountBalanceAfter": 66.25
+    },
+    {
+      "clubId": 66,
+      "entries": [
+        {
+          "id": 8,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 32,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 4.7,
+          "balanceAfter": 4.7,
+          "memoBefore": "联赛出场补贴（比赛 #32）",
+          "memoAfter": "联赛出场补贴（比赛 #32）",
+          "changed": false
+        },
+        {
+          "id": 43,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 42,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 13.2,
+          "balanceAfter": 13.2,
+          "memoBefore": "联赛胜场奖金（比赛 #42）",
+          "memoAfter": "联赛胜场奖金（比赛 #42）",
+          "changed": false
+        },
+        {
+          "id": 45,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 42,
+          "amountBefore": 1.19,
+          "amountAfter": 1.3,
+          "balanceBefore": 14.389999999999999,
+          "balanceAfter": 14.5,
+          "memoBefore": "比赛日收入（比赛 #42，上座 7914/12000，晴；票 1.19/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #42，上座 8682/12000，晴；票 1.3/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 49,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 45,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 19.09,
+          "balanceAfter": 19.2,
+          "memoBefore": "联赛出场补贴（比赛 #45）",
+          "memoAfter": "联赛出场补贴（比赛 #45）",
+          "changed": false
+        },
+        {
+          "id": 50,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 45,
+          "amountBefore": 0.97,
+          "amountAfter": 1.49,
+          "balanceBefore": 20.06,
+          "balanceAfter": 20.689999999999998,
+          "memoBefore": "比赛日收入（比赛 #45，上座 6477/12000，多云；票 0.97/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #45，上座 9916/12000，多云；票 1.49/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 93,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 1,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 27.06,
+          "balanceAfter": 27.689999999999998,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #1）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #1）",
+          "changed": false
+        },
+        {
+          "id": 94,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 1,
+          "amountBefore": 0.87,
+          "amountAfter": 1.47,
+          "balanceBefore": 27.93,
+          "balanceAfter": 29.159999999999997,
+          "memoBefore": "比赛日收入（比赛 #1，上座 5820/12000，雨；票 0.87/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #1，上座 9788/12000，雨；票 1.47/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 99,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 53,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 32.63,
+          "balanceAfter": 33.86,
+          "memoBefore": "联赛出场补贴（比赛 #53）",
+          "memoAfter": "联赛出场补贴（比赛 #53）",
+          "changed": false
+        },
+        {
+          "id": 117,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 59,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 37.330000000000005,
+          "balanceAfter": 38.56,
+          "memoBefore": "联赛出场补贴（比赛 #59）",
+          "memoAfter": "联赛出场补贴（比赛 #59）",
+          "changed": false
+        },
+        {
+          "id": 118,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 59,
+          "amountBefore": 0.77,
+          "amountAfter": 1.54,
+          "balanceBefore": 38.10000000000001,
+          "balanceAfter": 40.1,
+          "memoBefore": "比赛日收入（比赛 #59，上座 5159/12000，雪；票 0.77/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #59，上座 10283/12000，雪；票 1.54/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 144,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 12,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 45.10000000000001,
+          "balanceAfter": 47.1,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #12）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #12）",
+          "changed": false
+        },
+        {
+          "id": 152,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 65,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 53.60000000000001,
+          "balanceAfter": 55.6,
+          "memoBefore": "联赛胜场奖金（比赛 #65）",
+          "memoAfter": "联赛胜场奖金（比赛 #65）",
+          "changed": false
+        },
+        {
+          "id": 167,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 67,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 62.10000000000001,
+          "balanceAfter": 64.1,
+          "memoBefore": "联赛胜场奖金（比赛 #67）",
+          "memoAfter": "联赛胜场奖金（比赛 #67）",
+          "changed": false
+        },
+        {
+          "id": 169,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 67,
+          "amountBefore": 1.4,
+          "amountAfter": 1.79,
+          "balanceBefore": 63.50000000000001,
+          "balanceAfter": 65.89,
+          "memoBefore": "比赛日收入（比赛 #67，上座 9360/12000，晴；票 1.4/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #67，上座 11904/12000，晴；票 1.79/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 206,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 21,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 70.5,
+          "balanceAfter": 72.89,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #21）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #21）",
+          "changed": false
+        },
+        {
+          "id": 207,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 21,
+          "amountBefore": 1.42,
+          "amountAfter": 1.79,
+          "balanceBefore": 71.92,
+          "balanceAfter": 74.68,
+          "memoBefore": "比赛日收入（比赛 #21，上座 9453/12000，多云；票 1.42/商 0/播 0���",
+          "memoAfter": "比赛日收入（比赛 #21，上座 11904/12000，多云；票 1.79/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 71.92,
+      "accountBalanceAfter": 74.68
+    },
+    {
+      "clubId": 73,
+      "entries": [
+        {
+          "id": 14,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 49,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 4.7,
+          "balanceAfter": 4.7,
+          "memoBefore": "联赛出场补贴（比赛 #49）",
+          "memoAfter": "联赛出场补贴（比赛 #49）",
+          "changed": false
+        },
+        {
+          "id": 17,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 34,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 9.4,
+          "balanceAfter": 9.4,
+          "memoBefore": "联赛出场补贴（比赛 #34）",
+          "memoAfter": "联赛出场补贴（比赛 #34）",
+          "changed": false
+        },
+        {
+          "id": 18,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 34,
+          "amountBefore": 1.52,
+          "amountAfter": 1.61,
+          "balanceBefore": 10.92,
+          "balanceAfter": 11.01,
+          "memoBefore": "比赛日收入（比赛 #34，上座 10130/35000，多云；票 1.52/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #34，上座 10724/35000，多云；票 1.61/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 44,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 42,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 15.620000000000001,
+          "balanceAfter": 15.71,
+          "memoBefore": "联赛出场补贴（比赛 #42）",
+          "memoAfter": "联赛出场补贴（比赛 #42）",
+          "changed": false
+        },
+        {
+          "id": 46,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 44,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 24.12,
+          "balanceAfter": 24.21,
+          "memoBefore": "联赛胜场奖金（比�� #44）",
+          "memoAfter": "联赛胜场奖金（比�� #44）",
+          "changed": false
+        },
+        {
+          "id": 47,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 44,
+          "amountBefore": 1.33,
+          "amountAfter": 1.68,
+          "balanceBefore": 25.450000000000003,
+          "balanceAfter": 25.89,
+          "memoBefore": "比赛日收入（比赛 #44，上座 8875/35000，晴；票 1.33/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #44，上座 11225/35000，晴；票 1.68/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 85,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 9,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 32.45,
+          "balanceAfter": 32.89,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #9）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #9）",
+          "changed": false
+        },
+        {
+          "id": 86,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 9,
+          "amountBefore": 1.3,
+          "amountAfter": 1.91,
+          "balanceBefore": 33.75,
+          "balanceAfter": 34.8,
+          "memoBefore": "比赛日收入（比赛 #9，上座 8689/35000，雨；票 1.3/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #9，上座 12719/35000，雨；票 1.91/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 120,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 60,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 38.45,
+          "balanceAfter": 39.5,
+          "memoBefore": "联赛出场补贴（比赛 #60）",
+          "memoAfter": "联赛出场补贴（比赛 #60）",
+          "changed": false
+        },
+        {
+          "id": 121,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 60,
+          "amountBefore": 1.52,
+          "amountAfter": 2.59,
+          "balanceBefore": 39.970000000000006,
+          "balanceAfter": 42.09,
+          "memoBefore": "比赛日收入（比赛 #60，上座 10139/35000，雨；票 1.52/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #60，上座 17269/35000，雨；票 2.59/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 149,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 19,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 46.970000000000006,
+          "balanceAfter": 49.09,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #19）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #19）",
+          "changed": false
+        },
+        {
+          "id": 164,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 64,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 55.470000000000006,
+          "balanceAfter": 57.59,
+          "memoBefore": "联赛胜场奖金（比赛 #64）",
+          "memoAfter": "联赛胜场奖金（比赛 #64）",
+          "changed": false
+        },
+        {
+          "id": 179,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 72,
+          "amountBefore": 6.6,
+          "amountAfter": 6.6,
+          "balanceBefore": 62.07000000000001,
+          "balanceAfter": 64.19,
+          "memoBefore": "联赛平局奖金（比赛 #72）",
+          "memoAfter": "联赛平局奖金（比赛 #72）",
+          "changed": false
+        },
+        {
+          "id": 195,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 29,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 69.07000000000001,
+          "balanceAfter": 71.19,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #29）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #29）",
+          "changed": false
+        },
+        {
+          "id": 196,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 29,
+          "amountBefore": 2.41,
+          "amountAfter": 4.32,
+          "balanceBefore": 71.48,
+          "balanceAfter": 75.50999999999999,
+          "memoBefore": "比赛日收入（比赛 #29，上座 16096/35000，晴；票 2.41/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #29，上座 28786/35000，晴；票 4.32/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 71.48,
+      "accountBalanceAfter": 75.50999999999999
+    },
+    {
+      "clubId": 243,
+      "entries": [
+        {
+          "id": 25,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 163,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 6.7,
+          "balanceAfter": 6.7,
+          "memoBefore": "联赛胜场奖金（比赛 #163）",
+          "memoAfter": "联赛胜场奖金（比赛 #163）",
+          "changed": false
+        },
+        {
+          "id": 68,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 167,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 13.4,
+          "balanceAfter": 13.4,
+          "memoBefore": "联赛胜场奖金（比赛 #167）",
+          "memoAfter": "联赛胜场奖金（比赛 #167）",
+          "changed": false
+        },
+        {
+          "id": 76,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 174,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 18.2,
+          "balanceAfter": 18.2,
+          "memoBefore": "联赛平局奖金（比赛 #174）",
+          "memoAfter": "联赛平局奖金（比赛 #174）",
+          "changed": false
+        },
+        {
+          "id": 78,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 174,
+          "amountBefore": 1.07,
+          "amountAfter": 1.11,
+          "balanceBefore": 19.27,
+          "balanceAfter": 19.31,
+          "memoBefore": "比赛日收入（比赛 #174，上座 7103/12000，多云；票 1.07/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #174，上座 7419/12000，多云；票 1.11/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 79,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 175,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 25.97,
+          "balanceAfter": 26.009999999999998,
+          "memoBefore": "联赛胜场奖金（比赛 #175）",
+          "memoAfter": "联赛胜场奖金（比赛 #175）",
+          "changed": false
+        },
+        {
+          "id": 81,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 175,
+          "amountBefore": 1.4,
+          "amountAfter": 1.74,
+          "balanceBefore": 27.369999999999997,
+          "balanceAfter": 27.749999999999996,
+          "memoBefore": "比赛日收入（比赛 #175，上座 9351/12000，晴；票 1.4/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #175，上座 11610/12000，晴；票 1.74/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 91,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 4,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 34.37,
+          "balanceAfter": 34.75,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #4）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #4）",
+          "changed": false
+        },
+        {
+          "id": 114,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 181,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 39.169999999999995,
+          "balanceAfter": 39.55,
+          "memoBefore": "联赛平局奖金（比赛 #181）",
+          "memoAfter": "联赛平局奖金（比赛 #181）",
+          "changed": false
+        },
+        {
+          "id": 137,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 13,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 46.169999999999995,
+          "balanceAfter": 46.55,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #13）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #13）",
+          "changed": false
+        },
+        {
+          "id": 138,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 13,
+          "amountBefore": 1.62,
+          "amountAfter": 1.79,
+          "balanceBefore": 47.78999999999999,
+          "balanceAfter": 48.339999999999996,
+          "memoBefore": "比赛日收入（比赛 #13，上座 10781/12000，晴；票 1.62/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #13，上座 11904/12000，晴；票 1.79/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 175,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 185,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 54.489999999999995,
+          "balanceAfter": 55.04,
+          "memoBefore": "联赛胜场奖金（比赛 #185）",
+          "memoAfter": "联赛胜场奖金（比赛 #185）",
+          "changed": false
+        },
+        {
+          "id": 176,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 185,
+          "amountBefore": 1.16,
+          "amountAfter": 1.57,
+          "balanceBefore": 55.64999999999999,
+          "balanceAfter": 56.61,
+          "memoBefore": "比赛日收入（比赛 #185，上座 7707/12000，雨；票 1.16/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #185，上座 10453/12000，雨；票 1.57/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 194,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 24,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 62.64999999999999,
+          "balanceAfter": 63.61,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #24）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #24）",
+          "changed": false
+        }
+      ],
+      "accountBalanceBefore": 62.64999999999999,
+      "accountBalanceAfter": 63.61
+    },
+    {
+      "clubId": 280,
+      "entries": [
+        {
+          "id": 26,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 163,
+          "amountBefore": 2.9,
+          "amountAfter": 2.9,
+          "balanceBefore": 2.9,
+          "balanceAfter": 2.9,
+          "memoBefore": "联赛出场补贴（比赛 #163）",
+          "memoAfter": "联赛出场补贴（比赛 #163）",
+          "changed": false
+        },
+        {
+          "id": 27,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 163,
+          "amountBefore": 1.05,
+          "amountAfter": 1.11,
+          "balanceBefore": 3.95,
+          "balanceAfter": 4.01,
+          "memoBefore": "比赛日收入（比赛 #163，上座 7029/12000，多云；票 1.05/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #163，上座 7374/12000，多云；票 1.11/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 65,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 170,
+          "amountBefore": 6.7,
+          "amountAfter": 6.7,
+          "balanceBefore": 10.65,
+          "balanceAfter": 10.71,
+          "memoBefore": "联赛胜场奖金（比赛 #170）",
+          "memoAfter": "联赛胜场奖金（比赛 #170）",
+          "changed": false
+        },
+        {
+          "id": 71,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 171,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 15.45,
+          "balanceAfter": 15.510000000000002,
+          "memoBefore": "联赛平局奖金（比赛 #171）",
+          "memoAfter": "联赛平局奖金（比赛 #171）",
+          "changed": false
+        },
+        {
+          "id": 73,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 171,
+          "amountBefore": 1.06,
+          "amountAfter": 1.18,
+          "balanceBefore": 16.509999999999998,
+          "balanceAfter": 16.69,
+          "memoBefore": "比赛日收入（比赛 #171，上座 7068/12000，多云；票 1.06/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #171，上座 7863/12000，多云；票 1.18/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 83,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 10,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 23.509999999999998,
+          "balanceAfter": 23.69,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #10）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #10）",
+          "changed": false
+        },
+        {
+          "id": 104,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 177,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 28.31,
+          "balanceAfter": 28.490000000000002,
+          "memoBefore": "联赛平局奖金（比赛 #177）",
+          "memoAfter": "联赛平局奖金（比赛 #177）",
+          "changed": false
+        },
+        {
+          "id": 129,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 180,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 33.11,
+          "balanceAfter": 33.29,
+          "memoBefore": "联赛平局奖金（比赛 #180）",
+          "memoAfter": "联赛平局奖金（比赛 #180）",
+          "changed": false
+        },
+        {
+          "id": 150,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 19,
+          "amountBefore": 0.92,
+          "amountAfter": 1.1,
+          "balanceBefore": 34.03,
+          "balanceAfter": 34.39,
+          "memoBefore": "比赛日收入（比赛 #19，上座 6130/12000，雨；票 0.92/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #19，上座 7317/12000，雨；票 1.1/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 192,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 183,
+          "amountBefore": 4.8,
+          "amountAfter": 4.8,
+          "balanceBefore": 38.83,
+          "balanceAfter": 39.19,
+          "memoBefore": "联赛平局奖金（比赛 #183）",
+          "memoAfter": "联赛平局奖金（比赛 #183）",
+          "changed": false
+        },
+        {
+          "id": 193,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 183,
+          "amountBefore": 0.93,
+          "amountAfter": 1.1,
+          "balanceBefore": 39.76,
+          "balanceAfter": 40.29,
+          "memoBefore": "比赛日收入（比赛 #183，上座 6210/12000，多云；票 0.93/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #183，上座 7316/12000，多云；票 1.1/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 39.76,
+      "accountBalanceAfter": 40.29
+    },
+    {
+      "clubId": 449,
+      "entries": [
+        {
+          "id": 23,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 31,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 8.5,
+          "balanceAfter": 8.5,
+          "memoBefore": "联赛胜场奖金（比赛 #31）",
+          "memoAfter": "联赛胜场奖金（比赛 #31）",
+          "changed": false
+        },
+        {
+          "id": 24,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 31,
+          "amountBefore": 1.04,
+          "amountAfter": 1.08,
+          "balanceBefore": 9.54,
+          "balanceAfter": 9.58,
+          "memoBefore": "比赛日收入（比赛 #31，上座 6942/17000，多云；票 1.04/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #31，上座 7202/17000，多云；票 1.08/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 40,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 38,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 18.04,
+          "balanceAfter": 18.08,
+          "memoBefore": "联赛胜场奖金（比赛 #38）",
+          "memoAfter": "联赛胜场奖金（比赛 #38）",
+          "changed": false
+        },
+        {
+          "id": 60,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 48,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 26.54,
+          "balanceAfter": 26.58,
+          "memoBefore": "联赛胜场奖金（比赛 #48）",
+          "memoAfter": "联赛胜场奖金（比赛 #48）",
+          "changed": false
+        },
+        {
+          "id": 97,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 2,
+          "amountBefore": 1.12,
+          "amountAfter": 1.36,
+          "balanceBefore": 27.66,
+          "balanceAfter": 27.939999999999998,
+          "memoBefore": "比赛日收入（比赛 #2，上座 7463/17000，雨；票 1.12/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #2，上座 9081/17000，雨；票 1.36/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 106,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 50,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 32.36,
+          "balanceAfter": 32.64,
+          "memoBefore": "联赛出场补贴（比赛 #50）",
+          "memoAfter": "联赛出场补贴（比赛 #50）",
+          "changed": false
+        },
+        {
+          "id": 107,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 50,
+          "amountBefore": 1.23,
+          "amountAfter": 1.73,
+          "balanceBefore": 33.589999999999996,
+          "balanceAfter": 34.37,
+          "memoBefore": "比赛日收入（比赛 #50，上座 8213/17000，多云；票 1.23/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #50，上座 11502/17000，多云；票 1.73/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 126,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 55,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 38.29,
+          "balanceAfter": 39.07,
+          "memoBefore": "联赛出场补贴（比赛 #55）",
+          "memoAfter": "联赛出场补贴（比赛 #55）",
+          "changed": false
+        },
+        {
+          "id": 147,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 11,
+          "amountBefore": 7,
+          "amountAfter": 7,
+          "balanceBefore": 45.29,
+          "balanceAfter": 46.07,
+          "memoBefore": "冠军杯小组赛胜场奖金（比赛 #11）",
+          "memoAfter": "冠军杯小组赛胜场奖金（比赛 #11）",
+          "changed": false
+        },
+        {
+          "id": 148,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 11,
+          "amountBefore": 0.8,
+          "amountAfter": 1.14,
+          "balanceBefore": 46.089999999999996,
+          "balanceAfter": 47.21,
+          "memoBefore": "比赛日收入（比赛 #11，上座 5339/17000，多云；票 0.8/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #11，上座 7629/17000，多云；票 1.14/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 153,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 65,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 50.79,
+          "balanceAfter": 51.910000000000004,
+          "memoBefore": "联赛出场补贴（比赛 #65）",
+          "memoAfter": "联赛出场补贴（比赛 #65）",
+          "changed": false
+        },
+        {
+          "id": 154,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 65,
+          "amountBefore": 1.33,
+          "amountAfter": 1.9,
+          "balanceBefore": 52.12,
+          "balanceAfter": 53.81,
+          "memoBefore": "比赛日收入（比赛 #65，上座 8874/17000，晴；票 1.33/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #65，上座 12641/17000，晴；票 1.9/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 184,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 68,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 56.82,
+          "balanceAfter": 58.510000000000005,
+          "memoBefore": "联赛出场补贴（比赛 #68）",
+          "memoAfter": "联赛出场补贴（比赛 #68）",
+          "changed": false
+        }
+      ],
+      "accountBalanceBefore": 56.82,
+      "accountBalanceAfter": 58.510000000000005
+    },
+    {
+      "clubId": 110374,
+      "entries": [
+        {
+          "id": 2,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 33,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 4.7,
+          "balanceAfter": 4.7,
+          "memoBefore": "联赛出场补贴（比赛 #33）",
+          "memoAfter": "联赛出场补贴（比赛 #33）",
+          "changed": false
+        },
+        {
+          "id": 41,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 38,
+          "amountBefore": 4.7,
+          "amountAfter": 4.7,
+          "balanceBefore": 9.4,
+          "balanceAfter": 9.4,
+          "memoBefore": "联赛出场补贴（比赛 #38）",
+          "memoAfter": "联赛出场补贴（比赛 #38）",
+          "changed": false
+        },
+        {
+          "id": 42,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 38,
+          "amountBefore": 1.94,
+          "amountAfter": 1.91,
+          "balanceBefore": 11.34,
+          "balanceAfter": 11.31,
+          "memoBefore": "比赛日收入（比赛 #38，上座 12927/22000，晴；票 1.94/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #38，上座 12735/22000，晴；票 1.91/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 57,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 47,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 19.84,
+          "balanceAfter": 19.810000000000002,
+          "memoBefore": "联赛胜场奖金（比赛 #47）",
+          "memoAfter": "联赛胜场奖金（比赛 #47）",
+          "changed": false
+        },
+        {
+          "id": 90,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 7,
+          "amountBefore": 1.79,
+          "amountAfter": 2.29,
+          "balanceBefore": 21.63,
+          "balanceAfter": 22.1,
+          "memoBefore": "比赛日收入（比赛 #7，上座 11961/22000，晴；票 1.79/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #7，上座 15254/22000，晴；票 2.29/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 109,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 51,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 30.13,
+          "balanceAfter": 30.6,
+          "memoBefore": "联赛胜场奖金（比赛 #51）",
+          "memoAfter": "联赛胜场奖金（比赛 #51）",
+          "changed": false
+        },
+        {
+          "id": 110,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 51,
+          "amountBefore": 1.3,
+          "amountAfter": 1.94,
+          "balanceBefore": 31.43,
+          "balanceAfter": 32.54,
+          "memoBefore": "比赛日收入（比赛 #51，上座 8673/22000，雨；票 1.3/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #51，上座 12929/22000，雨；票 1.94/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 119,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 60,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 39.93,
+          "balanceAfter": 41.04,
+          "memoBefore": "联赛胜场奖金（比赛 #60）",
+          "memoAfter": "联赛胜场奖金（比赛 #60）",
+          "changed": false
+        },
+        {
+          "id": 177,
+          "kind": "prize",
+          "refType": "match_home",
+          "refId": 63,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 48.43,
+          "balanceAfter": 49.54,
+          "memoBefore": "联赛胜场奖金（比赛 #63）",
+          "memoAfter": "联赛胜场奖金（比赛 #63）",
+          "changed": false
+        },
+        {
+          "id": 178,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 63,
+          "amountBefore": 2.05,
+          "amountAfter": 3.27,
+          "balanceBefore": 50.48,
+          "balanceAfter": 52.81,
+          "memoBefore": "比赛日收入（比赛 #63，上座 13669/22000，晴；票 2.05/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #63，上座 21824/22000，晴；票 3.27/商 0/播 0）",
+          "changed": true
+        },
+        {
+          "id": 189,
+          "kind": "prize",
+          "refType": "match_away",
+          "refId": 71,
+          "amountBefore": 8.5,
+          "amountAfter": 8.5,
+          "balanceBefore": 58.98,
+          "balanceAfter": 61.31,
+          "memoBefore": "联赛胜场奖金（比赛 #71）",
+          "memoAfter": "联赛胜场奖金（比赛 #71）",
+          "changed": false
+        },
+        {
+          "id": 208,
+          "kind": "revenue",
+          "refType": "match",
+          "refId": 27,
+          "amountBefore": 2.08,
+          "amountAfter": 3.27,
+          "balanceBefore": 61.059999999999995,
+          "balanceAfter": 64.58,
+          "memoBefore": "比赛日收入（比赛 #27，上座 13834/22000，晴；票 2.08/商 0/播 0）",
+          "memoAfter": "比赛日收入（比赛 #27，上座 21824/22000，晴；票 3.27/商 0/播 0）",
+          "changed": true
+        }
+      ],
+      "accountBalanceBefore": 61.059999999999995,
+      "accountBalanceAfter": 64.58
+    }
+  ]
+}
