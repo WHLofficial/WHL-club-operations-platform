@@ -42,18 +42,31 @@ function freshEnv(): Fixture {
   return { env, sqlite, tour, kv };
 }
 
-// 默认球场：档位 0（1.2-2.5 万座），容量 20000，建设券 0.4，余额 5
-function seedClub(sqlite: DatabaseSync, opts: { capacity?: number; tier?: number; credit?: number; balance?: number } = {}) {
+// 默认球场：档位 0（1.2-2.5 万座），容量 20000，建设券 0.4，余额 5；
+// v6.30.0 起默认补一条开窗行（关窗用例传 { window: false }）——施工闸在函数内，
+// 直接调 expandStadium / upgradeStadiumTier / upgradeFacilityLevel 的用例也必须先有窗
+function seedClub(
+  sqlite: DatabaseSync,
+  opts: { capacity?: number; tier?: number; credit?: number; balance?: number; window?: boolean } = {},
+) {
   sqlite.exec(`
     INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active');
     INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 1, '2026-01-01T00:00:00Z');
     INSERT INTO stadiums (club_id, name, capacity, tier, build_credit) VALUES (1, '酋长球场', ${opts.capacity ?? 20000}, ${opts.tier ?? 0}, ${opts.credit ?? 0.4});
     INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (1, ${opts.balance ?? 5}, '2026-01-01T00:00:00Z');
   `);
+  if (opts.window !== false) openWindow(sqlite);
 }
 
 function stadiumRow(sqlite: DatabaseSync) {
   return sqlGet<{ capacity: number; tier: number; build_credit: number }>(sqlite, 'SELECT capacity, tier, build_credit FROM stadiums WHERE club_id = 1')!;
+}
+
+// v6.30.0 开窗闸：三个施工动作只在窗内放行；seedClub 默认开窗，关窗用例显式传 { window: false }
+function openWindow(sqlite: DatabaseSync) {
+  sqlite
+    .prepare(`INSERT OR IGNORE INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z')`)
+    .run();
 }
 
 /** 设施经营的审计留痕（v6.2.1）：actor 必须是操作人，before/after 要能还原改动前后取值
@@ -194,11 +207,13 @@ describe('路由（requireCoach + getBoundClub + build-info）', () => {
       credit: number;
       expansionPer100: number;
       maxOpenTier: number;
+      open: boolean;
       tier: { level: number; name: string; maxSeats: number };
       nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean; capacityOk: boolean } | null;
       facilities: { key: string; level: number; nextCost: number | null }[];
     };
     expect(body.credit).toBe(0.4);
+    expect(body.open).toBe(true);
     expect(body.expansionPer100).toBe(0.1);
     expect(body.tier).toMatchObject({ level: 0, name: '社区级', maxSeats: 25000 });
     expect(body.nextTier).toMatchObject({ name: '地区级', minSeats: 20000, upgradeCost: 3, open: true, capacityOk: true });
@@ -217,5 +232,88 @@ describe('路由（requireCoach + getBoundClub + build-info）', () => {
 
     const anon = await get('/api/club/stadium/build-info', 'tok-none');
     expect(anon.status).toBe(401);
+  });
+});
+
+describe('开窗闸（v6.30.0）', () => {
+  const post = (fx: Fixture, path: string, body: unknown = {}) =>
+    app.request(
+      path,
+      { method: 'POST', headers: { 'content-type': 'application/json', Cookie: 'whl_session=tok-coach' }, body: JSON.stringify(body) },
+      fx.env,
+    );
+
+  it('关窗：扩建 409 no_window，球场 / 券 / 余额 / 审计 / 台账原样', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { window: false });
+    const res = await post(fx, '/api/club/stadium/expand', { seats: 500 });
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { error?: string; code?: string }).toMatchObject({
+      code: 'no_window',
+      error: '转会窗口没开，现在不能扩建球场',
+    });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0, build_credit: 0.4 });
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(5);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
+    expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
+  });
+
+  it('关窗：升档 409 no_window，档位 / 券 / 余额 / 审计原样', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { window: false });
+    const res = await post(fx, '/api/club/stadium/upgrade');
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { error?: string; code?: string }).toMatchObject({
+      code: 'no_window',
+      error: '转会窗口没开，现在不能升级球场档位',
+    });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0, build_credit: 0.4 });
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(5);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_upgrade'").length).toBe(0);
+    expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
+  });
+
+  it('关窗：升设施 409 no_window，设施行 / 券 / 余额 / 审计原样', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { window: false });
+    const res = await post(fx, '/api/club/facilities/upgrade', { key: 'commercial' });
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { error?: string; code?: string }).toMatchObject({
+      code: 'no_window',
+      error: '转会窗口没开，现在不能升级设施',
+    });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM club_facilities')?.n).toBe(0);
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0, build_credit: 0.4 });
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(5);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='facility_upgrade'").length).toBe(0);
+    expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
+  });
+
+  it('关窗期参数 / 状态非法仍先报 400；关窗时 build-info 报 open=false', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { window: false });
+    // 参数非法优先于没开窗：非 100 倍数、白名单外设施类型都必须是 400
+    expect((await post(fx, '/api/club/stadium/expand', { seats: 150 })).status).toBe(400);
+    expect((await post(fx, '/api/club/facilities/upgrade', { key: 'casino' })).status).toBe(400);
+    // 状态非法（容量不足升档）同样先报 400
+    const low = freshEnv();
+    seedClub(low.sqlite, { capacity: 12000, window: false });
+    const lowRes = await post(low, '/api/club/stadium/upgrade');
+    expect(lowRes.status).toBe(400);
+    expect((await lowRes.json()) as { error?: string }).toMatchObject({ error: expect.stringContaining('容量不足') });
+    // 关窗时前端判据必须为 false（三类施工按钮靠它置灰）
+    const info = await app.request('/api/club/stadium/build-info', { headers: { Cookie: 'whl_session=tok-coach' } }, fx.env);
+    expect(info.status).toBe(200);
+    expect(((await info.json()) as { open: boolean }).open).toBe(false);
+  });
+
+  it('开窗：三端点照常 201（闸不误伤正常经营）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { balance: 20, credit: 1 });
+    expect((await post(fx, '/api/club/stadium/expand', { seats: 500 })).status).toBe(201);
+    expect((await post(fx, '/api/club/stadium/upgrade')).status).toBe(201);
+    expect((await post(fx, '/api/club/facilities/upgrade', { key: 'commercial' })).status).toBe(201);
+    expect(stadiumRow(fx.sqlite)).toMatchObject({ capacity: 20500, tier: 1 });
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action IN ('stadium_expand','stadium_upgrade','facility_upgrade')").length).toBe(3);
   });
 });

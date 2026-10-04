@@ -1054,12 +1054,15 @@ app.get('/club/stadium/build-info', async (c) => {
     .all<{ facility_key: string; level: number }>();
   const levelOf = (key: string) => facilities.results.find((f) => f.facility_key === key)?.level ?? 0;
   const balance = await loadBalance(c.env.DB, club.id);
+  const win = await getOpenWindow(c.env.DB);
   return c.json({
     credit: stadium.build_credit,
     balance,
     expansionPer100: prices.expansionPer100,
     maxOpenTier,
     refundRatio,
+    // v6.30.0：施工开窗闸的前端判据，与三个 POST 端点的 409 no_window 同源
+    open: win !== null,
     tier: {
       level: stadium.tier,
       name: tierEntry?.name ?? null,
@@ -1087,6 +1090,7 @@ app.post('/club/stadium/expand', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
+  // v6.30.0 开窗闸在 expandStadium 内：参数校验优先，避免关窗把参数错误也报成 409
   const body = (await c.req.raw.json().catch(() => null)) as { seats?: unknown } | null;
   const out = await expandStadium(c.env, club.id, Number(body?.seats), user.id);
   return c.json(out, 201);
@@ -1096,6 +1100,7 @@ app.post('/club/stadium/upgrade', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
+  // v6.30.0 开窗闸在 upgradeStadiumTier 内：档位/容量校验优先
   const out = await upgradeStadiumTier(c.env, club.id, user.id);
   return c.json(out, 201);
 });

@@ -5,6 +5,7 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
+import { getOpenWindow } from './seasons.ts';
 import { loadTierTable, type TierEntry } from './home.ts';
 import { createConfigService } from '../core/config.ts';
 import { createAuditStatement } from '../lib/audit.ts';
@@ -113,6 +114,9 @@ export async function expandStadium(
   const config = createConfigService(env.DB);
   const cost = round2((seats / EXPANSION_STEP) * prices.expansionPer100);
   const ratio = (await config.getNumber('voucher_refund')) ?? 0.25;
+  // v6.30.0 开窗闸：施工与转会同口径（关窗 409 no_window）；放在全部校验之后、动钱之前，
+  // 参数/状态非法仍先报 400
+  if (!(await getOpenWindow(env.DB))) throw new HttpError(409, '转会窗口没开，现在不能扩建球场', 'no_window');
   const { creditUsed, cash, refund } = await payAndRefund(env, clubId, cost, stadium.build_credit, ratio);
 
   const ledger = ledgerMovement(env.DB, {
@@ -181,6 +185,8 @@ export async function upgradeStadiumTier(
   const config = createConfigService(env.DB);
   const cost = round2(tierEntry.upgrade_cost);
   const ratio = (await config.getNumber('voucher_refund')) ?? 0.25;
+  // v6.30.0 开窗闸（同 expandStadium：校验先行、动钱在后）
+  if (!(await getOpenWindow(env.DB))) throw new HttpError(409, '转会窗口没开，现在不能升级球场档位', 'no_window');
   const { creditUsed, cash, refund } = await payAndRefund(env, clubId, cost, stadium.build_credit, ratio);
 
   const ledger = ledgerMovement(env.DB, {
@@ -245,6 +251,8 @@ export async function upgradeFacilityLevel(
   const cost = round2(prices.upgradeCosts[level]!);
   const ratio = (await config.getNumber('voucher_refund')) ?? 0.25;
   const stadium = await loadStadium(env.DB, clubId);
+  // v6.30.0 开窗闸（同 expandStadium：校验先行、动钱在后）
+  if (!(await getOpenWindow(env.DB))) throw new HttpError(409, '转会窗口没开，现在不能升级设施', 'no_window');
   const { creditUsed, cash, refund } = await payAndRefund(env, clubId, cost, stadium.build_credit, ratio);
 
   const ledger = ledgerMovement(env.DB, {

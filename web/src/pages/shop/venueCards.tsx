@@ -36,6 +36,9 @@ const FACILITY_LABEL: Record<string, string> = {
   medical: '医疗中心',
 };
 
+// v6.30.0 施工开窗闸：三类施工按钮的统一置灰原因（与后端 409 no_window 同口径）
+const CLOSED_BUILD_HINT = '转会窗口没开，开窗后才能施工';
+
 export function FacilityOpsCard() {
   const qc = useQueryClient();
   const { show } = useToast();
@@ -88,6 +91,8 @@ export function FacilityOpsCard() {
       ? `超当前档位上限，最多还能扩 ${capacityHeadroom.toLocaleString()} 座`
       : null;
   const upgradeBlocked = !info.nextTier || !info.nextTier.open || !info.nextTier.capacityOk;
+  // v6.30.0：门控吃 build-info 的 open（与后端 409 no_window 同一判据），不再单拉窗口端点
+  const windowOpen = info.open;
 
   return (
     <section className="card">
@@ -95,6 +100,7 @@ export function FacilityOpsCard() {
       <p className="hint">
         建设券余额 <span className="mono">{info.credit.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}%，可抵扣后续建设）· 当前余额{' '}
         <span className="mono">{info.balance.toFixed(2)}</span> M · 开放至 {info.maxOpenTier} 级
+        {!windowOpen && ` · ${CLOSED_BUILD_HINT}。`}
       </p>
 
       <p>
@@ -117,8 +123,9 @@ export function FacilityOpsCard() {
         <button
           className="btn btn-sm"
           type="button"
-          disabled={busy || !seatsValid || expandError !== null}
+          disabled={busy || !seatsValid || expandError !== null || !windowOpen}
           style={{ marginLeft: 8 }}
+          title={!windowOpen ? CLOSED_BUILD_HINT : undefined}
           onClick={() => void run('/api/club/stadium/expand', { seats: seatCount }, `扩建 +${seatCount} 座`)}
         >
           扩建
@@ -134,9 +141,17 @@ export function FacilityOpsCard() {
             <button
               className="btn btn-sm"
               type="button"
-              disabled={busy || upgradeBlocked}
+              disabled={busy || upgradeBlocked || !windowOpen}
               style={{ marginLeft: 8 }}
-              title={upgradeBlocked ? (!info.nextTier.open ? `第 ${info.tier.level + 1} 档暂未开放` : '容量不足，先扩建') : undefined}
+              title={
+                !windowOpen
+                  ? CLOSED_BUILD_HINT
+                  : upgradeBlocked
+                    ? !info.nextTier.open
+                      ? `第 ${info.tier.level + 1} 档暂未开放`
+                      : '容量不足，先扩建'
+                    : undefined
+              }
               onClick={() => void run('/api/club/stadium/upgrade', {}, `升级到${info.nextTier!.name}`)}
             >
               {upgradeBlocked ? (info.nextTier.open ? '容量不足' : '未开放') : '升级'}
@@ -156,9 +171,9 @@ export function FacilityOpsCard() {
               <button
                 className="btn btn-ghost btn-sm"
                 type="button"
-                disabled={busy}
+                disabled={busy || !windowOpen}
                 style={{ marginLeft: 4 }}
-                title={`升到 ${f.level + 1} 级：${f.nextCost.toFixed(2)}M`}
+                title={!windowOpen ? CLOSED_BUILD_HINT : `升到 ${f.level + 1} 级：${f.nextCost.toFixed(2)}M`}
                 onClick={() => void run('/api/club/facilities/upgrade', { key: f.key }, `${FACILITY_LABEL[f.key] ?? f.key}升到 ${f.level + 1} 级`)}
               >
                 升级 {f.nextCost.toFixed(2)}M
