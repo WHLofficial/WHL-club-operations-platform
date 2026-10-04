@@ -19,6 +19,7 @@ const COUNT_CARDS: { key: keyof Omit<AdminOverview, 'at'>; label: string; hint: 
   { key: 'resultQueue', label: '赛果队列', hint: '已结束未确认给 XP 的比赛', to: '/admin/seasons' },
   { key: 'activeListings', label: '活跃挂牌', hint: '在架 / 竞价 / 匹配中的挂牌', to: '/market' },
   { key: 'clubs', label: '俱乐部', hint: '注册俱乐部总数', to: '/admin/clubs' },
+  { key: 'cpuClubs', label: 'CPU 队', hint: '待接管的电脑队', to: '/admin/clubs/cpu-convert' },
   { key: 'players', label: '球员', hint: '球员库总人数', to: '/players' },
 ];
 

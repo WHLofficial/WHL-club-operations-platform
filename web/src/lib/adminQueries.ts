@@ -1,7 +1,7 @@
 // 管理端共享数据层（v2.1.0 commit 3）：
 // clubs 原来在俱乐部/合同导入/期初余额/手动记账四个 section 各拉一次，共享 key 自动去重；
 // /api/seasons/current 赛季页与球员页成长引擎都要用，同样共享。
-import { api, apiSend, type AdminClubRow, type AdminShopOrdersResponse, type MarketRoundReopenResult, type MarketRoundResponse, type MatchEntryInput, type MatchEntryListResponse, type MatchEntryPanel, type MatchEntrySubmitResult, type SeasonCurrent, type WeatherForecastPreview } from './api.ts';
+import { api, apiSend, type AdminClubRow, type AdminShopOrdersResponse, type CpuConvertState, type MarketRoundReopenResult, type MarketRoundResponse, type MatchEntryInput, type MatchEntryListResponse, type MatchEntryPanel, type MatchEntrySubmitResult, type SeasonCurrent, type WeatherForecastPreview } from './api.ts';
 
 export const ADMIN_CLUBS_KEY = ['admin', 'clubs'] as const;
 export const SEASON_CURRENT_KEY = ['seasons', 'current'] as const;
@@ -77,4 +77,11 @@ export async function fetchAdminShopOrders(status: string, source: string): Prom
   if (source) q.set('source', source);
   const qs = q.toString();
   return api<AdminShopOrdersResponse>(`/api/admin/shop/orders${qs ? `?${qs}` : ''}`);
+}
+
+// v6.27.0 CPU 接管向导：单队接管状态（五步向导整页吃这一份，动作后 invalidate 本 key）
+export const CPU_CONVERT_KEY = (id: number) => ['admin', 'cpu-convert', id] as const;
+
+export async function fetchCpuConvert(id: number): Promise<CpuConvertState> {
+  return api<CpuConvertState>(`/api/admin/clubs/${id}/cpu-convert`);
 }

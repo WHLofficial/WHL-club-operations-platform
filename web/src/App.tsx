@@ -44,6 +44,8 @@ const AdminGrowthPage = lazy(() => import('./pages/admin/GrowthEntryPage.tsx'));
 const AdminImportsPage = lazy(() => import('./pages/admin/ImportsPage.tsx'));
 const AdminMarketPage = lazy(() => import('./pages/admin/MarketPage.tsx'));
 const AdminClubsPage = lazy(() => import('./pages/admin/ClubsPage.tsx'));
+// CPU 接管向导（v6.27.0）：从俱乐部管理 CPU 行的入口进，侧栏不加项
+const AdminCpuConvertPage = lazy(() => import('./pages/admin/CpuConvertPage.tsx'));
 const AdminBrandsPage = lazy(() => import('./pages/admin/BrandsPage.tsx'));
 const AdminEventsPage = lazy(() => import('./pages/admin/EventsPage.tsx'));
 const AdminShopPage = lazy(() => import('./pages/admin/AdminShopPage.tsx'));
@@ -168,6 +170,7 @@ export default function App() {
             <Route path="imports" element={<AdminImportsPage />} />
             <Route path="market" element={<AdminMarketPage />} />
             <Route path="clubs" element={<AdminClubsPage />} />
+            <Route path="clubs/cpu-convert" element={<AdminCpuConvertPage />} />
             <Route path="brands" element={<AdminBrandsPage />} />
             <Route path="events" element={<AdminEventsPage />} />
             <Route path="shop" element={<AdminShopPage />} />

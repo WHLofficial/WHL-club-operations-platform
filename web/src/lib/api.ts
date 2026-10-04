@@ -35,11 +35,19 @@ export class ApiError extends Error {
   }
 }
 
+/** 错误体两种口径：HttpError 是 {error:'中文'}；机器通道与新管理端点（v6.27.0）是 {error:'code', message:'中文'}——有 message 就用它 */
+function errMessage(data: unknown, fallback = '请求失败'): string {
+  const d = data as { message?: unknown; error?: unknown } | null;
+  if (typeof d?.message === 'string' && d.message) return d.message;
+  if (typeof d?.error === 'string' && d.error) return d.error;
+  return fallback;
+}
+
 export async function api<T>(path: string): Promise<T> {
   const res = await fetch(path);
   const body = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new ApiError(res.status, body?.error ?? '请求失败', body?.code);
+    throw new ApiError(res.status, errMessage(body), body?.code);
   }
   return body as T;
 }
@@ -52,7 +60,7 @@ export async function apiSend<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', pa
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new ApiError(res.status, data?.error ?? '请求失败', data?.code, Array.isArray(data?.issues) ? data.issues : undefined);
+    throw new ApiError(res.status, errMessage(data), data?.code, Array.isArray(data?.issues) ? data.issues : undefined);
   }
   return data as T;
 }
@@ -66,7 +74,7 @@ export async function apiUpload<T>(path: string, contentType: string, body: Blob
   const res = await fetch(path, { method: 'POST', headers: { 'content-type': contentType }, body });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new ApiError(res.status, data?.error ?? '请求失败', data?.code);
+    throw new ApiError(res.status, errMessage(data), data?.code);
   }
   return data as T;
 }
@@ -406,12 +414,49 @@ export interface ClubDirectoryRow {
 export interface AdminClubRow {
   id: number;
   name: string;
+  /** CPU 队标记（v6.27.0）：true = 电脑队，可从俱乐部管理进入接管向导 */
+  isCpu: boolean;
   leagueTier: string;
   status: string;
   transferBanned?: boolean;
   createdAt: string;
   bindings: { userId: number; userName: string | null; boundAt: string }[];
   latestCode: { expiresAt: string | null; usedBy: number | null; usedAt: string | null; createdAt: string } | null;
+}
+
+// ---- CPU 接管向导（v6.27.0）：把电脑队转成真人可接管的俱乐部，五步一条线 ----
+
+/** GET /api/admin/clubs/:id/cpu-convert 的接管状态（五步向导整页吃这一份） */
+export interface CpuConvertState {
+  club: { id: number; name: string; isCpu: boolean; leagueTier: string | null; status: string };
+  /** 赛事系统对手方；查无此队时为 null（步骤 1 可跳过） */
+  tour: { id: number; name: string } | null;
+  /** 运营基建现状：是否有球场行 / 是否有账本 / 设施行数 */
+  infra: { stadium: boolean; ledger: boolean; facilities: number };
+  binding: { bound: boolean; userId: number | null; userName: string | null; boundAt: string | null };
+  /** 建议值：新队名 / 队壳影响力 / 奖励分 / 定级 / 初始球迷目标 */
+  suggest: { newName: string; shellInfluence: number; bonusPoints: number; leagueTier: 'premier' | 'second' | null; diehardTarget: number };
+}
+
+/** POST /api/admin/clubs/:id/rename-tour：renamed=false 表示对手方队名本就一致（幂等） */
+export interface CpuRenameTourResult {
+  ok: boolean;
+  renamed: boolean;
+  name: string;
+}
+
+/** POST /api/admin/clubs/:id/rename-local：changed=false 表示此前已摘 CPU 标（幂等，不回 name）；撞名走 409 */
+export interface CpuRenameLocalResult {
+  ok: boolean;
+  changed: boolean;
+  name?: string;
+}
+
+/** POST /api/admin/clubs/:id/seed-ops：created 是本次实际新建的部件（已存在的为 false / 0） */
+export interface CpuSeedOpsResult {
+  ok: boolean;
+  created: { stadium: boolean; ledger: boolean; facilities: number };
+  leagueTier: 'premier' | 'second';
 }
 
 export interface ImportPreview {
@@ -476,6 +521,8 @@ export interface AdminOverview {
   resultQueue: number;
   activeListings: number;
   clubs: number;
+  /** 待接管的电脑队数（v6.27.0） */
+  cpuClubs: number;
   players: number;
   at: string;
 }

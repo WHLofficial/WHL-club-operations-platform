@@ -1307,7 +1307,7 @@ async function main() {
         '/market', '/market/free', '/market/activation', '/market/intel', '/market/desk',
         '/shop', '/club', '/ledger', '/notifications',
         '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
-        '/admin/market', '/admin/clubs', '/admin/brands', '/admin/events', '/admin/shop', '/admin/finance',
+        '/admin/market', '/admin/clubs', '/admin/clubs/cpu-convert', '/admin/brands', '/admin/events', '/admin/shop', '/admin/finance',
         '/admin/system',
       ];
       const bad = [];

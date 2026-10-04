@@ -1,6 +1,7 @@
 // 管理端 · 俱乐部页：建队、绑定认证码、解绑、转会冻结、主场档案（原 Admin.tsx ClubsSection，v2.1.0 拆分）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import { api, apiDelete, apiPost, type AdminClubRow, type StadiumAdmin } from '../../lib/api.ts';
 import { ADMIN_CLUBS_KEY, TEAM_SYNC_KEY, fetchAdminClubs, fetchTeamSync } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
@@ -263,6 +264,11 @@ function ClubsSection() {
                       : '—'}
                   </td>
                   <td>
+                    {club.isCpu && (
+                      <Link className="btn btn-ghost btn-sm" to={`/admin/clubs/cpu-convert?id=${club.id}`}>
+                        接管向导
+                      </Link>
+                    )}
                     <button className="btn btn-ghost btn-sm" type="button" onClick={() => issueCode(club)}>
                       发认证码
                     </button>
