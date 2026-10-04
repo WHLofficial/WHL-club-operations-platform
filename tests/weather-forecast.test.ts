@@ -4,7 +4,7 @@
 // 对手系数 1+0.05×(90/108)=1.0417；K = 1800×4.0×1.0×1.0×1.0417 = 7500；多云 wx=0.97 → 上座 7275。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
@@ -274,10 +274,16 @@ describe('TC-MIG · 迁移与结构', () => {
     expect(rows[0]!.created_at).toBe('2026-09-16T00:00:00Z');
   });
 
-  it('TC-MIG-03 MIGRATION_FILES 尾部追加 0062 且全量迁移可跑', () => {
-    // MIGRATION_FILES 未导出（tests/d1.ts:67 为模块内常量）：读源码文本锁「尾部追加」这一动作
+  it('TC-MIG-03 MIGRATION_FILES 登记了目录内最新迁移 且全量迁移可跑', () => {
+    // MIGRATION_FILES 未导出（tests/d1.ts:67 为模块内常量）：读源码文本锁「新迁移必须登记进数组尾部」这一动作。
+    // 不锁具体文件名（每加一枚迁移都会变）：取 src/db/migrations 按名排序的最新一枚，断言它是源码里最后一个被登记的。
     const src = readFileSync(fileURLToPath(new URL('./d1.ts', import.meta.url).href), 'utf8');
-    expect(src).toMatch(/'0062_stadiums_fans_window_start\.sql',?\s*\];/);
+    const latest = readdirSync(fileURLToPath(new URL('../src/db/migrations/', import.meta.url).href))
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .pop()!;
+    const mentioned = [...src.matchAll(/'(\d{4}_[a-z0-9_]+\.sql)'/g)].map((m) => m[1]!);
+    expect(mentioned[mentioned.length - 1]).toBe(latest);
     const sqlite = new DatabaseSync(':memory:');
     expect(() => applyMigrations(sqlite)).not.toThrow();
     expect(
