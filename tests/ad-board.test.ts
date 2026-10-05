@@ -74,7 +74,7 @@ interface BoardPlayer {
   clubId: number | null;
   clubName: string | null;
   logoKey: string | null;
-  minOfferPrice: number | null;
+  listPrice: number | null;
   releaseFee: number | null;
   listedAt: string | null;
   emphasis: number;
@@ -99,15 +99,15 @@ async function board(fx: Fixture, query = ''): Promise<BoardOut> {
 function seedBoard(fx: Fixture): void {
   fx.sqlite.exec(`
     INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '甲队', 'premier', 'active'), (2, '乙队', 'premier', 'active');
-    INSERT INTO players (id, uid, name, display_name, club_id, position, age, ca, pa, status, fc_id, transfer_listed, min_offer_price, transfer_listed_at, game_attrs) VALUES
-      (1, 'uid1', '球员甲', '铁闸甲', 1, 'CM', 24, 80, 88, 'normal', 11, 1, 40, '2026-01-01T00:00:00.000Z', '{"PosID1":25,"PosID2":25,"PosID3":15}'),
-      (2, 'uid2', '球员乙', NULL, 1, 'ST', 22, 75, 84, 'normal', 12, 1, 55, '2026-02-01T00:00:00.000Z', NULL),
-      (3, 'uid3', '球员丙', NULL, 2, NULL, 21, 70, 80, 'normal', 13, 1, NULL, NULL, '{"PosID1":0}'),
-      (4, 'uid4', '球员丁', NULL, 1, 'CB', 26, 78, 78, 'normal', 14, 0, NULL, NULL, NULL),
-      (5, 'uid5', '球员戊', NULL, 2, 'GK', 30, 72, 72, 'normal', 15, 1, 30, '2025-12-31T00:00:00.000Z', NULL),
-      (6, 'uid6', '球员己', NULL, 1, 'LW', 23, 77, 86, 'normal', 16, 1, 66, '2026-01-15T00:00:00.000Z', NULL),
-      (7, 'uid7', '球员庚', NULL, 2, 'RM', 27, 74, 74, 'normal', 17, 1, 44, '2026-01-20T00:00:00.000Z', NULL),
-      (8, 'uid8', '球员辛', NULL, 2, 'LM', 25, 73, 73, 'normal', 18, 1, NULL, '2026-01-01T00:00:00.000Z', NULL);
+    INSERT INTO players (id, uid, name, display_name, club_id, position, age, ca, pa, status, fc_id, transfer_listed, list_price, min_offer_price, transfer_listed_at, game_attrs) VALUES
+      (1, 'uid1', '球员甲', '铁闸甲', 1, 'CM', 24, 80, 88, 'normal', 11, 1, 40, 39.5, '2026-01-01T00:00:00.000Z', '{"PosID1":25,"PosID2":25,"PosID3":15}'),
+      (2, 'uid2', '球员乙', NULL, 1, 'ST', 22, 75, 84, 'normal', 12, 1, 55, 54.5, '2026-02-01T00:00:00.000Z', NULL),
+      (3, 'uid3', '球员丙', NULL, 2, NULL, 21, 70, 80, 'normal', 13, 1, NULL, 30, NULL, '{"PosID1":0}'),
+      (4, 'uid4', '球员丁', NULL, 1, 'CB', 26, 78, 78, 'normal', 14, 0, NULL, NULL, NULL, NULL),
+      (5, 'uid5', '球员戊', NULL, 2, 'GK', 30, 72, 72, 'normal', 15, 1, 30, 28.5, '2025-12-31T00:00:00.000Z', NULL),
+      (6, 'uid6', '球员己', NULL, 1, 'LW', 23, 77, 86, 'normal', 16, 1, 66, 64.5, '2026-01-15T00:00:00.000Z', NULL),
+      (7, 'uid7', '球员庚', NULL, 2, 'RM', 27, 74, 74, 'normal', 17, 1, 44, 42.5, '2026-01-20T00:00:00.000Z', NULL),
+      (8, 'uid8', '球员辛', NULL, 2, 'LM', 25, 73, 73, 'normal', 18, 1, NULL, NULL, '2026-01-01T00:00:00.000Z', NULL);
     -- 现行合同只在 1 上（2 只有失效的旧合同 → releaseFee 仍须 null；3 无合同；4 有合同但人不在名单）
     INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, effective_from, is_active) VALUES
       (1, 1, 50, 2, 'formal', 'import', '2026-07-01', 1),
@@ -172,7 +172,7 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
     expect(byId.get(8)).toMatchObject({ emphasis: 0 });
   });
 
-  it('行字段：显示名 / 位置去重去空（NULL 槽位不当 GK）/ clubName / logoKey / releaseFee / 数值门槛', async () => {
+  it('行字段：显示名 / 位置去重去空（NULL 槽位不当 GK）/ clubName / logoKey / releaseFee / 公开标价', async () => {
     const fx = freshEnv();
     seedBoard(fx);
     const out = await board(fx);
@@ -191,7 +191,7 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
       clubName: '甲队',
       // v6.32.0：队徽 key 随 clubs JOIN 下发（R2 图），无徽队回落 null
       logoKey: 'logo/c1.png',
-      minOfferPrice: 40,
+      listPrice: 40,
       releaseFee: 50,
       listedAt: '2026-01-01T00:00:00.000Z',
       status: 'normal',
@@ -199,9 +199,24 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
       transferPriced: true,
     });
     // 2：只有失效合同 → releaseFee null（防 JOIN 漏 is_active 条件）；无 display_name → 回落 name
-    expect(byId.get(2)).toMatchObject({ name: '球员乙', releaseFee: null, minOfferPrice: 55, transferPriced: true });
-    // 3：position NULL + PosID1 = 0（GK）→ ['GK']；min_offer_price NULL → transferPriced false；乙队无徽 → logoKey null
-    expect(byId.get(3)).toMatchObject({ positions: ['GK'], minOfferPrice: null, transferPriced: false, clubName: '乙队', logoKey: null });
+    expect(byId.get(2)).toMatchObject({ name: '球员乙', releaseFee: null, listPrice: 55, transferPriced: true });
+    // 3：position NULL + PosID1 = 0（GK）→ ['GK']；list_price NULL（私密 min_offer_price=30 不顶替）→ 标价与 transferPriced 都空；乙队无徽 → logoKey null
+    expect(byId.get(3)).toMatchObject({ positions: ['GK'], listPrice: null, transferPriced: false, clubName: '乙队', logoKey: null });
+  });
+
+  it('私密防泄漏（v6.33.0）：响应键与原始 JSON 都不含最低报价头 minOfferPrice / min_offer_price', async () => {
+    const fx = freshEnv();
+    seedBoard(fx);
+    const out = await board(fx);
+    for (const p of out.players) {
+      expect('minOfferPrice' in p).toBe(false);
+      expect('min_offer_price' in p).toBe(false);
+    }
+    const raw = JSON.stringify(out);
+    expect(raw).not.toContain('minOfferPrice');
+    expect(raw).not.toContain('min_offer_price');
+    // 公开标价在场（否则上面的「不含」可能只是标价整个漏了下发）
+    expect(out.players.find((p) => p.id === 1)?.listPrice).toBe(40);
   });
 
   it('limit：正常值截断（players 变短、total 不变）；缺省回落 200', async () => {
@@ -224,7 +239,7 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
       (_, i) => `(${100 + i}, 'u${100 + i}', '球员${100 + i}', 1, 'ST', 20, 60, 70, 1, ${1000 + i}, 10, '2026-01-01T00:00:00.000Z')`,
     ).join(',');
     fx.sqlite.exec(
-      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, transfer_listed, fc_id, min_offer_price, transfer_listed_at) VALUES ${values};`,
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, transfer_listed, fc_id, list_price, transfer_listed_at) VALUES ${values};`,
     );
     for (const query of ['', '?limit=999', '?limit=201', '?limit=abc', '?limit=0', '?limit=-5', '?limit=', '?limit=2.5']) {
       const out = await board(fx, query);
@@ -272,7 +287,7 @@ describe('转会广告板缓存与写后新鲜度（v6.31.0）', () => {
     fx.sqlite.exec("INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 2, '2026-01-01T00:00:00.000Z')");
     expect((await board(fx, '?limit=3')).total).toBe(7);
 
-    // 真写一次：把 1 号拉出转会名单（守卫要求同时清最低价）
+    // 真写一次：把 1 号拉出转会名单（公开标价随之清空）
     const res = await app.request(
       '/api/players/1/offer-settings',
       {

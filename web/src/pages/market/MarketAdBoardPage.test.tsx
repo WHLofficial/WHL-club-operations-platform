@@ -10,11 +10,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TransferBoardResponse, TransferBoardRow } from '../../lib/api.ts';
 import MarketAdBoardPage, { AdBoardTeaser } from './MarketAdBoardPage.tsx';
 
-// 组件与 queries 都从 lib/api.ts 取函数：一处 mock，页面与 teaser 都走 apiMock
-const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
+// 组件与 queries 都从 lib/api.ts 取函数：一处 mock，页面与 teaser 都走 apiMock；
+// v6.33.0 报价弹层（AdBidModal）的送单走 apiPost，同样在这里接管
+const { apiMock, apiPostMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiPostMock: vi.fn() }));
 vi.mock('../../lib/api.ts', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../lib/api.ts')>();
-  return { ...mod, api: apiMock };
+  return { ...mod, api: apiMock, apiPost: apiPostMock };
 });
 
 function row(patch: Partial<TransferBoardRow> = {}): TransferBoardRow {
@@ -30,7 +31,7 @@ function row(patch: Partial<TransferBoardRow> = {}): TransferBoardRow {
     clubId: 3,
     clubName: '曼城',
     logoKey: null,
-    minOfferPrice: 180,
+    listPrice: 180,
     releaseFee: 240,
     listedAt: '2026-10-03T00:00:00.000Z',
     emphasis: 0,
@@ -75,13 +76,14 @@ function renderTeaser(fixture: TransferBoardResponse) {
 // 三档夹具：1 置顶 + 1 推荐 + 1 普通
 const MIXED = board([
   row({ id: 1, name: '置顶甲', emphasis: 2, emphasisUntil: '2026-10-12T12:00:00.000Z' }),
-  row({ id: 2, name: '推荐乙', emphasis: 1, ca: 84, pa: 90, minOfferPrice: 60, releaseFee: null }),
+  row({ id: 2, name: '推荐乙', emphasis: 1, ca: 84, pa: 90, listPrice: 60, releaseFee: null }),
   row({ id: 3, name: '普通丙', emphasis: 0, ca: 61, pa: 70 }),
 ]);
 
 afterEach(() => {
   cleanup();
   apiMock.mockReset();
+  apiPostMock.mockReset();
 });
 
 describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
@@ -90,7 +92,7 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
     expect(await screen.findByText('置顶甲')).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('转会市场 · 广告板');
     expect(screen.getByRole('link', { name: '广告板' }).getAttribute('href')).toBe('/market/board');
-    expect(screen.getByText('各队公开挂出的转会名单：标价公开，出价达线自动挂牌，低于自动拒。')).toBeTruthy();
+    expect(screen.getByText('各队公开挂出的转会名单：标价公开，达线且对方开了自动同意才自动成交；低于标价视为砍价，进人工谈判。')).toBeTruthy();
   });
 
   it('卡片左上角队徽（v6.32.0）：有 logoKey 出 R2 图，无徽回哈希色块首字（取队名首字）', async () => {
@@ -327,6 +329,69 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
     expect(await screen.findByText('普通己')).toBeTruthy();
     expect(order()).toEqual(['推荐乙', '普通丙', '普通丁', '普通戊', '普通己']);
   });
+
+  // ---- v6.33.0：卡脚圆形「报」按钮 + 报价弹层（AdBidModal） ----
+
+  it('报价按钮：每张卡（置顶/推荐/普通）卡脚都有，aria-label 点名球员', async () => {
+    const { container } = renderPage(MIXED);
+    expect(await screen.findByText('普通丙')).toBeTruthy();
+    expect(container.querySelectorAll('.adb-bid-btn').length).toBe(3);
+    expect(screen.getByRole('button', { name: '给 置顶甲 报价' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '给 推荐乙 报价' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '给 普通丙 报价' })).toBeTruthy();
+  });
+
+  it('点击卡脚按钮弹报价层：role=dialog 点名球员，金额初值就是公开标价', async () => {
+    renderPage(MIXED);
+    fireEvent.click(await screen.findByRole('button', { name: '给 置顶甲 报价' }));
+    const dialog = screen.getByRole('dialog', { name: '给 置顶甲 报价' });
+    expect(within(dialog).getByText('给 置顶甲 报价')).toBeTruthy();
+    // 初值是 String(listPrice)（"180"），不是 amount() 的两位小数格式
+    expect((screen.getByLabelText('报价金额') as HTMLInputElement).value).toBe('180');
+    expect(screen.getByLabelText('报价附言')).toBeTruthy();
+    expect(within(dialog).getByText(/对方标价 180\.00 m/)).toBeTruthy();
+  });
+
+  it('送出报价：POST /api/offers 带默认金额=标价、无附言，pending 反馈文案', async () => {
+    apiPostMock.mockResolvedValue({ offerId: 7, status: 'pending' });
+    renderPage(MIXED);
+    fireEvent.click(await screen.findByRole('button', { name: '给 置顶甲 报价' }));
+    fireEvent.click(screen.getByRole('button', { name: '送出报价' }));
+    await waitFor(() =>
+      expect(apiPostMock).toHaveBeenCalledWith('/api/offers', { playerId: 1, amount: 180, note: undefined }),
+    );
+    expect(await screen.findByText('报价已送出（#7），等卖家表态。')).toBeTruthy();
+  });
+
+  it('弹层金额可改：改动后按新金额送单，附言一并带上', async () => {
+    apiPostMock.mockResolvedValue({ offerId: 8, status: 'pending' });
+    renderPage(MIXED);
+    fireEvent.click(await screen.findByRole('button', { name: '给 推荐乙 报价' }));
+    fireEvent.change(screen.getByLabelText('报价金额'), { target: { value: '15' } });
+    fireEvent.change(screen.getByLabelText('报价附言'), { target: { value: '交个朋友' } });
+    fireEvent.click(screen.getByRole('button', { name: '送出报价' }));
+    await waitFor(() =>
+      expect(apiPostMock).toHaveBeenCalledWith('/api/offers', { playerId: 2, amount: 15, note: '交个朋友' }),
+    );
+  });
+
+  it('送单失败：错误文案透出在弹层侧栏（.bid-err），表单保留可重试', async () => {
+    apiPostMock.mockRejectedValue(new Error('先登录'));
+    const { container } = renderPage(MIXED);
+    fireEvent.click(await screen.findByRole('button', { name: '给 普通丙 报价' }));
+    fireEvent.click(screen.getByRole('button', { name: '送出报价' }));
+    expect(await screen.findByText('先登录')).toBeTruthy();
+    expect(container.querySelector('.bid-err')?.textContent).toBe('先登录');
+    expect(screen.getByLabelText('报价金额')).toBeTruthy(); // 没切到结果视图
+  });
+
+  it('标价口径：卡内标签是「标价」（原来的「最低报价」全文不再出现）', async () => {
+    renderPage(MIXED);
+    expect(await screen.findByText('普通丙')).toBeTruthy();
+    expect(screen.getAllByText('标价').length).toBe(3); // 每张卡一个
+    expect(screen.queryByText('最低报价')).toBeNull();
+    expect(document.body.textContent).not.toContain('最低报价');
+  });
 });
 
 describe('v6.31.0 在售市场页小卡片（AdBoardTeaser）', () => {
@@ -359,6 +424,9 @@ describe('v6.31.0 在售市场页小卡片（AdBoardTeaser）', () => {
     expect(within(mini).getByText('置顶').className).toContain('gold');
     expect(within(mini).getByLabelText('转会名单')).toBeTruthy();
     expect(within(mini).getByText('180.00 m')).toBeTruthy();
+    // v6.33.0：迷你卡整卡是链接，不挂报价按钮（报价入口只在广告板页的卡脚）
+    expect(within(mini).queryByRole('button')).toBeNull();
+    expect(mini.querySelector('.adb-bid-btn')).toBeNull();
   });
 
   it('无数据：整块不渲染（不留空卡）', async () => {

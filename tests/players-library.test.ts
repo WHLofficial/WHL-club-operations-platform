@@ -211,47 +211,65 @@ describe('球员库列表（v0.7.1 d6）', () => {
   });
 });
 
-// v6.30.0：列表行补转会设置摘要（挂牌 / 非卖品 / 是否标过价）；min_offer_price 数值是隐藏门槛，不进公开列表
-describe('转会设置摘要（v6.30.0）', () => {
-  it('四态齐全：挂牌 / 非卖品 / 已标价 / 无设置都出布尔摘要', async () => {
+// v6.30.0：列表行补转会设置摘要（挂牌 / 非卖品 / 已标价）；v6.33.0 起「已标价」由公开 list_price 派生——
+// 只设私密最低报价（min_offer_price）不再点亮图标，设线事实位不外泄
+describe('转会设置摘要（v6.30.0 / v6.33.0 派生改公开标价）', () => {
+  it('四态齐全：挂牌 / 非卖品 / 已标价（=有公开标价）/ 无设置都出布尔摘要', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
     fx.sqlite.exec(`
-      UPDATE players SET transfer_listed = 1, min_offer_price = 50 WHERE id = 1;
+      UPDATE players SET transfer_listed = 1, min_offer_price = 50, list_price = 50 WHERE id = 1;
       UPDATE players SET not_for_sale = 1 WHERE id = 2;
       UPDATE players SET min_offer_price = 33.5 WHERE id = 3;
     `);
     const body = await list('/api/players?limit=100', fx.env);
     const byId = new Map(body.players.map((p) => [p.id, p]));
+    // id1 名单内：按新口径保存过（list_price=50 显式造数——0065 回填只发生在迁移时刻，不管用例后设的数据）
     expect(byId.get(1)).toMatchObject({ transferListed: true, notForSale: false, transferPriced: true });
     expect(byId.get(2)).toMatchObject({ transferListed: false, notForSale: true, transferPriced: false });
-    expect(byId.get(3)).toMatchObject({ transferListed: false, notForSale: false, transferPriced: true });
+    // id3 只设了私密底线（list_price 仍 NULL）→ 不亮「已标价」（设线事实位不外泄）
+    expect(byId.get(3)).toMatchObject({ transferListed: false, notForSale: false, transferPriced: false });
     expect(byId.get(4)).toMatchObject({ transferListed: false, notForSale: false, transferPriced: false });
+    // 反向：补上公开标价才点亮
+    fx.sqlite.exec('UPDATE players SET list_price = 20 WHERE id = 3');
+    const again = new Map((await list('/api/players?limit=100', fx.env)).players.map((p) => [p.id, p]));
+    expect(again.get(3)).toMatchObject({ transferListed: false, notForSale: false, transferPriced: true });
   });
 
-  it('min_offer_price 的键与数值都不进列表响应（隐藏门槛不进公开面）', async () => {
+  it('两条线的键与数值都不进列表响应（私密门槛与公开标价都不在列表口径）', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
-    fx.sqlite.exec('UPDATE players SET transfer_listed = 1, min_offer_price = 50 WHERE id = 1');
+    fx.sqlite.exec('UPDATE players SET transfer_listed = 1, min_offer_price = 50, list_price = 50 WHERE id = 1');
     const body = await list('/api/players?limit=100', fx.env);
     for (const p of body.players) {
       expect('minOfferPrice' in p).toBe(false);
       expect('min_offer_price' in p).toBe(false);
+      expect('listPrice' in p).toBe(false);
+      expect('list_price' in p).toBe(false);
     }
-    expect(JSON.stringify(body)).not.toContain('minOfferPrice');
-    expect(JSON.stringify(body)).not.toContain('min_offer_price');
+    const raw = JSON.stringify(body);
+    expect(raw).not.toContain('minOfferPrice');
+    expect(raw).not.toContain('min_offer_price');
+    expect(raw).not.toContain('listPrice');
+    expect(raw).not.toContain('list_price');
     // 数值本身（50）也不许借排序键 / 附加列漏出去
-    expect(JSON.stringify(body)).not.toContain('50');
+    expect(raw).not.toContain('50');
   });
 
-  it('详情端点照旧给数值 minOfferPrice（列表口径不外扩成详情缩水）', async () => {
+  it('详情端点只下公开标价（v6.33.0）：私密最低报价的键与数值都不出', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
-    fx.sqlite.exec('UPDATE players SET transfer_listed = 1, min_offer_price = 50 WHERE id = 1');
+    fx.sqlite.exec('UPDATE players SET transfer_listed = 1, min_offer_price = 47.5, list_price = 65 WHERE id = 1');
     const res = await get('/api/players/1', fx.env);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { player: { transferListed: boolean; notForSale: boolean; minOfferPrice: number | null } };
-    expect(body.player).toMatchObject({ transferListed: true, notForSale: false, minOfferPrice: 50 });
+    const body = (await res.json()) as {
+      player: Record<string, unknown> & { transferListed: boolean; notForSale: boolean; listPrice: number | null };
+    };
+    expect(body.player).toMatchObject({ transferListed: true, notForSale: false, listPrice: 65 });
+    expect('minOfferPrice' in body.player).toBe(false);
+    const raw = JSON.stringify(body.player);
+    expect(raw).not.toContain('minOfferPrice');
+    expect(raw).not.toContain('47.5'); // 私密底线的数值不许透出
   });
 });
 

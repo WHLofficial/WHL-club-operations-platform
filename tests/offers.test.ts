@@ -10,6 +10,7 @@ import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { applyMigrations, sqlGet, sqlAll } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
+import { autoRespondKind } from '../src/core/offer-rules.ts';
 
 interface Fixture {
   env: Env;
@@ -358,31 +359,43 @@ describe('拒绝 / 撤回', () => {
   });
 });
 
-describe('自动应答（v6.4.0 改动 B：与转会名单解耦）', () => {
-  function listPlayer(fx: Fixture, min = 40, offerAuto = 1): void {
-    fx.sqlite.exec(`UPDATE players SET transfer_listed = 1, min_offer_price = ${min}, offer_auto = ${offerAuto} WHERE id = 1`);
+describe('自动应答（v6.4.0 解耦 + v6.33.0 双线：拒线=私密最低价、同意线=公开标价）', () => {
+  // 名单内三要素：公开标价 list（同意线）、私密最低价 min（拒线）、自动应答开关
+  function listPlayer(fx: Fixture, min: number | null = 40, list: number | null = 50, offerAuto = 1): void {
+    fx.sqlite.exec(
+      `UPDATE players SET transfer_listed = 1, min_offer_price = ${min ?? 'NULL'}, list_price = ${list ?? 'NULL'}, offer_auto = ${offerAuto} WHERE id = 1`,
+    );
   }
 
-  it('报价 ≥ 线且开关开：auto_accept + 挂牌 + 领先出价 + auto_accept 事件', async () => {
+  it('报价 ≥ 标价且开关开：auto_accept + 挂牌 + 领先出价 + auto_accept 事件', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    listPlayer(fx, 40);
-    const res = await place(fx, 1, 45);
+    listPlayer(fx, 40, 50);
+    const res = await place(fx, 1, 50);
     expect(res.status).toBe(201);
     const out = (await res.json()) as OfferOut;
     expect(out).toMatchObject({ status: 'accepted', auto: 'auto_accept' });
     const listing = sqlGet<{ id: number; ask_price: number }>(fx.sqlite, 'SELECT * FROM listings WHERE player_id = 1');
-    expect(listing?.ask_price).toBe(45);
+    expect(listing?.ask_price).toBe(50);
     expect(sqlGet(fx.sqlite, 'SELECT status, listing_id FROM offers WHERE id = ?', out.offerId as number)).toMatchObject({ status: 'accepted', listing_id: listing?.id });
     expect(sqlGet(fx.sqlite, "SELECT kind FROM offer_events WHERE offer_id = ? AND kind = 'auto_accept'", out.offerId as number)).toBeDefined();
     expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'offer_auto_accepted'")).toBeDefined();
     expect(sqlGet(fx.sqlite, "SELECT status, ref_type FROM fund_holds WHERE ref_type = 'listing' AND ref_id = ?", listing!.id)).toMatchObject({ status: 'held', ref_type: 'listing' });
   });
 
-  it('报价 < 线：auto_reject + 释放 + 事件 + 通知（开关关着也一样拒，低于线一律自动拒）', async () => {
+  it('报价 ∈ [最低价, 标价)：砍价区间不自动同意（开关开着也走人工谈判）', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    listPlayer(fx, 40, 0);
+    listPlayer(fx, 40, 50, 1);
+    const res = await place(fx, 1, 45);
+    expect(res.status).toBe(201);
+    expect((await res.json()) as OfferOut).toMatchObject({ status: 'pending', auto: null });
+  });
+
+  it('报价 < 最低价：auto_reject + 释放 + 事件 + 通知（开关关着也一样拒，低于线一律自动拒）', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    listPlayer(fx, 40, 50, 0);
     const res = await place(fx, 1, 35);
     expect(res.status).toBe(201);
     const out = (await res.json()) as OfferOut;
@@ -390,14 +403,28 @@ describe('自动应答（v6.4.0 改动 B：与转会名单解耦）', () => {
     expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', out.offerId as number)).toMatchObject({ status: 'rejected' });
     expect(sqlGet(fx.sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ?", out.offerId as number)).toMatchObject({ status: 'released' });
     expect(sqlGet(fx.sqlite, "SELECT kind FROM offer_events WHERE offer_id = ? AND kind = 'auto_reject'", out.offerId as number)).toBeDefined();
-    expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'offer_auto_rejected'")).toBeDefined();
+    // 通知载荷（渲染文本）只带报价额，不带私密最低报价：文案里不许出现底线的数值
+    const note = sqlGet<{ payload: string }>(fx.sqlite, "SELECT payload FROM notifications WHERE template = 'offer_auto_rejected'");
+    expect(note).toBeDefined();
+    expect(note!.payload).toContain('35 m'); // 用户自己的报价额照常展示
+    expect(note!.payload).toContain('低于对方底线');
+    expect(note!.payload).not.toContain('40'); // 私密底线数值
+    expect(note!.payload).not.toContain('min');
   });
 
-  it('达线但开关关：走人工谈判（pending）——名单与否不再影响', async () => {
+  it('无标价存量名单：同意线回落最低价（迁移回填前的老语义）', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    listPlayer(fx, 40, 0);
-    const res = await place(fx, 1, 45);
+    listPlayer(fx, 40, null, 1);
+    const out = (await (await place(fx, 1, 40)).json()) as OfferOut;
+    expect(out).toMatchObject({ status: 'accepted', auto: 'auto_accept' });
+  });
+
+  it('达标价但开关关：走人工谈判（pending）——名单与否不再影响', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    listPlayer(fx, 40, 50, 0);
+    const res = await place(fx, 1, 55);
     const out = (await res.json()) as OfferOut;
     expect(out).toMatchObject({ status: 'pending', auto: null });
   });
@@ -413,33 +440,43 @@ describe('自动应答（v6.4.0 改动 B：与转会名单解耦）', () => {
 });
 
 describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
-  it('进名单带最低价：三列更新；min 超上限 400；缺最低价 400；互斥 400', async () => {
+  it('进名单带标价：标价与最低价都落库；min 超上限 400；缺标价 400；互斥 400', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach');
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 50, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(200);
-    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, min_offer_price, not_for_sale FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 1, min_offer_price: 40, not_for_sale: 0 });
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, list_price, min_offer_price, not_for_sale FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 1, list_price: 50, min_offer_price: 40, not_for_sale: 0 });
 
-    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 75.01, notForSale: false }, 'tok-coach');
+    // min 区间先于标价判：min 越上限时即使给了合法标价也回「报价上限」
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 75.01, listPrice: 40, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(400);
     expect(((await res.json()) as OfferOut).error).toContain('报价上限');
 
+    // 进名单缺标价 → 400（v6.33.0 新文案）；最低报价是可选私密线
     res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('公开标价');
+
+    // 只给标价、不给最低价 → 200（名单内私密线可缺省）
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 40, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, list_price, min_offer_price FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 1, list_price: 40, min_offer_price: null });
 
     res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: true }, 'tok-coach');
     expect(res.status).toBe(400);
     expect(((await res.json()) as OfferOut).error).toContain('互斥');
   });
 
-  it('置非卖品：清名单与最低价 + 既有 pending 自动拒 + 释放 + 事件 + 通知', async () => {
+  it('置非卖品：清名单、标价与最低价 + 既有 pending 自动拒 + 释放 + 事件 + 通知', async () => {
     const fx = freshEnv();
     seedWorld(fx);
+    // 先挂一个公开标价（无最低价、开关关 ⇒ 报价仍走人工），验证非卖品把标价也清掉
+    fx.sqlite.exec('UPDATE players SET list_price = 45 WHERE id = 1');
     const res = await place(fx, 1, 30);
     const id = ((await res.json()) as OfferOut).offerId as number;
     const out = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: null, notForSale: true }, 'tok-coach');
     expect(out.status).toBe(200);
-    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, min_offer_price, not_for_sale FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, min_offer_price: null, not_for_sale: 1 });
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, list_price, min_offer_price, not_for_sale FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, list_price: null, min_offer_price: null, not_for_sale: 1 });
     expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', id)).toMatchObject({ status: 'rejected' });
     expect(sqlGet(fx.sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'offer' AND ref_id = ?", id)).toMatchObject({ status: 'released' });
     expect(sqlGet(fx.sqlite, "SELECT kind FROM offer_events WHERE offer_id = ? AND kind = 'reject'", id)).toBeDefined();
@@ -448,10 +485,10 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
   it('解耦（v6.4.0 改动 B）：不进名单也能设线与开关；无线开关被清；非卖品压掉线与开关', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    // 不进名单：线 35 + 开关开 → 全部落库
-    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: 35, offerAuto: true, notForSale: false }, 'tok-coach');
+    // 不进名单：线 35 + 开关开 → 全部落库；顺带传的标价被静默忽略（名单外没有公开面）
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: 35, listPrice: 60, offerAuto: true, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(200);
-    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, min_offer_price, offer_auto, not_for_sale FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, min_offer_price: 35, offer_auto: 1, not_for_sale: 0 });
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, list_price, min_offer_price, offer_auto, not_for_sale FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, list_price: null, min_offer_price: 35, offer_auto: 1, not_for_sale: 0 });
 
     // 只开开关不给线：开关存 0（没线的开关无效）
     res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: null, offerAuto: true, notForSale: false }, 'tok-coach');
@@ -461,7 +498,7 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
     // 非卖品：给线也给开关照样被压掉
     res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: 35, offerAuto: true, notForSale: true }, 'tok-coach');
     expect(res.status).toBe(200);
-    expect(sqlGet(fx.sqlite, 'SELECT min_offer_price, offer_auto, not_for_sale FROM players WHERE id = 1')).toMatchObject({ min_offer_price: null, offer_auto: 0, not_for_sale: 1 });
+    expect(sqlGet(fx.sqlite, 'SELECT list_price, min_offer_price, offer_auto, not_for_sale FROM players WHERE id = 1')).toMatchObject({ list_price: null, min_offer_price: null, offer_auto: 0, not_for_sale: 1 });
   });
 
   it('挂牌中锁定 / 别人队 404', async () => {
@@ -475,7 +512,7 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
   it('v6.31.0 打戳：首次进名单落 transfer_listed_at（ISO 毫秒）；不进名单的保存不产生戳', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach');
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 50, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(200);
     const stamped = sqlGet(fx.sqlite, 'SELECT transfer_listed_at FROM players WHERE id = 1') as { transfer_listed_at: string | null };
     expect(stamped.transfer_listed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -489,13 +526,14 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
   it('v6.31.0 保戳：重复进名单保存 / 改价不覆盖原戳（COALESCE 只补空）', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach')).status).toBe(200);
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 50, notForSale: false }, 'tok-coach')).status).toBe(200);
     // 种一个显著早于“现在”的戳再保存：值必须原样保留（防实现退化成每次无条件 now）
     fx.sqlite.exec("UPDATE players SET transfer_listed_at = '2020-01-01T00:00:00.000Z' WHERE id = 1");
-    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 45, notForSale: false }, 'tok-coach');
+    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 45, listPrice: 50, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(200);
-    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, min_offer_price, transfer_listed_at FROM players WHERE id = 1')).toMatchObject({
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, list_price, min_offer_price, transfer_listed_at FROM players WHERE id = 1')).toMatchObject({
       transfer_listed: 1,
+      list_price: 50,
       min_offer_price: 45,
       transfer_listed_at: '2020-01-01T00:00:00.000Z',
     });
@@ -504,18 +542,125 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
   it('v6.31.0 清戳：退出名单置 NULL，重新进名单重新打戳', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach')).status).toBe(200);
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 50, notForSale: false }, 'tok-coach')).status).toBe(200);
     const first = (sqlGet(fx.sqlite, 'SELECT transfer_listed_at AS t FROM players WHERE id = 1') as { t: string }).t;
 
-    // 下名单：戳必须清空（否则广告板排序会把早已下架的人当新上架）
+    // 下名单：戳必须清空（否则广告板排序会把早已下架的人当新上架）；公开标价同步清掉
     expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: null, notForSale: false }, 'tok-coach')).status).toBe(200);
-    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, transfer_listed_at FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, transfer_listed_at: null });
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, list_price, transfer_listed_at FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, list_price: null, transfer_listed_at: null });
 
     // 再上名单：重新打新戳（ISO 文本单调不降）
-    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach')).status).toBe(200);
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 50, notForSale: false }, 'tok-coach')).status).toBe(200);
     const second = (sqlGet(fx.sqlite, 'SELECT transfer_listed_at AS t FROM players WHERE id = 1') as { t: string }).t;
     expect(second).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(second >= first).toBe(true);
+  });
+});
+
+// v6.33.0：公开标价与私密最低报价的边界（设置校验 / 清线 / 审计 / 预填端点 / 判定纯函数）
+describe('标价 list_price（v6.33.0 公开标价 + 私密最低报价）', () => {
+  it('标价区间两界 400；标价低于最低报价 400；边界 1 / 75 通过', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 0.99, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('标价至少');
+
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 75.01, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('报价上限');
+
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 30, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('不能低于最低报价');
+
+    // 边界 1 / 75 都是合法标价（RC 50 × 1.5 = 75）
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 1, notForSale: false }, 'tok-coach')).status).toBe(200);
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 75, notForSale: false }, 'tok-coach')).status).toBe(200);
+  });
+
+  it('退名单清标价、保留最低价；置非卖品两条线一起清', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    expect(
+      (await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 60, offerAuto: true, notForSale: false }, 'tok-coach')).status,
+    ).toBe(200);
+
+    // 退名单：公开标价清掉（其他队不再看得到），私密最低价保留
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: 40, offerAuto: true, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, list_price, min_offer_price, offer_auto FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, list_price: null, min_offer_price: 40, offer_auto: 1 });
+
+    // 置非卖品：两条线一起清、开关也关
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: null, notForSale: true }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT list_price, min_offer_price, offer_auto, not_for_sale FROM players WHERE id = 1')).toMatchObject({ list_price: null, min_offer_price: null, offer_auto: 0, not_for_sale: 1 });
+  });
+
+  it('PUT 回值与审计 after 快照：含标价、不含最低报价数值、含 offerFloorOn 布尔', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 60, offerAuto: true, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    // PUT 回值带两条线（设置面板拿同一份形状）
+    expect(await res.json()).toMatchObject({ ok: true, transferListed: true, minOfferPrice: 40, listPrice: 60, offerAuto: true, notForSale: false });
+
+    const row = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'offer_settings' ORDER BY id DESC LIMIT 1");
+    expect(row).toBeDefined();
+    expect(JSON.parse(row!.after)).toEqual({ transferListed: true, listPrice: 60, offerFloorOn: true, offerAuto: true, notForSale: false });
+    expect(row!.after).not.toContain('40'); // 私密底线的数值不进留痕
+
+    // 只给标价时：数值仍不回、布尔照记
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 65, notForSale: false }, 'tok-coach')).status).toBe(200);
+    const row2 = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'offer_settings' ORDER BY id DESC LIMIT 1");
+    expect(JSON.parse(row2!.after)).toMatchObject({ listPrice: 65, offerFloorOn: false });
+  });
+
+  it('GET offer-settings：本队教练拿五字段（含私密最低价）；非本队 404；挂牌中 409', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    expect(
+      (await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 60, offerAuto: true, notForSale: false }, 'tok-coach')).status,
+    ).toBe(200);
+
+    let res = await app.request('/api/players/1/offer-settings', { headers: { Cookie: 'whl_session=tok-coach' } }, fx.env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ transferListed: true, minOfferPrice: 40, listPrice: 60, offerAuto: true, notForSale: false });
+
+    res = await app.request('/api/players/1/offer-settings', { headers: { Cookie: 'whl_session=tok-coach2' } }, fx.env);
+    expect(res.status).toBe(404);
+
+    fx.sqlite.exec("UPDATE players SET status = 'listed' WHERE id = 1");
+    res = await app.request('/api/players/1/offer-settings', { headers: { Cookie: 'whl_session=tok-coach' } }, fx.env);
+    expect(res.status).toBe(409);
+  });
+});
+
+describe('autoRespondKind（core/offer-rules，v6.33.0 双线判定）', () => {
+  it('双线：低于最低价一律拒；[最低价, 标价) 是砍价区间走人谈；≥ 标价且开关开才自动同意', () => {
+    expect(autoRespondKind(60, 40, 1, 39.99)).toBe('auto_reject');
+    expect(autoRespondKind(60, 40, 1, 40)).toBeNull(); // 到拒线未到同意线：砍价进人工
+    expect(autoRespondKind(60, 40, 1, 59.99)).toBeNull();
+    expect(autoRespondKind(60, 40, 1, 60)).toBe('auto_accept');
+    expect(autoRespondKind(60, 40, 0, 65)).toBeNull(); // 开关关
+    expect(autoRespondKind(60, 40, 0, 30)).toBe('auto_reject'); // 低于线不看开关
+  });
+
+  it('只有最低价：同意线回落最低价（无标价存量名单行为不变）', () => {
+    expect(autoRespondKind(null, 40, 1, 39.99)).toBe('auto_reject');
+    expect(autoRespondKind(null, 40, 1, 40)).toBe('auto_accept');
+    expect(autoRespondKind(null, 40, 0, 40)).toBeNull();
+  });
+
+  it('只有标价：拒线不存在，低于标价也不自动拒（砍价留给人工）', () => {
+    expect(autoRespondKind(60, null, 1, 30)).toBeNull();
+    expect(autoRespondKind(60, null, 1, 60)).toBe('auto_accept');
+    expect(autoRespondKind(60, null, 0, 60)).toBeNull();
+  });
+
+  it('两条线都 null → null（无论开关与金额）', () => {
+    expect(autoRespondKind(null, null, 1, 30)).toBeNull();
+    expect(autoRespondKind(null, null, 0, 30)).toBeNull();
   });
 });
 
@@ -637,6 +782,10 @@ describe('清单与详情（GET /api/offers）', () => {
     expect(inData.items).toHaveLength(2);
     expect(inData.items.every((i) => i.role === 'seller')).toBe(true);
     expect(inData.pendingMine).toBe(2);
+    // 谈判桌哨兵（v6.33.0）：列表行不带私密最低报价键，公开标价在场
+    const rawInbox = JSON.stringify(inData);
+    expect(rawInbox).not.toContain('minOfferPrice');
+    expect(rawInbox).toContain('listPrice');
 
     const outbox = await app.request('/api/offers?box=out&status=pending', { headers: { Cookie: 'whl_session=tok-coach2' } }, fx.env);
     const outData = (await outbox.json()) as { items: { role: string }[]; pendingMine: number };
@@ -649,6 +798,10 @@ describe('清单与详情（GET /api/offers）', () => {
     expect(d.offer.myRole).toBe('buyer');
     expect(d.offer.myTurn).toBe(false);
     expect(d.events[0].kind).toBe('open');
+    // 谈判桌哨兵（v6.33.0）：私密最低报价的键不进详情 JSON，公开标价在场
+    const rawDetail = JSON.stringify(d);
+    expect(rawDetail).not.toContain('minOfferPrice');
+    expect(rawDetail).toContain('listPrice');
 
     // 第四方（uid9/club4，与买卖双方无关）查详情 403
     fx.sqlite.exec("INSERT INTO clubs (id, name, league_tier, status) VALUES (4, '第四队', 'premier', 'active')");

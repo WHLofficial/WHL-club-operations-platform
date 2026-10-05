@@ -21,7 +21,7 @@ vi.mock('../../../lib/api.ts', async (importOriginal) => {
 function offer(patch: Partial<OfferListItem> = {}): OfferListItem {
   return {
     id: 5,
-    player: { id: 9, fcId: null, name: '测试球员', position: 'ST', ca: 51, pa: 82 },
+    player: { id: 9, fcId: null, name: '测试球员', position: 'ST', ca: 51, pa: 82, listPrice: 15 },
     counterpart: { id: 3, name: '对方俱乐部' },
     role: 'seller',
     amount: 12,
@@ -146,5 +146,29 @@ describe('v6.29.0 意向单（OffersSection）', () => {
     fireEvent.click(await screen.findByRole('button', { name: '谈判桌' }));
     await screen.findByText(/关窗期双方已谈成，先挂意向单/);
     expect(screen.queryByText(/还没轮到你/)).toBeNull();
+  });
+
+  // ---- v6.33.0：砍价徽标（卖方活单报价 < 公开标价；标价本身公开，徽标不泄底线） ----
+
+  it('砍价徽标：卖方视角活单、12 < 标价 15 → 「当前价」格内标出', async () => {
+    renderSection([offer({ status: 'pending', role: 'seller', amount: 12 })]);
+    expect(await screen.findByText('测试球员')).toBeTruthy();
+    const badge = screen.getByText('砍价');
+    expect(badge.className).toContain('badge');
+    expect(badge.className).toContain('orange');
+    // 挂在金额后面，是「当前价」格的一部分，不占独立列（单位 m 在表头）
+    expect(badge.closest('td')?.textContent).toBe('12.00砍价');
+  });
+
+  it('砍价徽标：达到/超过标价（16 ≥ 15）不出现', async () => {
+    renderSection([offer({ status: 'pending', role: 'seller', amount: 16 })]);
+    expect(await screen.findByText('测试球员')).toBeTruthy();
+    expect(screen.queryByText('砍价')).toBeNull();
+  });
+
+  it('砍价徽标：买方视角即使低于标价也不出现（只卖方看自己收到的单）', async () => {
+    renderSection([offer({ status: 'pending', role: 'buyer', amount: 12 })]);
+    expect(await screen.findByText('测试球员')).toBeTruthy();
+    expect(screen.queryByText('砍价')).toBeNull();
   });
 });

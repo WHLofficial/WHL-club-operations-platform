@@ -667,11 +667,12 @@ async function main() {
     });
 
     // ---- 广告板（v6.31.0）：/market/board 公开页 + 在售市场页顶部小卡片（teaser）----
-    // 端点只收转会名单内球员、下发布尔位与最低报价数值；着重度 0 普通 / 1 推荐 / 2 置顶（付费写路径本版未实现，夹具直给）
+    // 端点只收转会名单内球员、下发公开标价 listPrice（v6.33.0 起最低报价不出公开端点）与布尔位；
+    // 着重度 0 普通 / 1 推荐 / 2 置顶（付费写路径本版未实现，夹具直给）
     const adbOk = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     const adbRow = (over) => ({
       id: 1, uid: 'fc1', fcId: 100001, name: '哈兰德', positions: ['ST'], age: 24, ca: 94, pa: 95,
-      clubId: 10, clubName: '曼城', minOfferPrice: 180, releaseFee: 240,
+      clubId: 10, clubName: '曼城', listPrice: 180, releaseFee: 240,
       listedAt: '2026-10-03T00:00:00.000Z', emphasis: 0, emphasisUntil: null,
       status: 'normal', notForSale: false, transferPriced: true,
       ...over,
@@ -679,9 +680,9 @@ async function main() {
     const ADB_BOARD = {
       players: [
         adbRow({ id: 1, name: '哈兰德', emphasis: 2, emphasisUntil: '2026-10-12T12:00:00.000Z' }),
-        adbRow({ id: 2, name: '萨拉赫', fcId: 100002, emphasis: 1, ca: 89, pa: 90, minOfferPrice: 60, releaseFee: null }),
-        adbRow({ id: 3, name: '凯恩', fcId: 100003, emphasis: 0, ca: 90, pa: 90, minOfferPrice: 75 }),
-        adbRow({ id: 4, name: '姆巴佩', fcId: 100004, emphasis: 0, ca: 91, pa: 94, minOfferPrice: 200 }),
+        adbRow({ id: 2, name: '萨拉赫', fcId: 100002, emphasis: 1, ca: 89, pa: 90, listPrice: 60, releaseFee: null }),
+        adbRow({ id: 3, name: '凯恩', fcId: 100003, emphasis: 0, ca: 90, pa: 90, listPrice: 75 }),
+        adbRow({ id: 4, name: '姆巴佩', fcId: 100004, emphasis: 0, ca: 91, pa: 94, listPrice: 200 }),
       ],
       total: 12,
     };
@@ -710,6 +711,17 @@ async function main() {
       assert(!(await page.locator('.adb-grid').innerText()).includes('哈兰德'), '置顶行又出现在栅格里（两区没分流）');
       assert((await page.locator('.transfer-status-legend').count()) === 1, '广告板底部缺转会状态图例');
       assert((await text()).includes('共 12 人在名单，这里展示前 4 人'), '截断提示缺失（total > 展示数时应提示）');
+
+      // v6.33.0 报价按钮与弹层：每张卡脚一个圆形「报」钮；点开弹层预填标价；关闭收起
+      assert((await page.locator('.adb-bid-btn').count()) === 4, `圆形报价按钮应为 4 个（每卡一个），实测 ${await page.locator('.adb-bid-btn').count()}`);
+      await page.locator('.adb-fcard .adb-bid-btn').click();
+      const bidDialog = page.locator('.modal-mask .modal-card');
+      await bidDialog.waitFor({ timeout: TIMEOUT });
+      assert((await bidDialog.locator('h3').innerText()).includes('给 哈兰德 报价'), '报价弹层标题不对');
+      assert((await bidDialog.locator('input[aria-label="报价金额"]').inputValue()) === '180', '弹层金额没预填标价');
+      assert((await bidDialog.innerText()).includes('低于标价视为砍价'), '弹层缺砍价提示文案');
+      await bidDialog.locator('button', { hasText: '取消' }).click();
+      assert((await page.locator('.modal-mask').count()) === 0, '弹层取消后没关闭');
 
       // 「换一批」：普通档 ≥2 才有按钮；点一次必换序（付费档仍在首、集合不变）
       assert((await page.locator('.adb-shuffle').count()) === 1, '普通档 ≥2 时应有「换一批」按钮');
