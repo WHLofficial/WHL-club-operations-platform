@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // v6.31.0 广告板（/market/board + 在售市场页 teaser）前端口径：
 // 置顶区只放 emphasis=2（无置顶时整块连标题一起消失）、0/1 进栅格、三档视觉杠杆挂类、
-// 图例 / 空态 / 截断提示，以及 teaser 的三张迷你卡 + 「查看全部 N 人 →」+ 无数据不渲染。
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+// 图例 / 空态 / 截断提示，「换一批」的手动重排（只动 emphasis=0、每次必换序、付费档永在首），
+// 以及 teaser 的三张迷你卡 + 「查看全部 N 人 →」+ 无数据不渲染。
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -186,9 +187,131 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
   });
 
   it('不截断时（total = 展示数）不出截断提示', async () => {
-    renderPage(board([row({ id: 1, name: '甲' })], 1));
+    renderPage(board([row({ id: 1, name: '甲' })]));
     expect(await screen.findByText('甲')).toBeTruthy();
     expect(screen.queryByText(/共 .* 人在名单/)).toBeNull();
+  });
+
+  it('换一批：无付费加权的行不足 2 个时不渲染按钮（点了也没意义）', async () => {
+    const { container } = renderPage(MIXED); // MIXED 只有 1 个 emphasis = 0
+    expect(await screen.findByText('普通丙')).toBeTruthy();
+    expect(container.querySelector('.adb-shuffle')).toBeNull();
+    expect(screen.queryByRole('button', { name: /换一批/ })).toBeNull();
+  });
+
+  it('换一批：普通档 ≥2 时点一次必换序（同一批人、付费档仍在首、置顶不进栅格）', async () => {
+    const { container } = renderPage(
+      board([
+        row({ id: 1, name: '置顶甲', emphasis: 2 }),
+        row({ id: 2, name: '推荐乙', emphasis: 1 }),
+        row({ id: 3, name: '普通丙', emphasis: 0 }),
+        row({ id: 4, name: '普通丁', emphasis: 0 }),
+        row({ id: 5, name: '普通戊', emphasis: 0 }),
+      ]),
+    );
+    expect(await screen.findByText('普通丙')).toBeTruthy();
+    const order = () =>
+      [...container.querySelectorAll('.adb-grid .adb-card .adb-nm')].map((el) => el.textContent ?? '');
+    const before = order();
+    expect(before).toEqual(['推荐乙', '普通丙', '普通丁', '普通戊']);
+
+    const btn = screen.getByRole('button', { name: /换一批/ });
+    fireEvent.click(btn);
+    const after = order();
+    // 每次点都必须换出不同顺序（实现里「洗回原序就再洗 + 兜底反转」保证不空转）
+    expect(after).not.toEqual(before);
+    expect(after[0]).toBe('推荐乙');
+    expect([...after].sort()).toEqual([...before].sort());
+    expect(container.querySelector('.adb-grid')!.textContent).not.toContain('置顶甲');
+
+    fireEvent.click(btn);
+    expect(order()).not.toEqual(after);
+  });
+
+  it('名单变化时手动序自动回落服务端序（旧 id 序列不硬套：不丢人、不重复、不报错）', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const rows = (ids: Array<[number, string, 0 | 1 | 2]>) =>
+      board(ids.map(([id, name, emphasis]) => row({ id, name, emphasis })));
+    apiMock.mockResolvedValue(
+      rows([
+        [1, '置顶甲', 2],
+        [2, '推荐乙', 1],
+        [3, '普通丙', 0],
+        [4, '普通丁', 0],
+        [5, '普通戊', 0],
+      ]),
+    );
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <MarketAdBoardPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('普通丙')).toBeTruthy();
+    const order = () =>
+      [...container.querySelectorAll('.adb-grid .adb-card .adb-nm')].map((el) => el.textContent ?? '');
+    fireEvent.click(screen.getByRole('button', { name: /换一批/ }));
+    expect(order()).not.toEqual(['推荐乙', '普通丙', '普通丁', '普通戊']);
+
+    // 普通丙退出名单（重新取数后普通档从 3 人变 2 人）⇒ 手动序失效，回落服务端序
+    apiMock.mockResolvedValue(
+      rows([
+        [1, '置顶甲', 2],
+        [2, '推荐乙', 1],
+        [4, '普通丁', 0],
+        [5, '普通戊', 0],
+      ]),
+    );
+    await act(async () => {
+      await qc.invalidateQueries();
+    });
+    expect(await screen.findByText('普通丁')).toBeTruthy();
+    expect(order()).toEqual(['推荐乙', '普通丁', '普通戊']);
+  });
+
+  it('名单变长时手动序也回落（新进名单的人不能被旧 id 序列挤掉）', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const rows = (ids: Array<[number, string, 0 | 1 | 2]>) =>
+      board(ids.map(([id, name, emphasis]) => row({ id, name, emphasis })));
+    apiMock.mockResolvedValue(
+      rows([
+        [1, '置顶甲', 2],
+        [2, '推荐乙', 1],
+        [3, '普通丙', 0],
+        [4, '普通丁', 0],
+        [5, '普通戊', 0],
+      ]),
+    );
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <MarketAdBoardPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('普通丙')).toBeTruthy();
+    const order = () =>
+      [...container.querySelectorAll('.adb-grid .adb-card .adb-nm')].map((el) => el.textContent ?? '');
+    fireEvent.click(screen.getByRole('button', { name: /换一批/ }));
+    expect(order().length).toBe(4); // 推荐 + 3 普通
+
+    // 普通己新进名单：旧的手动序（长度 3）必须失效，否则新人会被挤掉（只剩 3 张卡）
+    apiMock.mockResolvedValue(
+      rows([
+        [1, '置顶甲', 2],
+        [2, '推荐乙', 1],
+        [3, '普通丙', 0],
+        [4, '普通丁', 0],
+        [5, '普通戊', 0],
+        [6, '普通己', 0],
+      ]),
+    );
+    await act(async () => {
+      await qc.invalidateQueries();
+    });
+    expect(await screen.findByText('普通己')).toBeTruthy();
+    expect(order()).toEqual(['推荐乙', '普通丙', '普通丁', '普通戊', '普通己']);
   });
 });
 

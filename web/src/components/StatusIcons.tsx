@@ -1,4 +1,4 @@
-// v6.30.0 C 段：转会状态的四枚手绘 SVG 线稿图标 + 文案/图例/单元格。
+// v6.30.0 C 段：转会状态的四枚手绘 SVG 线稿图标 + 文案/图例/单元格；v6.31.0 追加广告板的「换一批」（ShuffleIcon）。
 // 风格照 components/TopBar.tsx 的既有图标：viewBox 0 0 24 24、16×16、fill=none、stroke=currentColor
 // （单色随文字色）、线宽 2、圆线帽圆线角 —— 不引图标库。
 // 四态的含义与优先级（非卖品 > 挂牌中 > 转会名单 > 已标价）在 lib/club-columns.tsx 的 transferStatusOf，
@@ -62,8 +62,19 @@ export function LockIcon() {
   );
 }
 
-export type TransferStatusIcon = () => ReactElement;
+/** 换一批（v6.31.0 广告板的手动洗牌）：两条交叉箭头，右端各一个箭头 */
+export function ShuffleIcon() {
+  return (
+    <svg {...STROKE}>
+      <path d="M3 7h3.5l10 10H21" />
+      <path d="M3 17h3.5l10-10H21" />
+      <path d="M18.5 4.5 21 7l-2.5 2.5" />
+      <path d="M18.5 14.5 21 17l-2.5 2.5" />
+    </svg>
+  );
+}
 
+export type TransferStatusIcon = () => ReactElement;
 // 状态 → 图标；数组顺序即图例顺序（拍卖锤 挂牌中 · 清单 转会名单 · 欧元 已标价 · 锁 非卖品）
 export const TRANSFER_STATUS_ICON: Record<TransferStatusKey, TransferStatusIcon> = {
   listed: GavelIcon,

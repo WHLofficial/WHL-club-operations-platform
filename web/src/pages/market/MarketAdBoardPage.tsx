@@ -1,11 +1,14 @@
 // 转会市场 · 广告板 /market/board（v6.31.0）：把各队挂出的「转会名单」公开铺开。
 // 着重度（0 普通 / 1 推荐 / 2 置顶）是「列入转会名单时的有偿选项」的展示接口——本版只读，不写 player_promotions。
 // 置顶区（emphasis = 2）通栏纵向堆叠，无置顶时整条带子连标题一起消失；其余（0/1）进卡栅格。
+// 顺序：端点按时间桶（5 分钟一桶）轮换 emphasis = 0 那一段，付费档（1/2）恒按着重度 → 挂出时间；
+// 「换一批」按钮是纯前端本地重排（不打端点，只动普通档）。
 // 时间一律走 useTimeFmt（卡脚「挂出 …」），页面不自己算相对时间（守 tests/datetime-display.test.ts）。
+import { useState } from 'react';
 import { Link } from 'react-router';
 import type { TransferBoardRow } from '../../lib/api.ts';
 import { TeamLogo } from '../../components/TeamLogo.tsx';
-import { TransferStatusCell, TransferStatusLegend } from '../../components/StatusIcons.tsx';
+import { ShuffleIcon, TransferStatusCell, TransferStatusLegend } from '../../components/StatusIcons.tsx';
 import { transferStatusOf } from '../../lib/club-columns.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { playerPath } from '../../lib/player-link.ts';
@@ -177,18 +180,57 @@ export function AdBoardTeaser() {
   );
 }
 
+// 手动「换一批」：本地重排 emphasis = 0 的行（付费档不动），并保证至少换出一个不同的顺序
+// （连按两次不会出现「点了没反应」——洗回原序就再洗，兜底反转必定不同）
+function reshuffle(rows: TransferBoardRow[]): TransferBoardRow[] {
+  if (rows.length < 2) return rows;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const out = rows.slice();
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = out[i];
+      out[i] = out[j];
+      out[j] = tmp;
+    }
+    if (out.some((row, i) => row.id !== rows[i].id)) return out;
+  }
+  return rows.slice().reverse();
+}
+
 export default function MarketAdBoardPage() {
   const { data, isLoading, error } = useTransferBoard(200);
   const players = data?.players ?? [];
   const total = data?.total ?? players.length;
-  // 分流：emphasis = 2 进置顶带，0/1 进栅格（排序由端点负责：着重度 → 挂出时间 → id）
+  // 分流：emphasis = 2 进置顶带，1（推荐）与 0（普通）进栅格
   const featured = players.filter((row) => row.emphasis === 2);
-  const rest = players.filter((row) => row.emphasis !== 2);
+  const paid = players.filter((row) => row.emphasis === 1);
+  const unpinned = players.filter((row) => row.emphasis === 0);
+  // 「换一批」的本地顺序只存 id 序列：名单一变（进出名单 / 重新拉取）就自动回落端点给的桶序
+  const [manualIds, setManualIds] = useState<number[] | null>(null);
+  const byId = new Map(unpinned.map((row) => [row.id, row]));
+  const shownUnpinned =
+    manualIds !== null && manualIds.length === unpinned.length && manualIds.every((id) => byId.has(id))
+      ? manualIds.map((id) => byId.get(id)!)
+      : unpinned;
+  const rest = [...paid, ...shownUnpinned];
   return (
     <div className="container">
       <h1>转会市场 · 广告板</h1>
       <MarketNav />
-      <p className="adb-note">各队公开挂出的转会名单：标价公开，出价达线自动成交，低于自动拒。</p>
+      <div className="adb-note">
+        <p>各队公开挂出的转会名单：标价公开，出价达线自动成交，低于自动拒。</p>
+        {unpinned.length >= 2 && (
+          <button
+            type="button"
+            className="adb-shuffle"
+            onClick={() => setManualIds(reshuffle(shownUnpinned).map((row) => row.id))}
+            title="打乱没有付费加权的球员顺序（推荐 / 置顶不动）"
+          >
+            <ShuffleIcon />
+            换一批
+          </button>
+        )}
+      </div>
       {error ? (
         <div className="banner warn">{error instanceof Error ? error.message : '广告板打不开了，稍后再试'}</div>
       ) : (

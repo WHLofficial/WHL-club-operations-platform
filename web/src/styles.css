@@ -4634,11 +4634,46 @@ th.num .th-sort {
    不新增色板：淡金底取既有 .badge.gold 底色的 #f5e8cf，其余全走 :root token。
    ============================================================================ */
 
-/* 页头说明行（<h1> 与 MarketNav 之下） */
+/* 页头说明行（<h1> 与 MarketNav 之下）：左侧说明 + 右侧「换一批」（无付费加权的行够 2 个才出） */
 .adb-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   margin: 6px 0 12px;
   font-size: 13px;
   color: var(--muted);
+}
+
+.adb-note p {
+  margin: 0;
+}
+
+/* 手动「换一批」：幽灵胶囊按钮，形态照站内既有小按钮（描边 + 纸底 + 焦橙字） */
+.adb-shuffle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--terracotta-deep);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.adb-shuffle:hover {
+  border-color: var(--terracotta);
+  color: var(--cocoa);
+}
+
+.adb-shuffle:focus-visible {
+  outline: 2px solid var(--terracotta);
+  outline-offset: 2px;
 }
 
 /* 内容面板：置顶带 + 卡栅格同一个 .card（对齐设计样张的单面板排法） */
