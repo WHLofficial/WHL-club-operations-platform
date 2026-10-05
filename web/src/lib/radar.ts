@@ -52,3 +52,32 @@ export function starText(n: unknown): string {
   if (!Number.isFinite(v) || v <= 0) return '—';
   return '★'.repeat(Math.min(v, 5)) + '☆'.repeat(Math.max(0, 5 - v));
 }
+
+// ---- 五档配色与雷达环带（v6.35.0，spec docs/superpowers/specs/2026-10-05-player-heatmap-radar-ticks-design.md §1.2）----
+// 色值 = players-library.ts attrClass 五档（v6.19.0 全仓统一口径），测试锁死两处同源 ——
+// 雷达轴数值套色与环带配色都从这里取，避免第三处再抄一遍色表
+const TIER_COLORS = {
+  bad: '#e03131',
+  weak: '#fd7e14',
+  mid: '#b7892b',
+  solid: '#66a80f',
+  good: '#2b8a3e',
+} as const;
+
+// 值 → 档色：阈值与 attrClass 逐条同源（≤50 红 / ≤60 橙 / ≤70 琥珀金 / ≤80 榈绿 / 其余绿）
+export function tierColorOf(v: number): string {
+  if (v <= 50) return TIER_COLORS.bad;
+  if (v <= 60) return TIER_COLORS.weak;
+  if (v <= 70) return TIER_COLORS.mid;
+  if (v <= 80) return TIER_COLORS.solid;
+  return TIER_COLORS.good;
+}
+
+// 环带边界：顶环 = 外框 = 99，档界 80/70/60/50（六边形内叠，非圆环；每环取"下侧档"的色 ——
+// 99→绿、80→榈绿、70→琥珀金、60→橙、50→红，即 tierColorOf(边界值)）
+export const RADAR_BAND_BOUNDS = [99, 80, 70, 60, 50] as const;
+
+// 值 → 半径占比：归一分母 99（与 axisValue 同口径），钳 [0,99]
+export function bandFrac(v: number): number {
+  return Math.min(Math.max(v, 0), 99) / 99;
+}

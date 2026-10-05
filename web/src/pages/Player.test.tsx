@@ -193,3 +193,86 @@ describe('TC-CMP-DET：详情页「对比」入口（v6.34.0 步骤 7）', () =>
     expect(screen.queryByRole('link', { name: '⇄ 加入对比' })).toBeNull();
   });
 });
+
+// ---- 属性页签头部（v6.35.0：位置热区图接入 + 三列布局 + 雷达 head 变体档色）----
+
+/** 属性页签头部容器（页签默认就是 attrs，加载完即有） */
+async function attrHead(): Promise<HTMLElement> {
+  const title = await screen.findByText('FC 属性（当季源数据）');
+  const head = title.closest('.attr-head');
+  expect(head).not.toBeNull();
+  return head as HTMLElement;
+}
+
+describe('TC-CMP-ATTR：属性页签头部（v6.35.0）', () => {
+  it('TC-CMP-ATTR-01 · 热区图与雷达并排进头部：三列布局、PosID1 主位 + PosID2 副位', async () => {
+    open();
+    const head = await attrHead();
+
+    // 有位置数据 ⇒ 不回退两列（.attr-head-noheat 只在空态加）
+    expect(head.classList.contains('attr-head-noheat')).toBe(false);
+    expect(head.querySelector('.attr-head-visual svg.heat-svg')).toBeTruthy();
+    // 热区图三态：PosID1=ST 主位、PosID2=LW 副位、其余 10 块淡显
+    expect(head.querySelectorAll('rect.heat-block')).toHaveLength(12);
+    expect(head.querySelectorAll('rect.heat-block.heat-main')).toHaveLength(1);
+    expect(head.querySelector('text.heat-code.heat-main')?.textContent).toBe('ST');
+    expect(head.querySelectorAll('rect.heat-block.heat-sub')).toHaveLength(1);
+    expect(head.querySelector('text.heat-code.heat-sub')?.textContent).toBe('LW');
+    expect(head.querySelectorAll('rect.heat-block.heat-off')).toHaveLength(10);
+    // 雷达仍是 head 变体（232×156、六轴），与热区图同处右列
+    const radar = head.querySelector('svg.radar-svg-head');
+    expect(radar).not.toBeNull();
+    expect(radar!.getAttribute('viewBox')).toBe('0 0 232 156');
+    expect(radar!.querySelectorAll('.radar-axis-key')).toHaveLength(6);
+  });
+
+  it('TC-CMP-ATTR-02 · 雷达五档环带 + 数值套档色（v6.19.0 缺 fill 的缺陷已修）', async () => {
+    open();
+    const head = await attrHead();
+    const radar = head.querySelector('svg.radar-svg-head')!;
+
+    expect(radar.querySelectorAll('polygon.radar-band')).toHaveLength(5);
+    const vals = Array.from(radar.querySelectorAll('.radar-axis-val'));
+    // 组均（四舍五入）：PAC 92 / SHO 76 / PAS 59 / DRI 77 / DEF 39 / PHY 73
+    expect(vals.map((el) => el.textContent)).toEqual(['92', '76', '59', '77', '39', '73']);
+    // 档色类挂在数值 tspan 上（fill 由 styles.css 的 .radar-axis-val.attr-* 双类选择器给）
+    expect(vals[0].getAttribute('class')).toBe('radar-axis-val attr-good');
+    expect(vals[4].getAttribute('class')).toBe('radar-axis-val attr-bad');
+  });
+
+  it('TC-CMP-ATTR-03 · 空位置数据：热区图不渲染、头部回退两列，雷达照常', async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (/^\/api\/players\/\d+$/.test(path)) {
+        return Promise.resolve(detail(1, { gameAttrs: { ...ATTR_BASE, PosID1: null, PosID2: null } }));
+      }
+      if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'open' } });
+      if (/^\/api\/players\/\d+\/growth$/.test(path)) return Promise.reject(new Error('用例不打桩成长数据'));
+      return Promise.reject(new Error(`测试没打桩的请求：${path}`));
+    });
+    open();
+    const head = await attrHead();
+
+    expect(head.classList.contains('attr-head-noheat')).toBe(true);
+    expect(head.querySelector('svg.heat-svg')).toBeNull();
+    expect(head.querySelector('svg.radar-svg-head')).not.toBeNull();
+  });
+
+  it('TC-CMP-ATTR-04 · 纯门将：热区图只有 GK 块主位、雷达换 GK 六轴', async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (/^\/api\/players\/\d+$/.test(path)) {
+        return Promise.resolve(detail(1, { position: 'GK', gameAttrs: { ...ATTR_BASE, PosID1: 0, PosID2: null } }));
+      }
+      if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'open' } });
+      if (/^\/api\/players\/\d+\/growth$/.test(path)) return Promise.reject(new Error('用例不打桩成长数据'));
+      return Promise.reject(new Error(`测试没打桩的请求：${path}`));
+    });
+    open();
+    const head = await attrHead();
+
+    expect(head.querySelectorAll('rect.heat-block.heat-main')).toHaveLength(1);
+    expect(head.querySelector('text.heat-code.heat-main')?.textContent).toBe('GK');
+    expect(head.querySelectorAll('rect.heat-block.heat-off')).toHaveLength(11);
+    const keys = Array.from(head.querySelectorAll('.radar-axis-key'), (el) => el.textContent);
+    expect(keys).toEqual(['DIV', 'HAN', 'KIC', 'REF', 'POS', 'SPD']);
+  });
+});

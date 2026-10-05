@@ -16,11 +16,13 @@ import {
   positionName,
   roleChs,
 } from '../lib/ref.ts';
-import { axisValue, axesFor, starText, type RadarAxis } from '../lib/radar.ts';
+import { axesFor, starText } from '../lib/radar.ts';
 import { attrClass } from '../lib/players-library.ts';
 import { usePlayerDetail } from '../lib/queries.ts';
 import { playerPath } from '../lib/player-link.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
+import { AttrRadar } from '../components/AttrRadar.tsx';
+import { PositionHeatmap } from '../components/PositionHeatmap.tsx';
 import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
 // 窄屏断点（spec §2/§10）：≤840px 单栏回落、吸顶条压 32px、位置热区图不出
@@ -94,94 +96,16 @@ function footText(foot: number | null | undefined): string {
   return foot === 1 ? '右脚' : foot === 0 ? '左脚' : '—';
 }
 
-// 雷达几何（spec §4）：小雷达 viewBox 120×104、中心 (60,52)、R=40（3 人并排与吸顶迷你同刻度）；
-// 大雷达 viewBox 170×176、中心 (85,88)、R=62（2 人叠图）。归一分母 99 由 axisValue 承载。
-const RADAR_GEOM = {
-  big: { w: 170, h: 176, cx: 85, cy: 88, r: 62 },
-  small: { w: 120, h: 104, cx: 60, cy: 52, r: 40 },
-} as const;
+// 雷达几何与绘制全在共享件 web/src/components/AttrRadar.tsx（v6.35.0 统一，本页不再自带实现）：
+// big 170×176 中心 (85,88) R=62（2 人叠图）、small 120×104 中心 (60,52) R=40（3 人并排）、mini 同 small（吸顶条）；
+// 环带走 neutral 模式（不铺五档色、只画环线）——叠色/并排下铺色会糊，spec §4 登记为对比页唯一有意差异。
 
-function ringPoints(cx: number, cy: number, r: number, n: number, frac: number): string {
-  return Array.from({ length: n }, (_, i) => {
-    const a = (Math.PI * 2 * i) / n - Math.PI / 2;
-    return `${(cx + r * frac * Math.cos(a)).toFixed(2)},${(cy + r * frac * Math.sin(a)).toFixed(2)}`;
-  }).join(' ');
-}
-
-function dataPoints(axes: readonly RadarAxis[], attrs: Record<string, unknown>, cx: number, cy: number, r: number): string {
-  return Array.from({ length: axes.length }, (_, i) => {
-    const a = (Math.PI * 2 * i) / axes.length - Math.PI / 2;
-    const f = axisValue(attrs, axes[i].key);
-    return `${(cx + r * f * Math.cos(a)).toFixed(2)},${(cy + r * f * Math.sin(a)).toFixed(2)}`;
-  }).join(' ');
-}
-
-// 雷达（简化网格：外框实线 #e6dcc8 ＋ 50 分位内环虚线 #c8bba2；轴标只出三字母键名，不带数值）。
-// 与详情页 AttrRadar 的五档环带有意不同（spec §4：叠色/并排下环带会糊）。
-function RadarChart({
-  axes,
-  series,
-  variant,
-}: {
-  axes: readonly RadarAxis[];
-  series: { color: string; attrs: Record<string, unknown> }[];
-  variant: 'big' | 'small';
-}) {
-  const g = RADAR_GEOM[variant];
+// 位置热区图（v6.35.0 落地，替换原「待热区图轮落地」占位）：仅 2 人桌面态在叠图两侧各出一张
+function HeatSide({ slot }: { slot: ReadySlot }) {
+  const attrs = slot.detail.player.gameAttrs ?? {};
   return (
-    <svg
-      className={`cmp-radar cmp-radar-${variant}`}
-      viewBox={`0 0 ${g.w} ${g.h}`}
-      role="img"
-      aria-label={variant === 'big' ? '六维雷达（双色叠图）' : '六维雷达'}
-    >
-      <polygon className="cmp-radar-frame" points={ringPoints(g.cx, g.cy, g.r, axes.length, 1)} />
-      <polygon className="cmp-radar-quartile" points={ringPoints(g.cx, g.cy, g.r, axes.length, 0.5)} />
-      {series.map((s, si) => (
-        <polygon
-          key={si}
-          className="cmp-radar-data"
-          points={dataPoints(axes, s.attrs, g.cx, g.cy, g.r)}
-          style={{ stroke: s.color, fill: s.color }}
-        />
-      ))}
-      {axes.map((axis, i) => {
-        const a = (Math.PI * 2 * i) / axes.length - Math.PI / 2;
-        const x = g.cx + (g.r + 10) * Math.cos(a);
-        const y = g.cy + (g.r + 10) * Math.sin(a);
-        const anchor = Math.abs(Math.cos(a)) < 0.3 ? 'middle' : Math.cos(a) > 0 ? 'start' : 'end';
-        return (
-          <text key={axis.key} className="cmp-radar-key" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">
-            {axis.key}
-          </text>
-        );
-      })}
-    </svg>
-  );
-}
-
-// 吸顶条迷你六边形（只画网格＋单人数据多边形，不挂文字——文字在 SVG 外的姓名/CA-PA 行）
-function MiniRadar({ axes, attrs, color }: { axes: readonly RadarAxis[]; attrs: Record<string, unknown>; color: string }) {
-  const g = RADAR_GEOM.small;
-  return (
-    <svg className="cmp-bar-radar" viewBox={`0 0 ${g.w} ${g.h}`} aria-hidden="true">
-      <polygon className="cmp-radar-frame" points={ringPoints(g.cx, g.cy, g.r, axes.length, 1)} />
-      <polygon className="cmp-radar-quartile" points={ringPoints(g.cx, g.cy, g.r, axes.length, 0.5)} />
-      <polygon
-        className="cmp-radar-data"
-        points={dataPoints(axes, attrs, g.cx, g.cy, g.r)}
-        style={{ stroke: color, fill: color }}
-      />
-    </svg>
-  );
-}
-
-// 位置热区图占位（仅 2 人桌面态）：热区图本体属热区图轮（spec §4 依赖），先占位不阻塞其余部分
-function HeatPlaceholder({ who }: { who: string }) {
-  return (
-    <div className="cmp-heat" data-testid={`cmp-heat-${who}`}>
-      <span className="cmp-heat-box" aria-hidden="true" />
-      <p className="cmp-heat-note">位置热区图待热区图轮落地</p>
+    <div className="cmp-heatmap">
+      <PositionHeatmap posCodes={posChipsOf(attrs)} isGk={slot.detail.player.position === 'GK'} />
     </div>
   );
 }
@@ -380,13 +304,16 @@ export default function PlayerCompare() {
             )}
           </div>
 
-          {/* 雷达区：1 人＝单人雷达（＋空槽）；2 人＝热区图占位｜双色叠图｜热区图占位；3 人＝三张并排小雷达 */}
+          {/* 雷达区：1 人＝单人雷达（＋空槽）；2 人＝热区图｜双色叠图｜热区图；3 人＝三张并排小雷达 */}
           <div className="cmp-radarzone" ref={radarRef}>
             {ready.length === 1 && (
               <div className="cmp-radar-solo">
-                <RadarChart
+                <AttrRadar
                   variant="big"
+                  bands="neutral"
+                  className="cmp-radar-big"
                   axes={axes}
+                  ariaLabel="六维雷达"
                   series={[{ color: colorFor(ready[0].index), attrs: ready[0].detail.player.gameAttrs ?? {} }]}
                 />
                 {visible.length === 1 && (
@@ -401,24 +328,30 @@ export default function PlayerCompare() {
             )}
             {ready.length === 2 && (
               <>
-                {!narrow && <HeatPlaceholder who="a" />}
+                {!narrow && <HeatSide slot={ready[0]} />}
                 <div className="cmp-radar-main">
-                  <RadarChart
+                  <AttrRadar
                     variant="big"
+                    bands="neutral"
+                    className="cmp-radar-big"
                     axes={axes}
+                    ariaLabel="六维雷达（双色叠图）"
                     series={ready.map((s) => ({ color: colorFor(s.index), attrs: s.detail.player.gameAttrs ?? {} }))}
                   />
                 </div>
-                {!narrow && <HeatPlaceholder who="b" />}
+                {!narrow && <HeatSide slot={ready[1]} />}
               </>
             )}
             {ready.length === 3 && (
               <div className="cmp-radar3">
                 {ready.map((s) => (
                   <div className="cmp-radar3-cell" key={s.id}>
-                    <RadarChart
+                    <AttrRadar
                       variant="small"
+                      bands="neutral"
+                      className="cmp-radar-small"
                       axes={axes}
+                      ariaLabel="六维雷达"
                       series={[{ color: colorFor(s.index), attrs: s.detail.player.gameAttrs ?? {} }]}
                     />
                   </div>
@@ -442,7 +375,14 @@ export default function PlayerCompare() {
             <div className={`cmp-stickybar${barOn ? ' cmp-stickybar-on' : ''}`} aria-hidden={!barOn}>
               {ready.map((s) => (
                 <span className="cmp-bar-item" key={s.id}>
-                  <MiniRadar axes={axes} attrs={s.detail.player.gameAttrs ?? {}} color={colorFor(s.index)} />
+                  <AttrRadar
+                    variant="mini"
+                    bands="neutral"
+                    className="cmp-bar-radar"
+                    axes={axes}
+                    ariaHidden
+                    series={[{ color: colorFor(s.index), attrs: s.detail.player.gameAttrs ?? {} }]}
+                  />
                   <span className="cmp-bar-text">
                     <span className="cmp-bar-name" style={{ color: colorFor(s.index) }}>
                       {s.detail.player.name}

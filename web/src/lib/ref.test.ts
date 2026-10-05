@@ -2,7 +2,7 @@
 // 筛选面板的「属性」下拉改用它分组渲染 —— 一旦与 ATTR_KEYS 错位，下拉里就会缺项或露出英文键，
 // 而这类漂移在界面上只是「少了一个选项」，不会报错、不会红测试，所以在这里钉死。
 import { describe, expect, it } from 'vitest';
-import { ATTR_GROUPS, ATTR_LABELS, playstyleBadges } from './ref.ts';
+import { ATTR_GROUPS, ATTR_LABELS, playstyleBadges, positionName } from './ref.ts';
 import { ATTR_KEYS } from './players-library.ts';
 import { FC26_GAME_ATTR_COLUMNS, PS_SLOT_COUNT, PS_SLOT_KEYS } from '../../../src/core/fc26.ts';
 
@@ -21,6 +21,24 @@ describe('属性中文名表', () => {
   it('每一项都有中文名（下拉里不会落回英文键）', () => {
     const missing = [...ATTR_KEYS].filter((k) => !ATTR_LABELS[k]);
     expect(missing).toEqual([]);
+  });
+});
+
+// 空位置槽（PosIDn = null）在 JSON 里很常见，而 position.json 的 id 0 是 GK：
+// Number(null) === 0 会把空槽译成门将 —— 属性页多一枚 GK 芯片、位置热区图凭空给 GK 块上主位绿。
+// 后端 market.ts 的 slotNames / shop-ops.ts 的 hotZonesOf 早有同款护栏，这里钉死前端这一侧。
+describe('位置名 positionName 的空槽护栏', () => {
+  it('null / undefined / 空串 / 未知值都不产出位置名（空槽 ≠ 门将）', () => {
+    expect(positionName(null)).toBeNull();
+    expect(positionName(undefined)).toBeNull();
+    expect(positionName('')).toBeNull();
+    expect(positionName('abc')).toBeNull();
+    expect(positionName(-1)).toBeNull(); // 源表的「无位置」占位
+  });
+
+  it('真实门将（0）与普通位置照常产出', () => {
+    expect(positionName(0)).toBe('GK');
+    expect(positionName(25)).toBe('ST');
   });
 });
 

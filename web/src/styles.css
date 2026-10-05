@@ -2529,36 +2529,77 @@ th.num .th-sort {
 }
 
 /* 六维雷达（v0.7.1 d11）：静态 SVG，无动画；v6.2.0 起压进属性页签头部右格 —— 232×156 光图，
-   无卡框（.radar-card 已删）、无文字 legend（.radar-legend 已删），轴标签 = 三字母 + 数值 */
-.radar-grid {
-  fill: none;
+   无卡框（.radar-card 已删）、无文字 legend（.radar-legend 已删），轴标签 = 三字母 + 数值。
+   v6.35.0 泛化为四变体共享件（head/big/small/mini）：绘制类统一 radar-*，宽度由变体类或调用方类名给 */
+.radar-svg {
+  display: block;
+  flex: none;
+  height: auto;
+}
+.radar-svg-head {
+  width: 178px;
+}
+/* 五档环带（v6.35.0，spec §1.2）：边界 99/80/70/60/50、半径 v/99×R、六边形内叠非圆环；
+   tier = 档色（组件内联 style 给色，顶环即外框），neutral = 中性纸灰（对比页叠色/并排下档色会糊） */
+.radar-band {
+  fill-opacity: 0.2;
+  stroke-opacity: 0.55;
+  stroke-width: 1;
+}
+.radar-band-neutral {
+  fill: var(--border);
   stroke: var(--border);
+  fill-opacity: 0.12;
+  stroke-opacity: 0.6;
 }
 .radar-axis {
-  stroke: var(--border);
+  stroke: #d9c6ad;
 }
+/* 数据多边形（v6.35.0，spec §1.2）：虚线边 + 白点顶点；对比页多序列由组件内联 style 覆盖 fill/stroke 为本命色 */
 .radar-data {
-  fill: rgba(55, 80, 94, 0.16);
-  stroke: var(--sky-deep);
+  fill: #3e606f;
+  fill-opacity: 0.22;
+  stroke: #3e606f;
   stroke-width: 1.5;
+  stroke-dasharray: 4.5 3;
   stroke-linejoin: round;
+}
+.radar-dot {
+  fill: #fff;
+  stroke: #3e606f;
+  stroke-width: 1.4;
 }
 .radar-label {
   font-size: 10px;
-  fill: var(--muted);
+  fill: var(--ink);
+}
+.radar-svg-head .radar-label {
+  font-size: 11px;
 }
 .radar-axis-key {
-  fill: var(--muted);
+  fill: var(--ink);
+  font-weight: 700;
 }
 .radar-axis-val {
   fill: var(--ink);
   font-weight: 700;
 }
-.attr-radar-svg {
-  width: 232px;
-  height: auto;
-  flex: none;
-  display: block;
+/* v6.35.0 修 v6.19.0 遗留的 fill 缺陷：`.attr-*` 只设 color，而 SVG text 吃 fill 不吃 color
+   （当时"雷达轴数值套色"实际未生效）。双类选择器压过上面 .radar-axis-val 的单类 fill */
+.radar-axis-val.attr-bad {
+  fill: #e03131;
+}
+.radar-axis-val.attr-weak {
+  fill: #fd7e14;
+}
+.radar-axis-val.attr-mid {
+  fill: #b7892b;
+}
+.radar-axis-val.attr-solid {
+  fill: #66a80f;
+}
+.radar-axis-val.attr-good {
+  fill: #2b8a3e;
 }
 
 /* 位置热区图（v6.35.0，spec §1.1）：12 块拓扑 + 三态着色；语义 = 可踢位置分布（不是比赛跑动热图）。
@@ -2598,13 +2639,22 @@ th.num .th-sort {
   fill: #fff;
 }
 
-/* 属性页签头部两栏（v6.2.0）：左 = 标题/位置/角色，右 = 队徽 96px + 12px + 雷达；
+/* 属性页签头部（v6.2.0 两栏 → v6.35.0 三列）：左 = 标题/位置/角色，中 = 位置热区图，右 = 队徽 96px + 雷达；
    星级行与属性卡网格不在这个 grid 里，保持整宽 */
+/* 属性页签头部（v6.2.0 两栏 → v6.35.0 三列）：标题/位置/角色 ｜ 位置热区图 ｜ 队徽 96px + 雷达；
+   星级行与属性卡网格不在这个 grid 里，保持整宽。无位置码时不渲染热区图（attr-head-noheat 回两列） */
 .attr-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 16px;
   align-items: start;
+}
+.attr-head-noheat {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+/* 宽屏 display:contents ⇒ 热区图与 .attr-head-side 各自占一列；≤760px 折成并排居中一行 */
+.attr-head-visual {
+  display: contents;
 }
 .attr-head-side {
   display: flex;
@@ -2616,8 +2666,15 @@ th.num .th-sort {
   .attr-head {
     grid-template-columns: 1fr;
   }
+  .attr-head-visual {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
   .attr-head-side {
-    justify-content: flex-start;
+    justify-content: center;
   }
 }
 
@@ -5413,7 +5470,7 @@ th.num .th-sort {
   font-weight: 600;
 }
 
-/* ---- 雷达区（1 人单人态 / 2 人热区占位｜叠图｜热区占位 / 3 人三并排小图）---- */
+/* ---- 雷达区（1 人单人态 / 2 人热区图｜叠图｜热区图 / 3 人三并排小图）---- */
 .cmp-radarzone {
   position: relative;
   display: grid;
@@ -5471,49 +5528,13 @@ th.num .th-sort {
   padding: 6px;
 }
 
-/* 网格：外框实线 #e6dcc8 ＋ 50 分位内环虚线 #c8bba2（spec §4，与详情页五档环带有意不同） */
-.cmp-radar-frame {
-  fill: none;
-  stroke: #e6dcc8;
-  stroke-width: 1.2;
-}
+/* 网格与数据多边形样式全在共享件段（.radar-band-neutral / .radar-data / .radar-dot，v6.35.0 统一）；
+   对比页只留布局类：叠图/并排/吸顶条的宽度约束 */
 
-.cmp-radar-quartile {
-  fill: none;
-  stroke: #c8bba2;
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-}
-
-.cmp-radar-data {
-  stroke-width: 2;
-  fill-opacity: 0.22;
-}
-
-.cmp-radar-key {
-  fill: var(--muted);
-  font-size: 9px;
-}
-
-/* 热区图占位（热区图轮未落地；仅 2 人桌面态渲染）*/
-.cmp-heat {
-  text-align: center;
-}
-
-.cmp-heat-box {
-  display: block;
-  width: 100%;
-  aspect-ratio: 245 / 200;
-  border: 1.5px dashed #c8bba2;
-  border-radius: 8px;
-  background: rgba(255, 253, 247, 0.6);
-}
-
-.cmp-heat-note {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
+/* 位置热区图落点（v6.35.0 落地，替换原占位；仅 2 人桌面态渲染）：两侧各一张，居中于 1fr 列 */
+.cmp-heatmap {
+  display: flex;
+  justify-content: center;
 }
 
 .cmp-emptyslot {

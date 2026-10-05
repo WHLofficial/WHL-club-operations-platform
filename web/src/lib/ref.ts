@@ -28,6 +28,10 @@ export function teamName(id: unknown): string | null {
 }
 
 export function positionName(id: unknown): string | null {
+  // 空槽（null/undefined/''）不是 0：PositionID 0 是 GK，Number(null) 归零会把空槽错译成门将
+  // （后端 market.ts 的 slotNames 早有同款护栏；前端在 v6.35.0 位置热区图接入时补上——
+  //  否则 PosID1=null 的球员会凭空多出一块主位绿 GK，posChips 也会多一枚 GK 芯片）
+  if (id === null || id === undefined || id === '') return null;
   const n = Number(id);
   if (!Number.isFinite(n)) return null;
   const row = positionById.get(n);

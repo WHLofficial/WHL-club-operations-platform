@@ -295,7 +295,7 @@ describe('TC-CMP-STATE：9 态', () => {
 
     behaviors['2'] = detail(2, { name: '球员2' });
     await user.click(screen.getByRole('button', { name: '重试' }));
-    await waitFor(() => expect(container.querySelectorAll('.cmp-heat').length).toBe(2));
+    await waitFor(() => expect(container.querySelectorAll('.cmp-heatmap').length).toBe(2));
     expect(container.querySelector('.cmp-radar-big')).toBeTruthy();
     expect(playerCalls().filter((c) => c.endsWith('/1')).length).toBe(1);
     expect(playerCalls().filter((c) => c.endsWith('/2')).length).toBe(2);
@@ -318,7 +318,7 @@ describe('TC-CMP-STATE：9 态', () => {
     const { container } = open('/players/compare?ids=1,2,3');
     await waitFor(() => expect(container.querySelector('.cmp-radar-big')).toBeTruthy());
     expect(container.querySelectorAll('.cmp-radar-small').length).toBe(0);
-    expect(container.querySelectorAll('.cmp-heat').length).toBe(2);
+    expect(container.querySelectorAll('.cmp-heatmap').length).toBe(2);
     expect(valueCellsOf('冲刺速度').length).toBe(2);
   });
 
@@ -336,7 +336,7 @@ describe('TC-CMP-STATE：9 态', () => {
 // ---- TC-CMP-DESK · 桌面形态与顶栏 ----
 
 describe('TC-CMP-DESK：桌面结构', () => {
-  it('TC-CMP-DESK-01/06 · 2 人桌面：顶栏（URL chip＋编辑名单）＋双卡＋叠图＋热区占位＋双栏表＋杂项与四行', async () => {
+  it('TC-CMP-DESK-01/06 · 2 人桌面：顶栏（URL chip＋编辑名单）＋双卡＋叠图＋热区图＋双栏表＋杂项与四行', async () => {
     behaviors = { '1': detail(1), '2': detail(2) };
     const { container } = open('/players/compare?ids=1,2');
     await waitFor(() => expect(container.querySelectorAll('.cmp-card').length).toBe(2));
@@ -345,8 +345,18 @@ describe('TC-CMP-DESK：桌面结构', () => {
     expect(container.querySelector('.cmp-urlchip')?.textContent).toBe('/players/compare?ids=1,2');
     expect(screen.getByRole('link', { name: '编辑名单' }).getAttribute('href')).toBe('/players?compare=1%2C2');
 
-    expect(container.querySelectorAll('.cmp-heat').length).toBe(2);
-    expect(container.querySelectorAll('.cmp-radar-big .cmp-radar-data').length).toBe(2);
+    expect(container.querySelectorAll('.cmp-heatmap').length).toBe(2);
+    // 热区图本体（v6.35.0）：两张 12 块图，主位照 PosID1=ST、副位 LW/LM
+    const heats = container.querySelectorAll('.cmp-heatmap svg.heat-svg');
+    expect(heats.length).toBe(2);
+    expect(container.querySelectorAll('.cmp-heatmap rect.heat-block').length).toBe(24);
+    expect(
+      Array.from(container.querySelectorAll('.cmp-heatmap text.heat-code.heat-main'), (el) => el.textContent),
+    ).toEqual(['ST', 'ST']);
+    expect(
+      Array.from(container.querySelectorAll('.cmp-heatmap text.heat-code.heat-sub'), (el) => el.textContent),
+    ).toEqual(['LW', 'LM', 'LW', 'LM']);
+    expect(container.querySelectorAll('.cmp-radar-big .radar-data').length).toBe(2);
     expect(container.querySelectorAll('.cmp-table .cmp-gh').length).toBe(6);
     expect(container.querySelector('.cmp-misc')).toBeTruthy();
     expect(container.querySelector('.cmp-meta')).toBeTruthy();
@@ -359,7 +369,7 @@ describe('TC-CMP-DESK：桌面结构', () => {
     await waitFor(() => expect(container.querySelectorAll('.cmp-card').length).toBe(3));
     expect(container.querySelectorAll('.cmp-radar-small').length).toBe(3);
     expect(container.querySelector('.cmp-radar-big')).toBeNull();
-    expect(container.querySelectorAll('.cmp-heat').length).toBe(0);
+    expect(container.querySelectorAll('.cmp-heatmap').length).toBe(0);
     expect(valueCellsOf('冲刺速度').length).toBe(3);
     const dots = container.querySelectorAll<HTMLElement>('.cmp-ids .cmp-dot');
     expect(dots[2].style.background).toBe(hexToRgb(COMPARE_COLORS[2]));
@@ -370,7 +380,7 @@ describe('TC-CMP-DESK：桌面结构', () => {
 
 describe('TC-CMP-RADAR：雷达与班组均', () => {
   function axisLabels(container: HTMLElement): string[] {
-    return Array.from(container.querySelectorAll('.cmp-radar-key')).map((e) => e.textContent ?? '');
+    return Array.from(container.querySelectorAll('.radar-axis-key')).map((e) => e.textContent ?? '');
   }
 
   it('TC-CMP-RADAR-01 · 混比（门将＋外场）统一外场六轴、轴标只出三字母键名', async () => {
@@ -556,7 +566,7 @@ describe('TC-CMP-MOB：≤840px', () => {
     behaviors = { '1': detail(1), '2': detail(2, {}, attrsOf({ sprintspeed: 78, acceleration: 70 })) };
     const { container } = open('/players/compare?ids=1,2');
     await waitFor(() => expect(container.querySelectorAll('.cmp-card').length).toBe(2));
-    expect(container.querySelectorAll('.cmp-heat').length).toBe(0);
+    expect(container.querySelectorAll('.cmp-heatmap').length).toBe(0);
     expect(container.querySelector('.cmp-radar-big')).toBeTruthy();
     const cells = valueCellsOf('冲刺速度');
     expect(cells.length).toBe(2);
@@ -570,6 +580,6 @@ describe('TC-CMP-MOB：≤840px', () => {
     await waitFor(() => expect(container.querySelectorAll('.cmp-card').length).toBe(3));
     expect(container.querySelectorAll('.cmp-radar-small').length).toBe(3);
     expect(valueCellsOf('冲刺速度').length).toBe(3);
-    expect(container.querySelectorAll('.cmp-heat').length).toBe(0);
+    expect(container.querySelectorAll('.cmp-heatmap').length).toBe(0);
   });
 });

@@ -1,7 +1,8 @@
 // 雷达纯函数（web/src/lib/radar.ts）单测：口径自 pages/Player.tsx 提取，逐字锁定（含取整/钳制/小数边界）。
 import { describe, expect, it } from 'vitest';
 import { ATTR_GROUPS } from './ref.ts';
-import { GK_RADAR, axesFor, axisValue, groupAverage, starText } from './radar.ts';
+import { attrClass } from './players-library.ts';
+import { GK_RADAR, RADAR_BAND_BOUNDS, axesFor, axisValue, bandFrac, groupAverage, starText, tierColorOf } from './radar.ts';
 
 describe('GK_RADAR / axesFor（轴选择）', () => {
   it('门将六轴：键序 DIV/HAN/KIC/REF/POS/SPD，SPD 取 冲刺+加速 均值', () => {
@@ -104,5 +105,51 @@ describe('axisValue（轴值归一 0-1）', () => {
   it('GKP 组也在轴表中（属性表侧可用，五键均值）', () => {
     const attrs = { gkdiving: 99, gkhandling: 99, gkkicking: 99, gkpositioning: 99, gkreflexes: 99 };
     expect(axisValue(attrs, 'GKP')).toBe(1);
+  });
+});
+
+describe('tierColorOf / RADAR_BAND_BOUNDS（五档配色与环带边界，v6.35.0 spec §1.2）', () => {
+  // 档界两侧的值（含边界本身）—— 阈值口径必须与 attrClass 逐条同源，否则雷达套色与属性值套色会漂移
+  const BOUNDARY_SAMPLES = [0, 50, 51, 60, 61, 70, 71, 80, 81, 99];
+
+  it('档色与 attrClass 同阈值：五档边界两侧一一对应', () => {
+    expect(BOUNDARY_SAMPLES.map(attrClass)).toEqual([
+      'attr-bad',
+      'attr-bad',
+      'attr-weak',
+      'attr-weak',
+      'attr-mid',
+      'attr-mid',
+      'attr-solid',
+      'attr-solid',
+      'attr-good',
+      'attr-good',
+    ]);
+    expect(BOUNDARY_SAMPLES.map(tierColorOf)).toEqual([
+      '#e03131',
+      '#e03131',
+      '#fd7e14',
+      '#fd7e14',
+      '#b7892b',
+      '#b7892b',
+      '#66a80f',
+      '#66a80f',
+      '#2b8a3e',
+      '#2b8a3e',
+    ]);
+  });
+
+  it('环带边界 99/80/70/60/50，每环取「下侧档」色（顶环 = 外框 = 绿）', () => {
+    expect([...RADAR_BAND_BOUNDS]).toEqual([99, 80, 70, 60, 50]);
+    expect(RADAR_BAND_BOUNDS.map(tierColorOf)).toEqual(['#2b8a3e', '#66a80f', '#b7892b', '#fd7e14', '#e03131']);
+  });
+
+  it('bandFrac：分母 99、钳 [0,99]（99 → 1、超顶截顶、负值归零）', () => {
+    expect(bandFrac(99)).toBe(1);
+    expect(bandFrac(0)).toBe(0);
+    expect(bandFrac(50)).toBe(50 / 99);
+    expect(bandFrac(80)).toBe(80 / 99);
+    expect(bandFrac(200)).toBe(1);
+    expect(bandFrac(-5)).toBe(0);
   });
 });

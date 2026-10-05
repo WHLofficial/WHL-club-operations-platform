@@ -36,6 +36,8 @@ import { axesFor, groupAverage, starText } from '../lib/radar.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 // 六维雷达（v6.34.0 提取共享件）：详情页与后续对比页共用
 import { AttrRadar } from '../components/AttrRadar.tsx';
+// 位置热区图（v6.35.0）：12 块位置拓扑 + 主位/副位/未踢三态
+import { PositionHeatmap } from '../components/PositionHeatmap.tsx';
 // PlayStyle 徽章（v6.34.0 提取共享件）：详情页与对比页共用
 import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 import {
@@ -673,12 +675,11 @@ function AttrSheet({
   const skillmoves = Number(attrs['skillmoves']);
   const isGk = position === 'GK';
   const groups = ATTR_GROUPS.filter((g) => isGk || g.key !== 'GKP');
-  // 六维雷达（v6.2.0 移回属性页签头部）：轴与组值沿用同一段口径
+  // 六维雷达（v6.2.0 移回属性页签头部）：轴口径不变，组值改由共享件按 attrs 现算（v6.35.0 泛化）
   const radarAxes = axesFor(isGk);
-  const radarValues = radarAxes.map((g) => ({ key: g.key, value: groupAverage(g.keys, attrs) }));
   return (
     <>
-      <div className="attr-head">
+      <div className={posChips.length > 0 ? 'attr-head' : 'attr-head attr-head-noheat'}>
         <div>
           <h3>FC 属性（当季源数据）</h3>
           <div className="pos-row">
@@ -708,9 +709,13 @@ function AttrSheet({
             </div>
           )}
         </div>
-        <div className="attr-head-side">
-          {club && <TeamLogo name={club.name} logoKey={crestLogoKey} size={96} circle={false} />}
-          <AttrRadar values={radarValues} />
+        {/* 宽屏三列（标题｜热区图｜队徽+雷达）；≤760px 折行后热区图与雷达并排居中（spec §1.3） */}
+        <div className="attr-head-visual">
+          {posChips.length > 0 && <PositionHeatmap posCodes={posChips} isGk={isGk} />}
+          <div className="attr-head-side">
+            {club && <TeamLogo name={club.name} logoKey={crestLogoKey} size={96} circle={false} />}
+            <AttrRadar axes={radarAxes} series={[{ attrs }]} variant="head" ariaLabel="六维雷达" />
+          </div>
         </div>
       </div>
       <div className="star-line">
