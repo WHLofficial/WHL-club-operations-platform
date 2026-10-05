@@ -730,13 +730,19 @@ async function main() {
         adbRow({ id: 1, name: '哈兰德', emphasis: 2, emphasisUntil: '2026-10-12T12:00:00.000Z' }),
         adbRow({ id: 2, name: '萨拉赫', fcId: 100002, emphasis: 1, ca: 89, pa: 90, minOfferPrice: 60, releaseFee: null }),
         adbRow({ id: 3, name: '凯恩', fcId: 100003, emphasis: 0, ca: 90, pa: 90, minOfferPrice: 75 }),
+        adbRow({ id: 4, name: '姆巴佩', fcId: 100004, emphasis: 0, ca: 91, pa: 94, minOfferPrice: 200 }),
       ],
       total: 12,
     };
     let adbBody = ADB_BOARD; // 同一条 route 处理器，两段断言之间切夹具（有数据 → 空数据）
-    await page.route(/\/api\/market\/transfer-board/, (r) => r.fulfill(adbOk(adbBody)));
+    // 按 ?limit= 切片：板页请求 200（全量），小卡片请求 3（三张迷你卡）——照真实端点的语义
+    await page.route(/\/api\/market\/transfer-board/, (r) => {
+      const lim = Number(new URL(r.request().url()).searchParams.get('limit'));
+      const players = Number.isInteger(lim) && lim > 0 ? adbBody.players.slice(0, lim) : adbBody.players;
+      return r.fulfill(adbOk({ players, total: adbBody.total }));
+    });
 
-    await check('⑤e 广告板：置顶带 + 卡栅格 + 图例 + 截断提示；小卡片三张迷你卡、空数据整块不渲染', async () => {
+    await check('⑤e 广告板：置顶带 + 卡栅格 + 图例 + 截断提示 + 「换一批」换序；小卡片三张迷你卡、空数据整块不渲染', async () => {
       await page.goto(`${BASE}/market/board`, { waitUntil: 'networkidle' });
       assert(await page.locator('h1', { hasText: '广告板' }).first().isVisible(), '广告板 h1 不可见');
       // 导航：广告板是第 2 项且为当前项（顺序由 mobile-baseline 静态闸兜底，这里验落点与高亮）
@@ -747,12 +753,24 @@ async function main() {
       assert((await page.locator('.adb-band-note').innerText()).includes('1 个 · 付费位，按到期时间排'),
         `置顶带标题不对：${await page.locator('.adb-band-note').innerText()}`);
       assert((await page.locator('.adb-fcard').innerText()).includes('置顶到 2026-10-12'), '置顶卡没出「置顶到」到期日');
-      // 卡栅格：0/1 两行进栅格，置顶行不得重复出现
-      assert((await page.locator('.adb-grid .adb-card').count()) === 2, `栅格卡应为 2 张，实测 ${await page.locator('.adb-grid .adb-card').count()}`);
+      // 卡栅格：0/1 三行进栅格，置顶行不得重复出现
+      assert((await page.locator('.adb-grid .adb-card').count()) === 3, `栅格卡应为 3 张，实测 ${await page.locator('.adb-grid .adb-card').count()}`);
       assert((await page.locator('.adb-grid .emph-1').count()) === 1, '推荐档卡没挂 emph-1');
       assert(!(await page.locator('.adb-grid').innerText()).includes('哈兰德'), '置顶行又出现在栅格里（两区没分流）');
       assert((await page.locator('.transfer-status-legend').count()) === 1, '广告板底部缺转会状态图例');
-      assert((await text()).includes('共 12 人在名单，这里展示前 3 人'), '截断提示缺失（total > 展示数时应提示）');
+      assert((await text()).includes('共 12 人在名单，这里展示前 4 人'), '截断提示缺失（total > 展示数时应提示）');
+
+      // 「换一批」：普通档 ≥2 才有按钮；点一次必换序（付费档仍在首、集合不变）
+      assert((await page.locator('.adb-shuffle').count()) === 1, '普通档 ≥2 时应有「换一批」按钮');
+      const gridNames = async () =>
+        (await page.locator('.adb-grid .adb-card .adb-nm').allInnerTexts()).map((s) => s.trim());
+      const orderBefore = await gridNames();
+      assert(orderBefore[0] === '萨拉赫', `栅格第一张应为推荐档萨拉赫，实测 ${orderBefore[0]}`);
+      await page.locator('.adb-shuffle').click();
+      const orderAfter = await gridNames();
+      assert(orderAfter.join(',') !== orderBefore.join(','), `点「换一批」后顺序没变：${orderAfter.join(',')}`);
+      assert(orderAfter[0] === '萨拉赫', '「换一批」把付费档挪走了');
+      assert([...orderAfter].sort().join(',') === [...orderBefore].sort().join(','), '「换一批」改变了球员集合');
 
       // 小卡片：在售市场页顶部，3 张迷你卡 + 「查看全部 N 人 →」链到 /market/board
       await page.goto(`${BASE}/market`, { waitUntil: 'networkidle' });
