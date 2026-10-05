@@ -30,3 +30,9 @@ scripts/prod-20260920-s9-abilities/sql/
 scripts/prod-20260920-s9-club-align/sql/
 scripts/prod-20260920-s9-contracts/sql/
 scripts/prod-20260921-s9-free-leftover/sql/
+
+# 2026-10-05 生产批（合同导入 + 全库档位随机化）：合同批分片可由
+# gen-cpu-contracts-sql.ts 从 CSV + 生产状态复现（报告含 sha256 与逐行明细），故分片不入库；
+# 随机化批的分片是随机结果本体、不可复现，故入库，只排除可由 02-reroll.sql 反推的 manifest.json。
+scripts/prod-20261005-s9-cpu-contracts/sql/
+scripts/prod-20261005-s9-agent-reroll/sql/manifest.json
