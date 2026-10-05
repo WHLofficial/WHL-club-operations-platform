@@ -864,9 +864,11 @@ async function main() {
           /* 非 URL 形状的请求不计 */
         }
       };
+      const rawDegrade = `abc,${A},${A},${B},${C},${D}`;
+      const degradeUrl = `${BASE}/players/compare?ids=${rawDegrade}`;
       page.on('request', onReq);
       try {
-        await page.goto(`${BASE}/players/compare?ids=abc,${A},${A},${B},${C},${D}`, { waitUntil: 'networkidle' });
+        await page.goto(degradeUrl, { waitUntil: 'networkidle' });
         await page.locator('.cmp-table').waitFor({ timeout: TIMEOUT });
         const noticeText = await page.locator('.cmp-notices').innerText();
         for (const phrase of ['已忽略 1 个无效 id', '重复的球员已自动去重', '最多同时对比 3 人，已只取前 3 位']) {
@@ -874,10 +876,25 @@ async function main() {
         }
         assert((await page.locator('.cmp-ids > .cmp-card').count()) === 3, '降级后仍应渲染 3 人');
         assert((await page.locator('.cmp-state.cmp-error, .cmp-state.cmp-empty').count()) === 0, '降级名单不该落空态/错误态');
+        // URL 即事实源（TC-CMP-URL-06）：降级只出提示，不改写地址、不重定向
+        assert(page.url() === degradeUrl, `降级 URL 被改写/跳转（应为 ${degradeUrl}，实际 ${page.url()}）`);
+        const searchNow = await page.evaluate(() => document.location.search);
+        assert(searchNow === `?ids=${rawDegrade}`, `地址栏 search 被改写（${searchNow}）`);
       } finally {
         page.off('request', onReq);
       }
       assert(dReqs === 0, `被超限丢弃的 id ${D} 仍发起了 ${dReqs} 次请求（请求数应恒 ≤3）`);
+
+      // 4b) 改地址栏即改对比：同一标签页先后换 URL，画面人数随名单切换（1 人组 → 2 人组）
+      await page.goto(`${BASE}/players/compare?ids=${A}`, { waitUntil: 'networkidle' });
+      await page.locator('.cmp-emptyslot').waitFor({ timeout: TIMEOUT });
+      const cardsBeforeSwitch = await page.locator('.cmp-ids > .cmp-card').count();
+      assert(cardsBeforeSwitch === 1, `换名单前应是 1 人态（实测 ${cardsBeforeSwitch} 人）`);
+      await page.goto(`${BASE}/players/compare?ids=${A},${B}`, { waitUntil: 'networkidle' });
+      await page.locator('.cmp-table').waitFor({ timeout: TIMEOUT });
+      const cardsAfterSwitch = await page.locator('.cmp-ids > .cmp-card').count();
+      assert(cardsAfterSwitch === 2, `换成 2 人名单后画面未切到 2 人态（实测 ${cardsAfterSwitch} 人）`);
+      assert(page.url().includes(`/players/compare?ids=${A},${B}`), `换名单后 URL 未反映新 ids（${page.url()}）`);
 
       // 5) 库内勾选：?compare= 预勾选 1 人（按钮态）→ 再勾一人 → 「对比（2）」可点并真跳
       await page.goto(`${BASE}/players?compare=${A}`, { waitUntil: 'domcontentloaded' });
@@ -1585,13 +1602,18 @@ async function main() {
       // 详情取样。本地读端点 500 的页面会落错误横幅——壳照样渲染，横滚照样要量，失败横幅不豁免。
       // 详情取样 id 从列表 API 首行取（评审 P2-3：不硬编码——硬编码 id 在种子数据缺行时会扫到空/错态假绿）
       const ids = await page.evaluate(async () => {
-        const out = { player: '1', club: '1', notes: [] };
+        const out = { player: '1', compare: '1,1', club: '1', notes: [] };
         try {
-          const r = await fetch('/api/players?limit=1');
+          // limit=2：首行给 /players/:id 取样，两行给对比页 /players/compare?ids= 取样（⑤f 同源的 fc_id 口径）
+          const r = await fetch('/api/players?limit=2');
           if (r.ok) {
             const j = await r.json();
-            if (j.players?.[0]?.fcId != null) out.player = String(j.players[0].fcId);
+            const first = j.players?.[0]?.fcId ?? null;
+            const second = j.players?.[1]?.fcId ?? null;
+            if (first != null) out.player = String(first);
             else out.notes.push('players 列表空，/players/:id 用兜底 1');
+            if (first != null && second != null) out.compare = `${first},${second}`;
+            else out.notes.push('players 不足 2 人，对比页取样退化为单人 URL');
           } else out.notes.push(`/api/players ${r.status}，/players/:id 用兜底 1`);
         } catch { out.notes.push('players 列表取首行失败，/players/:id 用兜底 1'); }
         try {
@@ -1606,7 +1628,7 @@ async function main() {
       });
       for (const note of ids.notes) console.log(`   ⑫ 备注：${note}`);
       const ROUTES = [
-        '/', '/players', `/players/${ids.player}`, '/clubs', `/clubs/${ids.club}`, '/bind',
+        '/', '/players', `/players/${ids.player}`, `/players/compare?ids=${ids.compare}`, '/clubs', `/clubs/${ids.club}`, '/bind',
         '/market', '/market/board', '/market/free', '/market/activation', '/market/intel', '/market/desk',
         '/shop', '/club', '/ledger', '/notifications',
         '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
