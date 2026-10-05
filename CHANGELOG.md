@@ -6,7 +6,7 @@
 
 ## [v6.33.1] · 特例期一线队/训练营同场参赛：名册含训练营开关 + 注册校验三态 + 全员注册工件 + 全站文案改名（2026-10-05）
 
-**本地完成，未发布（待令）**（提交链 `c9c5bcf` fix(web) + `1bff080` feat + `1f480b7` fix 评审 + `96779c8` docs(test-plans) + `dfd6e87` feat(web) 改名 + `0cc1275` chore(scripts) 注册批工件 + 收口 docs 枚；零迁移）。**上线后执行序（顺序硬约束）**：① push 先上代码 ②开 `squads_include_trainee=true` + 四键豁免 ③执行全员注册批 ④verify（回读 `/api/squads` 前先 bump `cache:epoch:public`）。
+**已上线**（2026-10-05 发布，用户令「先发布」；提交链 `c9c5bcf` fix(web) + `1bff080` feat + `1f480b7` fix 评审 + `96779c8` docs(test-plans) + `dfd6e87` feat(web) 改名 + `0cc1275` chore(scripts) 注册批工件 + `907c5a1` docs 收口；零迁移）。**执行序（顺序未反）**：① push `4e5d9f9..907c5a1` 触发 CF Workers Builds → Version **`a08d7f3c-318d-427f-bee3-d858e6983f33`**（@2026-10-05T15:49:32Z；线上入口 `assets/index-BcjvHca1.js` sha256 `58b0023a…` 与本地构建逐字节一致、版本串 `6.33.1`）② 生产预检 9 条全过（season=9 / 20 队 570 人 / 训练营合同 69 / registrations 0 行 / status 全 normal）③ 开 `squads_include_trainee=true` + 四键豁免（`squad_min=19` / `squad_max=32` / `trainee_max=8` / `ca_pa_limits.premier.growthPa87=7`，直写 D1 回读全对）④ 写批 570 行注册 + 69 人 `status='trainee'` ⑤ verify：**570 = 一线队 501 + 训练营 69**、逐队零差异、stray 0 ⑥ bump KV `cache:epoch:public` `22 → 23` → 回读 `/api/squads`：20 队 **570 人 / 69 行 `squad='trainee'`**，逐队与 D1 一致。
 
 **缘起**：用户提出「tour 平台只取一线队人员……由于特殊情况，一线队和训练营都能参赛，如果此时注册有训练营无法参赛的风险」。核查链：注册写 `players.status='trainee'`（`src/worker/routes/registration.ts:366-371`）→ `/api/squads` 只发 `status IN ('normal','listed')` → 赛事仓整点 cron 把该球员从 tour `player` 表删除 → `validateAssign` 失败无法进阵容。规则原文（4.2）：「阵容注册分为一线队注册与训练营注册，所有参赛球员必须完成注册方可出战正式比赛」，两条注册线都可出战。用户拍 **T1 手动开关**。
 
