@@ -1,0 +1,4813 @@
+{
+ "ts": "2026-10-05T15:31:25.406Z",
+ "season": 9,
+ "source": "wrangler d1 execute whl-club --remote（只读 SELECT）",
+ "totals": {
+  "clubs": 20,
+  "players": 570,
+  "firstTeam": 501,
+  "trainee": 69
+ },
+ "files": {
+  "sql/01-precheck.sql": "a5e5be93507313076ed88808a82db28e07395059d77dc284089c323825d192c3",
+  "sql/02-registrations.sql": "fe04e72a016660c2da0c99d2ccc7691be0866fc95673324768ab8fdedfafc4df",
+  "sql/03-status-trainee.sql": "1034aa7389efb4cb1845ac032411b44c2191520c5e2031326b437e893e3ba2d4",
+  "sql/04-verify.sql": "2220c9d78f9e25d7f4931b48deb53fb7838331c89a766102f2c928f56ff9c327",
+  "rollback/01-rollback.sql": "68c04d78301df2477c2e35e2227b5dfe51c3a49384f849ca34412aac74a09554"
+ },
+ "clubs": [
+  {
+   "id": 1,
+   "name": "阿森纳",
+   "isCpu": false,
+   "total": 30,
+   "trainee": 4,
+   "firstTeam": 26
+  },
+  {
+   "id": 2,
+   "name": "阿斯顿维拉",
+   "isCpu": false,
+   "total": 30,
+   "trainee": 0,
+   "firstTeam": 30
+  },
+  {
+   "id": 5,
+   "name": "切尔西",
+   "isCpu": false,
+   "total": 31,
+   "trainee": 5,
+   "firstTeam": 26
+  },
+  {
+   "id": 9,
+   "name": "利物浦",
+   "isCpu": false,
+   "total": 37,
+   "trainee": 5,
+   "firstTeam": 32
+  },
+  {
+   "id": 10,
+   "name": "曼城(CPU)",
+   "isCpu": true,
+   "total": 28,
+   "trainee": 0,
+   "firstTeam": 28
+  },
+  {
+   "id": 11,
+   "name": "曼联",
+   "isCpu": false,
+   "total": 25,
+   "trainee": 2,
+   "firstTeam": 23
+  },
+  {
+   "id": 13,
+   "name": "纽卡斯尔联",
+   "isCpu": false,
+   "total": 23,
+   "trainee": 4,
+   "firstTeam": 19
+  },
+  {
+   "id": 14,
+   "name": "诺丁汉森林",
+   "isCpu": false,
+   "total": 23,
+   "trainee": 2,
+   "firstTeam": 21
+  },
+  {
+   "id": 21,
+   "name": "拜仁慕尼黑",
+   "isCpu": false,
+   "total": 37,
+   "trainee": 7,
+   "firstTeam": 30
+  },
+  {
+   "id": 33,
+   "name": "慕尼黑1860",
+   "isCpu": false,
+   "total": 26,
+   "trainee": 3,
+   "firstTeam": 23
+  },
+  {
+   "id": 45,
+   "name": "尤文图斯",
+   "isCpu": false,
+   "total": 31,
+   "trainee": 4,
+   "firstTeam": 27
+  },
+  {
+   "id": 66,
+   "name": "里昂",
+   "isCpu": false,
+   "total": 31,
+   "trainee": 4,
+   "firstTeam": 27
+  },
+  {
+   "id": 73,
+   "name": "巴黎圣日耳曼",
+   "isCpu": false,
+   "total": 29,
+   "trainee": 5,
+   "firstTeam": 24
+  },
+  {
+   "id": 241,
+   "name": "巴塞罗那",
+   "isCpu": false,
+   "total": 29,
+   "trainee": 6,
+   "firstTeam": 23
+  },
+  {
+   "id": 243,
+   "name": "皇家马德里",
+   "isCpu": false,
+   "total": 23,
+   "trainee": 1,
+   "firstTeam": 22
+  },
+  {
+   "id": 280,
+   "name": "奥林匹亚科斯",
+   "isCpu": false,
+   "total": 30,
+   "trainee": 4,
+   "firstTeam": 26
+  },
+  {
+   "id": 449,
+   "name": "皇家贝蒂斯",
+   "isCpu": false,
+   "total": 25,
+   "trainee": 5,
+   "firstTeam": 20
+  },
+  {
+   "id": 110374,
+   "name": "佛罗伦萨",
+   "isCpu": false,
+   "total": 31,
+   "trainee": 8,
+   "firstTeam": 23
+  },
+  {
+   "id": 112172,
+   "name": "RB莱比锡",
+   "isCpu": false,
+   "total": 26,
+   "trainee": 0,
+   "firstTeam": 26
+  },
+  {
+   "id": 131681,
+   "name": "AC米兰(CPU)",
+   "isCpu": true,
+   "total": 25,
+   "trainee": 0,
+   "firstTeam": 25
+  }
+ ],
+ "traineeIds": [
+  1832,
+  2453,
+  2486,
+  2698,
+  671,
+  1212,
+  1331,
+  2808,
+  3667,
+  574,
+  641,
+  926,
+  963,
+  18245,
+  287,
+  3538,
+  847,
+  1709,
+  2103,
+  4530,
+  158,
+  215,
+  2413,
+  2840,
+  3768,
+  4268,
+  5255,
+  6325,
+  7833,
+  370,
+  830,
+  1146,
+  1825,
+  3407,
+  5429,
+  7375,
+  730,
+  1438,
+  1697,
+  1702,
+  333,
+  884,
+  946,
+  1156,
+  1292,
+  802,
+  831,
+  925,
+  1255,
+  1432,
+  2150,
+  951,
+  1707,
+  5296,
+  10796,
+  17088,
+  420,
+  794,
+  1003,
+  4508,
+  4831,
+  1045,
+  2141,
+  3032,
+  3074,
+  4515,
+  6170,
+  14970,
+  18229
+ ],
+ "rows": [
+  {
+   "clubId": 1,
+   "playerId": 48,
+   "fcId": 241651,
+   "name": "V. Gyökeres",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 54,
+   "fcId": 222665,
+   "name": "M. Ødegaard",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 83,
+   "fcId": 199503,
+   "name": "G. Xhaka",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 89,
+   "fcId": 205452,
+   "name": "A. Rüdiger",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 94,
+   "fcId": 193080,
+   "name": "De Gea",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 153,
+   "fcId": 240243,
+   "name": "Matheus Cunha",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 165,
+   "fcId": 225193,
+   "name": "Mikel Merino",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 199,
+   "fcId": 222737,
+   "name": "Malcom",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 209,
+   "fcId": 230142,
+   "name": "Oyarzabal",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 242,
+   "fcId": 209499,
+   "name": "Fabinho",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 335,
+   "fcId": 245630,
+   "name": "Y. Fofana",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 357,
+   "fcId": 232363,
+   "name": "M. Škriniar",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 427,
+   "fcId": 264862,
+   "name": "M. Akliouche",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 434,
+   "fcId": 235944,
+   "name": "Brais Méndez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 547,
+   "fcId": 241811,
+   "name": "Sergio Gómez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 666,
+   "fcId": 239977,
+   "name": "N. Kühn",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 699,
+   "fcId": 246672,
+   "name": "Barrenetxea",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 798,
+   "fcId": 266096,
+   "name": "Tomás Araújo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1070,
+   "fcId": 233738,
+   "name": "Zubeldia",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1107,
+   "fcId": 219789,
+   "name": "H. Traoré",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1332,
+   "fcId": 274536,
+   "name": "M. Bombito",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1408,
+   "fcId": 246139,
+   "name": "Iñaki Peña",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1571,
+   "fcId": 70888,
+   "name": "A. Khalaili",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1582,
+   "fcId": 258775,
+   "name": "L. Sučić",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1822,
+   "fcId": 277689,
+   "name": "C. Harder",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 1,
+   "playerId": 1832,
+   "fcId": 269186,
+   "name": "O. Óskarsson",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 1,
+   "playerId": 2453,
+   "fcId": 264701,
+   "name": "A. Zakharyan",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 1,
+   "playerId": 2486,
+   "fcId": 272455,
+   "name": "Pablo Marín",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 1,
+   "playerId": 2698,
+   "fcId": 277225,
+   "name": "Jon Martín",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 1,
+   "playerId": 3182,
+   "fcId": 256097,
+   "name": "Javi López",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 4,
+   "fcId": 252371,
+   "name": "J. Bellingham",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 35,
+   "fcId": 215441,
+   "name": "S. Guirassy",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 44,
+   "fcId": 213331,
+   "name": "J. Tah",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 81,
+   "fcId": 216393,
+   "name": "Y. Tielemans",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 93,
+   "fcId": 202811,
+   "name": "E. Martínez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 108,
+   "fcId": 220502,
+   "name": "M. Zaccagni",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 115,
+   "fcId": 177003,
+   "name": "L. Modrić",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 125,
+   "fcId": 240130,
+   "name": "Éder Militão",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 151,
+   "fcId": 245367,
+   "name": "X. Simons",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 160,
+   "fcId": 248243,
+   "name": "E. Camavinga",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 202,
+   "fcId": 183898,
+   "name": "Á. Di María",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 210,
+   "fcId": 221697,
+   "name": "O. Watkins",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 330,
+   "fcId": 231410,
+   "name": "Brahim",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 468,
+   "fcId": 200458,
+   "name": "L. Digne",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 482,
+   "fcId": 241464,
+   "name": "Pau Torres",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 490,
+   "fcId": 202695,
+   "name": "J. Tarkowski",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 497,
+   "fcId": 227174,
+   "name": "M. Cash",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 556,
+   "fcId": 229906,
+   "name": "L. Bailey",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 565,
+   "fcId": 195864,
+   "name": "P. Pogba",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 587,
+   "fcId": 224294,
+   "name": "L. Cook",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 638,
+   "fcId": 188377,
+   "name": "K. Walker",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 763,
+   "fcId": 240947,
+   "name": "T. Mitchell",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 779,
+   "fcId": 253306,
+   "name": "M. Ugarte",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 822,
+   "fcId": 212419,
+   "name": "T. Mings",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 872,
+   "fcId": 246923,
+   "name": "J. Ramsey",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 994,
+   "fcId": 199189,
+   "name": "R. Barkley",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 1001,
+   "fcId": 246606,
+   "name": "Fran García",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 1074,
+   "fcId": 229942,
+   "name": "A. Disasi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 1103,
+   "fcId": 233084,
+   "name": "N. Molina",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 2,
+   "playerId": 3366,
+   "fcId": 207557,
+   "name": "R. Olsen",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 100,
+   "fcId": 194765,
+   "name": "A. Griezmann",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 163,
+   "fcId": 228813,
+   "name": "Aleix García",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 170,
+   "fcId": 246147,
+   "name": "M. Greenwood",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 233,
+   "fcId": 238616,
+   "name": "Pedro Neto",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 252,
+   "fcId": 247257,
+   "name": "Ibañez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 311,
+   "fcId": 200155,
+   "name": "H. Vanaken",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 386,
+   "fcId": 252042,
+   "name": "João Pedro",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 421,
+   "fcId": 273018,
+   "name": "Andrey Santos",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 473,
+   "fcId": 262859,
+   "name": "L. Colwill",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 481,
+   "fcId": 246875,
+   "name": "O. Kossounou",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 504,
+   "fcId": 228789,
+   "name": "Robert Sánchez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 557,
+   "fcId": 76687,
+   "name": "Estêvão",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 671,
+   "fcId": 259031,
+   "name": "L. Delap",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 5,
+   "playerId": 692,
+   "fcId": 268438,
+   "name": "A. Garnacho",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 693,
+   "fcId": 266032,
+   "name": "J. Gittens",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 755,
+   "fcId": 272978,
+   "name": "J. Hato",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 828,
+   "fcId": 277869,
+   "name": "M. Kayode",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 829,
+   "fcId": 275353,
+   "name": "Z. El Ouahdi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 914,
+   "fcId": 270039,
+   "name": "Diego Moreira",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 915,
+   "fcId": 262863,
+   "name": "A. Nusa",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1004,
+   "fcId": 265459,
+   "name": "T. Morton",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1005,
+   "fcId": 261299,
+   "name": "A. Scott",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1148,
+   "fcId": 271807,
+   "name": "E. Nwaneri",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1157,
+   "fcId": 273748,
+   "name": "J. Panichelli",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1212,
+   "fcId": 264492,
+   "name": "Yeremay",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1331,
+   "fcId": 275507,
+   "name": "M. Sarr",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1402,
+   "fcId": 270821,
+   "name": "M. Penders",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 1636,
+   "fcId": 261530,
+   "name": "Dário Essugo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 2225,
+   "fcId": 241643,
+   "name": "V. Johansson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 5,
+   "playerId": 2808,
+   "fcId": 71651,
+   "name": "J. Acheampong",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 5,
+   "playerId": 3667,
+   "fcId": 71998,
+   "name": "T. George",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 9,
+   "playerId": 2,
+   "fcId": 231747,
+   "name": "K. Mbappé",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 37,
+   "fcId": 228702,
+   "name": "F. de Jong",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 53,
+   "fcId": 239837,
+   "name": "A. Mac Allister",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 62,
+   "fcId": 231281,
+   "name": "T. Alexander-Arnold",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 74,
+   "fcId": 236772,
+   "name": "D. Szoboszlai",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 85,
+   "fcId": 226268,
+   "name": "F. Dimarco",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 88,
+   "fcId": 237678,
+   "name": "I. Konaté",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 107,
+   "fcId": 242516,
+   "name": "C. Gakpo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 127,
+   "fcId": 204638,
+   "name": "W. Orban",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 133,
+   "fcId": 262621,
+   "name": "G. Mamardashvili",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 171,
+   "fcId": 233556,
+   "name": "R. Orsolini",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 181,
+   "fcId": 264453,
+   "name": "M. van de Ven",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 207,
+   "fcId": 235790,
+   "name": "K. Havertz",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 254,
+   "fcId": 238095,
+   "name": "N. Milenković",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 408,
+   "fcId": 240679,
+   "name": "T. Koopmeiners",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 450,
+   "fcId": 230938,
+   "name": "F. Kessié",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 521,
+   "fcId": 247172,
+   "name": "J. Durán",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 564,
+   "fcId": 209297,
+   "name": "Fred",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 574,
+   "fcId": 248465,
+   "name": "I. Maatsen",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 9,
+   "playerId": 581,
+   "fcId": 211688,
+   "name": "Gayà",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 641,
+   "fcId": 258498,
+   "name": "B. Verbruggen",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 9,
+   "playerId": 711,
+   "fcId": 246174,
+   "name": "H. Elliott",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 727,
+   "fcId": 266097,
+   "name": "Geny Catamo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 926,
+   "fcId": 270857,
+   "name": "Mateus Fernandes",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 9,
+   "playerId": 963,
+   "fcId": 275138,
+   "name": "L. Camara",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1054,
+   "fcId": 252144,
+   "name": "Eduardo Quaresma",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1208,
+   "fcId": 276048,
+   "name": "Fernandez-Pardo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1227,
+   "fcId": 279044,
+   "name": "Geovany Quenda",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1361,
+   "fcId": 270674,
+   "name": "Alberto Costa",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1701,
+   "fcId": 273651,
+   "name": "J. Quansah",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1751,
+   "fcId": 226853,
+   "name": "J. St. Juste",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1803,
+   "fcId": 275592,
+   "name": "R. van Bommel",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 1805,
+   "fcId": 271132,
+   "name": "Gabriel Silva",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 2283,
+   "fcId": 277482,
+   "name": "L. Sauer",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 2509,
+   "fcId": 258881,
+   "name": "O. Nwobodo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 5097,
+   "fcId": 279934,
+   "name": "I. Subiabre",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 9,
+   "playerId": 18245,
+   "fcId": 77940,
+   "name": "Zhang Haoran",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 10,
+   "playerId": 167,
+   "fcId": 212616,
+   "name": "R. De Paul",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 259,
+   "fcId": 229476,
+   "name": "W. Anton",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 282,
+   "fcId": 251566,
+   "name": "Gabriel Martinelli",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 285,
+   "fcId": 270409,
+   "name": "Savinho",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 301,
+   "fcId": 256948,
+   "name": "C. Tzolis",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 332,
+   "fcId": 220876,
+   "name": "F. Honorat",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 339,
+   "fcId": 261865,
+   "name": "Miguel Gutiérrez",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 349,
+   "fcId": 244749,
+   "name": "N. Aguerd",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 444,
+   "fcId": 260599,
+   "name": "A. Varela",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 575,
+   "fcId": 243702,
+   "name": "D. Spence",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 593,
+   "fcId": 206511,
+   "name": "M. Arnold",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 632,
+   "fcId": 240709,
+   "name": "R. Baku",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 636,
+   "fcId": 229880,
+   "name": "A. Wan-Bissaka",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 645,
+   "fcId": 228383,
+   "name": "K. Grabara",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 746,
+   "fcId": 244261,
+   "name": "L. Majer",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 754,
+   "fcId": 277427,
+   "name": "N. O'Reilly",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 795,
+   "fcId": 277031,
+   "name": "A. Khusanov",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 896,
+   "fcId": 241522,
+   "name": "J. Wind",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 932,
+   "fcId": 254566,
+   "name": "P. Wimmer",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 1214,
+   "fcId": 257073,
+   "name": "Tiago Tomás",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 1238,
+   "fcId": 240017,
+   "name": "A. Skov Olsen",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 1277,
+   "fcId": 228946,
+   "name": "M. Svanberg",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 1791,
+   "fcId": 208375,
+   "name": "M. Müller",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 2820,
+   "fcId": 72159,
+   "name": "M. Moore",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 3038,
+   "fcId": 262105,
+   "name": "J. Duranville",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 4219,
+   "fcId": 76624,
+   "name": "Vitor Reis",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 5707,
+   "fcId": 71351,
+   "name": "J. Mokio",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 10,
+   "playerId": 9390,
+   "fcId": 76250,
+   "name": "M. Alleyne",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 11,
+   "playerId": 10,
+   "fcId": 251854,
+   "name": "Pedri",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 20,
+   "fcId": 246669,
+   "name": "B. Saka",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 27,
+   "fcId": 256079,
+   "name": "M. Caicedo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 28,
+   "fcId": 234378,
+   "name": "D. Rice",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 50,
+   "fcId": 256516,
+   "name": "Nico Williams",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 61,
+   "fcId": 241486,
+   "name": "J. Koundé",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 110,
+   "fcId": 231521,
+   "name": "E. Palacios",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 118,
+   "fcId": 248148,
+   "name": "Zubimendi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 134,
+   "fcId": 259532,
+   "name": "Joan García",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 180,
+   "fcId": 247103,
+   "name": "D. Hancko",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 262,
+   "fcId": 212218,
+   "name": "A. Laporte",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 271,
+   "fcId": 243576,
+   "name": "Pedro Porro",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 287,
+   "fcId": 245155,
+   "name": "M. Kudus",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 11,
+   "playerId": 297,
+   "fcId": 202556,
+   "name": "M. Depay",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 346,
+   "fcId": 257179,
+   "name": "Gonçalo Inácio",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 377,
+   "fcId": 254796,
+   "name": "N. Madueke",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 381,
+   "fcId": 260592,
+   "name": "B. Šeško",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 443,
+   "fcId": 272500,
+   "name": "C. Baleba",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 623,
+   "fcId": 205988,
+   "name": "L. Shaw",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 796,
+   "fcId": 270086,
+   "name": "António Silva",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 850,
+   "fcId": 254803,
+   "name": "S. Lammens",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 3538,
+   "fcId": 274445,
+   "name": "K. Konaté",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 11,
+   "playerId": 5866,
+   "fcId": 182224,
+   "name": "Wang Dalei",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 6056,
+   "fcId": 75087,
+   "name": "A. Heaven",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 11,
+   "playerId": 9741,
+   "fcId": 77354,
+   "name": "C. Obi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 8,
+   "fcId": 255253,
+   "name": "Vitinha",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 23,
+   "fcId": 256790,
+   "name": "J. Musiala",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 34,
+   "fcId": 232293,
+   "name": "V. Osimhen",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 46,
+   "fcId": 220901,
+   "name": "David Raya",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 49,
+   "fcId": 158023,
+   "name": "L. Messi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 52,
+   "fcId": 247851,
+   "name": "Bruno Guimarães",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 122,
+   "fcId": 234396,
+   "name": "A. Davies",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 184,
+   "fcId": 241159,
+   "name": "M. Guéhi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 198,
+   "fcId": 242964,
+   "name": "A. Gordon",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 231,
+   "fcId": 261188,
+   "name": "I. Ndiaye",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 250,
+   "fcId": 253163,
+   "name": "R. Araujo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 292,
+   "fcId": 243630,
+   "name": "J. David",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 303,
+   "fcId": 277179,
+   "name": "Fermín",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 461,
+   "fcId": 266127,
+   "name": "L. Hall",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 492,
+   "fcId": 262118,
+   "name": "T. Livramento",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 517,
+   "fcId": 254117,
+   "name": "M. Beier",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 523,
+   "fcId": 245152,
+   "name": "S. Giménez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 566,
+   "fcId": 272600,
+   "name": "Marc Casadó",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 847,
+   "fcId": 265526,
+   "name": "G. Restes",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 13,
+   "playerId": 966,
+   "fcId": 269136,
+   "name": "K. Mainoo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 13,
+   "playerId": 1709,
+   "fcId": 263193,
+   "name": "E. Bitshiabu",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 13,
+   "playerId": 2103,
+   "fcId": 74463,
+   "name": "Marc Bernal",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 13,
+   "playerId": 4530,
+   "fcId": 268737,
+   "name": "S. Nypan",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 14,
+   "playerId": 1,
+   "fcId": 239085,
+   "name": "E. Haaland",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 11,
+   "fcId": 233419,
+   "name": "Raphinha",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 19,
+   "fcId": 192119,
+   "name": "T. Courtois",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 132,
+   "fcId": 210514,
+   "name": "João Cancelo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 150,
+   "fcId": 215590,
+   "name": "Ayoze",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 158,
+   "fcId": 272449,
+   "name": "Pablo Barrios",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 14,
+   "playerId": 189,
+   "fcId": 253149,
+   "name": "J. Frimpong",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 204,
+   "fcId": 243580,
+   "name": "L. Openda",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 215,
+   "fcId": 256853,
+   "name": "M. Tillman",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 14,
+   "playerId": 224,
+   "fcId": 216547,
+   "name": "Rafa",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 249,
+   "fcId": 278016,
+   "name": "Murillo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 302,
+   "fcId": 231677,
+   "name": "M. Rashford",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 318,
+   "fcId": 223334,
+   "name": "Joelinton",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 350,
+   "fcId": 244067,
+   "name": "M. Lacroix",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 356,
+   "fcId": 232756,
+   "name": "F. Tomori",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 376,
+   "fcId": 257470,
+   "name": "A. Elanga",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 462,
+   "fcId": 262402,
+   "name": "Sergi Cardona",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 493,
+   "fcId": 253124,
+   "name": "Matheus Nunes",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 555,
+   "fcId": 231447,
+   "name": "D. Malen",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 740,
+   "fcId": 268896,
+   "name": "H. Larsson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 808,
+   "fcId": 241436,
+   "name": "C. Bassey",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 1134,
+   "fcId": 193105,
+   "name": "A. Areola",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 14,
+   "playerId": 1911,
+   "fcId": 259714,
+   "name": "M. Röhl",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 56,
+   "fcId": 241096,
+   "name": "S. Tonali",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 58,
+   "fcId": 247819,
+   "name": "N. Schlotterbeck",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 174,
+   "fcId": 250959,
+   "name": "A. Stiller",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 203,
+   "fcId": 244257,
+   "name": "J. Burkardt",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 246,
+   "fcId": 227647,
+   "name": "M. Mittelstädt",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 272,
+   "fcId": 237646,
+   "name": "D. Muñoz",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 294,
+   "fcId": 214096,
+   "name": "T. Kleindienst",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 385,
+   "fcId": 254022,
+   "name": "N. Woltemade",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 428,
+   "fcId": 250723,
+   "name": "K. Koné",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 442,
+   "fcId": 275298,
+   "name": "A. Pavlović",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 478,
+   "fcId": 256261,
+   "name": "M. Thiaw",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 534,
+   "fcId": 258729,
+   "name": "Gabri Veiga",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 559,
+   "fcId": 262881,
+   "name": "R. Ríos",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 673,
+   "fcId": 258437,
+   "name": "E. Emegha",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 696,
+   "fcId": 260926,
+   "name": "K. Schade",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 757,
+   "fcId": 269701,
+   "name": "N. Brown",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 774,
+   "fcId": 255971,
+   "name": "S. Hezze",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 849,
+   "fcId": 262659,
+   "name": "N. Atubolu",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 954,
+   "fcId": 257540,
+   "name": "A. Knauff",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 969,
+   "fcId": 263765,
+   "name": "T. Bischof",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 971,
+   "fcId": 257919,
+   "name": "R. Reitz",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 1260,
+   "fcId": 258601,
+   "name": "M. Sangaré",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 1907,
+   "fcId": 271057,
+   "name": "Gustavo Sá",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 2163,
+   "fcId": 256500,
+   "name": "N. Collins",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 2413,
+   "fcId": 71178,
+   "name": "S. El Mala",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 21,
+   "playerId": 2455,
+   "fcId": 264219,
+   "name": "E. Poku",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 2840,
+   "fcId": 276372,
+   "name": "I. Ansah",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 21,
+   "playerId": 2983,
+   "fcId": 266237,
+   "name": "P. Wanner",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 3265,
+   "fcId": 278228,
+   "name": "E. Baum",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 3374,
+   "fcId": 278780,
+   "name": "F. Jeltsch",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 3768,
+   "fcId": 276602,
+   "name": "A. Ouédraogo",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 21,
+   "playerId": 4122,
+   "fcId": 258315,
+   "name": "B. Arrey-Mbi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 4268,
+   "fcId": 268259,
+   "name": "N. Weiper",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 21,
+   "playerId": 5255,
+   "fcId": 268916,
+   "name": "M. Krattenmacher",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 21,
+   "playerId": 6325,
+   "fcId": 78063,
+   "name": "L. Karl",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 21,
+   "playerId": 6896,
+   "fcId": 271114,
+   "name": "D. Seimen",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 21,
+   "playerId": 7833,
+   "fcId": 279622,
+   "name": "N. Aséko",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 33,
+   "playerId": 9,
+   "fcId": 238794,
+   "name": "Vini Jr.",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 21,
+   "fcId": 231478,
+   "name": "L. Martínez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 42,
+   "fcId": 256196,
+   "name": "W. Pacho",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 59,
+   "fcId": 239818,
+   "name": "Rúben Dias",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 68,
+   "fcId": 237692,
+   "name": "P. Foden",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 90,
+   "fcId": 204525,
+   "name": "Iñigo Martínez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 92,
+   "fcId": 210257,
+   "name": "Ederson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 97,
+   "fcId": 264652,
+   "name": "B. Barcola",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 111,
+   "fcId": 223848,
+   "name": "S. Milinković-Savić",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 130,
+   "fcId": 233096,
+   "name": "D. Dumfries",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 147,
+   "fcId": 230899,
+   "name": "A. Lookman",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 169,
+   "fcId": 186942,
+   "name": "İ. Gündoğan",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 234,
+   "fcId": 232639,
+   "name": "R. Doan",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 244,
+   "fcId": 236703,
+   "name": "D. Raum",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 264,
+   "fcId": 210047,
+   "name": "F. Schär",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 308,
+   "fcId": 213516,
+   "name": "Ricardo Horta",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 328,
+   "fcId": 237681,
+   "name": "T. Kubo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 347,
+   "fcId": 247263,
+   "name": "E. Tapsoba",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 361,
+   "fcId": 200724,
+   "name": "Nacho Fernández",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 370,
+   "fcId": 259377,
+   "name": "Yeremy Pino",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 33,
+   "playerId": 513,
+   "fcId": 251421,
+   "name": "B. Johnson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 653,
+   "fcId": 200159,
+   "name": "S. Ortega",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 665,
+   "fcId": 265450,
+   "name": "J. Bakayoko",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 706,
+   "fcId": 262088,
+   "name": "H. Haraldsson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 33,
+   "playerId": 830,
+   "fcId": 264298,
+   "name": "C. Bradley",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 33,
+   "playerId": 1146,
+   "fcId": 277295,
+   "name": "O. Bobb",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 45,
+   "playerId": 3,
+   "fcId": 231443,
+   "name": "O. Dembélé",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 26,
+   "fcId": 224232,
+   "name": "N. Barella",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 66,
+   "fcId": 271421,
+   "name": "D. Doué",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 73,
+   "fcId": 20801,
+   "name": "Cristiano Ronaldo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 87,
+   "fcId": 239580,
+   "name": "Bremer",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 121,
+   "fcId": 222077,
+   "name": "M. Locatelli",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 138,
+   "fcId": 230869,
+   "name": "Unai Simón",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 286,
+   "fcId": 251570,
+   "name": "R. Cherki",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 313,
+   "fcId": 247246,
+   "name": "K. Thuram",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 364,
+   "fcId": 235840,
+   "name": "M. Di Gregorio",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 380,
+   "fcId": 264697,
+   "name": "M. Amoura",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 401,
+   "fcId": 277954,
+   "name": "K. Yıldız",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 464,
+   "fcId": 258966,
+   "name": "A. Cambiaso",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 472,
+   "fcId": 266872,
+   "name": "F. Gatti",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 479,
+   "fcId": 255654,
+   "name": "P. Kalulu",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 533,
+   "fcId": 261050,
+   "name": "Francisco Conceição",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 568,
+   "fcId": 255001,
+   "name": "N. Rovella",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 750,
+   "fcId": 238744,
+   "name": "W. McKennie",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 882,
+   "fcId": 272505,
+   "name": "Endrick",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 1048,
+   "fcId": 265188,
+   "name": "G. Scalvini",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 1257,
+   "fcId": 260823,
+   "name": "N. Fagioli",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 1442,
+   "fcId": 277909,
+   "name": "E. Kroupi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 1445,
+   "fcId": 268474,
+   "name": "L. Lucca",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 1491,
+   "fcId": 269728,
+   "name": "J. Bahoya",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 1825,
+   "fcId": 277211,
+   "name": "Franculino",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 45,
+   "playerId": 2138,
+   "fcId": 74310,
+   "name": "N. Savona",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 3407,
+   "fcId": 262027,
+   "name": "T. Muharemović",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 45,
+   "playerId": 5429,
+   "fcId": 74071,
+   "name": "R. Floriani Mussolini",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 45,
+   "playerId": 7375,
+   "fcId": 75085,
+   "name": "V. Adžić",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 45,
+   "playerId": 12475,
+   "fcId": 77573,
+   "name": "Li Hao",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 45,
+   "playerId": 12718,
+   "fcId": 277782,
+   "name": "Wang Yudong",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 22,
+   "fcId": 188545,
+   "name": "R. Lewandowski",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 25,
+   "fcId": 239053,
+   "name": "F. Valverde",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 29,
+   "fcId": 243715,
+   "name": "W. Saliba",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 40,
+   "fcId": 247827,
+   "name": "M. Olise",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 55,
+   "fcId": 246104,
+   "name": "R. Gravenberch",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 99,
+   "fcId": 257289,
+   "name": "H. Ekitiké",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 114,
+   "fcId": 210008,
+   "name": "A. Rabiot",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 139,
+   "fcId": 204935,
+   "name": "J. Pickford",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 148,
+   "fcId": 229188,
+   "name": "V. Pavlidis",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 154,
+   "fcId": 240950,
+   "name": "Pedro Gonçalves",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 190,
+   "fcId": 238074,
+   "name": "R. James",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 197,
+   "fcId": 246420,
+   "name": "J. Doku",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 226,
+   "fcId": 266866,
+   "name": "Éderson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 267,
+   "fcId": 207862,
+   "name": "M. Ginter",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 312,
+   "fcId": 210881,
+   "name": "J. McGinn",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 316,
+   "fcId": 234060,
+   "name": "Y. Herrera",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 340,
+   "fcId": 260908,
+   "name": "M. Kerkez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 474,
+   "fcId": 262138,
+   "name": "C. Lukeba",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 629,
+   "fcId": 259307,
+   "name": "M. Gusto",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 634,
+   "fcId": 235152,
+   "name": "F. Kadıoğlu",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 698,
+   "fcId": 256420,
+   "name": "M. Fofana",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 730,
+   "fcId": 250789,
+   "name": "D. Bakwa",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 66,
+   "playerId": 739,
+   "fcId": 272926,
+   "name": "L. Bergvall",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 804,
+   "fcId": 252064,
+   "name": "L. Krejčí",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 1126,
+   "fcId": 214584,
+   "name": "F. Armani",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 1195,
+   "fcId": 272781,
+   "name": "E. Ben Seghir",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 1433,
+   "fcId": 258378,
+   "name": "M. Godts",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 66,
+   "playerId": 1438,
+   "fcId": 275048,
+   "name": "C. Talbi",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 66,
+   "playerId": 1697,
+   "fcId": 278903,
+   "name": "J. Jacquet",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 66,
+   "playerId": 1702,
+   "fcId": 272785,
+   "name": "C. Mawissa",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 66,
+   "playerId": 2282,
+   "fcId": 78012,
+   "name": "Y. Diomande",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 16,
+   "fcId": 235212,
+   "name": "A. Hakimi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 32,
+   "fcId": 246191,
+   "name": "J. Alvarez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 36,
+   "fcId": 257534,
+   "name": "C. Palmer",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 41,
+   "fcId": 252145,
+   "name": "Nuno Mendes",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 51,
+   "fcId": 272834,
+   "name": "João Neves",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 67,
+   "fcId": 243014,
+   "name": "B. Mbeumo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 136,
+   "fcId": 234577,
+   "name": "Diogo Costa",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 142,
+   "fcId": 256675,
+   "name": "O. Marmoush",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 145,
+   "fcId": 241461,
+   "name": "Ferran Torres",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 152,
+   "fcId": 244675,
+   "name": "Sancet",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 162,
+   "fcId": 246863,
+   "name": "F. Nmecha",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 185,
+   "fcId": 227678,
+   "name": "E. Konsa",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 195,
+   "fcId": 240091,
+   "name": "G. Vicario",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 235,
+   "fcId": 231416,
+   "name": "D. Lukébakio",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 251,
+   "fcId": 251809,
+   "name": "S. Botman",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 265,
+   "fcId": 208920,
+   "name": "N. Aké",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 333,
+   "fcId": 259516,
+   "name": "Johnny Cardoso",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 73,
+   "playerId": 338,
+   "fcId": 204923,
+   "name": "M. Sabitzer",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 345,
+   "fcId": 216267,
+   "name": "A. Robertson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 422,
+   "fcId": 270673,
+   "name": "W. Zaïre-Emery",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 630,
+   "fcId": 251804,
+   "name": "S. Dest",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 661,
+   "fcId": 221992,
+   "name": "H. Lozano",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 793,
+   "fcId": 279709,
+   "name": "Lucas Beraldo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 797,
+   "fcId": 269087,
+   "name": "L. Yoro",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 846,
+   "fcId": 80170,
+   "name": "Wesley",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 73,
+   "playerId": 884,
+   "fcId": 268421,
+   "name": "M. Tel",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 73,
+   "playerId": 946,
+   "fcId": 72997,
+   "name": "Rodrigo Mora",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 73,
+   "playerId": 1156,
+   "fcId": 276295,
+   "name": "T. Barry",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 73,
+   "playerId": 1292,
+   "fcId": 70004,
+   "name": "S. Mayulu",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 241,
+   "playerId": 6,
+   "fcId": 231866,
+   "name": "Rodri",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 12,
+   "fcId": 277643,
+   "name": "Lamine Yamal",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 31,
+   "fcId": 247635,
+   "name": "K. Kvaratskhelia",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 70,
+   "fcId": 234236,
+   "name": "P. Schick",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 129,
+   "fcId": 251805,
+   "name": "J. Timber",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 140,
+   "fcId": 186153,
+   "name": "W. Szczęsny",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 143,
+   "fcId": 207421,
+   "name": "L. Trossard",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 205,
+   "fcId": 242458,
+   "name": "A. Dovbyk",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 256,
+   "fcId": 235243,
+   "name": "M. de Ligt",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 343,
+   "fcId": 242641,
+   "name": "R. Aït-Nouri",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 348,
+   "fcId": 245037,
+   "name": "Eric García",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 403,
+   "fcId": 259913,
+   "name": "G. Sudakov",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 423,
+   "fcId": 259868,
+   "name": "P. Sarr",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 425,
+   "fcId": 251806,
+   "name": "Q. Timber",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 446,
+   "fcId": 255069,
+   "name": "Nico González",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 460,
+   "fcId": 268889,
+   "name": "Álvaro Carreras",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 469,
+   "fcId": 270531,
+   "name": "O. Diomande",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 499,
+   "fcId": 186345,
+   "name": "K. Trippier",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 501,
+   "fcId": 250753,
+   "name": "A. Trubin",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 535,
+   "fcId": 254088,
+   "name": "Amad",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 603,
+   "fcId": 247649,
+   "name": "J. Branthwaite",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 802,
+   "fcId": 256325,
+   "name": "J. Šutalo",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 241,
+   "playerId": 831,
+   "fcId": 260815,
+   "name": "Arnau Martínez",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 241,
+   "playerId": 925,
+   "fcId": 274288,
+   "name": "O. Gloukh",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 241,
+   "playerId": 1099,
+   "fcId": 245235,
+   "name": "A. Bah",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 241,
+   "playerId": 1255,
+   "fcId": 263370,
+   "name": "V. Barco",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 241,
+   "playerId": 1432,
+   "fcId": 260952,
+   "name": "A. Schjelderup",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 241,
+   "playerId": 2150,
+   "fcId": 265774,
+   "name": "K. De Winter",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 241,
+   "playerId": 2416,
+   "fcId": 274559,
+   "name": "K. Páez",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 24,
+   "fcId": 256630,
+   "name": "F. Wirtz",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 63,
+   "fcId": 235073,
+   "name": "G. Kobel",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 65,
+   "fcId": 200104,
+   "name": "Son Heung Min",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 72,
+   "fcId": 165153,
+   "name": "K. Benzema",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 82,
+   "fcId": 215914,
+   "name": "N. Kanté",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 105,
+   "fcId": 243812,
+   "name": "Rodrygo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 119,
+   "fcId": 241637,
+   "name": "A. Tchouaméni",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 124,
+   "fcId": 248550,
+   "name": "Vivian",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 131,
+   "fcId": 226161,
+   "name": "Marcos Llorente",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 173,
+   "fcId": 216201,
+   "name": "Iñaki Williams",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 194,
+   "fcId": 251752,
+   "name": "L. Chevalier",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 238,
+   "fcId": 236496,
+   "name": "M. Guendouzi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 247,
+   "fcId": 278349,
+   "name": "D. Huijsen",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 261,
+   "fcId": 220793,
+   "name": "D. Sánchez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 344,
+   "fcId": 228618,
+   "name": "F. Mendy",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 402,
+   "fcId": 277846,
+   "name": "Nico Paz",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 498,
+   "fcId": 224656,
+   "name": "O. Aina",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 743,
+   "fcId": 257191,
+   "name": "A. Stach",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 951,
+   "fcId": 279173,
+   "name": "F. Mastantuono",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 243,
+   "playerId": 1049,
+   "fcId": 264846,
+   "name": "Cristhian Mosquera",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 1093,
+   "fcId": 75605,
+   "name": "Asencio",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 1209,
+   "fcId": 275324,
+   "name": "A. Diao",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 243,
+   "playerId": 5132,
+   "fcId": 278399,
+   "name": "Gonzalo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 156,
+   "fcId": 212194,
+   "name": "J. Brandt",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 164,
+   "fcId": 227236,
+   "name": "A. Zambo Anguissa",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 239,
+   "fcId": 229261,
+   "name": "D. Zakaria",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 305,
+   "fcId": 232498,
+   "name": "Isi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 466,
+   "fcId": 241509,
+   "name": "Mauro Júnior",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 471,
+   "fcId": 268804,
+   "name": "Mario Gila",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 476,
+   "fcId": 258781,
+   "name": "I. Zabarnyi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 511,
+   "fcId": 246321,
+   "name": "D. Maeda",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 562,
+   "fcId": 232711,
+   "name": "J. Stage",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 598,
+   "fcId": 73078,
+   "name": "K. Sano",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 631,
+   "fcId": 248165,
+   "name": "A. Rațiu",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 642,
+   "fcId": 252552,
+   "name": "K. Tzolakis",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 674,
+   "fcId": 254551,
+   "name": "G. Mikautadze",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 707,
+   "fcId": 259633,
+   "name": "G. Konstantelias",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 891,
+   "fcId": 251156,
+   "name": "A. Bertaccini",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 924,
+   "fcId": 275328,
+   "name": "C. Uzun",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 998,
+   "fcId": 271121,
+   "name": "Q. Hartman",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 1002,
+   "fcId": 278901,
+   "name": "A. Bouaddi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 1061,
+   "fcId": 242453,
+   "name": "S. van den Berg",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 1112,
+   "fcId": 258885,
+   "name": "Luiz Júnior",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 1171,
+   "fcId": 242530,
+   "name": "N. Okafor",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 1254,
+   "fcId": 264330,
+   "name": "C. Zafeiris",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 1334,
+   "fcId": 270077,
+   "name": "K. Koulierakis",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 1707,
+   "fcId": 266160,
+   "name": "Mika Mármol",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 280,
+   "playerId": 2929,
+   "fcId": 73885,
+   "name": "C. Kostoulas",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 3022,
+   "fcId": 70497,
+   "name": "K. Karetsas",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 3159,
+   "fcId": 73884,
+   "name": "C. Mouzakitis",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 280,
+   "playerId": 5296,
+   "fcId": 74209,
+   "name": "Antoñito Cordero",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 280,
+   "playerId": 10796,
+   "fcId": 260443,
+   "name": "S. Ibrahim",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 280,
+   "playerId": 17088,
+   "fcId": 77812,
+   "name": "Xuan Zhijian",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 449,
+   "playerId": 15,
+   "fcId": 203376,
+   "name": "V. van Dijk",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 39,
+   "fcId": 192985,
+   "name": "K. De Bruyne",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 60,
+   "fcId": 229558,
+   "name": "D. Upamecano",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 120,
+   "fcId": 224293,
+   "name": "Rúben Neves",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 219,
+   "fcId": 244778,
+   "name": "Trincão",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 275,
+   "fcId": 225116,
+   "name": "A. Meret",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 293,
+   "fcId": 235410,
+   "name": "Y. En-Nesyri",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 324,
+   "fcId": 255475,
+   "name": "Antony",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 336,
+   "fcId": 226456,
+   "name": "Fornals",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 383,
+   "fcId": 256903,
+   "name": "Gonçalo Ramos",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 405,
+   "fcId": 242444,
+   "name": "João Félix",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 413,
+   "fcId": 264388,
+   "name": "Moleiro",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 414,
+   "fcId": 263205,
+   "name": "B. Yılmaz",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 420,
+   "fcId": 279604,
+   "name": "Jauregizar",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 449,
+   "playerId": 480,
+   "fcId": 252802,
+   "name": "W. Singo",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 516,
+   "fcId": 277581,
+   "name": "Samu",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 538,
+   "fcId": 245371,
+   "name": "T. Almada",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 546,
+   "fcId": 264432,
+   "name": "Abde",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 576,
+   "fcId": 243057,
+   "name": "N. Williams",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 794,
+   "fcId": 277537,
+   "name": "Natan",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 449,
+   "playerId": 1003,
+   "fcId": 276471,
+   "name": "Altimira",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 449,
+   "playerId": 1336,
+   "fcId": 267860,
+   "name": "V. Gómez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 2109,
+   "fcId": 266039,
+   "name": "Pubill",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 449,
+   "playerId": 4508,
+   "fcId": 76739,
+   "name": "Pablo García",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 449,
+   "playerId": 4831,
+   "fcId": 76740,
+   "name": "Ángel Ortiz",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 5,
+   "fcId": 209331,
+   "name": "M. Salah",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 45,
+   "fcId": 207865,
+   "name": "Marquinhos",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 57,
+   "fcId": 208128,
+   "name": "H. Çalhanoğlu",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 75,
+   "fcId": 211110,
+   "name": "P. Dybala",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 84,
+   "fcId": 239231,
+   "name": "Marc Cucurella",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 86,
+   "fcId": 251517,
+   "name": "J. Gvardiol",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 91,
+   "fcId": 204963,
+   "name": "Carvajal",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 103,
+   "fcId": 257279,
+   "name": "Álex Baena",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 116,
+   "fcId": 241852,
+   "name": "M. Diaby",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 135,
+   "fcId": 252154,
+   "name": "M. Carnesecchi",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 146,
+   "fcId": 236610,
+   "name": "M. Kean",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 157,
+   "fcId": 208722,
+   "name": "S. Mané",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 176,
+   "fcId": 236987,
+   "name": "B. Kamara",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 178,
+   "fcId": 223959,
+   "name": "L. Torreira",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 187,
+   "fcId": 216460,
+   "name": "J. Giménez",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 201,
+   "fcId": 192629,
+   "name": "Iago Aspas",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 212,
+   "fcId": 188567,
+   "name": "P. Aubameyang",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 222,
+   "fcId": 206113,
+   "name": "S. Gnabry",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 245,
+   "fcId": 229348,
+   "name": "A. Robinson",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 263,
+   "fcId": 210413,
+   "name": "A. Romagnoli",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 445,
+   "fcId": 257057,
+   "name": "A. Onana",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 502,
+   "fcId": 234642,
+   "name": "É. Mendy",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 633,
+   "fcId": 239093,
+   "name": "J. Clauss",
+   "squad": "first_team",
+   "ct": "formal"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 1045,
+   "fcId": 273906,
+   "name": "Renato Veiga",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 2141,
+   "fcId": 278340,
+   "name": "P. Comuzzo",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 3032,
+   "fcId": 266041,
+   "name": "L. Koleosho",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 3074,
+   "fcId": 275291,
+   "name": "N. Pisilli",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 4515,
+   "fcId": 276682,
+   "name": "C. Ndour",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 6170,
+   "fcId": 271575,
+   "name": "S. Pafundi",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 14970,
+   "fcId": 76396,
+   "name": "A. Natali",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 110374,
+   "playerId": 18229,
+   "fcId": 77786,
+   "name": "Li Ruiyue",
+   "squad": "trainee",
+   "ct": "trainee"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 13,
+   "fcId": 212622,
+   "name": "J. Kimmich",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 17,
+   "fcId": 230621,
+   "name": "G. Donnarumma",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 33,
+   "fcId": 233731,
+   "name": "A. Isak",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 76,
+   "fcId": 241084,
+   "name": "L. Díaz",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 77,
+   "fcId": 247090,
+   "name": "E. Fernández",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 80,
+   "fcId": 226271,
+   "name": "Fabián Ruiz",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 101,
+   "fcId": 192505,
+   "name": "R. Lukaku",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 102,
+   "fcId": 244260,
+   "name": "Dani Olmo",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 123,
+   "fcId": 232656,
+   "name": "T. Hernández",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 126,
+   "fcId": 229582,
+   "name": "G. Mancini",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 159,
+   "fcId": 264240,
+   "name": "Gavi",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 177,
+   "fcId": 229391,
+   "name": "Palhinha",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 182,
+   "fcId": 256197,
+   "name": "P. Hincapié",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 186,
+   "fcId": 226851,
+   "name": "B. Pavard",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 192,
+   "fcId": 225375,
+   "name": "K. Laimer",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 232,
+   "fcId": 251852,
+   "name": "K. Adeyemi",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 236,
+   "fcId": 222492,
+   "name": "L. Sané",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 241,
+   "fcId": 209658,
+   "name": "L. Goretzka",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 257,
+   "fcId": 233486,
+   "name": "R. Le Normand",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 327,
+   "fcId": 241236,
+   "name": "A. Semenyo",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 329,
+   "fcId": 235805,
+   "name": "F. Chiesa",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 342,
+   "fcId": 257711,
+   "name": "R. Calafiori",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 429,
+   "fcId": 259694,
+   "name": "Mingueza",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 433,
+   "fcId": 243559,
+   "name": "De Frutos",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 769,
+   "fcId": 263620,
+   "name": "R. Lavia",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 112172,
+   "playerId": 2204,
+   "fcId": 263887,
+   "name": "J. Urbig",
+   "squad": "first_team",
+   "ct": "normal"
+  },
+  {
+   "clubId": 131681,
+   "playerId": 7,
+   "fcId": 202126,
+   "name": "H. Kane",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 14,
+   "fcId": 232580,
+   "name": "Gabriel",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 47,
+   "fcId": 215698,
+   "name": "M. Maignan",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 69,
+   "fcId": 227796,
+   "name": "C. Pulisic",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 78,
+   "fcId": 240638,
+   "name": "T. Reijnders",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 96,
+   "fcId": 185122,
+   "name": "P. Gulácsi",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 98,
+   "fcId": 241721,
+   "name": "Rafael Leão",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 113,
+   "fcId": 218667,
+   "name": "Bernardo Silva",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 117,
+   "fcId": 204485,
+   "name": "R. Mahrez",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 155,
+   "fcId": 213345,
+   "name": "K. Coman",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 175,
+   "fcId": 244669,
+   "name": "M. Hjulmand",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 179,
+   "fcId": 263578,
+   "name": "Balde",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 191,
+   "fcId": 231936,
+   "name": "B. White",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 193,
+   "fcId": 217870,
+   "name": "G. Di Lorenzo",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 217,
+   "fcId": 251470,
+   "name": "C. De Ketelaere",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 230,
+   "fcId": 264309,
+   "name": "A. Güler",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 258,
+   "fcId": 232488,
+   "name": "C. Romero",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 266,
+   "fcId": 208333,
+   "name": "E. Can",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 362,
+   "fcId": 197445,
+   "name": "D. Alaba",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 463,
+   "fcId": 259583,
+   "name": "D. Udogie",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 964,
+   "fcId": 269859,
+   "name": "A. Vermeeren",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 1732,
+   "fcId": 72093,
+   "name": "Martim Fernandes",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 9443,
+   "fcId": 74094,
+   "name": "M. Liberali",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 9605,
+   "fcId": 279202,
+   "name": "F. Camarda",
+   "squad": "first_team",
+   "ct": null
+  },
+  {
+   "clubId": 131681,
+   "playerId": 13232,
+   "fcId": 269476,
+   "name": "Hu Hetao",
+   "squad": "first_team",
+   "ct": null
+  }
+ ]
+}
