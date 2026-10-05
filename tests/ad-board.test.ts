@@ -1,18 +1,30 @@
-// 转会广告板测试（v6.31.0）：GET /api/market/transfer-board 的名单口径、排序、limit 与行字段。
-// fixture 自建：甲队 1 / 乙队 2 + 八名球员，覆盖在名单/不在名单、有/无现行合同、
+// 转会广告板测试（v6.31.0）：GET /api/market/transfer-board 的名单口径、排序（付费档 + 普通档时间桶轮换）、
+// limit 与行字段。fixture 自建：甲队 1 / 乙队 2 + 八名球员，覆盖在名单/不在名单、有/无现行合同、
 // 现行最高档着重度 / 过期着重度 / 越界 tier、存量无戳（NULL）与不同上架时刻。
-// 着重度时间用固定远期/过期文本（2099 / 2020），不依赖机器时钟。
-import { beforeEach, describe, expect, it } from 'vitest';
+// 着重度时间用固定远期/过期文本（2099 / 2020）；轮换用例把 Date.now 钉死（桶号可复现），
+// 不冻结时钟的用例只断「集合与付费档前缀」，不断普通档顺序。
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { applyMigrations, createTestD1, sqlGet } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { resetGuards } from '../src/lib/guard.ts';
+import { TRANSFER_BOARD_ROTATE_MS, shuffleWithSeed, transferBoardBucket } from '../src/core/ad-board.ts';
 
 // 限流桶 / L1 缓存 / 代际键记忆逐用例清零（PUBLIC_CACHE_TTL_MS = '0' 已旁路缓存，读库即真相）
 beforeEach(() => {
   resetGuards();
+});
+
+// 轮换用例把时钟钉死：桶号 = floor(now / 5min)，冻结后洗牌结果可写成字面量（跨机器可复现）
+const FIXED_NOW = Date.parse('2026-10-05T00:00:00.000Z'); // → 桶 5970528
+function freezeNow(ms = FIXED_NOW) {
+  return vi.spyOn(Date, 'now').mockReturnValue(ms);
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 interface Fixture {
@@ -112,26 +124,31 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
   it('名单口径：只收 transfer_listed = 1；不在名单球员的着重度行不外泄', async () => {
     const fx = freshEnv();
     seedBoard(fx);
+    freezeNow(); // 普通档顺序依赖桶号，这里一并钉死时钟
     const out = await board(fx);
     expect(out.total).toBe(7);
-    expect(out.players.map((p) => p.id)).toEqual([6, 7, 2, 8, 1, 5, 3]);
+    expect(out.players.map((p) => p.id)).toEqual([6, 7, 2, 1, 3, 5, 8]);
     expect(out.players.some((p) => p.id === 4)).toBe(false);
   });
 
-  it('排序：emphasis DESC → listedAt DESC（NULL 当最旧）→ id DESC', async () => {
+  it('排序：付费档按着重度 → 挂出时间 → id；普通档按时间桶轮换（锁死时钟取字面量）', async () => {
     const fx = freshEnv();
     seedBoard(fx);
+    freezeNow(); // 2026-10-05T00:00:00Z → 桶 5970528
     const out = await board(fx);
-    // emphasis 2 → 6；emphasis 1 → 7；emphasis 0 内部：2026-02-01(2) → 2026-01-01(8,1 同戳按 id 倒序)
-    // → 2025-12-31(5) → NULL(3)
-    expect(out.players.map((p) => [p.id, p.emphasis, p.listedAt])).toEqual([
+    // 付费档：6（emphasis 2）→ 7（emphasis 1）
+    expect(out.players.slice(0, 2).map((p) => [p.id, p.emphasis, p.listedAt])).toEqual([
       [6, 2, '2026-01-15T00:00:00.000Z'],
       [7, 1, '2026-01-20T00:00:00.000Z'],
-      [2, 0, '2026-02-01T00:00:00.000Z'],
-      [8, 0, '2026-01-01T00:00:00.000Z'],
-      [1, 0, '2026-01-01T00:00:00.000Z'],
-      [5, 0, '2025-12-31T00:00:00.000Z'],
-      [3, 0, null],
+    ]);
+    // 普通档：同一批人（挂出时间序 [2,8,1,5,3]），桶 5970528 洗成 [2,1,3,5,8]。
+    // 字面量同时锁住算法、种子与桶长——去掉轮换 / 改洗牌 / 改桶长都会红。
+    expect(out.players.slice(2).map((p) => [p.id, p.listedAt])).toEqual([
+      [2, '2026-02-01T00:00:00.000Z'],
+      [1, '2026-01-01T00:00:00.000Z'],
+      [3, null],
+      [5, '2025-12-31T00:00:00.000Z'],
+      [8, '2026-01-01T00:00:00.000Z'],
     ]);
   });
 
@@ -264,5 +281,81 @@ describe('转会广告板缓存与写后新鲜度（v6.31.0）', () => {
 
     // /api/players 命中写前缀 ⇒ 中间件 purge 公开缓存，广告板必须立刻见新（TTL 1h 不许兜底）
     expect((await board(fx, '?limit=3')).total).toBe(6);
+  });
+});
+
+describe('广告板轮换：时间桶 + 付费档免疫（v6.31.0）', () => {
+  it('同一时间桶内普通档顺序固定（种子化洗牌，多个 isolate 算同一缓存键结果一致）', async () => {
+    const fx = freshEnv();
+    seedBoard(fx);
+    const nowSpy = freezeNow();
+    // 桶 5970528：普通档 [2,8,1,5,3] 洗成 [2,1,3,5,8]；两次请求必须同序（不能每次 Math.random）
+    expect((await board(fx)).players.map((p) => p.id)).toEqual([6, 7, 2, 1, 3, 5, 8]);
+    expect((await board(fx)).players.map((p) => p.id)).toEqual([6, 7, 2, 1, 3, 5, 8]);
+
+    // 进下一个桶 ⇒ 普通档换一批（付费档前缀不动，见下一条用例）
+    nowSpy.mockReturnValue(FIXED_NOW + TRANSFER_BOARD_ROTATE_MS);
+    expect((await board(fx)).players.map((p) => p.id)).toEqual([6, 7, 8, 5, 3, 2, 1]);
+  });
+
+  it('换桶只换顺序、不重读库：桶号不进缓存键（进键会把该端点重读放大 12 倍）', async () => {
+    const fx = freshEnv('3600000'); // 1h 缓存：5 分钟的桶边界远在 TTL 之内，不会触发 SWR 刷新
+    seedBoard(fx);
+    const nowSpy = freezeNow();
+    expect((await board(fx)).players.map((p) => p.id)).toEqual([6, 7, 2, 1, 3, 5, 8]);
+
+    // 绕过写路径直接改库（不清缓存）：把普通档 8 从名单里摘掉。若下一次请求重读库，8 会消失
+    fx.sqlite.exec('UPDATE players SET transfer_listed = 0 WHERE id = 8');
+
+    nowSpy.mockReturnValue(FIXED_NOW + TRANSFER_BOARD_ROTATE_MS);
+    // 顺序换了 ⇒ 洗牌确实用了「当前」桶号（洗牌在缓存之外做，不靠换键失效）；
+    // 8 仍在 ⇒ 这一批人还是缓存里那一批，这次请求没有重读库
+    expect((await board(fx)).players.map((p) => p.id)).toEqual([6, 7, 8, 5, 3, 2, 1]);
+  });
+
+  it('付费档免疫：置顶 / 推荐的位置与顺序两桶都不动，只有 emphasis = 0 那一段换', async () => {
+    const fx = freshEnv();
+    seedBoard(fx);
+    const nowSpy = freezeNow();
+    const a = await board(fx);
+    expect(a.players.filter((p) => p.emphasis !== 0).map((p) => [p.id, p.emphasis])).toEqual([
+      [6, 2],
+      [7, 1],
+    ]);
+    expect(a.players.slice(2).map((p) => p.id)).toEqual([2, 1, 3, 5, 8]);
+
+    nowSpy.mockReturnValue(FIXED_NOW + TRANSFER_BOARD_ROTATE_MS);
+    const b = await board(fx);
+    expect(b.players.filter((p) => p.emphasis !== 0).map((p) => [p.id, p.emphasis])).toEqual([
+      [6, 2],
+      [7, 1],
+    ]);
+    expect(b.players.slice(2).map((p) => p.id)).toEqual([8, 5, 3, 2, 1]);
+
+    // 反证：把整份名单（含付费档）交给同一个种子洗牌，结果与线上顺序不同 ⇒
+    // 「洗了付费档」这种实现会被这条逮住（[6,8,7,5,1,3,2] ≠ [6,7,2,1,3,5,8]）
+    expect(shuffleWithSeed(a.players.map((p) => p.id), transferBoardBucket(FIXED_NOW))).not.toEqual([
+      6, 7, 2, 1, 3, 5, 8,
+    ]);
+  });
+});
+
+describe('core/ad-board：时间桶与种子化洗牌（v6.31.0）', () => {
+  it('桶号：5 分钟一档，桶内任意时刻同桶、跨档 +1', () => {
+    expect(TRANSFER_BOARD_ROTATE_MS).toBe(300_000);
+    expect(transferBoardBucket(FIXED_NOW)).toBe(5970528);
+    expect(transferBoardBucket(FIXED_NOW + TRANSFER_BOARD_ROTATE_MS - 1)).toBe(5970528);
+    expect(transferBoardBucket(FIXED_NOW + TRANSFER_BOARD_ROTATE_MS)).toBe(5970529);
+    expect(transferBoardBucket(0)).toBe(0);
+  });
+
+  it('shuffleWithSeed：同种子同结果（跨 isolate 一致）、字面量锁算法、不改原数组', () => {
+    const src = [1, 2, 3, 4];
+    expect(shuffleWithSeed(src, 1)).toEqual([4, 2, 1, 3]);
+    expect(shuffleWithSeed(src, 42)).toEqual([1, 4, 2, 3]);
+    expect(shuffleWithSeed(src, 1)).toEqual(shuffleWithSeed(src, 1));
+    expect(src).toEqual([1, 2, 3, 4]);
+    expect(shuffleWithSeed([], 7)).toEqual([]);
+    expect(shuffleWithSeed([9], 7)).toEqual([9]);
   });
 });

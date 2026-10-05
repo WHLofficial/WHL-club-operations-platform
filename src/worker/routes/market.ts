@@ -30,6 +30,7 @@ import { loadMarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
 import { availableBalance } from '../ledger.ts';
 import { POSITION_BY_ID } from '../../core/fc26.ts';
+import { shuffleWithSeed, transferBoardBucket } from '../../core/ad-board.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
@@ -413,6 +414,10 @@ interface TransferBoardDbRow {
 // 只收 players.transfer_listed = 1；emphasis 取 player_promotions 现行最高档（0 普通 / 1 推荐 / 2 置顶），
 // 该表本版只有读路径（付费写流程未实现，接口预留给「列入转会名单时的有偿选项」）。
 // 最低报价数值只在本端点公开（/api/players 列表仍只下发布尔位，v6.30.0 口径不变）。
+// 顺序：付费档（1/2）按着重度 → 挂出时间 → id；没有付费加权的（emphasis = 0）按「时间桶」轮换
+// （5 分钟一桶，种子化洗牌 ⇒ 同一桶内所有访客同一份乱序、跨 isolate 同序）——见 core/ad-board.ts。
+// 洗牌在缓存**之外**做（缓存键只有 limit）：桶号进键会把本端点重读放大 12 倍，而洗牌本身是纯函数。
+// 用户还能在页面上手动「换一批」，那是纯前端本地重排，不再打端点。
 // 新鲜度：改报价设置走 PUT /api/players/:id/offer-settings，/api/players 前缀命中 WRITE_SCOPE_PREFIXES
 // ⇒ 自动 purge 全部公开 scope（含 market）；1h TTL 只是兜底。total = LIMIT 前的名单总人数（截断提示用）。
 app.get('/market/transfer-board', async (c) => {
@@ -422,6 +427,10 @@ app.get('/market/transfer-board', async (c) => {
   const raw = c.req.query('limit');
   const parsed = Number(raw);
   const limit = raw !== undefined && raw.trim() !== '' && Number.isInteger(parsed) && parsed > 0 ? Math.min(200, parsed) : 200;
+  // 缓存只存 SQL 序（键 = limit）：**轮换不写进键**。桶长 5 分钟若进键，等于把本端点的重读从
+  // 86400÷1h = 24 次/天/形状/colo 抬到 86400÷5min = 288 次（12 倍，见 docs/test-plans §7.4 读量核算）。
+  // 洗牌放在缓存之外做：纯函数（种子 = 当前桶号）⇒ 同桶内任意 isolate 仍产出同一排列，
+  // 而每次请求只花 O(名单人数) 的 CPU。
   const data = await cachedJson(
     `market-transfer-board:${limit}`,
     ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS),
@@ -461,8 +470,7 @@ app.get('/market/transfer-board', async (c) => {
         const num = Number(v);
         return Number.isFinite(num) ? (POSITION_BY_ID[num] ?? null) : null;
       };
-      return {
-        players: rows.results.map((r) => ({
+      const players = rows.results.map((r) => ({
           id: r.id,
           uid: r.uid,
           fcId: r.fc_id,
@@ -486,13 +494,19 @@ app.get('/market/transfer-board', async (c) => {
           status: r.status,
           notForSale: r.not_for_sale === 1,
           transferPriced: r.min_offer_price !== null,
-        })),
+        }));
+      return {
+        players,
         total: rows.results[0]?.total_count ?? 0,
       };
     },
     { scope: 'market', env: c.env, ctx: waitUntilOf(c) },
   );
-  return c.json(data);
+  // 轮换只动 emphasis = 0（没有付费加权）那一段：付费档（1 推荐 / 2 置顶）保持 SQL 序，
+  // 排在前面的顺序就是「钱买到的东西」，不能被随机打散。数据来自缓存，所以这里不能原地改
+  const paid = data.players.filter((p) => p.emphasis !== 0);
+  const unpinned = data.players.filter((p) => p.emphasis === 0);
+  return c.json({ players: [...paid, ...shuffleWithSeed(unpinned, transferBoardBucket(Date.now()))], total: data.total });
 });
 
 interface SeaLookupRow {
