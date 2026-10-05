@@ -198,13 +198,14 @@ export function useClubRoster(id: number) {
 }
 
 // 球员详情（v6.34.0）：详情页（useParams 的 string）与对比页（fc_id，可能 number）共用。
-// 键统一 String(id)；enabled 语义沿用原 inline 查询（id 为 undefined 时不发请求）。
-export function usePlayerDetail(id: string | number | undefined) {
-  const key = String(id ?? '');
+// 键统一 String(id)；enabled 语义沿用原 inline 查询（id 缺省时不发请求）——`null`/空串一并拦掉，
+// 否则 key 会成 '' 并请求 `/api/players/`（那是列表端点，不是 404）。
+export function usePlayerDetail(id: string | number | null | undefined) {
+  const key = id === undefined || id === null ? '' : String(id);
   return useQuery({
     queryKey: qk.player(key),
     queryFn: () => api<PlayerDetail>(`/api/players/${key}`),
-    enabled: id !== undefined,
+    enabled: key !== '',
   });
 }
 
