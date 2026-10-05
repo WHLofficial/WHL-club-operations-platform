@@ -404,6 +404,7 @@ interface TransferBoardDbRow {
   pos3: number | null;
   pos4: number | null;
   club_name: string | null;
+  club_logo_key: string | null;
   release_fee: number | null;
   emphasis: number | null;
   emphasis_until: string | null;
@@ -443,6 +444,7 @@ app.get('/market/transfer-board', async (c) => {
                 json_extract(p.game_attrs, '$.PosID3') AS pos3,
                 json_extract(p.game_attrs, '$.PosID4') AS pos4,
                 cl.name AS club_name,
+                cl.logo_key AS club_logo_key,
                 ct.release_fee,
                 pm.tier AS emphasis, pm.ends_at AS emphasis_until,
                 COUNT(*) OVER () AS total_count
@@ -483,6 +485,8 @@ app.get('/market/transfer-board', async (c) => {
           pa: r.pa,
           clubId: r.club_id,
           clubName: r.club_name,
+          // 队徽走 R2（v6.32.0）：无徽由前端 TeamLogo 回落队名哈希色块，这里只管下发
+          logoKey: r.club_logo_key,
           // 广告板是 min_offer_price 数值的唯一公开出口（v6.31.0 裁决 4）；releaseFee 无现行合同为 null
           minOfferPrice: r.min_offer_price,
           releaseFee: r.release_fee,

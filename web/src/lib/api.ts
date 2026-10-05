@@ -894,6 +894,8 @@ export interface TransferBoardRow {
   pa: number;
   clubId: number;
   clubName: string;
+  /** 挂牌队的 R2 队徽 key（v6.32.0；无徽 null → TeamLogo 回落队名哈希色块） */
+  logoKey: string | null;
   minOfferPrice: number | null;
   /** 现行合同违约金（无合同 → null，显示「—」） */
   releaseFee: number | null;

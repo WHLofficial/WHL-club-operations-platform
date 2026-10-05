@@ -70,6 +70,7 @@ interface BoardPlayer {
   pa: number | null;
   clubId: number | null;
   clubName: string | null;
+  logoKey: string | null;
   minOfferPrice: number | null;
   releaseFee: number | null;
   listedAt: string | null;
@@ -94,7 +95,7 @@ async function board(fx: Fixture, query = ''): Promise<BoardOut> {
 // 名单：1/2/3/5/6/7/8 在名单，4 不在；着重度行 6 = 最高档 + 同档最晚到期、5 过期、8 越界
 function seedBoard(fx: Fixture): void {
   fx.sqlite.exec(`
-    INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '甲队', 'premier', 'active'), (2, '乙队', 'premier', 'active');
+    INSERT INTO clubs (id, name, league_tier, status, logo_key) VALUES (1, '甲队', 'premier', 'active', 'logo/c1.png'), (2, '乙队', 'premier', 'active', NULL);
     INSERT INTO players (id, uid, name, display_name, club_id, position, age, ca, pa, status, fc_id, transfer_listed, min_offer_price, transfer_listed_at, game_attrs) VALUES
       (1, 'uid1', '球员甲', '铁闸甲', 1, 'CM', 24, 80, 88, 'normal', 11, 1, 40, '2026-01-01T00:00:00.000Z', '{"PosID1":25,"PosID2":25,"PosID3":15}'),
       (2, 'uid2', '球员乙', NULL, 1, 'ST', 22, 75, 84, 'normal', 12, 1, 55, '2026-02-01T00:00:00.000Z', NULL),
@@ -168,7 +169,7 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
     expect(byId.get(8)).toMatchObject({ emphasis: 0 });
   });
 
-  it('行字段：显示名 / 位置去重去空（NULL 槽位不当 GK）/ clubName / releaseFee / 数值门槛', async () => {
+  it('行字段：显示名 / 位置去重去空（NULL 槽位不当 GK）/ clubName / logoKey / releaseFee / 数值门槛', async () => {
     const fx = freshEnv();
     seedBoard(fx);
     const out = await board(fx);
@@ -185,6 +186,8 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
       pa: 88,
       clubId: 1,
       clubName: '甲队',
+      // v6.32.0：队徽 key 随 clubs JOIN 下发（R2 图），无徽队回落 null
+      logoKey: 'logo/c1.png',
       minOfferPrice: 40,
       releaseFee: 50,
       listedAt: '2026-01-01T00:00:00.000Z',
@@ -194,8 +197,8 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
     });
     // 2：只有失效合同 → releaseFee null（防 JOIN 漏 is_active 条件）；无 display_name → 回落 name
     expect(byId.get(2)).toMatchObject({ name: '球员乙', releaseFee: null, minOfferPrice: 55, transferPriced: true });
-    // 3：position NULL + PosID1 = 0（GK）→ ['GK']；min_offer_price NULL → transferPriced false
-    expect(byId.get(3)).toMatchObject({ positions: ['GK'], minOfferPrice: null, transferPriced: false, clubName: '乙队' });
+    // 3：position NULL + PosID1 = 0（GK）→ ['GK']；min_offer_price NULL → transferPriced false；乙队无徽 → logoKey null
+    expect(byId.get(3)).toMatchObject({ positions: ['GK'], minOfferPrice: null, transferPriced: false, clubName: '乙队', logoKey: null });
   });
 
   it('limit：正常值截断（players 变短、total 不变）；缺省回落 200', async () => {

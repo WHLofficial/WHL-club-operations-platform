@@ -29,6 +29,7 @@ function row(patch: Partial<TransferBoardRow> = {}): TransferBoardRow {
     pa: 95,
     clubId: 3,
     clubName: '曼城',
+    logoKey: null,
     minOfferPrice: 180,
     releaseFee: 240,
     listedAt: '2026-10-03T00:00:00.000Z',
@@ -89,11 +90,24 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
     expect(await screen.findByText('置顶甲')).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('转会市场 · 广告板');
     expect(screen.getByRole('link', { name: '广告板' }).getAttribute('href')).toBe('/market/board');
-    expect(screen.getByText('各队公开挂出的转会名单：标价公开，出价达线自动成交，低于自动拒。')).toBeTruthy();
+    expect(screen.getByText('各队公开挂出的转会名单：标价公开，出价达线自动挂牌，低于自动拒。')).toBeTruthy();
   });
 
-  it('置顶区：只放 emphasis=2 的行，标题带个数与付费位口径', async () => {
-    const { container } = renderPage(MIXED);
+  it('卡片左上角队徽（v6.32.0）：有 logoKey 出 R2 图，无徽回哈希色块首字（取队名首字）', async () => {
+    const { container } = renderPage(
+      board([row({ id: 1, name: '有徽丁', logoKey: 'club/1.png' }), row({ id: 2, name: '无徽戊' })]),
+    );
+    await screen.findByText('有徽丁');
+    const imgs = container.querySelectorAll('.adb-card img.team-logo');
+    expect(imgs.length).toBe(1);
+    expect(imgs[0].getAttribute('src')).toBe('/api/media/club/1.png');
+    const fallbacks = container.querySelectorAll('.adb-card .team-logo-fallback');
+    expect(fallbacks.length).toBe(1);
+    // 回退字是队名首字（夹具 clubName 默认「曼城」），不是球员名
+    expect(fallbacks[0].textContent).toBe('曼');
+  });
+
+  it('置顶区：只放 emphasis=2 的行，标题带个数与付费位口径', async () => {    const { container } = renderPage(MIXED);
     expect(await screen.findByText('置顶甲')).toBeTruthy();
     expect(screen.getByText('1 个 · 付费位，按到期时间排')).toBeTruthy();
     // 带标题的「置顶」在 .adb-band-lab 里（卡片角标也是「置顶」二字 ⇒ 必须按带子作用域取，不能全局 getByText）

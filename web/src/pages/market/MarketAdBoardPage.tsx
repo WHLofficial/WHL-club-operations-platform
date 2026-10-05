@@ -87,7 +87,8 @@ function BoardCard({ row }: { row: TransferBoardRow }) {
   return (
     <article className={`adb-card${row.emphasis === 1 ? ' emph-1' : ''}`}>
       <div className="adb-card-head">
-        <TeamLogo name={row.clubName} size={22} />
+        {/* v6.32.0：左上角队徽接 R2 实图（无徽回哈希色块） */}
+        <TeamLogo name={row.clubName} logoKey={row.logoKey} size={22} />
         <Link className="adb-nm" to={playerPath(row)}>
           {row.name}
         </Link>
@@ -110,7 +111,7 @@ function FeaturedCard({ row }: { row: TransferBoardRow }) {
   const t = useTimeFmt();
   return (
     <article className="adb-fcard emph-2">
-      <TeamLogo name={row.clubName} size={40} />
+      <TeamLogo name={row.clubName} logoKey={row.logoKey} size={40} />
       <div className="adb-fcard-txt">
         <div className="adb-card-head">
           <Link className="adb-nm" to={playerPath(row)}>
@@ -218,7 +219,7 @@ export default function MarketAdBoardPage() {
       <h1>转会市场 · 广告板</h1>
       <MarketNav />
       <div className="adb-note">
-        <p>各队公开挂出的转会名单：标价公开，出价达线自动成交，低于自动拒。</p>
+        <p>各队公开挂出的转会名单：标价公开，出价达线自动挂牌，低于自动拒。</p>
         {unpinned.length >= 2 && (
           <button
             type="button"
