@@ -283,7 +283,7 @@ export interface PlayerListItem {
   /** 转会设置（v6.30.0，列表行口径）：挂牌中 / 非卖品 */
   transferListed: boolean;
   notForSale: boolean;
-  /** 是否设过最低报价的摘要：列表端点只给布尔，min_offer_price 数值不下发（详情端点给数值 minOfferPrice，故详情对象上没有本键） */
+  /** 是否设过最低报价的摘要：列表端点只给布尔，min_offer_price 数值不下发（v6.33.0 起详情也只给公开标价 listPrice，故详情对象上没有本键） */
   transferPriced?: boolean;
   growthTier: number;
   isFutureStar: boolean;
@@ -319,9 +319,10 @@ export interface PlayerDetail {
     gameAttrs: Record<string, unknown> | null;
     createdAt: string;
     updatedAt: string;
-    // 报价设置（v6.3.0；v6.4.0 加 offer_auto 与名单解耦）——球员页左栏报价设置与五态判据吃这几个字段
+    // 报价设置（v6.3.0；v6.4.0 加 offer_auto 与名单解耦；v6.33.0 标价）——球员页左栏报价设置与五态判据吃这几个字段；
+    // minOfferPrice 数值转全系统私密，公开面只下发标价 listPrice，私密底线走 offer-settings 端点
     transferListed: boolean;
-    minOfferPrice: number | null;
+    listPrice: number | null;
     offerAuto: boolean;
     notForSale: boolean;
   };
@@ -331,6 +332,17 @@ export interface PlayerDetail {
   seaSign: SeaSignEligibility;
   /** 海捞成交参照（v6.17.0）：违约金输入框下方的定价锚 */
   seaComps: SeaComps;
+}
+
+/** 报价设置（GET/PUT /api/players/:id/offer-settings，v6.33.0）：设置面板的私密预填源 */
+export interface OfferSettingsDto {
+  transferListed: boolean;
+  /** 私密最低报价（全系统私密，仅本队教练经本端点可见） */
+  minOfferPrice: number | null;
+  /** 公开标价（进转会名单必填，其他队可见） */
+  listPrice: number | null;
+  offerAuto: boolean;
+  notForSale: boolean;
 }
 
 /** 海捞资格判定（v6.17.0） */
@@ -881,7 +893,7 @@ export interface MarketDealsResponse {
 
 /**
  * 转会广告板行（GET /api/market/transfer-board，公开，v6.31.0）：只收 `players.transfer_listed = 1`。
- * 与 /api/players 列表的差别：这里**下发最低报价数值**（广告板是唯一公开出口），并带着重度与挂出时间。
+ * 与 /api/players 列表的差别：这里**下发公开标价数值 listPrice**（v6.33.0；最低报价转全系统私密），并带着重度与挂出时间。
  */
 export interface TransferBoardRow {
   id: number;
@@ -896,7 +908,7 @@ export interface TransferBoardRow {
   clubName: string;
   /** 挂牌队的 R2 队徽 key（v6.32.0；无徽 null → TeamLogo 回落队名哈希色块） */
   logoKey: string | null;
-  minOfferPrice: number | null;
+  listPrice: number | null;
   /** 现行合同违约金（无合同 → null，显示「—」） */
   releaseFee: number | null;
   /** 进入转会名单的时刻（历史存量未回填 → null） */
@@ -1958,7 +1970,7 @@ export type OfferStatus = 'pending' | 'intent' | 'accepted' | 'rejected' | 'with
 
 export interface OfferListItem {
   id: number;
-  player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null };
+  player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null; listPrice: number | null };
   counterpart: { id: number; name: string };
   role: 'buyer' | 'seller';
   amount: number;

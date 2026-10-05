@@ -1,5 +1,6 @@
 // 左栏五态操作区（v6.2.0 出骨架，v6.3.0 接真实端点与数据）：
 //   A 本队·未挂牌 = 报价设置（真实读写）+ 续约/挂牌/解约（开单端点）+ 我收到的报价入口
+//     （v6.33.0 标价：进转会名单必填公开标价，最低报价转全系统私密，预填走 offer-settings 端点）
 //   B 本队·挂牌中 = 转会区信息（要价/最高出价来自转会区列表缓存）；主动下架无端点，窗尾自动收口
 //   C 别队真人·未挂牌 = 报价（POST /api/offers，报价即冻结）/ 激活（POST /api/market/activations）
 //   D 别队真人·非卖品 = 报价置灰「此球员为非卖品！」；激活不受非卖品限制
@@ -11,11 +12,11 @@
 // v6.29.0：报价（POST /api/offers）移出窗门控——关窗期也能送报价/还价/同意，
 // 关窗期谈成先挂「意向单」（status=intent），开窗后由卖方确认才挂牌。
 // 训练营球员（contractType=trainee）：合同固定、只能被激活带走，不显示报价设置与挂牌/续约。
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, apiPut, apiUpload, type ContractDto, type FreeAgentResult, type SeaComps, type SeaSignEligibility } from '../../lib/api.ts';
-import { qk, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation } from '../../lib/queries.ts';
+import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import { money } from '../market/shared.tsx';
 
@@ -23,7 +24,8 @@ export interface SideOpsPlayer {
   id: number;
   status: string;
   transferListed: boolean;
-  minOfferPrice: number | null;
+  /** 公开标价（v6.33.0）：详情端点只下发它，私密最低报价不再经详情透出 */
+  listPrice: number | null;
   offerAuto: boolean;
   notForSale: boolean;
 }
@@ -74,9 +76,17 @@ export function SideOps({
   const [busy, setBusy] = useState(false);
   const [bidBusy, setBidBusy] = useState(false);
   const [armed, setArmed] = useState(false); // 解约 / 激活这类不可逆动作的第二击
-  // 报价设置草稿（v6.4.0 改动 B：最低报价/自动应答与转会名单解耦；非卖品与名单互斥自动清对方）
+  // 报价设置（v6.33.0 标价）：私密预填源——详情端点走公开缓存不下发最低报价，
+  // 标价/底线/开关从 offer-settings 端点回（仅本队教练）；数据没到不开放保存
+  const settingsQuery = useOfferSettings(
+    player.id,
+    isCoach && isMine && player.status === 'normal' && contract?.contractType !== 'trainee',
+  );
+  const settingsData = settingsQuery.data;
+  // 草稿（v6.4.0 改动 B：最低报价/自动应答与转会名单解耦；v6.33.0 加标价；非卖品与名单互斥自动清对方）
   const [listDraft, setListDraft] = useState(player.transferListed);
-  const [minDraft, setMinDraft] = useState(player.minOfferPrice === null ? '' : String(player.minOfferPrice));
+  const [minDraft, setMinDraft] = useState('');
+  const [listPriceDraft, setListPriceDraft] = useState('');
   const [autoDraft, setAutoDraft] = useState(player.offerAuto);
   const [nfsDraft, setNfsDraft] = useState(player.notForSale);
   // 操作草稿
@@ -88,11 +98,15 @@ export function SideOps({
   // 激活证据截图（v6.4.0 改动 4：证据制，激活必附 QQ 通知截图）
   const [proofFile, setProofFile] = useState<File | null>(null);
 
-  // 草稿只在换球员时重置：保存后数据刷新（player 字段值变化）会把用户在刷新窗口内的
-  // 下一次操作覆盖掉（草稿回跳、保存按钮失效），所以刻意不依赖字段值。
+  // 草稿只在换球员时重置：保存后数据刷新（字段值变化）会把用户在刷新窗口内的下一次操作
+  // 覆盖掉（草稿回跳、保存按钮失效），所以金额草稿不从 player 灌——等 settings 数据到达灌一次。
+  // filledFor 防「保存 → invalidate → refetch → 数据再次到达」把用户下一手草稿覆盖回去。
+  const filledFor = useRef<number | null>(null);
   useEffect(() => {
+    filledFor.current = null;
     setListDraft(player.transferListed);
-    setMinDraft(player.minOfferPrice === null ? '' : String(player.minOfferPrice));
+    setMinDraft('');
+    setListPriceDraft('');
     setAutoDraft(player.offerAuto);
     setNfsDraft(player.notForSale);
     setPanel(null);
@@ -100,6 +114,18 @@ export function SideOps({
     setProofFile(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上：只跟随 player.id
   }, [player.id]);
+
+  // settings 数据首次到达（对当前球员）时全量灌草稿：私密底线 + 公开标价都从这里来
+  useEffect(() => {
+    if (settingsData === undefined || filledFor.current === player.id) return;
+    filledFor.current = player.id;
+    setListDraft(settingsData.transferListed);
+    setMinDraft(settingsData.minOfferPrice === null ? '' : String(settingsData.minOfferPrice));
+    setListPriceDraft(settingsData.listPrice === null ? '' : String(settingsData.listPrice));
+    setAutoDraft(settingsData.offerAuto);
+    setNfsDraft(settingsData.notForSale);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟随 player.id 与数据到达
+  }, [player.id, settingsData]);
 
   // 挂牌态信息源（v6.4.0 改动 6）：按球员查现行挂牌（公开端点），详情给下一步最低价与出价历史。
   // 只有教练 + 挂牌中的球员才启用查询，其余态零请求。
@@ -110,13 +136,17 @@ export function SideOps({
   const releaseFee = contract?.releaseFee ?? null;
   const offerCap = releaseFee !== null && releaseFee > 0 ? round2(releaseFee * 1.5) : null;
   const isTrainee = contract?.contractType === 'trainee';
-  // v6.4.0 改动 B：线与开关独立于转会名单，脏判按「草稿 ≠ 现值」逐字段比
+  // v6.33.0：脏判按「草稿 ≠ settings 现值」逐字段比；settings 没到（私密端点还在路上/失败）禁存，
+  // 避免把「进名单必填标价」存成空值打到 400。
   const minDraftValue = minDraft === '' ? null : Number(minDraft);
+  const listPriceValue = listPriceDraft === '' ? null : Number(listPriceDraft);
   const settingsDirty =
-    listDraft !== player.transferListed ||
-    nfsDraft !== player.notForSale ||
-    minDraftValue !== player.minOfferPrice ||
-    autoDraft !== player.offerAuto;
+    settingsData !== undefined &&
+    (listDraft !== settingsData.transferListed ||
+      nfsDraft !== settingsData.notForSale ||
+      minDraftValue !== settingsData.minOfferPrice ||
+      listPriceValue !== settingsData.listPrice ||
+      autoDraft !== settingsData.offerAuto);
 
   async function run(fn: () => Promise<string>) {
     if (busy) return;
@@ -128,6 +158,7 @@ export function SideOps({
       invalidateOffers();
       void qc.invalidateQueries({ queryKey: qk.myClub });
       void qc.invalidateQueries({ queryKey: qk.squad });
+      void qc.invalidateQueries({ queryKey: qk.offerSettings(player.id) });
       void qc.invalidateQueries({ queryKey: ['market', 'board'] });
       void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
       refreshAll();
@@ -143,6 +174,7 @@ export function SideOps({
       await apiPut(`/api/players/${player.id}/offer-settings`, {
         transferListed: listDraft,
         minOfferPrice: minDraftValue,
+        listPrice: listPriceValue,
         offerAuto: autoDraft,
         notForSale: nfsDraft,
       });
@@ -341,9 +373,27 @@ export function SideOps({
               </button>
             </span>
           </div>
+          {listDraft && (
+            <label className="side-field">
+              <span className="side-lab">
+                <span>标价（m）· 公开</span>
+                <span className="side-range mono">{offerCap !== null ? `${minDraftValue ?? 1}–${offerCap}` : '—'}</span>
+              </span>
+              <input
+                className="mono"
+                inputMode="decimal"
+                min="1"
+                step="0.5"
+                placeholder="必填：其他队看得到"
+                value={listPriceDraft}
+                onChange={(e) => setListPriceDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+                aria-label="标价"
+              />
+            </label>
+          )}
           <label className="side-field">
             <span className="side-lab">
-              <span>最低报价（m）</span>
+              <span>最低报价（m）· 仅自己可见</span>
               <span className="side-range mono">{offerCap !== null ? `≤ ${offerCap}` : '—'}</span>
             </span>
             <input
@@ -363,7 +413,7 @@ export function SideOps({
               <button
                 type="button"
                 className={autoDraft ? 'on' : ''}
-                disabled={busy || minDraftValue === null}
+                disabled={busy || (listDraft ? listPriceValue === null : minDraftValue === null)}
                 onClick={() => setAutoDraft(true)}
               >
                 是
@@ -371,7 +421,7 @@ export function SideOps({
               <button
                 type="button"
                 className={!autoDraft ? 'on' : ''}
-                disabled={busy || minDraftValue === null}
+                disabled={busy || (listDraft ? listPriceValue === null : minDraftValue === null)}
                 onClick={() => setAutoDraft(false)}
               >
                 否
@@ -379,7 +429,7 @@ export function SideOps({
             </span>
           </div>
           <p className="side-sub">
-            低于最低报价一律自动拒（与开关无关）；达线且开关开着才自动同意，否则进人工谈判。两者都不必进转会名单{listDraft ? '，但进名单必须设线' : ''}。
+            低于最低报价一律自动拒（与开关无关）；达线且开关开着才自动同意，否则进人工谈判。标价是进转会名单的必填项，其他队看得到；最低报价只有你自己看得见。
           </p>
           <div className="side-row">
             <span className="attr-name">非卖品</span>
@@ -660,8 +710,10 @@ export function SideOps({
                 placeholder="给卖家的一句话"
               />
             </label>
-            {player.minOfferPrice !== null && (
-              <p className="side-sub">对方最低报价线 {player.minOfferPrice} m：低于线自动拒；达线且对方开了自动同意才直接成交，否则进人工谈判。</p>
+            {player.listPrice !== null && (
+              <p className="side-sub">
+                对方标价 {player.listPrice} m：低于标价视为砍价（对方看不到你的诚意边界，但低于其底线会被自动拒）；达标价且对方开了自动同意才直接成交，否则进人工谈判。
+              </p>
             )}
             <p className="side-sub">
               报价即冻结资金；
@@ -681,12 +733,14 @@ export function SideOps({
                       amount: Number(offerAmount),
                       note: offerNote || undefined,
                     });
+                    // 三态反馈（v6.33.0，用户措辞裁决 2026-10-05）：accepted 是「对方接受 → 挂牌进转会区」，
+                    // 不是成交——报价方只是领先（视同出了第一笔出价），还要被别人竞价
                     return r.status === 'intent'
                       ? '关窗期谈成：已挂意向单（资金继续冻结），开窗后由卖方确认才挂牌。'
                       : r.status === 'accepted'
-                        ? '达到对方最低报价线，已自动同意并挂牌！'
+                        ? '对方已接受：球员已挂牌进入转会区，你暂时领先（视同你出了第一笔出价）。'
                         : r.status === 'rejected'
-                          ? '低于对方最低报价线，报价被自动拒绝。'
+                          ? '低于对方底线，报价被自动拒，冻结已退回。'
                           : `报价已送出（#${r.offerId}），等卖家表态。`;
                   })
                 }

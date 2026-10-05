@@ -463,7 +463,7 @@ export default function Player() {
               id: player.id,
               status: player.status,
               transferListed: player.transferListed,
-              minOfferPrice: player.minOfferPrice,
+              listPrice: player.listPrice,
               offerAuto: player.offerAuto,
               notForSale: player.notForSale,
             }}

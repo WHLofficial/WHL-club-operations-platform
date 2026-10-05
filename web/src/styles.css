@@ -4897,6 +4897,37 @@ th.num .th-sort {
   color: var(--muted);
 }
 
+/* 卡脚圆形「报价」按钮（v6.33.0）：金底圆钮，点开弹层直接报价；#f5e8cf 复刻既有金底不引新色 */
+.adb-bid-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--gold-deep);
+  background: #f5e8cf;
+  color: var(--gold-deep);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.adb-bid-btn:hover {
+  filter: brightness(1.04);
+}
+.adb-bid-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 报价弹层（v6.33.0，复用 .modal-mask/.modal-card）：标题与错误行 */
+.modal-title {
+  margin: 0;
+  font-size: 16px;
+}
+.bid-err {
+  color: var(--bad);
+}
+
 .adb-until {
   font-weight: 600;
   color: var(--gold-deep);

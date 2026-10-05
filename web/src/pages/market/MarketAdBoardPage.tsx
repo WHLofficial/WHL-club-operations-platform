@@ -3,10 +3,13 @@
 // 置顶区（emphasis = 2）通栏纵向堆叠，无置顶时整条带子连标题一起消失；其余（0/1）进卡栅格。
 // 顺序：端点按时间桶（5 分钟一桶）轮换 emphasis = 0 那一段，付费档（1/2）恒按着重度 → 挂出时间；
 // 「换一批」按钮是纯前端本地重排（不打端点，只动普通档）。
+// v6.33.0：标价语义——公开面只下发标价 listPrice（私密最低报价不再出端点）；
+// 卡脚加圆形「报价」按钮，点击弹层直接 POST /api/offers（与球员页 C 态同端点同反馈）。
 // 时间一律走 useTimeFmt（卡脚「挂出 …」），页面不自己算相对时间（守 tests/datetime-display.test.ts）。
 import { useState } from 'react';
 import { Link } from 'react-router';
 import type { TransferBoardRow } from '../../lib/api.ts';
+import { apiPost } from '../../lib/api.ts';
 import { TeamLogo } from '../../components/TeamLogo.tsx';
 import { ShuffleIcon, TransferStatusCell, TransferStatusLegend } from '../../components/StatusIcons.tsx';
 import { transferStatusOf } from '../../lib/club-columns.tsx';
@@ -55,13 +58,13 @@ function Rail({ row }: { row: TransferBoardRow }) {
   );
 }
 
-// 最低报价 / 违约金（右对齐；最低报价走金）
+// 标价 / 违约金（右对齐；标价走金）
 function Amounts({ row }: { row: TransferBoardRow }) {
   return (
     <div className="adb-rows">
       <div className="adb-row">
-        <span className="adb-labr">最低报价</span>
-        <span className="adb-val adb-hi">{amount(row.minOfferPrice)}</span>
+        <span className="adb-labr">标价</span>
+        <span className="adb-val adb-hi">{amount(row.listPrice)}</span>
       </div>
       <div className="adb-row">
         <span className="adb-labr">违约金</span>
@@ -81,8 +84,8 @@ function HeadBadges({ row }: { row: TransferBoardRow }) {
   );
 }
 
-// 普通 / 推荐卡（栅格单元）
-function BoardCard({ row }: { row: TransferBoardRow }) {
+// 普通 / 推荐卡（栅格单元）；卡脚右侧圆形「报价」按钮直接弹报价层（v6.33.0）
+function BoardCard({ row, onBid }: { row: TransferBoardRow; onBid: (row: TransferBoardRow) => void }) {
   const t = useTimeFmt();
   return (
     <article className={`adb-card${row.emphasis === 1 ? ' emph-1' : ''}`}>
@@ -101,13 +104,16 @@ function BoardCard({ row }: { row: TransferBoardRow }) {
       </div>
       <div className="adb-card-foot">
         <span>挂出 {t.ago(row.listedAt)}</span>
+        <button type="button" className="adb-bid-btn" onClick={() => onBid(row)} aria-label={`给 ${row.name} 报价`} title={`给 ${row.name} 报价`}>
+          报
+        </button>
       </div>
     </article>
   );
 }
 
 // 置顶通栏卡（队徽 40px + 名字 21px，内部横排）
-function FeaturedCard({ row }: { row: TransferBoardRow }) {
+function FeaturedCard({ row, onBid }: { row: TransferBoardRow; onBid: (row: TransferBoardRow) => void }) {
   const t = useTimeFmt();
   return (
     <article className="adb-fcard emph-2">
@@ -128,6 +134,9 @@ function FeaturedCard({ row }: { row: TransferBoardRow }) {
       <div className="adb-card-foot">
         <span>挂出 {t.ago(row.listedAt)}</span>
         {row.emphasisUntil ? <span className="adb-until">置顶到 {t.date(row.emphasisUntil)}</span> : null}
+        <button type="button" className="adb-bid-btn" onClick={() => onBid(row)} aria-label={`给 ${row.name} 报价`} title={`给 ${row.name} 报价`}>
+          报
+        </button>
       </div>
     </article>
   );
@@ -150,7 +159,7 @@ function MiniCard({ row }: { row: TransferBoardRow }) {
         <span className="adb-mini-nums">
           CA <b className={attrClass(row.ca)}>{row.ca}</b> PA <b className={attrClass(row.pa)}>{row.pa}</b>
         </span>
-        <span className="adb-mini-price">{amount(row.minOfferPrice)}</span>
+        <span className="adb-mini-price">{amount(row.listPrice)}</span>
       </span>
     </Link>
   );
@@ -178,6 +187,100 @@ export function AdBoardTeaser() {
         ))}
       </div>
     </section>
+  );
+}
+
+// 报价弹层（v6.33.0）：卡脚圆形「报价」按钮的直接落点，与球员页 C 态同一端点（POST /api/offers）、
+// 同一三态反馈（用户措辞裁决 2026-10-05：accepted = 对方接受 → 挂牌进转会区，报价方领先，不是成交）。
+// 复用 .modal-mask/.modal-card（styles.css）；未登录 401 走错误区透出，公开页不做会话预判。
+function AdBidModal({ row, onClose }: { row: TransferBoardRow; onClose: () => void }) {
+  const [bidAmount, setBidAmount] = useState(row.listPrice !== null ? String(row.listPrice) : '');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  function submit() {
+    if (busy || bidAmount === '') return;
+    setBusy(true);
+    setErr(null);
+    apiPost<{ offerId: number; status: string }>('/api/offers', {
+      playerId: row.id,
+      amount: Number(bidAmount),
+      note: note || undefined,
+    })
+      .then((r) => {
+        // 三态反馈与球员页 C 态逐字同口径
+        setResult(
+          r.status === 'intent'
+            ? '关窗期谈成：已挂意向单（资金继续冻结），开窗后由卖方确认才挂牌。'
+            : r.status === 'accepted'
+              ? '对方已接受：球员已挂牌进入转会区，你暂时领先（视同你出了第一笔出价）。'
+              : r.status === 'rejected'
+                ? '低于对方底线，报价被自动拒，冻结已退回。'
+                : `报价已送出（#${r.offerId}），等卖家表态。`,
+        );
+      })
+      .catch((e: unknown) => setErr(e instanceof Error ? e.message : '报价失败'))
+      .finally(() => setBusy(false));
+  }
+
+  return (
+    <div className="modal-mask" onClick={busy ? undefined : onClose}>
+      <div className="modal-card" role="dialog" aria-label={`给 ${row.name} 报价`} onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title">给 {row.name} 报价</h3>
+        {result !== null ? (
+          <>
+            <p className="side-sub">{result}</p>
+            <div className="actions">
+              <button type="button" className="btn btn-sm" onClick={onClose}>
+                知道了
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="side-sub">
+              对方标价 {amount(row.listPrice)}：低于标价视为砍价；对方底线保密，低于底线会被自动拒。报价即冻结资金。
+            </p>
+            {err !== null && <p className="side-sub bid-err">{err}</p>}
+            <label className="side-field">
+              <span className="side-lab">
+                <span>报价（m）</span>
+              </span>
+              <input
+                className="mono"
+                inputMode="decimal"
+                min="1"
+                step="0.5"
+                value={bidAmount}
+                onChange={(e) => setBidAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                aria-label="报价金额"
+              />
+            </label>
+            <label className="side-field">
+              <span className="side-lab">
+                <span>附言（可选）</span>
+              </span>
+              <input
+                value={note}
+                onChange={(e) => setNote(e.target.value.slice(0, 100))}
+                aria-label="报价附言"
+                placeholder="给卖家的一句话"
+              />
+            </label>
+            <div className="actions">
+              <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={onClose}>
+                取消
+              </button>
+              <button type="button" className="btn btn-sm" disabled={busy || bidAmount === ''} onClick={submit}>
+                送出报价
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -214,12 +317,15 @@ export default function MarketAdBoardPage() {
       ? manualIds.map((id) => byId.get(id)!)
       : unpinned;
   const rest = [...paid, ...shownUnpinned];
+  // 报价弹层（v6.33.0）：卡脚圆钮的落点
+  const [bidRow, setBidRow] = useState<TransferBoardRow | null>(null);
+  const onBid = (row: TransferBoardRow) => setBidRow(row);
   return (
     <div className="container">
       <h1>转会市场 · 广告板</h1>
       <MarketNav />
       <div className="adb-note">
-        <p>各队公开挂出的转会名单：标价公开，出价达线自动挂牌，低于自动拒。</p>
+        <p>各队公开挂出的转会名单：标价公开，达线且对方开了自动同意才自动成交；低于标价视为砍价，进人工谈判。</p>
         {unpinned.length >= 2 && (
           <button
             type="button"
@@ -253,14 +359,14 @@ export default function MarketAdBoardPage() {
                   </p>
                   <div className="adb-feature">
                     {featured.map((row) => (
-                      <FeaturedCard key={row.id} row={row} />
+                      <FeaturedCard key={row.id} row={row} onBid={onBid} />
                     ))}
                   </div>
                 </>
               )}
               <div className="adb-grid">
                 {rest.map((row) => (
-                  <BoardCard key={row.id} row={row} />
+                  <BoardCard key={row.id} row={row} onBid={onBid} />
                 ))}
               </div>
               {total > players.length && (
@@ -273,6 +379,7 @@ export default function MarketAdBoardPage() {
           )}
         </section>
       )}
+      {bidRow !== null && <AdBidModal row={bidRow} onClose={() => setBidRow(null)} />}
     </div>
   );
 }

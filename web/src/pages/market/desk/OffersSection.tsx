@@ -180,7 +180,13 @@ export default function OffersSection({
                         <Link to={playerPath(o.player)}>{o.player.name}</Link>
                       </td>
                       <td>{o.counterpart.name}</td>
-                      <td className="num mono">{money(o.amount)}</td>
+                      <td className="num mono">
+                        {money(o.amount)}
+                        {/* 砍价徽标（v6.33.0）：卖方视角、活单、报价低于对方公开标价时标出（标价本身公开，徽标不泄底线） */}
+                        {o.status === 'pending' && o.role === 'seller' && o.player.listPrice !== null && o.amount < o.player.listPrice && (
+                          <span className="badge orange">砍价</span>
+                        )}
+                      </td>
                       <td className="num mono">R{o.round}</td>
                       <td>
                         {o.status === 'pending' ? (
