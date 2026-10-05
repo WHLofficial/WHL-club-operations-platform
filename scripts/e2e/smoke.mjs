@@ -28,7 +28,7 @@
 import { chromium } from 'playwright-core';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const BASE = process.argv[2] ?? process.env.E2E_BASE ?? 'http://127.0.0.1:8791';
@@ -54,6 +54,19 @@ function isKnownNoise(line) {
 }
 const SHOT_DIR = 'scratch';
 const TIMEOUT = 15_000;
+// 位置 id 集（⑤f / ⑯ 的探针判据）：在 Node 侧读仓内 ref 表，把数组传进页面 —— `web/assets/ref/position.json`
+// 是构建期被 `web/src/lib/ref.ts` import 进 JS 包的，**不进 dist 静态资产**，浏览器里 fetch 只会拿到
+// SPA 的 index.html（2026-10-06 实测：`Unexpected token '<'`）。判据口径与 `positionName` 一致：
+// 只认表里 `name !== '-'` 的 id（-1 是源表占位）。
+const POSITION_IDS = (() => {
+  try {
+    const rows = JSON.parse(readFileSync(join(process.cwd(), 'web', 'assets', 'ref', 'position.json'), 'utf8'));
+    return rows.filter((row) => row.name !== '-').map((row) => row.id);
+  } catch (e) {
+    console.warn(`（备注：读不到 web/assets/ref/position.json（${e.message}）——位置判据退回「有限数 ≥ 0」宽口径）`);
+    return null;
+  }
+})();
 
 if (!existsSync(CHROME)) {
   console.error(`找不到 Chrome：${CHROME}\n用 E2E_CHROME=<chrome.exe> 指定路径。`);
@@ -773,37 +786,65 @@ async function main() {
     await check('⑤f 球员对比：详情入口 / 1-2-3 人态 / 非法重复超限降级 / 库内勾选收集栏', async () => {
       const errBefore = pageErrors.length;
       const badBefore = badResponses.length;
-      // 探针：全列表 30 行的存档形态（并行拉详情）。radar = 有可上雷达的属性值（排除 PosID/RoleID/PSID 等
-      // ID 槽与元数据），pos = 有合法位置槽（PosID ≥ 0；-1 是源表占位，与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径）。
-      const probe = await page.evaluate(async () => {
+      // 探针：全列表 30 行的存档形态（并行拉详情）。**判据与渲染同源**（评审 P2-3：宽判据会把期望值抬到
+      // 渲染看不见的高度，真数据一变就假红）：
+      //   radarOut / radarGk = AttrRadar 画不画数据多边形，看的是「该轴集里有没有组均 > 0」——
+      //     轴键表逐字照抄 web/src/lib/ref.ts 的 ATTR_GROUPS（前六组）与 web/src/lib/radar.ts 的 GK_RADAR，
+      //     均值口径照抄 groupAverage（Number(null) === 0 也算有效值、无有效值回 null）；
+      //   pos = positionName 认不认这个 PosID（空槽 null/undefined/'' 一律不认，且只认 position.json 里
+      //     name !== '-' 的 id —— -1 是源表占位）；id 集在 Node 侧读仓内 ref 表传入（见 POSITION_IDS）。
+      const probe = await page.evaluate(async (posIds) => {
         const r = await fetch('/api/players?limit=30');
         if (!r.ok) return null;
         const ids = ((await r.json()).players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null);
-        const META = /^(ID|Age|CA|PA|height|weight|weakfoot|skillmoves|hashighqualityhead|internationalrep|naID|TeamID|NumofPS|PosID|RoleID|PSID)/;
+        const OUT_AXES = [
+          ['sprintspeed', 'acceleration'],
+          ['finishing', 'positioning', 'shotpower', 'longshots', 'penalties', 'volleys'],
+          ['vision', 'crossing', 'freekickaccuracy', 'longpassing', 'shortpassing', 'curve'],
+          ['agility', 'balance', 'reactions', 'composure', 'ballcontrol', 'dribbling'],
+          ['interceptions', 'headingaccuracy', 'defensiveawareness', 'standingtackle', 'slidingtackle'],
+          ['jumping', 'stamina', 'strength', 'aggression'],
+        ];
+        const GK_AXES = [['gkdiving'], ['gkhandling'], ['gkkicking'], ['gkreflexes'], ['gkpositioning'], ['sprintspeed', 'acceleration']];
+        const drawsWith = (axes, a) =>
+          axes.some((keys) => {
+            const vals = keys.map((k) => Number(a[k])).filter((v) => Number.isFinite(v));
+            return vals.length > 0 && Math.round(vals.reduce((x, y) => x + y, 0) / vals.length) > 0;
+          });
+        // 位置判据：只认 ref 表里 name !== '-' 的 id（-1 是源表占位）；id 集由 Node 侧读表传入。
+        // 读不到 ref 表（posIds === null）时退回「有限数 ≥ 0」宽口径，并在场景备注里说明。
+        const posOk = (v) => {
+          if (v === null || v === undefined || v === '') return false;
+          const n = Number(v);
+          return posIds === null ? Number.isFinite(n) && n >= 0 : Number.isFinite(n) && posIds.includes(n);
+        };
         const shape = {};
         await Promise.all(
           ids.map(async (id) => {
             const d = await fetch(`/api/players/${id}`);
             if (!d.ok) return;
-            const a = ((await d.json()).player ?? {}).gameAttrs ?? null;
+            const p = (await d.json()).player ?? {};
+            const a = p.gameAttrs ?? null;
             shape[id] = {
               attrs: a !== null,
-              radar: a !== null && Object.entries(a).some(([k, v]) => typeof v === 'number' && v > 0 && !META.test(k)),
-              pos:
-                a !== null &&
-                ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some(
-                  (k) => a[k] !== null && a[k] !== undefined && a[k] !== '' && Number(a[k]) >= 0,
-                ),
+              gk: p.position === 'GK',
+              radarOut: a !== null && drawsWith(OUT_AXES, a),
+              radarGk: a !== null && drawsWith(GK_AXES, a),
+              pos: a !== null && ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some((k) => posOk(a[k])),
             };
           }),
         );
         return { ids, shape };
-      });
+      }, POSITION_IDS);
       assert(probe && probe.ids.length >= 4, `本地夹具不足 4 名有 fc_id 的球员（拿到 ${probe ? probe.ids.length : 'null'}）——⑤f 前置缺失`);
-      const withArchive = probe.ids.filter((id) => probe.shape[id]?.radar);
+      const withArchive = probe.ids.filter((id) => probe.shape[id] && (probe.shape[id].radarOut || probe.shape[id].radarGk));
       const sample = [...withArchive, ...probe.ids.filter((id) => !withArchive.includes(id))].slice(0, 6);
       const [A, B, C, D] = sample;
-      const radarOf = (ids) => ids.filter((id) => probe.shape[id]?.radar === true).length;
+      // 轴集由对比页按「全员门将」选（PlayerCompare.tsx:185-186 的 axesFor(allGk)），所以期望值先判 allGk 再取对应判据
+      const radarOf = (ids) => {
+        const allGk = ids.length > 0 && ids.every((id) => probe.shape[id]?.gk === true);
+        return ids.filter((id) => probe.shape[id]?.[allGk ? 'radarGk' : 'radarOut'] === true).length;
+      };
       const posOf = (id) => probe.shape[id]?.pos === true;
       if (withArchive.length < 3) {
         console.warn(`（⑤f 备注：本地只有 ${withArchive.length} 名球员带可上雷达的存档，数据多边形断言按实际期望降级）`);
@@ -2016,9 +2057,16 @@ async function main() {
       // v6.35.0：属性页签头部（位置热区图 + 六维雷达）整块挂在 player.gameAttrs 上，本地夹具只有个别球员
       // 带 FC 存档（9001-9006 全 NULL）⇒ 先探一个「有存档的球员」来验头部几何，取样球员本身按实际存档态
       // 断言（无存档 ⇒ 不出 .attr-head 的空态闸门）。attrsPos 与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径。
-      const attrProbe = await page.evaluate(async (first) => {
+      const attrProbe = await page.evaluate(async ([first, posIds]) => {
         const r = await fetch('/api/players?limit=30');
         const ids = r.ok ? ((await r.json()).players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null) : [];
+        // 位置判据与 positionName 同源（空槽 null/undefined/'' 不认，且只认 ref 表里 name !== '-' 的 id）；
+        // id 集由 Node 侧读表传入（浏览器 fetch 不到 —— 该文件被构建期打进 JS 包）
+        const posOk = (v) => {
+          if (v === null || v === undefined || v === '') return false;
+          const n = Number(v);
+          return posIds === null ? Number.isFinite(n) && n >= 0 : Number.isFinite(n) && posIds.includes(n);
+        };
         let attrsPid = null;
         let pidAttrs = false;
         let attrsPos = false;
@@ -2026,11 +2074,7 @@ async function main() {
           const d = await fetch(`/api/players/${id}`);
           if (!d.ok) continue;
           const a = ((await d.json()).player ?? {}).gameAttrs ?? null;
-          const pos =
-            a !== null &&
-            ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some(
-              (k) => a[k] !== null && a[k] !== undefined && a[k] !== '' && Number(a[k]) >= 0,
-            );
+          const pos = a !== null && ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some((k) => posOk(a[k]));
           if (id === first) pidAttrs = a !== null;
           if (a !== null && attrsPid === null) {
             attrsPid = id;
@@ -2039,7 +2083,7 @@ async function main() {
           if (attrsPid !== null && id === first) break; // 取样球员排在最前 ⇒ 首轮就能定案
         }
         return { attrsPid, pidAttrs, attrsPos };
-      }, pid);
+      }, [pid, POSITION_IDS]);
 
       // —— 375：档案单列（900 档）+ 页签不撑破文档 + 转会事件卡互斥且 fit ——
       await page.setViewportSize({ width: 375, height: 812 });

@@ -1,6 +1,6 @@
 # 球员热区图 + 六维雷达刻度五档对齐 · 设计定稿（2026-10-05）
 
-状态：**定稿（visual companion 两屏迭代收敛）**，实现等令。视觉参数以 brainstorm session `43039-1791178761` 的 `heatmap-flatten-v2.html` 终稿屏为准。
+状态：**已实现**（v6.35.0，2026-10-06 本地完成，未发布；落地形态、对比页落点与有意偏差见 §7）。视觉参数以 brainstorm session `43039-1791178761` 的 `heatmap-flatten-v2.html` 终稿屏为准。
 
 > **时点说明**：spec 落盘时（2026-10-05）仓库已被并行会话推进到 v6.32.0（package.json 已 bump 6.33.0 在途）；本文行号与代码事实经同日复核仍成立（`posChips` Player.tsx:735、`.attr-head` styles.css:2566、`.attr-*` :2515-2527、`.radar-axis-val` fill 缺陷未修），但实现轮开工时必须以当时 HEAD 复核一遍再动手。版本号不预设（见 §6）。
 
@@ -76,13 +76,46 @@ series: [{ type:"radar", data:[[POINT_SHO,POINT_PAC,POINT_PHY,POINT_DEF,POINT_DR
 
 ## 5. 测试与验收（实现轮）
 
-- 测试计划：qa-test-planner 出 `docs/test-plans/v6.20.0-player-heatmap-radar.md`（实现轮开工时）。
+- 测试计划：qa-test-planner 出 `docs/test-plans/v6.35.0-heatmap-radar-badge.md`（实际版本号 6.35.0；本轮与「雷达共享件统一」「徽章/PlayStyle 统一」合并执行，计划一份覆盖三主题）。
 - 纯函数测试：拓扑完整性（12 位置全覆盖、坐标在界内、无块重叠）、三态类名/填色映射（主/副/未踢）、雷达环带半径公式（v/99×R）。
 - 页面测试：mock 数据渲染热区图（主位/副位/未踢各至少一块）与雷达环带数量（5 带 5 线）；fill 修复后雷达轴数值档色断言。
-- e2e ⑯（scripts/e2e/smoke.mjs:1771 起）补属性页签断言：点「属性」页签 → 热区图在 DOM、雷达 svg 在 DOM（现状零覆盖）。
-- 回归基线：typecheck 三份全清、vitest 全绿（**基线以实现轮开工时实测为准**——spec 时点 68 文件 / 1209 例是 v6.19.0 旧基线，v6.20.0–v6.32.0 已由并行会话推进）、build 成功、e2e **11/11**。
+- e2e ⑯（`scripts/e2e/smoke.mjs:2007` 起）补属性页签断言：点「属性」页签 → 热区图在 DOM、雷达 svg 在 DOM（原零覆盖）。落地为两态：取样球员无存档 ⇒ 只锁空态闸门（`.attr-head` 零个）；另用探到的「有存档球员」在末段验头部几何（5 环带、白点 = 数据多边形 × 6、热区两态自洽）。⑤f 另按数据驱动补对比页热区/雷达断言（见 §7）。
+- 回归基线：typecheck 三份全清、vitest 全绿（开工基线 98 文件 / 1622 例 ⇒ 收口 101 文件 / 1681 例）、build 成功、e2e **23/23**（场景数已由并行会话扩到 23，spec 时点的 11/11 是 v6.19.0 旧基线）。
 - code-review-skill 审查修复到绿。
 
 ## 6. 版本
 
-判级 minor（新增用户可见能力）；零迁移、零生产写、后端零改动。版本号不预设：实现轮开工时取当时 HEAD 的最新版本号 +1（spec 时点 package.json 已在 6.33.0 在途 ⇒ 预计 **6.34.0**，以开工时实测为准）。
+判级 minor（新增用户可见能力）；零迁移、零生产写。版本号实际落 **6.35.0**（开工时 HEAD 已是 v6.34.0 球员对比 ⇒ 顺延一版；spec 时点预估 6.34.0 未采用）。后端本 spec 范围零改动，但同轮顺带修了一处读路径缺陷：`/api/players/:id` 的 seaComps `signFee` 对 `fee ≤ 0` 的历史成交行抛 `RangeError` 打成 500（`src/worker/routes/players.ts`，提交 `029043e`）。
+
+## 7. 实现轮落地与偏差登记（2026-10-06 · v6.35.0）
+
+**落地形态**
+
+- 纯函数 `web/src/lib/heatmap.ts`：`HEAT_VIEW = { w: 245, h: 200 }`、`HEAT_CODES`（12 码，`['GK','RB','CB','LB','CDM','RM','CM','LM','CAM','RW','ST','LW']`）、`HEAT_SLOTS`（12 块坐标）、`HEAT_GK_BAND = '4,164 241,164 204,196 41,196'`、`heatPositionsOf(posCodes)`（清非法 / 去重 / 保序）、`heatStateOf(posCodes, isGk)`（主 / 副 / 未踢 + 纯门将特例）、`heatToneClass(state)`。
+- 共享组件 `web/src/components/PositionHeatmap.tsx`：props `{ posCodes, isGk, className }`；12 个 `<rect class="heat-block …">` 与 12 个 `<text class="heat-code …">` 恒在场；aria 摘要两态（主位清单 / 无位置数据）。
+- 落点一（本 spec §1.3 原定）：球员页属性页签头部 `.attr-head` 三列（`minmax(0,1fr) auto auto`，≤760px 堆叠）；位置码取 `PosID1..4` 经 `positionName` 归一（空槽护栏见下）。
+- 落点二（**本轮新增口径**）：球员对比页 2 人态身份卡下方 `.cmp-radarzone` 两侧各一张（`HeatSide`，宽度走布局类 `.cmp-heatmap`，不套 `.cmp-radar-big` 的 196px）；3 人态不出（每行 3 值格已够密）；吸顶条不出。
+
+**雷达共享件（本 spec §1.2 参数 + 泛化）**
+
+- `web/src/lib/radar.ts` 扩 `RADAR_BAND_BOUNDS = [99, 80, 70, 60, 50]`、`bandFrac(v)`（分母 99、钳 [0,99]）、`tierColorOf(v)`（与既有 `attrClass` 同阈值，五档边界两侧一一对应）。
+- `web/src/components/AttrRadar.tsx` 泛化：`variant: 'head' | 'big' | 'small' | 'mini'` + `bands: 'tier' | 'neutral'` + `ariaHidden`。几何：head 232×156 cx116 cy78 R48（本 spec §1.2 原值）/ big 170×176 cx85 cy88 R62 / small 120×104 cx60 cy52 R40 / mini 同 small 但无文字、无白点、`aria-hidden`。
+- **唯一有意视觉差异（登记）**：对比页用 `bands="neutral"` —— 只画 55% 环线与档界、不铺五档底色。理由：对比页是多人对拍场合，五档底色会与球员本命色抢注意力；球员页保持 `tier` 五档色（本 spec §1.2 终稿）。
+- **有意行为变化（登记）**：`AttrRadar` 跳过「全空序列」（`raw.some((v) => (v ?? 0) > 0)` 不成立即不画数据多边形与白点）。被替换掉的对比页私有实现（`RadarChart` / `MiniRadar` / `dataPoints`）是**无条件**画多边形（null 经 `axisValue` 归 0 ⇒ 退化到圆心），长尾球员（`game_attrs = null`）会出「塌成一点」的假图。统一后：无存档球员不出多边形，图例与属性表「—」仍在 ⇒ e2e ⑤f 断言改为数据驱动期望（见下）。
+
+**同轮顺带修复**
+
+- `web/src/lib/ref.ts` `positionName` 补空槽护栏：原实现 `Number(null) === 0`，而 `position.json` 的 id 0 是 GK ⇒ 空槽被错译成门将，热区图会凭空给 GK 块上主位绿、球员页多一枚 GK 芯片。新口径与后端同款（`src/worker/routes/market.ts:465-467` 的 `slotNames`、`src/worker/shop-ops.ts:157-161` 的 `hotZonesOf` 都是「槽位缺失归 null」）。
+- `.attr-*` 缺 `fill` 修复（本 spec §1.2 登记的缺陷）：`web/src/styles.css` 的 `.attr-*` 只设 `color`，SVG `<text>` 不吃 `color` ⇒ 轴数值套档色未生效；补同值 `fill`。
+- 徽章 / PlayStyle 统一（同轮另一主题，另见 `docs/superpowers/specs/2026-10-06-badge-playstyle-unification-design.md`）：与热区图无耦合，仅共用 `.attr-head` 三列布局。
+
+**e2e 口径（⑤f / ⑯）**
+
+- ⑤f 改为「探针取样」：`/api/players?limit=30` 全量拉详情，判据与渲染同源 —— 「有可上雷达的存档」= 内联六组轴键表（照抄 `web/src/lib/ref.ts` 的 `ATTR_GROUPS`）与门将六轴表（照抄 `web/src/lib/radar.ts` 的 `GK_RADAR`）逐轴算**组均 > 0**（`drawsWith` 照抄 `groupAverage`，含 `Number(null) === 0` 算有效值），「有位置数据」= `PosID1..4` 任一命中 `web/assets/ref/position.json` 里 `name !== '-'` 的 id 集（与 `positionName` 护栏、后端 `hotZonesOf` 同口径）。期望值由数据推、取样优先有存档球员；本地只有 1 名有存档 ⇒ 多边形断言按实际期望降级并 `console.warn` 备注（不再硬钉 2/3 条，否则「本地无存档」会假红）。评审 P2-3：此前探针判据（任一非元数据数值 > 0 / `PosID ≥ 0`）宽于渲染判据，真数据一变就假红。
+- ⑯ 补 375 属性页签断言（空态闸门：无存档 ⇒ `.attr-head` 零个）＋末段「有存档球员」头部几何（375：5 环带、白点 = 数据多边形 × 6、热区两态自洽、零横向溢出；1280：有位置数据三列 / 无位置数据两列）。
+
+**收口轮评审修正（2026-10-06 · code-review-skill 审 `38e5a5c..HEAD`，无 P0）**
+
+- **登记（P3-6）**：单人对比页的雷达 aria-label 由「六维雷达（双色叠图）」改为「六维雷达」——「双色叠图」只在 2 人态成立，1 人态说叠图是错的；2 人态文案不变。
+- **登记（P3-7）**：`heatStateOf` 注释原写「其余（≤3）副位」与实现不符（不封顶），已改「其余副位（不封顶，超出 3 个位置码也照铺 —— 属性表能存满 4 槽）」。
+- **P3-9**：`web/src/lib/radar.ts` 的 `axisValue` 与 `bandFrac` 重复 clamp 收成模块私有 `clamp99`（行为不变，`axisValue` 仍导出供测试与对比页表格用）。

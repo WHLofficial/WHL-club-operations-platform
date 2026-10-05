@@ -560,6 +560,17 @@ a.card:hover {
   color: var(--badge-gold-fg);
 }
 
+/* 徽章计数的 text 密度（BadgeCounts 的 badge-count-text-*，表格单元格用）：金/银分色走 --badge-* token。
+   对比页的 .cmp-badgecnt（本文件更靠后，color: var(--muted)）会盖掉这层 —— 两列计数在对比页保持同色对齐，
+   要改对比页配色改那边；icon 密度不铺色（🥇/🥈 自带颜色，只作类名钩子）。 */
+.badge-count-text-gold {
+  color: var(--badge-gold-fg);
+}
+
+.badge-count-text-silver {
+  color: var(--badge-silver-fg);
+}
+
 /* 徽章计数 chip（BadgeCounts 的 chip 密度，v6.35.0 自 .lib-card-chip-gold/silver 收进来）：
    与「自由身」chip（.lib-card-free）同族的方块，金/银只换 --badge-* 三色 */
 .badge-chip {

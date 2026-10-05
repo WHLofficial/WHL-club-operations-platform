@@ -7,7 +7,7 @@
 import type { ReactElement } from 'react';
 import { COL_DEFS, attrClass, money, parseColsParam, type SortKey } from './players-library.ts';
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleIsGold } from './ref.ts';
-import { PS_GOLD_BASE, isGoldPlaystyleId } from '../../../src/core/fc26.ts';
+import { basePlaystyleId } from '../../../src/core/fc26.ts';
 import { BadgeCounts, badgeCountItems } from '../components/BadgeCounts.tsx';
 import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
@@ -185,7 +185,7 @@ export function psBadgesOf(row: { psIds?: (number | null)[] | null }): PsBadgeRe
   row.psIds.forEach((v, slot) => {
     if (v === null || !Number.isInteger(v) || v <= 0) return;
     const gold = playstyleIsGold(v, slot + 1);
-    out.push({ psid: isGoldPlaystyleId(v) ? v - PS_GOLD_BASE : v, gold });
+    out.push({ psid: basePlaystyleId(v), gold });
   });
   return out;
 }

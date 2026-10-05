@@ -36,12 +36,15 @@ const AXIS_BY_KEY: ReadonlyMap<string, RadarAxis> = new Map(
   [...GK_RADAR, ...ATTR_GROUPS].map((g): [string, RadarAxis] => [g.key, g]),
 );
 
+// 归一分母 99（顶格＝属性上限）：先钳 [0,99] 再除 —— axisValue 与 bandFrac 共用这一份，别各写一遍
+const clamp99 = (v: number): number => Math.min(Math.max(v, 0), 99);
+
 // 轴值归一：组均钳 [0,99] 后除 99（与 AttrRadar 的 min(max(v,0),99)/99 同口径）；
 // 未知轴键 / 无有效值 / 非数一律按 0
 export function axisValue(attrs: Record<string, unknown>, key: string): number {
   const axis = AXIS_BY_KEY.get(key);
   const avg = axis ? groupAverage(axis.keys, attrs) : null;
-  return Math.min(Math.max(avg ?? 0, 0), 99) / 99;
+  return clamp99(avg ?? 0) / 99;
 }
 
 // ★/☆ 档位文案（原 Player.tsx:67-70 逐字口径）：≤0 或非有限 → '—'；封顶 5 星。
@@ -79,5 +82,5 @@ export const RADAR_BAND_BOUNDS = [99, 80, 70, 60, 50] as const;
 
 // 值 → 半径占比：归一分母 99（与 axisValue 同口径），钳 [0,99]
 export function bandFrac(v: number): number {
-  return Math.min(Math.max(v, 0), 99) / 99;
+  return clamp99(v) / 99;
 }

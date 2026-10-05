@@ -46,7 +46,7 @@ export function heatPositionsOf(posCodes: readonly string[]): HeatCode[] {
   return [...new Set(posCodes.filter((c) => CODE_SET.has(c)))] as HeatCode[];
 }
 
-// 位置码 → 三态：首码主位、其余（≤3）副位；空/全非法一律 none。
+// 位置码 → 三态：首码主位、其余副位（不封顶，超出 3 个位置码也照铺 —— 属性表能存满 4 槽）；空/全非法一律 none。
 // 纯门将（isGk 且只有 GK）只 GK 块主位绿、其余照常在场淡显；GK 兼场员按位置顺序照常铺绿。
 export function heatStateOf(posCodes: readonly string[], isGk: boolean): Record<HeatCode, HeatState> {
   const state = {} as Record<HeatCode, HeatState>;

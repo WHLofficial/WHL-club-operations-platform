@@ -19,6 +19,8 @@ import {
   type ClubColRow,
 } from './club-columns.tsx';
 import { COL_DEFS } from './players-library.ts';
+import { BadgeCounts } from '../components/BadgeCounts.tsx';
+import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
 describe('固定列（v6.30.0 C 段）', () => {
   it('阵容名单 11 列：键与文案逐列一致、顺序不可改', () => {
@@ -233,5 +235,31 @@ describe('可选列单元格渲染（与球员库共用一份，元素级断言�
 
   it('认不出的列键出「—」', () => {
     expect(childOf('mystery', row)).toBe('—');
+  });
+
+  // v6.35.0 徽章/PlayStyle 统一：这两个单元格是本轮唯一改过的表格组装点，spec §4 登记过「只有底层单测、
+  // 组装层无断言」的缺口 —— 这里用元素级断言补上（不渲染 DOM，与上面几例同法）。
+  it('徽章列：两枚全 0 出「—」，有值走 BadgeCounts 的 text 密度（v6.35.0）', () => {
+    expect(childOf('badges', row)).toBe('—');
+    const cell = childOf('badges', { ...row, badgesSilver: 3, badgesGold: 2 }) as ReactElement<{
+      silver: number;
+      gold: number;
+      density: string;
+    }>;
+    expect(cell.type).toBe(BadgeCounts);
+    expect(cell.props).toMatchObject({ silver: 3, gold: 2, density: 'text' });
+  });
+
+  it('ps 列：无 psIds / 全是空槽出「—」，有徽章走 PlaystyleBadge compact 并归一金段 ID（v6.35.0）', () => {
+    expect(childOf('ps', row)).toBe('—');
+    expect(childOf('ps', { ...row, psIds: [null, 0, 1.5, -3] })).toBe('—');
+    // 下标 0 的银段 1 ⇒ 槽 1 银徽；下标 12 的金段 103 ⇒ 槽 13 金徽，psid 归一成基础 ID 3
+    const psIds = [1, null, null, null, null, null, null, null, null, null, null, null, 103];
+    const badges = childOf('ps', { ...row, psIds }) as ReactElement<{ psid: number; gold: boolean; compact: boolean }>[];
+    expect(badges.map((b) => b.type)).toEqual([PlaystyleBadge, PlaystyleBadge]);
+    expect(badges.map((b) => b.props)).toEqual([
+      { psid: 1, gold: false, compact: true },
+      { psid: 3, gold: true, compact: true },
+    ]);
   });
 });
