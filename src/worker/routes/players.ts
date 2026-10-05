@@ -947,7 +947,8 @@ app.get('/players/:id', async (c) => {
   if (!p) throw new HttpError(404, '球员不存在');
   const id = p.id;
 
-  const [club, contract, ticksRow] = await Promise.all([
+  // 影响力系数（v6.34.0 增量 1）：与列表端点共用 influenceCoefs，保证两端逐值一致
+  const [club, contract, ticksRow, coefs] = await Promise.all([
     p.club_id
       ? c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(p.club_id).first<{ id: number; name: string }>()
       : Promise.resolve(null),
@@ -972,6 +973,7 @@ app.get('/players/:id', async (c) => {
         signed_window_seq: number | null;
       }>(),
     c.env.DB.prepare(`SELECT ${CURRENT_TICKS_SQL} AS n`).first<{ n: number }>(),
+    influenceCoefs(c.env.DB),
   ]);
   // 窗刻度（v3.0.0）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
   const currentTicks = ticksRow?.n ?? 0;
@@ -1081,6 +1083,9 @@ app.get('/players/:id', async (c) => {
       marker: markerOf(p.base_ca ?? p.ca, p.pa, p.growable === 1, p.ca),
       growable: p.growable === 1,
       prestige: p.prestige,
+      // 影响力（v6.34.0 增量 1）：与列表端点同口径同源——走 players.ca/pa 原始列（与属性 view 无关），
+      // 供球员对比页与列表逐值对齐
+      influence: influenceOf(coefs, p.ca, p.pa, p.growable === 1, p.prestige),
       marketValue: p.market_value,
       status: p.status,
       growthTier: p.growth_tier,

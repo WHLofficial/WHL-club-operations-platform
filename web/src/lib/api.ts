@@ -315,6 +315,10 @@ export interface PlayerDetail {
   player: PlayerListItem & {
     foot: number;
     growable: boolean;
+    /** 影响力（v6.34.0 增量 1）：规则 4.1.3 现值口径（与属性 view 无关），与球员库列表同源同值 */
+    influence: number;
+    /** FC26 存档 id（v4.0.0 寻址口径）：详情响应实际下发，补上此前的类型缺口 */
+    fcId: number | null;
     growthXp: number;
     gameAttrs: Record<string, unknown> | null;
     createdAt: string;

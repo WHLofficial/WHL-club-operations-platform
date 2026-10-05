@@ -421,6 +421,31 @@ describe('球员查询（附录 A〔1〕）', () => {
     expect(body.contract).toMatchObject({ releaseFee: 50, source: 'import' });
   });
 
+  it('球员卡：influence 与列表端点逐值一致、两位小数口径', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx);
+    // 夹具声望列默认 0（影响力恒 0 比不出东西），给球员一补上非零声望：
+    // growable(默认 1) / ca 88(8 档) / pa 92(9 档) / prestige 5 → 0.25 × ((8+9)/2) × 5 = 10.625 → ROUND 2 = 10.63
+    fx.sqlite.prepare('UPDATE players SET prestige = 5 WHERE id = 1').run();
+
+    const listRes = await get('/api/players?club_id=1', undefined, fx.env);
+    const listBody = (await listRes.json()) as { players: { id: number; influence: number }[] };
+    const listed = listBody.players.find((p) => p.id === 1)!;
+    expect(typeof listed.influence).toBe('number');
+    expect(listed.influence).toBe(10.63);
+
+    const res = await get('/api/players/1', undefined, fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { player: { influence: number; fcId: number | null } };
+    expect(typeof body.player.influence).toBe('number');
+    // 两位小数口径：10.625 经 ROUND 2 进位到 10.63（不是截断成 10.62）
+    expect(body.player.influence).toBe(10.63);
+    // 与列表端点同一球员逐值相等（对比页两端读同一口径）
+    expect(body.player.influence).toBe(listed.influence);
+    // 详情按 fc_id 寻址并把 fcId 下发（对比页据此与列表行对齐）
+    expect(body.player.fcId).toBe(1);
+  });
+
   it('不存在的球员 404', async () => {
     const fx = freshEnv();
     expect((await get('/api/players/999', undefined, fx.env)).status).toBe(404);
