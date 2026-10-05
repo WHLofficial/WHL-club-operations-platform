@@ -120,8 +120,8 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 78 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0/v6.28.0 各域参数）', () => {
-    expect(CONFIG_KEYS.length).toBe(78);
+  it('注册表 80 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0/v6.28.0/v6.33.1 各域参数）', () => {
+    expect(CONFIG_KEYS.length).toBe(80);
   });
 
   // v6.28.0 A/B 段：级别系数（影响力公式）与每场死忠系数
@@ -140,5 +140,28 @@ describe('config 服务（§13）', () => {
     const rows = await service.listMasked();
     expect(rows.find((r) => r.key === 'influence_tier_coefs')).toMatchObject({ secret: false, value: CONFIG_DEFAULTS.influence_tier_coefs });
     expect(rows.find((r) => r.key === 'fans_grow_rate_per_match')).toMatchObject({ secret: false, value: '0.2' });
+  });
+
+  // v6.33.1 特例期两键：名册是否含训练营、注册校验放行档。默认都是「平常口径」，
+  // 两键都非涉密（管理端配置页可见可改），坏值不在这里解析、由消费方白名单回落。
+  it('squads_include_trainee / registration_check_mode 键在册、默认值与 CONFIG_DEFAULTS 同源、列表不掩码', async () => {
+    expect(CONFIG_KEYS).toContain('squads_include_trainee');
+    expect(CONFIG_KEYS).toContain('registration_check_mode');
+    const { service } = setup();
+    // 库中无覆盖时读默认：名册默认不含训练营、校验默认照拦
+    await expect(service.get('squads_include_trainee')).resolves.toBe('false');
+    await expect(service.get('registration_check_mode')).resolves.toBe('enforce');
+    // 同源锁：服务返回值 = CONFIG_DEFAULTS 里的那份（别在别处再写一张默认表）
+    expect(CONFIG_DEFAULTS.squads_include_trainee).toBe('false');
+    expect(CONFIG_DEFAULTS.registration_check_mode).toBe('enforce');
+    // 覆盖读回：管理端把开关打开后，service 立刻读到新值（set 负责失效该键缓存）
+    await service.set('squads_include_trainee', 'true');
+    await service.set('registration_check_mode', 'warn');
+    await expect(service.get('squads_include_trainee')).resolves.toBe('true');
+    await expect(service.get('registration_check_mode')).resolves.toBe('warn');
+    // 非涉密：管理端视图出真值
+    const rows = await service.listMasked();
+    expect(rows.find((r) => r.key === 'squads_include_trainee')).toMatchObject({ secret: false, value: 'true' });
+    expect(rows.find((r) => r.key === 'registration_check_mode')).toMatchObject({ secret: false, value: 'warn' });
   });
 });

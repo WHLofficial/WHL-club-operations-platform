@@ -217,7 +217,10 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
   });
   const [filter, setFilter] = useState<SquadFilter>('all');
   const [busy, setBusy] = useState(false);
-  const [issues, setIssues] = useState<SquadIssue[] | null>(squad.compliance && !squad.compliance.pass ? squad.compliance.issues : null);
+  // 特例期 off 档不挂红字（v6.33.1）：compliance 即使不通过也保持空白
+  const [issues, setIssues] = useState<SquadIssue[] | null>(
+    squad.checkMode !== 'off' && squad.compliance && !squad.compliance.pass ? squad.compliance.issues : null,
+  );
   const [lastResult, setLastResult] = useState<RegistrationResult | null>(null);
 
   // v6.30.0 C 段：可选列进 URL（?regcols=）—— 与阵容名单的 ?cols= 分开键，两张表在不同页签，防串味
@@ -282,7 +285,8 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
       const trainee = squad.players.filter((p) => assign[p.id] === 'trainee').map((p) => p.id);
       const res = await apiPost<RegistrationResult>('/api/club/registrations', { firstTeam, trainee });
       setLastResult(res);
-      setIssues(null);
+      // warn 档放行后要把真实体检结果继续挂成红字；off 档隐藏；enforce 通过时 issues 恒为 []（清空）
+      setIssues(res.checkMode !== 'off' && res.issues.length > 0 ? res.issues : null);
       show(`注册名单已提交：一线队 ${res.firstTeam} 人、训练营 ${res.trainee} 人。`);
       onRefresh();
     } catch (err) {
@@ -315,6 +319,17 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             {LEAGUE_TIER_LABEL[squad.rules.tier] ?? squad.rules.tier}
           </span>{' '}
           已由赛事报名派生，可正常提交注册。
+        </div>
+      )}
+      {/* v6.33.1 特例期放行档：off 隔离 / warn 提示；enforce（正常档）不挂提示条 */}
+      {squad.checkMode === 'off' && (
+        <div className="banner warn">
+          特例期：注册校验已隔离——提交只做归属/重复校验，人数、门将、训练营资格都不再拦，管理员已临时放行。
+        </div>
+      )}
+      {squad.checkMode === 'warn' && (
+        <div className="banner info">
+          特例期：注册校验为提示模式——红字是真实体检结果，不通过也可以提交。
         </div>
       )}
       {!rules ? (
@@ -437,7 +452,8 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
               </ul>
             </div>
           )}
-          {issues === null && squad.compliance?.pass && lastResult === null && (
+          {/* 绿「通过」条在 off 档不出现（v6.33.1）：隔离期里它会被误读成管理员真做了体检 */}
+          {issues === null && squad.checkMode !== 'off' && squad.compliance?.pass && lastResult === null && (
             <div className="banner ok">资格检查通过，可以安心开赛。</div>
           )}
           {lastResult !== null && (

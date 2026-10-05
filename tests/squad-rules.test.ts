@@ -1,6 +1,6 @@
 // 合规引擎单测（规则 4.2）：人数/门将/训练营/CA·PA 梯度/工资帽/合同
 import { describe, expect, it } from 'vitest';
-import { checkSquad, DEFAULT_CA_PA_LIMITS, MARKER_WEIGHT, markerOf, markerWeightSql, TRAINEE_WAGE, type SquadPlayer, type SquadRuleContext } from '../src/core/squad-rules.ts';
+import { checkSquad, DEFAULT_CA_PA_LIMITS, MARKER_WEIGHT, markerOf, markerWeightSql, parseRegistrationCheckMode, TRAINEE_WAGE, type SquadPlayer, type SquadRuleContext } from '../src/core/squad-rules.ts';
 
 function player(overrides: Partial<SquadPlayer> = {}): SquadPlayer {
   return {
@@ -226,5 +226,29 @@ describe('markerOf 三档互斥切分', () => {
     expect(bare).not.toContain('players.');
     expect(bare).toContain('COALESCE(base_ca, ca) >= 90');
     expect(bare).toContain('pa >= 87 AND growable = 1 AND ca < pa');
+  });
+});
+
+// 注册校验放行档（v6.33.1）：config 原始值是自由文本，解析必须白名单化——
+// 只有 'warn' / 'off' 被原样认下，其余（含 NULL、空串、脏值）一律回落 'enforce'，
+// 保证「坏值绝不意外放行」。大小写、前后空格都按「非白名单成员」处理。
+describe('parseRegistrationCheckMode 白名单解析', () => {
+  it('白名单三值：enforce / warn / off', () => {
+    expect(parseRegistrationCheckMode('enforce')).toBe('enforce');
+    expect(parseRegistrationCheckMode('warn')).toBe('warn');
+    expect(parseRegistrationCheckMode('off')).toBe('off');
+  });
+
+  it('缺值与空串回落 enforce（未配置 = 照拦，不是放行）', () => {
+    expect(parseRegistrationCheckMode(null)).toBe('enforce');
+    expect(parseRegistrationCheckMode(undefined)).toBe('enforce');
+    expect(parseRegistrationCheckMode('')).toBe('enforce');
+  });
+
+  it('脏值与大小写变体回落 enforce', () => {
+    expect(parseRegistrationCheckMode('乱写')).toBe('enforce');
+    expect(parseRegistrationCheckMode('ENFORCE')).toBe('enforce');
+    expect(parseRegistrationCheckMode('WARN')).toBe('enforce');
+    expect(parseRegistrationCheckMode('off ')).toBe('enforce');
   });
 });

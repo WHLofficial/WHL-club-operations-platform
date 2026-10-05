@@ -167,6 +167,8 @@ app.get('/compliance', async (c) => {
       const firstTeam = mine.filter((r) => r.squad === 'first_team').map(toSp);
       const trainee = mine.filter((r) => r.squad === 'trainee').map(toSp);
       const rules = await loadSquadContext(c.env.DB, tier);
+      // 管理端扫描永远算真实体检：特例期的 registration_check_mode（教练侧放行档）故意不作用于这里，
+      // 否则「放行档」会连着管理组的眼睛一起关掉，事后无从核对哪些队是带着问题过的。
       const result = checkSquad(firstTeam, trainee, rules);
       return {
         clubId: club.id,

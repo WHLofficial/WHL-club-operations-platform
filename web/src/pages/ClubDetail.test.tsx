@@ -23,16 +23,20 @@ import type {
   MyClubOverview,
   PlayerLibraryRow,
   PlayersLibraryResponse,
+  SquadCompliance,
   SquadOverview,
   SquadPlayerRow,
+  SquadRules,
   StadiumInfo,
 } from '../lib/api.ts';
 import ClubDetail from './ClubDetail.tsx';
 
-const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
-// mediaUrl 给真实现（TeamLogo 要用它把 logoKey 折成 /api/media/*）
+const { apiMock, apiPostMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiPostMock: vi.fn() }));
+// mediaUrl 给真实现（TeamLogo 要用它把 logoKey 折成 /api/media/*）；
+// apiPost 只在注册工作台的提交用例里用到（v6.33.1），其余用例不会触发。
 vi.mock('../lib/api.ts', () => ({
   api: apiMock,
+  apiPost: apiPostMock,
   mediaUrl: (key: string | null | undefined) => (key ? `/api/media/${key}` : null),
 }));
 
@@ -210,7 +214,30 @@ function squadFixture(clubId: number): SquadOverview {
     players: [],
     registration: null,
     compliance: null,
+    // v6.33.1：放行档为必填字段（未绑队的早退响应也带）
+    checkMode: 'enforce',
     rules: null,
+  };
+}
+
+// 注册工作台要 rules 非空才挂出表格与提交按钮（既有用例在自家页签里内联了一份同值规则）
+const DESK_RULES: SquadRules = {
+  squadMin: 18,
+  squadMax: 30,
+  gkMin: 2,
+  traineeMax: 10,
+  wageCap: 20,
+  limits: { ge90: 2, ge87: 4, growthPa87: 6 },
+  tier: 'premier',
+};
+
+// 体检夹具（v6.33.1）：放行档用例只关心 issues 怎么被展示，stats 给一份能过类型的零头
+function complianceFixture(patch: Partial<SquadCompliance> = {}): SquadCompliance {
+  return {
+    pass: false,
+    issues: [{ rule: 'squad_size', message: '一线队人数不足 18 人', playerIds: [] }],
+    stats: { firstTeam: 1, trainee: 0, goalkeepers: 0, ge90: 0, ge87: 0, growthPa87: 0, wageTotal: 0.5 },
+    ...patch,
   };
 }
 
@@ -423,6 +450,7 @@ async function clickTab(user: ReturnType<typeof userEvent.setup>, label: string)
 afterEach(() => {
   cleanup();
   apiMock.mockReset();
+  apiPostMock.mockReset();
   authState.user = null;
 });
 
@@ -1051,6 +1079,86 @@ describe('自家页签：工作台与主场', () => {
     expect(within(desk).getAllByRole('columnheader')).toHaveLength(12);
     expect(within(desk).getByRole('columnheader', { name: '合同类型' })).toBeTruthy();
     expect((firstRow.querySelectorAll('td')[11] as HTMLElement).textContent).toBe('正式合同');
+  });
+
+  it('特例期 warn 档：挂提示模式 banner；体检不通过时红字照挂、不显示「通过」绿条', async () => {
+    authState.user = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false } satisfies MeUser;
+    stubApi({
+      me: meFixture(1),
+      squad: {
+        ...squadFixture(1),
+        checkMode: 'warn',
+        rules: DESK_RULES,
+        players: [deskPlayer({ id: 7, name: '张三' })],
+        compliance: complianceFixture(),
+      },
+    });
+    renderDetail('/clubs/1');
+
+    expect(await screen.findByText(/特例期：注册校验为提示模式/)).toBeTruthy();
+    // warn 档红字是真实体检结果，照挂；绿「通过」条不得出现
+    expect(screen.getByText('一线队人数不足 18 人')).toBeTruthy();
+    expect(screen.queryByText('资格检查通过，可以安心开赛。')).toBeNull();
+  });
+
+  it('特例期 warn 档：提交成功后继续用响应里的 issues 挂红字，不清空', async () => {
+    authState.user = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false } satisfies MeUser;
+    stubApi({
+      me: meFixture(1),
+      squad: {
+        ...squadFixture(1),
+        checkMode: 'warn',
+        rules: DESK_RULES,
+        players: [deskPlayer({ id: 7, name: '张三' })],
+        compliance: complianceFixture({ issues: [{ rule: 'squad_size', message: '提交前：一线队人数不足', playerIds: [] }] }),
+      },
+    });
+    apiPostMock.mockResolvedValueOnce({
+      ok: true,
+      season: 9,
+      firstTeam: 1,
+      trainee: 0,
+      wageTotal: 0.5,
+      checkMode: 'warn',
+      issues: [{ rule: 'gk', message: '提交后：门将不足', playerIds: [] }],
+    });
+    const user = userEvent.setup();
+    renderDetail('/clubs/1');
+
+    const desk = (await screen.findByText(/注册工作台/)).closest('section') as HTMLElement;
+    await user.click(within(desk).getByRole('button', { name: '提交注册名单' }));
+
+    // 提交成功的绿「注册完成」条照出，红字换成响应里的 issues（不是被清空）
+    expect(await screen.findByText(/第 9 赛季注册完成/)).toBeTruthy();
+    expect(screen.getByText('提交后：门将不足')).toBeTruthy();
+    expect(screen.queryByText('提交前：一线队人数不足')).toBeNull();
+    expect(apiPostMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('特例期 off 档：挂隔离 banner，体检不通过也不挂红字；恰好通过也不冒充「通过」', async () => {
+    authState.user = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false } satisfies MeUser;
+    const squad = (compliance: SquadCompliance): SquadOverview => ({
+      ...squadFixture(1),
+      checkMode: 'off',
+      rules: DESK_RULES,
+      players: [deskPlayer({ id: 7, name: '张三' })],
+      compliance,
+    });
+    stubApi({ me: meFixture(1), squad: squad(complianceFixture()) });
+    renderDetail('/clubs/1');
+
+    expect(await screen.findByText(/特例期：注册校验已隔离/)).toBeTruthy();
+    expect(screen.queryByText(/名单没过注册校验/)).toBeNull();
+    expect(screen.queryByText('一线队人数不足 18 人')).toBeNull();
+    expect(screen.queryByText('资格检查通过，可以安心开赛。')).toBeNull();
+
+    // 第二段：快照体检恰好 pass=true 时，off 档同样不显示「通过」绿条（它会被误读成真做过体检）
+    cleanup();
+    apiMock.mockReset();
+    stubApi({ me: meFixture(1), squad: squad(complianceFixture({ pass: true, issues: [] })) });
+    renderDetail('/clubs/1');
+    expect(await screen.findByText(/特例期：注册校验已隔离/)).toBeTruthy();
+    expect(screen.queryByText('资格检查通过，可以安心开赛。')).toBeNull();
   });
 
   it('主场：主场档案（影响力级别系数文案）+ 近期主场战报 + 去消费中心的一行入口', async () => {

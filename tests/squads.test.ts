@@ -5,6 +5,8 @@
 //    同步后会被改写成这里的值，出错了就是把赛事系统写脏；
 // ③ `fcId` 必有（赛事系统以它当 player 主键），所以 `fc_id` 为空的行不出。
 // 另加两条「省 D1 额度」锁死：全平台只跑一条 JOIN（不按俱乐部 N+1）、且不走 players 全表扫。
+// v6.33.1 特例期：名册是否含训练营由 config `squads_include_trainee` 决定（默认 false=旧口径），
+// 行内 `squad` 字段随之区分 first_team / trainee。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -66,7 +68,12 @@ function seed(fx: Fixture): void {
 }
 
 interface SquadsBody {
-  squads: { clubId: number; clubName: string; players: { fcId: number; name: string; number: string | null }[] }[];
+  squads: {
+    clubId: number;
+    clubName: string;
+    // v6.33.1：行内带名册档位；默认口径（不含训练营）下只可能全是 first_team
+    players: { fcId: number; name: string; number: string | null; squad: string }[];
+  }[];
 }
 
 describe('全平台一线队名册（v5.0.0）', () => {
@@ -85,15 +92,15 @@ describe('全平台一线队名册（v5.0.0）', () => {
     const city = body.squads[0];
     expect(city.clubId).toBe(1);
     expect(city.players).toEqual([
-      // fc_id 升序；304（trainee）不在
-      { fcId: 212602, name: 'Ederson', number: null },
-      { fcId: 239085, name: 'Erling Haaland', number: '9' },
+      // fc_id 升序；304（trainee）不在；默认开关下人人 first_team
+      { fcId: 212602, name: 'Ederson', number: null, squad: 'first_team' },
+      { fcId: 239085, name: 'Erling Haaland', number: '9', squad: 'first_team' },
     ]);
 
     const arsenal = body.squads[1];
     expect(arsenal.clubId).toBe(2);
     // 303 没有 display_name ⇒ 回落官方缩写名；306 没有 fc_id ⇒ 整行不出
-    expect(arsenal.players).toEqual([{ fcId: 201101, name: 'M. Ødegaard', number: '8' }]);
+    expect(arsenal.players).toEqual([{ fcId: 201101, name: 'M. Ødegaard', number: '8', squad: 'first_team' }]);
 
     // 自由身（club_id 为 NULL）永远不在任何队里
     const all = body.squads.flatMap((s) => s.players.map((p) => p.fcId));
@@ -108,8 +115,12 @@ describe('全平台一线队名册（v5.0.0）', () => {
 
     const joins = fx.captured.filter((sql) => /JOIN clubs/.test(sql));
     expect(joins).toHaveLength(1);
-    // 除这条聚合语句外不该有第二条业务查询
-    expect(fx.captured).toHaveLength(1);
+    // 业务面除这条聚合语句外不该有第二条查询。多出来的那条是 v6.33.1 的名册开关
+    // squads_include_trainee——config 点查（isolate 内 60s 记忆化），不是又跑了一趟名册；
+    // 所以这里不锁「捕获总数 = 1」，只锁「业务查询（JOIN / 其余）各自恰好一条」。
+    const configReads = fx.captured.filter((sql) => /FROM config/.test(sql));
+    expect(configReads).toHaveLength(1);
+    expect(fx.captured.filter((sql) => !/JOIN clubs/.test(sql) && !/FROM config/.test(sql))).toHaveLength(0);
 
     const plan = fx.sqlite.prepare(`EXPLAIN QUERY PLAN ${joins[0]}`).all() as { detail: string }[];
     // 线上 18,301 行：全表扫就是 18× 浪费。优化器实测走 `idx_players_status (status=?)`
@@ -118,5 +129,34 @@ describe('全平台一线队名册（v5.0.0）', () => {
     expect(detail).toContain('SEARCH p');
     expect(detail).not.toContain('SCAN p');
     expect(detail).toContain('SEARCH c USING INTEGER PRIMARY KEY');
+  });
+
+  it('特例期开关 squads_include_trainee=true：训练营球员随队下发且标 squad=trainee', async () => {
+    const fx = freshEnv();
+    seed(fx);
+    // 开关必须在第一次请求前落库：config 服务是 isolate 记忆化，读空后 60s 不再回库。
+    // （同一用例里若先请求过再改开关，必须补 resetConfigCache()，否则读到的是旧值）
+    fx.sqlite.exec(
+      "INSERT INTO config (key, value, updated_at) VALUES ('squads_include_trainee', 'true', '2026-01-01T00:00:00Z')",
+    );
+
+    const res = await app.request('/api/squads', {}, fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as SquadsBody;
+
+    const city = body.squads[0];
+    expect(city.clubId).toBe(1);
+    expect(city.players).toEqual([
+      // fc_id 升序：训练营 900001 从「整行不出」变为随队一行并标 trainee
+      { fcId: 212602, name: 'Ederson', number: null, squad: 'first_team' },
+      { fcId: 239085, name: 'Erling Haaland', number: '9', squad: 'first_team' },
+      { fcId: 900001, name: 'Joe Trainee', number: '30', squad: 'trainee' },
+    ]);
+    // 口径变化锁在 SQL 层：status 白名单同步扩到 trainee
+    expect(fx.captured.filter((sql) => /JOIN clubs/.test(sql))[0]).toContain("'trainee'");
+    // 开关只放训练营：自由身、无 fc_id 的行照旧不出（阿森纳侧原样）
+    const all = body.squads.flatMap((s) => s.players.map((p) => p.fcId));
+    expect(all).not.toContain(900002);
+    expect(body.squads[1].players).toEqual([{ fcId: 201101, name: 'M. Ødegaard', number: '8', squad: 'first_team' }]);
   });
 });

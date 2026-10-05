@@ -10,7 +10,7 @@ import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { PS_SLOT_COUNT } from '../../core/fc26.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { getOpenWindow, getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
-import { loadSquadContext } from '../squad-context.ts';
+import { loadRegistrationCheckMode, loadSquadContext } from '../squad-context.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, tierCache } from '../tier.ts';
 import { rowDisplayName } from '../../core/player-name.ts';
@@ -126,8 +126,10 @@ function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadP
 app.get('/club/squad', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.registrations.submit');
   const club = await getBoundClub(c.env, user.id);
+  // 放行档先读一次，两条返回路径共用（未绑队也要给出档位，前端才好决定挂不挂红字）
+  const checkMode = await loadRegistrationCheckMode(c.env.DB);
   if (!club) {
-    return c.json({ club: null, season: null, players: [], registration: null, compliance: null, rules: null });
+    return c.json({ club: null, season: null, players: [], registration: null, compliance: null, rules: null, checkMode });
   }
   const season = await getVisibleSeason(c.env.DB);
   const cache = tierCache();
@@ -209,6 +211,7 @@ app.get('/club/squad', async (c) => {
         }
       : null,
     compliance,
+    checkMode,
     rules: rules === null
       ? null
       : {
@@ -322,10 +325,11 @@ app.post('/club/registrations', async (c) => {
     throw new HttpError(400, '尚未在赛事平台报名，请等待赛事平台管理员确认报名', 'tier_pending');
   }
 
-  const [players, contractMap, rules] = await Promise.all([
+  const [players, contractMap, rules, checkMode] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
     loadSquadContext(c.env.DB, tier),
+    loadRegistrationCheckMode(c.env.DB),
   ]);
   const byId = new Map(players.map((p) => [p.id, p]));
   const allRequested = [...firstTeamIds, ...traineeIds];
@@ -340,7 +344,10 @@ app.post('/club/registrations', async (c) => {
   const trainee = traineeIds.map((id) => toSquadPlayer(byId.get(id)!, contractMap.get(id) ?? null));
 
   const result = checkSquad(firstTeam, trainee, rules);
-  if (!result.pass) {
+  // 放行档（v6.33.1 registration_check_mode）：只有 enforce 会拦；warn/off 一律放行，
+  // 且 issues 照常回给前端（warn 挂着当提示、off 由前端隐藏）——放行不等于把问题藏起来，
+  // 审计里也记下当时是哪一档放的行。
+  if (!result.pass && checkMode === 'enforce') {
     return c.json({ error: '名单没过注册校验', code: 'squad_invalid', issues: result.issues, stats: result.stats }, 422);
   }
 
@@ -382,7 +389,7 @@ app.post('/club/registrations', async (c) => {
       targetType: 'club',
       targetId: club.id,
       origin: 'user',
-      after: { season, firstTeam: firstTeamIds.length, trainee: traineeIds.length },
+      after: { season, firstTeam: firstTeamIds.length, trainee: traineeIds.length, checkMode },
     }),
   );
   await c.env.DB.batch(statements);
@@ -393,6 +400,9 @@ app.post('/club/registrations', async (c) => {
     firstTeam: firstTeamIds.length,
     trainee: traineeIds.length,
     wageTotal: result.stats.wageTotal,
+    checkMode,
+    /** 本次体检问题；enforce 下必为空（非空就 422 了），warn/off 下可能非空 */
+    issues: result.issues,
   });
 });
 

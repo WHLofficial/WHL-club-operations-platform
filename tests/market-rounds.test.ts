@@ -1487,8 +1487,8 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
 // ================= TC-CFG：配置 =================
 
 describe('招商轮配置（TC-CFG）', () => {
-  it('TC-CFG-01 CONFIG_KEYS 共 78 项，两个 market 键在册；默认值就位', async () => {
-    expect(CONFIG_KEYS).toHaveLength(78);
+  it('TC-CFG-01 CONFIG_KEYS 共 80 项，两个 market 键在册；默认值就位', async () => {
+    expect(CONFIG_KEYS).toHaveLength(80);
     expect(CONFIG_KEYS).toContain('market_round_rules');
     expect(CONFIG_KEYS).toContain('market_heat_rules');
     const fx = freshEnv();

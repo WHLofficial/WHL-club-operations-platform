@@ -597,6 +597,12 @@ export interface SquadCompliance {
   };
 }
 
+/**
+ * 注册校验放行档（v6.33.1 特例期开关 registration_check_mode）：
+ * enforce=照常拦；warn=体检照算照显示、但不拦提交；off=教练侧隔离（不体检、不挂红字）。
+ */
+export type RegistrationCheckMode = 'enforce' | 'warn' | 'off';
+
 export interface SquadPlayerRow {
   id: number;
   fcId: number | null;
@@ -641,6 +647,8 @@ export interface SquadOverview {
   players: SquadPlayerRow[];
   registration: { firstTeam: number[]; trainee: number[] } | null;
   compliance: SquadCompliance | null;
+  /** 当前放行档（v6.33.1）：未绑定队的早退响应也会带，按必填处理 */
+  checkMode: RegistrationCheckMode;
   rules: SquadRules | null;
 }
 
@@ -650,6 +658,10 @@ export interface RegistrationResult {
   firstTeam: number;
   trainee: number;
   wageTotal: number;
+  /** 提交时的放行档（v6.33.1） */
+  checkMode: RegistrationCheckMode;
+  /** 本次体检问题；enforce 通过时恒为 []，warn/off 下可能非空（off 由前端隐藏） */
+  issues: SquadIssue[];
 }
 
 export interface ContractImportPreview {

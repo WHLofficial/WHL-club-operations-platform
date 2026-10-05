@@ -60,6 +60,9 @@ export const CONFIG_KEYS = [
   'renewal_raise',
   'window_force_settle',
   'market_bid_paused',
+  // v6.33.1 特例期两键：①全平台名册是否含训练营（赛事侧临时放行）②注册校验放行档（enforce/warn/off）
+  'squads_include_trainee',
+  'registration_check_mode',
   'stadium_max_open_tier',
   'naming_params',
   'naming_industry_factors',
@@ -239,6 +242,11 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   renewal_raise: '0.05,0.15',
   window_force_settle: 'false',
   market_bid_paused: 'false',
+  // v6.33.1 特例期两键，默认都是「平常口径」：名册不含训练营、注册校验照拦。
+  // ① squads_include_trainee=true → /api/squads 把 trainee 也当一线队发给赛事系统（对外契约开关）；
+  // ② registration_check_mode=enforce|warn|off → 教练侧注册校验的放行档（管理端扫描不受它影响）。
+  squads_include_trainee: 'false',
+  registration_check_mode: 'enforce',
   // v6.26.0 消费中心：五类商品价目（M；JSON 可覆盖，键语义见 shop-ops）+ 豪门俱乐部名单
   //（队壳申请走群内咨询，系统只拦不收）+ FC26 当前版本 PA 上限（买 PA 不得超过）。
   shop_prices: JSON.stringify({
