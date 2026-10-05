@@ -48,9 +48,11 @@ export function renderNotification(template: string, data: Record<string, unknow
     case 'offer_expired':
       return `⌛ 报价过期：${data.player} 的报价已失效${data.reason === 'sold' ? '（球员已被卖家挂牌，报价通道关闭，冻结已退回）' : '（球员状态已变）'}，冻结已退回。`;
     case 'offer_auto_accepted':
-      return `🤝 自动同意：${data.player} 的 ${data.amount} m 报价达到最低报价线，已自动同意并挂牌。`;
+      // v6.33.0：文案不再说「最低报价线」——同意线来自公开标价，报价方自己的报价额就是参照
+      return `🤝 自动同意：${data.player} 的 ${data.amount} m 报价达到对方的线，已自动同意并挂牌。`;
     case 'offer_auto_rejected':
-      return `🚫 自动拒：${data.player} 的 ${data.amount} m 报价低于最低报价线（${data.min} m），直接被拒，冻结已退回。`;
+      // v6.33.0：不再携带私密最低报价数值（防底牌泄漏，设计 §3）
+      return `🚫 自动拒：${data.player} 的 ${data.amount} m 报价低于对方底线，直接被拒，冻结已退回。`;
     // 关窗期报价 / 意向单（v6.29.0）：同意不挂牌、开窗提醒、卖方确认挂牌、任一方了结（双方各收一条）
     case 'offer_intent_created':
       return `📝 意向单：${data.player} 的 ${data.amount} m 已谈拢，但转会窗没开——先挂成意向单，开窗后由卖方确认才生成挂牌。`;

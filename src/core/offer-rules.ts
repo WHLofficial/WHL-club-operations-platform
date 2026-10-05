@@ -42,12 +42,19 @@ export function otherTurn(turn: OfferTurn): OfferTurn {
 }
 
 /**
- * 自动应答判定（v6.4.0 改动 B：与转会名单解耦，用户裁决 2026-09-25）：设了最低报价即生效——
- * < 线一律 auto_reject（与开关无关，即时退回）；≥ 线且 offer_auto=1 才 auto_accept，
- * 否则返回 null 走人工谈判。没设最低报价（min_offer_price 为 null）返回 null。
+ * 自动应答判定（v6.33.0 双线）：拒线钉私密最低报价，同意线钉公开标价——
+ * < 最低报价一律 auto_reject（与开关无关，即时退回，砍价区间必进人工谈判）；
+ * ≥ 同意线（标价，未进名单无标价时回落最低报价，v6.4.0 语义）且 offer_auto=1 才 auto_accept。
+ * 两线都没设（都为 null）返回 null。标价与最低报价的区间校验由 setOfferSettings 保证（标价 ≥ 最低报价）。
  */
-export function autoRespondKind(minOfferPrice: number | null, offerAuto: number | null, amount: number): 'auto_accept' | 'auto_reject' | null {
-  if (minOfferPrice === null || !Number.isFinite(minOfferPrice)) return null;
-  if (amount < minOfferPrice) return 'auto_reject';
-  return offerAuto === 1 ? 'auto_accept' : null;
+export function autoRespondKind(
+  listPrice: number | null,
+  minOfferPrice: number | null,
+  offerAuto: number | null,
+  amount: number,
+): 'auto_accept' | 'auto_reject' | null {
+  if (minOfferPrice !== null && Number.isFinite(minOfferPrice) && amount < minOfferPrice) return 'auto_reject';
+  const line = listPrice !== null && Number.isFinite(listPrice) ? listPrice : minOfferPrice;
+  if (line === null || !Number.isFinite(line)) return null;
+  return offerAuto === 1 && amount >= line ? 'auto_accept' : null;
 }

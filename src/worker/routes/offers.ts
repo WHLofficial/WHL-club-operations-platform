@@ -1,6 +1,7 @@
 // 报价 / 议价路由（v6.3.0，设计 §4）：全部私有（登录 + 俱乐部身份），不走公开缓存。
 // 读路径先跑一遍全量惰性结算（含 offers 过期与自愈），与市场路由同口径。
-// offer-settings 挂在 /players/:id/offer-settings（PUT，三段路径，与 playersRoutes 的两段 GET 不冲突）。
+// offer-settings 挂在 /players/:id/offer-settings（PUT + GET，三段路径，与 playersRoutes 的两段 GET 不冲突）。
+// v6.33.0：GET 是设置面板的私密预填源（详情端点走公开缓存，不能个体化）。
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
@@ -29,6 +30,7 @@ interface OfferListRow {
   position: string | null;
   ca: number | null;
   pa: number | null;
+  list_price: number | null;
   buyer_club_id: number;
   seller_club_id: number;
   counterpart_name: string;
@@ -76,7 +78,7 @@ app.get('/offers', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT o.id, o.player_id, o.amount, o.init_amount, o.round, o.note, o.status, o.turn, o.listing_id, o.created_at, o.updated_at,
             o.buyer_club_id, o.seller_club_id, cb.name AS counterpart_name,
-            p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa
+            p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa, p.list_price
      FROM offers o
      JOIN players p ON p.id = o.player_id
      ${counterpartJoin}
@@ -106,7 +108,7 @@ app.get('/offers', async (c) => {
     box,
     items: rows.results.map((r) => ({
       id: r.id,
-      player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
+      player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa, listPrice: r.list_price },
       counterpart: { id: box === 'in' ? r.buyer_club_id : r.seller_club_id, name: r.counterpart_name },
       role: box === 'in' ? 'seller' : 'buyer',
       amount: r.amount,
@@ -136,7 +138,7 @@ app.get('/offers/:id', async (c) => {
   await settleOverdue(c.env, { origin: 'lazy_settle' });
 
   const r = await c.env.DB.prepare(
-    `SELECT o.*, ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.ca, p.pa,
+    `SELECT o.*, ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.ca, p.pa, p.list_price,
             cb.name AS buyer_name, cs.name AS seller_name
      FROM offers o
      JOIN players p ON p.id = o.player_id
@@ -168,6 +170,7 @@ app.get('/offers/:id', async (c) => {
       position: string | null;
       ca: number | null;
       pa: number | null;
+      list_price: number | null;
       buyer_name: string;
       seller_name: string;
     }>();
@@ -187,7 +190,7 @@ app.get('/offers/:id', async (c) => {
   return c.json({
     offer: {
       id: r.id,
-      player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
+      player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa, listPrice: r.list_price },
       buyerClub: { id: r.buyer_club_id, name: r.buyer_name },
       sellerClub: { id: r.seller_club_id, name: r.seller_name },
       amount: r.amount,
@@ -291,7 +294,7 @@ app.post('/offers/:id/withdraw', async (c) => {
   return c.json(await withdrawOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
-// PUT /api/players/:id/offer-settings —— 报价设置（设计 §2.1 + v6.4.0 改动 B 解耦，仅本队教练）
+// PUT /api/players/:id/offer-settings —— 报价设置（设计 §2.1 + v6.4.0 解耦 + v6.33.0 标价，仅本队教练）
 app.put('/players/:id/offer-settings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id);
@@ -300,7 +303,7 @@ app.put('/players/:id/offer-settings', async (c) => {
   const playerId = Number(c.req.param('id'));
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
   const body = (await c.req.raw.json().catch(() => null)) as
-    | { transferListed?: unknown; minOfferPrice?: unknown; offerAuto?: unknown; notForSale?: unknown }
+    | { transferListed?: unknown; minOfferPrice?: unknown; listPrice?: unknown; offerAuto?: unknown; notForSale?: unknown }
     | null;
   if (!body) throw new HttpError(400, '请求格式不对');
   if (typeof body.transferListed !== 'boolean' || typeof body.notForSale !== 'boolean') {
@@ -311,16 +314,55 @@ app.put('/players/:id/offer-settings', async (c) => {
       ? null
       : Number(body.minOfferPrice);
   if (minOfferPrice !== null && !Number.isFinite(minOfferPrice)) throw new HttpError(400, '最低报价金额不对（单位 m）');
+  const listPrice =
+    body.listPrice === null || body.listPrice === undefined || body.listPrice === '' ? null : Number(body.listPrice);
+  if (listPrice !== null && !Number.isFinite(listPrice)) throw new HttpError(400, '标价金额不对（单位 m）');
   const out = await setOfferSettings(c.env, {
     clubId: club.id,
     actor: user.id,
     playerId,
     transferListed: body.transferListed,
     minOfferPrice,
+    listPrice,
     offerAuto: body.offerAuto === true,
     notForSale: body.notForSale,
   });
   return c.json(out);
+});
+
+// GET /api/players/:id/offer-settings —— 设置面板的私密预填源（v6.33.0）：详情端点走公开缓存
+// 不能个体化，标价之外的私密最低报价只有这条端点回给本队教练
+app.get('/players/:id/offer-settings', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id);
+  if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
+  assertTradable(club);
+  const playerId = Number(c.req.param('id'));
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
+  const p = await c.env.DB.prepare(
+    `SELECT id, club_id, status, transfer_listed, min_offer_price, list_price, offer_auto, not_for_sale FROM players WHERE id = ?`,
+  )
+    .bind(playerId)
+    .first<{
+      id: number;
+      club_id: number | null;
+      status: string;
+      transfer_listed: number;
+      min_offer_price: number | null;
+      list_price: number | null;
+      offer_auto: number;
+      not_for_sale: number;
+    }>();
+  if (!p || p.club_id !== club.id) throw new HttpError(404, '球员不存在或不在你的队里');
+  if (p.status === 'listed') throw new HttpError(409, '这名球员在转会区挂牌中，报价设置先锁定，下架后再改');
+  if (p.status !== 'normal') throw new HttpError(400, '当前状态改不了报价设置');
+  return c.json({
+    transferListed: p.transfer_listed === 1,
+    minOfferPrice: p.min_offer_price,
+    listPrice: p.list_price,
+    offerAuto: p.offer_auto === 1,
+    notForSale: p.not_for_sale === 1,
+  });
 });
 
 export default app;

@@ -395,7 +395,7 @@ interface TransferBoardDbRow {
   age: number | null;
   ca: number | null;
   pa: number | null;
-  min_offer_price: number | null;
+  list_price: number | null;
   transfer_listed_at: string | null;
   status: string;
   not_for_sale: number;
@@ -413,7 +413,7 @@ interface TransferBoardDbRow {
 // GET /api/market/transfer-board?limit= —— 转会广告板（v6.31.0）：各队「列入转会名单」的球员公开面。
 // 只收 players.transfer_listed = 1；emphasis 取 player_promotions 现行最高档（0 普通 / 1 推荐 / 2 置顶），
 // 该表本版只有读路径（付费写流程未实现，接口预留给「列入转会名单时的有偿选项」）。
-// 最低报价数值只在本端点公开（/api/players 列表仍只下发布尔位，v6.30.0 口径不变）。
+// 公开数值只下发标价 list_price（/api/players 列表仍只下发布尔位，v6.30.0 口径不变）。
 // 顺序：付费档（1/2）按着重度 → 挂出时间 → id；没有付费加权的（emphasis = 0）按「时间桶」轮换
 // （5 分钟一桶，种子化洗牌 ⇒ 同一桶内所有访客同一份乱序、跨 isolate 同序）——见 core/ad-board.ts。
 // 洗牌在缓存**之外**做（缓存键只有 limit）：桶号进键会把本端点重读放大 12 倍，而洗牌本身是纯函数。
@@ -437,7 +437,7 @@ app.get('/market/transfer-board', async (c) => {
     async () => {
       const rows = await c.env.DB.prepare(
         `SELECT p.id, p.uid, p.fc_id, p.name, p.display_name, p.club_id, p.position, p.age, p.ca, p.pa,
-                p.min_offer_price, p.transfer_listed_at, p.status, p.not_for_sale,
+                p.list_price, p.transfer_listed_at, p.status, p.not_for_sale,
                 json_extract(p.game_attrs, '$.PosID1') AS pos1,
                 json_extract(p.game_attrs, '$.PosID2') AS pos2,
                 json_extract(p.game_attrs, '$.PosID3') AS pos3,
@@ -497,8 +497,8 @@ app.get('/market/transfer-board', async (c) => {
           clubName: r.club_name,
           // 队徽走 R2（v6.32.0，真源 = tour 库 team.logo_key）：无徽由前端 TeamLogo 回落队名哈希色块
           logoKey: r.club_id !== null ? (logoMap.get(r.club_id) ?? null) : null,
-          // 广告板是 min_offer_price 数值的唯一公开出口（v6.31.0 裁决 4）；releaseFee 无现行合同为 null
-          minOfferPrice: r.min_offer_price,
+          // 广告板只下发公开标价 list_price（v6.33.0：私密最低报价任何公开端点都不出）；releaseFee 无现行合同为 null
+          listPrice: r.list_price,
           releaseFee: r.release_fee,
           listedAt: r.transfer_listed_at,
           // tier 只存 1/2，读取钳 0..2、越界按 0（普通）处理
@@ -507,7 +507,7 @@ app.get('/market/transfer-board', async (c) => {
           // 与 /api/players 列表行同名字段，供前端复用 transferStatusOf
           status: r.status,
           notForSale: r.not_for_sale === 1,
-          transferPriced: r.min_offer_price !== null,
+          transferPriced: r.list_price !== null,
         }));
       return {
         players,

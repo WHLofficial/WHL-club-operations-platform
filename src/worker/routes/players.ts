@@ -670,7 +670,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
             players.prestige, players.market_value, players.status,
             players.growth_tier, players.growable, players.is_future_star, players.china_plan, players.agent_tier,
             players.badges_silver, players.badges_gold,
-            players.transfer_listed, players.not_for_sale, players.min_offer_price,
+            players.transfer_listed, players.not_for_sale, players.list_price,
             json_extract(players.game_attrs, '$.PosID1') AS pos1,
             json_extract(players.game_attrs, '$.PosID2') AS pos2,
             json_extract(players.game_attrs, '$.PosID3') AS pos3,
@@ -714,7 +714,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       badges_gold: number;
       transfer_listed: number;
       not_for_sale: number;
-      min_offer_price: number | null;
+      list_price: number | null;
       pos1: number | null;
       pos2: number | null;
       pos3: number | null;
@@ -778,10 +778,11 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     influence: influenceOf(coefs, r.cur_ca, r.cur_pa, r.growable === 1, r.prestige),
     marketValue: r.market_value,
     status: r.status,
-    // 转会设置（v6.30.0）：列表行只给布尔摘要——min_offer_price 数值绝不下发（隐藏门槛不进公开面）
+    // 转会设置（v6.30.0；v6.33.0 起两线分家）：列表行只给布尔摘要——min_offer_price（私密底线）与
+    // list_price（公开标价）的数值都不下发；「已标价」图标只反映公开标价，设没设私密线不再外泄事实位
     transferListed: r.transfer_listed === 1,
     notForSale: r.not_for_sale === 1,
-    transferPriced: r.min_offer_price !== null,
+    transferPriced: r.list_price !== null,
     growthTier: r.growth_tier,
     // 标记（v6.5.0）：用原始列现算（base_ca 缺省回 cur_ca=players.ca、PA 取现值），与 view 口径无关；
     // 判定纯函数与 SQL 筛选/排序同源（core/squad-rules）；v6.26.1 起第 4 参现值 CA 未练满才落绿
@@ -925,7 +926,7 @@ interface PlayerDetailRow {
   badges_silver: number;
   badges_gold: number;
   transfer_listed: number;
-  min_offer_price: number | null;
+  list_price: number | null;
   offer_auto: number;
   not_for_sale: number;
   game_attrs: string | null;
@@ -936,7 +937,7 @@ interface PlayerDetailRow {
 const PLAYER_DETAIL_COLUMNS =
   `id, fc_id, uid, name, display_name, number, club_id, position, foot, age, ca, pa, base_ca, growable, prestige, market_value,
    status, growth_tier, growth_xp, is_future_star, china_plan, agent_tier,
-   badges_silver, badges_gold, transfer_listed, min_offer_price, offer_auto, not_for_sale, game_attrs, created_at, updated_at`;
+   badges_silver, badges_gold, transfer_listed, list_price, offer_auto, not_for_sale, game_attrs, created_at, updated_at`;
 
 app.get('/players/:id', async (c) => {
   const ref = Number(c.req.param('id'));
@@ -1089,9 +1090,10 @@ app.get('/players/:id', async (c) => {
       agentTier: p.agent_tier,
       badgesSilver: p.badges_silver,
       badgesGold: p.badges_gold,
-      // 报价设置（v6.3.0；v6.4.0 加 offer_auto 与名单解耦）：球员页左栏报价设置与五态判据吃这几个字段
+      // 报价设置（v6.3.0；v6.4.0 加 offer_auto 与名单解耦；v6.33.0 起只下发公开标价，
+      // 私密最低报价走 GET /api/players/:id/offer-settings 给本队教练）：球员页左栏报价设置与五态判据吃这几个字段
       transferListed: p.transfer_listed === 1,
-      minOfferPrice: p.min_offer_price,
+      listPrice: p.list_price,
       offerAuto: p.offer_auto === 1,
       notForSale: p.not_for_sale === 1,
       gameAttrs,

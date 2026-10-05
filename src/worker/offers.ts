@@ -119,7 +119,7 @@ export async function placeOffer(
 
   const p = await db
     .prepare(
-      `SELECT p.id, p.club_id, p.status, p.transfer_listed, p.min_offer_price, p.offer_auto, p.not_for_sale,
+      `SELECT p.id, p.club_id, p.status, p.transfer_listed, p.list_price, p.min_offer_price, p.offer_auto, p.not_for_sale,
               ${sqlDisplayName('p')} AS name, cp.is_cpu AS seller_is_cpu, ct.release_fee AS release_fee
        FROM players p
        LEFT JOIN clubs cp ON cp.id = p.club_id
@@ -132,6 +132,7 @@ export async function placeOffer(
       club_id: number | null;
       status: string;
       transfer_listed: number;
+      list_price: number | null;
       min_offer_price: number | null;
       offer_auto: number;
       not_for_sale: number;
@@ -210,9 +211,9 @@ export async function placeOffer(
   if ((results[1].meta.changes ?? 0) !== 1) throw new HttpError(409, '报价没落库（冻结没过账），刷新再试');
   const offerId = Number(results[0].meta.last_row_id);
 
-  // 自动应答（v6.4.0 改动 B：只认最低报价与开关，与转会名单解耦）：auto_accept 走同一套
-  // 挂牌事务；auto_reject 立即终态化（低于线一律自动拒，与开关无关）
-  const auto = autoRespondKind(p.min_offer_price, p.offer_auto, amount);
+  // 自动应答（v6.33.0 双线）：拒线钉私密最低报价，同意线钉公开标价（未进名单回落最低报价）；
+  // auto_accept 走同一套挂牌事务；auto_reject 立即终态化（低于线一律自动拒，与开关无关）
+  const auto = autoRespondKind(p.list_price, p.min_offer_price, p.offer_auto, amount);
   if (auto === 'auto_accept') {
     const offer = await loadOffer(db, offerId);
     // v6.29.0：关窗期没有挂牌落点，达线自动同意同样只能落意向单（等开窗卖方点确认）；
@@ -236,7 +237,7 @@ export async function placeOffer(
   if (auto === 'auto_reject') {
     const offer = await loadOffer(db, offerId);
     await rejectOfferCore(env, offer, p.club_id ?? 0, null, 'auto_reject', 'user');
-    await queueClubNotification(env, input.clubId, 'offer_auto_rejected', { player: p.name, amount, min: p.min_offer_price });
+    await queueClubNotification(env, input.clubId, 'offer_auto_rejected', { player: p.name, amount });
     return { offerId, status: 'rejected', auto };
   }
   await queueClubNotification(env, p.club_id ?? 0, 'offer_received', {
@@ -831,9 +832,10 @@ export async function expireStaleOffers(env: Env, opts: { origin: AuditOrigin; a
   return summary;
 }
 
-// ---- 报价设置（v6.4.0 改动 B：最低报价 / 自动应答开关与转会名单解耦）----
-// 用户裁决：没进转会名单也可以设最低报价与自动应答；低于线一律自动拒（与开关无关），
-// 开关只控达线是否自动同意；进转会名单仍必须给最低报价。非卖品照旧压一切（线与开关被清）。
+// ---- 报价设置（v6.33.0 标价）：最低报价转全系统私密，进名单新增必填公开标价 ----
+// 用户裁决 2026-10-05：进转会名单必须给公开标价（其他队可见，低于标价视为砍价）；
+// 最低报价只有设了才生效（名单内外皆可，拒线），名单外传标价静默忽略；
+// 自动同意线 = 标价（名单内）?? 最低报价（名单外）；非卖品照旧压一切（线、标价与开关被清）。
 
 export async function setOfferSettings(
   env: Env,
@@ -843,10 +845,11 @@ export async function setOfferSettings(
     playerId: number;
     transferListed: boolean;
     minOfferPrice: number | null;
+    listPrice: number | null;
     offerAuto: boolean;
     notForSale: boolean;
   },
-): Promise<{ ok: true; transferListed: boolean; minOfferPrice: number | null; offerAuto: boolean; notForSale: boolean }> {
+): Promise<{ ok: true; transferListed: boolean; minOfferPrice: number | null; listPrice: number | null; offerAuto: boolean; notForSale: boolean }> {
   const db = env.DB;
   const p = await db
     .prepare(`SELECT p.id, p.club_id, p.status, p.transfer_listed, p.not_for_sale, ${sqlDisplayName('p')} AS name FROM players p WHERE p.id = ?`)
@@ -857,9 +860,10 @@ export async function setOfferSettings(
   if (p.status !== 'normal') throw new HttpError(400, '当前状态改不了报价设置');
   if (input.transferListed && input.notForSale) throw new HttpError(400, '非卖品和转会名单互斥，二选一');
 
-  let minOfferPrice: number | null = null;
-  if (input.minOfferPrice !== null && Number.isFinite(input.minOfferPrice)) {
-    const bounds = minOfferPriceBounds(
+  // 标价与最低报价共用同一区间 [1, 1.5×RC]（minOfferPriceBounds）；任一有值才查违约金合同
+  let bounds: { min: number; max: number } | null = null;
+  if ((input.minOfferPrice !== null && Number.isFinite(input.minOfferPrice)) || (input.listPrice !== null && Number.isFinite(input.listPrice))) {
+    bounds = minOfferPriceBounds(
       (
         await db
           .prepare(`SELECT release_fee FROM contracts WHERE player_id = ? AND is_active = 1`)
@@ -867,18 +871,33 @@ export async function setOfferSettings(
           .first<{ release_fee: number | null }>()
       )?.release_fee ?? null,
     );
-    if (!bounds) throw new HttpError(400, '球员没有含违约金的现行合同，定不了最低报价');
-    minOfferPrice = round2(input.minOfferPrice);
-    if (minOfferPrice < bounds.min) throw new HttpError(400, `最低报价至少 ${bounds.min} m`);
-    if (minOfferPrice > bounds.max) throw new HttpError(400, `最低报价 ${minOfferPrice} m 高于本球员的报价上限 ${bounds.max} m`);
-  }
-  if (input.transferListed && minOfferPrice === null) {
-    throw new HttpError(400, '进转会名单必须给一条最低报价（达线自动同意，低于自动拒）');
+    if (!bounds) throw new HttpError(400, '球员没有含违约金的现行合同，定不了报价线');
   }
 
-  // 非卖品 = 一切报价自动拒（设计 §2.1）：最低报价与开关被压掉；没线的开关存了也无效
+  let minOfferPrice: number | null = null;
+  if (input.minOfferPrice !== null && Number.isFinite(input.minOfferPrice)) {
+    minOfferPrice = round2(input.minOfferPrice);
+    if (minOfferPrice < bounds!.min) throw new HttpError(400, `最低报价至少 ${bounds!.min} m`);
+    if (minOfferPrice > bounds!.max) throw new HttpError(400, `最低报价 ${minOfferPrice} m 高于本球员的报价上限 ${bounds!.max} m`);
+  }
+  let listPrice: number | null = null;
+  if (input.listPrice !== null && Number.isFinite(input.listPrice)) {
+    listPrice = round2(input.listPrice);
+    if (listPrice < bounds!.min) throw new HttpError(400, `标价至少 ${bounds!.min} m`);
+    if (listPrice > bounds!.max) throw new HttpError(400, `标价 ${listPrice} m 高于本球员的报价上限 ${bounds!.max} m`);
+  }
+  if (input.transferListed && listPrice === null) {
+    throw new HttpError(400, '进转会名单必须给一个公开标价（其他队看得到；低于标价的报价视为砍价）');
+  }
+
+  // 非卖品 = 一切报价自动拒（设计 §2.1）：标价、最低报价与开关被压掉
   const effectiveMin = input.notForSale ? null : minOfferPrice;
-  const effectiveAuto = input.notForSale || effectiveMin === null ? false : input.offerAuto;
+  // 名单外传标价静默忽略（标价只属于挂牌状态，与 transfer_listed_at 对称）
+  const effectiveList = input.notForSale || !input.transferListed ? null : listPrice;
+  const effectiveAuto = input.notForSale || (effectiveList === null && effectiveMin === null) ? false : input.offerAuto;
+  if (effectiveList !== null && effectiveMin !== null && effectiveList < effectiveMin) {
+    throw new HttpError(400, `标价 ${effectiveList} m 不能低于最低报价 ${effectiveMin} m（低于线就成砍价了）`);
+  }
 
   // 置非卖品 = 一切报价自动拒：把既有 pending 与关窗期意向单一并自动拒 + 释放冻结（v6.29.0）
   const wasNotForSale = p.not_for_sale === 1;
@@ -894,14 +913,16 @@ export async function setOfferSettings(
     db
       .prepare(
         // 进名单打戳（v6.31.0 广告板）：首次进名单落 transfer_listed_at，重复保存保留原戳（COALESCE），
-        // 退出名单清 NULL；第 5 个绑定值与 transfer_listed 同值（复用入参，不新增形参）。
-        `UPDATE players SET transfer_listed = ?, min_offer_price = ?, offer_auto = ?, not_for_sale = ?,
+        // 退出名单清 NULL；标价随名单进出对称清置（v6.33.0）；
+        // 第 6 个绑定值与 transfer_listed 同值（复用入参，不新增形参）。
+        `UPDATE players SET transfer_listed = ?, list_price = ?, min_offer_price = ?, offer_auto = ?, not_for_sale = ?,
            transfer_listed_at = CASE WHEN ? = 1 THEN COALESCE(transfer_listed_at, ${nowSql()}) ELSE NULL END,
            updated_at = ${nowSql()}
          WHERE id = ? AND club_id = ? AND status = 'normal'`,
       )
       .bind(
         input.transferListed ? 1 : 0,
+        effectiveList,
         effectiveMin,
         effectiveAuto ? 1 : 0,
         input.notForSale ? 1 : 0,
@@ -916,8 +937,10 @@ export async function setOfferSettings(
       targetId: input.playerId,
       origin: 'user',
       after: {
+        // v6.33.0：最低报价转私密——审计只落「有没有设线」布尔 + 公开标价数值，不落数值
         transferListed: input.transferListed,
-        minOfferPrice: effectiveMin,
+        listPrice: effectiveList,
+        offerFloorOn: effectiveMin !== null,
         offerAuto: effectiveAuto,
         notForSale: input.notForSale,
       },
@@ -955,5 +978,12 @@ export async function setOfferSettings(
       reason: 'not_for_sale',
     });
   }
-  return { ok: true, transferListed: input.transferListed, minOfferPrice: effectiveMin, offerAuto: effectiveAuto, notForSale: input.notForSale };
+  return {
+    ok: true,
+    transferListed: input.transferListed,
+    minOfferPrice: effectiveMin,
+    listPrice: effectiveList,
+    offerAuto: effectiveAuto,
+    notForSale: input.notForSale,
+  };
 }
