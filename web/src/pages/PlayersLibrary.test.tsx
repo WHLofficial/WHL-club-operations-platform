@@ -5,12 +5,13 @@
 //
 // 依赖打桩：api（俱乐部目录 / 列表 / 名册三个端点）、matchMedia（useMediaQuery 判断点）。
 // 没打 CSS（jsdom 不跑样式表），所以样式类名只做「有没有这个类」的断言，视觉表现靠 e2e 截图看。
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClubDirectoryRow, PlayerLibraryRow, PlayersLibraryResponse } from '../lib/api.ts';
+import { COMPARE_COLORS } from '../lib/compare.ts';
 import PlayersLibrary, { psNames } from './PlayersLibrary.tsx';
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
@@ -82,11 +83,14 @@ function setNarrow(narrow: boolean): void {
 
 // 游标式分页条（v3.2.0）：服务端不再回 total，「还有更多 / 已到末页」只能看 nextCursor。
 let pageCursor: string | null = null;
+// 列表夹具可在用例里替换（对比勾选用例要更多行/更多名字）；姓名筛选按参数真过滤
+let rowsData: PlayerLibraryRow[] = ROWS;
 
 beforeEach(() => {
   mediaListeners.clear();
   mediaMatches = false;
   pageCursor = null;
+  rowsData = ROWS;
   window.matchMedia = ((query: string) => ({
     matches: mediaMatches,
     media: query,
@@ -102,7 +106,12 @@ beforeEach(() => {
     if (path === '/api/clubs/directory') return Promise.resolve({ clubs: CLUBS });
     if (path === '/api/players/roster') return Promise.resolve({ roster: '', count: 0 });
     if (path.startsWith('/api/players?')) {
-      const body: PlayersLibraryResponse = { players: ROWS, nextCursor: pageCursor };
+      const params = new URLSearchParams(path.slice(path.indexOf('?') + 1));
+      const name = params.get('name');
+      // 姓名筛选按站点口径去变音后子串匹配（v3.1.0 姓名去变音搜索），否则 'sesko' 搜不到 'Šeško'
+      const fold = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+      const players = name ? rowsData.filter((p) => fold(p.name).includes(fold(name))) : rowsData;
+      const body: PlayersLibraryResponse = { players, nextCursor: pageCursor };
       return Promise.resolve(body);
     }
     return Promise.reject(new Error(`测试没打桩的请求：${path}`));
@@ -568,5 +577,168 @@ describe('psNames：槽号从 1 起', () => {
   it('全空槽与空数组都渲染破折号', () => {
     expect(psNames(row({ id: 1, name: 'A', psIds: [null, null] }))).toBe('—');
     expect(psNames(row({ id: 1, name: 'A', psIds: [] }))).toBe('—');
+  });
+});
+
+// v6.34.0 步骤 7：球员库对比勾选与收集栏（计划 docs/test-plans/v6.34.0-player-compare.md ⑨）。
+// 口径：勾选只活在页面 state（不落库、不发写请求）、跨筛选保留、上限 3、颜色槽位不重排。
+function hexToRgb(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
+
+function chipNames(): string[] {
+  return [...document.querySelectorAll('.lib-pickbar-name')].map((el) => el.textContent ?? '');
+}
+
+function pickDots(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('.lib-pickbar-dot')];
+}
+
+describe('对比勾选与收集栏（v6.34.0 步骤 7）', () => {
+  it('TC-CMP-LIB-01/02 · 宽屏最左勾选列（表头「选」、无全选）；0 人不出现、勾 1 人出收集栏', async () => {
+    const user = open();
+    await screen.findByRole('link', { name: /Šeško/ });
+
+    // 勾选列贴在最左（UID 之前），表头是「选」且不设全选
+    const firstTh = document.querySelector('thead tr th') as HTMLTableCellElement;
+    expect(firstTh.textContent).toBe('选');
+    expect(firstTh.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(document.querySelector('thead tr th:nth-child(2)')?.textContent).toContain('UID');
+
+    // 0 人：整条收集栏不渲染
+    expect(document.querySelector('.lib-pickbar')).toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Šeško' }));
+    const bar = document.querySelector('.lib-pickbar') as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(bar.textContent).toContain('已选 1 / 3');
+    expect(chipNames()).toEqual(['Šeško']);
+    // 勾中行整行淡橙底；该行勾选框进入已勾（aria-label 翻面）
+    expect(document.querySelector('tr.lib-pick-row')).not.toBeNull();
+    expect((screen.getByRole('checkbox', { name: '取消对比：Šeško' }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('TC-CMP-LIB-03 · n=1「对比（1）」置灰不可点；n=2 变链接且 ids 顺序＝chips 顺序', async () => {
+    const user = open();
+    await screen.findByRole('link', { name: /Šeško/ });
+
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Ødegaard' }));
+    const one = screen.getByRole('button', { name: '对比（1）' }) as HTMLButtonElement;
+    expect(one.disabled).toBe(true);
+    expect(screen.queryByRole('link', { name: '对比（1）' })).toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Šeško' }));
+    // 先勾 Ødegaard（200002）后勾 Šeško（200001）⇒ href 按 chips 顺序，不按大小排
+    expect(screen.getByRole('link', { name: '对比（2）' }).getAttribute('href')).toBe(
+      '/players/compare?ids=200002,200001',
+    );
+  });
+
+  it('TC-CMP-LIB-04 · 上限 3：第 4 人勾选不落下（不挤位），未勾选框虚线禁用＋提示', async () => {
+    rowsData = [row({ id: 1, name: 'A' }), row({ id: 2, name: 'B' }), row({ id: 3, name: 'C' }), row({ id: 4, name: 'D' })];
+    const user = open('/players?compare=200001,200002,200003');
+    await screen.findByRole('link', { name: 'D' });
+
+    const fourth = screen.getByRole('checkbox', { name: '加入对比：D' }) as HTMLInputElement;
+    expect(fourth.disabled).toBe(true);
+    expect(fourth.closest('label')?.getAttribute('title')).toBe('最多同时对比 3 人');
+
+    fireEvent.click(fourth);
+    expect(chipNames()).toEqual(['A', 'B', 'C']); // 无第 4 个 chip、无挤位替换
+    expect(screen.getByRole('link', { name: '对比（3）' }).getAttribute('href')).toBe(
+      '/players/compare?ids=200001,200002,200003',
+    );
+    void user;
+  });
+
+  it('TC-CMP-LIB-05 · 跨筛选/排序保留勾选；不在当前筛选的 chip 标小字，撤筛后消失', async () => {
+    const user = open();
+    await screen.findByRole('link', { name: /Šeško/ });
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Šeško' }));
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Ødegaard' }));
+    expect(chipNames()).toEqual(['Šeško', 'Ødegaard']);
+
+    // 姓名筛选只留 Šeško：勾选不丢，Ødegaard 的 chip 标「不在当前筛选」
+    await user.type(screen.getByPlaceholderText('查找'), 'sesko');
+    await user.click(screen.getByRole('button', { name: '找' }));
+    await waitFor(() => expect(search()).toBe('?name=sesko&limit=20'));
+    await waitFor(() => expect(document.querySelector('.lib-pickbar-note')?.textContent).toBe('不在当前筛选'));
+    expect(chipNames()).toEqual(['Šeško', 'Ødegaard']);
+
+    // 表头排序同样不清勾选
+    await user.click(headerButton('CA'));
+    await waitFor(() => expect(document.querySelector('.lib-pickbar-note')?.textContent).toBe('不在当前筛选'));
+    expect(chipNames()).toEqual(['Šeško', 'Ødegaard']);
+
+    // 撤掉筛选：人回到当前结果，标记消失
+    await user.click(screen.getByRole('button', { name: '移除筛选：姓名含「sesko」' }));
+    await waitFor(() => expect(document.querySelector('.lib-pickbar-note')).toBeNull());
+    expect(chipNames()).toEqual(['Šeško', 'Ødegaard']);
+  });
+
+  it('TC-CMP-LIB-06 · 移除单个 chip 取消该行勾选；色随人走（移除中间人其余人不换色）；清空即消失', async () => {
+    rowsData = [row({ id: 1, name: 'A' }), row({ id: 2, name: 'B' }), row({ id: 3, name: 'C' })];
+    const user = open('/players?compare=200001,200002,200003');
+    // 行上的姓名链接（chips 里也有 'C'，文本查询会撞，按 link 角色取）
+    await screen.findByRole('link', { name: 'C' });
+    expect(pickDots().map((d) => d.style.background)).toEqual(COMPARE_COLORS.map(hexToRgb));
+
+    // 移除中间 B：A 与 C 的槽位不得回填重排（C 仍是深紫），B 的行回到未勾
+    await user.click(screen.getByRole('button', { name: '移除对比：B' }));
+    expect(chipNames()).toEqual(['A', 'C']);
+    expect(pickDots().map((d) => d.style.background)).toEqual([hexToRgb(COMPARE_COLORS[0]), hexToRgb(COMPARE_COLORS[2])]);
+    expect((screen.getByRole('checkbox', { name: '加入对比：B' }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole('link', { name: '对比（2）' }).getAttribute('href')).toBe('/players/compare?ids=200001,200003');
+
+    await user.click(screen.getByRole('button', { name: '清空' }));
+    expect(document.querySelector('.lib-pickbar')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /取消对比/ })).toBeNull();
+  });
+
+  it('TC-CMP-LIB-07 · 窄屏：卡片圈选（role=checkbox），收集栏压一行（姓名只留姓、无「清空」按钮）', async () => {
+    setNarrow(true);
+    const user = open();
+    await screen.findByRole('link', { name: /Šeško/ });
+    // 卡片分支：宽屏勾选列互斥不渲染
+    expect(document.querySelector('.lib-cards')).not.toBeNull();
+    expect(document.querySelector('thead th.lib-pickcol')).toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Šeško' }));
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Ødegaard' }));
+    expect(document.querySelector('.lib-pickflag.on')).not.toBeNull();
+    // 姓名只留姓（单词名取首字）；窄屏去掉「清空」文字按钮与「已选 n / 3」计数之外的装饰
+    expect(chipNames()).toEqual(['Š', 'Ø']);
+    expect(screen.queryByRole('button', { name: '清空' })).toBeNull();
+    expect(screen.getByRole('link', { name: '对比（2）' }).getAttribute('href')).toBe('/players/compare?ids=200001,200002');
+  });
+
+  it('TC-CMP-LIB-08 · URL ?compare= 预置：与 parseCompareIds 同口径（非法剔除/去重/超 3 取前 3）', async () => {
+    rowsData = [row({ id: 1, name: 'A' }), row({ id: 2, name: 'B' }), row({ id: 3, name: 'C' }), row({ id: 4, name: 'D' })];
+    open('/players?compare=200001,x,200001,200002,200003,200004');
+    await screen.findByRole('link', { name: 'D' });
+
+    // 非法 x 剔除、200001 重复去重、200004 超限丢弃 ⇒ A/B/C，且行上勾选态同步
+    expect(chipNames()).toEqual(['A', 'B', 'C']);
+    expect((screen.getByRole('checkbox', { name: '取消对比：A' }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole('link', { name: '对比（3）' }).getAttribute('href')).toBe(
+      '/players/compare?ids=200001,200002,200003',
+    );
+  });
+
+  it('TC-CMP-LIB-09 · 勾选/移除/清空不发写请求；无 ?compare= 时刷新库页勾选为空', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const user = open();
+    await screen.findByRole('link', { name: /Šeško/ });
+    await user.click(screen.getByRole('checkbox', { name: '加入对比：Šeško' }));
+    await user.click(screen.getByRole('button', { name: '移除对比：Šeško' }));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+
+    cleanup();
+    open();
+    await screen.findByRole('link', { name: /Šeško/ });
+    expect(document.querySelector('.lib-pickbar')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /取消对比/ })).toBeNull();
   });
 });

@@ -387,6 +387,16 @@ export default function Player() {
                 </span>
               </div>
             </div>
+            {/* 对比入口（v6.34.0 步骤 7 · 入口 B，spec §1）：球员卡 CA/PA 数字行下方，
+                带当前球员 fc_id 进对比页的 1 人态（不重定向）。fc_id 缺失的长尾球员整块不渲染——
+                对比页与球员 URL 都按 fc_id 寻址，拿内部 id 拼链接会落 404 */}
+            {player.fcId !== null && (
+              <div className="player-card-compare">
+                <Link className="btn btn-sm" to={`/players/compare?ids=${player.fcId}`}>
+                  ⇄ 加入对比
+                </Link>
+              </div>
+            )}
             <div className="player-card-foot">
               <span className={`badge ${player.status === 'listed' ? 'sky' : player.status === 'trainee' ? 'purple' : 'gray'}`}>
                 {STATUS_LABEL[player.status] ?? player.status}

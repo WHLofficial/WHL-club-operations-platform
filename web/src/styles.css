@@ -5746,3 +5746,214 @@ th.num .th-sort {
     gap: 3px;
   }
 }
+
+/* ==== 球员库对比勾选与收集栏（v6.34.0 步骤 7，spec §9）========================
+   固定新增勾选列（不进列设置，贴 UID 之前）+ 吸底收集栏。类名一律 lib-pick 前缀
+   （通用词会撞车，v3.4.0 .pos-chip 连坐教训）。收集栏在桌面要抬到吸底镜像滚动条
+   （.sticky-xbar，17px+边框）之上，否则被它压住。 */
+.lib-pickcol {
+  width: 34px;
+  text-align: center;
+}
+
+.lib-pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.lib-pick-input {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid #c3b294;
+  border-radius: 4px;
+  background: #fffdf7;
+  cursor: inherit;
+}
+
+.lib-pick-input:hover {
+  border-color: var(--terracotta);
+}
+
+.lib-pick-input:checked {
+  border-color: var(--terracotta);
+  background: var(--terracotta);
+}
+
+.lib-pick-input:checked::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 8px;
+  margin: 0 auto;
+  border: solid #fffdf7;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -2px);
+}
+
+/* 满 3 人：未勾选的框改虚线（点不动，悬停出「最多同时对比 3 人」） */
+.lib-pick-input:disabled {
+  border-style: dashed;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* 勾中行整行淡橙底（与 mockup tr.pick 同值） */
+.lib-pick-row > td {
+  background: rgba(164, 97, 44, 0.08);
+}
+
+/* 窄屏卡片圈选（卡片左上角；.lib-card 是 <a>，圈选按钮放在链接外面） */
+.lib-cards .lib-card {
+  position: relative;
+}
+
+.lib-card-link {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.lib-card-link:focus-visible {
+  outline: 2px solid var(--terracotta);
+  outline-offset: 2px;
+}
+
+.lib-pickflag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid #c3b294;
+  border-radius: 50%;
+  background: #fffdf7;
+  cursor: pointer;
+}
+
+.lib-pickflag:hover {
+  border-color: var(--terracotta);
+}
+
+.lib-pickflag.on {
+  border-color: var(--terracotta);
+  background: var(--terracotta);
+}
+
+.lib-pickflag.on::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 8px;
+  margin: 1px auto 0;
+  border: solid #fffdf7;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.lib-pickflag:disabled {
+  border-style: dashed;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* 吸底收集栏：钉在视口底，0 人不渲染（TSX 侧 gate）。
+   桌面（>900px）表格下方还有 17px 高的吸底镜像横向滚动条，收集栏抬到它上面。 */
+.lib-pickbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fffdf7;
+  box-shadow: 0 -2px 10px rgba(43, 29, 18, 0.06);
+}
+
+.lib-pickbar-count {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.lib-pickbar-grow {
+  flex: 1 1 0;
+}
+
+.lib-pickbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fdf4e3;
+  font-size: 13px;
+}
+
+.lib-pickbar-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.lib-pickbar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-pickbar-note {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lib-pickbar-x {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: #a99b86;
+  font-size: 14px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.lib-pickbar-x:hover {
+  color: var(--terracotta-deep);
+}
+
+/* 窄屏：收集栏压一行（姓名只留姓由 TSX 的 compareShortName 负责，这里只收紧间距）。
+   ≤900 不渲染吸底镜像滚动条，收集栏贴视口底即可 */
+@media (max-width: 900px) {
+  .lib-pickbar {
+    gap: 6px;
+    padding: 7px 9px;
+  }
+
+  .lib-pickbar-chip {
+    padding: 1px 7px;
+    font-size: 12px;
+  }
+}

@@ -5,13 +5,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { api, type ClubDirectoryRow, type PlayersLibraryResponse } from '../lib/api.ts';
+import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
 import { ATTR_LABELS } from '../lib/ref.ts';
 // v6.30.0 C 段：PlayStyle 显示名（psNames）与可变列单元格渲染（renderClubCol）挪去 ../lib/club-columns.tsx，
 // 球队页两张球员表与本页共用同一份实现；这里 re-export 保持球员库自己的对外形状不变
 import { renderClubCol } from '../lib/club-columns.tsx';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { playerPath } from '../lib/player-link.ts';
+// 球员对比勾选（v6.34.0 步骤 7）：URL ?compare= 预置解析与第三人色都复用对比域纯函数
+import { colorFor, parseCompareIds } from '../lib/compare.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
 import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
 import StickyScrollbar from '../components/StickyScrollbar.tsx';
@@ -75,6 +77,34 @@ function writeSideOpen(open: boolean): void {
 // 逻辑一字未改；psNames 继续从这里 re-export，免得既有引用（含测试）改路径。
 export { psNames } from '../lib/club-columns.tsx';
 
+// ---- 对比勾选（v6.34.0 步骤 7，spec §9）----
+// 勾选只活在页面 state：不落库、不发请求；跨筛选/排序/翻页保留（筛选只影响某行在不在场，
+// 不清勾选），跨页由对比页 URL 承载。存 fc_id（球员 URL 与对比 URL 的统一寻址口径）。
+const COMPARE_MAX = 3;
+
+interface ComparePick {
+  fcId: number;
+  /** 勾选那一刻记下的名字；URL 预置的为 null，等当前结果加载后按 fcId 回填 */
+  name: string | null;
+  /** 本命色槽位（colorFor 下标）：首次加入取最小空槽、此后终身不变 ——
+      移除中间一人后其余人不换色（spec §4/§9「色随人走」，与对比页色点对号） */
+  slot: number;
+}
+
+/** URL 预置（「编辑名单」落点 ?compare=<fc_id>,…）：与对比页同一 parseCompareIds 口径，
+    非法/重复/超 3 都由它处理；槽位按 URL 顺序分配 */
+function readComparePrefill(): ComparePick[] {
+  const raw = new URLSearchParams(window.location.search).get('compare');
+  return parseCompareIds(raw).ids.map((fcId, i) => ({ fcId, name: null, slot: i }));
+}
+
+/** 窄屏收集栏「姓名只留姓」（spec §9）：多词名取末词（西方名姓在后），单词名取首字 */
+function compareShortName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length > 1) return parts[parts.length - 1];
+  return Array.from(name)[0] ?? '';
+}
+
 // 表头排序（v3.1.0 步骤 6）：整个表头是可点按钮，点一下按该列排，再点翻向；箭头只在当前排序列点亮。
 // aria-sort 给读屏（它就挂 th），箭头本身是装饰
 function SortHeader({
@@ -116,6 +146,8 @@ export default function PlayersLibrary() {
   const [sideOpen, setSideOpen] = useState(readSideOpen);
   const narrow = useMediaQuery(DRAWER_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 对比勾选（v6.34.0 步骤 7）：初始值＝URL ?compare= 预置（「编辑名单」带名单开库）
+  const [comparePicks, setComparePicks] = useState<ComparePick[]>(readComparePrefill);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const asideRef = useRef<HTMLElement | null>(null);
@@ -174,6 +206,35 @@ export default function PlayersLibrary() {
   const busy = libQuery.isFetching;
   const canPrev = pageIdx > 1 && !busy;
   const canNext = (pageIdx < pageCount || (libQuery.hasNextPage && !busy)) && !busy;
+
+  // ---- 对比勾选派生（v6.34.0 步骤 7）----
+  const compareFull = comparePicks.length >= COMPARE_MAX;
+  const comparePickedIds = useMemo(() => new Set(comparePicks.map((p) => p.fcId)), [comparePicks]);
+  // 当前筛选结果（已加载页并集）里出现过的 fc_id ⇒ 名字回填与「不在当前筛选」标记都吃它
+  const compareLoadedNames = useMemo(() => {
+    const names = new Map<number, string>();
+    for (const page of libQuery.data?.pages ?? []) {
+      for (const row of page.players) if (row.fcId !== null) names.set(row.fcId, row.name);
+    }
+    return names;
+  }, [libQuery.data]);
+
+  function toggleCompare(p: PlayerLibraryRow): void {
+    if (p.fcId === null) return;
+    const fcId = p.fcId;
+    setComparePicks((list) => {
+      const at = list.findIndex((x) => x.fcId === fcId);
+      if (at >= 0) return list.filter((_, i) => i !== at);
+      // 满员拦截：第 4 人勾选不落下（不挤位替换），行的勾选框同时置 disabled
+      if (list.length >= COMPARE_MAX) return list;
+      const used = new Set(list.map((x) => x.slot));
+      let slot = 0;
+      while (used.has(slot)) slot += 1;
+      return [...list, { fcId, name: p.name, slot }];
+    });
+  }
+  const removeComparePick = (fcId: number): void => setComparePicks((list) => list.filter((x) => x.fcId !== fcId));
+  const compareHref = `/players/compare?ids=${comparePicks.map((p) => p.fcId).join(',')}`;
 
   function goNext() {
     if (pageIdx < pageCount) {
@@ -553,73 +614,91 @@ export default function PlayersLibrary() {
                       : []),
                     { k: '影响力', v: p.influence.toFixed(2) },
                   ];
+                  const picked = p.fcId !== null && comparePickedIds.has(p.fcId);
+                  const locked = compareFull && !picked;
                   return (
-                    <Link key={p.id} to={playerPath(p)} className="lib-card">
-                      <div className="lib-card-rail">
-                        {p.positions.length > 0 && (
-                          <>
-                            <span className="lib-card-pos-main">{p.positions[0]}</span>
-                            {p.positions.length > 1 && (
-                              <span className="lib-card-pos-sub">
-                                {p.positions.slice(1).map((pos) => (
-                                  <span key={pos} className="lib-card-pos-sec">
-                                    {pos}
-                                  </span>
-                                ))}
-                              </span>
-                            )}
-                          </>
-                        )}
-                        <span className="lib-card-gap" />
-                        <span className={`lib-card-ca ${attrClass(p.ca)}`}>{p.ca}</span>
-                        <span className="lib-card-lab">CA</span>
-                        <span className="lib-card-gap" />
-                        <span className={`lib-card-pa ${attrClass(p.pa)}`}>{p.pa}</span>
-                        <span className="lib-card-lab">PA</span>
-                      </div>
-                      <div className="lib-card-body">
-                        <div className="lib-card-head">
-                          <span className="lib-card-name">{p.name}</span>
-                          {p.marker && (
-                            <span className="lib-card-marker" title={MARKER_LABEL[p.marker]}>
-                              {MARKER_EMOJI[p.marker]}
-                            </span>
-                          )}
-                        </div>
-                        <div className="lib-card-sub">
-                          {p.status === 'free' ? (
-                            <span className="lib-card-free">自由身</span>
-                          ) : (
+                    <div key={p.id} className="lib-card">
+                      {/* 对比圈选（v6.34.0 步骤 7）：卡片左上角，与宽屏勾选列同一套行为；
+                          必须放 Link 之外 —— 卡片整张是 <a>，交互控件嵌在链接里是无效 HTML */}
+                      {p.fcId !== null && (
+                        <button
+                          type="button"
+                          role="checkbox"
+                          aria-checked={picked}
+                          aria-label={`${picked ? '取消对比' : '加入对比'}：${p.name}`}
+                          disabled={locked}
+                          title={locked ? '最多同时对比 3 人' : picked ? '取消对比' : '加入对比'}
+                          className={`lib-pickflag${picked ? ' on' : ''}${locked ? ' dis' : ''}`}
+                          onClick={() => toggleCompare(p)}
+                        />
+                      )}
+                      <Link to={playerPath(p)} className="lib-card-link">
+                        <div className="lib-card-rail">
+                          {p.positions.length > 0 && (
                             <>
-                              <TeamLogo name={p.clubName ?? ''} size={18} circle={false} />
-                              <span>{p.clubName}</span>
-                              {p.age !== null && <span>· {p.age}岁</span>}
+                              <span className="lib-card-pos-main">{p.positions[0]}</span>
+                              {p.positions.length > 1 && (
+                                <span className="lib-card-pos-sub">
+                                  {p.positions.slice(1).map((pos) => (
+                                    <span key={pos} className="lib-card-pos-sec">
+                                      {pos}
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
                             </>
                           )}
-                          {p.status !== 'normal' && p.status !== 'free' && (
-                            <span className={`badge ${STATUS_BADGE[p.status] ?? 'gray'}`}>
-                              {STATUS_LABEL[p.status] ?? p.status}
-                            </span>
-                          )}
+                          <span className="lib-card-gap" />
+                          <span className={`lib-card-ca ${attrClass(p.ca)}`}>{p.ca}</span>
+                          <span className="lib-card-lab">CA</span>
+                          <span className="lib-card-gap" />
+                          <span className={`lib-card-pa ${attrClass(p.pa)}`}>{p.pa}</span>
+                          <span className="lib-card-lab">PA</span>
                         </div>
-                        <div className="lib-card-list">
-                          {fields.map(({ k, v }) => (
-                            <div key={k} className="lib-card-row">
-                              <span className="lib-card-bl">{k}</span>
-                              <span className="lib-card-bv">{v}</span>
-                            </div>
-                          ))}
-                          {lens.map((c) => (
-                            <div key={c.label} className="lib-card-row lib-card-lens">
-                              <span className="lib-card-bl">{c.label}</span>
-                              <span className={`lib-card-bv${c.colored && c.raw !== null ? ` ${attrClass(c.raw)}` : ''}`}>
-                                {c.value}
+                        <div className="lib-card-body">
+                          <div className="lib-card-head">
+                            <span className="lib-card-name">{p.name}</span>
+                            {p.marker && (
+                              <span className="lib-card-marker" title={MARKER_LABEL[p.marker]}>
+                                {MARKER_EMOJI[p.marker]}
                               </span>
-                            </div>
-                          ))}
+                            )}
+                          </div>
+                          <div className="lib-card-sub">
+                            {p.status === 'free' ? (
+                              <span className="lib-card-free">自由身</span>
+                            ) : (
+                              <>
+                                <TeamLogo name={p.clubName ?? ''} size={18} circle={false} />
+                                <span>{p.clubName}</span>
+                                {p.age !== null && <span>· {p.age}岁</span>}
+                              </>
+                            )}
+                            {p.status !== 'normal' && p.status !== 'free' && (
+                              <span className={`badge ${STATUS_BADGE[p.status] ?? 'gray'}`}>
+                                {STATUS_LABEL[p.status] ?? p.status}
+                              </span>
+                            )}
+                          </div>
+                          <div className="lib-card-list">
+                            {fields.map(({ k, v }) => (
+                              <div key={k} className="lib-card-row">
+                                <span className="lib-card-bl">{k}</span>
+                                <span className="lib-card-bv">{v}</span>
+                              </div>
+                            ))}
+                            {lens.map((c) => (
+                              <div key={c.label} className="lib-card-row lib-card-lens">
+                                <span className="lib-card-bl">{c.label}</span>
+                                <span className={`lib-card-bv${c.colored && c.raw !== null ? ` ${attrClass(c.raw)}` : ''}`}>
+                                  {c.value}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    </Link>
+                      </Link>
+                    </div>
                   );
                 })}
               </div>
@@ -632,6 +711,9 @@ export default function PlayersLibrary() {
                 <table>
                   <thead>
                     <tr>
+                      {/* 对比勾选列（v6.34.0 步骤 7）：固定新增在 UID 之前、不进列设置；
+                          表头不设全选 —— 上限 3 人，全选没有意义（spec §9） */}
+                      <th className="lib-pickcol">选</th>
                       {FIXED_COLUMNS.map((col) => (
                         <SortHeader
                           key={col.label}
@@ -664,8 +746,29 @@ export default function PlayersLibrary() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((p) => (
-                      <tr key={p.id}>
+                    {rows.map((p) => {
+                      const picked = p.fcId !== null && comparePickedIds.has(p.fcId);
+                      const locked = compareFull && !picked;
+                      return (
+                      <tr key={p.id} className={picked ? 'lib-pick-row' : undefined}>
+                        <td className="lib-pickcol">
+                          {/* 对比勾选（v6.34.0 步骤 7）：fc_id 缺失的长尾球员无从对比，整格留空 */}
+                          {p.fcId !== null && (
+                            <label
+                              className={`lib-pick${picked ? ' on' : ''}${locked ? ' dis' : ''}`}
+                              title={locked ? '最多同时对比 3 人' : picked ? '取消对比' : '加入对比'}
+                            >
+                              <input
+                                type="checkbox"
+                                className="lib-pick-input"
+                                checked={picked}
+                                disabled={locked}
+                                aria-label={`${picked ? '取消对比' : '加入对比'}：${p.name}`}
+                                onChange={() => toggleCompare(p)}
+                              />
+                            </label>
+                          )}
+                        </td>
                         <td className="mono">{p.uid.replace(/^fc/, '')}</td>
                         <td className="marker-cell">{p.marker ? MARKER_EMOJI[p.marker] : ''}</td>
                         <td>
@@ -686,12 +789,58 @@ export default function PlayersLibrary() {
                           </td>
                           {activeCols.map((key) => renderClubCol(key, p))}
                         </tr>
-                      ))}
+                      );
+                    })}
                     </tbody>
                   </table>
                 </div>
                 {!narrow && <StickyScrollbar target={tableWrapRef} />}
               </>
+            )}
+
+            {/* 对比收集栏（v6.34.0 步骤 7，spec §9）：sticky 吸底、0 人不渲染；
+                窄屏压一行（姓名只留姓、清空走 chips 上的 ×，不出「清空」文字按钮）。
+                「对比（n）」n≥2 才可点；已选而不在当前筛选结果里的 chip 标小字 */}
+            {comparePicks.length > 0 && (
+              <div className="lib-pickbar" role="region" aria-label="球员对比收集栏">
+                <span className="lib-pickbar-count">{`已选 ${comparePicks.length} / ${COMPARE_MAX}`}</span>
+                {comparePicks.map((pick) => {
+                  const name = pick.name ?? compareLoadedNames.get(pick.fcId) ?? `#${pick.fcId}`;
+                  const offFilter = libQuery.data !== undefined && !compareLoadedNames.has(pick.fcId);
+                  return (
+                    <span key={pick.fcId} className="lib-pickbar-chip">
+                      <span className="lib-pickbar-dot" style={{ background: colorFor(pick.slot) }} aria-hidden="true" />
+                      <span className="lib-pickbar-name" title={name}>
+                        {narrow ? compareShortName(name) : name}
+                      </span>
+                      {offFilter && <span className="lib-pickbar-note">不在当前筛选</span>}
+                      <button
+                        type="button"
+                        className="lib-pickbar-x"
+                        aria-label={`移除对比：${name}`}
+                        onClick={() => removeComparePick(pick.fcId)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
+                <span className="lib-pickbar-grow" aria-hidden="true" />
+                {!narrow && (
+                  <button type="button" className="btn btn-sm lib-pickbar-clear" onClick={() => setComparePicks([])}>
+                    清空
+                  </button>
+                )}
+                {comparePicks.length >= 2 ? (
+                  <Link className="btn btn-sm lib-pickbar-go" to={compareHref}>
+                    {`对比（${comparePicks.length}）`}
+                  </Link>
+                ) : (
+                  <button type="button" className="btn btn-sm lib-pickbar-go" disabled title="再选 1 人才能对比">
+                    {`对比（${comparePicks.length}）`}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
