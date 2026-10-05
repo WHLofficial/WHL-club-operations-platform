@@ -1240,7 +1240,7 @@ describe('兜底与按需加载', () => {
     renderDetail();
 
     expect(await screen.findByText('球队不存在')).toBeTruthy();
-    expect(screen.getByText('回球队列表').closest('a')!.getAttribute('href')).toBe('/clubs');
+    expect(screen.getByText('回球队库').closest('a')!.getAttribute('href')).toBe('/clubs');
   });
 
   it('路径 id 非法时不打任何请求', async () => {

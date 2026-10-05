@@ -52,7 +52,7 @@ export default function ClubDetail() {
       <div className="container">
         <div className="banner bad">球队 ID 不对。</div>
         <p>
-          <Link to="/clubs">回球队列表</Link>
+          <Link to="/clubs">回球队库</Link>
         </p>
       </div>
     );
@@ -67,7 +67,7 @@ export default function ClubDetail() {
           {detailQuery.error instanceof Error ? detailQuery.error.message : '球队档案打不开了，稍后再试'}
         </div>
         <p>
-          <Link to="/clubs">回球队列表</Link>
+          <Link to="/clubs">回球队库</Link>
         </p>
       </div>
     );
@@ -114,7 +114,7 @@ export default function ClubDetail() {
           </div>
         </div>
         <Link className="muted club-detail-back" to="/clubs">
-          回球队列表
+          回球队库
         </Link>
       </div>
 

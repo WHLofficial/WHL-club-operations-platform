@@ -332,7 +332,7 @@ export default function Player() {
       <div className="container">
         <div className="banner bad">{dataQuery.error instanceof Error ? dataQuery.error.message : '加载球员合同失败'}</div>
         <Link className="btn btn-ghost" to="/club">
-          回球队中心
+          回我的球队
         </Link>
       </div>
     );

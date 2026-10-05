@@ -108,19 +108,19 @@ export default function TopBar() {
             首页
           </NavLink>
           <NavLink to="/club" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            球队中心
+            我的球队
           </NavLink>
           <NavLink to="/players" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             球员库
           </NavLink>
           <NavLink to="/clubs" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            球队
+            球队库
           </NavLink>
           {/* 转会中心（v6.23.0）：市场 / 报价 / 谈判三处入口并成一条，仍指向 /market，内部由 MarketNav 分流 */}
           <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             转会中心
           </NavLink>
-          {/* 消费中心（v6.26.0）：五类商品工单 + 球场消费三卡；v6.26.1 补顶栏入口（原先只有首页/球队中心卡片） */}
+          {/* 消费中心（v6.26.0）：五类商品工单 + 球场消费三卡；v6.26.1 补顶栏入口（原先只有首页/我的球队卡片） */}
           <NavLink to="/shop" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             消费中心
           </NavLink>

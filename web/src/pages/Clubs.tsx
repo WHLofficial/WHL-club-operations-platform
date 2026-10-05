@@ -62,7 +62,7 @@ export default function Clubs() {
 
   return (
     <div className="container">
-      <h1>球队</h1>
+      <h1>球队库</h1>
       {isError && <div className="banner warn">{error instanceof Error ? error.message : '球队名单打不开了，稍后再试'}</div>}
 
       {clubs === null ? (

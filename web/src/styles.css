@@ -1144,7 +1144,7 @@ tbody tr:hover td {
   font-weight: 700;
 }
 
-/* ---- 教练工作台（原「球队中心」，v3.4.0 步骤 8 并入球队详情页） ---- */
+/* ---- 教练工作台（v3.4.0 步骤 8 并入球队详情页） ---- */
 
 .club-head-badges {
   display: flex;

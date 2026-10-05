@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // /club 重定向壳（web/src/pages/Club.tsx，v3.4.0 步骤 8）：
-// 球队中心正文搬进 /clubs/:id 后，老入口靠这里转走 —— 绑定过的转自己的队，没绑的转登记页。
+// 「我的球队」正文搬进 /clubs/:id 后，老入口靠这里转走 —— 绑定过的转自己的队，没绑的转登记页。
 // 三种状态各钉一条：在途不闪跳、已绑定去 /clubs/:id、未绑定去 /bind。
 import { cleanup, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

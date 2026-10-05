@@ -54,7 +54,7 @@ export default function Home() {
 
       <div className="nav-cards">
         <NavLink to="/club" className="card nav-card">
-          <h3>球队中心</h3>
+          <h3>我的球队</h3>
           <p className="muted">阵容名单、注册合规与球队资金，以后都在这一页打理。</p>
         </NavLink>
         <NavLink to="/market" className="card nav-card">
@@ -66,7 +66,7 @@ export default function Home() {
           <p className="muted">买 PA、徽章、角色、位置热区、队壳申请，加上设施经营、冠名与球场档期，消费都在这一页。</p>
         </NavLink>
         <NavLink to="/clubs" className="card nav-card">
-          <h3>球队</h3>
+          <h3>球队库</h3>
           <p className="muted">全联盟球队总览：阵容人数、平均 CA、身价与工资，点开看单队详情。</p>
         </NavLink>
         <NavLink to="/ledger" className="card nav-card">

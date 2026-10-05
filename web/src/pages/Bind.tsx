@@ -18,7 +18,7 @@ export default function Bind() {
     setError('');
     try {
       await apiPost('/api/clubs/bind', { code: code.trim().toUpperCase() });
-      // 绑定改变 /api/me/club 的 club 形状，球队中心/市场的缓存全部失效
+      // 绑定改变 /api/me/club 的 club 形状，我的球队/市场的缓存全部失效
       void qc.invalidateQueries({ queryKey: ['me', 'club'] });
       setDone(true);
     } catch (err) {
@@ -35,9 +35,9 @@ export default function Bind() {
         {done ? (
           <div className="bind-done">
             <div className="stamp stamp-ok">登记完成</div>
-            <p>档案已入柜。去球队中心看看你的俱乐部吧。</p>
+            <p>档案已入柜。去我的球队看看你的俱乐部吧。</p>
             <Link className="btn" to="/club">
-              去球队中心
+              去我的球队
             </Link>
           </div>
         ) : (

@@ -63,7 +63,7 @@ export default function ShopPage() {
       ) : !isCoach || myClub === null ? (
         <div className="card empty-state">
           <p className="muted">
-            {isCoach ? '还没有绑定俱乐部。先到球队中心完成绑定，再来逛消费中心。' : '这里只对教练开放。球员消费是教练操作，观众视角看看就好。'}
+            {isCoach ? '还没有绑定俱乐部。先到我的球队完成绑定，再来逛消费中心。' : '这里只对教练开放。球员消费是教练操作，观众视角看看就好。'}
           </p>
         </div>
       ) : (
@@ -633,7 +633,7 @@ function ShellCard({ prices, hpremium, windowOpen }: { prices: ShopPrices; hprem
     <section className="card">
       <h3>队壳申请</h3>
       <p className="hint">
-        申请费 <span className="mono">{prices.clubShell}</span> m（提交即扣，拒绝自动退款）。同一时间只能有一张待审申请；管理组线下挑壳建档后发绑定码，凭码到球队中心绑定。
+        申请费 <span className="mono">{prices.clubShell}</span> m（提交即扣，拒绝自动退款）。同一时间只能有一张待审申请；管理组线下挑壳建档后发绑定码，凭码到我的球队绑定。
         {isHpremium && ' ⚠️ 豪门俱乐部队壳事项请在群内咨询管理组，系统不受理申请。'}
       </p>
       <div className="inline-form">

@@ -1,7 +1,7 @@
 // 转会台 · 谈判区（v6.23.0）：原 pages/Negotiations.tsx 主体搬入，逻辑行为不变。
 // 家族口径：mono 数字、口语化文案、操作 toast 反馈、两段式 busy 态。
 // v6.23.0 新增：会话卡头部阶段徽标（第一步 · 定违约金 / 工资谈判 · 剩 N 轮），只用现有字段推导。
-// v6.32.0：删历史台账表——工作台只放进行中，落定记录归球队中心转会页签的队史（工资随球员合同页签可查）；
+// v6.32.0：删历史台账表——工作台只放进行中，落定记录归球队详情页转会页签的队史（工资随球员合同页签可查）；
 // useMyNegotiations 挪 lib/queries.ts；money 收口到 ../shared.tsx；谈判规则展示常量具名。
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';

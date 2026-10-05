@@ -94,7 +94,7 @@ function RegistrationsSection() {
       </form>
 
       {snapshot === undefined ? null : snapshot.season === null ? (
-        <EmptyState>还没有任何注册名单。等教练在球队中心提交名单。</EmptyState>
+        <EmptyState>还没有任何注册名单。等教练在我的球队提交名单。</EmptyState>
       ) : (
         <>
           <h3>

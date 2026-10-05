@@ -22,7 +22,7 @@ export default function MarketFreePage() {
         </div>
       ) : club === null ? (
         <div className="card empty-state">
-          <p className="muted">还没有绑定俱乐部。先到球队中心完成绑定，再来海捞。</p>
+          <p className="muted">还没有绑定俱乐部。先到我的球队完成绑定，再来海捞。</p>
         </div>
       ) : (
         <SeaLookupSection />
