@@ -1,6 +1,8 @@
 # 球员热区图 + 六维雷达刻度五档对齐 · 设计定稿（2026-10-05）
 
-状态：**定稿（visual companion 两屏迭代收敛）**，实现等令。实现版本目标 v6.20.0（minor，零迁移零后端，纯前端）。视觉参数以 brainstorm session `43039-1791178761` 的 `heatmap-flatten-v2.html` 终稿屏为准。
+状态：**定稿（visual companion 两屏迭代收敛）**，实现等令。视觉参数以 brainstorm session `43039-1791178761` 的 `heatmap-flatten-v2.html` 终稿屏为准。
+
+> **时点说明**：spec 落盘时（2026-10-05）仓库已被并行会话推进到 v6.32.0（package.json 已 bump 6.33.0 在途）；本文行号与代码事实经同日复核仍成立（`posChips` Player.tsx:735、`.attr-head` styles.css:2566、`.attr-*` :2515-2527、`.radar-axis-val` fill 缺陷未修），但实现轮开工时必须以当时 HEAD 复核一遍再动手。版本号不预设（见 §6）。
 
 ## 0. 裁决链（用户指令留痕）
 
@@ -78,9 +80,9 @@ series: [{ type:"radar", data:[[POINT_SHO,POINT_PAC,POINT_PHY,POINT_DEF,POINT_DR
 - 纯函数测试：拓扑完整性（12 位置全覆盖、坐标在界内、无块重叠）、三态类名/填色映射（主/副/未踢）、雷达环带半径公式（v/99×R）。
 - 页面测试：mock 数据渲染热区图（主位/副位/未踢各至少一块）与雷达环带数量（5 带 5 线）；fill 修复后雷达轴数值档色断言。
 - e2e ⑯（scripts/e2e/smoke.mjs:1771 起）补属性页签断言：点「属性」页签 → 热区图在 DOM、雷达 svg 在 DOM（现状零覆盖）。
-- 回归基线：typecheck 三份全清、vitest **68 文件 / 1209 例**全绿（v6.19.0 基线）、build 成功、e2e **11/11**。
+- 回归基线：typecheck 三份全清、vitest 全绿（**基线以实现轮开工时实测为准**——spec 时点 68 文件 / 1209 例是 v6.19.0 旧基线，v6.20.0–v6.32.0 已由并行会话推进）、build 成功、e2e **11/11**。
 - code-review-skill 审查修复到绿。
 
 ## 6. 版本
 
-v6.20.0，判级 minor（新增用户可见能力）；零迁移、零生产写、后端零改动。
+判级 minor（新增用户可见能力）；零迁移、零生产写、后端零改动。版本号不预设：实现轮开工时取当时 HEAD 的最新版本号 +1（spec 时点 package.json 已在 6.33.0 在途 ⇒ 预计 **6.34.0**，以开工时实测为准）。
