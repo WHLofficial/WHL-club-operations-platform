@@ -24,8 +24,6 @@ import {
   TRANSFER_TYPE_LABEL,
   nationName,
   playstyleBadges,
-  playstyleById,
-  playstyleIconUrl,
   positionName,
   roleChs,
   teamName,
@@ -38,6 +36,8 @@ import { axesFor, groupAverage, starText } from '../lib/radar.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 // 六维雷达（v6.34.0 提取共享件）：详情页与后续对比页共用
 import { AttrRadar } from '../components/AttrRadar.tsx';
+// PlayStyle 徽章（v6.34.0 提取共享件）：详情页与对比页共用
+import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 import {
   PS_GOLD_BASE,
   PS_GRANTABLE_BASE_IDS,
@@ -65,26 +65,6 @@ const TAB_LABEL: Record<PlayerTab, string> = {
 
 // 窄屏卡片断点（v6.22.0）：≤760 转会/成长两张事件表改卡片流，与桌面表格 DOM 互斥
 const PLAYER_CARDS_QUERY = '(max-width: 760px)';
-
-function PlaystyleBadge({ psid, gold }: { psid: number; gold: boolean }) {
-  const row = playstyleById.get(psid);
-  const label = row?.chs ?? row?.en ?? `PS ${psid}`;
-  return (
-    <span className={`ps-badge${gold ? ' ps-gold' : ''}`} title={gold ? `${label}（金）` : label}>
-      <img
-        className="ps-icon"
-        src={playstyleIconUrl(psid)}
-        alt=""
-        loading="lazy"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.display = 'none';
-        }}
-      />
-      <span aria-hidden="true">{gold ? '🥇' : '🥈'}</span>
-      <span>{label}</span>
-    </span>
-  );
-}
 
 // PlayStyle 发放选择器（v3.3.0）：升级方案带徽章、中国计划自选徽章两处共用。
 // 只列「可发放白名单 − 已拥有」，本段选满后其余项禁用 —— 发放数量必须与方案/名额严格相等，

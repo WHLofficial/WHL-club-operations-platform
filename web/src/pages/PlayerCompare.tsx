@@ -13,8 +13,6 @@ import {
   ATTR_GROUPS,
   ATTR_LABELS,
   playstyleBadges,
-  playstyleById,
-  playstyleIconUrl,
   positionName,
   roleChs,
 } from '../lib/ref.ts';
@@ -23,6 +21,7 @@ import { attrClass } from '../lib/players-library.ts';
 import { usePlayerDetail } from '../lib/queries.ts';
 import { playerPath } from '../lib/player-link.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
+import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
 // 窄屏断点（spec §2/§10）：≤840px 单栏回落、吸顶条压 32px、位置热区图不出
 const NARROW_QUERY = '(max-width: 840px)';
@@ -78,28 +77,6 @@ function slotFromQuery(id: number, index: number, q: UseQueryResult<PlayerDetail
 }
 
 // ---- 小件 ----
-
-// PlayStyles 徽章：显示口径照 web/src/pages/Player.tsx:69-87 的模块私有组件（ps-badge / ps-gold
-// ＋图标＋金/银标记＋中文名）。本页允许改动的文件里不含 Player.tsx，故在此复刻同一 DOM/类名。
-function PlaystyleBadge({ psid, gold }: { psid: number; gold: boolean }) {
-  const row = playstyleById.get(psid);
-  const label = row?.chs ?? row?.en ?? `PS ${psid}`;
-  return (
-    <span className={`ps-badge${gold ? ' ps-gold' : ''}`} title={gold ? `${label}（金）` : label}>
-      <img
-        className="ps-icon"
-        src={playstyleIconUrl(psid)}
-        alt=""
-        loading="lazy"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.display = 'none';
-        }}
-      />
-      <span aria-hidden="true">{gold ? '🥇' : '🥈'}</span>
-      <span>{label}</span>
-    </span>
-  );
-}
 
 function posChipsOf(attrs: Record<string, unknown>): string[] {
   return ['PosID1', 'PosID2', 'PosID3', 'PosID4']
