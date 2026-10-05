@@ -471,6 +471,52 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
     expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, notForSale: true }, 'tok-coach')).status).toBe(409);
     expect((await send(fx.env, 'PUT', '/api/players/2/offer-settings', { transferListed: false, notForSale: true }, 'tok-coach')).status).toBe(404);
   });
+
+  it('v6.31.0 打戳：首次进名单落 transfer_listed_at（ISO 毫秒）；不进名单的保存不产生戳', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    const stamped = sqlGet(fx.sqlite, 'SELECT transfer_listed_at FROM players WHERE id = 1') as { transfer_listed_at: string | null };
+    expect(stamped.transfer_listed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    // 不进名单（解耦口径下也能设价/开自动应答）：戳必须保持 NULL
+    res = await send(fx.env, 'PUT', '/api/players/2/offer-settings', { transferListed: false, minOfferPrice: 35, offerAuto: true, notForSale: false }, 'tok-coach2');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, transfer_listed_at FROM players WHERE id = 2')).toMatchObject({ transfer_listed: 0, transfer_listed_at: null });
+  });
+
+  it('v6.31.0 保戳：重复进名单保存 / 改价不覆盖原戳（COALESCE 只补空）', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach')).status).toBe(200);
+    // 种一个显著早于“现在”的戳再保存：值必须原样保留（防实现退化成每次无条件 now）
+    fx.sqlite.exec("UPDATE players SET transfer_listed_at = '2020-01-01T00:00:00.000Z' WHERE id = 1");
+    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 45, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, min_offer_price, transfer_listed_at FROM players WHERE id = 1')).toMatchObject({
+      transfer_listed: 1,
+      min_offer_price: 45,
+      transfer_listed_at: '2020-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('v6.31.0 清戳：退出名单置 NULL，重新进名单重新打戳', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach')).status).toBe(200);
+    const first = (sqlGet(fx.sqlite, 'SELECT transfer_listed_at AS t FROM players WHERE id = 1') as { t: string }).t;
+
+    // 下名单：戳必须清空（否则广告板排序会把早已下架的人当新上架）
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: null, notForSale: false }, 'tok-coach')).status).toBe(200);
+    expect(sqlGet(fx.sqlite, 'SELECT transfer_listed, transfer_listed_at FROM players WHERE id = 1')).toMatchObject({ transfer_listed: 0, transfer_listed_at: null });
+
+    // 再上名单：重新打新戳（ISO 文本单调不降）
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, notForSale: false }, 'tok-coach')).status).toBe(200);
+    const second = (sqlGet(fx.sqlite, 'SELECT transfer_listed_at AS t FROM players WHERE id = 1') as { t: string }).t;
+    expect(second).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(second >= first).toBe(true);
+  });
 });
 
 describe('触发器同源锁（0037 fund_holds_offer_guard）', () => {

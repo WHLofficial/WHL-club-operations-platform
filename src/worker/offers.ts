@@ -893,10 +893,22 @@ export async function setOfferSettings(
   const statements = [
     db
       .prepare(
-        `UPDATE players SET transfer_listed = ?, min_offer_price = ?, offer_auto = ?, not_for_sale = ?, updated_at = ${nowSql()}
+        // 进名单打戳（v6.31.0 广告板）：首次进名单落 transfer_listed_at，重复保存保留原戳（COALESCE），
+        // 退出名单清 NULL；第 5 个绑定值与 transfer_listed 同值（复用入参，不新增形参）。
+        `UPDATE players SET transfer_listed = ?, min_offer_price = ?, offer_auto = ?, not_for_sale = ?,
+           transfer_listed_at = CASE WHEN ? = 1 THEN COALESCE(transfer_listed_at, ${nowSql()}) ELSE NULL END,
+           updated_at = ${nowSql()}
          WHERE id = ? AND club_id = ? AND status = 'normal'`,
       )
-      .bind(input.transferListed ? 1 : 0, effectiveMin, effectiveAuto ? 1 : 0, input.notForSale ? 1 : 0, input.playerId, input.clubId),
+      .bind(
+        input.transferListed ? 1 : 0,
+        effectiveMin,
+        effectiveAuto ? 1 : 0,
+        input.notForSale ? 1 : 0,
+        input.transferListed ? 1 : 0,
+        input.playerId,
+        input.clubId,
+      ),
     audit({
       actor: input.actor,
       action: 'offer_settings',

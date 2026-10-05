@@ -29,7 +29,8 @@ import { firstPlayerByRef } from '../player-ref.ts';
 import { loadMarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
 import { availableBalance } from '../ledger.ts';
-import { sqlDisplayName } from '../../core/player-name.ts';
+import { POSITION_BY_ID } from '../../core/fc26.ts';
+import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { createActivation } from '../activations.ts';
@@ -380,6 +381,118 @@ app.get('/market/deals', async (c) => {
     { scope: 'market', env: c.env, ctx: waitUntilOf(c) },
   );
   return c.json({ deals: data });
+});
+
+interface TransferBoardDbRow {
+  id: number;
+  uid: string;
+  fc_id: number | null;
+  name: string;
+  display_name: string | null;
+  club_id: number | null;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  min_offer_price: number | null;
+  transfer_listed_at: string | null;
+  status: string;
+  not_for_sale: number;
+  pos1: number | null;
+  pos2: number | null;
+  pos3: number | null;
+  pos4: number | null;
+  club_name: string | null;
+  release_fee: number | null;
+  emphasis: number | null;
+  emphasis_until: string | null;
+  total_count: number;
+}
+
+// GET /api/market/transfer-board?limit= —— 转会广告板（v6.31.0）：各队「列入转会名单」的球员公开面。
+// 只收 players.transfer_listed = 1；emphasis 取 player_promotions 现行最高档（0 普通 / 1 推荐 / 2 置顶），
+// 该表本版只有读路径（付费写流程未实现，接口预留给「列入转会名单时的有偿选项」）。
+// 最低报价数值只在本端点公开（/api/players 列表仍只下发布尔位，v6.30.0 口径不变）。
+// 新鲜度：改报价设置走 PUT /api/players/:id/offer-settings，/api/players 前缀命中 WRITE_SCOPE_PREFIXES
+// ⇒ 自动 purge 全部公开 scope（含 market）；1h TTL 只是兜底。total = LIMIT 前的名单总人数（截断提示用）。
+app.get('/market/transfer-board', async (c) => {
+  assertPublicRate(c, 'market');
+  // limit 默认 200、上限 200；非整数 / 非数字 / ≤0 / 空串回落默认（空串不走 Number('')=0 的坑；
+  // 整数口径与 /market/sea-lookup 的 limit 解析一致）
+  const raw = c.req.query('limit');
+  const parsed = Number(raw);
+  const limit = raw !== undefined && raw.trim() !== '' && Number.isInteger(parsed) && parsed > 0 ? Math.min(200, parsed) : 200;
+  const data = await cachedJson(
+    `market-transfer-board:${limit}`,
+    ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS),
+    async () => {
+      const rows = await c.env.DB.prepare(
+        `SELECT p.id, p.uid, p.fc_id, p.name, p.display_name, p.club_id, p.position, p.age, p.ca, p.pa,
+                p.min_offer_price, p.transfer_listed_at, p.status, p.not_for_sale,
+                json_extract(p.game_attrs, '$.PosID1') AS pos1,
+                json_extract(p.game_attrs, '$.PosID2') AS pos2,
+                json_extract(p.game_attrs, '$.PosID3') AS pos3,
+                json_extract(p.game_attrs, '$.PosID4') AS pos4,
+                cl.name AS club_name,
+                ct.release_fee,
+                pm.tier AS emphasis, pm.ends_at AS emphasis_until,
+                COUNT(*) OVER () AS total_count
+         FROM players p
+         LEFT JOIN clubs cl ON cl.id = p.club_id
+         LEFT JOIN contracts ct ON ct.player_id = p.id AND ct.is_active = 1
+         LEFT JOIN (
+           SELECT player_id, tier, ends_at FROM (
+             SELECT player_id, tier, ends_at,
+                    ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY tier DESC, ends_at DESC, id DESC) AS rn
+             FROM player_promotions WHERE ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           ) WHERE rn = 1
+         ) pm ON pm.player_id = p.id
+         WHERE p.transfer_listed = 1
+         ORDER BY CASE WHEN pm.tier IN (1, 2) THEN pm.tier ELSE 0 END DESC,
+                  p.transfer_listed_at IS NULL, p.transfer_listed_at DESC, p.id DESC
+         LIMIT ?`,
+      )
+        .bind(limit)
+        .all<TransferBoardDbRow>();
+
+      const slotNames = (v: unknown): string | null => {
+        // 槽位缺失（NULL）不能走 Number() 归零：PositionID 0 是 GK，会把空槽错译成门将
+        if (v === null || v === undefined) return null;
+        const num = Number(v);
+        return Number.isFinite(num) ? (POSITION_BY_ID[num] ?? null) : null;
+      };
+      return {
+        players: rows.results.map((r) => ({
+          id: r.id,
+          uid: r.uid,
+          fcId: r.fc_id,
+          name: rowDisplayName(r),
+          positions: [r.position ?? slotNames(r.pos1), slotNames(r.pos2), slotNames(r.pos3), slotNames(r.pos4)]
+            .filter((p): p is string => p !== null)
+            .filter((p, i, arr) => arr.indexOf(p) === i),
+          age: r.age,
+          ca: r.ca,
+          pa: r.pa,
+          clubId: r.club_id,
+          clubName: r.club_name,
+          // 广告板是 min_offer_price 数值的唯一公开出口（v6.31.0 裁决 4）；releaseFee 无现行合同为 null
+          minOfferPrice: r.min_offer_price,
+          releaseFee: r.release_fee,
+          listedAt: r.transfer_listed_at,
+          // tier 只存 1/2，读取钳 0..2、越界按 0（普通）处理
+          emphasis: r.emphasis === 1 || r.emphasis === 2 ? r.emphasis : 0,
+          emphasisUntil: r.emphasis_until,
+          // 与 /api/players 列表行同名字段，供前端复用 transferStatusOf
+          status: r.status,
+          notForSale: r.not_for_sale === 1,
+          transferPriced: r.min_offer_price !== null,
+        })),
+        total: rows.results[0]?.total_count ?? 0,
+      };
+    },
+    { scope: 'market', env: c.env, ctx: waitUntilOf(c) },
+  );
+  return c.json(data);
 });
 
 interface SeaLookupRow {
