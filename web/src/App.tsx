@@ -6,6 +6,7 @@ import { useAuth } from './lib/auth.tsx';
 import Home from './pages/Home.tsx';
 import Club from './pages/Club.tsx';
 import Player from './pages/Player.tsx';
+import PlayerCompare from './pages/PlayerCompare.tsx';
 import PlayersLibrary from './pages/PlayersLibrary.tsx';
 import Clubs from './pages/Clubs.tsx';
 import ClubDetail from './pages/ClubDetail.tsx';
@@ -98,6 +99,8 @@ export default function App() {
             }
           />
           <Route path="/players" element={<PlayersLibrary />} />
+          {/* 球员对比（v6.34.0）：静态段写在 /players/:id 之前（React Router 静态段优先，调序只为可读） */}
+          <Route path="/players/compare" element={<PlayerCompare />} />
           <Route path="/players/:id" element={<Player />} />
           <Route path="/clubs" element={<Clubs />} />
           <Route
