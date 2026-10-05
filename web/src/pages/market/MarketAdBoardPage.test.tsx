@@ -352,6 +352,14 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
     expect(within(dialog).getByText(/对方标价 180\.00 m/)).toBeTruthy();
   });
 
+  it('报价层卡片同时带 .modal-card 与 .card（v6.33.1：曾漏 .card，浮层没有底色与边框）', async () => {
+    renderPage(MIXED);
+    fireEvent.click(await screen.findByRole('button', { name: '给 置顶甲 报价' }));
+    const dialog = screen.getByRole('dialog', { name: '给 置顶甲 报价' });
+    expect(dialog.classList.contains('modal-card')).toBe(true);
+    expect(dialog.classList.contains('card')).toBe(true);
+  });
+
   it('送出报价：POST /api/offers 带默认金额=标价、无附言，pending 反馈文案', async () => {
     apiPostMock.mockResolvedValue({ offerId: 7, status: 'pending' });
     renderPage(MIXED);

@@ -2829,6 +2829,8 @@ th.num .th-sort {
   padding: 16px;
   background: rgba(43, 29, 18, 0.45);
 }
+/* .modal-card 只管宽度与纵向排布；底色/边框/圆角/内边距全靠 .card，
+   所以每个用到它的浮层都要写成 class="modal-card card"（漏掉 card 就是透明浮层） */
 .modal-card {
   width: min(440px, 100%);
   display: flex;

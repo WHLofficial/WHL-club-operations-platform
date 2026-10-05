@@ -227,7 +227,7 @@ function AdBidModal({ row, onClose }: { row: TransferBoardRow; onClose: () => vo
 
   return (
     <div className="modal-mask" onClick={busy ? undefined : onClose}>
-      <div className="modal-card" role="dialog" aria-label={`给 ${row.name} 报价`} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card card" role="dialog" aria-label={`给 ${row.name} 报价`} onClick={(e) => e.stopPropagation()}>
         <h3 className="modal-title">给 {row.name} 报价</h3>
         {result !== null ? (
           <>
