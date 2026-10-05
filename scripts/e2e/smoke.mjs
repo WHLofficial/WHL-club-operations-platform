@@ -764,21 +764,50 @@ async function main() {
     });
 
     // ---- 球员对比（v6.34.0 步骤 8）：详情页「⇄ 加入对比」→ 1/2/3 人态 → 非法/重复/超限降级 → 库内勾选收集栏 ----
-    // 取样球员从 /api/players?limit=6 取前 6 行 fc_id（本地夹具 9001 起有值；fc_id 是对比页与球员 URL
-    // 的统一寻址口径）。只验真浏览器里能验的：客户端跳转落点、1/2/3 人态的分支互斥（热区图占位只在
-    // 2 人桌面态、三张小雷达只在 3 人态）、滚过雷达后吸顶条真出现、属性表行数/组头、收集栏勾选链路。
+    // 取样球员从 /api/players?limit=30 取 fc_id（fc_id 是对比页与球员 URL 的统一寻址口径），但**优先挑有 FC 存档的**：
+    // 雷达数据多边形只对真有存档的球员画（共享件 AttrRadar v6.35.0 会跳过全空序列，本地夹具 9001-9006 没有存档 ⇒
+    // 画不出来），照注册顺序硬取前几行会让「2 条数据多边形」这类断言在本地假红。不足再按库列表顺序补齐。
+    // 只验真浏览器里能验的：客户端跳转落点、1/2/3 人态的分支互斥（热区图只在 2 人桌面态、三张小雷达只在 3 人态）、
+    // 滚过雷达后吸顶条真出现、属性表行数/组头、收集栏勾选链路。
     // 错误口径照 ⑪：只认本场景新增的 pageErrors 与 /api/players 非 2xx，已知环境噪声不参与判定。
     await check('⑤f 球员对比：详情入口 / 1-2-3 人态 / 非法重复超限降级 / 库内勾选收集栏', async () => {
       const errBefore = pageErrors.length;
       const badBefore = badResponses.length;
-      const sample = await page.evaluate(async () => {
-        const r = await fetch('/api/players?limit=6');
+      // 探针：全列表 30 行的存档形态（并行拉详情）。radar = 有可上雷达的属性值（排除 PosID/RoleID/PSID 等
+      // ID 槽与元数据），pos = 有合法位置槽（PosID ≥ 0；-1 是源表占位，与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径）。
+      const probe = await page.evaluate(async () => {
+        const r = await fetch('/api/players?limit=30');
         if (!r.ok) return null;
-        const j = await r.json();
-        return (j.players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null);
+        const ids = ((await r.json()).players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null);
+        const META = /^(ID|Age|CA|PA|height|weight|weakfoot|skillmoves|hashighqualityhead|internationalrep|naID|TeamID|NumofPS|PosID|RoleID|PSID)/;
+        const shape = {};
+        await Promise.all(
+          ids.map(async (id) => {
+            const d = await fetch(`/api/players/${id}`);
+            if (!d.ok) return;
+            const a = ((await d.json()).player ?? {}).gameAttrs ?? null;
+            shape[id] = {
+              attrs: a !== null,
+              radar: a !== null && Object.entries(a).some(([k, v]) => typeof v === 'number' && v > 0 && !META.test(k)),
+              pos:
+                a !== null &&
+                ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some(
+                  (k) => a[k] !== null && a[k] !== undefined && a[k] !== '' && Number(a[k]) >= 0,
+                ),
+            };
+          }),
+        );
+        return { ids, shape };
       });
-      assert(sample && sample.length >= 4, `本地夹具不足 4 名有 fc_id 的球员（拿到 ${sample ? sample.length : 'null'}）——⑤f 前置缺失`);
+      assert(probe && probe.ids.length >= 4, `本地夹具不足 4 名有 fc_id 的球员（拿到 ${probe ? probe.ids.length : 'null'}）——⑤f 前置缺失`);
+      const withArchive = probe.ids.filter((id) => probe.shape[id]?.radar);
+      const sample = [...withArchive, ...probe.ids.filter((id) => !withArchive.includes(id))].slice(0, 6);
       const [A, B, C, D] = sample;
+      const radarOf = (ids) => ids.filter((id) => probe.shape[id]?.radar === true).length;
+      const posOf = (id) => probe.shape[id]?.pos === true;
+      if (withArchive.length < 3) {
+        console.warn(`（⑤f 备注：本地只有 ${withArchive.length} 名球员带可上雷达的存档，数据多边形断言按实际期望降级）`);
+      }
 
       // 1) 详情页入口：CA/PA 行下「⇄ 加入对比」带 fc_id 进 1 人态；点击真客户端跳转
       await page.goto(`${BASE}/players/${A}`, { waitUntil: 'networkidle' });
@@ -799,17 +828,34 @@ async function main() {
       assert((await page.locator('.cmp-radar-solo .cmp-radar-big').count()) === 1, '1 人态缺单人雷达');
       assert((await page.locator('.cmp-table').count()) === 0, '1 人态不该渲染对照表');
 
-      // 2) 2 人态：双色叠图（1 大雷达 / 2 条数据多边形）+ 两份热区图虚线占位 + 属性表 34 行属性 6 组头
+      // 2) 2 人态：双色叠图（1 大雷达 / 2 条数据多边形）+ 两份位置热区图 + 属性表 34 行属性 6 组头
       await page.goto(`${BASE}/players/compare?ids=${A},${B}`, { waitUntil: 'networkidle' });
       await page.locator('.cmp-table').waitFor({ timeout: TIMEOUT });
       assert((await page.locator('.cmp-ids > .cmp-card').count()) === 2, '2 人态应有 2 张身份卡');
       assert((await page.locator('.cmp-radarzone .cmp-radar-big').count()) === 1, '2 人态应有 1 张大雷达');
-      assert((await page.locator('.cmp-radarzone polygon.cmp-radar-data').count()) === 2, '双色叠图应有 2 条数据多边形');
-      assert((await page.locator('.cmp-radarzone .cmp-heat').count()) === 2, '2 人桌面态应有 2 个热区图占位');
-      const heatNote = await page.locator('.cmp-heat-note').first().innerText();
-      assert(heatNote.includes('位置热区图待热区图轮落地'), `热区图占位文案不对（${heatNote}）`);
-      const heatBorder = await page.locator('.cmp-heat-box').first().evaluate((el) => getComputedStyle(el).borderTopStyle);
-      assert(heatBorder === 'dashed', `热区图占位应是虚线框（border-top-style=${heatBorder}）`);
+      // 数据多边形只对有存档的球员画（共享件 AttrRadar 跳过全空序列，v6.35.0 起；旧对比页实现无条件画
+      // 退化多边形）。期望值由探针推：本地取样 3 名有存档球员时这里就是 2，等于老断言的强度。
+      const expectPoly = radarOf([A, B]);
+      if (expectPoly === 0) console.warn('（⑤f 备注：取样两名球员都无可上雷达的存档，数据多边形断言降级为 0 条）');
+      assert(
+        (await page.locator('.cmp-radarzone polygon.radar-data').count()) === expectPoly,
+        `双色叠图应有 ${expectPoly} 条数据多边形`,
+      );
+      // v6.35.0：热区占位换成真图（PositionHeatmap 共享件）——2 张 svg，各 12 块位置块。
+      // 主位代号数取决于该球员在库里的位置数据，所以拿探针的 pos 推期望值再对齐，
+      // 而不是硬钉 1（换种子/换库都不会假红）。
+      assert((await page.locator('.cmp-radarzone .cmp-heatmap').count()) === 2, '2 人桌面态应有 2 份位置热区图');
+      assert((await page.locator('.cmp-radarzone .cmp-heatmap svg.heat-svg').count()) === 2, '热区图应各出一张 svg');
+      const heatBlocks = await page.locator('.cmp-radarzone .cmp-heatmap rect.heat-block').count();
+      assert(heatBlocks === 24, `两份热区图应有 24 块位置块（各 12），实测 ${heatBlocks}`);
+      // SVG <text> 没有 innerText（那是 HTMLElement 的）：用 allInnerTexts() 会拿到 undefined，取文案必须 allTextContents()
+      const heatMain = (await page.locator('.cmp-radarzone .cmp-heatmap text.heat-code.heat-main').allTextContents()).map((s) => s.trim());
+      assert(heatMain.every((c) => c.length > 0), `热区图主位代号出现空文案（${heatMain.join(',')}）`);
+      const expectMain = [A, B].filter(posOf).length;
+      assert(
+        heatMain.length === expectMain,
+        `热区图主位代号数应与有位置数据的球员数一致（探针 ${JSON.stringify([A, B].map((id) => probe.shape[id]))}，实见 ${heatMain.length} 枚：${heatMain.join(',')}）`,
+      );
       const groupKeys = (await page.locator('.cmp-table .cmp-row.cmp-gh .cmp-row-label').allInnerTexts()).map((s) => s.trim());
       assert(groupKeys.join(',') === 'PAC,SHO,PAS,DRI,DEF,PHY', `属性表六个组头顺序不对（${groupKeys.join(',')}）`);
       const attrRows = await page.locator('.cmp-table .cmp-col .cmp-row:not(.cmp-gh)').count();
@@ -850,8 +896,11 @@ async function main() {
       await page.locator('.cmp-radar3').waitFor({ timeout: TIMEOUT });
       assert((await page.locator('.cmp-ids > .cmp-card').count()) === 3, '3 人态应有 3 张身份卡');
       assert((await page.locator('.cmp-radar3 .cmp-radar-small').count()) === 3, '3 人态应有 3 张并排小雷达');
-      assert((await page.locator('.cmp-radar3 polygon.cmp-radar-data').count()) === 3, '三张小雷达应各带 1 条数据多边形');
-      assert((await page.locator('.cmp-heat').count()) === 0, '3 人态不该出热区图占位');
+      assert(
+        (await page.locator('.cmp-radar3 polygon.radar-data').count()) === radarOf([A, B, C]),
+        `三张小雷达应各带 1 条数据多边形（期望 ${radarOf([A, B, C])} 条）`,
+      );
+      assert((await page.locator('.cmp-heatmap').count()) === 0, '3 人态不该出位置热区图');
       assert((await page.locator('.cmp-radar-big').count()) === 0, '3 人态不该出大雷达');
       assert((await page.locator('.cmp-table').count()) === 1, '3 人态也应渲染属性对照表');
 
@@ -924,7 +973,7 @@ async function main() {
       await page.locator('.cmp-page').waitFor({ timeout: TIMEOUT });
       await page.locator('.cmp-table').waitFor({ timeout: TIMEOUT });
       assert((await page.locator('.cmp-ids > .cmp-card').count()) === 2, '库内收集 2 人后进入对比页应为 2 人态');
-      assert((await page.locator('.cmp-radarzone .cmp-heat').count()) === 2, '2 人态热区图占位缺失（库入口路径）');
+      assert((await page.locator('.cmp-radarzone .cmp-heatmap').count()) === 2, '2 人态位置热区图缺失（库入口路径）');
 
       // 6) 本场景错误口径（照 ⑪）：无新增未捕获前端错误、/api/players 无非 2xx
       const newErrs = pageErrors.slice(errBefore);
@@ -1964,6 +2013,33 @@ async function main() {
         return p ? (p.fcId ?? p.id) : null;
       });
       assert(pid, '取样球员失败（/api/players?limit=1 无数据）——⑯ 玩家页断言前提不成立');
+      // v6.35.0：属性页签头部（位置热区图 + 六维雷达）整块挂在 player.gameAttrs 上，本地夹具只有个别球员
+      // 带 FC 存档（9001-9006 全 NULL）⇒ 先探一个「有存档的球员」来验头部几何，取样球员本身按实际存档态
+      // 断言（无存档 ⇒ 不出 .attr-head 的空态闸门）。attrsPos 与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径。
+      const attrProbe = await page.evaluate(async (first) => {
+        const r = await fetch('/api/players?limit=30');
+        const ids = r.ok ? ((await r.json()).players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null) : [];
+        let attrsPid = null;
+        let pidAttrs = false;
+        let attrsPos = false;
+        for (const id of [...new Set([first, ...ids])]) {
+          const d = await fetch(`/api/players/${id}`);
+          if (!d.ok) continue;
+          const a = ((await d.json()).player ?? {}).gameAttrs ?? null;
+          const pos =
+            a !== null &&
+            ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some(
+              (k) => a[k] !== null && a[k] !== undefined && a[k] !== '' && Number(a[k]) >= 0,
+            );
+          if (id === first) pidAttrs = a !== null;
+          if (a !== null && attrsPid === null) {
+            attrsPid = id;
+            attrsPos = pos;
+          }
+          if (attrsPid !== null && id === first) break; // 取样球员排在最前 ⇒ 首轮就能定案
+        }
+        return { attrsPid, pidAttrs, attrsPos };
+      }, pid);
 
       // —— 375：档案单列（900 档）+ 页签不撑破文档 + 转会事件卡互斥且 fit ——
       await page.setViewportSize({ width: 375, height: 812 });
@@ -2005,6 +2081,39 @@ async function main() {
         return { vw, bad };
       });
       assert(fit.bad.length === 0, `375 事件卡超出视口 ±1px：${fit.bad.join(',')}（vw=${fit.vw}）`);
+      // 属性页签（v6.35.0）：头部 = 位置热区图 + 队徽 + 六维雷达（共享件 AttrRadar variant=head）。
+      // 头部整块只在有 FC 存档时渲染 ⇒ 取样球员无存档时这里只钉空态闸门，头部几何挪到 ⑯ 末段
+      // 用探到的有存档球员验（热区图取决于位置数据 ⇒ 钉「两态之一 + 自洽」，不硬钉有热区）。
+      await page.locator('.dossier-tabs button', { hasText: '属性' }).first().click();
+      await page.waitForTimeout(200);
+      if (attrProbe.pidAttrs) {
+        await page.locator('.attr-head').first().waitFor({ timeout: TIMEOUT });
+        const head = await page.evaluate(() => {
+          const el = document.querySelector('.attr-head');
+          if (!el) return null;
+          return {
+            noheat: el.classList.contains('attr-head-noheat'),
+            heat: el.querySelectorAll('.attr-head-visual svg.heat-svg').length,
+            blocks: el.querySelectorAll('.attr-head-visual rect.heat-block').length,
+            bands: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-band').length,
+            data: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-data').length,
+            dots: el.querySelectorAll('.attr-head-visual svg.radar-svg-head circle.radar-dot').length,
+          };
+        });
+        assert(head && head.bands === 5 && head.dots === head.data * 6, `属性页签头部六维雷达形状不对（${JSON.stringify(head)}）`);
+        assert(
+          head && (head.noheat ? head.heat === 0 : head.heat === 1 && head.blocks === 12),
+          `属性页签头部热区图与空态标记不自洽（${JSON.stringify(head)}）`,
+        );
+      } else {
+        const heads = await page.locator('.attr-head').count();
+        assert(heads === 0, `无 FC 存档的球员不该渲染属性页签头部（实见 ${heads} 块）`);
+        console.warn('（⑯ 备注：本地取样球员无 FC 存档，属性页签只验空态闸门；头部几何挪到末段用有存档球员验）');
+      }
+      const ovAttr = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      assert(ovAttr <= 1, `375 属性页签文档级横向溢出 ${ovAttr}px`);
       // 成长页签（本地 9001 无成长事件种子 ⇒ 只断言不撑破；卡片在场与否依赖种子，静态闸门兜底）
       await page.locator('.dossier-tabs button', { hasText: '成长' }).first().click();
       await page.waitForTimeout(200);
@@ -2095,6 +2204,56 @@ async function main() {
           return th ? getComputedStyle(th).position : null;
         });
         assert(wide2 === 'static', `1280 intel 应取消粘性（computed=${wide2}）`);
+      }
+
+      // —— 属性页签头部几何（v6.35.0）：用探到的有存档球员验真图（上面 375 段若取样球员无存档就只跑了空态闸门）——
+      if (!attrProbe.attrsPid) {
+        console.warn('（⑯ 备注：本地没有带 FC 存档的球员，属性页签头部几何断言整体跳过——静态闸门与单测兜底）');
+      } else {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(`${BASE}/players/${attrProbe.attrsPid}`, { waitUntil: 'networkidle' });
+        await page.locator('.dossier-tabs button', { hasText: '属性' }).first().click();
+        await page.locator('.attr-head').first().waitFor({ timeout: TIMEOUT });
+        const h375 = await page.evaluate(() => {
+          const el = document.querySelector('.attr-head');
+          const vis = document.querySelector('.attr-head-visual');
+          if (!el || !vis) return null;
+          return {
+            cols: getComputedStyle(el).gridTemplateColumns,
+            vis: getComputedStyle(vis).display,
+            noheat: el.classList.contains('attr-head-noheat'),
+            heat: el.querySelectorAll('.attr-head-visual svg.heat-svg').length,
+            blocks: el.querySelectorAll('.attr-head-visual rect.heat-block').length,
+            main: el.querySelectorAll('.attr-head-visual text.heat-code.heat-main').length,
+            bands: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-band').length,
+            data: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-data').length,
+            dots: el.querySelectorAll('.attr-head-visual svg.radar-svg-head circle.radar-dot').length,
+            ov: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          };
+        });
+        assert(h375 && !h375.cols.includes(' '), `375 属性页签头部应单列（grid-template-columns="${h375?.cols}"）`);
+        assert(h375 && h375.vis === 'flex', `375 .attr-head-visual 应折成 flex 换行行（display=${h375?.vis}）`);
+        assert(h375 && h375.bands === 5 && h375.dots === h375.data * 6, `375 属性页签头部六维雷达形状不对（${JSON.stringify(h375)}）`);
+        if (attrProbe.attrsPos) {
+          // 探针说这名球员有位置数据 ⇒ 热区图必在，且主位恰 1 块（heatStateOf：首枚有效位置码 = main）
+          assert(
+            h375 && !h375.noheat && h375.heat === 1 && h375.blocks === 12,
+            `有位置数据的球员头部应出 12 块热区图（${JSON.stringify(h375)}）`,
+          );
+          assert(h375 && h375.main === 1, `热区图主位应恰 1 块（实见 main=${h375?.main}）`);
+        } else {
+          assert(h375 && h375.noheat && h375.heat === 0, `无位置数据的球员头部应走 .attr-head-noheat 回退（${JSON.stringify(h375)}）`);
+        }
+        assert(h375 && h375.ov <= 1, `375 属性页签头部横向溢出 ${h375?.ov}px`);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.waitForTimeout(200);
+        const h1280 = await page.evaluate(() => {
+          const el = document.querySelector('.attr-head');
+          const vis = document.querySelector('.attr-head-visual');
+          return el && vis ? { cols: getComputedStyle(el).gridTemplateColumns.split(' ').length, vis: getComputedStyle(vis).display } : null;
+        });
+        assert(h1280 && h1280.vis === 'contents', `1280 .attr-head-visual 应 display:contents（=${h1280?.vis}）——三列靠它让热区图/雷达各占一列`);
+        assert(h1280 && h1280.cols === (attrProbe.attrsPos ? 3 : 2), `1280 .attr-head 应是 ${attrProbe.attrsPos ? 3 : 2} 列（实见 ${h1280?.cols}）`);
       }
     });
 
