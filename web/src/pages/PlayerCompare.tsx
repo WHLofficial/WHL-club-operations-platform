@@ -23,6 +23,7 @@ import { playerPath } from '../lib/player-link.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { AttrRadar } from '../components/AttrRadar.tsx';
 import { PositionHeatmap } from '../components/PositionHeatmap.tsx';
+import { BadgeCounts, badgeCountItems } from '../components/BadgeCounts.tsx';
 import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
 // 窄屏断点（spec §2/§10）：≤840px 单栏回落、吸顶条压 32px、位置热区图不出
@@ -643,10 +644,20 @@ function MetaSection({ slots }: { slots: ReadySlot[] }) {
         <span className="cmp-meta-label">徽章数</span>
         {slots.map((s) => (
           <span className="cmp-meta-cell" key={s.id}>
-            {/* 金在前（spec §7）：两枚定宽小块 = 台账计数 badgesGold / badgesSilver */}
-            <span className="cmp-badgecnt">金 {s.detail.player.badgesGold}</span>
-            <span className="cmp-dt">·</span>
-            <span className="cmp-badgecnt">银 {s.detail.player.badgesSilver}</span>
+            {/* 金在前（spec §7）：两枚定宽小块 = 台账计数 badgesGold / badgesSilver。
+                零值抑制 + 金在前走 BadgeCounts（v6.35.0 四页共用一份计数口径）；
+                两枚全 0 与相邻行的空态一致出「—」。 */}
+            {badgeCountItems(s.detail.player.badgesSilver, s.detail.player.badgesGold).length === 0 ? (
+              <span className="cmp-mut">—</span>
+            ) : (
+              <BadgeCounts
+                silver={s.detail.player.badgesSilver}
+                gold={s.detail.player.badgesGold}
+                density="text"
+                className="cmp-badgecnt"
+                sep={<span className="cmp-dt">·</span>}
+              />
+            )}
           </span>
         ))}
       </div>

@@ -39,3 +39,26 @@ describe('PlaystyleBadge 共享件（提取后行为零变化）', () => {
     expect(badge.textContent).toBe('🥈PS 9999');
   });
 });
+
+// v6.35.0：表格 ps 列的 compact 形态。与整徽的差别只有「不拉 webp 图标、不铺 pill 底」，
+// 名称/金标记/title 口径仍同源；类名独立（ps-badge-compact），银徽不上色。
+describe('PlaystyleBadge compact（表格 ps 列）', () => {
+  it('银徽：只 ps-badge-compact，无图标、无 img', () => {
+    const { container } = render(<PlaystyleBadge psid={1} gold={false} compact />);
+    const badge = container.querySelector('.ps-badge-compact')!;
+    expect(badge.getAttribute('class')).toBe('ps-badge-compact');
+    expect(badge.getAttribute('title')).toBe('精准搓射');
+    expect(badge.querySelector('img')).toBeNull();
+    expect(badge.querySelector('.ps-badge')).toBeNull();
+    expect(Array.from(badge.querySelectorAll('span[aria-hidden="true"]'), (el) => el.textContent)).toEqual(['🥈']);
+    expect(badge.textContent).toBe('🥈精准搓射');
+  });
+
+  it('金徽：多一枚 ps-badge-compact-gold（底色走 --badge-gold-* token）＋🥇＋「（金）」title', () => {
+    const { container } = render(<PlaystyleBadge psid={3} gold compact />);
+    const badge = container.querySelector('.ps-badge-compact')!;
+    expect(badge.getAttribute('class')).toBe('ps-badge-compact ps-badge-compact-gold');
+    expect(badge.getAttribute('title')).toBe('大力射门（金）');
+    expect(badge.textContent).toBe('🥇大力射门');
+  });
+});

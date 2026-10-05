@@ -543,18 +543,36 @@ describe('TC-CMP-POS：四行成组', () => {
     void container;
   });
 
-  it('TC-CMP-POS-05 · 徽章数金在前：`金 n · 银 n`（台账计数 badgesGold/badgesSilver）', async () => {
+  it('TC-CMP-POS-05 · 徽章数金在前：`2金 · 3银`（台账计数 badgesGold/badgesSilver，v6.35.0 走 BadgeCounts）', async () => {
     const { container } = await openTwo();
     const row = rowOf('徽章数');
     const cells = row.querySelectorAll('.cmp-meta-cell');
     expect(cells.length).toBe(2);
     const text = cells[0].textContent ?? '';
-    expect(text.startsWith('金 2')).toBe(true);
+    expect(text.startsWith('2金')).toBe(true);
     expect(text.indexOf('金')).toBeLessThan(text.indexOf('银'));
-    expect(text).toContain('银 3');
-    const blocks = within(cells[0] as HTMLElement).getAllByText(/^[金银] \d+$/);
-    expect(blocks.map((b) => b.textContent)).toEqual(['金 2', '银 3']);
+    expect(text).toContain('3银');
+    const blocks = within(cells[0] as HTMLElement).getAllByText(/^\d+[金银]$/);
+    expect(blocks.map((b) => b.textContent)).toEqual(['2金', '3银']);
+    expect(blocks.map((b) => b.getAttribute('class'))).toEqual([
+      'badge-count badge-count-text-gold cmp-badgecnt',
+      'badge-count badge-count-text-silver cmp-badgecnt',
+    ]);
+    expect(cells[0].querySelector('.cmp-dt')?.textContent).toBe('·');
     expect(container.querySelector('.cmp-badgecnt')).toBeTruthy();
+  });
+
+  it('TC-CMP-POS-06 · 徽章数两枚全 0：与相邻空态一致出「—」，不出计数块', async () => {
+    behaviors = { '1': detail(1, { badgesGold: 0, badgesSilver: 0 }), '2': detail(2, { badgesGold: 0, badgesSilver: 0 }) };
+    const { container } = open('/players/compare?ids=1,2');
+    await waitFor(() => expect(container.querySelector('.cmp-meta')).toBeTruthy());
+    const cells = rowOf('徽章数').querySelectorAll('.cmp-meta-cell');
+    expect(cells.length).toBe(2);
+    for (const cell of cells) {
+      expect(cell.querySelector('.cmp-mut')?.textContent).toBe('—');
+      expect(cell.querySelector('.cmp-badgecnt')).toBeNull();
+    }
+    expect(container.querySelectorAll('.cmp-badgecnt').length).toBe(0);
   });
 });
 

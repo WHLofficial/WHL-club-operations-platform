@@ -19,6 +19,14 @@
   --gold-deep: #8f6a1e;
   --silver: #9aa0a6;
   --silver-deep: #6e747b;
+  /* 徽章金银衬底（v6.35.0 收敛：原先 .badge.gold / .ps-gold / .lib-card-chip-* 各写一遍同一组色值，
+     金徽描边同时收成浅金 —— .ps-gold 原来用饱和 --gold，与衬底 #f5e8cf 对比过强、跟其余金徽不同族） */
+  --badge-gold-bg: #f5e8cf;
+  --badge-gold-line: #e2c98f;
+  --badge-gold-fg: var(--gold-deep);
+  --badge-silver-bg: #eeeae2;
+  --badge-silver-line: #d8d2c4;
+  --badge-silver-fg: var(--silver-deep);
   --ok: #0f9960;
   --bad: #dc2626;
   --warn: #d97706;
@@ -548,8 +556,33 @@ a.card:hover {
 }
 
 .badge.gold {
-  background: #f5e8cf;
-  color: var(--gold-deep);
+  background: var(--badge-gold-bg);
+  color: var(--badge-gold-fg);
+}
+
+/* 徽章计数 chip（BadgeCounts 的 chip 密度，v6.35.0 自 .lib-card-chip-gold/silver 收进来）：
+   与「自由身」chip（.lib-card-free）同族的方块，金/银只换 --badge-* 三色 */
+.badge-chip {
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.badge-chip + .badge-chip {
+  margin-left: 4px;
+}
+
+.badge-chip-gold {
+  background: var(--badge-gold-bg);
+  border: 1px solid var(--badge-gold-line);
+  color: var(--badge-gold-fg);
+}
+
+.badge-chip-silver {
+  background: var(--badge-silver-bg);
+  border: 1px solid var(--badge-silver-line);
+  color: var(--badge-silver-fg);
 }
 
 .badge-stack {
@@ -1040,14 +1073,35 @@ tbody tr:hover td {
 }
 
 .ps-gold {
-  border-color: var(--gold);
-  background: #f5e8cf;
-  color: var(--gold-deep);
+  border-color: var(--badge-gold-line);
+  background: var(--badge-gold-bg);
+  color: var(--badge-gold-fg);
 }
 
 .ps-icon {
   width: 16px;
   height: 16px;
+}
+
+/* v6.35.0：表格 ps 列的 compact 形态（PlaystyleBadge compact）—— 一列可能十几枚徽章，
+   不铺 pill 底、不拉 webp 图标；金徽走 --badge-gold-* token，银徽只留文字（免得整列都是色块）。
+   独立类名（不挂 .ps-badge），省得跟 pill 的 padding / radius 抢优先级 */
+.ps-badge-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 1px 6px 1px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.ps-badge-compact-gold {
+  padding: 0 5px;
+  border: 1px solid var(--badge-gold-line);
+  border-radius: 6px;
+  background: var(--badge-gold-bg);
+  color: var(--badge-gold-fg);
 }
 
 /* PlayStyle 发放选择器（v3.3.0）：升级方案/中国计划两处共用，点选后高亮，本段选满其余置灰 */
@@ -2640,8 +2694,6 @@ th.num .th-sort {
 }
 
 /* 属性页签头部（v6.2.0 两栏 → v6.35.0 三列）：左 = 标题/位置/角色，中 = 位置热区图，右 = 队徽 96px + 雷达；
-   星级行与属性卡网格不在这个 grid 里，保持整宽 */
-/* 属性页签头部（v6.2.0 两栏 → v6.35.0 三列）：标题/位置/角色 ｜ 位置热区图 ｜ 队徽 96px + 雷达；
    星级行与属性卡网格不在这个 grid 里，保持整宽。无位置码时不渲染热区图（attr-head-noheat 回两列） */
 .attr-head {
   display: grid;
@@ -3533,31 +3585,15 @@ th.num .th-sort {
   font-size: 12.5px;
 }
 
-/* 自由身 chip 与徽章「N金/N银」chip 同族（样机 .bc-free / .bc-gold / .bc-silver 的口径） */
-.lib-card-free,
-.lib-card-chip {
+/* 自由身 chip（样机 .bc-free 口径；金/银徽章 chip 见 .badge-chip，v6.35.0 起不再共用本规则） */
+.lib-card-free {
   padding: 1px 7px;
   border-radius: 6px;
   font-size: 11px;
   line-height: 1.6;
-}
-.lib-card-free {
   background: #e9e2d3;
   border: 1px solid #e6dcc8;
   color: #7a6a5a;
-}
-.lib-card-chip + .lib-card-chip {
-  margin-left: 4px;
-}
-.lib-card-chip-gold {
-  background: #f5e5bf;
-  border: 1px solid #e2c98f;
-  color: #8a5a00;
-}
-.lib-card-chip-silver {
-  background: #eeeae2;
-  border: 1px solid #d8d2c4;
-  color: #6b665c;
 }
 
 .lib-card-list {

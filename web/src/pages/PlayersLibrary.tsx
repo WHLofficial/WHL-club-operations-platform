@@ -7,14 +7,16 @@ import { Link } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, type ClubDirectoryRow, type PlayerLibraryRow, type PlayersLibraryResponse } from '../lib/api.ts';
 import { ATTR_LABELS } from '../lib/ref.ts';
-// v6.30.0 C 段：PlayStyle 显示名（psNames）与可变列单元格渲染（renderClubCol）挪去 ../lib/club-columns.tsx，
-// 球队页两张球员表与本页共用同一份实现；这里 re-export 保持球员库自己的对外形状不变
+// v6.30.0 C 段：PlayStyle 徽章清单（psBadgesOf）与可变列单元格渲染（renderClubCol）挪去
+// ../lib/club-columns.tsx，球队页两张球员表与本页共用同一份实现；这里 re-export 保持对外形状。
+// v6.35.0：psNames（拼字符串）改成 psBadgesOf（给渲染用的清单），ps 列统一走 PlaystyleBadge compact。
 import { renderClubCol } from '../lib/club-columns.tsx';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { playerPath } from '../lib/player-link.ts';
 // 球员对比勾选（v6.34.0 步骤 7）：URL ?compare= 预置解析与第三人色都复用对比域纯函数
 import { colorFor, parseCompareIds } from '../lib/compare.ts';
 import FilterPanel from '../components/FilterPanel.tsx';
+import { BadgeCounts, badgeCountItems } from '../components/BadgeCounts.tsx';
 import PlayerSearchBox from '../components/PlayerSearchBox.tsx';
 import StickyScrollbar from '../components/StickyScrollbar.tsx';
 import { TeamLogo } from '../components/TeamLogo.tsx';
@@ -73,9 +75,9 @@ function writeSideOpen(open: boolean): void {
 
 // v3.0.0：效力时长按窗刻度存储（赛季数），不再由日期折算
 
-// v6.30.0 C 段：psNames 与本页原来的 renderCol 已提取到 ../lib/club-columns.tsx（球队页共用），
-// 逻辑一字未改；psNames 继续从这里 re-export，免得既有引用（含测试）改路径。
-export { psNames } from '../lib/club-columns.tsx';
+// v6.30.0 C 段：psBadgesOf 与本页原来的 renderCol 已提取到 ../lib/club-columns.tsx（球队页共用），
+// 逻辑同源；这里继续 re-export，免得既有引用（含测试）改路径。
+export { psBadgesOf } from '../lib/club-columns.tsx';
 
 // ---- 对比勾选（v6.34.0 步骤 7，spec §9）----
 // 勾选只活在页面 state：不落库、不发请求；跨筛选/排序/翻页保留（筛选只影响某行在不在场，
@@ -595,20 +597,16 @@ export default function PlayersLibrary() {
                 {rows.map((p) => {
                   const lens = lensChips(filters, p);
                   /* 行序固定：身价 → 违约金 → 徽章 → 影响力 → 受筛选项（lens）；
-                     徽章金银全 0 时整行不出现。徽章值是「N金/N银」小 chip（spec §2.2）。 */
+                     徽章金银全 0 时整行不出现。徽章值是「N金/N银」小 chip（spec §2.2），
+                     金在前与零值抑制走 BadgeCounts（v6.35.0 起四页共用一份计数口径）。 */
                   const fields = [
                     { k: '身价', v: money(p.marketValue) },
                     { k: '违约金', v: money(p.releaseFee) },
-                    ...(p.badgesGold > 0 || p.badgesSilver > 0
+                    ...(badgeCountItems(p.badgesSilver, p.badgesGold).length > 0
                       ? [
                           {
                             k: '徽章',
-                            v: (
-                              <>
-                                {p.badgesGold > 0 && <span className="lib-card-chip lib-card-chip-gold">{p.badgesGold}金</span>}
-                                {p.badgesSilver > 0 && <span className="lib-card-chip lib-card-chip-silver">{p.badgesSilver}银</span>}
-                              </>
-                            ),
+                            v: <BadgeCounts silver={p.badgesSilver} gold={p.badgesGold} density="chip" />,
                           },
                         ]
                       : []),

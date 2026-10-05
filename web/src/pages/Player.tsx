@@ -36,6 +36,7 @@ import { axesFor, groupAverage, starText } from '../lib/radar.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 // 六维雷达（v6.34.0 提取共享件）：详情页与后续对比页共用
 import { AttrRadar } from '../components/AttrRadar.tsx';
+import { BadgeCounts, BADGE_KIND_LABEL, badgeCountItems } from '../components/BadgeCounts.tsx';
 // 位置热区图（v6.35.0）：12 块位置拓扑 + 主位/副位/未踢三态
 import { PositionHeatmap } from '../components/PositionHeatmap.tsx';
 // PlayStyle 徽章（v6.34.0 提取共享件）：详情页与对比页共用
@@ -195,8 +196,8 @@ export default function Player() {
     try {
       const r = await apiPost<LevelUpResult>(`/api/growth/levelup/${growth.player.id}`, { planIndex, picks });
       const parts = [`+${r.plan.ca} CA`];
-      if (r.plan.silver > 0) parts.push(`银徽章 +${r.plan.silver}`);
-      if (r.plan.gold > 0) parts.push(`金徽章 +${r.plan.gold}`);
+      // 金在前（v6.35.0：顺序走 badgeCountItems，与页面上四处的计数同一份口径）
+      for (const it of badgeCountItems(r.plan.silver, r.plan.gold)) parts.push(`${BADGE_KIND_LABEL[it.kind]} +${it.n}`);
       show(`升级完成：${parts.join('，')}。还剩 ${r.pendingLeft} 次待升级。`);
       setArmedPlan(null);
       setPicks([]);
@@ -345,8 +346,8 @@ export default function Player() {
                     {MARKER_EMOJI[player.marker]}
                   </span>
                 )}
-                {player.badgesGold > 0 && <span title="金徽章">🥇×{player.badgesGold}</span>}
-                {player.badgesSilver > 0 && <span title="银徽章">🥈×{player.badgesSilver}</span>}
+                {/* 徽章计数（v6.35.0 统一走 BadgeCounts）：金在前、零值抑制，title 由组件挂 */}
+                <BadgeCounts silver={player.badgesSilver} gold={player.badgesGold} density="icon" />
               </span>
             </div>
             <p className="player-card-sub">
@@ -824,10 +825,6 @@ function GrowthBlock({
   const china = p.chinaPlaystyles;
   const chinaGranted = growth.playstyleDetails.filter((d) => d.source === 'china');
   const chinaReady = chinaPicks.length === china.left;
-  const planBadgeText = (silver: number, gold: number) => {
-    if (silver === 0 && gold === 0) return '不加徽章';
-    return [silver > 0 ? `🥈 ×${silver}` : '', gold > 0 ? `🥇 ×${gold}` : ''].filter(Boolean).join(' ');
-  };
   return (
     <div className="growth-block">
       <h3>成长记录</h3>
@@ -859,10 +856,10 @@ function GrowthBlock({
                 </b>
                 <span className="mono upgrade-plan-ca">+{plan.ca} CA</span>
                 <span className="upgrade-plan-badges">
-                  {plan.silver === 0 && plan.gold === 0 ? (
+                  {badgeCountItems(plan.silver, plan.gold).length === 0 ? (
                     <span className="muted">不加徽章</span>
                   ) : (
-                    <span>{planBadgeText(plan.silver, plan.gold)}</span>
+                    <BadgeCounts silver={plan.silver} gold={plan.gold} density="icon" />
                   )}
                 </span>
               </button>
@@ -871,7 +868,8 @@ function GrowthBlock({
           {armedPlanDef && need > 0 && (
             <div className="pick-panel">
               <p className="hint">
-                方案 {(armedPlan ?? 0) + 1} 要发 {planBadgeText(armedPlanDef.silver, armedPlanDef.gold)}，已选 {picks.length}/{need}
+                方案 {(armedPlan ?? 0) + 1} 要发{' '}
+                <BadgeCounts silver={armedPlanDef.silver} gold={armedPlanDef.gold} density="icon" />，已选 {picks.length}/{need}
                 {picksReady ? '：选满了，再点一次方案确认。' : '：选满之后才能确认。'}
               </p>
               {armedPlanDef.silver > 0 && (
