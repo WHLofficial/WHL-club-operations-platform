@@ -40,7 +40,10 @@ function freshEnv(ttl = '0'): Fixture {
   const tour = new DatabaseSync(':memory:');
   tour.exec(
     `CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
-     INSERT INTO user (id, name, role, locked, must_change_pw) VALUES (2, '教练乙', 'coach', 0, 0);`,
+     INSERT INTO user (id, name, role, locked, must_change_pw) VALUES (2, '教练乙', 'coach', 0, 0);
+     -- v6.32.0：队徽真源 = tour 库 team.logo_key（照 routes/clubs.ts 口径；本平台 clubs.logo_key 无人写）
+     CREATE TABLE team (id INTEGER PRIMARY KEY, name TEXT, logo_key TEXT);
+     INSERT INTO team (id, name, logo_key) VALUES (1, '甲队', 'logo/c1.png'), (2, '乙队', NULL);`,
   );
   const kv = new Map<string, string>();
   const env: Env = {
@@ -95,7 +98,7 @@ async function board(fx: Fixture, query = ''): Promise<BoardOut> {
 // 名单：1/2/3/5/6/7/8 在名单，4 不在；着重度行 6 = 最高档 + 同档最晚到期、5 过期、8 越界
 function seedBoard(fx: Fixture): void {
   fx.sqlite.exec(`
-    INSERT INTO clubs (id, name, league_tier, status, logo_key) VALUES (1, '甲队', 'premier', 'active', 'logo/c1.png'), (2, '乙队', 'premier', 'active', NULL);
+    INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '甲队', 'premier', 'active'), (2, '乙队', 'premier', 'active');
     INSERT INTO players (id, uid, name, display_name, club_id, position, age, ca, pa, status, fc_id, transfer_listed, min_offer_price, transfer_listed_at, game_attrs) VALUES
       (1, 'uid1', '球员甲', '铁闸甲', 1, 'CM', 24, 80, 88, 'normal', 11, 1, 40, '2026-01-01T00:00:00.000Z', '{"PosID1":25,"PosID2":25,"PosID3":15}'),
       (2, 'uid2', '球员乙', NULL, 1, 'ST', 22, 75, 84, 'normal', 12, 1, 55, '2026-02-01T00:00:00.000Z', NULL),

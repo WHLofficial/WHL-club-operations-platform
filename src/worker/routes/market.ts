@@ -404,7 +404,6 @@ interface TransferBoardDbRow {
   pos3: number | null;
   pos4: number | null;
   club_name: string | null;
-  club_logo_key: string | null;
   release_fee: number | null;
   emphasis: number | null;
   emphasis_until: string | null;
@@ -444,7 +443,6 @@ app.get('/market/transfer-board', async (c) => {
                 json_extract(p.game_attrs, '$.PosID3') AS pos3,
                 json_extract(p.game_attrs, '$.PosID4') AS pos4,
                 cl.name AS club_name,
-                cl.logo_key AS club_logo_key,
                 ct.release_fee,
                 pm.tier AS emphasis, pm.ends_at AS emphasis_until,
                 COUNT(*) OVER () AS total_count
@@ -472,6 +470,18 @@ app.get('/market/transfer-board', async (c) => {
         const num = Number(v);
         return Number.isFinite(num) ? (POSITION_BY_ID[num] ?? null) : null;
       };
+      // 队徽真源在比赛系统（v6.32.0）：本平台 clubs.logo_key 全仓无人写（写侧在 tour），生产全 NULL；
+      // 照 routes/clubs.ts:95-105 的口径从 TOUR_DB team.logo_key 补齐（R2 键，/api/media 镜像下发）。
+      // 在 cachedJson 计算体内做 ⇒ 缓存载荷自带 logoKey；对 tour 库只读、按本页名单内 club_id 点查。
+      const clubIds = [...new Set(rows.results.map((r) => r.club_id).filter((x): x is number => x !== null))];
+      const logoMap = new Map<number, string>();
+      if (clubIds.length > 0) {
+        const ph = clubIds.map(() => '?').join(',');
+        const logoRows = await c.env.TOUR_DB.prepare(`SELECT id, logo_key FROM team WHERE id IN (${ph})`)
+          .bind(...clubIds)
+          .all<{ id: number; logo_key: string | null }>();
+        for (const r of logoRows.results) if (r.logo_key) logoMap.set(r.id, r.logo_key);
+      }
       const players = rows.results.map((r) => ({
           id: r.id,
           uid: r.uid,
@@ -485,8 +495,8 @@ app.get('/market/transfer-board', async (c) => {
           pa: r.pa,
           clubId: r.club_id,
           clubName: r.club_name,
-          // 队徽走 R2（v6.32.0）：无徽由前端 TeamLogo 回落队名哈希色块，这里只管下发
-          logoKey: r.club_logo_key,
+          // 队徽走 R2（v6.32.0，真源 = tour 库 team.logo_key）：无徽由前端 TeamLogo 回落队名哈希色块
+          logoKey: r.club_id !== null ? (logoMap.get(r.club_id) ?? null) : null,
           // 广告板是 min_offer_price 数值的唯一公开出口（v6.31.0 裁决 4）；releaseFee 无现行合同为 null
           minOfferPrice: r.min_offer_price,
           releaseFee: r.release_fee,
