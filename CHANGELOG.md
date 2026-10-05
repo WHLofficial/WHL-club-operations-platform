@@ -4,6 +4,16 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.34.0] · 球员对比：独立对比页 + 详情页入口 + 球员库勾选（纯能力对比，2–3 人）（2026-10-05）
+
+**本地完成，未发布（待令）**（提交链 `aac8985` feat(players) + `96bc117` feat(compare) 纯函数 + `d5a3ad7` docs(test-plans) + `1dd6e8e` refactor(web) 共享件 + `c4e3379` feat(compare) 对比页 + `f1e9598` feat(compare) 入口与库勾选 + `7db9ff0`/`a2376ef` test(e2e) + `d90bc5c` fix 评审 P0 + `64180e1` fix 键归一测试 + `a1afa8e` refactor PlaystyleBadge；零迁移）。
+
+**缘起与拍板**：用户令「球员对比功能实现」；硬需求＝对比页 URL 含全部参与球员 id、改 id 即改对比（唯一事实源）；纯能力对比（雷达/34 属性/体型·位置·花式·逆足·惯用脚/角色/徽章·徽章数/影响力）；2–3 人上限 3；门将＝混比统一外场六维、纯门将用 GK 六轴；桌面 A＋E＋F；胜负标记乙（胜方加粗、等值双粗、数字球员本命色）；颜色 A #8e5426 / B #37505e / C #6d4aa8。
+
+**交付**：详情端点补 `influence`（`influenceOf(coefs, p.ca, p.pa, p.growable === 1, p.prestige)`，与列表同源）+ 类型补 `influence`/`fcId`；`web/src/lib/compare.ts`（parseCompareIds/colorFor/rowMarks/groupAverages）+ `web/src/lib/radar.ts`（GK_RADAR/groupAverage/starText/axesFor/axisValue）+ 共享件 `AttrRadar`/`PlaystyleBadge` + `qk.player`/`usePlayerDetail`（id String 归一）；新公开路由 `/players/compare` 对比页（A＋E＋F、状态机 9 态、吸顶雷达条、热区图虚线占位、URL 只读）；入口两件（详情页「⇄ 加入对比」、球员库勾选列＋吸底收集栏（上限 3/跨筛选保留/`/players?compare=` 预勾选））。
+
+**验收**：typecheck 三份 0 error、vitest **98 文件 / 1622 例**全绿（净 +7 文件/+84 例）、build 成功（`index-ChUUQqk5.js` 628.96 kB / gzip 198.95 kB）、e2e **23/23**（⑤f 对比链路 + ⑫ 375 纳入对比页）；测试计划 `docs/test-plans/v6.34.0-player-compare.md`（65 TC，留痕已回填）；code-review **P0 1（radar 漏入库，已补）/ P1 3（键归一测试、375 扫描、URL-06 断言，均已补）/ P2 6 / P3 5**，微变异实做 5 条全还原。已知登记：库槽位色 vs 对比页存活序色差异（无害）、`groupAverage` 逐键 null 按 0 计（既有口径）、窄屏细节待手工、`PlayersLibrary.test.tsx:537` 既有竞态偶发。生产迁移现状：本仓已到 `0065`（本版零迁移）。
+
 ## [v6.33.1] · 特例期一线队/训练营同场参赛：名册含训练营开关 + 注册校验三态 + 全员注册工件 + 全站文案改名（2026-10-05）
 
 **已上线**（2026-10-05 发布，用户令「先发布」；提交链 `c9c5bcf` fix(web) + `1bff080` feat + `1f480b7` fix 评审 + `96779c8` docs(test-plans) + `dfd6e87` feat(web) 改名 + `0cc1275` chore(scripts) 注册批工件 + `907c5a1` docs 收口；零迁移）。**执行序（顺序未反）**：① push `4e5d9f9..907c5a1` 触发 CF Workers Builds → Version **`a08d7f3c-318d-427f-bee3-d858e6983f33`**（@2026-10-05T15:49:32Z；线上入口 `assets/index-BcjvHca1.js` sha256 `58b0023a…` 与本地构建逐字节一致、版本串 `6.33.1`）② 生产预检 9 条全过（season=9 / 20 队 570 人 / 训练营合同 69 / registrations 0 行 / status 全 normal）③ 开 `squads_include_trainee=true` + 四键豁免（`squad_min=19` / `squad_max=32` / `trainee_max=8` / `ca_pa_limits.premier.growthPa87=7`，直写 D1 回读全对）④ 写批 570 行注册 + 69 人 `status='trainee'` ⑤ verify：**570 = 一线队 501 + 训练营 69**、逐队零差异、stray 0 ⑥ bump KV `cache:epoch:public` `22 → 23` → 回读 `/api/squads`：20 队 **570 人 / 69 行 `squad='trainee'`**，逐队与 D1 一致。
