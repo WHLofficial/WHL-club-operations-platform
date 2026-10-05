@@ -65,36 +65,14 @@ function ConfigSection({ editable }: { editable: boolean }) {
           <table>
             <thead>
               <tr>
+                {editable && <th>操作</th>}
                 <th>键</th>
                 <th>当前值</th>
-                {editable && <th>操作</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key}>
-                  <td className="mono">
-                    {r.key} {r.secret && <span className="badge gray">涉密</span>}
-                  </td>
-                  <td className="mono">
-                    {/* v6.20.0 评审 P0-1：保持 minWidth:18rem 定宽——min(N,100%) 的百分比分量会改变桌面列宽分配，窄屏保底由 .table-wrap 横滚承担 */}
-                    {editingKey === r.key ? (
-                      <input
-                        className="field mono"
-                        type="text"
-                        value={draft}
-                        placeholder={r.value ?? '（默认）'}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void save(r);
-                          if (e.key === 'Escape') setEditingKey(null);
-                        }}
-                        style={{ minWidth: '18rem' }}
-                      />
-                    ) : (
-                      (r.value ?? '（默认）')
-                    )}
-                  </td>
                   {editable && (
                     <td>
                       {editingKey === r.key ? (
@@ -120,6 +98,28 @@ function ConfigSection({ editable }: { editable: boolean }) {
                       )}
                     </td>
                   )}
+                  <td className="mono">
+                    {r.key} {r.secret && <span className="badge gray">涉密</span>}
+                  </td>
+                  <td className="mono">
+                    {/* v6.20.0 评审 P0-1：保持 minWidth:18rem 定宽——min(N,100%) 的百分比分量会改变桌面列宽分配，窄屏保底由 .table-wrap 横滚承担 */}
+                    {editingKey === r.key ? (
+                      <input
+                        className="field mono"
+                        type="text"
+                        value={draft}
+                        placeholder={r.value ?? '（默认）'}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void save(r);
+                          if (e.key === 'Escape') setEditingKey(null);
+                        }}
+                        style={{ minWidth: '18rem' }}
+                      />
+                    ) : (
+                      (r.value ?? '（默认）')
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
