@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 /** 可激活名单模式（v6.18.0）：all=全部可激活 / trainee=仅训练营 */
@@ -16,6 +16,10 @@ export const qk = {
   clubStanding: (id: number) => ['clubs', 'standing', id] as const,
   seasonsCurrent: ['seasons', 'current'] as const,
   clubRoster: (id: number) => ['players', 'club-roster', id] as const,
+  // 球员详情（v6.34.0 收编自 Player.tsx inline query）：详情页与对比页共享同一缓存键。
+  // id 一律 string 归一（usePlayerDetail 内 String()）——详情页 useParams 是 string、
+  // 对比页可能传 number，键不统一会出现 ['player','7'] 与 ['player',7] 两份缓存
+  player: (id: string) => ['player', id] as const,
   myBids: ['market', 'my-bids'] as const,
   board: (status: string) => ['market', 'board', status] as const,
   listing: (id: number) => ['market', 'listing', id] as const,
@@ -190,6 +194,17 @@ export function useClubRoster(id: number) {
     queryFn: () => api<PlayersLibraryResponse>(`/api/players?club_id=${id}&limit=100`),
     enabled: Number.isInteger(id) && id > 0,
     staleTime: 60_000,
+  });
+}
+
+// 球员详情（v6.34.0）：详情页（useParams 的 string）与对比页（fc_id，可能 number）共用。
+// 键统一 String(id)；enabled 语义沿用原 inline 查询（id 为 undefined 时不发请求）。
+export function usePlayerDetail(id: string | number | undefined) {
+  const key = String(id ?? '');
+  return useQuery({
+    queryKey: qk.player(key),
+    queryFn: () => api<PlayerDetail>(`/api/players/${key}`),
+    enabled: id !== undefined,
   });
 }
 

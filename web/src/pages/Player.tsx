@@ -12,7 +12,6 @@ import {
   type GrowthDetail,
   type LevelUpResult,
   type MyClubOverview,
-  type PlayerDetail,
   type PlayerTransfersResponse,
   type UpgradePlanDto,
 } from '../lib/api.ts';
@@ -34,7 +33,11 @@ import {
 // 状态词统一用球员库那套（v6.2.0 两表合一：ref.ts 的旧表已删，normal=在队 / free=自由身）
 // attrClass 五档分段（v6.19.0 全仓统一口径）也在这里
 import { MARKER_EMOJI, MARKER_LABEL, STATUS_LABEL, attrClass } from '../lib/players-library.ts';
+// 雷达辅助（v6.34.0 提取共享件）：starText/groupAverage/axesFor 改从 lib/radar.ts 引入
+import { axesFor, groupAverage, starText } from '../lib/radar.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
+// 六维雷达（v6.34.0 提取共享件）：详情页与后续对比页共用
+import { AttrRadar } from '../components/AttrRadar.tsx';
 import {
   PS_GOLD_BASE,
   PS_GRANTABLE_BASE_IDS,
@@ -45,7 +48,7 @@ import {
   type PlaystyleSlot,
 } from '../../../src/core/fc26.ts';
 import { useToast } from '../lib/toast.tsx';
-import { qk, useOffersReceivedPending, useSeasonsCurrent } from '../lib/queries.ts';
+import { qk, useOffersReceivedPending, usePlayerDetail, useSeasonsCurrent } from '../lib/queries.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { playerPath } from '../lib/player-link.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
@@ -62,65 +65,6 @@ const TAB_LABEL: Record<PlayerTab, string> = {
 
 // 窄屏卡片断点（v6.22.0）：≤760 转会/成长两张事件表改卡片流，与桌面表格 DOM 互斥
 const PLAYER_CARDS_QUERY = '(max-width: 760px)';
-
-
-function starText(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return '—';
-  return '★'.repeat(Math.min(n, 5)) + '☆'.repeat(Math.max(0, 5 - n));
-}
-
-// 雷达轴（v0.7.1 d11，四裁决：外场 PAC/SHO/PAS/DRI/DEF/PHY；门将换轴 DIV/HAN/KIC/REF/POS/SPD，SPD=均(冲刺,加速)）
-const GK_RADAR = [
-  { key: 'DIV', label: '扑救', keys: ['gkdiving'] },
-  { key: 'HAN', label: '手型', keys: ['gkhandling'] },
-  { key: 'KIC', label: '开球', keys: ['gkkicking'] },
-  { key: 'REF', label: '反应', keys: ['gkreflexes'] },
-  { key: 'POS', label: '站位', keys: ['gkpositioning'] },
-  { key: 'SPD', label: '速度', keys: ['sprintspeed', 'acceleration'] },
-] as const;
-
-function groupAverage(keys: readonly string[], attrs: Record<string, unknown>): number | null {
-  const vals = keys.map((k) => Number(attrs[k])).filter((v) => Number.isFinite(v));
-  return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
-}
-
-// 六维雷达（静态 SVG，无动画）：组值=组内平均，归一到 99。
-// v6.2.0 起压进属性页签头部右格：232×156 光图（无卡框、无文字 legend），轴标签 = 三字母简称 + 数值
-function AttrRadar({ values }: { values: { key: string; value: number | null }[] }) {
-  const cx = 116;
-  const cy = 78;
-  const R = 48;
-  const n = values.length;
-  const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
-  const pt = (i: number, r: number) => `${(cx + r * Math.cos(angle(i))).toFixed(2)},${(cy + r * Math.sin(angle(i))).toFixed(2)}`;
-  const dataPts = values
-    .map((v, i) => pt(i, (R * Math.min(Math.max(v.value ?? 0, 0), 99)) / 99))
-    .join(' ');
-  return (
-    <svg className="attr-radar-svg" viewBox="0 0 232 156" role="img" aria-label="六维雷达">
-      {[0.25, 0.5, 0.75, 1].map((f) => (
-        <polygon key={f} className="radar-grid" points={values.map((_, i) => pt(i, R * f)).join(' ')} />
-      ))}
-      {values.map((v, i) => {
-        const x = cx + (R + 11) * Math.cos(angle(i));
-        const y = cy + (R + 11) * Math.sin(angle(i));
-        const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? 'middle' : Math.cos(angle(i)) > 0 ? 'start' : 'end';
-        return (
-          <g key={v.key}>
-            <line className="radar-axis" x1={cx} y1={cy} x2={cx + R * Math.cos(angle(i))} y2={cy + R * Math.sin(angle(i))} />
-            <text className="radar-label" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">
-              <tspan className="radar-axis-key">{v.key}</tspan>
-              <tspan className={`radar-axis-val${v.value === null ? '' : ` ${attrClass(v.value)}`}`} dx="3">
-                {v.value ?? '—'}
-              </tspan>
-            </text>
-          </g>
-        );
-      })}
-      {values.some((v) => (v.value ?? 0) > 0) && <polygon className="radar-data" points={dataPts} />}
-    </svg>
-  );
-}
 
 function PlaystyleBadge({ psid, gold }: { psid: number; gold: boolean }) {
   const row = playstyleById.get(psid);
@@ -203,11 +147,8 @@ export default function Player() {
   // 窄屏（≤760）走卡片流（v6.22.0）：只决定渲染分支，数据与状态完全复用
   const narrow = useMediaQuery(PLAYER_CARDS_QUERY);
 
-  const dataQuery = useQuery({
-    queryKey: ['player', id ?? ''],
-    queryFn: () => api<PlayerDetail>(`/api/players/${id}`),
-    enabled: id !== undefined,
-  });
+  // 球员详情（v6.34.0 收编进 usePlayerDetail）：详情页与对比页共用 ['player', id] 缓存键
+  const dataQuery = usePlayerDetail(id);
   // 我的俱乐部（只为球衣号编辑权）：与俱乐部页共用 queryKey，教练在别处拉过就不重复请求；
   // 非教练不拉（enabled: false）——球员页是公开页，别让每个登录用户都多打一次 /api/me/club。
   const { user } = useAuth();
@@ -743,7 +684,7 @@ function AttrSheet({
   const isGk = position === 'GK';
   const groups = ATTR_GROUPS.filter((g) => isGk || g.key !== 'GKP');
   // 六维雷达（v6.2.0 移回属性页签头部）：轴与组值沿用同一段口径
-  const radarAxes = isGk ? GK_RADAR : ATTR_GROUPS.slice(0, 6);
+  const radarAxes = axesFor(isGk);
   const radarValues = radarAxes.map((g) => ({ key: g.key, value: groupAverage(g.keys, attrs) }));
   return (
     <>
