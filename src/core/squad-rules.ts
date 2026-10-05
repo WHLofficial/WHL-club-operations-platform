@@ -22,7 +22,10 @@ export const DEFAULT_CA_PA_LIMITS: Record<'premier' | 'second', SquadLimits> = {
 // 注册校验放行档（v6.33.1 特例期开关 registration_check_mode）：
 // - enforce（默认）：照常拦，不通过就 422；
 // - warn：体检照算、工作台照出红字，但提交放行（响应带 issues 供留痕）；
-// - off：隔离——教练侧不做体检，工作台也不挂红字（checkSquad 仍被调用，结果只用于响应字段）。
+// - off：隔离——提交不再走拦截闸，**实际放行 checkSquad 能报的全部 7 条规则**：
+//   squad_size（人数）、gk（门将下限）、trainee_size（训练营人数）、trainee_growth（训练营成长）、
+//   ca_pa（初始 CA/PA 三档梯度）、contract（无现行合同）、wage_cap（工资帽）；
+//   教练侧工作台也不挂红字（checkSquad 仍被调用，结果只用于响应字段）。
 // 只作用于教练侧两条路径（GET /club/squad 与 POST /club/registrations）；
 // 管理端 /api/admin/compliance 的扫描永远看真实结果，开关不改它。
 export type RegistrationCheckMode = 'enforce' | 'warn' | 'off';

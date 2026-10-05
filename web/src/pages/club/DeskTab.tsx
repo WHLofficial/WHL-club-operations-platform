@@ -3,7 +3,7 @@
 // 注册名单查询（qk.squad）住在本组件里：只有激活「工作台」才挂载、才发请求。
 // v6.30.0 C 段：注册名单重定列集 —— 11 固定列（分配最左 + 标记/号码/UID/姓名/年龄/位置/CA/PA/违约金/工资）
 //   + 可选列（?regcols=，默认全不显示）+「列」开关；「无合同」红徽章与违规旗标随姓名格走（分配列控件本身没动）。
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -223,6 +223,13 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
   );
   const [lastResult, setLastResult] = useState<RegistrationResult | null>(null);
 
+  // issues 跟随 squad 更新（v6.33.1 复查修复）：父组件不给 key，换档位 / 换名单 / 提交后 refreshSquad
+  // 刷新 squad 时，红字必须收敛到最新体检结果，不能停在首挂算出的那一版。
+  // 依赖整份 squad（checkMode 与 compliance 都是它的字段），不放 issues 免得自触发。
+  useEffect(() => {
+    setIssues(squad.checkMode !== 'off' && squad.compliance && !squad.compliance.pass ? squad.compliance.issues : null);
+  }, [squad]);
+
   // v6.30.0 C 段：可选列进 URL（?regcols=）—— 与阵容名单的 ?cols= 分开键，两张表在不同页签，防串味
   const [searchParams, setSearchParams] = useSearchParams();
   const activeCols = clubVisibleCols(searchParams.get(REG_COLS_KEY));
@@ -324,7 +331,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
       {/* v6.33.1 特例期放行档：off 隔离 / warn 提示；enforce（正常档）不挂提示条 */}
       {squad.checkMode === 'off' && (
         <div className="banner warn">
-          特例期：注册校验已隔离——提交只做归属/重复校验，人数、门将、训练营资格都不再拦，管理员已临时放行。
+          特例期：注册校验已隔离——提交只做归属/重复校验；一线队人数、门将、训练营人数与资格、CA/PA 梯度、现行合同、工资帽都不再拦，管理员已临时放行。
         </div>
       )}
       {squad.checkMode === 'warn' && (

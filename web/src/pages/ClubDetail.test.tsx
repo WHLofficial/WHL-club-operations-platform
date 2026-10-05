@@ -4,7 +4,7 @@
 // + 各页签内部口径（阵容组三格与三图、名单、运营组、战绩组、自家工作台与主场档案）
 // + 按需加载（只有激活页签才打对应端点：阵容页签下不请求 /api/club/home-matches、主场页签下不请求名单）。
 // 没打 CSS（jsdom 不跑样式表），视觉表现靠 e2e 截图看；这里只钉结构与内联宽度。
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
@@ -30,6 +30,7 @@ import type {
   StadiumInfo,
 } from '../lib/api.ts';
 import ClubDetail from './ClubDetail.tsx';
+import { qk } from '../lib/queries.ts';
 
 const { apiMock, apiPostMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiPostMock: vi.fn() }));
 // mediaUrl 给真实现（TeamLogo 要用它把 logoKey 折成 /api/media/*）；
@@ -364,7 +365,7 @@ function LocationProbe() {
 
 function renderDetail(entry = '/clubs/1') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[entry]}>
         <LocationProbe />
@@ -374,6 +375,9 @@ function renderDetail(entry = '/clubs/1') {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  // 连 qc 一起返回：v6.33.1 的三态用例要拿它把 squad 缓存刷成新档位，
+  // 验证同一组件树（无 key）下红字跟随新 props 收敛
+  return { qc, ...result };
 }
 
 function path(): string {
@@ -1158,6 +1162,32 @@ describe('自家页签：工作台与主场', () => {
     stubApi({ me: meFixture(1), squad: squad(complianceFixture({ pass: true, issues: [] })) });
     renderDetail('/clubs/1');
     expect(await screen.findByText(/特例期：注册校验已隔离/)).toBeTruthy();
+    expect(screen.queryByText('资格检查通过，可以安心开赛。')).toBeNull();
+  });
+
+  it('特例期：squad 换成 off 档刷新后，红字跟随新 props 收敛（不留上一轮，也不冒充「通过」）', async () => {
+    authState.user = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false } satisfies MeUser;
+    const deskSquad = (checkMode: SquadOverview['checkMode']): SquadOverview => ({
+      ...squadFixture(1),
+      checkMode,
+      rules: DESK_RULES,
+      players: [deskPlayer({ id: 7, name: '张三' })],
+      compliance: complianceFixture(),
+    });
+    stubApi({ me: meFixture(1), squad: deskSquad('warn') });
+    const { qc } = renderDetail('/clubs/1');
+
+    // 首挂 warn 档、体检不通过：红字照挂
+    expect(await screen.findByText('一线队人数不足 18 人')).toBeTruthy();
+
+    // 管理员切到 off 档后名单刷新（父组件不给 key ⇒ 同一组件树换 props，不是重新挂载）。
+    // 缓存更新的通知走 setTimeout(0)（query-core notifyManager 的调度器），
+    // 所以先等新档位的横幅出现，再断言首挂那版红字已经收敛。
+    act(() => {
+      qc.setQueryData(qk.squad, deskSquad('off'));
+    });
+    expect(await screen.findByText(/特例期：注册校验已隔离/)).toBeTruthy();
+    expect(screen.queryByText('一线队人数不足 18 人')).toBeNull();
     expect(screen.queryByText('资格检查通过，可以安心开赛。')).toBeNull();
   });
 

@@ -10,8 +10,9 @@
 //   加 'trainee'——规则 4.2 原文「一线队与训练营两条注册线都能出战」，此前只发一线队是平台旧口径，
 //   而赛事侧拿不到训练营球员就写不进阵容。同时每行附 `squad`（first_team/trainee）供赛事侧将来自判
 //   （那边解析只挑 fcId/name/number，未知字段忽略，加字段安全）。这是**对外契约开关**：翻转走
-//   /api/admin/config，写路径代际 purge 精确失效本面（roster scope 固定键 squads:all），
-//   跨 colo 最长 60s、漏 purge 时 24h TTL 自愈；默认 false = 平常口径。
+//   /api/admin/config，且开关值已并进缓存键（`squads:all:${includeTrainee}`）——所以翻转后只要
+//   config 的 isolate 记忆化过期（≤60s，见 src/core/config.ts），键就不同、必然重算，最坏陈旧
+//   = 记忆化窗口；写路径代际 purge 仍可让其立刻换键；24h TTL 只是键不变时的兜底。默认 false = 平常口径。
 // - 姓名一律走 `sqlDisplayName()`（派生显示名，空则回落官方缩写名）——赛事系统原来存的是手工
 //   完整人名，同步后会被改写成派生名，这是本次改造的目的；
 // - `fcId` 是跨系统的球员身份（赛事系统的 `player.id` 就是它，两库早前一起 rekey 过），
@@ -41,13 +42,16 @@ interface SquadRow {
 
 app.get('/squads', async (c) => {
   assertPublicRate(c, 'squads');
-  // 特例期开关（默认关闭）：留在 cachedJson 之外读，翻转时靠写路径代际 purge 让旧载荷整体不可达
+  // 特例期开关（默认关闭）：在 cachedJson 之外读，并把取值并进缓存键——翻转后 config 记忆化
+  // 过期（≤60s）键即不同、必重算；若留在键外，记忆化尚新 + epoch 已 bump 的窗口会把旧口径
+  // 载荷写进新代际的键、后续 24h 一直伺服旧口径（本修复即为此，见文件头）
   const includeTrainee = (await createConfigService(c.env.DB).get('squads_include_trainee')) === 'true';
   // 状态集合是内部常量拼的（不含用户输入）；用字面量而非绑定参数，EXPLAIN 计划与测试锁定的形状不变
   const statusList = includeTrainee ? `'normal', 'listed', 'trainee'` : `'normal', 'listed'`;
   const data = await cachedJson(
-    'squads:all',
-    // roster scope：固定键、写路径代际 purge 精确失效，所以 TTL 取 24h 只是「漏 purge 时的自愈上限」。
+    // 开关值并进缓存键（见文件头）：翻转后 config 记忆化一过期即换键重算，不再有「旧口径写进新代际键」的窗口
+    `squads:all:${includeTrainee}`,
+    // roster scope：键只随开关取值、写路径代际 purge 精确失效，所以 TTL 取 24h 只是「键不变时的自愈上限」。
     // 不能因为「同步一天一次」就把它当低频端点——公开面无鉴权，谁都能刷。
     ttlForScope('roster', c.env.PUBLIC_CACHE_TTL_MS),
     async () => {

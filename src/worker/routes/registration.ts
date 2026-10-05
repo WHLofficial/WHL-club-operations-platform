@@ -346,10 +346,13 @@ app.post('/club/registrations', async (c) => {
   const result = checkSquad(firstTeam, trainee, rules);
   // 放行档（v6.33.1 registration_check_mode）：只有 enforce 会拦；warn/off 一律放行，
   // 且 issues 照常回给前端（warn 挂着当提示、off 由前端隐藏）——放行不等于把问题藏起来，
-  // 审计里也记下当时是哪一档放的行。
+  // 审计里也记下当时是哪一档放的行、放行了哪些规则。
   if (!result.pass && checkMode === 'enforce') {
     return c.json({ error: '名单没过注册校验', code: 'squad_invalid', issues: result.issues, stats: result.stats }, 422);
   }
+  // 审计只放规则名：去重 + 稳定排序（定序便于事后比对），不带 playerIds 与消息正文以控制审计体积；
+  // enforce 通过时自然为空数组，同样恒写 `[]` 便于分析
+  const issueRules = [...new Set(result.issues.map((i) => i.rule))].sort();
 
   const prev = await c.env.DB.prepare('SELECT player_id, squad FROM registrations WHERE season = ? AND club_id = ?')
     .bind(season, club.id)
@@ -389,7 +392,7 @@ app.post('/club/registrations', async (c) => {
       targetType: 'club',
       targetId: club.id,
       origin: 'user',
-      after: { season, firstTeam: firstTeamIds.length, trainee: traineeIds.length, checkMode },
+      after: { season, firstTeam: firstTeamIds.length, trainee: traineeIds.length, checkMode, issues: issueRules },
     }),
   );
   await c.env.DB.batch(statements);

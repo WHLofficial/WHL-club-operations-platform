@@ -159,4 +159,45 @@ describe('全平台一线队名册（v5.0.0）', () => {
     expect(all).not.toContain(900002);
     expect(body.squads[1].players).toEqual([{ fcId: 201101, name: 'M. Ødegaard', number: '8', squad: 'first_team' }]);
   });
+
+  it('翻转回归：开关值并进缓存键 ⇒ 只让 config 记忆化过期即自愈（不等 TTL、不靠 bump 代际）', async () => {
+    const fx = freshEnv();
+    // 本用例刻意「不旁路缓存」：TTL 非 0，第一次请求会把旧口径载荷写进 L1
+    fx.env.PUBLIC_CACHE_TTL_MS = '60000';
+    seed(fx);
+
+    const before = await app.request('/api/squads', {}, fx.env);
+    const beforeBody = (await before.json()) as SquadsBody;
+    expect(beforeBody.squads.flatMap((s) => s.players.map((p) => p.fcId))).not.toContain(900001);
+
+    // 翻转开关（默认 false 时库里没有行 ⇒ INSERT），随后只让 config 记忆化过期（resetConfigCache），
+    // 不 bump epoch：若缓存键不含开关值，这一请求会命中旧键、直接回旧口径载荷
+    fx.sqlite.exec(
+      "INSERT INTO config (key, value, updated_at) VALUES ('squads_include_trainee', 'true', '2026-01-01T00:00:00Z')",
+    );
+    resetConfigCache();
+
+    const after = await app.request('/api/squads', {}, fx.env);
+    const afterBody = (await after.json()) as SquadsBody;
+    const city = afterBody.squads[0];
+    expect(city.clubId).toBe(1);
+    expect(city.players.find((p) => p.fcId === 900001)).toMatchObject({ squad: 'trainee' });
+    // 载荷确实重算了（不是拿旧载荷糊弄）：第二次请求又跑了一条名册 JOIN，且状态白名单已含 trainee
+    const joins = fx.captured.filter((sql) => /JOIN clubs/.test(sql));
+    expect(joins).toHaveLength(2);
+    expect(joins[1]).toContain("'trainee'");
+  });
+
+  it('脏值「TRUE」大写：白名单只认 `=== \'true\'`，仍按关闭口径', async () => {
+    const fx = freshEnv();
+    seed(fx);
+    fx.sqlite.exec(
+      "INSERT INTO config (key, value, updated_at) VALUES ('squads_include_trainee', 'TRUE', '2026-01-01T00:00:00Z')",
+    );
+
+    const res = await app.request('/api/squads', {}, fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as SquadsBody;
+    expect(body.squads.flatMap((s) => s.players.map((p) => p.fcId))).not.toContain(900001);
+  });
 });

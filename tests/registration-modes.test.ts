@@ -141,7 +141,14 @@ describe('注册校验放行档 registration_check_mode（v6.33.1）', () => {
     )!;
     expect(audit.actor).toBe(1);
     expect(audit.origin).toBe('user');
-    expect(JSON.parse(audit.after)).toMatchObject({ season: 9, firstTeam: 2, trainee: 1, checkMode: 'warn' });
+    // after 除档位外还记「放行了哪几条规则」（只规则名、去重定序，供特例期事后追溯）
+    expect(JSON.parse(audit.after)).toMatchObject({
+      season: 9,
+      firstTeam: 2,
+      trainee: 1,
+      checkMode: 'warn',
+      issues: ['squad_size'],
+    });
   });
 
   it('off：提交放行落库，工作台 GET /api/club/squad 同步回 checkMode=off', async () => {
@@ -162,6 +169,21 @@ describe('注册校验放行档 registration_check_mode（v6.33.1）', () => {
     expect(body.checkMode).toBe('off');
     // 工作台照旧能还原刚提交的快照
     expect(body.registration).toEqual({ firstTeam: [1, 2], trainee: [101] });
+  });
+
+  it('未绑队：GET /api/club/squad 的早退响应也带 checkMode（放行档先于绑队判定读取）', async () => {
+    const fx = freshEnv();
+    seed(fx);
+    setCheckMode(fx, 'off');
+    // 模拟未绑队：休眠表里没有绑定行，getBoundClub 回 null ⇒ 走早退分支
+    fx.sqlite.exec('DELETE FROM club_bindings');
+
+    const squad = await getSquad(fx);
+    expect(squad.status).toBe(200);
+    const body = (await squad.json()) as { club: null; checkMode: string };
+    expect(body.club).toBeNull();
+    // 前端靠这个字段决定挂不挂红字，未绑队也不能丢
+    expect(body.checkMode).toBe('off');
   });
 
   it('配置写脏值「乱写」：解析回落 enforce，工作台与提交都按拦（422）', async () => {
