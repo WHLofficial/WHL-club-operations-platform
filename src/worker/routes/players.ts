@@ -1028,7 +1028,9 @@ app.get('/players/:id', async (c) => {
       fromClubName: r.from_club_name,
       toClubName: r.to_club_name,
       newReleaseFee: r.fee,
-      signFee: r.fee != null ? freeAgentFee(r.fee) : null,
+      // fee ≤ 0 的历史/夹具行不能把公开详情打成 500：参照是展示面，写路径（bypass.ts 两处）一律带
+      // f > 0 护栏才调 freeAgentFee，这里同口径——拿不到正数就落 null，前端 money(null) 出「—」
+      signFee: r.fee != null && r.fee > 0 ? freeAgentFee(r.fee) : null,
       season: r.season,
       windowSeq: r.window_seq,
       completedAt: r.completed_at,

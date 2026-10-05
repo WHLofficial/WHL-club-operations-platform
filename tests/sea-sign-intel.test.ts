@@ -483,6 +483,18 @@ describe('TC-COMPS 成交参照 seaComps（GET /players/:id）', () => {
       completedAt: '2026-06-10T00:00:00Z',
     });
   });
+
+  it('TC-COMPS-07 参照里 fee ≤ 0 的历史行不该把公开详情打成 500（signFee 落 null）', async () => {
+    const fx = seedIntel();
+    addPlayer(fx, { id: 810, name: '待判', ca: 80 });
+    addPlayer(fx, { id: 811, name: '零元成交', ca: 79 });
+    // 历史/夹具里可能有 fee = 0 的 free_agent 成交行（本地夹具 transfers 1 / 109 就是）。写路径两处
+    // 都带 f > 0 护栏才调 freeAgentFee，读路径漏了 ⇒ RangeError「新违约金须为正数」冒到 onError 变 500。
+    addTransfer(fx, { playerId: 811, toClubId: CLUB_B, fee: 0, completedAt: '2026-06-10T00:00:00Z' });
+    const rows = (await detail(fx, 810)).seaComps.rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ playerId: 811, newReleaseFee: 0, signFee: null });
+  });
 });
 
 describe('TC-REG 回归（海捞提交链与训练营通道）', () => {
