@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 /** 可激活名单模式（v6.18.0）：all=全部可激活 / trainee=仅训练营 */
@@ -32,6 +32,8 @@ export const qk = {
   clubEvents: ['club', 'events'] as const,
   offers: (box: 'in' | 'out', status: string) => ['offers', box, status] as const,
   offer: (id: number) => ['offers', 'detail', id] as const,
+  // 我的谈判会话（v6.32.0 自 desk/NegotiationsSection 收编：页签计数与谈判区共用一个键）
+  myNegotiations: ['negotiations', 'mine'] as const,
   homeMatches: ['club', 'home-matches'] as const,
   financeSummary: (season?: number) => ['club', 'finance-summary', season ?? 'current'] as const,
   // 消费中心（v6.26.0）
@@ -88,6 +90,16 @@ export function useMyBids(isCoach: boolean): { bids: MyBidRow[] | null; refresh:
     enabled: isCoach,
   });
   return { bids: data ?? null, refresh: () => void qc.invalidateQueries({ queryKey: qk.myBids }) };
+}
+
+// 我的谈判会话（v6.32.0 自 desk/NegotiationsSection 收编）：转会台页签计数与谈判区块共用同一个
+// query 键，命中缓存不重复发请求。
+export function useMyNegotiations(isCoach: boolean) {
+  return useQuery({
+    queryKey: qk.myNegotiations,
+    queryFn: async () => (await api<{ sessions: NegotiationSession[] }>('/api/negotiations?mine=1')).sessions,
+    enabled: isCoach,
+  });
 }
 
 export function useSquad(isCoach: boolean): SquadOverview | null {

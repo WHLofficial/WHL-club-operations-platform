@@ -1,6 +1,8 @@
 // 转会台 · 报价区（v6.23.0）：原 pages/Offers.tsx 整体搬入，逻辑行为不变。
 // 与旧页的区别只有两点：① box/status 由 desk 页统一持在 searchParams（本组件受控）；
 // ② 页级 h1 退役，区块标题改用 h3，toastNode 留在本区块内渲染。
+// v6.32.0：money 收口到 ../shared.tsx；标题「收到报价」改「报价」（box=out 是我送出的，旧名不副实）；
+// 「报价被接受 ≠ 成交」机制句从页面级说明条收进本区块 hint（这里是唯一讲解点）。
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -9,6 +11,7 @@ import { playerPath } from '../../../lib/player-link.ts';
 import { useOfferDetail, useOffers, useOffersInvalidation } from '../../../lib/queries.ts';
 import { useToast } from '../../../lib/toast.tsx';
 import { useTimeFmt } from '../../../lib/datetime.ts';
+import { money } from '../shared.tsx';
 
 const STATUS_BADGE: Record<OfferStatus, { label: string; cls: string }> = {
   pending: { label: '待回复', cls: 'sky' },
@@ -34,10 +37,6 @@ const EVENT_LABEL: Record<string, string> = {
   intent: '挂意向单',
   confirm: '确认挂牌',
 };
-
-function money(v: number | null | undefined): string {
-  return v === null || v === undefined ? '—' : v.toFixed(2);
-}
 
 export default function OffersSection({
   box,
@@ -119,10 +118,10 @@ export default function OffersSection({
   const detailData = detail.data ?? null;
 
   return (
-    <section id="desk-offers" aria-label="收到报价">
-      <h3>收到报价</h3>
+    <section id="desk-offers" aria-label="报价">
+      <h3>报价</h3>
       <p className="hint">
-        私下议价：对别队真人球员送报价，双方轮流出价。开窗期<span className="mono">同意</span>即自动挂牌并把报价方锁成领先出价；
+        私下议价：对别队真人球员送报价，双方轮流出价。报价被接受 ≠ 成交：开窗期<span className="mono">同意</span>即自动挂牌并把报价方锁成领先出价；
         关窗期也可报价 / 还价 / 同意——但关窗期同意只挂「意向单」（不生成挂牌、资金继续冻结），
         开窗后由卖方确认才挂牌，买方随时可撤回、卖方放弃则冻结退回。
         报价即冻结资金，了结（成交 / 拒绝 / 撤回 / 放弃 / 过期）后自动退回。进转会名单的球员达线自动同意、低于自动拒。
@@ -176,7 +175,7 @@ export default function OffersSection({
                 {items.map((o) => {
                   const badge = STATUS_BADGE[o.status];
                   return (
-                    <tr key={o.id} className={openId === o.id ? 'row-open' : undefined}>
+                    <tr key={o.id}>
                       <td>
                         <Link to={playerPath(o.player)}>{o.player.name}</Link>
                       </td>

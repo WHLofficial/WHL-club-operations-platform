@@ -1,27 +1,16 @@
 // 转会台 · 谈判区（v6.23.0）：原 pages/Negotiations.tsx 主体搬入，逻辑行为不变。
 // 家族口径：mono 数字、口语化文案、操作 toast 反馈、两段式 busy 态。
 // v6.23.0 新增：会话卡头部阶段徽标（第一步 · 定违约金 / 工资谈判 · 剩 N 轮），只用现有字段推导。
+// v6.32.0：删历史台账表——工作台只放进行中，落定记录归球队中心转会页签的队史（工资随球员合同页签可查）；
+// useMyNegotiations 挪 lib/queries.ts；money 收口到 ../shared.tsx；谈判规则展示常量具名。
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../../../lib/api.ts';
+import { useQueryClient } from '@tanstack/react-query';
+import { apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../../../lib/api.ts';
 import { useToast } from '../../../lib/toast.tsx';
-import { useMyClub, qk } from '../../../lib/queries.ts';
+import { useMyClub, useMyNegotiations, qk } from '../../../lib/queries.ts';
 import { playerPath } from '../../../lib/player-link.ts';
-
-const SOURCE_LABEL: Record<string, string> = {
-  negotiation: '报价成约',
-  forced: '强制成约',
-  direct: '直败结算',
-  trainee: '训练营直签',
-};
-
-const SOURCE_BADGE: Record<string, string> = {
-  negotiation: 'green',
-  forced: 'orange',
-  direct: 'red',
-  trainee: 'purple',
-};
+import { money } from '../shared.tsx';
 
 const TIER_BADGE: Record<number, string> = { 1: 'green', 2: 'gray', 3: 'red' };
 
@@ -31,18 +20,12 @@ const ATTEMPT_LABEL: Record<string, { text: string; badge: string }> = {
   direct_fail: { text: '直败', badge: 'red' },
 };
 
-function money(x: number | null | undefined): string {
-  return x === null || x === undefined ? '—' : x.toFixed(2);
-}
+// 谈判规则展示常量（与后端谈判引擎口径同源的显示值；后端改规则需同步这里）
+const MAX_NEGO_ROUNDS = 3;
+const TRAINEE_WAGE = 0.75;
+const TRAINEE_RELEASE_FEE = 5;
 
-// 我的谈判会话（desk 待办计数与谈判区共用同一个 query 键，命中缓存不重复发请求）
-export function useMyNegotiations(isCoach: boolean) {
-  return useQuery({
-    queryKey: ['negotiations', 'mine'],
-    queryFn: async () => (await api<{ sessions: NegotiationSession[] }>('/api/negotiations?mine=1')).sessions,
-    enabled: isCoach,
-  });
-}
+// 我的谈判会话在 lib/queries.ts（页签计数与谈判区共用一个 query 键）
 
 export default function NegotiationsSection() {
   const { show, toastNode } = useToast();
@@ -55,11 +38,10 @@ export default function NegotiationsSection() {
       ? sessionsQuery.error.message
       : '谈判名单打不开了，稍后再试'
     : '';
-  const refresh = () => qc.invalidateQueries({ queryKey: ['negotiations', 'mine'] });
+  const refresh = () => qc.invalidateQueries({ queryKey: qk.myNegotiations });
 
   const [justSigned, setJustSigned] = useState<{ id: number; name: string } | null>(null);
   const active = useMemo(() => (sessions ?? []).filter((s) => s.status === 'active'), [sessions]);
-  const done = useMemo(() => (sessions ?? []).filter((s) => s.status !== 'active'), [sessions]);
 
   // 成约即过户 ⇒ 顺手把新援的球衣号定了（v4.0.0）。号码不是必填，所以留「先跳过」。
   async function afterSettled(msg: string, player: { id: number; name: string }) {
@@ -73,8 +55,9 @@ export default function NegotiationsSection() {
       <h3>签约谈判</h3>
       <p className="hint">
         成交单获管理组批准后，谈判会话自动开在这里：先定新违约金（幅度受限），再按经纪人预期工资谈工资，最多{' '}
-        <span className="mono">3</span> 轮；任何时候都可以直接签训练营合同（固定 <span className="mono">0.75</span> m /
-        违约金 <span className="mono">5</span> m，不占本窗下放名额）。成约那一刻球员过户、钱款到账。
+        <span className="mono">{MAX_NEGO_ROUNDS}</span> 轮；任何时候都可以直接签训练营合同（固定{' '}
+        <span className="mono">{TRAINEE_WAGE}</span> m / 违约金 <span className="mono">{TRAINEE_RELEASE_FEE}</span> m，
+        不占本窗下放名额）。成约那一刻球员过户、钱款到账。
       </p>
       {loadError && <div className="banner warn">{loadError}</div>}
       {toastNode}
@@ -83,9 +66,10 @@ export default function NegotiationsSection() {
 
       {sessions === null && !loadError && <p className="muted">正在翻谈判夹…</p>}
 
-      {sessions !== null && sessions.length === 0 && (
+      {/* v6.32.0：判空按 active 走——只剩已落定会话（历史已归队史）的教练也该看到引导，而不是空区块 */}
+      {sessions !== null && active.length === 0 && (
         <div className="card empty-state">
-          <p className="muted">现在没有谈判。你们买下的球员过了审核之后，会话就会出现在这里。</p>
+          <p className="muted">现在没有进行中的谈判。你们买下的球员过了审核之后，会话就会出现在这里。</p>
         </div>
       )}
 
@@ -99,44 +83,6 @@ export default function NegotiationsSection() {
           show={show}
         />
       ))}
-
-      {done.length > 0 && (
-        <section className="card admin-section">
-          <h3>已落定的谈判</h3>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>球员</th>
-                  <th>流向</th>
-                  <th className="num">成交价（m）</th>
-                  <th className="num">签约工资（m）</th>
-                  <th>成约方式</th>
-                </tr>
-              </thead>
-              <tbody>
-                {done.map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      <Link to={playerPath(s.player)}>{s.player.name}</Link>
-                    </td>
-                    <td>
-                      {s.fromClubName ?? '—'} → <b>{s.toClubName ?? '—'}</b>
-                    </td>
-                    <td className="num mono">{money(s.transfer.fee)}</td>
-                    <td className="num mono">{money(s.settled?.wage ?? null)}</td>
-                    <td>
-                      <span className={`badge ${SOURCE_BADGE[s.settled?.source ?? ''] ?? 'gray'}`}>
-                        {SOURCE_LABEL[s.settled?.source ?? ''] ?? '—'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
     </section>
   );
 }
@@ -457,7 +403,7 @@ function OfferStep({
         {confirmTrainee ? (
           <>
             <button className="btn btn-danger" type="button" disabled={busy} onClick={signTrainee}>
-              {busy ? '签约中…' : '确认：按 0.75m / 5m 签进训练营'}
+              {busy ? '签约中…' : `确认：按 ${TRAINEE_WAGE}m / ${TRAINEE_RELEASE_FEE}m 签进训练营`}
             </button>
             <button className="btn btn-sm" type="button" disabled={busy} onClick={() => setConfirmTrainee(false)}>
               再想想
@@ -465,7 +411,7 @@ function OfferStep({
           </>
         ) : (
           <button className="btn btn-sm" type="button" disabled={busy} onClick={() => setConfirmTrainee(true)}>
-            直接签训练营（0.75m / 违约金 5m）
+            直接签训练营（{TRAINEE_WAGE}m / 违约金 {TRAINEE_RELEASE_FEE}m）
           </button>
         )}
         <span className="hint">训练营条款固定，不占本窗 2 个下放名额；点了就成约过户，不能反悔。</span>
