@@ -26,7 +26,7 @@
   2. **详情页「对比」入口**（入口 B）：`web/src/pages/Player.tsx` 球员卡内 CA/PA 数字行下方（`.player-card-numbers` 之后）加按钮，点击跳 `/players/compare?ids=<本球员 fcId>`，落在 1 人态（不重定向）；
   3. **球员库勾选**：表格勾选列 ＋ 吸底收集栏（详见 §9）。
 - URL 规则：`ids` 为**逗号分隔的 fc_id 列表**（球员 URL 一律 fc_id 寻址，与详情页 `playerPath` 口径一致）。解析与降级链见 §8；**任何情况都不自动改写 URL**（多余 id 不删、非法 id 不清洗）。
-- 路由落点：`web/src/App.tsx` 新增 `/players/compare`（建议写在 `/players/:id` 之前；React Router v6 静态段优先于动态段，调序非必需但更稳）。现有 `/players`(:84-85)、`/players/:id`(:86) 均公开（无 RequireUser），全表无 catch-all。
+- 路由落点：`web/src/App.tsx` 新增 `/players/compare`（建议写在 `/players/:id` 之前；React Router v6 静态段优先于动态段，调序非必需但更稳）。现有 `/players`（`web/src/App.tsx:100`）、`/players/:id`（:101）均公开（无 RequireUser），全表无 catch-all。
 - 「编辑名单」按钮（对比页顶栏）→ 跳 `/players?compare=<ids>` 带名单打开球员库，库页按该参数预置勾选与收集栏。
 
 ## 2. 页面结构（A＋E＋F）
@@ -65,8 +65,8 @@
 | 徽章数（金/银） | `player.badgesGold` / `player.badgesSilver`（台账计数，详情端点已下发） |
 | **影响力** | **缺失——唯一后端增量**（见下） |
 
-- **唯一后端增量**：`GET /api/players/:id` 响应的 `player` 补 `influence`（两位小数；口径＝v2.3.0 规则 4.1.3＝系数 × 能力等级 × 国际声望，与球员库列表端点同源）。复用 `influenceExpr()` / `influenceOf(coefs, ca, pa, growable, prestige)` / `influenceCoefs(db)`（`src/worker/routes/players.ts:173/184/189`；`influenceCoefs` 读 config `influence_coef_growable` / `influence_coef_static`），不得另写一份算法；`web/src/lib/api.ts` 的 `PlayerDetail.player` 类型同步补 `influence: number`。零迁移、零生产写。
-- 不拉取的端点：`/growth`（成长域）、`/transfers`、`/offer-settings`、`/api/clubs`（对比页无队徽需求）——除非 §12-1 改判。
+- **唯一后端增量**：`GET /api/players/:id` 响应的 `player` 补 `influence`（两位小数；口径＝v2.3.0 规则 4.1.3＝系数 × 能力等级 × 国际声望，与球员库列表端点同源）。复用 `influenceExpr()` / `influenceOf(coefs, ca, pa, growable, prestige)` / `influenceCoefs(db)`（`src/worker/routes/players.ts:173/184/189`；`influenceCoefs` 读 config `influence_coef_growable` / `influence_coef_static`），不得另写一份算法；**同值口径**＝列表端点吃的是原始列 `players.ca AS cur_ca` / `players.pa AS cur_pa`（players.ts:668、:778 传入 `influenceOf`），与属性 view 口径无关，详情用 `p.ca` / `p.pa` 即同值。同一处把 `web/src/lib/api.ts` 的 `PlayerDetail.player` 类型同步补两个字段：`influence: number` 与 `fcId: number | null`（后者运行时响应已回 `fcId`，players.ts:1069，只是类型没声明；不补则对比页类型化访问报 TS 错）。零迁移、零生产写。
+- 不拉取的端点：`/growth`（成长域）、`/transfers`、`/offer-settings`、`/api/clubs`（对比页无队徽需求）——除非 §13-1 改判。
 
 ## 4. 雷达与配色
 
@@ -141,7 +141,7 @@
 |---|---|
 | 新页面 | `web/src/pages/PlayerCompare.tsx`（组装＋URL 消费；目录细节实现轮定） |
 | 纯函数 | `web/src/lib/compare.ts`（建议）：`parseCompareIds`（切分/去重/取前 3/非法剔除）、颜色分配（色随人走）、轴选择——均配 `web/src/lib/*.test.ts`（tests/ 是 node 语义不能 import 用 window 的模块，测试落 web/src/lib 先例） |
-| 提取复用 | `AttrRadar`（Player.tsx:89-123 模块私有）＋ `GK_RADAR` / `groupAverage`（:73-85）提取为共用组件/模块（详情页同步改用，避免两份口径漂移） |
+| 提取复用 | `AttrRadar`（Player.tsx:89-123 模块私有）＋ `GK_RADAR` / `groupAverage`（:73-85）＋ `starText`（:67-70）提取为共用组件/模块（详情页同步改用，避免两份口径漂移） |
 | 路由 | `web/src/App.tsx` 加 `/players/compare`（写在 `/players/:id` 前） |
 | 详情页入口 | `Player.tsx` 球员卡内 `.player-card-numbers` 之后加「对比」按钮（入口 B） |
 | 库勾选 | `PlayersLibrary.tsx`（勾选列＋吸底收集栏＋跨筛选保留＋`?compare=` 预置） |
@@ -160,6 +160,8 @@
 - 属性表数字不分五档色（§5）。
 
 ## 13. 未决与待审阅（实现轮前请用户拍板或默认执行）
+
+建议开工前先拍 **1（徽章清单口径）与 3（双栏实启阈值）**——它们影响请求次数与属性区布局；其余按默认口径执行即可。
 
 1. **徽章清单口径**：本 spec 取 **FC 源槽**（零额外请求）；若要含成长发放明细（与详情页完全一致），需每球员 +1 `GET /api/players/:id/growth`。默认执行本 spec。
 2. **雷达网格样式**：本 spec 为对比页简化网格（外框＋50 分位虚线内环）；是否与详情页统一成五档环带，待审阅。
