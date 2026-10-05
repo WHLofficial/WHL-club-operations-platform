@@ -763,6 +763,159 @@ async function main() {
       adbBody = ADB_BOARD;
     });
 
+    // ---- 球员对比（v6.34.0 步骤 8）：详情页「⇄ 加入对比」→ 1/2/3 人态 → 非法/重复/超限降级 → 库内勾选收集栏 ----
+    // 取样球员从 /api/players?limit=6 取前 6 行 fc_id（本地夹具 9001 起有值；fc_id 是对比页与球员 URL
+    // 的统一寻址口径）。只验真浏览器里能验的：客户端跳转落点、1/2/3 人态的分支互斥（热区图占位只在
+    // 2 人桌面态、三张小雷达只在 3 人态）、滚过雷达后吸顶条真出现、属性表行数/组头、收集栏勾选链路。
+    // 错误口径照 ⑪：只认本场景新增的 pageErrors 与 /api/players 非 2xx，已知环境噪声不参与判定。
+    await check('⑤f 球员对比：详情入口 / 1-2-3 人态 / 非法重复超限降级 / 库内勾选收集栏', async () => {
+      const errBefore = pageErrors.length;
+      const badBefore = badResponses.length;
+      const sample = await page.evaluate(async () => {
+        const r = await fetch('/api/players?limit=6');
+        if (!r.ok) return null;
+        const j = await r.json();
+        return (j.players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null);
+      });
+      assert(sample && sample.length >= 4, `本地夹具不足 4 名有 fc_id 的球员（拿到 ${sample ? sample.length : 'null'}）——⑤f 前置缺失`);
+      const [A, B, C, D] = sample;
+
+      // 1) 详情页入口：CA/PA 行下「⇄ 加入对比」带 fc_id 进 1 人态；点击真客户端跳转
+      await page.goto(`${BASE}/players/${A}`, { waitUntil: 'networkidle' });
+      const entry = page.locator('.player-card-compare a');
+      await entry.waitFor({ timeout: TIMEOUT });
+      const entryHref = await entry.getAttribute('href');
+      assert(entryHref === `/players/compare?ids=${A}`, `详情页对比入口 href 不对（${entryHref}）`);
+      await entry.click();
+      await page.locator('.cmp-page').waitFor({ timeout: TIMEOUT });
+      assert(await page.locator('h1', { hasText: '球员对比' }).first().isVisible(), '对比页 h1 不可见');
+      assert((await page.locator('.cmp-urlchip').innerText()).includes(`/players/compare?ids=${A}`), 'URL chip 没回显名单');
+      assert((await page.locator('.cmp-ids > .cmp-card').count()) === 1, '1 人态应有 1 张身份卡');
+      const soloSlot = page.locator('.cmp-emptyslot');
+      await soloSlot.waitFor({ timeout: TIMEOUT });
+      assert((await soloSlot.locator('.cmp-emptyslot-title').innerText()).includes('还差 1 名球员'), '1 人态缺「还差 1 名球员」');
+      const soloBorder = await soloSlot.evaluate((el) => getComputedStyle(el).borderTopStyle);
+      assert(soloBorder === 'dashed', `1 人空槽应是虚线框（border-top-style=${soloBorder}）`);
+      assert((await page.locator('.cmp-radar-solo .cmp-radar-big').count()) === 1, '1 人态缺单人雷达');
+      assert((await page.locator('.cmp-table').count()) === 0, '1 人态不该渲染对照表');
+
+      // 2) 2 人态：双色叠图（1 大雷达 / 2 条数据多边形）+ 两份热区图虚线占位 + 属性表 34 行属性 6 组头
+      await page.goto(`${BASE}/players/compare?ids=${A},${B}`, { waitUntil: 'networkidle' });
+      await page.locator('.cmp-table').waitFor({ timeout: TIMEOUT });
+      assert((await page.locator('.cmp-ids > .cmp-card').count()) === 2, '2 人态应有 2 张身份卡');
+      assert((await page.locator('.cmp-radarzone .cmp-radar-big').count()) === 1, '2 人态应有 1 张大雷达');
+      assert((await page.locator('.cmp-radarzone polygon.cmp-radar-data').count()) === 2, '双色叠图应有 2 条数据多边形');
+      assert((await page.locator('.cmp-radarzone .cmp-heat').count()) === 2, '2 人桌面态应有 2 个热区图占位');
+      const heatNote = await page.locator('.cmp-heat-note').first().innerText();
+      assert(heatNote.includes('位置热区图待热区图轮落地'), `热区图占位文案不对（${heatNote}）`);
+      const heatBorder = await page.locator('.cmp-heat-box').first().evaluate((el) => getComputedStyle(el).borderTopStyle);
+      assert(heatBorder === 'dashed', `热区图占位应是虚线框（border-top-style=${heatBorder}）`);
+      const groupKeys = (await page.locator('.cmp-table .cmp-row.cmp-gh .cmp-row-label').allInnerTexts()).map((s) => s.trim());
+      assert(groupKeys.join(',') === 'PAC,SHO,PAS,DRI,DEF,PHY', `属性表六个组头顺序不对（${groupKeys.join(',')}）`);
+      const attrRows = await page.locator('.cmp-table .cmp-col .cmp-row:not(.cmp-gh)').count();
+      assert(attrRows === 34, `属性表应有 34 行属性，实测 ${attrRows}`);
+      const firstLabel = (await page.locator('.cmp-table .cmp-col .cmp-row:not(.cmp-gh) .cmp-row-label').first().innerText()).trim();
+      assert(firstLabel === '冲刺速度', `属性表首行文案应为「冲刺速度」（实际「${firstLabel}」）`);
+
+      // 吸顶雷达条：滚过雷达区后出现。临时把视口压到 1440×500 —— 1440×900 下雷达区到页尾的距离
+      // 不足条子自身的 140px 「页尾保护区」，按设计根本不出现，几何上无法验证；压矮后窗口（雷达已
+      // 出视口、又没到页尾）才存在。宽度不变 ⇒ 不触发窄屏分支。
+      await page.setViewportSize({ width: 1440, height: 500 });
+      const sticky = await page.evaluate(async () => {
+        window.scrollTo(0, 0);
+        await new Promise((r) => requestAnimationFrame(r));
+        const zone = document.querySelector('.cmp-radarzone');
+        const bar = document.querySelector('.cmp-stickybar');
+        if (!zone || !bar) return null;
+        const absBottom = Math.ceil(zone.getBoundingClientRect().bottom + window.scrollY);
+        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        window.scrollTo(0, Math.min(absBottom + 30, maxScroll));
+        await new Promise((r) => setTimeout(r, 250));
+        return {
+          absBottom,
+          scrollY: window.scrollY,
+          atEnd: window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 140,
+          on: bar.classList.contains('cmp-stickybar-on'),
+          visibility: getComputedStyle(bar).visibility,
+        };
+      });
+      assert(sticky, '2 人态缺吸顶条或雷达区节点');
+      assert(!sticky.atEnd, `吸顶条探针落到页尾保护区（scrollY=${sticky.scrollY}）——几何不具备，断言不可信`);
+      assert(sticky.on && sticky.visibility === 'visible', `滚过雷达区后吸顶条未出现（${JSON.stringify(sticky)}）`);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.evaluate(() => window.scrollTo(0, 0));
+
+      // 3) 3 人态：3 张身份卡 + 三张并排小雷达；热区图占位与大雷达都不该出现（分支互斥）
+      await page.goto(`${BASE}/players/compare?ids=${A},${B},${C}`, { waitUntil: 'networkidle' });
+      await page.locator('.cmp-radar3').waitFor({ timeout: TIMEOUT });
+      assert((await page.locator('.cmp-ids > .cmp-card').count()) === 3, '3 人态应有 3 张身份卡');
+      assert((await page.locator('.cmp-radar3 .cmp-radar-small').count()) === 3, '3 人态应有 3 张并排小雷达');
+      assert((await page.locator('.cmp-radar3 polygon.cmp-radar-data').count()) === 3, '三张小雷达应各带 1 条数据多边形');
+      assert((await page.locator('.cmp-heat').count()) === 0, '3 人态不该出热区图占位');
+      assert((await page.locator('.cmp-radar-big').count()) === 0, '3 人态不该出大雷达');
+      assert((await page.locator('.cmp-table').count()) === 1, '3 人态也应渲染属性对照表');
+
+      // 4) 处理链降级：非法 / 重复 / 超限各自提示，页面照常渲染取前 3 位，被丢弃的第 4 人不发请求
+      let dReqs = 0;
+      const onReq = (r) => {
+        try {
+          if (new URL(r.url()).pathname === `/api/players/${D}`) dReqs += 1;
+        } catch {
+          /* 非 URL 形状的请求不计 */
+        }
+      };
+      page.on('request', onReq);
+      try {
+        await page.goto(`${BASE}/players/compare?ids=abc,${A},${A},${B},${C},${D}`, { waitUntil: 'networkidle' });
+        await page.locator('.cmp-table').waitFor({ timeout: TIMEOUT });
+        const noticeText = await page.locator('.cmp-notices').innerText();
+        for (const phrase of ['已忽略 1 个无效 id', '重复的球员已自动去重', '最多同时对比 3 人，已只取前 3 位']) {
+          assert(noticeText.includes(phrase), `降级提示缺「${phrase}」（实际：${noticeText.replace(/\s+/g, ' ')}）`);
+        }
+        assert((await page.locator('.cmp-ids > .cmp-card').count()) === 3, '降级后仍应渲染 3 人');
+        assert((await page.locator('.cmp-state.cmp-error, .cmp-state.cmp-empty').count()) === 0, '降级名单不该落空态/错误态');
+      } finally {
+        page.off('request', onReq);
+      }
+      assert(dReqs === 0, `被超限丢弃的 id ${D} 仍发起了 ${dReqs} 次请求（请求数应恒 ≤3）`);
+
+      // 5) 库内勾选：?compare= 预勾选 1 人（按钮态）→ 再勾一人 → 「对比（2）」可点并真跳
+      await page.goto(`${BASE}/players?compare=${A}`, { waitUntil: 'domcontentloaded' });
+      await page.locator('.library-shell').first().waitFor({ timeout: TIMEOUT });
+      await page.locator('.library-main tbody tr, .library-main .empty-state').first().waitFor({ timeout: TIMEOUT });
+      const pickbar = page.locator('.lib-pickbar');
+      await pickbar.waitFor({ timeout: TIMEOUT });
+      const barCount = async () => (await pickbar.locator('.lib-pickbar-count').innerText()).replace(/\s+/g, '');
+      assert((await barCount()) === '已选1/3', `收集栏预勾选计数不对（${await barCount()}）`);
+      assert((await page.locator('.lib-pick-input:checked').count()) === 1, '?compare= 应预勾选 1 人');
+      const go1 = pickbar.locator('.lib-pickbar-go');
+      assert((await go1.evaluate((el) => el.tagName)) === 'BUTTON', '不足 2 人时对比控件应是按钮');
+      assert(await go1.isDisabled(), '不足 2 人时「对比（1）」应禁用');
+      await page.locator('.lib-pick-input:not(:checked)').first().click();
+      await page.waitForFunction(
+        () => document.querySelector('.lib-pickbar-count')?.textContent?.replace(/\s+/g, '') === '已选2/3',
+        null,
+        { timeout: TIMEOUT },
+      );
+      assert((await page.locator('.lib-pick-input:checked').count()) === 2, '勾第二个后应共 2 个勾选');
+      const go2 = pickbar.locator('.lib-pickbar-go');
+      assert((await go2.evaluate((el) => el.tagName)) === 'A', '满 2 人后对比控件应为链接');
+      assert((await go2.innerText()).replace(/\s+/g, '') === '对比（2）', `对比按钮文案不对（${await go2.innerText()}）`);
+      const goHref = await go2.getAttribute('href');
+      assert(goHref && goHref.startsWith('/players/compare?ids='), `对比链接 href 不对（${goHref}）`);
+      await go2.click();
+      await page.locator('.cmp-page').waitFor({ timeout: TIMEOUT });
+      await page.locator('.cmp-table').waitFor({ timeout: TIMEOUT });
+      assert((await page.locator('.cmp-ids > .cmp-card').count()) === 2, '库内收集 2 人后进入对比页应为 2 人态');
+      assert((await page.locator('.cmp-radarzone .cmp-heat').count()) === 2, '2 人态热区图占位缺失（库入口路径）');
+
+      // 6) 本场景错误口径（照 ⑪）：无新增未捕获前端错误、/api/players 无非 2xx
+      const newErrs = pageErrors.slice(errBefore);
+      assert(newErrs.length === 0, `⑤f 期间捕获 ${newErrs.length} 条前端错误：\n  ${newErrs.slice(0, 5).join('\n  ')}`);
+      const badPlayers = badResponses.slice(badBefore).filter((l) => l.includes('/api/players'));
+      assert(badPlayers.length === 0, `⑤f 期间 /api/players 出现非预期失败：\n  ${badPlayers.slice(0, 5).join('\n  ')}`);
+    });
+
     await check('⑥ 管理端可达（带会话）', async () => {
       await page.goto(`${BASE}/admin/clubs`, { waitUntil: 'networkidle' });
       const t = await text();
