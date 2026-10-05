@@ -4,6 +4,14 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.33.0] · 转会名单公开标价：最低报价转私密 + 广告板报价入口（2026-10-05）
+
+**本地完成待发布**（2026-10-05 收口，提交 `480a1ee` docs(spec) + `a755cc7` feat 后端 + `fb451b8` feat 前端 + `cbdd7ba` test，**push 未执行**）。**发布轮硬约束**：① 迁移 `0065_list_price.sql` 先 apply 生产（生产现停在 `0064`）；② 再 push（push 即 CF 自动部署）；③ **push 后 bump KV `cache:epoch:public`**（`/api/market/transfer-board` 与球员详情走 `cachedJson` 代际键，旧形状载荷最长存活 24h）。
+
+用户 brainstorming 拍板五条：进转会名单**必填公开标价**（`[1, 1.5×违约金]`）；**最低报价（底线）全系统私密**（公开面零下发）；**同意线改钉标价**（无标价回落底线），达线且对方开了自动同意才直接成交；**低于标价视为砍价**走人工谈判、**低于底线恒自动拒**；广告板卡脚加**圆形报价按钮**（点了直接发起报价，预填标价）。
+
+新增：`players.list_price`（迁移 0065，回填在名单行）+ `GET /api/players/:id/offer-settings`（本队教练，五字段）+ `autoRespondKind` 双线化 + `AdBidModal` 报价弹层 + 报价区块「砍价」徽标；`transferPriced` 改由 `list_price` 派生。收口：公开面（transfer-board / 球员列表与详情 / 报价列表与谈判桌 / 通知 / 审计）全部只出 `listPrice`，「低于对方底线」类文案不再带数额——`minOfferPrice` 仅活在私密端点。测试计划 `docs/test-plans/v6.33.0-list-price.md`；验收 vitest **90 文件 / 1521 例**全绿（净 +20）、typecheck 三份全清、build（`index-Cd07juMr.js` 609.94 kB / gzip 193.74 kB）、e2e **22/22**、变异 **M1–M7 全命中零空转**；code-review P0 0 / P1 0（登记不改 6 条）。
+
 ## [v6.32.0] · 转会台页签化 + 市场域信息架构重排（2026-10-05）
 
 **已上线**（2026-10-05 发布，用户令「修复roadmap，随后发布」；**零迁移、零生产数据写**，直接 push 触发 CF 自动部署：push `3306bb3..ed9503d`（7 枚 = v6.32.0 五枚 + v6.30.0 标题补写 1 + 本条）⇒ 生产 Version **`96436df1-de82-4007-bde6-ac59961078a0`** @2026-10-05T03:39:54Z；**上线回读抓到队徽真源缺陷**（transfer-board `logoKey` 全 null——本平台 `clubs.logo_key` 全仓无人写、生产全 NULL，真源在 tour 库）⇒ 热修 push `ed9503d..b9cd7a9` ⇒ 生产 Version **`292d0884-acc2-474f-a2e3-20859fc7376a`** @2026-10-05T03:49:42Z（两次均 Source `wrangler`；CF API 经 `curl --resolve api.cloudflare.com:443:<IP>` 直连取证——wrangler/Node 侧 DNS 间歇失败，`GET /accounts` 订正记录里的 account id 笔误「…a01ccec」→「…a01cec」）。**上线回读**：`/api/health` 200、SPA `/market/desk` 200、入口 `assets/index-C9J6_5Ha.js` sha256 `febfd58d…81cd` 与本地 6.32.0 构建**逐字节一致**（含版本串 `6.32.0`、「自动挂牌」在场 /「自动成交」零命中）、`GET /api/market/transfer-board` 行带 `logoKey` 且热修后与 `/api/clubs` 同源同值（巴黎圣日耳曼 `team/1/1788576927024.png`）、worker 代码直读含 `club_logo_key`→改含 TOUR_DB 合并。push 前硬闸：typecheck 三份全清 + vitest **90 文件 / 1501 例**全绿 + build（`index-C9J6_5Ha.js` 608.69 kB / gzip 193.37 kB，CSS `index-CDCHJSke.css` 与 6.31.0 同 hash=零 CSS 改动）。
