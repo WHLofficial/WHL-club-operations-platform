@@ -6,7 +6,7 @@
 
 ## [v6.33.0] · 转会名单公开标价：最低报价转私密 + 广告板报价入口（2026-10-05）
 
-**本地完成待发布**（2026-10-05 收口，提交 `480a1ee` docs(spec) + `a755cc7` feat 后端 + `fb451b8` feat 前端 + `cbdd7ba` test，**push 未执行**）。**发布轮硬约束**：① 迁移 `0065_list_price.sql` 先 apply 生产（生产现停在 `0064`）；② 再 push（push 即 CF 自动部署）；③ **push 后 bump KV `cache:epoch:public`**（`/api/market/transfer-board` 与球员详情走 `cachedJson` 代际键，旧形状载荷最长存活 24h）。
+**已上线**（2026-10-05 发布，用户令「发布」；提交 `480a1ee` docs(spec) + `a755cc7` feat 后端 + `fb451b8` feat 前端 + `cbdd7ba` test + `4e5d9f9` docs 收口）。**执行序（顺序未反）**：① 迁移 `0065_list_price.sql` 先 apply 生产——`Executed 3 commands in 3.03ms`，回读台账 head = `0065_list_price.sql`、`players` 四列在场、名单行 2 行全回填（B. Mbeumo 18 / O. Marmoush 18）；② `git push origin main`（`b9cd7a9..4e5d9f9`）触发 CF Workers Builds，约 1 分钟出 Version `69041242-34b7-4500-a6da-269586c0c9d3`（@2026-10-05T07:06:53Z）；③ **bump KV `cache:epoch:public` `17 → 18`**（`/api/market/transfer-board` 与球员详情走 `cachedJson` 代际键，旧形状载荷最长存活 24h）。**上线回读**：线上 `index-Cd07juMr.js` / `index-gjLtH_Uw.css` / `MarketAdBoardPage-MRvBa5OE.js` 与本地构建 sha256 逐字节一致，线上 JS 版本串 `6.33.0`、广告板分块含 `adb-bid-btn`；`/api/health`、`/api/market/transfer-board`（2 行 `listPrice:18`）、`/api/players/67`、`/api/players/142` 全 200 且**全端点 0 处 `minOfferPrice`**（详情只出 `listPrice`）；`GET /api/players/:id/offer-settings` 与 `/api/admin/brands` 匿名 401。生产迁移现状：本仓已到 `0065`。
 
 用户 brainstorming 拍板五条：进转会名单**必填公开标价**（`[1, 1.5×违约金]`）；**最低报价（底线）全系统私密**（公开面零下发）；**同意线改钉标价**（无标价回落底线），达线且对方开了自动同意才直接成交；**低于标价视为砍价**走人工谈判、**低于底线恒自动拒**；广告板卡脚加**圆形报价按钮**（点了直接发起报价，预填标价）。
 
