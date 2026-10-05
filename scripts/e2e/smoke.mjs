@@ -538,8 +538,6 @@ async function main() {
     const unstubDesk = async () => {
       for (const [pattern] of DESK_STUBS) await page.unroute(pattern);
     };
-    // 区块顶部对齐视口顶（top≈0）；sticky 顶栏与滚动余量给 ±40px 容差
-    const secTop = (id) => page.evaluate((x) => document.getElementById(x)?.getBoundingClientRect().top ?? null, id);
 
     await check('⑤b 旧报价/谈判路由换址到转会台（box 映射与默认值）', async () => {
       await stubDesk();
@@ -568,7 +566,7 @@ async function main() {
       }
     });
 
-    await check('⑤c 转会台结构：流水线说明条 / 三区锚点 / 待办计数 / 阶段徽标 / 深链', async () => {
+    await check('⑤c 转会台结构（v6.32.0 页签化）：流水线一行 / 页签计数 / 条件挂载 / 阶段徽标 / 深链', async () => {
       await stubDesk();
       try {
         await page.goto(`${BASE}/market/desk`, { waitUntil: 'networkidle' });
@@ -581,7 +579,7 @@ async function main() {
         assert((await tabs.filter({ hasText: '转会报价' }).count()) === 0, '顶栏仍留着「转会报价」旧入口');
         assert((await tabs.filter({ hasText: '签约谈判' }).count()) === 0, '顶栏仍留着「签约谈判」旧入口');
 
-        // MarketNav 五项（顺序与指向；v6.24.0 加「激活」）：NavLink 指错就红（V5 红点）
+        // MarketNav 六项（顺序与指向；v6.31.0 广告板第 2 项）：NavLink 指错就红（V5 红点）
         const nav = page.locator('nav[aria-label="市场分区"] a');
         assert(JSON.stringify(await nav.allInnerTexts()) === JSON.stringify(['在售市场', '广告板', '海捞', '激活', '我的转会台', '市场情报']),
           `MarketNav 文案/顺序不对：${(await nav.allInnerTexts()).join(' / ')}`);
@@ -589,101 +587,54 @@ async function main() {
           JSON.stringify(['/market', '/market/board', '/market/free', '/market/activation', '/market/desk', '/market/intel']),
           `MarketNav 指向不对：${(await nav.evaluateAll((els) => els.map((e) => e.getAttribute('href')))).join(' / ')}`);
 
-        // 流水线说明条（V6 红点：整块删就没这句）
+        // 流水线一行（v6.32.0 精简）：徽标链在场；机制句唯一讲解点收进报价区块 hint
         const pipe = await page.locator('[aria-label="转会流水线"]').innerText();
-        assert(pipe.includes('报价被接受 ≠ 成交') && pipe.includes('管理组审核') && pipe.includes('签约谈判'),
+        assert(pipe.includes('管理组审核') && pipe.includes('签约谈判') && pipe.includes('成约过户'),
           `流水线说明条文案不全：${pipe.replace(/\s+/g, ' ')}`);
+        assert(!(await text()).includes('报价被接受 ≠ 成交'), '默认页签（谈判）不应出现机制句（已收进报价区块）');
 
-        // 三区块齐、顺序固定（签约谈判 → 收到报价 → 我的出价）
+        // 待办速览退役：页签自带计数（夹具：谈判 active 2 / 报价 pendingMine 1+0 / 出价 active 1）
+        assert((await page.locator('[aria-label="待办速览"]').count()) === 0, '待办速览条未退役');
+        const tabBtn = async (label) =>
+          (await page.locator('[aria-label="转会台页签"] button', { hasText: label }).innerText()).replace(/\s+/g, '');
+        assert((await tabBtn('签约谈判')) === '签约谈判2', `谈判页签计数不对（夹具 2 场 active）：${await tabBtn('签约谈判')}`);
+        assert((await tabBtn('报价')) === '报价1', `报价页签计数不对（夹具 pendingMine 1+0）：${await tabBtn('报价')}`);
+        assert((await tabBtn('我的出价')) === '我的出价1', `出价页签计数不对（夹具 1 条 active）：${await tabBtn('我的出价')}`);
+
+        // 条件挂载：默认只挂谈判区块，另两个锚不在 DOM（v6.32.0 前是三锚同屏有序）
         const ids = await page.evaluate(() => [...document.querySelectorAll('[id^="desk-"]')].map((e) => e.id));
-        assert(JSON.stringify(ids) === JSON.stringify(['desk-nego', 'desk-offers', 'desk-bids']),
-          `区块顺序/锚点不对：${ids.join(' / ')}`);
+        assert(JSON.stringify(ids) === JSON.stringify(['desk-nego']), `默认应只挂谈判区块，实际：${ids.join(' / ')}`);
+        const negoText = await page.locator('#desk-nego').innerText();
+        assert((negoText.match(/第一步 · 定违约金/g) ?? []).length === 1, '违约金未定的谈判卡没出阶段徽标');
+        assert(negoText.includes('工资谈判 · 剩 2 轮'), '违约金已定的谈判卡没出「工资谈判 · 剩 N 轮」');
+        assert(!negoText.includes('已落定的谈判'), '已落定谈判表应已删除（历史归球队中心转会页签队史）');
 
-        // 待办速览：三个计数全由区块自身数据派生（夹具 in=1/out=0、2 场 active、1 条 active 出价）
-        const segBtn = async (label) =>
-          (await page.locator('[aria-label="待办速览"] button', { hasText: label }).innerText()).replace(/\s+/g, '');
-        assert((await segBtn('轮到我')) === '轮到我1', `「轮到我」计数不对（夹具 pendingMine=1/0）：${await segBtn('轮到我')}`);
-        assert((await segBtn('进行中谈判')) === '进行中谈判2', `「进行中谈判」计数不对（夹具 2 场 active）：${await segBtn('进行中谈判')}`);
-        assert((await segBtn('竞价中')) === '竞价中1', `「竞价中」计数不对（夹具 1 条 active 出价）：${await segBtn('竞价中')}`);
-
-        // 阶段徽标（V7：accepted 文案一改回「已挂牌」这条就红）
+        // 切「报价」页签：条件挂载换区，阶段徽标（V7：accepted 文案一改回「已挂牌」这条就红）
+        await page.locator('[aria-label="转会台页签"] button', { hasText: '报价' }).click();
+        await page.locator('#desk-offers').waitFor({ timeout: TIMEOUT });
+        assert((await page.evaluate(() => document.getElementById('desk-nego'))) === null, '切走后谈判区块未卸载');
         const offerRows = page.locator('#desk-offers tbody tr');
         assert((await offerRows.filter({ hasText: '已接受·挂牌竞价中' }).count()) === 1, '报价行没出「已接受·挂牌竞价中」徽标');
         assert((await offerRows.filter({ hasText: '待你表态' }).count()) === 1, '轮到我的报价行没出「待你表态」');
         assert((await offerRows.filter({ hasText: '等对方' }).count()) === 1, '不该我表态的 pending 行没出「等对方」');
-        const negoText = await page.locator('#desk-nego').innerText();
-        assert((negoText.match(/第一步 · 定违约金/g) ?? []).length === 1, '违约金未定的谈判卡没出阶段徽标');
-        assert(negoText.includes('工资谈判 · 剩 2 轮'), '违约金已定的谈判卡没出「工资谈判 · 剩 N 轮」');
-        assert(negoText.includes('已落定的谈判') && negoText.includes('前锋丁'), '已落定谈判表丢了（旧页数据）');
-        assert((await page.locator('#desk-bids tbody tr', { hasText: '待审核' }).count()) === 1, 'won+挂牌待审核的出价行没出「待审核」');
-        assert((await page.locator('#desk-bids tbody tr', { hasText: '领先中' }).count()) === 1, 'active 出价行没出「领先中」');
-        assert((await page.locator('#desk-bids select').count()) === 0, '出价区还带着挂牌表单的下拉（v6.24.0 已删）');
+        assert((await text()).includes('报价被接受 ≠ 成交'), '报价区块缺机制句（v6.32.0 唯一讲解点）');
 
-        // 深链：?tab=offers&box=out 既滚到报价区，也把 box 带到 out 侧
+        // 深链：?tab=offers&box=out 直接落报价页签（页签化后 = 直接挂载，无需滚动几何判据）
         await page.goto(`${BASE}/market/desk?tab=offers&box=out`, { waitUntil: 'networkidle' });
         await page.locator('#desk-offers').waitFor({ timeout: TIMEOUT });
-        await page.waitForFunction(
-          () => {
-            const el = document.getElementById('desk-offers');
-            return !!el && el.getBoundingClientRect().top <= 40;
-          },
-          null,
-          { timeout: TIMEOUT },
-        ).catch(() => {});
-        // v6.24.0 删挂牌表单后 desk-bids 变矮：desk-offers 下方内容不够滚时，浏览器只能滚到底
-        //（实测 max scroll 934 < 该区绝对位 1132 ⇒ 视口顶最多到 198）。「够不到顶」时按
-        // 下方 desk-bids 深链同款判据验收：已滚到底（gap≤40）且区块露在视口内。
-        const offGeom = await page.evaluate(() => {
-          const el = document.getElementById('desk-offers');
-          const d = document.documentElement;
-          return {
-            top: el?.getBoundingClientRect().top ?? null,
-            gap: d.scrollHeight - (window.scrollY + window.innerHeight),
-            vh: window.innerHeight,
-          };
-        });
-        assert(
-          offGeom.top !== null &&
-            (offGeom.top <= 40 || (offGeom.gap <= 40 && offGeom.top < offGeom.vh - 200)),
-          `?tab=offers 没把报价区滚到位（top=${offGeom.top}，距底 ${offGeom.gap}）`,
-        );
+        assert((await page.evaluate(() => document.getElementById('desk-nego'))) === null, '深链 offers 仍挂着谈判区块（条件挂载失效）');
         assert((await text()).includes('巴塞罗那'), '?box=out 没生效（out 侧报价行未渲染）');
         assert((await page.locator('#desk-offers [aria-label="报价页签"] button.on').first().innerText()).includes('我送出的'),
           '?box=out 时「我送出的」页签未选中');
 
-        // 点待办计数切区块：tab 进 URL 且把我的出价区滚进视野
-        await page.locator('[aria-label="待办速览"] button', { hasText: '竞价中' }).click();
-        await page.waitForFunction(() => location.search.includes('tab=bids'), null, { timeout: TIMEOUT });
-        await page.waitForFunction(
-          () => {
-            const el = document.getElementById('desk-bids');
-            if (!el) return false;
-            const d = document.documentElement;
-            return el.getBoundingClientRect().top <= 40 || d.scrollHeight - (window.scrollY + window.innerHeight) <= 40;
-          },
-          null,
-          { timeout: TIMEOUT },
-        ).catch(() => {});
-        const bidsGeom = await page.evaluate(() => {
-          const el = document.getElementById('desk-bids');
-          const d = document.documentElement;
-          return {
-            top: el?.getBoundingClientRect().top ?? null,
-            gap: d.scrollHeight - (window.scrollY + window.innerHeight),
-            vh: window.innerHeight,
-          };
-        });
-        assert(bidsGeom.top !== null, '我的出价区没渲染');
-        // 它是页面最末一段，下面没有内容可滚，够不到视口顶；「滚到底 + 露在视口里」才是合格的到位判据
-        assert(bidsGeom.top <= 40 || (bidsGeom.gap <= 40 && bidsGeom.top < bidsGeom.vh - 200),
-          `点「竞价中」没把出价区滚进视野（top=${bidsGeom.top}，距底 ${bidsGeom.gap}）`);
-
-        // 旧链 ?tab=mine 是 alias（v6.24.0）：URL 不改写，仍落「我的出价」区
+        // 旧链 ?tab=mine 是 alias（v6.24.0）：URL 不改写，仍落「我的出价」页签
         await page.goto(`${BASE}/market/desk?tab=mine`, { waitUntil: 'networkidle' });
         assert((await page.evaluate(() => location.search)).includes('tab=mine'), '?tab=mine 被改写（alias 应保留原 URL）');
-        assert((await page.locator('[aria-label="待办速览"] button.on').first().innerText()).includes('竞价中'),
-          '?tab=mine 没落到出价区（待办速览未选中「竞价中」）');
-        assert(await page.locator('#desk-bids').isVisible(), '?tab=mine 没渲染出价区锚点');
+        await page.locator('#desk-bids').waitFor({ timeout: TIMEOUT });
+        assert((await page.evaluate(() => document.getElementById('desk-offers'))) === null, 'mine alias 落地时报价区块不应挂载');
+        assert((await page.locator('#desk-bids tbody tr', { hasText: '待审核' }).count()) === 1, 'won+挂牌待审核的出价行没出「待审核」');
+        assert((await page.locator('#desk-bids tbody tr', { hasText: '领先中' }).count()) === 1, 'active 出价行没出「领先中」');
+        assert((await page.locator('#desk-bids select').count()) === 0, '出价区还带着挂牌表单的下拉（v6.24.0 已删）');
       } finally {
         await unstubDesk();
       }

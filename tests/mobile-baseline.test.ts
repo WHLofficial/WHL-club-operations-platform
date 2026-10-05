@@ -131,12 +131,13 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   // v6.24.0：可激活名单表随 ActivateSection 从 MarketFreePage 搬进新激活页（全树表数不变）
   'web/src/pages/market/MarketActivationPage.tsx': 1,
   'web/src/pages/market/MarketIntelPage.tsx': 1,
-  // v6.23.0 转会台：原 Negotiations/Offers/MarketMinePage 三页的表格随代码搬进 desk 三区（条数不变）
+  // v6.23.0 转会台：原 Negotiations/Offers/MarketMinePage 三页的表格随代码搬进 desk 三区；
+  // v6.32.0：NegotiationsSection 删「已落定的谈判」表（历史归球队中心转会页签）⇒ 2 → 1（报价记录表）
   'web/src/pages/market/desk/ListingsBidsSection.tsx': 1,
-  'web/src/pages/market/desk/NegotiationsSection.tsx': 2,
+  'web/src/pages/market/desk/NegotiationsSection.tsx': 1,
   'web/src/pages/market/desk/OffersSection.tsx': 2,
 };
-/** 全树 <table> 基线 = 点名页之和（48）：跌破说明扫描器空转（假绿） */
+/** 全树 <table> 基线 = 点名页之和（v6.32.0 起 47）：跌破说明扫描器空转（假绿） */
 const TABLE_BASELINE = Object.values(TABLES_BY_FILE_MIN).reduce((sum, n) => sum + n, 0);
 
 function countTables(src: string): number {
@@ -773,10 +774,14 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     expect(desk, '?tab 只认 nego|offers|bids（mine 是 bids 的 alias），缺省应落 nego').toContain(
       "tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine' ? (tabRaw === 'mine' ? 'bids' : tabRaw) : 'nego'",
     );
-    // 流水线说明条与三区块锚（V6：整块删掉就红；e2e ⑤c 另有真渲染断言）
+    // v6.32.0 页签化：流水线说明条精简一行徽标链（机制句唯一讲解点在报价区块 hint，页面不得再重复）；
+    // 待办速览条退役（计数进页签），三区块条件挂载（照球队中心 dossier-tabs 模式）
     expect(desk, '转会台缺流水线说明条').toContain('aria-label="转会流水线"');
-    expect(desk, '流水线说明条缺「报价被接受 ≠ 成交」机制句').toContain('报价被接受 ≠ 成交');
-    // 三个锚 id 分别住在三区组件里，desk 页负责顺序（签约谈判 → 收到报价 → 我的出价）
+    expect(desk, '流水线一行缺徽标链（管理组审核段）').toContain('管理组审核');
+    expect(desk, '流水线说明条又把机制句抄回来了（唯一讲解点在报价区块 hint）').not.toContain('报价被接受 ≠ 成交');
+    expect(desk, '待办速览条应已退役（计数进页签）').not.toContain('待办速览');
+    expect(desk, '页签条未用 dossier-tabs（应照球队中心模式）').toContain('seg dossier-tabs');
+    // 三个锚 id 分别住在三区组件里，desk 页按页签条件挂载（JSX 里仍按 谈判 → 报价 → 出价 排布）
     for (const [file, id] of [
       ['web/src/pages/market/desk/NegotiationsSection.tsx', 'desk-nego'],
       ['web/src/pages/market/desk/OffersSection.tsx', 'desk-offers'],
@@ -786,7 +791,10 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     }
     const order = ['<NegotiationsSection', '<OffersSection', '<ListingsBidsSection'].map((tag) => desk.indexOf(tag));
     expect(order.every((i) => i > -1), '转会台缺区块组件渲染').toBe(true);
-    expect(order, '区块顺序应为 签约谈判 → 收到报价 → 我的出价').toEqual([...order].sort((a, b) => a - b));
+    expect(order, '页签排布顺序应为 签约谈判 → 报价 → 我的出价').toEqual([...order].sort((a, b) => a - b));
+    // v6.32.0 IA 裁决：已落定谈判表删除（历史归球队中心转会页签队史）
+    expect(read(`${WEB_SRC}/pages/market/desk/NegotiationsSection.tsx`), '「已落定的谈判」表应已删除').not.toContain('已落定的谈判');
+    expect(read(`${WEB_SRC}/pages/market/desk/OffersSection.tsx`), '报价区块应承接「报价被接受 ≠ 成交」机制讲解').toContain('报价被接受 ≠ 成交');
   });
 
   it('激活拆成独立页：/market/activation 路由 + 首价入口；海捞页只剩查询（TC-C03）', () => {
