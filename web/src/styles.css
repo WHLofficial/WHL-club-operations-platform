@@ -2561,6 +2561,43 @@ th.num .th-sort {
   display: block;
 }
 
+/* 位置热区图（v6.35.0，spec §1.1）：12 块拓扑 + 三态着色；语义 = 可踢位置分布（不是比赛跑动热图）。
+   渲染 147×120 与雷达 178×120 等高并排；类名前缀 heat- 防连坐（v3.4.0 .pos-chip 教训） */
+.heat-svg {
+  width: 147px;
+  height: auto;
+  flex: none;
+  display: block;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(61, 43, 31, 0.12);
+}
+.heat-pitch {
+  fill: #f3ead9;
+}
+.heat-band {
+  fill: #faf6ef;
+  opacity: 0.55;
+}
+.heat-block.heat-main {
+  fill: #2b8a3e;
+}
+.heat-block.heat-sub {
+  fill: #66a80f;
+}
+.heat-block.heat-off {
+  fill: #faf6ef;
+  opacity: 0.55;
+}
+.heat-code {
+  font-size: 11px;
+  font-weight: 700;
+  fill: #c3b294;
+}
+.heat-code.heat-main,
+.heat-code.heat-sub {
+  fill: #fff;
+}
+
 /* 属性页签头部两栏（v6.2.0）：左 = 标题/位置/角色，右 = 队徽 96px + 12px + 雷达；
    星级行与属性卡网格不在这个 grid 里，保持整宽 */
 .attr-head {
