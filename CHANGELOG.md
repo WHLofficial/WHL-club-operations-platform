@@ -6,7 +6,7 @@
 
 ## [v6.34.0] · 球员对比：独立对比页 + 详情页入口 + 球员库勾选（纯能力对比，2–3 人）（2026-10-05）
 
-**本地完成，未发布（待令）**（提交链 `aac8985` feat(players) + `96bc117` feat(compare) 纯函数 + `d5a3ad7` docs(test-plans) + `1dd6e8e` refactor(web) 共享件 + `c4e3379` feat(compare) 对比页 + `f1e9598` feat(compare) 入口与库勾选 + `7db9ff0`/`a2376ef` test(e2e) + `d90bc5c` fix 评审 P0 + `64180e1` fix 键归一测试 + `a1afa8e` refactor PlaystyleBadge；零迁移）。
+**已上线**（2026-10-06 发布，用户令「发布」；提交链 `aac8985` feat(players) + `96bc117` feat(compare) 纯函数 + `d5a3ad7` docs(test-plans) + `1dd6e8e` refactor(web) 共享件 + `c4e3379` feat(compare) 对比页 + `f1e9598` feat(compare) 入口与库勾选 + `7db9ff0`/`a2376ef` test(e2e) + `d90bc5c` fix 评审 P0 + `64180e1` fix 键归一测试 + `a1afa8e` refactor PlaystyleBadge + `38e5a5c` docs 收口；零迁移）。**执行序**：① push 前实测生产无待 apply 迁移（`migrations list --remote` 报 `✅ No migrations to apply!`，本仓已到 `0065`）⇒ 无需 apply；② `git push origin main`（`907c5a1..38e5a5c`，14 个提交，含 v6.33.1 发布记录回写）触发 CF Workers Builds 自动部署 → Version **`6df4be40-3b97-493a-82bb-7a095886fded`**（@2026-10-05T20:50:36Z，Source `Unknown (deployment)`，本地时间 2026-10-06 04:50）；③ 上线回读：线上入口 `assets/index-ChUUQqk5.js` + `assets/index-hOYUad5h.css` 与本地 6.34.0 构建逐字同名、线上 JS 版本串 `6.34.0`；`/api/health`、`/api/players?limit=1`、`/api/market/listings`、`/api/clubs`（3707B）、`/api/squads`（43064B）全 200，`/api/admin/events/pool` 与 `/api/offers` 匿名 401；**详情端点 `GET /api/players/1` 实测出 `influence: 12.5`**——本版唯一后端增量的线上实证。前置验收：typecheck 三份全清、vitest 98 文件 / 1622 例全绿、build 成功。
 
 **缘起与拍板**：用户令「球员对比功能实现」；硬需求＝对比页 URL 含全部参与球员 id、改 id 即改对比（唯一事实源）；纯能力对比（雷达/34 属性/体型·位置·花式·逆足·惯用脚/角色/徽章·徽章数/影响力）；2–3 人上限 3；门将＝混比统一外场六维、纯门将用 GK 六轴；桌面 A＋E＋F；胜负标记乙（胜方加粗、等值双粗、数字球员本命色）；颜色 A #8e5426 / B #37505e / C #6d4aa8。
 
