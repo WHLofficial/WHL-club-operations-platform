@@ -17,6 +17,7 @@
 | 7 | 多个置顶怎么排 | **纵向堆叠**：几条通栏就几行（3 个 = 290px，最省高度） | 用户答「1 纵向堆叠（推荐）」 |
 | 8 | 小卡片形态 | **三张迷你卡**（各自名字/队伍/CA·PA/最低报价 + 置顶·推荐角标）；说明文案只留「各队公开挂出的转会名单。」 | 用户答「2，转会板改广告板，前三位xxxxx文案去掉」 |
 | 9 | 置顶数量上限 | 本版不设限（接口按档位渲染，几个置顶就几行）；上限属付费流程的产品规则，留给那一步定 | 设计问答记录 |
+| 10 | 普通档（无付费加权）的顺序 | **服务端 5 分钟时间桶种子化轮换 + 页面「换一批」手动换序**；付费档（推荐 / 置顶）不参与轮换，位置语义不变 | 用户答「1，也支持用户手动按键变换顺序」（2026-10-05 增补，见 §3.3） |
 
 视觉定稿过程（三屏样张 + 截图）在 brainstorming 视觉伴侣里走完：屏 1 结构三选一、屏 2 置顶区三排法、屏 3 小卡片三形态；下面 §4 是定稿规格，实施时按它写 CSS。
 
@@ -98,11 +99,11 @@ WHERE id = ? AND club_id = ? AND status = 'normal'
 
 写在 `src/worker/routes/market.ts`（公开市场分区，与 `/market/rumors`、`/market/deals` 同段）。
 
-- 公开 + `assertPublicRate(c, 'market')` + `cachedJson('market-transfer-board:<limit>', ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS), loader, {scope:'market', env, ctx: waitUntilOf(c)})`。
+- 公开 + `assertPublicRate(c, 'market')` + `cachedJson('market-transfer-board:<limit>', ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS), loader, {scope:'market', env, ctx: waitUntilOf(c)})`（**键只有 limit**，不含轮换桶，见 §3.3）。
   - 新鲜度：改报价设置走 `PUT /api/players/:id/offer-settings`，`WRITE_SCOPE_PREFIXES` 里的 `/api/players` 命中 ⇒ 自动 purge 全部公开 scope（含 market）；1h TTL 只是兜底。
 - `limit`：默认 200、上限 200（越界钳住，非法值回落默认）。
 - 过滤：只取 `players.transfer_listed = 1`。
-- 排序：`emphasis DESC` → `transfer_listed_at DESC`（NULL 当最旧）→ `id DESC`。
+- 排序：`emphasis DESC` → `transfer_listed_at DESC`（NULL 当最旧）→ `id DESC`；**缓存里存的就是这个 SQL 序**，出缓存后再把 `emphasis = 0` 的普通档按时间桶洗牌（§3.3），付费档保持本序。
 - 载荷：`{ players: TransferBoardRow[], total: number }`（`total` = 名单总人数，用于「查看全部 N 人」与截断提示）。
 
 行字段（`TransferBoardRow`）：
@@ -137,6 +138,24 @@ LEFT JOIN (
 
 - `/api/players` 列表**不下发**最低报价数值（既有口径不变，v6.30.0 注释「隐藏门槛不进公开面」仍成立）；广告板是唯一的公开数值出口。
 - 挂牌球员（listings）不合并进广告板。
+
+### 3.3 普通档轮换与「换一批」（2026-10-05 增补）
+
+来源：用户问「列入转会名单但没有有偿提升优先级的，每次展示顺序随机？」⇒ 裁决 = **服务端时间桶轮换 + 页面手动换序**（§0 第 10 条）。
+
+- **为什么随机必须种子化**：同一份缓存值会被多个 isolate / colo 读到，而「换桶」并不经过缓存失效（见下条）。若用 `Math.random()`，同一时刻不同 isolate 会给出不同排列 ⇒ 同一用户在相邻两次请求里看到顺序抖动。种子 = 时间桶号，任何 isolate 在同一桶内必得同一排列。
+- `src/core/ad-board.ts`（新文件，纯函数、可单测）：
+  - `TRANSFER_BOARD_ROTATE_MS = 5 * 60_000`；
+  - `transferBoardBucket(nowMs) = Math.floor(nowMs / TRANSFER_BOARD_ROTATE_MS)`（约 5 分钟一桶，整桶内顺序稳定）；
+  - `shuffleWithSeed(rows, seed)`：`mulberry32(seed)` 驱动的 Fisher–Yates，返回新数组、不改入参。
+- 端点（`src/worker/routes/market.ts`）：**缓存键只有 limit**（`market-transfer-board:<limit>`），洗牌放在 `cachedJson` 之后做 —— 读缓存拿到 SQL 序，再按 `emphasis !== 0` / `emphasis === 0` 分流，**只洗普通档**：`[...paid, ...shuffleWithSeed(unpinned, transferBoardBucket(Date.now()))]`。付费档（推荐 / 置顶）保持 SQL 序 —— 付费位的相对位置与「按到期时间排」语义不受轮换影响。
+  - **为什么洗牌不进 loader、桶号不进缓存键**：读量预算是硬纪律（`src/lib/cache-policy.ts:5-7`：每天最坏重读 = 86400 ÷ TTL，按形状、按 colo）。桶号进键会把本端点重读从 `86400 ÷ 1h = 24` 抬到 `86400 ÷ 5min = 288` 次/天/形状/colo（**12 倍**）。洗牌是 O(名单人数) 的纯函数，放在缓存之外后重读回到 24 次基线；代价是每次请求多一次数组复制与分流（可忽略）。
+  - 代价（登记不改）：`limit` 形状无白名单，对抗性枚举 `limit=1..200` 时最坏读量 = 288 × 200 × L 行/天/colo（详见测试计划 §7.4 读量核算）。
+- SQL 的 `... id DESC` 尾键是洗牌的**输入序**：它保证任何 isolate 从缓存/库里拿到同一输入；洗牌是纯函数 ⇒ 输出一致。
+- 页面（`web/src/pages/market/MarketAdBoardPage.tsx`）：说明行右侧「换一批」按钮（`ShuffleIcon`，仅当普通档 ≥ 2 时渲染）。点击用 `Math.random()` 重排**本地**普通档（最多试 8 次取第一个与当前不同的排列，兜底 `reverse()`）—— 纯客户端、不打端点、不动付费档。
+  - 状态只存 id 序列（`manualIds`）而非行对象；守卫 `manualIds.length === unpinned.length && manualIds.every((id) => byId.has(id))` 不成立即回落服务端桶序 ⇒ 名单变长/变短都不会丢卡、错位或重复。
+  - 重挂载或重新取数后回到服务端桶序（手动序不持久化，属预期行为）。
+- 本版不承诺的：轮换不保证「每桶人人换位」（2 人档洗牌可能恰好同序）、不承诺跨桶公平分布；桶长 5 分钟是产品口径，不是排序公平性保证。
 
 ## 4. 视觉规格（定稿）
 
@@ -212,3 +231,4 @@ LEFT JOIN (
 - 测试计划：`docs/test-plans/v6.31.0-ad-board.md`（qa-test-planner）。
 - 变异验证：至少覆盖「进名单不打戳 / 重复保存覆盖原戳 / 退出不清戳 / 排序丢着重度 / 现行推广判定去掉 `ends_at > now` / 取最高档改成取最低档 / teaser 空态仍渲染 / 置顶区无数据仍留标题 / 375 溢出」。
 - 评审：code-review-skill；docs 收口（CHANGELOG / ROADMAP / AGENTS + `package.json` bump 6.31.0）；分枚本地 commit（**不 push**，发布等令；发布顺序：先 `npm run db:migrate:remote` apply `0064` 再 push）。
+- **2026-10-05 收口实测**（含 §3.3 轮换增补，及评审 P1-2 后的机制复跑）：`npm run typecheck` 三份全清；`npx vitest run` 89 文件 / 1491 例全绿；`npm run build` 成功（4.02s，入口 608.52 kB / gzip 193.33 kB）；e2e **22/22**（新增 ⑤e 广告板场景、⑫ 375 零溢出 29 路由）；变异 M1–M24（测试计划 §3）+ M25–M35（§7.3，轮换与手动换序）全部判红。
