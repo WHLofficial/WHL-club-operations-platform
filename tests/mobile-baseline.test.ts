@@ -58,8 +58,10 @@ function collectTsx(dir: string, out: string[] = []): string[] {
 }
 
 const TSX_FILES = collectTsx(WEB_SRC).sort();
-/** 本批实测全树数（52，含 5 个 *.test.tsx；v6.23.0 转会台 +4 新 -3 旧，v6.24.0 激活页 +1）：只增不减——跌破只可能是遍历器漏目录（最大组口径，不许抽样） */
-const TSX_BASELINE = 52;
+/** 实测全树数（v6.31.0 广告板随代码走：77，含 16 个 *.test.tsx）：只增不减——跌破只可能是遍历器漏目录（最大组口径，不许抽样）。
+ *  旧值 52 停在 v6.24.0（转会台/激活页时代），此后各版持续加页（v6.30.0 球队页签化拆出 club/*、v6.31.0 广告板），
+ *  本次按实测重设，让「只增不减」重新有牙齿（>= 语义下旧值早已失效）。 */
+const TSX_BASELINE = 77;
 
 function read(relPath: string): string {
   return readFileSync(relPath, 'utf8');
@@ -69,6 +71,34 @@ function lineAt(src: string, index: number): number {
   let line = 1;
   for (let i = 0; i < index; i++) if (src.charCodeAt(i) === 10) line++;
   return line;
+}
+
+/**
+ * 取出 css 里每个 `@media (<query>) { … }` 块的正文（花括号配平），供「规则是否活在该媒体块内」的判定。
+ * v6.31.0 起因广告板在文件末尾又添了 ≤640 块，「取最后一个媒体块再切尾」的写法会误判，故改为按块取正文。
+ */
+function mediaBlocks(css: string, query: string): string[] {
+  const out: string[] = [];
+  let at = css.indexOf(query);
+  while (at !== -1) {
+    const open = css.indexOf('{', at);
+    if (open === -1) break;
+    let depth = 0;
+    let end = open;
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === '{') depth++;
+      else if (css[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    out.push(css.slice(open, end + 1));
+    at = css.indexOf(query, end);
+  }
+  return out;
 }
 
 // ---- 判据 1：每个 <table> 的紧邻上一非空行必须是 .table-wrap 包裹 ----
@@ -362,13 +392,15 @@ describe('v6.20.0 窄屏整治静态扫描闸门（docs/test-plans/v6.20.0-mobil
     );
     expect(hits, `DeskTab + VenueTab 的 coach-sticky 挂类（className 形态）应为恰 2 处（注册名单表 + 主场战报表）：实测 ${hits}`).toBe(2);
 
-    // 规则必须活在最后一个 (max-width: 640px) 媒体块之后（即 ≤640 规则域内），且真有 position: sticky
+    // 规则必须活在某个 (max-width: 640px) 媒体块**内部**（≤640 规则域），且真有 position: sticky。
+    // v6.31.0：原写法取 lastIndexOf 再切尾——广告板在文件末尾又加了一个 ≤640 块，尾切法会把 coach-sticky 判成「不在域内」。
+    // 改成按花括号配平取出每个 ≤640 块的正文再找持有者：既不受新增块位置影响，也不放过「规则漏到全局（桌面也粘）」的真回归。
     const css = read(STYLES_CSS);
-    const at = css.lastIndexOf('(max-width: 640px)');
-    expect(at, 'styles.css 找不到 (max-width: 640px) 媒体块').toBeGreaterThan(-1);
-    const tail = css.slice(at);
-    expect(tail.includes('.coach-sticky'), 'styles.css 的 ≤640 域内没有 .coach-sticky 规则（粘性首列被删？）').toBe(true);
-    expect(tail, 'styles.css 的 .coach-sticky 规则缺 position: sticky').toMatch(/\.coach-sticky[^{}]*\{[^}]*position:\s*sticky/s);
+    const blocks = mediaBlocks(css, '(max-width: 640px)');
+    expect(blocks.length, 'styles.css 找不到 (max-width: 640px) 媒体块').toBeGreaterThan(0);
+    const holder = blocks.find((block) => block.includes('.coach-sticky'));
+    expect(holder, 'styles.css 的 ≤640 域内没有 .coach-sticky 规则（粘性首列被删 / 漏到全局？）').toBeTruthy();
+    expect(holder!, 'styles.css 的 .coach-sticky 规则缺 position: sticky').toMatch(/\.coach-sticky[^{}]*\{[^}]*position:\s*sticky/s);
   });
 
   it('判据自检 · 固定宽字面量与表格包裹识别的最小正反例（防扫描器空转）', () => {
@@ -708,14 +740,15 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     expect(read(SHARED), 'MarketNav 的「我的转会台」应指向 /market/desk').toContain('to="/market/desk"');
   });
 
-  it('导航收敛：TopBar 单入口「转会中心」、MarketNav 五项（V3/V5 红点）', () => {
+  it('导航收敛：TopBar 单入口「转会中心」、MarketNav 六项（V3/V5 红点，v6.31.0 加广告板）', () => {
     const top = read(TOPBAR);
     expect(top, 'TopBar 缺「转会中心」入口').toContain('转会中心');
     expect(top, 'TopBar 仍留着「转会报价」旧入口').not.toContain('转会报价');
     expect(top, 'TopBar 仍留着「签约谈判」旧入口').not.toContain('签约谈判');
 
     const nav = read(SHARED);
-    const labels = ['在售市场', '海捞', '激活', '我的转会台', '市场情报'];
+    // v6.31.0：广告板插在「在售市场」之后（第 2 项，按用户裁决不放最末）——与 e2e ⑤c 的 href 清单同源
+    const labels = ['在售市场', '广告板', '海捞', '激活', '我的转会台', '市场情报'];
     let prev = -1;
     for (const label of labels) {
       const at = nav.indexOf(label);
@@ -723,7 +756,7 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
       expect(at, `MarketNav「${label}」顺序不对（应排在上一项之后）`).toBeGreaterThan(prev);
       prev = at;
     }
-    for (const href of ['to="/market"', 'to="/market/free"', 'to="/market/activation"', 'to="/market/desk"', 'to="/market/intel"']) {
+    for (const href of ['to="/market"', 'to="/market/board"', 'to="/market/free"', 'to="/market/activation"', 'to="/market/desk"', 'to="/market/intel"']) {
       expect(nav, `MarketNav 缺 ${href} 入口`).toContain(href);
     }
   });

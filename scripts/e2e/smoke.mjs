@@ -583,10 +583,10 @@ async function main() {
 
         // MarketNav 五项（顺序与指向；v6.24.0 加「激活」）：NavLink 指错就红（V5 红点）
         const nav = page.locator('nav[aria-label="市场分区"] a');
-        assert(JSON.stringify(await nav.allInnerTexts()) === JSON.stringify(['在售市场', '海捞', '激活', '我的转会台', '市场情报']),
+        assert(JSON.stringify(await nav.allInnerTexts()) === JSON.stringify(['在售市场', '广告板', '海捞', '激活', '我的转会台', '市场情报']),
           `MarketNav 文案/顺序不对：${(await nav.allInnerTexts()).join(' / ')}`);
         assert(JSON.stringify(await nav.evaluateAll((els) => els.map((e) => e.getAttribute('href')))) ===
-          JSON.stringify(['/market', '/market/free', '/market/activation', '/market/desk', '/market/intel']),
+          JSON.stringify(['/market', '/market/board', '/market/free', '/market/activation', '/market/desk', '/market/intel']),
           `MarketNav 指向不对：${(await nav.evaluateAll((els) => els.map((e) => e.getAttribute('href')))).join(' / ')}`);
 
         // 流水线说明条（V6 红点：整块删就没这句）
@@ -713,6 +713,73 @@ async function main() {
       } finally {
         await anon.close();
       }
+    });
+
+    // ---- 广告板（v6.31.0）：/market/board 公开页 + 在售市场页顶部小卡片（teaser）----
+    // 端点只收转会名单内球员、下发布尔位与最低报价数值；着重度 0 普通 / 1 推荐 / 2 置顶（付费写路径本版未实现，夹具直给）
+    const adbOk = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    const adbRow = (over) => ({
+      id: 1, uid: 'fc1', fcId: 100001, name: '哈兰德', positions: ['ST'], age: 24, ca: 94, pa: 95,
+      clubId: 10, clubName: '曼城', minOfferPrice: 180, releaseFee: 240,
+      listedAt: '2026-10-03T00:00:00.000Z', emphasis: 0, emphasisUntil: null,
+      status: 'normal', notForSale: false, transferPriced: true,
+      ...over,
+    });
+    const ADB_BOARD = {
+      players: [
+        adbRow({ id: 1, name: '哈兰德', emphasis: 2, emphasisUntil: '2026-10-12T12:00:00.000Z' }),
+        adbRow({ id: 2, name: '萨拉赫', fcId: 100002, emphasis: 1, ca: 89, pa: 90, minOfferPrice: 60, releaseFee: null }),
+        adbRow({ id: 3, name: '凯恩', fcId: 100003, emphasis: 0, ca: 90, pa: 90, minOfferPrice: 75 }),
+      ],
+      total: 12,
+    };
+    let adbBody = ADB_BOARD; // 同一条 route 处理器，两段断言之间切夹具（有数据 → 空数据）
+    await page.route(/\/api\/market\/transfer-board/, (r) => r.fulfill(adbOk(adbBody)));
+
+    await check('⑤e 广告板：置顶带 + 卡栅格 + 图例 + 截断提示；小卡片三张迷你卡、空数据整块不渲染', async () => {
+      await page.goto(`${BASE}/market/board`, { waitUntil: 'networkidle' });
+      assert(await page.locator('h1', { hasText: '广告板' }).first().isVisible(), '广告板 h1 不可见');
+      // 导航：广告板是第 2 项且为当前项（顺序由 mobile-baseline 静态闸兜底，这里验落点与高亮）
+      assert((await page.locator('nav[aria-label="市场分区"] a.on').first().innerText()).trim() === '广告板',
+        `广告板导航项没高亮：${await page.locator('nav[aria-label="市场分区"] a.on').first().innerText()}`);
+      // 置顶带：emphasis=2 通栏 1 条 + 标题带个数与付费位口径 + 到期日
+      assert((await page.locator('.adb-fcard').count()) === 1, `置顶通栏卡应为 1 张，实测 ${await page.locator('.adb-fcard').count()}`);
+      assert((await page.locator('.adb-band-note').innerText()).includes('1 个 · 付费位，按到期时间排'),
+        `置顶带标题不对：${await page.locator('.adb-band-note').innerText()}`);
+      assert((await page.locator('.adb-fcard').innerText()).includes('置顶到 2026-10-12'), '置顶卡没出「置顶到」到期日');
+      // 卡栅格：0/1 两行进栅格，置顶行不得重复出现
+      assert((await page.locator('.adb-grid .adb-card').count()) === 2, `栅格卡应为 2 张，实测 ${await page.locator('.adb-grid .adb-card').count()}`);
+      assert((await page.locator('.adb-grid .emph-1').count()) === 1, '推荐档卡没挂 emph-1');
+      assert(!(await page.locator('.adb-grid').innerText()).includes('哈兰德'), '置顶行又出现在栅格里（两区没分流）');
+      assert((await page.locator('.transfer-status-legend').count()) === 1, '广告板底部缺转会状态图例');
+      assert((await text()).includes('共 12 人在名单，这里展示前 3 人'), '截断提示缺失（total > 展示数时应提示）');
+
+      // 小卡片：在售市场页顶部，3 张迷你卡 + 「查看全部 N 人 →」链到 /market/board
+      await page.goto(`${BASE}/market`, { waitUntil: 'networkidle' });
+      const teaser = page.locator('.adb-teaser');
+      await teaser.waitFor({ timeout: TIMEOUT });
+      assert((await teaser.locator('h3').innerText()).trim() === '广告板', '小卡片标题不对');
+      assert((await teaser.innerText()).includes('12 人在名单'), '小卡片没出「N 人在名单」');
+      assert((await teaser.locator('.adb-mini').count()) === 3, `小卡片迷你卡应为 3 张，实测 ${await teaser.locator('.adb-mini').count()}`);
+      assert((await teaser.locator('a', { hasText: '查看全部' }).getAttribute('href')) === '/market/board', '小卡片「查看全部」没指向 /market/board');
+      // 小卡片必须排在转会区之上（用户裁决：在受市场的转会区之上加一个小卡片）
+      const teaserBeforeSection = await page.evaluate(() => {
+        const t = document.querySelector('.adb-teaser');
+        const sec = [...document.querySelectorAll('section.card')].find((s) => s.querySelector('h3')?.textContent === '转会区');
+        return !!(t && sec) && (t.compareDocumentPosition(sec) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      });
+      assert(teaserBeforeSection, '小卡片没有排在「转会区」之上');
+
+      // 空数据：页面空态（不出栅格/图例），小卡片整块连标题一起消失
+      adbBody = { players: [], total: 0 };
+      await page.goto(`${BASE}/market/board`, { waitUntil: 'networkidle' });
+      assert((await text()).includes('现在没有球队挂出转会名单。'), '空态文案缺失');
+      assert((await page.locator('.adb-grid').count()) === 0, '空数据仍渲染了卡栅格');
+      assert((await page.locator('.adb-band-note').count()) === 0, '空数据仍渲染了置顶带');
+      await page.goto(`${BASE}/market`, { waitUntil: 'networkidle' });
+      await page.locator('h3', { hasText: '转会区' }).first().waitFor({ timeout: TIMEOUT });
+      assert((await page.locator('.adb-teaser').count()) === 0, '空数据仍渲染了小卡片（应整块消失，不留空卡）');
+      adbBody = ADB_BOARD;
     });
 
     await check('⑥ 管理端可达（带会话）', async () => {
@@ -1406,7 +1473,7 @@ async function main() {
       for (const note of ids.notes) console.log(`   ⑫ 备注：${note}`);
       const ROUTES = [
         '/', '/players', `/players/${ids.player}`, '/clubs', `/clubs/${ids.club}`, '/bind',
-        '/market', '/market/free', '/market/activation', '/market/intel', '/market/desk',
+        '/market', '/market/board', '/market/free', '/market/activation', '/market/intel', '/market/desk',
         '/shop', '/club', '/ledger', '/notifications',
         '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
         '/admin/market', '/admin/clubs', '/admin/clubs/cpu-convert', '/admin/brands', '/admin/events', '/admin/shop', '/admin/finance',
