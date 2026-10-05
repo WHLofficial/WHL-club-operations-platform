@@ -4626,6 +4626,435 @@ th.num .th-sort {
 }
 
 /* ============================================================================
+   v6.31.0 ⑨ 广告板（Ad Board）：/market/board 页面 + 在售市场页顶部小卡片。
+   类名自 v6.31.0 设计定稿的 .tb-*/.ts-* 提案移植（数值照抄），前缀改 .adb-*；
+   队徽一律走 web/src/components/TeamLogo.tsx，所以这里没有 logo 规则。
+   着重度三档：0 普通（下面默认态）/ 1 推荐（名字 800 + 金色左轨 + 橙角标）/
+   2 置顶（通栏金边淡金底 + 金角标 + 脚部置顶到期）。
+   不新增色板：淡金底取既有 .badge.gold 底色的 #f5e8cf，其余全走 :root token。
+   ============================================================================ */
+
+/* 页头说明行（<h1> 与 MarketNav 之下） */
+.adb-note {
+  margin: 6px 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 内容面板：置顶带 + 卡栅格同一个 .card（对齐设计样张的单面板排法） */
+.adb-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.adb-empty-t {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 置顶带标题：置顶 N 个 · 付费位，按到期时间排（无置顶时整块连标题一起不渲染） */
+.adb-band {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+
+.adb-band-lab {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--muted);
+}
+
+.adb-band-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* 置顶区：纵向堆叠，几条置顶就几行通栏卡 */
+.adb-feature {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 置顶通栏卡：金边 + 淡金渐变底，内部横排 */
+.adb-fcard {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  padding: 14px 18px;
+  border: 1px solid var(--gold);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f5e8cf, var(--card) 72%);
+}
+
+.adb-fcard-txt {
+  min-width: 0;
+}
+
+.adb-fcard .adb-nm {
+  font-size: 21px;
+  font-weight: 800;
+}
+
+.adb-fcard .adb-body {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  gap: 26px;
+}
+
+.adb-fcard .adb-rows {
+  flex: 1;
+}
+
+.adb-fcard .adb-card-foot {
+  border-top: 0;
+  padding-top: 0;
+}
+
+/* 卡栅格（照设计稿同一条 auto-fill 轨道） */
+.adb-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+}
+
+/* 普通 / 推荐卡骨架（0 普通 = 默认态） */
+.adb-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.adb-card:hover,
+.adb-card:focus-within {
+  border-color: var(--terracotta);
+  box-shadow: 0 6px 18px rgba(43, 29, 18, .12);
+  transform: translateY(-1px);
+}
+
+/* 推荐（着重度 1）：金色左轨 + 名字加粗（橙角标在 JSX 里出） */
+.adb-card.emph-1 {
+  border-left: 3px solid var(--gold);
+}
+
+.adb-card.emph-1 .adb-nm,
+.adb-mini.emph-1 .adb-mini-nm,
+.adb-mini.emph-2 .adb-mini-nm {
+  font-weight: 800;
+}
+
+.adb-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.adb-card-head .badge-stack {
+  margin-left: auto;
+}
+
+.adb-nm {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adb-nm:hover {
+  text-decoration: underline;
+}
+
+.adb-sub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* CA/PA 竖轨 + 金额行 */
+.adb-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adb-rail {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  padding: 6px 0 6px 12px;
+  border-left: 3px solid var(--terracotta-tint);
+}
+
+.adb-rail-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.adb-rail-lab {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--muted);
+}
+
+.adb-rail-num {
+  font-size: 27px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.adb-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.adb-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.adb-labr {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.adb-val {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.adb-val.adb-hi {
+  color: var(--gold-deep);
+}
+
+.adb-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.adb-until {
+  font-weight: 600;
+  color: var(--gold-deep);
+}
+
+.adb-trunc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 在售市场页顶部的小卡片（teaser）：卡头 + 说明 + 三张迷你卡；无数据由 JSX 整块不渲染 */
+.adb-teaser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.adb-teaser-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adb-teaser-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.adb-teaser-more {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--terracotta-deep);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.adb-teaser-more:hover {
+  text-decoration: underline;
+}
+
+.adb-teaser-note {
+  margin: -4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.adb-teaser-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* 迷你卡：整张是球员链接，右上角图标只是状态标记 */
+.adb-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color .15s ease;
+}
+
+.adb-mini:hover {
+  border-color: var(--terracotta);
+}
+
+/* 置顶迷你卡：金边 + 淡金底 */
+.adb-mini.emph-2 {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, #f5e8cf, var(--card) 70%);
+}
+
+.adb-mini-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.adb-mini-head .badge {
+  font-size: 11px;
+  padding: 1px 7px;
+}
+
+.adb-mini-nm {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adb-mini-st {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.adb-mini-sub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adb-mini-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.adb-mini-nums {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.adb-mini-nums b {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.adb-mini-price {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold-deep);
+  white-space: nowrap;
+}
+
+/* ≤820：置顶通栏卡换行，数字不横溢 */
+@media (max-width: 820px) {
+  .adb-fcard {
+    flex-wrap: wrap;
+  }
+
+  .adb-fcard .adb-body {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+}
+
+/* ≤640：teaser 只留前 2 张迷你卡；栅格单列；卡脚允许换行 */
+@media (max-width: 640px) {
+  .adb-teaser-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adb-teaser-cards .adb-mini:nth-child(3) {
+    display: none;
+  }
+
+  .adb-mini-foot {
+    flex-wrap: wrap;
+    gap: 2px 8px;
+  }
+
+  .adb-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .adb-card-foot {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adb-card,
+  .adb-mini {
+    transition: none;
+  }
+}
+
+/* ============================================================================
    v6.30.0 C 段（球队详情页两张球员表列集重定）：转会状态图标列与表下图例的基样式。
    图标本体在 web/src/components/StatusIcons.tsx（16px 手绘线稿，stroke: currentColor 随文字色）；
    窄屏粘性列规则不在这里 —— 见 v6.21.0 ④（≤640 注册名单）与 v6.22.0 ④（≤760 阵容名单）两个媒体块。

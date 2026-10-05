@@ -879,6 +879,41 @@ export interface MarketDealsResponse {
   deals: MarketDealsRow[];
 }
 
+/**
+ * 转会广告板行（GET /api/market/transfer-board，公开，v6.31.0）：只收 `players.transfer_listed = 1`。
+ * 与 /api/players 列表的差别：这里**下发最低报价数值**（广告板是唯一公开出口），并带着重度与挂出时间。
+ */
+export interface TransferBoardRow {
+  id: number;
+  uid: string;
+  fcId: number | null;
+  name: string;
+  positions: string[];
+  age: number | null;
+  ca: number;
+  pa: number;
+  clubId: number;
+  clubName: string;
+  minOfferPrice: number | null;
+  /** 现行合同违约金（无合同 → null，显示「—」） */
+  releaseFee: number | null;
+  /** 进入转会名单的时刻（历史存量未回填 → null） */
+  listedAt: string | null;
+  /** 着重度现行最高档：0 普通 / 1 推荐 / 2 置顶（付费流程预留，本版只读） */
+  emphasis: 0 | 1 | 2;
+  /** 置顶到期时刻（仅 emphasis = 2 有） */
+  emphasisUntil: string | null;
+  status: string;
+  notForSale: boolean;
+  transferPriced: boolean;
+}
+
+export interface TransferBoardResponse {
+  players: TransferBoardRow[];
+  /** 转会名单总人数（可能大于 players.length），用于「查看全部 N 人」与截断提示 */
+  total: number;
+}
+
 /** 海捞资格查询行（GET /api/market/sea-lookup，教练：ID 点查或名字 LIKE，≤8 条） */
 export interface SeaLookupRow {
   id: number;

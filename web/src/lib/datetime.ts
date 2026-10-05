@@ -82,6 +82,26 @@ export function fmtDate(iso: string | null | undefined): string {
   return fmtIn(iso, D, (p) => `${p.y}-${p.mo}-${p.d}`);
 }
 
+/**
+ * 相对日期（v6.31.0）：今天 / 昨天 / N 天前；缺失或不可解析回「—」。
+ * 按**显示时区**的日历日算差（复用 parts 缓存，口径与上方格式化同源）；
+ * 页面不得自己算相对时间（守 tests/datetime-display.test.ts 的单点化不变量）。
+ * 未来时刻（时钟偏差）一律当「今天」，不出现负数天。
+ */
+export function fmtAgo(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '—';
+  const dayNo = (t: number) => {
+    const p = parts(t, D);
+    return Date.UTC(Number(p.y), Number(p.mo) - 1, Number(p.d)) / 86_400_000;
+  };
+  const days = dayNo(Date.now()) - dayNo(ms);
+  if (days <= 0) return '今天';
+  if (days === 1) return '昨天';
+  return `${days} 天前`;
+}
+
 export function useTzPref(): TzPref {
   const [pref, setPref] = useState<TzPref>(() => getTzPref());
   useEffect(() => {
@@ -101,6 +121,8 @@ export interface TimeFmt {
   time: (iso: string | null | undefined) => string;
   dateTime: (iso: string | null | undefined) => string;
   date: (iso: string | null | undefined) => string;
+  /** 相对日期（今天 / 昨天 / N 天前）：挂出时间一类「多久以前」一律走它 */
+  ago: (iso: string | null | undefined) => string;
 }
 
 /** 消费端唯一入口：渲染时间的组件必须走这个 hook（pref 变化即重渲染） */
@@ -112,6 +134,7 @@ export function useTimeFmt(): TimeFmt {
       time: fmtTime,
       dateTime: fmtDateTime,
       date: fmtDate,
+      ago: fmtAgo,
     }),
     [pref],
   );

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 // v6.25.0：显示时区偏好层的口径测试（docs/test-plans/v6.25.0-timezone-display.md TC-A 组）。
 // 核心断言都钉在两个确定档（北京 / UTC）上；system 档 CI 时区不定，只烟测不串具体值。
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { fmtDate, fmtDateTime, fmtTime, getTzPref, setTzPref, tzLabel, useTzPref } from './datetime.ts';
+import { fmtAgo, fmtDate, fmtDateTime, fmtTime, getTzPref, setTzPref, tzLabel, useTimeFmt, useTzPref } from './datetime.ts';
 
 afterEach(() => {
   localStorage.clear();
@@ -82,5 +82,61 @@ describe('system 档（TC-A07 烟测，不串具体钟面）', () => {
     const out = fmtDateTime('2026-10-03T13:00:00Z');
     expect(out).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(out).not.toBe('—');
+  });
+});
+
+// v6.31.0 广告板卡脚「挂出 今天 / 昨天 / N 天前」的语义（TC-ADB-38）：
+// 相对时间同样走显示时区（换偏好即换结果），且不许页面自己算。
+describe('fmtAgo（v6.31.0 相对日期）', () => {
+  const NOW = new Date('2026-10-05T04:00:00Z'); // 北京 2026-10-05 12:00 / UTC 2026-10-05 04:00
+
+  function withNow<T>(fn: () => T): T {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      return fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('按显示时区的日历日算差：今天 / 昨天 / N 天前（不是按 24 小时差）', () => {
+    setTzPref('asia/shanghai');
+    withNow(() => {
+      expect(fmtAgo('2026-10-05T02:00:00Z')).toBe('今天');
+      // 北京日历日仍是 10-05（UTC 还停在 10-04）：按 24 小时差算会错判成「昨天」
+      expect(fmtAgo('2026-10-04T17:00:00Z')).toBe('今天');
+      expect(fmtAgo('2026-10-04T02:00:00Z')).toBe('昨天');
+      expect(fmtAgo('2026-10-01T02:00:00Z')).toBe('4 天前');
+    });
+  });
+
+  it('换显示时区，同一时刻的「几天前」跟着换', () => {
+    setTzPref('utc');
+    withNow(() => {
+      expect(fmtAgo('2026-10-04T17:00:00Z')).toBe('昨天'); // UTC 钟面下就是昨天
+    });
+  });
+
+  it('缺失 / 非法 / 未来时刻：— / — / 今天（不出负数天）', () => {
+    withNow(() => {
+      expect(fmtAgo(null)).toBe('—');
+      expect(fmtAgo(undefined)).toBe('—');
+      expect(fmtAgo('')).toBe('—');
+      expect(fmtAgo('not-a-date')).toBe('—');
+      expect(fmtAgo('2026-10-06T02:00:00Z')).toBe('今天');
+    });
+  });
+
+  it('useTimeFmt().ago 与 fmtAgo 同源（页面不许自算相对时间）', () => {
+    function Probe() {
+      const t = useTimeFmt();
+      return <span data-testid="ago">{t.ago('2026-10-04T02:00:00Z')}</span>;
+    }
+    withNow(() => {
+      render(<Probe />);
+      expect(screen.getByTestId('ago').textContent).toBe('昨天');
+    });
+    cleanup();
   });
 });

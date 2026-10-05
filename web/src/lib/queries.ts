@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NamingQuoteResponse, type OfferDetailResponse, type OffersListResponse, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
 import { useAuth } from './auth.tsx';
 
 /** 可激活名单模式（v6.18.0）：all=全部可激活 / trainee=仅训练营 */
@@ -21,6 +21,8 @@ export const qk = {
   listing: (id: number) => ['market', 'listing', id] as const,
   rumors: ['market', 'rumors'] as const,
   deals: ['market', 'deals'] as const,
+  // 转会广告板（v6.31.0）：只收转会名单内球员，limit 参数化（页 200 / teaser 3）
+  transferBoard: (limit: number) => ['market', 'transfer-board', limit] as const,
   seaLookup: (q: string) => ['market', 'sea-lookup', q] as const,
   activatable: (mode: ActivatableMode, q: string) => ['market', 'activatable', mode, q] as const,
   notifications: ['notifications'] as const,
@@ -203,6 +205,16 @@ export function useMarketDeals() {
   return useQuery({
     queryKey: qk.deals,
     queryFn: async () => (await api<MarketDealsResponse>('/api/market/deals')).deals,
+    retry: false,
+  });
+}
+
+// 转会广告板（公开，v6.31.0）：limit 默认 200（端点上限）；teaser 传 3 只取前三位
+export function useTransferBoard(limit = 200) {
+  return useQuery({
+    queryKey: qk.transferBoard(limit),
+    queryFn: () => api<TransferBoardResponse>(`/api/market/transfer-board?limit=${limit}`),
+    staleTime: 60_000,
     retry: false,
   });
 }

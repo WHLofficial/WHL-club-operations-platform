@@ -16,6 +16,8 @@ import { APP_VERSION } from './lib/version.ts';
 
 // 市场五页按页拆 chunk（v2.2.0 起三页，v6.18.0 加市场情报，v6.24.0 加激活页）：在售市场/市场情报公开，海捞/激活/转会台要登录
 const MarketBoardPage = lazy(() => import('./pages/market/MarketBoardPage.tsx'));
+// 广告板（v6.31.0）：公开页，各队转会名单按着重度分置顶带 + 卡栅格两区展示
+const MarketAdBoardPage = lazy(() => import('./pages/market/MarketAdBoardPage.tsx'));
 const MarketFreePage = lazy(() => import('./pages/market/MarketFreePage.tsx'));
 // 激活（v6.24.0）：从海捞页拆出，激活挂牌 + 首价落定一页走完
 const MarketActivationPage = lazy(() => import('./pages/market/MarketActivationPage.tsx'));
@@ -107,6 +109,7 @@ export default function App() {
             }
           />
           <Route path="/market" element={<MarketBoardPage />} />
+          <Route path="/market/board" element={<MarketAdBoardPage />} />
           <Route
             path="/market/free"
             element={

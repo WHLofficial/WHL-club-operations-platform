@@ -10,6 +10,7 @@ import { useBoard, useMarketInvalidation, useMyBids, useMyClub } from '../../lib
 import { attrClass } from '../../lib/players-library.ts';
 import { playerPath } from '../../lib/player-link.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
+import { AdBoardTeaser } from './MarketAdBoardPage.tsx';
 import { MarketListingOverlay, listingBadge, pickDeadline } from './MarketListingOverlay.tsx';
 import { FILTER_LABEL, MarketNav, money, type ListingFilter } from './shared.tsx';
 
@@ -37,6 +38,9 @@ export default function MarketBoardPage() {
       <h1>转会市场 · 在售市场</h1>
       {loadError && <div className="banner warn">{loadError}</div>}
       <MarketNav />
+
+      {/* v6.31.0：广告板入口小卡片（名单为空时整块不渲染） */}
+      <AdBoardTeaser />
 
       <section className="card">
         <h3>转会区</h3>
