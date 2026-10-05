@@ -4,6 +4,16 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.33.1] · 特例期一线队/训练营同场参赛：名册含训练营开关 + 注册校验三态 + 全员注册工件 + 全站文案改名（2026-10-05）
+
+**本地完成，未发布（待令）**（提交链 `c9c5bcf` fix(web) + `1bff080` feat + `1f480b7` fix 评审 + `96779c8` docs(test-plans) + `dfd6e87` feat(web) 改名 + `0cc1275` chore(scripts) 注册批工件 + 收口 docs 枚；零迁移）。**上线后执行序（顺序硬约束）**：① push 先上代码 ②开 `squads_include_trainee=true` + 四键豁免 ③执行全员注册批 ④verify（回读 `/api/squads` 前先 bump `cache:epoch:public`）。
+
+**缘起**：用户提出「tour 平台只取一线队人员……由于特殊情况，一线队和训练营都能参赛，如果此时注册有训练营无法参赛的风险」。核查链：注册写 `players.status='trainee'`（`src/worker/routes/registration.ts:366-371`）→ `/api/squads` 只发 `status IN ('normal','listed')` → 赛事仓整点 cron 把该球员从 tour `player` 表删除 → `validateAssign` 失败无法进阵容。规则原文（4.2）：「阵容注册分为一线队注册与训练营注册，所有参赛球员必须完成注册方可出战正式比赛」，两条注册线都可出战。用户拍 **T1 手动开关**。
+
+**交付**：config 注册表 **78 → 80**——`squads_include_trainee`（默认 `'false'`；开关开时名册含 trainee 且每行附 `squad` 字段，缓存键并入开关值防旧口径写进新代际键）+ `registration_check_mode`（**enforce / warn / off 三态**，脏值回落 enforce；warn = 放行但红字在、off = 只做归属与重复校验，隔离 `checkSquad` 全部七条；管理端扫描不受档位影响；审计 `after` 恒带 issues 规则清单）；`GET /club/squad` 下发 `checkMode`，DeskTab 三态横幅与红字同步。**全员注册批工件** `scripts/prod-20261005-s9-all-registrations/`（season=9、20 队 570 行 = 一线队 501 + 训练营 69，CPU 两队全一线队；含生成器 / 分片 SQL / manifest / 回滚 / README runbook；**未执行任何生产写**）。**全站文案改名**：球队中心 → 我的球队、球队 → 球队库。顺带修广告板报价弹层透明（缺 `.card` 类）。
+
+**验收与后效**：测试计划 `docs/test-plans/v6.33.1-trainee-play-allowance.md`（32 TC）；vitest **91 文件 / 1538 例**全绿、typecheck 三份全清；code-review P1-1（缓存键）/ P1-2（off 档七条）已修并变异验证。已知后效：**回 enforce 前先收名单**（否则提交 422）；特例期训练营球员**不记场次 XP**（先观察）；CSV 164 名非平台球员暂不处理。生产迁移现状：本仓已到 `0065`。
+
 ## [v6.33.0] · 转会名单公开标价：最低报价转私密 + 广告板报价入口（2026-10-05）
 
 **已上线**（2026-10-05 发布，用户令「发布」；提交 `480a1ee` docs(spec) + `a755cc7` feat 后端 + `fb451b8` feat 前端 + `cbdd7ba` test + `4e5d9f9` docs 收口）。**执行序（顺序未反）**：① 迁移 `0065_list_price.sql` 先 apply 生产——`Executed 3 commands in 3.03ms`，回读台账 head = `0065_list_price.sql`、`players` 四列在场、名单行 2 行全回填（B. Mbeumo 18 / O. Marmoush 18）；② `git push origin main`（`b9cd7a9..4e5d9f9`）触发 CF Workers Builds，约 1 分钟出 Version `69041242-34b7-4500-a6da-269586c0c9d3`（@2026-10-05T07:06:53Z）；③ **bump KV `cache:epoch:public` `17 → 18`**（`/api/market/transfer-board` 与球员详情走 `cachedJson` 代际键，旧形状载荷最长存活 24h）。**上线回读**：线上 `index-Cd07juMr.js` / `index-gjLtH_Uw.css` / `MarketAdBoardPage-MRvBa5OE.js` 与本地构建 sha256 逐字节一致，线上 JS 版本串 `6.33.0`、广告板分块含 `adb-bid-btn`；`/api/health`、`/api/market/transfer-board`（2 行 `listPrice:18`）、`/api/players/67`、`/api/players/142` 全 200 且**全端点 0 处 `minOfferPrice`**（详情只出 `listPrice`）；`GET /api/players/:id/offer-settings` 与 `/api/admin/brands` 匿名 401。生产迁移现状：本仓已到 `0065`。
