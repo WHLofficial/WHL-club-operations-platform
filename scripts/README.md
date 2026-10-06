@@ -106,6 +106,14 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 
 口径详见该目录 README。触发原因与留痕普查见 [`ledger-audit/README.md`](./ledger-audit/README.md)：这是一笔**没有审计留痕**的支出（操作人靠邻行 `club_bind` 反推），v6.3.1 已把球场三端点、冠名解约、审核附加费与关窗批的留痕补齐，并用 `tests/ledger-audit-lock.test.ts` 锁死。
 
+## prod-20261006-*（一次性生产工件；已执行）
+
+| 目录 | 内容 | 状态 |
+|---|---|---|
+| `prod-20261006-s9-opening-align/` | **S9 期初对齐四步**（用户令 2026-10-06）：① 16 支真人队期初财政**累加**导入（图片 23 行 → 平台 club 映射；排除用户指定的巴塞罗那 241 / RB莱比锡 112172、平台无队的 3 行、只有 CPU 队的 2 行；合计 +968.25 m）② 18 支真人队各扣一次窗末工资（`kind='wage'` / `ref_type='window'` / `ref_id=901`，−1022.68 m）③ 517 份现行合同效力 +0.5（逐合同 `service_ticks − 1`，与「当前刻度 +1」在全部消费者上等价）④ 30 名 CSV 标记球员落点（24 名 `protection_ticks = 1` 保护期收口 + 28 行 `transfers` 补录：`match` 24 / `rc_change` 4，season 9 / window_seq 1；跳过 2 名自由身）。生成器 `gen-opening-align.ts`（含 `--verify` 只读复核）+ 执行器 `exec-shards.mjs` + 预检/复查 + `rollback/` 四件 + README/report | **已执行**（2026-10-06 经 `exec-shards.mjs --remote`：39 批 / 637 语句 / **changes 631**（32 + 36 + 517 + 46）、失败批 0；`--verify` 只读复核差异 0；全库余额 960.16 → **905.73**；未跑回滚） |
+
+消费券列（用户令 2026-10-06「先只导财政」）未落库，值留痕在该目录 `opening-finance.json` 与 README §2.1。
+
 ## revenue-import/
 
 从 revenue 插件库迁主场域数据（只迁 `stadiums` / `club_facilities`）。

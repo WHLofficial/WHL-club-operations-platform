@@ -1,0 +1,5915 @@
+{
+  "capturedAt": "2026-10-06T03:07:28.071Z",
+  "scope": "--remote",
+  "statements": [
+    {
+      "label": "A",
+      "sql": "SELECT c.id, c.name, c.league_tier, c.is_cpu, ROUND(COALESCE(a.balance, 0), 2) AS balance FROM clubs c LEFT JOIN ledger_accounts a ON a.club_id = c.id ORDER BY c.id",
+      "rows": 20,
+      "results": [
+        {
+          "id": 1,
+          "name": "阿森纳",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 32.14
+        },
+        {
+          "id": 2,
+          "name": "阿斯顿维拉",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 33.87
+        },
+        {
+          "id": 5,
+          "name": "切尔西",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 67.77
+        },
+        {
+          "id": 9,
+          "name": "利物浦",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 70
+        },
+        {
+          "id": 10,
+          "name": "曼城(CPU)",
+          "league_tier": null,
+          "is_cpu": 1,
+          "balance": 0
+        },
+        {
+          "id": 11,
+          "name": "曼联",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 75.08
+        },
+        {
+          "id": 13,
+          "name": "纽卡斯尔联",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 67.66
+        },
+        {
+          "id": 14,
+          "name": "诺丁汉森林",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 53.14
+        },
+        {
+          "id": 21,
+          "name": "拜仁慕尼黑",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 34.25
+        },
+        {
+          "id": 33,
+          "name": "慕尼黑1860",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 82.82
+        },
+        {
+          "id": 45,
+          "name": "尤文图斯",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 66.25
+        },
+        {
+          "id": 66,
+          "name": "里昂",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 74.68
+        },
+        {
+          "id": 73,
+          "name": "巴黎圣日耳曼",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 75.51
+        },
+        {
+          "id": 241,
+          "name": "巴塞罗那",
+          "league_tier": "premier",
+          "is_cpu": 0,
+          "balance": 0
+        },
+        {
+          "id": 243,
+          "name": "皇家马德里",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 63.61
+        },
+        {
+          "id": 280,
+          "name": "奥林匹亚科斯",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 40.29
+        },
+        {
+          "id": 449,
+          "name": "皇家贝蒂斯",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 58.51
+        },
+        {
+          "id": 110374,
+          "name": "佛罗伦萨",
+          "league_tier": null,
+          "is_cpu": 0,
+          "balance": 64.58
+        },
+        {
+          "id": 112172,
+          "name": "RB莱比锡",
+          "league_tier": "second",
+          "is_cpu": 0,
+          "balance": 0
+        },
+        {
+          "id": 131681,
+          "name": "AC米兰(CPU)",
+          "league_tier": null,
+          "is_cpu": 1,
+          "balance": 0
+        }
+      ]
+    },
+    {
+      "label": "B",
+      "sql": "SELECT ct.club_id, ROUND(SUM(ct.wage), 2) AS wage_sum, COUNT(*) AS n FROM contracts ct WHERE ct.is_active = 1 AND ct.club_id IS NOT NULL AND ct.wage IS NOT NULL GROUP BY ct.club_id ORDER BY ct.club_id",
+      "rows": 18,
+      "results": [
+        {
+          "club_id": 1,
+          "wage_sum": 48.37,
+          "n": 30
+        },
+        {
+          "club_id": 2,
+          "wage_sum": 58.25,
+          "n": 30
+        },
+        {
+          "club_id": 5,
+          "wage_sum": 49.23,
+          "n": 31
+        },
+        {
+          "club_id": 9,
+          "wage_sum": 73.55,
+          "n": 37
+        },
+        {
+          "club_id": 11,
+          "wage_sum": 63.68,
+          "n": 25
+        },
+        {
+          "club_id": 13,
+          "wage_sum": 57.48,
+          "n": 23
+        },
+        {
+          "club_id": 14,
+          "wage_sum": 48.62,
+          "n": 23
+        },
+        {
+          "club_id": 21,
+          "wage_sum": 56.98,
+          "n": 37
+        },
+        {
+          "club_id": 33,
+          "wage_sum": 62.53,
+          "n": 26
+        },
+        {
+          "club_id": 45,
+          "wage_sum": 65.56,
+          "n": 31
+        },
+        {
+          "club_id": 66,
+          "wage_sum": 67.57,
+          "n": 31
+        },
+        {
+          "club_id": 73,
+          "wage_sum": 66.44,
+          "n": 29
+        },
+        {
+          "club_id": 241,
+          "wage_sum": 61.48,
+          "n": 29
+        },
+        {
+          "club_id": 243,
+          "wage_sum": 56.77,
+          "n": 23
+        },
+        {
+          "club_id": 280,
+          "wage_sum": 37.62,
+          "n": 30
+        },
+        {
+          "club_id": 449,
+          "wage_sum": 33.37,
+          "n": 25
+        },
+        {
+          "club_id": 110374,
+          "wage_sum": 57.49,
+          "n": 31
+        },
+        {
+          "club_id": 112172,
+          "wage_sum": 57.69,
+          "n": 26
+        }
+      ]
+    },
+    {
+      "label": "C",
+      "sql": "SELECT id, club_id, player_id, service_ticks, protection_ticks, release_fee, wage, contract_type FROM contracts WHERE is_active = 1 ORDER BY club_id, player_id",
+      "rows": 517,
+      "results": [
+        {
+          "id": 456,
+          "club_id": 1,
+          "player_id": 48,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 50,
+          "wage": 4.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 457,
+          "club_id": 1,
+          "player_id": 54,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 45,
+          "wage": 5.19,
+          "contract_type": "formal"
+        },
+        {
+          "id": 122,
+          "club_id": 1,
+          "player_id": 83,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 2.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 458,
+          "club_id": 1,
+          "player_id": 89,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 30,
+          "wage": 4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 126,
+          "club_id": 1,
+          "player_id": 94,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 461,
+          "club_id": 1,
+          "player_id": 153,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 459,
+          "club_id": 1,
+          "player_id": 165,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 20,
+          "wage": 2.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 124,
+          "club_id": 1,
+          "player_id": 199,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 127,
+          "club_id": 1,
+          "player_id": 209,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 134,
+          "club_id": 1,
+          "player_id": 242,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 3,
+          "wage": 1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 125,
+          "club_id": 1,
+          "player_id": 335,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 6,
+          "wage": 1.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 123,
+          "club_id": 1,
+          "player_id": 357,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 460,
+          "club_id": 1,
+          "player_id": 427,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 2.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 129,
+          "club_id": 1,
+          "player_id": 434,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 128,
+          "club_id": 1,
+          "player_id": 547,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 0.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 121,
+          "club_id": 1,
+          "player_id": 666,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 1.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 130,
+          "club_id": 1,
+          "player_id": 699,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 0.95,
+          "contract_type": "formal"
+        },
+        {
+          "id": 462,
+          "club_id": 1,
+          "player_id": 798,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 136,
+          "club_id": 1,
+          "player_id": 1070,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 2,
+          "wage": 0.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 133,
+          "club_id": 1,
+          "player_id": 1107,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 4,
+          "wage": 1.01,
+          "contract_type": "formal"
+        },
+        {
+          "id": 137,
+          "club_id": 1,
+          "player_id": 1332,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 2,
+          "wage": 1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 135,
+          "club_id": 1,
+          "player_id": 1408,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 3,
+          "wage": 0.75,
+          "contract_type": "formal"
+        },
+        {
+          "id": 139,
+          "club_id": 1,
+          "player_id": 1571,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 131,
+          "club_id": 1,
+          "player_id": 1582,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 132,
+          "club_id": 1,
+          "player_id": 1822,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 453,
+          "club_id": 1,
+          "player_id": 1832,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 455,
+          "club_id": 1,
+          "player_id": 2453,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 454,
+          "club_id": 1,
+          "player_id": 2486,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 452,
+          "club_id": 1,
+          "player_id": 2698,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 138,
+          "club_id": 1,
+          "player_id": 3182,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 2,
+          "wage": 0.52,
+          "contract_type": "formal"
+        },
+        {
+          "id": 140,
+          "club_id": 2,
+          "player_id": 4,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 38,
+          "wage": 8.44,
+          "contract_type": "formal"
+        },
+        {
+          "id": 143,
+          "club_id": 2,
+          "player_id": 35,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 21,
+          "wage": 4.89,
+          "contract_type": "formal"
+        },
+        {
+          "id": 144,
+          "club_id": 2,
+          "player_id": 44,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 18,
+          "wage": 2.99,
+          "contract_type": "formal"
+        },
+        {
+          "id": 146,
+          "club_id": 2,
+          "player_id": 81,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 1.83,
+          "contract_type": "formal"
+        },
+        {
+          "id": 147,
+          "club_id": 2,
+          "player_id": 93,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.46,
+          "contract_type": "formal"
+        },
+        {
+          "id": 150,
+          "club_id": 2,
+          "player_id": 108,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 10,
+          "wage": 1.43,
+          "contract_type": "formal"
+        },
+        {
+          "id": 158,
+          "club_id": 2,
+          "player_id": 115,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 8,
+          "wage": 1.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 149,
+          "club_id": 2,
+          "player_id": 125,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 13,
+          "wage": 2.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 142,
+          "club_id": 2,
+          "player_id": 151,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 25,
+          "wage": 3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 141,
+          "club_id": 2,
+          "player_id": 160,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 28,
+          "wage": 4.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 152,
+          "club_id": 2,
+          "player_id": 202,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 151,
+          "club_id": 2,
+          "player_id": 210,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 2.05,
+          "contract_type": "formal"
+        },
+        {
+          "id": 148,
+          "club_id": 2,
+          "player_id": 330,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 153,
+          "club_id": 2,
+          "player_id": 468,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 154,
+          "club_id": 2,
+          "player_id": 482,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 155,
+          "club_id": 2,
+          "player_id": 490,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 160,
+          "club_id": 2,
+          "player_id": 497,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 0.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 162,
+          "club_id": 2,
+          "player_id": 556,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 1.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 159,
+          "club_id": 2,
+          "player_id": 565,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 6,
+          "wage": 1.01,
+          "contract_type": "formal"
+        },
+        {
+          "id": 161,
+          "club_id": 2,
+          "player_id": 587,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 0.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 167,
+          "club_id": 2,
+          "player_id": 638,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 3,
+          "wage": 0.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 163,
+          "club_id": 2,
+          "player_id": 763,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 0.95,
+          "contract_type": "formal"
+        },
+        {
+          "id": 156,
+          "club_id": 2,
+          "player_id": 779,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 168,
+          "club_id": 2,
+          "player_id": 822,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 1,
+          "wage": 0.38,
+          "contract_type": "formal"
+        },
+        {
+          "id": 164,
+          "club_id": 2,
+          "player_id": 872,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 0.95,
+          "contract_type": "formal"
+        },
+        {
+          "id": 165,
+          "club_id": 2,
+          "player_id": 994,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 0.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 145,
+          "club_id": 2,
+          "player_id": 1001,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 18,
+          "wage": 2.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 166,
+          "club_id": 2,
+          "player_id": 1074,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 4,
+          "wage": 0.71,
+          "contract_type": "formal"
+        },
+        {
+          "id": 157,
+          "club_id": 2,
+          "player_id": 1103,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 169,
+          "club_id": 2,
+          "player_id": 3366,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 1,
+          "wage": 0.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 404,
+          "club_id": 5,
+          "player_id": 100,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 16,
+          "wage": 2.91,
+          "contract_type": "formal"
+        },
+        {
+          "id": 408,
+          "club_id": 5,
+          "player_id": 163,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.76,
+          "contract_type": "formal"
+        },
+        {
+          "id": 396,
+          "club_id": 5,
+          "player_id": 170,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 2.68,
+          "contract_type": "formal"
+        },
+        {
+          "id": 407,
+          "club_id": 5,
+          "player_id": 233,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.24,
+          "contract_type": "formal"
+        },
+        {
+          "id": 409,
+          "club_id": 5,
+          "player_id": 252,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.47,
+          "contract_type": "formal"
+        },
+        {
+          "id": 414,
+          "club_id": 5,
+          "player_id": 311,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.29,
+          "contract_type": "formal"
+        },
+        {
+          "id": 398,
+          "club_id": 5,
+          "player_id": 386,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 20,
+          "wage": 2.56,
+          "contract_type": "formal"
+        },
+        {
+          "id": 397,
+          "club_id": 5,
+          "player_id": 421,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 20,
+          "wage": 2.95,
+          "contract_type": "formal"
+        },
+        {
+          "id": 399,
+          "club_id": 5,
+          "player_id": 473,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 2.33,
+          "contract_type": "formal"
+        },
+        {
+          "id": 415,
+          "club_id": 5,
+          "player_id": 481,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 416,
+          "club_id": 5,
+          "player_id": 504,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.91,
+          "contract_type": "formal"
+        },
+        {
+          "id": 395,
+          "club_id": 5,
+          "player_id": 557,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 50,
+          "wage": 4.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 390,
+          "club_id": 5,
+          "player_id": 671,
+          "service_ticks": -2,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 402,
+          "club_id": 5,
+          "player_id": 692,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 405,
+          "club_id": 5,
+          "player_id": 693,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 11,
+          "wage": 1.84,
+          "contract_type": "formal"
+        },
+        {
+          "id": 400,
+          "club_id": 5,
+          "player_id": 755,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 2.33,
+          "contract_type": "formal"
+        },
+        {
+          "id": 406,
+          "club_id": 5,
+          "player_id": 828,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 11,
+          "wage": 1.56,
+          "contract_type": "formal"
+        },
+        {
+          "id": 410,
+          "club_id": 5,
+          "player_id": 829,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.24,
+          "contract_type": "formal"
+        },
+        {
+          "id": 418,
+          "club_id": 5,
+          "player_id": 914,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 417,
+          "club_id": 5,
+          "player_id": 915,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1.21,
+          "contract_type": "formal"
+        },
+        {
+          "id": 411,
+          "club_id": 5,
+          "player_id": 1004,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.04,
+          "contract_type": "formal"
+        },
+        {
+          "id": 412,
+          "club_id": 5,
+          "player_id": 1005,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.04,
+          "contract_type": "formal"
+        },
+        {
+          "id": 419,
+          "club_id": 5,
+          "player_id": 1148,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1.11,
+          "contract_type": "formal"
+        },
+        {
+          "id": 413,
+          "club_id": 5,
+          "player_id": 1157,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.04,
+          "contract_type": "formal"
+        },
+        {
+          "id": 391,
+          "club_id": 5,
+          "player_id": 1212,
+          "service_ticks": -2,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 392,
+          "club_id": 5,
+          "player_id": 1331,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 401,
+          "club_id": 5,
+          "player_id": 1402,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 1.71,
+          "contract_type": "formal"
+        },
+        {
+          "id": 403,
+          "club_id": 5,
+          "player_id": 1636,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 420,
+          "club_id": 5,
+          "player_id": 2225,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 5,
+          "wage": 0.62,
+          "contract_type": "formal"
+        },
+        {
+          "id": 393,
+          "club_id": 5,
+          "player_id": 2808,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 394,
+          "club_id": 5,
+          "player_id": 3667,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 334,
+          "club_id": 9,
+          "player_id": 2,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 80,
+          "wage": 10.01,
+          "contract_type": "formal"
+        },
+        {
+          "id": 340,
+          "club_id": 9,
+          "player_id": 37,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 25,
+          "wage": 3.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 335,
+          "club_id": 9,
+          "player_id": 53,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 40,
+          "wage": 4.35,
+          "contract_type": "formal"
+        },
+        {
+          "id": 336,
+          "club_id": 9,
+          "player_id": 62,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 35,
+          "wage": 4.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 339,
+          "club_id": 9,
+          "player_id": 74,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 3.78,
+          "contract_type": "formal"
+        },
+        {
+          "id": 342,
+          "club_id": 9,
+          "player_id": 85,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 25,
+          "wage": 3.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 337,
+          "club_id": 9,
+          "player_id": 88,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 35,
+          "wage": 4.99,
+          "contract_type": "formal"
+        },
+        {
+          "id": 343,
+          "club_id": 9,
+          "player_id": 107,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 25,
+          "wage": 3.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 353,
+          "club_id": 9,
+          "player_id": 127,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.31,
+          "contract_type": "formal"
+        },
+        {
+          "id": 341,
+          "club_id": 9,
+          "player_id": 133,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 25,
+          "wage": 4.35,
+          "contract_type": "formal"
+        },
+        {
+          "id": 346,
+          "club_id": 9,
+          "player_id": 171,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.66,
+          "contract_type": "formal"
+        },
+        {
+          "id": 338,
+          "club_id": 9,
+          "player_id": 181,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 35,
+          "wage": 4.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 359,
+          "club_id": 9,
+          "player_id": 207,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 344,
+          "club_id": 9,
+          "player_id": 254,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 1.76,
+          "contract_type": "formal"
+        },
+        {
+          "id": 348,
+          "club_id": 9,
+          "player_id": 408,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 354,
+          "club_id": 9,
+          "player_id": 450,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.91,
+          "contract_type": "formal"
+        },
+        {
+          "id": 347,
+          "club_id": 9,
+          "player_id": 521,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 283,
+          "club_id": 9,
+          "player_id": 564,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.45,
+          "contract_type": "formal"
+        },
+        {
+          "id": 118,
+          "club_id": 9,
+          "player_id": 574,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 352,
+          "club_id": 9,
+          "player_id": 581,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 6,
+          "wage": 1.27,
+          "contract_type": "formal"
+        },
+        {
+          "id": 117,
+          "club_id": 9,
+          "player_id": 641,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 349,
+          "club_id": 9,
+          "player_id": 711,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 351,
+          "club_id": 9,
+          "player_id": 727,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.56,
+          "contract_type": "formal"
+        },
+        {
+          "id": 119,
+          "club_id": 9,
+          "player_id": 926,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 120,
+          "club_id": 9,
+          "player_id": 963,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 355,
+          "club_id": 9,
+          "player_id": 1054,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.22,
+          "contract_type": "formal"
+        },
+        {
+          "id": 360,
+          "club_id": 9,
+          "player_id": 1208,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 1.02,
+          "contract_type": "formal"
+        },
+        {
+          "id": 350,
+          "club_id": 9,
+          "player_id": 1227,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.89,
+          "contract_type": "formal"
+        },
+        {
+          "id": 356,
+          "club_id": 9,
+          "player_id": 1361,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.21,
+          "contract_type": "formal"
+        },
+        {
+          "id": 345,
+          "club_id": 9,
+          "player_id": 1701,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 12,
+          "wage": 1.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 357,
+          "club_id": 9,
+          "player_id": 1751,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.55,
+          "contract_type": "formal"
+        },
+        {
+          "id": 361,
+          "club_id": 9,
+          "player_id": 1803,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 2,
+          "wage": 0.73,
+          "contract_type": "formal"
+        },
+        {
+          "id": 358,
+          "club_id": 9,
+          "player_id": 1805,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.92,
+          "contract_type": "formal"
+        },
+        {
+          "id": 362,
+          "club_id": 9,
+          "player_id": 2283,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 2,
+          "wage": 0.73,
+          "contract_type": "formal"
+        },
+        {
+          "id": 284,
+          "club_id": 9,
+          "player_id": 2509,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 285,
+          "club_id": 9,
+          "player_id": 5097,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.37,
+          "contract_type": "formal"
+        },
+        {
+          "id": 333,
+          "club_id": 9,
+          "player_id": 18245,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 288,
+          "club_id": 11,
+          "player_id": 10,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 56,
+          "wage": 8.21,
+          "contract_type": "formal"
+        },
+        {
+          "id": 292,
+          "club_id": 11,
+          "player_id": 20,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 35,
+          "wage": 5.99,
+          "contract_type": "formal"
+        },
+        {
+          "id": 289,
+          "club_id": 11,
+          "player_id": 27,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 50,
+          "wage": 6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 290,
+          "club_id": 11,
+          "player_id": 28,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 41,
+          "wage": 5.99,
+          "contract_type": "formal"
+        },
+        {
+          "id": 295,
+          "club_id": 11,
+          "player_id": 50,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 291,
+          "club_id": 11,
+          "player_id": 61,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 36,
+          "wage": 4.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 308,
+          "club_id": 11,
+          "player_id": 110,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 6,
+          "wage": 1.61,
+          "contract_type": "formal"
+        },
+        {
+          "id": 296,
+          "club_id": 11,
+          "player_id": 118,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.13,
+          "contract_type": "formal"
+        },
+        {
+          "id": 300,
+          "club_id": 11,
+          "player_id": 134,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.61,
+          "contract_type": "formal"
+        },
+        {
+          "id": 298,
+          "club_id": 11,
+          "player_id": 180,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 12,
+          "wage": 1.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 302,
+          "club_id": 11,
+          "player_id": 262,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 301,
+          "club_id": 11,
+          "player_id": 271,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.78,
+          "contract_type": "formal"
+        },
+        {
+          "id": 286,
+          "club_id": 11,
+          "player_id": 287,
+          "service_ticks": -2,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 303,
+          "club_id": 11,
+          "player_id": 297,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.75,
+          "contract_type": "formal"
+        },
+        {
+          "id": 294,
+          "club_id": 11,
+          "player_id": 346,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 21,
+          "wage": 3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 304,
+          "club_id": 11,
+          "player_id": 377,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.56,
+          "contract_type": "formal"
+        },
+        {
+          "id": 293,
+          "club_id": 11,
+          "player_id": 381,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 26,
+          "wage": 3.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 297,
+          "club_id": 11,
+          "player_id": 443,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 15,
+          "wage": 2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 305,
+          "club_id": 11,
+          "player_id": 623,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.13,
+          "contract_type": "formal"
+        },
+        {
+          "id": 299,
+          "club_id": 11,
+          "player_id": 796,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 12,
+          "wage": 1.45,
+          "contract_type": "formal"
+        },
+        {
+          "id": 306,
+          "club_id": 11,
+          "player_id": 850,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.84,
+          "contract_type": "formal"
+        },
+        {
+          "id": 287,
+          "club_id": 11,
+          "player_id": 3538,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 310,
+          "club_id": 11,
+          "player_id": 5866,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 2,
+          "wage": 0.38,
+          "contract_type": "formal"
+        },
+        {
+          "id": 307,
+          "club_id": 11,
+          "player_id": 6056,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.18,
+          "contract_type": "formal"
+        },
+        {
+          "id": 309,
+          "club_id": 11,
+          "player_id": 9741,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 4,
+          "wage": 0.74,
+          "contract_type": "formal"
+        },
+        {
+          "id": 373,
+          "club_id": 13,
+          "player_id": 8,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 40,
+          "wage": 4.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 371,
+          "club_id": 13,
+          "player_id": 23,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 65,
+          "wage": 6.87,
+          "contract_type": "formal"
+        },
+        {
+          "id": 374,
+          "club_id": 13,
+          "player_id": 34,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 35,
+          "wage": 4.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 379,
+          "club_id": 13,
+          "player_id": 46,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 378,
+          "club_id": 13,
+          "player_id": 49,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 22,
+          "wage": 3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 375,
+          "club_id": 13,
+          "player_id": 52,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 3.35,
+          "contract_type": "formal"
+        },
+        {
+          "id": 376,
+          "club_id": 13,
+          "player_id": 122,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 5.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 377,
+          "club_id": 13,
+          "player_id": 184,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 382,
+          "club_id": 13,
+          "player_id": 198,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.13,
+          "contract_type": "formal"
+        },
+        {
+          "id": 383,
+          "club_id": 13,
+          "player_id": 231,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 372,
+          "club_id": 13,
+          "player_id": 250,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 45,
+          "wage": 5.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 384,
+          "club_id": 13,
+          "player_id": 292,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 15,
+          "wage": 1.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 385,
+          "club_id": 13,
+          "player_id": 303,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 380,
+          "club_id": 13,
+          "player_id": 461,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 381,
+          "club_id": 13,
+          "player_id": 492,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 386,
+          "club_id": 13,
+          "player_id": 517,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 388,
+          "club_id": 13,
+          "player_id": 523,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 389,
+          "club_id": 13,
+          "player_id": 566,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 4,
+          "wage": 1.01,
+          "contract_type": "formal"
+        },
+        {
+          "id": 367,
+          "club_id": 13,
+          "player_id": 847,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 387,
+          "club_id": 13,
+          "player_id": 966,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 1.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 369,
+          "club_id": 13,
+          "player_id": 1709,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 368,
+          "club_id": 13,
+          "player_id": 2103,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 370,
+          "club_id": 13,
+          "player_id": 4530,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 263,
+          "club_id": 14,
+          "player_id": 1,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 50,
+          "wage": 6.18,
+          "contract_type": "formal"
+        },
+        {
+          "id": 262,
+          "club_id": 14,
+          "player_id": 11,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 55,
+          "wage": 6.51,
+          "contract_type": "formal"
+        },
+        {
+          "id": 274,
+          "club_id": 14,
+          "player_id": 19,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 13,
+          "wage": 2.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 265,
+          "club_id": 14,
+          "player_id": 132,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 3.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 270,
+          "club_id": 14,
+          "player_id": 150,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.85,
+          "contract_type": "formal"
+        },
+        {
+          "id": 260,
+          "club_id": 14,
+          "player_id": 158,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 266,
+          "club_id": 14,
+          "player_id": 189,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 23,
+          "wage": 3.14,
+          "contract_type": "formal"
+        },
+        {
+          "id": 264,
+          "club_id": 14,
+          "player_id": 204,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 35,
+          "wage": 3.08,
+          "contract_type": "formal"
+        },
+        {
+          "id": 261,
+          "club_id": 14,
+          "player_id": 215,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 278,
+          "club_id": 14,
+          "player_id": 224,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 6,
+          "wage": 1.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 267,
+          "club_id": 14,
+          "player_id": 249,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 2.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 282,
+          "club_id": 14,
+          "player_id": 302,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.37,
+          "contract_type": "formal"
+        },
+        {
+          "id": 272,
+          "club_id": 14,
+          "player_id": 318,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.65,
+          "contract_type": "formal"
+        },
+        {
+          "id": 271,
+          "club_id": 14,
+          "player_id": 350,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.65,
+          "contract_type": "formal"
+        },
+        {
+          "id": 268,
+          "club_id": 14,
+          "player_id": 356,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 2.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 269,
+          "club_id": 14,
+          "player_id": 376,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 16,
+          "wage": 2.14,
+          "contract_type": "formal"
+        },
+        {
+          "id": 276,
+          "club_id": 14,
+          "player_id": 462,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.48,
+          "contract_type": "formal"
+        },
+        {
+          "id": 279,
+          "club_id": 14,
+          "player_id": 493,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.95,
+          "contract_type": "formal"
+        },
+        {
+          "id": 273,
+          "club_id": 14,
+          "player_id": 555,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 275,
+          "club_id": 14,
+          "player_id": 740,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 11,
+          "wage": 1.05,
+          "contract_type": "formal"
+        },
+        {
+          "id": 277,
+          "club_id": 14,
+          "player_id": 808,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.35,
+          "contract_type": "formal"
+        },
+        {
+          "id": 280,
+          "club_id": 14,
+          "player_id": 1134,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 281,
+          "club_id": 14,
+          "player_id": 1911,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 206,
+          "club_id": 21,
+          "player_id": 56,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 4.39,
+          "contract_type": "formal"
+        },
+        {
+          "id": 205,
+          "club_id": 21,
+          "player_id": 58,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 65,
+          "wage": 5.05,
+          "contract_type": "formal"
+        },
+        {
+          "id": 210,
+          "club_id": 21,
+          "player_id": 174,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 25,
+          "wage": 3.26,
+          "contract_type": "formal"
+        },
+        {
+          "id": 214,
+          "club_id": 21,
+          "player_id": 203,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.13,
+          "contract_type": "formal"
+        },
+        {
+          "id": 209,
+          "club_id": 21,
+          "player_id": 246,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 30,
+          "wage": 1.62,
+          "contract_type": "formal"
+        },
+        {
+          "id": 224,
+          "club_id": 21,
+          "player_id": 272,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.14,
+          "contract_type": "formal"
+        },
+        {
+          "id": 216,
+          "club_id": 21,
+          "player_id": 294,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 10,
+          "wage": 1.39,
+          "contract_type": "formal"
+        },
+        {
+          "id": 211,
+          "club_id": 21,
+          "player_id": 385,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 20,
+          "wage": 2.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 225,
+          "club_id": 21,
+          "player_id": 428,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 207,
+          "club_id": 21,
+          "player_id": 442,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 4.36,
+          "contract_type": "formal"
+        },
+        {
+          "id": 208,
+          "club_id": 21,
+          "player_id": 478,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 3.18,
+          "contract_type": "formal"
+        },
+        {
+          "id": 218,
+          "club_id": 21,
+          "player_id": 534,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.67,
+          "contract_type": "formal"
+        },
+        {
+          "id": 219,
+          "club_id": 21,
+          "player_id": 559,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.16,
+          "contract_type": "formal"
+        },
+        {
+          "id": 227,
+          "club_id": 21,
+          "player_id": 673,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.04,
+          "contract_type": "formal"
+        },
+        {
+          "id": 226,
+          "club_id": 21,
+          "player_id": 696,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 5,
+          "wage": 0.87,
+          "contract_type": "formal"
+        },
+        {
+          "id": 212,
+          "club_id": 21,
+          "player_id": 757,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 20,
+          "wage": 1.36,
+          "contract_type": "formal"
+        },
+        {
+          "id": 228,
+          "club_id": 21,
+          "player_id": 774,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.04,
+          "contract_type": "formal"
+        },
+        {
+          "id": 233,
+          "club_id": 21,
+          "player_id": 849,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 4,
+          "wage": 0.64,
+          "contract_type": "formal"
+        },
+        {
+          "id": 220,
+          "club_id": 21,
+          "player_id": 954,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.19,
+          "contract_type": "formal"
+        },
+        {
+          "id": 217,
+          "club_id": 21,
+          "player_id": 969,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.66,
+          "contract_type": "formal"
+        },
+        {
+          "id": 232,
+          "club_id": 21,
+          "player_id": 971,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 4,
+          "wage": 0.86,
+          "contract_type": "formal"
+        },
+        {
+          "id": 222,
+          "club_id": 21,
+          "player_id": 1260,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.63,
+          "contract_type": "formal"
+        },
+        {
+          "id": 223,
+          "club_id": 21,
+          "player_id": 1907,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.43,
+          "contract_type": "formal"
+        },
+        {
+          "id": 234,
+          "club_id": 21,
+          "player_id": 2163,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 2,
+          "wage": 0.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 200,
+          "club_id": 21,
+          "player_id": 2413,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 229,
+          "club_id": 21,
+          "player_id": 2455,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.88,
+          "contract_type": "formal"
+        },
+        {
+          "id": 202,
+          "club_id": 21,
+          "player_id": 2840,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 215,
+          "club_id": 21,
+          "player_id": 2983,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 15,
+          "wage": 1.31,
+          "contract_type": "formal"
+        },
+        {
+          "id": 235,
+          "club_id": 21,
+          "player_id": 3265,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 1,
+          "wage": 0.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 221,
+          "club_id": 21,
+          "player_id": 3374,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 10,
+          "wage": 1.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 201,
+          "club_id": 21,
+          "player_id": 3768,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 236,
+          "club_id": 21,
+          "player_id": 4122,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.41,
+          "contract_type": "formal"
+        },
+        {
+          "id": 203,
+          "club_id": 21,
+          "player_id": 4268,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 230,
+          "club_id": 21,
+          "player_id": 5255,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 204,
+          "club_id": 21,
+          "player_id": 6325,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 213,
+          "club_id": 21,
+          "player_id": 6896,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.51,
+          "contract_type": "formal"
+        },
+        {
+          "id": 231,
+          "club_id": 21,
+          "player_id": 7833,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 314,
+          "club_id": 33,
+          "player_id": 9,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 40,
+          "wage": 8.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 317,
+          "club_id": 33,
+          "player_id": 21,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 30,
+          "wage": 4.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 315,
+          "club_id": 33,
+          "player_id": 42,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 35,
+          "wage": 4.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 318,
+          "club_id": 33,
+          "player_id": 59,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 30,
+          "wage": 3.35,
+          "contract_type": "formal"
+        },
+        {
+          "id": 320,
+          "club_id": 33,
+          "player_id": 68,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 25,
+          "wage": 4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 325,
+          "club_id": 33,
+          "player_id": 90,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 324,
+          "club_id": 33,
+          "player_id": 92,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.46,
+          "contract_type": "formal"
+        },
+        {
+          "id": 316,
+          "club_id": 33,
+          "player_id": 97,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 33,
+          "wage": 4.99,
+          "contract_type": "formal"
+        },
+        {
+          "id": 326,
+          "club_id": 33,
+          "player_id": 111,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.55,
+          "contract_type": "formal"
+        },
+        {
+          "id": 321,
+          "club_id": 33,
+          "player_id": 130,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 20,
+          "wage": 2.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 319,
+          "club_id": 33,
+          "player_id": 147,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 30,
+          "wage": 3.35,
+          "contract_type": "formal"
+        },
+        {
+          "id": 327,
+          "club_id": 33,
+          "player_id": 169,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.46,
+          "contract_type": "formal"
+        },
+        {
+          "id": 330,
+          "club_id": 33,
+          "player_id": 234,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 329,
+          "club_id": 33,
+          "player_id": 244,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 332,
+          "club_id": 33,
+          "player_id": 264,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.15,
+          "contract_type": "formal"
+        },
+        {
+          "id": 365,
+          "club_id": 33,
+          "player_id": 308,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 1,
+          "wage": 0.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 323,
+          "club_id": 33,
+          "player_id": 328,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 18,
+          "wage": 2.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 322,
+          "club_id": 33,
+          "player_id": 347,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 20,
+          "wage": 2.43,
+          "contract_type": "formal"
+        },
+        {
+          "id": 363,
+          "club_id": 33,
+          "player_id": 361,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 311,
+          "club_id": 33,
+          "player_id": 370,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 366,
+          "club_id": 33,
+          "player_id": 513,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 1,
+          "wage": 0.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 331,
+          "club_id": 33,
+          "player_id": 653,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 364,
+          "club_id": 33,
+          "player_id": 665,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 328,
+          "club_id": 33,
+          "player_id": 706,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 15,
+          "wage": 1.55,
+          "contract_type": "formal"
+        },
+        {
+          "id": 312,
+          "club_id": 33,
+          "player_id": 830,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 313,
+          "club_id": 33,
+          "player_id": 1146,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 425,
+          "club_id": 45,
+          "player_id": 3,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 50,
+          "wage": 7.27,
+          "contract_type": "formal"
+        },
+        {
+          "id": 428,
+          "club_id": 45,
+          "player_id": 26,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 4.62,
+          "contract_type": "formal"
+        },
+        {
+          "id": 426,
+          "club_id": 45,
+          "player_id": 66,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 45,
+          "wage": 6.22,
+          "contract_type": "formal"
+        },
+        {
+          "id": 440,
+          "club_id": 45,
+          "player_id": 73,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 2.19,
+          "contract_type": "formal"
+        },
+        {
+          "id": 429,
+          "club_id": 45,
+          "player_id": 87,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 3.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 432,
+          "club_id": 45,
+          "player_id": 121,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 435,
+          "club_id": 45,
+          "player_id": 138,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.46,
+          "contract_type": "formal"
+        },
+        {
+          "id": 431,
+          "club_id": 45,
+          "player_id": 286,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 25,
+          "wage": 3.58,
+          "contract_type": "formal"
+        },
+        {
+          "id": 436,
+          "club_id": 45,
+          "player_id": 313,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 442,
+          "club_id": 45,
+          "player_id": 364,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 433,
+          "club_id": 45,
+          "player_id": 380,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 20,
+          "wage": 2.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 427,
+          "club_id": 45,
+          "player_id": 401,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 35,
+          "wage": 4.08,
+          "contract_type": "formal"
+        },
+        {
+          "id": 437,
+          "club_id": 45,
+          "player_id": 464,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 1.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 443,
+          "club_id": 45,
+          "player_id": 472,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 5,
+          "wage": 0.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 441,
+          "club_id": 45,
+          "player_id": 479,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 439,
+          "club_id": 45,
+          "player_id": 533,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 434,
+          "club_id": 45,
+          "player_id": 568,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 445,
+          "club_id": 45,
+          "player_id": 750,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.73,
+          "contract_type": "formal"
+        },
+        {
+          "id": 430,
+          "club_id": 45,
+          "player_id": 882,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 30,
+          "wage": 3.59,
+          "contract_type": "formal"
+        },
+        {
+          "id": 438,
+          "club_id": 45,
+          "player_id": 1048,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 444,
+          "club_id": 45,
+          "player_id": 1257,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 1.29,
+          "contract_type": "formal"
+        },
+        {
+          "id": 448,
+          "club_id": 45,
+          "player_id": 1442,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.72,
+          "contract_type": "formal"
+        },
+        {
+          "id": 446,
+          "club_id": 45,
+          "player_id": 1445,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 5,
+          "wage": 0.93,
+          "contract_type": "formal"
+        },
+        {
+          "id": 447,
+          "club_id": 45,
+          "player_id": 1491,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 0.93,
+          "contract_type": "formal"
+        },
+        {
+          "id": 421,
+          "club_id": 45,
+          "player_id": 1825,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 449,
+          "club_id": 45,
+          "player_id": 2138,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.47,
+          "contract_type": "formal"
+        },
+        {
+          "id": 422,
+          "club_id": 45,
+          "player_id": 3407,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 423,
+          "club_id": 45,
+          "player_id": 5429,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 424,
+          "club_id": 45,
+          "player_id": 7375,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 451,
+          "club_id": 45,
+          "player_id": 12475,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.36,
+          "contract_type": "formal"
+        },
+        {
+          "id": 450,
+          "club_id": 45,
+          "player_id": 12718,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 90,
+          "club_id": 66,
+          "player_id": 22,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 4.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 86,
+          "club_id": 66,
+          "player_id": 25,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 55,
+          "wage": 6.05,
+          "contract_type": "formal"
+        },
+        {
+          "id": 89,
+          "club_id": 66,
+          "player_id": 29,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 30,
+          "wage": 3.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 87,
+          "club_id": 66,
+          "player_id": 40,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 40,
+          "wage": 4.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 88,
+          "club_id": 66,
+          "player_id": 55,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 35,
+          "wage": 3.8,
+          "contract_type": "formal"
+        },
+        {
+          "id": 92,
+          "club_id": 66,
+          "player_id": 99,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 21,
+          "wage": 3.55,
+          "contract_type": "formal"
+        },
+        {
+          "id": 96,
+          "club_id": 66,
+          "player_id": 114,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 109,
+          "club_id": 66,
+          "player_id": 139,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 98,
+          "club_id": 66,
+          "player_id": 148,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 93,
+          "club_id": 66,
+          "player_id": 154,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 95,
+          "club_id": 66,
+          "player_id": 190,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 91,
+          "club_id": 66,
+          "player_id": 197,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 25,
+          "wage": 2.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 110,
+          "club_id": 66,
+          "player_id": 226,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 101,
+          "club_id": 66,
+          "player_id": 267,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 100,
+          "club_id": 66,
+          "player_id": 312,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 111,
+          "club_id": 66,
+          "player_id": 316,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 97,
+          "club_id": 66,
+          "player_id": 340,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 102,
+          "club_id": 66,
+          "player_id": 474,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 99,
+          "club_id": 66,
+          "player_id": 629,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 103,
+          "club_id": 66,
+          "player_id": 634,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 10,
+          "wage": 1.15,
+          "contract_type": "formal"
+        },
+        {
+          "id": 104,
+          "club_id": 66,
+          "player_id": 698,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.75,
+          "contract_type": "formal"
+        },
+        {
+          "id": 112,
+          "club_id": 66,
+          "player_id": 730,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 94,
+          "club_id": 66,
+          "player_id": 739,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 3.54,
+          "contract_type": "formal"
+        },
+        {
+          "id": 105,
+          "club_id": 66,
+          "player_id": 804,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 10,
+          "wage": 1.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 116,
+          "club_id": 66,
+          "player_id": 1126,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 1,
+          "wage": 0.43,
+          "contract_type": "formal"
+        },
+        {
+          "id": 106,
+          "club_id": 66,
+          "player_id": 1195,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 107,
+          "club_id": 66,
+          "player_id": 1433,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 113,
+          "club_id": 66,
+          "player_id": 1438,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 114,
+          "club_id": 66,
+          "player_id": 1697,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 115,
+          "club_id": 66,
+          "player_id": 1702,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 108,
+          "club_id": 66,
+          "player_id": 2282,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 5,
+          "club_id": 73,
+          "player_id": 16,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 50,
+          "wage": 5.93,
+          "contract_type": "formal"
+        },
+        {
+          "id": 8,
+          "club_id": 73,
+          "player_id": 32,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 50,
+          "wage": 5.74,
+          "contract_type": "formal"
+        },
+        {
+          "id": 10,
+          "club_id": 73,
+          "player_id": 36,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 30,
+          "wage": 5.71,
+          "contract_type": "formal"
+        },
+        {
+          "id": 6,
+          "club_id": 73,
+          "player_id": 41,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 50,
+          "wage": 6.01,
+          "contract_type": "formal"
+        },
+        {
+          "id": 7,
+          "club_id": 73,
+          "player_id": 51,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 50,
+          "wage": 6.66,
+          "contract_type": "formal"
+        },
+        {
+          "id": 12,
+          "club_id": 73,
+          "player_id": 67,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 3.91,
+          "contract_type": "formal"
+        },
+        {
+          "id": 11,
+          "club_id": 73,
+          "player_id": 136,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 3.05,
+          "contract_type": "formal"
+        },
+        {
+          "id": 14,
+          "club_id": 73,
+          "player_id": 142,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 20,
+          "wage": 2.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 13,
+          "club_id": 73,
+          "player_id": 145,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 2.06,
+          "contract_type": "formal"
+        },
+        {
+          "id": 17,
+          "club_id": 73,
+          "player_id": 152,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.22,
+          "contract_type": "formal"
+        },
+        {
+          "id": 9,
+          "club_id": 73,
+          "player_id": 162,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 50,
+          "wage": 4.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 19,
+          "club_id": 73,
+          "player_id": 185,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.11,
+          "contract_type": "formal"
+        },
+        {
+          "id": 27,
+          "club_id": 73,
+          "player_id": 195,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.59,
+          "contract_type": "formal"
+        },
+        {
+          "id": 21,
+          "club_id": 73,
+          "player_id": 235,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.21,
+          "contract_type": "formal"
+        },
+        {
+          "id": 15,
+          "club_id": 73,
+          "player_id": 251,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.02,
+          "contract_type": "formal"
+        },
+        {
+          "id": 20,
+          "club_id": 73,
+          "player_id": 265,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.21,
+          "contract_type": "formal"
+        },
+        {
+          "id": 1,
+          "club_id": 73,
+          "player_id": 333,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 22,
+          "club_id": 73,
+          "player_id": 338,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.11,
+          "contract_type": "formal"
+        },
+        {
+          "id": 28,
+          "club_id": 73,
+          "player_id": 345,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 1,
+          "wage": 0.46,
+          "contract_type": "formal"
+        },
+        {
+          "id": 18,
+          "club_id": 73,
+          "player_id": 422,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 5,
+          "wage": 1.37,
+          "contract_type": "formal"
+        },
+        {
+          "id": 23,
+          "club_id": 73,
+          "player_id": 630,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 29,
+          "club_id": 73,
+          "player_id": 661,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.39,
+          "contract_type": "formal"
+        },
+        {
+          "id": 25,
+          "club_id": 73,
+          "player_id": 793,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 1.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 16,
+          "club_id": 73,
+          "player_id": 797,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.21,
+          "contract_type": "formal"
+        },
+        {
+          "id": 24,
+          "club_id": 73,
+          "player_id": 846,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.42,
+          "contract_type": "formal"
+        },
+        {
+          "id": 4,
+          "club_id": 73,
+          "player_id": 884,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 2,
+          "club_id": 73,
+          "player_id": 946,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 26,
+          "club_id": 73,
+          "player_id": 1156,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 3,
+          "club_id": 73,
+          "player_id": 1292,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 469,
+          "club_id": 241,
+          "player_id": 6,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 62,
+          "wage": 8.8,
+          "contract_type": "normal"
+        },
+        {
+          "id": 470,
+          "club_id": 241,
+          "player_id": 12,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 45,
+          "wage": 7,
+          "contract_type": "normal"
+        },
+        {
+          "id": 471,
+          "club_id": 241,
+          "player_id": 31,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 33,
+          "wage": 5.8,
+          "contract_type": "normal"
+        },
+        {
+          "id": 472,
+          "club_id": 241,
+          "player_id": 70,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.8,
+          "contract_type": "normal"
+        },
+        {
+          "id": 481,
+          "club_id": 241,
+          "player_id": 129,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 2.7,
+          "contract_type": "normal"
+        },
+        {
+          "id": 490,
+          "club_id": 241,
+          "player_id": 140,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.85,
+          "contract_type": "normal"
+        },
+        {
+          "id": 485,
+          "club_id": 241,
+          "player_id": 143,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.5,
+          "contract_type": "normal"
+        },
+        {
+          "id": 473,
+          "club_id": 241,
+          "player_id": 205,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 20,
+          "wage": 2.1,
+          "contract_type": "normal"
+        },
+        {
+          "id": 480,
+          "club_id": 241,
+          "player_id": 256,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 12,
+          "wage": 2.34,
+          "contract_type": "normal"
+        },
+        {
+          "id": 482,
+          "club_id": 241,
+          "player_id": 343,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "normal"
+        },
+        {
+          "id": 487,
+          "club_id": 241,
+          "player_id": 348,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.4,
+          "contract_type": "normal"
+        },
+        {
+          "id": 486,
+          "club_id": 241,
+          "player_id": 403,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 7,
+          "wage": 1.8,
+          "contract_type": "normal"
+        },
+        {
+          "id": 483,
+          "club_id": 241,
+          "player_id": 423,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.78,
+          "contract_type": "normal"
+        },
+        {
+          "id": 474,
+          "club_id": 241,
+          "player_id": 425,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 2.43,
+          "contract_type": "normal"
+        },
+        {
+          "id": 478,
+          "club_id": 241,
+          "player_id": 446,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 1.83,
+          "contract_type": "normal"
+        },
+        {
+          "id": 475,
+          "club_id": 241,
+          "player_id": 460,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 17,
+          "wage": 2.9,
+          "contract_type": "normal"
+        },
+        {
+          "id": 476,
+          "club_id": 241,
+          "player_id": 469,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 1.83,
+          "contract_type": "normal"
+        },
+        {
+          "id": 488,
+          "club_id": 241,
+          "player_id": 499,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1,
+          "contract_type": "normal"
+        },
+        {
+          "id": 477,
+          "club_id": 241,
+          "player_id": 501,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 1.83,
+          "contract_type": "normal"
+        },
+        {
+          "id": 479,
+          "club_id": 241,
+          "player_id": 535,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 1.83,
+          "contract_type": "normal"
+        },
+        {
+          "id": 484,
+          "club_id": 241,
+          "player_id": 603,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "normal"
+        },
+        {
+          "id": 463,
+          "club_id": 241,
+          "player_id": 802,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 464,
+          "club_id": 241,
+          "player_id": 831,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 465,
+          "club_id": 241,
+          "player_id": 925,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 491,
+          "club_id": 241,
+          "player_id": 1099,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.4,
+          "contract_type": "normal"
+        },
+        {
+          "id": 466,
+          "club_id": 241,
+          "player_id": 1255,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 467,
+          "club_id": 241,
+          "player_id": 1432,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 468,
+          "club_id": 241,
+          "player_id": 2150,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 489,
+          "club_id": 241,
+          "player_id": 2416,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1,
+          "contract_type": "normal"
+        },
+        {
+          "id": 238,
+          "club_id": 243,
+          "player_id": 24,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 72,
+          "wage": 9.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 240,
+          "club_id": 243,
+          "player_id": 63,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 3.09,
+          "contract_type": "formal"
+        },
+        {
+          "id": 251,
+          "club_id": 243,
+          "player_id": 65,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 2.27,
+          "contract_type": "formal"
+        },
+        {
+          "id": 254,
+          "club_id": 243,
+          "player_id": 72,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.75,
+          "contract_type": "formal"
+        },
+        {
+          "id": 250,
+          "club_id": 243,
+          "player_id": 82,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.81,
+          "contract_type": "formal"
+        },
+        {
+          "id": 239,
+          "club_id": 243,
+          "player_id": 105,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 4.84,
+          "contract_type": "formal"
+        },
+        {
+          "id": 242,
+          "club_id": 243,
+          "player_id": 119,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 3.99,
+          "contract_type": "formal"
+        },
+        {
+          "id": 241,
+          "club_id": 243,
+          "player_id": 124,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 4.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 247,
+          "club_id": 243,
+          "player_id": 131,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.85,
+          "contract_type": "formal"
+        },
+        {
+          "id": 252,
+          "club_id": 243,
+          "player_id": 173,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 246,
+          "club_id": 243,
+          "player_id": 194,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 3.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 244,
+          "club_id": 243,
+          "player_id": 238,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 2.69,
+          "contract_type": "formal"
+        },
+        {
+          "id": 243,
+          "club_id": 243,
+          "player_id": 247,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 3.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 255,
+          "club_id": 243,
+          "player_id": 261,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.92,
+          "contract_type": "formal"
+        },
+        {
+          "id": 248,
+          "club_id": 243,
+          "player_id": 344,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 249,
+          "club_id": 243,
+          "player_id": 402,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.6,
+          "contract_type": "formal"
+        },
+        {
+          "id": 258,
+          "club_id": 243,
+          "player_id": 498,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 2,
+          "wage": 0.55,
+          "contract_type": "formal"
+        },
+        {
+          "id": 245,
+          "club_id": 243,
+          "player_id": 743,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 2.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 237,
+          "club_id": 243,
+          "player_id": 951,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 253,
+          "club_id": 243,
+          "player_id": 1049,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.55,
+          "contract_type": "formal"
+        },
+        {
+          "id": 256,
+          "club_id": 243,
+          "player_id": 1093,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.42,
+          "contract_type": "formal"
+        },
+        {
+          "id": 257,
+          "club_id": 243,
+          "player_id": 1209,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 259,
+          "club_id": 243,
+          "player_id": 5132,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.39,
+          "contract_type": "formal"
+        },
+        {
+          "id": 184,
+          "club_id": 280,
+          "player_id": 156,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 6,
+          "wage": 1.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 177,
+          "club_id": 280,
+          "player_id": 164,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 178,
+          "club_id": 280,
+          "player_id": 239,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.76,
+          "contract_type": "formal"
+        },
+        {
+          "id": 185,
+          "club_id": 280,
+          "player_id": 305,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 6,
+          "wage": 1.4,
+          "contract_type": "formal"
+        },
+        {
+          "id": 189,
+          "club_id": 280,
+          "player_id": 466,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 0.73,
+          "contract_type": "formal"
+        },
+        {
+          "id": 183,
+          "club_id": 280,
+          "player_id": 471,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.59,
+          "contract_type": "formal"
+        },
+        {
+          "id": 186,
+          "club_id": 280,
+          "player_id": 476,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1.05,
+          "contract_type": "formal"
+        },
+        {
+          "id": 179,
+          "club_id": 280,
+          "player_id": 511,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 191,
+          "club_id": 280,
+          "player_id": 562,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 0.73,
+          "contract_type": "formal"
+        },
+        {
+          "id": 190,
+          "club_id": 280,
+          "player_id": 598,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 0.87,
+          "contract_type": "formal"
+        },
+        {
+          "id": 195,
+          "club_id": 280,
+          "player_id": 631,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 2,
+          "wage": 0.62,
+          "contract_type": "formal"
+        },
+        {
+          "id": 188,
+          "club_id": 280,
+          "player_id": 642,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 4,
+          "wage": 1.17,
+          "contract_type": "formal"
+        },
+        {
+          "id": 193,
+          "club_id": 280,
+          "player_id": 674,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 0.87,
+          "contract_type": "formal"
+        },
+        {
+          "id": 192,
+          "club_id": 280,
+          "player_id": 707,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 1.03,
+          "contract_type": "formal"
+        },
+        {
+          "id": 194,
+          "club_id": 280,
+          "player_id": 891,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 3,
+          "wage": 0.87,
+          "contract_type": "formal"
+        },
+        {
+          "id": 199,
+          "club_id": 280,
+          "player_id": 924,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 1,
+          "wage": 0.51,
+          "contract_type": "formal"
+        },
+        {
+          "id": 196,
+          "club_id": 280,
+          "player_id": 998,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 2,
+          "wage": 0.82,
+          "contract_type": "formal"
+        },
+        {
+          "id": 175,
+          "club_id": 280,
+          "player_id": 1002,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 20,
+          "wage": 1.96,
+          "contract_type": "formal"
+        },
+        {
+          "id": 197,
+          "club_id": 280,
+          "player_id": 1061,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 2,
+          "wage": 0.7,
+          "contract_type": "formal"
+        },
+        {
+          "id": 174,
+          "club_id": 280,
+          "player_id": 1112,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 40,
+          "wage": 4.67,
+          "contract_type": "formal"
+        },
+        {
+          "id": 181,
+          "club_id": 280,
+          "player_id": 1171,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.44,
+          "contract_type": "formal"
+        },
+        {
+          "id": 198,
+          "club_id": 280,
+          "player_id": 1254,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 2,
+          "wage": 0.73,
+          "contract_type": "formal"
+        },
+        {
+          "id": 187,
+          "club_id": 280,
+          "player_id": 1334,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 5,
+          "wage": 1.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 170,
+          "club_id": 280,
+          "player_id": 1707,
+          "service_ticks": 1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 176,
+          "club_id": 280,
+          "player_id": 2929,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 15,
+          "wage": 2.61,
+          "contract_type": "formal"
+        },
+        {
+          "id": 182,
+          "club_id": 280,
+          "player_id": 3022,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 10,
+          "wage": 1.58,
+          "contract_type": "formal"
+        },
+        {
+          "id": 180,
+          "club_id": 280,
+          "player_id": 3159,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 10,
+          "wage": 1.44,
+          "contract_type": "formal"
+        },
+        {
+          "id": 171,
+          "club_id": 280,
+          "player_id": 5296,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 172,
+          "club_id": 280,
+          "player_id": 10796,
+          "service_ticks": -2,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 173,
+          "club_id": 280,
+          "player_id": 17088,
+          "service_ticks": -2,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 66,
+          "club_id": 449,
+          "player_id": 15,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 4.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 68,
+          "club_id": 449,
+          "player_id": 39,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 18,
+          "wage": 2.91,
+          "contract_type": "formal"
+        },
+        {
+          "id": 67,
+          "club_id": 449,
+          "player_id": 60,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 25,
+          "wage": 3.52,
+          "contract_type": "formal"
+        },
+        {
+          "id": 71,
+          "club_id": 449,
+          "player_id": 120,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 7,
+          "wage": 1.55,
+          "contract_type": "formal"
+        },
+        {
+          "id": 69,
+          "club_id": 449,
+          "player_id": 219,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 16,
+          "wage": 1.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 70,
+          "club_id": 449,
+          "player_id": 275,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "formal"
+        },
+        {
+          "id": 76,
+          "club_id": 449,
+          "player_id": 293,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 84,
+          "club_id": 449,
+          "player_id": 324,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 1,
+          "wage": 0.45,
+          "contract_type": "formal"
+        },
+        {
+          "id": 85,
+          "club_id": 449,
+          "player_id": 336,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 1,
+          "wage": 0.32,
+          "contract_type": "formal"
+        },
+        {
+          "id": 73,
+          "club_id": 449,
+          "player_id": 383,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 7,
+          "wage": 1.2,
+          "contract_type": "formal"
+        },
+        {
+          "id": 74,
+          "club_id": 449,
+          "player_id": 405,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 7,
+          "wage": 1.22,
+          "contract_type": "formal"
+        },
+        {
+          "id": 77,
+          "club_id": 449,
+          "player_id": 413,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 75,
+          "club_id": 449,
+          "player_id": 414,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 5,
+          "wage": 0.85,
+          "contract_type": "formal"
+        },
+        {
+          "id": 61,
+          "club_id": 449,
+          "player_id": 420,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 72,
+          "club_id": 449,
+          "player_id": 480,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 7,
+          "wage": 1.22,
+          "contract_type": "formal"
+        },
+        {
+          "id": 79,
+          "club_id": 449,
+          "player_id": 516,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 1.19,
+          "contract_type": "formal"
+        },
+        {
+          "id": 80,
+          "club_id": 449,
+          "player_id": 538,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 5,
+          "wage": 1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 83,
+          "club_id": 449,
+          "player_id": 546,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 3,
+          "wage": 0.79,
+          "contract_type": "formal"
+        },
+        {
+          "id": 78,
+          "club_id": 449,
+          "player_id": 576,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 5,
+          "wage": 0.85,
+          "contract_type": "formal"
+        },
+        {
+          "id": 62,
+          "club_id": 449,
+          "player_id": 794,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 63,
+          "club_id": 449,
+          "player_id": 1003,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 81,
+          "club_id": 449,
+          "player_id": 1336,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.87,
+          "contract_type": "formal"
+        },
+        {
+          "id": 82,
+          "club_id": 449,
+          "player_id": 2109,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.05,
+          "contract_type": "formal"
+        },
+        {
+          "id": 64,
+          "club_id": 449,
+          "player_id": 4508,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 65,
+          "club_id": 449,
+          "player_id": 4831,
+          "service_ticks": 0,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 38,
+          "club_id": 110374,
+          "player_id": 5,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 30,
+          "wage": 5.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 39,
+          "club_id": 110374,
+          "player_id": 45,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 25,
+          "wage": 3.95,
+          "contract_type": "formal"
+        },
+        {
+          "id": 40,
+          "club_id": 110374,
+          "player_id": 57,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 25,
+          "wage": 3.1,
+          "contract_type": "formal"
+        },
+        {
+          "id": 51,
+          "club_id": 110374,
+          "player_id": 75,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 10,
+          "wage": 1.82,
+          "contract_type": "formal"
+        },
+        {
+          "id": 44,
+          "club_id": 110374,
+          "player_id": 84,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 18,
+          "wage": 2.9,
+          "contract_type": "formal"
+        },
+        {
+          "id": 42,
+          "club_id": 110374,
+          "player_id": 86,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 20,
+          "wage": 3.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 47,
+          "club_id": 110374,
+          "player_id": 91,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 13,
+          "wage": 2.48,
+          "contract_type": "formal"
+        },
+        {
+          "id": 43,
+          "club_id": 110374,
+          "player_id": 103,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 18,
+          "wage": 3.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 45,
+          "club_id": 110374,
+          "player_id": 116,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 15,
+          "wage": 2.12,
+          "contract_type": "formal"
+        },
+        {
+          "id": 41,
+          "club_id": 110374,
+          "player_id": 135,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 24,
+          "wage": 3.77,
+          "contract_type": "formal"
+        },
+        {
+          "id": 46,
+          "club_id": 110374,
+          "player_id": 146,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.68,
+          "contract_type": "formal"
+        },
+        {
+          "id": 54,
+          "club_id": 110374,
+          "player_id": 157,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 8,
+          "wage": 1.65,
+          "contract_type": "formal"
+        },
+        {
+          "id": 48,
+          "club_id": 110374,
+          "player_id": 176,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 13,
+          "wage": 2.48,
+          "contract_type": "formal"
+        },
+        {
+          "id": 56,
+          "club_id": 110374,
+          "player_id": 178,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 6,
+          "wage": 1.08,
+          "contract_type": "formal"
+        },
+        {
+          "id": 55,
+          "club_id": 110374,
+          "player_id": 187,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 7,
+          "wage": 1.42,
+          "contract_type": "formal"
+        },
+        {
+          "id": 50,
+          "club_id": 110374,
+          "player_id": 201,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 12,
+          "wage": 2.16,
+          "contract_type": "formal"
+        },
+        {
+          "id": 57,
+          "club_id": 110374,
+          "player_id": 212,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.25,
+          "contract_type": "formal"
+        },
+        {
+          "id": 58,
+          "club_id": 110374,
+          "player_id": 222,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.3,
+          "contract_type": "formal"
+        },
+        {
+          "id": 49,
+          "club_id": 110374,
+          "player_id": 245,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "release_fee": 13,
+          "wage": 1.65,
+          "contract_type": "formal"
+        },
+        {
+          "id": 52,
+          "club_id": 110374,
+          "player_id": 263,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.5,
+          "contract_type": "formal"
+        },
+        {
+          "id": 53,
+          "club_id": 110374,
+          "player_id": 445,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "release_fee": 10,
+          "wage": 1.29,
+          "contract_type": "formal"
+        },
+        {
+          "id": 60,
+          "club_id": 110374,
+          "player_id": 502,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "release_fee": 1,
+          "wage": 0.36,
+          "contract_type": "formal"
+        },
+        {
+          "id": 59,
+          "club_id": 110374,
+          "player_id": 633,
+          "service_ticks": -1,
+          "protection_ticks": 2,
+          "release_fee": 5,
+          "wage": 0.73,
+          "contract_type": "formal"
+        },
+        {
+          "id": 30,
+          "club_id": 110374,
+          "player_id": 1045,
+          "service_ticks": -1,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 31,
+          "club_id": 110374,
+          "player_id": 2141,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 33,
+          "club_id": 110374,
+          "player_id": 3032,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 32,
+          "club_id": 110374,
+          "player_id": 3074,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 34,
+          "club_id": 110374,
+          "player_id": 4515,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 35,
+          "club_id": 110374,
+          "player_id": 6170,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 36,
+          "club_id": 110374,
+          "player_id": 14970,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 37,
+          "club_id": 110374,
+          "player_id": 18229,
+          "service_ticks": -3,
+          "protection_ticks": null,
+          "release_fee": 5,
+          "wage": 0.75,
+          "contract_type": "trainee"
+        },
+        {
+          "id": 496,
+          "club_id": 112172,
+          "player_id": 13,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 4.32,
+          "contract_type": "normal"
+        },
+        {
+          "id": 499,
+          "club_id": 112172,
+          "player_id": 17,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 3.98,
+          "contract_type": "normal"
+        },
+        {
+          "id": 492,
+          "club_id": 112172,
+          "player_id": 33,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 45,
+          "wage": 4.59,
+          "contract_type": "normal"
+        },
+        {
+          "id": 500,
+          "club_id": 112172,
+          "player_id": 76,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 25,
+          "wage": 2.7,
+          "contract_type": "normal"
+        },
+        {
+          "id": 497,
+          "club_id": 112172,
+          "player_id": 77,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 3.73,
+          "contract_type": "normal"
+        },
+        {
+          "id": 502,
+          "club_id": 112172,
+          "player_id": 80,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 1.83,
+          "contract_type": "normal"
+        },
+        {
+          "id": 507,
+          "club_id": 112172,
+          "player_id": 101,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.38,
+          "contract_type": "normal"
+        },
+        {
+          "id": 503,
+          "club_id": 112172,
+          "player_id": 102,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 15,
+          "wage": 2.2,
+          "contract_type": "normal"
+        },
+        {
+          "id": 493,
+          "club_id": 112172,
+          "player_id": 123,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 39,
+          "wage": 4.03,
+          "contract_type": "normal"
+        },
+        {
+          "id": 508,
+          "club_id": 112172,
+          "player_id": 126,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.3,
+          "contract_type": "normal"
+        },
+        {
+          "id": 495,
+          "club_id": 112172,
+          "player_id": 159,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 31,
+          "wage": 3.5,
+          "contract_type": "normal"
+        },
+        {
+          "id": 509,
+          "club_id": 112172,
+          "player_id": 177,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.53,
+          "contract_type": "normal"
+        },
+        {
+          "id": 494,
+          "club_id": 112172,
+          "player_id": 182,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 35,
+          "wage": 4,
+          "contract_type": "normal"
+        },
+        {
+          "id": 506,
+          "club_id": 112172,
+          "player_id": 186,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 11,
+          "wage": 2,
+          "contract_type": "normal"
+        },
+        {
+          "id": 504,
+          "club_id": 112172,
+          "player_id": 192,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 14,
+          "wage": 1.8,
+          "contract_type": "normal"
+        },
+        {
+          "id": 498,
+          "club_id": 112172,
+          "player_id": 232,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 30,
+          "wage": 3.22,
+          "contract_type": "normal"
+        },
+        {
+          "id": 511,
+          "club_id": 112172,
+          "player_id": 236,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 6,
+          "wage": 1.46,
+          "contract_type": "normal"
+        },
+        {
+          "id": 514,
+          "club_id": 112172,
+          "player_id": 241,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.55,
+          "contract_type": "normal"
+        },
+        {
+          "id": 501,
+          "club_id": 112172,
+          "player_id": 257,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 20,
+          "wage": 2.09,
+          "contract_type": "normal"
+        },
+        {
+          "id": 512,
+          "club_id": 112172,
+          "player_id": 327,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 0.91,
+          "contract_type": "normal"
+        },
+        {
+          "id": 513,
+          "club_id": 112172,
+          "player_id": 329,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 5,
+          "wage": 1.23,
+          "contract_type": "normal"
+        },
+        {
+          "id": 505,
+          "club_id": 112172,
+          "player_id": 342,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 12,
+          "wage": 2.07,
+          "contract_type": "normal"
+        },
+        {
+          "id": 515,
+          "club_id": 112172,
+          "player_id": 429,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.41,
+          "contract_type": "normal"
+        },
+        {
+          "id": 516,
+          "club_id": 112172,
+          "player_id": 433,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.42,
+          "contract_type": "normal"
+        },
+        {
+          "id": 510,
+          "club_id": 112172,
+          "player_id": 769,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 10,
+          "wage": 1.74,
+          "contract_type": "normal"
+        },
+        {
+          "id": 517,
+          "club_id": 112172,
+          "player_id": 2204,
+          "service_ticks": 1,
+          "protection_ticks": 4,
+          "release_fee": 1,
+          "wage": 0.7,
+          "contract_type": "normal"
+        }
+      ]
+    },
+    {
+      "label": "D",
+      "sql": "SELECT (SELECT COUNT(*) FROM ledger_entries WHERE kind = 'opening_import') AS opening_import_n, (SELECT COUNT(*) FROM ledger_entries WHERE kind = 'wage' AND ref_type = 'window' AND ref_id = 901) AS wage_901_n, (SELECT COUNT(*) FROM transfers) AS transfers_n, (SELECT COUNT(*) FROM season_windows WHERE status = 'closed' AND is_temporary = 0) AS closed_regular, (SELECT COUNT(*) FROM contracts WHERE is_active = 1) AS active_contracts, (SELECT COUNT(*) FROM contracts WHERE is_active = 1 AND club_id IS NULL) AS active_contracts_no_club",
+      "rows": 1,
+      "results": [
+        {
+          "opening_import_n": 0,
+          "wage_901_n": 0,
+          "transfers_n": 0,
+          "closed_regular": 1,
+          "active_contracts": 517,
+          "active_contracts_no_club": 0
+        }
+      ]
+    },
+    {
+      "label": "E",
+      "sql": "SELECT id, season, window_seq, status, is_temporary, opened_at, closed_at FROM season_windows ORDER BY season, window_seq",
+      "rows": 1,
+      "results": [
+        {
+          "id": 1,
+          "season": 9,
+          "window_seq": 1,
+          "status": "closed",
+          "is_temporary": 0,
+          "opened_at": "2026-09-18T01:00:00.000Z",
+          "closed_at": "2026-09-18T01:01:00.000Z"
+        }
+      ]
+    },
+    {
+      "label": "F",
+      "sql": "SELECT p.fc_id, p.id AS player_id, p.status AS player_status, c.id AS club_id, c.name AS club_name, ct.id AS contract_id, ct.contract_type, ct.release_fee, ct.wage, ct.service_ticks, ct.protection_ticks, ct.is_active, ct.signed_at FROM players p LEFT JOIN clubs c ON c.id = p.club_id LEFT JOIN contracts ct ON ct.player_id = p.id AND ct.is_active = 1 WHERE p.fc_id IN (235212, 252145, 272834, 247635, 268889, 239231, 231747, 264453, 273651, 264652, 204525, 158023, 271421, 277954, 272505, 251570, 215441, 278901, 247819, 254022, 254243, 261865, 251566, 71351, 264309, 246430, 209331, 207865, 208128, 210413) ORDER BY p.fc_id",
+      "rows": 30,
+      "results": [
+        {
+          "fc_id": 71351,
+          "player_id": 5707,
+          "player_status": "normal",
+          "club_id": 10,
+          "club_name": "曼城(CPU)",
+          "contract_id": null,
+          "contract_type": null,
+          "release_fee": null,
+          "wage": null,
+          "service_ticks": null,
+          "protection_ticks": null,
+          "is_active": null,
+          "signed_at": null
+        },
+        {
+          "fc_id": 158023,
+          "player_id": 49,
+          "player_status": "normal",
+          "club_id": 13,
+          "club_name": "纽卡斯尔联",
+          "contract_id": 378,
+          "contract_type": "formal",
+          "release_fee": 22,
+          "wage": 3,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 204525,
+          "player_id": 90,
+          "player_status": "normal",
+          "club_id": 33,
+          "club_name": "慕尼黑1860",
+          "contract_id": 325,
+          "contract_type": "formal",
+          "release_fee": 15,
+          "wage": 2.1,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 207865,
+          "player_id": 45,
+          "player_status": "normal",
+          "club_id": 110374,
+          "club_name": "佛罗伦萨",
+          "contract_id": 39,
+          "contract_type": "formal",
+          "release_fee": 25,
+          "wage": 3.95,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 208128,
+          "player_id": 57,
+          "player_status": "normal",
+          "club_id": 110374,
+          "club_name": "佛罗伦萨",
+          "contract_id": 40,
+          "contract_type": "formal",
+          "release_fee": 25,
+          "wage": 3.1,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 209331,
+          "player_id": 5,
+          "player_status": "normal",
+          "club_id": 110374,
+          "club_name": "佛罗伦萨",
+          "contract_id": 38,
+          "contract_type": "formal",
+          "release_fee": 30,
+          "wage": 5.3,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 210413,
+          "player_id": 263,
+          "player_status": "normal",
+          "club_id": 110374,
+          "club_name": "佛罗伦萨",
+          "contract_id": 52,
+          "contract_type": "formal",
+          "release_fee": 10,
+          "wage": 1.5,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 215441,
+          "player_id": 35,
+          "player_status": "normal",
+          "club_id": 2,
+          "club_name": "阿斯顿维拉",
+          "contract_id": 143,
+          "contract_type": "formal",
+          "release_fee": 21,
+          "wage": 4.89,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 231747,
+          "player_id": 2,
+          "player_status": "normal",
+          "club_id": 9,
+          "club_name": "利物浦",
+          "contract_id": 334,
+          "contract_type": "formal",
+          "release_fee": 80,
+          "wage": 10.01,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 235212,
+          "player_id": 16,
+          "player_status": "normal",
+          "club_id": 73,
+          "club_name": "巴黎圣日耳曼",
+          "contract_id": 5,
+          "contract_type": "formal",
+          "release_fee": 50,
+          "wage": 5.93,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 239231,
+          "player_id": 84,
+          "player_status": "normal",
+          "club_id": 110374,
+          "club_name": "佛罗伦萨",
+          "contract_id": 44,
+          "contract_type": "formal",
+          "release_fee": 18,
+          "wage": 2.9,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 246430,
+          "player_id": 291,
+          "player_status": "free",
+          "club_id": null,
+          "club_name": null,
+          "contract_id": null,
+          "contract_type": null,
+          "release_fee": null,
+          "wage": null,
+          "service_ticks": null,
+          "protection_ticks": null,
+          "is_active": null,
+          "signed_at": null
+        },
+        {
+          "fc_id": 247635,
+          "player_id": 31,
+          "player_status": "normal",
+          "club_id": 241,
+          "club_name": "巴塞罗那",
+          "contract_id": 471,
+          "contract_type": "normal",
+          "release_fee": 33,
+          "wage": 5.8,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "is_active": 1,
+          "signed_at": "2026-10-05T08:04:39.843Z"
+        },
+        {
+          "fc_id": 247819,
+          "player_id": 58,
+          "player_status": "normal",
+          "club_id": 21,
+          "club_name": "拜仁慕尼黑",
+          "contract_id": 205,
+          "contract_type": "formal",
+          "release_fee": 65,
+          "wage": 5.05,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 251566,
+          "player_id": 282,
+          "player_status": "normal",
+          "club_id": 10,
+          "club_name": "曼城(CPU)",
+          "contract_id": null,
+          "contract_type": null,
+          "release_fee": null,
+          "wage": null,
+          "service_ticks": null,
+          "protection_ticks": null,
+          "is_active": null,
+          "signed_at": null
+        },
+        {
+          "fc_id": 251570,
+          "player_id": 286,
+          "player_status": "normal",
+          "club_id": 45,
+          "club_name": "尤文图斯",
+          "contract_id": 431,
+          "contract_type": "formal",
+          "release_fee": 25,
+          "wage": 3.58,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 252145,
+          "player_id": 41,
+          "player_status": "normal",
+          "club_id": 73,
+          "club_name": "巴黎圣日耳曼",
+          "contract_id": 6,
+          "contract_type": "formal",
+          "release_fee": 50,
+          "wage": 6.01,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 254022,
+          "player_id": 385,
+          "player_status": "normal",
+          "club_id": 21,
+          "club_name": "拜仁慕尼黑",
+          "contract_id": 211,
+          "contract_type": "formal",
+          "release_fee": 20,
+          "wage": 2.2,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 254243,
+          "player_id": 237,
+          "player_status": "free",
+          "club_id": null,
+          "club_name": null,
+          "contract_id": null,
+          "contract_type": null,
+          "release_fee": null,
+          "wage": null,
+          "service_ticks": null,
+          "protection_ticks": null,
+          "is_active": null,
+          "signed_at": null
+        },
+        {
+          "fc_id": 261865,
+          "player_id": 339,
+          "player_status": "normal",
+          "club_id": 10,
+          "club_name": "曼城(CPU)",
+          "contract_id": null,
+          "contract_type": null,
+          "release_fee": null,
+          "wage": null,
+          "service_ticks": null,
+          "protection_ticks": null,
+          "is_active": null,
+          "signed_at": null
+        },
+        {
+          "fc_id": 264309,
+          "player_id": 230,
+          "player_status": "normal",
+          "club_id": 131681,
+          "club_name": "AC米兰(CPU)",
+          "contract_id": null,
+          "contract_type": null,
+          "release_fee": null,
+          "wage": null,
+          "service_ticks": null,
+          "protection_ticks": null,
+          "is_active": null,
+          "signed_at": null
+        },
+        {
+          "fc_id": 264453,
+          "player_id": 181,
+          "player_status": "normal",
+          "club_id": 9,
+          "club_name": "利物浦",
+          "contract_id": 338,
+          "contract_type": "formal",
+          "release_fee": 35,
+          "wage": 4.25,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 264652,
+          "player_id": 97,
+          "player_status": "normal",
+          "club_id": 33,
+          "club_name": "慕尼黑1860",
+          "contract_id": 316,
+          "contract_type": "formal",
+          "release_fee": 33,
+          "wage": 4.99,
+          "service_ticks": -2,
+          "protection_ticks": 1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 268889,
+          "player_id": 460,
+          "player_status": "normal",
+          "club_id": 241,
+          "club_name": "巴塞罗那",
+          "contract_id": 475,
+          "contract_type": "normal",
+          "release_fee": 17,
+          "wage": 2.9,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-10-05T08:04:39.843Z"
+        },
+        {
+          "fc_id": 271421,
+          "player_id": 66,
+          "player_status": "normal",
+          "club_id": 45,
+          "club_name": "尤文图斯",
+          "contract_id": 426,
+          "contract_type": "formal",
+          "release_fee": 45,
+          "wage": 6.22,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 272505,
+          "player_id": 882,
+          "player_status": "normal",
+          "club_id": 45,
+          "club_name": "尤文图斯",
+          "contract_id": 430,
+          "contract_type": "formal",
+          "release_fee": 30,
+          "wage": 3.59,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 272834,
+          "player_id": 51,
+          "player_status": "normal",
+          "club_id": 73,
+          "club_name": "巴黎圣日耳曼",
+          "contract_id": 7,
+          "contract_type": "formal",
+          "release_fee": 50,
+          "wage": 6.66,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 273651,
+          "player_id": 1701,
+          "player_status": "normal",
+          "club_id": 9,
+          "club_name": "利物浦",
+          "contract_id": 345,
+          "contract_type": "formal",
+          "release_fee": 12,
+          "wage": 1.25,
+          "service_ticks": -3,
+          "protection_ticks": 0,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 277954,
+          "player_id": 401,
+          "player_status": "normal",
+          "club_id": 45,
+          "club_name": "尤文图斯",
+          "contract_id": 427,
+          "contract_type": "formal",
+          "release_fee": 35,
+          "wage": 4.08,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        },
+        {
+          "fc_id": 278901,
+          "player_id": 1002,
+          "player_status": "normal",
+          "club_id": 280,
+          "club_name": "奥林匹亚科斯",
+          "contract_id": 175,
+          "contract_type": "formal",
+          "release_fee": 20,
+          "wage": 1.96,
+          "service_ticks": -4,
+          "protection_ticks": -1,
+          "is_active": 1,
+          "signed_at": "2026-09-21T01:46:58.647Z"
+        }
+      ]
+    }
+  ]
+}

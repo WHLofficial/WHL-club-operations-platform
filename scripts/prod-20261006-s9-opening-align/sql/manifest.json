@@ -1,0 +1,527 @@
+{
+  "batch": "prod-20261006-s9-opening-align",
+  "generatedAt": "2026-10-06T03:08:00.611Z",
+  "csv": "E:/Downloads/一线队-S9.csv",
+  "snapshotCapturedAt": "2026-10-06T03:07:28.071Z",
+  "finance": {
+    "imported": [
+      {
+        "clubId": 73,
+        "clubName": "巴黎圣日耳曼",
+        "imgName": "巴黎圣日耳曼",
+        "amount": 119.75,
+        "coupons": null
+      },
+      {
+        "clubId": 66,
+        "clubName": "里昂",
+        "imgName": "拜仁慕尼黑",
+        "amount": 72.9,
+        "coupons": 12
+      },
+      {
+        "clubId": 9,
+        "clubName": "利物浦",
+        "imgName": "利物浦",
+        "amount": 119.37,
+        "coupons": 11
+      },
+      {
+        "clubId": 11,
+        "clubName": "曼联",
+        "imgName": "巴塞罗那",
+        "amount": 60.49,
+        "coupons": 7
+      },
+      {
+        "clubId": 33,
+        "clubName": "慕尼黑1860",
+        "imgName": "慕尼黑1860",
+        "amount": 60.83,
+        "coupons": null
+      },
+      {
+        "clubId": 13,
+        "clubName": "纽卡斯尔联",
+        "imgName": "纽卡斯尔联",
+        "amount": 53.59,
+        "coupons": null
+      },
+      {
+        "clubId": 45,
+        "clubName": "尤文图斯",
+        "imgName": "尤文图斯",
+        "amount": 92.46,
+        "coupons": 17
+      },
+      {
+        "clubId": 110374,
+        "clubName": "佛罗伦萨",
+        "imgName": "佛罗伦萨",
+        "amount": 20.16,
+        "coupons": null
+      },
+      {
+        "clubId": 5,
+        "clubName": "切尔西",
+        "imgName": "切尔西",
+        "amount": 2.05,
+        "coupons": 1
+      },
+      {
+        "clubId": 449,
+        "clubName": "皇家贝蒂斯",
+        "imgName": "皇家贝蒂斯",
+        "amount": 44.78,
+        "coupons": null
+      },
+      {
+        "clubId": 2,
+        "clubName": "阿斯顿维拉",
+        "imgName": "阿斯顿维拉",
+        "amount": 40.79,
+        "coupons": null
+      },
+      {
+        "clubId": 21,
+        "clubName": "拜仁慕尼黑",
+        "imgName": "斯图加特",
+        "amount": 78.66,
+        "coupons": 10
+      },
+      {
+        "clubId": 1,
+        "clubName": "阿森纳",
+        "imgName": "皇家社会",
+        "amount": 51.76,
+        "coupons": null
+      },
+      {
+        "clubId": 280,
+        "clubName": "奥林匹亚科斯",
+        "imgName": "奥林匹亚科斯",
+        "amount": 45.66,
+        "coupons": 1
+      },
+      {
+        "clubId": 14,
+        "clubName": "诺丁汉森林",
+        "imgName": "诺丁汉森林",
+        "amount": 84.1,
+        "coupons": null
+      },
+      {
+        "clubId": 243,
+        "clubName": "皇家马德里",
+        "imgName": "那不勒斯",
+        "amount": 20.9,
+        "coupons": null
+      }
+    ],
+    "skipped": [
+      {
+        "imgName": "勒沃库森",
+        "finance": 78.92,
+        "coupons": 20,
+        "why": "用户排除令：除莱比锡和巴塞罗那外（映射：图中勒沃库森 = 平台巴塞罗那 241）"
+      },
+      {
+        "imgName": "AC米兰",
+        "finance": 59.6,
+        "coupons": 7,
+        "why": "平台只有 CPU 队 131681（is_cpu=1），用户令范围为真人队"
+      },
+      {
+        "imgName": "托特纳姆热刺",
+        "finance": 103.61,
+        "coupons": null,
+        "why": "平台 clubs 表无此队（20 行已全列，无 teams 表）"
+      },
+      {
+        "imgName": "科莫",
+        "finance": 35.25,
+        "coupons": null,
+        "why": "平台 clubs 表无此队"
+      },
+      {
+        "imgName": "曼城",
+        "finance": 8.89,
+        "coupons": null,
+        "why": "平台只有 CPU 队 10（is_cpu=1），用户令范围为真人队"
+      },
+      {
+        "imgName": "国际米兰",
+        "finance": 58.63,
+        "coupons": 7,
+        "why": "平台 clubs 表无此队"
+      },
+      {
+        "imgName": "RB莱比锡",
+        "finance": 50.6,
+        "coupons": null,
+        "why": "用户排除令：除莱比锡和巴塞罗那外"
+      }
+    ],
+    "sum": 968.25
+  },
+  "wages": [
+    {
+      "clubId": 1,
+      "n": 30,
+      "total": 48.37
+    },
+    {
+      "clubId": 2,
+      "n": 30,
+      "total": 58.25
+    },
+    {
+      "clubId": 5,
+      "n": 31,
+      "total": 49.23
+    },
+    {
+      "clubId": 9,
+      "n": 37,
+      "total": 73.55
+    },
+    {
+      "clubId": 11,
+      "n": 25,
+      "total": 63.68
+    },
+    {
+      "clubId": 13,
+      "n": 23,
+      "total": 57.48
+    },
+    {
+      "clubId": 14,
+      "n": 23,
+      "total": 48.62
+    },
+    {
+      "clubId": 21,
+      "n": 37,
+      "total": 56.98
+    },
+    {
+      "clubId": 33,
+      "n": 26,
+      "total": 62.53
+    },
+    {
+      "clubId": 45,
+      "n": 31,
+      "total": 65.56
+    },
+    {
+      "clubId": 66,
+      "n": 31,
+      "total": 67.57
+    },
+    {
+      "clubId": 73,
+      "n": 29,
+      "total": 66.44
+    },
+    {
+      "clubId": 241,
+      "n": 29,
+      "total": 61.48
+    },
+    {
+      "clubId": 243,
+      "n": 23,
+      "total": 56.77
+    },
+    {
+      "clubId": 280,
+      "n": 30,
+      "total": 37.62
+    },
+    {
+      "clubId": 449,
+      "n": 25,
+      "total": 33.37
+    },
+    {
+      "clubId": 110374,
+      "n": 31,
+      "total": 57.49
+    },
+    {
+      "clubId": 112172,
+      "n": 26,
+      "total": 57.69
+    }
+  ],
+  "tenure": {
+    "contracts": 517
+  },
+  "records": {
+    "ptk": 24,
+    "match": [
+      {
+        "fcId": 264309,
+        "name": "阿尔达·居莱尔",
+        "team": "AC米兰",
+        "rc": 30
+      },
+      {
+        "fcId": 235212,
+        "name": "阿什拉夫·哈基米",
+        "team": "巴黎圣日耳曼",
+        "rc": 50
+      },
+      {
+        "fcId": 252145,
+        "name": "努诺·门德斯",
+        "team": "巴黎圣日耳曼",
+        "rc": 50
+      },
+      {
+        "fcId": 272834,
+        "name": "若昂·内维斯",
+        "team": "巴黎圣日耳曼",
+        "rc": 50
+      },
+      {
+        "fcId": 247635,
+        "name": "赫维恰·克瓦拉茨赫利亚",
+        "team": "巴塞罗那",
+        "rc": 33
+      },
+      {
+        "fcId": 268889,
+        "name": "阿尔瓦罗·卡雷拉斯",
+        "team": "巴塞罗那",
+        "rc": 17
+      },
+      {
+        "fcId": 239231,
+        "name": "马克·库库雷利亚",
+        "team": "佛罗伦萨",
+        "rc": 18
+      },
+      {
+        "fcId": 231747,
+        "name": "基利安·姆巴佩",
+        "team": "利物浦",
+        "rc": 80
+      },
+      {
+        "fcId": 264453,
+        "name": "米基·范德芬",
+        "team": "利物浦",
+        "rc": 35
+      },
+      {
+        "fcId": 273651,
+        "name": "贾雷尔·夸安萨",
+        "team": "利物浦",
+        "rc": 12
+      },
+      {
+        "fcId": 264652,
+        "name": "布拉德利·巴尔科拉",
+        "team": "慕尼黑1860",
+        "rc": 33
+      },
+      {
+        "fcId": 204525,
+        "name": "伊尼戈·马丁内斯",
+        "team": "慕尼黑1860",
+        "rc": 15
+      },
+      {
+        "fcId": 158023,
+        "name": "利昂内尔·梅西",
+        "team": "纽卡斯尔联",
+        "rc": 22
+      },
+      {
+        "fcId": 271421,
+        "name": "德西雷·杜埃",
+        "team": "尤文图斯",
+        "rc": 45
+      },
+      {
+        "fcId": 277954,
+        "name": "凯南·耶尔德兹",
+        "team": "尤文图斯",
+        "rc": 35
+      },
+      {
+        "fcId": 272505,
+        "name": "恩德里克",
+        "team": "尤文图斯",
+        "rc": 30
+      },
+      {
+        "fcId": 251570,
+        "name": "拉扬·谢尔基",
+        "team": "尤文图斯",
+        "rc": 25
+      },
+      {
+        "fcId": 215441,
+        "name": "塞鲁·吉拉西",
+        "team": "阿斯顿维拉",
+        "rc": 21
+      },
+      {
+        "fcId": 278901,
+        "name": "‌阿尤布·布阿迪",
+        "team": "奥林匹亚科斯",
+        "rc": 20
+      },
+      {
+        "fcId": 247819,
+        "name": "尼科·施洛特贝克",
+        "team": "拜仁慕尼黑",
+        "rc": 65
+      },
+      {
+        "fcId": 254022,
+        "name": "尼克·沃尔特马德",
+        "team": "拜仁慕尼黑",
+        "rc": 20
+      },
+      {
+        "fcId": 261865,
+        "name": "米格尔·古铁雷斯",
+        "team": "曼城",
+        "rc": 21
+      },
+      {
+        "fcId": 251566,
+        "name": "加布里埃尔·马丁内利",
+        "team": "曼城",
+        "rc": 17
+      },
+      {
+        "fcId": 71351,
+        "name": "",
+        "team": "曼城",
+        "rc": 6
+      }
+    ],
+    "rcChange": [
+      {
+        "fcId": 209331,
+        "name": "穆罕默德·萨拉赫",
+        "team": "佛罗伦萨",
+        "rc": 30
+      },
+      {
+        "fcId": 207865,
+        "name": "马基尼奥斯",
+        "team": "佛罗伦萨",
+        "rc": 25
+      },
+      {
+        "fcId": 208128,
+        "name": "哈坎·恰尔汗奥卢",
+        "team": "佛罗伦萨",
+        "rc": 25
+      },
+      {
+        "fcId": 210413,
+        "name": "阿莱西奥·罗马尼奥利",
+        "team": "佛罗伦萨",
+        "rc": 10
+      }
+    ],
+    "skipped": [
+      {
+        "fcId": 254243,
+        "name": "埃利奥特·安德森",
+        "status": "已匹配",
+        "why": "自由身无队籍，transfers 的 from/to 都是 NULL 无从落款"
+      },
+      {
+        "fcId": 246430,
+        "name": "杜尚·弗拉霍维奇",
+        "status": "已续约1",
+        "why": "自由身/无队籍（在解约）——4.4.10 窗内解约会令续约无效，补录会造假记录"
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "02-finance-import.sql",
+      "bytes": 14465,
+      "sha256": "6838355db67593653f8e951c4b4ae8f0bcd5e777defa8ed7f7a479f835df2959",
+      "statements": 32,
+      "expectedChanges": 32,
+      "note": "16 队 × （账户 1 + 流水 1）"
+    },
+    {
+      "path": "03-wages.sql",
+      "bytes": 17008,
+      "sha256": "5789afed0bee4abe82cc75ba505872fe1bf6c6e846518940954de5bb82cff7a1",
+      "statements": 36,
+      "expectedChanges": 36,
+      "note": "18 队 × （账户 1 + 流水 1）"
+    },
+    {
+      "path": "04-tenure.sql",
+      "bytes": 58758,
+      "sha256": "dfa7a17081a6baf5f7a2581031061dbd60d6af4d3e10717387affda29325490d",
+      "statements": 517,
+      "expectedChanges": 517,
+      "note": "517 份现行合同各 1 行"
+    },
+    {
+      "path": "05-status-records.sql",
+      "bytes": 20644,
+      "sha256": "40abda7814f6b4a69f0b2d836822e856158ce30199a2f3745b86488f14591d88",
+      "statements": 52,
+      "expectedChanges": 46,
+      "note": "保护期收口 24 条语句（其中 18 条真改值）+ 补录 28 行"
+    },
+    {
+      "path": "06-verify.sql",
+      "bytes": 1437,
+      "sha256": "589a6f669c2dffc897b3457dbfa9493301d9785e715abe2d9b8f3b536a2f41ba",
+      "statements": 1,
+      "expectedChanges": 0,
+      "note": "只读，不改任何数据"
+    }
+  ],
+  "rollbackFiles": [
+    {
+      "path": "01-finance-import.sql",
+      "bytes": 12823,
+      "sha256": "2d6b5aa031282d2fd67c5078150e76ae875335c024d0f2255602d6ef59b96887",
+      "statements": 32,
+      "expectedChanges": 32,
+      "note": "16 队 × （账户 −、补偿流水 +）"
+    },
+    {
+      "path": "02-wages.sql",
+      "bytes": 13737,
+      "sha256": "7e47cb3fac76c08e92a4a42935220cc1cea846f2b2d3456daf83382383166002",
+      "statements": 36,
+      "expectedChanges": 36,
+      "note": "18 队 × （账户 +、补偿流水 +）"
+    },
+    {
+      "path": "03-tenure.sql",
+      "bytes": 58237,
+      "sha256": "4dbdb41f07e61a7b83ddb4bb57e0771e07a4269302b40d3e6168ed4a3de9ace5",
+      "statements": 517,
+      "expectedChanges": 517,
+      "note": "517 份合同各 1 行"
+    },
+    {
+      "path": "04-status-records.sql",
+      "bytes": 3450,
+      "sha256": "8ecc84bf140b7db73a19c87d56e884ad256243907089f702bb40f6203c7e3ce4",
+      "statements": 25,
+      "expectedChanges": 52,
+      "note": "删 28 行 + 还原 24 条"
+    }
+  ]
+}

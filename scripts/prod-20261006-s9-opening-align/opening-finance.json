@@ -1,0 +1,30 @@
+{
+  "source": "用户 2026-10-06 图片（联赛 S9 期初财政表，Div.1 12 行 + Div.2 11 行）+ 同消息映射令：「图中巴塞罗那=曼联，勒沃库森=巴塞罗那，拜仁慕尼黑=里昂，斯图加特=拜仁慕尼黑，皇家社会=阿森纳，那不勒斯=皇家马德里」；排除令：「除莱比锡和巴塞罗那外」",
+  "unit": "M（平台货币；与 web/src/pages/admin/FinancePage.tsx 的展示单位一致）",
+  "couponNote": "「消费券」列在平台无对应字段（clubs 表无券列、stadiums.build_credit 全 0）⇒ 本批只留痕不落库（用户 2026-10-06 拍板：先只导财政，券列留痕）",
+  "rows": [
+    { "imgName": "巴黎圣日耳曼", "div": 1, "finance": 119.75, "coupons": null, "clubId": 73, "clubName": "巴黎圣日耳曼", "decision": "import" },
+    { "imgName": "拜仁慕尼黑", "div": 1, "finance": 72.9, "coupons": 12, "clubId": 66, "clubName": "里昂", "decision": "import", "mapped": "图中拜仁慕尼黑 = 平台里昂" },
+    { "imgName": "利物浦", "div": 1, "finance": 119.37, "coupons": 11, "clubId": 9, "clubName": "利物浦", "decision": "import" },
+    { "imgName": "巴塞罗那", "div": 1, "finance": 60.49, "coupons": 7, "clubId": 11, "clubName": "曼联", "decision": "import", "mapped": "图中巴塞罗那 = 平台曼联" },
+    { "imgName": "慕尼黑1860", "div": 1, "finance": 60.83, "coupons": null, "clubId": 33, "clubName": "慕尼黑1860", "decision": "import" },
+    { "imgName": "勒沃库森", "div": 1, "finance": 78.92, "coupons": 20, "clubId": 241, "clubName": "巴塞罗那", "decision": "skip", "skipReason": "用户排除令：除莱比锡和巴塞罗那外（映射：图中勒沃库森 = 平台巴塞罗那 241）" },
+    { "imgName": "纽卡斯尔联", "div": 1, "finance": 53.59, "coupons": null, "clubId": 13, "clubName": "纽卡斯尔联", "decision": "import" },
+    { "imgName": "尤文图斯", "div": 1, "finance": 92.46, "coupons": 17, "clubId": 45, "clubName": "尤文图斯", "decision": "import" },
+    { "imgName": "佛罗伦萨", "div": 1, "finance": 20.16, "coupons": null, "clubId": 110374, "clubName": "佛罗伦萨", "decision": "import" },
+    { "imgName": "切尔西", "div": 1, "finance": 2.05, "coupons": 1, "clubId": 5, "clubName": "切尔西", "decision": "import" },
+    { "imgName": "AC米兰", "div": 1, "finance": 59.6, "coupons": 7, "clubId": 131681, "clubName": "AC米兰(CPU)", "decision": "skip", "skipReason": "平台只有 CPU 队 131681（is_cpu=1），用户令范围为真人队" },
+    { "imgName": "皇家贝蒂斯", "div": 1, "finance": 44.78, "coupons": null, "clubId": 449, "clubName": "皇家贝蒂斯", "decision": "import" },
+    { "imgName": "托特纳姆热刺", "div": 2, "finance": 103.61, "coupons": null, "clubId": null, "clubName": null, "decision": "skip", "skipReason": "平台 clubs 表无此队（20 行已全列，无 teams 表）" },
+    { "imgName": "科莫", "div": 2, "finance": 35.25, "coupons": null, "clubId": null, "clubName": null, "decision": "skip", "skipReason": "平台 clubs 表无此队" },
+    { "imgName": "阿斯顿维拉", "div": 2, "finance": 40.79, "coupons": null, "clubId": 2, "clubName": "阿斯顿维拉", "decision": "import" },
+    { "imgName": "斯图加特", "div": 2, "finance": 78.66, "coupons": 10, "clubId": 21, "clubName": "拜仁慕尼黑", "decision": "import", "mapped": "图中斯图加特 = 平台拜仁慕尼黑" },
+    { "imgName": "皇家社会", "div": 2, "finance": 51.76, "coupons": null, "clubId": 1, "clubName": "阿森纳", "decision": "import", "mapped": "图中皇家社会 = 平台阿森纳" },
+    { "imgName": "曼城", "div": 2, "finance": 8.89, "coupons": null, "clubId": 10, "clubName": "曼城(CPU)", "decision": "skip", "skipReason": "平台只有 CPU 队 10（is_cpu=1），用户令范围为真人队" },
+    { "imgName": "国际米兰", "div": 2, "finance": 58.63, "coupons": 7, "clubId": null, "clubName": null, "decision": "skip", "skipReason": "平台 clubs 表无此队" },
+    { "imgName": "奥林匹亚科斯", "div": 2, "finance": 45.66, "coupons": 1, "clubId": 280, "clubName": "奥林匹亚科斯", "decision": "import" },
+    { "imgName": "诺丁汉森林", "div": 2, "finance": 84.1, "coupons": null, "clubId": 14, "clubName": "诺丁汉森林", "decision": "import" },
+    { "imgName": "RB莱比锡", "div": 2, "finance": 50.6, "coupons": null, "clubId": 112172, "clubName": "RB莱比锡", "decision": "skip", "skipReason": "用户排除令：除莱比锡和巴塞罗那外" },
+    { "imgName": "那不勒斯", "div": 2, "finance": 20.9, "coupons": null, "clubId": 243, "clubName": "皇家马德里", "decision": "import", "mapped": "图中那不勒斯 = 平台皇家马德里" }
+  ]
+}

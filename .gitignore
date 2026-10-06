@@ -36,3 +36,8 @@ scripts/prod-20260921-s9-free-leftover/sql/
 # 随机化批的分片是随机结果本体、不可复现，故入库，只排除可由 02-reroll.sql 反推的 manifest.json。
 scripts/prod-20261005-s9-cpu-contracts/sql/
 scripts/prod-20261005-s9-agent-reroll/sql/manifest.json
+
+# 2026-10-06 期初对齐批（财政导入 + 工资 + 效力 + 标记落点）：写分片可由
+# gen-opening-align.ts 从「一线队-S9.csv + snapshot.json」复现，故分片不入库；
+# manifest.json（字节数/sha256/逐行明细）与只读预检/复查（01/06）、rollback/ 照旧入库。
+scripts/prod-20261006-s9-opening-align/sql/0[2-5]-*.sql
