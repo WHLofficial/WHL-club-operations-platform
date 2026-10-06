@@ -1,0 +1,450 @@
+{
+  "generatedAt": "2026-10-06T04:23:06Z",
+  "batchRefId": 20261006,
+  "totals": {
+    "clawback": 39.74,
+    "topup": 75.2,
+    "delta": 19,
+    "net": 54.46
+  },
+  "perClub": [
+    {
+      "clubId": 1,
+      "name": "阿森纳",
+      "baseline": 35.53,
+      "net": 3.8,
+      "expected": 39.33
+    },
+    {
+      "clubId": 2,
+      "name": "阿斯顿维拉",
+      "baseline": 16.41,
+      "net": 2.51,
+      "expected": 18.92
+    },
+    {
+      "clubId": 14,
+      "name": "诺丁汉森林",
+      "baseline": 88.62,
+      "net": 3.8,
+      "expected": 92.42
+    },
+    {
+      "clubId": 21,
+      "name": "拜仁慕尼黑",
+      "baseline": 55.93,
+      "net": -4.8,
+      "expected": 51.13
+    },
+    {
+      "clubId": 241,
+      "name": "巴塞罗那",
+      "baseline": -61.48,
+      "net": 56.4,
+      "expected": -5.08
+    },
+    {
+      "clubId": 449,
+      "name": "皇家贝蒂斯",
+      "baseline": 69.92,
+      "net": -20.94,
+      "expected": 48.98
+    },
+    {
+      "clubId": 110374,
+      "name": "佛罗伦萨",
+      "baseline": 27.25,
+      "net": 1.89,
+      "expected": 29.14
+    },
+    {
+      "clubId": 112172,
+      "name": "RB莱比锡",
+      "baseline": -57.69,
+      "net": 11.8,
+      "expected": -45.89
+    }
+  ],
+  "woMatches": [
+    {
+      "id": 2,
+      "comp": "champions_cup",
+      "homeTeam": 449,
+      "awayTeam": 112172,
+      "forfeit": "away",
+      "label": "皇家贝蒂斯 vs RB莱比锡（客队弃权）"
+    },
+    {
+      "id": 31,
+      "comp": "league_premier",
+      "homeTeam": 449,
+      "awayTeam": 241,
+      "forfeit": "home",
+      "label": "皇家贝蒂斯 vs 巴塞罗那（主队弃权）"
+    },
+    {
+      "id": 38,
+      "comp": "league_premier",
+      "homeTeam": 110374,
+      "awayTeam": 449,
+      "forfeit": "away",
+      "label": "佛罗伦萨 vs 皇家贝蒂斯（客队弃权）"
+    },
+    {
+      "id": 48,
+      "comp": "league_premier",
+      "homeTeam": 131681,
+      "awayTeam": 449,
+      "forfeit": "away",
+      "label": "AC米兰 vs 皇家贝蒂斯（客队弃权）"
+    },
+    {
+      "id": 165,
+      "comp": "league_second",
+      "homeTeam": 21,
+      "awayTeam": 10,
+      "forfeit": "home",
+      "label": "拜仁慕尼黑 vs 曼城（主队弃权）"
+    },
+    {
+      "id": 166,
+      "comp": "league_second",
+      "homeTeam": 112172,
+      "awayTeam": 1,
+      "forfeit": "home",
+      "label": "RB莱比锡 vs 阿森纳（主队弃权）"
+    },
+    {
+      "id": 169,
+      "comp": "league_second",
+      "homeTeam": 112172,
+      "awayTeam": 21,
+      "forfeit": "home",
+      "label": "RB莱比锡 vs 拜仁慕尼黑（主队弃权）"
+    },
+    {
+      "id": 172,
+      "comp": "league_second",
+      "homeTeam": 2,
+      "awayTeam": 112172,
+      "forfeit": "away",
+      "label": "阿斯顿维拉 vs RB莱比锡（客队弃权）"
+    },
+    {
+      "id": 176,
+      "comp": "league_second",
+      "homeTeam": 112172,
+      "awayTeam": 14,
+      "forfeit": "home",
+      "label": "RB莱比锡 vs 诺丁汉森林（主队弃权）"
+    },
+    {
+      "id": 182,
+      "comp": "league_second",
+      "homeTeam": 10,
+      "awayTeam": 112172,
+      "forfeit": "away",
+      "label": "曼城 vs RB莱比锡（客队弃权）"
+    }
+  ],
+  "clawbacks": [
+    {
+      "clubId": 449,
+      "kind": "prize",
+      "amount": 8.5,
+      "matchId": 31,
+      "originalEntryId": 23,
+      "memo": "弃权场奖金回收（比赛 #31 皇家贝蒂斯 vs 巴塞罗那（主队弃权）；原流水 id=23，-8.50M）"
+    },
+    {
+      "clubId": 449,
+      "kind": "prize",
+      "amount": 8.5,
+      "matchId": 38,
+      "originalEntryId": 40,
+      "memo": "弃权场奖金回收（比赛 #38 佛罗伦萨 vs 皇家贝蒂斯（客队弃权）；原流水 id=40，-8.50M）"
+    },
+    {
+      "clubId": 449,
+      "kind": "prize",
+      "amount": 8.5,
+      "matchId": 48,
+      "originalEntryId": 60,
+      "memo": "弃权场奖金回收（比赛 #48 AC米兰 vs 皇家贝蒂斯（客队弃权）；原流水 id=60，-8.50M）"
+    },
+    {
+      "clubId": 21,
+      "kind": "prize",
+      "amount": 6.7,
+      "matchId": 165,
+      "originalEntryId": 31,
+      "memo": "弃权场奖金回收（比赛 #165 拜仁慕尼黑 vs 曼城（主队弃权）；原流水 id=31，-6.70M）"
+    },
+    {
+      "clubId": 449,
+      "kind": "revenue",
+      "amount": 1.36,
+      "matchId": 2,
+      "originalEntryId": 97,
+      "memo": "弃权场比赛日收入回收（比赛 #2 皇家贝蒂斯 vs RB莱比锡（客队弃权）；原流水 id=97，-1.36M）"
+    },
+    {
+      "clubId": 449,
+      "kind": "revenue",
+      "amount": 1.08,
+      "matchId": 31,
+      "originalEntryId": 24,
+      "memo": "弃权场比赛日收入回收（比赛 #31 皇家贝蒂斯 vs 巴塞罗那（主队弃权）；原流水 id=24，-1.08M）"
+    },
+    {
+      "clubId": 110374,
+      "kind": "revenue",
+      "amount": 1.91,
+      "matchId": 38,
+      "originalEntryId": 42,
+      "memo": "弃权场比赛日收入回收（比赛 #38 佛罗伦萨 vs 皇家贝蒂斯（客队弃权）；原流水 id=42，-1.91M）"
+    },
+    {
+      "clubId": 21,
+      "kind": "revenue",
+      "amount": 1.9,
+      "matchId": 165,
+      "originalEntryId": 32,
+      "memo": "弃权场比赛日收入回收（比赛 #165 拜仁慕尼黑 vs 曼城（主队弃权）；原流水 id=32，-1.90M）"
+    },
+    {
+      "clubId": 2,
+      "kind": "revenue",
+      "amount": 1.29,
+      "matchId": 172,
+      "originalEntryId": 63,
+      "memo": "弃权场比赛日收入回收（比赛 #172 阿斯顿维拉 vs RB莱比锡（客队弃权）；原流水 id=63，-1.29M）"
+    }
+  ],
+  "topups": [
+    {
+      "clubId": 449,
+      "side": "home",
+      "matchId": 2,
+      "amount": 7,
+      "refType": "match_home",
+      "memo": "弃权场胜场奖金（比赛 #2 皇家贝蒂斯 vs RB莱比锡（客队弃权）；原读法把弃权方当胜方，本次订正）"
+    },
+    {
+      "clubId": 241,
+      "side": "away",
+      "matchId": 31,
+      "amount": 8.5,
+      "refType": "match_away",
+      "memo": "弃权场胜场奖金（比赛 #31 皇家贝蒂斯 vs 巴塞罗那（主队弃权）；原读法把弃权方当胜方，本次订正）"
+    },
+    {
+      "clubId": 241,
+      "side": "home",
+      "matchId": 18,
+      "amount": 7,
+      "refType": "match_home",
+      "memo": "联赛胜场奖金（比赛 #18，CPU 期补发）"
+    },
+    {
+      "clubId": 241,
+      "side": "away",
+      "matchId": 27,
+      "amount": 7,
+      "refType": "match_away",
+      "memo": "联赛胜场奖金（比赛 #27，CPU 期补发）"
+    },
+    {
+      "clubId": 241,
+      "side": "home",
+      "matchId": 37,
+      "amount": 4.7,
+      "refType": "match_home",
+      "memo": "联赛出场补贴（比赛 #37，CPU 期补发）"
+    },
+    {
+      "clubId": 241,
+      "side": "away",
+      "matchId": 44,
+      "amount": 4.7,
+      "refType": "match_away",
+      "memo": "联赛出场补贴（比赛 #44，CPU 期补发）"
+    },
+    {
+      "clubId": 241,
+      "side": "away",
+      "matchId": 51,
+      "amount": 4.7,
+      "refType": "match_away",
+      "memo": "联赛出场补贴（比赛 #51，CPU 期补发）"
+    },
+    {
+      "clubId": 241,
+      "side": "away",
+      "matchId": 57,
+      "amount": 4.7,
+      "refType": "match_away",
+      "memo": "联赛出场补贴（比赛 #57，CPU 期补发）"
+    },
+    {
+      "clubId": 241,
+      "side": "home",
+      "matchId": 61,
+      "amount": 8.5,
+      "refType": "match_home",
+      "memo": "联赛胜场奖金（比赛 #61，CPU 期补发）"
+    },
+    {
+      "clubId": 241,
+      "side": "away",
+      "matchId": 70,
+      "amount": 6.6,
+      "refType": "match_away",
+      "memo": "联赛平局奖金（比赛 #70，CPU 期补发）"
+    },
+    {
+      "clubId": 112172,
+      "side": "away",
+      "matchId": 22,
+      "amount": 7,
+      "refType": "match_away",
+      "memo": "联赛胜场奖金（比赛 #22，CPU 期补发）"
+    },
+    {
+      "clubId": 112172,
+      "side": "away",
+      "matchId": 183,
+      "amount": 4.8,
+      "refType": "match_away",
+      "memo": "联赛平局奖金（比赛 #183，CPU 期补发）"
+    }
+  ],
+  "deltaTopups": [
+    {
+      "clubId": 110374,
+      "side": "home",
+      "matchId": 38,
+      "amount": 3.8,
+      "refType": "match_home_fix",
+      "memo": "弃权场胜负订正差额（比赛 #38：出场补贴 4.70 → 胜场奖金 8.50，原流水 id=41）"
+    },
+    {
+      "clubId": 1,
+      "side": "away",
+      "matchId": 166,
+      "amount": 3.8,
+      "refType": "match_away_fix",
+      "memo": "弃权场胜负订正差额（比赛 #166：出场补贴 2.90 → 胜场奖金 6.70，原流水 id=33）"
+    },
+    {
+      "clubId": 21,
+      "side": "away",
+      "matchId": 169,
+      "amount": 3.8,
+      "refType": "match_away_fix",
+      "memo": "弃权场胜负订正差额（比赛 #169：出场补贴 2.90 → 胜场奖金 6.70，原流水 id=64）"
+    },
+    {
+      "clubId": 2,
+      "side": "home",
+      "matchId": 172,
+      "amount": 3.8,
+      "refType": "match_home_fix",
+      "memo": "弃权场胜负订正差额（比赛 #172：出场补贴 2.90 → 胜场奖金 6.70，原流水 id=62）"
+    },
+    {
+      "clubId": 14,
+      "side": "away",
+      "matchId": 176,
+      "amount": 3.8,
+      "refType": "match_away_fix",
+      "memo": "弃权场胜负订正差额（比赛 #176：出场补贴 2.90 → 胜场奖金 6.70，原流水 id=108）"
+    }
+  ],
+  "attendanceCleanup": [
+    {
+      "matchId": 2,
+      "clubId": 449,
+      "attendance": 9081,
+      "ticket": 1.36,
+      "commercial": 0,
+      "broadcast": 0
+    },
+    {
+      "matchId": 31,
+      "clubId": 449,
+      "attendance": 7202,
+      "ticket": 1.08,
+      "commercial": 0,
+      "broadcast": 0
+    },
+    {
+      "matchId": 38,
+      "clubId": 110374,
+      "attendance": 12735,
+      "ticket": 1.91,
+      "commercial": 0,
+      "broadcast": 0
+    },
+    {
+      "matchId": 165,
+      "clubId": 21,
+      "attendance": 12699,
+      "ticket": 1.9,
+      "commercial": 0,
+      "broadcast": 0
+    },
+    {
+      "matchId": 172,
+      "clubId": 2,
+      "attendance": 8575,
+      "ticket": 1.29,
+      "commercial": 0,
+      "broadcast": 0
+    }
+  ],
+  "files": [
+    {
+      "file": "sql/02-clawback.sql",
+      "bytes": 10296,
+      "sha256": "2f6f2785d16c8eeef3ca670afd51ffb33f2cb6978539562fc53db86253d2cf35",
+      "statements": 18
+    },
+    {
+      "file": "sql/03-topup-missing.sql",
+      "bytes": 11959,
+      "sha256": "26578de03070fde6de71ba9fb9d251ecbbfbf388e52566873c03a89e762fd53a",
+      "statements": 24
+    },
+    {
+      "file": "sql/04-topup-delta.sql",
+      "bytes": 5520,
+      "sha256": "17676ce5a66dbebab57679a48f43de6c3f3c21f1f3950646b70e2b9ea1056a08",
+      "statements": 10
+    },
+    {
+      "file": "sql/05-verify.sql",
+      "bytes": 2046,
+      "sha256": "492ef945c96d68f070fa6f9f3a79f2e4816f24a373455eb01b42ce375c112744",
+      "statements": 1
+    },
+    {
+      "file": "sql/06-attendance-cleanup.sql",
+      "bytes": 2271,
+      "sha256": "b660a2d12802a246fd89e8bae0b19b21fdf50e210486d96b9719a3d6b92ddbd3",
+      "statements": 5
+    },
+    {
+      "file": "rollback/01-undo.sql",
+      "bytes": 30943,
+      "sha256": "0f80a98d9f26d34f03f6a2102b8f37637b10771ef4cd7887578b5192a5a0c95a",
+      "statements": 52
+    },
+    {
+      "file": "rollback/05-attendance-restore.sql",
+      "bytes": 1773,
+      "sha256": "0114fe559eb29b2bfc49e74f6ac60e7fb76b4c22b6b5a0997c66e84e27df3f5a",
+      "statements": 5
+    }
+  ]
+}

@@ -114,6 +114,8 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 [--guard 'AC米兰(
 
 消费券列（用户令 2026-10-06「先只导财政」）未落库，值留痕在该目录 `opening-finance.json` 与 README §2.1。
 
+| `prod-20261006-s9-walkover-fix/` | **S9 弃权场奖金订正**（用户令 2026-10-06「查询巴塞罗那和莱比锡赛果并按赛果发场次奖金」+「弃权场败方不发钱，检查全库，收回这些奖金，并修订规则」+「这些原则要在代码层面修复」）：全库 10 场弃权场上 ① 收回弃权方错发的胜场奖金与弃权场比赛日收入 9 笔 39.74 m ② 补发弃权场胜方 + 两队 CPU 期被跳过的赛果奖金 12 笔 75.20 m ③ 真胜者「出场补贴 → 胜场奖金」差额 5 笔 19.00 m（净 +54.46 m）④ 5 场残留 `match_attendance` 行的收入四件套清零（行与 weather 保留）。根因 = `walkover_side` 记的是**弃权方（判负方）**，平台当胜方读；代码修订另枚（`src/core/walkover.ts` + 8 处读者，见该目录 README §7.1）。生成器 `gen-walkover-fix.ts`（含 `--verify` 只读复核 + `selfCheck()` 硬断言 + `--ts=` 复现时间戳）+ 预检/复查 + `rollback/` 两件 + README/report | **已执行**（2026-10-06 经 `exec-shards.mjs --remote`：9 批 / 57 语句 / **changes 57**（18 + 24 + 10 + 5）、失败批 0；`--verify` 差异 0（逐队余额 8/8、收回键 9/9、补发键 12/12、差额键 5/5、上座行 5/5 已清零、守恒 0）；逐队余额见该目录 README §2.4；未跑回滚） |
+
 ## revenue-import/
 
 从 revenue 插件库迁主场域数据（只迁 `stadiums` / `club_facilities`）。

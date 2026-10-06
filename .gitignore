@@ -41,3 +41,8 @@ scripts/prod-20261005-s9-agent-reroll/sql/manifest.json
 # gen-opening-align.ts 从「一线队-S9.csv + snapshot.json」复现，故分片不入库；
 # manifest.json（字节数/sha256/逐行明细）与只读预检/复查（01/06）、rollback/ 照旧入库。
 scripts/prod-20261006-s9-opening-align/sql/0[2-5]-*.sql
+
+# 2026-10-06 弃权场奖金订正批（收回 + 补发 + 上座清零）：写分片（02/03/04/06）可由
+# gen-walkover-fix.ts 用 --ts=2026-10-06T04:23:06Z 逐字复现（报告含 sha256），故分片不入库；
+# manifest.json（逐笔明细）、只读预检/复查（01/05）、rollback/ 与报告照旧入库。
+scripts/prod-20261006-s9-walkover-fix/sql/0[2346]-*.sql
