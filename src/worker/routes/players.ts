@@ -4,7 +4,6 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
-import { createConfigService } from '../../core/config.ts';
 import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId } from '../../core/fc26.ts';
 import { serviceSeasons, freeAgentFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
@@ -15,7 +14,7 @@ import { getOpenWindow } from '../seasons.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
 import { MARKER_VALUES, MARKER_WEIGHT, markerOf, markerWeightSql, type PlayerMarker } from '../../core/squad-rules.ts';
-import { playerAbilityLevel } from '../home.ts';
+import { influenceCoefs, influenceOf } from '../influence.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -178,27 +177,6 @@ function influenceExpr(coefs: { g: number; s: number }): string {
   return `(ROUND(CASE WHEN players.growable = 1 AND players.ca IS NOT NULL AND players.pa IS NOT NULL
     THEN ${g} * ((${tierCa} + ${tierPa}) / 2.0) * COALESCE(players.prestige, 0)
     ELSE ${s} * ${tierCa} * COALESCE(players.prestige, 0) END, 2))`;
-}
-
-// JS 镜像：响应里的 influence 用现值 CA/PA 算（与 SQL 表达式必须逐位一致，翻页游标两端对齐）
-function influenceOf(coefs: { g: number; s: number }, ca: number | null, pa: number | null, growable: boolean, prestige: number | null): number {
-  const coef = growable ? coefs.g : coefs.s;
-  return Math.round(coef * playerAbilityLevel(ca, pa, growable ? 1 : 0) * (prestige ?? 0) * 100) / 100;
-}
-
-async function influenceCoefs(db: Env['DB']): Promise<{ g: number; s: number }> {
-  try {
-    const raw = await createConfigService(db).get('attendance_model');
-    if (raw) {
-      const model = JSON.parse(raw) as { influence_coef_growable?: unknown; influence_coef_static?: unknown };
-      const g = Number(model.influence_coef_growable);
-      const s = Number(model.influence_coef_static);
-      if (Number.isFinite(g) && g >= 0 && g <= 1 && Number.isFinite(s) && s >= 0 && s <= 1) return { g, s };
-    }
-  } catch {
-    // 配置缺失或坏 JSON：退回规则 4.1.3 原文系数
-  }
-  return { g: 0.25, s: 0.13 };
 }
 
 // GET /api/players —— 球员库列表

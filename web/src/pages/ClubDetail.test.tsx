@@ -258,6 +258,7 @@ function deskPlayer(patch: Partial<SquadPlayerRow> & { id: number; name: string 
     isFutureStar: false,
     chinaPlan: false,
     prestige: 0,
+    influence: 0,
     status: 'normal',
     marketValue: 10,
     foot: 1,

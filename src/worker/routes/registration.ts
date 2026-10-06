@@ -14,6 +14,7 @@ import { loadRegistrationCheckMode, loadSquadContext } from '../squad-context.ts
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, tierCache } from '../tier.ts';
 import { rowDisplayName } from '../../core/player-name.ts';
+import { influenceCoefs, influenceOf } from '../influence.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -134,7 +135,7 @@ app.get('/club/squad', async (c) => {
   const season = await getVisibleSeason(c.env.DB);
   const cache = tierCache();
   const tier = await deriveClubTier(c.env, season, club.id, cache);
-  const [players, contractMap, regRows, rules] = await Promise.all([
+  const [players, contractMap, regRows, rules, inflCoefs] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
     season
@@ -144,6 +145,8 @@ app.get('/club/squad', async (c) => {
       : Promise.resolve({ results: [] as { player_id: number; squad: string }[] }),
     // v1.2.0：未报名定级赛事时 rules 置空，前端挂红色「未报名」状态条
     tier !== null ? loadSquadContext(c.env.DB, tier) : Promise.resolve(null),
+    // v6.37.0：名单卡的市场视图要下发影响力（与 /api/players 同源系数与 JS 镜像）
+    influenceCoefs(c.env.DB),
   ]);
 
   const squadByPlayer = new Map(regRows.results.map((r) => [r.player_id, r.squad]));
@@ -182,6 +185,8 @@ app.get('/club/squad', async (c) => {
         isFutureStar: p.is_future_star === 1,
         chinaPlan: p.china_plan === 1,
         prestige: p.prestige,
+        // 影响力（v6.37.0）：与 /api/players 同源（influenceOf 镜像，现值 CA/PA 口径）
+        influence: influenceOf(inflCoefs, p.ca, p.pa, p.growable === 1, p.prestige),
         status: p.status,
         marketValue: p.market_value,
         foot: p.foot,

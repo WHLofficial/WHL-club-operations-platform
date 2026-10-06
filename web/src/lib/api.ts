@@ -624,6 +624,8 @@ export interface SquadPlayerRow {
   isFutureStar: boolean;
   chinaPlan: boolean;
   prestige: number | null;
+  /** 影响力（v6.37.0）：与 /api/players 同源口径，市场视图列用 */
+  influence: number;
   status: string;
   marketValue: number | null;
   foot: number | null;
