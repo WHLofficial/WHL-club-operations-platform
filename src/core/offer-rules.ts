@@ -12,10 +12,12 @@ export type OfferTurn = 'buyer' | 'seller';
 
 /**
  * 报价金额校验（设计 §8 送报价验收：<1、>1.5×RC 越界；名单球员低于线不是 400，走 auto_reject 落库）。
+ * v6.37.0：报价取整（用户裁决「违约金和出价、激活价都保留到整数」，与挂牌出价 market-rules 同口径）。
  * 返回可读错误，null = 通过。
  */
 export function validateOfferAmount(amount: number, releaseFee: number | null): string | null {
   if (!Number.isFinite(amount) || amount < OFFER_ABSOLUTE_FLOOR) return `报价至少 ${OFFER_ABSOLUTE_FLOOR} m`;
+  if (!Number.isInteger(amount)) return '报价必须为整数';
   if (releaseFee === null || !Number.isFinite(releaseFee) || releaseFee <= 0) return '这名球员没有含违约金的现行合同，谈不了报价';
   const max = round2(releaseFee * OFFER_CAP_RC);
   if (amount > max) return `报价不能超过 ${max} m（违约金 ${OFFER_CAP_RC} 倍上限）`;

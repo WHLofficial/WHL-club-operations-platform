@@ -181,7 +181,7 @@ describe('普通球员激活（倍数价）', () => {
     expect(player?.status).toBe('listed');
   });
 
-  it('评审修复 P0-1：非整数激活价（RC21 保护期 ×1.5 = 31.5）激活方原样落首价 → 转公开竞价；抬价仍须整数', async () => {
+  it('v6.37.0 激活价取整：RC21 保护期 ×1.5 = 31.5 → 32，激活方原样落首价 → 转公开竞价；出价仍须整数', async () => {
     const fx = await seedActivation(freshEnv());
     fx.sqlite.exec(
       `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
@@ -192,11 +192,11 @@ describe('普通球员激活（倍数价）', () => {
     const act = await post('/api/transfers/activation', { playerId: 33, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
     expect(act.status).toBe(201);
     const actBody = (await act.json()) as { listingId: number; askPrice: number };
-    expect(actBody.askPrice).toBe(31.5); // 21 × 1.5（保护期内且 releaseFee > 20）
-    const listingId = actBody.listingId;
+    expect(actBody.askPrice).toBe(32); // 21 × 1.5 = 31.5，v6.37.0 起四舍五入取整
 
-    // 首价路径脱离整数准入：激活方按激活价 31.5 原样落价即成功（旧实现被「出价必须为整数」拒死）
-    const first = await post(`/api/market/listings/${listingId}/bids`, { amount: 31.5 }, 'tok-coach2', fx.env);
+    // 首价 = 激活价 32，整数后正常走「出价必须为整数」准入
+    const listingId = actBody.listingId;
+    const first = await post(`/api/market/listings/${listingId}/bids`, { amount: 32 }, 'tok-coach2', fx.env);
     expect(first.status).toBe(201);
     expect(((await first.json()) as { matchPhase?: string }).matchPhase).toBe('bidding');
     const row = sqlGet<{ status: string; deadline_at: string | null; activation_deadline: string | null }>(
@@ -208,7 +208,7 @@ describe('普通球员激活（倍数价）', () => {
     expect(row?.deadline_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(row?.activation_deadline).toBeNull();
 
-    // P2-②：最低抬价向上取整（ceil(31.5 + 1) = 33），不回传提交必被拒的 32.5
+    // P2-②：最低抬价向上取整（ceil(32 + 1) = 33）
     const detail = await get(`/api/market/listings/${listingId}`, 'tok-coach3', fx.env);
     expect(((await detail.json()) as { listing: { nextMinBid: number } }).listing.nextMinBid).toBe(33);
 
@@ -224,7 +224,7 @@ describe('普通球员激活（倍数价）', () => {
     const raise = await post(`/api/market/listings/${listingId}/bids`, { amount: 33 }, 'tok-coach3', fx.env);
     expect(raise.status).toBe(201);
     expect(sqlAll<{ status: string; amount: number }>(fx.sqlite, 'SELECT status, amount FROM bids ORDER BY id')).toEqual([
-      { status: 'superseded', amount: 31.5 },
+      { status: 'superseded', amount: 32 },
       { status: 'active', amount: 33 },
     ]);
   });

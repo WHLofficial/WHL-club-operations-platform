@@ -57,7 +57,11 @@ describe('activationFee（激活倍数 4.4.2.3）', () => {
   });
   it('激活边界：RC=20 整点按 2 倍（规则「≤20」）', () => {
     expect(activationFee(20, 3, 0)).toBe(40);
-    expect(activationFee(21, 3, 0)).toBe(31.5);
+  });
+  it('v6.37.0 激活价取整：1.5 倍产生的 .5 四舍五入', () => {
+    expect(activationFee(21, 3, 0)).toBe(32); // 31.5 → 32
+    expect(activationFee(23, 3, 0)).toBe(35); // 34.5 → 35
+    expect(activationFee(27, 3, 0)).toBe(41); // 40.5 → 41
   });
 });
 

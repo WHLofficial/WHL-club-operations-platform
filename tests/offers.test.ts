@@ -173,6 +173,10 @@ describe('送报价（设计 §8 六拒 + 冻结）', () => {
     fx.sqlite.exec("UPDATE players SET status = 'normal' WHERE id = 1");
     expect((await place(fx, 1, 0.5)).status).toBe(400);
     expect((await place(fx, 1, 75.01)).status).toBe(400); // 1.5×RC=75
+    // v6.37.0 报价取整：小数金额可读拒绝（与挂牌出价同口径；放在 75 成功单前，免撞同买方重复 409）
+    const frac = await place(fx, 1, 30.5);
+    expect(frac.status).toBe(400);
+    expect(((await frac.json()) as OfferOut).error).toBe('报价必须为整数');
     expect((await place(fx, 1, 75)).status).toBe(201);
 
     const dup = await place(fx, 1, 40);

@@ -41,11 +41,13 @@ export function protectionTicksFor(serviceTicks: number, contractType: string): 
 /**
  * 激活金额（4.4.2.3，非训练营球员）：保护期内 RC≤20m → 2 倍，>20m → 1.5 倍；
  * 保护期外固定 1 倍。训练营球员固定 5m（TRAINEE_ACTIVATION_FEE，market-rules）。
+ * v6.37.0：激活金额取整（用户裁决「违约金和出价、激活价都保留到整数」），
+ * 1.5 倍产生的 .5 四舍五入（21 → 31.5 → 32）；违约金本体在入口已整数校验。
  */
 export function activationFee(releaseFee: number, protectionTicks: number | null, currentTicks: number): number {
   if (!Number.isFinite(releaseFee) || releaseFee <= 0) throw new RangeError('违约金须为正数');
   const mult = isProtected(protectionTicks, currentTicks) ? (releaseFee <= 20 ? 2 : 1.5) : 1;
-  return round2(releaseFee * mult);
+  return Math.round(releaseFee * mult);
 }
 
 /** 解约费（4.4.4）：效力满 3 年（6 个常规窗）免费；其余 = RC×(3−效力)×0.1 */
