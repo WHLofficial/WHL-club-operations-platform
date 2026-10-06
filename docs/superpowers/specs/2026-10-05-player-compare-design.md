@@ -185,3 +185,12 @@
 ## 15. 版本
 
 判级 **minor**（新页面＋新入口，新增用户可见能力）；唯一后端增量＝详情响应补字段（零迁移、零生产写）。版本号不预设：开工时取当时 HEAD 版本号 +1（spec 时点 package.json 6.33.0 在途 ⇒ 预计 **6.34.0**，以实测为准）。
+
+## 16. v6.37.0 修订：入口 B 改页内浮层选人
+
+2026-10-06 用户拍板（本节取代 §1 入口 B 的「点击跳转」条款，其余契约不变）：
+
+- **交互形态**：详情页「⇄ 加入对比」由跳转链接改为**页内浮层**（`web/src/pages/player/ComparePickerOverlay.tsx`）。浮层内搜索球员（复用 `['players-roster']` 名册缓存 + `suggestPlayers` 本地过滤，零逐键请求）、点选入槽（自己恒占槽 A 色随 `COMPARE_COLORS`）、确认后 `onConfirm([own, ...picked])` 才 `navigate('/players/compare?ids=…')`。原「点击入口直接落 1 人态」的行为作废——入口不再直达 1 人态，1 人态仅由 URL 直达或后续移除产生。
+- **不变**：§0 裁决 10 的入口位置（CA/PA 数字行下方）、§8 URL 即事实源 / 不落库 / 色随人走、§9 库页勾选上限 3 与 n≥2 才可点、`COMPARE_MAX=3`、窄屏底部抽屉形态（≤760px，照 `.mkt-ov` 配方）。
+- **连带修正（bug 修复，非契约变更）**：对比页一人态「＋ 从球员库选」回球员库时带 `?compare=<fcId>` 预置勾选本球员（原先裸 `/players` 丢掉当前球员）；球员页 `.player-card-compare` 容器补上此前缺失的布局 CSS。
+- **验收记录**：测试计划 `docs/test-plans/v6.37.0-compare-entry-overlay.md`（TC-CMP-PICK-01…09 + 变异 M1–M5 全命中）；vitest 103 文件 / 1726 例全绿、e2e 23/23（⑤f 改写为浮层链路：1a 浮层初始态与 Esc 关闭 / 1b 搜索入槽确认落 2 人态 / 1c 一人态 URL 直达保留形态回归）。

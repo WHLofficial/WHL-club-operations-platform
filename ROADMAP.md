@@ -1510,7 +1510,28 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **测试与评审**：测试计划 `docs/test-plans/v6.37.0-club-tables-to-cards.md`（qa-test-planner 设计，TC-GRP/BDG/FEE/VIEW/CARD/GATE 六域 24 例，变异节留痕已回填）。变异验证 5 点全命中：① `groupRowsByPosition` 丢 unknown 档→2 红；② `inlineBadgesOf` 无合同提链首→首轮空转（夹具无交叉行）→补钉「四态>无合同」后 1 红；③ `activationFeeOf` 非保护 ×1→×1.5→2 红；④ `parseCardExtras` 去内置键过滤→首轮空转（夹具 wage 本就被上游滤）→改 marketValue/baseCa 夹具后 1 红；⑤ 死选择器探针塞回 styles.css→死选择器回归锁 1 红。code-review-skill 审 4 提交：无阻塞；2 条 🟢 a11y 备注登记不改（见下）。工作区卫生：styles.css 与并行会话（球员对比模块）混两会改动，按 hunk 拆分 `git apply --cached` 只暂存本会话段，提交不含对方 `.cmp-picker-*`/`.player-card-compare` 内容。
 
-**已知不改（登记）**：① 列头 `.sqc-gcols` aria-hidden 且值格无列语义，读屏用户丢列头（视觉优先定稿的代价，后续可补 aria-label）；② `ViewChips` `role=tablist` 无 tabpanel 关联；③ 窄屏真机触控目标高度未实测（下拉按钮行高 ≈36px）；④ **版本号撞车风险**：并行会话球员对比模块在途改动的测试计划同为 `docs/test-plans/v6.37.0-compare-entry-overlay.md`，其收口时需另择版本号（建议 6.38.0）。
+**已知不改（登记）**：① 列头 `.sqc-gcols` aria-hidden 且值格无列语义，读屏用户丢列头（视觉优先定稿的代价，后续可补 aria-label）；② `ViewChips` `role=tablist` 无 tabpanel 关联；③ 窄屏真机触控目标高度未实测（下拉按钮行高 ≈36px）；④ **版本号撞车风险**：并行会话球员对比模块在途改动的测试计划同为 `docs/test-plans/v6.37.0-compare-entry-overlay.md` ⇒ **收口裁决（2026-10-06）**：按用户指令「并行会话和你做的同属一个版本号，不要多 bump」，同版收口于 v6.37.0（见下节）。
+
+---
+
+## v6.37.0（续）· 球员对比入口浮层选人（同版第二模块，2026-10-06）
+
+**本地收口待发布**（未 push、未部署；提交链 `3ba82c2` feat(web) + `7990a9c` fix(compare) + `200f554` test(e2e) + 本枚 docs 收口；**零迁移、零生产写**）。与上一节（球队页两表弃表改卡）同属 v6.37.0：开工时用户指令「并行会话和你做的同属一个版本号，不要多 bump」⇒ package.json 维持 6.37.0，CHANGELOG 在同节并列两模块。
+
+**缘起与裁决**：
+- 用户报两 bug：详情页「⇄ 加入对比」按钮位置异常（`.player-card-compare` 容器零 CSS）+ 一人态回球员库再选另一人时第一名没勾上（裸 `/players` 丢 `?compare=`）。方案 A（修补跳转流，~10 行）vs 方案 B（页内浮层），用户拍板 **B** 并要求深入探索细化；UI 经 visual companion 画板定稿（m00164「没问题，定稿」）。
+- **数据源**：浮层搜索复用球员库搜索框的 `['players-roster']` 名册缓存 + 本地 `suggestPlayers` 过滤，零逐键请求——`/api/players?name=` 是贵形状（%词% 前导通配双列 OR 全表扫 18,301 行/次、逐键前缀全 miss 挤占 L1），逐键打会重演 2026-09-21 的 D1 免费日读打爆事故。
+- **契约**：入口 B 由「点击跳 1 人态」改浮层属实质契约变更 ⇒ spec §16 修订节登记；§0 入口位置 / §8 URL 即事实源 / §9 库勾选与 `COMPARE_MAX=3` 不变；顺带把两条 bug 修复（一人态补参、入口容器 CSS）一并入账。
+
+**交付**：
+- 新建 `web/src/pages/player/ComparePickerOverlay.tsx`：壳照 `MarketListingOverlay`（createPortal / 遮罩点击关 / panel `role=dialog aria-modal` / ✕ / ≤760px 底部抽屉 + safe-area + reduced-motion），焦点陷阱 + 锁滚 + 焦点归位照 `PlayersLibrary` 抽屉（**仓库第三份副本**，暂不抽公共件）；槽位固定 3 格、自己恒占 A 色（`colorFor` 色随人走）、候选排除自己、已选行保留显 ✓ 再点移除、确认 `onConfirm([own, ...picked])` 才导航；`styles.css` 新增 `.cmp-picker-*` 全组（配方照 `.mkt-ov`，z-index 900）+ 补 `.player-card-compare`。
+- `Player.tsx` 入口 Link→button（onClick stopPropagation + 开浮层）；`PlayerCompare.tsx` 一人态链接补 `?compare=<ready[0].id>`；测试计划 `docs/test-plans/v6.37.0-compare-entry-overlay.md`；spec §16。
+
+**验收**：typecheck 三份 0 error；vitest **103 文件 / 1726 例**全绿；e2e **23/23**（⑤f 改写：1a 浮层初始态 + Esc 关 / 1b 搜索入槽确认落 2 人态 / 1c 一人态 URL 直达保留形态回归）；变异验证 M1–M5 全命中（拆确认闸 → PICK-02 红 / 上限 2→3 → PICK-05 红 / 删排除自己 → PICK-05 红 / ids 顺序翻转 → PICK-04 红 / 一人态退回裸 `/players` → TC-CMP-URL-05 红）；code-review（code-review-skill 四阶段）**P0 0 / P1 0**，🟢 5 条登记不改（空查询只显提示不出默认候选——名册 96.9% 自由身默认 8 条全是噪音；满员阈值 2 双处硬编码由 M2 钉住；toast z-index 100 低于浮层 900 沿用 `.mkt-ov` 既有口径；入口按钮 stopPropagation 是 React 合成事件外的无害保险；e2e `hasText` 子串匹配有下游 URL 断言自证）。
+
+**教训（已入记忆）**：球员页规范 URL 效果（v4.0.0，`playerPath` 落定后 `navigate(replace)`）会重挂载整页——测试从内部 id 地址进时第一下点击落在被 React 换掉的游离节点上（onClick 不触发），**测试必须直接从 fc_id 地址进**（`Player.test.tsx` openPicker 已留注释）；HTML mockup 一键内联调试曾踩 display:flex 覆盖 `[hidden]` 与 innerHTML 重排致遮罩误判「点外」两坑，真实现用 React 条件渲染 + 「遮罩 onClick + 面板 stopPropagation」模式天然规避。
+
+**待办**：随上一节一起待发布（push 授权后同轮上线）；焦点陷阱已是仓库第三份副本，若出现第四处再抽共享件（登记不做）。
 
 ---
 
