@@ -368,6 +368,7 @@ async function runHooks(
       windowSeq: binding.window_seq,
       homeTeamId: m.home_team_id,
       awayTeamId: m.away_team_id,
+      walkoverSide: m.walkover_side,
     });
     if (home.statements.length > 0) await env.DB.batch(home.statements);
   } catch (err) {

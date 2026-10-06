@@ -19,6 +19,7 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createConfigService } from '../core/config.ts';
+import { walkoverLoser } from '../core/walkover.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
@@ -322,14 +323,16 @@ export interface EventResultRow {
   walkover_side: string | null;
 }
 
-/** 该队最近一场已确认赛果的胜负记号（弃权按取胜方；点球决胜按平——与 home.ts formPtsOf 战绩口径一致）。
- *  行按 id DESC 传入，取第一条涉及该队的。 */
+/** 该队最近一场已确认赛果的胜负记号（**弃权按弃权方判负**——walkover_side 记的是弃权方，见 core/walkover.ts；
+ *  点球决胜按平——与 home.ts formPtsOf 战绩口径一致）。行按 id DESC 传入，取第一条涉及该队的。 */
 export function lastResultOf(rows: EventResultRow[], tourTeamId: number): 'W' | 'D' | 'L' | null {
   for (const r of rows) {
     if (r.home_team_id === null || r.away_team_id === null) continue;
     if (r.home_team_id !== tourTeamId && r.away_team_id !== tourTeamId) continue;
-    if (r.walkover_side === 'home') return r.home_team_id === tourTeamId ? 'W' : 'L';
-    if (r.walkover_side === 'away') return r.away_team_id === tourTeamId ? 'W' : 'L';
+    if (r.walkover_side === 'home' || r.walkover_side === 'away' || r.walkover_side === 'both') {
+      const ours = r.home_team_id === tourTeamId ? 'home' : 'away';
+      return walkoverLoser(r.walkover_side, ours) ? 'L' : 'W';
+    }
     if (r.score_home === null || r.score_away === null) continue;
     if (r.score_home === r.score_away) return 'D';
     const winnerIsHome = r.score_home > r.score_away;

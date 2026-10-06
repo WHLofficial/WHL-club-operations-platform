@@ -868,8 +868,10 @@ app.get('/club/home-matches', async (c) => {
   const matches = rows.results.map((r) => {
     let result: string | null = null;
     let scoreText: string | null = null;
-    if (r.walkover_side === 'home') result = '弃权胜';
-    else if (r.walkover_side === 'away') result = '弃权负';
+    // 本表只收自家主场（attendance 行只在主队侧写），故本队恒为 home：
+    // walkover_side 记的是弃权方 ⇒ 'home' = 本队弃权判负，'away' = 客队弃权（本队胜）。
+    if (r.walkover_side === 'home') result = '弃权负';
+    else if (r.walkover_side === 'away') result = '弃权胜';
     else if (r.score_home !== null && r.score_away !== null) {
       scoreText = `${r.score_home}:${r.score_away}`;
       if (r.pen_home !== null && r.pen_away !== null) result = r.pen_home > r.pen_away ? '点球胜' : r.pen_home < r.pen_away ? '点球负' : '平';

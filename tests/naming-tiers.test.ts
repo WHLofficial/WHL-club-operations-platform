@@ -180,16 +180,19 @@ describe('两信号情绪演化（TC-EVO）', () => {
     expect(satisfactionDelta(SAT, 0, -1, 0.75)).toBeCloseTo(-0.01125);
   });
 
-  it('TC-EVO-02 windowWinRate 口径：点球按平、弃权按取胜方、双方弃权不计、无场次 null', () => {
-    // 1 胜（弃权）1 平（点球决胜按平）1 负 → 1/3
+  it('TC-EVO-02 windowWinRate 口径：点球按平、弃权按弃权方判负、双方弃权各记一负、无场次 null', () => {
+    // 1 胜（客队弃权）1 平（点球决胜按平）1 负 → 1/3
     const rows = [
-      row({ home: 101, away: 102, walkover: 'home' }),
+      row({ home: 101, away: 102, walkover: 'away' }),
       row({ home: 101, away: 103, scoreHome: 1, scoreAway: 1, penHome: 5, penAway: 3 }),
       row({ home: 104, away: 101, scoreHome: 2, scoreAway: 0 }),
     ];
     expect(windowWinRate(rows, 101)).toBeCloseTo(1 / 3);
     expect(windowWinRate(rows, 103)).toBe(0); // 点球战胜方按平计：103 不拿胜场（变异防线：只看 101 抓不到）
-    // 双方弃权（无弃权侧无比分）与队 id 缺失的脏行不计名额
+    // 弃权方判负：主队 101 弃权 → 0；双弃权双方各记一负 → 0（都不产生胜场）
+    expect(windowWinRate([row({ home: 101, away: 102, walkover: 'home' })], 101)).toBe(0);
+    expect(windowWinRate([row({ home: 101, away: 102, walkover: 'both' })], 101)).toBe(0);
+    // 未打完（无比分、无弃权标记）与队 id 缺失的脏行不计名额
     const rows2 = [
       row({ home: 101, away: 102 }),
       row({ home: null, away: 101, scoreHome: 3, scoreAway: 0 }),
@@ -303,12 +306,12 @@ describe('签约档位名额守卫（TC-QUOTA）', () => {
 // ─── TC-CHAMP ────────────────────────────────────────────────────────────────
 
 describe('联赛冠军加成（TC-CHAMP）', () => {
-  it('TC-CHAMP-01 积分表：胜3平1负0、点球按平、弃权判负 3:0、双方弃权不计', () => {
+  it('TC-CHAMP-01 积分表：胜3平1负0、点球按平、弃权按弃权方判负 3:0、未打完不计', () => {
     const rows = [
       row({ home: 101, away: 102, scoreHome: 2, scoreAway: 1 }), // 101 胜 +3 分 +2 球
       row({ home: 101, away: 103, scoreHome: 1, scoreAway: 1, penHome: 5, penAway: 3 }), // 点球按平
-      row({ home: 104, away: 101, walkover: 'home' }), // 101 判负 −3 净胜球
-      row({ home: 102, away: 103 }), // 双方弃权不计
+      row({ home: 104, away: 101, walkover: 'away' }), // 客队 101 弃权 ⇒ 101 判负 −3 净胜球
+      row({ home: 102, away: 103 }), // 未打完（无比分、无弃权标记）不计
     ];
     const table = new Map(leagueStandings(rows).map((r) => [r.teamId, r]));
     expect(table.get(101)).toMatchObject({ pts: 4, gd: -2 }); // 3+1 分；净胜 (2−1) + 0 − 3

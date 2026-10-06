@@ -272,7 +272,7 @@ describe('v6.28.0 C 段：纯函数逐位对拍（engine vs home.ts）', () => {
 
   it('formPtsOf / rollWeather / uniform / asRange：与运行期同值', async () => {
     const model = await loadAttendanceModel(freshEnv().env.DB);
-    // formPtsOf：null 分数跳过、弃权按胜负计、和局 1 分、胜 3 分、只数最近 3 场（不足 3 场 → 中性 4）
+    // formPtsOf：null 分数跳过、弃权按弃权方判负、和局 1 分、胜 3 分、只数最近 3 场（不足 3 场 → 中性 4）
     type FormRow = {
       home_team_id: number | null;
       away_team_id: number | null;
@@ -285,13 +285,13 @@ describe('v6.28.0 C 段：纯函数逐位对拍（engine vs home.ts）', () => {
     const rows: FormRow[] = [
       { home_team_id: 11, away_team_id: 12, score_home: 2, score_away: 0, pen_home: null, pen_away: null, walkover_side: null }, // ① 胜 → 3
       { home_team_id: 13, away_team_id: 11, score_home: 1, score_away: 1, pen_home: null, pen_away: null, walkover_side: null }, // ② 平 → 1
-      { home_team_id: 11, away_team_id: 14, score_home: null, score_away: null, pen_home: null, pen_away: null, walkover_side: 'away' }, // ③ 主队弃权 → 11 负 → 0
+      { home_team_id: 11, away_team_id: 14, score_home: null, score_away: null, pen_home: null, pen_away: null, walkover_side: 'away' }, // ③ 客队弃权 → 11 胜 → 3
       { home_team_id: 11, away_team_id: 15, score_home: null, score_away: null, pen_home: null, pen_away: null, walkover_side: null }, // 未打完 → 不占名额
       { home_team_id: 16, away_team_id: 11, score_home: 3, score_away: 2, pen_home: null, pen_away: null, walkover_side: null }, // 第 4 场，名额已满不计
     ];
     expect(engine.formPtsOf(rows, 11)).toBe(formPtsOf(rows, 11));
-    // 运行期 native 实算值：①②③ 三场占满名额 = 3 + 1 + 0 = 4（第 4 场起不再计入）
-    expect(formPtsOf(rows, 11)).toBe(4);
+    // 运行期 native 实算值：①②③ 三场占满名额 = 3 + 1 + 3 = 7（第 4 场起不再计入）
+    expect(formPtsOf(rows, 11)).toBe(7);
     // 少于 3 场有效结果 → 中性 4（与"一场未打"同分，口径：样本不足不奖励也不惩罚）
     expect(engine.formPtsOf(rows.slice(3), 11)).toBe(formPtsOf(rows.slice(3), 11));
     expect(formPtsOf(rows.slice(3), 11)).toBe(4);

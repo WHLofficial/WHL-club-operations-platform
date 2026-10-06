@@ -8,6 +8,7 @@ import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
+import { walkoverWinnerSide } from '../core/walkover.ts';
 import { serviceSeasons } from '../core/bypass-rules.ts';
 import { clubIdByTourTeam, loadPrizeTable } from './prizes.ts';
 import { getActiveNaming, loadHeatRules, loadSatisfyConfig } from './naming-ops.ts';
@@ -36,7 +37,7 @@ interface ClubRecord {
   draws: number;
 }
 
-/** 该赛事已确认赛果按 club 聚合战绩（walkover/点球按 winner 记胜负，其余比分定） */
+/** 该赛事已确认赛果按 club 聚合战绩（**弃权按弃权方判负**；点球决胜按点球定胜负；双弃权双方各记一负） */
 function aggregateRecords(rows: ConfirmedRow[], clubMap: Map<number, number>): Map<number, ClubRecord> {
   const out = new Map<number, ClubRecord>();
   const touch = (clubId: number): ClubRecord => {
@@ -53,8 +54,10 @@ function aggregateRecords(rows: ConfirmedRow[], clubMap: Map<number, number>): M
     const away = clubMap.get(row.away_team_id);
     if (home === undefined || away === undefined) continue;
     let outcome: 'home' | 'away' | 'draw' | null = null;
-    if (row.walkover_side === 'home') outcome = 'home';
-    else if (row.walkover_side === 'away') outcome = 'away';
+    // 弃权按弃权方判负（walkover_side 记的是弃权方，见 core/walkover.ts）；双弃权双方各记一负、不计平。
+    const woWinner = walkoverWinnerSide(row.walkover_side);
+    if (woWinner) outcome = woWinner;
+    else if (row.walkover_side === 'both') outcome = null;
     else if (row.score_home !== null && row.score_away !== null) {
       if (row.score_home > row.score_away) outcome = 'home';
       else if (row.score_home < row.score_away) outcome = 'away';
@@ -121,9 +124,13 @@ export async function settleTournamentStage(env: Env, actor: number, stageIdInpu
       const away = clubMap.get(row.away_team_id);
       if (home === undefined || away === undefined) continue;
       let winner: number | undefined;
-      if (row.walkover_side === 'home') winner = home;
-      else if (row.walkover_side === 'away') winner = away;
-      else if (row.score_home !== null && row.score_away !== null) {
+      // 弃权按弃权方判负：胜者是弃权方的对面；双弃权双方都算止步（各领保底）。
+      const woWinner = walkoverWinnerSide(row.walkover_side);
+      if (woWinner) winner = woWinner === 'home' ? home : away;
+      else if (row.walkover_side === 'both') {
+        losers.add(home);
+        losers.add(away);
+      } else if (row.score_home !== null && row.score_away !== null) {
         if (row.score_home > row.score_away) winner = home;
         else if (row.score_home < row.score_away) winner = away;
         else if (row.pen_home !== null && row.pen_away !== null && row.pen_home !== row.pen_away) {
@@ -319,7 +326,7 @@ interface StandingsRow {
 }
 
 /** 已确认赛果 → 积分表（胜 3 平 1 负 0；**点球决胜按平局计**，与 formPtsOf 战绩口径一致；
- *  弃权按 walkover_side 判负、净胜球按 3:0；双方弃权 / 无有效结果不计） */
+ *  **弃权按弃权方判负、净胜球按 3:0**（walkover_side 记的是弃权方，见 core/walkover.ts）；双方弃权 / 无有效结果不计） */
 export function leagueStandings(rows: ConfirmedRow[]): StandingsRow[] {
   const table = new Map<number, StandingsRow>();
   const touch = (teamId: number): StandingsRow => {
@@ -335,13 +342,13 @@ export function leagueStandings(rows: ConfirmedRow[]): StandingsRow[] {
     const home = touch(row.home_team_id);
     const away = touch(row.away_team_id);
     if (row.walkover_side === 'home') {
-      home.pts += 3;
-      home.gd += 3;
-      away.gd -= 3;
-    } else if (row.walkover_side === 'away') {
       away.pts += 3;
       away.gd += 3;
       home.gd -= 3;
+    } else if (row.walkover_side === 'away') {
+      home.pts += 3;
+      home.gd += 3;
+      away.gd -= 3;
     } else if (row.score_home !== null && row.score_away !== null) {
       if (row.score_home === row.score_away) {
         home.pts += 1;

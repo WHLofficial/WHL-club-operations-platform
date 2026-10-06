@@ -10,6 +10,7 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
+import { isWalkover, walkoverLoser } from '../core/walkover.ts';
 import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
 import { deriveClubLeagues, deriveClubTier, tierCache, type Tier } from './tier.ts';
 import {
@@ -188,8 +189,8 @@ export function asRange(v: unknown): [number, number] | null {
   return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' ? [v[0], v[1]] : null;
 }
 
-/** 近 3 场战绩 Pts（胜3平1负0；弃权按 winner 记胜负；**点球决胜按平局计**——用户裁决 2026-09-16；
- * 不足 3 场中性 4 分，假设 31） */
+/** 近 3 场战绩 Pts（胜3平1负0；**弃权按弃权方判负**——walkover_side 记的是弃权方，见 core/walkover.ts；
+ *  **点球决胜按平局计**——用户裁决 2026-09-16；不足 3 场中性 4 分，假设 31） */
 export function formPtsOf(
   rows: {
     home_team_id: number | null;
@@ -209,9 +210,9 @@ export function formPtsOf(
     if (r.home_team_id === null || r.away_team_id === null) continue;
     let won: boolean | null = null;
     let drew = false;
-    if (r.walkover_side === 'home') won = r.home_team_id === clubId;
-    else if (r.walkover_side === 'away') won = r.away_team_id === clubId;
-    else if (r.score_home !== null && r.score_away !== null) {
+    if (r.walkover_side === 'home' || r.walkover_side === 'away' || r.walkover_side === 'both') {
+      won = !walkoverLoser(r.walkover_side, r.home_team_id === clubId ? 'home' : 'away');
+    } else if (r.score_home !== null && r.score_away !== null) {
       // 点球决胜按平局计（战绩口径）：90 分钟平分就是平，点球胜负只影响淘汰赛晋级/奖金
       if (r.score_home === r.score_away) drew = true;
       else won = (r.score_home > r.score_away ? r.home_team_id : r.away_team_id) === clubId;
@@ -291,6 +292,8 @@ export interface AttendanceHookInput {
   windowSeq: number;
   homeTeamId: number | null;
   awayTeamId: number | null;
+  /** 弃权方（'' / null = 普通场）；弃权场不发比赛日收入，见 matchAttendanceStatements */
+  walkoverSide?: string | null;
 }
 
 export interface AttendanceDetail {
@@ -304,15 +307,18 @@ export interface AttendanceDetail {
 
 /**
  * 赛果确认钩子④（v1.5.0）：主场三分收入即时入账。
- * 跳过条件（detail=null）：AUTH_DB 目录无主场映射 / 无球场行 / 已入过账。
+ * 跳过条件（detail=null）：**弃权场**（用户裁决 2026-10-06：没人到场就没有比赛日收入，含双弃权；
+ * 上座/收入/死忠演化整块不落，与奖金侧「弃权方一分不发」同一裁决）/ AUTH_DB 目录无主场映射 / 无球场行 / 已入过账。
  * 上座快照 INSERT match_attendance（match_id 主键）+ ledgerMovement(kind='revenue', ref='match') 同批双闸。
  * v6.10.0：随机事件的预置上座乘数（next_attendance_mod）与预置天气（next_weather）在这里消费，同批清零。
+ * 弃权场早退 ⇒ 这两项预置也不消费（留到下一场主场），符合「预置留待真打的那场」口径。
  */
 export async function matchAttendanceStatements(
   env: Env,
   input: AttendanceHookInput,
 ): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; detail: AttendanceDetail | null }> {
   if (input.homeTeamId === null || input.awayTeamId === null) return { statements: [], detail: null };
+  if (isWalkover(input.walkoverSide)) return { statements: [], detail: null };
   const model = await loadAttendanceModel(env.DB);
   const rng = env.rng ?? Math.random;
   const clubMap = await clubIdByTourTeam(env, [input.homeTeamId]);

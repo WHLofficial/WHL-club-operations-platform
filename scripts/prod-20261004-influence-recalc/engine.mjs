@@ -144,7 +144,9 @@ export function asRange(v) {
   return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' ? [v[0], v[1]] : null;
 }
 
-/** 近 3 场战绩 Pts（胜3平1负0、点球按平、弃权按 winner、不足 3 场中性 4；镜像 home.ts:193）。 */
+/** 近 3 场战绩 Pts（胜3平1负0、点球按平、**弃权按弃权方判负**、不足 3 场中性 4；镜像 home.ts formPtsOf）。
+ *  弃权口径 2026-10-06 订正：walkover_side 记的是弃权方（判负方）——'home' = 主队弃权、'away' = 客队弃权、
+ *  'both' = 双弃权双方各记一负（见 src/core/walkover.ts 与生产批 scripts/prod-20261006-s9-walkover-fix）。 */
 export function formPtsOf(rows, clubId) {
   let pts = 0;
   let seen = 0;
@@ -153,9 +155,10 @@ export function formPtsOf(rows, clubId) {
     if (r.home_team_id === null || r.away_team_id === null) continue;
     let won = null;
     let drew = false;
-    if (r.walkover_side === 'home') won = r.home_team_id === clubId;
-    else if (r.walkover_side === 'away') won = r.away_team_id === clubId;
-    else if (r.score_home !== null && r.score_away !== null) {
+    if (r.walkover_side === 'home' || r.walkover_side === 'away' || r.walkover_side === 'both') {
+      const ours = r.home_team_id === clubId ? 'home' : 'away';
+      won = r.walkover_side === 'both' ? false : r.walkover_side !== ours;
+    } else if (r.score_home !== null && r.score_away !== null) {
       if (r.score_home === r.score_away) drew = true;
       else won = (r.score_home > r.score_away ? r.home_team_id : r.away_team_id) === clubId;
     }

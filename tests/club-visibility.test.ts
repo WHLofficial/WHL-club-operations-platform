@@ -205,7 +205,8 @@ describe('GET /api/club/home-matches（v6.7.0 B1 近期主场战报）', () => {
     expect(byId.get(2)).toMatchObject({ result: '负' });
     expect(byId.get(3)).toMatchObject({ scoreText: '1:1', result: '平' });
     expect(byId.get(4)).toMatchObject({ scoreText: '1:1', result: '点球负' });
-    expect(byId.get(5)).toMatchObject({ scoreText: null, result: '弃权胜' });
+    // match 5 本队为主队且 walkover_side='home' ⇒ 本队弃权判负（弃权方记的是判负方）
+    expect(byId.get(5)).toMatchObject({ scoreText: null, result: '弃权负' });
     expect(byId.get(6)).toMatchObject({ opponentName: null, scoreText: null, result: null });
   });
 

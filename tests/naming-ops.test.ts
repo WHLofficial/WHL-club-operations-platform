@@ -331,12 +331,12 @@ describe('品牌热度动态（近 3 场全胜/全败，v6.8.0）', () => {
     expect(brandHeatDelta([r(1, 0), r(2, 0)], 9001, RULES)).toBeNull();
   });
 
-  it('点球决胜按平计；弃权按 winner 记；无效行不计名额', () => {
+  it('点球决胜按平计；弃权按弃权方判负；无效行不计名额', () => {
     // 两胜 + 一场点球（1:1 点球 4:3 胜）→ 出现平 → 不动
     expect(brandHeatDelta([r(1, 0), r(2, 0), r(1, 1, { pen_home: 4, pen_away: 3 })], 9001, RULES)).toBeNull();
-    // 弃权：walkover_side 记的是**取胜方**（仓库既有口径，见 home.ts formPtsOf）——home 弃权记法=主队胜
-    expect(brandHeatDelta([r(0, 0, { walkover_side: 'home' }), r(1, 0), r(2, 0)], 9001, RULES)).toBe(0.03);
-    expect(brandHeatDelta([r(0, 0, { walkover_side: 'away' }), r(1, 0), r(2, 0)], 9001, RULES)).toBeNull(); // 主队判负 → 两胜一负
+    // 弃权：walkover_side 记的是**弃权方**（判负方，见 core/walkover.ts）——home 弃权 = 主队 9001 判负
+    expect(brandHeatDelta([r(0, 0, { walkover_side: 'home' }), r(1, 0), r(2, 0)], 9001, RULES)).toBeNull(); // 一负两胜 → 不动
+    expect(brandHeatDelta([r(0, 0, { walkover_side: 'away' }), r(1, 0), r(2, 0)], 9001, RULES)).toBe(0.03); // 客队弃权 → 9001 三胜
     // 无比分行跳过（不计名额）
     expect(brandHeatDelta([r(null, null), r(1, 0), r(2, 0), r(3, 0)], 9001, RULES)).toBe(0.03);
     // 本队是客队的记法（away_team_id = 9001）

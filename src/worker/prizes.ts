@@ -1,10 +1,13 @@
 // 赛事奖金自动入账（v1.4.0，TECH_DESIGN §9.1）。
 // 分界（用户裁决 2026-09-16）：单场可定值的即时入账（联赛胜平负/超级杯胜负/冠军杯小组赛每胜平/淘汰赛晋级）；
 // 赛事完结一次性项（入场奖金/资格赛止步保底/小组赛剩余池）走「赛事完结结算」端点，一次结清。
+// 弃权场口径（用户裁决 2026-10-06）：胜方照发胜场奖金，**弃权方一分不发**（连败方出场补贴也没有）；
+// 双弃权双方都不发。比赛日三分收入在弃权场同样不发（home.ts matchAttendanceStatements 早退）。
 // 入账一律经 ledgerMovement 幂等闸（ref_type 带侧别防同场双发），AUTH_DB 目录把 tour team id 映射 club_id；
 // AUTH_DB 未配置时不发奖金（与绑定派生同一回滚通道口径）。
 import type { Env } from './env.ts';
 import { createConfigService } from '../core/config.ts';
+import { isWalkover, walkoverWinnerSide } from '../core/walkover.ts';
 import { ledgerMovement } from './ledger.ts';
 import { cpuClubIds } from './growth.ts';
 
@@ -89,10 +92,12 @@ export async function tourTeamIdsByClub(env: Env, clubIds: number[]): Promise<Ma
   return map;
 }
 
-/** 单场比分→胜负平（walkover/点球按 winner 定，平局含点球战前平比分的点球胜负已由 winner 区分） */
-function outcome(m: MatchPrizeInput): 'home' | 'away' | 'draw' | null {
-  if (m.walkoverSide === 'home') return 'home';
-  if (m.walkoverSide === 'away') return 'away';
+/** 单场比分→胜负平（点球按 winner 定，平局含点球战前平比分的点球胜负已由 winner 区分）。
+ *  弃权按**弃权方判负**定胜负（walkover_side 记的是弃权方，见 core/walkover.ts）；双弃权 → 'none'（双方都不发）。 */
+function outcome(m: MatchPrizeInput): 'home' | 'away' | 'draw' | 'none' | null {
+  const woWinner = walkoverWinnerSide(m.walkoverSide);
+  if (woWinner) return woWinner;
+  if (m.walkoverSide === 'both') return 'none';
   if (m.scoreHome === null || m.scoreAway === null) return null;
   if (m.scoreHome > m.scoreAway) return 'home';
   if (m.scoreHome < m.scoreAway) return 'away';
@@ -121,6 +126,7 @@ function koProgressPrize(m: MatchPrizeInput, table: PrizeTable): number | null {
 
 /**
  * 赛果确认即时奖金：返回该场的 ledger 语句（含幂等闸，重复确认/重放安全）。
+ * 弃权场只发胜方（弃权方无任何款项）；双弃权双方都不发。
  * 无可发项（类型不适用/无绑定俱乐部）→ 空数组；不发主通知（确认通知已有）。
  */
 export async function matchPrizeStatements(env: Env, m: MatchPrizeInput): Promise<ReturnType<Env['DB']['prepare']>[]> {
@@ -149,7 +155,8 @@ export async function matchPrizeStatements(env: Env, m: MatchPrizeInput): Promis
       const winner = clubOf(res === 'home' ? m.homeTeamId : m.awayTeamId);
       const loser = clubOf(res === 'home' ? m.awayTeamId : m.homeTeamId);
       if (winner) payments.push({ clubId: winner.clubId, amount: p.win, refType: winner.refType, memo: `联赛胜场奖金（比赛 #${m.matchId}）` });
-      if (loser) payments.push({ clubId: loser.clubId, amount: p.loss, refType: loser.refType, memo: `联赛出场补贴（比赛 #${m.matchId}）` });
+      // 弃权场：弃权方一分不发（连败方出场补贴也没有，用户裁决 2026-10-06）；胜方照发。
+      if (loser && !isWalkover(m.walkoverSide)) payments.push({ clubId: loser.clubId, amount: p.loss, refType: loser.refType, memo: `联赛出场补贴（比赛 #${m.matchId}）` });
     } else if (res === 'draw') {
       for (const side of ['home', 'away'] as const) {
         const c = clubOf(side === 'home' ? m.homeTeamId : m.awayTeamId);
@@ -161,7 +168,7 @@ export async function matchPrizeStatements(env: Env, m: MatchPrizeInput): Promis
       const winner = clubOf(res === 'home' ? m.homeTeamId : m.awayTeamId);
       const loser = clubOf(res === 'home' ? m.awayTeamId : m.homeTeamId);
       if (winner) payments.push({ clubId: winner.clubId, amount: table.super_cup.win, refType: winner.refType, memo: `超级杯胜方奖金（比赛 #${m.matchId}）` });
-      if (loser) payments.push({ clubId: loser.clubId, amount: table.super_cup.loss, refType: loser.refType, memo: `超级杯出场补贴（比赛 #${m.matchId}）` });
+      if (loser && !isWalkover(m.walkoverSide)) payments.push({ clubId: loser.clubId, amount: table.super_cup.loss, refType: loser.refType, memo: `超级杯出场补贴（比赛 #${m.matchId}）` });
     }
   } else if (m.competitionType === 'champions_cup') {
     if (m.stageKind === 'group' || m.stageKind === 'round_robin') {

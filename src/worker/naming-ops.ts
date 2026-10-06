@@ -13,6 +13,7 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
+import { walkoverLoser } from '../core/walkover.ts';
 import { getOpenWindow } from './seasons.ts';
 import { createAuditStatement, writeAudit } from '../lib/audit.ts';
 
@@ -373,8 +374,8 @@ export async function loadHeatRules(db: Env['DB']): Promise<HeatRules> {
   };
 }
 
-/** 近 3 场有效结果的胜负记号（弃权按 winner 记；点球决胜按平计——与 formPtsOf 战绩口径一致；
- *  无效行不计名额）。全胜 +winStreak / 全败 −slump / 其余（含不足 3 场）不动。 */
+/** 近 3 场有效结果的胜负记号（**弃权按弃权方判负**——walkover_side 记的是弃权方，见 core/walkover.ts；
+ *  点球决胜按平计——与 formPtsOf 战绩口径一致；无效行不计名额）。全胜 +winStreak / 全败 −slump / 其余（含不足 3 场）不动。 */
 export function brandHeatDelta(
   rows: {
     home_team_id: number | null;
@@ -390,9 +391,9 @@ export function brandHeatDelta(
   for (const r of rows) {
     if (marks.length >= 3) break;
     if (r.home_team_id === null || r.away_team_id === null) continue;
-    if (r.walkover_side === 'home' || r.walkover_side === 'away') {
-      const winnerId = r.walkover_side === 'home' ? r.home_team_id : r.away_team_id;
-      marks.push(winnerId === tourTeamId ? 'W' : 'L');
+    if (r.walkover_side === 'home' || r.walkover_side === 'away' || r.walkover_side === 'both') {
+      const ours = r.home_team_id === tourTeamId ? 'home' : 'away';
+      marks.push(walkoverLoser(r.walkover_side, ours) ? 'L' : 'W');
       continue;
     }
     if (r.score_home === null || r.score_away === null) continue;
@@ -588,7 +589,7 @@ export async function recalibrateTierStatements(db: Env['DB']): Promise<TierReca
   };
 }
 
-/** 窗内胜率（战绩信号输入，formPtsOf 同口径：点球按平、弃权按取胜方、双方弃权不计）；无有效场次回 null。 */
+/** 窗内胜率（战绩信号输入，formPtsOf 同口径：点球按平、**弃权按弃权方判负**、双弃权双方各记一负）；无有效场次回 null。 */
 export function windowWinRate(
   rows: {
     home_team_id: number | null;
@@ -605,9 +606,9 @@ export function windowWinRate(
     if (r.home_team_id === null || r.away_team_id === null) continue;
     let won: boolean | null = null;
     let drew = false;
-    if (r.walkover_side === 'home') won = r.home_team_id === tourTeamId;
-    else if (r.walkover_side === 'away') won = r.away_team_id === tourTeamId;
-    else if (r.score_home !== null && r.score_away !== null) {
+    if (r.walkover_side === 'home' || r.walkover_side === 'away' || r.walkover_side === 'both') {
+      won = !walkoverLoser(r.walkover_side, r.home_team_id === tourTeamId ? 'home' : 'away');
+    } else if (r.score_home !== null && r.score_away !== null) {
       if (r.score_home === r.score_away) drew = true;
       else won = (r.score_home > r.score_away ? r.home_team_id : r.away_team_id) === tourTeamId;
     }
@@ -645,7 +646,7 @@ export interface SatisfactionReport {
 /**
  * 单队情绪演化语句（关窗批用，插件 evolve_sentiment 两信号口径）：
  * 上座信号由调用方传入（该队本窗有无主场比赛只有它知道——无场次中性 0，不借中性上座率 1.0 白拿 +1）；
- * 战绩信号按窗内全部场次胜率现算（点球按平、弃权按取胜方，与 formPtsOf/brandHeatDelta 同口径）。
+ * 战绩信号按窗内全部场次胜率现算（点球按平、弃权按弃权方判负，与 formPtsOf/brandHeatDelta 同口径）。
  * 演化后跌破品牌当前档位地板 → 品牌主动解约（terminated + windows_remaining=0，无赔偿），解约语句同批。
  * 幂等：无独立闸，靠关窗批第一句窗口状态原子闸（失败整批回滚）——与 fans UPDATE 同机制。
  */

@@ -154,7 +154,7 @@ describe('纯函数：天气/战绩/死忠', () => {
     expect(rollWeather(() => 0.95, probs)).toBe('雪');
   });
 
-  it('近3场战绩：胜3平1负0；点球决胜按平局计（用户裁决）；弃权按 winner；不足3场中性 4 分', () => {
+  it('近3场战绩：胜3平1负0；点球决胜按平局计（用户裁决）；弃权按弃权方判负；不足3场中性 4 分', () => {
     const row = (over: Partial<Parameters<typeof formPtsOf>[0][number]>) => ({
       home_team_id: 1,
       away_team_id: 2,
@@ -173,13 +173,16 @@ describe('纯函数：天气/战绩/死忠', () => {
     ];
     expect(formPtsOf(rows, 1)).toBe(4);
     expect(formPtsOf(rows.slice(0, 3), 1)).toBe(4);
-    // 弃权胜 + 真胜 + 平 = 7
+    // 弃权胜（客队弃权 = 本队胜）+ 真胜 + 平 = 7
     const rows2 = [
-      row({ walkover_side: 'home' }),
+      row({ walkover_side: 'away' }),
       row({ score_home: 3, score_away: 0 }),
       row({ score_home: 1, score_away: 1, pen_home: 5, pen_away: 3 }),
     ];
     expect(formPtsOf(rows2, 1)).toBe(7);
+    // 主队弃权 = 本队判负，同三场只余 3+1 = 4
+    const rows3 = [row({ walkover_side: 'home' }), rows2[1], rows2[2]];
+    expect(formPtsOf(rows3, 1)).toBe(4);
   });
 
   it('死忠目标阶梯逐带累计；演化涨粉/掉粉方向与钳帽', async () => {

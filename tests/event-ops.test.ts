@@ -357,15 +357,16 @@ describe('最近一场战绩口径 lastResultOf（弃权按取胜方、点球决
     expect(lastResultOf([row({ score_home: 1, score_away: 1, pen_home: 4, pen_away: 3 })], 11)).toBe('D');
   });
 
-  it('弃权记的是取胜方：walkover_side=home → 主队胜', () => {
-    expect(lastResultOf([row({ walkover_side: 'home', score_home: null, score_away: null })], 11)).toBe('W');
-    expect(lastResultOf([row({ walkover_side: 'home', score_home: null, score_away: null })], 12)).toBe('L');
-    expect(lastResultOf([row({ walkover_side: 'away', score_home: null, score_away: null })], 11)).toBe('L');
+  it('弃权记的是弃权方：walkover_side=home → 主队判负', () => {
+    expect(lastResultOf([row({ walkover_side: 'home', score_home: null, score_away: null })], 11)).toBe('L');
+    expect(lastResultOf([row({ walkover_side: 'home', score_home: null, score_away: null })], 12)).toBe('W');
+    expect(lastResultOf([row({ walkover_side: 'away', score_home: null, score_away: null })], 11)).toBe('W');
+    expect(lastResultOf([row({ walkover_side: 'both', score_home: null, score_away: null })], 11)).toBe('L');
   });
 
   it('按 id DESC 取第一条涉及该队的；无关行与脏行跳过', () => {
     const rows = [row({ home_team_id: 21, away_team_id: 22 }), row({ walkover_side: 'away', score_home: null, score_away: null })];
-    expect(lastResultOf(rows, 11)).toBe('L');
+    expect(lastResultOf(rows, 11)).toBe('W');
     expect(lastResultOf([row({ home_team_id: null, away_team_id: null })], 11)).toBeNull();
     expect(lastResultOf([], 11)).toBeNull();
   });
