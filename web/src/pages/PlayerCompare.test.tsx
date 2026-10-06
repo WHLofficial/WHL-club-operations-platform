@@ -259,7 +259,8 @@ describe('TC-CMP-URL：URL 即事实源', () => {
     behaviors = { '7': detail(7) };
     const { container } = open('/players/compare?ids=7');
     await waitFor(() => expect(screen.getByText('还差 1 名球员')).toBeTruthy());
-    expect(screen.getByRole('link', { name: '＋ 从球员库选' }).getAttribute('href')).toBe('/players');
+    // v6.37.0 修：回球员库带 ?compare=<fcId> 预置勾选本球员（原先裸 /players 丢掉当前球员）
+    expect(screen.getByRole('link', { name: '＋ 从球员库选' }).getAttribute('href')).toBe('/players?compare=7');
     expect(container.querySelectorAll('.cmp-radar-big').length).toBe(1);
     expect(container.querySelector('.cmp-table')).toBeNull();
     expect(container.querySelector('.cmp-misc')).toBeNull();

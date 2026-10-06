@@ -320,7 +320,8 @@ export default function PlayerCompare() {
                 {visible.length === 1 && (
                   <div className="cmp-emptyslot">
                     <p className="cmp-emptyslot-title">还差 1 名球员</p>
-                    <Link className="btn btn-sm" to="/players">
+                    {/* 回球员库并带 ?compare= 预置勾选（v6.37.0 修：原先裸 /players 丢掉当前球员） */}
+                    <Link className="btn btn-sm" to={`/players?compare=${ready[0].id}`}>
                       ＋ 从球员库选
                     </Link>
                   </div>
