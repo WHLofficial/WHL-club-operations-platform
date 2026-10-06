@@ -1,10 +1,12 @@
 // 工作台页签（v6.30.0 A 段：自 pages/ClubDetail.tsx 教练台 CoachPanel 拆入，自家专属）。
-// 转会禁令 banner + 注册工作台（含 SquadRow）+ 续约与解约（规则 4.4.3/4.4.4）+ 随机事件。
+// 转会禁令 banner + 注册工作台 + 续约与解约（规则 4.4.3/4.4.4）+ 随机事件。
 // 注册名单查询（qk.squad）住在本组件里：只有激活「工作台」才挂载、才发请求。
-// v6.30.0 C 段：注册名单重定列集 —— 11 固定列（分配最左 + 标记/号码/UID/姓名/年龄/位置/CA/PA/违约金/工资）
-//   + 可选列（?regcols=，默认全不显示）+「列」开关；「无合同」红徽章与违规旗标随姓名格走（分配列控件本身没动）。
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+// v6.30.0 C 段：注册名单重定列集 —— 分配列 + 标记/号码/UID/姓名/年龄/位置/CA/PA/违约金/工资 + 可选列（?regcols=）。
+// v6.37.0 卡片化：注册名单表整表重构为「位置四组容器 + 行解剖卡」，与 SquadTab 同构（组件在 card-parts.tsx）——
+//   行尾「分配 ▾」下拉取代最左分段按钮（三选全称，无合同禁一线/训练营）；违规旗标/无合同/退役徽章随姓名走；
+//   桌面 = 全列合并 +「列…」自选长尾；窄屏（≤760px）= 四视图 chips 快切；非开窗期下拉整体禁用。
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ApiError,
@@ -18,41 +20,29 @@ import {
   type RegistrationResult,
   type SquadIssue,
   type SquadOverview,
-  type SquadPlayerRow,
   type TerminationResult,
 } from '../../lib/api.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
-import { MARKER_EMOJI, MARKER_LABEL, money } from '../../lib/players-library.ts';
 import { qk } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
-import { playerPath } from '../../lib/player-link.ts';
 import { useTimeFmt } from '../../lib/datetime.ts';
-import {
-  CLUB_COL_ITEMS,
-  REG_COLS_KEY,
-  REG_FIXED_COLS,
-  clubColDef,
-  clubVisibleCols,
-  renderClubCol,
-  toggleClubCol,
-} from '../../lib/club-columns.tsx';
+import { CARD_VIEW_CELLS, DESKTOP_CELLS, groupRowsByPosition, type CardViewKey } from '../../lib/club-cards.ts';
+import { CARD_EXTRA_ITEMS, REG_COLS_KEY, parseCardExtras, toggleClubCol } from '../../lib/club-columns.tsx';
 import MultiSelect from '../../components/MultiSelect.tsx';
+import { useMediaQuery } from '../../lib/use-media.ts';
+import {
+  CardGroup,
+  RegCard,
+  VIEW_COL_WIDTH,
+  ViewChips,
+  extraColDefs,
+  type AssignValue,
+} from './card-parts.tsx';
 
 type SquadFilter = 'all' | 'first_team' | 'trainee';
-type Assignment = 'none' | 'first_team' | 'trainee';
+type Assignment = AssignValue;
 
 const SQUAD_FILTER_LABEL: Record<SquadFilter, string> = { all: '全部', first_team: '一线队', trainee: '训练营' };
-
-// 标红 badge 的短标签（完整原因在 message，悬浮 title 兜底）
-const ISSUE_RULE_LABEL: Record<string, string> = {
-  squad_size: '人数',
-  gk: '门将',
-  trainee_size: '训练营人数',
-  trainee_growth: '不可成长',
-  ca_pa: '初始CA限额',
-  contract: '无合同',
-  wage_cap: '工资帽',
-};
 
 export default function DeskTab({ overview }: { overview: MyClubOverview }) {
   const qc = useQueryClient();
@@ -230,9 +220,10 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
     setIssues(squad.checkMode !== 'off' && squad.compliance && !squad.compliance.pass ? squad.compliance.issues : null);
   }, [squad]);
 
-  // v6.30.0 C 段：可选列进 URL（?regcols=）—— 与阵容名单的 ?cols= 分开键，两张表在不同页签，防串味
+  // v6.30.0 C 段：可选列进 URL（?regcols=）—— 与阵容名单的 ?cols= 分开键，两张表在不同页签，防串味。
+  // v6.37.0 卡片化：解析收敛到长尾池（旧 URL 里表格时代的内置键不算数），卡片内置 8 列恒显。
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeCols = clubVisibleCols(searchParams.get(REG_COLS_KEY));
+  const activeCols = parseCardExtras(searchParams.get(REG_COLS_KEY));
   function writeCols(next: string[]) {
     setSearchParams((prev) => {
       const params = new URLSearchParams(prev);
@@ -244,6 +235,12 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
 
   const rules = squad.rules;
   const editable = squad.season !== null;
+
+  // 窄屏四视图 chips 的当前视图；桌面无 chips（全列合并），这个状态闲置
+  const narrow = useMediaQuery('(max-width: 760px)');
+  const [view, setView] = useState<CardViewKey>('basic');
+  const cells = narrow ? CARD_VIEW_CELLS[view] : DESKTOP_CELLS;
+  const extras = extraColDefs(activeCols);
 
   const stats = useMemo(() => {
     const first = squad.players.filter((p) => assign[p.id] === 'first_team');
@@ -395,13 +392,15 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
                 </button>
               ))}
             </div>
-            <MultiSelect
-              label="列"
-              items={CLUB_COL_ITEMS}
-              selected={activeCols}
-              onToggle={(key) => writeCols(toggleClubCol(activeCols, key))}
-              onClear={() => writeCols([])}
-            />
+            {!narrow && (
+              <MultiSelect
+                label="列…"
+                items={CARD_EXTRA_ITEMS}
+                selected={activeCols}
+                onToggle={(key) => writeCols(toggleClubCol(activeCols, key))}
+                onClear={() => writeCols([])}
+              />
+            )}
           </div>
 
           {rows.length === 0 ? (
@@ -409,44 +408,57 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
               <p className="muted">
                 {squad.players.length === 0
                   ? '名单还是空的。等管理组导入球员、签下合同之后，这里就是你的更衣室。'
-                  : '这个名单还没有人。点球员行最左的分段按钮，把人分进一线队或训练营。'}
+                  : '这个名单还没有人。用行尾的「分配」下拉，把人分进一线队或训练营。'}
               </p>
             </div>
           ) : (
-            <div className="table-wrap">
-              <table className="coach-sticky">
-                <thead>
-                  <tr>
-                    {REG_FIXED_COLS.map((col) => (
-                      <th key={col.key} className={col.num ? 'num' : undefined}>
-                        {col.label}
-                      </th>
-                    ))}
-                    {activeCols.map((key) => {
-                      const def = clubColDef(key);
-                      return (
-                        <th key={key} className={def.num ? 'num' : undefined}>
-                          {def.label}
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((p) => (
-                    <SquadRow
-                      key={p.id}
-                      player={p}
-                      value={assign[p.id] ?? 'none'}
-                      editable={editable}
-                      flags={flagged.get(p.id)}
-                      cols={activeCols}
-                      onChange={setAssignment}
+            <>
+              {narrow && (
+                <ViewChips
+                  value={view}
+                  onChange={setView}
+                  extra={
+                    <MultiSelect
+                      label="列…"
+                      items={CARD_EXTRA_ITEMS}
+                      selected={activeCols}
+                      onToggle={(key) => writeCols(toggleClubCol(activeCols, key))}
+                      onClear={() => writeCols([])}
                     />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  }
+                />
+              )}
+              <div
+                className="sqc-wrap"
+                style={{ '--sqc-cw': narrow ? VIEW_COL_WIDTH[view] : undefined } as CSSProperties}
+              >
+                {groupRowsByPosition(rows).map((g) => (
+                  <CardGroup
+                    key={g.key}
+                    groupKey={g.key}
+                    label={g.label}
+                    count={g.rows.length}
+                    cells={cells}
+                    extras={extras}
+                    wide={!narrow}
+                  >
+                    {g.rows.map((p) => (
+                      <RegCard
+                        key={p.id}
+                        row={p}
+                        view={view}
+                        assign={assign[p.id] ?? 'none'}
+                        flags={flagged.get(p.id) ?? []}
+                        extras={extras}
+                        wide={!narrow}
+                        editable={editable}
+                        onAssign={(next) => setAssignment(p.id, next)}
+                      />
+                    ))}
+                  </CardGroup>
+                ))}
+              </div>
+            </>
           )}
 
           {issues !== null && issues.length > 0 && (
@@ -480,76 +492,6 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
         </>
       )}
     </section>
-  );
-}
-
-function SquadRow({
-  player,
-  value,
-  editable,
-  flags,
-  cols,
-  onChange,
-}: {
-  player: SquadPlayerRow;
-  value: Assignment;
-  editable: boolean;
-  flags?: SquadIssue[];
-  cols: string[];
-  onChange: (playerId: number, next: Assignment) => void;
-}) {
-  const traineeBlocked = !player.growable || (player.pa !== null && player.ca !== null && player.pa - player.ca <= 0);
-  return (
-    <tr className={`${value === 'trainee' ? 'row-trainee' : ''}${flags !== undefined && flags.length > 0 ? ' row-flagged' : ''}`.trim() || undefined}>
-      {/* 分配列最左（v6.30.0 C 段）：分段按钮就是这张表的主操作，贴着球员名一起看 */}
-      <td>
-        <div className="seg seg-mini" role="radiogroup" aria-label={`${player.name} 的注册分配`}>
-          {(['none', 'first_team', 'trainee'] as Assignment[]).map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              className={value === opt ? 'on' : ''}
-              disabled={!editable || (opt !== 'none' && !player.hasContract)}
-              title={opt !== 'none' && !player.hasContract ? '没有现行合同，先让管理组导入合同模板' : undefined}
-              onClick={() => onChange(player.id, value === opt ? 'none' : opt)}
-            >
-              {opt === 'none' ? '—' : opt === 'first_team' ? '一线' : '训练营'}
-            </button>
-          ))}
-        </div>
-        {value === 'trainee' && traineeBlocked && <span className="error-msg">不可成长</span>}
-      </td>
-      <td className="marker-cell" title={player.marker ? MARKER_LABEL[player.marker] : undefined}>
-        {player.marker ? MARKER_EMOJI[player.marker] : ''}
-      </td>
-      {/* 号码只读（v4.0.0）：定号/改号在球员卡的合同页签，那里才有归属校验的上下文 */}
-      <td className="num mono">{player.number ?? '—'}</td>
-      <td className="mono">{player.uid.replace(/^fc/, '')}</td>
-      <td>
-        <Link to={playerPath(player)}>{player.name}</Link>
-        {flags !== undefined &&
-          flags.length > 0 &&
-          flags.map((issue, i) => (
-            <span key={i} className="badge red" title={issue.message}>
-              {ISSUE_RULE_LABEL[issue.rule] ?? issue.rule}
-            </span>
-          ))}
-        {/* 「无合同」红徽章随姓名走（v6.30.0 C 段）：合同列撤了，但它是注册被拦的头号原因，不能跟着消失 */}
-        {!player.hasContract && (
-          <span className="badge red" title="等管理组导入合同模板后才能注册">
-            无合同
-          </span>
-        )}
-        {player.status === 'retired' && <span className="badge gray">退役</span>}
-      </td>
-      <td className="num">{player.age ?? '—'}</td>
-      <td>{player.position ?? '—'}</td>
-      <td className="num mono">{player.ca ?? '—'}</td>
-      <td className="num mono">{player.pa ?? '—'}</td>
-      <td className="num mono">{player.releaseFee === null ? '—' : money(player.releaseFee)}</td>
-      <td className="num mono">{player.wage === null ? '—' : money(player.wage)}</td>
-      {cols.map((key) => renderClubCol(key, player))}
-    </tr>
   );
 }
 

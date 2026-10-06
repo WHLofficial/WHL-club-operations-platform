@@ -8,10 +8,12 @@
 // v6.22.0 增补（计划 docs/test-plans/v6.22.0-public-reading-mobile.md，spec §4）：
 // - 公开阅读页（Player 事件卡 / table-sticky-2 三表 / TopBar 渐隐提档 ≤1024 / toast 让位 / dossier 900 档）
 //   的静态契约；e2e ⑯ 只在真渲染时红，这里兜「类名/规则被下批重构删掉」的回归。
-// v6.30.0 增补（C 段：球队详情页两张球员表列集重定，plan 见 docs/test-plans/ 下 A/B/C 同批计划）：
-// - TC-STK 的粘性列位平移：阵容名单（table-sticky-2，≤760）钉「标记 + 号码 + 姓名」三列、UID 不钉；
-//   注册名单（coach-sticky，≤640）钉「分配 + 姓名」两列、原第 2 列让位。e2e ⑨ 只断行数与横向溢出，
-//   列位/冻结点错位不会红，由本例兜住（判据都是「第 N 列 sticky / 第 M 列不 sticky」的规则级断言）。
+// v6.30.0 增补（C 段：球队详情页两张球员表列集重定）：TC-STK 粘性列位平移用例——
+//   已于 v6.37.0 被改写（两表弃表改卡，原「钉标记/号码/姓名」「钉分配/姓名」断言整体作废，
+//   换成弃表 + 死选择器回归锁，见下方 v6.37.0 describe 内用例）。
+// v6.37.0 增补（球队页两表弃表改卡，card-parts.tsx）：SquadTab 阵容名单表、DeskTab 注册名单表
+//   弃表改「位置四组容器 + 行解剖卡」⇒ TABLES_BY_FILE_MIN 1→0 / 2→1、TC-STK 三表→两表、
+//   TC-SWP-05 挂类 2→1（只剩主场战报表）、v6.30.0 C 段用例改写为弃表 + 死选择器锁。
 //
 // 为什么要文本级扫描：这三条约定只活在 JSX/CSS 文本里——表格少包一层 `.table-wrap`、重构时又写回
 // `style={{ width: 320 }}`、抽屉关闭钮的 36px 命中区被删——组件测试与单测都不会红；e2e ⑫ 也只在
@@ -123,9 +125,9 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   'web/src/pages/admin/SeasonsPage.tsx': 3,
   'web/src/pages/admin/SystemPage.tsx': 2,
   // v6.30.0 A 段：球队页签化——阵容名单 / 转会两表（parts.TransferTable 复用一次定义）/ 注册表 / 主场战报 / 事件表随代码搬进 club/ 各 Tab；ClubDetail 自身归零不再点名
+  // v6.37.0：SquadTab 阵容名单表与 DeskTab 注册名单表弃表改卡（card-parts.tsx）⇒ SquadTab 1 → 0（出基线）、DeskTab 2 → 1（只剩事件表）
   'web/src/pages/club/parts.tsx': 1,
-  'web/src/pages/club/SquadTab.tsx': 1,
-  'web/src/pages/club/DeskTab.tsx': 2,
+  'web/src/pages/club/DeskTab.tsx': 1,
   'web/src/pages/club/VenueTab.tsx': 1,
   'web/src/pages/market/MarketListingOverlay.tsx': 1,
   // v6.24.0：可激活名单表随 ActivateSection 从 MarketFreePage 搬进新激活页（全树表数不变）
@@ -137,7 +139,7 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   'web/src/pages/market/desk/NegotiationsSection.tsx': 1,
   'web/src/pages/market/desk/OffersSection.tsx': 2,
 };
-/** 全树 <table> 基线 = 点名页之和（v6.32.0 起 47）：跌破说明扫描器空转（假绿） */
+/** 全树 <table> 基线 = 点名页之和（v6.37.0 起 45）：跌破说明扫描器空转（假绿） */
 const TABLE_BASELINE = Object.values(TABLES_BY_FILE_MIN).reduce((sum, n) => sum + n, 0);
 
 function countTables(src: string): number {
@@ -383,15 +385,16 @@ describe('v6.20.0 窄屏整治静态扫描闸门（docs/test-plans/v6.20.0-mobil
     expect(btnH.ok, `.btn 缺 min-height ≥36（${btnH.seen}）：admin-nav-toggle 的触控高度靠它`).toBe(true);
   });
 
-  it('TC-SWP-05 · coach-sticky 粘性首列：DeskTab + VenueTab 合计恰 2 处挂类 + styles.css ≤640 块含 sticky 规则（v6.21.0，v6.30.0 页签化随代码走）', () => {
+  it('TC-SWP-05 · coach-sticky 粘性首列：VenueTab 恰 1 处挂类 + styles.css ≤640 块含 sticky 规则（v6.21.0，v6.30.0 页签化随代码走）', () => {
     // e2e ⑮ 在本地观众登录下教练台不渲染，几何断言条件降级——粘性回归（摘类、删规则）在这里红。
-    // v6.30.0 A 段：CoachPanel 拆成 DeskTab（注册名单表 + 事件表）与 VenueTab（主场战报表），挂类总数不变。
+    // v6.30.0 A 段：CoachPanel 拆成 DeskTab 与 VenueTab（主场战报表）。
+    // v6.37.0：DeskTab 注册名单表弃表改卡 ⇒ 挂类 2 → 1（只剩主场战报表）。
     // P2-2（评审）：按 className 形态计数——文本级 /coach-sticky/g 会把注释里的提及误算进去
     const hits = [DESK_TAB, VENUE_TAB].reduce(
       (n, file) => n + (read(file).match(/className="[^"]*\bcoach-sticky\b/g)?.length ?? 0),
       0,
     );
-    expect(hits, `DeskTab + VenueTab 的 coach-sticky 挂类（className 形态）应为恰 2 处（注册名单表 + 主场战报表）：实测 ${hits}`).toBe(2);
+    expect(hits, `DeskTab + VenueTab 的 coach-sticky 挂类（className 形态）应为恰 1 处（主场战报表；注册名单 v6.37.0 已改卡）：实测 ${hits}`).toBe(1);
 
     // 规则必须活在某个 (max-width: 640px) 媒体块**内部**（≤640 规则域），且真有 position: sticky。
     // v6.31.0：原写法取 lastIndexOf 再切尾——广告板在文件末尾又加了一个 ≤640 块，尾切法会把 coach-sticky 判成「不在域内」。
@@ -583,12 +586,12 @@ describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-publi
     expect(nowrap.length, '.transfer-table 的 nowrap 规则缺失（桌面表格分支被改）').toBeGreaterThan(0);
   });
 
-  it('公开阅读 · table-sticky-2 三表挂类 + ≤760 粘性规则 + coach-sticky 原块仍在（TC-STK）', () => {
-    // 三张参考型宽表各恰好挂一次（转会记录表 transfer-table 不在本闸门内，恒不挂该类）
+  it('公开阅读 · table-sticky-2 两表挂类 + ≤760 粘性规则 + coach-sticky 原块仍在（TC-STK）', () => {
+    // 两张参考型宽表各恰好挂一次（转会记录表 transfer-table 不在本闸门内，恒不挂该类）
+    // v6.37.0：SquadTab 阵容名单表弃表改卡退出本闸（弃表断言挪进下方 v6.37.0 用例）
     for (const [file, name] of [
       [MARKET_INTEL, 'MarketIntelPage'],
       [MARKET_OVERLAY, 'MarketListingOverlay'],
-      [SQUAD_TAB, 'SquadTab'], // v6.30.0 A 段：阵容名单表随页签搬进 SquadTab
     ] as const) {
       const hits = read(file).match(/className="table-sticky-2"/g)?.length ?? 0;
       expect(hits, `${name} 应恰好挂一处 className="table-sticky-2"，实挂 ${hits}`).toBe(1);
@@ -603,46 +606,33 @@ describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-publi
     expect(coach.length, 'styles.css 缺 .coach-sticky 的 position:sticky 规则（≤640 原块被动了）').toBeGreaterThan(0);
   });
 
-  it('v6.30.0 C 段 · 球队页两张表粘性列位平移：阵容钉标记/号码/姓名（UID 不钉）、注册钉分配/姓名（原第 2 列让位）', () => {
+  it('v6.37.0 · 球队页两表弃表改卡：SquadTab/DeskTab 名单区无 <table>，旧粘性覆盖（:has 认表选择器）不得残留', () => {
+    // 阵容名单（SquadTab）与注册名单（DeskTab）弃表改「位置四组容器 + 行解剖卡」（card-parts.tsx）。
+    // v6.30.0 C 段为这两张表写的粘性列位覆盖（:has(td.marker-cell) / :has(td:nth-child(1) .seg)
+    // 两族认表选择器）随表删除——卡片化后这些选择器永远匹配不到，残留即死 CSS。
+    // 死选择器锁：若将来重新引入同构表格，此红提醒同步重审粘性规则，而不是悄悄复活死覆盖。
+    const squadSrc = read(SQUAD_TAB);
+    const deskSrc = read(DESK_TAB);
+    expect(squadSrc, 'SquadTab 不应再渲染 <table>（v6.37.0 已弃表改卡）').not.toMatch(/<table[\s>]/);
+    expect(squadSrc, 'SquadTab 不应再挂 table-sticky-2 / coach-sticky 类').not.toMatch(/className="[^"]*(table-sticky-2|coach-sticky)/);
+    expect(deskSrc, 'DeskTab 注册名单区不应再渲染名单 <table>（只剩事件表的 1 处，已由 TABLES_BY_FILE_MIN 点名）').not.toMatch(/table-sticky-2|coach-sticky/);
+
     const css = read(STYLES_CSS);
-
-    // ---- 阵容名单（≤760，table-sticky-2）：据首列标记格认表，冻结点从第 2 列挪到第 4 列（姓名）
-    const squadAt = css.indexOf('/* v6.30.0 C 段：阵容名单列集重定后');
-    const squadEnd = css.indexOf('/* ---- ⑤ Toast 让位');
-    expect(squadAt, '≤760 块缺 v6.30.0 阵容名单粘性段（列集重定后没平移冻结点）').toBeGreaterThan(-1);
-    expect(squadEnd, '找不到「⑤ Toast 让位」段头（切片终点失效，请同步本用例）').toBeGreaterThan(squadAt);
-    const squadBlock = css.slice(squadAt, squadEnd);
-    expect(squadBlock, '阵容表缺 --stky-c2（号码列定宽变量）').toMatch(/--stky-c2:/);
-    expect(squadBlock, '阵容表第 4 列（姓名）没被钉住').toMatch(/td:nth-child\(4\)\s*\{[^}]*position:\s*sticky/);
-    expect(squadBlock, '阵容表姓名列 left 未按两列宽相加（会与号码列错位）').toMatch(
-      /left:\s*calc\(var\(--stky-c1\)\s*\+\s*var\(--stky-c2\)\)/,
-    );
-    expect(squadBlock, '阵容表第 2 列仍画冻结边（冻结块中间会多一道缝）').toMatch(/td:nth-child\(2\)\s*\{[^}]*border-right:\s*0/);
-    // UID（第 3 列）必须不钉：整份 CSS 里 table-sticky-2 家族没有第 3 列的 sticky 规则
-    const uidSticky = rules().filter(
+    // 死选择器锁（按选择器判定，注释里的历史提及不误伤）：卡片化后这两族 :has 认表选择器永远匹配不到。
+    // 若将来重新引入同构表格，此红提醒同步重审粘性规则，而不是悄悄复活死覆盖。
+    const deadSelectors = rules().filter(
       (r) =>
-        token('table-sticky-2').test(r.selector) &&
-        /nth-child\(3\)/.test(r.selector) &&
-        /position:\s*sticky/.test(r.body),
+        /:has\(/.test(r.selector) && (/marker-cell/.test(r.selector) || /nth-child\(1\) \.seg/.test(r.selector)),
     );
-    expect(uidSticky.length, '阵容表把 UID 列也钉住了（应滑到姓名下面，不钉）').toBe(0);
-
-    // ---- 注册名单（≤640，coach-sticky）：第 2 列让位、姓名列（第 5 列）成新冻结点
-    const regAt = css.indexOf('/* v6.30.0 C 段：注册名单列集重定后');
-    const regEnd = css.indexOf('/* ---- ④ 参考型宽表粘前两列（v6.22.0）');
-    expect(regAt, '≤640 块缺 v6.30.0 注册名单粘性段').toBeGreaterThan(-1);
-    expect(regEnd, '找不到「④ 参考型宽表粘前两列」段头（切片终点失效，请同步本用例）').toBeGreaterThan(regAt);
-    const regBlock = css.slice(regAt, regEnd);
-    expect(regBlock, '注册表缺 --coach-sticky-c1 覆盖（分配列放不下会被撑开、姓名列 left 错位）').toMatch(
+    expect(deadSelectors.map((r) => r.selector), 'styles.css 残留已删表格的 :has 认表选择器（死 CSS）').toEqual([]);
+    expect(css, 'styles.css 残留 --coach-sticky-c1 的 10.5em 覆盖（只服务已删的注册名单表）').not.toMatch(
       /--coach-sticky-c1:\s*10\.5em/,
     );
-    expect(regBlock, '注册表第 2 列没让位（应与第 1 列粘连成 10.5em 宽的冻结块）').toMatch(
-      /td:nth-child\(2\)\s*\{[^}]*position:\s*static/,
+    // table-sticky-2 家族不得再钉第 4 列（原阵容姓名列的冻结点随表删除；现役两表都只钉前两列）
+    const col4Sticky = rules().filter(
+      (r) => token('table-sticky-2').test(r.selector) && /nth-child\(4\)/.test(r.selector) && /position:\s*sticky/.test(r.body),
     );
-    expect(regBlock, '注册表第 5 列（姓名）没被钉住').toMatch(/td:nth-child\(5\)\s*\{[^}]*position:\s*sticky/);
-    expect(regBlock, '注册表姓名列 left 没接 --coach-sticky-c1').toMatch(/left:\s*var\(--coach-sticky-c1\)/);
-    // 认表靠第 1 列的分配开关（.seg）：删掉它这条覆盖规则就全失效
-    expect(regBlock, '注册表覆盖规则没据第 1 列的分配开关（.seg）认表').toMatch(/:has\(tbody td:nth-child\(1\) \.seg\)/);
+    expect(col4Sticky.length, 'table-sticky-2 家族残留第 4 列粘性规则（原阵容姓名列冻结点，表已删）').toBe(0);
   });
 
   it('公开阅读 · TopBar 渐隐提档 ≤1024：mask 规则整体挪入 1024 块（TC-TOP）', () => {

@@ -1,27 +1,20 @@
 // 阵容组页签（v6.30.0 A 段：自 pages/ClubDetail.tsx 阵容组搬入，访客与自家都可见）。
 // 名单查询（useClubRoster）住在本组件里：只有激活「阵容」页签才挂载、才发请求。
 // v6.30.0 删减项③：位置分布不再逐个档位列「档内细位」明细，四档收成一行文字；「总身价」格保留（用户明令）。
-// v6.30.0 C 段：阵容名单重定列集 —— 11 固定列（标记/号码/UID/姓名/年龄/位置/CA/PA/违约金/工资/转会状态）
-//   + 可选列（?cols=，默认全不显示）+ 转会状态手绘图标列（下方一行图例）+「列」开关。
-//   旧表里的「状态」徽章列撤掉：转会状态图标把「挂牌中」这类信息收得更细（图例在表下解释）。
+// v6.30.0 C 段：名单重定列集（11 固定列 + 可选列 +「列」开关）。
+// v6.37.0 卡片化：名单表整表重构为「位置四组容器 + 行解剖卡」（桌面与窄屏同构、DOM 互斥）——
+//   桌面 = 无 chips、四视图全列合并（13 指标）+「列…」自选长尾；窄屏（≤760px）= 四视图 chips 快切；
+//   行 = 号码 + 姓名 + 徽章（1+N 折叠）+ 副行（标记行首 + 主位置 +N 点展开 · UID），组件在 card-parts.tsx。
+import { useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useClubRoster } from '../../lib/queries.ts';
-import { MARKER_EMOJI, MARKER_LABEL } from '../../lib/players-library.ts';
-import {
-  CLUB_COL_ITEMS,
-  SQUAD_COLS_KEY,
-  SQUAD_FIXED_COLS,
-  clubColDef,
-  clubVisibleCols,
-  renderClubCol,
-  toggleClubCol,
-  transferStatusOf,
-} from '../../lib/club-columns.tsx';
-import { TRANSFER_STATUS_GLOSSARY, TransferStatusCell, TransferStatusLegend } from '../../components/StatusIcons.tsx';
+import { CARD_VIEW_CELLS, DESKTOP_CELLS, groupRowsByPosition, type CardViewKey } from '../../lib/club-cards.ts';
+import { CARD_EXTRA_ITEMS, SQUAD_COLS_KEY, parseCardExtras, toggleClubCol } from '../../lib/club-columns.tsx';
 import MultiSelect from '../../components/MultiSelect.tsx';
-import { playerPath } from '../../lib/player-link.ts';
+import { useMediaQuery } from '../../lib/use-media.ts';
 import type { ClubSquadStructure } from '../../lib/api.ts';
 import { DetailLine, HeroStat, Histogram, ShareBar, money, num1 } from './parts.tsx';
+import { CardGroup, SquadCard, VIEW_COL_WIDTH, ViewChips, extraColDefs } from './card-parts.tsx';
 
 export default function SquadTab({ clubId, squad }: { clubId: number; squad: ClubSquadStructure }) {
   const rosterQuery = useClubRoster(clubId);
@@ -29,9 +22,9 @@ export default function SquadTab({ clubId, squad }: { clubId: number; squad: Clu
   const rosterRows = roster?.players ?? null;
   const rosterOverflow = roster !== null && roster.nextCursor !== null;
 
-  // 可选列进 URL（?cols=），链接可分享、刷新不丢；与本页其它参数（tab=）互不干扰
+  // 长尾自选列进 URL（?cols=），链接可分享、刷新不丢；卡片内置的 8 列不在池子里（恒显）
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeCols = clubVisibleCols(searchParams.get(SQUAD_COLS_KEY));
+  const activeCols = parseCardExtras(searchParams.get(SQUAD_COLS_KEY));
   function writeCols(next: string[]) {
     setSearchParams((prev) => {
       const params = new URLSearchParams(prev);
@@ -40,6 +33,13 @@ export default function SquadTab({ clubId, squad }: { clubId: number; squad: Clu
       return params;
     });
   }
+  const extraItems = CARD_EXTRA_ITEMS;
+  const extras = extraColDefs(activeCols);
+
+  // 窄屏四视图 chips 的当前视图；桌面无 chips（全列合并），这个状态闲置
+  const narrow = useMediaQuery('(max-width: 760px)');
+  const [view, setView] = useState<CardViewKey>('basic');
+  const cells = narrow ? CARD_VIEW_CELLS[view] : DESKTOP_CELLS;
 
   return (
     <section className="card club-block">
@@ -80,9 +80,7 @@ export default function SquadTab({ clubId, squad }: { clubId: number; squad: Clu
             <p className="muted club-sub-empty">队里还没有人。</p>
           ) : (
             // 四档恒出（含 0 人档）：「0 门将」本身就是要看见的信号。四档收成一行文字（不列档内细位）。
-            <p className="club-position-line">
-              {squad.byPosition.map((g) => `${g.label} ${g.count} 人`).join(' · ')}
-            </p>
+            <p className="club-position-line">{squad.byPosition.map((g) => `${g.label} ${g.count} 人`).join(' · ')}</p>
           )}
         </div>
 
@@ -100,10 +98,10 @@ export default function SquadTab({ clubId, squad }: { clubId: number; squad: Clu
       <div className="club-sub">
         <div className="tier-head">
           <h4>阵容名单</h4>
-          {rosterRows !== null && (
+          {!narrow && rosterRows !== null && (
             <MultiSelect
-              label="列"
-              items={CLUB_COL_ITEMS}
+              label="列…"
+              items={extraItems}
               selected={activeCols}
               onToggle={(key) => writeCols(toggleClubCol(activeCols, key))}
               onClear={() => writeCols([])}
@@ -125,56 +123,38 @@ export default function SquadTab({ clubId, squad }: { clubId: number; squad: Clu
           <p className="muted club-sub-empty">队里还没有人。</p>
         ) : (
           <>
-            <div className="table-wrap">
-              <table className="table-sticky-2">
-                <thead>
-                  <tr>
-                    {SQUAD_FIXED_COLS.map((col) => (
-                      <th
-                        key={col.key}
-                        className={col.num ? 'num' : undefined}
-                        title={col.key === 'transferStatus' ? TRANSFER_STATUS_GLOSSARY : undefined}
-                      >
-                        {col.label}
-                      </th>
-                    ))}
-                    {activeCols.map((key) => {
-                      const def = clubColDef(key);
-                      return (
-                        <th key={key} className={def.num ? 'num' : undefined}>
-                          {def.label}
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rosterRows.map((p) => (
-                    <tr key={p.id}>
-                      <td className="marker-cell" title={p.marker ? MARKER_LABEL[p.marker] : undefined}>
-                        {p.marker ? MARKER_EMOJI[p.marker] : ''}
-                      </td>
-                      <td className="mono">{p.number ?? '—'}</td>
-                      <td className="mono">{p.uid.replace(/^fc/, '')}</td>
-                      <td>
-                        <Link to={playerPath(p)}>{p.name}</Link>
-                      </td>
-                      <td className="num mono">{p.age ?? '—'}</td>
-                      <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>
-                      <td className="num mono">{p.ca}</td>
-                      <td className="num mono">{p.pa}</td>
-                      <td className="num mono">{p.releaseFee === null ? '—' : money(p.releaseFee)}</td>
-                      <td className="num mono">{p.wage === null ? '—' : money(p.wage)}</td>
-                      <td>
-                        <TransferStatusCell status={transferStatusOf(p)} />
-                      </td>
-                      {activeCols.map((key) => renderClubCol(key, p))}
-                    </tr>
+            {narrow && (
+              <ViewChips
+                value={view}
+                onChange={setView}
+                extra={
+                  <MultiSelect
+                    label="列…"
+                    items={extraItems}
+                    selected={activeCols}
+                    onToggle={(key) => writeCols(toggleClubCol(activeCols, key))}
+                    onClear={() => writeCols([])}
+                  />
+                }
+              />
+            )}
+            <div className="sqc-wrap" style={{ '--sqc-cw': narrow ? VIEW_COL_WIDTH[view] : undefined } as CSSProperties}>
+              {groupRowsByPosition(rosterRows).map((g) => (
+                <CardGroup
+                  key={g.key}
+                  groupKey={g.key}
+                  label={g.label}
+                  count={g.rows.length}
+                  cells={cells}
+                  extras={extras}
+                  wide={!narrow}
+                >
+                  {g.rows.map((p) => (
+                    <SquadCard key={p.id} row={p} view={view} extras={extras} wide={!narrow} />
                   ))}
-                </tbody>
-              </table>
+                </CardGroup>
+              ))}
             </div>
-            <TransferStatusLegend />
             {rosterOverflow && (
               <p className="muted club-sub-empty">
                 名单过长，这里只显示前 {rosterRows.length} 人 ——{' '}

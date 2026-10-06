@@ -4039,47 +4039,8 @@ th.num .th-sort {
   table.coach-sticky tbody tr:hover td:nth-child(-n + 2) {
     background: #f7f0e0;
   }
-  /* v6.30.0 C 段：注册名单列集重定后（分配/标记/号码/UID/姓名/…）钉「分配 + 姓名」两列，
-     夹在中间的标记/号码/UID 横向滚动时从姓名下面滑过（不钉）。第 1 列是分配开关（.seg），据它认表。
-     列宽：分配是三钮分段控件（— / 一线 / 训练营，12px 字号 + 3px 8px 内边距 ≈ 119px），
-     加上 td 左右内边距 24px ⇒ min-content ≈ 143px ≈ 10.2em，故覆盖成 10.5em（4.5em 放不下会被撑开、
-     姓名列的 left 就错位了）。 */
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) {
-    --coach-sticky-c1: 10.5em;
-  }
-  /* 第 2 列不再是粘性列（上面的通用规则钉了它）：改回静态、去掉冻结边，否则冻结块中间多一道缝 */
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) th:nth-child(2),
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) td:nth-child(2) {
-    position: static;
-    border-right: 0;
-    box-shadow: none;
-  }
-  /* 姓名列（第 5 列）：冻结点落在这 */
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) th:nth-child(5),
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) td:nth-child(5) {
-    position: sticky;
-    left: var(--coach-sticky-c1);
-    z-index: 2;
-    background: var(--card);
-    border-right: 1px solid var(--border);
-    box-shadow: 2px 0 6px rgba(43, 29, 18, 0.12);
-  }
-  /* 表头粘性格提层（多带上姓名格）；底色与全局 th 一致 */
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) thead th:nth-child(-n + 2),
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) thead th:nth-child(5) {
-    z-index: 3;
-    background: #f3ead9;
-  }
-  /* 行底色三态：粘性两格（第 1、5 列）都跟着行底色走 */
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) tr.row-trainee td:nth-child(5) {
-    background: #f6effa;
-  }
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) tr.row-flagged td:nth-child(5) {
-    background: #fbe9e7;
-  }
-  table.coach-sticky:has(tbody td:nth-child(1) .seg) tbody tr:hover td:nth-child(5) {
-    background: #f7f0e0;
-  }
+  /* v6.37.0：注册名单表弃表改卡（card-parts.tsx），原「钉分配 + 姓名」的 v6.30.0 C 段覆盖规则随表删除；
+     coach-sticky 现只剩 VenueTab 主场战报表在用。 */
 }
 
 /* ============================================================================
@@ -4087,7 +4048,7 @@ th.num .th-sort {
    ① 球员卷宗单列 ≤900（.dossier 由 280px 1fr 塌成单列）
    ② 卷宗页签横滑 ≤760（只命中 .dossier-tabs，不动全局 .seg）
    ③ 事件卡片流 ≤760（Player.tsx 转会/成长两表 narrow 分支，与桌面表格 DOM 互斥）
-   ④ 参考型宽表粘前两列 ≤760（.table-sticky-2：市场情报成交表 / 出价历史 / 阵容名单）
+   ④ 参考型宽表粘前两列 ≤760（.table-sticky-2：市场情报成交表 / 出价历史；阵容名单 v6.37.0 已弃表改卡）
    ⑤ Toast 让位（点击穿透 + 成长录入汇总条在场时上抬）
    ============================================================================ */
 
@@ -4209,18 +4170,18 @@ th.num .th-sort {
 }
 
 /* ---- ④ 参考型宽表粘前两列（v6.22.0）---------------------------------------
-   ≤760 起，挂 table-sticky-2 的三张参考型宽表（市场情报「已达成交易」、在售市场「出价历史」、
-   俱乐部页「阵容名单」）横向滚动时前两列钉在左缘。规则内容照抄 v6.21.0 的 .coach-sticky ≤640 块
-   （coach-sticky 自己的块保持 640 不动），只换类名与断点。
+   ≤760 起，挂 table-sticky-2 的两张参考型宽表（市场情报「已达成交易」、在售市场「出价历史」；
+   俱乐部页「阵容名单」v6.37.0 弃表改卡退出本闸）横向滚动时前两列钉在左缘。规则内容照抄
+   v6.21.0 的 .coach-sticky ≤640 块（coach-sticky 自己的块保持 640 不动），只换类名与断点。
    列宽：第 1 列钉在 --stky-c1（默认 6em ≈ 84px，td 14px 口径），第 2 列 left 用同一个变量，
    所以第 1 列必须三态定宽：内容再宽也只折行（overflow 兜底 ellipsis），不许被 min-content 撑开，
    否则第 2 列与第 1 列错位。逐表覆盖按实测首列内容宽：
    ·「已达成交易」首列是 16 字时间戳（mono 10 字 ≈ 84px + 左右内边距 24px ≈ 7.7em）→ 8em，
      让它折成「2026-10-02 / 12:34」两行，而不是贴着连字符断成三行；
    ·「出价历史」首列是俱乐部名（链接）：9em ≈ 126px，7 个汉字一行；
-   ·「阵容名单」钉的是「标记 + 号码 + 姓名」三列（v6.30.0 C 段列集重定：标记在最左、UID 滑到姓名
-     下面不钉），认表与列宽见本块末尾的 v6.30.0 段，不再走默认 6em。
-   三张表都没有现成容器类做祖先选择器，逐表覆盖用 :has() 按结构认表（全站已有先例）。 */
+   ·「阵容名单」原钉「标记 + 号码 + 姓名」三列（v6.30.0 C 段，:has(td.marker-cell) 认表），
+     v6.37.0 随卡片化整段删除。
+   两张表都没有现成容器类做祖先选择器，逐表覆盖用 :has() 按结构认表（全站已有先例）。 */
 @media (max-width: 760px) {
   table.table-sticky-2 {
     --stky-c1: 6em;
@@ -4271,45 +4232,9 @@ th.num .th-sort {
   table.table-sticky-2:has(tbody td:nth-child(1) a) {
     --stky-c1: 9em;
   }
-  /* v6.30.0 C 段：阵容名单列集重定后（标记/号码/UID/姓名/…）钉「标记 + 号码 + 姓名」三列，
-     中间的 UID 不钉（横向滚动时从姓名下面滑过）。第 1 列是标记格（emoji），据它认表。
-     列宽：标记/号码两格都按表头那两个词的宽度取（2 个汉字 28px + 左右内边距 24px = 52px = 3.7em），
-     姓名列的 left 靠这两个变量相加算出来，所以两列都必须三态定宽（否则被 min-content 撑开、left 错位）。 */
-  table.table-sticky-2:has(tbody td.marker-cell) {
-    --stky-c1: 3.7em;
-    --stky-c2: 3.7em;
-  }
-  /* 号码列：定宽 + 截断兜底（通用规则只钉了它，没定宽） */
-  table.table-sticky-2:has(tbody td.marker-cell) th:nth-child(2),
-  table.table-sticky-2:has(tbody td.marker-cell) td:nth-child(2) {
-    width: var(--stky-c2);
-    min-width: var(--stky-c2);
-    max-width: var(--stky-c2);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    /* 冻结点挪到姓名列，这里不再画分割线（否则冻结块中间多一道缝） */
-    border-right: 0;
-    box-shadow: none;
-  }
-  /* 姓名列（第 4 列）：冻结点落在这 */
-  table.table-sticky-2:has(tbody td.marker-cell) th:nth-child(4),
-  table.table-sticky-2:has(tbody td.marker-cell) td:nth-child(4) {
-    position: sticky;
-    left: calc(var(--stky-c1) + var(--stky-c2));
-    z-index: 2;
-    background: var(--card);
-    border-right: 1px solid var(--border);
-    box-shadow: 2px 0 6px rgba(43, 29, 18, 0.12);
-  }
-  /* 表头粘性格提层（多带上姓名格）；底色与全局 th 一致 */
-  table.table-sticky-2:has(tbody td.marker-cell) thead th:nth-child(-n + 2),
-  table.table-sticky-2:has(tbody td.marker-cell) thead th:nth-child(4) {
-    z-index: 3;
-    background: #f3ead9;
-  }
-  table.table-sticky-2:has(tbody td.marker-cell) tbody tr:hover td:nth-child(4) {
-    background: #f7f0e0;
-  }
+  /* v6.37.0：阵容名单表弃表改卡（card-parts.tsx），原「钉标记 + 号码 + 姓名」的 v6.30.0 C 段
+     覆盖规则（:has(tbody td.marker-cell) 家族）随表删除；table-sticky-2 现只剩市场情报成交表
+     与出价历史两张参考型宽表在用。 */
 }
 
 /* ---- ⑤ Toast 让位（v6.22.0）-----------------------------------------------
@@ -6061,4 +5986,392 @@ th.num .th-sort {
     padding: 1px 7px;
     font-size: 12px;
   }
+}
+
+/* ==== 阵容/注册名单卡片化（v6.37.0）========================================
+   SquadTab 阵容名单与 DeskTab 注册名单弃表改卡：位置四组「分组即容器」（组头承担表头）+
+   行解剖（号码 + 身份块 + 值-only 指标 + 行尾分配）。桌面与窄屏同构、DOM 由 useMediaQuery
+   互斥切换（≤760 窄屏：四视图 chips + 组头列头逐列对齐；>760 桌面：全列合并 + 组头标签串）。
+   类名一律 sqc- 前缀（教训：通用词撞已有规则）；窄屏值列宽由组件内联 --sqc-cw 下发
+   （basic 40 / growth 50 / contract 52 / market 52），组头 .sqc-k 与行内 .sqc-v 共用同一宽度对齐。
+   不新增色板：全部取 :root token；四组色条 accent 由组件内联 --sqc-accent 下发。 */
+
+.sqc-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* -- 位置组容器：组头 = 色条 + 组名·人数 + 列头 -------------------------------- */
+
+.sqc-group {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.sqc-ghead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 8px 10px;
+  border-left: 3px solid var(--sqc-accent, var(--silver));
+  background: var(--paper);
+}
+
+.sqc-gtitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.sqc-gcount {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 桌面：列头退化为组头右侧的标签串（不逐列对齐，定稿 14-B） */
+.sqc-glegend {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 窄屏：组头列头行（与行内值同一套钉死列宽逐列对齐） */
+.sqc-gcols {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  flex: none;
+}
+
+.sqc-k {
+  width: var(--sqc-cw, 48px);
+  text-align: right;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* -- 行卡：号码 + 身份块 + 指标值（+ 注册名单的行尾分配列）-------------------- */
+
+.sqc-row {
+  margin: 0;
+}
+
+.sqc-group article.sqc-row {
+  border-top: 1px solid var(--border);
+}
+
+.sqc-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.sqc-no {
+  flex: none;
+  min-width: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.sqc-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sqc-nm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sqc-nm {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.sqc-nm:hover {
+  text-decoration: underline;
+}
+
+.sqc-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sqc-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* 挂牌/非卖品/无合同/退役（status）：红系贴纸 */
+.sqc-badge-status {
+  background: #fbe3e0;
+  border-color: #f3c5bf;
+  color: #b3382c;
+}
+
+/* 保护期：琥珀 */
+.sqc-badge-protect {
+  background: #fdf0d9;
+  border-color: #eed9a9;
+  color: #9a6a13;
+}
+
+/* 未来之星 / 中国计划：绿 */
+.sqc-badge-star,
+.sqc-badge-china {
+  background: #e2f3e8;
+  border-color: #bfe3cd;
+  color: #197a4c;
+}
+
+/* +N 折叠：中性蓝，悬浮 title 出全量 */
+.sqc-badge-more {
+  background: #e8eef7;
+  border-color: #cad7ea;
+  color: #3b5f8a;
+  font-weight: 600;
+}
+
+/* 注册校验红旗（规则级短标签，完整原因在 title） */
+.sqc-badge-flag {
+  background: #fbe3e0;
+  border-color: #f3c5bf;
+  color: #b3382c;
+  font-weight: 700;
+}
+
+.sqc-subline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sqc-marker {
+  flex: none;
+  font-size: 11px;
+}
+
+.sqc-pos {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.sqc-pos:hover {
+  text-decoration: underline;
+}
+
+.sqc-sep {
+  flex: none;
+  color: var(--muted);
+}
+
+.sqc-uid {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* 指标值：窄屏按 --sqc-cw 钉宽右对齐（与组头 .sqc-k 同宽）；桌面平铺摊开 */
+.sqc-m {
+  display: flex;
+  align-items: baseline;
+  flex: none;
+}
+
+.sqc-v {
+  width: var(--sqc-cw, 48px);
+  text-align: right;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.sqc-v.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- 桌面变体（wide）：身份块定宽 + 指标 flex 摊开 -------------------------------- */
+
+.sqc-card.wide {
+  gap: 14px;
+  padding: 10px 14px;
+}
+
+.sqc-card.wide .sqc-id {
+  flex: none;
+  width: 170px;
+}
+
+.sqc-card.wide .sqc-m {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.sqc-card.wide .sqc-v {
+  width: auto;
+}
+
+/* -- 分配列（仅注册名单）：行尾「分配 ▾」下拉，三选全称 --------------------------- */
+
+.sqc-assign {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.sqc-assign .error-msg {
+  font-size: 11px;
+}
+
+.sqc-assign-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sqc-assign-btn.on {
+  background: var(--terracotta-tint);
+  border-color: var(--terracotta);
+  color: var(--terracotta-deep);
+  font-weight: 600;
+}
+
+.sqc-assign-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sqc-assign-caret {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.sqc-assign-pop {
+  /* 落位由 JS 按 trigger 视口坐标算（放不下翻上方），所以这里必须是 fixed */
+  position: fixed;
+  z-index: 80;
+  min-width: 112px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(43, 29, 18, 0.18);
+}
+
+.sqc-assign-pop:focus {
+  outline: none;
+}
+
+.sqc-assign-opt {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sqc-assign-opt:hover {
+  background: var(--paper);
+}
+
+.sqc-assign-opt.on {
+  background: var(--terracotta-tint);
+  color: var(--terracotta-deep);
+  font-weight: 600;
+}
+
+.sqc-assign-opt:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* -- 四视图 chips（窄屏页面级吸顶；「列…」由页面塞进 extra）----------------------- */
+
+.sqc-chips {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin: -2px 0 10px;
+  background: var(--paper);
+}
+
+.sqc-chip {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sqc-chip.on {
+  background: var(--terracotta);
+  border-color: var(--terracotta-deep);
+  color: #fffdf7;
+  font-weight: 600;
 }

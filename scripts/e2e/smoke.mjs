@@ -181,7 +181,7 @@ async function main() {
   page.setDefaultTimeout(TIMEOUT);
   const pageErrors = [];
   const badResponses = []; // 4xx/5xx 的 URL，⑨ 失败时一并打出来便于定位
-  page.on('pageerror', (e) => pageErrors.push(String(e?.message ?? e)));
+  page.on('pageerror', (e) => pageErrors.push(`${String(e?.message ?? e)}\n${e?.stack ?? ''}`));
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const t = m.text();
@@ -1300,15 +1300,16 @@ async function main() {
           wins: 1, draws: 1, losses: 1,
         },
       };
-      // v6.30.0 C 段：阵容名单列集重定后，行里要读的字段补齐（号码/违约金/身价 + 转会状态三布尔），
-      // 五个人恰好覆盖转会状态四态 + 空态：已标价 / 挂牌中 / 转会名单 / 非卖品 / —
+      // v6.37.0 弃表改卡：行形状对齐 /api/players 现行 DTO（卡片要读 position/marker/baseCa/
+      // growable/growthTier/serviceSeasons/influence/agentTier/contractType/protected/hasContract），
+      // 五个人恰好覆盖内联徽章四态 + 空态：已标价 / 挂牌中 / 转会名单 / 非卖品 / —
       const rosterFixture = {
         players: [
-          { id: 1, uid: 'fc100001', name: '门将甲', number: '1', positions: ['GK'], age: 27, ca: 80, pa: 84, status: 'normal', wage: 6.5, releaseFee: 12, marketValue: 30, transferListed: false, notForSale: false, transferPriced: false },
-          { id: 2, uid: 'fc100002', name: '后卫乙', number: '4', positions: ['CB', 'LB'], age: 24, ca: 76, pa: 85, status: 'normal', wage: 5.25, releaseFee: 8, marketValue: 22, transferListed: false, notForSale: false, transferPriced: true },
-          { id: 3, uid: 'fc100003', name: '中场丙', number: '8', positions: ['CM'], age: 31, ca: 74, pa: 74, status: 'listed', wage: 4.75, releaseFee: null, marketValue: 9.5, transferListed: false, notForSale: false, transferPriced: false },
-          { id: 4, uid: 'fc100004', name: '前锋丁', number: null, positions: ['ST'], age: 19, ca: 65, pa: 88, status: 'trainee', wage: null, releaseFee: null, marketValue: 5, transferListed: true, notForSale: false, transferPriced: false },
-          { id: 5, uid: 'fc100005', name: '边锋戊', number: '11', positions: [], age: null, ca: 61, pa: 70, status: 'normal', wage: 1.2, releaseFee: 3, marketValue: 4, transferListed: false, notForSale: true, transferPriced: false },
+          { id: 1, uid: 'fc100001', name: '门将甲', number: '1', position: 'GK', positions: ['GK'], marker: null, age: 27, ca: 80, pa: 84, baseCa: 80, growable: true, growthTier: 2, status: 'normal', wage: 6.5, releaseFee: 12, marketValue: 30, serviceSeasons: 3, influence: 1.2, agentTier: 1, contractType: 'formal', protected: true, hasContract: true, prestige: 1, transferListed: false, notForSale: false, transferPriced: false },
+          { id: 2, uid: 'fc100002', name: '后卫乙', number: '4', position: 'CB', positions: ['CB', 'LB'], marker: null, age: 24, ca: 76, pa: 85, baseCa: 76, growable: true, growthTier: 1, status: 'normal', wage: 5.25, releaseFee: 8, marketValue: 22, serviceSeasons: 2, influence: 0.8, agentTier: 2, contractType: 'formal', protected: false, hasContract: true, prestige: 0, transferListed: false, notForSale: false, transferPriced: true },
+          { id: 3, uid: 'fc100003', name: '中场丙', number: '8', position: 'CM', positions: ['CM'], marker: null, age: 31, ca: 74, pa: 74, baseCa: 74, growable: false, growthTier: 0, status: 'listed', wage: 4.75, releaseFee: null, marketValue: 9.5, serviceSeasons: 5, influence: 0.5, agentTier: 1, contractType: 'formal', protected: false, hasContract: true, prestige: 1, transferListed: false, notForSale: false, transferPriced: false },
+          { id: 4, uid: 'fc100004', name: '前锋丁', number: null, position: 'ST', positions: ['ST'], marker: 'growth', age: 19, ca: 65, pa: 88, baseCa: 65, growable: true, growthTier: 3, status: 'normal', wage: null, releaseFee: null, marketValue: 5, serviceSeasons: null, influence: 0.3, agentTier: 0, contractType: null, protected: false, hasContract: false, prestige: 0, transferListed: true, notForSale: false, transferPriced: false },
+          { id: 5, uid: 'fc100005', name: '边锋戊', number: '11', position: null, positions: [], marker: null, age: null, ca: 61, pa: 70, baseCa: 61, growable: false, growthTier: 0, status: 'normal', wage: 1.2, releaseFee: 3, marketValue: 4, serviceSeasons: 1, influence: 0.2, agentTier: 2, contractType: 'formal', protected: true, hasContract: true, prestige: 0, transferListed: false, notForSale: true, transferPriced: false },
         ],
         nextCursor: null,
       };
@@ -1502,55 +1503,89 @@ async function main() {
             (await page.locator('.club-position-line .band-bar, .club-position-line .club-hist-bar, .club-position-line .club-share-seg').count()) === 0,
             `${label}：位置分布按裁决不用图示，不该出现条`,
           );
-          // 阵容名单表（运营组那两张是 .transfer-table，要排除）
-          const rows = await page.locator('.club-block .table-wrap table:not(.transfer-table) tbody tr').count();
-          assert(rows === rosterFixture.players.length, `${label}：阵容名单 ${rows} 行 ≠ 夹具 ${rosterFixture.players.length} 行`);
-          // v6.30.0 C 段：11 列固定列序 + 转会状态图标列（只出图标）+ 表下图例 + 「列」开关（写 ?cols=）
-          const squadTable = '.club-block .table-wrap table:not(.transfer-table)';
-          const heads = (await page.locator(`${squadTable} thead th`).allInnerTexts()).map((t) => t.trim());
+          // v6.37.0 弃表改卡：阵容名单 = 位置四组容器 + 行解剖卡（article.sqc-row），不再有表
           assert(
-            heads.join('|') === ['标记', '号码', 'UID', '姓名', '年龄', '位置', 'CA', 'PA', '违约金', '工资', '转会状态'].join('|'),
-            `${label}：阵容名单表头不符（${heads.join('|')}）`,
+            (await page.locator('.club-block article.sqc-row table, .club-block .sqc-group .table-wrap').count()) === 0,
+            `${label}：阵容页签不该再出现表格`,
           );
-          const gloss = await page.locator(`${squadTable} thead th`).last().getAttribute('title');
+          const cardRows = await page.locator('.club-block article.sqc-row').count();
+          assert(cardRows === rosterFixture.players.length, `${label}：阵容名单卡 ${cardRows} 张 ≠ 夹具 ${rosterFixture.players.length} 张`);
+          const groupTitles = (await page.locator('.club-block .sqc-gtitle').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
           assert(
-            gloss === '拍卖锤 挂牌中 · 清单 转会名单 · 欧元 已标价 · 锁 非卖品',
-            `${label}：转会状态表头缺整张词表（${gloss}）`,
+            groupTitles.join('/') === '门将 · 1/后卫 · 1/中场 · 1/前锋 · 1/其他 · 1',
+            `${label}：位置四组分组不符（${groupTitles.join('/')}）——边锋戊无主位置应殿后「其他」`,
           );
-          const wantStatus = [null, '已标价', '挂牌中', '转会名单', '非卖品'];
-          const statusCells = await page
-            .locator(`${squadTable} tbody tr td:nth-child(11) .transfer-status`)
-            .evaluateAll((els) =>
-              els.map((e) => ({
-                title: e.getAttribute('title'),
-                text: (e.textContent ?? '').trim(),
-                icons: e.querySelectorAll('svg').length,
-              })),
+          // 内联徽章：四态 + 空态（行序 = 组序 GK/DF/MF/FW/其他；门将甲只有「保护期」，不算状态徽章）
+          const badgeTexts = await page
+            .locator('.club-block article.sqc-row')
+            .evaluateAll((els) => els.map((e) => e.querySelector('.sqc-badge-status')?.textContent?.trim() ?? ''));
+          assert(
+            badgeTexts.join('/') === '/已标价/挂牌中/转会名单/非卖品',
+            `${label}：内联徽章不符（${badgeTexts.join('/')}）`,
+          );
+          // 徽章折叠口径：只显第 1 枚、其余进 +N。边锋戊「非卖品」是首枚直接可见，
+          // 「保护期」折进 +N 的 title；门将甲无状态徽章 ⇒「保护期」在它那行直接显
+          assert(
+            (await page.locator('.club-block .sqc-badge-protect', { hasText: '保护期' }).count()) === 1,
+            `${label}：直接可见的保护期徽章应恰 1 枚（门将甲），实际不是`,
+          );
+          const moreTitle = await page
+            .locator('.club-block article.sqc-row', { hasText: '边锋戊' })
+            .locator('.sqc-badge-more')
+            .getAttribute('title');
+          assert(
+            (moreTitle ?? '').includes('保护期'),
+            `${label}：边锋戊的 +N 气泡该收「保护期」（实际「${moreTitle}」）`,
+          );
+          // 桌面专属：组头标签串 + 「列…」自选（窄屏走 chips + 组内标签格，见下）
+          if (label === 'desktop') {
+            // 桌面组头标签串：13 指标列名依序平铺（DESKTOP_CELLS）
+            const legendText = (await page.locator('.club-block .sqc-glegend').first().innerText()).replace(/\s+/g, ' ').trim();
+            assert(
+              legendText === '年龄 CA PA 初始CA 成长空间 成长档位 工资 违约金 激活价 效力 身价 影响力 经纪人',
+              `${label}：桌面组头标签串不符（${legendText}）`,
             );
-          assert(statusCells.length === wantStatus.length, `${label}：转会状态格 ${statusCells.length} 个 ≠ 夹具 ${wantStatus.length} 行`);
-          statusCells.forEach((cell, i) => {
-            const want = wantStatus[i];
-            assert(cell.title === want, `${label}：第 ${i + 1} 行转会状态 title「${cell.title}」≠「${want}」`);
-            assert(cell.icons === (want === null ? 0 : 1), `${label}：第 ${i + 1} 行转会状态图标 ${cell.icons} 枚（${want ?? '空态'}）`);
-            assert(cell.text === (want === null ? '—' : ''), `${label}：第 ${i + 1} 行转会状态格多出文字「${cell.text}」（只该出图标）`);
-          });
-          const legend = (await page.locator('.transfer-status-legend .transfer-legend-item').allInnerTexts()).map((t) =>
-            t.replace(/\s+/g, ' ').trim(),
-          );
-          assert(
-            legend.join(' · ') === '拍卖锤 挂牌中 · 清单 转会名单 · 欧元 已标价 · 锁 非卖品',
-            `${label}：转会状态图例不符（${legend.join(' · ')}）`,
-          );
-          // 「列」开关：勾选写进 ?cols= 且列立刻出现，再点一次收回去（别把下面的横向溢出断言带歪）
-          await page.locator('.club-block .multiselect').first().click();
-          const colItem = page.locator('.multiselect-panel .multiselect-item', { hasText: '身价' }).first();
-          await colItem.click();
-          await page.locator(`${squadTable} thead th`).nth(11).waitFor({ timeout: TIMEOUT });
-          assert(page.url().includes('cols=marketValue'), `${label}：勾选可选列没写进 ?cols=（${page.url()}）`);
-          await colItem.click();
-          await page.locator(`${squadTable} thead th`).nth(11).waitFor({ state: 'detached', timeout: TIMEOUT });
-          assert(!page.url().includes('cols='), `${label}：取消勾选后 ?cols= 没清掉（${page.url()}）`);
-          assert((await page.locator(`${squadTable} thead th`).count()) === 11, `${label}：取消勾选后列数 ≠ 11`);
+            // 「列…」自选（v6.37.0 起长尾池，身价/工资已是内置列）：勾选写进 ?cols= 且组头标签串立刻长出，
+            // 再点一次收回去（别把下面的横向溢出断言带歪）
+            await page.locator('.club-block .multiselect').first().click();
+            const colItem = page.locator('.multiselect-panel .multiselect-item', { hasText: '合同类型' }).first();
+            await colItem.click();
+            await page.locator('.club-block .sqc-glegend', { hasText: '合同类型' }).first().waitFor({ timeout: TIMEOUT });
+            assert(page.url().includes('cols=contractType'), `${label}：勾选可选列没写进 ?cols=（${page.url()}）`);
+            await colItem.click();
+            assert(
+              (await page.locator('.club-block .sqc-glegend', { hasText: '合同类型' }).count()) === 0,
+              `${label}：取消勾选后组头标签串还挂着「合同类型」`,
+            );
+            assert(!page.url().includes('cols='), `${label}：取消勾选后 ?cols= 没清掉（${page.url()}）`);
+          }
+          if (label === 'mobile') {
+            // 窄屏专属：四视图 chips（tablist）+ 「列…」收进 chips 行的 MultiSelect + 组内标签格
+            const chips = (await page.locator('.club-block .sqc-chips .sqc-chip').allInnerTexts()).map((t) => t.trim());
+            assert(
+              chips.join('/') === '基本/成长/合同/市场',
+              `${label}：窄屏四视图 chips 不符（${chips.join('/')}）`,
+            );
+            assert(
+              (await page.locator('.club-block .sqc-gcols').count()) > 0,
+              `${label}：窄屏组内该出标签格（.sqc-gcols）`,
+            );
+            await page.locator('.club-block .sqc-chip', { hasText: '合同' }).first().click();
+            await page.waitForTimeout(300);
+            const contractVals = await page
+              .locator('.club-block article.sqc-row')
+              .evaluateAll((els) => els.map((e) => [...e.querySelectorAll('.sqc-v')].map((v) => v.textContent?.trim() ?? '').join('|')));
+            // 合同视图 4 列：工资/违约金/激活价/效力（前锋丁无合同全 —；门将甲违约金 12 → 激活价 24）
+            assert(
+              contractVals[0] === '6.50 m|12|24|3 赛季',
+              `${label}：合同视图门将甲四格不符（${contractVals[0]}）`,
+            );
+            assert(
+              contractVals[3] === '—|—|—|—',
+              `${label}：无合同的前锋丁合同视图应全 —（${contractVals[3]}）`,
+            );
+            await page.locator('.club-block .sqc-chip', { hasText: '基本' }).first().click();
+          }
           const ovSquad = await docOverflow();
           assert(ovSquad.scrollW <= ovSquad.clientW + 1, `${label}：阵容页签被撑出横向滚动（${ovSquad.scrollW} > ${ovSquad.clientW}）`);
 

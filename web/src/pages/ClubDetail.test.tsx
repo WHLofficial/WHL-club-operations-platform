@@ -8,7 +8,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ClubBand,
   ClubDetail as ClubDetailDto,
@@ -201,7 +201,7 @@ function rosterRow(patch: Partial<PlayerLibraryRow> & { id: number; name: string
 const ROSTER: PlayersLibraryResponse = {
   players: [
     rosterRow({ id: 7, name: '张三', positions: ['CM', 'CAM'], age: 24, ca: 75, pa: 85, wage: 0.5 }),
-    rosterRow({ id: 8, name: '李四', positions: [], age: 19, ca: 60, pa: 88, status: 'trainee', wage: null }),
+    rosterRow({ id: 8, name: '李四', position: null, positions: [], age: 19, ca: 60, pa: 88, status: 'trainee', wage: null }),
   ],
   nextCursor: null,
 };
@@ -394,8 +394,8 @@ function sub(title: string): HTMLElement {
   return screen.getByText(title).parentElement as HTMLElement;
 }
 
-// 「阵容名单」整块（v6.30.0 C 段起）：标题的父节点是 .tier-head（标题 + 「列」开关一行），
-// 表/图例/超页提示都在它外面 —— 用 sub('阵容名单') 会落进一个只有标题的空壳，得往上取 .club-sub
+// 「阵容名单」整块：标题的父节点是 .tier-head（标题 + 桌面「列…」开关一行），
+// 分组卡/超页提示都在它外面 —— 用 sub('阵容名单') 会落进一个只有标题的空壳，得往上取 .club-sub
 function rosterBlock(): HTMLElement {
   return screen.getByText('阵容名单').closest('.club-sub') as HTMLElement;
 }
@@ -451,6 +451,21 @@ function activeTab(): string {
 async function clickTab(user: ReturnType<typeof userEvent.setup>, label: string): Promise<void> {
   await user.click(within(tabsGroup()).getByRole('button', { name: label }));
 }
+
+beforeEach(() => {
+  // v6.37.0 起 SquadTab/DeskTab 经 useMediaQuery 读 matchMedia（jsdom 没有这个 API，缺桩整树崩）。
+  // 恒 false = 桌面口径：本文件所有断言都按桌面 DOM 写；窄屏卡片分支由 e2e 三视口兜。
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+});
 
 afterEach(() => {
   cleanup();
@@ -698,63 +713,59 @@ describe('阵容页签：阵容组与名单', () => {
     ]);
   });
 
-  it('阵容名单：11 列固定列序，号码/UID/位置/违约金/工资各就各位，人链到 /players/:id', async () => {
+  it('阵容名单：位置四组容器（v6.37.0 弃表改卡），行解剖 = 号码/姓名链/副行 UID/指标值，人链到 /players/:id', async () => {
     stubApi();
     renderDetail();
 
     await screen.findByText('阵容名单');
     const roster = rosterBlock();
-    // 名单是异步拉的：先等第一行出来，再查表头/列数（不然只剩「正在点名…」）
+    // 名单是异步拉的：先等第一行出来（不然只剩「正在点名…」）
     await within(roster).findByText('张三');
-    const table = within(roster).getByRole('table');
-    // 固定列序（v6.30.0 C 段）：标记 / 号码 / UID / 姓名 / 年龄 / 位置 / CA / PA / 违约金 / 工资 / 转会状态
-    expect(Array.from(table.querySelectorAll('thead th'), (th) => th.textContent)).toEqual([
-      '标记',
-      '号码',
-      'UID',
-      '姓名',
-      '年龄',
-      '位置',
-      'CA',
-      'PA',
-      '违约金',
-      '工资',
-      '转会状态',
-    ]);
-    // 转会状态表头 title 带整张图标词表（桌面 hover 表头也能查）
-    expect(table.querySelector('thead th:last-child')!.getAttribute('title')).toBe(
-      '拍卖锤 挂牌中 · 清单 转会名单 · 欧元 已标价 · 锁 非卖品',
+    // 弃表改卡：不再有表格/表头，桌面分支也不挂窄屏四视图 chips
+    expect(within(roster).queryByRole('table')).toBeNull();
+    expect(within(roster).queryAllByRole('columnheader')).toHaveLength(0);
+    expect(within(roster).queryByRole('tablist')).toBeNull();
+
+    // 位置分组：张三 CM → 中场组；李四 positions 空 → 「其他」组殿后。组头 = 组名 · 人数
+    const groupTitles = Array.from(roster.querySelectorAll('.sqc-gtitle'), (el) => el.textContent);
+    expect(groupTitles).toEqual(['中场 · 1', '其他 · 1']);
+    // 桌面组头：列头退化为右对齐标签串（DESKTOP_CELLS 13 列依序合并）
+    const legend = roster.querySelector('.sqc-glegend') as HTMLElement;
+    expect(legend.textContent).toBe(
+      '年龄 CA PA 初始CA 成长空间 成长档位 工资 违约金 激活价 效力 身价 影响力 经纪人',
     );
 
-    const row = (await within(roster).findByText('李四')).closest('tr') as HTMLElement;
-    const cells = row.querySelectorAll('td');
-    expect(cells).toHaveLength(11);
-    expect((cells[0] as HTMLElement).textContent).toBe(''); // 标记：没标
-    expect((cells[1] as HTMLElement).textContent).toBe('—'); // 号码没录
-    expect((cells[2] as HTMLElement).textContent).toBe('8'); // UID 去掉 fc 前缀
-    expect((cells[4] as HTMLElement).textContent).toBe('19');
-    expect((cells[5] as HTMLElement).textContent).toBe('—'); // 位置空数组
-    expect((cells[8] as HTMLElement).textContent).toBe('—'); // 违约金：没合同
-    expect((cells[9] as HTMLElement).textContent).toBe('—'); // 工资：没合同
-    expect((cells[10] as HTMLElement).textContent).toBe('—'); // 转会状态：四态全不占
+    // 行解剖（李四：号码没录、位置空数组、没合同 ⇒ 工资/违约金 —）
+    const row = (within(roster).getByText('李四') as HTMLElement).closest('article') as HTMLElement;
+    expect(row.className).toContain('sqc-row');
+    expect(row.querySelector('.sqc-no')!.textContent).toBe(''); // 号码没录出空串（不是 0 / —）
+    expect(row.querySelector('.sqc-uid')!.textContent).toBe('8'); // UID 去掉 fc 前缀进副行
+    expect(row.querySelector('.sqc-pos')!.textContent).toBe('—'); // 位置空数组
+    const vals = Array.from(row.querySelectorAll('.sqc-v'), (el) => el.textContent);
+    // 13 列依序：年龄/CA/PA/初始CA/成长空间/成长档位/工资/违约金/激活价/效力/身价/影响力/经纪人
+    // （李四 wage/releaseFee 都没录 ⇒ 工资/违约金/激活价 —；agentTier 0 的标签是空串）
+    expect(vals).toEqual(['19', '60', '88', '75', '28', '—', '—', '—', '—', '1.5 赛季', '10.00 m', '1.23', '']);
+    expect(vals[6]).toBe('—'); // 工资（没录过）
+    expect(vals[7]).toBe('—'); // 违约金（没录过）
     expect((within(row).getByText('李四') as HTMLAnchorElement).getAttribute('href')).toBe('/players/8');
 
-    const first = (within(roster).getByText('张三') as HTMLElement).closest('tr') as HTMLElement;
-    expect(within(first).getByText('CM CAM')).toBeTruthy();
-    expect((first.querySelectorAll('td')[9] as HTMLElement).textContent).toBe('0.50 m');
-    // 旧的「状态」徽章列已撤（状态并进转会状态图标列），名单里不再出在队/训练营中文徽章
+    // 张三：多位置折叠「CM +1」、工资两位小数 money() 口径
+    const first = (within(roster).getByText('张三') as HTMLElement).closest('article') as HTMLElement;
+    expect(first.querySelector('.sqc-pos')!.textContent).toBe('CM +1');
+    expect(Array.from(first.querySelectorAll('.sqc-v'), (el) => el.textContent)[6]).toBe('0.50 m');
+    // 旧的「状态」徽章列已撤（状态并进行内徽章），名单里不再出在队/训练营中文徽章
     expect(within(roster).queryByText('在队')).toBeNull();
     expect(within(roster).queryByText('训练营')).toBeNull();
   });
 
-  it('转会状态列：四态各出图标且只出图标，表下那行图例四种俱全', async () => {
+  it('转会状态：四态各出全称文字徽章（v6.37.0 状态不占格），不再有图标列与表下图例', async () => {
     stubApi({
       roster: {
         players: [
-          rosterRow({ id: 7, name: '张三', status: 'listed' }), // 挂牌中 → 拍卖锤
-          rosterRow({ id: 8, name: '李四', transferListed: true }), // 转会名单 → 清单
-          rosterRow({ id: 9, name: '王五', transferPriced: true }), // 已标价 → 欧元
-          rosterRow({ id: 10, name: '赵六', notForSale: true }), // 非卖品 → 锁
+          rosterRow({ id: 7, name: '张三', status: 'listed' }), // 挂牌中
+          rosterRow({ id: 8, name: '李四', transferListed: true }), // 转会名单
+          rosterRow({ id: 9, name: '王五', transferPriced: true }), // 已标价
+          rosterRow({ id: 10, name: '赵六', notForSale: true }), // 非卖品
         ],
         nextCursor: null,
       },
@@ -764,37 +775,24 @@ describe('阵容页签：阵容组与名单', () => {
     await screen.findByText('阵容名单');
     const roster = rosterBlock();
     await within(roster).findByText('张三');
-    const cellOf = (name: string) =>
-      (within(roster).getByText(name).closest('tr') as HTMLElement)
-        .querySelectorAll('td')[10]!.querySelector('.transfer-status') as HTMLElement;
-
-    expect(cellOf('张三').getAttribute('title')).toBe('挂牌中');
-    expect(cellOf('李四').getAttribute('title')).toBe('转会名单');
-    expect(cellOf('王五').getAttribute('title')).toBe('已标价');
-    expect(cellOf('赵六').getAttribute('title')).toBe('非卖品');
-    for (const name of ['张三', '李四', '王五', '赵六']) {
-      const cell = cellOf(name);
-      expect(cell.querySelector('svg'), name).not.toBeNull();
-      // 只出图标：可见文本为空，中文只在 title / aria-label 里
-      expect(cell.textContent, name).toBe('');
-      expect(cell.getAttribute('aria-label'), name).toBe(cell.getAttribute('title'));
-    }
-    // 四枚图标互不相同（映射没串）
-    const shapes = ['张三', '李四', '王五', '赵六'].map((n) => cellOf(n).querySelector('svg')!.innerHTML);
-    expect(new Set(shapes).size).toBe(4);
-
-    // 表下那行图例：窄屏没有 hover，靠它解释图标
-    const legend = roster.querySelector('.transfer-status-legend') as HTMLElement;
-    expect(Array.from(legend.querySelectorAll('.transfer-legend-item'), (el) => el.textContent)).toEqual([
-      '拍卖锤 挂牌中',
-      '清单 转会名单',
-      '欧元 已标价',
-      '锁 非卖品',
-    ]);
+    // 徽章挂姓名行（.sqc-badges 内 .sqc-badge-status），全称文字直接可见
+    const badgeOf = (name: string) =>
+      ((within(roster).getByText(name) as HTMLElement).closest('article') as HTMLElement).querySelector(
+        '.sqc-badge-status',
+      ) as HTMLElement;
+    expect(badgeOf('张三').textContent).toBe('挂牌中');
+    expect(badgeOf('李四').textContent).toBe('转会名单');
+    expect(badgeOf('王五').textContent).toBe('已标价');
+    expect(badgeOf('赵六').textContent).toBe('非卖品');
+    // 图标列退役：无 .transfer-status 单元格、无表下图例
+    expect(within(roster).queryByRole('table')).toBeNull();
+    expect(roster.querySelector('.transfer-status-legend')).toBeNull();
+    expect(roster.querySelector('.transfer-status')).toBeNull();
   });
 
-  it('「列」开关：默认一列不多，勾选写进 ?cols= 且列立刻出现，再点一次收回去', async () => {
-    stubApi();
+  it('「列…」开关：默认只出内置 13 列，勾选写进 ?cols= 且额外指标立刻出现，再点一次收回去', async () => {
+    // marketValue 等已进内置 13 列（CARD_BUILTIN_COL_KEYS），额外池只剩 10 项长尾 —— 挑「合同类型」验
+    stubApi({ roster: { players: [rosterRow({ id: 7, name: '张三', contractType: 'formal' })], nextCursor: null } });
     const user = userEvent.setup();
     renderDetail('/clubs/1');
 
@@ -802,21 +800,22 @@ describe('阵容页签：阵容组与名单', () => {
     const roster = rosterBlock();
     await within(roster).findByText('张三');
     expect(path()).toBe('/clubs/1');
-    expect(within(roster).getAllByRole('columnheader')).toHaveLength(11);
+    // 内置列不占池：组头标签串就是 DESKTOP_CELLS 的 13 个标签，没有「合同类型」
+    expect((roster.querySelector('.sqc-glegend') as HTMLElement).textContent).not.toContain('合同类型');
 
     await user.click(within(roster).getByRole('button', { name: /^列/ }));
-    const panel = await screen.findByRole('group', { name: '列' });
-    await user.click(within(panel).getByRole('checkbox', { name: '身价' }));
+    const panel = await screen.findByRole('group', { name: '列…' });
+    await user.click(within(panel).getByRole('checkbox', { name: '合同类型' }));
 
-    expect(path()).toBe('/clubs/1?cols=marketValue');
-    expect(within(roster).getAllByRole('columnheader')).toHaveLength(12);
-    expect(within(roster).getByRole('columnheader', { name: '身价' })).toBeTruthy();
-    const first = (within(roster).getByText('张三') as HTMLElement).closest('tr') as HTMLElement;
-    expect((first.querySelectorAll('td')[11] as HTMLElement).textContent).toBe('10.00 m');
+    expect(path()).toBe('/clubs/1?cols=contractType');
+    // 额外指标进组头标签串 + 每行多一格值
+    expect((roster.querySelector('.sqc-glegend') as HTMLElement).textContent).toContain('合同类型');
+    const first = (within(roster).getByText('张三') as HTMLElement).closest('article') as HTMLElement;
+    expect(Array.from(first.querySelectorAll('.sqc-v'), (el) => el.textContent)).toContain('正式合同');
 
-    await user.click(within(panel).getByRole('checkbox', { name: '身价' }));
+    await user.click(within(panel).getByRole('checkbox', { name: '合同类型' }));
     expect(path()).toBe('/clubs/1');
-    expect(within(roster).getAllByRole('columnheader')).toHaveLength(11);
+    expect((roster.querySelector('.sqc-glegend') as HTMLElement).textContent).not.toContain('合同类型');
   });
 
   it('名单超过一页时提示去球员库看全部，链接带 club_id', async () => {
@@ -827,7 +826,7 @@ describe('阵容页签：阵容组与名单', () => {
     expect(within(hint).getByText('去球员库看全部').closest('a')!.getAttribute('href')).toBe('/players?club_id=1');
   });
 
-  it('名单为空时给空态，不渲染空表', async () => {
+  it('名单为空时给空态，不渲染分组卡（v6.37.0 弃表改卡）', async () => {
     stubApi({ roster: { players: [], nextCursor: null } });
     renderDetail();
 
@@ -835,6 +834,7 @@ describe('阵容页签：阵容组与名单', () => {
     const roster = rosterBlock();
     expect(await within(roster).findByText('队里还没有人。')).toBeTruthy();
     expect(within(roster).queryByRole('table')).toBeNull();
+    expect(roster.querySelector('.sqc-group')).toBeNull();
   });
 
   it('阵容名单里的人链到 fc_id，不是内部 id（v4.0.0）', async () => {
@@ -1020,16 +1020,16 @@ describe('自家页签：工作台与主场', () => {
     expect(await screen.findByText(/转会权限已被管理组冻结/)).toBeTruthy();
   });
 
-  it('注册工作台：分配列最左 + 11 列固定列序 + 无合同的人留红徽章与禁用 + 「列」开关走 ?regcols=', async () => {
+  it('注册工作台：位置四组行卡 + 行尾「分配 ▾」下拉（无合同禁一线/训练营）+ 「列」开关走 ?regcols=', async () => {
     authState.user = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false } satisfies MeUser;
     stubApi({
       me: meFixture(1),
       squad: {
         ...squadFixture(1),
-        // rules 非空才挂出筛选 + 表（rules 为 null 时整块换成「正在加载注册规则…」）
+        // rules 非空才挂出筛选 + 名单 + 提交按钮（rules 为 null 时整块换成「正在加载注册规则…」）
         rules: { squadMin: 18, squadMax: 30, gkMin: 2, traineeMax: 10, wageCap: 20, limits: { ge90: 2, ge87: 4, growthPa87: 6 }, tier: 'premier' },
         players: [
-          deskPlayer({ id: 7, name: '张三', number: '9', position: 'ST', ca: 80, pa: 88, wage: 0.75, releaseFee: 30, squad: 'first_team' }),
+          deskPlayer({ id: 7, name: '张三', number: '9', position: 'ST', ca: 80, pa: 88, wage: 0.75, releaseFee: 30 }),
           deskPlayer({ id: 8, name: '李四', hasContract: false }),
         ],
       },
@@ -1038,52 +1038,50 @@ describe('自家页签：工作台与主场', () => {
     renderDetail('/clubs/1');
 
     const desk = (await screen.findByText(/注册工作台/)).closest('section') as HTMLElement;
-    const table = within(desk).getByRole('table');
-    // 固定列序（v6.30.0 C 段）：分配最左，其余与阵容名单同序但无转会状态列
-    expect(Array.from(table.querySelectorAll('thead th'), (th) => th.textContent)).toEqual([
-      '分配',
-      '标记',
-      '号码',
-      'UID',
-      '姓名',
-      '年龄',
-      '位置',
-      'CA',
-      'PA',
-      '违约金',
-      '工资',
-    ]);
+    // 弃表改卡：无 table；组序按 GK/DF/MF/FW —— 张三 ST→前锋、李四 CM→中场，中场在前
+    expect(within(desk).queryByRole('table')).toBeNull();
+    expect(Array.from(desk.querySelectorAll('.sqc-gtitle'), (el) => el.textContent)).toEqual(['中场 · 1', '前锋 · 1']);
+    // 桌面组头挂 13 列标签串（与阵容名单同列集，去转会状态加分配列）
+    expect((desk.querySelector('.sqc-glegend') as HTMLElement).textContent).toContain('违约金');
+    expect((desk.querySelector('.sqc-glegend') as HTMLElement).textContent).not.toContain('转会状态');
 
-    const firstRow = table.querySelectorAll('tbody tr')[0] as HTMLElement;
-    // 第 1 格是分段按钮（分配），第 2 格才是标记 —— 分配确实最左
-    expect(firstRow.querySelector('td:nth-child(1) .seg')).not.toBeNull();
-    expect(firstRow.querySelector('td:nth-child(2)')!.className).toContain('marker-cell');
-    expect(Array.from(firstRow.querySelectorAll('td:nth-child(1) .seg button'), (b) => b.textContent)).toEqual([
-      '—',
-      '一线',
-      '训练营',
-    ]);
-    expect(firstRow.querySelector('td:nth-child(3)')!.textContent).toBe('9'); // 号码
-    expect(firstRow.querySelector('td:nth-child(4)')!.textContent).toBe('7'); // UID 去掉 fc 前缀
-    expect(firstRow.querySelector('td:nth-child(10)')!.textContent).toBe('30.00 m'); // 违约金
-    expect(firstRow.querySelector('td:nth-child(11)')!.textContent).toBe('0.75 m'); // 工资（与阵容名单同口径）
+    const zhang = (within(desk).getByText('张三') as HTMLElement).closest('article') as HTMLElement;
+    expect((zhang.querySelector('.sqc-no') as HTMLElement).textContent).toBe('9');
+    expect((zhang.querySelector('.sqc-uid') as HTMLElement).textContent).toBe('7');
+    const zvals = Array.from(zhang.querySelectorAll('.sqc-v'), (el) => el.textContent);
+    // 违约金/激活价走整数化（v6.37.0 规则层），工资保持两位小数；张三非保护 ⇒ 激活价 = 违约金 ×1
+    expect(zvals).toContain('30'); // 违约金（整数化）
+    expect(zvals).toContain('0.75 m'); // 工资（与阵容名单同口径）
 
-    // 无合同的人：一线/训练营禁用，姓名格里留「无合同」红徽章（合同列撤了，被拦的原因不能跟着消失）
-    const bare = (within(desk).getByText('李四') as HTMLElement).closest('tr') as HTMLElement;
-    const buttons = Array.from(bare.querySelectorAll('td:nth-child(1) .seg button')) as HTMLButtonElement[];
-    expect(buttons[0]!.disabled).toBe(false); // 「—」永远可点
-    expect(buttons[1]!.disabled).toBe(true);
-    expect(buttons[2]!.disabled).toBe(true);
-    expect(within(bare).getByText('无合同').getAttribute('title')).toBe('等管理组导入合同模板后才能注册');
+    // 未提交过 → 分配从「未分配」起步；选「一线队」立刻改按钮（落库要等提交）
+    const zbtn = zhang.querySelector('.sqc-assign-btn') as HTMLButtonElement;
+    expect(zbtn.textContent).toBe('未分配▾');
+    await user.click(zbtn);
+    await user.click((zhang.querySelector('.sqc-assign-pop') as HTMLElement).querySelectorAll('button')[1]!);
+    expect((zhang.querySelector('.sqc-assign-btn') as HTMLButtonElement).textContent).toBe('一线队▾');
+    expect((zhang.querySelector('.sqc-assign-btn') as HTMLButtonElement).className).toContain('on');
+
+    // 无合同的人：拉得开面板，但一线/训练营禁用，原因挂在选项 title 上
+    const li = (within(desk).getByText('李四') as HTMLElement).closest('article') as HTMLElement;
+    const lbtn = li.querySelector('.sqc-assign-btn') as HTMLButtonElement;
+    expect(lbtn.textContent).toBe('未分配▾');
+    expect(lbtn.disabled).toBe(false);
+    await user.click(lbtn);
+    const opts = Array.from((li.querySelector('.sqc-assign-pop') as HTMLElement).querySelectorAll('button')) as HTMLButtonElement[];
+    expect(opts.map((o) => o.textContent)).toEqual(['未分配', '一线队', '训练营']);
+    expect(opts[1]!.disabled).toBe(true);
+    expect(opts[2]!.disabled).toBe(true);
+    expect(opts[1]!.getAttribute('title')).toBe('没有现行合同，先让管理组导入合同模板');
+    // 无合同红徽在姓名旁，原因可见
+    expect(within(li).getByText('无合同').getAttribute('title')).toBe('等管理组导入合同模板后才能注册');
 
     // 「列」开关：注册名单写 ?regcols=，跟阵容名单的 ?cols= 分开（两个页签不串味）
     await user.click(within(desk).getByRole('button', { name: /^列/ }));
-    const panel = await screen.findByRole('group', { name: '列' });
+    const panel = await screen.findByRole('group', { name: '列…' });
     await user.click(within(panel).getByRole('checkbox', { name: '合同类型' }));
     expect(path()).toBe('/clubs/1?regcols=contractType');
-    expect(within(desk).getAllByRole('columnheader')).toHaveLength(12);
-    expect(within(desk).getByRole('columnheader', { name: '合同类型' })).toBeTruthy();
-    expect((firstRow.querySelectorAll('td')[11] as HTMLElement).textContent).toBe('正式合同');
+    expect((desk.querySelector('.sqc-glegend') as HTMLElement).textContent).toContain('合同类型');
+    expect(Array.from(zhang.querySelectorAll('.sqc-v'), (el) => el.textContent)).toContain('正式合同');
   });
 
   it('特例期 warn 档：挂提示模式 banner；体检不通过时红字照挂、不显示「通过」绿条', async () => {

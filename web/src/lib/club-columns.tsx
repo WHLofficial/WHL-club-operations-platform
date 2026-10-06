@@ -4,10 +4,11 @@
 // 与球员库的差别只有两处：
 //   ① 球队页两张表各有自己的一套固定列（球员库里可选的 违约金/工资 在球队页是固定列，所以池子要减掉这两项）；
 //   ② URL 键分成 cols（阵容名单）与 regcols（注册名单）—— 两张表在不同页签，用不同键防串味。
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { COL_DEFS, attrClass, money, parseColsParam, type SortKey } from './players-library.ts';
 import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleIsGold } from './ref.ts';
 import { basePlaystyleId } from '../../../src/core/fc26.ts';
+import { CARD_BUILTIN_COL_KEYS } from './club-cards.ts';
 import { BadgeCounts, badgeCountItems } from '../components/BadgeCounts.tsx';
 import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
@@ -56,6 +57,25 @@ export const CLUB_COL_ITEMS: { value: string; label: string }[] = CLUB_OPTIONAL_
   value: d.key,
   label: d.label,
 }));
+
+/**
+ * v6.37.0 卡片化「列…」自选池：可选列池剔除卡片已内置的 8 键（CARD_BUILTIN_COL_KEYS），
+ * 勾出来的都是长尾（徽章/脚/未来之星/中国计划/经纪人等 10 项），追加在卡片指标后面。
+ */
+export const CARD_EXTRA_ITEMS: { value: string; label: string }[] = CLUB_OPTIONAL_COLS.filter(
+  (d) => !CARD_BUILTIN_COL_KEYS.has(d.key),
+).map((d) => ({ value: d.key, label: d.label }));
+
+/**
+ * 卡片化的 ?cols=/?regcols= 解析：普通解析后再收敛到长尾池。
+ * 旧 URL 里可能存着表格时代的内置键（如 ?cols=wage）——不滤就会在卡上重复出一列。
+ */
+export function parseCardExtras(raw: string | null): string[] {
+  const parsed = parseClubColsParam(raw);
+  if (!parsed) return [];
+  const pool = new Set(CARD_EXTRA_ITEMS.map((i) => i.value));
+  return parsed.filter((k) => pool.has(k));
+}
 
 /** 可选列表头/文案的唯一来源（认不出的键回落原键：宁可见到怪名，也不静默少一列） */
 export function clubColDef(key: string): { label: string; num?: boolean } {
@@ -191,65 +211,91 @@ export function psBadgesOf(row: { psIds?: (number | null)[] | null }): PsBadgeRe
 }
 
 /**
+ * 可选列单元格内容（v6.37.0 从 renderClubCol 提出，外壳与内容分离）：
+ * 卡片化布局（阵容/注册名单）渲染同一份内容时不再包 td；球员库与表格形态照旧走 renderClubCol。
+ * key 是 COL_DEFS 的键或 `attr:<属性键>`；内容里的列表项由调用方自行带 key。
+ */
+export function clubCellContent(key: string, p: ClubColRow): ReactNode {
+  if (key.startsWith('attr:')) return p.attrValue ?? '—';
+  switch (key) {
+    case 'marketValue':
+      return money(p.marketValue);
+    case 'badges':
+      return badgeCountItems(p.badgesSilver, p.badgesGold).length === 0 ? (
+        '—'
+      ) : (
+        <BadgeCounts silver={p.badgesSilver} gold={p.badgesGold} density="text" />
+      );
+    case 'prestige':
+      return p.prestige ?? '—';
+    case 'baseCa':
+      return p.baseCa ?? '—';
+    case 'growthGap':
+      return p.pa === null || p.ca === null ? '—' : p.pa - p.ca;
+    case 'foot':
+      return p.foot === null ? '—' : p.foot === 0 ? '左脚' : '右脚';
+    case 'growthTier':
+      return p.growthTier === null ? '—' : `${p.growthTier} 档`;
+    case 'futureStar':
+      return p.isFutureStar ? '★' : '—';
+    case 'chinaPlan':
+      return p.chinaPlan ? '✓' : '—';
+    case 'agentTier':
+      return AGENT_TIER_LABEL[p.agentTier] ?? '—';
+    case 'ps': {
+      const badges = psBadgesOf(p);
+      return badges.length === 0
+        ? '—'
+        : badges.map((b, i) => <PlaystyleBadge key={`${b.psid}-${i}`} psid={b.psid} gold={b.gold} compact />);
+    }
+    case 'fcId':
+      return p.fcId ?? '—';
+    case 'wage':
+      return money(p.wage);
+    case 'releaseFee':
+      return p.releaseFee === null ? '—' : money(p.releaseFee);
+    case 'contractType':
+      return p.contractType ? (CONTRACT_TYPE_LABEL[p.contractType] ?? p.contractType) : '—';
+    case 'source':
+      return p.source ? (SOURCE_LABEL[p.source] ?? p.source) : '—';
+    case 'protected':
+      return p.contractType ? (p.protected ? '保护中' : '非保护') : '—';
+    case 'years':
+      // == null 而非 === null：API 漂移缺字段（undefined）时降级 '—' 而不是崩（同 club-cards 口径）
+      return p.serviceSeasons == null ? '—' : `${p.serviceSeasons.toFixed(1)} 赛季`;
+    default:
+      return '—';
+  }
+}
+
+/** 可选列单元格的 td 类名（与内容分离后由 renderClubCol 统一挂） */
+export function clubCellClass(key: string, p: ClubColRow): string {
+  if (key.startsWith('attr:')) return 'num mono';
+  switch (key) {
+    case 'badges':
+    case 'fcId':
+      return 'mono';
+    case 'ps':
+      return 'mono ps-cell';
+    case 'baseCa':
+      return `num mono${p.baseCa === null ? '' : ` ${attrClass(p.baseCa)}`}`;
+    case 'foot':
+    case 'futureStar':
+    case 'chinaPlan':
+    case 'agentTier':
+    case 'contractType':
+    case 'source':
+    case 'protected':
+      return '';
+    default:
+      return 'num mono';
+  }
+}
+
+/**
  * 可选列单元格（v6.30.0：自 pages/PlayersLibrary.tsx 的 renderCol 提出，球员库与本模块共用一份）。
  * key 是 COL_DEFS 的键或 `attr:<属性键>`；每个分支都带 key={key}。
  */
 export function renderClubCol(key: string, p: ClubColRow): ReactElement {
-  if (key.startsWith('attr:')) return <td key={key} className="num mono">{p.attrValue ?? '—'}</td>;
-  switch (key) {
-    case 'marketValue':
-      return <td key={key} className="num mono">{money(p.marketValue)}</td>;
-    case 'badges':
-      return (
-        <td key={key} className="mono">
-          {badgeCountItems(p.badgesSilver, p.badgesGold).length === 0 ? (
-            '—'
-          ) : (
-            <BadgeCounts silver={p.badgesSilver} gold={p.badgesGold} density="text" />
-          )}
-        </td>
-      );
-    case 'prestige':
-      return <td key={key} className="num mono">{p.prestige ?? '—'}</td>;
-    case 'baseCa':
-      return <td key={key} className={`num mono${p.baseCa === null ? '' : ` ${attrClass(p.baseCa)}`}`}>{p.baseCa ?? '—'}</td>;
-    case 'growthGap':
-      return <td key={key} className="num mono">{p.pa === null || p.ca === null ? '—' : p.pa - p.ca}</td>;
-    case 'foot':
-      return <td key={key}>{p.foot === null ? '—' : p.foot === 0 ? '左脚' : '右脚'}</td>;
-    case 'growthTier':
-      return <td key={key} className="num mono">{p.growthTier === null ? '—' : `${p.growthTier} 档`}</td>;
-    case 'futureStar':
-      return <td key={key}>{p.isFutureStar ? '★' : '—'}</td>;
-    case 'chinaPlan':
-      return <td key={key}>{p.chinaPlan ? '✓' : '—'}</td>;
-    case 'agentTier':
-      return <td key={key}>{AGENT_TIER_LABEL[p.agentTier] ?? '—'}</td>;
-    case 'ps': {
-      const badges = psBadgesOf(p);
-      return (
-        <td key={key} className="mono ps-cell">
-          {badges.length === 0
-            ? '—'
-            : badges.map((b, i) => <PlaystyleBadge key={`${b.psid}-${i}`} psid={b.psid} gold={b.gold} compact />)}
-        </td>
-      );
-    }
-    case 'fcId':
-      return <td key={key} className="mono">{p.fcId ?? '—'}</td>;
-    case 'wage':
-      return <td key={key} className="num mono">{money(p.wage)}</td>;
-    case 'releaseFee':
-      return <td key={key} className="num mono">{p.releaseFee === null ? '—' : money(p.releaseFee)}</td>;
-    case 'contractType':
-      return <td key={key}>{p.contractType ? (CONTRACT_TYPE_LABEL[p.contractType] ?? p.contractType) : '—'}</td>;
-    case 'source':
-      return <td key={key}>{p.source ? (SOURCE_LABEL[p.source] ?? p.source) : '—'}</td>;
-    case 'protected':
-      return <td key={key} className="mono">{p.contractType ? (p.protected ? '保护中' : '非保护') : '—'}</td>;
-    case 'years':
-      return <td key={key} className="num mono">{p.serviceSeasons === null ? '—' : `${p.serviceSeasons.toFixed(1)} 赛季`}</td>;
-    default:
-      return <td key={key}>—</td>;
-  }
+  return <td key={key} className={clubCellClass(key, p)}>{clubCellContent(key, p)}</td>;
 }
