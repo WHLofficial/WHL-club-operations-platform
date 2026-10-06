@@ -828,6 +828,7 @@ async function main() {
             shape[id] = {
               attrs: a !== null,
               gk: p.position === 'GK',
+              name: p.name ?? '',
               radarOut: a !== null && drawsWith(OUT_AXES, a),
               radarGk: a !== null && drawsWith(GK_AXES, a),
               pos: a !== null && ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some((k) => posOk(a[k])),
@@ -850,17 +851,35 @@ async function main() {
         console.warn(`（⑤f 备注：本地只有 ${withArchive.length} 名球员带可上雷达的存档，数据多边形断言按实际期望降级）`);
       }
 
-      // 1) 详情页入口：CA/PA 行下「⇄ 加入对比」带 fc_id 进 1 人态；点击真客户端跳转
+      // 1) 详情页入口（v6.37.0 改页内浮层选人，不再直接跳转）：
+      //    1a 浮层初始态（自己占槽 A + 两空位 + 确认闸）→ Esc 关闭；
+      //    1b 搜索取样第二名球员 → 入槽 → 确认 → 落 2 人态；
+      //    1c 一人态改由 URL 直达保留形态回归（单人雷达 / 虚线空槽 / 无对照表）
       await page.goto(`${BASE}/players/${A}`, { waitUntil: 'networkidle' });
-      const entry = page.locator('.player-card-compare a');
+      const entry = page.locator('.player-card-compare button');
       await entry.waitFor({ timeout: TIMEOUT });
-      const entryHref = await entry.getAttribute('href');
-      assert(entryHref === `/players/compare?ids=${A}`, `详情页对比入口 href 不对（${entryHref}）`);
       await entry.click();
+      const ov = page.locator('.cmp-picker-ov');
+      await ov.waitFor({ timeout: TIMEOUT });
+      assert((await ov.locator('.cmp-picker-slot').count()) === 3, '浮层应有 3 个槽位');
+      assert((await ov.locator('.cmp-picker-slot-empty').count()) === 2, '浮层初始应有两个空位');
+      assert(await ov.locator('.cmp-picker-foot .btn').isDisabled(), '未选人时「开始对比」应禁用');
+      await page.keyboard.press('Escape');
+      await ov.waitFor({ state: 'detached', timeout: TIMEOUT });
+
+      await entry.click();
+      await ov.waitFor({ timeout: TIMEOUT });
+      assert(probe.shape[B].name, '取样球员缺 name——⑤f 1b 搜索入槽前置缺失');
+      await ov.locator('.cmp-picker-search').fill(probe.shape[B].name);
+      await ov.locator('.cmp-picker-item', { hasText: probe.shape[B].name }).first().click();
+      assert((await ov.locator('.cmp-picker-slot-empty').count()) === 1, '选人后应只剩一个空位');
+      await ov.locator('.cmp-picker-foot .btn').click();
       await page.locator('.cmp-page').waitFor({ timeout: TIMEOUT });
       assert(await page.locator('h1', { hasText: '球员对比' }).first().isVisible(), '对比页 h1 不可见');
-      assert((await page.locator('.cmp-urlchip').innerText()).includes(`/players/compare?ids=${A}`), 'URL chip 没回显名单');
-      assert((await page.locator('.cmp-ids > .cmp-card').count()) === 1, '1 人态应有 1 张身份卡');
+      assert((await page.locator('.cmp-urlchip').innerText()).includes(`/players/compare?ids=${A},${B}`), 'URL chip 没回显名单');
+      assert((await page.locator('.cmp-ids > .cmp-card').count()) === 2, '经浮层确认应落 2 人态');
+
+      await page.goto(`${BASE}/players/compare?ids=${A}`, { waitUntil: 'networkidle' });
       const soloSlot = page.locator('.cmp-emptyslot');
       await soloSlot.waitFor({ timeout: TIMEOUT });
       assert((await soloSlot.locator('.cmp-emptyslot-title').innerText()).includes('还差 1 名球员'), '1 人态缺「还差 1 名球员」');
