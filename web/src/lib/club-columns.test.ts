@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import {
+  CARD_EXTRA_ITEMS,
   CLUB_COL_ITEMS,
   CLUB_OPTIONAL_COLS,
   REG_COLS_KEY,
@@ -12,6 +13,7 @@ import {
   SQUAD_FIXED_COLS,
   clubColDef,
   clubVisibleCols,
+  parseCardExtras,
   parseClubColsParam,
   renderClubCol,
   toggleClubCol,
@@ -124,6 +126,17 @@ describe('可选列池（默认全不显示）', () => {
   it('两套 URL 键分开：阵容名单 cols / 注册名单 regcols（两表在不同页签，防串味）', () => {
     expect(SQUAD_COLS_KEY).toBe('cols');
     expect(REG_COLS_KEY).toBe('regcols');
+  });
+
+  it('卡片化长尾池 parseCardExtras：只留额外列，内置键（旧 URL 遗留）与坏值滤掉', () => {
+    expect(CARD_EXTRA_ITEMS.length).toBeGreaterThan(0);
+    expect(parseCardExtras('contractType,badges')).toEqual(['contractType', 'badges']);
+    // 旧表时代遗留的 ?cols=marketValue：身价已是内置列，滤掉防重复渲染成第二列
+    // （wage/releaseFee 在 parseClubColsParam 上游就滤了，这里拦的是仍在可选池内的内置键）
+    expect(parseCardExtras('marketValue,contractType')).toEqual(['contractType']);
+    expect(parseCardExtras('baseCa,badges')).toEqual(['badges']);
+    expect(parseCardExtras('nope')).toEqual([]);
+    expect(parseCardExtras(null)).toEqual([]);
   });
 });
 

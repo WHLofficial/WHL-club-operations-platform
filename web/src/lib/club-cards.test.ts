@@ -62,6 +62,8 @@ describe('行内徽章优先级（定稿：状态 > 保护期 > 未来之星 > �
     const bare = inlineBadgesOf({ ...base, hasContract: false, contractType: null, isFutureStar: true, chinaPlan: true, protected: true });
     expect(bare.map((b) => b.text)).toEqual(['无合同', '未来之星', '中国计划']);
     expect(inlineBadgesOf({ ...base, status: 'retired' })[0]!.text).toBe('退役');
+    // 四态 > 无合同（挂牌/标价以合同在身为前提，交叉行按四态优先显示；变异验证发现的钉子）
+    expect(inlineBadgesOf({ ...base, hasContract: false, notForSale: true })[0]!.text).toBe('非卖品');
   });
 
   it('保护期只在有合同时出现；四类齐出时数组顺序即优先级', () => {
