@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-// 球员详情页（web/src/pages/Player.tsx）的「对比」入口测试（v6.34.0 步骤 7，计划
-// docs/test-plans/v6.34.0-player-compare.md 的 TC-CMP-DET-01/02）：入口在球员卡
-// CA/PA 数字行下方、href 走 fc_id（≠ 内部 id 的夹具，混用内部 id 的变异才会红）。
+// 球员详情页（web/src/pages/Player.tsx）的「对比」入口测试（v6.34.0 步骤 7 建立；
+// v6.37.0 入口从跳球员库改为页内浮层选人，计划 docs/test-plans/v6.37.0-compare-entry-overlay.md）：
+// 入口在球员卡 CA/PA 数字行下方、点击开浮层（ComparePickerOverlay），确认后落
+// /players/compare?ids=<fcId,...>（首位恒自己）。fc_id 用 ≠ 内部 id 的夹具，
+// 混用内部 id 的变异才会红。
 // 左栏 SideOps（会拉报价设置等私有端点）与登录态打桩；详情数据走 api 打桩（照
 // PlayerCompare.test.tsx 的 mock 手法：importOriginal 摊开真实导出、只换 api）。
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlayerDetail } from '../lib/api.ts';
 import Player from './Player.tsx';
@@ -158,27 +160,24 @@ function open(id = 1): ReturnType<typeof userEvent.setup> {
   return userEvent.setup();
 }
 
-describe('TC-CMP-DET：详情页「对比」入口（v6.34.0 步骤 7）', () => {
-  it('TC-CMP-DET-01/02 · 入口在球员卡 CA/PA 数字行下方，href 带本球员 fc_id（非内部 id）', async () => {
+describe('TC-CMP-DET：详情页「对比」入口（v6.34.0 建立，v6.37.0 改为点击开浮层）', () => {
+  it('TC-CMP-PICK-01 · 入口在球员卡 CA/PA 数字行下方，渲染为按钮（不再是 link）', async () => {
     open();
-    const link = await screen.findByRole('link', { name: '⇄ 加入对比' });
-
-    // fc_id 口径：详情响应里 fc 20801 ≠ 内部 id 1
-    expect(link.getAttribute('href')).toBe('/players/compare?ids=20801');
+    const entry = await screen.findByRole('button', { name: '⇄ 加入对比' });
 
     // 位置＝球员卡内 .player-card-numbers（CA/PA/身价）之后
-    const entry = link.closest('.player-card-compare') as HTMLElement;
+    const wrap = entry.closest('.player-card-compare') as HTMLElement;
     const numbers = document.querySelector('.player-card-numbers') as HTMLElement;
-    expect(entry).not.toBeNull();
-    expect(numbers.nextElementSibling).toBe(entry);
+    expect(wrap).not.toBeNull();
+    expect(numbers.nextElementSibling).toBe(wrap);
   });
 
   it('TC-CMP-DET-01 · 入口随左栏常驻卡渲染：切到「合同」页签后仍在', async () => {
     const user = open();
-    await screen.findByRole('link', { name: '⇄ 加入对比' });
+    await screen.findByRole('button', { name: '⇄ 加入对比' });
 
     await user.click(screen.getByRole('button', { name: '合同' }));
-    expect(screen.getByRole('link', { name: '⇄ 加入对比' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '⇄ 加入对比' })).toBeTruthy();
   });
 
   it('TC-CMP-DET-02 边界 · fcId 缺失（长尾球员）时不渲染入口，不拿内部 id 拼链接', async () => {
@@ -190,7 +189,205 @@ describe('TC-CMP-DET：详情页「对比」入口（v6.34.0 步骤 7）', () =>
     });
     open();
     await screen.findByText('林承宇');
-    expect(screen.queryByRole('link', { name: '⇄ 加入对比' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '⇄ 加入对比' })).toBeNull();
+  });
+});
+
+// ---- 选人浮层（v6.37.0）：名册与俱乐部目录打桩 + 挂 /players/compare 探针路由 ----
+
+/** 确认导航的落点：把 query 原样渲染出来当断言探针（MemoryRouter 里不戳真实 history） */
+function CmpProbe() {
+  const { search } = useLocation();
+  return <div data-testid="cmp-probe">{search}</div>;
+}
+
+const HAALAND = { name: 'Erling Haaland', clubId: 501, fcId: 20811 };
+const BELLINGHAM = { name: 'Jude Bellingham', clubId: 501, fcId: 20812 };
+const RASHFORD = { name: 'Marcus Rashford', clubId: 502, fcId: 20813 };
+
+function pickerRoster(): string {
+  return [
+    `${HAALAND.name}|${HAALAND.clubId}|${HAALAND.fcId}`,
+    `${BELLINGHAM.name}|${BELLINGHAM.clubId}|${BELLINGHAM.fcId}`,
+    `${RASHFORD.name}|${RASHFORD.clubId}|${RASHFORD.fcId}`,
+    // 自己（自由身、无俱乐部段）也在名册里：搜自己时必须被「排除自己」滤掉
+    `林承宇|20801`,
+  ].join('\n');
+}
+
+function clubSummary() {
+  return {
+    clubs: [{ id: 501, name: '曼城', isCpu: false, tier: null, logoKey: null, squad: { senior: 25, trainee: 0 } }],
+  };
+}
+
+/** 打开选人浮层：roster 响应可换（TC-CMP-PICK-08 的挂起 / 失败态用） */
+function openPicker(
+  roster: () => Promise<unknown> = () => Promise.resolve({ roster: pickerRoster(), count: 4 }),
+): ReturnType<typeof userEvent.setup> {
+  // 直接从 fc_id 地址进：从内部 id 进会在详情落定后被规范 URL 效果 navigate 到 /players/<fcId>，
+  // queryKey 换新导致整页重挂载，第一下点击会点在被 React 换掉的游离节点上（onClick 不触发）
+  window.history.replaceState(null, '', '/players/20801');
+  apiMock.mockImplementation((path: string) => {
+    if (/^\/api\/players\/\d+$/.test(path)) return Promise.resolve(detail(1));
+    if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'open' } });
+    if (/^\/api\/players\/\d+\/growth$/.test(path)) return Promise.reject(new Error('用例不打桩成长数据'));
+    if (path === '/api/players/roster') return roster();
+    if (path === '/api/clubs') return Promise.resolve(clubSummary());
+    return Promise.reject(new Error(`测试没打桩的请求：${path}`));
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/players/20801']}>
+        <Routes>
+          <Route path="/players/:id" element={<Player />} />
+          {/* 静态段排序高于 :id，确认导航会落在这里 */}
+          <Route path="/players/compare" element={<CmpProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return userEvent.setup();
+}
+
+/** 开浮层 + 等弹窗就绪（多数用例的第一步） */
+async function openDialog(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await user.click(await screen.findByRole('button', { name: '⇄ 加入对比' }));
+  return screen.findByRole('dialog', { name: '加入对比' });
+}
+
+describe('TC-CMP-PICK：选人浮层（v6.37.0）', () => {
+  it('TC-CMP-PICK-02 · 打开后三槽初始态：自己占 A、两空位、提示/计数/确认闸齐全', async () => {
+    const user = openPicker();
+    const dialog = await openDialog(user);
+
+    expect(within(dialog).getByText('林承宇')).toBeTruthy();
+    expect(within(dialog).getAllByText('空位')).toHaveLength(2);
+    expect(within(dialog).getByText('再选 2 人即可开始对比')).toBeTruthy();
+    expect(within(dialog).getByText('已选 1/3')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: '开始对比' }).hasAttribute('disabled')).toBe(true);
+    // 空查询不出候选列表
+    expect(within(dialog).getByText('输入姓名搜索球员')).toBeTruthy();
+  });
+
+  it('TC-CMP-PICK-03 · 搜索候选出「姓名+球队」，点行入槽 B 且确认解锁', async () => {
+    const user = openPicker();
+    const dialog = await openDialog(user);
+
+    await user.type(within(dialog).getByLabelText('搜索球员姓名'), 'erl');
+    const rows = () => dialog.querySelectorAll('.cmp-picker-item');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].textContent).toContain('Erling Haaland');
+    expect(rows()[0].textContent).toContain('曼城'); // 俱乐部名来自目录 501
+
+    await user.click(rows()[0]);
+    // 入槽 B：槽行出名字与移除钮；候选行变已选态
+    expect(within(dialog).getByRole('button', { name: '移除 Erling Haaland' })).toBeTruthy();
+    expect(rows()[0].getAttribute('aria-pressed')).toBe('true');
+    expect(within(dialog).getByText('已选 2/3')).toBeTruthy();
+    expect(within(dialog).getByText('再选 1 人即可开始对比')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: '开始对比' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('TC-CMP-PICK-04 · 确认导航：own 恒在首位（色 A 契约），浮层关闭', async () => {
+    const user = openPicker();
+    const dialog = await openDialog(user);
+
+    await user.type(within(dialog).getByLabelText('搜索球员姓名'), 'erl');
+    await user.click(dialog.querySelectorAll('.cmp-picker-item')[0]);
+    await user.click(within(dialog).getByRole('button', { name: '开始对比' }));
+
+    expect(await screen.findByTestId('cmp-probe').then((el) => el.textContent)).toBe('?ids=20801,20811');
+    expect(screen.queryByRole('dialog', { name: '加入对比' })).toBeNull();
+  });
+
+  it('TC-CMP-PICK-05 · 选满 2 人后未选候选禁用、提示换满员；候选里搜不到自己', async () => {
+    const user = openPicker();
+    const dialog = await openDialog(user);
+    const input = within(dialog).getByLabelText('搜索球员姓名');
+
+    await user.type(input, 'a'); // 三名候选都含 a：按折叠名序 erl < jude < marcus
+    const rows = () => dialog.querySelectorAll('.cmp-picker-item');
+    expect(rows()).toHaveLength(3);
+    expect(rows()[2].textContent).toContain('俱乐部 502'); // 目录没有 502 的回退显示
+
+    await user.click(rows()[0]);
+    await user.click(rows()[1]);
+
+    expect(within(dialog).getByText('名额已满（含自己共 3 人）')).toBeTruthy();
+    expect(within(dialog).getByText('已选 3/3')).toBeTruthy();
+    expect((rows()[2] as HTMLButtonElement).disabled).toBe(true);
+    expect((rows()[0] as HTMLButtonElement).disabled).toBe(false); // 已选行仍可点（= 移除）
+
+    // 排除自己：名册里有 林承宇（20801），候选里必须搜不到
+    await user.clear(input);
+    await user.type(input, '林承宇');
+    expect(within(dialog).getByText('没有匹配「林承宇」的球员')).toBeTruthy();
+  });
+
+  it('TC-CMP-PICK-06 · 槽 ✕ 移除恢复空位与名额；候选行再点一次等效移除', async () => {
+    const user = openPicker();
+    const dialog = await openDialog(user);
+
+    await user.type(within(dialog).getByLabelText('搜索球员姓名'), 'erl');
+    await user.click(dialog.querySelectorAll('.cmp-picker-item')[0]);
+
+    await user.click(within(dialog).getByRole('button', { name: '移除 Erling Haaland' }));
+
+    expect(within(dialog).getAllByText('空位')).toHaveLength(2);
+    expect(within(dialog).getByText('已选 1/3')).toBeTruthy();
+
+    // 候选行再点一次等效移除：先点回选中，再点同一行取消
+    await user.click(dialog.querySelectorAll('.cmp-picker-item')[0]);
+    expect(within(dialog).getAllByText('空位')).toHaveLength(1);
+    expect(dialog.querySelectorAll('.cmp-picker-item')[0].getAttribute('aria-pressed')).toBe('true');
+    await user.click(dialog.querySelectorAll('.cmp-picker-item')[0]);
+    expect(within(dialog).getAllByText('空位')).toHaveLength(2);
+    expect(dialog.querySelectorAll('.cmp-picker-item')[0].getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('TC-CMP-PICK-07a · Esc 关闭浮层', async () => {
+    const user = openPicker();
+    await openDialog(user);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '加入对比' })).toBeNull());
+  });
+
+  it('TC-CMP-PICK-07b · 点遮罩（面板外）关闭浮层', async () => {
+    const user = openPicker();
+    await openDialog(user);
+    fireEvent.click(document.querySelector('.cmp-picker-ov')!);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '加入对比' })).toBeNull());
+  });
+
+  it('TC-CMP-PICK-07c · 点 ✕ 关闭浮层', async () => {
+    const user = openPicker();
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole('button', { name: '关闭' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '加入对比' })).toBeNull());
+  });
+
+  it('TC-CMP-PICK-08 · 名册加载中与拉取失败各有兜底文案，不白屏', async () => {
+    const user = openPicker(() => new Promise(() => {})); // 永不 resolve：挂加载态
+    let dialog = await openDialog(user);
+    expect(within(dialog).getByText('名册加载中…')).toBeTruthy();
+
+    cleanup();
+    const user2 = openPicker(() => Promise.reject(new Error('名册炸了')));
+    dialog = await openDialog(user2);
+    expect(within(dialog).getByText('名册暂时拉不到，稍后再试')).toBeTruthy();
+  });
+
+  it('TC-CMP-PICK-09 · 打开后焦点落关闭钮；Esc 关闭后焦点回入口按钮', async () => {
+    const user = openPicker();
+    const entry = await screen.findByRole('button', { name: '⇄ 加入对比' });
+    await user.click(entry);
+    await screen.findByRole('dialog', { name: '加入对比' });
+    await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('关闭'));
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(document.activeElement).toBe(entry));
   });
 });
 

@@ -1011,6 +1011,11 @@ tbody tr:hover td {
   margin-bottom: 12px;
 }
 
+/* 对比入口容器（v6.37.0 修）：原先零定义、按钮贴住数字行；只管与上下块的间距 */
+.player-card-compare {
+  margin-bottom: 12px;
+}
+
 .ca-pa {
   font-size: 28px;
   font-weight: 800;
@@ -4689,6 +4694,257 @@ th.num .th-sort {
   }
 
   .mkt-ov-drawer .mkt-ov-panel {
+    animation: none;
+  }
+}
+
+/* ============================================================================
+   v6.37.0 球员对比选人浮层（.cmp-picker-*）：球员详情页「⇄ 加入对比」浮层。
+   壳配方照抄 .mkt-ov（遮罩 / panel / ✕ / ≤760 底部抽屉 / reduced-motion），
+   另加三槽行与候选列表的结构类。槽位色取 compare.ts 的 COMPARE_COLORS
+   （A 焦橙深 / B 深蓝灰 / C 深紫），圆点色与淡底由 colorFor 内联下发，这里不设色板。
+   ============================================================================ */
+.cmp-picker-ov {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(43, 29, 18, .45);
+}
+
+.cmp-picker-panel {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  max-height: min(86vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 16px 20px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(43, 29, 18, .28);
+}
+
+.cmp-picker-grab {
+  width: 38px;
+  height: 4px;
+  margin: 0 auto 10px;
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.cmp-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cmp-picker-title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.cmp-picker-x {
+  margin-left: auto;
+  padding: 4px 7px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.cmp-picker-x:hover {
+  color: var(--ink);
+  background: var(--terracotta-tint);
+}
+
+/* 三槽行：空位虚线；已占槽的边框色 / 淡底 / 圆点色由 colorFor 内联下发 */
+.cmp-picker-slots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cmp-picker-slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.cmp-picker-slot-empty {
+  color: var(--muted);
+  font-weight: 400;
+  border-style: dashed;
+  background: transparent;
+}
+
+.cmp-picker-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.cmp-picker-slot-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cmp-picker-slot-x {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  opacity: .65;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cmp-picker-slot-x:hover {
+  opacity: 1;
+}
+
+.cmp-picker-search {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.cmp-picker-search:focus-visible {
+  outline: 2px solid var(--terracotta);
+  outline-offset: 1px;
+}
+
+.cmp-picker-hint {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 候选行：姓名 / 球队 / ＋✓ 标记三段；选中行的字色与淡底由 colorFor 内联下发 */
+.cmp-picker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cmp-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.cmp-picker-item:hover:not([disabled]) {
+  background: var(--terracotta-tint);
+}
+
+.cmp-picker-item[disabled] {
+  opacity: .5;
+  cursor: default;
+}
+
+.cmp-picker-item-name {
+  font-weight: 600;
+}
+
+.cmp-picker-item-club {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cmp-picker-item-mark {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.cmp-picker-note {
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cmp-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cmp-picker-count {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- 浮层：≤760 底部抽屉（上滑出，含安全区），配方同 .mkt-ov-drawer ---- */
+@media (max-width: 760px) {
+  .cmp-picker-drawer {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .cmp-picker-drawer .cmp-picker-panel {
+    max-width: none;
+    max-height: 88vh;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    border-radius: 16px 16px 0 0;
+    animation: cmp-picker-drawer-up .22s ease-out;
+  }
+}
+
+@keyframes cmp-picker-drawer-up {
+  from {
+    transform: translateY(18px);
+    opacity: .55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmp-picker-drawer .cmp-picker-panel {
     animation: none;
   }
 }

@@ -56,6 +56,7 @@ import { useAuth } from '../lib/auth.tsx';
 import { playerPath } from '../lib/player-link.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { SideOps } from './player/SideOps.tsx';
+import ComparePickerOverlay from './player/ComparePickerOverlay.tsx';
 
 type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers';
 
@@ -127,6 +128,8 @@ export default function Player() {
   // 球衣号草稿（v4.0.0）：null = 还没动过，显示服务端的值；改过之后是本地输入
   const [numberDraft, setNumberDraft] = useState<string | null>(null);
   const [numberBusy, setNumberBusy] = useState(false);
+  // 对比选人浮层（v6.37.0）：入口按钮打开，确认后整页导航进对比页
+  const [pickerOpen, setPickerOpen] = useState(false);
   // 窄屏（≤760）走卡片流（v6.22.0）：只决定渲染分支，数据与状态完全复用
   const narrow = useMediaQuery(PLAYER_CARDS_QUERY);
 
@@ -370,14 +373,34 @@ export default function Player() {
                 </span>
               </div>
             </div>
-            {/* 对比入口（v6.34.0 步骤 7 · 入口 B，spec §1）：球员卡 CA/PA 数字行下方，
-                带当前球员 fc_id 进对比页的 1 人态（不重定向）。fc_id 缺失的长尾球员整块不渲染——
-                对比页与球员 URL 都按 fc_id 寻址，拿内部 id 拼链接会落 404 */}
+            {/* 对比入口（v6.34.0 步骤 7 · 入口 B，spec §1；v6.37.0 改页内浮层选人）：
+                球员卡 CA/PA 数字行下方，点开浮层搜人、确认后进对比页。
+                fc_id 缺失的长尾球员整块不渲染——对比页与球员 URL 都按 fc_id 寻址，
+                拿内部 id 拼链接会落 404 */}
             {player.fcId !== null && (
               <div className="player-card-compare">
-                <Link className="btn btn-sm" to={`/players/compare?ids=${player.fcId}`}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={(e) => {
+                    // 开浮层的这次 click 不能再冒泡：浮层在本按钮的 React 子树里挂 portal，
+                    // 事件穿 portal 根（onClick=onClose）会把刚开的浮层立刻关掉
+                    e.stopPropagation();
+                    setPickerOpen(true);
+                  }}
+                >
                   ⇄ 加入对比
-                </Link>
+                </button>
+                {pickerOpen && (
+                  <ComparePickerOverlay
+                    own={{ fcId: player.fcId, name: player.name }}
+                    onConfirm={(ids) => {
+                      setPickerOpen(false);
+                      navigate(`/players/compare?ids=${ids.join(',')}`);
+                    }}
+                    onClose={() => setPickerOpen(false)}
+                  />
+                )}
               </div>
             )}
             <div className="player-card-foot">
