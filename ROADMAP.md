@@ -1502,6 +1502,8 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.37.1 · 窄屏球队卡修复：指标区网格化折列（2026-10-07）
 
+**已上线**（2026-10-07 发布：push `c10069b..ee336a8`（6 枚，含 v6.37.0 发布记录回写）触发 CF 自动部署，生产 Version `ec2b0174-cff7-4a96-a840-e09aacb39b0f` @2026-10-07T01:52:49Z；线上入口资产 `index-DOQ8L5kH.js` / `index-Dsm4lZA2.css` 与本地 6.37.1 构建 sha256 逐字节一致、线上 JS 版本串 `6.37.1`；回读 health + players/clubs/squads/market 全 200；发布记录 docs 枚按仓规只本地 commit 不 push）。
+
 **裁决**：v6.37.0 真机崩坏的修复走**布局层网格化**而非砍列——四视图各配显式列数（`VIEW_GRID_COLS`：basic/contract=2、growth/market=3），`.sqc-m`/`.sqc-gcols` 从单行 flex 改同构 grid（`repeat(var(--sqc-mcols,3), var(--sqc-cw,48px))` 右对齐），组头列头与行值天然逐格对齐；合同 4 列与基本（含分配下拉）折 2 列给名字区让回宽度（360px 宽度账：合同 2×60=120 ⇒ 名字区 ~176-192px 完整），成长/市场 3 列本就放得下。配齐三件窄屏治理：合同列宽 52→60px + `.sqc-v` nowrap + 效力值去空格（「0.5 赛季」格内碎行）；`.sqc-subline` flex-wrap（位置摘要不被压没）。**范围红线**：桌面 wide 变体行为不变（既有 `.sqc-card.wide .sqc-m{display:flex}` specificity 覆盖）；效力值只动卡片值源 `club-cards.ts`，桌面表格/球员库/球员页的赛季文本保留空格。
 
 **交付**：`b72d37e` fix(web)（VIEW_GRID_COLS + cw 60 + grid 化 + nowrap + subline wrap，4 文件）+ `7726e4c` fix(club-cards)（years 去空格 + club-cards.test 取值口径同步 + ClubDetail.test 13 列序列同步 + 新增「窄屏网格列配置」锁）+ `872988f` test(e2e)（⑨ 合同视图窄屏四断言）+ `ccc5a9f` fix(web)（审查订正：nowrap 收窄 `.sqc-card:not(.wide)` + 可加列 `sqc-v-extra` 窄屏 ellipsis 截断——可加列长值如来源球队名 ~70px、PlayStyle 多徽章排在 nowrap 钉宽下会与邻格重叠的审查发现回归）+ docs 枚。**零迁移、零生产写、零 API 契约变更**。
