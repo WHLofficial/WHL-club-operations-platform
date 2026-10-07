@@ -1374,3 +1374,100 @@ describe('角色筛选（v6.6.0）', () => {
   });
 });
 
+// 跨仓名册同步端点（v6.38.0）：契约字段 { fcId, height, attrs, playstyles } 由对面仓消费，改名即破坏契约。
+describe('球员元数据批量 /api/players/meta（v6.38.0）', () => {
+  // 四行覆盖四种数据形态：①全字段 + 明细表银/金各一条 ②game_attrs 为 NULL
+  // ③game_attrs 合法 JSON 但非对象（players 上有 json_extract 表达式索引，坏 JSON 连插都插不进去，
+  //   所以「解析后不是对象」才是能造出来的形态）④身高不是数字
+  function seedMeta(sqlite: DatabaseSync): void {
+    const stmt = sqlite.prepare(
+      'INSERT INTO players (id, uid, name, ca, pa, fc_id, game_attrs) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    );
+    stmt.run(
+      1, 'fc1', '球员一', 80, 90, 2500801,
+      JSON.stringify({ ID: 2500801, height: 189, weight: 82, PSID1: 4, PSID13: 103, finishing: 88 }),
+    );
+    stmt.run(2, 'fc2', '球员二', 70, 88, 2500802, null);
+    stmt.run(3, 'fc3', '球员三', 75, 85, 2500803, 'null');
+    stmt.run(4, 'fc4', '球员四', 75, 85, 2500804, JSON.stringify({ height: '—', weight: null }));
+    // 发放明细：银徽基础 ID 4 落银槽、金徽基础 ID 3 落金槽（表里 kind 表金、psid 只存基础 ID）
+    sqlite.exec(`
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (1, 1, 'silver', 4, 'manual', '2026-01-01T00:00:00Z'),
+        (1, 13, 'gold', 3, 'growth', '2026-01-01T00:00:00Z');
+    `);
+  }
+
+  interface MetaBody {
+    players: { fcId: number; height: number | null; attrs: Record<string, unknown> | null; playstyles: number[] }[];
+  }
+
+  it('四项字段逐字段：attrs 原样整包、height 取 attrs.height、金徽 psid 换算 +100', async () => {
+    const fx = freshEnv();
+    seedMeta(fx.sqlite);
+    const res = await get('/api/players/meta?fcIds=2500801,2500802,99999', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as MetaBody;
+    // 查不到的 99999 不出现、不报错；顺序 = 请求顺序
+    expect(body.players.map((p) => p.fcId)).toEqual([2500801, 2500802]);
+    const [a, b] = body.players;
+    expect(a.height).toBe(189);
+    // attrs 是入库 JSON 的原样整包（PSID 槽也照给，不做字段筛选）
+    expect(a.attrs).toEqual({ ID: 2500801, height: 189, weight: 82, PSID1: 4, PSID13: 103, finishing: 88 });
+    // 明细按槽位序；金徽（kind='gold' + 基础 ID 3）换算成 103 —— 与 ref 表 / PSID 槽同一编号空间
+    expect(a.playstyles).toEqual([4, 103]);
+    expect(b).toEqual({ fcId: 2500802, height: null, attrs: null, playstyles: [] });
+  });
+
+  it('取不到身高/attrs 一律 null，不拿 0 顶替', async () => {
+    const fx = freshEnv();
+    seedMeta(fx.sqlite);
+    const body = (await (await get('/api/players/meta?fcIds=2500803,2500804', fx.env)).json()) as MetaBody;
+    // 'null' 解析出来不是对象（也不是字符串 'null'）：attrs 给 null
+    expect(body.players[0]).toEqual({ fcId: 2500803, height: null, attrs: null, playstyles: [] });
+    // 身高是 '—'：Number('—') = NaN → null；写成 Number(attrs?.height ?? 0) 这里会变 0
+    expect(body.players[1]).toEqual({
+      fcId: 2500804,
+      height: null,
+      attrs: { height: '—', weight: null },
+      playstyles: [],
+    });
+  });
+
+  it('参数校验：缺参/非法值/超 90 个一律 400，恰好 90 个放行', async () => {
+    const fx = freshEnv();
+    seedMeta(fx.sqlite);
+    for (const q of [
+      '',
+      'fcIds=',
+      'fcIds=abc',
+      'fcIds=0',
+      'fcIds=-1',
+      'fcIds=1.5',
+      'fcIds=1e3',
+      'fcIds=0x10',
+      'fcIds=2500801,',
+      'fcIds=2500801,,2500802',
+    ]) {
+      const res = await get(`/api/players/meta${q ? `?${q}` : ''}`, fx.env);
+      expect(res.status, `查询串 ${q}`).toBe(400);
+    }
+    // 90 个恰好在上限：1 个命中 + 89 个不存在 → 200，只出命中那行
+    const ids90 = ['2500801', ...Array.from({ length: 89 }, (_, i) => String(9000000 + i))];
+    const ok = await get(`/api/players/meta?fcIds=${ids90.join(',')}`, fx.env);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as MetaBody).players.map((p) => p.fcId)).toEqual([2500801]);
+    expect((await get(`/api/players/meta?fcIds=${[...ids90, '9000089'].join(',')}`, fx.env)).status).toBe(400);
+  });
+
+  it('重复 fcId 去重只回一行；全查不到给空数组不报错', async () => {
+    const fx = freshEnv();
+    seedMeta(fx.sqlite);
+    const dup = (await (await get('/api/players/meta?fcIds=2500801,2500801', fx.env)).json()) as MetaBody;
+    expect(dup.players.map((p) => p.fcId)).toEqual([2500801]);
+    const miss = await get('/api/players/meta?fcIds=7777777,7777778', fx.env);
+    expect(miss.status).toBe(200);
+    expect((await miss.json()) as MetaBody).toEqual({ players: [] });
+  });
+});
+

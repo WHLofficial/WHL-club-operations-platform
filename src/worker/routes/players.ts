@@ -4,7 +4,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
-import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId } from '../../core/fc26.ts';
+import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleIdOf } from '../../core/fc26.ts';
 import { serviceSeasons, freeAgentFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
@@ -874,6 +874,113 @@ async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: stri
   ).first<{ n: number; roster: string | null }>();
   return { roster: row?.roster ?? '', count: row?.n ?? 0 };
 }
+
+// GET /api/players/meta?fcIds=<逗号分隔 fc_id> —— 批量球员元数据（v6.38.0，跨仓名册同步用）
+// 契约字段名固定（对面仓照此实现，勿改名）：players[] 每项 { fcId, height, attrs, playstyles }。
+//   attrs     = game_attrs 原样整包（71 键，含 PSID1-15 与身高），不做字段筛选；无值/坏 JSON 给 null
+//   height    = attrs.height（players 表没有 height 列，身高只在 game_attrs 里）；取不到给 null
+//   playstyles = 发放明细表 player_playstyles 的 psid 数组，金徽换算成「基础 ID + 100」
+//                （与 web/assets/ref/playstyle.json 和 game_attrs.PSID* 同一编号空间：银 1-99 / 金 101-199；
+//                该表 psid 列存基础 ID、金徽由 kind='gold' 表示，不换算的话纯数字数组里金银分不出来）
+// 查不到的 fcId 不出现、不报错；重复 fcId 去重；响应顺序 = 请求顺序（前端按 fcId 对号入座）。
+// 上限 90 个（与 players-import 的 IN 分批 §17.2-1 同值）：超限或含非法值一律 400，且校验在缓存之前
+// （否则 400 会被 cachedJson 缓存住）。公开只读照 /players 与 /players/roster：assertPublicRate +
+// cachedJson（键含查询串；/api/players 前缀的 purge 映射 cache-policy.ts:66 已存在，写路径 bump 即失效）。
+// 路由必须注册在 /players/:id 之前 —— 同 roster：否则「meta」会被当成球员 ID 落进详情分支。
+const META_FC_IDS_MAX = 90;
+
+// fcIds 解析（逗号分隔）：只认十进制正整数，1e3 / 0x10 / 1.5 / 负数 / 空段都算非法值。
+function parseMetaFcIds(raw: string | undefined): number[] {
+  if (!raw) throw new HttpError(400, '缺少 fcIds 参数');
+  const parts = raw.split(',');
+  if (parts.length > META_FC_IDS_MAX) throw new HttpError(400, `fcIds 最多 ${META_FC_IDS_MAX} 个`);
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const part of parts) {
+    const token = part.trim();
+    const n = Number(token);
+    if (!/^\d+$/.test(token) || !Number.isSafeInteger(n) || n <= 0) {
+      throw new HttpError(400, `fcIds 含非法值「${token.slice(0, 20)}」`);
+    }
+    if (seen.has(n)) continue;
+    seen.add(n);
+    ids.push(n);
+  }
+  return ids;
+}
+
+interface PlayerMetaRow {
+  fc_id: number;
+  game_attrs: string | null;
+  psid: number | null;
+  kind: 'silver' | 'gold' | null;
+}
+
+interface PlayerMeta {
+  fcId: number;
+  height: number | null;
+  attrs: Record<string, unknown> | null;
+  playstyles: number[];
+}
+
+// 身高只在 game_attrs 里（players 表无 height 列，属性页与对比页都读 gameAttrs.height）：
+// 数字直接用、数字字符串转，其余（缺键 / null / 空串 / 非数字）给 null —— Number(null) = 0，别上当。
+function metaHeightOf(attrs: Record<string, unknown> | null): number | null {
+  const raw = attrs?.['height'];
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[]): Promise<{ players: PlayerMeta[] }> {
+  const byFcId = new Map<number, PlayerMeta>();
+  // fc_id IN 分批（§17.2-1，写法同 players-import.fetchExisting）：上限 90 与批大小同值 ⇒ 今天必是一批，
+  // 循环只为兜住上限将来调大，不为提前优化。
+  for (let i = 0; i < fcIds.length; i += META_FC_IDS_MAX) {
+    const slice = fcIds.slice(i, i + META_FC_IDS_MAX);
+    const marks = slice.map(() => '?').join(', ');
+    const rows = await c.env.DB
+      .prepare(
+        `SELECT players.fc_id AS fc_id, players.game_attrs AS game_attrs, pp.psid AS psid, pp.kind AS kind
+           FROM players LEFT JOIN player_playstyles pp ON pp.player_id = players.id
+          WHERE players.fc_id IN (${marks})
+          ORDER BY players.fc_id, pp.slot`,
+      )
+      .bind(...slice)
+      .all<PlayerMetaRow>();
+    for (const r of rows.results) {
+      let entry = byFcId.get(r.fc_id);
+      if (!entry) {
+        let attrs: Record<string, unknown> | null = null;
+        if (r.game_attrs) {
+          try {
+            const parsed = JSON.parse(r.game_attrs) as unknown;
+            attrs = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+          } catch {
+            attrs = null;
+          }
+        }
+        entry = { fcId: r.fc_id, height: metaHeightOf(attrs), attrs, playstyles: [] };
+        byFcId.set(r.fc_id, entry);
+      }
+      // 明细表按槽位升序（ORDER BY pp.slot）：psid 是基础 ID，金徽在此换算成 +100 的存库/参考表 ID
+      if (r.psid !== null && r.kind !== null) entry.playstyles.push(playstyleIdOf(r.psid, r.kind));
+    }
+  }
+  return { players: fcIds.flatMap((id) => { const e = byFcId.get(id); return e ? [e] : []; }) };
+}
+
+// 路由必须注册在 /players/:id 之前（同 roster，见上）
+app.get('/players/meta', async (c) => {
+  assertPublicRate(c, 'players');
+  const fcIds = parseMetaFcIds(c.req.query('fcIds'));
+  const data = await cachedJson(
+    `players:meta:${canonicalQuery(c.req.url)}`,
+    ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS),
+    () => loadPlayersMeta(c, fcIds),
+    { scope: 'players', env: c.env, ctx: waitUntilOf(c) },
+  );
+  return c.json(data);
+});
 
 // GET /api/players/:id —— 球员卡数据（球员 + 俱乐部 + 现行合同 + FC 存档）
 // `:id` 是裸数字 fc_id（兼容内部 id，见 src/worker/player-ref.ts）：前端据此把 URL 规范成 fc_id。
