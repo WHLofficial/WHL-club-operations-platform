@@ -744,7 +744,7 @@ describe('阵容页签：阵容组与名单', () => {
     const vals = Array.from(row.querySelectorAll('.sqc-v'), (el) => el.textContent);
     // 13 列依序：年龄/CA/PA/初始CA/成长空间/成长档位/工资/违约金/激活价/效力/身价/影响力/经纪人
     // （李四 wage/releaseFee 都没录 ⇒ 工资/违约金/激活价 —；agentTier 0 的标签是空串）
-    expect(vals).toEqual(['19', '60', '88', '75', '28', '—', '—', '—', '—', '1.5 赛季', '10.00 m', '1.23', '']);
+    expect(vals).toEqual(['19', '60', '88', '75', '28', '—', '—', '—', '—', '1.5赛季', '10.00 m', '1.23', '']);
     expect(vals[6]).toBe('—'); // 工资（没录过）
     expect(vals[7]).toBe('—'); // 违约金（没录过）
     expect((within(row).getByText('李四') as HTMLAnchorElement).getAttribute('href')).toBe('/players/8');

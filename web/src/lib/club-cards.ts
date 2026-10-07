@@ -205,7 +205,8 @@ export const CARD_VIEW_CELLS: Record<CardViewKey, readonly CardCell[]> = {
     { key: 'wage', label: '工资', num: true, get: (r) => (r.wage == null ? null : money(r.wage)) },
     { key: 'releaseFee', label: '违约金', num: true, get: (r) => moneyIntText(r.releaseFee) },
     { key: 'activation', label: '激活价', num: true, get: (r) => moneyIntText(activationFeeOf(r)) },
-    { key: 'years', label: '效力', num: true, get: (r) => (r.serviceSeasons == null ? null : `${r.serviceSeasons} 赛季`) },
+    // 效力值不带空格（「0.5赛季」）：卡片值格窄屏 nowrap 钉宽，60px 兜住最长「10.5赛季」
+    { key: 'years', label: '效力', num: true, get: (r) => (r.serviceSeasons == null ? null : `${r.serviceSeasons}赛季`) },
   ],
   market: [
     { key: 'marketValue', label: '身价', num: true, get: (r) => (r.marketValue == null ? null : money(r.marketValue)) },
