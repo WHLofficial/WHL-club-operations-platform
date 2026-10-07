@@ -1594,14 +1594,41 @@ async function main() {
             const contractVals = await page
               .locator('.club-block article.sqc-row')
               .evaluateAll((els) => els.map((e) => [...e.querySelectorAll('.sqc-v')].map((v) => v.textContent?.trim() ?? '').join('|')));
-            // 合同视图 4 列：工资/违约金/激活价/效力（前锋丁无合同全 —；门将甲违约金 12 → 激活价 24）
+            // 合同视图 4 列折 2 列（v6.37.1）：工资/违约金/激活价/效力（前锋丁无合同全 —；门将甲违约金 12 → 激活价 24）
             assert(
-              contractVals[0] === '6.50 m|12|24|3 赛季',
+              contractVals[0] === '6.50 m|12|24|3赛季',
               `${label}：合同视图门将甲四格不符（${contractVals[0]}）`,
             );
             assert(
               contractVals[3] === '—|—|—|—',
               `${label}：无合同的前锋丁合同视图应全 —（${contractVals[3]}）`,
+            );
+            // v6.37.1 窄屏压缩回归：名字区不被指标区挤成逐字竖排、位置摘要不被压没、值格 nowrap 不溢出
+            const narrowFit = await page.locator('.club-block article.sqc-row').first().evaluate((row) => {
+              const nm = row.querySelector('.sqc-nm')?.getBoundingClientRect().width ?? 0;
+              const pos = row.querySelector('.sqc-pos')?.textContent?.trim() ?? '';
+              const overflow = [...row.querySelectorAll('.sqc-v')].filter((v) => v.scrollWidth > v.clientWidth + 1).length;
+              const tops = [...row.querySelectorAll('.sqc-v')].map((v) => Math.round(v.getBoundingClientRect().top));
+              // 折 2 列 ⇒ 4 值最多两行；崩坏形态（逐值一行 / 全挤一行溢出）都会超界或被溢出断言抓
+              const gridRows = new Set(tops).size;
+              const maxTwoRows = tops.length === 0 || gridRows <= 2;
+              return { nmW: Math.round(nm), pos, overflow, maxTwoRows };
+            });
+            assert(
+              narrowFit.nmW >= 100,
+              `${label}：合同视图名字区仅 ${narrowFit.nmW}px（<100px 会逐字竖排）`,
+            );
+            assert(
+              narrowFit.pos.length > 0,
+              `${label}：合同视图首行位置摘要被压没`,
+            );
+            assert(
+              narrowFit.overflow === 0,
+              `${label}：合同视图有 ${narrowFit.overflow} 个值格 nowrap 后溢出`,
+            );
+            assert(
+              narrowFit.maxTwoRows,
+              `${label}：合同视图值区超过两行（--sqc-mcols 网格契约失效）`,
             );
             await page.locator('.club-block .sqc-chip', { hasText: '基本' }).first().click();
           }
