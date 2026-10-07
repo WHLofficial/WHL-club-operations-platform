@@ -6301,12 +6301,13 @@ th.num .th-sort {
   text-overflow: ellipsis;
 }
 
-/* 窄屏：组头列头行（与行内值同一套钉死列宽逐列对齐） */
+/* 窄屏：组头列头行（与行内值同一套钉死列宽逐列对齐；列数随 --sqc-mcols，v6.37.1 同构网格） */
 .sqc-gcols {
   margin-left: auto;
-  display: flex;
-  align-items: baseline;
-  flex: none;
+  display: grid;
+  grid-template-columns: repeat(var(--sqc-mcols, 3), var(--sqc-cw, 48px));
+  justify-content: end;
+  align-items: center;
 }
 
 .sqc-k {
@@ -6429,6 +6430,7 @@ th.num .th-sort {
 .sqc-subline {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
   color: var(--muted);
@@ -6467,11 +6469,13 @@ button.sqc-pos:hover {
   font-size: 11px;
 }
 
-/* 指标值：窄屏按 --sqc-cw 钉宽右对齐（与组头 .sqc-k 同宽）；桌面平铺摊开 */
+/* 指标值：窄屏按 --sqc-mcols × --sqc-cw 同构网格右对齐（与组头 .sqc-k 逐格对齐，4 列视图折 2 列）；
+   桌面平铺摊开（.sqc-card.wide .sqc-m 覆盖回 flex） */
 .sqc-m {
-  display: flex;
-  align-items: baseline;
-  flex: none;
+  display: grid;
+  grid-template-columns: repeat(var(--sqc-mcols, 3), var(--sqc-cw, 48px));
+  justify-content: end;
+  align-items: end;
 }
 
 .sqc-v {
@@ -6479,6 +6483,7 @@ button.sqc-pos:hover {
   text-align: right;
   font-size: 13px;
   color: var(--ink);
+  white-space: nowrap;
 }
 
 .sqc-v.num {

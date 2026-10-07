@@ -38,12 +38,24 @@ export const GROUP_ACCENTS: Record<string, string> = {
   unknown: '#64748b',
 };
 
-/** 各视图指标格的钉死列宽（窄屏值-only 对齐用；合同 4 列最宽、放得下「10.50 m」） */
+/** 各视图指标格的钉死列宽（窄屏值-only 对齐用；合同「10.5赛季」最长，60px 配 nowrap 兜住） */
 export const VIEW_COL_WIDTH: Record<CardViewKey, string> = {
   basic: '40px',
   growth: '50px',
-  contract: '52px',
+  contract: '60px',
   market: '52px',
+};
+
+/**
+ * 各视图窄屏网格列数（--sqc-mcols）：4 列合同与带分配下拉的基本视图折 2 列，
+ * 给名字区让回宽度（v6.37.1：真机 360px 下 4×52 把球员名压成逐字竖排）；
+ * 组头列头 .sqc-gcols 与行值 .sqc-m 同构网格 ⇒ 逐格对齐保持。
+ */
+export const VIEW_GRID_COLS: Record<CardViewKey, number> = {
+  basic: 2,
+  growth: 3,
+  contract: 2,
+  market: 3,
 };
 
 /* ---------- 行内徽章（1 + N 折叠，定稿优先级在 club-cards.inlineBadgesOf） ---------- */

@@ -14,7 +14,7 @@ import MultiSelect from '../../components/MultiSelect.tsx';
 import { useMediaQuery } from '../../lib/use-media.ts';
 import type { ClubSquadStructure } from '../../lib/api.ts';
 import { DetailLine, HeroStat, Histogram, ShareBar, money, num1 } from './parts.tsx';
-import { CardGroup, SquadCard, VIEW_COL_WIDTH, ViewChips, extraColDefs } from './card-parts.tsx';
+import { CardGroup, SquadCard, VIEW_COL_WIDTH, VIEW_GRID_COLS, ViewChips, extraColDefs } from './card-parts.tsx';
 
 export default function SquadTab({ clubId, squad }: { clubId: number; squad: ClubSquadStructure }) {
   const rosterQuery = useClubRoster(clubId);
@@ -138,7 +138,15 @@ export default function SquadTab({ clubId, squad }: { clubId: number; squad: Clu
                 }
               />
             )}
-            <div className="sqc-wrap" style={{ '--sqc-cw': narrow ? VIEW_COL_WIDTH[view] : undefined } as CSSProperties}>
+            <div
+              className="sqc-wrap"
+              style={
+                {
+                  '--sqc-cw': narrow ? VIEW_COL_WIDTH[view] : undefined,
+                  '--sqc-mcols': narrow ? VIEW_GRID_COLS[view] : undefined,
+                } as CSSProperties
+              }
+            >
               {groupRowsByPosition(rosterRows).map((g) => (
                 <CardGroup
                   key={g.key}

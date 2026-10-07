@@ -34,6 +34,7 @@ import {
   CardGroup,
   RegCard,
   VIEW_COL_WIDTH,
+  VIEW_GRID_COLS,
   ViewChips,
   extraColDefs,
   type AssignValue,
@@ -430,7 +431,12 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
               )}
               <div
                 className="sqc-wrap"
-                style={{ '--sqc-cw': narrow ? VIEW_COL_WIDTH[view] : undefined } as CSSProperties}
+                style={
+                  {
+                    '--sqc-cw': narrow ? VIEW_COL_WIDTH[view] : undefined,
+                    '--sqc-mcols': narrow ? VIEW_GRID_COLS[view] : undefined,
+                  } as CSSProperties
+                }
               >
                 {groupRowsByPosition(rows).map((g) => (
                   <CardGroup
