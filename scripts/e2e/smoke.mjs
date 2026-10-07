@@ -588,7 +588,7 @@ async function main() {
         // 顶栏收敛：一条「转会中心」，旧的两个入口退役（V3 红点）
         const tabs = page.locator('nav.nav-links a.nav-tab');
         assert(JSON.stringify(await tabs.allInnerTexts()) !== '[]', '顶栏没有渲染导航空');
-        assert((await tabs.filter({ hasText: '转会中心' }).count()) === 1, '顶栏没有「转会中心」入口');
+        assert((await tabs.filter({ hasText: '转会' }).count()) === 1, '顶栏没有「转会」入口');
         assert((await tabs.filter({ hasText: '转会报价' }).count()) === 0, '顶栏仍留着「转会报价」旧入口');
         assert((await tabs.filter({ hasText: '签约谈判' }).count()) === 0, '顶栏仍留着「签约谈判」旧入口');
 
@@ -1252,90 +1252,91 @@ async function main() {
       /\/api\/me\/club(\?|$)/,
     ];
 
+    const clubsFixture = {
+      clubs: [
+        { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 5, trainee: 1 }, avgCa: 78.4, totalValue: 412.5, totalWage: 33.4 },
+        { id: 73, name: '巴黎圣日耳曼', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 4, trainee: 0 }, avgCa: 80.1, totalValue: 502.25, totalWage: 41.2 },
+        { id: 241, name: '巴塞罗那', isCpu: true, tier: 'second', logoKey: null, squad: { senior: 3, trainee: 2 }, avgCa: null, totalValue: null, totalWage: 9.5 },
+        { id: 131681, name: 'AC米兰', isCpu: true, tier: null, logoKey: null, squad: { senior: 2, trainee: 0 }, avgCa: 61.2, totalValue: 20.75, totalWage: 1.25 },
+      ],
+    };
+    // 档位故意给不等的人数：柱高按「最高档」归一 ⇒ 最高档必然占满轨道，高度算错这条才量得出来。
+    // CA 各档之和 = 阵容人数（6）⇒ 条长之和恰好 100%；最高档只占 33%，若有人改成「按最大档
+    // 归一」宽度会变 100%，这条断言就会红。
+    const detailFixture = {
+      club: { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null },
+      squad: {
+        size: 6, senior: 5, trainee: 1, avgCa: 78.4, maxCa: 88, avgPa: 85.2, avgGrowth: 6.8,
+        totalValue: 412.5, totalWage: 33.4, avgWage: 6.68, badgesSilver: 9, badgesGold: 2,
+        byPosition: [
+          { key: 'GK', label: '门将', count: 1, detail: 'GK 1' },
+          { key: 'DF', label: '后卫', count: 2, detail: 'CB 2' },
+          { key: 'MF', label: '中场', count: 2, detail: 'CM 1 · CDM 1' },
+          { key: 'FW', label: '前锋', count: 1, detail: 'ST 1' },
+        ],
+        byAge: [
+          { key: 'u18', label: '≤18', count: 1 },
+          { key: '19-21', label: '19–21', count: 1 },
+          { key: '22-24', label: '22–24', count: 2 },
+          { key: '25-27', label: '25–27', count: 1 },
+          { key: '28-30', label: '28–30', count: 1 },
+          { key: '31+', label: '≥31', count: 0 },
+        ],
+        byCa: [
+          { key: '90+', label: '90+', count: 0 },
+          { key: '85-89', label: '85–89', count: 1 },
+          { key: '80-84', label: '80–84', count: 2 },
+          { key: '70-79', label: '70–79', count: 2 },
+          { key: 'u70', label: '<70', count: 1 },
+        ],
+      },
+      contracts: {
+        signed: 6, unprotected: 2, protectedCount: 4, avgYears: 2.5,
+        byYears: [
+          { key: 'le05', label: '0.5 赛季内', count: 1 },
+          { key: '1-15', label: '1–1.5 赛季', count: 2 },
+          { key: '2-25', label: '2–2.5 赛季', count: 3 },
+          { key: '3+', label: '3 赛季及以上', count: 0 },
+        ],
+      },
+      transfers: {
+        incoming: [
+          { id: 11, type: 'transfer', playerId: 5, playerName: '新援甲', fromClubId: 73, fromClubName: '巴黎圣日耳曼', toClubId: 1, toClubName: '阿森纳', fee: 12.5, extraFee: 1.5, season: 9, windowSeq: 1, completedAt: '2026-09-01T10:00:00Z' },
+        ],
+        // playerId 为 null 是真实情形（transfers.player_id 无 NOT NULL）⇒ 该格出纯文本，不能链 /players/null
+        outgoing: [
+          { id: 12, type: 'free_agent', playerId: null, playerName: '离队乙', fromClubId: 1, fromClubName: '阿森纳', toClubId: null, toClubName: null, fee: null, extraFee: null, season: 9, windowSeq: null, completedAt: null },
+        ],
+      },
+      form: {
+        recent: [
+          { matchId: 101, season: 9, competitionType: '联赛', stageName: '常规赛', round: 7, homeTeam: '阿森纳', awayTeam: '利物浦', scoreHome: 2, scoreAway: 1, penHome: null, penAway: null, result: 'win', finishedAt: '2026-09-20T19:00:00Z' },
+          // 点球大战不改 90 分钟判定 ⇒ 比分 1:1 记平，点球只做标注
+          { matchId: 102, season: 9, competitionType: '联赛', stageName: '常规赛', round: 6, homeTeam: '曼城', awayTeam: '阿森纳', scoreHome: 1, scoreAway: 1, penHome: 4, penAway: 3, result: 'draw', finishedAt: '2026-09-17T19:00:00Z' },
+          { matchId: 103, season: 9, competitionType: '联赛', stageName: '常规赛', round: 5, homeTeam: '阿森纳', awayTeam: '切尔西', scoreHome: 0, scoreAway: 2, penHome: null, penAway: null, result: 'loss', finishedAt: '2026-09-13T19:00:00Z' },
+        ],
+        wins: 1, draws: 1, losses: 1,
+      },
+    };
+    // v6.37.0 弃表改卡：行形状对齐 /api/players 现行 DTO（卡片要读 position/marker/baseCa/
+    // growable/growthTier/serviceSeasons/influence/agentTier/contractType/protected/hasContract），
+    // 五个人恰好覆盖内联徽章四态 + 空态：已标价 / 挂牌中 / 转会名单 / 非卖品 / —
+    const rosterFixture = {
+      players: [
+        { id: 1, uid: 'fc100001', name: '门将甲', number: '1', position: 'GK', positions: ['GK'], marker: null, age: 27, ca: 80, pa: 84, baseCa: 80, growable: true, growthTier: 2, status: 'normal', wage: 6.5, releaseFee: 12, marketValue: 30, serviceSeasons: 3, influence: 1.2, agentTier: 1, contractType: 'formal', protected: true, hasContract: true, prestige: 1, transferListed: false, notForSale: false, transferPriced: false },
+        { id: 2, uid: 'fc100002', name: '后卫乙', number: '4', position: 'CB', positions: ['CB', 'LB'], marker: null, age: 24, ca: 76, pa: 85, baseCa: 76, growable: true, growthTier: 1, status: 'normal', wage: 5.25, releaseFee: 8, marketValue: 22, serviceSeasons: 2, influence: 0.8, agentTier: 2, contractType: 'formal', protected: false, hasContract: true, prestige: 0, transferListed: false, notForSale: false, transferPriced: true },
+        { id: 3, uid: 'fc100003', name: '中场丙', number: '8', position: 'CM', positions: ['CM'], marker: null, age: 31, ca: 74, pa: 74, baseCa: 74, growable: false, growthTier: 0, status: 'listed', wage: 4.75, releaseFee: null, marketValue: 9.5, serviceSeasons: 5, influence: 0.5, agentTier: 1, contractType: 'formal', protected: false, hasContract: true, prestige: 1, transferListed: false, notForSale: false, transferPriced: false },
+        { id: 4, uid: 'fc100004', name: '前锋丁', number: null, position: 'ST', positions: ['ST'], marker: 'growth', age: 19, ca: 65, pa: 88, baseCa: 65, growable: true, growthTier: 3, status: 'normal', wage: null, releaseFee: null, marketValue: 5, serviceSeasons: null, influence: 0.3, agentTier: 0, contractType: null, protected: false, hasContract: false, prestige: 0, transferListed: true, notForSale: false, transferPriced: false },
+        { id: 5, uid: 'fc100005', name: '边锋戊', number: '11', position: null, positions: [], marker: null, age: null, ca: 61, pa: 70, baseCa: 61, growable: false, growthTier: 0, status: 'normal', wage: 1.2, releaseFee: 3, marketValue: 4, serviceSeasons: 1, influence: 0.2, agentTier: 2, contractType: 'formal', protected: true, hasContract: true, prestige: 0, transferListed: false, notForSale: true, transferPriced: false },
+      ],
+      nextCursor: null,
+    };
+    const standingFixture = {
+      standing: { tournamentId: 1, stageName: '常规赛', groupName: null, position: 3, played: 7, won: 4, drawn: 1, lost: 2, goalsFor: 12, goalsAgainst: 8, pts: 13, pointsDeducted: null },
+      note: null,
+    };
+
     await check('⑨ 球队页三视口：列表分段 / 详情三页签逐一点开 / 结构图不溢出（截图落 scratch/）', async () => {
-      const clubsFixture = {
-        clubs: [
-          { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 5, trainee: 1 }, avgCa: 78.4, totalValue: 412.5, totalWage: 33.4 },
-          { id: 73, name: '巴黎圣日耳曼', isCpu: false, tier: 'premier', logoKey: null, squad: { senior: 4, trainee: 0 }, avgCa: 80.1, totalValue: 502.25, totalWage: 41.2 },
-          { id: 241, name: '巴塞罗那', isCpu: true, tier: 'second', logoKey: null, squad: { senior: 3, trainee: 2 }, avgCa: null, totalValue: null, totalWage: 9.5 },
-          { id: 131681, name: 'AC米兰', isCpu: true, tier: null, logoKey: null, squad: { senior: 2, trainee: 0 }, avgCa: 61.2, totalValue: 20.75, totalWage: 1.25 },
-        ],
-      };
-      // 档位故意给不等的人数：柱高按「最高档」归一 ⇒ 最高档必然占满轨道，高度算错这条才量得出来。
-      // CA 各档之和 = 阵容人数（6）⇒ 条长之和恰好 100%；最高档只占 33%，若有人改成「按最大档
-      // 归一」宽度会变 100%，这条断言就会红。
-      const detailFixture = {
-        club: { id: 1, name: '阿森纳', isCpu: false, tier: 'premier', logoKey: null },
-        squad: {
-          size: 6, senior: 5, trainee: 1, avgCa: 78.4, maxCa: 88, avgPa: 85.2, avgGrowth: 6.8,
-          totalValue: 412.5, totalWage: 33.4, avgWage: 6.68, badgesSilver: 9, badgesGold: 2,
-          byPosition: [
-            { key: 'GK', label: '门将', count: 1, detail: 'GK 1' },
-            { key: 'DF', label: '后卫', count: 2, detail: 'CB 2' },
-            { key: 'MF', label: '中场', count: 2, detail: 'CM 1 · CDM 1' },
-            { key: 'FW', label: '前锋', count: 1, detail: 'ST 1' },
-          ],
-          byAge: [
-            { key: 'u18', label: '≤18', count: 1 },
-            { key: '19-21', label: '19–21', count: 1 },
-            { key: '22-24', label: '22–24', count: 2 },
-            { key: '25-27', label: '25–27', count: 1 },
-            { key: '28-30', label: '28–30', count: 1 },
-            { key: '31+', label: '≥31', count: 0 },
-          ],
-          byCa: [
-            { key: '90+', label: '90+', count: 0 },
-            { key: '85-89', label: '85–89', count: 1 },
-            { key: '80-84', label: '80–84', count: 2 },
-            { key: '70-79', label: '70–79', count: 2 },
-            { key: 'u70', label: '<70', count: 1 },
-          ],
-        },
-        contracts: {
-          signed: 6, unprotected: 2, protectedCount: 4, avgYears: 2.5,
-          byYears: [
-            { key: 'le05', label: '0.5 赛季内', count: 1 },
-            { key: '1-15', label: '1–1.5 赛季', count: 2 },
-            { key: '2-25', label: '2–2.5 赛季', count: 3 },
-            { key: '3+', label: '3 赛季及以上', count: 0 },
-          ],
-        },
-        transfers: {
-          incoming: [
-            { id: 11, type: 'transfer', playerId: 5, playerName: '新援甲', fromClubId: 73, fromClubName: '巴黎圣日耳曼', toClubId: 1, toClubName: '阿森纳', fee: 12.5, extraFee: 1.5, season: 9, windowSeq: 1, completedAt: '2026-09-01T10:00:00Z' },
-          ],
-          // playerId 为 null 是真实情形（transfers.player_id 无 NOT NULL）⇒ 该格出纯文本，不能链 /players/null
-          outgoing: [
-            { id: 12, type: 'free_agent', playerId: null, playerName: '离队乙', fromClubId: 1, fromClubName: '阿森纳', toClubId: null, toClubName: null, fee: null, extraFee: null, season: 9, windowSeq: null, completedAt: null },
-          ],
-        },
-        form: {
-          recent: [
-            { matchId: 101, season: 9, competitionType: '联赛', stageName: '常规赛', round: 7, homeTeam: '阿森纳', awayTeam: '利物浦', scoreHome: 2, scoreAway: 1, penHome: null, penAway: null, result: 'win', finishedAt: '2026-09-20T19:00:00Z' },
-            // 点球大战不改 90 分钟判定 ⇒ 比分 1:1 记平，点球只做标注
-            { matchId: 102, season: 9, competitionType: '联赛', stageName: '常规赛', round: 6, homeTeam: '曼城', awayTeam: '阿森纳', scoreHome: 1, scoreAway: 1, penHome: 4, penAway: 3, result: 'draw', finishedAt: '2026-09-17T19:00:00Z' },
-            { matchId: 103, season: 9, competitionType: '联赛', stageName: '常规赛', round: 5, homeTeam: '阿森纳', awayTeam: '切尔西', scoreHome: 0, scoreAway: 2, penHome: null, penAway: null, result: 'loss', finishedAt: '2026-09-13T19:00:00Z' },
-          ],
-          wins: 1, draws: 1, losses: 1,
-        },
-      };
-      // v6.37.0 弃表改卡：行形状对齐 /api/players 现行 DTO（卡片要读 position/marker/baseCa/
-      // growable/growthTier/serviceSeasons/influence/agentTier/contractType/protected/hasContract），
-      // 五个人恰好覆盖内联徽章四态 + 空态：已标价 / 挂牌中 / 转会名单 / 非卖品 / —
-      const rosterFixture = {
-        players: [
-          { id: 1, uid: 'fc100001', name: '门将甲', number: '1', position: 'GK', positions: ['GK'], marker: null, age: 27, ca: 80, pa: 84, baseCa: 80, growable: true, growthTier: 2, status: 'normal', wage: 6.5, releaseFee: 12, marketValue: 30, serviceSeasons: 3, influence: 1.2, agentTier: 1, contractType: 'formal', protected: true, hasContract: true, prestige: 1, transferListed: false, notForSale: false, transferPriced: false },
-          { id: 2, uid: 'fc100002', name: '后卫乙', number: '4', position: 'CB', positions: ['CB', 'LB'], marker: null, age: 24, ca: 76, pa: 85, baseCa: 76, growable: true, growthTier: 1, status: 'normal', wage: 5.25, releaseFee: 8, marketValue: 22, serviceSeasons: 2, influence: 0.8, agentTier: 2, contractType: 'formal', protected: false, hasContract: true, prestige: 0, transferListed: false, notForSale: false, transferPriced: true },
-          { id: 3, uid: 'fc100003', name: '中场丙', number: '8', position: 'CM', positions: ['CM'], marker: null, age: 31, ca: 74, pa: 74, baseCa: 74, growable: false, growthTier: 0, status: 'listed', wage: 4.75, releaseFee: null, marketValue: 9.5, serviceSeasons: 5, influence: 0.5, agentTier: 1, contractType: 'formal', protected: false, hasContract: true, prestige: 1, transferListed: false, notForSale: false, transferPriced: false },
-          { id: 4, uid: 'fc100004', name: '前锋丁', number: null, position: 'ST', positions: ['ST'], marker: 'growth', age: 19, ca: 65, pa: 88, baseCa: 65, growable: true, growthTier: 3, status: 'normal', wage: null, releaseFee: null, marketValue: 5, serviceSeasons: null, influence: 0.3, agentTier: 0, contractType: null, protected: false, hasContract: false, prestige: 0, transferListed: true, notForSale: false, transferPriced: false },
-          { id: 5, uid: 'fc100005', name: '边锋戊', number: '11', position: null, positions: [], marker: null, age: null, ca: 61, pa: 70, baseCa: 61, growable: false, growthTier: 0, status: 'normal', wage: 1.2, releaseFee: 3, marketValue: 4, serviceSeasons: 1, influence: 0.2, agentTier: 2, contractType: 'formal', protected: true, hasContract: true, prestige: 0, transferListed: false, notForSale: true, transferPriced: false },
-        ],
-        nextCursor: null,
-      };
-      const standingFixture = {
-        standing: { tournamentId: 1, stageName: '常规赛', groupName: null, position: 3, played: 7, won: 4, drawn: 1, lost: 2, goalsFor: 12, goalsAgainst: 8, pts: 13, pointsDeducted: null },
-        note: null,
-      };
       // 登录者是观众（club: null）⇒ 详情页不挂教练工作台；这一条不依赖本地能否读到真队
       const meClubFixture = { club: null, balance: null, squadCount: null, window: null, home: null };
 
@@ -1594,29 +1595,38 @@ async function main() {
             const contractVals = await page
               .locator('.club-block article.sqc-row')
               .evaluateAll((els) => els.map((e) => [...e.querySelectorAll('.sqc-v')].map((v) => v.textContent?.trim() ?? '').join('|')));
-            // 合同视图 4 列折 2 列（v6.37.1）：工资/违约金/激活价/效力（前锋丁无合同全 —；门将甲违约金 12 → 激活价 24）
+            // 合同视图四格：工资/违约金/激活价/效力（前锋丁无合同全 —；门将甲违约金 12 → 激活价 24）
             assert(
-              contractVals[0] === '6.50 m|12|24|3赛季',
+              contractVals[0] === '6.50 m|12 m|24 m|3赛季',
               `${label}：合同视图门将甲四格不符（${contractVals[0]}）`,
             );
             assert(
               contractVals[3] === '—|—|—|—',
               `${label}：无合同的前锋丁合同视图应全 —（${contractVals[3]}）`,
             );
-            // v6.37.1 窄屏压缩回归：名字区不被指标区挤成逐字竖排、位置摘要不被压没、值格 nowrap 不溢出
+            // v6.37.2 两行式定稿回归：第一行序号+名字，值区第二行整行 1fr 均分——值恒单行不折、
+            // 名字区不被指标挤压；组头标签格与值格右缘逐列对齐（ghead 左置色条容差 ≤3px）
             const narrowFit = await page.locator('.club-block article.sqc-row').first().evaluate((row) => {
               const nm = row.querySelector('.sqc-nm')?.getBoundingClientRect().width ?? 0;
               const pos = row.querySelector('.sqc-pos')?.textContent?.trim() ?? '';
               const overflow = [...row.querySelectorAll('.sqc-v')].filter((v) => v.scrollWidth > v.clientWidth + 1).length;
-              const tops = [...row.querySelectorAll('.sqc-v')].map((v) => Math.round(v.getBoundingClientRect().top));
-              // 折 2 列 ⇒ 4 值最多两行；崩坏形态（逐值一行 / 全挤一行溢出）都会超界或被溢出断言抓
-              const gridRows = new Set(tops).size;
-              const maxTwoRows = tops.length === 0 || gridRows <= 2;
-              return { nmW: Math.round(nm), pos, overflow, maxTwoRows };
+              // 两行式契约 = 值区恒单行；折成两行的崩坏形态（逐值一行 / 2+1 孤行）都会被抓
+              const rows = new Set(
+                [...row.querySelectorAll('.sqc-v')].map((v) => Math.round(v.getBoundingClientRect().top)),
+              ).size;
+              // 组头标签格（.sqc-gcols .sqc-k）与卡内值格逐列右缘对齐——头行与卡行同款 1fr 轨道才是同构
+              const gcols = row.closest('.sqc-group')?.querySelector('.sqc-gcols');
+              const kRights = gcols ? [...gcols.querySelectorAll('.sqc-k')].map((k) => Math.round(k.getBoundingClientRect().right)) : [];
+              const vRights = [...row.querySelectorAll('.sqc-v')].map((v) => Math.round(v.getBoundingClientRect().right));
+              const tailDelta =
+                Math.min(kRights.length, vRights.length) > 0
+                  ? kRights[kRights.length - 1] - vRights[vRights.length - 1]
+                  : null;
+              return { nmW: Math.round(nm), pos, overflow, rows, tailDelta };
             });
             assert(
-              narrowFit.nmW >= 100,
-              `${label}：合同视图名字区仅 ${narrowFit.nmW}px（<100px 会逐字竖排）`,
+              narrowFit.nmW >= 150,
+              `${label}：合同视图名字区仅 ${narrowFit.nmW}px（两行式下应 ≈160+，低于这个数说明布局回退挤压、360 真机会逐字竖排）`,
             );
             assert(
               narrowFit.pos.length > 0,
@@ -1627,8 +1637,22 @@ async function main() {
               `${label}：合同视图有 ${narrowFit.overflow} 个值格 nowrap 后溢出`,
             );
             assert(
-              narrowFit.maxTwoRows,
-              `${label}：合同视图值区超过两行（--sqc-mcols 网格契约失效）`,
+              narrowFit.rows === 1,
+              `${label}：合同视图值区折成 ${narrowFit.rows} 行（两行式定稿 = 值恒单行 1fr 均分）`,
+            );
+            assert(
+              narrowFit.tailDelta !== null && Math.abs(narrowFit.tailDelta) <= 3,
+              `${label}：组头标签格尾格与值格右缘错位 ${narrowFit.tailDelta}px（>3 对齐失效）`,
+            );
+            // nav 收纳（≤640 短文案，v6.37.2）：360 真机不允许横滑——每个页签右缘都要落在视口内
+            const navFit = await page.evaluate(() => {
+              const d = document.documentElement;
+              const rights = [...document.querySelectorAll('.nav-tab')].map((t) => Math.round(t.getBoundingClientRect().right));
+              return { clientW: d.clientWidth, scrollW: d.scrollWidth, maxRight: Math.max(...rights), count: rights.length };
+            });
+            assert(
+              navFit.count > 0 && navFit.maxRight <= navFit.clientW + 1,
+              `${label}：nav 伸到 ${navFit.maxRight} > 视口 ${navFit.clientW}（短文案收纳失效，尾部页签被裁）`,
             );
             await page.locator('.club-block .sqc-chip', { hasText: '基本' }).first().click();
           }
@@ -1688,6 +1712,107 @@ async function main() {
         console.log(`   截图：${shots.map((s) => s.replace(/\\/g, '/')).join(' / ')}`);
       } finally {
         for (const pattern of CLUB_ROUTES) await page.unroute(pattern);
+      }
+    });
+
+    // v6.37.2 教练态专有回归：工作台页签 own 才挂载（ClubDetail 的 visibleTabs），注册卡行尾的
+    // 分配下拉（.sqc-assign）恒在 DOM——360 真机第一行能不能留住名字就是跟它算账。⑨ 全程观众态
+    // 根本进不了这个页签，教练态的两行式几何（名字区/值区单行/列头对齐/nav 收纳）由本场景单测。
+    await check('⑲ 球队页教练态 375：工作台注册卡两行式几何 + nav 收纳（截图落 scratch/）', async () => {
+      const ok19 = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      // me/club 用 ⑪ 转会台同款 DESK_ME_CLUB（club.id = 1 ⇒ own=true），名单用 DESK_SQUAD
+      const ROUTES19 = [
+        /\/api\/clubs\/1(\?|$)/,
+        /\/api\/players\?/,
+        /\/api\/me\/club(\?|$)/,
+        /\/api\/club\/squad/,
+        /\/api\/clubs\/1\/standing/,
+      ];
+      await page.route(ROUTES19[0], (r) => r.fulfill(ok19(detailFixture)));
+      await page.route(ROUTES19[1], (r) => r.fulfill(ok19(rosterFixture)));
+      await page.route(ROUTES19[2], (r) => r.fulfill(ok19(DESK_ME_CLUB)));
+      // ⑪ 的 DESK_SQUAD rules=null / 行是 v6.23.0 旧表格形（无 uid，RegCard 副行 uid.replace 会崩）
+      // ⇒ ⑲ 用 ⑨ 的 rosterFixture 行（v6.37.0 卡片 DTO，全字段含 uid），rules 给真的。
+      const DESK_SQUAD_19 = {
+        ...DESK_SQUAD,
+        players: rosterFixture.players,
+        rules: { tier: 'premier', squadMin: 20, squadMax: 40, gkMin: 1, traineeMax: 7, limits: { ge90: 7, ge87: 8, growthPa87: 90 }, wageCap: 4 },
+      };
+      await page.route(ROUTES19[3], (r) => r.fulfill(ok19(DESK_SQUAD_19)));
+      await page.route(ROUTES19[4], (r) => r.fulfill(ok19(standingFixture)));
+      try {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(`${BASE}/clubs/1?tab=desk`, { waitUntil: 'domcontentloaded' });
+        await page.locator('.club-block article.sqc-row').first().waitFor({ timeout: TIMEOUT });
+        assert(
+          (await page.locator('.club-block .sqc-assign-btn').count()) > 0,
+          '教练态工作台没出分配下拉（me/club 或 club/squad 桩没生效，own 判定坏了也会走到这）',
+        );
+        // 合同视图四值最挤（68px 轨道），量的是教练态下的两行式契约
+        await page.locator('.club-block .sqc-chip', { hasText: '合同' }).first().click();
+        await page.waitForTimeout(300);
+        const fit19 = await page.locator('.club-block article.sqc-row').first().evaluate((row) => {
+          const r = (el) => el.getBoundingClientRect();
+          const vs = [...row.querySelectorAll('.sqc-v')];
+          const gcols = row.closest('.sqc-group')?.querySelector('.sqc-gcols');
+          const kRights = gcols ? [...gcols.querySelectorAll('.sqc-k')].map((k) => Math.round(r(k).right)) : [];
+          const vRights = vs.map((v) => Math.round(r(v).right));
+          return {
+            nmW: Math.round(r(row.querySelector('.sqc-nm')).width),
+            assignW: Math.round(r(row.querySelector('.sqc-assign')).width),
+            mBasis: getComputedStyle(row.querySelector('.sqc-m')).flexBasis,
+            rows: new Set(vs.map((v) => Math.round(r(v).top))).size,
+            overflow: vs.filter((v) => v.scrollWidth > v.clientWidth + 1).length,
+            tailDelta:
+              Math.min(kRights.length, vRights.length) > 0
+                ? Math.round(kRights[kRights.length - 1] - vRights[vRights.length - 1])
+                : null,
+          };
+        });
+        assert(
+          fit19.assignW >= 40,
+          `教练态分配下拉没真渲染（宽 ${fit19.assignW}px）——第一行布局账本里它必须真实在场`,
+        );
+        assert(
+          fit19.nmW >= 150,
+          `教练态合同视图名字区仅 ${fit19.nmW}px（分配下拉在第一行行尾时两行式应保住 ≈160px）`,
+        );
+        assert(
+          fit19.mBasis === '100%',
+          `教练态值区 flex-basis=${fit19.mBasis}（两行式 = 100% 独占第二行）`,
+        );
+        assert(
+          fit19.rows === 1,
+          `教练态值区折成 ${fit19.rows} 行（恒单行）`,
+        );
+        assert(
+          fit19.overflow === 0,
+          `教练态值格溢出 ${fit19.overflow} 个`,
+        );
+        assert(
+          fit19.tailDelta !== null && Math.abs(fit19.tailDelta) <= 3,
+          `教练态组头标签格尾格错位 ${fit19.tailDelta}px（>3 对齐失效）`,
+        );
+        // nav 收纳（≤640 短文案）：全部页签右缘落在视口内，不许横滑
+        const nav19 = await page.evaluate(() => {
+          const d = document.documentElement;
+          const rights = [...document.querySelectorAll('.nav-tab')].map((t) => Math.round(t.getBoundingClientRect().right));
+          return { clientW: d.clientWidth, scrollW: d.scrollWidth, maxRight: Math.max(...rights), count: rights.length };
+        });
+        assert(
+          nav19.count > 0 && nav19.maxRight <= nav19.clientW + 1,
+          `教练态 nav 伸到 ${nav19.maxRight} > 视口 ${nav19.clientW}（短文案收纳失效）`,
+        );
+        assert(
+          nav19.scrollW <= nav19.clientW + 1,
+          `教练态工作台把页面撑出横向滚动（${nav19.scrollW} > ${nav19.clientW}）`,
+        );
+        const deskShot = join(SHOT_DIR, 'e2e-clubs-desk-coach-375.png');
+        await page.screenshot({ path: deskShot, fullPage: false });
+        console.log(`   截图：${deskShot.replace(/\\/g, '/')}`);
+      } finally {
+        for (const pattern of ROUTES19) await page.unroute(pattern);
+        await page.setViewportSize({ width: 1440, height: 900 });
       }
     });
 
