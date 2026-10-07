@@ -38,7 +38,8 @@ export const GROUP_ACCENTS: Record<string, string> = {
   unknown: '#64748b',
 };
 
-/** 各视图指标格的钉死列宽（窄屏值-only 对齐用；合同「10.5赛季」最长，60px 配 nowrap 兜住） */
+/** 各视图指标格的钉死列宽（v6.37.2 起窄屏两行式改 1fr 均分、不再消费此值；
+ * 保留给桌面 wide 卡的表格式布局链路，合同「10.5赛季」最长，60px 配 nowrap 兜住） */
 export const VIEW_COL_WIDTH: Record<CardViewKey, string> = {
   basic: '40px',
   growth: '50px',
@@ -47,14 +48,16 @@ export const VIEW_COL_WIDTH: Record<CardViewKey, string> = {
 };
 
 /**
- * 各视图窄屏网格列数（--sqc-mcols）：4 列合同与带分配下拉的基本视图折 2 列，
- * 给名字区让回宽度（v6.37.1：真机 360px 下 4×52 把球员名压成逐字竖排）；
- * 组头列头 .sqc-gcols 与行值 .sqc-m 同构网格 ⇒ 逐格对齐保持。
+ * 各视图窄屏网格列数（--sqc-mcols）：
+ * （v6.37.1：真机 360px 下 4×52 钉宽把球员名压成逐字竖排，一度把 4 值的合同折 2×2；
+ * v6.37.2 用户否决一切「值区折行」形态（2+1 孤行、2×2 双行都否），
+ * 定稿两行式：值区折到卡第二行整行、按原值数 1fr 均分（3 值 ~90px/格、合同 4 值 ~68px/格），
+ * 列数 = 各视图值数，任何视图值不折行；组头列头 .sqc-gcols 同款 1fr 网格逐列对齐。
  */
 export const VIEW_GRID_COLS: Record<CardViewKey, number> = {
-  basic: 2,
+  basic: 3,
   growth: 3,
-  contract: 2,
+  contract: 4,
   market: 3,
 };
 
@@ -65,6 +68,9 @@ const BADGE_TIP: Record<string, string> = {
 };
 
 export function CardBadges({ badges, extra }: { badges: readonly InlineBadge[]; extra?: ReactNode }) {
+  // v6.37.2：+N 从 span 改 button——手机没有 hover，原先只挂一条 title 等于死元素；
+  // 点开就地铺出其余徽章、再点收回（照同文件 CardSubline 的位置 +N 先例）
+  const [open, setOpen] = useState(false);
   if (badges.length === 0 && !extra) return null;
   const first = badges[0];
   const rest = badges.slice(1);
@@ -76,9 +82,24 @@ export function CardBadges({ badges, extra }: { badges: readonly InlineBadge[]; 
         </span>
       )}
       {rest.length > 0 && (
-        <span className="sqc-badge sqc-badge-more" title={rest.map((b) => b.text).join('、')}>
-          +{rest.length}
-        </span>
+        <>
+          {open &&
+            rest.map((b) => (
+              <span key={b.text} className={`sqc-badge sqc-badge-${b.kind}`} title={BADGE_TIP[b.text]}>
+                {b.text}
+              </span>
+            ))}
+          <button
+            type="button"
+            className="sqc-badge sqc-badge-more"
+            title={open ? '点击收回' : rest.map((b) => b.text).join('、')}
+            aria-expanded={open}
+            aria-label={open ? `收回其余 ${rest.length} 枚徽章` : `展开其余 ${rest.length} 枚徽章`}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? '收起' : `+${rest.length}`}
+          </button>
+        </>
       )}
       {extra}
     </span>

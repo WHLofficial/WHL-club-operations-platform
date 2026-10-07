@@ -1050,7 +1050,7 @@ describe('自家页签：工作台与主场', () => {
     expect((zhang.querySelector('.sqc-uid') as HTMLElement).textContent).toBe('7');
     const zvals = Array.from(zhang.querySelectorAll('.sqc-v'), (el) => el.textContent);
     // 违约金/激活价走整数化（v6.37.0 规则层），工资保持两位小数；张三非保护 ⇒ 激活价 = 违约金 ×1
-    expect(zvals).toContain('30'); // 违约金（整数化）
+    expect(zvals).toContain('30 m'); // 违约金（整数化 + 单位 m，v6.37.2）
     expect(zvals).toContain('0.75 m'); // 工资（与阵容名单同口径）
 
     // 未提交过 → 分配从「未分配」起步；选「一线队」立刻改按钮（落库要等提交）

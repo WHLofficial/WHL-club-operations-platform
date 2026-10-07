@@ -107,29 +107,42 @@ export default function TopBar() {
           <NavLink to="/" end className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
             首页
           </NavLink>
-          <NavLink to="/club" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            我的球队
+          {/* v6.37.2：nav 双文案——桌面显 .nav-tf 全称，≤640 显 .nav-ts 短文案；aria-label 保留全称不损无障碍。
+              超管态 8 项在 360px 下不收纳装不下（453px > 336px），又不允许引入横向滑动，只能短文案。 */}
+          <NavLink to="/club" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="我的球队">
+            <span className="nav-tf">我的球队</span>
+            <span className="nav-ts">我的</span>
           </NavLink>
-          <NavLink to="/players" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            球员库
+          <NavLink to="/players" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="球员库">
+            <span className="nav-tf">球员库</span>
+            <span className="nav-ts">球员</span>
           </NavLink>
-          <NavLink to="/clubs" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            球队库
+          <NavLink to="/clubs" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="球队库">
+            <span className="nav-tf">球队库</span>
+            <span className="nav-ts">球队</span>
           </NavLink>
           {/* 转会中心（v6.23.0）：市场 / 报价 / 谈判三处入口并成一条，仍指向 /market，内部由 MarketNav 分流 */}
-          <NavLink to="/market" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            转会中心
+          {/* v6.37.2：窄屏顶栏横向吃紧，显示文案缩短为「转会」；无障碍全称走 aria-label */}
+          <NavLink
+            to="/market"
+            className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}
+            aria-label="转会中心"
+          >
+            转会
           </NavLink>
           {/* 消费中心（v6.26.0）：五类商品工单 + 球场消费三卡；v6.26.1 补顶栏入口（原先只有首页/我的球队卡片） */}
-          <NavLink to="/shop" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            消费中心
+          <NavLink to="/shop" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="消费中心">
+            <span className="nav-tf">消费中心</span>
+            <span className="nav-ts">消费</span>
           </NavLink>
-          <NavLink to="/ledger" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-            财政账本
+          <NavLink to="/ledger" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="财政账本">
+            <span className="nav-tf">财政账本</span>
+            <span className="nav-ts">财政</span>
           </NavLink>
           {user?.role === 'admin' && (
-            <NavLink to="/admin" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}>
-              管理端
+            <NavLink to="/admin" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="管理端">
+              <span className="nav-tf">管理端</span>
+              <span className="nav-ts">管理</span>
             </NavLink>
           )}
         </nav>

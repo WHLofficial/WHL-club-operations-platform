@@ -114,12 +114,12 @@ export function activationFeeOf(row: {
 /* ---------- 金额整数显示 ---------- */
 
 /**
- * 违约金/激活价的整数显示（v6.37.0）：37 → '37'、12.5 → '12.5'，null → null。
+ * 违约金/激活价的整数显示（v6.37.0；v6.37.2 起带单位）：37 → '37 m'、12.5 → '12.5 m'，null → null。
  * 只减尾零、不做进位取舍；存量小数照实显示。工资不走这里（保持 money() 两位小数）。
  */
 export function moneyIntText(x: number | null): string | null {
   if (x == null) return null;
-  return String(Math.round(x * 100) / 100);
+  return `${Math.round(x * 100) / 100} m`;
 }
 
 /* ---------- 位置副行文案 ---------- */

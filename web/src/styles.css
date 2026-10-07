@@ -150,6 +150,11 @@ h3 {
   display: none;
 }
 
+/* v6.37.2：nav 双文案——桌面只显全称（.nav-tf），短文案（.nav-ts）仅 ≤640 媒体块放开 */
+.nav-tab .nav-ts {
+  display: none;
+}
+
 .nav-tab {
   color: rgba(253, 244, 227, 0.82);
   text-decoration: none;
@@ -817,8 +822,11 @@ tbody tr:hover td {
 
 @media (max-width: 640px) {
   /* 两行布局：第一行品牌 + 用户区（两端对齐），第二行导航横滑 */
+  /* v6.37.2：360px 下顶栏侧边留白 16→12、栅格间距 16→10，给导航行多让宽度
+     （目标：6 个导航项总宽 ≤328px，不依赖横滑） */
   .topbar-inner {
-    gap: 8px;
+    gap: 10px;
+    padding: 10px 12px;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
       'brand userbox'
@@ -847,10 +855,24 @@ tbody tr:hover td {
     overflow-x: auto;
     padding-bottom: 2px;
     scrollbar-width: none;
+    /* v6.37.2：超管 8 项 453px > 可视 336px，不许滑动只能收纳——项距 4→2 再省 14px */
+    gap: 2px;
   }
 
+  /* v6.37.2：导航项字号 / 左右内边距收一档；短文案替全称（aria-label 仍全称）
+     ——360px 下超管 8 项 ≈326px ≤ 可视 336px，不依赖横滑 */
   .nav-tab {
     white-space: nowrap;
+    font-size: 12.5px;
+    padding: 6px 7px;
+  }
+
+  .nav-tab .nav-tf {
+    display: none;
+  }
+
+  .nav-tab .nav-ts {
+    display: inline;
   }
 
   .nav-cards {
@@ -868,6 +890,15 @@ tbody tr:hover td {
     left: auto;
     right: 0;
     max-width: min(360px, 86vw);
+  }
+
+  /* v6.37.2：360px 窄屏 padding 收窄——container 侧边 16→12、card 侧边 18→12，每侧共拿回 10px */
+  .container {
+    padding: 20px 12px 56px;
+  }
+
+  .card {
+    padding: 18px 12px;
   }
 }
 
@@ -1243,6 +1274,17 @@ tbody tr:hover td {
 .stat-value-small {
   font-size: 16px;
   line-height: 2;
+}
+
+/* v6.37.2：自家页头「当前窗口」值元素同挂 .stat-value 与 .stat-value-small，而 .club-stat .stat-value(22px)
+   权重更高（0-2-0 > 0-1-0，此前 .stat-value-small 从未生效）⇒ 360px 两列 ≈160px 里折出「口 1」孤行。
+   限定 .club-head-numbers 收字号回 16px 并强单行；桌面保持现状。该容器仅 ClubDetail.tsx 在用，
+   不误伤其他页面共用的 .stat-value。 */
+@media (max-width: 640px) {
+  .club-head-numbers .stat-value.stat-value-small {
+    font-size: 16px;
+    white-space: nowrap;
+  }
 }
 
 .gold-text {
@@ -6269,9 +6311,12 @@ th.num .th-sort {
 
 .sqc-ghead {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px 8px 10px;
+  /* v6.37.2：左右 padding 对称 10/10——列头行（.sqc-gcols 折到第二行）须与行卡值区
+     （.sqc-card padding 10/10）同起点同宽度，1fr 均分才能逐格对齐（原先右 12 差 2px） */
+  padding: 8px 10px;
   border-left: 3px solid var(--sqc-accent, var(--silver));
   background: var(--paper);
 }
@@ -6301,17 +6346,17 @@ th.num .th-sort {
   text-overflow: ellipsis;
 }
 
-/* 窄屏：组头列头行（与行内值同一套钉死列宽逐列对齐；列数随 --sqc-mcols，v6.37.1 同构网格） */
-.sqc-gcols {
-  margin-left: auto;
+/* 窄屏：组头列头行（v6.37.2 两行式——flex-basis:100% 折到组头第二行整行、1fr 均分，
+   与行内值区同一套网格严格逐列对齐；列数随 --sqc-mcols。gcols 与 .sqc-m 基类同挂一个元素，
+   1fr 轨道须用 0-2-0 特异性压过 .sqc-m 基类的钉宽轨道（源序在基类之前）。 */
+.sqc-ghead .sqc-gcols {
+  flex-basis: 100%;
   display: grid;
-  grid-template-columns: repeat(var(--sqc-mcols, 3), var(--sqc-cw, 48px));
-  justify-content: end;
+  grid-template-columns: repeat(var(--sqc-mcols, 3), 1fr);
   align-items: center;
 }
 
 .sqc-k {
-  width: var(--sqc-cw, 48px);
   text-align: right;
   color: var(--muted);
   font-size: 11px;
@@ -6333,6 +6378,14 @@ th.num .th-sort {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
+}
+
+/* v6.37.2：360px 窄屏阵容/注册卡内边距再拿回 2px（12→10）。必须写在基类之后
+   （同权重看源序；放到 818 那个 640 块里会被本规则反压回去）。 */
+@media (max-width: 640px) {
+  .sqc-card {
+    padding: 10px;
+  }
 }
 
 .sqc-no {
@@ -6411,12 +6464,15 @@ th.num .th-sort {
   color: #197a4c;
 }
 
-/* +N 折叠：中性蓝，悬浮 title 出全量 */
+/* +N 折叠：中性蓝，悬浮 title 出全量；v6.37.2 起是 button（点击就地展开其余徽章），
+   外观仍由 .sqc-badge 规则给——这里只补按钮自身默认值的 reset，观感不变 */
 .sqc-badge-more {
   background: #e8eef7;
   border-color: #cad7ea;
   color: #3b5f8a;
   font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 /* 注册校验红旗（规则级短标签，完整原因在 title） */
@@ -6479,7 +6535,6 @@ button.sqc-pos:hover {
 }
 
 .sqc-v {
-  width: var(--sqc-cw, 48px);
   text-align: right;
   font-size: 13px;
   color: var(--ink);
@@ -6534,6 +6589,21 @@ button.sqc-pos:hover {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
+}
+
+/* v6.37.2 两行式窄卡（用户否决了「值区折行」形态后定稿）：
+   第一行 = 序号 + 名字（flex:1，合同视图教练视角也有 161px）+ 分配下拉（回行尾）；
+   第二行 = 值区 .sqc-m 独占整行、1fr 均分——3 值视图 ~90px/格、合同 4 值 ~68px/格，
+   任何视图值格不再挤压折行；组头列头 .sqc-gcols 同款 1fr 逐列对齐。
+   DOM 序 m 在 assign 前，flex order 把值区排到视觉最后一行。桌面 .wide 不命中（仍单行平铺）。 */
+.sqc-card:not(.wide) {
+  flex-wrap: wrap;
+}
+
+.sqc-card:not(.wide) .sqc-m {
+  order: 1;
+  flex-basis: 100%;
+  grid-template-columns: repeat(var(--sqc-mcols, 3), 1fr);
 }
 
 .sqc-assign .error-msg {

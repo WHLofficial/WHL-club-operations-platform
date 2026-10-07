@@ -13,11 +13,10 @@ import {
   } from './club-cards.ts';
 import { VIEW_COL_WIDTH, VIEW_GRID_COLS } from '../pages/club/card-parts.tsx';
 
-describe('窄屏网格列配置（v6.37.1）', () => {
-  it('四视图都有列数与列宽；4 列合同与带分配下拉的基本视图折 2 列，列数 ≤ 列定义数', () => {
-    expect(VIEW_GRID_COLS).toEqual({ basic: 2, growth: 3, contract: 2, market: 3 });
+describe('窄屏网格列配置（v6.37.2 两行式）', () => {
+  it('列数 = 各视图值数（值区整行 1fr 均分、任何视图值不折行），列宽表保留给桌面链路', () => {
+    expect(VIEW_GRID_COLS).toEqual({ basic: 3, growth: 3, contract: 4, market: 3 });
     expect(Object.keys(VIEW_COL_WIDTH).sort()).toEqual(Object.keys(VIEW_GRID_COLS).sort());
-    // 合同「10.5赛季」最长：60px 列宽配 nowrap 兜住（56px 会溢出）
     expect(VIEW_COL_WIDTH.contract).toBe('60px');
   });
 });
@@ -102,10 +101,10 @@ describe('激活价前端镜像', () => {
 });
 
 describe('金额整数显示', () => {
-  it('去尾零不做取舍：37→37、12.5→12.5、12.75→12.75；null→null', () => {
-    expect(moneyIntText(37)).toBe('37');
-    expect(moneyIntText(12.5)).toBe('12.5');
-    expect(moneyIntText(12.75)).toBe('12.75');
+  it('去尾零不做取舍并带单位 m（v6.37.2）：37→37 m、12.5→12.5 m、12.75→12.75 m；null→null', () => {
+    expect(moneyIntText(37)).toBe('37 m');
+    expect(moneyIntText(12.5)).toBe('12.5 m');
+    expect(moneyIntText(12.75)).toBe('12.75 m');
     expect(moneyIntText(null)).toBeNull();
   });
 });
@@ -142,7 +141,7 @@ describe('四视图列与桌面全列', () => {
       marketValue: 52.5, influence: 3.14159, agentTier: 3,
     };
     expect(CARD_VIEW_CELLS.growth.map((c) => c.get(row))).toEqual(['84', '5', 'T2']);
-    expect(CARD_VIEW_CELLS.contract.map((c) => c.get(row))).toEqual(['1.25 m', '45', '45', '1.5赛季']);
+    expect(CARD_VIEW_CELLS.contract.map((c) => c.get(row))).toEqual(['1.25 m', '45 m', '45 m', '1.5赛季']);
     expect(CARD_VIEW_CELLS.market.map((c) => c.get(row))).toEqual(['52.50 m', '3.14', '苛刻']);
     expect(CARD_VIEW_CELLS.growth[2]!.get({ ...row, growthTier: 0 })).toBeNull();
     expect(CARD_VIEW_CELLS.basic[1]!.get({ ...row, ca: null })).toBeNull();
