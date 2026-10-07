@@ -1500,6 +1500,16 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.37.1 · 窄屏球队卡修复：指标区网格化折列（2026-10-07）
+
+**裁决**：v6.37.0 真机崩坏的修复走**布局层网格化**而非砍列——四视图各配显式列数（`VIEW_GRID_COLS`：basic/contract=2、growth/market=3），`.sqc-m`/`.sqc-gcols` 从单行 flex 改同构 grid（`repeat(var(--sqc-mcols,3), var(--sqc-cw,48px))` 右对齐），组头列头与行值天然逐格对齐；合同 4 列与基本（含分配下拉）折 2 列给名字区让回宽度（360px 宽度账：合同 2×60=120 ⇒ 名字区 ~176-192px 完整），成长/市场 3 列本就放得下。配齐三件窄屏治理：合同列宽 52→60px + `.sqc-v` nowrap + 效力值去空格（「0.5 赛季」格内碎行）；`.sqc-subline` flex-wrap（位置摘要不被压没）。**范围红线**：桌面 wide 变体行为不变（既有 `.sqc-card.wide .sqc-m{display:flex}` specificity 覆盖）；效力值只动卡片值源 `club-cards.ts`，桌面表格/球员库/球员页的赛季文本保留空格。
+
+**交付**：`b72d37e` fix(web)（VIEW_GRID_COLS + cw 60 + grid 化 + nowrap + subline wrap，4 文件）+ `7726e4c` fix(club-cards)（years 去空格 + club-cards.test 取值口径同步 + ClubDetail.test 13 列序列同步 + 新增「窄屏网格列配置」锁）+ `872988f` test(e2e)（⑨ 合同视图窄屏四断言）+ `ccc5a9f` fix(web)（审查订正：nowrap 收窄 `.sqc-card:not(.wide)` + 可加列 `sqc-v-extra` 窄屏 ellipsis 截断——可加列长值如来源球队名 ~70px、PlayStyle 多徽章排在 nowrap 钉宽下会与邻格重叠的审查发现回归）+ docs 枚。**零迁移、零生产写、零 API 契约变更**。
+
+**验收**：typecheck 三份 0 error；vitest **103 文件 / 1727 例**全绿（基线 1726 +1）；e2e **23/23**（⑨ 新增窄屏断言：`.sqc-nm` 宽 ≥100px（逐字竖排闸）/ `.sqc-pos` 非空 / `.sqc-v` scrollWidth 零溢出 / 值区 top 去重 ≤2 行（网格契约上界））；build 成功；变异验证 M1 删两处 `--sqc-mcols` 下发 ⇒ ⑨ 宽度断言红（名字区实测 44px）、M2 cw 回 52 ⇒ vitest `expected '52px' to be '60px'` 红，各自恰好命中目标断言。测试计划 `docs/test-plans/v6.37.1-squad-card-narrow.md`。
+
+**教训**：① e2e 几何断言初稿写「4 值同行」与折 2 列目标自相矛盾（4 值本该两行），终验红暴露后改为「≤2 行」上界锁——崩坏形态（逐值一行）超界被抓、正确形态过；首跑全绿后新增断言必须重跑验证。② Windows 下 `npm run dev` 经 TaskStop 停止会留 wrangler/workerd 孤儿进程（npm 外壳被杀、`node cli.js dev` 存活继续抢 8791 ⇒ 请求黑洞，e2e 挂 40 分钟无进展）；重跑 e2e 前先 `netstat -ano | grep 8791` 与 `Get-Process workerd` 清场。
+
 ## v6.37.0 · 球队页两表弃表改卡：位置四组容器 + 行解剖卡（2026-10-06）
 
 **已上线**（2026-10-06 深夜发布：push `18a19aa..c10069b` 触发 CF 自动部署，生产 Version `5026da80-5a88-4d3d-b73e-181f4e43b776` @2026-10-06T23:52:03Z（push 后约 2 秒）；线上资产 `index-CVrQgIEu.js` 与本地 6.37.0 构建 sha256 逐字节一致；发布记录 docs 枚按仓规只本地 commit 不 push）。提交链：`e834768` feat(core)（规则层金额整数化）＋ `c55d341` feat(worker)（influence 数据层）＋ `b9d19ad` feat(club)（主体 11 文件，1812+/563-）＋ `2ecc9fe` test(club)（变异补钉）＋ 本枚 docs。**零迁移、零生产写**（生产迁移现状：本仓已到 `0065`）。验收：typecheck 三份 0 error；vitest **103 文件 / 1726 例**，本版范围全绿（全量 1 红 `TC-CMP-URL-05` 属并行会话球员对比模块在途改动，非本版）；e2e **23/23**；build 成功；变异验证 5 点全命中（2 处首轮空转各补一枚钉）；code-review-skill 无阻塞（P0 0 / P1 0，2 条 🟢 a11y 备注登记不改）。
