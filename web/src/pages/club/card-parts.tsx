@@ -132,7 +132,8 @@ function metricValues(cells: readonly CardCell[], row: CardMetricRow, extras: re
       </span>
     )),
     ...extras.map((key) => (
-      <span key={key} className={`sqc-v ${clubCellClass(key, colRow)}`.trim()}>
+      // sqc-v-extra：可加列值可能超钉宽格（来源球队名 / PlayStyle 徽章排），窄屏截断不与邻格重叠
+      <span key={key} className={`sqc-v sqc-v-extra ${clubCellClass(key, colRow)}`.trim()}>
         {clubCellContent(key, colRow)}
       </span>
     )),

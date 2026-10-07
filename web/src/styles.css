@@ -6483,7 +6483,17 @@ button.sqc-pos:hover {
   text-align: right;
   font-size: 13px;
   color: var(--ink);
+}
+
+/* nowrap 只限窄屏卡形态：桌面 wide 的可加列长值（来源球队 / PlayStyle 徽章排）保持折行（v6.37.1 审查订正） */
+.sqc-card:not(.wide) .sqc-v {
   white-space: nowrap;
+}
+
+/* 可加列值超长（来源球队名 / 徽章排 > 钉宽格）窄屏截断，不与邻格重叠 */
+.sqc-card:not(.wide) .sqc-v-extra {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sqc-v.num {
