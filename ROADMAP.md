@@ -1500,6 +1500,25 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.38.0 · 公开端点 /api/players/meta：批量取球员元数据供跨仓名册同步（2026-10-07）
+
+**状态**：**本地收口待发布（未 push 未部署，等发布令）**（提交 `dcf0b05` feat(worker) + 本枚 docs 收口；零迁移、零生产写；纯新增公开只读端点，既有端点行为逐字不变 ⇒ 判级 minor）。
+
+**缘起与契约**：兄弟仓 WHL-tournament-management-system 的名册同步要按 EA `fc_id` 批量拉 FC26 球员元数据（身高 / `game_attrs` / PlayStyle）。契约由对面仓给出、**字段名不许改**：`GET /api/players/meta?fcIds=<逗号分隔 fc_id>` → 200 `{ players: [{ fcId, height, attrs, playstyles }] }`；fcIds 上限 90；超限或含非法值 400；匿名公开只读；查不到的 fcId 直接不出现、不报错。跨仓消费方是本端点唯一契约，改字段名或改金徽编号口径都会破对面。
+
+**交付**（`src/worker/routes/players.ts`；注册位置在 `loadRoster` 之后、`/players/:id` 之前——「meta」否则会被当成球员 ID 落进详情分支，同 roster 的坑；import 补 `playstyleIdOf`）：
+- `META_FC_IDS_MAX = 90`（与 `src/worker/players-import.ts:75-87` 的 `WHERE fc_id IN (…)` 分批同值，写法复用）。
+- `parseMetaFcIds`：缺参 400「缺少 fcIds 参数」/ 超 90 个 400「fcIds 最多 90 个」/ 每段须十进制正整数（`/^\d+$/` + `Number.isSafeInteger` + `> 0`）否则 400「fcIds 含非法值「…」」，`1e3`、`0x10`、`1.5`、负数、空段全拒；Set 去重。**校验在 `cachedJson` 之前**（否则 400 会被缓存住）。
+- `loadPlayersMeta`：一条 `SELECT players.fc_id, players.game_attrs, pp.psid, pp.kind FROM players LEFT JOIN player_playstyles pp ON pp.player_id = players.id WHERE players.fc_id IN (…) ORDER BY players.fc_id, pp.slot`；输出按请求顺序 `flatMap`、查不到跳过、重复去重。
+- 字段口径：`height` = `game_attrs.height`（**players 表本就没有身高列**——身高只在 71 键 `game_attrs` JSON 里，属性页 `web/src/pages/Player.tsx:761` 与对比页 `web/src/pages/PlayerCompare.tsx:540` 同此口径）；`metaHeightOf` 只认 number 与非空数字字符串，取不到给 `null`（避开 `Number(null) = 0`）。`attrs` = `game_attrs` **原样整包**（不做字段筛选，空/非对象给 `null`）。`playstyles` = 发放明细表 `player_playstyles` 的 psid 数组经 `playstyleIdOf(psid, kind)`，**金徽换算成基础 ID + 100**（与 `web/assets/ref/playstyle.json` 同编号空间：银 1-99 / 金 101-199；表里 `psid` 存基础 ID、金徽由 `kind='gold'` 表示、槽位银 1-12 / 金 13-15）。
+- 公开只读照 `/players` 与 `/players/roster`：`assertPublicRate(c, 'players')` + `cachedJson('players:meta:' + canonicalQuery(c.req.url), ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS), …)`；`/api/players` 前缀的写路径 purge 映射 `src/lib/cache-policy.ts:66` 已存在，直接复用（写路径 bump 代际键即失效）。
+
+**验收**：typecheck 三份 0 error；vitest **103 文件 / 1731 例**全绿（基线 103/1727，+4 例在 `tests/players-library.test.ts` 新 describe「球员元数据批量 /api/players/meta（v6.38.0）」：字段逐项 + 顺序/不命中 / 空值兜底 / 参数校验（含恰好 90 个放行、第 91 个 400）/ 去重与全 miss 空数组）；本版无前端改动 ⇒ 未跑 e2e 与 build。响应实测（内存 D1 夹具）：`{"players":[{"fcId":2500801,"height":189,"attrs":{…game_attrs 原样整包…},"playstyles":[4,126]},{"fcId":2500802,"height":null,"attrs":null,"playstyles":[]}]}`（126 = 金徽基础 ID 26 + 100）。
+
+**教训**：给 `players.game_attrs` 插坏 JSON 会被库直接拒（`Error: malformed JSON`）——迁移 `0034` 的 `json_extract` 表达式索引 `idx_players_sort_ps` 在插入时求值 ⇒ 生产库里不可能存在坏 JSON 行；测试里「解析失败」分支改用合法但非对象的 `'null'` 覆盖，代码里的 try/catch 仅作防御（同 `/players/:id` 详情的写法）。
+
+**待办**：① 随下一次被授权 push 与代码同轮上线；② **code-review-skill 未跑（登记）**——纯新增公开只读端点、无既有路径改动；③ 对面仓若要合并 FC 源槽位（`game_attrs.PSID1-15`）需自行读 `attrs`——本端点 `playstyles` 只取发放明细表（徽章真相源）。
+
 ## v6.37.1 · 窄屏球队卡修复：指标区网格化折列（2026-10-07）
 
 **已上线**（2026-10-07 发布：push `c10069b..ee336a8`（6 枚，含 v6.37.0 发布记录回写）触发 CF 自动部署，生产 Version `ec2b0174-cff7-4a96-a840-e09aacb39b0f` @2026-10-07T01:52:49Z；线上入口资产 `index-DOQ8L5kH.js` / `index-Dsm4lZA2.css` 与本地 6.37.1 构建 sha256 逐字节一致、线上 JS 版本串 `6.37.1`；回读 health + players/clubs/squads/market 全 200；发布记录 docs 枚按仓规只本地 commit 不 push）。
