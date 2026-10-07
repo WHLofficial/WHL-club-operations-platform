@@ -885,7 +885,14 @@ async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: stri
 // 查不到的 fcId 不出现、不报错；重复 fcId 去重；响应顺序 = 请求顺序（前端按 fcId 对号入座）。
 // 上限 90 个（与 players-import 的 IN 分批 §17.2-1 同值）：超限或含非法值一律 400，且校验在缓存之前
 // （否则 400 会被 cachedJson 缓存住）。公开只读照 /players 与 /players/roster：assertPublicRate +
-// cachedJson（键含查询串；/api/players 前缀的 purge 映射 cache-policy.ts:66 已存在，写路径 bump 即失效）。
+// cachedJson（/api/players 前缀的 purge 映射 cache-policy.ts:66 已存在，写路径 bump 即失效）。
+//
+// 缓存键的取法（v6.38.0 修复跨端点撞键）：**按解析后的 id 列表** `players:meta:<去重后 id 逗号串>`，
+// 不用 canonicalQuery(c.req.url)。后者不转义 ':'，而列表端点键是 `players:<canonicalQuery>`——于是
+// `GET /api/players?meta:fcIds=1`（列表路由忽略未知参数）与 `GET /api/players/meta?fcIds=1` 会归一到
+// 同一个 `players:meta:fcIds=1`：跨端点同键，谁先写谁占位，匿名请求能把列表体塞进合法 meta URL 的
+// 缓存位（TTL 内互相污染，反向亦然）。按 id 造键后列表键必然含 '='（`meta:fcIds=1` 形态；无参数时是
+// 空串），与 `players:meta:1` 永不相等；顺带把空白 / 前导零 / 重复参数的变体收进同一个键位。
 // 路由必须注册在 /players/:id 之前 —— 同 roster：否则「meta」会被当成球员 ID 落进详情分支。
 const META_FC_IDS_MAX = 90;
 
@@ -974,7 +981,8 @@ app.get('/players/meta', async (c) => {
   assertPublicRate(c, 'players');
   const fcIds = parseMetaFcIds(c.req.query('fcIds'));
   const data = await cachedJson(
-    `players:meta:${canonicalQuery(c.req.url)}`,
+    // 键按解析后的 id 列表（去重 + 请求顺序），不用 canonicalQuery：会与列表端点跨端点撞键（见上方注释）
+    `players:meta:${fcIds.join(',')}`,
     ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS),
     () => loadPlayersMeta(c, fcIds),
     { scope: 'players', env: c.env, ctx: waitUntilOf(c) },

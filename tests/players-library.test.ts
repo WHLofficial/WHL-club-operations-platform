@@ -1469,5 +1469,68 @@ describe('球员元数据批量 /api/players/meta（v6.38.0）', () => {
     expect(miss.status).toBe(200);
     expect((await miss.json()) as MetaBody).toEqual({ players: [] });
   });
+
+  // --- 缓存键回归（v6.38.0 修复跨端点撞键）---
+  // meta 键曾用 `players:meta:${canonicalQuery(c.req.url)}`，而 canonicalQuery 不转义 ':'、列表端点键是
+  // `players:<canonicalQuery>` ⇒ `GET /api/players?meta:fcIds=<id>`（列表路由忽略未知参数）与
+  // `GET /api/players/meta?fcIds=<id>` 归一到同一个 `players:meta:fcIds=<id>`（L1+L2 同键，谁先写谁占位）。
+  // 下面两个用例必须在 TTL>0 下跑：本文件其余用例 PUBLIC_CACHE_TTL_MS='0' 旁路缓存，抓不到这类缺陷。
+  function cacheEnv(fx: Fixture): Env {
+    fx.env.PUBLIC_CACHE_TTL_MS = '30000';
+    return fx.env;
+  }
+
+  it('跨端点同键回归：先列表（未知参数 meta:fcIds）后 meta 互不污染，反向亦然', async () => {
+    const fx = freshEnv();
+    seedMeta(fx.sqlite);
+    const env = cacheEnv(fx);
+    // ① 列表端点忽略未知参数：这一步在旧实现里往 meta 的键位写进了列表体
+    const listFirst = await get('/api/players?meta:fcIds=2500801', env);
+    expect(listFirst.status).toBe(200);
+    const listBody = (await listFirst.json()) as { players: unknown[]; nextCursor: string | null };
+    expect(listBody).toHaveProperty('nextCursor'); // 列表体形状（meta 体顶层只有 players）
+    // 合法 meta URL 必须回 meta 形状：旧实现这里回的是上面缓存的列表体（players[0] 无 fcId/height/attrs）
+    const metaAfter = await get('/api/players/meta?fcIds=2500801', env);
+    expect(metaAfter.status).toBe(200);
+    const metaBody = (await metaAfter.json()) as MetaBody;
+    expect(metaBody.players).toEqual([
+      {
+        fcId: 2500801,
+        height: 189,
+        attrs: { ID: 2500801, height: 189, weight: 82, PSID1: 4, PSID13: 103, finishing: 88 },
+        playstyles: [4, 103],
+      },
+    ]);
+    expect(metaBody).not.toHaveProperty('nextCursor');
+    // ② 反向：meta 已入缓存，再打列表 URL 必须回列表体——旧实现这里会被 meta 体顶掉
+    const listAfter = await get('/api/players?meta:fcIds=2500801', env);
+    expect(listAfter.status).toBe(200);
+    const listBody2 = (await listAfter.json()) as { players: Record<string, unknown>[]; nextCursor: string | null };
+    expect(listBody2).toEqual(listBody);
+    expect(listBody2).toHaveProperty('nextCursor');
+    // 列表行也带 fcId（不能拿它分辨）；meta 行独有的是 attrs/playstyles——旧实现这里拿到的是 meta 体 ⇒ 红
+    expect(listBody2.players.length).toBeGreaterThan(0);
+    expect(listBody2.players.some((p) => 'attrs' in p || 'playstyles' in p)).toBe(false);
+  });
+
+  it('400 不入缓存：TTL>0 下非法 fcIds 先打一次，合法请求仍走真实流程并正常入缓存', async () => {
+    const fx = freshEnv();
+    seedMeta(fx.sqlite);
+    const env = cacheEnv(fx);
+    // 校验在 cachedJson 之前：这次 400 不落到任何缓存键位
+    expect((await get('/api/players/meta?fcIds=abc', env)).status).toBe(400);
+    const ok = await get('/api/players/meta?fcIds=2500801', env);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as MetaBody).players[0].height).toBe(189);
+    // 缓存确实在 TTL>0 下生效：改库后同 id 再打仍回旧值 189（反证上一步命中的是真实缓存键）
+    fx.sqlite.exec("UPDATE players SET game_attrs = json_set(game_attrs, '$.height', 170) WHERE fc_id = 2500801");
+    const same = (await (await get('/api/players/meta?fcIds=2500801', env)).json()) as MetaBody;
+    expect(same.players[0].height).toBe(189);
+    // 键碎片收拢：空白 / 重复参数的变体与上面同一个键位（仍回 189，看不见改库后的 170）
+    const spaced = (await (await get('/api/players/meta?fcIds=%202500801', env)).json()) as MetaBody;
+    expect(spaced.players[0].height).toBe(189);
+    const dup = (await (await get('/api/players/meta?fcIds=2500801,2500801', env)).json()) as MetaBody;
+    expect(dup.players[0].height).toBe(189);
+  });
 });
 
