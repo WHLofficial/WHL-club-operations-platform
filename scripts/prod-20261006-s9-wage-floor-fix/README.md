@@ -162,4 +162,4 @@ node exec-shards.mjs rollback/02-cpu-refund-optional.sql --remote --chunk=20 --r
 1. **CPU 两行是否追溯回冲（待用户拍板）**：S9 第 1 窗已扣 club 241 巴塞罗那（CPU）−61.48 / club 112172 RB莱比锡（CPU）−57.69（当时令：财政导入排除、工资照扣）。现令「CPU 队不入账」是否追溯？本批**主件不含**；可选件 `sql/04-cpu-refund-optional.sql`（6 条，含其回滚 `rollback/02`）已备好，冲正态为「工资行 0 / memo 尾注『CPU 队不入账（用户令 2026-10-06），已冲正』/ 账户与后续行同步」。`manifest.cpuOptional.approved = false`，默认不跑。
 2. **生产预检快照未抓**：执行前第 0 步必抓，A–G 逐段核对（尤其 C 段若非空 ⇒ 影响面与 changes 按实际核）。
 3. **执行记录未回写**：§4 表格与 `report.md` 等执行后补（时间、命令、changes、v1–v5 验收值）。
-4. **v6.39.0 侧收口**：worker 级别下限扣款 + CPU 不入账已随 v6.39.0 落地；文档（`TECH_DESIGN.md` 的 `wage_cap` 行与键数、`PRD.md` 对应条目）与版本号待一并收口。
+4. **v6.39.0 侧收口已完成**（2026-10-08）：worker 级别下限扣款 + CPU 不入账已落地；文档回写（`TECH_DESIGN.md` 的 `wage_cap` 行与键数句、`PRD.md` 工资帽三处、`CHANGELOG.md`/`ROADMAP.md`/`AGENTS.md`）与版本号 bump 6.39.0 均已随本地提交完成（测试计划 `docs/test-plans/v6.39.0-wage-cap-by-tier.md`）。本批仍**只备不跑**，等用户下令执行。
