@@ -112,8 +112,8 @@ function ShopContent({
       </section>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-        {/* 左主栏：商品页签 + 表单 + 球场三卡 */}
-        <div style={{ flex: '1 1 480px' }}>
+        {/* 左主栏：商品页签 + 表单 + 球场三卡（.shop-main 带 min-width:0，窄屏才压得进视口） */}
+        <div className="shop-main">
           <div className="seg" role="group" aria-label="商品分类">
             {(Object.keys(TAB_LABEL) as ShopTab[]).map((t) => (
               <button key={t} type="button" className={tab === t ? 'on' : ''} onClick={() => goTab(t)}>
@@ -154,7 +154,7 @@ function ShopContent({
         </div>
 
         {/* 右侧栏：我的工单 */}
-        <div style={{ flex: '0 1 340px' }}>
+        <div className="shop-side">
           <OrdersCard />
         </div>
       </div>

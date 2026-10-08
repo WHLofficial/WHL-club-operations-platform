@@ -162,10 +162,12 @@ export function FacilityOpsCard() {
         )}
       </p>
 
-      <p>
-        <b>子设施</b>：
+      {/* v6.39.0 窄屏修复：子设施行原本 5 个 nowrap 项相邻、行内没有断行点，窄屏会把整栏顶宽溢出。
+          改成 flex + wrap：项内不折（名字+档位+按钮一体），项之间可换行。 */}
+      <p style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        <b>子设施</b>
         {info.facilities.map((f) => (
-          <span key={f.key} style={{ marginLeft: 10, whiteSpace: 'nowrap' }}>
+          <span key={f.key} style={{ whiteSpace: 'nowrap' }}>
             {FACILITY_LABEL[f.key] ?? f.key} <span className="mono">{f.level}</span> 级
             {f.nextCost !== null ? (
               <button

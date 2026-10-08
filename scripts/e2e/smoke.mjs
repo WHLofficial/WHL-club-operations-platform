@@ -2598,6 +2598,62 @@ async function main() {
       // ?tab= 深链落在对应页签
       await page.goto(`${BASE}/shop?tab=position`, { waitUntil: 'networkidle' });
       assert(await page.locator('.seg button.on', { hasText: '位置热区' }).first().isVisible(), '?tab=position 深链没落页签');
+      // 375 窄屏（v6.39.0 消费中心过宽修复：用户截图里右栏/页脚被裁）：文档零横向溢出 + 页签单行横滑 + 子设施行可换行
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${BASE}/shop`, { waitUntil: 'networkidle' });
+      const ovShop = await page.evaluate(() => ({
+        ov: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        wide: [...document.querySelectorAll('body *')]
+          .filter((el) => el.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+          .slice(0, 5)
+          .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]}@${Math.round(el.getBoundingClientRect().right)}`),
+      }));
+      assert(
+        ovShop.ov <= 1,
+        `375 消费中心文档级横向溢出 ${ovShop.ov}px（越界元素：${ovShop.wide.join('、') || '—'}）——两栏 min-width:0 与子设施行换行应把内容压进视口`,
+      );
+      const segGeom = await page.evaluate(() => {
+        const seg = document.querySelector('.seg');
+        const cs = seg ? getComputedStyle(seg) : null;
+        return {
+          ovx: cs?.overflowX ?? null,
+          wrap: cs?.flexWrap ?? null,
+          scrollable: seg ? seg.scrollWidth > seg.clientWidth + 1 : false,
+          buttons: seg ? seg.querySelectorAll('button').length : 0,
+        };
+      });
+      assert(
+        segGeom.ovx === 'auto' && segGeom.wrap === 'nowrap',
+        `375 消费中心页签应单行横滑（overflow-x:auto + flex-wrap:nowrap），实见 ${JSON.stringify(segGeom)}——② 块被删/挪块时红`,
+      );
+      assert(segGeom.buttons >= 5 && segGeom.scrollable, `375 页签条应真的有 5 个页签且可横滑，实见 ${JSON.stringify(segGeom)}`);
+      const facRow = await page.evaluate(() => {
+        const p = [...document.querySelectorAll('p')].find((el) => el.textContent?.includes('子设施'));
+        if (!p) return null;
+        const cs = getComputedStyle(p);
+        const kids = [...p.children];
+        return {
+          display: cs.display,
+          wrap: cs.flexWrap,
+          rows: new Set(kids.map((k) => Math.round(k.getBoundingClientRect().top))).size,
+          items: kids.length,
+          right: Math.max(...kids.map((k) => Math.round(k.getBoundingClientRect().right))),
+          vw: document.documentElement.clientWidth,
+        };
+      });
+      assert(
+        facRow === null || (facRow.display === 'flex' && facRow.wrap === 'wrap'),
+        `子设施行应 flex + wrap 可换行，实见 ${JSON.stringify(facRow)}`,
+      );
+      assert(facRow === null || facRow.right <= facRow.vw + 1, `子设施行右侧超出视口：${JSON.stringify(facRow)}`);
+      await page.screenshot({ path: join(SHOT_DIR, 'e2e-shop-375.png'), fullPage: true });
+      console.log(
+        `   375 消费中心：文档溢出 ${ovShop.ov}px；页签 ${JSON.stringify(segGeom)}；子设施行 ${
+          facRow === null ? '未渲染（无球场卡，几何断言降级）' : JSON.stringify(facRow)
+        }`,
+      );
+      console.log(`   截图：${join(SHOT_DIR, 'e2e-shop-375.png')}`);
+      await page.setViewportSize({ width: 1440, height: 900 });
       // 工作台/主场页签的入口（只挂给本队教练；本地种子会话若无教练台则备注降级，同 ⑮ 口径）
       await page.goto(`${BASE}/clubs`, { waitUntil: 'networkidle' });
       const clubLink = page.locator('a[href^="/clubs/"]').first();

@@ -1445,6 +1445,20 @@ tbody tr:hover td {
   color: var(--terracotta-deep);
 }
 
+/* ---- 消费中心两栏（v6.39.0）---- */
+
+/* 两栏都是 flex 项：默认 min-width:auto 会被子设施行/工单内容顶宽，窄屏整页横向溢出。
+   min-width:0 让它们能压到视口宽，窄屏由容器 flex-wrap 折成单列（宽度仍走流式）。 */
+.shop-main {
+  flex: 1 1 480px;
+  min-width: 0;
+}
+
+.shop-side {
+  flex: 0 1 340px;
+  min-width: 0;
+}
+
 /* ---- 移动端补充（v0.2.0 新组件） ---- */
 
 @media (max-width: 640px) {
@@ -1463,6 +1477,21 @@ tbody tr:hover td {
   .code-display {
     font-size: 24px;
     letter-spacing: 5px;
+  }
+
+  /* 窄屏页签：单行横滑（v6.39.0 消费中心过宽修复）。.seg 原本 overflow:hidden，
+     页签条比视口宽时右侧被裁且滑不动；改成横向可滚，页签自身不被压缩。 */
+  .seg {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .seg button,
+  .seg a {
+    flex: 0 0 auto;
   }
 }
 

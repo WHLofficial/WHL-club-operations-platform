@@ -800,3 +800,31 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     expect(free, '海捞页缺海捞查询区').toContain('SeaLookupSection');
   });
 });
+
+// v6.39.0 消费中心过宽修复（用户令 2026-10-06）的静态锁：声明必须落在 styles.css 类上，
+// 运行时几何（375 零溢出 / 页签可横滑）由 e2e ⑱ 的 375 段验。
+describe('v6.39.0 消费中心窄屏静态锁（消费中心过宽修复）', () => {
+  it('TC-SHOP-01 · 两栏 min-width:0 落在 .shop-main/.shop-side（不在内联 style）', () => {
+    const rules = cssRules(read('web/src/styles.css'));
+    for (const cls of ['.shop-main', '.shop-side']) {
+      const mw = declarations(rules, cls, 'min-width', true);
+      expect(mw.length, `${cls} 缺 min-width 声明（窄屏两栏会被子设施行/工单内容顶宽）`).toBeGreaterThan(0);
+      expect(mw.every((d) => d.value === '0'), `${cls} 的 min-width 应为 0，实见 ${JSON.stringify(mw)}`).toBe(true);
+    }
+    const page = read('web/src/pages/shop/ShopPage.tsx');
+    expect(page, '消费中心左主栏应挂 .shop-main').toContain('className="shop-main"');
+    expect(page, '消费中心右栏应挂 .shop-side').toContain('className="shop-side"');
+    expect(page, '两栏不应回退成内联 minWidth（TC-SWP-02 禁令）').not.toContain('minWidth: 0');
+  });
+
+  it('TC-SHOP-02 · 窄屏页签横滑 + 子设施行可换行', () => {
+    const rules = cssRules(read('web/src/styles.css'));
+    const ovx = declarations(rules, '.seg', 'overflow-x');
+    expect(
+      ovx.some((d) => d.value === 'auto'),
+      `.seg 缺 overflow-x:auto（窄屏页签条比视口宽时会被裁掉且滑不动），实见 ${JSON.stringify(ovx)}`,
+    ).toBe(true);
+    const venue = read('web/src/pages/shop/venueCards.tsx');
+    expect(venue, '子设施行应 flex + wrap（项间可换行，项内不折）').toContain("flexWrap: 'wrap'");
+  });
+});
