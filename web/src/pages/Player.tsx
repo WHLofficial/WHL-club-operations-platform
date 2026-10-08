@@ -508,7 +508,7 @@ export default function Player() {
                         </tr>
                         <tr>
                           <th>效力时长</th>
-                          <td className="mono">{contract.serviceSeasons.toFixed(1)} 赛季</td>
+                          <td className="mono">{contract.serviceSeasons.toFixed(1)} 年</td>
                         </tr>
                         <tr>
                           <th>保护期</th>

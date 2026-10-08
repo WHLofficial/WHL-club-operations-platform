@@ -227,11 +227,13 @@ const CA_BANDS: readonly Band[] = [
   { key: 'u70', label: '<70', min: 0, max: 69 },
 ];
 // 效力是 0.5 的整数倍（1 常规窗 = 0.5 赛季），所以档位之间留的空档取不到值。
+// v6.38.1：label 的「赛季」统一改「年」（用户裁决：效力时间的「年」语义同赛季，全仓文案统一）；
+// min/max 阈值与 key 都不动（tests/clubs-detail.test.ts 只按 key 数 count，不锁 label）。
 const YEARS_BANDS: readonly Band[] = [
-  { key: 'le05', label: '0.5 赛季内', min: 0, max: 0.5 },
-  { key: '1-15', label: '1–1.5 赛季', min: 1, max: 1.5 },
-  { key: '2-25', label: '2–2.5 赛季', min: 2, max: 2.5 },
-  { key: '3+', label: '3 赛季及以上', min: 3, max: 999 },
+  { key: 'le05', label: '0.5 年内', min: 0, max: 0.5 },
+  { key: '1-15', label: '1–1.5 年', min: 1, max: 1.5 },
+  { key: '2-25', label: '2–2.5 年', min: 2, max: 2.5 },
+  { key: '3+', label: '3 年及以上', min: 3, max: 999 },
 ];
 
 function bandCounts(rows: ClubSquadRow[], value: (r: ClubSquadRow) => number | null, bands: readonly Band[]): Array<{ key: string; label: string; count: number }> {

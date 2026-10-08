@@ -262,7 +262,7 @@ export function clubCellContent(key: string, p: ClubColRow): ReactNode {
       return p.contractType ? (p.protected ? '保护中' : '非保护') : '—';
     case 'years':
       // == null 而非 === null：API 漂移缺字段（undefined）时降级 '—' 而不是崩（同 club-cards 口径）
-      return p.serviceSeasons == null ? '—' : `${p.serviceSeasons.toFixed(1)} 赛季`;
+      return p.serviceSeasons == null ? '—' : `${p.serviceSeasons.toFixed(1)} 年`;
     default:
       return '—';
   }

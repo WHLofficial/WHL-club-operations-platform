@@ -317,7 +317,7 @@ export default function FilterPanel({
                   <option value="out">保护期外</option>
                 </select>
               </label>
-              {pair('yearsMin', 'yearsMax', '效力时长', '赛季')}
+              {pair('yearsMin', 'yearsMax', '效力时长', '年')}
             </div>
           </div>
         </div>

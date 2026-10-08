@@ -133,7 +133,7 @@ describe('四视图列与桌面全列', () => {
     ]);
   });
 
-  it('取值口径：成长空间 = PA−CA、档位 T1–T3（0 显 —）、效力带赛季、经纪人档位中文名', () => {
+  it('取值口径：成长空间 = PA−CA、档位 T1–T3（0 显 —）、效力带年（v6.38.1 赛季→年）、经纪人档位中文名', () => {
     const row = {
       age: 24, ca: 84, pa: 89, baseCa: 84, growthTier: 2,
       wage: 1.25, releaseFee: 45, serviceSeasons: 1.5,
@@ -141,10 +141,30 @@ describe('四视图列与桌面全列', () => {
       marketValue: 52.5, influence: 3.14159, agentTier: 3,
     };
     expect(CARD_VIEW_CELLS.growth.map((c) => c.get(row))).toEqual(['84', '5', 'T2']);
-    expect(CARD_VIEW_CELLS.contract.map((c) => c.get(row))).toEqual(['1.25 m', '45 m', '45 m', '1.5赛季']);
+    expect(CARD_VIEW_CELLS.contract.map((c) => c.get(row))).toEqual(['1.25 m', '45 m', '45 m', '1.5年']);
     expect(CARD_VIEW_CELLS.market.map((c) => c.get(row))).toEqual(['52.50 m', '3.14', '苛刻']);
     expect(CARD_VIEW_CELLS.growth[2]!.get({ ...row, growthTier: 0 })).toBeNull();
     expect(CARD_VIEW_CELLS.basic[1]!.get({ ...row, ca: null })).toBeNull();
+  });
+
+  it('分段配色适用域（v6.38.1）：shade 只给 0-99 能力值刻度列（CA/PA/初始CA），年龄/差值/金额/效力/文本不设', () => {
+    const row = { age: 31, ca: 45, pa: 92, baseCa: 88, wage: 1, releaseFee: 12, serviceSeasons: 0.5, influence: 2 } as unknown as CardMetricRow;
+    expect(CARD_VIEW_CELLS.basic.find((c) => c.key === 'ca')!.shade!(row)).toBe(45);
+    expect(CARD_VIEW_CELLS.basic.find((c) => c.key === 'pa')!.shade!(row)).toBe(92);
+    expect(CARD_VIEW_CELLS.growth.find((c) => c.key === 'baseCa')!.shade!(row)).toBe(88);
+    for (const c of [
+      CARD_VIEW_CELLS.basic.find((x) => x.key === 'age'),
+      CARD_VIEW_CELLS.growth.find((x) => x.key === 'growthGap'),
+      CARD_VIEW_CELLS.contract.find((x) => x.key === 'wage'),
+      CARD_VIEW_CELLS.contract.find((x) => x.key === 'years'),
+      CARD_VIEW_CELLS.market.find((x) => x.key === 'influence'),
+    ]) expect(c!.shade).toBeUndefined();
+    // 缺值（null）也在适用域内可表达：返回 null ⇒ 渲染层套中性墨色
+    expect(
+      CARD_VIEW_CELLS.basic
+        .find((c) => c.key === 'ca')!
+        .shade!({ ...row, ca: null } as unknown as CardMetricRow),
+    ).toBeNull();
   });
 
   it('API 漂移守卫：行缺字段（undefined）一律降级 null 显 —，绝不抛错崩整页（e2e ⑨ 教训）', () => {

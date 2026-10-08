@@ -198,7 +198,7 @@ describe('默认态与表头排序', () => {
     await waitFor(() => expect(search()).toBe('?sort=years&order=desc&effective_years_min=0&limit=20'));
     expect(headerTh('效力时长').getAttribute('aria-sort')).toBe('descending');
 
-    await user.click(screen.getByRole('button', { name: '移除筛选：效力时长 ≥ 0 赛季' }));
+    await user.click(screen.getByRole('button', { name: '移除筛选：效力时长 ≥ 0 年' }));
     await waitFor(() => expect(search()).toBe('?limit=20'));
     expect(headerButtons().some((b) => b.textContent?.startsWith('效力时长'))).toBe(false);
     expect(document.querySelectorAll('thead th[aria-sort]:not([aria-sort="none"])')).toHaveLength(0);
@@ -207,7 +207,7 @@ describe('默认态与表头排序', () => {
   it('固定列的排序不受别的筛选影响（删掉筛出的列不会误伤）', async () => {
     const user = open('/players?effective_years_min=0&sort=ca&order=desc&limit=20');
     await screen.findByRole('link', { name: /Šeško/ });
-    await user.click(screen.getByRole('button', { name: '移除筛选：效力时长 ≥ 0 赛季' }));
+    await user.click(screen.getByRole('button', { name: '移除筛选：效力时长 ≥ 0 年' }));
     await waitFor(() => expect(search()).toBe('?sort=ca&order=desc&limit=20'));
     expect(headerTh('CA').getAttribute('aria-sort')).toBe('descending');
   });

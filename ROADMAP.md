@@ -1519,6 +1519,23 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **待办**：① 随下一次被授权 push 与代码同轮上线；② **code-review-skill 未跑（登记）**——纯新增公开只读端点、无既有路径改动；③ 对面仓若要合并 FC 源槽位（`game_attrs.PSID1-15`）需自行读 `attrs`——本端点 `playstyles` 只取发放明细表（徽章真相源）。
 
+## v6.38.1 · 窄卡排版订正：徽章跟名同行 + 值区右侧 3/4 均分 + 值格分段色 + 效力单位改「年」（2026-10-08）
+
+**状态**：**本地收口，未 push**（零迁移、零生产写、纯前端 + 一处 worker 文案；按仓规随下次被授权 push 与代码同轮上线）。
+
+**缘起**（用户两条实时指令）：①（v6.37.2 两行式上线后）「既然变成现在排版，内联徽章可以显示在球员名右侧而非下边了；对于第二行数据，倾向于在右侧 3/4 区域平均分布，而非在整行平均分布」；②「属性值应用本仓已有的分段配色方案，同时效力时长单位改成年，该效力时间的『年』语义同『赛季』」。
+
+**交付**：
+- **排版（styles.css）**：组头列头 `.sqc-ghead .sqc-gcols` 与行值区 `.sqc-card:not(.wide) .sqc-m` 同款改 `flex-basis:75% + margin-left:auto`（值区不再整行均分，左侧让出与名字区相当的 1/4；无论 gcols 与组名同行还是折行都贴右，列头与值格起点实测对齐 ≤3px——残差由 `.sqc-k` 的 border-left 色条造成）；`.sqc-id` 改横向流（`flex-direction:row + wrap + center`，`.sqc-nm` `flex:none`、`.sqc-subline` `basis:100%` 强制独占下一行）——徽章跟在名字右侧、放不下才折；`.sqc-id` 补 `min-width:96px`（`.sqc-id{flex:1}` 的 basis 是 0%，观众态卡无 `.sqc-assign` 时第一行累进「序号20 + 0 + 值区75%」装得下 ⇒ 值区不折行、名字区被 grow 压成 32px 的 e2e ⑨ 实测回归；hypothetical size ≥96px 参与换行累进后值区必折到第二行）。
+- **值格分段色**：`club-cards.ts` 的 `CardCell` 增可选 `shade?: (row) => number | null`（只给 0-99 能力值刻度列：`basic.ca/pa` + `growth.baseCa`；年龄/成长差值/金额/效力/文本不设——套了会把 30 的差值读成「弱」色，同 `lensChipFor` colored 的适用域边界）；`card-parts.tsx` 的 `metricValues` 对 shade 列套 `attrClass(v)` 加 `attr-*` 类（nullish 中性墨色）；`styles.css` 五档色值提 `:root --attr-*` token（`.attr-*` 与新增 `.sqc-v.attr-*` 0-2-0 覆盖组共用同一 token，改色单一出处；0-2-0 是为了压过源序更后的 `.sqc-v` 墨色）。
+- **效力单位「赛季」→「年」（7 处）**：卡片 `club-cards.ts` years（`0.5年`）、横表 `club-columns.tsx`、详情表 `Player.tsx`、chip `players-library.ts`（RANGE_CHIP_GROUPS label 后缀 + lensChip 两处）、筛选器 `FilterPanel.tsx`、worker 分段 `routes/clubs.ts YEARS_BANDS`（「0.5 年内 / 1–1.5 年 / 2–2.5 年 / 3 年及以上」，key 与 min/max 阈值不动）。语义：1 年 = 1 赛季（1 常规窗 = 0.5 年），数值口径不变。
+- **e2e（smoke.mjs）**：⑨ 名字区断言改量 `.sqc-id` 容器；⑨/⑲ `mBasis` 锁 `'75%'` + `margin-left` 计算值 ≥60px（computed margin 是用后像素而非 `auto` 字面）；新增徽章与名字 top 差 ≤3px 同行锁；效力夹具与断言赛季→年。
+
+**验收**：typecheck 三份 0 error；vitest **104 文件 / 1738 例**全绿（基线 104/1736，+2 例全在分段色：`club-cards.test.ts` shade 适用域锁 + `card-parts.test.tsx` 值格渲染类锁；另有 6 处存量断言随单位同步订正——`club-columns.test` / `players-library.test` / `PlayersLibrary.test`×2 / `ClubDetail.test` / `smoke.mjs` 夹具与断言）；e2e **24/24**；探针 360×760 截图目测（`scratch/mobile-audit/probe.mjs`，资产 `index-1xWEkgdd.js`）：徽章跟名同行、值区右 3/4 起排与列头对齐、五档色可辨（82/84/85/88/92 绿系、75/78 琥珀、年龄与缺值中性墨色）；变异 M1（删 `basic.ca.shade` ⇒ card-parts 渲染抽样恰好 1 红）/ M2（`年`回`赛季` ⇒ 取值口径恰好 1 红）撤回复绿。测试计划 `docs/test-plans/v6.38.1-narrow-card-tone.md`。
+
+**教训**：工作区有未提交改动时**禁用 `git checkout -- <file>` 做变异撤回**——M2 变异脚本失配（Python 找 `${r.serviceSeasons}年` 串时误写漏 `$`）没改成，随后顺手执行的 checkout 却把当日全部未提交改动回滚（vitest 立红 2 例暴露）；重打三处 Edit 后复绿。变异实验的撤回一律用 Edit 精确还原，不用 git 回滚。
+
+
 ## v6.37.2 · 窄屏两行式卡片定稿：名字区/值区/分配下拉/nav/页头数值五处真机崩坏收敛（2026-10-07）
 
 **状态**：**已上线**（2026-10-07 发布：push `b4f010e..ae73c63`（8 枚，与 v6.38.0 公开端点模块同轮）触发 CF 自动部署，生产 Version **`2f7bb425-b145-4fce-8496-0ba3e6a1d31d`** @2026-10-07T05:50:57Z；线上资产与本地 6.38.0 构建 sha256 逐字节一致、线上 JS 版本串 `6.38`；零迁移；发布记录 docs 枚按仓规只本地 commit 不 push。**版本号叙事**：本地收口时按用户裁决「版本号6.37.x」回落 6.37.2，发布令下「bump 到 6.38.0」——两模块同轮统一以 6.38.0 上线）。

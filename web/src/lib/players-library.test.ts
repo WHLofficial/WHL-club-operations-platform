@@ -221,7 +221,7 @@ describe('摘要条 chips', () => {
 
   it('区间两边各自成一条，标签带单位', () => {
     const chips = filterChips(filters({ caMin: '70', caMax: '90', yearsMin: '1.5' }), CLUBS);
-    expect(chips.map((c) => c.label)).toEqual(['CA ≥ 70', 'CA ≤ 90', '效力时长 ≥ 1.5 赛季']);
+    expect(chips.map((c) => c.label)).toEqual(['CA ≥ 70', 'CA ≤ 90', '效力时长 ≥ 1.5 年']);
     expect(chips.map((c) => c.id)).toEqual(['caMin', 'caMax', 'yearsMin']);
   });
 

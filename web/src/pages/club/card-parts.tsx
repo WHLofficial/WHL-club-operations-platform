@@ -4,7 +4,7 @@
 // 结构纪律沿袭既有窄屏案例：narrow 与桌面 DOM 互斥、类名一律 sqc- 前缀、CSS 集中在 styles.css 段末。
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { MARKER_EMOJI, MARKER_LABEL } from '../../lib/players-library.ts';
+import { MARKER_EMOJI, MARKER_LABEL, attrClass } from '../../lib/players-library.ts';
 import {
   CARD_VIEWS,
   CARD_VIEW_CELLS,
@@ -147,11 +147,17 @@ export function extraColDefs(extraKeys: readonly string[]): { key: string; label
 
 function metricValues(cells: readonly CardCell[], row: CardMetricRow, extras: readonly string[], colRow: ClubColRow): ReactNode[] {
   return [
-    ...cells.map((c) => (
-      <span key={c.key} className={`sqc-v${c.num === false ? '' : ' num'}`}>
-        {c.get(row) ?? '—'}
-      </span>
-    )),
+    ...cells.map((c) => {
+      // v6.38.1：shade 在场的值格套全仓五档分段色（attrClass 阈值 50/60/70/80）——
+      // nullish 或缺格照旧中性墨色；.sqc-v 墨色源序在后所以 attr-* 需要 .sqc-v.attr-* 的 0-2-0 覆盖（styles.css）
+      const v = c.shade?.(row) ?? null;
+      const tone = v == null ? '' : ` ${attrClass(v)}`;
+      return (
+        <span key={c.key} className={`sqc-v${c.num === false ? '' : ' num'}${tone}`}>
+          {c.get(row) ?? '—'}
+        </span>
+      );
+    }),
     ...extras.map((key) => (
       // sqc-v-extra：可加列值可能超钉宽格（来源球队名 / PlayStyle 徽章排），窄屏截断不与邻格重叠
       <span key={key} className={`sqc-v sqc-v-extra ${clubCellClass(key, colRow)}`.trim()}>

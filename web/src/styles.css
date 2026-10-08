@@ -2623,21 +2623,29 @@ th.num .th-sort {
   flex-direction: column;
   gap: 2px;
 }
-/* 数值分段配色（v6.19.0 全仓统一）：sofifa 实测五档，阈值口径与来源见 web/src/lib/players-library.ts attrClass */
+/* 数值分段配色（v6.19.0 全仓统一）：sofifa 实测五档，阈值口径与来源见 web/src/lib/players-library.ts attrClass。
+   v6.38.1：色值提为 custom property（.sqc-v.attr-* 值格覆盖在同一 token 上，改色只动这里）。 */
+:root {
+  --attr-bad: #e03131;
+  --attr-weak: #fd7e14;
+  --attr-mid: #b7892b;
+  --attr-solid: #66a80f;
+  --attr-good: #2b8a3e;
+}
 .attr-bad {
-  color: #e03131;
+  color: var(--attr-bad);
 }
 .attr-weak {
-  color: #fd7e14;
+  color: var(--attr-weak);
 }
 .attr-mid {
-  color: #b7892b;
+  color: var(--attr-mid);
 }
 .attr-solid {
-  color: #66a80f;
+  color: var(--attr-solid);
 }
 .attr-good {
-  color: #2b8a3e;
+  color: var(--attr-good);
 }
 
 /* 六维雷达（v0.7.1 d11）：静态 SVG，无动画；v6.2.0 起压进属性页签头部右格 —— 232×156 光图，
@@ -6346,11 +6354,14 @@ th.num .th-sort {
   text-overflow: ellipsis;
 }
 
-/* 窄屏：组头列头行（v6.37.2 两行式——flex-basis:100% 折到组头第二行整行、1fr 均分，
-   与行内值区同一套网格严格逐列对齐；列数随 --sqc-mcols。gcols 与 .sqc-m 基类同挂一个元素，
-   1fr 轨道须用 0-2-0 特异性压过 .sqc-m 基类的钉宽轨道（源序在基类之前）。 */
+/* 窄屏：组头列头行（v6.37.2 两行式——折到组头第二行；v6.38.1 订正为与行值同款
+   右侧 3/4 区域 1fr 均分：flex-basis:75% + margin-left:auto，无论与组名同行还是
+   折行都贴右、起点与行卡 .sqc-m 的 25% 缩进对齐（≤3px 差由 border-left 色条造成）。
+   列数随 --sqc-mcols。gcols 与 .sqc-m 基类同挂一个元素，1fr 轨道须用 0-2-0 特异性
+   压过 .sqc-m 基类的钉宽轨道（源序在基类之前）。 */
 .sqc-ghead .sqc-gcols {
-  flex-basis: 100%;
+  flex-basis: 75%;
+  margin-left: auto;
   display: grid;
   grid-template-columns: repeat(var(--sqc-mcols, 3), 1fr);
   align-items: center;
@@ -6540,6 +6551,25 @@ button.sqc-pos:hover {
   color: var(--ink);
 }
 
+/* v6.38.1：值格里的属性值套全仓五档分段色（CARD_VIEW_CELLS 的 shade 轴 = CA/PA/初始CA，
+   card-parts metricValues 加 attr-* 类）。.sqc-v 墨色源序在后会被 0-1-0 的 .attr-* 输掉，
+   所以这里用 0-2-0 覆盖；色 token = 本表顶部 :root 的 --attr-*（改色单一出处） */
+.sqc-v.attr-bad {
+  color: var(--attr-bad);
+}
+.sqc-v.attr-weak {
+  color: var(--attr-weak);
+}
+.sqc-v.attr-mid {
+  color: var(--attr-mid);
+}
+.sqc-v.attr-solid {
+  color: var(--attr-solid);
+}
+.sqc-v.attr-good {
+  color: var(--attr-good);
+}
+
 /* nowrap 只限窄屏卡形态：桌面 wide 的可加列长值（来源球队 / PlayStyle 徽章排）保持折行（v6.37.1 审查订正） */
 .sqc-card:not(.wide) .sqc-v {
   white-space: nowrap;
@@ -6591,18 +6621,41 @@ button.sqc-pos:hover {
   gap: 2px;
 }
 
-/* v6.37.2 两行式窄卡（用户否决了「值区折行」形态后定稿）：
-   第一行 = 序号 + 名字（flex:1，合同视图教练视角也有 161px）+ 分配下拉（回行尾）；
-   第二行 = 值区 .sqc-m 独占整行、1fr 均分——3 值视图 ~90px/格、合同 4 值 ~68px/格，
-   任何视图值格不再挤压折行；组头列头 .sqc-gcols 同款 1fr 逐列对齐。
-   DOM 序 m 在 assign 前，flex order 把值区排到视觉最后一行。桌面 .wide 不命中（仍单行平铺）。 */
+/* v6.37.2 两行式窄卡（用户否决了「值区折行」形态后定稿；v6.38.1 订正两处排版）：
+   第一行 = 序号 + 名字（flex:1）+ 徽章跟随名字右侧（不再掉到名字下方）+ 分配下拉（回行尾）；
+   第二行 = 值区 .sqc-m 不再整行均分——左侧让出与名字区相当的 1/4、只在右侧 3/4 区域 1fr 均分
+   （margin-left:auto 吸收第二行剩余空间，无论组头 gcols 与标题同行还是折行都贴右对齐）；
+   组头列头 .sqc-gcols 同款 75% + margin-left:auto 与行值同起点（差值 ≤3px 由 border-left 色条造成，
+   e2e tailDelta 断言口径 ≤3px）。DOM 序 m 在 assign 前，flex order 把值区排到视觉最后一行。
+   桌面 .wide 不命中（仍单行平铺）。 */
 .sqc-card:not(.wide) {
   flex-wrap: wrap;
 }
 
+/* v6.38.1：名字区内改横向流——名字 + 徽章同一行、放不下才折；副行强制独占下一行 */
+.sqc-card:not(.wide) .sqc-id {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  /* v6.38.1：flex:1 的 basis 是 0%——观众态卡（无 .sqc-assign）第一行累进 序号20+0+值区75%
+     装得下 ⇒ 值区不换行、名字区被 grow 压成 32px（e2e ⑨ 实测回归）。min-width 保底参与
+     换行累进（hypothetical size ≥ 96px ⇒ 值区必折到第二行），也给「两字名+一枚徽章同行」留位。 */
+  min-width: 96px;
+}
+
+.sqc-card:not(.wide) .sqc-id > .sqc-nm {
+  flex: none;
+}
+
+.sqc-card:not(.wide) .sqc-id > .sqc-subline {
+  flex-basis: 100%;
+}
+
 .sqc-card:not(.wide) .sqc-m {
   order: 1;
-  flex-basis: 100%;
+  flex-basis: 75%;
+  margin-left: auto;
   grid-template-columns: repeat(var(--sqc-mcols, 3), 1fr);
 }
 

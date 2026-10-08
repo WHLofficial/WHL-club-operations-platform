@@ -1293,10 +1293,10 @@ async function main() {
       contracts: {
         signed: 6, unprotected: 2, protectedCount: 4, avgYears: 2.5,
         byYears: [
-          { key: 'le05', label: '0.5 赛季内', count: 1 },
-          { key: '1-15', label: '1–1.5 赛季', count: 2 },
-          { key: '2-25', label: '2–2.5 赛季', count: 3 },
-          { key: '3+', label: '3 赛季及以上', count: 0 },
+          { key: 'le05', label: '0.5 年内', count: 1 },
+          { key: '1-15', label: '1–1.5 年', count: 2 },
+          { key: '2-25', label: '2–2.5 年', count: 3 },
+          { key: '3+', label: '3 年及以上', count: 0 },
         ],
       },
       transfers: {
@@ -1597,7 +1597,7 @@ async function main() {
               .evaluateAll((els) => els.map((e) => [...e.querySelectorAll('.sqc-v')].map((v) => v.textContent?.trim() ?? '').join('|')));
             // 合同视图四格：工资/违约金/激活价/效力（前锋丁无合同全 —；门将甲违约金 12 → 激活价 24）
             assert(
-              contractVals[0] === '6.50 m|12 m|24 m|3赛季',
+              contractVals[0] === '6.50 m|12 m|24 m|3年',
               `${label}：合同视图门将甲四格不符（${contractVals[0]}）`,
             );
             assert(
@@ -1607,7 +1607,20 @@ async function main() {
             // v6.37.2 两行式定稿回归：第一行序号+名字，值区第二行整行 1fr 均分——值恒单行不折、
             // 名字区不被指标挤压；组头标签格与值格右缘逐列对齐（ghead 左置色条容差 ≤3px）
             const narrowFit = await page.locator('.club-block article.sqc-row').first().evaluate((row) => {
-              const nm = row.querySelector('.sqc-nm')?.getBoundingClientRect().width ?? 0;
+              // v6.38.1：.sqc-id 改横向流后 .sqc-nm(flex:none) 宽=名字文本宽；「名字区」语义量容器 .sqc-id
+              const idEl = row.querySelector('.sqc-id');
+              const nm = idEl?.getBoundingClientRect().width ?? 0;
+              const diag = {
+                noW: Math.round(row.querySelector('.sqc-no')?.getBoundingClientRect().width ?? 0),
+                idW: Math.round(idEl?.getBoundingClientRect().width ?? 0),
+                idFlex: idEl ? getComputedStyle(idEl).flex : null,
+                idWrap: idEl ? getComputedStyle(idEl).flexWrap : null,
+                mBasis: getComputedStyle(row.querySelector('.sqc-m')).flexBasis,
+                mW: Math.round(row.querySelector('.sqc-m')?.getBoundingClientRect().width ?? 0),
+                cardWrap: getComputedStyle(row).flexWrap,
+                vw: innerWidth,
+              };
+              console.log('[⑨narrowFit-diag]', JSON.stringify(diag));
               const pos = row.querySelector('.sqc-pos')?.textContent?.trim() ?? '';
               const overflow = [...row.querySelectorAll('.sqc-v')].filter((v) => v.scrollWidth > v.clientWidth + 1).length;
               // 两行式契约 = 值区恒单行；折成两行的崩坏形态（逐值一行 / 2+1 孤行）都会被抓
@@ -1622,11 +1635,11 @@ async function main() {
                 Math.min(kRights.length, vRights.length) > 0
                   ? kRights[kRights.length - 1] - vRights[vRights.length - 1]
                   : null;
-              return { nmW: Math.round(nm), pos, overflow, rows, tailDelta };
+              return { nmW: Math.round(nm), pos, overflow, rows, tailDelta, diag };
             });
             assert(
               narrowFit.nmW >= 150,
-              `${label}：合同视图名字区仅 ${narrowFit.nmW}px（两行式下应 ≈160+，低于这个数说明布局回退挤压、360 真机会逐字竖排）`,
+              `${label}：合同视图名字区仅 ${narrowFit.nmW}px（两行式下应 ≈160+，低于这个数说明布局回退挤压、360 真机会逐字竖排）diag=${JSON.stringify(narrowFit.diag)}`,
             );
             assert(
               narrowFit.pos.length > 0,
@@ -1758,9 +1771,17 @@ async function main() {
           const kRights = gcols ? [...gcols.querySelectorAll('.sqc-k')].map((k) => Math.round(r(k).right)) : [];
           const vRights = vs.map((v) => Math.round(r(v).right));
           return {
-            nmW: Math.round(r(row.querySelector('.sqc-nm')).width),
+            // v6.38.1：同 ⑨——名字区语义量 .sqc-id 容器（.sqc-nm 现为 flex:none 文本宽）
+            nmW: Math.round(r(row.querySelector('.sqc-id')).width),
             assignW: Math.round(r(row.querySelector('.sqc-assign')).width),
             mBasis: getComputedStyle(row.querySelector('.sqc-m')).flexBasis,
+            mMarginL: getComputedStyle(row.querySelector('.sqc-m')).marginLeft,
+            badgeTopDelta:
+              row.querySelector('.sqc-badges') && row.querySelector('.sqc-nm')
+                ? Math.abs(
+                    Math.round(r(row.querySelector('.sqc-badges')).top) - Math.round(r(row.querySelector('.sqc-nm')).top),
+                  )
+                : null,
             rows: new Set(vs.map((v) => Math.round(r(v).top))).size,
             overflow: vs.filter((v) => v.scrollWidth > v.clientWidth + 1).length,
             tailDelta:
@@ -1778,8 +1799,12 @@ async function main() {
           `教练态合同视图名字区仅 ${fit19.nmW}px（分配下拉在第一行行尾时两行式应保住 ≈160px）`,
         );
         assert(
-          fit19.mBasis === '100%',
-          `教练态值区 flex-basis=${fit19.mBasis}（两行式 = 100% 独占第二行）`,
+          fit19.mBasis === '75%' && parseFloat(fit19.mMarginL) >= 60,
+          `教练态值区 flex-basis=${fit19.mBasis}/margin-left=${fit19.mMarginL}（v6.38.1 = 右侧 3/4 区域均分：75% 宽 + margin-left:auto 吃掉左 1/4，used 值为像素非 'auto'）`,
+        );
+        assert(
+          fit19.badgeTopDelta !== null && fit19.badgeTopDelta <= 3,
+          `教练态徽章与名字 top 差 ${fit19.badgeTopDelta}px（v6.38.1 徽章应在名字右侧同行，不是名字下方）`,
         );
         assert(
           fit19.rows === 1,

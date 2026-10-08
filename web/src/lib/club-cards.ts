@@ -171,6 +171,10 @@ export interface CardCell {
   label: string;
   num?: boolean;
   get: (row: CardMetricRow) => string | null;
+  /** v6.38.1：0-99 能力值刻度列返回该值 ⇒ 值格由 metricValues 套 attrClass 五档分段色
+     （CA / PA / 初始 CA；与 players-library lensChipFor 的 colored 先例同一适用域边界——
+     年龄/差值/金额/效力时长/文本不设，套了会被误读）。 */
+  shade?: (row: CardMetricRow) => number | null;
 }
 
 /**
@@ -182,15 +186,35 @@ export interface CardCell {
 export const CARD_VIEW_CELLS: Record<CardViewKey, readonly CardCell[]> = {
   basic: [
     { key: 'age', label: '年龄', num: true, get: (r) => (r.age == null ? null : String(r.age)) },
-    { key: 'ca', label: 'CA', num: true, get: (r) => (r.ca == null ? null : String(r.ca)) },
-    { key: 'pa', label: 'PA', num: true, get: (r) => (r.pa == null ? null : String(r.pa)) },
+    {
+      key: 'ca',
+      label: 'CA',
+      num: true,
+      get: (r) => (r.ca == null ? null : String(r.ca)),
+      // 0-99 能力值刻度 ⇒ v6.38.1 套 attrClass 五档色（年龄不在能力刻度内，不上色）
+      shade: (r) => r.ca ?? null,
+    },
+    {
+      key: 'pa',
+      label: 'PA',
+      num: true,
+      get: (r) => (r.pa == null ? null : String(r.pa)),
+      shade: (r) => r.pa ?? null,
+    },
   ],
   growth: [
-    { key: 'baseCa', label: '初始CA', num: true, get: (r) => (r.baseCa == null ? null : String(r.baseCa)) },
+    {
+      key: 'baseCa',
+      label: '初始CA',
+      num: true,
+      get: (r) => (r.baseCa == null ? null : String(r.baseCa)),
+      shade: (r) => r.baseCa ?? null,
+    },
     {
       key: 'growthGap',
       label: '成长空间',
       num: true,
+      // PA−CA 差值不属于能力值刻度（90−60=30 套「弱」色是误读，lensChipFor 同口径），不上色
       get: (r) => (r.ca == null || r.pa == null ? null : String(r.pa - r.ca)),
     },
     {
@@ -205,8 +229,9 @@ export const CARD_VIEW_CELLS: Record<CardViewKey, readonly CardCell[]> = {
     { key: 'wage', label: '工资', num: true, get: (r) => (r.wage == null ? null : money(r.wage)) },
     { key: 'releaseFee', label: '违约金', num: true, get: (r) => moneyIntText(r.releaseFee) },
     { key: 'activation', label: '激活价', num: true, get: (r) => moneyIntText(activationFeeOf(r)) },
-    // 效力值不带空格（「0.5赛季」）：卡片值格窄屏 nowrap 钉宽，60px 兜住最长「10.5赛季」
-    { key: 'years', label: '效力', num: true, get: (r) => (r.serviceSeasons == null ? null : `${r.serviceSeasons}赛季`) },
+    // 效力值不带空格（「0.5年」）：卡片值格窄屏 nowrap 钉宽，60px 兜住最长「10.5年」。
+    // v6.38.1：单位 赛季→年（用户裁决「效力时间的年语义同赛季」，1 年 = 1 赛季，数值口径不变）
+    { key: 'years', label: '效力', num: true, get: (r) => (r.serviceSeasons == null ? null : `${r.serviceSeasons}年`) },
   ],
   market: [
     { key: 'marketValue', label: '身价', num: true, get: (r) => (r.marketValue == null ? null : money(r.marketValue)) },

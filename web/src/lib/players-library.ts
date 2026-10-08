@@ -405,7 +405,7 @@ const RANGE_CHIP_GROUPS: [keyof Filters, keyof Filters, string, string][] = [
   ['inflMin', 'inflMax', '影响力', ''],
   ['wageMin', 'wageMax', '工资', ' m'],
   ['rcMin', 'rcMax', '解约金', ' m'],
-  ['yearsMin', 'yearsMax', '效力时长', ' 赛季'],
+  ['yearsMin', 'yearsMax', '效力时长', ' 年'],
 ];
 
 // 摘要条里的徽章名：金段的 chs/en 都带 " +" 后缀（参考表如此），金徽章那一类已经写在
@@ -573,7 +573,7 @@ function lensChipFor(key: string, row: PlayerLibraryRow): LensChip {
       return { label, value: money(row.releaseFee), raw: row.releaseFee, colored: false };
     case 'years':
       // 无合同 = 效力时长 null（后端 join 不到合同就是这个形状），别渲染成「null 赛季」
-      return { label, value: row.serviceSeasons === null ? '—' : `${row.serviceSeasons} 赛季`, raw: row.serviceSeasons, colored: false };
+      return { label, value: row.serviceSeasons === null ? '—' : `${row.serviceSeasons} 年`, raw: row.serviceSeasons, colored: false };
     case 'agent_tier':
       // 与页面既有渲染同一口径：AGENT_TIER_LABEL[0] 是空串，只有下标越界才落 '—'
       return { label, value: AGENT_TIER_LABEL[row.agentTier] ?? '—', raw: row.agentTier, colored: false };

@@ -235,7 +235,7 @@ describe('可选列单元格渲染（与球员库共用一份，元素级断言�
   it('常规列出内容（含单位与文案）', () => {
     expect(childOf('foot', row)).toBe('左脚');
     expect(childOf('futureStar', row)).toBe('★');
-    expect(childOf('years', row)).toBe('1.5 赛季');
+    expect(childOf('years', row)).toBe('1.5 年');
   });
 
   it('球队页的行可能缺值（/api/club/squad 的 ca/pa/foot 等列为 NULL）→ 出「—」不炸', () => {

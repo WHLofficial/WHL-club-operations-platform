@@ -3,7 +3,9 @@
 // 渲染契约（1+N 折叠、点击展开全量、再点收回、aria 属性）在这一处钉死。
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CardBadges } from './card-parts.tsx';
+import { MemoryRouter } from 'react-router';
+import { CardBadges, SquadCard } from './card-parts.tsx';
+import type { PlayerLibraryRow } from '../../lib/api.ts';
 
 afterEach(cleanup);
 
@@ -46,5 +48,45 @@ describe('CardBadges 的 +N 展开（v6.37.2）', () => {
 
     const empty = render(<CardBadges badges={[]} />);
     expect(empty.container.innerHTML).toBe('');
+  });
+});
+
+/* ---------- v6.38.1：值格分段色（CARD_VIEW_CELLS.shade 轴 = CA/PA/初始CA 套 attrClass 五档） ---------- */
+
+const cardRow = {
+  id: 1, uid: 'fc99001', name: '测试甲', number: '1', clubId: null, position: 'GK',
+  age: 31, ca: 45, pa: 92, prestige: null, marketValue: null, status: 'active',
+  transferListed: false, notForSale: false, growthTier: 1, isFutureStar: false,
+  chinaPlan: false, agentTier: 0, badgesSilver: 0, badgesGold: 0,
+  growable: true, clubName: null, positions: ['GK'], influence: 2,
+  wage: null, releaseFee: null, contractType: null, foot: 3, baseCa: 45,
+  fcId: 99001, source: null, serviceSeasons: null, protected: false,
+} as unknown as PlayerLibraryRow;
+
+describe('SquadCard 值格分段色（v6.38.1）', () => {
+  it('基本视图：缺值格显 — 且不上色；PA 92 → attr-good；年龄不在 shade 轴不上色', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SquadCard row={{ ...cardRow, ca: null as unknown as number }} view="basic" extras={[]} />
+      </MemoryRouter>,
+    );
+    const vs = container.querySelectorAll('.sqc-v');
+    // 年龄 / CA / PA（ca 缺 → 值 — 且类不带 attr-*）
+    expect(vs[0]!.className).not.toContain('attr-');
+    expect(vs[0]!.textContent).toBe('31');
+    expect(vs[1]!.textContent).toBe('—');
+    expect(vs[1]!.className).not.toContain('attr-');
+    expect(vs[2]!.className).toContain('attr-good');
+    expect(vs[2]!.textContent).toBe('92');
+  });
+
+  it('阈值五档抽样：45→bad、62→mid、78→solid、85→good（attrClass 阈值 50/60/70/80）', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SquadCard row={{ ...cardRow, ca: 62, baseCa: 62 }} view="basic" extras={[]} />
+      </MemoryRouter>,
+    );
+    expect(container.querySelectorAll('.sqc-v')[1]!.className).toContain('attr-mid');
+    expect(container.querySelectorAll('.sqc-v')[2]!.className).toContain('attr-good');
   });
 });
