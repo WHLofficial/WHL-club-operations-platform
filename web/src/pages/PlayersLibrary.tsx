@@ -667,7 +667,7 @@ export default function PlayersLibrary() {
                               <span className="lib-card-free">自由身</span>
                             ) : (
                               <>
-                                <TeamLogo name={p.clubName ?? ''} size={18} circle={false} />
+                                <TeamLogo name={p.clubName ?? ''} logoKey={p.clubLogoKey} size={18} circle={false} />
                                 <span>{p.clubName}</span>
                                 {p.age !== null && <span>· {p.age}岁</span>}
                               </>
@@ -773,8 +773,16 @@ export default function PlayersLibrary() {
                           <Link to={playerPath(p)}>{p.name}</Link>
                         </td>
                         <td>
-                          {/* 归属球队链到球队页（v3.4.0）；自由身没有俱乐部，不给链接 */}
-                          {p.clubId === null ? '自由身' : <Link to={`/clubs/${p.clubId}`}>{p.clubName ?? '未知球队'}</Link>}
+                          {/* 归属球队链到球队页（v3.4.0）；自由身没有俱乐部，不给链接。
+                              v6.39.3：队名前挂队徽缩略图（真源=比赛系统 team.logo_key，无徽回落队名哈希色块） */}
+                          {p.clubId === null ? (
+                            '自由身'
+                          ) : (
+                            <Link className="lib-club" to={`/clubs/${p.clubId}`}>
+                              <TeamLogo name={p.clubName ?? ''} logoKey={p.clubLogoKey} size={18} circle={false} />
+                              <span>{p.clubName ?? '未知球队'}</span>
+                            </Link>
+                          )}
                         </td>
                         <td className="mono">{p.positions.length > 0 ? p.positions.join(' ') : '—'}</td>
                         <td className="num mono">{p.age ?? '—'}</td>

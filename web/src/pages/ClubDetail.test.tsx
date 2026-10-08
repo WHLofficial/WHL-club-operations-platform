@@ -183,6 +183,8 @@ function rosterRow(patch: Partial<PlayerLibraryRow> & { id: number; name: string
     badgesGold: 0,
     growable: true,
     clubName: '阿森纳',
+    // v6.39.3：队徽 R2 键（无徽回落哈希色块）
+    clubLogoKey: null,
     positions: ['CM'],
     influence: 1.23,
     wage: 0.5,

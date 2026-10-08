@@ -9,6 +9,7 @@ import { ttlForScope } from '../../lib/cache-policy.ts';
 import { writeAudit } from '../../lib/audit.ts';
 import { authBindTeam, AuthApiError } from '../authClient.ts';
 import { getBoundClub } from '../binding.ts';
+import { loadClubTourTeams, loadTeamLogos } from '../club-logos.ts';
 import { deriveClubTier, deriveClubLeagues, deriveClubTiers } from '../tier.ts';
 import { closedRegularTicks } from '../contract-ticks.ts';
 import { POSITION_BY_ID, POSITION_GROUP_BY_POSITION, POSITION_GROUPS } from '../../core/fc26.ts';
@@ -79,31 +80,6 @@ interface SquadAggRow {
   avg_ca: number | null;
   total_value: number | null;
   total_wage: number | null;
-}
-
-// club_id → tour_team_id（AUTH_DB 批量，实测 20 行）。队徽与分级派生共用这一份映射：
-// 逐队查的话每队都要扫 team 全表 20 行，20 队就是 400 行。
-async function loadClubTourTeams(env: Env): Promise<Map<number, number>> {
-  const out = new Map<number, number>();
-  if (!env.AUTH_DB) return out;
-  const rows = await env.AUTH_DB.prepare('SELECT club_id, tour_team_id AS tid FROM team WHERE club_id IS NOT NULL')
-    .all<{ club_id: number; tid: number | null }>();
-  for (const r of rows.results) if (typeof r.tid === 'number') out.set(r.club_id, r.tid);
-  return out;
-}
-
-// 队徽：本平台 `clubs.logo_key` 全仓无人**写**（写侧在比赛系统），虽然 `GET /me/club` 会读出来渲染，
-// 但没有任何入口能给它赋值 ⇒ 球队页一律取比赛系统 `team.logo_key`（生产 20/20 覆盖）。
-// 返回 tour_team_id → key，路由再经上面的映射折回 club_id。
-async function loadTeamLogos(env: Env, tourTeamIds: number[]): Promise<Map<number, string>> {
-  const out = new Map<number, string>();
-  if (env.TOUR_DB === undefined || tourTeamIds.length === 0) return out;
-  const ph = tourTeamIds.map(() => '?').join(', ');
-  const rows = await env.TOUR_DB.prepare(`SELECT id, logo_key FROM team WHERE id IN (${ph})`)
-    .bind(...tourTeamIds)
-    .all<{ id: number; logo_key: string | null }>();
-  for (const r of rows.results) if (r.logo_key) out.set(r.id, r.logo_key);
-  return out;
 }
 
 // 公开球队列表（v3.4.0）：一屏 20 队，一次算完 —— 固定 4 条 whl-club 语句 + AUTH_DB/TOUR_DB 各 1~2 条，无逐队查询。

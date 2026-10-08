@@ -1500,6 +1500,17 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.39.3 · 球员库球队名前接队徽缩略图（映射抽 src/worker/club-logos.ts 共用）（2026-10-08）
+
+- **状态**：patch × 本地收口未 push（2026-10-08）；零迁移、零生产写。
+- **缘起**：用户 m04476「下一个修复：球员库界面球队名前应该用队徽缩略图」。
+- **根因**：窄屏铭牌卡 `TeamLogo` 只传 `name`（不传 `logoKey`）⇒ 永远哈希色块；宽屏表格球队格是纯文本链接，无徽。
+- **交付**：① 新 `src/worker/club-logos.ts`（`loadClubTourTeams` / `loadTeamLogos`，抽自 `routes/clubs.ts` 的本地副本）② `/api/players` 计算体内补 `clubLogoKey`（页内 club_id 去重查一次；自由身 null）③ `PlayerLibraryRow.clubLogoKey` + 宽屏 `a.lib-club`（徽 + 队名 inline-flex）+ 窄屏卡片传 `logoKey`。
+- **真源**：比赛系统 `TOUR_DB.team.logo_key`（经 AUTH_DB `team.club_id → tour_team_id` 映射）；本平台 `clubs.logo_key` 全仓无人写。
+- **回归闸门**：worker 队徽用例 / 组件三例 / TC-CREST-01 静态锁 / e2e ⑧ 三视口徽断言 / 探针打桩截图。
+- **验收**：typecheck 0 error；vitest 104 文件 1759 例（净 +5）；build ✓；e2e 24/24；探针宽屏 2 真图 + 1 色块 + 1 自由身、窄屏同款、文档溢出 −15px。
+- **教训**：见 CHANGELOG v6.39.3 条（TeamLogo 静默降级 / 必填字段掀夹具 / 本地 logo_key 全 NULL）。
+
 ## v6.39.2 · 桌面球队页宽卡列对齐（列头与值区同款等宽轨网格 + 身份列 210 / 列距 22）+ 注册台列集 13→11 + 金额单位紧贴数字（2026-10-08）
 
 **状态**：**已上线**（2026-10-08 发布，用户令 m04382「v6.39.2发布」：push `b12ed0e..c534523` 触发 CF 自动部署，生产 Version **`c60c18a3-246a-4b7b-a30a-d5c041005a29`** @2026-10-08T11:23:55Z，自定义域回读通过——见文末「上线回读」；零迁移、零生产写、纯前端 CSS 与组件层）。判级 **patch**——展示订正 + 缺陷修补，无新增能力、无契约变更。typecheck 三份 tsconfig 0 error；`npm run build` 成功；vitest **104 文件 / 1754 例**全绿（v6.39.1 基线 104/1748，净 +6 例）；e2e **24/24**（⑨ 桌面几何锁改写 + ⑩ 新增桌面注册名单步）。测试计划 `docs/test-plans/v6.39.2-wide-card-align.md`。

@@ -1163,6 +1163,25 @@ async function main() {
             `${label}：宽屏显示列多选应可见`,
           );
         }
+
+        // v6.39.3：所属球队格要带队徽缩略图——真徽是 img.team-logo，本地/未接徽是哈希色块
+        // span.team-logo（两者同 class 前缀），所以按 .team-logo 计数，不写死 img。
+        if (width <= 900) {
+          const crest = page.locator('.library-main .lib-cards .lib-card .lib-card-sub .team-logo');
+          assert((await crest.count()) >= 1, `${label}：窄屏卡片「所属球队」行缺队徽缩略图（v6.39.3）`);
+          assert(
+            (await page.locator('.lib-cards .lib-card .lib-club').count()) === 0,
+            `${label}：窄屏卡片不该出现宽屏用的 a.lib-club`,
+          );
+        } else {
+          const links = page.locator('.library-main tbody a.lib-club');
+          const n = await links.count();
+          assert(n >= 1, `${label}：宽屏球队格应有带队徽的 a.lib-club 链接（v6.39.3）`);
+          const withCrest = await links.evaluateAll(
+            (els) => els.filter((el) => !!el.querySelector('.team-logo')).length,
+          );
+          assert(withCrest === n, `${label}：${n - withCrest}/${n} 个球队链接缺队徽缩略图`);
+        }
         // 多选下拉（v3.1.1 步骤 6）：左栏/抽屉里都要能打开、整块落在视口内、并且真的点得到
         await openPanel('位置');
         const pos = await panelProbe();

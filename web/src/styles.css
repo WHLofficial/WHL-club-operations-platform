@@ -2478,6 +2478,14 @@ tbody tr:hover td {
   white-space: nowrap;
 }
 
+/* 球员库「所属球队」格：队徽缩略图与队名同排（v6.39.3）。尺寸由 TeamLogo 内联给（18px），
+   这里只管对齐与间距；td 已 nowrap，inline-flex 行不会折。 */
+.lib-club {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* 生效条件摘要条：一类一条可删 chips（位置一条、银/金徽章各一条）。
    min-width:0 是为了让它在 .lib-bar 这个 flex 行里能被压缩换行（默认 min-width:auto 取
    min-content，选中一长串位置时会把翻页条挤出这一行而不是自己折行） */

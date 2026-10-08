@@ -71,6 +71,8 @@ function row(patch: Partial<PlayerLibraryRow> = {}): PlayerLibraryRow {
     transferPriced: false,
     growable: true,
     clubName: null,
+    // v6.39.3：队徽 R2 键（无徽回落哈希色块）
+    clubLogoKey: null,
     positions: ['ST'],
     influence: 0,
     wage: null,

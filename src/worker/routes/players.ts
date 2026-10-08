@@ -12,6 +12,7 @@ import { firstPlayerByRef } from '../player-ref.ts';
 import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
 import { getOpenWindow } from '../seasons.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
+import { loadClubTourTeams, loadTeamLogos } from '../club-logos.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
 import { MARKER_VALUES, MARKER_WEIGHT, markerOf, markerWeightSql, type PlayerMarker } from '../../core/squad-rules.ts';
 import { influenceCoefs, influenceOf } from '../influence.ts';
@@ -725,6 +726,26 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       sort_key?: number | string | null;
     }>();
 
+  // 队徽（v6.39.3）：真源在比赛系统 `team.logo_key`（本平台 clubs.logo_key 无人写，见 club-logos.ts）。
+  // 在 cachedJson 计算体内按本页去重后的 club_id 两步取（AUTH_DB 映射 → TOUR_DB 点查），缓存载荷自带 logoKey；
+  // 外源派生数据受 scope TTL 陈旧代价（与 /clubs 同口径，写侧改数据本 worker 收不到事件）。
+  const logoByClub = new Map<number, string>();
+  {
+    const clubIds = [...new Set(rows.results.map((r) => r.club_id).filter((x): x is number => x !== null))];
+    if (clubIds.length > 0) {
+      const tourTeams = await loadClubTourTeams(c.env);
+      const logos = await loadTeamLogos(
+        c.env,
+        clubIds.map((id) => tourTeams.get(id)).filter((tid): tid is number => typeof tid === 'number'),
+      );
+      for (const id of clubIds) {
+        const tid = tourTeams.get(id);
+        const key = tid === undefined ? undefined : logos.get(tid);
+        if (key !== undefined) logoByClub.set(id, key);
+      }
+    }
+  }
+
   const slotNames = (v: unknown): string | null => {
     // 槽位缺失（NULL）不能走 Number() 归零：PositionID 0 是 GK，会把空槽错译成门将
     if (v === null || v === undefined) return null;
@@ -741,6 +762,8 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     number: r.number,
     clubId: r.club_id,
     clubName: r.club_name,
+    // 队徽 R2 键（v6.39.3）：自由身恒 null；无徽由前端 TeamLogo 回落队名哈希色块
+    clubLogoKey: r.club_id === null ? null : (logoByClub.get(r.club_id) ?? null),
     position: r.position,
     positions: [r.position ?? slotNames(r.pos1), slotNames(r.pos2), slotNames(r.pos3), slotNames(r.pos4)]
       .filter((p): p is string => p !== null)

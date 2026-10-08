@@ -51,6 +51,8 @@ function row(patch: Partial<PlayerLibraryRow> & { id: number; name: string }): P
     badgesSilver: 1,
     badgesGold: 0,
     clubName: '阿森纳',
+    // v6.39.3：队徽 R2 键（无徽回落哈希色块）；用例按需覆盖
+    clubLogoKey: null,
     growable: true,
     positions: ['ST'],
     influence: 0.42,
@@ -750,5 +752,45 @@ describe('对比勾选与收集栏（v6.34.0 步骤 7）', () => {
     await screen.findByRole('link', { name: /Šeško/ });
     expect(document.querySelector('.lib-pickbar')).toBeNull();
     expect(screen.queryByRole('checkbox', { name: /取消对比/ })).toBeNull();
+  });
+});
+
+describe('所属球队队徽（v6.39.3）', () => {
+  it('宽屏：球队格 = 队徽缩略图 + 队名链接；自由身行不给徽', async () => {
+    rowsData = [
+      row({ id: 1, name: 'Šeško', clubLogoKey: 'team/9/crest.webp' }),
+      row({ id: 2, name: 'Ødegaard', status: 'free', clubId: null, clubName: null }),
+    ];
+    open();
+    await screen.findByRole('link', { name: /Šeško/ });
+
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('a.lib-club')];
+    expect(links).toHaveLength(1); // 自由身是纯文本，不产生链接
+    const img = links[0]!.querySelector('img.team-logo');
+    expect(img?.getAttribute('src')).toBe('/api/media/team/9/crest.webp');
+    expect(img?.getAttribute('alt')).toBe('阿森纳');
+    expect(links[0]!.textContent).toBe('阿森纳'); // 队名照旧在（徽是前置缩略图，不替代文字）
+
+    const freeRow = screen.getByRole('link', { name: /Ødegaard/ }).closest('tr')!;
+    expect(freeRow.textContent).toContain('自由身');
+    expect(freeRow.querySelector('.team-logo')).toBeNull();
+  });
+
+  it('无徽回落：clubLogoKey 为 null 时给队名哈希色块（span.team-logo-fallback），不出 img', async () => {
+    rowsData = [row({ id: 1, name: 'Šeško', clubLogoKey: null })];
+    open();
+    await screen.findByRole('link', { name: /Šeško/ });
+    const link = document.querySelector('a.lib-club')!;
+    expect(link.querySelector('img')).toBeNull();
+    expect(link.querySelector('span.team-logo.team-logo-fallback')?.textContent).toBe('阿');
+  });
+
+  it('窄屏卡片：缩略图带真 src（此前只传 name ⇒ 只能出哈希色块）', async () => {
+    setNarrow(true);
+    rowsData = [row({ id: 1, name: 'Šeško', clubLogoKey: 'team/9/crest.webp' })];
+    open();
+    await screen.findByRole('link', { name: /Šeško/ });
+    const img = document.querySelector('.lib-card-sub img.team-logo');
+    expect(img?.getAttribute('src')).toBe('/api/media/team/9/crest.webp');
   });
 });

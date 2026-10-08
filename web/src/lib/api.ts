@@ -400,6 +400,8 @@ export interface PlayerTransfersResponse {
 export interface PlayerLibraryRow extends PlayerListItem {
   growable: boolean;
   clubName: string | null;
+  // v6.39.3：队徽 R2 键（真源=比赛系统 team.logo_key）；自由身或未接徽为 null，前端 TeamLogo 回落队名哈希色块
+  clubLogoKey: string | null;
   // v2.3.0：多位置槽（PosID1-4 槽位序去重）、球员影响力（规则 4.1.3 现值口径）、现行合同速览
   positions: string[];
   influence: number;

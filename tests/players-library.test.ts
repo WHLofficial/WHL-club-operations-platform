@@ -27,15 +27,25 @@ beforeEach(() => resetGuards());
 interface Fixture {
   env: Env;
   sqlite: DatabaseSync;
+  // v6.39.3：队徽链路的两侧库（AUTH_DB club_id→tour_team_id 映射 / TOUR_DB team.logo_key），用例按需播种
+  authSqlite: DatabaseSync;
+  tourSqlite: DatabaseSync;
 }
 
 function freshEnv(): Fixture {
   resetConfigCache();
   const sqlite = new DatabaseSync(':memory:');
   applyMigrations(sqlite);
+  // 队徽链路要两侧各一张 team 表：造空表让不关心徽的用例走「无映射 ⇒ 无徽」路径
+  //（表缺失会 500，不是缺省，不能省）
+  const authSqlite = new DatabaseSync(':memory:');
+  authSqlite.exec('CREATE TABLE team (club_id INTEGER, tour_team_id INTEGER)');
+  const tourSqlite = new DatabaseSync(':memory:');
+  tourSqlite.exec('CREATE TABLE team (id INTEGER PRIMARY KEY, logo_key TEXT)');
   const env: Env = {
     DB: createTestD1(sqlite),
-    TOUR_DB: createTestD1(new DatabaseSync(':memory:')),
+    TOUR_DB: createTestD1(tourSqlite),
+    AUTH_DB: createTestD1(authSqlite),
     SESSION_KV: {
       get: async () => null,
       put: async () => undefined,
@@ -46,7 +56,7 @@ function freshEnv(): Fixture {
     // v3.2.0：未配 = 走分级 TTL（生产口径），这里显式旁路，让断言看到每次改库的结果
     PUBLIC_CACHE_TTL_MS: '0',
   };
-  return { env, sqlite };
+  return { env, sqlite, authSqlite, tourSqlite };
 }
 
 function get(path: string, env: Env) {
@@ -64,6 +74,7 @@ interface ListBody {
     growable: boolean;
     marketValue: number | null;
     clubName: string | null;
+    clubLogoKey: string | null;
     marker: string | null;
     transferListed: boolean;
     notForSale: boolean;
@@ -154,6 +165,22 @@ describe('球员库列表（v0.7.1 d6）', () => {
     const initial = await list('/api/players?view=initial&club_id=1', fx.env);
     expect(initial.players.map((p) => p.id)).toEqual([2, 7]);
     expect(initial.players[0]!.clubName).toBe('老东家 FC');
+  });
+
+  it('队徽（v6.39.3）：clubLogoKey 走 AUTH_DB 映射 + TOUR_DB team.logo_key；自由身/未接徽为 null', async () => {
+    const fx = freshEnv();
+    seedPlayers(fx.sqlite);
+    // 1 号（老东家 FC）与 2 号（蓝月亮）已绑定比赛系统队；比赛系统只给 101 传了徽
+    fx.authSqlite.exec(`INSERT INTO team (club_id, tour_team_id) VALUES (1, 101), (2, 102)`);
+    fx.tourSqlite.exec(`INSERT INTO team (id, logo_key) VALUES (101, 'team/101/crest.webp'), (102, NULL)`);
+
+    const res = await list('/api/players', fx.env);
+    const byId = new Map(res.players.map((p) => [p.id, p]));
+    expect(byId.get(1)!.clubLogoKey).toBe('team/101/crest.webp'); // 有映射且有徽
+    expect(byId.get(2)!.clubLogoKey).toBe('team/101/crest.webp'); // 同队同徽
+    expect(byId.get(3)!.clubLogoKey).toBeNull(); // 有映射、比赛系统没上传徽
+    expect(byId.get(8)!.clubLogoKey).toBeNull(); // 有归属、无映射（雾都联未绑定）
+    expect(byId.get(5)!.clubLogoKey).toBeNull(); // 自由身（club_id NULL）
   });
 
   it('sort=ca 默认降序 + keyset 翻页：两页拼出全量且不重不漏', async () => {
@@ -279,9 +306,15 @@ describe('初始归属字段的兴废（v0.7.1 d7 加、v2.0.0 裁决 4 删）',
     resetConfigCache();
     const sqlite = new DatabaseSync(':memory:');
     applyMigrations(sqlite, '0014_season_tournaments.sql');
+    // 队徽链路的两侧空表（同 freshEnv 口径）：本组只查主库，造空表只为补齐 Fixture 形状
+    const authSqlite = new DatabaseSync(':memory:');
+    authSqlite.exec('CREATE TABLE team (club_id INTEGER, tour_team_id INTEGER)');
+    const tourSqlite = new DatabaseSync(':memory:');
+    tourSqlite.exec('CREATE TABLE team (id INTEGER PRIMARY KEY, logo_key TEXT)');
     const env: Env = {
       DB: createTestD1(sqlite),
-      TOUR_DB: createTestD1(new DatabaseSync(':memory:')),
+      TOUR_DB: createTestD1(tourSqlite),
+      AUTH_DB: createTestD1(authSqlite),
       SESSION_KV: {
         get: async () => null,
         put: async () => undefined,
@@ -291,7 +324,7 @@ describe('初始归属字段的兴废（v0.7.1 d7 加、v2.0.0 裁决 4 删）',
       ASSETS: {} as never,
       PUBLIC_CACHE_TTL_MS: '0',
     };
-    return { env, sqlite };
+    return { env, sqlite, authSqlite, tourSqlite };
   }
 
   it('0015 回填：最早变更的 from_club_id / 只海捞过留 NULL / 没转过会=现属', async () => {

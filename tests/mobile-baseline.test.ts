@@ -941,3 +941,37 @@ describe('v6.39.2 桌面宽卡静态锁（列头与值区同款等宽轨网格 +
     expect(squad, 'SquadTab 不该用注册台列集').not.toContain('DESKTOP_CELLS_DESK');
   });
 });
+
+describe('v6.39.3 球员库队徽（TC-CREST-01）', () => {
+  const LIB = `${WEB_SRC}/pages/PlayersLibrary.tsx`;
+  const SHARED = 'src/worker/club-logos.ts';
+
+  it('TC-CREST-01 · 球员库两处球队渲染都传 logoKey；映射走 club-logos 共用模块', () => {
+    // 前端：宽屏球队格（a.lib-club 内 TeamLogo）与窄屏卡片都必须传 logoKey——只传 name 只能出
+    // 队名哈希色块，正是 v6.39.3 修掉的老形态（宽屏此前干脆是纯文本链接，连徽都没有）。
+    const lib = read(LIB);
+    const keyed = lib.match(/logoKey=\{p\.clubLogoKey\}/g)?.length ?? 0;
+    expect(keyed, `宽屏与窄屏两处都应传 logoKey={p.clubLogoKey}，实见 ${keyed} 处`).toBeGreaterThanOrEqual(2);
+    expect(lib, '宽屏球队格应有 a.lib-club（徽 + 队名同排的链接）').toContain('className="lib-club"');
+    const rules = cssRules(read(STYLES_CSS));
+    expect(
+      declarations(rules, '.lib-club', 'display').some((d) => d.value === 'inline-flex'),
+      `.lib-club 应 inline-flex 让徽与队名同排，实见 ${JSON.stringify(declarations(rules, '.lib-club', 'display'))}`,
+    ).toBe(true);
+
+    // 后端：/api/players 与 /api/clubs 共用同一份映射（真源=比赛系统 team.logo_key）。
+    // 抽模块前 clubs.ts 里有本地副本，各端点各写一份就会漂（v6.39.3 顺手收口）。
+    const shared = read(SHARED);
+    expect(shared, '共用模块应导出 loadClubTourTeams').toContain('export async function loadClubTourTeams');
+    expect(shared, '共用模块应导出 loadTeamLogos').toContain('export async function loadTeamLogos');
+    const players = read('src/worker/routes/players.ts');
+    expect(players, '/api/players 应从 club-logos.ts 取映射').toContain("from '../club-logos.ts'");
+    expect(players, '/api/players 应下发 clubLogoKey').toContain('clubLogoKey');
+    const clubs = read('src/worker/routes/clubs.ts');
+    expect(clubs, '/api/clubs 应从 club-logos.ts 取映射').toContain("from '../club-logos.ts'");
+    expect(clubs, 'clubs.ts 不该再有本地 loadClubTourTeams 副本').not.toMatch(/async function loadClubTourTeams/);
+    expect(read(`${WEB_SRC}/lib/api.ts`), 'PlayerLibraryRow 应有 clubLogoKey 字段').toMatch(
+      /clubLogoKey: string \| null;/,
+    );
+  });
+});
