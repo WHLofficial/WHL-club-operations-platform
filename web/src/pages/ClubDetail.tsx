@@ -123,7 +123,7 @@ export default function ClubDetail() {
         <div className="club-head-numbers">
           <div className="club-stat">
             <span className="stat-label">资金余额</span>
-            <span className="stat-value mono gold-text">{myOverview.balance === null ? '—' : `${myOverview.balance.toFixed(2)} m`}</span>
+            <span className="stat-value mono gold-text">{myOverview.balance === null ? '—' : `${myOverview.balance.toFixed(2)}m`}</span>
           </div>
           <div className="club-stat">
             <span className="stat-label">一线队人数</span>

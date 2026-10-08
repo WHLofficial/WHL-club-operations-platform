@@ -177,7 +177,7 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
     expect(within(plain).getByText('61').className).toContain('attr-mid');
     const rec = screen.getByText('推荐乙').closest('.adb-card') as HTMLElement;
     expect(within(rec).getByText('84').className).toContain('attr-good');
-    expect(within(rec).getByText('60.00 m')).toBeTruthy();
+    expect(within(rec).getByText('60.00m')).toBeTruthy();
     expect(within(rec).getByText('—')).toBeTruthy(); // 无合同：违约金显示 —，不拼「— M」
   });
 
@@ -349,7 +349,7 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
     // 初值是 String(listPrice)（"180"），不是 amount() 的两位小数格式
     expect((screen.getByLabelText('报价金额') as HTMLInputElement).value).toBe('180');
     expect(screen.getByLabelText('报价附言')).toBeTruthy();
-    expect(within(dialog).getByText(/对方标价 180\.00 m/)).toBeTruthy();
+    expect(within(dialog).getByText(/对方标价 180\.00m/)).toBeTruthy();
   });
 
   it('报价层卡片同时带 .modal-card 与 .card（v6.33.1：曾漏 .card，浮层没有底色与边框）', async () => {
@@ -431,7 +431,7 @@ describe('v6.31.0 在售市场页小卡片（AdBoardTeaser）', () => {
     expect(mini.className).toContain('emph-2');
     expect(within(mini).getByText('置顶').className).toContain('gold');
     expect(within(mini).getByLabelText('转会名单')).toBeTruthy();
-    expect(within(mini).getByText('180.00 m')).toBeTruthy();
+    expect(within(mini).getByText('180.00m')).toBeTruthy();
     // v6.33.0：迷你卡整卡是链接，不挂报价按钮（报价入口只在广告板页的卡脚）
     expect(within(mini).queryByRole('button')).toBeNull();
     expect(mini.querySelector('.adb-bid-btn')).toBeNull();

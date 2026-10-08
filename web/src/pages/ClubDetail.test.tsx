@@ -597,7 +597,7 @@ describe('阵容页签：阵容组与名单', () => {
     expect(statValue(squadBlock, '阵容人数')).toBe('4 人');
     expect(statHint(squadBlock, '阵容人数')).toBe('+ 1 青训');
     expect(statValue(squadBlock, '平均 CA')).toBe('75.2'); // 75.24 只显示一位
-    expect(statValue(squadBlock, '总身价')).toBe('1234.50 m');
+    expect(statValue(squadBlock, '总身价')).toBe('1234.50m');
   });
 
   it('阵容组明细行：能力 / 资产 / 荣誉三段，各段内用「·」连', async () => {
@@ -606,7 +606,7 @@ describe('阵容页签：阵容组与名单', () => {
 
     const squadBlock = (await screen.findByText('阵容组')).closest('section') as HTMLElement;
     expect(detailLine(squadBlock, '能力')).toBe('能力最高 CA 90.0 · 平均 PA 83.3 · 成长空间 10.0');
-    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40 m · 平均工资 1.10 m');
+    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40m · 平均工资 1.10m');
     expect(detailLine(squadBlock, '荣誉')).toBe('荣誉金徽章 1 枚 · 银徽章 3 枚');
   });
 
@@ -621,10 +621,10 @@ describe('阵容页签：阵容组与名单', () => {
     const squadBlock = (await screen.findByText('阵容组')).closest('section') as HTMLElement;
     expect(statValue(squadBlock, '阵容人数')).toBe('4 人');
     expect(statHint(squadBlock, '阵容人数')).toBeNull();
-    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40 m · 平均工资 —');
+    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40m · 平均工资 —');
   });
 
-  it('全队都没录身价时总身价显示 —（不是 0.00 m）', async () => {
+  it('全队都没录身价时总身价显示 —（不是 0.00m）', async () => {
     stubApi({
       detail: detailFixture({ squad: { ...detailFixture().squad, totalValue: null } }),
     });
@@ -632,7 +632,7 @@ describe('阵容页签：阵容组与名单', () => {
 
     const squadBlock = (await screen.findByText('阵容组')).closest('section') as HTMLElement;
     expect(statValue(squadBlock, '总身价')).toBe('—');
-    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40 m · 平均工资 1.10 m');
+    expect(detailLine(squadBlock, '资产')).toBe('资产工资总额 4.40m · 平均工资 1.10m');
   });
 
   it('位置分布缩成一行文字（四档 + 未知都出，含 0 人档），不再展开档内细位、不出图示', async () => {
@@ -729,11 +729,11 @@ describe('阵容页签：阵容组与名单', () => {
     // 位置分组：张三 CM → 中场组；李四 positions 空 → 「其他」组殿后。组头 = 组名 · 人数
     const groupTitles = Array.from(roster.querySelectorAll('.sqc-gtitle'), (el) => el.textContent);
     expect(groupTitles).toEqual(['中场 · 1', '其他 · 1']);
-    // 桌面组头：列头退化为右对齐标签串（DESKTOP_CELLS 13 列依序合并）
+    // 桌面组头：列头 = 与值区同款轨网格，逐格一个列名（v6.39.2 起；此前是右对齐的标签串，与值区对不上）
     const legend = roster.querySelector('.sqc-glegend') as HTMLElement;
-    expect(legend.textContent).toBe(
-      '年龄 CA PA 初始CA 成长空间 成长档位 工资 违约金 激活价 效力 身价 影响力 经纪人',
-    );
+    expect(Array.from(legend.querySelectorAll('.sqc-k'), (el) => el.textContent)).toEqual([
+      '年龄', 'CA', 'PA', '初始CA', '成长空间', '成长档位', '工资', '违约金', '激活价', '效力', '身价', '影响力', '经纪人',
+    ]);
 
     // 行解剖（李四：号码没录、位置空数组、没合同 ⇒ 工资/违约金 —）
     const row = (within(roster).getByText('李四') as HTMLElement).closest('article') as HTMLElement;
@@ -744,7 +744,7 @@ describe('阵容页签：阵容组与名单', () => {
     const vals = Array.from(row.querySelectorAll('.sqc-v'), (el) => el.textContent);
     // 13 列依序：年龄/CA/PA/初始CA/成长空间/成长档位/工资/违约金/激活价/效力/身价/影响力/经纪人
     // （李四 wage/releaseFee 都没录 ⇒ 工资/违约金/激活价 —；agentTier 0 的标签是空串）
-    expect(vals).toEqual(['19', '60', '88', '75', '28', '—', '—', '—', '—', '1.5年', '10.00 m', '1.23', '']);
+    expect(vals).toEqual(['19', '60', '88', '75', '28', '—', '—', '—', '—', '1.5年', '10.00m', '1.23', '']);
     expect(vals[6]).toBe('—'); // 工资（没录过）
     expect(vals[7]).toBe('—'); // 违约金（没录过）
     expect((within(row).getByText('李四') as HTMLAnchorElement).getAttribute('href')).toBe('/players/8');
@@ -752,7 +752,7 @@ describe('阵容页签：阵容组与名单', () => {
     // 张三：多位置折叠「CM +1」、工资两位小数 money() 口径
     const first = (within(roster).getByText('张三') as HTMLElement).closest('article') as HTMLElement;
     expect(first.querySelector('.sqc-pos')!.textContent).toBe('CM +1');
-    expect(Array.from(first.querySelectorAll('.sqc-v'), (el) => el.textContent)[6]).toBe('0.50 m');
+    expect(Array.from(first.querySelectorAll('.sqc-v'), (el) => el.textContent)[6]).toBe('0.50m');
     // 旧的「状态」徽章列已撤（状态并进行内徽章），名单里不再出在队/训练营中文徽章
     expect(within(roster).queryByText('在队')).toBeNull();
     expect(within(roster).queryByText('训练营')).toBeNull();
@@ -888,7 +888,7 @@ describe('转会页签：运营组', () => {
 
     const incoming = within(ops).getByText('皇家马德里');
     expect((incoming as HTMLAnchorElement).getAttribute('href')).toBe('/clubs/243');
-    expect(within(ops).getByText('12.50 m +1.50')).toBeTruthy();
+    expect(within(ops).getByText('12.50m +1.50')).toBeTruthy();
     expect(within(ops).getByText('海捞签入')).toBeTruthy();
     // 自由身转入：文字是「自由身」而不是链接
     expect((within(ops).getAllByText('自由身')[0] as HTMLElement).tagName).toBe('TD');
@@ -1000,7 +1000,7 @@ describe('自家页签：工作台与主场', () => {
 
     // 页头常驻：账目三格不是页签内容，切到别的页签也还在
     const head = (await screen.findByText('资金余额')).closest('.club-head-numbers') as HTMLElement;
-    expect(statText(head, '资金余额')).toBe('12.50 m');
+    expect(statText(head, '资金余额')).toBe('12.50m');
     expect(statText(head, '一线队人数')).toBe('24 人');
     expect(within(head).getByText('第 9 赛季 · 窗口 3')).toBeTruthy();
     // 工作台页签里挂着注册工作台（e2e ⑱ 走这条文案）
@@ -1050,8 +1050,8 @@ describe('自家页签：工作台与主场', () => {
     expect((zhang.querySelector('.sqc-uid') as HTMLElement).textContent).toBe('7');
     const zvals = Array.from(zhang.querySelectorAll('.sqc-v'), (el) => el.textContent);
     // 违约金/激活价走整数化（v6.37.0 规则层），工资保持两位小数；张三非保护 ⇒ 激活价 = 违约金 ×1
-    expect(zvals).toContain('30 m'); // 违约金（整数化 + 单位 m，v6.37.2）
-    expect(zvals).toContain('0.75 m'); // 工资（与阵容名单同口径）
+    expect(zvals).toContain('30m'); // 违约金（整数化 + 单位 m，v6.37.2）
+    expect(zvals).toContain('0.75m'); // 工资（与阵容名单同口径）
 
     // 未提交过 → 分配从「未分配」起步；选「一线队」立刻改按钮（落库要等提交）
     const zbtn = zhang.querySelector('.sqc-assign-btn') as HTMLButtonElement;
@@ -1212,7 +1212,7 @@ describe('自家页签：工作台与主场', () => {
     expect(matches.textContent).toContain('切尔西');
     expect(matches.textContent).toContain('55,000');
     expect(matches.textContent).toContain('92%');
-    expect(matches.textContent).toContain('8.20 m');
+    expect(matches.textContent).toContain('8.20m');
     // 未确认的那场：赛果「待定」、比分 —，不编数字
     expect(within(matches).getByText('待定')).toBeTruthy();
 

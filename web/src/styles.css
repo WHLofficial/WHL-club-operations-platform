@@ -6326,9 +6326,11 @@ th.num .th-sort {
 /* ==== 阵容/注册名单卡片化（v6.37.0）========================================
    SquadTab 阵容名单与 DeskTab 注册名单弃表改卡：位置四组「分组即容器」（组头承担表头）+
    行解剖（号码 + 身份块 + 值-only 指标 + 行尾分配）。桌面与窄屏同构、DOM 由 useMediaQuery
-   互斥切换（≤760 窄屏：四视图 chips + 组头列头逐列对齐；>760 桌面：全列合并 + 组头标签串）。
+   互斥切换（≤760 窄屏：四视图 chips + 组头列头逐列对齐；>760 桌面：全列合并 + 组头列头
+   逐列对齐，v6.39.2 起两套都对齐——桌面此前是右对齐标签串，对不上值区）。
    类名一律 sqc- 前缀（教训：通用词撞已有规则）；窄屏值列宽由组件内联 --sqc-cw 下发
    （basic 40 / growth 50 / contract 52 / market 52），组头 .sqc-k 与行内 .sqc-v 共用同一宽度对齐。
+   桌面值列宽改由 .sqc-group.wide 的 --sqc-* token 下发（见 wide 块）。
    不新增色板：全部取 :root token；四组色条 accent 由组件内联 --sqc-accent 下发。 */
 
 .sqc-wrap {
@@ -6371,16 +6373,17 @@ th.num .th-sort {
   font-weight: 600;
 }
 
-/* 桌面：列头退化为组头右侧的标签串（不逐列对齐，定稿 14-B） */
+/* 桌面：组头列头 = 与行内值区**逐列对齐**的等宽轨网格（v6.39.2；v6.37.0–v6.39.1 是右对齐
+   标签串，与值区各排各的 ⇒ 用户报「表头和数据不对齐」）。轨模板必须与 .sqc-card.wide .sqc-m
+   逐字相同（同 minmax/同 gap），否则列数一变就错位；左右边界由 .sqc-group.wide .sqc-ghead
+   的 padding（11/14）与标题列定宽（--sqc-idw）对齐到值区，见下方 wide 块。 */
 .sqc-glegend {
   flex: 1;
   min-width: 0;
-  text-align: right;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--sqc-wmin, 58px), 1fr));
+  gap: 4px var(--sqc-wgap, 6px);
+  align-items: center;
 }
 
 /* 窄屏：组头列头行（v6.37.2 两行式——折到组头第二行；v6.38.1 订正为与行值同款
@@ -6566,7 +6569,7 @@ button.sqc-pos:hover {
 }
 
 /* 指标值：窄屏按 --sqc-mcols × --sqc-cw 同构网格右对齐（与组头 .sqc-k 逐格对齐，4 列视图折 2 列）；
-   桌面平铺摊开（.sqc-card.wide .sqc-m 覆盖回 flex） */
+   桌面改用等宽轨网格（.sqc-card.wide .sqc-m 覆盖，轨模板与组头 .sqc-glegend 相同） */
 .sqc-m {
   display: grid;
   grid-template-columns: repeat(var(--sqc-mcols, 3), var(--sqc-cw, 48px));
@@ -6615,34 +6618,82 @@ button.sqc-pos:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* -- 桌面变体（wide）：身份块定宽 + 指标 flex 摊开 -------------------------------- */
+/* -- 桌面变体（wide）：身份列定宽 + 值区等宽轨平铺 + 列头逐列对齐 ------------------ */
+
+/* 宽卡几何 token（唯一出处）：组头列头与行内值区都从这里取，改一处两边同步。
+   v6.39.2 起因＝用户报「表头和数据不对齐；名字列宽度太低，且与后面数据距离太近」——
+   身份列 170→210px、列距 14→22px，值区由 flex 平铺改等宽轨网格，列头跟同一套轨模板。
+     --sqc-idw      身份列（号码 + 名字 + 徽章 + 副行）宽
+     --sqc-cgap     身份列 → 值区 的列距
+     --sqc-wgap     值列之间的列距
+     --sqc-wmin     值列最小轨宽：auto-fit 按它决定单行放几列，放不下就整列折行（列头同款同折）。
+                    58 是量出来的：最宽值形如「180.00m」（身价带两位小数；v6.39.2 起单位紧贴数字）
+                    ≈55px，轨宽 ≥58 时 auto-fit 扩张到 ≈61-63px 恰好容下；注册名单页签行尾多一列
+                    「分配」，值区只剩 754px @1280 ⇒ 放不下 13 列，故注册台列集只取 11 列
+                    （DESKTOP_CELLS_DESK，舍初始CA/成长空间）单行放下；阵容页签值区 868px 装全 13 列。
+     --sqc-assignw  注册名单行尾「分配 ▾」列（wide 定宽——按钮文案会变宽窄，不定宽值区就被挤歪）
+   注：每个 token 单独一行且行尾不留注释——tests/mobile-baseline.test.ts 的 declarations() 按
+   `(?:^|;)\s*prop\s*:` 抓声明，声明之间夹注释会让后面的 token 抓不到（TC-WIDE-02 踩过）。 */
+.sqc-group.wide {
+  --sqc-idw: 210px;
+  --sqc-cgap: 22px;
+  --sqc-wgap: 6px;
+  --sqc-wmin: 58px;
+  --sqc-assignw: 92px;
+}
+
+/* 组头内容盒与行卡内容盒等宽：行卡 padding 14/14 无边框；组头有 3px 色条边框，
+   故左内边距取 11（3 + 11 = 14）、右内边距取 14 ⇒ 两侧内容盒同宽同起点，
+   列头网格与值区网格像素级重合（不是「大致对齐」）。 */
+.sqc-group.wide .sqc-ghead {
+  gap: var(--sqc-cgap);
+  padding: 8px 14px 8px 11px;
+}
+
+/* 组标题占住身份列同宽的位置（列头网格起点 = 卡片值区起点），「门将 · 2」正好压在名字列上方 */
+.sqc-group.wide .sqc-ghead .sqc-gtitle {
+  flex: none;
+  width: var(--sqc-idw);
+}
+
+/* 注册名单：行尾有「分配 ▾」列 ⇒ 列头网格右侧让出「分配列 + 列距」，否则列头比值区宽一截 */
+.sqc-group.wide .sqc-ghead.has-assign {
+  padding-right: calc(14px + var(--sqc-assignw) + var(--sqc-cgap));
+}
 
 .sqc-card.wide {
-  gap: 14px;
+  gap: var(--sqc-cgap);
   padding: 10px 14px;
 }
 
 .sqc-card.wide .sqc-id {
   flex: none;
-  width: 170px;
+  width: var(--sqc-idw);
 }
 
-/* v6.39.1：这块必须显式写回 flex——基类 .sqc-m（见上）是 grid，v6.37.1 把基类由 flex 改 grid 时
-   只在这块写了 flex 子属性，display 被基类带走 ⇒ 桌面值区回退成 repeat(3, 48px) 定宽三列
-   （--sqc-mcols/--sqc-cw 只窄屏下发），13 个指标折多行挤在右侧。
-   e2e ⑨ 桌面分支与 tests/mobile-baseline.test.ts 的 TC-WIDE-01 都锁这条，别再删。 */
+/* v6.39.2：值区 = 等宽轨网格（轨模板与组头 .sqc-glegend 逐字相同 ⇒ 逐列对齐）。
+   v6.39.1 这里是 flex 平铺（space-between）——13 个值各按自身宽窄摊开，与列头永远对不上；
+   再往前 v6.37.1 起 display 被基类 .sqc-m 的 grid 带走 ⇒ 回退成 repeat(3, 48px) 定宽三列。
+   改这块前先看 tests/mobile-baseline.test.ts 的 TC-WIDE 三条静态锁与 e2e ⑨ 桌面几何断言。 */
 .sqc-card.wide .sqc-m {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--sqc-wmin, 58px), 1fr));
+  gap: 4px var(--sqc-wgap, 6px);
   flex: 1;
   min-width: 0;
-  flex-wrap: wrap;
-  justify-content: space-between;
   align-items: center;
-  gap: 4px 14px;
 }
 
-.sqc-card.wide .sqc-v {
-  width: auto;
+/* 数值格不折行：值区折成两行比溢出几个像素难看（轨宽偶尔不够时让它吃掉列距，
+   6px 列距兜住常见溢出；金额单位已紧贴数字后格内一般无空格可折，此规则作数值格硬保证；
+   可加列值 .sqc-v-extra 不在此列，保持折行不截断） */
+.sqc-card.wide .sqc-v.num {
+  white-space: nowrap;
+}
+
+/* 注册名单行尾分配列定宽（见 --sqc-assignw 注释）：按钮右对齐在列内，列宽不随文案变 */
+.sqc-card.wide.has-assign .sqc-assign {
+  width: var(--sqc-assignw);
 }
 
 /* -- 分配列（仅注册名单）：行尾「分配 ▾」下拉，三选全称 --------------------------- */

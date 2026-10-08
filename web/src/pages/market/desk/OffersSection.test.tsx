@@ -116,7 +116,7 @@ describe('v6.29.0 意向单（OffersSection）', () => {
     // 买方的撤回不出现卖方桌上
     expect(screen.queryByRole('button', { name: '撤回' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /确认挂牌（12\.00 m）/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确认挂牌（12\.00m）/ }));
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/offers/5/accept', {}));
     expect(await screen.findByText(/已确认，球员挂牌/)).toBeTruthy();
     apiPostMock.mockClear();

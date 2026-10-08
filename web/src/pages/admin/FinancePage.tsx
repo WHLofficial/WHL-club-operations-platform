@@ -85,7 +85,7 @@ function OpeningBalanceSection() {
               {parsed.map((r, i) => (
                 <tr key={`${r.clubId}-${i}`}>
                   <td>{clubName(r.clubId)}</td>
-                  <td className="num mono">{r.balance.toFixed(2)} m</td>
+                  <td className="num mono">{r.balance.toFixed(2)}m</td>
                 </tr>
               ))}
             </tbody>
@@ -201,7 +201,7 @@ function ManualLedgerSection() {
           />
         </label>
       </div>
-      {kindDef?.reference !== undefined && <p className="hint">金额已按 §9.1 模板预填 {kindDef.reference} m，可改。</p>}
+      {kindDef?.reference !== undefined && <p className="hint">金额已按 §9.1 模板预填 {kindDef.reference}m，可改。</p>}
       <label className="field">
         备注（写清来由，方便对账）
         <textarea
@@ -218,7 +218,7 @@ function ManualLedgerSection() {
         <p className="error-msg">{kind === 'manual_adjust' ? '金额要是不为 0 的数字。' : '奖金只能入账，要冲账请选「手动调整」用负数。'}</p>
       )}
       {result && (
-        <div className="banner info">已入账。该俱乐部当前余额 {result.balance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} m。</div>
+        <div className="banner info">已入账。该俱乐部当前余额 {result.balance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m。</div>
       )}
       <ConfirmButton
         label="记这笔账"

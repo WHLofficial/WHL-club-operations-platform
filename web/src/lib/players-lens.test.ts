@@ -114,7 +114,7 @@ describe('lensChips 透镜（卡片受筛选项行）', () => {
     // 排序键与筛选维度同为 wage：只出一条，排序键优先占据候选位
     const chips = lensChips(filters({ sort: 'wage', wageMin: '1' }), row({ wage: 2.5 }));
     expect(chips).toHaveLength(1);
-    expect(chips).toEqual([{ label: '工资', value: '2.50 m', raw: 2.5, colored: false }]);
+    expect(chips).toEqual([{ label: '工资', value: '2.50m', raw: 2.5, colored: false }]);
   });
 
   it('TC-LEN-05 · 上限 2 条', () => {
@@ -182,12 +182,12 @@ describe('SORT_KEY_LABELS 与排序行文案', () => {
 describe('money 金额文案', () => {
   it('TC-MONEY-01 · money(null) 与两位小数', () => {
     expect(money(null)).toBe('—');
-    expect(money(1234)).toBe('1234.00 m');
+    expect(money(1234)).toBe('1234.00m');
   });
 
   it('TC-MONEY-02 · 行为不回归', () => {
     // 0 是有效金额、不是「无值」（页面原本地副本就是这个口径，搬家不许顺手改成 ?? 判空）
-    expect(money(0)).toBe('0.00 m');
-    expect(money(0.5)).toBe('0.50 m');
+    expect(money(0)).toBe('0.00m');
+    expect(money(0.5)).toBe('0.50m');
   });
 });

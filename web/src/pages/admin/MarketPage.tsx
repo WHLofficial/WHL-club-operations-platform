@@ -28,13 +28,13 @@ function bypassSummary(r: AdminReviewRow): string | null {
   const num = (k: string) => (typeof p[k] === 'number' ? (p[k] as number).toFixed(2) : '—');
   switch (p.kind) {
     case 'rc_change':
-      return `违约金 ${num('oldReleaseFee')} → ${num('newReleaseFee')} m${(p.changeFee as number) > 0 ? `，加价费 ${num('changeFee')} m` : '，降价免费'}`;
+      return `违约金 ${num('oldReleaseFee')} → ${num('newReleaseFee')}m${(p.changeFee as number) > 0 ? `，加价费 ${num('changeFee')}m` : '，降价免费'}`;
     case 'termination':
-      return `解约费 ${(p.terminationFee as number) > 0 ? num('terminationFee') : '0.00'} m，本窗禁签`;
+      return `解约费 ${(p.terminationFee as number) > 0 ? num('terminationFee') : '0.00'}m，本窗禁签`;
     case 'free_agent':
-      return `新违约金 ${num('newReleaseFee')} m，签入费 ${num('signFee')} m（30%）`;
+      return `新违约金 ${num('newReleaseFee')}m，签入费 ${num('signFee')}m（30%）`;
     case 'match':
-      return `匹配留队：新违约金 ${num('newReleaseFee')} m > 出价 ${num('previousBid')} m，回收差额 ${num('diff')} m`;
+      return `匹配留队：新违约金 ${num('newReleaseFee')}m > 出价 ${num('previousBid')}m，回收差额 ${num('diff')}m`;
     default:
       return null;
   }
@@ -89,7 +89,7 @@ function ReviewsSection() {
       show(
         action === 'approve'
           ? fee !== undefined
-            ? `已按裁定价 ${fee} m 批准：${row.transfer.player.name}（原价 ${row.transfer.fee ?? '—'} m）。`
+            ? `已按裁定价 ${fee}m 批准：${row.transfer.player.name}（原价 ${row.transfer.fee ?? '—'}m）。`
             : res.status === 'signing'
               ? `已批准：${row.transfer.player.name} → ${row.transfer.toClubName ?? '—'}，签约谈判已开启，等买方谈妥合同后过户。`
               : res.status === 'already'
@@ -421,7 +421,7 @@ function ForcedAuctionSection() {
     setCreateBusy(true);
     try {
       const res = await apiPost<ForcedAuctionResult>('/api/admin/forced-auctions', { playerId: Number(playerId) });
-      show(`强制拍卖已挂出：挂牌价 ${res.askPrice.toFixed(2)} m，1m 起拍，整单税 50%。`);
+      show(`强制拍卖已挂出：挂牌价 ${res.askPrice.toFixed(2)}m，1m 起拍，整单税 50%。`);
       setPlayerId('');
       reload();
     } catch (err) {
@@ -611,7 +611,7 @@ function WindowsSection() {
           ? `第 ${res.season} 赛季窗口 ${res.windowSeq}${tail} 已关闭：${res.forceSettled} 场签约谈判按已定条款强制成约。`
           : `第 ${res.season} 赛季窗口 ${res.windowSeq}${tail} 已关闭，窗尾截止处理完成。`) +
           (res.loyalty && res.loyalty.count > 0
-            ? `中期窗忠诚奖金发放 ${res.loyalty.count} 队 / 合计 ${res.loyalty.total.toFixed(2)} m。`
+            ? `中期窗忠诚奖金发放 ${res.loyalty.count} 队 / 合计 ${res.loyalty.total.toFixed(2)}m。`
             : ''),
       );
       reload();

@@ -97,7 +97,7 @@ function ShopContent({
       {/* 余额条 + 流水线说明条 */}
       <section className="card">
         <p>
-          资金余额 <span className="mono gold-text">{balance === null ? '—' : `${balance.toFixed(2)} m`}</span>
+          资金余额 <span className="mono gold-text">{balance === null ? '—' : `${balance.toFixed(2)}m`}</span>
           {catalog && (
             <span className="hint">
               {' '}· 当前版本 PA 上限 <span className="mono">{catalog.paCap}</span>
@@ -226,7 +226,7 @@ function PaCard({ prices, paCap, players, loading, windowOpen }: { prices: ShopP
             </option>
           ))}
         </select>
-        <span className="mono gold-text">{price.toFixed(2)} m</span>
+        <span className="mono gold-text">{price.toFixed(2)}m</span>
         <button
           className="btn btn-sm"
           type="button"
@@ -236,7 +236,7 @@ function PaCard({ prices, paCap, players, loading, windowOpen }: { prices: ShopP
             submitOrder(
               'pa',
               { playerId, points },
-              `确认为「${player?.name}」买 ${points} 点 PA，支付 ${price.toFixed(2)} m？（提交即扣费，审核不过自动退款）`,
+              `确认为「${player?.name}」买 ${points} 点 PA，支付 ${price.toFixed(2)}m？（提交即扣费，审核不过自动退款）`,
               null,
               invalidate,
               (m) => show(m, true),
@@ -313,7 +313,7 @@ function BadgeCard({ prices, players, loading, windowOpen }: { prices: ShopPrice
             </option>
           ))}
         </select>
-        <span className="mono gold-text">{price.toFixed(2)} m</span>
+        <span className="mono gold-text">{price.toFixed(2)}m</span>
         <button
           className="btn btn-sm"
           type="button"
@@ -323,7 +323,7 @@ function BadgeCard({ prices, players, loading, windowOpen }: { prices: ShopPrice
             submitOrder(
               op === 'upgrade' ? 'badge_upgrade' : 'badge',
               op === 'upgrade' ? { playerId, psid } : { playerId, kind: op, psid },
-              `确认为「${player?.name}」${op === 'upgrade' ? `把「${playstyleById.get(psid ?? 0)?.chs ?? ''}」银徽升金` : `购${op === 'silver' ? '银' : '金'}徽章「${playstyleById.get(psid ?? 0)?.chs ?? ''}」`}，支付 ${price.toFixed(2)} m？（提交即扣费，审核不过自动退款）`,
+              `确认为「${player?.name}」${op === 'upgrade' ? `把「${playstyleById.get(psid ?? 0)?.chs ?? ''}」银徽升金` : `购${op === 'silver' ? '银' : '金'}徽章「${playstyleById.get(psid ?? 0)?.chs ?? ''}」`}，支付 ${price.toFixed(2)}m？（提交即扣费，审核不过自动退款）`,
               null,
               invalidate,
               (m) => show(m, true),
@@ -425,7 +425,7 @@ function RoleCard({ prices, players, loading, windowOpen }: { prices: ShopPrices
             ))}
           </select>
         )}
-        <span className="mono gold-text">{price.toFixed(2)} m</span>
+        <span className="mono gold-text">{price.toFixed(2)}m</span>
         <button
           className="btn btn-sm"
           type="button"
@@ -436,8 +436,8 @@ function RoleCard({ prices, players, loading, windowOpen }: { prices: ShopPrices
               'role',
               op === 'add' ? { playerId, action: 'add', roleId } : { playerId, action: op, slot },
               op === 'add'
-                ? `确认为「${player?.name}」新增角色「${roleId !== null ? roleLabel(roleId) : ''}」，支付 ${price.toFixed(2)} m？（提交即扣费，审核不过自动退款）`
-                : `确认为「${player?.name}」${op === 'upgrade' ? '把该角色升为双加号' : '去除该角色'}，支付 ${price.toFixed(2)} m？（提交即扣费，审核不过自动退款）`,
+                ? `确认为「${player?.name}」新增角色「${roleId !== null ? roleLabel(roleId) : ''}」，支付 ${price.toFixed(2)}m？（提交即扣费，审核不过自动退款）`
+                : `确认为「${player?.name}」${op === 'upgrade' ? '把该角色升为双加号' : '去除该角色'}，支付 ${price.toFixed(2)}m？（提交即扣费，审核不过自动退款）`,
               null,
               invalidate,
               (m) => show(m, true),
@@ -570,7 +570,7 @@ function PositionCard({ prices, players, loading, windowOpen }: { prices: ShopPr
             )}
           </>
         )}
-        <span className="mono gold-text">{price.toFixed(2)} m</span>
+        <span className="mono gold-text">{price.toFixed(2)}m</span>
         <button
           className="btn btn-sm"
           type="button"
@@ -580,7 +580,7 @@ function PositionCard({ prices, players, loading, windowOpen }: { prices: ShopPr
             submitOrder(
               'position',
               op === 'remove' ? { playerId, action: 'remove', slot } : { playerId, action: op, slot, posId },
-              `确认为「${player?.name}」${op === 'add' ? `新增位置「${POSITION_BY_ID[posId ?? 0] ?? ''}」` : op === 'remove' ? `去除第 ${slot} 槽位置` : `把第 ${slot} 槽替换为「${POSITION_BY_ID[posId ?? 0] ?? ''}」`}，支付 ${price.toFixed(2)} m？（提交即扣费，审核不过自动退款）`,
+              `确认为「${player?.name}」${op === 'add' ? `新增位置「${POSITION_BY_ID[posId ?? 0] ?? ''}」` : op === 'remove' ? `去除第 ${slot} 槽位置` : `把第 ${slot} 槽替换为「${POSITION_BY_ID[posId ?? 0] ?? ''}」`}，支付 ${price.toFixed(2)}m？（提交即扣费，审核不过自动退款）`,
               null,
               invalidate,
               (m) => show(m, true),
@@ -644,7 +644,7 @@ function ShellCard({ prices, hpremium, windowOpen }: { prices: ShopPrices; hprem
           disabled={busy || isHpremium || !windowOpen}
           title={isHpremium ? '豪门队壳事项请在群内咨询管理组' : !windowOpen ? WINDOW_CLOSED_NOTE : undefined}
           onClick={() => {
-            if (!window.confirm(`确认提交队壳申请，支付 ${prices.clubShell.toFixed(2)} m？（提交即扣费，拒绝自动退款）`)) return;
+            if (!window.confirm(`确认提交队壳申请，支付 ${prices.clubShell.toFixed(2)}m？（提交即扣费，拒绝自动退款）`)) return;
             setBusy(true);
             void apiPost<{ summary: string }>('/api/shop/orders', { category: 'club_shell', payload: { note: note.trim() || undefined }, note: note.trim() || null })
               .then(() => {
@@ -697,7 +697,7 @@ function OrdersCard() {
                     </span>
                   )}
                   <span style={{ marginLeft: 6 }}>{o.categoryLabel}</span>
-                  {o.amount !== null && <span className="mono gold-text" style={{ float: 'right' }}>−{o.amount.toFixed(2)} m</span>}
+                  {o.amount !== null && <span className="mono gold-text" style={{ float: 'right' }}>−{o.amount.toFixed(2)}m</span>}
                 </div>
                 <p className="hint" style={{ margin: '2px 0 0' }}>
                   {o.summary} · {time(o.createdAt)}

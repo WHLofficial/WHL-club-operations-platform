@@ -1374,7 +1374,7 @@ async function main() {
           assert(href === '/clubs/1', `${label}：整卡应链到 /clubs/1（不是卡里再放详情按钮），实际 ${href}`);
           const cpu = await page.locator('.club-card .badge', { hasText: 'CPU' }).count();
           assert(cpu === 2, `${label}：CPU 标应出 2 个，实际 ${cpu}`);
-          // 没录过身价（生产现状：market_value 全 NULL）显示「—」，不能写成 0.00 m
+          // 没录过身价（生产现状：market_value 全 NULL）显示「—」，不能写成 0.00m
           const barcaValue = (
             await page
               .locator('.club-card', { hasText: '巴塞罗那' })
@@ -1557,15 +1557,15 @@ async function main() {
             (moreTitle ?? '').includes('保护期'),
             `${label}：边锋戊的 +N 气泡该收「保护期」（实际「${moreTitle}」）`,
           );
-          // 桌面专属：组头标签串 + 「列…」自选（窄屏走 chips + 组内标签格，见下）
+          // 桌面专属：组头列头 + 「列…」自选（窄屏走 chips + 组内标签格，见下）
           if (label === 'desktop') {
-            // 桌面组头标签串：13 指标列名依序平铺（DESKTOP_CELLS）
+            // 桌面组头列头：13 指标列名依序平铺（DESKTOP_CELLS），每格一个 .sqc-k
             const legendText = (await page.locator('.club-block .sqc-glegend').first().innerText()).replace(/\s+/g, ' ').trim();
             assert(
               legendText === '年龄 CA PA 初始CA 成长空间 成长档位 工资 违约金 激活价 效力 身价 影响力 经纪人',
-              `${label}：桌面组头标签串不符（${legendText}）`,
+              `${label}：桌面组头列名不符（${legendText}）`,
             );
-            // 「列…」自选（v6.37.0 起长尾池，身价/工资已是内置列）：勾选写进 ?cols= 且组头标签串立刻长出，
+            // 「列…」自选（v6.37.0 起长尾池，身价/工资已是内置列）：勾选写进 ?cols= 且组头列名立刻长出，
             // 再点一次收回去（别把下面的横向溢出断言带歪）
             await page.locator('.club-block .multiselect').first().click();
             const colItem = page.locator('.multiselect-panel .multiselect-item', { hasText: '合同类型' }).first();
@@ -1575,34 +1575,59 @@ async function main() {
             await colItem.click();
             assert(
               (await page.locator('.club-block .sqc-glegend', { hasText: '合同类型' }).count()) === 0,
-              `${label}：取消勾选后组头标签串还挂着「合同类型」`,
+              `${label}：取消勾选后组头列名还挂着「合同类型」`,
             );
             assert(!page.url().includes('cols='), `${label}：取消勾选后 ?cols= 没清掉（${page.url()}）`);
-            // v6.39.1 回归锁：桌面值区必须是 flex 平铺（单行），不是窄屏那套 grid 网格。
-            // 背景：v6.37.1 把基类 .sqc-m 由 flex 改 grid 时漏给 .sqc-card.wide .sqc-m 补 display:flex，
-            // 桌面值区回退成 repeat(3, 48px) 网格（13 个指标折成多行挤在右侧）——线上 v6.37.1–v6.39.0 一直带此 bug，
-            // 而此前桌面分支只验组头标签串文本，量不到几何 ⇒ 一条都没红。这里量 computed display + 值格同行。
+            // v6.39.2 回归锁：桌面列头与值区必须是**同一套等宽轨网格、逐列对齐**（用户报「表头和数据不对齐」）。
+            // 量轨右缘逐列差：列头 .sqc-k 与值格 .sqc-v 都是 stretch 的网格项，盒子右缘=轨右缘 ⇒ 差值即错位量。
+            // 背景：v6.37.0–v6.39.1 列头是右对齐标签串（join(' ')），与值区各排各的，结构上不可能对齐；
+            // v6.39.1 的 display:flex 锁只保证值格同行，量不到对齐（那条锁由本锁取代）。
             const wideGeom = await page.locator('.club-block article.sqc-row').first().evaluate((row) => {
+              const r = (el) => el.getBoundingClientRect();
               const m = row.querySelector('.sqc-m');
               const vs = [...row.querySelectorAll('.sqc-v')];
-              const tops = vs.map((v) => Math.round(v.getBoundingClientRect().top));
-              const mr = m.getBoundingClientRect();
+              const group = row.closest('.sqc-group');
+              const ks = [...(group?.querySelector('.sqc-glegend')?.querySelectorAll('.sqc-k') ?? [])];
+              const tops = vs.map((v) => Math.round(r(v).top));
+              const lR = ks.map((k) => Math.round(r(k).right));
+              const vR = vs.map((v) => Math.round(r(v).right));
+              let maxRightDelta = 0;
+              for (let i = 0; i < Math.min(lR.length, vR.length); i += 1) {
+                maxRightDelta = Math.max(maxRightDelta, Math.abs(lR[i] - vR[i]));
+              }
+              const id = row.querySelector('.sqc-id');
+              const cols = getComputedStyle(m).gridTemplateColumns;
+              const tracks = cols.split(' ').map((t) => Number.parseFloat(t)).filter((n) => Number.isFinite(n) && n > 0);
               return {
                 display: getComputedStyle(m).display,
-                cols: getComputedStyle(m).gridTemplateColumns,
+                cols,
+                tracks,
+                trackSpread: tracks.length ? Number((Math.max(...tracks) - Math.min(...tracks)).toFixed(1)) : 0,
                 vCount: vs.length,
+                kCount: ks.length,
+                maxRightDelta,
+                idWidth: id ? Math.round(r(id).width) : 0,
+                cgap: id ? Math.round(r(m).left - r(id).right) : 0,
                 tops,
-                mHeight: Math.round(mr.height),
-                rowHeight: Math.round(row.getBoundingClientRect().height),
+                mHeight: Math.round(r(m).height),
+                rowHeight: Math.round(r(row).height),
               };
             });
             assert(
-              wideGeom.display === 'flex',
-              `desktop：宽卡值区 .sqc-m 应 flex 平铺（基类 grid 须被 .sqc-card.wide 覆盖回 flex），实测 display=${wideGeom.display}、grid-template-columns=${wideGeom.cols}`,
+              wideGeom.display === 'grid' && wideGeom.tracks.length === 13 && wideGeom.trackSpread <= 1,
+              `desktop：宽卡值区应是 13 条等宽轨的网格（auto-fit 模板；computed 读出的已是解算后的轨宽，不是 'auto-fit' 字面），实测 display=${wideGeom.display}、轨数 ${wideGeom.tracks.length}、轨宽极差 ${wideGeom.trackSpread}px、grid-template-columns=${wideGeom.cols}`,
             );
             assert(
-              wideGeom.vCount === 13,
-              `desktop：宽卡值格应 13 格（DESKTOP_CELLS），实测 ${wideGeom.vCount}`,
+              wideGeom.vCount === 13 && wideGeom.kCount === 13,
+              `desktop：宽卡列头格与值格都该 13 个（DESKTOP_CELLS），实测列头 ${wideGeom.kCount} / 值 ${wideGeom.vCount}`,
+            );
+            assert(
+              wideGeom.maxRightDelta <= 2,
+              `desktop：列头与值区应逐列对齐（轨右缘差 ≤2px），实测最大差 ${wideGeom.maxRightDelta}px`,
+            );
+            assert(
+              wideGeom.idWidth >= 200 && wideGeom.cgap >= 20,
+              `desktop：身份列应 ≥200px 且与值区列距 ≥20px（用户报名字列太窄、离数据太近），实测 ${wideGeom.idWidth}px / ${wideGeom.cgap}px`,
             );
             const topSpread = Math.max(...wideGeom.tops) - Math.min(...wideGeom.tops);
             assert(
@@ -1628,7 +1653,7 @@ async function main() {
               .evaluateAll((els) => els.map((e) => [...e.querySelectorAll('.sqc-v')].map((v) => v.textContent?.trim() ?? '').join('|')));
             // 合同视图四格：工资/违约金/激活价/效力（前锋丁无合同全 —；门将甲违约金 12 → 激活价 24）
             assert(
-              contractVals[0] === '6.50 m|12 m|24 m|3年',
+              contractVals[0] === '6.50m|12m|24m|3年',
               `${label}：合同视图门将甲四格不符（${contractVals[0]}）`,
             );
             assert(
@@ -1866,6 +1891,62 @@ async function main() {
         const deskShot = join(SHOT_DIR, 'e2e-clubs-desk-coach-375.png');
         await page.screenshot({ path: deskShot, fullPage: false });
         console.log(`   截图：${deskShot.replace(/\\/g, '/')}`);
+        // v6.39.2：桌面宽卡第二个使用点（注册名单行尾带分配列）——列头须与值区逐列对齐，且列头右侧
+        // 要让出「分配列 + 列距」（--sqc-assignw / has-assign 的 padding-right），否则列头比值区宽一截。
+        // v6.39.2 用户裁决：注册台桌面列舍「初始CA」「成长空间」（DESKTOP_CELLS_DESK 11 列）——注册台行尾
+        // 恒有分配列，13 列在 1280 视口会折两行；11 列必须单行放下，所以这里锁 valueRows === 1。
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.goto(`${BASE}/clubs/1?tab=desk`, { waitUntil: 'domcontentloaded' });
+        await page.locator('.club-block article.sqc-row').first().waitFor({ timeout: TIMEOUT });
+        const wideDesk = await page.locator('.club-block article.sqc-row').first().evaluate((row) => {
+          const r = (el) => el.getBoundingClientRect();
+          const m = row.querySelector('.sqc-m');
+          const vs = [...row.querySelectorAll('.sqc-v')];
+          const group = row.closest('.sqc-group');
+          const head = group.querySelector('.sqc-ghead');
+          const legend = group.querySelector('.sqc-glegend');
+          const ks = [...(legend?.querySelectorAll('.sqc-k') ?? [])];
+          const assign = row.querySelector('.sqc-assign');
+          const lR = ks.map((k) => Math.round(r(k).right));
+          const vR = vs.map((v) => Math.round(r(v).right));
+          let maxRightDelta = 0;
+          for (let i = 0; i < Math.min(lR.length, vR.length); i += 1) {
+            maxRightDelta = Math.max(maxRightDelta, Math.abs(lR[i] - vR[i]));
+          }
+          // 值格按视觉行分组（同 top 视为一行）：单行 = 1
+          const rows = new Set(vs.map((v) => Math.round(r(v).top))).size;
+          return {
+            kCount: ks.length,
+            vCount: vs.length,
+            valueRows: rows,
+            legendText: (legend?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+            maxRightDelta,
+            assignW: assign ? Math.round(r(assign).width) : 0,
+            headPadR: getComputedStyle(head).paddingRight,
+            legendW: legend ? Math.round(r(legend).width) : 0,
+            mW: Math.round(r(m).width),
+          };
+        });
+        assert(
+          wideDesk.kCount === 11 && wideDesk.vCount === 11,
+          `教练态桌面注册名单列头/值格应各 11 个（DESKTOP_CELLS_DESK 舍初始CA/成长空间），实测 ${wideDesk.kCount}/${wideDesk.vCount}`,
+        );
+        assert(
+          wideDesk.legendText === '年龄 CA PA 成长档位 工资 违约金 激活价 效力 身价 影响力 经纪人',
+          `教练态桌面注册名单列头文案不符（应 11 列且不含初始CA/成长空间），实测「${wideDesk.legendText}」`,
+        );
+        assert(
+          wideDesk.valueRows === 1,
+          `教练态桌面注册名单 11 列应单行放下（用户裁决），实测值格占 ${wideDesk.valueRows} 行`,
+        );
+        assert(
+          wideDesk.maxRightDelta <= 2,
+          `教练态桌面注册名单列头与值区错位 ${wideDesk.maxRightDelta}px（应逐列对齐 ≤2px）`,
+        );
+        assert(
+          wideDesk.assignW >= 80 && Math.abs(wideDesk.legendW - wideDesk.mW) <= 2,
+          `教练态桌面注册名单列头宽 ${wideDesk.legendW} ≠ 值区宽 ${wideDesk.mW}（分配列 ${wideDesk.assignW}px 没在列头右侧让出：padding-right=${wideDesk.headPadR}）`,
+        );
       } finally {
         for (const pattern of ROUTES19) await page.unroute(pattern);
         await page.setViewportSize({ width: 1440, height: 900 });

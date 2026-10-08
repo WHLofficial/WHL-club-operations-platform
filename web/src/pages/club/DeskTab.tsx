@@ -26,7 +26,7 @@ import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { qk } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
-import { CARD_VIEW_CELLS, DESKTOP_CELLS, groupRowsByPosition, type CardViewKey } from '../../lib/club-cards.ts';
+import { CARD_VIEW_CELLS, DESKTOP_CELLS_DESK, groupRowsByPosition, type CardViewKey } from '../../lib/club-cards.ts';
 import { CARD_EXTRA_ITEMS, REG_COLS_KEY, parseCardExtras, toggleClubCol } from '../../lib/club-columns.tsx';
 import MultiSelect from '../../components/MultiSelect.tsx';
 import { useMediaQuery } from '../../lib/use-media.ts';
@@ -240,7 +240,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
   // 窄屏四视图 chips 的当前视图；桌面无 chips（全列合并），这个状态闲置
   const narrow = useMediaQuery('(max-width: 760px)');
   const [view, setView] = useState<CardViewKey>('basic');
-  const cells = narrow ? CARD_VIEW_CELLS[view] : DESKTOP_CELLS;
+  const cells = narrow ? CARD_VIEW_CELLS[view] : DESKTOP_CELLS_DESK;
   const extras = extraColDefs(activeCols);
 
   const stats = useMemo(() => {
@@ -347,7 +347,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             工资帽按级别以半赛季计
             {wageCap === null
               ? '（本季度未配置，暂不校验）'
-              : `（${rules.tier ? (LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier) : '本级'} ${wageCap} m）；窗末按现行合同工资实扣，未达下限 ${wageCap - 15} m 按下限扣`}。
+              : `（${rules.tier ? (LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier) : '本级'} ${wageCap}m）；窗末按现行合同工资实扣，未达下限 ${wageCap - 15}m 按下限扣`}。
           </p>
 
           <div className="preview-stats">
@@ -370,12 +370,12 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             <div className="club-stat">
               <span className="stat-label">工资</span>
               <span className={`stat-value mono${capLeft !== null && capLeft < 0 ? ' bad-text' : ' gold-text'}`}>
-                {wageCap !== null ? `${stats.wageTotal.toFixed(2)}/${wageCap} m` : `${stats.wageTotal.toFixed(2)} m`}
+                {wageCap !== null ? `${stats.wageTotal.toFixed(2)}/${wageCap}m` : `${stats.wageTotal.toFixed(2)}m`}
               </span>
             </div>
           </div>
           {wageCap !== null && (
-            <div className="cap-bar" title={`${rules.tier ? `${LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier} ` : ''}工资帽 ${wageCap} m（扣款下限 ${wageCap - 15} m）`}>
+            <div className="cap-bar" title={`${rules.tier ? `${LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier} ` : ''}工资帽 ${wageCap}m（扣款下限 ${wageCap - 15}m）`}>
               <div
                 className={`cap-bar-fill${capLeft !== null && capLeft < 0 ? ' over' : ''}`}
                 style={{ width: `${Math.min(100, (stats.wageTotal / wageCap) * 100)}%` }}
@@ -450,6 +450,8 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
                     cells={cells}
                     extras={extras}
                     wide={!narrow}
+                    // 行尾恒有「分配 ▾」列 ⇒ 组头列头右侧让出同宽（--sqc-assignw），列头才与值区对齐
+                    assign
                   >
                     {g.rows.map((p) => (
                       <RegCard
@@ -487,7 +489,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
           {lastResult !== null && (
             <div className="banner ok">
               第 {lastResult.season} 赛季注册完成：一线队 {lastResult.firstTeam} 人、训练营 {lastResult.trainee} 人，工资{' '}
-              {wageCap !== null ? `${lastResult.wageTotal.toFixed(2)}/${wageCap}` : lastResult.wageTotal.toFixed(2)} m。
+              {wageCap !== null ? `${lastResult.wageTotal.toFixed(2)}/${wageCap}` : lastResult.wageTotal.toFixed(2)}m。
               <span className="stamp stamp-ok stamp-inline">注册完成</span>
             </div>
           )}
@@ -526,7 +528,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
     if (!rcPlayer) return null;
     const rc = rcPlayer.releaseFee ?? 0;
     return rc <= 20
-      ? { lo: Math.max(0, rc - 10), hi: rc + 10, label: '±10 m' }
+      ? { lo: Math.max(0, rc - 10), hi: rc + 10, label: '±10m' }
       : { lo: rc * 0.5, hi: rc * 1.5, label: '±50%' };
   }, [rcPlayer]);
 
@@ -540,8 +542,8 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       });
       show(
         res.changeFee > 0
-          ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)} m，加价部分 30% 共 ${res.changeFee.toFixed(2)} m 待审核时收。`
-          : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)} m，降价免费，保护期从审核通过那一刻重新起算。`,
+          ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，加价部分 30% 共 ${res.changeFee.toFixed(2)}m 待审核时收。`
+          : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，降价免费，保护期从审核通过那一刻重新起算。`,
       );
       setRcPlayerId('');
       setNewFee('');
@@ -560,7 +562,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       const res = await apiPost<TerminationResult>('/api/transfers/termination', { playerId: termPlayer.id });
       show(
         res.terminationFee > 0
-          ? `解约申请已提交：${termPlayer.name}，解约费 ${res.terminationFee.toFixed(2)} m 待审核时回收。他本窗内全联盟禁签。`
+          ? `解约申请已提交：${termPlayer.name}，解约费 ${res.terminationFee.toFixed(2)}m 待审核时回收。他本窗内全联盟禁签。`
           : `解约申请已提交：${termPlayer.name}，效力满 3 赛季免费解约。他本窗内全联盟禁签。`,
       );
       setTermPlayerId('');
@@ -578,7 +580,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       <h3>续约与解约</h3>
       {toastNode}
       <p className="hint">
-        两种方式都直接开单送管理组审核：续约改违约金（违约金 ≤ 20 m 时幅度 ±10 m、超过 20 m 时幅度 ±50%；提高付差额的 30%，降低免费，
+        两种方式都直接开单送管理组审核：续约改违约金（违约金 ≤ 20m 时幅度 ±10m、超过 20m 时幅度 ±50%；提高付差额的 30%，降低免费，
         原保护期自审核通过起结束）；解约效力满 3 赛季免费，不足 3 赛季按违约金 ×（3 − 效力赛季数）× 10% 回收解约费，被解约球员本窗全联盟禁签。
       </p>
       {formal.length === 0 ? (
@@ -592,7 +594,7 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
                 <option value="">选一名球员…</option>
                 {formal.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name}（违约金 {(p.releaseFee ?? 0).toFixed(2)} m）
+                    {p.name}（违约金 {(p.releaseFee ?? 0).toFixed(2)}m）
                   </option>
                 ))}
               </select>
@@ -622,8 +624,8 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
           </div>
           {rcPlayer && rcBounds && (
             <p className="hint">
-              {rcPlayer.name} 现违约金 {(rcPlayer.releaseFee ?? 0).toFixed(2)} m，允许幅度 {rcBounds.label}：
-              {' '}{rcBounds.lo.toFixed(2)} – {rcBounds.hi.toFixed(2)} m。提高要付差额的 30%，降低免费。
+              {rcPlayer.name} 现违约金 {(rcPlayer.releaseFee ?? 0).toFixed(2)}m，允许幅度 {rcBounds.label}：
+              {' '}{rcBounds.lo.toFixed(2)} – {rcBounds.hi.toFixed(2)}m。提高要付差额的 30%，降低免费。
             </p>
           )}
 

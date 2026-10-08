@@ -97,8 +97,8 @@ function FirstBidSection({
       // v6.24.0 评审修复（P1-3）：激活首价落定只转入公开竞价，成交/匹配由截止后的结算分流决定
       onDone(
         res.matchPhase === 'bidding'
-          ? `首价 ${money(amount)} m 已落定，转入公开竞价。`
-          : `✓ 出价成功（${money(amount)} m），截止时刻已刷新。`,
+          ? `首价 ${money(amount)}m 已落定，转入公开竞价。`
+          : `✓ 出价成功（${money(amount)}m），截止时刻已刷新。`,
       );
       // 挂牌转入公开竞价：在售板与我的出价一并刷新
       invalidateMarket(pending.listingId);
@@ -111,7 +111,7 @@ function FirstBidSection({
     <section ref={ref} className="card admin-section" aria-label="落激活首价">
       <h3>落激活首价</h3>
       <p className="hint">
-        已激活 {pending.playerName}，挂牌 {money(pending.askPrice)} m：请在 {dateTime(pending.firstBidDeadline)} 前落首价，
+        已激活 {pending.playerName}，挂牌 {money(pending.askPrice)}m：请在 {dateTime(pending.firstBidDeadline)} 前落首价，
         {pending.kind === 'trainee'
           ? '落价后转入公开竞价；竞价截止后训练营合同直进管理组审核。'
           : '落价后转入公开竞价；竞价截止后进 24 小时匹配窗，等原属俱乐部决定是否匹配（基准=竞价最高价）。'}
@@ -283,7 +283,7 @@ function ActivateSection({
             }}
           />
           <p className="hint">
-            训练营球员激活费固定 5.00 m；正式球员按违约金与保护期计。点「激活」后先选你在 QQ 里通知对方俱乐部的截图（证据制，png / jpg / webp ≤ 5MB），上传即提交；对方如未收到通知可以举报。
+            训练营球员激活费固定 5.00m；正式球员按违约金与保护期计。点「激活」后先选你在 QQ 里通知对方俱乐部的截图（证据制，png / jpg / webp ≤ 5MB），上传即提交；对方如未收到通知可以举报。
             激活成功后本页会摆出首价表单：5 分钟内落首价（=激活价）才转公开竞价。
           </p>
         </>

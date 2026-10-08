@@ -369,7 +369,7 @@ export default function Player() {
               <div>
                 <span className="stat-label">身价</span>
                 <span className="mono market-value">
-                  {player.marketValue === null ? '未定价' : `${player.marketValue.toFixed(2)} m`}
+                  {player.marketValue === null ? '未定价' : `${player.marketValue.toFixed(2)}m`}
                 </span>
               </div>
             </div>
@@ -494,11 +494,11 @@ export default function Player() {
                       <>
                         <tr>
                           <th>违约金</th>
-                          <td className="num mono">{contract.releaseFee === null ? '—' : `${contract.releaseFee.toFixed(2)} m`}</td>
+                          <td className="num mono">{contract.releaseFee === null ? '—' : `${contract.releaseFee.toFixed(2)}m`}</td>
                         </tr>
                         <tr>
                           <th>工资</th>
-                          <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)} m / 半赛季`}</td>
+                          <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)}m / 半赛季`}</td>
                         </tr>
                         <tr>
                           <th>签约赛季</th>
@@ -610,7 +610,7 @@ export default function Player() {
                         <div className="event-field">
                           <span className="event-flabel">费用</span>
                           <span className="event-fval mono">
-                            {t.fee === null ? '—' : `${t.fee.toFixed(2)} m`}
+                            {t.fee === null ? '—' : `${t.fee.toFixed(2)}m`}
                             {t.extraFee !== null && t.extraFee > 0 ? ` +${t.extraFee.toFixed(2)}` : ''}
                           </span>
                         </div>
@@ -645,7 +645,7 @@ export default function Player() {
                           <td>{t.fromClubName ?? '自由身'}</td>
                           <td>{t.toClubName ?? '自由身'}</td>
                           <td className="num mono">
-                            {t.fee === null ? '—' : `${t.fee.toFixed(2)} m`}
+                            {t.fee === null ? '—' : `${t.fee.toFixed(2)}m`}
                             {t.extraFee !== null && t.extraFee > 0 ? ` +${t.extraFee.toFixed(2)}` : ''}
                           </td>
                           <td className="mono">

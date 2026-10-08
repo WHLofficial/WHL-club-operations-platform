@@ -94,7 +94,7 @@ export function inlineBadgesOf(row: InlineBadgeRow): InlineBadge[] {
 
 /**
  * 激活价（口径同 core activationFee + activations.ts 的训练营分支）：
- * 训练营固定 5 m；保护期 ×2（违约金 ≤20）/ ×1.5（>20）；无保护 ×1；定不了价（无合同/无违约金）null。
+ * 训练营固定 5m；保护期 ×2（违约金 ≤20）/ ×1.5（>20）；无保护 ×1；定不了价（无合同/无违约金）null。
  * v6.37.0 起激活价为整数（m），1.5 倍的 .5 四舍五入 —— 与 core 同一口径。
  * 保护期判定用服务端算好的 protected（ticks 比较在服务端），前端不再复制一份 ticks 口径。
  */
@@ -114,12 +114,12 @@ export function activationFeeOf(row: {
 /* ---------- 金额整数显示 ---------- */
 
 /**
- * 违约金/激活价的整数显示（v6.37.0；v6.37.2 起带单位）：37 → '37 m'、12.5 → '12.5 m'，null → null。
+ * 违约金/激活价的整数显示（v6.37.0；v6.37.2 起带单位）：37 → '37m'、12.5 → '12.5m'，null → null。
  * 只减尾零、不做进位取舍；存量小数照实显示。工资不走这里（保持 money() 两位小数）。
  */
 export function moneyIntText(x: number | null): string | null {
   if (x == null) return null;
-  return `${Math.round(x * 100) / 100} m`;
+  return `${Math.round(x * 100) / 100}m`;
 }
 
 /* ---------- 位置副行文案 ---------- */
@@ -248,6 +248,16 @@ export const DESKTOP_CELLS: readonly CardCell[] = [
   ...CARD_VIEW_CELLS.contract,
   ...CARD_VIEW_CELLS.market,
 ];
+
+/**
+ * 注册工作台桌面列 = 全列去掉「初始CA」「成长空间」（11 指标）。
+ * 用户裁决（v6.39.2）：「注册工作台舍弃初始CA和成长空间，以放下所有列在一行」——注册台行尾恒有
+ * 「分配 ▾」列（--sqc-assignw），13 列在 1280 视口放不下会折成两行；砍掉这两列后 11 列单行放下。
+ * 阵容页签（SquadTab）仍用 DESKTOP_CELLS 全 13 列（那一屏没有分配列）。
+ */
+export const DESKTOP_CELLS_DESK: readonly CardCell[] = DESKTOP_CELLS.filter(
+  (c) => c.key !== 'baseCa' && c.key !== 'growthGap',
+);
 
 /** 卡片已内置的列键（COL_DEFS 键名）：「列…」自选池要剔除它们，勾出来的都是长尾 */
 export const CARD_BUILTIN_COL_KEYS: ReadonlySet<string> = new Set([

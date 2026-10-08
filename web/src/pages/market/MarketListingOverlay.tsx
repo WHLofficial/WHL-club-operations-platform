@@ -79,9 +79,9 @@ export function MarketListingOverlay({
       if (res.ok) {
         // v6.24.0 评审修复（P1-3）：激活首价落定不再当场成交/进匹配窗，只转入公开竞价
         if (res.matchPhase === 'bidding') {
-          show(`首价 ${money(amount)} m 已落定，转入公开竞价。`);
+          show(`首价 ${money(amount)}m 已落定，转入公开竞价。`);
         } else {
-          setSuccess(`✓ 出价成功（${money(amount)} m），截止时刻已刷新。`);
+          setSuccess(`✓ 出价成功（${money(amount)}m），截止时刻已刷新。`);
         }
         invalidateMarket(l.id);
         onBidDone();
@@ -103,7 +103,7 @@ export function MarketListingOverlay({
       show(
         res.decision === 'pass'
           ? '已放行：按竞价最高价成交，转管理组审核。'
-          : `已提交匹配：新违约金 ${(res.newReleaseFee ?? 0).toFixed(2)} m，差额 ${(res.diff ?? 0).toFixed(2)} m 待审核时回收，球员留队。`,
+          : `已提交匹配：新违约金 ${(res.newReleaseFee ?? 0).toFixed(2)}m，差额 ${(res.diff ?? 0).toFixed(2)}m 待审核时回收，球员留队。`,
       );
       setPassArmed(false);
       setMatchFee('');
@@ -232,7 +232,7 @@ function OverlayBody({
   const note = isSeller
     ? '这是你的挂牌：竞价截止后最高价进审核过户；可在球员页维护报价设置。窗尾无人出价将自动下架（收下架费）。'
     : l.matchPhase === 'matching' && halfPrice !== null
-      ? `竞价已截止。被激活方 ${l.sellerClub.name} 可在匹配窗内付「新违约金 > ${money(halfPrice)} m」的差额把球员留下，到期未匹配则按 ${money(halfPrice)} m 成交。`
+      ? `竞价已截止。被激活方 ${l.sellerClub.name} 可在匹配窗内付「新违约金 > ${money(halfPrice)}m」的差额把球员留下，到期未匹配则按 ${money(halfPrice)}m 成交。`
       : l.firstBidPending
         ? `首价窗内只有 ${l.activatorName ?? '激活方'} 可以出价，金额固定为激活价；落价后进入公开竞价。`
         : null;
@@ -256,7 +256,7 @@ function OverlayBody({
       <dl className="mkt-ov-rows">
         <div>
           <dt>{l.type === 'activation' ? '激活价' : '挂牌价'}</dt>
-          <dd className="mono">{money(l.askPrice)} m</dd>
+          <dd className="mono">{money(l.askPrice)}m</dd>
         </div>
         <div>
           <dt>{l.matchPhase === 'matching' ? '最终最高' : '当前最高'}</dt>
@@ -264,8 +264,8 @@ function OverlayBody({
             {l.highestBid == null
               ? '还没人出价'
               : l.highestBidder
-                ? `${l.highestBidder.name} · ${money(l.highestBid)} m`
-                : `${money(l.highestBid)} m`}
+                ? `${l.highestBidder.name} · ${money(l.highestBid)}m`
+                : `${money(l.highestBid)}m`}
           </dd>
         </div>
         <div>
@@ -307,8 +307,8 @@ function OverlayBody({
         <div className="admin-section">
           <h4>匹配决定（被激活方）</h4>
           <p className="hint">
-            匹配：给球员一份新违约金（整数 m，须高于当前最高价 {money(l.highestBid)} m，不受幅度限制），审核通过时回收新旧差额
-            {oldRc > 0 ? <>（现违约金 {money(oldRc)} m）</> : null}，球员留队且本球员生涯只能被匹配这一次。
+            匹配：给球员一份新违约金（整数 m，须高于当前最高价 {money(l.highestBid)}m，不受幅度限制），审核通过时回收新旧差额
+            {oldRc > 0 ? <>（现违约金 {money(oldRc)}m）</> : null}，球员留队且本球员生涯只能被匹配这一次。
             放行：按竞价最高价成交送管理组审核。
           </p>
           <div className="inline-form">

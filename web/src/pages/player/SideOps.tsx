@@ -257,11 +257,11 @@ export function SideOps({
         <div className="side-sec-head">转会区 · 本队挂牌中</div>
         <div className="side-row">
           <span className="attr-name">要价</span>
-          <span className="mono">{l ? `${money(l.askPrice)} m` : '—'}</span>
+          <span className="mono">{l ? `${money(l.askPrice)}m` : '—'}</span>
         </div>
         <div className="side-row">
           <span className="attr-name">最高出价</span>
-          <span className="mono">{l?.highestBid != null ? `${money(l.highestBid)} m` : '暂无出价'}</span>
+          <span className="mono">{l?.highestBid != null ? `${money(l.highestBid)}m` : '暂无出价'}</span>
         </div>
         {leaderBid && (
           <div className="side-row">
@@ -311,12 +311,12 @@ export function SideOps({
             </div>
             <div className="side-row">
               <span className="attr-name">{l.type === 'activation' ? '激活价' : '挂牌价'}</span>
-              <span className="mono">{money(l.askPrice)} m</span>
+              <span className="mono">{money(l.askPrice)}m</span>
             </div>
             <div className="side-row">
               <span className="attr-name">当前最高</span>
               <span className="mono gold-text">
-                {l.highestBidder ? `${l.highestBidder.name} · ${money(l.highestBid)} m` : l.highestBid != null ? `${money(l.highestBid)} m` : '暂无出价'}
+                {l.highestBidder ? `${l.highestBidder.name} · ${money(l.highestBid)}m` : l.highestBid != null ? `${money(l.highestBid)}m` : '暂无出价'}
               </span>
             </div>
             {canBid ? (
@@ -493,8 +493,8 @@ export function SideOps({
                         '/api/transfers/rc-change',
                         { playerId: player.id, newReleaseFee: Number(renewFee) },
                       );
-                      return `续约已提交：${r.oldReleaseFee.toFixed(2)} → ${r.newReleaseFee.toFixed(2)} m${
-                        r.changeFee > 0 ? `，加价 30% 共 ${r.changeFee.toFixed(2)} m 待审核收取` : ''
+                      return `续约已提交：${r.oldReleaseFee.toFixed(2)} → ${r.newReleaseFee.toFixed(2)}m${
+                        r.changeFee > 0 ? `，加价 30% 共 ${r.changeFee.toFixed(2)}m 待审核收取` : ''
                       }。`;
                     })
                   }
@@ -519,7 +519,7 @@ export function SideOps({
                   aria-label="挂牌要价"
                 />
               </label>
-              <p className="side-sub">下限取违约金/身价五折取低（不低于 1 m），上限违约金 1.5 倍。</p>
+              <p className="side-sub">下限取违约金/身价五折取低（不低于 1m），上限违约金 1.5 倍。</p>
               <div className="side-btns">
                 <button
                   type="button"
@@ -531,7 +531,7 @@ export function SideOps({
                         playerId: player.id,
                         askPrice: Number(askPrice),
                       });
-                      return `挂牌成功（#${r.listingId}）：规则区间 ${r.min.toFixed(2)}–${r.max.toFixed(2)} m。`;
+                      return `挂牌成功（#${r.listingId}）：规则区间 ${r.min.toFixed(2)}–${r.max.toFixed(2)}m。`;
                     })
                   }
                 >
@@ -558,7 +558,7 @@ export function SideOps({
                     void run(async () => {
                       const r = await apiPost<{ terminationFee: number }>('/api/transfers/termination', { playerId: player.id });
                       return `解约申请已提交：${
-                        r.terminationFee > 0 ? `解约费 ${r.terminationFee.toFixed(2)} m 待审核时回收` : '效力满 3 赛季免费'
+                        r.terminationFee > 0 ? `解约费 ${r.terminationFee.toFixed(2)}m 待审核时回收` : '效力满 3 赛季免费'
                       }。`;
                     });
                   }}
@@ -603,7 +603,7 @@ export function SideOps({
     body = (
       <section className="side-sec">
         <div className="side-sec-head">球队操作</div>
-        <p className="side-sub">训练营球员：合同固定（工资 0.75 m / 违约金 5 m），只能被其他球队按激活转会带走。</p>
+        <p className="side-sub">训练营球员：合同固定（工资 0.75m / 违约金 5m），只能被其他球队按激活转会带走。</p>
       </section>
     );
   } else if (player.notForSale) {
@@ -658,7 +658,7 @@ export function SideOps({
                       playerId: player.id,
                       newReleaseFee: Number(freeFee),
                     });
-                    return `海捞申请已提交：新违约金 ${r.newReleaseFee.toFixed(2)} m，签入费 ${r.signFee.toFixed(2)} m（新违约金的 30%）待审核时收，等管理组批准。`;
+                    return `海捞申请已提交：新违约金 ${r.newReleaseFee.toFixed(2)}m，签入费 ${r.signFee.toFixed(2)}m（新违约金的 30%）待审核时收，等管理组批准。`;
                   })
                 }
               >
@@ -712,7 +712,7 @@ export function SideOps({
             </label>
             {player.listPrice !== null && (
               <p className="side-sub">
-                对方标价 {player.listPrice} m：低于标价视为砍价（对方看不到你的诚意边界，但低于其底线会被自动拒）；达标价且对方开了自动同意才直接成交，否则进人工谈判。
+                对方标价 {player.listPrice}m：低于标价视为砍价（对方看不到你的诚意边界，但低于其底线会被自动拒）；达标价且对方开了自动同意才直接成交，否则进人工谈判。
               </p>
             )}
             <p className="side-sub">

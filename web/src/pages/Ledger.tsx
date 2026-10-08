@@ -31,12 +31,12 @@ const KIND_OPTIONS = [
 
 function fmtAmount(n: number): string {
   const abs = Math.abs(n);
-  const s = `${abs.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} m`;
+  const s = `${abs.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m`;
   return n >= 0 ? `+${s}` : `−${s}`;
 }
 
 function money2(n: number): string {
-  return `${n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} m`;
+  return `${n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m`;
 }
 
 // 窗口财务汇总（v6.7.0，B2）：比赛日收入按上座记录精确归窗，其余流水按时间落进各窗。
@@ -199,12 +199,12 @@ export default function Ledger() {
             <div className="ledger-balance-main">
               <span className="ledger-balance-label">俱乐部余额</span>
               <strong className="mono ledger-balance-num">
-                {balance?.balance === null || balance?.balance === undefined ? '…' : `${balance.balance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} m`}
+                {balance?.balance === null || balance?.balance === undefined ? '…' : `${balance.balance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m`}
               </strong>
             </div>
             <div className="ledger-balance-sub muted">
-              可支配 {balance?.available?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'} m ·
-              冻结中 {balance?.held?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'} m
+              可支配 {balance?.available?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'}m ·
+              冻结中 {balance?.held?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'}m
             </div>
           </div>
 

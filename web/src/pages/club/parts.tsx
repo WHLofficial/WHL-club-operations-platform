@@ -14,7 +14,7 @@ import { playerPath } from '../../lib/player-link.ts';
 
 // 金额口径与球员库一致（身价/工资都以「m」为单位存储）；null = 没录过，显示「—」
 export function money(x: number | null): string {
-  return x === null ? '—' : `${x.toFixed(2)} m`;
+  return x === null ? '—' : `${x.toFixed(2)}m`;
 }
 
 export function num1(x: number | null): string {

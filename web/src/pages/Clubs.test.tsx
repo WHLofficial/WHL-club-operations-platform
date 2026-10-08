@@ -23,14 +23,14 @@ function club(patch: Partial<ClubSummary> & { id: number; name: string }): ClubS
     logoKey: null,
     squad: { senior: 0, trainee: 0 },
     avgCa: null,
-    // 生产现状：players.market_value 全 NULL ⇒ 服务端给 null，卡片显示「—」而不是 0.00 m
+    // 生产现状：players.market_value 全 NULL ⇒ 服务端给 null，卡片显示「—」而不是 0.00m
     totalValue: null,
     totalWage: 0,
     ...patch,
   };
 }
 
-// 指标格是 dt/dd 成对；按 dt 取同格 dd 的文本（「—」与「0.00 m」要能分辨）
+// 指标格是 dt/dd 成对；按 dt 取同格 dd 的文本（「—」与「0.00m」要能分辨）
 function metric(card: HTMLElement, label: string): string {
   return within(card).getByText(label).nextElementSibling!.textContent!.trim();
 }
@@ -86,8 +86,8 @@ describe('球队页（v3.4.0 步骤 4）', () => {
     expect(within(card).getByText('24 人')).toBeTruthy();
     expect(within(card).getByText(/\+ 3 青训/)).toBeTruthy();
     expect(within(card).getByText('75.2')).toBeTruthy(); // 75.24 只显示一位
-    expect(within(card).getByText('1234.50 m')).toBeTruthy();
-    expect(within(card).getByText('4.40 m')).toBeTruthy();
+    expect(within(card).getByText('1234.50m')).toBeTruthy();
+    expect(within(card).getByText('4.40m')).toBeTruthy();
 
     // 没有青训就不显示「+ 0 青训」那半句
     const rm = screen.getByText('皇家马德里').closest('a')!;
@@ -96,14 +96,14 @@ describe('球队页（v3.4.0 步骤 4）', () => {
     const cpu = screen.getByText('甲队 (CPU)').closest('a')!;
     expect(within(cpu).getByText('CPU')).toBeTruthy();
     expect(metric(cpu, '平均 CA')).toBe('—'); // 空队平均 CA 是 —，不是 0
-    expect(metric(cpu, '总身价')).toBe('—'); // 没录过身价是 —，不是 0.00 m
-    expect(metric(cpu, '工资总额')).toBe('0.00 m'); // 没有合同 ⇒ 工资 0 是真话
+    expect(metric(cpu, '总身价')).toBe('—'); // 没录过身价是 —，不是 0.00m
+    expect(metric(cpu, '工资总额')).toBe('0.00m'); // 没有合同 ⇒ 工资 0 是真话
 
     // 有人但都没录身价（生产现状）：身价是 —，其余指标照常出
     const second = screen.getByText('乙级队').closest('a')!;
     expect(metric(second, '阵容')).toBe('18 人 + 2 青训');
     expect(metric(second, '总身价')).toBe('—');
-    expect(metric(second, '工资总额')).toBe('0.00 m');
+    expect(metric(second, '工资总额')).toBe('0.00m');
   });
 
   it('没有球队的段整段不渲染', async () => {

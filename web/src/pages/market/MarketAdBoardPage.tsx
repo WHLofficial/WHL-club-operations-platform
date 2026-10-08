@@ -19,9 +19,9 @@ import { attrClass } from '../../lib/players-library.ts';
 import { useTransferBoard } from '../../lib/queries.ts';
 import { MarketNav, money } from './shared.tsx';
 
-// 金额统一「180.00 m」（单位字母照市场分区既有口径：在售市场卡 / 球员页都用小写 m）；无值回「—」，不拼出「— m」
+// 金额统一「180.00m」（单位字母照市场分区既有口径：在售市场卡 / 球员页都用小写 m）；无值回「—」，不拼出「— m」
 function amount(v: number | null | undefined): string {
-  return v == null ? '—' : `${money(v)} m`;
+  return v == null ? '—' : `${money(v)}m`;
 }
 
 // 副标题：位置 · 年龄 · 球队（位置沿用球员库的「空格分隔」口径）

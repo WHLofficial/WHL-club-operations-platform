@@ -4,13 +4,14 @@ import {
   CARD_BUILTIN_COL_KEYS,
   CARD_VIEW_CELLS,
   DESKTOP_CELLS,
+  DESKTOP_CELLS_DESK,
   activationFeeOf,
   groupRowsByPosition,
   inlineBadgesOf,
   moneyIntText,
   positionSummary,
   type CardMetricRow,
-  } from './club-cards.ts';
+} from './club-cards.ts';
 import { VIEW_COL_WIDTH, VIEW_GRID_COLS } from '../pages/club/card-parts.tsx';
 
 describe('窄屏网格列配置（v6.37.2 两行式）', () => {
@@ -83,7 +84,7 @@ describe('行内徽章优先级（定稿：状态 > 保护期 > 未来之星 > �
 });
 
 describe('激活价前端镜像', () => {
-  it('训练营固定 5 m', () => {
+  it('训练营固定 5m', () => {
     expect(activationFeeOf({ hasContract: true, contractType: 'trainee', protected: false, releaseFee: 5 })).toBe(5);
   });
 
@@ -101,10 +102,10 @@ describe('激活价前端镜像', () => {
 });
 
 describe('金额整数显示', () => {
-  it('去尾零不做取舍并带单位 m（v6.37.2）：37→37 m、12.5→12.5 m、12.75→12.75 m；null→null', () => {
-    expect(moneyIntText(37)).toBe('37 m');
-    expect(moneyIntText(12.5)).toBe('12.5 m');
-    expect(moneyIntText(12.75)).toBe('12.75 m');
+  it('去尾零不做取舍并带单位 m（v6.37.2）：37→37m、12.5→12.5m、12.75→12.75m；null→null', () => {
+    expect(moneyIntText(37)).toBe('37m');
+    expect(moneyIntText(12.5)).toBe('12.5m');
+    expect(moneyIntText(12.75)).toBe('12.75m');
     expect(moneyIntText(null)).toBeNull();
   });
 });
@@ -133,6 +134,21 @@ describe('四视图列与桌面全列', () => {
     ]);
   });
 
+  it('注册台桌面列 = 全列舍「初始CA」「成长空间」共 11 列（v6.39.2 用户裁决：单行放下）', () => {
+    expect(DESKTOP_CELLS_DESK).toHaveLength(11);
+    expect(DESKTOP_CELLS_DESK.map((c) => c.key)).toEqual([
+      'age', 'ca', 'pa',
+      'growthTier',
+      'wage', 'releaseFee', 'activation', 'years',
+      'marketValue', 'influence', 'agent',
+    ]);
+    // 舍的正是这两列、不是别的；且保序（仍 basic→growth→contract→market 依序）
+    expect(DESKTOP_CELLS_DESK.filter((c) => c.key === 'baseCa' || c.key === 'growthGap')).toEqual([]);
+    expect(DESKTOP_CELLS_DESK.map((c) => c.key)).toEqual(
+      DESKTOP_CELLS.map((c) => c.key).filter((k) => k !== 'baseCa' && k !== 'growthGap'),
+    );
+  });
+
   it('取值口径：成长空间 = PA−CA、档位 T1–T3（0 显 —）、效力带年（v6.38.1 赛季→年）、经纪人档位中文名', () => {
     const row = {
       age: 24, ca: 84, pa: 89, baseCa: 84, growthTier: 2,
@@ -141,8 +157,8 @@ describe('四视图列与桌面全列', () => {
       marketValue: 52.5, influence: 3.14159, agentTier: 3,
     };
     expect(CARD_VIEW_CELLS.growth.map((c) => c.get(row))).toEqual(['84', '5', 'T2']);
-    expect(CARD_VIEW_CELLS.contract.map((c) => c.get(row))).toEqual(['1.25 m', '45 m', '45 m', '1.5年']);
-    expect(CARD_VIEW_CELLS.market.map((c) => c.get(row))).toEqual(['52.50 m', '3.14', '苛刻']);
+    expect(CARD_VIEW_CELLS.contract.map((c) => c.get(row))).toEqual(['1.25m', '45m', '45m', '1.5年']);
+    expect(CARD_VIEW_CELLS.market.map((c) => c.get(row))).toEqual(['52.50m', '3.14', '苛刻']);
     expect(CARD_VIEW_CELLS.growth[2]!.get({ ...row, growthTier: 0 })).toBeNull();
     expect(CARD_VIEW_CELLS.basic[1]!.get({ ...row, ca: null })).toBeNull();
   });
@@ -179,7 +195,7 @@ describe('四视图列与桌面全列', () => {
       serviceSeasons: 1, marketValue: 20, agentTier: 1, contractType: 'formal', protected: false,
     } as unknown as CardMetricRow;
     expect(CARD_VIEW_CELLS.market[1]!.get(noInfluence)).toBeNull();
-    expect(CARD_VIEW_CELLS.market[0]!.get(noInfluence)).toBe('20.00 m');
+    expect(CARD_VIEW_CELLS.market[0]!.get(noInfluence)).toBe('20.00m');
     expect(moneyIntText(undefined as unknown as null)).toBeNull();
     expect(activationFeeOf({ contractType: 'formal', protected: true, releaseFee: undefined as unknown as null })).toBeNull();
   });

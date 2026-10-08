@@ -124,7 +124,7 @@ function RegistrationsSection() {
                       <td>{club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : <span className="muted">未定级</span>}</td>
                       <td className="num mono">{club.firstTeam}</td>
                       <td className="num mono">{club.trainee}</td>
-                      <td className="num mono">{club.wageTotal.toFixed(2)} m</td>
+                      <td className="num mono">{club.wageTotal.toFixed(2)}m</td>
                       <td>
                         <details>
                           <summary className="muted">{club.players.length} 人</summary>
@@ -175,7 +175,7 @@ function RegistrationsSection() {
                         {club.pass ? (
                           <span className="muted">
                             一线队 {club.stats?.firstTeam} 人 · 训练营 {club.stats?.trainee} 人 · 工资{' '}
-                            {(club.stats?.wageTotal ?? 0).toFixed(2)} m
+                            {(club.stats?.wageTotal ?? 0).toFixed(2)}m
                           </span>
                         ) : (
                           <ul className="issue-list">

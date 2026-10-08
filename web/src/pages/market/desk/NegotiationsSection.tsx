@@ -262,7 +262,7 @@ function ReleaseFeeStep({
         fee: Number(fee),
       });
       onChanged();
-      show(`违约金定为 ${res.releaseFee} m。经纪人预期工资 ${res.expectedWage.toFixed(2)} m/半赛季，开谈吧。`);
+      show(`违约金定为 ${res.releaseFee}m。经纪人预期工资 ${res.expectedWage.toFixed(2)}m/半赛季，开谈吧。`);
     } catch (err) {
       onError(err instanceof Error ? err.message : '提交失败');
     } finally {
@@ -290,7 +290,7 @@ function ReleaseFeeStep({
       </button>
       <span className="hint">
         {session.rcBounds
-          ? `幅度受限：只能在 ${session.rcBounds[0]}~${session.rcBounds[1]} m 之间（整数）。`
+          ? `幅度受限：只能在 ${session.rcBounds[0]}~${session.rcBounds[1]}m 之间（整数）。`
           : '幅度受限（整数 m）。'}
         定完会给出经纪人预期工资。
       </span>
@@ -322,7 +322,7 @@ function OfferStep({
   function outcomeMessage(res: OfferResult): string {
     switch (res.result) {
       case 'success':
-        return `第 ${res.attemptNo} 轮报价 ${money(res.wage)} m 被接受，合同落定，球员过户完成。`;
+        return `第 ${res.attemptNo} 轮报价 ${money(res.wage)}m 被接受，合同落定，球员过户完成。`;
       case 'direct':
         return res.message ?? '报价过低，谈判直接失败，已按预期工资结算。';
       case 'forced':
@@ -370,11 +370,11 @@ function OfferStep({
       <div className="stat-pair">
         <div className="market-card-price">
           <span className="stat-label">新违约金</span>
-          <span className="mono">{money(session.releaseFee)} m</span>
+          <span className="mono">{money(session.releaseFee)}m</span>
         </div>
         <div className="market-card-price">
           <span className="stat-label">经纪人预期工资</span>
-          <span className="mono gold-text">{money(session.expectedWage)} m/半赛季</span>
+          <span className="mono gold-text">{money(session.expectedWage)}m/半赛季</span>
         </div>
       </div>
       <div className="inline-form">
@@ -395,7 +395,7 @@ function OfferStep({
           {busy ? '谈判中…' : `报价（剩 ${session.remaining} 轮）`}
         </button>
         <span className="hint">
-          {lastOffer !== null ? <>上一次报价 {money(lastOffer)} m，必须一次比一次高。</> : <>第一口价随你开，但别把经纪人惹毛。</>}
+          {lastOffer !== null ? <>上一次报价 {money(lastOffer)}m，必须一次比一次高。</> : <>第一口价随你开，但别把经纪人惹毛。</>}
           报价不耗轮次，只有经纪人回应了才算一轮。
         </span>
       </div>

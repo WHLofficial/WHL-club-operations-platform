@@ -835,23 +835,109 @@ describe('v6.39.0 消费中心窄屏静态锁（消费中心过宽修复）', ()
 // 13 个指标折多行。此类回归只在真浏览器几何里可见，所以 e2e ⑨ 桌面分支量 computed display +
 // 值格同行（顶差 ≤3px）；这里再钉文本级：wide 块必须显式声明 display:flex，且基类仍是 grid
 // （两边任一被改走都要有人来看一眼——若将来基类改回 flex，这条会提示同步更新）。
-describe('v6.39.1 桌面宽卡静态锁（值区 wide 必须 flex 平铺）', () => {
-  it('TC-WIDE-01 · .sqc-card.wide .sqc-m 块内含 display:flex；基类 .sqc-m 是 grid', () => {
+describe('v6.39.2 桌面宽卡静态锁（列头与值区同款等宽轨网格 + 逐列对齐的几何账）', () => {
+  it('TC-WIDE-01 · 列头 .sqc-glegend 与值区 .sqc-card.wide .sqc-m 的轨模板逐字相同（同 minmax/同 gap）', () => {
     const rules = cssRules(read(STYLES_CSS));
-    const wide = declarations(rules, '.sqc-card.wide .sqc-m', 'display');
+    const legendCols = declarations(rules, '.sqc-glegend', 'grid-template-columns');
+    const wideCols = declarations(rules, '.sqc-card.wide .sqc-m', 'grid-template-columns');
+    const want = 'repeat(auto-fit, minmax(var(--sqc-wmin, 58px), 1fr))';
     expect(
-      wide.some((d) => d.value === 'flex'),
-      `.sqc-card.wide .sqc-m 缺 display:flex（桌面值区会回退成基类 grid 的 repeat(3, 48px) 定宽三列，13 指标折多行），实见 ${JSON.stringify(wide)}`,
+      legendCols.some((d) => d.value === want),
+      `列头 .sqc-glegend 的 grid-template-columns 应为 ${want}（v6.39.2 起列头是网格，不再是 join(' ') 标签串），实见 ${JSON.stringify(legendCols)}`,
     ).toBe(true);
+    expect(
+      wideCols.some((d) => d.value === want),
+      `值区 .sqc-card.wide .sqc-m 的 grid-template-columns 应与列头逐字相同，实见 ${JSON.stringify(wideCols)}`,
+    ).toBe(true);
+    for (const sel of ['.sqc-glegend', '.sqc-card.wide .sqc-m']) {
+      const display = declarations(rules, sel, 'display');
+      expect(display.some((d) => d.value === 'grid'), `${sel} 缺 display:grid，实见 ${JSON.stringify(display)}`).toBe(true);
+      const gap = declarations(rules, sel, 'gap');
+      expect(gap.some((d) => d.value === '4px var(--sqc-wgap, 6px)'), `${sel} 的 gap 应与对方一致（4px var(--sqc-wgap, 6px)），实见 ${JSON.stringify(gap)}`).toBe(true);
+    }
     const base = declarations(rules, '.sqc-m', 'display', true);
     expect(
       base.some((d) => d.value === 'grid'),
       `.sqc-m 基类应仍是 grid（窄屏 --sqc-mcols × --sqc-cw 网格）；若基类改回 flex，请同步改本条与 e2e ⑨ 桌面断言，实见 ${JSON.stringify(base)}`,
     ).toBe(true);
-    // 两处使用点（SquadTab 阵容 / DeskTab 注册名单）都要把 wide 接到卡上，否则桌面落到窄卡分支
+  });
+
+  it('TC-WIDE-02 · 列头左右边界对齐值区的几何账（身份列定宽 + 列距 + 组头 11/14 padding）', () => {
+    const rules = cssRules(read(STYLES_CSS));
+    // 组头内容盒 = 行卡内容盒（行卡 padding 14/14 无边框；组头有 3px 色条 ⇒ 左 11 + 3 = 14、右 14），
+    // 标题列定宽 = 身份列宽、组头 gap = 列距 ⇒ 列头网格与值区网格同起点同宽（e2e ⑨ 量轨右缘差 ≤2px）。
+    const headPad = declarations(rules, '.sqc-group.wide .sqc-ghead', 'padding');
+    expect(
+      headPad.some((d) => d.value === '8px 14px 8px 11px'),
+      `组头 padding 应为 8px 14px 8px 11px（11 + 3px 色条 = 14 = 行卡左内边距），实见 ${JSON.stringify(headPad)}`,
+    ).toBe(true);
+    const headGap = declarations(rules, '.sqc-group.wide .sqc-ghead', 'gap');
+    expect(
+      headGap.some((d) => d.value === 'var(--sqc-cgap)'),
+      `组头 gap 应取 --sqc-cgap（标题列→列头网格 = 身份列→值区），实见 ${JSON.stringify(headGap)}`,
+    ).toBe(true);
+    const titleW = declarations(rules, '.sqc-group.wide .sqc-ghead .sqc-gtitle', 'width');
+    const idW = declarations(rules, '.sqc-card.wide .sqc-id', 'width');
+    for (const [sel, got] of [['.sqc-group.wide .sqc-ghead .sqc-gtitle', titleW], ['.sqc-card.wide .sqc-id', idW]] as const) {
+      expect(
+        got.some((d) => d.value === 'var(--sqc-idw)'),
+        `${sel} 应取 var(--sqc-idw)（标题列与身份列同宽，列头网格才对得上值区），实见 ${JSON.stringify(got)}`,
+      ).toBe(true);
+    }
+    const tokens = declarations(rules, '.sqc-group.wide', '--sqc-idw');
+    expect(tokens.length, 'token --sqc-idw 应在 .sqc-group.wide 上有唯一定义').toBe(1);
+    expect(
+      parseFloat(tokens[0]!.value) >= 200,
+      `--sqc-idw=${tokens[0]!.value}：用户报「名字列宽度太低」，v6.39.2 起应 ≥200px`,
+    ).toBe(true);
+    const cgap = declarations(rules, '.sqc-group.wide', '--sqc-cgap');
+    expect(cgap.length, 'token --sqc-cgap 应在 .sqc-group.wide 上有唯一定义').toBe(1);
+    expect(
+      parseFloat(cgap[0]!.value) >= 20,
+      `--sqc-cgap=${cgap[0]!.value}：用户报「与后面数据距离太近」，v6.39.2 起应 ≥20px`,
+    ).toBe(true);
+  });
+
+  it('TC-WIDE-03 · 注册名单行尾分配列定宽 + 列头右侧让出同宽（否则列头比值区宽一截）', () => {
+    const rules = cssRules(read(STYLES_CSS));
+    const assignW = declarations(rules, '.sqc-card.wide.has-assign .sqc-assign', 'width');
+    expect(
+      assignW.some((d) => d.value === 'var(--sqc-assignw)'),
+      `宽卡分配列应定宽 var(--sqc-assignw)（按钮文案变宽窄会把值区挤歪），实见 ${JSON.stringify(assignW)}`,
+    ).toBe(true);
+    const headPadR = declarations(rules, '.sqc-group.wide .sqc-ghead.has-assign', 'padding-right');
+    expect(
+      headPadR.some((d) => d.value === 'calc(14px + var(--sqc-assignw) + var(--sqc-cgap))'),
+      `带分配列的组头右侧应让出「分配列 + 列距」，实见 ${JSON.stringify(headPadR)}`,
+    ).toBe(true);
+    // 两处使用点（SquadTab 阵容 / DeskTab 注册名单）都要把 wide 接到卡上，否则桌面落到窄卡分支；
+    // 只有 DeskTab 有分配列 ⇒ 它的 CardGroup 必须传 assign（列头才知道要右侧让位）
     const squad = read(SQUAD_TAB);
     const desk = read(DESK_TAB);
     expect(squad, 'SquadTab 应把 wide 传给分组/卡片').toContain('wide=');
     expect(desk, 'DeskTab 应把 wide 传给分组/卡片').toContain('wide=');
+    const deskGroup = desk.slice(desk.indexOf('<CardGroup'), desk.indexOf('</CardGroup>'));
+    expect(deskGroup, 'DeskTab 的 CardGroup 应传 assign（列头右侧让出分配列）').toContain('assign');
+    const squadGroup = squad.slice(squad.indexOf('<CardGroup'), squad.indexOf('</CardGroup>'));
+    expect(squadGroup, 'SquadTab 的 CardGroup 不该传 assign（阵容行没有分配列）').not.toContain('assign');
+  });
+
+  it('TC-WIDE-04 · 注册台桌面列集 = DESKTOP_CELLS_DESK 11 列，阵容仍全列 13 列（v6.39.2 用户裁决）', () => {
+    // 注册台行尾恒有分配列，13 列在 1280 视口放不下会折两行 ⇒ 用户裁决舍「初始CA」「成长空间」保单行；
+    // 阵容页签没有分配列，仍用全列。这条静态锁钉住「哪一屏用哪份列集」，防两边漂移回 13 列。
+    const cards = read(`${WEB_SRC}/lib/club-cards.ts`);
+    expect(cards, 'club-cards.ts 应导出 DESKTOP_CELLS_DESK').toContain('DESKTOP_CELLS_DESK');
+    expect(cards, '注册台列集应由全列过滤掉 baseCa / growthGap 得来').toMatch(
+      /DESKTOP_CELLS_DESK[\s\S]{0,240}baseCa[\s\S]{0,80}growthGap/,
+    );
+    const parts = read(`${WEB_SRC}/pages/club/card-parts.tsx`);
+    expect(parts, 'RegCard（注册台宽卡）应走 DESKTOP_CELLS_DESK').toContain('DESKTOP_CELLS_DESK');
+    expect(parts, 'SquadCard（阵容宽卡）仍应走全列 DESKTOP_CELLS').toMatch(/DESKTOP_CELLS\b/);
+    const desk = read(DESK_TAB);
+    expect(desk, 'DeskTab 桌面列集应走 DESKTOP_CELLS_DESK').toContain('DESKTOP_CELLS_DESK');
+    expect(desk, 'DeskTab 不该再用全列 DESKTOP_CELLS（\\b 不吃 _DESK 后缀）').not.toMatch(/DESKTOP_CELLS\b/);
+    const squad = read(SQUAD_TAB);
+    expect(squad, 'SquadTab 桌面列集仍应是全列 DESKTOP_CELLS').toMatch(/DESKTOP_CELLS\b/);
+    expect(squad, 'SquadTab 不该用注册台列集').not.toContain('DESKTOP_CELLS_DESK');
   });
 });

@@ -4,9 +4,9 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router';
-import { CardBadges, CardGroup, SquadCard } from './card-parts.tsx';
-import { DESKTOP_CELLS } from '../../lib/club-cards.ts';
-import type { PlayerLibraryRow } from '../../lib/api.ts';
+import { CardBadges, CardGroup, RegCard, SquadCard } from './card-parts.tsx';
+import { DESKTOP_CELLS, DESKTOP_CELLS_DESK } from '../../lib/club-cards.ts';
+import type { PlayerLibraryRow, SquadPlayerRow } from '../../lib/api.ts';
 
 afterEach(cleanup);
 
@@ -92,11 +92,12 @@ describe('SquadCard 值格分段色（v6.38.1）', () => {
   });
 });
 
-/* ---------- v6.39.1：宽卡（wide）结构契约 ----------
+/* ---------- v6.39.1/v6.39.2：宽卡（wide）结构契约 ----------
    桌面回归的根因在 CSS（基类 .sqc-m 改 grid 后 .sqc-card.wide 漏回 display:flex），
    jsdom 量不到 computed 布局，所以这里只钉**结构**：wide 必出 article.sqc-card.wide、
-   值格走 DESKTOP_CELLS（13 格）、窄卡不带 .wide、组头 wide 走标签串。
-   几何（computed display / 值格同行）由 scripts/e2e/smoke.mjs ⑨ 段桌面分支量。 */
+   值格走 DESKTOP_CELLS（13 格；注册台 RegCard 走 DESKTOP_CELLS_DESK 11 格）、窄卡不带 .wide、
+   列头 wide/narrow 两分支渲染同一份标签列表。
+   几何（computed display / 列头与值区逐列对齐）由 scripts/e2e/smoke.mjs ⑨ 段桌面分支量。 */
 
 describe('SquadCard 宽窄结构（v6.39.1）', () => {
   it('wide：article 带 .wide 类，值区走 DESKTOP_CELLS 13 格（含身价/影响力/经纪人）', () => {
@@ -120,8 +121,9 @@ describe('SquadCard 宽窄结构（v6.39.1）', () => {
     expect(container.querySelectorAll('.sqc-v')).toHaveLength(3);
   });
 
-  it('组头：wide 走标签串（.sqc-glegend）而非窄屏的 .sqc-gcols 标签格', () => {
+  it('组头：wide 走 .sqc-glegend、窄屏走 .sqc-gcols，两分支渲染同一份标签列表（逐列对齐的前提）', () => {
     const cells = DESKTOP_CELLS;
+    const labels = cells.map((c) => c.label);
     const wide = render(
       <MemoryRouter>
         <CardGroup groupKey="GK" label="门将" count={1} cells={cells} extras={[]} wide>
@@ -129,8 +131,9 @@ describe('SquadCard 宽窄结构（v6.39.1）', () => {
         </CardGroup>
       </MemoryRouter>,
     );
-    expect(wide.container.querySelector('.sqc-glegend')).toBeTruthy();
     expect(wide.container.querySelector('.sqc-gcols')).toBeNull();
+    const wideK = [...wide.container.querySelectorAll('.sqc-glegend .sqc-k')].map((k) => k.textContent);
+    expect(wideK).toEqual(labels);
 
     const narrow = render(
       <MemoryRouter>
@@ -139,7 +142,39 @@ describe('SquadCard 宽窄结构（v6.39.1）', () => {
         </CardGroup>
       </MemoryRouter>,
     );
-    expect(narrow.container.querySelector('.sqc-gcols')).toBeTruthy();
     expect(narrow.container.querySelector('.sqc-glegend')).toBeNull();
+    expect([...narrow.container.querySelectorAll('.sqc-gcols .sqc-k')].map((k) => k.textContent)).toEqual(labels);
+  });
+
+  it('组头：assign 时带 .has-assign（宽屏列头右侧要让出分配列，否则列头比值区宽一截）', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <CardGroup groupKey="GK" label="门将" count={1} cells={DESKTOP_CELLS} extras={[]} wide assign>
+          <SquadCard row={cardRow} view="basic" extras={[]} wide />
+        </CardGroup>
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('.sqc-ghead')!.className).toContain('has-assign');
+  });
+
+  it('注册台宽卡（RegCard）：桌面 11 格（DESKTOP_CELLS_DESK 舍初始CA/成长空间），窄卡仍按视图 3 格', () => {
+    const row = cardRow as unknown as SquadPlayerRow;
+    const wide = render(
+      <MemoryRouter>
+        <RegCard row={row} view="basic" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    const article = wide.container.querySelector('article.sqc-card')!;
+    expect(article.className).toContain('wide');
+    expect(article.className).toContain('has-assign');
+    expect(wide.container.querySelectorAll('.sqc-v')).toHaveLength(DESKTOP_CELLS_DESK.length);
+    expect(DESKTOP_CELLS_DESK.length).toBe(11);
+
+    const narrow = render(
+      <MemoryRouter>
+        <RegCard row={row} view="basic" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(narrow.container.querySelectorAll('.sqc-v')).toHaveLength(3);
   });
 });

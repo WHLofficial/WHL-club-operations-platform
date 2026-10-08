@@ -25,7 +25,7 @@ export function seasonsOf(windows: number): string {
 }
 
 export function money2(n: number | null): string {
-  return n === null ? '—' : `${n.toFixed(2)} m`;
+  return n === null ? '—' : `${n.toFixed(2)}m`;
 }
 
 const FACILITY_LABEL: Record<string, string> = {
@@ -478,7 +478,7 @@ export function BookingsCard() {
   const slotNos = Array.from({ length: Math.max(0, data.slots) }, (_, i) => i + 1);
   const fallbackKey = data.catalog.find((o) => o.key === 'idle')?.key ?? data.catalog[0]?.key ?? '';
   const incomeText = (o: BookingActivityOption) =>
-    o.incomeMin === o.incomeMax ? money2(o.incomeMin) : `${o.incomeMin.toFixed(2)}–${o.incomeMax.toFixed(2)} m`;
+    o.incomeMin === o.incomeMax ? money2(o.incomeMin) : `${o.incomeMin.toFixed(2)}–${o.incomeMax.toFixed(2)}m`;
 
   return (
     <section className="card">

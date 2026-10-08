@@ -41,7 +41,7 @@ export function MarketBidForm({
     return (
       <div className="inline-form">
         <button className="btn" type="button" disabled={busy} onClick={submit}>
-          {busy ? '出价中…' : `落激活首价（${money(askPrice)} m）`}
+          {busy ? '出价中…' : `落激活首价（${money(askPrice)}m）`}
         </button>
         <span className="hint">激活金额固定，出价即冻结。</span>
       </div>
@@ -69,9 +69,9 @@ export function MarketBidForm({
         />
       </div>
       <button className="btn" type="button" disabled={busy || !integerOk || Number(amount) < nextMinBid} onClick={submit}>
-        {busy ? '出价中…' : `出价（至少 ${money(nextMinBid)} m）`}
+        {busy ? '出价中…' : `出价（至少 ${money(nextMinBid)}m）`}
       </button>
-      <span className="hint">出价即冻结资金{available !== null ? <>，当前可支配 {money(available)} m</> : null}。</span>
+      <span className="hint">出价即冻结资金{available !== null ? <>，当前可支配 {money(available)}m</> : null}。</span>
     </div>
   );
 }

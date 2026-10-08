@@ -9,7 +9,7 @@ import { TeamLogo } from '../components/TeamLogo.tsx';
 
 // 金额口径与球员库一致（身价/工资都以「m」为单位存储）；null = 没录过，显示「—」
 function money(x: number | null): string {
-  return x === null ? '—' : `${x.toFixed(2)} m`;
+  return x === null ? '—' : `${x.toFixed(2)}m`;
 }
 
 const SEGMENTS: { key: 'premier' | 'second' | 'none'; title: string; hint: string }[] = [

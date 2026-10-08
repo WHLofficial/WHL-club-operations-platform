@@ -316,7 +316,7 @@ function ContractsSection() {
       {toastNode}
       <p className="hint">
         每队一份 CSV（列：uid、RC、工资、效力起点、类型）。合同落库的同时，无归属的球员会认领到所选俱乐部——
-        队壳归属以平台合同为准。训练营合同工资固定 0.75 m/半赛季。
+        队壳归属以平台合同为准。训练营合同工资固定 0.75m/半赛季。
       </p>
       <label className="field">
         目标俱乐部

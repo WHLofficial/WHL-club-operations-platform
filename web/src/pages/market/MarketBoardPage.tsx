@@ -127,12 +127,12 @@ export function MarketCard({ listing, mine, onOpen }: { listing: MarketListing; 
       <div className="mkt-rows">
         <div className="mkt-row">
           <span className="mkt-labr">{listing.type === 'activation' ? '激活价' : '挂牌价'}</span>
-          <span className="mkt-val mono">{money(listing.askPrice)} m</span>
+          <span className="mkt-val mono">{money(listing.askPrice)}m</span>
         </div>
         <div className="mkt-row">
           <span className="mkt-labr">当前最高</span>
           <span className={`mkt-val mono${listing.highestBid != null ? ' mkt-hi' : ''}`}>
-            {listing.highestBid == null ? '还没人出价' : `${money(listing.highestBid)} m`}
+            {listing.highestBid == null ? '还没人出价' : `${money(listing.highestBid)}m`}
           </span>
         </div>
         <div className="mkt-row">

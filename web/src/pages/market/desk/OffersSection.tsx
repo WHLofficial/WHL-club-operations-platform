@@ -86,7 +86,7 @@ export default function OffersSection({
     try {
       if (action === 'counter') {
         const r = await apiPost<{ ok: boolean; amount: number }>(`/api/offers/${offer.id}/counter`, { amount });
-        show(`还价已送出：${r.amount.toFixed(2)} m，等对方表态。`);
+        show(`还价已送出：${r.amount.toFixed(2)}m，等对方表态。`);
         setCounterDraft('');
       } else {
         await apiPost(`/api/offers/${offer.id}/${action}`, {});
@@ -303,7 +303,7 @@ function OfferDesk({
       </div>
       <div className="side-row">
         <span className="attr-name">当前有效价</span>
-        <span className="mono">{money(offer.amount)} m（首报 {money(offer.initAmount)} m · R{offer.round}）</span>
+        <span className="mono">{money(offer.amount)}m（首报 {money(offer.initAmount)}m · R{offer.round}）</span>
       </div>
       {offer.note && (
         <div className="side-row">
@@ -365,7 +365,7 @@ function OfferDesk({
           )}
           {canAccept && (
             <button type="button" className="btn" disabled={busy} onClick={() => void onAct(offer, 'accept')}>
-              同意（{money(offer.amount)} m，同意即挂牌）
+              同意（{money(offer.amount)}m，同意即挂牌）
             </button>
           )}
           {canReject && (
@@ -391,7 +391,7 @@ function OfferDesk({
           {offer.role === 'seller' ? (
             <>
               <button type="button" className="btn" disabled={busy} onClick={() => void onAct(offer, 'accept')}>
-                确认挂牌（{money(offer.amount)} m）
+                确认挂牌（{money(offer.amount)}m）
               </button>
               <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void onAct(offer, 'reject')}>
                 放弃

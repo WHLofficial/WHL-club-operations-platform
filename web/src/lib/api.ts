@@ -144,7 +144,7 @@ export interface ClubSummary {
   avgCa: number | null;
   /**
    * 全队身价合计。`players.market_value` 是运营列（导入不写、只有 admin PATCH 会写），
-   * 一个人都没录过时服务端给 null ⇒ 前端显示「—」而不是 0.00 m
+   * 一个人都没录过时服务端给 null ⇒ 前端显示「—」而不是 0.00m
    */
   totalValue: number | null;
   totalWage: number;

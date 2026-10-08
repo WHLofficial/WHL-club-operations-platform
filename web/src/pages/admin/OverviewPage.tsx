@@ -120,7 +120,7 @@ function M0Section() {
     );
   }
   const fmt = (v: number) =>
-    `${v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m`;
+    `${v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}m`;
   return (
     <section className="card admin-section">
       <h2>M0 货币监控</h2>

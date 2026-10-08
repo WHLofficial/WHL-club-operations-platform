@@ -35,8 +35,8 @@ function MyBidsSection({ bids, available, balance }: { bids: MyBidRow[]; availab
     <section className="card">
       <h3>我的出价</h3>
       <p className="hint">
-        账户余额 {money(balance)} m，冻结中 {money(bids.filter((b) => b.holdStatus === 'held').reduce((s, b) => s + b.amount, 0))} m，
-        可支配 {money(available)} m。出价即冻结，被超出或落选自动解冻。
+        账户余额 {money(balance)}m，冻结中 {money(bids.filter((b) => b.holdStatus === 'held').reduce((s, b) => s + b.amount, 0))}m，
+        可支配 {money(available)}m。出价即冻结，被超出或落选自动解冻。
       </p>
       <div className="table-wrap">
         <table>

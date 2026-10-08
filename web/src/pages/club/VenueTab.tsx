@@ -58,7 +58,7 @@ const RESULT_BADGE: Record<string, string> = {
 };
 
 function money2(n: number | null): string {
-  return n === null ? '—' : `${n.toFixed(2)} m`;
+  return n === null ? '—' : `${n.toFixed(2)}m`;
 }
 
 function HomeMatchesCard() {

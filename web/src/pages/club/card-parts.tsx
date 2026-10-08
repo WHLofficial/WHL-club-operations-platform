@@ -1,6 +1,7 @@
 // 阵容/注册名单卡片化共享组件（v6.37.0 定稿：位置分组即容器 + 行解剖，桌面与窄屏同构）。
 // 窄屏（≤760px）：四视图 chips + 组头挂列头（值-only 指标格，宽度钉死 --sqc-cw 对齐）；
-// 桌面：无 chips、四视图全列合并（DESKTOP_CELLS），组头列头退化为右对齐标签串（定稿画板 14-B）。
+// 桌面：无 chips、四视图全列合并（阵容 SquadCard 用 DESKTOP_CELLS 13 列；注册台 RegCard 用
+// DESKTOP_CELLS_DESK 11 列，舍初始CA/成长空间以让出行尾分配列、单行放下），组头列头与值区逐列对齐。
 // 结构纪律沿袭既有窄屏案例：narrow 与桌面 DOM 互斥、类名一律 sqc- 前缀、CSS 集中在 styles.css 段末。
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -9,6 +10,7 @@ import {
   CARD_VIEWS,
   CARD_VIEW_CELLS,
   DESKTOP_CELLS,
+  DESKTOP_CELLS_DESK,
   inlineBadgesOf,
   positionSummary,
   type CardCell,
@@ -189,6 +191,13 @@ export function CardGroup({
   children: ReactNode;
 }) {
   const accent = GROUP_ACCENTS[groupKey] ?? GROUP_ACCENTS.unknown!;
+  // 列头格列表（cells 在前、可加列在后 —— 与 metricValues 的值序一一对应）：宽屏与窄屏共用这一份，
+  // 两套网格只是容器规则不同（.sqc-glegend / .sqc-m.sqc-gcols），标签不会漂
+  const legendCells = [...cells, ...extras].map((c) => (
+    <span key={c.key} className="sqc-k">
+      {c.label}
+    </span>
+  ));
   return (
     <section className={`sqc-group${wide ? ' wide' : ''}`} style={{ '--sqc-accent': accent } as CSSProperties}>
       <header className={`sqc-ghead${assign ? ' has-assign' : ''}`}>
@@ -196,22 +205,11 @@ export function CardGroup({
           {label} <span className="sqc-gcount">· {count}</span>
         </h4>
         {wide ? (
-          // 桌面（定稿 14-B）：列头退化为组头右侧的标签串，不逐列对齐
-          <span className="sqc-glegend">
-            {[...cells, ...extras].map((c) => c.label).join(' ')}
-          </span>
+          // 桌面（v6.39.2）：列头 = 与行内值区同款等宽轨网格，逐列对齐（此前是右对齐标签串，对不上）
+          <span className="sqc-glegend">{legendCells}</span>
         ) : (
           <span className="sqc-m sqc-gcols" aria-hidden="true">
-            {cells.map((c) => (
-              <span key={c.key} className="sqc-k">
-                {c.label}
-              </span>
-            ))}
-            {extras.map((d) => (
-              <span key={d.key} className="sqc-k">
-                {d.label}
-              </span>
-            ))}
+            {legendCells}
           </span>
         )}
       </header>
@@ -425,7 +423,8 @@ export function RegCard({
   // 与桌面旧 SquadRow 同口径：不可成长（或无成长空间）的球员分进训练营会报错；
   // 只在真的分进训练营时才显示（不是「潜在进不去」就喊）
   const traineeBlocked = !row.growable || (row.pa ?? 0) - (row.ca ?? 0) <= 0;
-  const cells = wide ? DESKTOP_CELLS : CARD_VIEW_CELLS[view];
+  // 注册台桌面列用 DESKTOP_CELLS_DESK（11 列，舍「初始CA」「成长空间」）——用户裁决见 club-cards.ts
+  const cells = wide ? DESKTOP_CELLS_DESK : CARD_VIEW_CELLS[view];
   const badges = inlineBadgesOf(row);
   const values = metricValues(cells, row, extras.map((d) => d.key), row);
   const flagEls = flags.map((f, i) => (

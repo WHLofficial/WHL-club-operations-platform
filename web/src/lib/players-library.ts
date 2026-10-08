@@ -401,10 +401,10 @@ const RANGE_CHIP_GROUPS: [keyof Filters, keyof Filters, string, string][] = [
   ['ageMin', 'ageMax', '年龄', ' 岁'],
   ['baseCaMin', 'baseCaMax', '初始 CA', ''],
   ['gapMin', 'gapMax', '成长空间', ''],
-  ['mvMin', 'mvMax', '身价', ' m'],
+  ['mvMin', 'mvMax', '身价', 'm'],
   ['inflMin', 'inflMax', '影响力', ''],
-  ['wageMin', 'wageMax', '工资', ' m'],
-  ['rcMin', 'rcMax', '解约金', ' m'],
+  ['wageMin', 'wageMax', '工资', 'm'],
+  ['rcMin', 'rcMax', '解约金', 'm'],
   ['yearsMin', 'yearsMax', '效力时长', ' 年'],
 ];
 
@@ -477,7 +477,7 @@ export function filterChips(f: Filters, clubs: readonly { id: number; name: stri
 // 金额显示：与页面（pages/PlayersLibrary.tsx）原本地副本逐字一致，v6.19.0 起页面改用这份。
 // null 出「—」而不是 0 ——「没有合同」与「0 工资」是两回事。
 export function money(x: number | null): string {
-  return x === null ? '—' : `${x.toFixed(2)} m`;
+  return x === null ? '—' : `${x.toFixed(2)}m`;
 }
 
 // 排序下拉的中文标签（窄屏排序行）：30 个固定键全覆盖 —— 29 个非 id 键的文案就是承载它的表头列
