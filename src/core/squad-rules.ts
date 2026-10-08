@@ -1,7 +1,7 @@
 // 阵容注册合规引擎（规则 4.2 + PRD §4.3）：纯函数，注册提交校验与管理端体检共用。
 // 口径：一线队 squad_min-squad_max 人含 ≥gk_min 门将；训练营 ≤trainee_max 人且可成长（PA−CA＞0）；
 // CA/PA 梯度按俱乐部级别，以**初始CA**计（规则 4.2.2 原文；= players.base_ca，裁决：跟随 FC 源
-// 刷新 = §10.4 非平台成长所得 CA），CA≥87 计数含 CA≥90；工资帽按半赛季（P1，null=未配置跳过）。
+// 刷新 = §10.4 非平台成长所得 CA），CA≥87 计数含 CA≥90；工资帽按级别（顶级 68 / 次级 58，用户令 2026-10-06）。
 
 export const TRAINEE_WAGE = 0.75; // 训练营合同固定工资（m/半赛季，规则 4.3.4）
 export const TRAINEE_RC = 5; // 训练营合同固定违约金（m，规则 4.3.4：激活倍数固定 1 倍与其对齐）
@@ -18,6 +18,13 @@ export const DEFAULT_CA_PA_LIMITS: Record<'premier' | 'second', SquadLimits> = {
   premier: { ge90: 1, ge87: 4, growthPa87: 6 },
   second: { ge90: 1, ge87: 3, growthPa87: 6 },
 };
+
+// 工资帽按级别（m/半赛季，用户令 2026-10-06：顶级 68 / 次级 58）。config 键 wage_cap 存分级别 JSON，
+// 本表是与 ca_pa_limits 同源的兜底默认（config 缺行或缺档时用它）——即「未配置不再跳过」。
+export const DEFAULT_WAGE_CAP_BY_TIER: Record<'premier' | 'second', number> = { premier: 68, second: 58 };
+
+// 扣工资下限 = 对应级别工资帽 − 15（用户令 2026-10-06：未达 53 / 43 的按下限扣）。未定级不适用。
+export const WAGE_FLOOR_GAP = 15;
 
 // 注册校验放行档（v6.33.1 特例期开关 registration_check_mode）：
 // - enforce（默认）：照常拦，不通过就 422；

@@ -255,6 +255,115 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
     const kinds = (fx.sqlite.prepare('SELECT kind FROM ledger_entries').all() as { kind: string }[]).map((r) => r.kind);
     expect(kinds).toEqual(['luxury_tax']);
   });
+
+  it('工资下限：未达级别下限按下限扣（顶级 53 / 次级 43），未定级不适用', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11); // 顶级：报了 league_premier
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12); // 次级：报了 league_second
+    seedClubWithTeam(fx.auth, fx.sqlite, 3, 13); // 未定级：没报定级赛事
+    fx.sqlite
+      .prepare(
+        "INSERT INTO season_tournaments (id, season, tournament_id, competition_type) VALUES (1, 9, 1, 'league_premier'), (2, 9, 2, 'league_second')",
+      )
+      .run();
+    fx.tour.prepare('INSERT INTO entry (id, tournament_id, team_id) VALUES (1, 1, 11), (2, 2, 12)').run();
+    fx.sqlite
+      .prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24), (2, 'p2', '乙', 2, 24), (3, 'p3', '丙', 3, 24)`)
+      .run();
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES
+        (1, 1, 1, 500, 49.23, '2026-01-01T00:00:00Z', 1),
+        (2, 2, 2, 500, 37.62, '2026-01-01T00:00:00Z', 1),
+        (3, 3, 3, 500, 10, '2026-01-01T00:00:00Z', 1)`)
+      .run();
+    const { statements, summary } = await windowPayrollStatements(fx.env, 9, 1, { chargeWages: true });
+    expect(summary).toMatchObject({ wageClubs: 3, wageTotal: 53 + 43 + 10, wageFloorClubs: 2 });
+    await fx.env.DB.batch(statements);
+    const rows = fx.sqlite
+      .prepare("SELECT club_id, amount, memo FROM ledger_entries WHERE kind = 'wage' ORDER BY club_id")
+      .all() as { club_id: number; amount: number; memo: string }[];
+    expect(rows.map((r) => [r.club_id, r.amount])).toEqual([
+      [1, -53],
+      [2, -43],
+      [3, -10],
+    ]);
+    expect(rows[0].memo).toContain('未达顶级下限 53 m，按下限扣');
+    expect(rows[1].memo).toContain('未达次级下限 43 m，按下限扣');
+    expect(rows[2].memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）');
+  });
+
+  it('下限边界：恰等于下限不按下限记（memo 无尾注、计数不加）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11); // 工资恰等于顶级下限 53
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12); // 工资略高于下限
+    fx.sqlite
+      .prepare(
+        "INSERT INTO season_tournaments (id, season, tournament_id, competition_type) VALUES (1, 9, 1, 'league_premier'), (2, 9, 2, 'league_premier')",
+      )
+      .run();
+    fx.tour.prepare('INSERT INTO entry (id, tournament_id, team_id) VALUES (1, 1, 11), (2, 1, 12)').run();
+    fx.sqlite
+      .prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24), (2, 'p2', '乙', 2, 24)`)
+      .run();
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES
+        (1, 1, 1, 500, 53, '2026-01-01T00:00:00Z', 1),
+        (2, 2, 2, 500, 53.01, '2026-01-01T00:00:00Z', 1)`)
+      .run();
+    const { statements, summary } = await windowPayrollStatements(fx.env, 9, 1, { chargeWages: true });
+    expect(summary).toMatchObject({ wageClubs: 2, wageTotal: 106.01, wageFloorClubs: 0 });
+    await fx.env.DB.batch(statements);
+    const rows = fx.sqlite
+      .prepare("SELECT club_id, amount, memo FROM ledger_entries WHERE kind = 'wage' ORDER BY club_id")
+      .all() as { club_id: number; amount: number; memo: string }[];
+    expect(rows.map((r) => [r.club_id, r.amount])).toEqual([
+      [1, -53],
+      [2, -53.01],
+    ]);
+    expect(rows[0].memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）');
+    expect(rows[1].memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）');
+  });
+
+  it('下限取 config 覆盖值：帽值改 60 后按下限 45 判（不再用默认 53）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    fx.sqlite
+      .prepare("INSERT INTO season_tournaments (id, season, tournament_id, competition_type) VALUES (1, 9, 1, 'league_premier')")
+      .run();
+    fx.tour.prepare('INSERT INTO entry (id, tournament_id, team_id) VALUES (1, 1, 11)').run();
+    fx.sqlite
+      .prepare(`INSERT INTO config (key, value, updated_at) VALUES ('wage_cap', '{"premier":60,"second":58}', '2026-01-01T00:00:00Z')`)
+      .run();
+    fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24)`).run();
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES (1, 1, 1, 500, 48, '2026-01-01T00:00:00Z', 1)`)
+      .run();
+    const { statements, summary } = await windowPayrollStatements(fx.env, 9, 1, { chargeWages: true });
+    expect(summary).toMatchObject({ wageClubs: 1, wageTotal: 48, wageFloorClubs: 0 });
+    await fx.env.DB.batch(statements);
+    const row = fx.sqlite.prepare("SELECT amount, memo FROM ledger_entries WHERE kind = 'wage'").get() as { amount: number; memo: string };
+    // 用默认帽值（68 ⇒ 下限 53）会扣成 −53；覆盖成 60 ⇒ 下限 45 ⇒ 按实际工资扣
+    expect(row.amount).toBe(-48);
+    expect(row.memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）');
+  });
+
+  it('CPU 队不入账：工资与富人税都跳过（用户令 2026-10-06）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    fx.sqlite.prepare('UPDATE clubs SET is_cpu = 1 WHERE id = 1').run();
+    fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24)`).run();
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES (1, 1, 1, 500, 3, '2026-01-01T00:00:00Z', 1)`)
+      .run();
+    fx.sqlite.prepare('UPDATE ledger_accounts SET balance = 200 WHERE club_id = 1').run(); // 不跳过则税 40、工资 3 都会记
+    const { statements, summary } = await windowPayrollStatements(fx.env, 1, 1, { chargeWages: true });
+    expect(summary).toMatchObject({ wageClubs: 0, wageTotal: 0, taxClubs: 0, taxTotal: 0, wageFloorClubs: 0 });
+    expect(statements).toHaveLength(0);
+  });
 });
 
 describe('赛季结算（growable 重判+settled）与忠诚奖金（v3.0.0 移入中期窗）', () => {

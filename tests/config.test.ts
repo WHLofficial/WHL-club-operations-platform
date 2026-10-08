@@ -27,9 +27,10 @@ describe('config 服务（§13）', () => {
     await expect(service.getNumber('auction_tax_rate')).resolves.toBe(0.5);
   });
 
-  it('json/待定键缺省为 null（ca_pa_limits 除外，规则 4.2.2 有原文默认）', async () => {
+  it('json/待定键缺省为 null（ca_pa_limits 与 wage_cap 除外，各有原文默认）', async () => {
     const { service } = setup();
-    await expect(service.get('wage_cap')).resolves.toBeNull();
+    // v6.39.0：工资帽改按级别（用户令 2026-10-06：顶级 68 / 次级 58），config 表可取整表或按档覆盖
+    await expect(service.getJson<Record<string, number>>('wage_cap')).resolves.toEqual({ premier: 68, second: 58 });
     // v1.4.0：prize_table 有 §9.1 原文默认（JSON 可覆盖），不再是缺省 null
     await expect(service.getJson<object>('prize_table')).resolves.toHaveProperty('league_premier');
     await expect(service.getJson<object>('ca_pa_limits')).resolves.toEqual({

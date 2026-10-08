@@ -1144,10 +1144,18 @@ describe('注册名单提交与校验（附录 A〔2〕）', () => {
     expect(body.issues.find((i) => i.rule === 'contract')?.message).toContain('一线5');
   });
 
-  it('工资帽配置后超限被拒（P1 占位，未配置时跳过）', async () => {
+  it('工资帽按级别：默认顶级 68 放行，config 覆盖后超限被拒', async () => {
+    // v6.39.0：默认值即生效（config 无 wage_cap 行 → 顶级 68）。夹具工资合计 20 + 3×0.75 = 22.25 m → 通过
+    const pass = freshEnv();
+    await seedRegistrationWorld(pass);
+    expect((await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', pass.env)).status).toBe(200);
+
+    // config 覆盖成按级别 JSON（旧口径为单值 '20'）：顶级 20 m → 被拒
     const fx = freshEnv();
     await seedRegistrationWorld(fx);
-    fx.sqlite.prepare("INSERT INTO config (key, value, updated_at) VALUES ('wage_cap', '20', '2026-01-01T00:00:00Z')").run();
+    fx.sqlite
+      .prepare(`INSERT INTO config (key, value, updated_at) VALUES ('wage_cap', '{"premier":20,"second":20}', '2026-01-01T00:00:00Z')`)
+      .run();
     const res = await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
     expect(res.status).toBe(422);
     const body = (await res.json()) as { issues: { rule: string; message: string }[] };
@@ -1196,7 +1204,7 @@ describe('注册名单提交与校验（附录 A〔2〕）', () => {
     expect(empty.players).toHaveLength(23);
     expect(empty.registration).toBeNull();
     expect(empty.compliance).toBeNull();
-    expect(empty.rules).toMatchObject({ squadMin: 20, wageCap: null });
+    expect(empty.rules).toMatchObject({ squadMin: 20, wageCap: 68 }); // v6.39.0：顶级默认帽值 68 m（规则口径）
 
     await post('/api/club/registrations', regBody(FULL_FIRST, FULL_TRAINEE), 'tok-coach', fx.env);
     const filled = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {

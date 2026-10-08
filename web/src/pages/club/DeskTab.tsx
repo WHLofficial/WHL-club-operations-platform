@@ -344,7 +344,10 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
           <p className="hint">
             一线队 {rules.squadMin}-{rules.squadMax} 人、至少 {rules.gkMin} 名门将；训练营 ≤{rules.traineeMax} 人且须可成长（PA−CA＞0）。
             {rules.tier && <>初始CA 限额：≥90 最多 {rules.limits.ge90} 名、≥87 最多 {rules.limits.ge87} 名、＜87 且 PA≥87 且未练满可成长最多 {rules.limits.growthPa87} 名。</>}
-            工资帽以半赛季计{wageCap === null ? '（本季度未配置，暂不校验）' : `，上限 ${wageCap} m`}。
+            工资帽按级别以半赛季计
+            {wageCap === null
+              ? '（本季度未配置，暂不校验）'
+              : `（${rules.tier ? (LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier) : '本级'} ${wageCap} m）；窗末按现行合同工资实扣，未达下限 ${wageCap - 15} m 按下限扣`}。
           </p>
 
           <div className="preview-stats">
@@ -372,7 +375,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             </div>
           </div>
           {wageCap !== null && (
-            <div className="cap-bar" title={`工资帽 ${wageCap} m`}>
+            <div className="cap-bar" title={`${rules.tier ? `${LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier} ` : ''}工资帽 ${wageCap} m（扣款下限 ${wageCap - 15} m）`}>
               <div
                 className={`cap-bar-fill${capLeft !== null && capLeft < 0 ? ' over' : ''}`}
                 style={{ width: `${Math.min(100, (stats.wageTotal / wageCap) * 100)}%` }}
