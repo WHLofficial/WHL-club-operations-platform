@@ -1,0 +1,137 @@
+{
+  "batch": "prod-20261006-s9-wage-floor-fix",
+  "generatedAt": "2026-10-08T04:12:48.220Z",
+  "rule": {
+    "order": "顶级联赛未达 53、次级联赛未达 43 工资的球队，扣工资时按 53/43 扣除（= 对应级别工资帽 − 15）",
+    "wageCapByTier": {
+      "premier": 68,
+      "second": 58
+    },
+    "floorGap": 15,
+    "floorByTier": {
+      "premier": 53,
+      "second": 43
+    },
+    "source": "src/core/squad-rules.ts（DEFAULT_WAGE_CAP_BY_TIER / WAGE_FLOOR_GAP）+ src/worker/window-payroll.ts（v6.39.0）",
+    "refId": 901,
+    "refIdMeaning": "season * 100 + windowSeq = S9 第 1 窗"
+  },
+  "clubs": [
+    {
+      "clubId": 5,
+      "clubName": "切尔西",
+      "tier": "premier",
+      "cap": 68,
+      "floor": 53,
+      "oldAmount": -49.23,
+      "newAmount": -53,
+      "extra": 3.77,
+      "contracts": 31
+    },
+    {
+      "clubId": 280,
+      "clubName": "奥林匹亚科斯",
+      "tier": "second",
+      "cap": 58,
+      "floor": 43,
+      "oldAmount": -37.62,
+      "newAmount": -43,
+      "extra": 5.38,
+      "contracts": 30
+    },
+    {
+      "clubId": 449,
+      "clubName": "皇家贝蒂斯",
+      "tier": "premier",
+      "cap": 68,
+      "floor": 53,
+      "oldAmount": -33.37,
+      "newAmount": -53,
+      "extra": 19.63,
+      "contracts": 25
+    }
+  ],
+  "totals": {
+    "oldAmount": -120.22,
+    "newAmount": -149,
+    "extra": -28.78,
+    "other15ClubsSum": -902.46,
+    "grandTotalAfter": -1051.46
+  },
+  "cpuOptional": {
+    "approved": false,
+    "note": "用户 2026-10-06 令「cpu也不扣工资」，但 S9 第 1 窗按当时口径「财政导入排除、工资照扣」已扣；是否追溯回冲待裁决 ⇒ 件已备，默认不执行",
+    "clubs": [
+      {
+        "clubId": 241,
+        "clubName": "巴塞罗那(CPU)",
+        "tier": "premier",
+        "chargedAmount": -61.48,
+        "refundTo": 0
+      },
+      {
+        "clubId": 112172,
+        "clubName": "RB莱比锡(CPU)",
+        "tier": "second",
+        "chargedAmount": -57.69,
+        "refundTo": 0
+      }
+    ]
+  },
+  "precheck": [
+    {
+      "label": "A",
+      "purpose": "三条工资行现状：amount 应为 −49.23 / −37.62 / −33.37、memo 尾为「 人现行合同）」"
+    },
+    {
+      "label": "B",
+      "purpose": "三队账户余额与最新一条流水：invariant 必须全为 consistent（③ 对账语句的不变式前提）"
+    },
+    {
+      "label": "C",
+      "purpose": "工资行之后的流水（本批要顺移 balance_after 的行）：期望 0 行；有行时逐行核对影响面"
+    },
+    {
+      "label": "D",
+      "purpose": "Σ 现行合同工资与人数（触底判据）：期望 5→49.23/31 人、280→37.62/30 人、449→33.37/25 人"
+    },
+    {
+      "label": "E",
+      "purpose": "CPU 旗标：5 / 280 / 449 必须 is_cpu = 0（CPU 队不进本批的触底订正）"
+    },
+    {
+      "label": "F",
+      "purpose": "级别证据：S9 定级赛事（league_premier / league_second）——5/449 顶级、280 次级"
+    },
+    {
+      "label": "G",
+      "purpose": "已修检测：期望 0 行（>0 说明本批已跑过，先看 03-verify.sql 再决定）"
+    }
+  ],
+  "files": [
+    {
+      "path": "sql/01-precheck.sql",
+      "statements": 7
+    },
+    {
+      "path": "sql/02-wage-floor-fix.sql",
+      "statements": 9
+    },
+    {
+      "path": "sql/03-verify.sql",
+      "statements": 5
+    },
+    {
+      "path": "sql/04-cpu-refund-optional.sql",
+      "statements": 6
+    },
+    {
+      "path": "rollback/01-wage-floor.sql",
+      "statements": 9
+    },
+    {
+      "path": "rollback/02-cpu-refund-optional.sql",
+      "statements": 6
+    }
+  ]
+}
