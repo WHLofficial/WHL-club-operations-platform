@@ -745,7 +745,7 @@ seasons(season=N, status: preparing → running → settled)
 | `gk_min` | `1` | 门将下限 |
 | `trainee_max` | `7` | 训练营上限 |
 | `ca_pa_limits` | json（premier:1/4/6；second:1/3/6，规则 4.2.2 原文） | CA/PA 限额梯度（premier/second 两套） |
-| `wage_cap` | `null` | 工资帽（m/半赛季，随赛季大名单填入） |
+| `wage_cap` | json（premier:68；second:58） | 按级别工资帽（m/半赛季；v6.39.0 分套，可由 `PUT /api/admin/config` 覆盖）；窗末扣款下限 = 帽 − 15（顶级 53 / 次级 43），未定级不适用 |
 | `prize_table` | json | 赛事奖金表（§9.1） |
 | `loyalty_tiers` | `[[0.5,0.05],[1.5,0.10],[2.5,0.20]]` | 忠诚奖金档位 [起效赛季, RC 比例]，取满足的最高档（§11；v3.0.0 单位由「年」改「赛季」，1 常规窗=0.5 赛季） |
 | `luxury_cash_threshold` / `luxury_cash_rate` | `125` / `0.20` | 富人税（资金） |
@@ -784,7 +784,7 @@ seasons(season=N, status: preparing → running → settled)
 
 🔒 = 涉密键（§6.10：掩码展示、audit 不记值、不进前端）。
 
-注册表在 `src/core/config.ts` 的 `CONFIG_KEYS` 共 61 条登记（唯一键 59 个——`prize_table` 与 `attendance_model` 各重复登记一次，读取按名取默认，无副作用）；有默认值的键见同文件 `CONFIG_DEFAULTS`，`wage_cap` / `maintenance_table` / `upgrade_plans` / `tier_conditions` 无默认，缺省时 `get` 返回 null。
+注册表在 `src/core/config.ts` 的 `CONFIG_KEYS` 共 80 条登记（唯一键 78 个——`prize_table` 与 `attendance_model` 各重复登记一次，读取按名取默认，无副作用；计数为本版实测订正，原句写 61/59 已滞后）；有默认值的键见同文件 `CONFIG_DEFAULTS`，`maintenance_table` / `upgrade_plans` / `tier_conditions` 无默认，缺省时 `get` 返回 null（`wage_cap` v6.39.0 起自带按级别默认，不再列于此）。
 
 ## 14. 迁移与部署
 
@@ -817,7 +817,7 @@ Cutover 步骤：①平台部署 → ②导入期初余额与球场数据 → �
 | # | 类型 | 内容 |
 |---|---|---|
 | 1 | 假设 | 交易日 = 自然日（可配置交易日历），待确认 |
-| 2 | 可配置 | 工资帽数值：随每赛季大名单填入 config，不阻塞开发 |
+| 2 | 已定（v6.39.0） | 工资帽数值：按级别分套（顶级 68 / 次级 58）——`DEFAULT_WAGE_CAP_BY_TIER` 落 config 默认值（`squad-rules.ts`），`PUT /api/admin/config` 可覆盖；窗末扣款的级别下限 = 帽 − 15（顶级 53 / 次级 43），未定级不适用；CPU 队不入账（用户令 2026-10-06） |
 | 3 | 已定 | 工资/谈判判定整套移植谈判插件 `formula.py` 实公式（§6.7），参数默认取插件现值全部可配置，「占位系数校准」待办撤销 |
 | 4 | 已定 | FC 属性字段 = FC Editor 表头 61 列（§5.2）全量入 game_attrs；徽章效果随 Playstyles 映射确认后定义 |
 | 5 | 假设 | 忠诚奖金 2-2.5 年档按 1.5-2 年档（10%）处理，可配置 |

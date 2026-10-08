@@ -1500,6 +1500,27 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.39.0 · 工资帽按级别（顶级 68 / 次级 58）+ 窗末扣款级别下限（帽 − 15 = 53/43）+ CPU 队不入账 + 消费中心窄屏过宽修复（2026-10-08）
+
+**状态**：**本地收口，未 push**（零迁移、零生产写；等用户下令后随授权 push 同轮上线）。判级 minor——两处用户可见变化（工资帽按级别显示、消费中心窄屏可用），无 DB 迁移、无 API 契约变更。typecheck 三份 tsconfig 0 error；vitest **104 文件 / 1744 例**全绿（v6.38.1 基线 104/1738，净 +6 例）；`npm run build` 成功；e2e **24/24**（⑱ 新增 375 段）。测试计划 `docs/test-plans/v6.39.0-wage-cap-by-tier.md`（TC-CAP-01 / TC-FLOOR-01–03 / TC-CPU-01 / TC-SHOP-01–03 + 3 枚变异实测 + 1 枚等价变异登记）。生产订正批 `scripts/prod-20261006-s9-wage-floor-fix/` **只备不跑**（形状级演练 27 条断言全过，含崩溃窗口自愈）。
+
+**缘起与拍板**（用户令，2026-10-06–08）：①（m01914）「上次扣工资时忽略了一点：顶级联赛未达53，次级联赛未达43工资的球队，扣工资时按53/43扣除，这个数字是对应级别工资帽-15」。四问四答：〔帽值落库〕「2，改一下平台现有机制」= 存两项帽值 68/58、代码算「帽 − 15」，并把现有工资帽机制从**全局单值**改成**按级别**；〔生效范围〕worker 永久生效 + 本次补扣；〔未定级〕不扣，且「工资帽阵容限制也按级别显示」；〔补扣方式〕「直接把上次的扣款记录改改」（原地改行，不做补偿分录）。②（m02029/m02030）「cpu也不扣工资」——与奖金/主场收入/拍卖同口径，CPU 队不入账。③（m01899 + m02015）附 /shop 375 视口截图（右缘被裁）「修复消费中心过宽问题，排查类似问题」→「之前的计划呢，加上一起做」⇒ 窄屏修复与工资任务同批交付。
+
+**交付**：
+- 规则层 `src/core/squad-rules.ts`：新增 `DEFAULT_WAGE_CAP_BY_TIER = { premier: 68, second: 58 }` 与 `WAGE_FLOOR_GAP = 15`；引擎 `checkSquad` 未动（`ctx.wageCap` 仍是 `number | null`、rule id 仍是 `wage_cap`、超帽文案逐字不变）。
+- 配置层 `src/core/config.ts`：`wage_cap` 由「无默认（`get` 返回 null）」改为 `JSON.stringify(DEFAULT_WAGE_CAP_BY_TIER)`（分套 json 先例同 `ca_pa_limits`）；**未加键**，`CONFIG_KEYS` 仍 80 条登记（唯一键 78），三处「80」断言与 `PUT /api/admin/config` 通道均不动。`src/worker/squad-context.ts` 改读 `getJson<Partial<Record<Tier, number>>>('wage_cap')` ⇒ `wageCapJson?.[tier] ?? DEFAULT_WAGE_CAP_BY_TIER[tier]`（`tier === null` 仍抛 500，不回退）。
+- 扣款层 `src/worker/window-payroll.ts`：工资段 `floor = cap − WAGE_FLOOR_GAP`，`total < floor` 时按下限扣并在 memo 追「；未达顶级/次级下限 N m，按下限扣」；`PayrollSummary` 增 `wageFloorClubs`；CPU 队（`cpuClubIds`）在**工资与富人税两段都跳过**（余额不动、无流水）。
+- 前端 `web/src/pages/club/DeskTab.tsx`：工资帽文案与进度条随 `rules.wageCap` 按级别显示（未配置态文案同步）。
+- 窄屏（消费中心过宽）：`web/src/styles.css` 新增 `.shop-main`（`flex: 1 1 480px; min-width: 0`）与 `.shop-side`（`flex: 0 1 340px; min-width: 0`）——两栏原本吃 `min-width: auto`，被子设施行/工单内容顶宽致整页横向溢出；`@media (max-width: 640px)` 内 `.seg` 改单行横滑（`display:flex; max-width:100%; overflow-x:auto` + `button/a { flex: 0 0 auto }`，与 `.dossier-tabs` 既有惯例一致）；`ShopPage.tsx` 两栏改 `className="shop-main"/"shop-side"`（删内联 `flex/minWidth`）；`venueCards.tsx` 子设施行改 `flex + wrap`（项内仍 nowrap，项间可换行）。
+- 闸门：`tests/mobile-baseline.test.ts` 新增 TC-SHOP-01/02（`.shop-main/.shop-side` 的 `min-width:0` 必须落 CSS 类、模板不得回内联 `minWidth`；`.seg` 有 `overflow-x:auto`；子设施行有 `flexWrap:'wrap'`）；`scripts/e2e/smoke.mjs` ⑱ 追加 375×812 段（文档零溢出 + 越界元素入失败消息、`.seg` 几何 `ovx/wrap/scrollable/buttons≥5`、子设施行 flex+wrap+右缘 ≤ 视口 + 1）。
+- 生产订正批（另册只备不跑）：`scripts/prod-20261006-s9-wage-floor-fix/`——S9 第 1 窗（`ref_type='window'`、`ref_id=901`）3 队工资行**原地改数**（5 切尔西 −49.23→−53、449 皇家贝蒂斯 −33.37→−53、280 奥林匹亚科斯 −37.62→−43；差 3.77 / 19.63 / 5.38 合计 **28.78 m** 从余额再扣）+ `ledger_accounts.balance` 与工资行之后各 `balance_after` 顺移；生成器含 `nextChainIntact` 锚（顺移后重放自动空跑、崩溃中途态重跑整件自愈）；可选件 `sql/04-cpu-refund-optional.sql` = CPU 241/112172 已扣工资追溯回冲（**待裁决**，默认不跑）。
+
+**测试与评审**：TC-FLOOR-02 锁「恰等于下限不按下限记」（额度/memo/计数三处），TC-FLOOR-03 锁「下限真读 config 覆盖值」（帽改 60 ⇒ 下限 45 生效），TC-CPU-01 锁「不跳过时工资 −3 与富人税 −40 都会记」。**变异实测 3 枚**：M1 `WAGE_FLOOR_GAP 15→0` ⇒ 2 红（主用例 + 边界用例，后者证明边界用例同时锁住下限数值）；M2 工资段去掉 CPU 排除 ⇒ 恰 1 红；M3 删 `.shop-main` 的 `min-width: 0` ⇒ 恰 1 红；撤回全复绿。**等价变异登记 1 枚**：下限判定 `total < floor` 改 `total <= floor` 无红——等号点上两支额度相同（都等于 `floor`）、memo 尾注与计数都以 `charge > total` 判，属等价改写而非漏网缺陷。e2e 24/24；375 实测：页签 `{ovx:auto, wrap:nowrap, scrollable:true, buttons:5}`、子设施行 `{display:flex, wrap:wrap, rows:6, right:253/375}`、截图 `scratch/e2e-shop-375.png` 目测右栏与页脚不再被裁。
+
+**已知不改（登记）**：① 消费中心 ≤640 的 `.seg` 未补 `scrollbar-width: thin` + `::-webkit-scrollbar{ height: 6px }`（`.dossier-tabs` 有同款细滚动条可供性提示）——会动已 e2e 通过的 CSS，留作可选美化；② `tier_table` 键名与联赛级别无关（是球场档位表），不要当级别表消费。
+
+**待办**：① 生产订正批执行（等用户下令）——先 `capture-snapshot.mjs --remote` 抓 A–G 预检、再 `node exec-shards.mjs sql/02-wage-floor-fix.sql --remote --chunk=20 --retry=2`（期望 changes 6）、复查 `03-verify.sql`（v1–v5）；② CPU 241（−61.48）/ 112172（−57.69）是否追溯回冲（可选件 04）待用户裁决；③ 本版文档回写已随收口完成（TECH_DESIGN `wage_cap` 行与键数句 61/59→80/78、PRD 工资帽三处、CHANGELOG/ROADMAP/AGENTS）。
+
 ## v6.38.0 · 公开端点 /api/players/meta：批量取球员元数据供跨仓名册同步（2026-10-07）
 
 **状态**：**已上线**（2026-10-07 发布：push `b4f010e..ae73c63`（8 枚，与 v6.37.2 窄屏两行式模块同轮）触发 CF 自动部署，生产 Version **`2f7bb425-b145-4fce-8496-0ba3e6a1d31d`** @2026-10-07T05:50:57Z；线上入口资产 `index-D6fopAWj.js` 与本地 6.38.0 构建 sha256 逐字节一致（`e256a33a…`）、线上 JS 版本串 `6.38`；零迁移；回读 health + players/clubs/squads/market 全 200、`/api/players/meta?fcIds=1` 200 空数组；发布记录 docs 枚按仓规只本地 commit 不 push）。
