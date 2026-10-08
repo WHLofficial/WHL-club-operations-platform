@@ -23,13 +23,17 @@
 // 幂等与崩溃恢复（每条语句自带守卫 ⇒ 整批重放 changes = 0）：
 //   · 标记 = 工资行的 (amount, memo 尾)。OLD 态 = amount 原值 且 memo 尾「 人现行合同）」；
 //     NEW 态 = amount 触底值 且 memo 含「，按下限扣）」。
-//   · 每队三条语句、顺序固定：①顺移工资行之后的流水 ②工资行触底 ③账户对账。
-//     ②把标记 OLD → NEW，且放在 ① 之后 ⇒ 重放时 ①② 的守卫全为假。
+//   · 每队三条语句、顺序固定：②工资行触底 → ①顺移工资行之后的流水 → ③账户对账。
+//     ② 先跑 ⇒ ① 的守卫（NEW 态 且 链断）首跑成立、重放不成立。
+//   · ① 的锚是「该队工资行的下一条**本队**流水仍与工资行首尾相接」的反面（nextChainBroken）：
+//     顺移一旦发生这条等式即假。取行用 `MIN(m.id)`，**不假设 id 相邻**——旧版写 `w2.id + 1 = n.id`
+//     在生产栽了：各队流水 id 交错（如 club 5 工资行 id 229、下一条 club 5 流水 id 277），
+//     相邻锚恒假 ⇒ ① 空跑，只改了工资行、没顺移下游（2026-10-08 部分收敛事故，见 report.md）。
+//   · 四态自愈：P 都没跑 / ② 只跑了② / N 都跑了（链相连）/ X 只跑了①——任一态跑一次 ②①③ 都到 N，
+//     再跑一次全空跑。回滚件同构（②' 还原工资行 → ①' 把下游加回 → ③' 对账）。
 //   · ③ 是「账户余额 := 该队最新一条流水的 balance_after」（守卫：两者不等才写）：天然幂等，
 //     同时把 ①② 造成的余额变化对齐回账户行（预检 B 段已证明该不变式成立）。
-//   · ① 除标记外还锚一条「工资行的下一行仍首尾相接」（nextChainIntact）：顺移一旦发生这条等式即假，
-//     所以「① 已跑、② 未跑」的中途状态重跑整件时 ① 空跑、② 翻标记、③ 对账 ⇒ 收敛到订正态（自愈）。
-//     工资行是最后一行（无后续流水）时 ① 恒空跑——本来也无行可移。
+//   · 工资行是最后一行（无后续流水）时 ① 的窗口为空 ⇒ changes = 0（本来也无行可移）。
 //
 // 通道纪律（scripts/README.md 第 66 行）：ledger_* 含外键/需原子性 ⇒ 走 --command（exec-shards.mjs），
 //   不走 --file；exec-shards 会拒收含 " % & | < > 的语句（--command 经 shell，cmd.exe 会把 > 当重定向）
@@ -60,11 +64,13 @@ const CLUBS = [
   { id: 449, name: '皇家贝蒂斯', tier: 'premier', cap: 68, floor: 53, old: 33.37, n: 25 },
 ];
 
-/** CPU 队（可选分片，默认不执行）：S9 第 1 窗按当时口径「财政导入排除、工资照扣」扣了工资，
- *  用户 2026-10-06 新令「cpu 也不扣工资」是否追溯回冲尚未裁决 ⇒ 单独出件、单独回滚件。 */
+/** CPU 期工资冲正队（用户 2026-10-08 令「CPU财政回溯」⇒ 本件转为**必跑**，件名保留 -optional 以防引用失效）：
+ *  S9 第 1 窗（2026-10-06 03:08）扣款时两队仍是 CPU 队（当时口径「财政导入排除、工资照扣」）；
+ *  两队随后于 2026-10-06 04:43/04:44 被真人接队（流水有「接队资金」+30），故 clubs.is_cpu 现为 0 是正确的，
+ *  本件只回冲 CPU 期那笔工资，不涉其余入账。 */
 const CPU_CLUBS = [
-  { id: 241, name: '巴塞罗那(CPU)', tier: 'premier', old: 61.48, n: 29 },
-  { id: 112172, name: 'RB莱比锡(CPU)', tier: 'second', old: 57.69, n: 26 },
+  { id: 241, name: '巴塞罗那', tier: 'premier', old: 61.48, n: 29 },
+  { id: 112172, name: 'RB莱比锡', tier: 'second', old: 57.69, n: 26 },
 ];
 
 const TIER_LABEL = { premier: '顶级', second: '次级' };
@@ -86,21 +92,34 @@ const lit = (v) => `'${v.replace(/'/g, "''")}'`;
 /** 字符数（用展开取码点，避免 UTF-16 长度与 SQLite 的字符口径不一致；本批全是 BMP 字符）。 */
 const chars = (s) => [...s].length;
 /** 「工资行之后」的行窗条件。故意不用 `id > (…)`：`>` 会被 exec-shards.mjs 的 shell 元字符闸拒收，
- *  写成 BETWEEN（无元字符）等价；工资行不存在时子查询为 NULL ⇒ BETWEEN 求值为 NULL ⇒ 匹配 0 行。 */
-const afterWageRow = (id) =>
-  `id BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = ${id} AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = ${REF_ID}) AND 2147483647`;
+ *  写成 BETWEEN（无元字符）等价；工资行不存在时子查询为 NULL ⇒ BETWEEN 求值为 NULL ⇒ 匹配 0 行。
+ *  col 传 'id'（UPDATE 的 WHERE，裸列）或 'm.id'（子查询里带前缀，避免与别的表歧义）。 */
+const afterWageRowOn = (col, id) =>
+  `${col} BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = ${id} AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = ${REF_ID}) AND 2147483647`;
+const afterWageRow = (id) => afterWageRowOn('id', id);
+/** 工资行现值的标量子查询（同队同窗只应有一行）；无工资行时为 NULL。 */
+const wageField = (id, col) =>
+  `(SELECT x.${col} FROM ledger_entries x WHERE x.club_id = ${id} AND x.kind = 'wage' AND x.ref_type = 'window' AND x.ref_id = ${REF_ID})`;
+/** 该队工资行的下一条**本队**流水 id（无后续流水时为 NULL）。 */
+const nextRowId = (id) =>
+  `(SELECT MIN(m.id) FROM ledger_entries m WHERE m.club_id = ${id} AND ${afterWageRowOn('m.id', id)})`;
 /** 标记守卫片段：OLD 态 / NEW 态（取工资行现值，用于「同一队只写一次」）。 */
 const markerOld = (id, old) =>
   `EXISTS (SELECT 1 FROM ledger_entries x WHERE x.club_id = ${id} AND x.kind = 'wage' AND x.ref_type = 'window' AND x.ref_id = ${REF_ID} AND ROUND(x.amount, 2) = ${num(-old)} AND substr(x.memo, -${chars(TAIL_OLD)}) = ${lit(TAIL_OLD)})`;
-/** NEW 态：命中判据用 `instr(…) != 0`（instr 未命中返回 0）——同样为了绕开 `>`。 */
-const markerNew = (id, floor) =>
-  `EXISTS (SELECT 1 FROM ledger_entries x WHERE x.club_id = ${id} AND x.kind = 'wage' AND x.ref_type = 'window' AND x.ref_id = ${REF_ID} AND ROUND(x.amount, 2) = ${num(-floor)} AND instr(x.memo, ${lit(NOTE_TAIL)}) != 0)`;
-/** ① 的崩溃恢复锚：工资行的**下一行**仍与工资行首尾相接（`n.balance_after = w.balance_after + n.amount`）。
- *  顺移一旦发生（① 只动后续行、不动工资行），这条等式立刻不成立 ⇒ 重放 ① 自动空跑，
- *  「① 已跑、② 未跑」的中途状态重跑整个正向件即可收敛（② 翻标记、③ 对账），不必手工修数。
- *  工资行是最后一行时 EXISTS 为假 ⇒ ① 空跑（本来也无行可顺移）。 */
-const nextChainIntact = (id) =>
-  `EXISTS (SELECT 1 FROM ledger_entries n JOIN ledger_entries w2 ON w2.id + 1 = n.id WHERE n.club_id = ${id} AND w2.club_id = ${id} AND w2.kind = 'wage' AND w2.ref_type = 'window' AND w2.ref_id = ${REF_ID} AND ROUND(n.balance_after, 2) = ROUND(w2.balance_after + n.amount, 2))`;
+/** NEW 态：命中判据用 `instr(…) != 0`（instr 未命中返回 0）——同样为了绕开 `>`。
+ *  target = 目标 amount（工资触底件传 −floor，CPU 冲正件传 0）。 */
+const markerNew = (id, target, note = NOTE_TAIL) =>
+  `EXISTS (SELECT 1 FROM ledger_entries x WHERE x.club_id = ${id} AND x.kind = 'wage' AND x.ref_type = 'window' AND x.ref_id = ${REF_ID} AND ROUND(x.amount, 2) = ${num(target)} AND instr(x.memo, ${lit(note)}) != 0)`;
+/** ① 的崩溃恢复锚：该队工资行的下一条本队流水**不再**与工资行首尾相接（链断）。
+ *  顺移一旦发生（① 只动后续行、不动工资行）这条等式立刻不成立 ⇒ 重放 ① 自动空跑。
+ *  取行用 MIN(id) 而非 id + 1：生产各队流水 id 交错，相邻假设不成立（事故根因）。
+ *  工资行是最后一行时 nextRowId 为 NULL ⇒ NOT EXISTS 为真 ⇒ ① 仍会执行但窗口为空（changes = 0），无害。
+ *  已知假设：下一条流水的 amount ≠ 0（否则可能巧合相等而被误判成「已顺移」；本批涉及的候选行金额全非 0）。 */
+const nextChainBroken = (id) =>
+  `NOT EXISTS (SELECT 1 FROM ledger_entries n WHERE n.club_id = ${id} AND n.id = ${nextRowId(id)} AND ROUND(n.balance_after, 2) = ROUND(${wageField(id, 'balance_after')} + n.amount, 2))`;
+const CPU_NOTE = '已冲正';
+/** CPU 冲正件的 memo 尾注（正向件与回滚件同源；回滚时整段删掉还原成「 人现行合同）」）。 */
+const CPU_MEMO_NOTE = `；CPU 队不入账（用户令 2026-10-06），${CPU_NOTE}）`;
 
 /** ③ 账户对账：账户余额 := 该队最新一条流水的 balance_after（守卫：不相等才写）。 */
 function reconcileAccount(c, tag) {
@@ -122,7 +141,7 @@ function forwardWageFloor() {
   const out = [
     '-- 02 工资触底订正：S9 第 1 窗（ref_id = 901）三队工资行改成级别下限额度',
     '-- 订单：顶级 5 切尔西 49.23 → 53（+3.77）/ 449 皇家贝蒂斯 33.37 → 53（+19.63）/ 次级 280 奥林匹亚科斯 37.62 → 43（+5.38）',
-    '-- 合计再扣 28.78 m；每队三条语句（顺移后续流水 → 工资行触底 → 账户对账），顺序不得调换',
+    '-- 合计再扣 28.78 m；每队三条语句（工资行触底 → 顺移后续流水 → 账户对账），顺序不得调换',
     '',
   ];
   for (const c of CLUBS) {
@@ -130,14 +149,6 @@ function forwardWageFloor() {
     const memoNew = ` 人现行合同${floorNote(c.tier, c.floor)}`;
     out.push(
       `-- club ${c.id} ${c.name}（${TIER_LABEL[c.tier]}，帽 ${c.cap}、下限 ${c.floor}、S9 第 1 窗实扣 ${num(c.old)}）`,
-      `-- ① 该队工资行之后的流水 balance_after 整体 −${num(extra)}（只动 balance_after，不动金额）`,
-      `UPDATE ledger_entries`,
-      `SET balance_after = ROUND(balance_after - ${num(extra)}, 2)`,
-      `WHERE club_id = ${c.id}`,
-      `  AND ${afterWageRow(c.id)}`,
-      `  AND ${nextChainIntact(c.id)}`,
-      `  AND ${markerOld(c.id, c.old)};`,
-      '',
       `-- ② 工资行触底：amount → ${num(-c.floor)}、balance_after −${num(extra)}、memo 补下限尾注（与 worker floorNote 逐字一致）`,
       `UPDATE ledger_entries`,
       `SET amount = ${num(-c.floor)},`,
@@ -145,6 +156,15 @@ function forwardWageFloor() {
       `    memo = REPLACE(memo, ${lit(TAIL_OLD)}, ${lit(memoNew)})`,
       `WHERE club_id = ${c.id} AND kind = 'wage' AND ref_type = 'window' AND ref_id = ${REF_ID}`,
       `  AND ROUND(amount, 2) = ${num(-c.old)} AND substr(memo, -${chars(TAIL_OLD)}) = ${lit(TAIL_OLD)};`,
+      '',
+      `-- ① 该队工资行之后的流水 balance_after 整体 −${num(extra)}（只动 balance_after，不动金额）`,
+      `-- 守卫：工资行已在触底态 且 下一条本队流水与工资行不相接（顺移一旦发生 → 相接 ⇒ 重放空跑）`,
+      `UPDATE ledger_entries`,
+      `SET balance_after = ROUND(balance_after - ${num(extra)}, 2)`,
+      `WHERE club_id = ${c.id}`,
+      `  AND ${afterWageRow(c.id)}`,
+      `  AND ${markerNew(c.id, -c.floor)}`,
+      `  AND ${nextChainBroken(c.id)};`,
       '',
       reconcileAccount(c, `② 之后余额比最新流水少 ${num(extra)}`),
       '',
@@ -157,32 +177,32 @@ function forwardWageFloor() {
 
 function forwardCpuRefund() {
   const out = [
-    '-- 04（可选，默认不执行）CPU 队工资回冲：241 巴塞罗那 −61.48 / 112172 RB莱比锡 −57.69',
-    '-- 用户 2026-10-06 令「cpu也不扣工资」，但 S9 第 1 窗是当时明确口径「财政导入排除、工资照扣」⇒ 是否追溯未裁决',
+    '-- 04 CPU 期工资冲正：241 巴塞罗那 −61.48 / 112172 RB莱比锡 −57.69（用户 2026-10-08 令「CPU财政回溯」）',
     '-- 采用「直接改上次记录」的同款形状：amount → 0（保留行与 ref 供审计）、余额与后续 balance_after 还原、memo 记原因',
     '-- 若用户改口径为「补一笔 manual_adjust 补偿分录」，则不要用本件，另出补偿分录件',
     '',
   ];
   for (const c of CPU_CLUBS) {
     const back = round2(c.old);
-    const memoNew = ` 人现行合同；CPU 队不入账（用户令 2026-10-06），已冲正）`;
+    const memoNew = ` 人现行合同${CPU_MEMO_NOTE}`;
     out.push(
-      `-- club ${c.id} ${c.name}（CPU，S9 第 1 窗实扣 ${num(c.old)}）`,
-      `-- ① 该队工资行之后的流水 balance_after 整体 +${num(back)}`,
-      `UPDATE ledger_entries`,
-      `SET balance_after = ROUND(balance_after + ${num(back)}, 2)`,
-      `WHERE club_id = ${c.id}`,
-      `  AND ${afterWageRow(c.id)}`,
-      `  AND ${nextChainIntact(c.id)}`,
-      `  AND ${markerOld(c.id, c.old)};`,
-      '',
-      `-- ② 工资行冲正：amount → 0、balance_after +${num(back)}、memo 记原因`,
+      `-- club ${c.id} ${c.name}（CPU 期，S9 第 1 窗实扣 ${num(c.old)}）`,
+      `-- ② 工资行冲正：amount → 0（保留行与 ref 供审计）、balance_after +${num(back)}、memo 记原因`,
       `UPDATE ledger_entries`,
       `SET amount = 0,`,
       `    balance_after = ROUND(balance_after + ${num(back)}, 2),`,
       `    memo = REPLACE(memo, ${lit(TAIL_OLD)}, ${lit(memoNew)})`,
       `WHERE club_id = ${c.id} AND kind = 'wage' AND ref_type = 'window' AND ref_id = ${REF_ID}`,
       `  AND ROUND(amount, 2) = ${num(-c.old)} AND substr(memo, -${chars(TAIL_OLD)}) = ${lit(TAIL_OLD)};`,
+      '',
+      `-- ① 该队工资行之后的流水 balance_after 整体 +${num(back)}（含接队后的奖金/接队资金等 5–10 行）`,
+      `-- 守卫：工资行已在冲正态 且 下一条本队流水与工资行不相接（顺移一旦发生 → 相接 ⇒ 重放空跑）`,
+      `UPDATE ledger_entries`,
+      `SET balance_after = ROUND(balance_after + ${num(back)}, 2)`,
+      `WHERE club_id = ${c.id}`,
+      `  AND ${afterWageRow(c.id)}`,
+      `  AND ${markerNew(c.id, 0, CPU_NOTE)}`,
+      `  AND ${nextChainBroken(c.id)};`,
       '',
       reconcileAccount(c, `② 之后余额比最新流水多 ${num(back)}`),
       '',
@@ -196,29 +216,31 @@ function forwardCpuRefund() {
 function rollbackWageFloor() {
   const out = [
     '-- 01 回滚工资触底订正：把 S9 第 1 窗三队工资行还原成原扣款额（逐条带守卫 ⇒ 重放 changes = 0）',
-    '-- 顺序与正向相反：①后续流水 balance_after 还原 → ②工资行还原 → ③账户对账',
-    '-- 守卫是 NEW 态标记（amount = 触底值 且 memo 含下限尾注）；②把标记翻回 OLD 态，故 ①② 必须在 ②之前',
+    '-- 顺序：② 工资行还原 → ① 后续流水 balance_after 还原 → ③ 账户对账',
+    '-- ② 的守卫是 NEW 态标记（amount = 触底值 且 memo 含下限尾注），跑完翻回 OLD 态',
+    '-- ① 的守卫 = OLD 态 且 下一条本队流水与工资行不相接 ⇒ 只在「② 已还原、下游仍被顺移」时执行',
     '',
   ];
   for (const c of CLUBS) {
     const extra = round2(c.floor - c.old);
     out.push(
       `-- club ${c.id} ${c.name}：还原 ${num(-c.floor)} → ${num(-c.old)}（后续流水 balance_after +${num(extra)}）`,
-      `-- ① 该队工资行之后的流水 balance_after 整体 +${num(extra)}`,
-      `UPDATE ledger_entries`,
-      `SET balance_after = ROUND(balance_after + ${num(extra)}, 2)`,
-      `WHERE club_id = ${c.id}`,
-      `  AND ${afterWageRow(c.id)}`,
-      `  AND ${nextChainIntact(c.id)}`,
-      `  AND ${markerNew(c.id, c.floor)};`,
-      '',
-      `-- ② 工资行还原：amount → ${num(-c.old)}、balance_after +${num(extra)}、memo 去掉下限尾注`,
+      `-- ②' 工资行还原：amount → ${num(-c.old)}、balance_after +${num(extra)}、memo 去掉下限尾注`,
       `UPDATE ledger_entries`,
       `SET amount = ${num(-c.old)},`,
       `    balance_after = ROUND(balance_after + ${num(extra)}, 2),`,
       `    memo = REPLACE(memo, ${lit(floorNote(c.tier, c.floor))}, '）')`,
       `WHERE club_id = ${c.id} AND kind = 'wage' AND ref_type = 'window' AND ref_id = ${REF_ID}`,
       `  AND ROUND(amount, 2) = ${num(-c.floor)} AND instr(memo, ${lit(NOTE_TAIL)}) != 0;`,
+      '',
+      `-- ①' 该队工资行之后的流水 balance_after 整体 +${num(extra)}（把 ① 的顺移加回）`,
+      `-- 守卫：工资行已还原成原值 且 下一条本队流水与工资行不相接（= ②' 已跑而 ①' 未跑的中途态）`,
+      `UPDATE ledger_entries`,
+      `SET balance_after = ROUND(balance_after + ${num(extra)}, 2)`,
+      `WHERE club_id = ${c.id}`,
+      `  AND ${afterWageRow(c.id)}`,
+      `  AND ${markerOld(c.id, c.old)}`,
+      `  AND ${nextChainBroken(c.id)};`,
       '',
       reconcileAccount(c, `② 之后余额比最新流水多 ${num(extra)}`),
       '',
@@ -237,21 +259,22 @@ function rollbackCpuRefund() {
     const back = round2(c.old);
     out.push(
       `-- club ${c.id} ${c.name}：还原 0 → ${num(-c.old)}（后续流水 balance_after −${num(back)}）`,
-      `-- ① 该队工资行之后的流水 balance_after 整体 −${num(back)}`,
+      `-- ②' 工资行还原：amount → ${num(-c.old)}、balance_after −${num(back)}、memo 去掉冲正说明`,
+      `UPDATE ledger_entries`,
+      `SET amount = ${num(-c.old)},`,
+      `    balance_after = ROUND(balance_after - ${num(back)}, 2),`,
+      `    memo = REPLACE(memo, '${CPU_MEMO_NOTE}', '）')`,
+      `WHERE club_id = ${c.id} AND kind = 'wage' AND ref_type = 'window' AND ref_id = ${REF_ID}`,
+      `  AND ROUND(amount, 2) = 0 AND instr(memo, ${lit(CPU_NOTE)}) != 0;`,
+      '',
+      `-- ①' 该队工资行之后的流水 balance_after 整体 −${num(back)}（把 ① 的顺移加回）`,
+      `-- 守卫：工资行已还原成原值 且 下一条本队流水与工资行不相接（= ②' 已跑而 ①' 未跑的中途态）`,
       `UPDATE ledger_entries`,
       `SET balance_after = ROUND(balance_after - ${num(back)}, 2)`,
       `WHERE club_id = ${c.id}`,
       `  AND ${afterWageRow(c.id)}`,
-      `  AND ${nextChainIntact(c.id)}`,
-      `  AND EXISTS (SELECT 1 FROM ledger_entries x WHERE x.club_id = ${c.id} AND x.kind = 'wage' AND x.ref_type = 'window' AND x.ref_id = ${REF_ID} AND ROUND(x.amount, 2) = 0 AND instr(x.memo, '已冲正') != 0);`,
-      '',
-      `-- ② 工资行还原：amount → ${num(-c.old)}、balance_after −${num(back)}、memo 去掉冲正说明`,
-      `UPDATE ledger_entries`,
-      `SET amount = ${num(-c.old)},`,
-      `    balance_after = ROUND(balance_after - ${num(back)}, 2),`,
-      `    memo = REPLACE(memo, '；CPU 队不入账（用户令 2026-10-06），已冲正）', '）')`,
-      `WHERE club_id = ${c.id} AND kind = 'wage' AND ref_type = 'window' AND ref_id = ${REF_ID}`,
-      `  AND ROUND(amount, 2) = 0 AND instr(memo, '已冲正') != 0;`,
+      `  AND ${markerOld(c.id, c.old)}`,
+      `  AND ${nextChainBroken(c.id)};`,
       '',
       reconcileAccount(c, `② 之后余额比最新流水多 ${num(back)}`),
       '',
@@ -286,7 +309,7 @@ ORDER BY a.club_id;`,
   },
   {
     label: 'C',
-    purpose: '工资行之后的流水（本批要顺移 balance_after 的行）：期望 0 行；有行时逐行核对影响面',
+    purpose: '工资行之后的流水（本批要顺移 balance_after 的行）：生产实况 7 行（club 5 一行 id 277、club 449 六行 id 245–254）——旧版以为 0 行',
     sql: `SELECT e.club_id, e.id, e.kind, ROUND(e.amount, 2) AS amount, e.balance_after, e.created_at
 FROM ledger_entries e
 WHERE e.club_id IN (5, 280, 449)
@@ -304,7 +327,7 @@ ORDER BY ct.club_id;`,
   },
   {
     label: 'E',
-    purpose: 'CPU 旗标：5 / 280 / 449 必须 is_cpu = 0（CPU 队不进本批的触底订正）',
+    purpose: 'CPU 旗标：5 / 280 / 449 必须 is_cpu = 0；241 / 112172 现为 0 是**正确的**（2026-10-06 04:43 起被真人接队，见 H 段的「接队资金」行）',
     sql: `SELECT id, name, is_cpu FROM clubs WHERE id IN (5, 241, 280, 449, 112172) ORDER BY id;`,
   },
   {
@@ -317,12 +340,31 @@ ORDER BY competition_type;`,
   },
   {
     label: 'G',
-    purpose: '已修检测：期望 0 行（>0 说明本批已跑过，先看 03-verify.sql 再决定）',
+    purpose: '已修检测：三队期望 0 行（>0 说明触底件已跑过，先看 03-verify.sql 再决定）',
     sql: `SELECT club_id, ROUND(amount, 2) AS amount, memo
 FROM ledger_entries
 WHERE kind = 'wage' AND ref_type = 'window' AND ref_id = ${REF_ID} AND club_id IN (5, 280, 449)
   AND instr(memo, ${lit(NOTE_TAIL)}) != 0
 ORDER BY club_id;`,
+  },
+  {
+    label: 'H',
+    purpose: 'CPU 期工资冲正目标（04 件）：241 / 112172 的工资行 + 之后全部流水（含「接队资金」「CPU 期补发」）+ 账户',
+    sql: `SELECT e.club_id, e.id, e.kind, ROUND(e.amount, 2) AS amount, ROUND(e.balance_after, 2) AS bal, e.created_at, e.memo
+FROM ledger_entries e
+WHERE e.club_id IN (241, 112172)
+ORDER BY e.club_id, e.id;`,
+  },
+  {
+    label: 'I',
+    purpose: '链相连诊断（正向 ① 的守卫依据）：下一条本队流水是否与工资行首尾相接——linked / broken / no-downstream（工资行是末行）三态，跑前 5/280/449 应为 linked（生产事故后 5 与 449 曾为 broken），顺移后仍全 linked',
+    sql: `SELECT c.id AS club_id, c.name,
+  (SELECT w.id FROM ledger_entries w WHERE w.club_id = c.id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = ${REF_ID}) AS wage_id,
+  ${nextRowId('c.id')} AS next_id,
+  ${wageField('c.id', 'balance_after')} AS wage_bal,
+  (SELECT n.balance_after FROM ledger_entries n WHERE n.club_id = c.id AND n.id = ${nextRowId('c.id')}) AS next_bal,
+  CASE WHEN ${nextRowId('c.id')} IS NULL THEN 'no-downstream' WHEN ROUND((SELECT n.balance_after FROM ledger_entries n WHERE n.club_id = c.id AND n.id = ${nextRowId('c.id')}), 2) = ROUND(${wageField('c.id', 'balance_after')} + (SELECT n.amount FROM ledger_entries n WHERE n.club_id = c.id AND n.id = ${nextRowId('c.id')}), 2) THEN 'linked' ELSE 'broken' END AS chain
+FROM clubs c WHERE c.id IN (5, 280, 449, 241, 112172) ORDER BY c.id;`,
   },
 ];
 
@@ -368,7 +410,7 @@ const oldTotal = round2(CLUBS.reduce((s, c) => s + c.old, 0));
 const newTotal = round2(CLUBS.reduce((s, c) => s + c.floor, 0));
 
 const files = [
-  { path: join(OUT_DIR, '01-precheck.sql'), body: `${['-- 01 预检（只读）：A–G 七段，逐段核对后再跑正向件', '-- 抓取：node capture-snapshot.mjs（默认 --remote，只跑 SELECT）', '', ...PRECHECK.map((p) => `-- ${p.label} · ${p.purpose}\n${p.sql}\n`)].join('\n')}` },
+  { path: join(OUT_DIR, '01-precheck.sql'), body: `${['-- 01 预检（只读）：A–I 九段，逐段核对后再跑正向件', '-- 抓取：node capture-snapshot.mjs（默认 --remote，只跑 SELECT）', '', ...PRECHECK.map((p) => `-- ${p.label} · ${p.purpose}\n${p.sql}\n`)].join('\n')}` },
   { path: join(OUT_DIR, '02-wage-floor-fix.sql'), body: forwardWageFloor() },
   { path: join(OUT_DIR, '03-verify.sql'), body: verifyShard() },
   { path: join(OUT_DIR, '04-cpu-refund-optional.sql'), body: forwardCpuRefund() },
@@ -404,9 +446,10 @@ const manifest = {
   })),
   totals: { oldAmount: -oldTotal, newAmount: -newTotal, extra: -extraTotal, other15ClubsSum: -902.46, grandTotalAfter: -1051.46 },
   cpuOptional: {
-    approved: false,
-    note: '用户 2026-10-06 令「cpu也不扣工资」，但 S9 第 1 窗按当时口径「财政导入排除、工资照扣」已扣；是否追溯回冲待裁决 ⇒ 件已备，默认不执行',
-    clubs: CPU_CLUBS.map((c) => ({ clubId: c.id, clubName: c.name, tier: c.tier, chargedAmount: -c.old, refundTo: 0 })),
+    approved: true,
+    approvedOn: '2026-10-08',
+    note: '用户 2026-10-08 令「CPU财政回溯」⇒ 04 件转为必跑（件名保留 -optional 以防既有引用失效）。两队在 S9 第 1 窗扣款时仍是 CPU 队（2026-10-06 04:43/04:44 才被真人接队，流水有「接队资金」+30），故只回冲 CPU 期那笔工资：amount → 0、余额与后续 balance_after 还原、memo 记原因',
+    clubs: CPU_CLUBS.map((c) => ({ clubId: c.id, clubName: c.name, tier: c.tier, chargedAmount: -c.old, refundTo: 0, memoNote: CPU_MEMO_NOTE })),
   },
   precheck: PRECHECK.map((p) => ({ label: p.label, purpose: p.purpose })),
   files: files.map((f) => ({ path: f.path.replace(HERE, '').replace(/\\/g, '/'), statements: statementsOf(f.body) })),
@@ -420,4 +463,4 @@ console.log(`触底订正：${CLUBS.length} 队，${num(-oldTotal)} → ${num(-n
 for (const c of manifest.clubs) {
   console.log(`  · club ${c.clubId} ${c.clubName}（${TIER_LABEL[c.tier]} ${c.cap}−15=${c.floor}）：${num(c.oldAmount)} → ${num(c.newAmount)}（${num(-c.extra)}）`);
 }
-console.log(`可选件（默认不执行，待裁决）：CPU ${CPU_CLUBS.map((c) => `${c.id} ${num(-c.old)}`).join(' / ')}`);
+console.log(`CPU 期工资冲正（用户令 2026-10-08，必跑）：${CPU_CLUBS.map((c) => `${c.id} ${num(-c.old)}`).join(' / ')} ⇒ amount → 0，余额还原`);

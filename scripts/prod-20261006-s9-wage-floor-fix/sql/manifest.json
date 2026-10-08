@@ -1,6 +1,6 @@
 {
   "batch": "prod-20261006-s9-wage-floor-fix",
-  "generatedAt": "2026-10-08T04:12:48.220Z",
+  "generatedAt": "2026-10-08T10:08:37.458Z",
   "rule": {
     "order": "顶级联赛未达 53、次级联赛未达 43 工资的球队，扣工资时按 53/43 扣除（= 对应级别工资帽 − 15）",
     "wageCapByTier": {
@@ -59,22 +59,25 @@
     "grandTotalAfter": -1051.46
   },
   "cpuOptional": {
-    "approved": false,
-    "note": "用户 2026-10-06 令「cpu也不扣工资」，但 S9 第 1 窗按当时口径「财政导入排除、工资照扣」已扣；是否追溯回冲待裁决 ⇒ 件已备，默认不执行",
+    "approved": true,
+    "approvedOn": "2026-10-08",
+    "note": "用户 2026-10-08 令「CPU财政回溯」⇒ 04 件转为必跑（件名保留 -optional 以防既有引用失效）。两队在 S9 第 1 窗扣款时仍是 CPU 队（2026-10-06 04:43/04:44 才被真人接队，流水有「接队资金」+30），故只回冲 CPU 期那笔工资：amount → 0、余额与后续 balance_after 还原、memo 记原因",
     "clubs": [
       {
         "clubId": 241,
-        "clubName": "巴塞罗那(CPU)",
+        "clubName": "巴塞罗那",
         "tier": "premier",
         "chargedAmount": -61.48,
-        "refundTo": 0
+        "refundTo": 0,
+        "memoNote": "；CPU 队不入账（用户令 2026-10-06），已冲正）"
       },
       {
         "clubId": 112172,
-        "clubName": "RB莱比锡(CPU)",
+        "clubName": "RB莱比锡",
         "tier": "second",
         "chargedAmount": -57.69,
-        "refundTo": 0
+        "refundTo": 0,
+        "memoNote": "；CPU 队不入账（用户令 2026-10-06），已冲正）"
       }
     ]
   },
@@ -89,7 +92,7 @@
     },
     {
       "label": "C",
-      "purpose": "工资行之后的流水（本批要顺移 balance_after 的行）：期望 0 行；有行时逐行核对影响面"
+      "purpose": "工资行之后的流水（本批要顺移 balance_after 的行）：生产实况 7 行（club 5 一行 id 277、club 449 六行 id 245–254）——旧版以为 0 行"
     },
     {
       "label": "D",
@@ -97,7 +100,7 @@
     },
     {
       "label": "E",
-      "purpose": "CPU 旗标：5 / 280 / 449 必须 is_cpu = 0（CPU 队不进本批的触底订正）"
+      "purpose": "CPU 旗标：5 / 280 / 449 必须 is_cpu = 0；241 / 112172 现为 0 是**正确的**（2026-10-06 04:43 起被真人接队，见 H 段的「接队资金」行）"
     },
     {
       "label": "F",
@@ -105,13 +108,21 @@
     },
     {
       "label": "G",
-      "purpose": "已修检测：期望 0 行（>0 说明本批已跑过，先看 03-verify.sql 再决定）"
+      "purpose": "已修检测：三队期望 0 行（>0 说明触底件已跑过，先看 03-verify.sql 再决定）"
+    },
+    {
+      "label": "H",
+      "purpose": "CPU 期工资冲正目标（04 件）：241 / 112172 的工资行 + 之后全部流水（含「接队资金」「CPU 期补发」）+ 账户"
+    },
+    {
+      "label": "I",
+      "purpose": "链相连诊断（正向 ① 的守卫依据）：下一条本队流水是否与工资行首尾相接——linked / broken / no-downstream（工资行是末行）三态，跑前 5/280/449 应为 linked（生产事故后 5 与 449 曾为 broken），顺移后仍全 linked"
     }
   ],
   "files": [
     {
       "path": "sql/01-precheck.sql",
-      "statements": 7
+      "statements": 9
     },
     {
       "path": "sql/02-wage-floor-fix.sql",

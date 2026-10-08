@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 
 const remote = !process.argv.includes('--local');
 const scope = remote ? '--remote' : '--local';
-const LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+const LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
 const DIR = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
 /** 与 exec-shards.mjs 同一套切分：去空行/整行注释，遇行尾 `;` 收一条。 */
@@ -50,9 +50,10 @@ for (let i = 0; i < statements.length; i++) {
     console.error((res.stderr || res.stdout || '').slice(0, 2000));
     process.exit(1);
   }
-  const m = res.stdout.match(/^\[/m);
+  const stdout = (res.stdout || '').replace(/\u001b\[[0-9;]*m/g, '');
+  const m = stdout.match(/^\[\s*$/m) ?? stdout.match(/^\[/m);
   if (!m || m.index == null) throw new Error(`语句 ${LABELS[i]} 输出里没有以行首 [ 开始的 JSON`);
-  const parsed = JSON.parse(res.stdout.slice(m.index));
+  const parsed = JSON.parse(stdout.slice(m.index));
   const results = parsed[0]?.results ?? [];
   snapshot.statements.push({ label: LABELS[i], sql: statements[i], rows: results.length, results });
   console.log(`语句 ${LABELS[i]}：${results.length} 行`);

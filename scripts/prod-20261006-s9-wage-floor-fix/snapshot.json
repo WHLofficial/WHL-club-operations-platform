@@ -1,0 +1,441 @@
+{
+  "capturedAt": "2026-10-08T10:08:51.222Z",
+  "scope": "--remote",
+  "statements": [
+    {
+      "label": "A",
+      "sql": "SELECT club_id, id, ROUND(amount, 2) AS amount, balance_after, memo, created_at FROM ledger_entries WHERE kind = 'wage' AND ref_type = 'window' AND ref_id = 901 AND club_id IN (5, 280, 449) ORDER BY club_id",
+      "rows": 3,
+      "results": [
+        {
+          "club_id": 5,
+          "id": 229,
+          "amount": -53,
+          "balance_after": 16.82,
+          "memo": "球员工资（S9 第 1 窗，31 人现行合同；未达顶级下限 53 m，按下限扣）",
+          "created_at": "2026-10-06T03:08:00.611Z"
+        },
+        {
+          "club_id": 280,
+          "id": 241,
+          "amount": -43,
+          "balance_after": 42.95,
+          "memo": "球员工资（S9 第 1 窗，30 人现行合同；未达次级下限 43 m，按下限扣）",
+          "created_at": "2026-10-06T03:08:00.611Z"
+        },
+        {
+          "club_id": 449,
+          "id": 242,
+          "amount": -53,
+          "balance_after": 50.29,
+          "memo": "球员工资（S9 第 1 窗，25 人现行合同；未达顶级下限 53 m，按下限扣）",
+          "created_at": "2026-10-06T03:08:00.611Z"
+        }
+      ]
+    },
+    {
+      "label": "B",
+      "sql": "SELECT a.club_id, ROUND(a.balance, 2) AS account_balance, a.updated_at, (SELECT e.id FROM ledger_entries e WHERE e.club_id = a.club_id ORDER BY e.id DESC LIMIT 1) AS tail_id, (SELECT ROUND(e.balance_after, 2) FROM ledger_entries e WHERE e.club_id = a.club_id ORDER BY e.id DESC LIMIT 1) AS tail_balance, CASE WHEN ROUND(a.balance, 2) = ROUND((SELECT e.balance_after FROM ledger_entries e WHERE e.club_id = a.club_id ORDER BY e.id DESC LIMIT 1), 2) THEN 'consistent' ELSE 'DRIFT' END AS invariant FROM ledger_accounts a WHERE a.club_id IN (5, 280, 449) ORDER BY a.club_id",
+      "rows": 3,
+      "results": [
+        {
+          "club_id": 5,
+          "account_balance": 23.42,
+          "updated_at": "2026-10-08T06:50:40.431Z",
+          "tail_id": 277,
+          "tail_balance": 23.42,
+          "invariant": "consistent"
+        },
+        {
+          "club_id": 280,
+          "account_balance": 42.95,
+          "updated_at": "2026-10-08T04:12:48.220Z",
+          "tail_id": 241,
+          "tail_balance": 42.95,
+          "invariant": "consistent"
+        },
+        {
+          "club_id": 449,
+          "account_balance": 29.35,
+          "updated_at": "2026-10-08T06:50:40.431Z",
+          "tail_id": 254,
+          "tail_balance": 29.35,
+          "invariant": "consistent"
+        }
+      ]
+    },
+    {
+      "label": "C",
+      "sql": "SELECT e.club_id, e.id, e.kind, ROUND(e.amount, 2) AS amount, e.balance_after, e.created_at FROM ledger_entries e WHERE e.club_id IN (5, 280, 449) AND e.id BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = e.club_id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = 901) AND 2147483647 ORDER BY e.club_id, e.id",
+      "rows": 7,
+      "results": [
+        {
+          "club_id": 5,
+          "id": 277,
+          "kind": "prize",
+          "amount": 6.6,
+          "balance_after": 23.42,
+          "created_at": "2026-10-07T11:10:08.537Z"
+        },
+        {
+          "club_id": 449,
+          "id": 245,
+          "kind": "manual_adjust",
+          "amount": -8.5,
+          "balance_after": 41.79,
+          "created_at": "2026-10-06T04:23:06Z"
+        },
+        {
+          "club_id": 449,
+          "id": 246,
+          "kind": "manual_adjust",
+          "amount": -8.5,
+          "balance_after": 33.29,
+          "created_at": "2026-10-06T04:23:06Z"
+        },
+        {
+          "club_id": 449,
+          "id": 247,
+          "kind": "manual_adjust",
+          "amount": -8.5,
+          "balance_after": 24.79,
+          "created_at": "2026-10-06T04:23:06Z"
+        },
+        {
+          "club_id": 449,
+          "id": 249,
+          "kind": "manual_adjust",
+          "amount": -1.36,
+          "balance_after": 23.43,
+          "created_at": "2026-10-06T04:23:06Z"
+        },
+        {
+          "club_id": 449,
+          "id": 250,
+          "kind": "manual_adjust",
+          "amount": -1.08,
+          "balance_after": 22.35,
+          "created_at": "2026-10-06T04:23:06Z"
+        },
+        {
+          "club_id": 449,
+          "id": 254,
+          "kind": "prize",
+          "amount": 7,
+          "balance_after": 29.35,
+          "created_at": "2026-10-06T04:23:06Z"
+        }
+      ]
+    },
+    {
+      "label": "D",
+      "sql": "SELECT ct.club_id, c.name, ROUND(SUM(ct.wage), 2) AS wage_sum, COUNT(*) AS n FROM contracts ct JOIN clubs c ON c.id = ct.club_id WHERE ct.is_active = 1 AND ct.club_id IS NOT NULL AND ct.wage IS NOT NULL AND ct.club_id IN (5, 280, 449) GROUP BY ct.club_id, c.name ORDER BY ct.club_id",
+      "rows": 3,
+      "results": [
+        {
+          "club_id": 5,
+          "name": "切尔西",
+          "wage_sum": 49.23,
+          "n": 31
+        },
+        {
+          "club_id": 280,
+          "name": "奥林匹亚科斯",
+          "wage_sum": 37.62,
+          "n": 30
+        },
+        {
+          "club_id": 449,
+          "name": "皇家贝蒂斯",
+          "wage_sum": 33.37,
+          "n": 25
+        }
+      ]
+    },
+    {
+      "label": "E",
+      "sql": "SELECT id, name, is_cpu FROM clubs WHERE id IN (5, 241, 280, 449, 112172) ORDER BY id",
+      "rows": 5,
+      "results": [
+        {
+          "id": 5,
+          "name": "切尔西",
+          "is_cpu": 0
+        },
+        {
+          "id": 241,
+          "name": "巴塞罗那",
+          "is_cpu": 0
+        },
+        {
+          "id": 280,
+          "name": "奥林匹亚科斯",
+          "is_cpu": 0
+        },
+        {
+          "id": 449,
+          "name": "皇家贝蒂斯",
+          "is_cpu": 0
+        },
+        {
+          "id": 112172,
+          "name": "RB莱比锡",
+          "is_cpu": 0
+        }
+      ]
+    },
+    {
+      "label": "F",
+      "sql": "SELECT id, season, tournament_id, competition_type FROM season_tournaments WHERE season = 9 AND competition_type IN ('league_premier', 'league_second') ORDER BY competition_type",
+      "rows": 2,
+      "results": [
+        {
+          "id": 1,
+          "season": 9,
+          "tournament_id": 1,
+          "competition_type": "league_premier"
+        },
+        {
+          "id": 2,
+          "season": 9,
+          "tournament_id": 2,
+          "competition_type": "league_second"
+        }
+      ]
+    },
+    {
+      "label": "G",
+      "sql": "SELECT club_id, ROUND(amount, 2) AS amount, memo FROM ledger_entries WHERE kind = 'wage' AND ref_type = 'window' AND ref_id = 901 AND club_id IN (5, 280, 449) AND instr(memo, '，按下限扣）') != 0 ORDER BY club_id",
+      "rows": 3,
+      "results": [
+        {
+          "club_id": 5,
+          "amount": -53,
+          "memo": "球员工资（S9 第 1 窗，31 人现行合同；未达顶级下限 53 m，按下限扣）"
+        },
+        {
+          "club_id": 280,
+          "amount": -43,
+          "memo": "球员工资（S9 第 1 窗，30 人现行合同；未达次级下限 43 m，按下限扣）"
+        },
+        {
+          "club_id": 449,
+          "amount": -53,
+          "memo": "球员工资（S9 第 1 窗，25 人现行合同；未达顶级下限 53 m，按下限扣）"
+        }
+      ]
+    },
+    {
+      "label": "H",
+      "sql": "SELECT e.club_id, e.id, e.kind, ROUND(e.amount, 2) AS amount, ROUND(e.balance_after, 2) AS bal, e.created_at, e.memo FROM ledger_entries e WHERE e.club_id IN (241, 112172) ORDER BY e.club_id, e.id",
+      "rows": 17,
+      "results": [
+        {
+          "club_id": 241,
+          "id": 239,
+          "kind": "wage",
+          "amount": 0,
+          "bal": 0,
+          "created_at": "2026-10-06T03:08:00.611Z",
+          "memo": "球员工资（S9 第 1 窗，29 人现行合同；CPU 队不入账（用户令 2026-10-06），已冲正）"
+        },
+        {
+          "club_id": 241,
+          "id": 255,
+          "kind": "prize",
+          "amount": 8.5,
+          "bal": 8.5,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "弃权场胜场奖金（比赛 #31 皇家贝蒂斯 vs 巴塞罗那（主队弃权）；原读法把弃权方当胜方，本次订正）"
+        },
+        {
+          "club_id": 241,
+          "id": 256,
+          "kind": "prize",
+          "amount": 7,
+          "bal": 15.5,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛胜场奖金（比赛 #18，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 257,
+          "kind": "prize",
+          "amount": 7,
+          "bal": 22.5,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛胜场奖金（比赛 #27，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 258,
+          "kind": "prize",
+          "amount": 4.7,
+          "bal": 27.2,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛出场补贴（比赛 #37，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 259,
+          "kind": "prize",
+          "amount": 4.7,
+          "bal": 31.9,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛出场补贴（比赛 #44，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 260,
+          "kind": "prize",
+          "amount": 4.7,
+          "bal": 36.6,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛出场补贴（比赛 #51，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 261,
+          "kind": "prize",
+          "amount": 4.7,
+          "bal": 41.3,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛出场补贴（比赛 #57，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 262,
+          "kind": "prize",
+          "amount": 8.5,
+          "bal": 49.8,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛胜场奖金（比赛 #61，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 263,
+          "kind": "prize",
+          "amount": 6.6,
+          "bal": 56.4,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛平局奖金（比赛 #70，CPU 期补发）"
+        },
+        {
+          "club_id": 241,
+          "id": 271,
+          "kind": "manual_adjust",
+          "amount": 30,
+          "bal": 86.4,
+          "created_at": "2026-10-06T04:43:58.829Z",
+          "memo": "接队资金"
+        },
+        {
+          "club_id": 112172,
+          "id": 244,
+          "kind": "wage",
+          "amount": 0,
+          "bal": 0,
+          "created_at": "2026-10-06T03:08:00.611Z",
+          "memo": "球员工资（S9 第 1 窗，26 人现行合同；CPU 队不入账（用户令 2026-10-06），已冲正）"
+        },
+        {
+          "club_id": 112172,
+          "id": 264,
+          "kind": "prize",
+          "amount": 7,
+          "bal": 7,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛胜场奖金（比赛 #22，CPU 期补发）"
+        },
+        {
+          "club_id": 112172,
+          "id": 265,
+          "kind": "prize",
+          "amount": 4.8,
+          "bal": 11.8,
+          "created_at": "2026-10-06T04:23:06Z",
+          "memo": "联赛平局奖金（比赛 #183，CPU 期补发）"
+        },
+        {
+          "club_id": 112172,
+          "id": 272,
+          "kind": "manual_adjust",
+          "amount": 30,
+          "bal": 41.8,
+          "created_at": "2026-10-06T04:44:11.342Z",
+          "memo": "接队资金"
+        },
+        {
+          "club_id": 112172,
+          "id": 280,
+          "kind": "manual_adjust",
+          "amount": 6,
+          "bal": 47.8,
+          "created_at": "2026-10-07T14:18:30.958Z",
+          "memo": "反馈重大bug奖金"
+        },
+        {
+          "club_id": 112172,
+          "id": 281,
+          "kind": "manual_adjust",
+          "amount": 2,
+          "bal": 49.8,
+          "created_at": "2026-10-07T14:18:50.319Z",
+          "memo": "反馈一般bug奖金"
+        }
+      ]
+    },
+    {
+      "label": "I",
+      "sql": "SELECT c.id AS club_id, c.name, (SELECT w.id FROM ledger_entries w WHERE w.club_id = c.id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = 901) AS wage_id, (SELECT MIN(m.id) FROM ledger_entries m WHERE m.club_id = c.id AND m.id BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = c.id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = 901) AND 2147483647) AS next_id, (SELECT x.balance_after FROM ledger_entries x WHERE x.club_id = c.id AND x.kind = 'wage' AND x.ref_type = 'window' AND x.ref_id = 901) AS wage_bal, (SELECT n.balance_after FROM ledger_entries n WHERE n.club_id = c.id AND n.id = (SELECT MIN(m.id) FROM ledger_entries m WHERE m.club_id = c.id AND m.id BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = c.id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = 901) AND 2147483647)) AS next_bal, CASE WHEN (SELECT MIN(m.id) FROM ledger_entries m WHERE m.club_id = c.id AND m.id BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = c.id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = 901) AND 2147483647) IS NULL THEN 'no-downstream' WHEN ROUND((SELECT n.balance_after FROM ledger_entries n WHERE n.club_id = c.id AND n.id = (SELECT MIN(m.id) FROM ledger_entries m WHERE m.club_id = c.id AND m.id BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = c.id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = 901) AND 2147483647)), 2) = ROUND((SELECT x.balance_after FROM ledger_entries x WHERE x.club_id = c.id AND x.kind = 'wage' AND x.ref_type = 'window' AND x.ref_id = 901) + (SELECT n.amount FROM ledger_entries n WHERE n.club_id = c.id AND n.id = (SELECT MIN(m.id) FROM ledger_entries m WHERE m.club_id = c.id AND m.id BETWEEN (SELECT w.id + 1 FROM ledger_entries w WHERE w.club_id = c.id AND w.kind = 'wage' AND w.ref_type = 'window' AND w.ref_id = 901) AND 2147483647)), 2) THEN 'linked' ELSE 'broken' END AS chain FROM clubs c WHERE c.id IN (5, 280, 449, 241, 112172) ORDER BY c.id",
+      "rows": 5,
+      "results": [
+        {
+          "club_id": 5,
+          "name": "切尔西",
+          "wage_id": 229,
+          "next_id": 277,
+          "wage_bal": 16.82,
+          "next_bal": 23.42,
+          "chain": "linked"
+        },
+        {
+          "club_id": 241,
+          "name": "巴塞罗那",
+          "wage_id": 239,
+          "next_id": 255,
+          "wage_bal": 0,
+          "next_bal": 8.5,
+          "chain": "linked"
+        },
+        {
+          "club_id": 280,
+          "name": "奥林匹亚科斯",
+          "wage_id": 241,
+          "next_id": null,
+          "wage_bal": 42.95,
+          "next_bal": null,
+          "chain": "no-downstream"
+        },
+        {
+          "club_id": 449,
+          "name": "皇家贝蒂斯",
+          "wage_id": 242,
+          "next_id": 245,
+          "wage_bal": 50.29,
+          "next_bal": 41.79,
+          "chain": "linked"
+        },
+        {
+          "club_id": 112172,
+          "name": "RB莱比锡",
+          "wage_id": 244,
+          "next_id": 264,
+          "wage_bal": 0,
+          "next_bal": 7,
+          "chain": "linked"
+        }
+      ]
+    }
+  ]
+}
