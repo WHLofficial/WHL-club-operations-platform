@@ -6627,7 +6627,12 @@ button.sqc-pos:hover {
   width: 170px;
 }
 
+/* v6.39.1：这块必须显式写回 flex——基类 .sqc-m（见上）是 grid，v6.37.1 把基类由 flex 改 grid 时
+   只在这块写了 flex 子属性，display 被基类带走 ⇒ 桌面值区回退成 repeat(3, 48px) 定宽三列
+   （--sqc-mcols/--sqc-cw 只窄屏下发），13 个指标折多行挤在右侧。
+   e2e ⑨ 桌面分支与 tests/mobile-baseline.test.ts 的 TC-WIDE-01 都锁这条，别再删。 */
 .sqc-card.wide .sqc-m {
+  display: flex;
   flex: 1;
   min-width: 0;
   flex-wrap: wrap;

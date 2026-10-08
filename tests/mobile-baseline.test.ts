@@ -828,3 +828,30 @@ describe('v6.39.0 消费中心窄屏静态锁（消费中心过宽修复）', ()
     expect(venue, '子设施行应 flex + wrap（项间可换行，项内不折）').toContain("flexWrap: 'wrap'");
   });
 });
+
+// v6.39.1 桌面宽卡回归（用户报 2026-10-08：桌面球队页每行渲染成窄卡）的静态锁。
+// 根因：v6.37.1 把基类 .sqc-m 由 flex 改 grid（窄屏网格），但 .sqc-card.wide .sqc-m 覆盖块
+// 从来没写过 display——原先靠基类的 flex 被改掉后，桌面值区回退成 repeat(3, 48px) 定宽三列，
+// 13 个指标折多行。此类回归只在真浏览器几何里可见，所以 e2e ⑨ 桌面分支量 computed display +
+// 值格同行（顶差 ≤3px）；这里再钉文本级：wide 块必须显式声明 display:flex，且基类仍是 grid
+// （两边任一被改走都要有人来看一眼——若将来基类改回 flex，这条会提示同步更新）。
+describe('v6.39.1 桌面宽卡静态锁（值区 wide 必须 flex 平铺）', () => {
+  it('TC-WIDE-01 · .sqc-card.wide .sqc-m 块内含 display:flex；基类 .sqc-m 是 grid', () => {
+    const rules = cssRules(read(STYLES_CSS));
+    const wide = declarations(rules, '.sqc-card.wide .sqc-m', 'display');
+    expect(
+      wide.some((d) => d.value === 'flex'),
+      `.sqc-card.wide .sqc-m 缺 display:flex（桌面值区会回退成基类 grid 的 repeat(3, 48px) 定宽三列，13 指标折多行），实见 ${JSON.stringify(wide)}`,
+    ).toBe(true);
+    const base = declarations(rules, '.sqc-m', 'display', true);
+    expect(
+      base.some((d) => d.value === 'grid'),
+      `.sqc-m 基类应仍是 grid（窄屏 --sqc-mcols × --sqc-cw 网格）；若基类改回 flex，请同步改本条与 e2e ⑨ 桌面断言，实见 ${JSON.stringify(base)}`,
+    ).toBe(true);
+    // 两处使用点（SquadTab 阵容 / DeskTab 注册名单）都要把 wide 接到卡上，否则桌面落到窄卡分支
+    const squad = read(SQUAD_TAB);
+    const desk = read(DESK_TAB);
+    expect(squad, 'SquadTab 应把 wide 传给分组/卡片').toContain('wide=');
+    expect(desk, 'DeskTab 应把 wide 传给分组/卡片').toContain('wide=');
+  });
+});

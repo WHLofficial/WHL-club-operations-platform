@@ -4,7 +4,8 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router';
-import { CardBadges, SquadCard } from './card-parts.tsx';
+import { CardBadges, CardGroup, SquadCard } from './card-parts.tsx';
+import { DESKTOP_CELLS } from '../../lib/club-cards.ts';
 import type { PlayerLibraryRow } from '../../lib/api.ts';
 
 afterEach(cleanup);
@@ -88,5 +89,57 @@ describe('SquadCard 值格分段色（v6.38.1）', () => {
     );
     expect(container.querySelectorAll('.sqc-v')[1]!.className).toContain('attr-mid');
     expect(container.querySelectorAll('.sqc-v')[2]!.className).toContain('attr-good');
+  });
+});
+
+/* ---------- v6.39.1：宽卡（wide）结构契约 ----------
+   桌面回归的根因在 CSS（基类 .sqc-m 改 grid 后 .sqc-card.wide 漏回 display:flex），
+   jsdom 量不到 computed 布局，所以这里只钉**结构**：wide 必出 article.sqc-card.wide、
+   值格走 DESKTOP_CELLS（13 格）、窄卡不带 .wide、组头 wide 走标签串。
+   几何（computed display / 值格同行）由 scripts/e2e/smoke.mjs ⑨ 段桌面分支量。 */
+
+describe('SquadCard 宽窄结构（v6.39.1）', () => {
+  it('wide：article 带 .wide 类，值区走 DESKTOP_CELLS 13 格（含身价/影响力/经纪人）', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SquadCard row={cardRow} view="basic" extras={[]} wide />
+      </MemoryRouter>,
+    );
+    const article = container.querySelector('article.sqc-card')!;
+    expect(article.className).toContain('wide');
+    expect(container.querySelectorAll('.sqc-v')).toHaveLength(13);
+  });
+
+  it('窄卡：article 不带 .wide，值区格数按视图（basic = 3）', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SquadCard row={cardRow} view="basic" extras={[]} />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('article.sqc-card')!.className).not.toContain('wide');
+    expect(container.querySelectorAll('.sqc-v')).toHaveLength(3);
+  });
+
+  it('组头：wide 走标签串（.sqc-glegend）而非窄屏的 .sqc-gcols 标签格', () => {
+    const cells = DESKTOP_CELLS;
+    const wide = render(
+      <MemoryRouter>
+        <CardGroup groupKey="GK" label="门将" count={1} cells={cells} extras={[]} wide>
+          <SquadCard row={cardRow} view="basic" extras={[]} wide />
+        </CardGroup>
+      </MemoryRouter>,
+    );
+    expect(wide.container.querySelector('.sqc-glegend')).toBeTruthy();
+    expect(wide.container.querySelector('.sqc-gcols')).toBeNull();
+
+    const narrow = render(
+      <MemoryRouter>
+        <CardGroup groupKey="GK" label="门将" count={1} cells={cells} extras={[]}>
+          <SquadCard row={cardRow} view="basic" extras={[]} />
+        </CardGroup>
+      </MemoryRouter>,
+    );
+    expect(narrow.container.querySelector('.sqc-gcols')).toBeTruthy();
+    expect(narrow.container.querySelector('.sqc-glegend')).toBeNull();
   });
 });

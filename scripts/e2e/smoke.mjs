@@ -1578,6 +1578,37 @@ async function main() {
               `${label}：取消勾选后组头标签串还挂着「合同类型」`,
             );
             assert(!page.url().includes('cols='), `${label}：取消勾选后 ?cols= 没清掉（${page.url()}）`);
+            // v6.39.1 回归锁：桌面值区必须是 flex 平铺（单行），不是窄屏那套 grid 网格。
+            // 背景：v6.37.1 把基类 .sqc-m 由 flex 改 grid 时漏给 .sqc-card.wide .sqc-m 补 display:flex，
+            // 桌面值区回退成 repeat(3, 48px) 网格（13 个指标折成多行挤在右侧）——线上 v6.37.1–v6.39.0 一直带此 bug，
+            // 而此前桌面分支只验组头标签串文本，量不到几何 ⇒ 一条都没红。这里量 computed display + 值格同行。
+            const wideGeom = await page.locator('.club-block article.sqc-row').first().evaluate((row) => {
+              const m = row.querySelector('.sqc-m');
+              const vs = [...row.querySelectorAll('.sqc-v')];
+              const tops = vs.map((v) => Math.round(v.getBoundingClientRect().top));
+              const mr = m.getBoundingClientRect();
+              return {
+                display: getComputedStyle(m).display,
+                cols: getComputedStyle(m).gridTemplateColumns,
+                vCount: vs.length,
+                tops,
+                mHeight: Math.round(mr.height),
+                rowHeight: Math.round(row.getBoundingClientRect().height),
+              };
+            });
+            assert(
+              wideGeom.display === 'flex',
+              `desktop：宽卡值区 .sqc-m 应 flex 平铺（基类 grid 须被 .sqc-card.wide 覆盖回 flex），实测 display=${wideGeom.display}、grid-template-columns=${wideGeom.cols}`,
+            );
+            assert(
+              wideGeom.vCount === 13,
+              `desktop：宽卡值格应 13 格（DESKTOP_CELLS），实测 ${wideGeom.vCount}`,
+            );
+            const topSpread = Math.max(...wideGeom.tops) - Math.min(...wideGeom.tops);
+            assert(
+              topSpread <= 3,
+              `desktop：宽卡 13 个值格应在同一行（顶差 ≤3px），实测顶差 ${topSpread}px、值区高 ${wideGeom.mHeight}px、行高 ${wideGeom.rowHeight}px`,
+            );
           }
           if (label === 'mobile') {
             // 窄屏专属：四视图 chips（tablist）+ 「列…」收进 chips 行的 MultiSelect + 组内标签格

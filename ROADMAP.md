@@ -1500,6 +1500,24 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.39.1 · 桌面球队页宽卡回归修复（`.sqc-card.wide .sqc-m` 补回 `display: flex`）（2026-10-08）
+
+**状态**：**本地收口，未 push**（零迁移、零生产写；等用户下令后随授权 push 同轮上线）。判级 **patch**——缺陷修补，无新增能力、无契约变更。typecheck 三份 tsconfig 0 error；vitest **104 文件 / 1748 例**全绿（v6.39.0 基线 104/1744，净 +4 例）；`npm run build` 成功；e2e **24/24**（⑨ 桌面分支新增几何锁）。测试计划 `docs/test-plans/v6.39.1-wide-card-display.md`（TC-WIDE-01 / TC-WIDE-02 / TC-CARD-05–07 + 变异口径）。
+
+**缘起**（用户令 m03382，附图）：电脑端 `/clubs/66?tab=squad` 截图——分组标题右侧 13 列名列正常，但每行球员渲染成窄卡形态（值区 3 列窄网格逐格堆叠）。用户令原话：「电脑端显示bug，排查相似问题，修复」。
+
+**根因**：`web/src/styles.css:6570` 基类 `.sqc-m` 是 `display: grid`（窄屏按 `--sqc-mcols × --sqc-cw` 与组头逐格对齐），桌面覆盖块 `.sqc-card.wide .sqc-m` 只写了 flex 子属性、**漏写 `display: flex`**；`--sqc-mcols`/`--sqc-cw` 只在窄屏下发（`web/src/pages/club/SquadTab.tsx:145-146`）⇒ 桌面回退成 `repeat(3, 48px)` 定宽三列、13 指标折多行。引入点 `b72d37e`（v6.37.1）把基类由 flex 改 grid 时断言「桌面 wide 由既有覆盖块兜住」——**该断言错误**（覆盖块从来没有过 `display`），回归自此带到线上（v6.37.2 / v6.38.1 / v6.39.0 均未碰 wide 块）。
+
+**交付**：`web/src/styles.css` 的 `.sqc-card.wide .sqc-m` 补 `display: flex`（注释移到规则体上方：`cssRules()` 正则会把体内注释当声明，注释里的选择器字样还会污染文本级判据）。
+
+**相似问题排查**：全仓 sqc 机制两个使用点（`web/src/pages/club/SquadTab.tsx` 阵容 / `web/src/pages/club/DeskTab.tsx` 注册名单）共用同一套 CSS 与 `DESKTOP_CELLS`，wide 接线均正确 ⇒ 一处 CSS 覆盖两处。登记不改的两处同类隐患：① `web/src/pages/PlayersLibrary.tsx:53` 球员库走独立机制（lib-card/表、断点 900 与主机制 760 不一致），当前不坏；② 宽窄判定用 `matchMedia` viewport 而非容器查询，宽视口 + 窄容器会误拿 wide，当前两处皆全宽不触发。
+
+**回归闸门**（此前桌面几何零覆盖，破版一路带到线上）：① `scripts/e2e/smoke.mjs` ⑨ 桌面分支——`.sqc-m` computed `display === 'flex'` + 值格恰 13 + 13 格顶差 ≤3px，失败信息带实测 display 与 `grid-template-columns`；② `web/src/pages/club/card-parts.test.tsx` 宽窄结构三例（wide 出 `article.sqc-card.wide` 且走 `DESKTOP_CELLS` 13 格／窄卡不带 `.wide` 且 basic 3 格／组头 wide 走 `.sqc-glegend`、窄屏走 `.sqc-gcols`）；③ `tests/mobile-baseline.test.ts` TC-WIDE-01 静态锁（wide 块必含 `display:flex`、基类仍是 grid、两使用点都接 `wide=`）。
+
+**验收**：修复前红基线——e2e 全量唯一失败即新几何断言，实测 `display=grid、grid-template-columns=48px 48px 48px`（其余 23 项全绿，证明只此一处坏）；修复后 24/24。桌面探针 1280×900 四行卡实测 `display=flex / vCount=13 / topSpread=0 / 值区宽 916px 高 21px / 行高 65px / 文档零横向溢出` + 截图留痕（`scratch/probe-wide-card.png`，探针 `scratch/probe-wide-card-desktop.mjs`）。
+
+**教训**：① 「基类改值、以为变体块会兜住」——变体块只写子属性时被改掉的基类属性会直接穿透到桌面（同类形态先例 v6.37.2 P4 `.stat-value` 压过 `.stat-value-small`）；CSS 覆盖须逐属性核对，别只看特异性；② 桌面几何此前零覆盖 ⇒ 一条断言都没红；③ `cssRules()` 的 `/[^{}]+/` 会把规则体内注释当声明读，注释写规则体上方。
+
 ## v6.39.0 · 工资帽按级别（顶级 68 / 次级 58）+ 窗末扣款级别下限（帽 − 15 = 53/43）+ CPU 队不入账 + 消费中心窄屏过宽修复（2026-10-08）
 
 **状态**：**本地收口，未 push**（零迁移、零生产写；等用户下令后随授权 push 同轮上线）。判级 minor——两处用户可见变化（工资帽按级别显示、消费中心窄屏可用），无 DB 迁移、无 API 契约变更。typecheck 三份 tsconfig 0 error；vitest **104 文件 / 1744 例**全绿（v6.38.1 基线 104/1738，净 +6 例）；`npm run build` 成功；e2e **24/24**（⑱ 新增 375 段）。测试计划 `docs/test-plans/v6.39.0-wage-cap-by-tier.md`（TC-CAP-01 / TC-FLOOR-01–03 / TC-CPU-01 / TC-SHOP-01–03 + 3 枚变异实测 + 1 枚等价变异登记）。生产订正批 `scripts/prod-20261006-s9-wage-floor-fix/` **只备不跑**（形状级演练 27 条断言全过，含崩溃窗口自愈）。
