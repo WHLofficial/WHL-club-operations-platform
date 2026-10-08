@@ -1502,7 +1502,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.39.3 · 球员库球队名前接队徽缩略图（映射抽 src/worker/club-logos.ts 共用）（2026-10-08）
 
-- **状态**：patch × 本地收口未 push（2026-10-08）；零迁移、零生产写。
+- **状态**：patch × **已上线**（2026-10-08 发布，用户令 m04745「发布」：push `c534523..74540bc`（2 枚：v6.39.2 上线回写 `f1b912f` + 本枚）触发 CF 自动部署（Workers Builds），生产 Version `d8093411-9eea-40fd-9611-0299f8595bf4` @2026-10-08T15:14:29Z；零迁移、零生产写、纯展示层 + worker 读路径）。
 - **缘起**：用户 m04476「下一个修复：球员库界面球队名前应该用队徽缩略图」。
 - **根因**：窄屏铭牌卡 `TeamLogo` 只传 `name`（不传 `logoKey`）⇒ 永远哈希色块；宽屏表格球队格是纯文本链接，无徽。
 - **交付**：① 新 `src/worker/club-logos.ts`（`loadClubTourTeams` / `loadTeamLogos`，抽自 `routes/clubs.ts` 的本地副本）② `/api/players` 计算体内补 `clubLogoKey`（页内 club_id 去重查一次；自由身 null）③ `PlayerLibraryRow.clubLogoKey` + 宽屏 `a.lib-club`（徽 + 队名 inline-flex）+ 窄屏卡片传 `logoKey`。
@@ -1510,6 +1510,8 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - **回归闸门**：worker 队徽用例 / 组件三例 / TC-CREST-01 静态锁 / e2e ⑧ 三视口徽断言 / 探针打桩截图。
 - **验收**：typecheck 0 error；vitest 104 文件 1759 例（净 +5）；build ✓；e2e 24/24；探针宽屏 2 真图 + 1 色块 + 1 自由身、窄屏同款、文档溢出 −15px。
 - **教训**：见 CHANGELOG v6.39.3 条（TeamLogo 静默降级 / 必填字段掀夹具 / 本地 logo_key 全 NULL）。
+- **上线回读**：自定义域 https://club.whleague.win 回读通过——入口资产 `index-C19jn4zM.js`/`index-Gfv8Dt1q.css` → **`index-DbqKwyYi.js`（642519 B）/`index-CxZEtVWu.css`（82694 B）**、包内版本串 `6.39.3` 恰 1 处、`.lib-club{display:inline-flex;align-items:center;gap:6px}` 逐字在线、生产 `GET /api/players?limit=3` 三行均带真 `clubLogoKey`（`team/18/1788577356249.png` 等）且与 `GET /api/clubs` 同 clubId 的 `logoKey` 逐字一致 3/3、真机（系统 Chrome 免登录公开页）`/players` 1280→20 行 / 19 个 `a.lib-club` 全为解码成功真图（`naturalWidth` 160）、375→20 张窄卡 / 19 个 `.lib-card-sub .team-logo` 真图，两视口 0 色块回落 / 0 页面报错（截图 `scratch/probe-live-players-1280.png`、`-375.png`）。
+
 
 ## v6.39.2 · 桌面球队页宽卡列对齐（列头与值区同款等宽轨网格 + 身份列 210 / 列距 22）+ 注册台列集 13→11 + 金额单位紧贴数字（2026-10-08）
 
