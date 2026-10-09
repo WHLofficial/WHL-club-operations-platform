@@ -11,7 +11,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const PURE_DATA_MODULES = ['src/core/fc26.ts', 'src/core/players-sort.ts'];
+// v6.40.0：notify-meta.ts 也被前端 import（收件篮徽章表 / notify-links.ts），同样要求零依赖。
+const PURE_DATA_MODULES = ['src/core/fc26.ts', 'src/core/players-sort.ts', 'src/core/notify-meta.ts'];
 
 function hasStaticDependency(line: string): boolean {
   return (

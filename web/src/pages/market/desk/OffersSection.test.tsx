@@ -4,6 +4,7 @@
 // - 「轮到谁」列：卖方视角「待卖方确认」、买方视角「等对方确认」（intent 的 myTurn 恒 false，不能再显示 —）
 // - 「我收到的」页签上的 intentsMine 徽标「（N 待确认挂牌）」
 // - 谈判桌动作：卖方「确认挂牌」(accept) + 「放弃」(reject)，买方「撤回」(withdraw)，端点逐字对
+import { StrictMode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
@@ -60,7 +61,13 @@ function detailResponse(o: OfferListItem): OfferDetailResponse {
   };
 }
 
-function renderSection(items: OfferListItem[], detail?: OfferDetailResponse, intentsMine = 0) {
+function renderSection(
+  items: OfferListItem[],
+  detail?: OfferDetailResponse,
+  intentsMine = 0,
+  route = '/',
+  strict = false,
+) {
   apiMock.mockImplementation((path: string) => {
     if (path.startsWith('/api/offers?')) return Promise.resolve(listResponse(items, intentsMine));
     if (/^\/api\/offers\/\d+$/.test(path)) {
@@ -69,13 +76,15 @@ function renderSection(items: OfferListItem[], detail?: OfferDetailResponse, int
     return Promise.reject(new Error(`未预期的请求：${path}`));
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const tree = (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[route]}>
         <OffersSection box="in" status="all" onBoxChange={() => {}} onStatusChange={() => {}} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  // StrictMode 开关：dev 下 effect 会连跑两次，深链播种最怕「首跑跳过」型旗标
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 afterEach(() => {
@@ -170,5 +179,45 @@ describe('v6.29.0 意向单（OffersSection）', () => {
     renderSection([offer({ status: 'pending', role: 'buyer', amount: 12 })]);
     expect(await screen.findByText('测试球员')).toBeTruthy();
     expect(screen.queryByText('砍价')).toBeNull();
+  });
+});
+
+// v6.40.0：站内信深链落点（?offer=<id>）——从收件篮点进来直接展开谈判桌 + 高亮目标行
+describe('v6.40.0 站内信深链落点（OffersSection，TC-JUMP-01）', () => {
+  it('?offer=5 且该单在列表里：谈判桌自动展开、目标行挂 .is-target 并带 data-offer-id', async () => {
+    const o = offer({ id: 5, status: 'pending' });
+    renderSection([o], detailResponse(o), 0, '/market/desk?tab=offers&box=in&offer=5');
+
+    // 详情按 id 取 ⇒ 谈判桌直接开着（行内按钮文案是「收起」而非「谈判桌」；页头那句
+    // 「私下议价：…」是静态文案，恒在，不能当判据）
+    expect(await screen.findByRole('button', { name: '收起' })).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('[data-offer-id="5"]')).toBeTruthy());
+    const row = document.querySelector('[data-offer-id="5"]') as HTMLElement;
+    expect(row.classList.contains('is-target'), '目标行应挂 .is-target').toBe(true);
+    // 其余行不该被点亮
+    expect(document.querySelectorAll('.is-target').length).toBe(1);
+  });
+
+  it('?offer=999 不在当前列表里：提示条给出单号，谈判桌仍按 id 打开', async () => {
+    const o = offer({ id: 5, status: 'pending' });
+    const target = offer({ id: 999, status: 'expired' });
+    renderSection([o], detailResponse(target), 0, '/market/desk?tab=offers&box=in&offer=999');
+
+    const hint = await screen.findByRole('status');
+    expect(hint.textContent).toContain('#999');
+    expect(hint.textContent).toContain('不在当前列表里');
+    expect(document.querySelector('.is-target'), '不在列表里就没有可高亮的行').toBeNull();
+    expect(document.querySelector('[data-offer-id="5"]')).toBeTruthy();
+    // 谈判桌仍按 id 打开：详情请求打的是目标单号，而不是列表里那行
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/offers/999'));
+  });
+
+  it('StrictMode 下 ?offer= 的谈判桌不被「首跑跳过」效应收起（dev 双跑 effect）', async () => {
+    const o = offer({ id: 5, status: 'pending' });
+    renderSection([o], detailResponse(o), 0, '/market/desk?tab=offers&box=in&offer=5', true);
+
+    // 双跑第二次若走「收起」分支，播种的 openId 会被清掉 ⇒ 行内按钮回落成「谈判桌」、行不再高亮
+    expect(await screen.findByRole('button', { name: '收起' })).toBeTruthy();
+    await waitFor(() => expect(document.querySelectorAll('.is-target').length).toBe(1));
   });
 });

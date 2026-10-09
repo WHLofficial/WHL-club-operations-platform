@@ -3,7 +3,7 @@
 // 核心断言都钉在两个确定档（北京 / UTC）上；system 档 CI 时区不定，只烟测不串具体值。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { fmtAgo, fmtDate, fmtDateTime, fmtTime, getTzPref, setTzPref, tzLabel, useTimeFmt, useTzPref } from './datetime.ts';
+import { fmtAgo, fmtDate, fmtDateTime, fmtDayLabel, fmtTime, getTzPref, setTzPref, tzLabel, useTimeFmt, useTzPref } from './datetime.ts';
 
 afterEach(() => {
   localStorage.clear();
@@ -136,6 +136,54 @@ describe('fmtAgo（v6.31.0 相对日期）', () => {
     withNow(() => {
       render(<Probe />);
       expect(screen.getByTestId('ago').textContent).toBe('昨天');
+    });
+    cleanup();
+  });
+});
+
+// v6.40.0 收件篮日期分组：「今天 / 昨天 / YYYY-MM-DD」三档，日历日口径与 fmtAgo 同源
+describe('fmtDayLabel（v6.40.0 分组标签）', () => {
+  const NOW = new Date('2026-10-05T04:00:00Z'); // 北京 2026-10-05 12:00
+
+  function withNow<T>(fn: () => T): T {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      return fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('今天 / 昨天 / 更早给 YYYY-MM-DD（按显示时区的日历日）', () => {
+    setTzPref('asia/shanghai');
+    withNow(() => {
+      expect(fmtDayLabel('2026-10-05T02:00:00Z')).toBe('今天');
+      expect(fmtDayLabel('2026-10-04T17:00:00Z')).toBe('今天'); // 北京日历日仍是 10-05
+      expect(fmtDayLabel('2026-10-04T02:00:00Z')).toBe('昨天');
+      expect(fmtDayLabel('2026-09-30T02:00:00Z')).toBe('2026-09-30');
+      expect(fmtDayLabel('2026-08-01T02:00:00Z')).toBe('2026-08-01');
+    });
+  });
+
+  it('换显示时区，同一时刻的标签跟着换；缺失 / 非法 ⇒ —', () => {
+    setTzPref('utc');
+    withNow(() => {
+      expect(fmtDayLabel('2026-10-04T17:00:00Z')).toBe('昨天'); // UTC 钟面下就是昨天
+      expect(fmtDayLabel('2026-10-02T17:00:00Z')).toBe('2026-10-02');
+    });
+    expect(fmtDayLabel(null)).toBe('—');
+    expect(fmtDayLabel('not-a-date')).toBe('—');
+  });
+
+  it('useTimeFmt().dayLabel 同源（页面分组文案走 hook）', () => {
+    function Probe() {
+      const t = useTimeFmt();
+      return <span data-testid="day">{t.dayLabel('2026-10-04T02:00:00Z')}</span>;
+    }
+    withNow(() => {
+      render(<Probe />);
+      expect(screen.getByTestId('day').textContent).toBe('昨天');
     });
     cleanup();
   });

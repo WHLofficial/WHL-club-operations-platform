@@ -975,3 +975,39 @@ describe('v6.39.3 球员库队徽（TC-CREST-01）', () => {
     );
   });
 });
+
+describe('v6.40.0 收件篮窄屏静态锁（TC-NB-STR-01/03）', () => {
+  const PAGE = `${WEB_SRC}/pages/Notifications.tsx`;
+
+  it('TC-NB-STR-01 · 两行卡片与 ≥44px 点击区写在 ≤640 块内（桌面仍是单行 flex）', () => {
+    const css = read(STYLES_CSS);
+    // 收件篮的窄屏规则必须落在 @media (max-width: 640px) 里：若写在桌面块，窄屏依旧单行、
+    // 长摘要把时间戳挤出视口（v6.40.0 要修的就是这个），静态门按块归属卡住。
+    const narrow = mediaBlocks(css, '@media (max-width: 640px)').filter((b) => /(^|[^\w-])\.inbox-row\s*\{/.test(b));
+    expect(narrow.length, '收件篮窄屏规则应恰好写在 ≤640 块内一处').toBe(1);
+    const block = narrow[0];
+    expect(block, '第一行：head（未读点+徽章）/ time / go').toContain("'head time go'");
+    expect(block, '第二行：正文满宽').toContain("'text text text'");
+    const mh = block.match(/min-height:\s*(\d+)px/);
+    expect(mh && Number(mh[1]) >= 44, `整行点击区应 ≥44px，实见 ${mh ? `${mh[1]}px` : '未声明 min-height'}`).toBe(true);
+
+    // 桌面形态不能被窄屏网格污染：按行号取最早的 display 声明，应是单行 flex
+    const displays = declarations(cssRules(css), '.inbox-row', 'display').sort((a, b) => a.line - b.line);
+    expect(displays[0]?.value, `桌面 .inbox-row 应单行 flex，实见 ${JSON.stringify(displays)}`).toBe('flex');
+  });
+
+  it('TC-NB-STR-03 · 徽章走 NOTIFY_META、分组标签走 dayLabel（不再裸三元 / 自算日历日）', () => {
+    const page = read(PAGE);
+    expect(page, '徽章不再裸三元模板名').not.toMatch(/template\s*===\s*'(result_confirmed|levelup)'/);
+    expect(page, '徽章表真源是 src/core/notify-meta.ts').toContain("from '../../../src/core/notify-meta.ts'");
+    expect(page, '未知模板退化成原始模板名').toContain('NOTIFY_META[n.template]');
+    expect(page, '日期分组标签走 datetime.ts 的 dayLabel（Intl 只许出现在那里）').toMatch(/dayLabel\(/);
+    expect(page, '页面不许自算日历日').not.toMatch(/toISOString\(\)\.slice\(/);
+  });
+
+  it('TC-NB-STR-01b · 整行可点：可点行是 button.inbox-row、不可点行是同款 div.inbox-row', () => {
+    const page = read(PAGE);
+    expect(page, '可点行沿用 .inbox-row 并加 button 语义').toContain('inbox-row inbox-row-btn');
+    expect(page, '不可点行仍是 .inbox-row（视觉同款、语义不可点）').toMatch(/className="inbox-row"/);
+  });
+});

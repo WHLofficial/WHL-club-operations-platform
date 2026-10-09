@@ -413,3 +413,133 @@ describe('站内信收件篮（v2.4.0）', () => {
     expect(JSON.parse(calls[0]!.body).text).toBe('QQ');
   });
 });
+
+// v6.40.0：类目筛选 / 类目计数 / 本类全部已读 / payload.ref 与 clubId（收件篮徽章与跳转的数据面）
+describe('收件篮类目与跳转数据面（v6.40.0）', () => {
+  function seedCats(sqlite: DatabaseSync) {
+    sqlite.exec(`
+      INSERT INTO notifications (id, club_id, user_id, channel, template, payload, status, created_at) VALUES
+        (11, 5, 1, 'web', 'result_confirmed', '{"text":"赛果"}', 'sent', '2026-07-01T10:00:00Z'),
+        (12, 7, 1, 'web', 'levelup', '{"text":"成长甲","ref":{"type":"player","id":6}}', 'sent', '2026-07-02T10:00:00Z'),
+        (13, 7, 1, 'web', 'levelup', '{"text":"成长乙"}', 'sent', '2026-07-03T10:00:00Z'),
+        (14, 7, 1, 'web', 'offer_received', '{"text":"收到报价","ref":{"type":"offer","id":42}}', 'sent', '2026-07-04T10:00:00Z'),
+        (15, 7, 1, 'web', 'shop_order_approved', '{"text":"工单通过","ref":{"type":"shop_order","id":9}}', 'sent', '2026-07-05T10:00:00Z'),
+        (16, 7, 1, 'web', 'event_triggered', '{"text":"事件"}', 'sent', '2026-07-06T10:00:00Z'),
+        (17, 7, 1, 'web', 'legacy_unknown', '{"text":"未知模板"}', 'sent', '2026-07-07T10:00:00Z'),
+        (18, 7, 1, 'web', 'offer_expired', '{"text":"坏 ref","ref":{"type":"offer","id":0}}', 'sent', '2026-07-08T10:00:00Z'),
+        (19, 7, 2, 'web', 'offer_received', '{"text":"别人的"}', 'sent', '2026-07-09T10:00:00Z');
+      UPDATE notifications SET read_at = '2026-07-03T11:00:00Z' WHERE id = 13;
+    `);
+  }
+  const cookie = (token = 'tok-admin') => ({ Cookie: `whl_session=${token}` });
+
+  it('类目筛选只筛 items，unread 仍为全量口径；游标可叠加；非法类目 400', async () => {
+    const fx = freshEnv();
+    seedCats(fx.sqlite);
+    const get = async (q: string) =>
+      (await (await app.request(`/api/notifications${q}`, { headers: cookie() }, fx.env)).json()) as {
+        items: { id: number; template: string }[];
+        nextCursor: number | null;
+        unread: number;
+      };
+
+    const all = await get('');
+    expect(all.items.map((i) => i.id)).toEqual([18, 17, 16, 15, 14, 13, 12, 11]);
+    expect(all.unread).toBe(7); // 本人 8 条里 id 13 已读 ⇒ 全量未读 7（含未知模板）
+
+    const shop = await get('?category=shop');
+    expect(shop.items.map((i) => i.id)).toEqual([15]);
+    expect(shop.unread).toBe(7); // 类目筛选不动 unread 口径
+
+    const offer = await get('?category=offer');
+    expect(offer.items.map((i) => i.id)).toEqual([18, 14]);
+    expect((await get('?category=offer&cursor=18')).items.map((i) => i.id)).toEqual([14]);
+    expect((await get('?category=growth&cursor=13')).items.map((i) => i.id)).toEqual([12]);
+
+    const bad = await app.request('/api/notifications?category=nope', { headers: cookie() }, fx.env);
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toBe('类目不对');
+  });
+
+  it('列表行带 clubId 与 ref；老 payload / 坏 ref 退化为 null', async () => {
+    const fx = freshEnv();
+    seedCats(fx.sqlite);
+    const body = (await (
+      await app.request('/api/notifications', { headers: cookie() }, fx.env)
+    ).json()) as { items: { id: number; clubId: number | null; ref: { type: string; id: number } | null }[] };
+    const byId = new Map(body.items.map((i) => [i.id, i]));
+    expect(byId.get(11)).toMatchObject({ clubId: 5, ref: null });
+    expect(byId.get(12)).toMatchObject({ clubId: 7, ref: { type: 'player', id: 6 } });
+    expect(byId.get(14)).toMatchObject({ ref: { type: 'offer', id: 42 } });
+    expect(byId.get(15)).toMatchObject({ ref: { type: 'shop_order', id: 9 } });
+    expect(byId.get(13)?.ref).toBeNull(); // 老行只有 {text}
+    expect(byId.get(16)?.ref).toBeNull(); // 事件类无实体
+    expect(byId.get(18)?.ref).toBeNull(); // id=0 非法
+  });
+
+  it('unread-count?by=category 给类目计数（只含 >0，未知模板不进任何类目）', async () => {
+    const fx = freshEnv();
+    seedCats(fx.sqlite);
+    const plain = (await (
+      await app.request('/api/notifications/unread-count', { headers: cookie() }, fx.env)
+    ).json()) as Record<string, unknown>;
+    expect(plain).toEqual({ unread: 7 }); // 不带 by 时形状不变（顶栏 60s 轮询成本不变）
+
+    const byCat = (await (
+      await app.request('/api/notifications/unread-count?by=category', { headers: cookie() }, fx.env)
+    ).json()) as { unread: number; byCategory: Record<string, number> };
+    expect(byCat.unread).toBe(7);
+    expect(byCat.byCategory).toEqual({ result: 1, growth: 1, offer: 2, shop: 1, event: 1 });
+    expect(byCat.byCategory.legacy_unknown).toBeUndefined();
+  });
+
+  it('read{all,category} 只清本类；category 不带 all / 非法类目都 400', async () => {
+    const fx = freshEnv();
+    seedCats(fx.sqlite);
+    const postRead = (body: unknown) =>
+      app.request(
+        '/api/notifications/read',
+        { method: 'POST', headers: { 'content-type': 'application/json', ...cookie() }, body: JSON.stringify(body) },
+        fx.env,
+      );
+    const unreadByCat = async () =>
+      (await (
+        await app.request('/api/notifications/unread-count?by=category', { headers: cookie() }, fx.env)
+      ).json()) as { unread: number; byCategory: Record<string, number> };
+
+    expect(((await (await postRead({ all: true, category: 'offer' })).json()) as { marked: number }).marked).toBe(2);
+    expect((await unreadByCat()).byCategory).toEqual({ result: 1, growth: 1, shop: 1, event: 1 });
+    // 已清理过的类目再清 = 0（幂等），且不动别的类目
+    expect(((await (await postRead({ all: true, category: 'offer' })).json()) as { marked: number }).marked).toBe(0);
+
+    expect((await postRead({ ids: [11], category: 'result' })).status).toBe(400);
+    const bad = await postRead({ all: true, category: 'nope' });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toBe('类目不对');
+    expect(((await (await postRead({ all: true })).json()) as { marked: number }).marked).toBe(5); // 含未知模板那条
+  });
+
+  it('queueClubNotification 按模板落 ref：offer/player/shop_order 三类，其余不带 ref 键', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (7, '阿森纳', 'premier', 'active');
+      INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (7, 31, '2026-01-01T00:00:00Z');
+    `);
+    const { queueClubNotification } = await import('../src/worker/notify.ts');
+    await queueClubNotification(fx.env, 7, 'offer_received', { player: '球员一', amount: 10, buyerClubId: 3, offerId: 42 });
+    await queueClubNotification(fx.env, 7, 'levelup', { player: '球员一', playerId: 6, ca: 2 });
+    await queueClubNotification(fx.env, 7, 'shop_order_approved', { summary: 'x', orderId: 9 });
+    await queueClubNotification(fx.env, 7, 'result_confirmed', { season: 3, score: '1:0' });
+    const rows = sqlAll<{ template: string; payload: string }>(
+      fx.sqlite,
+      `SELECT template, payload FROM notifications WHERE channel = 'web' ORDER BY id`,
+    );
+    const refOf = (t: string) => JSON.parse(rows.find((r) => r.template === t)!.payload) as Record<string, unknown>;
+    expect(refOf('offer_received').ref).toEqual({ type: 'offer', id: 42 });
+    expect(refOf('levelup').ref).toEqual({ type: 'player', id: 6 });
+    expect(refOf('shop_order_approved').ref).toEqual({ type: 'shop_order', id: 9 });
+    expect('ref' in refOf('result_confirmed')).toBe(false);
+    expect(typeof refOf('result_confirmed').text).toBe('string');
+    // 老 payload（无 ref）与新 payload 在同一个列表里共存——列 API 已验证（上一条用例 id 13）
+  });
+});

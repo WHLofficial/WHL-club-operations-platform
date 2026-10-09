@@ -134,6 +134,34 @@ function clearSession() {
   }
 }
 
+// ---- 站内信种子（⑳，v6.40.0）：本地库没有任何站内信种子（唯一写入者是 queueClubNotification，
+// 人工 INSERT 只出现在单测里）⇒ 收件篮的徽章 / 跳转 / 日期分组必须在 e2e 里自己种。id 取 900001+
+// 与真行错开，跑完在 finally 里按区间删掉。只写本地 D1，绝不 --remote。
+function seedNotifications(rows) {
+  mkdirSync(SHOT_DIR, { recursive: true });
+  const q = (s) => String(s).replace(/'/g, "''");
+  const values = rows
+    .map((r) =>
+      `(${r.id}, ${r.clubId === null ? 'NULL' : r.clubId}, ${USER_ID}, 'web', '${q(r.template)}', ` +
+      `'${q(JSON.stringify(r.payload))}', 'sent', '${r.createdAt}', '${r.createdAt}', NULL)`)
+    .join(',\n  ');
+  const sql =
+    `DELETE FROM notifications WHERE id BETWEEN 900001 AND 900099;\n` +
+    `INSERT INTO notifications (id, club_id, user_id, channel, template, payload, status, created_at, sent_at, read_at) VALUES\n  ${values};\n`;
+  const sqlFile = join(SHOT_DIR, 'e2e-notifications-seed.sql');
+  writeFileSync(sqlFile, sql, 'utf8');
+  wrangler(['d1', 'execute', 'whl-club', '--local', '--file', sqlFile, '--json']);
+}
+function clearNotifications() {
+  const sqlFile = join(SHOT_DIR, 'e2e-notifications-cleanup.sql');
+  writeFileSync(sqlFile, 'DELETE FROM notifications WHERE id BETWEEN 900001 AND 900099;', 'utf8');
+  try {
+    wrangler(['d1', 'execute', 'whl-club', '--local', '--file', sqlFile, '--json']);
+  } catch (e) {
+    console.warn(`（跳过站内信种子清理：${String(e?.message ?? e).slice(0, 120)}）`);
+  }
+}
+
 // ---- 结果收集 ----
 const results = [];
 async function check(name, fn) {
@@ -2838,9 +2866,188 @@ async function main() {
         assert(groupTitles.includes(t), `管理端侧栏缺分组标题「${t}」（实际：${groupTitles.join('/')}）`);
       }
     });
+
+    await check('⑳ 收件篮徽章 / 跳转 / 窄屏两行卡（v6.40.0，截图落 scratch/）', async () => {
+      // 本地库没有站内信种子（唯一写入者是 queueClubNotification）⇒ 自己种四行（id 900001+，
+      // finally 里按区间删）：
+      //   ① offer_received + ref{offer,999}：列表里没有 999 这单 ⇒ 谈判桌按单号开 + 落点提示条
+      //   ② levelup + ref{player,<取样球员>}：精确落到球员页
+      //   ③ naming_offer、club_id 为 NULL：类目落点要 clubId ⇒ 整行不可点
+      //   ④ result_confirmed、club_id=1：类目落点 /clubs/1?tab=results
+      //     （本机 TOUR_DB 是旧 schema，球队端点必 500 ⇒ 只断言 URL，不验渲染）
+      // 四行分属今天 / 昨天 / 前天，同时验日期分组；桌面视口取 1600 高，保证四行首屏可见
+      // （见过即已读走 IntersectionObserver，看不见的行不会被标记）。
+      const sampled = await page.request.get(`${BASE}/api/players?limit=1&sort=ca&order=desc`);
+      assert(sampled.status() === 200, `取样球员失败：/api/players 状态码 ${sampled.status()}`);
+      const samplePlayerId = (await sampled.json()).players?.[0]?.id ?? null;
+      assert(Number.isInteger(samplePlayerId), '取样球员没有 id（⑳ ② 的前提不成立）');
+      const noon = new Date();
+      noon.setHours(12, 0, 0, 0);
+      const back = (n) => {
+        const d = new Date(noon);
+        d.setDate(d.getDate() - n);
+        return d;
+      };
+      const ymd = (d) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const today = back(0);
+      const older = back(2);
+      seedNotifications([
+        {
+          id: 900001,
+          clubId: 1,
+          template: 'offer_received',
+          createdAt: today.toISOString(),
+          payload: { text: 'E2E：有买家为你的一名球员送来了报价（单号 999）', ref: { type: 'offer', id: 999 } },
+        },
+        {
+          id: 900002,
+          clubId: 1,
+          template: 'levelup',
+          createdAt: back(1).toISOString(),
+          payload: { text: 'E2E：你的球员成长了', ref: { type: 'player', id: samplePlayerId } },
+        },
+        {
+          id: 900003,
+          clubId: null,
+          template: 'naming_offer',
+          createdAt: older.toISOString(),
+          payload: { text: 'E2E：有买家为你的球场冠名送来报价' },
+        },
+        {
+          id: 900004,
+          clubId: 1,
+          template: 'result_confirmed',
+          createdAt: today.toISOString(),
+          payload: { text: 'E2E：第 3 轮比赛结果已确认' },
+        },
+      ]);
+      // 报价台列表接口：本机没有可用的报价数据 ⇒ 打桩成「空列表但加载成功」，好让 ?offer=999 的
+      // 落点提示条（items !== null 才渲染）成为可判定的路径
+      const offersStub = /\/api\/offers\?/;
+      await page.route(offersStub, (r) =>
+        r.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            club: { id: 1, name: '阿森纳' },
+            box: 'in',
+            items: [],
+            nextCursor: null,
+            pendingMine: 0,
+            intentsMine: 0,
+          }),
+        }),
+      );
+      try {
+        await page.setViewportSize({ width: 1280, height: 1600 });
+        await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+        await page.locator('[data-notify-id="900001"]').waitFor({ timeout: TIMEOUT });
+        const rowInfo = (id) =>
+          page.locator(`[data-notify-id="${id}"]`).evaluate((el) => ({
+            badge: el.querySelector('.badge')?.textContent?.trim() ?? null,
+            tone: (el.querySelector('.badge')?.className ?? '').replace('badge', '').trim(),
+            clickable: !!el.querySelector('button.inbox-row-btn'),
+            go: !!el.querySelector('.inbox-go'),
+            dot: !!el.querySelector('.inbox-dot'),
+            group: el.closest('.inbox-group')?.querySelector('.inbox-day:not(.is-sep)')?.textContent?.trim() ?? null,
+          }));
+        const want = [
+          { id: 900001, label: '收到报价', tone: 'blue', clickable: true, group: '今天' },
+          { id: 900002, label: '球员成长', tone: 'gold', clickable: true, group: '昨天' },
+          { id: 900003, label: '冠名报价', tone: 'purple', clickable: false, group: ymd(older) },
+          { id: 900004, label: '赛果确认', tone: 'green', clickable: true, group: '今天' },
+        ];
+        for (const w of want) {
+          const info = await rowInfo(w.id);
+          assert(info.badge === w.label, `#${w.id} 徽章文案不对：${info.badge}（应「${w.label}」）`);
+          assert(info.tone === w.tone, `#${w.id} 徽章配色不对：${info.tone}（应 ${w.tone}）`);
+          assert(info.clickable === w.clickable, `#${w.id} 可点性不对：${info.clickable}（应 ${w.clickable}）`);
+          assert(info.go === w.clickable, `#${w.id} 行尾「去处理 ›」与可点性不一致：${info.go}`);
+          assert(info.group === w.group, `#${w.id} 日期分组标签不对：${info.group}（应 ${w.group}）`);
+          assert(info.dot, `#${w.id} 首屏应仍是未读外观（见过即已读不回改视觉，免得刚看过就跳位）`);
+        }
+        // 见过即已读：刷新后这四行都不该再是未读（read_at 已落库）
+        await page.waitForTimeout(1000);
+        await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+        await page.locator('[data-notify-id="900001"]').waitFor({ timeout: TIMEOUT });
+        for (const w of want) {
+          assert(!(await rowInfo(w.id)).dot, `#${w.id} 刷新后仍是未读：见过即已读没落库`);
+        }
+        // ① 报价信：整行可点 ⇒ 报价台按单号开谈判桌 + 提示条（999 不在列表里）
+        await page.locator('[data-notify-id="900001"] button.inbox-row-btn').click();
+        await page.waitForLoadState('networkidle');
+        const u1 = new URL(page.url());
+        assert(
+          u1.pathname === '/market/desk' &&
+            u1.searchParams.get('tab') === 'offers' &&
+            u1.searchParams.get('box') === 'in' &&
+            u1.searchParams.get('offer') === '999',
+          `报价信没落到报价台单号深链：${page.url()}`,
+        );
+        const hint = page.locator('.banner.warn[role="status"]', { hasText: '#999' });
+        await hint.first().waitFor({ timeout: TIMEOUT });
+        assert(
+          (await hint.first().innerText()).includes('不在当前列表里'),
+          `落点提示条文案不对：${await hint.first().innerText()}`,
+        );
+        await page.screenshot({ path: join(SHOT_DIR, 'e2e-v640-offer-jump.png'), fullPage: false });
+        // ② 成长信：ref 是球员 ⇒ 精确落到球员页
+        await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+        await page.locator('[data-notify-id="900002"] button.inbox-row-btn').click();
+        await page.waitForLoadState('networkidle');
+        assert(new URL(page.url()).pathname === `/players/${samplePlayerId}`, `成长信没落到球员页：${page.url()}`);
+        // ④ 赛果信：无 ref、有 clubId ⇒ 类目落点（本机球队端点 500，只断言 URL）
+        await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+        await page.locator('[data-notify-id="900004"] button.inbox-row-btn').click();
+        await page.waitForLoadState('networkidle');
+        const u4 = new URL(page.url());
+        assert(
+          u4.pathname === '/clubs/1' && u4.searchParams.get('tab') === 'results',
+          `赛果信没落到球队赛果页签：${page.url()}`,
+        );
+        // 窄屏 375：两行卡片（徽章 + 时间同排、正文满宽在第二行）+ 行点击区 ≥44
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+        const target = page.locator('[data-notify-id="900001"]');
+        await target.waitFor({ timeout: TIMEOUT });
+        await target.scrollIntoViewIfNeeded();
+        const geo = await target.evaluate((el) => {
+          const rowEl = el.querySelector('.inbox-row');
+          const cs = getComputedStyle(rowEl);
+          const rect = rowEl.getBoundingClientRect();
+          return {
+            display: cs.display,
+            areas: (cs.gridTemplateAreas || '').replace(/\s+/g, ' ').trim(),
+            rowH: rect.height,
+            rowW: rect.width,
+            right: rect.right,
+            headTop: el.querySelector('.inbox-head').getBoundingClientRect().top,
+            timeTop: el.querySelector('.inbox-time').getBoundingClientRect().top,
+            textTop: el.querySelector('.inbox-text').getBoundingClientRect().top,
+            textW: el.querySelector('.inbox-text').getBoundingClientRect().width,
+          };
+        });
+        assert(geo.display === 'grid', `375 下收件篮行不是两行网格：display=${geo.display}`);
+        assert(
+          geo.areas.includes('head time go') && geo.areas.includes('text text text'),
+          `375 下网格区域不对：${geo.areas}`,
+        );
+        assert(geo.rowH >= 44, `375 下行点击区不足 44px：${geo.rowH.toFixed(1)}`);
+        assert(Math.abs(geo.headTop - geo.timeTop) <= 2, `375 下徽章与时间不在同一行：${geo.headTop} / ${geo.timeTop}`);
+        assert(geo.textTop > geo.headTop + 4, '375 下正文没有换到第二行');
+        assert(geo.textW >= geo.rowW - 24, `375 下正文没占满行宽：${geo.textW.toFixed(1)} / ${geo.rowW.toFixed(1)}`);
+        assert(geo.right <= 375.5, `375 下行右边缘溢出：${geo.right.toFixed(1)}`);
+        await page.screenshot({ path: join(SHOT_DIR, 'e2e-v640-inbox-375.png'), fullPage: false });
+      } finally {
+        await page.unroute(offersStub);
+        await page.setViewportSize({ width: 1280, height: 900 });
+      }
+    });
   } finally {
     await browser.close();
     clearSession();
+    clearNotifications();
   }
 
   const failed = results.filter((r) => !r.ok);
