@@ -1,8 +1,9 @@
 // 挂牌浮层（v6.24.0 批次 B）：桌面 = 居中弹层，≤760px = 底部抽屉（上滑出），createPortal 挂到 body。
 // 内容 = 球员信息 + 出价表单（MarketBidForm）+ 被激活方的匹配决定 + 出价历史；
 // 读秒与卡片共用同一绝对截止字段（pickDeadline + useCountdown），打开是接续而不是重置。
+// 壳（锁滚 / Esc / Tab 循环 / 焦点归位）自 v6.40.0 起走共享 hook useOverlayShell。
 // 卡片与浮层共用的口径函数（listingBadge / pickDeadline）放在本文件，避免与 MarketBoardPage 循环引用。
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
 import { apiPost, type BidPlaceResult, type MarketListing, type MatchDecisionResult } from '../../lib/api.ts';
@@ -11,7 +12,7 @@ import { TeamLogo } from '../../components/TeamLogo.tsx';
 import { playerPath } from '../../lib/player-link.ts';
 import { useListingDetail, useMarketInvalidation, type MarketMyClub } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
-import { useMediaQuery } from '../../lib/use-media.ts';
+import { useOverlayShell } from '../../lib/use-overlay-shell.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { BID_STATUS_LABEL, money } from './shared.tsx';
@@ -51,7 +52,7 @@ export function MarketListingOverlay({
   /** 出价 / 匹配决定成功后让页面刷新「已冻结资金」口径 */
   onBidDone: () => void;
 }) {
-  const narrow = useMediaQuery('(max-width: 760px)');
+  const { narrow, panelRef, onCloseRef } = useOverlayShell(onClose);
   const detailQuery = useListingDetail(listingId);
   const detail = detailQuery.data ?? null;
   const invalidateMarket = useMarketInvalidation();
@@ -60,14 +61,6 @@ export function MarketListingOverlay({
   const [matchFee, setMatchFee] = useState<string>('');
   const [matchBusy, setMatchBusy] = useState(false);
   const [passArmed, setPassArmed] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const l = detail === null ? null : detail.listing;
   const remaining = useCountdown(l === null ? null : pickDeadline(l));
@@ -119,8 +112,9 @@ export function MarketListingOverlay({
   // 最新出价 / 匹配决定的资金口径可能会变：重新拉一次刷新（由外层完成）
 
   return createPortal(
-    <div className={narrow ? 'mkt-ov mkt-ov-drawer' : 'mkt-ov'} onClick={onClose} role="presentation">
+    <div className={narrow ? 'mkt-ov mkt-ov-drawer' : 'mkt-ov'} onClick={() => onCloseRef.current()} role="presentation">
       <div
+        ref={panelRef}
         className="mkt-ov-panel"
         role="dialog"
         aria-modal="true"
