@@ -1500,6 +1500,19 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.40.0 · 站内信徽章（30 模板 × 八类类目）+ 类目页签与「本类全部已读」+ 整行跳转（ref 精确 / 类目兜底）+ 见过即已读 + 收件篮窄屏两行卡（2026-10-09）
+
+- **状态**：minor × **本地收口，未 push**（等发布令）。零迁移、零生产写、零新端点——只扩既有端点契约。判级理由：两处用户可见新能力（整行跳转 + 徽章/页签）+ 一条既有语义变更（已读改「见过即已读」）。
+- **缘起**：用户 m03242「脑暴下一个功能，给所有类型的站内信分配徽章，并实现跳转功能，以及窄屏显示优化」；四条拍板（m03254 答）——① 徽章模板一一对应、配色切成八类；② 跳转「类目落点 + 有据时精确」；③ 整行跳转 + 已读改「见过即已读」；④ 窄屏四件事（页签筛选 / 徽章与时间重排 / 未读置顶与日期分组 / 两行卡加高点击区），且页签与未读置顶桌面端同样生效。
+- **交付**：① 新 `src/core/notify-meta.ts`（`NOTIFY_CATEGORIES` 八类 + `NOTIFY_META` 30 条模板中文 label + `categoryOf` / `templatesOf` / `notificationRefOf`；服务端筛选与前端徽章同源，不手抄第二份清单）；② worker 契约——通知载荷扩为 `{text, ref?}`（各生成点补实体 id）、列表 item 增 `clubId` / `ref`、`GET /api/notifications?category=` 只筛本类（`template IN (…)` 参数化）、`GET /api/notifications/unread-count?by=category`、`POST /api/notifications/read {all, category}` 只清本类；③ 前端——新 `web/src/lib/notify-links.ts`（ref 精确落点 → 类目固定落点 → `null` 不可点）、`Notifications.tsx` 重做（八类页签 / 徽章 / 未读置顶与日期分组 / 整行跳转 / 见过即已读，IntersectionObserver 预读约 120px 且不回改本页视觉）、`OffersSection` `?offer=` 与 `ShopPage` `?order=` 深链 + `.is-target` + 落点提示条；④ 窄屏 ≤640 两行卡（第 1 行徽章 + 时间、第 2 行正文满宽，行高 ≥44px）。
+- **不变量（回归锁）**：模板 ↔ 徽章一一对应（`src/worker/notify.ts` 的 `case` 字面量集合双向等于 `NOTIFY_META`，恰 30 条）；配色只有八类且类目 ↔ `.badge` 修饰色绑定；ref 只存 `offer` / `player` / `shop_order` 三型（`event_*` / `naming_*` / `window_signals` 刻意不造）；跳转优先级固定且缺 `clubId` 返 `null`（绝不猜）；列表 `unread` 恒全量口径、游标语义不变（满页 + 第 31 行才给 `nextCursor`）；不带 `?by` 时返回体与旧版逐字一致。
+- **回归闸门**：`src/core/notify-meta.test.ts` 12 例（含 8 类顺序/配色字面量与「8 类 × 30 模板成员表」两处字面量锁）、`web/src/lib/notify-links.test.ts` 10 例、`web/src/pages/Notifications.test.tsx` 13 例、`tests/notify.test.ts` 16 例（TC-API-01–06）、`web/src/pages/shop/ShopPage.test.tsx` 3 例、`web/src/pages/market/desk/OffersSection.test.tsx` 11 例、`tests/mobile-baseline.test.ts` TC-NB-STR-01/02/03 静态门、`tests/core-zero-import.test.ts`（`src/core/notify-meta.ts` 入纯数据模块表）、e2e ⑳ 段（四行种子：徽章文案/配色/可点性/日期分组 + 刷新后未读点消失 + 三条跳转 URL + 375 两行网格几何）。
+- **验收**：typecheck 三份 tsconfig 0 error；vitest **108 文件 / 1811 例**全绿（开工前基线 104 / 1744）；`npm run build` 成功；e2e **25/25**（⑫ 全路由 375 扫描含 `/notifications` 360/375 零溢出）；变异 M1–M5 实测（红 2 / 5 / 3 / 2、等价 1 枚全绿）。
+- **探针裁决（L6 读量）**：`scripts/d1-read-audit/probe-notify-category.mjs` 只读打生产，双基准（行数最多 user 1 / 未读最多 user 2）实测——列表 13–14 读、未读数全量 14 读、`?category=` 13–14 读 / 3 返、`by=category` user2 **27 读 / 3 返 + `USE TEMP B-TREE FOR GROUP BY`**、UPDATE 计划同 `idx_notifications_user`；`template IN` 9 槽 → 1 槽读量不变（残差谓词）⇒ **不建迁移 0066**（远低于 README §5.4 的 1,000 行/次验收线；补 `(user_id, template, id)` 也服务不了 `ORDER BY id DESC` 的早停）。
+- **测试计划**：`docs/test-plans/v6.40.0-notification-badges.md`（含变异实测订正、探针结论与 e2e 段号订正的执行留痕）。
+- **教训**：① 组件测试的期望值不许从被测常量现算——`Notifications.test.tsx` 原写 `const tone = NOTIFY_CATEGORIES.find((c) => c.id === meta.category)!.tone`，挪类目/换色都抓不到（变异 M2 首轮组件全绿即此），改字面量 `TONE` 表 + 8 枚代表对后同一变异红 5；② 变异预期要按实测订正（M1 只红 2——TC-LINK-01 / TC-JUMP-01 吃的是现成 ref、不经 `notificationRefOf`；M4 的 TC-CAT-01 不可达——`by=category` 不走 `categoryCond`）；③ 探针标签按 SQL 形状命名，别借 surface 名（同一形状在多 surface 重复会串位）；④ 几何断言并入 e2e 比另起打桩探针更省也更真（375 两行直接量 `gridTemplateAreas`）。
+- **待办**：`?listing=` 激活页精确落点（激活页列表实体是球员、无工单/挂单实体 ⇒ 走 `ref:{player}` 跳 `/players/<id>`）；TopBar 未读红点（只有点无数字，不动）；QQ/FEISHU 渠道文案与推送/邮件。
+
 ## v6.39.3 · 球员库球队名前接队徽缩略图（映射抽 src/worker/club-logos.ts 共用）（2026-10-08）
 
 - **状态**：patch × **已上线**（2026-10-08 发布，用户令 m04745「发布」：push `c534523..74540bc`（2 枚：v6.39.2 上线回写 `f1b912f` + 本枚）触发 CF 自动部署（Workers Builds），生产 Version `d8093411-9eea-40fd-9611-0299f8595bf4` @2026-10-08T15:14:29Z；零迁移、零生产写、纯展示层 + worker 读路径）。
