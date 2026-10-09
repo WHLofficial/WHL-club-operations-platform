@@ -2,13 +2,14 @@
 // GET /api/negotiations?mine=1            我的谈判会话（含已结束，LIMIT 50）
 // POST /api/negotiations/:transferId/release-fee   提交新 RC（返回 E 数值，仅签入方）
 // POST /api/negotiations/:sessionId/offer          工资报价（满意度文案返回）
+// POST /api/negotiations/:sessionId/preview        工资预览（只读：返回成功率档位 + 风险布尔）
 // POST /api/negotiations/:sessionId/trainee        直签训练营合同（不占下放名额）
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach, type SessionUser } from '../../lib/session.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
-import { chooseTrainee, listMySessions, offerWage, submitReleaseFee } from '../negotiations.ts';
+import { chooseTrainee, listMySessions, offerWage, previewWage, submitReleaseFee } from '../negotiations.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -48,6 +49,14 @@ app.post('/:sessionId/offer', async (c) => {
   if (!Number.isInteger(sessionId)) throw new HttpError(400, '谈判会话 ID 不对');
   const body = (await c.req.raw.json().catch(() => null)) as { wage?: unknown } | null;
   return c.json(await offerWage(c.env, sessionId, clubId, user.id, body?.wage));
+});
+
+app.post('/:sessionId/preview', async (c) => {
+  const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
+  const sessionId = Number(c.req.param('sessionId'));
+  if (!Number.isInteger(sessionId)) throw new HttpError(400, '谈判会话 ID 不对');
+  const body = (await c.req.raw.json().catch(() => null)) as { wage?: unknown } | null;
+  return c.json(await previewWage(c.env, sessionId, clubId, user.id, body?.wage));
 });
 
 app.post('/:sessionId/trainee', async (c) => {

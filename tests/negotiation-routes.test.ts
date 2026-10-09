@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
+import { previewForecast } from '../src/worker/negotiations.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
@@ -358,7 +359,127 @@ describe('响应面收敛（§6.10-2）', () => {
       expect(s).not.toHaveProperty(forbidden);
     }
     const attempts = s.attempts as Record<string, unknown>[];
-    expect(Object.keys(attempts[0]).sort()).toEqual(['attemptNo', 'offeredWage', 'result']);
+    expect(Object.keys(attempts[0]).sort()).toEqual(['at', 'attemptNo', 'feedback', 'offeredWage', 'result']);
     expect(s.agentTierLabel).toBe('普通');
+  });
+});
+
+// v6.40.0 对话式改造：预览端点（D5 四档 0.2/0.5/0.8）与逐轮反馈落库
+describe('工资预览（成功率档位）', () => {
+  it('档位边界逐值：0.2 / 0.5 / 0.8 归上档', () => {
+    expect(previewForecast(1)).toBe('成功率很高');
+    expect(previewForecast(0.8)).toBe('成功率很高');
+    expect(previewForecast(0.7999)).toBe('成功率过半');
+    expect(previewForecast(0.5)).toBe('成功率过半');
+    expect(previewForecast(0.4999)).toBe('成功率偏低');
+    expect(previewForecast(0.2)).toBe('成功率偏低');
+    expect(previewForecast(0.1999)).toBe('成功率很低');
+    expect(previewForecast(0)).toBe('成功率很低');
+  });
+
+  it('预览零副作用：不落库 / 不耗次数 / 不写审计 / 不成约；响应只含档位与风险', async () => {
+    const fx = await seedSigning(freshEnv());
+    expect((await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 5 }, 'tok-coach2', fx.env)).status).toBe(400);
+    const feeRes = await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    const expectedWage = ((await feeRes.json()) as { expectedWage: number }).expectedWage;
+    const auditBefore = sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'negotiation_offer'")?.n;
+
+    const res = await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: expectedWage }, 'tok-coach2', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['forecast', 'risk']);
+    // 报 E 本身必成（successRate 在 offered ≥ expected 时恒 1）
+    expect(body.forecast).toBe('成功率很高');
+    expect(body.risk).toBe(false);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM negotiation_attempts WHERE session_id = ?', fx.sessionId)?.n).toBe(0);
+    expect(sqlGet<{ attempt_count: number }>(fx.sqlite, 'SELECT attempt_count FROM negotiation_sessions WHERE id = ?', fx.sessionId)?.attempt_count).toBe(0);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'negotiation_offer'")?.n).toBe(auditBefore);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('signing');
+  });
+
+  it('未交 RC / 非法值 / 越界 / 不升价被拒；档位不随经纪人档位变', async () => {
+    const fx = await seedSigning(freshEnv());
+    expect((await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 5 }, 'tok-coach2', fx.env)).status).toBe(400);
+    const feeRes = await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    const expectedWage = ((await feeRes.json()) as { expectedWage: number }).expectedWage;
+    expect((await post('/api/negotiations/abc/preview', { wage: 5 }, 'tok-coach2', fx.env)).status).toBe(400);
+    for (const bad of [0, -1, 25, 'abc']) {
+      expect((await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: bad }, 'tok-coach2', fx.env)).status).toBe(400);
+    }
+
+    const probe = Math.round(expectedWage * 0.85 * 100) / 100;
+    fx.sqlite.exec('UPDATE players SET agent_tier = 1 WHERE id = 10');
+    const mild = (await (await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: probe }, 'tok-coach2', fx.env)).json()) as { forecast: string };
+    fx.sqlite.exec('UPDATE players SET agent_tier = 3 WHERE id = 10');
+    const harsh = (await (await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: probe }, 'tok-coach2', fx.env)).json()) as { forecast: string };
+    expect(harsh.forecast).toBe(mild.forecast);
+
+    fx.sqlite.exec('UPDATE players SET agent_tier = 2 WHERE id = 10');
+    fx.env.rng = () => 0.9;
+    await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: 1 }, 'tok-coach2', fx.env);
+    expect((await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 1 }, 'tok-coach2', fx.env)).status).toBe(400);
+    expect(sqlGet<{ attempt_count: number }>(fx.sqlite, 'SELECT attempt_count FROM negotiation_sessions WHERE id = ?', fx.sessionId)?.attempt_count).toBe(1);
+  });
+
+  it('次数已满回 409 且不替玩家强约；鉴权与 GET 我的会话同级', async () => {
+    const fx = await seedSigning(freshEnv());
+    await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    expect((await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 5 }, 'tok-viewer', fx.env)).status).toBe(403);
+    expect((await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 5 }, 'tok-coach3', fx.env)).status).toBe(403);
+    expect((await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 5 }, 'tok-coach', fx.env)).status).toBe(403);
+
+    fx.sqlite.exec(
+      `INSERT INTO negotiation_attempts (session_id, attempt_no, offered_wage, eff_expected, result) VALUES
+         (${fx.sessionId}, 1, 1, 1, 'fail'), (${fx.sessionId}, 2, 2, 1, 'fail'), (${fx.sessionId}, 3, 3, 1, 'fail')`,
+    );
+    fx.sqlite.exec(`UPDATE negotiation_sessions SET attempt_count = 3 WHERE id = ${fx.sessionId}`);
+    const res = await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 9 }, 'tok-coach2', fx.env);
+    expect(res.status).toBe(409);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM negotiation_sessions WHERE id = ?', fx.sessionId)?.status).toBe('active');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('signing');
+  });
+});
+
+describe('逐轮反馈落库（对话流左气泡）', () => {
+  it('失败轮：反馈句与风险布尔落库，列表回读带 at / feedback，lastSatisfaction 同源', async () => {
+    const fx = await seedSigning(freshEnv());
+    const feeRes = await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    const expectedWage = ((await feeRes.json()) as { expectedWage: number }).expectedWage;
+    fx.env.rng = () => 0.9; // 不直败、不成约 → 记一轮失败
+
+    const res = await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: Math.max(0.02, Math.round(expectedWage * 0.6 * 100) / 100) }, 'tok-coach2', fx.env);
+    const body = (await res.json()) as { result: string; satisfaction: string; risk: boolean };
+    expect(body.result).toBe('fail');
+    expect(body.risk).toBe(true);
+
+    const row = sqlGet<{ feedback: string | null; risk: number; created_at: string }>(
+      fx.sqlite,
+      'SELECT feedback, risk, created_at FROM negotiation_attempts WHERE session_id = ? AND attempt_no = 1',
+      fx.sessionId,
+    );
+    expect(row?.feedback).toBe(body.satisfaction);
+    expect(row?.feedback).toContain('（报价过低，有谈崩风险）');
+    expect(row?.risk).toBe(1);
+    expect(row?.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
+    const s = ((await mine.json()) as { sessions: { lastSatisfaction: string | null; attempts: Record<string, unknown>[] }[] }).sessions[0];
+    expect(s.attempts[0]).toMatchObject({ attemptNo: 1, result: 'fail', feedback: body.satisfaction, at: row?.created_at });
+    expect(s.lastSatisfaction).toBe(body.satisfaction);
+  });
+
+  it('成功轮：同样落反馈句（不落风险后缀），风险位归 0', async () => {
+    const fx = await seedSigning(freshEnv());
+    const feeRes = await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
+    const expectedWage = ((await feeRes.json()) as { expectedWage: number }).expectedWage;
+    const res = await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: expectedWage }, 'tok-coach2', fx.env);
+    expect(((await res.json()) as { result: string }).result).toBe('success');
+    expect(
+      sqlGet<{ feedback: string | null; risk: number }>(
+        fx.sqlite,
+        'SELECT feedback, risk FROM negotiation_attempts WHERE session_id = ? AND attempt_no = 1',
+        fx.sessionId,
+      ),
+    ).toEqual({ feedback: '😍 经纪人非常满意', risk: 0 });
   });
 });

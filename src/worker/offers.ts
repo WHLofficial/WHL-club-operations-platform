@@ -29,6 +29,9 @@ function nowSql() {
 
 const ACTIVE_LISTING_STATUSES = "('listed', 'bidding', 'matched_pending', 'pending_review')";
 
+// 附言（对话式改造后的聊天文本）上限：与前端 SideOps 的 slice(0,100) 同值，服务端不再单独放宽
+const NOTE_MAX = 100;
+
 /**
  * 0037 触发器兜底（WHL_OFFER_REJECT_*）与 partial unique 撞车从 D1 裸错转可读 HttpError。
  * 服务层预检与落库之间有并发窗口（资金被抢 / 报价刚被对方处理 / 同买方重复），触发器拦下时
@@ -166,7 +169,8 @@ export async function placeOffer(
   }
 
   const audit = createAuditStatement(db);
-  const note = input.note?.trim() || null;
+  // 附言是聊天文本：前端已截 100 字，服务端同样兜一刀，避免绕过前端塞长文进事件流
+  const note = input.note?.trim().slice(0, NOTE_MAX) || null;
   // pending 唯一性由 partial unique 兜底；事件/冻结用「该 pending 单」子查询定位，规避 batch 内取自增 id
   const pendingRef = `(SELECT id FROM offers WHERE player_id = ? AND buyer_club_id = ? AND status = 'pending')`;
   let results: D1Result[];
@@ -286,7 +290,7 @@ export async function counterOffer(
   }
 
   const audit = createAuditStatement(db);
-  const note = input.note?.trim() || null;
+  const note = input.note?.trim().slice(0, NOTE_MAX) || null;
   const turn = otherTurn(offer.turn as OfferTurn);
   let results: D1Result[];
   try {

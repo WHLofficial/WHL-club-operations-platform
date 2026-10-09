@@ -130,6 +130,7 @@ const MIGRATION_FILES = [
   '0063_offers_intent.sql',
   '0064_ad_board.sql',
   '0065_list_price.sql',
+  '0066_negotiation_feedback.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

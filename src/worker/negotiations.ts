@@ -11,7 +11,7 @@ import { HttpError } from '../lib/http.ts';
 import { abilityLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE } from '../core/negotiation-rules.ts';
 import { AGENT_TIER_LABELS } from '../core/negotiation-rules.ts';
 import { attemptExpected, directFail, expectedWage, satisfactionText, successRate } from './negotiation-secret.ts';
-import { loadNegotiationContext, type AgentTierParams } from './negotiation-context.ts';
+import { loadNegotiationContext, type AgentTierParams, type NegotiationContext } from './negotiation-context.ts';
 import { completeTransfer, loadTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
@@ -299,6 +299,36 @@ interface AttemptRow {
   result: string;
 }
 
+interface AttemptListRow extends AttemptRow {
+  session_id: number;
+  feedback: string | null;
+  created_at: string;
+}
+
+// 同一个 p 源（§6.10-2：eff / 成功率 / 阈值不出服务端）：提交报价、实时预览、列表读时现算三处共用，
+// 免得「预览说一套、提交落地另一套」。feedback 是事后反应句（满意度 + 可选风险后缀），
+// 与预览档位（previewForecast 的预测词）各表各的，两套阈值本就不同位。
+function evaluateWage(
+  ctx: NegotiationContext,
+  e: number,
+  attemptNo: number,
+  wage: number,
+  agentTier: number,
+): { attemptNo: number; eff: number; p: number; tier: AgentTierParams; risk: boolean; feedback: string } {
+  const eff = attemptExpected(e, attemptNo, ctx.attemptDecay);
+  const p = successRate(wage, eff, ctx.sigmoidSlope, ctx.sigmoidMid);
+  const tier = tierParamsOf(ctx, agentTier);
+  const risk = p < tier.threshold;
+  return {
+    attemptNo,
+    eff,
+    p,
+    tier,
+    risk,
+    feedback: satisfactionText(p, ...ctx.satisfaction) + (risk ? '（报价过低，有谈崩风险）' : ''),
+  };
+}
+
 // 单次工资报价（事务内顺序固定，§6.7）：单调性（不耗次数）→ eff 衰减 → 直败 →
 // 成功率 roll → 末轮强约。响应只含 结局/剩余次数/满意度文案/风险布尔/结算工资（§6.10-2）。
 export async function offerWage(
@@ -335,30 +365,79 @@ export async function offerWage(
   if (last && wage <= last.offered_wage) throw new HttpError(400, '报价必须高于上一次报价');
 
   const attemptNo = count + 1;
-  const eff = attemptExpected(e, attemptNo, ctx.attemptDecay);
-  const p = successRate(wage, eff, ctx.sigmoidSlope, ctx.sigmoidMid);
   const player = await loadPlayerFacts(db, session.player_id);
-  const tier = tierParamsOf(ctx, player?.agent_tier ?? 2);
-  const risk = p < tier.threshold;
-  const satisfaction = satisfactionText(p, ...ctx.satisfaction) + (risk ? '（报价过低，有谈崩风险）' : '');
+  const { eff, p, tier, risk, feedback: satisfaction } = evaluateWage(ctx, e, attemptNo, wage, player?.agent_tier ?? 2);
 
   if (directFail(p, tier.threshold, tier.probability, roll())) {
     const settleWage = attemptNo >= ctx.maxAttempts ? e : eff;
-    await settleActiveSession(env, session, settleWage, 'direct', actor, { attemptNo, wage, eff, result: 'direct_fail' });
+    await settleActiveSession(env, session, settleWage, 'direct', actor, { attemptNo, wage, eff, result: 'direct_fail', feedback: satisfaction, risk });
     return { result: 'direct', attemptNo, remaining: 0, wage: settleWage, message: settleMessage('direct') };
   }
 
   const success = roll() < p;
   if (success) {
-    await settleActiveSession(env, session, wage, 'negotiation', actor, { attemptNo, wage, eff, result: 'success' });
+    await settleActiveSession(env, session, wage, 'negotiation', actor, { attemptNo, wage, eff, result: 'success', feedback: satisfaction, risk });
     return { result: 'success', attemptNo, remaining: 0, wage, message: settleMessage('negotiation') };
   }
   if (attemptNo >= ctx.maxAttempts) {
-    await settleActiveSession(env, session, e, 'forced', actor, { attemptNo, wage, eff, result: 'fail' });
+    await settleActiveSession(env, session, e, 'forced', actor, { attemptNo, wage, eff, result: 'fail', feedback: satisfaction, risk });
     return { result: 'forced', attemptNo, remaining: 0, wage: e, message: settleMessage('forced') };
   }
-  await settleActiveSession(env, session, null, 'record', actor, { attemptNo, wage, eff, result: 'fail' });
+  await settleActiveSession(env, session, null, 'record', actor, { attemptNo, wage, eff, result: 'fail', feedback: satisfaction, risk });
   return { result: 'fail', attemptNo, remaining: ctx.maxAttempts - attemptNo, satisfaction, risk };
+}
+
+export interface WageForecast {
+  forecast: string;
+  risk: boolean;
+}
+
+// 四档边界 0.2 / 0.5 / 0.8（2026-10-09 用户裁决）：硬编码在 Worker 侧，不进 web/、不进 config、
+// 不与涉密的满意度阈值（0.25/0.6/0.9）同放一个常量组。档位不随经纪人档位变（档位只影响 risk）。
+const PREVIEW_BANDS = [0.8, 0.5, 0.2];
+
+// 措辞故意不复用事后满意度句（😍/🙂/😐/😠 经纪人…）：两套阈值本就不同位，
+// 共用词会在 4.40~4.50m 一带出现「预告比较满意、事后不太满意」的错位缝。
+export function previewForecast(p: number): string {
+  if (p >= PREVIEW_BANDS[0]) return '成功率很高';
+  if (p >= PREVIEW_BANDS[1]) return '成功率过半';
+  if (p >= PREVIEW_BANDS[2]) return '成功率偏低';
+  return '成功率很低';
+}
+
+// 工资报价预览：输入即给档位，让盲赌变有据。零副作用——不落库、不耗轮次、不写审计、不触发强约。
+// 鉴权与 GET 我的会话同级（无 assertTradable）：转会禁令只拦「谈」，不拦「看」。
+export async function previewWage(
+  env: Env,
+  sessionId: number,
+  clubId: number,
+  actor: number | null,
+  wageInput: unknown,
+): Promise<WageForecast> {
+  const db = env.DB;
+  const { session } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
+  const ctx = await loadNegotiationContext(db);
+
+  const wage = Math.round(Number(wageInput) * 100) / 100;
+  if (!Number.isFinite(wage) || wage < ctx.wageMin || wage > ctx.wageMax) {
+    throw new HttpError(400, `报价需在 ${ctx.wageMin}~${ctx.wageMax} 之间（m/半赛季）`);
+  }
+  const e = session.expected_wage;
+  if (e === null || session.release_fee === null) throw new HttpError(400, '请先提交新违约金，再开始报价');
+
+  const attempts = await db
+    .prepare('SELECT attempt_no, offered_wage, eff_expected, result FROM negotiation_attempts WHERE session_id = ? ORDER BY attempt_no')
+    .bind(session.id)
+    .all<AttemptRow>();
+  const count = attempts.results.length;
+  // 次数已满按已了结回 409，但绝不在这里补强约结算：预览是只读动作，不替玩家做决定
+  if (count >= ctx.maxAttempts) throw new HttpError(409, '这场谈判已经结束了');
+  const last = attempts.results[count - 1] ?? null;
+  if (last && wage <= last.offered_wage) throw new HttpError(400, '报价必须高于上一次报价');
+
+  const player = await loadPlayerFacts(db, session.player_id);
+  const evaluation = evaluateWage(ctx, e, count + 1, wage, player?.agent_tier ?? 2);
+  return { forecast: previewForecast(evaluation.p), risk: evaluation.risk };
 }
 
 // 直签训练营：固定条款立即成约（需求方裁决，不占 4.3.4(3) 下放名额）。
@@ -386,7 +465,7 @@ async function settleActiveSession(
   settleWage: number | null,
   settleSource: string,
   actor: number | null,
-  attempt: { attemptNo: number; wage: number; eff: number; result: string } | null,
+  attempt: { attemptNo: number; wage: number; eff: number; result: string; feedback: string; risk: boolean } | null,
 ): Promise<Record<string, never>> {
   const db = env.DB;
   const audit = createAuditStatement(db);
@@ -395,10 +474,10 @@ async function settleActiveSession(
     statements.push(
       db
         .prepare(
-          `INSERT INTO negotiation_attempts (session_id, attempt_no, offered_wage, eff_expected, result, created_at)
-           VALUES (?, ?, ?, ?, ?, ${nowSql()})`,
+          `INSERT INTO negotiation_attempts (session_id, attempt_no, offered_wage, eff_expected, result, feedback, risk, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ${nowSql()})`,
         )
-        .bind(session.id, attempt.attemptNo, attempt.wage, attempt.eff, attempt.result),
+        .bind(session.id, attempt.attemptNo, attempt.wage, attempt.eff, attempt.result, attempt.feedback, attempt.risk ? 1 : 0),
       db.prepare(`UPDATE negotiation_sessions SET attempt_count = ? WHERE id = ?`).bind(attempt.attemptNo, session.id),
     );
   }
@@ -520,18 +599,18 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
   }
 
   const ids = rows.results.map((r) => r.id);
-  const attemptRows: { session_id: number; attempt_no: number; offered_wage: number; eff_expected: number; result: string }[] = [];
+  const attemptRows: AttemptListRow[] = [];
   for (let i = 0; i < ids.length; i += 90) {
     const slice = ids.slice(i, i + 90);
     if (slice.length === 0) continue;
     const placeholders = slice.map(() => '?').join(', ');
     const batch = await db
-      .prepare(`SELECT session_id, attempt_no, offered_wage, eff_expected, result FROM negotiation_attempts WHERE session_id IN (${placeholders}) ORDER BY session_id, attempt_no`)
+      .prepare(`SELECT session_id, attempt_no, offered_wage, eff_expected, result, feedback, created_at FROM negotiation_attempts WHERE session_id IN (${placeholders}) ORDER BY session_id, attempt_no`)
       .bind(...slice)
-      .all<{ session_id: number; attempt_no: number; offered_wage: number; eff_expected: number; result: string }>();
+      .all<AttemptListRow>();
     attemptRows.push(...batch.results);
   }
-  const bySession = new Map<number, { attempt_no: number; offered_wage: number; eff_expected: number; result: string }[]>();
+  const bySession = new Map<number, AttemptListRow[]>();
   for (const a of attemptRows) {
     const list = bySession.get(a.session_id) ?? [];
     list.push(a);
@@ -544,10 +623,10 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
     let lastSatisfaction: string | null = null;
     let lastRisk = false;
     if (r.status === 'active' && last && last.result === 'fail') {
-      const p = successRate(last.offered_wage, last.eff_expected, ctx.sigmoidSlope, ctx.sigmoidMid);
-      const tier = tierParamsOf(ctx, r.agent_tier);
-      lastRisk = p < tier.threshold;
-      lastSatisfaction = satisfactionText(p, ...ctx.satisfaction) + (lastRisk ? '（报价过低，有谈崩风险）' : '');
+      // 新行直接读落库的反馈；0066 之前的老行 feedback 为 NULL，按同一 p 源现算兜底
+      const evaluation = evaluateWage(ctx, r.expected_wage ?? last.eff_expected, last.attempt_no, last.offered_wage, r.agent_tier);
+      lastRisk = evaluation.risk;
+      lastSatisfaction = last.feedback ?? evaluation.feedback;
     }
     return {
       id: r.id,
@@ -567,7 +646,7 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       remaining: Math.max(0, ctx.maxAttempts - r.attempt_count),
       lastSatisfaction,
       lastRisk,
-      attempts: attempts.map((a) => ({ attemptNo: a.attempt_no, offeredWage: a.offered_wage, result: a.result })),
+      attempts: attempts.map((a) => ({ attemptNo: a.attempt_no, offeredWage: a.offered_wage, result: a.result, at: a.created_at, feedback: a.feedback })),
       settled: r.status === 'settled' && r.settle_source
         ? { wage: r.settled_wage, source: r.settle_source, message: settleMessage(r.settle_source) }
         : null,
