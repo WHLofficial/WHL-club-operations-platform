@@ -7,7 +7,8 @@
 // v6.40.0 同版本补充（对话式改造）：
 //   ① 谈判桌从「行下原地展开」改**对话浮层**（B 布局）：桌面居中弹层 / ≤760px 底部抽屉，外壳复用
 //      .mkt-ov* + useOverlayShell（锁滚 / Esc / Tab 循环 / 焦点归位）；三段 = 单据头 · 事件流（唯一滚动区）·
-//      动作栏（还价 / 同意 / 拒绝 / 撤回 固定四颗，按角色与轮次置灰并把理由写进 title）。
+//      动作栏（按 角色×状态 收敛：还价 / 同意 / 拒绝（卖方）/ 撤回（买方）；越权那颗不渲染（v6.40.1），
+//      状态或轮次不满足则置灰并把理由写进 title）。
 //   ② 拒绝语义 R1：规则不动，只把「拒绝」摆到明面（卖方 pending 任意轮次都能拒，与轮次无关）；拒绝 / 放弃 /
 //      撤回改两段式就地确认并说清冻结去向；提示句按真实规则订正（名单不产生任何自动行为）。
 //   ③ 金额：报价类（当前价 / 还价 / 同意价）走 moneyIntText（整数带 m），列头去掉「（m）」。
@@ -404,9 +405,10 @@ export default function OffersSection({
   );
 }
 
-// 谈判桌浮层（v6.40.0 对话式）：单据头 / 事件流（唯一滚动区）/ 动作栏固定四颗。
-// 动作可用性只看 role 与 status（拒绝与轮次无关——R1：卖方 pending 任意轮次都能拒），
-// 置灰时把理由写进 title，让人看得见「为什么不能点」。
+// 谈判桌浮层（v6.40.0 对话式）：单据头 / 事件流（唯一滚动区）/ 动作栏。
+// 动作可用性只看 role 与 status（拒绝与轮次无关——R1：卖方 pending 任意轮次都能拒）。
+// v6.40.1：越权那颗直接不渲染（拒绝只给卖方、撤回只给买方、意向单的同意只给卖方）——
+// 置灰 + title 在触屏上读不出「为什么不能点」，留下的动作仍按轮次/状态置灰并把理由写进 title。
 function OfferDesk({
   detail,
   settings,
@@ -446,18 +448,23 @@ function OfferDesk({
   const intent = offer?.status === 'intent';
   const settled = offer !== null && !pending && !intent;
   const seller = offer?.role === 'seller';
+  const buyer = offer?.role === 'buyer';
   const myTurn = offer?.myTurn === true;
 
-  // 动作矩阵（R1）：还价/同意要轮到我；拒绝=卖方（待回复单拒绝 / 意向单放弃）；撤回=买方（撤回 / 撤回意向）
+  // 动作矩阵（v6.40.1）：还价/同意要轮到我；拒绝=卖方（待回复单拒绝 / 意向单放弃）；撤回=买方（撤回 / 撤回意向）
   const canCounter = pending && myTurn;
   const canAccept = (pending && myTurn) || (intent && seller);
   const canReject = seller && (pending || intent);
-  const canWithdraw = !seller && (pending || intent);
+  const canWithdraw = buyer && (pending || intent);
+  // 渲染门：越权那颗不渲染（买方在意向单态没有「同意」，卖方没有「撤回」）
+  const showAccept = !intent || seller;
 
   const counterValue = Number(counterDraft);
   const counterOk = Number.isInteger(counterValue) && counterValue > (offer?.amount ?? 0);
 
   const reason = (ok: boolean, why: string) => (ok ? undefined : why);
+  const counterWhy = settled ? '这一单已经了结' : intent ? '意向单已谈成，等开窗后确认挂牌' : '还没轮到你，等对方表态';
+  const acceptWhy = settled ? '这一单已经了结' : '还没轮到你，等对方表态';
 
   // 名单规则行：只在球员还在转会名单里时出现（不在名单就不留空行）；卖方多打一枪设置端点读底价
   const listed = offer ? (seller ? (settings?.transferListed ?? offer.player.listPrice !== null) : offer.player.listPrice !== null) : false;
@@ -580,38 +587,44 @@ function OfferDesk({
                   type="button"
                   className="btn"
                   disabled={busy || !canCounter || !counterOk}
-                  title={reason(canCounter, pending ? '还没轮到你，等对方表态' : '这一单已经了结')}
+                  title={reason(canCounter, counterWhy)}
                   onClick={() => void onAct('counter')}
                 >
                   还价
                 </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy || !canAccept}
-                  title={reason(canAccept, intent ? '意向单由卖方确认挂牌' : '还没轮到你，等对方表态')}
-                  onClick={() => void onAct('accept')}
-                >
-                  {intent ? `确认挂牌（${moneyIntText(offer.amount)}）` : `同意（${moneyIntText(offer.amount)}，同意即挂牌）`}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  disabled={busy || !canReject}
-                  title={reason(canReject, settled ? '这一单已经了结' : '只有卖方能拒绝；买方要终止请用撤回')}
-                  onClick={() => onConfirming('reject')}
-                >
-                  {intent ? '放弃' : '拒绝'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={busy || !canWithdraw}
-                  title={reason(canWithdraw, settled ? '这一单已经了结' : '只有买方能撤回；卖方要终止请用拒绝')}
-                  onClick={() => onConfirming('withdraw')}
-                >
-                  {intent ? '撤回意向' : '撤回报价'}
-                </button>
+                {showAccept && (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || !canAccept}
+                    title={reason(canAccept, acceptWhy)}
+                    onClick={() => void onAct('accept')}
+                  >
+                    {intent ? `挂意向单（${moneyIntText(offer.amount)}）` : `同意并挂牌（${moneyIntText(offer.amount)}）`}
+                  </button>
+                )}
+                {seller && (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    disabled={busy || !canReject}
+                    title={reason(canReject, '这一单已经了结')}
+                    onClick={() => onConfirming('reject')}
+                  >
+                    {intent ? '放弃' : '拒绝'}
+                  </button>
+                )}
+                {buyer && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={busy || !canWithdraw}
+                    title={reason(canWithdraw, '这一单已经了结')}
+                    onClick={() => onConfirming('withdraw')}
+                  >
+                    {intent ? '撤回意向' : '撤回报价'}
+                  </button>
+                )}
               </div>
 
               {canCounter && (

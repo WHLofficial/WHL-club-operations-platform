@@ -199,7 +199,9 @@ app.get('/offers/:id', async (c) => {
       note: r.note,
       status: r.status,
       turn: r.turn,
-      myRole,
+      // 键名与列表接口（:111 role）一致：前端 OfferDetailResponse.offer 继承 OfferListItem 的 role，
+      // 早前这里写 myRole 导致运行期 offer.role 恒 undefined（v6.40.1 订正）
+      role: myRole,
       myTurn: r.status === 'pending' && r.turn === myRole,
       listingId: r.listing_id,
       season: r.season,

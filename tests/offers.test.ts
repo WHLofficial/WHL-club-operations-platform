@@ -798,8 +798,10 @@ describe('清单与详情（GET /api/offers）', () => {
 
     const detail = await app.request(`/api/offers/${inData.items.find((i) => i.id !== secondId)?.id ?? inData.items[0].id}`, { headers: { Cookie: 'whl_session=tok-coach2' } }, fx.env);
     expect(detail.status).toBe(200);
-    const d = (await detail.json()) as { offer: { myRole: string; myTurn: boolean }; events: { kind: string }[] };
-    expect(d.offer.myRole).toBe('buyer');
+    const d = (await detail.json()) as { offer: { role: string; myTurn: boolean }; events: { kind: string }[] };
+    // 契约门（v6.40.1）：详情与列表同键名 role；发 myRole 会让前端 seller 恒 false（拒绝恒灰 / 撤回恒亮）
+    expect(d.offer.role).toBe('buyer');
+    expect('myRole' in d.offer).toBe(false);
     expect(d.offer.myTurn).toBe(false);
     expect(d.events[0].kind).toBe('open');
     // 谈判桌哨兵（v6.33.0）：私密最低报价的键不进详情 JSON，公开标价在场

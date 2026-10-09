@@ -7214,6 +7214,11 @@ button.sqc-pos:hover {
   width: 100%;
 }
 
+/* v6.40.1：越权动作不渲染后可能是奇数颗（1/3），末颗占满整行不留空位 */
+.nego-actions > .btn:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .nego-fields {
   display: grid;
   gap: 8px;
