@@ -4,6 +4,7 @@
 // 时间窗 ±300s；文本在平台侧用纯代码模板渲染好，插件只负责发 QQ。
 import type { Env } from './env.ts';
 import { hmacHex } from '../lib/hmac.ts';
+import { notificationRefOf } from '../core/notify-meta.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -143,6 +144,8 @@ export async function queueClubNotification(
       .bind(...accountIds)
       .all<{ user_id: number; qq: string }>();
     const text = renderNotification(template, data);
+    // v6.40.0：能定位的实体一起落库（收件篮整行跳转用）；无实体模板不带 ref，前端走类目固定落点
+    const ref = notificationRefOf(template, data);
     // 每个绑定账号都有一条 web 行（收件篮，status='sent' 免投递）；绑了 QQ 的账号另有一条
     // QQ 投递行（status='pending'，cron 投递），两通道互不挤占
     await db.batch([
@@ -152,7 +155,7 @@ export async function queueClubNotification(
             `INSERT INTO notifications (club_id, user_id, channel, template, payload, status, created_at)
              VALUES (?, ?, 'web', ?, ?, 'sent', ${nowSql()})`,
           )
-          .bind(clubId, userId, template, JSON.stringify({ text })),
+          .bind(clubId, userId, template, JSON.stringify(ref ? { text, ref } : { text })),
       ),
       ...qqs.results.map((r) =>
         db

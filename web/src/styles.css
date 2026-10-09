@@ -286,29 +286,71 @@ h3 {
   margin-bottom: 12px;
 }
 
-.inbox-list {
+.inbox-tabs {
+  margin-bottom: 10px;
+}
+
+/* 页签角标：类目未读条数（0 不渲染） */
+.inbox-tab-n {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-list,
+.inbox-rows {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.inbox-item button {
+/* 日期分组头（「以下为已读」是未读/已读分界，与纯日期头靠上边框区分） */
+.inbox-day {
+  padding: 10px 8px 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.inbox-day.is-sep {
+  border-top: 1px solid var(--border);
+}
+
+.inbox-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
   width: 100%;
   padding: 10px 8px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+
+/* 可点行是 button：抹掉控件底色/内边距，只留行样式；不可点行是 div */
+.inbox-row-btn {
   background: none;
   border: none;
   border-top: 1px solid var(--border);
-  text-align: left;
   cursor: pointer;
   font: inherit;
   color: inherit;
 }
 
-.inbox-item.is-unread button {
+.inbox-row-btn:hover {
+  background: #f7f0e0;
+}
+
+.inbox-item.is-unread .inbox-row {
   font-weight: 600;
+}
+
+/* 未读点与徽章成组：窄屏下整组占第一行左侧 */
+.inbox-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
 }
 
 .inbox-dot {
@@ -327,10 +369,39 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.inbox-go {
+  flex: none;
+  font-size: 12px;
+  color: var(--terracotta);
+}
+
 .inbox-time {
   flex: none;
   font-size: 12px;
   opacity: 0.7;
+}
+
+/* 站内信跳转的落点行（v6.40.0）：报价台 ?offer= / 商城 ?order= 命中后给个看得见的落脚点，
+   免得用户落在长列表里找不着北。入场闪一下，之后保持暖底与左侧色条。 */
+.is-target {
+  background: var(--terracotta-tint);
+  box-shadow: inset 3px 0 0 var(--terracotta);
+  animation: target-flash 1.4s ease-out 1;
+}
+
+@keyframes target-flash {
+  0% {
+    background: #f7f0e0;
+  }
+  100% {
+    background: var(--terracotta-tint);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-target {
+    animation: none;
+  }
 }
 
 .role-badge {
@@ -1492,6 +1563,37 @@ tbody tr:hover td {
   .seg button,
   .seg a {
     flex: 0 0 auto;
+  }
+
+  /* 收件篮窄屏（v6.40.0）：两行卡片——第一行「未读点 + 徽章 … 时间 + 去处理」，
+     第二行正文满宽；整行点击区 ≥44px（触摸目标），长摘要不再把时间戳挤出视口 */
+  .inbox-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas:
+      'head time go'
+      'text text text';
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 4px;
+    min-height: 44px;
+    padding: 12px 10px;
+  }
+
+  .inbox-head {
+    grid-area: head;
+  }
+
+  .inbox-time {
+    grid-area: time;
+  }
+
+  .inbox-go {
+    grid-area: go;
+  }
+
+  .inbox-text {
+    grid-area: text;
   }
 }
 

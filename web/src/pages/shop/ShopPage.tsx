@@ -1,7 +1,7 @@
 // 消费中心 /shop（v6.26.0）：五类商品 + 球场消费三卡的统一入口。
 // B 布局（visual companion 定稿）：左主栏商品页签（?tab= 深链）+ 底部球场三卡；右侧栏我的工单常驻（行内展开）。
 // 提交流程：确认框 → 提交即扣费 → 管理组审核 → 通过自动生效 / 拒绝自动退款。
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiPost } from '../../lib/api.ts';
 import { PS_GRANTABLE_BASE_IDS, POSITION_BY_ID } from '../../../../src/core/fc26.ts';
@@ -37,6 +37,9 @@ export default function ShopPage() {
   const [params, setParams] = useSearchParams();
   const tabRaw = params.get('tab');
   const tab: ShopTab = tabRaw === 'badge' || tabRaw === 'role' || tabRaw === 'position' || tabRaw === 'shell' ? tabRaw : 'pa';
+  // v6.40.0：站内信深链 ?order=<id>——从收件篮点进来直接展开这张工单（列表一次全量，无游标）
+  const orderParam = Number(params.get('order'));
+  const targetOrder = Number.isInteger(orderParam) && orderParam > 0 ? orderParam : null;
 
   const { loading, isCoach, club: myClub, failed: clubFailed } = useMyClub();
   const catalogQuery = useShopCatalog(true);
@@ -67,7 +70,7 @@ export default function ShopPage() {
           </p>
         </div>
       ) : (
-        <ShopContent tab={tab} goTab={goTab} balance={myClub.balance} catalog={catalog} catalogError={catalogQuery.error instanceof Error ? catalogQuery.error.message : null} />
+        <ShopContent tab={tab} goTab={goTab} balance={myClub.balance} catalog={catalog} catalogError={catalogQuery.error instanceof Error ? catalogQuery.error.message : null} targetOrder={targetOrder} />
       )}
     </div>
   );
@@ -79,12 +82,14 @@ function ShopContent({
   balance,
   catalog,
   catalogError,
+  targetOrder,
 }: {
   tab: ShopTab;
   goTab: (t: ShopTab) => void;
   balance: number | null;
   catalog: { prices: ShopPrices; paCap: number; hpremiumClubIds: number[] } | null;
   catalogError: string | null;
+  targetOrder: number | null;
 }) {
   const squadState = useShopSquadState(true);
   const players = squadState.data?.players ?? [];
@@ -155,7 +160,7 @@ function ShopContent({
 
         {/* 右侧栏：我的工单 */}
         <div className="shop-side">
-          <OrdersCard />
+          <OrdersCard targetOrder={targetOrder} />
         </div>
       </div>
     </>
@@ -665,19 +670,35 @@ function ShellCard({ prices, hpremium, windowOpen }: { prices: ShopPrices; hprem
 
 /* ---------- 我的工单（右栏，行内展开） ---------- */
 
-function OrdersCard() {
+function OrdersCard({ targetOrder }: { targetOrder: number | null }) {
   const { time } = useTimeFmt();
   const ordersQuery = useShopOrders(true);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  // v6.40.0：?order=<id> 深链的初值就是目标单，进来即展开（与行点击共用同一个开关）
+  const [expanded, setExpanded] = useState<number | null>(targetOrder);
   const orders = ordersQuery.data?.orders ?? [];
+  const rowRefs = useRef(new Map<number, HTMLDivElement>());
   // 待审置顶（金），其余按时间倒序
   const pending = orders.filter((o) => o.status === 'pending');
   const rest = orders.filter((o) => o.status !== 'pending');
   const sorted = [...pending, ...rest];
+  // 端点一次只给最近 100 条：更早的目标单必然不在列表里
+  const targetMissing = targetOrder !== null && orders.length > 0 && !orders.some((o) => o.id === targetOrder);
+
+  // 目标行在场时滚到它（jsdom 没有 scrollIntoView，运行时守卫照 MarketActivationPage 的先例）
+  useEffect(() => {
+    if (targetOrder === null || expanded !== targetOrder) return;
+    const el = rowRefs.current.get(targetOrder);
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+  }, [targetOrder, expanded, ordersQuery.data]);
 
   return (
     <section className="card">
       <h3>我的工单</h3>
+      {targetMissing && (
+        <p className="banner warn" role="status">
+          目标工单 <span className="mono">#{targetOrder}</span> 不在当前列表里（列表只列最近 100 条）。
+        </p>
+      )}
       {ordersQuery.isError ? (
         <p className="muted">{ordersQuery.error instanceof Error ? ordersQuery.error.message : '工单读不出来'}</p>
       ) : sorted.length === 0 ? (
@@ -688,7 +709,19 @@ function OrdersCard() {
             const st = STATUS_BADGE[o.status];
             const open = expanded === o.id;
             return (
-              <div key={o.id} className={o.status === 'pending' ? 'banner warn' : ''} style={{ padding: '6px 8px', cursor: 'pointer' }} onClick={() => setExpanded(open ? null : o.id)}>
+              <div
+                key={o.id}
+                data-order-id={o.id}
+                ref={(el) => {
+                  if (el) rowRefs.current.set(o.id, el);
+                  else rowRefs.current.delete(o.id);
+                }}
+                className={[o.status === 'pending' ? 'banner warn' : '', targetOrder === o.id && open ? 'is-target' : '']
+                  .filter(Boolean)
+                  .join(' ') || undefined}
+                style={{ padding: '6px 8px', cursor: 'pointer' }}
+                onClick={() => setExpanded(open ? null : o.id)}
+              >
                 <div>
                   <span className={`badge ${st.cls}`}>{st.label}</span>
                   {o.source === 'external' && (

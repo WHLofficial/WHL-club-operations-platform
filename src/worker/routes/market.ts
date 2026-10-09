@@ -782,7 +782,7 @@ app.post('/market/listings/:id/activation-report', async (c) => {
     }),
   ]);
   if ((results[0].meta.changes ?? 0) !== 1) throw new HttpError(409, '举报没落库，刷新再试');
-  await queueClubNotification(c.env, listing.activated_by, 'activation_reported', { listingId: id });
+  await queueClubNotification(c.env, listing.activated_by, 'activation_reported', { listingId: id, playerId: listing.player_id });
   return c.json({ ok: true }, 201);
 });
 

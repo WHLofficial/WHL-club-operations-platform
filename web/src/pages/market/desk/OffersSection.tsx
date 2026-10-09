@@ -3,8 +3,9 @@
 // ② 页级 h1 退役，区块标题改用 h3，toastNode 留在本区块内渲染。
 // v6.32.0：money 收口到 ../shared.tsx；标题「收到报价」改「报价」（box=out 是我送出的，旧名不副实）；
 // 「报价被接受 ≠ 成交」机制句从页面级说明条收进本区块 hint（这里是唯一讲解点）。
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+// v6.40.0：支持站内信深链 ?offer=<id>——从收件篮点进来直接展开该单谈判桌并高亮行（.is-target）。
+import { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, type OfferDetailResponse, type OfferListItem, type OfferStatus } from '../../../lib/api.ts';
 import { playerPath } from '../../../lib/player-link.ts';
@@ -55,15 +56,35 @@ export default function OffersSection({
   const invalidateOffers = useOffersInvalidation();
 
   const list = useOffers(box, status, true);
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [params] = useSearchParams();
+  // v6.40.0：站内信深链的目标单号（?offer=<id>）。详情按 id 取，因此即便该单不在当前这一页
+  // 列表里（被页签/筛选挡下，或属于更早的 50 条）也能展开谈判桌——只有行高亮与滚动需要行在场。
+  const offerParam = Number(params.get('offer'));
+  const targetOfferId = Number.isInteger(offerParam) && offerParam > 0 ? offerParam : null;
+  const [openId, setOpenId] = useState<number | null>(targetOfferId);
   const detail = useOfferDetail(openId, true);
   const [counterDraft, setCounterDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
+  const lastFilter = useRef<string | null>(null);
 
-  // 切换页签/筛选时收起谈判桌（旧页在 switchBox / switchStatus 里同步做，这里随受控入参走）
+  // 切换页签/筛选时收起谈判桌（旧页在 switchBox / switchStatus 里同步做，这里随受控入参走）。
+  // 首跑不收起：那是深链播种的 openId，收起就把 ?offer= 落点丢了。判据用「筛选键前值」而非
+  // 「跑过几次」——StrictMode 下 dev 会双跑 mount effect，计数式首跑跳过会被第二次当成切换。
   useEffect(() => {
-    setOpenId(null);
+    const key = `${box}|${status}`;
+    if (lastFilter.current === key) return;
+    const first = lastFilter.current === null;
+    lastFilter.current = key;
+    if (!first) setOpenId(null);
   }, [box, status]);
+
+  // 目标行在场时滚到它（jsdom 没有 scrollIntoView，守卫写法照 MarketActivationPage 的先例）
+  useEffect(() => {
+    if (targetOfferId === null || openId !== targetOfferId) return;
+    const el = rowRefs.current.get(targetOfferId);
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+  }, [targetOfferId, openId, list.data]);
 
   const items = list.data?.items ?? null;
   const pendingMine = list.data?.pendingMine ?? 0;
@@ -145,6 +166,12 @@ export default function OffersSection({
         </button>
       </div>
 
+      {targetOfferId !== null && openId === targetOfferId && items !== null && !items.some((o) => o.id === targetOfferId) && (
+        <p className="banner warn" role="status">
+          目标报价 <span className="mono">#{targetOfferId}</span> 不在当前列表里（可能被上面的页签/筛选挡下，或是更早的单子），已按单号打开谈判桌；可切「全部」或继续往后翻。
+        </p>
+      )}
+
       {list.isError && <div className="banner bad">{list.error instanceof Error ? list.error.message : '清单拉取失败'}</div>}
       {items === null && list.isPending && <p className="muted">正在翻报价夹…</p>}
       {items !== null && items.length === 0 && (
@@ -175,7 +202,16 @@ export default function OffersSection({
                 {items.map((o) => {
                   const badge = STATUS_BADGE[o.status];
                   return (
-                    <tr key={o.id}>
+                    <tr
+                      key={o.id}
+                      // v6.40.0：站内信深链的落点行（滚动/高亮与组件测试/e2e 都认这个属性）
+                      data-offer-id={o.id}
+                      className={targetOfferId === o.id && openId === o.id ? 'is-target' : undefined}
+                      ref={(el) => {
+                        if (el) rowRefs.current.set(o.id, el);
+                        else rowRefs.current.delete(o.id);
+                      }}
+                    >
                       <td>
                         <Link to={playerPath(o.player)}>{o.player.name}</Link>
                       </td>

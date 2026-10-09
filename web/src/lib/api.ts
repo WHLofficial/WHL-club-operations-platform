@@ -1,5 +1,6 @@
 // API 约定（附录 A）：错误统一 {error, code?}；前端消费的 DTO 在此层冻结
 import type { PlayerMarker } from '../../../src/core/squad-rules.ts';
+import type { NotifyCategoryId, NotifyRef } from '../../../src/core/notify-meta.ts';
 
 export interface MeUser {
   id: number;
@@ -1143,11 +1144,13 @@ export interface FinanceSummaryResponse {
   totals: { matchday: FinanceMatchday; net: number; closingBalance: number | null } | null;
 }
 
-// 站内信收件篮（v2.4.0）
+// 站内信收件篮（v2.4.0；v6.40.0 起每行带 clubId 与 ref 供整行跳转）
 export interface NotificationItem {
   id: number;
+  clubId: number | null;
   template: string;
   text: string;
+  ref: NotifyRef | null;
   createdAt: string;
   readAt: string | null;
 }
@@ -1156,6 +1159,12 @@ export interface NotificationsPage {
   items: NotificationItem[];
   nextCursor: number | null;
   unread: number;
+}
+
+// 类目未读分布（v6.40.0，unread-count?by=category）：只含 >0 的类目
+export interface NotificationsUnreadByCategory {
+  unread: number;
+  byCategory: Partial<Record<NotifyCategoryId, number>>;
 }
 
 // 设施经营预览（v2.5.0）

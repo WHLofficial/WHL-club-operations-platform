@@ -646,6 +646,7 @@ export async function applyLevelUp(
   // 通知教练（§12；尽力而为，没绑 QQ 静默跳过）
   await queueClubNotification(env, player.club_id, 'levelup', {
     player: rowDisplayName(player),
+    playerId,
     ca: plan.ca,
     silver: plan.silver,
     gold: plan.gold,

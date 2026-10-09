@@ -163,6 +163,7 @@ export async function createActivation(
   const activatorName = (await db.prepare('SELECT name FROM clubs WHERE id = ?').bind(clubId).first<{ name: string }>())?.name ?? '对方';
   await queueClubNotification(env, player.club_id, 'activation_notice', {
     player: player.display_name || player.name,
+    playerId,
     activatorName,
     fee: askPrice,
     listingId,
@@ -215,7 +216,7 @@ export async function submitMatch(
   if (newFeeInput === undefined || newFeeInput === null || newFeeInput === 'pass') {
     // 放行：按竞价最高价成交，转待审
     await settleListingForReview(db, { id: listing.id, player_id: listing.player_id, seller_club_id: listing.seller_club_id, ask_price: bid.amount, season: listing.season, window_seq: listing.window_seq }, actor, 'user', 'matched_pending');
-    await queueClubNotification(env, listing.activated_by, 'activation_passed', { listingId: listing.id });
+    await queueClubNotification(env, listing.activated_by, 'activation_passed', { listingId: listing.id, playerId: listing.player_id });
     return { ok: true, decision: 'pass' };
   }
 
@@ -312,6 +313,7 @@ export async function submitMatch(
   // 通知激活方：被激活方选择匹配留队（v6.4.0 改动 4）
   await queueClubNotification(env, listing.activated_by, 'activation_matched', {
     listingId: listing.id,
+    playerId: listing.player_id,
     newReleaseFee: newFee,
     previousBid: bid.amount,
   });

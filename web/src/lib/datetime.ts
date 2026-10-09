@@ -57,6 +57,12 @@ function parts(ms: number, opts: Intl.DateTimeFormatOptions) {
 
 type Join = (p: ReturnType<typeof parts>) => string;
 
+/** 显示时区下的「第几天」（整数日序）：相对日期的唯一算法口径（fmtAgo / fmtDayLabel 共用）。 */
+function dayNo(t: number): number {
+  const p = parts(t, D);
+  return Date.UTC(Number(p.y), Number(p.mo) - 1, Number(p.d)) / 86_400_000;
+}
+
 function fmtIn(iso: string | null | undefined, opts: Intl.DateTimeFormatOptions, join: Join): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
@@ -92,14 +98,24 @@ export function fmtAgo(iso: string | null | undefined): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return '—';
-  const dayNo = (t: number) => {
-    const p = parts(t, D);
-    return Date.UTC(Number(p.y), Number(p.mo) - 1, Number(p.d)) / 86_400_000;
-  };
   const days = dayNo(Date.now()) - dayNo(ms);
   if (days <= 0) return '今天';
   if (days === 1) return '昨天';
   return `${days} 天前`;
+}
+
+/**
+ * 日期分组标签（v6.40.0 收件篮）：今天 / 昨天 / YYYY-MM-DD，按显示时区的日历日。
+ * 与 fmtAgo 同源（一个算差、一个给分组名），页面不许自算日历日。
+ */
+export function fmtDayLabel(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '—';
+  const days = dayNo(Date.now()) - dayNo(ms);
+  if (days <= 0) return '今天';
+  if (days === 1) return '昨天';
+  return fmtDate(iso);
 }
 
 export function useTzPref(): TzPref {
@@ -123,6 +139,8 @@ export interface TimeFmt {
   date: (iso: string | null | undefined) => string;
   /** 相对日期（今天 / 昨天 / N 天前）：挂出时间一类「多久以前」一律走它 */
   ago: (iso: string | null | undefined) => string;
+  /** 日期分组标签（今天 / 昨天 / YYYY-MM-DD）：列表按天分组的分隔线文案 */
+  dayLabel: (iso: string | null | undefined) => string;
 }
 
 /** 消费端唯一入口：渲染时间的组件必须走这个 hook（pref 变化即重渲染） */
@@ -135,6 +153,7 @@ export function useTimeFmt(): TimeFmt {
       dateTime: fmtDateTime,
       date: fmtDate,
       ago: fmtAgo,
+      dayLabel: fmtDayLabel,
     }),
     [pref],
   );

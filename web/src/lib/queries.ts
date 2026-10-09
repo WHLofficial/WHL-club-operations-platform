@@ -1,7 +1,8 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
+import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
+import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
 /** 可激活名单模式（v6.18.0）：all=全部可激活 / trainee=仅训练营 */
@@ -30,6 +31,9 @@ export const qk = {
   seaLookup: (q: string) => ['market', 'sea-lookup', q] as const,
   activatable: (mode: ActivatableMode, q: string) => ['market', 'activatable', mode, q] as const,
   notifications: ['notifications'] as const,
+  // 收件篮列表（v6.40.0 类目化）：'' = 全部；键里带类目 ⇒ 切页签各存一份缓存
+  notificationsList: (category: string) => ['notifications', 'list', category] as const,
+  unreadByCategory: ['notifications', 'unread-by-category'] as const,
   stadiumBuild: ['club', 'stadium-build'] as const,
   naming: ['club', 'naming'] as const,
   bookings: ['club', 'bookings'] as const,
@@ -293,13 +297,38 @@ export function useUnreadCount() {
   });
 }
 
-// 标已读（单条 ids / 全部 all），写后失效收件篮与未读数
+// 收件篮列表：游标分页；category 缺省全部（v6.40.0）
+export function useNotificationList(category: NotifyCategoryId | '') {
+  return useInfiniteQuery({
+    queryKey: qk.notificationsList(category),
+    queryFn: ({ pageParam }) =>
+      api<NotificationsPage>(`/api/notifications?${category === '' ? '' : `category=${category}&`}${pageParam !== null ? `cursor=${pageParam}` : ''}`),
+    initialPageParam: null as number | null,
+    // nextCursor 到底时是 null；v5 里 null 仍是合法游标，必须转 undefined 才算「没有下一页」
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+// 类目未读分布（页签角标）：进收件篮才拉一次 + 写后由 invalidate 刷新；不轮询（顶栏那份才是 60s 轮询）
+export function useUnreadByCategory() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: qk.unreadByCategory,
+    queryFn: () => api<NotificationsUnreadByCategory>('/api/notifications/unread-count?by=category'),
+    enabled: user != null,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// 标已读（ids 单条 / all 全部，可带 category 只清本类），写后失效收件篮与两份未读数。
+// opts.keepList：「见过即已读」专用——只刷新未读数、不动列表，否则刚看过的行会当场重排/跳位。
 export function useMarkNotificationsRead() {
   const qc = useQueryClient();
-  return async (body: { ids?: number[]; all?: boolean }) => {
+  return async (body: { ids?: number[]; all?: boolean; category?: NotifyCategoryId }, opts?: { keepList?: boolean }) => {
     const out = await apiPost<{ marked: number }>('/api/notifications/read', body);
-    void qc.invalidateQueries({ queryKey: qk.notifications });
+    if (!opts?.keepList) void qc.invalidateQueries({ queryKey: qk.notifications });
     void qc.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
+    void qc.invalidateQueries({ queryKey: qk.unreadByCategory });
     return out;
   };
 }

@@ -230,14 +230,15 @@ export async function placeOffer(
       player: p.name,
       amount,
       sellerClubId: p.club_id,
+      offerId,
     });
-    await queueClubNotification(env, p.club_id ?? 0, 'offer_auto_accepted', { player: p.name, amount, self: true });
+    await queueClubNotification(env, p.club_id ?? 0, 'offer_auto_accepted', { player: p.name, amount, self: true, offerId });
     return { offerId, status: 'accepted', auto };
   }
   if (auto === 'auto_reject') {
     const offer = await loadOffer(db, offerId);
     await rejectOfferCore(env, offer, p.club_id ?? 0, null, 'auto_reject', 'user');
-    await queueClubNotification(env, input.clubId, 'offer_auto_rejected', { player: p.name, amount });
+    await queueClubNotification(env, input.clubId, 'offer_auto_rejected', { player: p.name, amount, offerId });
     return { offerId, status: 'rejected', auto };
   }
   await queueClubNotification(env, p.club_id ?? 0, 'offer_received', {
@@ -596,10 +597,11 @@ export async function acceptOffer(
       player: offer.player_name,
       amount: offer.amount,
       listingId,
+      offerId: offer.id,
     });
     for (const row of siblingBuyers.results) {
       if (row.buyer_club_id !== offer.buyer_club_id) {
-        await queueClubNotification(env, row.buyer_club_id, 'offer_expired', { player: offer.player_name, reason: 'sold' });
+        await queueClubNotification(env, row.buyer_club_id, 'offer_expired', { player: offer.player_name, reason: 'sold', offerId: offer.id });
       }
     }
     return { ok: true, status: 'accepted', listingId };
@@ -642,12 +644,12 @@ export async function acceptOffer(
 
   const listingId = await acceptOfferCore(env, offer, input.actor, role);
 
-  await queueClubNotification(env, offer.buyer_club_id, 'offer_accepted', { player: offer.player_name, amount: offer.amount, listingId });
-  await queueClubNotification(env, offer.seller_club_id, 'offer_accepted', { player: offer.player_name, amount: offer.amount, listingId });
+  await queueClubNotification(env, offer.buyer_club_id, 'offer_accepted', { player: offer.player_name, amount: offer.amount, listingId, offerId: offer.id });
+  await queueClubNotification(env, offer.seller_club_id, 'offer_accepted', { player: offer.player_name, amount: offer.amount, listingId, offerId: offer.id });
   // 兄弟单买方通知「球员已挂牌」（同意即挂牌，成交走审核过户——v6.4.0 文案收口）
   for (const row of siblingBuyers.results) {
     if (row.buyer_club_id !== offer.buyer_club_id) {
-      await queueClubNotification(env, row.buyer_club_id, 'offer_expired', { player: offer.player_name, reason: 'sold' });
+      await queueClubNotification(env, row.buyer_club_id, 'offer_expired', { player: offer.player_name, reason: 'sold', offerId: offer.id });
     }
   }
   return { ok: true, status: 'accepted', listingId };
@@ -711,12 +713,12 @@ export async function rejectOffer(env: Env, input: { offerId: number; clubId: nu
       note: '卖方放弃意向单',
     });
     if (!changed) throw new HttpError(409, '这条意向单刚被处理过了，刷新看看');
-    await queueClubNotification(env, offer.buyer_club_id, 'offer_intent_closed', { player: offer.player_name, amount: offer.amount, action: '放弃' });
+    await queueClubNotification(env, offer.buyer_club_id, 'offer_intent_closed', { player: offer.player_name, amount: offer.amount, action: '放弃', offerId: offer.id });
     return { ok: true };
   }
   const changed = await finalizeOffer(env, offer, { status: 'rejected', actorClubId: input.clubId, actor: input.actor, origin: 'user', kind: 'reject' });
   if (!changed) throw new HttpError(409, '这条报价刚被处理过了，刷新看看');
-  await queueClubNotification(env, offer.buyer_club_id, 'offer_rejected', { player: offer.player_name, amount: offer.amount });
+  await queueClubNotification(env, offer.buyer_club_id, 'offer_rejected', { player: offer.player_name, amount: offer.amount, offerId: offer.id });
   return { ok: true };
 }
 
@@ -739,12 +741,12 @@ export async function withdrawOffer(env: Env, input: { offerId: number; clubId: 
       note: '买方撤回意向单',
     });
     if (!changed) throw new HttpError(409, '这条意向单刚被处理过了，刷新看看');
-    await queueClubNotification(env, offer.seller_club_id, 'offer_intent_closed', { player: offer.player_name, amount: offer.amount, action: '撤回' });
+    await queueClubNotification(env, offer.seller_club_id, 'offer_intent_closed', { player: offer.player_name, amount: offer.amount, action: '撤回', offerId: offer.id });
     return { ok: true };
   }
   const changed = await finalizeOffer(env, offer, { status: 'withdrawn', actorClubId: input.clubId, actor: input.actor, origin: 'user', kind: 'withdraw' });
   if (!changed) throw new HttpError(409, '这条报价刚被处理过了，刷新看看');
-  await queueClubNotification(env, offer.seller_club_id, 'offer_withdrawn', { player: offer.player_name, amount: offer.amount });
+  await queueClubNotification(env, offer.seller_club_id, 'offer_withdrawn', { player: offer.player_name, amount: offer.amount, offerId: offer.id });
   return { ok: true };
 }
 
@@ -825,8 +827,8 @@ export async function expireStaleOffers(env: Env, opts: { origin: AuditOrigin; a
     const note = row.offer_status === 'intent' ? '球员状态已变，意向单无法成约' : null;
     if (await finalizeOffer(env, offer, { status: 'expired', fromStatus: row.offer_status, actorClubId: null, actor, origin, kind: 'expire', note })) {
       summary.expired++;
-      await queueClubNotification(env, offer.buyer_club_id, 'offer_expired', { player: row.player_name, reason: 'state' });
-      await queueClubNotification(env, offer.seller_club_id, 'offer_expired', { player: row.player_name, reason: 'state' });
+      await queueClubNotification(env, offer.buyer_club_id, 'offer_expired', { player: row.player_name, reason: 'state', offerId: offer.id });
+      await queueClubNotification(env, offer.seller_club_id, 'offer_expired', { player: row.player_name, reason: 'state', offerId: offer.id });
     }
   }
   return summary;
@@ -903,10 +905,13 @@ export async function setOfferSettings(
   const wasNotForSale = p.not_for_sale === 1;
   const pendingBuyers = !wasNotForSale && input.notForSale
     ? await db
-        .prepare(`SELECT DISTINCT buyer_club_id FROM offers WHERE player_id = ? AND status IN ('pending', 'intent')`)
+        .prepare(
+          // 每个买方取最新一条在建单（MAX(id)）——通知里带 offerId 才能跳回那张被自动拒的单
+          `SELECT buyer_club_id, MAX(id) AS offer_id FROM offers WHERE player_id = ? AND status IN ('pending', 'intent') GROUP BY buyer_club_id`,
+        )
         .bind(input.playerId)
-        .all<{ buyer_club_id: number }>()
-    : { results: [] as { buyer_club_id: number }[] };
+        .all<{ buyer_club_id: number; offer_id: number }>()
+    : { results: [] as { buyer_club_id: number; offer_id: number }[] };
 
   const audit = createAuditStatement(db);
   const statements = [
@@ -976,6 +981,7 @@ export async function setOfferSettings(
       player: p.name,
       amount: null,
       reason: 'not_for_sale',
+      offerId: row.offer_id,
     });
   }
   return {

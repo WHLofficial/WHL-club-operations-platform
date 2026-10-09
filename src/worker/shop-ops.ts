@@ -790,12 +790,13 @@ export async function rejectShopOrder(
     summary,
     reason,
     refund: order.source === 'club' && order.amount != null && order.amount > 0,
+    orderId: order.id,
   });
   return { order: { ...order, status: 'rejected', reviewed_by: opts.reviewerId, reject_reason: reason }, summary };
 }
 
 async function queueApprovedNotification(env: Env, order: ShopOrderRow, summary: string, note: string | null) {
-  const data: Record<string, unknown> = { summary, external: order.source === 'external' };
+  const data: Record<string, unknown> = { summary, external: order.source === 'external', orderId: order.id };
   if (note) data.note = note;
   await queueClubNotification(env, order.club_id, 'shop_order_approved', data);
 }

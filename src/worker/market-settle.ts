@@ -350,8 +350,8 @@ export async function settleOverdue(
     if ((await settleListingForReview(db, row, actor, origin, 'matched_pending')) === 'settled') {
       summary.settled++;
       // 证据制配套通知（v6.4.0 改动 4）：匹配窗到期未匹配，两边各知会一声
-      await queueClubNotification(env, row.activated_by, 'activation_match_expired', { listingId: row.id, player: row.player_name });
-      await queueClubNotification(env, row.seller_club_id, 'activation_match_expired', { listingId: row.id, player: row.player_name });
+      await queueClubNotification(env, row.activated_by, 'activation_match_expired', { listingId: row.id, player: row.player_name, playerId: row.player_id });
+      await queueClubNotification(env, row.seller_club_id, 'activation_match_expired', { listingId: row.id, player: row.player_name, playerId: row.player_id });
     }
   }
 
