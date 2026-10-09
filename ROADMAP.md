@@ -1513,6 +1513,18 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 - **教训**：① 组件测试的期望值不许从被测常量现算——`Notifications.test.tsx` 原写 `const tone = NOTIFY_CATEGORIES.find((c) => c.id === meta.category)!.tone`，挪类目/换色都抓不到（变异 M2 首轮组件全绿即此），改字面量 `TONE` 表 + 8 枚代表对后同一变异红 5；② 变异预期要按实测订正（M1 只红 2——TC-LINK-01 / TC-JUMP-01 吃的是现成 ref、不经 `notificationRefOf`；M4 的 TC-CAT-01 不可达——`by=category` 不走 `categoryCond`）；③ 探针标签按 SQL 形状命名，别借 surface 名（同一形状在多 surface 重复会串位）；④ 几何断言并入 e2e 比另起打桩探针更省也更真（375 两行直接量 `gridTemplateAreas`）。
 - **待办**：`?listing=` 激活页精确落点（激活页列表实体是球员、无工单/挂单实体 ⇒ 走 `ref:{player}` 跳 `/players/<id>`）；TopBar 未读红点（只有点无数字，不动）；QQ/FEISHU 渠道文案与推送/邮件。
 
+### v6.40.0 同版本补充 · 报价/签约谈判对话式改造（含 R1 拒绝摆明面）
+
+- **状态**：minor × **已完工、待上线**（用户 m05439「并且合并到6.40.0」⇒ 视同本版一起上线，`package.json` 保持 6.40.0 不 bump；落地提交 `36480cd` 壳 → `ad60659` 后端 → `546c810` 报价页签 → `0409fc0` 签约谈判页签；生产 0066 apply + 回读待用户「上线」令）。
+- **缘起**：用户 m04806「报价谈判系统UI显示改为对话式，新增拒绝报价功能。新UI需要通过visual companion定稿」；visual companion v1 屏定稿布局 B（清单不动 + 对话浮层）与拒绝语义 R1（规则不动、只把「拒绝」摆到明面）；实施级细节 v2/v3/v4 屏三轮复审；D1 甲（逐轮经纪人反馈落库）/ D2 甲（还价带附言）/ D4 乙（抽共享浮层壳）与工资预览四档边界 0.2 / 0.5 / 0.8 由用户 m05270 / m05348 拍板；设计记录 `memory/design-nego-chat-ui.md`、批准计划 `memory/plan-v6.40.0-nego-chat-ui.md`。
+- **交付**：① 浮层壳唯一出处 `web/src/lib/useOverlayShell.ts`（锁滚 / Esc / Tab 循环 / 焦点归位），`ComparePickerOverlay.tsx` 与 `MarketListingOverlay.tsx` 改接；② 报价页签对话式「谈判桌」浮层（桌面居中 / ≤760px 底部抽屉）：单据头（卖方多打一枪 `offer-settings` 才显示底价与自动同意；买方不泄底价；非名单球员不留空行）+ 事件流（`open`/`counter` 左右气泡、其余 8 种 kind 系统行）+ 动作栏固定四颗（越权置灰 + `title` 说明）；**R1** 卖方待回复单任意轮次可拒 + 拒绝/撤回/放弃两段式确认（说清冻结去向）；还价带 100 字附言（服务端 `NOTE_MAX = 100` 兜底）；≤760px 清单改卡片行；③ 签约谈判页签报价记录折进卡内对话流 + 工资实时档位预览端点（`POST /api/negotiations/:sessionId/preview` → `{forecast, risk}`，零副作用、次数满 409 不替玩家强约、四档档位不随经纪人档位变）；④ 后端迁移 `0066_negotiation_feedback.sql`（`feedback TEXT` + `risk INTEGER NOT NULL DEFAULT 0`）+ `evaluateWage` 三处同源 + `attempts` DTO 扩 `at`/`feedback`；⑤ 金额双口径（报价类整数 `moneyIntText` / 工资类两位小数 `money()+m`）与秒级时间戳 `fmtDateTimeSec`。
+- **不变量（回归锁）**：判定公式与涉密参数一字不动；事后满意度阈值 0.25/0.6/0.9 不动（预览四档 0.2/0.5/0.8 是另一套词，有意并存）；拒绝侧 worker 零改动（R1 只摆明面）；事件 note「有值直显、空才兜底、绝不前端重写系统句」；`GET /api/offers` / `:id` 契约未变；站内信深链 `?offer=` 自动开桌不回归。
+- **回归闸门**：`web/src/pages/market/desk/OffersSection.test.tsx` 22 例（含 R1 任意轮次可拒 + 两段式 + 附言 + 窄屏卡片行 + 深链三例）、`web/src/pages/market/desk/NegotiationsSection.test.tsx` 15 例（含档位四态 + 静默失败 + 老行无反馈 + 金额口径）、`tests/negotiation-routes.test.ts` 18 例（预览零副作用 / 四档边界逐值 / 次数满不强约 / 反馈落库与响应面收敛）、`tests/mobile-baseline.test.ts` 静态锁（两处表格数下调 ⇒ `TABLE_BASELINE` 45→43）、e2e ⑤c 新增浮层与档位断言。
+- **验收**：typecheck 三份 tsconfig 0 error；vitest **109 文件 / 1843 例**全绿（基线 108 / 1812，净 +31）；`npm run build` 成功；e2e **25/25**；变异 M1–M6（档位边界 0.8→0.7 / 反馈去风险后缀 / `canReject` 退回轮次限制 / 成交价 `moneyIntText`→`money` / 档位去掉本地不合规分支 / 拒绝去掉两段式）实测红 1 / 1 / 1 / 1 / 1 / 2，等价变异 1 枚登记。
+- **测试计划**：`docs/test-plans/v6.40.0-nego-chat-ui.md`（含 M1–M6 实测表、执行留痕与评审登记）。
+- **教训**：① `moneyIntText` 自带单位 `m`，再补一个 `m` 会渲染成 `12.5mm`（本轮实测踩到三处；写新代码先看单位在谁身上）；② 窄屏横滑的病根是 `.table-wrap{overflow-x:auto}`，数据密集页要么折卡片要么别给表格；③ 预览类端点的「次数满」分支必须显式不写库——只读动作不得替玩家推进状态机（用例直接断言会话仍 `active`、transfer 仍 `signing`）；④ 两套词（预测档位 vs 事后满意度）阈值不同位是有意的，共用词会在 4.40~4.50m 一带露出「预告满意、事后不满意」的错位缝。
+- **待办**：`previewWage` 与 `offerWage` 的输入校验目前是两份复制（越界 / 单调 / 未交 RC / 次数满），下次动判定规则前抽公共守卫；`risk` 列只在写入侧使用，读路径纯现算（新老行分界改用 `last.feedback === null` 更精确）；本机本地 D1 迁移记账与 schema 脱节（预存在，非 0066 引起，未做破坏性重置）。
+
 ## v6.39.3 · 球员库球队名前接队徽缩略图（映射抽 src/worker/club-logos.ts 共用）（2026-10-08）
 
 - **状态**：patch × **已上线**（2026-10-08 发布，用户令 m04745「发布」：push `c534523..74540bc`（2 枚：v6.39.2 上线回写 `f1b912f` + 本枚）触发 CF 自动部署（Workers Builds），生产 Version `d8093411-9eea-40fd-9611-0299f8595bf4` @2026-10-08T15:14:29Z；零迁移、零生产写、纯展示层 + worker 读路径）。
