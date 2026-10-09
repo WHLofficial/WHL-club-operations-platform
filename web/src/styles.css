@@ -7249,3 +7249,74 @@ button.sqc-pos:hover {
   }
 }
 
+/* v6.40.0 签约谈判：卡内对话流。气泡/系统行复用上面 .nego-b / .nego-sys 那套（浮层与卡片同形），
+   .nego-thread 只是给它们一个不滚动的容器——谈判区在卡片里，整页滚动，不另开内滚动区。 */
+.nego-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+/* 工资实时档位（成功率预测）：标签 + 胶囊一行，role="status" 让读屏跟着念。
+   四档色系复用徽章金/蓝/红，另加一档更深的红区分「很低」；等待态走中性灰。 */
+.live-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+
+.live-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.live-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.live-pill.is-hi {
+  background: var(--badge-gold-bg);
+  border-color: var(--badge-gold-line);
+  color: var(--badge-gold-fg);
+}
+
+.live-pill.is-mid {
+  background: #e3ecfa;
+  color: #1d4fd7;
+}
+
+.live-pill.is-low {
+  background: #fbe3e3;
+  color: #b91c1c;
+}
+
+.live-pill.is-vlow {
+  background: #f2c4c4;
+  color: #7f1d1d;
+}
+
+.live-pill.is-wait {
+  background: #efe9dd;
+  color: var(--muted);
+  font-weight: 400;
+}
+

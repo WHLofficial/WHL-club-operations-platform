@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type WageForecast } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -109,6 +109,19 @@ export function useMyNegotiations(isCoach: boolean) {
     queryKey: qk.myNegotiations,
     queryFn: async () => (await api<{ sessions: NegotiationSession[] }>('/api/negotiations?mine=1')).sessions,
     enabled: isCoach,
+  });
+}
+
+// 工资预览（v6.40.0）：输入停下后问一次「这个价成功率大概多少」。零副作用（不落库、不耗轮次、不写审计）。
+// 键里带 wage ⇒ 同价复用缓存、自带竞态保护（慢响应回来时键已换，不会被当成当前值）；staleTime 给足，
+// 反复修改输入不会重复问。失败一律静默（调用方只画已到手的档位，不 toast、不挡提交按钮）。
+export function useWagePreview(sessionId: number, wage: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['negotiations', 'preview', sessionId, wage],
+    queryFn: () => apiPost<WageForecast>(`/api/negotiations/${sessionId}/preview`, { wage: Number(wage) }),
+    enabled: enabled && Number.isInteger(sessionId) && sessionId > 0 && wage !== '',
+    retry: false,
+    staleTime: 60_000,
   });
 }
 

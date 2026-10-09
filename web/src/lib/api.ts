@@ -842,8 +842,15 @@ export interface NegotiationSession {
   remaining: number;
   lastSatisfaction: string | null;
   lastRisk: boolean;
-  attempts: { attemptNo: number; offeredWage: number; result: string }[];
+  attempts: { attemptNo: number; offeredWage: number; result: string; at: string; feedback: string | null }[];
   settled: { wage: number | null; source: string; message: string } | null;
+}
+
+// 工资预览（v6.40.0）：POST /api/negotiations/:sessionId/preview 的响应。只读——不落库、不耗轮次、
+// 不写审计；forecast 是服务端按 0.2/0.5/0.8 量化出的成功率档位（四档文案只在 Worker 侧维护）。
+export interface WageForecast {
+  forecast: string;
+  risk: boolean;
 }
 
 export interface ReleaseFeeResult {

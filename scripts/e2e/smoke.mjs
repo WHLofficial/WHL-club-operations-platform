@@ -546,7 +546,12 @@ async function main() {
         deskNego({}), // 违约金未定 ⇒ 阶段徽标「第一步 · 定违约金」
         deskNego({
           id: 22, transferId: 32, releaseFee: 9, rcBounds: [6, 12], remaining: 2, attemptsUsed: 1,
-          attempts: [{ attemptNo: 1, offeredWage: 5, result: 'fail' }],
+          // v6.40.0：逐轮反馈落库（0066）后 attempt 带 at / feedback ⇒ 卡内对话流有左右两条气泡
+          attempts: [{
+            attemptNo: 1, offeredWage: 5, result: 'fail',
+            at: '2026-09-20T11:00:00.000Z', feedback: '😐 经纪人不太满意（报价过低，有谈崩风险）',
+          }],
+          lastSatisfaction: '😐 经纪人不太满意（报价过低，有谈崩风险）', lastRisk: true,
         }), // 违约金已定 ⇒ 「工资谈判 · 剩 2 轮」
         deskNego({
           id: 23, transferId: 33, status: 'settled', releaseFee: 9, remaining: 0, attemptsUsed: 1,
@@ -588,6 +593,8 @@ async function main() {
       [/\/api\/negotiations\?mine=1/, DESK_NEGO],
       [/\/api\/offers\/\d+(\?|$)/, DESK_OFFER_DETAIL],
       [/\/api\/players\/\d+\/offer-settings/, DESK_OFFER_SETTINGS],
+      // v6.40.0 工资实时档位：预览端点只读，夹具回一档「过半」
+      [/\/api\/negotiations\/\d+\/preview/, { forecast: '成功率过半', risk: false }],
       [/\/api\/me\/bids/, DESK_BIDS],
       [/\/api\/club\/squad/, DESK_SQUAD],
     ];
@@ -668,6 +675,29 @@ async function main() {
         assert((negoText.match(/第一步 · 定违约金/g) ?? []).length === 1, '违约金未定的谈判卡没出阶段徽标');
         assert(negoText.includes('工资谈判 · 剩 2 轮'), '违约金已定的谈判卡没出「工资谈判 · 剩 N 轮」');
         assert(!negoText.includes('已落定的谈判'), '已落定谈判表应已删除（历史归球队中心转会页签队史）');
+
+        // v6.40.0 卡内对话流：报价记录表折进气泡（我方在右 / 经纪人反馈在左 / 结果系统行），时间到秒
+        const secondCard = page.locator('#desk-nego section.card', { hasText: '中场丙' }).last();
+        assert((await secondCard.locator('table').count()) === 0, '谈判卡里还留着报价记录表（应已折进对话流）');
+        assert((await secondCard.locator('.nego-thread').count()) === 1, '谈判卡缺对话流容器');
+        const myBubble = secondCard.locator('.nego-b.me').first();
+        assert((await myBubble.innerText()).includes('第 1 轮工资报价'), '我方报价气泡文案不对');
+        assert((await myBubble.innerText()).includes('5.00m/半赛季'), '我方报价没按两位小数显示（金钱口径：工资两位小数）');
+        const agentBubble = secondCard.locator('.nego-b.them').first();
+        assert((await agentBubble.innerText()).includes('经纪人不太满意'), '经纪人逐轮反馈没出左气泡');
+        const negoStamp = (await agentBubble.locator('.nego-b-at').innerText()).trim();
+        assert(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(negoStamp), `谈判气泡时间不是秒级时间戳（${negoStamp}）`);
+        assert(negoText.includes('违约金定为9m') || negoText.includes('违约金定为 9m'),
+          '违约金进不去整数口径（moneyIntText 去尾零，不带小数）');
+
+        // v6.40.0 工资实时档位：输入停下 350ms 问一次预览；不合规只给本地提示，合规才上胶囊
+        const wageInput = page.locator('#wage-22');
+        await wageInput.fill('1');
+        await secondCard.locator('.live-hint', { hasText: '必须高于上一次报价' }).waitFor({ timeout: TIMEOUT });
+        assert((await secondCard.locator('.live-pill').count()) === 0, '报价不合法时不该出档位胶囊');
+        await wageInput.fill('6');
+        await secondCard.locator('.live-pill', { hasText: '成功率过半' }).waitFor({ timeout: TIMEOUT });
+        assert((await secondCard.locator('.live-pill.is-mid').count()) === 1, '过半档该走 is-mid 配色');
 
         // 切「报价」页签：条件挂载换区，阶段徽标（V7：accepted 文案一改回「已挂牌」这条就红）
         await page.locator('[aria-label="转会台页签"] button', { hasText: '报价' }).click();

@@ -3,13 +3,19 @@
 // v6.23.0 新增：会话卡头部阶段徽标（第一步 · 定违约金 / 工资谈判 · 剩 N 轮），只用现有字段推导。
 // v6.32.0：删历史台账表——工作台只放进行中，落定记录归球队详情页转会页签的队史（工资随球员合同页签可查）；
 // useMyNegotiations 挪 lib/queries.ts；money 收口到 ../shared.tsx；谈判规则展示常量具名。
-import { useMemo, useState } from 'react';
+// v6.40.0 对话式：报价记录表折进卡内对话流（我方报价在右 / 经纪人反馈在左 / 结果用系统行），动作区挪到流底部；
+// 工资类金额两位小数（money + m），违约金与成交价走整数口径（moneyIntText）；气泡与系统行时间到秒；
+// 工资输入下加实时成功率档位（useWagePreview，350ms 防抖，失败静默）。
+// 这个页签不加拒绝 / 终止谈判（设计不做清单）：谈判只有「谈成」或签训练营两条出口。
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../../../lib/api.ts';
 import { useToast } from '../../../lib/toast.tsx';
-import { useMyClub, useMyNegotiations, qk } from '../../../lib/queries.ts';
+import { useMyClub, useMyNegotiations, useWagePreview, qk } from '../../../lib/queries.ts';
 import { playerPath } from '../../../lib/player-link.ts';
+import { moneyIntText } from '../../../lib/club-cards.ts';
+import { useTimeFmt } from '../../../lib/datetime.ts';
 import { money } from '../shared.tsx';
 
 const TIER_BADGE: Record<number, string> = { 1: 'green', 2: 'gray', 3: 'red' };
@@ -24,6 +30,26 @@ const ATTEMPT_LABEL: Record<string, { text: string; badge: string }> = {
 const MAX_NEGO_ROUNDS = 3;
 const TRAINEE_WAGE = 0.75;
 const TRAINEE_RELEASE_FEE = 5;
+
+// 服务端只吐档位文案（阈值 0.2/0.5/0.8 留在 Worker 侧），前端只负责上色。
+const FORECAST_CLASS: Record<string, string> = {
+  成功率很高: 'is-hi',
+  成功率过半: 'is-mid',
+  成功率偏低: 'is-low',
+  成功率很低: 'is-vlow',
+};
+
+// 一轮的结果只有落到系统行才看得见：'fail' 不用写——左气泡的经纪人反馈就是那一轮的回应。
+// 三种 result 的措辞与后端 settleMessage 同源（成约那是会话级结算句，由 settled.message 承担）。
+function attemptSysText(a: NegotiationSession['attempts'][number]): string | null {
+  const label = ATTEMPT_LABEL[a.result];
+  if (!label || a.result === 'fail') return null;
+  const tail =
+    a.result === 'success'
+      ? '报价被经纪人接受，按你的报价签约'
+      : '报价过低，谈判直接失败，已按该次预期工资结算';
+  return `${label.text} · ${tail}`;
+}
 
 // 我的谈判会话在 lib/queries.ts（页签计数与谈判区共用一个 query 键）
 
@@ -56,8 +82,8 @@ export default function NegotiationsSection() {
       <p className="hint">
         成交单获管理组批准后，谈判会话自动开在这里：先定新违约金（幅度受限），再按经纪人预期工资谈工资，最多{' '}
         <span className="mono">{MAX_NEGO_ROUNDS}</span> 轮；任何时候都可以直接签训练营合同（固定{' '}
-        <span className="mono">{TRAINEE_WAGE}</span> m / 违约金 <span className="mono">{TRAINEE_RELEASE_FEE}</span> m，
-        不占本窗下放名额）。成约那一刻球员过户、钱款到账。
+        <span className="mono">{money(TRAINEE_WAGE)}</span>m / 违约金{' '}
+        <span className="mono">{moneyIntText(TRAINEE_RELEASE_FEE) ?? '—'}</span>，不占本窗下放名额）。成约那一刻球员过户、钱款到账。
       </p>
       {loadError && <div className="banner warn">{loadError}</div>}
       {toastNode}
@@ -102,19 +128,18 @@ function NumberPrompt({
   show: (text: string, err?: boolean) => void;
 }) {
   const qc = useQueryClient();
-  const [num, setNum] = useState('');
+  const [number, setNumber] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function save() {
-    if (busy || num === '') return;
+  async function submit() {
+    if (busy || number === '') return;
     setBusy(true);
     try {
-      const res = await apiPost<{ ok: boolean; number: string | null }>(`/api/club/players/${player.id}/number`, {
-        number: Number(num),
+      const res = await apiPost<{ ok: boolean; number: number }>(`/api/club/players/${player.id}/number`, {
+        number: Number(number),
       });
       show(`${player.name} 定为 ${res.number} 号。`);
-      // 阵容表的号码列吃 /api/club/squad
-      void qc.invalidateQueries({ queryKey: qk.squad });
+      qc.invalidateQueries({ queryKey: qk.squad });
       onDone();
     } catch (err) {
       show(err instanceof Error ? err.message : '定号失败', true);
@@ -139,16 +164,14 @@ function NumberPrompt({
             type="number"
             min="1"
             max="99"
-            step="1"
-            value={num}
-            placeholder="1–99"
-            onChange={(e) => setNum(e.target.value)}
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
           />
         </div>
-        <button className="btn" type="button" disabled={busy || num === ''} onClick={save}>
-          {busy ? '保存中…' : '定号'}
+        <button className="btn" type="button" disabled={busy || number === ''} onClick={submit}>
+          {busy ? '定号中…' : '定号'}
         </button>
-        <button className="btn btn-ghost" type="button" disabled={busy} onClick={onDone}>
+        <button className="btn btn-sm" type="button" disabled={busy} onClick={onDone}>
           先跳过
         </button>
       </div>
@@ -172,7 +195,9 @@ function SessionCard({
   show: (text: string, err?: boolean) => void;
 }) {
   const s = session;
+  const { dateTimeSec } = useTimeFmt();
   const lastOffer = s.attempts.length > 0 ? s.attempts[s.attempts.length - 1].offeredWage : null;
+  const agentName = `经纪人${s.agentTierLabel}`;
 
   return (
     <section className="card">
@@ -188,51 +213,52 @@ function SessionCard({
         <span className={`badge ${TIER_BADGE[s.agentTier] ?? 'gray'}`}>经纪人{s.agentTierLabel}</span>
       </h3>
       <p className="hint">
-        {s.fromClubName ?? '—'} → <b>{s.toClubName ?? '—'}</b> · 成交价 <span className="mono">{money(s.transfer.fee)}</span> m ·
-        {s.player.position ?? '—'} · {s.player.age ?? '—'} 岁 ·{' '}
-        <span className="mono">{s.player.ca ?? '—'}</span> ·{' '}
+        {s.fromClubName ?? '—'} → <b>{s.toClubName ?? '—'}</b> · 成交价{' '}
+        <span className="mono">{moneyIntText(s.transfer.fee) ?? '—'}</span> · {s.player.position ?? '—'} ·{' '}
+        {s.player.age ?? '—'} 岁 · <span className="mono">{s.player.ca ?? '—'}</span> ·{' '}
         <span className="mono">{s.player.pa ?? '—'}</span>
       </p>
+
+      {/* 对话流：会话开场 →（逐轮）我方报价 / 经纪人反馈 / 结果 → 结算。动作区在流底部，跟对话读下来就是一条线 */}
+      <div className="nego-thread">
+        {s.releaseFee === null ? (
+          <p className="nego-sys">谈判会话开启：先定新违约金（整数，幅度受限），定完给出经纪人预期工资。</p>
+        ) : (
+          <p className="nego-sys">
+            违约金定为 <span className="mono">{moneyIntText(s.releaseFee) ?? '—'}</span> · 预期工资{' '}
+            <span className="mono">{money(s.expectedWage)}m/半赛季</span>
+          </p>
+        )}
+        {s.attempts.map((a) => {
+          const sys = attemptSysText(a);
+          return (
+            <Fragment key={a.attemptNo}>
+              <div className="nego-b me">
+                <div className="nego-b-who">我方</div>
+                <div className="nego-b-main">
+                  第 {a.attemptNo} 轮工资报价 · <span className="mono">{money(a.offeredWage)}m/半赛季</span>
+                </div>
+                {a.at && <div className="nego-b-at mono">{dateTimeSec(a.at)}</div>}
+              </div>
+              {/* 逐轮反馈（0066 起落库；老行没有 feedback 就只留我方那条） */}
+              {a.feedback && (
+                <div className="nego-b them">
+                  <div className="nego-b-who">{agentName}</div>
+                  <div className="nego-b-main">{a.feedback}</div>
+                  {a.at && <div className="nego-b-at mono">{dateTimeSec(a.at)}</div>}
+                </div>
+              )}
+              {sys && <p className="nego-sys">{sys}</p>}
+            </Fragment>
+          );
+        })}
+        {s.settled && <p className="nego-sys">{s.settled.message}</p>}
+      </div>
 
       {s.releaseFee === null ? (
         <ReleaseFeeStep session={s} onChanged={onChanged} onError={onError} show={show} />
       ) : (
         <OfferStep session={s} lastOffer={lastOffer} onChanged={onChanged} onSettled={onSettled} onError={onError} show={show} />
-      )}
-
-      {s.attempts.length > 0 && (
-        <>
-          <h4>报价记录</h4>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th className="num">轮次</th>
-                  <th className="num">报价（m）</th>
-                  <th>结果</th>
-                </tr>
-              </thead>
-              <tbody>
-                {s.attempts.map((a) => (
-                  <tr key={a.attemptNo}>
-                    <td className="num mono">{a.attemptNo}</td>
-                    <td className="num mono">{money(a.offeredWage)}</td>
-                    <td>
-                      <span className={`badge ${ATTEMPT_LABEL[a.result]?.badge ?? 'gray'}`}>
-                        {ATTEMPT_LABEL[a.result]?.text ?? a.result}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {s.lastSatisfaction && (
-            <p className="hint">
-              上一轮反馈：{s.lastSatisfaction}
-            </p>
-          )}
-        </>
       )}
     </section>
   );
@@ -316,8 +342,33 @@ function OfferStep({
   show: (text: string, err?: boolean) => void;
 }) {
   const [wage, setWage] = useState('');
+  const [debounced, setDebounced] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmTrainee, setConfirmTrainee] = useState(false);
+
+  // 输入停下 350ms 再问档位：边敲边打请求既费流量又让胶囊乱跳。
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(wage), 350);
+    return () => clearTimeout(t);
+  }, [wage]);
+
+  // 本地先过一遍规则（金额范围、必须抬高），不合规就只显示提示句——不发请求，也就不会出现
+  // 「本地一看就不行、服务端却回了档位」的自相矛盾。
+  const wageNum = wage === '' ? Number.NaN : Number(wage);
+  const localHint =
+    wage === ''
+      ? ''
+      : !Number.isFinite(wageNum)
+        ? '报价要是数字。'
+        : wageNum < 0.01
+          ? '报价至少 0.01m/半赛季。'
+          : wageNum > 20
+            ? '报价最多 20m/半赛季。'
+            : lastOffer !== null && wageNum <= lastOffer
+              ? `必须高于上一次报价 ${money(lastOffer)}m。`
+              : '';
+  const forecastOn = localHint === '' && wage !== '' && debounced === wage;
+  const preview = useWagePreview(session.id, debounced, forecastOn);
 
   function outcomeMessage(res: OfferResult): string {
     switch (res.result) {
@@ -365,12 +416,34 @@ function OfferStep({
     }
   }
 
+  // 四态：空输入什么都不显示 / 不合规只给本地提示 / 等回话「正在掂量…」/ 到手就上档位胶囊。
+  // 请求失败整行不显示（静默）——预览是锦上添花，不能变成拦住出价的错误提示。
+  const forecastNode =
+    wage === '' ? null : localHint !== '' ? (
+      <>
+        <span className="live-label">报价提示</span>
+        <span className="live-hint">{localHint}</span>
+      </>
+    ) : preview.isError ? null : (
+      <>
+        <span className="live-label">预计</span>
+        {preview.data ? (
+          <span className={`live-pill ${FORECAST_CLASS[preview.data.forecast] ?? 'is-mid'}`}>
+            {preview.data.forecast}
+            {preview.data.risk ? '（有谈崩风险）' : ''}
+          </span>
+        ) : (
+          <span className="live-pill is-wait">正在掂量…</span>
+        )}
+      </>
+    );
+
   return (
     <>
       <div className="stat-pair">
         <div className="market-card-price">
           <span className="stat-label">新违约金</span>
-          <span className="mono">{money(session.releaseFee)}m</span>
+          <span className="mono">{moneyIntText(session.releaseFee) ?? '—'}</span>
         </div>
         <div className="market-card-price">
           <span className="stat-label">经纪人预期工资</span>
@@ -399,11 +472,16 @@ function OfferStep({
           报价不耗轮次，只有经纪人回应了才算一轮。
         </span>
       </div>
+      {forecastNode && (
+        <div className="live-row" role="status" aria-live="polite">
+          {forecastNode}
+        </div>
+      )}
       <div className="inline-form">
         {confirmTrainee ? (
           <>
             <button className="btn btn-danger" type="button" disabled={busy} onClick={signTrainee}>
-              {busy ? '签约中…' : `确认：按 ${TRAINEE_WAGE}m / ${TRAINEE_RELEASE_FEE}m 签进训练营`}
+              {busy ? '签约中…' : `确认：按 ${money(TRAINEE_WAGE)}m / ${moneyIntText(TRAINEE_RELEASE_FEE) ?? '—'} 签进训练营`}
             </button>
             <button className="btn btn-sm" type="button" disabled={busy} onClick={() => setConfirmTrainee(false)}>
               再想想
@@ -411,7 +489,7 @@ function OfferStep({
           </>
         ) : (
           <button className="btn btn-sm" type="button" disabled={busy} onClick={() => setConfirmTrainee(true)}>
-            直接签训练营（{TRAINEE_WAGE}m / 违约金 {TRAINEE_RELEASE_FEE}m）
+            直接签训练营（{money(TRAINEE_WAGE)}m / 违约金 {moneyIntText(TRAINEE_RELEASE_FEE) ?? '—'}）
           </button>
         )}
         <span className="hint">训练营条款固定，不占本窗 2 个下放名额；点了就成约过户，不能反悔。</span>
