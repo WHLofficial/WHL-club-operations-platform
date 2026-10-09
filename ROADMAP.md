@@ -1502,7 +1502,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.40.1 · 报价谈判桌角色契约订正（详情 `myRole` 键名漂移）+ 动作栏按角色收敛 + 同意按钮文案（2026-10-09）
 
-- **状态**：patch × **本地收口，未 push**（等发布令）。零迁移、零生产写、零新端点。
+- **状态**：patch × **已上线**（2026-10-09 发布，用户令 m05132「发布」：push `6da17ec..7e84420`（4 枚：上批 v6.40.0 同版本补充发布记录回写 + 本批 3 枚）触发 CF 自动部署，生产 Version **`dc788500-3ef3-4f16-8b82-2871de122188`** @2026-10-09T11:13:40Z；回读经自定义域名 `https://club.whleague.win` 全过——入口 `index-B3EHNjsn.js`（sha256 `928c7533…`）/ `index-DmzAlzoh.css`（`4a63b71c…`）与本地构建**逐字节一致**，路由块 `MarketDeskPage-BqxaQTLr.js`（`c85ec167…`）同 sha256 且新文案在线（同意并挂牌 / 挂意向单 / 撤回意向），旧文案清零（`只有买方能撤回` 0 次、`同意（` 0 次），CSS 规则 `.nego-actions>.btn:last-child:nth-child(odd){grid-column:1 / -1}` 在线，包内版本串 `6.40.1`，`/api/offers`·`/api/offers/:id`·`POST /api/offers/:id/withdraw` 匿名 401 而 `/api/health` 200，`d1 migrations list` ⇒ `No migrations to apply!`）。零迁移、零生产写、零新端点。
 - **缘起**：用户 m04521「为什么我是卖家，但 撤回报价是亮的？？？？」（附图：手机端谈判桌浮层，当前有效价 10m（首报 10m · R0）/ 买方 皇家马德里 / 卖家 里昂 / 轮到谁 你 / 四颗按钮）→ 追问「那么为什么我作为卖家，拒绝按钮是不可点的」→ 中途插入「同意按钮文案改成：同意并挂牌/挂意向单（根据状态不同选不同文案）·报价」。
 - **根因（跨层键名漂移，真 bug 非观感）**：worker 详情接口发 `myRole`（`src/worker/routes/offers.ts:202`），而列表接口每行发 `role`（同文件 :111）；前端类型 `OfferDetailResponse.offer` 继承 `OfferListItem`（`web/src/lib/api.ts:2011` 声明 `role: 'buyer' | 'seller'`）⇒ `web/src/pages/market/desk/OffersSection.tsx:448` 的 `offer?.role === 'seller'` 运行期恒 `undefined` ⇒ **所有人被当买方**。症状：卖方「拒绝」恒灰（用户问题 2）、「撤回报价」恒亮（问题 1）、意向单态卖方无法确认挂牌、卖方底价/自动同意永不显示、气泡左右镜像；买方视角恰好看起来正常 ⇒ 一直没被发现。
 - **三层测试为何全绿**：组件夹具与 e2e 夹具都自己写 `role`（与前端错误读法同形 ⇒ 组件层 `seller` 为真）、worker 集成只断言 `myRole`（服务端自洽）⇒ **没有任何一层把两侧键名对照过**。构建取证：R1 前的生产 chunk 只有 `myTurn`×2、无 `role==="seller"`；R1 后的 `MarketDeskPage-*.js` 有 `role==="seller"`×5 且无 `myRole` ⇒ 漂移由「报价页签改对话式谈判桌」引入。
