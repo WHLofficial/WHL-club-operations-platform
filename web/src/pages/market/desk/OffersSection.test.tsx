@@ -6,11 +6,14 @@
 // - 谈判桌动作：卖方「确认挂牌」(accept) + 「放弃」(reject)，买方「撤回意向」(withdraw)，端点逐字对
 // v6.40.0 同版本补充（对话式改造）新增覆盖：
 // - 谈判桌从行下原地展开改**浮层**（role=dialog；行尾按钮恒叫「谈判桌」+ aria-expanded）
-// - R1 拒绝改造：四颗动作常驻（还价/同意/拒绝/撤回），按角色与轮次置灰并把理由写进 title；
+// - R1 拒绝改造（v6.40.1 收敛为「越权不渲染」）：动作按角色与轮次置灰并把理由写进 title；
 //   卖方待回复单**任意轮次**都能拒（与轮次无关）；拒绝/放弃/撤回两段式就地确认，点第一下不发请求
 // - 报价类金额整数（moneyIntText：12m 而非 12.00）、还价须整数且严格抬高、还价可带 100 字附言
 // - 气泡时间到秒；卖方视角多打一枪 offer-settings 才显示底价与自动同意开关（买方看不到）
 // - ≤760px 清单换卡片行（.mkt-desk-cards），不再横滑表格
+// v6.40.1（角色契约 + 动作栏收敛）新增覆盖：
+// - 动作栏按 角色×状态 收敛：拒绝只卖方、撤回只买方、意向单的同意只卖方；按钮集合逐字锁死
+// - 卖方视角气泡左右归位（自己的话在 me 侧）；详情 role 键的契约门在 tests/offers.test.ts
 import { StrictMode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -126,6 +129,11 @@ async function openDesk(): Promise<HTMLElement> {
   return dialog;
 }
 
+/** 动作栏按钮文案（顺序即渲染顺序）：v6.40.1 起越权那颗不渲染，集合随 角色×状态 变 */
+function actionLabels(desk: HTMLElement): (string | null)[] {
+  return Array.from(desk.querySelectorAll('.nego-actions button')).map((b) => b.textContent);
+}
+
 beforeEach(() => {
   mqMatches = false;
   window.matchMedia = ((query: string) => ({
@@ -171,7 +179,8 @@ describe('v6.29.0 意向单（OffersSection）', () => {
     const o = offer({ role: 'seller' });
     apiPostMock.mockResolvedValue({ ok: true });
     renderSection([o], detailResponse(o));
-    const dialog = within(await openDesk());
+    const desk = await openDesk();
+    const dialog = within(desk);
 
     // 事件流：intent → 挂意向单（带系统附言原文），confirm → 确认挂牌（无 note 走兜底句）
     expect(dialog.getByText(/挂意向单 · 12m · 转会窗口未开/)).toBeTruthy();
@@ -180,12 +189,11 @@ describe('v6.29.0 意向单（OffersSection）', () => {
     expect(document.querySelectorAll('.nego-sys').length).toBe(2);
     expect(document.querySelectorAll('.nego-b.them').length).toBe(1);
     expect(document.querySelectorAll('.nego-b.me').length).toBe(0);
-    // 撤回是买方那颗：在卖方桌上仍列出来但置灰（四颗常驻，理由写 title）
-    const withdraw = dialog.getByRole('button', { name: '撤回意向' }) as HTMLButtonElement;
-    expect(withdraw.disabled).toBe(true);
-    expect(withdraw.getAttribute('title')).toBe('只有买方能撤回；卖方要终止请用拒绝');
+    // 撤回是买方那颗：卖方桌上不渲染（v6.40.1 越权不渲染）
+    expect(dialog.queryByRole('button', { name: '撤回意向' })).toBeNull();
+    expect(actionLabels(desk)).toEqual(['还价', '挂意向单（12m）', '放弃']);
 
-    fireEvent.click(dialog.getByRole('button', { name: /确认挂牌（12m）/ }));
+    fireEvent.click(dialog.getByRole('button', { name: /挂意向单（12m）/ }));
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/offers/5/accept', {}));
     expect(await screen.findByText(/已确认，球员挂牌/)).toBeTruthy();
     apiPostMock.mockClear();
@@ -199,16 +207,19 @@ describe('v6.29.0 意向单（OffersSection）', () => {
     expect(await screen.findByText(/已放弃意向，冻结已退回对方/)).toBeTruthy();
   });
 
-  it('谈判桌：买方意向单只有「撤回意向」可点，确认挂牌/放弃都在场但置灰（R1 摆到明面）', async () => {
+  it('谈判桌：买方意向单只剩「还价」（灰）与「撤回意向」，挂意向单/放弃都不渲染（v6.40.1）', async () => {
     const o = offer({ role: 'buyer', counterpart: { id: 1, name: '卖方俱乐部' } });
     apiPostMock.mockResolvedValue({ ok: true });
     renderSection([o], detailResponse(o));
-    const dialog = within(await openDesk());
+    const desk = await openDesk();
+    const dialog = within(desk);
     expect(await screen.findByText(/关窗期双方已谈成，先挂意向单/)).toBeTruthy();
-    expect((dialog.getByRole('button', { name: /确认挂牌（12m）/ }) as HTMLButtonElement).disabled).toBe(true);
-    const reject = dialog.getByRole('button', { name: '放弃' }) as HTMLButtonElement;
-    expect(reject.disabled).toBe(true);
-    expect(reject.getAttribute('title')).toBe('只有卖方能拒绝；买方要终止请用撤回');
+    expect(dialog.queryByRole('button', { name: /挂意向单（12m）/ })).toBeNull();
+    expect(dialog.queryByRole('button', { name: '放弃' })).toBeNull();
+    expect(actionLabels(desk)).toEqual(['还价', '撤回意向']);
+    expect((dialog.getByRole('button', { name: '还价' }) as HTMLButtonElement).getAttribute('title')).toBe(
+      '意向单已谈成，等开窗后确认挂牌',
+    );
 
     fireEvent.click(dialog.getByRole('button', { name: '撤回意向' }));
     expect(apiPostMock).not.toHaveBeenCalled();
@@ -266,28 +277,67 @@ describe('v6.40.0 站内信深链落点（OffersSection，TC-JUMP-01）', () => 
   });
 });
 
-// v6.40.0 同版本补充：报价谈判对话式（浮层 / R1 四颗常驻 / 两段式确认 / 整数金额 / 窄屏卡片行）
+// v6.40.0 同版本补充：报价谈判对话式（浮层 / 两段式确认 / 整数金额 / 窄屏卡片行）；v6.40.1 起动作栏由「四颗常驻 + 置灰」改为按角色收敛（越权那颗不渲染）
 describe('v6.40.0 对话式谈判桌（OffersSection）', () => {
-  it('待回复单买方视角：四颗动作常驻，越权的三颗置灰且 title 说明理由（R1 摆到明面）', async () => {
+  it('待回复单买方视角：动作栏是「还价 / 同意并挂牌 / 撤回报价」，拒绝不渲染；没轮到我时还价与同意置灰', async () => {
     const o = offer({ status: 'pending', role: 'buyer', myTurn: false, counterpart: { id: 1, name: '卖方俱乐部' } });
     renderSection([o], detailResponse(o, pendingEvents()));
-    const dialog = within(await openDesk());
+    const desk = await openDesk();
+    const dialog = within(desk);
 
+    // 拒绝是卖方专属：买方桌上不渲染（v6.40.1）
+    expect(dialog.queryByRole('button', { name: '拒绝' })).toBeNull();
+    expect(actionLabels(desk)).toEqual(['还价', '同意并挂牌（12m）', '撤回报价']);
+
+    // 还没轮到我：还价与同意置灰，理由写进 title；撤回这颗对买方是亮的
     const counter = dialog.getByRole('button', { name: '还价' });
-    const accept = dialog.getByRole('button', { name: /同意（12m，同意即挂牌）/ });
-    const reject = dialog.getByRole('button', { name: '拒绝' });
-    const withdraw = dialog.getByRole('button', { name: '撤回报价' });
-
-    // 还没轮到我：还价与同意置灰，理由写进 title
     expect((counter as HTMLButtonElement).disabled).toBe(true);
     expect(counter.getAttribute('title')).toBe('还没轮到你，等对方表态');
+    const accept = dialog.getByRole('button', { name: /同意并挂牌（12m）/ });
     expect((accept as HTMLButtonElement).disabled).toBe(true);
-    // 只有卖方能拒绝；买方要终止请用撤回 —— 撤回这颗对买方是亮的
-    expect((reject as HTMLButtonElement).disabled).toBe(true);
-    expect(reject.getAttribute('title')).toBe('只有卖方能拒绝；买方要终止请用撤回');
-    expect((withdraw as HTMLButtonElement).disabled).toBe(false);
+    const withdraw = dialog.getByRole('button', { name: '撤回报价' }) as HTMLButtonElement;
+    expect(withdraw.disabled).toBe(false);
     // 轮次提示句仍在
     expect(dialog.getByText('还没轮到你，等对方表态。')).toBeTruthy();
+  });
+
+  it('动作栏按 角色×状态 收敛：按钮集合逐字锁死（越权那颗不渲染，奇数颗占满整行）', async () => {
+    const cases: Array<[string, OfferListItem, string[]]> = [
+      ['卖方待回复单', offer({ status: 'pending', role: 'seller', myTurn: true, turn: 'seller' }), ['还价', '同意并挂牌（12m）', '拒绝']],
+      ['买方待回复单', offer({ status: 'pending', role: 'buyer', myTurn: true, turn: 'buyer' }), ['还价', '同意并挂牌（12m）', '撤回报价']],
+      ['卖方意向单', offer({ status: 'intent', role: 'seller' }), ['还价', '挂意向单（12m）', '放弃']],
+      ['买方意向单', offer({ status: 'intent', role: 'buyer' }), ['还价', '撤回意向']],
+      // 了结单：渲染门只看角色（越权颗不渲染），状态不满足走置灰——故两角色各剩本角色三颗，全灰
+      ['卖方了结单', offer({ status: 'rejected', role: 'seller' }), ['还价', '同意并挂牌（12m）', '拒绝']],
+      ['买方了结单', offer({ status: 'rejected', role: 'buyer' }), ['还价', '同意并挂牌（12m）', '撤回报价']],
+    ];
+    for (const [label, o, expected] of cases) {
+      renderSection([o], detailResponse(o));
+      expect(actionLabels(await openDesk()), label).toEqual(expected);
+      cleanup();
+      apiMock.mockReset();
+    }
+  });
+
+  it('气泡左右归位：对照的是自己那一队（卖方 counter 在 me 侧、买方 open 在 them 侧；买方视角镜像）', async () => {
+    const o = offer({ status: 'pending', role: 'seller', myTurn: true, turn: 'seller' });
+    renderSection([o], detailResponse(o, pendingEvents()));
+    await openDesk();
+    const me = Array.from(document.querySelectorAll('.nego-b.me')).map((el) => el.textContent ?? '');
+    const them = Array.from(document.querySelectorAll('.nego-b.them')).map((el) => el.textContent ?? '');
+    expect(me).toHaveLength(1);
+    expect(them).toHaveLength(1);
+    expect(me[0]).toContain('这个价可以谈'); // 卖方（sellerClub id 1）自己那条 counter
+    expect(them[0]).toContain('先探个底'); // 买方（buyerClub id 2）那条 open
+    cleanup();
+    apiMock.mockReset();
+
+    const b = offer({ status: 'pending', role: 'buyer', myTurn: false, counterpart: { id: 1, name: '卖方俱乐部' } });
+    renderSection([b], detailResponse(b, pendingEvents()));
+    await openDesk();
+    const meBuyer = Array.from(document.querySelectorAll('.nego-b.me')).map((el) => el.textContent ?? '');
+    expect(meBuyer).toHaveLength(1);
+    expect(meBuyer[0]).toContain('先探个底');
   });
 
   it('R1：卖方待回复单任意轮次都能拒（先发起方轮次只能还价的旧限制不适用于拒绝）——两段式确认 + 冻结去向', async () => {
@@ -299,6 +349,8 @@ describe('v6.40.0 对话式谈判桌（OffersSection）', () => {
 
     const reject = dialog.getByRole('button', { name: '拒绝' });
     expect((reject as HTMLButtonElement).disabled).toBe(false);
+    // 撤回报价是买方那颗：卖方桌上不渲染（v6.40.1）
+    expect(dialog.queryByRole('button', { name: '撤回报价' })).toBeNull();
     // 还价仍受轮次约束（规则不动）
     expect((dialog.getByRole('button', { name: '还价' }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -386,19 +438,36 @@ describe('v6.40.0 对话式谈判桌（OffersSection）', () => {
     expect(document.querySelector('.nego-rule')).toBeNull();
   });
 
-  it('了结单：四颗全灰（title 说明了结）+ 结果句说明冻结去向', async () => {
+  it('了结单：留下的动作全灰（title 说明了结）+ 结果句说明冻结去向', async () => {
     const o = offer({ status: 'rejected', role: 'seller', amount: 12 });
     renderSection([o], detailResponse(o, [ev('open', 12, '2025-12-29T00:00:00.000Z', { id: 2, name: '买方教练' }), ev('reject', 12, '2025-12-30T00:00:00.000Z', null)]));
-    const dialog = within(await openDesk());
-    for (const name of ['还价', '拒绝', '撤回报价']) {
+    const desk = await openDesk();
+    const dialog = within(desk);
+    expect(actionLabels(desk)).toEqual(['还价', '同意并挂牌（12m）', '拒绝']);
+    for (const name of [/还价/, /同意并挂牌（12m）/, /拒绝/]) {
       const btn = dialog.getByRole('button', { name }) as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
       expect(btn.getAttribute('title')).toBe('这一单已经了结');
     }
+    expect(dialog.queryByRole('button', { name: '撤回报价' })).toBeNull();
     expect(dialog.getByText(/已了结，冻结资金已退回报价方。/)).toBeTruthy();
     // reject 事件 note 为空 ⇒ 走前端兜底句（不重写系统句）
     expect(dialog.getByText(/拒绝 · 12m · 冻结已退回买方/)).toBeTruthy();
     expect(apiPostMock).not.toHaveBeenCalled();
+  });
+
+  it('了结单买方视角：本角色三颗全灰（撤回在、按状态灰）+「拒绝」不渲染（v6.40.1）', async () => {
+    const o = offer({ status: 'rejected', role: 'buyer', amount: 12 });
+    renderSection([o], detailResponse(o, [ev('open', 12, '2025-12-29T00:00:00.000Z', { id: 1, name: '买方教练' }), ev('reject', 12, '2025-12-30T00:00:00.000Z', null)]));
+    const desk = await openDesk();
+    const dialog = within(desk);
+    expect(actionLabels(desk)).toEqual(['还价', '同意并挂牌（12m）', '撤回报价']);
+    for (const name of [/还价/, /同意并挂牌（12m）/, /撤回报价/]) {
+      const btn = dialog.getByRole('button', { name }) as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute('title')).toBe('这一单已经了结');
+    }
+    expect(dialog.queryByRole('button', { name: '拒绝' })).toBeNull();
   });
 
   it('气泡与系统行时间到秒（YYYY-MM-DD HH:mm:ss）', async () => {

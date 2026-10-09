@@ -531,6 +531,21 @@ async function main() {
     const DESK_OFFER_SETTINGS = {
       transferListed: true, minOfferPrice: 8, listPrice: 15, offerAuto: false, notForSale: false,
     };
+    // v6.40.1：详情按单号分角色发——id 1 我在卖方（默认），id 4 我在买方。
+    // 动作栏与气泡左右都随 offer.role 变，两枚夹具正好互为镜像（谁的口径错了都会当场露）。
+    const DESK_OFFER_DETAIL_BUYER = {
+      offer: {
+        ...deskOffer({ id: 4, role: 'buyer', counterpart: { id: 241, name: '巴塞罗那' }, amount: 20, turn: 'seller', myTurn: false }),
+        buyerClub: { id: 1, name: '阿森纳' },
+        sellerClub: { id: 241, name: '巴塞罗那' },
+        season: 9, windowSeq: 1, resolvedAt: null,
+      },
+      // 买方视角：首报是我发的（右气泡），对手回价在左
+      events: [
+        { kind: 'open', amount: 10, note: '先探个底', at: '2026-09-20T09:00:00.000Z', actor: { id: 1, name: '阿森纳' } },
+        { kind: 'counter', amount: 20, note: null, at: '2026-09-20T10:00:00.000Z', actor: { id: 241, name: '巴塞罗那' } },
+      ],
+    };
     const deskNego = (over) => ({
       id: 21, transferId: 31, status: 'active',
       transfer: { type: 'transfer', status: 'pending_review', fee: 12.5 },
@@ -591,7 +606,7 @@ async function main() {
       [/\/api\/offers\?box=in/, DESK_OFFERS_IN],
       [/\/api\/offers\?box=out/, DESK_OFFERS_OUT],
       [/\/api\/negotiations\?mine=1/, DESK_NEGO],
-      [/\/api\/offers\/\d+(\?|$)/, DESK_OFFER_DETAIL],
+      [/\/api\/offers\/\d+(\?|$)/, (url) => (/\/api\/offers\/4(\?|$)/.test(url) ? DESK_OFFER_DETAIL_BUYER : DESK_OFFER_DETAIL)],
       [/\/api\/players\/\d+\/offer-settings/, DESK_OFFER_SETTINGS],
       // v6.40.0 工资实时档位：预览端点只读，夹具回一档「过半」
       [/\/api\/negotiations\/\d+\/preview/, { forecast: '成功率过半', risk: false }],
@@ -600,7 +615,9 @@ async function main() {
     ];
     const deskOk = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     const stubDesk = async () => {
-      for (const [pattern, body] of DESK_STUBS) await page.route(pattern, (r) => r.fulfill(deskOk(body)));
+      for (const [pattern, body] of DESK_STUBS) {
+        await page.route(pattern, (r) => r.fulfill(deskOk(typeof body === 'function' ? body(r.request().url()) : body)));
+      }
     };
     const unstubDesk = async () => {
       for (const [pattern] of DESK_STUBS) await page.unroute(pattern);
@@ -716,7 +733,22 @@ async function main() {
         await deskDialog.waitFor({ timeout: TIMEOUT });
         assert((await deskDialog.locator('.nego-stream').count()) === 1, '谈判桌没有对话流');
         assert((await deskDialog.locator('.nego-sys').count()) === 0, 'pending 单不该出系统行胶囊（只有 open/counter 两种说话事件）');
-        assert((await deskDialog.locator('.nego-actions button').count()) === 4, '动作栏不是固定四颗（还价/同意/拒绝/撤回）');
+        // v6.40.1：动作栏随 角色×状态 收敛（越权那颗不渲染）。这一行我在卖方、轮到我还价
+        const sellerActions = await deskDialog.locator('.nego-actions button').allInnerTexts();
+        assert(sellerActions.length === 3, `卖方待回复单动作栏应是 3 颗（还价/同意并挂牌/拒绝），实际 ${sellerActions.length} 颗`);
+        assert(sellerActions[0] === '还价', `动作栏第一颗不是还价（${sellerActions[0]}）`);
+        assert(/^同意并挂牌（\d+(?:\.\d+)?m）$/.test(sellerActions[1]), `第二颗不是「同意并挂牌（Xm）」（${sellerActions[1]}）`);
+        assert(sellerActions[2] === '拒绝', `第三颗不是拒绝（${sellerActions[2]}）`);
+        assert(!sellerActions.includes('撤回报价'), '卖方桌上不该出现「撤回报价」（v6.40.1：越权颗不渲染）');
+        assert(await deskDialog.locator('.nego-actions button', { hasText: '拒绝' }).isEnabled(), '卖方待回复单的「拒绝」应可点（v6.40.1 契约漂移修复）');
+        // 奇数颗布局：末颗占满整行（三颗时拒绝不跟还价挤在左格，styles.css `.nego-actions > .btn:last-child:nth-child(odd)`）
+        const lastSpan = await deskDialog.locator('.nego-actions button').last().evaluate((el) => {
+          const cs = getComputedStyle(el);
+          return `${cs.gridColumnStart}/${cs.gridColumnEnd}`;
+        });
+        assert(lastSpan === '1/-1', `奇数颗动作栏的末颗没占满整行（grid-column=${lastSpan}）`);
+        // 气泡左右：卖方视角里对手首报在左（them）、我的回价在右（me）
+        assert((await deskDialog.locator('.nego-b.me').count()) === 1 && (await deskDialog.locator('.nego-b.them').count()) === 1, '卖方视角气泡不是一左一右各一条');
         const stamp = (await deskDialog.locator('.nego-b-at').first().innerText()).trim();
         assert(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(stamp), `气泡时间不是秒级时间戳（${stamp}）`);
         assert((await page.evaluate(() => document.body.style.overflow)) === 'hidden', '开桌时没锁滚动');
@@ -731,6 +763,23 @@ async function main() {
         assert((await text()).includes('巴塞罗那'), '?box=out 没生效（out 侧报价行未渲染）');
         assert((await page.locator('#desk-offers [aria-label="报价页签"] button.on').first().innerText()).includes('我送出的'),
           '?box=out 时「我送出的」页签未选中');
+
+        // v6.40.1 买方视角（用户的原始症状在这侧）：同一颗「撤回报价」只有买方该亮，「拒绝」不该渲染；
+        // 气泡左右与卖方镜像 —— 详情桩按单号发 role，前端读错键名时这里立刻红。
+        await page.locator('#desk-offers tbody tr', { hasText: '巴塞罗那' }).first().locator('button', { hasText: '谈判桌' }).click();
+        await deskDialog.waitFor({ timeout: TIMEOUT });
+        const buyerActions = await deskDialog.locator('.nego-actions button').allInnerTexts();
+        assert(buyerActions.length === 3, `买方待回复单动作栏应是 3 颗（还价/同意并挂牌/撤回报价），实际 ${buyerActions.length} 颗`);
+        assert(buyerActions[0] === '还价', `买方动作栏第一颗不是还价（${buyerActions[0]}）`);
+        assert(/^同意并挂牌（\d+(?:\.\d+)?m）$/.test(buyerActions[1]), `买方动作栏第二颗不是「同意并挂牌（Xm）」（${buyerActions[1]}）`);
+        assert(buyerActions[2] === '撤回报价', `买方动作栏第三颗不是撤回报价（${buyerActions[2]}）`);
+        assert(!buyerActions.includes('拒绝'), '买方桌上不该出现「拒绝」（v6.40.1：拒绝是卖方专属）');
+        assert(await deskDialog.locator('.nego-actions button', { hasText: '撤回报价' }).isEnabled(), '买方「撤回报价」应可点');
+        assert(await deskDialog.locator('.nego-actions button', { hasText: '还价' }).isDisabled(), '不是我的回合时「还价」应置灰');
+        assert((await deskDialog.locator('.nego-b.me').count()) === 1 && (await deskDialog.locator('.nego-b.them').count()) === 1, '买方视角气泡不是一左一右各一条');
+        assert(((await deskDialog.locator('.nego-b').first().getAttribute('class')) ?? '').includes('me'), '买方视角：自己发的价应落在右侧（me）');
+        await page.keyboard.press('Escape');
+        await deskDialog.waitFor({ state: 'detached', timeout: TIMEOUT });
 
         // 旧链 ?tab=mine 是 alias（v6.24.0）：URL 不改写，仍落「我的出价」页签
         await page.goto(`${BASE}/market/desk?tab=mine`, { waitUntil: 'networkidle' });
