@@ -8,7 +8,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MarketDeskPage from './MarketDeskPage.tsx';
 
 const { apiMock, authMock } = vi.hoisted(() => ({ apiMock: vi.fn(), authMock: vi.fn() }));
@@ -129,6 +129,20 @@ function renderDesk(entry = '/market/desk', stubOpts: { clubError?: boolean } = 
   );
   return { ...view, seenKeys };
 }
+
+// v6.40.0 起报价区块用 useMediaQuery 决定「表格 / 卡片行」⇒ jsdom 得自备 matchMedia（先例 Player.test.tsx）
+beforeEach(() => {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+});
 
 afterEach(() => {
   cleanup();

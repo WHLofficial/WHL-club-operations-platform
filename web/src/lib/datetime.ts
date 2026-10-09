@@ -52,7 +52,7 @@ function parts(ms: number, opts: Intl.DateTimeFormatOptions) {
     cache.set(key, f);
   }
   const get = (type: string) => f!.formatToParts(ms).find((x) => x.type === type)?.value ?? '';
-  return { y: get('year'), mo: get('month'), d: get('day'), h: get('hour'), mi: get('minute') };
+  return { y: get('year'), mo: get('month'), d: get('day'), h: get('hour'), mi: get('minute'), se: get('second') };
 }
 
 type Join = (p: ReturnType<typeof parts>) => string;
@@ -72,6 +72,7 @@ function fmtIn(iso: string | null | undefined, opts: Intl.DateTimeFormatOptions,
 
 const D = { year: 'numeric', month: '2-digit', day: '2-digit' } as const;
 const HM = { hour: '2-digit', minute: '2-digit' } as const;
+const HMS = { hour: '2-digit', minute: '2-digit', second: '2-digit' } as const;
 
 /** YYYY-MM-DD HH:mm */
 export function fmtDateTime(iso: string | null | undefined): string {
@@ -86,6 +87,14 @@ export function fmtTime(iso: string | null | undefined): string {
 /** YYYY-MM-DD */
 export function fmtDate(iso: string | null | undefined): string {
   return fmtIn(iso, D, (p) => `${p.y}-${p.mo}-${p.d}`);
+}
+
+/**
+ * YYYY-MM-DD HH:mm:ss（v6.40.0 同版本补充：谈判气泡与系统行的秒级时间戳）。
+ * 与 fmtDateTime 同源同配置，只多取 second 分片；旧的行内表格仍用 fmtTime / fmtDateTime。
+ */
+export function fmtDateTimeSec(iso: string | null | undefined): string {
+  return fmtIn(iso, { ...D, ...HMS }, (p) => `${p.y}-${p.mo}-${p.d} ${p.h}:${p.mi}:${p.se}`);
 }
 
 /**
@@ -136,6 +145,8 @@ export interface TimeFmt {
   label: string;
   time: (iso: string | null | undefined) => string;
   dateTime: (iso: string | null | undefined) => string;
+  /** 到秒的完整时间戳（YYYY-MM-DD HH:mm:ss）：谈判对话流的气泡/系统行 */
+  dateTimeSec: (iso: string | null | undefined) => string;
   date: (iso: string | null | undefined) => string;
   /** 相对日期（今天 / 昨天 / N 天前）：挂出时间一类「多久以前」一律走它 */
   ago: (iso: string | null | undefined) => string;
@@ -151,6 +162,7 @@ export function useTimeFmt(): TimeFmt {
       label: tzLabel(pref),
       time: fmtTime,
       dateTime: fmtDateTime,
+      dateTimeSec: fmtDateTimeSec,
       date: fmtDate,
       ago: fmtAgo,
       dayLabel: fmtDayLabel,

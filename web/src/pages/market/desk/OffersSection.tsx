@@ -4,15 +4,37 @@
 // v6.32.0：money 收口到 ../shared.tsx；标题「收到报价」改「报价」（box=out 是我送出的，旧名不副实）；
 // 「报价被接受 ≠ 成交」机制句从页面级说明条收进本区块 hint（这里是唯一讲解点）。
 // v6.40.0：支持站内信深链 ?offer=<id>——从收件篮点进来直接展开该单谈判桌并高亮行（.is-target）。
+// v6.40.0 同版本补充（对话式改造）：
+//   ① 谈判桌从「行下原地展开」改**对话浮层**（B 布局）：桌面居中弹层 / ≤760px 底部抽屉，外壳复用
+//      .mkt-ov* + useOverlayShell（锁滚 / Esc / Tab 循环 / 焦点归位）；三段 = 单据头 · 事件流（唯一滚动区）·
+//      动作栏（还价 / 同意 / 拒绝 / 撤回 固定四颗，按角色与轮次置灰并把理由写进 title）。
+//   ② 拒绝语义 R1：规则不动，只把「拒绝」摆到明面（卖方 pending 任意轮次都能拒，与轮次无关）；拒绝 / 放弃 /
+//      撤回改两段式就地确认并说清冻结去向；提示句按真实规则订正（名单不产生任何自动行为）。
+//   ③ 金额：报价类（当前价 / 还价 / 同意价）走 moneyIntText（整数带 m），列头去掉「（m）」。
+//   ④ 时间：气泡与系统行到秒（dateTimeSec）。
+//   ⑤ 窄屏清单：表格改卡片行（对手 · 金额 · R轮次 · 完整时间戳），断点 760px（与浮层抽屉同源）。
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiPost, type OfferDetailResponse, type OfferListItem, type OfferStatus } from '../../../lib/api.ts';
+import {
+  apiPost,
+  type OfferDetailResponse,
+  type OfferEventRow,
+  type OfferListItem,
+  type OfferSettingsDto,
+  type OfferStatus,
+} from '../../../lib/api.ts';
 import { playerPath } from '../../../lib/player-link.ts';
-import { useOfferDetail, useOffers, useOffersInvalidation } from '../../../lib/queries.ts';
+import { moneyIntText } from '../../../lib/club-cards.ts';
+import { useMediaQuery } from '../../../lib/use-media.ts';
+import { useOverlayShell } from '../../../lib/use-overlay-shell.ts';
+import { useOfferDetail, useOfferSettings, useOffers, useOffersInvalidation } from '../../../lib/queries.ts';
 import { useToast } from '../../../lib/toast.tsx';
 import { useTimeFmt } from '../../../lib/datetime.ts';
-import { money } from '../shared.tsx';
+
+// 清单窄屏断点：与浮层底部抽屉同一条（760px 是本站主流断点，见 Player.tsx / ComparePickerOverlay）
+const CARDS_QUERY = '(max-width: 760px)';
 
 const STATUS_BADGE: Record<OfferStatus, { label: string; cls: string }> = {
   pending: { label: '待回复', cls: 'sky' },
@@ -39,6 +61,35 @@ const EVENT_LABEL: Record<string, string> = {
   confirm: '确认挂牌',
 };
 
+// 仅当事件自己没带 note 时才用的补救句（note 是权威：有值一律直显原文，绝不重写系统句）
+const SYS_FALLBACK: Record<string, string> = {
+  accept: '挂牌已生成，等窗口收口',
+  confirm: '挂牌已生成，等窗口收口',
+  auto_accept: '名单自动同意：达线且自动同意开着',
+  auto_reject: '名单自动拒：低于最低报价',
+  reject: '冻结已退回买方',
+  withdraw: '冻结已退回卖方',
+  expire: '冻结已退回',
+};
+
+// 了结态的结果句：挂牌之后卖方没有任何动作（无下架端点），如实说明「等窗口收口」
+const SETTLED_NOTE: Partial<Record<OfferStatus, string>> = {
+  accepted: '挂牌已生成，你的价锁成领先出价；之后没有可操作的动作，等窗口收口（本版不加反悔通道）。',
+  rejected: '已了结，冻结资金已退回报价方。',
+  withdrawn: '已了结，冻结资金已退回报价方。',
+  expired: '已了结，冻结资金已退回报价方。',
+};
+
+type OfferAction = 'counter' | 'accept' | 'reject' | 'withdraw';
+
+function sysText(e: OfferEventRow): string {
+  const label = EVENT_LABEL[e.kind] ?? e.kind;
+  const price = e.amount === null ? '' : ` · ${moneyIntText(e.amount)}`;
+  if (e.note) return `${label}${price} · ${e.note}`;
+  const tail = SYS_FALLBACK[e.kind];
+  return `${label}${price}${tail ? ` · ${tail}` : ''}`;
+}
+
 export default function OffersSection({
   box,
   status,
@@ -51,9 +102,10 @@ export default function OffersSection({
   onStatusChange: (next: 'pending' | 'all') => void;
 }) {
   const { show, toastNode } = useToast();
-  const { time } = useTimeFmt();
+  const { time, dateTimeSec } = useTimeFmt();
   const qc = useQueryClient();
   const invalidateOffers = useOffersInvalidation();
+  const cards = useMediaQuery(CARDS_QUERY);
 
   const list = useOffers(box, status, true);
   const [params] = useSearchParams();
@@ -64,9 +116,18 @@ export default function OffersSection({
   const [openId, setOpenId] = useState<number | null>(targetOfferId);
   const detail = useOfferDetail(openId, true);
   const [counterDraft, setCounterDraft] = useState('');
+  const [noteDraft, setNoteDraft] = useState('');
+  // 两段式确认的目标动作（拒绝 / 放弃 / 撤回）：点在就地确认条上才真发请求
+  const [confirming, setConfirming] = useState<OfferAction | null>(null);
   const [busy, setBusy] = useState(false);
-  const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
+  const rowRefs = useRef(new Map<number, HTMLElement>());
   const lastFilter = useRef<string | null>(null);
+
+  const detailData = detail.data ?? null;
+  const deskOffer = detailData?.offer ?? null;
+  // 底价只有卖方视角读得到（GET /api/players/:id/offer-settings 只回本队教练）；买方只认公开标价
+  const settingsPlayerId = deskOffer && deskOffer.role === 'seller' ? deskOffer.player.id : 0;
+  const settings = useOfferSettings(settingsPlayerId, settingsPlayerId > 0);
 
   // 切换页签/筛选时收起谈判桌（旧页在 switchBox / switchStatus 里同步做，这里随受控入参走）。
   // 首跑不收起：那是深链播种的 openId，收起就把 ?offer= 落点丢了。判据用「筛选键前值」而非
@@ -84,7 +145,14 @@ export default function OffersSection({
     if (targetOfferId === null || openId !== targetOfferId) return;
     const el = rowRefs.current.get(targetOfferId);
     if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
-  }, [targetOfferId, openId, list.data]);
+  }, [targetOfferId, openId, list.data, cards]);
+
+  // 换单 / 关桌时把草稿与确认条复位，免得一单的输入漏到下一单
+  useEffect(() => {
+    setCounterDraft('');
+    setNoteDraft('');
+    setConfirming(null);
+  }, [openId]);
 
   const items = list.data?.items ?? null;
   const pendingMine = list.data?.pendingMine ?? 0;
@@ -101,14 +169,18 @@ export default function OffersSection({
     setOpenId(null);
   }
 
-  async function act(offer: OfferListItem, action: 'accept' | 'reject' | 'withdraw' | 'counter', amount?: number) {
-    if (busy) return;
+  async function act(action: OfferAction) {
+    const offer = deskOffer;
+    if (!offer || busy) return;
     setBusy(true);
     try {
       if (action === 'counter') {
-        const r = await apiPost<{ ok: boolean; amount: number }>(`/api/offers/${offer.id}/counter`, { amount });
-        show(`还价已送出：${r.amount.toFixed(2)}m，等对方表态。`);
+        const amount = Number(counterDraft);
+        const note = noteDraft.trim();
+        const r = await apiPost<{ ok: boolean; amount: number }>(`/api/offers/${offer.id}/counter`, { amount, note: note || null });
+        show(`还价已送出：${moneyIntText(r.amount)}，等对方表态。`);
         setCounterDraft('');
+        setNoteDraft('');
       } else {
         await apiPost(`/api/offers/${offer.id}/${action}`, {});
         // v6.29.0：意向单上 accept=卖方确认挂牌、reject=卖方放弃、withdraw=买方撤回，措辞与待回复单区分
@@ -127,6 +199,7 @@ export default function OffersSection({
                 : '已撤回，冻结资金已退回。',
         );
       }
+      setConfirming(null);
       invalidateOffers();
       void qc.invalidateQueries({ queryKey: ['offers', 'detail'] });
     } catch (err) {
@@ -136,16 +209,35 @@ export default function OffersSection({
     }
   }
 
-  const detailData = detail.data ?? null;
+  // 一排可点开的「谈判桌」按钮：桌面表格行 / 窄屏卡片行共用同一份行数据与 openId
+  const openButton = (o: OfferListItem) => (
+    <button
+      type="button"
+      className="btn btn-sm btn-ghost"
+      aria-expanded={openId === o.id}
+      onClick={() => setOpenId(openId === o.id ? null : o.id)}
+    >
+      谈判桌
+    </button>
+  );
+
+  const targetClass = (o: OfferListItem) => (targetOfferId === o.id && openId === o.id ? 'is-target' : undefined);
+
+  const registerRow = (o: OfferListItem) => (el: HTMLElement | null) => {
+    if (el) rowRefs.current.set(o.id, el);
+    else rowRefs.current.delete(o.id);
+  };
 
   return (
     <section id="desk-offers" aria-label="报价">
       <h3>报价</h3>
       <p className="hint">
-        私下议价：对别队真人球员送报价，双方轮流出价。报价被接受 ≠ 成交：开窗期<span className="mono">同意</span>即自动挂牌并把报价方锁成领先出价；
+        私下议价：对别队真人球员送报价，双方轮流出价；点行尾<span className="mono">谈判桌</span>看整条对话。
+        报价被接受 ≠ 成交：开窗期<span className="mono">同意</span>即自动挂牌并把报价方锁成领先出价；
         关窗期也可报价 / 还价 / 同意——但关窗期同意只挂「意向单」（不生成挂牌、资金继续冻结），
         开窗后由卖方确认才挂牌，买方随时可撤回、卖方放弃则冻结退回。
-        报价即冻结资金，了结（成交 / 拒绝 / 撤回 / 放弃 / 过期）后自动退回。进转会名单的球员达线自动同意、低于自动拒。
+        报价即冻结资金，了结（成交 / 拒绝 / 撤回 / 放弃 / 过期）后自动退回。
+        名单不产生自动行为：低于最低报价自动拒（与开关无关）；标价与「自动同意」开关同时满足才自动成交，否则进人工谈判。
       </p>
       {toastNode}
 
@@ -182,7 +274,49 @@ export default function OffersSection({
         </div>
       )}
 
-      {items !== null && items.length > 0 && (
+      {items !== null && items.length > 0 && cards && (
+        <div className="mkt-desk-cards">
+          {items.map((o) => {
+            const badge = STATUS_BADGE[o.status];
+            return (
+              <div key={o.id} className={`mkt-desk-card${targetClass(o) ? ' is-target' : ''}`} data-offer-id={o.id} ref={registerRow(o)}>
+                <div className="dc-top">
+                  <Link to={playerPath(o.player)}>{o.player.name}</Link>
+                  <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                </div>
+                <div className="dc-mid">
+                  <span className="dc-opp">{o.counterpart.name}</span>
+                  {' · '}
+                  <span className="mono dc-amount">{moneyIntText(o.amount)}</span>
+                  <span className="muted mono">R{o.round}</span>
+                  {o.status === 'pending' ? (
+                    o.myTurn ? (
+                      <span className="badge gold">待你表态</span>
+                    ) : (
+                      <span className="muted">等对方</span>
+                    )
+                  ) : o.status === 'intent' ? (
+                    o.role === 'seller' ? (
+                      <span className="badge gold">待卖方确认</span>
+                    ) : (
+                      <span className="muted">等对方确认</span>
+                    )
+                  ) : null}
+                  {o.status === 'pending' && o.role === 'seller' && o.player.listPrice !== null && o.amount < o.player.listPrice && (
+                    <span className="badge orange">砍价</span>
+                  )}
+                </div>
+                <div className="dc-bot">
+                  <span className="muted mono">{dateTimeSec(o.updatedAt)}</span>
+                  {openButton(o)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {items !== null && items.length > 0 && !cards && (
         <section className="card admin-section">
           <div className="table-wrap">
             <table>
@@ -190,7 +324,7 @@ export default function OffersSection({
                 <tr>
                   <th>球员</th>
                   <th>{box === 'in' ? '买方' : '卖家'}</th>
-                  <th className="num">当前价（m）</th>
+                  <th className="num">当前价</th>
                   <th className="num">轮次</th>
                   <th>轮到谁</th>
                   <th>状态</th>
@@ -202,22 +336,13 @@ export default function OffersSection({
                 {items.map((o) => {
                   const badge = STATUS_BADGE[o.status];
                   return (
-                    <tr
-                      key={o.id}
-                      // v6.40.0：站内信深链的落点行（滚动/高亮与组件测试/e2e 都认这个属性）
-                      data-offer-id={o.id}
-                      className={targetOfferId === o.id && openId === o.id ? 'is-target' : undefined}
-                      ref={(el) => {
-                        if (el) rowRefs.current.set(o.id, el);
-                        else rowRefs.current.delete(o.id);
-                      }}
-                    >
+                    <tr key={o.id} data-offer-id={o.id} className={targetClass(o)} ref={registerRow(o)}>
                       <td>
                         <Link to={playerPath(o.player)}>{o.player.name}</Link>
                       </td>
                       <td>{o.counterpart.name}</td>
                       <td className="num mono">
-                        {money(o.amount)}
+                        {moneyIntText(o.amount)}
                         {/* 砍价徽标（v6.33.0）：卖方视角、活单、报价低于对方公开标价时标出（标价本身公开，徽标不泄底线） */}
                         {o.status === 'pending' && o.role === 'seller' && o.player.listPrice !== null && o.amount < o.player.listPrice && (
                           <span className="badge orange">砍价</span>
@@ -245,11 +370,7 @@ export default function OffersSection({
                         <span className={`badge ${badge.cls}`}>{badge.label}</span>
                       </td>
                       <td className="muted">{time(o.updatedAt)}</td>
-                      <td>
-                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setOpenId(openId === o.id ? null : o.id)}>
-                          {openId === o.id ? '收起' : '谈判桌'}
-                        </button>
-                      </td>
+                      <td>{openButton(o)}</td>
                     </tr>
                   );
                 })}
@@ -265,11 +386,16 @@ export default function OffersSection({
       {openId !== null && (
         <OfferDesk
           detail={detailData}
+          settings={settings.data ?? null}
           loading={detail.isPending}
           error={detail.error instanceof Error ? detail.error.message : null}
           busy={busy}
           counterDraft={counterDraft}
+          noteDraft={noteDraft}
+          confirming={confirming}
           onCounterDraft={setCounterDraft}
+          onNoteDraft={setNoteDraft}
+          onConfirming={setConfirming}
           onAct={act}
           onClose={() => setOpenId(null)}
         />
@@ -278,172 +404,241 @@ export default function OffersSection({
   );
 }
 
-// 谈判桌：单据信息 + 事件时间线 + 操作按钮（轮到我：同意/还价；卖方可拒；买方可撤）
+// 谈判桌浮层（v6.40.0 对话式）：单据头 / 事件流（唯一滚动区）/ 动作栏固定四颗。
+// 动作可用性只看 role 与 status（拒绝与轮次无关——R1：卖方 pending 任意轮次都能拒），
+// 置灰时把理由写进 title，让人看得见「为什么不能点」。
 function OfferDesk({
   detail,
+  settings,
   loading,
   error,
   busy,
   counterDraft,
+  noteDraft,
+  confirming,
   onCounterDraft,
+  onNoteDraft,
+  onConfirming,
   onAct,
   onClose,
 }: {
   detail: OfferDetailResponse | null;
+  settings: OfferSettingsDto | null;
   loading: boolean;
   error: string | null;
   busy: boolean;
   counterDraft: string;
+  noteDraft: string;
+  confirming: OfferAction | null;
   onCounterDraft: (v: string) => void;
-  onAct: (offer: OfferListItem, action: 'accept' | 'reject' | 'withdraw' | 'counter', amount?: number) => Promise<void>;
+  onNoteDraft: (v: string) => void;
+  onConfirming: (v: OfferAction | null) => void;
+  onAct: (action: OfferAction) => Promise<void>;
   onClose: () => void;
 }) {
-  const { time } = useTimeFmt();
-  if (loading) {
-    return (
-      <section className="card">
-        <p className="muted">正在摊开谈判桌…</p>
-      </section>
-    );
-  }
-  if (error || !detail) {
-    return (
-      <section className="card">
-        <div className="banner bad">{error ?? '这条报价看不到了'}</div>
-      </section>
-    );
-  }
-  const { offer, events } = detail;
-  const pending = offer.status === 'pending';
-  // v6.29.0：意向单（关窗期谈成）——卖方确认挂牌 / 放弃，买方撤回；myTurn 对意向单恒 false，动作只看 role
-  const intent = offer.status === 'intent';
-  const canAccept = pending && offer.myTurn;
-  const canReject = pending && offer.role === 'seller';
-  const canWithdraw = pending && offer.role === 'buyer';
+  const { dateTimeSec } = useTimeFmt();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const { narrow, panelRef, onCloseRef } = useOverlayShell(onClose, closeRef);
+
+  const offer = detail?.offer ?? null;
+  const events = detail?.events ?? [];
+  const pending = offer?.status === 'pending';
+  const intent = offer?.status === 'intent';
+  const settled = offer !== null && !pending && !intent;
+  const seller = offer?.role === 'seller';
+  const myTurn = offer?.myTurn === true;
+
+  // 动作矩阵（R1）：还价/同意要轮到我；拒绝=卖方（待回复单拒绝 / 意向单放弃）；撤回=买方（撤回 / 撤回意向）
+  const canCounter = pending && myTurn;
+  const canAccept = (pending && myTurn) || (intent && seller);
+  const canReject = seller && (pending || intent);
+  const canWithdraw = !seller && (pending || intent);
+
   const counterValue = Number(counterDraft);
-  return (
-    <section className="card admin-section">
-      <h3>
-        谈判桌 · {offer.player.name}
-        {offer.listingId !== null && (
-          <span className="badge green">已挂牌 #{offer.listingId}</span>
+  const counterOk = Number.isInteger(counterValue) && counterValue > (offer?.amount ?? 0);
+
+  const reason = (ok: boolean, why: string) => (ok ? undefined : why);
+
+  // 名单规则行：只在球员还在转会名单里时出现（不在名单就不留空行）；卖方多打一枪设置端点读底价
+  const listed = offer ? (seller ? (settings?.transferListed ?? offer.player.listPrice !== null) : offer.player.listPrice !== null) : false;
+
+  return createPortal(
+    <div className={narrow ? 'mkt-ov mkt-ov-drawer' : 'mkt-ov'} onClick={() => onCloseRef.current()} role="presentation">
+      <div
+        className="mkt-ov-panel nego-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={offer ? `谈判桌 · ${offer.player.name}` : '谈判桌'}
+        ref={panelRef}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {narrow && <div className="mkt-ov-grab" aria-hidden="true" />}
+        {loading && (
+          <div className="nego-head">
+            <p className="muted">正在摊开谈判桌…</p>
+          </div>
         )}
-      </h3>
-      <div className="side-row">
-        <span className="attr-name">买方</span>
-        <span>{offer.buyerClub.name}</span>
+        {!loading && (error !== null || offer === null) && (
+          <div className="nego-head">
+            <div className="banner bad">{error ?? '这条报价看不到了'}</div>
+          </div>
+        )}
+
+        {offer && (
+          <>
+            <div className="nego-head">
+              <div className="nego-head-top">
+                <h3 className="nego-title">
+                  <Link to={playerPath(offer.player)}>{offer.player.name}</Link>
+                  <span className={`badge ${STATUS_BADGE[offer.status].cls}`}>{STATUS_BADGE[offer.status].label}</span>
+                  {offer.listingId !== null && <span className="badge green">已挂牌 #{offer.listingId}</span>}
+                </h3>
+                <button className="mkt-ov-x" type="button" aria-label="关闭谈判桌" ref={closeRef} onClick={onClose}>
+                  ✕
+                </button>
+              </div>
+              <p className="nego-line">
+                <span className="attr-name">当前有效价</span> <b className="mono">{moneyIntText(offer.amount)}</b>
+                <span className="muted">
+                  （首报 {moneyIntText(offer.initAmount)} · R{offer.round}）
+                </span>
+              </p>
+              <p className="nego-line">
+                <span className="attr-name">买方</span> <span>{offer.buyerClub.name}</span>
+                <span className="attr-name">卖家</span> <span>{offer.sellerClub.name}</span>
+                <span className="attr-name">轮到谁</span>
+                <span>{pending ? (myTurn ? '你' : '对方') : '—'}</span>
+              </p>
+              {listed && (
+                <p className="nego-rule">
+                  转会名单：标价 <span className="mono">{moneyIntText(offer.player.listPrice)}</span>
+                  {seller && (
+                    <>
+                      {' '}
+                      · 最低报价 <span className="mono">{settings ? (settings.minOfferPrice === null ? '未设' : moneyIntText(settings.minOfferPrice)) : '设置锁定'}</span>
+                    </>
+                  )}
+                  {seller && <> · 自动同意 {settings ? (settings.offerAuto ? '开' : '关') : '—'}</>}
+                  <br />
+                  名单不产生自动行为：低于最低报价自动拒（与开关无关）；标价与「自动同意」开关同时满足才自动成交，否则进人工谈判。
+                </p>
+              )}
+              {intent && (
+                <p className="nego-note">
+                  关窗期双方已谈成，先挂意向单：不生成挂牌、资金继续冻结。开窗后由卖方确认才生成挂牌；买方随时可撤回，卖方放弃则冻结退回。
+                </p>
+              )}
+              {settled && <p className="nego-settled">{SETTLED_NOTE[offer.status]}</p>}
+            </div>
+
+            <div className="nego-stream">
+              {events.length === 0 && <p className="nego-empty">这一单还没有事件记录。</p>}
+              {events.map((e, i) => {
+                const speaking = e.kind === 'open' || e.kind === 'counter';
+                if (!speaking) {
+                  return (
+                    <div className="nego-sys" key={i}>
+                      <span className="nego-sys-main">{sysText(e)}</span>
+                      <span className="nego-sys-at mono">{dateTimeSec(e.at)}</span>
+                    </div>
+                  );
+                }
+                const mine = e.actor !== null && e.actor.id === (seller ? offer.sellerClub.id : offer.buyerClub.id);
+                return (
+                  <div className={`nego-b ${mine ? 'me' : 'them'}`} key={i}>
+                    <p className="nego-b-who">
+                      {e.actor?.name ?? '系统'} · {EVENT_LABEL[e.kind] ?? e.kind}
+                    </p>
+                    {e.amount !== null && <p className="nego-b-main mono">{moneyIntText(e.amount)}</p>}
+                    {e.note && <p className="nego-b-note">{e.note}</p>}
+                    <p className="nego-b-at mono">{dateTimeSec(e.at)}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="nego-bar">
+              {confirming !== null && (
+                <div className="nego-confirm" role="alert">
+                  <span>
+                    {confirming === 'reject'
+                      ? `确认${intent ? '放弃这张意向单' : '拒绝这份报价'}？`
+                      : `确认${intent ? '撤回这张意向单' : '撤回报价'}？`}
+                    冻结的 {moneyIntText(offer.amount)} 将退回买方。
+                  </span>
+                  <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => void onAct(confirming)}>
+                    确认{confirming === 'reject' ? (intent ? '放弃' : '拒绝') : intent ? '撤回意向' : '撤回'}
+                  </button>
+                  <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => onConfirming(null)}>
+                    再想想
+                  </button>
+                </div>
+              )}
+
+              <div className="nego-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !canCounter || !counterOk}
+                  title={reason(canCounter, pending ? '还没轮到你，等对方表态' : '这一单已经了结')}
+                  onClick={() => void onAct('counter')}
+                >
+                  还价
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !canAccept}
+                  title={reason(canAccept, intent ? '意向单由卖方确认挂牌' : '还没轮到你，等对方表态')}
+                  onClick={() => void onAct('accept')}
+                >
+                  {intent ? `确认挂牌（${moneyIntText(offer.amount)}）` : `同意（${moneyIntText(offer.amount)}，同意即挂牌）`}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={busy || !canReject}
+                  title={reason(canReject, settled ? '这一单已经了结' : '只有卖方能拒绝；买方要终止请用撤回')}
+                  onClick={() => onConfirming('reject')}
+                >
+                  {intent ? '放弃' : '拒绝'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={busy || !canWithdraw}
+                  title={reason(canWithdraw, settled ? '这一单已经了结' : '只有买方能撤回；卖方要终止请用拒绝')}
+                  onClick={() => onConfirming('withdraw')}
+                >
+                  {intent ? '撤回意向' : '撤回报价'}
+                </button>
+              </div>
+
+              {canCounter && (
+                <div className="nego-fields">
+                  <label className="field">
+                    <span>还价（m，整数，须高于当前价 {moneyIntText(offer.amount)}）</span>
+                    <input
+                      className="mono"
+                      inputMode="numeric"
+                      placeholder={String(Math.floor(offer.amount) + 1)}
+                      value={counterDraft}
+                      onChange={(e) => onCounterDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>附言（可选，100 字内）</span>
+                    <input value={noteDraft} maxLength={100} placeholder="给对方的一句话" onChange={(e) => onNoteDraft(e.target.value)} />
+                  </label>
+                </div>
+              )}
+
+              {pending && !myTurn && <p className="nego-reason">还没轮到你，等对方表态。</p>}
+            </div>
+          </>
+        )}
       </div>
-      <div className="side-row">
-        <span className="attr-name">卖家</span>
-        <span>{offer.sellerClub.name}</span>
-      </div>
-      <div className="side-row">
-        <span className="attr-name">当前有效价</span>
-        <span className="mono">{money(offer.amount)}m（首报 {money(offer.initAmount)}m · R{offer.round}）</span>
-      </div>
-      {offer.note && (
-        <div className="side-row">
-          <span className="attr-name">最近附言</span>
-          <span>{offer.note}</span>
-        </div>
-      )}
-
-      {events.length > 0 && (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>动作</th>
-                <th>谁</th>
-                <th className="num">金额（m）</th>
-                <th>附言</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((e, i) => (
-                <tr key={i}>
-                  <td className="mono">{time(e.at)}</td>
-                  <td>{EVENT_LABEL[e.kind] ?? e.kind}</td>
-                  <td>{e.actor ? e.actor.name : '系统'}</td>
-                  <td className="num mono">{money(e.amount)}</td>
-                  <td className="muted">{e.note ?? ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {pending && (
-        <div className="inline-form">
-          {canAccept && (
-            <label className="field">
-              <span>还价（m，须严格高于当前价）</span>
-              <input
-                className="mono"
-                inputMode="decimal"
-                placeholder={(offer.amount + 1).toFixed(2)}
-                value={counterDraft}
-                onChange={(e) => onCounterDraft(e.target.value.replace(/[^0-9.]/g, ''))}
-              />
-            </label>
-          )}
-          {canAccept && (
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || !Number.isFinite(counterValue) || counterValue <= offer.amount}
-              onClick={() => void onAct(offer, 'counter', counterValue)}
-            >
-              还价
-            </button>
-          )}
-          {canAccept && (
-            <button type="button" className="btn" disabled={busy} onClick={() => void onAct(offer, 'accept')}>
-              同意（{money(offer.amount)}m，同意即挂牌）
-            </button>
-          )}
-          {canReject && (
-            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void onAct(offer, 'reject')}>
-              拒绝
-            </button>
-          )}
-          {canWithdraw && (
-            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAct(offer, 'withdraw')}>
-              撤回报价
-            </button>
-          )}
-          {!canAccept && !canReject && !canWithdraw && <p className="muted">还没轮到你，等对方表态。</p>}
-        </div>
-      )}
-
-      {intent && (
-        <div className="inline-form">
-          <p className="muted">
-            关窗期双方已谈成，先挂意向单：不生成挂牌、资金继续冻结。开窗后由卖方确认才生成挂牌；
-            买方随时可撤回，卖方放弃则冻结退回。
-          </p>
-          {offer.role === 'seller' ? (
-            <>
-              <button type="button" className="btn" disabled={busy} onClick={() => void onAct(offer, 'accept')}>
-                确认挂牌（{money(offer.amount)}m）
-              </button>
-              <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void onAct(offer, 'reject')}>
-                放弃
-              </button>
-            </>
-          ) : (
-            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAct(offer, 'withdraw')}>
-              撤回
-            </button>
-          )}
-        </div>
-      )}
-
-      <button type="button" className="btn btn-ghost" onClick={onClose}>
-        收起谈判桌
-      </button>
-    </section>
+    </div>,
+    document.body,
   );
 }

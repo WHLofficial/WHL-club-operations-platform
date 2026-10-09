@@ -514,6 +514,23 @@ async function main() {
       club: { id: 1, name: '阿森纳' }, box: 'out', nextCursor: null, pendingMine: 0,
       items: [deskOffer({ id: 4, role: 'buyer', counterpart: { id: 241, name: '巴塞罗那' }, amount: 20, turn: 'seller' })],
     };
+    // v6.40.0 对话式谈判桌的两条新请求：单据详情（对话流数据源）与卖方可见的名单设置
+    const DESK_OFFER_DETAIL = {
+      offer: {
+        ...deskOffer({ id: 1, myTurn: true }),
+        buyerClub: { id: 73, name: '巴黎圣日耳曼' },
+        sellerClub: { id: 1, name: '阿森纳' },
+        season: 9, windowSeq: 1, resolvedAt: null,
+      },
+      // 对话流两条：对方首报（左气泡）+ 我回价（右气泡）；时间戳带毫秒 Z，前端显示到秒
+      events: [
+        { kind: 'open', amount: 10, note: '先探个底', at: '2026-09-20T09:00:00.000Z', actor: { id: 73, name: '巴黎圣日耳曼' } },
+        { kind: 'counter', amount: 12.5, note: null, at: '2026-09-20T10:00:00.000Z', actor: { id: 1, name: '阿森纳' } },
+      ],
+    };
+    const DESK_OFFER_SETTINGS = {
+      transferListed: true, minOfferPrice: 8, listPrice: 15, offerAuto: false, notForSale: false,
+    };
     const deskNego = (over) => ({
       id: 21, transferId: 31, status: 'active',
       transfer: { type: 'transfer', status: 'pending_review', fee: 12.5 },
@@ -569,6 +586,8 @@ async function main() {
       [/\/api\/offers\?box=in/, DESK_OFFERS_IN],
       [/\/api\/offers\?box=out/, DESK_OFFERS_OUT],
       [/\/api\/negotiations\?mine=1/, DESK_NEGO],
+      [/\/api\/offers\/\d+(\?|$)/, DESK_OFFER_DETAIL],
+      [/\/api\/players\/\d+\/offer-settings/, DESK_OFFER_SETTINGS],
       [/\/api\/me\/bids/, DESK_BIDS],
       [/\/api\/club\/squad/, DESK_SQUAD],
     ];
@@ -659,6 +678,21 @@ async function main() {
         assert((await offerRows.filter({ hasText: '待你表态' }).count()) === 1, '轮到我的报价行没出「待你表态」');
         assert((await offerRows.filter({ hasText: '等对方' }).count()) === 1, '不该我表态的 pending 行没出「等对方」');
         assert((await text()).includes('报价被接受 ≠ 成交'), '报价区块缺机制句（v6.32.0 唯一讲解点）');
+
+        // v6.40.0 对话式谈判桌：行尾「谈判桌」开浮层（门户 + 唯一滚动区），Esc 关并还原滚动锁
+        const mineRow = offerRows.filter({ hasText: '待你表态' }).first();
+        await mineRow.locator('button', { hasText: '谈判桌' }).click();
+        const deskDialog = page.locator('[role="dialog"][aria-label^="谈判桌"]');
+        await deskDialog.waitFor({ timeout: TIMEOUT });
+        assert((await deskDialog.locator('.nego-stream').count()) === 1, '谈判桌没有对话流');
+        assert((await deskDialog.locator('.nego-sys').count()) === 0, 'pending 单不该出系统行胶囊（只有 open/counter 两种说话事件）');
+        assert((await deskDialog.locator('.nego-actions button').count()) === 4, '动作栏不是固定四颗（还价/同意/拒绝/撤回）');
+        const stamp = (await deskDialog.locator('.nego-b-at').first().innerText()).trim();
+        assert(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(stamp), `气泡时间不是秒级时间戳（${stamp}）`);
+        assert((await page.evaluate(() => document.body.style.overflow)) === 'hidden', '开桌时没锁滚动');
+        await page.keyboard.press('Escape');
+        await deskDialog.waitFor({ state: 'detached', timeout: TIMEOUT });
+        assert((await page.evaluate(() => document.body.style.overflow)) !== 'hidden', '关桌后没还原滚动锁');
 
         // 深链：?tab=offers&box=out 直接落报价页签（页签化后 = 直接挂载，无需滚动几何判据）
         await page.goto(`${BASE}/market/desk?tab=offers&box=out`, { waitUntil: 'networkidle' });

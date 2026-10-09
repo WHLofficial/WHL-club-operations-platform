@@ -14,6 +14,8 @@
 // v6.37.0 增补（球队页两表弃表改卡，card-parts.tsx）：SquadTab 阵容名单表、DeskTab 注册名单表
 //   弃表改「位置四组容器 + 行解剖卡」⇒ TABLES_BY_FILE_MIN 1→0 / 2→1、TC-STK 三表→两表、
 //   TC-SWP-05 挂类 2→1（只剩主场战报表）、v6.30.0 C 段用例改写为弃表 + 死选择器锁。
+// v6.40.0 增补（报价谈判对话式）：报价区行下谈判桌的事件表改对话流 ⇒ OffersSection 表数 2→1
+//   （清单表仍在，窄屏由卡片行替代渲染；清单卡与浮层时间戳的类名契约见 OffersSection.test.tsx）。
 //
 // 为什么要文本级扫描：这三条约定只活在 JSX/CSS 文本里——表格少包一层 `.table-wrap`、重构时又写回
 // `style={{ width: 320 }}`、抽屉关闭钮的 36px 命中区被删——组件测试与单测都不会红；e2e ⑫ 也只在
@@ -137,9 +139,11 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   // v6.32.0：NegotiationsSection 删「已落定的谈判」表（历史归球队中心转会页签）⇒ 2 → 1（报价记录表）
   'web/src/pages/market/desk/ListingsBidsSection.tsx': 1,
   'web/src/pages/market/desk/NegotiationsSection.tsx': 1,
-  'web/src/pages/market/desk/OffersSection.tsx': 2,
+  // v6.40.0 报价谈判对话式：行下谈判桌的事件表改对话流（无表）⇒ 2 → 1（只剩报价清单表；
+  // ≤760px 该表在渲染层被卡片行替代，但「清单仍有表」这条契约照旧，表还在源码里）
+  'web/src/pages/market/desk/OffersSection.tsx': 1,
 };
-/** 全树 <table> 基线 = 点名页之和（v6.37.0 起 45）：跌破说明扫描器空转（假绿） */
+/** 全树 <table> 基线 = 点名页之和（v6.37.0 起 45，v6.40.0 起 44）：跌破说明扫描器空转（假绿） */
 const TABLE_BASELINE = Object.values(TABLES_BY_FILE_MIN).reduce((sum, n) => sum + n, 0);
 
 function countTables(src: string): number {
