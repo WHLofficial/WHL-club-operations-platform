@@ -1016,3 +1016,43 @@ describe('v6.40.0 收件篮窄屏静态锁（TC-NB-STR-01/03）', () => {
     expect(page, '不可点行仍是 .inbox-row（视觉同款、语义不可点）').toMatch(/className="inbox-row"/);
   });
 });
+
+describe('v6.40.2 顶栏双文案静态锁（TC-TOPBAR-01）', () => {
+  const TOPBAR = `${WEB_SRC}/components/TopBar.tsx`;
+
+  // 背景：v6.37.2 给顶栏做「桌面全称 / ≤640 短文案」双 span，但 /market 那一条当时被写成裸「转会」，
+  // 桌面（>640px）因此误显短文案（用户 2026-10-09 报）。静态门按形态卡住：凡带 aria-label 的顶栏项，
+  // 可见文案必须是 .nav-tf + .nav-ts 双 span；首页无 aria-label、保持裸文本是有意的（文案本来就短）。
+  it('TC-TOPBAR-01 · 每个带 aria-label 的顶栏项都是 .nav-tf + .nav-ts 双 span，/market 显「转会中心」', () => {
+    const top = read(TOPBAR);
+    const chunks = top.split('</NavLink>');
+    const labeled: string[] = [];
+    for (const chunk of chunks) {
+      const at = chunk.lastIndexOf('<NavLink');
+      if (at === -1) continue;
+      const item = chunk.slice(at);
+      if (!item.includes('nav-tab')) continue; // 顶栏项之外的 NavLink（品牌链接等）不算
+      if (!item.includes('aria-label="')) continue; // 首页：无 aria-label，裸文本
+      labeled.push(item);
+      const name = item.match(/aria-label="([^"]+)"/)?.[1] ?? '(无名)';
+      expect(item, `顶栏项「${name}」缺 .nav-tf（桌面全称）`).toContain('className="nav-tf"');
+      expect(item, `顶栏项「${name}」缺 .nav-ts（≤640 短文案）`).toContain('className="nav-ts"');
+    }
+    // 七项带 aria-label：我的球队 / 球员库 / 球队库 / 转会中心 / 消费中心 / 财政账本 / 管理端
+    expect(labeled.length, '带 aria-label 的顶栏项数量变了（少一项=有人把 aria-label 删了，多一项=新入口没配双文案）').toBe(7);
+
+    const market = labeled.find((item) => item.includes('aria-label="转会中心"'));
+    expect(market, '顶栏缺 /market 项').toBeTruthy();
+    expect(market, '宽屏该显全称「转会中心」').toContain('<span className="nav-tf">转会中心</span>');
+    expect(market, '≤640 该显短文案「转会」').toContain('<span className="nav-ts">转会</span>');
+  });
+
+  it('TC-TOPBAR-01b · 显隐规则成对：桌面隐藏 .nav-ts、≤640 隐藏 .nav-tf（掉一条就两段文案同时出现）', () => {
+    const css = read(STYLES_CSS);
+    const desktop = css.match(/\.nav-tab \.nav-ts\s*\{[^}]*display:\s*none/);
+    expect(desktop, '桌面块缺 `.nav-tab .nav-ts { display: none }`').toBeTruthy();
+    const narrow = mediaBlocks(css, '@media (max-width: 640px)').filter((b) => /\.nav-tab \.nav-tf\s*\{/.test(b));
+    expect(narrow.length, '≤640 块缺 `.nav-tab .nav-tf { display: none }`').toBe(1);
+    expect(narrow[0], '≤640 块要把短文案放出来').toMatch(/\.nav-tab \.nav-ts\s*\{\s*display:\s*inline/);
+  });
+});

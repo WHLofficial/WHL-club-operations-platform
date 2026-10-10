@@ -662,6 +662,11 @@ async function main() {
         assert((await tabs.filter({ hasText: '转会' }).count()) === 1, '顶栏没有「转会」入口');
         assert((await tabs.filter({ hasText: '转会报价' }).count()) === 0, '顶栏仍留着「转会报价」旧入口');
         assert((await tabs.filter({ hasText: '签约谈判' }).count()) === 0, '顶栏仍留着「签约谈判」旧入口');
+        // v6.40.2：/market 那条要显全称（双 span：桌面 .nav-tf / ≤640 .nav-ts）——宽屏误显「转会」就是这出的问题
+        const marketTab = page.locator('nav.nav-links a.nav-tab[aria-label="转会中心"]');
+        assert((await marketTab.count()) === 1, '顶栏找不到 /market 项（aria-label=转会中心）');
+        const marketLabel = (await marketTab.innerText()).trim();
+        assert(marketLabel === '转会中心', `宽屏（1440）/market 项应显全称，实见「${marketLabel}」`);
 
         // MarketNav 六项（顺序与指向；v6.31.0 广告板第 2 项）：NavLink 指错就红（V5 红点）
         const nav = page.locator('nav[aria-label="市场分区"] a');
@@ -2048,6 +2053,9 @@ async function main() {
           nav19.scrollW <= nav19.clientW + 1,
           `教练态工作台把页面撑出横向滚动（${nav19.scrollW} > ${nav19.clientW}）`,
         );
+        // v6.40.2：≤640 显短文案（.nav-ts）——与 ⑤c 的宽屏断言成对，卡住「双 span 显隐规则被删」
+        const marketLabel375 = (await page.locator('.nav-tab[aria-label="转会中心"]').innerText()).trim();
+        assert(marketLabel375 === '转会', `≤640 /market 项应显短文案「转会」，实见「${marketLabel375}」`);
         const deskShot = join(SHOT_DIR, 'e2e-clubs-desk-coach-375.png');
         await page.screenshot({ path: deskShot, fullPage: false });
         console.log(`   截图：${deskShot.replace(/\\/g, '/')}`);

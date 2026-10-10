@@ -122,13 +122,15 @@ export default function TopBar() {
             <span className="nav-ts">球队</span>
           </NavLink>
           {/* 转会中心（v6.23.0）：市场 / 报价 / 谈判三处入口并成一条，仍指向 /market，内部由 MarketNav 分流 */}
-          {/* v6.37.2：窄屏顶栏横向吃紧，显示文案缩短为「转会」；无障碍全称走 aria-label */}
+          {/* v6.40.2：v6.37.2 双文案只改了别的项、这一条写成裸「转会」，桌面（>640px）误显短文案；
+              这里补回同款双 span——桌面显全称、≤640 显短文案（styles.css 的 .nav-tf/.nav-ts 显隐） */}
           <NavLink
             to="/market"
             className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`}
             aria-label="转会中心"
           >
-            转会
+            <span className="nav-tf">转会中心</span>
+            <span className="nav-ts">转会</span>
           </NavLink>
           {/* 消费中心（v6.26.0）：五类商品工单 + 球场消费三卡；v6.26.1 补顶栏入口（原先只有首页/我的球队卡片） */}
           <NavLink to="/shop" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="消费中心">
