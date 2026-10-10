@@ -113,7 +113,7 @@ app.post('/growth/levelup/:playerId', async (c) => {
   const player = await c.env.DB.prepare('SELECT id, club_id FROM players WHERE id = ?').bind(playerId).first<{ id: number; club_id: number | null }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
   if (user.role !== 'admin') {
-    const club = await getBoundClub(c.env, user.id);
+    const club = await getBoundClub(c.env, user.id, c.req.raw);
     if (!club || club.id !== player.club_id) throw new HttpError(403, '只有本队教练（或管理组）能选升级方案');
   }
   const out = await applyLevelUp(c.env, user.id, playerId, body?.planIndex, body?.picks);
@@ -133,7 +133,7 @@ app.post('/growth/china-playstyles/:playerId', async (c) => {
   if (!player) throw new HttpError(404, '找不到这名球员');
   if (player.china_plan !== 1) throw new HttpError(409, '这名球员不在中国球员计划里');
   if (user.role !== 'admin') {
-    const club = await getBoundClub(c.env, user.id);
+    const club = await getBoundClub(c.env, user.id, c.req.raw);
     if (!club || club.id !== player.club_id) throw new HttpError(403, '只有本队教练（或管理组）能发中国计划徽章');
   }
   const out = await grantChinaPlaystyles(c.env, user.id, playerId, body?.picks);

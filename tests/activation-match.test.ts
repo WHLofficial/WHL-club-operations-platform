@@ -7,6 +7,7 @@ import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
+import { resetSettleCoalesce } from '../src/worker/market-settle.ts';
 import { expectedWage } from '../src/worker/negotiation-secret.ts';
 
 interface Fixture {
@@ -360,7 +361,9 @@ describe('匹配 / 放行 / 到期', () => {
   it('24h 匹配窗到期未决定 → 按竞价最高价成交进待审（惰性结算）', async () => {
     const fx = await seedMatchPending();
     fx.sqlite.exec(`UPDATE listings SET match_deadline = '2026-07-01T01:00:00Z' WHERE id = ${fx.listingId}`);
-    // 任何市场入口都先跑惰性结算
+    // 任何市场入口都先跑惰性结算。v6.40.2 读路径有 30s 合并窗（生产里连读省往返），
+    // 同一用例前面已访问过市场 ⇒ 先清零，等价于生产里 30 秒后的下一次访问。
+    resetSettleCoalesce();
     await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
     const listing = sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', fx.listingId);
     expect(listing?.status).toBe('pending_review');
@@ -407,6 +410,7 @@ describe('匹配 / 放行 / 到期', () => {
     expect(((await low.json()) as { error: string }).error).toContain('24');
 
     fx.sqlite.exec(`UPDATE listings SET match_deadline = '2026-07-01T01:00:00Z' WHERE id = ${fx.listingId}`);
+    resetSettleCoalesce(); // 到期后这次访问必须真结算（同前：清 30s 合并窗）
     await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
 
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', fx.listingId)?.status).toBe('pending_review');
@@ -443,6 +447,7 @@ describe('匹配 / 放行 / 到期', () => {
     expect((await post(`/api/market/listings/${listingId2}/bids`, { amount: 25 }, 'tok-coach2', fx.env)).status).toBe(201);
     // 先走到匹配等待期，这样 409 命中「生涯一次」而不是「不在匹配等待期」
     fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId2}`);
+    resetSettleCoalesce(); // 到点后这次访问必须真结算（同前：清 30s 合并窗）
     await get('/api/market/listings', undefined, fx.env);
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId2)?.status).toBe('matched_pending');
     const rematch = await post('/api/transfers/match', { listingId: listingId2, newReleaseFee: 60 }, 'tok-coach', fx.env);

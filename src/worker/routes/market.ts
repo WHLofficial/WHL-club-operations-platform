@@ -94,7 +94,10 @@ function statusFilter(raw: string | undefined): string[] {
 // GET /api/market/listings?status=&cursor=&player_id= —— 转会区（卡柜）
 // player_id（v6.4.0 改动 6）：按球员查现行挂牌（球员页左栏出价途径用），与 status 过滤叠加。
 app.get('/market/listings', async (c) => {
-  await settleOverdue(c.env, { origin: 'lazy_settle' });
+  // v6.40.2：公开读端点也要限速——这条既无鉴权又整跑惰性结算，是匿名放大最便宜的入口
+  assertPublicRate(c, 'market');
+  // v6.40.2：读路径结算可合并（30s 窗内只真跑一次）
+  await settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 });
   const statuses = statusFilter(c.req.query('status'));
   const cursorRaw = c.req.query('cursor');
   let cursor: number | null = null;
@@ -206,7 +209,7 @@ app.get('/market/listings', async (c) => {
 // POST /api/market/listings —— 挂牌（价格校验 4.4.1.1）
 app.post('/market/listings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
 
@@ -216,6 +219,9 @@ app.post('/market/listings', async (c) => {
   const askPrice = Number(body.askPrice);
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
   if (!Number.isFinite(askPrice) || askPrice <= 0) throw new HttpError(400, '挂牌价须为正数（单位 m）');
+
+  // v6.40.2：动作前先真结算——同球员的报价可能刚好到期、上一单挂牌可能刚好被结算（与出价端点同口径）
+  await settleOverdue(c.env, { origin: 'user' });
 
   const win = await getOpenWindow(c.env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能挂牌', 'no_window');
@@ -632,7 +638,7 @@ app.get('/market/sea-lookup', async (c) => {
 // 4.4.2.1 一窗一次（失效激活也占额，批量化查询照搬退役 trainees 实现）。
 app.get('/market/activatable', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) return c.json({ club: null, players: [] });
 
   const mode = c.req.query('mode');
@@ -729,7 +735,7 @@ app.get('/market/activatable', async (c) => {
 // 与 POST /api/transfers/activation 同源（见 activations.ts）。
 app.post('/market/activations', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
 
@@ -743,7 +749,7 @@ app.post('/market/activations', async (c) => {
 // 不改挂牌状态、不冻结匹配窗（匹配与到期照常走）；是否影响成交由管理组裁量（不自动改数据）。
 app.post('/market/listings/:id/activation-report', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
@@ -788,7 +794,8 @@ app.post('/market/listings/:id/activation-report', async (c) => {
 
 // GET /api/market/listings/:id —— 详情 + 出价历史
 app.get('/market/listings/:id', async (c) => {
-  await settleOverdue(c.env, { origin: 'lazy_settle' });
+  // v6.40.2：读路径结算可合并（30s 窗内只真跑一次）
+  await settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 });
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
   const listing = await c.env.DB.prepare(
@@ -894,7 +901,7 @@ app.get('/market/listings/:id', async (c) => {
 // POST /api/market/listings/:id/bids —— 出价（资金冻结先行，§6.4-1）
 app.post('/market/listings/:id/bids', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
 
@@ -1084,7 +1091,7 @@ app.post('/market/listings/:id/bids', async (c) => {
 // GET /api/me/bids —— 我的出价（含冻结状态章）
 app.get('/me/bids', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) return c.json({ club: null, bids: [] });
   const rows = await c.env.DB.prepare(
     `SELECT b.id, b.listing_id, b.amount, b.created_at, b.status AS bid_status,

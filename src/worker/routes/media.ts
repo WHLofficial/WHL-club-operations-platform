@@ -44,7 +44,7 @@ function edgeCacheAvailable(): boolean {
 // R2 免费档写 100 万次/月：激活是低频动作，用量差几个数量级，不触碰额度。
 app.post('/activation', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   const contentType = c.req.header('Content-Type')?.split(';')[0]?.trim().toLowerCase() ?? '';
   const ext = ACTIVATION_PROOF_TYPES[contentType];

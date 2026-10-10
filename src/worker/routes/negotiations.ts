@@ -16,14 +16,14 @@ const app = new Hono<{ Bindings: Env }>();
 // 谈判入口共用件：ban 只拦提交动作，GET 我的会话不受禁令影响（能看不能谈）
 async function requireCoachClub(env: Env, request: Request): Promise<{ user: SessionUser; clubId: number }> {
   const user = await requireCoach(env, request, 'club.squad.manage');
-  const club = await getBoundClub(env, user.id);
+  const club = await getBoundClub(env, user.id, request);
   if (!club) throw new HttpError(403, '你还没有绑定俱乐部，先找管理组拿认证码');
   return { user, clubId: club.id };
 }
 
 async function requireTradableCoachClub(env: Env, request: Request): Promise<{ user: SessionUser; clubId: number }> {
   const ctx = await requireCoachClub(env, request);
-  const club = await getBoundClub(env, ctx.user.id);
+  const club = await getBoundClub(env, ctx.user.id, request);
   if (club) assertTradable(club);
   return ctx;
 }

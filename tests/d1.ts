@@ -5,6 +5,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { generateCode } from '../src/lib/crypto.ts';
+import { resetSettleCoalesce } from '../src/worker/market-settle.ts';
 
 export interface TestKV {
   get(key: string): Promise<string | null>;
@@ -27,9 +28,24 @@ export function createTestKV(seed: Map<string, string> = new Map()): TestKV {
 }
 
 export function createTestD1(sqlite: DatabaseSync): D1Database {
+  // v6.40.2：结算合并（settleOverdue 的 coalesceMs）是进程内模块级状态——同进程跑用例时，
+  // 上一个用例 30s 窗口里的 summary 会顶掉本用例该发生的真结算（「触碰即收口」型断言全红）。
+  // 所有夹具都经 createTestD1 建库 ⇒ 挂这里逐例清零，将来新用例也自动免疫（照 resetGuards 先例）。
+  resetSettleCoalesce();
   const d1 = {
     prepare(sql: string) {
       let args: unknown[] = [];
+      // v6.40.2：batch 里每条要像真实 D1 一样回 { results, meta }（此前只回 meta.changes，
+      // SELECT 进 batch 就拿不到行——路由层合并查询需要它）。写语句的 changes 用 changes() 取，
+      // 读语句按 0（真实 D1 对 SELECT 的 meta.changes 也是 0）。
+      const isRead = /^\s*(select|with)\b/i.test(sql);
+      const exec = () => {
+        const results = sqlite.prepare(sql).all(...(args as never[]));
+        if (isRead) return { results, meta: { changes: 0, last_row_id: 0 } };
+        const changes = (sqlite.prepare('SELECT changes() AS c').get() as { c: number }).c;
+        const lastRowId = (sqlite.prepare('SELECT last_insert_rowid() AS r').get() as { r: number }).r;
+        return { results, meta: { changes, last_row_id: Number(lastRowId) } };
+      };
       const stmt = {
         bind(...bound: unknown[]) {
           args = bound;
@@ -45,14 +61,15 @@ export function createTestD1(sqlite: DatabaseSync): D1Database {
           const r = sqlite.prepare(sql).run(...(args as never[]));
           return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } };
         },
+        exec,
       };
       return stmt;
     },
-    async batch(statements: { run(): Promise<{ meta: { changes: number } }> }[]) {
+    async batch(statements: { exec(): unknown }[]) {
       sqlite.exec('BEGIN IMMEDIATE');
       try {
-        const out: { meta: { changes: number } }[] = [];
-        for (const s of statements) out.push(await s.run());
+        const out: unknown[] = [];
+        for (const s of statements) out.push(s.exec());
         sqlite.exec('COMMIT');
         return out;
       } catch (err) {
@@ -131,6 +148,7 @@ const MIGRATION_FILES = [
   '0064_ad_board.sql',
   '0065_list_price.sql',
   '0066_negotiation_feedback.sql',
+  '0067_settle_scan_indexes.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

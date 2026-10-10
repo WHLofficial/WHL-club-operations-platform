@@ -626,7 +626,7 @@ app.post('/clubs/bind', async (c) => {
   }
 
   // 绑定成功后按目录解析本侧俱乐部（目录行在发码时已按 club_id 关联）
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(502, '绑定已完成，但俱乐部目录尚未关联，请联系管理组');
 
   // 本地审计只记事实（绑定真源在 auth 库）
@@ -644,7 +644,7 @@ app.post('/clubs/bind', async (c) => {
 // 我的球队概览（余额/名单数/窗口态）；窗口态在v0.7.0 落地，此前恒为 null
 app.get('/me/club', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const bound = await getBoundClub(c.env, user.id);
+  const bound = await getBoundClub(c.env, user.id, c.req.raw);
   if (!bound) {
     return c.json({ club: null, balance: null, squadCount: null, window: null });
   }
@@ -731,7 +731,7 @@ app.get('/me/club', async (c) => {
 // 财政余额（附录 A〔6〕）：余额 / 冻结 / 可支配，口径与出价校验一致（§7.4）
 app.get('/club/balance', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) return c.json({ club: null, balance: null, held: null, available: null });
   const row = await c.env.DB.prepare(
     `SELECT (SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) AS balance,
@@ -749,7 +749,7 @@ const LEDGER_PAGE_SIZE = 30;
 
 app.get('/club/ledger', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) return c.json({ club: null, entries: [], nextCursor: null });
 
   const conditions = ['club_id = ?'];
@@ -809,7 +809,7 @@ const HOME_MATCHES_LIMIT = 10;
 
 app.get('/club/home-matches', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) return c.json({ club: null, matches: [] });
 
   const rows = await c.env.DB.prepare(
@@ -886,7 +886,7 @@ app.get('/club/home-matches', async (c) => {
 // closingBalance 按 (created_at, id) 取末笔的 balance_after——流水 id 顺序与时间顺序不做强假设。
 app.get('/club/finance-summary', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) return c.json({ club: null, season: null, windows: [], outside: null, totals: null });
 
   const seasonParam = c.req.query('season');
@@ -1015,7 +1015,7 @@ app.get('/club/finance-summary', async (c) => {
 // 设施经营（v2.5.0）：build-info 一次拉全预览数据；扩建/升级操作即批即记账
 app.get('/club/stadium/build-info', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   const stadium = await c.env.DB
     .prepare('SELECT club_id, capacity, tier, build_credit FROM stadiums WHERE club_id = ?')
@@ -1068,7 +1068,7 @@ app.get('/club/stadium/build-info', async (c) => {
 
 app.post('/club/stadium/expand', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   // v6.30.0 开窗闸在 expandStadium 内：参数校验优先，避免关窗把参数错误也报成 409
   const body = (await c.req.raw.json().catch(() => null)) as { seats?: unknown } | null;
@@ -1078,7 +1078,7 @@ app.post('/club/stadium/expand', async (c) => {
 
 app.post('/club/stadium/upgrade', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   // v6.30.0 开窗闸在 upgradeStadiumTier 内：档位/容量校验优先
   const out = await upgradeStadiumTier(c.env, club.id, user.id);
@@ -1087,7 +1087,7 @@ app.post('/club/stadium/upgrade', async (c) => {
 
 app.post('/club/facilities/upgrade', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   const body = (await c.req.raw.json().catch(() => null)) as { key?: unknown } | null;
   if (typeof body?.key !== 'string') throw new HttpError(400, '缺设施类型');
@@ -1132,7 +1132,7 @@ function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]) {
 
 app.get('/club/naming/quote', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const contract = await getActiveNaming(c.env.DB, club.id);
   // 收到的报价（v6.14.0 C3）：待签（轮 open 内）+ 排队接班（queued），签约入口只此一处
@@ -1167,7 +1167,7 @@ app.get('/club/naming/quote', async (c) => {
 
 app.post('/club/naming/offers/:id/accept', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const offerId = Number(c.req.param('id'));
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 id 不合法');
@@ -1178,7 +1178,7 @@ app.post('/club/naming/offers/:id/accept', async (c) => {
 
 app.post('/club/naming/renew', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const body = (await c.req.raw.json().catch(() => null)) as { packageNo?: unknown } | null;
   const contract = await renewNaming(c.env, club.id, Number(body?.packageNo), user.id);
@@ -1187,7 +1187,7 @@ app.post('/club/naming/renew', async (c) => {
 
 app.post('/club/naming/terminate', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const out = await terminateNaming(c.env, club.id, user.id);
   // v6.14.0 C3 触发点：退约腾出 active 位，若该队有排队接班报价立即转正（关窗批另有兜底重试）
@@ -1224,7 +1224,7 @@ function bookingDto(row: VenueBookingRow, nameOf: (key: string) => string) {
 
 app.get('/club/bookings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再排档期');
   const catalog = await loadActivityCatalog(c.env.DB);
   const nameOf = (key: string) => catalog.types[key]?.name ?? key;
@@ -1263,7 +1263,7 @@ app.get('/club/bookings', async (c) => {
 
 app.post('/club/bookings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再排档期');
   const body = (await c.req.raw.json().catch(() => null)) as { slotNo?: unknown; activityType?: unknown; season?: unknown; windowSeq?: unknown } | null;
   if (typeof body?.activityType !== 'string') throw new HttpError(400, '缺活动类型');
@@ -1296,7 +1296,7 @@ app.post('/club/bookings', async (c) => {
 
 app.get('/club/events', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再看事件');
   const view = await listClubEvents(c.env, club.id);
   return c.json({ clubId: club.id, ...view });
@@ -1304,7 +1304,7 @@ app.get('/club/events', async (c) => {
 
 app.post('/club/events/:id/choose', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再选事件');
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '事件 id 必须是正整数');

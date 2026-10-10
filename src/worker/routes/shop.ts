@@ -30,7 +30,7 @@ app.get('/shop/catalog', async (c) => {
 // 全队表单状态：热区 / 角色 / 徽章占用按效果引擎同一套规则算好，前端下拉只出合法项
 app.get('/shop/squad-state', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再逛消费中心');
   const players = await c.env.DB
     .prepare(
@@ -73,7 +73,7 @@ app.get('/shop/squad-state', async (c) => {
 // 本俱乐部的全部工单（含管理组代录的 external 单），带球员名与摘要
 app.get('/shop/orders', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再看消费工单');
   const rows = await c.env.DB
     .prepare(
@@ -91,7 +91,7 @@ app.get('/shop/orders', async (c) => {
 
 app.post('/shop/orders', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再提交消费工单');
   // v6.29.0 开窗闸：消费提交与转会操作同口径（关窗 409；GET 与管理端代录不受限）
   if (!(await getOpenWindow(c.env.DB))) throw new HttpError(409, '转会窗口没开，现在不能提交消费工单', 'no_window');

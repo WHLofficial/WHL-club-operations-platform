@@ -6,6 +6,7 @@ import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
+import { resetSettleCoalesce } from '../src/worker/market-settle.ts';
 
 interface Fixture {
   env: Env;
@@ -141,6 +142,9 @@ async function ageListingForDeadline(fx: Fixture, listingId = 1): Promise<void> 
     `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
                           listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
   );
+  // 催老后这次访问必须真结算：v6.40.2 读路径有 30s 合并窗，同一用例里前面已访问过市场
+  // （合并命中会直接回旧 summary，状态迁移不发生）⇒ 先清零，等价于生产里 30 秒后的下一次访问。
+  resetSettleCoalesce();
   await get('/api/market/listings?status=pending_review', 'tok-viewer', fx.env);
 }
 

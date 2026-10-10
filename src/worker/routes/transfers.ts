@@ -16,7 +16,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 async function requireCoachClub(env: Env, request: Request): Promise<{ user: SessionUser; clubId: number }> {
   const user = await requireCoach(env, request, 'club.squad.manage');
-  const club = await getBoundClub(env, user.id);
+  const club = await getBoundClub(env, user.id, request);
   if (!club) throw new HttpError(403, '你还没有绑定俱乐部，先找管理组拿认证码');
   assertTradable(club);
   return { user, clubId: club.id };

@@ -6,7 +6,7 @@
 // 来自登录回调存档的 claims，不再查 TOUR_DB user 表（账号真源在 auth 库，收口后新账号在
 // 赛事库无行）。claims 缺失/损坏的旧会话视为未登录，重新走一次 OIDC 登录即恢复。
 import type { Env } from '../worker/env.ts';
-import { hasTeamBinding } from '../worker/binding.ts';
+import { getTeamBinding } from '../worker/binding.ts';
 import { HttpError } from './http.ts';
 import { sha256Hex } from './crypto.ts';
 import { OIDC_SESSION_COOKIE } from './oidc.ts';
@@ -223,7 +223,8 @@ export async function requireCoach(env: Env, request: Request, perm?: (typeof CO
     // 准教练也能进 /clubs/bind 这类绑前端点。管理点照旧先行。
     const perms = user.locked ? [] : user.permissions;
     if (ADMIN_PERMS.some((p) => perms.includes(p))) return user;
-    const bound = !user.locked && (await hasTeamBinding(env, user.id));
+    // v6.40.2：按请求记忆化——同请求里随后的 getBoundClub 复用这一份，省一趟 AUTH_DB 跨库往返
+    const bound = !user.locked && (await getTeamBinding(env, request, user.id)).bound;
     const ok = perm
       ? perms.includes(perm) || bound
       : COACH_PERMS.some((p) => perms.includes(p)) || bound;

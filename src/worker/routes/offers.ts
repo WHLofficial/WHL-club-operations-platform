@@ -48,7 +48,7 @@ interface OfferListRow {
 // GET /api/offers?box=in|out&status=&cursor= —— 我收到的 / 我送出的（游标分页，设计 §4）
 app.get('/offers', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
 
   const box = c.req.query('box');
@@ -57,7 +57,8 @@ app.get('/offers', async (c) => {
   if (!(OFFER_STATUS_FILTERS as readonly string[]).includes(statusRaw)) {
     throw new HttpError(400, 'status 只能是 pending / intent / accepted / rejected / withdrawn / expired / all');
   }
-  await settleOverdue(c.env, { origin: 'lazy_settle' });
+  // v6.40.2：读路径结算可合并（30s 窗内只真跑一次；列表 + 详情连着来时第二趟不再重跑整轮结算）
+  await settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 });
 
   const cursorRaw = c.req.query('cursor');
   let cursor: { at: string; id: number } | null = null;
@@ -75,8 +76,10 @@ app.get('/offers', async (c) => {
   if (statusRaw !== 'all') binds.push(statusRaw);
   if (cursor) binds.push(cursor.at, cursor.at, cursor.id);
 
-  const rows = await c.env.DB.prepare(
-    `SELECT o.id, o.player_id, o.amount, o.init_amount, o.round, o.note, o.status, o.turn, o.listing_id, o.created_at, o.updated_at,
+  // v6.40.2：主查询与两个计数互不依赖 ⇒ 合成一次 db.batch，三条 SELECT 只付一趟往返
+  const [rowScan, pendingScan, intentScan] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `SELECT o.id, o.player_id, o.amount, o.init_amount, o.round, o.note, o.status, o.turn, o.listing_id, o.created_at, o.updated_at,
             o.buyer_club_id, o.seller_club_id, cb.name AS counterpart_name,
             p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa, p.list_price
      FROM offers o
@@ -86,21 +89,16 @@ app.get('/offers', async (c) => {
        ${cursor ? 'AND (o.updated_at < ? OR (o.updated_at = ? AND o.id < ?))' : ''}
      ORDER BY o.updated_at DESC, o.id DESC
      LIMIT 50`,
-  )
-    .bind(...binds)
-    .all<OfferListRow>();
-
-  const pendingMineRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM offers o WHERE ${roleCol} = ? AND status = 'pending' AND turn = ?`,
-  )
-    .bind(club.id, box === 'in' ? 'seller' : 'buyer')
-    .first<{ n: number }>();
-  // 意向单徽标（v6.29.0）：这条 box 里等开窗的意向单条数（卖方要确认、买方要决定等不等）
-  const intentsMineRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM offers o WHERE ${roleCol} = ? AND status = 'intent'`,
-  )
-    .bind(club.id)
-    .first<{ n: number }>();
+    ).bind(...binds),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM offers o WHERE ${roleCol} = ? AND status = 'pending' AND turn = ?`,
+    ).bind(club.id, box === 'in' ? 'seller' : 'buyer'),
+    // 意向单徽标（v6.29.0）：这条 box 里等开窗的意向单条数（卖方要确认、买方要决定等不等）
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM offers o WHERE ${roleCol} = ? AND status = 'intent'`).bind(club.id),
+  ]);
+  const rows = { results: (rowScan.results ?? []) as OfferListRow[] };
+  const pendingMineRow = ((pendingScan.results ?? []) as { n: number }[])[0];
+  const intentsMineRow = ((intentScan.results ?? []) as { n: number }[])[0];
 
   const last = rows.results[rows.results.length - 1];
   return c.json({
@@ -128,64 +126,77 @@ app.get('/offers', async (c) => {
   });
 });
 
+// GET /api/offers/:id 主查询行：报价本体 + 球员快照 + 买卖双方俱乐部名
+interface OfferDetailRow {
+  id: number;
+  player_id: number;
+  buyer_club_id: number;
+  seller_club_id: number;
+  amount: number;
+  init_amount: number;
+  round: number;
+  note: string | null;
+  status: string;
+  turn: string;
+  hold_id: number | null;
+  listing_id: number | null;
+  season: number | null;
+  window_seq: number | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  player_name: string;
+  player_fc_id: number | null;
+  position: string | null;
+  ca: number | null;
+  pa: number | null;
+  list_price: number | null;
+  buyer_name: string;
+  seller_name: string;
+}
+
 // GET /api/offers/:id —— 单条 + 谈判桌 events（时间正序）；买卖双方可见
 app.get('/offers/:id', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '报价 ID 不对');
-  await settleOverdue(c.env, { origin: 'lazy_settle' });
+  // v6.40.2：读路径结算可合并（与列表接口同窗；开桌两趟请求里第二趟不再重跑整轮结算）
+  await settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 });
 
-  const r = await c.env.DB.prepare(
-    `SELECT o.*, ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.ca, p.pa, p.list_price,
+  // v6.40.2：主查询与事件查询互不依赖 ⇒ 合成一次 db.batch，两条 SELECT 只付一趟往返
+  // （403/404 路径会多跑一条无害 SELECT，换来正常路径省一趟跨区往返）
+  const [offerScan, eventScan] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `SELECT o.*, ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.ca, p.pa, p.list_price,
             cb.name AS buyer_name, cs.name AS seller_name
      FROM offers o
      JOIN players p ON p.id = o.player_id
      JOIN clubs cb ON cb.id = o.buyer_club_id
      JOIN clubs cs ON cs.id = o.seller_club_id
      WHERE o.id = ?`,
-  )
-    .bind(id)
-    .first<{
-      id: number;
-      player_id: number;
-      buyer_club_id: number;
-      seller_club_id: number;
-      amount: number;
-      init_amount: number;
-      round: number;
-      note: string | null;
-      status: string;
-      turn: string;
-      hold_id: number | null;
-      listing_id: number | null;
-      season: number | null;
-      window_seq: number | null;
-      created_at: string;
-      updated_at: string;
-      resolved_at: string | null;
-      player_name: string;
-      player_fc_id: number | null;
-      position: string | null;
-      ca: number | null;
-      pa: number | null;
-      list_price: number | null;
-      buyer_name: string;
-      seller_name: string;
-    }>();
+    ).bind(id),
+    c.env.DB.prepare(
+      `SELECT e.kind, e.amount, e.note, e.at, e.actor_club_id, cb.name AS actor_name
+     FROM offer_events e
+     LEFT JOIN clubs cb ON cb.id = e.actor_club_id
+     WHERE e.offer_id = ? ORDER BY e.id ASC LIMIT 100`,
+    ).bind(id),
+  ]);
+  const r = ((offerScan.results ?? []) as OfferDetailRow[])[0] ?? null;
   if (!r) throw new HttpError(404, '这条报价不存在');
   const myRole = club.id === r.seller_club_id ? 'seller' : club.id === r.buyer_club_id ? 'buyer' : null;
   if (!myRole) throw new HttpError(403, '这不是你的报价单');
 
-  const events = await c.env.DB.prepare(
-    `SELECT e.kind, e.amount, e.note, e.at, e.actor_club_id, cb.name AS actor_name
-     FROM offer_events e
-     LEFT JOIN clubs cb ON cb.id = e.actor_club_id
-     WHERE e.offer_id = ? ORDER BY e.id ASC LIMIT 100`,
-  )
-    .bind(id)
-    .all<{ kind: string; amount: number | null; note: string | null; at: string; actor_club_id: number | null; actor_name: string | null }>();
+  const eventRows = (eventScan.results ?? []) as {
+    kind: string;
+    amount: number | null;
+    note: string | null;
+    at: string;
+    actor_club_id: number | null;
+    actor_name: string | null;
+  }[];
 
   return c.json({
     offer: {
@@ -210,7 +221,7 @@ app.get('/offers/:id', async (c) => {
       updatedAt: r.updated_at,
       resolvedAt: r.resolved_at,
     },
-    events: events.results.map((e) => ({
+    events: eventRows.map((e) => ({
       kind: e.kind,
       amount: e.amount,
       note: e.note,
@@ -223,7 +234,7 @@ app.get('/offers/:id', async (c) => {
 // POST /api/offers —— 送报价 {playerId, amount, note}
 app.post('/offers', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
   const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown; amount?: unknown; note?: unknown } | null;
@@ -232,6 +243,8 @@ app.post('/offers', async (c) => {
   const amount = Number(body.amount);
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
   if (!Number.isFinite(amount)) throw new HttpError(400, '报价金额不对（单位 m）');
+  // v6.40.2：动作前先真结算——球员可能刚被挂牌 / 同球员的旧单刚过期，这一单要被拒（与出价端点同口径）
+  await settleOverdue(c.env, { origin: 'user' });
   const out = await placeOffer(c.env, {
     clubId: club.id,
     actor: user.id,
@@ -245,7 +258,7 @@ app.post('/offers', async (c) => {
 // POST /api/offers/:id/counter —— 还价 {amount, note}
 app.post('/offers/:id/counter', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
   const offerId = Number(c.req.param('id'));
@@ -254,6 +267,8 @@ app.post('/offers/:id/counter', async (c) => {
   if (!body) throw new HttpError(400, '请求格式不对');
   const amount = Number(body.amount);
   if (!Number.isFinite(amount)) throw new HttpError(400, '还价金额不对（单位 m）');
+  // v6.40.2：动作前先真结算（这单可能刚好过期 / 球员刚被挂牌）
+  await settleOverdue(c.env, { origin: 'user' });
   return c.json(
     await counterOffer(c.env, {
       offerId,
@@ -268,38 +283,44 @@ app.post('/offers/:id/counter', async (c) => {
 // POST /api/offers/:id/accept —— 同意（轮到谁谁同意；含挂牌事务）
 app.post('/offers/:id/accept', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
   const offerId = Number(c.req.param('id'));
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 ID 不对');
+  // v6.40.2：动作前先真结算（这单可能刚好过期；同意挂牌前先让过期单收口）
+  await settleOverdue(c.env, { origin: 'user' });
   return c.json(await acceptOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
 // POST /api/offers/:id/reject —— 拒绝（卖方）
 app.post('/offers/:id/reject', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   const offerId = Number(c.req.param('id'));
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 ID 不对');
+  // v6.40.2：动作前先真结算（这单可能刚好过期）
+  await settleOverdue(c.env, { origin: 'user' });
   return c.json(await rejectOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
 // POST /api/offers/:id/withdraw —— 撤回（买方）
 app.post('/offers/:id/withdraw', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   const offerId = Number(c.req.param('id'));
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 ID 不对');
+  // v6.40.2：动作前先真结算（这单可能刚好过期 / 已谈成，撤回要被拒）
+  await settleOverdue(c.env, { origin: 'user' });
   return c.json(await withdrawOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
 // PUT /api/players/:id/offer-settings —— 报价设置（设计 §2.1 + v6.4.0 解耦 + v6.33.0 标价，仅本队教练）
 app.put('/players/:id/offer-settings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
   const playerId = Number(c.req.param('id'));
@@ -336,7 +357,7 @@ app.put('/players/:id/offer-settings', async (c) => {
 // 不能个体化，标价之外的私密最低报价只有这条端点回给本队教练
 app.get('/players/:id/offer-settings', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   assertTradable(club);
   const playerId = Number(c.req.param('id'));

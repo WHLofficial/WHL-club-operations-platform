@@ -285,7 +285,45 @@ async function settleByContractType(
 
 // 全量惰性结算入口：市场相关请求与 cron tick 都走这里。
 // origin 必填：这条结算到底是哪条入口触发的，由调用方声明（见 lib/audit.ts 的通道取值）。
+//
+// v6.40.2：只读入口可以传 coalesceMs 做合并——整跑一次结算要十几次 D1 往返（生产实测约 220ms/条），
+// 而读请求常常连着来（列表 + 详情）。窗口内直接回上一次的 summary；并发读共享同一次在飞结算；
+// 只有成功才记时刻，失败清在飞并照旧抛出。写路径 / cron / 关窗不传 ⇒ 永远真跑，语义不变。
+// 必须 opt-in：单测里直接调 settleOverdue 的用例共享同进程模块级状态，默认开会互相污染。
+// 显式传 now（回放 / 单测）也不合并——那种调用要的就是「按这个时刻真跑」。
+let settleInflight: Promise<SettleSummary> | null = null;
+let settleLastAt = 0;
+let settleLastSummary: SettleSummary | null = null;
+
+// 测试辅助：清空进程内合并状态（照 lib/guard.ts 的 resetGuards 先例）。
+// 挂在 tests/d1.ts 的 createTestD1() 上 ⇒ 所有夹具逐例清零，不必逐文件改。
+export function resetSettleCoalesce(): void {
+  settleInflight = null;
+  settleLastAt = 0;
+  settleLastSummary = null;
+}
+
 export async function settleOverdue(
+  env: Env,
+  opts: { origin: AuditOrigin; now?: Date; actor?: number | null; coalesceMs?: number },
+): Promise<SettleSummary> {
+  const coalesceMs = opts.coalesceMs ?? 0;
+  if (coalesceMs <= 0 || opts.now !== undefined) return runSettleOverdue(env, opts);
+  if (settleInflight !== null) return settleInflight;
+  if (settleLastSummary !== null && Date.now() - settleLastAt < coalesceMs) return settleLastSummary;
+  const inflight = runSettleOverdue(env, opts);
+  settleInflight = inflight;
+  try {
+    const summary = await inflight;
+    settleLastAt = Date.now();
+    settleLastSummary = summary;
+    return summary;
+  } finally {
+    settleInflight = null;
+  }
+}
+
+async function runSettleOverdue(
   env: Env,
   opts: { origin: AuditOrigin; now?: Date; actor?: number | null },
 ): Promise<SettleSummary> {
@@ -301,52 +339,58 @@ export async function settleOverdue(
   await expireStaleOffers(env, { actor, origin });
 
   // 激活首价窗失效（4.4.2.2）：先于窗尾收口处理，避免给卖家误收下架费
-  const expired = await db
-    .prepare(
-      `SELECT l.id, l.player_id FROM listings l
+  // v6.40.2：下面三段扫描互不依赖——前两段按「有无出价」互斥；匹配窗扫描的 match_deadline 恒在未来
+  // （本段收口新建的 matched_pending 行扫不到）⇒ 合成一次 db.batch，三条 SELECT 只付一趟往返。
+  // 循环顺序保持与拆分前逐字一致（expired → remnants → matchExpired）。
+  const nowIso = now.toISOString();
+  const [expiredScan, remnantScan, matchScan] = await db.batch([
+    db
+      .prepare(
+        `SELECT l.id, l.player_id FROM listings l
        WHERE l.type = 'activation' AND l.status = 'listed'
          AND l.activated_by IS NOT NULL AND l.activation_deadline IS NOT NULL AND l.activation_deadline < ?
          AND NOT EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id)
        ORDER BY l.id LIMIT 100`,
-    )
-    .bind(now.toISOString())
-    .all<{ id: number; player_id: number }>();
-  for (const row of expired.results) {
-    if (await voidExpiredActivation(db, row.id, row.player_id, actor, origin)) summary.voided++;
-  }
-
-  // 激活首价已落但未收口（收口前崩溃的残留）：listed 已过期且带出价（v6.24.0 后新单不会停在此态，
-  // 仅存量/异常残留）→ 与正常截止同口径分流（正式合同进匹配等待，训练营直接进待审）
-  const remnants = await db
-    .prepare(
-      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.season, l.window_seq
+      )
+      .bind(nowIso),
+    db
+      .prepare(
+        `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.season, l.window_seq
        FROM listings l
        WHERE l.type = 'activation' AND l.status = 'listed'
          AND l.activation_deadline IS NOT NULL AND l.activation_deadline < ?
          AND EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id)
        ORDER BY l.id LIMIT 100`,
-    )
-    .bind(now.toISOString())
-    .all<ListingCore & { status: string }>();
-  for (const row of remnants.results) {
-    const r = await settleByContractType(env, row, actor, origin, 'listed', ctx);
-    if (r === 'settled') summary.settled++;
-  }
-
-  // 匹配窗到期（4.4.2.4）：被激活方 24h 内未提交匹配 → 按竞价最高价成交进待审
-  const matchExpired = await db
-    .prepare(
-      `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.activated_by, l.season, l.window_seq,
+      )
+      .bind(nowIso),
+    db
+      .prepare(
+        `SELECT l.id, l.player_id, l.seller_club_id, l.ask_price, l.activated_by, l.season, l.window_seq,
               ${sqlDisplayName('p')} AS player_name
        FROM listings l
        JOIN players p ON p.id = l.player_id
        WHERE l.type = 'activation' AND l.status = 'matched_pending'
          AND l.match_deadline IS NOT NULL AND l.match_deadline < ?
        ORDER BY l.id LIMIT 100`,
-    )
-    .bind(now.toISOString())
-    .all<ListingCore & { activated_by: number | null; player_name: string }>();
-  for (const row of matchExpired.results) {
+      )
+      .bind(nowIso),
+  ]);
+  const expiredRows = (expiredScan.results ?? []) as { id: number; player_id: number }[];
+  for (const row of expiredRows) {
+    if (await voidExpiredActivation(db, row.id, row.player_id, actor, origin)) summary.voided++;
+  }
+
+  // 激活首价已落但未收口（收口前崩溃的残留）：listed 已过期且带出价（v6.24.0 后新单不会停在此态，
+  // 仅存量/异常残留）→ 与正常截止同口径分流（正式合同进匹配等待，训练营直接进待审）
+  const remnantRows = (remnantScan.results ?? []) as (ListingCore & { status: string })[];
+  for (const row of remnantRows) {
+    const r = await settleByContractType(env, row, actor, origin, 'listed', ctx);
+    if (r === 'settled') summary.settled++;
+  }
+
+  // 匹配窗到期（4.4.2.4）：被激活方 24h 内未提交匹配 → 按竞价最高价成交进待审
+  const matchRows = (matchScan.results ?? []) as (ListingCore & { activated_by: number | null; player_name: string })[];
+  for (const row of matchRows) {
     if ((await settleListingForReview(db, row, actor, origin, 'matched_pending')) === 'settled') {
       summary.settled++;
       // 证据制配套通知（v6.4.0 改动 4）：匹配窗到期未匹配，两边各知会一声

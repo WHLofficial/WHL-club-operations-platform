@@ -126,7 +126,7 @@ function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadP
 // GET /api/club/squad —— 注册工作台数据：全队名单 + 现行合同 + 当前快照 + 快照体检
 app.get('/club/squad', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.registrations.submit');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   // 放行档先读一次，两条返回路径共用（未绑队也要给出档位，前端才好决定挂不挂红字）
   const checkMode = await loadRegistrationCheckMode(c.env.DB);
   if (!club) {
@@ -238,7 +238,7 @@ app.get('/club/squad', async (c) => {
 //（唯一索引只认列与常量，不认关联子查询），20 队 / 570 人的规模上一次点查足够。
 app.post('/club/players/:id/number', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
   if (!(await getOpenWindow(c.env.DB))) throw new HttpError(409, '转会窗口没开，现在改不了号码', 'no_window');
   const playerId = Number(c.req.param('id'));
@@ -308,7 +308,7 @@ function parseIdList(raw: unknown, label: string): number[] {
 // POST /api/club/registrations —— 提交注册名单（快照整体替换，重复提交安全）
 app.post('/club/registrations', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.registrations.submit');
-  const club = await getBoundClub(c.env, user.id);
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
 
   const body = (await c.req.raw.json().catch(() => null)) as { firstTeam?: unknown; trainee?: unknown } | null;
