@@ -366,11 +366,21 @@ export function useOffersReceivedPending(enabled: boolean) {
   });
 }
 
-export function useOfferDetail(id: number | null, enabled: boolean) {
-  return useQuery({
-    queryKey: qk.offer(id ?? 0),
+// v6.40.2：详情描述符单独抽出——浮层悬停时用它预取，与 useOfferDetail 共用同一份 key / queryFn
+export function offerDetailQuery(id: number) {
+  return {
+    queryKey: qk.offer(id),
     queryFn: () => api<OfferDetailResponse>(`/api/offers/${id}`),
+  };
+}
+
+// seed（v6.40.2）：列表行拼的占位详情，开桌即读、不等这一趟往返。placeholderData 不进缓存，
+// 服务端仍会真查一次（动作矩阵最终由服务端复核）。
+export function useOfferDetail(id: number | null, enabled: boolean, seed?: OfferDetailResponse | null) {
+  return useQuery({
+    ...offerDetailQuery(id ?? 0),
     enabled: enabled && id !== null,
+    placeholderData: seed ?? undefined,
   });
 }
 

@@ -94,7 +94,7 @@ function detailResponse(o: OfferListItem, events: OfferEventRow[] = intentEvents
 
 function renderSection(
   items: OfferListItem[],
-  detail?: OfferDetailResponse,
+  detail?: OfferDetailResponse | Promise<OfferDetailResponse>,
   intentsMine = 0,
   route = '/',
   strict = false,
@@ -532,5 +532,89 @@ describe('v6.40.0 对话式谈判桌（OffersSection）', () => {
     await screen.findByRole('dialog');
     await waitFor(() => expect(document.querySelector('.mkt-desk-card.is-target')).toBeTruthy());
     expect(document.querySelectorAll('.is-target').length).toBe(1);
+  });
+});
+
+// v6.40.2 开桌即读（TC-DESK-11..14）：开桌前先用列表行把单据头画出来（placeholderData 播种），
+// 事件流等详情回来再补——「摊开谈判桌」不再是一块空白面板。
+describe('v6.40.2 开桌即读（列表行播种，TC-DESK-11..14）', () => {
+  /** 悬置的详情请求：先看播种画面，再手动放行真详情 */
+  function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  it('TC-DESK-11 详情悬置时单据头已可读、事件区给占位；详情回来后事件流替换占位', async () => {
+    const o = offer({ id: 5, status: 'pending', role: 'buyer', myTurn: true, turn: 'buyer' });
+    const d = deferred<OfferDetailResponse>();
+    renderSection([o], d.promise);
+
+    fireEvent.click(await screen.findByRole('button', { name: '谈判桌' }));
+    const dialog = (await screen.findByRole('dialog')) as HTMLElement;
+    const desk = within(dialog);
+
+    // 单据头全部来自列表行：球员名进 aria-label、当前有效价/首报/R 轮、买卖双方、动作栏
+    expect(dialog.getAttribute('aria-label')).toBe('谈判桌 · 测试球员');
+    expect(desk.getByText('12m')).toBeTruthy();
+    expect(desk.getByText('（首报 10m · R2）')).toBeTruthy();
+    expect(desk.getByText('我的俱乐部')).toBeTruthy(); // 买方=本队
+    expect(desk.getByText('对方俱乐部')).toBeTruthy(); // 卖方=对手
+    expect(actionLabels(dialog)).toEqual(['还价', '同意并挂牌（12m）', '撤回报价']);
+    // 事件流还没到：占位句，而不是「这一单还没有事件记录。」
+    expect(desk.getByText('正在读取谈判记录…')).toBeTruthy();
+    expect(desk.queryByText('这一单还没有事件记录。')).toBeNull();
+    expect(document.querySelectorAll('.nego-b').length).toBe(0);
+
+    d.resolve(detailResponse(o, pendingEvents()));
+    expect(await desk.findByText(/先探个底/)).toBeTruthy();
+    expect(desk.queryByText('正在读取谈判记录…')).toBeNull();
+  });
+
+  it('TC-DESK-12 卖方开桌：底价设置请求与详情并行发出（role 取自列表行，不用等详情）', async () => {
+    const o = offer({ id: 5, status: 'pending', role: 'seller', myTurn: true, turn: 'seller' });
+    const d = deferred<OfferDetailResponse>();
+    renderSection([o], d.promise);
+
+    fireEvent.click(await screen.findByRole('button', { name: '谈判桌' }));
+    const dialog = (await screen.findByRole('dialog')) as HTMLElement;
+
+    // 详情还悬置着（d 没 resolve），设置端点已经按播种的 player.id 打出去 ⇒ 两请求并行而非串行
+    expect(apiMock).toHaveBeenCalledWith('/api/players/9/offer-settings');
+    expect(within(dialog).getByText(/转会名单：标价/)).toBeTruthy();
+
+    d.resolve(detailResponse(o));
+    expect(await within(dialog).findByText(/最低报价/)).toBeTruthy();
+  });
+
+  it('TC-DESK-13 深链 ?offer=999 不在列表：没有可播种的行 ⇒ 仍走「正在摊开谈判桌…」骨架', async () => {
+    const o = offer({ id: 5, status: 'pending' });
+    const d = deferred<OfferDetailResponse>();
+    renderSection([o], d.promise, 0, '/market/desk?tab=offers&box=in&offer=999');
+
+    const dialog = (await screen.findByRole('dialog')) as HTMLElement;
+    expect(within(dialog).getByText('正在摊开谈判桌…')).toBeTruthy();
+    expect(within(dialog).queryByText('正在读取谈判记录…')).toBeNull();
+
+    d.resolve(detailResponse(offer({ id: 999, status: 'expired' })));
+    expect(await within(dialog).findByText('测试球员')).toBeTruthy();
+  });
+
+  it('TC-DESK-14 悬停/聚焦行尾「谈判桌」即预取详情，但不打开浮层', async () => {
+    const o = offer({ id: 5, status: 'pending' });
+    renderSection([o], detailResponse(o, pendingEvents()));
+    const btn = await screen.findByRole('button', { name: '谈判桌' });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    fireEvent.pointerOver(btn);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/offers/5'));
+    expect(document.querySelector('[role="dialog"]'), '预取不该开浮层').toBeNull();
+
+    // 聚焦（键盘 Tab 过来）同样预取
+    apiMock.mockClear();
+    fireEvent.focusIn(btn);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/offers/5'));
   });
 });

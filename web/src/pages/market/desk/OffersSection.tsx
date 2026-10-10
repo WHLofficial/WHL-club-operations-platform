@@ -14,6 +14,9 @@
 //   ③ 金额：报价类（当前价 / 还价 / 同意价）走 moneyIntText（整数带 m），列头去掉「（m）」。
 //   ④ 时间：气泡与系统行到秒（dateTimeSec）。
 //   ⑤ 窄屏清单：表格改卡片行（对手 · 金额 · R轮次 · 完整时间戳），断点 760px（与浮层抽屉同源）。
+// v6.40.2：开桌提速——列表行播种（列表那条单拼成占位详情，单据头点开即读，不再空等一趟详情）+
+//   悬停/聚焦预取详情 + 事件流「正在读取谈判记录…」占位（原先会误显示「还没有事件记录」）；
+//   底价设置请求随播种同帧有 playerId，与详情并行发出（原先串行等详情回来才发）。
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { createPortal } from 'react-dom';
@@ -25,12 +28,19 @@ import {
   type OfferListItem,
   type OfferSettingsDto,
   type OfferStatus,
+  type OffersListResponse,
 } from '../../../lib/api.ts';
 import { playerPath } from '../../../lib/player-link.ts';
 import { moneyIntText } from '../../../lib/club-cards.ts';
 import { useMediaQuery } from '../../../lib/use-media.ts';
 import { useOverlayShell } from '../../../lib/use-overlay-shell.ts';
-import { useOfferDetail, useOfferSettings, useOffers, useOffersInvalidation } from '../../../lib/queries.ts';
+import {
+  offerDetailQuery,
+  useOfferDetail,
+  useOfferSettings,
+  useOffers,
+  useOffersInvalidation,
+} from '../../../lib/queries.ts';
 import { useToast } from '../../../lib/toast.tsx';
 import { useTimeFmt } from '../../../lib/datetime.ts';
 
@@ -91,6 +101,30 @@ function sysText(e: OfferEventRow): string {
   return `${label}${price}${tail ? ` · ${tail}` : ''}`;
 }
 
+// v6.40.2：列表行 → 占位详情，供谈判桌开桌即读（详情那一趟往返还没回来也能看单据头）。
+// 字段口径与 GET /api/offers/:id 的 offer 对齐：buyerClub / sellerClub 按 role 分配（我是买方 ⇒ 本队为买方，
+// 对方为卖方）；season / windowSeq / resolvedAt 谈判桌从不读，置 0 / 0 / null；events 置空，
+// 由 eventsLoading 显示「正在读取谈判记录…」，不冒充「还没有事件记录」。
+// 该单不在当前列表里（深链到更早的单）时返回 null，浮层照旧等详情。
+function seedFromList(data: OffersListResponse | undefined, id: number | null): OfferDetailResponse | null {
+  if (id === null || !data) return null;
+  const row = data.items.find((o) => o.id === id);
+  if (!row) return null;
+  const mine = { id: data.club.id, name: data.club.name };
+  const other = { id: row.counterpart.id, name: row.counterpart.name };
+  return {
+    offer: {
+      ...row,
+      buyerClub: row.role === 'buyer' ? mine : other,
+      sellerClub: row.role === 'seller' ? mine : other,
+      season: 0,
+      windowSeq: 0,
+      resolvedAt: null,
+    },
+    events: [],
+  };
+}
+
 export default function OffersSection({
   box,
   status,
@@ -115,7 +149,9 @@ export default function OffersSection({
   const offerParam = Number(params.get('offer'));
   const targetOfferId = Number.isInteger(offerParam) && offerParam > 0 ? offerParam : null;
   const [openId, setOpenId] = useState<number | null>(targetOfferId);
-  const detail = useOfferDetail(openId, true);
+  // v6.40.2：当前列表里有这一行就先播种成占位详情——单据头点开即读，不等详情那一趟往返
+  const seed = seedFromList(list.data, openId);
+  const detail = useOfferDetail(openId, true, seed);
   const [counterDraft, setCounterDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   // 两段式确认的目标动作（拒绝 / 放弃 / 撤回）：点在就地确认条上才真发请求
@@ -129,6 +165,8 @@ export default function OffersSection({
   // 底价只有卖方视角读得到（GET /api/players/:id/offer-settings 只回本队教练）；买方只认公开标价
   const settingsPlayerId = deskOffer && deskOffer.role === 'seller' ? deskOffer.player.id : 0;
   const settings = useOfferSettings(settingsPlayerId, settingsPlayerId > 0);
+  // v6.40.2：事件流还没到（详情在飞、手上只有播种的空事件表）——事件区显示占位文案，不冒充「没有事件记录」
+  const eventsLoading = detail.isFetching && (detail.data?.events.length ?? 0) === 0;
 
   // 切换页签/筛选时收起谈判桌（旧页在 switchBox / switchStatus 里同步做，这里随受控入参走）。
   // 首跑不收起：那是深链播种的 openId，收起就把 ?offer= 落点丢了。判据用「筛选键前值」而非
@@ -211,11 +249,15 @@ export default function OffersSection({
   }
 
   // 一排可点开的「谈判桌」按钮：桌面表格行 / 窄屏卡片行共用同一份行数据与 openId
+  // v6.40.2：悬停 / 聚焦就预取详情——真点开时多半已进缓存（全局 staleTime 30s），浮层只剩渲染
+  const prefetchDesk = (id: number) => void qc.prefetchQuery(offerDetailQuery(id));
   const openButton = (o: OfferListItem) => (
     <button
       type="button"
       className="btn btn-sm btn-ghost"
       aria-expanded={openId === o.id}
+      onPointerEnter={() => prefetchDesk(o.id)}
+      onFocus={() => prefetchDesk(o.id)}
       onClick={() => setOpenId(openId === o.id ? null : o.id)}
     >
       谈判桌
@@ -390,6 +432,7 @@ export default function OffersSection({
           settings={settings.data ?? null}
           loading={detail.isPending}
           error={detail.error instanceof Error ? detail.error.message : null}
+          eventsLoading={eventsLoading}
           busy={busy}
           counterDraft={counterDraft}
           noteDraft={noteDraft}
@@ -414,6 +457,7 @@ function OfferDesk({
   settings,
   loading,
   error,
+  eventsLoading,
   busy,
   counterDraft,
   noteDraft,
@@ -428,6 +472,7 @@ function OfferDesk({
   settings: OfferSettingsDto | null;
   loading: boolean;
   error: string | null;
+  eventsLoading: boolean;
   busy: boolean;
   counterDraft: string;
   noteDraft: string;
@@ -539,7 +584,11 @@ function OfferDesk({
             </div>
 
             <div className="nego-stream">
-              {events.length === 0 && <p className="nego-empty">这一单还没有事件记录。</p>}
+              {events.length === 0 && (
+                <p className="nego-empty">
+                  {eventsLoading ? '正在读取谈判记录…' : error !== null ? '谈判记录没读出来，重开一次可以再试。' : '这一单还没有事件记录。'}
+                </p>
+              )}
               {events.map((e, i) => {
                 const speaking = e.kind === 'open' || e.kind === 'counter';
                 if (!speaking) {
