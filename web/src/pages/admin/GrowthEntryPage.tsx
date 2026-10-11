@@ -1,7 +1,7 @@
 // 管理端 · 成长录入（v6.16.0）：按场给球员补录成长数据（出场 / 评分 / 零封 / 夺回球权 / 扑救）。
 // 交互对照参考插件 fixtures 编辑器：行内编辑 + 基线脏检测 + 只提交有改动的行 + 未保存切换要确认；
 // 页面结构 = 比赛列表卡（近 50 场）+ 行内按钮在该行下方展开的内嵌面板（不弹窗、不跳页）。
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -9,7 +9,9 @@ import {
   type MatchEntryListItem,
   type MatchEntryPanel,
   type MatchEntryPerPlayerResult,
+  ocrMatchEntry,
 } from '../../lib/api.ts';
+import { mergeOcrEntries, sideConcededOf } from '../../lib/growth-ocr.ts';
 import {
   MATCH_ENTRY_LIST_KEY,
   fetchMatchEntryList,
@@ -77,6 +79,16 @@ const fmtXp = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixe
 
 /** recorded.source 的展示标注：manual = 管理组补录，其余一律按赛果同步理解 */
 const sourceLabel = (source: string): string => (source === 'manual' ? '管理组补录' : '赛果同步');
+
+/** v6.43.0 截图文件 → 纯 base64（剥 data: 前缀）；读失败抛错给上层 toast */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(new Error('读文件失败'));
+    reader.readAsDataURL(file);
+  });
+}
 
 const numOrNull = (s: string): number | null => {
   const t = s.trim();
@@ -445,6 +457,11 @@ function EntryPanel({
   const [side, setSide] = useState<Side>('home');
   const [saving, setSaving] = useState<number | 'all' | null>(null);
   const [lastSummary, setLastSummary] = useState<{ written: number; duplicates: number; totalXp: number } | null>(null);
+  // v6.43.0 截图识别：busy 是当前识别的页签，report 常驻展示在工具栏下（比 toast 更耐看——警告多行）
+  const [ocrBusy, setOcrBusy] = useState<null | 'summary' | 'goalkeeping'>(null);
+  const [ocrReport, setOcrReport] = useState<{ ok: boolean; lines: string[] } | null>(null);
+  const ocrInputRef = useRef<HTMLInputElement | null>(null);
+  const ocrKindRef = useRef<'summary' | 'goalkeeping'>('summary');
   const builtRef = useRef<string | null>(null);
   /** 窄屏（≤760）改渲染卡片流；桌面仍渲染原表格（两端 DOM 互斥，桌面零变化） */
   const narrow = useMediaQuery(ENTRY_CARDS_QUERY);
@@ -486,6 +503,45 @@ function EntryPanel({
 
   function updateRow(playerId: number, fn: (r: RowDraft) => RowDraft) {
     setRows((prev) => (prev ? { ...prev, [side]: prev[side].map((r) => (r.playerId === playerId ? fn(r) : r)) } : prev));
+  }
+
+  // v6.43.0 截图识别：上传 → 服务端视觉模型识别 + 认人 → 预填未锁定格子（可重试、可完全绕过）。
+  // 识别出的队侧与当前侧不同时自动切表（预填必须落在正确的表上）。
+  async function runOcr(file: File) {
+    const kind = ocrKindRef.current;
+    if (ocrBusy !== null || rows === null) return;
+    setOcrBusy(kind);
+    setOcrReport(null);
+    try {
+      const image = await fileToBase64(file);
+      const res = await ocrMatchEntry(match.matchId, kind, image);
+      const target: Side = res.side;
+      if (target !== side) setSide(target);
+      const merged = mergeOcrEntries(rows[target], res.entries, sideConcededOf(match, target));
+      setRows((prev) => (prev ? { ...prev, [target]: merged.rows } : prev));
+      const lines: string[] = [];
+      lines.push(
+        `识别成功：预填 ${merged.applied} 格${merged.gkAuto > 0 ? `，零封联动自动勾 ${merged.gkAuto} 名门将` : ''}`,
+      );
+      if (merged.skipped.length > 0) {
+        lines.push(`跳过 ${merged.skipped.length} 条：${merged.skipped.map((s) => `${s.name}（${s.reason}）`).join('、')}`);
+      }
+      if (res.unmatched.length > 0) {
+        lines.push(`认人失败 ${res.unmatched.length} 行：${res.unmatched.map((u) => u.name).join('、')}——请在表内手填`);
+      }
+      for (const w of res.warnings) lines.push(w);
+      setOcrReport({ ok: true, lines });
+    } catch (err) {
+      setOcrReport({ ok: false, lines: [err instanceof Error ? err.message : '识别失败'] });
+    } finally {
+      setOcrBusy(null);
+    }
+  }
+
+  function onOcrPick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) void runOcr(file);
   }
 
   function sideChip(s: Side) {
@@ -617,6 +673,43 @@ function EntryPanel({
         </span>
       </div>
 
+      {mode === 'edit' && (
+        <div className="entry-ocr">
+          <span className="muted">截图识别（可选）：</span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={ocrBusy !== null}
+            onClick={() => {
+              ocrKindRef.current = 'summary';
+              ocrInputRef.current?.click();
+            }}
+          >
+            {ocrBusy === 'summary' ? '识别中…' : '上传外场 Summary 截图'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={ocrBusy !== null}
+            onClick={() => {
+              ocrKindRef.current = 'goalkeeping';
+              ocrInputRef.current?.click();
+            }}
+          >
+            {ocrBusy === 'goalkeeping' ? '识别中…' : '上传门将页截图'}
+          </button>
+          <input ref={ocrInputRef} type="file" accept="image/png,image/jpeg" hidden onChange={onOcrPick} />
+          <span className="muted">识别出场 / 评分 / 零封 / 扑救并预填；夺回球权仍手填。预填后请人工核对。</span>
+          {ocrReport && (
+            <div className={`entry-ocr-report${ocrReport.ok ? '' : ' bad-text'}`}>
+              {ocrReport.lines.map((l, i) => (
+                <p key={i}>{l}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {mode === 'view' && <p className="hint">只读查看：所有格子已锁定，已录值不可修改。</p>}
 
       {narrow ? (
@@ -735,7 +828,18 @@ function EntryPanel({
                         placeholder="次数"
                         title={`历史累计 ${r.duelsBase} 次 · 每 12 次 1 XP`}
                         onChange={(e) =>
-                          updateRow(r.playerId, (row) => ({ ...row, duelsWon: { ...row.duelsWon, value: e.target.value }, result: null }))
+                          updateRow(r.playerId, (row) => {
+                            // 零封联动（用户裁决）：本侧失球 0 时，手填夺回球权（含 0）= 确认防守球员 → 自动勾零封；
+                            // 清空或改错不联动取消，人工反勾不被覆盖
+                            const autoClean =
+                              sideConcededOf(match, side) === 0 && !row.cleanSheet.locked && !row.cleanSheet.checked && isNonNegativeInt(e.target.value);
+                            return {
+                              ...row,
+                              duelsWon: { ...row.duelsWon, value: e.target.value },
+                              cleanSheet: autoClean ? { ...row.cleanSheet, checked: true } : row.cleanSheet,
+                              result: null,
+                            };
+                          })
                         }
                       />
                     )}
@@ -910,7 +1014,18 @@ function EntryPanel({
                         placeholder="次数"
                         title={`历史累计 ${r.duelsBase} 次 · 每 12 次 1 XP`}
                         onChange={(e) =>
-                          updateRow(r.playerId, (row) => ({ ...row, duelsWon: { ...row.duelsWon, value: e.target.value }, result: null }))
+                          updateRow(r.playerId, (row) => {
+                            // 零封联动（用户裁决）：本侧失球 0 时，手填夺回球权（含 0）= 确认防守球员 → 自动勾零封；
+                            // 清空或改错不联动取消，人工反勾不被覆盖
+                            const autoClean =
+                              sideConcededOf(match, side) === 0 && !row.cleanSheet.locked && !row.cleanSheet.checked && isNonNegativeInt(e.target.value);
+                            return {
+                              ...row,
+                              duelsWon: { ...row.duelsWon, value: e.target.value },
+                              cleanSheet: autoClean ? { ...row.cleanSheet, checked: true } : row.cleanSheet,
+                              result: null,
+                            };
+                          })
                         }
                       />
                     )}

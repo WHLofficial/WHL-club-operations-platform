@@ -1662,6 +1662,25 @@ tbody tr:hover td {
   gap: 8px;
 }
 
+/* v6.43.0 截图识别条：工具栏下的一行操作 + 多行识别报告 */
+.entry-ocr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.entry-ocr-report {
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+
+.entry-ocr-report p {
+  margin: 2px 0;
+  font-size: 12px;
+}
+
 /* 未保存改动确认条：plugin fixtures 同语义（继续编辑 / 放弃改动） */
 .entry-confirm {
   display: flex;

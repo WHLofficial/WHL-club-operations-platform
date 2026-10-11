@@ -1988,6 +1988,38 @@ export interface MatchEntrySubmitResult {
   perPlayer: MatchEntryPerPlayerResult[];
 }
 
+// ---- v6.43.0：截图识别预填（POST /api/admin/growth/match-entry/:matchId/ocr，零 DB 写） ----
+
+/** 识别出的单人预填条目（服务端已认人；夺回球权不识别——按裁决保持人工手填） */
+export interface MatchOcrEntry {
+  playerId: number;
+  name: string;
+  position: string | null;
+  draft: { appearance?: true; rating?: number; cleanSheet?: true; saves?: number };
+  /** 认人方式：official = 官方缩写名逐字，*folded = 归一化命中，display = 显示名 */
+  matched: 'official' | 'official-folded' | 'display' | 'display-folded';
+}
+
+/** 一张截图的识别结果（结构错误 / 交叉校验 / 模型备注都收在 warnings） */
+export interface MatchOcrResult {
+  team: string | null;
+  side: 'home' | 'away';
+  kind: 'summary' | 'goalkeeping';
+  entries: MatchOcrEntry[];
+  /** 认人失败的截图行（表格内手填或忽略） */
+  unmatched: { name: string; pos: string | null }[];
+  warnings: string[];
+}
+
+/** 赛后截图识别预填（不写库；image 传不带 data: 前缀的 base64） */
+export async function ocrMatchEntry(
+  matchId: number,
+  kind: 'summary' | 'goalkeeping',
+  imageBase64: string,
+): Promise<MatchOcrResult> {
+  return apiPost<MatchOcrResult>(`/api/admin/growth/match-entry/${matchId}/ocr`, { kind, image: imageBase64 });
+}
+
 // ---- M0 货币监控（PRD：Σ俱乐部余额报表，观察通胀） ----
 
 export interface M0Report {

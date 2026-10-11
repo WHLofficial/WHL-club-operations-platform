@@ -18,6 +18,9 @@ import {
   type GrowthEventType,
 } from '../../growth.ts';
 import { rowDisplayName } from '../../../core/player-name.ts';
+import { foldName } from '../../../core/name-fold.ts';
+import { parseOcrVision, buildOcrEntries, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
+import { llmVisionJson } from '../../../lib/llm.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -329,6 +332,111 @@ app.get('/growth/match-entry/:matchId', async (c) => {
       away: { clubId: away.clubId, isCpu: away.isCpu, players: withTotals(awayPlayers) },
     },
     recorded: recorded.results.map((r) => ({ playerId: r.player_id, eventType: r.event_type, value: r.value, xp: r.xp, source: r.source })),
+  });
+});
+
+// v6.43.0：赛后截图识别（零 DB 写，管理端手动触发）。一张图一次调用：
+// 视觉模型 → parseOcrVision → 队名对侧 → 花名册认人 → 预填草稿 + 交叉校验警告。
+// 失败可重试、可完全绕过（识别是增强不是依赖，预填后仍走下方批量端点人工确认入库）。
+const OCR_PROMPT = `你是 FC26 赛后数据截图的识别引擎。这张图是游戏的「Player Performance」界面，布局固定：
+- 左侧：球员表格，列依次为 POS（位置缩写）、Name（球员名）、RR（评分，N/A 表示替补没上场）、G（进球）、AST（助攻）。
+- 右侧：当前选中球员的详情区，顶部有页签（Summary / Possession / Shooting / Passing / Defending / Goalkeeping）。
+- 画面最顶部的 FPS/CPU/GPU 监控条是录屏软件的干扰，一律忽略。
+
+请输出严格的 JSON（禁止 markdown 代码块、禁止多余文字），结构如下：
+{
+  "team": "右上角队名",
+  "tab": "右侧详情当前页签，小写：summary|goalkeeping（其它页签也照实输出）",
+  "rows": [
+    { "pos": "位置缩写", "name": "球员名（保留原文的重音符号，如 é、à、ć）", "rating": 数字或 null, "goals": 数字, "assists": 数字 }
+  ],
+  "selected": {
+    "name": "左侧表格中高亮选中的球员名",
+    "rating": "详情区 Total Rating 数字（summary 页签时）",
+    "goals": "详情区 Goals 左列数字", "assists": "详情区 Assists 左列数字",
+    "possessionWon": "详情区 Possession Won 左列数字", "minutes": "Minutes Played 左列数字"
+  },
+  "gk": {
+    "name": "左侧表格中高亮选中的门将名",
+    "gkRating": "详情区 Goalkeeper Rating 数字（goalkeeping 页签时）",
+    "shotsAgainst": "Shots Against", "shotsOnTarget": "Shots On Target",
+    "saves": "Saves", "goalsConceded": "Goals Conceded"
+  },
+  "notes": "识别中任何不确定、看不清、被遮挡的地方，没有则空串"
+}
+规则：
+1. rows 只输出图中可见的行，按图内顺序；表格带滚动条时看不到的行绝不编造。
+2. 替补（SUB）行 rating 是 N/A，输出 null。
+3. selected 与 gk 二选一：tab=summary 填 selected、tab=goalkeeping 填 gk；其它页签两者都为 null。
+4. 所有数字严格按图，不做任何推算。`;
+
+const OCR_MAX_BYTES = 5 * 1024 * 1024; // 与媒体上传同一口径
+
+/** base64 → 规范化 base64 + 嗅探魔数；只认 PNG/JPEG（防 MIME 伪装），超 5MB 拒。 */
+function decodeOcrImage(b64: string): { mime: 'image/png' | 'image/jpeg'; base64: string } {
+  const compact = b64.replace(/^data:(image\/(?:png|jpeg));base64,/, '').replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) throw new HttpError(400, 'image 不是合法 base64');
+  const buffer = Uint8Array.from(atob(compact), (ch) => ch.charCodeAt(0));
+  if (buffer.byteLength === 0) throw new HttpError(400, 'image 解码后是空的');
+  if (buffer.byteLength > OCR_MAX_BYTES) throw new HttpError(400, '图片超过 5MB 上限');
+  const png = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+  const jpeg = buffer[0] === 0xff && buffer[1] === 0xd8;
+  if (!png && !jpeg) throw new HttpError(400, '只支持 PNG 或 JPEG 截图');
+  return { mime: png ? 'image/png' : 'image/jpeg', base64: compact };
+}
+
+app.post('/growth/match-entry/:matchId/ocr', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  const matchId = Number(c.req.param('matchId'));
+  const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
+  if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认、弃权或不是联赛/冠军杯小组赛）');
+
+  const body = (await readJson(c)) as { kind?: unknown; image?: unknown } | null;
+  const kind = body?.kind;
+  if (kind !== 'summary' && kind !== 'goalkeeping') throw new HttpError(400, 'kind 只能是 summary 或 goalkeeping');
+  if (typeof body?.image !== 'string' || body.image === '') throw new HttpError(400, '缺 image（截图的 base64）');
+  const image = decodeOcrImage(body.image);
+
+  // 视觉调用（未配置 503 / 失败 502 都由 llmVisionJson 抛）
+  const parsed = await llmVisionJson<{ notes?: unknown }>(c.env, image, OCR_PROMPT);
+  const { ocr, errors } = parseOcrVision(parsed);
+  if (!ocr || !ocr.tab || ocr.tab !== kind) {
+    throw new HttpError(502, `识别结果${ocr?.tab && ocr.tab !== kind ? `是 ${ocr.tab} 页签，与上传的 ${kind} 不符` : '不可解析'}，请重试${errors.length ? `（${errors[0]}）` : ''}`);
+  }
+
+  // 截图队名 → 本场两侧（归一化等值，退化为包含）；CPU 队名一样能对上（认人靠花名册，CPU 侧花名册为空）
+  const fold = (s: string | null) => foldName(s ?? '');
+  const ocrTeam = fold(ocr.team);
+  let side: 'home' | 'away' | null = null;
+  if (ocrTeam && (ocrTeam === fold(row.home_team) || ocrTeam.includes(fold(row.home_team)) || fold(row.home_team).includes(ocrTeam))) side = 'home';
+  else if (ocrTeam && (ocrTeam === fold(row.away_team) || ocrTeam.includes(fold(row.away_team)) || fold(row.away_team).includes(ocrTeam))) side = 'away';
+  if (!side) throw new HttpError(400, `截图队名「${ocr.team ?? '未识别'}」对不上这场比赛（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），确认传对图了吗`);
+
+  const resolved = await resolveEntrySide(c.env.DB, side === 'home' ? row.home_team : row.away_team, new Map());
+  const roster: OcrRosterPlayer[] =
+    resolved.clubId === null
+      ? []
+      : (
+          await c.env.DB.prepare(
+            `SELECT id, name, display_name, position FROM players WHERE club_id = ? AND status IN ('normal', 'listed', 'trainee')`,
+          )
+            .bind(resolved.clubId)
+            .all<{ id: number; name: string; display_name: string | null; position: string | null }>()
+        ).results.map((p) => ({ id: p.id, officialName: p.name, displayName: rowDisplayName(p), position: p.position }));
+
+  const built = buildOcrEntries(ocr, roster);
+  const crossWarnings =
+    row.score_home === null || row.score_away === null ? [] : ocrCrossChecks(ocr, { side, scoreHome: row.score_home, scoreAway: row.score_away });
+  const warnings = [...errors, ...built.warnings, ...crossWarnings];
+  if (typeof parsed.notes === 'string' && parsed.notes.trim() !== '') warnings.push(`模型备注：${parsed.notes.trim()}`);
+
+  return c.json({
+    team: ocr.team,
+    side,
+    kind,
+    entries: built.entries,
+    unmatched: built.unmatched,
+    warnings,
   });
 });
 

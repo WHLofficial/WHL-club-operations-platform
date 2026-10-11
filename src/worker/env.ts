@@ -45,4 +45,7 @@ export interface Env {
   LLM_API_BASE?: string;
   LLM_API_KEY?: string;
   LLM_MODEL?: string;
+  // v6.43.0：成长录入截图识别用的视觉模型，缺省回落 LLM_MODEL（免费档 glm-4v-flash 已实测够用，
+  // 见 memory/spike-v6.43.0-vision.md）。
+  LLM_VISION_MODEL?: string;
 }
