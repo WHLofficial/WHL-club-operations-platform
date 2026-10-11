@@ -1056,3 +1056,69 @@ describe('v6.40.2 顶栏双文案静态锁（TC-TOPBAR-01）', () => {
     expect(narrow[0], '≤640 块要把短文案放出来').toMatch(/\.nav-tab \.nav-ts\s*\{\s*display:\s*inline/);
   });
 });
+
+describe('v6.41.0 顶栏 ≡ 菜单静态锁（TC-MENU-11/12/13）', () => {
+  const TOPBAR = `${WEB_SRC}/components/TopBar.tsx`;
+
+  // 背景：v6.25.0 把「显示时区三档」与「退出登录」平铺在顶栏右上角，窄屏首行因此拥挤（登出按钮占 ~76px）。
+  // v6.41.0 两件控件并进右上角 ≡ 菜单，未登录也渲染（时区对公开页生效），登出项只在已登录 OIDC 态出现。
+  // 交互本身由 TopBar.test.tsx 六例与 e2e ⑰ 真浏览器路径兜；这里卡住形态——类名/aria/顺序被下批重构
+  // 挪走时，组件测试仍会绿（它们按 role 找元素），但「登出又回到顶栏平铺」「菜单掉进登录态条件里」这类
+  // 回归只有文本扫描看得见。
+  it('TC-MENU-11 · ≡ 按钮带完整 aria 契约，图标是三条横线', () => {
+    const top = read(TOPBAR);
+    expect(top, '缺 ≡ 按钮类名（e2e ⑰ 与样式都锚它）').toContain('className="user-menu-btn"');
+    expect(top, '≡ 按钮缺 aria-label（按钮无可读文本，靠它命名）').toContain('aria-label="菜单"');
+    expect(top, '≡ 按钮缺 aria-haspopup="menu"').toContain('aria-haspopup="menu"');
+    expect(top, '≡ 按钮缺 aria-expanded 展开态').toContain('aria-expanded={menuOpen}');
+    expect(top, '图标该是三条横线（M4 7h16M4 12h16M4 17h16）').toContain('M4 7h16M4 12h16M4 17h16');
+  });
+
+  it('TC-MENU-12 · 时区三档与退出登录都在 .user-menu 容器内，且登出仍限 OIDC', () => {
+    const top = read(TOPBAR);
+    const wrapAt = top.indexOf('className="user-menu-wrap"');
+    const menuAt = top.indexOf('className="user-menu"');
+    const logoutAt = top.indexOf('action="/api/auth/logout"');
+    expect(wrapAt, '顶栏缺 .user-menu-wrap 容器').toBeGreaterThan(-1);
+    expect(menuAt, '顶栏缺 .user-menu 弹层').toBeGreaterThan(wrapAt);
+    expect(logoutAt, '退出登录不在 ≡ 菜单容器之后（=没在菜单里）').toBeGreaterThan(menuAt);
+
+    const menu = top.slice(menuAt, top.indexOf('</div>', logoutAt));
+    expect(menu, '菜单缺时区小标题（顶栏没时钟图标了，当前档只在这里可见）').toContain('className="user-menu-head"');
+    expect(menu, '时区三档该由 TZ_OPTIONS 渲染').toContain('TZ_OPTIONS.map');
+    expect(menu, '时区档缺 menuitemradio 语义').toContain('role="menuitemradio"');
+    expect(menu, '时区档缺 aria-checked 选中态').toContain('aria-checked={tz === value}');
+    expect(menu, '菜单里该有分隔线把时区与登出隔开').toContain('className="user-menu-sep"');
+    expect(menu, '登出项缺 role="menuitem"').toContain('role="menuitem"');
+    expect(menu, '登出必须是原生表单整页 POST（302 链由浏览器跟随）').toContain('method="post"');
+
+    const gate = top.slice(Math.max(0, logoutAt - 260), logoutAt);
+    expect(gate, '登出项该仍受「已登录 + OIDC」双门控（兼容模式无从登出）').toMatch(
+      /user\s*&&\s*authMode\s*===\s*'oidc'/,
+    );
+  });
+
+  it('TC-MENU-13 · 菜单渲染在 user 三态条件之后（未登录也渲染），旧 .tz-* 类零残留', () => {
+    const top = read(TOPBAR);
+    const menuWrapAt = top.indexOf('className="user-menu-wrap"');
+    const tourLoginAt = top.indexOf('去赛事系统登录');
+    expect(tourLoginAt, '顶栏缺兼容模式的赛事系统登录入口').toBeGreaterThan(-1);
+    expect(menuWrapAt, '≡ 菜单落进了 user 三态条件内（未登录就不渲染 ⇒ 公开页没法切时区）').toBeGreaterThan(tourLoginAt);
+
+    for (const dead of ['tz-btn', 'tz-pop', 'tz-wrap']) {
+      expect(top, `TopBar 仍有 v6.25.0 的旧类名 ${dead}`).not.toContain(dead);
+    }
+    const css = read(STYLES_CSS);
+    expect(css, 'styles.css 仍留着旧的 .tz-* 选择器').not.toMatch(/^\s*\.tz-(wrap|btn|pop)\b/m);
+    expect(css, 'CSS 缺 .user-menu 弹层规则').toMatch(/\.user-menu\s*\{/);
+    expect(css, 'CSS 缺时区小标题规则').toMatch(/\.user-menu-head\s*\{/);
+    expect(css, 'CSS 缺菜单分隔线规则').toMatch(/\.user-menu-sep\s*\{/);
+    expect(css, '登出表单会撑高弹层（缺 .user-menu form { margin: 0 }）').toMatch(
+      /\.user-menu form\s*\{\s*margin:\s*0;?\s*\}/,
+    );
+    expect(css, '弹层该右锚（right: 0）——≡ 在最右一格，向左展开').toMatch(/\.user-menu\s*\{[^}]*right:\s*0/);
+    expect(css, '选中档样式丢了（用户看不出当前时区）').toMatch(
+      /\.user-menu button\[aria-checked='true'\]\s*\{[^}]*color:\s*var\(--terracotta\)/,
+    );
+  });
+});

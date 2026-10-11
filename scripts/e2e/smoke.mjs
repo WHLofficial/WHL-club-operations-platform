@@ -2812,12 +2812,19 @@ async function main() {
       }
     });
 
-    // v6.25.0：显示时区偏好化——顶栏时钟图标下拉即切即生效（重渲染链 whl:tz-change → useTzPref）、
-    // 收件篮信封图标化。跑在 1280 宽屏（⑰ 前各场景已把视口拨回）。
-    await check('⑰ 显示时区：时钟下拉切 UTC 时间串即变 + 收件篮图标化 + Esc 关闭', async () => {
+    // v6.25.0 的显示时区偏好化（重渲染链 whl:tz-change → useTzPref）+ 收件篮信封图标化；
+    // v6.41.0 起时区下拉与退出登录并进右上角 ≡ 菜单（button.user-menu-btn / .user-menu），
+    // 顶栏不再平铺这两件控件。跑在 1280 宽屏（⑰ 前各场景已把视口拨回），末尾补 375 窄屏几何。
+    await check('⑰ ≡ 菜单：时区切 UTC 时间串即变 + 退出登录在菜单内 + 收件篮图标化 + Esc 关闭', async () => {
       await page.goto(`${BASE}/ledger`, { waitUntil: 'networkidle' });
-      const tzBtn = page.locator('button.tz-btn');
-      assert(await tzBtn.isVisible(), '顶栏时钟图标（button.tz-btn）不可见');
+      const menuBtn = page.locator('button.user-menu-btn');
+      assert(await menuBtn.isVisible(), '顶栏 ≡ 菜单按钮（button.user-menu-btn）不可见');
+      // 零残留：v6.25.0 的时钟按钮与平铺登出表单都不该还在顶栏上
+      assert((await page.locator('button.tz-btn').count()) === 0, '顶栏仍有旧的时钟按钮 button.tz-btn');
+      assert(
+        (await page.locator('.userbox > form[action="/api/auth/logout"]').count()) === 0,
+        '顶栏仍有平铺的登出表单（应已收进 ≡ 菜单）',
+      );
       const inbox = page.locator('a.inbox-link[aria-label="站内信收件篮"]');
       assert(await inbox.isVisible(), '收件篮信封图标（a.inbox-link）不可见');
 
@@ -2829,12 +2836,20 @@ async function main() {
         console.warn('（⑰ 备注：会话无未读，红点断言降级——静态与单测兜底）');
       }
 
-      // 打开下拉：默认档必须是北京时间
-      await tzBtn.click();
-      const pop = page.locator('.tz-pop');
-      assert(await pop.isVisible(), '时区下拉未弹出');
+      // 打开菜单：默认档必须是北京时间；登出项按 /api/me 的 authMode 断言（兼容模式本来就没有登出）
+      await menuBtn.click();
+      const pop = page.locator('.user-menu');
+      assert(await pop.isVisible(), '≡ 菜单未弹出');
       const checked = await pop.locator('button[aria-checked="true"]').innerText();
       assert(checked.includes('北京时间'), `默认选中档应为北京时间（实际=${checked.trim()}）`);
+      const me = await page.evaluate(async () => (await fetch('/api/me')).json());
+      const logout = pop.locator('form[action="/api/auth/logout"] button', { hasText: '退出登录' });
+      if (me?.authMode === 'oidc') {
+        assert(await logout.isVisible(), 'OIDC 态下 ≡ 菜单缺「退出登录」项');
+        assert((await logout.getAttribute('role')) === 'menuitem', '登出项缺 role="menuitem"');
+      } else {
+        console.warn(`（⑰ 备注：本地 dev AUTH_MODE=${me?.authMode}，菜单无登出项属预期——OIDC 断言降级）`);
+      }
 
       // 账本首行时间串：切 UTC 后必须变（同一条流水北京时间 21:xx vs UTC 13:xx）
       const cell = page.locator('td.mono.ledger-time').first();
@@ -2853,16 +2868,63 @@ async function main() {
         assert(after !== before, `切 UTC 后时间串未变化（前后都=${before}）——whl:tz-change 重渲染链失效`);
       }
 
-      // 切回默认档 + Esc 关闭下拉
-      await tzBtn.click();
-      await page.locator('.tz-pop button', { hasText: '北京时间' }).click();
+      // 切回默认档 + Esc 关闭菜单
+      await menuBtn.click();
+      await page.locator('.user-menu button', { hasText: '北京时间' }).click();
       assert(
         (await page.evaluate(() => localStorage.getItem('whl.tz'))) === 'asia/shanghai',
         '切回北京时间失败',
       );
-      await tzBtn.click();
+      await menuBtn.click();
       await page.keyboard.press('Escape');
-      assert((await page.locator('.tz-pop').count()) === 0, 'Esc 未关闭时区下拉');
+      assert((await page.locator('.user-menu').count()) === 0, 'Esc 未关闭 ≡ 菜单');
+
+      // 375 窄屏几何：≡ 收进菜单后顶栏首行省出宽度（登出按钮原来占 ~76px），不许溢出；
+      // 弹层右缘也不许越出视口（绝对定位 right:0 锚在按钮右缘，向左展开）
+      await page.setViewportSize({ width: 375, height: 780 });
+      await page.waitForTimeout(200);
+      const geo = await page.evaluate(() => {
+        const d = document.documentElement;
+        const btn = document.querySelector('button.user-menu-btn');
+        const ub = document.querySelector('.userbox');
+        return {
+          btnRight: Math.round(btn.getBoundingClientRect().right),
+          ubW: Math.round(ub.getBoundingClientRect().width),
+          clientW: d.clientWidth,
+          scrollW: d.scrollWidth,
+        };
+      });
+      assert(geo.btnRight <= geo.clientW + 1, `375 下 ≡ 按钮右缘 ${geo.btnRight} 越出视口 ${geo.clientW}`);
+      assert(geo.scrollW <= geo.clientW + 1, `375 顶栏撑出横向滚动（${geo.scrollW} > ${geo.clientW}）`);
+      await menuBtn.click();
+      const menuRight = await page.evaluate(() => Math.round(document.querySelector('.user-menu').getBoundingClientRect().right));
+      assert(menuRight <= geo.clientW + 1, `375 下 ≡ 弹层右缘 ${menuRight} 越出视口 ${geo.clientW}`);
+      await page.keyboard.press('Escape');
+      // 最坏情况口径：把退役的登出按钮按旧样式塞回 userbox，量它当时占多宽、会不会把文档撑出横向滚动
+      // （只改 DOM 不改源码，量完立刻摘掉；实测结论写进测试计划，供下次判断「收纳是否值得」）
+      const legacy = await page.evaluate(() => {
+        const ub = document.querySelector('.userbox');
+        const name = document.querySelector('.userbox-name');
+        const nameBefore = name ? Math.round(name.getBoundingClientRect().width) : null;
+        const probe = document.createElement('button');
+        probe.className = 'btn btn-sm';
+        probe.textContent = '退出登录';
+        ub.appendChild(probe);
+        const w = Math.round(probe.getBoundingClientRect().width);
+        const total = Math.round(ub.getBoundingClientRect().width);
+        const doc = document.documentElement.scrollWidth;
+        const clientW = document.documentElement.clientWidth;
+        const nameAfter = name ? Math.round(name.getBoundingClientRect().width) : null;
+        probe.remove();
+        return { w, total, doc, clientW, nameBefore, nameAfter };
+      });
+      console.log(
+        `   ≡ 菜单 375 几何：按钮右缘 ${geo.btnRight}/${geo.clientW}；userbox 宽 ${geo.ubW}；文档宽 ${geo.scrollW}；弹层右缘 ${menuRight}`,
+      );
+      console.log(
+        `   ≡ 菜单 375 最坏情况：登出按钮复原占 ${legacy.w}px（userbox ${legacy.total}），文档宽 ${legacy.doc}/${legacy.clientW}，用户名宽 ${legacy.nameBefore}→${legacy.nameAfter}`,
+      );
+      await page.setViewportSize({ width: 1280, height: 900 });
     });
 
     await check('⑱ 消费中心：页结构 / 匿名引导 / 工作台与主场入口 / 管理端侧栏「消费」', async () => {

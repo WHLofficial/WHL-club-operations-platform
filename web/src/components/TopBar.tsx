@@ -20,18 +20,19 @@ export default function TopBar() {
   const barRef = useRef<HTMLElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
-  // v6.25.0：时区切换下拉（未登录也可见——球员库 / 球队页是公开的，时间显示对所有访客生效）
+  // v6.25.0 的时区切换（未登录也可见——球员库 / 球队页是公开的，时间显示对所有访客生效）与退出登录，
+  // v6.41.0 起并进右上角 ≡ 菜单：顶栏不再平铺这两件低频控件，窄屏首行也省出宽度。
   const tz = useTzPref();
-  const [tzOpen, setTzOpen] = useState(false);
-  const tzRef = useRef<HTMLDivElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!tzOpen) return;
+    if (!menuOpen) return;
     // 外点 / Esc 关闭（与 MultiSelect 的 Popover 同款交互）
     const onDown = (e: MouseEvent) => {
-      if (tzRef.current && !tzRef.current.contains(e.target as Node)) setTzOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setTzOpen(false);
+      if (e.key === 'Escape') setMenuOpen(false);
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -39,7 +40,7 @@ export default function TopBar() {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [tzOpen]);
+  }, [menuOpen]);
 
   // v6.20.0：窄屏顶栏第二行是横滑页签，当前页签可能停在视口外（用户看不出自己在哪）。
   // 路由变化后把 .is-active 滚进视野并居中，只动横向：inline 居中，block 用 'nearest' ——
@@ -149,41 +150,6 @@ export default function TopBar() {
           )}
         </nav>
         <div className="userbox">
-          {/* v6.25.0：显示时区切换——时钟图标 + 下拉，偏好本地持久化、全站时间随档即时刷新 */}
-          <div className="tz-wrap" ref={tzRef}>
-            <button
-              type="button"
-              className="tz-btn"
-              aria-label="显示时区"
-              aria-expanded={tzOpen}
-              title={`显示时区：${tzLabel(tz)}`}
-              onClick={() => setTzOpen((v) => !v)}
-            >
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-                <path d="M12 7v5l3.5 2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            </button>
-            {tzOpen && (
-              <div className="tz-pop" role="menu">
-                {TZ_OPTIONS.map(([value, text]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={tz === value}
-                    onClick={() => {
-                      setTzPref(value);
-                      setTzOpen(false);
-                    }}
-                  >
-                    {tz === value ? '✓ ' : ''}
-                    {text}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
           {user === undefined ? null : user ? (
             <>
               {/* v6.25.0：文字链接换信封图标，未读红点锚图标右上（原 .inbox-unread-dot 语义不变） */}
@@ -197,16 +163,6 @@ export default function TopBar() {
               <span className="userbox-name">{user.name}</span>
               {isSuperAdmin(user) && <span className="badge red">超管</span>}
               <span className={`role-badge role-${user.role}`}>{ROLE_LABEL[user.role]}</span>
-              {/* 登出仅 OIDC 模式提供：兼容模式的会话真源在赛事系统，club 无从登出。
-                  原生表单整页跳转：302 链（club→认证中心→回 club）由浏览器跟随，
-                  后端顺带吊销本地会话并清 cookie */}
-              {authMode === 'oidc' && (
-                <form action="/api/auth/logout" method="post">
-                  <button className="btn btn-sm btn-ghost" type="submit">
-                    退出登录
-                  </button>
-                </form>
-              )}
             </>
           ) : authMode === 'oidc' ? (
             // OIDC 模式：本站发起 authorize 跳认证中心，需同页导航（回跳状态存 cookie，新开窗口会丢）
@@ -218,6 +174,59 @@ export default function TopBar() {
               去赛事系统登录
             </a>
           )}
+          {/* v6.41.0：右上角 ≡ 菜单——v6.25.0 的时区三档与退出登录都收在这里；未登录也渲染
+              （时区对公开页生效：球员库 / 球队页的时间显示按档走），登出项只在已登录的 OIDC 态出现 */}
+          <div className="user-menu-wrap" ref={menuRef}>
+            <button
+              type="button"
+              className="user-menu-btn"
+              aria-label="菜单"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title={`菜单（显示时区：${tzLabel(tz)}）`}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            {menuOpen && (
+              <div className="user-menu" role="menu" aria-label="用户菜单">
+                {/* 顶栏不再挂时钟图标，当前时区档只在这里能一眼看到 */}
+                <p className="user-menu-head" role="presentation">
+                  显示时区：{tzLabel(tz)}
+                </p>
+                {TZ_OPTIONS.map(([value, text]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={tz === value}
+                    onClick={() => {
+                      setTzPref(value);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    {tz === value ? '✓ ' : ''}
+                    {text}
+                  </button>
+                ))}
+                {/* 登出仅 OIDC 模式提供：兼容模式的会话真源在赛事系统，club 无从登出。
+                    原生表单整页跳转：302 链（club→认证中心→回 club）由浏览器跟随，
+                    后端顺带吊销本地会话并清 cookie */}
+                {user && authMode === 'oidc' && (
+                  <>
+                    <div className="user-menu-sep" role="separator" />
+                    <form action="/api/auth/logout" method="post">
+                      <button type="submit" role="menuitem">
+                        退出登录
+                      </button>
+                    </form>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>

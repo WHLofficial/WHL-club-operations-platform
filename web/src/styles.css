@@ -216,13 +216,13 @@ h3 {
   box-shadow: 0 0 0 2px var(--cocoa);
 }
 
-/* 显示时区切换（v6.25.0）：时钟图标按钮 + 三档下拉 */
-.tz-wrap {
+/* 右上角 ≡ 菜单（v6.41.0）：v6.25.0 的时区下拉与退出登录并进同一个弹层（原 .tz-wrap/.tz-pop） */
+.user-menu-wrap {
   position: relative;
   display: inline-flex;
 }
 
-.tz-btn {
+.user-menu-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -234,16 +234,16 @@ h3 {
   cursor: pointer;
 }
 
-.tz-btn:hover {
+.user-menu-btn:hover {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.tz-pop {
+.user-menu {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
   z-index: 60;
-  min-width: 132px;
+  min-width: 148px;
   display: flex;
   flex-direction: column;
   padding: 4px;
@@ -253,7 +253,14 @@ h3 {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
-.tz-pop button {
+/* 小标题：顶栏没有时钟图标了，当前时区档只能在这里看到 */
+.user-menu-head {
+  margin: 2px 6px 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.user-menu button {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -268,13 +275,23 @@ h3 {
   white-space: nowrap;
 }
 
-.tz-pop button:hover {
+.user-menu button:hover {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.tz-pop button[aria-checked='true'] {
+.user-menu button[aria-checked='true'] {
   color: var(--terracotta);
   font-weight: 600;
+}
+
+.user-menu-sep {
+  margin: 4px 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* 登出是原生表单整页 POST：表单本身不能撑高弹层 */
+.user-menu form {
+  margin: 0;
 }
 
 /* 收件篮页（v2.4.0） */
