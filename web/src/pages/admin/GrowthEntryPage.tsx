@@ -463,6 +463,17 @@ function EntryPanel({
   const ocrInputRef = useRef<HTMLInputElement | null>(null);
   const ocrKindRef = useRef<'summary' | 'goalkeeping'>('summary');
   const builtRef = useRef<string | null>(null);
+  // rows 的同步镜像：截图识别要等 13-90 秒，期间管理员可能手填格子——
+  // 响应回来时合并基底必须是最新的行（闭包里的 rows 是发起那一刻的快照，直接用会覆盖等待期的手填）
+  const rowsRef = useRef<Record<Side, RowDraft[]> | null>(null);
+  /** 所有 rows 写入都走这里，保证 rowsRef 与状态同调（updateRow / 识别合并 / 保存锁定共用） */
+  function setRowsTracked(updater: (prev: Record<Side, RowDraft[]> | null) => Record<Side, RowDraft[]> | null) {
+    setRows((prev) => {
+      const next = updater(prev);
+      rowsRef.current = next;
+      return next;
+    });
+  }
   /** 窄屏（≤760）改渲染卡片流；桌面仍渲染原表格（两端 DOM 互斥，桌面零变化） */
   const narrow = useMediaQuery(ENTRY_CARDS_QUERY);
 
@@ -472,7 +483,7 @@ function EntryPanel({
     const built = `${data.match.matchId}:${mode}`;
     if (builtRef.current === built) return;
     builtRef.current = built;
-    setRows({ home: buildSideRows(data, 'home', mode), away: buildSideRows(data, 'away', mode) });
+    setRowsTracked(() => ({ home: buildSideRows(data, 'home', mode), away: buildSideRows(data, 'away', mode) }));
     setSide(data.sides.home.isCpu || data.sides.home.players.length === 0 ? 'away' : 'home');
     setLastSummary(null);
   }, [data, mode]);
@@ -502,14 +513,14 @@ function EntryPanel({
   const dirtyCount = activeRows.filter(rowDirty).length;
 
   function updateRow(playerId: number, fn: (r: RowDraft) => RowDraft) {
-    setRows((prev) => (prev ? { ...prev, [side]: prev[side].map((r) => (r.playerId === playerId ? fn(r) : r)) } : prev));
+    setRowsTracked((prev) => (prev ? { ...prev, [side]: prev[side].map((r) => (r.playerId === playerId ? fn(r) : r)) } : prev));
   }
 
   // v6.43.0 截图识别：上传 → 服务端视觉模型识别 + 认人 → 预填未锁定格子（可重试、可完全绕过）。
   // 识别出的队侧与当前侧不同时自动切表（预填必须落在正确的表上）。
   async function runOcr(file: File) {
     const kind = ocrKindRef.current;
-    if (ocrBusy !== null || rows === null) return;
+    if (ocrBusy !== null || rowsRef.current === null) return;
     setOcrBusy(kind);
     setOcrReport(null);
     try {
@@ -517,8 +528,11 @@ function EntryPanel({
       const res = await ocrMatchEntry(match.matchId, kind, image);
       const target: Side = res.side;
       if (target !== side) setSide(target);
-      const merged = mergeOcrEntries(rows[target], res.entries, sideConcededOf(match, target));
-      setRows((prev) => (prev ? { ...prev, [target]: merged.rows } : prev));
+      // 合并基底取 rowsRef（等待识别期间的手填都在里面），不用闭包快照
+      if (!rowsRef.current) return;
+      const baseRows = rowsRef.current[target];
+      const merged = mergeOcrEntries(baseRows, res.entries, sideConcededOf(match, target));
+      setRowsTracked((prev) => (prev ? { ...prev, [target]: merged.rows } : prev));
       const lines: string[] = [];
       lines.push(
         `识别成功：预填 ${merged.applied} 格${merged.gkAuto > 0 ? `，零封联动自动勾 ${merged.gkAuto} 名门将` : ''}`,
@@ -572,7 +586,7 @@ function EntryPanel({
     try {
       const res = await submitMatchEntry(match.matchId, entries);
       const byId = new Map(res.perPlayer.map((p) => [p.playerId, p]));
-      setRows((prev) => {
+      setRowsTracked((prev) => {
         if (!prev) return prev;
         const next: Record<Side, RowDraft[]> = { home: prev.home, away: prev.away };
         for (const s of ['home', 'away'] as Side[]) {
@@ -589,7 +603,7 @@ function EntryPanel({
       show(`已保存：新录 ${res.written} 项${res.duplicates > 0 ? `、重复跳过 ${res.duplicates} 项` : ''}，合计 +${fmtXp(res.totalXp)} XP。`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '保存失败';
-      setRows((prev) => {
+      setRowsTracked((prev) => {
         if (!prev) return prev;
         const next: Record<Side, RowDraft[]> = { home: prev.home, away: prev.away };
         for (const s of ['home', 'away'] as Side[]) {
