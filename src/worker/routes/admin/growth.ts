@@ -338,37 +338,40 @@ app.get('/growth/match-entry/:matchId', async (c) => {
 // v6.43.0：赛后截图识别（零 DB 写，管理端手动触发）。一张图一次调用：
 // 视觉模型 → parseOcrVision → 队名对侧 → 花名册认人 → 预填草稿 + 交叉校验警告。
 // 失败可重试、可完全绕过（识别是增强不是依赖，预填后仍走下方批量端点人工确认入库）。
-const OCR_PROMPT = `你是 FC26 赛后数据截图的识别引擎。这张图是游戏的「Player Performance」界面，布局固定：
-- 左侧：球员表格，列依次为 POS（位置缩写）、Name（球员名）、RR（评分，N/A 表示替补没上场）、G（进球）、AST（助攻）。
-- 右侧：当前选中球员的详情区，顶部有页签（Summary / Possession / Shooting / Passing / Defending / Goalkeeping）。
-- 画面最顶部的 FPS/CPU/GPU 监控条是录屏软件的干扰，一律忽略。
+const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎。只输出一个 JSON 对象：禁止 markdown 代码块、禁止任何解释文字；图中没有或看不清的字段输出 null，绝不编造、绝不推算。
 
-请输出严格的 JSON（禁止 markdown 代码块、禁止多余文字），结构如下：
+界面固定布局：左侧球员表格，列依次为 POS（位置缩写）、Name、RR（评分，N/A=替补没上场）、G（进球）、AST（助攻）；右侧选中球员详情区，页签 Summary / Possession / Shooting / Passing / Defending / Goalkeeping；画面顶部的 FPS/CPU/GPU 监控条是录屏软件干扰，一律忽略。
+
+输出结构（键名逐字一致；下面的示例值就是应输出的类型——数字字段输出 JSON number，禁止加引号变字符串）：
 {
-  "team": "右上角队名",
-  "tab": "右侧详情当前页签，小写：summary|goalkeeping（其它页签也照实输出）",
+  "team": "MILAN",
+  "tab": "summary",
   "rows": [
-    { "pos": "位置缩写", "name": "球员名（保留原文的重音符号，如 é、à、ć）", "rating": 数字或 null, "goals": 数字, "assists": 数字 }
+    { "pos": "ST", "name": "H. Kane", "rating": 7.8, "goals": 2, "assists": 0 },
+    { "pos": "SUB", "name": "D. Alaba", "rating": null, "goals": 0, "assists": 0 }
   ],
   "selected": {
-    "name": "左侧表格中高亮选中的球员名",
-    "rating": "详情区 Total Rating 数字（summary 页签时）",
-    "goals": "详情区 Goals 左列数字", "assists": "详情区 Assists 左列数字",
-    "possessionWon": "详情区 Possession Won 左列数字", "minutes": "Minutes Played 左列数字"
+    "name": "H. Kane",
+    "rating": 7.8,
+    "goals": 2, "assists": 2,
+    "possessionWon": 3, "minutes": 94
   },
   "gk": {
-    "name": "左侧表格中高亮选中的门将名",
-    "gkRating": "详情区 Goalkeeper Rating 数字（goalkeeping 页签时）",
-    "shotsAgainst": "Shots Against", "shotsOnTarget": "Shots On Target",
-    "saves": "Saves", "goalsConceded": "Goals Conceded"
+    "name": "M. Maignan",
+    "gkRating": 4.0, "shotsAgainst": 10, "shotsOnTarget": 7,
+    "saves": 3, "goalsConceded": 4
   },
-  "notes": "识别中任何不确定、看不清、被遮挡的地方，没有则空串"
+  "notes": ""
 }
+
 规则：
-1. rows 只输出图中可见的行，按图内顺序；表格带滚动条时看不到的行绝不编造。
-2. 替补（SUB）行 rating 是 N/A，输出 null。
-3. selected 与 gk 二选一：tab=summary 填 selected、tab=goalkeeping 填 gk；其它页签两者都为 null。
-4. 所有数字严格按图，不做任何推算。`;
+1. rows 只输出图中可见的行，按图内顺序；表格带滚动条时，滚动条外的行绝不编造。
+2. 每行必须包含全部五个键：替补（SUB）行 rating 填 null，goals/assists 填 0。
+3. tab=summary 时填 selected、gk 置 null；tab=goalkeeping 时填 gk、selected 置 null；其它页签两者都置 null。
+4. 详情区每个指标都有两列数字：左列是球员本人，右列是全队平均；一律取左列。
+5. rating/gkRating 是一位小数（如 7.8）；goals/assists 及 gk 各项是整数；数字字段一律输出 JSON number（7.8 而不是 "7.8"），只有 pos/name/team/tab/notes 是字符串。
+6. 所有数字严格按图，不做任何推算。
+7. 自检：goalkeeping 页签必须满足 Saves + Goals Conceded = Shots On Target；读到的数若不满足，先重读一遍图；重读后仍不满足就照实输出并在 notes 说明——绝不为了凑等式改数字。`;
 
 const OCR_MAX_BYTES = 5 * 1024 * 1024; // 与媒体上传同一口径
 

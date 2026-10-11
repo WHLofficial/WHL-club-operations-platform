@@ -1512,6 +1512,8 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **评审（code-review-skill）**：修 1 个 🟡——`runOcr` 原以发起那一刻的 rows 闭包快照为合并基底，识别需 13-90 秒、期间管理员手填的格子会在响应到达时被整体覆盖 ⇒ `rowsRef` 同步镜像 + 所有 rows 写入统一走 `setRowsTracked`（updateRow / 识别合并 / 保存锁定 / 保存失败标记五个写点全换），合并基底取最新行（提交 `4b84c99`）。nit 登记 4 条不改：core `selected` 解析后暂无消费方；认人歧义与认不出同报「不在当前花名册」（管理员可在表内手填兜底）；atob 全量解码 5MB 只为取 8 字节魔数（几十 ms 可接受）；502 文本嵌上游回包 ≤300 字符（admin-only）。
 
+**提示词打磨（同日追加，未 bump 版本）**：用 prompt-master 技能把 `OCR_PROMPT` 重构两轮并 A/B 实测（`scratch/v643-spike/spike.mjs` 加 `SPIKE_PROMPT=v1/v2/v3` 开关，四图 × 两模型）。V2（关键约束前置 + 全键必填 + GK 自检锚 Saves+Conceded=OnTarget + 左列口径显式化）把 thinking-flash 从 47/48 修成 48/48，但 schema 占位符用字符串描述导致模型输出数字字符串（值全对、类型漂移，端点容忍但不干净）；V3 按用户裁决「最好类型统一」——schema 换**带真实数字的示例行** + 显式规则「数字字段一律 JSON number 禁止引号」，8 次调用行数据 **48/48 格全对且类型全为 number**、gk 五项全对。两个打分器 false 均为假象：tab 大写（端点 `growth-ocr.ts:92` toLowerCase 归一）、thinking-flash #1 Kane 详情 assists 误读队均列（`selected` 无写库消费方，零影响）。教训：**prompt schema 里带真实数字的示例行比类型描述文字更能钉住输出类型**。采纳 V3 进端点，`tests/growth-ocr*.test.ts` 20 例 + typecheck 复跑全绿，详见 `memory/spike-v6.43.0-vision.md` A/B 节。
+
 **待办/生产**：上线前需 `wrangler secret put` 配 `LLM_API_BASE` / `LLM_API_KEY` / `LLM_VISION_MODEL`（用户自备智谱 key；**未配 = 503 旁路，手填照旧，识别可绕过**，不阻塞其它功能）；glm-4v-flash 免费档遇 429 code 1305 限流时，把 `LLM_VISION_MODEL` 换 `glm-4.1v-thinking-flash` 即可（key 同一个）。
 
 ## v6.42.0 · 夺回球权 / 扑救改跨场累计入账（2026-10-11）
