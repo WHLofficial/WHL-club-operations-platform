@@ -1500,6 +1500,32 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.43.0 · 成长录入截图识别——上传 FC26 赛后截图自动预填（2026-10-11）
+
+**状态**：**本地收口未 push**（生产上线随下次授权 push；**前置**：生产需配 LLM secret，见「待办」）。零迁移、零生产写、零生产数据触碰。判级 minor（新增管理端能力）。
+
+**缘起与裁决**（用户「探索如何实现更自动化的成长录入」）：每场比赛四张 FC26 赛后截图（双方 Summary + 双方门将 Goalkeeping）人工逐格录入太慢。三个拍板：① 识别通道选**智谱 BigModel**（候选四选一；spike 实测 **glm-4v-flash 免费、四图两轮 8 次全对**——48 格行数据 + 门将五项 100%，glm-4.1v-thinking-flash 47/48（图 1 Maignan 行 assists 键被省略而非填错），17-27s/图，单图 prompt ≈3302 tokens（图 ≈2600 + 提示词 ≈700）；glm-4.6v-flash 重试仍 429 code 1305 未测成；结论落 `memory/spike-v6.43.0-vision.md`，spike 脚本在 gitignore 的 `scratch/v643-spike/`）；② 「夺回球权」**不识别**——左表只有 POS|Name|RR|G|AST 四列，Possession Won 只在右栏选中球员详情里，全队拿不到 ⇒ 保持手填；③ 入口 = **管理端成长录入页增强**（上传 → 识别 → 预填 → 人工确认保存，写路径完全复用既有批量补录端点），不做教练端自助、不做截图存 R2。识别只自动化**出场 / 评分 / 零封 / 扑救**四项；进球助攻不预填（自动通道已从 match_event 记，录入页只读展示）但做**交叉校验警告**。
+
+**交付**：① `src/lib/llm.ts` 新增 `llmVisionJson`（OpenAI 兼容 vision 消息体 `image_url` data URL、temperature 0.1、90s 超时、未配置 503、`extractJsonObject` 尾扫容错 thinking 围栏；`llmChatJson` 同步改用它）+ `LLM_VISION_MODEL` 变量（`src/worker/env.ts`，缺省回落 `LLM_MODEL`）；② `src/core/growth-ocr.ts` 全新纯函数：`parseOcrVision`（宽容收数——评分 0-10.5 之外按没上场、N/A 是 SUB 行预期值不算识别错、`asCount` 钳非负整数）、`matchRosterPlayer` 四层认人阶梯（official 逐字 → official 去变音 → display 逐字 → display 去变音，同层多命中 = 歧义不猜）、`buildOcrEntries`（summary：rating<7.0 只预填出场并警告「7.0 以下不给 XP」；goalkeeping：saves>0 才填、conceded===0 → 门将零封）、`ocrCrossChecks`（行内进球和 vs 本队比分 / GK conceded vs 对方比分**双向** / Saves+Conceded=OnTarget 内部一致性）；③ `POST /api/admin/growth/match-entry/:matchId/ocr`（requireAdmin；base64 剥前缀 + **魔数嗅探** PNG/JPEG + ≤5MB；页签与上传 kind 不符 502；队名 foldName 等值或互为包含匹配 home/away；**零 DB 写零审计**）；④ 前端 `web/src/lib/growth-ocr.ts` `mergeOcrEntries`（只写未锁定格，已录格逐格进 skipped 带原因、训练营整行跳过、duelsWon 永不写、conceded===0 时未锁门将自动勾零封）+ GrowthEntryPage 上传识别卡（Summary/Goalkeeping 两按钮、识别中 disabled、逐行报告）+ **手填联动**：零封场手填夺回球权（非负整数）自动勾该行零封（用户 m00084 裁决「有手填的即为防守球员」——取代按位置集合预勾）；⑤ 测试计划 `docs/test-plans/v6.43.0-growth-ocr.md`（TC-OCR/MATCH/DRAFT/XCHK/EP/FE 六组 + 变异 6 处清单）。
+
+**验收**：typecheck 三份 tsconfig 0 error；新测试 **24 例**全绿（`tests/growth-ocr.test.ts` + `tests/growth-ocr-endpoint.test.ts` + `web/src/lib/growth-ocr.test.ts`）；全量 **114 文件 / 1894 例**全绿（v6.41.0 基线 111/1866）；`npm run build` 成功；e2e **25/25**；变异 **6 处全命中**（认人去归一化层 / buildOcrEntries 放开 <7 限制 / 交叉校验比较反 / 前端零封联动去 conceded 条件 / 端点删页签守卫 / decodeOcrImage 去 JPEG 魔数嗅探）；提交 `20853b0`（13 文件 +1319/−7）。
+
+**评审（code-review-skill）**：修 1 个 🟡——`runOcr` 原以发起那一刻的 rows 闭包快照为合并基底，识别需 13-90 秒、期间管理员手填的格子会在响应到达时被整体覆盖 ⇒ `rowsRef` 同步镜像 + 所有 rows 写入统一走 `setRowsTracked`（updateRow / 识别合并 / 保存锁定 / 保存失败标记五个写点全换），合并基底取最新行（提交 `4b84c99`）。nit 登记 4 条不改：core `selected` 解析后暂无消费方；认人歧义与认不出同报「不在当前花名册」（管理员可在表内手填兜底）；atob 全量解码 5MB 只为取 8 字节魔数（几十 ms 可接受）；502 文本嵌上游回包 ≤300 字符（admin-only）。
+
+**待办/生产**：上线前需 `wrangler secret put` 配 `LLM_API_BASE` / `LLM_API_KEY` / `LLM_VISION_MODEL`（用户自备智谱 key；**未配 = 503 旁路，手填照旧，识别可绕过**，不阻塞其它功能）；glm-4v-flash 免费档遇 429 code 1305 限流时，把 `LLM_VISION_MODEL` 换 `glm-4.1v-thinking-flash` 即可（key 同一个）。
+
+## v6.42.0 · 夺回球权 / 扑救改跨场累计入账（2026-10-11）
+
+**状态**：**本地收口未 push**（随 v6.43.0 同批上线）。零迁移、零生产写。判级 fix 级语义订正（用户规则原文核查产物），按 minor 记版本（行为可见变化）。
+
+**缘起与裁决**：用户给出成长规则原文并要求逐条核查引擎（§10.1）：(6) 夺回球权（仅防守球员）**每 12 次 1 点**、(7) 扑救（仅门将）**每 8 次 1 点，单场多于 8 次额外得 1**——两条都是**跨场累计**，且 (7) 的单场加成与累计档是独立规则。实现（`xpForEvent`）把两项都按单场值算 ⇒ 累计从未成立（核查表：(1)-(5) 全符，(6)(7) 是唯一实质缺口；用户两轮纠正 m00093「是累计值不是单场」/ m00097「单场满 8 另外得 1，不要混淆」）。生产只读摸底：`growth_events` 里 `duels_won` / `saves` **零行**，无历史账要重算、无回填批次。
+
+**交付**：① `src/worker/growth.ts` `xpForEvent` 加第三参 `base = 0`：duels = `floor((base+value)/12) − floor(base/12)`、saves 同式（K=8）+ `(value>8 ? 1 : 0)`——单场跨档自动连跨两档（历史 6 次 + 本场 10 次 = 档 16 → 1 XP），加成只看本场值，其余类型不累计、base 缺省 0 兼容旧调用；② `manualEventOf`：duels 收**非负整数**（0 = 确认防守球员身份，400 文案「夺回球权要是非负整数（填 0 = 确认防守球员）」）、**撤「算出 0 XP 直接拒」的通用拦**（不足一档是合法 0 XP 行；saves 仍正整数——0 扑救没信息量）；新增 `loadCumulativeBases`（`SUM(value) WHERE event_type IN ('duels_won','saves')`）单/批端点都传基数；③ 面板 `GET /growth/match-entry/:matchId` 花名册加 `duelsTotal` / `savesTotal`（**含本场已录行**，前端基数 = 总数 − 已录值，防重复累计）；④ 前端 `web/src/lib/growth-xp.ts` 重写（`GrowthXpBases` + `growthXpForEvent(type, value, base=0)` 与后端逐字同口径）、GrowthEntryPage 基数接线 + 输入格 title「历史累计 N 次 · 每 12 次 1 XP」（saves 每 8 次）。
+
+**验收**：三份测试文件合计 **56 例**全绿（`tests/growth-match-entry.test.ts` TC-BATCH-04/08 改写 + 新增 TC-BATCH-10 跨场累计 / `tests/growth.test.ts` xpForEvent 4 累计例 + 单端点累计 it / `web/src/lib/growth-xp.test.ts` 累计 8 例）；变异 **3 处全命中**（duels 退回单场 floor ⇒ 3 红 / saves 去加成 ⇒ 4 红 / duels 拒 0 复活 ⇒ 2 红）；typecheck 三份全清；vitest 全量绿（收口轮 111 文件；v6.43.0 收口全量 114 文件 / 1894 例覆盖本轮改动）；提交 `46010d4`（9 文件 +175/−40）。
+
+**教训**：① 「累计」类规则不能只看单条录入的 XP 数——旧例 TC-BATCH-08「不足一档拒收」本身就是错口径的实现镜像，改规则先改断言口径；② 测试种子 `seedEvent` 不碰 `growth_xp`，跨场累计用例必须自造历史行再录本场。
+
 ## v6.41.0 · 顶栏右上角 ≡ 菜单（显示时区 + 退出登录收纳）（2026-10-11）
 
 - **状态**：minor × **已上线**（2026-10-11：push `a386cb1..a3a9e8a` 5 枚 ⇒ CF Workers Builds **Version `c218ff1b-935a-422e-84d1-32c04ba05d97`** @2026-10-11T05:23:19.086Z，`wrangler deployments status` 100%；**无迁移**）（用户 m07093「将topbar的退出登录和时区调整放到右上角菜单中，菜单图标是≡」+ 同轮追加「计划对其他仓也实施相似改动，本仓完成后生成提示词」）。纯前端收纳重构，**零后端改动 / 零迁移 / 零生产写**（`/api/me`、`/api/auth/logout`、`localStorage['whl.tz']`、`whl:tz-change` 事件链一字不动）。
