@@ -477,7 +477,9 @@ describe('TC-BATCH 批量补录', () => {
     const cases: [Record<string, unknown>, string][] = [
       [{ playerId: 10, rating: 6.9 }, '评分要在 7.0-10.0'],
       [{ playerId: 10, rating: 10.5 }, '评分要在 7.0-10.0'],
-      [{ playerId: 10, duelsWon: 0 }, '次数要是正整数'],
+      [{ playerId: 10, duelsWon: -1 }, '夺回球权要是非负整数'],
+      [{ playerId: 10, duelsWon: 1.5 }, '夺回球权要是非负整数'],
+      [{ playerId: 10, saves: 0 }, '次数要是正整数'],
       [{ playerId: 10, saves: -1 }, '次数要是正整数'],
       [{ playerId: 10, appearance: false }, '都没有勾上'], // 一格没勾
     ];
@@ -565,7 +567,7 @@ describe('TC-BATCH 批量补录', () => {
     expect(auditsOf(fx).length).toBe(0);
   });
 
-  it('TC-BATCH-08 边界值：评分上下界与四舍五入、夺权 12/扑救 8 起算，0 XP 的数值整批拒', async () => {
+  it('TC-BATCH-08 边界值：评分上下界与四舍五入、夺权 12/扑救 8 起算，不足一档是合法 0 XP 行', async () => {
     const fx = freshEnv();
     seedBase(fx);
     seedMatch(fx, { matchId: 2100, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
@@ -593,14 +595,41 @@ describe('TC-BATCH 批量补录', () => {
     expect(rounded.status).toBe(201);
     expect(eventsOf(fx, 2100).find((r) => r.player_id === 20 && r.event_type === 'rating')).toMatchObject({ value: 7.1, xp: 1 });
 
-    // 达不到记 XP 的标准：夺权 11、扑救 7 都是 0 XP 项，直接拒（不是静默丢）
-    for (const entry of [{ playerId: 10, duelsWon: 11 }, { playerId: 11, saves: 7 }]) {
-      const bad = await post(batchPath(2100), { entries: [entry] }, 'tok-admin', fx.env);
-      expect(bad.status).toBe(400);
-      expect(await errorText(bad)).toContain('这个数值达不到记 XP 的标准');
-    }
-    expect(xpOf(fx, 10)).toBe(1); // 那两次被拒的提交没改动 XP
+    // 夺权 11、扑救 7 现在是合法 0 XP 行（v6.42.0 累计口径：不足一档先落台账，攒够跨档才入账）
+    const zeros = await post(batchPath(2100), { entries: [{ playerId: 10, duelsWon: 11 }, { playerId: 11, saves: 7 }] }, 'tok-admin', fx.env);
+    expect(zeros.status).toBe(201);
+    expect(await zeros.json()).toMatchObject({ written: 2, duplicates: 0, totalXp: 0 });
+    expect(xpOf(fx, 10)).toBe(1); // 0 XP 行不改 growth_xp
     expect(xpOf(fx, 11)).toBe(4);
+  });
+
+  it('TC-BATCH-10 夺权/扑救跨场累计：只入账跨档差值，0 标记行合法落台账', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2300, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    // 历史累计（历史行的 XP 当年已入账，这里不碰 growth_xp 存量，只看本场差值）
+    seedEvent(fx, 10, '910', 'duels_won', 11, 0); // 11 次：差 1 次跨档
+    seedEvent(fx, 12, '911', 'saves', 6, 0); // 6 次：本场 10 次到 16
+    seedEvent(fx, 20, '912', 'duels_won', 12, 1); // 已 12 次
+
+    const res = await post(
+      batchPath(2300),
+      {
+        entries: [
+          { playerId: 10, duelsWon: 1 }, // 11 → 12：恰好跨档 +1
+          { playerId: 12, saves: 10 }, // 6 → 16：跨两档 +2，单场 >8 额外 +1 → 3
+          { playerId: 20, duelsWon: 0 }, // 0 标记行：0 XP 合法（防守球员人工确认的载体）
+        ],
+      },
+      'tok-admin',
+      fx.env,
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ written: 3, duplicates: 0, totalXp: 4 });
+    expect(xpOf(fx, 10)).toBe(1);
+    expect(xpOf(fx, 12)).toBe(3);
+    expect(xpOf(fx, 20)).toBe(0); // 0 行不入账
+    expect(eventsOf(fx, 2300).find((r) => r.player_id === 20 && r.event_type === 'duels_won')).toMatchObject({ value: 0, xp: 0 });
   });
 
   it('TC-BATCH-09 最大组：25 人 × 5 项 = 125 条事件一次入账，审计仍只有一条', async () => {

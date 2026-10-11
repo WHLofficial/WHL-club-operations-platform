@@ -155,6 +155,11 @@ describe('XP 计算函数（§10.1 表）', () => {
     expect(xpForEvent('duels_won', 24)).toBe(2);
     expect(xpForEvent('saves', 8)).toBe(1);
     expect(xpForEvent('saves', 9)).toBe(2);
+    // v6.42.0 累计口径：base = 该类型历史累计，单场只入账跨档差值；扑救加成与跨档独立
+    expect(xpForEvent('duels_won', 1, 11)).toBe(1); // 11 → 12 恰好跨档
+    expect(xpForEvent('duels_won', 0, 12)).toBe(0); // 0 标记行
+    expect(xpForEvent('saves', 10, 6)).toBe(3); // 6 → 16 跨两档 +2，单场 >8 额外 +1
+    expect(xpForEvent('saves', 9, 20)).toBe(2); // 20 → 29 跨一档 +1，加成再 +1
   });
 
   it('里程碑阈值 5/10/15/20 之后每 +5（无上限，去重锚保证每档只发一次）', () => {
@@ -213,6 +218,25 @@ describe('XP 补录（附录 A〔6〕）', () => {
     expect(noPlayer.status).toBe(404);
     const coach = await post('/api/admin/growth/events', { playerId: 10, eventType: 'appearance' }, 'tok-coach', fx.env);
     expect(coach.status).toBe(403);
+  });
+
+  it('夺权/扑救跨场累计：第二场只入账跨档差值；夺权 0 标记行合法、扑救 0 仍拒', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+
+    const first = await post('/api/admin/growth/events', { playerId: 10, eventType: 'duels_won', value: 11, matchRef: 'manual:c1' }, 'tok-admin', fx.env);
+    expect(first.status).toBe(201);
+    expect(((await first.json()) as { xp: number }).xp).toBe(0); // 11 次不足一档，0 XP 落台账
+    const second = await post('/api/admin/growth/events', { playerId: 10, eventType: 'duels_won', value: 1, matchRef: 'manual:c2' }, 'tok-admin', fx.env);
+    expect(((await second.json()) as { xp: number }).xp).toBe(1); // 11 → 12 恰好跨档
+    expect(xpOf(fx, 10)).toBe(1);
+
+    const marker = await post('/api/admin/growth/events', { playerId: 21, eventType: 'duels_won', value: 0, matchRef: 'manual:c3' }, 'tok-admin', fx.env);
+    expect(marker.status).toBe(201);
+    expect(((await marker.json()) as { xp: number }).xp).toBe(0); // 0 = 防守球员人工确认标记
+
+    const zeroSaves = await post('/api/admin/growth/events', { playerId: 21, eventType: 'saves', value: 0 }, 'tok-admin', fx.env);
+    expect(zeroSaves.status).toBe(400); // 扑救没有标记语义，仍要正整数
   });
 });
 

@@ -1933,6 +1933,10 @@ export interface MatchEntryPlayer {
   displayName: string;
   position: string | null;
   status: string;
+  /** 夺回球权历史累计次数（含本场已录行；v6.42.0 跨场累计基数） */
+  duelsTotal: number;
+  /** 扑救历史累计次数（含本场已录行） */
+  savesTotal: number;
 }
 
 export interface MatchEntrySide {

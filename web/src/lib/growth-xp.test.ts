@@ -36,6 +36,13 @@ describe('growthXpForEvent（对照后端 xpForEvent）', () => {
     expect(growthXpForEvent('saves', 17)).toBe(3);
   });
 
+  it('累计口径（v6.42.0）：base = 历史累计，单场只入账跨档差值；加成与跨档独立', () => {
+    expect(growthXpForEvent('duels_won', 1, 11)).toBe(1); // 11 → 12 恰好跨档
+    expect(growthXpForEvent('duels_won', 0, 12)).toBe(0); // 0 标记行
+    expect(growthXpForEvent('saves', 10, 6)).toBe(3); // 6 → 16 跨两档 +2，单场 >8 额外 +1
+    expect(growthXpForEvent('saves', 9, 20)).toBe(2); // 20 → 29 跨一档 +1，加成再 +1
+  });
+
   it('非补录类型（里程碑等）折算 0', () => {
     expect(growthXpForEvent('milestone', 5)).toBe(0);
     expect(growthXpForEvent('unknown', 3)).toBe(0);
@@ -60,5 +67,12 @@ describe('entryXp（一行录入合计）', () => {
     expect(entryXp({ rating: 6.5 })).toBe(0);
     expect(entryXp({ saves: 7 })).toBe(0);
     expect(entryXp({ duelsWon: 11 })).toBe(0);
+  });
+
+  it('entryXp 带累计基数（面板 duelsTotal/savesTotal）', () => {
+    expect(entryXp({ duelsWon: 1 }, { duelsWon: 11 })).toBe(1); // 11 → 12 恰好跨档
+    expect(entryXp({ saves: 10 }, { saves: 6 })).toBe(3); // 跨两档 + 单场加成
+    expect(entryXp({ duelsWon: 0 }, { duelsWon: 12 })).toBe(0); // 0 标记行
+    expect(entryXp({ duelsWon: 12, saves: 7 }, { duelsWon: 12, saves: 16 })).toBe(1); // 12→24 跨一档；16→23 无跨档
   });
 });

@@ -64,6 +64,9 @@ interface RowDraft {
   assists: number;
   /** 已录进球/助攻那几行的 XP（本场XP = entryXp(草稿) + extraXp） */
   extraXp: number;
+  /** 累计项基数：夺回球权/扑救的历史累计次数（已录行 = 面板累计 − 本场已录值，复现已入账 XP） */
+  duelsBase: number;
+  savesBase: number;
   /** 已录来源（中文标签，去重） */
   sources: string[];
   base: RowBase;
@@ -89,6 +92,14 @@ const isPositiveInt = (s: string): boolean => {
   return Number.isInteger(n) && n >= 1;
 };
 
+// 夺回球权收 0（v6.42.0）：0 行本身 0 XP，合法 —— 它是「防守球员人工确认」的载体（填了，哪怕是 0）
+const isNonNegativeInt = (s: string): boolean => {
+  const t = s.trim();
+  if (t === '') return false;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 0;
+};
+
 /** 行输入问题（空格子不报错；非空但不合法给中文原因） */
 function rowIssues(r: RowDraft): string[] {
   const out: string[] = [];
@@ -96,7 +107,7 @@ function rowIssues(r: RowDraft): string[] {
     const v = Number(r.rating.value);
     if (!Number.isFinite(v) || v < 7 || v > 10) out.push('评分需在 7.0–10.0');
   }
-  if (!r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isPositiveInt(r.duelsWon.value)) out.push('夺回球权需为正整数');
+  if (!r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isNonNegativeInt(r.duelsWon.value)) out.push('夺回球权需为非负整数');
   if (!r.saves.locked && r.saves.value.trim() !== '' && !isPositiveInt(r.saves.value)) out.push('扑救需为正整数');
   return out;
 }
@@ -154,7 +165,7 @@ const draftOf = (r: RowDraft): GrowthEntryDraft => ({
   saves: numOrNull(r.saves.value),
 });
 
-const rowXp = (r: RowDraft): number => entryXp(draftOf(r)) + r.extraXp;
+const rowXp = (r: RowDraft): number => entryXp(draftOf(r), { duelsWon: r.duelsBase, saves: r.savesBase }) + r.extraXp;
 
 /** 保存结果回填：提交过的格子转锁定态，并按 perPlayer 给结果徽标 */
 function applyResult(r: RowDraft, e: MatchEntryInput, p: MatchEntryPerPlayerResult | undefined): RowDraft {
@@ -235,6 +246,10 @@ function buildSideRows(panel: MatchEntryPanel, side: Side, mode: Mode): RowDraft
       const label = sourceLabel(rec.source);
       if (!sources.includes(label)) sources.push(label);
     }
+    // 累计基数（v6.42.0）：面板 duelsTotal/savesTotal = 含本场的全历史；本场已录的行要扣掉
+    // 本场值才是「入账当时」的基数（entryXp(已录值, 基数) 精确复现已录 XP），未录行面板值即本次基数
+    const duelsBase = (p.duelsTotal ?? 0) - (seen.duels_won ? Number(duelsWon || '0') : 0);
+    const savesBase = (p.savesTotal ?? 0) - (seen.saves ? Number(saves || '0') : 0);
     const lock = (recorded: boolean): boolean => mode === 'view' || recorded;
     return {
       playerId: p.id,
@@ -249,6 +264,8 @@ function buildSideRows(panel: MatchEntryPanel, side: Side, mode: Mode): RowDraft
       goals,
       assists,
       extraXp,
+      duelsBase,
+      savesBase,
       sources,
       base: { appearance, rating, cleanSheet, duelsWon, saves },
       result: null,
@@ -614,7 +631,7 @@ function EntryPanel({
               !r.rating.locked &&
               r.rating.value.trim() !== '' &&
               !(Number.isFinite(Number(r.rating.value)) && Number(r.rating.value) >= 7 && Number(r.rating.value) <= 10);
-            const duelsBad = !r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isPositiveInt(r.duelsWon.value);
+            const duelsBad = !r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isNonNegativeInt(r.duelsWon.value);
             const savesBad = !r.saves.locked && r.saves.value.trim() !== '' && !isPositiveInt(r.saves.value);
             return (
               <div
@@ -716,6 +733,7 @@ function EntryPanel({
                         disabled={ro}
                         inputMode="numeric"
                         placeholder="次数"
+                        title={`历史累计 ${r.duelsBase} 次 · 每 12 次 1 XP`}
                         onChange={(e) =>
                           updateRow(r.playerId, (row) => ({ ...row, duelsWon: { ...row.duelsWon, value: e.target.value }, result: null }))
                         }
@@ -737,6 +755,7 @@ function EntryPanel({
                         disabled={ro}
                         inputMode="numeric"
                         placeholder="次数"
+                        title={`历史累计 ${r.savesBase} 次 · 每 8 次 1 XP`}
                         onChange={(e) =>
                           updateRow(r.playerId, (row) => ({ ...row, saves: { ...row.saves, value: e.target.value }, result: null }))
                         }
@@ -803,7 +822,7 @@ function EntryPanel({
                 !r.rating.locked &&
                 r.rating.value.trim() !== '' &&
                 !(Number.isFinite(Number(r.rating.value)) && Number(r.rating.value) >= 7 && Number(r.rating.value) <= 10);
-              const duelsBad = !r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isPositiveInt(r.duelsWon.value);
+              const duelsBad = !r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isNonNegativeInt(r.duelsWon.value);
               const savesBad = !r.saves.locked && r.saves.value.trim() !== '' && !isPositiveInt(r.saves.value);
               return (
                 <tr key={r.playerId} className={ro ? 'row-trainee' : undefined} title={ro ? '训练营不按场次计' : undefined}>
@@ -889,6 +908,7 @@ function EntryPanel({
                         disabled={ro}
                         inputMode="numeric"
                         placeholder="次数"
+                        title={`历史累计 ${r.duelsBase} 次 · 每 12 次 1 XP`}
                         onChange={(e) =>
                           updateRow(r.playerId, (row) => ({ ...row, duelsWon: { ...row.duelsWon, value: e.target.value }, result: null }))
                         }
@@ -909,6 +929,7 @@ function EntryPanel({
                         disabled={ro}
                         inputMode="numeric"
                         placeholder="次数"
+                        title={`历史累计 ${r.savesBase} 次 · 每 8 次 1 XP`}
                         onChange={(e) =>
                           updateRow(r.playerId, (row) => ({ ...row, saves: { ...row.saves, value: e.target.value }, result: null }))
                         }

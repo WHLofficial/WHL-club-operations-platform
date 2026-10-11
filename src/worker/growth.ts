@@ -34,8 +34,11 @@ export const GROWTH_EVENT_TYPES = [
 export type GrowthEventType = (typeof GROWTH_EVENT_TYPES)[number] | 'levelup';
 
 // §10.1：出场 1；评分 7.0-7.9→1/8.0-8.9→2/9.0-9.9→3/10.0→4；进球/助攻各 0.5；零封 0.5；
-// 夺回球权每 12 次 1；扑救每 8 次 1 且单场 >8 额外 1
-export function xpForEvent(eventType: GrowthEventType, value: number): number {
+// 夺回球权每 12 次 1；扑救每 8 次 1 且单场 >8 额外 1。
+// 后两项是跨场累计（v6.42.0 用户裁决）：base = 该球员该类型的历史累计次数，单场只入账
+// 跨档差值 floor((base+value)/K) − floor(base/K)；扑救的「单场 >8 额外 1」独立叠加、与跨档无关。
+// 其余类型不累计，base 无效；base 缺省 0 时公式退回按单场值整算（自动通道与旧测试兼容）。
+export function xpForEvent(eventType: GrowthEventType, value: number, base = 0): number {
   switch (eventType) {
     case 'appearance':
       return 1;
@@ -50,9 +53,9 @@ export function xpForEvent(eventType: GrowthEventType, value: number): number {
     case 'clean_sheet':
       return 0.5;
     case 'duels_won':
-      return Math.floor(value / 12);
+      return Math.floor((base + value) / 12) - Math.floor(base / 12);
     case 'saves':
-      return Math.floor(value / 8) + (value > 8 ? 1 : 0);
+      return Math.floor((base + value) / 8) - Math.floor(base / 8) + (value > 8 ? 1 : 0);
     default:
       return 0;
   }

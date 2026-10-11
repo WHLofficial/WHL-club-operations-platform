@@ -23,19 +23,36 @@ import { nowSql, readJson } from './shared.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 // 补录口径（单人与批量共用一份，防止两处漂移）：rating 7.0-10.0 且四舍五入到 0.1；
-// duels_won/saves 正整数；XP 一律服务端按 §10.1 算，算出 0 XP 的项直接拒
-// （duels_won 1-11、saves 1-7 都是 0 XP，同样拒）。
-function manualEventOf(eventType: GrowthEventType, raw: unknown): { value: number; xp: number } {
+// duels_won 非负整数（0 行合法，v6.42.0：它是「防守球员人工确认」的载体——手填了，哪怕是 0，
+// 就认定该场为防守球员）、saves 正整数；XP 一律服务端按 §10.1 算，夺回球权/扑救两项按
+// 跨场累计折算（base = 历史累计次数，只入账跨档差值），单场不足一档就是 0 XP，合法落台账。
+// rating 区间 7.0 起步恒有 XP，没有 0 XP 路径。
+function manualEventOf(eventType: GrowthEventType, raw: unknown, base = 0): { value: number; xp: number } {
   let value = raw === undefined || raw === null ? 1 : Number(raw);
   if (eventType === 'rating') {
     if (!Number.isFinite(value) || value < 7 || value > 10) throw new HttpError(400, '评分要在 7.0-10.0 之间，7.0 以下不给 XP');
     value = Math.round(value * 10) / 10;
-  } else if (eventType === 'duels_won' || eventType === 'saves') {
+  } else if (eventType === 'duels_won') {
+    if (!Number.isInteger(value) || value < 0) throw new HttpError(400, '夺回球权要是非负整数（填 0 = 确认防守球员）');
+  } else if (eventType === 'saves') {
     if (!Number.isInteger(value) || value <= 0) throw new HttpError(400, '次数要是正整数');
   }
-  const xp = xpForEvent(eventType, value);
-  if (xp <= 0) throw new HttpError(400, '这个数值达不到记 XP 的标准');
-  return { value, xp };
+  return { value, xp: xpForEvent(eventType, value, base) };
+}
+
+// 累计项（duels_won/saves）的跨场基数：该球员该类型历史行 SUM(value)。含本场已有行——
+// 本场行已存在时该锚整项是 duplicate 不重复入账，基数差只影响响应里的 xp 展示值，库里恒正确。
+async function loadCumulativeBases(db: D1Database, playerIds: number[]): Promise<Map<string, number>> {
+  if (playerIds.length === 0) return new Map();
+  const rows = await db
+    .prepare(
+      `SELECT player_id, event_type, SUM(value) AS total FROM growth_events
+       WHERE event_type IN ('duels_won', 'saves') AND player_id IN (${playerIds.map(() => '?').join(', ')})
+       GROUP BY player_id, event_type`,
+    )
+    .bind(...playerIds)
+    .all<{ player_id: number; event_type: string; total: number }>();
+  return new Map(rows.results.map((r) => [`${r.player_id}|${r.event_type}`, r.total] as const));
 }
 
 // 补录：评分/扑救/夺回球权等比赛系统没有的数据；XP 由服务端按 §10.1 计算
@@ -52,7 +69,11 @@ app.post('/growth/events', async (c) => {
   if (typeof eventType !== 'string' || !(MANUAL_TYPES as readonly string[]).includes(eventType)) {
     throw new HttpError(400, 'event_type 只能是 appearance / rating / clean_sheet / duels_won / saves');
   }
-  const { value, xp } = manualEventOf(eventType as GrowthEventType, body?.value);
+  const { value, xp } = manualEventOf(
+    eventType as GrowthEventType,
+    body?.value,
+    eventType === 'duels_won' || eventType === 'saves' ? (await loadCumulativeBases(c.env.DB, [playerId])).get(`${playerId}|${eventType}`) ?? 0 : 0,
+  );
 
   const matchRef = typeof body?.matchRef === 'string' && body.matchRef.trim() !== '' ? body.matchRef.trim().slice(0, 40) : `manual:${Date.now()}`;
   const recorded = await recordGrowthEvent(c.env.DB, {
@@ -294,11 +315,18 @@ app.get('/growth/match-entry/:matchId', async (c) => {
     .bind(String(matchId))
     .all<{ player_id: number; event_type: string; value: number; xp: number; source: string }>();
 
+  // 每人当前累计（duels/saves 跨场累计的基数）：前端预填与「本场 XP」实时跨档预览用
+  const homePlayers = await rosterOf(home.clubId);
+  const awayPlayers = await rosterOf(away.clubId);
+  const totals = await loadCumulativeBases(c.env.DB, [...homePlayers, ...awayPlayers].map((p) => p.id));
+  const withTotals = <T extends { id: number }>(players: T[]) =>
+    players.map((p) => ({ ...p, duelsTotal: totals.get(`${p.id}|duels_won`) ?? 0, savesTotal: totals.get(`${p.id}|saves`) ?? 0 }));
+
   return c.json({
     match: entryMatchItem(row, home, away, recorded.results.length),
     sides: {
-      home: { clubId: home.clubId, isCpu: home.isCpu, players: await rosterOf(home.clubId) },
-      away: { clubId: away.clubId, isCpu: away.isCpu, players: await rosterOf(away.clubId) },
+      home: { clubId: home.clubId, isCpu: home.isCpu, players: withTotals(homePlayers) },
+      away: { clubId: away.clubId, isCpu: away.isCpu, players: withTotals(awayPlayers) },
     },
     recorded: recorded.results.map((r) => ({ playerId: r.player_id, eventType: r.event_type, value: r.value, xp: r.xp, source: r.source })),
   });
@@ -351,12 +379,15 @@ app.post('/growth/match-entry/:matchId', async (c) => {
 
   // 展开事件流：字段顺序固定，方便前端按事件类型锁定格子
   const events: { playerId: number; eventType: GrowthEventType; value: number; xp: number }[] = [];
+  const bases = await loadCumulativeBases(c.env.DB, ids);
   for (const { playerId, entry } of parsed) {
     if (entry.appearance) events.push({ playerId, eventType: 'appearance', value: 1, xp: xpForEvent('appearance', 1) });
     if (entry.cleanSheet) events.push({ playerId, eventType: 'clean_sheet', value: 1, xp: xpForEvent('clean_sheet', 1) });
     if (entry.rating !== undefined && entry.rating !== null) events.push({ playerId, eventType: 'rating', ...manualEventOf('rating', entry.rating) });
-    if (entry.duelsWon !== undefined && entry.duelsWon !== null) events.push({ playerId, eventType: 'duels_won', ...manualEventOf('duels_won', entry.duelsWon) });
-    if (entry.saves !== undefined && entry.saves !== null) events.push({ playerId, eventType: 'saves', ...manualEventOf('saves', entry.saves) });
+    if (entry.duelsWon !== undefined && entry.duelsWon !== null)
+      events.push({ playerId, eventType: 'duels_won', ...manualEventOf('duels_won', entry.duelsWon, bases.get(`${playerId}|duels_won`) ?? 0) });
+    if (entry.saves !== undefined && entry.saves !== null)
+      events.push({ playerId, eventType: 'saves', ...manualEventOf('saves', entry.saves, bases.get(`${playerId}|saves`) ?? 0) });
   }
   if (events.length === 0) throw new HttpError(400, '每一行都没有勾上要记的项目');
 
