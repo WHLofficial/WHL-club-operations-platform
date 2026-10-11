@@ -106,18 +106,21 @@ const isEmptyPos = (n: number) => n < 0;
 const POS_EMPTY = 'None';
 const ROLE_EMPTY = '0';
 
-/** A 硬闸（身份 / 位置 / 队伍 / 国籍 / 身体 / 逆足 / 三列缺口）：必须逐字相同，非 0 即不通过。 */
+/** A 硬闸（身份 / 位置 / 队伍 / 国籍 / 身体 / 逆足 / 三列缺口）：S9 时两侧逐字一致（0 处）。
+ *  此后若出现差异，要么平台内改过、要么映射出错 ⇒ 必须 0，非 0 停下人工确认。 */
 const HARD_COLS = new Set([
   'playerid',
   'Position', 'Position2', 'Position3', 'Position4', 'teamid',
   'nationality', 'preferredfoot', 'height', 'weight', 'weakfootabilitytypecode',
   'playerjointeamdate', 'contractvaliduntil', 'birthdate',
 ]);
-/** B 数值列（overallrating / potential / 34 项能力）：期望 0，非 0 逐条列。 */
+/** B 数值列（overallrating / potential / 34 项能力）：导出取库内现值（`ca` / `pa` + `game_attrs`），
+ *  s901 是 2026-09-05 快照，之后平台内成长与订正会改现值 ⇒ 差异预期内，不算失败，逐条列出备查。 */
 const SOFT_COLS = new Set(['overallrating', 'potential', ...ATTR34]);
-/** C 文本列：导出已按 s901 的写法与顺序还原、生涯特性按 s901 带回，期望 0。 */
+/** C 文本列（role1-5 / Playstyles / Playstyles+）：导出按**库内槽位顺序** + 平台反查表出值，
+ *  与 s901 的写法（连字符 / 双空格 / 大小写）、顺序、生涯特性差异都是预期内的 ⇒ 不算失败，逐条列出备查。 */
 const TEXT_COLS = new Set(['role1', 'role2', 'role3', 'role4', 'role5', 'Playstyles', 'Playstyles+']);
-/** D 平台侧可编辑列（姓名三列 + 球衣号）：平台是这三列的真源，与 s901 不同不算失败，逐条列出备查。 */
+/** D 平台侧可编辑列（姓名三列 + 球衣号）：平台是这三列的真源（v6.0.0 起在平台内维护、可编辑），与 s901 不同不算失败，逐条列出备查。 */
 const EDITABLE_COLS = new Set(['firstname', 'lastname', 'commonname', 'number']);
 const CLASS_SETS = [HARD_COLS, SOFT_COLS, TEXT_COLS, EDITABLE_COLS] as const;
 
@@ -188,7 +191,7 @@ function loadRef(file: string): Map<number, RefRow> {
   return new Map(rows.map((r) => [r.id, r]));
 }
 
-/** 归一化文本 → id 反查（按 s901 的写法认槽位；冲突取首个）。 */
+/** 归一化文本 → id 反查，**只用于对照报告**（认 s901 的同义异写，报「s901 有、库内无槽位」），不参与出值。 */
 function normIndex(rows: Map<number, RefRow>, keep: (id: number) => boolean): Map<string, number> {
   const out = new Map<string, number>();
   for (const [id, r] of rows) {
@@ -209,9 +212,9 @@ function loadRefs(): Refs {
     role,
     playstyle,
     team,
-    // 角色：银 1..49 / 金 101..149 都进表（`en` 自带 `+` / `++`）
+    // 角色：银 1..49 / 金 101..149 都进表（`en` 自带 `+` / `++`）——只给对照报告认写法
     roleByNorm: normIndex(role, (id) => id > 0),
-    // 花式：只收银槽 id（金槽 `en` 带 ` +` 后缀，s901 的金列给的是基础名）
+    // 花式：只收银槽 id（金槽 `en` 带 ` +` 后缀，s901 的金列给的是基础名）——只给对照报告认写法
     psByNorm: normIndex(playstyle, (id) => id > 0 && id < PS_GOLD_BASE),
   };
 }
@@ -223,28 +226,6 @@ function splitTokens(v: unknown): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s !== '' && s !== '0' && s !== 'None' && s !== '-');
-}
-
-/** 按 s901 的 token 顺序重排库内 id（同 id 逐个消掉，保重复）；库里多出来的按原槽序追加。
- *  解析不出 id 的 token（`One Club Player` / `Injury Prone` 这类生涯特性）原样带回。 */
-function alignIds(prevTokens: string[], dbIds: number[], byNorm: Map<string, number>): { ids: number[]; extras: string[] } {
-  const remaining = [...dbIds];
-  const ids: number[] = [];
-  const extras: string[] = [];
-  for (const t of prevTokens) {
-    const id = byNorm.get(normKey(t));
-    if (id == null) {
-      extras.push(t);
-      continue;
-    }
-    const at = remaining.indexOf(id);
-    if (at >= 0) {
-      ids.push(id);
-      remaining.splice(at, 1);
-    }
-  }
-  for (const id of remaining) ids.push(id);
-  return { ids, extras };
 }
 
 // ---------------------------------------------------------------- 生产库（只读）
@@ -311,7 +292,7 @@ type PrevTriple = {
   join: unknown;
   contractUntil: unknown;
   birthdate: unknown;
-  /** s901 自己的角色 / 花式文本（含库内没有槽位的生涯特性）——导出按它的写法与顺序逐字还原。 */
+  /** s901 自己的角色 / 花式文本——**只用于对照报告**，不参与出值（导出忠实线上库）。 */
   roles: string[];
   ps: string[];
   gold: string[];
@@ -502,22 +483,11 @@ function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | nul
     return r.name;
   };
 
-  // —— s901 文本对齐：ref 表与 s901 之间存在同义异写（`CM Half-Winger +` vs `CM Half Winger +` 的连字符、
-  //    `GK Sweeper Keeper  +` 的双空格、大小写），用 normKey 认到同一个 id 后，导出按 s901 的写法逐字还原；
-  //    顺序也按 s901 排（库内是「并集 + 保序追加」，顺序可能不同），库里多出来的按原槽序追加到尾部。
+  // —— 文本列忠实于线上库：角色 / 花式按**库内槽位顺序**出（RoleID1-5 / PSID1-12 / PSID13-15），
+  //    文本取平台自己的反查表 `web/assets/ref/{role,playstyle}.json`；s901 的写法与顺序只用于报差异，不参与出值。
   const prevRoles = p.prev?.roles ?? [];
   const prevPs = p.prev?.ps ?? [];
   const prevGold = p.prev?.gold ?? [];
-  const roleTextById = new Map<number, string>();
-  for (const t of prevRoles) {
-    const id = refs.roleByNorm.get(normKey(t));
-    if (id != null && !roleTextById.has(id)) roleTextById.set(id, t);
-  }
-  const psTextById = new Map<number, string>();
-  for (const t of [...prevPs, ...prevGold]) {
-    const id = refs.psByNorm.get(normKey(t));
-    if (id != null && !psTextById.has(id)) psTextById.set(id, t);
-  }
 
   /** 槽位原值只读一次（at() 对缺键会记数，重复调用会重复记）。 */
   const slotVal = new Map<string, number | null>();
@@ -537,11 +507,11 @@ function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | nul
     if (n != null && !isEmptySlot(n) && n < PS_GOLD_BASE) rep.bump('金槽持有银 id（异常）', `fc ${fc} ${k}=${n}`);
   }
 
-  const roleOrdered = alignIds(prevRoles, slotIds(ROLE_SLOTS, false), refs.roleByNorm).ids;
+  const roleIds = slotIds(ROLE_SLOTS, false);
   const roleTextAt = (i: number): string => {
-    const id = roleOrdered[i];
+    const id = roleIds[i];
     if (id == null) return ROLE_EMPTY;
-    const t = roleTextById.get(id) ?? refs.role.get(id)?.en;
+    const t = refs.role.get(id)?.en;
     if (!t || t === '-') {
       rep.bump(`角色 id 未知：${id}`, `fc ${fc} RoleID${i + 1}`);
       return ROLE_EMPTY;
@@ -549,11 +519,11 @@ function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | nul
     return t;
   };
 
-  const { ids: silverOrdered, extras: traits } = alignIds(prevPs, slotIds(PS_SLOTS, true), refs.psByNorm);
-  const { ids: goldOrdered, extras: goldExtra } = alignIds(prevGold, slotIds(GOLD_SLOTS, true), refs.psByNorm);
-  /** 花式文本一律取银表 `en`（基础名，无 `+` 后缀）——与 s901 逐字一致。 */
+  const silverIds = slotIds(PS_SLOTS, true);
+  const goldIds = slotIds(GOLD_SLOTS, true);
+  /** 花式文本一律取银表 `en`（基础名，无 `+` 后缀）——平台侧口径。 */
   const psText = (id: number, where: string): string | null => {
-    const t = psTextById.get(id) ?? refs.playstyle.get(id)?.en;
+    const t = refs.playstyle.get(id)?.en;
     if (!t || t === '-') {
       rep.bump(`花式 id 未知：${id}`, `fc ${fc} ${where}`);
       return null;
@@ -562,9 +532,24 @@ function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | nul
   };
   const psTexts = (ids: number[], where: string): string[] =>
     ids.map((id) => psText(id, where)).filter((t): t is string => t != null);
-  // `One Club Player` / `Injury Prone` 这类生涯特性在 PlayStyleID 表里没有 id、库内无槽位，按 s901 原样带回。
-  if (traits.length) rep.bump('生涯特性按 s901 带回（库内无槽位）', `fc ${fc} ${traits.join(' / ')}`);
-  if (goldExtra.length) rep.bump('金槽写法库内认不出，按 s901 带回', `fc ${fc} ${goldExtra.join(' / ')}`);
+  // s901 有、库内没有槽位的花式 / 角色（`One Club Player` / `Injury Prone` 这类生涯特性，或平台内清掉的槽位）：
+  // 只记数备查，**不回填**——用户 2026-10-11 裁定「特性和数值等忠实于线上库，不要回填」。
+  const dbPs = new Set([...silverIds, ...goldIds]);
+  const droppedPs = new Set<string>();
+  for (const t of [...prevPs, ...prevGold]) {
+    const id = refs.psByNorm.get(normKey(t));
+    if (id == null) droppedPs.add(`${t}（库内无对应 id）`);
+    else if (!dbPs.has(id)) droppedPs.add(t);
+  }
+  if (droppedPs.size) rep.bump('s901 花式库内无槽位（不回填）', `fc ${fc} ${[...droppedPs].join(' / ')}`);
+  const dbRoles = new Set(roleIds);
+  const droppedRoles = new Set<string>();
+  for (const t of prevRoles) {
+    const id = refs.roleByNorm.get(normKey(t));
+    if (id == null) droppedRoles.add(`${t}（库内无对应 id）`);
+    else if (!dbRoles.has(id)) droppedRoles.add(t);
+  }
+  if (droppedRoles.size) rep.bump('s901 角色库内无槽位（不回填）', `fc ${fc} ${[...droppedRoles].join(' / ')}`);
 
   // 姓名三列：库内 v6.0.0 起由 s901 三列灌入；万一三列全空则回退 players.name（末空格切分），并记数。
   let first = textOrEmpty(p.first_name);
@@ -622,8 +607,8 @@ function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | nul
     role3: roleTextAt(2),
     role4: roleTextAt(3),
     role5: roleTextAt(4),
-    Playstyles: [...psTexts(silverOrdered, 'PSID1-12'), ...traits].join(', '),
-    'Playstyles+': [...psTexts(goldOrdered, 'PSID13-15'), ...goldExtra].join(', '),
+    Playstyles: psTexts(silverIds, 'PSID1-12').join(', '),
+    'Playstyles+': psTexts(goldIds, 'PSID13-15').join(', '),
   };
   for (const key of ATTR34) vals[key] = at(key);
   if (p.prev == null) rep.bump('s901 无此人（三列缺口留空）', `fc ${fc} ${first} ${last}`);
@@ -942,18 +927,19 @@ function runDiffPrev(): number {
   );
   L.push('');
   L.push('## 分级口径', '');
-  L.push('- **A 硬闸**（playerid / Position1-4 / teamid / nationality / preferredfoot / height / weight / weakfootabilitytypecode / 三列缺口）：必须逐字相同，非 0 即不通过。');
-  L.push('- **B 数值**（overallrating / potential / 34 项能力）：s901 是 2026-09-05 快照，之后平台内成长与订正会改现值；期望 0，非 0 逐条列。');
-  L.push('- **C 文本**（role1-5 / Playstyles / Playstyles+）：导出已按 s901 的写法（连字符 / 双空格 / 大小写）与顺序还原、生涯特性按 s901 带回；期望 0，非 0 逐条列。');
-  L.push('- **D 平台侧可编辑**（firstname / lastname / commonname / number）：平台是姓名与球衣号的真源（v6.0.0 起在平台内维护、可编辑），与 s901 不同**不算失败**，逐条列出备查。');
+  L.push('- **A 硬闸**（playerid / Position1-4 / teamid / nationality / preferredfoot / height / weight / weakfootabilitytypecode / 三列缺口）：S9 时两侧逐字一致（0 处）；此后出现差异要么平台内改过、要么映射出错 ⇒ **必须 0，非 0 停下人工确认**。');
+  L.push('- **B 数值**（overallrating / potential / 34 项能力）：导出取库内现值（`ca` / `pa` + `game_attrs`），与 2026-09-05 快照不同是平台内成长与订正的正常结果 ⇒ 不算失败，逐条列。');
+  L.push('- **C 文本**（role1-5 / Playstyles / Playstyles+）：导出按**库内槽位顺序** + 平台反查表出值（忠实线上库）；与 s901 的写法（连字符 / 双空格 / 大小写）、顺序、生涯特性差异 ⇒ 不算失败，逐条列。');
+  L.push('- **D 平台侧可编辑**（firstname / lastname / commonname / number）：平台是姓名与球衣号的真源（v6.0.0 起在平台内维护、可编辑）⇒ 不算失败，逐条列。');
   L.push('');
   L.push('## 结果', '');
   L.push(`- A 硬闸差异：**${hard.length}**（${hard.length === 0 ? '通过' : '不通过'}）`);
-  L.push(`- B 数值差异：${soft.length} 处（期望 0）`);
-  L.push(`- C 文本差异：${text.length} 处（期望 0）`);
-  L.push(`- D 平台侧可编辑差异：${editable.length} 处（不算失败，逐条列）`);
+  L.push(`- B 数值差异：${soft.length} 处（不算失败，平台库现值）`);
+  L.push(`- C 文本差异：${text.length} 处（不算失败，平台库槽位与反查表）`);
+  L.push(`- D 平台侧可编辑差异：${editable.length} 处（不算失败）`);
   L.push(`- 差异涉及球员：${new Set(diffs.map((d) => d.fc)).size} 人 / 共 ${diffs.length} 处`);
-  L.push(`- 生涯特性按 s901 带回（库内无槽位）：${rep.get('生涯特性按 s901 带回（库内无槽位）')} 处`);
+  L.push(`- s901 花式库内无槽位（不回填）：${rep.get('s901 花式库内无槽位（不回填）')} 处`);
+  L.push(`- s901 角色库内无槽位（不回填）：${rep.get('s901 角色库内无槽位（不回填）')} 处`);
   L.push(
     `- s901 有、本次导出无：${missingInMine.length} 人${missingInMine.length ? `（fc ${missingInMine.slice(0, 20).join(', ')}${missingInMine.length > 20 ? ' …' : ''}）` : ''}`,
   );
@@ -980,13 +966,13 @@ function runDiffPrev(): number {
     L.push('');
   };
   dump('A 硬闸差异（必须 0）', hard);
-  dump('B 数值差异（期望 0）', soft);
-  dump('C 文本差异（期望 0）', text);
+  dump('B 数值差异（不算失败，平台库现值）', soft);
+  dump('C 文本差异（不算失败，平台库槽位与反查表）', text);
   dump('D 平台侧可编辑差异（不算失败）', editable);
   writeFileSync(join(OUT_DIR, 'diff-prev-report.md'), L.join('\n') + '\n');
   console.log(L.slice(0, 20).join('\n'));
   console.log(`\n报告：${join(OUT_DIR, 'diff-prev-report.md')}`);
-  return hard.length === 0 && text.length === 0 ? 0 : 4;
+  return hard.length === 0 ? 0 : 4;
 }
 
 // ---------------------------------------------------------------- main
