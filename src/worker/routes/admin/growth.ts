@@ -342,6 +342,8 @@ const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎
 
 界面固定布局：左侧球员表格，列依次为 POS（位置缩写）、Name、RR（评分，N/A=替补没上场）、G（进球）、AST（助攻）；右侧选中球员详情区，页签 Summary / Possession / Shooting / Passing / Defending / Goalkeeping；画面顶部的 FPS/CPU/GPU 监控条是录屏软件干扰，一律忽略。
 
+左表在两个业务页签下都会出现：Summary 页签下往往显示不完整个队（带滚动条）；Goalkeeping 页签下通常列出更多球员（含 Summary 页没露出的后卫与替补）。无论当前是哪个页签，rows 都要转录左表可见的全部行，一行不许丢；门将本人也在左表里，他的 RR 就是评分。
+
 输出结构（键名逐字一致；下面的示例值就是应输出的类型——数字字段输出 JSON number，禁止加引号变字符串）：
 {
   "team": "MILAN",
@@ -365,9 +367,9 @@ const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎
 }
 
 规则：
-1. rows 只输出图中可见的行，按图内顺序；表格带滚动条时，滚动条外的行绝不编造。
+1. rows 输出左表可见的行，按图内顺序；表格带滚动条时，滚动条外的行绝不编造。
 2. 每行必须包含全部五个键：替补（SUB）行 rating 填 null，goals/assists 填 0。
-3. tab=summary 时填 selected、gk 置 null；tab=goalkeeping 时填 gk、selected 置 null；其它页签两者都置 null。
+3. tab=summary 时填 selected、gk 置 null；tab=goalkeeping 时填 gk、selected 置 null；其它页签两者都置 null。rows 与页签无关，任何页签都要完整输出。
 4. 详情区每个指标都有两列数字：左列是球员本人，右列是全队平均；一律取左列。
 5. rating/gkRating 是一位小数（如 7.8）；goals/assists 及 gk 各项是整数；数字字段一律输出 JSON number（7.8 而不是 "7.8"），只有 pos/name/team/tab/notes 是字符串。
 6. 所有数字严格按图，不做任何推算。
@@ -394,18 +396,18 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
   if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认、弃权或不是联赛/冠军杯小组赛）');
 
-  const body = (await readJson(c)) as { kind?: unknown; image?: unknown } | null;
-  const kind = body?.kind;
-  if (kind !== 'summary' && kind !== 'goalkeeping') throw new HttpError(400, 'kind 只能是 summary 或 goalkeeping');
+  const body = (await readJson(c)) as { image?: unknown } | null;
   if (typeof body?.image !== 'string' || body.image === '') throw new HttpError(400, '缺 image（截图的 base64）');
   const image = decodeOcrImage(body.image);
 
   // 视觉调用（未配置 503 / 失败 502 都由 llmVisionJson 抛）
   const parsed = await llmVisionJson<{ notes?: unknown }>(c.env, image, OCR_PROMPT);
   const { ocr, errors } = parseOcrVision(parsed);
-  if (!ocr || !ocr.tab || ocr.tab !== kind) {
-    throw new HttpError(502, `识别结果${ocr?.tab && ocr.tab !== kind ? `是 ${ocr.tab} 页签，与上传的 ${kind} 不符` : '不可解析'}，请重试${errors.length ? `（${errors[0]}）` : ''}`);
+  // 页签由模型识别结果决定（前端一个入口多选上传，不再由请求指定）；只认两张业务页签
+  if (!ocr || (ocr.tab !== 'summary' && ocr.tab !== 'goalkeeping')) {
+    throw new HttpError(502, `识别结果${ocr?.tab ? `是 ${ocr.tab} 页签，只认外场 Summary 与门将 Goalkeeping` : '不可解析'}，请重试${errors.length ? `（${errors[0]}）` : ''}`);
   }
+  const kind: 'summary' | 'goalkeeping' = ocr.tab;
 
   // 截图队名 → 本场两侧（归一化等值，退化为包含）；CPU 队名一样能对上（认人靠花名册，CPU 侧花名册为空）
   const fold = (s: string | null) => foldName(s ?? '');

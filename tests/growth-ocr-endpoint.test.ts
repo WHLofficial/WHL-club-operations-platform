@@ -95,6 +95,18 @@ const summaryPayload = {
   notes: '',
 };
 
+const gkPayload = {
+  team: '海港联',
+  tab: 'Goalkeeping',
+  rows: [
+    { pos: 'GK', name: 'K. Zhang', rating: '5.1', goals: 0, assists: 0 },
+    { pos: 'CM', name: 'M. Wang', rating: '7.5', goals: 0, assists: 0 },
+    { pos: 'SUB', name: 'X. Bench', rating: 'N/A', goals: 0, assists: 0 },
+  ],
+  selected: null,
+  gk: { name: 'K. Zhang', gkRating: '4.0', shotsAgainst: 10, shotsOnTarget: 7, saves: 3, goalsConceded: 4 },
+};
+
 function mockVision(content: string): void {
   vi.stubGlobal(
     'fetch',
@@ -134,31 +146,29 @@ describe('TC-EP 截图识别端点', () => {
     const fx = seeded();
     const anon = await app.request(ocrPath(MATCH_ID), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, fx.env);
     expect(anon.status).toBe(401);
-    const coach = await sendOcr(fx, { kind: 'summary', image: PNG_B64 }, 'tok-coach');
+    const coach = await sendOcr(fx, { image: PNG_B64 }, 'tok-coach');
     expect(coach.status).toBe(403);
-    const missing = await sendOcr(fx, { kind: 'summary', image: PNG_B64 }, 'tok-admin', 99999);
+    const missing = await sendOcr(fx, { image: PNG_B64 }, 'tok-admin', 99999);
     expect(missing.status).toBe(404);
   });
 
-  it('TC-EP-02 入参校验：kind 非法、base64 坏、魔数不是 PNG/JPEG、超 5MB 各回 400', async () => {
+  it('TC-EP-02 入参校验：缺 image、base64 坏、魔数不是 PNG/JPEG、超 5MB 各回 400', async () => {
     const fx = seeded();
-    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(400); // kind 缺失
-    expect((await sendOcr(fx, { kind: 'shooting', image: PNG_B64 })).status).toBe(400);
-    expect((await sendOcr(fx, { kind: 'summary', image: '!!!not-base64!!!' })).status).toBe(400);
-    expect((await sendOcr(fx, { kind: 'summary', image: 'aGVsbG8gd29ybGQ=' })).status).toBe(400); // 'hello world' 无图片魔数
-    expect((await sendOcr(fx, { kind: 'summary', image: 'A'.repeat(7_000_000) })).status).toBe(400); // ≈5.25MB
-    expect((await sendOcr(fx, { kind: 'summary' })).status).toBe(400); // image 缺失
+    expect((await sendOcr(fx, {})).status).toBe(400); // image 缺失
+    expect((await sendOcr(fx, { image: '!!!not-base64!!!' })).status).toBe(400);
+    expect((await sendOcr(fx, { image: 'aGVsbG8gd29ybGQ=' })).status).toBe(400); // 'hello world' 无图片魔数
+    expect((await sendOcr(fx, { image: 'A'.repeat(7_000_000) })).status).toBe(400); // ≈5.25MB
   });
 
   it('TC-EP-03 未配置 LLM → 503；网关回非 JSON → 502；两者都不写库', async () => {
     const unconfigured = seeded();
     unconfigured.env.LLM_API_BASE = undefined as unknown as string;
-    const res503 = await sendOcr(unconfigured, { kind: 'summary', image: PNG_B64 });
+    const res503 = await sendOcr(unconfigured, { image: PNG_B64 });
     expect(res503.status).toBe(503);
 
     const fx = seeded();
     mockVision('抱歉，我无法输出结构化数据');
-    const res502 = await sendOcr(fx, { kind: 'summary', image: PNG_B64 });
+    const res502 = await sendOcr(fx, { image: PNG_B64 });
     expect(res502.status).toBe(502);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM growth_events')!.n).toBe(0);
   });
@@ -166,7 +176,7 @@ describe('TC-EP 截图识别端点', () => {
   it('TC-EP-04 合法 summary：队名对上主队、花名册认人、警告与模型备注贯通', async () => {
     const fx = seeded();
     mockVision(JSON.stringify({ ...summaryPayload, notes: '底部一行被遮挡' }));
-    const res = await sendOcr(fx, { kind: 'summary', image: PNG_B64 });
+    const res = await sendOcr(fx, { image: PNG_B64 });
     expect(res.status).toBe(200);
     const body = (await res.json()) as OcrResponse;
     expect(body.side).toBe('home');
@@ -181,15 +191,16 @@ describe('TC-EP 截图识别端点', () => {
     expect(body.warnings).toContain('模型备注：底部一行被遮挡');
   });
 
-  it('TC-EP-05 页签不符 → 502 点名；队名对不上两侧 → 400 点名截图队名', async () => {
+  it('TC-EP-05 页签不是两张业务页签 → 502 点名；队名对不上两侧 → 400 点名截图队名', async () => {
     const fx = seeded();
-    mockVision(JSON.stringify({ ...summaryPayload, tab: 'Goalkeeping' }));
-    const mismatch = await sendOcr(fx, { kind: 'summary', image: PNG_B64 });
+    mockVision(JSON.stringify({ ...summaryPayload, tab: 'Shooting' }));
+    const mismatch = await sendOcr(fx, { image: PNG_B64 });
     expect(mismatch.status).toBe(502);
-    expect(((await mismatch.json()) as { error: string }).error).toContain('goalkeeping');
+    // parseOcrVision 层就拦未知页签：错误信息点名「页签「Shooting」不是 Summary 或 Goalkeeping」
+    expect(((await mismatch.json()) as { error: string }).error).toContain('页签「Shooting」');
 
     mockVision(JSON.stringify({ ...summaryPayload, team: '巴黎圣日耳曼' }));
-    const wrongTeam = await sendOcr(fx, { kind: 'summary', image: PNG_B64 });
+    const wrongTeam = await sendOcr(fx, { image: PNG_B64 });
     expect(wrongTeam.status).toBe(400);
     expect(((await wrongTeam.json()) as { error: string }).error).toContain('巴黎圣日耳曼');
   });
@@ -197,9 +208,25 @@ describe('TC-EP 截图识别端点', () => {
   it('TC-EP-06 零 DB 写：成功路径后 growth_events / audit_log / growth_xp 原样不动', async () => {
     const fx = seeded();
     mockVision(JSON.stringify(summaryPayload));
-    await sendOcr(fx, { kind: 'summary', image: PNG_B64 });
+    await sendOcr(fx, { image: PNG_B64 });
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM growth_events')!.n).toBe(0);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM audit_log')!.n).toBe(0);
     expect(sqlGet<{ xp: number }>(fx.sqlite, 'SELECT growth_xp AS xp FROM players WHERE id = 11')!.xp).toBe(0);
+  });
+
+  it('TC-EP-07 合法 goalkeeping：左表行照常并出 + 门将块并进门将同一条（页签由模型定）', async () => {
+    const fx = seeded();
+    mockVision(JSON.stringify(gkPayload));
+    const res = await sendOcr(fx, { image: PNG_B64 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as OcrResponse;
+    expect(body.side).toBe('home');
+    expect(body.kind).toBe('goalkeeping'); // 请求没带 kind，页签来自识别结果
+    // 门将 5.1（<7 只出场）+ gk 块并入 saves；M. Wang 7.5 出场+评分；SUB N/A 跳过
+    expect(body.entries).toHaveLength(2);
+    expect(body.entries[0]).toMatchObject({ playerId: 10, draft: { appearance: true, saves: 3 } });
+    expect(body.entries[1]).toMatchObject({ playerId: 12, draft: { appearance: true, rating: 7.5 } });
+    expect(body.unmatched).toEqual([]);
+    expect(body.warnings).toContain('「K. Zhang」评分 5.1 低于 7.0，只预填出场（7.0 以下不给 XP）');
   });
 });

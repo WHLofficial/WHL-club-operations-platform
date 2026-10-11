@@ -1500,6 +1500,24 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.43.1 · 截图识别：门将页行合并去重 + 单入口多选上传 + 提示词 V4（2026-10-11）
+
+**状态**：本地完成待部署（零迁移、零生产写；随下次授权 push 上线）。判级 patch（同一能力的流程收窄与识别面补全，无新增端点、契约变更仅减参数）。
+
+**缘起与裁决**（用户两条）：①「第一张外场图片常常不能包含所有球员，部分球员数据在门将那一页上，因此应当合并去重」——Goalkeeping 页左表常带 Summary 页滚动条外的后卫与替补（例图 2 的 Alaba/Mahrez、例图 4 的 Konaté/St. Juste/Costa/Kessié），而 v6.43.0 的 `buildOcrEntries` 在门将页**只吃 `gk` 块、左表 rows 全丢弃**，这些球员进不了预填（模型明明都认出来了）；②「可不可以只保留一个上传入口，可多选图片？」——Summary/门将页两按钮并成一个多选入口。
+
+**交付**：
+- `src/core/growth-ocr.ts`：`buildOcrEntries` 重构——`pushRows()` 无条件先跑（**两个页签都吃 rows**），goalkeeping 再把 `gk` 块并进门将同人条（`push()` 既有 Object.assign 合并天然覆盖「门将页里门将本人 RR ≥7 + 扑救」合成一条的情形）；doc 注释更新。
+- `src/worker/routes/admin/growth.ts`：端点去 `kind` 请求参数（页签由模型识别结果决定；非两张业务页签仍 502 且点名页签）；`OCR_PROMPT` 升 **V4**——新增段落「左表在两个业务页签下都会出现：Summary 页签下往往显示不完整个队（带滚动条）；Goalkeeping 页签下通常列出更多球员（含 Summary 页没露出的后卫与替补）。无论当前是哪个页签，rows 都要转录左表可见的全部行，一行不许丢；门将本人也在左表里，他的 RR 就是评分」+ 规则 1 措辞收窄到左表 + 规则 3 补「rows 与页签无关」，schema 与其余规则逐字未动。
+- `web/src/lib/growth-ocr.ts`：`mergeOcrEntries` 逐格三态去重——锁定格进 `blocked`（不变）、空格写 + `applied`、**同值计 `deduped` 不重写**、**异值保留先填值**并出「评分识别 X 与已填 Y 冲突，保留已填值」提示（顺带关死 v6.43.0 评审后残余的「等待期手填被覆盖」口子——现在任何已填格都不再被静默覆盖）。
+- `web/src/pages/admin/GrowthEntryPage.tsx`：单一多选上传入口（`multiple`），逐张**顺序**识别逐张合并（glm-4v-flash 免费档 429 限流 ⇒ 不并行）、单张失败继续下一张、按钮显「识别中 i/n…」进度、报告行逐张给「第 i 张（team · Summary/门将页）：预填 X 格、去重 Y 格…」；提示文案说明「门将页左表也并出额外球员，重复出现的球员自动去重；冲突保留先填的值」。
+
+**验收**：typecheck 三份全清；vitest 全量 **114 文件 / 1898 例**全绿（v6.43.0 基线 114/1894，净 +4 例）；`npm run build` 成功。**提示词 A/B（第二轮）**：V4 对 V3 **零回退**——4 图 × glm-4v-flash / glm-4.1v-thinking-flash 共 8 次调用，行数据每次 12/12 行、36/36 格全对，gk 五项 5/5 全对，类型全 JSON number，耗时 10.8–20.7s/图；三个打分 flag 全部定性（`saveSuccessRate=false` = GT 多录的 43% 超出 schema 要求范围；`tabOut=undefined` = 原始回包实为 `"goalkeeping"`、打分器取值路径错；图 1 `assists=false` × 2 = 模型把队均列当本人列，`selected` 无写库消费方、落库用 rows 36/36 全对——采样噪声非回归）。A/B 数据落 `memory/spike-v6.43.0-vision.md` 第二轮。测试计划 `docs/test-plans/v6.43.1-growth-ocr-merge.md`。
+
+**评审（code-review-skill，提交后复跑）**：无阻塞项。变异验证两处定向红（按最坏情况口径）：冲突分支改成覆盖 ⇒ 恰 TC-FE-06 红；`pushRows` 退回只认 summary ⇒ 恰 TC-DRAFT-02/05 红——还原后全绿。nit 4 条登记不改：① `runOcr` 逐张 `setSide(target)`，视图随识别进度在两侧跳动（最后停在最后一张的侧；报告行已逐张点名侧别）；② ocr 解析成功但页签缺失时 502 文案「不可解析」与真实原因略有出入（`errors[0]` 会带细节）；③ 报告 `ok` 判据 = 至少一张成功（部分失败整体仍绿，但逐行点名失败）；④ 门将页左表的门将行 RR<7 每次触发「评分低于 7.0」警告——语义正确（7.0 以下不给 XP）但门将几乎场场触发，属信息噪声。
+
+**踩坑**：打分器两处口径假象（GT 多录 schema 外字段、tabOut 取值路径）说明 A/B 汇总不能只看 flag 数——先逐类核对原始回包再定性，否则会把「打分器 bug」当成「识别回归」或反之。
+
 ## v6.43.0 · 成长录入截图识别——上传 FC26 赛后截图自动预填（2026-10-11）
 
 **状态**：**已上线**（2026-10-11 用户令「发布」：push `a3a9e8a..b5fda14` ⇒ CF Workers Builds **Version `b2927d42-6669-4590-9682-a05dda102488`** @2026-10-11T10:07:39Z、100%；**上线前置已做**——生产 secret 三件套 `LLM_API_BASE`（`https://open.bigmodel.cn/api/paas/v4`）/ `LLM_API_KEY`（用户自备智谱 key）/ `LLM_VISION_MODEL`（`glm-4v-flash`）于 push 前配好（三次 Secret Change @10:06:27/51/56Z；`LLM_MODEL` **刻意不配**——v6.12.0 草稿工坊保持 503 旁路不动，视觉路径判定只看 BASE+KEY+VISION 三件）；上线回读：`/api/health` 200、`POST /api/admin/growth/match-entry/1/ocr` 匿名 **401**（v6.43.0 路由在场 + 管理员守卫生效，旧版此处 404）、线上入口资产 `assets/index-6e4ddl74.js`（650,256 B）与本地重构建**逐字节一致**、线上版本串 `6.43.0`；⚠️ 首轮 hash 比对不一致是本地 dist 落后于评审修复 `4b84c99`（改了 GrowthEntryPage.tsx）——重构建后即一致，线上一直是对的）。零迁移、零生产写、零生产数据触碰。判级 minor（新增管理端能力）。

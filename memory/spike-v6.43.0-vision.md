@@ -29,3 +29,10 @@ FC26 赛后 Player Performance 截图 → 结构化 JSON（左表行 POS/Name/RR
 - V3（=V2 结构 + schema 换成带真实数字的示例行 + 显式规则「数字字段一律 JSON number，禁止加引号」+ 用户裁决「最好类型统一」）：8 次调用行数据 48/48 格全对且类型全为 number；gk 五项全对。两个打分器 false 均为假象——tab 大写 "Goalkeeping"（端点 growth-ocr.ts:92 toLowerCase 归一）、thinking-flash #1 Kane 详情 assists 读成队均列 2（selected 字段无写库消费方，零影响）。
 - 采纳：端点 OCR_PROMPT = V3（保留页签收窄 summary|goalkeeping）；spike.mjs 加 SPIKE_PROMPT=v1/v2/v3 开关可复跑。
 - 教训：prompt schema 里「带真实数字的示例行」比「类型描述文字」更能钉住输出类型；描述文字反而诱导字符串化。
+
+## 提示词 A/B 第二轮（2026-10-11 v6.43.1，采纳 v4）
+- 背景：v6.43.1 流程改「单入口多选上传 + 门将页左表行也并出外场球员」，V3 的规则 3 只说页签与 selected/gk 的取舍、没说 rows 与页签无关——门将页左表转录只是「碰巧听话」。
+- V4 = V3 + 新段落「左表在两个业务页签下都会出现：Summary 页签下往往显示不完整个队（带滚动条）；Goalkeeping 页签下通常列出更多球员（含 Summary 页没露出的后卫与替补）。无论当前是哪个页签，rows 都要转录左表可见的全部行，一行不许丢；门将本人也在左表里，他的 RR 就是评分」+ 规则 1 措辞收窄到左表 + 规则 3 补「rows 与页签无关，任何页签都要完整输出」。schema 与其余规则逐字未动。
+- 实测（4 图 × glm-4v-flash / glm-4.1v-thinking-flash，SPIKE_PROMPT=v4）：8 次调用行数据每次 12/12 行、36/36 格全对，gk 五项 5/5 全对，类型全 number——对 V3 基线零回退。耗时 10.8–20.7s/图。
+- 三个打分 flag 全部定性：① `saveSuccessRate=false`（4 次 GK 图）= GT 多录的 43% 超出 schema 要求范围，模型本就不该输出——打分器口径假象；② `tabOut=undefined`（4 次 GK 图）= 原始回包实为 "goalkeeping"，打分器取值路径错——假象；③ `assists=false`（图 1 两模型）= 模型把 Kane 详情队均列（2）当本人列（0），selected 无写库消费方（buildOcrEntries 只吃 rows+gk），落库用 rows 36/36 全对——采样噪声非回归（V3 轮 thinking-flash 同样如此）。
+- 采纳：端点 OCR_PROMPT = V4；spike.mjs SPIKE_PROMPT=v1/v2/v3/v4 可复跑。

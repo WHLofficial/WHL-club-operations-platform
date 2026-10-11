@@ -26,6 +26,8 @@ export interface OcrMergeOutcome<R extends OcrMergeRow> {
   rows: R[];
   /** 成功写入的格子数 */
   applied: number;
+  /** 同值去重的格子数（同一球员在两页都出现等场景，值相同不重复写） */
+  deduped: number;
   skipped: OcrMergeSkip[];
   /** 零封联动新勾的门将数 */
   gkAuto: number;
@@ -42,8 +44,10 @@ export function sideConcededOf(
 }
 
 /**
- * 把识别条目合并进行草稿：
+ * 把识别条目合并进行草稿（多选上传逐张调用，本函数负责跨图去重）：
  * - 只写未锁定（未录入/未提交）的格子，锁定的逐条给跳过原因；
+ * - 已填但未锁定的格子不覆盖：同值算去重（deduped），异值保留先填的值并出冲突跳过——
+ *   识别等待期间的手填与上一张图的结果都不被后续图覆盖（宁缺勿错，冲突由人工裁决）；
  * - 夺回球权（duelsWon）不预填——按裁决保持人工手填（它同时是防守球员确认的载体）；
  * - 本侧失球 0 时，未锁定的门将行自动勾零封（无论识别条目里有没有他）。
  */
@@ -56,6 +60,7 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
   const byId = new Map(next.map((r) => [r.playerId, r]));
   const skipped: OcrMergeSkip[] = [];
   let applied = 0;
+  let deduped = 0;
 
   for (const e of entries) {
     const row = byId.get(e.playerId);
@@ -68,41 +73,52 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
       continue;
     }
     let touched = 0;
+    let duped = 0;
     let blocked: string[] = [];
+    const conflicts: string[] = [];
     if (e.draft.appearance) {
-      if (!row.appearance.locked) {
+      if (row.appearance.locked) blocked.push('出场');
+      else if (row.appearance.checked) duped += 1;
+      else {
         row.appearance = { ...row.appearance, checked: true };
         touched += 1;
-      } else blocked.push('出场');
+      }
     }
     if (e.draft.rating !== undefined) {
-      if (!row.rating.locked) {
-        row.rating = { ...row.rating, value: String(e.draft.rating) };
+      const value = String(e.draft.rating);
+      if (row.rating.locked) blocked.push('评分');
+      else if (row.rating.value === '') {
+        row.rating = { ...row.rating, value };
         touched += 1;
-      } else blocked.push('评分');
+      } else if (row.rating.value === value) duped += 1;
+      else conflicts.push(`评分识别 ${value} 与已填 ${row.rating.value} 冲突`);
     }
     if (e.draft.cleanSheet) {
-      if (!row.cleanSheet.locked) {
+      if (row.cleanSheet.locked) blocked.push('零封');
+      else if (row.cleanSheet.checked) duped += 1;
+      else {
         row.cleanSheet = { ...row.cleanSheet, checked: true };
         touched += 1;
-      } else blocked.push('零封');
+      }
     }
     if (e.draft.saves !== undefined) {
-      if (!row.saves.locked) {
-        row.saves = { ...row.saves, value: String(e.draft.saves) };
+      const value = String(e.draft.saves);
+      if (row.saves.locked) blocked.push('扑救');
+      else if (row.saves.value === '') {
+        row.saves = { ...row.saves, value };
         touched += 1;
-      } else blocked.push('扑救');
+      } else if (row.saves.value === value) duped += 1;
+      else conflicts.push(`扑救识别 ${value} 与已填 ${row.saves.value} 冲突`);
     }
-    if (touched === 0) {
-      skipped.push({
-        playerId: e.playerId,
-        name: e.name,
-        reason: blocked.length > 0 ? `${blocked.join('、')}格已录入锁定` : '无可预填字段',
-      });
-    } else {
-      applied += touched;
-      if (blocked.length > 0) skipped.push({ playerId: e.playerId, name: e.name, reason: `${blocked.join('、')}格已录入锁定` });
+    applied += touched;
+    deduped += duped;
+    if (conflicts.length > 0) {
+      skipped.push({ playerId: e.playerId, name: e.name, reason: `${conflicts.join('、')}，保留已填值` });
     }
+    if (blocked.length > 0) {
+      skipped.push({ playerId: e.playerId, name: e.name, reason: `${blocked.join('、')}格已录入锁定` });
+    }
+    // 全部同值去重（touched=0、无冲突、无锁定）不算跳过——多选上传时这是常态
   }
 
   let gkAuto = 0;
@@ -115,5 +131,5 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
     }
   }
 
-  return { rows: next, applied, skipped, gkAuto, cleanSheetSide: conceded === 0 };
+  return { rows: next, applied, deduped, skipped, gkAuto, cleanSheetSide: conceded === 0 };
 }

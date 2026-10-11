@@ -2012,12 +2012,8 @@ export interface MatchOcrResult {
 }
 
 /** 赛后截图识别预填（不写库；image 传不带 data: 前缀的 base64） */
-export async function ocrMatchEntry(
-  matchId: number,
-  kind: 'summary' | 'goalkeeping',
-  imageBase64: string,
-): Promise<MatchOcrResult> {
-  return apiPost<MatchOcrResult>(`/api/admin/growth/match-entry/${matchId}/ocr`, { kind, image: imageBase64 });
+export async function ocrMatchEntry(matchId: number, imageBase64: string): Promise<MatchOcrResult> {
+  return apiPost<MatchOcrResult>(`/api/admin/growth/match-entry/${matchId}/ocr`, { image: imageBase64 });
 }
 
 // ---- M0 货币监控（PRD：Σ俱乐部余额报表，观察通胀） ----

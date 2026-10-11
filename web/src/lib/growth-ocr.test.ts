@@ -76,4 +76,30 @@ describe('TC-FE 识别条目 → 行草稿合并', () => {
     expect(sideConcededOf(match, 'home')).toBe(4);
     expect(sideConcededOf(match, 'away')).toBe(2);
   });
+
+  it('TC-FE-05 多选上传去重：第二张同值不重写、计 deduped、不出跳过', () => {
+    const original = [row(1), row(2, { position: 'GK' })];
+    const first = mergeOcrEntries(original, [entry(1, '甲', { appearance: true, rating: 7.8, saves: 3 })], 4);
+    expect(first.applied).toBe(3);
+    const second = mergeOcrEntries(first.rows, [entry(1, '甲', { appearance: true, rating: 7.8, saves: 3 })], 4);
+    expect(second.applied).toBe(0);
+    expect(second.deduped).toBe(3);
+    expect(second.skipped).toEqual([]);
+    expect(second.rows[0].rating.value).toBe('7.8'); // 值原样
+    expect(second.rows[0].saves.value).toBe('3');
+  });
+
+  it('TC-FE-06 冲突保留先填值：异值出跳过并带双方值，新格照写', () => {
+    const original = [row(1)];
+    const first = mergeOcrEntries(original, [entry(1, '甲', { appearance: true, rating: 7.8 })], 4);
+    const second = mergeOcrEntries(first.rows, [entry(1, '甲', { appearance: true, rating: 8.5, saves: 2 })], 4);
+    expect(second.rows[0].rating.value).toBe('7.8'); // 先填的不被覆盖
+    expect(second.applied).toBe(1); // saves 是新格照写
+    expect(second.deduped).toBe(1); // appearance 同值去重
+    expect(second.skipped).toContainEqual({
+      playerId: 1,
+      name: '甲',
+      reason: '评分识别 8.5 与已填 7.8 冲突，保留已填值',
+    });
+  });
 });

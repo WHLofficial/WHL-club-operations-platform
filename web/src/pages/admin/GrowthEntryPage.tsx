@@ -457,11 +457,10 @@ function EntryPanel({
   const [side, setSide] = useState<Side>('home');
   const [saving, setSaving] = useState<number | 'all' | null>(null);
   const [lastSummary, setLastSummary] = useState<{ written: number; duplicates: number; totalXp: number } | null>(null);
-  // v6.43.0 截图识别：busy 是当前识别的页签，report 常驻展示在工具栏下（比 toast 更耐看——警告多行）
-  const [ocrBusy, setOcrBusy] = useState<null | 'summary' | 'goalkeeping'>(null);
+  // v6.43.1 截图识别：一个入口多选上传，busy 带进度（第 i/n 张），report 常驻展示在工具栏下（比 toast 更耐看——警告多行）
+  const [ocrBusy, setOcrBusy] = useState<null | { done: number; total: number }>(null);
   const [ocrReport, setOcrReport] = useState<{ ok: boolean; lines: string[] } | null>(null);
   const ocrInputRef = useRef<HTMLInputElement | null>(null);
-  const ocrKindRef = useRef<'summary' | 'goalkeeping'>('summary');
   const builtRef = useRef<string | null>(null);
   // rows 的同步镜像：截图识别要等 13-90 秒，期间管理员可能手填格子——
   // 响应回来时合并基底必须是最新的行（闭包里的 rows 是发起那一刻的快照，直接用会覆盖等待期的手填）
@@ -516,46 +515,49 @@ function EntryPanel({
     setRowsTracked((prev) => (prev ? { ...prev, [side]: prev[side].map((r) => (r.playerId === playerId ? fn(r) : r)) } : prev));
   }
 
-  // v6.43.0 截图识别：上传 → 服务端视觉模型识别 + 认人 → 预填未锁定格子（可重试、可完全绕过）。
-  // 识别出的队侧与当前侧不同时自动切表（预填必须落在正确的表上）。
-  async function runOcr(file: File) {
-    const kind = ocrKindRef.current;
-    if (ocrBusy !== null || rowsRef.current === null) return;
-    setOcrBusy(kind);
+  // v6.43.0 截图识别，v6.43.1 改一个入口多选上传：逐张顺序调服务端识别（页签由服务端看图决定）
+  // 并逐张合并进行草稿——同值去重、异值保留先填的值并提示冲突，重复出现在两页的球员不重复写。
+  // 顺序而非并行：glm-4v-flash 免费档有 429 限流，四张并发必撞。
+  async function runOcr(files: File[]) {
+    if (ocrBusy !== null || rowsRef.current === null || files.length === 0) return;
     setOcrReport(null);
-    try {
-      const image = await fileToBase64(file);
-      const res = await ocrMatchEntry(match.matchId, kind, image);
-      const target: Side = res.side;
-      if (target !== side) setSide(target);
-      // 合并基底取 rowsRef（等待识别期间的手填都在里面），不用闭包快照
-      if (!rowsRef.current) return;
-      const baseRows = rowsRef.current[target];
-      const merged = mergeOcrEntries(baseRows, res.entries, sideConcededOf(match, target));
-      setRowsTracked((prev) => (prev ? { ...prev, [target]: merged.rows } : prev));
-      const lines: string[] = [];
-      lines.push(
-        `识别成功：预填 ${merged.applied} 格${merged.gkAuto > 0 ? `，零封联动自动勾 ${merged.gkAuto} 名门将` : ''}`,
-      );
-      if (merged.skipped.length > 0) {
-        lines.push(`跳过 ${merged.skipped.length} 条：${merged.skipped.map((s) => `${s.name}（${s.reason}）`).join('、')}`);
+    const lines: string[] = [];
+    let okCount = 0;
+    for (let i = 0; i < files.length; i += 1) {
+      setOcrBusy({ done: i, total: files.length });
+      try {
+        const image = await fileToBase64(files[i]);
+        const res = await ocrMatchEntry(match.matchId, image);
+        const target: Side = res.side;
+        // 合并基底取 rowsRef（等待识别期间的手填与上一张的预填都在里面），不用闭包快照
+        if (!rowsRef.current) break;
+        const merged = mergeOcrEntries(rowsRef.current[target], res.entries, sideConcededOf(match, target));
+        setRowsTracked((prev) => (prev ? { ...prev, [target]: merged.rows } : prev));
+        setSide(target);
+        okCount += 1;
+        const kindLabel = res.kind === 'goalkeeping' ? '门将页' : 'Summary';
+        lines.push(
+          `第 ${i + 1} 张（${res.team ?? '?'} · ${kindLabel}）：预填 ${merged.applied} 格${merged.deduped > 0 ? `、去重 ${merged.deduped} 格` : ''}${merged.gkAuto > 0 ? `、零封联动自动勾 ${merged.gkAuto} 名门将` : ''}`,
+        );
+        if (merged.skipped.length > 0) {
+          lines.push(`　跳过 ${merged.skipped.length} 条：${merged.skipped.map((s) => `${s.name}（${s.reason}）`).join('、')}`);
+        }
+        if (res.unmatched.length > 0) {
+          lines.push(`　认人失败 ${res.unmatched.length} 行：${res.unmatched.map((u) => u.name).join('、')}——请在表内手填`);
+        }
+        for (const w of res.warnings) lines.push(w);
+      } catch (err) {
+        lines.push(`第 ${i + 1} 张识别失败：${err instanceof Error ? err.message : '未知错误'}`);
       }
-      if (res.unmatched.length > 0) {
-        lines.push(`认人失败 ${res.unmatched.length} 行：${res.unmatched.map((u) => u.name).join('、')}——请在表内手填`);
-      }
-      for (const w of res.warnings) lines.push(w);
-      setOcrReport({ ok: true, lines });
-    } catch (err) {
-      setOcrReport({ ok: false, lines: [err instanceof Error ? err.message : '识别失败'] });
-    } finally {
-      setOcrBusy(null);
     }
+    setOcrBusy(null);
+    setOcrReport({ ok: okCount > 0, lines });
   }
 
   function onOcrPick(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (file) void runOcr(file);
+    if (files.length > 0) void runOcr(files);
   }
 
   function sideChip(s: Side) {
@@ -694,26 +696,15 @@ function EntryPanel({
             type="button"
             className="btn btn-sm"
             disabled={ocrBusy !== null}
-            onClick={() => {
-              ocrKindRef.current = 'summary';
-              ocrInputRef.current?.click();
-            }}
+            onClick={() => ocrInputRef.current?.click()}
           >
-            {ocrBusy === 'summary' ? '识别中…' : '上传外场 Summary 截图'}
+            {ocrBusy ? `识别中 ${ocrBusy.done + 1}/${ocrBusy.total}…` : '上传截图识别'}
           </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            disabled={ocrBusy !== null}
-            onClick={() => {
-              ocrKindRef.current = 'goalkeeping';
-              ocrInputRef.current?.click();
-            }}
-          >
-            {ocrBusy === 'goalkeeping' ? '识别中…' : '上传门将页截图'}
-          </button>
-          <input ref={ocrInputRef} type="file" accept="image/png,image/jpeg" hidden onChange={onOcrPick} />
-          <span className="muted">识别出场 / 评分 / 零封 / 扑救并预填；夺回球权仍手填。预填后请人工核对。</span>
+          <input ref={ocrInputRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={onOcrPick} />
+          <span className="muted">
+            可一次多选：双方外场 Summary + 双方门将页。门将页左表也并出额外球员，重复出现的球员自动去重；识别出场 /
+            评分 / 零封 / 扑救并预填，冲突保留先填的值；夺回球权仍手填。预填后请人工核对。
+          </span>
           {ocrReport && (
             <div className={`entry-ocr-report${ocrReport.ok ? '' : ' bad-text'}`}>
               {ocrReport.lines.map((l, i) => (

@@ -39,7 +39,11 @@ const summaryRaw = {
 const gkRaw = {
   team: '海港联',
   tab: 'Goalkeeping',
-  rows: [{ pos: 'GK', name: 'K. Zhang', rating: '5.1', goals: 0, assists: 0 }],
+  rows: [
+    { pos: 'GK', name: 'K. Zhang', rating: '5.1', goals: 0, assists: 0 },
+    { pos: 'CM', name: 'M. Wáng', rating: '7.5', goals: 1, assists: 0 },
+    { pos: 'SUB', name: 'X. Bench', rating: 'N/A', goals: 0, assists: 0 },
+  ],
   selected: null,
   gk: { name: 'K. Zhang', gkRating: '4.0', shotsAgainst: 10, shotsOnTarget: 7, saves: 3, goalsConceded: 4 },
 };
@@ -127,21 +131,38 @@ describe('TC-DRAFT 识别结果 → 预填草稿', () => {
     expect(built.warnings).toContain('「K. Zhang」评分 5.1 低于 7.0，只预填出场（7.0 以下不给 XP）');
   });
 
-  it('TC-DRAFT-02 goalkeeping：门将出场 + 扑救（>0 才填）+ 失球 0 勾零封', () => {
+  it('TC-DRAFT-02 goalkeeping：左表行照常并出（门将页补漏）+ 门将出场/扑救/零封', () => {
     const ocr4 = parseOcrVision(gkRaw).ocr!;
     const built4 = buildOcrEntries(ocr4, roster);
-    expect(built4.entries).toHaveLength(1);
-    expect(built4.entries[0]).toMatchObject({ playerId: 10, matched: 'official' });
-    expect(built4.entries[0].draft).toEqual({ appearance: true, saves: 3 }); // 失球 4 → 无零封
+    // 左表三行：门将 5.1（<7 只出场）+ M. Wáng 7.5（出场+评分）+ SUB N/A 跳过；gk 块并进门将同一条
+    expect(built4.entries).toHaveLength(2);
+    const byId = new Map(built4.entries.map((e) => [e.playerId, e]));
+    expect(byId.get(10)!.draft).toEqual({ appearance: true, saves: 3 }); // 失球 4 → 无零封
+    expect(byId.get(12)!.draft).toEqual({ appearance: true, rating: 7.5 });
+    expect(built4.warnings).toContain('「K. Zhang」评分 5.1 低于 7.0，只预填出场（7.0 以下不给 XP）');
 
     const ocr0 = parseOcrVision({ ...gkRaw, gk: { ...gkRaw.gk, goalsConceded: 0, saves: 7, shotsOnTarget: 7 } }).ocr!;
     const built0 = buildOcrEntries(ocr0, roster);
-    expect(built0.entries[0].draft).toEqual({ appearance: true, saves: 7, cleanSheet: true });
+    expect(new Map(built0.entries.map((e) => [e.playerId, e])).get(10)!.draft).toEqual({
+      appearance: true,
+      saves: 7,
+      cleanSheet: true,
+    });
 
     const ocrNoGk = parseOcrVision({ ...gkRaw, gk: null }).ocr!;
     const builtNoGk = buildOcrEntries(ocrNoGk, roster);
-    expect(builtNoGk.entries).toEqual([]);
+    expect(builtNoGk.entries).toHaveLength(2); // 左表行照常，只有扑救/零封没来源
     expect(builtNoGk.warnings).toContain('截图里没有门将详情（Goalkeeping 面板），扑救与零封无法预填');
+  });
+
+  it('TC-DRAFT-05 门将在 rows 里评分 ≥7 时与 gk 块合成一条（rating + saves 同条）', () => {
+    const { ocr } = parseOcrVision({
+      ...gkRaw,
+      rows: [{ pos: 'GK', name: 'K. Zhang', rating: '8.0', goals: 0, assists: 0 }],
+    });
+    const built = buildOcrEntries(ocr!, roster);
+    expect(built.entries).toHaveLength(1);
+    expect(built.entries[0].draft).toEqual({ appearance: true, rating: 8, saves: 3 });
   });
 
   it('TC-DRAFT-03 认不出的行进 unmatched；夺回球权永不进草稿（裁决锁）', () => {
