@@ -104,4 +104,30 @@ describe('TC-FE 识别条目 → 行草稿合并', () => {
       reason: '评分识别 8.5 与已填 7.8 冲突，保留已填值',
     });
   });
+
+  it('TC-FE-07 v6.46.0 非 XP 场次（allowCounters=false）：出场与评分照预填，零封/扑救不预填也不联动', () => {
+    // 冠军杯淘汰赛/超级杯/资格赛只收出场与评分（纯 XP 计数器写进去服务端整批 400）
+    const rows = [row(1, { position: 'GK' }), row(2)];
+    const res = mergeOcrEntries(
+      rows,
+      [
+        entry(1, '甲', { appearance: true, rating: 6.4, saves: 5, cleanSheet: true }),
+        entry(2, '乙', { appearance: true, rating: 7.9 }),
+      ],
+      0, // 本侧失球 0：正常场次会联动门将勾零封，这里必须不联动
+      false,
+    );
+    expect(res.rows[0].appearance.checked).toBe(true); // 出场照预填
+    expect(res.rows[0].rating.value).toBe('6.4'); // 差评照预填（v6.46.0 起 0–10 全收）
+    expect(res.rows[0].saves.value).toBe(''); // 扑救不预填
+    expect(res.rows[0].cleanSheet.checked).toBe(false); // 零封不预填
+    expect(res.rows[1].appearance.checked).toBe(true);
+    expect(res.rows[1].rating.value).toBe('7.9');
+    expect(res.gkAuto).toBe(0); // 门将零封联动停用（cleanSheetSide 只是「本侧失球 0」的描述，不受开关影响）
+    expect(res.skipped).toContainEqual({
+      playerId: 1,
+      name: '甲',
+      reason: '本场不计成长 XP，零封与扑救不预填',
+    });
+  });
 });

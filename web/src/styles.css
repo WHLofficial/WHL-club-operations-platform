@@ -884,6 +884,182 @@ tbody tr:hover td {
   background: #f7f0e0;
 }
 
+/* ---- 球员页「比赛」页签（v6.46.0）：斑马纹工具类 + 均分六档徽章 + 逐场流水 ---- */
+
+/* 斑马纹：偶数行底色刻意比 hover #f7f0e0 浅（两者不打架），所以 hover 规则必须排在后面。
+   全站只有本页新表挂 .zebra，其他表不受影响（zebra-all 风险大，已否）。 */
+table.zebra tbody tr:nth-child(even) td {
+  background: #faf4e7;
+}
+
+table.zebra tbody tr:hover td {
+  background: #f7f0e0;
+}
+
+/* 合计行（每赛季末行）与赛季分组头：都压在斑马纹与 hover 之上 */
+table.matches-table tbody tr.matches-sum td {
+  background: #f3ead9;
+  border-top: 1px solid #d9cbb2;
+  font-weight: 700;
+}
+
+table.matches-table tbody tr.matches-sum:hover td {
+  background: #f3ead9;
+}
+
+table.matches-table tbody tr.matches-season td {
+  background: var(--terracotta-tint);
+  color: var(--cocoa-deep);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 11 列要挤进右栏：字号与内边距都比全站默认表更紧一档 */
+table.matches-table {
+  font-size: 12.5px;
+}
+
+table.matches-table th {
+  font-size: 12px;
+  padding: 8px 9px;
+}
+
+table.matches-table td {
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+/* 窄屏副行（被裁掉的冷门列）整行铺开挂在赛事行下方 */
+.matches-sub {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* 窄屏每赛事两行，nth-child 斑马纹会错位 ⇒ 窄屏由 JS 按赛事序号挂 .matches-alt，成对染色 */
+table.matches-table tbody tr.matches-alt td {
+  background: #faf4e7;
+}
+
+table.matches-table tbody tr.matches-alt:hover td {
+  background: #f7f0e0;
+}
+
+/* 副行紧贴上一行：去掉上边框与上内边距，只留一点下内边距把它和数据行分开 */
+table.matches-table tbody tr.matches-subrow td {
+  border-top: 0;
+  padding-top: 1px;
+  padding-bottom: 6px;
+}
+
+/* 窄屏密度档：375px 视口的右栏只有约 292px，7 列（赛事 / 出场 / 均分 + 4 个计数列）
+   按全站默认字号要 348px ⇒ 字号与内边距各收紧一档才放得下（徽章也少 6px） */
+table.matches-table-narrow {
+  font-size: 11px;
+}
+
+table.matches-table-narrow th {
+  font-size: 11px;
+  padding: 7px 5px;
+}
+
+table.matches-table-narrow td {
+  padding: 6px 5px;
+}
+
+table.matches-table-narrow .rating-badge {
+  min-width: 40px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+/* 均分徽章：白字 + 六档底色（红→橙→琥珀→橄榄→绿→深绿，与 FM 的优劣梯度同向；白字对比度均 ≥4.9:1） */
+.rating-badge {
+  display: inline-block;
+  min-width: 46px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: center;
+}
+
+.rating-badge.t1 { background: #065f46; } /* ≥ 8.50 */
+.rating-badge.t2 { background: #166534; } /* 8.00–8.49 */
+.rating-badge.t3 { background: #4d7c0f; } /* 7.50–7.99 */
+.rating-badge.t4 { background: #a16207; } /* 7.00–7.49 */
+.rating-badge.t5 { background: #c2410c; } /* 6.00–6.99 */
+.rating-badge.t6 { background: #b91c1c; } /* < 6.00 */
+
+.rating-none {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 逐场流水：每场两行（标题 + 比分 / 事件串 + 评分），不是表格 */
+.matches-h4 {
+  margin: 18px 0 8px;
+}
+
+.matches-flow {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.matches-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.matches-row:first-child {
+  border-top: 0;
+}
+
+.matches-row-title {
+  font-size: 12.5px;
+}
+
+.matches-row-score {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.matches-row-events {
+  grid-column: 1;
+  color: var(--terracotta);
+  font-size: 12px;
+}
+
+.matches-row-rating {
+  grid-row: 2;
+  grid-column: 2;
+  text-align: right;
+}
+
+.matches-foot {
+  margin-top: 10px;
+}
+
+.matches-foot p {
+  font-size: 11.5px;
+  line-height: 1.75;
+  margin: 0;
+}
+
 /* ---- Toast（家族：底部胶囊） ---- */
 
 .toast {
@@ -5225,7 +5401,7 @@ th.num .th-sort {
 
 /* ============================================================================
    v6.31.0 ⑨ 广告板（Ad Board）：/market/board 页面 + 在售市场页顶部小卡片。
-   类名自 v6.31.0 设计定稿的 .tb-*/.ts-* 提案移植（数值照抄），前缀改 .adb-*；
+   类名自 v6.31.0 设计定稿的 .tb-* 与 .ts-* 提案移植（数值照抄），前缀改 .adb-*；
    队徽一律走 web/src/components/TeamLogo.tsx，所以这里没有 logo 规则。
    着重度三档：0 普通（下面默认态）/ 1 推荐（名字 800 + 金色左轨 + 橙角标）/
    2 置顶（通栏金边淡金底 + 金角标 + 脚部置顶到期）。

@@ -553,8 +553,9 @@ function MatchEntrySection() {
     <>
       {toastNode}
       <p className="hint">
-        仅联赛与冠军杯小组赛可录；列表按确认时间倒序列出全部可补录比赛，可切换「按赛事」或「按轮次」查看。
-        本场停赛的球员不能录成长（行内已标红）。出场与评分走截图识别 + 人工确认；
+        已确认的非弃权场次都可录（v6.46.0 起含冠军杯淘汰赛 / 超级杯 / 资格赛）；列表按确认时间倒序列出全部可补录比赛，可切换「按赛事」或「按轮次」查看。
+        不产成长 XP 的场次只能录出场与评分（行首标「不计 XP」）；本场停赛的球员不能录成长（行内已标红）。
+        出场与评分走截图识别 + 人工确认；
         赛果确定的值（进球、助攻、赛果零封）只读，手录的评分 / 夺回球权 / 扑救可改后重新提交（XP 按差额调整）；
         已录的出场与零封是记过标记，不能撤销。
       </p>
@@ -1230,6 +1231,7 @@ function EntryPanel({
                 <tr key={r.playerId} className={ro ? 'row-suspended' : undefined} title={r.suspended ? suspendedText(r.suspended) : undefined}>
                   <td>
                     {r.name}
+                    {noXp && <span className="badge gray entry-src">不计 XP</span>}
                     {r.sources.length > 0 && <div className="muted entry-src">已录 · {r.sources.join('、')}</div>}
                     {r.trainee && <div className="muted entry-src">训练营</div>}
                     {r.suspended && <div className="bad-text entry-src">{suspendedText(r.suspended)}</div>}

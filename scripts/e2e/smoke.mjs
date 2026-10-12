@@ -2,6 +2,7 @@
 // 本地端到端冒烟（v2.8.1 建，v3.1.0 起兼顾 OIDC 模式 + 球员库三视口，v3.4.0 加球队页三视口，
 // v6.19.0 球员库窄屏卡片化，v6.20.0 加全路由 375 零溢出扫描⑫ + 管理抽屉开合⑬，
 // v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮；v6.22.0 加公开阅读几何⑯；
+// v6.46.0 加球员页「比赛」页签㉑（11 列表 / 赛季分组 / 合计行 / 375 卡内不横滑，端点打桩）；
 // v6.23.0 转会合并：/offers 与 /negotiations 换址到 /market/desk，加 ⑤b 换址 / ⑤c 转会台结构 / ⑤d 匿名）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
@@ -3270,6 +3271,183 @@ async function main() {
         await page.screenshot({ path: join(SHOT_DIR, 'e2e-v640-inbox-375.png'), fullPage: false });
       } finally {
         await page.unroute(offersStub);
+        await page.setViewportSize({ width: 1280, height: 900 });
+      }
+    });
+
+    await check('㉑ 球员页「比赛」页签（v6.46.0）：11 列表 / 赛季分组 / 合计行 / 脚注，375 卡内不横滑', async () => {
+      // 端点打桩：本机 TOUR_DB 是旧 schema（缺 tactic_submission / injury / injury_miss，与
+      // EMPTY_TOUR_DB_PATHS 同一类环境噪声）⇒ /api/players/:id/matches 本地必 500。真实端点的取数与
+      // 归并由 tests/player-matches.test.ts（13 例，跑真实迁移 + 真实 TOUR schema）覆盖，这里只钉渲染与几何。
+      const matchesStub = /\/api\/players\/\d+\/matches/;
+      const compStat = (over = {}) => ({
+        competitionType: 'league_premier',
+        competitionName: '顶级联赛',
+        tournamentId: 3,
+        tournamentName: 'S9 顶级联赛',
+        appearances: 22,
+        ratingCount: 19,
+        avgRating: 7.42,
+        goals: 12,
+        assists: 5,
+        yellow: 3,
+        red: 0,
+        penMiss: 1,
+        ownGoal: 0,
+        injuryOut: 0,
+        missed: 2,
+        cleanSheets: 8,
+        conceded: 12,
+        saves: 6,
+        ...over,
+      });
+      const flow = (over = {}) => ({
+        matchId: 456,
+        season: 9,
+        competitionType: 'league_premier',
+        competitionName: '顶级联赛',
+        tournamentId: 3,
+        tournamentName: 'S9 顶级联赛',
+        stageName: '循环赛',
+        round: 12,
+        stageLabel: '顶级联赛 · 循环赛 · 第 12 轮',
+        date: '2026-09-20',
+        homeTeam: '海港联',
+        awayTeam: '北岸城',
+        opponent: '北岸城',
+        side: 'home',
+        scoreHome: 3,
+        scoreAway: 1,
+        rating: 7.8,
+        saves: 0,
+        conceded: 1,
+        cleanSheet: false,
+        events: ['进球 23′', '助攻 67′'],
+        missed: false,
+        appeared: true,
+        sources: ['growth', 'event'],
+        ...over,
+      });
+      const matchesPayload = {
+        player: { id: 1, name: 'E2E 取样', position: 'ST' },
+        seasons: [
+          {
+            season: 9,
+            comps: [
+              compStat(),
+              compStat({ competitionType: 'champions_cup', competitionName: '冠军杯', tournamentId: 7, avgRating: 6.42 }),
+            ],
+            total: compStat({ competitionName: '合计', appearances: 28, avgRating: 7.15 }),
+          },
+          {
+            season: 8,
+            comps: [compStat({ competitionType: 'league_second', competitionName: '次级联赛', tournamentId: 4, avgRating: 6.08 })],
+            total: compStat({ competitionName: '合计', appearances: 12, avgRating: 6.08 }),
+          },
+        ],
+        matches: [
+          flow(),
+          flow({ matchId: 457, round: 10, date: '2026-08-30', rating: null, events: [], missed: true, appeared: false, sources: [] }),
+        ],
+      };
+      await page.route(matchesStub, (r) =>
+        r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(matchesPayload) }),
+      );
+      // 取样前先落回本站：page.evaluate 里的相对 fetch 只在同源页面里能用（E2E_ONLY 单跑时页面还停在上一场景）
+      await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+      const sample = await page.evaluate(async () => {
+        const r = await fetch('/api/players?limit=1');
+        if (!r.ok) return null;
+        const p = (await r.json()).players?.[0];
+        return p ? (p.fcId ?? p.id) : null;
+      });
+      assert(sample, '取样球员失败（/api/players?limit=1 无数据）——㉑ 断言前提不成立');
+      const headerTexts = () =>
+        page.evaluate(() => [...document.querySelectorAll('table.matches-table thead th')].map((th) => th.innerText.trim()));
+      try {
+        // —— 1280：11 列 + 赛季分组行 + 合计行 + 徽章跨档 + 脚注；桌面走 nth-child 斑马纹，不出窄屏副行 ——
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.goto(`${BASE}/players/${sample}`, { waitUntil: 'networkidle' });
+        await page.locator('.dossier-tabs button', { hasText: '比赛' }).first().click();
+        await page.locator('table.matches-table').first().waitFor({ state: 'visible', timeout: TIMEOUT });
+        const wide = await page.evaluate(() => {
+          const t = document.querySelector('table.matches-table');
+          const wrap = t.parentElement;
+          return {
+            tableCls: t.className,
+            seasons: [...document.querySelectorAll('tr.matches-season td')].map((td) => td.innerText.trim()),
+            sumFirst: document.querySelector('tr.matches-sum td')?.innerText.trim() ?? null,
+            badges: document.querySelectorAll('.rating-badge').length,
+            tiers: new Set(
+              [...document.querySelectorAll('.rating-badge')].map((b) => [...b.classList].find((c) => /^t[1-6]$/.test(c))),
+            ).size,
+            subs: document.querySelectorAll('.matches-subrow').length,
+            foot: document.querySelectorAll('.matches-foot p').length,
+            overflow: Math.max(0, t.scrollWidth - wrap.clientWidth),
+          };
+        });
+        const hWide = await headerTexts();
+        assert(hWide.length === 11, `1280 比赛表应有 11 列，实见 ${hWide.length}：${hWide.join('/')}`);
+        assert(
+          hWide.slice(0, 3).join('/') === '赛事/出场*/均分',
+          `1280 前三列表头不对：${hWide.slice(0, 3).join('/')}`,
+        );
+        // 末三列两种变体（场上：点球未进/乌龙/伤退/缺阵；门将：扑救/乌龙/伤退/缺阵）都以此收尾
+        assert(
+          hWide.slice(8).join('/') === '乌龙/伤退/缺阵',
+          `1280 末三列表头不对（场上与门将变体都应是 乌龙/伤退/缺阵）：${hWide.slice(8).join('/')}`,
+        );
+        assert(wide.tableCls.includes('zebra'), `1280 桌面表格应挂 .zebra（nth-child 斑马纹），实见 class="${wide.tableCls}"`);
+        assert(wide.seasons.join(',') === 'S9,S8', `赛季分组行应倒序（S9,S8），实见「${wide.seasons.join(',')}」`);
+        assert(wide.sumFirst?.startsWith('合计'), `每赛季末应有合计行，实见首格「${wide.sumFirst}」`);
+        assert(wide.badges >= 4 && wide.tiers >= 3, `均分徽章应 ≥4 个且跨 ≥3 档，实见 ${wide.badges} 个 / ${wide.tiers} 档`);
+        assert(wide.subs === 0, `桌面不应出窄屏副行，实见 ${wide.subs} 行`);
+        assert(wide.foot === 3, `脚注应 3 条（出场口径 / 均分口径 / 黄牌与乌龙口径），实见 ${wide.foot} 条`);
+        assert(wide.overflow <= 1, `1280 卡内横向溢出 ${wide.overflow}px（11 列应放得下）`);
+        await page.screenshot({ path: join(SHOT_DIR, 'e2e-v6460-matches-1280.png'), fullPage: true });
+
+        // —— 375：裁到 7 列 + 副行整行铺开 + 密度档；卡内不横滑、文档级零溢出（v6.46.0 实测的红线） ——
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(`${BASE}/players/${sample}`, { waitUntil: 'networkidle' });
+        await page.locator('.dossier-tabs button', { hasText: '比赛' }).first().click();
+        await page.locator('table.matches-table').first().waitFor({ state: 'visible', timeout: TIMEOUT });
+        const hNarrow = await headerTexts();
+        assert(hNarrow.length === 7, `375 比赛表应收成 7 列，实见 ${hNarrow.length}：${hNarrow.join('/')}`);
+        // 取样球员（本地 = 9001 阿大）是门将 ⇒ 两个变体的 7 列都要认：
+        // 场上 = 进球/助攻/黄牌/红牌，门将 = 零封/失球/黄牌/红牌（进球助攻点失三格被替换）
+        const narrowStats = hNarrow.slice(3).join('/');
+        assert(
+          hNarrow.slice(0, 3).join('/') === '赛事/出场*/均分' &&
+            ['进球/助攻/黄牌/红牌', '零封/失球/黄牌/红牌'].includes(narrowStats),
+          `375 列表头不对（应是 赛事/出场*/均分 + 场上或门将的四列）：${hNarrow.join('/')}`,
+        );
+        const narrow = await page.evaluate(() => {
+          const t = document.querySelector('table.matches-table');
+          const wrap = t.parentElement;
+          const sub = document.querySelector('.matches-subrow');
+          return {
+            tableCls: t.className,
+            scroll: t.scrollWidth,
+            wrapW: wrap.clientWidth,
+            subRows: document.querySelectorAll('.matches-subrow').length,
+            subSpan: sub?.querySelector('td')?.getAttribute('colspan') ?? null,
+            subText: sub?.innerText.trim() ?? null,
+            docOver: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          };
+        });
+        assert(narrow.tableCls.includes('matches-table-narrow'), `375 应挂密度档 .matches-table-narrow，实见 class="${narrow.tableCls}"`);
+        assert(narrow.subRows >= 3, `375 每个赛事都应有副行，实见 ${narrow.subRows} 行`);
+        assert(narrow.subSpan === '7', `375 副行应整行铺开（colspan=7），实见 colspan=${narrow.subSpan}`);
+        assert(/点失|扑救/.test(narrow.subText ?? ''), `375 副行应含被裁掉的冷门列，实见「${narrow.subText}」`);
+        // 这两条是本页签最容易回归的地方：副行塞回「赛事」格 ⇒ 首列被 9px 小字撑到 144px，卡内立刻横滑 56px
+        assert(
+          narrow.scroll <= narrow.wrapW + 1,
+          `375 卡内横向溢出 ${narrow.scroll - narrow.wrapW}px（表格 ${narrow.scroll} / 卡片 ${narrow.wrapW}）`,
+        );
+        assert(narrow.docOver <= 1, `375 文档级横向溢出 ${narrow.docOver}px`);
+        await page.screenshot({ path: join(SHOT_DIR, 'e2e-v6460-matches-375.png'), fullPage: true });
+      } finally {
+        await page.unroute(matchesStub);
         await page.setViewportSize({ width: 1280, height: 900 });
       }
     });

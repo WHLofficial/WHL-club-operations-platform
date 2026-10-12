@@ -346,4 +346,29 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     expect(screen.getByText(/录入面板有未保存的改动/)).toBeTruthy();
     expect((cellInput(0, 3) as HTMLInputElement).value).toBe('');
   });
+
+  it('TC-ENTRY-E7 v6.46.0 非 XP 场次（冠军杯淘汰轮）：只录出场与评分，三个计数器禁用、XP 展示按住 0', async () => {
+    // 这些场次也放开补录（球员比赛记录的出场与均分要用），但零封/夺回球权/扑救写进去服务端整批 400
+    const cup = match({ matchId: 2400, competitionType: 'champions_cup', stageKind: 'elim', stageName: '决赛', xpEligible: false });
+    mocks.list.mockResolvedValue({ matches: [cup] });
+    mocks.panel.mockResolvedValue({
+      ...panel(),
+      match: { ...panel().match, matchId: 2400, competitionType: 'champions_cup', stageKind: 'elim', stageName: '决赛', xpEligible: false },
+      recorded: [], // 未录过：三个计数器正常该是可勾/可填的，这里的禁用只可能来自「不计 XP」
+    });
+    renderPage();
+    await openEdit();
+
+    // 头部徽章 + 说明块（点明零封/夺回球权/扑救不开放的原因是它们只产 XP）
+    expect(document.body.textContent).toContain('本场不计成长 XP（只录出场与评分）');
+    expect(document.body.textContent).toContain('零封 / 夺回球权 / 扑救是纯 XP 计数器，本场不开放');
+    // 三个计数器禁用；出场与评分照常可录
+    for (const col of [4, 5, 6]) expect((cellInput(0, col) as HTMLInputElement).disabled).toBe(true);
+    expect((cellInput(0, 2) as HTMLInputElement).disabled).toBe(false); // 出场
+    expect((cellInput(0, 3) as HTMLInputElement).readOnly).toBe(false); // 评分
+    // XP 列与汇总徽章都按住 0：填了值也不给收益幻觉
+    fireEvent.change(cellInput(0, 3) as HTMLInputElement, { target: { value: '8.5' } });
+    expect(cell(0, 9).textContent).toBe('0');
+    expect(cell(0, 0).textContent).toContain('不计 XP'); // 行首标记：告诉管理组这场录了也不产 XP
+  });
 });

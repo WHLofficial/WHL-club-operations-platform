@@ -12,6 +12,7 @@ import {
   type GrowthDetail,
   type LevelUpResult,
   type MyClubOverview,
+  type PlayerMatchesResponse,
   type PlayerTransfersResponse,
   type UpgradePlanDto,
 } from '../lib/api.ts';
@@ -57,14 +58,17 @@ import { playerPath } from '../lib/player-link.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { SideOps } from './player/SideOps.tsx';
 import ComparePickerOverlay from './player/ComparePickerOverlay.tsx';
+import { MatchesTab } from './player/MatchesTab.tsx';
 
-type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers';
+type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers' | 'matches';
 
 const TAB_LABEL: Record<PlayerTab, string> = {
   profile: '合同',
   attrs: '属性',
   growth: '成长',
   transfers: '转会记录',
+  // v6.46.0：比赛记录（分赛季分赛事汇总 + 逐场流水），五字页签里最短的两字方案
+  matches: '比赛',
 };
 
 // 窄屏卡片断点（v6.22.0）：≤760 转会/成长两张事件表改卡片流，与桌面表格 DOM 互斥
@@ -158,6 +162,12 @@ export default function Player() {
     queryKey: ['player', id ?? '', 'transfers'],
     queryFn: () => api<PlayerTransfersResponse>(`/api/players/${id}/transfers`),
     enabled: id !== undefined && tab === 'transfers',
+  });
+  // 比赛记录（v6.46.0）同待遇：只在切到「比赛」页签时拉
+  const matchesQuery = useQuery({
+    queryKey: ['player', id ?? '', 'matches'],
+    queryFn: () => api<PlayerMatchesResponse>(`/api/players/${id}/matches`),
+    enabled: id !== undefined && tab === 'matches',
   });
   // 球队列表（v6.2.0）：只为属性页签的队徽 logoKey 与左栏五态的 CPU 判据；
   // 公开端点、服务端 24h scope 缓存 + 两级缓存，与球队页共用 queryKey，只有有归属球员的详情才拉
@@ -659,6 +669,8 @@ export default function Player() {
               )}
             </>
           )}
+
+          {tab === 'matches' && <MatchesTab query={matchesQuery} isGk={player.position === 'GK'} narrow={narrow} />}
         </section>
       </div>
     </div>

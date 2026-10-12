@@ -396,6 +396,79 @@ export interface PlayerTransfersResponse {
   transfers: PlayerTransferRow[];
 }
 
+// ---- v6.46.0：球员页「比赛」页签（公开 GET /api/players/:id/matches）----
+
+/** 某赛事（一个赛季内）的汇总；`:id` 口径与 /players/:id 一致（fc_id，兼容内部 id） */
+export interface PlayerMatchesCompStat {
+  competitionType: string;
+  competitionName: string;
+  tournamentId: number | null;
+  tournamentName: string | null;
+  /** 出场 = 成长记录 / 赛事事件 / 赛前真实提交首发 三者任一（伤病缺阵另计一列） */
+  appearances: number;
+  /** 有评分的场次数（均分只统计这些场次） */
+  ratingCount: number;
+  /** 两位小数；无评分为 null。合计行 = 该赛季全部评分场次的加权平均 */
+  avgRating: number | null;
+  goals: number;
+  assists: number;
+  yellow: number;
+  red: number;
+  penMiss: number;
+  ownGoal: number;
+  injuryOut: number;
+  missed: number;
+  /** 门将变体：出场场次里对手 0 球 / 失球合计 / 扑救合计（成长库记录值） */
+  cleanSheets: number;
+  conceded: number;
+  saves: number;
+}
+
+export interface PlayerMatchesSeason {
+  season: number;
+  comps: PlayerMatchesCompStat[];
+  /** 该赛季合计：competitionName 为「合计」，均分为加权平均 */
+  total: PlayerMatchesCompStat;
+}
+
+export interface PlayerMatchesItem {
+  matchId: number;
+  season: number;
+  competitionType: string;
+  competitionName: string;
+  tournamentId: number | null;
+  tournamentName: string | null;
+  stageName: string | null;
+  round: number | null;
+  /** 「赛事 · 阶段 · 第 N 轮」拼好的标题 */
+  stageLabel: string;
+  /** 完赛日（YYYY-MM-DD，取 result_confirmations.finished_at 的日期部分） */
+  date: string | null;
+  homeTeam: string | null;
+  awayTeam: string | null;
+  /** 对手（side 判不出时为 null） */
+  opponent: string | null;
+  side: 'home' | 'away' | null;
+  scoreHome: number | null;
+  scoreAway: number | null;
+  rating: number | null;
+  saves: number;
+  conceded: number | null;
+  cleanSheet: boolean;
+  /** 事件串（门将带「零封 / 失球 N」前缀与「扑救 N」后缀），如 ['进球 23′', '助攻 67′'] */
+  events: string[];
+  /** 该场在伤病停赛名单里（只进「缺阵」列，不算出场） */
+  missed: boolean;
+  appeared: boolean;
+  sources: ('growth' | 'event' | 'lineup')[];
+}
+
+export interface PlayerMatchesResponse {
+  player: { id: number; name: string; position: string | null };
+  seasons: PlayerMatchesSeason[];
+  matches: PlayerMatchesItem[];
+}
+
 // ---- v0.7.1 d8：球员库（公开 /api/players，keyset 游标分页）----
 
 export interface PlayerLibraryRow extends PlayerListItem {
