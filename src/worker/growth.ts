@@ -315,7 +315,8 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
 
   const statements: D1PreparedStatement[] = [];
 
-  // 训练营球员：固定 XP/赛季，不按场次（§10.1）；锚在 season 上天然幂等
+  // 训练营球员的赛季结算那份固定 XP（§10.1）；锚在 season 上天然幂等。
+  // v6.45.0 起这份与逐场 XP 并行累加（训练营球员按场次照记出场/评分/进球/助攻/零封）
   const trainees = await scanRows<{ id: number }>(
     db,
     `SELECT t.id FROM players t JOIN contracts c ON c.player_id = t.id AND c.is_active = 1

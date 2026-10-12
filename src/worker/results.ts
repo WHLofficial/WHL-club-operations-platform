@@ -540,13 +540,15 @@ interface XpHookSummary {
 }
 
 /**
- * 从比赛系统 match_event 生成出场/进球/助攻/零封事件（growth_events 去重锚防重复）。
- * 限制口径（§15 假设 20-22）：仅联赛与冠军杯小组赛计 XP；弃权场不计；训练营球员不按场次
- * （走结算固定 XP）。球员匹配先按 **fc_id**（赛事系统的 player.id 就是 FC26 playerid，两库早前
- * 一起 rekey 过，实测 570/570 命中），姓名只作回落 —— tour 存完整人名、本库存官方缩写名，
- * 靠名字认人在两侧写法不同的球员上会漏；队名仍按「队名=俱乐部名」解（零封要的是当场那支队的
- * 防守位置表），解不开的进 unresolved 由管理组补录；
+ * 从比赛系统 match_event 生成进球/助攻/零封事件（growth_events 去重锚防重复）。
+ * 限制口径（§15 假设 20-22）：仅联赛与冠军杯小组赛计 XP；弃权场不计。球员匹配先按 **fc_id**
+ * （赛事系统的 player.id 就是 FC26 playerid，两库早前一起 rekey 过，实测 570/570 命中），姓名只作
+ * 回落 —— tour 存完整人名、本库存官方缩写名，靠名字认人在两侧写法不同的球员上会漏；队名仍按
+ * 「队名=俱乐部名」解（零封要的是当场那支队的防守位置表），解不开的进 unresolved 由管理组补录；
  * CPU 队（队名带 (CPU)）整队静默跳过，不计 XP 也不进 unresolved（用户规则 2026-09-18）。
+ * v6.45.0 两处口径变更：①**出场不再走自动通道**——FC26 没有「出场」事件，靠 match_event 反推上场
+ * 名单本来就残缺（没碰球的登记者一条事件都没有），改由录入台的截图识别 + 人工确认负责；
+ * ②训练营球员与正式球员同口径按场次记 XP（赛季结算那份固定 trainee_xp 是另一条线，仍在跑）。
  */
 async function recordAutoXpForMatch(
   env: Env,
@@ -591,9 +593,9 @@ async function recordAutoXpForMatch(
     if (ev.assist_player_id !== null) seen.set(ev.assist_player_id, { name: ev.assist_name, teamId: ev.assist_team_id, teamName: ev.assist_team_name });
   }
 
-  // 队名 → 平台俱乐部 → 名单内球员（带 position/status 供零封判定与训练营排除）
+  // 队名 → 平台俱乐部 → 名单内球员（带 position 供零封位置判定）
   const clubCache = new Map<string, { clubId: number; defensive: Set<string> } | null>();
-  const rosterCache = new Map<string, { id: number; position: string | null; status: string } | null>();
+  const rosterCache = new Map<string, { id: number; position: string | null } | null>();
   // tourPlayerId 是赛事系统 player.id，等于本库 players.fc_id —— 认人先用它。
   // 姓名回落只在 fc_id 查不到时用：tour 存完整人名（`Anan Khalaili`），本库存官方缩写名
   // （`A. Khalaili`），按名字等值匹配本来就只在两侧写法恰好相同时才成立。
@@ -616,12 +618,12 @@ async function recordAutoXpForMatch(
     if (player === undefined) {
       player =
         // 不按 club_id 过滤：事件归属的是「这个人」，转会后旧比赛仍算他的成长
-        (await env.DB.prepare('SELECT id, position, status FROM players WHERE fc_id = ?')
+        (await env.DB.prepare('SELECT id, position FROM players WHERE fc_id = ?')
           .bind(tourPlayerId)
-          .first<{ id: number; position: string | null; status: string }>()) ??
-        (await env.DB.prepare('SELECT id, position, status FROM players WHERE club_id = ? AND name = ? ORDER BY id LIMIT 1')
+          .first<{ id: number; position: string | null }>()) ??
+        (await env.DB.prepare('SELECT id, position FROM players WHERE club_id = ? AND name = ? ORDER BY id LIMIT 1')
           .bind(club.clubId, playerName)
-          .first<{ id: number; position: string | null; status: string }>()) ??
+          .first<{ id: number; position: string | null }>()) ??
         null;
       rosterCache.set(key, player);
     }
@@ -645,12 +647,11 @@ async function recordAutoXpForMatch(
     );
   }
 
+  // 出场名单（有事件球员 + 助攻者）只用来解人：进球/助攻/零封都要 resolved 里的人。
+  // v6.45.0：出场事件改由录入台（截图识别 + 人工确认）负责，这里不再 push appearance。
   const resolved = new Map<number, Awaited<ReturnType<typeof resolve>>>();
   for (const [tourPlayerId, info] of seen) {
-    const r = await resolve(info.teamName, info.name, tourPlayerId);
-    resolved.set(tourPlayerId, r);
-    if (!r || r.player.status === 'trainee') continue; // 训练营不按场次（§10.1）
-    push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'appearance', value: 1, xp: 1, recordedBy: null });
+    resolved.set(tourPlayerId, await resolve(info.teamName, info.name, tourPlayerId));
   }
   // 进球/助攻按「球员×类型」聚合成一条事件：growth_events 去重锚是
   // UNIQUE(player_id, match_ref, event_type)，一场一类型只容一行，value 记球/助攻数
@@ -663,12 +664,12 @@ async function recordAutoXpForMatch(
   }
   for (const [tourPlayerId, count] of goalCount) {
     const r = resolved.get(tourPlayerId);
-    if (!r || r.player.status === 'trainee') continue;
+    if (!r) continue;
     push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'goal', value: count, xp: 0.5 * count, recordedBy: null });
   }
   for (const [tourPlayerId, count] of assistCount) {
     const r = resolved.get(tourPlayerId);
-    if (!r || r.player.status === 'trainee') continue;
+    if (!r) continue;
     push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'assist', value: count, xp: 0.5 * count, recordedBy: null });
   }
   // 零封：一侧净吞 0 蛋 → 该侧登场的防守位置球员各 0.5（位置宽松链见 defensivePositionsForClub）
@@ -683,7 +684,7 @@ async function recordAutoXpForMatch(
     for (const [tourPlayerId, info] of seen) {
       if (info.teamId !== sideTeamId) continue;
       const r = resolved.get(tourPlayerId);
-      if (!r || r.player.status === 'trainee') continue;
+      if (!r) continue;
       if (!r.club.defensive.has(r.player.position ?? '')) continue;
       push({ playerId: r.player.id, matchRef: String(matchId), eventType: 'clean_sheet', value: 1, xp: 0.5, recordedBy: null });
     }

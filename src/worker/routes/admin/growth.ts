@@ -21,6 +21,7 @@ import { rowDisplayName } from '../../../core/player-name.ts';
 import { foldName } from '../../../core/name-fold.ts';
 import { parseOcrVision, buildOcrEntries, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
 import { llmVisionJson } from '../../../lib/llm.ts';
+import { suspendedPlayersAtMatch, suspensionLabel } from '../../tour-suspension.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -64,7 +65,9 @@ app.post('/growth/events', async (c) => {
   const body = (await readJson(c)) as { playerId?: unknown; matchRef?: unknown; eventType?: unknown; value?: unknown } | null;
   const playerId = Number(body?.playerId);
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
-  const player = await c.env.DB.prepare('SELECT id FROM players WHERE id = ?').bind(playerId).first<{ id: number }>();
+  const player = await c.env.DB.prepare('SELECT id, name, display_name, fc_id FROM players WHERE id = ?')
+    .bind(playerId)
+    .first<{ id: number; name: string; display_name: string | null; fc_id: number | null }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
 
   const eventType = body?.eventType;
@@ -79,6 +82,11 @@ app.post('/growth/events', async (c) => {
   );
 
   const matchRef = typeof body?.matchRef === 'string' && body.matchRef.trim() !== '' ? body.matchRef.trim().slice(0, 40) : `manual:${Date.now()}`;
+  // v6.45.0：锚是赛事系统比赛号时按同场停赛拦（停赛球员不能录成长）；`manual:` 这类自定义锚无从判，放行
+  if (/^\d+$/.test(matchRef) && player.fc_id !== null) {
+    const s = (await suspendedPlayersAtMatch(c.env.TOUR_DB, Number(matchRef))).get(player.fc_id);
+    if (s) throw new HttpError(400, `${rowDisplayName(player)} 本场停赛（${suspensionLabel(s)}），不能录成长`);
+  }
   const recorded = await recordGrowthEvent(c.env.DB, {
     playerId,
     matchRef,
@@ -174,7 +182,7 @@ const MATCH_ENTRY_WHERE = `(rc.competition_type IN ('league_premier', 'league_se
      AND (rc.walkover_side IS NULL OR rc.walkover_side = '')`;
 
 const MATCH_ENTRY_COLUMNS = `rc.match_id, rc.season, rc.window_seq, rc.competition_type, rc.stage_name, rc.stage_kind, rc.round,
-     rc.home_team, rc.away_team, rc.score_home, rc.score_away, rc.finished_at, rc.confirmed_at`;
+     rc.home_team, rc.away_team, rc.score_home, rc.score_away, rc.finished_at, rc.confirmed_at, rc.tournament_id`;
 
 // 面板花名册的稳定序：位置权重（门将→后卫→中场→前锋，与 routes/players.ts 的 POSITION_SORT_CASE 同序）→ id
 const ROSTER_POSITION_CASE = `CASE players.position
@@ -201,6 +209,7 @@ interface MatchEntryRow {
   score_away: number | null;
   finished_at: string | null;
   confirmed_at: string | null;
+  tournament_id: number | null;
   recorded?: number;
 }
 
@@ -211,6 +220,7 @@ interface EntryPlayerRow {
   club_id: number | null;
   position: string | null;
   status: string;
+  fc_id?: number | null;
 }
 
 // 一侧的归属解析结果：clubId 解析不到（含 CPU 队）为 null，isCpu 单独标出
@@ -241,7 +251,8 @@ async function resolveEntrySide(db: D1Database, teamName: string | null, cache: 
 }
 
 // 列表行与面板 match 块共用同一份 DTO（面板就是列表行 + 两侧花名册 + 已录事件）
-function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, recorded: number) {
+// v6.45.0：tournamentName 供录入台按赛事分组（名字在赛事库，第二趟查，见 loadTournamentNames）
+function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, recorded: number, tournamentName: string | null) {
   return {
     matchId: row.match_id,
     season: row.season,
@@ -256,6 +267,8 @@ function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, re
     scoreAway: row.score_away,
     finishedAt: row.finished_at,
     confirmedAt: row.confirmed_at,
+    tournamentId: row.tournament_id,
+    tournamentName,
     homeClubId: home.clubId,
     awayClubId: away.clubId,
     homeIsCpu: home.isCpu,
@@ -263,6 +276,20 @@ function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, re
     recorded,
   };
 }
+
+// 赛事名（v6.45.0 录入台按赛事分组用）：result_confirmations 在俱乐部库、tournament 在赛事库，
+// 跨库不能 JOIN，只对已取到的 id 做一趟 IN 查名；查不到（或 tournament_id 为空）保留 null，
+// 前端把它们归进「未关联赛事」一组，不影响任何写路径。
+async function loadTournamentNames(env: Env, ids: (number | null)[]): Promise<Map<number, string>> {
+  const uniq = [...new Set(ids.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0))];
+  if (uniq.length === 0) return new Map();
+  const rows = await env.TOUR_DB.prepare(`SELECT id, name FROM tournament WHERE id IN (${uniq.map(() => '?').join(', ')})`)
+    .bind(...uniq)
+    .all<{ id: number; name: string }>();
+  return new Map(rows.results.map((r) => [r.id, r.name] as const));
+}
+
+const tournamentNameOf = (names: Map<number, string>, id: number | null): string | null => (id === null ? null : names.get(id) ?? null);
 
 // 可补录比赛列表：近 50 场（确认时间倒序），每场带已录事件数
 app.get('/growth/match-entry', async (c) => {
@@ -275,12 +302,13 @@ app.get('/growth/match-entry', async (c) => {
      ORDER BY rc.confirmed_at DESC, rc.match_id DESC
      LIMIT 50`,
   ).all<MatchEntryRow>();
+  const names = await loadTournamentNames(c.env, rows.results.map((r) => r.tournament_id));
   const cache = new Map<string, number | null>();
   const matches = [];
   for (const row of rows.results) {
     const home = await resolveEntrySide(c.env.DB, row.home_team, cache);
     const away = await resolveEntrySide(c.env.DB, row.away_team, cache);
-    matches.push(entryMatchItem(row, home, away, row.recorded ?? 0));
+    matches.push(entryMatchItem(row, home, away, row.recorded ?? 0, tournamentNameOf(names, row.tournament_id)));
   }
   return c.json({ matches });
 });
@@ -295,10 +323,14 @@ app.get('/growth/match-entry/:matchId', async (c) => {
   const cache = new Map<string, number | null>();
   const home = await resolveEntrySide(c.env.DB, row.home_team, cache);
   const away = await resolveEntrySide(c.env.DB, row.away_team, cache);
+  const names = await loadTournamentNames(c.env, [row.tournament_id]);
+  // v6.45.0：本场停赛（只读 TOUR_DB 按赛事仓同口径复算，见 tour-suspension.ts）→ 面板标红禁行、
+  // 写端点整行拒收。判不了停赛的球员（本库 fc_id 为空）不锁。
+  const suspended = await suspendedPlayersAtMatch(c.env.TOUR_DB, matchId);
   const rosterOf = async (clubId: number | null) => {
     if (clubId === null) return [];
     const rows = await c.env.DB.prepare(
-      `SELECT id, name, display_name, position, status FROM players
+      `SELECT id, name, display_name, position, status, fc_id FROM players
        WHERE club_id = ? AND status IN ('normal', 'listed', 'trainee')
        ORDER BY ${ROSTER_POSITION_CASE}, players.id`,
     )
@@ -310,6 +342,7 @@ app.get('/growth/match-entry/:matchId', async (c) => {
       officialName: p.name,
       position: p.position,
       status: p.status,
+      suspended: p.fc_id == null ? null : suspended.get(p.fc_id) ?? null,
     }));
   };
   const recorded = await c.env.DB.prepare(
@@ -326,7 +359,7 @@ app.get('/growth/match-entry/:matchId', async (c) => {
     players.map((p) => ({ ...p, duelsTotal: totals.get(`${p.id}|duels_won`) ?? 0, savesTotal: totals.get(`${p.id}|saves`) ?? 0 }));
 
   return c.json({
-    match: entryMatchItem(row, home, away, recorded.results.length),
+    match: entryMatchItem(row, home, away, recorded.results.length, tournamentNameOf(names, row.tournament_id)),
     sides: {
       home: { clubId: home.clubId, isCpu: home.isCpu, players: withTotals(homePlayers) },
       away: { clubId: away.clubId, isCpu: away.isCpu, players: withTotals(awayPlayers) },
@@ -478,16 +511,19 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   });
   const ids = [...new Set(parsed.map((p) => p.playerId))];
   const rows = await c.env.DB.prepare(
-    `SELECT id, name, display_name, club_id, position, status FROM players WHERE id IN (${ids.map(() => '?').join(', ')})`,
+    `SELECT id, name, display_name, club_id, position, status, fc_id FROM players WHERE id IN (${ids.map(() => '?').join(', ')})`,
   )
     .bind(...ids)
     .all<EntryPlayerRow>();
   const players = new Map<number, EntryPlayerRow>(rows.results.map((r) => [r.id, r] as const));
+  // v6.45.0：本场停赛球员不能录成长（同场判定见 tour-suspension.ts）——整行拒绝而不是静默跳过，
+  // 静默跳过会让管理组以为录上了。判不了停赛的球员（本库 fc_id 为空）放行。
+  const suspended = await suspendedPlayersAtMatch(c.env.TOUR_DB, matchId);
   for (const { playerId } of parsed) {
     const p = players.get(playerId);
     if (!p || p.club_id === null || !clubIds.includes(p.club_id)) throw new HttpError(400, '这名球员不属于该场两队');
-    // 训练营不按场次计 XP（走赛季结算）：整行拒绝而不是静默跳过——静默跳过会让管理组以为录上了
-    if (p.status === 'trainee') throw new HttpError(400, `${rowDisplayName(p)} 在训练营，训练营不按场次记 XP，走赛季结算`);
+    const s = p.fc_id == null ? undefined : suspended.get(p.fc_id);
+    if (s) throw new HttpError(400, `${rowDisplayName(p)} 本场停赛（${suspensionLabel(s)}），不能录成长`);
   }
 
   // 展开事件流：字段顺序固定，方便前端按事件类型锁定格子
