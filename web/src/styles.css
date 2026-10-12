@@ -1625,8 +1625,9 @@ tbody tr:hover td {
   font-size: 12px;
 }
 
-.row-trainee td {
-  background: #f6effa;
+/* 本场停赛行（v6.45.0 成长录入）置灰标红；row-trainee 保留给注册工作台的训练营行 */
+.row-suspended td {
+  background: #fbe9e7;
 }
 
 /* 注册逐人标红（v2.2.0）：体检/422 打回时点名的球员行，浅红底 */
@@ -1638,6 +1639,27 @@ tbody tr:hover td {
 
 .match-entry-actions {
   white-space: nowrap;
+}
+
+/* v6.45.0 列表按赛事 → 轮次分组：两级组头行（td 铺满整行） */
+.match-entry-group td,
+.match-entry-group-sub td {
+  background: #f3ead9;
+  white-space: nowrap;
+}
+
+.match-entry-group td {
+  font-weight: 700;
+  color: var(--cocoa-deep);
+  border-top: 1px solid var(--border);
+}
+
+.match-entry-group-sub td {
+  background: #faf5ea;
+  font-size: 13px;
+  color: var(--cocoa-deep);
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 
 .match-entry-actions .btn + .btn {
@@ -3924,9 +3946,9 @@ th.num .th-sort {
     box-shadow: 0 1px 5px rgba(43, 29, 18, 0.1);
     color: #2b1d12;
   }
-  /* 训练营球员整卡置灰（与桌面 .row-trainee td 同色），字段全禁用 */
-  .entry-card.row-trainee {
-    background: #f6effa;
+  /* 本场停赛整卡置灰标红（与桌面 .row-suspended td 同色），字段全禁用 */
+  .entry-card.row-suspended {
+    background: #fbe9e7;
   }
   /* 脏行高亮：焦橙描边 + 淡光晕（桌面表格无此态，只在卡片流出现） */
   .entry-card.dirty {

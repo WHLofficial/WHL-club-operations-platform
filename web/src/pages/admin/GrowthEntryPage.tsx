@@ -9,9 +9,11 @@ import {
   type MatchEntryListItem,
   type MatchEntryPanel,
   type MatchEntryPerPlayerResult,
+  type MatchEntrySuspended,
   ocrMatchEntry,
 } from '../../lib/api.ts';
 import { mergeOcrEntries, sideConcededOf } from '../../lib/growth-ocr.ts';
+import { groupMatchEntries } from '../../lib/growth-entry-group.ts';
 import {
   MATCH_ENTRY_LIST_KEY,
   fetchMatchEntryList,
@@ -54,8 +56,10 @@ interface RowDraft {
   playerId: number;
   name: string;
   position: string | null;
-  /** players.status === 'trainee'：训练营不按场次计 */
+  /** players.status === 'trainee'：训练营徽标（v6.45.0 起与正式球员同口径按场次计 XP） */
   trainee: boolean;
+  /** 本场停赛（v6.45.0）：非空 = 整行不可录（面板标红置灰、输入禁用、保存跳过，服务端也会整行拒） */
+  suspended: MatchEntrySuspended | null;
   appearance: FieldBool;
   rating: FieldNum;
   cleanSheet: FieldBool;
@@ -76,6 +80,16 @@ interface RowDraft {
 }
 
 const fmtXp = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+/** 停赛理由中文（与服务端 suspensionLabel 同词：直红 / 两黄变一红 / 累积黄牌） */
+const SUSPEND_REASON_LABEL: Record<MatchEntrySuspended['reason'], string> = {
+  red: '直红',
+  red_2y: '两黄变一红',
+  yellow: '累积黄牌',
+};
+
+/** 停赛标注：本场停赛（直红 · 总 2 场）——serving 是「服到第几场」，展示总场数更有用 */
+const suspendedText = (s: MatchEntrySuspended): string => `本场停赛（${SUSPEND_REASON_LABEL[s.reason]} · 总 ${s.total} 场）`;
 
 /** recorded.source 的展示标注：manual = 管理组补录，其余一律按赛果同步理解 */
 const sourceLabel = (source: string): string => (source === 'manual' ? '管理组补录' : '赛果同步');
@@ -265,9 +279,11 @@ function buildSideRows(panel: MatchEntryPanel, side: Side, mode: Mode): RowDraft
     const lock = (recorded: boolean): boolean => mode === 'view' || recorded;
     return {
       playerId: p.id,
-      name: p.displayName !== '' ? p.displayName : p.name,
+      // 服务端已按「显示名优先」给 name（rowDisplayName），这里直接用
+      name: p.name,
       position: p.position,
       trainee: p.status === 'trainee',
+      suspended: p.suspended ?? null,
       appearance: { checked: appearance, locked: lock(seen.appearance) },
       rating: { value: rating, locked: lock(seen.rating) },
       cleanSheet: { checked: cleanSheet, locked: lock(seen.clean_sheet) },
@@ -330,8 +346,9 @@ function MatchEntrySection() {
     <>
       {toastNode}
       <p className="hint">
-        仅联赛与冠军杯小组赛可录；训练营球员不按场次计。列表为近 50 场已确认、按确认时间倒序的比赛。
-        已录值不可改（平台暂无成长事件删除通道），重复提交会被自动跳过。
+        仅联赛与冠军杯小组赛可录；按赛事 → 轮次分组展示近 50 场已确认的比赛（确认时间倒序）。
+        本场停赛的球员不能录成长（行内已标红）。出场与评分走截图识别 + 人工确认，已录值不可改
+        （平台暂无成长事件删除通道），重复提交会被自动跳过。
       </p>
       <h3>近期可补录比赛</h3>
       {!data ? (
@@ -343,7 +360,7 @@ function MatchEntrySection() {
           <table>
             <thead>
               <tr>
-                <th>轮次 / 阶段</th>
+                <th>赛季 / 窗口</th>
                 <th>对阵</th>
                 <th className="num">比分</th>
                 <th>确认时间</th>
@@ -352,78 +369,93 @@ function MatchEntrySection() {
               </tr>
             </thead>
             <tbody>
-              {data.matches.map((m) => {
-                const opened = open !== null && open.matchId === m.matchId ? open : null;
-                return (
-                  <Fragment key={m.matchId}>
-                    <tr>
-                      <td>
-                        第 {m.round} 轮 · {m.stageName}
-                        <div className="muted">
-                          S{m.season} · {m.competitionType} · 窗口 {m.windowSeq}
-                        </div>
-                      </td>
-                      <td>
-                        {m.homeTeam} <span className="muted">vs</span> {m.awayTeam}
-                      </td>
-                      <td className="num mono">
-                        {m.scoreHome} : {m.scoreAway}
-                      </td>
-                      <td className="muted">{dateTime(m.confirmedAt)}</td>
-                      <td>
-                        {m.recorded > 0 ? (
-                          <span className="badge green">已录 {m.recorded} 项</span>
-                        ) : (
-                          <span className="badge gray">未录</span>
-                        )}
-                      </td>
-                      <td className="match-entry-actions">
-                        <button type="button" className="btn btn-sm" onClick={() => toggleMatch(m, 'edit')}>
-                          {opened?.mode === 'edit' ? '收起' : '录数据'}
-                        </button>
-                        {m.recorded > 0 && (
-                          <button type="button" className="btn btn-sm btn-ghost" onClick={() => toggleMatch(m, 'view')}>
-                            {opened?.mode === 'view' ? '收起' : '查看'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                    {opened && (
-                      <tr className="entry-row">
+              {groupMatchEntries(data.matches).map((g) => (
+                <Fragment key={g.tournamentId === null ? 'none' : `t${g.tournamentId}`}>
+                  <tr className="match-entry-group">
+                    <td colSpan={6}>
+                      {g.label} <span className="muted">· {g.matchCount} 场</span>
+                    </td>
+                  </tr>
+                  {g.rounds.map((rd) => (
+                    <Fragment key={rd.key}>
+                      <tr className="match-entry-group-sub">
                         <td colSpan={6}>
-                          {pending && (
-                            <div className="banner warn entry-confirm">
-                              <span>录入面板有未保存的改动：收起面板或切换比赛会丢弃；换队侧则草稿保留（不提交）。</span>
-                              <button type="button" className="btn btn-sm" onClick={() => setPending(null)}>
-                                继续编辑
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-danger"
-                                onClick={() => {
-                                  const act = pending;
-                                  setPending(null);
-                                  act();
-                                }}
-                              >
-                                不保存，继续
-                              </button>
-                            </div>
-                          )}
-                          <EntryPanel
-                            key={`${m.matchId}:${opened.mode}`}
-                            match={m}
-                            mode={opened.mode}
-                            guard={guard}
-                            onClose={() => runOpen(null)}
-                            onDirtyChange={setDirty}
-                          />
+                          {rd.label} <span className="muted">· {rd.matches.length} 场</span>
                         </td>
                       </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
+                      {rd.matches.map((m) => {
+                        const opened = open !== null && open.matchId === m.matchId ? open : null;
+                        return (
+                          <Fragment key={m.matchId}>
+                            <tr>
+                              <td className="muted">
+                                S{m.season} · {m.competitionType} · 窗口 {m.windowSeq}
+                              </td>
+                              <td>
+                                {m.homeTeam} <span className="muted">vs</span> {m.awayTeam}
+                              </td>
+                              <td className="num mono">
+                                {m.scoreHome} : {m.scoreAway}
+                              </td>
+                              <td className="muted">{dateTime(m.confirmedAt)}</td>
+                              <td>
+                                {m.recorded > 0 ? (
+                                  <span className="badge green">已录 {m.recorded} 项</span>
+                                ) : (
+                                  <span className="badge gray">未录</span>
+                                )}
+                              </td>
+                              <td className="match-entry-actions">
+                                <button type="button" className="btn btn-sm" onClick={() => toggleMatch(m, 'edit')}>
+                                  {opened?.mode === 'edit' ? '收起' : '录数据'}
+                                </button>
+                                {m.recorded > 0 && (
+                                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => toggleMatch(m, 'view')}>
+                                    {opened?.mode === 'view' ? '收起' : '查看'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            {opened && (
+                              <tr className="entry-row">
+                                <td colSpan={6}>
+                                  {pending && (
+                                    <div className="banner warn entry-confirm">
+                                      <span>录入面板有未保存的改动：收起面板或切换比赛会丢弃；换队侧则草稿保留（不提交）。</span>
+                                      <button type="button" className="btn btn-sm" onClick={() => setPending(null)}>
+                                        继续编辑
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-danger"
+                                        onClick={() => {
+                                          const act = pending;
+                                          setPending(null);
+                                          act();
+                                        }}
+                                      >
+                                        不保存，继续
+                                      </button>
+                                    </div>
+                                  )}
+                                  <EntryPanel
+                                    key={`${m.matchId}:${opened.mode}`}
+                                    match={m}
+                                    mode={opened.mode}
+                                    guard={guard}
+                                    onClose={() => runOpen(null)}
+                                    onDirtyChange={setDirty}
+                                  />
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>
@@ -626,7 +658,7 @@ function EntryPanel({
     const valid: RowDraft[] = [];
     let skipped = 0;
     for (const r of rows[side]) {
-      if (r.trainee || !rowDirty(r)) continue;
+      if (r.suspended !== null || !rowDirty(r)) continue;
       if (rowIssues(r).length > 0) {
         skipped += 1;
         continue;
@@ -724,7 +756,7 @@ function EntryPanel({
           {activeRows.map((r) => {
             const issues = rowIssues(r);
             const dirtyRow = rowDirty(r);
-            const ro = r.trainee;
+            const ro = r.suspended !== null;
             const ratingBad =
               !r.rating.locked &&
               r.rating.value.trim() !== '' &&
@@ -734,14 +766,15 @@ function EntryPanel({
             return (
               <div
                 key={r.playerId}
-                className={`entry-card${ro ? ' row-trainee' : ''}${dirtyRow ? ' dirty' : ''}`}
-                title={ro ? '训练营不按场次计' : undefined}
+                className={`entry-card${ro ? ' row-suspended' : ''}${dirtyRow ? ' dirty' : ''}`}
+                title={r.suspended ? suspendedText(r.suspended) : undefined}
               >
                 <div className="entry-card-head">
                   <span className="entry-card-name">{r.name}</span>
                   <span className="entry-card-pos">{r.position ?? '—'}</span>
                   {r.sources.length > 0 && <span className="badge gray">已录 · {r.sources.join('、')}</span>}
-                  {ro && <span className="badge gray">训练营不按场次计</span>}
+                  {r.trainee && <span className="badge gray">训练营</span>}
+                  {r.suspended && <span className="badge red">{suspendedText(r.suspended)}</span>}
                   {issues.length > 0 && (
                     <span className="badge red" title={issues.join('；')}>
                       校验问题
@@ -886,7 +919,7 @@ function EntryPanel({
                     type="button"
                     className="btn btn-sm"
                     disabled={ro || saving !== null || !dirtyRow || issues.length > 0}
-                    title={ro ? '训练营不按场次计' : issues.length > 0 ? issues[0] : dirtyRow ? '提交这一行' : '没有改动'}
+                    title={r.suspended ? suspendedText(r.suspended) : issues.length > 0 ? issues[0] : dirtyRow ? '提交这一行' : '没有改动'}
                     onClick={() => void saveRows([r], r.playerId)}
                   >
                     {saving === r.playerId ? '保存中…' : '保存'}
@@ -926,7 +959,7 @@ function EntryPanel({
             {activeRows.map((r) => {
               const issues = rowIssues(r);
               const dirtyRow = rowDirty(r);
-              const ro = r.trainee;
+              const ro = r.suspended !== null;
               const ratingBad =
                 !r.rating.locked &&
                 r.rating.value.trim() !== '' &&
@@ -934,11 +967,12 @@ function EntryPanel({
               const duelsBad = !r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isNonNegativeInt(r.duelsWon.value);
               const savesBad = !r.saves.locked && r.saves.value.trim() !== '' && !isPositiveInt(r.saves.value);
               return (
-                <tr key={r.playerId} className={ro ? 'row-trainee' : undefined} title={ro ? '训练营不按场次计' : undefined}>
+                <tr key={r.playerId} className={ro ? 'row-suspended' : undefined} title={r.suspended ? suspendedText(r.suspended) : undefined}>
                   <td>
                     {r.name}
                     {r.sources.length > 0 && <div className="muted entry-src">已录 · {r.sources.join('、')}</div>}
-                    {ro && <div className="muted entry-src">训练营不按场次计</div>}
+                    {r.trainee && <div className="muted entry-src">训练营</div>}
+                    {r.suspended && <div className="bad-text entry-src">{suspendedText(r.suspended)}</div>}
                   </td>
                   <td className="muted">{r.position ?? '—'}</td>
                   <td className={r.appearance.locked ? 'recorded' : undefined}>
@@ -1064,7 +1098,7 @@ function EntryPanel({
                       type="button"
                       className="btn btn-sm"
                       disabled={ro || saving !== null || !dirtyRow || issues.length > 0}
-                      title={ro ? '训练营不按场次计' : issues.length > 0 ? issues[0] : dirtyRow ? '提交这一行' : '没有改动'}
+                      title={r.suspended ? suspendedText(r.suspended) : issues.length > 0 ? issues[0] : dirtyRow ? '提交这一行' : '没有改动'}
                       onClick={() => void saveRows([r], r.playerId)}
                     >
                       {saving === r.playerId ? '保存中…' : '保存'}

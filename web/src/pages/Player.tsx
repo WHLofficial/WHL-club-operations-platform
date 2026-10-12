@@ -860,7 +860,7 @@ function GrowthBlock({
         {p.pendingLevelUps > 0 && <span className="badge orange">{p.pendingLevelUps} 次待升级</span>}
       </p>
       {p.status === 'trainee' && (
-        <p className="hint">训练营球员按赛季固定经验结算（训练营赛季那行），不按场次累计。</p>
+        <p className="hint">训练营球员 v6.45.0 起与正式球员同口径按场次记 XP（训练营赛季那行固定经验另算）。</p>
       )}
       {p.pendingLevelUps > 0 && p.upgradePlans.length > 0 && (
         <>

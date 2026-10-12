@@ -1914,6 +1914,9 @@ export interface MatchEntryListItem {
   scoreAway: number;
   finishedAt: string | null;
   confirmedAt: string | null;
+  /** v6.45.0：赛事系统 tournament.id / 赛事名（录入台按赛事分组；赛事库查不到名字时为 null） */
+  tournamentId: number | null;
+  tournamentName: string | null;
   homeClubId: number | null;
   awayClubId: number | null;
   homeIsCpu: boolean;
@@ -1926,13 +1929,21 @@ export interface MatchEntryListResponse {
   matches: MatchEntryListItem[];
 }
 
-/** 一队侧花名册里的球员（status = 'trainee' 即训练营，不按场次计） */
+/** 本场停赛（v6.45.0：赛事仓停赛引擎同口径复算）：reason 三选一，serving/total 组成「第几/共几场」 */
+export interface MatchEntrySuspended {
+  reason: 'red' | 'red_2y' | 'yellow';
+  total: number;
+  serving: number;
+}
+
+/** 一队侧花名册里的球员（v6.45.0：训练营球员与正式球员同口径可录；停赛球员 suspended 非空 = 不可录） */
 export interface MatchEntryPlayer {
   id: number;
   name: string;
-  displayName: string;
   position: string | null;
   status: string;
+  /** 本场停赛（null = 可录）；面板标红禁行，写端点也会整行拒收 */
+  suspended: MatchEntrySuspended | null;
   /** 夺回球权历史累计次数（含本场已录行；v6.42.0 跨场累计基数） */
   duelsTotal: number;
   /** 扑救历史累计次数（含本场已录行） */

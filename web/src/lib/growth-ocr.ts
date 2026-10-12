@@ -1,13 +1,14 @@
 // v6.43.0：截图识别结果 → 录入行草稿的合并（纯函数，无 IO，页面与测试共用）。
 // 零封联动口径（用户裁决 2026-10）：本侧失球 0 ⇒ 门将行自动勾零封；
 // 外场行「手填夺回球权（含 0）即勾零封」在页面 onChange 里做，不在这里。
-import type { MatchEntryListItem, MatchOcrEntry } from './api.ts';
+import type { MatchEntryListItem, MatchEntrySuspended, MatchOcrEntry } from './api.ts';
 
 /** 行草稿的结构视图（GrowthEntryPage 的 RowDraft 天然满足，测试好造） */
 export interface OcrMergeRow {
   playerId: number;
   position: string | null;
-  trainee: boolean;
+  /** v6.45.0：本场停赛（非空即整行不可录），取代 v6.43.x 的训练营锁定 */
+  suspended: MatchEntrySuspended | null;
   appearance: { checked: boolean; locked: boolean };
   rating: { value: string; locked: boolean };
   cleanSheet: { checked: boolean; locked: boolean };
@@ -49,7 +50,8 @@ export function sideConcededOf(
  * - 已填但未锁定的格子不覆盖：同值算去重（deduped），异值保留先填的值并出冲突跳过——
  *   识别等待期间的手填与上一张图的结果都不被后续图覆盖（宁缺勿错，冲突由人工裁决）；
  * - 夺回球权（duelsWon）不预填——按裁决保持人工手填（它同时是防守球员确认的载体）；
- * - 本侧失球 0 时，未锁定的门将行自动勾零封（无论识别条目里有没有他）。
+ * - 本侧失球 0 时，未锁定的门将行自动勾零封（无论识别条目里有没有他）；
+ * - v6.45.0：本场停赛的行整行跳过（停赛不能录成长），也不参与门将零封联动。
  */
 export function mergeOcrEntries<R extends OcrMergeRow>(
   rows: R[],
@@ -68,8 +70,8 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
       skipped.push({ playerId: e.playerId, name: e.name, reason: '不在当前花名册' });
       continue;
     }
-    if (row.trainee) {
-      skipped.push({ playerId: e.playerId, name: e.name, reason: '训练营球员不按场次计' });
+    if (row.suspended) {
+      skipped.push({ playerId: e.playerId, name: e.name, reason: '本场停赛' });
       continue;
     }
     let touched = 0;
@@ -124,7 +126,7 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
   let gkAuto = 0;
   if (conceded === 0) {
     for (const row of next) {
-      if (row.position === 'GK' && !row.cleanSheet.locked && !row.cleanSheet.checked) {
+      if (row.position === 'GK' && !row.suspended && !row.cleanSheet.locked && !row.cleanSheet.checked) {
         row.cleanSheet = { ...row.cleanSheet, checked: true };
         gkAuto += 1;
       }
