@@ -120,31 +120,31 @@ describe('TC-MATCH 花名册认人阶梯', () => {
 });
 
 describe('TC-DRAFT 识别结果 → 预填草稿', () => {
-  it('TC-DRAFT-01 summary：≥7 预填出场+评分；<7 只出场带警告；N/A 行整体跳过', () => {
+  it('TC-DRAFT-01 summary：有评分即预填出场+评分（v6.46.0 起差评照录）；N/A 行整体跳过', () => {
     const { ocr } = parseOcrVision(summaryRaw);
     const built = buildOcrEntries(ocr as OcrVision, roster);
     const byId = new Map(built.entries.map((e) => [e.playerId, e]));
-    expect(byId.get(10)!.draft).toEqual({ appearance: true }); // 5.1 → 只出场
+    expect(byId.get(10)!.draft).toEqual({ appearance: true, rating: 5.1 }); // 差评照录：库里有值，均分才真实（<7.0 只记录不给 XP）
     expect(byId.get(11)!.draft).toEqual({ appearance: true, rating: 9.2 });
     expect(byId.has(15)).toBe(false); // X. Bench 没上场：不进 entries 也不进 unmatched
     expect(built.unmatched).toEqual([]);
-    expect(built.warnings).toContain('「K. Zhang」评分 5.1 低于 7.0，只预填出场（7.0 以下不给 XP）');
+    expect(built.warnings).toEqual([]); // 低评分不再是警告：它是正常入库的值
   });
 
   it('TC-DRAFT-02 goalkeeping：左表行照常并出（门将页补漏）+ 门将出场/扑救/零封', () => {
     const ocr4 = parseOcrVision(gkRaw).ocr!;
     const built4 = buildOcrEntries(ocr4, roster);
-    // 左表三行：门将 5.1（<7 只出场）+ M. Wáng 7.5（出场+评分）+ SUB N/A 跳过；gk 块并进门将同一条
+    // 左表三行：门将 5.1（差评照录）+ M. Wáng 7.5（出场+评分）+ SUB N/A 跳过；gk 块并进门将同一条
     expect(built4.entries).toHaveLength(2);
     const byId = new Map(built4.entries.map((e) => [e.playerId, e]));
-    expect(byId.get(10)!.draft).toEqual({ appearance: true, saves: 3 }); // 失球 4 → 无零封
+    expect(byId.get(10)!.draft).toEqual({ appearance: true, rating: 5.1, saves: 3 }); // 失球 4 → 无零封
     expect(byId.get(12)!.draft).toEqual({ appearance: true, rating: 7.5 });
-    expect(built4.warnings).toContain('「K. Zhang」评分 5.1 低于 7.0，只预填出场（7.0 以下不给 XP）');
 
     const ocr0 = parseOcrVision({ ...gkRaw, gk: { ...gkRaw.gk, goalsConceded: 0, saves: 7, shotsOnTarget: 7 } }).ocr!;
     const built0 = buildOcrEntries(ocr0, roster);
     expect(new Map(built0.entries.map((e) => [e.playerId, e])).get(10)!.draft).toEqual({
       appearance: true,
+      rating: 5.1,
       saves: 7,
       cleanSheet: true,
     });

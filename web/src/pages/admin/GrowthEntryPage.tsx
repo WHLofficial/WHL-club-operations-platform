@@ -5,6 +5,7 @@ import { Fragment, useEffect, useRef, useState, type ChangeEvent, type ReactNode
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  COMPETITION_TYPE_LABEL,
   type MatchEntryInput,
   type MatchEntryListItem,
   type MatchEntryPanel,
@@ -150,7 +151,8 @@ function rowIssues(r: RowDraft): string[] {
   const out: string[] = [];
   if (!r.rating.locked && r.rating.value.trim() !== '') {
     const v = Number(r.rating.value);
-    if (!Number.isFinite(v) || v < 7 || v > 10) out.push('评分需在 7.0–10.0');
+    // v6.46.0：评分放宽到 0.0-10.0（均分要真实）。7.0 以下照录，只是不给 XP
+    if (!Number.isFinite(v) || v < 0 || v > 10) out.push('评分需在 0.0–10.0');
   }
   if (!r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isNonNegativeInt(r.duelsWon.value)) out.push('夺回球权需为非负整数');
   if (!r.saves.locked && r.saves.value.trim() !== '' && !isPositiveInt(r.saves.value)) out.push('扑救需为正整数');
@@ -706,6 +708,12 @@ function EntryPanel({
 
   const activeRows = rows[side];
   const totalXp = activeRows.reduce((sum, r) => sum + rowXp(r), 0);
+  /**
+   * v6.46.0：本场不计成长 XP（冠军杯淘汰赛/超级杯/资格赛）。这些场次也放开补录，但只收出场与评分：
+   * 零封/夺回球权/扑救是纯 XP 计数器，写进去服务端整批拒收（440 文案点名），所以这里直接禁掉，
+   * 并把 XP 展示统一按住为 0 —— 不让管理组以为有收益。
+   */
+  const noXp = match.xpEligible === false;
   const hasDirty = (['home', 'away'] as Side[]).some((s) => rows[s].some(rowDirty));
   /** 当前队侧脏行数（窄屏汇总条展示用；saveAll 也只提交当前队侧的脏行） */
   const dirtyCount = activeRows.filter(rowDirty).length;
@@ -730,7 +738,7 @@ function EntryPanel({
         const target: Side = res.side;
         // 合并基底取 rowsRef（等待识别期间的手填与上一张的预填都在里面），不用闭包快照
         if (!rowsRef.current) break;
-        const merged = mergeOcrEntries(rowsRef.current[target], res.entries, sideConcededOf(match, target));
+        const merged = mergeOcrEntries(rowsRef.current[target], res.entries, sideConcededOf(match, target), !noXp);
         setRowsTracked((prev) => (prev ? { ...prev, [target]: merged.rows } : prev));
         setSide(target);
         okCount += 1;
@@ -925,7 +933,11 @@ function EntryPanel({
             );
           })}
         </div>
-        <span className="badge gold">本场合计 +{fmtXp(totalXp)} XP</span>
+        {noXp ? (
+          <span className="badge gray">本场不计成长 XP（只录出场与评分）</span>
+        ) : (
+          <span className="badge gold">本场合计 +{fmtXp(totalXp)} XP</span>
+        )}
         {lastSummary && (
           <span className="badge gray">
             新录 {lastSummary.written}
@@ -984,6 +996,14 @@ function EntryPanel({
       )}
 
       {mode === 'view' && <p className="hint">只读查看：所有格子已锁定，要改值请点「录数据」。</p>}
+
+      {noXp && (
+        <p className="hint">
+          本场不计成长 XP（{COMPETITION_TYPE_LABEL[data.match.competitionType] ?? data.match.competitionType} ·{' '}
+          {data.match.stageName || '—'}）：只能录出场与评分 —— 评分与出场照常入库（球员比赛记录的出场与均分要用），
+          本场 XP 恒为 0；零封 / 夺回球权 / 扑救是纯 XP 计数器，本场不开放。
+        </p>
+      )}
 
       {narrow ? (
         /* v6.21.0 窄屏卡片流（≤760）：与桌面表格 DOM 互斥；状态判据、格子锁定规则、
@@ -1056,7 +1076,7 @@ function EntryPanel({
                         value={r.rating.value}
                         disabled={ro}
                         inputMode="decimal"
-                        placeholder="7.0–10.0"
+                        placeholder="0.0–10.0"
                         onChange={(e) => updateRow(r.playerId, (row) => ({ ...row, rating: { ...row.rating, value: e.target.value }, result: null }))}
                       />
                     )}
@@ -1074,7 +1094,7 @@ function EntryPanel({
                         type="checkbox"
                         className="entry-card-check"
                         checked={r.cleanSheet.checked}
-                        disabled={ro}
+                        disabled={ro || noXp}
                         onChange={(e) =>
                           updateRow(r.playerId, (row) => ({
                             ...row,
@@ -1097,7 +1117,7 @@ function EntryPanel({
                       <input
                         className={`entry-num mono${duelsBad ? ' invalid' : ''}`}
                         value={r.duelsWon.value}
-                        disabled={ro}
+                        disabled={ro || noXp}
                         inputMode="numeric"
                         placeholder="次数"
                         title={`历史累计 ${r.duelsBase} 次 · 每 12 次 1 XP`}
@@ -1130,7 +1150,7 @@ function EntryPanel({
                       <input
                         className={`entry-num mono${savesBad ? ' invalid' : ''}`}
                         value={r.saves.value}
-                        disabled={ro}
+                        disabled={ro || noXp}
                         inputMode="numeric"
                         placeholder="次数"
                         title={`历史累计 ${r.savesBase} 次 · 每 8 次 1 XP`}
@@ -1150,7 +1170,11 @@ function EntryPanel({
                   <span className="badge gray">自动</span>
                 </div>
                 <div className="entry-card-foot">
-                  <span className="badge gold">本场 +{fmtXp(rowXp(r))} XP</span>
+                  {noXp ? (
+                    <span className="badge gray">不计 XP</span>
+                  ) : (
+                    <span className="badge gold">本场 +{fmtXp(rowXp(r))} XP</span>
+                  )}
                   <button
                     type="button"
                     className="btn btn-sm"
@@ -1199,7 +1223,7 @@ function EntryPanel({
               const ratingBad =
                 !r.rating.locked &&
                 r.rating.value.trim() !== '' &&
-                !(Number.isFinite(Number(r.rating.value)) && Number(r.rating.value) >= 7 && Number(r.rating.value) <= 10);
+                !(Number.isFinite(Number(r.rating.value)) && Number(r.rating.value) >= 0 && Number(r.rating.value) <= 10);
               const duelsBad = !r.duelsWon.locked && r.duelsWon.value.trim() !== '' && !isNonNegativeInt(r.duelsWon.value);
               const savesBad = !r.saves.locked && r.saves.value.trim() !== '' && !isPositiveInt(r.saves.value);
               return (
@@ -1246,7 +1270,7 @@ function EntryPanel({
                         value={r.rating.value}
                         disabled={ro}
                         inputMode="decimal"
-                        placeholder="7.0–10.0"
+                        placeholder="0.0–10.0"
                         onChange={(e) => updateRow(r.playerId, (row) => ({ ...row, rating: { ...row.rating, value: e.target.value }, result: null }))}
                       />
                     )}
@@ -1262,7 +1286,7 @@ function EntryPanel({
                       <input
                         type="checkbox"
                         checked={r.cleanSheet.checked}
-                        disabled={ro}
+                        disabled={ro || noXp}
                         onChange={(e) =>
                           updateRow(r.playerId, (row) => ({
                             ...row,
@@ -1284,7 +1308,7 @@ function EntryPanel({
                       <input
                         className={`entry-num mono${duelsBad ? ' invalid' : ''}`}
                         value={r.duelsWon.value}
-                        disabled={ro}
+                        disabled={ro || noXp}
                         inputMode="numeric"
                         placeholder="次数"
                         title={`历史累计 ${r.duelsBase} 次 · 每 12 次 1 XP`}
@@ -1316,7 +1340,7 @@ function EntryPanel({
                       <input
                         className={`entry-num mono${savesBad ? ' invalid' : ''}`}
                         value={r.saves.value}
-                        disabled={ro}
+                        disabled={ro || noXp}
                         inputMode="numeric"
                         placeholder="次数"
                         title={`历史累计 ${r.savesBase} 次 · 每 8 次 1 XP`}
@@ -1328,7 +1352,7 @@ function EntryPanel({
                   </td>
                   <td className="num mono">{r.goals > 0 ? r.goals : '—'}</td>
                   <td className="num mono">{r.assists > 0 ? r.assists : '—'}</td>
-                  <td className="num mono">{fmtXp(rowXp(r))}</td>
+                  <td className="num mono">{noXp ? '0' : fmtXp(rowXp(r))}</td>
                   <td>
                     <button
                       type="button"
@@ -1364,7 +1388,11 @@ function EntryPanel({
            沿用 saveAll（只提交脏行，不合法行会提示跳过），与表头「全部保存」同一动作。 */
         createPortal(
           <div className="entry-sumbar">
-            <span className="badge gold">本场合计 +{fmtXp(totalXp)} XP</span>
+            {noXp ? (
+              <span className="badge gray">本场不计成长 XP</span>
+            ) : (
+              <span className="badge gold">本场合计 +{fmtXp(totalXp)} XP</span>
+            )}
             <span className="muted">脏行 {dirtyCount}</span>
             <button
               type="button"

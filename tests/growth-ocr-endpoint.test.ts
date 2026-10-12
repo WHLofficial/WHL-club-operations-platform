@@ -182,13 +182,13 @@ describe('TC-EP 截图识别端点', () => {
     expect(body.side).toBe('home');
     expect(body.kind).toBe('summary');
     expect(body.team).toBe('海港联');
-    // 认人：K. Zhang→10（5.1 只出场）、L. Li→11（出场+评分）；自由身 14 / 训练营 13 不在花名册
+    // 认人：K. Zhang→10（5.1 差评照录）、L. Li→11（出场+评分）；自由身 14 / 训练营 13 不在花名册
     expect(body.entries).toHaveLength(2);
-    expect(body.entries[0]).toMatchObject({ playerId: 10, name: 'K. Zhang', matched: 'official', draft: { appearance: true } });
+    expect(body.entries[0]).toMatchObject({ playerId: 10, name: 'K. Zhang', matched: 'official', draft: { appearance: true, rating: 5.1 } });
     expect(body.entries[1]).toMatchObject({ playerId: 11, name: 'L. Li', draft: { appearance: true, rating: 9.2 } });
     expect(body.unmatched).toEqual([]);
-    expect(body.warnings).toContain('「K. Zhang」评分 5.1 低于 7.0，只预填出场（7.0 以下不给 XP）');
     expect(body.warnings).toContain('模型备注：底部一行被遮挡');
+    expect(body.warnings.some((w) => w.includes('低于 7.0'))).toBe(false); // v6.46.0：低评分不再是警告
   });
 
   it('TC-EP-05 页签不是两张业务页签 → 502 点名；队名对不上两侧 → 400 点名截图队名', async () => {
@@ -222,11 +222,10 @@ describe('TC-EP 截图识别端点', () => {
     const body = (await res.json()) as OcrResponse;
     expect(body.side).toBe('home');
     expect(body.kind).toBe('goalkeeping'); // 请求没带 kind，页签来自识别结果
-    // 门将 5.1（<7 只出场）+ gk 块并入 saves；M. Wang 7.5 出场+评分；SUB N/A 跳过
+    // 门将 5.1（差评照录）+ gk 块并入 saves；M. Wang 7.5 出场+评分；SUB N/A 跳过
     expect(body.entries).toHaveLength(2);
-    expect(body.entries[0]).toMatchObject({ playerId: 10, draft: { appearance: true, saves: 3 } });
+    expect(body.entries[0]).toMatchObject({ playerId: 10, draft: { appearance: true, rating: 5.1, saves: 3 } });
     expect(body.entries[1]).toMatchObject({ playerId: 12, draft: { appearance: true, rating: 7.5 } });
     expect(body.unmatched).toEqual([]);
-    expect(body.warnings).toContain('「K. Zhang」评分 5.1 低于 7.0，只预填出场（7.0 以下不给 XP）');
   });
 });

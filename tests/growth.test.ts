@@ -208,8 +208,13 @@ describe('XP 补录（附录 A〔6〕）', () => {
     expect(((await again.json()) as { duplicate: boolean }).duplicate).toBe(true);
     expect(xpOf(fx, 10)).toBe(3);
 
-    const lowRating = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 6.5 }, 'tok-admin', fx.env);
-    expect(lowRating.status).toBe(400);
+    // v6.46.0：评分下限放到 0.0 —— 差评照录进库，只是不给 XP；上限仍卡在 10.0
+    const lowRating = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 6.5, matchRef: 'manual:low' }, 'tok-admin', fx.env);
+    expect(lowRating.status).toBe(201);
+    expect(((await lowRating.json()) as { xp: number }).xp).toBe(0);
+    expect(xpOf(fx, 10)).toBe(3); // 6.5 一分不加
+    const highRating = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 10.5 }, 'tok-admin', fx.env);
+    expect(highRating.status).toBe(400);
     const badType = await post('/api/admin/growth/events', { playerId: 10, eventType: 'goal' }, 'tok-admin', fx.env);
     expect(badType.status).toBe(400);
     const badCount = await post('/api/admin/growth/events', { playerId: 10, eventType: 'saves', value: -3 }, 'tok-admin', fx.env);

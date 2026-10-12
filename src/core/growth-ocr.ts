@@ -178,8 +178,8 @@ export interface OcrBuildResult {
 /**
  * 识别结果 → 预填草稿。
  * 两个页签都吃左表 rows（外场 Summary 常看不全全队，门将页左表还带着替补等人——两页各传一张、
- * 重复出现的球员由前端合并去重）：rating 有值 ⇒ 出场 + 评分（<7.0 只出场，产品规则 7.0 以下不给
- * XP）；N/A 行 = 没上场，跳过。
+ * 重复出现的球员由前端合并去重）：rating 有值 ⇒ 出场 + 评分（v6.46.0 起照实预填，0.0-10.0 全部
+ * 入库——低于 7.0 只记录不给 XP，均分要真实就得把差评也留下）；N/A 行 = 没上场，跳过。
  * goalkeeping 额外吃 gk 详情 ⇒ 门将出场 + 扑救（>0 才填，扑救没有 0 标记语义）+ 失球 0 ⇒ 零封；
  * 门将本人在 rows 里也出现时与 rows 行合成同一条。
  */
@@ -209,10 +209,7 @@ export function buildOcrEntries(ocr: OcrVision, roster: OcrRosterPlayer[]): OcrB
       if (row.rating === null) continue; // N/A/没识别到评分 = 没上场，不预填
       const hit = tryMatch(row.name, row.pos);
       if (!hit) continue;
-      const draft: OcrEntryDraft = { appearance: true };
-      if (row.rating >= 7) draft.rating = row.rating;
-      else warnings.push(`「${row.name}」评分 ${row.rating} 低于 7.0，只预填出场（7.0 以下不给 XP）`);
-      push(hit, draft);
+      push(hit, { appearance: true, rating: row.rating });
     }
   };
 

@@ -212,6 +212,7 @@ interface ListMatch {
   homeIsCpu: boolean;
   awayIsCpu: boolean;
   recorded: number;
+  xpEligible: boolean;
 }
 
 interface PanelPlayer {
@@ -294,7 +295,7 @@ function auditsOf(fx: Fixture, action = 'growth_manual_event_batch'): AuditRow[]
 }
 
 describe('TC-LIST 可补录比赛列表', () => {
-  it('TC-LIST-01 只列可计 XP 的比赛：联赛两级全阶段 + 冠军杯小组赛，冠军杯淘汰轮不出现', async () => {
+  it('TC-LIST-01 v6.46.0 放开到全部已确认非弃权场次：冠军杯淘汰轮也列出并标 xpEligible=false', async () => {
     const fx = freshEnv();
     seedBase(fx);
     seedMatch(fx, { matchId: 1001, competitionType: 'league_premier', stageName: '常规赛', stageKind: 'league', round: 1, homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
@@ -303,10 +304,11 @@ describe('TC-LIST 可补录比赛列表', () => {
     seedMatch(fx, { matchId: 1004, competitionType: 'champions_cup', stageName: '半决赛', stageKind: 'knockout', round: 1, homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-04T10:00:00Z' });
 
     const matches = await listMatches(fx);
-    expect(matches.map((m) => m.matchId)).toEqual([1003, 1002, 1001]);
+    expect(matches.map((m) => m.matchId)).toEqual([1004, 1003, 1002, 1001]);
 
     // 列表行 DTO：前端直接渲染，字段口径与面板 match 块一致
-    expect(matches[0]).toMatchObject({
+    const group = matches.find((m) => m.matchId === 1003) as ListMatch;
+    expect(group).toMatchObject({
       matchId: 1003,
       tournamentId: 5,
       tournamentName: '第七赛季联赛',
@@ -323,9 +325,12 @@ describe('TC-LIST 可补录比赛列表', () => {
       homeClubId: 1,
       awayClubId: 3,
       recorded: 0,
+      xpEligible: true,
     });
-    expect(matches[0].confirmedAt).toBe('2026-07-03T10:00:00Z');
-    expect(matches[0].finishedAt).toBe('2026-07-01T21:00:00Z');
+    expect(group.confirmedAt).toBe('2026-07-03T10:00:00Z');
+    expect(group.finishedAt).toBe('2026-07-01T21:00:00Z');
+    // 计 XP 口径不变：冠军杯只到小组赛（淘汰轮、超级杯、资格赛都是 xpEligible=false，但能录出场与评分）
+    expect(matches.find((m) => m.matchId === 1004)?.xpEligible).toBe(false);
   });
 
   it('TC-LIST-02 弃权场与未确认场次不出现（walkover_side 空串的普通场照常出现）', async () => {
@@ -450,17 +455,21 @@ describe('TC-PANEL 单场面板', () => {
     expect(away.get(31)?.suspended).toBeNull(); // 无 fc_id → 判不出停赛（放行口径）
   });
 
-  it('TC-PANEL-03 不可录的场次一律 404：不存在 / 冠军杯淘汰轮 / 弃权场 / 非数字 id；匿名 401', async () => {
+  it('TC-PANEL-03 不可录的场次一律 404：不存在 / 弃权场 / 非数字 id；冠军杯淘汰轮可录但标 xpEligible=false；匿名 401', async () => {
     const fx = freshEnv();
     seedBase(fx);
     seedMatch(fx, { matchId: 1400, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
     seedMatch(fx, { matchId: 1401, competitionType: 'champions_cup', stageKind: 'knockout', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-02T10:00:00Z' });
     seedMatch(fx, { matchId: 1402, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', walkoverSide: 'both', confirmedAt: '2026-07-03T10:00:00Z' });
 
-    for (const id of [9999, 1401, 1402, 'abc']) {
+    for (const id of [9999, 1402, 'abc']) {
       const res = await get(panelPath(id), 'tok-admin', fx.env);
       expect(res.status, `matchId=${id}`).toBe(404);
     }
+    // v6.46.0：淘汰轮面板打得开（要能录出场与评分），但带 xpEligible=false 让前端只放开两格
+    const knockout = await get(panelPath(1401), 'tok-admin', fx.env);
+    expect(knockout.status).toBe(200);
+    expect(((await knockout.json()) as Panel).match).toMatchObject({ matchId: 1401, stageKind: 'knockout', xpEligible: false });
     expect((await anon(panelPath(1400), fx.env, 'GET')).status).toBe(401);
     expect((await anon(LIST, fx.env, 'GET')).status).toBe(401);
   });
@@ -574,14 +583,14 @@ describe('TC-BATCH 批量补录', () => {
     expect(manual.status).toBe(201);
   });
 
-  it('TC-BATCH-04 口径复用单人补录规则：评分区间/正整数/entries 形态都前置拒', async () => {
+  it('TC-BATCH-04 口径复用单人补录规则：评分区间 0-10/正整数/entries 形态都前置拒；差评照录', async () => {
     const fx = freshEnv();
     seedBase(fx);
     seedMatch(fx, { matchId: 1800, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
 
     const cases: [Record<string, unknown>, string][] = [
-      [{ playerId: 10, rating: 6.9 }, '评分要在 7.0-10.0'],
-      [{ playerId: 10, rating: 10.5 }, '评分要在 7.0-10.0'],
+      [{ playerId: 10, rating: -0.1 }, '评分要在 0.0-10.0'],
+      [{ playerId: 10, rating: 10.5 }, '评分要在 0.0-10.0'],
       [{ playerId: 10, duelsWon: -1 }, '夺回球权要是非负整数'],
       [{ playerId: 10, duelsWon: 1.5 }, '夺回球权要是非负整数'],
       [{ playerId: 10, saves: 0 }, '次数要是正整数'],
@@ -600,6 +609,13 @@ describe('TC-BATCH 批量补录', () => {
     }
     expect(eventsOf(fx).length).toBe(0);
     expect(auditsOf(fx).length).toBe(0);
+
+    // v6.46.0：评分下限放到 0.0 —— 6.9 这种差评要能进库（值照录、XP = 0），均分才真实
+    const low = await post(batchPath(1800), { entries: [{ playerId: 10, rating: 6.9 }] }, 'tok-admin', fx.env);
+    expect(low.status).toBe(201);
+    expect(await low.json()).toMatchObject({ written: 1, duplicates: 0, totalXp: 0 });
+    expect(eventsOf(fx, 1800).find((r) => r.event_type === 'rating')).toMatchObject({ value: 6.9, xp: 0, source: 'manual' });
+    expect(xpOf(fx, 10)).toBe(0);
   });
 
   it('TC-BATCH-05 同锚重复提交：第二次全进 duplicates、XP 不重复、事件各 1 行', async () => {
@@ -657,7 +673,7 @@ describe('TC-BATCH 批量补录', () => {
       {
         entries: [
           { playerId: 10, appearance: true },
-          { playerId: 11, rating: 6.0 }, // 第 2 条非法
+          { playerId: 11, rating: 10.5 }, // 第 2 条非法（评分超上限）
           { playerId: 12, saves: 8 },
         ],
       },
@@ -665,7 +681,7 @@ describe('TC-BATCH 批量补录', () => {
       fx.env,
     );
     expect(res.status).toBe(400);
-    expect(await errorText(res)).toContain('评分要在 7.0-10.0');
+    expect(await errorText(res)).toContain('评分要在 0.0-10.0');
     expect(eventsOf(fx, 2000).length).toBe(0);
     expect(xpOf(fx, 10)).toBe(0);
     expect(xpOf(fx, 12)).toBe(0);
@@ -753,6 +769,72 @@ describe('TC-BATCH 批量补录', () => {
     expect(await res.json()).toMatchObject({ written: 125, duplicates: 0, totalXp: 137.5 }); // 每人 1+2+0.5+1+1
     expect(eventsOf(fx, 2200).length).toBe(125);
     expect(auditsOf(fx).length).toBe(1);
+  });
+
+  it('TC-BATCH-11 非 XP 场次（冠军杯淘汰轮）：只收出场与评分，值照录、XP 归零；零封/夺权/扑救整批 400', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2400, competitionType: 'champions_cup', stageName: '半决赛', stageKind: 'knockout', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+
+    // 越界项整批 400（哪怕同一批里还有合法的出场），零写入零审计 —— 纯 XP 计数器不给非 XP 赛事开口子
+    const bad: [Record<string, unknown>, string][] = [
+      [{ playerId: 10, cleanSheet: true }, '零封'],
+      [{ playerId: 10, duelsWon: 0 }, '夺回球权'],
+      [{ playerId: 10, saves: 4 }, '扑救'],
+    ];
+    for (const [entry, msg] of bad) {
+      const res = await post(batchPath(2400), { entries: [{ playerId: 11, appearance: true }, entry] }, 'tok-admin', fx.env);
+      expect(res.status, msg).toBe(400);
+      const text = await errorText(res);
+      expect(text).toContain(msg);
+      expect(text).toContain('只能录出场与评分');
+    }
+    expect(eventsOf(fx).length).toBe(0);
+    expect(auditsOf(fx).length).toBe(0);
+
+    // 出场 + 评分照收：值照录（含 5.5 这种差评）、XP 恒 0，players.growth_xp 不动
+    const res = await post(
+      batchPath(2400),
+      { entries: [{ playerId: 10, appearance: true, rating: 8.5 }, { playerId: 11, rating: 5.5 }] },
+      'tok-admin',
+      fx.env,
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ written: 3, duplicates: 0, totalXp: 0 });
+    const rows = eventsOf(fx, 2400);
+    expect(rows.find((r) => r.player_id === 10 && r.event_type === 'appearance')).toMatchObject({ value: 1, xp: 0, source: 'manual' });
+    expect(rows.find((r) => r.player_id === 10 && r.event_type === 'rating')).toMatchObject({ value: 8.5, xp: 0 });
+    expect(rows.find((r) => r.player_id === 11 && r.event_type === 'rating')).toMatchObject({ value: 5.5, xp: 0 });
+    expect(xpOf(fx, 10)).toBe(0);
+    expect(xpOf(fx, 11)).toBe(0);
+  });
+
+  it('TC-BATCH-12 单人补录 POST /growth/events：数字锚按那场赛事判 XP，manual: 锚沿用旧行为', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2500, competitionType: 'champions_cup', stageKind: 'knockout', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    seedMatch(fx, { matchId: 2501, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-02T10:00:00Z' });
+
+    const single = (body: Record<string, unknown>) => post('/api/admin/growth/events', body, 'tok-admin', fx.env);
+    // 联赛锚：照旧按 §10.1 计 XP
+    const league = await single({ playerId: 10, eventType: 'rating', value: 8, matchRef: '2501' });
+    expect(league.status).toBe(201);
+    expect(await league.json()).toMatchObject({ xp: 2 });
+    // 非 XP 锚：评分能录、XP 归零；纯 XP 计数器直接 400
+    const cupRating = await single({ playerId: 10, eventType: 'rating', value: 8, matchRef: '2500' });
+    expect(cupRating.status).toBe(201);
+    expect(await cupRating.json()).toMatchObject({ xp: 0 });
+    const cupSaves = await single({ playerId: 20, eventType: 'saves', value: 4, matchRef: '2500' });
+    expect(cupSaves.status).toBe(400);
+    expect(await errorText(cupSaves)).toContain('只能录出场与评分');
+    // 认不出的场次号按「不计 XP」保守处理（宁少给，不白给）
+    const unknown = await single({ playerId: 11, eventType: 'rating', value: 8, matchRef: '9999' });
+    expect(unknown.status).toBe(201);
+    expect(await unknown.json()).toMatchObject({ xp: 0 });
+    // manual: 自定义锚无从判赛事，沿用旧行为照常计 XP
+    const manual = await single({ playerId: 12, eventType: 'rating', value: 8, matchRef: 'manual:r-2500' });
+    expect(manual.status).toBe(201);
+    expect(await manual.json()).toMatchObject({ xp: 2 });
   });
 
   it('TC-BATCH-10 权限与审计：匿名 401、教练 403、不可录场 POST 404；成功提交审计一条含明细', async () => {

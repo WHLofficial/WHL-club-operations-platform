@@ -52,11 +52,14 @@ export function sideConcededOf(
  * - 夺回球权（duelsWon）不预填——按裁决保持人工手填（它同时是防守球员确认的载体）；
  * - 本侧失球 0 时，未锁定的门将行自动勾零封（无论识别条目里有没有他）；
  * - v6.45.0：本场停赛的行整行跳过（停赛不能录成长），也不参与门将零封联动。
+ * - v6.46.0：allowCounters=false（本场不计成长 XP —— 冠军杯淘汰赛/超级杯/资格赛）时不预填
+ *   零封与扑救，也不做门将零封联动：这两项是纯 XP 计数器，写进去服务端会整批拒收。
  */
 export function mergeOcrEntries<R extends OcrMergeRow>(
   rows: R[],
   entries: MatchOcrEntry[],
   conceded: number,
+  allowCounters = true,
 ): OcrMergeOutcome<R> {
   const next = rows.map((r) => ({ ...r }));
   const byId = new Map(next.map((r) => [r.playerId, r]));
@@ -95,7 +98,7 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
       } else if (row.rating.value === value) duped += 1;
       else conflicts.push(`评分识别 ${value} 与已填 ${row.rating.value} 冲突`);
     }
-    if (e.draft.cleanSheet) {
+    if (allowCounters && e.draft.cleanSheet) {
       if (row.cleanSheet.locked) blocked.push('零封');
       else if (row.cleanSheet.checked) duped += 1;
       else {
@@ -103,7 +106,7 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
         touched += 1;
       }
     }
-    if (e.draft.saves !== undefined) {
+    if (allowCounters && e.draft.saves !== undefined) {
       const value = String(e.draft.saves);
       if (row.saves.locked) blocked.push('扑救');
       else if (row.saves.value === '') {
@@ -120,11 +123,14 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
     if (blocked.length > 0) {
       skipped.push({ playerId: e.playerId, name: e.name, reason: `${blocked.join('、')}格已录入锁定` });
     }
+    if (!allowCounters && (e.draft.cleanSheet === true || e.draft.saves !== undefined)) {
+      skipped.push({ playerId: e.playerId, name: e.name, reason: '本场不计成长 XP，零封与扑救不预填' });
+    }
     // 全部同值去重（touched=0、无冲突、无锁定）不算跳过——多选上传时这是常态
   }
 
   let gkAuto = 0;
-  if (conceded === 0) {
+  if (allowCounters && conceded === 0) {
     for (const row of next) {
       if (row.position === 'GK' && !row.suspended && !row.cleanSheet.locked && !row.cleanSheet.checked) {
         row.cleanSheet = { ...row.cleanSheet, checked: true };

@@ -53,6 +53,7 @@ function match(over: Partial<MatchEntryListItem> = {}): MatchEntryListItem {
     homeIsCpu: false,
     awayIsCpu: false,
     recorded: 3,
+    xpEligible: true,
     ...over,
   };
 }
@@ -286,7 +287,8 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     expect(mocks.submit.mock.calls[0][1]).toHaveLength(50);
     expect(mocks.submit.mock.calls[1][1]).toHaveLength(1);
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('新录 51 项'));
-  });
+    // 51 行 × 51 次 fireEvent 在 jsdom 下渲染很重（单跑约 4.6s），默认 5s 超时在全量并发时会假失败
+  }, 20000);
 
   it('TC-ENTRY-E5 行内保存还在飞就收起：确认条等它落地再算脏行，不重复提交', async () => {
     // 手动放行的提交：先扣住不 resolve，验证「在飞」期间的收起行为

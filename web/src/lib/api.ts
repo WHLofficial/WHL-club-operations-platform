@@ -1899,7 +1899,7 @@ export const GROWTH_EVENT_LABEL: Record<string, string> = {
 
 // ---- v6.16.0：管理端「成长录入」（按场补录，/api/admin/growth/match-entry） ----
 
-/** 可补录比赛列表行（v6.45.1 起列出全部可录场次，已按可计 XP 口径过滤，按确认时间倒序） */
+/** 可补录比赛列表行（v6.45.1 起列出全部已确认非弃权场次，按确认时间倒序；v6.46.0 起含杯赛淘汰赛/超级杯/资格赛） */
 export interface MatchEntryListItem {
   matchId: number;
   season: number;
@@ -1923,6 +1923,11 @@ export interface MatchEntryListItem {
   awayIsCpu: boolean;
   /** 该场已录成长事件条数（列表徽标用） */
   recorded: number;
+  /**
+   * v6.46.0：本场是否计成长 XP（联赛两级全阶段 + 冠军杯小组赛）。
+   * false（冠军杯淘汰赛/超级杯/资格赛）= 只能录出场与评分，值照录、XP 恒 0。
+   */
+  xpEligible: boolean;
 }
 
 export interface MatchEntryListResponse {

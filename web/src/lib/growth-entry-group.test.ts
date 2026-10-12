@@ -26,6 +26,7 @@ function item(over: Partial<MatchEntryListItem> & { matchId: number }): MatchEnt
     homeIsCpu: false,
     awayIsCpu: false,
     recorded: 0,
+    xpEligible: true,
     ...over,
   };
 }

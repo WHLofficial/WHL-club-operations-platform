@@ -22,26 +22,28 @@ import { foldName } from '../../../core/name-fold.ts';
 import { parseOcrVision, buildOcrEntries, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
 import { llmVisionJson } from '../../../lib/llm.ts';
 import { suspendedPlayersAtMatch, suspensionLabel } from '../../tour-suspension.ts';
+import { loadTournamentNames, tournamentNameOf } from '../../tournament-names.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// 补录口径（单人与批量共用一份，防止两处漂移）：rating 7.0-10.0 且四舍五入到 0.1；
+// 补录口径（单人与批量共用一份，防止两处漂移）：rating 0.0-10.0 且四舍五入到 0.1；
 // duels_won 非负整数（0 行合法，v6.42.0：它是「防守球员人工确认」的载体——手填了，哪怕是 0，
 // 就认定该场为防守球员）、saves 正整数；XP 一律服务端按 §10.1 算，夺回球权/扑救两项按
 // 跨场累计折算（base = 历史累计次数，只入账跨档差值），单场不足一档就是 0 XP，合法落台账。
-// rating 区间 7.0 起步恒有 XP，没有 0 XP 路径。
-function manualEventOf(eventType: GrowthEventType, raw: unknown, base = 0): { value: number; xp: number } {
+// v6.46.0：评分放宽到 0.0 起步（低于 7.0 只记录、0 XP——「录了但没打好」也要能进均分）；
+// xpOn=false 用于不计 XP 的场次（杯赛淘汰赛/超级杯/资格赛），值照录、XP 归零。
+function manualEventOf(eventType: GrowthEventType, raw: unknown, base = 0, xpOn = true): { value: number; xp: number } {
   let value = raw === undefined || raw === null ? 1 : Number(raw);
   if (eventType === 'rating') {
-    if (!Number.isFinite(value) || value < 7 || value > 10) throw new HttpError(400, '评分要在 7.0-10.0 之间，7.0 以下不给 XP');
+    if (!Number.isFinite(value) || value < 0 || value > 10) throw new HttpError(400, '评分要在 0.0-10.0 之间（7.0 以下不给 XP）');
     value = Math.round(value * 10) / 10;
   } else if (eventType === 'duels_won') {
     if (!Number.isInteger(value) || value < 0) throw new HttpError(400, '夺回球权要是非负整数（填 0 = 确认防守球员）');
   } else if (eventType === 'saves') {
     if (!Number.isInteger(value) || value <= 0) throw new HttpError(400, '次数要是正整数');
   }
-  return { value, xp: xpForEvent(eventType, value, base) };
+  return { value, xp: xpOn ? xpForEvent(eventType, value, base) : 0 };
 }
 
 // 累计项（duels_won/saves）的跨场基数：该球员该类型历史行 SUM(value)。含本场已有行——
@@ -137,13 +139,25 @@ app.post('/growth/events', async (c) => {
   if (typeof eventType !== 'string' || !(MANUAL_TYPES as readonly string[]).includes(eventType)) {
     throw new HttpError(400, 'event_type 只能是 appearance / rating / clean_sheet / duels_won / saves');
   }
+  const matchRef = typeof body?.matchRef === 'string' && body.matchRef.trim() !== '' ? body.matchRef.trim().slice(0, 40) : `manual:${Date.now()}`;
+  // v6.46.0：锚是赛事系统比赛号时按那场赛事判是否计 XP（口径同批量端点）。查不到的场次号按「不计 XP」
+  // 处理——宁可少给，也不给不该给的赛事发 XP；`manual:` 这类自定义锚无从判，沿用旧行为（照常计 XP）。
+  let xpEligible = true;
+  if (/^\d+$/.test(matchRef)) {
+    const conf = await c.env.DB.prepare('SELECT competition_type, stage_kind FROM result_confirmations WHERE match_id = ?')
+      .bind(Number(matchRef))
+      .first<{ competition_type: string | null; stage_kind: string | null }>();
+    xpEligible = conf !== null && xpEligibleOf(conf);
+  }
+  if (!xpEligible && eventType !== 'appearance' && eventType !== 'rating') {
+    throw new HttpError(400, `这场比赛不计成长 XP，${EVENT_TYPE_LABELS[eventType as GrowthEventType] ?? eventType}录不了，只能录出场与评分`);
+  }
   const { value, xp } = manualEventOf(
     eventType as GrowthEventType,
     body?.value,
     eventType === 'duels_won' || eventType === 'saves' ? (await loadCumulativeBases(c.env.DB, [playerId])).get(`${playerId}|${eventType}`) ?? 0 : 0,
+    xpEligible,
   );
-
-  const matchRef = typeof body?.matchRef === 'string' && body.matchRef.trim() !== '' ? body.matchRef.trim().slice(0, 40) : `manual:${Date.now()}`;
   // v6.45.0：锚是赛事系统比赛号时按同场停赛拦（停赛球员不能录成长）；`manual:` 这类自定义锚无从判，放行
   if (/^\d+$/.test(matchRef) && player.fc_id !== null) {
     const s = (await suspendedPlayersAtMatch(c.env.TOUR_DB, Number(matchRef))).get(player.fc_id);
@@ -236,12 +250,21 @@ app.post('/growth/:playerId/tier', async (c) => {
 });
 
 // ---- v6.16.0：按场次的花名册批量补录台（管理端三个端点）----
-// 可计 XP 口径与自动钩子（results.ts recordAutoXpForMatch）同源，且刻意写成一份 SQL 片段：
-// 联赛顶级/次级全阶段计 XP，冠军杯只计小组赛；弃权场不计 —— 自动通道根本没写过（甚至可以说
-// 不该写），列出来补录也永远撞去重锚。列表/面板/批量三处引用同一个 WHERE，改口径只改这一行。
-const MATCH_ENTRY_WHERE = `(rc.competition_type IN ('league_premier', 'league_second')
-       OR (rc.competition_type = 'champions_cup' AND rc.stage_kind = 'group'))
-     AND (rc.walkover_side IS NULL OR rc.walkover_side = '')`;
+// v6.46.0 起「能录」与「计 XP」解耦：
+//   能录 = 全部已确认的非弃权场次（杯赛淘汰赛、超级杯、资格赛也要能录出场与评分——球员页「比赛」
+//          页签的出场/均分来自补录，赛事系统侧只保证有事件的人不缺，替补登场与差评分只有补录才有）；
+//   计 XP = 与自动钩子（results.ts recordAutoXpForMatch）同源口径：顶级/次级联赛全阶段、冠军杯小组赛。
+// 三条 SQL 片段（列表/面板/批量）共用同一个 WHERE，改口径只改这一行；计 XP 的判定见 xpEligibleOf。
+const MATCH_ENTRY_WHERE = `(rc.walkover_side IS NULL OR rc.walkover_side = '')`;
+
+/** 本场是否计成长 XP：与自动钩子同源（联赛顶级/次级全阶段 + 冠军杯小组赛）；其余赛事值照录、XP 归零 */
+function xpEligibleOf(row: { competition_type: string | null; stage_kind: string | null }): boolean {
+  return (
+    row.competition_type === 'league_premier' ||
+    row.competition_type === 'league_second' ||
+    (row.competition_type === 'champions_cup' && row.stage_kind === 'group')
+  );
+}
 
 const MATCH_ENTRY_COLUMNS = `rc.match_id, rc.season, rc.window_seq, rc.competition_type, rc.stage_name, rc.stage_kind, rc.round,
      rc.home_team, rc.away_team, rc.score_home, rc.score_away, rc.finished_at, rc.confirmed_at, rc.tournament_id`;
@@ -331,6 +354,8 @@ function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, re
     confirmedAt: row.confirmed_at,
     tournamentId: row.tournament_id,
     tournamentName,
+    /** v6.46.0：本场是否计 XP（前端据此提示「只能录出场与评分」） */
+    xpEligible: xpEligibleOf(row),
     homeClubId: home.clubId,
     awayClubId: away.clubId,
     homeIsCpu: home.isCpu,
@@ -339,19 +364,7 @@ function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, re
   };
 }
 
-// 赛事名（v6.45.0 录入台按赛事分组用）：result_confirmations 在俱乐部库、tournament 在赛事库，
-// 跨库不能 JOIN，只对已取到的 id 做一趟 IN 查名；查不到（或 tournament_id 为空）保留 null，
-// 前端把它们归进「未关联赛事」一组，不影响任何写路径。
-async function loadTournamentNames(env: Env, ids: (number | null)[]): Promise<Map<number, string>> {
-  const uniq = [...new Set(ids.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0))];
-  if (uniq.length === 0) return new Map();
-  const rows = await env.TOUR_DB.prepare(`SELECT id, name FROM tournament WHERE id IN (${uniq.map(() => '?').join(', ')})`)
-    .bind(...uniq)
-    .all<{ id: number; name: string }>();
-  return new Map(rows.results.map((r) => [r.id, r.name] as const));
-}
-
-const tournamentNameOf = (names: Map<number, string>, id: number | null): string | null => (id === null ? null : names.get(id) ?? null);
+// 赛事名（跨库取名）v6.46.0 抽到 src/worker/tournament-names.ts —— 录入台按赛事分组与球员页「比赛」页签共用一份
 
 // 可补录比赛列表：全部可计 XP 的已确认场次（确认时间倒序），每场带已录事件数。
 // v6.45.1：去掉 v6.45.0 的 LIMIT 50——线上可录场次已到 100 场，截断会让老场次彻底看不见（前端按赛事/轮次分组展示）。
@@ -380,7 +393,7 @@ app.get('/growth/match-entry/:matchId', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const matchId = Number(c.req.param('matchId'));
   const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
-  if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认、弃权或不是联赛/冠军杯小组赛）');
+  if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认或弃权场次）');
 
   const cache = new Map<string, number | null>();
   const home = await resolveEntrySide(c.env.DB, row.home_team, cache);
@@ -489,7 +502,7 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const matchId = Number(c.req.param('matchId'));
   const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
-  if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认、弃权或不是联赛/冠军杯小组赛）');
+  if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认或弃权场次）');
 
   const body = (await readJson(c)) as { image?: unknown } | null;
   if (typeof body?.image !== 'string' || body.image === '') throw new HttpError(400, '缺 image（截图的 base64）');
@@ -551,7 +564,7 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const matchId = Number(c.req.param('matchId'));
   const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
-  if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认、弃权或不是联赛/冠军杯小组赛）');
+  if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认或弃权场次）');
 
   const body = (await readJson(c)) as { entries?: unknown } | null;
   const entries = body?.entries;
@@ -592,17 +605,37 @@ app.post('/growth/match-entry/:matchId', async (c) => {
     if (s) throw new HttpError(400, `${rowDisplayName(p)} 本场停赛（${suspensionLabel(s)}），不能录成长`);
   }
 
-  // 展开事件流：字段顺序固定，方便前端按事件类型锁定格子
+  // v6.46.0：本场不计 XP（杯赛淘汰赛 / 超级杯 / 资格赛）时只收「出场 + 评分」——零封、夺回球权、
+  // 扑救是纯 XP 计数器（补录台之外没有展示价值），收下只会把 XP 灌进不该给 XP 的赛事，
+  // 还会顶起 duels_won / saves 的跨场累计档位。整批一次判，任何一行越界即整批 400（零写入）。
+  const xpEligible = xpEligibleOf(row);
+  if (!xpEligible) {
+    for (const { playerId, entry } of parsed) {
+      const bad =
+        entry.cleanSheet === true
+          ? '零封'
+          : entry.duelsWon !== undefined && entry.duelsWon !== null
+            ? '夺回球权'
+            : entry.saves !== undefined && entry.saves !== null
+              ? '扑救'
+              : null;
+      if (bad === null) continue;
+      const name = rowDisplayName(players.get(playerId) as EntryPlayerRow);
+      throw new HttpError(400, `本场不计成长 XP，${name} 的${bad}录不了，只能录出场与评分`);
+    }
+  }
+
+  // 展开事件流：字段顺序固定，方便前端按事件类型锁定格子；非 XP 场次一律 xp=0（值照录）
   const events: { playerId: number; eventType: GrowthEventType; value: number; xp: number }[] = [];
   const bases = await loadCumulativeBases(c.env.DB, ids);
   for (const { playerId, entry } of parsed) {
-    if (entry.appearance) events.push({ playerId, eventType: 'appearance', value: 1, xp: xpForEvent('appearance', 1) });
-    if (entry.cleanSheet) events.push({ playerId, eventType: 'clean_sheet', value: 1, xp: xpForEvent('clean_sheet', 1) });
-    if (entry.rating !== undefined && entry.rating !== null) events.push({ playerId, eventType: 'rating', ...manualEventOf('rating', entry.rating) });
+    if (entry.appearance) events.push({ playerId, eventType: 'appearance', value: 1, xp: xpEligible ? xpForEvent('appearance', 1) : 0 });
+    if (entry.cleanSheet) events.push({ playerId, eventType: 'clean_sheet', value: 1, xp: xpEligible ? xpForEvent('clean_sheet', 1) : 0 });
+    if (entry.rating !== undefined && entry.rating !== null) events.push({ playerId, eventType: 'rating', ...manualEventOf('rating', entry.rating, 0, xpEligible) });
     if (entry.duelsWon !== undefined && entry.duelsWon !== null)
-      events.push({ playerId, eventType: 'duels_won', ...manualEventOf('duels_won', entry.duelsWon, bases.get(`${playerId}|duels_won`) ?? 0) });
+      events.push({ playerId, eventType: 'duels_won', ...manualEventOf('duels_won', entry.duelsWon, bases.get(`${playerId}|duels_won`) ?? 0, xpEligible) });
     if (entry.saves !== undefined && entry.saves !== null)
-      events.push({ playerId, eventType: 'saves', ...manualEventOf('saves', entry.saves, bases.get(`${playerId}|saves`) ?? 0) });
+      events.push({ playerId, eventType: 'saves', ...manualEventOf('saves', entry.saves, bases.get(`${playerId}|saves`) ?? 0, xpEligible) });
   }
   if (events.length === 0) throw new HttpError(400, '每一行都没有勾上要记的项目');
 
