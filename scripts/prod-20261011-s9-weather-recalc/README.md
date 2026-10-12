@@ -108,6 +108,12 @@ broadcast  = round2(0.3 × broadcast_level)
 
 ## 4 执行顺序
 
+> **执行状态（2026-10-12）**：①②③④ 已完成 —— 插件 v2.12.0 已部署（服务器 Docker，schema 12→13）、
+> 全量推送完成（116 场，平台落库 103，插件自家冲正 23 场 +26.1945）、权威数据已抓（103 行）、
+> 工件已生成（`--ts=2026-10-12T11:45:00Z`，自检与分片演练通过）。
+> **⑤ 未执行** —— 需用户明确下令。执行前请读 [`report.md`](./report.md)（含逐场明细、逐队净变化、
+> 残余不确定度、两侧对账口径与产物指纹）。
+
 ```bash
 # ① 插件侧（用户服务器）：部署 v2.12.0 → 配置 club_sync_url/club_sync_secret → 推送
 /主场天气推送 预览      # 只算不写：看缺系数场次、将订正的场次与差额
@@ -118,7 +124,8 @@ broadcast  = round2(0.3 × broadcast_level)
 node scripts/prod-20261011-s9-weather-recalc/capture-authoritative.mjs
 
 # ③ 生成（--ts 固定工件时间戳；补生成必须传回同一时间戳）
-node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --ts=2026-10-11T00:00:00Z
+#    本批实际用的时间戳（工件已按此生成，重跑可逐字节复现）：
+node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --ts=2026-10-12T11:45:00Z
 
 # ④ 演练（只读）
 node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --verify

@@ -56,7 +56,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _load_config_file(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as fh:
+    # AstrBot 落盘的托管配置带 UTF-8 BOM（utf-8-sig 才能读）
+    with open(path, "r", encoding="utf-8-sig") as fh:
         raw = json.load(fh)
     # AstrBotConfig 落盘的就是该插件自己的配置字典；兼容被整体包裹的情形
     node = raw.get("astrbot_plugin_whleague_revenue_system")

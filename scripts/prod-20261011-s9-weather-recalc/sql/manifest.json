@@ -1,0 +1,59 @@
+{
+  "batchTs": "2026-10-12T11:45:00Z",
+  "shards": {
+    "sql/02-recalc.sql": {
+      "bytes": 104860,
+      "stmts": 237,
+      "sha256": "64db49f5b9a834cc0c9b08778f7b875387899ef6d232540d5cdaf40d6740418a",
+      "note": "全量收敛（推荐）",
+      "expectChanges": "234 句"
+    },
+    "sql/02a-type-only.sql": {
+      "bytes": 78814,
+      "stmts": 177,
+      "sha256": "94592bebbf204e4e19a20478e079d395c4b80f730e1148d77e615517614fb248",
+      "note": "保守子集（只订类型不一致）",
+      "expectChanges": "177 句"
+    },
+    "sql/03-verify-balance.sql": {
+      "bytes": 3014,
+      "stmts": 1,
+      "sha256": "eb05987366d43c847276ab27a23853c799debe67a231cc6c0a35149b9f5dd965",
+      "note": "执行后复查（只读）",
+      "expectChanges": "只读"
+    },
+    "sql/03a-verify-rows.sql": {
+      "bytes": 3334,
+      "stmts": 1,
+      "sha256": "a4da8eaf7a51d5a3687c131ac240f7a58acca5976ddfe8d651e71df8fa072b98",
+      "note": "执行后复查（只读）",
+      "expectChanges": "只读"
+    },
+    "rollback/01-undo.sql": {
+      "bytes": 95925,
+      "stmts": 234,
+      "sha256": "2eb987c60799097842b3fc1cdc0e2ae7d958d7f1670fcfdeffb1b32878bade58",
+      "note": "回滚",
+      "expectChanges": "234 句"
+    }
+  },
+  "totals": {
+    "rowsSeen": 90,
+    "corrections": 78,
+    "typeChanged": 59,
+    "coefOnly": 19,
+    "tierExact": 66,
+    "tierEstimate": 12,
+    "weatherOnly": 3,
+    "skipped": 9,
+    "uncovered": 0,
+    "anomalies": 0,
+    "ledgerEntries": 71,
+    "deltaSum": 0.63,
+    "deltaSumTypeOnly": 0.65,
+    "attendanceUp": 35,
+    "attendanceDown": 37,
+    "soldOut": 10,
+    "cappedByCapacity": 8
+  }
+}

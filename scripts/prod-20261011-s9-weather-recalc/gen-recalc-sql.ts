@@ -768,8 +768,21 @@ function main(): void {
         const expect = c.demandNew >= c.capacity ? Math.floor(c.capacity * plan.model.fillMid) : Math.floor(Math.max(0, c.demandNew));
         if (c.aNew !== expect) errs.push(`match ${c.matchId}：精确档上座 ${c.aNew} ≠ 复算 ${expect}`);
       }
-    } else if (c.aOld > 0 && Math.abs(c.aNew / c.aOld - c.ratio) > 0.02) {
-      errs.push(`match ${c.matchId} 缩放比偏离系数比过大`);
+    } else if (c.aOld > 0) {
+      // 估计档：按「系数比 → 满座 min 守卫 → 容量上限封顶」逐位复算（截断场不满足缩放比，不能只看比例）
+      const cap = c.capacity;
+      let expect = Math.round(c.aOld * c.ratio);
+      if (cap !== null && cap > 0) {
+        if (c.aOld / cap >= SOLD_OUT_BAND) expect = Math.min(expect, c.aOld);
+        const capCeil = Math.floor(cap * 0.999);
+        if (expect > capCeil) expect = capCeil;
+      }
+      expect = Math.max(0, expect);
+      if (c.aNew !== expect) {
+        errs.push(`match ${c.matchId}：估计档上座 ${c.aNew} ≠ 复算 ${expect}`);
+      } else if (!c.soldOut && !c.cappedByCapacity && Math.abs(c.aNew / c.aOld - c.ratio) > 0.02) {
+        errs.push(`match ${c.matchId} 缩放比偏离系数比过大`);
+      }
     }
   }
   for (const w of plan.weatherOnly) {
