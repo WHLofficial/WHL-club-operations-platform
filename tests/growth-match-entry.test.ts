@@ -4,6 +4,8 @@
 //   联赛顶级/次级全阶段、冠军杯小组赛计 XP；弃权场与未确认场次不列；
 //   同锚去重 = growth_events 的 UNIQUE(player_id, match_ref, event_type)，match_ref 固定用
 //   比赛系统 match id 的字符串形式（补录端点不接受调用方自造锚，否则自动通道写过的场能补第二份 XP）。
+// v6.45.0：列表带赛事（tournament_id → 名称，前端据此分组）；面板/批量加「本场停赛」硬闸
+//   （只读 TOUR_DB 复算，见 src/worker/tour-suspension.ts）；训练营球员不再受限（与正式球员同口径）。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -18,18 +20,42 @@ interface Fixture {
   kv: Map<string, string>;
 }
 
-// 比赛系统库只摆「已完赛但平台未确认」的场次，证明列表不拿它当数据源
+// 赛事库表：本任务只需要「停赛复算」用到的几张（镜像赛事仓迁移裁剪）。
+// 注意 TOUR_DB 里 match.id 必须与 result_confirmations.match_id 对齐——停赛判定就是拿这个 id 去赛事库找场次。
+const TOUR_SCHEMA = `
+  CREATE TABLE tournament (id INTEGER PRIMARY KEY, name TEXT, status TEXT, config_json TEXT DEFAULT '{}');
+  CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT);
+  CREATE TABLE entry (id INTEGER PRIMARY KEY, tournament_id INTEGER, team_id INTEGER, seed INTEGER);
+  CREATE TABLE team (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE player (id INTEGER PRIMARY KEY, team_id INTEGER, name TEXT, number INTEGER);
+  CREATE TABLE match (
+    id INTEGER PRIMARY KEY, stage_id INTEGER, round INTEGER, slot INTEGER, leg INTEGER DEFAULT 1,
+    home_entry_id INTEGER, away_entry_id INTEGER, status TEXT, note TEXT, walkover_side TEXT DEFAULT ''
+  );
+  CREATE TABLE match_event (
+    id INTEGER PRIMARY KEY, match_id INTEGER, entry_id INTEGER, player_id INTEGER,
+    assist_player_id INTEGER, type TEXT, minute INTEGER, created_at TEXT
+  );`;
+
+// 比赛系统库摆赛事夹具（停赛复算要读 tournament/stage/entry/team/player/match/match_event）：
+// 可补录列表只认 result_confirmations，不拿这里当数据源
 function freshEnv(): Fixture {
   resetConfigCache();
   const sqlite = new DatabaseSync(':memory:');
   applyMigrations(sqlite);
   const tour = new DatabaseSync(':memory:');
   tour.exec(
-    `CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
+    `${TOUR_SCHEMA}
+     CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
      INSERT INTO user (id, name, role, locked, must_change_pw) VALUES
        (1, '管理组甲', 'admin', 0, 0),
        (2, '教练乙', 'coach', 0, 0);
-     CREATE TABLE match (id INTEGER PRIMARY KEY, status TEXT);`,
+     INSERT INTO tournament (id, name, status, config_json) VALUES (5, '第七赛季联赛', 'running', '{}');
+     INSERT INTO stage (id, tournament_id, kind, sort_order, name) VALUES (1, 5, 'league', 1, '常规赛');
+     INSERT INTO entry (id, tournament_id, team_id, seed) VALUES (1, 5, 501, 1), (2, 5, 502, 2);
+     INSERT INTO team (id, name) VALUES (501, '海港联'), (502, '北岸城');
+     INSERT INTO player (id, team_id, name, number) VALUES
+       (101, 501, '张三', 7), (102, 501, '李四', 9), (103, 501, '赵十三', 13), (104, 501, '孙十四', 14), (201, 502, '钱七', 1);`,
   );
   const kv = new Map<string, string>();
   const env: Env = {
@@ -57,19 +83,37 @@ function freshEnv(): Fixture {
 // 平台种子：1 海港联（premier）、2 北岸城（premier）、3 秋叶原（second，与任何场次无关）
 // 球员：10 正常(带显示名/门将)、11 正常(无显示名/前锋)、12 挂牌(中场)、13 训练营(带显示名)、
 //       14 自由身(前锋，已离队)、20 北岸城门将、30 秋叶原前锋
+// fc_id 与赛事库 player.id 对齐（101/102/103/104/201）：停赛判定就靠这一列认人
 function seedBase(fx: Fixture): void {
   fx.sqlite.exec(`
     INSERT INTO clubs (id, name, league_tier, status) VALUES
       (1, '海港联', 'premier', 'active'), (2, '北岸城', 'premier', 'active'), (3, '秋叶原', 'second', 'active');
-    INSERT INTO players (id, uid, name, display_name, club_id, position, status, growth_xp, ca) VALUES
-      (10, 'p10', 'K. Zhang', '张三', 1, 'GK', 'normal', 0, 70),
-      (11, 'p11', 'L. Li', NULL, 1, 'ST', 'normal', 0, 70),
-      (12, 'p12', 'M. Wang', NULL, 1, 'CM', 'listed', 0, 70),
-      (13, 'p13', 'N. Zhao', '赵十三', 1, 'CM', 'trainee', 0, 60),
-      (14, 'p14', 'O. Sun', NULL, 1, 'ST', 'free', 0, 60),
-      (20, 'p20', 'Q. Qian', NULL, 2, 'GK', 'normal', 0, 70),
-      (30, 'p30', 'R. Zhou', NULL, 3, 'ST', 'normal', 0, 70);
+    INSERT INTO players (id, uid, name, display_name, club_id, position, status, growth_xp, ca, fc_id) VALUES
+      (10, 'p10', 'K. Zhang', '张三', 1, 'GK', 'normal', 0, 70, 101),
+      (11, 'p11', 'L. Li', NULL, 1, 'ST', 'normal', 0, 70, 102),
+      (12, 'p12', 'M. Wang', NULL, 1, 'CM', 'listed', 0, 70, 103),
+      (13, 'p13', 'N. Zhao', '赵十三', 1, 'CM', 'trainee', 0, 60, 104),
+      (14, 'p14', 'O. Sun', NULL, 1, 'ST', 'free', 0, 60, NULL),
+      (20, 'p20', 'Q. Qian', NULL, 2, 'GK', 'normal', 0, 70, 201),
+      (30, 'p30', 'R. Zhou', NULL, 3, 'ST', 'normal', 0, 70, NULL);
   `);
+}
+
+// 赛事库侧：把该场次摆进比赛序列（round 决定先后），再按需要挂红黄牌
+function seedTourMatch(fx: Fixture, matchId: number, round: number): void {
+  fx.tour
+    .prepare(
+      `INSERT INTO match (id, stage_id, round, slot, leg, home_entry_id, away_entry_id, status, note, walkover_side)
+       VALUES (?, 1, ?, 1, 1, 1, 2, 'finished', NULL, '')`,
+    )
+    .run(matchId, round);
+}
+
+// entryId 1 = 海港联（主队），2 = 北岸城（客队）
+function seedCard(fx: Fixture, tourPlayerId: number, matchId: number, type: string, entryId = 1): void {
+  fx.tour
+    .prepare('INSERT INTO match_event (match_id, entry_id, player_id, type, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(matchId, entryId, tourPlayerId, type, '2026-06-01T00:00:00Z');
 }
 
 interface MatchSeed {
@@ -147,6 +191,8 @@ function anon(path: string, env: Env, method = 'POST') {
 
 interface ListMatch {
   matchId: number;
+  tournamentId: number | null;
+  tournamentName: string | null;
   season: number;
   windowSeq: number;
   competitionType: string | null;
@@ -172,6 +218,7 @@ interface PanelPlayer {
   officialName: string;
   position: string | null;
   status: string;
+  suspended: { reason: string; total: number; serving: number } | null;
 }
 
 interface Panel {
@@ -258,6 +305,8 @@ describe('TC-LIST 可补录比赛列表', () => {
     // 列表行 DTO：前端直接渲染，字段口径与面板 match 块一致
     expect(matches[0]).toMatchObject({
       matchId: 1003,
+      tournamentId: 5,
+      tournamentName: '第七赛季联赛',
       season: 7,
       windowSeq: 2,
       competitionType: 'champions_cup',
@@ -328,6 +377,18 @@ describe('TC-LIST 可补录比赛列表', () => {
 });
 
 describe('TC-PANEL 单场面板', () => {
+  it('TC-LIST-05 赛事名解析：赛事库里查不到的 tournament_id 回 null，不拖垮列表', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 1350, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    seedMatch(fx, { matchId: 1351, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-02T10:00:00Z' });
+    fx.sqlite.exec('UPDATE result_confirmations SET tournament_id = 999 WHERE match_id = 1350'); // 赛事库没有这个 id
+
+    const matches = await listMatches(fx);
+    expect(matches.find((m) => m.matchId === 1350)).toMatchObject({ tournamentId: 999, tournamentName: null });
+    expect(matches.find((m) => m.matchId === 1351)).toMatchObject({ tournamentId: 5, tournamentName: '第七赛季联赛' });
+  });
+
   it('TC-PANEL-01 花名册口径：normal/listed/trainee 出（门将→前锋稳定序），free 不出；显示名优先、官方名保留', async () => {
     const fx = freshEnv();
     seedBase(fx);
@@ -340,7 +401,7 @@ describe('TC-PANEL 单场面板', () => {
     // 位置权重(门将→中场→前锋) + id：14 是 free，已离队不出
     expect(body.sides.home.players.map((p) => p.id)).toEqual([10, 12, 13, 11]);
     const zhang = body.sides.home.players[0];
-    expect(zhang).toMatchObject({ name: '张三', officialName: 'K. Zhang', position: 'GK', status: 'normal' });
+    expect(zhang).toMatchObject({ name: '张三', officialName: 'K. Zhang', position: 'GK', status: 'normal', suspended: null });
     const trainee = body.sides.home.players[2];
     expect(trainee).toMatchObject({ id: 13, name: '赵十三', officialName: 'N. Zhao', status: 'trainee' });
     expect(body.sides.home.players[3]).toMatchObject({ id: 11, name: 'L. Li', officialName: 'L. Li' }); // 无显示名回落官方名
@@ -364,6 +425,29 @@ describe('TC-PANEL 单场面板', () => {
       { playerId: 11, eventType: 'rating', value: 8.5, xp: 2, source: 'manual' },
     ]);
     expect(body.match.recorded).toBe(3);
+  });
+
+  it('TC-PANEL-04 本场停赛随花名册下发：只按 fc_id 认人，无 fc_id 的球员判不出（不锁）', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 1450, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    seedMatch(fx, { matchId: 1451, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-02T10:00:00Z' });
+    // 赛事序列：1450 是第 1 场，第 2 场 1451 → 张三（fc 101）在第 2 场服直红第 1 场
+    seedTourMatch(fx, 1450, 1);
+    seedTourMatch(fx, 1451, 2);
+    seedCard(fx, 101, 1450, 'red');
+    // 李四（fc 102）与张三同队吃黄，本场没有停赛；30 号（fc_id 空）挂赛事牌也判不出来
+    fx.sqlite.exec('INSERT INTO players (id, uid, name, club_id, position, status, growth_xp, ca, fc_id) VALUES (31, \'p31\', \'S. Wu\', 2, \'CM\', \'normal\', 0, 65, NULL)');
+    seedCard(fx, 201, 1450, 'yellow', 2);
+
+    const panel = (await (await get(panelPath(1451), 'tok-admin', fx.env)).json()) as Panel;
+    const home = new Map(panel.sides.home.players.map((p) => [p.id, p]));
+    expect(home.get(10)?.suspended).toEqual({ reason: 'red', total: 2, serving: 1 });
+    expect(home.get(11)?.suspended).toBeNull();
+    expect(home.get(13)?.suspended).toBeNull(); // 训练营球员照常出现在花名册（停赛闸与训练营无关）
+    const away = new Map(panel.sides.away.players.map((p) => [p.id, p]));
+    expect(away.get(20)?.suspended).toBeNull(); // 只有 1 张黄：不够累积
+    expect(away.get(31)?.suspended).toBeNull(); // 无 fc_id → 判不出停赛（放行口径）
   });
 
   it('TC-PANEL-03 不可录的场次一律 404：不存在 / 冠军杯淘汰轮 / 弃权场 / 非数字 id；匿名 401', async () => {
@@ -454,19 +538,40 @@ describe('TC-BATCH 批量补录', () => {
     expect(eventsOf(fx).length).toBe(0);
   });
 
-  it('TC-BATCH-03 训练营球员 → 400 点名该球员，整批不落库', async () => {
+  it('TC-BATCH-03 本场停赛球员 → 400 点名该球员并写明原因，整批不落库；训练营球员不再受限', async () => {
     const fx = freshEnv();
     seedBase(fx);
     seedMatch(fx, { matchId: 1700, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    seedMatch(fx, { matchId: 1701, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-02T10:00:00Z' });
+    // 张三（fc 101）在 1700 直红 → 1701 停赛第 1 场；赵十三（fc 104，训练营）同队吃黄，本场不停
+    seedTourMatch(fx, 1700, 1);
+    seedTourMatch(fx, 1701, 2);
+    seedCard(fx, 101, 1700, 'red');
+    seedCard(fx, 104, 1700, 'yellow');
 
-    const res = await post(batchPath(1700), { entries: [{ playerId: 10, appearance: true }, { playerId: 13, appearance: true }] }, 'tok-admin', fx.env);
+    const res = await post(batchPath(1701), { entries: [{ playerId: 10, appearance: true }, { playerId: 13, appearance: true }] }, 'tok-admin', fx.env);
     expect(res.status).toBe(400);
     const text = await errorText(res);
-    expect(text).toContain('赵十三'); // 点名用显示名口径
-    expect(text).toContain('训练营');
-    expect(eventsOf(fx, 1700).length).toBe(0);
-    expect(xpOf(fx, 10)).toBe(0);
+    expect(text).toContain('张三'); // 点名用显示名口径
+    expect(text).toContain('本场停赛');
+    expect(text).toContain('直红 · 停 2 场');
+    expect(eventsOf(fx, 1701).length).toBe(0);
+    expect(xpOf(fx, 13)).toBe(0); // 好行也不许先落库
     expect(auditsOf(fx).length).toBe(0);
+
+    // 训练营球员（v6.45.0 起与正式球员同口径）单录放行；停赛只拦真正停赛的人
+    const trainee = await post(batchPath(1701), { entries: [{ playerId: 13, appearance: true, rating: 8 }] }, 'tok-admin', fx.env);
+    expect(trainee.status).toBe(201);
+    expect(await trainee.json()).toMatchObject({ written: 2, totalXp: 3 });
+    expect(xpOf(fx, 13)).toBe(3);
+
+    // 单条补录端点同闸：matchRef 是比赛 id 时也拦停赛球员
+    const single = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 8, matchRef: '1701' }, 'tok-admin', fx.env);
+    expect(single.status).toBe(400);
+    expect(await errorText(single)).toContain('本场停赛');
+    // 手工锚（非比赛 id）不判停赛：与赛事无关的补录照常
+    const manual = await post('/api/admin/growth/events', { playerId: 10, eventType: 'rating', value: 8, matchRef: 'manual:1701' }, 'tok-admin', fx.env);
+    expect(manual.status).toBe(201);
   });
 
   it('TC-BATCH-04 口径复用单人补录规则：评分区间/正整数/entries 形态都前置拒', async () => {
@@ -524,11 +629,11 @@ describe('TC-BATCH 批量补录', () => {
     expect(auditsOf(fx).length).toBe(2); // 每次提交各留一条（第二次是 no-op 也留痕）
   });
 
-  it('TC-BATCH-06 与自动通道同锚去重：自动写过的出场不重复加 XP，手动项照常入账', async () => {
+  it('TC-BATCH-06 与历史自动行同锚去重：旧锚的出场不重复加 XP，手动项照常入账', async () => {
     const fx = freshEnv();
     seedBase(fx);
     seedMatch(fx, { matchId: 1900, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
-    seedEvent(fx, 10, '1900', 'appearance', 1, 1); // 自动通道已入账
+    seedEvent(fx, 10, '1900', 'appearance', 1, 1); // v6.45.0 前的自动出场行（去自动化后仍有历史数据）
     fx.sqlite.exec('UPDATE players SET growth_xp = 1 WHERE id = 10');
 
     const res = await post(batchPath(1900), { entries: [{ playerId: 10, appearance: true, rating: 9 }] }, 'tok-admin', fx.env);

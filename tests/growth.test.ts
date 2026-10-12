@@ -241,7 +241,7 @@ describe('XP 补录（附录 A〔6〕）', () => {
 });
 
 describe('赛果确认钩子：自动 XP（§15 假设 20-22）', () => {
-  it('按队名+球员名匹配入出场/进球/助攻/零封；训练营不记；解不开进 unresolved', async () => {
+  it('按队名+球员名匹配入进球/助攻/零封（v6.45.0 起无自动出场）；训练营照记；解不开进 unresolved', async () => {
     const fx = freshEnv();
     seedPlatform(fx);
     seedTour(fx);
@@ -251,22 +251,24 @@ describe('赛果确认钩子：自动 XP（§15 假设 20-22）', () => {
     const c900 = await post('/api/admin/results/900/confirm', {}, 'tok-admin', fx.env);
     expect(c900.status).toBe(201);
     const xp900 = ((await c900.json()) as { xp: { granted: number; unresolved: string[] } }).xp;
-    expect(xp900.granted).toBe(4); // 出场 2 + 张三两球合成一条(value2) + 赵六一球
+    expect(xp900.granted).toBe(3); // 张三两球合成一条(value2) + 赵六一球 + 王五助攻
     expect(xp900.unresolved).toEqual(expect.arrayContaining(['曼城·孙九', '俱乐部「切尔西」']));
-    expect(xpOf(fx, 10)).toBe(2); // 出场 1 + 两球 1（0.5×2）
+    expect(xpOf(fx, 10)).toBe(1); // 两球 1（0.5×2）
     expect(sqlGet<{ value: number; xp: number }>(fx.sqlite, "SELECT value, xp FROM growth_events WHERE player_id = 10 AND event_type = 'goal'")).toMatchObject({
       value: 2,
       xp: 1,
     });
-    expect(xpOf(fx, 20)).toBe(1.5); // 出场 1 + 一球 0.5
-    expect(xpOf(fx, 12)).toBe(0); // 训练营不按场次
+    expect(xpOf(fx, 20)).toBe(0.5); // 一球 0.5
+    expect(xpOf(fx, 12)).toBe(0.5); // 训练营球员 v6.45.0 起按场次记（助攻 0.5）
+    // 出场不再自动记（FC26 事件流里没有出场，改由补录台截图识别 + 人工确认）
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE event_type = 'appearance'")?.n).toBe(0);
 
-    // 901 曼城 0:3 阿森纳：张三 1 球 + 李四(GK，黄牌在场)；阿森纳零封 → 李四 出场+零封
+    // 901 曼城 0:3 阿森纳：张三 1 球 + 李四(GK，黄牌在场)；阿森纳零封 → 李四 零封
     const c901 = await post('/api/admin/results/901/confirm', {}, 'tok-admin', fx.env);
     expect(c901.status).toBe(201);
-    expect((((await c901.json()) as { xp: { granted: number } }).xp).granted).toBe(4); // 出场 2 + 张三进球 1 + 零封 1
-    expect(xpOf(fx, 10)).toBe(3.5); // 再 + 出场 1 + 一球 0.5
-    expect(xpOf(fx, 11)).toBe(1.5); // 出场 1 + 零封 0.5
+    expect((((await c901.json()) as { xp: { granted: number } }).xp).granted).toBe(2); // 张三进球 1 + 零封 1
+    expect(xpOf(fx, 10)).toBe(1.5); // 再 + 一球 0.5
+    expect(xpOf(fx, 11)).toBe(0.5); // 零封 0.5
 
     const events = sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE event_type = 'clean_sheet'")?.n;
     expect(events).toBe(1);
@@ -309,10 +311,10 @@ describe('赛果确认钩子：自动 XP（§15 假设 20-22）', () => {
     const res = await post('/api/admin/results/906/confirm', {}, 'tok-admin', fx.env);
     expect(res.status).toBe(201);
     const xp = ((await res.json()) as { xp: { granted: number; unresolved: string[] } }).xp;
-    expect(xp.granted).toBe(2); // 只有阿森纳张三：出场 1 + 进球 1
+    expect(xp.granted).toBe(1); // 只有阿森纳张三的进球（v6.45.0 起无自动出场）
     expect(xp.unresolved).toEqual([]); // CPU 队不再提示补录，也不牵扯它的球员名
-    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '906'")?.n).toBe(2);
-    expect(xpOf(fx, 10)).toBe(1.5); // 张三：出场 1 + 一球 0.5（CPU 队两名 CPU 球员的进球一分不记）
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '906'")?.n).toBe(1);
+    expect(xpOf(fx, 10)).toBe(0.5); // 张三：一球 0.5（CPU 队两名 CPU 球员的进球一分不记）
 
     // 严格匹配：只有半角「(CPU)」后缀算 CPU 队，全角/大小写/中间位置都不算
     expect(isCpuTeam('巴塞罗那(CPU)')).toBe(true);

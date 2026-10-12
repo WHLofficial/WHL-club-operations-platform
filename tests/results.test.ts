@@ -357,10 +357,7 @@ describe('赛果自动确认（v2.7.0）：cron 扫完赛场次 + 异常标人�
       fx.sqlite,
       "SELECT event_type, player_id FROM growth_events WHERE match_ref = '900' ORDER BY event_type",
     );
-    expect(xpRows).toEqual([
-      { event_type: 'appearance', player_id: 31 },
-      { event_type: 'goal', player_id: 31 },
-    ]);
+    expect(xpRows).toEqual([{ event_type: 'goal', player_id: 31 }]); // v6.45.0 起出场不再自动记
   });
 
   it('XP 没解析到位 → needs_review=1 带 note；补录后 replay-hooks 清标记且幂等不双记', async () => {
@@ -390,10 +387,10 @@ describe('赛果自动确认（v2.7.0）：cron 扫完赛场次 + 异常标人�
     const item = ((await replay.json()) as { result: { needsReview: boolean; reviewNote: string | null } }).result;
     expect(item.needsReview).toBe(false);
     const xpRows = sqlAll<{ event_type: string; player_id: number }>(fx.sqlite, "SELECT event_type, player_id FROM growth_events WHERE match_ref = '900'");
-    expect(xpRows.map((r) => r.event_type).sort()).toEqual(['appearance', 'goal']); // 各一条，不双记
+    expect(xpRows.map((r) => r.event_type).sort()).toEqual(['goal']); // 只有进球一条（v6.45.0 起无自动出场），不双记
 
     await post('/api/admin/results/900/replay-hooks', {}, 'tok-admin', fx.env);
-    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '900'")?.n).toBe(2);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '900'")?.n).toBe(1);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM notifications')?.n).toBe(0);
   });
 });

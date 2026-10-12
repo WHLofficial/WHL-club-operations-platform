@@ -490,7 +490,7 @@ describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-
     expect(numeric, `inputMode="numeric" 实测 ${numeric} 处（应 4：两分支 × 夺回球权/扑救）`).toBe(4);
   });
 
-  it('TC-REG-02 · 卡片状态枚举：已录/训练营/校验/只读/脏行/行保存禁用（P0 净增，卡片分支内）', () => {
+  it('TC-REG-02 · 卡片状态枚举：已录/停赛/校验/只读/脏行/行保存禁用（P0 净增，卡片分支内）', () => {
     const src = read(GROWTH_ENTRY);
     const cardsAt = src.indexOf('<div className="entry-cards">');
     const tableAt = src.indexOf('<table className="entry-table">');
@@ -500,9 +500,11 @@ describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-
 
     // 已录格：来源徽标（同锚去重，无纠正通道如实标注）
     expect(branch, '卡片缺「已录」来源徽标').toContain('badge gray">已录 · ');
-    // 训练营：整卡置灰类 + 说明 title
-    expect(branch, '卡片缺 row-trainee 置灰类').toContain("row-trainee");
-    expect(branch, '卡片缺「训练营不按场次计」标注').toContain('训练营不按场次计');
+    // 停赛：整卡置灰标红类 + 一行说明（v6.45.0 起训练营不再锁行，改按场次记）
+    expect(branch, '卡片缺 row-suspended 置灰类').toContain('row-suspended');
+    expect(branch, '卡片缺「本场停赛」标注').toContain('suspendedText(r.suspended)');
+    // 训练营：仅徽标（不再禁用输入）
+    expect(branch, '卡片缺「训练营」徽标').toContain('badge gray">训练营<');
     // 校验问题：徽标 + invalid 类（评分 7-10 闸）
     expect(branch, '卡片缺「校验问题」徽标').toContain('校验问题');
     expect(branch, '卡片缺 invalid 校验类').toContain("' invalid' : ''");

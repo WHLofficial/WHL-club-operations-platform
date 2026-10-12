@@ -8,7 +8,7 @@ function row(playerId: number, over: Partial<OcrMergeRow> = {}): OcrMergeRow {
   return {
     playerId,
     position: null,
-    trainee: false,
+    suspended: null,
     appearance: { checked: false, locked: false },
     rating: { value: '', locked: false },
     cleanSheet: { checked: false, locked: false },
@@ -35,20 +35,22 @@ describe('TC-FE 识别条目 → 行草稿合并', () => {
     expect(JSON.stringify(original)).toBe(snapshot); // 原数组不动
   });
 
-  it('TC-FE-02 已录锁定的格子逐格跳过并给原因；训练营整行跳过', () => {
+  it('TC-FE-02 已录锁定的格子逐格跳过并给原因；停赛整行跳过（训练营不再跳过）', () => {
     const rows = [
       row(1, { rating: { value: '8.0', locked: true }, appearance: { checked: true, locked: true } }),
-      row(2, { trainee: true }),
+      row(2, { suspended: { reason: 'red', total: 2, serving: 1 } }),
+      row(3), // 训练营球员 v6.45.0 起照常预填
     ];
     const res = mergeOcrEntries(
       rows,
-      [entry(1, '甲', { appearance: true, rating: 9 }), entry(2, '乙', { appearance: true, rating: 8 })],
+      [entry(1, '甲', { appearance: true, rating: 9 }), entry(2, '乙', { appearance: true, rating: 8 }), entry(3, '丙', { appearance: true, rating: 8 })],
       4,
     );
     expect(res.rows[0].rating.value).toBe('8.0'); // 锁定值不被覆盖
-    expect(res.applied).toBe(0);
+    expect(res.applied).toBe(2); // 只写丙的出场 + 评分
     expect(res.skipped).toContainEqual({ playerId: 1, name: '甲', reason: '出场、评分格已录入锁定' });
-    expect(res.skipped).toContainEqual({ playerId: 2, name: '乙', reason: '训练营球员不按场次计' });
+    expect(res.skipped).toContainEqual({ playerId: 2, name: '乙', reason: '本场停赛' });
+    expect(res.rows[2].appearance.checked).toBe(true);
   });
 
   it('TC-FE-03 零封联动：失球 0 → 未锁门将自动勾并计数；失球>0 不动；已勾/已锁不重复计', () => {
