@@ -6,6 +6,8 @@
 //   比赛系统 match id 的字符串形式（补录端点不接受调用方自造锚，否则自动通道写过的场能补第二份 XP）。
 // v6.45.0：列表带赛事（tournament_id → 名称，前端据此分组）；面板/批量加「本场停赛」硬闸
 //   （只读 TOUR_DB 复算，见 src/worker/tour-suspension.ts）；训练营球员不再受限（与正式球员同口径）。
+// v6.45.1：列表去 50 场上限（列全部可录场次）；批量端点支持「手录值改值」——同值仍 no-op，
+//   manual 值不同则改原行 + 按录入顺序重放该球员该类型的 XP 链（差额可负），auto（赛果同步）值不同整批 400。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -230,9 +232,10 @@ interface Panel {
 interface BatchResult {
   ok: boolean;
   written: number;
+  updated: number;
   duplicates: number;
   totalXp: number;
-  perPlayer: { playerId: number; name: string; xp: number; written: number; duplicates: number }[];
+  perPlayer: { playerId: number; name: string; xp: number; written: number; updated: number; duplicates: number }[];
 }
 
 const LIST = '/api/admin/growth/match-entry';
@@ -337,7 +340,7 @@ describe('TC-LIST 可补录比赛列表', () => {
     expect(matches.map((m) => m.matchId)).toEqual([1006]);
   });
 
-  it('TC-LIST-03 recorded = 该场已录事件数；确认时间倒序、同刻按 matchId 倒序；只回最近 50 场', async () => {
+  it('TC-LIST-03 recorded = 该场已录事件数；确认时间倒序、同刻按 matchId 倒序；v6.45.1 起列出全部（不再截断 50 场）', async () => {
     const fx = freshEnv();
     seedBase(fx);
     const base = { competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城' };
@@ -347,21 +350,18 @@ describe('TC-LIST 可补录比赛列表', () => {
     seedEvent(fx, 10, '1101', 'appearance', 1, 1);
     seedEvent(fx, 11, '1101', 'goal', 2, 1);
     seedEvent(fx, 12, '1102', 'rating', 8.5, 2);
-    // 另插一批更早的可录比赛，压出 LIMIT 50
+    // 另插一批更早的可录比赛：v6.45.0 的 LIMIT 50 会把这些挤掉，v6.45.1 必须全列
     for (let i = 0; i < 52; i += 1) {
       seedMatch(fx, { ...base, matchId: 1200 + i, confirmedAt: `2026-06-01T00:00:${String(i % 60).padStart(2, '0')}Z` });
     }
 
     const matches = await listMatches(fx);
-    expect(matches.length).toBe(50);
-    expect(matches.slice(0, 3).map((m) => m.matchId)).toEqual([1102, 1101, 1100]);
+    const older = Array.from({ length: 52 }, (_, i) => 1200 + i).reverse(); // 1251 → 1200（越早越靠后）
+    expect(matches.map((m) => m.matchId)).toEqual([1102, 1101, 1100, ...older]);
     const byId = new Map(matches.map((m) => [m.matchId, m]));
     expect(byId.get(1101)?.recorded).toBe(2);
     expect(byId.get(1102)?.recorded).toBe(1);
     expect(byId.get(1100)?.recorded).toBe(0);
-    const ids = matches.map((m) => m.matchId);
-    expect(ids).not.toContain(1200); // 被 LIMIT 切掉的最早几场
-    expect(ids).toContain(1251);
   });
 
   it('TC-LIST-04 两队归属解析：本库队名解出 clubId，CPU 队无归属且打标；两队都解不开的场照样列出', async () => {
@@ -489,10 +489,10 @@ describe('TC-BATCH 批量补录', () => {
     const body = (await res.json()) as BatchResult;
     expect(body).toMatchObject({ ok: true, written: 5, duplicates: 0, totalXp: 7.5 });
     expect(body.perPlayer).toEqual([
-      { playerId: 10, name: '张三', xp: 3, written: 2, duplicates: 0 },
-      { playerId: 11, name: 'L. Li', xp: 0.5, written: 1, duplicates: 0 },
-      { playerId: 12, name: 'M. Wang', xp: 2, written: 1, duplicates: 0 },
-      { playerId: 20, name: 'Q. Qian', xp: 2, written: 1, duplicates: 0 },
+      { playerId: 10, name: '张三', xp: 3, written: 2, updated: 0, duplicates: 0 },
+      { playerId: 11, name: 'L. Li', xp: 0.5, written: 1, updated: 0, duplicates: 0 },
+      { playerId: 12, name: 'M. Wang', xp: 2, written: 1, updated: 0, duplicates: 0 },
+      { playerId: 20, name: 'Q. Qian', xp: 2, written: 1, updated: 0, duplicates: 0 },
     ]);
 
     // 事件表：锚是比赛 id 的字符串形式，赛季取可见赛季、窗口为空、来源 manual、操作者记账
@@ -775,13 +775,170 @@ describe('TC-BATCH 批量补录', () => {
     const after = JSON.parse(audits[0].after ?? '{}') as {
       matchId: number;
       written: number;
+      updated: number;
       duplicates: number;
-      entries: { playerId: number; name: string; eventType: string; value: number; xp: number; duplicate: boolean }[];
+      entries: { playerId: number; name: string; eventType: string; value: number; xp: number; kind: string; previousValue?: number }[];
     };
-    expect(after).toMatchObject({ matchId: 2300, written: 2, duplicates: 0 });
+    expect(after).toMatchObject({ matchId: 2300, written: 2, updated: 0, duplicates: 0 });
     expect(after.entries).toEqual([
-      { playerId: 10, name: '张三', eventType: 'appearance', value: 1, xp: 1, duplicate: false },
-      { playerId: 10, name: '张三', eventType: 'rating', value: 8, xp: 2, duplicate: false },
+      { playerId: 10, name: '张三', eventType: 'appearance', value: 1, xp: 1, kind: 'insert' },
+      { playerId: 10, name: '张三', eventType: 'rating', value: 8, xp: 2, kind: 'insert' },
     ]);
+  });
+});
+
+describe('TC-EDIT 手录值改值（v6.45.1）', () => {
+  it('TC-EDIT-01 改评分：原行换值换 XP，差额一次入账（可正可负），重复提交同值仍是 no-op', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2400, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+
+    const first = await post(batchPath(2400), { entries: [{ playerId: 11, rating: 8 }] }, 'tok-admin', fx.env);
+    expect(first.status).toBe(201);
+    expect(xpOf(fx, 11)).toBe(2);
+
+    // 8 → 9：xp 2 → 3，差额 +1
+    const up = await post(batchPath(2400), { entries: [{ playerId: 11, rating: 9 }] }, 'tok-admin', fx.env);
+    expect(up.status).toBe(201); // 改值也算写成功 → 201
+    expect(await up.json()).toMatchObject({
+      written: 0,
+      updated: 1,
+      duplicates: 0,
+      totalXp: 1,
+      perPlayer: [{ playerId: 11, xp: 1, written: 0, updated: 1, duplicates: 0 }],
+    });
+    expect(eventsOf(fx, 2400).length).toBe(1); // 改值不新起一行
+    expect(eventsOf(fx, 2400)[0]).toMatchObject({ event_type: 'rating', value: 9, xp: 3, source: 'manual', recorded_by: 1 });
+    expect(xpOf(fx, 11)).toBe(3);
+
+    // 9 → 7：xp 3 → 1，差额 -2（回收）
+    const down = await post(batchPath(2400), { entries: [{ playerId: 11, rating: 7 }] }, 'tok-admin', fx.env);
+    expect(down.status).toBe(201);
+    expect(await down.json()).toMatchObject({ written: 0, updated: 1, duplicates: 0, totalXp: -2 });
+    expect(xpOf(fx, 11)).toBe(1);
+    expect(eventsOf(fx, 2400)[0]).toMatchObject({ value: 7, xp: 1 });
+
+    // 同值再提一次：no-op（200 + duplicates），XP 不动
+    const same = await post(batchPath(2400), { entries: [{ playerId: 11, rating: 7 }] }, 'tok-admin', fx.env);
+    expect(same.status).toBe(200);
+    expect(await same.json()).toMatchObject({ written: 0, updated: 0, duplicates: 1, totalXp: 0 });
+    expect(xpOf(fx, 11)).toBe(1);
+    expect(auditsOf(fx).length).toBe(4); // 每次提交各留一条审计
+  });
+
+  it('TC-EDIT-02 改值不改 XP 档位时也计 updated：评分 7 → 7.5 同为 1 XP，差额 0', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2401, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    await post(batchPath(2401), { entries: [{ playerId: 11, rating: 7 }] }, 'tok-admin', fx.env);
+
+    const res = await post(batchPath(2401), { entries: [{ playerId: 11, rating: 7.5 }] }, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ written: 0, updated: 1, duplicates: 0, totalXp: 0 });
+    expect(eventsOf(fx, 2401)[0]).toMatchObject({ value: 7.5, xp: 1 });
+    expect(xpOf(fx, 11)).toBe(1);
+  });
+
+  it('TC-EDIT-03 累计项改值：按录入顺序重放该球员该类型 XP 链，链上其他场次的 XP 一并校正', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    // 三场历史：11 → 1 → 12（录入顺序 = id 序），XP 分别为 0 / 1 / 1，总计 2
+    seedEvent(fx, 10, '910', 'duels_won', 11, 0, 'manual');
+    seedEvent(fx, 10, '911', 'duels_won', 1, 1, 'manual');
+    seedEvent(fx, 10, '912', 'duels_won', 12, 1, 'manual');
+    fx.sqlite.exec('UPDATE players SET growth_xp = 2 WHERE id = 10');
+    seedMatch(fx, { matchId: 910, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+
+    // 第一场 11 → 6：重放后 0 + 0 + 1 = 1，差额 -1（第二行 1 → 0 要跟着改）
+    const res = await post(batchPath(910), { entries: [{ playerId: 10, duelsWon: 6 }] }, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ written: 0, updated: 1, duplicates: 0, totalXp: -1 });
+    expect(eventsOf(fx, 910)[0]).toMatchObject({ value: 6, xp: 0 });
+    expect(eventsOf(fx, 911)[0]).toMatchObject({ value: 1, xp: 0 }); // 链上被连带校正
+    expect(eventsOf(fx, 912)[0]).toMatchObject({ value: 12, xp: 1 }); // 恰好不受影响
+    expect(xpOf(fx, 10)).toBe(1);
+
+    // 第一场再改成 12：1 + 0 + 1 = 2，差额 +1
+    const again = await post(batchPath(910), { entries: [{ playerId: 10, duelsWon: 12 }] }, 'tok-admin', fx.env);
+    expect(again.status).toBe(201);
+    expect(await again.json()).toMatchObject({ written: 0, updated: 1, totalXp: 1 });
+    expect(eventsOf(fx, 910)[0]).toMatchObject({ value: 12, xp: 1 });
+    expect(xpOf(fx, 10)).toBe(2);
+  });
+
+  it('TC-EDIT-04 混合提交：同批里新增 / 改值 / 重复三种计数各算各的，状态码看写过没写', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2402, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    await post(batchPath(2402), { entries: [{ playerId: 11, rating: 8, appearance: true }] }, 'tok-admin', fx.env);
+
+    const res = await post(
+      batchPath(2402),
+      { entries: [{ playerId: 11, rating: 9, appearance: true }, { playerId: 10, rating: 9 }] },
+      'tok-admin',
+      fx.env,
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      written: 1,
+      updated: 1,
+      duplicates: 1,
+      totalXp: 4, // 改评分 +1（2 → 3）+ 新录评分 +3
+      perPlayer: [
+        { playerId: 11, xp: 1, written: 0, updated: 1, duplicates: 1 },
+        { playerId: 10, xp: 3, written: 1, updated: 0, duplicates: 0 },
+      ],
+    });
+    expect(xpOf(fx, 11)).toBe(4); // 1 出场 + 3 评分（改值后）
+    expect(xpOf(fx, 10)).toBe(3);
+  });
+
+  it('TC-EDIT-05 赛果同步的值拒改：值不同即 400 点名球员与项目，整批零写入零审计', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2403, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    // 赛果同步写下的零封（正常恒为 value 1；这里摆一条 0 的历史/异常行来钉住拒改闸）
+    seedEvent(fx, 11, '2403', 'clean_sheet', 0, 0, 'auto');
+
+    const res = await post(
+      batchPath(2403),
+      { entries: [{ playerId: 10, rating: 8 }, { playerId: 11, cleanSheet: true }] },
+      'tok-admin',
+      fx.env,
+    );
+    expect(res.status).toBe(400);
+    const message = await errorText(res);
+    expect(message).toContain('L. Li');
+    expect(message).toContain('零封由赛果确定');
+    expect(eventsOf(fx, 2403).length).toBe(1); // 一行都没动
+    expect(xpOf(fx, 10)).toBe(0);
+    expect(auditsOf(fx).length).toBe(0);
+  });
+
+  it('TC-EDIT-06 赛果同步的值撞同值不放行改成 no-op：重复提交同场零封照旧跳过', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2404, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    seedEvent(fx, 11, '2404', 'clean_sheet', 1, 0.5, 'auto');
+    fx.sqlite.exec('UPDATE players SET growth_xp = 0.5 WHERE id = 11');
+
+    const res = await post(batchPath(2404), { entries: [{ playerId: 11, cleanSheet: true }] }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ written: 0, updated: 0, duplicates: 1, totalXp: 0 });
+    expect(eventsOf(fx, 2404)[0]).toMatchObject({ source: 'auto', value: 1, xp: 0.5 });
+    expect(xpOf(fx, 11)).toBe(0.5);
+  });
+
+  it('TC-EDIT-07 改值受球衣/花名册口径约束不变：不属于该场的球员仍整批 400', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 2405, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    await post(batchPath(2405), { entries: [{ playerId: 11, rating: 8 }] }, 'tok-admin', fx.env);
+
+    const res = await post(batchPath(2405), { entries: [{ playerId: 30, rating: 9 }, { playerId: 11, rating: 9 }] }, 'tok-admin', fx.env);
+    expect(res.status).toBe(400);
+    expect(await errorText(res)).toContain('不属于该场两队');
+    expect(eventsOf(fx, 2405)[0]).toMatchObject({ value: 8, xp: 2 }); // 合法的那条也没落库
+    expect(xpOf(fx, 11)).toBe(2);
   });
 });

@@ -25,6 +25,7 @@
 //   E2E_BASE        默认 http://127.0.0.1:8791
 //   E2E_CHROME      默认 C:/Program Files/Google/Chrome/Application/chrome.exe
 //   E2E_PERSIST_TO  传给 wrangler 的 --persist-to（例如 .wrangler/rehearsal）
+//   E2E_ONLY        只跑标题里含该串的场景（迭代单个场景用，如 E2E_ONLY=⑭），其余照旧跳过并打印
 import { chromium } from 'playwright-core';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -164,7 +165,12 @@ function clearNotifications() {
 
 // ---- 结果收集 ----
 const results = [];
+const ONLY = process.env.E2E_ONLY ?? ''; // 只跑标题含该串的场景（迭代单个场景用）
 async function check(name, fn) {
+  if (ONLY && !name.includes(ONLY)) {
+    console.log(`— 跳过 ${name}（E2E_ONLY=${ONLY}）`);
+    return;
+  }
   const started = Date.now();
   try {
     await fn();
@@ -2358,7 +2364,7 @@ async function main() {
       assert(t.includes('管理端'), '宽屏管理端壳渲染异常');
     });
 
-    await check('⑭ 成长补录台：宽屏表格分支 / 窄屏卡片流（XP 实时复算 + 保存锁定 + 汇总条，截图落 scratch/）', async () => {
+    await check('⑭ 成长补录台：宽屏表格分支 / 窄屏卡片流（XP 实时复算 + 手录值保存后仍可改 + 汇总条，截图落 scratch/）', async () => {
       // ---- 宽屏：表格分支（与卡片 DOM 互斥，桌面零变化契约） ----
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.goto(`${BASE}/admin/growth`, { waitUntil: 'networkidle' });
@@ -2409,21 +2415,26 @@ async function main() {
         `entry-panel 应完整落在视口内（left=${fit?.left} right=${fit?.right} vs 视口=${fit?.vw}）——P1-1 出宽修法（sticky+100cqw）失效`,
       );
 
-      // 拦截保存响应拿 playerId/xp，跑完把写入退掉（烟测可重复：不消费掉球员的评分格）
+      // 拦截保存响应拿 playerId / matchId，跑完把写入退掉（烟测可重复：不消费掉球员的评分格）
       let savedPid = null;
-      let savedXp = 0;
+      let savedMatch = null;
+      let saveSettled = null;
+      const saveResponse = new Promise((res) => {
+        saveSettled = res;
+      });
       const onSave = async (r) => {
         if (r.url().includes('/api/admin/growth/match-entry/') && r.request().method() === 'POST') {
           try {
             const j = await r.json();
             savedPid = j.perPlayer?.[0]?.playerId ?? null;
-            savedXp = j.perPlayer?.[0]?.xp ?? 0;
+            savedMatch = r.url().match(/match-entry\/(\d+)/)?.[1] ?? null;
           } catch { /* 响应体解析失败不影响断言 */ }
+          saveSettled?.();
         }
       };
       page.on('response', onSave);
 
-      // 挑一张评分格未锁的卡，改评分 → 卡脚 XP 徽标实时变（TC-ENT-05）
+      // 挑一张评分格可编辑的卡，改评分 → 卡脚 XP 徽标实时变（TC-ENT-05）
       const cardIndex = await page.evaluate(() => {
         const cards = [...document.querySelectorAll('.entry-card')];
         return cards.findIndex((c) => c.querySelector('input[inputmode="decimal"]:enabled'));
@@ -2433,22 +2444,54 @@ async function main() {
       const head = (await card.locator('.entry-card-head').innerText()).trim();
       const foot = card.locator('.entry-card-foot');
       const footBefore = await foot.innerText();
-      await card.locator('input[inputmode="decimal"]').first().fill('8');
+      // v6.45.1：手录值保存后仍可改且回填，重跑时这张卡可能已带着上次的值 ⇒ 填「与当前值不同」的值
+      const ratingInput = card.locator('input[inputmode="decimal"]').first();
+      const ratingBefore = await ratingInput.inputValue();
+      const target = ratingBefore === '9' ? '8' : '9';
+      await ratingInput.fill(target);
       const footAfter = await foot.innerText();
-      assert(footBefore !== footAfter, `填评分 8 后卡脚 XP 徽标没实时变（「${head.split('\n')[0]}」：前「${footBefore.replace(/\n/g, ' ')}」后「${footAfter.replace(/\n/g, ' ')}」）`);
+      assert(footBefore !== footAfter, `把评分改成 ${target}（原 ${ratingBefore || '空'}）后卡脚 XP 徽标没实时变（「${head.split('\n')[0]}」：前「${footBefore.replace(/\n/g, ' ')}」后「${footAfter.replace(/\n/g, ' ')}」）`);
 
-      // 本行保存 → 该卡评分格进入锁定态（TC-ENT-06；已录值不可改是 v6.16.0 语义）
+      // 本行保存 → v6.45.1 语义：手录的评分保持可改（回填新值 + 格子带「已录 · 可改」标记），
+      // 与赛果值（只读）区分；出场/零封这类「记过」标记保存后锁定。
       await foot.getByRole('button').first().click();
-      await page.waitForFunction(
-        (idx) => {
-          const c = document.querySelectorAll('.entry-card')[idx];
-          if (!c) return false;
-          const inputs = c.querySelectorAll('input[inputmode="decimal"]');
-          return inputs.length === 0 || [...inputs].every((el) => el.disabled);
-        },
-        cardIndex,
-        { timeout: TIMEOUT },
+      // 等这一批真的提交完（拿到响应）再断言与收起：光看格子的 value+class 不够——
+      // 已录手录值的格子本来就是 enabled + recorded 且回填着旧值，填完当下就满足（v6.45.1 实测踩到过）
+      const posted = await Promise.race([saveResponse.then(() => true), page.waitForTimeout(TIMEOUT).then(() => false)]);
+      assert(posted, `行内保存后 ${TIMEOUT}ms 内没有 POST /api/admin/growth/match-entry/… 响应`);
+      // 等「保存回填 + 格子改标」这一对结果一起到：只等 input.value 会被打字本身满足（保存还没回来）
+      const marked = await page
+        .waitForFunction(
+          (args) => {
+            const c = document.querySelectorAll('.entry-card')[args.idx];
+            const el = c?.querySelector('input[inputmode="decimal"]');
+            if (!el || el.disabled || el.readOnly || el.value !== args.target) return false;
+            const wrap = el.closest('.entry-card-field');
+            return !!wrap && wrap.classList.contains('recorded') && wrap.classList.contains('editable');
+          },
+          { idx: cardIndex, target },
+          { timeout: TIMEOUT },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const markCls = await page.evaluate((idx) => {
+        const c = document.querySelectorAll('.entry-card')[idx];
+        const el = c?.querySelector('input[inputmode="decimal"]');
+        return el?.closest('.entry-card-field')?.className ?? '';
+      }, cardIndex);
+      assert(
+        marked,
+        `保存后手录评分格应回填并带 recorded + editable 标记（实际 class="${markCls}"）——已录手录值必须仍可改（v6.45.1）`,
       );
+      // 只读侧对照：赛果值 / 记过标记的格子有 recorded 但没有 editable —— 在场就断言它们不可编辑
+      const roGate = await page.evaluate(() => {
+        const cells = [...document.querySelectorAll('.entry-card-field.recorded:not(.editable)')];
+        if (cells.length === 0) return null;
+        const bad = cells.filter((c) => [...c.querySelectorAll('input')].some((el) => !el.disabled && !el.readOnly));
+        return { cells: cells.length, bad: bad.length };
+      });
+      if (roGate === null) console.warn('（⑭ 备注：本场没有「已录但不可改」的格子（赛果零封/记过标记），只读侧断言降级）');
+      else assert(roGate.bad === 0, `已录不可改的格子仍有 ${roGate.bad}/${roGate.cells} 个可编辑控件`);
 
       // 查看模式：全部控件只读（TC-ENT-04 的另一面）
       page.off('response', onSave);
@@ -2461,12 +2504,15 @@ async function main() {
       );
       assert(editableInView === 0, `查看模式仍有 ${editableInView} 个可编辑控件`);
 
-      // 退掉本次写入：删事件 + 退 XP，恢复「该球员评分格未录」的原状（烟测幂等）
-      if (savedPid != null) {
-        const startIso = new Date(Date.now() - 10 * 60_000).toISOString();
+      // 退掉本次写入，恢复「该球员本场无手录评分」的原状（烟测幂等）。
+      // v6.45.1 起保存可能是改值 UPDATE（created_at 还是旧值，按时间圈不到）⇒ 按
+      // player_id + match_ref + event_type 定位；退的 XP 取该行自己的 xp，先退再删。
+      if (savedPid != null && savedMatch != null) {
+        const p = Number(savedPid);
+        const m = Number(savedMatch);
         const sql =
-          `DELETE FROM growth_events WHERE player_id = ${Number(savedPid)} AND source = 'manual' AND created_at >= '${startIso}';\n` +
-          `UPDATE players SET growth_xp = MAX(0, growth_xp - ${Number(savedXp) || 0}) WHERE id = ${Number(savedPid)};`;
+          `UPDATE players SET growth_xp = MAX(0, growth_xp - COALESCE((SELECT xp FROM growth_events WHERE player_id = ${p} AND match_ref = '${m}' AND event_type = 'rating'), 0)) WHERE id = ${p};\n` +
+          `DELETE FROM growth_events WHERE player_id = ${p} AND match_ref = '${m}' AND event_type = 'rating' AND source = 'manual';`;
         const f = join(SHOT_DIR, 'e2e-growth-rollback.sql');
         writeFileSync(f, sql, 'utf8');
         try {

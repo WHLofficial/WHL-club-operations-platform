@@ -1,7 +1,8 @@
 // v6.45.0 成长录入列表分组 · 纯函数测试（TC-GRP）。
+// v6.45.1 加「按轮次」单层视图的用例（TC-GRP-07..09）。
 // 分组是展示层唯一排序口径：只按首次出现序，绝不重排服务端给的「确认时间倒序」。
 import { describe, expect, it } from 'vitest';
-import { groupMatchEntries, roundGroupLabel } from './growth-entry-group.ts';
+import { groupMatchEntries, groupMatchEntriesByRound, roundGroupLabel } from './growth-entry-group.ts';
 import type { MatchEntryListItem } from './api.ts';
 
 function item(over: Partial<MatchEntryListItem> & { matchId: number }): MatchEntryListItem {
@@ -85,5 +86,50 @@ describe('TC-GRP 成长录入列表分组', () => {
 
   it('TC-GRP-06 空列表不出组', () => {
     expect(groupMatchEntries([])).toEqual([]);
+  });
+
+  it('TC-GRP-07 按轮次视图：单层平铺、组头带赛事名、同轮次跨赛事不并组（按首次出现序）', () => {
+    const rounds = groupMatchEntriesByRound([
+      item({ matchId: 900, tournamentId: 5, tournamentName: 'S3 顶级联赛', round: 2, stageName: '常规赛' }),
+      item({ matchId: 910, tournamentId: 6, tournamentName: 'S3 冠军杯', round: 2, stageName: '常规赛' }),
+      item({ matchId: 901, tournamentId: 5, tournamentName: 'S3 顶级联赛', round: 2, stageName: '常规赛' }),
+    ]);
+    expect(rounds).toHaveLength(2);
+    // 单层：没有赛事维度的嵌套，赛事名收进组头
+    expect(rounds.map((r) => `${r.label} · ${r.tournament}`)).toEqual([
+      '第 2 轮 · 常规赛 · S3 顶级联赛',
+      '第 2 轮 · 常规赛 · S3 冠军杯',
+    ]);
+    expect(rounds[0].matches.map((m) => m.matchId)).toEqual([900, 901]);
+    expect(rounds[1].matches.map((m) => m.matchId)).toEqual([910]);
+    expect(rounds[0].key).toBe('t5|2|常规赛');
+    expect(rounds[1].key).toBe('t6|2|常规赛');
+  });
+
+  it('TC-GRP-08 按轮次视图：同赛事同轮次跨窗口并组（窗口不进键）；阶段不同不并组', () => {
+    const rounds = groupMatchEntriesByRound([
+      item({ matchId: 900, windowSeq: 3, round: 2, stageName: '常规赛' }),
+      item({ matchId: 901, windowSeq: 4, round: 2, stageName: '常规赛' }),
+      item({ matchId: 902, windowSeq: 4, round: 2, stageName: '' }),
+    ]);
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0].matches.map((m) => m.matchId)).toEqual([900, 901]);
+    expect(rounds[1].matches.map((m) => m.matchId)).toEqual([902]);
+    // 组键与赛事视图同源（赛事 + 轮次 + 阶段），不含窗口
+    expect(rounds[0].key).toBe('t5|2|常规赛');
+    expect(rounds[1].key).toBe('t5|2|');
+  });
+
+  it('TC-GRP-09 按轮次视图：赛事名缺失回落（未关联赛事 / 赛事 #id），不改入参，空列表不出组', () => {
+    const input = [
+      item({ matchId: 900, tournamentId: null, tournamentName: null }),
+      item({ matchId: 901, tournamentId: 7, tournamentName: null }),
+    ];
+    const snapshot = input.map((m) => m.matchId);
+    const rounds = groupMatchEntriesByRound(input);
+    expect(rounds.map((r) => r.tournament)).toEqual(['未关联赛事', '赛事 #7']);
+    expect(rounds[0].matches.map((m) => m.matchId)).toEqual([900]);
+    expect(input.map((m) => m.matchId)).toEqual(snapshot);
+    expect(groupMatchEntriesByRound([])).toEqual([]);
   });
 });
