@@ -1899,7 +1899,7 @@ export const GROWTH_EVENT_LABEL: Record<string, string> = {
 
 // ---- v6.16.0：管理端「成长录入」（按场补录，/api/admin/growth/match-entry） ----
 
-/** 可补录比赛列表行（近 50 场，已按可计 XP 口径过滤，按确认时间倒序） */
+/** 可补录比赛列表行（v6.45.1 起列出全部可录场次，已按可计 XP 口径过滤，按确认时间倒序） */
 export interface MatchEntryListItem {
   matchId: number;
   season: number;
@@ -1985,8 +1985,11 @@ export interface MatchEntryInput {
 export interface MatchEntryPerPlayerResult {
   playerId: number;
   name: string;
+  /** 这次实际进账的 XP：新录按事件 XP 累加；改值按差额算（改小累计值会回收，可为负） */
   xp: number;
   written: number;
+  /** v6.45.1：改值成功的事件数（来源 manual 的已录事件，值不同即更新原行） */
+  updated: number;
   duplicates: number;
 }
 
@@ -1994,6 +1997,8 @@ export interface MatchEntryPerPlayerResult {
 export interface MatchEntrySubmitResult {
   ok: boolean;
   written: number;
+  /** v6.45.1：改值成功的条数（与 written 分别计数；两者都为 0 时 HTTP 200，否则 201） */
+  updated: number;
   duplicates: number;
   totalXp: number;
   perPlayer: MatchEntryPerPlayerResult[];

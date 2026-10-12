@@ -1662,6 +1662,22 @@ tbody tr:hover td {
   padding-bottom: 7px;
 }
 
+/* v6.45.1 列表头：标题 + 视图切换段控件同一行（窄屏换行） */
+.list-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.list-head h3 {
+  margin: 0;
+}
+
+.list-head .seg {
+  margin-bottom: 0;
+}
+
 .match-entry-actions .btn + .btn {
   margin-left: 6px;
 }
@@ -1737,6 +1753,12 @@ tbody tr:hover td {
 
 .entry-table td.recorded {
   background: #f4f0e6;
+}
+
+/* v6.45.1：已录但还是能改的格子（手录的评分 / 夺回球权 / 扑救）——斜纹 + 左侧强调边，与只读的平灰底区分开 */
+.entry-table td.recorded.editable {
+  box-shadow: inset 3px 0 0 var(--terracotta);
+  background-image: repeating-linear-gradient(135deg, rgba(164, 97, 44, 0.08) 0 4px, rgba(164, 97, 44, 0) 4px 8px);
 }
 
 .entry-table input.invalid {
@@ -4006,6 +4028,11 @@ th.num .th-sort {
   /* 已录（锁定）字段：与桌面 td.recorded 同色 */
   .entry-card-field.recorded {
     background: #f4f0e6;
+  }
+  /* v6.45.1：已录但仍可改的字段（手录的评分 / 夺回球权 / 扑救）——斜纹 + 顶部强调边，与桌面同语义 */
+  .entry-card-field.recorded.editable {
+    box-shadow: inset 0 3px 0 var(--terracotta);
+    background-image: repeating-linear-gradient(135deg, rgba(164, 97, 44, 0.08) 0 4px, rgba(164, 97, 44, 0) 4px 8px);
   }
   .entry-card-flabel {
     color: var(--muted);
