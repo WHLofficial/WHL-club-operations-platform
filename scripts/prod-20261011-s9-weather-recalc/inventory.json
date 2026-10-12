@@ -1,0 +1,1687 @@
+{
+  "mode": "pre-push-inventory",
+  "snapshotCapturedAt": "2026-10-12T02:19:36.351Z",
+  "modelSource": "代码默认 CONFIG_DEFAULTS.attendance_model（config 表无覆盖）",
+  "ranges": {
+    "晴": [
+      1.05,
+      1.25
+    ],
+    "多云": [
+      0.9,
+      1.04
+    ],
+    "雨": [
+      0.8,
+      0.89
+    ],
+    "雪": [
+      0.75,
+      0.79
+    ]
+  },
+  "fillMid": 0.992,
+  "tiers": {
+    "exact": 0,
+    "estimate": 0,
+    "exactEligible": 72,
+    "refPlanRows": 78,
+    "refPlanFile": "C:\\Users\\bhdjb\\whlProgram\\WHL-club-operations-platform\\scripts\\prod-20261004-influence-recalc\\plan.json"
+  },
+  "exactDemoted": [],
+  "planRowNotes": [
+    {
+      "matchId": 2,
+      "reason": "计划上座 9081 ≠ 库中 0（弃权批清零后计划未回写）"
+    },
+    {
+      "matchId": 31,
+      "reason": "计划上座 7202 ≠ 库中 0（弃权批清零后计划未回写）"
+    },
+    {
+      "matchId": 38,
+      "reason": "计划上座 12735 ≠ 库中 0（弃权批清零后计划未回写）"
+    },
+    {
+      "matchId": 40,
+      "reason": "计划天气字段与库中不一致（计划 '多���' vs 库 '多云'，计划文件该字段已损坏）"
+    },
+    {
+      "matchId": 165,
+      "reason": "计划上座 12699 ≠ 库中 0（弃权批清零后计划未回写）"
+    },
+    {
+      "matchId": 172,
+      "reason": "计划上座 8575 ≠ 库中 0（弃权批清零后计划未回写）"
+    }
+  ],
+  "platformForecastRows": 0,
+  "rows": 90,
+  "revenueTotal": 162.23,
+  "sensitivityTotal": {
+    "lo": -38.79,
+    "hi": 43.51
+  },
+  "pre": {
+    "typeDist": {
+      "雨": 19,
+      "晴": 29,
+      "多云": 37,
+      "雪": 5
+    },
+    "zeroRows": [
+      {
+        "matchId": 2,
+        "clubId": 449,
+        "home": "皇家贝蒂斯",
+        "away": "RB莱比锡(CPU)",
+        "wOld": "雨",
+        "walkover": "away"
+      },
+      {
+        "matchId": 31,
+        "clubId": 449,
+        "home": "皇家贝蒂斯",
+        "away": "巴塞罗那(CPU)",
+        "wOld": "多云",
+        "walkover": "home"
+      },
+      {
+        "matchId": 38,
+        "clubId": 110374,
+        "home": "佛罗伦萨",
+        "away": "皇家贝蒂斯",
+        "wOld": "晴",
+        "walkover": "away"
+      },
+      {
+        "matchId": 165,
+        "clubId": 21,
+        "home": "拜仁慕尼黑",
+        "away": "曼城(CPU)",
+        "wOld": "晴",
+        "walkover": "home"
+      },
+      {
+        "matchId": 172,
+        "clubId": 2,
+        "home": "阿斯顿维拉",
+        "away": "RB莱比锡(CPU)",
+        "wOld": "多云",
+        "walkover": "away"
+      }
+    ],
+    "soldOutRows": [
+      {
+        "matchId": 10,
+        "clubId": 11,
+        "aOld": 21824,
+        "capacity": 22000
+      },
+      {
+        "matchId": 13,
+        "clubId": 243,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 20,
+        "clubId": 11,
+        "aOld": 21824,
+        "capacity": 22000
+      },
+      {
+        "matchId": 21,
+        "clubId": 66,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 22,
+        "clubId": 2,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 25,
+        "clubId": 33,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 27,
+        "clubId": 110374,
+        "aOld": 21824,
+        "capacity": 22000
+      },
+      {
+        "matchId": 53,
+        "clubId": 33,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 58,
+        "clubId": 11,
+        "aOld": 21824,
+        "capacity": 22000
+      },
+      {
+        "matchId": 63,
+        "clubId": 110374,
+        "aOld": 21824,
+        "capacity": 22000
+      },
+      {
+        "matchId": 64,
+        "clubId": 33,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 66,
+        "clubId": 13,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 67,
+        "clubId": 66,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 69,
+        "clubId": 33,
+        "aOld": 11904,
+        "capacity": 12000
+      },
+      {
+        "matchId": 73,
+        "clubId": 13,
+        "aOld": 11980,
+        "capacity": 12000
+      },
+      {
+        "matchId": 76,
+        "clubId": 110374,
+        "aOld": 21683,
+        "capacity": 22000
+      },
+      {
+        "matchId": 80,
+        "clubId": 11,
+        "aOld": 21710,
+        "capacity": 22000
+      },
+      {
+        "matchId": 189,
+        "clubId": 14,
+        "aOld": 11882,
+        "capacity": 12000
+      },
+      {
+        "matchId": 191,
+        "clubId": 243,
+        "aOld": 11829,
+        "capacity": 12000
+      },
+      {
+        "matchId": 192,
+        "clubId": 14,
+        "aOld": 11843,
+        "capacity": 12000
+      }
+    ],
+    "revenueMismatch": [],
+    "noConfirmation": [],
+    "noStadium": [],
+    "revenueTotal": 162.23
+  },
+  "uncovered": [
+    {
+      "matchId": 1,
+      "clubId": 66,
+      "home": "里昂",
+      "away": "阿斯顿维拉",
+      "wOld": "雨",
+      "aOld": 9788
+    },
+    {
+      "matchId": 2,
+      "clubId": 449,
+      "home": "皇家贝蒂斯",
+      "away": "RB莱比锡(CPU)",
+      "wOld": "雨",
+      "aOld": 0
+    },
+    {
+      "matchId": 3,
+      "clubId": 9,
+      "home": "利物浦",
+      "away": "曼城(CPU)",
+      "wOld": "晴",
+      "aOld": 19682
+    },
+    {
+      "matchId": 4,
+      "clubId": 13,
+      "home": "纽卡斯尔联",
+      "away": "皇家马德里",
+      "wOld": "晴",
+      "aOld": 11423
+    },
+    {
+      "matchId": 5,
+      "clubId": 33,
+      "home": "慕尼黑1860",
+      "away": "拜仁慕尼黑",
+      "wOld": "多云",
+      "aOld": 10600
+    },
+    {
+      "matchId": 7,
+      "clubId": 110374,
+      "home": "佛罗伦萨",
+      "away": "尤文图斯",
+      "wOld": "晴",
+      "aOld": 15254
+    },
+    {
+      "matchId": 9,
+      "clubId": 73,
+      "home": "巴黎圣日耳曼",
+      "away": "切尔西",
+      "wOld": "雨",
+      "aOld": 12719
+    },
+    {
+      "matchId": 10,
+      "clubId": 11,
+      "home": "曼联",
+      "away": "奥林匹亚科斯",
+      "wOld": "晴",
+      "aOld": 21824
+    },
+    {
+      "matchId": 11,
+      "clubId": 449,
+      "home": "皇家贝蒂斯",
+      "away": "阿斯顿维拉",
+      "wOld": "多云",
+      "aOld": 7629
+    },
+    {
+      "matchId": 13,
+      "clubId": 243,
+      "home": "皇家马德里",
+      "away": "利物浦",
+      "wOld": "晴",
+      "aOld": 11904
+    },
+    {
+      "matchId": 14,
+      "clubId": 13,
+      "home": "纽卡斯尔联",
+      "away": "曼城(CPU)",
+      "wOld": "多云",
+      "aOld": 10843
+    },
+    {
+      "matchId": 15,
+      "clubId": 1,
+      "home": "阿森纳",
+      "away": "慕尼黑1860",
+      "wOld": "雨",
+      "aOld": 5299
+    },
+    {
+      "matchId": 17,
+      "clubId": 14,
+      "home": "诺丁汉森林",
+      "away": "佛罗伦萨",
+      "wOld": "多云",
+      "aOld": 9760
+    },
+    {
+      "matchId": 19,
+      "clubId": 280,
+      "home": "奥林匹亚科斯",
+      "away": "巴黎圣日耳曼",
+      "wOld": "雨",
+      "aOld": 7317
+    },
+    {
+      "matchId": 20,
+      "clubId": 11,
+      "home": "曼联",
+      "away": "切尔西",
+      "wOld": "多云",
+      "aOld": 21824
+    },
+    {
+      "matchId": 21,
+      "clubId": 66,
+      "home": "里昂",
+      "away": "皇家贝蒂斯",
+      "wOld": "多云",
+      "aOld": 11904
+    },
+    {
+      "matchId": 22,
+      "clubId": 2,
+      "home": "阿斯顿维拉",
+      "away": "RB莱比锡(CPU)",
+      "wOld": "晴",
+      "aOld": 11904
+    },
+    {
+      "matchId": 23,
+      "clubId": 9,
+      "home": "利物浦",
+      "away": "纽卡斯尔联",
+      "wOld": "多云",
+      "aOld": 17377
+    },
+    {
+      "matchId": 25,
+      "clubId": 33,
+      "home": "慕尼黑1860",
+      "away": "AC米兰(CPU)",
+      "wOld": "雨",
+      "aOld": 11904
+    },
+    {
+      "matchId": 26,
+      "clubId": 21,
+      "home": "拜仁慕尼黑",
+      "away": "阿森纳",
+      "wOld": "晴",
+      "aOld": 14687
+    },
+    {
+      "matchId": 27,
+      "clubId": 110374,
+      "home": "佛罗伦萨",
+      "away": "巴塞罗那(CPU)",
+      "wOld": "晴",
+      "aOld": 21824
+    },
+    {
+      "matchId": 28,
+      "clubId": 45,
+      "home": "尤文图斯",
+      "away": "诺丁汉森林",
+      "wOld": "多云",
+      "aOld": 17221
+    },
+    {
+      "matchId": 29,
+      "clubId": 73,
+      "home": "巴黎圣日耳曼",
+      "away": "曼联",
+      "wOld": "晴",
+      "aOld": 28786
+    },
+    {
+      "matchId": 30,
+      "clubId": 5,
+      "home": "切尔西",
+      "away": "奥林匹亚科斯",
+      "wOld": "多云",
+      "aOld": 17112
+    },
+    {
+      "matchId": 31,
+      "clubId": 449,
+      "home": "皇家贝蒂斯",
+      "away": "巴塞罗那(CPU)",
+      "wOld": "多云",
+      "aOld": 0
+    },
+    {
+      "matchId": 32,
+      "clubId": 45,
+      "home": "尤文图斯",
+      "away": "里昂",
+      "wOld": "晴",
+      "aOld": 13157
+    },
+    {
+      "matchId": 33,
+      "clubId": 5,
+      "home": "切尔西",
+      "away": "佛罗伦萨",
+      "wOld": "雨",
+      "aOld": 9554
+    },
+    {
+      "matchId": 34,
+      "clubId": 73,
+      "home": "巴黎圣日耳曼",
+      "away": "纽卡斯尔联",
+      "wOld": "多云",
+      "aOld": 10724
+    },
+    {
+      "matchId": 36,
+      "clubId": 9,
+      "home": "利物浦",
+      "away": "曼联",
+      "wOld": "多云",
+      "aOld": 10834
+    },
+    {
+      "matchId": 38,
+      "clubId": 110374,
+      "home": "佛罗伦萨",
+      "away": "皇家贝蒂斯",
+      "wOld": "晴",
+      "aOld": 0
+    },
+    {
+      "matchId": 39,
+      "clubId": 11,
+      "home": "曼联",
+      "away": "尤文图斯",
+      "wOld": "多云",
+      "aOld": 13855
+    },
+    {
+      "matchId": 40,
+      "clubId": 33,
+      "home": "慕尼黑1860",
+      "away": "利物浦",
+      "wOld": "多云",
+      "aOld": 7789
+    },
+    {
+      "matchId": 41,
+      "clubId": 5,
+      "home": "切尔西",
+      "away": "AC米兰(CPU)",
+      "wOld": "雨",
+      "aOld": 13068
+    },
+    {
+      "matchId": 42,
+      "clubId": 66,
+      "home": "里昂",
+      "away": "巴黎圣日耳曼",
+      "wOld": "晴",
+      "aOld": 8682
+    },
+    {
+      "matchId": 43,
+      "clubId": 9,
+      "home": "利物浦",
+      "away": "切尔西",
+      "wOld": "多云",
+      "aOld": 13938
+    },
+    {
+      "matchId": 44,
+      "clubId": 73,
+      "home": "巴黎圣日耳曼",
+      "away": "巴塞罗那(CPU)",
+      "wOld": "晴",
+      "aOld": 11225
+    },
+    {
+      "matchId": 45,
+      "clubId": 66,
+      "home": "里昂",
+      "away": "曼联",
+      "wOld": "多云",
+      "aOld": 9916
+    },
+    {
+      "matchId": 46,
+      "clubId": 45,
+      "home": "尤文图斯",
+      "away": "慕尼黑1860",
+      "wOld": "雨",
+      "aOld": 11532
+    },
+    {
+      "matchId": 47,
+      "clubId": 13,
+      "home": "纽卡斯尔联",
+      "away": "佛罗伦萨",
+      "wOld": "雪",
+      "aOld": 5860
+    },
+    {
+      "matchId": 49,
+      "clubId": 11,
+      "home": "曼联",
+      "away": "巴黎圣日耳曼",
+      "wOld": "雪",
+      "aOld": 8658
+    },
+    {
+      "matchId": 50,
+      "clubId": 449,
+      "home": "皇家贝蒂斯",
+      "away": "利物浦",
+      "wOld": "多云",
+      "aOld": 11502
+    },
+    {
+      "matchId": 51,
+      "clubId": 110374,
+      "home": "佛罗伦萨",
+      "away": "巴塞罗那(CPU)",
+      "wOld": "雨",
+      "aOld": 12929
+    },
+    {
+      "matchId": 52,
+      "clubId": 5,
+      "home": "切尔西",
+      "away": "尤文图斯",
+      "wOld": "晴",
+      "aOld": 15668
+    },
+    {
+      "matchId": 53,
+      "clubId": 33,
+      "home": "慕尼黑1860",
+      "away": "里昂",
+      "wOld": "晴",
+      "aOld": 11904
+    },
+    {
+      "matchId": 54,
+      "clubId": 13,
+      "home": "纽卡斯尔联",
+      "away": "AC米兰(CPU)",
+      "wOld": "多云",
+      "aOld": 9699
+    },
+    {
+      "matchId": 55,
+      "clubId": 45,
+      "home": "尤文图斯",
+      "away": "皇家贝蒂斯",
+      "wOld": "多云",
+      "aOld": 15123
+    },
+    {
+      "matchId": 56,
+      "clubId": 9,
+      "home": "利物浦",
+      "away": "纽卡斯尔联",
+      "wOld": "多云",
+      "aOld": 24419
+    },
+    {
+      "matchId": 58,
+      "clubId": 11,
+      "home": "曼联",
+      "away": "慕尼黑1860",
+      "wOld": "多云",
+      "aOld": 21824
+    },
+    {
+      "matchId": 59,
+      "clubId": 66,
+      "home": "里昂",
+      "away": "切尔西",
+      "wOld": "雪",
+      "aOld": 10283
+    },
+    {
+      "matchId": 60,
+      "clubId": 73,
+      "home": "巴黎圣日耳曼",
+      "away": "佛罗伦萨",
+      "wOld": "雨",
+      "aOld": 17269
+    },
+    {
+      "matchId": 62,
+      "clubId": 5,
+      "home": "切尔西",
+      "away": "曼联",
+      "wOld": "多云",
+      "aOld": 16374
+    },
+    {
+      "matchId": 63,
+      "clubId": 110374,
+      "home": "佛罗伦萨",
+      "away": "AC米兰(CPU)",
+      "wOld": "晴",
+      "aOld": 21824
+    },
+    {
+      "matchId": 64,
+      "clubId": 33,
+      "home": "慕尼黑1860",
+      "away": "巴黎圣日耳曼",
+      "wOld": "多云",
+      "aOld": 11904
+    },
+    {
+      "matchId": 65,
+      "clubId": 449,
+      "home": "皇家贝蒂斯",
+      "away": "里昂",
+      "wOld": "晴",
+      "aOld": 12641
+    },
+    {
+      "matchId": 66,
+      "clubId": 13,
+      "home": "纽卡斯尔联",
+      "away": "尤文图斯",
+      "wOld": "晴",
+      "aOld": 11904
+    },
+    {
+      "matchId": 67,
+      "clubId": 66,
+      "home": "里昂",
+      "away": "纽卡斯尔联",
+      "wOld": "晴",
+      "aOld": 11904
+    },
+    {
+      "matchId": 68,
+      "clubId": 11,
+      "home": "曼联",
+      "away": "皇家贝蒂斯",
+      "wOld": "雪",
+      "aOld": 19934
+    },
+    {
+      "matchId": 69,
+      "clubId": 33,
+      "home": "慕尼黑1860",
+      "away": "切尔西",
+      "wOld": "雨",
+      "aOld": 11904
+    },
+    {
+      "matchId": 70,
+      "clubId": 45,
+      "home": "尤文图斯",
+      "away": "巴塞罗那(CPU)",
+      "wOld": "多云",
+      "aOld": 17341
+    },
+    {
+      "matchId": 71,
+      "clubId": 9,
+      "home": "利物浦",
+      "away": "佛罗伦萨",
+      "wOld": "晴",
+      "aOld": 25762
+    },
+    {
+      "matchId": 73,
+      "clubId": 13,
+      "home": "纽卡斯尔联",
+      "away": "曼联",
+      "wOld": "晴",
+      "aOld": 11980
+    },
+    {
+      "matchId": 75,
+      "clubId": 449,
+      "home": "皇家贝蒂斯",
+      "away": "慕尼黑1860",
+      "wOld": "多云",
+      "aOld": 8334
+    },
+    {
+      "matchId": 76,
+      "clubId": 110374,
+      "home": "佛罗伦萨",
+      "away": "尤文图斯",
+      "wOld": "多云",
+      "aOld": 21683
+    },
+    {
+      "matchId": 77,
+      "clubId": 73,
+      "home": "巴黎圣日耳曼",
+      "away": "切尔西",
+      "wOld": "雨",
+      "aOld": 24011
+    },
+    {
+      "matchId": 78,
+      "clubId": 241,
+      "home": "巴塞罗那",
+      "away": "里昂",
+      "wOld": "雪",
+      "aOld": 8184
+    },
+    {
+      "matchId": 80,
+      "clubId": 11,
+      "home": "曼联",
+      "away": "巴塞罗那",
+      "wOld": "多云",
+      "aOld": 21710
+    },
+    {
+      "matchId": 83,
+      "clubId": 45,
+      "home": "尤文图斯",
+      "away": "AC米兰(CPU)",
+      "wOld": "多云",
+      "aOld": 15050
+    },
+    {
+      "matchId": 163,
+      "clubId": 280,
+      "home": "奥林匹亚科斯",
+      "away": "皇家马德里",
+      "wOld": "多云",
+      "aOld": 7374
+    },
+    {
+      "matchId": 164,
+      "clubId": 2,
+      "home": "阿斯顿维拉",
+      "away": "诺丁汉森林",
+      "wOld": "雨",
+      "aOld": 6303
+    },
+    {
+      "matchId": 165,
+      "clubId": 21,
+      "home": "拜仁慕尼黑",
+      "away": "曼城(CPU)",
+      "wOld": "晴",
+      "aOld": 0
+    },
+    {
+      "matchId": 167,
+      "clubId": 1,
+      "home": "阿森纳",
+      "away": "皇家马德里",
+      "wOld": "晴",
+      "aOld": 8727
+    },
+    {
+      "matchId": 170,
+      "clubId": 14,
+      "home": "诺丁汉森林",
+      "away": "奥林匹亚科斯",
+      "wOld": "晴",
+      "aOld": 8636
+    },
+    {
+      "matchId": 171,
+      "clubId": 280,
+      "home": "奥林匹亚科斯",
+      "away": "阿森纳",
+      "wOld": "多云",
+      "aOld": 7863
+    },
+    {
+      "matchId": 172,
+      "clubId": 2,
+      "home": "阿斯顿维拉",
+      "away": "RB莱比锡(CPU)",
+      "wOld": "多云",
+      "aOld": 0
+    },
+    {
+      "matchId": 173,
+      "clubId": 14,
+      "home": "诺丁汉森林",
+      "away": "曼城(CPU)",
+      "wOld": "多云",
+      "aOld": 8091
+    },
+    {
+      "matchId": 174,
+      "clubId": 243,
+      "home": "皇家马德里",
+      "away": "拜仁慕尼黑",
+      "wOld": "多云",
+      "aOld": 7419
+    },
+    {
+      "matchId": 175,
+      "clubId": 243,
+      "home": "皇家马德里",
+      "away": "阿斯顿维拉",
+      "wOld": "晴",
+      "aOld": 11610
+    },
+    {
+      "matchId": 178,
+      "clubId": 1,
+      "home": "阿森纳",
+      "away": "拜仁慕尼黑",
+      "wOld": "雨",
+      "aOld": 5205
+    },
+    {
+      "matchId": 179,
+      "clubId": 2,
+      "home": "阿斯顿维拉",
+      "away": "阿森纳",
+      "wOld": "多云",
+      "aOld": 6921
+    },
+    {
+      "matchId": 180,
+      "clubId": 21,
+      "home": "拜仁慕尼黑",
+      "away": "奥林匹亚科斯",
+      "wOld": "多云",
+      "aOld": 10410
+    },
+    {
+      "matchId": 181,
+      "clubId": 14,
+      "home": "诺丁汉森林",
+      "away": "皇家马德里",
+      "wOld": "雨",
+      "aOld": 8465
+    },
+    {
+      "matchId": 183,
+      "clubId": 280,
+      "home": "奥林匹亚科斯",
+      "away": "RB莱比锡(CPU)",
+      "wOld": "多云",
+      "aOld": 7316
+    },
+    {
+      "matchId": 184,
+      "clubId": 21,
+      "home": "拜仁慕尼黑",
+      "away": "阿斯顿维拉",
+      "wOld": "雨",
+      "aOld": 11274
+    },
+    {
+      "matchId": 185,
+      "clubId": 243,
+      "home": "皇家马德里",
+      "away": "曼城(CPU)",
+      "wOld": "雨",
+      "aOld": 10453
+    },
+    {
+      "matchId": 186,
+      "clubId": 1,
+      "home": "阿森纳",
+      "away": "诺丁汉森林",
+      "wOld": "晴",
+      "aOld": 7037
+    },
+    {
+      "matchId": 187,
+      "clubId": 2,
+      "home": "阿斯顿维拉",
+      "away": "奥林匹亚科斯",
+      "wOld": "雨",
+      "aOld": 9802
+    },
+    {
+      "matchId": 189,
+      "clubId": 14,
+      "home": "诺丁汉森林",
+      "away": "拜仁慕尼黑",
+      "wOld": "晴",
+      "aOld": 11882
+    },
+    {
+      "matchId": 190,
+      "clubId": 112172,
+      "home": "RB莱比锡",
+      "away": "皇家马德里",
+      "wOld": "多云",
+      "aOld": 2367
+    },
+    {
+      "matchId": 191,
+      "clubId": 243,
+      "home": "皇家马德里",
+      "away": "奥林匹亚科斯",
+      "wOld": "晴",
+      "aOld": 11829
+    },
+    {
+      "matchId": 192,
+      "clubId": 14,
+      "home": "诺丁汉森林",
+      "away": "阿斯顿维拉",
+      "wOld": "晴",
+      "aOld": 11843
+    }
+  ],
+  "anomalies": [],
+  "skips": [],
+  "perRowSensitivity": [
+    {
+      "matchId": 1,
+      "totalOld": 1.47,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.17,
+      "dHi": 0.7
+    },
+    {
+      "matchId": 2,
+      "totalOld": 0,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": 0,
+      "dHi": 0
+    },
+    {
+      "matchId": 3,
+      "totalOld": 2.95,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -1.03,
+      "dHi": 0.26
+    },
+    {
+      "matchId": 4,
+      "totalOld": 1.71,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.59,
+      "dHi": 0.15
+    },
+    {
+      "matchId": 5,
+      "totalOld": 1.59,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.36,
+      "dHi": 0.46
+    },
+    {
+      "matchId": 7,
+      "totalOld": 2.29,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.8,
+      "dHi": 0.2
+    },
+    {
+      "matchId": 9,
+      "totalOld": 1.91,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.21,
+      "dHi": 0.92
+    },
+    {
+      "matchId": 10,
+      "totalOld": 3.27,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -1.14,
+      "dHi": 0.28
+    },
+    {
+      "matchId": 11,
+      "totalOld": 1.14,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.26,
+      "dHi": 0.33
+    },
+    {
+      "matchId": 13,
+      "totalOld": 1.79,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.16
+    },
+    {
+      "matchId": 14,
+      "totalOld": 1.63,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.37,
+      "dHi": 0.47
+    },
+    {
+      "matchId": 15,
+      "totalOld": 0.79,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.09,
+      "dHi": 0.38
+    },
+    {
+      "matchId": 17,
+      "totalOld": 1.46,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.33,
+      "dHi": 0.42
+    },
+    {
+      "matchId": 19,
+      "totalOld": 1.1,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.12,
+      "dHi": 0.53
+    },
+    {
+      "matchId": 20,
+      "totalOld": 3.27,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.74,
+      "dHi": 0.94
+    },
+    {
+      "matchId": 21,
+      "totalOld": 1.79,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.41,
+      "dHi": 0.52
+    },
+    {
+      "matchId": 22,
+      "totalOld": 1.79,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.16
+    },
+    {
+      "matchId": 23,
+      "totalOld": 2.61,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.59,
+      "dHi": 0.75
+    },
+    {
+      "matchId": 25,
+      "totalOld": 1.79,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.2,
+      "dHi": 0.86
+    },
+    {
+      "matchId": 26,
+      "totalOld": 2.2,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.77,
+      "dHi": 0.19
+    },
+    {
+      "matchId": 27,
+      "totalOld": 3.27,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -1.14,
+      "dHi": 0.28
+    },
+    {
+      "matchId": 28,
+      "totalOld": 2.58,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.59,
+      "dHi": 0.74
+    },
+    {
+      "matchId": 29,
+      "totalOld": 4.32,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -1.5,
+      "dHi": 0.38
+    },
+    {
+      "matchId": 30,
+      "totalOld": 2.57,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.58,
+      "dHi": 0.74
+    },
+    {
+      "matchId": 31,
+      "totalOld": 0,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": 0,
+      "dHi": 0
+    },
+    {
+      "matchId": 32,
+      "totalOld": 1.97,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.69,
+      "dHi": 0.17
+    },
+    {
+      "matchId": 33,
+      "totalOld": 1.43,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.16,
+      "dHi": 0.69
+    },
+    {
+      "matchId": 34,
+      "totalOld": 1.61,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.37,
+      "dHi": 0.46
+    },
+    {
+      "matchId": 36,
+      "totalOld": 1.63,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.37,
+      "dHi": 0.47
+    },
+    {
+      "matchId": 38,
+      "totalOld": 0,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": 0,
+      "dHi": 0
+    },
+    {
+      "matchId": 39,
+      "totalOld": 2.08,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.47,
+      "dHi": 0.6
+    },
+    {
+      "matchId": 40,
+      "totalOld": 1.17,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.27,
+      "dHi": 0.34
+    },
+    {
+      "matchId": 41,
+      "totalOld": 1.96,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.22,
+      "dHi": 0.94
+    },
+    {
+      "matchId": 42,
+      "totalOld": 1.3,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.45,
+      "dHi": 0.11
+    },
+    {
+      "matchId": 43,
+      "totalOld": 2.09,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.47,
+      "dHi": 0.6
+    },
+    {
+      "matchId": 44,
+      "totalOld": 1.68,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.58,
+      "dHi": 0.15
+    },
+    {
+      "matchId": 45,
+      "totalOld": 1.49,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.34,
+      "dHi": 0.43
+    },
+    {
+      "matchId": 46,
+      "totalOld": 1.73,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.19,
+      "dHi": 0.83
+    },
+    {
+      "matchId": 47,
+      "totalOld": 0.88,
+      "rLo": 0.974025974025974,
+      "rHi": 1.6233766233766234,
+      "dLo": -0.02,
+      "dHi": 0.55
+    },
+    {
+      "matchId": 49,
+      "totalOld": 1.3,
+      "rLo": 0.974025974025974,
+      "rHi": 1.6233766233766234,
+      "dLo": -0.03,
+      "dHi": 0.81
+    },
+    {
+      "matchId": 50,
+      "totalOld": 1.73,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.39,
+      "dHi": 0.5
+    },
+    {
+      "matchId": 51,
+      "totalOld": 1.94,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.22,
+      "dHi": 0.93
+    },
+    {
+      "matchId": 52,
+      "totalOld": 2.35,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.82,
+      "dHi": 0.2
+    },
+    {
+      "matchId": 53,
+      "totalOld": 1.79,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.16
+    },
+    {
+      "matchId": 54,
+      "totalOld": 1.45,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.33,
+      "dHi": 0.42
+    },
+    {
+      "matchId": 55,
+      "totalOld": 2.27,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.51,
+      "dHi": 0.66
+    },
+    {
+      "matchId": 56,
+      "totalOld": 3.66,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.83,
+      "dHi": 1.06
+    },
+    {
+      "matchId": 58,
+      "totalOld": 3.27,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.74,
+      "dHi": 0.94
+    },
+    {
+      "matchId": 59,
+      "totalOld": 1.54,
+      "rLo": 0.974025974025974,
+      "rHi": 1.6233766233766234,
+      "dLo": -0.04,
+      "dHi": 0.96
+    },
+    {
+      "matchId": 60,
+      "totalOld": 2.59,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.29,
+      "dHi": 1.24
+    },
+    {
+      "matchId": 62,
+      "totalOld": 2.46,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.56,
+      "dHi": 0.71
+    },
+    {
+      "matchId": 63,
+      "totalOld": 3.27,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -1.14,
+      "dHi": 0.28
+    },
+    {
+      "matchId": 64,
+      "totalOld": 1.79,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.41,
+      "dHi": 0.52
+    },
+    {
+      "matchId": 65,
+      "totalOld": 1.9,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.66,
+      "dHi": 0.17
+    },
+    {
+      "matchId": 66,
+      "totalOld": 1.79,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.16
+    },
+    {
+      "matchId": 67,
+      "totalOld": 1.79,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.16
+    },
+    {
+      "matchId": 68,
+      "totalOld": 2.99,
+      "rLo": 0.974025974025974,
+      "rHi": 1.6233766233766234,
+      "dLo": -0.08,
+      "dHi": 1.86
+    },
+    {
+      "matchId": 69,
+      "totalOld": 1.79,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.2,
+      "dHi": 0.86
+    },
+    {
+      "matchId": 70,
+      "totalOld": 2.6,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.59,
+      "dHi": 0.75
+    },
+    {
+      "matchId": 71,
+      "totalOld": 3.86,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -1.34,
+      "dHi": 0.34
+    },
+    {
+      "matchId": 73,
+      "totalOld": 1.8,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.63,
+      "dHi": 0.16
+    },
+    {
+      "matchId": 75,
+      "totalOld": 1.25,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.28,
+      "dHi": 0.36
+    },
+    {
+      "matchId": 76,
+      "totalOld": 3.25,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.74,
+      "dHi": 0.94
+    },
+    {
+      "matchId": 77,
+      "totalOld": 3.6,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.4,
+      "dHi": 1.73
+    },
+    {
+      "matchId": 78,
+      "totalOld": 1.23,
+      "rLo": 0.974025974025974,
+      "rHi": 1.6233766233766234,
+      "dLo": -0.03,
+      "dHi": 0.77
+    },
+    {
+      "matchId": 80,
+      "totalOld": 3.26,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.74,
+      "dHi": 0.94
+    },
+    {
+      "matchId": 83,
+      "totalOld": 2.26,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.51,
+      "dHi": 0.65
+    },
+    {
+      "matchId": 163,
+      "totalOld": 1.11,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.25,
+      "dHi": 0.32
+    },
+    {
+      "matchId": 164,
+      "totalOld": 0.95,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.11,
+      "dHi": 0.46
+    },
+    {
+      "matchId": 165,
+      "totalOld": 0,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": 0,
+      "dHi": 0
+    },
+    {
+      "matchId": 167,
+      "totalOld": 1.31,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.46,
+      "dHi": 0.11
+    },
+    {
+      "matchId": 170,
+      "totalOld": 1.3,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.45,
+      "dHi": 0.11
+    },
+    {
+      "matchId": 171,
+      "totalOld": 1.18,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.27,
+      "dHi": 0.34
+    },
+    {
+      "matchId": 172,
+      "totalOld": 0,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": 0,
+      "dHi": 0
+    },
+    {
+      "matchId": 173,
+      "totalOld": 1.21,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.27,
+      "dHi": 0.35
+    },
+    {
+      "matchId": 174,
+      "totalOld": 1.11,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.25,
+      "dHi": 0.32
+    },
+    {
+      "matchId": 175,
+      "totalOld": 1.74,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.61,
+      "dHi": 0.15
+    },
+    {
+      "matchId": 178,
+      "totalOld": 0.78,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.09,
+      "dHi": 0.37
+    },
+    {
+      "matchId": 179,
+      "totalOld": 1.04,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.24,
+      "dHi": 0.3
+    },
+    {
+      "matchId": 180,
+      "totalOld": 1.56,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.35,
+      "dHi": 0.45
+    },
+    {
+      "matchId": 181,
+      "totalOld": 1.27,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.14,
+      "dHi": 0.61
+    },
+    {
+      "matchId": 183,
+      "totalOld": 1.1,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.25,
+      "dHi": 0.32
+    },
+    {
+      "matchId": 184,
+      "totalOld": 1.69,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.19,
+      "dHi": 0.81
+    },
+    {
+      "matchId": 185,
+      "totalOld": 1.57,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.18,
+      "dHi": 0.75
+    },
+    {
+      "matchId": 186,
+      "totalOld": 1.06,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.37,
+      "dHi": 0.09
+    },
+    {
+      "matchId": 187,
+      "totalOld": 1.47,
+      "rLo": 0.8875739644970414,
+      "rHi": 1.4792899408284024,
+      "dLo": -0.17,
+      "dHi": 0.7
+    },
+    {
+      "matchId": 189,
+      "totalOld": 1.78,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.15
+    },
+    {
+      "matchId": 190,
+      "totalOld": 0.36,
+      "rLo": 0.7731958762886598,
+      "rHi": 1.288659793814433,
+      "dLo": -0.08,
+      "dHi": 0.1
+    },
+    {
+      "matchId": 191,
+      "totalOld": 1.77,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.15
+    },
+    {
+      "matchId": 192,
+      "totalOld": 1.78,
+      "rLo": 0.6521739130434783,
+      "rHi": 1.0869565217391306,
+      "dLo": -0.62,
+      "dHi": 0.15
+    }
+  ]
+}

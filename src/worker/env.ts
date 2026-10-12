@@ -31,6 +31,11 @@ export interface Env {
   // v6.1.0：球队建档双向同步的共享密钥（与赛事仓同值，wrangler secret put TEAM_SYNC_SECRET）。
   // 出站未配 = 只记同步失败、不阻断本地建俱乐部；入站未配 = /api/internal/* 一律 503（写端点 fail-closed）。
   TEAM_SYNC_SECRET?: string;
+  // v6.44.0：天气同步（插件侧天气真源 → 平台 match_weather）的共享密钥。**刻意与 TEAM_SYNC_SECRET 分开**
+  // （wrangler secret put WEATHER_SYNC_SECRET，与插件配置 club_sync_secret 同值）：两把钥匙开两个端点，
+  // 插件那侧只需知道天气这一把，旋转任一把不影响另一条通道。
+  // 入站未配 = POST /api/internal/weather-sync 一律 503（写端点 fail-closed，同 team-upsert）。
+  WEATHER_SYNC_SECRET?: string;
   // v6.1.1：Sentry 错误追踪（@sentry/hono/cloudflare 中间件）。DSN 走 secret
   // （wrangler secret put SENTRY_DSN；配 secret 会生成 Source=Secret Change 的新版本）。
   // **未配 = 完全旁路**：SDK 不初始化、零上报零网络，本地 .dev.vars 不配即可。

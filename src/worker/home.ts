@@ -10,6 +10,7 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
+import { computeMatchAttendance, uniform } from '../core/attendance.ts';
 import { isWalkover, walkoverLoser } from '../core/walkover.ts';
 import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
 import { deriveClubLeagues, deriveClubTier, tierCache, type Tier } from './tier.ts';
@@ -179,10 +180,9 @@ export function rollWeather(rng: () => number, probabilities: Record<string, num
   return items[items.length - 1][0];
 }
 
-/** 区间均匀抽（v6.15.0 导出：预报侧抽天气系数与消费端同源） */
-export function uniform(rng: () => number, lo: number, hi: number): number {
-  return lo + rng() * (hi - lo);
-}
+/** 区间均匀抽（v6.15.0 导出；v6.44.0 起实现迁到 core/attendance.ts——算式唯一真源，
+ *  本文件保留再导出，既有调用方（weather-ops / 测试）不受影响） */
+export { uniform };
 
 /** [lo, hi] 二元数值区间校验（v6.15.0 导出：weather-ops 预报抽系数与消费端共用，防两处漂移） */
 export function asRange(v: unknown): [number, number] | null {
@@ -380,25 +380,28 @@ export async function matchAttendanceStatements(
   const homeInfluence = teamInfluence(stadium, await playerInfluenceSum(env, clubId, model), influenceTierCoef(influenceCoefs, homeTier));
   const opp = homeInfluence <= 0 ? 1 : 1 + 0.05 * (awayInfluence / homeInfluence);
 
-  const demand =
-    stadium.fans *
-    multiplier *
-    tierCoef *
-    form *
-    wx *
-    opp *
-    stadium.next_attendance_mod * // v6.10.0 随机事件：下一场上座乘数（默认 1，用完即清）
-    uniform(rng, model.perturbation[0], model.perturbation[1]);
-  const fill = uniform(rng, model.sell_out_fill[0], model.sell_out_fill[1]);
-  const attendance = demand >= stadium.capacity ? Math.floor(stadium.capacity * fill) : Math.floor(Math.max(0, demand));
-
+  // 设施等级（商/播两档收入与青训演化）：v6.44.0 起提到算式之前——算式是纯函数，等级作为因子传进去
   const facilities = await env.DB.prepare('SELECT facility_key, level FROM club_facilities WHERE club_id = ?').bind(clubId).all<{ facility_key: string; level: number }>();
   const levelOf = (key: string) => facilities.results.find((f) => f.facility_key === key)?.level ?? 0;
-  const wan = attendance / 10000;
-  const ticket = Math.round(wan * model.ticket_revenue_per_10k * 100) / 100;
-  const commercial = Math.round(wan * model.commercial_per_10k_per_level * levelOf('commercial') * 100) / 100;
-  const broadcast = Math.round(model.broadcast_per_match_per_level * levelOf('broadcast') * 100) / 100;
-  const total = Math.round((ticket + commercial + broadcast) * 100) / 100;
+
+  // 上座与三分收入（v6.44.0：算式搬到 core/attendance.ts，与订正脚本、插件侧公式同源；
+  // 本处只负责解析因子。rng 消费顺序不变：perturbation → fill 两口，金样数值基线锁在 tests/home.test.ts）
+  const { attendance, ticket, commercial, broadcast, total } = computeMatchAttendance(
+    model,
+    {
+      fans: stadium.fans,
+      capacity: stadium.capacity,
+      multiplier,
+      tierCoef,
+      form,
+      wx,
+      opp,
+      nextAttendanceMod: stadium.next_attendance_mod, // v6.10.0 随机事件：下一场上座乘数（默认 1，用完即清）
+      commercialLevel: levelOf('commercial'),
+      broadcastLevel: levelOf('broadcast'),
+    },
+    rng,
+  );
 
   // v6.28.0 B 段：每场死忠演化（比赛日体感）——与上座/收入同批原子落账；幂等闸是 match_attendance 主键（上面已查过）。
   // 系数走 per-match 键（初值 0.2 = 窗系数 0.5 × 0.4）；fan_mood 是窗级事件信号，这里不消费（关窗批按窗生效一次）。

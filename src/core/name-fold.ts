@@ -91,6 +91,15 @@ function sqlLit(s: string): string {
   return `'${s.replace(/'/g, "''")}'`;
 }
 
+// 队名归一（v6.44.0 天气同步）：tour 库的 team.name 是**人写的**，插件侧同源但可能带 CPU 标记——
+// 平台侧 CPU 队的口径是「半角 (CPU) 结尾」（worker/growth.ts isCpuTeam），但队名一旦来自
+// 手工录入/导入，全角括号同样出现过，所以剥两种括号、大小写不敏感；剥完再走 foldName，
+// 于是「Šeško FC」与「sesko fc」在两侧对得上。用于按 (主队, 客队) 匹对 tour 赛程。
+export function normTeamName(raw: string): string {
+  const trimmed = raw.trim();
+  return foldName(trimmed.replace(/[（(]\s*cpu\s*[）)]$/i, '').trim());
+}
+
 // 「含非 ASCII 字符」的 GLOB（0x80 以上都算；SQLite 的 GLOB 逐字符按码位匹配）
 const NON_ASCII_GLOB = '*[^ -~]*';
 

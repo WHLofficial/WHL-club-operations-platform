@@ -15,6 +15,7 @@ import { createAuditStatement } from '../lib/audit.ts';
 import { loadAttendanceModel, rollWeather, uniform, asRange } from './home.ts';
 import { clubIdByTourTeam } from './prizes.ts';
 import { MATCH_SELECT, type TourMatchRow } from './results.ts';
+import { normTeamName } from '../core/name-fold.ts';
 
 /** 轮次定位参数的严格解析（GET query 字符串与 POST body 数字两形态共用）：
  *  `Number('')`/`Number(null)` 都是 0——不拦的话 `?round=` 会被当成第 0 轮、
@@ -262,3 +263,316 @@ export async function forecastRound(env: Env, actor: number | null, tournamentId
   }
   return result;
 }
+
+// ============================================================================================
+// 天气同步（v6.44.0）：插件侧是天气真源，把整轮天气+系数推过来，平台按推送值固化。
+//
+// 契约（与插件 `services/club_sync.py` 逐字对应）：
+//   POST /api/internal/weather-sync，HMAC 签名（lib/hmac.ts，独立密钥 WEATHER_SYNC_SECRET），
+//   body { season, competition, roundNo, items: [{ home, away, weather, coef }] }。
+//   验签与形状校验在 routes/internal.ts（机器通道的 fail-closed 口径在那边），本文件只管落库。
+//
+// 三个设计决定：
+//   ① **推者赢**：upsert（ON CONFLICT DO UPDATE）覆盖平台自己抽的预报行——真源是插件，
+//      平台侧 forecastRound 的随机值只在对该场尚无推送时才有意义。已确认赛果的场次照样覆盖：
+//      覆盖后 match_weather 与 match_attendance.weather 不一致，那正是历史账订正批要收敛的差异
+//      （见 ROADMAP v6.44.0 节），verdict 里 settled=true 把这类场次点名。
+//   ② **判据是队名对**：tour 库没有"客队名+轮次"的稳定唯一键可用（跨锦标赛轮号会撞，见本文件头），
+//      所以按 (tournament_id, round) 取该轮全部比赛，再用归一化后的 (主队名, 客队名) 匹对。
+//      队名归一走 core/name-fold.ts 的 normTeamName（剥 CPU 后缀 + 折名），与平台侧 CPU 口径同源。
+//   ③ **逐场 verdict 而非整体失败**：一场对不上不该让整轮作废（插件一条命令推全季）。
+//      只有"赛季没绑定赛事"这类整轮级错误才抛错。
+// ============================================================================================
+
+export const WEATHER_SYNC_PATH = '/api/internal/weather-sync';
+
+/** 插件侧 competition 名 → 平台 season_tournaments.competition_type（插件只推这三类有主场的赛事） */
+export const COMPETITION_TYPE_BY_NAME: Record<string, string> = {
+  顶级联赛: 'league_premier',
+  次级联赛: 'league_second',
+  冠军杯: 'champions_cup',
+};
+
+/** 推送方落款。match_weather.forecast_by 声明为 INTEGER（管理端触发时写管理员 user id），
+ *  SQLite 动态类型照收这个字符串；该列**当前无任何读取方**，真凭据是每批一条的审计行。
+ *  刻意不写 NULL：库里看到这行的人该能一眼分出「插件推的」与「平台自己抽的」。 */
+export const WEATHER_SYNC_FORECAST_BY = 'revenue-plugin';
+
+/** 单轮场次上限（正常一轮 5-9 场；防呆，不是业务约束） */
+const SYNC_ITEMS_MAX = 40;
+const SYNC_NAME_MAX = 60;
+
+export interface WeatherPushItem {
+  home: string;
+  away: string;
+  weather: string;
+  coef: number;
+}
+
+export interface WeatherPushPayload {
+  season: number;
+  competition: string;
+  roundNo: number;
+  items: WeatherPushItem[];
+}
+
+export type WeatherVerdictStatus = 'created' | 'replaced' | 'unchanged' | 'unmatched' | 'skipped_no_stadium' | 'bad_weather';
+
+export interface WeatherVerdict {
+  home: string;
+  away: string;
+  status: WeatherVerdictStatus;
+  matchId?: number;
+  /** 该场已有 match_attendance 行（历史账已按旧值结过，差异留给订正批） */
+  settled?: boolean;
+  detail?: string;
+}
+
+export interface WeatherPushResult {
+  season: number;
+  competition: string;
+  competitionType: string;
+  roundNo: number;
+  tournamentIds: number[];
+  verdicts: WeatherVerdict[];
+  /** 逐状态计数（插件把这段回显给操作者：落库多少、没匹配上多少） */
+  summary: Record<WeatherVerdictStatus, number> & { settled: number; pushed: number };
+}
+
+/** 严格整数解析：`Number('')`/`Number(null)` 都是 0，机器通道的入参必须先过这一关（同 parseRoundParams）。 */
+function syncInt(raw: unknown): number {
+  return typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+}
+
+/**
+ * 解析并校验推送体（形状错误一律抛 400：插件是唯一调用方，形状不对就是它的 bug，别静默吞）。
+ * 逐场**解析层**只校验类型与范围；天气类型是否被平台认识留到落库阶段判（verdict bad_weather），
+ * 这样一轮里混进一个表外天气时其余场次照常落库。
+ */
+export function parseWeatherPush(raw: unknown): WeatherPushPayload {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new HttpError(400, '请求体应为 JSON 对象', 'bad_body');
+  }
+  const body = raw as Record<string, unknown>;
+  const season = syncInt(body.season);
+  if (!Number.isInteger(season) || season <= 0) {
+    throw new HttpError(400, `season 应为正整数（收到 ${JSON.stringify(body.season)}）`, 'bad_season');
+  }
+  const competition = typeof body.competition === 'string' ? body.competition.trim() : '';
+  if (!Object.prototype.hasOwnProperty.call(COMPETITION_TYPE_BY_NAME, competition)) {
+    throw new HttpError(
+      400,
+      `competition 只支持 ${Object.keys(COMPETITION_TYPE_BY_NAME).join(' / ')}（收到 ${competition || '空'}）`,
+      'unknown_competition',
+    );
+  }
+  const roundNo = syncInt(body.roundNo);
+  if (!Number.isInteger(roundNo) || roundNo < 0 || roundNo > 200) {
+    throw new HttpError(400, `roundNo 应为 0-200 的整数（收到 ${JSON.stringify(body.roundNo)}）`, 'bad_round');
+  }
+  if (!Array.isArray(body.items) || body.items.length === 0) {
+    throw new HttpError(400, 'items 应为非空数组', 'bad_items');
+  }
+  if (body.items.length > SYNC_ITEMS_MAX) {
+    throw new HttpError(400, `items 最多 ${SYNC_ITEMS_MAX} 场（收到 ${body.items.length}）`, 'bad_items');
+  }
+  const items = body.items.map((rawItem, i) => {
+    const at = `items[${i}]`;
+    if (typeof rawItem !== 'object' || rawItem === null || Array.isArray(rawItem)) {
+      throw new HttpError(400, `${at} 应为对象`, 'bad_item');
+    }
+    const item = rawItem as Record<string, unknown>;
+    const name = (key: 'home' | 'away'): string => {
+      const v = typeof item[key] === 'string' ? item[key].trim() : '';
+      if (!v || v.length > SYNC_NAME_MAX) throw new HttpError(400, `${at}.${key} 应为 1-${SYNC_NAME_MAX} 字的队名`, 'bad_item');
+      return v;
+    };
+    const weather = typeof item.weather === 'string' ? item.weather.trim() : '';
+    if (!weather) throw new HttpError(400, `${at}.weather 不能为空`, 'bad_item');
+    const coef = typeof item.coef === 'number' ? item.coef : NaN;
+    // 系数只校验「是个正数」：区间真源在插件的天气档位表里，平台侧硬套自己的区间会
+    // 把「两侧档位表不同步」误报成「推送非法」——那是配置问题，该在订正报告里看出来。
+    if (!Number.isFinite(coef) || coef <= 0) {
+      throw new HttpError(400, `${at}.coef 应为正数（收到 ${JSON.stringify(item.coef)}）`, 'bad_item');
+    }
+    return { home: name('home'), away: name('away'), weather, coef };
+  });
+  return { season, competition, roundNo, items };
+}
+
+/**
+ * 落库：按轮取 tour 赛程 → 队名匹对 → 无球场跳过 → upsert match_weather（推者赢）→ 审计。
+ * 全部写语句 + 审计行同批 batch（原子；审计的 after 就是本次推送的逐场落库结果）。
+ */
+export async function applyWeatherPush(env: Env, payload: WeatherPushPayload): Promise<WeatherPushResult> {
+  const competitionType = COMPETITION_TYPE_BY_NAME[payload.competition];
+  const bindings = await env.DB.prepare(
+    'SELECT tournament_id FROM season_tournaments WHERE season = ? AND competition_type = ? ORDER BY tournament_id',
+  )
+    .bind(payload.season, competitionType)
+    .all<{ tournament_id: number }>();
+  if (bindings.results.length === 0) {
+    throw new HttpError(
+      409,
+      `第 ${payload.season} 赛季没有绑定「${payload.competition}」（${competitionType}）赛事，先到「赛季与赛事绑定」里绑`,
+      'not_bound',
+    );
+  }
+  const tournamentIds = bindings.results.map((r) => r.tournament_id);
+
+  // 该轮全部比赛（可能跨同类型的多座赛事：赛季里同一 competition_type 绑了两座时都算候选）
+  const { results: matches } = await env.TOUR_DB.prepare(
+    `${MATCH_SELECT} WHERE s.tournament_id IN (${tournamentIds.map(() => '?').join(',')}) AND m.round = ? ORDER BY m.id`,
+  )
+    .bind(...tournamentIds, payload.roundNo)
+    .all<TourMatchRow>();
+
+  const byPair = new Map<string, TourMatchRow>();
+  for (const m of matches) {
+    if (m.home_team === null || m.away_team === null) continue;
+    const key = `${normTeamName(m.home_team)}|${normTeamName(m.away_team)}`;
+    if (!byPair.has(key)) byPair.set(key, m); // 同轮同对理论只一场；真撞了取 id 小的（ORDER BY 已保证）
+  }
+
+  const model = await loadAttendanceModel(env.DB);
+  const homeTeamIds = matches.map((m) => m.home_team_id).filter((id): id is number => id !== null);
+  const clubMap = await clubIdByTourTeam(env, homeTeamIds);
+  const clubIds = [...new Set(clubMap.values())];
+  const stadiumClubIds = new Set(
+    clubIds.length
+      ? (
+          await env.DB.prepare(`SELECT club_id FROM stadiums WHERE club_id IN (${clubIds.map(() => '?').join(',')})`)
+            .bind(...clubIds)
+            .all<{ club_id: number }>()
+        ).results.map((r) => r.club_id)
+      : [],
+  );
+
+  const matchIds = matches.map((m) => m.id);
+  const existing = new Map(
+    matchIds.length
+      ? (
+          await env.DB.prepare(
+            `SELECT match_id, weather, wx_coef FROM match_weather WHERE match_id IN (${matchIds.map(() => '?').join(',')})`,
+          )
+            .bind(...matchIds)
+            .all<{ match_id: number; weather: string; wx_coef: number }>()
+        ).results.map((r) => [r.match_id, r])
+      : [],
+  );
+  const settledIds = new Set(
+    matchIds.length
+      ? (
+          await env.DB.prepare(
+            `SELECT match_id FROM match_attendance WHERE match_id IN (${matchIds.map(() => '?').join(',')})`,
+          )
+            .bind(...matchIds)
+            .all<{ match_id: number }>()
+        ).results.map((r) => r.match_id)
+      : [],
+  );
+
+  const verdicts: WeatherVerdict[] = [];
+  const writes: { match: TourMatchRow; item: WeatherPushItem; clubId: number; status: WeatherVerdictStatus }[] = [];
+  for (const item of payload.items) {
+    const verdict: WeatherVerdict = { home: item.home, away: item.away, status: 'unmatched' };
+    const match = byPair.get(`${normTeamName(item.home)}|${normTeamName(item.away)}`);
+    if (!match) {
+      verdict.detail = '该轮赛程里没有这对主客队（队名或轮次对不上）';
+      verdicts.push(verdict);
+      continue;
+    }
+    verdict.matchId = match.id;
+    if (model.weather_probabilities[item.weather] === undefined) {
+      verdict.status = 'bad_weather';
+      verdict.detail = `平台不认识的天气类型「${item.weather}」（平台侧档位：${Object.keys(model.weather_probabilities).join('/')}）`;
+      verdicts.push(verdict);
+      continue;
+    }
+    const clubId = match.home_team_id === null ? undefined : clubMap.get(match.home_team_id);
+    if (clubId === undefined || !stadiumClubIds.has(clubId)) {
+      verdict.status = 'skipped_no_stadium';
+      verdict.detail = clubId === undefined ? '主队不是平台俱乐部（CPU 队或未绑定）' : '主队没有球场行（结算端也会跳过）';
+      verdicts.push(verdict);
+      continue;
+    }
+    const prior = existing.get(match.id);
+    const status: WeatherVerdictStatus = !prior
+      ? 'created'
+      : prior.weather === item.weather && prior.wx_coef === item.coef
+        ? 'unchanged'
+        : 'replaced';
+    verdict.status = status;
+    verdict.settled = settledIds.has(match.id);
+    if (verdict.settled) verdict.detail = '该场已确认赛果，历史账差异由订正批收敛';
+    verdicts.push(verdict);
+    writes.push({ match, item, clubId, status });
+  }
+
+  const summary: WeatherPushResult['summary'] = {
+    created: 0,
+    replaced: 0,
+    unchanged: 0,
+    unmatched: 0,
+    skipped_no_stadium: 0,
+    bad_weather: 0,
+    settled: 0,
+    pushed: payload.items.length,
+  };
+  for (const v of verdicts) {
+    summary[v.status] += 1;
+    if (v.settled) summary.settled += 1;
+  }
+
+  if (writes.length > 0) {
+    const statements = writes.map(({ match, item, clubId }) =>
+      env.DB
+        .prepare(
+          `INSERT INTO match_weather (match_id, club_id, season, tournament_id, round, weather, wx_coef, forecast_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           ON CONFLICT(match_id) DO UPDATE SET
+             club_id = excluded.club_id, season = excluded.season, tournament_id = excluded.tournament_id,
+             round = excluded.round, weather = excluded.weather, wx_coef = excluded.wx_coef,
+             forecast_by = excluded.forecast_by`,
+        )
+        // club_id 写解析出的平台俱乐部：消费端是 `WHERE match_id = ? AND club_id = ?`，两边必须一致
+        .bind(match.id, clubId, payload.season, match.tournament_id, payload.roundNo, item.weather, item.coef, WEATHER_SYNC_FORECAST_BY),
+    );
+    statements.push(
+      createAuditStatement(env.DB)({
+        actor: null, // 机器通道：人类行为人取不到（见 lib/audit.ts 的 actor/origin 契约）
+        action: 'weather_sync',
+        targetType: 'tournament',
+        targetId: tournamentIds[0],
+        origin: 'machine',
+        after: {
+          season: payload.season,
+          competition: payload.competition,
+          competitionType,
+          roundNo: payload.roundNo,
+          tournamentIds,
+          summary,
+          applied: writes.map(({ match, item, status }) => ({
+            matchId: match.id,
+            home: item.home,
+            away: item.away,
+            weather: item.weather,
+            coef: item.coef,
+            status,
+          })),
+        },
+      }),
+    );
+    await env.DB.batch(statements);
+  }
+
+  return {
+    season: payload.season,
+    competition: payload.competition,
+    competitionType,
+    roundNo: payload.roundNo,
+    tournamentIds,
+    verdicts,
+    summary,
+  };
+} 

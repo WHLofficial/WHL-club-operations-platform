@@ -46,3 +46,9 @@ scripts/prod-20261006-s9-opening-align/sql/0[2-5]-*.sql
 # gen-walkover-fix.ts 用 --ts=2026-10-06T04:23:06Z 逐字复现（报告含 sha256），故分片不入库；
 # manifest.json（逐笔明细）、只读预检/复查（01/05）、rollback/ 与报告照旧入库。
 scripts/prod-20261006-s9-walkover-fix/sql/0[2346]-*.sql
+
+# 2026-10-11 S9 天气订正批：写分片（02-recalc / 02a-type-only）可由 gen-recalc-sql.ts 用
+# snapshot.json + authoritative.json（推送后抓取）+ --ts=… 逐字复现（报告含 sha256 与逐场明细），
+# 故分片不入库；manifest.json（逐笔明细）、只读预检/复查（01-precheck / 03 / 03a）、rollback/ 与
+# README/报告照旧入库。
+scripts/prod-20261011-s9-weather-recalc/sql/02*.sql
