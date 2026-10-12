@@ -9,6 +9,7 @@ import { serviceSeasons, freeAgentFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
+import { loadPlayerMatches } from '../player-matches.ts';
 import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
 import { getOpenWindow } from '../seasons.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
@@ -1296,6 +1297,18 @@ app.get('/players/:id/transfers', async (c) => {
       completedAt: r.completed_at,
     })),
   });
+});
+
+// GET /api/players/:id/matches —— 球员页「比赛」页签（v6.46.0）：按赛季分赛事汇总 + 逐场流水。
+// 口径与 /players/:id、/players/:id/growth 一致：公开只读、不加限流与缓存（单球员单页面的低频查询），
+// `:id` 同样是 fc_id。四个来源（成长记录 / 赛事事件 / 赛前真实首发 / 伤病停赛名单）的归并在
+// src/core/player-matches.ts，取数在 src/worker/player-matches.ts。
+app.get('/players/:id/matches', async (c) => {
+  const ref = Number(c.req.param('id'));
+  if (!Number.isInteger(ref)) throw new HttpError(400, '球员 ID 不对');
+  const payload = await loadPlayerMatches(c.env, ref);
+  if (!payload) throw new HttpError(404, '球员不存在');
+  return c.json({ player: payload.player, seasons: payload.result.seasons, matches: payload.result.matches });
 });
 
 export default app;
