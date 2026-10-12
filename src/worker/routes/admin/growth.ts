@@ -59,6 +59,68 @@ async function loadCumulativeBases(db: D1Database, playerIds: number[]): Promise
   return new Map(rows.results.map((r) => [`${r.player_id}|${r.event_type}`, r.total] as const));
 }
 
+/** 事件类型的中文名（拒改文案与审计 detail 用） */
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  appearance: '出场',
+  rating: '评分',
+  clean_sheet: '零封',
+  duels_won: '夺回球权',
+  saves: '扑救',
+  goal: '进球',
+  assist: '助攻',
+};
+
+interface ExistingEventRow {
+  id: number;
+  player_id: number;
+  event_type: string;
+  value: number;
+  xp: number;
+  source: string;
+}
+
+/** 改值重放结果：被改行的新 XP、链上其他受影响的行、该球员这次的总 XP 差额 */
+interface ChainReplay {
+  xp: number;
+  extra: { id: number; xp: number }[];
+  delta: number;
+}
+
+/**
+ * 改一条已录事件的值后，重放该球员该类型事件的 XP 链（v6.45.1）。
+ * 写入时的算法是「基数 = 那一刻该球员该类型已录值之和」（v6.42.0 起跨场累计），
+ * 录入顺序 = created_at, id 序，所以按同一顺序重放即可精确复现：
+ * 每个事件 xp = xpForEvent(type, value, 此前值之和)。非累计类型（rating 的值定档）重放后
+ * 只有被改行会变——链上其余行不受影响，这份通用实现也顺带把它们校正回同式。
+ * 返回 null 表示这条行不在了（库里没有删除通道，理论上到不了这里），调用方按 no-op 处理。
+ */
+async function replayEventChain(
+  db: D1Database,
+  playerId: number,
+  eventType: GrowthEventType,
+  change: { id: number; value: number },
+): Promise<ChainReplay | null> {
+  const rows = await db
+    .prepare('SELECT id, value, xp FROM growth_events WHERE player_id = ? AND event_type = ? ORDER BY created_at, id')
+    .bind(playerId, eventType)
+    .all<{ id: number; value: number; xp: number }>();
+  let base = 0;
+  let delta = 0;
+  let xp: number | null = null;
+  const extra: { id: number; xp: number }[] = [];
+  for (const r of rows.results) {
+    const value = r.id === change.id ? change.value : r.value;
+    const next = xpForEvent(eventType, value, base);
+    if (r.id === change.id) xp = next;
+    if (next !== r.xp) {
+      delta += next - r.xp;
+      if (r.id !== change.id) extra.push({ id: r.id, xp: next });
+    }
+    base += value;
+  }
+  return xp === null ? null : { xp, extra, delta };
+}
+
 // 补录：评分/扑救/夺回球权等比赛系统没有的数据；XP 由服务端按 §10.1 计算
 app.post('/growth/events', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
@@ -291,7 +353,8 @@ async function loadTournamentNames(env: Env, ids: (number | null)[]): Promise<Ma
 
 const tournamentNameOf = (names: Map<number, string>, id: number | null): string | null => (id === null ? null : names.get(id) ?? null);
 
-// 可补录比赛列表：近 50 场（确认时间倒序），每场带已录事件数
+// 可补录比赛列表：全部可计 XP 的已确认场次（确认时间倒序），每场带已录事件数。
+// v6.45.1：去掉 v6.45.0 的 LIMIT 50——线上可录场次已到 100 场，截断会让老场次彻底看不见（前端按赛事/轮次分组展示）。
 app.get('/growth/match-entry', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const rows = await c.env.DB.prepare(
@@ -299,8 +362,7 @@ app.get('/growth/match-entry', async (c) => {
             (SELECT COUNT(*) FROM growth_events ge WHERE ge.match_ref = CAST(rc.match_id AS TEXT)) AS recorded
      FROM result_confirmations rc
      WHERE ${MATCH_ENTRY_WHERE}
-     ORDER BY rc.confirmed_at DESC, rc.match_id DESC
-     LIMIT 50`,
+     ORDER BY rc.confirmed_at DESC, rc.match_id DESC`,
   ).all<MatchEntryRow>();
   const names = await loadTournamentNames(c.env, rows.results.map((r) => r.tournament_id));
   const cache = new Map<string, number | null>();
@@ -479,8 +541,12 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
 });
 
 // 批量补录：entries 展开成事件流（每项一条），全部校验前置，事件 + 恰好一条审计进同一个 batch。
-// 同锚去重靠 growth_events 的 UNIQUE(player_id, match_ref, event_type) + recordGrowthEventStatements
-// 的 NOT EXISTS 闸，重复提交是 no-op（written=0），XP 不会重复加。
+// 同锚（球员 × 赛事 × 事件类型）已存在时的三种走法（v6.45.1）：
+//  · 值相同 → no-op；
+//  · 来源 manual → 改值：更新原行 + 重放该球员该类型的 XP 链，差额一次加进 players.growth_xp；
+//  · 来源 auto（赛果同步）→ 值不同即 400（整批零写入），赛果定的值录入台不许改。
+// 新值走 growth_events 的 UNIQUE(player_id, match_ref, event_type) + recordGrowthEventStatements 的
+// NOT EXISTS 闸（幂等不进账），XP 不会重复加。
 app.post('/growth/match-entry/:matchId', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const matchId = Number(c.req.param('matchId'));
@@ -543,44 +609,93 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   const matchRef = String(matchId);
   const season = await getVisibleSeason(c.env.DB);
 
-  // 审计的 after 要在一批里写死，所以先读一次本场已有的去重锚（同锚 = 球员 × 赛事 × 事件类型）；
-  // 同一批里同锚出现两次时，第二次也是 duplicate（与批内 NOT EXISTS 闸的判定一致）。
-  // 已知边界：锚预读与 batch 执行之间若另一请求插了同锚，after.written 会比实际多计一格
-  // （响应里的 written/duplicates 用批后 meta.changes 实数，不受影响；库里状态恒正确）。
-  const existing = await c.env.DB.prepare('SELECT player_id, event_type FROM growth_events WHERE match_ref = ?')
+  // 审计的 after 要在一批里写死，所以先读一次本场已有的行（去重锚 = 球员 × 赛事 × 事件类型，
+  // 另带 id/value/xp/source 供改值判定用）；同一批里同锚出现两次时，第二次也算 duplicate。
+  // 已知边界：锚预读与 batch 执行之间若另一请求插了同锚，after 的计数会比实际多计一格
+  // （响应里的 written/updated/duplicates 用批后 meta.changes 实数，不受影响；库里状态恒正确）。
+  const existing = await c.env.DB.prepare('SELECT id, player_id, event_type, value, xp, source FROM growth_events WHERE match_ref = ?')
     .bind(matchRef)
-    .all<{ player_id: number; event_type: string }>();
-  const anchors = new Set(existing.results.map((r) => `${r.player_id}|${r.event_type}`));
+    .all<ExistingEventRow>();
+  const existingByAnchor = new Map<string, ExistingEventRow>(existing.results.map((r) => [`${r.player_id}|${r.event_type}`, r]));
+
+  // 赛果同步的值不许在录入台改：值不同即整批 400（与停赛拦截同风格——静默跳过会让管理组
+  // 以为改上了）。值相同（例如重复提交同一场零封）不算越界，照旧按 no-op 走。
+  for (const e of events) {
+    const found = existingByAnchor.get(`${e.playerId}|${e.eventType}`);
+    if (!found || found.source === 'manual' || found.value === e.value) continue;
+    const name = rowDisplayName(players.get(e.playerId) as EntryPlayerRow);
+    throw new HttpError(400, `${name} 的${EVENT_TYPE_LABELS[e.eventType] ?? e.eventType}由赛果确定，不能在录入台修改`);
+  }
 
   const statements: D1PreparedStatement[] = [];
-  const detail: { playerId: number; name: string; eventType: string; value: number; xp: number; duplicate: boolean }[] = [];
+  const detail: {
+    playerId: number;
+    name: string;
+    eventType: string;
+    value: number;
+    xp: number;
+    kind: 'insert' | 'update' | 'noop';
+    previousValue?: number;
+  }[] = [];
+  // 每个事件对应的「信号语句」在 batch 里的下标：insert = 那条 INSERT、update = 那条改值 UPDATE、
+  // noop = -1；deltaXp = 这次实际进账的 XP（改小累计值会回收，可为负）。计数一律看批后 changes。
+  const signals: { kind: 'insert' | 'update' | 'noop'; index: number; deltaXp: number }[] = [];
   let expectedWritten = 0;
+  let expectedUpdated = 0;
+  const planned = new Set<string>();
   for (const e of events) {
     const anchor = `${e.playerId}|${e.eventType}`;
-    const duplicate = anchors.has(anchor);
-    if (!duplicate) anchors.add(anchor);
-    if (!duplicate) expectedWritten += 1;
-    detail.push({
-      playerId: e.playerId,
-      name: rowDisplayName(players.get(e.playerId) as EntryPlayerRow),
-      eventType: e.eventType,
-      value: e.value,
-      xp: e.xp,
-      duplicate,
-    });
-    statements.push(
-      ...recordGrowthEventStatements(c.env.DB, {
-        playerId: e.playerId,
-        matchRef,
-        season,
-        windowSeq: null,
-        eventType: e.eventType,
-        value: e.value,
-        xp: e.xp,
-        source: 'manual',
-        recordedBy: user.id,
-      }),
-    );
+    const name = rowDisplayName(players.get(e.playerId) as EntryPlayerRow);
+    const found = existingByAnchor.get(anchor);
+    const line = { playerId: e.playerId, name, eventType: e.eventType, value: e.value, xp: e.xp };
+    if (planned.has(anchor)) {
+      signals.push({ kind: 'noop', index: -1, deltaXp: 0 });
+      detail.push({ ...line, kind: 'noop' });
+      continue;
+    }
+    planned.add(anchor);
+    if (found !== undefined && (found.value === e.value || found.source !== 'manual')) {
+      signals.push({ kind: 'noop', index: -1, deltaXp: 0 });
+      detail.push({ ...line, kind: 'noop', previousValue: found.value });
+      continue;
+    }
+    if (!found) {
+      expectedWritten += 1;
+      const at = statements.length;
+      statements.push(
+        ...recordGrowthEventStatements(c.env.DB, {
+          playerId: e.playerId,
+          matchRef,
+          season,
+          windowSeq: null,
+          eventType: e.eventType,
+          value: e.value,
+          xp: e.xp,
+          source: 'manual',
+          recordedBy: user.id,
+        }),
+      );
+      signals.push({ kind: 'insert', index: at + 1, deltaXp: e.xp });
+      detail.push({ ...line, kind: 'insert' });
+      continue;
+    }
+    // 改值：原行换值换 XP（recorded_by 记这次是谁改的），并把该球员该类型的 XP 链按录入顺序重放，
+    // 链上其他行受影响的 XP 一并改，差额一次加进 players.growth_xp。
+    const replay = await replayEventChain(c.env.DB, e.playerId, e.eventType, { id: found.id, value: e.value });
+    if (replay === null) {
+      signals.push({ kind: 'noop', index: -1, deltaXp: 0 });
+      detail.push({ ...line, kind: 'noop', previousValue: found.value });
+      continue;
+    }
+    expectedUpdated += 1;
+    const at = statements.length;
+    statements.push(c.env.DB.prepare('UPDATE growth_events SET value = ?, xp = ?, recorded_by = ? WHERE id = ?').bind(e.value, replay.xp, user.id, found.id));
+    for (const x of replay.extra) statements.push(c.env.DB.prepare('UPDATE growth_events SET xp = ? WHERE id = ?').bind(x.xp, x.id));
+    if (replay.delta !== 0) {
+      statements.push(c.env.DB.prepare(`UPDATE players SET growth_xp = growth_xp + ?, updated_at = ${nowSql()} WHERE id = ?`).bind(replay.delta, e.playerId));
+    }
+    signals.push({ kind: 'update', index: at, deltaXp: replay.delta });
+    detail.push({ ...line, xp: replay.xp, kind: 'update', previousValue: found.value });
   }
   const results = await c.env.DB.batch([
     ...statements,
@@ -590,36 +705,53 @@ app.post('/growth/match-entry/:matchId', async (c) => {
       targetType: 'match',
       targetId: matchId,
       origin: 'user',
-      after: { matchId, written: expectedWritten, duplicates: detail.length - expectedWritten, entries: detail },
+      after: {
+        matchId,
+        written: expectedWritten,
+        updated: expectedUpdated,
+        duplicates: detail.length - expectedWritten - expectedUpdated,
+        entries: detail,
+      },
     }),
   ]);
 
-  // 计数以实际 changes 为准（每事件两条语句：偶数下标 = XP 是否已加、奇数下标 = 事件是否新入账）
-  const perPlayerMap = new Map<number, { playerId: number; name: string; xp: number; written: number; duplicates: number }>();
+  // 计数以实际 changes 为准（信号语句命中才算落库）
+  const perPlayerMap = new Map<number, { playerId: number; name: string; xp: number; written: number; updated: number; duplicates: number }>();
   let written = 0;
+  let updated = 0;
   let duplicates = 0;
   let totalXp = 0;
   events.forEach((e, i) => {
-    const inserted = (results[i * 2 + 1]?.meta.changes ?? 0) === 1;
+    const sig = signals[i];
+    const applied = sig.index >= 0 && (results[sig.index]?.meta.changes ?? 0) === 1;
     const bucket = perPlayerMap.get(e.playerId) ?? {
       playerId: e.playerId,
       name: rowDisplayName(players.get(e.playerId) as EntryPlayerRow),
       xp: 0,
       written: 0,
+      updated: 0,
       duplicates: 0,
     };
-    if (inserted) {
+    if (applied && sig.kind === 'insert') {
       written += 1;
       totalXp += e.xp;
-      bucket.xp += e.xp;
       bucket.written += 1;
+      bucket.xp += e.xp;
+    } else if (applied && sig.kind === 'update') {
+      updated += 1;
+      totalXp += sig.deltaXp;
+      bucket.updated += 1;
+      bucket.xp += sig.deltaXp;
     } else {
       duplicates += 1;
       bucket.duplicates += 1;
     }
     perPlayerMap.set(e.playerId, bucket);
   });
-  return c.json({ ok: true, written, duplicates, totalXp, perPlayer: [...perPlayerMap.values()] }, written > 0 ? 201 : 200);
+  return c.json(
+    { ok: true, written, updated, duplicates, totalXp, perPlayer: [...perPlayerMap.values()] },
+    written > 0 || updated > 0 ? 201 : 200,
+  );
 });
 
 export default app;
