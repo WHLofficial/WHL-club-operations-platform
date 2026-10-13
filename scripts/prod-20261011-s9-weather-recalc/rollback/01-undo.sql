@@ -2,7 +2,7 @@
 --
 -- 生成时间：2026-10-12T11:45:00Z
 -- 执行：node exec-shards.mjs sql/<本文件> --remote --chunk=20 --retry=2
--- 对应 sql/02-recalc.sql 的 78 场；上座行守卫看新值、账本锚 ref_type='wx_fix_undo'
+-- 对应 sql/02-recalc.sql 的 78 场，另含 3 场只改天气的还原（那 3 场无分录）；上座行守卫看新值、账本锚 ref_type='wx_fix_undo'
 -- 只跑了 02a 的情况下，未跑场次这里守卫不通过 ⇒ 自动 no-op
 
 
@@ -941,3 +941,15 @@ SELECT 14, 0.29, '2026-10-12T11:45:00Z'
 INSERT INTO ledger_entries (club_id, kind, amount, balance_after, ref_type, ref_id, memo, created_at)
 SELECT 14, 'manual_adjust', 0.29, (SELECT balance FROM ledger_accounts WHERE club_id = 14), 'wx_fix_undo', 192, '天气订正回滚·match:192（撤销 wx_fix 分录；上座 9963→11843；天气 多云→晴；差额 +0.29）', '2026-10-12T11:45:00Z'
  WHERE NOT EXISTS (SELECT 1 FROM ledger_entries WHERE club_id = 14 AND kind = 'manual_adjust' AND ref_type = 'wx_fix_undo' AND ref_id = 192);
+
+-- match 2｜只改天气的还原 晴→雨（上座与收入已清零，无分录）
+UPDATE match_attendance SET weather = '雨'
+ WHERE match_id = 2 AND weather = '晴';
+
+-- match 165｜只改天气的还原 多云→晴（上座与收入已清零，无分录）
+UPDATE match_attendance SET weather = '晴'
+ WHERE match_id = 165 AND weather = '多云';
+
+-- match 172｜只改天气的还原 雨→多云（上座与收入已清零，无分录）
+UPDATE match_attendance SET weather = '多云'
+ WHERE match_id = 172 AND weather = '雨';

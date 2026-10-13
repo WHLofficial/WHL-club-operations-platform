@@ -6,7 +6,7 @@
       "stmts": 237,
       "sha256": "64db49f5b9a834cc0c9b08778f7b875387899ef6d232540d5cdaf40d6740418a",
       "note": "全量收敛（推荐）",
-      "expectChanges": "234 句"
+      "expectChanges": "237 句"
     },
     "sql/02a-type-only.sql": {
       "bytes": 78814,
@@ -16,25 +16,25 @@
       "expectChanges": "177 句"
     },
     "sql/03-verify-balance.sql": {
-      "bytes": 3014,
+      "bytes": 3071,
       "stmts": 1,
-      "sha256": "eb05987366d43c847276ab27a23853c799debe67a231cc6c0a35149b9f5dd965",
+      "sha256": "796323881d910f352efec39906219f3fa07d70ecf014460c24ab833eea36e14f",
       "note": "执行后复查（只读）",
       "expectChanges": "只读"
     },
     "sql/03a-verify-rows.sql": {
-      "bytes": 3334,
+      "bytes": 3391,
       "stmts": 1,
-      "sha256": "a4da8eaf7a51d5a3687c131ac240f7a58acca5976ddfe8d651e71df8fa072b98",
+      "sha256": "79b8e90f6648bed727baffdb8708029d912abdacf4bd85376765e0e4f860c7e3",
       "note": "执行后复查（只读）",
       "expectChanges": "只读"
     },
     "rollback/01-undo.sql": {
-      "bytes": 95925,
-      "stmts": 234,
-      "sha256": "2eb987c60799097842b3fc1cdc0e2ae7d958d7f1670fcfdeffb1b32878bade58",
+      "bytes": 96524,
+      "stmts": 237,
+      "sha256": "22f48e13d4e9a6b6172b60d139d8628a7a1d50077ba0a442073e3be98f6f9960",
       "note": "回滚",
-      "expectChanges": "234 句"
+      "expectChanges": "237 句"
     }
   },
   "totals": {
@@ -48,7 +48,8 @@
     "skipped": 9,
     "uncovered": 0,
     "anomalies": 0,
-    "ledgerEntries": 71,
+    "ledgerEntries": 78,
+    "ledgerEntriesNonZero": 71,
     "deltaSum": 0.63,
     "deltaSumTypeOnly": 0.65,
     "attendanceUp": 35,

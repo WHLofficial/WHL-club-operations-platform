@@ -95,7 +95,7 @@ broadcast  = round2(0.3 × broadcast_level)
 | `capture-snapshot.mjs` | 逐条 `wrangler d1 execute whl-club --remote --json` 抓 A–I ⇒ `snapshot.json` |
 | `00-plugin-forensics.sql` | 插件服务器侧取证（用户代跑）：`matches`/`league_state`/`weather` 分布/`wx_coef` 缺失面/已结算轮次 |
 | `capture-authoritative.mjs` | 推送后抓 `match_weather WHERE forecast_by='revenue-plugin'` ⇒ `authoritative.json`（0 行 exit 2） |
-| `gen-recalc-sql.ts` | 生成器：读快照 + 权威 + `plan.json` ⇒ 全部 SQL + `manifest.json` + `report-data.json`；带 `selfCheck()` 硬断言、`--verify` 只读复核、`--ts=<ISO>` 固定工件时间戳 |
+| `gen-recalc-sql.ts` | 生成器：读快照 + 权威 + `plan.json` ⇒ 全部 SQL + `manifest.json` + `report-data.json`；带 `selfCheck()` 硬断言、`--ts=<ISO>` 固定工件时间戳、`--out=<dir>` 写到别处（只读复核做法：重跑到临时目录比对 sha256） |
 | `sql/02-recalc.sql` | **全量收敛**（推荐）：每场 1 句上座行 UPDATE + 2 句账本 |
 | `sql/02a-type-only.sql` | **保守子集**：只订天气类型不一致的场次（输入差异 100% 可证），不含「类型一致仅系数不同」的估计档 |
 | `sql/03-verify-balance.sql` | 逐队余额 = 基线 + 净变化、`wx_fix` 笔数/合计、`wx_undo` 笔数、`conserve` |
@@ -108,11 +108,12 @@ broadcast  = round2(0.3 × broadcast_level)
 
 ## 4 执行顺序
 
-> **执行状态（2026-10-12）**：①②③④ 已完成 —— 插件 v2.12.0 已部署（服务器 Docker，schema 12→13）、
+> **执行状态（2026-10-13T01:32Z：①②③④⑤ 全部完成）**：插件 v2.12.0 已部署（服务器 Docker，schema 12→13）、
 > 全量推送完成（116 场，平台落库 103，插件自家冲正 23 场 +26.1945）、权威数据已抓（103 行）、
 > 工件已生成（`--ts=2026-10-12T11:45:00Z`，自检与分片演练通过）。
-> **⑤ 未执行** —— 需用户明确下令。执行前请读 [`report.md`](./report.md)（含逐场明细、逐队净变化、
-> 残余不确定度、两侧对账口径与产物指纹）。
+> **⑤ 已执行** —— `sql/02-recalc.sql` 237/237 句提交（changes 237 / rows_written 471 / 失败批 0）；
+> 复查：18 队余额 = 基线 + 净变化、账本 `wx_fix` 78 行合计 +0.63、守恒位 0、81 场与权威存证逐场一致。
+> 执行记录、执行前漂移（match 194）与工件口径订正见 [`report.md`](./report.md) §10。
 
 ```bash
 # ① 插件侧（用户服务器）：部署 v2.12.0 → 配置 club_sync_url/club_sync_secret → 推送
@@ -127,18 +128,18 @@ node scripts/prod-20261011-s9-weather-recalc/capture-authoritative.mjs
 #    本批实际用的时间戳（工件已按此生成，重跑可逐字节复现）：
 node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --ts=2026-10-12T11:45:00Z
 
-# ④ 演练（只读）
-node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --verify
-node scripts/prod-20261011-s9-weather-recalc/../prod-20261006-s9-walkover-fix/exec-shards.mjs \
-  scripts/prod-20261011-s9-weather-recalc/sql/02-recalc.sql --remote --dry
+# ④ 演练（只读）：分片计划；只读复核 = 重跑到临时目录比对 sha256
+node .../exec-shards.mjs scripts/prod-20261011-s9-weather-recalc/sql/02-recalc.sql --remote --dry
+node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --ts=2026-10-12T11:45:00Z --out=/tmp/wx-regen
 
-# ⑤ 授权执行（用户明确下令后）
+# ⑤ 执行（2026-10-13T01:32Z 已执行，用户授权后）
 node .../exec-shards.mjs scripts/prod-20261011-s9-weather-recalc/sql/02-recalc.sql --remote --chunk=20 --retry=2
+#    合计：已提交 237/237 条，changes 237，rows_written 471，失败批 0
 node .../exec-shards.mjs scripts/prod-20261011-s9-weather-recalc/sql/03-verify-balance.sql --remote
 node .../exec-shards.mjs scripts/prod-20261011-s9-weather-recalc/sql/03a-verify-rows.sql --remote
 ```
 
-保守路线：把 ⑤ 的 `02-recalc.sql` 换成 `sql/02a-type-only.sql`（只订类型不一致，钱只动可证输入差异那部分）；两者可先后跑，重叠场次自动 no-op。
+保守路线（未采用）：把 ⑤ 的 `02-recalc.sql` 换成 `sql/02a-type-only.sql`（只订类型不一致，钱只动可证输入差异那部分）；两者可先后跑，重叠场次自动 no-op。
 
 ## 5 推送前盘点（`inventory.json`，快照 `--remote @ 2026-10-12T02:19:36Z`）
 
@@ -175,10 +176,10 @@ node .../exec-shards.mjs scripts/prod-20261011-s9-weather-recalc/sql/03a-verify-
 - `--retry` 只对带守卫、重放 `changes=0` 的工件安全；
 - 只读取值逐条走 `npx wrangler d1 execute whl-club --remote --json --command "SELECT …"`（`--file` 只回汇总）。
 
-## 8 回滚
+## 8 回滚（未使用，保持备用）
 
 ```bash
 node .../exec-shards.mjs scripts/prod-20261011-s9-weather-recalc/rollback/01-undo.sql --remote --chunk=20 --retry=2
 ```
 
-逆序补偿（每场两句：账户按差额加减 + 反向流水 `ref_type='wx_fix_undo'`，memo 指回原笔）；上座行写回旧值（守卫看本批写入后的值）。原流水一律保留 —— 删流水会打断 `balance_after` 链（仓内先例 `scripts/prod-20260926-rollback-stadium-expand/`）。
+逆序补偿（每场两句：账户按差额加减 + 反向流水 `ref_type='wx_fix_undo'`，memo 指回原笔；另含 3 场只改天气的还原，共 237 句）；上座行写回旧值（守卫看本批写入后的值）。原流水一律保留 —— 删流水会打断 `balance_after` 链（仓内先例 `scripts/prod-20260926-rollback-stadium-expand/`）。

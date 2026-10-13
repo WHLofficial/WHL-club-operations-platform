@@ -626,6 +626,11 @@ function weatherOnlySql(w: WeatherOnly): string {
   return `UPDATE match_attendance SET weather = '${w.wNew}'\n WHERE match_id = ${w.matchId} AND weather = '${w.wOld}';`;
 }
 
+/** 只改天气场次（弃权清零场，上座与收入本就是 0、无分录）的回滚：反向 UPDATE，守卫看新值 */
+function restoreWeatherOnlySql(w: WeatherOnly): string {
+  return `UPDATE match_attendance SET weather = '${w.wOld}'\n WHERE match_id = ${w.matchId} AND weather = '${w.wNew}';`;
+}
+
 /** 账本两笔（账户差额 + 流水），与 src/worker/ledger.ts:29-63 的 ledgerMovement 同形。
  *  离线批可能被通道拆批，故不用 changes()>0 闸，改用同键 NOT EXISTS（prod-20261006 批同款）。 */
 function ledgerPair(c: Correction, ts: string, dir: 1 | -1): string[] {
@@ -824,10 +829,11 @@ function main(): void {
 
   const bodyRollback = [
     header(`S9 天气订正批 · 回滚（还原上座行 + 反向分录）`, [
-      `对应 sql/02-recalc.sql 的 ${full.length} 场；上座行守卫看新值、账本锚 ref_type='${REF_TYPE_UNDO}'`,
+      `对应 sql/02-recalc.sql 的 ${full.length} 场，另含 ${plan.weatherOnly.length} 场只改天气的还原（那 ${plan.weatherOnly.length} 场无分录）；上座行守卫看新值、账本锚 ref_type='${REF_TYPE_UNDO}'`,
       `只跑了 02a 的情况下，未跑场次这里守卫不通过 ⇒ 自动 no-op`,
     ]),
     ...full.map((c) => `-- match ${c.matchId}｜还原 ${c.aNew}→${c.aOld}｜差额 ${fmt2(-c.delta)}｜${c.tier === 'exact' ? '精确' : '估计'}\n${restoreSql(c)}\n${ledgerPair(c, BATCH_TS, -1).join('\n')}\n`),
+    ...plan.weatherOnly.map((w) => `-- match ${w.matchId}｜只改天气的还原 ${w.wNew}→${w.wOld}（上座与收入已清零，无分录）\n${restoreWeatherOnlySql(w)}\n`),
   ].join('\n');
 
   // 逐队期望余额：基线（F 段）+ Σ delta
@@ -839,10 +845,14 @@ function main(): void {
 
   const wxCode: Record<string, number> = { 晴: 1, 多云: 2, 雨: 3, 雪: 4 };
   const changed = full.filter((c) => c.typeChanged);
+  /** 上座被容量夹住（或票收入四舍五入后相同）⇒ 订正前后上座不变，其旧值编码在复查里必然仍被数到 */
+  const unchangedAtt = full.filter((c) => c.aNew === c.aOld).length;
+  /** 差额为 0 的场次：SQL 仍写账本（留痕），故 wx_fix 行数 = full.length 而非非零差额数 */
+  const zeroDelta = full.filter((c) => c.delta === 0).length;
 
   const verify1 = [
     header(`S9 天气订正批 · 执行后复查（一）：余额与分录`, [
-      `逐队余额应等于基线 + 净变化（下表）；wx_fix 计数应为 ${full.filter((c) => c.delta !== 0).length}、合计应为 ${fmt2(sum(full, (c) => c.delta))}；守恒位应恒为 0。`,
+      `逐队余额应等于基线 + 净变化（下表）；wx_fix 计数应为 ${full.length}（含差额为 0 的 ${zeroDelta} 场——零差额同样留痕）、合计应为 ${fmt2(sum(full, (c) => c.delta))}；守恒位应恒为 0。`,
       ...clubIds.map((id) => `club ${id}：基线 ${fmt2(balBase.get(id) ?? 0)} + ${fmt2(perClub.get(id) ?? 0)} = ${fmt2(round2((balBase.get(id) ?? 0) + (perClub.get(id) ?? 0)))}`),
     ]),
     `SELECT\n` +
@@ -856,7 +866,7 @@ function main(): void {
 
   const verify2 = [
     header(`S9 天气订正批 · 执行后复查（二）：逐场旧值是否已消失`, [
-      `att_old_n / wx_old_n 应为 0（旧值与旧天气类型都已不在）；att_new_n / wx_new_n 应分别等于订正场数 ${full.length} 与天气有变化的场数 ${changed.length}。`,
+      `att_old_n 应为 ${unchangedAtt}（上座本就未变的场次——旧值理应仍在）、wx_old_n 应为 0（旧天气类型都已不在）；att_new_n / wx_new_n 应分别等于订正场数 ${full.length} 与天气有变化的场数 ${changed.length}。`,
       `编码：match_id*1000000+attendance 与 match_id*10+天气码（晴1/多云2/雨3/雪4），避开 exec-shards 对 | 的禁用。`,
     ]),
     `SELECT\n` +
@@ -867,11 +877,11 @@ function main(): void {
   ].join('\n');
 
   const shards: Record<string, { body: string; note: string; expectChanges: string }> = {
-    'sql/02-recalc.sql': { body: bodyFull, note: '全量收敛（推荐）', expectChanges: `${full.length * (1 + 2)} 句` },
+    'sql/02-recalc.sql': { body: bodyFull, note: '全量收敛（推荐）', expectChanges: `${full.length * 3 + plan.weatherOnly.length} 句` },
     'sql/02a-type-only.sql': { body: bodyTypeOnly, note: '保守子集（只订类型不一致）', expectChanges: `${typeOnly.length * 3} 句` },
     'sql/03-verify-balance.sql': { body: verify1, note: '执行后复查（只读）', expectChanges: '只读' },
     'sql/03a-verify-rows.sql': { body: verify2, note: '执行后复查（只读）', expectChanges: '只读' },
-    'rollback/01-undo.sql': { body: bodyRollback, note: '回滚', expectChanges: `${full.length * 3} 句` },
+    'rollback/01-undo.sql': { body: bodyRollback, note: '回滚', expectChanges: `${full.length * 3 + plan.weatherOnly.length} 句` },
   };
 
   // 单条语句字节数守卫 + 禁用字符守卫
@@ -918,7 +928,8 @@ function main(): void {
       skipped: plan.skips.length,
       uncovered: plan.uncovered.length,
       anomalies: plan.anomalies.length,
-      ledgerEntries: full.filter((c) => c.delta !== 0).length,
+      ledgerEntries: full.length,
+      ledgerEntriesNonZero: full.filter((c) => c.delta !== 0).length,
       deltaSum: sum(full, (c) => c.delta),
       deltaSumTypeOnly: sum(typeOnly, (c) => c.delta),
       attendanceUp: full.filter((c) => c.aNew > c.aOld).length,

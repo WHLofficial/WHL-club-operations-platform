@@ -3,7 +3,8 @@
 > 生成时间：`2026-10-12T11:45:00Z`（批次时间戳，写入账本 `created_at`）
 > 平台快照：`snapshot.json`（`--remote` @ `2026-10-12T02:19:36.351Z`，90 行已结算上座）
 > 权威输入：`authoritative.json`（`--remote` @ `2026-10-12T11:43:54.534Z`，103 行 `match_weather`）
-> **状态：SQL 已生成、自检通过、分片演练通过 —— 未执行。执行需用户明确下令。**
+> **状态：已执行（2026-10-13T01:32Z，本地时钟）并复核通过 —— 237/237 句提交、账本守恒位 0、81 场与插件权威存证逐场一致。**
+> 执行细节与复核读数见 §10；执行前预检发现的快照后漂移（match 194）见 §10.2。
 
 ---
 
@@ -120,7 +121,7 @@ A_new = round(A_old × coef_插件 / mid(平台区间[平台当时的天气]))
 | 订正场次 | **78**（天气类型不一致 59 · 类型一致仅系数 19） |
 | 精度分档 | 精确 66 · 估计 12 |
 | 上座 | 上调 35 场 · 下调 37 场 · 满座截断 10 场 · 触容量上限 8 场 |
-| 账本 | 71 笔（7 场类型变但金额不变 ⇒ 无需记账）· **净 +0.63** |
+| 账本 | 78 笔（其中 7 场差额为 0 仍留痕；非零差额 71 笔）· **净 +0.63** |
 | 比赛日收入合计 | 162.23 → **162.86** |
 | 只改天气 | 3（全是弃权清零场） |
 | 跳过 | 9 |
@@ -282,42 +283,102 @@ A_new = round(A_old × coef_插件 / mid(平台区间[平台当时的天气]))
 **两侧金额不同是预期的**：两套系统各有自己的球场容量（插件最大 35000 vs 平台 12000–22000）、
 自己的球迷/影响力模型、各自抽各自的扰动。对账只要求「输入（天气类型 + 系数）一致 + 量级一致」。
 
-## 10. 执行顺序（授权后）
+## 10. 执行记录
+
+### 10.1 已执行（2026-10-13T01:32Z，本地时钟）
 
 ```bash
-# 0) 复核（只读）：再抓一次权威行，确认与生成时的输入一致
-node capture-authoritative.mjs
-
-# 1) 全量收敛（推荐）——27 批，每批 ≤10 句
+# 0) 预检（只读）：九段 SELECT 与 snapshot.json 基线逐段比对 + 账本锚查重 —— 结论见 §10.2
+# 1) 演练：237 句、单条最长 575B ⇒ 26 批（每批 ≤20 条且 ≤4000B）
+# 2) 正式执行（用户授权后）
 node ../prod-20261006-s9-walkover-fix/exec-shards.mjs sql/02-recalc.sql --remote --chunk=20 --retry=2
-#    （最小干预替代：sql/02a-type-only.sql，20 批，只订类型不一致的 59 场）
-
-# 2) 复查（只读）
-node ../prod-20261006-s9-walkover-fix/exec-shards.mjs sql/03-verify-balance.sql --remote
-node ../prod-20261006-s9-walkover-fix/exec-shards.mjs sql/03a-verify-rows.sql --remote
-
-# 3) 需要回滚时
-node ../prod-20261006-s9-walkover-fix/exec-shards.mjs rollback/01-undo.sql --remote --chunk=20 --retry=2
+#    合计：已提交 237/237 条，changes 237，rows_written 471，失败批 0
+#    ⇒ 每句恰好改 1 行 ⇒ 全部守卫命中，无静默 no-op
+# 3) 复查（只读）：读数见 §10.3
 ```
+
+未走保守路线（`sql/02a-type-only.sql` 只订 59 场类型不一致）；`rollback/01-undo.sql` 未使用、保持备用。
+
+### 10.2 执行前预检：快照后的生产漂移（已解释，不影响本批）
+
+预检把 `sql/01-precheck.sql` 九段 SELECT 与 `snapshot.json`（`2026-10-12T02:19:36Z`）基线逐段比对：
+
+| 段 | 基线 | 预检 | 结论 |
+| --- | --- | --- | --- |
+| A `season_tournaments` | 3 | 3 | OK |
+| C `match_attendance` | 90 | 91 | +match 194 |
+| D `stadiums` | 18 队 | 18 队（club 1 有差异） | 新结算带来的球迷演化 |
+| E `club_facilities` | 36 | 36 | OK |
+| G `ledger_entries` | 271 | 274 | +3 行（追加式） |
+| H `result_confirmations` | 110 | 111 | +match 194 |
+| I `config.attendance_model` | 0 | 0 | OK |
+| B `match_weather` | 0 | 103 | 插件推送已落库 |
+| 账本 `wx_fix` / `wx_fix_undo` 锚 | — | **0 行** | 本批此前确实未执行 |
+
+漂移全部由 **match 194** 引起（次级联赛第 8 轮 阿森纳 vs RB莱比锡，club 1 主场）：预报行
+`雨 / 0.8702` 于 `11:42:57Z` 随推送落库，赛果 `14:35:06Z` 才确认 ⇒ **该场结算时吃的是权威预报**，
+本来就已收敛、不需要订正；它带来的账本三行（club 112172 奖金 6.70；club 1 奖金 2.90 + 收入 1.18）
+与 club 1 的球迷演化都是**追加**。原 90 行上座行的 `weather/attendance/ticket/commercial/broadcast`
+逐行未变 ⇒ 02 的旧值守卫全部命中（实测 changes 237/237 也印证了这一点）；`02` 只碰
+`match_attendance` / `ledger_entries` / `ledger_accounts` 三张表，不碰球场。
+
+`match_weather` 现 103 行中 12 行尚无上座行（未结算），将来结算时同样吃权威预报 ⇒ 同样不需要订正。
+
+### 10.3 复核读数（全部符合预期）
+
+- **逐队余额 = 基线 + 净变化**：18 队全部相等。其中 16 队与 `03` 注释里逐队写明的期望值**逐字相同**；
+  club 1 = `49.68`（注释期望 `45.60`）、club 112172 = `2.16`（注释期望 `−4.54`）之差恰好等于
+  match 194 的快照后结算（club 1 主场 +4.08 = 1.18 + 2.90；club 112172 客场奖金 +6.70）。
+- **账本**：`wx_fix` 78 行、合计 `+0.63`（= 本批净变化）、`wx_fix_undo` 0 行、守恒位
+  `Σbalance − Σamount` = `0.00`。
+- **逐场旧值**：`att_old_n` = 6（上座本就未变的 6 场：被容量夹住或票收入四舍五入后相同，旧值理应仍在）、
+  `att_new_n` = 78、`wx_old_n` = 0、`wx_new_n` = 59。
+- **收敛核对 81/81**：78 场订正 + 3 场只改天气，其平台 `match_attendance.weather`、
+  `match_weather.weather` 与 `match_weather.wx_coef` 与 `authoritative.json`（推送落地时 `11:43:54Z`
+  的 103 行原文）**逐场一致**。
+- 结构性：`match_attendance` 91 行、`match_weather` 103 行、权威行 `forecast_by` 全为 `revenue-plugin`。
+
+### 10.4 工件口径订正（只订计数与注释，不动已执行的 SQL）
+
+生成器原来有三处计数与它实际发射的语句不一致，执行后按实测读数订正。**未重新生成 02/02a**：
+重跑演练（`--out=<临时目录> --ts=2026-10-12T11:45:00Z`）证明 `sql/02-recalc.sql`
+（104860B / 237 句 / `64db49f5b9a834cc…`）与 `sql/02a-type-only.sql`（78814B / 177 句 /
+`94592bebbf204e4e…`）**逐字节不变**，即指纹仍是实跑内容。
+
+| 位置 | 原值 | 实值 | 说明 |
+| --- | --- | --- | --- |
+| `03` 注释：`wx_fix` 计数 | 71 | **78** | 差额为 0 的 7 场同样写账本（留痕） |
+| `03a` 注释：`att_old_n` | 0 | **6** | 上座未变的 6 场，其旧值编码仍在 |
+| `manifest`：02 期望语句数 | 234 | **237** | 漏算 3 场只改天气的 UPDATE |
+| `report-data.json`：`ledgerEntries` | 71 | **78** | 行数；另加 `ledgerEntriesNonZero` = 71 |
+| `rollback/01-undo.sql` | 234 句 | **237 句** | 补上 3 场只改天气的还原（回滚完整性缺口） |
+
+`03`/`03a` 只有注释变化（非注释行逐字节相同），`rollback` 只多出 3 句还原；
+生成器 `gen-recalc-sql.ts` 的对应计数表达式已改（下次重跑即产出订正后的口径）。
 
 产物指纹（`sql/manifest.json`）：
 
 | 文件 | 字节 | 语句 | sha256 | 分片 |
 | --- | --- | --- | --- | --- |
-| `sql/02-recalc.sql` | 104860 | 237 | `64db49f5b9a834cc0c9b08778f7b875387899ef6d232540d5cdaf40d6740418a` | 27 批 |
-| `sql/02a-type-only.sql` | 78814 | 177 | `94592bebbf204e4e19a20478e079d395c4b80f730e1148d77e615517614fb248` | 20 批 |
-| `sql/03-verify-balance.sql` | 3014 | 1 | `eb05987366d43c847276ab27a23853c799debe67a231cc6c0a35149b9f5dd965` | 只读 |
-| `sql/03a-verify-rows.sql` | 3334 | 1 | `a4da8eaf7a51d5a3687c131ac240f7a58acca5976ddfe8d651e71df8fa072b98` | 只读 |
-| `rollback/01-undo.sql` | 95925 | 234 | `2eb987c60799097842b3fc1cdc0e2ae7d958d7f1670fcfdeffb1b32878bade58` | 24 批 |
+| `sql/02-recalc.sql` | 104860 | 237 | `64db49f5b9a834cc0c9b08778f7b875387899ef6d232540d5cdaf40d6740418a` | 26 批（实跑） |
+| `sql/02a-type-only.sql` | 78814 | 177 | `94592bebbf204e4e19a20478e079d395c4b80f730e1148d77e615517614fb248` | 20 批（未用） |
+| `sql/03-verify-balance.sql` | 3071 | 1 | `796323881d910f352efec39906219f3fa07d70ecf014460c24ab833eea36e14f` | 只读 |
+| `sql/03a-verify-rows.sql` | 3391 | 1 | `79b8e90f6648bed727baffdb8708029d912abdacf4bd85376765e0e4f860c7e3` | 只读 |
+| `rollback/01-undo.sql` | 96524 | 237 | `22f48e13d4e9a6b6172b60d139d8628a7a1d50077ba0a442073e3be98f6f9960` | 24 批（未用） |
 
-生成器可复现：`node gen-recalc-sql.ts --ts=2026-10-12T11:45:00Z` 重跑逐字节一致
-（`--verify` 已复核）。`sql/02*.sql` 按仓惯例不入库（`.gitignore`），
-但用 `snapshot.json` + `authoritative.json` + 上述 `--ts` 可随时复现。
+> 上表 sha256 的短前 16 位与 `sql/manifest.json` 现场一致（`02`/`02a` 与执行时相同；其余三个是
+> §10.4 订正后的版本）。完整值以 `sql/manifest.json` 为准。
+
+生成器可复现：`node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --ts=2026-10-12T11:45:00Z`
+重跑逐字节一致（只读复核做法：`--out=<临时目录>` 重跑后比对 sha256）。`sql/02*.sql` 按仓惯例不入库
+（`.gitignore`），但用 `snapshot.json` + `authoritative.json` + 上述 `--ts` 可随时复现。
 
 ## 11. 未做的事
 
-- **未执行平台侧订正**（本批 SQL 只是工件）。
+- **回滚未执行**（本批无需回滚）；`rollback/01-undo.sql` 保持备用，已补全 3 场只改天气的还原。
 - **未改动 `match_attendance` 之外的历史**：账本只追加、不改写旧流水；奖金/对赌未受影响
   （本批只动比赛日收入与余额，S9 奖金结算在弃权批已处理过，本次净变化 ±0.7 量级不触发对赌重算）。
+- **未对 S9 之后新结算的场次做任何事**：match 194 等场次结算时已吃权威预报，本就收敛（§10.2）。
 - **插件侧 `sync_weather` 未再跑**（幂等守卫保证重跑为 no-op，但无必要）。
 - 未对插件库做任何额外写操作（部署迁移 + 冲正之外）。
+

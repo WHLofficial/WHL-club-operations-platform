@@ -2,7 +2,7 @@
 --
 -- 生成时间：2026-10-12T11:45:00Z
 -- 执行：node exec-shards.mjs sql/<本文件> --remote --chunk=20 --retry=2
--- att_old_n / wx_old_n 应为 0（旧值与旧天气类型都已不在）；att_new_n / wx_new_n 应分别等于订正场数 78 与天气有变化的场数 59。
+-- att_old_n 应为 6（上座本就未变的场次——旧值理应仍在）、wx_old_n 应为 0（旧天气类型都已不在）；att_new_n / wx_new_n 应分别等于订正场数 78 与天气有变化的场数 59。
 -- 编码：match_id*1000000+attendance 与 match_id*10+天气码（晴1/多云2/雨3/雪4），避开 exec-shards 对 | 的禁用。
 
 
