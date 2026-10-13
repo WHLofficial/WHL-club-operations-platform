@@ -92,4 +92,4 @@ node scripts/prod-20261011-s9-weather-recalc/capture-authoritative.mjs   # 抓 f
 node scripts/prod-20261011-s9-weather-recalc/gen-recalc-sql.ts --ts=<ISO> # 出 02*/02a/03*/rollback/report
 ```
 
-生成的订正 SQL **只备不跑**；执行需用户明确下令（见该目录 `README.md` §4）。
+生成的订正 SQL **已于 2026-10-13T01:32Z 执行完毕**（237/237 句、账本 78 行 +0.63、守恒 0.00、收敛 81/81；见该目录 `README.md` §4 与 `report.md` §10）。

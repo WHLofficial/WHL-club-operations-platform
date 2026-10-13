@@ -54,7 +54,7 @@
 //
 // CLI：node gen-recalc-sql.ts [--authoritative=<file>] [--ts=<ISO>] [--out=<dir>]
 //   默认读 authoritative.json（capture-authoritative.mjs 在插件推送后抓的 match_weather）。
-//   没有它 → 只打印「推送前盘点 + 敏感度区间」并退出 0，不产出订正 SQL（工件保持只备不跑）。
+//   没有它 → 只打印「推送前盘点 + 敏感度区间」并退出 0，不产出订正 SQL（本批工件已于 2026-10-13T01:32Z 执行，见 report.md §10）。
 //   --ts 固定工件时间戳：补生成后续分片时要传回已执行批的时间戳，否则 created_at 会变、
 //   与已执行的 SQL 不再逐字一致（沿用 prod-20261006 批的纪律）。
 
