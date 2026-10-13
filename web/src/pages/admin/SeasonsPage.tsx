@@ -127,7 +127,7 @@ function SeasonsSection() {
     setBusy(true);
     try {
       const res = await apiPost<SeasonSettleResult>(`/api/admin/seasons/${seasonNo}/settle-season`, { acknowledged });
-      show(`赛季 ${seasonNo} 已结算：growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。（忠诚奖金自v3.0.0 起在赛季中期末关窗时发。）`);
+      show(`赛季 ${seasonNo} 已结算：growable 重判 ${res.growable} 人${res.warnings.length > 0 ? `；提示：${res.warnings.join('；')}` : ''}。（忠诚支出自 v3.0.0 起在赛季中期窗关窗时扣。）`);
       setSettleCheck(null);
       reload();
     } catch (err) {

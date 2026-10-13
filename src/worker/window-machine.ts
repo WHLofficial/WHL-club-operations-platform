@@ -249,6 +249,7 @@ export async function closeWindow(
   forceSettled: number;
   payroll: PayrollSummary;
   home: HomeWindowSummary;
+  /** 忠诚支出（v6.47.0 起为俱乐部扣款）：count = 人次数、total = 扣款金额绝对值（正数） */
   loyalty: { count: number; total: number };
 }> {
   const db = env.DB;
@@ -298,8 +299,9 @@ export async function closeWindow(
   const payroll = await windowPayrollStatements(env, win.season, win.windowSeq, { chargeWages: !isTemporary });
   // 窗末主场结算（v1.5.0）：维护费+死忠演化+冠名收租并入同批（幂等闸/原子语义与工资一致）
   const home = await windowHomeStatements(env, win.season, win.windowSeq, { chargeNaming: !isTemporary, actor });
-  // 忠诚奖金（规则 4.3.2；v3.0.0 改口径）：只在常规窗且同赛季第 2 个（中期）关窗时发，
-  // 效力按关窗后窗刻度算（本窗 +0.5 已计入），逐队汇总，幂等 ref = window/season*100+windowSeq
+  // 忠诚支出（规则 4.3.2；v6.47.0 用户令 2026-10-13 定为俱乐部支出）：只在常规窗且同赛季第 2 个
+  // （中期）关窗时扣，效力按关窗后窗刻度算（本窗 +0.5 已计入），逐队汇总，幂等 ref = window/season*100+windowSeq
+  // summary.total = 扣款金额绝对值（正数），余额不足时扣成负 = 欠款
   let loyalty: { statements: ReturnType<Env['DB']['prepare']>[]; summary: { count: number; total: number } } = {
     statements: [],
     summary: { count: 0, total: 0 },
@@ -326,7 +328,7 @@ export async function closeWindow(
         isTemporary,
         forceSettled,
         loyaltyCount: loyalty.summary.count,
-        loyaltyTotal: loyalty.summary.total,
+        loyaltyTotal: loyalty.summary.total, // 扣款金额绝对值（正数；余额可扣成负 = 欠款）
         // 同批扣款的逐类汇总：逐笔流水已各自带 memo/ref，此处补「这次关窗一共扣了多少」的可核对口径
         payroll: payroll.summary,
         home: home.summary,

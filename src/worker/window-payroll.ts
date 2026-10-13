@@ -1,6 +1,7 @@
 // 窗末结算扣款（v1.4.0，TECH_DESIGN §11「窗口 closed 触发结算」；v3.0.0 按窗类型分支）：
 // 常规窗（is_temporary=0）：富人税 → 工资。工资 = Σ现行合同（is_active=1）wage（m/半赛季，一窗全额；
-//   训练营合同 wage 存 0.75 同口径），未达级别下限（帽值−15 = 顶级 53 / 次级 43，用户令 2026-10-06）按下限扣；
+//   训练营合同 wage 存 0.75 同口径），下限 = 级别帽值 − wage_floor_gap（config 键，默认 0 = 不设下限；
+//   v6.47.0 用户令 2026-10-13 取消穷鬼线，旧口径为 gap 15 = 顶级 53 / 次级 43）；
 //   CPU 队不入账（用户令 2026-10-06）——工资与富人税都跳过。
 // 临时窗（is_temporary=1）：只扣富人税，工资不扣（规则口径：临时窗不是半赛季节点）。
 // 富人税（§9.2）= max(资金>125m → 资金×20%，球队价值(ΣRC+资金)>700m → 价值×5%)；
@@ -11,7 +12,7 @@
 // 关窗批的窗口状态 UPDATE 行数做原子闸，闸 0 行=关窗已并发完成、同批扣款一并回滚。
 import type { Env } from './env.ts';
 import { createConfigService } from '../core/config.ts';
-import { DEFAULT_WAGE_CAP_BY_TIER, WAGE_FLOOR_GAP } from '../core/squad-rules.ts';
+import { DEFAULT_WAGE_CAP_BY_TIER } from '../core/squad-rules.ts';
 import { cpuClubIds } from './growth.ts';
 import { ledgerMovement } from './ledger.ts';
 import { deriveClubTiers, type Tier } from './tier.ts';
@@ -21,7 +22,9 @@ export interface PayrollSummary {
   wageTotal: number;
   taxClubs: number;
   taxTotal: number;
-  /** 触发级别下限（帽值−15）按下限扣的队数（v6.39.0） */
+  /**
+   * 触发级别下限（帽值 − wage_floor_gap）按下限扣的队数（v6.39.0；v6.47.0 起 gap=0 ⇒ 恒为 0）
+   */
   wageFloorClubs: number;
 }
 
@@ -82,9 +85,10 @@ export async function windowPayrollStatements(
       });
     }
   }
-  // 扣工资下限（v6.39.0，用户令 2026-10-06）：实扣 = max(Σ现行合同工资, 级别帽值−15)；
-  // 未定级（报名派生不出级别）不适用下限，照旧按 Σ 工资扣。
+  // 扣工资下限（v6.39.0，用户令 2026-10-06；v6.47.0 改为 config 驱动）：实扣 = max(Σ现行合同工资, 帽值−gap)；
+  // gap 默认 0 = 不设下限（用户令 2026-10-13 取消穷鬼线）；未定级（报名派生不出级别）不适用下限，照旧按 Σ 工资扣。
   const capJson = await config.getJson<Partial<Record<Tier, number>>>('wage_cap');
+  const floorGap = (await config.getNumber('wage_floor_gap')) ?? 0;
   const payableClubs = wages.results.filter((w) => w.total > 0 && !cpuIds.has(w.club_id));
   const tiers = await deriveClubTiers(env, season, payableClubs.map((w) => w.club_id));
   let wageFloorClubs = 0;
@@ -92,7 +96,7 @@ export async function windowPayrollStatements(
     const total = Math.round(w.total * 100) / 100;
     const tier = tiers.get(w.club_id) ?? null;
     const cap = tier === null ? null : capJson?.[tier] ?? DEFAULT_WAGE_CAP_BY_TIER[tier];
-    const floor = cap === null ? null : cap - WAGE_FLOOR_GAP;
+    const floor = cap === null || floorGap <= 0 ? null : cap - floorGap;
     const charge = floor !== null && total < floor ? floor : total;
     if (charge > total) wageFloorClubs += 1;
     const floorNote = charge > total ? `；未达${tier === 'premier' ? '顶级' : '次级'}下限 ${charge} m，按下限扣` : '';

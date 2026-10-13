@@ -52,9 +52,11 @@ export const MODEL_DEFAULTS = Object.freeze({
   influence_coef_static: 0.13,
 });
 
+// 与 src/core/config.ts 的 tier_table 默认值逐字对齐（tests/influence-recalc-engine.test.ts 断言两者相等）。
+// v6.47.0：第 1 档 base_maintenance 5.0 → 3.5 同步。
 export const TIER_TABLE_DEFAULTS = Object.freeze({
   0: { name: '社区级', min_seats: 12000, max_seats: 25000, base_maintenance: 2.0, per_10k_rate: 0.8, attend_coef: 1.0, upgrade_cost: 3.0 },
-  1: { name: '地区级', min_seats: 20000, max_seats: 35000, base_maintenance: 5.0, per_10k_rate: 0.55, attend_coef: 1.1, upgrade_cost: 4.5 },
+  1: { name: '地区级', min_seats: 20000, max_seats: 35000, base_maintenance: 3.5, per_10k_rate: 0.55, attend_coef: 1.1, upgrade_cost: 4.5 },
   2: { name: '大区级', min_seats: 25000, max_seats: 45000, base_maintenance: 8.0, per_10k_rate: 0.35, attend_coef: 1.2, upgrade_cost: 6.0 },
   3: { name: '国家级', min_seats: 35000, max_seats: 60000, base_maintenance: 11.0, per_10k_rate: 0.28, attend_coef: 1.3, upgrade_cost: 10.0 },
   4: { name: '国际级', min_seats: 50000, max_seats: 100000, base_maintenance: 14.0, per_10k_rate: 0.2, attend_coef: 1.4, upgrade_cost: 0.0 },

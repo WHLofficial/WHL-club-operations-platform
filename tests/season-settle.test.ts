@@ -256,7 +256,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
     expect(kinds).toEqual(['luxury_tax']);
   });
 
-  it('工资下限：未达级别下限按下限扣（顶级 53 / 次级 43），未定级不适用', async () => {
+  it('工资下限（wage_floor_gap=15）：未达级别下限按下限扣（顶级 53 / 次级 43），未定级不适用', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11); // 顶级：报了 league_premier
@@ -277,6 +277,8 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
         (2, 2, 2, 500, 37.62, '2026-01-01T00:00:00Z', 1),
         (3, 3, 3, 500, 10, '2026-01-01T00:00:00Z', 1)`)
       .run();
+    // 下限口径由 config 键驱动（v6.47.0）：默认 '0' = 不设下限，本用例显式回到旧的 gap 15 口径
+    fx.sqlite.prepare(`INSERT INTO config (key, value, updated_at) VALUES ('wage_floor_gap', '15', '2026-01-01T00:00:00Z')`).run();
     const { statements, summary } = await windowPayrollStatements(fx.env, 9, 1, { chargeWages: true });
     expect(summary).toMatchObject({ wageClubs: 3, wageTotal: 53 + 43 + 10, wageFloorClubs: 2 });
     await fx.env.DB.batch(statements);
@@ -293,7 +295,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
     expect(rows[2].memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）');
   });
 
-  it('下限边界：恰等于下限不按下限记（memo 无尾注、计数不加）', async () => {
+  it('下限边界（gap=15）：恰等于下限不按下限记（memo 无尾注、计数不加）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11); // 工资恰等于顶级下限 53
@@ -312,6 +314,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
         (1, 1, 1, 500, 53, '2026-01-01T00:00:00Z', 1),
         (2, 2, 2, 500, 53.01, '2026-01-01T00:00:00Z', 1)`)
       .run();
+    fx.sqlite.prepare(`INSERT INTO config (key, value, updated_at) VALUES ('wage_floor_gap', '15', '2026-01-01T00:00:00Z')`).run();
     const { statements, summary } = await windowPayrollStatements(fx.env, 9, 1, { chargeWages: true });
     expect(summary).toMatchObject({ wageClubs: 2, wageTotal: 106.01, wageFloorClubs: 0 });
     await fx.env.DB.batch(statements);
@@ -326,7 +329,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
     expect(rows[1].memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）');
   });
 
-  it('下限取 config 覆盖值：帽值改 60 后按下限 45 判（不再用默认 53）', async () => {
+  it('下限取 config 覆盖值（gap=15）：帽值改 60 后按下限 45 判（不再用默认 53）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
@@ -337,6 +340,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
     fx.sqlite
       .prepare(`INSERT INTO config (key, value, updated_at) VALUES ('wage_cap', '{"premier":60,"second":58}', '2026-01-01T00:00:00Z')`)
       .run();
+    fx.sqlite.prepare(`INSERT INTO config (key, value, updated_at) VALUES ('wage_floor_gap', '15', '2026-01-01T00:00:00Z')`).run();
     fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24)`).run();
     fx.sqlite
       .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES (1, 1, 1, 500, 48, '2026-01-01T00:00:00Z', 1)`)
@@ -348,6 +352,28 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
     // 用默认帽值（68 ⇒ 下限 53）会扣成 −53；覆盖成 60 ⇒ 下限 45 ⇒ 按实际工资扣
     expect(row.amount).toBe(-48);
     expect(row.memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）');
+  });
+
+  it('取消穷鬼线（wage_floor_gap 默认 0）：低于级别下限也按现行合同实扣、不记下限', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    fx.sqlite
+      .prepare("INSERT INTO season_tournaments (id, season, tournament_id, competition_type) VALUES (1, 9, 1, 'league_premier')")
+      .run();
+    fx.tour.prepare('INSERT INTO entry (id, tournament_id, team_id) VALUES (1, 1, 11)').run();
+    // 贝蒂斯式廉价阵容：顶级 Σ33.37（旧口径下限 53 会扣成 −53）
+    fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24)`).run();
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, effective_from, is_active) VALUES (1, 1, 1, 500, 33.37, '2026-01-01T00:00:00Z', 1)`)
+      .run();
+    const { statements, summary } = await windowPayrollStatements(fx.env, 9, 1, { chargeWages: true });
+    expect(summary).toMatchObject({ wageClubs: 1, wageTotal: 33.37, wageFloorClubs: 0 });
+    await fx.env.DB.batch(statements);
+    const row = fx.sqlite.prepare("SELECT amount, memo FROM ledger_entries WHERE kind = 'wage'").get() as { amount: number; memo: string };
+    expect(row.amount).toBe(-33.37);
+    expect(row.memo).toBe('球员工资（S9 第 1 窗，1 人现行合同）'); // 无「未达…下限」尾注
   });
 
   it('CPU 队不入账：工资与富人税都跳过（用户令 2026-10-06）', async () => {
@@ -366,7 +392,7 @@ describe('窗末扣款（工资+富人税 §9.2）', () => {
   });
 });
 
-describe('赛季结算（growable 重判+settled）与忠诚奖金（v3.0.0 移入中期窗）', () => {
+describe('赛季结算（growable 重判+settled）与忠诚支出（v3.0.0 移入中期窗；v6.47.0 改为扣款）', () => {
   it('硬阻断（开窗未关）409；growable 按 age_cap 重判；重复结算 409', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
@@ -390,7 +416,7 @@ describe('赛季结算（growable 重判+settled）与忠诚奖金（v3.0.0 移�
     await expect(settleSeason(fx.env, 1, 1, true)).rejects.toThrow('已经结算过');
   });
 
-  it('忠诚奖金：按效力赛季分档、逐队合并一笔、ref=窗口；效力 0 不发', async () => {
+  it('忠诚支出：按效力赛季分档、逐队合并一笔、ref=窗口、金额为负（扣款）；效力 0 不发', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);
     seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
@@ -402,15 +428,32 @@ describe('赛季结算（growable 重判+settled）与忠诚奖金（v3.0.0 移�
         (1, 1, 1, 100, 3, 4, 1), (2, 2, 1, 100, 3, 2, 1), (3, 3, 1, 100, 3, 0, 1), (4, 4, 2, 100, 3, 6, 1)`)
       .run();
     const { statements, summary } = await loyaltyMovements(fx.env.DB, 1, 1, 1, 6);
-    expect(summary).toEqual({ count: 3, total: 35 }); // 5 + 10 + 20；2 队效力 0 无档不发
+    expect(summary).toEqual({ count: 3, total: 35 }); // 5 + 10 + 20；total 为扣款额绝对值；2 队效力 0 无档不发
     await fx.env.DB.batch(statements);
     const rows = fx.sqlite
       .prepare("SELECT club_id, amount, ref_type, ref_id, memo FROM ledger_entries WHERE kind = 'loyalty' ORDER BY club_id")
       .all() as { club_id: number; amount: number; ref_type: string; ref_id: number; memo: string }[];
     expect(rows).toHaveLength(1); // 一队三份合同合并成一条流水（幂等闸按 (club_id,kind,ref_type,ref_id)）
-    expect(rows[0]).toMatchObject({ club_id: 1, amount: 35, ref_type: 'window', ref_id: 101 });
+    expect(rows[0]).toMatchObject({ club_id: 1, amount: -35, ref_type: 'window', ref_id: 101 }); // 负 = 出账（m）
     expect(rows[0]?.memo).toContain('S1 第 1 窗');
-    expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'loyalty_bonus'").get()).toEqual({ n: 1 });
+    expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'loyalty_charge'").get()).toEqual({ n: 1 });
+  });
+
+  it('忠诚支出收官档：效力 ≥3.5 赛季免收（tiers 尾档 [3.5,0] ⇒ 不产生流水）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 30), (2, 'p2', '乙', 1, 24)`).run();
+    // ticksAfterClose = 8：s=0 ⇒ 效力 4.0（≥3.5 免收）；s=4 ⇒ 效力 2.0（10%）
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, service_ticks, is_active) VALUES
+        (1, 1, 1, 100, 3, 0, 1), (2, 2, 1, 100, 3, 4, 1)`)
+      .run();
+    const { statements, summary } = await loyaltyMovements(fx.env.DB, 1, 1, 1, 8);
+    expect(summary).toEqual({ count: 1, total: 10 }); // 只有效力 2.0 的那一位按 10% 扣
+    await fx.env.DB.batch(statements);
+    const row = fx.sqlite.prepare("SELECT amount FROM ledger_entries WHERE kind = 'loyalty'").get() as { amount: number };
+    expect(row.amount).toBe(-10);
   });
 
   it('软警示（未确认完赛果）需 acknowledged；age_cap 缺失跳过 growable 重判', async () => {

@@ -1130,6 +1130,7 @@ export interface CloseWindowResult {
   windowSeq: number;
   /** v3.0.0：本次关的是临时窗 */
   isTemporary: boolean;
+  /** 忠诚支出（v6.47.0 起为俱乐部扣款）：count = 人次数、total = 扣款金额绝对值（正数） */
   loyalty: { count: number; total: number };
   forceSettled: number;
 }
@@ -1618,6 +1619,7 @@ export const LEDGER_KIND_LABELS: Record<string, string> = {
   match_diff_burn: '匹配差额',
   free_agent_fee: '海捞签入费',
   wage: '工资',
+  loyalty: '忠诚支出',
   ticket: '门票',
   commercial: '商业收入',
   broadcast: '转播分成',

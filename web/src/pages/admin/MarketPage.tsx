@@ -611,7 +611,7 @@ function WindowsSection() {
           ? `第 ${res.season} 赛季窗口 ${res.windowSeq}${tail} 已关闭：${res.forceSettled} 场签约谈判按已定条款强制成约。`
           : `第 ${res.season} 赛季窗口 ${res.windowSeq}${tail} 已关闭，窗尾截止处理完成。`) +
           (res.loyalty && res.loyalty.count > 0
-            ? `中期窗忠诚奖金发放 ${res.loyalty.count} 队 / 合计 ${res.loyalty.total.toFixed(2)}m。`
+            ? `中期窗忠诚支出扣款 ${res.loyalty.count} 队 / 合计 ${res.loyalty.total.toFixed(2)}m。`
             : ''),
       );
       reload();
@@ -630,7 +630,7 @@ function WindowsSection() {
         同一时刻只有一个窗口开着。开窗会给全联盟球员重掷经纪人性格；关窗前先处理完市场截止单，
         并要求没有待审单、没有等待匹配的激活单、没有进行中的签约谈判——除非开了 window_force_settle 参数并用强制关窗，
         未谈完的谈判会按买方已提交的条款强制成约。勾选「同时宣告新成长期」会在开窗同一批里画一条里程碑起算线。
-        一个赛季最多 2 个常规窗（第 1 个是季初、第 2 个是中期）：季初与中期关窗推进效力 0.5 赛季、按合同扣工资与冠名费，中期关窗另发忠诚奖金；
+        一个赛季最多 2 个常规窗（第 1 个是季初、第 2 个是中期）：季初与中期关窗推进效力 0.5 赛季、按合同扣工资与冠名费，中期关窗另扣忠诚支出；
         临时窗只扣富人税与维护费（维护费按本窗主场数照收），不推进效力、不扣工资、不收冠名费。
       </p>
       <div className="inline-form">

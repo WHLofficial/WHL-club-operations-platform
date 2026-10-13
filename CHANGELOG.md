@@ -4,6 +4,32 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.47.0] · 经济革命 T0 发版批 0：忠诚奖金改「忠诚支出」（扣款）+ 取消穷鬼线（`wage_floor_gap` 默认 0）+ 效力支出费率排程 + 开放 2 档并下调 1 档基础维护费（2026-10-13）
+
+**本地完成，未 push**（零迁移、零 DDL、零生产写；判级 minor——① 忠诚从「发钱」改为「扣钱」（账本方向反转）② 新增 config 白名单键 `wage_floor_gap`（默认 `0` ⇒ 取消穷鬼线）③ `loyalty_tiers` 默认排程加收官档 ④ `tier_table[1].base_maintenance` 5.0 → 3.5）。⚠️ 本版与两批生产写批**必须成对执行**：**先发版、后落库**（顺序颠倒 ⇒ S9 中期窗在旧代码下把 −591.65 反向发成 +591.65，一进一出差 **1183.30**）。
+
+**缘起**（用户四条 + 此前已定三条）：①「**T0，但不开窗**，头脑风暴明确实施细节」——在 `memory/plan-s9-s10-economy-revolution-rollout.md` 的 T0 批次内落代码与工件、**不开窗**（不触发关窗批、不产生任何生产动账）；②「**T3a 提前到此批，并将之前因穷鬼线多扣的退回**」；③「不要忘了用 architecture-designer / game-economy-designer」；此前已定：**忠诚 = 俱乐部支出**、**按每个球员效力时长分别分档**、**费率排程 = 效力 0.5/1 收 5%、1.5/2 收 10%、2.5/3 收 20%、≥3.5 不收**、**扣款时点仍是每赛季第二个正式窗关窗**。
+
+**交付（worker）**：
+- **忠诚方向反转**（`src/worker/season-settle.ts`）：`loyaltyMovements` 由 `delta: agg.amount`（入账）改为 **`delta: -agg.amount`**（出账）；memo 由「忠诚奖金（S…）」改「**忠诚支出**（S…）」；审计 `action` 由 `'loyalty_bonus'` 改 **`'loyalty_charge'`**（`after.amount` 仍记扣款绝对值）；兜底排程补收官档（`[[0.5,0.05],[1.5,0.10],[2.5,0.20],[3.5,0]]`，与 config 默认同源）。账本无余额下限守卫（`ledger_accounts` 直接累加）⇒ 负号即「**欠款**」语义：余额不足时扣成负值、下窗自然补扣（欠账三选一中的默认实现，另两选项需再发版）。连带注释/类型：`src/worker/window-machine.ts` 关窗响应 `loyalty`（`count` = 人次数、`total` = 扣款绝对值）、`src/worker/contract-ticks.ts`、`src/worker/routes/admin/market.ts`、`src/worker/routes/admin/seasons.ts`（顺带订正该处本已过时的「忠诚奖金 → growable」序）。
+- **取消穷鬼线（零发版可回滚）**：`src/core/config.ts` 新增白名单键 **`wage_floor_gap`（默认 `'0'`）**；`src/worker/window-payroll.ts` 改 `const floorGap = (await config.getNumber('wage_floor_gap')) ?? 0;` + `const floor = cap === null || floorGap <= 0 ? null : cap - floorGap;`，去掉对 `WAGE_FLOOR_GAP` 的 import；`src/core/squad-rules.ts` 保留该常量作历史留档（注释写明旧行为 = 该键设 `'15'` ⇒ 顶级 53 / 次级 43）。⇒ 未来重启下限或调裕度都是**一次 `PUT /api/admin/config`**，不必发版。
+- **费率排程固化**：`loyalty_tiers` 默认改 `'[[0.5,0.05],[1.5,0.10],[2.5,0.20],[3.5,0]]'`（收官 0 档由实现里的 `rate <= 0 → continue` 跳过，不写 0 元流水）。口径要点：扣款只发生在**每赛季第 2 个常规窗**，而窗刻度每赛季走 2 步 ⇒ **两次扣款之间效力 +1.0 赛季**、每份合同共扣 **3 期 = 终身 35% × RC**（不是 6 期 70%）。
+- **维护费与档位**：`tier_table` 第 1 档 `base_maintenance` **5.0 → 3.5**（升档后基础维护压力减半，配合生产写批把 `stadium_max_open_tier` 开到第 2 档）。
+- **前端与镜像**：`web/src/lib/api.ts`（`LEDGER_KIND_LABELS.loyalty = '忠诚支出'` + 类型注释）、`web/src/pages/Ledger.tsx`（KIND_OPTIONS 补 `loyalty`）、`web/src/pages/admin/MarketPage.tsx` 与 `SeasonsPage.tsx`（中期窗「另扣忠诚支出」）；`scripts/prod-20261004-influence-recalc/engine.mjs` 的 `TIER_TABLE_DEFAULTS` 镜像同步（与 `src/core/config.ts` 逐字对齐，`tests/influence-recalc-engine.test.ts` 断言两者相等）。
+- **测试**：`tests/season-settle.test.ts` 忠诚用例改断言负号 + `loyalty_charge`（`total` 仍为绝对值）、新增「收官档：效力 ≥3.5 免收」用例（效力 4.0 免收 + 效力 2.0 收 10% ⇒ 只 1 人 / 10）；三个下限用例**显式插 `wage_floor_gap='15'`** 回到旧口径验证、新增「取消穷鬼线（默认 0）」用例（Σ 33.37 ⇒ 实扣 −33.37、`wageFloorClubs=0`、memo 无尾注）；`tests/config.test.ts` / `tests/market-rounds.test.ts` / `tests/naming-tiers.test.ts` 的 `CONFIG_KEYS` 长度断言 80 → **81**。
+
+**验收**：`npm run typecheck` 三份 tsconfig 0 error；`npx vitest run` 全量 **122 文件 / 1997 例**全绿（v6.46.0 基线 122/1995，净 +2 例）；`npm run build` 成功。
+
+**生产写批（两批，均「已备未跑」，需当轮授权；AGENTS.md：`--remote` 写与 `scripts/prod-*/` SQL 不自行执行）**：
+- **批 A `scripts/prod-20261013-t0-economy-patch/`**：3 键落库（`loyalty_tiers` 排程 / `wage_floor_gap='0'` / `stadium_max_open_tier='2'`）= 6 语句（3 键 × 审计镜像 + upsert，期望 changes 6）+ 回滚件 6 语句；**取代** `scripts/prod-20261013-loyalty-tier-schedule/`（保留作历史、勿再执行）。
+- **批 B `scripts/prod-20261013-wage-floor-refund/`**：退回 S9 第 1 窗因旧下限多扣的 **+28.78**（3 队：切尔西 `+3.77` 24.10→27.87、奥林匹亚科斯 `+5.38` 49.06→54.44、贝蒂斯 `+19.63` 35.71→55.34）。做法是**订正历史行**（原地改 wage 行金额 + 改 memo 尾注 + 整队后续流水 `balance_after` 顺移 24 条 + 账户对齐），changes **30**、重放 **0**、回滚 30/0；**不新增流水行**（避免被读成 faucet）⇒ 必须整队顺移账链。本地已用 `node:sqlite` 复刻三队真实流水序列验证（`scratch/verify-refund-sql.mjs`：主件 30 → 重放 0 → 回滚 30 → 重放 0，账链全程一致）。
+
+**评审·踩坑**：① 忠诚方向反转**必须与排程落库同批、且发版在前**（否则 S9 中期窗按旧代码把 −591.65 发成 +591.65，差 1183.30）；② 扣款只发生在赛季第 2 个常规窗 ⇒ 两次间隔窗刻度 +1.0 赛季 ⇒ 排程实际只走 3 期（终身 35%×RC），排程里的 `[3.5,0]` 是**收官档**而非装饰；③ 账本无余额下限 ⇒ 负号即「欠款」，4 支次级队（阿森纳/维拉/拜仁/RBL）同窗现金不足会被扣成负值（RBL 最重）；④ 退回历史多扣**不能新增流水**（会被读成 faucet）⇒ 原地改行 + 整队顺移 + 账户对账三件必须同批，且顺移条数取决于该队工资行之后的流水数（本轮 6/6/12）；⑤ `WAGE_FLOOR_GAP` 常量保留但不再被引用，避免既有文档/生成器口径断裂；⑥ 改历史行属订正类，本批不写 `audit_log`（与 `scripts/prod-20261012-*` 天气订正批同口径），留痕走执行记录与 `03-verify` 回读。
+
+**文档同步**：TECH_DESIGN §7.1 kind 表（`loyalty` 行改 `−`、阶段改 P1 中期窗关窗）、§7.2 发行/回收（忠诚移出「发行」、进「回收」）、§11 结算段与关窗批、§13 config 表（新增 `wage_floor_gap` 行 + `wage_cap`/`loyalty_tiers`/`tier_table` 三行口径）、§15 假设 5/14/40；PRD 4.7 赛季结算行与假设 5；ROADMAP 本节；测试计划 `docs/test-plans/v6.47.0-economy-t0-patch.md`；排期稿 `memory/plan-s9-s10-economy-revolution-rollout.md` §4（T3a 并入 T0 + 退回批）。
+
+**待拍板**：① 是否授权执行批 A/B（含执行顺序）；② 欠账策略取值——**允许负余额**（默认实现、零额外代码）/ 归零 / 单列欠款账（后两者需再发版）；③ `stadium_max_open_tier=2` 的落库时点（与 T1 中期窗同批更可控）。
+
 ## [v6.46.0] · 球员页「比赛」页签：比赛数据进档案 + 补录放开到全部已确认非弃权场次 + 评分入库放宽 0–10（2026-10-13）
 
 **已上线**（2026-10-13 用户「推送发布」：push `63864e2..09a9700`（11 枚 = 本版四枚 `0671f15`/`6d7a3bd`/`ec419cc`/`09a9700` + 前序 v6.45.1 四枚 `0d473ad`/`5f42449`/`de71eb0`/`2e1f14d` + v6.44.0 状态回写 `8a7f1e5` + v6.44.0/v6.45.0 发布记录回写 `2b2ec14` + 2026-10-11 S9 天气订正批工件 `26d5208`）⇒ CF Workers Builds 自动部署 Version `f2c82825-63ec-4e8c-b427-1f35f589a054`（version created 2026-10-13T00:12:24.775Z、deployment 00:12:25.728Z、100%、Source `Unknown (deployment)`）；零迁移、零 DDL、零生产写、零前置 secret/配置。上线回读：线上 `assets/index-CU9W7KKJ.js`（sha256 `e2cb1d0d…55a09`）与 `assets/index-CY2IZrGm.css`（sha256 `22c7aa10…f5b8d`）与本地 HEAD 重构建**逐字节一致**、线上入口含版本串 `6.46.0`、CSS 含 `matches-table`/`rating-badge`/`matches-subrow`、`/api/health` 200、`GET /api/players/239085/matches` 200（`{player:{id:1,name:"Erling Haaland",position:"ST"}}` + S9 次级联赛/冠军杯两行 + 合计「出场 6 / 进球 5 / 助攻 2」）、`/api/players/abc/matches` 400、`/api/players/999999999/matches` 404、匿名 `GET /api/admin/growth/match-entry/1` 与匿名 `POST /api/admin/growth/events` 均 401）。判级 minor——新增公开只读端点 `GET /api/players/:id/matches` 与录入台可录范围放开。

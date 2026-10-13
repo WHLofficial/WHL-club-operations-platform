@@ -1,0 +1,51 @@
+{
+  "batch": "prod-20261013-wage-floor-refund",
+  "batchTs": "2026-10-13T15:00:00Z",
+  "db": "whl-club",
+  "databaseId": "73154873-d5ae-42b0-a630-25f5ef60053d",
+  "order": [
+    "1) sql/01-precheck.sql（只读基线：三队 wage 行应为 −53/−43/−53 且账链 0 断点）",
+    "2) sql/02-refund.sql（写入，期望 changes 30 = 3 改行 + 24 顺移 + 3 账户）",
+    "3) sql/03-verify.sql（回读验收：账户 27.87/54.44/55.34、账链 0 断点、其余 15 队零波及）",
+    "本批与 prod-20261013-t0-economy-patch 相互独立，可先跑；两批都跑完后 Σ工资口 = −1022.68/窗"
+  ],
+  "shards": {
+    "sql/01-precheck.sql": {
+      "bytes": 2619,
+      "stmts": 7,
+      "sha256": "9674022c4ca130b041159544de3e7e8d4b306ff0702d69b0d78b12221aba7cdd",
+      "note": "前置只读体检",
+      "expectChanges": "只读",
+      "detail": "7 条只读：三队 wage 行现值 / Σ现行合同 / 顺移规模（期望 6·6·12）/ 账户对账 / 全账本账链 / 其余 15 队基线 / 三队冻结"
+    },
+    "sql/02-refund.sql": {
+      "bytes": 8507,
+      "stmts": 9,
+      "sha256": "65ae104929a95245a7146a2d369db4ca97ac7cf30b64f71636e50f1e501e36af",
+      "note": "主件（写入）",
+      "expectChanges": "期望 changes 30（3 + 24 + 3）",
+      "detail": "三队各 3 语句：① wage 行改回 Σ现行合同 + memo 尾注改写 ② 顺移本队后续流水 balance_after ③ 账户对齐；全部带幂等守卫"
+    },
+    "sql/03-verify.sql": {
+      "bytes": 1968,
+      "stmts": 5,
+      "sha256": "93137ef2ccd805c849d1ba87a42b805ecab0e442726f49933fd7e0b17fb2a529",
+      "note": "执行后复查（只读）",
+      "expectChanges": "只读",
+      "detail": "三队 wage 新值（−49.23/−37.62/−33.37）/ 账户（27.87/54.44/55.34）/ 全账本账链 0 断点 / 其余 15 队零波及 / 三队现金合计 137.65"
+    },
+    "rollback/01-restore-floor.sql": {
+      "bytes": 8380,
+      "stmts": 9,
+      "sha256": "44cf5d3217384e1c91107f36477ec645c757c66b0ed596972210b21b75835471",
+      "note": "回滚",
+      "expectChanges": "期望 changes 30",
+      "detail": "逐语句反做：wage 行改回 −53/−43/−53 与旧 memo、后续流水反向顺移、账户余额反向对齐（回到 24.10/49.06/35.71）"
+    }
+  },
+  "totals": {
+    "files": 4,
+    "bytes": 21474,
+    "stmts": 30
+  }
+}

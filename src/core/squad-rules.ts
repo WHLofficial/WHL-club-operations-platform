@@ -23,7 +23,9 @@ export const DEFAULT_CA_PA_LIMITS: Record<'premier' | 'second', SquadLimits> = {
 // 本表是与 ca_pa_limits 同源的兜底默认（config 缺行或缺档时用它）——即「未配置不再跳过」。
 export const DEFAULT_WAGE_CAP_BY_TIER: Record<'premier' | 'second', number> = { premier: 68, second: 58 };
 
-// 扣工资下限 = 对应级别工资帽 − 15（用户令 2026-10-06：未达 53 / 43 的按下限扣）。未定级不适用。
+// 扣工资下限的帽值裕度（用户令 2026-10-06 起为 15：帽值 − 15 = 顶级 53 / 次级 43，未达按下限扣）。
+// v6.47.0（用户令 2026-10-13 取消穷鬼线）起改由 config 键 wage_floor_gap 驱动，默认 0 = 不设下限；
+// 本常量仅作历史口径留档（window-payroll 已不再引用），旧行为 = 该键设 '15'。
 export const WAGE_FLOOR_GAP = 15;
 
 // 注册校验放行档（v6.33.1 特例期开关 registration_check_mode）：

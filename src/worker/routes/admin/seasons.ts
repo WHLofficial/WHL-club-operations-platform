@@ -45,7 +45,7 @@ app.get('/seasons/:id/settle-check', async (c) => {
   return c.json({ ok: true, season, ...check });
 });
 
-// 赛季结算（v1.4.0）：手动按钮——忠诚奖金 → growable 重判 → seasons.status='settled'。
+// 赛季结算（v1.4.0）：手动按钮——growable 重判 → seasons.status='settled'（忠诚支出自 v3.0.0 起改在赛季中期窗关窗批扣，不在此处）。
 // 硬阻断 409；软警示需 acknowledged=true 确认后继续（返回体带提示清单）
 app.post('/seasons/:id/settle-season', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');

@@ -26,6 +26,8 @@ export const CONFIG_KEYS = [
   'trainee_max',
   'ca_pa_limits',
   'wage_cap',
+  // v6.47.0：扣工资下限的帽值裕度（= 帽值 − gap）；'0' = 不设下限（用户令 2026-10-13 取消穷鬼线）
+  'wage_floor_gap',
   'prize_table',
   'luxury_cash_threshold',
   'luxury_cash_rate',
@@ -113,8 +115,11 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   gk_min: '1',
   trainee_max: '7',
   ca_pa_limits: JSON.stringify(DEFAULT_CA_PA_LIMITS), // 规则 4.2.2 梯度原文，config 表可覆盖
-  // v6.39.0：按级别工资帽（用户令 2026-10-06：顶级 68 / 次级 58）；扣款下限 = 帽 − 15（53 / 43）
+  // v6.39.0：按级别工资帽（用户令 2026-10-06：顶级 68 / 次级 58）
+  // v6.47.0：下限由 wage_floor_gap 驱动（默认 0 = 取消穷鬼线，用户令 2026-10-13）；
+  //          设 15 恢复旧口径（下限 = 帽 − 15 = 顶级 53 / 次级 43）
   wage_cap: JSON.stringify(DEFAULT_WAGE_CAP_BY_TIER),
+  wage_floor_gap: '0',
   luxury_cash_threshold: '125',
   luxury_cash_rate: '0.20',
   luxury_value_threshold: '700',
@@ -122,7 +127,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   // v1.3.0：异常出价告警阈值（大额强制审 40m；短窗连续抬价/最小步长拉锯判据，JSON 可覆盖）
   review_amount_threshold: '40',
   bid_pattern_alert: '{"windowMinutes":30,"maxRaises":3,"colludeRounds":6}',
-  // v1.4.0：奖金表（TECH_DESIGN §9.1 原文，JSON 可覆盖）+ 忠诚奖金档位 [起效年限, RC 比例]
+  // v1.4.0：奖金表（TECH_DESIGN §9.1 原文，JSON 可覆盖）
   prize_table: JSON.stringify({
     league_premier: { entry: 20, win: 8.5, draw: 6.6, loss: 4.7 },
     league_second: { entry: 7.5, win: 6.7, draw: 4.8, loss: 2.9 },
@@ -131,7 +136,10 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     champions_ko: { quarterfinal: 7.5, semifinal: 10, final: 12.5, champion: 5 },
     super_cup: { win: 4.0, loss: 2.0 },
   }),
-  loyalty_tiers: '[[0.5,0.05],[1.5,0.10],[2.5,0.20]]',
+  // 忠诚档位 [起效年限, RC 比例]：用户令 2026-10-13 的费率排程 —— 效力 0.5-1 收 5%、
+  // 1.5-2 收 10%、2.5-3 收 20%、≥3.5 起免收（收官 0 档由 rate <= 0 跳过）。
+  // 注意：扣款只发生在每赛季第 2 个常规窗，两次扣款之间效力 +1.0 ⇒ 每份合同共扣 3 期 = 终身 35% × RC。
+  loyalty_tiers: '[[0.5,0.05],[1.5,0.10],[2.5,0.20],[3.5,0]]',
   // v1.5.0：主场收入引擎全套系数（revenue 插件移植，TECH_DESIGN §8；天气概率 40/30/20/10 用户裁决 2026-09-16；
   // 影响力系数=规则 4.1.3 原文可成长 0.25/非成长 0.13）
   attendance_model: JSON.stringify({
@@ -158,9 +166,10 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     influence_coef_static: 0.13,
   }),
   // 球场档位 0-4（座位区间/维护费/上座系数/升级费；远期扩建校验用）
+  // v6.47.0：第 1 档 base_maintenance 5.0 → 3.5（升档后基础维护压力减半，配合开放第 2 档）
   tier_table: JSON.stringify({
     0: { name: '社区级', min_seats: 12000, max_seats: 25000, base_maintenance: 2.0, per_10k_rate: 0.8, attend_coef: 1.0, upgrade_cost: 3.0 },
-    1: { name: '地区级', min_seats: 20000, max_seats: 35000, base_maintenance: 5.0, per_10k_rate: 0.55, attend_coef: 1.1, upgrade_cost: 4.5 },
+    1: { name: '地区级', min_seats: 20000, max_seats: 35000, base_maintenance: 3.5, per_10k_rate: 0.55, attend_coef: 1.1, upgrade_cost: 4.5 },
     2: { name: '大区级', min_seats: 25000, max_seats: 45000, base_maintenance: 8.0, per_10k_rate: 0.35, attend_coef: 1.2, upgrade_cost: 6.0 },
     3: { name: '国家级', min_seats: 35000, max_seats: 60000, base_maintenance: 11.0, per_10k_rate: 0.28, attend_coef: 1.3, upgrade_cost: 10.0 },
     4: { name: '国际级', min_seats: 50000, max_seats: 100000, base_maintenance: 14.0, per_10k_rate: 0.2, attend_coef: 1.4, upgrade_cost: 0.0 },

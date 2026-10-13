@@ -26,6 +26,7 @@ const KIND_OPTIONS = [
   'match_diff_burn',
   'termination_fee',
   'delist_fee',
+  'loyalty',
   ...MANUAL_LEDGER_KINDS.filter((k) => k.value.startsWith('prize_')).map((k) => k.value),
 ];
 

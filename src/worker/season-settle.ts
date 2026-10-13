@@ -1,7 +1,7 @@
 // 赛季结算域（v1.4.0，PRD 4.8/TECH_DESIGN §11/§9.1-9.2）：
 // 1. 赛事完结结算：入场奖金（联赛）、资格赛止步保底、冠军杯小组赛剩余池按胜场占比——一次性项，stage_settled_at 原子闸幂等。
 // 2. 赛季结算按钮（手动 + 前置校验）：growable 重判（规则 4.1.1 本季 age_cap）→ 状态 settled。
-//    忠诚奖金自v3.0.0 起改在赛季中期窗（同赛季第 2 个常规窗）关窗时发（规则 4.3.2 + 窗刻度），见 loyaltyMovements。
+//    忠诚支出自v3.0.0 起改在赛季中期窗（同赛季第 2 个常规窗）关窗时扣（规则 4.3.2 + 窗刻度；v6.47.0 改为扣款），见 loyaltyMovements。
 //    死忠演化归v1.5.0（主场收入域），此处留位不实现；富人税/工资在窗末（closeWindow）收，季末不重复（假设 28）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
@@ -242,10 +242,11 @@ export async function checkSeasonSettle(env: Env, season: number): Promise<Seaso
 }
 
 /**
- * 忠诚奖金（规则 4.3.2）：赛季中期窗（同赛季第 2 个常规窗）关窗时发一次，按窗刻度算效力
- * （1 个常规窗 = 0.5 赛季），取满足的最高档（loyalty_tiers [[赛季, RC 比],…]），逐队汇总入账本。
- * 幂等键 = window/season*100+windowSeq：同一窗重放不重复发；一队多条合同同窗合并成一条流水。
- * 返回待拼进关窗批的语句与汇总（供关窗响应回显）。
+ * 忠诚支出（规则 4.3.2；用户令 2026-10-13：定为俱乐部支出而非奖金）：赛季中期窗（同赛季第 2 个
+ * 常规窗）关窗时扣一次，按窗刻度算效力（1 个常规窗 = 0.5 赛季），取满足的最高档
+ * （loyalty_tiers [[赛季, RC 比],…]），逐队汇总后从俱乐部余额扣除（余额可为负 = 欠款，下窗自然补扣）。
+ * 幂等键 = window/season*100+windowSeq：同一窗重放不重复扣；一队多条合同同窗合并成一条流水。
+ * 返回待拼进关窗批的语句与汇总（count = 人次数、total = 扣款金额绝对值，供关窗响应回显）。
  */
 export async function loyaltyMovements(
   db: D1Database,
@@ -256,7 +257,7 @@ export async function loyaltyMovements(
 ): Promise<{ statements: D1PreparedStatement[]; summary: { count: number; total: number } }> {
   const config = createConfigService(db);
   const tiersRaw = await config.get('loyalty_tiers');
-  const tiers = (tiersRaw ? JSON.parse(tiersRaw) : [[0.5, 0.05], [1.5, 0.1], [2.5, 0.2]]) as [number, number][];
+  const tiers = (tiersRaw ? JSON.parse(tiersRaw) : [[0.5, 0.05], [1.5, 0.1], [2.5, 0.2], [3.5, 0]]) as [number, number][];
   tiers.sort((a, b) => a[0] - b[0]); // 配置可能乱序，按起效赛季升序后「取满足的最高档」才成立
 
   const contracts = await db
@@ -287,19 +288,19 @@ export async function loyaltyMovements(
     statements.push(
       ...ledgerMovement(db, {
         clubId,
-        delta: agg.amount,
+        delta: -agg.amount, // 出账：负号（m）；余额不足时扣成负 = 欠款，下窗自然补扣
         kind: 'loyalty',
         refType: 'window',
         refId: season * 100 + windowSeq,
-        memo: `忠诚奖金（S${season} 第 ${windowSeq} 窗，${agg.count} 人现行合同）`,
+        memo: `忠诚支出（S${season} 第 ${windowSeq} 窗，${agg.count} 人现行合同）`,
       }),
       audit({
         actor,
-        action: 'loyalty_bonus',
+        action: 'loyalty_charge',
         targetType: 'club',
         targetId: clubId,
         origin: 'user',
-        after: { season, windowSeq, contracts: agg.count, amount: agg.amount },
+        after: { season, windowSeq, contracts: agg.count, amount: agg.amount }, // amount = 扣款额（绝对值）
       }),
     );
   }
@@ -485,7 +486,7 @@ export async function championBonusStatements(
 
 /**
  * 赛季结算（手动按钮）：growable 重判 → seasons.status='settled'。
- * 忠诚奖金自v3.0.0 起在赛季中期窗关窗时发（见 loyaltyMovements）。
+ * 忠诚支出自v3.0.0 起在赛季中期窗关窗时扣（见 loyaltyMovements；v6.47.0 起为俱乐部支出）。
  * 冠军加成（v6.13.0 C2）并入本批：跳过原因并进 warnings 触发 acknowledged 流程。
  */
 export async function settleSeason(

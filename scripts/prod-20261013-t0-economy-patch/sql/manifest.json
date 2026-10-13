@@ -1,0 +1,51 @@
+{
+  "batch": "prod-20261013-t0-economy-patch",
+  "batchTs": "2026-10-13T15:00:00Z",
+  "db": "whl-club",
+  "databaseId": "73154873-d5ae-42b0-a630-25f5ef60053d",
+  "order": [
+    "1) 发版批 0 上线（push ⇒ CF 自动构建完成，Version 回读变化）——否则 ① 忠诚排程会在旧代码下反向发钱",
+    "2) sql/01-precheck.sql（只读基线）",
+    "3) sql/02-config-patch.sql（写入，期望 changes 6）",
+    "4) sql/03-verify.sql（回读验收）"
+  ],
+  "shards": {
+    "sql/01-precheck.sql": {
+      "bytes": 1534,
+      "stmts": 6,
+      "sha256": "35821d10e2e054db59add1aaabde0fa8fdce4ce6c120a0f8c4992ba61ebd32fb",
+      "note": "前置只读体检",
+      "expectChanges": "只读",
+      "detail": "6 条只读，用于执行前基线（config / 忠诚流水 / 窗口 / 球场档位 / 工资流水 / 审计）"
+    },
+    "sql/02-config-patch.sql": {
+      "bytes": 4885,
+      "stmts": 6,
+      "sha256": "74d1e075e25de125cee52f6d6cc5befbf8e8d9ef25204aed06933a6fde53325c",
+      "note": "主件（写入）",
+      "expectChanges": "6 句（3 审计 + 3 键 upsert）",
+      "detail": "三键：loyalty_tiers 排程固化 / wage_floor_gap=0 取消穷鬼线 / stadium_max_open_tier=2 开放 2 档"
+    },
+    "sql/03-verify.sql": {
+      "bytes": 983,
+      "stmts": 4,
+      "sha256": "2d5cd9e2a15317f86bc1c89596bd257b5baa9d88f0c70326efcb5ab03720aead",
+      "note": "执行后复查（只读）",
+      "expectChanges": "只读",
+      "detail": "config_rows 应 8 → 11、三键命中目标值、审计多 3 条、账本与窗口零改动"
+    },
+    "rollback/01-remove-t0-keys.sql": {
+      "bytes": 2081,
+      "stmts": 6,
+      "sha256": "b881398191dd7d8d5ba3bbe978733801a0b7a28e0174df5b5e504a28d9183f98",
+      "note": "回滚",
+      "expectChanges": "6 句（3 审计 + 3 删行）",
+      "detail": "三键删行回代码默认；stadium_max_open_tier 是唯一真实行为回滚点（关回 2 档）"
+    }
+  },
+  "totals": {
+    "files": 4,
+    "bytes": 9483,
+    "stmts": 22
+  }
+}

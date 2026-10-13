@@ -60,7 +60,7 @@ export async function windowBaseTicks(db: D1Database, signedAt: string | null): 
 
 /**
  * 同赛季第几个非临时窗（1 = 季初、2 = 中期）= window_seq ≤ 本窗的非临时窗数。
- * 调用方只在常规窗上用它判定（关窗时才发忠诚奖金）；对临时窗调用得到的是它之前已开的常规窗数，不是 0。
+ * 调用方只在常规窗上用它判定（关窗时才扣忠诚支出）；对临时窗调用得到的是它之前已开的常规窗数，不是 0。
  */
 export async function regularWindowOrdinal(db: D1Database, season: number, windowSeq: number): Promise<number> {
   const row = await db
