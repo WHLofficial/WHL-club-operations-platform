@@ -12,9 +12,14 @@ import { abilityLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE } fro
 import { AGENT_TIER_LABELS } from '../core/negotiation-rules.ts';
 import { attemptExpected, directFail, expectedWage, satisfactionText, successRate } from './negotiation-secret.ts';
 import { loadNegotiationContext, type AgentTierParams, type NegotiationContext } from './negotiation-context.ts';
-import { completeTransfer, loadTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
+import { completeTransfer, loadTransfer, listingIdFromTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
+import { createConfigService } from '../core/config.ts';
+import { fmtBeijingMinute } from '../core/ops-schedule.ts';
+import { queueClubNotification } from './notify.ts';
+import type { ExpiryOpts } from './expiry-ops.ts';
+import { assertOpOpen } from './ops-schedule.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -234,6 +239,8 @@ export async function submitReleaseFee(
   if (!transfer) throw new HttpError(404, '转会单不存在');
   if (transfer.status === 'completed') throw new HttpError(409, '这单转会已经完成了');
   if (transfer.status !== 'signing') throw new HttpError(409, '这单转会还没进入签约谈判');
+  // v6.49.0 运营时刻表：签约谈判自己的时段（提交违约金 = 谈判的第一步动作）
+  await assertOpOpen(db, 'transfer_negotiation');
   if (FIXED_FEE_TYPES.has(transfer.type)) {
     throw new HttpError(400, '这单的新违约金在提交时已经定死了（附加费按它结算），直接报价即可');
   }
@@ -340,6 +347,8 @@ export async function offerWage(
 ): Promise<OfferOutcome> {
   const db = env.DB;
   const { session } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
+  // v6.49.0 运营时刻表：签约谈判自己的时段（报工资 = 谈判的推进动作）
+  await assertOpOpen(db, 'transfer_negotiation');
   const ctx = await loadNegotiationContext(db);
   const roll = env.rng ?? defaultRng;
 
@@ -450,6 +459,8 @@ export async function chooseTrainee(
 ): Promise<{ ok: true; result: 'trainee'; wage: number; message: string }> {
   const db = env.DB;
   const { session, transfer } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
+  // v6.49.0 运营时刻表：签约谈判自己的时段（选训练营合同 = 谈判的推进动作）
+  await assertOpOpen(db, 'transfer_negotiation');
   if (transfer.type === 'rc_change' || transfer.type === 'match') {
     throw new HttpError(400, '续约和匹配是留人操作，球员本来就在队里，不能转进训练营');
   }
@@ -652,4 +663,177 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
         : null,
     };
   });
+}
+
+// ---- 作废签约谈判的收口（v6.49.0：管理介入与到期引擎共用一处） ----
+
+// 球员还原按合同类型：激活挂牌还原回训练营，普通挂牌还原回一线队（与审核驳回同口径）
+export function playerRestoreSql(db: Env['DB'], playerId: number) {
+  return db
+    .prepare(
+      `UPDATE players SET status = CASE WHEN (
+         SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1
+       ) = 'trainee' THEN 'trainee' ELSE 'normal' END, updated_at = ${nowSql()}
+       WHERE id = ? AND status = 'listed'`,
+    )
+    .bind(playerId, playerId);
+}
+
+export interface VoidSigningOpts {
+  actor: number | null;
+  origin: AuditOrigin;
+  /** 审计动作名（管理介入 = admin_negotiation_void；超时 = negotiation_timeout） */
+  action: string;
+  /** 挂牌 deadline_note 上的话术 */
+  deadlineNote: string;
+  /** 审计 after.reason */
+  reason: string;
+}
+
+/**
+ * 签约谈判作废收口：会话关闭 + 解冻挂牌冻结 + 撤活跃出价 + 挂牌下架 + 球员还原 + 转会单驳回，
+ * 一个 batch，每条守卫 WHERE 幂等。守卫未命中返回 'already'（超时路径静默跳过，不抛错）。
+ */
+export async function voidSigningCore(env: Env, sessionId: number, opts: VoidSigningOpts): Promise<'done' | 'already'> {
+  const db = env.DB;
+  const session = await db
+    .prepare('SELECT id, transfer_id, status FROM negotiation_sessions WHERE id = ?')
+    .bind(sessionId)
+    .first<{ id: number; transfer_id: number; status: string }>();
+  if (!session || session.status !== 'active') return 'already';
+  const transfer = await loadTransfer(db, session.transfer_id);
+  if (!transfer || transfer.status !== 'signing') return 'already';
+  const listingId = listingIdFromTransfer(transfer);
+  const audit = createAuditStatement(db);
+  const results = await db.batch([
+    db.prepare(`UPDATE negotiation_sessions SET status = 'cancelled', settled_at = ${nowSql()} WHERE id = ? AND status = 'active'`).bind(sessionId),
+    db.prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id IS ? AND status = 'held'`).bind(listingId),
+    db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
+    db.prepare(`UPDATE listings SET status = 'delisted', deadline_note = ? WHERE id = ? AND status = 'pending_review'`).bind(opts.deadlineNote, listingId),
+    playerRestoreSql(db, transfer.player_id),
+    db.prepare(`UPDATE transfers SET status = 'rejected' WHERE id = ? AND status = 'signing'`).bind(transfer.id),
+    audit({
+      actor: opts.actor,
+      action: opts.action,
+      targetType: 'negotiation',
+      targetId: sessionId,
+      origin: opts.origin,
+      after: { reason: opts.reason, transferId: transfer.id, playerId: transfer.player_id },
+    }),
+  ]);
+  return (results[0].meta.changes ?? 0) > 0 ? 'done' : 'already';
+}
+
+// ---- 到期引擎适配器（v6.49.0）：签约谈判静默超时 ----
+// 锚 = MAX(expiry_anchor_at, created_at, 最后一次工资报价)：每一轮报价都刷新静默时钟。
+// 存量宽限同报价：expiry_anchor_at 为空的行首次扫描按 now 打标，避免上线首 tick 批量误杀。
+
+const NEGOTIATION_SILENCE_HOURS_DEFAULT = 72;
+
+function isoMinusHours(iso: string, hours: number): string {
+  return new Date(Date.parse(iso) - hours * 3600_000).toISOString();
+}
+
+async function silenceHours(db: D1Database): Promise<number> {
+  const hours = await createConfigService(db).getNumber('negotiation_silence_hours');
+  return hours && hours > 0 ? hours : NEGOTIATION_SILENCE_HOURS_DEFAULT;
+}
+
+interface SilentSessionRow {
+  id: number;
+  transfer_id: number;
+  club_id: number;
+  anchor: string;
+  player_name: string;
+}
+
+const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.created_at, ''),
+             COALESCE((SELECT MAX(a.created_at) FROM negotiation_attempts a WHERE a.session_id = s.id), ''))`;
+
+const SILENT_SESSION_SELECT = `
+  SELECT s.id, s.transfer_id, s.club_id, ${SILENT_ANCHOR_SQL} AS anchor,
+         ${sqlDisplayName('p')} AS player_name
+  FROM negotiation_sessions s
+  JOIN players p ON p.id = s.player_id`;
+
+export async function closeSilentSessions(env: Env, opts: ExpiryOpts): Promise<number> {
+  const db = env.DB;
+  const hours = await silenceHours(db);
+  const cutoff = isoMinusHours(opts.nowIso, hours);
+  let rows: SilentSessionRow[];
+  if (opts.closeAll) {
+    const res = await db
+      .prepare(`${SILENT_SESSION_SELECT} WHERE s.status = 'active' ORDER BY s.id LIMIT ?`)
+      .bind(opts.limit)
+      .all<SilentSessionRow>();
+    rows = res.results;
+  } else {
+    await db
+      .prepare(`UPDATE negotiation_sessions SET expiry_anchor_at = ? WHERE status = 'active' AND expiry_anchor_at = ''`)
+      .bind(opts.nowIso)
+      .run();
+    const res = await db
+      .prepare(`${SILENT_SESSION_SELECT} WHERE s.status = 'active' AND s.expiry_anchor_at != '' AND ${SILENT_ANCHOR_SQL} <= ? ORDER BY s.id LIMIT ?`)
+      .bind(cutoff, opts.limit)
+      .all<SilentSessionRow>();
+    rows = res.results;
+  }
+  let closed = 0;
+  for (const row of rows) {
+    const reasonText = opts.closeAll ? '签约谈判通道已结束' : `超过 ${hours} 小时没有动作`;
+    const result = await voidSigningCore(env, row.id, {
+      actor: null,
+      origin: opts.origin,
+      action: 'negotiation_timeout',
+      deadlineNote: `${reasonText}，自动作废`,
+      reason: opts.closeAll ? 'ops_end' : 'silence_timeout',
+    });
+    if (result !== 'done') continue;
+    closed++;
+    await queueClubNotification(env, row.club_id, 'negotiation_timeout', { player: row.player_name, hours, reason: reasonText });
+    const seller = await sellerClubOf(db, row.transfer_id);
+    if (seller !== null && seller !== row.club_id) {
+      await queueClubNotification(env, seller, 'negotiation_timeout', { player: row.player_name, hours, reason: reasonText });
+    }
+  }
+  return closed;
+}
+
+/** 临近提醒：距静默超时不足 remindLeadHours 提醒一次（reminded_at 抢占），只发签约方。 */
+export async function remindSilentSessions(env: Env, opts: ExpiryOpts): Promise<number> {
+  const db = env.DB;
+  const hours = await silenceHours(db);
+  if (opts.remindLeadHours <= 0 || hours <= opts.remindLeadHours) return 0;
+  const cutoff = isoMinusHours(opts.nowIso, hours);
+  const remindFrom = isoMinusHours(opts.nowIso, hours - opts.remindLeadHours);
+  const res = await db
+    .prepare(
+      `${SILENT_SESSION_SELECT}
+       WHERE s.status = 'active' AND s.expiry_anchor_at != '' AND s.reminded_at = ''
+         AND ${SILENT_ANCHOR_SQL} <= ? AND ${SILENT_ANCHOR_SQL} > ?
+       ORDER BY s.id LIMIT ?`,
+    )
+    .bind(remindFrom, cutoff, opts.limit)
+    .all<SilentSessionRow>();
+  let sent = 0;
+  for (const row of res.results) {
+    const deadline = fmtBeijingMinute(new Date(Date.parse(row.anchor) + hours * 3600_000).toISOString());
+    const claimed = await db
+      .prepare(`UPDATE negotiation_sessions SET reminded_at = ? WHERE id = ? AND status = 'active' AND reminded_at = ''`)
+      .bind(opts.nowIso, row.id)
+      .run();
+    if ((claimed.meta.changes ?? 0) === 0) continue;
+    await queueClubNotification(env, row.club_id, 'negotiation_deadline', { player: row.player_name, deadline, hours });
+    sent++;
+  }
+  return sent;
+}
+
+/** 挂牌方（原俱乐部）：签约破裂后他们要知道球员回到自己手里、挂牌已下架。 */
+async function sellerClubOf(db: D1Database, transferId: number): Promise<number | null> {
+  const transfer = await loadTransfer(db, transferId);
+  const listingId = transfer ? listingIdFromTransfer(transfer) : null;
+  if (listingId === null) return null;
+  const row = await db.prepare(`SELECT seller_club_id FROM listings WHERE id = ?`).bind(listingId).first<{ seller_club_id: number | null }>();
+  return row?.seller_club_id ?? null;
 }

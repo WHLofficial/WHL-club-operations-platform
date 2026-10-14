@@ -10,6 +10,7 @@ import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { isWindowOpen } from './seasons.ts';
+import { assertOpOpen } from './ops-schedule.ts';
 
 export const SLOT_MIN = 1;
 export const SLOT_MAX = 20;
@@ -236,6 +237,8 @@ export async function bookSlot(
   if (!(await isWindowOpen(env.DB, input.season, input.windowSeq))) {
     throw new HttpError(409, '档期只能在开着的窗口里订，这一窗已经关了');
   }
+  // v6.49.0 运营时刻表：消费中心整体一套时段（档期预订默认「不限制」= 只剩上面那道窗口闸）
+  await assertOpOpen(env.DB, 'consumption');
   const previous = await env.DB
     .prepare(
       `SELECT id, club_id, season, window_seq, slot_no, activity_type, booked_by, created_at

@@ -17,6 +17,8 @@ import { playerPath } from '../../../lib/player-link.ts';
 import { moneyIntText } from '../../../lib/club-cards.ts';
 import { useTimeFmt } from '../../../lib/datetime.ts';
 import { money } from '../shared.tsx';
+import OpsGateNote from '../../../components/OpsGateNote.tsx';
+import { useOpsGate } from '../../../lib/ops-gate.ts';
 
 const TIER_BADGE: Record<number, string> = { 1: 'green', 2: 'gray', 3: 'red' };
 
@@ -277,6 +279,8 @@ function ReleaseFeeStep({
   onError: (msg: string) => void;
   show: (text: string, err?: boolean) => void;
 }) {
+  // v6.49.0：签约谈判受「签约谈判」时段约束
+  const gate = useOpsGate('transfer_negotiation');
   const [fee, setFee] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -311,7 +315,8 @@ function ReleaseFeeStep({
           placeholder={session.rcBounds ? `${session.rcBounds[0]}~${session.rcBounds[1]}` : ''}
         />
       </div>
-      <button className="btn" type="button" disabled={busy || fee === ''} onClick={submit}>
+      <OpsGateNote gate={gate} />
+      <button className="btn" type="button" disabled={busy || fee === '' || gate?.blocked} onClick={submit}>
         {busy ? '提交中…' : '定违约金，出预期工资'}
       </button>
       <span className="hint">
@@ -341,6 +346,8 @@ function OfferStep({
   onError: (msg: string) => void;
   show: (text: string, err?: boolean) => void;
 }) {
+  // v6.49.0：签约谈判受「签约谈判」时段约束
+  const gate = useOpsGate('transfer_negotiation');
   const [wage, setWage] = useState('');
   const [debounced, setDebounced] = useState('');
   const [busy, setBusy] = useState(false);
@@ -464,7 +471,8 @@ function OfferStep({
             onChange={(e) => setWage(e.target.value)}
           />
         </div>
-        <button className="btn" type="button" disabled={busy || wage === ''} onClick={submitOffer}>
+        <OpsGateNote gate={gate} />
+        <button className="btn" type="button" disabled={busy || wage === '' || gate?.blocked} onClick={submitOffer}>
           {busy ? '谈判中…' : `报价（剩 ${session.remaining} 轮）`}
         </button>
         <span className="hint">

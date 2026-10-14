@@ -39,7 +39,7 @@ export interface NotifyMeta {
   category: NotifyCategoryId;
 }
 
-/** 30 个模板一一对应一枚徽章（原始模板名走徽章 title，不丢信息）。 */
+/** 33 个模板一一对应一枚徽章（原始模板名走徽章 title，不丢信息）。 */
 export const NOTIFY_META: Record<string, NotifyMeta> = {
   result_confirmed: { label: '赛果确认', category: 'result' },
   levelup: { label: '球员成长', category: 'growth' },
@@ -71,6 +71,10 @@ export const NOTIFY_META: Record<string, NotifyMeta> = {
   shop_order_approved: { label: '工单通过', category: 'shop' },
   shop_order_rejected: { label: '工单驳回', category: 'shop' },
   window_signals: { label: '窗口信号', category: 'window' },
+  // v6.49.0 到期引擎：报价将到期提醒 / 签约谈判超时与将超时
+  offer_deadline: { label: '报价临近', category: 'offer' },
+  negotiation_timeout: { label: '谈判超时', category: 'offer' },
+  negotiation_deadline: { label: '谈判临近', category: 'offer' },
 };
 
 /** 未知模板 ⇒ null（前端退化：无修饰色徽章 + 原始模板名 + 不可点）。 */

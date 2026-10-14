@@ -3,10 +3,10 @@
 // 每个函数幂等（状态迁移带守卫 WHERE），并发重复调用返回 already。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { loadTransfer, listingIdFromTransfer } from './transfers.ts';
+import { loadTransfer } from './transfers.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { settleListingForReview, type ListingCore } from './market-settle.ts';
-import { forceSettleAtExpected } from './negotiations.ts';
+import { forceSettleAtExpected, playerRestoreSql, voidSigningCore } from './negotiations.ts';
 
 async function loadListingCore(db: Env['DB'], listingId: number): Promise<ListingCore | null> {
   return db
@@ -19,22 +19,6 @@ export async function requireReason(body: unknown): Promise<string> {
   const text = typeof (body as { reason?: unknown } | null)?.reason === 'string' ? ((body as { reason: string }).reason as string).trim() : '';
   if (text.length < 2) throw new HttpError(400, '请填写处置原因（至少 2 个字，会进审计）');
   return text;
-}
-
-function playerRestoreSql(db: Env['DB'], playerId: number) {
-  // 球员还原按合同类型：激活挂牌还原回训练营，普通挂牌还原回一线队（与审核驳回同口径）
-  return db
-    .prepare(
-      `UPDATE players SET status = CASE WHEN (
-         SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1
-       ) = 'trainee' THEN 'trainee' ELSE 'normal' END, updated_at = ${nowSql()}
-       WHERE id = ? AND status = 'listed'`,
-    )
-    .bind(playerId, playerId);
-}
-
-function nowSql(): string {
-  return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
 
 // 撤销活跃出价：解冻该买方对本挂牌的资金（同挂牌同队只持一份 hold）、出价置 withdrawn。
@@ -140,6 +124,8 @@ export async function adminForceSign(env: Env, sessionId: number, actor: number,
 }
 
 // 作废签约谈判（交易破裂处置）：会话关闭、转会单驳回、资金解冻、球员还原、挂牌下架
+// 收口本体在 negotiations.ts 的 voidSigningCore（到期引擎超时作废共用同一处）；这里只保留
+// 管理端特有的 404/409 前置话术。
 export async function adminCancelSigning(env: Env, sessionId: number, actor: number, reason: string): Promise<'done' | 'already'> {
   const db = env.DB;
   const session = await db
@@ -150,23 +136,11 @@ export async function adminCancelSigning(env: Env, sessionId: number, actor: num
   if (session.status !== 'active') throw new HttpError(409, '这条谈判已经结束');
   const transfer = await loadTransfer(db, session.transfer_id);
   if (!transfer || transfer.status !== 'signing') throw new HttpError(409, '转会单不在签约阶段，不能作废谈判');
-  const listingId = listingIdFromTransfer(transfer);
-  const audit = createAuditStatement(db);
-  await db.batch([
-    db.prepare(`UPDATE negotiation_sessions SET status = 'cancelled', settled_at = ${nowSql()} WHERE id = ? AND status = 'active'`).bind(sessionId),
-    db.prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id IS ? AND status = 'held'`).bind(listingId),
-    db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
-    db.prepare(`UPDATE listings SET status = 'delisted', deadline_note = ? WHERE id = ? AND status = 'pending_review'`).bind(`管理组作废：${reason}`, listingId),
-    playerRestoreSql(db, transfer.player_id),
-    db.prepare(`UPDATE transfers SET status = 'rejected' WHERE id = ? AND status = 'signing'`).bind(transfer.id),
-    audit({
-      actor,
-      action: 'admin_negotiation_void',
-      targetType: 'negotiation',
-      targetId: sessionId,
-      origin: 'user',
-      after: { reason, transferId: transfer.id, playerId: transfer.player_id },
-    }),
-  ]);
-  return 'done';
+  return voidSigningCore(env, sessionId, {
+    actor,
+    origin: 'user',
+    action: 'admin_negotiation_void',
+    deadlineNote: `管理组作废：${reason}`,
+    reason,
+  });
 }

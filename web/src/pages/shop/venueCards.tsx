@@ -17,6 +17,8 @@ import {
 import { qk, useNamingInvalidation, useNamingQuote } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
+import OpsGateNote from '../../components/OpsGateNote.tsx';
+import { useOpsGate } from '../../lib/ops-gate.ts';
 
 // 冠名期限按赛季展示（v3.0.0：库内按常规窗计数，1 赛季 = 2 个常规窗）
 export function seasonsOf(windows: number): string {
@@ -42,6 +44,8 @@ const CLOSED_BUILD_HINT = '转会窗口没开，开窗后才能施工';
 export function FacilityOpsCard() {
   const qc = useQueryClient();
   const { show } = useToast();
+  // v6.49.0：消费中心时段（consumption）——必须在早退之前调用（hook 顺序固定）
+  const consumptionGate = useOpsGate('consumption');
   const infoQuery = useQuery({
     queryKey: qk.stadiumBuild,
     queryFn: () => api<StadiumBuildInfo>('/api/club/stadium/build-info'),
@@ -92,11 +96,13 @@ export function FacilityOpsCard() {
       : null;
   const upgradeBlocked = !info.nextTier || !info.nextTier.open || !info.nextTier.capacityOk;
   // v6.30.0：门控吃 build-info 的 open（与后端 409 no_window 同一判据），不再单拉窗口端点
-  const windowOpen = info.open;
+  // v6.49.0：消费中心时段（consumption）再叠一层，任一不过都点不动
+  const windowOpen = info.open && consumptionGate?.blocked !== true;
 
   return (
     <section className="card">
       <h3>设施经营</h3>
+      <OpsGateNote gate={consumptionGate} className="hint" />
       <p className="hint">
         建设券余额 <span className="mono">{info.credit.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}%，可抵扣后续建设）· 当前余额{' '}
         <span className="mono">{info.balance.toFixed(2)}</span> M · 开放至 {info.maxOpenTier} 级
@@ -199,6 +205,9 @@ function moodLabel(satisfaction: number): string {
 
 export function NamingCard() {
   const { show } = useToast();
+  // v6.49.0：冠名接报价/续约/终止同属消费中心时段
+  const consumptionGate = useOpsGate('consumption');
+  const opsBlocked = consumptionGate?.blocked === true;
   const { dateTime } = useTimeFmt();
   const quoteQuery = useNamingQuote();
   const refresh = useNamingInvalidation();
@@ -314,10 +323,10 @@ export function NamingCard() {
         {o.status === 'queued' ? null : contract ? (
           pickId === o.id ? (
             <>
-              <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o, 'queued')}>
+              <button className="btn btn-ghost btn-sm" type="button" disabled={busy || opsBlocked} style={{ marginLeft: 8 }} onClick={() => void accept(o, 'queued')}>
                 现合同到期后自动接替
               </button>
-              <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => void accept(o, 'terminate')}>
+              <button className="btn btn-sm" type="button" disabled={busy || opsBlocked} style={{ marginLeft: 6 }} onClick={() => void accept(o, 'terminate')}>
                 解约当前并签新
               </button>
               <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => setPickId(null)}>
@@ -330,7 +339,7 @@ export function NamingCard() {
             </button>
           )
         ) : (
-          <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o)}>
+          <button className="btn btn-sm" type="button" disabled={busy || opsBlocked} style={{ marginLeft: 8 }} onClick={() => void accept(o)}>
             接受签约
           </button>
         )}
@@ -341,6 +350,7 @@ export function NamingCard() {
   return (
     <section className="card">
       <h3>冠名市场</h3>
+      <OpsGateNote gate={consumptionGate} className="hint" />
       {contract ? (
         <>
           <p>
@@ -390,7 +400,7 @@ export function NamingCard() {
                     <button
                       className="btn btn-ghost btn-sm"
                       type="button"
-                      disabled={busy}
+                      disabled={busy || opsBlocked}
                       title={`${seasonsOf(p.windows)} 赛季 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`}
                       onClick={() => void renew(p.packageNo, p.pkgName)}
                     >
@@ -409,7 +419,7 @@ export function NamingCard() {
             <span className="hint">（有生效冠名：接受时选「到期后自动接替」或「解约当前并签新」）</span>
           </p>
           {quote.offers.length === 0 ? <p className="hint">暂无待签报价。</p> : quote.offers.map(offerRow)}
-          <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void terminate()}>
+          <button className="btn btn-sm" type="button" disabled={busy || opsBlocked} onClick={() => void terminate()}>
             退冠名
           </button>
         </>
@@ -431,6 +441,9 @@ export function NamingCard() {
 
 export function BookingsCard() {
   const qc = useQueryClient();
+  // v6.49.0：排档期同属消费中心时段
+  const consumptionGate = useOpsGate('consumption');
+  const opsBlocked = consumptionGate?.blocked === true;
   const { show } = useToast();
   const listQuery = useQuery({
     queryKey: qk.bookings,
@@ -483,6 +496,7 @@ export function BookingsCard() {
   return (
     <section className="card">
       <h3>球场档期</h3>
+      <OpsGateNote gate={consumptionGate} className="hint" />
       <p className="hint">
         每窗有 <span className="mono">{data.slots}</span> 个非比赛日档位，可以排演唱会、电竞、开放日、青训营这类活动；收益与草皮损坏都在关窗时一起结算。
         {!data.open && (data.season !== null ? '当前看的是已关窗口的档期，只能看不能改。' : '现在没有开着的窗口，开窗后才能排档期。')}
@@ -515,7 +529,7 @@ export function BookingsCard() {
                     <td>
                       <select
                         value={picked}
-                        disabled={!data.open || busySlot !== null}
+                        disabled={!data.open || busySlot !== null || opsBlocked}
                         onChange={(e) => setChoice((prev) => ({ ...prev, [slotNo]: e.target.value }))}
                       >
                         {data.catalog.map((o) => (
@@ -529,7 +543,7 @@ export function BookingsCard() {
                       <button
                         className="btn btn-ghost btn-sm"
                         type="button"
-                        disabled={!data.open || busySlot !== null || pickedOption === undefined}
+                        disabled={!data.open || busySlot !== null || pickedOption === undefined || opsBlocked}
                         onClick={() => void book(slotNo, picked, pickedOption?.name ?? picked)}
                       >
                         {busySlot === slotNo ? '提交中…' : current ? '改排' : '排上'}

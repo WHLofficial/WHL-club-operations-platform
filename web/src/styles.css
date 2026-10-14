@@ -7586,3 +7586,218 @@ button.sqc-pos:hover {
   font-weight: 400;
 }
 
+
+/* ---- 成长档位页（v6.48.0 §10.3）：条件徽标串 + 升降标记 ---- */
+
+.tier-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+/* 未命中的条件留位置但压暗：一眼看出哪几条没算上 */
+.tier-chips .badge.muted {
+  opacity: 0.45;
+}
+
+.up-mark {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.down-mark {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+/* 球员页档位依据行（v6.48.0 §10.3）：档位徽章 + 五条件短标签一行排开 */
+.tier-basis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.9em;
+}
+
+/* ---------- 运营时刻表（v6.49.0）：管理端甘特图 + 逐项时段表单 ---------- */
+/* 手绘静态 SVG（同 AttrRadar / PositionHeatmap 范式）：几何在 web/src/lib/gantt.ts，这里只管观感。 */
+
+.gantt-scroll {
+  overflow-x: auto;
+  margin-top: 0.6rem;
+}
+
+/* 窄屏横滑：min-width 必须落样式表（禁内联 minWidth，见 tests/mobile-baseline.test.ts TC-SWP-02） */
+.gantt-svg {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+}
+
+.gantt-row-bg {
+  fill: transparent;
+}
+
+.gantt-row-clickable {
+  cursor: pointer;
+}
+
+.gantt-row-clickable:hover .gantt-row-bg,
+.gantt-row-selected .gantt-row-bg {
+  fill: rgba(164, 97, 44, 0.07);
+}
+
+.gantt-group {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--muted);
+}
+
+.gantt-row-label {
+  font-size: 12px;
+  fill: var(--ink);
+}
+
+.gantt-row-state {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.gantt-bar {
+  stroke-width: 1;
+}
+
+.gantt-bar-open {
+  fill: var(--sky);
+  stroke: var(--sky-deep);
+}
+
+.gantt-bar-pending {
+  fill: var(--badge-gold-bg);
+  stroke: var(--badge-gold-line);
+}
+
+.gantt-bar-closed {
+  fill: var(--badge-silver-bg);
+  stroke: var(--badge-silver-line);
+}
+
+/* 斜纹带（不限制 / 随窗锚但窗口已关）：fill 由 SVG 的 pattern 给，这里只描边 */
+.gantt-band {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.gantt-hatch-line {
+  stroke: #ded4c0;
+  stroke-width: 3;
+}
+
+.gantt-hatch-line-closed {
+  stroke: #e8e0d0;
+  stroke-width: 2;
+}
+
+.gantt-band-label {
+  font-size: 10px;
+  fill: var(--muted);
+}
+
+.gantt-tick {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.gantt-tick-minor {
+  stroke: #f0e8d8;
+  stroke-width: 1;
+}
+
+.gantt-tick-label {
+  font-size: 10px;
+  fill: var(--muted);
+}
+
+.gantt-now-line {
+  stroke: var(--terracotta);
+  stroke-width: 1.5;
+}
+
+.gantt-now-label {
+  font-size: 10px;
+  fill: var(--terracotta);
+}
+
+.gantt-window-band {
+  fill: rgba(176, 200, 208, 0.18);
+}
+
+.gantt-window-edge {
+  stroke: var(--sky-deep);
+  stroke-dasharray: 4 3;
+}
+
+.gantt-window-label {
+  font-size: 10px;
+  fill: var(--sky-deep);
+}
+
+.gantt-open-end {
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+}
+
+.gantt-open-label {
+  font-size: 10px;
+  fill: var(--muted);
+}
+
+/* 逐项时段表单 */
+.ops-row {
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+
+.ops-row:first-of-type {
+  border-top: none;
+}
+
+.ops-row-selected {
+  background: rgba(164, 97, 44, 0.05);
+}
+
+.ops-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+
+.ops-row-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.ops-presets {
+  margin: 0.4rem 0;
+  overflow-x: auto;
+}
+
+.ops-row-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-top: 0.4rem;
+}
+
+/* v6.49.0 教练侧时刻表提示条（OpsGateNote）：未开始/已结束 = 红字说明；进行中 = 读秒（muted） */
+.ops-gate {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+.ops-gate-blocked {
+  color: var(--bad);
+}

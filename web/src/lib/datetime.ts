@@ -170,3 +170,60 @@ export function useTimeFmt(): TimeFmt {
     [pref],
   );
 }
+
+// ---- 北京时间墙钟 ↔ UTC（v6.49.0 运营时刻表）----
+// 时刻表的具体时间一律按北京时间填写与展示（与 worker 侧 fmtBeijingMinute 的 409 话术同口径）；
+// 中国无夏令时 ⇒ 固定 +08:00，不走显示偏好（切 UTC 档也不改这张表的填写口径）。
+
+const ZH_WALL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/** datetime-local 的墙钟串（北京时间）→ UTC ISO；非法返回 null（含 2 月 30 日这类会被 Date 归一化的日期） */
+export function zhWallToUtcIso(wall: string | null | undefined): string | null {
+  const m = ZH_WALL_RE.exec((wall ?? '').trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const h = Number(m[4]);
+  const mi = Number(m[5]);
+  const s = Number(m[6] ?? 0);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) return null;
+  const ms = Date.UTC(y, mo - 1, d, h - 8, mi, s);
+  const back = new Date(ms + 8 * 3600_000);
+  if (
+    back.getUTCFullYear() !== y ||
+    back.getUTCMonth() !== mo - 1 ||
+    back.getUTCDate() !== d ||
+    back.getUTCHours() !== h ||
+    back.getUTCMinutes() !== mi ||
+    back.getUTCSeconds() !== s
+  ) {
+    return null;
+  }
+  return new Date(ms).toISOString();
+}
+
+/** UTC ISO → datetime-local 的墙钟串（北京时间，YYYY-MM-DDTHH:mm）；空/非法返回 '' */
+export function utcIsoToZhWall(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '';
+  const w = new Date(ms + 8 * 3600_000);
+  return `${w.getUTCFullYear()}-${pad2(w.getUTCMonth() + 1)}-${pad2(w.getUTCDate())}T${pad2(w.getUTCHours())}:${pad2(w.getUTCMinutes())}`;
+}
+
+/**
+ * 显示时区在某时刻相对 UTC 的偏移毫秒数（甘特图刻度对齐用）。
+ * 日/周刻度必须落在「显示时区的午夜」，UTC 与北京时间差 8h，不校正就会把日期线画在早上 8 点。
+ */
+export function zoneOffsetMs(ms: number): number {
+  const t = Math.floor(ms / 1000) * 1000;
+  const p = parts(t, { ...D, ...HMS });
+  const wall = Date.UTC(Number(p.y), Number(p.mo) - 1, Number(p.d), Number(p.h), Number(p.mi), Number(p.se));
+  return wall - t;
+}
+

@@ -15,6 +15,7 @@ import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { walkoverLoser } from '../core/walkover.ts';
 import { getOpenWindow } from './seasons.ts';
+import { assertOpOpen } from './ops-schedule.ts';
 import { createAuditStatement, writeAudit } from '../lib/audit.ts';
 
 export interface BrandPoolRow {
@@ -186,6 +187,8 @@ export async function renewNaming(
   }
   const win = await getOpenWindow(env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，续约办不了');
+  // v6.49.0 运营时刻表：冠名续约属消费中心（默认「不限制」= 只剩上面那道窗口闸）
+  await assertOpOpen(env.DB, 'consumption');
   const row = await getActiveNaming(env.DB, clubId);
   if (!row) throw new HttpError(404, '该队没有生效冠名');
   if (row.windows_remaining !== 1) {
@@ -244,6 +247,8 @@ export async function terminateNaming(
 ): Promise<{ brand: string; penalty: number; windowsRemaining: number }> {
   const win = await getOpenWindow(env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，退约也办不了');
+  // v6.49.0 运营时刻表：冠名退约属消费中心（退约是收口动作，但仍在消费中心的口径里）
+  await assertOpOpen(env.DB, 'consumption');
   const row = await getActiveNaming(env.DB, clubId);
   if (!row) throw new HttpError(404, '该队没有生效冠名');
   const params = await loadNamingParams(env.DB);

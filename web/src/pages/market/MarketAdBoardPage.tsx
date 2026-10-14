@@ -18,6 +18,8 @@ import { playerPath } from '../../lib/player-link.ts';
 import { attrClass } from '../../lib/players-library.ts';
 import { useTransferBoard } from '../../lib/queries.ts';
 import { MarketNav, money } from './shared.tsx';
+import OpsGateNote from '../../components/OpsGateNote.tsx';
+import { useOpsGate } from '../../lib/ops-gate.ts';
 
 // 金额统一「180.00m」（单位字母照市场分区既有口径：在售市场卡 / 球员页都用小写 m）；无值回「—」，不拼出「— m」
 function amount(v: number | null | undefined): string {
@@ -194,6 +196,7 @@ export function AdBoardTeaser() {
 // 同一三态反馈（用户措辞裁决 2026-10-05：accepted = 对方接受 → 挂牌进转会区，报价方领先，不是成交）。
 // 复用 .modal-mask/.modal-card（styles.css）；未登录 401 走错误区透出，公开页不做会话预判。
 function AdBidModal({ row, onClose }: { row: TransferBoardRow; onClose: () => void }) {
+  const offerGate = useOpsGate('transfer_offer');
   const [bidAmount, setBidAmount] = useState(row.listPrice !== null ? String(row.listPrice) : '');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -269,11 +272,12 @@ function AdBidModal({ row, onClose }: { row: TransferBoardRow; onClose: () => vo
                 placeholder="给卖家的一句话"
               />
             </label>
+            <OpsGateNote gate={offerGate} />
             <div className="actions">
               <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={onClose}>
                 取消
               </button>
-              <button type="button" className="btn btn-sm" disabled={busy || bidAmount === ''} onClick={submit}>
+              <button type="button" className="btn btn-sm" disabled={busy || bidAmount === '' || offerGate?.blocked} onClick={submit}>
                 送出报价
               </button>
             </div>

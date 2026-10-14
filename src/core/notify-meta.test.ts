@@ -29,16 +29,16 @@ describe('NOTIFY_META 与 worker 模板表', () => {
     expect(RENDER_END).toBeGreaterThan(RENDER_START);
   });
 
-  it('模板集合双向相等（30 条，无重复）', () => {
+  it('模板集合双向相等（33 条，无重复）', () => {
     const templates = renderTemplates();
-    expect(templates).toHaveLength(30);
+    expect(templates).toHaveLength(33);
     expect(new Set(templates).size).toBe(templates.length);
     expect(templates.slice().sort()).toEqual(Object.keys(NOTIFY_META).sort());
   });
 
   it('每条徽章文案非空、唯一、≤6 字', () => {
     const labels = Object.values(NOTIFY_META).map((m) => m.label);
-    expect(labels).toHaveLength(30);
+    expect(labels).toHaveLength(33);
     expect(new Set(labels).size).toBe(labels.length);
     for (const label of labels) {
       expect(label.length).toBeGreaterThan(0);
@@ -78,6 +78,10 @@ describe('NOTIFY_META 与 worker 模板表', () => {
         'offer_intent_window_open',
         'offer_intent_confirmed',
         'offer_intent_closed',
+        // v6.49.0 到期引擎：报价临近 / 谈判超时 / 谈判临近
+        'offer_deadline',
+        'negotiation_timeout',
+        'negotiation_deadline',
       ],
       activation: [
         'activation_notice',
@@ -92,8 +96,8 @@ describe('NOTIFY_META 与 worker 模板表', () => {
       window: ['window_signals'],
     };
     const members = Object.values(expected).flat();
-    expect(members).toHaveLength(30);
-    expect(new Set(members).size).toBe(30);
+    expect(members).toHaveLength(33);
+    expect(new Set(members).size).toBe(33);
     for (const [cat, list] of Object.entries(expected)) {
       expect(templatesOf(cat as NotifyCategoryId).slice().sort(), `类目 ${cat} 的成员不符`).toEqual(list.slice().sort());
     }

@@ -17,6 +17,10 @@ import {
 } from '../core/offer-rules.ts';
 import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from './seasons.ts';
+import { assertOpOpen } from './ops-schedule.ts';
+import { createConfigService } from '../core/config.ts';
+import { fmtBeijingMinute } from '../core/ops-schedule.ts';
+import type { ExpiryOpts } from './expiry-ops.ts';
 import { availableBalance } from './ledger.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
@@ -119,6 +123,8 @@ export async function placeOffer(
   // 关窗期被同意会转成意向单，等开窗卖方点确认时再把窗口写回来。
   const win = await getOpenWindow(db);
   const amount = round2(input.amount);
+  // v6.49.0 运营时刻表：报价通道自己的时段（默认「不限制」= 与 v6.29.0 起的行为逐字一致）
+  await assertOpOpen(db, 'transfer_offer');
 
   const p = await db
     .prepare(
@@ -264,6 +270,8 @@ export async function counterOffer(
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
   if (offer.status !== 'pending') throw new HttpError(409, '这条报价已经了结，不能再还价');
+  // v6.49.0 运营时刻表：还价同报价通道时段（收口类动作——拒绝/撤回/过期——不受时段约束，钱不能被时段卡住）
+  await assertOpOpen(db, 'transfer_offer');
   if (offer.turn !== role) throw new HttpError(409, '还没轮到你出价', 'not_your_turn');
   // v6.29.0：窗口关不关不再挡还价（关窗期谈价是常态），报价单自身状态与球员状态才是闸
   if (offer.player_club_id !== offer.seller_club_id || offer.player_status !== 'normal') {
@@ -584,6 +592,8 @@ export async function acceptOffer(
     if (offer.hold_id === null) throw new HttpError(409, '这条意向单的资金冻结缺失，不能确认');
     const win = await getOpenWindow(db);
     if (!win) throw new HttpError(409, '转会窗口没开，意向单要等开窗后再确认', 'no_window');
+    // v6.49.0 运营时刻表：意向单确认属报价通道全流程（这一单的收尾，不按挂牌时段另判）
+    await assertOpOpen(db, 'transfer_offer');
     // 兄弟 pending 单此刻才转 expired（同开窗期同意）：先记下买方，确认后只通知他们
     const siblingBuyers = await db
       .prepare(`SELECT DISTINCT buyer_club_id FROM offers WHERE player_id = ? AND status = 'pending' AND id != ?`)
@@ -619,6 +629,8 @@ export async function acceptOffer(
     throw new HttpError(409, '球员已不在卖家阵容里，这条报价马上会被过期收口');
   }
   if (offer.hold_id === null) throw new HttpError(409, '这条报价的资金冻结缺失，不能同意');
+  // v6.49.0 运营时刻表：接受报价同报价通道时段（关窗期会转意向单，不生成挂牌；开窗期顺手挂牌也走这条闸）
+  await assertOpOpen(db, 'transfer_offer');
 
   // 卖方还价抬高过 → 买方的冻结还停在旧额：接受前先补足到当前报价额（占用/转意向之前）
   if (role === 'buyer') await topUpBuyerHold(env, offer, input.clubId);
@@ -836,6 +848,114 @@ export async function expireStaleOffers(env: Env, opts: { origin: AuditOrigin; a
     }
   }
   return summary;
+}
+
+// ---- 到期引擎适配器（v6.49.0）：报价回合时限 ----
+// 锚 = MAX(expiry_anchor_at, updated_at)：任何动作（还价/接受等）刷新 updated_at ⇒ 回合时钟重新起算。
+// 存量宽限：expiry_anchor_at 为空的行首次扫描按 now 打标，避免上线首 tick 把历史 pending 批量误杀。
+// 只收口 pending：intent（关窗议价意向）按 v6.29.0 跨窗存活，不归本引擎管。
+
+const OFFER_TURN_HOURS_DEFAULT = 48;
+
+function isoMinusHours(iso: string, hours: number): string {
+  return new Date(Date.parse(iso) - hours * 3600_000).toISOString();
+}
+
+async function offerTurnHours(db: D1Database): Promise<number> {
+  const hours = await createConfigService(db).getNumber('offer_turn_hours');
+  return hours && hours > 0 ? hours : OFFER_TURN_HOURS_DEFAULT;
+}
+
+interface DueOfferRow {
+  id: number;
+  buyer_club_id: number;
+  seller_club_id: number;
+  turn: string;
+  anchor: string;
+  player_name: string;
+}
+
+const DUE_OFFER_SELECT = `
+  SELECT o.id, o.buyer_club_id, o.seller_club_id, o.turn,
+         MAX(o.expiry_anchor_at, o.updated_at) AS anchor,
+         ${sqlDisplayName('p')} AS player_name
+  FROM offers o
+  JOIN players p ON p.id = o.player_id`;
+
+export async function expireDueOffers(env: Env, opts: ExpiryOpts): Promise<number> {
+  const db = env.DB;
+  const hours = await offerTurnHours(db);
+  const cutoff = isoMinusHours(opts.nowIso, hours);
+  let rows: DueOfferRow[];
+  if (opts.closeAll) {
+    // 时段已结束：在途全部收口（不看各自时限）
+    const res = await db
+      .prepare(`${DUE_OFFER_SELECT} WHERE o.status = 'pending' ORDER BY o.id LIMIT ?`)
+      .bind(opts.limit)
+      .all<DueOfferRow>();
+    rows = res.results;
+  } else {
+    await db
+      .prepare(`UPDATE offers SET expiry_anchor_at = ? WHERE status = 'pending' AND expiry_anchor_at = ''`)
+      .bind(opts.nowIso)
+      .run();
+    const res = await db
+      .prepare(`${DUE_OFFER_SELECT} WHERE o.status = 'pending' AND o.expiry_anchor_at != '' AND MAX(o.expiry_anchor_at, o.updated_at) <= ? ORDER BY o.id LIMIT ?`)
+      .bind(cutoff, opts.limit)
+      .all<DueOfferRow>();
+    rows = res.results;
+  }
+  let closed = 0;
+  for (const row of rows) {
+    const offer = await db.prepare(`SELECT * FROM offers WHERE id = ? AND status = 'pending'`).bind(row.id).first<OfferRow>();
+    if (!offer) continue;
+    const ok = await finalizeOffer(env, offer, {
+      status: 'expired',
+      fromStatus: 'pending',
+      actorClubId: null,
+      actor: null,
+      origin: opts.origin,
+      kind: 'expire',
+      note: opts.closeAll ? '报价通道已结束，自动结束' : `超过 ${hours} 小时未回应，自动结束`,
+    });
+    if (!ok) continue;
+    closed++;
+    const reason = opts.closeAll ? 'ops_end' : 'deadline';
+    await queueClubNotification(env, offer.buyer_club_id, 'offer_expired', { player: row.player_name, reason, offerId: offer.id });
+    await queueClubNotification(env, offer.seller_club_id, 'offer_expired', { player: row.player_name, reason, offerId: offer.id });
+  }
+  return closed;
+}
+
+/** 临近提醒：距到点不足 remindLeadHours 提醒一次（reminded_at 抢占，只发一次），只发在回合的一方。 */
+export async function remindDueOffers(env: Env, opts: ExpiryOpts): Promise<number> {
+  const db = env.DB;
+  const hours = await offerTurnHours(db);
+  if (opts.remindLeadHours <= 0 || hours <= opts.remindLeadHours) return 0;
+  const cutoff = isoMinusHours(opts.nowIso, hours);
+  const remindFrom = isoMinusHours(opts.nowIso, hours - opts.remindLeadHours);
+  const res = await db
+    .prepare(
+      `${DUE_OFFER_SELECT}
+       WHERE o.status = 'pending' AND o.expiry_anchor_at != '' AND o.reminded_at = ''
+         AND MAX(o.expiry_anchor_at, o.updated_at) <= ? AND MAX(o.expiry_anchor_at, o.updated_at) > ?
+       ORDER BY o.id LIMIT ?`,
+    )
+    .bind(remindFrom, cutoff, opts.limit)
+    .all<DueOfferRow>();
+  let sent = 0;
+  for (const row of res.results) {
+    const deadline = fmtBeijingMinute(new Date(Date.parse(row.anchor) + hours * 3600_000).toISOString());
+    const claimed = await db
+      .prepare(`UPDATE offers SET reminded_at = ? WHERE id = ? AND status = 'pending' AND reminded_at = ''`)
+      .bind(opts.nowIso, row.id)
+      .run();
+    if ((claimed.meta.changes ?? 0) === 0) continue;
+    const clubId = row.turn === 'buyer' ? row.buyer_club_id : row.seller_club_id;
+    await queueClubNotification(env, clubId, 'offer_deadline', { player: row.player_name, offerId: row.id, deadline });
+    sent++;
+  }
+  return sent;
 }
 
 // ---- 报价设置（v6.33.0 标价）：最低报价转全系统私密，进名单新增必填公开标价 ----

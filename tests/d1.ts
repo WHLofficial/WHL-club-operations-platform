@@ -149,6 +149,8 @@ const MIGRATION_FILES = [
   '0065_list_price.sql',
   '0066_negotiation_feedback.sql',
   '0067_settle_scan_indexes.sql',
+  '0068_growth_tier_auto.sql',
+  '0069_ops_schedule_expiry.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

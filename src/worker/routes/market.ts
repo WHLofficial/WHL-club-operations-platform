@@ -20,6 +20,7 @@ import {
   TRAINEE_ACTIVATION_FEE,
 } from '../../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from '../seasons.ts';
+import { assertOpOpen } from '../ops-schedule.ts';
 import { activationFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
@@ -225,6 +226,8 @@ app.post('/market/listings', async (c) => {
 
   const win = await getOpenWindow(c.env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能挂牌', 'no_window');
+  // v6.49.0 运营时刻表：挂牌与出价共用 transfer_listing 时段（默认「不限制」= 只剩上面那道窗口闸）
+  await assertOpOpen(c.env.DB, 'transfer_listing');
 
   const player = await c.env.DB.prepare('SELECT id, name, club_id, status, market_value FROM players WHERE id = ?')
     .bind(playerId)
@@ -965,6 +968,8 @@ app.post('/market/listings/:id/bids', async (c) => {
   if (!(await isWindowOpen(c.env.DB, listing.season, listing.window_seq))) {
     throw new HttpError(409, '这单所属的转会窗口已经关了');
   }
+  // v6.49.0 运营时刻表：出价与挂牌共用 transfer_listing 时段
+  await assertOpOpen(c.env.DB, 'transfer_listing');
 
   const isActivation = listing.type === 'activation';
   // 评审修复（P2-③）：highest/total 只认 active 出价——与冻结触发器（0005）、结算分流

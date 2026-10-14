@@ -10,6 +10,7 @@ import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { loadMarketContext } from './market-context.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
+import { assertOpOpen } from './ops-schedule.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import {
@@ -271,6 +272,8 @@ export async function createRcChange(
 
   const win = await getOpenWindow(db);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能续约', 'no_window');
+  // v6.49.0 运营时刻表：续约自己的时段（默认「不限制」= 只剩上面那道窗口闸）
+  await assertOpOpen(db, 'transfer_rc_change');
 
   const player = await db
     .prepare('SELECT id, name, display_name, club_id, status FROM players WHERE id = ?')
@@ -354,6 +357,8 @@ export async function createTermination(
 
   const win = await getOpenWindow(db);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能解约', 'no_window');
+  // v6.49.0 运营时刻表：解约自己的时段（默认「不限制」= 只剩上面那道窗口闸）
+  await assertOpOpen(db, 'transfer_termination');
 
   const player = await db
     .prepare('SELECT id, name, display_name, club_id, status FROM players WHERE id = ?')
@@ -436,6 +441,8 @@ export async function createFreeAgent(
 
   const win = await getOpenWindow(db);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能海捞', 'no_window');
+  // v6.49.0 运营时刻表：海捞明标段（v6.50.0 两阶段落地后，暗标段另有 transfer_sea_sealed 自己的闸）
+  await assertOpOpen(db, 'transfer_sea_open');
 
   const player = await db
     .prepare('SELECT id, name, display_name, club_id, status FROM players WHERE id = ?')
@@ -503,6 +510,8 @@ export async function createForcedAuction(
 
   const win = await getOpenWindow(db);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能发起强制拍卖', 'no_window');
+  // v6.49.0 运营时刻表：强制拍卖自己的时段（默认「不限制」= 只剩上面那道窗口闸）
+  await assertOpOpen(db, 'transfer_forced_auction');
 
   const player = await db
     .prepare('SELECT id, name, club_id, status, position, ca FROM players WHERE id = ?')

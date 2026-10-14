@@ -28,6 +28,8 @@ import { settleOverdue, type SettleSummary } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults } from './results.ts';
 import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
+import { runExpiryTick, type ExpirySummary } from './expiry-ops.ts';
+import opsRoutes from './routes/ops-schedule.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -85,6 +87,8 @@ app.route('/api', notificationsRoutes);
 app.route('/api', authRoutes);
 // 媒体读取（v3.4.0）：镜像比赛系统的公开媒体路由，只读不写、不碰 D1（队徽/封面图同源取）
 app.route('/api/media', mediaRoutes);
+// 运营时刻表只读（v6.49.0）：教练侧与匿名访客都要看「这个操作现在开着吗」，不鉴权
+app.route('/api', opsRoutes);
 app.route('/api/admin', adminRoutes);
 // 机器通道入站（v6.1.0）：赛事系统建队推过来建俱乐部行。不走会话，只认 HMAC 签名；
 // 未配 TEAM_SYNC_SECRET 一律 503。写路径已在 cache-policy 登记（否则公开目录最长陈旧 24h）。
@@ -193,7 +197,15 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     events = { error: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true, ...summary, autoResults, events, notify };
+  // 统一到期引擎（v6.49.0）：报价回合时限 / 签约谈判静默超时 / 运营时刻表到点收口在途。
+  // 引擎内部每个适配器各自 try/catch，一个坏不影响其余（与上面 events 同纪律）。
+  let expiry: Awaited<ReturnType<typeof runExpiryTick>> | { error: string };
+  try {
+    expiry = await runExpiryTick(env, 'cron_tick');
+  } catch (err) {
+    expiry = { error: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, ...summary, autoResults, events, notify, expiry };
 }
 
 // tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的
@@ -204,14 +216,17 @@ async function runSettleTick(env: Env) {
 // tick 每 5 分钟一次、空跑占多数，空跑还 purge 等于白付一次 KV 写并让名册重新全表扫。
 // v6.11.0 加 events.expired：超时兜底会落效果（死忠/影响力/建设券…），公开目录里能看到这些列；
 // reminded 只写 notifications 与 event_occurrences.reminded_at，不算进来。
-function tickChanged(summary: SettleSummary, events: EventTickResult): boolean {
+// v6.49.0 加 expiry.closed：到期收口会改 offers/fund_holds/listings/players/transfers（公开目录看得到
+// 归属与挂牌状态）；reminded 只写 notifications 与 reminded_at，不算进来。
+function tickChanged(summary: SettleSummary, events: EventTickResult, expiry: ExpirySummary | { error: string }): boolean {
   return (
     summary.settled > 0 ||
     summary.delisted > 0 ||
     summary.voided > 0 ||
     summary.notesUpdated > 0 ||
     summary.healed > 0 ||
-    events.expired > 0
+    events.expired > 0 ||
+    ('closed' in expiry && expiry.closed > 0)
   );
 }
 
@@ -228,7 +243,7 @@ async function scheduledTick(_event: unknown, env: Env, _ctx: { waitUntil(p: Pro
     'club-settle-tick',
     async () => {
       const tick = await runSettleTick(env);
-      if (!('expired' in tick.events) || !tickChanged(tick, tick.events)) return;
+      if (!('expired' in tick.events) || !tickChanged(tick, tick.events, tick.expiry)) return;
       await purgePublicCaches(env).catch(() => {});
     },
     { schedule: { type: 'crontab', value: '*/5 * * * *' }, checkinMargin: 2, maxRuntime: 5 },

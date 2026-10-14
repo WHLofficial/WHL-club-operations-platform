@@ -2,6 +2,8 @@
 // B 布局（visual companion 定稿）：左主栏商品页签（?tab= 深链）+ 底部球场三卡；右侧栏我的工单常驻（行内展开）。
 // 提交流程：确认框 → 提交即扣费 → 管理组审核 → 通过自动生效 / 拒绝自动退款。
 import { useEffect, useRef, useState } from 'react';
+import OpsGateNote from '../../components/OpsGateNote.tsx';
+import { useOpsGate } from '../../lib/ops-gate.ts';
 import { useSearchParams } from 'react-router';
 import { apiPost } from '../../lib/api.ts';
 import { PS_GRANTABLE_BASE_IDS, POSITION_BY_ID } from '../../../../src/core/fc26.ts';
@@ -18,6 +20,8 @@ type ShopTab = 'pa' | 'badge' | 'role' | 'position' | 'shell';
 // v6.29.0：关窗期消费工单（POST /api/shop/orders）后端一律 409 no_window——
 // 下单入口统一置灰，并把同一句提示摆在提交区近旁。窗口态复用公开端点 /api/seasons/current。
 const WINDOW_CLOSED_NOTE = '关窗期间不能提交消费工单，开窗后再来';
+// v6.49.0 运营时刻表：消费中心整体也能设时段，被时段挡住时按钮的 title 用这句
+const OPS_CLOSED_NOTE = '消费中心当前不在开放时段（见管理端运营时刻表）';
 
 const TAB_LABEL: Record<ShopTab, string> = {
   pa: '买 PA',
@@ -96,6 +100,9 @@ function ShopContent({
   // 关窗期后端拒绝消费工单；数据未到按未开窗处理（与球员页 windowOpen 同口径）
   const seasons = useSeasonsCurrent();
   const windowOpen = seasons.data?.window?.status === 'open';
+  // v6.49.0：消费中心整体时段（consumption 键）——与窗口闸叠加，任一不过都点不动
+  const consumptionGate = useOpsGate('consumption');
+  const opsOpen = consumptionGate?.blocked !== true;
 
   return (
     <>
@@ -131,6 +138,7 @@ function ShopContent({
               {WINDOW_CLOSED_NOTE}
             </p>
           )}
+          <OpsGateNote gate={consumptionGate} className="hint" />
           {catalogError ? (
             <section className="card">
               <p className="muted">{catalogError}</p>
@@ -145,11 +153,11 @@ function ShopContent({
             </section>
           ) : (
             <>
-              {tab === 'pa' && <PaCard prices={catalog.prices} paCap={catalog.paCap} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
-              {tab === 'badge' && <BadgeCard prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
-              {tab === 'role' && <RoleCard prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
-              {tab === 'position' && <PositionCard prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
-              {tab === 'shell' && <ShellCard prices={catalog.prices} hpremium={catalog.hpremiumClubIds} windowOpen={windowOpen} />}
+              {tab === 'pa' && <PaCard opsOpen={opsOpen} prices={catalog.prices} paCap={catalog.paCap} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
+              {tab === 'badge' && <BadgeCard opsOpen={opsOpen} prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
+              {tab === 'role' && <RoleCard opsOpen={opsOpen} prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
+              {tab === 'position' && <PositionCard opsOpen={opsOpen} prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
+              {tab === 'shell' && <ShellCard prices={catalog.prices} hpremium={catalog.hpremiumClubIds} windowOpen={windowOpen} opsOpen={opsOpen} />}
             </>
           )}
 
@@ -205,7 +213,7 @@ function submitOrder(category: string, payload: Record<string, unknown>, confirm
 
 /* ---------- 买 PA ---------- */
 
-function PaCard({ prices, paCap, players, loading, windowOpen }: { prices: ShopPrices; paCap: number; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean }) {
+function PaCard({ opsOpen, prices, paCap, players, loading, windowOpen }: { prices: ShopPrices; paCap: number; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean; opsOpen: boolean }) {
   const { show } = useToast();
   const invalidate = useShopInvalidation();
   const [playerId, setPlayerId] = useState<number | null>(null);
@@ -214,7 +222,7 @@ function PaCard({ prices, paCap, players, loading, windowOpen }: { prices: ShopP
   const price = points * prices.paPerPoint;
   const headroom = player?.pa != null ? paCap - player.pa : null;
   const maxPoints = player?.pa != null ? Math.max(0, Math.min(10, paCap - player.pa)) : 10;
-  const disabled = loading || player === null || points < 1 || points > maxPoints || !windowOpen;
+  const disabled = loading || player === null || points < 1 || points > maxPoints || !windowOpen || !opsOpen;
 
   return (
     <section className="card">
@@ -236,7 +244,7 @@ function PaCard({ prices, paCap, players, loading, windowOpen }: { prices: ShopP
           className="btn btn-sm"
           type="button"
           disabled={disabled}
-          title={!windowOpen ? WINDOW_CLOSED_NOTE : undefined}
+          title={!windowOpen ? WINDOW_CLOSED_NOTE : !opsOpen ? OPS_CLOSED_NOTE : undefined}
           onClick={() =>
             submitOrder(
               'pa',
@@ -267,7 +275,7 @@ function PaCard({ prices, paCap, players, loading, windowOpen }: { prices: ShopP
 
 type BadgeOp = 'silver' | 'gold' | 'upgrade';
 
-function BadgeCard({ prices, players, loading, windowOpen }: { prices: ShopPrices; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean }) {
+function BadgeCard({ opsOpen, prices, players, loading, windowOpen }: { prices: ShopPrices; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean; opsOpen: boolean }) {
   const { show } = useToast();
   const invalidate = useShopInvalidation();
   const [op, setOp] = useState<BadgeOp>('silver');
@@ -285,7 +293,7 @@ function BadgeCard({ prices, players, loading, windowOpen }: { prices: ShopPrice
   const silverFull = player != null && player.silverUsed >= 12;
   const goldFull = player != null && player.goldUsed >= 3;
   const opBlocked = (op === 'silver' && silverFull) || ((op === 'gold' || op === 'upgrade') && goldFull);
-  const disabled = loading || player === null || psid === null || !options.includes(psid) || opBlocked || !windowOpen;
+  const disabled = loading || player === null || psid === null || !options.includes(psid) || opBlocked || !windowOpen || !opsOpen;
 
   return (
     <section className="card">
@@ -323,7 +331,7 @@ function BadgeCard({ prices, players, loading, windowOpen }: { prices: ShopPrice
           className="btn btn-sm"
           type="button"
           disabled={disabled}
-          title={!windowOpen ? WINDOW_CLOSED_NOTE : undefined}
+          title={!windowOpen ? WINDOW_CLOSED_NOTE : !opsOpen ? OPS_CLOSED_NOTE : undefined}
           onClick={() =>
             submitOrder(
               op === 'upgrade' ? 'badge_upgrade' : 'badge',
@@ -359,7 +367,7 @@ function roleLabel(id: number): string {
   return r ? `${r.chs.replace(/ \+$/, '')}${id > 100 ? ' ++' : ' +'}` : `角色 #${id}`;
 }
 
-function RoleCard({ prices, players, loading, windowOpen }: { prices: ShopPrices; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean }) {
+function RoleCard({ opsOpen, prices, players, loading, windowOpen }: { prices: ShopPrices; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean; opsOpen: boolean }) {
   const { show } = useToast();
   const invalidate = useShopInvalidation();
   const [op, setOp] = useState<RoleOp>('add');
@@ -385,6 +393,7 @@ function RoleCard({ prices, players, loading, windowOpen }: { prices: ShopPrices
     loading ||
     player === null ||
     !windowOpen ||
+    !opsOpen ||
     (op === 'add' ? roleId === null || !addOptions.includes(roleId) : slot === null || !slotOptions.some((r) => r.slot === slot));
 
   return (
@@ -435,7 +444,7 @@ function RoleCard({ prices, players, loading, windowOpen }: { prices: ShopPrices
           className="btn btn-sm"
           type="button"
           disabled={disabled}
-          title={!windowOpen ? WINDOW_CLOSED_NOTE : undefined}
+          title={!windowOpen ? WINDOW_CLOSED_NOTE : !opsOpen ? OPS_CLOSED_NOTE : undefined}
           onClick={() =>
             submitOrder(
               'role',
@@ -483,7 +492,7 @@ type PositionOp = 'add' | 'remove' | 'replace';
 
 const POSITION_OPTIONS = Object.values(POSITION_BY_ID); // 含 GK，选项里再过滤
 
-function PositionCard({ prices, players, loading, windowOpen }: { prices: ShopPrices; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean }) {
+function PositionCard({ opsOpen, prices, players, loading, windowOpen }: { prices: ShopPrices; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean; opsOpen: boolean }) {
   const { show } = useToast();
   const invalidate = useShopInvalidation();
   const [op, setOp] = useState<PositionOp>('add');
@@ -518,6 +527,7 @@ function PositionCard({ prices, players, loading, windowOpen }: { prices: ShopPr
     player === null ||
     isGkMain ||
     !windowOpen ||
+    !opsOpen ||
     !slotChosen ||
     (op !== 'remove' && (posId === null || !posOptions.some((o) => o.id === posId)));
 
@@ -580,7 +590,7 @@ function PositionCard({ prices, players, loading, windowOpen }: { prices: ShopPr
           className="btn btn-sm"
           type="button"
           disabled={disabled}
-          title={!windowOpen ? WINDOW_CLOSED_NOTE : undefined}
+          title={!windowOpen ? WINDOW_CLOSED_NOTE : !opsOpen ? OPS_CLOSED_NOTE : undefined}
           onClick={() =>
             submitOrder(
               'position',
@@ -625,7 +635,7 @@ function playerZonesAt(p: ShopSquadStatePlayer, n: number): string | null {
 
 /* ---------- 队壳申请 ---------- */
 
-function ShellCard({ prices, hpremium, windowOpen }: { prices: ShopPrices; hpremium: number[]; windowOpen: boolean }) {
+function ShellCard({ prices, hpremium, windowOpen, opsOpen }: { prices: ShopPrices; hpremium: number[]; windowOpen: boolean; opsOpen: boolean }) {
   const { show } = useToast();
   const invalidate = useShopInvalidation();
   const [note, setNote] = useState('');
@@ -646,8 +656,8 @@ function ShellCard({ prices, hpremium, windowOpen }: { prices: ShopPrices; hprem
         <button
           className="btn btn-sm"
           type="button"
-          disabled={busy || isHpremium || !windowOpen}
-          title={isHpremium ? '豪门队壳事项请在群内咨询管理组' : !windowOpen ? WINDOW_CLOSED_NOTE : undefined}
+          disabled={busy || isHpremium || !windowOpen || !opsOpen}
+          title={isHpremium ? '豪门队壳事项请在群内咨询管理组' : !windowOpen ? WINDOW_CLOSED_NOTE : !opsOpen ? OPS_CLOSED_NOTE : undefined}
           onClick={() => {
             if (!window.confirm(`确认提交队壳申请，支付 ${prices.clubShell.toFixed(2)}m？（提交即扣费，拒绝自动退款）`)) return;
             setBusy(true);

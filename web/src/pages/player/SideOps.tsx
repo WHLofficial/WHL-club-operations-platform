@@ -18,6 +18,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, apiPut, apiUpload, type ContractDto, type FreeAgentResult, type SeaComps, type SeaSignEligibility } from '../../lib/api.ts';
 import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
+import OpsGateNote from '../../components/OpsGateNote.tsx';
+import { useOpsGate } from '../../lib/ops-gate.ts';
 import { money } from '../market/shared.tsx';
 
 export interface SideOpsPlayer {
@@ -72,6 +74,10 @@ export function SideOps({
   const qc = useQueryClient();
   const invalidateOffers = useOffersInvalidation();
   const invalidateMarket = useMarketInvalidation();
+  // v6.49.0 运营时刻表：三类写入口的置灰真源（后端 assertOpOpen 仍是硬闸，这里只省白填一遍表单）
+  const listingGate = useOpsGate('transfer_listing');
+  const seaGate = useOpsGate('transfer_sea_open');
+  const offerGate = useOpsGate('transfer_offer');
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
   const [bidBusy, setBidBusy] = useState(false);
@@ -520,11 +526,12 @@ export function SideOps({
                 />
               </label>
               <p className="side-sub">下限取违约金/身价五折取低（不低于 1m），上限违约金 1.5 倍。</p>
+              <OpsGateNote gate={listingGate} className="side-sub" />
               <div className="side-btns">
                 <button
                   type="button"
                   className="btn btn-sm"
-                  disabled={busy || askPrice === ''}
+                  disabled={busy || askPrice === '' || listingGate?.blocked}
                   onClick={() =>
                     void run(async () => {
                       const r = await apiPost<{ listingId: number; min: number; max: number }>('/api/market/listings', {
@@ -647,11 +654,12 @@ export function SideOps({
             </label>
             <SeaCompsBlock seaComps={seaComps} />
             <p className="side-sub">签入即付海捞费并定新合同；签完本窗内他队还能竞价挖角。</p>
+            <OpsGateNote gate={seaGate} className="side-sub" />
             <div className="side-btns">
               <button
                 type="button"
                 className="btn btn-sm"
-                disabled={busy || !seaSign.eligible || freeFee === ''}
+                disabled={busy || !seaSign.eligible || freeFee === '' || seaGate?.blocked}
                 onClick={() =>
                   void run(async () => {
                     const r = await apiPost<FreeAgentResult>('/api/transfers/free-agent', {
@@ -721,11 +729,12 @@ export function SideOps({
                 ? '对方同意即自动挂牌，你的价锁成领先出价。'
                 : '关窗期同意先挂「意向单」（不生成挂牌、冻结继续），开窗后由卖方确认才挂牌。'}
             </p>
+            <OpsGateNote gate={offerGate} className="side-sub" />
             <div className="side-btns">
               <button
                 type="button"
                 className="btn btn-sm"
-                disabled={busy || offerAmount === ''}
+                disabled={busy || offerAmount === '' || offerGate?.blocked}
                 onClick={() =>
                   void run(async () => {
                     const r = await apiPost<{ offerId: number; status: string }>('/api/offers', {

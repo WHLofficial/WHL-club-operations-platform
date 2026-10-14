@@ -92,6 +92,9 @@ export const CONFIG_KEYS = [
   'influence_tier_coefs',
   'fans_grow_rate_per_match',
   'fans_drop_rate_per_match',
+  // v6.49.0 到期引擎：报价回合时限 / 签约谈判静默超时（小时）
+  'offer_turn_hours',
+  'negotiation_silence_hours',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -283,6 +286,10 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   //（一窗约 2–3 场主场，观察几窗再定标；关窗兜底仍走 attendance_model 的窗系数）
   fans_grow_rate_per_match: '0.2',
   fans_drop_rate_per_match: '0.2',
+  // v6.49.0 到期引擎：报价回合（锚 = 最后一次动作）超过 48h 未回应 → 自动结束；
+  // 签约谈判静默（锚 = 最后一次工资报价）超过 72h → 自动作废。存量行首扫按 now 打标宽限。
+  offer_turn_hours: '48',
+  negotiation_silence_hours: '72',
 };
 
 export const CONFIG_SECRET_KEYS: ReadonlySet<string> = new Set([

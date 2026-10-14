@@ -16,6 +16,7 @@ import { createConfigService } from '../core/config.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
+import { assertOpOpen } from './ops-schedule.ts';
 import {
   buildPackages,
   getActiveNaming,
@@ -470,6 +471,8 @@ export async function acceptOffer(
     throw new HttpError(400, '已有生效冠名：签新报价请选择「到期后自动接替」或「解约当前并签新」');
   }
   if (!active && !win) throw new HttpError(409, '转会窗口没开，签不了冠名合同');
+  // v6.49.0 运营时刻表：签冠名合同属消费中心（有生效冠名时的接班签约同样受这套时段约束）
+  await assertOpOpen(db, 'consumption');
 
   const [tierRules, heatRules] = await Promise.all([loadTierRules(db), loadHeatRules(db)]);
   const quota = tierQuotaOf(offer.tier, tierRules);

@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
+import OpsGateNote from '../../components/OpsGateNote.tsx';
+import { useOpsGate } from '../../lib/ops-gate.ts';
 import { apiPost, apiUpload, type ActivatablePlayer, type ActivationResult, type BidPlaceResult } from '../../lib/api.ts';
 import { useActivatable, useMarketInvalidation, useMyClub, type ActivatableMode } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
@@ -138,6 +140,8 @@ function ActivateSection({
   onError: (msg: string) => void;
 }) {
   const qc = useQueryClient();
+  // v6.49.0：激活受「激活」时段约束（后端 assertOpOpen 硬闸，这里置灰 + 说明）
+  const activationGate = useOpsGate('transfer_activation');
   const [mode, setMode] = useState<ActivatableMode>('all');
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState('');
@@ -220,6 +224,7 @@ function ActivateSection({
         <p className="hint">没有符合条件的可激活球员。</p>
       ) : (
         <>
+          <OpsGateNote gate={activationGate} />
           <div className="table-wrap">
             <table>
               <thead>
@@ -256,7 +261,7 @@ function ActivateSection({
                       <button
                         className="btn btn-sm"
                         type="button"
-                        disabled={busyId !== null || p.justSigned || p.activatedThisWindow || p.activationFee === null}
+                        disabled={busyId !== null || p.justSigned || p.activatedThisWindow || p.activationFee === null || activationGate?.blocked}
                         title={p.activationFee === null ? '正式合同缺违约金，先让管理组补合同' : undefined}
                         onClick={() => requestActivate(p)}
                       >

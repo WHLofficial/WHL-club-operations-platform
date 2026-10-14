@@ -516,6 +516,9 @@ export interface AdminClubRow {
   leagueTier: string;
   status: string;
   transferBanned?: boolean;
+  /** 队壳国家（v6.48.0 §10.3，FC 国家编号）：成长档位 c2 的比对基准；null = 未设，管理端提示补录 */
+  country: number | null;
+  countryName: string | null;
   createdAt: string;
   bindings: { userId: number; userName: string | null; boundAt: string }[];
   latestCode: { expiresAt: string | null; usedBy: number | null; usedAt: string | null; createdAt: string } | null;
@@ -1912,6 +1915,17 @@ export interface GrowthDetail {
     upgradePlans: UpgradePlanDto[];
     /** 中国计划自选银徽章名额（config.china_badges − 已发数） */
     chinaPlaystyles: { quota: number; granted: number; left: number };
+    /**
+     * 档位依据（v6.48.0 §10.3）：自动核定值 + 五条件三态；locked = 管理组人工覆盖过。
+     * 老版本部署期间字段可能缺（前端按可选处理）
+     */
+    tierBasis?: {
+      autoTier: number;
+      locked: boolean;
+      clubCountry: number | null;
+      clubCountryName: string | null;
+      conditions: TierConditionDetail[];
+    };
   };
   /** 发放明细：与 FC 源槽合并后才是这名球员完整的 PlayStyle 清单 */
   playstyleDetails: PlaystyleDetailRow[];
@@ -1971,6 +1985,84 @@ export const GROWTH_EVENT_LABEL: Record<string, string> = {
   levelup: '升级',
   reset: '解约重置', // 解约清零的划断标记（值/XP 都是 0）：成长史里说明为什么累计从头开始
 };
+
+// ---- v6.48.0：成长档位自动核定（§10.3，/api/admin/growth/tier-*） ----
+
+/** 档位条件元数据（规则真源 src/core/growth-tier.ts，端点原样下发） */
+export interface TierConditionMeta {
+  key: 'c1' | 'c2' | 'c3' | 'c4' | 'c5';
+  label: string;
+  points: number;
+  hint: string;
+}
+
+/** 逐条条件的判定结果：命中 / 数据缺失（缺数据不猜，一律记未命中）/ 未命中 */
+export interface TierConditionDetail extends TierConditionMeta {
+  hit: boolean;
+  missing: boolean;
+}
+
+/** 单人档位明细（GET /api/admin/growth/:playerId/tier；公开球员页的 tierBasis 是同一口径的子集） */
+export interface TierPlayerDetail {
+  playerId: number;
+  name: string;
+  currentTier: number;
+  /** true = 人工覆盖过（重算跳过），可解除锁定回到自动值 */
+  locked: boolean;
+  autoTier: number;
+  clubCountry: number | null;
+  clubCountryName: string | null;
+  conditions: TierConditionDetail[];
+}
+
+/** 变更明细行（预览与落库共用；只列档位真的会变/变了的行） */
+export interface TierDiffRow {
+  playerId: number;
+  name: string;
+  clubId: number | null;
+  clubName: string | null;
+  currentTier: number;
+  nextTier: number;
+  conditions: Record<'c1' | 'c2' | 'c3' | 'c4' | 'c5', boolean>;
+}
+
+/** 重算汇总（GET 预览 = applied:false、batches:0；POST 落库返回同一形状） */
+export interface TierRecomputeSummary {
+  ok: boolean;
+  scope: 'players' | 'fcIds' | 'clubs' | 'all';
+  scanned: number;
+  locked: number;
+  up: number;
+  down: number;
+  unchanged: number;
+  applied: boolean;
+  batches: number;
+  rows: TierDiffRow[];
+  truncated: boolean;
+  /** 仅 GET 预览带（前端条件说明表用） */
+  conditions?: TierConditionMeta[];
+}
+
+/** 未设国家的队（GET /api/admin/growth/tier-clubs-without-country） */
+export interface TierClubWithoutCountry {
+  id: number;
+  name: string;
+  players: number;
+  countryName: null;
+}
+
+/** 变更清单行（GET /api/admin/growth/tier-changes，读 audit_log 的 growth_tier* 行） */
+export interface TierChangeEntry {
+  id: number;
+  actor: number | null;
+  action: string;
+  targetType: string;
+  targetId: number | null;
+  origin: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  at: string;
+}
 
 // ---- v6.16.0：管理端「成长录入」（按场补录，/api/admin/growth/match-entry） ----
 
@@ -2254,4 +2346,42 @@ export interface AdminShopOrderRow extends ShopOrderDto {
 
 export interface AdminShopOrdersResponse {
   orders: AdminShopOrderRow[];
+}
+
+/* ---------- 运营时刻表（v6.49.0） ---------- */
+
+export type OpsStartAnchor = 'none' | 'window_open' | 'absolute';
+export type OpsEndAnchor = 'none' | 'window_close' | 'absolute';
+export type OpsState = 'unrestricted' | 'not_started' | 'open' | 'closed';
+
+export interface OpsStatusRow {
+  key: string;
+  label: string;
+  group: string;
+  desc: string;
+  startAnchor: OpsStartAnchor;
+  startAt: string | null;
+  endAnchor: OpsEndAnchor;
+  endAt: string | null;
+  requiresWindow: boolean;
+  closeInflight: boolean;
+  note: string;
+  state: OpsState;
+  stateLabel: string;
+  /** 解析后的起点（随窗锚 = 窗口 openedAt）；没开窗时为 null */
+  resolvedStartAt: string | null;
+  /** 解析后的终点；endIsWindowClose=true 时为 null（动态边界，关窗即止） */
+  resolvedEndAt: string | null;
+  endIsWindowClose: boolean;
+}
+
+export interface OpsScheduleView {
+  now: string;
+  window: { openedAt: string; closedAt: string | null } | null;
+  rows: OpsStatusRow[];
+}
+
+export interface OpsSaveResult {
+  ok: true;
+  row: OpsStatusRow;
 }

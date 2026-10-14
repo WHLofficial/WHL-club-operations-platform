@@ -9,6 +9,7 @@ import playersRoutes from './players.ts';
 import financeRoutes from './finance.ts';
 import seasonsRoutes from './seasons.ts';
 import growthRoutes from './growth.ts';
+import growthTierRoutes from './growth-tier.ts';
 import marketRoutes from './market.ts';
 import reviewsRoutes from './reviews.ts';
 import overviewRoutes from './overview.ts';
@@ -17,6 +18,7 @@ import brandsRoutes from './brands.ts';
 import eventsRoutes from './events.ts';
 import weatherRoutes from './weather.ts';
 import shopRoutes from './shop.ts';
+import opsScheduleRoutes from './ops-schedule.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -26,6 +28,9 @@ app.route('/', playersRoutes);
 app.route('/', financeRoutes);
 app.route('/', seasonsRoutes);
 app.route('/', growthRoutes);
+// v6.48.0：成长档位自动核定（GET/POST /api/admin/growth/tier-recompute + /growth/tier-changes
+// + /growth/tier-clubs-without-country + /growth/:playerId/tier[/unlock]）
+app.route('/', growthTierRoutes);
 app.route('/', marketRoutes);
 app.route('/', reviewsRoutes);
 app.route('/', overviewRoutes);
@@ -39,5 +44,7 @@ app.route('/', eventsRoutes);
 app.route('/', weatherRoutes);
 // v6.26.0：消费中心管理端（GET/POST /api/admin/shop/orders + POST /api/admin/shop/orders/:id/approve|reject）
 app.route('/', shopRoutes);
+// v6.49.0：运营时刻表（GET/PUT /api/admin/ops-schedule，逐项设时段 + 读全表）
+app.route('/', opsScheduleRoutes);
 
 export default app;

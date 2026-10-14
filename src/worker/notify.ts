@@ -29,6 +29,14 @@ async function signAndPost(env: Env, path: string, body: unknown): Promise<Respo
 
 // ---- 模板渲染（纯代码，无 LLM；§12）----
 
+// offer_expired 的失效原因尾巴（v6.49.0 起由 reason 决定：sold/state 旧因 + deadline/ops_end 新因）
+const OFFER_EXPIRED_TAIL: Record<string, string> = {
+  sold: '（球员已被卖家挂牌，报价通道关闭，冻结已退回）',
+  deadline: '（超过时限没有回应，自动结束，冻结已退回）',
+  ops_end: '（报价通道已结束，自动结束，冻结已退回）',
+  state: '（球员状态已变）',
+};
+
 export function renderNotification(template: string, data: Record<string, unknown>): string {
   switch (template) {
     case 'result_confirmed':
@@ -47,7 +55,10 @@ export function renderNotification(template: string, data: Record<string, unknow
     case 'offer_withdrawn':
       return `↩️ 报价撤回：对方撤回了对 ${data.player} 的 ${data.amount} m 报价。`;
     case 'offer_expired':
-      return `⌛ 报价过期：${data.player} 的报价已失效${data.reason === 'sold' ? '（球员已被卖家挂牌，报价通道关闭，冻结已退回）' : '（球员状态已变）'}，冻结已退回。`;
+      return `⌛ 报价过期：${data.player} 的报价已失效${OFFER_EXPIRED_TAIL[String(data.reason)] ?? '（球员状态已变）'}，冻结已退回。`;
+    // v6.49.0 到期引擎：距到点不足 24h 提醒在回合的一方（只发一次）
+    case 'offer_deadline':
+      return `⏳ 报价将到期：${data.player} 的报价还剩不到 24 小时（北京时间 ${data.deadline} 截止），到点未回应就自动结束、冻结退回。`;
     case 'offer_auto_accepted':
       // v6.33.0：文案不再说「最低报价线」——同意线来自公开标价，报价方自己的报价额就是参照
       return `🤝 自动同意：${data.player} 的 ${data.amount} m 报价达到对方的线，已自动同意并挂牌。`;
@@ -102,6 +113,11 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `🛒 消费工单已生效：${data.summary}${data.note ? `（备注：${data.note}）` : ''}${data.external ? '（外部录入）' : ''}。`;
     case 'shop_order_rejected':
       return `🛒 消费工单被拒绝：${data.summary}。理由：${data.reason}${data.refund ? '（费用已退回余额）' : ''}。`;
+    // 签约谈判超时（v6.49.0 到期引擎）：静默超时自动作废 / 距超时不足 24h 提醒
+    case 'negotiation_timeout':
+      return `⌛ 签约谈判超时：${data.player} 的签约谈判已自动作废（${data.reason}），冻结已退回、球员回到原俱乐部，可重新挂牌。`;
+    case 'negotiation_deadline':
+      return `⏳ 签约谈判将超时：${data.player} 的谈判还剩不到 24 小时（北京时间 ${data.deadline} 截止），到点没动作就自动作废。`;
     default:
       return String(data.text ?? '');
   }

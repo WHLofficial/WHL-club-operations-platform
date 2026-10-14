@@ -1124,3 +1124,49 @@ describe('v6.41.0 顶栏 ≡ 菜单静态锁（TC-MENU-11/12/13）', () => {
     );
   });
 });
+
+// v6.49.0 运营时刻表（管理端只读甘特图 + 逐项时段表单）的静态锁：
+// 几何口径由 web/src/lib/gantt.test.ts 的纯函数用例兜住（刻度/对齐/范围/条），这里只兜「声明落在哪」——
+// 横滑与 min-width 必须在样式表（TC-SWP-02 禁内联）、不引图表库、时间换算与渲染口径不许旁路。
+describe('v6.49.0 运营时刻表静态锁（甘特图 + 逐项时段）', () => {
+  const CHART = `${WEB_SRC}/components/GanttChart.tsx`;
+  const SCHEDULE_PAGE = `${WEB_SRC}/pages/admin/SchedulePage.tsx`;
+
+  it('TC-SCH-01 · 窄屏横滑与定宽落在样式表（不在内联 style）', () => {
+    const rules = cssRules(read(STYLES_CSS));
+    const ovx = declarations(rules, '.gantt-scroll', 'overflow-x');
+    expect(
+      ovx.some((d) => d.value === 'auto'),
+      `.gantt-scroll 缺 overflow-x:auto（窄屏甘特图比视口宽时会被裁掉且滑不动），实见 ${JSON.stringify(ovx)}`,
+    ).toBe(true);
+    const mw = declarations(rules, '.gantt-svg', 'min-width');
+    expect(mw.length, '.gantt-svg 缺 min-width（窄屏会被压扁到刻度看不清）').toBeGreaterThan(0);
+
+    const chart = read(CHART);
+    expect(chart, '甘特图不应内联 minWidth（TC-SWP-02 禁令）').not.toContain('minWidth');
+    expect(chart, '甘特图外层应挂 .gantt-scroll').toContain('className="gantt-scroll"');
+    expect(chart, '甘特图应挂 .gantt-svg').toContain('className="gantt-svg"');
+  });
+
+  it('TC-SCH-02 · 手绘 SVG 裁决：不引图表库，组件用原生 svg', () => {
+    const pkg = JSON.parse(read('package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    const all = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }).join(' ');
+    for (const lib of ['echarts', 'chart.js', 'recharts', 'd3', 'vis-timeline', 'frappe-gantt', 'apexcharts']) {
+      expect(all.includes(lib), `引了图表库 ${lib}（v6.49.0 裁决：手绘 SVG，见 memory/design-ops-schedule-expiry.md）`).toBe(false);
+    }
+    const chart = read(CHART);
+    expect(chart, '甘特图应是原生 <svg> 手绘').toContain('<svg');
+    expect(chart, '每行应出 <title>（悬停看具体时间）').toContain('<title>');
+  });
+
+  it('TC-SCH-03 · 时间口径不许旁路：北京墙钟换算 + 渲染走 useTimeFmt + 校验复用 core', () => {
+    const page = read(SCHEDULE_PAGE);
+    expect(page, '具体时间提交前应走 zhWallToUtcIso 换 UTC ISO').toContain('zhWallToUtcIso');
+    expect(page, '回填表单应走 utcIsoToZhWall').toContain('utcIsoToZhWall');
+    expect(page, '锚校验应复用 core 的 validateOpsInput（前后端同一套文案）').toContain('validateOpsInput');
+    expect(page, '时间文案应走 useTimeFmt（渲染时间不许裸用 ISO 串）').toContain('useTimeFmt');
+    const chart = read(CHART);
+    expect(chart, '刻度文案应走 useTimeFmt').toContain('useTimeFmt');
+    expect(chart, '刻度对齐偏移应走 zoneOffsetMs（日刻度落显示时区午夜）').toContain('zoneOffsetMs');
+  });
+});

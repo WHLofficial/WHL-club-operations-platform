@@ -3,7 +3,7 @@
 // 核心断言都钉在两个确定档（北京 / UTC）上；system 档 CI 时区不定，只烟测不串具体值。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { fmtAgo, fmtDate, fmtDateTime, fmtDayLabel, fmtTime, getTzPref, setTzPref, tzLabel, useTimeFmt, useTzPref } from './datetime.ts';
+import { fmtAgo, fmtDate, fmtDateTime, fmtDayLabel, fmtTime, getTzPref, setTzPref, tzLabel, useTimeFmt, useTzPref, utcIsoToZhWall, zhWallToUtcIso, zoneOffsetMs } from './datetime.ts';
 
 afterEach(() => {
   localStorage.clear();
@@ -186,5 +186,46 @@ describe('fmtDayLabel（v6.40.0 分组标签）', () => {
       expect(screen.getByTestId('day').textContent).toBe('昨天');
     });
     cleanup();
+  });
+});
+
+// v6.49.0 运营时刻表：北京时间墙钟 ↔ UTC（表单填写口径，与显示偏好无关）
+describe('zhWallToUtcIso / utcIsoToZhWall（时刻表表单）', () => {
+  it('北京时间 20:00 → UTC 12:00；反向回到同一墙钟串', () => {
+    expect(zhWallToUtcIso('2026-07-05T20:00')).toBe('2026-07-05T12:00:00.000Z');
+    expect(utcIsoToZhWall('2026-07-05T12:00:00.000Z')).toBe('2026-07-05T20:00');
+  });
+
+  it('跨日进位：北京 00:30 → 前一 UTC 日 16:30', () => {
+    expect(zhWallToUtcIso('2026-07-05T00:30')).toBe('2026-07-04T16:30:00.000Z');
+    expect(utcIsoToZhWall('2026-07-04T16:30:00.000Z')).toBe('2026-07-05T00:30');
+  });
+
+  it('带秒的墙钟串也认（秒原样保留）', () => {
+    expect(zhWallToUtcIso('2026-07-05T20:00:30')).toBe('2026-07-05T12:00:30.000Z');
+  });
+
+  it('口径与显示偏好无关：切 UTC 档后同一墙钟串仍按北京时间解释', () => {
+    setTzPref('utc');
+    expect(zhWallToUtcIso('2026-07-05T20:00')).toBe('2026-07-05T12:00:00.000Z');
+    expect(utcIsoToZhWall('2026-07-05T12:00:00.000Z')).toBe('2026-07-05T20:00');
+  });
+
+  it('非法输入 ⇒ null / 空串（含被 Date 归一化的 2 月 30 日）', () => {
+    expect(zhWallToUtcIso('2026-02-30T10:00')).toBeNull();
+    expect(zhWallToUtcIso('2026-13-01T10:00')).toBeNull();
+    expect(zhWallToUtcIso('2026-07-05T24:00')).toBeNull();
+    expect(zhWallToUtcIso('2026-07-05')).toBeNull();
+    expect(zhWallToUtcIso('')).toBeNull();
+    expect(zhWallToUtcIso(null)).toBeNull();
+    expect(utcIsoToZhWall(null)).toBe('');
+    expect(utcIsoToZhWall('nope')).toBe('');
+  });
+
+  it('zoneOffsetMs：北京 +8h、UTC 0；午夜边界不串（日刻度对齐的真源）', () => {
+    const t = Date.parse('2026-07-05T13:37:00Z');
+    expect(zoneOffsetMs(t)).toBe(8 * 3600_000);
+    setTzPref('utc');
+    expect(zoneOffsetMs(t)).toBe(0);
   });
 });
