@@ -4,6 +4,10 @@
 // POST /api/transfers/free-agent   海捞（新 RC 不设限，签入费=新 RC×30%）
 // POST /api/transfers/activation   激活（训练营 5m / 普通倍数价，5 分钟首价窗）
 // POST /api/transfers/match        匹配（新 RC > 首价 + 差额销毁；不带金额 = 放行）
+// v6.50.0 海捞两阶段·暗标段（同前缀）：
+// GET  /api/transfers/sea-sealed           本窗暗标段状态（阶段 + 我的密封标 + 开标公示）
+// POST /api/transfers/sea-sealed           出标 / 改标（body {playerId, newReleaseFee}）
+// POST /api/transfers/sea-sealed/withdraw  撤标（body {playerId}）
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
@@ -11,6 +15,7 @@ import { requireCoach, type SessionUser } from '../../lib/session.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
 import { createRcChange, createTermination, createFreeAgent } from '../bypass.ts';
 import { createActivation, submitMatch } from '../activations.ts';
+import { loadSeaPhaseView, submitSealedBid, withdrawSealedBid } from '../sea-sealed.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -59,6 +64,35 @@ app.post('/transfers/match', async (c) => {
   const body = await readJson(c);
   const result = await submitMatch(c.env, clubId, user.id, body?.listingId, body?.newReleaseFee);
   return c.json(result, 201);
+});
+
+// ---- 海捞两阶段·暗标段（v6.50.0；设计见 memory/design-sea-two-phase.md）----
+// 明标段（常规海捞）仍是上面那个 POST /api/transfers/free-agent，原样不动；暗标段收标期间它会被 409 拦下。
+// 读接口不带 assertTradable：受罚俱乐部也得看得见倒计时与开标公示。
+async function requireCoachClubRead(env: Env, request: Request): Promise<{ user: SessionUser; clubId: number }> {
+  const user = await requireCoach(env, request, 'club.squad.manage');
+  const club = await getBoundClub(env, user.id, request);
+  if (!club) throw new HttpError(403, '你还没有绑定俱乐部，先找管理组拿认证码');
+  return { user, clubId: club.id };
+}
+
+app.get('/transfers/sea-sealed', async (c) => {
+  const { clubId } = await requireCoachClubRead(c.env, c.req.raw);
+  return c.json(await loadSeaPhaseView(c.env, clubId));
+});
+
+app.post('/transfers/sea-sealed', async (c) => {
+  const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
+  const body = await readJson(c);
+  const result = await submitSealedBid(c.env, clubId, user.id, body?.playerId, body?.newReleaseFee);
+  return c.json(result, 201);
+});
+
+app.post('/transfers/sea-sealed/withdraw', async (c) => {
+  const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
+  const body = await readJson(c);
+  const result = await withdrawSealedBid(c.env, clubId, user.id, body?.playerId);
+  return c.json(result);
 });
 
 export default app;

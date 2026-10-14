@@ -117,7 +117,7 @@ describe('到期引擎：报价回合时限', () => {
     seedWorld(fx);
     const out = await runExpiryTick(fx.env, 'cron_tick');
     expect(out).toMatchObject({ closed: 0, reminded: 0, errors: [] });
-    expect(out.byAdapter).toEqual({ offer: 0, negotiation: 0 });
+    expect(out.byAdapter).toEqual({ offer: 0, negotiation: 0, sea_sealed: 0 });
   });
 
   it('超时报价过期：解冻 + offer_events(expire) + 审计 + 双方通知（reason=deadline）', async () => {

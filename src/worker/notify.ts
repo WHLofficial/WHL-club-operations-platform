@@ -118,6 +118,17 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `⌛ 签约谈判超时：${data.player} 的签约谈判已自动作废（${data.reason}），冻结已退回、球员回到原俱乐部，可重新挂牌。`;
     case 'negotiation_deadline':
       return `⏳ 签约谈判将超时：${data.player} 的谈判还剩不到 24 小时（北京时间 ${data.deadline} 截止），到点没动作就自动作废。`;
+    // 海捞两阶段·暗标段（v6.50.0）：胜出 / 未胜出或作废 / 开标公告 / 截止前提醒
+    case 'sea_sealed_lead':
+      return `🏆 暗标胜出：${data.player} 你以最高标 ${data.amount} m 拿下（签入费 ${data.signFee} m 在审核通过时收），接下来是审核 → 工资谈判 → 过户。`;
+    case 'sea_sealed_lost':
+      return data.reason === 'outbid'
+        ? `📉 暗标没拿下：${data.player} 有更高的密封标（金额与出标方不公开），你的签入费冻结已解冻；明标段还能常规海捞。`
+        : `⚠️ 暗标作废：${data.player} 的标没能生效（${data.voidReason}），你的签入费冻结已解冻。`;
+    case 'sea_batch_open':
+      return `📣 海捞暗标段已开标：本批 ${data.won} 名球员被签走（共 ${data.clubs} 家出标），胜出者与金额见海捞页公示。`;
+    case 'sea_sealed_deadline':
+      return `⏳ 海捞暗标段北京时间 ${data.deadline} 截止：你还压着 ${data.count} 份密封标，截止前可以改标或撤回。`;
     default:
       return String(data.text ?? '');
   }

@@ -75,6 +75,11 @@ export const NOTIFY_META: Record<string, NotifyMeta> = {
   offer_deadline: { label: '报价临近', category: 'offer' },
   negotiation_timeout: { label: '谈判超时', category: 'offer' },
   negotiation_deadline: { label: '谈判临近', category: 'offer' },
+  // v6.50.0 海捞两阶段·暗标段（保密出标 → 统一开标）：胜出 / 未成 / 开标公告 / 临近截止
+  sea_sealed_lead: { label: '暗标胜出', category: 'window' },
+  sea_sealed_lost: { label: '暗标未成', category: 'window' },
+  sea_batch_open: { label: '暗标开标', category: 'window' },
+  sea_sealed_deadline: { label: '暗标临近', category: 'window' },
 };
 
 /** 未知模板 ⇒ null（前端退化：无修饰色徽章 + 原始模板名 + 不可点）。 */

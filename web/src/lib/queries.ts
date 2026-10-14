@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type WageForecast } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type WageForecast } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -29,6 +29,8 @@ export const qk = {
   // 转会广告板（v6.31.0）：只收转会名单内球员，limit 参数化（页 200 / teaser 3）
   transferBoard: (limit: number) => ['market', 'transfer-board', limit] as const,
   seaLookup: (q: string) => ['market', 'sea-lookup', q] as const,
+  // 海捞暗标段状态（v6.50.0）：阶段横幅、我的密封标、开标公示共用一份
+  seaPhase: ['market', 'sea-sealed'] as const,
   activatable: (mode: ActivatableMode, q: string) => ['market', 'activatable', mode, q] as const,
   notifications: ['notifications'] as const,
   // 收件篮列表（v6.40.0 类目化）：'' = 全部；键里带类目 ⇒ 切页签各存一份缓存
@@ -283,6 +285,17 @@ export function useSeaLookup(q: string) {
     queryKey: qk.seaLookup(query),
     queryFn: async () => (await api<SeaLookupResponse>(`/api/market/sea-lookup?q=${encodeURIComponent(query)}`)).results,
     enabled: query !== '',
+    retry: false,
+  });
+}
+
+// 海捞暗标段状态（教练端点 v6.50.0）：阶段横幅 / 我的密封标 / 开标公示都读这一份。
+// 倒计时用 lib/use-countdown.ts 本地读秒，所以这里不必按秒刷新；出标/撤标后由调用方 invalidate。
+export function useSeaPhase(enabled = true) {
+  return useQuery({
+    queryKey: qk.seaPhase,
+    queryFn: () => api<SeaPhaseView>('/api/transfers/sea-sealed'),
+    enabled,
     retry: false,
   });
 }

@@ -1,20 +1,21 @@
-// 管理端 · 转会页：审核队列（含市场干预）+ 暂停出价 + 强制拍卖（规则 4.4.5）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
+// 管理端 · 转会页：审核队列（含市场干预）+ 暂停出价 + 强制拍卖（规则 4.4.5）+ 海捞暗标段（v6.50.0）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
 // （原 Admin.tsx 三 section，v2.1.0 拆分；暂停出价为v2.1.0 commit 5 新增）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
+import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
 import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
 import { usePrompt } from '../../components/PromptDialog.tsx';
-import { useTimeFmt } from '../../lib/datetime.ts';
+import { useTimeFmt, utcIsoToZhWall, zhWallToUtcIso } from '../../lib/datetime.ts';
 
 export default function MarketPage() {
   return (
     <div className="admin-page">
       <ReviewsSection />
       <ForcedAuctionSection />
+      <SeaSealedSection />
       <WindowsSection />
     </div>
   );
@@ -700,6 +701,239 @@ function WindowsSection() {
                   </td>
                   <td className="mono">{dateTime(w.openedAt)}</td>
                   <td className="mono">{dateTime(w.closedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------- 海捞暗标段（v6.50.0） ---------- */
+
+const SEA_BATCH_LABEL: Record<string, string> = {
+  sealed: '收标中',
+  settling: '开标中',
+  opened: '已开标',
+  cancelled: '已取消',
+};
+
+const SEA_ADMIN_BID_LABEL: Record<string, string> = {
+  sealed: '收标中',
+  won: '胜出',
+  lost: '未胜出',
+  void: '已作废',
+  withdrawn: '已撤回',
+};
+
+const SEA_ADMIN_HOLD_LABEL: Record<string, string> = {
+  held: '冻结中',
+  released: '已解冻',
+  settled: '已收签入费',
+};
+
+function SeaSealedSection() {
+  const { show, toastNode } = useToast();
+  const { ask, promptNode } = usePrompt();
+  const { dateTime } = useTimeFmt();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [wall, setWall] = useState('');
+
+  const { data, error } = useQuery({ queryKey: ['admin', 'sea-sealed'], queryFn: () => api<SeaAdminView>('/api/admin/sea-sealed') });
+
+  useEffect(() => {
+    if (error) show(error instanceof Error ? error.message : '暗标段台账加载失败', true);
+  }, [error, show]);
+
+  // 截止输入框跟着批次回填；只在空着时填，免得每次刷新吞掉管理组正在敲的值
+  const batchDeadline = data?.batch?.deadlineAt ?? null;
+  useEffect(() => {
+    if (batchDeadline !== null && wall === '') setWall(utcIsoToZhWall(batchDeadline));
+  }, [batchDeadline, wall]);
+
+  const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'sea-sealed'] });
+  const batch = data?.batch ?? null;
+  const batchId = batch?.id;
+  const settled = batch !== null && (batch.status === 'opened' || batch.status === 'cancelled');
+
+  async function run(work: () => Promise<string>) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      show(await work());
+      await reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '操作失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const openNow = () =>
+    run(async () => {
+      const r = await apiPost<SeaOpenSummary>('/api/admin/sea-sealed/open', batchId === undefined ? {} : { batchId });
+      return r.already
+        ? '这批标已经开过了，没有重复结算。'
+        : `开标完成：胜出 ${r.won} 名（已进审核队列，等审核 → 工资谈判 → 过户），未胜出 ${r.lost} 名、作废 ${r.voided} 名，冻结按结果解冻。`;
+    });
+
+  const extend = () =>
+    run(async () => {
+      const iso = zhWallToUtcIso(wall);
+      if (iso === null) throw new Error('新截止时间填完整（北京时间，形如 2026-10-20T20:00）。');
+      const r = await apiPost<SeaExtendResult>(
+        '/api/admin/sea-sealed/extend',
+        batchId === undefined ? { deadlineAt: iso } : { deadlineAt: iso, batchId },
+      );
+      setWall(utcIsoToZhWall(r.batch.deadlineAt));
+      return `暗标段截止已延长到 ${dateTime(r.batch.deadlineAt)}；时刻表「海捞·暗标段」的终点同步改了，两把尺子一致。`;
+    });
+
+  const cancel = async () => {
+    const note = await ask('取消本窗暗标批次的说明（会发给出标俱乐部，并进审计）：');
+    if (!note) return;
+    await run(async () => {
+      const r = await apiPost<SeaCancelResult>(
+        '/api/admin/sea-sealed/cancel',
+        batchId === undefined ? { note } : { note, batchId },
+      );
+      return `批次已取消：${r.voided} 份密封标作废、冻结全部解冻，本窗自由身池回到常规海捞。`;
+    });
+  };
+
+  return (
+    <section className="card admin-section">
+      <h2>海捞暗标段</h2>
+      {toastNode}
+      {promptNode}
+      <p className="hint">
+        海捞两阶段的开标口：开窗后自由身池整体进暗标批次，统一截止、价高者得（同额先出的胜出），金额与出标方在收标期内保密；
+        教练侧入口在球员档案左栏。到点由到期引擎自动开标，关窗时批次仍收标也会立即开标收口（不挡关窗）。
+        开标只生成待审单——签入费在审核通过时才收；胜出的进审核队列，其余冻结当场解冻。
+        这里可以手动立即开标、延长暗标段（批次与时刻表终点同改）、或取消本窗批次（全部标作废并解冻）。
+      </p>
+
+      {data !== undefined && !data.enabled && (
+        <p className="banner warn">
+          海捞两阶段未启用（参数 sea_enabled = false）：自由身池走原来的即时海捞，暗标入口关闭，收标中的批次会被自动作废并解冻。
+        </p>
+      )}
+
+      {data === undefined ? (
+        <p className="muted">正在翻暗标台账…</p>
+      ) : batch === null ? (
+        <EmptyState>
+          {data.enabled
+            ? '当前窗口还没有暗标批次：到时刻表里给「海捞·暗标段」填上具体起点与终点，进段后会自动建批次。'
+            : '海捞两阶段没启用，暂时不会有暗标批次。'}
+        </EmptyState>
+      ) : (
+        <>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th className="num">批次</th>
+                  <th>赛季 / 窗口</th>
+                  <th>状态</th>
+                  <th>截止（北京时间）</th>
+                  <th>开标时间</th>
+                  <th className="num">出标</th>
+                  <th className="num">参与球员</th>
+                  <th className="num">参与球队</th>
+                  <th className="num">最高标（m）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="num mono">#{batch.id}</td>
+                  <td className="mono">
+                    S{batch.season} 第 {batch.windowSeq} 窗
+                  </td>
+                  <td>
+                    <span className={`badge ${batch.status === 'sealed' ? 'sky' : batch.status === 'opened' ? 'green' : 'gray'}`}>
+                      {SEA_BATCH_LABEL[batch.status] ?? batch.status}
+                    </span>
+                  </td>
+                  <td className="mono">{dateTime(batch.deadlineAt)}</td>
+                  <td className="mono">{batch.openedAt === null ? '—' : dateTime(batch.openedAt)}</td>
+                  <td className="num mono">{data.summary.bids}</td>
+                  <td className="num mono">{data.summary.players}</td>
+                  <td className="num mono">{data.summary.clubs}</td>
+                  <td className="num mono">{data.summary.top.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {batch.note !== '' && <p className="muted">批次说明：{batch.note}</p>}
+
+          <div className="inline-form">
+            <ConfirmButton
+              label={settled ? '重新开标（已结算）' : '立即开标'}
+              confirmLabel="再点一次确认开标"
+              busyLabel="开标中…"
+              busy={busy}
+              onConfirm={openNow}
+            />
+            <div className="field">
+              <label htmlFor="sea-deadline">新截止时间（北京时间）</label>
+              <input
+                id="sea-deadline"
+                className="mono"
+                type="datetime-local"
+                value={wall}
+                disabled={settled}
+                onChange={(e) => setWall(e.target.value)}
+              />
+            </div>
+            <button className="btn" type="button" disabled={busy || settled || wall === ''} onClick={() => void extend()}>
+              延长暗标段
+            </button>
+            <button className="btn btn-danger" type="button" disabled={busy || settled} onClick={() => void cancel()}>
+              取消本窗批次
+            </button>
+          </div>
+          {settled && <p className="muted">这一窗的批次已经结算完（{SEA_BATCH_LABEL[batch.status]}），逐标明账保留作核对。</p>}
+        </>
+      )}
+
+      {data !== undefined && data.bids.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>球员</th>
+                <th>出标球队</th>
+                <th className="num">新违约金（m）</th>
+                <th className="num">冻结（m）</th>
+                <th>标状态</th>
+                <th>冻结状态</th>
+                <th>出标时间</th>
+                <th>改标时间</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.bids.map((b) => (
+                <tr key={b.bidId}>
+                  <td>{b.playerName}</td>
+                  <td>{b.clubName}</td>
+                  <td className="num mono">{b.newReleaseFee.toFixed(2)}</td>
+                  <td className="num mono">{(b.newReleaseFee * 0.3).toFixed(2)}</td>
+                  <td>
+                    <span className={`badge ${b.status === 'won' ? 'green' : b.status === 'sealed' ? 'sky' : 'gray'}`}>
+                      {SEA_ADMIN_BID_LABEL[b.status] ?? b.status}
+                    </span>
+                  </td>
+                  <td>
+                    {b.holdStatus === null ? '—' : (SEA_ADMIN_HOLD_LABEL[b.holdStatus] ?? b.holdStatus)}
+                  </td>
+                  <td className="mono">{b.submittedAt === null ? '—' : dateTime(b.submittedAt)}</td>
+                  <td className="mono">{b.updatedAt === null ? '—' : dateTime(b.updatedAt)}</td>
+                  <td>{b.voidReason === '' ? '—' : b.voidReason}</td>
                 </tr>
               ))}
             </tbody>

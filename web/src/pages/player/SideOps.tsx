@@ -6,7 +6,7 @@
 //   D 别队真人·非卖品 = 报价置灰「此球员为非卖品！」；激活不受非卖品限制
 //   E CPU 队 / 自由身 = 海捞签入（POST /api/transfers/free-agent，带新违约金）；v6.17.0 起
 //     可用性与不可签原因以详情下发的 seaSign 为准（后端 createFreeAgent 守卫链同源），
-//     违约金输入框下嵌 seaComps 成交参照
+//     违约金输入框下嵌 seaComps 成交参照；v6.50.0 起收标期内改走密封标（POST /api/transfers/sea-sealed）
 // 窗门控（v6.2.0 延续）：转会动作后端一律 409 no_window，前端关窗时同步置灰；
 // 报价设置是意图标记不锁窗，关窗时也能改。
 // v6.29.0：报价（POST /api/offers）移出窗门控——关窗期也能送报价/还价/同意，
@@ -15,11 +15,13 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiPost, apiPut, apiUpload, type ContractDto, type FreeAgentResult, type SeaComps, type SeaSignEligibility } from '../../lib/api.ts';
-import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation } from '../../lib/queries.ts';
+import { apiPost, apiPut, apiUpload, type ContractDto, type FreeAgentResult, type SeaComps, type SeaSignEligibility, type SeaSubmitResult } from '../../lib/api.ts';
+import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../lib/ops-gate.ts';
+import { useTimeFmt } from '../../lib/datetime.ts';
+import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
 import { money } from '../market/shared.tsx';
 
 export interface SideOpsPlayer {
@@ -32,7 +34,7 @@ export interface SideOpsPlayer {
   notForSale: boolean;
 }
 
-type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'activate';
+type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'sealed' | 'activate';
 
 function round2(x: number): number {
   return Math.round((x + Number.EPSILON) * 100) / 100;
@@ -139,6 +141,17 @@ export function SideOps({
   const activeListingId = playerListingQuery.data?.listings[0]?.id ?? null;
   const listedDetailQuery = useListingDetail(activeListingId);
 
+  // v6.50.0 海捞暗标段：收标期内自由身池整体走密封标（后端 createFreeAgent 同期间被 409 拦），
+  // E 态因此换一套表单。只在 E 态球员上取这份数据（其他态零请求）；金额保密，只有自己那份回得来。
+  const seaPhaseQuery = useSeaPhase(isCoach && (isFree || isCpu));
+  const seaPhase = seaPhaseQuery.data;
+  const sealedPhase = seaPhase?.state === 'sealed';
+  const mySealedBid = seaPhase?.myBids.find((b) => b.playerId === player.id) ?? null;
+  const sealedLeft = useCountdown(sealedPhase ? (seaPhase?.batch?.deadlineAt ?? null) : null);
+  const fmt = useTimeFmt();
+  // 出标冻结额 = 新违约金 × 30%（与后端 freeAgentFee 同口径；真数仍以服务端回执为准）
+  const sealedFee = freeFee.trim() === '' || Number.isNaN(Number(freeFee)) ? null : round2(Number(freeFee) * 0.3);
+
   const releaseFee = contract?.releaseFee ?? null;
   const offerCap = releaseFee !== null && releaseFee > 0 ? round2(releaseFee * 1.5) : null;
   const isTrainee = contract?.contractType === 'trainee';
@@ -167,6 +180,7 @@ export function SideOps({
       void qc.invalidateQueries({ queryKey: qk.offerSettings(player.id) });
       void qc.invalidateQueries({ queryKey: ['market', 'board'] });
       void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
+      void qc.invalidateQueries({ queryKey: qk.seaPhase });
       refreshAll();
     } catch (err) {
       show(err instanceof Error ? err.message : '操作失败', true);
@@ -635,10 +649,78 @@ export function SideOps({
   } else if (isFree || isCpu) {
     // E 态（v6.17.0）：开关不再看 windowOpen，以 seaSign 为准——窗口、归属、在途、本窗被解约
     // 这些拦截都在后端守卫链里判过一遍，前端只负责原样禁用并展示原因。
+    // v6.50.0 海捞暗标段：收标期内这里换成密封标（金额保密 / 统一截止 / 价高者得），
+    // 常规海捞表单原样留给明标段；两种表单的资格开关都是同一份 seaSign。
+    const canSeal = sealedPhase && mySealedBid?.status !== 'won' && mySealedBid?.status !== 'lost';
     body = (
       <section className="side-sec">
         <div className="side-sec-head">球队操作</div>
-        {panel === 'freeagent' ? (
+        {panel === 'sealed' ? (
+          <>
+            <label className="side-field">
+              <span className="side-lab">
+                <span>新违约金（m）</span>
+                <span className="side-range mono">{sealedFee === null ? '—' : `冻结 ${sealedFee}`}</span>
+              </span>
+              <input
+                className="mono"
+                inputMode="decimal"
+                value={freeFee}
+                onChange={(e) => setFreeFee(e.target.value.replace(/[^0-9.]/g, ''))}
+                aria-label="新违约金"
+              />
+            </label>
+            <SeaCompsBlock seaComps={seaComps} />
+            <p className="side-sub">
+              密封标：金额与出标方保密，统一截止后价高者得（同额先出的胜出）。出标即冻结签入费（新违约金的 30%），
+              截止前可改可撤；胜出后进管理组审核 → 工资谈判。
+            </p>
+            {sealedPhase && (
+              <p className="side-sub">
+                {sealedLeft === null ? '暗标段进行中' : `距截止还剩 ${fmtClock(sealedLeft)}`}
+                {seaPhase?.batch ? `（截止 ${fmt.time(seaPhase.batch.deadlineAt)}）` : ''}
+              </p>
+            )}
+            <div className="side-btns">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy || !seaSign.eligible || freeFee === '' || !sealedPhase}
+                onClick={() =>
+                  void run(async () => {
+                    const r = await apiPost<SeaSubmitResult>('/api/transfers/sea-sealed', {
+                      playerId: player.id,
+                      newReleaseFee: Number(freeFee),
+                    });
+                    return r.updated
+                      ? `密封标已改：新违约金 ${r.newReleaseFee.toFixed(2)}m（原冻结已刷新为 ${r.signFee.toFixed(2)}m）。`
+                      : `密封标已提交：新违约金 ${r.newReleaseFee.toFixed(2)}m，签入费 ${r.signFee.toFixed(2)}m 已冻结，截止后统一开标。`;
+                  })
+                }
+              >
+                {mySealedBid?.status === 'sealed' ? '确认改标' : '确认出标'}
+              </button>
+              {mySealedBid?.status === 'sealed' && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  disabled={busy || !sealedPhase}
+                  onClick={() =>
+                    void run(async () => {
+                      await apiPost('/api/transfers/sea-sealed/withdraw', { playerId: player.id });
+                      return '已撤标，冻结的签入费已解冻。';
+                    })
+                  }
+                >
+                  撤回出标
+                </button>
+              )}
+              <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => setPanel(null)}>
+                取消
+              </button>
+            </div>
+          </>
+        ) : panel === 'freeagent' ? (
           <>
             <label className="side-field">
               <span className="side-lab">
@@ -679,10 +761,37 @@ export function SideOps({
           </>
         ) : (
           <div className="side-btns">
-            <button type="button" className="btn btn-sm" disabled={busy || !seaSign.eligible} onClick={() => setPanel('freeagent')}>
-              海捞签入
-            </button>
+            {canSeal ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy || !seaSign.eligible}
+                onClick={() => {
+                  if (mySealedBid?.status === 'sealed') setFreeFee(String(mySealedBid.newReleaseFee));
+                  setPanel('sealed');
+                }}
+              >
+                {mySealedBid?.status === 'sealed' ? '改标 / 撤标' : '暗标出标'}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-sm" disabled={busy || !seaSign.eligible} onClick={() => setPanel('freeagent')}>
+                海捞签入
+              </button>
+            )}
           </div>
+        )}
+        {mySealedBid !== null && panel !== 'sealed' && (
+          <p className="side-sub">
+            你在本窗暗标段给这名球员出的标：
+            <span className="mono"> {mySealedBid.newReleaseFee.toFixed(2)}m</span>
+            {mySealedBid.status === 'sealed'
+              ? '（收标中，可改可撤）'
+              : mySealedBid.status === 'won'
+                ? '（胜出，等管理组审核）'
+                : mySealedBid.status === 'lost'
+                  ? '（未胜出，冻结已解冻）'
+                  : `（${mySealedBid.voidReason === '' ? '已失效' : mySealedBid.voidReason}）`}
+          </p>
         )}
         {seaSign.reason !== null && <p className="side-sub">{seaSign.reason}</p>}
       </section>

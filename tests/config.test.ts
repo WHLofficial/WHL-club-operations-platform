@@ -122,7 +122,7 @@ describe('config 服务（§13）', () => {
   });
 
   it('注册表 83 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0/v6.28.0/v6.33.1/v6.47.0/v6.49.0 各域参数）', () => {
-    expect(CONFIG_KEYS.length).toBe(83); // v6.47.0 加 wage_floor_gap；v6.49.0 加 offer_turn_hours / negotiation_silence_hours
+    expect(CONFIG_KEYS.length).toBe(85); // v6.47.0 加 wage_floor_gap；v6.49.0 加 offer_turn_hours / negotiation_silence_hours；v6.50.0 加 sea_enabled / sea_sealed_hours
   });
 
   // v6.28.0 A/B 段：级别系数（影响力公式）与每场死忠系数

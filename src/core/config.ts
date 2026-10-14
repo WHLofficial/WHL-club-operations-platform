@@ -95,6 +95,9 @@ export const CONFIG_KEYS = [
   // v6.49.0 到期引擎：报价回合时限 / 签约谈判静默超时（小时）
   'offer_turn_hours',
   'negotiation_silence_hours',
+  // v6.50.0 海捞两阶段：暗标段总开关（默认关＝现状即时海捞）+ 暗标段时长（管理端表单默认填充值）
+  'sea_enabled',
+  'sea_sealed_hours',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -290,6 +293,11 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   // 签约谈判静默（锚 = 最后一次工资报价）超过 72h → 自动作废。存量行首扫按 now 打标宽限。
   offer_turn_hours: '48',
   negotiation_silence_hours: '72',
+  // v6.50.0 海捞两阶段：sea_enabled=false 时整条暗标链不生效（无批次、密封标入口关闭、
+  // 海捞＝现状即时签入）；上线后由管理端单独一步开。sea_sealed_hours 只是管理端在
+  // 时刻表里填「暗标段终点」时的默认时长（实际以 transfer_sea_sealed 行的具体时间为准）。
+  sea_enabled: 'false',
+  sea_sealed_hours: '72',
 };
 
 export const CONFIG_SECRET_KEYS: ReadonlySet<string> = new Set([

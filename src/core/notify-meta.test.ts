@@ -29,16 +29,17 @@ describe('NOTIFY_META 与 worker 模板表', () => {
     expect(RENDER_END).toBeGreaterThan(RENDER_START);
   });
 
-  it('模板集合双向相等（33 条，无重复）', () => {
+  it('模板集合双向相等（37 条，无重复）', () => {
+    // 32→33 是 v6.49.0 到期引擎（offer_deadline 等三模板）；33→37 是 v6.50.0 海捞暗标段四模板
     const templates = renderTemplates();
-    expect(templates).toHaveLength(33);
+    expect(templates).toHaveLength(37);
     expect(new Set(templates).size).toBe(templates.length);
     expect(templates.slice().sort()).toEqual(Object.keys(NOTIFY_META).sort());
   });
 
   it('每条徽章文案非空、唯一、≤6 字', () => {
     const labels = Object.values(NOTIFY_META).map((m) => m.label);
-    expect(labels).toHaveLength(33);
+    expect(labels).toHaveLength(37);
     expect(new Set(labels).size).toBe(labels.length);
     for (const label of labels) {
       expect(label.length).toBeGreaterThan(0);
@@ -93,11 +94,12 @@ describe('NOTIFY_META 与 worker 模板表', () => {
       event: ['event_triggered', 'event_resolved', 'event_deadline'],
       naming: ['naming_mood', 'naming_terminated', 'naming_champion', 'naming_offer', 'naming_offer_activated'],
       shop: ['shop_order_approved', 'shop_order_rejected'],
-      window: ['window_signals'],
+      // v6.50.0 海捞暗标段四模板归 window（海捞不是 offer 实体，notificationRefOf 取不到可跳转的 id）
+      window: ['window_signals', 'sea_sealed_lead', 'sea_sealed_lost', 'sea_batch_open', 'sea_sealed_deadline'],
     };
     const members = Object.values(expected).flat();
-    expect(members).toHaveLength(33);
-    expect(new Set(members).size).toBe(33);
+    expect(members).toHaveLength(37);
+    expect(new Set(members).size).toBe(37);
     for (const [cat, list] of Object.entries(expected)) {
       expect(templatesOf(cat as NotifyCategoryId).slice().sort(), `类目 ${cat} 的成员不符`).toEqual(list.slice().sort());
     }
@@ -138,6 +140,11 @@ describe('notificationRefOf：只抽 UI 真能定位的三型', () => {
     expect(notificationRefOf('event_triggered', { club: '甲', name: 'x' })).toBeNull();
     expect(notificationRefOf('naming_mood', { brand: 'b' })).toBeNull();
     expect(notificationRefOf('window_signals', { club: '甲' })).toBeNull();
+    // v6.50.0 暗标四模板：即便带上 playerId 也不造 ref（窗类目没有可跳转实体，前端靠海捞页横幅定位）
+    expect(notificationRefOf('sea_sealed_lead', { playerId: 6, amount: 3 })).toBeNull();
+    expect(notificationRefOf('sea_sealed_lost', { playerId: 6 })).toBeNull();
+    expect(notificationRefOf('sea_batch_open', { playerId: 6, won: 1 })).toBeNull();
+    expect(notificationRefOf('sea_sealed_deadline', { deadline: '2026-10-20 20:00' })).toBeNull();
     expect(notificationRefOf('result_confirmed', { home: 'a' })).toBeNull();
     expect(notificationRefOf('offer_received', { player: '甲', amount: 3 })).toBeNull();
     expect(notificationRefOf('levelup', { player: '甲' })).toBeNull();

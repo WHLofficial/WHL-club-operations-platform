@@ -2385,3 +2385,98 @@ export interface OpsSaveResult {
   ok: true;
   row: OpsStatusRow;
 }
+
+/* ---------- 海捞两阶段·暗标段（v6.50.0） ---------- */
+
+export type SeaBatchStatus = 'sealed' | 'settling' | 'opened' | 'cancelled';
+export type SeaBidStatus = 'sealed' | 'won' | 'lost' | 'void' | 'withdrawn';
+
+/** 我的密封标（金额保密：只有出标方自己看得到；开标胜出后随公示公开） */
+export interface SeaBidDto {
+  playerId: number;
+  playerName: string;
+  newReleaseFee: number;
+  status: SeaBidStatus;
+  voidReason: string;
+  updatedAt: string | null;
+}
+
+/** 开标公示行（谁以多少胜出） */
+export interface SeaWinnerDto {
+  playerId: number;
+  playerName: string;
+  clubId: number;
+  clubName: string;
+  amount: number;
+}
+
+export interface SeaBatchDto {
+  id: number;
+  season: number;
+  windowSeq: number;
+  status: SeaBatchStatus;
+  sealedAt: string | null;
+  deadlineAt: string;
+  openedAt: string | null;
+}
+
+/** GET /api/transfers/sea-sealed：state off=未启用 / none=不在暗标段 / sealed=收标中 / closing=已截止等开标 / open=已开标 */
+export interface SeaPhaseView {
+  enabled: boolean;
+  state: 'off' | 'none' | 'sealed' | 'closing' | 'open';
+  batch: SeaBatchDto | null;
+  myBids: SeaBidDto[];
+  results: SeaWinnerDto[];
+}
+
+export interface SeaSubmitResult {
+  ok: true;
+  bidId: number;
+  playerId: number;
+  newReleaseFee: number;
+  signFee: number;
+  /** 本次是改标（原冻结已刷新）还是首标 */
+  updated: boolean;
+}
+
+export interface SeaOpenSummary {
+  ok: true;
+  batchId: number;
+  already: boolean;
+  won: number;
+  lost: number;
+  voided: number;
+}
+
+export interface SeaExtendResult {
+  ok: true;
+  batch: { id: number; season: number; windowSeq: number; status: SeaBatchStatus; deadlineAt: string; note: string };
+}
+
+/** 取消本窗批次：全部标作废 + 冻结解冻 */
+export interface SeaCancelResult {
+  ok: true;
+  voided: number;
+}
+
+export interface SeaAdminBidRow {
+  bidId: number;
+  playerId: number;
+  playerName: string;
+  clubId: number;
+  clubName: string;
+  newReleaseFee: number;
+  status: SeaBidStatus;
+  holdStatus: string | null;
+  voidReason: string;
+  submittedAt: string | null;
+  updatedAt: string | null;
+}
+
+/** GET /api/admin/sea-sealed：逐标明账（管理端看得到金额与出标方，教练侧看不到） */
+export interface SeaAdminView {
+  enabled: boolean;
+  batch: (SeaBatchDto & { note: string; remindedAt: string }) | null;
+  bids: SeaAdminBidRow[];
+  summary: { players: number; bids: number; clubs: number; top: number };
+}

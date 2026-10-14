@@ -16,6 +16,7 @@ import { loyaltyMovements } from './season-settle.ts';
 import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 import { queueClubNotification } from './notify.ts';
+import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
@@ -346,6 +347,13 @@ export async function closeWindow(
   // 窗尾收口（4.4.7）：无人出价下架收费、仍在竞价的强制进待审
   // origin='user'：管理员关窗触发的惰性结算（actor 就是这位管理员）
   await settleOverdue(env, { actor, origin: 'user' });
+  // v6.50.0 海捞暗标：关窗时批次还收着标 ⇒ 立即开标（不阻塞关窗，窗口状态此刻已落 closed）。
+  // 开标失败不吞掉「窗已关」这个事实：批次留在 sealed，由下一轮 tick 兜底（到点或时刻表行结束都会开）。
+  try {
+    await openSealedBatchOnWindowClose(env, actor, win.season, win.windowSeq);
+  } catch (err) {
+    console.error('sea_sealed_open_on_window_close_failed', err);
+  }
   return {
     ok: true,
     season: win.season,

@@ -19,6 +19,7 @@ import eventsRoutes from './events.ts';
 import weatherRoutes from './weather.ts';
 import shopRoutes from './shop.ts';
 import opsScheduleRoutes from './ops-schedule.ts';
+import seaSealedRoutes from './sea-sealed.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -46,5 +47,7 @@ app.route('/', weatherRoutes);
 app.route('/', shopRoutes);
 // v6.49.0：运营时刻表（GET/PUT /api/admin/ops-schedule，逐项设时段 + 读全表）
 app.route('/', opsScheduleRoutes);
+// v6.50.0：海捞暗标段（GET /api/admin/sea-sealed + POST /sea-sealed/open|extend|cancel）
+app.route('/', seaSealedRoutes);
 
 export default app;

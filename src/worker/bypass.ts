@@ -133,15 +133,30 @@ async function chargeBypassFee(
   actor: number | null,
 ): Promise<void> {
   const db = env.DB;
-  const available = await availableBalance(db, clubId);
-  if (round2(available) < amount) {
-    throw new HttpError(409, `俱乐部可用资金不足：这笔费用要 ${round2(amount)} m，当前可支配 ${round2(available)} m`);
+  // v6.50.0 海捞暗标：胜出单的签入费在审核通过时才收，收的同时销毁这笔密封冻结。
+  // 冻结本来就为这笔费做担保，故它可以把可用额顶上来（否则「余额 30 / 冻着 30」的俱乐部过不了
+  // 余额预检，而放最后解冻又会让守卫重复算一遍缺口——两处都按「加回自己的那份冻结」处理）。
+  const sealed = await db
+    .prepare(`SELECT sealed_bid_id FROM transfers WHERE id = ?`)
+    .bind(transferId)
+    .first<{ sealed_bid_id: number | null }>();
+  const sealedHold = sealed?.sealed_bid_id
+    ? await db
+        .prepare(`SELECT id, amount FROM fund_holds WHERE ref_type = 'sea_sealed' AND ref_id = ? AND status = 'held' ORDER BY id DESC LIMIT 1`)
+        .bind(sealed.sealed_bid_id)
+        .first<{ id: number; amount: number }>()
+    : null;
+  const available = round2((await availableBalance(db, clubId)) + (sealedHold?.amount ?? 0));
+  if (available < amount) {
+    throw new HttpError(409, `俱乐部可用资金不足：这笔费用要 ${round2(amount)} m，当前可支配 ${available} m`);
   }
   const guardSql =
     `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'` +
     ` AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
-    ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0) >= ?`;
-  const guardParams = [transferId, clubId, clubId, amount];
+    ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
+    (sealedHold ? ` + COALESCE((SELECT amount FROM fund_holds WHERE id = ? AND status = 'held'), 0)` : '') +
+    ` >= ?`;
+  const guardParams = [transferId, clubId, clubId, ...(sealedHold ? [sealedHold.id] : []), amount];
   // 留痕与账本共用同一套守卫，且**排在账本之前**落库：两者评估的是同一份库存状态，
   // 故「是否真扣到这笔费」的判断完全一致 —— 审核重放（该 kind 已有流水）或批内余额守卫
   // 没过时都不会留下失实的 bypass_fee 行（createAuditStatement 无法表达 WHERE，此处手写）
@@ -166,6 +181,9 @@ async function chargeBypassFee(
   const statements = [
     auditStmt,
     ...ledger,
+    ...(sealedHold
+      ? [db.prepare(`UPDATE fund_holds SET status = 'settled' WHERE id = ? AND status = 'held'`).bind(sealedHold.id)]
+      : []),
     db
       .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'pending_review' AND extra_fee IS NULL`)
       .bind(amount, transferId),
@@ -183,10 +201,12 @@ async function chargeBypassFee(
 
 // 旁路单建单批：transfer + 审核任务一个 batch（审核任务 ref_id 用 last_insert_rowid()
 // 指回同批前一句刚插入的 transfer）；回链与审计在拿到 transferId 后补一个小批。
-async function createBypassTransfer(
+// v6.50.0 起也被海捞暗标开标复用（sealedBidId 记「这单从哪份密封标来」）——actor 可为 null
+//（tick 开标没有操作人；审计写 NULL，不用 0 当哨兵）。
+export async function createBypassTransfer(
   env: Env,
   opts: {
-    actor: number;
+    actor: number | null;
     type: string;
     playerId: number;
     fromClubId: number | null;
@@ -199,14 +219,16 @@ async function createBypassTransfer(
     payload: Record<string, unknown>;
     action: string;
     origin: AuditOrigin;
+    /** 海捞暗标开标：来源密封标 id（见 migrations/0070_sea_sealed.sql 的解冻兜底触发器） */
+    sealedBidId?: number | null;
   },
 ): Promise<{ transferId: number }> {
   const db = env.DB;
   const results = await db.batch([
     db
       .prepare(
-        `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, extra_fee, status, season, window_seq, evidence, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ${nowSql()})`,
+        `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, extra_fee, status, season, window_seq, evidence, sealed_bid_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ${nowSql()})`,
       )
       .bind(
         opts.type,
@@ -218,6 +240,7 @@ async function createBypassTransfer(
         opts.season,
         opts.windowSeq,
         JSON.stringify(opts.evidence),
+        opts.sealedBidId ?? null,
       ),
     db
       .prepare(
@@ -443,6 +466,19 @@ export async function createFreeAgent(
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能海捞', 'no_window');
   // v6.49.0 运营时刻表：海捞明标段（v6.50.0 两阶段落地后，暗标段另有 transfer_sea_sealed 自己的闸）
   await assertOpOpen(db, 'transfer_sea_open');
+  // v6.50.0 两阶段：收标期间自由身池走「统一截止 + 价高者得」的密封标，明标入口先关掉
+  //（说的是同一批球员，放行等于两头下注；settling 只是开标在途，几十秒内就落 opened，不拦）
+  const sealedBatch = await db
+    .prepare(`SELECT id FROM sea_batches WHERE season = ? AND window_seq = ? AND status = 'sealed' LIMIT 1`)
+    .bind(win.season, win.windowSeq)
+    .first<{ id: number }>();
+  if (sealedBatch) {
+    throw new HttpError(
+      409,
+      '现在是海捞暗标段：自由身池走统一截止的密封标，常规海捞等明标段（球员档案里有密封标入口）',
+      'sea_sealed_phase',
+    );
+  }
 
   const player = await db
     .prepare('SELECT id, name, display_name, club_id, status FROM players WHERE id = ?')

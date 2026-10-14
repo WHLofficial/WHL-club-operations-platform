@@ -1170,3 +1170,42 @@ describe('v6.49.0 运营时刻表静态锁（甘特图 + 逐项时段）', () =>
     expect(chart, '刻度对齐偏移应走 zoneOffsetMs（日刻度落显示时区午夜）').toContain('zoneOffsetMs');
   });
 });
+
+// v6.50.0 海捞暗标段（教练侧密封标 + 管理端开标口）的静态锁：
+// 阶段状态与冻结守恒由 tests/sea-sealed.test.ts 的 25 例兜住（服务端是唯一真源），这里只兜「前端声明落在哪」——
+// 收标期入口必须经 useSeaPhase 判阶段（不靠时刻表行状态自算）、时间渲染不许旁路（useTimeFmt）、管理端三操作点名。
+describe('v6.50.0 海捞暗标段静态锁（教练侧密封标 + 管理端开标口）', () => {
+  const FREE_PAGE = `${WEB_SRC}/pages/market/MarketFreePage.tsx`;
+  const SIDE_OPS = `${WEB_SRC}/pages/player/SideOps.tsx`;
+  const MARKET_PAGE = `${WEB_SRC}/pages/admin/MarketPage.tsx`;
+
+  it('TC-SEA-01 · 教练侧：阶段数据只走 useSeaPhase，海捞页出横幅/倒计时/公示，球员页出密封标入口', () => {
+    const free = read(FREE_PAGE);
+    expect(free, '海捞页应读 /api/transfers/sea-sealed 的阶段视图').toContain('useSeaPhase');
+    expect(free, '收标中要显示倒计时（复用 use-countdown 单例秒表）').toContain('useCountdown');
+    expect(free, '倒计时要走 fmtClock 排版（不自拼 hh:mm:ss）').toContain('fmtClock');
+    const side = read(SIDE_OPS);
+    expect(side, '球员档案 E 态应有密封标出标端点').toContain('/api/transfers/sea-sealed');
+    expect(side, '撤标端点应就位').toContain('/api/transfers/sea-sealed/withdraw');
+    expect(side, '阶段判断应走 useSeaPhase（不靠时刻表行状态自算）').toContain('useSeaPhase');
+  });
+
+  it('TC-SEA-02 · 管理端开标口：三操作点名 + 墙钟换算复用 datetime 层', () => {
+    const page = read(MARKET_PAGE);
+    for (const path of ['/api/admin/sea-sealed/open', '/api/admin/sea-sealed/extend', '/api/admin/sea-sealed/cancel']) {
+      expect(page, `管理端缺 ${path}`).toContain(path);
+    }
+    expect(page, '立即开标应走两段式确认（ConfirmButton）').toContain('ConfirmButton');
+    expect(page, '延长截止应走 zhWallToUtcIso（北京墙钟 → UTC ISO，提交前换算）').toContain('zhWallToUtcIso');
+    expect(page, '回填截止输入框应走 utcIsoToZhWall').toContain('utcIsoToZhWall');
+  });
+
+  it('TC-SEA-03 · 新增界面时间渲染不许旁路（设备本地时间格式化零命中，渲染走 useTimeFmt）', () => {
+    const LOCAL_DATE_FMT = /new Date\([^)]*\)\.toLocaleString|toLocaleDateString|toLocaleTimeString/;
+    for (const f of [FREE_PAGE, SIDE_OPS, MARKET_PAGE]) {
+      const text = read(f);
+      expect(LOCAL_DATE_FMT.test(text), `${f} 用了设备本地时间格式化（渲染时间一律走 useTimeFmt）`).toBe(false);
+      expect(text, `${f} 应至少一处 useTimeFmt`).toContain('useTimeFmt');
+    }
+  });
+});

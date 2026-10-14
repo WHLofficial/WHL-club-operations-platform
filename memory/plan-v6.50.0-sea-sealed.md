@@ -55,3 +55,11 @@
 - 明标段起点需与暗标终点一致（时刻表 `transfer_sea_open` 行起点填同一具体时间；管理端表单提示）。
 - 冻结长期占用（暗标段内最多 `sea_sealed_hours`）→ 撤回/未胜出即解冻；冻结额 30%×RC 与签入费一致，不额外占用。
 - 与并行会话共享文件（`tests/d1.ts`、`src/core/config.ts`）→ 编辑前重读；提交只 add 本批文件。
+
+## 收口记录（2026-10-15）
+
+- **状态**：本地完成、待上线（待令）。本地闸门：`npm run typecheck` 三份 0 error；`npx vitest run` **131 文件 / 2147 例**全绿；`npm run build` 成功。
+- **交付**：迁移 `0070_sea_sealed.sql`（两表 + 三触发器/索引组）；`src/worker/sea-sealed.ts`；`src/worker/expiry-ops.ts` 第三适配器；`closeWindow` 开标钩子；`src/worker/bypass.ts` 三处（导出 + `sealedBidId` + 签入费同批销毁冻结 + 收标期硬闸）；通知 4 模板 + config 两键；教练侧三端点 + 海捞页横幅/公示 + 球员档案 E 态密封标表单；管理端四端点 + 转会页「海捞暗标段」段。测试：`tests/sea-sealed.test.ts` 25 例 + `tests/mobile-baseline.test.ts` 3 例静态锁 + 注册表计数四处同改。文档：`docs/test-plans/v6.50.0-sea-sealed.md`、`memory/design-sea-two-phase.md` §8（落地偏差 10 条）。
+- **与设计的偏差**：见 `memory/design-sea-two-phase.md` §8（通知 4 模板 / 关闭时整批作废 / 批次状态为唯一真源 / 惰性建批要求具体终点 / 延长两把尺子同改 / 签入费时点与冻结销毁 / 收标期硬闸 / 公告只发败者 / 取消说明兼作作废原因 / `sea_sealed_hours` 只是表单默认值）。
+- **下一步**：① 本地提交（本批代码与测试；`CHANGELOG`/`ROADMAP`/`AGENTS`/`package.json`/`TECH_DESIGN` 与并行会话 growth-tier 的未提交文件仍在工作区，归属待确认）；② 用户令后：**先 apply 迁移 0070 到生产 → push → 部署 → 关闭态回读**（`GET /api/transfers/sea-sealed` 应 `state='off'`、管理端 `enabled:false`、常规海捞与上线前一致）；③ 回读无误后**单独一步**开 `sea_enabled=true` 并把时刻表 `transfer_sea_sealed` 行填具体起止（同一步不做，回滚位 = 改回 `false`）。
+- **未验证项**：真机端到端演练 / 4 个新通知模板的真实 QQ 投递 / 前端窄屏观感 / 并发真双写压测（详见测试计划「未验证项」五条）。
