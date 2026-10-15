@@ -1,14 +1,15 @@
-# 增量计划 v6.51.0：强制拍卖人选解禁 + 品牌池扩编（统一中文名 + 9 家新品牌）
+# 增量计划 v6.51.0：强制拍卖人选解禁与可指定挂牌价 + 品牌池扩编（统一中文名 + 9 家新品牌）
 
 **版本号说明**：判级 minor（新增只读端点 + 行为放宽 + 数据扩编，无破坏性迁移）。迁移号 **0071**（接在海捞 0070 之后）。
 
 依赖：无（品牌池扩编沿用 v6.8.0 热度规则与 v6.13.0 档位校准口径）。测试计划见 `docs/test-plans/v6.51.0-forced-auction-and-brand-pool.md`。
-用户口径（m13213）：「把管理端强制拍卖改为无限制，本队非门将CA前六仅作为一个校验参考值，不强制；品牌池写一些新东西，并统一品牌名为中文。」
+用户口径（m13213）：「把管理端强制拍卖改为无限制，本队非门将CA前六仅作为一个校验参考值，不强制；品牌池写一些新东西，并统一品牌名为中文。」追加（m13596）：「强制拍卖可指定挂牌价，并入此版。」
 
 ## 范围
 
 ① **强拍人选解禁**：删掉三道人选硬闸（门将 / 缺 CA / 非前六）；保留五道闸（存在且有归属 / 开窗 / 时刻表段 / CPU 队 / 状态非 normal 与在流程里）；前六降为参考值随响应回报；新增只读预检端点，预检与建单同源同文案。
 ② **品牌池加料**：品牌名统一中文（`CVS Health` → 西维斯健康）+ 9 家新品牌 + 四个新行业系数。档位 / 名额 / 热度规则口径一律不动。
+③ **挂牌价可指定**（m13596）：建单可带 `askPrice`（缺省 1m = 原口径）；`round2` 两位小数；非有限或 ≤0 ⇒ 400「挂牌价须为正数（单位 m）」；落库 / 审计 / 响应三处同值；下游随价（首价门槛 = 挂牌价、下架费 = 10% × 挂牌价、成交税 = 整单 50% × 成交价）。
 
 ## 要改的文件（已全部落地）
 
@@ -18,17 +19,18 @@
 
 **修改**
 - `src/worker/ops-schedule.ts`（抽出 `opBlockReason`，`assertOpOpen` 复用；行为零变化）
-- `src/worker/bypass.ts`（新导出 `ForcedAuctionReference` / `ForcedAuctionBlocker` / `ForcedAuctionInspection` / `inspectForcedAuction`；`createForcedAuction` 去三道硬闸、响应带 `reference`）
-- `src/worker/routes/admin/market.ts`（+ `GET /api/admin/forced-auctions/preview`；注释改「人选不限，前六仅参考」）
+- `src/worker/bypass.ts`（新导出 `ForcedAuctionReference` / `ForcedAuctionBlocker` / `ForcedAuctionInspection` / `inspectForcedAuction`；`createForcedAuction` 去三道硬闸、响应带 `reference`；新导出 `parseForcedAuctionPrice(input)`，`askPriceInput` 缺省回 1m）
+- `src/core/bypass-rules.ts`（`FORCED_AUCTION_PRICE` 注释改「默认挂牌价」，值仍 1）
+- `src/worker/routes/admin/market.ts`（+ `GET /api/admin/forced-auctions/preview`；`POST /forced-auctions` body 接可选 `askPrice` 并透传；注释改「人选不限，前六仅参考；挂牌价可指定」）
 - `src/core/config.ts`（`naming_industry_factors` 默认表 + 汽车 1.05 / 金融 1.15 / 制造 1.1 / 文旅 0.9）
 - `web/src/lib/api.ts`（`ForcedAuctionReference` / `ForcedAuctionBlocker` / `ForcedAuctionPreview`；`ForcedAuctionResult.reference`）
-- `web/src/pages/admin/MarketPage.tsx`（`referenceLine()` + 输入即显参考值 + 提示文案与 toast 改「参考不强制」）
+- `web/src/pages/admin/MarketPage.tsx`（`referenceLine()` + 输入即显参考值 + 提示文案与 toast 改「参考不强制」；「挂牌价（m）」输入默认 1 / `step 0.5` / 非正数禁用挂出）
 - `tests/d1.ts`（MIGRATION_FILES + `0071_brand_pool_expand.sql`）
-- `tests/forced-auction.test.ts`（首例改写 + 2 例新增）、`tests/naming-ops.test.ts`、`tests/market-rounds.test.ts`（16 家口径）
+- `tests/forced-auction.test.ts`（首例改写 + 3 例新增，含案「挂牌价可指定」共 9 例）、`tests/naming-ops.test.ts`、`tests/market-rounds.test.ts`（16 家口径）
 - `scripts/e2e/smoke.mjs`（㉓ + 头注释）
 - `PRD.md` / `TECH_DESIGN.md`（规则行 + 端点行）、`CHANGELOG.md` / `ROADMAP.md` / `AGENTS.md`、`package.json` 6.51.0
 
-## 分步（1–8 已完成，9 待令）
+## 分步（1–9 已完成，10 待令）
 
 1. 现状取证：`createForcedAuction` 三闸位置与文案、品牌池 7 家、`naming_contracts` 生产 0 行、招商轮/档位敏感断言全集 ✅
 2. 服务层：`opBlockReason` 抽取 → `inspectForcedAuction` → `createForcedAuction` 改写 ✅
@@ -38,7 +40,8 @@
 6. 测试改写与计数同步（7→16）+ smoke ㉓ ✅
 7. 闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **131 文件 / 2149 例**全绿、`npm run build` 成功 ✅
 8. 文档与版本号（PRD / TECH_DESIGN / CHANGELOG / ROADMAP / AGENTS / 本文件 / 测试计划 / `package.json` 6.51.0）✅
-9. 待令：迁移 `0071` apply 生产 → push → 部署 → 回读
+9. **追加需求（m13596）挂牌价可指定**：`parseForcedAuctionPrice`（`src/worker/bypass.ts`）+ `FORCED_AUCTION_PRICE` 注释降级（`src/core/bypass-rules.ts`）+ 路由透传 `askPrice` + 前端「挂牌价（m）」输入 + `tests/forced-auction.test.ts` 第三例（该文件 9 例）→ 全量 `npx vitest run` **131 文件 / 2150 例**全绿、`npm run typecheck` 三份 0 error、`npm run build` 成功（入口 `index-DD3YIWil.js` 663.32 kB）；文档同步（PRD:89 / TECH_DESIGN:407+1027 / CHANGELOG / ROADMAP / AGENTS:119 / 本文件 / 测试计划 TC-FA-09）✅
+10. 待令：迁移 `0071` apply 生产 → push → 部署 → 回读（含管理端按指定挂牌价挂单留观察）
 
 ## 口径备忘
 
@@ -47,4 +50,5 @@
 - **保留的五道闸**：无归属 404「球员不存在或没有归属」/ 无窗 409「转会窗口没开，现在不能发起强制拍卖」（errCode `no_window`）/ 时刻表段未开或已结束（`opBlockReason` 的 `op_not_started` / `op_closed`）/ CPU 队 400「CPU 队球员不参与强制拍卖（CPU 队不入账）」/ 状态与在流程（listed「这名球员已经在挂牌流程里了」、其他「当前状态不能强制拍卖」、在流程「这名球员已经有一单在市场流程里了，等它结束再操作」）。
 - **品牌热度与档位**：新品牌 heat 0.68–0.95（全部 < 1.0）⇒ 头部仍是亚马逊 1.3 / 麒麟生物 1.2 / 阿迪达斯 1.1；仅 极星运动 0.95 / 鲸涛饮品 0.91 记「新兴」（可口可乐 1.0 / 海底捞 0.9 原有）；关窗自动校准照旧按热度重算（`tier_locked` 优先、topK 按俱乐部数）。招商轮报价量随之从 7 家口径变 16 家（头部名额 1 队 / 新兴 2 队 / 口碑不限，`offersPerBrand` 默认 3 不变）。
 - **新行业系数**：汽车 1.05 / 金融 1.15 / 制造 1.1 / 文旅 0.9（未登记行业回 1.0；**config 键数不变** ⇒ 插件 `market_industry_templates` 同值口径与 CONFIG_KEYS 长度断言不受影响）。
+- **挂牌价口径**（m13596）：`parseForcedAuctionPrice` —— `undefined` / `null` / `''` 回 `FORCED_AUCTION_PRICE`（1m，旧口径不变）；否则 `Number()` 后「有限且 > 0」，不满足 ⇒ 400 `挂牌价须为正数（单位 m）`（与普通挂牌 `src/worker/routes/market.ts:210-324` 同文案）+ `round2` 两位小数。该值同时用于 `listings.ask_price` 落库、审计 `after.askPrice`、响应 `askPrice`。下游自动随价、零额外改动：起拍价 = 挂牌价（`validateBidAmount` 首价门槛 ⇒「首笔出价不得低于挂牌价 X m」）、下架费 = `delistFee` = 10% × 挂牌价（默认 1m ⇒ 仍 0.1m）、成交税 = 整单 50% × 成交价。前端输入默认 1、`step 0.5`、非正数禁用挂出。
 - **迁移回滚**：两处改名 UPDATE 反向执行 + `DELETE FROM brand_pool WHERE brand IN ('青云乳业','长风汽车','白马体育','极星运动','天工重工','鲸涛饮品','磐石银行','迅达通讯','星野文旅')`。

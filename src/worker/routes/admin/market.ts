@@ -148,11 +148,11 @@ app.get('/forced-auctions/preview', async (c) => {
   return c.json(await inspectForcedAuction(c.env, c.req.query('playerId')));
 });
 
-// POST /api/admin/forced-auctions —— 建强制拍卖（1m 挂牌，人选不限，整单税 50%）
+// POST /api/admin/forced-auctions —— 建强制拍卖（挂牌价可指定、默认 1m；人选不限；整单税 50%）
 app.post('/forced-auctions', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
-  const body = (await readJson(c)) as { playerId?: unknown } | null;
-  const result = await createForcedAuction(c.env, user.id, body?.playerId);
+  const body = (await readJson(c)) as { playerId?: unknown; askPrice?: unknown } | null;
+  const result = await createForcedAuction(c.env, user.id, body?.playerId, body?.askPrice);
   return c.json(result, 201);
 });
 

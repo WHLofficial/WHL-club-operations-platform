@@ -415,6 +415,7 @@ function ForcedAuctionSection() {
   const { show, toastNode } = useToast();
   const queryClient = useQueryClient();
   const [playerId, setPlayerId] = useState('');
+  const [askPrice, setAskPrice] = useState('1');
   const [createBusy, setCreateBusy] = useState(false);
   const [cancelId, setCancelId] = useState<number | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -428,6 +429,8 @@ function ForcedAuctionSection() {
 
   const playerIdNum = Number(playerId);
   const previewReady = playerId !== '' && Number.isInteger(playerIdNum) && playerIdNum > 0;
+  const askPriceNum = Number(askPrice);
+  const askPriceReady = askPrice !== '' && Number.isFinite(askPriceNum) && askPriceNum > 0;
   const { data: preview } = useQuery({
     queryKey: ['admin', 'forced-auction-preview', playerId],
     queryFn: () =>
@@ -446,15 +449,19 @@ function ForcedAuctionSection() {
     if (createBusy) return;
     setCreateBusy(true);
     try {
-      const res = await apiPost<ForcedAuctionResult>('/api/admin/forced-auctions', { playerId: Number(playerId) });
+      const res = await apiPost<ForcedAuctionResult>('/api/admin/forced-auctions', {
+        playerId: Number(playerId),
+        askPrice: askPriceNum,
+      });
       const r = res.reference;
       const ref = r.isGk
         ? '门将，前六参考不适用'
         : r.caRank === null
           ? '缺 CA，参考不可算'
           : `非门将 CA 队内第 ${r.caRank}${r.topSixLine !== null ? `（前六线 ${r.topSixLine}）` : ''}`;
-      show(`强制拍卖已挂出：${r.playerName}｜参考 ${ref}（不强制）｜挂牌价 ${res.askPrice.toFixed(2)}m，1m 起拍，整单税 50%。`);
+      show(`强制拍卖已挂出：${r.playerName}｜参考 ${ref}（不强制）｜挂牌价 ${res.askPrice.toFixed(2)}m 起拍，整单税 50%。`);
       setPlayerId('');
+      setAskPrice('1');
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '建强制拍卖失败', true);
@@ -496,21 +503,26 @@ function ForcedAuctionSection() {
       <h2>强制拍卖</h2>
       {toastNode}
       <p className="hint">
-        准入失败时的处置手段：按 1m 挂牌强拍（人选不限——本队任何正式球员都可挂，门将、CA 前六之外的也能挂），成交整单税 50%。
+        准入失败时的处置手段：按给定挂牌价强拍（默认 1m，起拍价即挂牌价，之后每次加价 ≥ 1m；窗尾无人出价按下架费 10% 挂牌价收）。
+        人选不限——本队任何正式球员都可挂，门将、CA 前六之外的也能挂；
         「非门将 CA 前六」只是填了球员 ID 后给出的参考值（并标出前六线），不拦截挂出。
-        未成交前可以取消；行内可单独暂停/恢复这一件的出价（其余市场照常）。
+        成交整单税 50%。未成交前可以取消；行内可单独暂停/恢复这一件的出价（其余市场照常）。
       </p>
       <div className="inline-form">
         <div className="field">
           <label htmlFor="forced-player">球员 ID</label>
           <input id="forced-player" className="mono" type="number" min="1" value={playerId} onChange={(e) => setPlayerId(e.target.value)} />
         </div>
+        <div className="field">
+          <label htmlFor="forced-price">挂牌价（m）</label>
+          <input id="forced-price" className="mono" type="number" min="0.01" step="0.5" value={askPrice} onChange={(e) => setAskPrice(e.target.value)} />
+        </div>
         <ConfirmButton
           label="挂出强制拍卖"
           confirmLabel="再点一次确认挂出"
           busyLabel="挂出中…"
           busy={createBusy}
-          disabled={playerId === '' || Number(playerId) < 1}
+          disabled={playerId === '' || Number(playerId) < 1 || !askPriceReady}
           disarmKey={playerId}
           onConfirm={create}
         />

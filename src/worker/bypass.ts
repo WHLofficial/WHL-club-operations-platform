@@ -653,14 +653,28 @@ export async function inspectForcedAuction(env: Env, playerIdInput: unknown): Pr
 }
 
 /**
+ * 强制拍卖挂牌价（v6.51.0）：管理端可指定，缺省 1m（4.4.5 原口径）；正数、两位小数
+ * （沿普通挂牌价口径）。起拍价即挂牌价，之后照常竞价（4.4.1.2）。
+ */
+export function parseForcedAuctionPrice(input: unknown): number {
+  if (input === undefined || input === null || input === '') return FORCED_AUCTION_PRICE;
+  const askPrice = Number(input);
+  if (!Number.isFinite(askPrice) || askPrice <= 0) throw new HttpError(400, '挂牌价须为正数（单位 m）');
+  return round2(askPrice);
+}
+
+/**
  * 管理方建强制拍卖（v6.51.0）：人选不限门将、不限 CA 前六——队内非门将 CA 排名/前六线只作为
- * 参考值随响应回报（管理端展示用）；挂牌价固定 1m，之后走普通挂牌链（首价 ≥1m、正常竞价、成交税整单 50%）。
+ * 参考值随响应回报（管理端展示用）；挂牌价可指定（默认 1m），之后走普通挂牌链（首价 ≥挂牌价、
+ * 正常竞价、成交税整单 50%）。
  */
 export async function createForcedAuction(
   env: Env,
   actor: number,
   playerIdInput: unknown,
+  askPriceInput?: unknown,
 ): Promise<ForcedAuctionResult> {
+  const askPrice = parseForcedAuctionPrice(askPriceInput);
   const db = env.DB;
   const { reference, blockers } = await inspectForcedAuction(env, playerIdInput);
   const block = blockers[0];
@@ -695,14 +709,14 @@ export async function createForcedAuction(
         `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, deadline_at, season, window_seq)
          VALUES (?, ?, 'forced', ?, 'listed', ${nowSql()}, ?, ?, ?, ?)`,
       )
-      .bind(playerId, clubId, FORCED_AUCTION_PRICE, listedDay, firstDeadline, win.season, win.windowSeq),
+      .bind(playerId, clubId, askPrice, listedDay, firstDeadline, win.season, win.windowSeq),
     audit({
       actor,
       action: 'forced_auction_create',
       targetType: 'listing',
       targetId: null,
       origin: 'user',
-      after: { playerId, sellerClubId: clubId, askPrice: FORCED_AUCTION_PRICE, season: win.season, windowSeq: win.windowSeq },
+      after: { playerId, sellerClubId: clubId, askPrice, season: win.season, windowSeq: win.windowSeq },
     }),
   ];
   const results = await db.batch(statements);
@@ -714,7 +728,7 @@ export async function createForcedAuction(
   // 4.4.10：强制拍卖属挂牌，提交即触发本窗续约回滚
   await rollbackRcChangeForPlayer(env, playerId, actor, { refType: 'listing', refId: listingId });
 
-  return { ok: true, listingId, askPrice: FORCED_AUCTION_PRICE, reference };
+  return { ok: true, listingId, askPrice, reference };
 }
 
 // 管理方取消强制拍卖（未成交前）：解冻出价、球员还原，不收下架费

@@ -16,7 +16,7 @@ export const PROTECTION_TICKS = 3;
 export const SEASONS_PER_TICK = 0.5;
 // 免费解约门槛（4.4.4：效力满 3 年）
 export const FREE_TERMINATION_SEASONS = 3;
-// 强制拍卖挂牌价（4.4.5：联赛管理方以 1m 挂牌）
+// 强制拍卖默认挂牌价（4.4.5：联赛管理方挂出；v6.51.0 起管理端可指定挂牌价，此值仅作默认）
 export const FORCED_AUCTION_PRICE = 1;
 
 /** 效力（赛季）= 0.5 × 签约后经历的常规窗关窗数；基数缺失按 0（0028 默认值） */

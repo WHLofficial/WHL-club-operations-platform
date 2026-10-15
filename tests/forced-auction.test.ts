@@ -1,5 +1,6 @@
 // 强制拍卖测试（规则 4.4.5）：v6.51.0 起人选不限（门将 / 前六之外 / 缺 CA 都能挂），
-// 队内非门将 CA 前六只作为参考值随响应回报；1m 挂牌、正常竞价链成交、整单税 50%、管理组取消。
+// 队内非门将 CA 前六只作为参考值随响应回报；挂牌价可指定（默认 1m）、正常竞价链成交、
+// 整单税 50%、管理组取消。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -246,6 +247,60 @@ describe('强制拍卖（4.4.5）', () => {
     const res = await post('/api/admin/forced-auctions', { playerId: 60 }, 'tok-admin', fx.env);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain('CPU 队球员不参与强制拍卖');
+  });
+
+  it('v6.51.0 挂牌价可指定：缺省 1m / 指定则落库并抬高首价门槛 / 两位小数 / 非正数 400', async () => {
+    const fx = await seedAuction();
+    const askPriceOf = (listingId: number) =>
+      sqlGet<{ ask_price: number }>(fx.sqlite, 'SELECT ask_price FROM listings WHERE id = ?', listingId)?.ask_price;
+
+    // 缺省 = 1m（4.4.5 原口径，老调用方不带 askPrice 行为不变）
+    const dflt = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
+    expect(dflt.status).toBe(201);
+    const dfltBody = (await dflt.json()) as { listingId: number; askPrice: number };
+    expect(dfltBody.askPrice).toBe(1);
+    expect(askPriceOf(dfltBody.listingId)).toBe(1);
+    expect((await post(`/api/admin/forced-auctions/${dfltBody.listingId}/cancel`, {}, 'tok-admin', fx.env)).status).toBe(200);
+
+    // 指定 5m：落库 + 响应回报，且首价门槛同步抬高（4 被拒、5 通过）
+    const five = await post('/api/admin/forced-auctions', { playerId: 41, askPrice: 5 }, 'tok-admin', fx.env);
+    expect(five.status).toBe(201);
+    const fiveBody = (await five.json()) as { listingId: number; askPrice: number };
+    expect(fiveBody.askPrice).toBe(5);
+    expect(askPriceOf(fiveBody.listingId)).toBe(5);
+    const low = await post(`/api/market/listings/${fiveBody.listingId}/bids`, { amount: 4 }, 'tok-coach2', fx.env);
+    expect(low.status).toBe(400);
+    expect(((await low.json()) as { error: string }).error).toBe('首笔出价不得低于挂牌价 5 m');
+    expect((await post(`/api/market/listings/${fiveBody.listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
+    expect((await post(`/api/admin/forced-auctions/${fiveBody.listingId}/cancel`, {}, 'tok-admin', fx.env)).status).toBe(200);
+
+    // 两位小数（round2 沿普通挂牌价口径）
+    const frac = await post('/api/admin/forced-auctions', { playerId: 42, askPrice: 3.456 }, 'tok-admin', fx.env);
+    expect(frac.status).toBe(201);
+    const fracBody = (await frac.json()) as { listingId: number; askPrice: number };
+    expect(fracBody.askPrice).toBe(3.46);
+    expect(askPriceOf(fracBody.listingId)).toBe(3.46);
+    expect((await post(`/api/admin/forced-auctions/${fracBody.listingId}/cancel`, {}, 'tok-admin', fx.env)).status).toBe(200);
+
+    // 下架费随挂牌价走（10% × 挂牌价）：6m 挂牌、窗尾无人出价 ⇒ 收 0.6m
+    const six = await post('/api/admin/forced-auctions', { playerId: 44, askPrice: 6 }, 'tok-admin', fx.env);
+    expect(six.status).toBe(201);
+    const sixId = ((await six.json()) as { listingId: number }).listingId;
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour') WHERE id = ${sixId}`);
+    await get('/api/market/listings?status=all', 'tok-admin', fx.env);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', sixId)?.status).toBe('delisted');
+    expect(
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND club_id = ${fx.club}`)?.amount,
+    ).toBe(-0.6);
+
+    // 非正数 / 非数字 ⇒ 400（与普通挂牌同文案），整单不落库
+    for (const bad of [0, -1, 'abc']) {
+      const res = await post('/api/admin/forced-auctions', { playerId: 43, askPrice: bad }, 'tok-admin', fx.env);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('挂牌价须为正数（单位 m）');
+    }
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM listings WHERE player_id = 43')?.n).toBe(0);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 43')?.status).toBe('normal');
   });
 
   it('成交链：1m 挂牌 → 竞价 → 待审 → 批准进谈判 → 成约按整单 50% 税过户', async () => {
