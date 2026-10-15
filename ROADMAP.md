@@ -1500,6 +1500,76 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.50.0 · 海捞两阶段（暗标段密封标 + 明标段原样）：窗口批次制 + 统一开标 + 管理端开标口（2026-10-15）
+
+**状态**：**本地完成、待上线**（代码/测试/文档已完成，本地闸门全绿：`npm run typecheck` 三份 0 error、`npx vitest run` **131 文件 / 2147 例**全绿、`npm run build` 成功）。判级 **minor**：新增两张表 + 三处触发器/索引 + 一个新服务文件 + 一条到期适配器 + 关窗钩子 + 通知 4 模板 + 两枚 config 键 + 七个端点（教练 3 / 管理 4），`sea_enabled` 默认 `false` 且时刻表该行默认 `none` ⇒ **上线即与上线前行为逐字一致**（双保险安全默认）。**上线顺序硬约束 = 迁移 `0070` 先 apply 生产 → push → 部署 → 回读**（新代码读 `sea_batches`/`sea_sealed_bids`，并给 `transfers` 加 `sealed_bid_id`）；**上线后仍保持关闭**，确认无误再单独一步开 `sea_enabled=true`（回滚位保持）。迁移号从 `0070` 起（`0068`/`0069` 被并行会话 growth-tier 与时刻表占用）。
+
+**缘起（用户 m11201）**：「头脑风暴探索转会各类型定时关闭，以及海捞分为暗标阶段和明标阶段，利用 architect-designer」。经组织方式探索后由用户裁决 **窗口批次制**：每个转会窗固定两段——开窗时自由身池**整体进暗标批次**、统一截止开标（金额与出标方保密、价高者得）；之后进**明标段 = 现有海捞流程原样**（公开、窗口内随时提交、先到先得、审核 → 工资谈判 → 过户；不做公开竞价、不复用挂牌链）。设计定稿 12 条口径与 10 条落地偏差见 `memory/design-sea-two-phase.md`；增量计划 `memory/plan-v6.50.0-sea-sealed.md`。
+
+**交付（数据层，迁移 `0070_sea_sealed.sql`）**：`sea_batches(id, season, window_seq, status sealed|settling|opened|cancelled, sealed_at, deadline_at, reminded_at, opened_at, opened_by, note, created_at)` + UNIQUE `(season, window_seq)` + `(status, deadline_at)` 索引；`sea_sealed_bids(id, batch_id, player_id, club_id, new_release_fee, hold_id, status sealed|won|lost|void|withdrawn, submitted_at, updated_at, resolved_at, void_reason)` + UNIQUE `(batch_id, player_id, club_id)`（**同球员同队限一份**）+ 两组查询索引；`fund_holds` 插入守卫触发器 `fund_holds_sea_sealed_guard`（`WHL_SEA_REJECT_CLOSED`（该批次已不在收标）/ `_AMOUNT`（冻结额必须 = 标价 × 30%，按标上的价校验）/ `_FUNDS`（可用额 + 本 ref 自己的冻结），与 0005/0037/0063 同形）；`transfers.sealed_bid_id` 列 + **部分唯一索引** `idx_transfers_sealed_bid`（`WHERE sealed_bid_id IS NOT NULL`，普通海捞/挂牌单不受影响）+ `transfers_sea_sealed_release` 终态触发器（单据 `rejected` ⇒ 冻结 `released` + 该标置 `void`；`completed` ⇒ 冻结 `settled`）。
+
+**交付（服务层，`src/worker/sea-sealed.ts` 新建）**：`seaEnabled`（config `sea_enabled`）/ `loadSeaPhase` / `ensureSeaBatch`（**惰性建批**：时刻表 `transfer_sea_sealed` 行进段**且终点是具体时间**才建批——随窗锚拿不到统一截止，不开批次）/ `findBatch` / `loadSeaPhaseView` / `submitSealedBid`（**单批原子**：改标 = 改价 + 释放旧冻结 + 插新冻结同一批；新标 = 插标 + 插冻结同一批（`ref_id` 取 `last_insert_rowid()`），随后小批回填 `hold_id` + 审计 `sea_sealed_bid`/`sea_sealed_rebid`；触发器裸错映射成人话）/ `withdrawSealedBid`（`withdrawn` + 解冻）/ `openSeaBatch`（按球员分组取**最高价、同额取最早** → **重跑资格链** `checkSeaSignEligible`（用批次自己的 `season/window_seq` 当窗口引用，关窗开标时没有开放窗口）→ 胜出者建 `transfers(type='free_agent', status='pending_review')` + `review_task`（**复用现有审核链** → 工资谈判 → `completeTransfer` 过户）+ 其余解冻 + 通知 → 批次 `opened` + 审计 `sea_batch_open`；**幂等**靠批次 `sealed → settling` 的 claim UPDATE +「建单前查既存 `sealed_bid_id`」自愈重放）/ `openSealedBatchOnWindowClose` / `expireDueSeaBatches`（`closeAll` 或到点；`sea_enabled=false` ⇒ 整批作废 + 解冻）/ `remindDueSeaBatches`（提前 24h，批次级 `reminded_at` 抢占）/ 管理端 `openNow` / `extendSeaBatch`（**批次截止与时刻表行同改**——两把尺子变一把）/ `cancelSeaBatch` / `cancelCurrentBatch`（管理组写的说明**兼作**标作废原因发给出标方）。
+
+**交付（引擎与触发点）**：`src/worker/expiry-ops.ts` 注册第三适配器 `sea_sealed`（`opsKey: 'transfer_sea_sealed'`：`close` = 到点开标、`remind` = 24h 提醒）；`closeWindow` 末段钩子「关窗时批次仍 sealed ⇒ 立即开标」（**best-effort，不阻塞关窗**，失败留 `sealed` 由 tick 兜底）；`src/worker/bypass.ts` 三处：`createBypassTransfer` 改 `export` + 支持 `sealedBidId`、`chargeBypassFee` 支持密封冻结（审核通过收签入费时**同批销毁冻结** ⇒ 谈判期内可用额不被双重扣减，且「销毁」语句必须排在 `extra_fee` 更新**之前**否则幂等判断失效——`statements[last]` 必须仍指 `extra_fee`）、`createFreeAgent` 加暗标段硬闸（收标期内常规海捞 409 `sea_sealed_phase`）。通知 4 模板：`sea_sealed_lead`（胜出 + 金额 + 签入费在审核通过时收）/ `sea_sealed_lost`（`outbid` ⇒ 更高标、金额与出标方不公开；否则作废 + 原因）/ `sea_batch_open`（本批 N 名被签走 / M 家出标，只发参与但未胜出的俱乐部）/ `sea_sealed_deadline`（提前 24h）；类目统一 `window`（**海捞单不是 offer 实体**，`notificationRefOf` 返回 null）。config 两键 `sea_enabled`（默认 `false`）/ `sea_sealed_hours`（默认 `72`，**仅管理端表单默认值**，实际以时刻表具体时间为准）。
+
+**交付（教练侧）**：`GET|POST /api/transfers/sea-sealed` + `POST /api/transfers/sea-sealed/withdraw`（轻读守卫 = `requireCoach` + `getBoundClub`，**受罚俱乐部也看得见倒计时与公示**）；海捞页阶段横幅（收标中倒计时 / 已截止 / 已开标 + 说明段）+「我的出标（只有自己看得见）」（金额 / 签入费 / 状态 / 撤回）+ 开标公示（球员 → 俱乐部 + 金额）；球员档案 E 态在收标期内把「海捞签入」换成**密封标表单**（出标/改标/撤回 + 冻结提示 + 倒计时 + 保密说明），明标段维持原按钮；已出标提示行。
+
+**交付（管理端）**：`src/worker/routes/admin/sea-sealed.ts` 四端点（`GET /sea-sealed` 明账 / `POST /sea-sealed/open` 立即开标 / `extend` 延长 / `cancel` 取消，与窗口开关同级 `requireAdmin`）+ 转会页「海捞暗标段」段：批次摘要（状态 / 截止 / summary） + **逐标明账**（球员 / 出标方 / 金额 / 冻结 / 标状态 / 冻结状态 / 时间 / 作废原因；**金额与出标方在管理端可见**）+ 三操作（立即开标两段式确认 / 延长走 `zhWallToUtcIso`/`utcIsoToZhWall` / 取消带说明）。
+
+**验收**：`tests/sea-sealed.test.ts` 新建 **25 例**五组（阶段与惰性建批 / 密封标与冻结守恒 / 开标重跑资格链与幂等 / 关窗立即开标·到点 tick·24h 提醒·`sea_enabled=false` 整批作废 / 明标衔接·迁移守卫·审核结算链·管理端明账与延长取消）；`tests/mobile-baseline.test.ts` **+3** 静态锁（TC-SEA-01 教练侧阶段读视图不靠时刻表行自算 / TC-SEA-02 管理端三端点 + 墙钟换算 + 两段式确认 / TC-SEA-03 三处新界面零设备本地时间格式化）；注册表计数四处同改（`CONFIG_KEYS` 83→85；通知模板 33→37 + `window` 类目扩员 + `notificationRefOf` 四条「窗类目不造 ref」）；`tests/expiry-ops.test.ts` 的 `byAdapter` 补第三键。全量 **131 文件 / 2147 例**全绿、build 成功。
+
+**评审·踩坑（八处）**：① 出标改标必须**单批原子**——触发器按「标上的价 × 30%」校验冻结额，分两批会留下「价已改、冻结没换」的中间态，新标路径失败还会留孤儿标行；② `chargeBypassFee` 里销毁密封冻结的语句必须放在 `extra_fee` 更新**之前**（理由见上）；③ 新标用 `INSERT … last_insert_rowid()` 同批取 `bidId`（与 `createBypassTransfer` 建 `review_task` 同手法）；④ 触发器裸错经 `mapSealedTriggerError` 映射（`WHL_SEA_REJECT_FUNDS` → 400「出标即冻结，冻结没过账这标就不算数」等）；⑤ 作废原因取 `checkSeaSignEligible` 的 `verdict.reason`（被挂牌时说「当前状态不能海捞」，不是内部代号）；⑥ `cancelCurrentBatch` 把管理组写的说明兼作标作废原因；⑦ `readJson` 返回 `unknown` ⇒ body 取参先 `as Record<string, unknown> | null`（范式同 `admin/ops-schedule.ts`）；⑧ 暗标通知类目选 `window` 而非 `offer`（`offer` 类目会强制取 `data.offerId`，而海捞单不是 offer 实体）。**测试踩坑**：断言「被挂牌」实际文案是「当前状态不能海捞」；无 `qq_link` 时通知只落 web 通道一条。
+
+**文档同步**：`docs/test-plans/v6.50.0-sea-sealed.md`；`memory/design-sea-two-phase.md`、`memory/plan-v6.50.0-sea-sealed.md`。
+
+**待办**：① 明标段起点需与暗标终点对齐（时刻表 `transfer_sea_open` 行填**同一具体时间**，管理端表单已提示）；② 上线后单独一步开 `sea_enabled=true`（同一步不做）；③ 未跑真机端到端演练、4 个新通知模板未在真实 QQ 通道投递、前端窄屏观感未目视、并发真双写未压测（见测试计划「未验证项」）。
+
+## v6.49.0 · 运营时刻表（11 键双锚）+ 统一到期引擎（报价回合 48h / 谈判静默 72h）+ 管理端只读甘特图 + 教练侧置灰读秒（2026-10-14）
+
+**状态**：**本地完成、待上线**（代码/测试/文档已完成，本地闸门全绿：`npm run typecheck` 三份 0 error、`npx vitest run` **130 文件 / 2119 例**全绿、`npm run build` 成功）。判级 **minor**：新增一张运营配置表 + 一条 tick 步骤 + 两个自动收口适配器 + 一个管理端页面，**默认全 `none` 时线上行为与上线前逐字一致**（零语义变化）。**上线顺序硬约束 = 迁移 `0069` 先 apply 生产 → push → 部署 → 回读**。版本号顺延 v6.49.0、迁移号从 `0069` 起（v6.48.0 与 `0068` 被并行会话 growth-tier 占用）。
+
+**缘起（用户四条）**：① m11201「头脑风暴探索转会各类型定时关闭，以及海捞分为暗标阶段和明标阶段，利用 architect-designer」；② m11287「每一种转会操作和消费中心整体都要可以设置开始时间结束时间」（把「定时关闭」升级为**运营时刻表**）；③ m11307「要考虑到随开窗而起但在关窗前结束、开窗后才起但随关窗结束、随开窗起随关窗结束的三种需求以简化操作」；④ m11312「三种的锚点不要 offset 要具体时间」。另有 m11316/m11319/m11351：管理端附**只读甘特图**（手绘 SVG，不引图表库）。
+
+**交付（数据层）**：迁移 `src/db/migrations/0069_ops_schedule_expiry.sql`——`ops_schedule` 表（`op_key` PK、`start_anchor`/`start_at`/`end_anchor`/`end_at`、`requires_window`、`close_inflight`、`note`、`updated_by`、`updated_at`）+ **11 行种子全 `none/none`**（10 项转会操作 + 消费中心整体；审核单不设时段）+ `offers.expiry_anchor_at/reminded_at` + `negotiation_sessions.expiry_anchor_at/reminded_at` + 两索引。
+
+**交付（规则层）**：`src/core/ops-schedule.ts` 新建（**零 import 纯函数**，前端同源引用）——`OPS_KEYS`（11 键，`requiresWindow` 仅 `transfer_offer`/`transfer_negotiation` 为 false）、`resolveOpsRow`（五态：不限制/未开始/进行中/已结束；随窗锚解析窗口 `openedAt/closedAt`）、`opsStateLabel`、`fmtBeijingMinute`、`validateOpsInput`、`OPS_PRESETS`。
+
+**交付（引擎层）**：`src/worker/ops-schedule.ts`（`loadOpsRows` 60s 缓存 / `loadWindowRef` / `assertOpOpen` / `opsScheduleView` / `saveOpsRow` + 审计 `ops_schedule_set`）；`src/worker/expiry-ops.ts`（`ExpiryAdapter` 注册表 + `runExpiryTick`，`EXPIRY_LIMIT=50`、提前 24h 提醒、`reminded_at` 抢占）⇒ 接入 `runSettleTick` **第 5 步**（独立 try/catch）+ `tickChanged` 判据。适配器两枚：报价回合时限（锚 `MAX(expiry_anchor_at, updated_at)`；到期 `finalizeOffer` + `offer_events(expire)` + 解冻 + 通知）与签约谈判静默超时（锚 `MAX(expiry_anchor_at, created_at, MAX(attempts.created_at))`；到期 `voidSigningCore` 七语句收口，自 `market-intervene.ts` 抽出复用）。**存量宽限**：存量 pending 行首次扫描回填 `now + N 小时`，不按历史锚实时算；`close_inflight` 默认 `0`。
+
+**交付（闸门与端点）**：`assertOpOpen` 接 **15 处写入口**（挂牌/出价/海捞/解约/续约/强制拍卖/激活/设施三改/档期/冠名两处/消费工单/报价四处/谈判三处）；**收口类动作不接闸**（拒绝/撤回/过期——钱不能被时段卡住）。`GET /api/ops-schedule`（公开）+ `GET|PUT /api/admin/ops-schedule`。
+
+**交付（管理端与教练侧）**：管理端新页 `/admin/schedule`（逐项时段表单 + **只读甘特图**：时间轴/区间条/窗口背景带/当前时刻线/悬停具体时间/点行跳表单）；教练侧 `web/src/lib/ops-gate.ts`（模块级单例 + `useSyncExternalStore`，60s TTL）+ `OpsGateNote.tsx`（复用 `useCountdown` 读秒）+ `datetime.ts` 新增 `zhWallToUtcIso`/`utcIsoToZhWall`/`zoneOffsetMs` + 9 个写入口置灰接线（含消费中心五卡与球场三卡）。
+
+**验收**：typecheck 三份 0 error；vitest **130 文件 / 2119 例**全绿（新增 `tests/ops-schedule.test.ts` 16、`tests/expiry-ops.test.ts` 15、`web/src/lib/gantt.test.ts` 23、`web/src/lib/ops-gate.test.ts` 9；`datetime.test.tsx` +6；`mobile-baseline.test.ts` +3 静态锁；通知模板 30→33 四处锁同改）；`npm run build` 成功。
+
+**评审·踩坑（六处）**：`resolveOpsRow` 的 `unrestricted` 改按锚型判（按解析时间判会把随窗锚在无窗时误判）；关窗收口条件删掉多余的 `endAt !== null`；`alignFloor` 的 `offsetMs` 符号写反（刻度画到 08:00）；`useOpsGate` 必须在组件早退之前（否则 `Rendered more hooks than during the previous render`）；提示条不得插进 `.table-wrap`（撞 `<table>` 紧邻行静态锁）；`readFileSync(new URL(...))` 在 `tsconfig.tests.json` 下类型不兼容 ⇒ 用相对路径。
+
+**文档同步**：`docs/test-plans/v6.49.0-ops-schedule.md`；`memory/design-ops-schedule-expiry.md`、`memory/plan-v6.49.0-ops-schedule.md`、`memory/design-sea-two-phase.md`、`memory/plan-v6.50.0-sea-sealed.md`（增量 2 海捞两阶段计划，另批）。
+
+## v6.48.0 · 成长档位自动核定：五条件规则层 + 重算引擎 + 九个触发点全挂钩 + 管理端「成长档位」页 + 队壳国家必填（2026-10-14）
+
+**状态**：**待上线**（代码与测试已完成，本地闸门全绿：`npm run typecheck` 三份 0 error、`npx vitest run` **129 文件 / 2105 例**全绿、`npm run build` 成功、**变异 8 处全命中**）。判级 **minor**：新增两列（`clubs.country`、`players.growth_tier_locked`）、新增管理端 6 端点 + 1 管理页 + 1 公开响应字段（`player.tierBasis`），无破坏性契约变更。上线动作顺序：**迁移 0068 apply（生产）→ push → 部署 → 回读 → 首次回填**（管理端「成长档位」页一键重算 → 预览 → 确认 → 回读分布 + 抽查）。
+
+**缘起**：用户 m08652「检查一下成长档位计算是否正确」。排查结论：生产 **18,301 名球员全员 1 档**、`growth_tier` 在 `audit_log` 里零记录，而按 §10.3 的叠加口径应有约 **1,768 人 >1 档**——平台从来没有自动计算过档位，`growth_tier` 只是管理端「档位核定」的手工输入（建队链、导入链都不写它）。用户硬约束四条（m08955/m08967/m08970）：**建档必填国家** + **rekey 换壳必须 `--new-country`** + **编辑入口兜底补录** + **机器通道留空即标「未设国家」**；口径两条（m08781/m08929 拍板）：**自动核定 + 人工覆盖**（锁定后可解除）、**回落按当前状态可升可降**（不单向）。
+
+**交付（数据层）**：迁移 `src/db/migrations/0068_growth_tier_auto.sql`——`clubs.country INTEGER`（可空，FC NationID 空间）+ `players.growth_tier_locked INTEGER NOT NULL DEFAULT 0`；随后 6 条带 `country IS NULL` 守卫的 UPDATE 写入 **20 行生产队壳初始国家**（英格兰 14 ×8 / 德国 21 ×3 / 意大利 27 ×3 / 法国 18 ×2 / 西班牙 45 ×3 / 希腊 22 ×1），工件带期望 changes 与回滚语句。`src/core/nations.ts` 新建 = `web/assets/ref/nation.json`（218 条）的 Worker 侧镜像 + `nationName(id)`，一致性由 `tests/nations.test.ts` 逐条断言（港澳台 158/172/213 独立编号钉死）。
+
+**交付（规则层）**：`src/core/growth-tier.ts` 新建（**唯一真源**）——`GROWTH_TIER_CONDITIONS`（c1..c5，分值 1/1/1/2/1）、`TIER_CONDITION_SQL`、`GROWTH_TIER_SQL = MIN(1 + c1 + c2 + c3 + 2·c4 + c5, 5)`、`GROWTH_TIER_SELECT`/`GROWTH_TIER_MISSING_SELECT`、TS 镜像 `evaluateGrowthTier`、`gameAttrInt`、`tierConditionDetails`。口径：c1 `TeamID = club_id`（现实效力按来源球队）、c2 `naID = clubs.country`、c3 `china_plan = 1`（只认 155）、c4 `is_future_star = 1`、c5 `age <= 18`；**缺数据不猜**（缺任一侧记假 + 标「数据缺失」）。设计期预演（生产数据）：档 1 16,533 / 2 1,612 / 3 113 / 4 27 / 5 16 ⇒ **1,768 升、0 降**。
+
+**交付（重算引擎）**：`src/worker/growth-tier.ts` 新建——scope 四类（players/fcIds/clubs/all）；**只写差异行**、**锁定行跳过**；UPDATE 带 `(id, 旧档, 未锁定)` 守卫、审计以 `changes() > 0` 为闸；每批 100 条、绑定参数按 90 分片、明细上限 200（`truncated` 如实回报）；`recomputeGrowthTiers`（预览不写库 / 执行 + 批次汇总审计）、`hookTierRecompute`（触发点轻量挂钩）、`clubsWithoutCountry`。审计四动作：`growth_tier_set`（`after.auto` 区分人工/自动，自动带 `conditions` 快照）、`growth_tier_recompute`、`growth_tier_unlock`、`club_country_set`。
+
+**交付（触发点九项）**：球员导入收尾（fcIds）/ 合同导入认领 / 转会过户 / 解约去归属（`statusChange > 0` 才跑；amendment 不动归属跳过）/ 改队壳国家（新端点 `POST /clubs/:id/country`）/ 改未来之星（PATCH 与 batch）/ 单人核定与批量改档（写值 + 置锁，不重算）/ 解除锁定（立即重算）。不挂钩赛季结算与窗口机器。**建档必填**：`POST /clubs` 的 `parseCountry`（400「必须选择队壳国家（FC 国家编号，如 14 = 英格兰）」）；机器通道与批量同步建队留空 → `NULL` + 「未设国家的队」提示。
+
+**交付（端点与管理端）**：`src/worker/routes/admin/growth-tier.ts` 新建 6 端点（预览/执行、变更清单、未设国家的队、单人明细/核定、解除锁定）；旧单人核定端点从 `routes/admin/growth.ts` 移出（路径不变）。公开 `GET /players/:id/growth` 加 `player.tierBasis`。前端：`web/src/pages/admin/TierPage.tsx` 新建 + 路由 `/admin/tier` + 侧栏「成长档位」、`ClubsPage` 建档必填国家/列表改国家、`PlayersPage` 核定区改「自动核定，人工可覆盖」+ 依据明细 + 解除锁定、`Player.tsx` 新增 `TierBasisLine`、`lib/tier.ts` 条件短标签共用、`styles.css` 四类新样式。**rekey 工件**：`scripts/rekey-team/rekey-team.mjs` v2.4.0（换壳必填 `--new-country`、读旧值进报告、03 工件在父行搬迁后写国家、README 补「换壳后补一次重算」）。
+
+**验收**：typecheck 三份 0 error；vitest 全量 **129 文件 / 2105 例**全绿（v6.47.0 基线 122/1997，净 +7 文件 +108 例：`tests/growth-tier.test.ts` 12 + `growth-tier-recompute.test.ts` 12 + `growth-tier-routes.test.ts` 22 + `nations.test.ts` 4 + 既有文件随契约更新）；`npm run build` 成功；e2e `scripts/e2e/smoke.mjs` 新增 **㉒**；**变异 8 处全命中**（去 MIN 截断 / 18 岁边界 / 锁定取反 / country NULL 记缺失 / 审计丢 conditions / 转会不挂钩 / 建档不校验国家 / 核定不置锁）。
+
+**评审·踩坑（两处真实缺陷，测试闸门抓到）**：① `json_valid(x) AND json_extract(x, …)` 在 SELECT 投影里**会抛 `malformed JSON`**（AND 不保证短路）⇒ 改 `CASE WHEN json_valid(x) THEN … END` + `COALESCE(…, 0)`（否则 NULL 顺着求和把档位表达式污染成 NULL）；② 审计守卫复用「旧档」谓词**恒为空**（UPDATE 先执行、旧档已变）⇒ 改 `changes() > 0`。夹具教训：`players` 的表达式索引拒绝坏 JSON 写入（规则层测试改裸表）；导入只给 4 支 CPU 队写队籍；`/players/batch` 收 `items: [{id, …}]` 平铺字段。并发工作流：v6.49.0「时刻表」同改 `AdminLayout.tsx`（侧栏 12 → 14 项），闸门判读需排除对方未完成文件。
+
+**文档同步**：TECH_DESIGN §4/§5.1/**§10.3 整节重写**；CHANGELOG 本节；测试计划 `docs/test-plans/v6.48.0-growth-tier-auto.md`；AGENTS.md 状态；设计/计划稿 `memory/design-growth-tier-auto.md`、`memory/plan-v6.48.0-growth-tier-auto.md`。
+
+**待办（上线后）**：① 首次回填 + 回读分布（预期 1,768 升 / 0 降；抽查哈兰德 ⇒ 档 1、贝林厄姆 ⇒ 档 2）；② `config.tier_conditions` 死配置清理或标注；③ 年龄滚动（c5 目前按导入时 `age` 静态判定）。
+
 ## v6.47.0 · 经济革命 T0 发版批 0：忠诚奖金改「忠诚支出」（扣款）+ 取消穷鬼线（`wage_floor_gap` 默认 0）+ 效力支出费率排程 + 开放 2 档并下调 1 档基础维护费（2026-10-13）
 
 **状态**：**已上线**（2026-10-13T15:53:55Z，Version `534aafdb-2192-41c7-99f6-cb725cf86996`；push `460f590..892e861`；自定义域名 `club.whleague.win` 回读通过：入口 bundle 含 `6.47.0` 与「忠诚支出」、无「忠诚奖金」残留。判级 minor：账本方向反转 + 新增 config 键 + 两处默认值调整；**代码侧零迁移、零 DDL**）。配套两批生产写批**已于同日执行并回读验收**：批 B（15:57）退回 +28.78 → 三队 wage 行 −49.23 / −37.62 / −33.37、账户 27.87 / 54.44 / 55.34、账链 0 断点；批 A（15:59）三键落库 → `config` 8 → 11 行、`audit_log` 新增 3 条 `config_set`（id 257–259）、账本与窗口零改动。执行顺序符合「先发版、后落库」硬约束。

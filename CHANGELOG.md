@@ -4,6 +4,84 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.50.0] · 海捞两阶段（暗标段密封标 + 明标段原样）：窗口批次制 + 统一开标 + 管理端开标口（2026-10-15）
+
+**待上线**（本地闸门全绿：`npm run typecheck` 三份 0 error；`npx vitest run` **131 文件 / 2147 例**全绿；`npm run build` 成功）。**上线顺序硬约束 = 迁移 `0070` 先 apply 生产 → push → 部署 → 回读**（新代码要读 `sea_batches` / `sea_sealed_bids`，并给 `transfers` 加 `sealed_bid_id`）。**上线后仍保持关闭**：`sea_enabled` 默认 `false` ⇒ 线上行为与上线前逐字一致；确认无误后再单独一步改 `true` 才真正开暗标段（同一步不做，回滚位保持）。
+
+**缘起**：用户 m11201「头脑风暴探索转会各类型定时关闭，以及海捞分为暗标阶段和明标阶段」⇒ 经组织方式探索后由用户裁决**窗口批次制**（一窗两段：开窗时自由身池整体进暗标批次、统一截止开标；之后进明标段 = 现有海捞流程原样）。设计定稿 12 条口径与落地偏差见 `memory/design-sea-two-phase.md`。
+
+**交付（数据层，迁移 `0070_sea_sealed.sql`）**：`sea_batches(id, season, window_seq, status sealed|settling|opened|cancelled, sealed_at, deadline_at, reminded_at, opened_at, opened_by, note, created_at)` + UNIQUE `(season, window_seq)`；`sea_sealed_bids(id, batch_id, player_id, club_id, new_release_fee, hold_id, status sealed|won|lost|void|withdrawn, submitted_at, updated_at, resolved_at, void_reason)` + UNIQUE `(batch_id, player_id, club_id)` + 两组查询索引；`fund_holds` 插入守卫触发器 `fund_holds_sea_sealed_guard`（`WHL_SEA_REJECT_CLOSED` / `_AMOUNT` / `_FUNDS`，与 0005/0037 同形）；`transfers.sealed_bid_id` 列 + 部分唯一索引 `idx_transfers_sealed_bid` + `transfers_sea_sealed_release` 终态触发器（单据 `rejected`/`completed` 时释放或结算冻结）。`tests/d1.ts` MIGRATION_FILES 追加（数组顺序 = 应用顺序）。
+
+**交付（服务层，`src/worker/sea-sealed.ts` 新建）**：阶段判定 `loadSeaPhase`（`sea_enabled=false` 时不生效）+ 批次惰性创建 `ensureSeaBatch`（时刻表 `transfer_sea_sealed` 行进段**且终点是具体时间**才建批——随窗锚拿不到统一截止，不开批次）+ 出标/改标/撤回（**单批原子**：改标 = 改价 + 释放旧冻结 + 插新冻结同一批）+ 开标 `openSeaBatch`（按球员分组取最高价、同额取最早 → **重跑资格链** `checkSeaSignEligible`（用批次自己的 season/window_seq 当窗口引用，关窗开标时没有开放窗口）→ 胜出者建 `free_agent/pending_review` 单 + `review_task` 复用现有审核链、其余解冻 + 通知 → 批次 `opened` + 审计 `sea_batch_open`；幂等靠批次 `sealed → settling` 的 claim UPDATE）+ `openSealedBatchOnWindowClose` / `expireDueSeaBatches` / `remindDueSeaBatches` + 管理端 `openNow` / `extendSeaBatch` / `cancelCurrentBatch`。
+
+**交付（引擎与触发点）**：`src/worker/expiry-ops.ts` 注册第三适配器 `sea_sealed`（`opsKey: 'transfer_sea_sealed'`：到点开标 / 提前 **24h** 提醒，`reminded_at` 抢占）；`closeWindow` 末段钩子「关窗时批次仍 sealed ⇒ 立即开标」（best-effort，不阻塞关窗）；`sea_enabled=false` 时 tick 把还 sealed 的批次**整批作废 + 解冻**（回滚不留悬挂冻结）。通知 4 模板：`sea_sealed_lead` / `sea_sealed_lost` / `sea_batch_open` / `sea_sealed_deadline`（类目统一 `window`——海捞单不是 offer 实体，`notificationRefOf` 返回 null）。config 加 `sea_enabled`（默认 `false`）、`sea_sealed_hours`（默认 `72`，仅管理端表单默认值，实际以时刻表具体时间为准）。
+
+**交付（教练侧）**：`GET|POST /api/transfers/sea-sealed` + `POST /api/transfers/sea-sealed/withdraw`（轻读守卫：受罚俱乐部也看得见倒计时与公示）；海捞页阶段横幅（收标中倒计时 / 已截止 / 已开标 + 「我的出标（只有自己看得见）」+ 开标公示）；球员档案 E 态在收标期内把「海捞签入」换成密封标表单（出标/改标/撤回 + 冻结提示 + 倒计时），明标段维持原按钮；常规海捞入口在收标期被 409 `sea_sealed_phase` 硬拦。
+
+**交付（管理端）**：`GET|POST /api/admin/sea-sealed`（`open` / `extend` / `cancel`，与窗口开关同级 `requireAdmin`）+ 转会页「海捞暗标段」段：批次摘要 + 逐标明账（金额与出标方在管理端可见）+ 立即开标（两段式确认）/ 延长（批次与时刻表终点**同改**）/ 取消（全部作废 + 解冻，说明会发给出标方）。
+
+**验收**：新增 `tests/sea-sealed.test.ts` **25 例**（阶段与惰性建批 / 密封标与冻结守恒 / 开标重跑资格链与幂等 / 关窗立即开标与到点 tick / 提醒 / `sea_enabled=false` 整批作废 / 明标衔接与迁移守卫 / 审核结算链 / 管理端明账与延长取消）；`tests/mobile-baseline.test.ts` **+3** 静态锁（TC-SEA-01/02/03）；注册表计数四处同改（`CONFIG_KEYS` 83→85；通知模板 33→37 及类目表 `window` 扩员）。
+
+**评审踩坑（八处）**：① 出标改标必须**单批原子**——触发器按「标上的价 × 30%」校验冻结额，分两批会留下「价已改、冻结没换」的中间态，新标路径失败还会留孤儿标行；② `chargeBypassFee` 里销毁密封冻结的语句必须放在 `extra_fee` 更新**之前**，否则 `statements[last]` 不再指 `extra_fee`、幂等判断失效；③ 新标用 `INSERT … last_insert_rowid()` 同批取 `bidId`（与 `createBypassTransfer` 建 `review_task` 同手法）；④ 触发器裸错经 `mapSealedTriggerError` 映射成人话（`WHL_SEA_REJECT_FUNDS` → 400「出标即冻结，冻结没过账这标就不算数」等）；⑤ 作废原因取 `checkSeaSignEligible` 的 `verdict.reason`（被挂牌时说「当前状态不能海捞」，不是内部代号）；⑥ `cancelCurrentBatch` 把管理组写的说明**兼作**标作废原因发给出标方；⑦ `readJson` 返回 `unknown`，body 取参要先 `as Record<string, unknown> | null`；⑧ 暗标通知类目选 `window` 而非 `offer`——`offer` 类目会强制取 `data.offerId`，而海捞单不是 offer 实体。
+
+**文档同步**：`docs/test-plans/v6.50.0-sea-sealed.md`；`memory/design-sea-two-phase.md`（口径 12 条 + 落地偏差 8 条）、`memory/plan-v6.50.0-sea-sealed.md`。
+
+**待办**：明标段起点需与暗标终点对齐（时刻表 `transfer_sea_open` 行填同一具体时间，管理端表单已提示）；上线后单独一步开 `sea_enabled`；其余见 [ROADMAP.md](./ROADMAP.md)。
+
+## [v6.49.0] · 运营时刻表（11 键双锚）+ 统一到期引擎（报价回合 48h / 谈判静默 72h）+ 管理端只读甘特图 + 教练侧置灰读秒（2026-10-14）
+
+**待上线**（本地闸门全绿：`npm run typecheck` 三份 0 error；`npx vitest run` **130 文件 / 2119 例**全绿；`npm run build` 成功）。**上线顺序硬约束 = 迁移 `0069` 先 apply 生产 → push → 部署 → 回读**（新代码要读 `ops_schedule` 表）。版本号顺延 **v6.49.0**（v6.48.0 被并行会话 growth-tier 占用；迁移号同理从 `0069` 起，避开其 `0068`）。
+
+**缘起**：用户 m11201「头脑风暴探索转会各类型定时关闭」+ m11287「每一种转会操作和消费中心整体都要可以设置开始时间结束时间」⇒ 从「各类型定时关闭」升级为**统一运营时刻表**：10 项转会操作 + 消费中心整体各自可设开始/结束时间；随附用户 m11307 的三种随窗形态（随开窗起 / 随关窗止 / 随开窗起随关窗止）与 m11312「锚点不要 offset 要具体时间」。
+
+**交付（数据层，迁移 `0069_ops_schedule_expiry.sql`）**：`ops_schedule(op_key PK, start_anchor, start_at, end_anchor, end_at, requires_window, close_inflight, note, updated_by, updated_at)` + **11 行种子全为 `none/none`（不限制）** ⇒ 上线即与上线前行为逐字一致；`offers.expiry_anchor_at/reminded_at` + `negotiation_sessions.expiry_anchor_at/reminded_at` + 两索引。`tests/d1.ts` MIGRATION_FILES 追加（数组顺序 = 应用顺序）。
+
+**交付（规则层，`src/core/ops-schedule.ts` 新建 = 零 import 纯函数）**：`OPS_KEYS` 11 键（10 转会 + `consumption`；仅 `transfer_offer`/`transfer_negotiation` 为 `requiresWindow:false`）、`resolveOpsRow`（五态 `unrestricted/not_started/open/closed`，随窗两锚解析窗口 `openedAt/closedAt`）、`opsStateLabel`、`fmtBeijingMinute`、`validateOpsInput`（六条文案）、`OPS_PRESETS`（A/B/C/none 一键预设）。
+
+**交付（引擎层，`src/worker/ops-schedule.ts` + `src/worker/expiry-ops.ts` 新建）**：`loadOpsRows`（60s 缓存）/`loadWindowRef`/`assertOpOpen`（409 `op_not_started` / `op_closed`，文案含北京时间）/`opsScheduleView`/`saveOpsRow`（审计 `ops_schedule_set`，`guardSql='changes() > 0'`）；`runExpiryTick(env, origin)` 挂 **`runSettleTick` 第 5 步**（独立 try/catch；返回体加 `expiry`；`tickChanged` 追加判据），`EXPIRY_LIMIT=50`、提前 **24h** 提醒（`reminded_at` 抢占）。
+
+**交付（两适配器）**：① 报价回合时限（锚 `MAX(o.expiry_anchor_at, o.updated_at)`）——`expireDueOffers`/`remindDueOffers`，到期 `finalizeOffer` + `offer_events(kind='expire')` + 解冻 + 通知 `offer_expired`（reason `deadline`）/ 提前 `offer_deadline`；② 签约谈判静默超时（锚 `MAX(expiry_anchor_at, created_at, MAX(attempts.created_at))`）——`closeSilentSessions`/`remindSilentSessions`，到期七语句收口 `voidSigningCore`（自 `market-intervene.ts` 抽出复用，`playerRestoreSql` 一并迁入 `negotiations.ts`）+ 通知 `negotiation_timeout`/`negotiation_deadline`。**存量宽限**：首次扫描把存量 pending 行的锚回填为 `now + N 小时`（不按历史锚实时算），避免首 tick 批量误杀；`close_inflight` 默认 `0`，关窗时按行决定是否收口在途单。
+
+**交付（闸门 15 处）**：`assertOpOpen` 接入挂牌/出价（`routes/market.ts` 两处）、海捞/解约/续约/强制拍卖（`bypass.ts` 四处）、激活（`market-ops.ts` acceptOffer）、设施扩建/升级/改建（`stadium-ops.ts` 三处）、档期（`venue-ops.ts` bookSlot）、冠名两处（`naming-ops.ts`）、消费工单（`routes/shop.ts`）、报价四处（发起/还价/接受/意向确认）、谈判三处（提交违约金/报工资/选青训）。**收口类动作（拒绝/撤回/过期）不接闸——钱不能被时段卡住**；读路径不接。
+
+**交付（端点与管理端）**：`GET /api/ops-schedule`（公开，教练侧取闸门真源）+ `GET|PUT /api/admin/ops-schedule`（PUT body `{key,startAnchor,startAt,endAnchor,endAt,requiresWindow,closeInflight,note}`）。管理端新页 `/admin/schedule`（侧栏「转会与经营」组内「时刻表」）：逐项时段表单（预设钮 + 双锚 select + `datetime-local` + 两个复选框）+ **只读甘特图**（手绘 SVG，时间轴 + 11 行区间条 + 窗口背景带 + 当前时刻线 + 悬停 `<title>` 全量信息 + 点行跳到该行表单；随窗止画虚线箭头标「关窗即止」，`none` 行画满宽斜纹灰带「不限制」）。
+
+**交付（教练侧置灰读秒）**：`web/src/lib/ops-gate.ts`（模块级单例 + `useSyncExternalStore`，60s TTL，取不到就按未加载不禁用）+ `web/src/components/OpsGateNote.tsx`（复用 `useCountdown`/`fmtClock`）+ `web/src/lib/datetime.ts` 新增 `zhWallToUtcIso`/`utcIsoToZhWall`/`zoneOffsetMs`（固定 +08:00，回程校验拒绝 `2026-02-30`/13 月/24:00）+ 9 个写入口接线（球员页左栏挂牌/海捞/报价、市场竞价表单、广告板报价、激活页、谈判两步、消费中心五卡 + 球场三卡）。
+
+**验收**：typecheck 三份 0 error；vitest **130 文件 / 2119 例**全绿（新增 `tests/ops-schedule.test.ts` 16 + `tests/expiry-ops.test.ts` 15 + `web/src/lib/gantt.test.ts` 23 + `web/src/lib/ops-gate.test.ts` 9；`datetime.test.tsx` +6、`mobile-baseline.test.ts` +3 静态锁、`notify-meta` 锁 30→33 模板）；`npm run build` 成功（`SchedulePage-*.js` 独立懒加载块）。
+
+**评审·踩坑（六处，都是闸门抓到的）**：① `resolveOpsRow` 的 `unrestricted` 按解析时间判会把「随窗锚 + 当前无窗」误判成不限制 ⇒ 改按**锚型**判；② `runExpiryTick` 的关窗收口多带一个 `resolved.endAt !== null` 条件，会让「随关窗止 + 勾了收口」失效 ⇒ 删除；③ `alignFloor` 的 `offsetMs` 符号写反（北京日刻度画在 08:00）⇒ 修为 `Math.floor((ms+offsetMs)/step) * step - offsetMs`；④ `useOpsGate` 插在组件早退之后 ⇒ `Rendered more hooks than during the previous render`（`FacilityOpsCard`/`MarketActivationPage`）⇒ 提到组件顶部并加静态锁；⑤ 往 `.table-wrap` 内插提示条会撞 `mobile-baseline` 的 `<table>` 紧邻行锁 ⇒ 提示条挪到 `table-wrap` 之前；⑥ `tsconfig.tests.json` 下 `readFileSync(new URL(...))` 类型不兼容 ⇒ 测试读文件一律相对路径。
+
+**文档同步**：`docs/test-plans/v6.49.0-ops-schedule.md`（七段：范围与风险 / 自动化用例 / 变异验证 / 回归闸门 / 本地验证 / 生产写批 / 未验证项）；设计稿与计划 `memory/design-ops-schedule-expiry.md`、`memory/plan-v6.49.0-ops-schedule.md`。
+
+**待办（上线后）**：① 按需把 11 行从 `none` 改成真实时段（管理端操作，逐行即时生效）；② 若生产 pending 报价/谈判多于 50，存量宽限需多个 tick 回填（只写锚不动作）；③ 甘特图真机窄屏观感目视。
+
+## [v6.48.0] · 成长档位自动核定：五条件规则层（SQL 真源 + TS 镜像）+ 重算引擎 + 九个触发点全挂钩 + 管理端「成长档位」页 + 队壳国家必填（2026-10-14）
+
+**待上线**（本地闸门全绿：`npm run typecheck` 三份 0 error；`npx vitest run` **129 文件 / 2105 例**全绿；`npm run build` 成功；**变异 8 处全命中**）。上线动作顺序：迁移 **0068** apply（生产，含 20 行队壳国家初始值）→ push → 部署 → 回读 → **首次回填**（管理端「成长档位」页：一键重算 → 预览 → 确认 → 回读分布 + 抽查口径）。判级 minor——新增两列（`clubs.country`、`players.growth_tier_locked`）、新增管理端六个端点与一个管理页、公开球员页响应加 `tierBasis`；无破坏性契约变更。
+
+**缘起**：用户 m08652「检查一下成长档位计算是否正确」。排查结论：生产 18,301 名球员**全员 1 档**、`growth_tier` 在审计里零记录，而按 §10.3 的叠加口径应有约 1,768 人 >1 档——平台**从来没有自动计算过**，档位只是管理端「档位核定」的手工输入（且建队/导入链都不写它）。设计逐节批准（m08987/m08993「没问题」）后开工（m09029）。用户硬约束四条：**建档必填国家**、**rekey 换壳必须 `--new-country`**、**编辑入口兜底补录**、**机器通道留空即标「未设国家」**；口径两条：**自动核定 + 人工覆盖**（锁定后可解除）、**回落按当前状态可升可降**。
+
+**交付（数据层）**：迁移 `0068_growth_tier_auto.sql`——`ALTER TABLE clubs ADD COLUMN country INTEGER`（可空，FC NationID 空间）+ `ALTER TABLE players ADD COLUMN growth_tier_locked INTEGER NOT NULL DEFAULT 0`；随后 6 条 `UPDATE clubs SET country = ?`（均带 `country IS NULL` 守卫）写入 **20 行生产队壳**的初始国家（英格兰 14 × 8 队 / 德国 21 × 3 / 意大利 27 × 3 / 法国 18 × 2 / 西班牙 45 × 3 / 希腊 22 × 1），并带期望 changes 与回滚语句。`src/core/nations.ts` 新建（`web/assets/ref/nation.json` 218 条 FC NationID 的 Worker 侧镜像 + `nationName(id)` 宽容查询），一致性由 `tests/nations.test.ts` 逐条断言（含港澳台 158/172/213 三个独立编号钉死）。
+
+**交付（规则层，`src/core/growth-tier.ts` 新建 = 唯一真源）**：`GROWTH_TIER_MIN/MAX`、`GrowthTierConditionKey`、`GROWTH_TIER_CONDITIONS`（键序 c1..c5，分值 1/1/1/2/1，带 label/hint 供两端共用）、`TIER_CONDITION_SQL`、`GROWTH_TIER_SQL = MIN(1 + c1 + c2 + c3 + 2·c4 + c5, 5)`、`GROWTH_TIER_SELECT`/`GROWTH_TIER_MISSING_SELECT`（明细一次取全：当前档/锁定/队壳国家/五条件/自动档/两条缺失标记）、TS 镜像 `evaluateGrowthTier(input)`（`hits` + `missing`）、`gameAttrInt`、`tierConditionDetails`（命中/数据缺失/未命中三态）。口径：c1 = `game_attrs.TeamID = club_id`（现实效力按来源球队）、c2 = `game_attrs.naID = clubs.country`、c3 = `china_plan = 1`（只认 naID 155）、c4 = `is_future_star = 1`、c5 = `age <= 18`；**缺数据不猜**——`club_id`/`TeamID`/`naID`/`clubs.country` 缺任一，条件记假并标「数据缺失」。设计期预演（生产数据）：档 1 16,533 / 2 1,612 / 3 113 / 4 27 / 5 16 ⇒ **1,768 升、0 降**。
+
+**交付（重算引擎，`src/worker/growth-tier.ts` 新建）**：三种 scope（`players` 单批 id / `fcIds` 导入收尾 / `clubs` 某队 / `all` 全量）；**只写差异行**（`growth_tier <> 自动值`），**锁定行一律跳过**并单列计数；每条 UPDATE 带 `(id, 旧档, 未锁定)` 守卫，审计以 `changes() > 0` 为闸；每批 100 条（每条 = UPDATE + 审计两语句）、`IN (...)` 绑定参数按 90 分片（D1 上限 100）；keyset 分页取变更行（`p.id > afterId`），明细上限 200（`truncated` 如实回报）；`recomputeGrowthTiers`（预览 `apply:false` 不写库 / 执行后另写一条批次汇总审计）、`hookTierRecompute`（触发点轻量挂钩：不跑计数聚合）、`clubsWithoutCountry`（未设国家的队 + 队内人数）。审计：`growth_tier_set`（人工与自动共用，`after.auto` 区分，自动行带 `conditions` 快照）、`growth_tier_recompute`（scope/升降/锁定/批次数）、`growth_tier_unlock`、`club_country_set`（targetType `club`）。
+
+**交付（触发点九项全挂钩）**：① 球员导入收尾（`players-import.ts` confirmImport 末尾，fcIds 范围）；② 合同导入认领（`contracts-import.ts` 每 chunk 认领 UPDATE 之后）；③ 转会过户 / ④ 解约去归属（`transfers.ts` completeTransfer / completeTermination 的 batch 之后，`statusChange > 0` 才跑，续约/匹配 amendment 不动归属故跳过）；⑤ 管理端改队壳国家（`routes/admin/clubs.ts` 新增 `POST /clubs/:id/country`：写库 + 审计 + 该队重算，返回升降计数）；⑥ 管理端改未来之星（`routes/admin/players.ts` 的 PATCH 与 batch，批量按 id 集合重算）；⑦ 单人核定 / ⑧ 批量改档（写值 + **置锁**，不重算）；⑨ 解除锁定（清标记 → 立即重算 → 读回实际档位）。不挂钩：赛季结算、窗口机器（不写归属/国家/未来之星）。**建档必填**：`POST /clubs` 走 `parseCountry`（无效即 400「必须选择队壳国家（FC 国家编号，如 14 = 英格兰）」），`createClubFromTourTeam` 参数加 `country?`——机器通道（`routes/internal.ts`）与批量同步（`teamSync.ts`）留空不猜，落 `NULL` 并进「未设国家的队」提示；`GET /clubs` 下发 `country`/`countryName`。
+
+**交付（端点与管理端）**：`src/worker/routes/admin/growth-tier.ts` 新建（6 端点：`GET|POST /growth/tier-recompute`（预览 / 执行，可带 `clubId`）、`GET /growth/tier-changes`（读 `audit_log` 的 `growth_tier%`，before/after 解析后下发）、`GET /growth/tier-clubs-without-country`、`GET|POST /growth/:playerId/tier`（明细 / 人工核定=写值+置锁）、`POST /growth/:playerId/tier/unlock`），`routes/admin/growth.ts` 里旧的单人核定端点整段移出（路径不变，原位留注释指路）；`routes/admin/index.ts` 挂载。公开 `GET /players/:id/growth` 加 `player.tierBasis`（自动值 / 锁定态 / 队壳国家 / 五条件三态）。前端：`web/src/pages/admin/TierPage.tsx` 新建（一键重算计数条 + 条件说明 + 明细前 200 行 + 未设国家的队 + 变更清单）、路由 `/admin/tier` + 侧栏「成长档位」、`ClubsPage` 建档必填国家 + 列表「队壳国家」列与改国家入口、`PlayersPage` 核定区改「自动核定，人工可覆盖」（依据明细 + 解除锁定）、`Player.tsx` 档位徽章旁新增 `TierBasisLine`（五条件短标签 + 人工/自动标记 + 队壳国家）、`lib/tier.ts`（条件短标签两端共用）、`styles.css` 新增 `.tier-chips`/`.tier-basis`/`.up-mark`/`.down-mark`。
+
+**交付（rekey 工件）**：`scripts/rekey-team/rekey-team.mjs` v2.4.0——换壳模式**必填** `--new-country`（无合法国家即 exit 1，收口模式带该参数只提示忽略）；换壳前读旧 `clubs.country` 进报告（读不到时提示「迁移 0068 是否已应用」）；03 工件在 `clubs.id` 搬迁**之后**追加 `UPDATE clubs SET country = <N> WHERE id = <NEW>`（写在父行搬迁之前会对不上任何行、静默空转），回滚注释填回旧值；README/工件检查清单加「换壳后到管理端档位页补一次重算」（手写 SQL 绕过管理端入口 ⇒ 自动挂钩不触发）。
+
+**测试**：新增 `tests/growth-tier.test.ts`（12 例：SQL 真源与 TS 镜像在同一组 12 条 fixture 上逐条对齐 + 边界 + 坏 JSON + `gameAttrInt`）、`tests/growth-tier-recompute.test.ts`（12 例：预览不写库 / 只写差异 / 锁定跳过 / 并发改过不盲写 / 分片与截断 / 审计口径）、`tests/growth-tier-routes.test.ts`（22 例：建档必填、改国家、六个端点、公开页依据、四个触发点直调、**源码扫描**锁「写 `players.club_id` 的文件必须调 `hookTierRecompute`」）、`tests/nations.test.ts`（4 例）；既有测试随契约更新（`admin-clubs-create`/`team-sync`/`routes`/`tier`/`market-routes`/`window-machine`/`activation*`/`bypass-routes`/`club-visibility`/`ledger`/`negotiation-routes`/`forced-auction` 的建队夹具补 `country`，`CpuConvertPage.test.tsx` 夹具补两字段，`AdminLayout.test.tsx` 12 → 14 项）。e2e `scripts/e2e/smoke.mjs` 新增 **㉒**（档位预览形状 + 建档缺国家 400 + 球员页 `tierBasis` + 改国家→重算→变更清单回读，旧值可读时自动写回）。**变异 8 处全命中**：去 MIN 上限截断 / 18 岁边界 `<18` / 锁定取反 / country NULL 不再记缺失 / 审计丢 conditions / 转会过户不挂钩 / 建档不校验国家 / 人工核定不置锁。
+
+**评审·踩坑（两处真实缺陷，都是测试闸门抓到的）**：① **坏 JSON 兜底写法**——`json_valid(x) AND json_extract(x, …)` 在 SELECT 投影里**会抛 `malformed JSON`**（AND 两侧不保证短路，优化器先求 `json_extract`），必须 `CASE WHEN json_valid(x) THEN … END`；且比较结果要套 `COALESCE(…, 0)`，否则 NULL 会顺着 `1 + (c1) + …` 把整条档位表达式污染成 NULL（`MIN(NULL, 5) = NULL`）。② **审计守卫不能复用「旧档」谓词**——UPDATE 先执行、旧档在审计求值时已经变了，写出来的审计**恒为空**（发现时「写差异 + 每条审计」用例拿到空数组）；改用 `changes() > 0`（`ledgerMovement` 的既有形态）。夹具教训三条：`players` 上有 `idx_players_sort_ps` 这类**表达式索引**，往真表写坏 JSON 在 INSERT 那一刻就抛错（坏数据只可能来自历史路径 ⇒ 规则层测试改用裸表验表达式）；导入链**只给 4 支 CPU 队**写队籍（`clubIdForTeam`），导入挂钩用例的 `TeamID` 必须是 CPU 队号；`/api/admin/players/batch` 收 `items: [{id, …}]`（字段平铺，不是 `{updates:{…}}`）。并发工作流：另一会话的 v6.49.0「时刻表」与本版同时改 `AdminLayout.tsx`（侧栏 12 → 14 项）与 `web/src/App.tsx`，闸门判读时要排除对方未完成的 `SchedulePage.tsx` / `ops-schedule.test.ts` 报错。
+
+**文档同步**：TECH_DESIGN §4（数据边界表加「队壳国家」行）、§5.1（`clubs.country` 与 `players.growth_tier_locked` 注释）、**§10.3 整节重写**（条件表 + 数据 + 引擎 + 触发点表 + 端点 + 审计 + 管理端 + 首次回填 + 两处实现教训）；ROADMAP 本节；测试计划 `docs/test-plans/v6.48.0-growth-tier-auto.md`；AGENTS.md 状态；设计/计划稿 `memory/design-growth-tier-auto.md`、`memory/plan-v6.48.0-growth-tier-auto.md`。
+
+**待办（上线后）**：① 首次回填并回读分布（预期 1,768 升 / 0 降；抽查哈兰德 club 14 ≠ TeamID 10 ⇒ 档 1、贝林厄姆 club 2、naID 14 = 阿斯顿维拉 country 14 ⇒ 档 2）；② `config.tier_conditions` 是**死配置**（注册了键但全仓无读取者），确认后清理或标注；③ 年龄滚动（c5 目前按导入时的 `age` 静态判定）留待后续版本。
+
 ## [v6.47.0] · 经济革命 T0 发版批 0：忠诚奖金改「忠诚支出」（扣款）+ 取消穷鬼线（`wage_floor_gap` 默认 0）+ 效力支出费率排程 + 开放 2 档并下调 1 档基础维护费（2026-10-13）
 
 **已上线**（2026-10-13T15:53:55Z，Version `534aafdb-2192-41c7-99f6-cb725cf86996`；push `460f590..892e861`；自定义域名回读通过：入口 bundle 含 `6.47.0` 与「忠诚支出」标签、无「忠诚奖金」残留）。零迁移、零 DDL；判级 minor——① 忠诚从「发钱」改为「扣钱」（账本方向反转）② 新增 config 白名单键 `wage_floor_gap`（默认 `0` ⇒ 取消穷鬼线）③ `loyalty_tiers` 默认排程加收官档 ④ `tier_table[1].base_maintenance` 5.0 → 3.5。⚠️ 本版与两批生产写批**成对执行**：**先发版、后落库**（顺序颠倒 ⇒ S9 中期窗在旧代码下把 −591.65 反向发成 +591.65，一进一出差 **1183.30**）；实际执行顺序 = push 15:53 → 批 B 15:57 → 批 A 15:59，符合约束。
