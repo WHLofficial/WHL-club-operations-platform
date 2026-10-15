@@ -1500,6 +1500,22 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## v6.51.0 · 强制拍卖人选解禁（前六降为参考值 + 预检端点）+ 品牌池扩编（统一中文名 + 9 家新品牌）（2026-10-15）
+
+**状态**：**待发布**（本地闸门全绿：`npm run typecheck` 三份 0 error、`npx vitest run` **131 文件 / 2149 例**全绿、`npm run build` 成功）。上线顺序 = 迁移 `0071` 先 apply 生产 → push → 部署 → 回读。交付记录 `memory/plan-v6.51.0-forced-auction-and-brand-pool.md`；测试计划 `docs/test-plans/v6.51.0-forced-auction-and-brand-pool.md`。
+
+**缘起（用户 m13213）**：「把管理端强制拍卖改为无限制，本队非门将CA前六仅作为一个校验参考值，不强制；品牌池写一些新东西，并统一品牌名为中文」。裁决：① 强拍人选**完全解禁**（管理组自担判断，参考值只提示）；② 预检与建单**同源同文案**（预检说会被拒的，建单必被拒）；③ 品牌池统一中文名并加 9 家（热度布局避开头部三家与既有两个新兴档，档位 / 名额 / 热度规则口径一律不动）。
+
+**交付（服务层）**：`src/worker/ops-schedule.ts` 抽出 `opBlockReason(db, opKey)`（未登记 / 全 none 回 `null`，否则回 `{status, message, errCode}`），`assertOpOpen` 改为「取原因再抛」——行为零变化，但让预检能给人话原因。`src/worker/bypass.ts` 新导出 `ForcedAuctionReference` / `ForcedAuctionBlocker` / `ForcedAuctionInspection` / `inspectForcedAuction(env, playerIdInput)`：删三门将 / 缺 CA / 非前六硬闸；保留五闸（无归属 404、无窗 409 `no_window`、时刻表 `transfer_forced_auction` 段、CPU 队 400、状态非 `normal` 与已在市场流程里 400）；参考值 `reference = {playerId, playerName, clubId, clubName, position, ca, isGk, caRank, topSixLine, inTopSix, nonGkWithCa}`（`caRank` = 队内非门将 `ca` 严格更高者 + 1；`topSixLine` = 队内非门将 CA 降序第 6 名，不足 6 人则 `null`；门将 / 缺 CA ⇒ `caRank` / `inTopSix` 为 `null`）。`createForcedAuction` 改为「inspect → `blockers[0]` 抛同文案 → 建挂牌」，响应新增 `reference`；挂牌价 1m / 首价 ≥1m / 竞价链 / 整单 50% 税 / 取消链全不变。
+
+**交付（端点与前端）**：`src/worker/routes/admin/market.ts` 增 `GET /api/admin/forced-auctions/preview?playerId=`（`requireAdmin` 无权限串，只读回 `{reference, blockers}`，**不写库**）。`web/src/lib/api.ts` 增 DTO 三型 + `ForcedAuctionResult.reference`；`web/src/pages/admin/MarketPage.tsx` 增 `referenceLine()`（「非门将 CA 队内第 N 位（前六线 CA X），落在前六 / 不在前六（同样可挂）」；门将 / 缺 CA 专门文案；末尾缀「⚠ 现在挂出会被拒：<原因>」或「可挂出」），球员 ID 一填即显（React Query key `['admin','forced-auction-preview', playerId]`），提示文案与成功 toast 改「人选不限 + 参考不强制」。
+
+**交付（迁移 `0071_brand_pool_expand.sql` 与行业系数）**：`CVS Health` → **西维斯健康**（`brand_pool` + `naming_contracts` 两处幂等 UPDATE；生产 `naming_contracts` 实测 0 行 ⇒ 影响面为零，`market_offers` 走 `brand_id` 不受影响）；新增 9 家（`source='builtin'` / `status='adopted'` / `INSERT OR IGNORE`）：青云乳业 0.82 饮食、长风汽车 0.88 汽车、白马体育 0.86 运动、极星运动 0.95 运动（新兴）、天工重工 0.74 制造、鲸涛饮品 0.91 饮食（新兴）、磐石银行 0.79 金融、迅达通讯 0.84 科技、星野文旅 0.68 文旅。`src/core/config.ts` 的 `naming_industry_factors` 默认表补 汽车 1.05 / 金融 1.15 / 制造 1.1 / 文旅 0.9（未登记行业回 1.0；**config 键数不变** ⇒ CONFIG_KEYS 长度与插件同值口径不动）。池规模 7 → 16 的连带影响已全量核对：档位自动校准按热度重算（头部不变）、招商轮报价量改 16 家口径（既有断言全部同步）。
+
+**验收数字**：typecheck 三份 0 error；`npx vitest run` 131 文件 / 2149 例全绿（forced-auction 8 例含 3 例新写 / 改写）；`npm run build` 成功；`node --check scripts/e2e/smoke.mjs` 通过。
+
+**留待（待令）**：迁移 `0071` apply 生产 → push → 部署 → 回读（`GET /api/admin/brands` 16 家 + 中文名、`GET /api/admin/forced-auctions/preview?playerId=<真实球员>` 200 + 参考值）。本批不含 config 改动（`sea_enabled` 等仍维持现态）。
+
 ## v6.50.0 · 海捞两阶段（暗标段密封标 + 明标段原样）：窗口批次制 + 统一开标 + 管理端开标口（2026-10-15）
 
 **状态**：**已上线 2026-10-15**（Version `c1f7e6a6-0f69-4d79-b9dc-9b04b3cf66af`，push `0157d87`；迁移 `0070` 已 apply 生产、回读通过）。代码/测试/文档已完成，本地闸门全绿：`npm run typecheck` 三份 0 error、`npx vitest run` **131 文件 / 2147 例**全绿、`npm run build` 成功。判级 **minor**：新增两张表 + 三处触发器/索引 + 一个新服务文件 + 一条到期适配器 + 关窗钩子 + 通知 4 模板 + 两枚 config 键 + 七个端点（教练 3 / 管理 4），`sea_enabled` 默认 `false` 且时刻表该行默认 `none` ⇒ **上线即与上线前行为逐字一致**（双保险安全默认）。**上线顺序硬约束 = 迁移 `0070` 先 apply 生产 → push → 部署 → 回读**（新代码读 `sea_batches`/`sea_sealed_bids`，并给 `transfers` 加 `sealed_bid_id`）；**上线后仍保持关闭**，确认无误再单独一步开 `sea_enabled=true`（回滚位保持）。迁移号从 `0070` 起（`0068`/`0069` 被并行会话 growth-tier 与时刻表占用）。
