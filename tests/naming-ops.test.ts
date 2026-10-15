@@ -90,19 +90,23 @@ describe('底价与三套餐（纯函数，formula.py:462 / build_packages 口�
     expect(pkgs[2]!.betFans).toBe(0.03);
   });
 
-  it('品牌池：迁移种子 7 家落库、重跑幂等、热度覆盖 0.7-1.3', () => {
+  it('品牌池：迁移种子 16 家落库（v6.51.0 扩编后）、重跑幂等、热度覆盖 0.68-1.3', () => {
     const fx = freshEnv();
     const rows = sqlAll<{ brand: string; heat: number; status: string }>(fx.sqlite, 'SELECT brand, heat, status FROM brand_pool ORDER BY id');
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(16);
+    expect(rows.map((r) => r.brand)).toEqual([
+      '麒麟生物', '阿迪达斯', '亚马逊', '可口可乐', '海底捞', '星海通讯', '西维斯健康',
+      '青云乳业', '长风汽车', '白马体育', '极星运动', '天工重工', '鲸涛饮品', '磐石银行', '迅达通讯', '星野文旅',
+    ]);
     expect(rows.map((r) => r.brand)).toContain('亚马逊');
-    expect(rows.map((r) => r.heat)).toEqual([1.2, 1.1, 1.3, 1.0, 0.9, 0.8, 0.7]);
+    expect(rows.map((r) => r.heat)).toEqual([1.2, 1.1, 1.3, 1.0, 0.9, 0.8, 0.7, 0.82, 0.88, 0.86, 0.95, 0.74, 0.91, 0.79, 0.84, 0.68]);
     expect(rows.every((r) => r.status === 'adopted')).toBe(true);
     // 种子语句幂等：同一条 INSERT OR IGNORE 再跑不重复（迁移文件整体重跑会撞 CREATE TABLE，故只重跑种子句）
     fx.sqlite.exec(
       `INSERT OR IGNORE INTO brand_pool (brand, heat, source, status, industry, created_at)
        VALUES ('亚马逊', 1.3, 'builtin', 'adopted', '科技', 'x')`,
     );
-    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM brand_pool')?.n).toBe(7);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM brand_pool')?.n).toBe(16);
   });
 
   it('行业系数：报价 = 底价×行业系数；未登记行业回 1.0；非法配置剔除', async () => {
@@ -391,7 +395,7 @@ describe('品牌池管理路由（v6.8.0）', () => {
     const list = await getAs('/api/admin/brands', fx.env, 'whl_session=tok-admin');
     expect(list.status).toBe(200);
     const rows = (await list.json()) as { brands: { brand: string; active_contracts: number }[] };
-    expect(rows.brands).toHaveLength(7);
+    expect(rows.brands).toHaveLength(16);
     expect(rows.brands.find((b) => b.brand === '可口可乐')?.active_contracts).toBe(1);
 
     const add = await send('POST', '/api/admin/brands', fx.env, { brand: '某新品牌', heat: 1.4, industry: '科技' });

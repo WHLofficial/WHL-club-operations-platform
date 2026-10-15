@@ -1,5 +1,5 @@
-// 强制拍卖测试（规则 4.4.5）：CA 前六（含并列、不含门将）人选校验、1m 挂牌、
-// 正常竞价链成交、整单税 50%、管理组取消。
+// 强制拍卖测试（规则 4.4.5）：v6.51.0 起人选不限（门将 / 前六之外 / 缺 CA 都能挂），
+// 队内非门将 CA 前六只作为参考值随响应回报；1m 挂牌、正常竞价链成交、整单税 50%、管理组取消。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -133,25 +133,107 @@ async function openReviewTaskId(fx: Fixture): Promise<number> {
 }
 
 describe('强制拍卖（4.4.5）', () => {
-  it('人选校验：前六（含并列）可拍、第七与门将不可拍', async () => {
+  it('v6.51.0 人选不限：第七、门将、缺 CA 都能挂，队内非门将 CA 前六只作参考值回报', async () => {
     const fx = await seedAuction();
-    // CA 82 是本队非门将第六（84 并列占四、五）；豪门队 7 名非门将 CA 均 > 82，
-    // 若按联盟口径这里会排到第 13 名而 409——201 即钉死「队内前六」语义
-    const ok = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
-    expect(ok.status).toBe(201);
-    const okBody = (await ok.json()) as { askPrice: number; listingId: number };
-    expect(okBody.askPrice).toBe(1);
-    // 取消后重试边界
-    const listingId = okBody.listingId;
-    expect((await post(`/api/admin/forced-auctions/${listingId}/cancel`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    type Resp = { askPrice: number; listingId: number; reference: Record<string, unknown> };
+    const cancel = (id: number) => post(`/api/admin/forced-auctions/${id}/cancel`, {}, 'tok-admin', fx.env);
 
+    // 第七（CA 80，队内非门将第 7）⇒ 201，参考值标出「不在前六」并给出前六线 CA 82
     const seventh = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
-    expect(seventh.status).toBe(409);
+    expect(seventh.status).toBe(201);
+    const seventhBody = (await seventh.json()) as Resp;
+    expect(seventhBody.askPrice).toBe(1);
+    expect(seventhBody.reference).toMatchObject({
+      playerId: 46,
+      playerName: '第七',
+      clubName: '受罚队',
+      caRank: 7,
+      inTopSix: false,
+      topSixLine: 82,
+      isGk: false,
+      nonGkWithCa: 7,
+    });
+    expect((await cancel(seventhBody.listingId)).status).toBe(200);
+
+    // 门将（CA 91）⇒ 201：前六参考口径不含门将，参考值不可算（isGk 立起）
     const gk = await post('/api/admin/forced-auctions', { playerId: 47 }, 'tok-admin', fx.env);
-    expect(gk.status).toBe(400);
-    // 队内口径对豪门队同样生效：CA 88 是豪门队非门将第七
+    expect(gk.status).toBe(201);
+    const gkBody = (await gk.json()) as Resp;
+    expect(gkBody.reference).toMatchObject({ isGk: true, caRank: null, inTopSix: null });
+    expect((await cancel(gkBody.listingId)).status).toBe(200);
+
+    // 前六（含并列）照旧可挂：CA 82 是队内非门将第六（84 并列占四、五）⇒ 参考 inTopSix=true
+    const sixth = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
+    expect(sixth.status).toBe(201);
+    const sixthBody = (await sixth.json()) as Resp;
+    expect(sixthBody.reference).toMatchObject({ caRank: 6, inTopSix: true, topSixLine: 82 });
+    expect((await cancel(sixthBody.listingId)).status).toBe(200);
+
+    // 豪门队 CA 88 是队内非门将第七 ⇒ 同样能挂（参考值按本队口径算：前六线 CA 89）
     const richSeventh = await post('/api/admin/forced-auctions', { playerId: 56 }, 'tok-admin', fx.env);
-    expect(richSeventh.status).toBe(409);
+    expect(richSeventh.status).toBe(201);
+    const richBody = (await richSeventh.json()) as Resp;
+    expect(richBody.reference).toMatchObject({ caRank: 7, inTopSix: false, topSixLine: 89 });
+    expect((await cancel(richBody.listingId)).status).toBe(200);
+
+    // 缺 CA：参考值不可算，但照样能挂（2026 之前只认「有 CA」的硬闸已去）
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status)
+       VALUES (58, 'fc58', '没数据', ${fx.club}, 'CM', 24, NULL, NULL, 'normal');`,
+    );
+    const noCa = await post('/api/admin/forced-auctions', { playerId: 58 }, 'tok-admin', fx.env);
+    expect(noCa.status).toBe(201);
+    expect(((await noCa.json()) as Resp).reference).toMatchObject({ ca: null, caRank: null, inTopSix: null, isGk: false });
+  });
+
+  it('v6.51.0 preview：参考值 + 闸门原因（开窗可挂 / 无窗报 no_window / 404 / 需管理员）', async () => {
+    const fx = await seedAuction();
+    const preview = await get('/api/admin/forced-auctions/preview?playerId=46', 'tok-admin', fx.env);
+    expect(preview.status).toBe(200);
+    const body = (await preview.json()) as {
+      reference: Record<string, unknown>;
+      blockers: { status: number; message: string; errCode?: string }[];
+    };
+    expect(body.blockers).toEqual([]);
+    expect(body.reference).toMatchObject({ playerId: 46, playerName: '第七', clubName: '受罚队', caRank: 7, inTopSix: false, topSixLine: 82 });
+
+    // 关窗 ⇒ 预检只报原因（不改任何状态），建单仍 409 —— 同一句口径
+    fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-07-02T00:00:00Z' WHERE season = 1 AND window_seq = 1`);
+    const closed = await get('/api/admin/forced-auctions/preview?playerId=46', 'tok-admin', fx.env);
+    const closedBody = (await closed.json()) as { blockers: { errCode?: string; message: string }[] };
+    expect(closedBody.blockers.map((b) => b.errCode)).toEqual(['no_window']);
+    const created = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
+    expect(created.status).toBe(409);
+    expect(((await created.json()) as { error: string }).error).toBe(closedBody.blockers[0].message);
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM listings WHERE player_id = 46`)?.n).toBe(0);
+
+    // 球员不存在：预检与建单同源 404
+    expect((await get('/api/admin/forced-auctions/preview?playerId=999', 'tok-admin', fx.env)).status).toBe(404);
+    // 仍是管理端点：匿名 401
+    expect((await get('/api/admin/forced-auctions/preview?playerId=46', undefined, fx.env)).status).toBe(401);
+  });
+
+  it('v6.51.0 preview：CPU 队 / 已在流程里 —— 预检报原因，建单同一句 400', async () => {
+    const fx = await seedAuction();
+    fx.sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
+       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
+    );
+    const cpuPreview = await get('/api/admin/forced-auctions/preview?playerId=60', 'tok-admin', fx.env);
+    const cpuBody = (await cpuPreview.json()) as { blockers: { status: number; message: string }[] };
+    expect(cpuBody.blockers).toHaveLength(1);
+    expect(cpuBody.blockers[0].message).toContain('CPU 队球员不参与强制拍卖');
+
+    // 已在挂牌流程里（player 45 先挂出）⇒ 预检与建单都挡住
+    expect((await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env)).status).toBe(201);
+    const busyPreview = await get('/api/admin/forced-auctions/preview?playerId=45', 'tok-admin', fx.env);
+    const busyBody = (await busyPreview.json()) as { blockers: { status: number; message: string }[] };
+    expect(busyBody.blockers).toHaveLength(1);
+    expect(busyBody.blockers[0]).toMatchObject({ status: 400, message: '这名球员已经在挂牌流程里了' });
+    const again = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
+    expect(again.status).toBe(400);
+    expect(((await again.json()) as { error: string }).error).toBe(busyBody.blockers[0].message);
   });
 
   it('CPU 队球员不参与强制拍卖（v2.0.0：CPU 队不入账）', async () => {

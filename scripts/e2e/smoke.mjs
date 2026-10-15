@@ -4,6 +4,7 @@
 // v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮；v6.22.0 加公开阅读几何⑯；
 // v6.46.0 加球员页「比赛」页签㉑（11 列表 / 赛季分组 / 合计行 / 375 卡内不横滑，端点打桩）；
 // v6.48.0 加成长档位㉒（预览形状 / 建档必填国家 / 改国家后重算 + 变更清单 / 球员页依据）；
+// v6.51.0 加强制拍卖人选解禁与品牌池扩编㉓（预览参考值 / 404 与 400 / 品牌池 16 家中文名）；
 // v6.23.0 转会合并：/offers 与 /negotiations 换址到 /market/desk，加 ⑤b 换址 / ⑤c 转会台结构 / ⑤d 匿名）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
@@ -3550,6 +3551,75 @@ async function main() {
             body: JSON.stringify({ country: oldCountry }),
           });
         }
+      }
+    });
+    await check('④ 强制拍卖人选解禁 + 品牌池扩编（v6.51.0）：预览参考值 / 404 与 400 / 16 家中文品牌', async () => {
+      // 只打 API：这一版是「去掉人选硬闸 + 给参考值 + 品牌池加料」，几何不是重点。
+      // 管理端 cookie 走页内 fetch（同 ㉒：APIRequestContext 带不上 __Host- 的 Secure cookie）。
+      if (!page.url().startsWith(BASE)) await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+      const api = (path, init) =>
+        page.evaluate(
+          async ({ path, init }) => {
+            const r = await fetch(path, { credentials: 'same-origin', ...(init ?? {}) });
+            let body = null;
+            try {
+              body = await r.json();
+            } catch {
+              /* 非 JSON（500 的纯文本）不影响断言 */
+            }
+            return { status: r.status, body };
+          },
+          { path, init },
+        );
+
+      // ① 口径：playerId 非正整数 400、查无此人 404（预检与建单同源）
+      const bad = await api('/api/admin/forced-auctions/preview?playerId=0');
+      assert(bad.status === 400, `playerId=0 应 400，实见 ${bad.status}`);
+      const missing = await api('/api/admin/forced-auctions/preview?playerId=987654321');
+      assert(missing.status === 404, `查无此球员应 404，实见 ${missing.status}`);
+
+      // ② 取一位有东家的球员（本地库可能一支队都没有）→ 参考值形状 + 预览不落挂牌
+      const forcedCount = async () => {
+        const r = await page.request.get(`${BASE}/api/market/listings?status=active`);
+        if (r.status() !== 200) return -1;
+        return ((await r.json()).listings ?? []).filter((l) => l.type === 'forced').length;
+      };
+      const before = await forcedCount();
+      const pool = await page.request.get(`${BASE}/api/players?limit=20`);
+      const rows = pool.status() === 200 ? ((await pool.json()).players ?? []) : [];
+      let hit = null;
+      for (const p of rows) {
+        const res = await api(`/api/admin/forced-auctions/preview?playerId=${p.id ?? p.fcId}`);
+        if (res.status === 200) {
+          hit = res;
+          break;
+        }
+        // 名单里的球员可能没有东家（404）——那不是失败；其他码才是
+        assert(res.status === 404, `预览非 404 的失败：${res.status} ${JSON.stringify(res.body)}`);
+      }
+      if (!hit) {
+        console.log('（跳过参考值形状断言：本地球员库为空或全员无东家）');
+      } else {
+        const ref = hit.body?.reference ?? {};
+        assert(Array.isArray(hit.body?.blockers), `blockers 应为数组：${JSON.stringify(hit.body?.blockers)}`);
+        assert(typeof ref.playerId === 'number', `参考值缺 playerId：${JSON.stringify(ref)}`);
+        assert(typeof ref.isGk === 'boolean' && typeof ref.nonGkWithCa === 'number', `参考值形状不对：${JSON.stringify(ref)}`);
+        assert(ref.inTopSix === null || typeof ref.inTopSix === 'boolean', `inTopSix 应三态：${JSON.stringify(ref.inTopSix)}`);
+        if (ref.isGk) assert(ref.caRank === null && ref.inTopSix === null, `门将的参考值应不可算：${JSON.stringify(ref)}`);
+        if (before >= 0) assert((await forcedCount()) === before, '预览不该产生挂牌');
+      }
+
+      // ③ 品牌池：统一中文名 + 扩编（本地库未 apply 0071 时只提示，不判失败）
+      const brands = await api('/api/admin/brands');
+      assert(brands.status === 200, `品牌池状态码 ${brands.status}`);
+      const list = brands.body?.brands ?? [];
+      if (list.length < 16) {
+        console.log(`（跳过品牌池口径断言：本地 brand_pool 只有 ${list.length} 家，未 apply 0071）`);
+      } else {
+        const names = list.map((b) => b.brand);
+        assert(names.includes('西维斯健康') && !names.includes('CVS Health'), `品牌名未统一中文：${names.join('/')}`);
+        assert(list.every((b) => typeof b.industry === 'string' && b.industry.length > 0), '行业列缺失');
+        assert(list.every((b) => b.heat >= 0.5 && b.heat <= 1.5), '热度越出钳制界');
       }
     });
   } finally {

@@ -1,8 +1,8 @@
-// 管理端 · 转会页：审核队列（含市场干预）+ 暂停出价 + 强制拍卖（规则 4.4.5）+ 海捞暗标段（v6.50.0）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
+// 管理端 · 转会页：审核队列（含市场干预）+ 暂停出价 + 强制拍卖（规则 4.4.5；v6.51.0 起人选不限、前六为参考）+ 海捞暗标段（v6.50.0）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
 // （原 Admin.tsx 三 section，v2.1.0 拆分；暂停出价为v2.1.0 commit 5 新增）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
+import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionPreview, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
 import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
@@ -398,6 +398,19 @@ function BidPauseSwitch() {
 
 /* ---------- 强制拍卖（规则 4.4.5） ---------- */
 
+// 参考值一句话（v6.51.0：门将 / 前六只是参考提示，不再拦截；blockers[0] 才是真会拒的闸）
+function referenceLine(p: ForcedAuctionPreview): string {
+  const r = p.reference;
+  const rank = r.isGk
+    ? '门将（前六参考口径不含门将）'
+    : r.caRank === null
+      ? '缺 CA 数据，参考不可算'
+      : `非门将 CA 队内第 ${r.caRank} 位${r.topSixLine !== null ? `（前六线 CA ${r.topSixLine}）` : ''}`;
+  const verdict = r.inTopSix === true ? '落在前六' : r.inTopSix === false ? '不在前六（同样可挂）' : null;
+  const head = `${r.playerName}${r.clubName ? `（${r.clubName}）` : ''}｜参考：${rank}${verdict ? `，${verdict}` : ''}`;
+  return p.blockers.length > 0 ? `${head}｜⚠ 现在挂出会被拒：${p.blockers[0].message}` : `${head}｜可挂出`;
+}
+
 function ForcedAuctionSection() {
   const { show, toastNode } = useToast();
   const queryClient = useQueryClient();
@@ -413,7 +426,19 @@ function ForcedAuctionSection() {
     queryFn: () => api<MarketListings>('/api/market/listings?status=active').catch(() => null),
   });
 
-  const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'forced-auctions'] });
+  const playerIdNum = Number(playerId);
+  const previewReady = playerId !== '' && Number.isInteger(playerIdNum) && playerIdNum > 0;
+  const { data: preview } = useQuery({
+    queryKey: ['admin', 'forced-auction-preview', playerId],
+    queryFn: () =>
+      api<ForcedAuctionPreview>(`/api/admin/forced-auctions/preview?playerId=${playerIdNum}`).catch(() => null),
+    enabled: previewReady,
+  });
+
+  const reload = () => {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'forced-auctions'] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'forced-auction-preview'] });
+  };
 
   const forced = (open?.listings ?? []).filter((l) => l.type === 'forced');
 
@@ -422,7 +447,13 @@ function ForcedAuctionSection() {
     setCreateBusy(true);
     try {
       const res = await apiPost<ForcedAuctionResult>('/api/admin/forced-auctions', { playerId: Number(playerId) });
-      show(`强制拍卖已挂出：挂牌价 ${res.askPrice.toFixed(2)}m，1m 起拍，整单税 50%。`);
+      const r = res.reference;
+      const ref = r.isGk
+        ? '门将，前六参考不适用'
+        : r.caRank === null
+          ? '缺 CA，参考不可算'
+          : `非门将 CA 队内第 ${r.caRank}${r.topSixLine !== null ? `（前六线 ${r.topSixLine}）` : ''}`;
+      show(`强制拍卖已挂出：${r.playerName}｜参考 ${ref}（不强制）｜挂牌价 ${res.askPrice.toFixed(2)}m，1m 起拍，整单税 50%。`);
       setPlayerId('');
       reload();
     } catch (err) {
@@ -465,7 +496,8 @@ function ForcedAuctionSection() {
       <h2>强制拍卖</h2>
       {toastNode}
       <p className="hint">
-        资格检查未过的处置手段：按 1m 挂牌强拍（只有本队 CA 前六、不含门将的球员可拍），成交整单税 50%。
+        准入失败时的处置手段：按 1m 挂牌强拍（人选不限——本队任何正式球员都可挂，门将、CA 前六之外的也能挂），成交整单税 50%。
+        「非门将 CA 前六」只是填了球员 ID 后给出的参考值（并标出前六线），不拦截挂出。
         未成交前可以取消；行内可单独暂停/恢复这一件的出价（其余市场照常）。
       </p>
       <div className="inline-form">
@@ -483,6 +515,7 @@ function ForcedAuctionSection() {
           onConfirm={create}
         />
       </div>
+      {previewReady && preview && <p className="hint">{referenceLine(preview)}</p>}
 
       {forced.length > 0 && (
         <div className="table-wrap">

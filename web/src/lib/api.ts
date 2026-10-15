@@ -1138,10 +1138,43 @@ export interface CloseWindowResult {
   forceSettled: number;
 }
 
+/** 强制拍卖人选参考值（v6.51.0：队内非门将 CA 前六只作参考，不再强制） */
+export interface ForcedAuctionReference {
+  playerId: number;
+  playerName: string;
+  clubId: number | null;
+  clubName: string | null;
+  position: string | null;
+  ca: number | null;
+  /** 门将（前六参考口径不含门将） */
+  isGk: boolean;
+  /** 队内非门将 CA 排名（并列取并列最优名次）；门将 / 缺 CA 为 null */
+  caRank: number | null;
+  /** 队内非门将第六名的 CA（前六参考线）；有 CA 的非门将不足六人为 null */
+  topSixLine: number | null;
+  /** 是否落在队内非门将 CA 前六（参考值，不强制）；门将 / 缺 CA 为 null */
+  inTopSix: boolean | null;
+  /** 队内有 CA 的非门将人数 */
+  nonGkWithCa: number;
+}
+
+export interface ForcedAuctionBlocker {
+  status: number;
+  message: string;
+  errCode?: string;
+}
+
+/** GET /api/admin/forced-auctions/preview：人选参考 + 现在挂出会被拒的原因 */
+export interface ForcedAuctionPreview {
+  reference: ForcedAuctionReference;
+  blockers: ForcedAuctionBlocker[];
+}
+
 export interface ForcedAuctionResult {
   ok: boolean;
   listingId: number;
   askPrice: number;
+  reference: ForcedAuctionReference;
 }
 
 // ---- v0.7.0 DTO（附录 A〔6〕：财政/赛季/赛果/成长/通知/监管）----

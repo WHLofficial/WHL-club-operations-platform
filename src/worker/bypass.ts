@@ -10,7 +10,7 @@ import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { loadMarketContext } from './market-context.ts';
 import { availableBalance, ledgerMovement } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
-import { assertOpOpen } from './ops-schedule.ts';
+import { assertOpOpen, opBlockReason } from './ops-schedule.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import {
@@ -525,15 +525,136 @@ export async function createFreeAgent(
 
 // ---- 强制拍卖（规则 4.4.5）：准入失败触发，管理方以 1m 挂牌，整单税 50% ----
 
+/** 人选参考值（v6.51.0：队内非门将 CA 前六只作参考，不再是人选硬条件） */
+export interface ForcedAuctionReference {
+  playerId: number;
+  playerName: string;
+  clubId: number | null;
+  clubName: string | null;
+  position: string | null;
+  ca: number | null;
+  /** 门将（前六参考口径不含门将） */
+  isGk: boolean;
+  /** 队内非门将 CA 排名（并列取并列最优名次）；门将 / 缺 CA 为 null */
+  caRank: number | null;
+  /** 队内非门将第六名的 CA（前六参考线）；有 CA 的非门将不足六人为 null */
+  topSixLine: number | null;
+  /** 是否落在队内非门将 CA 前六（参考值，不强制）；门将 / 缺 CA 为 null */
+  inTopSix: boolean | null;
+  /** 队内有 CA 的非门将人数 */
+  nonGkWithCa: number;
+}
+
+export interface ForcedAuctionBlocker {
+  status: number;
+  message: string;
+  errCode?: string;
+}
+
+export interface ForcedAuctionInspection {
+  reference: ForcedAuctionReference;
+  /** 现在挂牌会被拒的原因（按闸门顺序；空数组 = 可挂） */
+  blockers: ForcedAuctionBlocker[];
+}
+
 export interface ForcedAuctionResult {
   ok: true;
   listingId: number;
   askPrice: number;
+  reference: ForcedAuctionReference;
 }
 
 /**
- * 管理方建强制拍卖：人选必须是该俱乐部阵容 CA 前六（含并列、不含门将）的正式球员；
- * 挂牌价固定 1m，之后走普通挂牌链（首价 ≥1m、正常竞价、成交税整单 50%）。
+ * 强制拍卖预检（v6.51.0）：算人选参考值 + 收集闸门原因。建单与管理端 preview 端点吃这一处口径——
+ * 人选不限门将、不限 CA 前六；保留的硬闸：窗口在开、运营时刻表、非 CPU 队、球员状态可挂牌、不在市场流程里。
+ */
+export async function inspectForcedAuction(env: Env, playerIdInput: unknown): Promise<ForcedAuctionInspection> {
+  const db = env.DB;
+  const playerId = Number(playerIdInput);
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
+
+  const player = await db
+    .prepare(
+      `SELECT p.id, p.name, p.club_id, p.status, p.position, p.ca, c.name AS club_name
+       FROM players p LEFT JOIN clubs c ON c.id = p.club_id WHERE p.id = ?`,
+    )
+    .bind(playerId)
+    .first<{
+      id: number;
+      name: string;
+      club_id: number | null;
+      status: string;
+      position: string | null;
+      ca: number | null;
+      club_name: string | null;
+    }>();
+  if (!player || player.club_id === null) throw new HttpError(404, '球员不存在或没有归属');
+
+  const isGk = player.position === 'GK';
+  let caRank: number | null = null;
+  let topSixLine: number | null = null;
+  const stats = await db
+    .prepare(`SELECT COUNT(*) AS n FROM players WHERE club_id = ? AND position != 'GK' AND ca IS NOT NULL`)
+    .bind(player.club_id)
+    .first<{ n: number }>();
+  const nonGkWithCa = stats?.n ?? 0;
+  if (!isGk && player.ca !== null) {
+    // 前六（含并列）：严格高于其 CA 的非门将队友数 + 1
+    const above = await db
+      .prepare(`SELECT COUNT(*) AS n FROM players WHERE club_id = ? AND position != 'GK' AND ca > ?`)
+      .bind(player.club_id, player.ca)
+      .first<{ n: number }>();
+    caRank = (above?.n ?? 0) + 1;
+  }
+  if (nonGkWithCa >= 6) {
+    const line = await db
+      .prepare(
+        `SELECT ca FROM players WHERE club_id = ? AND position != 'GK' AND ca IS NOT NULL
+         ORDER BY ca DESC LIMIT 1 OFFSET 5`,
+      )
+      .bind(player.club_id)
+      .first<{ ca: number | null }>();
+    topSixLine = line?.ca ?? null;
+  }
+  const reference: ForcedAuctionReference = {
+    playerId: player.id,
+    playerName: player.name,
+    clubId: player.club_id,
+    clubName: player.club_name,
+    position: player.position,
+    ca: player.ca,
+    isGk,
+    caRank,
+    topSixLine,
+    inTopSix: caRank === null ? null : caRank <= 6,
+    nonGkWithCa,
+  };
+
+  const blockers: ForcedAuctionBlocker[] = [];
+  const win = await getOpenWindow(db);
+  if (!win) blockers.push({ status: 409, message: '转会窗口没开，现在不能发起强制拍卖', errCode: 'no_window' });
+  const opBlock = await opBlockReason(db, 'transfer_forced_auction');
+  if (opBlock) blockers.push(opBlock);
+  // CPU 队不入账（v2.0.0，用户裁决）：CPU 队球员即整队都是「海里的」，不参与强制拍卖
+  // （否则拍卖成交会把成交价记到 CPU 队头上）
+  if ((await cpuClubIds(db)).has(player.club_id)) {
+    blockers.push({ status: 400, message: 'CPU 队球员不参与强制拍卖（CPU 队不入账）' });
+  }
+  if (player.status !== 'normal') {
+    blockers.push({
+      status: 400,
+      message: player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '当前状态不能强制拍卖',
+    });
+  } else if ((await findInFlight(db, playerId)) === 'listing') {
+    blockers.push({ status: 400, message: '这名球员已经有一单在市场流程里了，等它结束再操作' });
+  }
+
+  return { reference, blockers };
+}
+
+/**
+ * 管理方建强制拍卖（v6.51.0）：人选不限门将、不限 CA 前六——队内非门将 CA 排名/前六线只作为
+ * 参考值随响应回报（管理端展示用）；挂牌价固定 1m，之后走普通挂牌链（首价 ≥1m、正常竞价、成交税整单 50%）。
  */
 export async function createForcedAuction(
   env: Env,
@@ -541,42 +662,15 @@ export async function createForcedAuction(
   playerIdInput: unknown,
 ): Promise<ForcedAuctionResult> {
   const db = env.DB;
-  const playerId = Number(playerIdInput);
-  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 应为球员 ID');
-
-  const win = await getOpenWindow(db);
+  const { reference, blockers } = await inspectForcedAuction(env, playerIdInput);
+  const block = blockers[0];
+  if (block) throw new HttpError(block.status, block.message, block.errCode);
+  const playerId = reference.playerId;
+  const clubId = reference.clubId;
+  if (clubId === null) throw new HttpError(404, '球员不存在或没有归属'); // 预检已拦，仅类型收窄
+  const win = await getOpenWindow(db); // 预检已确认在开，这里取 season/windowSeq 落库
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能发起强制拍卖', 'no_window');
-  // v6.49.0 运营时刻表：强制拍卖自己的时段（默认「不限制」= 只剩上面那道窗口闸）
-  await assertOpOpen(db, 'transfer_forced_auction');
-
-  const player = await db
-    .prepare('SELECT id, name, club_id, status, position, ca FROM players WHERE id = ?')
-    .bind(playerId)
-    .first<{ id: number; name: string; club_id: number | null; status: string; position: string | null; ca: number | null }>();
-  if (!player || player.club_id === null) throw new HttpError(404, '球员不存在或没有归属');
-  // CPU 队不入账（v2.0.0，用户裁决）：CPU 队球员即整队都是「海里的」，不参与强制拍卖
-  // （否则拍卖成交会把成交价记到 CPU 队头上；其前六资格也本是按 CPU 队阵容算的）
-  if ((await cpuClubIds(db)).has(player.club_id)) {
-    throw new HttpError(400, 'CPU 队球员不参与强制拍卖（CPU 队不入账）');
-  }
-  if (player.position === 'GK') throw new HttpError(400, '强制拍卖人选不含门将（4.4.5）');
-  if (player.ca === null) throw new HttpError(409, '球员缺 CA 数据，无法核验前六资格');
-  if (player.status !== 'normal') {
-    throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '当前状态不能强制拍卖');
-  }
-
-  // CA 前六（含并列）：严格高于其 CA 的非门将队友数 < 6
-  const rankRow = await db
-    .prepare(
-      `SELECT COUNT(*) + 1 AS rank FROM players
-       WHERE club_id = ? AND position != 'GK' AND ca > ?`,
-    )
-    .bind(player.club_id, player.ca)
-    .first<{ rank: number }>();
-  if ((rankRow?.rank ?? 99) > 6) {
-    throw new HttpError(409, '拍卖人选必须是阵容 CA 前六（含并列、不含门将）');
-  }
-  await ensureNotInFlight(db, playerId);
+  await ensureNotInFlight(db, playerId); // 预检后有单据刚进流程的兜底
 
   const audit = createAuditStatement(db);
   // v6.24.1：强制拍并入统一截止规则——创建即按 bidDeadline 首算落 deadline_at（无人出价同计静默），
@@ -595,20 +689,20 @@ export async function createForcedAuction(
   const statements = [
     db
       .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`)
-      .bind(playerId, player.club_id),
+      .bind(playerId, clubId),
     db
       .prepare(
         `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, deadline_at, season, window_seq)
          VALUES (?, ?, 'forced', ?, 'listed', ${nowSql()}, ?, ?, ?, ?)`,
       )
-      .bind(playerId, player.club_id, FORCED_AUCTION_PRICE, listedDay, firstDeadline, win.season, win.windowSeq),
+      .bind(playerId, clubId, FORCED_AUCTION_PRICE, listedDay, firstDeadline, win.season, win.windowSeq),
     audit({
       actor,
       action: 'forced_auction_create',
       targetType: 'listing',
       targetId: null,
       origin: 'user',
-      after: { playerId, sellerClubId: player.club_id, askPrice: FORCED_AUCTION_PRICE, season: win.season, windowSeq: win.windowSeq },
+      after: { playerId, sellerClubId: clubId, askPrice: FORCED_AUCTION_PRICE, season: win.season, windowSeq: win.windowSeq },
     }),
   ];
   const results = await db.batch(statements);
@@ -620,7 +714,7 @@ export async function createForcedAuction(
   // 4.4.10：强制拍卖属挂牌，提交即触发本窗续约回滚
   await rollbackRcChangeForPlayer(env, playerId, actor, { refType: 'listing', refId: listingId });
 
-  return { ok: true, listingId, askPrice: FORCED_AUCTION_PRICE };
+  return { ok: true, listingId, askPrice: FORCED_AUCTION_PRICE, reference };
 }
 
 // 管理方取消强制拍卖（未成交前）：解冻出价、球员还原，不收下架费

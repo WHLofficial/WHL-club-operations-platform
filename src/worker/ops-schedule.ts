@@ -79,22 +79,36 @@ export async function loadWindowRef(db: D1Database): Promise<OpsWindowRef | null
 // ---- 闸门（写路径调用）----
 
 /**
- * 该操作现在是否开着？未登记 / 全 none（现状）= 放行（零行为变化，且不查窗口表）。
- * 到点未开 → 409 op_not_started；已结束 → 409 op_closed。服务器时钟唯一权威（v6.24.0）。
+ * 该操作现在被挡住的用户可见原因（未登记 / 全 none（现状）= null 放行，且不查窗口表）。
+ * v6.51.0：从 assertOpOpen 里提出口径——管理端「预检」要在不抛错的前提下展示同一条原因，
+ * 两处吃同一个函数，判定永不漂移。
  */
-export async function assertOpOpen(db: D1Database, opKey: string): Promise<void> {
+export async function opBlockReason(
+  db: D1Database,
+  opKey: string,
+): Promise<{ status: number; message: string; errCode: string } | null> {
   const row = (await loadOpsRows(db)).get(opKey);
-  if (!row || (row.startAnchor === 'none' && row.endAnchor === 'none')) return;
+  if (!row || (row.startAnchor === 'none' && row.endAnchor === 'none')) return null;
   const window = await loadWindowRef(db);
   const resolved = resolveOpsRow(row, window, new Date().toISOString());
   const label = opsLabelOf(opKey);
   if (resolved.state === 'not_started') {
-    throw new HttpError(409, `${label}还没开始（北京时间 ${fmtBeijingMinute(resolved.startAt!)} 起）`, 'op_not_started');
+    return { status: 409, message: `${label}还没开始（北京时间 ${fmtBeijingMinute(resolved.startAt!)} 起）`, errCode: 'op_not_started' };
   }
   if (resolved.state === 'closed') {
     const tail = resolved.endAt ? `（北京时间 ${fmtBeijingMinute(resolved.endAt)} 止）` : '（转会窗口已关）';
-    throw new HttpError(409, `${label}已结束${tail}`, 'op_closed');
+    return { status: 409, message: `${label}已结束${tail}`, errCode: 'op_closed' };
   }
+  return null;
+}
+
+/**
+ * 该操作现在是否开着？未登记 / 全 none（现状）= 放行（零行为变化，且不查窗口表）。
+ * 到点未开 → 409 op_not_started；已结束 → 409 op_closed。服务器时钟唯一权威（v6.24.0）。
+ */
+export async function assertOpOpen(db: D1Database, opKey: string): Promise<void> {
+  const block = await opBlockReason(db, opKey);
+  if (block) throw new HttpError(block.status, block.message, block.errCode);
 }
 
 // ---- 读接口（教练侧 + 管理端共用）----

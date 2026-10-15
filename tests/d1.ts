@@ -152,6 +152,7 @@ const MIGRATION_FILES = [
   '0068_growth_tier_auto.sql',
   '0069_ops_schedule_expiry.sql',
   '0070_sea_sealed.sql',
+  '0071_brand_pool_expand.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

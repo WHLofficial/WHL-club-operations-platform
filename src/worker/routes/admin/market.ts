@@ -8,7 +8,7 @@ import { HttpError } from '../../../lib/http.ts';
 import { createConfigService } from '../../../core/config.ts';
 import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminCancelSigning, requireReason } from '../../market-intervene.ts';
 import { listWindows, openWindow, closeWindow } from '../../window-machine.ts';
-import { createForcedAuction, cancelForcedAuction } from '../../bypass.ts';
+import { createForcedAuction, cancelForcedAuction, inspectForcedAuction } from '../../bypass.ts';
 import { readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -140,9 +140,15 @@ app.post('/windows/close', async (c) => {
   return c.json(await closeWindow(c.env, user.id, body?.force));
 });
 
-// ---- 强制拍卖（规则 4.4.5，附录 A〔5〕） ----
+// ---- 强制拍卖（规则 4.4.5，附录 A〔5〕；v6.51.0 起人选不限——前六仅作参考值） ----
 
-// POST /api/admin/forced-auctions —— 建强制拍卖（1m 挂牌，CA 前六不含门将，整单税 50%）
+// GET /api/admin/forced-auctions/preview?playerId=N —— 人选参考（队内非门将 CA 排名/前六线）+ 闸门预检
+app.get('/forced-auctions/preview', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  return c.json(await inspectForcedAuction(c.env, c.req.query('playerId')));
+});
+
+// POST /api/admin/forced-auctions —— 建强制拍卖（1m 挂牌，人选不限，整单税 50%）
 app.post('/forced-auctions', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const body = (await readJson(c)) as { playerId?: unknown } | null;

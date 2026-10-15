@@ -197,7 +197,8 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   }),
   // v6.8.0 冠名活化：行业系数（插件 market_industry_templates 出厂全 1.0，这里给真实默认表；
   // 未登记行业回 1.0）+ 品牌热度动态规则（近 3 场全胜/全败，钳制边界）
-  naming_industry_factors: JSON.stringify({ 医疗: 1.2, 运动: 1.1, 科技: 1.3, 饮食: 1.0 }),
+  // v6.51.0 品牌池扩编：新品牌带入 汽车/金融/制造/文旅 四个行业，一并登记系数
+  naming_industry_factors: JSON.stringify({ 医疗: 1.2, 运动: 1.1, 科技: 1.3, 饮食: 1.0, 汽车: 1.05, 金融: 1.15, 制造: 1.1, 文旅: 0.9 }),
   market_heat_rules: JSON.stringify({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 }),
   // v6.14.0 C3 招商轮：每轮每品牌定向报价上限 + 报价有效期小时（插件 market_offers_per_brand /
   // market_offer_ttl_hours 同值；关窗批清盘兜底，expire_at = min(创建+TTL, 轮关闭)）
