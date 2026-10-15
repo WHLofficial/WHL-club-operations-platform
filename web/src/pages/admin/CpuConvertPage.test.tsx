@@ -39,6 +39,8 @@ function clubRow(patch: Partial<AdminClubRow> & { id: number; name: string }): A
     leagueTier: 'premier',
     status: 'active',
     transferBanned: false,
+    country: null,
+    countryName: null,
     createdAt: '2026-10-01T00:00:00.000Z',
     bindings: [],
     latestCode: null,

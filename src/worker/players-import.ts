@@ -6,6 +6,7 @@ import { createAuditStatement } from '../lib/audit.ts';
 import { createConfigService } from '../core/config.ts';
 import { IMPORT_ROW_LIMIT, normalizeImportBatch, type ImportChannel, type NormalizedPlayer } from '../core/import.ts';
 import { fetchPurchases, replayStatements } from './shop-ops.ts';
+import { hookTierRecompute } from './growth-tier.ts';
 
 export type ImportMode = 'minor' | 'major';
 
@@ -247,6 +248,12 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
   }
   // 大换版：台账计数已在 upsert 里折算，明细表跟着折（整表一次，幂等）
   if (payload.mode === 'major') await foldPlaystylesStatement(env.DB).run();
+  // 导入收尾重算档位（v6.48.0 §10.3）：导入覆盖 age / china_plan / game_attrs（含 naID、TeamID）
+  // 与 is_future_star，五个条件里除 c1/c2 的队壳基准外都可能变。按 fc_id 定位（导入行只有 fc_id，
+  // 免得再查一遍本地 id）；只写差异——重导入没动档位时零写入。
+  if (outcome.players.length > 0) {
+    await hookTierRecompute(env.DB, { kind: 'fcIds', fcIds: outcome.players.map((p) => p.fcId) }, { actor, origin: 'user' });
+  }
   return {
     written,
     insertedEstimate: inserted,

@@ -2,7 +2,7 @@
 // （原 Admin.tsx 三 section，v2.1.0 拆分；commit 3 数据层转 TanStack Query）
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, type AdminRegistrations, type ComplianceReport, type GrowthPeriodsResponse, type GrowthSettlementResult } from '../../lib/api.ts';
+import { api, apiPost, type AdminRegistrations, type ComplianceReport, type GrowthPeriodsResponse, type GrowthSettlementResult, type TierPlayerDetail } from '../../lib/api.ts';
 import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
@@ -356,6 +356,7 @@ function GrowthSection() {
   const [summary, setSummary] = useState<GrowthSettlementResult | null>(null);
   const [tierPlayerId, setTierPlayerId] = useState('');
   const [tier, setTier] = useState('1');
+  const [tierDetail, setTierDetail] = useState<TierPlayerDetail | null>(null);
   const [periodNote, setPeriodNote] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -421,9 +422,37 @@ function GrowthSection() {
     setBusy(true);
     try {
       await apiPost<{ ok: boolean }>(`/api/admin/growth/${Number(tierPlayerId)}/tier`, { tier: Number(tier) });
-      show(`档位已核定：球员 #${Number(tierPlayerId)} → 档 ${tier}。`);
+      show(`档位已核定：球员 #${Number(tierPlayerId)} → 档 ${tier}（已锁定，自动重算不再动它）。`);
+      await loadTierDetail();
     } catch (err) {
       show(err instanceof Error ? err.message : '核定失败', true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 依据明细：当前档 / 自动档 / 锁定状态 / 五条件三态（v6.48.0 §10.3）
+  async function loadTierDetail() {
+    if (!tierValid) return;
+    try {
+      const detail = await api<TierPlayerDetail>(`/api/admin/growth/${Number(tierPlayerId)}/tier`);
+      setTierDetail(detail);
+      setTier(String(detail.currentTier));
+    } catch (err) {
+      setTierDetail(null);
+      show(err instanceof Error ? err.message : '档位依据加载失败', true);
+    }
+  }
+
+  async function unlockTier() {
+    if (busy || !tierValid) return;
+    setBusy(true);
+    try {
+      const r = await apiPost<{ ok: boolean; tier: number; changed: boolean }>(`/api/admin/growth/${Number(tierPlayerId)}/tier/unlock`, {});
+      show(r.changed ? `已解除锁定：球员 #${Number(tierPlayerId)} 重算为档 ${r.tier}。` : `已解除锁定：档位仍是 ${r.tier}（与自动核定一致）。`);
+      await loadTierDetail();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '解除锁定失败', true);
     } finally {
       setBusy(false);
     }
@@ -548,11 +577,22 @@ function GrowthSection() {
       )}
 
       <h3>档位核定（§10.3）</h3>
-      <p className="hint">条件叠加（效力 +1 / 国籍 +1 / 中国籍 +1 / 未来之星 +2 / ≤18 岁 +1）由管理组按现实资料判断，这里只落核定结果。</p>
+      <p className="hint">
+        档位默认由平台自动核定（五条件叠加：效力 +1 / 国籍 +1 / 中国籍 +1 / 未来之星 +2 / ≤18 岁 +1，缺数据不猜），
+        这里的人工核定是覆盖：写值的同时锁定该球员，之后的重算跳过它，可随时解除锁定回到自动值。
+        全库一键重算、未设国家的队与变更清单在「成长档位」页。
+      </p>
       <div className="inline-form">
         <label className="field">
           球员 ID
-          <input value={tierPlayerId} onChange={(e) => setTierPlayerId(e.target.value)} placeholder="如 10" />
+          <input
+            value={tierPlayerId}
+            onChange={(e) => {
+              setTierPlayerId(e.target.value);
+              setTierDetail(null);
+            }}
+            placeholder="如 10"
+          />
         </label>
         <label className="field">
           核定档位
@@ -572,7 +612,63 @@ function GrowthSection() {
           disarmKey={`${tierPlayerId}|${tier}`}
           onConfirm={confirmTier}
         />
+        <button className="btn btn-ghost" type="button" disabled={!tierValid || busy} onClick={loadTierDetail}>
+          查看依据
+        </button>
       </div>
+      {tierDetail && (
+        <div className="code-card">
+          <p>
+            <b>{tierDetail.name}</b> <span className="muted">#{tierDetail.playerId}</span>：当前档{' '}
+            <span className="mono">档 {tierDetail.currentTier}</span>，自动核定值 <span className="mono">档 {tierDetail.autoTier}</span>
+            {tierDetail.locked ? <span className="badge red">人工覆盖（已锁定）</span> : <span className="badge muted">自动</span>}
+            ，队壳国家 {tierDetail.clubCountryName ?? <span className="muted">未设</span>}
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>条件</th>
+                  <th>加成</th>
+                  <th>判定</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tierDetail.conditions.map((cond) => (
+                  <tr key={cond.key}>
+                    <td>{cond.label}</td>
+                    <td className="mono">+{cond.points}</td>
+                    <td>
+                      {cond.hit ? (
+                        <span className="badge">命中</span>
+                      ) : cond.missing ? (
+                        <span className="badge muted" title={cond.hint}>
+                          数据缺失
+                        </span>
+                      ) : (
+                        <span className="muted">未命中</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {tierDetail.locked && (
+            <div className="actions">
+              <ConfirmButton
+                label="解除锁定（回到自动核定）"
+                confirmLabel="确认解除（再点一次）"
+                className="btn-ghost"
+                busy={busy}
+                busyLabel="重算中…"
+                disarmKey={tierDetail.playerId}
+                onConfirm={unlockTier}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

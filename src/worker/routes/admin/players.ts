@@ -7,6 +7,7 @@ import { requireAdmin } from '../../../lib/session.ts';
 import { createAuditStatement } from '../../../lib/audit.ts';
 import { confirmImport, previewImport } from '../../players-import.ts';
 import { confirmContractsImport, previewContractsImport } from '../../contracts-import.ts';
+import { hookTierRecompute } from '../../growth-tier.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -44,7 +45,11 @@ function parsePlayerUpdates(body: Record<string, unknown>): { updates: Record<st
   if ('growthTier' in body) {
     const v = Number(body.growthTier);
     if (!Number.isInteger(v) || v < 1 || v > 5) errors.push('成长档位须在 1-5 之间');
-    else updates.growth_tier = v;
+    else {
+      updates.growth_tier = v;
+      // v6.48.0 §10.3：人工改档 = 覆盖自动核定 ⇒ 同一批置锁，之后的重算跳过它（可解除锁定）
+      updates.growth_tier_locked = 1;
+    }
   }
   if ('isFutureStar' in body) {
     const v = Number(body.isFutureStar);
@@ -106,7 +111,7 @@ app.patch('/players/:id', async (c) => {
   if (Object.keys(updates).length === 0) throw new HttpError(400, '没有可更新的字段');
 
   const current = await c.env.DB.prepare(
-    'SELECT id, market_value, status, growth_tier, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id = ?',
+    'SELECT id, market_value, status, growth_tier, growth_tier_locked, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id = ?',
   )
     .bind(id)
     .first<{
@@ -114,6 +119,7 @@ app.patch('/players/:id', async (c) => {
       market_value: number | null;
       status: string;
       growth_tier: number;
+      growth_tier_locked: number;
       is_future_star: number;
       growable: number;
       prestige: number | null;
@@ -141,6 +147,11 @@ app.patch('/players/:id', async (c) => {
       after: updates,
     }),
   ]);
+  // 未来之星是档位 c4 的输入（+2）：数据修正后按当前状态重算（不置锁——这是改数据，不是人工覆盖；
+  // 若同一请求也改了 growthTier，那条已被置锁，重算会跳过它）
+  if ('is_future_star' in updates) {
+    await hookTierRecompute(c.env.DB, { kind: 'players', playerIds: [id] }, { actor: user.id, origin: 'user' });
+  }
   return c.json({ ok: true });
 });
 
@@ -177,6 +188,7 @@ app.post('/players/batch', async (c) => {
     market_value: number | null;
     status: string;
     growth_tier: number;
+    growth_tier_locked: number;
     is_future_star: number;
     growable: number;
     prestige: number | null;
@@ -187,7 +199,7 @@ app.post('/players/batch', async (c) => {
     pa: number | null;
   };
   const { results } = await c.env.DB.prepare(
-    `SELECT id, market_value, status, growth_tier, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id IN (${placeholders})`,
+    `SELECT id, market_value, status, growth_tier, growth_tier_locked, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id IN (${placeholders})`,
   )
     .bind(...ids)
     .all<PlayerCurrent>();
@@ -215,6 +227,11 @@ app.post('/players/batch', async (c) => {
     ];
   });
   await c.env.DB.batch(statements.flat());
+  // 未来之星是档位 c4 的输入（+2）：批量改完后按当前状态重算这批人（不置锁）
+  const futureStarIds = updatesList.filter((u) => 'is_future_star' in u.updates).map((u) => u.id);
+  if (futureStarIds.length > 0) {
+    await hookTierRecompute(c.env.DB, { kind: 'players', playerIds: futureStarIds }, { actor: user.id, origin: 'user' });
+  }
   return c.json({ ok: true, updated: updatesList.length });
 });
 

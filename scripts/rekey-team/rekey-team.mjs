@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-// 换队号 rekey 预演工具（v2.3.0）：给定旧/新游戏队号，对三库做只读预演核查，
+// 换队号 rekey 预演工具（v2.4.0）：给定旧/新游戏队号，对三库做只读预演核查，
 // 产出米兰口径的分步 SQL 工件 + 执行 README。工具本身不做任何写操作，
 // 真正执行用 README 里印好的 wrangler d1 execute 命令（生产执行等管理组明确下令）。
 //
 // 用法：
 //   node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 \
-//     [--guard 'AC米兰(CPU)'] [--touch-club] [--remote] [--out DIR]
+//     [--guard 'AC米兰(CPU)'] [--touch-club --new-country 27] [--remote] [--out DIR]
 //
 //   --old / --new   旧、新游戏队号（正整数，必填）
 //   --guard         auth UPDATE 的 name 守卫（建议总是带上，防新号将来被别的队占用时误改）
 //   --touch-club    换壳模式：clubs.id 也要从 old 搬到 new（club 库子表一起生成 03 工件）；
 //                   默认收口模式（米兰口径）：平台 clubs.id 已是新号，只动 tour 与 auth
+//   --new-country   队壳国家（FC NationID，如 14 = 英格兰、155 = China PR）；换壳模式必填。
+//                   clubs.country 是档位 c2「会籍与队壳国家一致」的比对基准（v6.48.0 §10.3），
+//                   换壳时由管理组按新壳的现实事实重新声明，不许沿用旧值、也不许留空
 //   --remote        预演查生产（默认 --local，用本地 miniflare 状态演练）
 //   --out           工件输出目录（默认 scripts/prod-<日期>-rekey-<old>-to-<new>）
 //
@@ -20,7 +23,7 @@
 //   club (whl-club) ：所有 *_club_id 列 + home_team_id/away_team_id/winner_team + clubs.id 父行
 //   只报数不改的撞号列：audit_log.target_id 等任意 *_target_id / *_user_id（撞号高发，永远不生成 UPDATE）
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const args = process.argv.slice(2);
@@ -34,12 +37,27 @@ const OLD = Number(flag('old'));
 const NEW = Number(flag('new'));
 const GUARD = typeof flag('guard') === 'string' ? flag('guard') : undefined;
 const TOUCH_CLUB = flag('touch-club') !== undefined;
+const NEW_COUNTRY = Number(flag('new-country'));
 const REMOTE = flag('remote') !== undefined;
 const OUT = typeof flag('out') === 'string' ? flag('out') : `scripts/prod-${new Date().toISOString().slice(0, 10)}-rekey-${OLD}-to-${NEW}`;
 
 if (!Number.isInteger(OLD) || OLD <= 0 || !Number.isInteger(NEW) || NEW <= 0) {
-  console.error('用法：node rekey-team.mjs --old <旧队号> --new <新队号> [--guard 队名] [--touch-club] [--remote] [--out DIR]');
+  console.error('用法：node rekey-team.mjs --old <旧队号> --new <新队号> [--guard 队名] [--touch-club --new-country <NationID>] [--remote] [--out DIR]');
   process.exit(1);
+}
+
+// 队壳国家表（web/assets/ref/nation.json，与 src/core/nations.ts 同源）。换壳模式必须显式声明
+// --new-country：clubs.country 是档位 c2「会籍与队壳国家一致」的比对基准（v6.48.0 §10.3），
+// 换壳时由管理组按新壳的现实事实重新声明——既不许沿用旧值，也不许留空。
+const NATIONS = JSON.parse(readFileSync(resolve(process.cwd(), 'web/assets/ref/nation.json'), 'utf8'));
+const countryName = NATIONS.find((n) => n.id === NEW_COUNTRY)?.name;
+if (TOUCH_CLUB && !countryName) {
+  console.error('换壳模式必须声明队壳国家：--new-country <NationID>（如 14 = 英格兰，155 = China PR）');
+  console.error('用法：node rekey-team.mjs --old <旧队号> --new <新队号> --touch-club --new-country <NationID> [--guard 队名] [--remote]');
+  process.exit(1);
+}
+if (!TOUCH_CLUB && countryName) {
+  console.error(`提示：--new-country ${NEW_COUNTRY}（${countryName}）只在换壳模式（--touch-club）生效，收口模式忽略。`);
 }
 
 // 三库的 wrangler d1 数据库名与执行目录（auth 在 auth 仓执行是米兰口径的既有习惯；
@@ -205,6 +223,18 @@ if (TOUCH_CLUB && plan.auth?.oldRow) {
   }
 }
 
+// 换壳模式的旧国家值：报告里留个底，03 的回滚注释要用（country 被重写后，反向执行得填得回去）
+let oldCountry = null;
+if (TOUCH_CLUB && plan.club?.oldRow) {
+  try {
+    oldCountry = query(plan.club.db, `SELECT country FROM ${ident(DBS.club.parent)} WHERE id = ${OLD}`)[0]?.country ?? null;
+    const oldLabel = oldCountry === null ? '（原为空）' : `${oldCountry} ${NATIONS.find((n) => n.id === Number(oldCountry))?.name ?? ''}`.trim();
+    report.push(`\n【队壳国家重声明】clubs.country：${oldLabel} → ${NEW_COUNTRY} ${countryName}`);
+  } catch {
+    report.push(`\n【队壳国家重声明】clubs.country → ${NEW_COUNTRY} ${countryName}（旧值读不到：迁移 0068 是否已应用？）`);
+  }
+}
+
 // ---------- 生成 SQL 工件（米兰口径：tour 先子后父 + defer；auth 单行带守卫；club 同 tour） ----------
 const guardSql = GUARD ? ` AND name = '${GUARD.replaceAll("'", "''")}'` : '';
 function childUpdates(key, p) {
@@ -235,14 +265,18 @@ if (plan.auth) {
 UPDATE team SET tour_team_id = ${NEW} WHERE tour_team_id = ${OLD}${guardSql};${TOUCH_CLUB ? `\nUPDATE team SET club_id = ${NEW} WHERE club_id = ${OLD}${guardSql};` : ''}`;
 }
 if (plan.club) {
-  files['03-club-rekey-clubs-id.sql'] = `-- club 库（${DBS.club.name}）换壳：clubs.id ${OLD} → ${NEW}，子表一并搬运（--touch-club 模式）
+  files['03-club-rekey-clubs-id.sql'] = `-- club 库（${DBS.club.name}）换壳：clubs.id ${OLD} → ${NEW}，子表一并搬运 + 队壳国家重声明（--touch-club 模式）
 -- 由 scripts/rekey-team/rekey-team.mjs 预演生成。必须走 --command（defer_foreign_keys 只在该通道生效）。
--- 期望 changes：${['clubs 1 行', ...plan.club.updates.filter((u) => u.rows > 0).map((u) => `${u.table} ${u.rows} 行`)].join('；')}。
--- 回滚：同结构反向 UPDATE（${NEW} → ${OLD}），同样带 PRAGMA defer_foreign_keys = ON。
+-- 期望 changes：${['clubs 1 行', ...plan.club.updates.filter((u) => u.rows > 0).map((u) => `${u.table} ${u.rows} 行`), 'clubs.country 1 行'].join('；')}。
+-- 回滚：同结构反向 UPDATE（${NEW} → ${OLD}），同样带 PRAGMA defer_foreign_keys = ON；
+--       并把国家填回旧值：UPDATE clubs SET country = ${oldCountry === null ? 'NULL' : oldCountry} WHERE id = ${OLD};
 
 PRAGMA defer_foreign_keys = ON;
 ${childUpdates('club', plan.club)}
-UPDATE ${DBS.club.parent} SET id = ${NEW} WHERE id = ${OLD};`;
+UPDATE ${DBS.club.parent} SET id = ${NEW} WHERE id = ${OLD};
+-- 队壳国家重声明（v6.48.0 §10.3）：clubs.country 是档位 c2「会籍与队壳国家一致」的比对基准。
+-- 必须放在父行 id 搬迁之后——那时该行 id 已经是 ${NEW}，写在前面对不上任何行（会静默空转）。
+UPDATE clubs SET country = ${NEW_COUNTRY} WHERE id = ${NEW};`;
 }
 
 // ---------- 落盘 ----------
@@ -257,6 +291,7 @@ if (files['02-auth-tour-team-id.sql']) {
 }
 if (files['03-club-rekey-clubs-id.sql']) {
   execLines.push(`| club 换壳 | \`npx wrangler d1 execute whl-club ${REMOTE ? '--remote' : '--local'} --command "<03 文件去掉注释后的语句序列>"\` | 待执行 |`);
+  execLines.push(`| 档位重算 | 管理端「成长档位」页 → 该队（或全量）执行一次重算 | 待执行 |`);
 }
 writeFileSync(
   join(OUT, 'README.md'),
@@ -278,9 +313,15 @@ ${report.join('\n')}
 |---|---|---|
 ${execLines.join('\n')}
 
+## 换壳后的档位重算（v6.48.0 §10.3）
+
+换壳改了 \`clubs.id\` 与 \`clubs.country\`，走的是手写 SQL、没经过管理端入口，**档位重算不会自动触发**（自动挂钩只在建档 / 改国家 / 转会 / 解约 / 合同导入 / 球员导入上）。执行 03 之后必须补一步：管理端「成长档位」页对该队执行一次重算（或全量）——否则 c1「来源球队 = 队壳」、c2「会籍 = 队壳国家」会停在旧壳的判定上。
+
+本次声明的队壳国家：${NEW_COUNTRY} ${countryName}${oldCountry === null ? '（旧值为空）' : `（旧值 ${oldCountry}）`}。
+
 ## 回滚
 
-各 SQL 文件头注释带反向语句；auth 反向 UPDATE 带 name 守卫（${GUARD ?? '未设守卫——建议补 --guard 重新生成'}）。
+各 SQL 文件头注释带反向语句（03 另含 \`clubs.country\` 的旧值回填）；auth 反向 UPDATE 带 name 守卫（${GUARD ?? '未设守卫——建议补 --guard 重新生成'}）。
 `,
 );
 console.log(report.join('\n'));

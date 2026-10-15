@@ -20,6 +20,7 @@ import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { growthResetStatements } from './growth.ts';
+import { hookTierRecompute } from './growth-tier.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -333,6 +334,11 @@ export async function completeTransfer(
   );
   const results = await db.batch(statements);
   const statusChange = results[statusStmtIndex]?.meta.changes ?? 0;
+  // 归属变更后重算档位（v6.48.0 §10.3）：c1（来源球队 = 队壳）与 c2（会籍 = 队壳国家）都锚在
+  // club_id 上，换队即可能升/降。续约/匹配（amendment）不动归属，跳过；重放（statusChange = 0）不重算。
+  if (statusChange > 0 && !amendment) {
+    await hookTierRecompute(db, { kind: 'players', playerIds: [transfer.player_id] }, { actor, origin });
+  }
   return { status: statusChange > 0 ? 'completed' : 'already' };
 }
 
@@ -419,6 +425,11 @@ export async function completeTermination(
   );
   const results = await db.batch(statements);
   const statusChange = results[statusStmtIndex]?.meta.changes ?? 0;
+  // 去归属后重算档位（v6.48.0 §10.3）：club_id 归 NULL ⇒ c1/c2 记假（缺数据不猜），
+  // 档位落到 1 + c3/c4/c5。重放（statusChange = 0）不重算。
+  if (statusChange > 0) {
+    await hookTierRecompute(db, { kind: 'players', playerIds: [transfer.player_id] }, { actor, origin });
+  }
   return { status: statusChange > 0 ? 'completed' : 'already' };
 }
 

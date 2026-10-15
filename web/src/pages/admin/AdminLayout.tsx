@@ -1,6 +1,7 @@
 // 管理端壳布局：左侧栏 12 项导航 + 子路由出口（v2.1.0 拆分；v6.8.0 加「品牌池」；v6.10.0 加「事件」；
 // v6.20.0 窄屏（≤760px）侧栏改左侧滑出抽屉，桌面 DOM 与样式保持 v6.19.0 不动；
-// v6.28.0 起按域分组（总览单独成首项，其余归四域），路由路径与分组前逐字一致，「消费」改「消费工单」）。
+// v6.28.0 起按域分组（总览单独成首项，其余归四域），路由路径与分组前逐字一致，「消费」改「消费工单」；
+// v6.49.0 加「时刻表」——转会与经营域，运营时刻表 + 只读甘特图）。
 // 非 admin 看到的提示卡与旧 Admin.tsx 一致，不重定向。
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
@@ -31,6 +32,7 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
       { to: '/admin/clubs', label: '俱乐部' },
       { to: '/admin/players', label: '球员' },
       { to: '/admin/growth', label: '成长录入' },
+      { to: '/admin/tier', label: '成长档位' },
       { to: '/admin/imports', label: '导入' },
     ],
   },
@@ -38,6 +40,7 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
     title: '转会与经营',
     items: [
       { to: '/admin/market', label: '转会' },
+      { to: '/admin/schedule', label: '时刻表' },
       { to: '/admin/brands', label: '品牌池' },
       { to: '/admin/shop', label: '消费工单' },
       { to: '/admin/finance', label: '财政' },

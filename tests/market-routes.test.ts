@@ -75,7 +75,7 @@ async function createClub(fx: Fixture, name: string): Promise<number> {
   clubSeq += 1;
   // 巡测队种子只有 9001-9100：本文件跨用例累计的序号要折回这段区间，否则越界后建队 502
   const gameTeamId = 9001 + ((clubSeq - 9001) % 100);
-  const res = await post('/api/admin/clubs', { name, leagueTier: 'premier', gameTeamId }, 'tok-admin', fx.env);
+  const res = await post('/api/admin/clubs', { name, leagueTier: 'premier', gameTeamId, country: 14 }, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   return ((await res.json()) as { club: { id: number } }).club.id;
 }

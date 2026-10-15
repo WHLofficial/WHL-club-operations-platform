@@ -73,7 +73,7 @@ function post(path: string, body: unknown, token: string | undefined, env: Env) 
 let clubSeq = 9000;
 async function createClub(fx: Fixture, name: string): Promise<number> {
   clubSeq += 1;
-  const res = await post('/api/admin/clubs', { name, leagueTier: 'premier', gameTeamId: clubSeq }, 'tok-admin', fx.env);
+  const res = await post('/api/admin/clubs', { name, leagueTier: 'premier', gameTeamId: clubSeq, country: 14 }, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   return ((await res.json()) as { club: { id: number } }).club.id;
 }

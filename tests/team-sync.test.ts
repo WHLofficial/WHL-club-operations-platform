@@ -315,7 +315,7 @@ describe('真实风险：先推成功后本地建档失败 → 错位必须被�
     fx.sqlite.exec(`INSERT INTO clubs (id, name, status, created_at) VALUES (700, '撞名俱乐部', 'active', '2026-01-01T00:00:00Z')`);
     stubFetch();
 
-    const res = await adminPost('/api/admin/clubs', { gameTeamId: 999, name: '撞名俱乐部' }, fx.env);
+    const res = await adminPost('/api/admin/clubs', { gameTeamId: 999, name: '撞名俱乐部', country: 14 }, fx.env);
     expect(res.status).toBe(409);
     // 推送已经发出去了（不可撤销），本地一行没建
     expect(reqs.map((r) => r.path)).toEqual([TEAM_UPSERT_PATH]);

@@ -225,29 +225,8 @@ app.post('/growth/periods', async (c) => {
   return c.json({ ok: true, ...(await loadGrowthPeriod(c.env.DB)) }, 201);
 });
 
-// 档位核定（§10.3）：条件叠加由管理组按现实资料判断，平台只落核定结果与审计
-app.post('/growth/:playerId/tier', async (c) => {
-  const user = await requireAdmin(c.env, c.req.raw);
-  const playerId = Number(c.req.param('playerId'));
-  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
-  const body = (await readJson(c)) as { tier?: unknown } | null;
-  const tier = Number(body?.tier);
-  if (!Number.isInteger(tier) || tier < 1 || tier > 5) throw new HttpError(400, '档位只能是 1-5');
-  const player = await c.env.DB.prepare('SELECT id FROM players WHERE id = ?').bind(playerId).first<{ id: number }>();
-  if (!player) throw new HttpError(404, '找不到这名球员');
-  await c.env.DB.batch([
-    c.env.DB.prepare(`UPDATE players SET growth_tier = ?, updated_at = ${nowSql()} WHERE id = ?`).bind(tier, playerId),
-    createAuditStatement(c.env.DB)({
-      actor: user.id,
-      action: 'growth_tier_set',
-      targetType: 'player',
-      targetId: playerId,
-      origin: 'user',
-      after: { tier },
-    }),
-  ]);
-  return c.json({ ok: true, tier });
-});
+// 档位核定（§10.3）自 v6.48.0 起搬到 routes/admin/growth-tier.ts（自动核定 + 人工覆盖/锁定），
+// 路径不变：GET|POST /growth/:playerId/tier 与 POST /growth/:playerId/tier/unlock。
 
 // ---- v6.16.0：按场次的花名册批量补录台（管理端三个端点）----
 // v6.46.0 起「能录」与「计 XP」解耦：

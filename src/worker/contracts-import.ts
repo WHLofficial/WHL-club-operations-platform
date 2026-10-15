@@ -14,6 +14,7 @@ import { CPU_CLUB_IDS_SQL, cpuClubIds } from './growth.ts';
 import { protectionTicksFor } from '../core/bypass-rules.ts';
 import { windowBaseTicks } from './contract-ticks.ts';
 import { rowDisplayName } from '../core/player-name.ts';
+import { hookTierRecompute } from './growth-tier.ts';
 
 const CHUNK_ROWS = 200; // 每 db.batch 一个事务批次
 
@@ -266,6 +267,11 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
       }),
     );
     await env.DB.batch(statements);
+    // 认领改了归属 ⇒ 档位重算（v6.48.0 §10.3）：c1（来源球队 = 队壳）与 c2（会籍 = 队壳国家）
+    // 都锚在 club_id 上。只对认领行；重放时认领 UPDATE 被守卫挡下，重算只写差异、不重复写。
+    if (claimIds.length > 0) {
+      await hookTierRecompute(env.DB, { kind: 'players', playerIds: claimIds }, { actor, origin: 'user' });
+    }
     written += slice.length;
     inserted += insertCount;
   }

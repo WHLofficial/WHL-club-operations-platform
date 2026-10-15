@@ -3,6 +3,7 @@
 // v6.19.0 球员库窄屏卡片化，v6.20.0 加全路由 375 零溢出扫描⑫ + 管理抽屉开合⑬，
 // v6.21.0 加成长补录卡片流⑭ + 教练台粘性首列⑮；v6.22.0 加公开阅读几何⑯；
 // v6.46.0 加球员页「比赛」页签㉑（11 列表 / 赛季分组 / 合计行 / 375 卡内不横滑，端点打桩）；
+// v6.48.0 加成长档位㉒（预览形状 / 建档必填国家 / 改国家后重算 + 变更清单 / 球员页依据）；
 // v6.23.0 转会合并：/offers 与 /negotiations 换址到 /market/desk，加 ⑤b 换址 / ⑤c 转会台结构 / ⑤d 匿名）：
 // playwright-core + 系统 Chrome，对 dev 8791 做黑盒验证。
 //
@@ -3449,6 +3450,106 @@ async function main() {
       } finally {
         await page.unroute(matchesStub);
         await page.setViewportSize({ width: 1280, height: 900 });
+      }
+    });
+    await check('㉒ 成长档位（v6.48.0）：预览形状 / 建档必填国家 / 改国家后重算 + 变更清单 / 球员页依据', async () => {
+      // 只打 API（这一版的交互集中在管理端「成长档位」页与球员页徽章，几何不是重点）。
+      // 管理端 cookie 走页内 fetch：Playwright 的 APIRequestContext 不认 127.0.0.1 是可信源，
+      // 带不上 __Host- 的 Secure cookie（② 里踩过同一个坑）。
+      if (!page.url().startsWith(BASE)) await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+      const api = (path, init) =>
+        page.evaluate(
+          async ({ path, init }) => {
+            const r = await fetch(path, { credentials: 'same-origin', ...(init ?? {}) });
+            let body = null;
+            try {
+              body = await r.json();
+            } catch {
+              /* 非 JSON（500 的纯文本）不影响断言 */
+            }
+            return { status: r.status, body };
+          },
+          { path, init },
+        );
+
+      // ① 预览：五条件说明 + 计数 + 明细，且不落库（applied=false / batches=0）
+      const preview = await api('/api/admin/growth/tier-recompute');
+      assert(preview.status === 200, `档位预览状态码 ${preview.status}`);
+      assert(preview.body?.applied === false && preview.body?.batches === 0, `预览不该写库：${JSON.stringify({ applied: preview.body?.applied, batches: preview.body?.batches })}`);
+      assert(typeof preview.body?.scanned === 'number', '预览缺 scanned');
+      assert(
+        (preview.body?.conditions ?? []).map((c) => c.key).join(',') === 'c1,c2,c3,c4,c5' &&
+          (preview.body?.conditions ?? []).map((c) => c.points).join(',') === '1,1,1,2,1',
+        `条件说明不对：${JSON.stringify(preview.body?.conditions)}`,
+      );
+
+      // ② 变更清单与未设国家的队：形状（空数组也是合法结果）
+      const changes = await api('/api/admin/growth/tier-changes?limit=5');
+      assert(changes.status === 200 && Array.isArray(changes.body?.entries), `变更清单形状不对：${changes.status}`);
+      const noCountry = await api('/api/admin/growth/tier-clubs-without-country');
+      assert(noCountry.status === 200 && Array.isArray(noCountry.body?.clubs), `未设国家的队形状不对：${noCountry.status}`);
+      for (const c of noCountry.body.clubs) {
+        assert(c.countryName === null && typeof c.players === 'number', `未设国家的队元素形状不对：${JSON.stringify(c)}`);
+      }
+
+      // ③ 建档必填队壳国家：缺了就是 400，且不建档（tour 里 777 是本地基线队，走不到推送分支）
+      const created = await api('/api/admin/clubs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gameTeamId: 777 }),
+      });
+      if (created.status === 502) {
+        console.log('（跳过建档必填断言：本地未配 TEAM_SYNC_SECRET 且 tour 无此队）');
+      } else {
+        assert(created.status === 400, `缺国家建档应 400，实见 ${created.status}`);
+        assert(String(created.body?.error ?? '').includes('必须选择队壳国家'), `缺国家文案不对：${created.body?.error}`);
+      }
+
+      // ④ 公开球员页：档位依据（五条件三态 + 自动值 + 锁定态）
+      const sampled = await page.request.get(`${BASE}/api/players?limit=1`);
+      const sample = sampled.status() === 200 ? (await sampled.json()).players?.[0] : null;
+      if (!sample) {
+        console.log('（跳过球员页档位依据：本地球员库为空）');
+      } else {
+        const growth = await page.request.get(`${BASE}/api/players/${sample.id ?? sample.fcId}/growth`);
+        assert(growth.status() === 200, `球员成长端点状态码 ${growth.status()}`);
+        const g = (await growth.json()).player;
+        assert(Array.isArray(g?.tierBasis?.conditions) && g.tierBasis.conditions.length === 5, `档位依据条件条数不对：${JSON.stringify(g?.tierBasis)}`);
+        assert(typeof g.tierBasis.autoTier === 'number' && typeof g.tierBasis.locked === 'boolean', '档位依据缺 autoTier / locked');
+        assert(g.tierBasis.conditions.every((c) => typeof c.hit === 'boolean' && typeof c.missing === 'boolean'), '条件三态字段缺失');
+      }
+
+      // ⑤ 改队壳国家 → 该队重算 → 回读变更清单（写的是本地库；旧值能读到就写回去）
+      const dir = await page.request.get(`${BASE}/api/clubs/directory`);
+      const clubs = dir.status() === 200 ? (await dir.json()).clubs ?? [] : [];
+      if (clubs.length === 0) {
+        console.log('（跳过改国家流程：本地俱乐部目录为空）');
+      } else {
+        const clubId = clubs[0].id;
+        const before = await api('/api/admin/clubs');
+        const oldCountry = before.status === 200 ? (before.body?.clubs ?? []).find((c) => c.id === clubId)?.country ?? null : null;
+        const set = await api(`/api/admin/clubs/${clubId}/country`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ country: 14 }),
+        });
+        assert(set.status === 200, `改国家状态码 ${set.status}`);
+        assert(set.body?.country === 14 && set.body?.countryName === 'England', `改国家回执不对：${JSON.stringify(set.body)}`);
+        assert(typeof set.body?.tier?.up === 'number' && typeof set.body?.tier?.down === 'number', `改国家应回报重算计数：${JSON.stringify(set.body?.tier)}`);
+        const after = await api('/api/admin/growth/tier-changes?limit=20');
+        assert(
+          (after.body?.entries ?? []).some((e) => e.action === 'club_country_set' && e.targetId === clubId),
+          `变更清单里没有这次 club_country_set（#${clubId}）`,
+        );
+        if (oldCountry === null) {
+          console.log(`（本地俱乐部 #${clubId} 的队壳国家留作 England——旧值本就是空，端点不接受置空）`);
+        } else if (oldCountry !== 14) {
+          await api(`/api/admin/clubs/${clubId}/country`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ country: oldCountry }),
+          });
+        }
       }
     });
   } finally {

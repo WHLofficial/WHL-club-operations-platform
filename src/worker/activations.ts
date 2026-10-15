@@ -9,6 +9,7 @@ import { activationFee, matchDiff } from '../core/bypass-rules.ts';
 import { TRAINEE_ACTIVATION_FEE, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { availableBalance } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
+import { assertOpOpen } from './ops-schedule.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
 import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement } from '../lib/audit.ts';
@@ -55,6 +56,8 @@ export async function createActivation(
 
   const win = await getOpenWindow(db);
   if (!win) throw new HttpError(409, '转会窗口没开，现在不能激活', 'no_window');
+  // v6.49.0 运营时刻表：激活自己的时段（默认「不限制」= 与上线前逐字一致，只剩上面那道窗口闸）
+  await assertOpOpen(db, 'transfer_activation');
 
   const player = await db
     .prepare(`SELECT p.id, p.name, p.club_id, p.status, ${sqlDisplayName('p')} AS display_name FROM players p WHERE p.id = ?`)
@@ -196,6 +199,8 @@ export async function submitMatch(
   const db = env.DB;
   const listingId = Number(listingIdInput);
   if (!Number.isInteger(listingId) || listingId <= 0) throw new HttpError(400, 'listingId 应为挂牌 ID');
+  // v6.49.0 运营时刻表：匹配窗不随转会窗走（竞价截止后 24h 常跨关窗），所以它只有自己这一道闸
+  await assertOpOpen(db, 'transfer_match');
 
   const listing = await db
     .prepare(`SELECT id, player_id, seller_club_id, activated_by, status, season, window_seq FROM listings WHERE id = ?`)

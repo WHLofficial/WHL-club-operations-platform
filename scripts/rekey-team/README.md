@@ -23,14 +23,15 @@
 # 收口模式（米兰口径）：平台 clubs.id 已是新号，只搬 tour 与 auth
 node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 --guard 'AC米兰(CPU)'
 
-# 换壳模式：clubs.id 一起从 old 搬到 new，club 库子表生成 03 工件
-node scripts/rekey-team/rekey-team.mjs --old 2 --new 997 --guard '旧队名' --touch-club
+# 换壳模式：clubs.id 一起从 old 搬到 new，club 库子表生成 03 工件（--new-country 必填）
+node scripts/rekey-team/rekey-team.mjs --old 2 --new 997 --guard '旧队名' --touch-club --new-country 14
 
 # 生产预演（--remote 查真库，auth 侧自动切到 ../WHL-auth-service 执行）
 node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 --guard 'AC米兰(CPU)' --remote
 ```
 
 - `--guard '队名'`：auth UPDATE 的 name 守卫，强烈建议总是带（防新号将来被别的队占用时误改）
+- `--new-country <NationID>`：队壳国家（如 14 = 英格兰、155 = China PR），**换壳模式必填**；`clubs.country` 是档位 c2「会籍与队壳国家一致」的比对基准（v6.48.0 §10.3），换壳时由管理组按新壳的现实事实重新声明，不许沿用旧值也不许留空。收口模式忽略
 - `--out DIR`：工件输出目录，默认 `scripts/prod-<日期>-rekey-<old>-to-<new>`
 - `--auth-cwd`：覆盖 auth 仓目录（默认 `../WHL-auth-service`，仅 `--remote` 时用到）
 
@@ -45,8 +46,12 @@ node scripts/rekey-team/rekey-team.mjs --old 47 --new 131681 --guard 'AC米兰(C
 
 - `01-tour-rekey-team-id.sql`：`PRAGMA defer_foreign_keys = ON` + 子表 UPDATE + `team.id` 父行，子表即使 0 行也写上（幂等保障）
 - `02-auth-tour-team-id.sql`：`tour_team_id`（及换壳模式的 `club_id`）单行 UPDATE，带 name 守卫
-- `03-club-rekey-clubs-id.sql`（仅换壳模式）：同 01 结构，`clubs.id` + 全部子表
+- `03-club-rekey-clubs-id.sql`（仅换壳模式）：同 01 结构，`clubs.id` + 全部子表 + `clubs.country` 重声明（写在父行 id 搬迁之后，`WHERE id = <new>`）
 - `README.md`：预演核查报告 + 逐条执行命令 + 实测记录表格模板 + 回滚说明
+
+## 换壳后必须补一步档位重算（v6.48.0 §10.3）
+
+换壳改了 `clubs.id` 与 `clubs.country`，走的是手写 SQL、没经过管理端入口，**档位重算不会自动触发**（自动挂钩只在建档 / 改国家 / 转会 / 解约 / 合同导入 / 球员导入上）。执行 03 之后到管理端「成长档位」页对该队执行一次重算（或全量），否则 c1「来源球队 = 队壳」、c2「会籍 = 队壳国家」会停在旧壳的判定上。生成的工件 README 里也带这一行。
 
 ## 执行通道硬约束（同米兰口径）
 

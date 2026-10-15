@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { api, apiDelete, apiPost, type AdminClubRow, type StadiumAdmin } from '../../lib/api.ts';
 import { ADMIN_CLUBS_KEY, TEAM_SYNC_KEY, fetchAdminClubs, fetchTeamSync } from '../../lib/adminQueries.ts';
-import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
+import { LEAGUE_TIER_LABEL, nationById } from '../../lib/ref.ts';
 import { influenceCoefText } from '../../lib/influence.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
@@ -21,6 +21,9 @@ export default function ClubsPage() {
   );
 }
 
+// 队壳国家下拉：FC 国家表按中文名排序（v6.48.0 §10.3，建档必填、可后改）
+const NATION_OPTIONS = [...nationById.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+
 function ClubsSection() {
   const { show, toastNode } = useToast();
   const { dateTime, date } = useTimeFmt();
@@ -28,8 +31,10 @@ function ClubsSection() {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [gameTeamId, setGameTeamId] = useState('');
+  const [country, setCountry] = useState('');
   const [prefilling, setPrefilling] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [countryEdit, setCountryEdit] = useState<{ club: string; clubId: number; value: string } | null>(null);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
   const [stadium, setStadium] = useState<{ club: string; clubId: number; form: StadiumForm; tierName: string | null; fans: number; influence: StadiumAdmin['influence'] } | null>(null);
 
@@ -70,10 +75,12 @@ function ClubsSection() {
         {
           name: name.trim(),
           gameTeamId: gameTeamId.trim(),
+          country: Number(country),
         },
       );
       setName('');
       setGameTeamId('');
+      setCountry('');
       if (res.authLinked === false) {
         show(`${res.club.name} 已建，但认证中心目录登记失败——稍后点列表里的「重新登记」。`, true);
       } else if (res.pushedToTour) {
@@ -165,6 +172,22 @@ function ClubsSection() {
     }
   }
 
+  async function saveCountry() {
+    if (!countryEdit) return;
+    try {
+      const res = await apiPost<{ ok: boolean; countryName: string | null; tier: { up: number; down: number } }>(
+        `/api/admin/clubs/${countryEdit.clubId}/country`,
+        { country: Number(countryEdit.value) },
+      );
+      const moved = res.tier.up + res.tier.down;
+      show(`${countryEdit.club} 的队壳国家已改为 ${res.countryName ?? countryEdit.value}${moved > 0 ? `，该队 ${moved} 名球员档位随之重算。` : '。'}`);
+      setCountryEdit(null);
+      reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '国家保存失败', true);
+    }
+  }
+
   async function toggleBan(club: AdminClubRow) {
     try {
       if (club.transferBanned) {
@@ -203,7 +226,18 @@ function ClubsSection() {
           俱乐部名字
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="留空则取赛事系统队名" maxLength={40} />
         </label>
-        <button className="btn" type="submit" disabled={creating || !gameTeamId.trim()}>
+        <label className="field">
+          队壳国家
+          <select value={country} onChange={(e) => setCountry(e.target.value)}>
+            <option value="">必选</option>
+            {NATION_OPTIONS.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="btn" type="submit" disabled={creating || !gameTeamId.trim() || !country}>
           {creating ? '建队中…' : '建俱乐部'}
         </button>
       </form>
@@ -211,6 +245,8 @@ function ClubsSection() {
         联赛级别不再建队时定死：由各队在本赛季报名的定级赛事（顶级/次级联赛）自动派生。球队 ID 必须与游戏内一致——
         赛事系统里还没有这支队时会自动在赛事系统建队（同一个号），两边一起建；俱乐部以该 ID 建档并在认证中心自动登记，
         登记失败可稍后点「重新登记」。反过来在赛事系统建队，也会同步到这里建俱乐部。
+        <br />
+        队壳国家（v6.48.0）是成长档位自动核定的比对基准之一（球员会籍与队壳国家一致 +1），必须按现实录入；填错可点列表里的「国家」改。
       </p>
 
       {clubs === null ? (
@@ -224,6 +260,7 @@ function ClubsSection() {
               <tr>
                 <th>俱乐部</th>
                 <th>级别</th>
+                <th>队壳国家</th>
                 <th>绑定教练</th>
                 <th>最近认证码</th>
                 <th>操作</th>
@@ -237,6 +274,16 @@ function ClubsSection() {
                     {club.transferBanned && <span className="badge red" title="挂单/出价/海捞/议价已被拦下">转会冻结</span>}
                   </td>
                   <td>{club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : <span className="muted">未定级</span>}</td>
+                  <td>
+                    {club.countryName ?? (club.country !== null ? `#${club.country}` : <span className="badge red" title="未设国家：该队球员的成长档位条件 c2 判不了">未设</span>)}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      onClick={() => setCountryEdit({ club: club.name, clubId: club.id, value: club.country !== null ? String(club.country) : '' })}
+                    >
+                      国家
+                    </button>
+                  </td>
                   <td>
                     {club.bindings.length === 0 ? (
                       <span className="muted">未绑定</span>
@@ -327,6 +374,35 @@ function ClubsSection() {
               保存主场档案
             </button>
             <button className="btn btn-ghost" type="button" onClick={() => setStadium(null)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {countryEdit && (
+        <div className="code-card">
+          <p>
+            <b>{countryEdit.club}</b> 的队壳国家（成长档位 c2 的比对基准，改完该队球员按当前状态重算）
+          </p>
+          <div className="import-grid">
+            <label className="field">
+              国家
+              <select value={countryEdit.value} onChange={(e) => setCountryEdit({ ...countryEdit, value: e.target.value })}>
+                <option value="">请选择</option>
+                {NATION_OPTIONS.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="actions">
+            <button className="btn" type="button" disabled={!countryEdit.value} onClick={saveCountry}>
+              保存国家
+            </button>
+            <button className="btn btn-ghost" type="button" onClick={() => setCountryEdit(null)}>
               取消
             </button>
           </div>

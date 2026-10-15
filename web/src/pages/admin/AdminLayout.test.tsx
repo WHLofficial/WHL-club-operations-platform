@@ -25,14 +25,17 @@ afterEach(() => {
   media.narrow = false;
 });
 
-// 改造前（v6.27.0）的 12 项原文：文案 + to 逐字抄下来，分组后必须一项不差
+// 改造前（v6.27.0）的 12 项原文 + 之后各版新增项：文案 + to 逐字抄下来，分组后必须一项不差
+// （v6.48.0 成长档位 / v6.49.0 时刻表——新增项要同时进 NAV_BEFORE 与 SHAPE_AFTER，别只改一边）
 const NAV_BEFORE: { label: string; to: string }[] = [
   { label: '总览', to: '/admin' },
   { label: '赛季', to: '/admin/seasons' },
   { label: '球员', to: '/admin/players' },
   { label: '成长录入', to: '/admin/growth' },
+  { label: '成长档位', to: '/admin/tier' },
   { label: '导入', to: '/admin/imports' },
   { label: '转会', to: '/admin/market' },
+  { label: '时刻表', to: '/admin/schedule' },
   { label: '俱乐部', to: '/admin/clubs' },
   { label: '品牌池', to: '/admin/brands' },
   { label: '事件', to: '/admin/events' },
@@ -46,8 +49,8 @@ const NAV_BEFORE: { label: string; to: string }[] = [
 const SHAPE_AFTER: { title: string | null; labels: string[] }[] = [
   { title: null, labels: ['总览'] },
   { title: '赛事运营', labels: ['赛季', '事件'] },
-  { title: '球队与名册', labels: ['俱乐部', '球员', '成长录入', '导入'] },
-  { title: '转会与经营', labels: ['转会', '品牌池', '消费工单', '财政'] },
+  { title: '球队与名册', labels: ['俱乐部', '球员', '成长录入', '成长档位', '导入'] },
+  { title: '转会与经营', labels: ['转会', '时刻表', '品牌池', '消费工单', '财政'] },
   { title: '系统', labels: ['系统'] },
 ];
 
@@ -84,7 +87,7 @@ function navShape(el: HTMLElement): { title: string | null; labels: string[] }[]
 }
 
 describe('管理端侧栏四域分组（v6.28.0）', () => {
-  it('TC-NAV-D1/D2：12 项一项不差，to 与分组前逐字一致；组标题与归属固定', () => {
+  it('TC-NAV-D1/D2：14 项一项不差，to 与分组前逐字一致；组标题与归属固定', () => {
     renderLayout('/admin');
     const side = nav();
     const links = within(side).getAllByRole('link');

@@ -196,7 +196,7 @@ describe('分级派生（v1.2.0：报名定级）', () => {
 
   it('建队双模：派生模式忽略 leagueTier（列 NULL）；回滚模式写休眠列', async () => {
     const fx = freshEnv();
-    const created = await post('/api/admin/clubs', { name: '里昂', leagueTier: 'premier', gameTeamId: 9001 }, 'tok-admin', fx.env);
+    const created = await post('/api/admin/clubs', { name: '里昂', leagueTier: 'premier', gameTeamId: 9001, country: 18 }, 'tok-admin', fx.env);
     expect(created.status).toBe(201);
     const body = (await created.json()) as { club: { id: number; leagueTier: string | null } };
     expect(body.club.leagueTier).toBeNull();
@@ -204,7 +204,7 @@ describe('分级派生（v1.2.0：报名定级）', () => {
 
     // 回滚通道：摘掉 AUTH_DB 即读休眠列，建队写列、派生回读
     fx.env.AUTH_DB = undefined;
-    const legacy = await post('/api/admin/clubs', { name: '波尔多', leagueTier: 'second', gameTeamId: 9002 }, 'tok-admin', fx.env);
+    const legacy = await post('/api/admin/clubs', { name: '波尔多', leagueTier: 'second', gameTeamId: 9002, country: 18 }, 'tok-admin', fx.env);
     expect(legacy.status).toBe(201);
     const legacyBody = (await legacy.json()) as { club: { id: number; leagueTier: string | null } };
     expect(legacyBody.club.leagueTier).toBe('second');

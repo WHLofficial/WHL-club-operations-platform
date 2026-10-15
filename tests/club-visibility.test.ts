@@ -66,7 +66,7 @@ function post(path: string, body: unknown, token: string, env: Env) {
 
 async function bindCoach(fx: Fixture): Promise<number> {
   const auth = attachAuthChannel(fx.env);
-  const res = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'premier', gameTeamId: 9001 }, 'tok-admin', fx.env);
+  const res = await post('/api/admin/clubs', { name: '阿森纳', leagueTier: 'premier', gameTeamId: 9001, country: 14 }, 'tok-admin', fx.env);
   expect(res.status).toBe(201);
   const { club } = (await res.json()) as { club: { id: number } };
   authRegisterClubTeam(auth, club.id, club.id, '阿森纳');

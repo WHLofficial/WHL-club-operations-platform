@@ -104,7 +104,7 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
     fx.env.TOUR_API_BASE = 'http://tour.test';
     fx.env.TEAM_SYNC_SECRET = 'sync-secret';
     stubMachineFetch();
-    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队' }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队', country: 14 }, fx.env);
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
       club: { id: number; name: string };
@@ -123,7 +123,7 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
     fx.env.TEAM_SYNC_SECRET = 'sync-secret';
     stubMachineFetch();
     machineReply = () => ({ status: 409, json: { error: 'conflict', message: '球队 ID #999 已被占用' } });
-    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队' }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队', country: 14 }, fx.env);
     expect(res.status).toBe(502);
     expect(((await res.json()) as { error: string }).error).toContain('赛事系统建队失败：球队 ID #999 已被占用');
     expect(sqlGet(fx.sqlite, 'SELECT id FROM clubs WHERE id = 999')).toBeUndefined();
@@ -133,7 +133,7 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
     const fx = freshEnv();
     fx.env.TOUR_API_BASE = 'http://tour.test';
     stubMachineFetch();
-    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队' }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队', country: 14 }, fx.env);
     expect(res.status).toBe(502);
     expect(((await res.json()) as { error: string }).error).toContain('未配置 TEAM_SYNC_SECRET');
     expect(sqlGet(fx.sqlite, 'SELECT id FROM clubs WHERE id = 999')).toBeUndefined();
@@ -141,7 +141,7 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
 
   it('成功（回滚通道无 AUTH_DB）：指定 id 建队、名字取 tour 预填、authLinked=null', async () => {
     const fx = freshEnv();
-    const res = await post('/api/admin/clubs', { gameTeamId: 500 }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 500, country: 14 }, fx.env);
     expect(res.status).toBe(201);
     const body = (await res.json()) as { club: { id: number; name: string }; authLinked: boolean | null };
     expect(body.club).toMatchObject({ id: 500, name: '游戏里的队' });
@@ -151,7 +151,7 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
   it('成功（auth 接入）：register 带 tour_team_id/club_id 落 auth 目录，authLinked=true', async () => {
     const fx = freshEnv(true);
     stubMachineFetch();
-    const res = await post('/api/admin/clubs', { gameTeamId: 500, name: '自定义名' }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 500, name: '自定义名', country: 14 }, fx.env);
     expect(res.status).toBe(201);
     const body = (await res.json()) as { club: { id: number; name: string }; authLinked: boolean | null };
     expect(body.club).toMatchObject({ id: 500, name: '自定义名' });
@@ -164,11 +164,11 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
   it('id 撞号 → 409；auth register 失败不回滚 clubs 行（201 authLinked=false），重试端点可修复', async () => {
     const fx = freshEnv(true);
     fx.sqlite.exec(`INSERT INTO clubs (id, name, status, created_at) VALUES (500, '占号队', 'active', '2026-01-01T00:00:00Z')`);
-    expect((await post('/api/admin/clubs', { gameTeamId: 500 }, fx.env)).status).toBe(409);
+    expect((await post('/api/admin/clubs', { gameTeamId: 500, country: 14 }, fx.env)).status).toBe(409);
 
     stubMachineFetch();
     machineReply = () => ({ status: 400, json: { error: 'club_taken', message: '该俱乐部已关联其他球队' } });
-    const res = await post('/api/admin/clubs', { gameTeamId: 600, name: '新队' }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 600, name: '新队', country: 14 }, fx.env);
     expect(res.status).toBe(201);
     expect(((await res.json()) as { authLinked: boolean }).authLinked).toBe(false);
 
@@ -183,7 +183,7 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
     fx.env.TOUR_API_BASE = 'http://tour.test';
     fx.env.TEAM_SYNC_SECRET = 'sync-secret';
     stubMachineFetch();
-    const res = await post('/api/admin/clubs', { gameTeamId: 500 }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 500, country: 14 }, fx.env);
     expect(res.status).toBe(201);
     expect(((await res.json()) as { pushedToTour: boolean }).pushedToTour).toBe(false);
     expect(machineRequests).toEqual([]);
@@ -195,7 +195,7 @@ describe('管理端建队：游戏球队 ID 必填（v2.3.0）', () => {
     fx.env.TEAM_SYNC_SECRET = 'sync-secret';
     fx.sqlite.exec(`INSERT INTO clubs (id, name, status, created_at) VALUES (700, '新队', 'active', '2026-01-01T00:00:00Z')`);
     stubMachineFetch();
-    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队' }, fx.env);
+    const res = await post('/api/admin/clubs', { gameTeamId: 999, name: '新队', country: 14 }, fx.env);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toContain('俱乐部名字已存在');
     // 推送不可撤销，这是有意接受的代价：错位由对账页的 onlyTour 一类显形并可一键补建

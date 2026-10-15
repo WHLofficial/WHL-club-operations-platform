@@ -44,8 +44,12 @@ const AdminOverviewPage = lazy(() => import('./pages/admin/OverviewPage.tsx'));
 const AdminSeasonsPage = lazy(() => import('./pages/admin/SeasonsPage.tsx'));
 const AdminPlayersPage = lazy(() => import('./pages/admin/PlayersPage.tsx'));
 const AdminGrowthPage = lazy(() => import('./pages/admin/GrowthEntryPage.tsx'));
+// 成长档位（v6.48.0 §10.3）：自动核定一键重算 + 未设国家的队 + 变更清单
+const AdminTierPage = lazy(() => import('./pages/admin/TierPage.tsx'));
 const AdminImportsPage = lazy(() => import('./pages/admin/ImportsPage.tsx'));
 const AdminMarketPage = lazy(() => import('./pages/admin/MarketPage.tsx'));
+// 运营时刻表（v6.49.0）：逐项时段 + 只读甘特图
+const AdminSchedulePage = lazy(() => import('./pages/admin/SchedulePage.tsx'));
 const AdminClubsPage = lazy(() => import('./pages/admin/ClubsPage.tsx'));
 // CPU 接管向导（v6.27.0）：从俱乐部管理 CPU 行的入口进，侧栏不加项
 const AdminCpuConvertPage = lazy(() => import('./pages/admin/CpuConvertPage.tsx'));
@@ -173,8 +177,10 @@ export default function App() {
             <Route path="seasons" element={<AdminSeasonsPage />} />
             <Route path="players" element={<AdminPlayersPage />} />
             <Route path="growth" element={<AdminGrowthPage />} />
+            <Route path="tier" element={<AdminTierPage />} />
             <Route path="imports" element={<AdminImportsPage />} />
             <Route path="market" element={<AdminMarketPage />} />
+            <Route path="schedule" element={<AdminSchedulePage />} />
             <Route path="clubs" element={<AdminClubsPage />} />
             <Route path="clubs/cpu-convert" element={<AdminCpuConvertPage />} />
             <Route path="brands" element={<AdminBrandsPage />} />

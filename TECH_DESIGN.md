@@ -86,6 +86,7 @@ web/          React SPA（挂牌板/球队中心/球员卡/管理端/审核队�
 | 赛果衍生数据（奖金/门票收入/XP） | 平台 | — | 赛果确认钩子生成，存平台库 |
 | AstrBot 三插件库（revenue/growth/negotiation） | 冻结退役 | 迁移期一次性导出 | 切换后弃用 |
 | 积分插件库 | 积分插件 | 不互通 | 仅预留 `exchange_reserved` 流水类型 |
+| **队壳国家（clubs.country，v6.48.0）** | **平台（管理端人工录）** | **平台（档位重算 c2）** | **现实事实，只能人工录**：建档必填、列表可改；机器通道/批量同步建队留空 ⇒ 进「未设国家的队」提示补录，该队球员 c2 记数据缺失（不猜） |
 
 ## 5. 数据模型草图
 
@@ -120,7 +121,8 @@ CREATE TABLE players (
   prestige REAL DEFAULT 0,           -- 国际声望 1-5（FC26db internationalrep 导入映射；无源时管理组手填）
   market_value REAL,                 -- 身价：管理员赋值（无公式）
   status TEXT DEFAULT 'normal',      -- normal/listed/trainee/free/retired
-  growth_tier INTEGER DEFAULT 1,     -- 成长档位 1-5
+  growth_tier INTEGER DEFAULT 1,     -- 成长档位 1-5（v6.48.0 起由五条件自动核定，见 §10.3）
+  growth_tier_locked INTEGER DEFAULT 0, -- v6.48.0：人工核定标记（=1 时自动重算跳过该行；解除锁定即回到自动值）
   growth_xp REAL DEFAULT 0,          -- 当前成长经验
   is_future_star INTEGER DEFAULT 0,  -- 未来之星（档位+2；源=FC26db Growth+ 名单 + 管理组核定）
   china_plan INTEGER DEFAULT 0,      -- 中国球员加强计划（naID=155 China PR 自动判定，见 §5.2）
@@ -163,6 +165,7 @@ CREATE TABLE players (
 CREATE TABLE clubs (
   id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
   league_tier TEXT,                 -- v1.2.0 起休眠：级别由赛季定级赛事报名派生（worker/tier.ts）；AUTH_DB 未配置时回落读此列（回滚通道）
+  country INTEGER,                  -- v6.48.0：队壳国家（FC NationID 空间），档位 c2 的比对基准；现实事实，只能人工录
   logo_key TEXT, status TEXT, created_at TEXT
 );
 CREATE TABLE club_bindings (        -- v1.0.0 起休眠（真源 auth team_binding；保留防回滚，AUTH_DB 未配置时回落读此表）
@@ -677,9 +680,49 @@ P0：管理组用奖金模板手动记账（选赛事类型 → 自动算好待�
 
 实现：结算生成「升级待办」→ 教练（或管理组）选方案 → **选满本方案要发的 PlayStyle**（档 3 起才有徽章方案；`POST /api/growth/levelup/:playerId` 带 `picks`）→ 同批写入 CA、台账计数（`badges_silver`/`badges_gold`，上限 **12 银/3 金**）与明细行 `player_playstyles`（`source='growth'`）→ 审计留痕。方案表存 config；徽章身份（具体 PlayStyle）**平台自己记账**（v3.3.0 起，见 §5.2 与决策表第 10 条），FC 阵容文件仍由管理组人工落实。
 
-### 10.3 成长档位（初始 1、上限 5，管理组核定）
+### 10.3 成长档位（初始 1、上限 5；v6.48.0 起自动核定 + 人工覆盖）
 
-条件叠加：现实效力俱乐部与游戏队壳一致 +1；第一国籍（会籍）与队壳国家一致 +1；中国国籍（大陆）+1；未来之星 +2；≤18 岁 +1。
+条件叠加（`src/core/growth-tier.ts` 是唯一真源：SQL 表达式供生产用，`evaluateGrowthTier` 是 TS 镜像供端点文案与单测，两侧在同一组 fixture 上逐条对齐）：
+
+| 键 | 条件 | 分值 | 判定口径 |
+|---|---|---|---|
+| c1 | 现实效力与队壳一致 | +1 | `game_attrs.TeamID = players.club_id`（「现实效力」按**来源球队**，用户口径 2026-10-14） |
+| c2 | 会籍与队壳国家一致 | +1 | `game_attrs.naID = clubs.country`（队壳国家是人工录入的现实事实） |
+| c3 | 中国国籍（大陆） | +1 | `china_plan = 1`（导入侧只认 naID 155 China PR；港澳台 158/172/213 不算） |
+| c4 | 未来之星 | +2 | `is_future_star = 1`（管理组名单） |
+| c5 | ≤18 岁 | +1 | `players.age <= 18`（导入时由 birthdate 算一次，本版不做年龄滚动） |
+
+`tier = MIN(1 + c1 + c2 + c3 + 2·c4 + c5, 5)`。**缺数据不猜**：`club_id` / `TeamID` / `naID` / `clubs.country` 缺任一，对应条件记假并标「数据缺失」（不是当命中）——端点把它作为第三态下发，管理端与球员页都能看出「这条为什么没算上」。
+
+**数据**：迁移 0068 加 `clubs.country`（可空，20 行生产队壳的初始值人工核实写入）与 `players.growth_tier_locked`（人工覆盖标记）。`src/core/nations.ts` 是 `web/assets/ref/nation.json`（218 条 FC NationID）的 Worker 侧镜像，逐条一致性由 `tests/nations.test.ts` 断言。
+
+**重算引擎**（`src/worker/growth-tier.ts`）：只写差异行（`growth_tier <> 自动值`），锁定行一律跳过；每条 UPDATE 带 `(id, 旧档, 未锁定)` 守卫，审计以 `changes() > 0` 为闸（与 `ledgerMovement` 同形），写入与留痕同生共死；按 100 条一批（每条 = UPDATE + 审计两语句），`IN (...)` 绑定参数按 90 分片。三种 scope：单批球员 id / 某队（改队壳国家）/ 全量（一键重算与首次回填）。预览走同一套 SQL、不写库（`applied=false`）。
+
+**触发点**（漏一处就是静默错档位，故有源码扫描测试锁住清单）：
+
+| 触发 | 挂钩位置 |
+|---|---|
+| 球员导入收尾 | `players-import.ts` confirmImport 末尾（fcIds 范围） |
+| 合同导入认领 | `contracts-import.ts` 每 chunk 的认领 UPDATE 之后（playerIds 范围） |
+| 转会过户 / 解约去归属 | `transfers.ts` completeTransfer / completeTermination 的 batch 之后（`statusChange > 0` 才跑；续约/匹配 amendment 不动归属，跳过） |
+| 管理端改队壳国家 | `routes/admin/clubs.ts` POST /clubs/:id/country |
+| 管理端改未来之星 | `routes/admin/players.ts` PATCH /players/:id 与 POST /players/batch |
+| 单人核定 / 批量改档 | 写值 + 置锁（不重算）；解除锁定立即重算 |
+| 一键全量重算 | `routes/admin/growth-tier.ts` 预览 → 确认 |
+
+不挂钩：赛季结算、窗口机器（它们不写归属/国家/未来之星）。
+
+**端点**（管理端 `routes/admin/growth-tier.ts`）：`GET|POST /growth/tier-recompute`（预览 / 执行，可带 `clubId` 只算一队）、`GET /growth/tier-changes`（变更清单，读 `audit_log` 的 `growth_tier%`）、`GET /growth/tier-clubs-without-country`（未设国家的队，提示补录）、`GET|POST /growth/:playerId/tier`（明细 / 人工核定=写值+置锁）、`POST /growth/:playerId/tier/unlock`（清标记 → 立即重算 → 读回实际档位）。公开 `GET /players/:id/growth` 增加 `player.tierBasis`（自动值 / 锁定态 / 队壳国家 / 五条件三态）。
+
+**审计**：`growth_tier_set`（人工与自动共用，`after.auto` 区分；自动行带 `conditions` 快照）、`growth_tier_recompute`（批次汇总：scope/升降/锁定/批次数）、`growth_tier_unlock`、`club_country_set`（targetType `club`）。机器通道一律 `actor=null`，`origin` 透传调用方。
+
+**管理端**：新页「成长档位」（`web/src/pages/admin/TierPage.tsx`）= 一键重算计数条 + 明细前 200 行 + 未设国家的队 + 变更清单；球员页「档位核定」区改「自动核定，人工可覆盖」（带依据明细与解除锁定）；球队页建档必填队壳国家、列表可改。
+
+**上线后的首次回填**（不进迁移，管理端操作）：一键重算 → 预览 → 确认 → 回读分布；抽查口径按现实事实核对（例：哈兰德 club 14 ≠ TeamID 10 ⇒ 档 1；贝林厄姆 club 2、naID 14 = 阿斯顿维拉 country 14 ⇒ 档 2）。
+
+**两处实现教训**（都是测试闸门抓到的，改动前会静默出错）：
+1. 坏 JSON 兜底不能写 `json_valid(x) AND json_extract(x, …)`——SELECT 投影里 AND 两侧不保证短路，`json_extract` 先求值会抛 `malformed JSON`；必须 `CASE WHEN json_valid(x) THEN … END`，且比较结果套 `COALESCE(…, 0)`，否则 NULL 会顺着 `1 + (c1) + …` 把整条档位表达式污染成 NULL（`MIN(NULL, 5) = NULL`）。
+2. 审计守卫不能复用「旧档」谓词：UPDATE 先执行、旧档在审计求值时已经变了，写出来的审计恒为空。用 `changes() > 0`（`ledger.ts` 的既有形态）。
 
 ### 10.4 换版工具（P2）
 

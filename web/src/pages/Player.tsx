@@ -14,6 +14,7 @@ import {
   type MyClubOverview,
   type PlayerMatchesResponse,
   type PlayerTransfersResponse,
+  type TierConditionDetail,
   type UpgradePlanDto,
 } from '../lib/api.ts';
 import {
@@ -34,6 +35,8 @@ import {
 import { MARKER_EMOJI, MARKER_LABEL, STATUS_LABEL, attrClass } from '../lib/players-library.ts';
 // 雷达辅助（v6.34.0 提取共享件）：starText/groupAverage/axesFor 改从 lib/radar.ts 引入
 import { axesFor, groupAverage, starText } from '../lib/radar.ts';
+// 档位条件短标签（v6.48.0 §10.3）：与管理端「成长档位」页共用
+import { CONDITION_SHORT } from '../lib/tier.ts';
 import { TeamLogo } from '../components/TeamLogo.tsx';
 // 六维雷达（v6.34.0 提取共享件）：详情页与后续对比页共用
 import { AttrRadar } from '../components/AttrRadar.tsx';
@@ -819,9 +822,38 @@ function AttrSheet({
 
 // 成长记录块（§10）：XP 进度、升级方案二选一（带徽章的方案要先选 PlayStyle）、
 // 中国计划自选徽章、徽章墙、事件时间线
+/** 档位依据（v6.48.0 §10.3）：档位徽章 + 五条件三态（命中 / 未命中 / 数据缺失）。
+ *  球员页原本只有一个裸徽章，看不出「为什么是这个档」；锁定态也在这里露出来。 */
+function TierBasisLine({ tier, basis }: { tier: number; basis: NonNullable<GrowthDetail['player']['tierBasis']> }) {
+  return (
+    <p className="tier-basis">
+      <span className="badge gray">成长档位 {tier}</span>
+      {basis.locked ? (
+        <span className="badge red" title="管理组人工核定，自动重算跳过它">
+          人工核定
+          {basis.autoTier !== tier ? `（自动值 ${basis.autoTier}）` : ''}
+        </span>
+      ) : (
+        <span className="muted">自动核定</span>
+      )}
+      <span className="tier-chips">
+        {basis.conditions.map((cond: TierConditionDetail) => (
+          <span
+            key={cond.key}
+            className={`badge${cond.hit ? '' : ' muted'}`}
+            title={cond.hit ? `${cond.label}：+${cond.points}` : cond.missing ? `${cond.label}：数据缺失，没算上（${cond.hint}）` : `${cond.label}：未命中`}
+          >
+            {CONDITION_SHORT[cond.key]}
+          </span>
+        ))}
+      </span>
+      {basis.clubCountryName && <span className="muted">队壳国家 {basis.clubCountryName}</span>}
+    </p>
+  );
+}
+
 function GrowthBlock({
-  growth,
-  armedPlan,
+  growth,  armedPlan,
   armedPlanDef,
   picks,
   chinaPicks,
@@ -874,8 +906,8 @@ function GrowthBlock({
       {p.status === 'trainee' && (
         <p className="hint">训练营球员 v6.45.0 起与正式球员同口径按场次记 XP（训练营赛季那行固定经验另算）。</p>
       )}
-      {p.pendingLevelUps > 0 && p.upgradePlans.length > 0 && (
-        <>
+      {p.tierBasis && <TierBasisLine tier={p.growthTier} basis={p.tierBasis} />}
+      {p.pendingLevelUps > 0 && p.upgradePlans.length > 0 && (        <>
           <div className="upgrade-plans">
             {p.upgradePlans.map((plan, i) => (
               <button

@@ -8,6 +8,13 @@ import { getBoundClub } from '../binding.ts';
 import { createConfigService } from '../../core/config.ts';
 import { applyLevelUp, getUpgradePlans, grantChinaPlaystyles, listPlayerPlaystyles, DEFAULT_UPGRADE_PLANS } from '../growth.ts';
 import { rowDisplayName } from '../../core/player-name.ts';
+import {
+  GROWTH_TIER_MISSING_SELECT,
+  GROWTH_TIER_SELECT,
+  tierConditionDetails,
+  type GrowthTierConditionKey,
+} from '../../core/growth-tier.ts';
+import { nationName } from '../../core/nations.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -36,6 +43,36 @@ app.get('/players/:id/growth', async (c) => {
   );
   if (!player) throw new HttpError(404, '找不到这名球员');
   const playerId = player.id;
+
+  // 档位依据（v6.48.0 §10.3）：五条件逐条命中 / 数据缺失——球员页展示「为什么是这个档」，
+  // 也让人看得见「自动核定」与「人工覆盖（锁定）」的区别
+  const tierRow = await c.env.DB.prepare(
+    `SELECT ${GROWTH_TIER_SELECT}, ${GROWTH_TIER_MISSING_SELECT} FROM players p LEFT JOIN clubs c ON c.id = p.club_id WHERE p.id = ?`,
+  )
+    .bind(playerId)
+    .first<{
+      current_tier: number;
+      locked: number;
+      club_country: number | null;
+      c1: number;
+      c2: number;
+      c3: number;
+      c4: number;
+      c5: number;
+      next_tier: number;
+      miss_c1: number;
+      miss_c2: number;
+    }>();
+  const tierHits: Record<GrowthTierConditionKey, boolean> = {
+    c1: tierRow?.c1 === 1,
+    c2: tierRow?.c2 === 1,
+    c3: tierRow?.c3 === 1,
+    c4: tierRow?.c4 === 1,
+    c5: tierRow?.c5 === 1,
+  };
+  const tierMissing: GrowthTierConditionKey[] = [];
+  if (tierRow?.miss_c1 === 1) tierMissing.push('c1');
+  if (tierRow?.miss_c2 === 1) tierMissing.push('c2');
 
   const config = createConfigService(c.env.DB);
   const xpPerLevel = (await config.getNumber('xp_per_level')) ?? 10;
@@ -69,6 +106,14 @@ app.get('/players/:id/growth', async (c) => {
       name: rowDisplayName(player),
       ca: player.ca,
       growthTier: player.growth_tier,
+      // 档位依据（v6.48.0 §10.3）：自动核定值 + 五条件命中/缺失；locked = 人工覆盖过
+      tierBasis: {
+        autoTier: tierRow?.next_tier ?? player.growth_tier,
+        locked: tierRow?.locked === 1,
+        clubCountry: tierRow?.club_country ?? null,
+        clubCountryName: nationName(tierRow?.club_country ?? null),
+        conditions: tierConditionDetails(tierHits, tierMissing),
+      },
       growthXp: player.growth_xp,
       levelsApplied: player.levels_applied,
       badgesSilver: player.badges_silver,

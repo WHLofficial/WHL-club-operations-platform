@@ -11,12 +11,23 @@ import { getVisibleSeason } from '../../seasons.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, diehardTarget, influenceTierCoef, loadInfluenceTierCoefs } from '../../home.ts';
 import { deriveClubTier, tierCache } from '../../tier.ts';
 import { FACILITY_KEYS } from '../../stadium-ops.ts';
+import { hookTierRecompute } from '../../growth-tier.ts';
+import { nationName } from '../../../core/nations.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
+/** 队壳国家（FC NationID 空间）：查不到国家名即视为无效 id（不猜、不落库） */
+function parseCountry(v: unknown): number {
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !Number.isInteger(n) || nationName(n) === null) {
+    throw new HttpError(400, '必须选择队壳国家（FC 国家编号，如 14 = 英格兰）');
+  }
+  return n;
+}
+
 export interface CreatedClub {
-  club: { id: number; name: string; leagueTier: string | null; status: string; createdAt: string };
+  club: { id: number; name: string; leagueTier: string | null; country: number | null; status: string; createdAt: string };
   authLinked: boolean | null;
 }
 
@@ -38,9 +49,18 @@ export async function createClubFromTourTeam(
     gameTeamId,
     name,
     leagueTier,
+    country,
     operator,
     origin,
-  }: { gameTeamId: number; name: string; leagueTier?: unknown; operator: number | null; origin: AuditOrigin },
+  }: {
+    gameTeamId: number;
+    name: string;
+    leagueTier?: unknown;
+    /** 队壳国家（FC NationID）：手动建档必填（路由校验后传入）；批量同步/机器通道没有现实资料可填，留空 */
+    country?: unknown;
+    operator: number | null;
+    origin: AuditOrigin;
+  },
 ): Promise<CreatedClub> {
   if (!name) throw new HttpError(400, '俱乐部名字不能为空');
   if (name.length > 40) throw new HttpError(400, '俱乐部名字最多 40 个字');
@@ -50,16 +70,19 @@ export async function createClubFromTourTeam(
     throw new HttpError(400, '联赛级别只能是 premier（顶级）或 second（次级）');
   }
   const writeTier = env.AUTH_DB ? null : (leagueTier ?? null);
+  // 队壳国家（v6.48.0 §10.3）：c2「会籍与队壳国家一致」的比对基准，是现实事实、只能人工录。
+  // 留空不猜——这些队会进管理端「未设国家的队」提示，球员 c2 记假（不是当命中）。
+  const writeCountry = country === undefined || country === null || country === '' ? null : parseCountry(country);
   // id 撞号先查（插入冲突会被名字冲突的 catch 混淆，给不出准话）
   const idTaken = await env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(gameTeamId).first<{ id: number }>();
   if (idTaken) throw new HttpError(409, `球队 ID #${gameTeamId} 已被登记册占用`);
   const club = await env.DB.prepare(
-    `INSERT INTO clubs (id, name, league_tier, status, created_at)
-     VALUES (?, ?, ?, 'active', ${nowSql()})
-     RETURNING id, name, league_tier, status, created_at`,
+    `INSERT INTO clubs (id, name, league_tier, country, status, created_at)
+     VALUES (?, ?, ?, ?, 'active', ${nowSql()})
+     RETURNING id, name, league_tier, country, status, created_at`,
   )
-    .bind(gameTeamId, name, writeTier)
-    .first<{ id: number; name: string; league_tier: string | null; status: string; created_at: string }>()
+    .bind(gameTeamId, name, writeTier, writeCountry)
+    .first<{ id: number; name: string; league_tier: string | null; country: number | null; status: string; created_at: string }>()
     .catch(() => null);
   if (!club) throw new HttpError(409, '俱乐部名字已存在');
   // actor 可空（audit_log.actor 允许 NULL）：机器通道推来的建档没有本仓管理员身份，
@@ -70,7 +93,7 @@ export async function createClubFromTourTeam(
     targetType: 'club',
     targetId: club.id,
     origin,
-    after: { name, gameTeamId, leagueTier: writeTier },
+    after: { name, gameTeamId, leagueTier: writeTier, country: writeCountry },
   });
   // auth 目录自动建档（v2.3.0）：register upsert 幂等；失败不回滚 clubs 行，留「重新登记」重试
   let authLinked: boolean | null = null;
@@ -87,6 +110,7 @@ export async function createClubFromTourTeam(
       id: club.id,
       name: club.name,
       leagueTier: club.league_tier,
+      country: club.country,
       status: club.status,
       createdAt: club.created_at,
     },
@@ -96,7 +120,7 @@ export async function createClubFromTourTeam(
 
 app.post('/clubs', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
-  const body = (await readJson(c)) as { name?: unknown; leagueTier?: unknown; gameTeamId?: unknown } | null;
+  const body = (await readJson(c)) as { name?: unknown; leagueTier?: unknown; gameTeamId?: unknown; country?: unknown } | null;
   // v2.3.0：游戏球队 ID 必填——四个 id 空间一致（tour team.id = auth team.tour_team_id = auth club_id = clubs.id），
   // 建队即指定 id，不再让 D1 自增产生第四套号
   const gameTeamId = Number(body?.gameTeamId);
@@ -125,6 +149,8 @@ app.post('/clubs', async (c) => {
     gameTeamId,
     name,
     leagueTier: body?.leagueTier,
+    // 手动建档必填（v6.48.0 §10.3）：队壳国家是 c2 的比对基准，缺了这队球员的会籍条件永远判不出
+    country: parseCountry(body?.country),
     operator: user.id,
     origin: 'user',
   });
@@ -163,8 +189,8 @@ app.post('/clubs/:id/register-auth', async (c) => {
 app.get('/clubs', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const clubs = await c.env.DB.prepare(
-    'SELECT id, name, league_tier, status, transfer_banned, is_cpu, created_at FROM clubs ORDER BY id LIMIT 200',
-  ).all<{ id: number; name: string; league_tier: string; status: string; transfer_banned: number; is_cpu: number; created_at: string }>();
+    'SELECT id, name, league_tier, country, status, transfer_banned, is_cpu, created_at FROM clubs ORDER BY id LIMIT 200',
+  ).all<{ id: number; name: string; league_tier: string; country: number | null; status: string; transfer_banned: number; is_cpu: number; created_at: string }>();
   // 绑定与认证码真源在 auth 库（v1.0.0）；AUTH_DB 未配置回落本地休眠表（回滚通道）。
   // 绑定人名字取 auth account.name，不再回查赛事库 user 表。
   const bindings = c.env.AUTH_DB
@@ -213,6 +239,9 @@ app.get('/clubs', async (c) => {
           id: r.id,
           name: r.name,
           leagueTier: await deriveClubTier(c.env, season, r.id, cache),
+          // v6.48.0：队壳国家（档位 c2 的比对基准）——null = 未设，前端标「未设国家」提示补录
+          country: r.country,
+          countryName: nationName(r.country),
           status: r.status,
           transferBanned: r.transfer_banned === 1,
           isCpu: r.is_cpu === 1,
@@ -222,6 +251,32 @@ app.get('/clubs', async (c) => {
         })),
       ),
   });
+});
+
+// 队壳国家（v6.48.0 §10.3）：c2「会籍与队壳国家一致」的比对基准，是现实事实、只能人工录。
+// 建档时必填，建错/换壳后在这里改；改一次即重算该队球员档位（只写差异，人工锁定行不动）。
+app.post('/clubs/:id/country', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const body = (await readJson(c)) as { country?: unknown } | null;
+  const country = parseCountry(body?.country);
+  const club = await c.env.DB.prepare('SELECT id, country FROM clubs WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; country: number | null }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  await c.env.DB.prepare('UPDATE clubs SET country = ? WHERE id = ?').bind(country, clubId).run();
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'club_country_set',
+    targetType: 'club',
+    targetId: clubId,
+    origin: 'user',
+    before: { country: club.country },
+    after: { country, countryName: nationName(country) },
+  });
+  const tier = await hookTierRecompute(c.env.DB, { kind: 'clubs', clubIds: [clubId] }, { actor: user.id, origin: 'user' });
+  return c.json({ ok: true, country, countryName: nationName(country), tier });
 });
 
 // 转会禁令（v1.3.0）：冻结/解冻俱乐部转会权限。只拦新动作，既有市场单据走审核面板处置
