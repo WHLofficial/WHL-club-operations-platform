@@ -328,4 +328,30 @@ describe('TC-EP 截图识别端点', () => {
     expect(err).toContain('海港联');
     expect(err).toContain('对不上这场比赛');
   });
+
+  it('TC-EP-14 同城同前缀：写全了判给对的一侧，只写片段才 400 报「分不清主客」', async () => {
+    // 未来的国际米兰 / AC米兰：写全「国际米兰」或「AC米兰」都能判对
+    const full = seededTeams('国际米兰', 'AC米兰');
+    captureVision(JSON.stringify({ ...summaryPayload, team: '国际米兰' }));
+    const res = await sendOcr(full, { image: PNG_B64 });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as OcrResponse).side).toBe('home');
+
+    const swap = seededTeams('国际米兰', 'AC米兰');
+    captureVision(JSON.stringify({ ...summaryPayload, team: 'AC米兰' }));
+    const res2 = await sendOcr(swap, { image: PNG_B64 });
+    expect(res2.status).toBe(200);
+    expect(((await res2.json()) as OcrResponse).side).toBe('away');
+
+    // 现实里就有的对：只写「慕尼黑」两侧都像 ⇒ 不猜、不默认主队，文案点名两队并教怎么走
+    const amb = seededTeams('拜仁慕尼黑', '慕尼黑1860');
+    captureVision(JSON.stringify({ ...summaryPayload, team: '慕尼黑' }));
+    const res3 = await sendOcr(amb, { image: PNG_B64 });
+    expect(res3.status).toBe(400);
+    const err = ((await res3.json()) as { error: string }).error;
+    expect(err).toContain('慕尼黑');
+    expect(err).toContain('拜仁慕尼黑');
+    expect(err).toContain('慕尼黑1860');
+    expect(err).toContain('分不清主客');
+  });
 });

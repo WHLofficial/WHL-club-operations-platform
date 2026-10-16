@@ -498,7 +498,11 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
 
   // 截图队名 → 本场两侧（v6.51.3：提示词要求模型给中文队名；比对见 core/growth-ocr 的 matchOcrTeamSide，
   // 归一化等值/包含之外还容忍俱乐部前后缀与 CPU 尾标的漂移）；CPU 队名一样能对上（认人靠花名册，CPU 侧花名册为空）
+  // v6.51.3 起两侧一样像（同城同名片段，如「慕尼黑」对拜仁慕尼黑与慕尼黑1860）判歧义、不默认主队
   const side = matchOcrTeamSide(ocr.team, row.home_team, row.away_team);
+  if (side === 'ambiguous') {
+    throw new HttpError(400, `截图队名「${ocr.team}」这场两侧都像（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），分不清主客——请换一张队名更完整的截图，或手动选边`);
+  }
   if (!side) throw new HttpError(400, `截图队名「${ocr.team ?? '未识别'}」对不上这场比赛（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），确认传对图了吗`);
 
   const resolved = await resolveEntrySide(c.env.DB, side === 'home' ? row.home_team : row.away_team, new Map());

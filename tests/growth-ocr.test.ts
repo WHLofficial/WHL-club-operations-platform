@@ -12,6 +12,7 @@ import {
   ocrCrossChecks,
   parseOcrVision,
   teamNameKey,
+  teamNameMatchStrength,
   type OcrRosterPlayer,
   type OcrVision,
 } from '../src/core/growth-ocr.ts';
@@ -255,7 +256,7 @@ describe('TC-TEAM 队名对侧（v6.51.3）', () => {
     expect(isSameTeamName('海港联', '   ')).toBe(false);
   });
 
-  it('TC-TEAM-03 落侧：先主后客、缺失回 null（宁缺勿错）', () => {
+  it('TC-TEAM-03 落侧：强度高者胜出，缺失或都不像回 null（宁缺勿错）', () => {
     expect(matchOcrTeamSide('切尔西', '切尔西', '佛罗伦萨')).toBe('home');
     expect(matchOcrTeamSide('佛罗伦萨', '切尔西', '佛罗伦萨')).toBe('away');
     expect(matchOcrTeamSide('莱比锡红牛', 'RB莱比锡', 'AC米兰(CPU)')).toBe('home');
@@ -263,5 +264,27 @@ describe('TC-TEAM 队名对侧（v6.51.3）', () => {
     expect(matchOcrTeamSide(null, '切尔西', '佛罗伦萨')).toBeNull();
     expect(matchOcrTeamSide('  ', '切尔西', '佛罗伦萨')).toBeNull();
     expect(matchOcrTeamSide('皇家马德里', '切尔西', '佛罗伦萨')).toBeNull();
+  });
+
+  it('TC-TEAM-04 歧义保护：同城同前缀的两侧一样像时不猜（不默认主队）', () => {
+    // 现实里就有的对：拜仁慕尼黑 / 慕尼黑1860、皇家马德里 / 皇家贝蒂斯
+    expect(matchOcrTeamSide('慕尼黑', '拜仁慕尼黑', '慕尼黑1860')).toBe('ambiguous');
+    expect(matchOcrTeamSide('皇家', '皇家马德里', '皇家贝蒂斯')).toBe('ambiguous');
+    expect(matchOcrTeamSide('慕尼黑1860', '拜仁慕尼黑', '慕尼黑1860')).toBe('away');
+    // 未来的国际米兰 / AC米兰：写全了强度高，只写「米兰」按核心名判给 AC米兰
+    expect(matchOcrTeamSide('国际米兰', '国际米兰', 'AC米兰')).toBe('home');
+    expect(matchOcrTeamSide('国际米兰', 'AC米兰', '国际米兰')).toBe('away');
+    expect(matchOcrTeamSide('AC米兰', '国际米兰', 'AC米兰')).toBe('away');
+    expect(matchOcrTeamSide('米兰', '国际米兰', 'AC米兰')).toBe('away');
+    expect(matchOcrTeamSide('米兰', 'AC米兰', '国际米兰')).toBe('home');
+  });
+
+  it('TC-TEAM-05 强度分层：逐字 3 > 核心名相等 2 > 包含 1', () => {
+    expect(teamNameMatchStrength('切尔西', '切尔西')).toBe(3);
+    expect(teamNameMatchStrength('海港联', 'AC米兰(CPU)')).toBe(0);
+    expect(teamNameMatchStrength('米兰', 'AC米兰(CPU)')).toBe(2); // 剥掉 ac/cpu 后核心名相等
+    expect(teamNameMatchStrength('莱比锡红牛', 'RB莱比锡')).toBe(1); // 只在核心名层互相包含
+    expect(teamNameMatchStrength('慕尼黑', '拜仁慕尼黑')).toBe(1);
+    expect(teamNameMatchStrength('曼', '曼城')).toBe(0); // 单字不认（≥2 字才判包含）
   });
 });

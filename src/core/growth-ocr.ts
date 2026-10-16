@@ -173,6 +173,7 @@ export function matchRosterPlayer(ocrName: string, roster: OcrRosterPlayer[]): O
 // ---------- 队名对侧（v6.51.3） ----------
 // 提示词要求模型给中文队名（库里也是中文），但译名会漂移：RB莱比锡 ↔ 莱比锡红牛、AC米兰 ↔ AC米兰(CPU)；
 // 库里还可能带 FC/SC 之类前后缀。同语言逐字比对因此不够，这里再比一层剥掉前后缀的核心名。
+// 分层比对（逐字 3 / 核心名 2 / 互相包含 1）是为了同城同前缀的两支队：写全了强度高，只写片段才可能同分判歧义。
 const TEAM_AFFIX_TOKENS = ['rb', 'fc', 'ac', 'cf', 'sc', 'afc', 'cd', 'sv', 'sk', 'fk', 'bk', 'tsv', 'club', 'cpu'];
 
 /** 队名核心串：折叠大小写/变音符 → 去空格标点 → 反复剥掉首尾的俱乐部前后缀（rb/fc/ac/…/cpu）。 */
@@ -194,25 +195,47 @@ export function teamNameKey(raw: string): string {
   return key;
 }
 
-/** 是否同一支队：先归一化逐字/互相包含，再比核心名（核心长度 <2 时只认相等，避免单字误配）。 */
-export function isSameTeamName(a: string, b: string): boolean {
-  const fa = foldName(a);
-  const fb = foldName(b);
-  if (fa !== '' && fb !== '' && (fa === fb || fa.includes(fb) || fb.includes(fa))) return true;
-  const ka = teamNameKey(a);
-  const kb = teamNameKey(b);
-  if (ka === '' || kb === '') return false;
-  if (ka === kb) return true;
-  if (Math.min(ka.length, kb.length) < 2) return false;
-  return ka.includes(kb) || kb.includes(ka);
+/**
+ * 单侧匹配强度（v6.51.3 分层，先判相等再判包含）：0 不匹配 / 1 归一化或核心名互相包含（≥2 字才认）
+ * / 2 核心名相等 / 3 归一化逐字相等。
+ * 分层是为了应对同城同前缀的两支队：截图只写「慕尼黑」时，拜仁慕尼黑与慕尼黑1860 都是强度 1 ⇒ 歧义；
+ * 写「国际米兰」时该侧 3、对手「AC米兰」只是 1 ⇒ 判给国际米兰；写「米兰」时 AC米兰 核心名相等拿 2 ⇒ 判给 AC米兰。
+ */
+export function teamNameMatchStrength(ocrTeam: string, teamName: string): 0 | 1 | 2 | 3 {
+  const fa = foldName(ocrTeam);
+  const fb = foldName(teamName);
+  if (fa === '' || fb === '') return 0;
+  if (fa === fb) return 3;
+  const ka = teamNameKey(ocrTeam);
+  const kb = teamNameKey(teamName);
+  if (ka === '' || kb === '') return 0;
+  if (ka === kb) return 2;
+  const foldContains = Math.min(fa.length, fb.length) >= 2 && (fa.includes(fb) || fb.includes(fa));
+  const coreContains = Math.min(ka.length, kb.length) >= 2 && (ka.includes(kb) || kb.includes(ka));
+  return foldContains || coreContains ? 1 : 0;
 }
 
-/** 截图队名落在主队还是客队；队名缺失或两侧都对不上回 null——宁缺勿错，由调用方报错。 */
-export function matchOcrTeamSide(ocrTeam: string | null, homeTeam: string | null, awayTeam: string | null): 'home' | 'away' | null {
+/** 是否同一支队（强度 >0 即算），供调用方做等值判断。 */
+export function isSameTeamName(a: string, b: string): boolean {
+  return teamNameMatchStrength(a, b) > 0;
+}
+
+/**
+ * 截图队名落在主队还是客队（v6.51.3 起含歧义保护）：
+ * 两侧强度不同取高者；两侧一样像（如「慕尼黑」对上拜仁慕尼黑与慕尼黑1860、「皇家」对上皇家马德里与皇家贝蒂斯）
+ * 回 'ambiguous' —— 不猜、不默认主队；队名缺失或两侧都不像回 null。两种都由调用方报错。
+ */
+export function matchOcrTeamSide(
+  ocrTeam: string | null,
+  homeTeam: string | null,
+  awayTeam: string | null,
+): 'home' | 'away' | 'ambiguous' | null {
   if (!ocrTeam || ocrTeam.trim() === '') return null;
-  if (homeTeam && isSameTeamName(ocrTeam, homeTeam)) return 'home';
-  if (awayTeam && isSameTeamName(ocrTeam, awayTeam)) return 'away';
-  return null;
+  const home = homeTeam ? teamNameMatchStrength(ocrTeam, homeTeam) : 0;
+  const away = awayTeam ? teamNameMatchStrength(ocrTeam, awayTeam) : 0;
+  if (home === 0 && away === 0) return null;
+  if (home === away) return 'ambiguous';
+  return home > away ? 'home' : 'away';
 }
 
 export interface OcrBuildResult {
