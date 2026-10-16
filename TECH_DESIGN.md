@@ -975,7 +975,7 @@ D1 按「查询扫描过的行数」计费（索引扫描同样计入，免费�
 | origin | 何时记 |
 |---|---|
 | `user` | 人类请求直接触发（管理端、教练自助、玩家操作），含它们内部顺带写的辅助审计；**关窗时管理员触发的惰性结算也记 `user`**（触发者是人，v6.3.1 已有 actor 语义，不新造值） |
-| `cron_tick` | 定时兜底：`runSettleTick`（cron 与 `POST /api/cron/tick` 共用，`src/worker/index.ts`）与 `autoConfirmResults` |
+| `cron_tick` | 定时兜底：`runSettleTick`（cron 与 `POST /api/cron/tick` 共用，`src/worker/index.ts`）与 `autoConfirmResults`、`retryUnresolvedResults`（v6.51.6：没解析到的场次按跳重放钩子补账，最多 3 次） |
 | `lazy_settle` | 业务请求顺手结算过期项（读市场 / 报价 / 谈判列表时触发）——`actor` 保持 `NULL`，**不把惰性结算记到触发用户头上** |
 | `backchannel` | 认证中心推送的全端登出（OIDC backchannel logout，无本地用户行 ⇒ `actor` 为 NULL） |
 | `machine` | 内部机器通道（如 `src/worker/routes/internal.ts` 建队，operator 为 null） |

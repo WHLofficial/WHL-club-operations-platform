@@ -1522,6 +1522,28 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.6 · 赛事侧成长数据自动补账：没解析到的场次由 cron 重放钩子补齐（2026-10-16）
+
+**状态**：**待发布（本地就绪 2026-10-16）**（判级 **patch**：同一链的自愈补丁，无新端点、无页面、**零迁移** ⇒ 上线只需 push，push 即触发 CF Workers Builds 自动部署；部署后由既有 cron（`*/5 * * * *`）按跳收敛，也可 `POST /api/cron/tick`（带 `X-Cron-Key`）立即触发一跳）｜PRD 无需同步（确认口径与用户可见行为未变）；TECH_DESIGN 只同步 `cron_tick` 一行（`:978`）。
+
+**缘起（用户）**：① 报障「发现生产库有一些应当从赛事侧自动生成的成长数据没有生成」；② 授权动手「坐上来自己动吧」→ 改为「一次性补漏吧，不做大工程了」→ 最终裁决「**算了，还是自动重试吧**」（有效口径 = cron 自动重试，不做一次性脚本）。
+
+**诊断（只读生产 2026-10-16）**：`result_confirmations` 116 行中 `needs_review=1` **56 行，且全是 2026-09-20（49）+ 09-21（7）**，note 清一色「N 项没解析到（队·球员全名）」（例：match 33「5 项没解析到（佛罗伦萨·Álex Baena、佛罗伦萨·Paulo Dybala、切尔西·Mason Greenwood、切尔西·Alejandro Garnacho、切尔西·Pedro Neto）」）；`growth_events` 463 行 = auto 378（appearance 186 / assist 78 / clean_sheet 15 / goal 99）+ manual 85（全部 `match_ref='33'`，用户当天手录）。赛事库 **116 场 finished、未确认 0 场** ⇒ 自动确认健康，缺口在钩子：按确认日统计 auto 事件 09-20 确认 62 场 → **0 条**、09-21 7 场 → 21 条、09-24 起每天 3–52 条（正常）⇒ 根因窗口就是「`fc_id` 关联正在落值」的那两天，09-20/21 两批 69 场里**仅 6 场有 auto 事件**，事件级缺口 **170 个进球 + 140 次助攻**（同批俱乐部侧 auto 仅 goal 7 / assist 5 / clean_sheet 9）。**可补性验证**：56 场 flagged 涉及 162 名球员（152 非 CPU + 10 CPU），**非 CPU 的 152 名全部能按 `fc_id` 认到、0 缺失**，`players.fc_id` 覆盖 18301/18301 = 100%，20 个队名两侧完全一致（无「俱乐部没解析到」残留）⇒ 一次重放即可补齐。
+
+**根因**：`confirmResult`（`src/worker/results.ts`）的钩子只在**确认那一刻**跑一次，认不到球员只标 `needs_review`、**不重试**；当时两库 `fc_id` 尚未落值、姓名回落又扛不住赛事侧全名（`Paulo Dybala` / `Mason Greenwood` / `Pedro Neto` / `Alejandro Garnacho` / `Álex Baena`）vs 平台侧官方缩写名（`P. Dybala` / `M. Greenwood` / `Pedro Neto` / `A. Garnacho` / `Álex Baena`）⇒ 欠账一直挂着，除非人工进管理端点一次重放。
+
+**交付**：① `src/worker/results.ts` 新增 `retryUnresolvedResults(env, cap = 20): XpRetrySummary { scanned, healed, failed }`（`UNRESOLVED_RETRY_MAX = 3`）——扫 `needs_review = 1 AND review_note LIKE '%没解析到%'` 且 `NOT LIKE '%通知发送失败%'` / `'%自动重试已放弃%'`（`ORDER BY match_id LIMIT cap`，cap=20/跳 ⇒ 56 场约 3 跳）；逐场 `replayHooksForMatch(env, match_id)`（内部 `runHooks(..., { notify: false })`，不重发通知）；通了清标记；没通则把重放重写后的 note 截到 300 字符内追加「（自动重试 N 次）」，第 3 次起写「自动重试已放弃：第 N 次仍没解析到，修完数据后可从管理端重放」，此后被 LIKE 过滤不再占额度；单场异常 `console.warn('[xp-retry] 重放 #N 失败：…')` 不中断本跳。② `src/worker/index.ts`：`runSettleTick` 在 `autoConfirmResults` 后调用（注释写明语义），返回体加 `xpRetry`；`tickChanged` 增第 4 参 `xpRetry: XpRetrySummary` 与 `xpRetry.healed > 0` 条件——补账写 `players.growth_xp` 而 `growthXp` 在公开球员载荷（`src/worker/routes/players.ts:1211`）⇒ 真补到账才 purge 公开缓存。③ `TECH_DESIGN.md:978` 的 `cron_tick` 行补 `retryUnresolvedResults`。
+
+**幂等（重放安全前提，逐条核实）**：XP = `growth_events` 的 `UNIQUE(player_id, match_ref, event_type)` + `growth_xp` 增量 `NOT EXISTS` 闸（`src/worker/growth.ts:140-157`）；奖金 = `ledgerMovement` 默认幂等闸 `(club_id, kind, ref_type, ref_id)`（`src/worker/ledger.ts:29`）；比赛日收入 = `match_attendance` 有行即整段早退（`src/worker/home.ts:330`）；通知钩子重放直接跳过。
+
+**验收（本地）**：`npm run typecheck`（tsc --noEmit && tsconfig.worker.json && tsconfig.tests.json）三份 0 error；`npx vitest run` **136 文件 / 2230 例全绿**（v6.51.5 基线 136 / 2228，净 +2 例 = TC-XP-01 补账成功且不双记 / TC-XP-02 三次后放弃 + 通知类标记不碰）；`npm run build` ✓ 入口 `assets/index-DvQRIwgv.js`（663,313 B / gzip 210.89 kB，sha256 `91f85c525c92224d69f68fd3d0df61512138a0439882dfdd95a06851f7530d9a`，含版本串 6.51.6）+ CSS 入口 `index-BGPWLRxy.css` 未变。
+
+**本地提交**：`b474060` fix(worker)（`src/worker/results.ts`、`src/worker/index.ts`、`tests/results.test.ts`）+ `0654690` chore 版本号 6.51.5 → 6.51.6 + docs 枚，**未 push**。
+
+**待办（上线后回读）**：① 生产 `needs_review=1` 应 3 跳内归零（56 → 0）；② auto 事件补齐（预期 +≈170 goal / +≈140 assist 与对应 clean_sheet）；③ 抽 `match_ref='33'` 核对自动入账与用户手录 85 条并存（`players.growth_xp` 同步增长）。
+
+**留待补**：① 只自动重试「没解析到」类；「通知发送失败」仍要人工（重放不补通知，清了标记反而掩盖）；② 到 3 次上限后若要再补，仍需管理端 `POST /api/admin/results/:id/replay-hooks` 手点一次；③ 诊断脚本（对账用）在 `%TEMP%`/临时文件，未入库。
+
 ## v6.51.5 · 截图识别输入侧稳定化：上传前 2× 放大（不换模型、不改提示词）（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（判级 **patch**：同一条链的可读性修补，无新能力；**零迁移、零服务端改动、零提示词改动**，push `dff7fd9..a637bd1`（4 枚，含 v6.51.4 上线回写 `67ad2fb`）即触发 CF Workers Builds 自动部署 Version `13a090d1-c5e9-4b96-80d6-4b8f88ad74ff` @2026-10-16T12:50:14Z；回读 `/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-CISzZnED.js` 与页面 chunk `assets/GrowthEntryPage-oKNtpqgZ.js`、CSS `index-BGPWLRxy.css` 三件 sha256 与本地**逐字节一致**、匿名 OCR 端点 401；用户侧真机验收待执行）｜PRD 与 TECH_DESIGN 无需同步（端点形状、提示词、模型、`max_tokens` 全未变；变的只是送进去的像素）。

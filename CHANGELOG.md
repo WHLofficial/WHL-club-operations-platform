@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.6] · 赛事侧成长数据自动补账：没解析到的场次由 cron 重放钩子补齐（2026-10-16）
+
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一条链的自愈补丁，无新端点、无页面、无迁移）⇒ 上线只需 push，push 即部署；部署后由既有 cron（`*/5 * * * *`）按跳收敛，也可 `POST /api/cron/tick`（带 `X-Cron-Key`）立即触发一跳。
+
+**缘起（用户）**：用户报「发现生产库有一些应当从赛事侧自动生成的成长数据没有生成」；诊断确认后裁决「**算了，还是自动重试吧**」（此前两版口径——先授权动手、后改「一次性补漏吧，不做大工程了」——均作废）。
+
+**根因**：确认钩子只在**确认那一刻**跑一次，认不到球员只标 `needs_review` 不重试。2026-09-20 首批回填时两库 `fc_id` 关联尚未落值、姓名回落又扛不住赛事侧全名（`Paulo Dybala`）vs 平台侧官方缩写名（`P. Dybala`）⇒ 当天 62 场确认**零 auto 事件**（09-21 的 7 场部分成功，21 条），09-20/21 两批 69 场里仅 6 场有 auto 事件，事件级缺口 **170 个进球 + 140 次助攻**，56 场挂「N 项没解析到」至今无人收敛（自动确认本身健康：116 场完赛 / 116 场确认 / 0 漏确认）。
+
+**交付**：① `src/worker/results.ts` 新增 `retryUnresolvedResults(env, cap = 20): XpRetrySummary`（`UNRESOLVED_RETRY_MAX = 3`）——扫 `needs_review = 1 AND review_note LIKE '%没解析到%'` 且排除「通知发送失败」「自动重试已放弃」的场次（`ORDER BY match_id LIMIT cap`），逐场 `replayHooksForMatch`（`{ notify: false }`，不重发通知）；通了清标记，没通在**重放重写后的 note** 上追加「（自动重试 N 次）」（计数器从重放前的 note 解析——`reviewOf` 会重建整条 note），第 3 次起写「自动重试已放弃：第 N 次仍没解析到，修完数据后可从管理端重放」不再占位；单场异常只 `console.warn` 不中断跳。② `src/worker/index.ts`：`runSettleTick` 在 `autoConfirmResults` 之后调用，响应体多 `xpRetry`；`tickChanged` 增第 4 参 `xpRetry: XpRetrySummary` 与 `xpRetry.healed > 0` 条件——补账写 `players.growth_xp`，而 `growthXp` 在公开球员载荷里（`src/worker/routes/players.ts:1211`）⇒ **只有真补到账的跳才付这次公开缓存 purge**，稳态（无欠账）恒为 0。③ `TECH_DESIGN.md:978` 的 `cron_tick` 行同步。
+
+**幂等（重放安全的前提，已逐条核实）**：XP = `growth_events` 的 `UNIQUE(player_id, match_ref, event_type)` + `growth_xp` 增量 `NOT EXISTS` 闸（`src/worker/growth.ts:140-157`）；奖金 = `ledgerMovement` 的 `(club_id, kind, ref_type, ref_id)` 默认幂等闸（`src/worker/ledger.ts:29`）；比赛日收入 = `match_attendance` 有行即整段早退（`src/worker/home.ts:330`）；通知钩子重放直接跳过 ⇒ 三账都不双记。
+
+**测试**：`tests/results.test.ts` 新增两例——TC-XP-01 自动补账成功（补数据后 `{ scanned: 1, healed: 1, failed: 0 }`、`needs_review=0` / `review_note=NULL`、`growth_events` 单条 goal 不双记、`players.growth_xp = 0.5`、再跑 `{ scanned: 0, healed: 0, failed: 0 }`）；TC-XP-02 一直解析不到（三次依次写「自动重试 1 次」「2 次」「自动重试已放弃」，第四次不再被扫；把 note 改回含「通知发送失败」时 `scanned = 0` 不碰）⇒ 全量 **136 文件 / 2230 例**全绿（v6.51.5 基线 136 / 2228，净 +2 例）；`npm run typecheck` 三份 0 error；build 入口 `assets/index-DvQRIwgv.js`（663,313 B，sha256 `91f85c525c92224d69f68fd3d0df61512138a0439882dfdd95a06851f7530d9a`，含版本串 6.51.6）；CSS 入口 `index-BGPWLRxy.css` 未变（零前端改动）。
+
+**待核（上线后回读）**：① 生产 `needs_review=1` 应 3 跳内归零（56 场 → 0）；② auto 事件补上（预期 +≈170 goal / +≈140 assist 与对应 clean_sheet）；③ 抽 `match_ref='33'` 核对自动入账与用户手录的 85 条并存；④ `src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200` 仍未核（文本模型上限未知）。
+
 ## [v6.51.5] · 截图识别输入侧稳定化：上传前 2× 放大（不换模型、不改提示词）（2026-10-16）
 
 **已上线（2026-10-16）**：判级 **patch**（同一条链的可读性修补，无新能力）；**零迁移、零服务端改动、零提示词改动**，push `dff7fd9..a637bd1`（4 个提交，含 v6.51.4 上线回写 `67ad2fb`）触发 CF Workers Builds 自动部署 Version `13a090d1-c5e9-4b96-80d6-4b8f88ad74ff`（@2026-10-16T12:50:14Z）；回读：`/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-CISzZnED.js`（663,313 B，sha256 `081b5c3cd2eb61d423f3486e955c866699894baa1dde48941100d8e3302c5424`）、页面 chunk `assets/GrowthEntryPage-oKNtpqgZ.js`（35,422 B，sha256 `ca0d144a352d72e30a391cb4ef36fa39c18391093d17e993947cf6d53ac5d8d6`）与 CSS `index-BGPWLRxy.css` 三件**均与本地逐字节一致**、匿名 OCR 端点 401。
