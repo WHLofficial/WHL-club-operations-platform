@@ -1520,6 +1520,18 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **待办（用户侧一次性操作）**：在赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（当前全 0 ⇒ 带带入的 stage 3/4 会被对账报为不一致、黄条常亮，属预期假阳性）；补账后黄条转健康，公开榜数值不应变化。
 
+## v6.51.1 · 品牌池表格显示微调：来源/状态列不再折行 + 新增「总部」只读展示列 + 收窄行业/热度列宽（2026-10-16）
+
+**状态**：**待发布**（零迁移、零生产写、零契约变化 —— 纯管理端展示微调，判级 **patch**）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2196 例**全绿、`npm run build` 成功；浏览器实测（本地 dev 8791，1280×720）表头 9 列与 28 行渲染正常。测试计划 `docs/test-plans/v6.51.1-brand-table-display.md`。
+
+**缘起（用户 m02096 / m02183）**：①「来源 状态两列对应文字折行了，减小字号」；②「行业和热度减小列宽，加入『总部』一列，在行业之前（仅展示列）」。
+
+**交付**：`web/src/pages/admin/BrandsPage.tsx` —— 来源 / 状态两列挂 `.brand-meta-cell`；桌面表格在「行业」之前插入只读「总部」列（取 `row.hq`，空值「—」，**不挂输入控件**），列序 = 品牌 / 总部 / 行业 / 热度 / 档位 / 来源 / 状态 / 生效冠名 / 操作（9 列，展开行 `colSpan` 8 → 9）；窄屏卡片流元信息行同步补「总部」；行业输入 96 → 72、热度 72 → 56（档位 84 不动）。`web/src/styles.css` 新增 `.brand-meta-cell { font-size: 12px; white-space: nowrap; }`（规则落样式表、行内不带尺寸 ⇒ 不触 `tests/mobile-baseline.test.ts` 的固定宽禁令）。`tests/mobile-baseline.test.ts` 的 `FIXED_WIDTH_ALLOWLIST` 两条同步登记（`96` → `72`、`72` → `56`，各恰好命中 1 次、清单外零命中）。`web/src/pages/admin/BrandsPage.test.tsx` 新增 **TC-BR-04**（九列列序 + 总部格纯文本无控件 + 两列类名 + CSS 规则静态锁），该文件 4 例。
+
+**验收数字**：typecheck 三份 0 error；`npx vitest run` **135 文件 / 2196 例**全绿（+1 例 = TC-BR-04；`BrandsPage.test.tsx` 3 → 4 例）；`npm run build` 成功。浏览器实测（dev 8791，1280×720）：表头 `[品牌, 总部, 行业, 热度, 档位, 来源, 状态, 生效冠名, '']`、28 行；首行总部「巴塞尔」72px 宽 / 12px / nowrap / 无控件、行业 input 72px、热度 input 56px、来源「种子」与状态「在池」单行 12px。
+
+**留待（待令）**：push → CF 自动部署 → 核对 Version id 与线上资产（入口包 + `BrandsPage-*.js` 惰性块）→ 生产回读 `/admin/brands` 表头九列。本版不含后端 / 迁移 / 规则改动（`PRD.md`、`TECH_DESIGN.md` 无需同步）。
+
 ## v6.51.0 · 强制拍卖解禁与可指定挂牌价（前六降参考值 + 预检端点）+ 品牌池三批（全虚构化 28 家 / 冠名落点名 / 企业档案 / 招商性格与对赌抽签引擎）（2026-10-15）
 
 **状态**：**已上线 2026-10-16**（Version `5d4385eb-6e88-45fa-bb2c-1ee065eea221`，push `0157d87..0f5a216`；迁移 `0071` → `0072` → `0073` → `0074` → `0075` 已按序 apply 生产（五条全 ✅、`migrations list --remote` 无待应用），回读通过：`brand_pool` 28 行 / `origin='中资'` 6 / `style='对赌'` 7 / 档案 9 列 28 行齐备 / 13 个真实品牌名残留 0；`naming_contracts` 新列 `venue_name`、`bet_terms` 均在（存量 0 行）；线上资产与本地构建逐字一致（主包 `index-SaRKu1mz.js` + 新惰性块 `ShopPage-yP3didCV.js` / `BrandsPage-DAGlYRL2.js` 均含新文案、HTTP 200））。本地闸门全绿：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2195 例**全绿、`npm run build` 成功；`scripts/e2e/smoke.mjs` ㉓ 已改新口径，并在本地 dev（8791）实测 **27 / 28 通过**——本版 ㉓ 通过，唯一失败 ㉒ 是 **v6.48.0 存量缺陷**（断言要 `action='club_country_set'` 行、端点 `src/worker/routes/admin/growth-tier.ts:113` 只筛 `growth_tier%`，两者同出提交 `1593362`），本版未擅自改端点过滤。**上线顺序硬约束 = 迁移 `0071` → `0072` → `0073` → `0074` → `0075` 一次按序 apply 生产 → push → 部署 → 回读**（顺序不可打乱：`0073` 的全虚构化改名必须早于 `0074` / `0075` 的档案与性格配种）。交付记录 `memory/plan-v6.51.0-forced-auction-and-brand-pool.md`（强拍批）+ 品牌池三批 `memory/design-brand-pool-structure.md` / `memory/plan-v6.51.0-brand-venue-naming.md`（批 1 落点名）/ `memory/plan-brand-fictionalize-pool.md`（批 2 改名）/ `memory/plan-brand-profile-and-style.md`（批 3 档案与性格）；测试计划 `docs/test-plans/v6.51.0-forced-auction-and-brand-pool.md` + `docs/test-plans/v6.51.0-brand-pool-fictionalize-profile-style.md`。

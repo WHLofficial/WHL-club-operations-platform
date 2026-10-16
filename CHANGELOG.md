@@ -4,6 +4,14 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.1] · 品牌池表格显示微调：来源/状态列不再折行 + 新增「总部」只读展示列 + 收窄行业/热度列宽（2026-10-16）
+
+**待发布**（零迁移、零生产写、零契约变化 —— 纯管理端展示微调，判级 **patch**：无新增能力）。**缘起（用户 m02096 / m02183）**：①「来源 状态两列对应文字折行了，减小字号」；②「行业和热度减小列宽，加入『总部』一列，在行业之前（仅展示列）」。
+
+**交付（`web/src/pages/admin/BrandsPage.tsx` + `web/src/styles.css`）**：① 来源 / 状态两列挂 `.brand-meta-cell`（`font-size: 12px` + `white-space: nowrap`；规则落样式表、行内不带尺寸 ⇒ 不触 `tests/mobile-baseline.test.ts` 的固定宽禁令），列窄时不再把「种子 / 在池」折成两行；② 桌面表格在「行业」之前插入只读「总部」列（取该行 `hq`，空值显示「—」，不挂任何输入控件），列序变为 品牌 / 总部 / 行业 / 热度 / 档位 / 来源 / 状态 / 生效冠名 / 操作（9 列，展开行 `colSpan` 8 → 9）；窄屏卡片流的元信息行同步补「总部 {hq}」；③ 行业输入框 96 → 72（值恒为 2 字）、热度 72 → 56（值形如 `0.95`；档位 84 不动），`tests/mobile-baseline.test.ts` 的 `FIXED_WIDTH_ALLOWLIST` 两条同步登记（各恰好命中 1 次、清单外零命中）。
+
+**测试**：`web/src/pages/admin/BrandsPage.test.tsx` 新增 **TC-BR-04**（列序九列 + 总部格为纯文本且无 `input` / `select` / `textarea` + 来源/状态两列类名 + `.brand-meta-cell` 规则静态锁），该文件 4 例。闸门：`npm run typecheck` 三份 0 error；`npx vitest run` **135 文件 / 2196 例**全绿；`npm run build` 成功。浏览器实测（本地 dev 8791，1280×720）：表头 9 列、28 行；首行总部「巴塞尔」72px 宽且无控件、行业框 72px、热度框 56px、来源/状态 12px 单行。测试计划 `docs/test-plans/v6.51.1-brand-table-display.md`。
+
 ## [已上线] · tour 侧增量 — 积分榜重算自愈（tour 单仓，不占本仓版本号）（2026-10-15，Version 5cf7decb-c375-49e3-873b-0dc5fbcd6be0）
 
 **本仓无任何代码改动**（本节是共享台账里的一条；赛事仓自身的权威文档是 `PRD.md` / `TECH_DESIGN.md`）。赛事仓 3 个提交（`8676d4e` feat(standings) / `6358f42` feat(admin) / `4183832` feat(web)）**已 push**（`81f0643..4183832`）并自动部署（该仓已接 CF Workers Builds，push 即构建）；迁移 `0029_rebuild_pending.sql` 已 apply 生产。设计与实施计划在该仓 `docs/`（按该仓 `.gitignore:13` 的 `docs/` 约定不入库）。
