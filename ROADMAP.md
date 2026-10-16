@@ -1500,6 +1500,26 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **读量收益与护栏**：free-agents 退役即净收益（原实测 **36,274 行/次**，全站最大读放大器，ROADMAP §5.5 记录）；cpu-board 实测计划 `SCAN cp`（clubs 驱动）+ `SEARCH p USING idx_players_club`，护栏 TC-BOARD-06 锁 CROSS JOIN 文本 + 不含 `idx_players_status`（退化成普通 JOIN 会塌成扫全部 17,731 自由身，变异 V6 座实）；**守卫链同源**：`checkSeaSignEligible` 就是 `createFreeAgent` 那条链而非镜像，变异 V1/V2/V8 座实禁签/顺序/在途三面联动（V8 同时红 4.4.10 解约拦截——`findInFlight` 共用，后续改动需同步回归）。
 
+## tour 侧增量 · 积分榜重算自愈（tour 单仓，不占本仓版本号；2026-10-15）
+
+**状态**：2026-10-15 部署完成（Version `5cf7decb-c375-49e3-873b-0dc5fbcd6be0`，2026-10-15T23:59:07Z，Source `Unknown (deployment)` —— 赛事仓已接 CF Workers Builds，push 即自动构建部署）。**本仓无任何代码改动**（本节是共享台账里的一条；赛事仓自身的权威文档是 `PRD.md` / `TECH_DESIGN.md`）。赛事仓 3 个提交（`8676d4e` feat(standings) / `6358f42` feat(admin) / `4183832` feat(web)）**已 push**（`81f0643..4183832`，赛事仓 `origin/main` = `4183832`，落后 0）；迁移 `0029_rebuild_pending.sql` 已 apply 生产。设计与实施计划（赛事仓 `docs/`，按该仓 `.gitignore:13` 的 `docs/` 约定不入库）：`docs/superpowers/specs/2026-10-15-standings-rebuild-self-heal-design.md` + `docs/superpowers/plans/2026-10-15-standings-rebuild-self-heal-plan.md`。
+
+**编号说明**：本轮是 **tour 单仓增量**（本仓无任何代码改动），不占本仓版本号；各仓语义化版本自 2026-09-25 起独立，本轮不存在旧「共享增量号」回填问题。
+
+**缘起（2026-10-15 拜仁 vs 曼城终场提交异常）**：用户报告（m13698）「查一下积分榜上为什么没有把拜仁曼城完赛的比赛算进去」（追加 m13793：这场比赛终场提交时网络异常）。取证结论：比赛系统 `match` 193（S9 次级联赛预赛阶段 stage 2，`finished_at` `2026-10-15T14:42:04.663Z`）已标 `finished`，但 stage 2 榜上拜仁（entry 2）与曼城（entry 4）`played` 仍是 7（应 8），下游带入阶段（stage 3/4）沿用旧基数；`audit_log` 里这场比赛**没有 `match_finish` 行**（同一场的 `lineup_proxy_grant` / `lineup_proxy_submit` / `match_start` / `event_create` 等 987–992 行都在）。根因 = 终场提交本就是两段式、D1 无跨语句事务：第一段 `UPDATE match … status='finished'` 立即提交，第二段的榜重算与审计若因超时/实例中断失败，catch 只对 `AdvancerError` 回滚，其它异常直接 500 ⇒ 留下「比赛已完赛、积分榜未重算、无审计行」的半截状态，且库里**没有任何欠账标记**能让它自愈。（用户当日已用「扣分再取消扣分」触发重算修好这场的榜面值；本节把病根堵上。）
+
+**交付（均赛事仓）**
+- **① 欠账标记（迁移 `0029_rebuild_pending.sql`）**：新表 `rebuild_pending(stage_id INTEGER PRIMARY KEY, tournament_id, source, created_at, attempts, last_error)`，语义是「后续处理没跑完（榜重算 / 淘汰赛填位 / 下一阶段首轮生成）」，不是「欠一次重算」；同迁移给 `standing` 加 `carried_played`（记带入当时带进来的那个数，源阶段继续开打后不会漂移 ⇒ 对账不误报）。
+- **② 守卫模块 `worker/lib/rebuild-guard.ts`**：`runStageRebuildGuard(db, mark, writeStmts, opts)` —— 主写入与欠账标记**同一批**提交；随后就地重放 follow-up（失败自动重试一次），全部成功后**单独一批**销账（自动生成批次必须等榜批次提交后才能构建，所以不能与销账捆在一起）；`AdvancerError` 不重试不降级、原样抛给调用方（调用方回滚主写入并同批删标记）；其它失败记 `attempts` / `last_error`（截 500 字符）并返回 `{ followUpOk: false }`。`healPendingRebuilds(env)` 供 cron 一小时兜底重放。
+- **③ 六写入点接线（五类链）**：报分（`worker/routes/admin/scoring.ts`，降级时回 200 + `standingsPending: true`）、带入 PUT 两分支 / 赛程生成两分支 / 删单场 / 删阶段场次（`schedule.ts`，合 `writeAndRebuild`）、扣分 PATCH（`tournaments.ts`，标记阶段 = affected 里 `sort_order` 最小的非淘汰阶段，`resolveRebuildMarkStage`）；`worker/index.ts` 的 `scheduled` 加第三路 `ctx.waitUntil(healPendingRebuilds(env, { autoFill: buildAutoFillStmts }))`。
+- **④ 管理端自愈可见性（两端点 + 两处前端）**：`GET /api/admin/tournaments/:id/standings-health`（`{ok, healthy, pending[], mismatches[]}`，对账等式 `played == 本阶段 finished 数 + carried_played`）+ `POST /api/admin/tournaments/:id/rebuild-standings`（body `{stageId?}`，缺省全赛事；**先重算后清账**，审计 action `standings_rebuild`）；前端 `TournamentManage.tsx` 顶部黄条 +「立即重算积分榜」按钮、`MatchesTab.tsx` 报分回执加「比分已记录，积分榜正在补算」。
+
+**验收（赛事仓实测）**：`npm run typecheck`（`tsc --noEmit && tsc -p tsconfig.worker.json --noEmit`）0 error；`npm test` = **52 passed | 1 skipped（53 文件）、628 passed | 7 skipped**（新增 `tests/rebuild.selfheal.test.ts` 15 例：协议与销账 / 瞬时失败重试 / 连失降级 / `AdvancerError` 清标记 / cron 自愈 / 各触发点 / 对账 / `carried_played` 假阳性回归 / 幂等）；`npm run build` ✓（`dist/assets/index-Veqx_ePg.js` 473.88 kB、`TournamentManage-w6IeGqZp.js` 60.03 kB）。迁移 `0029` 已 apply（`Executed 3 commands in 1.48ms`）；生产只读核验：`rebuild_pending` 表在场、`standing` 16 列含 `carried_played`、`carried_played <> 0` 行数 **0**（历史行待补账）。部署后回读：`/api/health` 200；匿名 `GET https://tour.whleague.win/api/admin/tournaments/2/standings-health` ⇒ **401**（新端点已挂载、守卫生效）；公开榜 stage 2 未被扰动（曼城(CPU) `played` 8 / 10 分第 4，拜仁慕尼黑 `played` 8 / 9 分第 5，与 193 事故修复后逐条一致）；线上 `assets/index-Veqx_ePg.js` sha256 `5bacd53d9fc76740d15165ef1876f5f6dbdce7d9cab4e16cb0960fb449343c27`、`assets/TournamentManage-w6IeGqZp.js` sha256 `d368cbc9c8a4cf5ad6d1d85c6619fb6560e77c59dd5597da391f8f41fa5c3889`，与本地 `dist/` 同名文件**逐字节一致**。
+
+**踩坑**：① `standing` 的 INSERT 加到 15 列（含 `carried_played`）却没同步迁移，守卫把「插入失败」静默降级成「榜暂缺」，36 例测试全红 ⇒ 改列清单必须同步迁移。② 一键重算端点初版「先清账后写榜」，批次失败时会账已销、榜未修，又回到静默半截 ⇒ 改为先写榜后清账。③ 带带入阶段的用例必须先建榜再 PUT 带入（带入读的是上游已算出的基数，否则 `carried_played` 算成 0）。④ 守卫内部自带一次重试 ⇒ 测试注入失败要连失两批才降到欠账。
+
+**待办（用户侧一次性操作）**：在赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（当前全 0 ⇒ 带带入的 stage 3/4 会被对账报为不一致、黄条常亮，属预期假阳性）；补账后黄条转健康，公开榜数值不应变化。
+
 ## v6.51.0 · 强制拍卖解禁与可指定挂牌价（前六降参考值 + 预检端点）+ 品牌池扩编（统一中文名 + 9 家新品牌）（2026-10-15）
 
 **状态**：**待发布**（本地闸门全绿：`npm run typecheck` 三份 0 error、`npx vitest run` **131 文件 / 2150 例**全绿、`npm run build` 成功）。上线顺序 = 迁移 `0071` 先 apply 生产 → push → 部署 → 回读。交付记录 `memory/plan-v6.51.0-forced-auction-and-brand-pool.md`；测试计划 `docs/test-plans/v6.51.0-forced-auction-and-brand-pool.md`。

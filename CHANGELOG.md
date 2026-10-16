@@ -4,6 +4,18 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [已上线] · tour 侧增量 — 积分榜重算自愈（tour 单仓，不占本仓版本号）（2026-10-15，Version 5cf7decb-c375-49e3-873b-0dc5fbcd6be0）
+
+**本仓无任何代码改动**（本节是共享台账里的一条；赛事仓自身的权威文档是 `PRD.md` / `TECH_DESIGN.md`）。赛事仓 3 个提交（`8676d4e` feat(standings) / `6358f42` feat(admin) / `4183832` feat(web)）**已 push**（`81f0643..4183832`）并自动部署（该仓已接 CF Workers Builds，push 即构建）；迁移 `0029_rebuild_pending.sql` 已 apply 生产。设计与实施计划在该仓 `docs/`（按该仓 `.gitignore:13` 的 `docs/` 约定不入库）。
+
+**缘起**：2026-10-15 拜仁 vs 曼城（`match` 193）终场提交只落了半截——比赛已标 `finished`、积分榜未重算、`audit_log` 也没有 `match_finish` 行（终场提交两段式 + D1 无跨语句事务，第二段失败时只有 `AdvancerError` 会回滚）。用户在比赛系统管理端用「扣分再取消扣分」触发重算修好了那场的榜面值，本轮把病根堵上。
+
+**交付**：① 迁移 `0029`：欠账表 `rebuild_pending`（语义「后续处理没跑完」）+ `standing.carried_played`（对账不被源阶段后续开打污染）；② `worker/lib/rebuild-guard.ts`：主写入与欠账标记同批提交、后续处理全部成功后**单独一批**销账、`AdvancerError` 不降级（调用方回滚并同批删标记）、`healPendingRebuilds` 每小时 cron 兜底；③ 六写入点接线（报分 / 带入 ×2 / 赛程生成 ×2 / 删单场 / 删阶段场次 / 扣分），报分降级回 200 + `standingsPending: true`；④ 管理端 `GET /api/admin/tournaments/:id/standings-health` 体检（欠账 + 对账等式 `played == 本阶段 finished 数 + carried_played`）与 `POST /:id/rebuild-standings` 一键重算（**先重算后清账**，审计 `standings_rebuild`），前端黄条 +「立即重算积分榜」+ 报分文案「比分已记录，积分榜正在补算」。
+
+**验收**：赛事仓 `npm run typecheck` 0 error；`npm test` **628 passed | 7 skipped**（53 文件，新增 `tests/rebuild.selfheal.test.ts` 15 例）；`npm run build` ✓。生产只读核验：`rebuild_pending` 表在场、`standing` 16 列、`carried_played <> 0` 行数 0（历史行待补账）。回读：`/api/health` 200、匿名体检端点 401、公开榜 stage 2 未被扰动（曼城 played 8 / 10 分第 4，拜仁 played 8 / 9 分第 5）、线上两份资产 sha256 与本地 `dist/` 逐字节一致。
+
+**待办（用户侧一次性）**：赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（补账前带带入阶段黄条为预期假阳性）。详见 [ROADMAP.md](./ROADMAP.md) 的「tour 侧增量 · 积分榜重算自愈」节。
+
 ## [v6.51.0] · 强制拍卖解禁与可指定挂牌价（前六降参考值 + 预检端点）+ 品牌池扩编（品牌名统一中文 + 9 家新品牌）（2026-10-15）
 
 **待发布**（本地闸门全绿：`npm run typecheck` 三份 0 error；`npx vitest run` **131 文件 / 2150 例**全绿；`npm run build` 成功；`scripts/e2e/smoke.mjs` 加 ㉓）。**上线顺序硬约束 = 迁移 `0071` 先 apply 生产 → push → 部署 → 回读**（新品牌与中文名都在迁移里；不 apply 则线上仍是 7 家旧池、旧名 `CVS Health`）。迁移无破坏性改动（两处幂等 UPDATE + 9 行 `INSERT OR IGNORE`），且生产 `naming_contracts` 实测 **0 行** ⇒ 改名影响面为零（`market_offers` 走 `brand_id`，不受影响）。
