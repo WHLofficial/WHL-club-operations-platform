@@ -1,7 +1,9 @@
 // v6.43.0 成长录入截图识别 · 端点测试（mock 视觉网关 + 本地 D1 夹具）。
 // 识别路径零 DB 写：成功后 growth_events / audit_log / growth_xp 必须原样不动（TC-EP-06）。
 // v6.51.2：出站 max_tokens 缺省 1024（glm-4v-flash 上限）+ LLM_VISION_MAX_TOKENS 可配 + 截断明确报错。
-// 测试计划：docs/test-plans/v6.43.0-growth-ocr.md、docs/test-plans/v6.51.2-ocr-vision-maxtokens.md。
+// v6.51.3：提示词要求中文队名（锁出站文本）；队名对侧容忍译名/前后缀漂移，英文队名仍 400。
+// 测试计划：docs/test-plans/v6.43.0-growth-ocr.md、docs/test-plans/v6.51.2-ocr-vision-maxtokens.md、
+// docs/test-plans/v6.51.3-ocr-team-name-chinese.md。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -133,6 +135,14 @@ function seeded(): Fixture {
   const fx = freshEnv(LLM);
   seedBase(fx);
   seedMatch(fx, MATCH_ID, '海港联', '北岸城');
+  return fx;
+}
+
+/** 与 seeded 同款，但换成本场两队名（v6.51.3 队名对侧用例用） */
+function seededTeams(homeTeam: string, awayTeam: string): Fixture {
+  const fx = freshEnv(LLM);
+  seedBase(fx);
+  seedMatch(fx, MATCH_ID, homeTeam, awayTeam);
   return fx;
 }
 
@@ -281,5 +291,41 @@ describe('TC-EP 截图识别端点', () => {
     const res2 = await sendOcr(fx2, { image: PNG_B64 });
     expect(res2.status).toBe(502);
     expect(((await res2.json()) as { error: string }).error).toContain('截断');
+  });
+
+  it('TC-EP-11 提示词锁：出站文本要求中文队名，示例值也是中文（v6.51.3）', async () => {
+    const fx = seeded();
+    const call = captureVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(200);
+    const body = call().body as { messages: { content: { type: string; text?: string }[] }[] };
+    const text = body.messages[0].content.find((p) => p.type === 'text')?.text ?? '';
+    expect(text).toContain('team 字段写该队的中文名');
+    expect(text).toContain('CHELSEA → 切尔西');
+    expect(text).toContain('"team": "切尔西"');
+  });
+
+  it('TC-EP-12 队名漂移容忍：译名差异/CPU 尾标不再误报「对不上这场比赛」', async () => {
+    const drift = seededTeams('RB莱比锡', 'AC米兰(CPU)');
+    captureVision(JSON.stringify({ ...summaryPayload, team: '莱比锡红牛' }));
+    const res = await sendOcr(drift, { image: PNG_B64 });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as OcrResponse).side).toBe('home');
+
+    const drift2 = seededTeams('RB莱比锡', 'AC米兰(CPU)');
+    captureVision(JSON.stringify({ ...summaryPayload, team: '米兰' }));
+    const res2 = await sendOcr(drift2, { image: PNG_B64 });
+    expect(res2.status).toBe(200);
+    expect(((await res2.json()) as OcrResponse).side).toBe('away');
+  });
+
+  it('TC-EP-13 模型没听话给英文队名时：仍 400，文案点名截图队名与本场对阵', async () => {
+    const fx = seeded();
+    mockVision(JSON.stringify({ ...summaryPayload, team: 'CHELSEA' }));
+    const res = await sendOcr(fx, { image: PNG_B64 });
+    expect(res.status).toBe(400);
+    const err = ((await res.json()) as { error: string }).error;
+    expect(err).toContain('CHELSEA');
+    expect(err).toContain('海港联');
+    expect(err).toContain('对不上这场比赛');
   });
 });

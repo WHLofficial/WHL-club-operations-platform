@@ -2,6 +2,7 @@
 // 纯函数、零 IO——模型调用在 src/lib/llm.ts，DB 与端点在 src/worker/routes/admin/growth.ts。
 // 识别语义（用户裁决）：RR→评分（<7.0 不给 XP ⇒ 只预填出场）；GK 面板→扑救/失球；
 // 夺回球权图上看不到 ⇒ 保持手填；防守球员认定 = 手填夺回球权（含 0）。
+// v6.51.3：队名对侧（matchOcrTeamSide）——模型按提示词给中文队名，比对容忍前后缀与 CPU 尾标的漂移。
 import { foldName } from './name-fold.ts';
 
 export type OcrKind = 'summary' | 'goalkeeping';
@@ -166,6 +167,51 @@ export function matchRosterPlayer(ocrName: string, roster: OcrRosterPlayer[]): O
     if (hits.length === 1) return { player: hits[0], matched: level };
     if (hits.length > 1) return null; // 歧义（同队同名/同 folded 名）不猜
   }
+  return null;
+}
+
+// ---------- 队名对侧（v6.51.3） ----------
+// 提示词要求模型给中文队名（库里也是中文），但译名会漂移：RB莱比锡 ↔ 莱比锡红牛、AC米兰 ↔ AC米兰(CPU)；
+// 库里还可能带 FC/SC 之类前后缀。同语言逐字比对因此不够，这里再比一层剥掉前后缀的核心名。
+const TEAM_AFFIX_TOKENS = ['rb', 'fc', 'ac', 'cf', 'sc', 'afc', 'cd', 'sv', 'sk', 'fk', 'bk', 'tsv', 'club', 'cpu'];
+
+/** 队名核心串：折叠大小写/变音符 → 去空格标点 → 反复剥掉首尾的俱乐部前后缀（rb/fc/ac/…/cpu）。 */
+export function teamNameKey(raw: string): string {
+  let key = foldName(raw).replace(/[^a-z0-9\u3400-\u9fff]+/g, '');
+  for (let stripped = true; stripped; ) {
+    stripped = false;
+    for (const token of TEAM_AFFIX_TOKENS) {
+      if (key.startsWith(token) && key.length > token.length) {
+        key = key.slice(token.length);
+        stripped = true;
+      }
+      if (key.endsWith(token) && key.length > token.length) {
+        key = key.slice(0, -token.length);
+        stripped = true;
+      }
+    }
+  }
+  return key;
+}
+
+/** 是否同一支队：先归一化逐字/互相包含，再比核心名（核心长度 <2 时只认相等，避免单字误配）。 */
+export function isSameTeamName(a: string, b: string): boolean {
+  const fa = foldName(a);
+  const fb = foldName(b);
+  if (fa !== '' && fb !== '' && (fa === fb || fa.includes(fb) || fb.includes(fa))) return true;
+  const ka = teamNameKey(a);
+  const kb = teamNameKey(b);
+  if (ka === '' || kb === '') return false;
+  if (ka === kb) return true;
+  if (Math.min(ka.length, kb.length) < 2) return false;
+  return ka.includes(kb) || kb.includes(ka);
+}
+
+/** 截图队名落在主队还是客队；队名缺失或两侧都对不上回 null——宁缺勿错，由调用方报错。 */
+export function matchOcrTeamSide(ocrTeam: string | null, homeTeam: string | null, awayTeam: string | null): 'home' | 'away' | null {
+  if (!ocrTeam || ocrTeam.trim() === '') return null;
+  if (homeTeam && isSameTeamName(ocrTeam, homeTeam)) return 'home';
+  if (awayTeam && isSameTeamName(ocrTeam, awayTeam)) return 'away';
   return null;
 }
 

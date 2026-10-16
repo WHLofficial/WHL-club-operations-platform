@@ -18,8 +18,7 @@ import {
   type GrowthEventType,
 } from '../../growth.ts';
 import { rowDisplayName } from '../../../core/player-name.ts';
-import { foldName } from '../../../core/name-fold.ts';
-import { parseOcrVision, buildOcrEntries, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
+import { parseOcrVision, buildOcrEntries, matchOcrTeamSide, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
 import { llmVisionJson } from '../../../lib/llm.ts';
 import { suspendedPlayersAtMatch, suspensionLabel } from '../../tour-suspension.ts';
 import { loadTournamentNames, tournamentNameOf } from '../../tournament-names.ts';
@@ -433,7 +432,7 @@ const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎
 
 输出结构（键名逐字一致；下面的示例值就是应输出的类型——数字字段输出 JSON number，禁止加引号变字符串）：
 {
-  "team": "MILAN",
+  "team": "切尔西",
   "tab": "summary",
   "rows": [
     { "pos": "ST", "name": "H. Kane", "rating": 7.8, "goals": 2, "assists": 0 },
@@ -452,6 +451,7 @@ const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎
   },
   "notes": ""
 }
+team 字段写该队的中文名（CHELSEA → 切尔西、FIORENTINA → 佛罗伦萨、FC BAYERN MÜNCHEN → 拜仁慕尼黑、RB LEIPZIG → RB莱比锡、REAL BETIS → 皇家贝蒂斯）；没有通行中文译名时才照抄截图上的原文。
 
 规则：
 1. rows 输出左表可见的行，按图内顺序；表格带滚动条时，滚动条外的行绝不编造。
@@ -496,12 +496,9 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   }
   const kind: 'summary' | 'goalkeeping' = ocr.tab;
 
-  // 截图队名 → 本场两侧（归一化等值，退化为包含）；CPU 队名一样能对上（认人靠花名册，CPU 侧花名册为空）
-  const fold = (s: string | null) => foldName(s ?? '');
-  const ocrTeam = fold(ocr.team);
-  let side: 'home' | 'away' | null = null;
-  if (ocrTeam && (ocrTeam === fold(row.home_team) || ocrTeam.includes(fold(row.home_team)) || fold(row.home_team).includes(ocrTeam))) side = 'home';
-  else if (ocrTeam && (ocrTeam === fold(row.away_team) || ocrTeam.includes(fold(row.away_team)) || fold(row.away_team).includes(ocrTeam))) side = 'away';
+  // 截图队名 → 本场两侧（v6.51.3：提示词要求模型给中文队名；比对见 core/growth-ocr 的 matchOcrTeamSide，
+  // 归一化等值/包含之外还容忍俱乐部前后缀与 CPU 尾标的漂移）；CPU 队名一样能对上（认人靠花名册，CPU 侧花名册为空）
+  const side = matchOcrTeamSide(ocr.team, row.home_team, row.away_team);
   if (!side) throw new HttpError(400, `截图队名「${ocr.team ?? '未识别'}」对不上这场比赛（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），确认传对图了吗`);
 
   const resolved = await resolveEntrySide(c.env.DB, side === 'home' ? row.home_team : row.away_team, new Map());

@@ -1,12 +1,17 @@
 // v6.43.0 成长录入截图识别 · core 纯函数测试（解析 / 认人 / 草稿 / 交叉校验）。
-// 测试计划：docs/test-plans/v6.43.0-growth-ocr.md（TC-OCR / TC-MATCH / TC-DRAFT / TC-XCHK）。
+// v6.51.3：队名对侧（TC-TEAM）——模型给中文队名，比对容忍译名与前后缀漂移。
+// 测试计划：docs/test-plans/v6.43.0-growth-ocr.md（TC-OCR / TC-MATCH / TC-DRAFT / TC-XCHK）、
+// docs/test-plans/v6.51.3-ocr-team-name-chinese.md（TC-TEAM）。
 import { describe, expect, it } from 'vitest';
 import { extractJsonObject } from '../src/lib/llm.ts';
 import {
   buildOcrEntries,
+  isSameTeamName,
+  matchOcrTeamSide,
   matchRosterPlayer,
   ocrCrossChecks,
   parseOcrVision,
+  teamNameKey,
   type OcrRosterPlayer,
   type OcrVision,
 } from '../src/core/growth-ocr.ts';
@@ -225,5 +230,38 @@ describe('TC-XCHK 识别结果 × 比分交叉校验', () => {
     // 内部一致（3+4=7）→ 无内部不一致警告；不一致（3+4≠8）→ 有
     expect(ocrCrossChecks(gk(3, 4, 7), { side: 'home', scoreHome: 2, scoreAway: 4 })).toHaveLength(0);
     expect(ocrCrossChecks(gk(3, 4, 8), { side: 'home', scoreHome: 2, scoreAway: 4 })).toContainEqual(expect.stringContaining('内部不一致'));
+  });
+});
+
+describe('TC-TEAM 队名对侧（v6.51.3）', () => {
+  it('TC-TEAM-01 核心名：折叠、去空格标点、反复剥首尾俱乐部前后缀', () => {
+    expect(teamNameKey('RB莱比锡')).toBe('莱比锡');
+    expect(teamNameKey('AC米兰(CPU)')).toBe('米兰');
+    expect(teamNameKey('FC Bayern München')).toBe('bayernmunchen');
+    expect(teamNameKey('纽卡斯尔联')).toBe('纽卡斯尔联'); // 无前后缀不动
+    expect(teamNameKey('慕尼黑1860')).toBe('慕尼黑1860'); // 数字保留
+    expect(teamNameKey('  ')).toBe('');
+  });
+
+  it('TC-TEAM-02 同队判定：译名漂移/前后缀算同队，不同队不算', () => {
+    expect(isSameTeamName('RB莱比锡', '莱比锡红牛')).toBe(true); // 核心名互相包含
+    expect(isSameTeamName('米兰', 'AC米兰(CPU)')).toBe(true);
+    expect(isSameTeamName('拜仁慕尼黑', 'FC拜仁慕尼黑')).toBe(true);
+    expect(isSameTeamName('曼城(CPU)', '曼城')).toBe(true);
+    expect(isSameTeamName('海港联', '海港联')).toBe(true);
+    expect(isSameTeamName('曼联', '曼城')).toBe(false);
+    expect(isSameTeamName('阿森纳', '切尔西')).toBe(false);
+    expect(isSameTeamName('', '海港联')).toBe(false);
+    expect(isSameTeamName('海港联', '   ')).toBe(false);
+  });
+
+  it('TC-TEAM-03 落侧：先主后客、缺失回 null（宁缺勿错）', () => {
+    expect(matchOcrTeamSide('切尔西', '切尔西', '佛罗伦萨')).toBe('home');
+    expect(matchOcrTeamSide('佛罗伦萨', '切尔西', '佛罗伦萨')).toBe('away');
+    expect(matchOcrTeamSide('莱比锡红牛', 'RB莱比锡', 'AC米兰(CPU)')).toBe('home');
+    expect(matchOcrTeamSide('米兰', 'RB莱比锡', 'AC米兰(CPU)')).toBe('away');
+    expect(matchOcrTeamSide(null, '切尔西', '佛罗伦萨')).toBeNull();
+    expect(matchOcrTeamSide('  ', '切尔西', '佛罗伦萨')).toBeNull();
+    expect(matchOcrTeamSide('皇家马德里', '切尔西', '佛罗伦萨')).toBeNull();
   });
 });
