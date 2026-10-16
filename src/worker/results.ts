@@ -491,6 +491,65 @@ export async function replayHooksForMatch(env: Env, matchIdInput: unknown): Prom
   });
 }
 
+/** 自动补账的重试上限：同一场连续这么多次仍没解析到就不再自动重试（残留标记交人工）。 */
+const UNRESOLVED_RETRY_MAX = 3;
+
+export interface XpRetrySummary {
+  scanned: number;
+  healed: number;
+  failed: number;
+}
+
+/**
+ * 没解析到的场次自动补账（v6.51.6）：确认钩子只在确认那一刻跑一次，当时认不到的球员
+ * （典型：两库 fc_id 关联尚未落值，姓名回落又扛不住全名 vs 官方缩写名）会让这场一直挂着
+ * 「N 项没解析到」，此后除非人工点重放，欠的 XP 永不补。这里把这些场逐场重放：
+ * 解析通了就补齐 XP 并清标记；连续 UNRESOLVED_RETRY_MAX 次仍不通的写「自动重试已放弃」
+ * 不再占位（人工修完数据后仍可从管理端重放）。重放路径本身幂等——XP 靠
+ * growth_events 的 UNIQUE(player_id, match_ref, event_type)、奖金走出账账本的
+ * (club, kind, ref) 闸、比赛日收入按 match_attendance 主键早退，都不会双记。
+ */
+export async function retryUnresolvedResults(env: Env, cap = 20): Promise<XpRetrySummary> {
+  const rows = await env.DB.prepare(
+    `SELECT match_id, review_note FROM result_confirmations
+      WHERE needs_review = 1
+        AND review_note LIKE '%没解析到%'
+        AND review_note NOT LIKE '%通知发送失败%'
+        AND review_note NOT LIKE '%自动重试已放弃%'
+      ORDER BY match_id
+      LIMIT ?`,
+  )
+    .bind(cap)
+    .all<{ match_id: number; review_note: string | null }>();
+
+  const out: XpRetrySummary = { scanned: rows.results.length, healed: 0, failed: 0 };
+  for (const row of rows.results) {
+    const prev = Number(/自动重试 (\d+) 次/.exec(row.review_note ?? '')?.[1] ?? 0);
+    try {
+      const item = await replayHooksForMatch(env, row.match_id);
+      if (!item.needsReview) {
+        out.healed += 1;
+        continue;
+      }
+      // 还是没解析到：在重写后的 note 上记一次尝试（note 由 reviewOf 重建，计数器得自己维护）
+      const attempts = prev + 1;
+      const tail =
+        attempts >= UNRESOLVED_RETRY_MAX
+          ? `（自动重试已放弃：第 ${attempts} 次仍没解析到，修完数据后可从管理端重放）`
+          : `（自动重试 ${attempts} 次）`;
+      const base = (item.reviewNote ?? '').slice(0, Math.max(0, 300 - tail.length));
+      await env.DB.prepare('UPDATE result_confirmations SET review_note = ? WHERE match_id = ?')
+        .bind(`${base}${tail}`, row.match_id)
+        .run();
+      out.failed += 1;
+    } catch (err) {
+      out.failed += 1;
+      console.warn(`[xp-retry] 重放 #${row.match_id} 失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return out;
+}
+
 /** elim 阶段 config_json 里的入场队数（晋级轮次推算用；解析失败按未知处理=不发晋级奖金） */
 function stageEntryCount(configJson: string | null): number | null {
   if (!configJson) return null;

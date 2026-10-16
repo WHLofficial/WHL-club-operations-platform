@@ -26,7 +26,7 @@ import mediaRoutes from './routes/media.ts';
 import internalRoutes from './routes/internal.ts';
 import { settleOverdue, type SettleSummary } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
-import { autoConfirmResults } from './results.ts';
+import { autoConfirmResults, retryUnresolvedResults, type XpRetrySummary } from './results.ts';
 import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
 import { runExpiryTick, type ExpirySummary } from './expiry-ops.ts';
 import opsRoutes from './routes/ops-schedule.ts';
@@ -188,6 +188,10 @@ async function runSettleTick(env: Env) {
   const summary = await settleOverdue(env, { origin: 'cron_tick' });
   // 赛果自动确认（v2.7.0）：完赛场次逐场入档，异常标人工；开关/上限在 results.ts
   const autoResults = await autoConfirmResults(env);
+  // 没解析到的场次自动补账（v6.51.6）：确认那刻认不到球员的场（典型：fc_id 关联尚未落值）
+  // 一直挂着「N 项没解析到」而永不补 XP，这里按场重放钩子补齐；幂等可重入，
+  // 连续 3 次仍没解析到的写「自动重试已放弃」不再占用额度。
+  const xpRetry = await retryUnresolvedResults(env);
   // bot 通知重试（§12）：失败留 pending，下轮再投
   const notify = await dispatchPendingNotifications(env);
   // 选择型事件兜底（v6.11.0，D2）：超时未选按净额最差结算 + 距时限 24h 提醒（D3 起在通知之后跑）
@@ -205,7 +209,7 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     expiry = { error: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true, ...summary, autoResults, events, notify, expiry };
+  return { ok: true, ...summary, autoResults, xpRetry, events, notify, expiry };
 }
 
 // tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的
@@ -218,7 +222,14 @@ async function runSettleTick(env: Env) {
 // reminded 只写 notifications 与 event_occurrences.reminded_at，不算进来。
 // v6.49.0 加 expiry.closed：到期收口会改 offers/fund_holds/listings/players/transfers（公开目录看得到
 // 归属与挂牌状态）；reminded 只写 notifications 与 reminded_at，不算进来。
-function tickChanged(summary: SettleSummary, events: EventTickResult, expiry: ExpirySummary | { error: string }): boolean {
+// v6.51.6 加 xpRetry.healed：补账会写 players.growth_xp，而 growthXp 就在公开球员载荷里 ⇒ 真要 purge；
+// 只有真补到账的 tick 才付这次 KV 写，稳态（无欠账）恒为 0。
+function tickChanged(
+  summary: SettleSummary,
+  events: EventTickResult,
+  expiry: ExpirySummary | { error: string },
+  xpRetry: XpRetrySummary,
+): boolean {
   return (
     summary.settled > 0 ||
     summary.delisted > 0 ||
@@ -226,6 +237,7 @@ function tickChanged(summary: SettleSummary, events: EventTickResult, expiry: Ex
     summary.notesUpdated > 0 ||
     summary.healed > 0 ||
     events.expired > 0 ||
+    xpRetry.healed > 0 ||
     ('closed' in expiry && expiry.closed > 0)
   );
 }
@@ -243,7 +255,7 @@ async function scheduledTick(_event: unknown, env: Env, _ctx: { waitUntil(p: Pro
     'club-settle-tick',
     async () => {
       const tick = await runSettleTick(env);
-      if (!('expired' in tick.events) || !tickChanged(tick, tick.events, tick.expiry)) return;
+      if (!('expired' in tick.events) || !tickChanged(tick, tick.events, tick.expiry, tick.xpRetry)) return;
       await purgePublicCaches(env).catch(() => {});
     },
     { schedule: { type: 'crontab', value: '*/5 * * * *' }, checkinMargin: 2, maxRuntime: 5 },

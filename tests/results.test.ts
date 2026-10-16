@@ -5,7 +5,7 @@ import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
 import { resetConfigCache, createConfigService } from '../src/core/config.ts';
-import { autoConfirmResults } from '../src/worker/results.ts';
+import { autoConfirmResults, retryUnresolvedResults } from '../src/worker/results.ts';
 
 interface Fixture {
   env: Env;
@@ -392,5 +392,63 @@ describe('赛果自动确认（v2.7.0）：cron 扫完赛场次 + 异常标人�
     await post('/api/admin/results/900/replay-hooks', {}, 'tok-admin', fx.env);
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '900'")?.n).toBe(1);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM notifications')?.n).toBe(0);
+  });
+
+  it('没解析到的场次由 retryUnresolvedResults 自动补账：补齐 XP、清标记、幂等不双记（v6.51.6）', async () => {
+    const fx = freshEnv();
+    seedTournament(fx);
+    await bindTournament5(fx);
+    // 900 有进球事件，但平台侧还没有俱乐部/球员可解析 ⇒ 确认那刻标人工
+    fx.tour.exec(`INSERT INTO player (id, team_id, name) VALUES (21, 2, '哈兰德');
+      INSERT INTO match_event (id, match_id, player_id, assist_player_id, type, minute) VALUES (1, 900, 21, NULL, 'goal', 10)`);
+    expect(await autoConfirmResults(fx.env)).toEqual({ skipped: false, confirmed: 2, flagged: 1, failed: 0 });
+
+    // 数据补齐（fc_id 关联落值后姓名也认得到）⇒ 下一跳自动收敛，不用人工点重放
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '曼城', 'premier', 'active');
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status)
+        VALUES (31, 'm31', '哈兰德', 2, 'ST', 26, 150, 180, 99, 'first_team');
+    `);
+    expect(await retryUnresolvedResults(fx.env)).toEqual({ scanned: 1, healed: 1, failed: 0 });
+    expect(
+      sqlGet<{ needs_review: number; review_note: string | null }>(
+        fx.sqlite,
+        'SELECT needs_review, review_note FROM result_confirmations WHERE match_id = 900',
+      ),
+    ).toMatchObject({ needs_review: 0, review_note: null });
+    expect(
+      sqlAll<{ event_type: string }>(fx.sqlite, "SELECT event_type FROM growth_events WHERE match_ref = '900'").map((r) => r.event_type),
+    ).toEqual(['goal']);
+    expect(sqlGet<{ growth_xp: number }>(fx.sqlite, 'SELECT growth_xp FROM players WHERE id = 31')?.growth_xp).toBe(0.5);
+
+    // 幂等：账已清 ⇒ 再跑不扫任何场次，也不双记
+    expect(await retryUnresolvedResults(fx.env)).toEqual({ scanned: 0, healed: 0, failed: 0 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE match_ref = '900'")?.n).toBe(1);
+  });
+
+  it('一直解析不到：三次后写「已放弃」不再占位；通知类标记不碰（v6.51.6）', async () => {
+    const fx = freshEnv();
+    seedTournament(fx);
+    await bindTournament5(fx);
+    fx.tour.exec(`INSERT INTO player (id, team_id, name) VALUES (21, 2, '哈兰德');
+      INSERT INTO match_event (id, match_id, player_id, assist_player_id, type, minute) VALUES (1, 900, 21, NULL, 'goal', 10)`);
+    await autoConfirmResults(fx.env);
+    const noteOf = () =>
+      sqlGet<{ review_note: string | null }>(fx.sqlite, 'SELECT review_note FROM result_confirmations WHERE match_id = 900')?.review_note ?? '';
+
+    expect(await retryUnresolvedResults(fx.env)).toEqual({ scanned: 1, healed: 0, failed: 1 });
+    expect(noteOf()).toContain('自动重试 1 次');
+    expect(await retryUnresolvedResults(fx.env)).toEqual({ scanned: 1, healed: 0, failed: 1 });
+    expect(noteOf()).toContain('自动重试 2 次');
+    expect(await retryUnresolvedResults(fx.env)).toEqual({ scanned: 1, healed: 0, failed: 1 });
+    expect(noteOf()).toContain('自动重试已放弃');
+    // 到顶后不再占每跳额度（LIKE 过滤掉），残留标记交人工
+    expect(await retryUnresolvedResults(fx.env)).toEqual({ scanned: 0, healed: 0, failed: 0 });
+
+    // 通知发送失败要人工补发，重放清不掉 ⇒ 自动补账必须绕开这类标记
+    fx.sqlite.exec(
+      "UPDATE result_confirmations SET needs_review = 1, review_note = '1 项没解析到（曼城·X）；通知发送失败' WHERE match_id = 900",
+    );
+    expect(await retryUnresolvedResults(fx.env)).toEqual({ scanned: 0, healed: 0, failed: 0 });
   });
 });
