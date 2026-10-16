@@ -1522,6 +1522,24 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.7 · 零封联动收窄到「这张图里识别到的门将」（2026-10-16）
+
+**状态**：**待发布（本地就绪 2026-10-16）**；判级 **patch**；**零迁移、零服务端改动、零提示词改动**（只改录入面板的草稿合并逻辑）⇒ 上线只需 push。
+
+**缘起（用户裁决）**：先问「零封联动自动勾 2 名门将是什么机制」，随后判定口径不对——「不对吧，不应该联动的，上传的截图已经足够证明哪个门将上场了」；并要求把「已经被联动的」清理掉。
+
+**根因**：`web/src/lib/growth-ocr.ts` 的 `mergeOcrEntries` 原口径把整队 `position === 'GK'` 行全勾（不看是否出现在识别条目里）⇒ 双门将俱乐部会勾到替补门将（0.5 XP / 人，保存即锁）。而依据本就在手：服务端 `src/core/growth-ocr.ts:314`「N/A/没识别到评分 = 没上场，不预填」⇒ 识别条目里的门将就是上场门将（门将页还额外按 `ocr.gk` 点名）。
+
+**交付**：① `web/src/lib/growth-ocr.ts`——联动改为先建 `shownGk` 集合（`entries` 里出现 + `position === 'GK'` + 未停赛），只勾这些行；「失球 0 才算零封」的判定权仍在已确认比分（`sideConcededOf`）；锁定/已勾行不动；文件头口径说明与 `mergeOcrEntries` docstring 同步（v6.51.7 收窄注释）。② `web/src/lib/growth-ocr.test.ts`——TC-FE-03 重写为 6 行夹具 + 5 条识别条目（`gkAuto === 1`；失球 2 时 `gkAuto === 0`、`cleanSheetSide === false`）；TC-FE-07（`allowCounters = false`）回归不变。③ 新建测试计划 `docs/test-plans/v6.51.7-clean-sheet-scope.md`。
+
+**生产核查（只读，回答「已经被联动的清理掉」）**：全库 `clean_sheet` 36 条**全为 `source = 'auto'`**（CB 7 / CDM 15 / CM 2 / GK 1 / LB 6 / RB 5）、**`manual` 0 条** ⇒ 联动从未落库、**无需清理**；全库唯一门将零封 = `growth_events` id 702（A. Areola，诺丁汉森林，`match_ref = '173'`，0.5 XP）来自确认钩子（该场 2:0、他在赛事侧有一条助攻），与联动无关；用户手录的 match 33 批次（13:03–13:05Z）无 clean_sheet（该场 2:1）。用户看到的自动勾只在浏览器草稿里。
+
+**验收**：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **136 文件 / 2230 例全绿**；`npm run build` ✓ 入口 `assets/index-DpFqkcsf.js`（663,313 B，sha256 `de50706addbec6bd4237585498508a6cbe46db727a3ca41931ee5a64f926a6d9`，含 6.51.7）+ 页面 chunk `assets/GrowthEntryPage-DTGACkY6.js`（35,523 B，sha256 `cdc3dbd5947dcf187de22db60ada542f6b7f56429cff224504f69189b4eb5335`）；CSS 入口 `index-BGPWLRxy.css` 未变。
+
+**本地提交**（未 push）：`a8479da` fix(web) + `ab2423d` chore 版本号 6.51.6→6.51.7 + docs 枚。
+
+**留待补**：① 用户侧真机确认（重传那张图，报告应只勾上场的门将）；② 「条目里出现但实际是替补」无法数据侧区分（截图/首发名单是唯一权威，未覆盖）；③ 双门将同场登场（换人）时两条都会勾——本版按「图里出现即勾」不做区分（罕见，未覆盖）。
+
 ## v6.51.6 · 赛事侧成长数据自动补账：没解析到的场次由 cron 重放钩子补齐（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（判级 **patch**：同一链的自愈补丁，无新端点、无页面、**零迁移**；push `a637bd1..c451c06`（4 枚，含 v6.51.5 上线回写 `269dbdf`）触发 CF Workers Builds 自动部署 Version `64c65af4-8e0b-42fb-8ad1-7d9f2d1398d3` @2026-10-16T14:12:38Z；回读 `/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-DvQRIwgv.js`（sha256 `91f85c525c92224d69f68fd3d0df61512138a0439882dfdd95a06851f7530d9a`）与本地逐字节一致；**生产 56 场欠账由既有 cron 三跳清零**（14:15 / 14:20 / 14:25Z：56 → 36 → 16 → 0），auto 事件 +268）｜PRD 无需同步（确认口径与用户可见行为未变）；TECH_DESIGN 只同步 `cron_tick` 一行（`:978`）。

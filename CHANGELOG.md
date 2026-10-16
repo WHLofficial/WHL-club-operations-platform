@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.7] · 零封联动收窄到「这张图里识别到的门将」（2026-10-16）
+
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一处草稿合并逻辑的口径修正，无新端点、无页面、**零迁移、零服务端改动、零提示词改动**——识别条目与模型不变，改的只是录入面板的自动勾选范围）。
+
+缘起（用户裁决）：先问「零封联动自动勾 2 名门将是什么机制」；随后判定现行行为不对——「不对吧，不应该联动的，上传的截图已经足够证明哪个门将上场了」；并要求把**已经被联动的清理掉**。
+
+根因：`web/src/lib/growth-ocr.ts` 的 `mergeOcrEntries` 在本侧失球 0 时，把**整队** `position === 'GK'` 且未停赛、未录过（未锁定）的门将行全部自动勾零封（原注释还写着「无论识别条目里有没有他」）⇒ 双门将俱乐部（如佛罗伦萨 M. Carnesecchi + É. Mendy）会把**替补门将**也勾上、各 0.5 XP，而保存即锁定。证据链本可判断谁上场：服务端 `src/core/growth-ocr.ts:314` 明确写「N/A/没识别到评分 = 没上场，不预填」，门将页再按 `ocr.gk` 点名胜任门将 ⇒ **识别条目里出现的门将就是上场的门将**。
+
+交付：`mergeOcrEntries` 先建 `shownGk`（只收 `entries` 里出现、`position === 'GK'`、未停赛的行），联动只勾这些行；失球 0 仍以**已确认比分**为权威（条目没带零封、例如门将页失球被读成 >0 时照勾），已锁定与已勾的行不动；文件头口径说明与 docstring 同步注明这次收窄；报告行「零封联动自动勾 N 名门将」随之只数真正上场的门将。
+
+生产核查（只读，回答「已经被联动的清理掉」）：**库里没有需要清理的行**——全库 `clean_sheet` 36 条**全部 `source = 'auto'`**（CB 7 / CDM 15 / CM 2 / GK 1 / LB 6 / RB 5，即补账后的 auto 总数），`source = 'manual'` 的零封 **0 条** ⇒ OCR 联动从未写入过数据库；全库唯一门将零封是 `growth_events` id 702（A. Areola，诺丁汉森林，`match_ref = '173'`，0.5 XP，`auto`），来自确认钩子（该场诺丁汉森林 2:0 曼城(CPU)，他在赛事侧有一条助攻事件所以进了 `seen`），与联动无关。用户点过的 match 33 手录批次（13:03–13:05Z）只有 appearance 32 / rating 32 / duels_won 19 / saves 2、**无 clean_sheet**（该场 2:1，两侧都不该有零封）⇒ 看到过的自动勾只存在于浏览器草稿，刷新面板即回基线。
+
+测试：`web/src/lib/growth-ocr.test.ts` 的 TC-FE-03 重写为「只看图里的门将」——6 行夹具 + 5 条识别条目（图里的 GK 勾、没出现在图里的 GK 不勾、已勾不重复计、已录锁定不动、停赛不碰、ST 不碰）断言 `gkAuto === 1`；失球 2 时 `gkAuto === 0`。定向 7 例通过；全量 **136 文件 / 2230 例全绿**。闸门：`npm run typecheck`（三份 tsconfig）0 error；`npm run build` ✓ 入口 `assets/index-DpFqkcsf.js`（663,313 B / gzip 210.88 kB，sha256 `de50706addbec6bd4237585498508a6cbe46db727a3ca41931ee5a64f926a6d9`，含版本串 6.51.7）+ `assets/GrowthEntryPage-DTGACkY6.js`（35,523 B，sha256 `cdc3dbd5947dcf187de22db60ada542f6b7f56429cff224504f69189b4eb5335`），CSS 入口未变。测试计划 `docs/test-plans/v6.51.7-clean-sheet-scope.md`。
+
+**待核**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知，仍未核）。
+
 ## [v6.51.6] · 赛事侧成长数据自动补账：没解析到的场次由 cron 重放钩子补齐（2026-10-16）
 
 **已上线（2026-10-16）**：判级 **patch**（同一条链的自愈补丁，无新端点、无页面、**零迁移**）；push `a637bd1..c451c06`（4 枚，含 v6.51.5 上线回写 `269dbdf`）触发 CF Workers Builds 自动部署 Version `64c65af4-8e0b-42fb-8ad1-7d9f2d1398d3`（@2026-10-16T14:12:38Z）；回读：`/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-DvQRIwgv.js`（663,313 B，sha256 `91f85c525c92224d69f68fd3d0df61512138a0439882dfdd95a06851f7530d9a`，含版本串 6.51.6）与本地逐字节一致；**生产补账随既有 cron 三跳收敛**（14:15 / 14:20 / 14:25Z 各一跳）：`needs_review = 1` **56 → 36 → 16 → 0**，且无一条 `result_confirmations` 留下「自动重试 N 次」或「已放弃」（56 场全部在额度内自愈）。
