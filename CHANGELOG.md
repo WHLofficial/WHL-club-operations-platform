@@ -4,6 +4,27 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.4] · 截图识别三修：认人容忍「姓+首字母」形态 + 视觉模型换 glm-4.6v-flashx 且默认关思考 + 「不保存，继续」真丢草稿（2026-10-16）
+
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一条链上的缺陷修补：认人误报 / 模型额度与耗时 / 丢弃草稿没丢）；**零迁移 ⇒ 无需 apply**；生产视觉模型与 max_tokens 已随 `wrangler secret put` 生效（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b`、`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3`）。
+
+**缘起（用户）**：① 「1修」（先修认人）——4 张真图共 12 行「认人失败」里 7 行其实是库里写法与截图写法不一致；② 「顺便把模型改成 GLM-4.6V-FlashX，现在有额度了」（随后更正「flashx，不是 flash 那个免费模型」，并要求「应该先试图获取 model 元数据列表」）；③ 报 bug「点击不保存，继续后没有丢弃未保存改动」；④ 要账单估算与「怎么把输入压到 32K 以下」。
+
+**根因**：① `matchRosterPlayer` 四层阶梯全是整名相等比较，跨不过「首字母缩写 vs 全名 vs 只存姓」（库里 `Marc Cucurella` / `Pedro Neto` / `Aleix García` / `Carvajal` / `Ibañez` vs 截图 `M. Cucurella` / `P. Neto` / `A. García` / `D. Carvajal` / `R. Ibáñez`）；② 生产视觉模型是免费档 `glm-4v-flash`（持续限流不可用），且 `glm-4.6v` 系列默认开思考——思考 token 计费且把单图耗时拉到 13–16s；③ 「不保存，继续」只执行了 pending 动作：收起 / 切比赛 / 切视图靠面板重挂丢草稿，唯独**换队侧不重挂**，草稿留着（横幅当时还写着「换队侧的草稿会保留」）。
+
+**交付**：
+① `src/core/growth-ocr.ts` 认人第五层：`matchRosterPlayer` 四层之后加「姓相同 + 首字母兼容」形态层（新私有 `nameShapeOf`、导出 `isSameSurnameShape`），命中唯一回 `matched: 'surname-initial'`，多命中仍回 null 不猜；`OcrEntry.matched` 联合类型加第 5 值，`web/src/lib/api.ts` 同步镜像。
+② 视觉模型换 `glm-4.6v-flashx` + 关思考：`src/lib/llm.ts` 新增 `llmVisionThinkingEnabled(env)`，请求体对智谱端点（`bigmodel.cn`）默认带 `thinking: { type: 'disabled' }`（`LLM_VISION_THINKING=on` 时保留思考；非智谱端点不带该私有字段）；`src/worker/env.ts` 新增 `LLM_VISION_THINKING?`；生产 secret 已切（模型 + `LLM_VISION_MAX_TOKENS=8192`，8192 是必需项——缺省 1024 会被 4.6v 的思考吃满）。
+③ `web/src/pages/admin/GrowthEntryPage.tsx` 丢弃语义订正：新增 `discardRef`（页面）与 `discardDrafts`（面板，用当前 data 重建两侧行），「不保存，继续」handler 改为「清 pending → 通知面板丢弃 → 执行 pending 动作」；确认条文案改为「收起面板、切换比赛、切换视图或换队侧，确认后都会丢弃草稿（不提交）」。
+
+**实测（真实模型 + 生产提示词 1798 字符 + `E:\成长录入图` 4 张）**：`glm-4.6v-flashx` 开思考 13.2–16.1s / out 1604–1958 / reasoning 2097–2762 字符；**关思考 6.6–9.5s / out 652–765 / reasoning 0**，四张图名单与开思考完全一致（同一处小误读 `M. Carnesechi` 两边相同），生产 `extractJsonObject` 均可解析；免费档 `glm-4.6v-flash` 本轮复测仍全 429（code 1305）⇒ 不用。`glm-4v-flash` 也接受 `thinking` 字段（HTTP 200）⇒ 回滚安全。模型清单端点 `GET /api/paas/v4/models` 只列 11 个文本模型、不含任何视觉 id。
+
+**账单（官方 pricing.md，2026-10-16 查；GLM-4.6V-FlashX 输入 [0,32K) 0.15 / 输出 1.5、[32K,128K) 0.3 / 3、缓存命中 0.03 元每百万 tokens）**：实测单图出站 `prompt_tokens` 3,572–3,649（约 1k 提示词 + 约 2.5k 图像）⇒ 已落在**最便宜的 [0,32K) 档**；关思考单图 ≈ 3.58k 输入 + 0.66k 输出 ≈ **0.0015 元/图**（开思考 ≈ 0.0031 元/图）⇒ 4 张/场 ≈ 0.6 分钱。
+
+**测试**：`tests/growth-ocr.test.ts` TC-MATCH-04（形态层七行命中 + 拼写错不救 + 同姓两人不猜）、TC-MATCH-05（`isSameSurnameShape` 十组）；`tests/growth-ocr-endpoint.test.ts` TC-EP-04b（只给姓走形态层）、TC-EP-17（出站 thinking.disabled / `LLM_VISION_THINKING=on` 时不带 / 非智谱端点不带）；`web/src/pages/admin/GrowthEntryPage.test.tsx` TC-ENTRY-E10（换队侧 + 不保存 → 两侧都回基线）、TC-ENTRY-E11（收起 + 不保存 → 重开回基线）。闸门：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **135 文件 / 2219 例全绿**；`npm run build` ✓ 入口 `assets/index-Cy37Jlw2.js`（663,313 B，sha256 `1008a0c1fa029ee7878f2cdffd7c207687735200dfbba0d43a4d559b80eff0f5`，含版本串 6.51.4）。
+
+**待核**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 的上限未知；换模型时若小上限会同样 400）。
+
 ## [v6.51.3] · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍 + 同城同前缀歧义保护 + 歧义一键选边（提示带截图英文原文）（2026-10-16）
 
 **已上线（2026-10-16）**：判级 **patch**（同一能力的缺陷修补：库里中文队名 vs 截图英文队名必然对不上，识别结果被 400 拦下）；**零迁移 ⇒ 无需 apply**，push `0a07264..e04c478`（10 个提交，含本版 7 枚与 v6.51.2 上线回写、并行会话 2 枚）后 CF Workers Builds 自动部署 Version `43364b87-66f8-49a2-aff4-1921140df1aa`（2026-10-16T10:26:22Z）。零生产写；前端只动成长录入页的识别报告区（歧义那张渲染成一行提示 + 主队 / 客队 / 取消三颗按钮）。上线回读：`/api/health` 200（`d1` / `tour_db` / `kv` 全 ok）、线上入口 `assets/index-BWgmRcm6.js` sha256 `705e5f3ce3217561d78bdb20d5102f0769425609ebcbb13d49121cf4fbd9cd4e` 与本地构建**逐字节一致**、匿名 `POST /api/admin/growth/match-entry/1/ocr` ⇒ 401（路由挂载 + 守卫生效）。

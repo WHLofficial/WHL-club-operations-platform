@@ -1522,6 +1522,24 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.4 · 截图识别三修：认人容忍「姓+首字母」形态 + 视觉模型换 glm-4.6v-flashx 且默认关思考 + 「不保存，继续」真丢草稿（2026-10-16）
+
+**状态**：**本地就绪待发布**（判级 **patch**：同一链上的缺陷修补；**零迁移**（不改表）⇒ 上线只需 push，push 即触发 CF Workers Builds 自动部署）｜**生产 secret 已切**（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b` @2026-10-16T11:48:57Z；`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3` @11:49:40Z）⇒ 线上（v6.51.3 代码）此刻起已用 flashx 识别，只差「关思考」随本版代码上线｜PRD 与 TECH_DESIGN 无需同步（识别口径与端点形状未变；新增的 `thinking` 字段与 `LLM_VISION_THINKING` 是出站参数）。
+
+**缘起（用户）**：① 4 张真图的质量反馈（12 行认人失败 / 4 行模型读错）→ 用户裁决「**1修**」（只做匹配器形态容忍，「2 暂时不做」拼写容错层）；② 同一条消息里追加「**顺便把模型改成 GLM-4.6V-FlashX，现在有额度了**」，随后更正「flashx，不是 flash 那个免费模型」，并要求「**应该先试图获取 model 元数据列表**」；③ 新报 bug「**点击不保存，继续后没有丢弃未保存改动**」；④ 追问「max-tokens 是 128k，低于 32k 的输入会便宜一半，所以请告诉我如何把当前输入压低一些到 32k 以下」与「这段改完后账单大概多少钱」（用户侧账单估算）。
+
+**根因**：① `matchRosterPlayer`（`src/core/growth-ocr.ts`）四层阶梯全是整名相等比较 ⇒ 库里写全名或只写姓（`Marc Cucurella` / `Álex Baena` / `Pedro Neto` / `Aleix García` / `Andrey Santos` / `Carvajal` / `Ibañez`）对不上截图的首字母缩写（`M. Cucurella` / `Á. Baena` / `P. Neto` / `A. García` / `A. Santos` / `D. Carvajal` / `R. Ibáñez`），7 行被报「认人失败」（另 4 行是模型真读错，属提示词/模型能力问题，本次不做拼写容错）；② 视觉模型是免费档 `glm-4v-flash`（当日持续 429 code 1305 不可用），换 `glm-4.6v-flashx` 后默认开思考：思考 token 计费且单图 13–16s；③ 「不保存，继续」只跑 pending 动作，收起/切比赛/切视图靠面板重挂丢草稿，**换队侧不重挂** ⇒ 草稿留在内存（横幅当时还承诺「换队侧的草稿会保留」）。
+
+**交付**：① 认人第五层 `surname-initial`（`isSameSurnameShape`：姓必须一致；一侧无 given 或 given 逐字相同算兼容；一侧 given 单字则要求首字母相同；多命中不猜）+ `OcrEntry.matched` 第 5 值 + 前端类型镜像 `web/src/lib/api.ts`；② 视觉调用默认关思考（`llmVisionThinkingEnabled` + 请求体对 `bigmodel.cn` 端点带 `thinking: { type: 'disabled' }`，`LLM_VISION_THINKING=on` 保留思考，非智谱端点不带）+ `src/worker/env.ts` 增变量；③ `discardRef`/`discardDrafts` 让「不保存，继续」真正丢草稿（换队侧也丢）+ 横幅文案订正。
+
+**验收**：真实模型四张真图（`E:\成长录入图`，生产提示词 1798 字符）—— flashx **开思考** 13.2–16.1s / out 1604–1958 / reasoning 2097–2762 字符；**关思考 6.6–9.5s / out 652–765 / reasoning 0**，名单与开思考逐条一致，生产提取器可解析；免费档 `glm-4.6v-flash` 复测仍全 429 ⇒ 不采用；`glm-4v-flash` 接受 `thinking` 字段（回滚安全）；模型清单 `GET /api/paas/v4/models` 只有 11 个文本模型、无视觉 id（故按官方文档名取 flashx）。闸门：typecheck 三份 0 error、`npx vitest run` **135 文件 / 2219 例全绿**（v6.51.3 基线 2213，净 +6）、`npm run build` ✓ 入口 `assets/index-Cy37Jlw2.js`（663,313 B，sha256 `1008a0c1fa029ee7878f2cdffd7c207687735200dfbba0d43a4d559b80eff0f5`）；`assets/GrowthEntryPage-BVTD6iRd.js` sha256 `7b7f2eaaf401342d9ddd30108f4c752379c1053e61ebac31be1a2b6ef8976d66`。
+
+**账单口径（官方 pricing.md 2026-10-16）**：GLM-4.6V-FlashX 输入 [0,32K) 0.15 / 输出 1.5、[32K,128K) 0.3 / 3、缓存命中 0.03 元每百万 tokens（缓存存储限时免费）；实测单图 `prompt_tokens` 3,572–3,649 ⇒ 已在最便宜档，**无需为 32K 阈值做任何裁剪**；关思考单图 ≈ **0.0015 元**（3.58k in + 0.66k out），开思考 ≈ 0.0031 元，一场 4 张图 ≈ 0.6 分钱。
+
+**留待补**：① 拼写容错层（Damerau 距离 ≤1 + 位置同族 LCB/RCB→CB + 全队唯一候选）仍不做——用户点名「2 暂时不做」；② `glm-4.6v-flashx` 仍有的小误读（`M. Carnesechi` 缺 s、`A. Garmacho`）留给提示词/模型侧，不写进匹配器（避免把错名救成对名）；③ `src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200` 待核（文本模型 `LLM_MODEL` 上限未知）。
+
+**本地提交**：`bd0cc94` fix(worker)（认人形态层 + 默认关思考）+ `b37d726` fix(web)（不保存真丢草稿 + 类型镜像）+ `4d56148` chore 版本号 + 本枚 docs；**未 push**（零迁移，push 即部署）。
+
 ## v6.51.3 · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍 + 同城同前缀歧义保护 + 歧义一键选边（提示带截图英文原文）（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（判级 **patch**：缺陷修补：中英队名对不上让识别必 400；**零迁移**（不改表）⇒ 无需 apply，push `0a07264..e04c478` 即触发 CF Workers Builds 自动部署 Version `43364b87-66f8-49a2-aff4-1921140df1aa`；回读 `/api/health` 200、线上入口 `assets/index-BWgmRcm6.js` sha256 与本地逐字节一致、匿名 OCR 端点 401）｜零生产写；前端只动成长录入页识别报告区（歧义那张一行提示 + 三颗按钮）｜PRD 与 TECH_DESIGN 无需同步（识别口径微调；识别端点只新增可选入参 `side`，缺省行为不变）。
