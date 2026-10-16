@@ -6,7 +6,7 @@
 
 ## [v6.51.3] · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍 + 同城同前缀歧义保护 + 歧义一键选边（提示带截图英文原文）（2026-10-16）
 
-**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一能力的缺陷修补：库里中文队名 vs 截图英文队名必然对不上，识别结果被 400 拦下）；**零迁移 ⇒ 上线只需 push**、零生产写；前端只动成长录入页的识别报告区（歧义那张渲染成一行提示 + 主队 / 客队 / 取消三颗按钮）。
+**已上线（2026-10-16）**：判级 **patch**（同一能力的缺陷修补：库里中文队名 vs 截图英文队名必然对不上，识别结果被 400 拦下）；**零迁移 ⇒ 无需 apply**，push `0a07264..e04c478`（10 个提交，含本版 7 枚与 v6.51.2 上线回写、并行会话 2 枚）后 CF Workers Builds 自动部署 Version `43364b87-66f8-49a2-aff4-1921140df1aa`（2026-10-16T10:26:22Z）。零生产写；前端只动成长录入页的识别报告区（歧义那张渲染成一行提示 + 主队 / 客队 / 取消三颗按钮）。上线回读：`/api/health` 200（`d1` / `tour_db` / `kv` 全 ok）、线上入口 `assets/index-BWgmRcm6.js` sha256 `705e5f3ce3217561d78bdb20d5102f0769425609ebcbb13d49121cf4fbd9cd4e` 与本地构建**逐字节一致**、匿名 `POST /api/admin/growth/match-entry/1/ocr` ⇒ 401（路由挂载 + 守卫生效）。
 
 **缘起（用户）**：管理端成长录入 4 张图全报「截图队名「FIORENTINA」/「CHELSEA」对不上这场比赛（切尔西 vs 佛罗伦萨），确认传对图了吗」——「卡在中英对应了」。
 
@@ -52,7 +52,9 @@
 
 **验收**：赛事仓 `npm run typecheck` 0 error；`npm test` **628 passed | 7 skipped**（53 文件，新增 `tests/rebuild.selfheal.test.ts` 15 例）；`npm run build` ✓。生产只读核验：`rebuild_pending` 表在场、`standing` 16 列、`carried_played <> 0` 行数 0（历史行待补账）。回读：`/api/health` 200、匿名体检端点 401、公开榜 stage 2 未被扰动（曼城 played 8 / 10 分第 4，拜仁 played 8 / 9 分第 5）、线上两份资产 sha256 与本地 `dist/` 逐字节一致。
 
-**待办（用户侧一次性）**：赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（补账前带带入阶段黄条为预期假阳性）。详见 [ROADMAP.md](./ROADMAP.md) 的「tour 侧增量 · 积分榜重算自愈」节。
+**待办（用户侧一次性）**：赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（补账前带带入阶段黄条为预期假阳性）—— **2026-10-16 用户已执行**：生产只读核验 `standing.carried_played <> 0` = **16 行**、`rebuild_pending` = **0 行**、按 `played == 本阶段 finished 场次 + carried_played` 对账**不一致 0 行**（黄条转健康；公开榜数值未变）。详见 [ROADMAP.md](./ROADMAP.md) 的「tour 侧增量 · 积分榜重算自愈」节。
+
+**版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致，`/api/health` 200。判级 **minor**（新增管理端端点与用户可见能力）。
 
 ## [v6.51.0] · 强制拍卖解禁与可指定挂牌价（前六降参考值 + 预检端点）+ 品牌池三批（全虚构化 28 家 / 冠名落点名 / 企业档案 / 招商性格与对赌抽签引擎）（2026-10-15）
 
