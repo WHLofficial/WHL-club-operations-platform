@@ -1,7 +1,7 @@
 // 管理端 · 品牌池（v6.8.0 冠名活化）：列表 / 新增自定义品牌 / 调热度·行业·档位 / 弃用
 // 热度界 0.5–1.5（与 market_heat_rules 钳制边界一致）；有 active 合同的品牌后端会拒弃用（409）
 // 档位（v6.13.0 C2）：三档下拉 + 锁定开关；锁档的行关窗自动校准跳过
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiSend } from '../../lib/api.ts';
 import { fetchMarketRound, MARKET_ROUND_KEY, reopenMarketRound } from '../../lib/adminQueries.ts';
@@ -20,12 +20,41 @@ interface BrandRow {
   tier_locked: number;
   created_at: string;
   active_contracts: number;
+  // v6.51.0 批 2/3：企业档案 7 列 + 招商性格 2 列（空串 = 未登记）
+  name_en: string;
+  full_name: string;
+  color: string;
+  slogan: string;
+  hq: string;
+  intro: string;
+  origin: string;
+  style: string;
+  prefer: string;
+}
+
+/** 行内编辑草稿（v6.51.0 起含档案与招商性格；数字字段也用字符串，提交时才转数）。 */
+interface BrandDraft {
+  heat: string;
+  industry: string;
+  nameEn: string;
+  fullName: string;
+  color: string;
+  slogan: string;
+  hq: string;
+  intro: string;
+  origin: string;
+  style: string;
+  prefer: string;
 }
 
 const BRANDS_KEY = ['admin', 'brands'] as const;
 const HEAT_MIN = 0.5;
 const HEAT_MAX = 1.5;
 const TIERS = ['头部', '新兴', '口碑'] as const;
+// 招商性格（v6.51.0 批 3）：决定该品牌递什么套餐；空 = 按档位（头部进取、其余稳健）
+const STYLES = ['', '稳健', '进取', '对赌'] as const;
+// 招商偏好标签（与后端 PREFER_TAGS 同源）：对赌抽签权重偏向 + 情绪加成
+const PREFER_TAG_OPTIONS = ['冠军相', '高上座', '死忠规模', '大场馆'] as const;
 // v6.21.0 ②：赞助品牌表窄屏改卡片流的断点——与 AdminLayout 抽屉 / styles.css 管理端媒体块同为 ≤760
 const NARROW_QUERY = '(max-width: 760px)';
 
@@ -57,10 +86,20 @@ export default function BrandsPage() {
   const [newHeat, setNewHeat] = useState('1.0');
   const [newIndustry, setNewIndustry] = useState('');
   const [busy, setBusy] = useState(false);
-  const [draft, setDraft] = useState<Record<number, { heat: string; industry: string }>>({});
+  const [draft, setDraft] = useState<Record<number, BrandDraft>>({});
+  // v6.51.0：档案/招商性格区默认收起（28 行池子全展开时表格过长）——按行展开，状态只存展开中的行
+  const [openIds, setOpenIds] = useState<Record<number, boolean>>({});
 
   const brands = data?.brands ?? [];
   const refresh = () => qc.invalidateQueries({ queryKey: BRANDS_KEY });
+
+  function isOpen(row: BrandRow): boolean {
+    return openIds[row.id] === true;
+  }
+
+  function toggleOpen(row: BrandRow) {
+    setOpenIds((m) => ({ ...m, [row.id]: !m[row.id] }));
+  }
 
   // 招商轮（v6.14.0 C3）：当前 open 轮优先、否则最近已结轮 + 全状态报价流水；只读 + 手动恢复按钮
   const marketQuery = useQuery({ queryKey: MARKET_ROUND_KEY, queryFn: fetchMarketRound });
@@ -82,10 +121,24 @@ export default function BrandsPage() {
     }
   }
 
-  function fieldOf(row: BrandRow) {
-    return draft[row.id] ?? { heat: String(row.heat), industry: row.industry };
+  function fieldOf(row: BrandRow): BrandDraft {
+    return (
+      draft[row.id] ?? {
+        heat: String(row.heat),
+        industry: row.industry,
+        nameEn: row.name_en,
+        fullName: row.full_name,
+        color: row.color,
+        slogan: row.slogan,
+        hq: row.hq,
+        intro: row.intro,
+        origin: row.origin,
+        style: row.style,
+        prefer: row.prefer,
+      }
+    );
   }
-  function setField(row: BrandRow, patch: Partial<{ heat: string; industry: string }>) {
+  function setField(row: BrandRow, patch: Partial<BrandDraft>) {
     setDraft((d) => ({ ...d, [row.id]: { ...fieldOf(row), ...patch } }));
   }
 
@@ -113,9 +166,24 @@ export default function BrandsPage() {
     const heat = Number(f.heat);
     if (!Number.isFinite(heat) || heat < HEAT_MIN || heat > HEAT_MAX) return show(`热度需在 ${HEAT_MIN}–${HEAT_MAX} 之间`, true);
     if (!f.industry.trim()) return show('行业名不能空', true);
+    if (f.color.trim() !== '' && !/^#[0-9A-Fa-f]{6}$/.test(f.color.trim())) return show('色值要写成 #RRGGBB 或留空', true);
+    const prefer = f.prefer.split(',').map((t) => t.trim()).filter((t) => t !== '');
+    if (prefer.length > 3) return show('偏好标签最多 3 个', true);
     setBusy(true);
     try {
-      await apiSend('PATCH', `/api/admin/brands/${row.id}`, { heat, industry: f.industry.trim() });
+      await apiSend('PATCH', `/api/admin/brands/${row.id}`, {
+        heat,
+        industry: f.industry.trim(),
+        nameEn: f.nameEn.trim(),
+        fullName: f.fullName.trim(),
+        color: f.color.trim(),
+        slogan: f.slogan.trim(),
+        hq: f.hq.trim(),
+        intro: f.intro.trim(),
+        origin: f.origin,
+        style: f.style,
+        prefer: prefer.join(','),
+      });
       setDraft((d) => {
         const next = { ...d };
         delete next[row.id];
@@ -173,6 +241,107 @@ export default function BrandsPage() {
     }
   }
 
+  /** 品牌名 + 品牌色块 + 英文名 + 「中资」标签（v6.51.0 批 2，空字段不渲染）。 */
+  function brandLabel(row: BrandRow) {
+    return (
+      <>
+        {row.color !== '' && (
+          <span
+            className="brand-color-chip"
+            style={{ background: row.color }}
+            title={`品牌色 ${row.color}`}
+          />
+        )}
+        <b>{row.brand}</b>
+        {row.name_en !== '' && <span className="hint" style={{ marginLeft: 6 }}>{row.name_en}</span>}
+        {row.origin !== '' && (
+          <span className="badge gold" style={{ marginLeft: 6 }} title="中资企业">
+            {row.origin}
+          </span>
+        )}
+      </>
+    );
+  }
+
+  /** 企业档案 7 列 + 招商性格 2 列（v6.51.0 批 2/3）：桌面表格第二行与窄屏卡片共用同一网格。 */
+  function profileFields(row: BrandRow, f: BrandDraft) {
+    return (
+      <div className="brand-profile-grid">
+        <label>
+          英文名
+          <input className="input input-sm" value={f.nameEn} maxLength={40} onChange={(e) => setField(row, { nameEn: e.target.value })} />
+        </label>
+        <label>
+          全称
+          <input className="input input-sm" value={f.fullName} maxLength={30} onChange={(e) => setField(row, { fullName: e.target.value })} />
+        </label>
+        <label>
+          口号
+          <input className="input input-sm" value={f.slogan} maxLength={20} onChange={(e) => setField(row, { slogan: e.target.value })} />
+        </label>
+        <label>
+          总部
+          <input className="input input-sm" value={f.hq} maxLength={20} onChange={(e) => setField(row, { hq: e.target.value })} />
+        </label>
+        <label>
+          品牌色
+          <span className="brand-color-cell">
+            <input
+              type="color"
+              value={/^#[0-9A-Fa-f]{6}$/.test(f.color) ? f.color : '#cccccc'}
+              onChange={(e) => setField(row, { color: e.target.value })}
+            />
+            <input className="input input-sm mono" placeholder="#RRGGBB" value={f.color} maxLength={7} onChange={(e) => setField(row, { color: e.target.value })} />
+          </span>
+        </label>
+        <label>
+          性质
+          <select className="input input-sm" value={f.origin} onChange={(e) => setField(row, { origin: e.target.value })}>
+            <option value="">境外</option>
+            <option value="中资">中资</option>
+          </select>
+        </label>
+        <label>
+          招商性格
+          <select className="input input-sm" value={f.style} onChange={(e) => setField(row, { style: e.target.value })}>
+            {STYLES.map((s) => (
+              <option key={s} value={s}>
+                {s === '' ? '按档位' : s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="brand-profile-cell">
+          偏好标签
+          <span className="brand-prefer-cell">
+            {PREFER_TAG_OPTIONS.map((t) => {
+              const on = f.prefer.split(',').includes(t);
+              return (
+                <label key={t} className="hint">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => {
+                      const cur = f.prefer.split(',').map((x) => x.trim()).filter((x) => x !== '');
+                      const next = on ? cur.filter((x) => x !== t) : [...cur, t];
+                      if (next.length > 3) return;
+                      setField(row, { prefer: next.join(',') });
+                    }}
+                  />{' '}
+                  {t}
+                </label>
+              );
+            })}
+          </span>
+        </div>
+        <label style={{ gridColumn: '1 / -1' }}>
+          简介
+          <textarea className="input input-sm" rows={2} value={f.intro} maxLength={80} onChange={(e) => setField(row, { intro: e.target.value })} />
+        </label>
+      </div>
+    );
+  }
+
   return (
     <div className="admin-page">
       {toastNode}
@@ -184,6 +353,10 @@ export default function BrandsPage() {
           签约时热度定格进合同，改动只影响之后的报价与续约。档位每窗按热度自动校准（热度降序前 3 家且 ≥1.0 → 头部，
           ≥0.9 → 新兴，其余口碑）；锁档后该品牌跳过自动校准。头部档限 1 队、新兴档限 2 队签约。
         </p>
+        <p className="hint">
+          v6.51.0：每行的「档案」按钮展开可编辑品牌档案（英文名/全称/口号/总部/品牌色/简介/性质）与招商性格——默认收起；
+          套餐由性格决定（稳健/进取/对赌，空 = 按档位），偏好标签（最多 3 个，逗号分隔）影响对赌抽签权重与情绪加成；品牌名与热度留空字段不展示。
+        </p>
         {isPending && <p className="muted">加载中…</p>}
         {isError && <p className="muted">{error instanceof Error ? error.message : '读不出来'}</p>}
         {/* v6.21.0 ②：窄屏（≤760）改卡片流；桌面表格分支原样保留（含内联定宽，mobile-baseline 白名单） */}
@@ -193,7 +366,7 @@ export default function BrandsPage() {
               const f = fieldOf(row);
               return (
                 <div className="brand-card" key={row.id}>
-                  <b>{row.brand}</b>
+                  <div>{brandLabel(row)}</div>
                   {/* P2-4（评审）：与桌面表格「来源/状态/生效冠名」三列对等的元信息行 */}
                   <div className="brand-card-meta">
                     <span>来源 {row.source === 'custom' ? '自定义' : '种子'}</span>
@@ -214,7 +387,11 @@ export default function BrandsPage() {
                       <input type="checkbox" checked={row.tier_locked === 1} disabled={busy} onChange={() => void toggleTierLock(row)} /> 锁
                     </label>
                   </div>
+                  {isOpen(row) && profileFields(row, f)}
                   <div className="btn-row">
+                    <button className="btn btn-ghost btn-sm" type="button" aria-expanded={isOpen(row)} onClick={() => toggleOpen(row)}>
+                      {isOpen(row) ? '收起' : '档案'}
+                    </button>
                     <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void saveBrand(row)}>
                       保存
                     </button>
@@ -246,39 +423,49 @@ export default function BrandsPage() {
                 {brands.map((row) => {
                   const f = fieldOf(row);
                   return (
-                    <tr key={row.id}>
-                      <td>{row.brand}</td>
-                      <td>
-                        {/* v6.20.0：表格内控件保持定宽——min(N,100%) 的百分比分量会改变桌面列宽分配（评审 P0-1），窄屏保底由 .table-wrap 横滚承担 */}
-                        <input className="input input-sm" style={{ width: 96 }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
-                      </td>
-                      <td>
-                        <input className="input input-sm mono" style={{ width: 72 }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
-                      </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        <select className="input input-sm" style={{ width: 84 }} value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
-                          {TIERS.map((t) => (
-                            <option key={t} value={t}>
-                              {t}
-                            </option>
-                          ))}
-                        </select>
-                        <label className="hint" style={{ marginLeft: 6, whiteSpace: 'nowrap' }}>
-                          <input type="checkbox" checked={row.tier_locked === 1} disabled={busy} onChange={() => void toggleTierLock(row)} /> 锁
-                        </label>
-                      </td>
-                      <td>{row.source === 'custom' ? '自定义' : '种子'}</td>
-                      <td>{row.status === 'adopted' ? '在池' : '已弃用'}</td>
-                      <td className="mono">{row.active_contracts}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void saveBrand(row)}>
-                          保存
-                        </button>
-                        <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void toggleStatus(row)}>
-                          {row.status === 'adopted' ? '弃用' : '恢复'}
-                        </button>
-                      </td>
-                    </tr>
+                    <Fragment key={row.id}>
+                      <tr>
+                        <td>{brandLabel(row)}</td>
+                        <td>
+                          {/* v6.20.0：表格内控件保持定宽——min(N,100%) 的百分比分量会改变桌面列宽分配（评审 P0-1），窄屏保底由 .table-wrap 横滚承担 */}
+                          <input className="input input-sm" style={{ width: 96 }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
+                        </td>
+                        <td>
+                          <input className="input input-sm mono" style={{ width: 72 }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <select className="input input-sm" style={{ width: 84 }} value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
+                            {TIERS.map((t) => (
+                              <option key={t} value={t}>
+                                {t}
+                              </option>
+                            ))}
+                          </select>
+                          <label className="hint" style={{ marginLeft: 6, whiteSpace: 'nowrap' }}>
+                            <input type="checkbox" checked={row.tier_locked === 1} disabled={busy} onChange={() => void toggleTierLock(row)} /> 锁
+                          </label>
+                        </td>
+                        <td>{row.source === 'custom' ? '自定义' : '种子'}</td>
+                        <td>{row.status === 'adopted' ? '在池' : '已弃用'}</td>
+                        <td className="mono">{row.active_contracts}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <button className="btn btn-ghost btn-sm" type="button" aria-expanded={isOpen(row)} onClick={() => toggleOpen(row)}>
+                            {isOpen(row) ? '收起' : '档案'}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void saveBrand(row)}>
+                            保存
+                          </button>
+                          <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void toggleStatus(row)}>
+                            {row.status === 'adopted' ? '弃用' : '恢复'}
+                          </button>
+                        </td>
+                      </tr>
+                      {isOpen(row) && (
+                        <tr>
+                          <td colSpan={8}>{profileFields(row, f)}</td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

@@ -105,6 +105,8 @@ export interface MyClubOverview {
 export interface StadiumInfo {
   name: string | null;
   namingBrand: string | null;
+  /** 冠名落点名（v6.51.0）：「品牌·球场名」；老合同为空快照时按现球场名现拼；无冠名 null */
+  namingVenueName: string | null;
   capacity: number;
   tier: number;
   tierName: string | null;
@@ -1325,7 +1327,45 @@ export interface BrandQuote {
   /** 档位名额余量（v6.13.0 C2）：null = 不限（口碑档）；0 = 已满不可签 */
   quotaLeft: number | null;
   baseFee: number;
+  /** 签下将命名的球场名（v6.51.0）；无球场名时 null */
+  venueName?: string | null;
   packages: NamingPackage[];
+}
+
+/** 品牌企业档案（v6.51.0 批 2）：合同卡/报价卡渲染 slogan、属地、色块与「中资」标签用 */
+export interface BrandProfile {
+  nameEn: string;
+  color: string;
+  slogan: string;
+  hq: string;
+  intro: string;
+  /** 空串 = 境外品牌；「中资」= 中资品牌（前端显示小标签） */
+  origin: string;
+  /** 招商性格（v6.51.0 批 3）：稳健 / 进取 / 对赌，空串 = 未登记（按档位递套餐） */
+  style: string;
+  /** 招商偏好标签（逗号分隔）：冠军相 / 高上座 / 死忠规模 / 大场馆 */
+  prefer: string;
+}
+
+/** 对赌条款快照项（v6.51.0 批 3）：签约时抽定的指标与阈值 */
+export interface BetTermsItem {
+  m: string;
+  threshold: number;
+  baseline: number;
+  nBase: number;
+  pTarget: number;
+  /** '' | 'floor' | 'ceil' | 'pool_default'（护栏标记，ceil = 少池钳到上限，pool_default = 池默认基线） */
+  guard: string;
+}
+
+export interface BetTerms {
+  v: number;
+  seed: number[];
+  p: number;
+  strength: string;
+  backtest: { hitRate: number | null; windows: number };
+  dropped: string[];
+  items: BetTermsItem[];
 }
 
 export interface NamingContractBase {
@@ -1346,6 +1386,12 @@ export interface NamingContractBase {
   startedWindow: number;
   /** 品牌方情绪（v6.12.0）：0–2，<0.8 低落 / 0.8–1.2 平静 / >1.2 高涨（C2 起按窗演化） */
   satisfaction: number;
+  /** 冠名落点名快照（v6.51.0）：老合同为 null（前端回落品牌名） */
+  venueName: string | null;
+  /** 对赌条款快照（v6.51.0 批 3）：null = 旧口径（按 betAttend/betFans 绝对线一条判定） */
+  betTerms: BetTerms | null;
+  /** 品牌企业档案（v6.51.0 批 2）：品牌不在池中时为 null */
+  brandProfile: BrandProfile | null;
 }
 
 /** 读端点（quote）在基础字段上附加档位与情绪地板；accept 端点只回基础字段（v6.14.0 C3） */
@@ -1361,12 +1407,18 @@ export interface ClubOffer {
   id: number;
   brand: string;
   tier: string;
+  /** 行业（v6.51.0 批 2）：报价卡属地行「城市 · 行业」用 */
+  industry: string;
   packageNo: number;
   amount: number;
   windows: number;
   status: 'pending' | 'queued';
   /** 过期时刻（ISO）；过期后读端点不再下发，签约时后端也会拦 */
   expireAt: string;
+  /** 签下将命名的球场名（v6.51.0）：无球场名时空串（前端不加行） */
+  venueName: string;
+  /** 品牌企业档案（v6.51.0 批 2） */
+  brandProfile: BrandProfile | null;
 }
 
 export interface NamingQuoteResponse {
@@ -1828,8 +1880,8 @@ export interface WeatherForecastPreviewMatch {
   stageName: string | null;
   /** 比赛系统侧是否已完赛 */
   finished: boolean;
-  /** 主场球场；无球场行（含 CPU 队）为 null */
-  stadium: { name: string | null; capacity: number; tier: number } | null;
+  /** 主场球场；无球场行（含 CPU 队）为 null。venueName = 冠名落点名（v6.51.0，无冠名空串） */
+  stadium: { name: string | null; capacity: number; tier: number; venueName: string } | null;
   /** 预报天气；未预报为 null */
   weather: string | null;
   /** 预报时抽定的天气系数；未预报为 null */

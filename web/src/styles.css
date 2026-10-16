@@ -4334,6 +4334,71 @@ th.num .th-sort {
   }
 }
 
+/* ---- 品牌企业档案 + 招商性格行内编辑（v6.51.0 批 2/3）----------------------
+   桌面：表格里每个品牌下的第二行（colSpan 全宽）承载档案网格；窄屏：卡片内同网格。
+   类名契约：brand-profile-grid（label 上、控件下）。 */
+.brand-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px 10px;
+  padding: 6px 0 2px;
+}
+/* 品牌色块：只在此处给尺寸，行内只带动态 background（内联固定宽禁令） */
+.brand-color-chip {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+.brand-profile-grid label,
+.brand-profile-grid .brand-profile-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+/* 偏好标签：4 个固定标签横向勾选（最多 3 个，前端硬拦 + 后端同校验） */
+.brand-prefer-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 28px;
+}
+.brand-prefer-cell label {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.brand-prefer-cell input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+}
+.brand-profile-grid .input {
+  width: 100%;
+}
+.brand-profile-grid input[type='color'] {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+}
+/* 色值行：色板 + 文本兜底同排 */
+.brand-profile-grid .brand-color-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ---- ② 品牌池卡片流（v6.21.0）----------------------------------------------
    ≤760 BrandsPage.tsx 渲染卡片流，桌面仍渲染原表格（含内联定宽，mobile-baseline 白名单不动）。
    类名契约：brand-cards / brand-card / brand-card-grid / brand-new-form（TSX 由 subagent B 写）。
@@ -4402,6 +4467,20 @@ th.num .th-sort {
     width: 20px;
     height: 20px;
     min-height: 0;
+  }
+  /* 企业档案网格（v6.51.0 批 2/3）：窄屏单列堆叠，控件加高到 36px 与卡片流其余控件一致 */
+  .brand-profile-grid {
+    grid-template-columns: 1fr;
+  }
+  .brand-profile-grid .input {
+    min-height: 36px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
   }
   /* 新增品牌表单：全宽堆叠（原横排到窄屏会挤） */
   .brand-new-form {

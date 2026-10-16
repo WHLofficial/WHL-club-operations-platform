@@ -9,6 +9,7 @@ import {
   type BookingResult,
   type BookingsResponse,
   type BuildPaymentResult,
+  type BrandProfile,
   type ClubOffer,
   type NamingOfferAcceptResult,
   type NamingTerminateResult,
@@ -40,6 +41,45 @@ const FACILITY_LABEL: Record<string, string> = {
 
 // v6.30.0 施工开窗闸：三类施工按钮的统一置灰原因（与后端 409 no_window 同口径）
 const CLOSED_BUILD_HINT = '转会窗口没开，开窗后才能施工';
+
+/** 对赌指标展示名（v6.51.0 批 3，与后端 BET_LABELS 同口径）。 */
+const BET_LABEL: Record<string, string> = {
+  attend: '上座率',
+  sellout: '满座场次',
+  fans: '死忠增长',
+  points: '窗内积分',
+  goals: '窗内进球',
+  cleansheet: '零封场次',
+};
+
+/** 比率类指标（阈值是 0–1 比例，展示成百分比；其余是场次数/积分的整数线）。 */
+function betThresholdText(m: string, threshold: number): string {
+  return m === 'attend' || m === 'fans' ? `${(threshold * 100).toFixed(1)}%` : String(threshold);
+}
+
+/** 品牌档案碎片（v6.51.0 批 2）：口号 + 「中资」标签 + 招商性格徽标；档案缺失（不在池中的老品牌）时调用点不渲染。 */
+function BrandTags({ profile }: { profile: BrandProfile }) {
+  return (
+    <>
+      {profile.slogan !== '' && <span className="hint">「{profile.slogan}」</span>}
+      {profile.origin !== '' && (
+        <span className="badge gold" style={{ marginLeft: 6 }} title="中资品牌">
+          {profile.origin}
+        </span>
+      )}
+      {profile.style !== '' && (
+        <span className="badge blue" style={{ marginLeft: 6 }} title="招商性格：决定递什么套餐（稳健 / 进取 / 对赌）">
+          {profile.style}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** 属地 · 行业 hint（批 2）：品牌总部城市与所属行业。 */
+function brandHqText(profile: BrandProfile | null, industry: string): string {
+  return [profile?.hq ?? '', industry].filter((s) => s !== '').join(' · ');
+}
 
 export function FacilityOpsCard() {
   const qc = useQueryClient();
@@ -300,9 +340,11 @@ export function NamingCard() {
 
   // 报价行（v6.14.0 C3）：待签可接受；已登记接班只展示；有现约时接受要先选「到期接替」或「解约换签」
   function offerRow(o: ClubOffer) {
+    const hqText = brandHqText(o.brandProfile, o.industry);
     return (
       <p key={o.id}>
         <b>{o.brand}</b>
+        {o.brandProfile !== null && <BrandTags profile={o.brandProfile} />}
         <span className={`badge ${TIER_BADGE[o.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[o.tier] ?? ''}>
           {o.tier}档
         </span>
@@ -311,6 +353,7 @@ export function NamingCard() {
             待接替
           </span>
         )}
+        {hqText !== '' && <span className="hint">（{hqText}）</span>}
         <span className="hint">（套餐 {o.packageNo}）</span> <span className="mono">{o.amount.toFixed(2)}</span> M/窗 ×{' '}
         <span className="mono">{seasonsOf(o.windows)}</span> 赛季
         <span className="hint">
@@ -320,6 +363,16 @@ export function NamingCard() {
             ? '本轮内有效'
             : `有效期至 ${dateTime(o.expireAt)}`}
         </span>
+        {o.venueName !== '' && (
+          <span className="hint"> · 签下将命名为「{o.venueName}」</span>
+        )}
+        {o.packageNo === 3 && (
+          <span className="hint">
+            {' '}
+            · 对赌：签约时随机抽 2 条指标，每项达线各得 0.25 × 底价奖金
+            {o.brandProfile?.prefer ? `（偏向 ${o.brandProfile.prefer.split(',').join('、')}）` : ''}
+          </span>
+        )}
         {o.status === 'queued' ? null : contract ? (
           pickId === o.id ? (
             <>
@@ -354,7 +407,8 @@ export function NamingCard() {
       {contract ? (
         <>
           <p>
-            现约 <b>{contract.brand}</b>
+            现约 <b>{contract.venueName || contract.brand}</b>
+            {contract.brandProfile !== null && <BrandTags profile={contract.brandProfile} />}
             <span className={`badge ${TIER_BADGE[contract.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[contract.tier] ?? ''}>
               {contract.tier}档
             </span>
@@ -362,12 +416,27 @@ export function NamingCard() {
             <span className="mono">{contract.feePerWindow.toFixed(2)}</span> M，还剩{' '}
             <span className="mono">{seasonsOf(contract.windowsRemaining)}</span>/
             <span className="mono">{seasonsOf(contract.windowsTotal)}</span> 赛季
-            {contract.bonusAmount > 0 && (
+            {contract.betTerms && contract.betTerms.items.length > 0 ? (
               <>
-                {' '}· 达线奖金 <span className="mono">{contract.bonusAmount.toFixed(2)}</span> M（上座 ≥{' '}
-                <span className="mono">{contract.betAttend}</span> 或死忠增长 ≥{' '}
-                <span className="mono">{contract.betFans}</span>）
+                {' '}· 对赌条款（每项达线 <span className="mono">0.25</span> × 底价）：{' '}
+                {contract.betTerms.items.map((it, i) => (
+                  <span key={it.m}>
+                    {i > 0 && '、'}
+                    <span title={`基线 ${betThresholdText(it.m, it.baseline)}（样本 ${it.nBase} 场，目标概率 ${(it.pTarget * 100).toFixed(0)}%${it.guard !== '' ? `，护栏 ${it.guard}` : ''}）`}>
+                      {BET_LABEL[it.m] ?? it.m} 达 <span className="mono">{betThresholdText(it.m, it.threshold)}</span>
+                    </span>
+                  </span>
+                ))}
+                <span className="hint">（签约时按品牌偏好抽定，合同期内不重抽）</span>
               </>
+            ) : (
+              contract.bonusAmount > 0 && (
+                <>
+                  {' '}· 达线奖金 <span className="mono">{contract.bonusAmount.toFixed(2)}</span> M（上座 ≥{' '}
+                  <span className="mono">{contract.betAttend}</span> 或死忠增长 ≥{' '}
+                  <span className="mono">{contract.betFans}</span>）
+                </>
+              )
             )}
           </p>
           <p>
@@ -376,6 +445,17 @@ export function NamingCard() {
               （<span className="mono">{contract.satisfaction.toFixed(2)}</span> / 2.00；每窗按上座与战绩演化，冠名类事件即时影响）
             </span>
           </p>
+          {contract.brandProfile && (contract.brandProfile.intro !== '' || contract.brandProfile.nameEn !== '') && (
+            <p className="hint">
+              {contract.brandProfile.nameEn !== '' && <span>{contract.brandProfile.nameEn}</span>}
+              {contract.brandProfile.intro !== '' && (
+                <>
+                  {' '}
+                  <span title={contract.brandProfile.intro}>企业简介 ▾ 悬停可读（{brandHqText(contract.brandProfile, '')}）</span>
+                </>
+              )}
+            </p>
+          )}
           {contract.satisfyFloor !== null && contract.satisfaction <= contract.satisfyFloor + 0.1 && (
             <p>
               <span className="badge red" title={`情绪地板 ${contract.satisfyFloor.toFixed(2)}，跌破即被品牌主动解约（无赔偿）`}>
