@@ -3529,6 +3529,9 @@ async function main() {
         const clubId = clubs[0].id;
         const before = await api('/api/admin/clubs');
         const oldCountry = before.status === 200 ? (before.body?.clubs ?? []).find((c) => c.id === clubId)?.country ?? null : null;
+        // 变更清单的基线游标（改国家前的最大行 id）——下面按「新增了哪些行」断言，不依赖总数
+        const feedBefore = await api('/api/admin/growth/tier-changes?limit=1');
+        const feedIdBefore = feedBefore.body?.entries?.[0]?.id ?? 0;
         const set = await api(`/api/admin/clubs/${clubId}/country`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -3537,10 +3540,17 @@ async function main() {
         assert(set.status === 200, `改国家状态码 ${set.status}`);
         assert(set.body?.country === 14 && set.body?.countryName === 'England', `改国家回执不对：${JSON.stringify(set.body)}`);
         assert(typeof set.body?.tier?.up === 'number' && typeof set.body?.tier?.down === 'number', `改国家应回报重算计数：${JSON.stringify(set.body?.tier)}`);
-        const after = await api('/api/admin/growth/tier-changes?limit=20');
+        // 断言改看「效果」而不是「触发事件」：端点 `WHERE action LIKE 'growth_tier%'` 只收档位行，
+        // 而改国家走 hookTierRecompute → applyTierRecompute，只写球员级 `growth_tier_set` 差异行
+        // （不写 `growth_tier_recompute` 批次汇总——那条只由管理端批量重算入口写）。
+        // 所以这里锁「新增行数 === 重算回报的变化数、且全是自动档位写入」。
+        const changed = (set.body?.tier?.up ?? 0) + (set.body?.tier?.down ?? 0);
+        const after = await api('/api/admin/growth/tier-changes?limit=200');
+        assert(after.status === 200, `变更清单状态码 ${after.status}`);
+        const fresh = (after.body?.entries ?? []).filter((e) => e.id > feedIdBefore);
         assert(
-          (after.body?.entries ?? []).some((e) => e.action === 'club_country_set' && e.targetId === clubId),
-          `变更清单里没有这次 club_country_set（#${clubId}）`,
+          fresh.length === changed && fresh.every((e) => e.action === 'growth_tier_set' && e.targetType === 'player' && e.after?.auto === true),
+          `变更清单里没有这次改国家引发的档位写入（新增 ${fresh.length} 行，重算报 ${changed} 处变化）`,
         );
         if (oldCountry === null) {
           console.log(`（本地俱乐部 #${clubId} 的队壳国家留作 England——旧值本就是空，端点不接受置空）`);
