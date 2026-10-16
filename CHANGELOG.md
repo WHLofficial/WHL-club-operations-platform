@@ -6,7 +6,7 @@
 
 ## [v6.51.6] · 赛事侧成长数据自动补账：没解析到的场次由 cron 重放钩子补齐（2026-10-16）
 
-**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一条链的自愈补丁，无新端点、无页面、无迁移）⇒ 上线只需 push，push 即部署；部署后由既有 cron（`*/5 * * * *`）按跳收敛，也可 `POST /api/cron/tick`（带 `X-Cron-Key`）立即触发一跳。
+**已上线（2026-10-16）**：判级 **patch**（同一条链的自愈补丁，无新端点、无页面、**零迁移**）；push `a637bd1..c451c06`（4 枚，含 v6.51.5 上线回写 `269dbdf`）触发 CF Workers Builds 自动部署 Version `64c65af4-8e0b-42fb-8ad1-7d9f2d1398d3`（@2026-10-16T14:12:38Z）；回读：`/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-DvQRIwgv.js`（663,313 B，sha256 `91f85c525c92224d69f68fd3d0df61512138a0439882dfdd95a06851f7530d9a`，含版本串 6.51.6）与本地逐字节一致；**生产补账随既有 cron 三跳收敛**（14:15 / 14:20 / 14:25Z 各一跳）：`needs_review = 1` **56 → 36 → 16 → 0**，且无一条 `result_confirmations` 留下「自动重试 N 次」或「已放弃」（56 场全部在额度内自愈）。
 
 **缘起（用户）**：用户报「发现生产库有一些应当从赛事侧自动生成的成长数据没有生成」；诊断确认后裁决「**算了，还是自动重试吧**」（此前两版口径——先授权动手、后改「一次性补漏吧，不做大工程了」——均作废）。
 
@@ -18,7 +18,7 @@
 
 **测试**：`tests/results.test.ts` 新增两例——TC-XP-01 自动补账成功（补数据后 `{ scanned: 1, healed: 1, failed: 0 }`、`needs_review=0` / `review_note=NULL`、`growth_events` 单条 goal 不双记、`players.growth_xp = 0.5`、再跑 `{ scanned: 0, healed: 0, failed: 0 }`）；TC-XP-02 一直解析不到（三次依次写「自动重试 1 次」「2 次」「自动重试已放弃」，第四次不再被扫；把 note 改回含「通知发送失败」时 `scanned = 0` 不碰）⇒ 全量 **136 文件 / 2230 例**全绿（v6.51.5 基线 136 / 2228，净 +2 例）；`npm run typecheck` 三份 0 error；build 入口 `assets/index-DvQRIwgv.js`（663,313 B，sha256 `91f85c525c92224d69f68fd3d0df61512138a0439882dfdd95a06851f7530d9a`，含版本串 6.51.6）；CSS 入口 `index-BGPWLRxy.css` 未变（零前端改动）。
 
-**待核（上线后回读）**：① 生产 `needs_review=1` 应 3 跳内归零（56 场 → 0）；② auto 事件补上（预期 +≈170 goal / +≈140 assist 与对应 clean_sheet）；③ 抽 `match_ref='33'` 核对自动入账与用户手录的 85 条并存；④ `src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200` 仍未核（文本模型上限未知）。
+**回读（上线后核对，2026-10-16）**：① `needs_review = 1` 三跳内 56 → 0；② auto 事件 **+268 条**（`goal` 99 → 230、`assist` 78 → 194、`clean_sheet` 15 → 36；`growth_events` 总数 463 → 731）——比诊断时的朴素估算（赛事侧 170 球 / 140 助）少，差额是**属于 CPU 俱乐部的进球者/助攻者没有平台球员可入账、被 `resolve()` 静默跳过**（既有设计），不是漏账；③ 抽 `match_ref='33'` 核对：用户手录 85 条 + 自动 6 条（3 球 3 助、各 0.5 XP）并存，无重复入账；④ 仍未核：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型上限未知）。
 
 ## [v6.51.5] · 截图识别输入侧稳定化：上传前 2× 放大（不换模型、不改提示词）（2026-10-16）
 
