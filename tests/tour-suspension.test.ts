@@ -304,4 +304,46 @@ describe('TC-SUS 停赛判定（只读 TOUR_DB 复算）', () => {
     expect(m3.has(201)).toBe(false);
     expect(await susp(tour, 4)).toEqual(new Map());
   });
+
+  it('TC-SUS-14 v6.51.9 取数趟数固定 7 条且不再重复查本队 entry（原 9 条串行）', async () => {
+    const tour = freshTour();
+    addSeq(tour, 3);
+    addCard(tour, 1, 1, HOME, 101, 'red');
+
+    const sql: string[] = [];
+    const db = createTestD1(tour);
+    const counted = new Proxy(db as unknown as Record<string, unknown>, {
+      get(t, prop, receiver) {
+        const v = Reflect.get(t, prop, receiver);
+        if (typeof v !== 'function') return v;
+        if (prop === 'prepare') {
+          return (text: string) => {
+            sql.push(text);
+            return (v as (text: string) => unknown).call(t, text);
+          };
+        }
+        return (v as (...a: unknown[]) => unknown).bind(t);
+      },
+    }) as unknown as D1Database;
+
+    const hit = await suspendedPlayersAtMatch(counted, 2);
+    expect(hit.get(101)).toEqual({ reason: 'red', total: 2, serving: 1 });
+    // 本场 1 + 配置 1 + 两侧 entry 1 + 每侧「比赛序 + 红黄牌」2×2
+    expect(sql).toHaveLength(7);
+    // 调用方已持有本场两侧 entry，不再自己查一次「本队有哪些 entry」
+    expect(sql.some((text) => /FROM entry\s+WHERE team_id/.test(text))).toBe(false);
+  });
+
+  it('TC-SUS-15 同赛事里本队另一支 entry（多报名形态）：记在别支上的红牌不影响本场判定', async () => {
+    const tour = freshTour();
+    addSeq(tour, 3);
+    // 本队第二支 entry（id 3，team 11）另有自己的场次 90：事件按 p.team_id 收窄会把它读进来
+    tour.exec(`INSERT INTO entry (id, tournament_id, team_id, seed) VALUES (3, ${T}, 11, 3);
+      INSERT INTO match (id, stage_id, round, slot, leg, home_entry_id, away_entry_id, status, note, walkover_side)
+        VALUES (90, 1, 9, 1, 1, 3, ${AWAY}, 'finished', NULL, '');`);
+    addCard(tour, 1, 90, 3, 101, 'red');
+
+    // 这张牌记在别支上、也不在本场序列里 ⇒ 本场不判停赛（收窄 entry 集合前后结论一致）
+    expect((await susp(tour, 2)).get(101) ?? null).toBeNull();
+  });
 });

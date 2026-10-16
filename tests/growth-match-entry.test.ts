@@ -191,6 +191,28 @@ function anon(path: string, env: Env, method = 'POST') {
   return app.request(path, { method, headers: { 'content-type': 'application/json' }, body: method === 'POST' ? '{}' : undefined }, env);
 }
 
+// v6.51.9 取数趟数守卫：把每次 prepare 的 SQL 记下来（列 / 面板端点的查询条数必须与场次、队数无关——
+// 逐场逐队查一次库就是这里的红灯）。断言的是「几趟往返」，不是性能数字。
+function countQueries(env: Env): { env: Env; db: string[]; tour: string[] } {
+  const db: string[] = [];
+  const tour: string[] = [];
+  const wrap = (target: D1Database, log: string[]): D1Database =>
+    new Proxy(target as unknown as Record<string, unknown>, {
+      get(t, prop, receiver) {
+        const v = Reflect.get(t, prop, receiver);
+        if (typeof v !== 'function') return v;
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            log.push(sql);
+            return (v as (text: string) => unknown).call(t, sql);
+          };
+        }
+        return (v as (...a: unknown[]) => unknown).bind(t);
+      },
+    }) as unknown as D1Database;
+  return { env: { ...env, DB: wrap(env.DB, db), TOUR_DB: wrap(env.TOUR_DB, tour) }, db, tour };
+}
+
 interface ListMatch {
   matchId: number;
   tournamentId: number | null;
@@ -379,6 +401,39 @@ describe('TC-LIST 可补录比赛列表', () => {
     expect(matches.find((m) => m.matchId === 1300)).toMatchObject({ homeClubId: 1, homeIsCpu: false, awayClubId: null, awayIsCpu: true });
     expect(matches.find((m) => m.matchId === 1301)).toMatchObject({ homeClubId: null, homeIsCpu: false, awayClubId: null, awayIsCpu: true });
   });
+
+  it('TC-LIST-06 v6.51.9 取数趟数与场次/队数无关：主查询 + clubs 全表 + 一趟赛事名（原为逐场逐队查 clubs）', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    fx.sqlite.exec(`INSERT INTO clubs (id, name, league_tier, status) VALUES
+      (102, '北岸联', 'premier', 'active'), (103, '东岸城', 'premier', 'active');`);
+    // 20 场、客队名在「北岸联 / 东岸城 / CPU」三者间轮换：旧实现每场两次 clubs 查询（还有同名缓存掩盖）
+    for (let i = 0; i < 20; i += 1) {
+      seedMatch(fx, {
+        matchId: 1500 + i,
+        competitionType: 'league_premier',
+        stageKind: 'league',
+        homeTeam: '海港联',
+        awayTeam: i % 3 === 0 ? '北岸联' : i % 3 === 1 ? '东岸城' : '机器甲 (CPU)',
+        confirmedAt: `2026-07-${String(10 + (i % 18)).padStart(2, '0')}T21:00:00Z`,
+      });
+    }
+
+    const spy = countQueries(fx.env);
+    const res = await get(LIST, 'tok-admin', spy.env);
+    expect(res.status).toBe(200);
+    const matches = ((await res.json()) as { matches: ListMatch[] }).matches;
+    expect(matches).toHaveLength(20);
+    expect(matches.filter((m) => m.homeClubId === 1)).toHaveLength(20);
+    expect(matches.filter((m) => m.awayClubId === 102)).toHaveLength(7);
+    expect(matches.filter((m) => m.awayClubId === 103)).toHaveLength(7);
+    expect(matches.filter((m) => m.awayIsCpu)).toHaveLength(6);
+
+    expect(spy.db).toHaveLength(2); // 主查询 + clubs 全表
+    // 赛事库：会话查询（兼容模式查 user 表）1 条 + 赛事名 1 条——与场次/队数无关
+    expect(spy.tour.filter((sql) => !/FROM user\b/.test(sql))).toHaveLength(1);
+    expect(spy.db.some((sql) => /FROM clubs\s+WHERE name/.test(sql))).toBe(false); // 不再逐队查
+  });
 });
 
 describe('TC-PANEL 单场面板', () => {
@@ -453,6 +508,27 @@ describe('TC-PANEL 单场面板', () => {
     const away = new Map(panel.sides.away.players.map((p) => [p.id, p]));
     expect(away.get(20)?.suspended).toBeNull(); // 只有 1 张黄：不够累积
     expect(away.get(31)?.suspended).toBeNull(); // 无 fc_id → 判不出停赛（放行口径）
+  });
+
+  it('TC-PANEL-05 v6.51.9 面板并成三段取数：本库 6 条 + 停赛 7 条固定，与花名册大小无关', async () => {
+    const fx = freshEnv();
+    seedBase(fx);
+    seedMatch(fx, { matchId: 1600, competitionType: 'league_premier', stageKind: 'league', homeTeam: '海港联', awayTeam: '北岸城', confirmedAt: '2026-07-01T10:00:00Z' });
+    seedTourMatch(fx, 1600, 1);
+    seedCard(fx, 101, 1600, 'red'); // 本场直红：只为让停赛复算走全流程（判定另有 TC-SUS/TC-PANEL-04 覆盖）
+
+    const spy = countQueries(fx.env);
+    const res = await get(panelPath(1600), 'tok-admin', spy.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Panel;
+    expect(body.sides.home.players.map((p) => p.id)).toEqual([10, 12, 13, 11]);
+    expect(body.sides.away.players.map((p) => p.id)).toEqual([20]);
+
+    // 本库：场次行 / 已录事件 / clubs 全表 / 两条花名册（一次 batch）/ 累计基数
+    expect(spy.db).toHaveLength(6);
+    // 赛事库：赛事名 1 条 + 停赛复算 7 条（会话查 user 表那 1 条不计）
+    expect(spy.tour.filter((sql) => !/FROM user\b/.test(sql))).toHaveLength(8);
+    expect(spy.tour.some((sql) => /FROM entry\s+WHERE team_id/.test(sql))).toBe(false); // 不再重复查本队 entry
   });
 
   it('TC-PANEL-03 不可录的场次一律 404：不存在 / 弃权场 / 非数字 id；冠军杯淘汰轮可录但标 xpEligible=false；匿名 401', async () => {
