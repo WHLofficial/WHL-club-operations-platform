@@ -4,9 +4,9 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.51.8] · 截图识别「队名对不上」也能选边定侧：模型给英文名不再只能重传（2026-10-16）
+## [v6.51.8] · 截图识别「队名对不上」也能选边定侧 + 模型照抄英文名时自动分侧：冷门队不再只能重传（2026-10-16）
 
-**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一处识别响应分支的补充：对不上的那条路多回一个可选 side 的机器码、前端多认一个码——无新端点、无新页面、**零迁移、零提示词改动、模型不变**）；上线只需 push（CF Workers Builds 自动部署），无需 apply 迁移。
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一处识别响应分支的补充：对不上的那条路多回一个可选 side 的机器码、前端多认一个码——无新端点、无新页面、**零迁移、零提示词改动、模型不变**）；上线只需 push（CF Workers Builds 自动部署），无需 apply 迁移。同日按用户追加「并入，然后发布」并入**英文名兜底分侧**（新增 `src/core/fc26-team-names.ts` 镜像 + 生成器 `scripts/gen-fc26-team-names.mjs`，仍无新端点/新页面/迁移）。
 
 缘起（用户）：一是报障「第 3 张识别失败：截图队名「OLYMPIACOS FC」对不上这场比赛（奥林匹亚科斯 vs 皇家马德里），确认传对图了吗」（第 4 张同队名）；二是随即指出恢复通道缺位——「返回让用户选边的功能没有真正成立」「这个功能没有体现啊」。
 
@@ -14,9 +14,11 @@
 
 交付：① 服务端 `src/worker/routes/admin/growth.ts` 的 unmatched 分支改回 `code = 'ocr_team_unmatched'`，文案改为「截图队名「X」…对不上这场比赛（A vs B）——确实是这张图的队名，就点按钮选边；传错图请点取消」（仍然 400，`side` 直通逻辑不变：同一张图带 `side: 'home' | 'away'` 重发即跳过队名匹配）；② 前端 `web/src/pages/admin/GrowthEntryPage.tsx` 的 `runOcr` catch 同时认 `ocr_team_ambiguous` 与 `ocr_team_unmatched`，两条路走同一条待选行（提示带模型读到的英文原文 + 主队/客队/取消三颗按钮，选边用同一份 base64 续跑、取消则不预填）；③ 测试：TC-EP-13 补 code 与「点按钮选边」文案断言，页面新增 TC-ENTRY-E13（OLYMPIACOS FC 英文名 → 提示带英文原文 + 三颗按钮 + 选主队续跑 `body.side === 'home'`、报告条不落红字）。
 
-验收：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **136 文件 / 2231 例全绿**（v6.51.7 基线 136/2230，净 +1）；`npm run build` ✓ 入口 `web/dist/assets/index-Ddpx2Jdr.js`（663,313 B，sha256 `1ce0a01262de243c118a72183c43cc910e1c84f620fbe4fa0abbcf4c83e0737e`，含版本串 6.51.8）+ 页面 chunk `web/dist/assets/GrowthEntryPage-DqIvzlA6.js`（35,556 B，sha256 `63b8fc82b6ba4ec2df5ab9ebc427d795522e0677954f8fe28d540c9205367371`）；CSS 入口未变。
+④ **并入英文名兜底分侧**（用户追加「并入，然后发布」）：`src/core/fc26-team-names.ts` = `web/assets/ref/team.json` 的 Worker 侧镜像（696 条 `{id, name}`，生成器 `scripts/gen-fc26-team-names.mjs`，一致性由 `tests/fc26-teams.test.ts` 逐条钉死）；`fc26TeamIdOfName`（`src/core/growth-ocr.ts`）两趟匹配——先严格层（逐字 / 剥俱乐部前后缀的核心名相等），只有严格层没命中才退到宽松包含，**唯一命中才算**，多命中（只写 `Manchester`、镜像里两个 id 同名的 `AC Milan`）/游戏假名（`MILANO FC`）/空值一律回 null；端点（`src/worker/routes/admin/growth.ts`）**中文命中优先**，只在中文落空或歧义时用 `teamRaw ?? team` 的英文原文查队号、再与本场两侧 `clubId`（= FC26 队号）对齐，命中即照常认人预填、用户不必点按钮；两侧俱乐部查询合并成一次（同一份缓存既给选边也给取花名册用，顺带少一次查询）。
 
-留待补（可选，未做）：**确定性英文名兜底**——`web/assets/ref/team.json` 有 696 个 FC26 英文真名（`{id: 280, name: "Olympiacos FC"}`），而 `clubs.id` 就是游戏真号 ⇒ 可把英文名直接桥到俱乐部分侧，用户不必点按钮（v6.51.3 文档里记为「有意不做」，本次仍按选边兜底处理，需要时另开小版）。
+验收：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **137 文件 / 2235 例全绿**（v6.51.7 基线 136/2230；净 +5 = 镜像 2 例 + TC-TEAM-06 英文名→队号 + TC-EP-18 兜底分侧 + 上一段的 TC-ENTRY-E13）；`npm run build` ✓ 入口 `web/dist/assets/index-Ddpx2Jdr.js`（663,313 B，sha256 `1ce0a01262de243c118a72183c43cc910e1c84f620fbe4fa0abbcf4c83e0737e`，含版本串 6.51.8）+ 页面 chunk `web/dist/assets/GrowthEntryPage-DqIvzlA6.js`（35,556 B，sha256 `63b8fc82b6ba4ec2df5ab9ebc427d795522e0677954f8fe28d540c9205367371`）；CSS 入口未变（兜底分侧全在 Worker 侧，前端资产与上一段逐字节相同）。
+
+原「留待补」的确定性英文名兜底已在本版落地（见交付 ④）；仍不做/覆盖不到的三处：① 姓名拼写容错层（用户此前裁决「暂时不做」）；② 游戏内显示假名的 4 支（Milano FC / Lombardia FC / Bergamo Calcio / Latium）——镜像存的是改回后的真名，截图给假名时查不到，落回按钮选边；③ CPU 俱乐部的英文名（`AC Milan` 在镜像里对应老 id 47 与新 id 131681 两条同名 ⇒ 多命中不猜）——CPU 侧花名册本就为空，桥接意义有限。
 
 待核：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
 
