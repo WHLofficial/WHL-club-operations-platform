@@ -198,7 +198,7 @@ UPDATE brand_pool SET style='稳健', prefer='高上座,死忠规模' WHERE bran
 
 **生产 schema 体检（只读 `--remote` SELECT）**：因本地库出现过「手工 apply 漏对象」，apply `0071`–`0075` 前对生产做了对象级 + 列级比对（基准 = 从零重放 `0001`–`0070` 的参考库）：对象清单 147 条全中（生产另有 infra 表 `_cf_KV`）、47 张表列清单逐表一致、`idx_players_sort_growth_tier` 与 `idx_players_sort_future_star` 生产**存在**、29 条 `idx_players%` 索引逐条相同 ⇒ 生产无同类缺口。手法备忘：D1 远端 `pragma_table_info(m.name)` 关联调用被拒 `SQLITE_AUTH`（须字面量表名）、compound SELECT term 数上限实测 ≤ 5（需分批）。
 
-**待令（一句不做）**：迁移 `0071 → 0072 → 0073 → 0074 → 0075` 按序 apply 生产、push、部署、生产回读；本地 dev 8791 的人工验收。
+**已上线 2026-10-16（用户 m01797「修完后可以bump版本发布了」授权）**：迁移 `0071` → `0072` → `0073` → `0074` → `0075` 已按序 apply 生产（五条全 ✅、`migrations list --remote` 无待应用）；push `0157d87..0f5a216`（走 `ssh://git@ssh.github.com:443/…`，22 端口被挡）→ CF Workers Builds 自动部署 → Version `5d4385eb-6e88-45fa-bb2c-1ee065eea221`（2026-10-16T03:12Z）；生产回读通过：`brand_pool` 28 行 / `origin='中资'` 6 / `style='对赌'` 7 / 档案 9 列 28 行齐备 / 13 个真实品牌名残留 0；`naming_contracts` 新列 `venue_name`、`bet_terms` 均在（存量 0 行）；线上资产与本地构建逐字一致（主包 `index-SaRKu1mz.js` + 惰性块 `ShopPage-yP3didCV.js` / `BrandsPage-DAGlYRL2.js` 均 200 且含新文案）。分层提交：`a3369ab` feat(db) → `8efa719` feat(naming) → `d16dccc` feat(web) → `0a85c38` test → `0f5a216` docs（docs 随代码同 push 合规）。**仍待办**：本地 dev 8791 的人工验收（用户做）。
 
 **回滚口径**：代码回退 + 新增列留空即回现状行为（`venue_name` / `bet_terms` 空走旧逻辑、`style` 空回档位映射、`prefer` 空无加成、7 档案列空不渲染）；数据侧按各迁移尾部注释反向执行（0073 为反向 `UPDATE` + `DELETE` 12 家）。
 
