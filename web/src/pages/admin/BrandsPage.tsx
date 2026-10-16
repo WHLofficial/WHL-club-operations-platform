@@ -367,8 +367,9 @@ export default function BrandsPage() {
               return (
                 <div className="brand-card" key={row.id}>
                   <div>{brandLabel(row)}</div>
-                  {/* P2-4（评审）：与桌面表格「来源/状态/生效冠名」三列对等的元信息行 */}
+                  {/* P2-4（评审）：与桌面表格「总部/来源/状态/生效冠名」四列对等的元信息行 */}
                   <div className="brand-card-meta">
+                    <span>总部 {row.hq || '—'}</span>
                     <span>来源 {row.source === 'custom' ? '自定义' : '种子'}</span>
                     <span>状态 {row.status === 'adopted' ? '在池' : '已弃用'}</span>
                     <span>生效冠名 {row.active_contracts}</span>
@@ -410,6 +411,7 @@ export default function BrandsPage() {
               <thead>
                 <tr>
                   <th>品牌</th>
+                  <th>总部</th>
                   <th>行业</th>
                   <th>热度</th>
                   <th>档位</th>
@@ -426,12 +428,13 @@ export default function BrandsPage() {
                     <Fragment key={row.id}>
                       <tr>
                         <td>{brandLabel(row)}</td>
+                        <td className="brand-meta-cell">{row.hq || '—'}</td>
                         <td>
                           {/* v6.20.0：表格内控件保持定宽——min(N,100%) 的百分比分量会改变桌面列宽分配（评审 P0-1），窄屏保底由 .table-wrap 横滚承担 */}
-                          <input className="input input-sm" style={{ width: 96 }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
+                          <input className="input input-sm" style={{ width: 72 }} value={f.industry} maxLength={10} onChange={(e) => setField(row, { industry: e.target.value })} />
                         </td>
                         <td>
-                          <input className="input input-sm mono" style={{ width: 72 }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
+                          <input className="input input-sm mono" style={{ width: 56 }} value={f.heat} onChange={(e) => setField(row, { heat: e.target.value })} />
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <select className="input input-sm" style={{ width: 84 }} value={row.tier} disabled={busy} onChange={(e) => void changeTier(row, e.target.value)}>
@@ -445,8 +448,8 @@ export default function BrandsPage() {
                             <input type="checkbox" checked={row.tier_locked === 1} disabled={busy} onChange={() => void toggleTierLock(row)} /> 锁
                           </label>
                         </td>
-                        <td>{row.source === 'custom' ? '自定义' : '种子'}</td>
-                        <td>{row.status === 'adopted' ? '在池' : '已弃用'}</td>
+                        <td className="brand-meta-cell">{row.source === 'custom' ? '自定义' : '种子'}</td>
+                        <td className="brand-meta-cell">{row.status === 'adopted' ? '在池' : '已弃用'}</td>
                         <td className="mono">{row.active_contracts}</td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <button className="btn btn-ghost btn-sm" type="button" aria-expanded={isOpen(row)} onClick={() => toggleOpen(row)}>
@@ -462,7 +465,7 @@ export default function BrandsPage() {
                       </tr>
                       {isOpen(row) && (
                         <tr>
-                          <td colSpan={8}>{profileFields(row, f)}</td>
+                          <td colSpan={9}>{profileFields(row, f)}</td>
                         </tr>
                       )}
                     </Fragment>

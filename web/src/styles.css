@@ -4351,6 +4351,11 @@ th.num .th-sort {
   margin-right: 6px;
   border-radius: 2px;
 }
+/* 品牌池桌面表格的「来源 / 状态」两列（种子·自定义 / 在池·已弃用）：列窄时 2–3 个汉字被折成两行 ⇒ 降一档字号并禁折 */
+.brand-meta-cell {
+  font-size: 12px;
+  white-space: nowrap;
+}
 .brand-profile-grid label,
 .brand-profile-grid .brand-profile-cell {
   display: flex;

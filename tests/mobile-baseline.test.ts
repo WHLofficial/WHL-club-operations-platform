@@ -241,14 +241,14 @@ const FIXED_WIDTH_ALLOWLIST = [
   {
     file: 'web/src/pages/admin/BrandsPage.tsx',
     prop: 'width' as const,
-    literal: '96',
-    why: '品牌列表「行业」列的表内 <input> 定宽——min(N,100%) 的百分比分量会改变桌面列宽分配（评审 P0-1），窄屏保底由 .table-wrap 横滚承担',
+    literal: '72',
+    why: '品牌列表「行业」列的表内 <input> 定宽（v6.51.1 收窄 96→72：行业值恒为 2 字；min(N,100%) 的百分比分量会改变桌面列宽分配（评审 P0-1），窄屏保底由 .table-wrap 横滚承担）',
   },
   {
     file: 'web/src/pages/admin/BrandsPage.tsx',
     prop: 'width' as const,
-    literal: '72',
-    why: '品牌列表「热度」列的表内 <input> 定宽（同上，评审 P0-1 裁决保留）',
+    literal: '56',
+    why: '品牌列表「热度」列的表内 <input> 定宽（v6.51.1 收窄 72→56：值形如 0.95；同上，评审 P0-1 裁决保留）',
   },
   {
     file: 'web/src/pages/admin/BrandsPage.tsx',

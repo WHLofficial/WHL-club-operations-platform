@@ -3,10 +3,12 @@
 // - TC-BR-01（P0）：进页面时档案/招商性格区全部收起——每行一个「档案」按钮、零个「收起」、零个 .brand-profile-grid
 // - TC-BR-02（P0）：点某行「档案」只展开该行（按钮变「收起」、网格里是该行的值），再点回收起、其他行不受影响
 // - TC-BR-03（P1）：窄屏卡片流同样默认收起、同样可展开（走 useMediaQuery 的窄屏分支）
-// 动因：池子 28 家时全部展开会把表格拉到很长（v6.51.0 复审后改默认收起）。
+// - TC-BR-04（P2）：「总部」是行业之前的只读展示列（无输入控件）；「来源 / 状态」两列挂 brand-meta-cell（小一号字号 + 禁折），规则本体锁在 styles.css
+// 动因：池子 28 家时全部展开会把表格拉到很长（v6.51.0 复审后改默认收起）；两列 2–3 个汉字在窄列里折行（用户反馈）。
 // 后端校验（color/origin/style/prefer 非法 400 与长度上限）由 tests/naming-brand-profile.test.ts 守着，这里只管前端形态。
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { readFileSync } from 'node:fs';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import BrandsPage from './BrandsPage.tsx';
@@ -165,5 +167,28 @@ describe('管理端品牌池 · 档案区默认收起（v6.51.0）', () => {
     expect(container.querySelectorAll('.brand-profile-grid')).toHaveLength(1);
     expect(screen.getByDisplayValue('XINGHAI')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: '收起' })).toHaveLength(1);
+  });
+
+  it('TC-BR-04：「总部」为只读展示列（行业之前）、「来源 / 状态」两列走 brand-meta-cell（小一号字号 + 禁折），CSS 规则在位', async () => {
+    const { container } = renderPage();
+    await screen.findByText('奥维恩');
+
+    // 列序：品牌 / 总部 / 行业 / 热度 / 档位 / 来源 / 状态 / 生效冠名 / 操作
+    const rows = Array.from(container.querySelectorAll('tbody tr')).filter((tr) => tr.querySelectorAll('td').length === 9);
+    expect(rows).toHaveLength(BRANDS.length);
+    for (const [i, tr] of rows.entries()) {
+      const cells = tr.querySelectorAll('td');
+      // 总部列：只读文本（不挂输入控件），值取该行 hq
+      expect(cells[1]!.textContent).toBe(BRANDS[i]!.hq);
+      expect(cells[1]!.querySelector('input, select, textarea')).toBeNull();
+      // 列窄时「种子 / 在池 / 自定义 / 已弃用」会被折成两行 ⇒ 两列挂类名（尺寸与禁折写在 styles.css）
+      expect(cells[5]!.className).toBe('brand-meta-cell');
+      expect(cells[6]!.className).toBe('brand-meta-cell');
+      expect(['种子', '自定义']).toContain(cells[5]!.textContent);
+      expect(['在池', '已弃用']).toContain(cells[6]!.textContent);
+    }
+    // 静态锁：规则本体（字号与禁折）必须在 styles.css 里，行内不得带尺寸/字号（相对路径按仓库根解析，vitest cwd = 仓库根）
+    const css = readFileSync('web/src/styles.css', 'utf8');
+    expect(css).toMatch(/\.brand-meta-cell\s*\{[^}]*font-size:\s*12px;[^}]*white-space:\s*nowrap;/);
   });
 });
