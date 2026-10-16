@@ -339,15 +339,18 @@ describe('TC-EP 截图识别端点', () => {
     expect(((await res2.json()) as OcrResponse).side).toBe('away');
   });
 
-  it('TC-EP-13 模型没听话给英文队名时：仍 400，文案点名截图队名与本场对阵', async () => {
+  it('TC-EP-13 模型没听话给英文队名时：400 点名截图队名与本场对阵，且回可选 side 的 code（v6.51.8）', async () => {
     const fx = seeded();
     mockVision(JSON.stringify({ ...summaryPayload, team: 'CHELSEA' }));
     const res = await sendOcr(fx, { image: PNG_B64 });
     expect(res.status).toBe(400);
-    const err = ((await res.json()) as { error: string }).error;
-    expect(err).toContain('CHELSEA');
-    expect(err).toContain('海港联');
-    expect(err).toContain('对不上这场比赛');
+    const body = (await res.json()) as { error: string; code?: string };
+    expect(body.error).toContain('CHELSEA');
+    expect(body.error).toContain('海港联');
+    expect(body.error).toContain('对不上这场比赛');
+    // 对不上不等于这张图作废：前端拿这个 code 渲染提示 + 主队/客队/取消，点完带 side 续跑
+    expect(body.code).toBe('ocr_team_unmatched');
+    expect(body.error).toContain('点按钮选边');
   });
 
   it('TC-EP-14 同城同前缀：写全了判给对的一侧，只写片段才 400 报「分不清主客」', async () => {

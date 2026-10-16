@@ -506,6 +506,8 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   // 归一化等值/包含之外还容忍俱乐部前后缀与 CPU 尾标的漂移）；CPU 队名一样能对上（认人靠花名册，CPU 侧花名册为空）
   // v6.51.3 起两侧一样像（同城同名片段，如「慕尼黑」对拜仁慕尼黑与慕尼黑1860）判歧义、不默认主队：
   // 回 code=ocr_team_ambiguous，前端拿这条文案（里面有 teamRaw 原文）显示提示 + 主队/客队/取消三颗按钮。
+  // v6.51.8：**对不上（含模型给英文名，如 OLYMPIACOS FC 对 奥林匹亚科斯）同样回可选的 code**——
+  // 队名认不出不代表这张图的评分不能用，让用户点按钮选边即可；两条路的按钮与续跑方式完全一样。
   // 提示优先给模型照抄的截图原文，中文识别结果括注在后 —— 英文原文才是用户核对「传错图没」的锚点
   const shownTeam = ocr.teamRaw ?? ocr.team ?? '未识别';
   const shownZh = ocr.teamRaw && ocr.team && ocr.team !== ocr.teamRaw ? `（识别为「${ocr.team}」）` : '';
@@ -517,7 +519,12 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
       'ocr_team_ambiguous',
     );
   }
-  if (!matched) throw new HttpError(400, `截图队名「${shownTeam}」${shownZh}对不上这场比赛（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），确认传对图了吗`);
+  if (!matched)
+    throw new HttpError(
+      400,
+      `截图队名「${shownTeam}」${shownZh}对不上这场比赛（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}）——确实是这张图的队名，就点按钮选边；传错图请点取消`,
+      'ocr_team_unmatched',
+    );
   const side: 'home' | 'away' = matched;
 
   const resolved = await resolveEntrySide(c.env.DB, side === 'home' ? row.home_team : row.away_team, new Map());

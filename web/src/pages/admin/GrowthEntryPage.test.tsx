@@ -466,6 +466,56 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     expect(cellInput(0, 3)?.value ?? '').toBe('8'); // 手填的评分原样不动
   });
 
+  it('TC-ENTRY-E13 队名对不上（v6.51.8，模型给英文名如 OLYMPIACOS FC）：同样出提示 + 三颗按钮，选边即可救回', async () => {
+    const calls: { body: { image?: string; side?: string } }[] = [];
+    const responses = [
+      new Response(
+        JSON.stringify({
+          error:
+            '截图队名「OLYMPIACOS FC」对不上这场比赛（海港联 vs 北岸城）——确实是这张图的队名，就点按钮选边；传错图请点取消',
+          code: 'ocr_team_unmatched',
+        }),
+        { status: 400 },
+      ),
+      new Response(
+        JSON.stringify({
+          team: '海港联',
+          side: 'home',
+          kind: 'summary',
+          entries: [{ playerId: 10, name: 'K. Zhang', position: 'GK', draft: { appearance: true, rating: 6.8 }, matched: 'official' }],
+          unmatched: [],
+          warnings: [],
+        }),
+        { status: 200 },
+      ),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+        calls.push({ body: JSON.parse(String(init?.body)) as { image?: string; side?: string } });
+        return responses.shift() as Response;
+      }),
+    );
+
+    renderPage();
+    await openEdit();
+    pickFile();
+
+    // 不再是「红字 + 只能重传」：提示行点名截图上的英文原文，三颗按钮照旧
+    expect(await screen.findByText(/OLYMPIACOS FC/)).toBeTruthy();
+    expect(screen.getByText(/点按钮选边/)).toBeTruthy();
+    expect(panelButton('主队 海港联')).toBeTruthy();
+    expect(panelButton('客队 北岸城')).toBeTruthy();
+    expect(panelButton('取消（这张图不预填）')).toBeTruthy();
+    expect(document.querySelector('.entry-ocr-report')?.className).not.toContain('bad-text');
+
+    fireEvent.click(panelButton('主队 海港联'));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].body.side).toBe('home');
+    expect(calls[1].body.image).toBe(calls[0].body.image); // 同一张图重发
+    expect(await screen.findByText(/按主队 海港联/)).toBeTruthy();
+  });
+
   it('TC-ENTRY-E10 换队侧「不保存，继续」也真丢草稿（v6.51.4）：切回主队看到服务端基线', async () => {
     renderPage();
     await openEdit();

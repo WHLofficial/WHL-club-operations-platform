@@ -792,8 +792,9 @@ function EntryPanel({
         }
         for (const w of res.warnings) lines.push(w);
       } catch (err) {
-        // 队名歧义（v6.51.3）不是失败：不落红字，改成提示 + 三颗按钮，选完用这张图带 side 续跑
-        if (err instanceof ApiError && err.code === 'ocr_team_ambiguous') {
+        // 队名对不上侧不是失败（v6.51.3 歧义 / v6.51.8 对不上，含模型给英文名）：不落红字，
+        // 改成提示 + 三颗按钮，选完用这张图带 side 续跑
+        if (err instanceof ApiError && (err.code === 'ocr_team_ambiguous' || err.code === 'ocr_team_unmatched')) {
           pending.push({ key: i, image, message: err.message });
         } else {
           lines.push(`第 ${i + 1} 张识别失败：${err instanceof Error ? err.message : '未知错误'}`);
