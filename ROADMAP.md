@@ -1522,7 +1522,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.51.1 · 品牌池表格显示微调：来源/状态列不再折行 + 新增「总部」只读展示列 + 收窄行业/热度列宽（2026-10-16）
 
-**状态**：**待发布**（零迁移、零生产写、零契约变化 —— 纯管理端展示微调，判级 **patch**）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2196 例**全绿、`npm run build` 成功；浏览器实测（本地 dev 8791，1280×720）表头 9 列与 28 行渲染正常。测试计划 `docs/test-plans/v6.51.1-brand-table-display.md`。
+**状态**：**已上线 2026-10-16**（Version `7fc239a6-ff2f-4283-b6c6-955a12b26e0d`，push `0f5a216..ee46840`；**零迁移 ⇒ 无 apply**、零生产写；线上入口 `assets/index-SfH_zacy.js` 与惰性块 `assets/BrandsPage-BuCzDGdC.js` 的 sha256 与本地构建**逐字一致**、CSS 含 `.brand-meta-cell`、入口含版本串 `6.51.1`；回读 `/api/health` 200 / `/api/clubs` 200 / 匿名 `/api/admin/brands` 401）。判级 **patch**（无新增能力，纯展示微调）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2196 例**全绿、`npm run build` 成功；浏览器实测（本地 dev 8791，1280×720）表头 9 列与 28 行渲染正常。测试计划 `docs/test-plans/v6.51.1-brand-table-display.md`。
 
 **缘起（用户 m02096 / m02183）**：①「来源 状态两列对应文字折行了，减小字号」；②「行业和热度减小列宽，加入『总部』一列，在行业之前（仅展示列）」。
 
@@ -1530,7 +1530,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **验收数字**：typecheck 三份 0 error；`npx vitest run` **135 文件 / 2196 例**全绿（+1 例 = TC-BR-04；`BrandsPage.test.tsx` 3 → 4 例）；`npm run build` 成功。浏览器实测（dev 8791，1280×720）：表头 `[品牌, 总部, 行业, 热度, 档位, 来源, 状态, 生效冠名, '']`、28 行；首行总部「巴塞尔」72px 宽 / 12px / nowrap / 无控件、行业 input 72px、热度 input 56px、来源「种子」与状态「在池」单行 12px。
 
-**留待（待令）**：push → CF 自动部署 → 核对 Version id 与线上资产（入口包 + `BrandsPage-*.js` 惰性块）→ 生产回读 `/admin/brands` 表头九列。本版不含后端 / 迁移 / 规则改动（`PRD.md`、`TECH_DESIGN.md` 无需同步）。
+**上线记录（2026-10-16 已执行）**：本地 commit `06509c7`（fix(web)）/ `1ccbdb7`（chore 版本号）/ `ee46840`（docs）→ push `0f5a216..ee46840`（走 `ssh://git@ssh.github.com:443`，22 端口被挡）→ CF Workers Builds 自动部署 Version `7fc239a6-ff2f-4283-b6c6-955a12b26e0d` @2026-10-16T05:28:39.815Z（100%）→ 资产核对：入口包与 `BrandsPage-*` 惰性块 sha256 与本地 `web/dist/` 逐字一致、线上入口含版本串 `6.51.1`、CSS 含 `.brand-meta-cell`、`/api/health` 200。本版不含后端 / 迁移 / 规则改动（`PRD.md`、`TECH_DESIGN.md` 无需同步）。
 
 ## v6.51.0 · 强制拍卖解禁与可指定挂牌价（前六降参考值 + 预检端点）+ 品牌池三批（全虚构化 28 家 / 冠名落点名 / 企业档案 / 招商性格与对赌抽签引擎）（2026-10-15）
 
