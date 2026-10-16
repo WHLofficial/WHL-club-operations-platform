@@ -15,6 +15,7 @@ import { createAuditStatement } from '../lib/audit.ts';
 import { loadAttendanceModel, rollWeather, uniform, asRange } from './home.ts';
 import { clubIdByTourTeam } from './prizes.ts';
 import { MATCH_SELECT, type TourMatchRow } from './results.ts';
+import { venueNameOf } from './naming-ops.ts';
 import { normTeamName } from '../core/name-fold.ts';
 
 /** 轮次定位参数的严格解析（GET query 字符串与 POST body 数字两形态共用）：
@@ -97,6 +98,19 @@ export async function buildRoundView(env: Env, tournamentId: number, round: numb
         .all<{ club_id: number; name: string | null; capacity: number; tier: number }>()
     : { results: [] as { club_id: number; name: string | null; capacity: number; tier: number }[] };
   const stadiumMap = new Map(stadiumRows.results.map((r) => [r.club_id, r]));
+  // 冠名落点名（v6.51.0 批 1）：本球场在用的生效冠名合同快照；无冠名/老合同空串 ⇒ 展示回落球场名
+  const venueRows = clubIds.length
+    ? await env.DB
+        .prepare(
+          `SELECT club_id, brand, venue_name FROM naming_contracts
+           WHERE status = 'active' AND club_id IN (${clubIds.map(() => '?').join(',')})`,
+        )
+        .bind(...clubIds)
+        .all<{ club_id: number; brand: string; venue_name: string }>()
+    : { results: [] as { club_id: number; brand: string; venue_name: string }[] };
+  const venueMap = new Map(
+    venueRows.results.map((r) => [r.club_id, venueNameOf(r.venue_name, r.brand, stadiumMap.get(r.club_id)?.name ?? null)]),
+  );
   const clubNames = new Map(
     clubIds.length
       ? (
@@ -153,7 +167,9 @@ export async function buildRoundView(env: Env, tournamentId: number, round: numb
       awayTeamName: m.away_team,
       stageName: m.stage_name,
       finished: m.status === 'finished',
-      stadium: stadium ? { name: stadium.name, capacity: stadium.capacity, tier: stadium.tier } : null,
+      stadium: stadium
+        ? { name: stadium.name, capacity: stadium.capacity, tier: stadium.tier, venueName: venueMap.get(clubId ?? -1) ?? '' }
+        : null,
       weather: forecast?.weather ?? null,
       wxCoef: forecast ? forecast.wx_coef : null,
       confirmedWeather: confirmed?.weather ?? null,

@@ -16,8 +16,11 @@ import { clubIdByTourTeam, tourTeamIdsByClub } from './prizes.ts';
 import { deriveClubLeagues, deriveClubTier, tierCache, type Tier } from './tier.ts';
 import {
   evolveSatisfactionForClub,
+  loadNamingWindowCounts,
   loadSatisfyConfig,
   loadTierProfiles,
+  parseBetTerms,
+  parsePreferTags,
   recalibrateTierStatements,
   windowNamingStatements,
   windowBrandHeatStatement,
@@ -25,7 +28,7 @@ import {
   type NamingContractRow,
 } from './naming-ops.ts';
 import { loadActivityCatalog, windowActivityStatements } from './venue-ops.ts';
-import { activateQueuedStatements, buildRoundStatements } from './market-ops.ts';
+import { activateQueuedStatements, buildRoundStatements, loadClubSignals, preferHitCount } from './market-ops.ts';
 import {
   collectWindowSignals,
   loadEventSignals,
@@ -533,6 +536,15 @@ export async function windowHomeStatements(
         ).results.map((r) => [r.brand, r.tier as BrandTier])
       : [],
   );
+  // v6.51.0 批 3：品牌招商性格 prefer 映射（情绪加成用）+ 队况信号（同一次批算好，逐队复用）
+  const brandPrefer = new Map(
+    opts.chargeNaming
+      ? (await env.DB.prepare(`SELECT brand, prefer FROM brand_pool`).all<{ brand: string; prefer: string }>()).results.map(
+          (r) => [r.brand, parsePreferTags(r.prefer)],
+        )
+      : [],
+  );
+  const clubSignals = opts.chargeNaming ? await loadClubSignals(env, season) : new Map<number, Set<string>>();
   const profiles = opts.chargeNaming ? await loadTierProfiles(env.DB) : null;
   const satisfyCfg = opts.chargeNaming ? await loadSatisfyConfig(env.DB) : null;
 
@@ -646,8 +658,16 @@ export async function windowHomeStatements(
       // 对赌奖金增长率按「窗初快照 → 窗末」算（v6.28.0）：每场演化已即时改 fans，拿现值当基准会把增长率算成 0
       const fansStart = s.fans_window_start > 0 ? s.fans_window_start : s.fans;
       const fansGrowth = fansStart > 0 ? (nextFansWithMood - fansStart) / fansStart : 0;
+      // v6.51.0 批 3：对赌 v2 条款要本窗实况样本（主场场次/积分/进球/零封/满座）——只对赌合同才查
+      const counts =
+        naming.package_no === 3 && parseBetTerms(naming.bet_terms)
+          ? await loadNamingWindowCounts(env, s.club_id, tourTeamId ?? null, season, windowSeq)
+          : undefined;
       statements.push(
-        ...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth, { feeFactor: sig?.mults.fee_mod ?? 1 }),
+        ...windowNamingStatements(env, naming, season, windowSeq, attendRate, fansGrowth, {
+          feeFactor: sig?.mults.fee_mod ?? 1,
+          counts,
+        }),
       );
       summary.namingClubs++;
       summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
@@ -661,7 +681,9 @@ export async function windowHomeStatements(
       if (profile && satisfyCfg && naming.windows_remaining > 1) {
         // 上座信号按「有无主场场次」定（无场次中性 0，不借中性上座率 1.0 白拿达标）
         const sAttend = played > 0 ? (attendRate >= profile.goodAttend ? 1 : attendRate <= profile.badAttend ? -1 : 0) : 0;
-        const evolution = await evolveSatisfactionForClub(env, naming, tourTeamId, season, windowSeq, sAttend, profile, satisfyCfg);
+        // 招商性格偏好加成（v6.51.0 批 3）：品牌 prefer 与该队现状信号（死忠规模/大场馆/高上座/冠军相）的命中数
+        const hits = preferHitCount(brandPrefer.get(naming.brand) ?? [], clubSignals.get(s.club_id));
+        const evolution = await evolveSatisfactionForClub(env, naming, tourTeamId, season, windowSeq, sAttend, profile, satisfyCfg, hits);
         statements.push(...evolution.statements);
         const rep = evolution.report;
         if (rep.to !== rep.from) {
@@ -754,6 +776,18 @@ export async function windowHomeStatements(
         .all<{ id: number; name: string }>()
     ).results;
     const marketName = (id: number) => marketClubs.find((cl) => cl.id === id)?.name ?? `俱乐部${id}`;
+    // v6.51.0 批 2：站内信尾附品牌属地署名（无属地品牌回落现状文案）
+    const activatedBrands = [...new Set(activated.map((a) => a.brand))];
+    const brandHq = new Map(
+      activatedBrands.length === 0
+        ? []
+        : (
+            await env.DB
+              .prepare(`SELECT brand, hq FROM brand_pool WHERE brand IN (${activatedBrands.map(() => '?').join(',')})`)
+              .bind(...activatedBrands)
+              .all<{ brand: string; hq: string }>()
+          ).results.map((r) => [r.brand, r.hq]),
+    );
     for (const p of offerNotified) {
       notifications.push({
         clubId: p.clubId,
@@ -765,7 +799,16 @@ export async function windowHomeStatements(
       notifications.push({
         clubId: a.clubId,
         template: 'naming_offer_activated',
-        data: { club: marketName(a.clubId), brand: a.brand, feePerWindow: a.feePerWindow, windows: a.windows, pkgName: a.pkgName },
+        data: {
+          club: marketName(a.clubId),
+          brand: a.brand,
+          feePerWindow: a.feePerWindow,
+          windows: a.windows,
+          pkgName: a.pkgName,
+          // v6.51.0 批 1/2：落点名 + 品牌属地署名（品牌档案可能被改名，按当刻品牌名现查）
+          venueName: a.venueName,
+          hq: brandHq.get(a.brand) ?? '',
+        },
       });
     }
   }

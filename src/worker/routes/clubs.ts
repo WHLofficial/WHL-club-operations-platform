@@ -17,7 +17,7 @@ import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, 
 import { createConfigService } from '../../core/config.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
-import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles } from '../naming-ops.ts';
+import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms } from '../naming-ops.ts';
 import { acceptOffer, activateQueuedStatements, listClubOffers } from '../market-ops.ts';
 import { queueClubNotification } from '../notify.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
@@ -677,6 +677,7 @@ app.get('/me/club', async (c) => {
   let home: {
     name: string | null;
     namingBrand: string | null;
+    namingVenueName: string | null;
     capacity: number;
     tier: number;
     tierName: string | null;
@@ -698,6 +699,8 @@ app.get('/me/club', async (c) => {
     home = {
       name: stadium.name,
       namingBrand: naming?.brand ?? null,
+      // v6.51.0 批 1：落点名用合同快照，老合同（空快照）按现球场名现拼；无冠名 null
+      namingVenueName: naming ? venueNameOf(naming.venue_name, naming.brand, stadium.name) : null,
       capacity: stadium.capacity,
       tier: stadium.tier,
       tierName: tierTable[String(stadium.tier)]?.name ?? null,
@@ -1096,7 +1099,45 @@ app.post('/club/facilities/upgrade', async (c) => {
 });
 
 // 冠名市场（v2.6.0；v6.14.0 C3 起签约只走招商轮报价——「收到的报价」取代品牌直签列表）
-function namingContractDto(row: NonNullable<Awaited<ReturnType<typeof getActiveNaming>>>) {
+/** 品牌企业档案（v6.51.0 批 2）：合同/报价卡渲染 slogan、属地、色块与「中资」标签用。 */
+interface BrandProfileRow {
+  name_en: string;
+  color: string;
+  slogan: string;
+  hq: string;
+  intro: string;
+  origin: string;
+  style: string;
+  prefer: string;
+}
+
+function brandProfileDto(row: BrandProfileRow | null) {
+  if (!row) return null;
+  return {
+    nameEn: row.name_en,
+    color: row.color,
+    slogan: row.slogan,
+    hq: row.hq,
+    intro: row.intro,
+    origin: row.origin,
+    style: row.style,
+    prefer: row.prefer,
+  };
+}
+
+async function loadBrandProfile(db: D1Database, brand: string): Promise<BrandProfileRow | null> {
+  return (
+    (await db
+      .prepare(`SELECT name_en, color, slogan, hq, intro, origin, style, prefer FROM brand_pool WHERE brand = ?`)
+      .bind(brand)
+      .first<BrandProfileRow>()) ?? null
+  );
+}
+
+function namingContractDto(
+  row: NonNullable<Awaited<ReturnType<typeof getActiveNaming>>>,
+  profile: BrandProfileRow | null = null,
+) {
   return {
     id: row.id,
     clubId: row.club_id,
@@ -1114,6 +1155,10 @@ function namingContractDto(row: NonNullable<Awaited<ReturnType<typeof getActiveN
     startedSeason: row.started_season,
     startedWindow: row.started_window,
     satisfaction: row.satisfaction,
+    // v6.51.0 批 1/3：落点名快照（空 = 老合同，前端按品牌名回落）与对赌条款快照（null = 旧口径）
+    venueName: row.venue_name !== '' ? row.venue_name : null,
+    betTerms: parseBetTerms(row.bet_terms),
+    brandProfile: brandProfileDto(profile),
   };
 }
 
@@ -1122,11 +1167,24 @@ function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]) {
     id: row.id,
     brand: row.brand,
     tier: row.tier,
+    industry: row.industry,
     packageNo: row.package_no,
     amount: row.amount,
     windows: row.windows,
     status: row.status,
     expireAt: row.expire_at,
+    // v6.51.0 批 1：签下将命名为「品牌·球场名」（无球场名时空串，前端不加行）
+    venueName: composeVenueName(row.brand, row.stadium_name),
+    brandProfile: brandProfileDto({
+      name_en: row.name_en,
+      color: row.color,
+      slogan: row.slogan,
+      hq: row.hq,
+      intro: '',
+      origin: row.origin,
+      style: row.style,
+      prefer: row.prefer,
+    }),
   };
 }
 
@@ -1140,24 +1198,31 @@ app.get('/club/naming/quote', async (c) => {
   if (contract) {
     // 队况只在有现约（续约候选要按容量/死忠现算）时才读，无约分支不白读一行（评审 P3-1）
     const stadium = await c.env.DB
-      .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
+      .prepare('SELECT name, capacity, fans FROM stadiums WHERE club_id = ?')
       .bind(club.id)
-      .first<{ capacity: number; fans: number }>();
+      .first<{ name: string | null; capacity: number; fans: number }>();
     // 档位与情绪地板随约下发（v6.13.0 C2，前端低情绪预警用）；品牌被弃用回口碑兜底
-    const [brands, profiles, factors] = await Promise.all([
+    const [brands, profiles, factors, brandProfile] = await Promise.all([
       loadAdoptedBrands(c.env.DB),
       loadTierProfiles(c.env.DB),
       loadIndustryFactors(c.env.DB),
+      loadBrandProfile(c.env.DB, contract.brand),
     ]);
     const brandTier = brands.find((b) => b.brand === contract.brand)?.tier ?? '口碑';
     const tierKey = brandTier as keyof typeof profiles;
     // 续约候选（剩最后 1 窗时前端用）：按当前队况与品牌现热度现算；品牌已弃用则不给（renewal 缺省）
     const params = await loadNamingParams(c.env.DB);
     const renewal = stadium
-      ? quoteBrands(params, brands, stadium.capacity, stadium.fans, factors).find((b) => b.brand === contract.brand) ?? null
+      ? quoteBrands(params, brands, stadium.capacity, stadium.fans, factors, stadium.name).find(
+          (b) => b.brand === contract.brand,
+        ) ?? null
       : null;
     return c.json({
-      contract: { ...namingContractDto(contract), tier: brandTier, satisfyFloor: profiles[tierKey]?.satisfyFloor ?? null },
+      contract: {
+        ...namingContractDto(contract, brandProfile),
+        tier: brandTier,
+        satisfyFloor: profiles[tierKey]?.satisfyFloor ?? null,
+      },
       renewal,
       offers,
     });
@@ -1173,7 +1238,11 @@ app.post('/club/naming/offers/:id/accept', async (c) => {
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 id 不合法');
   const body = (await c.req.raw.json().catch(() => null)) as { mode?: unknown } | null;
   const out = await acceptOffer(c.env, offerId, club.id, body?.mode, user.id);
-  return c.json({ result: out.result, penalty: out.penalty, contract: out.contract ? namingContractDto(out.contract) : null }, 201);
+  const profile = out.contract ? await loadBrandProfile(c.env.DB, out.contract.brand) : null;
+  return c.json(
+    { result: out.result, penalty: out.penalty, contract: out.contract ? namingContractDto(out.contract, profile) : null },
+    201,
+  );
 });
 
 app.post('/club/naming/renew', async (c) => {
@@ -1182,7 +1251,7 @@ app.post('/club/naming/renew', async (c) => {
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const body = (await c.req.raw.json().catch(() => null)) as { packageNo?: unknown } | null;
   const contract = await renewNaming(c.env, club.id, Number(body?.packageNo), user.id);
-  return c.json({ contract: namingContractDto(contract) }, 201);
+  return c.json({ contract: namingContractDto(contract, await loadBrandProfile(c.env.DB, contract.brand)) }, 201);
 });
 
 app.post('/club/naming/terminate', async (c) => {
@@ -1197,9 +1266,16 @@ app.post('/club/naming/terminate', async (c) => {
     if (activation.statements.length > 0) {
       await c.env.DB.batch(activation.statements);
       for (const a of activation.activated) {
+        // v6.51.0 批 1/2：落点名与品牌属地随通知下发（老合同 venueName 空 ⇒ 模板回落品牌名口径）
+        const hqRow = await c.env.DB
+          .prepare('SELECT hq FROM brand_pool WHERE brand = ?')
+          .bind(a.brand)
+          .first<{ hq: string }>();
         await queueClubNotification(c.env, a.clubId, 'naming_offer_activated', {
           club: club.name,
           brand: a.brand,
+          venueName: a.venueName,
+          hq: hqRow?.hq ?? '',
           feePerWindow: a.feePerWindow,
           windows: a.windows,
           pkgName: a.pkgName,

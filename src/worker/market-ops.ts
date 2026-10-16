@@ -18,7 +18,9 @@ import { ledgerMovement } from './ledger.ts';
 import { getOpenWindow } from './seasons.ts';
 import { assertOpOpen } from './ops-schedule.ts';
 import {
+  buildBetTerms,
   buildPackages,
+  composeVenueName,
   getActiveNaming,
   industryFactor,
   loadAdoptedBrands,
@@ -27,10 +29,13 @@ import {
   loadNamingParams,
   loadTierRules,
   namingBaseFee,
+  parsePreferTags,
   terminatePenaltyOf,
   tierQuotaOf,
   type NamingContractRow,
 } from './naming-ops.ts';
+import { leagueStandings } from './season-settle.ts';
+import { clubIdByTourTeam } from './prizes.ts';
 
 const nowSql = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
@@ -86,6 +91,17 @@ export interface ClubOfferRow {
   brand: string;
   tier: string;
   round_status: string;
+  /** 本队球场名（v6.51.0 批 1）：报价卡展示「签下将命名为 品牌·球场名」 */
+  stadium_name: string | null;
+  /** 企业档案（v6.51.0 批 2）与招商性格（批 3）：随报价一起给到教练端 */
+  name_en: string;
+  color: string;
+  slogan: string;
+  hq: string;
+  industry: string;
+  origin: string;
+  style: string;
+  prefer: string;
 }
 
 /** 教练端收件箱：本队待签（pending 且所在轮 open）+ 排队接班（queued）的报价。 */
@@ -94,10 +110,12 @@ export async function listClubOffers(db: Env['DB'], clubId: number): Promise<Clu
     await db
       .prepare(
         `SELECT o.id, o.brand_id, o.club_id, o.package_no, o.amount, o.windows, o.package_json,
-                o.status, o.created_at, o.expire_at, b.brand, b.tier, r.status AS round_status
+                o.status, o.created_at, o.expire_at, b.brand, b.tier, r.status AS round_status,
+                s.name AS stadium_name, b.name_en, b.color, b.slogan, b.hq, b.industry, b.origin, b.style, b.prefer
          FROM market_offers o
          JOIN brand_pool b ON b.id = o.brand_id
          JOIN market_rounds r ON r.id = o.round_id
+         LEFT JOIN stadiums s ON s.club_id = o.club_id
          WHERE o.club_id = ? AND ((o.status = 'pending' AND r.status = 'open') OR o.status = 'queued')
          ORDER BY o.id DESC`,
       )
@@ -111,6 +129,104 @@ export async function listClubOffers(db: Env['DB'], clubId: number): Promise<Clu
 /** 套餐按档位：头部大牌只做短约（进取），新兴 / 口碑走稳健。 */
 export function packageNoForTier(tier: string): 1 | 2 {
   return tier === '头部' ? 2 : 1;
+}
+
+/** 套餐按招商性格（v6.51.0 批 3）：稳健 1 / 进取 2 / 对赌 3，未登记（空串）回落到档位映射。
+ *  对赌品牌只递对赌套餐——“对赌”是品牌的经营性格，不由档位覆盖。 */
+export function packageNoForBrand(tier: string, style: string): 1 | 2 | 3 {
+  if (style === '稳健') return 1;
+  if (style === '进取') return 2;
+  if (style === '对赌') return 3;
+  return packageNoForTier(tier);
+}
+
+/** 偏好标签命中数（纯函数）：品牌 prefer ∩ 该队现状标签。 */
+export function preferHitCount(prefer: string[], tags: Set<string> | undefined): number {
+  if (!tags || tags.size === 0) return 0;
+  let n = 0;
+  for (const p of prefer) if (tags.has(p)) n += 1;
+  return n;
+}
+
+/**
+ * 队况信号（v6.51.0 批 3）：club_id → 命中的偏好标签集合，供递价排序与签约后的情绪加成共用。
+ * 口径：死忠规模 = stadiums.fans 前 25%；大场馆 = stadiums.capacity 前 25%；
+ *      高上座 = 上一赛季 match_attendance 平均上座率（Σattendance ÷ 当刻 capacity × 场次）前 25%，无数据不匹配；
+ *      冠军相 = 上一赛季 league_premier 冠军（积分表口径同 season-settle championBonusStatements），无数据不匹配。
+ * 样本 < 4 队时前 25% 退化取最高 1 队（ceil 口径天然满足）；并列按 club_id 升序稳定切分。
+ */
+export async function loadClubSignals(env: Env, season: number): Promise<Map<number, Set<string>>> {
+  const signals = new Map<number, Set<string>>();
+  const add = (clubId: number, tag: string): void => {
+    const set = signals.get(clubId) ?? new Set<string>();
+    set.add(tag);
+    signals.set(clubId, set);
+  };
+  const stadiums = (
+    await env.DB.prepare(`SELECT club_id, capacity, fans FROM stadiums`).all<{ club_id: number; capacity: number; fans: number }>()
+  ).results;
+  if (stadiums.length === 0) return signals;
+  const topCount = Math.max(1, Math.ceil(stadiums.length * 0.25));
+  const byFans = [...stadiums].sort((a, b) => b.fans - a.fans || a.club_id - b.club_id);
+  for (const s of byFans.slice(0, topCount)) add(s.club_id, '死忠规模');
+  const byCap = [...stadiums].sort((a, b) => b.capacity - a.capacity || a.club_id - b.club_id);
+  for (const s of byCap.slice(0, topCount)) add(s.club_id, '大场馆');
+  // 高上座（上一赛季；本季进行中不算，避免半程数据）
+  const capOf = new Map(stadiums.map((s) => [s.club_id, s.capacity]));
+  const prevAttend = await env.DB
+    .prepare(`SELECT MAX(season) AS s FROM match_attendance WHERE season < ?`)
+    .bind(season)
+    .first<{ s: number | null }>();
+  if (prevAttend?.s != null) {
+    const rows = (
+      await env.DB
+        .prepare(
+          `SELECT club_id, COALESCE(SUM(attendance), 0) AS total, COUNT(*) AS n
+           FROM match_attendance WHERE season = ? GROUP BY club_id`,
+        )
+        .bind(prevAttend.s)
+        .all<{ club_id: number; total: number; n: number }>()
+    ).results;
+    const rates = rows
+      .filter((r) => r.n > 0 && (capOf.get(r.club_id) ?? 0) > 0)
+      .map((r) => ({ clubId: r.club_id, rate: r.total / ((capOf.get(r.club_id) ?? 1) * r.n) }))
+      .sort((a, b) => b.rate - a.rate || a.clubId - b.clubId);
+    for (const r of rates.slice(0, Math.max(1, Math.ceil(rates.length * 0.25)))) add(r.clubId, '高上座');
+  }
+  // 冠军相（上一赛季联赛冠军）
+  const prevLeague = await env.DB
+    .prepare(`SELECT MAX(season) AS s FROM season_tournaments WHERE competition_type = 'league_premier' AND season < ?`)
+    .bind(season)
+    .first<{ s: number | null }>();
+  if (prevLeague?.s != null) {
+    const bindings = (
+      await env.DB
+        .prepare(`SELECT tournament_id FROM season_tournaments WHERE season = ? AND competition_type = 'league_premier'`)
+        .bind(prevLeague.s)
+        .all<{ tournament_id: number }>()
+    ).results;
+    if (bindings.length === 1) {
+      const results = (
+        await env.DB
+          .prepare(
+            `SELECT home_team_id, away_team_id, score_home, score_away, pen_home, pen_away, walkover_side, winner_team
+             FROM result_confirmations WHERE tournament_id = ? AND season = ?`,
+          )
+          .bind(bindings[0]!.tournament_id, prevLeague.s)
+          .all<Parameters<typeof leagueStandings>[0][number]>()
+      ).results;
+      const standings = leagueStandings(results);
+      if (standings.length > 0) {
+        const clubMap = await clubIdByTourTeam(env, standings.map((r) => r.teamId));
+        standings.sort((a, b) => b.pts - a.pts || b.gd - a.gd || a.teamId - b.teamId);
+        for (const r of standings.slice(0, 1)) {
+          const clubId = clubMap.get(r.teamId);
+          if (clubId != null) add(clubId, '冠军相');
+        }
+      }
+    }
+  }
+  return signals;
 }
 
 /** 品牌挑队策略（valuations 已按估值降序；offeredTeams 是本轮已被其它品牌递过价的队）：
@@ -208,16 +324,21 @@ export async function buildRoundStatements(env: Env, season: number, windowSeq: 
     pkgJson: string;
   }
   const rows: OfferRow[] = [];
+  // 招商性格偏好（v6.51.0 批 3）：排在前面的队优先被递价——同一品牌下 prefer 命中数多的队排前，
+  // 命中数相同再按估值降序（与 v6.51.0 之前的纯估值序相比，只在有命中差异时换序）。
+  const clubSignals = await loadClubSignals(env, season);
   for (const b of sellers) {
+    const brandPrefer = parsePreferTags(b.prefer);
     const valuations = stadiums.results
       .map((s) => ({
         clubId: s.club_id,
         // 估值 = 冠名底价公式（×热度已在 namingBaseFee 内）× 行业系数，降序（插件 _valuations 同口径）
         fee: round3(namingBaseFee(params, s.capacity, s.fans, b.heat) * industryFactor(factors, b.industry)),
+        preferHits: preferHitCount(brandPrefer, clubSignals.get(s.club_id)),
       }))
-      .sort((x, y) => y.fee - x.fee);
+      .sort((x, y) => y.preferHits - x.preferHits || y.fee - x.fee);
     const targets = pickTargetsForBrand(b.tier, valuations, rules.offersPerBrand, offeredTeams);
-    const pkgNo = packageNoForTier(b.tier);
+    const pkgNo = packageNoForBrand(b.tier, b.style);
     for (const clubId of targets) {
       offeredTeams.add(clubId);
       const fee = valuations.find((v) => v.clubId === clubId)!.fee;
@@ -283,6 +404,8 @@ export interface QueuedActivation {
   feePerWindow: number;
   windows: number;
   pkgName: string;
+  /** 冠名落点名「品牌·球场名」（v6.51.0 批 1，站内信文案用；无球场名时为空串） */
+  venueName: string;
 }
 
 /**
@@ -307,12 +430,22 @@ export async function activateQueuedStatements(
   const queued = (
     await db
       .prepare(
-        `SELECT o.id, o.club_id, o.package_no, o.amount, o.windows, o.package_json, b.brand
+        `SELECT o.id, o.club_id, o.package_no, o.amount, o.windows, o.package_json, b.brand, s.name AS stadium_name
          FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id
+         LEFT JOIN stadiums s ON s.club_id = o.club_id
          WHERE o.status = 'queued'${scope} ORDER BY o.id`,
       )
       .bind(...(clubIds ?? []))
-      .all<{ id: number; club_id: number; package_no: number; amount: number; windows: number; package_json: string; brand: string }>()
+      .all<{
+        id: number;
+        club_id: number;
+        package_no: number;
+        amount: number;
+        windows: number;
+        package_json: string;
+        brand: string;
+        stadium_name: string | null;
+      }>()
   ).results;
   if (queued.length === 0) return { statements: [], activated: [] };
   const actives = new Set(
@@ -325,9 +458,20 @@ export async function activateQueuedStatements(
   const activated: QueuedActivation[] = [];
   for (const q of queued) {
     const snap = parsePkgJson(q.package_json, q.package_no, q.amount);
+    // 冠名落点名与对赌条款快照（v6.51.0 批 1/3）：与直接签约同一口径——转正当刻抽签并落库
+    const venueName = composeVenueName(q.brand, q.stadium_name);
+    const betTerms = q.package_no === 3 ? JSON.stringify(await buildBetTerms(env, q.club_id, q.brand, season, windowSeq)) : '';
     // 构建期仍有 active 的队不进通知列表（语句照生成，执行期守卫决定落不落）
     if (!actives.has(q.club_id)) {
-      activated.push({ clubId: q.club_id, offerId: q.id, brand: q.brand, feePerWindow: q.amount, windows: q.windows, pkgName: snap.pkgName });
+      activated.push({
+        clubId: q.club_id,
+        offerId: q.id,
+        brand: q.brand,
+        feePerWindow: q.amount,
+        windows: q.windows,
+        pkgName: snap.pkgName,
+        venueName,
+      });
     }
     statements.push(
       // 先占坑：offer queued→accepted（NOT EXISTS active 挡跨批竞态——别批刚插了 active 合同则本队不再转正）
@@ -343,15 +487,15 @@ export async function activateQueuedStatements(
           `INSERT INTO naming_contracts
            (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
             windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status,
-            started_season, started_window, created_at, updated_at)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ${nowSql}, ${nowSql}
+            started_season, started_window, venue_name, bet_terms, created_at, updated_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ${nowSql}, ${nowSql}
            WHERE NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')
              AND (SELECT status FROM market_offers WHERE id = ?) = 'accepted'`,
         )
         .bind(
           q.club_id, q.brand, snap.brandHeat, snap.baseFee, q.package_no, snap.pkgName, q.amount,
           q.windows, q.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
-          season, windowSeq, q.club_id, q.id,
+          season, windowSeq, venueName, betTerms, q.club_id, q.id,
         ),
       audit({
         actor,
@@ -588,10 +732,18 @@ export async function acceptOffer(
              AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}`,
         )
         .bind(claim, offerId, clubId, ...quotaParams);
+  // 冠名落点名（v6.51.0 批 1）：成约当刻的「品牌·球场名」快照，之后球场改名/换品牌不影响历史合同
+  const stadiumRow = await db
+    .prepare(`SELECT name FROM stadiums WHERE club_id = ?`)
+    .bind(clubId)
+    .first<{ name: string }>();
+  const venueName = composeVenueName(offer.brand, stadiumRow?.name ?? null);
+  // 对赌条款快照（v6.51.0 批 3）：只在对赌套餐签约时抽签（确定性 seed ⇒ 重放/重跑逐字一致）
+  const betTerms = offer.package_no === 3 ? JSON.stringify(await buildBetTerms(env, clubId, offer.brand, win.season, win.windowSeq)) : '';
   const contractCols = [
     clubId, offer.brand, snap.brandHeat, snap.baseFee, offer.package_no, snap.pkgName, offer.amount,
     offer.windows, offer.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
-    win.season, win.windowSeq,
+    win.season, win.windowSeq, venueName, betTerms,
   ];
   const statements = [
     // 抢锁：并发同刻只一方能把 pending 改掉（claim_token 同时记下本批归属）
@@ -602,8 +754,8 @@ export async function acceptOffer(
         `INSERT INTO naming_contracts
          (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
           windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status,
-          started_season, started_window, created_at, updated_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ${nowSql}, ${nowSql}
+          started_season, started_window, venue_name, bet_terms, created_at, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ${nowSql}, ${nowSql}
          WHERE ${claimGuard}${
           active
             ? ` AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}`
@@ -671,12 +823,12 @@ export async function spawnVisitOffer(
   const candidates = (
     await db
       .prepare(
-        `SELECT b.id, b.brand, b.heat, b.industry FROM brand_pool b
+        `SELECT b.id, b.brand, b.heat, b.industry, b.tier, b.style FROM brand_pool b
          WHERE b.status = 'adopted'
            AND NOT EXISTS (SELECT 1 FROM naming_contracts nc WHERE nc.brand = b.brand AND nc.status = 'active')
          ORDER BY b.id`,
       )
-      .all<{ id: number; brand: string; heat: number; industry: string }>()
+      .all<{ id: number; brand: string; heat: number; industry: string; tier: string; style: string }>()
   ).results;
   if (candidates.length === 0) return { statements: [], notes: ['品牌池里没有可上门的品牌，本次落空'], applied: null };
   const rng = env.rng ?? Math.random;
@@ -692,20 +844,22 @@ export async function spawnVisitOffer(
   }
   const [params, factors, rules] = await Promise.all([loadNamingParams(db), loadIndustryFactors(db), loadRoundRules(db)]);
   const fee = round3(namingBaseFee(params, club.capacity, club.fans, picked.heat) * industryFactor(factors, picked.industry));
-  const pkg = buildPackages(params, fee)[0]!; // 稳健套餐（插件 offer_spawn 取 packages[0] 同口径）
+  // 套餐按品牌招商性格（v6.51.0 批 3）：稳健/进取/对赌各递自家套餐，未登记回落稳健全（插件 offer_spawn 旧口径）
+  const pkgNo = packageNoForBrand(picked.tier, picked.style);
+  const pkg = buildPackages(params, fee)[pkgNo - 1] ?? buildPackages(params, fee)[0]!;
   const expireAt = rules.offerTtlHours > 0 ? new Date(Date.now() + rules.offerTtlHours * 3_600_000).toISOString() : '9999-12-31T00:00:00.000Z';
   const out = await db
     .prepare(
       // 去重子查询不带 status 谓词（评审 P1-2）：与 idx_market_offers_round (round_id, brand_id, club_id) 唯一索引
       // 同口径——本轮内该品牌对该队递过任何状态的报价就不再递（重发走落空播报，不会撞索引报 500）
       `INSERT INTO market_offers (round_id, brand_id, club_id, package_no, amount, windows, package_json, status, created_at, expire_at)
-       SELECT ?, ?, ?, 1, ?, ?, ?, 'pending', ${nowSql}, ?
+       SELECT ?, ?, ?, ?, ?, ?, ?, 'pending', ${nowSql}, ?
        WHERE NOT EXISTS (
          SELECT 1 FROM market_offers WHERE round_id = ? AND brand_id = ? AND club_id = ?
        ) AND ${guardSql}`,
     )
     .bind(
-      open.id, picked.id, club.clubId, pkg.feePerWindow, pkg.windows,
+      open.id, picked.id, club.clubId, pkgNo, pkg.feePerWindow, pkg.windows,
       JSON.stringify({ slot: 'naming', pkgName: pkg.pkgName, baseFee: fee, bonusAmount: pkg.bonusAmount, betAttend: pkg.betAttend, betFans: pkg.betFans, brandHeat: picked.heat }),
       expireAt, open.id, picked.id, club.clubId, occurrenceId,
     )

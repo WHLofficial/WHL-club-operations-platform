@@ -106,8 +106,16 @@ export function renderNotification(template: string, data: Record<string, unknow
     // 招商轮（v6.14.0，C3）：开轮定向递价汇总 / 接班合同转正生效
     case 'naming_offer':
       return `📣 招商期开启：${data.club} 收到 ${data.count} 份品牌报价（${data.brands}），去「冠名市场」查看签约。`;
-    case 'naming_offer_activated':
-      return `✅ 品牌接替生效：「${data.brand}」冠名 ${data.club} 正式生效（${data.pkgName}套餐，${data.feePerWindow}M/窗 × ${data.windows} 窗）。`;
+    case 'naming_offer_activated': {
+      // v6.51.0 批 1：合同快照的落点名「品牌·球场名」为空（无球场名/老合同）时回落现状文案；
+      // 批 2：尾附品牌署名行（有属地品牌带属地，无属地只署名）
+      const venuePart =
+        typeof data.venueName === 'string' && data.venueName !== ''
+          ? `「${data.venueName}」正式启用`
+          : `「${data.brand}」冠名 ${data.club} 正式生效`;
+      const sign = typeof data.hq === 'string' && data.hq !== '' ? `—— ${data.brand}（${data.hq}）` : `—— ${data.brand}`;
+      return `✅ 品牌接替生效：${venuePart}（${data.pkgName}套餐，${data.feePerWindow}M/窗 × ${data.windows} 窗）。\n${sign}`;
+    }
     // 消费中心（v6.26.0）：工单生效回执 / 拒绝退款
     case 'shop_order_approved':
       return `🛒 消费工单已生效：${data.summary}${data.note ? `（备注：${data.note}）` : ''}${data.external ? '（外部录入）' : ''}。`;
