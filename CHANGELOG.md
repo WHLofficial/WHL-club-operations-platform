@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.51.3] · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍（2026-10-16）
+## [v6.51.3] · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍 + 同城同前缀歧义保护（2026-10-16）
 
 **待发布（本地就绪 2026-10-16）**：判级 **patch**（同一能力的缺陷修补：库里中文队名 vs 截图英文队名必然对不上，识别结果被 400 拦下）；**零迁移 ⇒ 上线只需 push**、零生产写、前端零改动。
 
@@ -12,11 +12,11 @@
 
 **根因**：`src/worker/routes/admin/growth.ts` 的队名对侧只做同语言归一化等值/双向包含，而库里 `clubs.name` 是中文（生产 20 队全中文），FC26 截图上是英文真名（`OCR_PROMPT` 也要求照抄截图）。
 
-**交付**：① `OCR_PROMPT` —— `team` 字段要求输出中文队名，JSON 示例值改 `"team": "切尔西"`，并给一条映射示例（CHELSEA → 切尔西、FIORENTINA → 佛罗伦萨、FC BAYERN MÜNCHEN → 拜仁慕尼黑、RB LEIPZIG → RB莱比锡、REAL BETIS → 皇家贝蒂斯），无通行译名才照抄原文。② `src/core/growth-ocr.ts` 新增队名对侧纯函数 `teamNameKey`（折叠大小写/变音符 → 去空格标点 → 反复剥首尾 `rb/fc/ac/…/cpu` 前后缀）、`isSameTeamName`（先归一化逐字/互相包含，再比核心名；核心 <2 字符只认相等）、`matchOcrTeamSide`（先主后客，对不上回 null）。③ 端点改用 `matchOcrTeamSide`，**400 文案逐字不变**（模型不听话给英文名时仍是同一条 400）。
+**交付**：① `OCR_PROMPT` —— `team` 字段要求输出中文队名，JSON 示例值改 `"team": "切尔西"`，并给一条映射示例（CHELSEA → 切尔西、FIORENTINA → 佛罗伦萨、FC BAYERN MÜNCHEN → 拜仁慕尼黑、RB LEIPZIG → RB莱比锡、REAL BETIS → 皇家贝蒂斯），无通行译名才照抄原文。② `src/core/growth-ocr.ts` 新增队名对侧纯函数 `teamNameKey`（折叠大小写/变音符 → 去空格标点 → 反复剥首尾 `rb/fc/ac/…/cpu` 前后缀）、`teamNameMatchStrength`（**强度分层**：3 归一化逐字 / 2 核心名相等 / 1 归一化或核心名互相包含（≥2 字才认））、`isSameTeamName`、`matchOcrTeamSide`（强度高者胜出，两侧同强度回 `'ambiguous'`）。③ 端点改用 `matchOcrTeamSide`：对不上仍是原 400 文案（逐字不变）；新增歧义 400 ——「截图队名「X」这场两侧都像（A vs B），分不清主客——请换一张队名更完整的截图，或手动选边」。用户侧表现：该张图不出预填，识别报告区红字一行，手填与主/客切换不受影响。④ **歧义保护（应对同城同前缀的队，用户提出）**：「慕尼黑」对拜仁慕尼黑 vs 慕尼黑1860、「皇家」对皇家马德里 vs 皇家贝蒂斯都是同强度 ⇒ 不猜、也不默认主队；写全了则强度更高的一侧胜出（「国际米兰」3 胜「AC米兰」1；「米兰」按核心名相等 2 判给 AC米兰）。
 
-**实测（生产提示词 + 用户 4 张真图 + `glm-4v-flash`，探针 `%TEMP%/probe-ocr.mjs`）**：中文队名 **4/4 精确命中**（佛罗伦萨 ×2 / 切尔西 ×2，与库内逐字相同），**球员名保持英文缩写**（未被中文化），HTTP 200 / 12.1–16.3 s、usage in=3572、out 561–681、`finish_reason=stop`、JSON 可解析、rows 12；提示词 1555 → 1686 字符。**已否决**「把本场两个候选中文名写进提示词让模型二选一」：0/4 生效（模型照抄英文原文）—— 条件式指令在这档小模型上不可靠，直接给映射示例才有效。
+**实测（生产提示词 + 用户 4 张真图 + `glm-4v-flash`，探针 `%TEMP%/probe-ocr.mjs`）**：中文队名 **4/4 精确命中**（佛罗伦萨 ×2 / 切尔西 ×2，与库内逐字相同），**球员名保持英文缩写**（未被中文化），HTTP 200 / 12.1–16.3 s、usage in=3572、out 561–681、`finish_reason=stop`、JSON 可解析、rows 12；提示词 1555 → 1686 字符。**复测（歧义保护落地后同口径重跑）**：4/4 仍全中，耗时 15.8 / 14.1 / 15.3 / 15.2 s（平均 **15.1 s**，无一次重试），出参 654 / 651 / 681 / 645 tokens（占 1024 上限 63–67 %，有约 1/3 余量，12 行场景不会触顶），`finish_reason` 全为 `stop`；抽查一张门将页全文 JSON：`tab=goalkeeping` 页签识别正确、9 名首发 + 3 个 SUB（`rating: null`，规则被遵守）、门将自检 `saves 1 + goalsConceded 2 = shotsOnTarget 3` 成立、`selected: null`、评分与计数均为 JSON number、球员名英文。**已否决**「把本场两个候选中文名写进提示词让模型二选一」：0/4 生效（模型照抄英文原文）—— 条件式指令在这档小模型上不可靠，直接给映射示例才有效。
 
-**测试**：`tests/growth-ocr.test.ts` 新增 **TC-TEAM-01/02/03**（核心名 / 同队判定 / 落侧）；`tests/growth-ocr-endpoint.test.ts` 新增 **TC-EP-11**（出站提示词锁中文队名口径）、**TC-EP-12**（译名漂移 + CPU 尾标不再误报）、**TC-EP-13**（英文队名仍 400 且文案点名对阵）。闸门：`npm run typecheck` 0 error；`npx vitest run` **135 文件 / 2205 例全绿**（基线 135/2199）；`npm run build` ✓ 入口 `web/dist/assets/index-B68L41ic.js`（sha256 `e4b86fc99f0e4f5ecbb2e6f6d3cb0baaf42b68cdaa6420ae12e88f5c8cd18e44`，含版本串 `6.51.3`）。测试计划 `docs/test-plans/v6.51.3-ocr-team-name-chinese.md`。
+**测试**：`tests/growth-ocr.test.ts` 新增 **TC-TEAM-01/02/03/04/05**（核心名 / 同队判定 / 落侧强度择高 / 歧义保护（慕尼黑·皇家·米兰双雄）/ 强度分层）；`tests/growth-ocr-endpoint.test.ts` 新增 **TC-EP-11**（出站提示词锁中文队名口径）、**TC-EP-12**（译名漂移 + CPU 尾标不再误报）、**TC-EP-13**（英文队名仍 400 且文案点名对阵）、**TC-EP-14**（国际米兰 vs AC米兰 写全判对；只写「慕尼黑」两侧都像 ⇒ 400 报「分不清主客」）。闸门：`npm run typecheck` 0 error；`npx vitest run` **135 文件 / 2208 例全绿**（基线 135/2199，净 +9）；`npm run build` ✓ 入口 `web/dist/assets/index-B68L41ic.js`（sha256 `e4b86fc99f0e4f5ecbb2e6f6d3cb0baaf42b68cdaa6420ae12e88f5c8cd18e44`，含版本串 `6.51.3`；本版后端纯函数不参与前端打包，故入口不变）。测试计划 `docs/test-plans/v6.51.3-ocr-team-name-chinese.md`。
 
 **待核（未并本版）**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（事件结构草稿走文本模型 `LLM_MODEL`，上限未知）。
 

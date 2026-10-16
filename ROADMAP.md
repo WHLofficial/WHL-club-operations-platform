@@ -1520,7 +1520,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **待办（用户侧一次性操作）**：在赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（当前全 0 ⇒ 带带入的 stage 3/4 会被对账报为不一致、黄条常亮，属预期假阳性）；补账后黄条转健康，公开榜数值不应变化。
 
-## v6.51.3 · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍（2026-10-16）
+## v6.51.3 · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍 + 同城同前缀歧义保护（2026-10-16）
 
 **状态**：本地就绪待发布（2026-10-16）｜判级 **patch**（缺陷修补：中英队名对不上让识别必 400）｜**零迁移**（不改表）⇒ 上线只需 push（push 即触发 CF Workers Builds 自动部署）｜零生产写、前端零改动｜PRD 与 TECH_DESIGN 无需同步（识别口径微调，无规则/接口变化）。
 
@@ -1528,17 +1528,17 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **根因**：`src/worker/routes/admin/growth.ts:499-505` 的队名对侧只做同语言 `foldName` 等值/双向包含；库里 `clubs.name` 全中文（生产 20 队，无中文字符行数 0），截图是 FC26 英文真名。
 
-**交付**：① `OCR_PROMPT` —— `team` 改要中文队名（示例值 `"team": "切尔西"` + 一条映射示例 CHELSEA → 切尔西 / FIORENTINA → 佛罗伦萨 / FC BAYERN MÜNCHEN → 拜仁慕尼黑 / RB LEIPZIG → RB莱比锡 / REAL BETIS → 皇家贝蒂斯；无通行译名才照抄）；② `src/core/growth-ocr.ts` 新增 `teamNameKey` / `isSameTeamName` / `matchOcrTeamSide`（剥 `rb/fc/ac/…/cpu` 前后缀再比核心名；先主后客；宁缺勿错）；③ 端点改用 `matchOcrTeamSide`，400 文案逐字不变（模型给英文名仍是同一条 400）。
+**交付**：① `OCR_PROMPT` —— `team` 改要中文队名（示例值 `"team": "切尔西"` + 一条映射示例 CHELSEA → 切尔西 / FIORENTINA → 佛罗伦萨 / FC BAYERN MÜNCHEN → 拜仁慕尼黑 / RB LEIPZIG → RB莱比锡 / REAL BETIS → 皇家贝蒂斯；无通行译名才照抄）；② `src/core/growth-ocr.ts` 新增 `teamNameKey`（剥 `rb/fc/ac/…/cpu` 前后缀取核心名）、`teamNameMatchStrength`（强度分层 3 逐字 / 2 核心名相等 / 1 互相包含 ≥2 字）、`isSameTeamName`、`matchOcrTeamSide`（强度高者胜出；两侧同强度回 `'ambiguous'`）；③ 端点：对不上仍是原 400 文案（逐字不变），歧义另给 400「这场两侧都像（A vs B），分不清主客——请换一张队名更完整的截图，或手动选边」；④ **歧义保护（用户提出：愿国际米兰 / 现拜仁慕尼黑 vs 慕尼黑1860）** —— 「慕尼黑」「皇家」这类片段两侧同强度不猜、不默认主队；写全则强度高者胜（「国际米兰」3 胜「AC米兰」1；只写「米兰」按核心名相等 2 判给 AC米兰）。
 
-**验收（真实模型实测 + 闸门）**：探针 `%TEMP%/probe-ocr.mjs`（生产提示词 + `E:\成长录入图` 4 张图 + `glm-4v-flash` + `max_tokens 1024`）：**4/4 HTTP 200、中文队名精确命中**（佛罗伦萨 ×2 / 切尔西 ×2）、球员名保持英文缩写、`finish_reason=stop`、rows 12、12.1–16.3 s、usage in=3572 out 561–681；**候选名二选一变体 0/4 已否决**（条件式指令在这档小模型不可靠）。`npm run typecheck` 0 error；`npx vitest run` **135 文件 / 2205 例全绿**（基线 135/2199，净 +6 = TC-TEAM-01/02/03 + TC-EP-11/12/13）；`npm run build` ✓ 入口 `web/dist/assets/index-B68L41ic.js`（663,283 B / gzip 210.86 kB，sha256 `e4b86fc99f0e4f5ecbb2e6f6d3cb0baaf42b68cdaa6420ae12e88f5c8cd18e44`，含版本串 `6.51.3`；CSS 入口 `index-G3fpYeiH.css` 未变）。测试计划 `docs/test-plans/v6.51.3-ocr-team-name-chinese.md`。
+**验收（真实模型实测 + 闸门）**：探针 `%TEMP%/probe-ocr.mjs`（生产提示词 + `E:\成长录入图` 4 张图 + `glm-4v-flash` + `max_tokens 1024`）：**4/4 HTTP 200、中文队名精确命中**（佛罗伦萨 ×2 / 切尔西 ×2）、球员名保持英文缩写、`finish_reason=stop`、rows 12、12.1–16.3 s、usage in=3572 out 561–681；**候选名二选一变体 0/4 已否决**（条件式指令在这档小模型不可靠）。**歧义保护落地后复测（同口径重跑）**：4/4 仍全中，15.8 / 14.1 / 15.3 / 15.2 s（平均 **15.1 s**）、出参 654 / 651 / 681 / 645 tokens（占 1024 上限 **63–67 %**，12 行场景留约 1/3 余量）、`finish_reason` 全 `stop`；抽查门将页全文 JSON：页签 `goalkeeping` 正确、9 首发 + 3 SUB（`rating: null`）、门将自检 `1 + 2 = 3` 成立、`selected: null`、数字均为 JSON number。`npm run typecheck` 0 error；`npx vitest run` **135 文件 / 2208 例全绿**（基线 135/2199，净 +9 = TC-TEAM-01/02/03/04/05 + TC-EP-11/12/13/14）；`npm run build` ✓ 入口 `web/dist/assets/index-B68L41ic.js`（663,283 B / gzip 210.86 kB，sha256 `e4b86fc99f0e4f5ecbb2e6f6d3cb0baaf42b68cdaa6420ae12e88f5c8cd18e44`，含版本串 `6.51.3`；CSS 入口 `index-G3fpYeiH.css` 未变；后端纯函数不入前端包 ⇒ 复测后入口仍是同一份）。测试计划 `docs/test-plans/v6.51.3-ocr-team-name-chinese.md`。
 
 **抖动登记**：首轮全量 1 例与本次改动无关的失败（`web/src/pages/PlayersLibrary.test.tsx:540` 的 `inert` 断言，jsdom 时序），单文件复跑 39/39 绿、第二轮全量全绿 ⇒ 既有偶发。
 
 **待核（未并本版）**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
 
-**本地提交**：`fbef7d6` fix(worker) + `e381f50` chore 版本号 + docs 条目枚（本提交，2026-10-16）。
+**本地提交**：`fbef7d6` fix(worker) + `e381f50` chore 版本号 + `deb4ec7` docs + `5d2c968` fix(worker)（歧义保护）+ docs 歧义回写枚（本提交，2026-10-16）。
 
-**留待补**：英文名兜底映射表（`web/assets/ref/team.json` 696 项 ↔ `clubs.id`）—— 有意不做（多一份真名漂移源）；若日后模型偶发不听话（返回英文名仍 400），再评估落表。另：用户侧验收（4 张图各跑一次识别）待上线后执行。
+**留待补**：英文名兜底映射表（`web/assets/ref/team.json` 696 项 ↔ `clubs.id`）—— 有意不做（多一份真名漂移源）；若日后模型偶发不听话（返回英文名仍 400），再评估落表。歧义片段（只写「慕尼黑」这类）当前只能报 400 让用户手填 —— 后续若要更顺，可让端点在 400 body 里带 `candidates`，前端给「这张图是哪支」二选一按钮。另：用户侧验收（4 张图各跑一次识别）待上线后执行。
 
 ## v6.51.2 · 视觉识别 max_tokens 订正：缺省 1024 + `LLM_VISION_MAX_TOKENS` 可配 + 截断明确报错（2026-10-16）
 
