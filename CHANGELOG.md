@@ -6,7 +6,7 @@
 
 ## [v6.51.4] · 截图识别三修：认人容忍「姓+首字母」形态 + 视觉模型换 glm-4.6v-flashx 且默认关思考 + 「不保存，继续」真丢草稿（2026-10-16）
 
-**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一条链上的缺陷修补：认人误报 / 模型额度与耗时 / 丢弃草稿没丢）；**零迁移 ⇒ 无需 apply**；生产视觉模型与 max_tokens 已随 `wrangler secret put` 生效（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b`、`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3`）。
+**已上线（2026-10-16）**：判级 **patch**（同一条链上的缺陷修补：认人误报 / 模型额度与耗时 / 丢弃草稿没丢）；**零迁移 ⇒ 无需 apply**，push `e04c478..dff7fd9`（5 个提交）触发 CF Workers Builds 自动部署 Version `85f2f272-22a3-40ae-a2d3-fdb99465fda6`（@2026-10-16T12:08:19Z）；回读：`/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-Cy37Jlw2.js`（sha256 `1008a0c1fa029ee7878f2cdffd7c207687735200dfbba0d43a4d559b80eff0f5`）与本地逐字节一致、`assets/GrowthEntryPage-BVTD6iRd.js`（sha256 `7b7f2eaaf401342d9ddd30108f4c752379c1053e61ebac31be1a2b6ef8976d66`）亦逐字节一致、匿名 OCR 端点 401；生产视觉模型与 max_tokens 已随 `wrangler secret put` 生效（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b`、`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3`）。
 
 **缘起（用户）**：① 「1修」（先修认人）——4 张真图共 12 行「认人失败」里 7 行其实是库里写法与截图写法不一致；② 「顺便把模型改成 GLM-4.6V-FlashX，现在有额度了」（随后更正「flashx，不是 flash 那个免费模型」，并要求「应该先试图获取 model 元数据列表」）；③ 报 bug「点击不保存，继续后没有丢弃未保存改动」；④ 要账单估算与「怎么把输入压到 32K 以下」。
 

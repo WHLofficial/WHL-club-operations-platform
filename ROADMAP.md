@@ -1524,7 +1524,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.51.4 · 截图识别三修：认人容忍「姓+首字母」形态 + 视觉模型换 glm-4.6v-flashx 且默认关思考 + 「不保存，继续」真丢草稿（2026-10-16）
 
-**状态**：**本地就绪待发布**（判级 **patch**：同一链上的缺陷修补；**零迁移**（不改表）⇒ 上线只需 push，push 即触发 CF Workers Builds 自动部署）｜**生产 secret 已切**（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b` @2026-10-16T11:48:57Z；`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3` @11:49:40Z）⇒ 线上（v6.51.3 代码）此刻起已用 flashx 识别，只差「关思考」随本版代码上线｜PRD 与 TECH_DESIGN 无需同步（识别口径与端点形状未变；新增的 `thinking` 字段与 `LLM_VISION_THINKING` 是出站参数）。
+**状态**：**已上线 2026-10-16**（判级 **patch**：同一链上的缺陷修补；**零迁移**（不改表）⇒ 上线只需 push，push `e04c478..dff7fd9`（5 枚）即触发 CF Workers Builds 自动部署 Version `85f2f272-22a3-40ae-a2d3-fdb99465fda6` @2026-10-16T12:08:19Z；回读 `/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-Cy37Jlw2.js` 与 `assets/GrowthEntryPage-BVTD6iRd.js` sha256 与本地逐字节一致、匿名 OCR 端点 401）｜**生产 secret 早于代码切换**（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b` @2026-10-16T11:48:57Z；`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3` @11:49:40Z）｜PRD 与 TECH_DESIGN 无需同步（识别口径与端点形状未变；新增的 `thinking` 字段与 `LLM_VISION_THINKING` 是出站参数）。
 
 **缘起（用户）**：① 4 张真图的质量反馈（12 行认人失败 / 4 行模型读错）→ 用户裁决「**1修**」（只做匹配器形态容忍，「2 暂时不做」拼写容错层）；② 同一条消息里追加「**顺便把模型改成 GLM-4.6V-FlashX，现在有额度了**」，随后更正「flashx，不是 flash 那个免费模型」，并要求「**应该先试图获取 model 元数据列表**」；③ 新报 bug「**点击不保存，继续后没有丢弃未保存改动**」；④ 追问「max-tokens 是 128k，低于 32k 的输入会便宜一半，所以请告诉我如何把当前输入压低一些到 32k 以下」与「这段改完后账单大概多少钱」（用户侧账单估算）。
 
