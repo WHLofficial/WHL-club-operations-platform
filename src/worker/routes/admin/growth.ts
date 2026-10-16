@@ -433,6 +433,7 @@ const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎
 输出结构（键名逐字一致；下面的示例值就是应输出的类型——数字字段输出 JSON number，禁止加引号变字符串）：
 {
   "team": "切尔西",
+  "teamRaw": "CHELSEA",
   "tab": "summary",
   "rows": [
     { "pos": "ST", "name": "H. Kane", "rating": 7.8, "goals": 2, "assists": 0 },
@@ -452,13 +453,14 @@ const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎
   "notes": ""
 }
 team 字段写该队的中文名（CHELSEA → 切尔西、FIORENTINA → 佛罗伦萨、FC BAYERN MÜNCHEN → 拜仁慕尼黑、RB LEIPZIG → RB莱比锡、REAL BETIS → 皇家贝蒂斯）；没有通行中文译名时才照抄截图上的原文。
+teamRaw 字段照抄截图上该队队名的原文（逐字复制，不翻译、不改大小写；看不清就填 null）——它只用来给用户核对传图对不对，别拿它替换 team。
 
 规则：
 1. rows 输出左表可见的行，按图内顺序；表格带滚动条时，滚动条外的行绝不编造。
 2. 每行必须包含全部五个键：替补（SUB）行 rating 填 null，goals/assists 填 0。
 3. tab=summary 时填 selected、gk 置 null；tab=goalkeeping 时填 gk、selected 置 null；其它页签两者都置 null。rows 与页签无关，任何页签都要完整输出。
 4. 详情区每个指标都有两列数字：左列是球员本人，右列是全队平均；一律取左列。
-5. rating/gkRating 是一位小数（如 7.8）；goals/assists 及 gk 各项是整数；数字字段一律输出 JSON number（7.8 而不是 "7.8"），只有 pos/name/team/tab/notes 是字符串。
+5. rating/gkRating 是一位小数（如 7.8）；goals/assists 及 gk 各项是整数；数字字段一律输出 JSON number（7.8 而不是 "7.8"），只有 pos/name/team/teamRaw/tab/notes 是字符串。
 6. 所有数字严格按图，不做任何推算。
 7. 自检：goalkeeping 页签必须满足 Saves + Goals Conceded = Shots On Target；读到的数若不满足，先重读一遍图；重读后仍不满足就照实输出并在 notes 说明——绝不为了凑等式改数字。`;
 
@@ -483,8 +485,12 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
   if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认或弃权场次）');
 
-  const body = (await readJson(c)) as { image?: unknown } | null;
+  const body = (await readJson(c)) as { image?: unknown; side?: unknown } | null;
   if (typeof body?.image !== 'string' || body.image === '') throw new HttpError(400, '缺 image（截图的 base64）');
+  // v6.51.3：歧义时前端从提示里带 side 重发同一张图 —— 用户直接指定主客，不再走队名匹配
+  if (body.side !== undefined && body.side !== 'home' && body.side !== 'away')
+    throw new HttpError(400, 'side 只能是 home 或 away（省略则按截图队名自动判断）');
+  const forcedSide: 'home' | 'away' | null = body.side === 'home' || body.side === 'away' ? body.side : null;
   const image = decodeOcrImage(body.image);
 
   // 视觉调用（未配置 503 / 失败 502 都由 llmVisionJson 抛）
@@ -498,12 +504,21 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
 
   // 截图队名 → 本场两侧（v6.51.3：提示词要求模型给中文队名；比对见 core/growth-ocr 的 matchOcrTeamSide，
   // 归一化等值/包含之外还容忍俱乐部前后缀与 CPU 尾标的漂移）；CPU 队名一样能对上（认人靠花名册，CPU 侧花名册为空）
-  // v6.51.3 起两侧一样像（同城同名片段，如「慕尼黑」对拜仁慕尼黑与慕尼黑1860）判歧义、不默认主队
-  const side = matchOcrTeamSide(ocr.team, row.home_team, row.away_team);
-  if (side === 'ambiguous') {
-    throw new HttpError(400, `截图队名「${ocr.team}」这场两侧都像（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），分不清主客——请换一张队名更完整的截图，或手动选边`);
+  // v6.51.3 起两侧一样像（同城同名片段，如「慕尼黑」对拜仁慕尼黑与慕尼黑1860）判歧义、不默认主队：
+  // 回 code=ocr_team_ambiguous，前端拿这条文案（里面有 teamRaw 原文）显示提示 + 主队/客队/取消三颗按钮。
+  // 提示优先给模型照抄的截图原文，中文识别结果括注在后 —— 英文原文才是用户核对「传错图没」的锚点
+  const shownTeam = ocr.teamRaw ?? ocr.team ?? '未识别';
+  const shownZh = ocr.teamRaw && ocr.team && ocr.team !== ocr.teamRaw ? `（识别为「${ocr.team}」）` : '';
+  const matched = forcedSide ?? matchOcrTeamSide(ocr.team, row.home_team, row.away_team);
+  if (matched === 'ambiguous') {
+    throw new HttpError(
+      400,
+      `截图队名「${shownTeam}」${shownZh}这场两侧都像（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），分不清主客——请点按钮选边，或换一张队名更完整的截图`,
+      'ocr_team_ambiguous',
+    );
   }
-  if (!side) throw new HttpError(400, `截图队名「${ocr.team ?? '未识别'}」对不上这场比赛（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），确认传对图了吗`);
+  if (!matched) throw new HttpError(400, `截图队名「${shownTeam}」${shownZh}对不上这场比赛（${row.home_team ?? '?'} vs ${row.away_team ?? '?'}），确认传对图了吗`);
+  const side: 'home' | 'away' = matched;
 
   const resolved = await resolveEntrySide(c.env.DB, side === 'home' ? row.home_team : row.away_team, new Map());
   const roster: OcrRosterPlayer[] =

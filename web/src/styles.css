@@ -1895,6 +1895,21 @@ table.matches-table-narrow .rating-badge {
   font-size: 12px;
 }
 
+/* v6.51.3 歧义待选：队名分不清主客时的一行提示 + 主队 / 客队 / 取消 */
+.entry-ocr-choice {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.entry-ocr-choice p {
+  margin: 0;
+  font-size: 12px;
+}
+
 /* 未保存改动确认条：plugin fixtures 同语义（继续编辑 / 放弃改动） */
 .entry-confirm {
   display: flex;

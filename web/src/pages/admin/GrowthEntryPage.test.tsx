@@ -371,4 +371,89 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     expect(cell(0, 9).textContent).toBe('0');
     expect(cell(0, 0).textContent).toContain('不计 XP'); // 行首标记：告诉管理组这场录了也不产 XP
   });
+
+  /** 上传一张图（ocrInputRef 藏在面板里的 file input） */
+  function pickFile(name = 'a.png') {
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { value: [new File(['x'], name, { type: 'image/png' })], configurable: true });
+    fireEvent.change(input);
+  }
+
+  it('TC-ENTRY-E8 队名歧义（v6.51.3）：提示带模型读到的英文原文 + 主队/客队/取消三颗按钮，选边用同一张图续跑', async () => {
+    const calls: { body: { image?: string; side?: string } }[] = [];
+    const responses = [
+      new Response(
+        JSON.stringify({
+          error:
+            '截图队名「FC BAYERN MÜNCHEN」（识别为「慕尼黑」）这场两侧都像（海港联 vs 北岸城），分不清主客——请点按钮选边，或换一张队名更完整的截图',
+          code: 'ocr_team_ambiguous',
+        }),
+        { status: 400 },
+      ),
+      new Response(
+        JSON.stringify({
+          team: '北岸城',
+          side: 'away',
+          kind: 'summary',
+          entries: [{ playerId: 20, name: 'Q. Qian', position: 'GK', draft: { appearance: true, rating: 6.4 }, matched: 'official' }],
+          unmatched: [],
+          warnings: [],
+        }),
+        { status: 200 },
+      ),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+        calls.push({ body: JSON.parse(String(init?.body)) as { image?: string; side?: string } });
+        return responses.shift() as Response;
+      }),
+    );
+
+    renderPage();
+    await openEdit();
+    pickFile();
+
+    // 提示行带英文原文；三颗按钮：两侧各一颗 + 取消（确实传错时用）
+    expect(await screen.findByText(/FC BAYERN MÜNCHEN/)).toBeTruthy();
+    expect(panelButton('主队 海港联')).toBeTruthy();
+    expect(panelButton('客队 北岸城')).toBeTruthy();
+    expect(panelButton('取消（这张图不预填）')).toBeTruthy();
+    // 歧义不算失败：报告条不落红字
+    expect(document.querySelector('.entry-ocr-report')?.className).not.toContain('bad-text');
+
+    fireEvent.click(panelButton('客队 北岸城'));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].body.side).toBe('away');
+    expect(calls[1].body.image).toBe(calls[0].body.image); // 同一张图重发，不用重选文件
+    expect(await screen.findByText(/按客队 北岸城/)).toBeTruthy();
+  });
+
+  it('TC-ENTRY-E9 确实传错图时点「取消」：不预填、不再打服务端、提示留在报告区', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        return new Response(
+          JSON.stringify({
+            error: '截图队名「CHELSEA」这场两侧都像（海港联 vs 北岸城），分不清主客——请点按钮选边，或换一张队名更完整的截图',
+            code: 'ocr_team_ambiguous',
+          }),
+          { status: 400 },
+        );
+      }),
+    );
+
+    renderPage();
+    await openEdit();
+    pickFile();
+    await screen.findByText(/分不清主客/);
+    fireEvent.click(panelButton('取消（这张图不预填）'));
+
+    expect(await screen.findByText(/已取消，这张图不预填/)).toBeTruthy();
+    expect(document.querySelector('.entry-ocr-choice')).toBeNull(); // 待选行收掉
+    expect(calls).toBe(1); // 取消不再打服务端
+    expect(cellInput(0, 3)?.value ?? '').toBe('8'); // 手填的评分原样不动
+  });
 });

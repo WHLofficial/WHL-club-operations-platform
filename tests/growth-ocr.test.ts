@@ -99,6 +99,15 @@ describe('TC-OCR 识别回包解析', () => {
     expect(errors).toHaveLength(3);
   });
 
+  it('TC-OCR-05 teamRaw 原文字段（v6.51.3）：照抄收下，缺失 / 空白 / 非字符串回 null', () => {
+    expect(parseOcrVision({ tab: 'summary', team: '慕尼黑', teamRaw: 'FC BAYERN MÜNCHEN', rows: [] }).ocr!.teamRaw).toBe(
+      'FC BAYERN MÜNCHEN',
+    );
+    expect(parseOcrVision({ tab: 'summary', team: '慕尼黑', rows: [] }).ocr!.teamRaw).toBeNull();
+    expect(parseOcrVision({ tab: 'summary', team: '慕尼黑', teamRaw: '   ', rows: [] }).ocr!.teamRaw).toBeNull();
+    expect(parseOcrVision({ tab: 'summary', team: '慕尼黑', teamRaw: 7, rows: [] }).ocr!.teamRaw).toBeNull();
+  });
+
   it('TC-OCR-02b extractJsonObject：围栏 + 前后闲话里捞 JSON；捞不出回 null', () => {
     const fenced = '好的，结果如下：\n```json\n' + JSON.stringify(summaryRaw) + '\n```\n以上就是全部内容。';
     expect(extractJsonObject(fenced)).toEqual(summaryRaw);
@@ -203,6 +212,7 @@ describe('TC-DRAFT 识别结果 → 预填草稿', () => {
 describe('TC-XCHK 识别结果 × 比分交叉校验', () => {
   const base: OcrVision = {
     team: '海港联',
+    teamRaw: null,
     tab: 'summary',
     rows: [
       { pos: 'ST', name: '甲', rating: 9, goals: 2, assists: 0 },

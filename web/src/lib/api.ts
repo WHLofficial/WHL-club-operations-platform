@@ -2284,9 +2284,13 @@ export interface MatchOcrResult {
   warnings: string[];
 }
 
-/** 赛后截图识别预填（不写库；image 传不带 data: 前缀的 base64） */
-export async function ocrMatchEntry(matchId: number, imageBase64: string): Promise<MatchOcrResult> {
-  return apiPost<MatchOcrResult>(`/api/admin/growth/match-entry/${matchId}/ocr`, { image: imageBase64 });
+/** 赛后截图识别预填（不写库；image 传不带 data: 前缀的 base64）。
+ *  v6.51.3：队名分不清主客时服务端回 400 code=ocr_team_ambiguous；同一张图带上 side 重发即跳过队名匹配。 */
+export async function ocrMatchEntry(matchId: number, imageBase64: string, side?: 'home' | 'away'): Promise<MatchOcrResult> {
+  return apiPost<MatchOcrResult>(
+    `/api/admin/growth/match-entry/${matchId}/ocr`,
+    side ? { image: imageBase64, side } : { image: imageBase64 },
+  );
 }
 
 // ---- M0 货币监控（PRD：Σ俱乐部余额报表，观察通胀） ----

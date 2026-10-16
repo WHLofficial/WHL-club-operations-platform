@@ -302,6 +302,9 @@ describe('TC-EP 截图识别端点', () => {
     expect(text).toContain('team 字段写该队的中文名');
     expect(text).toContain('CHELSEA → 切尔西');
     expect(text).toContain('"team": "切尔西"');
+    // v6.51.3：歧义提示要显示截图上的英文原文 ⇒ 提示词得有 teamRaw
+    expect(text).toContain('"teamRaw": "CHELSEA"');
+    expect(text).toContain('teamRaw 字段照抄截图上该队队名的原文');
   });
 
   it('TC-EP-12 队名漂移容忍：译名差异/CPU 尾标不再误报「对不上这场比赛」', async () => {
@@ -348,10 +351,43 @@ describe('TC-EP 截图识别端点', () => {
     captureVision(JSON.stringify({ ...summaryPayload, team: '慕尼黑' }));
     const res3 = await sendOcr(amb, { image: PNG_B64 });
     expect(res3.status).toBe(400);
-    const err = ((await res3.json()) as { error: string }).error;
-    expect(err).toContain('慕尼黑');
-    expect(err).toContain('拜仁慕尼黑');
-    expect(err).toContain('慕尼黑1860');
-    expect(err).toContain('分不清主客');
+    const body3 = (await res3.json()) as { error: string; code?: string };
+    expect(body3.code).toBe('ocr_team_ambiguous');
+    expect(body3.error).toContain('慕尼黑');
+    expect(body3.error).toContain('拜仁慕尼黑');
+    expect(body3.error).toContain('慕尼黑1860');
+    expect(body3.error).toContain('分不清主客');
+  });
+
+  it('TC-EP-15 歧义可带 side 直通：同一张图指定主客即跳过队名匹配；非法 side 400', async () => {
+    // 点「客队 慕尼黑1860」＝原图带 side 重发：模型给的是片段「慕尼黑」也照走，不再比队名
+    const amb = seededTeams('拜仁慕尼黑', '慕尼黑1860');
+    captureVision(JSON.stringify({ ...summaryPayload, team: '慕尼黑', teamRaw: 'FC BAYERN MÜNCHEN' }));
+    const res = await sendOcr(amb, { image: PNG_B64, side: 'away' });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as OcrResponse).side).toBe('away');
+
+    // 模型没听话给英文队名（本来会 400 对不上）也能靠 side 救回
+    const fx = seeded();
+    captureVision(JSON.stringify({ ...summaryPayload, team: 'CHELSEA' }));
+    const res2 = await sendOcr(fx, { image: PNG_B64, side: 'home' });
+    expect(res2.status).toBe(200);
+    expect(((await res2.json()) as OcrResponse).side).toBe('home');
+
+    mockVision(JSON.stringify(summaryPayload));
+    const bad = await sendOcr(seeded(), { image: PNG_B64, side: 'Home' });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toContain('side 只能是 home 或 away');
+  });
+
+  it('TC-EP-16 歧义文案带英文原文（teamRaw）：提示里显示截图上那个队名', async () => {
+    mockVision(JSON.stringify({ ...summaryPayload, team: '慕尼黑', teamRaw: 'FC BAYERN MÜNCHEN' }));
+    const res = await sendOcr(seededTeams('拜仁慕尼黑', '慕尼黑1860'), { image: PNG_B64 });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; code?: string };
+    expect(body.code).toBe('ocr_team_ambiguous');
+    expect(body.error).toContain('FC BAYERN MÜNCHEN');
+    expect(body.error).toContain('识别为「慕尼黑」');
+    expect(body.error).toContain('分不清主客');
   });
 });

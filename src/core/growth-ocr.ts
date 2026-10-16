@@ -2,7 +2,8 @@
 // 纯函数、零 IO——模型调用在 src/lib/llm.ts，DB 与端点在 src/worker/routes/admin/growth.ts。
 // 识别语义（用户裁决）：RR→评分（<7.0 不给 XP ⇒ 只预填出场）；GK 面板→扑救/失球；
 // 夺回球权图上看不到 ⇒ 保持手填；防守球员认定 = 手填夺回球权（含 0）。
-// v6.51.3：队名对侧（matchOcrTeamSide）——模型按提示词给中文队名，比对容忍前后缀与 CPU 尾标的漂移。
+// v6.51.3：队名对侧（matchOcrTeamSide）——模型按提示词给中文队名，比对容忍前后缀与 CPU 尾标的漂移；
+//   两侧一样像（「慕尼黑」对拜仁慕尼黑与慕尼黑1860）不猜：端点回 code=ocr_team_ambiguous，前端拿 teamRaw 显示截图原文再让用户选边。
 import { foldName } from './name-fold.ts';
 
 export type OcrKind = 'summary' | 'goalkeeping';
@@ -35,6 +36,8 @@ export interface OcrGk {
 
 export interface OcrVision {
   team: string | null;
+  /** v6.51.3：模型照抄的截图队名原文（英文，如 CHELSEA）；歧义提示里显示「截图上是这个」，缺失为 null */
+  teamRaw: string | null;
   tab: OcrKind | null;
   rows: OcrRow[];
   selected: OcrSelected | null; // tab = summary 时有值
@@ -144,7 +147,7 @@ export function parseOcrVision(raw: unknown): { ocr: OcrVision | null; errors: s
       }
     : null;
 
-  return { ocr: { team: asText(raw.team), tab, rows, selected, gk }, errors };
+  return { ocr: { team: asText(raw.team), teamRaw: asText(raw.teamRaw), tab, rows, selected, gk }, errors };
 }
 
 export interface OcrMatchResult {

@@ -5,6 +5,7 @@ import { Fragment, useEffect, useRef, useState, type ChangeEvent, type ReactNode
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ApiError,
   COMPETITION_TYPE_LABEL,
   type MatchEntryInput,
   type MatchEntryListItem,
@@ -30,6 +31,16 @@ import EmptyState from '../../components/EmptyState.tsx';
 
 type Side = 'home' | 'away';
 type Mode = 'edit' | 'view';
+
+/** v6.51.3：队名分不清主客的一张图（服务端回 400 code=ocr_team_ambiguous）——留图等用户选边或取消 */
+interface OcrPending {
+  /** 本轮上传里的第 i 张（0 基），提示行按 key + 1 报张号 */
+  key: number;
+  /** 这张图的 base64：选边后原样重发，不再要用户重选文件 */
+  image: string;
+  /** 服务端 400 文案：内含模型照抄的截图英文队名（teamRaw）与本场两侧 */
+  message: string;
+}
 
 /** v6.21.0 窄屏卡片流断点：与 styles.css 管理端 ≤760 媒体块同档，也与 AdminLayout 抽屉断点一致 */
 const ENTRY_CARDS_QUERY = '(max-width: 760px)';
@@ -645,6 +656,8 @@ function EntryPanel({
   // v6.43.1 截图识别：一个入口多选上传，busy 带进度（第 i/n 张），report 常驻展示在工具栏下（比 toast 更耐看——警告多行）
   const [ocrBusy, setOcrBusy] = useState<null | { done: number; total: number }>(null);
   const [ocrReport, setOcrReport] = useState<{ ok: boolean; lines: string[] } | null>(null);
+  // v6.51.3 歧义待选：识别成功但队名分不清主客时不失败也不猜 —— 提示 +「主队 / 客队 / 取消」三颗按钮
+  const [ocrChoices, setOcrChoices] = useState<OcrPending[]>([]);
   const ocrInputRef = useRef<HTMLInputElement | null>(null);
   const builtRef = useRef<string | null>(null);
   // rows 的同步镜像：截图识别要等 13-90 秒，期间管理员可能手填格子——
@@ -729,12 +742,15 @@ function EntryPanel({
   async function runOcr(files: File[]) {
     if (ocrBusy !== null || rowsRef.current === null || files.length === 0) return;
     setOcrReport(null);
+    setOcrChoices([]);
     const lines: string[] = [];
+    const pending: OcrPending[] = [];
     let okCount = 0;
     for (let i = 0; i < files.length; i += 1) {
       setOcrBusy({ done: i, total: files.length });
+      let image = '';
       try {
-        const image = await fileToBase64(files[i]);
+        image = await fileToBase64(files[i]);
         const res = await ocrMatchEntry(match.matchId, image);
         const target: Side = res.side;
         // 合并基底取 rowsRef（等待识别期间的手填与上一张的预填都在里面），不用闭包快照
@@ -755,11 +771,50 @@ function EntryPanel({
         }
         for (const w of res.warnings) lines.push(w);
       } catch (err) {
-        lines.push(`第 ${i + 1} 张识别失败：${err instanceof Error ? err.message : '未知错误'}`);
+        // 队名歧义（v6.51.3）不是失败：不落红字，改成提示 + 三颗按钮，选完用这张图带 side 续跑
+        if (err instanceof ApiError && err.code === 'ocr_team_ambiguous') {
+          pending.push({ key: i, image, message: err.message });
+        } else {
+          lines.push(`第 ${i + 1} 张识别失败：${err instanceof Error ? err.message : '未知错误'}`);
+        }
       }
     }
     setOcrBusy(null);
-    setOcrReport({ ok: okCount > 0, lines });
+    setOcrChoices(pending);
+    setOcrReport({ ok: okCount > 0 || pending.length > 0, lines });
+  }
+
+  /** v6.51.3 歧义待选收尾：side=null 表示这张确实传错了，取消掉不预填（其余图不受影响） */
+  async function resolveOcrChoice(choice: OcrPending, side: Side | null) {
+    setOcrChoices((prev) => prev.filter((c) => c.key !== choice.key));
+    if (side === null) {
+      setOcrReport((prev) => ({
+        ok: true,
+        lines: [...(prev?.lines ?? []), `第 ${choice.key + 1} 张：已取消，这张图不预填（其余图不受影响）`],
+      }));
+      return;
+    }
+    try {
+      const res = await ocrMatchEntry(match.matchId, choice.image, side);
+      if (!rowsRef.current) return;
+      const merged = mergeOcrEntries(rowsRef.current[side], res.entries, sideConcededOf(match, side), !noXp);
+      setRowsTracked((prev) => (prev ? { ...prev, [side]: merged.rows } : prev));
+      setSide(side);
+      const team = side === 'home' ? match.homeTeam : match.awayTeam;
+      const kindLabel = res.kind === 'goalkeeping' ? '门将页' : 'Summary';
+      setOcrReport((prev) => ({
+        ok: true,
+        lines: [
+          ...(prev?.lines ?? []),
+          `第 ${choice.key + 1} 张（按${side === 'home' ? '主队' : '客队'} ${team} · ${kindLabel}）：预填 ${merged.applied} 格`,
+        ],
+      }));
+    } catch (err) {
+      setOcrReport((prev) => ({
+        ok: prev?.ok ?? false,
+        lines: [...(prev?.lines ?? []), `第 ${choice.key + 1} 张识别失败：${err instanceof Error ? err.message : '未知错误'}`],
+      }));
+    }
   }
 
   function onOcrPick(e: ChangeEvent<HTMLInputElement>) {
@@ -990,6 +1045,22 @@ function EntryPanel({
             <div className={`entry-ocr-report${ocrReport.ok ? '' : ' bad-text'}`}>
               {ocrReport.lines.map((l, i) => (
                 <p key={i}>{l}</p>
+              ))}
+              {ocrChoices.map((ch) => (
+                <div key={ch.key} className="entry-ocr-choice">
+                  <p>
+                    第 {ch.key + 1} 张：{ch.message}
+                  </p>
+                  <button type="button" className="btn btn-sm" onClick={() => void resolveOcrChoice(ch, 'home')}>
+                    主队 {match.homeTeam}
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={() => void resolveOcrChoice(ch, 'away')}>
+                    客队 {match.awayTeam}
+                  </button>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => void resolveOcrChoice(ch, null)}>
+                    取消（这张图不预填）
+                  </button>
+                </div>
               ))}
             </div>
           )}
