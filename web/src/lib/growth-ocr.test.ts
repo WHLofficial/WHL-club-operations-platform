@@ -53,22 +53,39 @@ describe('TC-FE 识别条目 → 行草稿合并', () => {
     expect(res.rows[2].appearance.checked).toBe(true);
   });
 
-  it('TC-FE-03 零封联动：失球 0 → 未锁门将自动勾并计数；失球>0 不动；已勾/已锁不重复计', () => {
-    const gkFree = row(10, { position: 'GK' });
-    const gkChecked = row(11, { position: 'GK', cleanSheet: { checked: true, locked: false } });
-    const gkLocked = row(12, { position: 'GK', cleanSheet: { checked: false, locked: true } });
-    const outfield = row(13, { position: 'ST' });
+  it('TC-FE-03 v6.51.7 零封联动只看图里的门将：图里识别到且失球 0 ⇒ 勾；没出现在图里/已勾/已锁/停赛都不动', () => {
+    const rows = [
+      row(10, { position: 'GK' }), // 这张图识别到 ⇒ 勾
+      row(11, { position: 'GK' }), // 替补门将：没出现在图里 ⇒ 不猜（v6.51.7 收口）
+      row(12, { position: 'GK', cleanSheet: { checked: true, locked: false } }), // 已勾不重复计
+      row(13, { position: 'GK', cleanSheet: { checked: false, locked: true } }), // 已录锁定不动
+      row(14, { position: 'GK', suspended: { reason: 'red', total: 2, serving: 1 } }),
+      row(15, { position: 'ST' }),
+    ];
+    const entries = [
+      entry(10, '甲', { appearance: true, rating: 5.1 }),
+      entry(12, '丙', { appearance: true, rating: 6 }),
+      entry(13, '丁', { appearance: true, rating: 5 }),
+      entry(14, '戊', { appearance: true, rating: 4 }),
+      entry(15, '己', { appearance: true, rating: 7 }),
+    ];
 
-    const zero = mergeOcrEntries([gkFree, gkChecked, gkLocked, outfield], [], 0);
+    const zero = mergeOcrEntries(rows, entries, 0);
     expect(zero.cleanSheetSide).toBe(true);
     expect(zero.rows[0].cleanSheet.checked).toBe(true);
-    expect(zero.rows[1].cleanSheet.checked).toBe(true);
-    expect(zero.rows[2].cleanSheet.checked).toBe(false); // 锁定不动
-    expect(zero.rows[3].cleanSheet.checked).toBe(false); // 外场不联动（防守球员认定靠手填夺回球权）
-    expect(zero.gkAuto).toBe(1);
+    expect(zero.rows[1].cleanSheet.checked).toBe(false); // 替补门将不猜
+    expect(zero.rows[2].cleanSheet.checked).toBe(true);
+    expect(zero.rows[3].cleanSheet.checked).toBe(false); // 锁定不动
+    expect(zero.rows[4].cleanSheet.checked).toBe(false); // 停赛不动
+    expect(zero.rows[5].cleanSheet.checked).toBe(false); // 外场不联动（防守球员认定靠手填夺回球权）
+    expect(zero.gkAuto).toBe(1); // 只数新勾的 10
 
-    const conceded = mergeOcrEntries([row(10, { position: 'GK' })], [], 2);
-    expect(conceded.rows[0].cleanSheet.checked).toBe(false);
+    const conceded = mergeOcrEntries(
+      [row(10, { position: 'GK' })],
+      [entry(10, '甲', { appearance: true, rating: 5.1 })],
+      2,
+    );
+    expect(conceded.rows[0].cleanSheet.checked).toBe(false); // 失球>0 不动
     expect(conceded.gkAuto).toBe(0);
     expect(conceded.cleanSheetSide).toBe(false);
   });

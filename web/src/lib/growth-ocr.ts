@@ -1,5 +1,5 @@
 // v6.43.0：截图识别结果 → 录入行草稿的合并（纯函数，无 IO，页面与测试共用）。
-// 零封联动口径（用户裁决 2026-10）：本侧失球 0 ⇒ 门将行自动勾零封；
+// 零封联动口径（用户裁决 2026-10；v6.51.7 收窄到「这张图里识别到的门将」）：本侧失球 0 ⇒ 门将行自动勾零封；
 // 外场行「手填夺回球权（含 0）即勾零封」在页面 onChange 里做，不在这里。
 import type { MatchEntryListItem, MatchEntrySuspended, MatchOcrEntry } from './api.ts';
 
@@ -50,7 +50,8 @@ export function sideConcededOf(
  * - 已填但未锁定的格子不覆盖：同值算去重（deduped），异值保留先填的值并出冲突跳过——
  *   识别等待期间的手填与上一张图的结果都不被后续图覆盖（宁缺勿错，冲突由人工裁决）；
  * - 夺回球权（duelsWon）不预填——按裁决保持人工手填（它同时是防守球员确认的载体）；
- * - 本侧失球 0 时，未锁定的门将行自动勾零封（无论识别条目里有没有他）；
+ * - 本侧失球 0 时，只把**这张图里识别到的门将行**自动勾零封：截图点名了谁上场，没出现在图里的
+ *   门将不猜（v6.51.7 收窄，原口径是整队门将全勾）；
  * - v6.45.0：本场停赛的行整行跳过（停赛不能录成长），也不参与门将零封联动。
  * - v6.46.0：allowCounters=false（本场不计成长 XP —— 冠军杯淘汰赛/超级杯/资格赛）时不预填
  *   零封与扑救，也不做门将零封联动：这两项是纯 XP 计数器，写进去服务端会整批拒收。
@@ -131,8 +132,15 @@ export function mergeOcrEntries<R extends OcrMergeRow>(
 
   let gkAuto = 0;
   if (allowCounters && conceded === 0) {
+    // v6.51.7（用户裁决）：只勾这张图里识别到的门将——截图已点名谁上场，替补门将不猜。
+    // 失球 0 仍以已确认比分为权威：条目没带零封（例如门将页的失球被读成 >0）时也照勾。
+    const shownGk = new Set<number>();
+    for (const e of entries) {
+      const row = byId.get(e.playerId);
+      if (row && row.position === 'GK' && !row.suspended) shownGk.add(e.playerId);
+    }
     for (const row of next) {
-      if (row.position === 'GK' && !row.suspended && !row.cleanSheet.locked && !row.cleanSheet.checked) {
+      if (shownGk.has(row.playerId) && !row.cleanSheet.locked && !row.cleanSheet.checked) {
         row.cleanSheet = { ...row.cleanSheet, checked: true };
         gkAuto += 1;
       }
