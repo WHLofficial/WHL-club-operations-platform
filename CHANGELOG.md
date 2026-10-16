@@ -6,7 +6,7 @@
 
 ## [v6.51.2] · 视觉识别 max_tokens 订正：缺省 4096 → 1024（模型硬上限）+ `LLM_VISION_MAX_TOKENS` 可配 + 截断明确报错（2026-10-16）
 
-**待发布（本地就绪 2026-10-16）**：判级 **patch**（缺陷修补，零新增能力、零契约变化）；**零迁移 ⇒ 上线只需 push**（CF Workers Builds 自动部署）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2199 例**全绿、`npm run build` 成功（入口 `assets/index-D_Vc8k4n.js`，sha256 `9ceb33bf…`，含版本串 `6.51.2`）。
+**已上线（2026-10-16）**：判级 **patch**（缺陷修补，零新增能力、零契约变化）；**零迁移 ⇒ 无需 apply，push 即部署**。push `ee46840..0a07264`（含上轮 v6.51.1 上线回写），CF Workers Builds 自动部署 Version `3f2a8e22-6799-4172-9357-0e9d733e422b`（2026-10-16T05:59:01Z）。上线回读：`/api/health` 200（`d1` / `tour_db` / `kv` 全 ok）、线上入口 `assets/index-D_Vc8k4n.js` sha256 `9ceb33bfba2e54d5fedefb48e0ff7c43d10dc52fc598e566d19fdf58f78d0fc1` 与本地构建**逐字节一致**（663 283 B）、OCR 端点匿名 401（路由挂载 + 守卫生效）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2199 例**全绿、`npm run build` 成功（入口含版本串 `6.51.2`）。
 
 **缘起（用户 m14677）**：「成长录入截图识别报LLM 返回 400：`{"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}}`，图片来自 `E:\成长录入图`」—— 管理端成长录入的截图识别**自 v6.43.0 上线起必错**，与图片、网络无关（4 张 PNG 均过魔数与 5MB 校验，报错在 0.4s 参数校验阶段返回、不进推理）。
 
@@ -16,7 +16,7 @@
 
 **测试**：`tests/growth-ocr-endpoint.test.ts` 新增 **TC-EP-08**（缺省 1024 + 非法 env 回落 1024）、**TC-EP-09**（`LLM_VISION_MAX_TOKENS=4096` → 出站 4096）、**TC-EP-10**（截断报错点名、可解析也不放行），该文件 7 → 10 例。测试计划 `docs/test-plans/v6.51.2-ocr-vision-maxtokens.md`。
 
-**待核（未并本版）**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（事件结构草稿，走文本模型 `LLM_MODEL`）—— 文本模型上限未知，若同为 1024 上限会以同样方式 400。
+**待核（未并本版）**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（事件结构草稿，走文本模型 `LLM_MODEL`）—— 文本模型上限未知，若同为 1024 上限会以同样方式 400。**另**：备选视觉模型 `glm-4.6v-flash` 经实测**不采纳**（该模型存在、上限 [1,32768]，但 1024 输出即被推理吃满、且连续调用 429 `code 1305 该模型当前访问量过大`，用户裁决放弃，继续只用 `glm-4v-flash`）。**上线后待办（用户侧）**：用 `E:\成长录入图` 的 4 张图在管理端成长录入页各跑一次识别（真实端到端；自动化只覆盖到出站参数与回包解析）。
 
 ## [v6.51.1] · 品牌池表格显示微调：来源/状态列不再折行 + 新增「总部」只读展示列 + 收窄行业/热度列宽（2026-10-16）
 
