@@ -15,6 +15,7 @@ import {
   ocrMatchEntry,
 } from '../../lib/api.ts';
 import { mergeOcrEntries, sideConcededOf } from '../../lib/growth-ocr.ts';
+import { fileToOcrBase64 } from '../../lib/ocr-image.ts';
 import { groupMatchEntries, groupMatchEntriesByRound } from '../../lib/growth-entry-group.ts';
 import {
   MATCH_ENTRY_LIST_KEY,
@@ -124,16 +125,6 @@ const sourceLabel = (source: string): string => (source === 'manual' ? '管理�
  */
 const cellCls = (base: string, recorded: boolean, locked: boolean): string =>
   [base, recorded ? 'recorded' : '', recorded && !locked ? 'editable' : ''].filter(Boolean).join(' ');
-
-/** v6.43.0 截图文件 → 纯 base64（剥 data: 前缀）；读失败抛错给上层 toast */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
-    reader.onerror = () => reject(new Error('读文件失败'));
-    reader.readAsDataURL(file);
-  });
-}
 
 const numOrNull = (s: string): number | null => {
   const t = s.trim();
@@ -768,7 +759,7 @@ function EntryPanel({
 
   // v6.43.0 截图识别，v6.43.1 改一个入口多选上传：逐张顺序调服务端识别（页签由服务端看图决定）
   // 并逐张合并进行草稿——同值去重、异值保留先填的值并提示冲突，重复出现在两页的球员不重复写。
-  // 顺序而非并行：glm-4v-flash 免费档有 429 限流，四张并发必撞。
+  // 顺序而非并行：视觉模型有 429 限流，四张并发必撞；单张先过 fileToOcrBase64 放大再送（v6.51.5）。
   async function runOcr(files: File[]) {
     if (ocrBusy !== null || rowsRef.current === null || files.length === 0) return;
     setOcrReport(null);
@@ -780,7 +771,7 @@ function EntryPanel({
       setOcrBusy({ done: i, total: files.length });
       let image = '';
       try {
-        image = await fileToBase64(files[i]);
+        image = await fileToOcrBase64(files[i]);
         const res = await ocrMatchEntry(match.matchId, image);
         const target: Side = res.side;
         // 合并基底取 rowsRef（等待识别期间的手填与上一张的预填都在里面），不用闭包快照

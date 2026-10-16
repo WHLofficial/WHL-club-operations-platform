@@ -4,6 +4,8 @@
 //   2) 收起面板时脏草稿要走确认条，选「保存并继续」＝先提交再收起（父级持 pending，面板经 saveAllRef 回填结果）；
 //   3) 切视图会重挂面板，同样要过确认条；
 //   4) 一次「全部保存」超过服务端单批上限（50）要自动分块。
+//   5) 截图上传前要过 fileToOcrBase64（v6.51.5 的 2× 放大助手）——这里 mock 掉它只为钉住「页面确实走了这道工序」，
+//      放大算法本身由 web/src/lib/ocr-image.test.ts 覆盖。
 // 注意：查看模式里「没录过的格子」渲染成 —（没有 input）；面板里的按钮有两个「收起」（列表行上一个、面板头一个），要按面板作用域取。
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,6 +32,12 @@ vi.mock('../../lib/adminQueries.ts', () => ({
   matchEntryPanelKey: (matchId: number) => ['admin', 'growth', 'match-entry', matchId],
   submitMatchEntry: mocks.submit,
 }));
+
+const ocrImage = vi.hoisted(() => ({
+  fileToOcrBase64: vi.fn(async (_file: File) => 'SENTINEL_B64'),
+}));
+
+vi.mock('../../lib/ocr-image.ts', () => ({ fileToOcrBase64: ocrImage.fileToOcrBase64 }));
 
 function match(over: Partial<MatchEntryListItem> = {}): MatchEntryListItem {
   return {
@@ -144,6 +152,7 @@ beforeEach(() => {
   mocks.list.mockReset();
   mocks.panel.mockReset();
   mocks.submit.mockReset();
+  ocrImage.fileToOcrBase64.mockClear();
   mocks.list.mockResolvedValue({ matches: [match()] });
   mocks.panel.mockResolvedValue(panel());
   localStorage.clear();
@@ -490,5 +499,25 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     await openEdit();
     expect((cellInput(0, 3) as HTMLInputElement).value).toBe('8');
     expect(panelButton('全部保存').disabled).toBe(true);
+  });
+
+  it('TC-ENTRY-E12 截图先过放大助手再上传（v6.51.5）：请求体里的 image 就是助手输出', async () => {
+    const calls: { body: { image?: string } }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+        calls.push({ body: JSON.parse(String(init?.body)) as { image?: string } });
+        return new Response(JSON.stringify({ team: '海港联', side: 'home', kind: 'summary', entries: [], unmatched: [], warnings: [] }), { status: 200 });
+      }),
+    );
+
+    renderPage();
+    await openEdit();
+    pickFile();
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body.image).toBe('SENTINEL_B64');
+    expect(ocrImage.fileToOcrBase64).toHaveBeenCalledTimes(1);
+    expect((ocrImage.fileToOcrBase64.mock.calls[0][0] as File).name).toBe('a.png');
   });
 });
