@@ -456,4 +456,39 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     expect(calls).toBe(1); // 取消不再打服务端
     expect(cellInput(0, 3)?.value ?? '').toBe('8'); // 手填的评分原样不动
   });
+
+  it('TC-ENTRY-E10 换队侧「不保存，继续」也真丢草稿（v6.51.4）：切回主队看到服务端基线', async () => {
+    renderPage();
+    await openEdit();
+
+    fireEvent.change(cellInput(0, 3) as HTMLInputElement, { target: { value: '9' } });
+    expect(panelButton('全部保存').disabled).toBe(false);
+
+    // 换队侧不重挂面板（side 是面板 state）：草稿原本会留在主队那一侧
+    fireEvent.click(screen.getByRole('button', { name: /^客队 · 北岸城/ }));
+    expect(screen.getByText(/录入面板有未保存的改动/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '不保存，继续' }));
+
+    // 客队名单在面板里了；切回主队时已无脏行（不再弹确认条）
+    await waitFor(() => expect(rows()[0].textContent).toContain('Q. Qian'));
+    expect(screen.queryByText(/录入面板有未保存的改动/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^主队 · 海港联/ }));
+    await waitFor(() => expect(rows()[0].textContent).toContain('张三'));
+    expect((cellInput(0, 3) as HTMLInputElement).value).toBe('8'); // 草稿被丢弃，回到已录基线
+    expect(panelButton('全部保存').disabled).toBe(true);
+  });
+
+  it('TC-ENTRY-E11 收起「不保存，继续」后重开同一场：草稿仍在丢弃（回归护栏）', async () => {
+    renderPage();
+    await openEdit();
+
+    fireEvent.change(cellInput(0, 3) as HTMLInputElement, { target: { value: '9.5' } });
+    fireEvent.click(panelButton('收起'));
+    fireEvent.click(screen.getByRole('button', { name: '不保存，继续' }));
+    await waitFor(() => expect(document.querySelector('.entry-table')).toBeNull());
+
+    await openEdit();
+    expect((cellInput(0, 3) as HTMLInputElement).value).toBe('8');
+    expect(panelButton('全部保存').disabled).toBe(true);
+  });
 });

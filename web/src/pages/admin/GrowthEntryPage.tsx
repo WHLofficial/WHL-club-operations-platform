@@ -401,6 +401,9 @@ function MatchEntrySection() {
   const [view, setView] = useState<ListView>(readListView);
   // 确认条的「保存并继续」：行在面板 state 里，面板把这个出口挂到 ref 上（见 EntryPanel.saveAllSides）
   const saveAllRef = useRef<(() => Promise<boolean>) | null>(null);
+  // 确认条的「不保存，继续」（v6.51.4）：收起/切比赛靠面板重挂丢弃草稿，但换队侧不重挂，
+  // 草稿会留在面板里——所以丢弃也得由面板执行，出口同样挂 ref（见 EntryPanel.discardDrafts）
+  const discardRef = useRef<(() => void) | null>(null);
   const [savingAll, setSavingAll] = useState(false);
 
   function switchView(next: ListView) {
@@ -491,7 +494,7 @@ function MatchEntrySection() {
               <td colSpan={6}>
                 {pending && (
                   <div className="banner warn entry-confirm">
-                    <span>录入面板有未保存的改动：收起面板、切换比赛或切换视图都会丢弃草稿；换队侧的草稿会保留（不提交）。</span>
+                    <span>录入面板有未保存的改动：收起面板、切换比赛、切换视图或换队侧，确认后都会丢弃草稿（不提交）。</span>
                     <button type="button" className="btn btn-sm" onClick={() => setPending(null)}>
                       继续编辑
                     </button>
@@ -504,6 +507,8 @@ function MatchEntrySection() {
                       onClick={() => {
                         const act = pending;
                         setPending(null);
+                        // 先让面板把两侧草稿按服务端数据重建（换队侧不重挂面板，只有它能丢），再执行待执行动作
+                        discardRef.current?.();
                         act();
                       }}
                     >
@@ -519,6 +524,7 @@ function MatchEntrySection() {
                   onClose={() => runOpen(null)}
                   onDirtyChange={setDirty}
                   saveAllRef={saveAllRef}
+                  discardRef={discardRef}
                   show={show}
                 />
               </td>
@@ -627,6 +633,7 @@ function EntryPanel({
   onClose,
   onDirtyChange,
   saveAllRef,
+  discardRef,
   show,
 }: {
   match: MatchEntryListItem;
@@ -636,6 +643,8 @@ function EntryPanel({
   onDirtyChange: (dirty: boolean) => void;
   /** 父级确认条的「保存并继续」出口：面板把「保存两队侧脏行」挂到这里（见 saveAllSides） */
   saveAllRef: { current: (() => Promise<boolean>) | null };
+  /** 父级确认条的「不保存，继续」出口（v6.51.4）：面板把「按服务端数据重建两队侧行」挂到这里（见 discardDrafts） */
+  discardRef: { current: (() => void) | null };
   /**
    * 父级的 toast 出口（v6.45.1）：面板自己 useToast 的 node 渲在面板里，收起面板（保存并继续）时
    * 会和面板一起卸载——「已保存」提示当场消失。所以面板统一用父级的 show，node 挂在列表卡上。
@@ -694,6 +703,16 @@ function EntryPanel({
     onDirtyChange((['home', 'away'] as Side[]).some((s) => rows[s].some(rowDirty)));
   }, [rows, onDirtyChange]);
 
+  /**
+   * 「不保存，继续」用（v6.51.4）：把两侧行按当前服务端数据重建，丢掉所有未提交的输入。
+   * 收起 / 切比赛 / 切视图都会重挂面板（组件卸载，草稿自然没了），只有换队侧不重挂——
+   * 那条路上的草稿必须在这里显式清掉，否则「不保存」名不副实（父级确认条文案承诺的是丢弃）。
+   */
+  function discardDrafts() {
+    if (!data) return;
+    setRowsTracked(() => ({ home: buildSideRows(data, 'home', mode), away: buildSideRows(data, 'away', mode) }));
+  }
+
   // 父级确认条要在「动作执行前」调到最新的 saveAllSides（行在面板 state 里，父级看不到）：
   // 用 latest-ref 挂上去，父级 await 完拿到 false 就不继续执行待执行动作。
   // 注意：这三个 hook 必须在下面 isLoading/error 早返回之前——早返回会改 hook 数量，React 直接报错。
@@ -707,6 +726,17 @@ function EntryPanel({
       saveAllRef.current = null;
     };
   }, [saveAllRef]);
+  // 「不保存，继续」同样走 latest-ref（丢弃要吃到最新一次渲染的 data 与 mode）
+  const latestDiscard = useRef(discardDrafts);
+  useEffect(() => {
+    latestDiscard.current = discardDrafts;
+  });
+  useEffect(() => {
+    discardRef.current = () => latestDiscard.current();
+    return () => {
+      discardRef.current = null;
+    };
+  }, [discardRef]);
 
   if (error) {
     return (
