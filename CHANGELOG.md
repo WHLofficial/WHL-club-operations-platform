@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.3] · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍（2026-10-16）
+
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一能力的缺陷修补：库里中文队名 vs 截图英文队名必然对不上，识别结果被 400 拦下）；**零迁移 ⇒ 上线只需 push**、零生产写、前端零改动。
+
+**缘起（用户）**：管理端成长录入 4 张图全报「截图队名「FIORENTINA」/「CHELSEA」对不上这场比赛（切尔西 vs 佛罗伦萨），确认传对图了吗」——「卡在中英对应了」。
+
+**根因**：`src/worker/routes/admin/growth.ts` 的队名对侧只做同语言归一化等值/双向包含，而库里 `clubs.name` 是中文（生产 20 队全中文），FC26 截图上是英文真名（`OCR_PROMPT` 也要求照抄截图）。
+
+**交付**：① `OCR_PROMPT` —— `team` 字段要求输出中文队名，JSON 示例值改 `"team": "切尔西"`，并给一条映射示例（CHELSEA → 切尔西、FIORENTINA → 佛罗伦萨、FC BAYERN MÜNCHEN → 拜仁慕尼黑、RB LEIPZIG → RB莱比锡、REAL BETIS → 皇家贝蒂斯），无通行译名才照抄原文。② `src/core/growth-ocr.ts` 新增队名对侧纯函数 `teamNameKey`（折叠大小写/变音符 → 去空格标点 → 反复剥首尾 `rb/fc/ac/…/cpu` 前后缀）、`isSameTeamName`（先归一化逐字/互相包含，再比核心名；核心 <2 字符只认相等）、`matchOcrTeamSide`（先主后客，对不上回 null）。③ 端点改用 `matchOcrTeamSide`，**400 文案逐字不变**（模型不听话给英文名时仍是同一条 400）。
+
+**实测（生产提示词 + 用户 4 张真图 + `glm-4v-flash`，探针 `%TEMP%/probe-ocr.mjs`）**：中文队名 **4/4 精确命中**（佛罗伦萨 ×2 / 切尔西 ×2，与库内逐字相同），**球员名保持英文缩写**（未被中文化），HTTP 200 / 12.1–16.3 s、usage in=3572、out 561–681、`finish_reason=stop`、JSON 可解析、rows 12；提示词 1555 → 1686 字符。**已否决**「把本场两个候选中文名写进提示词让模型二选一」：0/4 生效（模型照抄英文原文）—— 条件式指令在这档小模型上不可靠，直接给映射示例才有效。
+
+**测试**：`tests/growth-ocr.test.ts` 新增 **TC-TEAM-01/02/03**（核心名 / 同队判定 / 落侧）；`tests/growth-ocr-endpoint.test.ts` 新增 **TC-EP-11**（出站提示词锁中文队名口径）、**TC-EP-12**（译名漂移 + CPU 尾标不再误报）、**TC-EP-13**（英文队名仍 400 且文案点名对阵）。闸门：`npm run typecheck` 0 error；`npx vitest run` **135 文件 / 2205 例全绿**（基线 135/2199）；`npm run build` ✓ 入口 `web/dist/assets/index-B68L41ic.js`（sha256 `e4b86fc99f0e4f5ecbb2e6f6d3cb0baaf42b68cdaa6420ae12e88f5c8cd18e44`，含版本串 `6.51.3`）。测试计划 `docs/test-plans/v6.51.3-ocr-team-name-chinese.md`。
+
+**待核（未并本版）**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（事件结构草稿走文本模型 `LLM_MODEL`，上限未知）。
+
 ## [v6.51.2] · 视觉识别 max_tokens 订正：缺省 4096 → 1024（模型硬上限）+ `LLM_VISION_MAX_TOKENS` 可配 + 截断明确报错（2026-10-16）
 
 **已上线（2026-10-16）**：判级 **patch**（缺陷修补，零新增能力、零契约变化）；**零迁移 ⇒ 无需 apply，push 即部署**。push `ee46840..0a07264`（含上轮 v6.51.1 上线回写），CF Workers Builds 自动部署 Version `3f2a8e22-6799-4172-9357-0e9d733e422b`（2026-10-16T05:59:01Z）。上线回读：`/api/health` 200（`d1` / `tour_db` / `kv` 全 ok）、线上入口 `assets/index-D_Vc8k4n.js` sha256 `9ceb33bfba2e54d5fedefb48e0ff7c43d10dc52fc598e566d19fdf58f78d0fc1` 与本地构建**逐字节一致**（663 283 B）、OCR 端点匿名 401（路由挂载 + 守卫生效）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2199 例**全绿、`npm run build` 成功（入口含版本串 `6.51.2`）。

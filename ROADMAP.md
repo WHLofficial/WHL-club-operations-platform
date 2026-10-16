@@ -1520,6 +1520,26 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **待办（用户侧一次性操作）**：在赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（当前全 0 ⇒ 带带入的 stage 3/4 会被对账报为不一致、黄条常亮，属预期假阳性）；补账后黄条转健康，公开榜数值不应变化。
 
+## v6.51.3 · 截图识别的队名对侧：模型改输出中文队名 + 译名/前后缀漂移容忍（2026-10-16）
+
+**状态**：本地就绪待发布（2026-10-16）｜判级 **patch**（缺陷修补：中英队名对不上让识别必 400）｜**零迁移**（不改表）⇒ 上线只需 push（push 即触发 CF Workers Builds 自动部署）｜零生产写、前端零改动｜PRD 与 TECH_DESIGN 无需同步（识别口径微调，无规则/接口变化）。
+
+**缘起（用户）**：4 张生产截图全报「截图队名「FIORENTINA」/「CHELSEA」对不上这场比赛（切尔西 vs 佛罗伦萨），确认传对图了吗」——「卡在中英对应了」。
+
+**根因**：`src/worker/routes/admin/growth.ts:499-505` 的队名对侧只做同语言 `foldName` 等值/双向包含；库里 `clubs.name` 全中文（生产 20 队，无中文字符行数 0），截图是 FC26 英文真名。
+
+**交付**：① `OCR_PROMPT` —— `team` 改要中文队名（示例值 `"team": "切尔西"` + 一条映射示例 CHELSEA → 切尔西 / FIORENTINA → 佛罗伦萨 / FC BAYERN MÜNCHEN → 拜仁慕尼黑 / RB LEIPZIG → RB莱比锡 / REAL BETIS → 皇家贝蒂斯；无通行译名才照抄）；② `src/core/growth-ocr.ts` 新增 `teamNameKey` / `isSameTeamName` / `matchOcrTeamSide`（剥 `rb/fc/ac/…/cpu` 前后缀再比核心名；先主后客；宁缺勿错）；③ 端点改用 `matchOcrTeamSide`，400 文案逐字不变（模型给英文名仍是同一条 400）。
+
+**验收（真实模型实测 + 闸门）**：探针 `%TEMP%/probe-ocr.mjs`（生产提示词 + `E:\成长录入图` 4 张图 + `glm-4v-flash` + `max_tokens 1024`）：**4/4 HTTP 200、中文队名精确命中**（佛罗伦萨 ×2 / 切尔西 ×2）、球员名保持英文缩写、`finish_reason=stop`、rows 12、12.1–16.3 s、usage in=3572 out 561–681；**候选名二选一变体 0/4 已否决**（条件式指令在这档小模型不可靠）。`npm run typecheck` 0 error；`npx vitest run` **135 文件 / 2205 例全绿**（基线 135/2199，净 +6 = TC-TEAM-01/02/03 + TC-EP-11/12/13）；`npm run build` ✓ 入口 `web/dist/assets/index-B68L41ic.js`（663,283 B / gzip 210.86 kB，sha256 `e4b86fc99f0e4f5ecbb2e6f6d3cb0baaf42b68cdaa6420ae12e88f5c8cd18e44`，含版本串 `6.51.3`；CSS 入口 `index-G3fpYeiH.css` 未变）。测试计划 `docs/test-plans/v6.51.3-ocr-team-name-chinese.md`。
+
+**抖动登记**：首轮全量 1 例与本次改动无关的失败（`web/src/pages/PlayersLibrary.test.tsx:540` 的 `inert` 断言，jsdom 时序），单文件复跑 39/39 绿、第二轮全量全绿 ⇒ 既有偶发。
+
+**待核（未并本版）**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
+
+**本地提交**：`fbef7d6` fix(worker) + `e381f50` chore 版本号 + docs 条目枚（本提交，2026-10-16）。
+
+**留待补**：英文名兜底映射表（`web/assets/ref/team.json` 696 项 ↔ `clubs.id`）—— 有意不做（多一份真名漂移源）；若日后模型偶发不听话（返回英文名仍 400），再评估落表。另：用户侧验收（4 张图各跑一次识别）待上线后执行。
+
 ## v6.51.2 · 视觉识别 max_tokens 订正：缺省 1024 + `LLM_VISION_MAX_TOKENS` 可配 + 截断明确报错（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（判级 **patch**：缺陷修补、零新增能力、零契约变化；**零迁移 ⇒ 无需 apply**，push `ee46840..0a07264` 后 CF Workers Builds 自动部署 Version `3f2a8e22-6799-4172-9357-0e9d733e422b`；回读 `/api/health` 200、线上入口 sha256 与本地逐字节一致、OCR 端点匿名 401）。`PRD.md` / `TECH_DESIGN.md` 无需同步（无规则与契约变化）。
