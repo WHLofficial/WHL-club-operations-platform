@@ -18,6 +18,19 @@ export function llmVisionModel(env: Env): string | undefined {
   return env.LLM_VISION_MODEL || env.LLM_MODEL;
 }
 
+/** 视觉调用的输出上限缺省值：glm-4v-flash 只接受 [1,1024]，写 4096 会被参数校验直接打回 */
+export const VISION_MAX_TOKENS_DEFAULT = 1024;
+
+/**
+ * 视觉调用的 max_tokens：LLM_VISION_MAX_TOKENS 可配（换付费视觉模型时抬高，不必改代码），
+ * 缺省 1024。v6.51.2 修：缺省原是写死的 4096，而生产视觉模型 glm-4v-flash 上限 1024 ——
+ * 自 v6.43.0 起截图识别必回 400（code 1210）。非法值一律回落缺省。
+ */
+export function llmVisionMaxTokens(env: Env): number {
+  const raw = Number(env.LLM_VISION_MAX_TOKENS);
+  return Number.isInteger(raw) && raw > 0 ? raw : VISION_MAX_TOKENS_DEFAULT;
+}
+
 interface LlmChatOptions {
   system: string;
   user: string;
@@ -104,11 +117,13 @@ export interface LlmVisionImage {
 /**
  * 一次视觉 chat/completions：图片（base64 data URL）+ 文字提示，要求模型只回 JSON。
  * v6.43.0 成长录入截图识别专用（管理端 only）；不带 response_format（视觉模型兼容面窄，
- * 靠提示词约束 + extractJsonObject 兜底）；超时 90s（spike 实测 13-27s/图，留足余量）。
+ * 靠提示词约束 + extractJsonObject 兜底）；超时 90s（spike 实测 13-27s/图，留足余量）；
+ * max_tokens 缺省 1024、可用 LLM_VISION_MAX_TOKENS 抬高（v6.51.2）。
  * 失败/超时/空回包与 llmChat 同口径抛 HttpError(502)，绝不静默编造。
  */
-export async function llmVisionJson<T>(env: Env, image: LlmVisionImage, prompt: string, maxTokens = 4096): Promise<T> {
+export async function llmVisionJson<T>(env: Env, image: LlmVisionImage, prompt: string, maxTokens?: number): Promise<T> {
   const model = llmVisionModel(env);
+  const maxOut = maxTokens ?? llmVisionMaxTokens(env);
   if (!env.LLM_API_BASE || !env.LLM_API_KEY || !model) {
     throw new HttpError(503, '未配置 LLM（LLM_API_BASE / LLM_API_KEY / LLM_VISION_MODEL 或 LLM_MODEL）');
   }
@@ -129,7 +144,7 @@ export async function llmVisionJson<T>(env: Env, image: LlmVisionImage, prompt: 
             ],
           },
         ],
-        max_tokens: maxTokens,
+        max_tokens: maxOut,
         temperature: 0.1,
       }),
       signal: AbortSignal.timeout(90_000),
@@ -142,9 +157,16 @@ export async function llmVisionJson<T>(env: Env, image: LlmVisionImage, prompt: 
     const body = (await res.text().catch(() => '')).slice(0, 300);
     throw new HttpError(502, `LLM 返回 ${res.status}${body ? `：${body}` : ''}`);
   }
-  const data = (await res.json().catch(() => null)) as { choices?: { message?: { content?: unknown } }[] } | null;
-  const text = data?.choices?.[0]?.message?.content;
+  const data = (await res.json().catch(() => null)) as {
+    choices?: { message?: { content?: unknown }; finish_reason?: unknown }[];
+  } | null;
+  const choice = data?.choices?.[0];
+  const text = choice?.message?.content;
   if (typeof text !== 'string' || text.trim() === '') throw new HttpError(502, 'LLM 回包为空');
+  // 用满上限 = 名单可能缺行（截断后即便 JSON 还能解析也当失败：漏记球员比要求重试更贵）
+  if (choice?.finish_reason === 'length') {
+    throw new HttpError(502, `视觉模型输出被截断（max_tokens=${maxOut} 用满），请重试或调大 LLM_VISION_MAX_TOKENS`);
+  }
   const parsed = extractJsonObject(text);
   if (parsed === null) throw new HttpError(502, 'LLM 回的不是合法 JSON，请重试');
   return parsed as T;

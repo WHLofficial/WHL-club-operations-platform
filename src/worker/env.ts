@@ -53,4 +53,7 @@ export interface Env {
   // v6.43.0：成长录入截图识别用的视觉模型，缺省回落 LLM_MODEL（免费档 glm-4v-flash 已实测够用，
   // 见 memory/spike-v6.43.0-vision.md）。
   LLM_VISION_MODEL?: string;
+  // v6.51.2：视觉调用 max_tokens（缺省 1024）。glm-4v-flash 只接受 [1,1024] —— 写 4096 会被
+  // 参数校验直接打回（400 code 1210，v6.43.0–v6.51.1 的真实故障）；换付费视觉模型时用这个变量抬高。
+  LLM_VISION_MAX_TOKENS?: string;
 }

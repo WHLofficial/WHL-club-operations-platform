@@ -1,6 +1,7 @@
 // v6.43.0 成长录入截图识别 · 端点测试（mock 视觉网关 + 本地 D1 夹具）。
 // 识别路径零 DB 写：成功后 growth_events / audit_log / growth_xp 必须原样不动（TC-EP-06）。
-// 测试计划：docs/test-plans/v6.43.0-growth-ocr.md。
+// v6.51.2：出站 max_tokens 缺省 1024（glm-4v-flash 上限）+ LLM_VISION_MAX_TOKENS 可配 + 截断明确报错。
+// 测试计划：docs/test-plans/v6.43.0-growth-ocr.md、docs/test-plans/v6.51.2-ocr-vision-maxtokens.md。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -112,6 +113,20 @@ function mockVision(content: string): void {
     'fetch',
     vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })),
   );
+}
+
+/** 与 mockVision 同款桩，另把出站请求体记下来（v6.51.2 的 max_tokens 断言用） */
+function captureVision(content: string, finishReason?: string): () => { url: string; body: Record<string, unknown> } {
+  let last: { url: string; body: Record<string, unknown> } | null = null;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      last = { url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> };
+      const choice = { message: { content }, ...(finishReason ? { finish_reason: finishReason } : {}) };
+      return new Response(JSON.stringify({ choices: [choice] }), { status: 200 });
+    }),
+  );
+  return () => last as { url: string; body: Record<string, unknown> };
 }
 
 function seeded(): Fixture {
@@ -227,5 +242,44 @@ describe('TC-EP 截图识别端点', () => {
     expect(body.entries[0]).toMatchObject({ playerId: 10, draft: { appearance: true, rating: 5.1, saves: 3 } });
     expect(body.entries[1]).toMatchObject({ playerId: 12, draft: { appearance: true, rating: 7.5 } });
     expect(body.unmatched).toEqual([]);
+  });
+
+  it('TC-EP-08 出站 max_tokens 缺省 1024（glm-4v-flash 上限），env 非法值也回落 1024', async () => {
+    const fx = seeded();
+    const call = captureVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(200);
+    expect(call().body.max_tokens).toBe(1024);
+    expect(call().body.model).toBe('glm-4v-flash');
+
+    const bad = seeded();
+    bad.env.LLM_VISION_MAX_TOKENS = '4096.5'; // 非整数 = 非法，回落缺省而不是照发
+    const badCall = captureVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(bad, { image: PNG_B64 })).status).toBe(200);
+    expect(badCall().body.max_tokens).toBe(1024);
+  });
+
+  it('TC-EP-09 LLM_VISION_MAX_TOKENS 可配：换付费视觉模型时抬高，不动代码', async () => {
+    const fx = seeded();
+    fx.env.LLM_VISION_MAX_TOKENS = '4096';
+    const call = captureVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(200);
+    expect(call().body.max_tokens).toBe(4096);
+  });
+
+  it('TC-EP-10 finish_reason=length：点名「输出被截断」，不再误报「不是合法 JSON」', async () => {
+    const fx = seeded();
+    captureVision('{"team":"海港联","tab":"Summary","rows":[{"pos":"GK"', 'length');
+    const res = await sendOcr(fx, { image: PNG_B64 });
+    expect(res.status).toBe(502);
+    const err = ((await res.json()) as { error: string }).error;
+    expect(err).toContain('截断');
+    expect(err).toContain('LLM_VISION_MAX_TOKENS');
+
+    // 截断后恰好还能解析出 JSON 也不放行（漏记球员比要求重试更贵）
+    const fx2 = seeded();
+    captureVision(JSON.stringify(summaryPayload), 'length');
+    const res2 = await sendOcr(fx2, { image: PNG_B64 });
+    expect(res2.status).toBe(502);
+    expect(((await res2.json()) as { error: string }).error).toContain('截断');
   });
 });
