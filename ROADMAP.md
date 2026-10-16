@@ -1522,6 +1522,22 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.5 · 截图识别输入侧稳定化：上传前 2× 放大（不换模型、不改提示词）（2026-10-16）
+
+**状态**：**本地就绪待发布**（判级 **patch**：同一条链的可读性修补，无新能力；**零迁移、零服务端改动、零提示词改动** ⇒ 上线只需 push）｜PRD 与 TECH_DESIGN 无需同步（端点形状、提示词、模型、`max_tokens` 全未变；变的只是送进去的像素）。
+
+**缘起（用户）**：① 4 张真图跑完后报「有识别错误的情况，也有识别正确但对不上人的情况」；② 追问「模型出这种识别错误的概率大吗」；③ 明确约束「**不要换模型**」，并要求用 brainstorming 探索稳定化思路。
+
+**根因与 spike 结论**：视觉模型按像素切块读图——1920×1080 原图里表格姓名占的像素太少，两处误读是**系统性**的：flashx（关思考）连跑 2 轮 × 4 张 = 8 次调用，**逐次输出一字不差**（`M. Carnesecchi` → `Carnesechi`、`A. Garnacho` → `Garmacho`）⇒ 「跑两遍取一致」这类重试没有收益。输入侧对照实验（ImageMagick 生成变体，原图未动）：原图 3580 tok / 6–9 s / 两处误读 → **全图 2× 放大 6925 tok / 8.7–9.7 s / 4/4 全对**；浏览器 canvas 同款双线性插值放大两张问题图同样读对；**裁切方案否决**（队名区在裁切外，3/4 图 team 变「未知」、teamRaw null）；`glm-4.6v`（106B）当日 8 次调用全 429，不可用。
+
+**交付**：① 新增 `web/src/lib/ocr-image.ts`——`ocrUpscaleTarget(w, h)`（2× 等比放大、最长边封顶 4096、已超长边不缩小、非法尺寸原样）+ `decodedBase64Bytes` + `fileToOcrBase64(file)`（`createImageBitmap` → canvas `imageSmoothingQuality: 'high'` 放大 → PNG；解码后超 4.5MB 回退 JPEG 0.92；再超 / 无 `createImageBitmap` / 解码失败一律退回原图 base64，**不阻断上传**）；② `web/src/pages/admin/GrowthEntryPage.tsx` 删本地 `fileToBase64` 改调该助手（歧义选边的重试复用同一份 base64，逻辑未变）；③ 顺手订正 `runOcr` 上方过期注释（原写「glm-4v-flash 免费档限流」，模型已换）。
+
+**验收**：闸门 `npm run typecheck` 三份 0 error；`npx vitest run` **136 文件 / 2228 例全绿**（v6.51.4 基线 135 / 2219，净 +1 文件 +9 例 = TC-IMG-01..08 八例 + TC-ENTRY-E12 一例）；`npm run build` ✓ 入口 `assets/index-CISzZnED.js`（663,313 B / gzip 210.88 kB，sha256 `081b5c3cd2eb61d423f3486e955c866699894baa1dde48941100d8e3302c5424`，含版本串 6.51.5）+ `assets/GrowthEntryPage-oKNtpqgZ.js`（35,422 B，sha256 `ca0d144a352d72e30a391cb4ef36fa39c18391093d17e993947cf6d53ac5d8d6`）；CSS 入口未变（本版零样式改动）。成本：单图输入 token 3.6k → 6.9k（仍在 [0,32K) 档）⇒ ≈0.002 元/图、一场四图 ≈0.8 分钱；延迟无实质差异。
+
+**本地提交**：`b26bbf3` fix(web)（`web/src/lib/ocr-image.ts`、`web/src/lib/ocr-image.test.ts`、`web/src/pages/admin/GrowthEntryPage.tsx`、`web/src/pages/admin/GrowthEntryPage.test.tsx`）+ `427d5f0` chore 版本号 6.51.4 → 6.51.5 + docs 枚，**未 push**。
+
+**留待补**：① 真实浏览器 canvas 放大的验收（管理端 4 张图复跑，预期认人失败清零）——单测里 canvas 是桩，像素质量只有真机能验；② 若今后出现新的固定误读，可先试 3× 放大再考虑提示词侧的「逐字照抄」规则（本版有意不动提示词）；③ 拼写容错层（编辑距离 / 近似建议）仍不做——放大已消掉已知两处，且上次用户已裁「暂时不做」。
+
 ## v6.51.4 · 截图识别三修：认人容忍「姓+首字母」形态 + 视觉模型换 glm-4.6v-flashx 且默认关思考 + 「不保存，继续」真丢草稿（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（判级 **patch**：同一链上的缺陷修补；**零迁移**（不改表）⇒ 上线只需 push，push `e04c478..dff7fd9`（5 枚）即触发 CF Workers Builds 自动部署 Version `85f2f272-22a3-40ae-a2d3-fdb99465fda6` @2026-10-16T12:08:19Z；回读 `/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-Cy37Jlw2.js` 与 `assets/GrowthEntryPage-BVTD6iRd.js` sha256 与本地逐字节一致、匿名 OCR 端点 401）｜**生产 secret 早于代码切换**（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b` @2026-10-16T11:48:57Z；`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3` @11:49:40Z）｜PRD 与 TECH_DESIGN 无需同步（识别口径与端点形状未变；新增的 `thinking` 字段与 `LLM_VISION_THINKING` 是出站参数）。

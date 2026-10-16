@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.5] · 截图识别输入侧稳定化：上传前 2× 放大（不换模型、不改提示词）（2026-10-16）
+
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一条链的可读性修补，无新能力）；**零迁移、零服务端改动、零提示词改动 ⇒ 上线只需 push**。
+
+**缘起**：4 张真图在管理端跑完后用户报「有识别错误」，并在追问稳定性的同时定调「不要换模型」；spike 结论必须满足这条约束。
+
+**根因**：视觉模型对图像按像素切块——1920×1080 原图里表格姓名占的像素太少，两处误读是**系统性**的（glm-4.6v-flashx 关思考连跑 2 轮 × 4 张 = 8 次调用，逐次输出一字不差：`M. Carnesecchi` → `Carnesechi`、`A. Garnacho` → `Garmacho`）⇒ 「跑两遍取一致」这类重试没有收益，只能改输入（或换模型，已排除）。
+
+**交付**：① 新增 `web/src/lib/ocr-image.ts`——`ocrUpscaleTarget(w, h)`（2× 等比放大、最长边封顶 4096、已超长边不缩小）+ `fileToOcrBase64(file)`（`createImageBitmap` → canvas 平滑放大 → PNG；解码后超 4.5MB 回退 JPEG 0.92；再超或环境不支持 / 解码失败则退回原图 base64，**不阻断上传**）；② `web/src/pages/admin/GrowthEntryPage.tsx` 删本地 `fileToBase64`，OCR 主路径改调该助手（歧义选边重试复用同一份 base64 的逻辑不变）；③ 顺手订正 `runOcr` 上方过期注释（原文写「glm-4v-flash 免费档限流」，模型早已换）。
+
+**实测（4 张真图，glm-4.6v-flashx 关思考；探针在 %TEMP%，不入库）**：原图 3580 tok / 6–9 s / 固定两处误读 → 全图 2× 放大 6925 tok / 8.7–9.7 s / **4/4 全对**（Carnesecchi、Garnacho 均读对，队名 / teamRaw / 页签 / 数字与原先一致）；用浏览器 canvas 同款双线性插值放大两张问题图同样读对（PNG 1.79 / 2.17 MB，服务端 5MB 上限内）；**裁切方案实测否决**——裁掉右半会连带丢队名区域，3/4 图 team 变「未知」、teamRaw 为 null。
+
+**测试**：`web/src/lib/ocr-image.test.ts` 8 例（TC-IMG-01..08：尺寸算法含封顶 / 不缩小 / 非法尺寸、base64 字节估算、正常放大路径、PNG 超限回退 JPEG 0.92、双超限退回原图、无 `createImageBitmap`、解码失败、已到 4096 不放大）；`web/src/pages/admin/GrowthEntryPage.test.tsx` 新增 TC-ENTRY-E12（mock 助手，钉住「页面确实走了这道工序」）⇒ 全量 **136 文件 / 2228 例**全绿（v6.51.4 基线 135 / 2219，净 +1 文件 +9 例）；`npm run typecheck` 三份 0 error；build 入口 `assets/index-CISzZnED.js`（663,313 B，sha256 `081b5c3cd2eb61d423f3486e955c866699894baa1dde48941100d8e3302c5424`，含版本串 6.51.5）+ `assets/GrowthEntryPage-oKNtpqgZ.js`（35,422 B，sha256 `ca0d144a352d72e30a391cb4ef36fa39c18391093d17e993947cf6d53ac5d8d6`）；CSS 未变。
+
+**成本**：单图输入 token 3.6k → 6.9k，仍在 [0,32K) 最便宜档 ⇒ 约 0.002 元/图（原 ≈0.0015），一场四图 ≈0.8 分钱；延迟无实质差异（7.6–9.7 s）。
+
+**待核**：真实浏览器 canvas 放大效果以管理端 4 张图复跑验收（预期认人失败清零）；`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200` 仍未核（文本模型上限未知）。
+
 ## [v6.51.4] · 截图识别三修：认人容忍「姓+首字母」形态 + 视觉模型换 glm-4.6v-flashx 且默认关思考 + 「不保存，继续」真丢草稿（2026-10-16）
 
 **已上线（2026-10-16）**：判级 **patch**（同一条链上的缺陷修补：认人误报 / 模型额度与耗时 / 丢弃草稿没丢）；**零迁移 ⇒ 无需 apply**，push `e04c478..dff7fd9`（5 个提交）触发 CF Workers Builds 自动部署 Version `85f2f272-22a3-40ae-a2d3-fdb99465fda6`（@2026-10-16T12:08:19Z）；回读：`/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-Cy37Jlw2.js`（sha256 `1008a0c1fa029ee7878f2cdffd7c207687735200dfbba0d43a4d559b80eff0f5`）与本地逐字节一致、`assets/GrowthEntryPage-BVTD6iRd.js`（sha256 `7b7f2eaaf401342d9ddd30108f4c752379c1053e61ebac31be1a2b6ef8976d66`）亦逐字节一致、匿名 OCR 端点 401；生产视觉模型与 max_tokens 已随 `wrangler secret put` 生效（Source = Secret Change 自动部署：`LLM_VISION_MODEL=glm-4.6v-flashx` → Version `54459c29-c53d-4fcb-b33f-bf5fd922c94b`、`LLM_VISION_MAX_TOKENS=8192` → Version `112ca117-31ae-4c5c-ac35-d3469f8673e3`）。
