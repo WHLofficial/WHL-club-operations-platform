@@ -1,11 +1,13 @@
 // v6.43.0 成长录入截图识别 · core 纯函数测试（解析 / 认人 / 草稿 / 交叉校验）。
 // v6.51.3：队名对侧（TC-TEAM）——模型给中文队名，比对容忍译名与前后缀漂移。
+// v6.51.8：英文兜底分侧 —— 模型照抄截图英文名时，用 FC26 队名表把英文名查回队号（TC-TEAM-06）。
 // 测试计划：docs/test-plans/v6.43.0-growth-ocr.md（TC-OCR / TC-MATCH / TC-DRAFT / TC-XCHK）、
-// docs/test-plans/v6.51.3-ocr-team-name-chinese.md（TC-TEAM）。
+// docs/test-plans/v6.51.3-ocr-team-name-chinese.md（TC-TEAM）、docs/test-plans/v6.51.8-ocr-unmatched-side-pick.md。
 import { describe, expect, it } from 'vitest';
 import { extractJsonObject } from '../src/lib/llm.ts';
 import {
   buildOcrEntries,
+  fc26TeamIdOfName,
   isSameSurnameShape,
   isSameTeamName,
   matchOcrTeamSide,
@@ -347,5 +349,23 @@ describe('TC-TEAM 队名对侧（v6.51.3）', () => {
     expect(teamNameMatchStrength('莱比锡红牛', 'RB莱比锡')).toBe(1); // 只在核心名层互相包含
     expect(teamNameMatchStrength('慕尼黑', '拜仁慕尼黑')).toBe(1);
     expect(teamNameMatchStrength('曼', '曼城')).toBe(0); // 单字不认（≥2 字才判包含）
+  });
+
+  it('TC-TEAM-06 英文名 → FC26 队号（v6.51.8 兜底分侧）：唯一命中才算，多命中/假名/空值回 null', () => {
+    // 平台现役队的游戏英文真名（就是截图里显示的那串）
+    expect(fc26TeamIdOfName('OLYMPIACOS FC')).toBe(280);
+    expect(fc26TeamIdOfName('CHELSEA')).toBe(5); // 全大写也认：折叠后逐字相等
+    expect(fc26TeamIdOfName('FC BAYERN MÜNCHEN')).toBe(21);
+    expect(fc26TeamIdOfName('Fiorentina')).toBe(110374);
+    expect(fc26TeamIdOfName('1860 München')).toBe(33); // 剥掉 tsv 后核心名相等
+    expect(fc26TeamIdOfName('Bayern')).toBe(21); // 严格层没中才退宽松包含（只写半截也救得回）
+    expect(fc26TeamIdOfName('Barcelona')).toBe(241);
+    // 不猜的几种：片段同时像两队 / 库里两个 id 同名 / 游戏假名（表里已改回真名）/ 空值
+    expect(fc26TeamIdOfName('Manchester')).toBeNull();
+    expect(fc26TeamIdOfName('AC Milan')).toBeNull(); // 老 id 47 与新 id 131681 同名 ⇒ 多命中不猜
+    expect(fc26TeamIdOfName('MILANO FC')).toBeNull(); // 游戏内假名，表里是改回后的 AC Milan
+    expect(fc26TeamIdOfName('')).toBeNull();
+    expect(fc26TeamIdOfName('  ')).toBeNull();
+    expect(fc26TeamIdOfName(null)).toBeNull();
   });
 });

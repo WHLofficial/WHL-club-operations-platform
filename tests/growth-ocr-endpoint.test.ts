@@ -2,8 +2,9 @@
 // 识别路径零 DB 写：成功后 growth_events / audit_log / growth_xp 必须原样不动（TC-EP-06）。
 // v6.51.2：出站 max_tokens 缺省 1024（glm-4v-flash 上限）+ LLM_VISION_MAX_TOKENS 可配 + 截断明确报错。
 // v6.51.3：提示词要求中文队名（锁出站文本）；队名对侧容忍译名/前后缀漂移，英文队名仍 400。
+// v6.51.8：队名对不上也能选边（回 code=ocr_team_unmatched）；模型照抄英文名时先用 FC26 队名表兜底分侧。
 // 测试计划：docs/test-plans/v6.43.0-growth-ocr.md、docs/test-plans/v6.51.2-ocr-vision-maxtokens.md、
-// docs/test-plans/v6.51.3-ocr-team-name-chinese.md。
+// docs/test-plans/v6.51.3-ocr-team-name-chinese.md、docs/test-plans/v6.51.8-ocr-unmatched-side-pick.md。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -435,5 +436,40 @@ describe('TC-EP 截图识别端点', () => {
     const otherCall = captureVision(JSON.stringify(summaryPayload));
     expect((await sendOcr(other, { image: PNG_B64 })).status).toBe(200);
     expect(otherCall().body.thinking).toBeUndefined();
+  });
+
+  it('TC-EP-18 英文兜底分侧：模型照抄截图英文（OLYMPIACOS FC）直接判侧，认不出仍回按钮（v6.51.8）', async () => {
+    // 真实俱乐部形态：clubs.id = FC26 队号（280 奥林匹亚科斯 / 243 皇家马德里），花名册也按 club_id 挂
+    const fx = freshEnv(LLM);
+    seedBase(fx);
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES
+        (280, '奥林匹亚科斯', 'premier', 'active'), (243, '皇家马德里', 'premier', 'active');
+      INSERT INTO players (id, uid, name, display_name, club_id, position, status, growth_xp, ca) VALUES
+        (30, 'p30', 'K. Zhang', '张三', 280, 'GK', 'normal', 0, 70),
+        (31, 'p31', 'L. Li', NULL, 280, 'ST', 'normal', 0, 70);
+    `);
+    seedMatch(fx, MATCH_ID, '奥林匹亚科斯', '皇家马德里');
+    mockVision(JSON.stringify({ ...summaryPayload, team: 'OLYMPIACOS FC', teamRaw: 'OLYMPIACOS FC' }));
+    const res = await sendOcr(fx, { image: PNG_B64 });
+    expect(res.status).toBe(200);
+    const ok = (await res.json()) as OcrResponse;
+    expect(ok.side).toBe('home');
+    // 英文名认出来之后走的是常规路径：花名册照常认人、不用用户点按钮
+    expect(ok.entries.map((e) => e.playerId)).toEqual([30, 31]);
+
+    // 同一个英文名对一支不含该队的场次：不准硬塞，照旧 400 让用户点按钮/取消
+    mockVision(JSON.stringify({ ...summaryPayload, team: 'OLYMPIACOS FC', teamRaw: 'OLYMPIACOS FC' }));
+    const miss = await sendOcr(seeded(), { image: PNG_B64 });
+    expect(miss.status).toBe(400);
+    const missBody = (await miss.json()) as { code?: string; error: string };
+    expect(missBody.code).toBe('ocr_team_unmatched');
+    expect(missBody.error).toContain('OLYMPIACOS FC');
+
+    // 中文已经判出侧时以中文为准（两个来源打架不猜）：中文「奥林匹亚科斯」+ 英文原文写皇马 ⇒ 仍判主队
+    mockVision(JSON.stringify({ ...summaryPayload, team: '奥林匹亚科斯', teamRaw: 'REAL MADRID' }));
+    const priority = await sendOcr(seededTeams('奥林匹亚科斯', '皇家马德里'), { image: PNG_B64 });
+    expect(priority.status).toBe(200);
+    expect(((await priority.json()) as OcrResponse).side).toBe('home');
   });
 });

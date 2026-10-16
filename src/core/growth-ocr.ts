@@ -7,6 +7,7 @@
 // v6.51.4：认人补一层「姓 + 首字母」形态容忍（isSameSurnameShape）——库里 Marc Cucurella / Pedro Neto / Aleix García
 //   这类全名，截图（FC26 游戏内）给 M. Cucurella / P. Neto / A. García，逐字比不过去；只存姓的（Carvajal / Ibañez）同理。
 import { foldName } from './name-fold.ts';
+import { FC26_TEAM_NAMES } from './fc26-team-names.ts';
 
 export type OcrKind = 'summary' | 'goalkeeping';
 
@@ -272,6 +273,33 @@ export function matchOcrTeamSide(
   if (home === 0 && away === 0) return null;
   if (home === away) return 'ambiguous';
   return home > away ? 'home' : 'away';
+}
+
+// ---------- 英文队名兜底分侧（v6.51.8） ----------
+/**
+ * 截图上的 FC26 英文队名 → 队号（唯一命中才算，多命中或未收录回 null）。
+ *
+ * 模型有时不按提示词给中文译名、直接照抄截图原文（OLYMPIACOS FC 这类冷门队最明显），此时中文比对必然落空；
+ * 而 ref 表（`fc26-team-names.ts`）里的游戏英文真名是确定的 —— 查出来的队号可以直接和本场两侧的
+ * `clubs.id`（= FC26 队号）对齐，用户不必点按钮选边。命中不了（含多命中，如只写「Manchester」同时像
+ * 曼城与曼联）就回 null，交给按钮兜底，不影响原有判定。
+ */
+export function fc26TeamIdOfName(raw: string | null): number | null {
+  const name = (raw ?? '').trim();
+  if (name === '') return null;
+  // 两趟：先看「改名/缩写之外完全一致」（含剥俱乐部前后缀的核心名相等，强度 ≥2），只有这趟没命中
+  // 才退到宽松包含（强度 1，容忍「Bayern」这种只写半截的）。一趟到底会被跨联赛的近似名撞掉——
+  // 「FC Barcelona」同时松匹配到 Barcelona Sporting Club、「Real Betis Balompié」松匹配到 Real Betis，
+  // 于是多命中回 null，本来能桥接的队反而不桥接。
+  const strict: number[] = [];
+  const loose: number[] = [];
+  for (const [id, english] of Object.entries(FC26_TEAM_NAMES)) {
+    const strength = teamNameMatchStrength(name, english);
+    if (strength >= 2) strict.push(Number(id));
+    else if (strength === 1) loose.push(Number(id));
+  }
+  if (strict.length > 0) return strict.length === 1 ? strict[0] : null;
+  return loose.length === 1 ? loose[0] : null;
 }
 
 export interface OcrBuildResult {

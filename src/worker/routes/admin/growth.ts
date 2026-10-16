@@ -18,7 +18,7 @@ import {
   type GrowthEventType,
 } from '../../growth.ts';
 import { rowDisplayName } from '../../../core/player-name.ts';
-import { parseOcrVision, buildOcrEntries, matchOcrTeamSide, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
+import { parseOcrVision, buildOcrEntries, matchOcrTeamSide, fc26TeamIdOfName, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
 import { llmVisionJson } from '../../../lib/llm.ts';
 import { suspendedPlayersAtMatch, suspensionLabel } from '../../tour-suspension.ts';
 import { loadTournamentNames, tournamentNameOf } from '../../tournament-names.ts';
@@ -511,7 +511,19 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   // 提示优先给模型照抄的截图原文，中文识别结果括注在后 —— 英文原文才是用户核对「传错图没」的锚点
   const shownTeam = ocr.teamRaw ?? ocr.team ?? '未识别';
   const shownZh = ocr.teamRaw && ocr.team && ocr.team !== ocr.teamRaw ? `（识别为「${ocr.team}」）` : '';
-  const matched = forcedSide ?? matchOcrTeamSide(ocr.team, row.home_team, row.away_team);
+  // 英文兜底的分侧依据（v6.51.8）：本场两侧的俱乐部号只查这一次，下面选边/取花名册共用同一份缓存
+  const clubCache = new Map<string, number | null>();
+  const homeClub = await resolveEntrySide(c.env.DB, row.home_team, clubCache);
+  const awayClub = await resolveEntrySide(c.env.DB, row.away_team, clubCache);
+  let matched = forcedSide ?? matchOcrTeamSide(ocr.team, row.home_team, row.away_team);
+  // v6.51.8 英文兜底：模型没给中文译名（照抄截图英文，OLYMPIACOS FC 这类冷门队最明显）时，
+  // 用英文原文查 FC26 队号（core/growth-ocr 的 fc26TeamIdOfName），再与本场两侧 clubId（= FC26 队号）对齐；
+  // 只在中文比对落空/歧义时兜底（中文命中优先，免得两个来源互相打架），两边都不中就照旧让用户点按钮
+  if (matched === null || matched === 'ambiguous') {
+    const refId = fc26TeamIdOfName(ocr.teamRaw ?? ocr.team);
+    if (refId !== null && refId === homeClub.clubId) matched = 'home';
+    else if (refId !== null && refId === awayClub.clubId) matched = 'away';
+  }
   if (matched === 'ambiguous') {
     throw new HttpError(
       400,
@@ -527,7 +539,7 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
     );
   const side: 'home' | 'away' = matched;
 
-  const resolved = await resolveEntrySide(c.env.DB, side === 'home' ? row.home_team : row.away_team, new Map());
+  const resolved = side === 'home' ? homeClub : awayClub;
   const roster: OcrRosterPlayer[] =
     resolved.clubId === null
       ? []
