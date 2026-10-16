@@ -609,7 +609,7 @@ describe('TC-PV · 预览 GET /api/admin/weather/forecast', () => {
       confirmedWeather: null,
       skippedReason: null,
     });
-    expect(mine!.stadium).toEqual({ name: '球场1', capacity: 20000, tier: 0 });
+    expect(mine!.stadium).toEqual({ name: '球场1', capacity: 20000, tier: 0, venueName: '' }); // v6.51.0 批 1：无冠名时落点名 ''
     expect(confirmed).toMatchObject({
       weather: null, // 无预报行
       wxCoef: null,

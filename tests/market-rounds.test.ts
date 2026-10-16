@@ -289,13 +289,13 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     const round1 = await seedOpenRound(fx.env);
-    const keep = await seedOffer(fx.env, 1, '麒麟生物', 1);
-    await seedOffer(fx.env, 1, '亚马逊', 2);
+    const keep = await seedOffer(fx.env, 1, '凯利昂生物', 1);
+    await seedOffer(fx.env, 1, '奥维恩', 2);
 
     const build = await buildRoundStatements(fx.env, 1, 2);
     expect(build.hadOpenRound).toBe(true);
     expect(build.settleStatements).toHaveLength(3);
-    expect(build.offerCount).toBe(16); // 16 家品牌各 1 队（所有档位都只有 1 队可选）
+    expect(build.offerCount).toBe(28); // 28 家品牌各 1 队（所有档位都只有 1 队可选）
 
     await fx.env.DB.batch([...build.settleStatements, ...build.openStatements]);
 
@@ -318,7 +318,7 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     const build = await buildRoundStatements(fx.env, 1, 1);
     expect(build.hadOpenRound).toBe(false);
     expect(build.settleStatements).toHaveLength(0);
-    expect(build.offerCount).toBe(16);
+    expect(build.offerCount).toBe(28);
     expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM market_rounds')).toBe(0);
   });
 
@@ -371,7 +371,7 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     const round1 = await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '麒麟生物', 1);
+    const offerId = await seedOffer(fx.env, 1, '凯利昂生物', 1);
     const build = await buildRoundStatements(fx.env, 1, 2);
     // 批内必败语句（NOT NULL 违约）⇒ 整批回滚：清盘也不得生效
     const bomb = fx.env.DB.prepare(
@@ -400,14 +400,14 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    await seedOffer(fx.env, 1, '麒麟生物', 1);
-    await seedOffer(fx.env, 1, '亚马逊', 2);
+    await seedOffer(fx.env, 1, '凯利昂生物', 1);
+    await seedOffer(fx.env, 1, '奥维恩', 2);
     await seedOffer(fx.env, 1, '星海通讯', 1);
     await openRound(fx.env, 1, 2);
-    expect(brandHeat(fx.sqlite, '麒麟生物')).toBe(1.17); // 1.2 − 0.03
-    expect(brandHeat(fx.sqlite, '亚马逊')).toBe(1.27); // 1.3 − 0.03
+    expect(brandHeat(fx.sqlite, '凯利昂生物')).toBe(1.17); // 1.2 − 0.03
+    expect(brandHeat(fx.sqlite, '奥维恩')).toBe(1.27); // 1.3 − 0.03
     expect(brandHeat(fx.sqlite, '星海通讯')).toBe(0.77); // 0.8 − 0.03
-    expect(brandHeat(fx.sqlite, '阿迪达斯')).toBe(1.1); // 没出手 ⇒ 不动
+    expect(brandHeat(fx.sqlite, '维洛')).toBe(1.1); // 没出手 ⇒ 不动
   });
 
   it('TC-ROUND-07B 热度惩罚钳底不破（SQL 侧 MAX 兜住下钳）', async () => {
@@ -427,11 +427,11 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await seedOffer(fx.env, 1, '星海通讯', 1); // 报价先落，再把品牌弃用
-    await seedOffer(fx.env, 1, '阿迪达斯', 1); // 对照组：在池且整轮无人签
+    await seedOffer(fx.env, 1, '维洛', 1); // 对照组：在池且整轮无人签
     fx.sqlite.exec("UPDATE brand_pool SET status = 'discarded' WHERE brand = '星海通讯'");
     await openRound(fx.env, 1, 2);
     expect(brandHeat(fx.sqlite, '星海通讯')).toBe(0.8); // 弃用 ⇒ WHERE status='adopted' 挡住
-    expect(brandHeat(fx.sqlite, '阿迪达斯')).toBe(1.07); // 1.1 − 0.03
+    expect(brandHeat(fx.sqlite, '维洛')).toBe(1.07); // 1.1 − 0.03
   });
 
   it('TC-ROUND-07C 已 accepted / queued 的品牌不扣热度（且自此不再出手）', async () => {
@@ -440,19 +440,19 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     seedClub(fx.sqlite, 2);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    // 队 1 签下可口可乐（新兴，名额 2）⇒ 热度 +deal
-    await signViaOffer(fx.env, 1, '可口可乐', 1);
-    // 队 2 有 active（星海通讯）⇒ 可排队接班可口可乐
+    // 队 1 签下斯科尔汽水（新兴，名额 2）⇒ 热度 +deal
+    await signViaOffer(fx.env, 1, '斯科尔汽水', 1);
+    // 队 2 有 active（星海通讯）⇒ 可排队接班斯科尔汽水
     await signViaOffer(fx.env, 2, '星海通讯', 1);
-    const queuedOffer = await seedOffer(fx.env, 2, '可口可乐', 1);
+    const queuedOffer = await seedOffer(fx.env, 2, '斯科尔汽水', 1);
     const out = await acceptOffer(fx.env, queuedOffer, 2, 'queued', null);
     expect(out.result).toBe('queued');
-    expect(brandHeat(fx.sqlite, '可口可乐')).toBe(1.02); // 签约 deal +0.02
+    expect(brandHeat(fx.sqlite, '斯科尔汽水')).toBe(1.02); // 签约 deal +0.02
 
     const build = await buildRoundStatements(fx.env, 1, 2);
     await fx.env.DB.batch([...build.settleStatements, ...build.openStatements]);
     // 清盘不得把已签/已排队的品牌按「被冷落」再扣一次
-    expect(brandHeat(fx.sqlite, '可口可乐')).toBe(1.02);
+    expect(brandHeat(fx.sqlite, '斯科尔汽水')).toBe(1.02);
     // 「名额合并计数 ⇒ 本轮不再出手」由 TC-OFFER-07B 专测（此处不重复断言，避免变异归因串台）
     expect(packageNoForTier('新兴')).toBe(1);
   });
@@ -479,9 +479,9 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const queuedOffer = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const queuedOffer = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, queuedOffer, 1, 'queued', null);
-    const pending = await seedOffer(fx.env, 1, '亚马逊', 1);
+    const pending = await seedOffer(fx.env, 1, '奥维恩', 1);
     const roundsBefore = countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM market_rounds');
 
     const { summary, notifications } = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: false });
@@ -509,8 +509,8 @@ describe('定向递价（TC-OFFER）', () => {
     const build = await openRound(fx.env, 1, 1);
     const round = (await getOpenRound(fx.env.DB))!;
     expect(build.offersPerClub.length).toBeGreaterThan(0);
-    expect(clubsOfferedFor(fx.sqlite, '亚马逊', round.id)).toEqual([1, 3]);
-    expect(clubsOfferedFor(fx.sqlite, '麒麟生物', round.id)).toEqual([1, 3]);
+    expect(clubsOfferedFor(fx.sqlite, '奥维恩', round.id)).toEqual([1, 3]);
+    expect(clubsOfferedFor(fx.sqlite, '凯利昂生物', round.id)).toEqual([1, 3]);
     // perBrand=1 ⇒ 头部只给第一
     expect(pickTargetsForBrand('头部', [{ clubId: 9 }, { clubId: 8 }, { clubId: 7 }], 1, new Set())).toEqual([9]);
     expect(packageNoForTier('头部')).toBe(2);
@@ -524,14 +524,14 @@ describe('定向递价（TC-OFFER）', () => {
     expect(pickTargetsForBrand('新兴', [{ clubId: 1 }], 3, new Set())).toEqual([1]);
   });
 
-  it('TC-OFFER-02b 新兴落地：6 队等值 ⇒ 可口可乐/海底捞都给 [3,4,5]', async () => {
+  it('TC-OFFER-02b 新兴落地：6 队等值 ⇒ 斯科尔汽水/洛森餐饮都给 [3,4,5]', async () => {
     const fx = freshEnv();
     seedClubs(fx.sqlite, 6);
     openWindow(fx.sqlite);
     await openRound(fx.env, 1, 1);
     const round = (await getOpenRound(fx.env.DB))!;
-    expect(clubsOfferedFor(fx.sqlite, '可口可乐', round.id)).toEqual([3, 4, 5]);
-    expect(clubsOfferedFor(fx.sqlite, '海底捞', round.id)).toEqual([3, 4, 5]);
+    expect(clubsOfferedFor(fx.sqlite, '斯科尔汽水', round.id)).toEqual([3, 4, 5]);
+    expect(clubsOfferedFor(fx.sqlite, '洛森餐饮', round.id)).toEqual([3, 4, 5]);
     expect(packageNoForTier('新兴')).toBe(1);
   });
 
@@ -542,7 +542,7 @@ describe('定向递价（TC-OFFER）', () => {
     expect(packageNoForTier('口碑')).toBe(1);
   });
 
-  it('TC-OFFER-03b 口碑落地：5 队时星海通讯先给零报价的第 5 队，西维斯健康复用第 1-3 队', async () => {
+  it('TC-OFFER-03b 口碑落地：5 队时星海通讯先给零报价的第 5 队，埃尔巴草本复用第 1-3 队', async () => {
     const fx = freshEnv();
     seedClubs(fx.sqlite, 5);
     openWindow(fx.sqlite);
@@ -550,7 +550,7 @@ describe('定向递价（TC-OFFER）', () => {
     const round = (await getOpenRound(fx.env.DB))!;
     // 头部 {1,2}、新兴 [2,3,4] 已占 1-4 ⇒ 星海通讯 zero=[5] 优先
     expect(clubsOfferedFor(fx.sqlite, '星海通讯', round.id)).toEqual([1, 2, 5]);
-    expect(clubsOfferedFor(fx.sqlite, '西维斯健康', round.id)).toEqual([1, 2, 3]);
+    expect(clubsOfferedFor(fx.sqlite, '埃尔巴草本', round.id)).toEqual([1, 2, 3]);
     const star = offerRows(fx.sqlite, "WHERE round_id = ? AND brand_id = ?", round.id, brandId(fx.sqlite, '星海通讯'));
     expect(new Set(star.map((o) => o.club_id)).size).toBe(star.length);
   });
@@ -561,7 +561,7 @@ describe('定向递价（TC-OFFER）', () => {
     fx.sqlite.exec("INSERT INTO clubs (id, name, league_tier, status) VALUES (2, '无球场队', 'premier', 'active')");
     openWindow(fx.sqlite);
     const build = await openRound(fx.env, 1, 1);
-    expect(build.offerCount).toBe(16); // 16 家品牌 × 唯一可估值的队 1
+    expect(build.offerCount).toBe(28); // 28 家品牌 × 唯一可估值的队 1
     expect(offerRows(fx.sqlite, 'WHERE club_id = 2')).toHaveLength(0);
     expect(pickTargetsForBrand('口碑', [], 3, new Set())).toEqual([]);
     expect(pickTargetsForBrand('头部', [], 3, new Set())).toEqual([]);
@@ -578,16 +578,16 @@ describe('定向递价（TC-OFFER）', () => {
         `SELECT o.package_no, o.windows, o.amount, o.package_json FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id WHERE b.brand = ?`,
         brand,
       )!;
-    const amazon = byBrand('亚马逊');
+    const amazon = byBrand('奥维恩');
     expect(amazon.package_no).toBe(2);
     expect(amazon.windows).toBe(2);
     expect(amazon.amount).toBe(2.78); // round3(round3(1.316×1.3×1.3) × 1.25)
     expect((JSON.parse(amazon.package_json) as { pkgName: string }).pkgName).toBe('进取');
-    const coke = byBrand('可口可乐');
+    const coke = byBrand('斯科尔汽水');
     expect([coke.package_no, coke.windows, coke.amount]).toEqual([1, 6, 1.119]);
     expect((JSON.parse(coke.package_json) as { pkgName: string }).pkgName).toBe('稳健');
-    const qilin = byBrand('麒麟生物'); // 头部 ⇒ 同样递进取
-    expect([qilin.package_no, qilin.windows, qilin.amount]).toEqual([2, 2, 2.369]); // round3(1.895 × 1.25)
+    const qilin = byBrand('凯利昂生物'); // 头部但招商性格=稳健（v6.51.0）⇒ 按性格递稳健
+    expect([qilin.package_no, qilin.windows, qilin.amount]).toEqual([1, 6, 1.611]); // round3(1.895 × 0.85)
   });
 
   it('TC-OFFER-06 package_json 是发放时快照：开轮后改热度不影响合同', async () => {
@@ -597,9 +597,9 @@ describe('定向递价（TC-OFFER）', () => {
     await openRound(fx.env, 1, 1);
     const amazon = sqlGet<OfferRow>(
       fx.sqlite,
-      `SELECT o.* FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id WHERE b.brand = '亚马逊'`,
+      `SELECT o.* FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id WHERE b.brand = '奥维恩'`,
     )!;
-    fx.sqlite.exec("UPDATE brand_pool SET heat = 1.4 WHERE brand = '亚马逊'");
+    fx.sqlite.exec("UPDATE brand_pool SET heat = 1.4 WHERE brand = '奥维恩'");
     const out = await acceptOffer(fx.env, amazon.id, 1, undefined, null);
     const contract = out.contract!;
     expect(contract.base_fee).toBe(2.224); // 快照底价（旧热度 1.3）
@@ -609,7 +609,7 @@ describe('定向递价（TC-OFFER）', () => {
     expect(contract.windows_total).toBe(2);
     expect(contract.windows_remaining).toBe(2);
     // 热度按签约当刻的现值再 +deal（合同是快照，热度不是）；1.4 + 0.02，未到上钳
-    expect(brandHeat(fx.sqlite, '亚马逊')).toBe(1.42);
+    expect(brandHeat(fx.sqlite, '奥维恩')).toBe(1.42);
   });
 
   it('TC-OFFER-07A 名额过滤：头部已有 active ⇒ 整轮不出手', async () => {
@@ -618,12 +618,12 @@ describe('定向递价（TC-OFFER）', () => {
     seedClub(fx.sqlite, 2);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    await signViaOffer(fx.env, 1, '亚马逊', 2);
+    await signViaOffer(fx.env, 1, '奥维恩', 2);
     const build = await buildRoundStatements(fx.env, 2, 1);
     await fx.env.DB.batch([...build.settleStatements, ...build.openStatements]);
     const round = (await getOpenRound(fx.env.DB))!;
-    expect(clubsOfferedFor(fx.sqlite, '亚马逊', round.id)).toEqual([]);
-    expect(build.offerCount).toBe(30); // 15 家出手 × 2 队（头部剩 2 家 + 新兴 3 家 + 口碑 10 家）
+    expect(clubsOfferedFor(fx.sqlite, '奥维恩', round.id)).toEqual([]);
+    expect(build.offerCount).toBe(54); // 27 家出手 × 2 队（头部剩 2 家 + 新兴 5 家 + 口碑 20 家）
   });
 
   it('TC-OFFER-07B 名额过滤：queued 与 active 合并计数；口碑不限额照出', async () => {
@@ -632,15 +632,15 @@ describe('定向递价（TC-OFFER）', () => {
     seedClub(fx.sqlite, 2);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    await signViaOffer(fx.env, 1, '可口可乐', 1); // 新兴 active 1
+    await signViaOffer(fx.env, 1, '斯科尔汽水', 1); // 新兴 active 1
     await signViaOffer(fx.env, 2, '星海通讯', 1); // 队 2 有约 ⇒ 才能排队
-    const queuedOffer = await seedOffer(fx.env, 2, '可口可乐', 1);
+    const queuedOffer = await seedOffer(fx.env, 2, '斯科尔汽水', 1);
     await acceptOffer(fx.env, queuedOffer, 2, 'queued', null); // 新兴 queued 1 ⇒ 满 2
     const build = await buildRoundStatements(fx.env, 2, 1);
     await fx.env.DB.batch([...build.settleStatements, ...build.openStatements]);
     const round = (await getOpenRound(fx.env.DB))!;
-    expect(clubsOfferedFor(fx.sqlite, '可口可乐', round.id)).toEqual([]);
-    expect(clubsOfferedFor(fx.sqlite, '海底捞', round.id)).toEqual([1, 2]); // 新兴另一家没满
+    expect(clubsOfferedFor(fx.sqlite, '斯科尔汽水', round.id)).toEqual([]);
+    expect(clubsOfferedFor(fx.sqlite, '洛森餐饮', round.id)).toEqual([1, 2]); // 新兴另一家没满
     expect(clubsOfferedFor(fx.sqlite, '星海通讯', round.id)).toEqual([1, 2]); // 口碑有 active 照出
   });
 
@@ -651,7 +651,7 @@ describe('定向递价（TC-OFFER）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1); // 口碑 active 1
-    await signViaOffer(fx.env, 2, '海底捞', 1); // 队 2 有约 ⇒ 才能排队
+    await signViaOffer(fx.env, 2, '洛森餐饮', 1); // 队 2 有约 ⇒ 才能排队
     const queuedOffer = await seedOffer(fx.env, 2, '星海通讯', 1);
     expect((await acceptOffer(fx.env, queuedOffer, 2, 'queued', null)).result).toBe('queued'); // 口碑不限额 ⇒ 排得进
     const build = await buildRoundStatements(fx.env, 2, 1);
@@ -686,25 +686,25 @@ describe('定向递价（TC-OFFER）', () => {
     await openRound(fx.env, 1, 2);
     const round2 = (await getOpenRound(fx.env.DB))!;
     const listed = await listClubOffers(fx.env.DB, 1);
-    expect(listed).toHaveLength(16);
+    expect(listed).toHaveLength(28);
     expect(listed.every((o) => o.round_status === 'open')).toBe(true);
     expect(listed.map((o) => o.id)).toEqual([...listed.map((o) => o.id)].sort((a, b) => b - a)); // id DESC
 
     const star = listed.find((o) => o.brand === '星海通讯')!;
-    const cvs = listed.find((o) => o.brand === '西维斯健康')!;
+    const cvs = listed.find((o) => o.brand === '埃尔巴草本')!;
     await acceptOffer(fx.env, star.id, 1, undefined, null); // 签掉 ⇒ accepted 不再列
     await acceptOffer(fx.env, cvs.id, 1, 'queued', null);
     const after = await listClubOffers(fx.env.DB, 1);
-    expect(after).toHaveLength(15); // 16 − 已签 1（排队的那条仍在列）
+    expect(after).toHaveLength(27); // 28 − 已签 1（排队的那条仍在列）
     expect(after.map((o) => o.id)).toContain(cvs.id);
     expect(after.map((o) => o.id)).not.toContain(star.id);
 
-    // 关轮（清盘 pending）⇒ 旧轮 pending 全变 expired 不再列；新轮 16 条 pending 照列，queued 恒列
+    // 关轮（清盘 pending）⇒ 旧轮 pending 全变 expired 不再列；新轮 28 条 pending 照列，queued 恒列
     await openRound(fx.env, 1, 3);
     const settled = await listClubOffers(fx.env.DB, 1);
-    expect(settled).toHaveLength(17);
+    expect(settled).toHaveLength(29);
     expect(settled.filter((o) => o.status === 'queued').map((o) => o.id)).toEqual([cvs.id]);
-    expect(settled.filter((o) => o.status === 'pending')).toHaveLength(16);
+    expect(settled.filter((o) => o.status === 'pending')).toHaveLength(28);
     expect(settled.some((o) => o.id === star.id)).toBe(false);
     expect(round2.id).toBeLessThan((await getOpenRound(fx.env.DB))!.id);
   });
@@ -719,8 +719,8 @@ describe('定向递价（TC-OFFER）', () => {
     await fx.env.DB.batch([...build.settleStatements, ...build.openStatements]);
     expect(build.offersPerClub.some((p) => p.clubId === 1)).toBe(true);
     const round = (await getOpenRound(fx.env.DB))!;
-    expect(clubsOfferedFor(fx.sqlite, '亚马逊', round.id)).toEqual([1]);
-    expect(clubsOfferedFor(fx.sqlite, '西维斯健康', round.id)).toEqual([1]);
+    expect(clubsOfferedFor(fx.sqlite, '奥维恩', round.id)).toEqual([1]);
+    expect(clubsOfferedFor(fx.sqlite, '埃尔巴草本', round.id)).toEqual([1]);
   });
 });
 
@@ -732,19 +732,19 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
 
     const out = await acceptOffer(fx.env, offerId, 1, undefined, null);
     expect(out.result).toBe('signed');
     expect(out.penalty).toBe(0);
     const contract = out.contract!;
     expect(contract.club_id).toBe(1);
-    expect(contract.brand).toBe('可口可乐');
+    expect(contract.brand).toBe('斯科尔汽水');
     expect(contract.status).toBe('active');
     expect(contract.started_season).toBe(1);
     expect(contract.started_window).toBe(1);
     expect(offerRow(fx.sqlite, offerId).status).toBe('accepted');
-    expect(brandHeat(fx.sqlite, '可口可乐')).toBe(1.02);
+    expect(brandHeat(fx.sqlite, '斯科尔汽水')).toBe(1.02);
     const audit = sqlGet<{ action: string; target_type: string; target_id: number; actor: number | null }>(
       fx.sqlite,
       'SELECT action, target_type, target_id, actor FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1',
@@ -762,7 +762,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite, 2);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     await rejectsHttp(acceptOffer(fx.env, 99999, 1, undefined, null), 404, '报价不存在');
     await rejectsHttp(acceptOffer(fx.env, offerId, 2, undefined, null), 403, '这份报价不是递给你们队的');
   });
@@ -772,7 +772,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     fx.sqlite.exec(`UPDATE market_offers SET status = 'expired' WHERE id = ${offerId}`);
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, undefined, null), 409, '报价已过期');
     fx.sqlite.exec(`UPDATE market_offers SET status = 'accepted' WHERE id = ${offerId}`);
@@ -786,7 +786,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     fx.sqlite.exec(`UPDATE market_offers SET expire_at = '2020-01-01T00:00:00.000Z' WHERE id = ${offerId}`);
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, undefined, null), 409, '报价已过有效期');
     expect(offerRow(fx.sqlite, offerId).status).toBe('expired');
@@ -798,7 +798,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     const roundId = await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     fx.sqlite.exec(`UPDATE market_rounds SET status = 'settled', settled_at = '2026-08-01T00:00:00Z' WHERE id = ${roundId}`);
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, undefined, null), 409, '招商轮已关闭，签不了这份报价');
     expect(offerRow(fx.sqlite, offerId).status).toBe('pending');
@@ -809,7 +809,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     await seedOpenRound(fx.env); // 轮开着但没有窗口
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, undefined, null), 409, '转会窗口没开，签不了冠名合同');
   });
 
@@ -819,7 +819,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
     const msg = '已有生效冠名：签新报价请选择「到期后自动接替」或「解约当前并签新」';
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, undefined, null), 400, msg);
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, 'bogus', null), 400, msg);
@@ -833,7 +833,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     const out = await acceptOffer(fx.env, offerId, 1, 'queued', null);
     expect(out.result).toBe('queued');
     expect(out.contract).toBeNull();
@@ -868,16 +868,16 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     const first = await acceptOffer(fx.env, offerId, 1, undefined, null);
     expect(first.result).toBe('signed');
-    expect(brandHeat(fx.sqlite, '可口可乐')).toBe(1.02);
+    expect(brandHeat(fx.sqlite, '斯科尔汽水')).toBe(1.02);
     const auditsAfterWin = countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_offer_accept'");
 
     // 输方：pre-check 就撞 accepted；库里不得多一行合同、热度不得二次 +deal
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, undefined, null), 409, '这份报价已处理过');
     expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(1);
-    expect(brandHeat(fx.sqlite, '可口可乐')).toBe(1.02);
+    expect(brandHeat(fx.sqlite, '斯科尔汽水')).toBe(1.02);
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_offer_accept'")).toBe(auditsAfterWin);
   });
 
@@ -886,20 +886,20 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
-    const heat0 = brandHeat(fx.sqlite, '可口可乐');
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
+    const heat0 = brandHeat(fx.sqlite, '斯科尔汽水');
     // 预检已过、批提交前被抢先落下一纸 active：抢锁句守卫假 ⇒ claim 未写入 ⇒ 下游语句全挂同一令牌，整批零改行
     const env = racingEnv(fx, () => {
       fx.sqlite.exec(`INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name,
         fee_per_window, windows_total, windows_remaining, status, started_season, started_window, created_at, updated_at)
-        VALUES (1, '海底捞', 0.9, 1.0, 1, '稳健', 0.85, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`);
+        VALUES (1, '洛森餐饮', 0.9, 1.0, 1, '稳健', 0.85, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`);
     });
     await rejectsHttp(acceptOffer(env, offerId, 1, undefined, null), 409, '报价已被处理或条件已变化，请刷新后重试');
     expect(offerRow(fx.sqlite, offerId).status).toBe('pending');
     expect(sqlGet<{ claim_token: string }>(fx.sqlite, 'SELECT claim_token FROM market_offers WHERE id = ?', offerId)!.claim_token).toBe('');
     expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(1); // 只有抢先那纸
-    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '可口可乐'")).toBe(0);
-    expect(brandHeat(fx.sqlite, '可口可乐')).toBe(heat0); // 热度不 +deal
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '斯科尔汽水'")).toBe(0);
+    expect(brandHeat(fx.sqlite, '斯科尔汽水')).toBe(heat0); // 热度不 +deal
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_offer_accept'")).toBe(0);
   });
 
@@ -911,12 +911,12 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     const old = await signViaOffer(fx.env, 1, '星海通讯', 1);
     expect(old.windows_remaining).toBe(6);
     expect(old.fee_per_window).toBe(1.164); // round3(1.369×0.85)
-    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
 
     const out = await acceptOffer(fx.env, offerId, 1, 'terminate', 1);
     expect(out.result).toBe('terminated');
     expect(out.penalty).toBe(1.746); // round3(5 × 1.164 × 0.3)
-    expect(out.contract!.brand).toBe('亚马逊');
+    expect(out.contract!.brand).toBe('奥维恩');
     const terminated = sqlGet<{ status: string; ended_season: number; ended_window: number }>(
       fx.sqlite,
       'SELECT status, ended_season, ended_window FROM naming_contracts WHERE id = ?',
@@ -946,7 +946,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     await seedOpenRound(fx.env);
     const old = await signViaOffer(fx.env, 1, '星海通讯', 1);
     fx.sqlite.exec(`UPDATE naming_contracts SET windows_remaining = 1 WHERE id = ${old.id}`);
-    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
     const out = await acceptOffer(fx.env, offerId, 1, 'terminate', null);
     expect(out.result).toBe('terminated');
     expect(out.penalty).toBe(0);
@@ -964,9 +964,9 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite, 2);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    await signViaOffer(fx.env, 1, '亚马逊', 2); // 头部名额 1 用满
-    const offerId = await seedOffer(fx.env, 2, '亚马逊', 2);
-    await rejectsHttp(acceptOffer(fx.env, offerId, 2, undefined, null), 409, '品牌「亚马逊」档位名额已满（头部档限 1 队）');
+    await signViaOffer(fx.env, 1, '奥维恩', 2); // 头部名额 1 用满
+    const offerId = await seedOffer(fx.env, 2, '奥维恩', 2);
+    await rejectsHttp(acceptOffer(fx.env, offerId, 2, undefined, null), 409, '品牌「奥维恩」档位名额已满（头部档限 1 队）');
     expect(offerRow(fx.sqlite, offerId).status).toBe('pending');
   });
 
@@ -1001,7 +1001,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
     const first = await acceptOffer(fx.env, offerId, 1, 'terminate', null);
     expect(first.penalty).toBe(1.746);
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, 'terminate', null), 409, '这份报价已处理过');
@@ -1014,12 +1014,12 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
-    fx.sqlite.exec("UPDATE brand_pool SET status = 'discarded' WHERE brand = '亚马逊'");
+    const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
+    fx.sqlite.exec("UPDATE brand_pool SET status = 'discarded' WHERE brand = '奥维恩'");
     const out = await acceptOffer(fx.env, offerId, 1, undefined, null);
     expect(out.result).toBe('signed');
-    expect(out.contract!.brand).toBe('亚马逊');
-    expect(brandHeat(fx.sqlite, '亚马逊')).toBe(1.3); // WHERE status = 'adopted' 挡住 deal
+    expect(out.contract!.brand).toBe('奥维恩');
+    expect(brandHeat(fx.sqlite, '奥维恩')).toBe(1.3); // WHERE status = 'adopted' 挡住 deal
   });
 
   it('TC-ACCEPT-09C 换签赔款守卫与幂等：claim 挂账本闸、幂等键＝本报价（同键重放不双赔）', async () => {
@@ -1028,7 +1028,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
     const out = await acceptOffer(fx.env, offerId, 1, 'terminate', null);
     expect(out.penalty).toBe(1.746);
     const src = readFileSync(MARKET_SRC, 'utf8');
@@ -1068,7 +1068,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     const old = await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, offerId, 1, 'queued', null);
 
     // 旧约到期（收租批已把它 expire）
@@ -1078,15 +1078,15 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     await fx.env.DB.batch(activation.statements);
 
     const contract = (await getActiveNaming(fx.env.DB, 1))!;
-    expect(contract.brand).toBe('西维斯健康');
-    expect(contract.base_fee).toBe(1.105); // 快照底价：西维斯健康 heat 0.7 × 医疗系数 1.2
+    expect(contract.brand).toBe('埃尔巴草本');
+    expect(contract.base_fee).toBe(1.105); // 快照底价：埃尔巴草本 heat 0.7 × 医疗系数 1.2
     expect(contract.fee_per_window).toBe(0.939); // 口碑档稳健 = round3(1.105 × 0.85)，取自报价 amount
     expect(contract.brand_heat).toBe(0.7);
     expect(contract.pkg_name).toBe('稳健');
     expect(contract.windows_total).toBe(6);
     expect(contract.windows_remaining).toBe(6);
     expect(contract.started_season).toBe(2);
-    expect(activation.activated[0]).toMatchObject({ clubId: 1, offerId, brand: '西维斯健康', windows: 6, pkgName: '稳健' });
+    expect(activation.activated[0]).toMatchObject({ clubId: 1, offerId, brand: '埃尔巴草本', windows: 6, pkgName: '稳健' });
     // 缺陷 A 已修（2026-09-29）：批内顺序改为 offer 占坑（queued→accepted）→ 合同 INSERT（守卫 offer='accepted'）→ 审计
     expect(offerRow(fx.sqlite, offerId).status).toBe('accepted');
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(1);
@@ -1098,7 +1098,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, offerId, 1, 'queued', null);
     const activation = await activateQueuedStatements(fx.env, 1, 2, 'user', null);
     // 评审 P1-3：语句一律生成（3 条：占坑 / 合同 / 审计），落不落由执行期「本队无 active」守卫决定
@@ -1107,7 +1107,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     const outs = await fx.env.DB.batch(activation.statements);
     expect(outs.map((o) => o.meta.changes)).toEqual([0, 0, 0]);
     expect(offerRow(fx.sqlite, offerId).status).toBe('queued');
-    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '西维斯健康'")).toBe(0);
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '埃尔巴草本'")).toBe(0);
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(0);
     expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('星海通讯');
   });
@@ -1118,8 +1118,8 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerA = await seedOffer(fx.env, 1, '西维斯健康', 1);
-    const offerB = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const offerA = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
+    const offerB = await seedOffer(fx.env, 1, '奥维恩', 2);
     await acceptOffer(fx.env, offerA, 1, 'queued', null);
     // 口碑不限额 ⇒ 名额守卫过得去，闸门是「同队已有 queued」；评审 P1-1：直撞唯一索引是 500，先预检给 409
     await rejectsHttp(acceptOffer(fx.env, offerB, 1, 'queued', null), 409, '已有一份待接替报价，先处理它再排新的');
@@ -1138,7 +1138,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     const old = await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, offerId, 1, 'queued', null);
     fx.sqlite.exec(`UPDATE naming_contracts SET status = 'expired' WHERE id = ${old.id}`);
     const before =
@@ -1170,8 +1170,8 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     await seedOpenRound(fx.env);
     const a1 = await signViaOffer(fx.env, 1, '星海通讯', 1);
     const a2 = await signViaOffer(fx.env, 2, '星海通讯', 1);
-    const q1 = await seedOffer(fx.env, 1, '西维斯健康', 1);
-    const q2 = await seedOffer(fx.env, 2, '西维斯健康', 1);
+    const q1 = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
+    const q2 = await seedOffer(fx.env, 2, '埃尔巴草本', 1);
     await acceptOffer(fx.env, q1, 1, 'queued', null);
     await acceptOffer(fx.env, q2, 2, 'queued', null);
     fx.sqlite.exec(`UPDATE naming_contracts SET status = 'expired' WHERE id IN (${a1.id}, ${a2.id})`);
@@ -1179,14 +1179,14 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     const scoped = await activateQueuedStatements(fx.env, 1, 2, 'user', 1, [1]);
     expect(scoped.activated.map((a) => a.clubId)).toEqual([1]);
     await fx.env.DB.batch(scoped.statements);
-    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('西维斯健康'); // 只有队 1 转正
+    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('埃尔巴草本'); // 只有队 1 转正
     expect(await getActiveNaming(fx.env.DB, 2)).toBeNull(); // 别队不受影响
     expect(offerRow(fx.sqlite, q2).status).toBe('queued');
 
     const all = await activateQueuedStatements(fx.env, 1, 2, 'user', null);
     expect(all.activated.map((a) => a.clubId)).toEqual([2]);
     await fx.env.DB.batch(all.statements);
-    expect((await getActiveNaming(fx.env.DB, 2))!.brand).toBe('西维斯健康');
+    expect((await getActiveNaming(fx.env.DB, 2))!.brand).toBe('埃尔巴草本');
     expect(offerRow(fx.sqlite, q1).status).toBe('accepted');
     expect(offerRow(fx.sqlite, q2).status).toBe('accepted');
     const src = readFileSync(MARKET_SRC, 'utf8');
@@ -1199,7 +1199,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     const old = await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, offerId, 1, 'queued', null);
     fx.sqlite.exec(`UPDATE naming_contracts SET windows_remaining = 1 WHERE id = ${old.id}`);
     const contract = sqlGet<NamingContractRow>(fx.sqlite, 'SELECT * FROM naming_contracts WHERE id = ?', old.id)!;
@@ -1214,7 +1214,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     await fx.env.DB.batch([...rent, ...sameBatch.statements]);
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM naming_contracts WHERE id = ?', old.id)!.status).toBe('expired');
     expect(offerRow(fx.sqlite, offerId).status).toBe('accepted');
-    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('西维斯健康');
+    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('埃尔巴草本');
   });
 
   it('TC-QUEUED-07 并发守卫：批前冒出 active ⇒ 合同不落、offer 不转正、审计不落', async () => {
@@ -1223,7 +1223,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, offerId, 1, 'queued', null);
     // 转正语句构建时把 old 置 expired ⇒ 拿到语句
     const old = (await getActiveNaming(fx.env.DB, 1))!;
@@ -1231,13 +1231,13 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     const activation = await activateQueuedStatements(fx.env, 1, 2, 'user', null);
     expect(activation.statements).toHaveLength(3);
     // 构建之后、提交之前：并发又插了一纸 active（模拟退约路径/另一次关窗批抢先）
-    const winner = await seedOffer(fx.env, 1, '海底捞', 1);
+    const winner = await seedOffer(fx.env, 1, '洛森餐饮', 1);
     await acceptOffer(fx.env, winner, 1, undefined, null);
 
     await fx.env.DB.batch(activation.statements);
-    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('海底捞');
+    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('洛森餐饮');
     expect(offerRow(fx.sqlite, offerId).status).toBe('queued');
-    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '西维斯健康'")).toBe(0);
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '埃尔巴草本'")).toBe(0);
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(0);
     const src = readFileSync(MARKET_SRC, 'utf8');
     expect(src).toContain('WHERE NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = \'active\')');
@@ -1255,7 +1255,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     const cases = [
       {
         club: 1,
-        oldBrand: '海底捞',
+        oldBrand: '洛森餐饮',
         queued: '星海通讯',
         pkgNo: 1,
         amount: 1.111,
@@ -1265,8 +1265,8 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
       },
       {
         club: 2,
-        oldBrand: '可口可乐',
-        queued: '西维斯健康',
+        oldBrand: '斯科尔汽水',
+        queued: '埃尔巴草本',
         pkgNo: 2,
         amount: 2.222,
         broken: '{"baseFee": 2.5}',
@@ -1276,7 +1276,7 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
       {
         club: 3,
         oldBrand: '星海通讯',
-        queued: '亚马逊',
+        queued: '奥维恩',
         pkgNo: 3,
         amount: 3.333,
         broken: '{"brandHeat": "x", "bonusAmount": null}',
@@ -1323,12 +1323,12 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     await seedOpenRound(fx.env);
     const occ = seedOccurrence(fx.sqlite);
     const spawn = await spawnVisitOffer(fx.env, { clubId: 1, capacity: 20000, fans: 18000 }, occ, PENDING_GUARD);
-    expect(spawn.applied).toEqual({ brand: '麒麟生物', amount: 1.611, windows: 6 });
-    expect(spawn.notes).toEqual(['品牌「麒麟生物」上门递价：1.611M/窗 × 6 窗（稳健），冠名市场可签']);
+    expect(spawn.applied).toEqual({ brand: '凯利昂生物', amount: 1.611, windows: 6 });
+    expect(spawn.notes).toEqual(['品牌「凯利昂生物」上门递价：1.611M/窗 × 6 窗（稳健），冠名市场可签']);
     expect(spawn.statements).toHaveLength(0); // 独立执行，不进 occurrence 批
     const row = sqlGet<OfferRow>(
       fx.sqlite,
-      `SELECT o.* FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id WHERE b.brand = '麒麟生物'`,
+      `SELECT o.* FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id WHERE b.brand = '凯利昂生物'`,
     )!;
     expect([row.status, row.package_no, row.windows, row.amount]).toEqual(['pending', 1, 6, 1.611]);
     const snap = JSON.parse(row.package_json) as { pkgName: string; baseFee: number; brandHeat: number };
@@ -1364,11 +1364,11 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    await seedOffer(fx.env, 1, '麒麟生物', 1);
+    await seedOffer(fx.env, 1, '凯利昂生物', 1);
     const occ = seedOccurrence(fx.sqlite);
     const spawn = await spawnVisitOffer(fx.env, { clubId: 1, capacity: 20000, fans: 18000 }, occ, PENDING_GUARD);
     expect(spawn.applied).toBeNull();
-    expect(spawn.notes).toEqual(['品牌「麒麟生物」已有待处理的上门报价，本次落空']);
+    expect(spawn.notes).toEqual(['品牌「凯利昂生物」已有待处理的上门报价，本次落空']);
     expect(offerRows(fx.sqlite)).toHaveLength(1);
 
     // 评审 P1-2：去重子查询去掉 status 谓词后与 idx_market_offers_round 同口径——
@@ -1377,14 +1377,14 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     seedClub(fx2.sqlite);
     openWindow(fx2.sqlite);
     await seedOpenRound(fx2.env);
-    await signViaOffer(fx2.env, 1, '海底捞', 1); // 有约才能排接班；海底捞有 active ⇒ 不在候选池
-    const queuedId = await seedOffer(fx2.env, 1, '麒麟生物', 1);
+    await signViaOffer(fx2.env, 1, '洛森餐饮', 1); // 有约才能排接班；洛森餐饮有 active ⇒ 不在候选池
+    const queuedId = await seedOffer(fx2.env, 1, '凯利昂生物', 1);
     await acceptOffer(fx2.env, queuedId, 1, 'queued', null);
     const occ2 = seedOccurrence(fx2.sqlite);
     const spawn2 = await spawnVisitOffer(fx2.env, { clubId: 1, capacity: 20000, fans: 18000 }, occ2, PENDING_GUARD);
     expect(spawn2.applied).toBeNull();
-    expect(spawn2.notes).toEqual(['品牌「麒麟生物」已有待处理的上门报价，本次落空']);
-    expect(offerRows(fx2.sqlite)).toHaveLength(2); // 海底捞 + 麒麟生物排队报价，没有新行
+    expect(spawn2.notes).toEqual(['品牌「凯利昂生物」已有待处理的上门报价，本次落空']);
+    expect(offerRows(fx2.sqlite)).toHaveLength(2); // 洛森餐饮 + 凯利昂生物排队报价，没有新行
     const src = readFileSync(MARKET_SRC, 'utf8');
     expect(src).toContain('SELECT 1 FROM market_offers WHERE round_id = ? AND brand_id = ? AND club_id = ?');
   });
@@ -1394,10 +1394,10 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    fx.sqlite.exec("UPDATE brand_pool SET heat = 0 WHERE brand = '麒麟生物'");
+    fx.sqlite.exec("UPDATE brand_pool SET heat = 0 WHERE brand = '凯利昂生物'");
     const occ = seedOccurrence(fx.sqlite);
     const spawn = await spawnVisitOffer(fx.env, { clubId: 1, capacity: 20000, fans: 18000 }, occ, PENDING_GUARD);
-    expect(spawn.applied?.brand).toBe('阿迪达斯'); // 权重 0 被跳过（首个正权重品牌）
+    expect(spawn.applied?.brand).toBe('维洛'); // 权重 0 被跳过（首个正权重品牌）
     const src = readFileSync(MARKET_SRC, 'utf8');
     expect(src).toContain('const rng = env.rng ?? Math.random;');
     expect(src).toContain('const total = candidates.reduce((s, b) => s + Math.max(b.heat, 0), 0);');
@@ -1405,12 +1405,12 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
 
   it('TC-SPAWN-06 requires_no_naming 条件层：有冠名的队不候选，无冠名才过', () => {
     expect(conditionOk(ctxOf(), { requires_no_naming: true })).toBe(true);
-    expect(conditionOk(ctxOf({ brand: '可口可乐' }), { requires_no_naming: true })).toBe(false);
+    expect(conditionOk(ctxOf({ brand: '斯科尔汽水' }), { requires_no_naming: true })).toBe(false);
     // 计数型条件不受影响（回归：别把 no_naming 写成反向恒真）
-    expect(conditionOk(ctxOf({ brand: '可口可乐' }), { requires_naming: true })).toBe(true);
+    expect(conditionOk(ctxOf({ brand: '斯科尔汽水' }), { requires_naming: true })).toBe(true);
     // 池里只有 brand_visit 时，抽签结果完全由条件层决定
     const pool = [eventRowOf()];
-    expect(pickEvent(pool, ctxOf({ brand: '可口可乐' }), EVENT_RULES_DEFAULT, () => 0, {})).toBeNull();
+    expect(pickEvent(pool, ctxOf({ brand: '斯科尔汽水' }), EVENT_RULES_DEFAULT, () => 0, {})).toBeNull();
     expect(pickEvent(pool, ctxOf(), EVENT_RULES_DEFAULT, () => 0, {})?.event_id).toBe('brand_visit');
     const src = readFileSync(EVENT_SRC, 'utf8');
     expect(src).toContain('if (cond.requires_no_naming === true && ctx.brand !== null) return false;');
@@ -1422,11 +1422,11 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     seedClub(fx.sqlite, 2);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    fx.sqlite.exec("UPDATE brand_pool SET status = 'discarded' WHERE brand IN ('麒麟生物', '亚马逊', '可口可乐', '海底捞')");
-    await signViaOffer(fx.env, 2, '阿迪达斯', 1); // 队 2 有 active 阿迪达斯
+    fx.sqlite.exec("UPDATE brand_pool SET status = 'discarded' WHERE brand IN ('凯利昂生物', '奥维恩', '斯科尔汽水', '洛森餐饮')");
+    await signViaOffer(fx.env, 2, '维洛', 1); // 队 2 有 active 维洛
     const occ = seedOccurrence(fx.sqlite);
     const spawn = await spawnVisitOffer(fx.env, { clubId: 1, capacity: 20000, fans: 18000 }, occ, PENDING_GUARD);
-    expect(spawn.applied?.brand).toBe('星海通讯'); // 阿迪达斯被 active 挡住，弃用的不候选
+    expect(spawn.applied?.brand).toBe('星海通讯'); // 维洛被 active 挡住，弃用的不候选
   });
 
   it('TC-SPAWN-08 occurrence PENDING_GUARD：occurrence 非 pending ⇒ 不写库', async () => {
@@ -1517,15 +1517,15 @@ describe('招商轮配置（TC-CFG）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    fx.sqlite.exec("UPDATE brand_pool SET heat = 1.49 WHERE brand = '亚马逊'");
-    const amazon = await seedOffer(fx.env, 1, '亚马逊', 2);
+    fx.sqlite.exec("UPDATE brand_pool SET heat = 1.49 WHERE brand = '奥维恩'");
+    const amazon = await seedOffer(fx.env, 1, '奥维恩', 2);
     await acceptOffer(fx.env, amazon, 1, undefined, null);
-    expect(brandHeat(fx.sqlite, '亚马逊')).toBe(1.5); // 1.51 → 上钳
+    expect(brandHeat(fx.sqlite, '奥维恩')).toBe(1.5); // 1.51 → 上钳
 
-    fx.sqlite.exec("UPDATE brand_pool SET heat = 1.0045 WHERE brand = '阿迪达斯'");
-    await seedOffer(fx.env, 1, '阿迪达斯', 1);
+    fx.sqlite.exec("UPDATE brand_pool SET heat = 1.0045 WHERE brand = '维洛'");
+    await seedOffer(fx.env, 1, '维洛', 1);
     await openRound(fx.env, 1, 2);
-    expect(brandHeat(fx.sqlite, '阿迪达斯')).toBe(0.974); // ROUND(1.0045−0.03, 3)：浮点 0.9745 → 0.974
+    expect(brandHeat(fx.sqlite, '维洛')).toBe(0.974); // ROUND(1.0045−0.03, 3)：浮点 0.9745 → 0.974
     // 「已签 ⇒ 清盘不扣」的豁免归 TC-ROUND-07C 专测（此处不重复断言，避免变异归因串台）
   });
 });
@@ -1559,7 +1559,7 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     expect(bareBody.offers).toEqual([]);
 
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const offerId = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     const withContract = await getAs('/api/club/naming/quote', fx.env);
     const body = (await withContract.json()) as {
       contract: { brand: string; tier: string; satisfyFloor: number; windowsRemaining: number };
@@ -1585,7 +1585,7 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     bindCoach(fx.sqlite, 1);
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
-    const offerId = await seedOffer(fx.env, 1, '可口可乐', 1);
+    const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     expect((await send('POST', '/api/club/naming/offers/abc/accept', fx.env, {})).status).toBe(400);
     expect(
       (((await (await send('POST', '/api/club/naming/offers/0/accept', fx.env, {})).json()) as { error: string }).error),
@@ -1598,7 +1598,7 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     const body = (await ok.json()) as { result: string; penalty: number; contract: { brand: string; status: string } };
     expect(body.result).toBe('signed');
     expect(body.penalty).toBe(0);
-    expect(body.contract.brand).toBe('可口可乐');
+    expect(body.contract.brand).toBe('斯科尔汽水');
     expect(body.contract.status).toBe('active');
     // 已处理过 ⇒ 409 文案透传
     const again = await send('POST', `/api/club/naming/offers/${offerId}/accept`, fx.env, {});
@@ -1611,7 +1611,7 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     seedClub(fx.sqlite);
     bindCoach(fx.sqlite, 1);
     openWindow(fx.sqlite);
-    const res = await send('POST', '/api/club/naming/sign', fx.env, { brand: '可口可乐', packageNo: 1 });
+    const res = await send('POST', '/api/club/naming/sign', fx.env, { brand: '斯科尔汽水', packageNo: 1 });
     expect(res.status).toBe(404);
   });
 
@@ -1622,9 +1622,9 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const q = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const q = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, q, 1, 'queued', null);
-    const pending = await seedOffer(fx.env, 1, '亚马逊', 2);
+    const pending = await seedOffer(fx.env, 1, '奥维恩', 2);
 
     const res = await getAs('/api/admin/brands/market-round', fx.env, 'whl_session=tok-admin');
     expect(res.status).toBe(200);
@@ -1646,13 +1646,13 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     seedClub(fx.sqlite);
     openWindow(fx.sqlite);
     const round1 = await seedOpenRound(fx.env);
-    const pending = await seedOffer(fx.env, 1, '麒麟生物', 1);
+    const pending = await seedOffer(fx.env, 1, '凯利昂生物', 1);
     const noWindow = await send('POST', '/api/admin/brands/market-round/reopen', fx.env, {}, 'whl_session=tok-admin');
     expect(noWindow.status).toBe(200);
     const body = (await noWindow.json()) as { ok: boolean; hadOpenRound: boolean; offerCount: number };
     expect(body.ok).toBe(true);
     expect(body.hadOpenRound).toBe(true);
-    expect(body.offerCount).toBe(16);
+    expect(body.offerCount).toBe(28);
     expect(offerRow(fx.sqlite, pending).status).toBe('expired');
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM market_rounds WHERE id = ?', round1)!.status).toBe('settled');
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'market_round_reopen'")).toBe(1);
@@ -1671,12 +1671,12 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     openWindow(fx.sqlite);
     await seedOpenRound(fx.env);
     await signViaOffer(fx.env, 1, '星海通讯', 1);
-    const queuedOffer = await seedOffer(fx.env, 1, '西维斯健康', 1);
+    const queuedOffer = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     await acceptOffer(fx.env, queuedOffer, 1, 'queued', null);
 
     const res = await send('POST', '/api/club/naming/terminate', fx.env, {});
     expect(res.status).toBe(201);
-    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('西维斯健康');
+    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('埃尔巴草本');
     expect(offerRow(fx.sqlite, queuedOffer).status).toBe('accepted');
     const notification = sqlGet<{ template: string; payload: string; user_id: number }>(
       fx.sqlite,
@@ -1684,23 +1684,23 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     )!;
     expect(notification.user_id).toBe(1);
     expect((JSON.parse(notification.payload) as { text: string }).text).toBe(
-      '✅ 品牌接替生效：「西维斯健康」冠名 俱乐部1 正式生效（稳健套餐，0.939M/窗 × 6 窗）。',
+      '✅ 品牌接替生效：「埃尔巴草本·球场1」正式启用（稳健套餐，0.939M/窗 × 6 窗）。\n—— 埃尔巴草本（帕多瓦）',
     );
   });
 
   it('TC-ROUTE-07 通知文案逐字；关窗批回滚不发假通知（源码锁）', () => {
-    expect(renderNotification('naming_offer', { club: '阿森纳', count: 2, brands: '亚马逊、麒麟生物' })).toBe(
-      '📣 招商期开启：阿森纳 收到 2 份品牌报价（亚马逊、麒麟生物），去「冠名市场」查看签约。',
+    expect(renderNotification('naming_offer', { club: '阿森纳', count: 2, brands: '奥维恩、凯利昂生物' })).toBe(
+      '📣 招商期开启：阿森纳 收到 2 份品牌报价（奥维恩、凯利昂生物），去「冠名市场」查看签约。',
     );
     expect(
       renderNotification('naming_offer_activated', {
         club: '阿森纳',
-        brand: '亚马逊',
+        brand: '奥维恩',
         pkgName: '进取',
         feePerWindow: 2.78,
         windows: 2,
       }),
-    ).toBe('✅ 品牌接替生效：「亚马逊」冠名 阿森纳 正式生效（进取套餐，2.78M/窗 × 2 窗）。');
+    ).toBe('✅ 品牌接替生效：「奥维恩」冠名 阿森纳 正式生效（进取套餐，2.78M/窗 × 2 窗）。\n—— 奥维恩');
     orderInSource(
       readFileSync(MACHINE_SRC, 'utf8'),
       "if ((results[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '窗口刚被关过了');",

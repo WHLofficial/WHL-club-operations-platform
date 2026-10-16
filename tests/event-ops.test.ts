@@ -321,7 +321,7 @@ describe('条件判定 conditionOk（硬条件 AND）', () => {
 
   it('requires_naming / requires_activity', () => {
     expect(conditionOk(ctxOf(), { requires_naming: true })).toBe(false);
-    expect(conditionOk(ctxOf({ brand: '可口可乐' }), { requires_naming: true })).toBe(true);
+    expect(conditionOk(ctxOf({ brand: '斯科尔汽水' }), { requires_naming: true })).toBe(true);
     expect(conditionOk(ctxOf(), { requires_activity: 'concert' })).toBe(false);
     expect(conditionOk(ctxOf({ activities: ['open_day', 'concert'] }), { requires_activity: 'concert' })).toBe(true);
   });
@@ -549,7 +549,7 @@ describe('队况上下文 loadEventContexts', () => {
       .prepare(
         `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window, windows_total,
            windows_remaining, status, started_season, started_window, created_at, updated_at)
-         VALUES (1, '可口可乐', 1.0, 1.0, 1, '稳健', 0.85, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+         VALUES (1, '斯科尔汽水', 1.0, 1.0, 1, '稳健', 0.85, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
       )
       .run();
     fx.sqlite
@@ -572,7 +572,7 @@ describe('队况上下文 loadEventContexts', () => {
     expect(c1.stadium).toMatchObject({ capacity: 20000, tier: 2, fans: 3000, build_credit: 4, next_weather: '雨', name: '酋长球场' });
     expect(c1.balance).toBe(88);
     expect(c1.facilities.get('youth')).toBe(3);
-    expect(c1.brand).toBe('可口可乐');
+    expect(c1.brand).toBe('斯科尔汽水');
     expect(c1.activities).toEqual(['concert']);
     expect(c1.lastResult).toBe('W');
     expect(c1.tourTeamId).toBe(11);
@@ -733,18 +733,18 @@ describe('11 键效果与钳幅（点名触发逐键验证）', () => {
       .prepare(
         `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window, windows_total,
            windows_remaining, status, started_season, started_window, created_at, updated_at)
-         VALUES (1, '可口可乐', 1.0, 1.0, 1, '稳健', 0.85, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+         VALUES (1, '斯科尔汽水', 1.0, 1.0, 1, '稳健', 0.85, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
       )
       .run();
     const up = await fireNamed(fx, 'heat_up', { brand_heat: 0.05 });
-    expect(up.event.notes).toEqual(['品牌热度 +0.05（可口可乐）']);
-    expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '可口可乐'`)!.heat).toBe(1.05);
+    expect(up.event.notes).toEqual(['品牌热度 +0.05（斯科尔汽水）']);
+    expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '斯科尔汽水'`)!.heat).toBe(1.05);
 
     // 钳上限：+0.3 → 1.35；再 +0.3 → 1.5 封顶
     await fireNamed(fx, 'heat_big', { brand_heat: 99 });
-    expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '可口可乐'`)!.heat).toBe(1.35);
+    expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '斯科尔汽水'`)!.heat).toBe(1.35);
     await fireNamed(fx, 'heat_big2', { brand_heat: 99 });
-    expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '可口可乐'`)!.heat).toBe(1.5);
+    expect(sqlGet<{ heat: number }>(fx.sqlite, `SELECT heat FROM brand_pool WHERE brand = '斯科尔汽水'`)!.heat).toBe(1.5);
 
     // 无冠名的队落空
     const fx2 = freshEnv();
@@ -827,7 +827,7 @@ describe('11 键效果与钳幅（点名触发逐键验证）', () => {
     fx.sqlite.exec(
       `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
          windows_total, windows_remaining, status, started_season, started_window, created_at, updated_at, satisfaction)
-       VALUES (1, '可口可乐', 1.0, 2.0, 1, '稳健', 2.0, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1.8)`,
+       VALUES (1, '斯科尔汽水', 1.0, 2.0, 1, '稳健', 2.0, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1.8)`,
     );
     const up = await fireNamed(fx, 'sat_up', { satisfaction: 0.5 });
     expect(up.event.notes).toEqual(['品牌方情绪 +0.50']);
@@ -1221,7 +1221,7 @@ describe('D3 经营信号收集与关窗消费', () => {
     fx.sqlite.exec(
       `INSERT INTO naming_contracts (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
          windows_total, windows_remaining, status, started_season, started_window, created_at, updated_at)
-       VALUES (1, '可口可乐', 1.0, 2.0, 1, '稳健', 2.0, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+       VALUES (1, '斯科尔汽水', 1.0, 2.0, 1, '稳健', 2.0, 6, 6, 'active', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
     );
     // 抬高影响力让死忠朝目标增长（默认 0 影响力是流失方向，mood 乘数方向不好断言）
     fx.sqlite.exec(`UPDATE stadiums SET shell_influence = 400 WHERE club_id = 1`);

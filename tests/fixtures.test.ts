@@ -215,7 +215,7 @@ describe('TC-PUB · 公开只读 GET /api/fixtures', () => {
     expect(m.awayTeamName).toBe('队12'); // tour 侧队名，不是俱乐部名/编号
     expect(m.stageName).toBe('常规赛');
     expect(m.finished).toBe(true);
-    expect(m.stadium).toEqual({ name: '球场1', capacity: 20000, tier: 0 });
+    expect(m.stadium).toEqual({ name: '球场1', capacity: 20000, tier: 0, venueName: '' }); // v6.51.0 批 1：无冠名时落点名 ''
     expect(m.weather).toBe('晴'); // 未确认 → 取预报值
     // 未确认：上座 null；收入三件套已收窄出公开面（评审 #4），白名单由 MATCH_KEYS 锁死
     expect(m.attendance).toBeNull();
@@ -286,7 +286,7 @@ describe('TC-PUB · 公开只读 GET /api/fixtures', () => {
     addMatch(fx, 3, 12, 11, { round: 0 }); // 平台俱乐部主场但无球场行
     const body = (await (await get(fixturesUrl(5, 0), fx)).json()) as FixturesBody;
     expect(body.matches.map((m) => m.matchId)).toEqual([1]);
-    expect(body.matches[0]!.stadium).toEqual({ name: '球场1', capacity: 20000, tier: 0 });
+    expect(body.matches[0]!.stadium).toEqual({ name: '球场1', capacity: 20000, tier: 0, venueName: '' }); // v6.51.0 批 1
   });
 
   it('TC-PUB-08 确认后 weather 切到实际值（写路径 purge 生效）', async () => {

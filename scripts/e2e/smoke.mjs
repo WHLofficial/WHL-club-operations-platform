@@ -3553,7 +3553,7 @@ async function main() {
         }
       }
     });
-    await check('④ 强制拍卖人选解禁 + 品牌池扩编（v6.51.0）：预览参考值 / 404 与 400 / 16 家中文品牌', async () => {
+    await check('④ 强制拍卖人选解禁 + 品牌池全虚构化扩编（v6.51.0）：预览参考值 / 404 与 400 / 28 家虚构品牌', async () => {
       // 只打 API：这一版是「去掉人选硬闸 + 给参考值 + 品牌池加料」，几何不是重点。
       // 管理端 cookie 走页内 fetch（同 ㉒：APIRequestContext 带不上 __Host- 的 Secure cookie）。
       if (!page.url().startsWith(BASE)) await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
@@ -3609,17 +3609,29 @@ async function main() {
         if (before >= 0) assert((await forcedCount()) === before, '预览不该产生挂牌');
       }
 
-      // ③ 品牌池：统一中文名 + 扩编（本地库未 apply 0071 时只提示，不判失败）
+      // ③ 品牌池：全虚构化 + 扩编 28 家（本地库未 apply 0073 时只提示，不判失败）
       const brands = await api('/api/admin/brands');
       assert(brands.status === 200, `品牌池状态码 ${brands.status}`);
       const list = brands.body?.brands ?? [];
-      if (list.length < 16) {
-        console.log(`（跳过品牌池口径断言：本地 brand_pool 只有 ${list.length} 家，未 apply 0071）`);
+      if (list.length < 28) {
+        console.log(`（跳过品牌池口径断言：本地 brand_pool 只有 ${list.length} 家，未 apply 0073）`);
       } else {
         const names = list.map((b) => b.brand);
-        assert(names.includes('西维斯健康') && !names.includes('CVS Health'), `品牌名未统一中文：${names.join('/')}`);
+        // 全池虚构化：不得残留任何真实品牌名
+        for (const real of ['亚马逊', '阿迪达斯', '可口可乐', '海底捞', '麒麟生物', 'CVS', '西维斯', '极星', '天工', '鲸涛', '磐石', '迅达', '星野']) {
+          assert(!names.some((n) => n.includes(real)), `品牌池残留真实品牌名「${real}」：${names.join('/')}`);
+        }
+        // 22 欧式 + 6 中资
+        assert(names.includes('奥维恩') && names.includes('斯科尔汽水') && names.includes('埃尔巴草本'), `虚构名缺失：${names.join('/')}`);
+        const cn = list.filter((b) => b.origin === '中资').map((b) => b.brand);
+        assert(cn.length === 6, `中资品牌应 6 家：${cn.join('/')}`);
         assert(list.every((b) => typeof b.industry === 'string' && b.industry.length > 0), '行业列缺失');
         assert(list.every((b) => b.heat >= 0.5 && b.heat <= 1.5), '热度越出钳制界');
+        // 企业档案 7 列（0074）：虚构池全有档案
+        assert(list.every((b) => typeof b.name_en === 'string' && b.name_en.length > 0), '英文名列缺失');
+        assert(list.every((b) => typeof b.hq === 'string' && b.hq.length > 0), '属地列缺失');
+        // 招商性格（0075）：对赌 7 家，偏好标签非空
+        assert(list.filter((b) => b.style === '对赌').length === 7, '对赌品牌应 7 家');
       }
     });
   } finally {

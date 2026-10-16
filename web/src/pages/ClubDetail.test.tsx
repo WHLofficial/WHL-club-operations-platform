@@ -285,6 +285,7 @@ function homeFixture(): StadiumInfo {
   return {
     name: '酋长球场',
     namingBrand: null,
+    namingVenueName: null,
     capacity: 60000,
     tier: 3,
     tierName: '专业',
