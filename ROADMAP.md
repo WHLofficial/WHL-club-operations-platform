@@ -1520,6 +1520,22 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **待办（用户侧一次性操作）**：在赛事管理页点一次「立即重算积分榜」补历史 `carried_played`（当前全 0 ⇒ 带带入的 stage 3/4 会被对账报为不一致、黄条常亮，属预期假阳性）；补账后黄条转健康，公开榜数值不应变化。
 
+## v6.51.2 · 视觉识别 max_tokens 订正：缺省 1024 + `LLM_VISION_MAX_TOKENS` 可配 + 截断明确报错（2026-10-16）
+
+**状态**：**本地就绪待发布**（判级 **patch**：缺陷修补、零新增能力、零契约变化；**零迁移 ⇒ 上线只需 push**，CF Workers Builds 自动部署；push 与部署待用户发令）。`PRD.md` / `TECH_DESIGN.md` 无需同步（无规则与契约变化）。
+
+**缘起（用户 m14677）**：「成长录入截图识别报LLM 返回 400：`{"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}}`，图片来自 `E:\成长录入图`」—— 该路径自 v6.43.0 上线起必错。
+
+**根因**：`src/lib/llm.ts:110` 的 `llmVisionJson(..., maxTokens = 4096)` 缺省 4096 vs 生产视觉模型 `glm-4v-flash` 上限 1024 ⇒ 参数校验阶段 400（0.4s、不进推理）；spike `scratch/v643-spike/spike.mjs:174` 原有按模型分档，移植生产代码时丢失。诊断阶段实机探针（智谱直调、真图）：4096 → 400 原文一致；1024 → 200 / 24s / `out=648` / `finish_reason=stop`。
+
+**交付**：① `src/lib/llm.ts`：`VISION_MAX_TOKENS_DEFAULT = 1024` + `llmVisionMaxTokens(env)`（`LLM_VISION_MAX_TOKENS` 可配，缺省 / 非法一律 1024）+ `llmVisionJson` 签名 `maxTokens?: number`；② `src/worker/env.ts` 声明新变量；③ `finish_reason === 'length'` 明确报错并要求重试（JSON 仍可解析也不放行）。调用点 `growth.ts:491` 不改。
+
+**验收数字**：`npm run typecheck` 三份 **0 error**；`npx vitest run` **135 文件 / 2199 例**全绿（+3 = TC-EP-08/09/10，`tests/growth-ocr-endpoint.test.ts` 7 → 10 例）；`npm run build` 成功（本地入口 `assets/index-D_Vc8k4n.js`，sha256 `9ceb33bfba2e54d5fedefb48e0ff7c43d10dc52fc598e566d19fdf58f78d0fc1`，含版本串 `6.51.2`）。测试计划 `docs/test-plans/v6.51.2-ocr-vision-maxtokens.md`。
+
+**待核（未并本版）**：`src/worker/routes/admin/events.ts:182` `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知，确认生产文本模型后另批处理）。
+
+**本地提交（已执行）**：`48ca064`（fix(worker)）/ `fab51a0`（chore 版本号 6.51.1 → 6.51.2）/ 本提交（docs）。push 待令。
+
 ## v6.51.1 · 品牌池表格显示微调：来源/状态列不再折行 + 新增「总部」只读展示列 + 收窄行业/热度列宽（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（Version `7fc239a6-ff2f-4283-b6c6-955a12b26e0d`，push `0f5a216..ee46840`；**零迁移 ⇒ 无 apply**、零生产写；线上入口 `assets/index-SfH_zacy.js` 与惰性块 `assets/BrandsPage-BuCzDGdC.js` 的 sha256 与本地构建**逐字一致**、CSS 含 `.brand-meta-cell`、入口含版本串 `6.51.1`；回读 `/api/health` 200 / `/api/clubs` 200 / 匿名 `/api/admin/brands` 401）。判级 **patch**（无新增能力，纯展示微调）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2196 例**全绿、`npm run build` 成功；浏览器实测（本地 dev 8791，1280×720）表头 9 列与 28 行渲染正常。测试计划 `docs/test-plans/v6.51.1-brand-table-display.md`。

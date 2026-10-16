@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.2] · 视觉识别 max_tokens 订正：缺省 4096 → 1024（模型硬上限）+ `LLM_VISION_MAX_TOKENS` 可配 + 截断明确报错（2026-10-16）
+
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（缺陷修补，零新增能力、零契约变化）；**零迁移 ⇒ 上线只需 push**（CF Workers Builds 自动部署）。本地闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **135 文件 / 2199 例**全绿、`npm run build` 成功（入口 `assets/index-D_Vc8k4n.js`，sha256 `9ceb33bf…`，含版本串 `6.51.2`）。
+
+**缘起（用户 m14677）**：「成长录入截图识别报LLM 返回 400：`{"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}}`，图片来自 `E:\成长录入图`」—— 管理端成长录入的截图识别**自 v6.43.0 上线起必错**，与图片、网络无关（4 张 PNG 均过魔数与 5MB 校验，报错在 0.4s 参数校验阶段返回、不进推理）。
+
+**根因**：`src/lib/llm.ts` 的 `llmVisionJson(env, image, prompt, maxTokens = 4096)` 缺省写死 4096，而生产视觉模型 `LLM_VISION_MODEL` = `glm-4v-flash`（免费档）只接受 [1,1024]；`scratch/v643-spike/spike.mjs:174` 原有按模型分档（`/glm-4v-flash/.test(model) ? 1024 : 4096`），移植进生产代码时丢失。诊断阶段实机探针复现（智谱直调、`E:\成长录入图` 真图）：4096 → 400（回包原文一字不差）；1024 → 200 / 24s / `usage in=3492 out=648` / `finish_reason=stop` / 解析 12 行。
+
+**交付**：① `src/lib/llm.ts` —— 新增 `VISION_MAX_TOKENS_DEFAULT = 1024` 与 `llmVisionMaxTokens(env)`（读 `LLM_VISION_MAX_TOKENS`，缺省 / 非法一律 1024），`llmVisionJson` 签名改 `maxTokens?: number`、缺省时取 env 值；② `src/worker/env.ts` 声明 `LLM_VISION_MAX_TOKENS?: string`（换付费视觉模型时抬高，不必改代码）；③ `finish_reason === 'length'` 由「不是合法 JSON」改判为点名截断：`视觉模型输出被截断（max_tokens=… 用满），请重试或调大 LLM_VISION_MAX_TOKENS`，且**截断后即便 JSON 仍可解析也判失败**（漏记球员比要求重试更贵）。调用点 `src/worker/routes/admin/growth.ts:491` 无需改动（吃新缺省）。
+
+**测试**：`tests/growth-ocr-endpoint.test.ts` 新增 **TC-EP-08**（缺省 1024 + 非法 env 回落 1024）、**TC-EP-09**（`LLM_VISION_MAX_TOKENS=4096` → 出站 4096）、**TC-EP-10**（截断报错点名、可解析也不放行），该文件 7 → 10 例。测试计划 `docs/test-plans/v6.51.2-ocr-vision-maxtokens.md`。
+
+**待核（未并本版）**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（事件结构草稿，走文本模型 `LLM_MODEL`）—— 文本模型上限未知，若同为 1024 上限会以同样方式 400。
+
 ## [v6.51.1] · 品牌池表格显示微调：来源/状态列不再折行 + 新增「总部」只读展示列 + 收窄行业/热度列宽（2026-10-16）
 
 **已上线 2026-10-16**（Version `7fc239a6-ff2f-4283-b6c6-955a12b26e0d`，push `0f5a216..ee46840`；**零迁移 ⇒ 无 apply**，无生产写；线上资产与本地构建逐字一致：入口 `assets/index-SfH_zacy.js`（sha256 `47d20a2b3f59…`，含版本串 `6.51.1`）+ 惰性块 `assets/BrandsPage-BuCzDGdC.js`（sha256 `794ed8a1ca6f…`，含「总部」）+ `assets/index-G3fpYeiH.css`（含 `.brand-meta-cell`）；回读 `/api/health` 200、`/api/clubs` 200、匿名 `/api/admin/brands` 401）。判级 **patch**：无新增能力、零契约变化 —— 纯管理端展示微调。**缘起（用户 m02096 / m02183）**：①「来源 状态两列对应文字折行了，减小字号」；②「行业和热度减小列宽，加入『总部』一列，在行业之前（仅展示列）」。
