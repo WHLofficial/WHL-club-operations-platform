@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.8] · 截图识别「队名对不上」也能选边定侧：模型给英文名不再只能重传（2026-10-16）
+
+**待发布（本地就绪 2026-10-16）**：判级 **patch**（同一处识别响应分支的补充：对不上的那条路多回一个可选 side 的机器码、前端多认一个码——无新端点、无新页面、**零迁移、零提示词改动、模型不变**）；上线只需 push（CF Workers Builds 自动部署），无需 apply 迁移。
+
+缘起（用户）：一是报障「第 3 张识别失败：截图队名「OLYMPIACOS FC」对不上这场比赛（奥林匹亚科斯 vs 皇家马德里），确认传对图了吗」（第 4 张同队名）；二是随即指出恢复通道缺位——「返回让用户选边的功能没有真正成立」「这个功能没有体现啊」。
+
+根因：v6.51.3 给「两侧一样像」（同城同名片段，如慕尼黑 vs 拜仁慕尼黑/慕尼黑1860）装了提示 + 主队/客队/取消三颗按钮，**但对不上（`if (!matched)`）那条分支当时没带 code** ⇒ 前端只认 `code === 'ocr_team_ambiguous'`，这条路一律落成红字「识别失败」。而队名对不上并不代表这张图的评分不能用：`shownTeam = ocr.teamRaw ?? ocr.team` 且没有「（识别为「…」）」括注 ⇒ 这条报错里模型给的就是英文原名（提示词里「没有通行中文译名时才照抄原文」的逃逸口被 OLYMPIACOS 命中），用户看到英文名 + 「确认传对图了吗」，自然会重传。
+
+交付：① 服务端 `src/worker/routes/admin/growth.ts` 的 unmatched 分支改回 `code = 'ocr_team_unmatched'`，文案改为「截图队名「X」…对不上这场比赛（A vs B）——确实是这张图的队名，就点按钮选边；传错图请点取消」（仍然 400，`side` 直通逻辑不变：同一张图带 `side: 'home' | 'away'` 重发即跳过队名匹配）；② 前端 `web/src/pages/admin/GrowthEntryPage.tsx` 的 `runOcr` catch 同时认 `ocr_team_ambiguous` 与 `ocr_team_unmatched`，两条路走同一条待选行（提示带模型读到的英文原文 + 主队/客队/取消三颗按钮，选边用同一份 base64 续跑、取消则不预填）；③ 测试：TC-EP-13 补 code 与「点按钮选边」文案断言，页面新增 TC-ENTRY-E13（OLYMPIACOS FC 英文名 → 提示带英文原文 + 三颗按钮 + 选主队续跑 `body.side === 'home'`、报告条不落红字）。
+
+验收：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **136 文件 / 2231 例全绿**（v6.51.7 基线 136/2230，净 +1）；`npm run build` ✓ 入口 `web/dist/assets/index-Ddpx2Jdr.js`（663,313 B，sha256 `1ce0a01262de243c118a72183c43cc910e1c84f620fbe4fa0abbcf4c83e0737e`，含版本串 6.51.8）+ 页面 chunk `web/dist/assets/GrowthEntryPage-DqIvzlA6.js`（35,556 B，sha256 `63b8fc82b6ba4ec2df5ab9ebc427d795522e0677954f8fe28d540c9205367371`）；CSS 入口未变。
+
+留待补（可选，未做）：**确定性英文名兜底**——`web/assets/ref/team.json` 有 696 个 FC26 英文真名（`{id: 280, name: "Olympiacos FC"}`），而 `clubs.id` 就是游戏真号 ⇒ 可把英文名直接桥到俱乐部分侧，用户不必点按钮（v6.51.3 文档里记为「有意不做」，本次仍按选边兜底处理，需要时另开小版）。
+
+待核：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
+
 ## [v6.51.7] · 零封联动收窄到「这张图里识别到的门将」（2026-10-16）
 
 **已上线（2026-10-16）**：判级 **patch**（同一处草稿合并逻辑的口径修正，无新端点、无页面、**零迁移、零服务端改动、零提示词改动**——识别条目与模型不变，改的只是录入面板的自动勾选范围）；push `c451c06..3a141fb`（4 枚，含 v6.51.6 上线回写 `e5cd7e6`）触发 CF Workers Builds 自动部署 Version `b6933b16-00ac-4fb3-aa59-e5ca21932f6c`（@2026-10-16T15:17:31Z）；回读：线上入口 `assets/index-DpFqkcsf.js`（663,313 B，sha256 `de50706addbec6bd4237585498508a6cbe46db727a3ca41931ee5a64f926a6d9`）与页面 chunk `assets/GrowthEntryPage-DTGACkY6.js`（35,523 B，sha256 `cdc3dbd5947dcf187de22db60ada542f6b7f56429cff224504f69189b4eb5335`）与本地逐字节一致、`/api/health` 200（d1/tour_db/kv 全 ok）、匿名 `POST /api/admin/growth/match-entry/1/ocr` 401。
