@@ -313,6 +313,18 @@ async function resolveEntrySide(db: D1Database, teamName: string | null, cache: 
   return { clubId, isCpu: false };
 }
 
+// v6.51.9 提速（列表/面板）：clubs 全表就 20 行级，一次取回建表，队名解析全走内存——
+// 原来是「按场次逐队 SELECT id FROM clubs WHERE name = ?」（列表 20 场就 20+ 趟往返）。
+// 保留 resolveEntrySide 给单场调用方（OCR 端点按需查一次）；列表/面板改用下面这两个。
+const clubIdMapOf = (rows: { id: number; name: string }[]): Map<string, number> => new Map(rows.map((r) => [r.name, r.id] as const));
+
+/** 归属解析（内存表版）：CPU 队/空名短路与 resolveEntrySide 同口径，查不到留 null */
+function entrySideOf(teamName: string | null, clubIds: Map<string, number>): EntrySide {
+  if (isCpuTeam(teamName)) return { clubId: null, isCpu: true };
+  if (!teamName) return { clubId: null, isCpu: false };
+  return { clubId: clubIds.get(teamName) ?? null, isCpu: false };
+}
+
 // 列表行与面板 match 块共用同一份 DTO（面板就是列表行 + 两侧花名册 + 已录事件）
 // v6.45.0：tournamentName 供录入台按赛事分组（名字在赛事库，第二趟查，见 loadTournamentNames）
 function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, recorded: number, tournamentName: string | null) {
@@ -346,23 +358,31 @@ function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, re
 
 // 可补录比赛列表：全部可计 XP 的已确认场次（确认时间倒序），每场带已录事件数。
 // v6.45.1：去掉 v6.45.0 的 LIMIT 50——线上可录场次已到 100 场，截断会让老场次彻底看不见（前端按赛事/轮次分组展示）。
+// v6.51.9：主查询与 clubs 全表互不依赖 ⇒ 并发取，队名解析改内存查表（原为逐场逐队 SELECT）；
+// 赛事名（跨库）仍要等主查询拿到 tournament_id，故单独一趟。SQL 与排序逐字未改。
 app.get('/growth/match-entry', async (c) => {
   await requireAdmin(c.env, c.req.raw);
-  const rows = await c.env.DB.prepare(
-    `SELECT ${MATCH_ENTRY_COLUMNS},
-            (SELECT COUNT(*) FROM growth_events ge WHERE ge.match_ref = CAST(rc.match_id AS TEXT)) AS recorded
-     FROM result_confirmations rc
-     WHERE ${MATCH_ENTRY_WHERE}
-     ORDER BY rc.confirmed_at DESC, rc.match_id DESC`,
-  ).all<MatchEntryRow>();
+  const [rows, clubRows] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT ${MATCH_ENTRY_COLUMNS},
+              (SELECT COUNT(*) FROM growth_events ge WHERE ge.match_ref = CAST(rc.match_id AS TEXT)) AS recorded
+       FROM result_confirmations rc
+       WHERE ${MATCH_ENTRY_WHERE}
+       ORDER BY rc.confirmed_at DESC, rc.match_id DESC`,
+    ).all<MatchEntryRow>(),
+    c.env.DB.prepare('SELECT id, name FROM clubs').all<{ id: number; name: string }>(),
+  ]);
+  const clubIds = clubIdMapOf(clubRows.results);
   const names = await loadTournamentNames(c.env, rows.results.map((r) => r.tournament_id));
-  const cache = new Map<string, number | null>();
-  const matches = [];
-  for (const row of rows.results) {
-    const home = await resolveEntrySide(c.env.DB, row.home_team, cache);
-    const away = await resolveEntrySide(c.env.DB, row.away_team, cache);
-    matches.push(entryMatchItem(row, home, away, row.recorded ?? 0, tournamentNameOf(names, row.tournament_id)));
-  }
+  const matches = rows.results.map((row) =>
+    entryMatchItem(
+      row,
+      entrySideOf(row.home_team, clubIds),
+      entrySideOf(row.away_team, clubIds),
+      row.recorded ?? 0,
+      tournamentNameOf(names, row.tournament_id),
+    ),
+  );
   return c.json({ matches });
 });
 
@@ -370,26 +390,43 @@ app.get('/growth/match-entry', async (c) => {
 app.get('/growth/match-entry/:matchId', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const matchId = Number(c.req.param('matchId'));
-  const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
+  if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(404, '这场比赛不在可补录名单里（未确认或弃权场次）');
+
+  // v6.51.9 提速：原实现八段串行（场次行 → 两队归属 → 赛事名 → 停赛复算 → 已录事件 → 主队花名册 →
+  // 客队花名册 → 累计基数，线上实测约 17 趟往返），现按依赖并成三段：
+  //   ① 场次行 ∥ clubs 全表 ∥ 已录事件 ∥ 停赛复算（赛事库，内部也已并行）
+  //   ② 赛事名 ∥ 两侧花名册（一次 batch）  ③ 累计基数（依赖花名册 id）
+  // SQL 逐字未改（含 ROSTER_POSITION_CASE 排序与在册口径），只有取的顺序变了。
+  const [row, recorded, clubRows, suspended] = await Promise.all([
+    loadEntryMatch(c.env.DB, matchId),
+    c.env.DB.prepare('SELECT player_id, event_type, value, xp, source FROM growth_events WHERE match_ref = ? ORDER BY player_id, id')
+      .bind(String(matchId))
+      .all<{ player_id: number; event_type: string; value: number; xp: number; source: string }>(),
+    c.env.DB.prepare('SELECT id, name FROM clubs').all<{ id: number; name: string }>(),
+    // v6.45.0：本场停赛（只读 TOUR_DB 按赛事仓同口径复算，见 tour-suspension.ts）→ 面板标红禁行、
+    // 写端点整行拒收。判不了停赛的球员（本库 fc_id 为空）不锁。
+    suspendedPlayersAtMatch(c.env.TOUR_DB, matchId),
+  ]);
   if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认或弃权场次）');
 
-  const cache = new Map<string, number | null>();
-  const home = await resolveEntrySide(c.env.DB, row.home_team, cache);
-  const away = await resolveEntrySide(c.env.DB, row.away_team, cache);
-  const names = await loadTournamentNames(c.env, [row.tournament_id]);
-  // v6.45.0：本场停赛（只读 TOUR_DB 按赛事仓同口径复算，见 tour-suspension.ts）→ 面板标红禁行、
-  // 写端点整行拒收。判不了停赛的球员（本库 fc_id 为空）不锁。
-  const suspended = await suspendedPlayersAtMatch(c.env.TOUR_DB, matchId);
-  const rosterOf = async (clubId: number | null) => {
-    if (clubId === null) return [];
-    const rows = await c.env.DB.prepare(
+  const clubIds = clubIdMapOf(clubRows.results);
+  const home = entrySideOf(row.home_team, clubIds);
+  const away = entrySideOf(row.away_team, clubIds);
+
+  // 两侧花名册一次 batch 取回：CPU 侧（clubId=null）绑 -1 走索引空集，与原来「不查、回空表」等价，
+  // 换来语句位置恒定（结果按 [主, 客] 下标对齐，不用另算游标）
+  const rosterStmt = (clubId: number | null) =>
+    c.env.DB.prepare(
       `SELECT id, name, display_name, position, status, fc_id FROM players
        WHERE club_id = ? AND status IN ('normal', 'listed', 'trainee')
        ORDER BY ${ROSTER_POSITION_CASE}, players.id`,
-    )
-      .bind(clubId)
-      .all<EntryPlayerRow>();
-    return rows.results.map((p) => ({
+    ).bind(clubId ?? -1);
+  const [names, rosters] = await Promise.all([
+    loadTournamentNames(c.env, [row.tournament_id]),
+    c.env.DB.batch([rosterStmt(home.clubId), rosterStmt(away.clubId)]),
+  ]);
+  const rosterRows = (run: { results?: unknown[] } | undefined) =>
+    ((run?.results ?? []) as EntryPlayerRow[]).map((p) => ({
       id: p.id,
       name: rowDisplayName(p),
       officialName: p.name,
@@ -397,16 +434,10 @@ app.get('/growth/match-entry/:matchId', async (c) => {
       status: p.status,
       suspended: p.fc_id == null ? null : suspended.get(p.fc_id) ?? null,
     }));
-  };
-  const recorded = await c.env.DB.prepare(
-    'SELECT player_id, event_type, value, xp, source FROM growth_events WHERE match_ref = ? ORDER BY player_id, id',
-  )
-    .bind(String(matchId))
-    .all<{ player_id: number; event_type: string; value: number; xp: number; source: string }>();
 
   // 每人当前累计（duels/saves 跨场累计的基数）：前端预填与「本场 XP」实时跨档预览用
-  const homePlayers = await rosterOf(home.clubId);
-  const awayPlayers = await rosterOf(away.clubId);
+  const homePlayers = rosterRows(rosters[0]);
+  const awayPlayers = rosterRows(rosters[1]);
   const totals = await loadCumulativeBases(c.env.DB, [...homePlayers, ...awayPlayers].map((p) => p.id));
   const withTotals = <T extends { id: number }>(players: T[]) =>
     players.map((p) => ({ ...p, duelsTotal: totals.get(`${p.id}|duels_won`) ?? 0, savesTotal: totals.get(`${p.id}|saves`) ?? 0 }));

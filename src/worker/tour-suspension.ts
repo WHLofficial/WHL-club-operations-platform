@@ -157,40 +157,32 @@ async function loadTeamDiscipline(
   tourDb: D1Database,
   tournamentId: number,
   teamId: number,
+  entryIds: number[],
 ): Promise<{ byEntry: Map<number, SeqRow[]>; byPlayer: Map<number, PlayerCards> }> {
-  const entries = await tourDb
-    .prepare('SELECT id FROM entry WHERE team_id = ?')
-    .bind(teamId)
-    .all<{ id: number }>();
-  const entryIds = new Set(entries.results.map((r) => r.id));
+  const entryIdSet = new Set(entryIds);
   const byEntry = new Map<number, SeqRow[]>();
-  if (entryIds.size === 0) return { byEntry, byPlayer: new Map() };
+  if (entryIdSet.size === 0) return { byEntry, byPlayer: new Map() };
+  const ids = [...entryIdSet];
 
-  const seq = await tourDb
-    .prepare(
-      `SELECT m.id, m.home_entry_id, m.away_entry_id, m.status, m.note, m.walkover_side
+  // v6.51.9：比赛序与红黄牌事件互不依赖 ⇒ 并发取（原来是两条串行 await）。同时不再自己查
+  // 「本队有哪些 entry」——调用方已持有本场两侧的 entry，直接传进来（原来那条
+  // SELECT id FROM entry WHERE team_id = ? 与调用方的 entry 查询是重复的一趟）。
+  const [seq, events] = await Promise.all([
+    tourDb
+      .prepare(
+        `SELECT m.id, m.home_entry_id, m.away_entry_id, m.status, m.note, m.walkover_side
        FROM match m
        JOIN stage s ON s.id = m.stage_id
        WHERE s.tournament_id = ?
-         AND (m.home_entry_id IN (${[...entryIds].map(() => '?').join(', ')})
-              OR m.away_entry_id IN (${[...entryIds].map(() => '?').join(', ')}))
+         AND (m.home_entry_id IN (${ids.map(() => '?').join(', ')})
+              OR m.away_entry_id IN (${ids.map(() => '?').join(', ')}))
        ORDER BY s.sort_order, m.round, m.slot, m.leg, m.id`,
-    )
-    .bind(tournamentId, ...entryIds, ...entryIds)
-    .all<SeqRow>();
-  for (const m of seq.results) {
-    if (m.note === BYE_NOTE) continue;
-    for (const eid of [m.home_entry_id, m.away_entry_id]) {
-      if (eid == null || !entryIds.has(eid)) continue;
-      const list = byEntry.get(eid);
-      if (list) list.push(m);
-      else byEntry.set(eid, [m]);
-    }
-  }
-
-  const events = await tourDb
-    .prepare(
-      `SELECT me.match_id, me.entry_id, me.player_id, me.type, me.created_at
+      )
+      .bind(tournamentId, ...ids, ...ids)
+      .all<SeqRow>(),
+    tourDb
+      .prepare(
+        `SELECT me.match_id, me.entry_id, me.player_id, me.type, me.created_at
        FROM match_event me
        JOIN match m ON m.id = me.match_id
        JOIN stage s ON s.id = m.stage_id
@@ -199,9 +191,19 @@ async function loadTeamDiscipline(
        WHERE s.tournament_id = ? AND me.player_id IS NOT NULL
          AND me.type IN ('yellow', 'red', 'red_2y') AND p.team_id = ?
        ORDER BY me.id`,
-    )
-    .bind(tournamentId, teamId)
-    .all<CardRow>();
+      )
+      .bind(tournamentId, teamId)
+      .all<CardRow>(),
+  ]);
+  for (const m of seq.results) {
+    if (m.note === BYE_NOTE) continue;
+    for (const eid of [m.home_entry_id, m.away_entry_id]) {
+      if (eid == null || !entryIdSet.has(eid)) continue;
+      const list = byEntry.get(eid);
+      if (list) list.push(m);
+      else byEntry.set(eid, [m]);
+    }
+  }
 
   const byPlayer = new Map<number, PlayerCards>();
   for (const ev of events.results) {
@@ -238,22 +240,29 @@ export async function suspendedPlayersAtMatch(
   const entryIds = [target.home_entry_id, target.away_entry_id].filter((v): v is number => v !== null);
   if (entryIds.length === 0) return new Map();
 
-  const cfgRow = await tourDb
-    .prepare('SELECT config_json FROM tournament WHERE id = ?')
-    .bind(target.tournament_id)
-    .first<{ config_json: string | null }>();
+  // v6.51.9：配置与两侧 entry 互不依赖 ⇒ 一次并发取（原来两趟串行）
+  const [cfgRow, entryRows] = await Promise.all([
+    tourDb
+      .prepare('SELECT config_json FROM tournament WHERE id = ?')
+      .bind(target.tournament_id)
+      .first<{ config_json: string | null }>(),
+    tourDb
+      .prepare(`SELECT id, team_id FROM entry WHERE id IN (${entryIds.map(() => '?').join(', ')})`)
+      .bind(...entryIds)
+      .all<{ id: number; team_id: number }>(),
+  ]);
   const cfg = parseSuspensionConfig(cfgRow?.config_json);
   const hasAnchor = cfg.yellowResetAt !== null;
   const resetAt = cfg.yellowResetAt ?? '';
 
-  const entryRows = await tourDb
-    .prepare(`SELECT id, team_id FROM entry WHERE id IN (${entryIds.map(() => '?').join(', ')})`)
-    .bind(...entryIds)
-    .all<{ id: number; team_id: number }>();
-
+  // v6.51.9：两侧队伍的纪律数据并发取（原来串行两支）。entry 用调用方刚取到的本场这一支即可——
+  // 本队别的 entry 的序列只有「事件记在别的 entry 上」的球员会用到，而那些球员在这里
+  // findIndex(matchId) 恒为 -1（本场不属于那支 entry），原实现同样整人跳过，结论不变。
   const out = new Map<number, MatchSuspension>();
-  for (const entry of entryRows.results) {
-    const { byEntry, byPlayer } = await loadTeamDiscipline(tourDb, target.tournament_id, entry.team_id);
+  const sides = await Promise.all(
+    entryRows.results.map((entry) => loadTeamDiscipline(tourDb, target.tournament_id, entry.team_id, [entry.id])),
+  );
+  for (const { byEntry, byPlayer } of sides) {
     for (const [playerId, info] of byPlayer) {
       const seq = byEntry.get(info.entryId ?? -1);
       if (!seq) continue;
