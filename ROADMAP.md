@@ -1524,7 +1524,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.51.7 · 零封联动收窄到「这张图里识别到的门将」（2026-10-16）
 
-**状态**：**待发布（本地就绪 2026-10-16）**；判级 **patch**；**零迁移、零服务端改动、零提示词改动**（只改录入面板的草稿合并逻辑）⇒ 上线只需 push。
+**状态**：**已上线（2026-10-16）**；判级 **patch**；**零迁移、零服务端改动、零提示词改动**（只改录入面板的草稿合并逻辑）；push `c451c06..3a141fb`（4 枚，含 v6.51.6 上线回写 `e5cd7e6`）⇒ CF Workers Builds 自动部署 Version `b6933b16-00ac-4fb3-aa59-e5ca21932f6c`（@2026-10-16T15:17:31Z）；回读：线上入口 `assets/index-DpFqkcsf.js`（sha256 `de50706addbec6bd4237585498508a6cbe46db727a3ca41931ee5a64f926a6d9`）与页面 chunk `assets/GrowthEntryPage-DTGACkY6.js`（sha256 `cdc3dbd5947dcf187de22db60ada542f6b7f56429cff224504f69189b4eb5335`）与本地逐字节一致、`/api/health` 200（d1/tour_db/kv 全 ok）、匿名 OCR 401。
 
 **缘起（用户裁决）**：先问「零封联动自动勾 2 名门将是什么机制」，随后判定口径不对——「不对吧，不应该联动的，上传的截图已经足够证明哪个门将上场了」；并要求把「已经被联动的」清理掉。
 
@@ -1536,7 +1536,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **验收**：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **136 文件 / 2230 例全绿**；`npm run build` ✓ 入口 `assets/index-DpFqkcsf.js`（663,313 B，sha256 `de50706addbec6bd4237585498508a6cbe46db727a3ca41931ee5a64f926a6d9`，含 6.51.7）+ 页面 chunk `assets/GrowthEntryPage-DTGACkY6.js`（35,523 B，sha256 `cdc3dbd5947dcf187de22db60ada542f6b7f56429cff224504f69189b4eb5335`）；CSS 入口 `index-BGPWLRxy.css` 未变。
 
-**本地提交**（未 push）：`a8479da` fix(web) + `ab2423d` chore 版本号 6.51.6→6.51.7 + docs 枚。
+**本地提交**：`a8479da` fix(web) + `ab2423d` chore 版本号 6.51.6→6.51.7 + `3a141fb` docs；**2026-10-16 已 push**（`c451c06..3a141fb`，含上一轮 v6.51.6 上线回写 `e5cd7e6`）；本条上线回写为 docs-only 提交（按惯例不 push）。
 
 **留待补**：① 用户侧真机确认（重传那张图，报告应只勾上场的门将）；② 「条目里出现但实际是替补」无法数据侧区分（截图/首发名单是唯一权威，未覆盖）；③ 双门将同场登场（换人）时两条都会勾——本版按「图里出现即勾」不做区分（罕见，未覆盖）。
 
