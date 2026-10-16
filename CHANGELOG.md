@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.9] · 成长录入页提速：比赛列表与录入面板取数并发化 + 停赛复算去重（2026-10-16）
+
+**本地完成（未发布，待令）**：判级 **patch**（性能与读量治理——无新端点、无页面、**零迁移、零前端改动、零提示词改动、模型不变**，**SQL 逐字未改**，只改取数顺序与并发度）。缘起＝用户「先停，再做一个：改善成长录入页面比赛列表和录入面板的加载速度，先出方案」；诊断给出 A/B/C/D/E 五项，用户裁决「完成后做成长录入优化，**ABC 全做**」（D 新索引与 E 悬停预取不做）。
+
+诊断（生产只读）：列表端点主查询 `duration 8.34ms` 但 `rows_read 77,708` ⇒ 慢的不是 SQL，而是**串行往返次数**——列表约 22 趟（主查询 + 每场逐队 `SELECT id FROM clubs WHERE name = ?` + 赛事名）、面板约 17 趟（八段串行：场次行 → 两队归属 → 赛事名 → 停赛复算 → 已录事件 → 主花名册 → 客花名册 → 累计基数）。
+
+交付：① **列表端点（A）**——主查询与 `SELECT id, name FROM clubs` 并发取，队名 → 俱乐部归属改**内存查表**（新增 `clubIdMapOf` / `entrySideOf`，与 `resolveEntrySide` 同口径——CPU 队/空名短路、查不到留 null；后者保留给 OCR 与批量等单场调用方），赛事名仍单独一趟（跨库、依赖主查询的 `tournament_id`）⇒ 约 22 趟 → **3 条 / 2 波**，且与场次/队数无关（原实现队名各不相同时一场两趟，同名缓存只掩盖了重名那几场）；② **面板端点（B）**——八段串行并成**三波**：① 场次行 ∥ clubs 全表 ∥ 已录事件 ∥ 停赛复算 ② 赛事名 ∥ 两侧花名册（一次 `DB.batch`；CPU 侧 `bind(clubId ?? -1)` 走索引空集，等价于原来「不查」并换取语句位置恒定、结果按 `[主, 客]` 下标对齐）③ 累计基数（依赖花名册 id）⇒ 本库 6 条 + 赛事库 8 条；③ **停赛复算去重（C）**——`src/worker/tour-suspension.ts` 的 `loadTeamDiscipline(tourDb, tournamentId, teamId, entryIds)` 不再自查「本队有哪些 entry」（调用方已持有本场两侧 entry），且「比赛序 ∥ 红黄牌事件」并发；`suspendedPlayersAtMatch` 的「配置 ∥ 两侧 entry」并发、两侧队伍的数据并发取 ⇒ 查询 **9 条 → 7 条**。收窄 entry 集合不改判定（已写入注释并被 TC-SUS-15 钉住）：本队别的 entry 的序列只有「事件记在别的 entry 上」的球员会用到，而那些球员本场 `seq.findIndex((m) => m.id === matchId)` 恒为 -1，原实现同样整人跳过。
+
+验收：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **137 文件 / 2239 例全绿**（v6.51.8 基线 137/2235，净 +4 = TC-LIST-06 / TC-PANEL-05 / TC-SUS-14 / TC-SUS-15，取数趟数用 `Proxy` 包 `prepare` 记 SQL 文本做守卫，断言时须过滤兼容模式会话那趟 `TOUR_DB user` 查询）；`npm run build` ✓ 入口 `web/dist/assets/index-DsDpFJV5.js`（663,313 B / gzip 210.88 kB，sha256 `31bba7504e685ee1df66e79980df02f1f0caad5712ace18a18a8d6605b880638`，含版本串 6.51.9）+ 页面 chunk `web/dist/assets/GrowthEntryPage-Bxtugy8H.js`（35,556 B，sha256 `7cdfca6270198d659304ff9d076cfcf7ed7c78ddd9a752b4ff67e55e44cb5d5a`）；CSS 入口 `index-BGPWLRxy.css` 未变（零前端改动）。测试计划 `docs/test-plans/v6.51.9-growth-entry-query-batching.md`。
+
+不做/未覆盖：① D 新索引 `growth_events(match_ref)`；② E 列表悬停预取（先看本版体感）；③ 真机体感与生产 `rows_read` 净变化未实测（本地测试库无网络延迟，量化不出 RTT 收益）。
+
+待核：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
+
+本地提交：`fix(worker)` 取数并发化 + `test(worker)` 趟数守卫 + `chore` 版本号 6.51.8→6.51.9 + `docs(v6.51.9)`；**未 push**（待发布令）。
+
 ## [v6.51.8] · 截图识别「队名对不上」也能选边定侧 + 模型照抄英文名时自动分侧：冷门队不再只能重传（2026-10-16）
 
 **已上线（2026-10-16）**：push `3a141fb..a10a22f`（6 枚，含 v6.51.7 上线回写），CF Workers Builds 自动部署 Version **`69b30fe3-2b93-4f1a-8401-34c6b848ed6b`**（deployment `9c430ee9-106d-4919-9f52-624b485a3d7a` @16:59:09Z）。判级 **patch**（同一处识别响应分支的补充：对不上的那条路多回一个可选 side 的机器码、前端多认一个码——无新端点、无新页面、**零迁移、零提示词改动、模型不变**）；上线只需 push（CF Workers Builds 自动部署），无需 apply 迁移。同日按用户追加「并入，然后发布」并入**英文名兜底分侧**（新增 `src/core/fc26-team-names.ts` 镜像 + 生成器 `scripts/gen-fc26-team-names.mjs`，仍无新端点/新页面/迁移）。**上线回读**：`GET /` 200 且入口仍是 `assets/index-Ddpx2Jdr.js`（663,313 B，sha256 与本地逐字节一致——兜底分侧在 Worker 侧，前端资产未变）；`/api/health` 200；匿名 `POST /api/admin/growth/match-entry/1/ocr` → 401。

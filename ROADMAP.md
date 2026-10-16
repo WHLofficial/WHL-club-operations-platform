@@ -1522,6 +1522,22 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.9 · 成长录入页提速：比赛列表与录入面板取数并发化 + 停赛复算去重（2026-10-16）
+
+**状态**：**本地完成（未发布，待令）**；判级 **patch**（性能与读量治理）；**零迁移、零前端改动、零提示词改动、模型不变、SQL 逐字未改**（只改取数顺序与并发度，响应逐字段等价）⇒ 上线只需 push（CF Workers Builds 自动部署）。
+
+**缘起（用户）**：先叫停其它线——「先停，再做一个：改善成长录入页面比赛列表和录入面板的加载速度，先出方案」；诊断给出 A/B/C/D/E 五项后裁决「完成后做成长录入优化，**ABC 全做**」（D 新索引 `growth_events(match_ref)`、E 列表悬停预取不做）。
+
+**诊断（生产只读）**：列表端点主查询 `duration 8.34ms` 但 `rows_read 77,708` ⇒ 慢的不是 SQL，而是**串行往返次数**：列表约 22 趟（主查询 + 每场逐队 `SELECT id FROM clubs WHERE name = ?` + 赛事名）、面板约 17 趟（八段串行：场次行 → 两队归属 → 赛事名 → 停赛复算 → 已录事件 → 主花名册 → 客花名册 → 累计基数）。
+
+**交付**：① **列表端点（A）**——`Promise.all([主查询, SELECT id, name FROM clubs])` + 队名归属改内存查表（`clubIdMapOf` / `entrySideOf`，口径与 `resolveEntrySide` 一致；后者保留给 OCR / 批量等单场调用方），赛事名仍单独一趟 ⇒ **3 条 / 2 波**且与场次/队数无关；② **面板端点（B）**——八段串行并成**三波**（① 场次行 ∥ clubs 全表 ∥ 已录事件 ∥ 停赛复算 ② 赛事名 ∥ 两侧花名册一次 `DB.batch` ③ 累计基数），CPU 侧花名册绑 `-1` 走索引空集、语句位置恒定 ⇒ 本库 6 条 + 赛事库 8 条；③ **停赛复算去重（C）**——`src/worker/tour-suspension.ts` 的 `loadTeamDiscipline(tourDb, tournamentId, teamId, entryIds)` 不再自查「本队有哪些 entry」，「比赛序 ∥ 红黄牌」并发；`suspendedPlayersAtMatch` 的「配置 ∥ 两侧 entry」与两侧队伍数据并发 ⇒ **9 条 → 7 条**（收窄 entry 集合不改判定，见 TC-SUS-15）。
+
+**验收**：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **137 文件 / 2239 例全绿**（v6.51.8 基线 137/2235，净 +4 = TC-LIST-06 / TC-PANEL-05 / TC-SUS-14 / TC-SUS-15——用 `Proxy` 包 `prepare` 记 SQL 文本来钉「取数趟数」，须过滤兼容模式会话那趟 `TOUR_DB user` 查询）；`npm run build` ✓ 入口 `assets/index-DsDpFJV5.js`（663,313 B / gzip 210.88 kB，sha256 `31bba7504e685ee1df66e79980df02f1f0caad5712ace18a18a8d6605b880638`，含版本串 6.51.9）+ 页面 chunk `assets/GrowthEntryPage-Bxtugy8H.js`（35,556 B，sha256 `7cdfca6270198d659304ff9d076cfcf7ed7c78ddd9a752b4ff67e55e44cb5d5a`）；CSS 入口未变。测试计划 `docs/test-plans/v6.51.9-growth-entry-query-batching.md`。
+
+**未验证**：① 真机体感（本版只按往返次数量化，未做真机计时）；② 生产 `rows_read` 净变化（clubs 全表每请求多读 20 行、少读 N 次单行查询，预期净降，未实测）；③ 并发度收益依赖真实网络 RTT，本地测试库无法量化。
+
+**本地提交**：`fix(worker)` 取数并发化 + `test(worker)` 趟数守卫 + `chore` 版本号 6.51.8→6.51.9 + `docs(v6.51.9)`；**未 push**（待发布令）。
+
 ## v6.51.8 · 截图识别「队名对不上」也能选边定侧 + 模型照抄英文名时自动分侧（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（push `3a141fb..a10a22f` ⇒ CF Workers Builds 自动部署 Version `69b30fe3-2b93-4f1a-8401-34c6b848ed6b` @16:59:09Z；上线回读：`/` 200 且入口仍 `assets/index-Ddpx2Jdr.js` 与本地逐字节一致、`/api/health` 200、匿名 OCR 401）；判级 **patch**；**零迁移、零提示词改动、模型不变**（只补一个响应 code、前端一个 catch 分支，加上同日并入的英文名兜底分侧——Worker 侧镜像 + 纯函数，无新端点/页面）；无需 apply 迁移 ⇒ 上线只需 push（CF Workers Builds 自动部署）。
