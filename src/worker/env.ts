@@ -56,4 +56,7 @@ export interface Env {
   // v6.51.2：视觉调用 max_tokens（缺省 1024）。glm-4v-flash 只接受 [1,1024] —— 写 4096 会被
   // 参数校验直接打回（400 code 1210，v6.43.0–v6.51.1 的真实故障）；换付费视觉模型时用这个变量抬高。
   LLM_VISION_MAX_TOKENS?: string;
+  // v6.51.4：智谱视觉模型的思考开关。抽字段用不上推理，缺省关（thinking: disabled）——
+  // glm-4.6v-flashx 实测同图关思考快一倍、输出 token 减半、名单一致；=on/enabled/true 时保留思考。
+  LLM_VISION_THINKING?: string;
 }

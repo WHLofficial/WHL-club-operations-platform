@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { extractJsonObject } from '../src/lib/llm.ts';
 import {
   buildOcrEntries,
+  isSameSurnameShape,
   isSameTeamName,
   matchOcrTeamSide,
   matchRosterPlayer,
@@ -131,6 +132,56 @@ describe('TC-MATCH 花名册认人阶梯', () => {
   it('TC-MATCH-03 完全认不出回 null；空花名册全 null', () => {
     expect(matchRosterPlayer('查无此人', roster)).toBeNull();
     expect(matchRosterPlayer('L. Li', [])).toBeNull();
+  });
+
+  it('TC-MATCH-04 姓+首字母形态层（v6.51.4）：库里全名/只存姓都能对上截图缩写', () => {
+    // 生产实况（club 110374 佛罗伦萨 / club 5 切尔西）：库里有的存全名、有的只存姓，截图一律「首字母. 姓」
+    const shapeRoster: OcrRosterPlayer[] = [
+      { id: 84, officialName: 'Marc Cucurella', displayName: 'Marc Cucurella', position: 'LB' },
+      { id: 103, officialName: 'Álex Baena', displayName: 'Álex Baena', position: 'LM' },
+      { id: 233, officialName: 'Pedro Neto', displayName: 'Pedro Neto', position: 'RM' },
+      { id: 163, officialName: 'Aleix García', displayName: 'Aleix García', position: 'CM' },
+      { id: 421, officialName: 'Andrey Santos', displayName: 'Andrey Santos', position: 'CM' },
+      { id: 91, officialName: 'Carvajal', displayName: 'Carvajal', position: 'RB' }, // 库里只有姓
+      { id: 252, officialName: 'Ibañez', displayName: 'Ibañez', position: 'CB' }, // 库里只有姓 + 重音
+      { id: 222, officialName: 'S. Gnabry', displayName: 'S. Gnabry', position: 'LM' },
+      { id: 146, officialName: 'M. Kean', displayName: 'M. Kean', position: 'ST' },
+    ];
+    expect(matchRosterPlayer('M. Cucurella', shapeRoster)).toEqual({ player: shapeRoster[0], matched: 'surname-initial' });
+    expect(matchRosterPlayer('Á. Baena', shapeRoster)).toEqual({ player: shapeRoster[1], matched: 'surname-initial' });
+    expect(matchRosterPlayer('P. Neto', shapeRoster)).toEqual({ player: shapeRoster[2], matched: 'surname-initial' });
+    expect(matchRosterPlayer('A. García', shapeRoster)).toEqual({ player: shapeRoster[3], matched: 'surname-initial' });
+    expect(matchRosterPlayer('A. Santos', shapeRoster)).toEqual({ player: shapeRoster[4], matched: 'surname-initial' });
+    expect(matchRosterPlayer('D. Carvajal', shapeRoster)).toEqual({ player: shapeRoster[5], matched: 'surname-initial' });
+    expect(matchRosterPlayer('R. Ibáñez', shapeRoster)).toEqual({ player: shapeRoster[6], matched: 'surname-initial' });
+    // 逐字/归一化层能命中时不落到这一层
+    expect(matchRosterPlayer('S. Gnabry', shapeRoster)).toEqual({ player: shapeRoster[7], matched: 'official' });
+    // 首字母不符不认（B. Cucurella ≠ Marc Cucurella）；两侧都是完整名却不一致也不认
+    expect(matchRosterPlayer('B. Cucurella', shapeRoster)).toBeNull();
+    expect(matchRosterPlayer('Andrey Santos', [{ id: 1, officialName: 'Aleix Santos', displayName: 'Aleix Santos', position: 'CM' }])).toBeNull();
+    // 拼写错不走这一层（Gnarby/Keane 这类要靠人工改，本版不做编辑距离）
+    expect(matchRosterPlayer('S. Gnarby', shapeRoster)).toBeNull();
+    expect(matchRosterPlayer('M. Keane', shapeRoster)).toBeNull();
+    // 只凭姓分不出两个人 → 放弃
+    const dupes: OcrRosterPlayer[] = [
+      { id: 1, officialName: 'M. Salah', displayName: 'M. Salah', position: 'RM' },
+      { id: 2, officialName: 'R. Salah', displayName: 'R. Salah', position: 'ST' },
+    ];
+    expect(matchRosterPlayer('Salah', dupes)).toBeNull();
+    expect(matchRosterPlayer('M. Salah', dupes)).toEqual({ player: dupes[0], matched: 'official' });
+  });
+
+  it('TC-MATCH-05 isSameSurnameShape：姓必须同；一侧缺名算兼容；都给了名就要求首字母一致', () => {
+    expect(isSameSurnameShape('M. Cucurella', 'Marc Cucurella')).toBe(true);
+    expect(isSameSurnameShape('Marc Cucurella', 'M. Cucurella')).toBe(true); // 双向
+    expect(isSameSurnameShape('Carvajal', 'D. Carvajal')).toBe(true); // 库侧只有姓
+    expect(isSameSurnameShape('D. Carvajal', 'Carvajal')).toBe(true);
+    expect(isSameSurnameShape('Á. Baena', 'Alex Baena')).toBe(true); // 归一化后 a ↔ alex
+    expect(isSameSurnameShape('M. Cucurella', 'Marc Cucurella Ruiz')).toBe(false); // 姓取末节：cucurella vs ruiz
+    expect(isSameSurnameShape('B. Cucurella', 'Marc Cucurella')).toBe(false); // 首字母不符
+    expect(isSameSurnameShape('Marc Cucurella', 'Mario Cucurella')).toBe(false); // 都给了完整名且不一致
+    expect(isSameSurnameShape('', 'Carvajal')).toBe(false);
+    expect(isSameSurnameShape('M. Cucurella', '')).toBe(false);
   });
 });
 

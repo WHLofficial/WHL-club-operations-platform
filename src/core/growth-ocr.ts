@@ -4,6 +4,8 @@
 // 夺回球权图上看不到 ⇒ 保持手填；防守球员认定 = 手填夺回球权（含 0）。
 // v6.51.3：队名对侧（matchOcrTeamSide）——模型按提示词给中文队名，比对容忍前后缀与 CPU 尾标的漂移；
 //   两侧一样像（「慕尼黑」对拜仁慕尼黑与慕尼黑1860）不猜：端点回 code=ocr_team_ambiguous，前端拿 teamRaw 显示截图原文再让用户选边。
+// v6.51.4：认人补一层「姓 + 首字母」形态容忍（isSameSurnameShape）——库里 Marc Cucurella / Pedro Neto / Aleix García
+//   这类全名，截图（FC26 游戏内）给 M. Cucurella / P. Neto / A. García，逐字比不过去；只存姓的（Carvajal / Ibañez）同理。
 import { foldName } from './name-fold.ts';
 
 export type OcrKind = 'summary' | 'goalkeeping';
@@ -56,7 +58,7 @@ export interface OcrEntry {
   name: string; // 花名册 officialName
   position: string | null;
   draft: OcrEntryDraft;
-  matched: 'official' | 'official-folded' | 'display' | 'display-folded';
+  matched: 'official' | 'official-folded' | 'display' | 'display-folded' | 'surname-initial';
 }
 
 export interface OcrRosterPlayer {
@@ -155,7 +157,7 @@ export interface OcrMatchResult {
   matched: OcrEntry['matched'];
 }
 
-/** 认人阶梯：official 逐字 → official 归一化 → display 逐字 → display 归一化；同层多个命中即歧义放弃（宁缺勿错）。 */
+/** 认人阶梯：official 逐字 → official 归一化 → display 逐字 → display 归一化 → 姓+首字母形态；同层多个命中即歧义放弃（宁缺勿错）。 */
 export function matchRosterPlayer(ocrName: string, roster: OcrRosterPlayer[]): OcrMatchResult | null {
   const folded = foldName(ocrName);
   const ladder: { level: OcrEntry['matched']; key: (p: OcrRosterPlayer) => string }[] = [
@@ -170,7 +172,38 @@ export function matchRosterPlayer(ocrName: string, roster: OcrRosterPlayer[]): O
     if (hits.length === 1) return { player: hits[0], matched: level };
     if (hits.length > 1) return null; // 歧义（同队同名/同 folded 名）不猜
   }
+  // 第五层（v6.51.4）：「姓相同 + 首字母兼容」。库里存全名（Marc Cucurella）、截图给缩写（M. Cucurella），
+  // 或者库里只存姓（Carvajal）而截图带首字母（D. Carvajal）——逐字与归一化都比不过去，这里按形态认。
+  // 同样守「同层多个命中即放弃」：命中两人说明只凭姓分不出来，宁缺勿错。
+  const shaped = roster.filter((p) => isSameSurnameShape(ocrName, p.officialName) || isSameSurnameShape(ocrName, p.displayName));
+  if (shaped.length === 1) return { player: shaped[0], matched: 'surname-initial' };
   return null;
+}
+
+/** 拆成「名（去首字母点号后并成一串）+ 姓（最后一节）」：'M. Cucurella' → {given:'m', surname:'cucurella'}、'Carvajal' → {given:'', surname:'carvajal'}。 */
+function nameShapeOf(raw: string): { given: string; surname: string } {
+  const tokens = foldName(raw)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+  if (tokens.length === 0) return { given: '', surname: '' };
+  return { given: tokens.slice(0, -1).join(''), surname: tokens[tokens.length - 1] };
+}
+
+/**
+ * 「姓 + 首字母兼容」形态判定（v6.51.4）：
+ * 姓（末节，折叠后）必须一致；名一侧缺（只存了姓）算兼容，都给了就要求首字母一致（M. ↔ Marc、A. ↔ Andrey/Aleix）；
+ * 两边都给了完整名却不一致 → 不认（这种要靠逐字/归一化层或人工）。拼写错（Gnarby/Gnabry、Keane/Kean）不走这层。
+ */
+export function isSameSurnameShape(a: string, b: string): boolean {
+  const pa = nameShapeOf(a);
+  const pb = nameShapeOf(b);
+  if (pa.surname === '' || pb.surname === '' || pa.surname !== pb.surname) return false;
+  if (pa.given === '' || pb.given === '') return true; // 一边只存了姓（截图或库侧都可能）
+  if (pa.given === pb.given) return true; // 名也逐字一致（含都写缩写的情形）
+  if (pa.given.length === 1 || pb.given.length === 1) return pa.given[0] === pb.given[0]; // 缩写 ↔ 全名
+  return false;
 }
 
 // ---------- 队名对侧（v6.51.3） ----------

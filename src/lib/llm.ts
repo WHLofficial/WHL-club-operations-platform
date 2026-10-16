@@ -31,6 +31,17 @@ export function llmVisionMaxTokens(env: Env): number {
   return Number.isInteger(raw) && raw > 0 ? raw : VISION_MAX_TOKENS_DEFAULT;
 }
 
+/**
+ * 视觉调用是否要模型的思考模式（v6.51.4，只对智谱端点有效）。
+ * 抽字段是纯结构识别，用不上推理：glm-4.6v-flashx 实测四张真图开/关思考的名单完全一致，
+ * 关掉后约 15s → 6.6-9.5s、输出 token 从 ~1650 降到 ~660（账单减半）。
+ * LLM_VISION_THINKING=on/enabled/true 时保留思考（换模型后想对比精度再用）。
+ */
+export function llmVisionThinkingEnabled(env: Env): boolean {
+  const raw = (env.LLM_VISION_THINKING ?? '').trim().toLowerCase();
+  return raw === 'on' || raw === 'enabled' || raw === 'true';
+}
+
 interface LlmChatOptions {
   system: string;
   user: string;
@@ -119,6 +130,8 @@ export interface LlmVisionImage {
  * v6.43.0 成长录入截图识别专用（管理端 only）；不带 response_format（视觉模型兼容面窄，
  * 靠提示词约束 + extractJsonObject 兜底）；超时 90s（spike 实测 13-27s/图，留足余量）；
  * max_tokens 缺省 1024、可用 LLM_VISION_MAX_TOKENS 抬高（v6.51.2）。
+ * v6.51.4：智谱端点的视觉模型默认关思考（thinking: disabled，可用 LLM_VISION_THINKING=on 打开）——
+ * 实测 glm-4v-flash / glm-4.6v-flashx 都接受这个字段，其它 provider 不带。
  * 失败/超时/空回包与 llmChat 同口径抛 HttpError(502)，绝不静默编造。
  */
 export async function llmVisionJson<T>(env: Env, image: LlmVisionImage, prompt: string, maxTokens?: number): Promise<T> {
@@ -128,6 +141,9 @@ export async function llmVisionJson<T>(env: Env, image: LlmVisionImage, prompt: 
     throw new HttpError(503, '未配置 LLM（LLM_API_BASE / LLM_API_KEY / LLM_VISION_MODEL 或 LLM_MODEL）');
   }
   const base = env.LLM_API_BASE.replace(/\/+$/, '');
+  // 思考开关只发给认这个字段的智谱端点（换 OpenAI 兼容中转/其它厂商时不要多带参数）
+  const thinking =
+    /bigmodel\.cn/.test(base) && !llmVisionThinkingEnabled(env) ? { thinking: { type: 'disabled' as const } } : {};
   let res: Response;
   try {
     res = await fetch(`${base}/chat/completions`, {
@@ -146,6 +162,7 @@ export async function llmVisionJson<T>(env: Env, image: LlmVisionImage, prompt: 
         ],
         max_tokens: maxOut,
         temperature: 0.1,
+        ...thinking,
       }),
       signal: AbortSignal.timeout(90_000),
     });

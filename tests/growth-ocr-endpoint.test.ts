@@ -216,6 +216,24 @@ describe('TC-EP 截图识别端点', () => {
     expect(body.warnings.some((w) => w.includes('低于 7.0'))).toBe(false); // v6.46.0：低评分不再是警告
   });
 
+  it('TC-EP-04b 截图只给姓（v6.51.4 形态层）：Zhang → K. Zhang，matched 标 surname-initial', async () => {
+    const fx = seeded();
+    mockVision(
+      JSON.stringify({
+        ...summaryPayload,
+        rows: [{ pos: 'GK', name: 'Zhang', rating: '5.1', goals: 0, assists: 0 }],
+        selected: null,
+      }),
+    );
+    const res = await sendOcr(fx, { image: PNG_B64 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as OcrResponse;
+    expect(body.entries).toEqual([
+      { playerId: 10, name: 'K. Zhang', position: 'GK', matched: 'surname-initial', draft: { appearance: true, rating: 5.1 } },
+    ]);
+    expect(body.unmatched).toEqual([]);
+  });
+
   it('TC-EP-05 页签不是两张业务页签 → 502 点名；队名对不上两侧 → 400 点名截图队名', async () => {
     const fx = seeded();
     mockVision(JSON.stringify({ ...summaryPayload, tab: 'Shooting' }));
@@ -389,5 +407,30 @@ describe('TC-EP 截图识别端点', () => {
     expect(body.error).toContain('FC BAYERN MÜNCHEN');
     expect(body.error).toContain('识别为「慕尼黑」');
     expect(body.error).toContain('分不清主客');
+  });
+
+  it('TC-EP-17 智谱端点默认关思考；非智谱端点不带该字段；LLM_VISION_THINKING=on 时保留思考（v6.51.4）', async () => {
+    // 生产实际形态：LLM_API_BASE 是智谱 bigmodel.cn —— 抽字段用不上推理，默认 thinking.disabled
+    const fx = freshEnv({ base: 'https://open.bigmodel.cn/api/paas/v4', key: 'k', model: 'glm-4.6v-flashx' });
+    seedBase(fx);
+    seedMatch(fx, MATCH_ID, '海港联', '北岸城');
+    const call = captureVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(200);
+    expect(call().body.thinking).toEqual({ type: 'disabled' });
+
+    // 想留着思考（换模型后对比精度）：LLM_VISION_THINKING=on ⇒ 不带这个字段（模型回到自己的缺省）
+    const on = freshEnv({ base: 'https://open.bigmodel.cn/api/paas/v4', key: 'k', model: 'glm-4.6v-flashx' });
+    seedBase(on);
+    seedMatch(on, MATCH_ID, '海港联', '北岸城');
+    on.env.LLM_VISION_THINKING = 'on';
+    const onCall = captureVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(on, { image: PNG_B64 })).status).toBe(200);
+    expect(onCall().body.thinking).toBeUndefined();
+
+    // 换成别的 OpenAI 兼容厂商/中转：不要多带智谱私有字段（不认识会 4xx）
+    const other = seeded();
+    const otherCall = captureVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(other, { image: PNG_B64 })).status).toBe(200);
+    expect(otherCall().body.thinking).toBeUndefined();
   });
 });
