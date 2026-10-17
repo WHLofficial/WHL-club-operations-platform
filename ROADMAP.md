@@ -1522,6 +1522,26 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.11 · 成长录入三修：游戏截断名兜底（认人第六层）+「不保存，继续」只丢当前队侧 + 截图上传改 JPEG（2026-10-17）
+
+**状态**：**本地完成（未发布，待令）**（判级 patch；零迁移、零提示词改动、模型不变 ⇒ push 即部署）。
+
+**缘起（用户）**：① m17643「认人失败 1 行：T. Alexander-Arn...——请在表内手填，是不是长名字会被截断？如果是的话，探查生产库内球员名，防止截断」；② m17741「我知道了，是游戏画面截断了，要探索这种情况下的兜底方案」（三选一 → 「前缀层自动认回」）；③ 同轮追加「点击「不保存，继续」应当只丢弃当页的未保存项目」；④ m17852「评估ocr后处理速度，试图优化」。
+
+**诊断**：FC26 赛后表 Name 列约 16 字符后截断（截图 `T. Alexander-Arn…`），模型照抄截断文本（探针：尾部三个 ASCII `.`，不是 U+2026；不猜全名），库内名字完整 ⇒ 旧五层认人全落空。生产 rostered 570 人中 `LENGTH(name) > 16` = 8 名，其 16 字符前缀各自唯一。速度侧：后处理纯计算 ≈0.4 ms、模型调用 7.5-8.5 s 且对上传体积不敏感 ⇒ 只优化浏览器侧。
+
+**交付**：① 认人第六层 `'truncated-prefix'`（`src/core/growth-ocr.ts` + `web/src/lib/api.ts` union 同步）；② 换队侧闸门只看当前队侧（`sideDirty`）+ `discardDrafts` 只重建当前队侧（`web/src/pages/admin/GrowthEntryPage.tsx`，文案同步）；③ 上传改 JPEG 0.92 / 0.8 兜底 / 退回原图（`web/src/lib/ocr-image.ts`）。
+
+**验收**：typecheck 0 error；`npx vitest run` 138 文件 / 2250 例全绿（净 +4）；build ✓ 入口 `index-C_AZu9Zs.js` sha256 `7b290dda…`、页面 chunk `GrowthEntryPage-CvZ1TBqL.js` sha256 `532ed558…`、CSS 未变；测试计划 `docs/test-plans/v6.51.11-truncated-name-discard-scope-and-jpeg.md`。
+
+**用户侧验收（待执行）**：重传利-曼图（`T. Alexander-Arn...` 应直接预填）+ 体感上传等待。
+
+**不做/未覆盖**：真机体感、端到端墙钟、JPEG 下 `selected` 稀疏、键长 <4 短名。
+
+**待核**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`。
+
+**本地提交**：`45e1084` + `0f815a0` + `3186897` + `a1ea125` + docs（本枚）。
+
 ## v6.51.10 · 成长录入：`growth_events(match_ref, player_id)` 索引（迁移 0076）+ 列表行悬停预取（2026-10-16）
 
 **状态**：**已上线 2026-10-17**（迁移 `0076` 已先 apply 生产：`npm run db:migrate:remote` ⇒ `Executed 2 commands in 3.55ms`、0076 ✅，只读核验索引在册且 2 列；push `cbacac6..40ae714`（5 枚，含 v6.51.9 上线回写 `c85c23c`）⇒ CF Workers Builds 自动部署 Version `81e9fcce-6f7e-4ab2-a9eb-fce8043fff1c`（Created 2026-10-17T00:37:55Z、100% 流量）；回读 `/` 200、`/api/health` 200（d1/tour_db/kv 全 ok）、入口 `assets/index-D3qBMZhr.js` + 页面 chunk `assets/GrowthEntryPage-BFSZ17wJ.js` + CSS 入口 `assets/index-BGPWLRxy.css` 三件与本地逐字节一致、匿名 OCR 401「未登录」、线上页面 chunk 含预取代码）；判级 **patch**（纯读路径优化）；**零提示词改动、模型不变、SQL 逐字未改**（索引只改查询计划，前端只多一条预取，响应逐字段等价）。

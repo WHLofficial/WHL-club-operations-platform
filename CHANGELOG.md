@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.11] · 成长录入三修：游戏截断名兜底（认人第六层）+「不保存，继续」只丢当前队侧 + 截图上传改 JPEG（2026-10-17）
+
+**本地完成（未发布，待令）**：判级 **patch**（无新端点、无迁移、**零提示词改动、模型不变**）。缘起（用户）：① m17643「认人失败 1 行：T. Alexander-Arn...——请在表内手填，是不是长名字会被截断？如果是的话，探查生产库内球员名，防止截断」；② m17741「我知道了，是游戏画面截断了，要探索这种情况下的兜底方案」（三选一 → 选「前缀层自动认回」）；③ 同轮追加指令「点击「不保存，继续」应当只丢弃当页的未保存项目」；④ m17852「评估ocr后处理速度，试图优化」。
+
+诊断：FC26 赛后 Player Performance 表的 Name 列在约 16 字符后截断（截图里就是 `T. Alexander-Arn…`），视觉模型**照抄截断文本**（探针实测尾部是三个 ASCII `.`，不是 U+2026；不猜全名），而生产库名字完整（`T. Alexander-Arnold` id 62 / club 9 利物浦 / 19 字符）⇒ 旧五层认人（含 v6.51.4「姓+首字母」）全落空，落到「请在表内手填」。生产核对：rostered 570 人中 `LENGTH(name) > 16` = **8** 名（R. Floriani Mussolini 21 / T. Alexander-Arnold 19 / Francisco Conceição 19 / S. Milinković-Savić 19 / Gabriel Martinelli 18 / Cristhian Mosquera 18 / A. Zambo Anguissa 17 / Cristiano Ronaldo 17），这 8 名的 16 字符可见前缀在各自花名册内**全部唯一**。
+
+交付：① **截断前缀层**（`src/core/growth-ocr.ts`）：`matchRosterPlayer` 第六层 `'truncated-prefix'`——尾部带省略号痕迹（`/(?:\.{2,}|…)$/`）时剥痕折叠成字母数字键（`nameKeyOf`，键长 ≥4 才算），本侧花名册里**唯一**前缀命中才认（命中 ≥2 回 null，宁缺勿错）；`'K. Mbappé'` 之类正常名与无痕迹短名不受影响；`web/src/lib/api.ts` matched union 同步第六值。② **「不保存，继续」只丢当前队侧**（`web/src/pages/admin/GrowthEntryPage.tsx`）：换队侧闸门只看当前队侧是否脏（新 `sideDirty` + `onSideDirtyChange`），`discardDrafts` 只重建当前队侧 ⇒ 另一队侧草稿保留；确认条文案改为「…收起面板、切换比赛、切换视图会丢弃全部草稿；换队侧只丢弃当前队侧的草稿（另一队侧的草稿保留）。都不提交。」③ **截图上传改 JPEG 0.92**（`web/src/lib/ocr-image.ts`）：2× 放大后 PNG（2.3-3.7 MB）改 JPEG q92（0.57-0.71 MB，≈1/5），超 `OCR_MAX_DECODED_BYTES` 再降 q80、仍超退回原图。
+
+速度实测（m17852）：服务端后处理纯计算 ≈ **0.4 ms**（parseOcrVision 2.7 µs + buildOcrEntries 409.7 µs + ocrCrossChecks 0.3 µs；生产 D1 单查 `sql_duration_ms` 0.6 ms）⇒ 全程 7.5-8.5 s 里 <1%；模型调用占 ~80-90% 且**对体积不敏感**（5 张真图 PNG vs JPEG q92 逐行零差异、prompt tokens 同为 6925、耗时 7073-8376 ms 无编码相关性）⇒ 唯一可优化的是浏览器侧上传（3.0-4.9 MB base64 → ~0.9 MB），故改 JPEG。
+
+验收：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **138 文件 / 2250 例全绿**（v6.51.10 基线 138/2246，净 +4 = TC-MATCH-06/07 + TC-ENTRY-E16/E17）；`npm run build` ✓ 入口 `web/dist/assets/index-C_AZu9Zs.js`（663,314 B / gzip 210.88 kB，sha256 `7b290ddae85753be593691b011f0087fd71199f0ad73de97e2e26ecefc04cd2e`，含版本串 6.51.11）+ 页面 chunk `web/dist/assets/GrowthEntryPage-CvZ1TBqL.js`（36,171 B / gzip 11.04 kB，sha256 `532ed55843a02879cadf312e4abcc2538605c082f240cf60af3ffdf0ec07434a`）；CSS 入口 `index-BGPWLRxy.css` 未变（零样式改动）。测试计划 `docs/test-plans/v6.51.11-truncated-name-discard-scope-and-jpeg.md`。
+
+不做/未覆盖：① 真机体感（上传体积 ≈1/5）待用户验收；② 端到端墙钟不可压（模型侧）；③ JPEG 下 `selected` 块偶尔更稀疏（除解析外无下游消费者）；④ 截断键长 <4 的极端短名不兜底（宁缺勿错）。
+
+待核：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
+
+本地提交：`45e1084`（fix(worker) 截断前缀层）+ `0f815a0`（fix(web) 不保存继续只丢当前队侧）+ `3186897`（perf(web) 截图上传改 JPEG）+ `a1ea125`（chore 版本号 6.51.10→6.51.11）+ docs(v6.51.11)（本枚）。
+
 ## [v6.51.10] · 成长录入：`growth_events(match_ref, player_id)` 索引（迁移 0076）+ 列表行悬停预取（2026-10-16）
 
 **已上线（2026-10-17）**：迁移 `0076_growth_events_match_ref_index.sql` 已先 apply 生产（`npm run db:migrate:remote` ⇒ `Executed 2 commands in 3.55ms`、0076 ✅；只读核验 `idx=1 / sqlite_autoindex_growth_events_1=1 / growth_events=774 行 / 索引 2 列`）；push `cbacac6..40ae714`（5 枚，含 v6.51.9 上线回写 `c85c23c`）⇒ CF Workers Builds 自动部署 Version **`81e9fcce-6f7e-4ab2-a9eb-fce8043fff1c`**（Created 2026-10-17T00:37:55Z，100% 流量）。判级 **patch**（纯读路径优化：无新端点、无页面、**零提示词改动、模型不变、SQL 逐字未改**、响应逐字段等价）。缘起＝v6.51.9 收尾后用户两问「悬停预取没有做吗」「迁移 CREATE INDEX idx_growth_events_match_ref ON growth_events (match_ref) 没有做吗」——D/E 两项当时按用户裁决「ABC 全做」排除，据两问补做本版。
