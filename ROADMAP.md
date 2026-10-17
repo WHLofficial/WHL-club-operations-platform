@@ -1524,7 +1524,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.51.9 · 成长录入页提速：比赛列表与录入面板取数并发化 + 停赛复算去重（2026-10-16）
 
-**状态**：**本地完成（未发布，待令）**；判级 **patch**（性能与读量治理）；**零迁移、零前端改动、零提示词改动、模型不变、SQL 逐字未改**（只改取数顺序与并发度，响应逐字段等价）⇒ 上线只需 push（CF Workers Builds 自动部署）。
+**状态**：**已上线 2026-10-16**（push `a10a22f..cbacac6`（5 枚，含 v6.51.8 上线回写）⇒ CF Workers Builds 自动部署 Version `6c87d629-ce3a-46dd-9f73-2152e5edfcec` @2026-10-16T23:51:51Z、100% 流量；回读 `/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-DsDpFJV5.js`（sha256 `31bba750…`）+ 页面 chunk `assets/GrowthEntryPage-Bxtugy8H.js`（sha256 `7cdfca62…`）+ CSS 入口 `assets/index-BGPWLRxy.css`（sha256 `dd4f5b5c…`）三件与本地逐字节一致、匿名 OCR 401「未登录」；零迁移 ⇒ 无需 apply）；判级 **patch**（性能与读量治理）；**零迁移、零前端改动、零提示词改动、模型不变、SQL 逐字未改**（只改取数顺序与并发度，响应逐字段等价）⇒ 上线只需 push（CF Workers Builds 自动部署）。
 
 **缘起（用户）**：先叫停其它线——「先停，再做一个：改善成长录入页面比赛列表和录入面板的加载速度，先出方案」；诊断给出 A/B/C/D/E 五项后裁决「完成后做成长录入优化，**ABC 全做**」（D 新索引 `growth_events(match_ref)`、E 列表悬停预取不做）。
 
