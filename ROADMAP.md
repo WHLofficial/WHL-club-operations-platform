@@ -1522,6 +1522,26 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.12 · 点球决胜按平局（发奖口径）——代码修正 + S9 冠军杯小组赛 4 场生产订正（2026-10-17）
+
+**状态**：**生产订正已执行（2026-10-17）**；**代码修正待发布**（发版后小组赛/联赛的「平比分 + 点球」才按平局发奖；淘汰赛口径不变）。判级 **patch**（无新端点、无迁移、无前端改动）。闸门：`npm run typecheck` 三份 0 error、`npx vitest run` **138 文件 / 2252 例全绿**（净 +2）、`npm run build` ✓。
+
+**缘起（用户 m02671，原文）**：「点球决胜按平局重新发」。
+
+**交付**
+- **规则**：**平比分 + 点球分胜负**的场次，在**小组赛/联赛**口径下按平局发奖（双方各 2.5）；点球胜者只作用于**淘汰赛**口径（晋级与晋级奖金）。战绩侧早已如此（`src/worker/home.ts` formPtsOf「点球决胜按平局计——用户裁决 2026-09-16」、`src/worker/season-settle.ts` leagueStandings、`src/worker/naming-ops.ts` betCountSql），**只有发奖侧漏了 stage 闸**。
+- **代码**：① `src/worker/prizes.ts` `outcome()` —— 点球与 `winnerTeamId` 两条兜底一并限定在 `stage_kind ∉ {group, round_robin}`；② `src/worker/season-settle.ts` `aggregateRecords()` —— 同一 stage 闸（小组赛剩余池 `paid` 口径）+ **一侧未映射时照样计已映射一侧**（原来整场跳过 ⇒ `paid` 算少、剩余池补发会突破池上限）；③ `tests/season-settle.test.ts` +2 例。
+- **生产订正批** `scripts/prod-20261017-s9-pk-draw-fix/`（生成器带自检 + 预检/收回/补发/复查/回滚 SQL + README）：收回 3 笔 7.00（`manual_adjust` + `ref_type='pk_rollback_prize'`，不删原流水）+ 按平局补发 7 笔 2.50（对手侧 canonical 键、点球胜方侧 `match_*_fix` 键防重放双发；CPU 一侧不补）⇒ **净 −3.50M**：280 / 241 / 112172 各 −4.50（112172 余额 −1.71，欠账）、11 / 45 / 2 / 21 各 +2.50。
+
+**验收数字**
+- 范围：全库「平比分 + 点球」恰好 **4 场**，全在 S9 冠军杯小组赛（#10 / #16 / #18 / #22；联赛 0 场）。
+- 执行：生产 **20/20** 条语句生效（changes 6 + 14）、**重放全 0**（幂等）、守恒 0、`pk_rollback_n=3 / canonical_prize_n=7 / draw_2_5_n=7`；预检 4 场全 `champions_cup/group`、`pk_*_n=0`。
+- 口径收口：小组赛 `match_*` / `match_*_fix` 流水 = **35 笔 / 213.50M**（28 胜 × 7.00 + 7 平 × 2.50），被收回的 3 笔 7.00 由订正流水抵消 ⇒ **实发 192.50**；结算 `paid` = 192.50 ⇒ `remaining = 7.50`（0.30/胜）⇒ **小组赛总支出恰好 = 池上限 200**（旧口径 `paid`=168 ⇒ 会补 32 而突破到 228）。
+- **更正（如实登记）**：m02661 答复的「本赛季小组赛已发放 168」是错报（`memo LIKE '冠军杯%'` 漏 4 笔：弃权场 #2 的 id 254 + 3 笔误写「联赛胜场奖金（比赛 #N，CPU 期补发）」的 #18 id 256 / #22 id 264 / #27 id 257）；真实即时值 **196.00**，订正后 192.50。池下调算术同步更正（`memory/plan-s9-s10-economy-revolution-rollout.md` 附录 D + `memory/design-s9-income-system.md` §3 L0/§4.5）：**只动池最多省 7.5/赛季**（初稿写 32 是错的），要 −80 必须**池 120 + 逐场单价同批下调**（胜 4.0 / 平 1.5，缺一无效；只动单价则池兜底回去、只动池则实付已超池）。
+- 本地提交：`4a1f144`（fix(settle)）+ `6ac2459`（chore(scripts)）+ docs(v6.51.12)；**未 push**。
+
+**留待（待令）**：① 发布（bump `package.json` → 6.51.12 + push；代码修正上线后未来小组赛/联赛点球场才按平局发奖）；② 冠军杯池与逐场单价是否下调（T0-7，重算后建议见附录 D）；③ S9 杯赛结算（`stage_settled_at` 仍 null）时会按修正后的 `paid` 给 7.50。
+
 ## v6.51.11 · 成长录入三修：游戏截断名兜底（认人第六层）+「不保存，继续」只丢当前队侧 + 截图上传改 JPEG（2026-10-17）
 
 **状态**：**已上线 2026-10-17**（Version `0d4c2583-e896-4f2d-bfc2-ecf3df634a08`，push `40ae714..bba0af8`（6 枚，含 v6.51.10 上线回写 `33a6b4b`）⇒ CF Workers Builds 自动部署 @07:23:50Z；零迁移无需 apply；回读三件资产与本地 dist 逐字节一致 + `/` 200 + health 200 + 匿名 OCR 401）。判级 patch（零迁移、零提示词改动、模型不变）。
