@@ -6,6 +6,7 @@
 //   4) 一次「全部保存」超过服务端单批上限（50）要自动分块。
 //   5) 截图上传前要过 fileToOcrBase64（v6.51.5 的 2× 放大助手）——这里 mock 掉它只为钉住「页面确实走了这道工序」，
 //      放大算法本身由 web/src/lib/ocr-image.test.ts 覆盖。
+//   6) 「不保存，继续」只丢当前队侧的草稿（v6.51.11）：换队侧不动另一队侧的草稿（含截图预填），闸门也只看当前队侧。
 // 注意：查看模式里「没录过的格子」渲染成 —（没有 input）；面板里的按钮有两个「收起」（列表行上一个、面板头一个），要按面板作用域取。
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -616,5 +617,104 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     await waitFor(() => expect(document.querySelector('.entry-table')).not.toBeNull());
     expect(document.body.textContent).not.toContain('面板加载失败');
     expect(mocks.panel).toHaveBeenCalledTimes(2); // 预取失败的那趟 + 点开重取的这趟
+  });
+
+  it('TC-ENTRY-E16 换队侧「不保存，继续」只丢当前队侧（v6.51.11）：另一队侧的截图预填保留', async () => {
+    // 多选上传两队截图：主队那张预填 L. Li 评分 9、客队那张预填 Q. Qian 评分 7.7。
+    // 识别后 setSide 跟着预填走（res.side），所以传完客队那张时当前队侧是客队、两侧都脏。
+    const responses = [
+      new Response(
+        JSON.stringify({
+          team: '海港联',
+          side: 'home',
+          kind: 'summary',
+          entries: [{ playerId: 11, name: 'L. Li', position: 'ST', draft: { appearance: true, rating: 9 }, matched: 'official' }],
+          unmatched: [],
+          warnings: [],
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        JSON.stringify({
+          team: '北岸城',
+          side: 'away',
+          kind: 'summary',
+          entries: [{ playerId: 20, name: 'Q. Qian', position: 'GK', draft: { appearance: true, rating: 7.7 }, matched: 'official' }],
+          unmatched: [],
+          warnings: [],
+        }),
+        { status: 200 },
+      ),
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => responses.shift() as Response));
+
+    renderPage();
+    await openEdit();
+    pickFile('home.png');
+    await waitFor(() => expect((cellInput(1, 3) as HTMLInputElement).value).toBe('9')); // 主队侧预填落地（L. Li 行）
+    pickFile('away.png');
+    await waitFor(() => expect(rows()[0].textContent).toContain('Q. Qian')); // 面板跟着预填切到客队侧
+
+    // 换回主队：当前队侧（客队）有脏行 → 出确认条；「不保存，继续」只丢客队侧的草稿
+    fireEvent.click(screen.getByRole('button', { name: /^主队 · 海港联/ }));
+    expect(screen.getByText(/录入面板有未保存的改动/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '不保存，继续' }));
+    await waitFor(() => expect(rows()[0].textContent).toContain('张三'));
+    expect((cellInput(1, 3) as HTMLInputElement).value).toBe('9'); // 主队侧的预填还在（换队侧不动另一侧）
+
+    // 再回客队：主队侧此时有未保存预填 → 照样出确认条，丢的是主队侧；客队侧上一步已回到基线
+    fireEvent.click(screen.getByRole('button', { name: /^客队 · 北岸城/ }));
+    expect(screen.getByText(/录入面板有未保存的改动/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '不保存，继续' }));
+    await waitFor(() => expect(rows()[0].textContent).toContain('Q. Qian'));
+    expect((cellInput(0, 3) as HTMLInputElement).value).toBe(''); // 客队侧草稿已丢：评分回到空
+    expect((cellInput(0, 2) as HTMLInputElement).checked).toBe(false); // 出场预填也一起丢了
+  });
+
+  it('TC-ENTRY-E17 换队侧闸门只看当前队侧（v6.51.11）：另一队侧挂着草稿也不拦', async () => {
+    mocks.submit.mockResolvedValue({
+      ok: true,
+      written: 1,
+      updated: 0,
+      duplicates: 0,
+      totalXp: 1,
+      perPlayer: [{ playerId: 20, name: 'Q. Qian', xp: 1, written: 1, updated: 0, duplicates: 0 }],
+    } satisfies MatchEntrySubmitResult);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              team: '北岸城',
+              side: 'away',
+              kind: 'summary',
+              entries: [{ playerId: 20, name: 'Q. Qian', position: 'GK', draft: { appearance: true, rating: 7.7 }, matched: 'official' }],
+              unmatched: [],
+              warnings: [],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    renderPage();
+    await openEdit();
+    // 主队侧先手填一个草稿，留着不保存
+    fireEvent.change(cellInput(0, 3) as HTMLInputElement, { target: { value: '9' } });
+    // 传客队截图：预填落在客队侧、面板跟过去——当前队侧（客队）脏，主队侧也脏
+    pickFile('away.png');
+    await waitFor(() => expect(rows()[0].textContent).toContain('Q. Qian'));
+    // 把当前队侧存掉：基线前移 ⇒ 客队侧干净，主队侧的草稿还挂着
+    fireEvent.click(rowSaveButton());
+    await screen.findAllByText(/新录 1 项/); // 等状态行/toast 出现 = 保存真的落地（不能只看保存按钮，保存中它也是禁用的）
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(() => rowSaveButton()).toThrow()); // 客队侧已无脏行
+
+    // 换队侧：当前队侧干净、脏的是另一侧 —— 不该弹确认条（老口径「两侧任一脏就拦」会误拦）
+    fireEvent.click(screen.getByRole('button', { name: /^主队 · 海港联/ }));
+    await waitFor(() => expect(rows()[0].textContent).toContain('张三'));
+    expect(screen.queryByText(/录入面板有未保存的改动/)).toBeNull();
+    expect((cellInput(0, 3) as HTMLInputElement).value).toBe('9'); // 主队侧草稿原样保留
   });
 });

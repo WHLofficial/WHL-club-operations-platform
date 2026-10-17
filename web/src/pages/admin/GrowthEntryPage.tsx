@@ -402,6 +402,8 @@ function MatchEntrySection() {
   // 草稿会留在面板里——所以丢弃也得由面板执行，出口同样挂 ref（见 EntryPanel.discardDrafts）
   const discardRef = useRef<(() => void) | null>(null);
   const [savingAll, setSavingAll] = useState(false);
+  // v6.51.11：「不保存，继续」只丢当前队侧的草稿，换队侧闸门因此只看当前队侧有没有脏行（另一队侧的草稿会保留）
+  const [sideDirty, setSideDirty] = useState(false);
 
   // v6.51.10 悬停预取：鼠标掠过（或键盘聚焦到）某一行就先把该场面板数据拉进缓存，点「录数据」时多半
   // 直接命中、省掉一波往返。失败的预取不留错误态——清掉缓存条目，点开后的正常请求照旧、错误由面板自己报。
@@ -446,9 +448,13 @@ function MatchEntrySection() {
     setOpen(next);
   }
 
-  /** 未保存改动闸门：有脏改动先出确认条，确认后才执行切换/收起 */
-  function guard(action: () => void) {
-    if (dirty) setPending(() => action);
+  /**
+   * 未保存改动闸门：有脏改动先出确认条，确认后才执行切换/收起。
+   * scope='side' 用于换队侧（v6.51.11）：「不保存，继续」只丢当前队侧，所以只看当前队侧脏不脏——
+   * 另一队侧有草稿时切换不动它，不该拦。
+   */
+  function guard(action: () => void, scope: 'panel' | 'side' = 'panel') {
+    if (scope === 'side' ? sideDirty : dirty) setPending(() => action);
     else action();
   }
 
@@ -515,7 +521,7 @@ function MatchEntrySection() {
               <td colSpan={6}>
                 {pending && (
                   <div className="banner warn entry-confirm">
-                    <span>录入面板有未保存的改动：收起面板、切换比赛、切换视图或换队侧，确认后都会丢弃草稿（不提交）。</span>
+                    <span>录入面板有未保存的改动：收起面板、切换比赛、切换视图会丢弃全部草稿；换队侧只丢弃当前队侧的草稿（另一队侧的草稿保留）。都不提交。</span>
                     <button type="button" className="btn btn-sm" onClick={() => setPending(null)}>
                       继续编辑
                     </button>
@@ -528,7 +534,7 @@ function MatchEntrySection() {
                       onClick={() => {
                         const act = pending;
                         setPending(null);
-                        // 先让面板把两侧草稿按服务端数据重建（换队侧不重挂面板，只有它能丢），再执行待执行动作
+                        // 先让面板把当前队侧的草稿按服务端数据重建（换队侧不重挂面板，只有它能丢），再执行待执行动作
                         discardRef.current?.();
                         act();
                       }}
@@ -544,6 +550,7 @@ function MatchEntrySection() {
                   guard={guard}
                   onClose={() => runOpen(null)}
                   onDirtyChange={setDirty}
+                  onSideDirtyChange={setSideDirty}
                   saveAllRef={saveAllRef}
                   discardRef={discardRef}
                   show={show}
@@ -653,15 +660,18 @@ function EntryPanel({
   guard,
   onClose,
   onDirtyChange,
+  onSideDirtyChange,
   saveAllRef,
   discardRef,
   show,
 }: {
   match: MatchEntryListItem;
   mode: Mode;
-  guard: (action: () => void) => void;
+  guard: (action: () => void, scope?: 'panel' | 'side') => void;
   onClose: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  /** 当前队侧的脏状态（v6.51.11）：换队侧闸门只看它——「不保存，继续」只丢当前队侧，另一队侧的草稿保留 */
+  onSideDirtyChange: (dirty: boolean) => void;
   /** 父级确认条的「保存并继续」出口：面板把「保存两队侧脏行」挂到这里（见 saveAllSides） */
   saveAllRef: { current: (() => Promise<boolean>) | null };
   /** 父级确认条的「不保存，继续」出口（v6.51.4）：面板把「按服务端数据重建两队侧行」挂到这里（见 discardDrafts） */
@@ -724,14 +734,20 @@ function EntryPanel({
     onDirtyChange((['home', 'away'] as Side[]).some((s) => rows[s].some(rowDirty)));
   }, [rows, onDirtyChange]);
 
+  // 当前队侧的脏状态单独报一份（v6.51.11）：换队侧闸门只看它——「不保存，继续」只丢当前队侧
+  useEffect(() => {
+    if (rows === null) return;
+    onSideDirtyChange(rows[side].some(rowDirty));
+  }, [rows, side, onSideDirtyChange]);
+
   /**
-   * 「不保存，继续」用（v6.51.4）：把两侧行按当前服务端数据重建，丢掉所有未提交的输入。
-   * 收起 / 切比赛 / 切视图都会重挂面板（组件卸载，草稿自然没了），只有换队侧不重挂——
-   * 那条路上的草稿必须在这里显式清掉，否则「不保存」名不副实（父级确认条文案承诺的是丢弃）。
+   * 「不保存，继续」用（v6.51.4；v6.51.11 收窄到当前队侧）：把当前队侧的行按服务端数据重建，丢掉这一侧未提交的输入。
+   * 换队侧不重挂面板，只有它能显式丢——另一队侧的草稿（含截图预填）要留着，用户只是离开当前这一页。
+   * 收起 / 切比赛 / 切视图会重挂面板（组件卸载），剩下的草稿随卸载一起作废。
    */
   function discardDrafts() {
     if (!data) return;
-    setRowsTracked(() => ({ home: buildSideRows(data, 'home', mode), away: buildSideRows(data, 'away', mode) }));
+    setRowsTracked((prev) => (prev ? { ...prev, [side]: buildSideRows(data, side, mode) } : prev));
   }
 
   // 父级确认条要在「动作执行前」调到最新的 saveAllSides（行在面板 state 里，父级看不到）：
@@ -1032,7 +1048,7 @@ function EntryPanel({
                 disabled={chip.disabled}
                 title={chip.reason}
                 onClick={() => {
-                  if (!chip.disabled && s !== side) guard(() => setSide(s));
+                  if (!chip.disabled && s !== side) guard(() => setSide(s), 'side');
                 }}
               >
                 {s === 'home' ? '主队' : '客队'} · {chip.team}
