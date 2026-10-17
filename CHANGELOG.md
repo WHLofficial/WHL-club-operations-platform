@@ -6,7 +6,7 @@
 
 ## [v6.51.11] · 成长录入三修：游戏截断名兜底（认人第六层）+「不保存，继续」只丢当前队侧 + 截图上传改 JPEG（2026-10-17）
 
-**本地完成（未发布，待令）**：判级 **patch**（无新端点、无迁移、**零提示词改动、模型不变**）。缘起（用户）：① m17643「认人失败 1 行：T. Alexander-Arn...——请在表内手填，是不是长名字会被截断？如果是的话，探查生产库内球员名，防止截断」；② m17741「我知道了，是游戏画面截断了，要探索这种情况下的兜底方案」（三选一 → 选「前缀层自动认回」）；③ 同轮追加指令「点击「不保存，继续」应当只丢弃当页的未保存项目」；④ m17852「评估ocr后处理速度，试图优化」。
+**已上线（2026-10-17）**：push `40ae714..bba0af8`（6 枚，含 v6.51.10 上线回写 `33a6b4b`）⇒ CF Workers Builds 自动部署 Version **`0d4c2583-e896-4f2d-bfc2-ecf3df634a08`**（Version Created 2026-10-17T07:23:50.214Z、deployment 07:23:51.087Z、Source `Unknown (deployment)`、100% 流量）；零迁移 ⇒ 无需 apply。回读：`GET /` 200、`/api/health` 200（`{"ok":true,"checks":{"d1":"ok","tour_db":"ok","kv":"ok"}}`）、匿名 `POST /api/admin/growth/match-entry/1/ocr` ⇒ 401；线上入口 `assets/index-C_AZu9Zs.js`（663,314 B）、页面 chunk `assets/GrowthEntryPage-CvZ1TBqL.js`（36,171 B）、CSS `assets/index-BGPWLRxy.css`（94,381 B）三件与本地 dist **逐字节一致**（`cmp` 通过）；线上页面 chunk 内含新前端代码（`toDataURL("image/jpeg", …)`、确认条「换队侧只丢弃当前队侧」「丢弃全部草稿」）⇒ 三项改动在线（截断前缀层在 worker 侧，随同一 Version 部署）。判级 **patch**（无新端点、无迁移、**零提示词改动、模型不变**）。缘起（用户）：① m17643「认人失败 1 行：T. Alexander-Arn...——请在表内手填，是不是长名字会被截断？如果是的话，探查生产库内球员名，防止截断」；② m17741「我知道了，是游戏画面截断了，要探索这种情况下的兜底方案」（三选一 → 选「前缀层自动认回」）；③ 同轮追加指令「点击「不保存，继续」应当只丢弃当页的未保存项目」；④ m17852「评估ocr后处理速度，试图优化」。
 
 诊断：FC26 赛后 Player Performance 表的 Name 列在约 16 字符后截断（截图里就是 `T. Alexander-Arn…`），视觉模型**照抄截断文本**（探针实测尾部是三个 ASCII `.`，不是 U+2026；不猜全名），而生产库名字完整（`T. Alexander-Arnold` id 62 / club 9 利物浦 / 19 字符）⇒ 旧五层认人（含 v6.51.4「姓+首字母」）全落空，落到「请在表内手填」。生产核对：rostered 570 人中 `LENGTH(name) > 16` = **8** 名（R. Floriani Mussolini 21 / T. Alexander-Arnold 19 / Francisco Conceição 19 / S. Milinković-Savić 19 / Gabriel Martinelli 18 / Cristhian Mosquera 18 / A. Zambo Anguissa 17 / Cristiano Ronaldo 17），这 8 名的 16 字符可见前缀在各自花名册内**全部唯一**。
 
@@ -20,7 +20,7 @@
 
 待核：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
 
-本地提交：`45e1084`（fix(worker) 截断前缀层）+ `0f815a0`（fix(web) 不保存继续只丢当前队侧）+ `3186897`（perf(web) 截图上传改 JPEG）+ `a1ea125`（chore 版本号 6.51.10→6.51.11）+ docs(v6.51.11)（本枚）。
+本地提交：`45e1084`（fix(worker) 截断前缀层）+ `0f815a0`（fix(web) 不保存继续只丢当前队侧）+ `3186897`（perf(web) 截图上传改 JPEG）+ `a1ea125`（chore 版本号 6.51.10→6.51.11）+ docs(v6.51.11)（本枚 `bba0af8`）；push `40ae714..bba0af8`（6 枚）已执行（含 v6.51.10 上线回写 `33a6b4b`）。
 
 ## [v6.51.10] · 成长录入：`growth_events(match_ref, player_id)` 索引（迁移 0076）+ 列表行悬停预取（2026-10-16）
 
