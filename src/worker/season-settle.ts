@@ -37,7 +37,10 @@ interface ClubRecord {
   draws: number;
 }
 
-/** 该赛事已确认赛果按 club 聚合战绩（**弃权按弃权方判负**；点球决胜按点球定胜负；双弃权双方各记一负） */
+/** 该赛事已确认赛果按 club 聚合战绩（**弃权按弃权方判负**；**小组赛/联赛平比分即平局**——点球只决定淘汰赛晋级，
+ *  用户裁决 2026-10-17；双弃权双方各记一负）。
+ *  只映射到一侧时（对手是 CPU 队或目录缺行）**照样计该侧**——即时发奖本来就是按侧发的，两边口径必须一致，
+ *  否则小组赛剩余池会把「已发」算少、补发突破池上限（2026-10-17 实测 S9：即时 196 vs 结算 168）。 */
 function aggregateRecords(rows: ConfirmedRow[], clubMap: Map<number, number>): Map<number, ClubRecord> {
   const out = new Map<number, ClubRecord>();
   const touch = (clubId: number): ClubRecord => {
@@ -52,7 +55,7 @@ function aggregateRecords(rows: ConfirmedRow[], clubMap: Map<number, number>): M
     if (row.home_team_id === null || row.away_team_id === null) continue;
     const home = clubMap.get(row.home_team_id);
     const away = clubMap.get(row.away_team_id);
-    if (home === undefined || away === undefined) continue;
+    if (home === undefined && away === undefined) continue;
     let outcome: 'home' | 'away' | 'draw' | null = null;
     // 弃权按弃权方判负（walkover_side 记的是弃权方，见 core/walkover.ts）；双弃权双方各记一负、不计平。
     const woWinner = walkoverWinnerSide(row.walkover_side);
@@ -61,17 +64,20 @@ function aggregateRecords(rows: ConfirmedRow[], clubMap: Map<number, number>): M
     else if (row.score_home !== null && row.score_away !== null) {
       if (row.score_home > row.score_away) outcome = 'home';
       else if (row.score_home < row.score_away) outcome = 'away';
-      else if (row.pen_home !== null && row.pen_away !== null && row.pen_home !== row.pen_away) {
+      else if (row.stage_kind !== 'group' && row.stage_kind !== 'round_robin'
+        && row.pen_home !== null && row.pen_away !== null && row.pen_home !== row.pen_away) {
         outcome = row.pen_home > row.pen_away ? 'home' : 'away';
       } else outcome = 'draw';
     }
-    touch(home).played++;
-    touch(away).played++;
-    if (outcome === 'home') touch(home).wins++;
-    else if (outcome === 'away') touch(away).wins++;
-    else if (outcome === 'draw') {
-      touch(home).draws++;
-      touch(away).draws++;
+    if (home !== undefined) touch(home).played++;
+    if (away !== undefined) touch(away).played++;
+    if (outcome === 'home') {
+      if (home !== undefined) touch(home).wins++;
+    } else if (outcome === 'away') {
+      if (away !== undefined) touch(away).wins++;
+    } else if (outcome === 'draw') {
+      if (home !== undefined) touch(home).draws++;
+      if (away !== undefined) touch(away).draws++;
     }
   }
   return out;
@@ -122,6 +128,7 @@ export async function settleTournamentStage(env: Env, actor: number, stageIdInpu
       if (row.home_team_id === null || row.away_team_id === null) continue;
       const home = clubMap.get(row.home_team_id);
       const away = clubMap.get(row.away_team_id);
+      // 注：一侧未映射（对手是 CPU 队或目录缺行）时整场跳过——资格赛本季未绑定，同类口径如要收紧另批处理
       if (home === undefined || away === undefined) continue;
       let winner: number | undefined;
       // 弃权按弃权方判负：胜者是弃权方的对面；双弃权双方都算止步（各领保底）。
@@ -133,6 +140,7 @@ export async function settleTournamentStage(env: Env, actor: number, stageIdInpu
       } else if (row.score_home !== null && row.score_away !== null) {
         if (row.score_home > row.score_away) winner = home;
         else if (row.score_home < row.score_away) winner = away;
+        // 资格赛是淘汰赛口径：平比分看点球定**晋级**（与发奖口径不同，这里只管谁止步，不涉及胜负平奖金）
         else if (row.pen_home !== null && row.pen_away !== null && row.pen_home !== row.pen_away) {
           winner = row.pen_home > row.pen_away ? home : away;
         }

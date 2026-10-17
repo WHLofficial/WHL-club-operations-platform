@@ -157,6 +157,27 @@ describe('赛果确认即时入账（v1.4.0 §9.1）', () => {
     ]);
   });
 
+  it('点球决胜只作用于淘汰赛：小组赛平比分+点球 ⇒ 按平局发双方各 2.5（用户裁决 2026-10-17）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    // 小组赛 1-1、点球客胜（tour 的 winner 记客队）⇒ 按平局发，不按胜场发
+    insertMatch(fx.tour, { matchId: 1, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 1, penHome: 1, penAway: 3, winnerTeamId: 12, stageKind: 'group' });
+    insertBinding(fx.sqlite, 1, 6, 'champions_cup');
+    await confirmResult(fx.env, 1, 1, 'user');
+    const rows = fx.sqlite.prepare('SELECT club_id, amount, ref_type FROM ledger_entries WHERE kind = ? ORDER BY club_id').all('prize') as { club_id: number; amount: number; ref_type: string }[];
+    expect(rows).toEqual([
+      { club_id: 1, amount: 2.5, ref_type: 'match_home' },
+      { club_id: 2, amount: 2.5, ref_type: 'match_away' },
+    ]);
+    // 淘汰赛同形态（1-1、点球主胜）⇒ 仍按胜者发晋级奖金（entryCount=2、round=0 ⇒ 夺冠 +5）
+    insertMatch(fx.tour, { matchId: 2, tournamentId: 6, stageId: 61, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 1, penHome: 4, penAway: 3, winnerTeamId: 11, stageKind: 'elim', round: 0, entryCount: 2 });
+    await confirmResult(fx.env, 1, 2, 'user');
+    const ko = fx.sqlite.prepare('SELECT club_id, amount FROM ledger_entries WHERE kind = ? AND ref_id = 2').all('prize') as { club_id: number; amount: number }[];
+    expect(ko).toEqual([{ club_id: 1, amount: 5 }]);
+  });
+
   it('AUTH_DB 未配置 → 不入账不报错（回滚通道口径）', async () => {
     const fx = freshEnv();
     (fx.env as { AUTH_DB?: unknown }).AUTH_DB = undefined;
@@ -214,6 +235,33 @@ describe('赛事完结结算（一次性项，stage_settled_at 幂等）', () =>
     const res2 = await settleTournamentStage(fx2.env, 1, 1);
     expect(res2.items).toBe(1);
     expect(fx2.sqlite.prepare("SELECT amount FROM ledger_entries WHERE memo LIKE '冠军杯小组赛剩余池%'").get()).toMatchObject({ amount: 186 });
+  });
+
+  it('小组赛剩余池 paid 与即时发奖同口径：点球场按平局计入、对手是 CPU 队时非 CPU 一侧照计（2026-10-17 修正）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    // CPU 队：clubs 行 is_cpu=1（目录有行但奖金不入账）
+    fx.sqlite.prepare(`INSERT INTO clubs (id, name, status, is_cpu) VALUES (241, '巴塞罗那(CPU)', 'active', 1)`).run();
+    authRegisterClubTeam(fx.auth, 6, 241, '巴塞罗那(CPU)');
+    // ① 平台队 vs CPU 队：主胜 7.0（只发平台侧）
+    insertMatch(fx.tour, { matchId: 1, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 6, scoreHome: 2, scoreAway: 0, stageKind: 'group' });
+    // ② 平台队之间 1-1、点球客胜 ⇒ 双方各 2.5
+    insertMatch(fx.tour, { matchId: 2, tournamentId: 6, stageId: 60, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 1, penHome: 1, penAway: 3, winnerTeamId: 12, stageKind: 'group' });
+    insertBinding(fx.sqlite, 1, 6, 'champions_cup');
+    await confirmResult(fx.env, 1, 1, 'user');
+    await confirmResult(fx.env, 1, 2, 'user');
+    const instant = fx.sqlite.prepare("SELECT club_id, amount FROM ledger_entries WHERE kind = 'prize' ORDER BY id").all() as { club_id: number; amount: number }[];
+    expect(instant).toEqual([
+      { club_id: 1, amount: 7 },
+      { club_id: 1, amount: 2.5 },
+      { club_id: 2, amount: 2.5 },
+    ]);
+    // 结算 paid 必须 = 即时之和 12.0（旧口径：CPU 场整场跳过 + 点球记胜 ⇒ 只算 5.0）⇒ 剩余池 188 全给唯一有胜场的队
+    const res = await settleTournamentStage(fx.env, 1, 1);
+    expect(res.items).toBe(1);
+    expect(fx.sqlite.prepare("SELECT club_id, amount FROM ledger_entries WHERE memo LIKE '冠军杯小组赛剩余池%'").get()).toMatchObject({ club_id: 1, amount: 188 });
   });
 });
 

@@ -92,7 +92,8 @@ export async function tourTeamIdsByClub(env: Env, clubIds: number[]): Promise<Ma
   return map;
 }
 
-/** 单场比分→胜负平（点球按 winner 定，平局含点球战前平比分的点球胜负已由 winner 区分）。
+/** 单场比分→胜负平（**点球胜者只作用于淘汰赛口径**——点球只决定晋级与晋级奖金；小组赛/联赛平比分即平局，
+ *  与 formPtsOf / leagueStandings / betCountSql 战绩口径一致，用户裁决 2026-10-17）。
  *  弃权按**弃权方判负**定胜负（walkover_side 记的是弃权方，见 core/walkover.ts）；双弃权 → 'none'（双方都不发）。 */
 function outcome(m: MatchPrizeInput): 'home' | 'away' | 'draw' | 'none' | null {
   const woWinner = walkoverWinnerSide(m.walkoverSide);
@@ -101,12 +102,14 @@ function outcome(m: MatchPrizeInput): 'home' | 'away' | 'draw' | 'none' | null {
   if (m.scoreHome === null || m.scoreAway === null) return null;
   if (m.scoreHome > m.scoreAway) return 'home';
   if (m.scoreHome < m.scoreAway) return 'away';
-  // 比分相同：淘汰赛看点球胜者定胜负；小组/联赛平局（无点球或点球也平按平局）
-  if (m.penHome !== null && m.penAway !== null && m.penHome !== m.penAway) {
-    return m.penHome > m.penAway ? 'home' : 'away';
+  // 比分相同：只有淘汰赛口径（含附加赛/单场决赛）看点球胜者定胜负；小组/联赛（有平局奖金的赛事）一律平局
+  if (m.stageKind !== 'group' && m.stageKind !== 'round_robin') {
+    if (m.penHome !== null && m.penAway !== null && m.penHome !== m.penAway) {
+      return m.penHome > m.penAway ? 'home' : 'away';
+    }
+    if (m.winnerTeamId !== null && m.winnerTeamId === m.homeTeamId) return 'home';
+    if (m.winnerTeamId !== null && m.winnerTeamId === m.awayTeamId) return 'away';
   }
-  if (m.winnerTeamId !== null && m.winnerTeamId === m.homeTeamId) return 'home';
-  if (m.winnerTeamId !== null && m.winnerTeamId === m.awayTeamId) return 'away';
   return 'draw';
 }
 
