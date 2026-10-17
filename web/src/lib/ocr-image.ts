@@ -6,14 +6,26 @@
  * M. Carnesecchi → Carnesechi、A. Garnacho → Garmacho）。全图放大 2× 后同一批图
  * 4/4 全对，代价是输入 token 3.6k → 6.9k（仍在最便宜档）。
  * 不做裁切：实测裁掉右侧会连带丢掉队名区域（3/4 图 team 变「未知」），故只缩放。
+ *
+ * v6.51.11 重编码改 JPEG：2× 之后 PNG 是 2.3–3.7MB（base64 3.0–4.9MB），
+ * 同样 3840×2160 的 JPEG 0.92 只有 0.57–0.71MB（≈1/5）——识别结果逐行相同
+ * （5 张真图实测：4 张 Summary + 1 张 Goalkeeping，姓名/评分/进球/助攻零差异，
+ * tab 与 teamRaw 一致），而模型耗时对体积不敏感（探针里 2.7MB 与 0.66MB 的
+ * 调用耗时在噪声内），所以省下的是用户上行传输与 canvas 编码时间。
+ * 代价：个别图的 team 中文字段会回英文原名（5 张里 1 张），由服务端 v6.51.8 的
+ * FC26 英文名兜底分侧接住（19/20 队命中），队名真的认不出时仍有选边按钮。
  */
 
 /** 放大倍数。2× 已能把 1920×1080 截图的两处固定误读压掉，再大只是多花 token。 */
 export const OCR_UPSCALE_FACTOR = 2;
 /** 放大后最长边上限：4K 截图再 ×2 会越过最低计费档，也逼近服务端 5MB 上限。 */
 export const OCR_UPSCALE_MAX_SIDE = 4096;
-/** 服务端 OCR_MAX_BYTES = 5MB（按解码字节算）；这里留裕量，超了改 JPEG / 退回原图。 */
+/** 服务端 OCR_MAX_BYTES = 5MB（按解码字节算）；这里留裕量，超了降质 / 退回原图。 */
 export const OCR_MAX_DECODED_BYTES = 4.5 * 1024 * 1024;
+/** 2× 图的重编码质量（v6.51.11 起走 JPEG）：0.92 与 PNG 识别结果逐行相同，体积 1/5。 */
+export const OCR_JPEG_QUALITY = 0.92;
+/** 0.92 仍超上限时的降质档（正常 3840×2160 到不了，留着兜 4K 以上输入）。 */
+export const OCR_JPEG_FALLBACK_QUALITY = 0.8;
 
 export interface OcrUpscaleTarget {
   width: number;
@@ -75,10 +87,10 @@ async function upscaleToBase64(file: File): Promise<string | null> {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(bitmap, 0, 0, width, height);
-    const png = stripPrefix(canvas.toDataURL('image/png'));
-    if (decodedBase64Bytes(png) <= OCR_MAX_DECODED_BYTES) return png;
-    const jpeg = stripPrefix(canvas.toDataURL('image/jpeg', 0.92));
+    const jpeg = stripPrefix(canvas.toDataURL('image/jpeg', OCR_JPEG_QUALITY));
     if (decodedBase64Bytes(jpeg) <= OCR_MAX_DECODED_BYTES) return jpeg;
+    const lower = stripPrefix(canvas.toDataURL('image/jpeg', OCR_JPEG_FALLBACK_QUALITY));
+    if (decodedBase64Bytes(lower) <= OCR_MAX_DECODED_BYTES) return lower;
     return null;
   } finally {
     bitmap.close?.();

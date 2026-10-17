@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 // v6.51.5 截图识别 · 上传前 2× 放大（尺寸算法 + canvas 路径与全部退回分支）。
-// 测试计划：docs/test-plans/v6.51.5-ocr-image-upscale.md（TC-IMG）。
+// v6.51.11 重编码改 JPEG 0.92（识别结果与 PNG 逐行相同、体积 1/5）：正常路径与降质档随之调整。
+// 测试计划：docs/test-plans/v6.51.5-ocr-image-upscale.md（TC-IMG）、v6.51.11-*.md。
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OCR_MAX_DECODED_BYTES, decodedBase64Bytes, fileToOcrBase64, ocrUpscaleTarget } from './ocr-image.ts';
+import {
+  OCR_JPEG_FALLBACK_QUALITY,
+  OCR_JPEG_QUALITY,
+  OCR_MAX_DECODED_BYTES,
+  decodedBase64Bytes,
+  fileToOcrBase64,
+  ocrUpscaleTarget,
+} from './ocr-image.ts';
 
 /** 生成「解码后约 bytes 字节」的 base64 字符串（内容不重要，只看长度判定）。 */
 const payloadOf = (bytes: number): string => 'A'.repeat(Math.ceil((bytes * 4) / 3));
@@ -13,12 +21,15 @@ function stubBitmap(width: number, height: number) {
   return bitmap;
 }
 
-function stubCanvas(png: string, jpeg: string, drawImage = vi.fn()) {
+function stubCanvas(png: string, jpeg: string, jpegLow: string = jpeg, drawImage = vi.fn()) {
   const ctx = { imageSmoothingEnabled: false, imageSmoothingQuality: 'low', drawImage };
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
   const toDataURL = vi
     .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
-    .mockImplementation((type?: string) => (type === 'image/jpeg' ? `data:image/jpeg;base64,${jpeg}` : `data:image/png;base64,${png}`));
+    .mockImplementation((type?: string, quality?: number) => {
+      if (type === 'image/jpeg') return `data:image/jpeg;base64,${quality === OCR_JPEG_FALLBACK_QUALITY ? jpegLow : jpeg}`;
+      return `data:image/png;base64,${png}`;
+    });
   return { ctx, toDataURL, drawImage };
 }
 
@@ -51,27 +62,29 @@ describe('TC-IMG 上传前 2× 放大（v6.51.5）', () => {
     expect(decodedBase64Bytes('A'.repeat(400))).toBe(300);
   });
 
-  it('TC-IMG-03 正常路径：按 2× 目标尺寸画到 canvas，返回 PNG base64（无 data: 前缀）', async () => {
+  it('TC-IMG-03 正常路径：按 2× 目标尺寸画到 canvas，返回 JPEG 0.92 base64（无 data: 前缀）', async () => {
     const bitmap = stubBitmap(1920, 1080);
     const small = payloadOf(1024);
-    const { drawImage } = stubCanvas(small, payloadOf(1024));
+    const { drawImage, toDataURL } = stubCanvas(payloadOf(1024), small);
     await expect(fileToOcrBase64(png())).resolves.toBe(small);
     expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 3840, 2160);
+    expect(toDataURL).toHaveBeenCalledWith('image/jpeg', OCR_JPEG_QUALITY);
     expect(bitmap.close).toHaveBeenCalled();
   });
 
-  it('TC-IMG-04 PNG 超服务端上限 → 回退 JPEG 0.92', async () => {
+  it('TC-IMG-04 JPEG 0.92 超服务端上限 → 降到 0.8 重编码（v6.51.11）', async () => {
     stubBitmap(1920, 1080);
-    const jpegSmall = payloadOf(2048);
-    const { toDataURL } = stubCanvas(payloadOf(OCR_MAX_DECODED_BYTES + 200_000), jpegSmall);
-    await expect(fileToOcrBase64(png())).resolves.toBe(jpegSmall);
-    expect(toDataURL).toHaveBeenCalledWith('image/jpeg', 0.92);
+    const low = payloadOf(2048);
+    const { toDataURL } = stubCanvas('', payloadOf(OCR_MAX_DECODED_BYTES + 200_000), low);
+    await expect(fileToOcrBase64(png())).resolves.toBe(low);
+    expect(toDataURL).toHaveBeenCalledWith('image/jpeg', OCR_JPEG_QUALITY);
+    expect(toDataURL).toHaveBeenCalledWith('image/jpeg', OCR_JPEG_FALLBACK_QUALITY);
   });
 
-  it('TC-IMG-05 PNG 与 JPEG 都超上限 → 退回原图，不阻断上传', async () => {
+  it('TC-IMG-05 两档 JPEG 都超上限 → 退回原图，不阻断上传', async () => {
     stubBitmap(1920, 1080);
     const huge = payloadOf(OCR_MAX_DECODED_BYTES + 200_000);
-    stubCanvas(huge, huge);
+    stubCanvas(huge, huge, huge);
     await expect(fileToOcrBase64(png())).resolves.toBe(RAW);
   });
 
