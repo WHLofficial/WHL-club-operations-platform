@@ -4,6 +4,29 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [已上线] · 生产批 — S9 冠军杯小组赛池降到 192.5 + 次级入场奖金补至顶级水平（不占本仓版本号）（2026-10-17）
+
+**已执行（2026-10-17）**：纯数据批（**零代码、零迁移、零 API 变更**）；作用域 = 生产 D1 `whl-club` 的 `config` 一行 upsert + 7 家次级球队账本补发。
+
+缘起（用户指令）：①「降低奖金池到192.5」（m03014）②「即本赛季不再留冠军杯小组赛奖池里的剩余部分进行分配」（m03018）③「将次级入场奖金补发到顶级水平」（m03020）。
+
+规则与口径：
+- **池 200 → 192.5**：`src/worker/season-settle.ts:146-156` 冠军杯小组赛结算 `remaining = round(pool − paid, 2)`，仅 `remaining > 0 && totalWins > 0` 才按胜场占比分给有胜场的队；S9 实测 `paid = 192.50`（25 胜 × 7.00 + 7 平 × 2.50，弃权判负、`is_cpu` 一侧不计）⇒ 池写 192.5 时 `remaining = 0`，本赛季不再分配剩余池（用户 ② 的意图）。池只有降到 ≤ `paid` 才成为硬上限。
+- **写入方式**：`config` 表 upsert 整串 `prize_table` JSON（SQL 侧 `json_object(...)` 构造；除 `champions_group.pool` 外其余字段与 `src/core/config.ts:137-146` 默认逐字一致，生成器自检逐字段比对）。此前生产 `prize_table` **0 行**（生效值 = 代码默认 200）⇒ 本批写入后由 config 覆盖，S10 起再调只改这一行。
+- **次级入场补至顶级**：入场奖金 = 赛季末一次性按级别发（顶级 `league_premier.entry` 20 / 次级 `league_second.entry` 7.5，差 2.67 倍 = 设计稿 `memory/design-s9-income-system.md:65` 的 D3 缺陷）；生产 `memo LIKE '%入场%'` 0 笔（结算尚未跑、一分未发）⇒ **现在补差额 12.50 × 7 家 = 87.50M**（不改 config 的 `entry`：用户用词是「补发」；差额 + 结算基础额 7.5 = 20 = 顶级水平；且 L1 联盟版权池计划取代入场奖金，改 config 会让这笔钱将来发不出去）。
+- **名单 7 家**（`is_cpu = 0`）：1 阿森纳 / 2 阿斯顿维拉 / 14 诺丁汉森林 / 21 拜仁慕尼黑 / 243 皇家马德里 / 280 奥林匹亚科斯 / 112172 RB莱比锡；排除 10 曼城(CPU)、131681 AC米兰(CPU)。**CPU 判据取 whl-club `clubs.is_cpu`**（AUTH_DB `team` 里 112172 的名字是历史 CPU 期标签「RB莱比锡(CPU)」，而 whl-club 里 `name='RB莱比锡'`、`is_cpu=0`、有账本账户 ⇒ 在名单内），与结算 `clubIdByTourTeam`（`src/worker/prizes.ts:60-76`，第 73 行排除 `is_cpu`）口径一致。
+
+执行记录与回读：
+- 预检（只读）：`prize_table` 0 行 / `paid` 192.50 / `entry_topup` 0 笔 / 已结算赛事 0 / 守恒 0 / 全联盟 1287.31；7 家批前余额 49.68 / 32.42 / 109.05 / 63.10 / 42.20 / 49.94 / −1.71。
+- 执行：`sql/02-config-pool-patch.sql` **changes 2**（审计 1 + upsert 1）、`sql/03-entry-topup.sql` **changes 14**（7 家 × 2 条，无 changes=0）⇒ 重放两文件 **16 条全 changes=0**（幂等成立）。
+- 回读：`prize_table` 1 行且 `champions_group` = `{"entry":15,"pool":192.5,"win":7,"draw":2.5}`；`entry_topup` **7 笔 / 87.50**、逐队恰好 1 笔；守恒 0；全联盟余额 1287.31 → **1374.81（+87.50）**；7 家各 +12.50（112172 由 −1.71 → 10.79 转正）。
+- 回滚工件：`rollback/01-undo-entry-topup.sql`（7 笔补偿 −12.50，`manual_adjust` + `ref_type='batch_rollback_entry_topup'`，**不删原流水**）+ `rollback/02-undo-config-pool.sql`（删 config 行 ⇒ 回代码默认 200）。
+- 本地演练（`.wrangler/state` 副本 + `--persist-to`）已过：写入 → 重放不变 → 回滚归位 → 重放回滚无新增。
+- 批次目录 `scripts/prod-20261017-s9-pool-and-entry-topup/`（README 含工件 sha256 与遗留项）；测试计划 `docs/test-plans/prod-2026-10-17-s9-pool-and-entry-topup.md`。
+- 通道坑（登记）：`exec-shards.mjs` 走 `--command` ⇒ 拒含 `" % & | < >` 的语句（`prize_table` JSON 改用 `json_object(...)` 构造）；生产 `--remote` 偶发 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` 崩溃与 `Proxy environment variables detected` 之后 fetch 失败，**首轮两条写入各撞一次且均已只读复核确认零落库**（`prize_table` 0 行 / `entry_topup` 0 笔），再 `--retry=3` 重跑即成功。
+
+遗留：① 结算仍按 config 发基础入场额（顶级 20 / 次级 7.5），本批只补差额 ⇒ 次级球队结算合计 = 20（= 顶级水平）；S10 若 L1 版权池取代入场奖金，需另行处理 ② 池 192.5 是 **S9 专用值**（= 本赛季 `paid`）；S10 起若目标 120 必须与逐场单价（胜 4.0 / 平 1.5）**同批**下调，只动池不生效 ③ 冠军杯淘汰赛（`champions_ko`）与超级杯未动 ④ 涉及 CPU 的 6 场里 #6「AC米兰(CPU) 2-1 阿森纳」是 CPU 方胜 ⇒ 对 `paid` 计 0（结算口径正确，非缺陷）。
+
 ## [v6.51.12] · 点球决胜按平局（发奖口径）——代码修正 + S9 冠军杯小组赛 4 场生产订正（2026-10-17）
 
 **生产订正已执行（2026-10-17）；代码修正待发布**（发版后小组赛/联赛的「平比分 + 点球」才按平局发奖；淘汰赛口径不变）。判级 **patch**（无新端点、无迁移、无前端改动；只改发奖判胜口径与结算 `paid` 口径）。
