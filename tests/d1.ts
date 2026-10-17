@@ -157,6 +157,7 @@ const MIGRATION_FILES = [
   '0073_brand_fictionalize.sql',
   '0074_brand_profiles.sql',
   '0075_brand_style.sql',
+  '0076_growth_events_match_ref_index.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {
