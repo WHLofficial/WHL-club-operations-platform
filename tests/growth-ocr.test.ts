@@ -1,6 +1,7 @@
 // v6.43.0 成长录入截图识别 · core 纯函数测试（解析 / 认人 / 草稿 / 交叉校验）。
 // v6.51.3：队名对侧（TC-TEAM）——模型给中文队名，比对容忍译名与前后缀漂移。
 // v6.51.8：英文兜底分侧 —— 模型照抄截图英文名时，用 FC26 队名表把英文名查回队号（TC-TEAM-06）。
+// v6.51.11：截断前缀层（TC-MATCH-06）——FC26 的 Name 列装不下长名时给省略号，模型照抄成 'T. Alexander-Arn...'。
 // 测试计划：docs/test-plans/v6.43.0-growth-ocr.md（TC-OCR / TC-MATCH / TC-DRAFT / TC-XCHK）、
 // docs/test-plans/v6.51.3-ocr-team-name-chinese.md（TC-TEAM）、docs/test-plans/v6.51.8-ocr-unmatched-side-pick.md。
 import { describe, expect, it } from 'vitest';
@@ -16,6 +17,7 @@ import {
   parseOcrVision,
   teamNameKey,
   teamNameMatchStrength,
+  truncatedNameKey,
   type OcrRosterPlayer,
   type OcrVision,
 } from '../src/core/growth-ocr.ts';
@@ -184,6 +186,46 @@ describe('TC-MATCH 花名册认人阶梯', () => {
     expect(isSameSurnameShape('Marc Cucurella', 'Mario Cucurella')).toBe(false); // 都给了完整名且不一致
     expect(isSameSurnameShape('', 'Carvajal')).toBe(false);
     expect(isSameSurnameShape('M. Cucurella', '')).toBe(false);
+  });
+
+  it('TC-MATCH-06 截断前缀层（v6.51.11）：游戏画面把长名截成「T. Alexander-Arn...」，按前缀唯一认回', () => {
+    // 生产实况（2026-10-17 核对：有球会的 570 人里 8 名长于 16 字符，16 字符前缀在本队花名册都唯一）
+    const truncRoster: OcrRosterPlayer[] = [
+      { id: 62, officialName: 'T. Alexander-Arnold', displayName: 'T. Alexander-Arnold', position: 'RB' },
+      { id: 81, officialName: 'Cristiano Ronaldo', displayName: 'Cristiano Ronaldo', position: 'ST' },
+      { id: 132, officialName: 'Francisco Conceição', displayName: 'Francisco Conceição', position: 'RW' },
+      { id: 30, officialName: 'K. Mbappé', displayName: 'Kylian Mbappé', position: 'ST' },
+    ];
+    // 省略号三种写法都认：ASCII 三点（模型实际输出，探针实测字符码 46,46,46）、U+2026、两点
+    expect(matchRosterPlayer('T. Alexander-Arn...', truncRoster)).toEqual({ player: truncRoster[0], matched: 'truncated-prefix' });
+    expect(matchRosterPlayer('T. Alexander-Arn…', truncRoster)).toEqual({ player: truncRoster[0], matched: 'truncated-prefix' });
+    expect(matchRosterPlayer('Cristiano Ronald..', truncRoster)).toEqual({ player: truncRoster[1], matched: 'truncated-prefix' });
+    // 截断点落在重音字母上也不影响（折叠后比前缀）：'Francisco Concei...' → franciscoconcei
+    expect(matchRosterPlayer('Francisco Concei...', truncRoster)).toEqual({ player: truncRoster[2], matched: 'truncated-prefix' });
+    // 没被截断的名字照旧走上面几层（这里 official 逐字命中）
+    expect(matchRosterPlayer('K. Mbappé', truncRoster)).toEqual({ player: truncRoster[3], matched: 'official' });
+    // 前缀撞车（Gabriel Martinelli / Gabriel Martins 都吃 'gabrielmarti'）→ 放弃，宁缺勿错
+    const twin: OcrRosterPlayer[] = [
+      { id: 1, officialName: 'Gabriel Martinelli', displayName: 'Gabriel Martinelli', position: 'LW' },
+      { id: 2, officialName: 'Gabriel Martins', displayName: 'Gabriel Martins', position: 'LW' },
+    ];
+    expect(matchRosterPlayer('Gabriel Marti...', twin)).toBeNull();
+    // 没有省略号痕迹 = 可能是别人的短名，不能当前缀用
+    expect(matchRosterPlayer('T. Alexander-Arn', truncRoster)).toBeNull();
+    // 剥完太短（键长 < 4）不认
+    expect(matchRosterPlayer('T...', truncRoster)).toBeNull();
+    // 库里没有这个前缀 → 仍回 null（交回人工手填）
+    expect(matchRosterPlayer('Z. Nobody-Long...', truncRoster)).toBeNull();
+  });
+
+  it('TC-MATCH-07 truncatedNameKey：只认尾部省略号痕迹，剥完至少 4 个字符', () => {
+    expect(truncatedNameKey('T. Alexander-Arn...')).toBe('talexanderarn');
+    expect(truncatedNameKey('T. Alexander-Arn…')).toBe('talexanderarn');
+    expect(truncatedNameKey('  A. Zambo Anguiss…  ')).toBe('azamboanguiss');
+    expect(truncatedNameKey('T. Alexander-Arnold')).toBeNull(); // 没痕迹（完整名不该走前缀层）
+    expect(truncatedNameKey('T...')).toBeNull(); // 剥完只剩 't'，太短
+    expect(truncatedNameKey('...')).toBeNull();
+    expect(truncatedNameKey('')).toBeNull();
   });
 });
 

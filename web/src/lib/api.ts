@@ -2269,8 +2269,8 @@ export interface MatchOcrEntry {
   name: string;
   position: string | null;
   draft: { appearance?: true; rating?: number; cleanSheet?: true; saves?: number };
-  /** 认人方式：official = 官方缩写名逐字，*folded = 归一化命中，display = 显示名，surname-initial = 姓+首字母形态（v6.51.4） */
-  matched: 'official' | 'official-folded' | 'display' | 'display-folded' | 'surname-initial';
+  /** 认人方式：official = 官方缩写名逐字，*folded = 归一化命中，display = 显示名，surname-initial = 姓+首字母形态（v6.51.4），truncated-prefix = 截图名被游戏截断后按前缀认回（v6.51.11） */
+  matched: 'official' | 'official-folded' | 'display' | 'display-folded' | 'surname-initial' | 'truncated-prefix';
 }
 
 /** 一张截图的识别结果（结构错误 / 交叉校验 / 模型备注都收在 warnings） */

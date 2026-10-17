@@ -6,6 +6,9 @@
 //   两侧一样像（「慕尼黑」对拜仁慕尼黑与慕尼黑1860）不猜：端点回 code=ocr_team_ambiguous，前端拿 teamRaw 显示截图原文再让用户选边。
 // v6.51.4：认人补一层「姓 + 首字母」形态容忍（isSameSurnameShape）——库里 Marc Cucurella / Pedro Neto / Aleix García
 //   这类全名，截图（FC26 游戏内）给 M. Cucurella / P. Neto / A. García，逐字比不过去；只存姓的（Carvajal / Ibañez）同理。
+// v6.51.11：认人补第六层「截断前缀」——FC26 的 Name 列装不下长名时在尾部给省略号（截图里 'T. Alexander-Arn...'，
+//   模型照抄），库里存的是完整名，上面几层都比不过去；带省略号痕迹的名字改按折叠去标点的前缀在全队花名册里找，
+//   唯一命中才认（同层多命中仍宁缺勿错）。
 import { foldName } from './name-fold.ts';
 import { FC26_TEAM_NAMES } from './fc26-team-names.ts';
 
@@ -59,7 +62,7 @@ export interface OcrEntry {
   name: string; // 花名册 officialName
   position: string | null;
   draft: OcrEntryDraft;
-  matched: 'official' | 'official-folded' | 'display' | 'display-folded' | 'surname-initial';
+  matched: 'official' | 'official-folded' | 'display' | 'display-folded' | 'surname-initial' | 'truncated-prefix';
 }
 
 export interface OcrRosterPlayer {
@@ -158,7 +161,7 @@ export interface OcrMatchResult {
   matched: OcrEntry['matched'];
 }
 
-/** 认人阶梯：official 逐字 → official 归一化 → display 逐字 → display 归一化 → 姓+首字母形态；同层多个命中即歧义放弃（宁缺勿错）。 */
+/** 认人阶梯：official 逐字 → official 归一化 → display 逐字 → display 归一化 → 姓+首字母形态 → 截断前缀（v6.51.11）；同层多个命中即歧义放弃（宁缺勿错）。 */
 export function matchRosterPlayer(ocrName: string, roster: OcrRosterPlayer[]): OcrMatchResult | null {
   const folded = foldName(ocrName);
   const ladder: { level: OcrEntry['matched']; key: (p: OcrRosterPlayer) => string }[] = [
@@ -178,6 +181,15 @@ export function matchRosterPlayer(ocrName: string, roster: OcrRosterPlayer[]): O
   // 同样守「同层多个命中即放弃」：命中两人说明只凭姓分不出来，宁缺勿错。
   const shaped = roster.filter((p) => isSameSurnameShape(ocrName, p.officialName) || isSameSurnameShape(ocrName, p.displayName));
   if (shaped.length === 1) return { player: shaped[0], matched: 'surname-initial' };
+  // 第六层（v6.51.11）：截图名被游戏画面截断。FC26 的 Name 列装不下长名，尾部给省略号（'T. Alexander-Arn...'），
+  // 模型照抄——库里存的是完整名（T. Alexander-Arnold），逐字/归一化/形态三层都比不过去。
+  // 只认带省略号痕迹的名字（没痕迹的短名可能是别的球员，不能当前缀），按折叠去标点的前缀在全队花名册里找；
+  // 同样守「唯一命中才认」：前缀撞车说明分不出来，宁缺勿错。
+  const truncated = truncatedNameKey(ocrName);
+  if (truncated !== null) {
+    const hits = roster.filter((p) => nameKeyOf(p.officialName).startsWith(truncated) || nameKeyOf(p.displayName).startsWith(truncated));
+    if (hits.length === 1) return { player: hits[0], matched: 'truncated-prefix' };
+  }
   return null;
 }
 
@@ -205,6 +217,25 @@ export function isSameSurnameShape(a: string, b: string): boolean {
   if (pa.given === pb.given) return true; // 名也逐字一致（含都写缩写的情形）
   if (pa.given.length === 1 || pb.given.length === 1) return pa.given[0] === pb.given[0]; // 缩写 ↔ 全名
   return false;
+}
+
+// ---------- 截断前缀兜底（v6.51.11） ----------
+/** 截图名被游戏表列截断的痕迹：FC26 的 Name 列装不下长名时在尾部给省略号，模型照抄成 "..." 或 "…"。 */
+const TRUNCATED_NAME_TAIL = /(?:\.{2,}|…)$/;
+/** 截断前缀（去标点后）至少要有这么长：太短的串（'T...'）在全队里前缀容易撞车，认了也是错的。 */
+const TRUNCATED_KEY_MIN = 4;
+
+/** 名字的比对键：折叠大小写/变音符后只留字母数字（'T. Alexander-Arnold' → 'talexanderarnold'）。 */
+function nameKeyOf(raw: string): string {
+  return foldName(raw).replace(/[^a-z0-9]/g, '');
+}
+
+/** 截断名的前缀键：没有省略号痕迹、或剥完太短回 null（'T. Alexander-Arn...' → 'talexanderarn'）。 */
+export function truncatedNameKey(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!TRUNCATED_NAME_TAIL.test(trimmed)) return null;
+  const key = nameKeyOf(trimmed.replace(TRUNCATED_NAME_TAIL, ''));
+  return key.length >= TRUNCATED_KEY_MIN ? key : null;
 }
 
 // ---------- 队名对侧（v6.51.3） ----------
