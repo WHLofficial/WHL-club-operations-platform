@@ -46,6 +46,12 @@ interface OcrPending {
 /** v6.21.0 窄屏卡片流断点：与 styles.css 管理端 ≤760 媒体块同档，也与 AdminLayout 抽屉断点一致 */
 const ENTRY_CARDS_QUERY = '(max-width: 760px)';
 
+/**
+ * v6.51.10 悬停预取的缓存新鲜期：与全局 staleTime（web/src/main.tsx 30s）同口径，写成显式值 ——
+ * 全局若被改成 0，这条预取就退化成「每次掠过白拉一趟、点开还要再拉」，等于没有。
+ */
+const PANEL_PREFETCH_STALE_MS = 30_000;
+
 interface FieldNum {
   value: string;
   locked: boolean;
@@ -397,6 +403,30 @@ function MatchEntrySection() {
   const discardRef = useRef<(() => void) | null>(null);
   const [savingAll, setSavingAll] = useState(false);
 
+  // v6.51.10 悬停预取：鼠标掠过（或键盘聚焦到）某一行就先把该场面板数据拉进缓存，点「录数据」时多半
+  // 直接命中、省掉一波往返。失败的预取不留错误态——清掉缓存条目，点开后的正常请求照旧、错误由面板自己报。
+  const queryClient = useQueryClient();
+  const openRef = useRef<number | null>(null);
+  useEffect(() => {
+    openRef.current = open?.matchId ?? null;
+  }, [open]);
+
+  function prefetchPanel(matchId: number) {
+    if (open?.matchId === matchId) return; // 已展开的那场由面板自己的 query 管，不重复拉
+    const key = matchEntryPanelKey(matchId);
+    void queryClient
+      .prefetchQuery({
+        queryKey: key,
+        queryFn: () => fetchMatchEntryPanel(matchId),
+        staleTime: PANEL_PREFETCH_STALE_MS,
+      })
+      .then(() => {
+        if (queryClient.getQueryState(key)?.status === 'error' && openRef.current !== matchId) {
+          queryClient.removeQueries({ queryKey: key, exact: true });
+        }
+      });
+  }
+
   function switchView(next: ListView) {
     setView(next);
     try {
@@ -451,7 +481,7 @@ function MatchEntrySection() {
       const opened = open !== null && open.matchId === m.matchId ? open : null;
       return (
         <Fragment key={m.matchId}>
-          <tr>
+          <tr onMouseEnter={() => prefetchPanel(m.matchId)} onFocus={() => prefetchPanel(m.matchId)}>
             <td className="muted">
               S{m.season} · {m.competitionType} · 窗口 {m.windowSeq}
             </td>

@@ -10,6 +10,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import GrowthEntryPage from './GrowthEntryPage.tsx';
 import type {
@@ -126,13 +127,27 @@ function rowSaveButton(): HTMLButtonElement {
   return btns[0] as HTMLButtonElement;
 }
 
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <GrowthEntryPage />
-    </QueryClientProvider>,
-  );
+/** 列表页渲染。staleTime 缺省 0（测试里点开必重取，断言「取到了什么」最直接）；
+ *  悬停预取的用例传 30_000 —— 与生产（web/src/main.tsx）同口径，才测得出「命中缓存不重发」。 */
+function renderPage(staleTime?: number) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, ...(staleTime === undefined ? {} : { staleTime }) } },
+  });
+  return {
+    ...render(
+      <QueryClientProvider client={qc}>
+        <GrowthEntryPage />
+      </QueryClientProvider>,
+    ),
+    client: qc,
+  };
+}
+
+/** 比赛列表里某一场的行（rows() 只覆盖面板的 .entry-table，列表是外层那张表） */
+function listRow(index = 0): HTMLTableRowElement {
+  const tr = [...document.querySelectorAll<HTMLTableRowElement>('.match-entry-actions')][index]?.closest('tr');
+  if (!tr) throw new Error(`比赛列表没有第 ${index} 行`);
+  return tr;
 }
 
 /** 打开某场的录入面板并等名单渲染完 */
@@ -569,5 +584,37 @@ describe('TC-ENTRY-E 录入面板可改性（v6.45.1）', () => {
     expect(calls[0].body.image).toBe('SENTINEL_B64');
     expect(ocrImage.fileToOcrBase64).toHaveBeenCalledTimes(1);
     expect((ocrImage.fileToOcrBase64.mock.calls[0][0] as File).name).toBe('a.png');
+  });
+
+  it('TC-ENTRY-E14 悬停预取（v6.51.10）：掠过列表行先把面板数据拉进缓存，点开不再发第二趟', async () => {
+    const { client } = renderPage(30_000);
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: '录数据' });
+    expect(mocks.panel).not.toHaveBeenCalled(); // 光渲染列表不预取
+    await user.hover(listRow());
+    await waitFor(() => expect(mocks.panel).toHaveBeenCalledTimes(1));
+    expect(mocks.panel).toHaveBeenCalledWith(1900);
+    await waitFor(() => expect(client.getQueryState(['admin', 'growth', 'match-entry', 1900])?.status).toBe('success'));
+
+    fireEvent.click(screen.getByRole('button', { name: '录数据' }));
+    await waitFor(() => expect(document.querySelector('.entry-table')).not.toBeNull());
+    expect(mocks.panel).toHaveBeenCalledTimes(1); // 面板吃的就是预取那份（新鲜期内不重取）
+  });
+
+  it('TC-ENTRY-E15 预取失败不留错误态：点开照旧正常取数，不闪「面板加载失败」', async () => {
+    const { client } = renderPage(30_000);
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: '录数据' });
+    mocks.panel.mockRejectedValueOnce(new Error('网络抖动'));
+
+    await user.hover(listRow());
+    await waitFor(() => expect(mocks.panel).toHaveBeenCalledTimes(1));
+    // 预取那趟失败后缓存条目要被清掉：留着的话点开时 useQuery 先吃到 error 态，会闪一下失败提示
+    await waitFor(() => expect(client.getQueryState(['admin', 'growth', 'match-entry', 1900])).toBeUndefined());
+
+    fireEvent.click(screen.getByRole('button', { name: '录数据' }));
+    await waitFor(() => expect(document.querySelector('.entry-table')).not.toBeNull());
+    expect(document.body.textContent).not.toContain('面板加载失败');
+    expect(mocks.panel).toHaveBeenCalledTimes(2); // 预取失败的那趟 + 点开重取的这趟
   });
 });
