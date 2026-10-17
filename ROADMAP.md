@@ -1522,6 +1522,26 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.10 · 成长录入：`growth_events(match_ref, player_id)` 索引（迁移 0076）+ 列表行悬停预取（2026-10-16）
+
+**状态**：**本地完成（未发布，待令）**——含**一条迁移** `0076_growth_events_match_ref_index.sql` ⇒ 上线须先 `npm run db:migrate:remote` 再 push；判级 **patch**（纯读路径优化）；**零提示词改动、模型不变、SQL 逐字未改**（索引只改查询计划，前端只多一条预取，响应逐字段等价）。
+
+**缘起（用户）**：v6.51.9 收尾后两问——「悬停预取没有做吗」「迁移 CREATE INDEX idx_growth_events_match_ref ON growth_events (match_ref) 没有做吗」；D/E 两项在 v6.51.9 时按裁决「**ABC 全做**」排除，据两问补做本版。
+
+**诊断**：`growth_events` 上原只有 `UNIQUE(player_id, match_ref, event_type)` 的隐式索引，前缀是 `player_id` ⇒ 成长录入页两处按场次过滤的查询（列表的 recorded 计数、面板的「已录事件」）单查 `match_ref` 用不上、只能整表扫（列表一次要跑 N 场次）；保存前查已录同理。
+
+**交付**：① **D 新索引**（迁移 `0076_growth_events_match_ref_index.sql`）：`CREATE INDEX IF NOT EXISTS idx_growth_events_match_ref ON growth_events (match_ref, player_id)` —— 第二列专为面板那条 `WHERE match_ref = ? ORDER BY player_id, id` 而加：`EXPLAIN QUERY PLAN` 实测（node:sqlite 造 3 场 × 40 人）只建 `(match_ref)` 时排序仍要 `USE TEMP B-TREE FOR ORDER BY`，带上 `player_id` 后三处查询（`src/worker/routes/admin/growth.ts:368` / `:402` / `:694`）全部走覆盖索引且无临时 B 树（非唯一索引末键 rowid ⇒ 等值段内天然按 `(player_id, id)` 有序）；`player_id` 前缀查询（`src/worker/player-matches.ts:62`）仍吃 UNIQUE 隐式索引（TC-IDX-05 反向钉住）。迁移登记进 `tests/d1.ts` 的 `MIGRATION_FILES`。② **E 悬停预取**：`web/src/pages/admin/GrowthEntryPage.tsx` 列表行 `<tr onMouseEnter/onFocus={() => prefetchPanel(m.matchId)}>` 先把该场面板数据拉进与面板**同一个 query key** 的缓存、新鲜期 `PANEL_PREFETCH_STALE_MS = 30_000`（与 `web/src/main.tsx` 全局 staleTime 同口径）；已展开那场不重复拉；预取失败清掉缓存条目（`getQueryState` 为 `error` → `removeQueries`），点开照旧正常取数、不闪「面板加载失败」。
+
+**验收**：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **138 文件 / 2246 例全绿**（v6.51.9 基线 137/2239，净 +7 = TC-IDX-01..05 + TC-ENTRY-E14/E15）；`npm run build` ✓ 入口 `assets/index-D3qBMZhr.js`（663,314 B / gzip 210.88 kB，sha256 `8cc937acf8514c417f86ec149c2d95ad241393e0bca4bf2c55a240a202a892fe`，含版本串 6.51.10）+ 页面 chunk `assets/GrowthEntryPage-BFSZ17wJ.js`（35,969 B，sha256 `bf82e034945f742aabdf17e7147737dc25690b333da503a1ec0c6c8e838c92f0`）；CSS 入口 `index-BGPWLRxy.css` 未变。测试计划 `docs/test-plans/v6.51.10-growth-match-ref-index-and-prefetch.md`。
+
+**未验证**：① 真机体感（预取命中时点开面板近乎瞬时）；② 生产 `EXPLAIN QUERY PLAN` 未跑（上线后可跑一条只读核对走索引）；③ 生产 `rows_read` 净变化未实测。
+
+**留待补（有意不做）**：面板内其它请求（OCR、保存后失效）不加预取；触摸端（窄屏卡片视图）无 hover 语义，维持原样；不做滚动可见性/空闲预取。
+
+**待核**：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
+
+**本地提交**：`41512cd`（feat(worker) 索引迁移 + EXPLAIN 用例）+ `4db82b9`（feat(web) 悬停预取 + 页面用例）+ `9434774`（chore 版本号 6.51.9→6.51.10）+ `docs(v6.51.10)`；**未 push**（待发布令）。
+
 ## v6.51.9 · 成长录入页提速：比赛列表与录入面板取数并发化 + 停赛复算去重（2026-10-16）
 
 **状态**：**已上线 2026-10-16**（push `a10a22f..cbacac6`（5 枚，含 v6.51.8 上线回写）⇒ CF Workers Builds 自动部署 Version `6c87d629-ce3a-46dd-9f73-2152e5edfcec` @2026-10-16T23:51:51Z、100% 流量；回读 `/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-DsDpFJV5.js`（sha256 `31bba750…`）+ 页面 chunk `assets/GrowthEntryPage-Bxtugy8H.js`（sha256 `7cdfca62…`）+ CSS 入口 `assets/index-BGPWLRxy.css`（sha256 `dd4f5b5c…`）三件与本地逐字节一致、匿名 OCR 401「未登录」；零迁移 ⇒ 无需 apply）；判级 **patch**（性能与读量治理）；**零迁移、零前端改动、零提示词改动、模型不变、SQL 逐字未改**（只改取数顺序与并发度，响应逐字段等价）⇒ 上线只需 push（CF Workers Builds 自动部署）。

@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.51.10] · 成长录入：`growth_events(match_ref, player_id)` 索引（迁移 0076）+ 列表行悬停预取（2026-10-16）
+
+**本地完成（未发布，待令）**：含**一条迁移** `0076_growth_events_match_ref_index.sql` ⇒ 上线须先 `npm run db:migrate:remote` 再 push。判级 **patch**（纯读路径优化：无新端点、无页面、**零提示词改动、模型不变、SQL 逐字未改**、响应逐字段等价）。缘起＝v6.51.9 收尾后用户两问「悬停预取没有做吗」「迁移 CREATE INDEX idx_growth_events_match_ref ON growth_events (match_ref) 没有做吗」——D/E 两项当时按用户裁决「ABC 全做」排除，据两问补做本版。
+
+交付：① **D 新索引**（迁移 `0076_growth_events_match_ref_index.sql`）：`CREATE INDEX IF NOT EXISTS idx_growth_events_match_ref ON growth_events (match_ref, player_id);` —— 第二列不是可有可无：`EXPLAIN QUERY PLAN` 实测（node:sqlite 造 3 场 × 40 人）只建 `(match_ref)` 时面板那条 `WHERE match_ref = ? ORDER BY player_id, id` 仍要 `USE TEMP B-TREE FOR ORDER BY`，带上 `player_id` 后三处 match_ref 查询（列表 recorded 计数 `src/worker/routes/admin/growth.ts:368` / 面板已录事件 `:402` / 保存前查已录 `:694`）全部 `SEARCH ... USING [COVERING] INDEX idx_growth_events_match_ref (match_ref=?)` 且无临时 B 树（非唯一索引末键是 rowid ⇒ match_ref 等值段内天然按 `(player_id, id)` 有序）；`player_id` 前缀查询（`src/worker/player-matches.ts:62`）仍走 UNIQUE 的 `sqlite_autoindex_growth_events_1`，不受影响。迁移登记进 `tests/d1.ts` 的 `MIGRATION_FILES`（守卫 TC-MIG-03 断言目录内最新一枚 = 数组末项）。② **E 悬停预取**：`web/src/pages/admin/GrowthEntryPage.tsx` 列表行 `<tr onMouseEnter/onFocus={() => prefetchPanel(m.matchId)}>`，预取写进与面板**同一个 query key**（`matchEntryPanelKey`）、新鲜期 `PANEL_PREFETCH_STALE_MS = 30_000`（与 `web/src/main.tsx` 全局 staleTime 同口径，显式写死——全局若被改成 0 这条预取就退化成白拉）；已展开那场不重复拉；预取失败清掉缓存条目（`getQueryState(key)?.status === 'error'` → `removeQueries`），点开照旧正常取数、**不闪「面板加载失败」**。
+
+验收：`npm run typecheck`（三份 tsconfig）0 error；`npx vitest run` **138 文件 / 2246 例全绿**（v6.51.9 基线 137/2239，净 +7 = TC-IDX-01..05 + TC-ENTRY-E14/E15）；`npm run build` ✓ 入口 `web/dist/assets/index-D3qBMZhr.js`（663,314 B / gzip 210.88 kB，sha256 `8cc937acf8514c417f86ec149c2d95ad241393e0bca4bf2c55a240a202a892fe`，含版本串 6.51.10）+ 页面 chunk `web/dist/assets/GrowthEntryPage-BFSZ17wJ.js`（35,969 B / gzip 10.95 kB，sha256 `bf82e034945f742aabdf17e7147737dc25690b333da503a1ec0c6c8e838c92f0`）；CSS 入口 `index-BGPWLRxy.css` 未变（零样式改动）。测试计划 `docs/test-plans/v6.51.10-growth-match-ref-index-and-prefetch.md`。
+
+不做/未覆盖：① 真机体感与生产 `EXPLAIN QUERY PLAN` 未跑（上线后可跑一条只读 `EXPLAIN QUERY PLAN` 核对走索引）；② 面板内其它请求（OCR、保存后失效）不加预取；③ 触摸端（窄屏卡片视图）无 hover 语义，维持原样；④ 不做滚动可见性/空闲预取。
+
+待核：`src/worker/routes/admin/events.ts:182` 的 `maxTokens: 1200`（文本模型 `LLM_MODEL` 上限未知）。
+
+本地提交：`41512cd`（feat(worker) 索引迁移 + EXPLAIN 用例）+ `4db82b9`（feat(web) 悬停预取 + 页面用例）+ `9434774`（chore 版本号 6.51.9→6.51.10）+ 本枚 docs(v6.51.10)。
+
 ## [v6.51.9] · 成长录入页提速：比赛列表与录入面板取数并发化 + 停赛复算去重（2026-10-16）
 
 **已上线（2026-10-16）**：push `a10a22f..cbacac6`（5 枚，含 v6.51.8 上线回写 `efc9d66`）⇒ CF Workers Builds 自动部署 Version `6c87d629-ce3a-46dd-9f73-2152e5edfcec`（@2026-10-16T23:51:51Z，100% 流量）；回读：`/api/health` 200（d1/tour_db/kv 全 ok）、线上入口 `assets/index-DsDpFJV5.js`（663,313 B / sha256 `31bba750…`）、页面 chunk `assets/GrowthEntryPage-Bxtugy8H.js`（35,556 B / sha256 `7cdfca62…`）、CSS 入口 `assets/index-BGPWLRxy.css`（94,381 B / sha256 `dd4f5b5c…`）三件与本地逐字节一致、匿名 `POST /api/admin/growth/match-entry/1/ocr` ⇒ 401「未登录」；零迁移 ⇒ 无需 apply。判级 **patch**（性能与读量治理——无新端点、无页面、**零迁移、零前端改动、零提示词改动、模型不变**，**SQL 逐字未改**，只改取数顺序与并发度）。缘起＝用户「先停，再做一个：改善成长录入页面比赛列表和录入面板的加载速度，先出方案」；诊断给出 A/B/C/D/E 五项，用户裁决「完成后做成长录入优化，**ABC 全做**」（D 新索引与 E 悬停预取不做）。
