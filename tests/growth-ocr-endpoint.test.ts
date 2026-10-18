@@ -3,6 +3,7 @@
 // v6.51.2：出站 max_tokens 缺省 1024（glm-4v-flash 上限）+ LLM_VISION_MAX_TOKENS 可配 + 截断明确报错。
 // v6.51.3：提示词要求中文队名（锁出站文本）；队名对侧容忍译名/前后缀漂移，英文队名仍 400。
 // v6.51.8：队名对不上也能选边（回 code=ocr_team_unmatched）；模型照抄英文名时先用 FC26 队名表兜底分侧。
+// v6.51.13：解析按图片内容哈希缓存 10 分钟 ⇒ 选边续跑与同图重传不再重复调视觉模型（TC-EP-C1..C4）。
 // 测试计划：docs/test-plans/v6.43.0-growth-ocr.md、docs/test-plans/v6.51.2-ocr-vision-maxtokens.md、
 // docs/test-plans/v6.51.3-ocr-team-name-chinese.md、docs/test-plans/v6.51.8-ocr-unmatched-side-pick.md。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -471,5 +472,93 @@ describe('TC-EP 截图识别端点', () => {
     const priority = await sendOcr(seededTeams('奥林匹亚科斯', '皇家马德里'), { image: PNG_B64 });
     expect(priority.status).toBe(200);
     expect(((await priority.json()) as OcrResponse).side).toBe('home');
+  });
+});
+
+/** 与 mockVision 同款桩，另记调用次数（v6.51.13 缓存用例：锁「同一张图只调一次模型」） */
+function countingVision(content: string): () => number {
+  let calls = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+    }),
+  );
+  return () => calls;
+}
+
+// 第二张图：同魔数、内容不同（base64 合法，解码后仍是 PNG 头）——用来锁「不同图片不共享缓存」
+const PNG_B64_B = 'iVBORw0KGgoAAAA=';
+
+describe('TC-EP-CACHE 解析缓存（v6.51.13：选边 / 重传不再重复调模型）', () => {
+  it('TC-EP-C1 歧义选边：带 side 续跑命中缓存，视觉调用仍只有 1 次', async () => {
+    const fx = seededTeams('拜仁慕尼黑', '慕尼黑1860');
+    // 给客队（慕尼黑1860）建一份花名册：选边后要按「选中的那一侧」认人，而不是沿用首次的判定
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (3, '慕尼黑1860', 'premier', 'active');
+      INSERT INTO players (id, uid, name, display_name, club_id, position, status, growth_xp, ca) VALUES
+        (40, 'p40', 'L. Li', NULL, 3, 'ST', 'normal', 0, 70);
+    `);
+    const calls = countingVision(JSON.stringify({ ...summaryPayload, team: '慕尼黑', teamRaw: 'FC BAYERN MÜNCHEN' }));
+    const first = await sendOcr(fx, { image: PNG_B64 });
+    expect(first.status).toBe(400);
+    expect(((await first.json()) as { code?: string }).code).toBe('ocr_team_ambiguous');
+    expect(calls()).toBe(1);
+
+    const picked = await sendOcr(fx, { image: PNG_B64, side: 'away' });
+    expect(picked.status).toBe(200);
+    const body = (await picked.json()) as OcrResponse;
+    expect(body.side).toBe('away');
+    expect(body.entries.map((e) => e.playerId)).toEqual([40]); // 客队花名册认人：缓存只复用解析，认人现算
+    expect(calls()).toBe(1); // 关键：选边没有第二次视觉调用
+  });
+
+  it('TC-EP-C2 同图重传命中缓存（data: 前缀与换行规范化后同键）；换一张图不共享', async () => {
+    const fx = seeded();
+    const calls = countingVision(JSON.stringify(summaryPayload));
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(200);
+    expect(calls()).toBe(1);
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(200);
+    expect(calls()).toBe(1);
+    // 同一张图的另一种写法（data: 前缀 + 中间换行）→ decodeOcrImage 规范化后同一个键
+    const wrapped = `data:image/png;base64,${PNG_B64.slice(0, 8)}\n${PNG_B64.slice(8)}`;
+    expect((await sendOcr(fx, { image: wrapped })).status).toBe(200);
+    expect(calls()).toBe(1);
+    // 另一张图：内容不同 ⇒ 新键 ⇒ 照常调模型
+    expect((await sendOcr(fx, { image: PNG_B64_B })).status).toBe(200);
+    expect(calls()).toBe(2);
+  });
+
+  it('TC-EP-C3 坏结果不缓存：页签不合法 502 后，同图重试仍会重新调模型', async () => {
+    const fx = seeded();
+    const calls = countingVision(JSON.stringify({ ...summaryPayload, tab: 'Shooting' }));
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(502);
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(502);
+    expect(calls()).toBe(2);
+  });
+
+  it('TC-EP-C4 KV 读写都抛错时不阻断识别（退化成每次都调模型）', async () => {
+    const fx = seeded();
+    const calls = countingVision(JSON.stringify(summaryPayload));
+    const base = fx.env.SESSION_KV as unknown as { get(k: string): Promise<string | null>; put(k: string, v: string): Promise<void> };
+    fx.env.SESSION_KV = {
+      get: async (k: string) => {
+        if (k.startsWith('ocr:')) throw new Error('kv down');
+        return base.get(k);
+      },
+      put: async (k: string, v: string) => {
+        if (k.startsWith('ocr:')) throw new Error('kv down');
+        return base.put(k, v);
+      },
+    } as unknown as KVNamespace;
+
+    const res = await sendOcr(fx, { image: PNG_B64 });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as OcrResponse).side).toBe('home');
+    expect(calls()).toBe(1);
+    // 缓存不可用 ⇒ 第二次仍走模型（不是 500，也不是空响应）
+    expect((await sendOcr(fx, { image: PNG_B64 })).status).toBe(200);
+    expect(calls()).toBe(2);
   });
 });

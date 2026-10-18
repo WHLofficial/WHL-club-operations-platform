@@ -20,6 +20,7 @@ import {
 import { rowDisplayName } from '../../../core/player-name.ts';
 import { parseOcrVision, buildOcrEntries, matchOcrTeamSide, fc26TeamIdOfName, ocrCrossChecks, type OcrRosterPlayer } from '../../../core/growth-ocr.ts';
 import { llmVisionJson } from '../../../lib/llm.ts';
+import { sha256Hex } from '../../../lib/crypto.ts';
 import { suspendedPlayersAtMatch, suspensionLabel } from '../../tour-suspension.ts';
 import { loadTournamentNames, tournamentNameOf } from '../../tournament-names.ts';
 import { nowSql, readJson } from './shared.ts';
@@ -455,6 +456,7 @@ app.get('/growth/match-entry/:matchId', async (c) => {
 // v6.43.0：赛后截图识别（零 DB 写，管理端手动触发）。一张图一次调用：
 // 视觉模型 → parseOcrVision → 队名对侧 → 花名册认人 → 预填草稿 + 交叉校验警告。
 // 失败可重试、可完全绕过（识别是增强不是依赖，预填后仍走下方批量端点人工确认入库）。
+// v6.51.13：解析按图片内容哈希缓存 10 分钟 ⇒ 同一张图（选边续跑、重复上传）只调一次视觉模型。
 const OCR_PROMPT = `你是 FC26 赛后「Player Performance」截图识别引擎。只输出一个 JSON 对象：禁止 markdown 代码块、禁止任何解释文字；图中没有或看不清的字段输出 null，绝不编造、绝不推算。
 
 界面固定布局：左侧球员表格，列依次为 POS（位置缩写）、Name、RR（评分，N/A=替补没上场）、G（进球）、AST（助攻）；右侧选中球员详情区，页签 Summary / Possession / Shooting / Passing / Defending / Goalkeeping；画面顶部的 FPS/CPU/GPU 监控条是录屏软件干扰，一律忽略。
@@ -510,6 +512,29 @@ function decodeOcrImage(b64: string): { mime: 'image/png' | 'image/jpeg'; base64
   return { mime: png ? 'image/png' : 'image/jpeg', base64: compact };
 }
 
+// v6.51.13：解析缓存 —— 治「选边 = 再调一次视觉模型」（选边续跑与同图重传都命中同一份）。
+// 键 = 图片内容（规范化 base64）的哈希，值 = 模型的**原始解析**；队侧、花名册与预填每次现算，
+// 所以换边、甚至换一场比赛复用同一份解析都安全（缓存里绝不放 entries，避免 playerId 被固化）。
+// 只缓存「页签合法」的结果：坏结果不缓存，用户重试仍会重新打模型（保住今天的重试语义）。
+const OCR_CACHE_TTL_SEC = 600; // 10 分钟：够用户点按钮或刷新一次，过夜自动清
+
+async function readOcrCache(env: Env, key: string): Promise<unknown | null> {
+  try {
+    const raw = await env.SESSION_KV.get(key);
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null; // 缓存是增强不是依赖：读失败/坏 JSON 一律当未命中
+  }
+}
+
+async function writeOcrCache(env: Env, key: string, parsed: unknown): Promise<void> {
+  try {
+    await env.SESSION_KV.put(key, JSON.stringify(parsed), { expirationTtl: OCR_CACHE_TTL_SEC });
+  } catch {
+    /* 写失败退化成「每次都调模型」的旧行为，不影响本次响应 */
+  }
+}
+
 app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const matchId = Number(c.req.param('matchId'));
@@ -524,13 +549,19 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   const forcedSide: 'home' | 'away' | null = body.side === 'home' || body.side === 'away' ? body.side : null;
   const image = decodeOcrImage(body.image);
 
+  // v6.51.13：同一张图的解析只发生一次 —— 歧义/对不上时前端带 side 重发同一张图（v6.51.3/v6.51.8），
+  // 以及用户重复上传同一张图，都命中缓存，不再重复调视觉模型。
+  const cacheKey = `ocr:${await sha256Hex(image.base64)}`;
+  const cachedParsed = await readOcrCache(c.env, cacheKey);
   // 视觉调用（未配置 503 / 失败 502 都由 llmVisionJson 抛）
-  const parsed = await llmVisionJson<{ notes?: unknown }>(c.env, image, OCR_PROMPT);
+  const parsed =
+    cachedParsed !== null ? (cachedParsed as { notes?: unknown }) : await llmVisionJson<{ notes?: unknown }>(c.env, image, OCR_PROMPT);
   const { ocr, errors } = parseOcrVision(parsed);
   // 页签由模型识别结果决定（前端一个入口多选上传，不再由请求指定）；只认两张业务页签
   if (!ocr || (ocr.tab !== 'summary' && ocr.tab !== 'goalkeeping')) {
     throw new HttpError(502, `识别结果${ocr?.tab ? `是 ${ocr.tab} 页签，只认外场 Summary 与门将 Goalkeeping` : '不可解析'}，请重试${errors.length ? `（${errors[0]}）` : ''}`);
   }
+  if (cachedParsed === null) await writeOcrCache(c.env, cacheKey, parsed);
   const kind: 'summary' | 'goalkeeping' = ocr.tab;
 
   // 截图队名 → 本场两侧（v6.51.3：提示词要求模型给中文队名；比对见 core/growth-ocr 的 matchOcrTeamSide，
