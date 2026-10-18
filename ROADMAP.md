@@ -1522,6 +1522,20 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.51.13 · 成长录入截图识别：解析按图片内容缓存（选边不再重复调模型）（2026-10-17）
+
+**状态**：**待发布**（本地提交未 push）。判级 **patch** = 性能与调用量治理（**零迁移、零契约变更、零前端改动、零提示词改动、模型不变** ⇒ 响应逐字段等价，上线只需 push）。
+
+**缘起（用户提问 + 裁决）**：用户 m03336 问「成长录入，截图识别，当到达需要用户选边的分支时，选边后现在的行为难道是再调用一遍 LLM 吗？」—— **是**：前端带 `side` 重发同一张图（`web/src/pages/admin/GrowthEntryPage.tsx:866`），端点无条件先跑 `llmVisionJson`（`src/worker/routes/admin/growth.ts`），`side` 只覆盖队名判定（`forcedSide`）⇒ 每次选边 = 重传 ~0.8 MB 图 + 一次完整识别（几秒）。用户随后裁决「**B**」（服务端按图哈希缓存），并要求收尾避免冗长测试调用（m03369）。
+
+**交付**：`src/worker/routes/admin/growth.ts` 新增解析缓存 —— `OCR_CACHE_TTL_SEC = 600`、`readOcrCache` / `writeOcrCache`（异常全吞）、`cacheKey = 'ocr:' + sha256Hex(image.base64)`；命中即跳过视觉调用；**页签合法才写缓存**（坏结果不缓存 ⇒ 重试仍重打模型）；缓存**只存原始解析**（不存 entries ⇒ 队侧/花名册/预填现算，换边或换场复用同一份都安全）。
+
+**为什么选 B 而非 A**：A（首次解析随错误回传、前端回传）要改错误契约（响应体恒为 `{ error, code }`，`src/worker/index.ts:99-100`）与前端，且载荷活在浏览器内存（刷新即丢、无跨设备复用）；B 零契约变更、零前端改动，缓存不依赖浏览器状态（刷新后重传同图、换设备、换管理员都命中），解析恒由服务端产生且与图片内容绑死（无「图 A + 解析 B」的篡改面）。
+
+**验收数字**：`npx vitest run tests/growth-ocr-endpoint.test.ts` = **23 例全绿**（净 +4 = TC-EP-C1..C4）；`npm run typecheck`（tsc ×3）**0 error**。**按用户要求收尾只跑定向用例** ⇒ **全量 `npm test` / `npm run test:e2e` 本增量未跑**，发布前需补。测试计划 `docs/test-plans/v6.51.13-ocr-parse-cache.md`。
+
+**留待（待令）**：① v6.51.12 / v6.51.13 的发布（bump `package.json` + push ⇒ CF Workers Builds 自动部署）② 全量 vitest 与 e2e 补跑 ③ 真机体感验证（歧义图选边应从「几秒」降到瞬时）。
+
 ## 生产批 · S9 冠军杯小组赛池 192.5 + 次级入场奖金补至顶级水平（2026-10-17，不占本仓版本号）
 
 **状态**：**已执行（2026-10-17）**。纯数据批（**零代码、零迁移、零 API 变更**）；作用域 = 生产 D1 `whl-club` 的 `config` 一行 upsert + 7 家次级球队账本补发。批次目录 `scripts/prod-20261017-s9-pool-and-entry-topup/`（README 含口径、预检基线、执行记录、逐队净变化、工件 sha256、回滚、遗留）。
