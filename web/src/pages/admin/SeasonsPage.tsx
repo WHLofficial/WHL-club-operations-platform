@@ -389,7 +389,8 @@ function ResultsSection() {
         r.xp.unresolved.length > 0
           ? `有 ${r.xp.unresolved.length} 个球员没匹配上（${r.xp.unresolved.join('、')}），请到「成长引擎」补录。`
           : '';
-      show(`赛果已确认入档${r.xp.granted > 0 ? `，自动记了 ${r.xp.granted} 条 XP 事件` : ''}。${unresolvedNote}`);
+      // v6.52.0：非成长球员的事件照样记（数据要用）但 XP 为 0 ⇒ granted 只代表「新入账的成长事件条数」，不再宣称 XP
+      show(`赛果已确认入档${r.xp.granted > 0 ? `，自动记了 ${r.xp.granted} 条成长事件` : ''}。${unresolvedNote}`);
       reload();
     } catch (err) {
       show(err instanceof Error ? err.message : '确认失败', true);

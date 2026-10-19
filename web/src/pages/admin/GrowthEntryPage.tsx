@@ -77,6 +77,11 @@ interface RowDraft {
   position: string | null;
   /** players.status === 'trainee'：训练营徽标（v6.45.0 起与正式球员同口径按场次计 XP） */
   trainee: boolean;
+  /**
+   * v6.52.0：可成长（players.growable = 1）。非成长球员照常可录（比赛数据要用），只是不计成长 XP ——
+   * 行内标灰徽标、本场 XP 恒 0，输入与截图预填都不受影响。
+   */
+  growable: boolean;
   /** 本场停赛（v6.45.0）：非空 = 整行不可录（面板标红置灰、输入禁用、保存跳过，服务端也会整行拒） */
   suspended: MatchEntrySuspended | null;
   appearance: FieldBool;
@@ -227,7 +232,12 @@ const draftOf = (r: RowDraft): GrowthEntryDraft => ({
   saves: numOrNull(r.saves.value),
 });
 
-const rowXp = (r: RowDraft): number => entryXp(draftOf(r), { duelsWon: r.duelsBase, saves: r.savesBase }) + r.extraXp;
+const rowXp = (r: RowDraft): number => {
+  // v6.52.0：非成长球员不计成长 XP —— 必须在累加 extraXp（已录进球/助攻的 XP）之前返回 0，
+  // 否则合计与行内展示会把这部分算进去；数据本身照收，只为展示口径归零。
+  if (!r.growable) return 0;
+  return entryXp(draftOf(r), { duelsWon: r.duelsBase, saves: r.savesBase }) + r.extraXp;
+};
 
 /**
  * 保存结果回填：基线前移（提交过的格子不再算脏）+ 按 perPlayer 给结果徽标。
@@ -335,6 +345,9 @@ function buildSideRows(panel: MatchEntryPanel, side: Side, mode: Mode): RowDraft
       name: p.name,
       position: p.position,
       trainee: p.status === 'trainee',
+      // v6.52.0：漏字段/老后端按非成长处理（与 SQL 侧 COALESCE(growable, 0) = 1 同向），
+      // 显示上只会少报 XP、不会虚报
+      growable: p.growable === true,
       suspended: p.suspended ?? null,
       appearance: { checked: appearance, locked: lockMark('appearance') },
       rating: { value: rating, locked: lockNum('rating') },
@@ -600,6 +613,7 @@ function MatchEntrySection() {
       <p className="hint">
         已确认的非弃权场次都可录（v6.46.0 起含冠军杯淘汰赛 / 超级杯 / 资格赛）；列表按确认时间倒序列出全部可补录比赛，可切换「按赛事」或「按轮次」查看。
         不产成长 XP 的场次只能录出场与评分（行首标「不计 XP」）；本场停赛的球员不能录成长（行内已标红）。
+        非成长球员的录入照收（比赛数据要用），只是不计成长 XP（行内标「非成长 · 不计 XP」，输入与截图预填照常）。
         出场与评分走截图识别 + 人工确认；
         赛果确定的值（进球、助攻、赛果零封）只读，手录的评分 / 夺回球权 / 扑救可改后重新提交（XP 按差额调整）；
         已录的出场与零封是记过标记，不能撤销。
@@ -1170,6 +1184,7 @@ function EntryPanel({
                   <span className="entry-card-pos">{r.position ?? '—'}</span>
                   {r.sources.length > 0 && <span className="badge gray">已录 · {r.sources.join('、')}</span>}
                   {r.trainee && <span className="badge gray">训练营</span>}
+                  {!r.growable && <span className="badge gray">非成长 · 不计 XP</span>}
                   {r.suspended && <span className="badge red">{suspendedText(r.suspended)}</span>}
                   {issues.length > 0 && (
                     <span className="badge red" title={issues.join('；')}>
@@ -1371,6 +1386,7 @@ function EntryPanel({
                   <td>
                     {r.name}
                     {noXp && <span className="badge gray entry-src">不计 XP</span>}
+                    {!r.growable && <span className="badge gray entry-src">非成长 · 不计 XP</span>}
                     {r.sources.length > 0 && <div className="muted entry-src">已录 · {r.sources.join('、')}</div>}
                     {r.trainee && <div className="muted entry-src">训练营</div>}
                     {r.suspended && <div className="bad-text entry-src">{suspendedText(r.suspended)}</div>}

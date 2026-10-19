@@ -69,7 +69,8 @@ function match(over: Partial<MatchEntryListItem> = {}): MatchEntryListItem {
 }
 
 function player(id: number, name: string, position: string): MatchEntryPlayer {
-  return { id, name, position, status: 'normal', suspended: null, duelsTotal: 30, savesTotal: 20 };
+  // v6.52.0：面板 DTO 带 growable（false = 非成长，行内标灰、XP 归零）；旧用例的默认球员都可成长
+  return { id, name, position, status: 'normal', growable: true, suspended: null, duelsTotal: 30, savesTotal: 20 };
 }
 
 /** 主场两人：张三（手录评分 8 + 手录出场）、L. Li（赛果零封）；客场一人 */

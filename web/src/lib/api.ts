@@ -1864,7 +1864,10 @@ export interface ResultsQueue {
 export interface ConfirmResultResult {
   ok: boolean;
   result: ConfirmedResultRow;
-  /** 确认钩子自动 XP：granted=入账事件数，unresolved=没匹配上的俱乐部/球员名（补录用） */
+  /**
+   * 确认钩子自动记的成长事件（v6.52.0 起非成长球员的事件照记但 XP 为 0 ⇒ granted 只代表
+   * 「新入账的成长事件条数」，不再宣称 XP 条数）；unresolved=没匹配上的俱乐部/球员名（补录用）
+   */
   xp: { granted: number; unresolved: string[] };
 }
 
@@ -2199,6 +2202,11 @@ export interface MatchEntryPlayer {
   name: string;
   position: string | null;
   status: string;
+  /**
+   * v6.52.0：是否计成长 XP（players.growable = 1）。false = 非成长球员：录入照收（比赛数据要用），
+   * 但事件 xp 存 0、growth_xp 不累加；面板标灰徽标、本场 XP 显示 0，输入不禁用。
+   */
+  growable: boolean;
   /** 本场停赛（null = 可录）；面板标红禁行，写端点也会整行拒收 */
   suspended: MatchEntrySuspended | null;
   /** 夺回球权历史累计次数（含本场已录行；v6.42.0 跨场累计基数） */

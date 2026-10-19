@@ -129,9 +129,9 @@ app.post('/growth/events', async (c) => {
   const body = (await readJson(c)) as { playerId?: unknown; matchRef?: unknown; eventType?: unknown; value?: unknown } | null;
   const playerId = Number(body?.playerId);
   if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
-  const player = await c.env.DB.prepare('SELECT id, name, display_name, fc_id FROM players WHERE id = ?')
+  const player = await c.env.DB.prepare('SELECT id, name, display_name, fc_id, growable FROM players WHERE id = ?')
     .bind(playerId)
-    .first<{ id: number; name: string; display_name: string | null; fc_id: number | null }>();
+    .first<{ id: number; name: string; display_name: string | null; fc_id: number | null; growable: number | null }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
 
   const eventType = body?.eventType;
@@ -158,11 +158,16 @@ app.post('/growth/events', async (c) => {
     eventType === 'duels_won' || eventType === 'saves' ? (await loadCumulativeBases(c.env.DB, [playerId])).get(`${playerId}|${eventType}`) ?? 0 : 0,
     xpEligible,
   );
+  // v6.52.0：非成长球员（growable !== 1）事件照收、XP 归零。三处（入账 / 审计 / 响应）必须共用
+  // 同一个局部量——只改传给 recordGrowthEvent 的话，响应与审计会回一个并没有入账的 XP 值。
+  const creditedXp = player.growable === 1 ? xp : 0;
   // v6.45.0：锚是赛事系统比赛号时按同场停赛拦（停赛球员不能录成长）；`manual:` 这类自定义锚无从判，放行
   if (/^\d+$/.test(matchRef) && player.fc_id !== null) {
     const s = (await suspendedPlayersAtMatch(c.env.TOUR_DB, Number(matchRef))).get(player.fc_id);
     if (s) throw new HttpError(400, `${rowDisplayName(player)} 本场停赛（${suspensionLabel(s)}），不能录成长`);
   }
+  // recorded = 事件是否新入账（v6.52.0 起由 core 按事件 INSERT 判定，不再看 XP 语句的 changes——
+  // 非成长球员的 XP 语句恒 0 行，若仍看它会把这个新事件误报成 duplicate）
   const recorded = await recordGrowthEvent(c.env.DB, {
     playerId,
     matchRef,
@@ -170,7 +175,7 @@ app.post('/growth/events', async (c) => {
     windowSeq: null,
     eventType: eventType as GrowthEventType,
     value,
-    xp,
+    xp: creditedXp,
     source: 'manual',
     recordedBy: user.id,
   });
@@ -180,9 +185,9 @@ app.post('/growth/events', async (c) => {
     targetType: 'player',
     targetId: playerId,
     origin: 'user',
-    after: { eventType, value, xp, matchRef, duplicate: !recorded },
+    after: { eventType, value, xp: creditedXp, matchRef, duplicate: !recorded },
   });
-  return c.json({ ok: true, xp, duplicate: !recorded }, recorded ? 201 : 200);
+  return c.json({ ok: true, xp: creditedXp, duplicate: !recorded }, recorded ? 201 : 200);
 });
 
 app.post('/growth/settlement/run', async (c) => {
@@ -285,6 +290,8 @@ interface EntryPlayerRow {
   position: string | null;
   status: string;
   fc_id?: number | null;
+  /** v6.52.0：非成长球员（COALESCE(growable,0) = 0）录入照收、XP 归零；比较一律 `=== 1` */
+  growable: number | null;
 }
 
 // 一侧的归属解析结果：clubId 解析不到（含 CPU 队）为 null，isCpu 单独标出
@@ -418,7 +425,7 @@ app.get('/growth/match-entry/:matchId', async (c) => {
   // 换来语句位置恒定（结果按 [主, 客] 下标对齐，不用另算游标）
   const rosterStmt = (clubId: number | null) =>
     c.env.DB.prepare(
-      `SELECT id, name, display_name, position, status, fc_id FROM players
+      `SELECT id, name, display_name, position, status, fc_id, growable FROM players
        WHERE club_id = ? AND status IN ('normal', 'listed', 'trainee')
        ORDER BY ${ROSTER_POSITION_CASE}, players.id`,
     ).bind(clubId ?? -1);
@@ -433,6 +440,8 @@ app.get('/growth/match-entry/:matchId', async (c) => {
       officialName: p.name,
       position: p.position,
       status: p.status,
+      // v6.52.0：面板据此标「非成长 · 不计 XP」；漏这个字段会让整队被前端当非成长（undefined ⇒ false）
+      growable: p.growable === 1,
       suspended: p.fc_id == null ? null : suspended.get(p.fc_id) ?? null,
     }));
 
@@ -666,7 +675,7 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   });
   const ids = [...new Set(parsed.map((p) => p.playerId))];
   const rows = await c.env.DB.prepare(
-    `SELECT id, name, display_name, club_id, position, status, fc_id FROM players WHERE id IN (${ids.map(() => '?').join(', ')})`,
+    `SELECT id, name, display_name, club_id, position, status, fc_id, growable FROM players WHERE id IN (${ids.map(() => '?').join(', ')})`,
   )
     .bind(...ids)
     .all<EntryPlayerRow>();
@@ -701,17 +710,20 @@ app.post('/growth/match-entry/:matchId', async (c) => {
     }
   }
 
-  // 展开事件流：字段顺序固定，方便前端按事件类型锁定格子；非 XP 场次一律 xp=0（值照录）
+  // 展开事件流：字段顺序固定，方便前端按事件类型锁定格子；非 XP 场次一律 xp=0（值照录）。
+  // v6.52.0：非成长球员（growable !== 1）同样事件照写、XP 归零——必须在构造 events 时就归零，
+  // 响应 totalXp / 逐行 xp 与审计 detail 都取构造值（只在 SQL 里归零会虚报入账）。
   const events: { playerId: number; eventType: GrowthEventType; value: number; xp: number }[] = [];
   const bases = await loadCumulativeBases(c.env.DB, ids);
   for (const { playerId, entry } of parsed) {
-    if (entry.appearance) events.push({ playerId, eventType: 'appearance', value: 1, xp: xpEligible ? xpForEvent('appearance', 1) : 0 });
-    if (entry.cleanSheet) events.push({ playerId, eventType: 'clean_sheet', value: 1, xp: xpEligible ? xpForEvent('clean_sheet', 1) : 0 });
-    if (entry.rating !== undefined && entry.rating !== null) events.push({ playerId, eventType: 'rating', ...manualEventOf('rating', entry.rating, 0, xpEligible) });
+    const xpOn = xpEligible && players.get(playerId)?.growable === 1;
+    if (entry.appearance) events.push({ playerId, eventType: 'appearance', value: 1, xp: xpOn ? xpForEvent('appearance', 1) : 0 });
+    if (entry.cleanSheet) events.push({ playerId, eventType: 'clean_sheet', value: 1, xp: xpOn ? xpForEvent('clean_sheet', 1) : 0 });
+    if (entry.rating !== undefined && entry.rating !== null) events.push({ playerId, eventType: 'rating', ...manualEventOf('rating', entry.rating, 0, xpOn) });
     if (entry.duelsWon !== undefined && entry.duelsWon !== null)
-      events.push({ playerId, eventType: 'duels_won', ...manualEventOf('duels_won', entry.duelsWon, bases.get(`${playerId}|duels_won`) ?? 0, xpEligible) });
+      events.push({ playerId, eventType: 'duels_won', ...manualEventOf('duels_won', entry.duelsWon, bases.get(`${playerId}|duels_won`) ?? 0, xpOn) });
     if (entry.saves !== undefined && entry.saves !== null)
-      events.push({ playerId, eventType: 'saves', ...manualEventOf('saves', entry.saves, bases.get(`${playerId}|saves`) ?? 0, xpEligible) });
+      events.push({ playerId, eventType: 'saves', ...manualEventOf('saves', entry.saves, bases.get(`${playerId}|saves`) ?? 0, xpOn) });
   }
   if (events.length === 0) throw new HttpError(400, '每一行都没有勾上要记的项目');
 
@@ -790,6 +802,16 @@ app.post('/growth/match-entry/:matchId', async (c) => {
     }
     // 改值：原行换值换 XP（recorded_by 记这次是谁改的），并把该球员该类型的 XP 链按录入顺序重放，
     // 链上其他行受影响的 XP 一并改，差额一次加进 players.growth_xp。
+    // v6.52.0：当前非成长球员跳过重放——只改 value / recorded_by，被改行保持它现有的 xp
+    // （原本 0 的仍为 0；成长期录下的历史 XP 不抹掉），链上其他行不动、growth_xp 不变（delta=0）。
+    if (players.get(e.playerId)?.growable !== 1) {
+      expectedUpdated += 1;
+      const at = statements.length;
+      statements.push(c.env.DB.prepare('UPDATE growth_events SET value = ?, recorded_by = ? WHERE id = ?').bind(e.value, user.id, found.id));
+      signals.push({ kind: 'update', index: at, deltaXp: 0 });
+      detail.push({ ...line, xp: found.xp, kind: 'update', previousValue: found.value });
+      continue;
+    }
     const replay = await replayEventChain(c.env.DB, e.playerId, e.eventType, { id: found.id, value: e.value });
     if (replay === null) {
       signals.push({ kind: 'noop', index: -1, deltaXp: 0 });
@@ -801,7 +823,13 @@ app.post('/growth/match-entry/:matchId', async (c) => {
     statements.push(c.env.DB.prepare('UPDATE growth_events SET value = ?, xp = ?, recorded_by = ? WHERE id = ?').bind(e.value, replay.xp, user.id, found.id));
     for (const x of replay.extra) statements.push(c.env.DB.prepare('UPDATE growth_events SET xp = ? WHERE id = ?').bind(x.xp, x.id));
     if (replay.delta !== 0) {
-      statements.push(c.env.DB.prepare(`UPDATE players SET growth_xp = growth_xp + ?, updated_at = ${nowSql()} WHERE id = ?`).bind(replay.delta, e.playerId));
+      // 兜底：与主闸同口径——目标球员在批执行前被改成非成长时不改 XP
+      statements.push(
+        c.env.DB.prepare(`UPDATE players SET growth_xp = growth_xp + ?, updated_at = ${nowSql()} WHERE id = ? AND COALESCE(growable, 0) = 1`).bind(
+          replay.delta,
+          e.playerId,
+        ),
+      );
     }
     signals.push({ kind: 'update', index: at, deltaXp: replay.delta });
     detail.push({ ...line, xp: replay.xp, kind: 'update', previousValue: found.value });

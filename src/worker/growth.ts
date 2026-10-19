@@ -136,6 +136,11 @@ export interface GrowthEventInput {
  * 要赶在本事件入表之前判断（若先插后查，同批刚插的行会让闸永远不放行）。
  * 重放时 UPDATE 0 行、INSERT 撞 UNIQUE 跳过，growth_xp 不会重复加；
  * meta.changes：偶数位=XP 是否已加，奇数位=事件是否新入账（批量计数用奇数位）。
+ *
+ * v6.52.0 非成长球员（COALESCE(growable,0) = 1 才算可成长）：事件行与 value 照写
+ * （球员比赛 tab / 成长史 / 基数汇总都要用），只把 XP 归零 —— XP 语句不累加、
+ * 事件行的 xp 栏存 0，两者口径一致（不会出现「行 +20 但总数没动」）。
+ * 因此偶数位 0 现在也可能是「非成长」而不只是「重放」。
  */
 export function recordGrowthEventStatements(db: D1Database, e: GrowthEventInput): D1PreparedStatement[] {
   return [
@@ -143,23 +148,28 @@ export function recordGrowthEventStatements(db: D1Database, e: GrowthEventInput)
       .prepare(
         `UPDATE players SET growth_xp = growth_xp + ?, updated_at = ${nowSql()}
          WHERE id = ?
+           AND COALESCE(growable, 0) = 1
            AND NOT EXISTS (SELECT 1 FROM growth_events WHERE player_id = ? AND match_ref IS ? AND event_type IS ?)`,
       )
       .bind(e.xp, e.playerId, e.playerId, e.matchRef, e.eventType),
     db
       .prepare(
         `INSERT INTO growth_events (player_id, match_ref, season, window_seq, event_type, value, xp, source, recorded_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${nowSql()})
+         VALUES (?, ?, ?, ?, ?, ?, CASE WHEN COALESCE((SELECT growable FROM players WHERE id = ?), 0) = 1 THEN ? ELSE 0 END, ?, ?, ${nowSql()})
          ON CONFLICT (player_id, match_ref, event_type) DO NOTHING`,
       )
-      .bind(e.playerId, e.matchRef, e.season, e.windowSeq, e.eventType, e.value, e.xp, e.source, e.recordedBy ?? null),
+      .bind(e.playerId, e.matchRef, e.season, e.windowSeq, e.eventType, e.value, e.playerId, e.xp, e.source, e.recordedBy ?? null),
   ];
 }
 
-/** 单条便捷封装（补录路径用），返回是否实际入账 */
+/**
+ * 单条便捷封装（补录路径用），返回事件是否实际入账。
+ * v6.52.0 起按事件 INSERT（results[1]）判定：非成长球员的 XP 语句恒 0 行，
+ * 仍看 results[0] 会把「新事件已入库」误报成 duplicate（200 而非 201）。
+ */
 export async function recordGrowthEvent(db: D1Database, e: GrowthEventInput): Promise<boolean> {
   const results = await db.batch(recordGrowthEventStatements(db, e));
-  return (results[0]?.meta.changes ?? 0) === 1;
+  return (results[1]?.meta.changes ?? 0) === 1;
 }
 
 /**
@@ -317,10 +327,12 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
 
   // 训练营球员的赛季结算那份固定 XP（§10.1）；锚在 season 上天然幂等。
   // v6.45.0 起这份与逐场 XP 并行累加（训练营球员按场次照记出场/评分/进球/助攻/零封）
+  // v6.52.0：非成长球员不产生这类纯 XP 合成事件（查询层过滤，连事件行都不写）
   const trainees = await scanRows<{ id: number }>(
     db,
     `SELECT t.id FROM players t JOIN contracts c ON c.player_id = t.id AND c.is_active = 1
-     WHERE c.contract_type = 'trainee'`,
+     WHERE c.contract_type = 'trainee'
+       AND COALESCE(t.growable, 0) = 1`,
     't.id',
     [],
   );
@@ -343,10 +355,12 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
   // 中国球员计划：每赛季额外 XP（china_plan=1）
   // 中国球员计划：只看在玩家队的中国球员——必须有现行合同（用户规则 2026-09-18：只有在玩家队的
   // 球员才有成长；CPU 队名单在比赛系统侧、自由身/无归属球员没有平台合同，不再每季白拿 20 XP）
+  // v6.52.0：非成长球员不产生这类纯 XP 合成事件
   const china = await scanRows<{ id: number }>(
     db,
     `SELECT t.id FROM players t JOIN contracts c ON c.player_id = t.id AND c.is_active = 1
-     WHERE t.china_plan = 1`,
+     WHERE t.china_plan = 1
+       AND COALESCE(t.growable, 0) = 1`,
     't.id',
     [],
   );
@@ -389,6 +403,7 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
     db,
     `SELECT x.id AS id, x.total AS total FROM (
        SELECT ge.player_id AS id, SUM(ge.value) AS total FROM growth_events ge
+       JOIN players p ON p.id = ge.player_id AND COALESCE(p.growable, 0) = 1
        WHERE ge.event_type IN ('goal', 'assist')
          AND ge.id > ?
          AND ge.id > COALESCE((SELECT MAX(r.id) FROM growth_events r WHERE r.player_id = ge.player_id AND r.event_type = 'reset'), 0)
@@ -428,10 +443,16 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
   }
 
   // 升级待办清单（待办数 = floor(xp/10) − 已消费；发放走 /api/growth/levelup/:playerId）
+  // v6.52.0：非成长球员不可消费升级，不列进待办表。赛季重判（season-settle 的 growableStatement）
+  // 把可成长翻成非成长时只改 growable、不清 growth_xp ⇒ 「有 XP 但不可消费」会长期存在，
+  // 这里必须按 growable 收窄（否则管理端待办表永远挂着点下去必 409 的球员）。
   const pending = await db
     .prepare(
       `SELECT id, name, display_name, growth_tier, CAST(growth_xp / ? AS INTEGER) - levels_applied AS pending
-       FROM players WHERE CAST(growth_xp / ? AS INTEGER) - levels_applied > 0 ORDER BY id LIMIT 200`,
+       FROM players
+       WHERE CAST(growth_xp / ? AS INTEGER) - levels_applied > 0
+         AND COALESCE(growable, 0) = 1
+       ORDER BY id LIMIT 200`,
     )
     .bind(xpPerLevel, xpPerLevel)
     .all<{ id: number; name: string; display_name: string | null; growth_tier: number; pending: number }>();
@@ -587,13 +608,16 @@ export async function applyLevelUp(
 }> {
   const db = env.DB;
   const player = await db
-    .prepare('SELECT id, name, display_name, club_id, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = ?')
+    .prepare(
+      'SELECT id, name, display_name, club_id, growable, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = ?',
+    )
     .bind(playerId)
     .first<{
       id: number;
       name: string;
       display_name: string | null;
       club_id: number | null;
+      growable: number | null;
       growth_tier: number;
       growth_xp: number;
       levels_applied: number;
@@ -601,6 +625,10 @@ export async function applyLevelUp(
       badges_gold: number;
     }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
+
+  // v6.52.0 兜底闸门：非成长球员不能消费升级。必须排在 pending 判定之前——迁移 0077 清零后
+  // 非成长球员 pending 本来为 0，先判 pending 会永远命中「没有待处理的升级」，新文案不可观测。
+  if (player.growable !== 1) throw new HttpError(409, '非成长球员不能消费升级');
 
   const config = createConfigService(db);
   const xpPerLevel = (await config.getNumber('xp_per_level')) ?? 10;

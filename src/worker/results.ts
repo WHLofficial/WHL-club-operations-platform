@@ -594,6 +594,11 @@ async function queueResultNotifications(
 // ---- 确认钩子：自动 XP 事件（§10.1）----
 
 interface XpHookSummary {
+  /**
+   * 本次新入账的成长**事件条数**（按事件 INSERT 的 changes 计）。
+   * v6.52.0：不是 XP 条数——非成长球员（growable ≠ 1）的进球/助攻/零封事件照写、XP 归零，
+   * 这里同样计数；字段名与前端类型保持不变，文案统一说「成长事件」。
+   */
   granted: number;
   unresolved: string[];
 }
@@ -608,6 +613,8 @@ interface XpHookSummary {
  * v6.45.0 两处口径变更：①**出场不再走自动通道**——FC26 没有「出场」事件，靠 match_event 反推上场
  * 名单本来就残缺（没碰球的登记者一条事件都没有），改由录入台的截图识别 + 人工确认负责；
  * ②训练营球员与正式球员同口径按场次记 XP（赛季结算那份固定 trainee_xp 是另一条线，仍在跑）。
+ * v6.52.0：非成长球员（growable ≠ 1）的事件仍照写（比赛 tab 要读这些数据），XP 由
+ * recordGrowthEventStatements 的主闸归零；granted 只数事件条数，不改口径。
  */
 async function recordAutoXpForMatch(
   env: Env,
@@ -752,7 +759,9 @@ async function recordAutoXpForMatch(
   let granted = 0;
   if (statements.length > 0) {
     const results = await env.DB.batch(statements);
-    // 每条事件两条语句（先 UPDATE 后 INSERT），奇数位 changes=1 表示新入账
+    // 每条事件两条语句（先 UPDATE 后 INSERT），奇数位 changes=1 表示新入账。
+    // v6.52.0：口径 = 新入账的**事件条数**（非成长球员 XP 语句恒 0 行，但事件照写，这里同样计数），
+    // 不再宣称「XP 条数」；XP 是否真的累加由主闸按 growable 决定。
     for (let i = 0; i < statements.length; i += 2) {
       if ((results[i + 1]?.meta.changes ?? 0) === 1) granted++;
     }
