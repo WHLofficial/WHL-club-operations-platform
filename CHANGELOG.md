@@ -4,6 +4,40 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.52.0] · 非成长球员不计成长 XP（数据照收）+ 训练营 / 中国计划 / 里程碑三类结算过滤（2026-10-20）
+
+**状态：本地完成，未 apply 生产迁移、未 push**（发布待令；顺序 = 先 `npm run db:migrate:remote` apply `0077`，再 push —— push 即 CF Workers Builds 自动部署）。判级 **minor**（规则变更 + 迁移 + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。
+
+**缘起与拍板**：用户 m06019「1growable = 0，2后者，3非成长的xp清零，给我计划」⇒ 判定口径 = `growable = 0`、从源头挡、存量 XP 清零；m06100 更正「不，是非成长不计XP，但数据仍然接收，因为有别的功能要用这些数据」⇒ **不禁行、不 400 拒收、OCR 照常预填**；本轮追加「训练营 / 中国计划 / 里程碑三类结算也过滤」。计划文件 `memory/plan-v6.52.0-growth-nongrowable.md`。
+
+**规则变更（新门槛，PRD 已补一条）**
+
+- **可成长 = `COALESCE(players.growable, 0) = 1`**，`NULL` 落非成长侧（与既有索引口径一致）。
+- **①录入台批量 / ②单人补录 / ③赛果确认自动钩子 / ⑦改值重放 = 主闸归零**：事件行与 `value` **照写**（球员「比赛」tab / 成长史 / 累计基数 / 去重锚都要用），但 `growth_events.xp` 存 **0**、`players.growth_xp` **不累加** —— 两者同口径，不出现「行 +20 但总数没动」。
+- **④训练营 / ⑤中国计划 / ⑥里程碑 = 查询层过滤**：非成长球员连事件行都不产生（历史行保留、不追溯删除）。这三类是纯 XP 合成事件、不承载比赛数据，属于「数据照收」的唯一例外。
+- **升级闸门**：`applyLevelUp` 对非成长球员恒 **409「非成长球员不能消费升级」**，判定排在 `pending` 之前（迁移清零后 pending 本就为 0，先判 pending 会让新文案不可观测）。
+- **待升级口径收窄**：结算待办表（`src/worker/growth.ts:449-455`）与球员页 `pendingLevelUps`（`src/worker/routes/growth.ts:83`）只算可成长球员（见「实施偏差」）。
+
+**迁移 `0077_growth_nongrowable_reset.sql`**（`tests/d1.ts` 的 `MIGRATION_FILES` 已追加，排在 0076 之后）
+
+- `UPDATE players SET growth_xp = 0 … WHERE COALESCE(growable, 0) = 0 AND COALESCE(growth_xp, 0) <> 0`；事件行、`levels_applied` 不动。
+- 尾守卫不可省：去掉后 SQLite 把匹配的 **7,827 行**都计入 `rows_written`（值没变也算）；带上只写真正有 XP 的 **≈116 行**（生产基线：116 名非成长球员合计 **372 XP**、其中 6 人待升级），重放为 **0 行**。
+- 不可精确回滚（清零前 `growth_xp` ≠ `SUM(growth_events.xp)`），迁移注释给了近似重算 SQL。
+
+**交付**
+
+- `src/worker/growth.ts`：主闸 XP 语句加 `AND COALESCE(growable, 0) = 1`；事件 INSERT 的 `xp` 改 `CASE WHEN COALESCE((SELECT growable …), 0) = 1 THEN ? ELSE 0 END`（bind 链多一次 `playerId`）；`recordGrowthEvent` 改按事件 INSERT（`results[1]`）判定是否新入账（否则非成长球员的新事件会被误报 `duplicate`，回 200 而非 201）；三类结算查询加 `growable` 过滤（`growth.ts:334` / `:362` / `:406`，里程碑 JOIN 留在派生表内层）；结算待办表加过滤；升级闸门 409。
+- `src/worker/routes/admin/growth.ts`：面板 DTO / 批量 SELECT / 单人 SELECT / 花名册 SQL 增 `growable`；批量在**构造 events 时**归零（`xpOn = xpEligible && growable === 1`），响应 `totalXp` / 逐行 `xp` 与审计 detail 都不虚报；单人补录用 `creditedXp = growable === 1 ? xp : 0` 一处供入账 / 审计 / 响应三处共用；改值重放对非成长球员**跳过重放**（只改 `value` / `recorded_by`，被改行保持现有 `xp`，链上其他行与 `growth_xp` 不动），并对 `growth_xp` 的 UPDATE 加 `growable` 兜底。
+- `src/worker/results.ts`：`granted` 语义明确为「新入账的**成长事件条数**」（非成长球员的事件也计数），字段名与前端类型不变。
+- `src/worker/routes/growth.ts`：球员成长载荷补 `growable`，非成长球员 `pendingLevelUps` 恒 0。
+- 前端：`GrowthEntryPage.tsx` 非成长行标灰徽标「非成长 · 不计 XP」（卡片头 + 桌面表格）、`rowXp` 在累加 `extraXp` **之前**返回 0（合计与四处展示都经它）、提示条说明「录入照收，只是不计成长 XP」、输入与截图预填**不禁用**；`SeasonsPage.tsx` 赛果确认 toast 改「自动记了 N 条成长事件」；`api.ts` 的 `MatchEntryPlayer` 加 `growable`。
+
+**实施偏差（如实登记）**：计划 §4.3 原写「`pendingLevelUps` 不按 `growable` 收窄」，实现改为**一并收窄** —— `season-settle` 的重判只改 `growable`、不清 `growth_xp`，不收窄的话超龄/练满球员会长期显示「N 次待升级」而点下去必 409；迁移清零只覆盖 apply 那一刻，收窄才覆盖之后的重判。
+
+**测试**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a…TC-NG-11b，覆盖迁移、主闸、三类结算、自动钩子与 `retryUnresolvedResults`、录入台批量、单人补录、改值重放、升级闸门、消费方、前端静态锁、迁移注册与幂等）；全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138/2256，净 **+1 文件 / +22 例**；耗时 99.50s）。**未验证**：`npm run typecheck`（三份）、`npm run build`、`npm run db:migrate:local`、`npm run test:e2e` 本轮未跑。测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
+
+**上线前置**：生产 apply **0077** → 回读「非成长球员 `growth_xp` 全 0、可成长球员 XP 未动、事件行数与 `value` 不变」→ push → 部署核对。**本文件撰写时以上均未做。**
+
 ## [v6.51.13] · 成长录入截图识别：解析按图片内容缓存（选边不再重复调模型）（2026-10-17）
 
 **已上线 2026-10-18**（Version `245d6ffa-f415-4aad-9e55-a7527516824f`，push `bba0af8..878ad1b`；本版**无迁移**；与 v6.51.12 同批上线，`package.json` 6.51.11 → 6.51.13）。发布前补跑全量闸门：`npx vitest run` **138 文件 / 2256 例全绿**、`npm run test:e2e` **28 / 28**（dev 8791）、typecheck 三份 0 error、build ✓；线上入口 `assets/index-DkytDFBO.js` 与本地 `web/dist/assets/index-DkytDFBO.js` sha256 逐字节一致（`49817fd5bee3f1eeddb5dba91ffd83fad8aa7b1bd34c101a0fdbccb4e2334ae5`；线上 `index.html` 与本地仅差 Cloudflare 边缘注入的 `__CF$cv$params` 与隐藏锚点），`/api/health` 200 / 匿名 `/api/admin/brands` 401 / `/api/clubs` 200。

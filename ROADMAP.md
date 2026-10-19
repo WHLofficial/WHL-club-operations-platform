@@ -1522,6 +1522,43 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.52.0 · 非成长球员不计成长 XP（数据照收）+ 训练营 / 中国计划 / 里程碑三类结算过滤（2026-10-20）
+
+**状态**：**本地完成；生产迁移未 apply、未 push**（发布待令）。判级 **minor**（规则变更 + 迁移 `0077` + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。**发布顺序硬约束**：先 `npm run db:migrate:remote` apply **0077** → 只读回读（非成长球员 `growth_xp` 全 0 / 可成长球员 XP 未动 / 事件行数与 `value` 不变）→ push（push 即 CF Workers Builds 自动部署）→ 部署核对。计划文件 `memory/plan-v6.52.0-growth-nongrowable.md`，测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
+
+**缘起与拍板**（用户 2026-10-19）：m06019「1growable = 0，2后者，3非成长的xp清零，给我计划」⇒ 判定口径 = `growable = 0`、从源头挡、存量 XP 清零；m06100 更正「不，是非成长不计XP，但数据仍然接收，因为有别的功能要用这些数据」⇒ **不禁行、不 400 拒收、OCR 照常预填**（上一版计划的行内禁行 / 后端拒收 / OCR 跳过全部作废）；本轮追加「训练营 / 中国计划 / 里程碑三类结算也过滤」（原「三类也走主闸、事件照写」方案作废）。
+
+**规则（新门槛，PRD 4.6 已补一条）**
+
+- **可成长 = `COALESCE(players.growable, 0) = 1`**；`NULL` 落非成长侧（与 `0042` / `0061` 标记索引、`0035` 排序索引口径一致）。生产实测 18,301 行 `growable ∈ {0,1}`（无 NULL）。
+- **①②③⑦ 主闸归零**（录入台批量 / 单人补录 / 自动钩子 / 改值重放）：事件行与 `value` **照写**，`growth_events.xp` 存 0、`players.growth_xp` 不累加。理由：`growth_events` 同时是球员「比赛」tab（`src/worker/player-matches.ts:62`）、成长史（`src/worker/routes/growth.ts:88`）、`duels_won` / `saves` 累计基数、录入台幂等锚的数据源 —— 拦写入会打断这些功能。
+- **④⑤⑥ 查询层过滤**（训练营 / 中国计划 / 里程碑）：加 `COALESCE(growable, 0) = 1`，非成长球员连事件行都不产生（历史行保留、不追溯删除）。三类是纯 XP 合成事件、不承载比赛数据 ⇒ 「数据照收」的唯一例外。
+- **升级闸门**：`applyLevelUp` 非成长球员恒 **409「非成长球员不能消费升级」**，判定排在 `pending` 之前（清零后 pending 本为 0，先判 pending 新文案不可观测）。
+- **待升级收窄**：结算待办表与球员页 `pendingLevelUps` 只算可成长球员（见「实施偏差」）。
+
+**迁移 `0077_growth_nongrowable_reset.sql`**
+
+- 纯数据订正：`UPDATE players SET growth_xp = 0, updated_at = … WHERE COALESCE(growable, 0) = 0 AND COALESCE(growth_xp, 0) <> 0`；`growth_events`、`levels_applied` 一律不动；文件内不写 `BEGIN/COMMIT`（执行器自行包事务）。
+- **尾守卫不可省**：只写 `growable = 0` 会匹配 **7,827 行**（值没变 SQLite 也计入 `rows_written`）；带上 `growth_xp <> 0` 只写真正有 XP 的 **≈116 行**，重放 **0 行**（node:sqlite 实测 `changes` 2 → 0）。
+- 预期影响：116 名球员 **372 XP** 归零、6 人「待升级」消失；`tests/d1.ts` 的 `MIGRATION_FILES` 已追加（排在 `0076_growth_events_match_ref_index.sql` 之后）。
+- **不可精确回滚**（清零前 `growth_xp` ≠ `SUM(growth_events.xp)`：解约/导入清零不删事件、改值重放会改事件 xp），迁移注释给了近似重算 SQL。
+
+**交付**
+
+- `src/worker/growth.ts`：主闸 XP 语句加 `growable` 守卫（`src/worker/growth.ts:151`）；事件 INSERT 的 `xp` 改 `CASE WHEN COALESCE((SELECT growable FROM players WHERE id = ?), 0) = 1 THEN ? ELSE 0 END`（bind 链多一次 `playerId`）；`recordGrowthEvent` 改按事件 INSERT（`results[1]`）判定新入账（非成长球员 XP 语句恒 0 行，仍看 `results[0]` 会把新事件误报 `duplicate`）；三类结算查询过滤（`:334` 训练营 / `:362` 中国计划 / `:406` 里程碑 —— **JOIN `players` 必须留在派生表内层**，外层 `GROUP BY` 后别名叫 `x`、`p` 不在作用域；参数顺序仍 `[period.startEventId, lastId]`）；结算待办表加 `COALESCE(growable, 0) = 1`（`:449-455`）；`applyLevelUp` SELECT 增 `growable` + 闸门（`:631`）。
+- `src/worker/routes/admin/growth.ts`：面板 DTO / 批量 SELECT / 单人 SELECT / 花名册 SQL 增 `growable`（比较一律 `=== 1`）；批量在**构造 events 时**归零 `xpOn = xpEligible && growable === 1`（只在 SQL 里归零会让响应 `totalXp` / 逐行 `xp` 与审计 detail 虚报）；单人补录 `creditedXp = growable === 1 ? xp : 0` 同时用于入账 / 审计 `after.xp` / 响应 `xp`；改值重放对非成长球员**跳过 replay**（只改 `value` / `recorded_by`，被改行保持现有 `xp` —— 原 0 仍 0、成长期历史 XP 不抹掉；链上其他行与 `growth_xp` 不动），`growth_xp` 的 UPDATE 另加 `growable` 兜底。
+- `src/worker/results.ts`：`granted` 语义固定为「新入账的**成长事件条数**」（非成长球员的事件也计数），字段名与 `web/src/lib/api.ts` 类型不变，只改注释与文案。
+- `src/worker/routes/growth.ts`：球员成长载荷补 `growable`，非成长球员 `pendingLevelUps` 恒 0（`:83`）。
+- 前端：`web/src/pages/admin/GrowthEntryPage.tsx` 非成长行标灰徽标「非成长 · 不计 XP」（卡片头 + 桌面表格）、`rowXp` 在 `extraXp` 之前 `return 0`、提示条说明录入照收；**输入与截图预填不禁用**。`SeasonsPage.tsx` 赛果确认 toast 改「自动记了 N 条成长事件」。`api.ts` 的 `MatchEntryPlayer` 加 `growable: boolean`。
+
+**实施偏差（如实登记）**：计划 §4.3 原写「`pendingLevelUps` 不按 `growable` 收窄」，实现改为**一并收窄** —— `season-settle` 的重判只改 `growable`、不清 `growth_xp`，不收窄时超龄/练满球员会长期显示「N 次待升级」而点下去必 409；迁移清零只覆盖 apply 那一刻，收窄才覆盖之后的重判。
+
+**测试与闸门**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a…TC-NG-11b：迁移清零与幂等 / 主闸 / 三类结算 / 自动钩子与 `retryUnresolvedResults` / 录入台批量 / 单人补录 / 改值重放 / 升级闸门 / 消费方（球员比赛 tab + 成长史）/ 前端静态锁 / 迁移注册与隔离）。全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138 / 2256，净 **+1 文件 / +22 例**；耗时 99.50s）。**未验证**：`npm run typecheck`（三份 tsconfig）、`npm run build`、`npm run db:migrate:local`、`npm run test:e2e` 本轮未跑，无输出可引。
+
+**待办（待令）**：① 生产 apply **0077**（写量按 ≈116 行登记，不按 7,827）→ 回读 116 名 / 372 XP 归零、6 人 pending 归 0、可成长球员 XP 未动、事件行数不变；② push → 部署核对 Version + 端点体检；③ 上线记录回写（纯文档枚，按纪律不 push）。**本轮未做任何生产写、未 push。**
+
+**如实登记**：① 翻回可成长不追溯 —— `0 → 1` 后此前 `xp=0` 的行不补发，但 ④⑤⑥ 会按当前 `growable = 1` 恢复产生（里程碑按当前成长期内历史 goal/assist 汇总，可能一次性补发多档）；用户 2026-10-19 裁决「保持现状」，不对称保留。② 历史事件保留 ⇒ `SUM(growth_events.xp)` 与清零后的 `growth_xp` 不再一致（既有口径差异，非本版引入）。③ 训练营里的非成长球员是违规态（体检 `trainee_growth` 会报），本版不额外处理。④ `loadCumulativeBases` 仍按全部历史 `value` 求和（表现统计而非 XP 账本；`xp=0` 无法区分「非成长」与「不计 XP 赛事」）。
+
 ## v6.51.13 · 成长录入截图识别：解析按图片内容缓存（选边不再重复调模型）（2026-10-17）
 
 **状态**：**已上线 2026-10-18**（Version `245d6ffa-f415-4aad-9e55-a7527516824f`，push `bba0af8..878ad1b`；与 v6.51.12 同批，`package.json` 6.51.11 → 6.51.13；**无迁移**）。判级 **patch** = 性能与调用量治理（**零契约变更、零前端改动、零提示词改动、模型不变** ⇒ 响应逐字段等价）。
