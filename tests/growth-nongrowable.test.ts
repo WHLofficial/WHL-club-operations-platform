@@ -705,6 +705,9 @@ describe('NG-08 升级闸门：非成长球员 409（排在 pending 判定之前
     const fx = freshEnv();
     seedPlatform(fx);
     fx.sqlite.exec('UPDATE players SET growth_xp = 25 WHERE id = 11'); // 待办 2
+    // 成长页也必须按 growable 归零：存量 25 XP 仍在，但非成长球员不应显示「2 次待升级」
+    const before = (await (await get('/api/players/102/growth', 'tok-admin', fx.env)).json()) as { player: { pendingLevelUps: number; growthXp: number } };
+    expect(before.player).toMatchObject({ pendingLevelUps: 0, growthXp: 25 });
 
     const res = await post('/api/growth/levelup/11', { planIndex: 0 }, 'tok-admin', fx.env);
     expect(res.status).toBe(409);
@@ -727,6 +730,8 @@ describe('NG-08 升级闸门：非成长球员 409（排在 pending 判定之前
     const fx = freshEnv();
     seedPlatform(fx);
     fx.sqlite.exec('UPDATE players SET growth_xp = 25 WHERE id = 10');
+    const before = (await (await get('/api/players/101/growth', 'tok-admin', fx.env)).json()) as { player: { pendingLevelUps: number; growthXp: number } };
+    expect(before.player).toMatchObject({ pendingLevelUps: 2, growthXp: 25 });
 
     const res = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
     expect(res.status).toBe(200);

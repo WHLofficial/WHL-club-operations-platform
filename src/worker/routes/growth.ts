@@ -76,7 +76,11 @@ app.get('/players/:id/growth', async (c) => {
 
   const config = createConfigService(c.env.DB);
   const xpPerLevel = (await config.getNumber('xp_per_level')) ?? 10;
-  const pending = Math.max(0, Math.floor(player.growth_xp / xpPerLevel) - player.levels_applied);
+  // v6.52.0：非成长球员不参与成长 XP 与升级 —— 待升级次数直接归 0。必须与升级闸门
+  // （worker/growth.ts 的 applyLevelUp：growable !== 1 恒 409）和管理端结算待办表（已按
+  // growable 收窄）同口径：season-settle 重判只改 growable、不清 growth_xp，若这里仍按 XP
+  // 计算，超龄/练满的球员会长期显示「N 次待升级」而点下去永远 409。
+  const pending = player.growable === 1 ? Math.max(0, Math.floor(player.growth_xp / xpPerLevel) - player.levels_applied) : 0;
   const plans = (await getUpgradePlans(c.env.DB))[player.growth_tier] ?? DEFAULT_UPGRADE_PLANS[player.growth_tier] ?? [];
   // 发放明细（v3.3.0）：属性页清单 = FC 源槽 + 这一份，去重后展示；中国计划名额也靠它算
   const playstyleDetails = await listPlayerPlaystyles(c.env.DB, playerId);
