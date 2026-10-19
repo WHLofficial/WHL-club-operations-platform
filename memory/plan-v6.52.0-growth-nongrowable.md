@@ -273,9 +273,11 @@ SELECT x.id AS id, x.total AS total FROM (
 | `docs/test-plans/v6.52.0-growth-nongrowable.md`（新） | qa-test-planner 设计的测试计划 |
 | `CHANGELOG.md` / `ROADMAP.md` / `AGENTS.md` / `PRD.md` / `package.json` | v6.52.0 条目 / 加节 / 当前状态 bullet / 4.6 规则行 / 版本号 6.51.13 → 6.52.0 |
 
-**测试用例数**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a/b、02a/b、03a/b、04a/b/c、05a/b、06a/b、07a/b、08a/b、09、10a/b、11a/b）。全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138 文件 / 2256 例，净 **+1 文件 / +22 例**；耗时 99.50s）。
+**测试用例数**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a/b、02a/b、03a/b、04a/b/c、05a/b、06a/b、07a/b、08a/b、09、10a/b、11a/b）。全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138 文件 / 2256 例，净 **+1 文件 / +22 例**；复跑耗时 93.62s）。
 
-**闸门结果**：`npm test` 全量全绿（本轮实测输出）；`npm run typecheck`（三份 tsconfig）、`npm run build`、`npm run db:migrate:local`、`npm run test:e2e` **本轮未跑（未验证）**。
+**闸门结果**：`npm test` 全量 **139 文件 / 2278 例全绿**；`npm run typecheck`（三份 tsconfig）**0 error**；`npm run build` ✓；`npm run db:migrate:local` **通过（0077 已应用）**；`npm run test:e2e` **未跑**（需 8791 常驻 dev server）。
+
+**变异验证**：临时去掉 `src/worker/routes/growth.ts` 的 `growable === 1 ? … : 0` 分支 ⇒ TC-NG-08a 在 `pendingLevelUps: 0` 断言处变红（实际 `pendingLevelUps: 2`），恢复后全绿 —— 证明成长页待升级归零有回归锁。
 
 **生产**：apply 0077、生产回读、push、部署核对 **均未做**；写量按 ≈116 行登记（不按 7,827）。
 

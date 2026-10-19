@@ -34,7 +34,7 @@
 
 **实施偏差（如实登记）**：计划 §4.3 原写「`pendingLevelUps` 不按 `growable` 收窄」，实现改为**一并收窄** —— `season-settle` 的重判只改 `growable`、不清 `growth_xp`，不收窄的话超龄/练满球员会长期显示「N 次待升级」而点下去必 409；迁移清零只覆盖 apply 那一刻，收窄才覆盖之后的重判。
 
-**测试**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a…TC-NG-11b，覆盖迁移、主闸、三类结算、自动钩子与 `retryUnresolvedResults`、录入台批量、单人补录、改值重放、升级闸门、消费方、前端静态锁、迁移注册与幂等）；全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138/2256，净 **+1 文件 / +22 例**；耗时 99.50s）。**未验证**：`npm run typecheck`（三份）、`npm run build`、`npm run db:migrate:local`、`npm run test:e2e` 本轮未跑。测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
+**测试**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a…TC-NG-11b，覆盖迁移、主闸、三类结算、自动钩子与 `retryUnresolvedResults`、录入台批量、单人补录、改值重放、升级闸门、消费方、前端静态锁、迁移注册与幂等）；全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138/2256，净 **+1 文件 / +22 例**；复跑耗时 93.62s）。**已跑**：`npm run typecheck`（三份 tsconfig）0 error、`npm run build` ✓、`npm run db:migrate:local`（0077 已应用）；**未跑**：`npm run test:e2e`（需 8791 常驻 dev server）。测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
 
 **上线前置**：生产 apply **0077** → 回读「非成长球员 `growth_xp` 全 0、可成长球员 XP 未动、事件行数与 `value` 不变」→ push → 部署核对。**本文件撰写时以上均未做。**
 
