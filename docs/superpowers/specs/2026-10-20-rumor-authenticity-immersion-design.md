@@ -1,7 +1,7 @@
 # 转会中心「传闻」真实性与沉浸感改造设计
 
 - 状态：待评审（设计稿，不含实现）
-- 日期：2026-10-20（**rev4**：按第三轮独立复核 17 条修订；rev3 按第二轮 10 条；rev2 按第一轮 14 条与作者侧 21 条整理；rev1 为 788 行初稿）
+- 日期：2026-10-20（**rev5**：按第四轮独立复核 7 条修订；rev4 按第三轮 17 条；rev3 按第二轮 10 条；rev2 按第一轮 14 条与作者侧 21 条整理；rev1 为 788 行初稿）
 - 范围：`src/worker/rumors.ts`、`GET /api/market/rumors`、`web/src/pages/market/MarketIntelPage.tsx`、`web/src/lib/queries.ts`、`web/src/lib/api.ts`
 - 不改：数据库结构（P0/P1）、成交表列结构、MarketNav、`/clubs/:id` 的登录策略
 
@@ -164,7 +164,7 @@ TC-RUMOR-08（`:513-529`）用直插 SQLite 的方式测缓存命中，不触发
 
 ### 2.9 冷窗
 
-可谈、在挂、留队三族锚点全空。此时走 5.1 定义的固定回退：族固定为可谈、全部无据、8 条照发，卡头可以写「本窗市场冷清」。这句话描述的是公开池为空，不是对单条消息的自白，不泄漏任何位信息。
+可谈、在挂、留队三族锚点全空。此时走 5.1 定义的冷窗回退：全部无据、8 条照发、族固定为可谈（族抽签仍然跑，但三族全空使回退把所有槽都收到可谈），卡头可以写「本窗市场冷清」。这是全设计里唯一「不看位」的分支：冷窗里「族」是常量，所以不携带任何位信息。注意区分两种空：**单族**为空只做槽级回退、保位（5.0），只有**三族全空**才强制无据。
 
 ### 2.10 侧信道（tell）
 
@@ -373,8 +373,10 @@ seed = [season, windowSeq]                                  // rumors.ts:187
 FULL = [可谈, 在挂, 留队]                                     // 固定全集，长度恒为 3
 family(slot) = FULL[floor(seededUnit([...seed, slot], 4) * FULL.length)]
 grounded(slot) = seededUnit([...seed, slot], 0) < 0.5
-if anchor(family(slot)) 为空:                                 // 该族池空 → 槽级固定回退
-  family(slot) = 可谈; grounded(slot) = false
+if anchor(family(slot)) 为空:                                 // 该族池空 → 槽级回退（保位）
+  family(slot) = firstNonEmpty(FULL)                          // FULL 顺序下第一个非空族
+if firstNonEmpty(FULL) 为空:                                   // 三族全空 = 冷窗
+  grounded(slot) = false                                     // 只有这一刻才强制无据
 pool = grounded ? anchor(family) : complement(family)         // complement 见 5.1 守卫矩阵
 fact = pickFact(pool, seed, slot, grounded ? 5 : 6)           // 4 参，rendezvous
 sub  = grounded ? subOfAnchor(fact) : SUB[family][floor(seededUnit([...seed, slot], 10) * n)]
@@ -384,7 +386,8 @@ text = TEMPLATE[family][sub](fact.playerName, clubOf(fact).name)
 四条必须一起读的性质：
 
 - `family` 只由 `(seed, slot)` 与固定全集决定，既不读位，也不读池长。rev2 用「非空族列表 `F` 的下标」抽族，`F` 的长度一变就重排所有槽的族：线上今天 `F = [可谈, 留队]`（17 人 `transfer_listed` 保证可谈非空、listings 空），第一条挂牌会让 `|F|` 从 2 变 3，约 1/6 的槽换族，这是 rev2 里「加挂牌只影响 ≤2 条」不成立的根因。改成固定全集后，`floor(u × 3)` 在任何池状态下都落在同一组槽。
-- 空族回退是**槽级**的，不是全局重排：只有落在空族的那些槽改走「可谈 + 无据」，其余槽的族不动。
+- 空族回退是**槽级**的，且**不改位**：落在空族的槽改走 `firstNonEmpty(FULL)`（按 FULL 顺序取第一个非空族，今天 `listings` 为空所以就是可谈），位为真就出该族有据行、为假就出该族无据行。回退目标只由**池状态**决定、不由槽决定，所以它不携带位信息。rev4 前半稿把回退写成「可谈 + 无据」，线上（`listings` 空）会让落在在挂族的槽一律变无据，可谈族的有据率被压到约 25%、留队族仍是 50%，族与位因此相关（lift≈0.5，已越出 TC-RUMOR-12 的 [0.67,1.5]）；而且默认夹具三族都非空，永远走不到这个回退，测不出来。rev5 改为保位。注意连「可谈族自己也空」的边角也归这里：此时 `firstNonEmpty` 会指向在挂或留队，而不是让可谈槽一律无据。
+- **只有三族全空（冷窗）才强制无据**，且这是全局唯一的例外：此时卡片上只剩可谈族的无据行（2.9），「族」这一位在冷窗里是常量，不携带位信息。
 - `grounded` 只读位，且是唯一的读取点。
 - `sub` 在有据侧由锚点决定、在无据侧由盐位 10 均匀抽取，两侧共享同一变体集合。
 
@@ -421,7 +424,7 @@ text = TEMPLATE[family][sub](fact.playerName, clubOf(fact).name)
 
 **冷窗回退（rev2 新增，rev1 缺失）**
 
-三族全空时 5.0 的每个槽都会落到「可谈 + 无据」的槽级回退。定义固定回退：
+三族全空时 5.0 的每个槽都会收到可谈族，且 `grounded` 被强制为 false（冷窗）。定义冷窗回退：
 
 - 族固定为**可谈**，`grounded` 一律为 false（补集 = 有俱乐部、`transfer_listed = 0` 的球员，非空）。
 - 变体只有一条，因此 8 条文案同构、主语各不相同。
@@ -451,8 +454,9 @@ text = TEMPLATE[family][sub](fact.playerName, clubOf(fact).name)
 1. **列名必须 AS 成 camelCase 键**。`src/worker/rumors.ts:126-127` 的注释就是 v6.18.0 踩过的坑：「列名一律 AS 成接口里的 camelCase 键——D1 按 SQL 列名给键，不别名时 `SaleFact.playerId` 读出来是 undefined（真料文本会直接渲染 "undefined"）」。四条池查询统一写 `p.id AS playerId`、`${sqlDisplayName('p')} AS playerName`；显示名口径只能走 `src/core/player-name.ts:16`（`COALESCE(display_name, name)`），不要手写 COALESCE，否则会把显示名退回 FC26 缩写名（`E. Haaland`）。
 2. **锚点窗口必须与公开端点同源**。ADR-0008 承诺「玩家能查到的就是系统能引用的」，所以池查询要先取公开端点的那个 50 条窗口（子查询），再 JOIN 球员与俱乐部做主体过滤。先按主体过滤再 `LIMIT 50` 会取到公开页之外的行：`/market/listings` 默认只取三态后 `ORDER BY l.id DESC LIMIT 50`（`src/worker/routes/market.ts:82-87`、`:123-126`），`/market/deals` 不按 type 过滤、直接取全部 completed 的最新 50 条（`:356-363`）。
 
-1. 可谈池：`SELECT p.id AS playerId, ${sqlDisplayName('p')} AS playerName, p.club_id AS clubId, c.name AS clubName FROM players p JOIN clubs c ON c.id = p.club_id WHERE p.transfer_listed = 1 AND p.club_id > 0 AND c.is_cpu = 0 AND c.status = 'active' ORDER BY p.id`。
-   可谈族没有分页窗口，但 `/market/board` 有 200 条上限（`src/worker/routes/market.ts:422-470`，排序 emphasis → transfer_listed_at → id）。当前 17 人远低于上限；若将来超过 200，锚点按广告板同一排序截断到前 200，TC-RUMOR-20 增加这条边界。
+1. 可谈池（**窗口 = 广告板前 200，与 `/market/transfer-board` 同一排序**）：
+   `WITH pm AS (SELECT player_id, tier FROM (SELECT player_id, tier, ends_at, ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY tier DESC, ends_at DESC, id DESC) AS rn FROM player_promotions WHERE ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE rn = 1), win AS (SELECT p.id FROM players p LEFT JOIN pm ON pm.player_id = p.id WHERE p.transfer_listed = 1 ORDER BY CASE WHEN pm.tier IN (1, 2) THEN pm.tier ELSE 0 END DESC, p.transfer_listed_at IS NULL, p.transfer_listed_at DESC, p.id DESC LIMIT 200) SELECT p.id AS playerId, ${sqlDisplayName('p')} AS playerName, p.club_id AS clubId, c.name AS clubName FROM win w JOIN players p ON p.id = w.id JOIN clubs c ON c.id = p.club_id WHERE p.club_id > 0 AND c.is_cpu = 0 AND c.status = 'active' ORDER BY p.id`。
+   **窗口先取、过滤后做**：`win` 子查询的 `WHERE` 只有 `transfer_listed = 1`、排序与上限逐字对齐 `src/worker/routes/market.ts:453-474`（`pm` 子查询取未过期 promotion 的 `tier`、`ORDER BY` 三段、`LIMIT ?` 默认/最大 200）；`p.club_id > 0`、`c.is_cpu = 0`、`c.status = 'active'` 三个过滤放在**窗口之后**。顺序不能反：先过滤再 `LIMIT 200` 会把窗口平移到广告板排 200 名之后的人（卡片引用了玩家在广告板前 200 里查不到的球员，ADR-0008 破功）；后过滤只会**缩小**锚点集合，锚点仍 ⊂ 广告板可见窗口，可查证性不受影响，也和 8.4 守卫矩阵「全部」行的 `is_cpu`/`status` 守卫一致。广告板在缓存之外还会按 5 分钟桶洗牌（`src/core/ad-board.ts:28` 的 `shuffleWithSeed`），洗的是**可见顺序**，不改变「是否落在前 200」，所以锚点取洗牌前的窗口序即可。rev4 只写「将来超过 200 就截断」，没有 SQL 也没有用例，已按 ADR-0008 补成窗口查询，并加 TC-RUMOR-20c。
 2. 在挂池（原 `:128-134` 重写，**主体必须等于现东家**，**窗口取自公开卡柜**）：
    `WITH win AS (SELECT l.id, l.player_id, l.seller_club_id, l.status FROM listings l WHERE l.status IN ('listed','bidding','matched_pending') ORDER BY l.id DESC LIMIT 50) SELECT w.id, p.id AS playerId, ${sqlDisplayName('p')} AS playerName, p.club_id AS clubId, c.name AS clubName, w.status AS listingStatus FROM win w JOIN players p ON p.id = w.player_id AND p.club_id = w.seller_club_id JOIN clubs c ON c.id = p.club_id WHERE c.is_cpu = 0 AND c.status = 'active'`。
    `p.club_id = w.seller_club_id` 这个条件不能省：只 JOIN `clubs` 时队名取的是挂牌俱乐部，球员换队后主体就不是现东家。它放在窗口之后，所以只会缩小结果，不会把窗口平移。
@@ -464,7 +468,7 @@ text = TEMPLATE[family][sub](fact.playerName, clubOf(fact).name)
 7. 留队集合：`SELECT DISTINCT player_id FROM (SELECT player_id FROM transfers WHERE status = 'completed' ORDER BY completed_at DESC, id DESC LIMIT 50)` 再加 `match`/`rc_change` 与 `from = to` 的过滤，同窗口。
 8. 跨队集合：`SELECT DISTINCT player_id FROM transfers WHERE status = 'completed' AND type IN ('transfer','activation','forced_auction','free_agent')`（**无窗口**：守卫要排除的是「任何历史跨队成交」，历史记录在公开成交表上永远查得到，不需要与 50 条窗口对齐）。
 
-- 集合 5-8 的行数都远小于表规模（当前 17 名可谈、0 条在挂、28 条留队记录、0 条跨队成交），可以一次带出后在内存里做补集减法。集合 5 与 8 **没有 LIMIT**，上界是表规模而不是 200——rev3 这里写「全量规模下上限各 200」，没有任何 SQL 支撑，已删（见 8.6）。rev2 另有一处把 28 条 `rc_change` 写成「28 条成交」，也已改：线上市场类成交为 0。
+- 集合 5-8 的行数都远小于表规模（当前 17 名可谈、0 条在挂、28 条留队记录、0 条跨队成交），可以一次带出后在内存里做补集减法。集合 5 **必须与查询 1 同一窗口**（同一 `ORDER BY` + `LIMIT 200`），否则锚点在可见窗口内、补集却在窗口外，两侧不同源；集合 6/7 与查询 2/3 同窗口（≤50）；集合 8 **没有 LIMIT**，上界是 `transfers` 行数——因为历史跨队成交永远可查（ADR-0008：时间不设窗口）。rev3 写「全量规模下上限各 200」没有任何 SQL 支撑，已删（见 8.6，rev5 把可谈族的 200 落成查询 1 的 `LIMIT 200`）。rev2 另有一处把 28 条 `rc_change` 写成「28 条成交」，也已改：线上市场类成交为 0。
 - **P0 阶段 `RumorItem` 保持五键**（`id/text/playerId/playerName/clubName`），没有迁移；六键（加 `clubId`）是 P1-1 的契约变更，见 5.4。rev2 在这里写「五键不变」又在 5.4 写「五键 → 六键」，没有标阶段，实现者会按前者把 P0-1 做成五键。
 - 路由注释 `src/worker/routes/market.ts:326` 的「6~8 条」改成「0-8 条」。
 
@@ -474,8 +478,8 @@ text = TEMPLATE[family][sub](fact.playerName, clubOf(fact).name)
 - 位仍取 `seededUnit([...seed, slot], 0) < 0.5`（`:200`），语义从「选池子」变成「选有无锚点」，位置不变。
 - 族选择用盐位 4，事实索引用盐位 5（rev2 强制：原来事实索引也用 4，P0-1 就必须挪开，不能留到 P0-2），变体用盐位 10，假料主体用盐位 6，去重用盐位 7。盐位 1/2/3 是 rev1 的模板洗牌，已退役（每族变体固定，句序不再洗），见 7.3。
 - 三族模板对位共用；假料不设专用模板；变体集合两侧相同（有据侧由锚点决定，无据侧均匀）。
-- 族抽签在固定全集上进行，族池空的槽落槽级回退（可谈 + 无据），因此「某个族出现在卡片上」只说明该族锚点非空，不携带本窗真假比例；也不会因为某个族从空变非空而重排其它槽。
-- 冷窗回退不看位，全部无据。
+- 族抽签在固定全集上进行，族池空的槽落槽级回退——回退到 `firstNonEmpty(FULL)` 并**保留位**，所以「某个族出现在卡片上」只说明该族锚点非空，不携带本窗真假比例；也不会因为某个族从空变非空而重排其它槽。
+- 冷窗（三族全空）回退不看位，全部无据；这是唯一例外，且此时族是常量（只剩可谈）。
 
 **测试 / 验收**
 - TC-RUMOR-04（`:412-444`）改写为「族内真假对称」，并新增断言：同一族内有据行与无据行使用的变体集合相同（这直接控住 rev1 的「未列入名单」类错误）。
@@ -752,7 +756,7 @@ src/lib/guard.ts                   cachedJson（既有接缝，不改）
 | --- | --- | --- |
 | 0 | 位（有据/无据） | 否（只选主体） |
 | 1/2/3 | **退役**（rev1 的模板洗牌已删除：每族变体固定，句序不再洗） | — 保留编号不是为了复用，而是为了明确「不要再分配出去」：一旦有新维度拿 1/2/3，旧注释会误导实现者以为句序还在洗 |
-| 4 | 族选择（固定全集 `FULL` 上的均匀抽） | 是（族可见），但与位无关；族池为空时该槽回退到「可谈 + 无据」，回退也不读位 |
+| 4 | 族选择（固定全集 `FULL` 上的均匀抽） | 是（族可见），但与位无关；族池为空时该槽回退到 `firstNonEmpty(FULL)` 并**保留位**（5.0），回退同样不读位 |
 | 5 | 有据事实（rendezvous 权重） | 是（主体），但与位无关 |
 | 6 | 无据事实（rendezvous 权重，补集） | 是（主体），但与位无关 |
 | 7 | 去重重抽 | 是（主体），但与位无关 |
@@ -803,7 +807,7 @@ type RumorsResponse = {
 | TC-RUMOR-03 换窗换血 | `:396-410` | 保持，槽位期望按新抽取重算 |
 | TC-RUMOR-04 真假混排与模板不重复 | `:412-444` | 改写为族内真/无据对称 + 变体集合相等。**必须在固定 200 个窗口上聚合**：单窗 8 条上三族不一定都被抽中，某族的有据/无据也未必同时出现，无据侧更是未必覆盖该族全部变体——按单窗断言基线就会红。聚合口径：每族有据行 > 0 且无据行 > 0；无据侧出现的变体集合等于该族全集，且每个变体至少出现一次。单窗做不到这一点是夹具问题，不是实现问题。 |
 | TC-RUMOR-05 守卫 | `:446-469` | 改写为新守卫矩阵，删除「假料不是甲队」断言 |
-| TC-RUMOR-06 空池 | `:471-497` | 段一改为冷窗回退（8 条、族固定可谈、全无据、正文互不相同、id 仍 0..7）；段二改为「仅可谈非空」——落在可谈的槽出有据行，落在在挂/留队的槽走槽级回退（可谈族 + 无据），断言仍是 8 条且无占位符 |
+| TC-RUMOR-06 空池 | `:471-497` | 段一改为冷窗回退（8 条、族固定可谈、全无据、正文互不相同、id 仍 0..7）；段二改为「仅可谈非空」——落在可谈的槽**按位**出有据行（位真）或落在可谈补集（位假），落在在挂/留队的槽走槽级回退到 `firstNonEmpty(FULL)`（今天即可谈族）、**位不变**，断言仍是 8 条且无占位符。rev4 这里写「落在可谈的槽出有据行」，把 50% 的位假行也要求成有据，按字面会判红一半合法行（rev5 修） |
 | TC-RUMOR-07 不泄漏 | `:499-511` | 保持；P1 键集同 PR 更新 |
 | TC-RUMOR-08 缓存命中 | `:513-529` | 测试意图保持，**断言必须改口径**：换窗后的旧期望 `['r4-2-5','r4-2-6','r4-2-7']` 来自被删除的假料 id 池机制（`src/worker/rumors.ts:40-44` 的 `FAKE_PLAYER_POOL`/`FAKE_ID_RANGE` 与 `:159-166` 的随机 id 点查），P0-1 之后必然变化；改成「换窗后 id 前缀为 `r4-2-`、正文与本窗不同、窗口键变化生效」。D1 成本断言拆成 TC-RUMOR-22 |
 | TC-RUMOR-09 限流 60/61 | `:531-544` | 保持 |
@@ -814,7 +818,7 @@ type RumorsResponse = {
 | 编号 | 断言 |
 | --- | --- |
 | TC-RUMOR-11 | 假料主语合法性：`club_id` 非空、`status ∈ normal/trainee`、俱乐部 active 且非 CPU、该球员无跨队成交 |
-| TC-RUMOR-12 | 与位独立（只测能在单条上切分、且真的逐条变化的维度）：在 200 个固定窗口上，对**主张族**做有据/无据的 2×3 卡方检验，`p > 0.05`，且每格 lift（有据比例 ÷ 无据比例）落在 [0.67, 1.5]。**只有族这一个维度**：归因措辞在所有条上都是常量「据一位经纪人称」（6.3），是否含数字在所有条上都是常量「不含」（模板里没有任何数字），拿常量做卡方检验永远通过，是无效覆盖——rev3 把这两项留在用例里，等于给读者一个「测了三项」的假象。变体与句长同样不参与：有据侧变体由锚点子态决定（`listed`/`bidding` → 挂牌中，`matched_pending` → 已谈拢，5.1 表），这是设计规定的差异，要求「无显著差异」会让基线直接红。变体只断言「同族两侧变体集合相等」（TC-RUMOR-04）。卡片级指标（涉及俱乐部数）不能按条切分，不进入本用例。 |
+| TC-RUMOR-12 | 与位独立（只测能在单条上切分、且真的逐条变化的维度）：在 200 个固定窗口上，对**主张族**做有据/无据的 2×3 卡方检验，`p > 0.05`，且每格 lift（有据比例 ÷ 无据比例）落在 [0.67, 1.5]。**只有族这一个维度**：归因措辞在所有条上都是常量「据一位经纪人称」（6.3），是否含数字在所有条上都是常量「不含」（模板里没有任何数字），拿常量做卡方检验永远通过，是无效覆盖——rev3 把这两项留在用例里，等于给读者一个「测了三项」的假象。变体与句长同样不参与：有据侧变体由锚点子态决定（`listed`/`bidding` → 挂牌中，`matched_pending` → 已谈拢，5.1 表），这是设计规定的差异，要求「无显著差异」会让基线直接红。变体只断言「同族两侧变体集合相等」（TC-RUMOR-04）。卡片级指标（涉及俱乐部数）不能按条切分，不进入本用例。<br>**rev5 追加**：同一检验必须在**线上形态夹具**上再跑一遍（`transfer_listed` 有、在挂为空、留队 28 条，即 5.0 槽级回退被真实触发的形态）。默认夹具三族都非空，走不到回退分支；若回退写成「可谈 + 无据」，这组会立刻红（可谈有据率≈25% vs 留队 50%，lift≈0.5）。 |
 | TC-RUMOR-13 | rendezvous 最小扰动：池 ≥20 条事实，加一条后正文变动 ≤2 条 |
 | TC-RUMOR-14 | 同窗 `playerId` 唯一 |
 | TC-RUMOR-15 | 每个 `clubId` 非空；前端 href 为 `/players?club_id=N` 且不含 `/clubs/` |
@@ -822,13 +826,13 @@ type RumorsResponse = {
 | TC-RUMOR-17 | 开窗 `phase='open'`；无开窗 `phase='offseason'` 且 id 仍为 `r{season}-0-{slot}` |
 | TC-RUMOR-18 | 写路径 epoch bump 后重算，拆成两条（rev3 把两件互相打架的事写在一条里，只给了一个夹具）：<br>**18a 不改变族集合的写**（例如给已在挂的球员补一条成交、或改一条留队记录的 `from`）：原 id 是新的子集（允许去重丢槽），正文变动 ≤2 条。<br>**18b 补空族**（把原本为空的那一族补到非空，非空族数从 2 变 3）：只有落在该族的槽变化，其余槽的族与正文逐字不变（5.0 固定全集）。<br>两条各自有夹具与写入动作，不能共用一个 `advanceWindow`。 |
 | TC-RUMOR-19 | 俱乐部上限：同一俱乐部有据行 ≤ `MAX_GROUNDED_PER_CLUB` |
-| TC-RUMOR-20 | 锚点窗口边界，两侧各一条：<br>**20a 卡柜**：造 60 条 listings、其中最早 10 条对应的球员不得成为在挂族有据行（它们不在公开页 50 条窗口内）。<br>**20b 成交表**：造 60 条 completed，其中 10 条较老的 `match`/`rc_change` 落在公开成交表最新 50 条之外——这 10 人不得成为留队族有据行，即使它们在 5.1 的留队池筛选条件下完全合格。20b 是 ADR-0008 的成交侧对照：公开端点不按 `type` 过滤，所以窗口必须先取、type 后筛（5.1 查询 3）。 |
+| TC-RUMOR-20 | 锚点窗口边界，两侧各一条：<br>**20a 卡柜**：造 60 条 listings、其中最早 10 条对应的球员不得成为在挂族有据行（它们不在公开页 50 条窗口内）。<br>**20b 成交表**：造 60 条 completed，其中 10 条较老的 `match`/`rc_change` 落在公开成交表最新 50 条之外——这 10 人不得成为留队族有据行，即使它们在 5.1 的留队池筛选条件下完全合格。20b 是 ADR-0008 的成交侧对照：公开端点不按 `type` 过滤，所以窗口必须先取、type 后筛（5.1 查询 3）。<br>**20c 广告板（可谈族，rev5 新增）**：造 201 条 `transfer_listed = 1`，用与 `/market/transfer-board` 同构的 `ORDER BY`（`CASE pm.tier …` → `transfer_listed_at` → `id`）算出前 200，断言排在第 201 位的球员不得成为可谈族有据行（它不在广告板窗口内）。这条同时锁住「查询 1 的 `LIMIT 200` 不能被实现漏掉」——rev4 只在正文写了这条边界，没有 SQL 也没有用例。 |
 | TC-RUMOR-21 | 在挂池主体一致性：listing 的 `seller_club_id` 与球员 `club_id` 不一致时，该行不出现在载荷（负例夹具） |
 | TC-RUMOR-22 | 缓存成本：命中时 `loadFactPool` 不被调用（`vi.spyOn` 计数为 0），窗口解析点查 1-2 次；未命中时 8 条事实查询各执行一次。若 harness 无法 spy 模块内部函数，退化为「命中返回体与首次逐字相同」，并在用例注释里写明这是近似口径 |
 
 ### 8.4 夹具改造（rev4 重写）
 
-rev1 只写「在挂种子已有 2 条可复用」，这不够：默认夹具只有 2 名**锚点候选**球员（另有最多 16 名假料池球员，全部挂在 CLUB_A）、2 条 listing、0 条 `transfer_listed`、0 条留队（`tests/market-intel.test.ts:279-289` 灌 `fakeIdPool`、`:268-301`，`addPlayer` 在 `:132-153`），而 TC-RUMOR-01/02/10 都断言 8 条且 id 为 0..7（`:373`、`:553` 等）。同窗去重按 `playerId` 全局唯一，8 个槽最坏情况全落在同一族（族抽签逐槽独立，8 连中同一族的概率是 3·(1/3)^8 = 4.57e-4；TC-RUMOR-12 要在 200 个固定窗口上跑，撞到的概率约 8.7%），所以「每族唯一锚点数 ≥ 该族被抽中的槽数」才是 8 条不掉的条件。
+rev1 只写「在挂种子已有 2 条可复用」，这不够：默认夹具只有 2 名**锚点候选**球员（另有最多 **64** 名假料池球员 = `fakeIdPool(4,1,3)` 的 48 个 ∪ `fakeIdPool(4,0,1)` 的 16 个，去重后略少，全部挂在 `CLUB_A`；`tests/market-intel.test.ts:248-256` 每轮 16 个、`:281` 取并集、`:282-286` 逐个 `addPlayer(..., clubId: CLUB_A)`）、2 条 listing、0 条 `transfer_listed`、0 条留队（`:268-301`，`addPlayer` 在 `:132-153`），而 TC-RUMOR-01/02/10 都断言 8 条且 id 为 0..7（`:373`、`:553` 等）。同窗去重按 `playerId` 全局唯一，8 个槽最坏情况全落在同一族（族抽签逐槽独立，8 连中同一族的概率是 3·(1/3)^8 = 4.57e-4；TC-RUMOR-12 要在 200 个固定窗口上跑，撞到的概率约 8.7%），所以「每族唯一锚点数 ≥ 该族被抽中的槽数」才是 8 条不掉的条件。rev4 这里写「最多 16 名假料池球员」是错的（16 只是单轮池大小）。
 
 rev2 原文「8 个槽里只要有 3 个以上落在同一族就会掉条」把门槛写错了：掉条的条件是该族唯一锚点数少于落在该族的槽数，与「3 个以上」无关。**下限取 ≥12 是为了同时覆盖跨族撞车**（同一球员既是可谈又在挂时只能出一条）。
 
@@ -847,7 +851,8 @@ rev2 原文「8 个槽里只要有 3 个以上落在同一族就会掉条」把�
 - **helper 迁移（rev3 的改法仍然是错的，rev4 重写）**：`tests/market-intel.test.ts:317-343` 的 `realRelations(fx)` 现在只收 listings 三态与四类跨队成交，不收 `match`/`rc_change`；`:352-360` 的 `expectNoContradiction` 原文是 `if (rel.has(\`${r.playerId}:${r.clubName}\`)) continue; expect(currentClubName(fx, r.playerId)).not.toBe(r.clubName)`。
   - **要删掉的是这条断言本身**：它断言「无据行不得指向现效力队」，而新设计里每条无据行的 `clubName` 都来自 `c.id = p.club_id`（5.1 假料池），即必然等于现东家——那条断言正是要被拆掉的侧信道。rev3 写「对 `grounded=false` 的行执行原断言」，等于让正确的实现全军覆没。
   - 改法：`realRelations(fx)` 补留队关系（`from = to` 的 `rc_change` 与 `match`，双方队名都是本队）；`expectNoContradiction` 换成**按族**的两条断言——有据行：`playerId` 必须在该族的锚点集合里（可谈 = `transfer_listed`、在挂 = listings 三态且在 50 条窗口内、留队 = `match`/`rc_change` 且 `from = to`）；无据行：`playerId` **不得**在该族锚点集合里（其余两族不约束，因为族是逐槽抽的）。
-  - 保留「不得与该球员的真实关系撞组合」这一条，键必须是 `playerId:clubId`（或 `playerId:clubName`），不能只有 `playerId`：同一球员对两个不同俱乐部可以分别是「有据」与「无据」的对象，只按 `playerId` 建集合会把合法行判红。
+  - **全局「撞组合」断言要一并删掉（rev5）**：`realRelations(fx)` 是**全族合并**的集合（listings 三态 + 四类跨队成交，迁移后还要加 `match`/`rc_change`），而 5.1 的守卫矩阵只按族排除——可谈无据只排 `transfer_listed = 1`、留队无据只排 `match`/`rc_change`。于是三类**合法**的无据行必然撞上全局集合：① `transfer_listed = 0` 但有 active listing 的球员落在可谈无据；② 有留队记录的球员落在可谈无据；③ 有 listing 的球员落在留队无据。它们的 `playerId:clubId` 都在 `realRelations` 里，保留这条断言就把正确实现判红（rev4 一边写「其余两族不约束」一边保留它，自相矛盾，12.8 #1 也重复了这一句）。
+  - 所以只保留**按族**的成员关系断言；`realRelations` 至多用于**有据行**的正向核对（有据行的 `playerId:clubId` 必须在该族锚点集合里，而该族锚点集合是 `realRelations` 按族过滤后的子集），不能把跨族关系套到无据行上。键仍用 `playerId:clubId`（或 `playerId:clubName`）而不是只有 `playerId`：同一球员对两个俱乐部可以分别是「有据」与「无据」的对象。
   - 这条迁移与 P0-1 同批；不做的话 TC-RUMOR-05 必然判红。
 
 ### 8.5 变异清单（新增）
@@ -862,8 +867,11 @@ rev2 原文「8 个槽里只要有 3 个以上落在同一族就会掉条」把�
 | V21 在挂池去掉 `p.club_id = l.seller_club_id` | TC-RUMOR-21 红 |
 | V22 `MAX_GROUNDED_PER_CLUB` 改成 `99` | TC-RUMOR-19 红 |
 | V23 锚点不按 50 条窗口截断 | TC-RUMOR-20 红 |
+| V24 可谈锚点不按广告板前 200 截断（查询 1 漏 `LIMIT 200`） | TC-RUMOR-20c 红 |
+| V25 槽级回退写成 `family = 可谈; grounded = false`（rev4 前半稿的写法） | TC-RUMOR-12 的线上形态组红（族×位相关）；默认夹具组不红——这正是必须加那组夹具的原因 |
+| V26 恢复全局「撞组合」断言（`realRelations` 套到无据行） | TC-RUMOR-05 红（三类合法无据行被误杀） |
 
-V20 的期望在 rev1 里挂错了对象：TC-RUMOR-04 原来只断言 id、互不相同、占位符填满，不锁模板集合，所以那个变异不会红。rev2 把「变体集合相等」写进 TC-RUMOR-04，这条是对的、也是唯一有效的一条；同一版又把「变体 ID」写进 TC-RUMOR-12，那是错的——有据侧变体由锚点子态决定，分布差异是设计要求，基线自己就会红。rev3 删掉 TC-RUMOR-12 的变体维度，V20 只指 TC-RUMOR-04。
+V20 的期望在 rev1 里挂错了对象：TC-RUMOR-04 原来只断言 id、互不相同、占位符填满，不锁模板集合，所以那个变异不会红。rev2 把「变体集合相等」写进 TC-RUMOR-04，这条是对的、也是唯一有效的一条；同一版又把「变体 ID」写进 TC-RUMOR-12，那是错的——有据侧变体由锚点子态决定，分布差异是设计要求，基线自己就会红。rev3 删掉 TC-RUMOR-12 的变体维度，V20 只指 TC-RUMOR-04。rev5 新增 V24/V25/V26，分别钉住可谈窗口、回退保位、按族断言这三处。
 
 ### 8.6 D1 预算（当前线上档 / 上界档）
 
@@ -871,11 +879,11 @@ V20 的期望在 rev1 里挂错了对象：TC-RUMOR-04 原来只断言 id、互�
 
 | # | 查询 | 走哪个索引 |
 | --- | --- | --- |
-| 1 | 可谈池（`transfer_listed = 1`） | `idx_players_transfer_listed`（`0064_ad_board.sql:16`，部分索引 `WHERE transfer_listed = 1`，以 `id` 为键，`ORDER BY p.id` 顺带满足） |
+| 1 | 可谈池（`transfer_listed = 1`，窗口 `LIMIT 200`） | `idx_players_transfer_listed`（`0064_ad_board.sql:16`，部分索引 `WHERE transfer_listed = 1`）能定位候选，但**不满足** 5.1 查询 1 的 `ORDER BY`（`CASE pm.tier …` → `transfer_listed_at` → `id`），需对候选集在内存排序（当前 17 行，上界 200 行，可接受）；按 id 排序的行数在候选集内，不需要全表扫 |
 | 2 | 在挂池（窗口子查询 `ORDER BY l.id DESC LIMIT 50`） | 窗口子查询按 `status IN (...)` 三值 + 主键倒序，`idx_listings_status_listed`（`0001_init.sql:253`，`status, listed_at DESC`）只能覆盖 status 过滤、不覆盖 `id` 序；实现时以 `EXPLAIN QUERY PLAN` 为准。外层的 `p.club_id = w.seller_club_id` 走 `idx_players_club`（`:263`） |
 | 3 | 留队池（窗口子查询 `ORDER BY t.completed_at DESC, t.id DESC LIMIT 50`） | `idx_transfers_status_time`（`0058_transfers_status_time.sql:7`，`status, completed_at DESC, id DESC`）正好匹配窗口子查询 |
 | 4 | 假料池（`club_id > 0`） | `idx_players_club`（`0001_init.sql:263`）范围扫。**不能**靠 `idx_players_club_ca`（`0030_players_club_ca_index.sql:15`，`club_id, ca DESC, id`）省排序：那是「同一 club 内按 ca 再按 id」的序，不是全局 `p.id` 序。要么去掉 `ORDER BY p.id` 在内存里排，要么改成 `ORDER BY p.club_id, p.id` 让索引真正可用 |
-| 5-8 | 四个集合（可谈/在挂/留队/跨队） | 可谈集合走 `idx_players_transfer_listed`；在挂集合走 status 索引（`0001_init.sql:253`）而不是 `idx_listings_player`（`:266` 只覆盖 `player_id`，不覆盖 `status` 过滤）；留队/跨队集合走 `idx_transfers_status_time`（`0058`：`status, completed_at DESC, id DESC`）或 `idx_transfers_player`（`:270`）——**这些是候选，不是结论**，最终以 `EXPLAIN QUERY PLAN` 为准 |
+| 5-8 | 四个集合（可谈/在挂/留队/跨队） | 可谈集合与查询 1 同一窗口（`LIMIT 200`）、走 `idx_players_transfer_listed`；在挂集合走 status 索引（`0001_init.sql:253`）而不是 `idx_listings_player`（`:266` 只覆盖 `player_id`，不覆盖 `status` 过滤）；留队/跨队集合走 `idx_transfers_status_time`（`0058`：`status, completed_at DESC, id DESC`）或 `idx_transfers_player`（`:270`）——**这些是候选，不是结论**，最终以 `EXPLAIN QUERY PLAN` 为准 |
 
 rev1 把这些查询统一写成 `idx_listings_player` / `idx_transfers_player`，rev2 改了一半，rev3 又把 `idx_players_club_ca` 写成「可省排序」——那一句是错的，已按上表更正。索引归属一律标成候选，不当作结论。
 
@@ -884,21 +892,21 @@ rev1 把这些查询统一写成 `idx_listings_player` / `idx_transfers_player`�
 | 档位 | 可谈 | 在挂 | 留队 | 假料池 | 四个集合 | 单次未命中读量 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 当前线上（2026-10 实测：`transfer_listed = 1` 17 人、`listings` 空、市场类成交 0、`match`/`rc_change` 28 条） | 17 | 0 | 28 | 570 | ≤45 | ≈ 660 行 |
-| 上界档（按表规模，不按 LIMIT） | ≤ 有俱乐部的球员数（≤ 18,301） | ≤ 50（窗口） | ≤ 50（窗口） | ≤ 18,301 | 集合 5 ≤ 18,301、集合 6/7 ≤ 50、集合 8 ≤ `transfers` 行数 | ≈ 5.5 万 + `transfers` 行数 |
+| 上界档（可谈/在挂/留队按窗口，假料池按表规模） | ≤ 200（窗口） | ≤ 50（窗口） | ≤ 50（窗口） | ≤ 18,301 | 集合 5 ≤ 200、集合 6/7 ≤ 50、集合 8 ≤ `transfers` 行数 | ≈ 1.9 万 + `transfers` 行数 |
 
-- 上界档的口径：查询 1 与 4 **没有 LIMIT**（5.1），所以它们的上界是「有俱乐部的球员数」（`players` 共 18,301 行，自由身 17,731，剩 570 是目前 `club_id > 0` 的实测值），不是 200。rev3 的「全量规模 = 570 / ≤200」把当前实测值当成了上界，且没有任何 SQL 支撑，已删。查询 2/3 有窗口，上界就是 50。
-- 若实际要把上界压下来，可选动作有两个（都不在本轮）：给查询 1/4 加 `LIMIT`（会牺牲补集完整性，需要重新论证去重下限）或改成「按俱乐部抽样」（`ORDER BY random()` 等价物在 D1 上不可控）。这条留到 §11 第 8 问一起拍。
+- 上界档的口径：查询 1/2/3 都是**公开端点的同一窗口**（5.1），上界分别是 200/50/50；只有查询 4（假料池）没有 LIMIT，上界是「有俱乐部的球员数」（`players` 共 18,301 行，自由身 17,731，剩 570 是目前 `club_id > 0` 的实测值）。rev3 的「全量规模 = 570 / ≤200」把当前实测值当成了上界；rev4 又把可谈族写成「≤ 18,301」，两者都错过——rev5 给查询 1 落了 `LIMIT 200`，上界随之收到 200。
+- 假料池仍是唯一按表规模的扫描（≤18,301）。若要再压，可选动作有两个（都不在本轮）：给查询 4 加 `LIMIT`（会牺牲补集完整性，需要重新论证去重下限）或改成「按俱乐部抽样」（`ORDER BY random()` 等价物在 D1 上不可控）。这条留到 §11 第 8 问一起拍。
 - rev2 原文的 `570 + 50 + 50 + ≤200 ≈ 900` 一边用 LIMIT 上限（50/50/200）一边用当前行数（17/28），两档都不是，所以删掉重列。
 - 每次命中读量 = 1-2 次 `season_windows` 点查 ≈ 2 行。
-- 日读量 ≈ `W × R + H × 2`，其中 `R` = 单次未命中读量（当前档 660，上界档 5.5 万 + `transfers` 行数），`W` = 触发 purge 的写请求数（`/api/market`、`/api/players` 前缀非 GET 2xx，`src/lib/cache-policy.ts:58-73`），`H` = 当日命中数。
-- 算例（`W = 2,000`）：当前档约 1.3M 行/天；上界档约 1.1 亿行/天 + `transfers` 行数 × 2000。两档差三个数量级，这正是必须把 1/4 的扫描面钉清楚的原因。D1 的读行额度随套餐而定，本次未查套餐数值，所以只给公式与算例，不宣称「一定在额度内」——见 §11 第 8 问。
+- 日读量 ≈ `W × R + H × 2`，其中 `R` = 单次未命中读量（当前档 660，上界档 1.9 万 + `transfers` 行数），`W` = 触发 purge 的写请求数（`/api/market`、`/api/players` 前缀非 GET 2xx，`src/lib/cache-policy.ts:58-73`），`H` = 当日命中数。
+- 算例（`W = 2,000`）：当前档约 1.3M 行/天；上界档约 3,800 万行/天 + `transfers` 行数 × 2000。两档差约 30 倍，差额几乎全在假料池那 18,301 行上（可谈族的 200 窗口把它从三个数量级压成一个半）。D1 的读行额度随套餐而定，本次未查套餐数值，所以只给公式与算例，不宣称「一定在额度内」——见 §11 第 8 问。
 
 ### 8.7 验收标准
 
 - P0 用例全过；P1 用例通过率 ≥90%（qa-test-planner 的通过标准）。
 - `npm test` 与 `npm run typecheck` 全绿（`AGENTS.md:46`）。
 - **窗口覆盖改在夹具里做**：固定 4 个窗口（例如 `(4,1)`、`(4,2)`、`(5,0)`、`(9,1)`）跑同一套断言。rev1 写的「线上抽查 4 个不同窗口」在无开窗的生产环境不存在——`resolveRumorWindow` 对所有请求都返回 `(visibleSeason, 0)`（`src/worker/rumors.ts:22-27`），四个窗口只有拿到临时开窗授权才可能。
-- 线上只验两件可执行的事：① 同一窗口多次请求逐字相同；② 抽出的有据行，点进球员页或卡柜能在**公开端点自己的 50 条窗口**内找到对应记录——在挂族对 `/market` 卡柜（三态、`ORDER BY l.id DESC`），留队族对 `/market/deals`（**不按 type 过滤**）。「在 50 条窗口内」是 ADR-0008 的实现口径（窗口先取、type 后筛），不是「在通过 type 过滤后的 50 条里」。
+- 线上只验两件可执行的事：① 同一窗口多次请求逐字相同；② 抽出的有据行，点进球员页或对应公开页能在**该公开端点自己的窗口**内找到对应记录——可谈族对 `/market/board`（前 200，`ORDER BY CASE pm.tier …`）、在挂族对 `/market` 卡柜（三态、`ORDER BY l.id DESC`，50 条）、留队族对 `/market/deals`（**不按 type 过滤**，50 条）。「在自己的窗口内」是 ADR-0008 的实现口径（窗口先取、后筛），不是「在通过主体/type 过滤后的 50 条里」。
 - 语料回归（人工）：导出 30 个窗口 240 条文案，逐条判「状态主张是否有锚点」「意图主张是否归因」「有没有把违约金说成转会费」。
 
 ---
@@ -907,7 +915,7 @@ rev1 把这些查询统一写成 `idx_listings_player` / `idx_transfers_player`�
 
 | 阶段 | 内容 | 独立验收 |
 | --- | --- | --- |
-| 一 | P0-1 主张-锚点重构（**含事实索引迁到盐位 5**）+ P0-3 卡片文案与三态 + `MarketIntelPage.test.tsx` + 8.4 的两个 helper 迁移（`realRelations`/`expectNoContradiction`） | TC-RUMOR-01/02/03/06/07/08/09/10 绿（08 按 8.2 新口径），04/05 改写后绿，三态 jsdom 绿；线上验收两条可执行项通过 |
+| 一 | P0-1 主张-锚点重构（**含事实索引迁到盐位 5**）+ P0-3 卡片文案与三态 + `MarketIntelPage.test.tsx` + 8.4 的两个 helper 迁移（`realRelations`/`expectNoContradiction`） | **P0-1 的全部用例**：TC-RUMOR-01/02/03/06/07/08/09/10/11/12/16/20/21/22 绿（08 按 8.2 新口径，20 含 20a/20b/20c，12 含线上形态组），04/05 改写后绿；三态 jsdom 绿；线上验收两条可执行项通过 |
 | 二 | P0-2 rendezvous + 去重 + core 抽取 | TC-RUMOR-13/14/18 绿；02/03 不回归 |
 | 三 | P1-1 clubId + 双主体链接（含 P1-2 缓存键 v2 同批） | TC-RUMOR-15 绿；键集断言更新 |
 | 四 | P1-3 窗口 phase 与冷窗文案 | TC-RUMOR-17 绿；10 不回归 |
@@ -939,12 +947,12 @@ rev1 把这些查询统一写成 `idx_listings_player` / `idx_transfers_player`�
 
 1. 接受「统一现东家视角」、放弃「某队想买 X」的买方传闻吗？（ADR-0003）
 2. 真料锚点用 `players.transfer_listed`（当前 17 人，只来自 4 家俱乐部）。接受它，还是宁可继续 0 真？
-3. `match`（匹配留队）与 `rc_change`（续约）算不算传闻主题？「续约」进传闻是本设计的一个假设。
+3. `match`（匹配留队）与 `rc_change`（续约）算不算传闻主题？「续约」进传闻是本设计的一个假设。**这是阶段一的前置拍板项**（不是可选口味）：留队族已经被写进 `FULL`（5.0）、查询 3（5.1）、留队模板（6.3）与 8.4 的三族夹具，P0-1 一开工就会真的查它、渲染它。若答案是否，按这条降级，不需要重写设计：`FULL` 从三元素变两元素（`[可谈, 在挂]`，盐位 4 的 `floor(u × 2)` 会重排全部槽——**必须在阶段一开工前定**，事后再改等于换一套卡片）、删掉查询 3 与留队模板、TC-16/20b 与 8.4 的留队行一起移出阶段一随留队族进 P1；8.6 的单次读量相应减 50。rev4 没写这条依赖，导致「未拍板」与「已进 P0」同时成立。
 4. 匿名读者点队名去 `/players?club_id=N`（该队名单）够不够？还是要公开俱乐部摘要页？
 5. 要不要 edition 快照（迁移 0078）以支持「上一期情报 / 球员传闻档案」？
 6. 休赛期要不要按日换血（种子加日期分桶）？现在整段休赛期内容不变，冷窗回退还会让 8 条同构。
 7. 版本归属：这轮算 v6.53.x 增量还是独立 v6.54.0？按 `AGENTS.md:47` 需要先落 `docs/test-plans/<版本>-rumor-claim-anchor.md`。
-8. D1 套餐的读行/日额度是多少？8.6 只给了公式与两档算例（`W=2000` 时当前线上档约 1.3M 行/天、上界档约 1.1 亿行/天 + `transfers` 行数 × 2000），没有额度数值无法判断是否超限。两档差三个数量级，原因是查询 1/4 没有 LIMIT（5.1、8.6），上一版把当前 570 当成上界，低估了。
+8. D1 套餐的读行/日额度是多少？8.6 只给了公式与两档算例（`W=2000` 时当前线上档约 1.3M 行/天、上界档约 3,800 万行/天 + `transfers` 行数 × 2000），没有额度数值无法判断是否超限。两档差约 30 倍，差额几乎全在假料池（≤18,301 行的全俱乐部扫描，5.1 查询 4）；可谈族 rev5 已落 `LIMIT 200`，不再是表规模。上一版把当前 570 当成上界，低估了。
 9. 是否给 `/api/market/listings` 与 `/api/market/deals` 加**俱乐部过滤**与**可翻页的锚点窗口**？`player_id` 参数在 listings 上已经存在（`src/worker/routes/market.ts:110-115`），缺的是 club 过滤与翻页——加了就能让锚点回到全集（ADR-0008 的选项 A），但要动两个公开端点的分页语义。rev3 把这一问写成「加按球员的分页入口」，比实际更「从零开始」，已改。
 10. `clubs.status` 的生产取值有哪些？守卫暂按 `= 'active'` 写，依据只是夹具（`tests/market-intel.test.ts:80`）；如果生产存在别的取值，要么放宽守卫，要么补一张状态白名单。
 
@@ -1061,4 +1069,18 @@ rev1 把这些查询统一写成 `idx_listings_player` / `idx_transfers_player`�
 | 16 | §11 第 9 问说「加按球员的分页入口」，但 listings 已有 `player_id` | 改为「加俱乐部过滤与可翻页的锚点窗口」，并注明 `player_id` 已存在（`src/worker/routes/market.ts:110-115`） | §11 第 9 问 |
 | 17 | 12.2 写 6.13s，上一轮实跑是 6.55s | rev4 本轮实跑得 26 passed / 6.31s，两处按本轮结果改写并注明上一轮的 6.55s 与 rev3 的 6.13s 偏差来源 | 1.4、12.2 |
 
-三套溯源的分工不变：12.5 是作者侧整理、12.6 与 12.7 与 12.8 是三独立轮次，条数不可相加。
+三套溯源的分工不变：12.5 是作者侧整理、12.6 与 12.7 与 12.8 与 12.9 是四个独立轮次，条数不可相加。
+
+### 12.9 对第四轮独立复核的处理（rev5，7 条）
+
+| # | 意见 | 处置 | 落点 |
+| --- | --- | --- | --- |
+| 1 | 8.4 一边写「其余两族不约束」一边保留全局「撞组合」断言，自相矛盾，按字面会把三类合法无据行判红 | **修**：删掉全局断言，只留按族成员关系；`realRelations` 降级为有据行的正向核对，并列出三类必然撞车的合法行作为理由；新增 V26 变异钉住 | 8.4、8.5 V26 |
+| 2 | 5.0 的空族回退把位强制为无据，线上（在挂为空）导致族×位相关（lift≈0.5），而默认夹具三族都非空、TC-12 测不到 | **修**：回退改为「回退到 `firstNonEmpty(FULL)`、**位不变**」，只有三族全空（冷窗）才强制无据；`grounded` 仍是唯一读位点。TC-12 追加「线上形态夹具」一组（在挂为空），8.5 新增 V25 让「回退强制无据」必红 | 5.0、5.1、2.9、8.3 TC-12、8.5 V25 |
+| 3 | §11 第 3 问未拍板，但留队族已进 P0-1；阶段表与门禁都没体现 | **修**：把第 3 问写成阶段一的**前置拍板项**，并给出「否」的降级口径（`FULL` 两元素会重排全部槽，所以必须开工前定；删查询 3/模板/留队夹具，TC-16/20b 进 P1） | §11 #3、§9 |
+| 4 | §9 阶段一验收漏 TC-11/12/16/20/21/22 | **修**：阶段一独立验收改为「P0-1 的全部用例」并逐条列出；注明 20 含 20a/20b/20c、12 含线上形态组 | §9 阶段一 |
+| 5 | 8.4 写「最多 16 名假料池球员」，实际是 48+16 的并集（最多 64） | **修**：改为 64 并给出 `fakeIdPool(4,1,3)` ∪ `fakeIdPool(4,0,1)` 的推导与行号；12.8 #9 保留原文作为历史记录，由本条更正 | 8.4 |
+| 6 | 可谈族的广告板 200 窗口只有一句承诺，没有 SQL、索引归属与用例 | **修**：查询 1 落成与 `/market/transfer-board` 同排序同上限的窗口 SQL（`LIMIT 200`），集合 5 同步同窗口，8.6 上界档随之从 5.5 万收到 1.9 万，新增 TC-20c 与 V24，§11 #8 同步 | 5.1 查询 1、5.1 集合、8.3 TC-20c、8.5 V24、8.6、§11 #8 |
+| 7 | 8.2 TC-06 段二写「落在可谈的槽出有据行」，位为假的槽仍是可谈无据，按字面判红一半合法行 | **修**：改为「按位：位真出有据、位假落在可谈补集」，并注明回退槽保留位 | 8.2 TC-06、8.3 TC-16 |
+
+未采纳的处置：无。七条全部按复核方给的方向修进文档；只有第 2 条在两种做法（保位 / 加 production-like 夹具）之间**两条都做了**——保位是机制修复，夹具是回归锁，缺一条都会在下一轮复现。
