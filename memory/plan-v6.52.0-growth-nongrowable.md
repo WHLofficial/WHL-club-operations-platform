@@ -6,9 +6,9 @@
 - **m06100（更正）**：「不，是非成长不计XP，但数据仍然接收，因为有别的功能要用这些数据」
   ⇒ **不是禁行、不拒收**：录入台的录入照收（事件行照写、value 照存），只是**不计 XP**。上一版计划里「行内禁行 + 后端 400 拒收 + OCR 跳过」作废。
 - **用户最新追加（本次修订）**：**三类结算也过滤** —— 训练营 / 中国计划 / 里程碑在查询层加 `growable` 过滤，非成长球员不再产生这三类事件行。原「事件照写、xp=0」方案作废。
-- **本次修订（2026-10-19）**：迁移号 `0076` → **`0077_growth_nongrowable_reset.sql`**（`0076` 已被 v6.51.10 的 `0076_growth_events_match_ref_index.sql` 占用并已 apply 生产）；本轮仍只交付计划，代码/迁移待令。
+- **本次修订（2026-10-19）**：迁移号 `0076` → **`0077_growth_nongrowable_reset.sql`**（`0076` 已被 v6.51.10 的 `0076_growth_events_match_ref_index.sql` 占用并已 apply 生产）；本轮仍只交付计划，代码/迁移待令。（已于 2026-10-20 实施并上线，见 §11。）
 - **§9.9 已定案（2026-10-19 用户裁决）**：改值重放保持现状（当前非成长跳过 replay；当前可成长仍按现有 `replayEventChain` 正常重放）；`loadCumulativeBases` 仍按全部历史 `value` 求和。进球/助攻的单事件 XP 与里程碑 XP 两条路径都已覆盖（单事件走主闸归零，里程碑走查询层过滤）。
-- 本轮交付 = 计划（本文件）；代码/迁移待令。
+- 本轮交付 = 计划（本文件）；代码/迁移待令。（已于 2026-10-20 实施并上线，见 §11。）
 
 ---
 
@@ -23,7 +23,7 @@
 
 ### 1.2 生产实测（`wrangler d1 execute --remote`，只读）
 
-- 球员 18,301；`growable = 0` **7,827**（全部 `growth_tier >= 1`）；其中 **116 名 `growth_xp > 0`，合计 372 XP**（自动 305 条/207.5 XP/83 人；补录 277 条/164.5 XP/98 人；33 人 48 XP 仅来自补录）。
+- 球员 18,301；`growable = 0` **7,827**（全部 `growth_tier >= 1`）；其中 **116 名 `growth_xp > 0`，合计 372 XP**（自动 305 条/207.5 XP/83 人；补录 277 条/164.5 XP/98 人；33 人 48 XP 仅来自补录）。（2026-10-20 apply 前实测为 116 名 / **413 XP**；见 §11 上线记录。）
 - **6 名非成长球员已可升级**（`levels_applied` 全 0、`growth_tier` 全 1、`status` 全 `normal`）：Mbappé(id 2, 26 岁, 91/92, 13.5 XP)、Lewandowski(22, 36, 88/88, 11.5)、Osimhen(34, 26, 87/89, 10)、Son Heung Min(65, 32, 85/85, 10.5)、Benzema(72, 37, 85/85, 11)、Pedro Gonçalves(154, 27)。
 - `config` 无 `xp_per_level` 行 ⇒ 默认 10。
 
@@ -81,7 +81,7 @@ UPDATE players SET growth_xp = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','no
 
 - 文件内不写 `BEGIN/COMMIT`（仓规）；`tests/d1.ts` 的 `MIGRATION_FILES` 追加注册 `0077_growth_nongrowable_reset.sql`（排在末项 `0076_growth_events_match_ref_index.sql` 之后）。
 - **写量**：`WHERE COALESCE(growable, 0) = 0` 会匹配 **7,827 行**，即使值没变 SQLite 也把匹配行计入 `rows_written`（node:sqlite 实测：同一条 UPDATE 连跑两次，`changes` 均为 2/2）⇒ 迁移必须带 `AND COALESCE(growth_xp, 0) <> 0`，只写真正有 XP 的 **116 行**；其余 7,711 行的 `updated_at` 不刷新（本来也无变化）。带守卫后重放为 0 行。生产 apply 的 D1 写配额按 **≈116 行**登记（不按 7,827）。
-- 预期影响：116 名球员的 372 XP 归零（`rows_written ≈ 116`）；6 人「待升级」消失（本来也不该升）。
+- 实际上线影响（2026-10-20 apply 前实测）：116 名球员的 **413 XP** 归零（计划期读数 372，期间旧代码又记了 41；`rows_written = 116`）；6 人「待升级」消失（本来也不该升）。
 - 上线顺序：**先 apply 迁移再 push**（push 即 CF 自动部署）。
 
 ---
@@ -215,7 +215,7 @@ SELECT x.id AS id, x.total AS total FROM (
 ## 7. 验收口径
 
 - **本地**：迁移 apply 后回读「非成长球员 `growth_xp` 全 0、可成长球员 XP 未动、事件行数与 value 不变」；录入台非成长行可录且响应 XP 为 0；球员比赛 tab 仍显示非成长球员的比赛数据；升级 409；**三类结算（训练营 / 中国计划 / 里程碑）对非成长球员无新事件行（重放同样 0）**。
-- **生产（待令）**：`npm run db:migrate:remote` apply **0077** → 回读 116 名 / 372 XP 归零、6 人 pending 归 0、可成长球员 XP 未动、事件行数不变、**三类结算对非成长球员无新事件行（重放同样 0）** → push（先核 CF 自动部署）→ 部署核对 Version + 端点体检。
+- **生产（2026-10-20 已执行）**：apply **0077** → 回读 116 名 / **413 XP** 归零、非成长 `growth_xp != 0` 为 0、可成长 152 人 XP 未动、`growth_events` 1,429 条 / 915 XP 未动、6 人 pending 归 0 → push `878ad1b..b776ae8` → CF 自动部署 Version **`0386f797-ee98-4f1e-bd3f-98cf809e0918`**（100%）→ 线上入口 `index-DMeaHSCF.js` 与本地 sha256 一致；`/api/health` 200。
 
 ---
 
@@ -233,27 +233,27 @@ SELECT x.id AS id, x.total AS total FROM (
 3. **三类结算事件不再产生**：训练营 / 中国计划 / 里程碑对 `growable = 0` 的球员不再写事件行；**历史已经产生的行保留、不追溯删除**（成长史里仍能看到旧行）。
 4. **翻回可成长**：球员日后被改回 `growable = 1`，此前 `xp=0` 的 ①②③⑦ 事件行不会追溯补 XP（与「存量清零」同向）；但 ④⑤⑥ 会按当前 `growable = 1` 恢复产生事件（里程碑按当前成长期内历史 goal/assist 汇总，可能一次性补发多档）—— 1→0 立即停发、0→1 追溯计入，这个不对称如实登记。（用户 2026-10-19 裁决：保持现状，该不对称作为已知边界保留。）
 5. **训练营里的非成长球员是违规态**（体检 `trainee_growth` 会报），本轮不额外处理。
-6. 生产 372 XP 归零是**不可逆的数据订正**，apply 前会再向用户确认一次。
+6. 生产 **413 XP** 归零（apply 前实测；计划期 372）是**不可逆的数据订正**，已于 2026-10-20 经用户「发布」指令执行。
 7. 存量事件（582 条）保留 ⇒ `SUM(growth_events.xp)` 与清零后的 `growth_xp` 不再一致（既有口径差异，非本次引入）。
 8. **迁移号从 `0076` 顺延为 `0077`**（`0076` 已被 v6.51.10 的 `0076_growth_events_match_ref_index.sql` 占用并已 apply 生产）；不修改任何既有迁移。
 9. **已定案（2026-10-19 用户裁决：保持现状）**：改值重放对历史 `xp=0` 行不做额外拦截 —— 当前非成长球员跳过 replay（被改行保持现有 xp、链上其他行不动）；当前可成长球员仍按现有 `replayEventChain` 正常重放（历史 `xp=0` 行可能因改值补 XP，仅管理端可触发，登记为已知边界）。`loadCumulativeBases` 仍按全部历史 `value` 求和（非成长时期的数值计入累计基数；它是表现统计而非 XP 账本，且 `xp=0` 无法区分「非成长」与「不计 XP 赛事」）。
 
 ---
 
-## 10. 实施步骤（交付序，待令）
+## 10. 实施步骤（交付序，已于 2026-10-20 执行）
 
 1. 迁移 `0077_growth_nongrowable_reset.sql` + `tests/d1.ts` 注册（追加在 `0076_growth_events_match_ref_index.sql` 之后）。
 2. worker：`src/worker/growth.ts`（主闸 + 三类结算查询加 `growable` 过滤（训练营 / 中国计划 + 里程碑 JOIN）+ 升级闸门）、`src/worker/routes/admin/growth.ts`（DTO/批量/单人/重放 + 花名册）、`src/worker/routes/growth.ts`（升级文案）。
 3. 前端 `GrowthEntryPage.tsx`（徽标 + 行 XP 归零 + 合计）、`SeasonsPage.tsx`（赛果确认 toast 文案改为「成长事件」）。
 4. 测试（§5 表）+ 既有用例复跑 + 全量闸门 + `db:migrate:local` + e2e。
 5. 文档（§6）+ code-review-skill 复审 + 修复后复测。
-6. **待令**：apply 生产 **0077** → push → 部署核对 → 生产回读 → 上线记录回写（本地 commit 不 push）。
+6. **已执行（2026-10-20）**：apply 生产 **0077** → push → 部署核对 → 生产回读 → 上线记录回写（本地 commit 不 push）。
 
 ---
 
 ## 11. 交付记录（2026-10-20）
 
-**状态**：代码、迁移、测试、文档全部落本地；**生产 0077 未 apply、未 push、未部署**（待令）。
+**状态**：**已上线 2026-10-20**（Version `0386f797-ee98-4f1e-bd3f-98cf809e0918`，push `878ad1b..b776ae8`；迁移 0077 已 apply 生产）。
 
 **改动文件**
 
@@ -279,7 +279,7 @@ SELECT x.id AS id, x.total AS total FROM (
 
 **变异验证**：临时去掉 `src/worker/routes/growth.ts` 的 `growable === 1 ? … : 0` 分支 ⇒ TC-NG-08a 在 `pendingLevelUps: 0` 断言处变红（实际 `pendingLevelUps: 2`），恢复后全绿 —— 证明成长页待升级归零有回归锁。
 
-**生产**：apply 0077、生产回读、push、部署核对 **均未做**；写量按 ≈116 行登记（不按 7,827）。
+**生产（2026-10-20）**：apply 0077（`Executed 2 commands`）→ 回读 116 名 / **413 XP** 归零、非成长 `growth_xp != 0` 为 0、可成长 152 人 XP 未动、`growth_events` 1,429 条 / 915 XP 未动；push `878ad1b..b776ae8` → CF 自动部署 Version `0386f797-ee98-4f1e-bd3f-98cf809e0918`（100%）；线上入口 `index-DMeaHSCF.js` 与本地 sha256 一致。
 
 **实施偏差（如实登记）**：计划 §4.3 原写「`pendingLevelUps` 不按 `growable` 收窄」，实现改为**一并收窄** —— `season-settle` 的重判只改 `growable`、不清 `growth_xp`，不收窄时超龄/练满球员会长期显示「N 次待升级」而点下去必 409；迁移清零只覆盖 apply 那一刻，收窄才覆盖之后的重判。
 

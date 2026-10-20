@@ -6,7 +6,7 @@
 
 ## [v6.52.0] · 非成长球员不计成长 XP（数据照收）+ 训练营 / 中国计划 / 里程碑三类结算过滤（2026-10-20）
 
-**状态：本地完成，未 apply 生产迁移、未 push**（发布待令；顺序 = 先 `npm run db:migrate:remote` apply `0077`，再 push —— push 即 CF Workers Builds 自动部署）。判级 **minor**（规则变更 + 迁移 + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。
+**已上线 2026-10-20**（Version `0386f797-ee98-4f1e-bd3f-98cf809e0918`，push `878ad1b..b776ae8`；迁移 `0077` 已于 push 前 apply 生产，`Executed 2 commands`）。判级 **minor**（规则变更 + 迁移 + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。
 
 **缘起与拍板**：用户 m06019「1growable = 0，2后者，3非成长的xp清零，给我计划」⇒ 判定口径 = `growable = 0`、从源头挡、存量 XP 清零；m06100 更正「不，是非成长不计XP，但数据仍然接收，因为有别的功能要用这些数据」⇒ **不禁行、不 400 拒收、OCR 照常预填**；本轮追加「训练营 / 中国计划 / 里程碑三类结算也过滤」。计划文件 `memory/plan-v6.52.0-growth-nongrowable.md`。
 
@@ -21,7 +21,7 @@
 **迁移 `0077_growth_nongrowable_reset.sql`**（`tests/d1.ts` 的 `MIGRATION_FILES` 已追加，排在 0076 之后）
 
 - `UPDATE players SET growth_xp = 0 … WHERE COALESCE(growable, 0) = 0 AND COALESCE(growth_xp, 0) <> 0`；事件行、`levels_applied` 不动。
-- 尾守卫不可省：去掉后 SQLite 把匹配的 **7,827 行**都计入 `rows_written`（值没变也算）；带上只写真正有 XP 的 **≈116 行**（生产基线：116 名非成长球员合计 **372 XP**、其中 6 人待升级），重放为 **0 行**。
+- 尾守卫不可省：去掉后 SQLite 把匹配的 **7,827 行**都计入 `rows_written`（值没变也算）；带上只写真正有 XP 的 **116 行**（apply 前实测：116 名非成长球员合计 **413 XP**，计划期读数为 372，期间旧代码又记了 41；6 人待升级），重放为 **0 行**。
 - 不可精确回滚（清零前 `growth_xp` ≠ `SUM(growth_events.xp)`），迁移注释给了近似重算 SQL。
 
 **交付**
@@ -36,7 +36,7 @@
 
 **测试**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a…TC-NG-11b，覆盖迁移、主闸、三类结算、自动钩子与 `retryUnresolvedResults`、录入台批量、单人补录、改值重放、升级闸门、消费方、前端静态锁、迁移注册与幂等）；全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138/2256，净 **+1 文件 / +22 例**；复跑耗时 93.62s）。**已跑**：`npm run typecheck`（三份 tsconfig）0 error、`npm run build` ✓、`npm run db:migrate:local`（0077 已应用）；**未跑**：`npm run test:e2e`（需 8791 常驻 dev server）。测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
 
-**上线前置**：生产 apply **0077** → 回读「非成长球员 `growth_xp` 全 0、可成长球员 XP 未动、事件行数与 `value` 不变」→ push → 部署核对。**本文件撰写时以上均未做。**
+**上线记录（2026-10-20）**：生产 apply **0077**（`Executed 2 commands in 12.56ms`）→ push `878ad1b..b776ae8` → CF Workers Builds 自动部署 Version **`0386f797-ee98-4f1e-bd3f-98cf809e0918`**（100% 流量，Created 2026-10-20T00:25:57Z）→ 回读：非成长球员 **7,827 人**、`growth_xp != 0` **0**；可成长球员 **152 人**仍有 XP；`growth_events` **1,429 条 / 915 XP** 未动；线上入口 `assets/index-DMeaHSCF.js` 与本地构建 **sha256 逐字节一致**（`48e6291…`）；`/api/health` 200、`/api/players?limit=1` 200。
 
 ## [v6.51.13] · 成长录入截图识别：解析按图片内容缓存（选边不再重复调模型）（2026-10-17）
 

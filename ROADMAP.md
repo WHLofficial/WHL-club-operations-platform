@@ -1524,7 +1524,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.52.0 · 非成长球员不计成长 XP（数据照收）+ 训练营 / 中国计划 / 里程碑三类结算过滤（2026-10-20）
 
-**状态**：**本地完成；生产迁移未 apply、未 push**（发布待令）。判级 **minor**（规则变更 + 迁移 `0077` + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。**发布顺序硬约束**：先 `npm run db:migrate:remote` apply **0077** → 只读回读（非成长球员 `growth_xp` 全 0 / 可成长球员 XP 未动 / 事件行数与 `value` 不变）→ push（push 即 CF Workers Builds 自动部署）→ 部署核对。计划文件 `memory/plan-v6.52.0-growth-nongrowable.md`，测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
+**状态**：**已上线 2026-10-20**（Version `0386f797-ee98-4f1e-bd3f-98cf809e0918`，push `878ad1b..b776ae8`；迁移 **0077** 已于 push 前 apply 生产）。判级 **minor**（规则变更 + 迁移 `0077` + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。发布顺序：apply **0077** → 只读回读 → push（CF Workers Builds 自动部署）→ 部署核对，已按序执行。计划文件 `memory/plan-v6.52.0-growth-nongrowable.md`，测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
 
 **缘起与拍板**（用户 2026-10-19）：m06019「1growable = 0，2后者，3非成长的xp清零，给我计划」⇒ 判定口径 = `growable = 0`、从源头挡、存量 XP 清零；m06100 更正「不，是非成长不计XP，但数据仍然接收，因为有别的功能要用这些数据」⇒ **不禁行、不 400 拒收、OCR 照常预填**（上一版计划的行内禁行 / 后端拒收 / OCR 跳过全部作废）；本轮追加「训练营 / 中国计划 / 里程碑三类结算也过滤」（原「三类也走主闸、事件照写」方案作废）。
 
@@ -1540,7 +1540,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 - 纯数据订正：`UPDATE players SET growth_xp = 0, updated_at = … WHERE COALESCE(growable, 0) = 0 AND COALESCE(growth_xp, 0) <> 0`；`growth_events`、`levels_applied` 一律不动；文件内不写 `BEGIN/COMMIT`（执行器自行包事务）。
 - **尾守卫不可省**：只写 `growable = 0` 会匹配 **7,827 行**（值没变 SQLite 也计入 `rows_written`）；带上 `growth_xp <> 0` 只写真正有 XP 的 **≈116 行**，重放 **0 行**（node:sqlite 实测 `changes` 2 → 0）。
-- 预期影响：116 名球员 **372 XP** 归零、6 人「待升级」消失；`tests/d1.ts` 的 `MIGRATION_FILES` 已追加（排在 `0076_growth_events_match_ref_index.sql` 之后）。
+- 实际影响（2026-10-20 apply 前实测）：116 名球员 **413 XP** 归零（计划期读数 372，期间旧代码又记了 41）、6 人「待升级」消失；`tests/d1.ts` 的 `MIGRATION_FILES` 已追加（排在 `0076_growth_events_match_ref_index.sql` 之后）。
 - **不可精确回滚**（清零前 `growth_xp` ≠ `SUM(growth_events.xp)`：解约/导入清零不删事件、改值重放会改事件 xp），迁移注释给了近似重算 SQL。
 
 **交付**
@@ -1553,9 +1553,9 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **实施偏差（如实登记）**：计划 §4.3 原写「`pendingLevelUps` 不按 `growable` 收窄」，实现改为**一并收窄** —— `season-settle` 的重判只改 `growable`、不清 `growth_xp`，不收窄时超龄/练满球员会长期显示「N 次待升级」而点下去必 409；迁移清零只覆盖 apply 那一刻，收窄才覆盖之后的重判。
 
-**测试与闸门**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a…TC-NG-11b：迁移清零与幂等 / 主闸 / 三类结算 / 自动钩子与 `retryUnresolvedResults` / 录入台批量 / 单人补录 / 改值重放 / 升级闸门 / 消费方（球员比赛 tab + 成长史）/ 前端静态锁 / 迁移注册与隔离）。全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138 / 2256，净 **+1 文件 / +22 例**；耗时 99.50s）。**未验证**：`npm run typecheck`（三份 tsconfig）、`npm run build`、`npm run db:migrate:local`、`npm run test:e2e` 本轮未跑，无输出可引。
+**测试与闸门**：新增 `tests/growth-nongrowable.test.ts` **22 例**（TC-NG-01a…TC-NG-11b：迁移清零与幂等 / 主闸 / 三类结算 / 自动钩子与 `retryUnresolvedResults` / 录入台批量 / 单人补录 / 改值重放 / 升级闸门 / 消费方（球员比赛 tab + 成长史）/ 前端静态锁 / 迁移注册与隔离）。全量 `npm test` **139 文件 / 2278 例全绿**（v6.51.13 基线 138 / 2256，净 **+1 文件 / +22 例**；复跑耗时 93.62s）。**已跑**：`npm run typecheck`（三份 tsconfig）0 error、`npm run build` ✓、`npm run db:migrate:local`（0077 已应用）；**未跑**：`npm run test:e2e`（需 8791 常驻 dev server）。
 
-**待办（待令）**：① 生产 apply **0077**（写量按 ≈116 行登记，不按 7,827）→ 回读 116 名 / 372 XP 归零、6 人 pending 归 0、可成长球员 XP 未动、事件行数不变；② push → 部署核对 Version + 端点体检；③ 上线记录回写（纯文档枚，按纪律不 push）。**本轮未做任何生产写、未 push。**
+**上线记录（2026-10-20）**：① 生产 apply **0077**（`Executed 2 commands in 12.56ms`，写量按 116 行登记）→ 回读：非成长 **7,827 人**、`growth_xp != 0` **0**；可成长 **152 人**仍有 XP；`growth_events` **1,429 条 / 915 XP** 未动；6 人 pending 归 0。② push `878ad1b..b776ae8` → CF 自动部署 Version **`0386f797-ee98-4f1e-bd3f-98cf809e0918`**（100%，2026-10-20T00:25:57Z）。③ 线上入口 `assets/index-DMeaHSCF.js` 与本地构建 sha256 逐字节一致；`/api/health` 200、`/api/players?limit=1` 200。④ 本上线记录为纯文档枚，按纪律只本地 commit 不 push。
 
 **如实登记**：① 翻回可成长不追溯 —— `0 → 1` 后此前 `xp=0` 的行不补发，但 ④⑤⑥ 会按当前 `growable = 1` 恢复产生（里程碑按当前成长期内历史 goal/assist 汇总，可能一次性补发多档）；用户 2026-10-19 裁决「保持现状」，不对称保留。② 历史事件保留 ⇒ `SUM(growth_events.xp)` 与清零后的 `growth_xp` 不再一致（既有口径差异，非本版引入）。③ 训练营里的非成长球员是违规态（体检 `trainee_growth` 会报），本版不额外处理。④ `loadCumulativeBases` 仍按全部历史 `value` 求和（表现统计而非 XP 账本；`xp=0` 无法区分「非成长」与「不计 XP 赛事」）。
 
