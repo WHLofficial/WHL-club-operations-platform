@@ -4,6 +4,51 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.53.0] · 球场档期 P0（容量驱动收入 + 设施门槛 + 场馆经营页）（2026-10-20）
+
+**已实现、未上线**（2026-10-20 本地工作区；迁移 `0078` **尚未 apply 生产**、未 push、未部署；发布须用户下令）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
+
+**缘起与拍板**：用户锁定「场馆档期」独立页（Q8-1）与档期窗 = 转会窗；设计稿 `memory/design-venue-slots-explore.md` 与四份工作流在迁移号、文件名、枚举、通知 key、API 形状上的冲突按计划 §0 的 A1–A14 裁决收口（迁移 `0078` / `0078_venue_slots_p0.sql` / `idx_season_windows_open` / `venue_policy ∈ {'','money','fans','reputation'}` / `cost_base=0.275` + 每座成本 + 草皮独立掷 / P0 不直给死忠 / 一张 `venue_window_settlements` / `consumption` 锚到窗口开关 / 不加 `planned_close_at` / `venue_window_open` + `venue_slot_reminder` / 新 `venue-plan` 三端点并删旧 `bookings` / 只用状态码 + 中文 message / 独立 `/venue` 页 / `activity_slots` 改「每窗档位上限」默认 `'4'`）。P0 九项 = ①容量派生档位 ②容量驱动收入 − 成本栈 + 饱和 ③五类活动 + 设施门槛 ④关窗结算 + 账本 + 死忠演化 ⑤`/venue` 页 + 两条提醒 ⑥窗口节奏 + `consumption` 开关 ⑦并发开窗唯一索引 ⑧失败开窗不先重掷 ⑨六条验收。
+
+**规则变更**
+
+- **槽位**：容量 `<15000 → 2`、`15000–29999 → 3`、`≥30000 → 4`；再由 `activity_slots`（默认 `'4'`，`0` = 关闭档期预订，硬上限 20）钳制。无 `stadiums` 行按 2 槽。
+- **收入**：单槽毛收入 = 容量 × 票价 × 利用率（capacity 型）或固定额（flat 型）；设施乘数、冠名 `attendBuff`、声望乘数依次相乘；同窗同活动饱和 `1 / 0.7 / 0.45 / 0.45` **按同类序位**乘在毛收入上；运营成本按档照付。四档容量单槽期望净额：35000 演唱 **3.75** / 22000 **2.06** / 17000 **1.41** / 12000 **0.76**；电竞 **2.15 / 1.24 / 0.89 / 0.54**；青训 0.7；开放日 0.2；企业日 rep20 **0.63**、rep100 **1.35**。
+- **活动与门槛**：演唱会、电竞（转播 L2）、企业日（商业 L1 + 声望 ≥20）、青训营（青训 L1）、开放日；预览逐槽给 `unlockReason`（不 reject），保存与事件赠档必须拒。
+- **后果**：关窗按槽落三条账本流水（活动收入 `+gross` / 草皮 `−damage` / 运营成本 `−opsCost`），`summary.activityTotal` 改「活动净现金」并新增 `activityOpsCost`；声望赛季末 ×0.9；上座乘数 K=5 逐场 −1、新季首窗清零，事件预置（K=0）仍一场即清。
+- **入口与提醒**：独立 `/venue`「场馆经营」页（首页卡 + 主场页入口，消费中心删 `BookingsCard`）；开窗逐队发 `venue_window_open`，关窗前 `runVenueReminderTick` 对未排满的队发 `venue_slot_reminder`（`venue_reminder_at` 去重）。
+- **API**：新增 `GET/PUT /api/club/venue-plan` + `POST /api/club/venue-plan/preview`（只读、不落库、无需开窗）；同版删除 `GET/POST /api/club/bookings`。PUT 为 partial、一次 `db.batch` 原子提交，窗关闭或 `consumption` 关闭 ⇒ 409。
+
+**迁移 `0078_venue_slots_p0.sql`**（`tests/d1.ts` 的 `MIGRATION_FILES` 已追加）
+
+1. `CREATE UNIQUE INDEX IF NOT EXISTS idx_season_windows_open ON season_windows(status) WHERE status='open'`（同时刻至多 1 个 open 窗）。
+2. `season_windows.venue_reminder_at TEXT NOT NULL DEFAULT ''`（关窗提醒去重）。
+3. `stadiums.venue_reputation REAL NOT NULL DEFAULT 0 CHECK 0–100`。
+4. `stadiums.attendance_mod_matches INTEGER NOT NULL DEFAULT 0 CHECK ≥0`（不锁 0–5，K 是代码常量）。
+5. 有界回填：仅 `next_attendance_mod <> 1 AND attendance_mod_matches <> 0` 归 0；正常库写 0 行。
+6. `clubs.venue_policy TEXT NOT NULL DEFAULT '' CHECK IN ('','money','fans','reputation')`。
+7. `clubs.city TEXT`（可空，P0 纯预留）。
+8. `venue_window_settlements(club_id, season, window_seq, reputation_gain, attend_mod, bookings, created_at, PK(club_id,season,window_seq))`。
+9. `ops_schedule.consumption` 双 `none` → `window_open` / `window_close`（只改双 none，不覆盖运营手工锚点）。
+
+**交付**
+
+- 服务端：新建 `src/core/venue.ts`（`slotsForCapacity` / `satMultAt` / `venueQuote` / `quotePlan` / `activityUnlockReason` / `recommendPlan` / 配置校验，零 import）；重写 `src/worker/venue-ops.ts`（三类定价、饱和、草皮实际/期望分离、三条账本、`venue_window_settlements` 幂等、容量/设施/声望三闸、`venueSlotStatement` + `bookSlot`）；新建 `src/worker/venue-reminders.ts`（`runVenueReminderTick`，`index.ts` 的 `runSettleTick` 内 try/catch 调用，不计入 `tickChanged`）。
+- 结算与窗口：`src/worker/home.ts`（`VenueContext`、`activityTotal` 净现金、`activityOpsCost`、K=5 逐场递减）；`src/worker/window-machine.ts`（新季首窗清零、重掷并入 `openBatch`、开窗通知、返回 `venueReset` / `venueNotified`）；`src/worker/season-settle.ts`（声望 ×0.9，冠军通知改读 `seasonsIdx`）；`src/worker/event-ops.ts`（`venue_reputation` 入上下文、赠档按容量派生槽数并过设施/声望闸）。
+- 路由与通知：`src/worker/routes/clubs.ts`（新增 `GET/PUT /club/venue-plan` + `POST /club/venue-plan/preview`，删除旧 `GET/POST /club/bookings`）；`src/worker/notify.ts` 两条模板；`src/core/notify-meta.ts` 两条 4 字标签（`category='window'`，模板数 37 → 39）；`src/core/config.ts`（`activity_config` 五类活动新默认、`activity_slots='4'`、`window_length_hours='168'` 入白名单）。
+- 前端：新建 `web/src/pages/venue/VenuePlanPage.tsx` + `venue-preview.ts` + `venue-plan.css`；`App.tsx` 路由、`api.ts` 类型、`queries.ts` hooks、`notify-links.ts` 深链 `/venue`；首页 `.nav-card` 与 `club/VenueTab.tsx` 入口；`shop/ShopPage.tsx` / `shop/venueCards.tsx` 删旧档期卡。
+- 测试：新增 `tests/venue-core.test.ts`、`tests/venue-slots-migration.test.ts`、`tests/venue-reminder.test.ts`、`web/src/pages/venue/venue-preview.test.ts`、`web/src/pages/venue/VenuePlanPage.test.tsx`；改写 `tests/venue-ops.test.ts`、`tests/home.test.ts`、`tests/window-machine.test.ts`、`tests/event-ops.test.ts`、`tests/season-settle.test.ts`、`tests/notify.test.ts`、`src/core/notify-meta.test.ts`、`web/src/lib/notify-links.test.ts`、`tests/ops-schedule.test.ts`、`tests/naming-tiers.test.ts`、`tests/config.test.ts`、`tests/contract-ticks.test.ts` 等。
+
+**实施偏差 / 如实登记**
+
+- **本轮为「实现 + 评审修复」两段**：实现后跑了四路只读代码评审，修掉 2 个 🔴（保存中仍可改档 → 成功后静默清空；PUT 四道闸的单测全打在已无生产调用方的 `bookSlot` 上）与一批 🟡（预览失败仍显示旧 totals、历史 `idle` 档显示「已排」、提醒先发后占位、临时窗误报、`slots=0` 仍发开窗信、硬编码 K/钳制、超界档位清不掉、死类型/死键、GET 契约与「预览不写库」无测试等）。
+- 本机闸门（2026-10-20 复核轮）：`npm run typecheck` 三份 tsconfig **0 error**、`npm run build` 成功、`npm run db:migrate:local` 应用 `0078` 且二次 apply 输出 `✅ No migrations to apply!`、`npm run test:e2e` **29/29**。生产 apply / 回读 / push / 部署**未执行**，本版不写 Version id、不写上线记录。
+- `scripts/e2e/smoke.mjs` 已加入 `/venue` 的 `㉓ 场馆经营` 场景与 `ROUTES` 项；经济模型已从 `scratch/` 复制进版本库 `scripts/venue/cadence-model.mjs`，C2 的 109.24 / 13.24 / 7.02 / 5.29 / 2.99 可在干净检出复跑。
+- 有意保留的口径：一档固定三条账本流水（即使金额为 0），`venue_window_settlements.bookings` 记档期表行数（含历史 `idle`）——两者都是幂等/审计凭据，与「真正结算了几档」分开看。
+- 真实并发仍由唯一索引兜底；单测以「串行第二次 409 + `BEFORE INSERT` trigger 中止回滚」覆盖，不等同 D1 真并发压测。
+
+**测试**：全量 `npm test` **144 文件 / 2390 例全绿**（exit 0；Duration 103.43s；较实现轮 +6 例：PUT 四道闸、GET 字段契约、预览不写库、草皮等级降损、声望按上座率缩放、锁定活动仍计价）；`npm run typecheck`（三份 tsconfig）**0 error**；`npm run build` 成功（7.18s）；`npm run db:migrate:local` 二次幂等；`npm run test:e2e` **29/29**（含新增 ㉓）。用例覆盖迁移九条与失败无半状态、槽数边界、四档报价、饱和同类序位、设施/声望三闸、期望 vs 实际草皮、三条流水与台账幂等、K=5 与事件同窗、首窗清零、声望衰减与冠军通知、两条通知与深链、提醒去重、方针保存与预览、并发开窗与重掷回滚、页面 2/3/4 槽与 375 布局。测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
+
 ## [v6.52.0] · 非成长球员不计成长 XP（数据照收）+ 训练营 / 中国计划 / 里程碑三类结算过滤（2026-10-20）
 
 **已上线 2026-10-20**（Version `0386f797-ee98-4f1e-bd3f-98cf809e0918`，push `878ad1b..b776ae8`；迁移 `0077` 已于 push 前 apply 生产，`Executed 2 commands`）。判级 **minor**（规则变更 + 迁移 + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。

@@ -1522,6 +1522,64 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.53.0 · 球场档期 P0（容量驱动收入 + 设施门槛 + 场馆经营页）（2026-10-20）
+
+**状态**：**已实现、未上线**（2026-10-20 本地工作区；迁移 `0078` **尚未 apply 生产**、未 push、未部署；发布须用户下令）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
+
+**缘起与拍板**：用户锁定「场馆经营」独立页（Q8-1）与「档期窗 = 转会窗」（Q7b=D，不新增窗口体系、不自动开窗）；设计稿 `memory/design-venue-slots-explore.md`。四份工作流在迁移号 / 文件名 / 枚举 / 通知 key / API 形状上的冲突按计划 §0 的 A1–A14 裁决收口：
+
+| # | 裁决 |
+|---|---|
+| A1/A2/A3 | 迁移 **0078**、文件 `0078_venue_slots_p0.sql`、索引 `idx_season_windows_open` |
+| A4 | `venue_policy ∈ {'','money','fans','reputation'}`（空串 = 未选，只预览） |
+| A5 | 单槽成本拆分 `cost_base=0.275` + 每座成本；草皮损坏独立掷（期望 0.525），不与成本重复计费 |
+| A6 | P0 不新增活动直给死忠；`fans_delta` 只进 schema 与推荐排序（P0 全 0） |
+| A7 | 声望 / 上座乘数幂等载体一张表 `venue_window_settlements` |
+| A8 | `ops_schedule.consumption` 改锚 `window_open` / `window_close`（仅双 none 时） |
+| A9 | 不加 `planned_close_at`；`closesAt = opened_at + window_length_hours`（默认 168h），`venue_reminder_at` 仅去重 |
+| A10 | 通知 `venue_window_open` + `venue_slot_reminder`，归 `category='window'`；深链按模板显式判 `/venue` |
+| A11 | 新增 `GET/PUT /api/club/venue-plan` + `POST /api/club/venue-plan/preview`，同版删除 `GET/POST /api/club/bookings` |
+| A12 | 只用 HTTP 状态码 + 中文 message，不引错误码枚举 |
+| A13 | 独立 `/venue` 页 + 首页卡 + 主场页入口；消费中心删 `BookingsCard` |
+| A14 | `activity_slots` 语义改「每窗档位上限」，默认 `'4'`，`0` = 关闭档期预订 |
+
+**规则（P0 九项）**
+
+1. **档位按容量派生**：`<15000 → 2`、`15000–29999 → 3`、`≥30000 → 4`，再被 `activity_slots` 钳制（硬上限 20）；无球场行按 2 槽。
+2. **容量驱动收入 − 成本栈 + 饱和**：毛收入 = 容量 × 票价 × 利用率（或固定额）× 设施乘数 × 冠名加成 × 声望乘数；同窗同活动饱和 `1 / 0.7 / 0.45 / 0.45` **按同类序位**乘在毛收入上；运营成本按档照付，草皮损坏独立掷。
+3. **五类活动 + 设施门槛**：演唱会；电竞（转播 L2）；企业日（商业 L1 + 声望 ≥20，收入 ×(0.5+rep/100)）；青训营（青训 L1）；开放日。预览逐槽给未解锁原因，保存/赠档必须拒。
+4. **后果落点**：关窗按槽落三条账本流水（活动收入 `+gross` / 草皮 `−damage` / 运营成本 `−opsCost`）；`venue_window_settlements` 一队一窗一行，重跑不二次加声望/乘数；`evolveFans` 关窗演化沿用既有口径。
+5. **入口与两条提醒**：`/venue` 页 + 开窗逐队 `venue_window_open` + 关窗前 `runVenueReminderTick` 对未排满队发 `venue_slot_reminder`。
+6. **窗口节奏 + 开关**：迁移第 ⑨ 条把 `consumption` 两端锚到窗口开关；`bookSlot` 保留 `isWindowOpen` + `assertOpOpen`，关窗后 PUT 409。
+7. **并发开窗唯一索引**：`idx_season_windows_open` 只允许一个 `status='open'`。
+8. **失败开窗不先重掷**：经纪人重掷并入 `openBatch`，并发/失败整批回滚。
+9. **验收**：§7.4 六条 + 本期补充（ops 闸、三流水、设施 0 级、C2 基线、前端 375 等）。
+
+**迁移 `0078_venue_slots_p0.sql`**（9 条）：唯一开窗索引 → `venue_reminder_at` → `venue_reputation` → `attendance_mod_matches` → 有界回填（正常 0 行）→ `venue_policy` → `city` → `venue_window_settlements` → `consumption` 锚点。第 1 条放最前：生产若已有 ≥2 个 open 行，迁移在第一条失败、四列一列未加，无半状态。`tests/d1.ts` 已登记。
+
+**数字验收（设计口径 / 单测锁定值）**
+
+- 单槽期望净额（演唱 / 电竞）：35000 **3.75 / 2.15**，22000 **2.06 / 1.24**，17000 **1.41 / 0.89**，12000 **0.76 / 0.54**；青训 0.7；开放日 0.2；企业日 rep20 **0.63**、rep100 **1.35**。
+- 饱和：35000 排 4 演唱逐槽 `3.75 / 2.175 / 0.8625 / 0.8625`，合计 **7.65**（无饱和 15.00）；2 演唱 + 2 电竞 ≈ **9.385**；联盟 48 槽全演唱 ≈ **52.59**（单窗口径）。
+- C2 模型基线（计划期只读复跑 `--esports=off`）：`incomeLeague=54.62`/窗 ×2 = **109.24m/季**（116.02 已退役）；按档两窗合计 35000 **13.24** / 22000 **7.02** / 17000 **5.29** / 12000 **2.99**。模型含 0.85 预订率等假设，与单槽静态公式分开验收。
+
+**交付**：新建 `src/core/venue.ts`（零 import 公式源）、`src/worker/venue-reminders.ts`、`src/db/migrations/0078_venue_slots_p0.sql`、`web/src/pages/venue/VenuePlanPage.tsx` + `venue-preview.ts` + `venue-plan.css`；重写 `src/worker/venue-ops.ts`；改 `src/worker/home.ts`（`activityTotal` 净现金 + `activityOpsCost` + K=5）、`window-machine.ts`（首窗清零 / 重掷并批 / 开窗通知）、`season-settle.ts`（声望 ×0.9 + 冠军通知读 `seasonsIdx`）、`event-ops.ts`（声望上下文 + 赠档门槛）、`routes/clubs.ts`（三端点、删旧 bookings）、`notify.ts` / `notify-meta.ts` / `config.ts` / `index.ts`；前端 `App.tsx` / `api.ts` / `queries.ts` / `notify-links.ts` / `Home.tsx` / `VenueTab.tsx` / `ShopPage.tsx` / `venueCards.tsx`。测试新增 `venue-core` / `venue-slots-migration` / `venue-reminder` / `venue-preview` / `VenuePlanPage`，并改写既有 venue-ops / home / window-machine / event-ops / season-settle / notify / notify-meta / notify-links / ops-schedule / naming-tiers / config / contract-ticks。
+
+**测试与闸门**：全量 `npm test` **144 文件 / 2390 例全绿**（exit 0，Duration 103.43s；较实现轮 +6 例：PUT 四道闸 / GET 字段契约 / 预览不写库 / 草皮等级降损 / 声望按上座率缩放 / 锁定活动仍计价）；`npm run typecheck` 三份 tsconfig **0 error**；`npm run build` 成功（7.18s）；`npm run db:migrate:local` 二次 apply 输出 `✅ No migrations to apply!`；`npm run test:e2e` **29/29**（含新增 ㉓ 场馆经营）。`scripts/e2e/smoke.mjs` 已加 `/venue` ㉓ 与 `ROUTES` 项；经济模型已入版本库 `scripts/venue/cadence-model.mjs`。
+
+**评审修复轮（实现后四路只读评审）**：修 🔴 两处——保存中仍可改档（成功后 `setDraft({})` 静默清空）与 PUT 四道闸的单测实际打在已无生产调用方的 `bookSlot` 上；🟡 若干——预览失败仍显示旧 totals、历史 `idle` 档显示「已排」、提醒先发后占位、临时窗按 168h 误报、`activity_slots=0` 仍发开窗信、K/钳制硬编码、超界档位清不掉、死类型 `BookingActivityOption/BookingsResponse/BookingResult` 与 `qk.bookings`、GET 契约与「预览不写库」无测试。保留口径：一档固定三条账本流水（含 0 元行）、`venue_window_settlements.bookings` 记档期行数。
+
+**遗留（如实登记）**
+
+- **R3**：事件预置（K=0, mod≠1）与活动同窗时，活动 5 场效果会被事件「一场即清」优先清掉；页脚注「与一次性事件叠加时以事件为准」，P1 若需独立列再做。
+- **R4**：企业日声望 ≥20 按每窗 +2~3 点需 2–3 季；保持门槛，试点窗文案注明「需累积声望」。
+- **R5**：设施全 0 时只剩演唱会/开放日；保持锁定（P0 验证门槛），采纳率是观察值不是硬门槛。
+- **R9**：重掷并入 `openBatch` 后单批语句变多；失败路径用 trigger 覆盖，D1 batch 上限内。
+- **R10**：`venue_policy` 只供方针卡；`city` 纯预留，P0 无读写入口。
+- **R12**：`consumption` 改锚后商城/冠名/档期一起进窗（设计要求）；运营可临时改回双 none，P1 再评估独立 `venue_booking` op_key。
+- 真实并发仅以唯一索引 + 串行/trigger 单测覆盖；QQ 模板白名单在 AstrBot 侧跨仓，本地无法证实。
+- **生产 apply / 回读 / push / 部署未执行**；本版不得写 Version id 或「已上线」。
+
 ## v6.52.0 · 非成长球员不计成长 XP（数据照收）+ 训练营 / 中国计划 / 里程碑三类结算过滤（2026-10-20）
 
 **状态**：**已上线 2026-10-20**（Version `0386f797-ee98-4f1e-bd3f-98cf809e0918`，push `878ad1b..b776ae8`；迁移 **0077** 已于 push 前 apply 生产）。判级 **minor**（规则变更 + 迁移 `0077` + 存量数据订正）；`package.json` 6.51.13 → **6.52.0**。发布顺序：apply **0077** → 只读回读 → push（CF Workers Builds 自动部署）→ 部署核对，已按序执行。计划文件 `memory/plan-v6.52.0-growth-nongrowable.md`，测试计划 `docs/test-plans/v6.52.0-growth-nongrowable.md`。
