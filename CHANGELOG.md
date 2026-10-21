@@ -6,7 +6,7 @@
 
 ## [v6.53.0] · 球场档期 P0（容量驱动收入 + 设施门槛 + 场馆经营页）（2026-10-20）
 
-**已实现、未上线**（2026-10-20 本地工作区；迁移 `0078` **尚未 apply 生产**、未 push、未部署；发布须用户下令）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
+**已上线 2026-10-21**（Version `a7df4fe3-3264-4724-b70a-7ad8c38ca54d`，push `b776ae8..7c4de47`；迁移 `0078_venue_slots_p0.sql` 已于 push 前 apply 生产）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
 
 **缘起与拍板**：用户锁定「场馆档期」独立页（Q8-1）与档期窗 = 转会窗；设计稿 `memory/design-venue-slots-explore.md` 与四份工作流在迁移号、文件名、枚举、通知 key、API 形状上的冲突按计划 §0 的 A1–A14 裁决收口（迁移 `0078` / `0078_venue_slots_p0.sql` / `idx_season_windows_open` / `venue_policy ∈ {'','money','fans','reputation'}` / `cost_base=0.275` + 每座成本 + 草皮独立掷 / P0 不直给死忠 / 一张 `venue_window_settlements` / `consumption` 锚到窗口开关 / 不加 `planned_close_at` / `venue_window_open` + `venue_slot_reminder` / 新 `venue-plan` 三端点并删旧 `bookings` / 只用状态码 + 中文 message / 独立 `/venue` 页 / `activity_slots` 改「每窗档位上限」默认 `'4'`）。P0 九项 = ①容量派生档位 ②容量驱动收入 − 成本栈 + 饱和 ③五类活动 + 设施门槛 ④关窗结算 + 账本 + 死忠演化 ⑤`/venue` 页 + 两条提醒 ⑥窗口节奏 + `consumption` 开关 ⑦并发开窗唯一索引 ⑧失败开窗不先重掷 ⑨六条验收。
 
@@ -42,7 +42,8 @@
 **实施偏差 / 如实登记**
 
 - **本轮为「实现 + 评审修复」两段**：实现后跑了四路只读代码评审，修掉 2 个 🔴（保存中仍可改档 → 成功后静默清空；PUT 四道闸的单测全打在已无生产调用方的 `bookSlot` 上）与一批 🟡（预览失败仍显示旧 totals、历史 `idle` 档显示「已排」、提醒先发后占位、临时窗误报、`slots=0` 仍发开窗信、硬编码 K/钳制、超界档位清不掉、死类型/死键、GET 契约与「预览不写库」无测试等）。
-- 本机闸门（2026-10-20 复核轮）：`npm run typecheck` 三份 tsconfig **0 error**、`npm run build` 成功、`npm run db:migrate:local` 应用 `0078` 且二次 apply 输出 `✅ No migrations to apply!`、`npm run test:e2e` **29/29**。生产 apply / 回读 / push / 部署**未执行**，本版不写 Version id、不写上线记录。
+- 本机闸门（2026-10-20 复核轮）：`npm run typecheck` 三份 tsconfig **0 error**、`npm run build` 成功、`npm run db:migrate:local` 应用 `0078` 且二次 apply 输出 `✅ No migrations to apply!`、`npm run test:e2e` **29/29**。
+- **上线记录（2026-10-21）**：apply 前只读确认生产 `season_windows` 中 `status='open'` **0 行**（唯一索引不会撞）→ `wrangler d1 migrations apply whl-club --remote` **Executed 10 commands / 14.45ms** → 回读：`stadiums` 新列 2、`clubs` 新列 2、`season_windows.venue_reminder_at` 1、`idx_season_windows_open` 1、`venue_window_settlements` 表 1、`ops_schedule.consumption` 锚 = `window_open`/`window_close`、`migrations list` 无待应用 → push `b776ae8..7c4de47` → CF 自动部署 Version **`a7df4fe3-3264-4724-b70a-7ad8c38ca54d`**（100%）；线上入口 `assets/index-DgP-mRWU.js` 与本地 `web/dist` 逐字一致；`/api/health`、`/api/players?limit=1`、`/api/market/listings`、`/api/clubs`、`/api/squads` 全 200；`/api/club/venue-plan` 未登录 **401**（路由在位，非 404）；`/venue` 200。
 - `scripts/e2e/smoke.mjs` 已加入 `/venue` 的 `㉓ 场馆经营` 场景与 `ROUTES` 项；经济模型已从 `scratch/` 复制进版本库 `scripts/venue/cadence-model.mjs`，C2 的 109.24 / 13.24 / 7.02 / 5.29 / 2.99 可在干净检出复跑。
 - 有意保留的口径：一档固定三条账本流水（即使金额为 0），`venue_window_settlements.bookings` 记档期表行数（含历史 `idle`）——两者都是幂等/审计凭据，与「真正结算了几档」分开看。
 - 真实并发仍由唯一索引兜底；单测以「串行第二次 409 + `BEFORE INSERT` trigger 中止回滚」覆盖，不等同 D1 真并发压测。

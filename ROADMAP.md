@@ -1524,7 +1524,7 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 ## v6.53.0 · 球场档期 P0（容量驱动收入 + 设施门槛 + 场馆经营页）（2026-10-20）
 
-**状态**：**已实现、未上线**（2026-10-20 本地工作区；迁移 `0078` **尚未 apply 生产**、未 push、未部署；发布须用户下令）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
+**状态**：**已上线 2026-10-21**（Version `a7df4fe3-3264-4724-b70a-7ad8c38ca54d`，push `b776ae8..7c4de47`；迁移 `0078` 已于 push 前 apply 生产并回读）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
 
 **缘起与拍板**：用户锁定「场馆经营」独立页（Q8-1）与「档期窗 = 转会窗」（Q7b=D，不新增窗口体系、不自动开窗）；设计稿 `memory/design-venue-slots-explore.md`。四份工作流在迁移号 / 文件名 / 枚举 / 通知 key / API 形状上的冲突按计划 §0 的 A1–A14 裁决收口：
 
