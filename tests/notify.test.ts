@@ -215,11 +215,8 @@ describe('通知投递（HMAC §12-1）', () => {
 describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
   it('确认赛果 → 双方教练各排一条；cron tick 投递 sent', async () => {
     const fx = freshEnv();
-    fx.sqlite.exec(`
-      INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active'), (2, '曼城', 'premier', 'active');
-      INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 11, '2026-01-01T00:00:00Z'), (2, 22, '2026-01-01T00:00:00Z');
-      INSERT INTO qq_links (user_id, qq, verified_at) VALUES (11, '10001', '2026-01-01T00:00:00Z'), (22, '20002', '2026-01-01T00:00:00Z');
-    `);
+    // 俱乐部留到开窗之后再插：v6.53.0 开窗会给每个 active 队排一条 venue_window_open，
+    // 本用例只数「确认赛果」那批，别把开窗提醒混进 4 行里
     fx.tour.exec(`
       CREATE TABLE tournament (id INTEGER PRIMARY KEY, name TEXT, status TEXT);
       CREATE TABLE stage (id INTEGER PRIMARY KEY, tournament_id INTEGER, kind TEXT, sort_order INTEGER, name TEXT, config_json TEXT DEFAULT '{}');
@@ -242,6 +239,11 @@ describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
     `);
     await post('/api/admin/seasons', { season: 3 }, 'tok-admin', fx.env);
     await post('/api/admin/windows/open', { season: 3, windowSeq: 1 }, 'tok-admin', fx.env);
+    fx.sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active'), (2, '曼城', 'premier', 'active');
+      INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 11, '2026-01-01T00:00:00Z'), (2, 22, '2026-01-01T00:00:00Z');
+      INSERT INTO qq_links (user_id, qq, verified_at) VALUES (11, '10001', '2026-01-01T00:00:00Z'), (22, '20002', '2026-01-01T00:00:00Z');
+    `);
     await post(
       '/api/admin/seasons/3/bind-tournament',
       { tournamentId: 5, competitionType: 'league_premier' },
@@ -541,5 +543,27 @@ describe('收件篮类目与跳转数据面（v6.40.0）', () => {
     expect('ref' in refOf('result_confirmed')).toBe(false);
     expect(typeof refOf('result_confirmed').text).toBe('string');
     // 老 payload（无 ref）与新 payload 在同一个列表里共存——列 API 已验证（上一条用例 id 13）
+  });
+});
+
+describe('场馆档期通知（v6.53.0 §6.1）', () => {
+  it('两枚模板的徽章与类目已登记（收件篮「窗口」页签）', async () => {
+    const { NOTIFY_META } = await import('../src/core/notify-meta.ts');
+    expect(NOTIFY_META.venue_window_open).toEqual({ label: '场馆开窗', category: 'window' });
+    expect(NOTIFY_META.venue_slot_reminder).toEqual({ label: '档期提醒', category: 'window' });
+  });
+
+  it('venue_window_open：开窗文案带赛季/窗号/本窗档位数', async () => {
+    const { renderNotification } = await import('../src/worker/notify.ts');
+    expect(renderNotification('venue_window_open', { season: 3, windowSeq: 2, slots: 4 })).toBe(
+      '【场馆开窗】S3 第 2 窗已开，本窗有 4 个档位可排，去「场馆经营」页安排。',
+    );
+  });
+
+  it('venue_slot_reminder：关窗前文案带剩余小时与未排档位', async () => {
+    const { renderNotification } = await import('../src/worker/notify.ts');
+    expect(
+      renderNotification('venue_slot_reminder', { season: 3, windowSeq: 2, slots: 4, booked: 1, hoursLeft: 24, remain: 3 }),
+    ).toBe('【档期提醒】S3 第 2 窗约 24 小时后关闭，你还有 3 个档位没排（已排 1/4）。');
   });
 });

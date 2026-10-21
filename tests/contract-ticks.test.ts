@@ -78,7 +78,8 @@ describe('currentWindow / regularWindowOrdinal', () => {
       { season: 2, windowSeq: 1, status: 'closed', closedAt: '2026-09-10T00:00:00.000Z' },
       { season: 1, windowSeq: 1, status: 'closed', closedAt: '2026-08-10T00:00:00.000Z' },
       { season: 2, windowSeq: 2, status: 'open' },
-      { season: 2, windowSeq: 3, status: 'open', isTemporary: 1 },
+      // 迁移 0078 的 idx_season_windows_open 只允许一个在开窗，临时窗在此按已关播种（ordinal 不读 status）
+      { season: 2, windowSeq: 3, status: 'closed', isTemporary: 1, closedAt: '2026-09-12T00:00:00.000Z' },
     ]);
     await expect(regularWindowOrdinal(db, 2, 1)).resolves.toBe(1);
     await expect(regularWindowOrdinal(db, 2, 2)).resolves.toBe(2);

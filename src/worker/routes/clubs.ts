@@ -21,7 +21,21 @@ import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingP
 import { acceptOffer, activateQueuedStatements, listClubOffers } from '../market-ops.ts';
 import { queueClubNotification } from '../notify.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
-import { bookSlot, listBookings, loadActivityCatalog, type VenueBookingRow } from '../venue-ops.ts';
+import { listBookings, loadActivityCatalog, loadVenueContext, venueSlotStatement, type ActivityCatalog, type VenueBookingRow } from '../venue-ops.ts';
+import {
+  ATTEND_MOD_MAX,
+  ATTEND_MOD_MIN,
+  activityUnlockReason,
+  quotePlan,
+  recommendPlan,
+  slotsForCapacity,
+  type VenueActivityDef,
+  type VenuePlanPick,
+  type VenuePolicy,
+  type VenueSlotQuote,
+  type VenueTotals,
+} from '../../core/venue.ts';
+import { assertOpOpen } from '../ops-schedule.ts';
 import { listClubEvents, parseEventOptions, resolveEvent } from '../event-ops.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -1298,74 +1312,438 @@ function bookingDto(row: VenueBookingRow, nameOf: (key: string) => string) {
   };
 }
 
-app.get('/club/bookings', async (c) => {
+/* ---------- 场馆档期（v6.53.0 P0，§4.5）：页数据 / 预览 / 保存 ---------- */
+
+const VENUE_POLICIES = ['money', 'fans', 'reputation'] as const;
+
+const VENUE_FACILITY_LABELS: Record<string, string> = {
+  commercial: '商业设施',
+  broadcast: '转播设施',
+  pitch: '草皮',
+  youth: '青训设施',
+  medical: '医疗设施',
+};
+
+/** 当前开着的窗（专查存档期页需要的 opened_at / venue_reminder_at；不扩被十几处调用的 getOpenWindow）。 */
+function getVenueWindow(db: Env['DB']) {
+  return db
+    .prepare(
+      `SELECT season, window_seq, opened_at, venue_reminder_at
+       FROM season_windows WHERE status = 'open' LIMIT 1`,
+    )
+    .first<{ season: number; window_seq: number; opened_at: string; venue_reminder_at: string }>();
+}
+
+interface VenuePlanState {
+  window: {
+    status: 'open';
+    season: number;
+    windowSeq: number;
+    openedAt: string;
+    closesAt: string | null;
+    reminderSent: boolean;
+  } | null;
+  capacity: number;
+  hasStadium: boolean;
+  reputation: number;
+  nextAttendanceMod: number;
+  attendanceModMatches: number;
+  slotCap: number;
+  slotCount: number;
+  facilities: Map<string, number>;
+  attendanceRate: number;
+  attendBuff: number;
+  catalog: ActivityCatalog;
+  booked: VenueBookingRow[];
+  policy: VenuePolicy | null;
+}
+
+/** 页数据的一次性取数（GET / 预览 / PUT 共用）：场馆、设施、冠名加成、活动目录、当前窗与已排档期。
+ *  PUT 把自己已读到的窗口行传进来复用（undefined = 自己查）：两次读之间可能关窗，写入必须绑定同一个窗。 */
+async function loadVenuePlanState(
+  env: Env,
+  clubId: number,
+  winOverride?: Awaited<ReturnType<typeof getVenueWindow>>,
+): Promise<VenuePlanState> {
+  const config = createConfigService(env.DB);
+  const [catalog, win, venue, naming, policyRow, windowHours] = await Promise.all([
+    loadActivityCatalog(env.DB),
+    winOverride === undefined ? getVenueWindow(env.DB) : Promise.resolve(winOverride),
+    loadVenueContext(env.DB, clubId),
+    getActiveNaming(env.DB, clubId),
+    env.DB.prepare(`SELECT venue_policy FROM clubs WHERE id = ?`).bind(clubId).first<{ venue_policy: string }>(),
+    config.getNumber('window_length_hours'),
+  ]);
+
+  const facilities = venue.facilities;
+  const capacity = venue.capacity;
+  const reputation = venue.venueReputation;
+  const nextAttendanceMod = venue.nextAttendanceMod;
+  const attendanceModMatches = venue.attendanceModMatches;
+  const slotCap = catalog.slotCap;
+  const slotCount = slotsForCapacity(capacity, slotCap);
+
+  const openedAt = win?.opened_at ?? '';
+  const openedMs = Date.parse(openedAt);
+  const closesAt =
+    win !== null && openedAt !== '' && Number.isFinite(openedMs)
+      ? new Date(openedMs + (windowHours ?? 168) * 3600_000).toISOString()
+      : null;
+
+  let attendanceRate = 1;
+  let booked: VenueBookingRow[] = [];
+  if (win !== null) {
+    const agg = await env.DB
+      .prepare(
+        `SELECT COALESCE(SUM(attendance), 0) AS total, COUNT(*) AS n
+         FROM match_attendance WHERE club_id = ? AND season = ? AND window_seq = ?`,
+      )
+      .bind(clubId, win.season, win.window_seq)
+      .first<{ total: number; n: number }>();
+    const played = agg?.n ?? 0;
+    attendanceRate = played > 0 && capacity > 0 ? (agg?.total ?? 0) / (capacity * played) : 1;
+    // 历史 'idle'（v6.9 的空置档）等同没排：不计已排、不作 diff 基准、不参与保存后合计
+    booked = (await listBookings(env.DB, clubId, win.season, win.window_seq)).filter(
+      (b) => b.activity_type !== 'idle',
+    );
+  }
+
+  // attendBuff：生效冠名品牌档位的活动收入加成（与 home.ts 关窗批同口径）
+  let attendBuff = 0;
+  if (naming !== null) {
+    const brand = await env.DB
+      .prepare(`SELECT tier FROM brand_pool WHERE brand = ?`)
+      .bind(naming.brand)
+      .first<{ tier: string }>();
+    const profiles = await loadTierProfiles(env.DB);
+    attendBuff = profiles[(brand?.tier ?? '口碑') as '头部' | '新兴' | '口碑'].attendBuff;
+  }
+
+  const policyRaw = policyRow?.venue_policy ?? '';
+  return {
+    window:
+      win === null
+        ? null
+        : {
+            status: 'open',
+            season: win.season,
+            windowSeq: win.window_seq,
+            openedAt,
+            closesAt,
+            reminderSent: (win.venue_reminder_at ?? '') !== '',
+          },
+    capacity,
+    hasStadium: venue.hasStadium,
+    reputation,
+    nextAttendanceMod,
+    attendanceModMatches,
+    slotCap,
+    slotCount,
+    facilities,
+    attendanceRate,
+    attendBuff,
+    catalog,
+    booked,
+    policy: policyRaw === '' ? null : (policyRaw as VenuePolicy),
+  };
+}
+
+function quotePicks(state: VenuePlanState, picks: VenuePlanPick[]): { quotes: VenueSlotQuote[]; totals: VenueTotals } {
+  return quotePlan({
+    capacity: state.capacity,
+    slots: state.slotCount,
+    defs: state.catalog.types,
+    facilities: state.facilities,
+    reputation: state.reputation,
+    attendanceRate: state.attendanceRate,
+    attendBuff: state.attendBuff,
+    picks,
+  });
+}
+
+function activityRequirements(def: VenueActivityDef, state: VenuePlanState) {
+  const requirements: { label: string; need: number; current: number }[] = [];
+  if (def.requiresFacility !== null) {
+    requirements.push({
+      label: VENUE_FACILITY_LABELS[def.requiresFacility] ?? def.requiresFacility,
+      need: def.requiresLevel,
+      current: state.facilities.get(def.requiresFacility) ?? 0,
+    });
+  }
+  if (def.requiresReputation !== null) {
+    requirements.push({ label: '场馆声望', need: def.requiresReputation, current: state.reputation });
+  }
+  return requirements;
+}
+
+/** GET/PUT/预览 共用的槽号校验（文案与 venueSlotStatement 的 400 口径一致）。
+ *  容量下调后已存在的超界档位仍要能清空，故把「已保存的槽号」也放行（见 PUT 的额外限制）。 */
+function assertVenueSlotNo(
+  state: VenuePlanState,
+  slotNo: number,
+  saved?: ReadonlyMap<number, VenueBookingRow>,
+): void {
+  const inRange = Number.isInteger(slotNo) && slotNo >= 1 && slotNo <= state.slotCount;
+  if (!inRange && !(saved?.has(slotNo) ?? false)) {
+    throw new HttpError(
+      400,
+      `档位序号应在 1-${state.slotCount} 之间（本队容量 ${state.capacity} 座，本窗 ${state.slotCount} 个档位）`,
+    );
+  }
+}
+
+app.get('/club/venue-plan', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再排档期');
-  const catalog = await loadActivityCatalog(c.env.DB);
-  const nameOf = (key: string) => catalog.types[key]?.name ?? key;
-  // 缺省看当前开窗；也可显式查历史（season + windowSeq 必须成对给，给了就得是整数，给错宁可报错也不静默换窗）
-  const seasonRaw = c.req.query('season');
-  const windowRaw = c.req.query('windowSeq');
-  const hasQuery = seasonRaw !== undefined || windowRaw !== undefined;
-  if (hasQuery && (seasonRaw === undefined || windowRaw === undefined)) {
-    throw new HttpError(400, '查历史档期要 season 与 windowSeq 成对给');
-  }
-  const seasonParam = Number(seasonRaw);
-  const windowParam = Number(windowRaw);
-  if (seasonRaw !== undefined && (!Number.isInteger(seasonParam) || !Number.isInteger(windowParam))) {
-    throw new HttpError(400, 'season / windowSeq 必须是整数');
-  }
-  const current = await getOpenWindow(c.env.DB);
-  const target = seasonRaw !== undefined ? { season: seasonParam, windowSeq: windowParam } : current;
-  const isOpen = !!target && !!current && current.season === target.season && current.windowSeq === target.windowSeq;
-  const rows = target ? await listBookings(c.env.DB, club.id, target.season, target.windowSeq) : [];
-  return c.json({
-    clubId: club.id,
-    open: isOpen,
-    season: target?.season ?? null,
-    windowSeq: target?.windowSeq ?? null,
-    slots: catalog.slots,
-    catalog: Object.entries(catalog.types).map(([key, def]) => ({
+  const state = await loadVenuePlanState(c.env, club.id);
+  const nameOf = (key: string) => state.catalog.types[key]?.name ?? key;
+
+  const picks: VenuePlanPick[] = state.booked.map((b) => ({ slotNo: b.slot_no, activity: b.activity_type }));
+  const plan = quotePicks(state, picks);
+  const quoteBySlot = new Map(plan.quotes.map((q) => [q.slotNo, q] as const));
+  const bookedBySlot = new Map(state.booked.map((b) => [b.slot_no, b] as const));
+
+  const activities = Object.entries(state.catalog.types).map(([key, def]) => {
+    const requirements = activityRequirements(def, state);
+    return {
       key,
       name: def.name,
-      // 预计收入区间（固定收入活动上下界相同）；实际值在窗末按档位种子结算
-      incomeMin: def.incomeMin ?? def.income ?? 0,
-      incomeMax: def.incomeMax ?? def.income ?? 0,
+      blurb: def.blurb,
+      unlocked: requirements.every((r) => r.current >= r.need),
+      requirements,
+    };
+  });
+
+  const slots = [];
+  for (let slotNo = 1; slotNo <= state.slotCount; slotNo++) {
+    const booked = bookedBySlot.get(slotNo) ?? null;
+    const current = quoteBySlot.get(slotNo) ?? null;
+    const options = Object.entries(state.catalog.types).map(([key, def]) => {
+      if (key === 'idle') {
+        return {
+          activity: 'idle',
+          gross: 0,
+          opsCost: 0,
+          expectedDamage: 0,
+          expectedNet: 0,
+          attendanceMod: 1,
+          reputationGain: 0,
+          unlockReason: null,
+        };
+      }
+      // 该槽若排此活动：用「完整草稿替换本槽」重算，同类序位与 preview 同口径
+      const trial = picks.filter((p) => p.slotNo !== slotNo).concat([{ slotNo, activity: key }]);
+      const quote = quotePicks(state, trial).quotes.find((q) => q.slotNo === slotNo);
+      if (!quote) throw new HttpError(500, `槽 ${slotNo} 的「${key}」报价算不出来`);
+      return {
+        activity: key,
+        gross: quote.gross,
+        opsCost: quote.opsCost,
+        expectedDamage: quote.expectedDamage,
+        expectedNet: quote.expectedNet,
+        attendanceMod: quote.attendanceMod,
+        reputationGain: quote.reputationGain,
+        unlockReason: activityUnlockReason(def, state.facilities, state.reputation),
+      };
+    });
+    slots.push({
+      slotNo,
+      saturation: current?.saturation ?? 1,
+      booked: booked?.activity_type ?? null,
+      quote:
+        current === null
+          ? null
+          : {
+              activity: current.activity,
+              gross: current.gross,
+              opsCost: current.opsCost,
+              expectedDamage: current.expectedDamage,
+              expectedNet: current.expectedNet,
+              attendanceMod: current.attendanceMod,
+              reputationGain: current.reputationGain,
+            },
+      options,
+    });
+  }
+
+  const existing = picks.filter((p): p is { slotNo: number; activity: string } => typeof p.activity === 'string' && p.activity !== 'idle');
+  const recommendations = Object.fromEntries(
+    VENUE_POLICIES.map((policy) => [
+      policy,
+      recommendPlan({
+        capacity: state.capacity,
+        slots: state.slotCount,
+        policy,
+        defs: state.catalog.types,
+        facilities: state.facilities,
+        reputation: state.reputation,
+        attendanceRate: state.attendanceRate,
+        attendBuff: state.attendBuff,
+        existing,
+      }),
+    ]),
+  );
+
+  return c.json({
+    clubId: club.id,
+    window: state.window,
+    capacity: state.capacity,
+    hasStadium: state.hasStadium,
+    slotCount: state.slotCount,
+    slotCap: state.slotCap,
+    reputation: state.reputation,
+    attendance: {
+      // 事件预置 K=0 也要显示「还剩 1 场」，不能显示 0
+      mod: state.nextAttendanceMod,
+      matchesLeft: state.nextAttendanceMod !== 1 ? Math.max(1, state.attendanceModMatches) : 0,
+      clamp: [ATTEND_MOD_MIN, ATTEND_MOD_MAX] as [number, number],
+    },
+    facilities: FACILITY_KEYS.map((key) => ({
+      key,
+      label: VENUE_FACILITY_LABELS[key] ?? key,
+      level: state.facilities.get(key) ?? 0,
     })),
-    bookings: rows.map((r) => bookingDto(r, nameOf)),
+    activities,
+    slots,
+    policy: state.policy,
+    recommendations,
+    bookings: state.booked.map((r) => bookingDto(r, nameOf)),
+    configWarning:
+      state.catalog.legacyKeys.length > 0
+        ? `activity_config 仍是旧格式（${state.catalog.legacyKeys.join('、')}）：旧配置只保留金额区间与掷点，饱和、设施门槛、声望加成按 P0 生效。`
+        : null,
   });
 });
 
-app.post('/club/bookings', async (c) => {
+app.post('/club/venue-plan/preview', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再排档期');
-  const body = (await c.req.raw.json().catch(() => null)) as { slotNo?: unknown; activityType?: unknown; season?: unknown; windowSeq?: unknown } | null;
-  if (typeof body?.activityType !== 'string') throw new HttpError(400, '缺活动类型');
-  const open = await getOpenWindow(c.env.DB);
-  if (!open) throw new HttpError(409, '现在没有开着的窗口，订不了档期');
-  if (body.season !== undefined && Number(body.season) !== open.season) throw new HttpError(409, '只能订当前开窗的档期');
-  if (body.windowSeq !== undefined && Number(body.windowSeq) !== open.windowSeq) throw new HttpError(409, '只能订当前开窗的档期');
-  const catalog = await loadActivityCatalog(c.env.DB);
-  const out = await bookSlot(
-    c.env,
-    {
-      clubId: club.id,
-      season: open.season,
-      windowSeq: open.windowSeq,
-      slotNo: Number(body.slotNo),
-      activityType: body.activityType,
-      actor: user.id,
-    },
-    catalog,
-  );
-  const nameOf = (key: string) => catalog.types[key]?.name ?? key;
-  // previous 供前端提示「原档期「演唱会」已被取代」
-  return c.json(
-    { booking: bookingDto(out.booking, nameOf), previous: out.previous ? bookingDto(out.previous, nameOf) : null },
-    201,
-  );
+  const body = (await c.req.raw.json().catch(() => null)) as { slots?: unknown } | null;
+  if (!Array.isArray(body?.slots)) throw new HttpError(400, 'slots 要给数组');
+  const state = await loadVenuePlanState(c.env, club.id);
+
+  const picks: VenuePlanPick[] = [];
+  const seen = new Set<number>();
+  for (const item of body.slots) {
+    if (item === null || typeof item !== 'object') throw new HttpError(400, 'slots 里每一项要是对象');
+    const slotNo = Number((item as { slotNo?: unknown }).slotNo);
+    assertVenueSlotNo(state, slotNo);
+    if (seen.has(slotNo)) throw new HttpError(400, `档位 ${slotNo} 重复给了`);
+    seen.add(slotNo);
+    const activity = (item as { activity?: unknown }).activity;
+    if (activity === null || activity === undefined || activity === 'idle') continue;
+    if (typeof activity !== 'string') throw new HttpError(400, 'activity 要么是活动键要么是 null');
+    if (state.catalog.types[activity] === undefined) throw new HttpError(400, `没有「${activity}」这种活动`);
+    picks.push({ slotNo, activity });
+  }
+
+  const plan = quotePicks(state, picks);
+  // 设施/声望不 reject：预览要能显示已排但已锁的项
+  const unlockReasons: Record<number, string> = {};
+  for (const quote of plan.quotes) {
+    const def = state.catalog.types[quote.activity];
+    if (!def) continue;
+    const reason = activityUnlockReason(def, state.facilities, state.reputation);
+    if (reason !== null) unlockReasons[quote.slotNo] = reason;
+  }
+  return c.json({ slots: plan.quotes, totals: plan.totals, unlockReasons });
+});
+
+app.put('/club/venue-plan', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再排档期');
+  const body = (await c.req.raw.json().catch(() => null)) as { slots?: unknown; policy?: unknown } | null;
+
+  // policy：省略 = 保持；null = 清空；非法枚举 400（先于窗口检查，避免「参数错也报没开窗」）
+  let policyChange: string | null | undefined;
+  if (body?.policy === undefined) policyChange = undefined;
+  else if (body.policy === null) policyChange = '';
+  else if (typeof body.policy === 'string' && (VENUE_POLICIES as readonly string[]).includes(body.policy)) policyChange = body.policy;
+  else throw new HttpError(400, '方针只能是 money / fans / reputation 或 null');
+
+  const win = await getVenueWindow(c.env.DB);
+  if (win === null) throw new HttpError(409, '现在没有开着的窗，档期保存不了');
+  // ops 闸：运营把 consumption 改成 absolute 或临时关闭时必须 409（前端 useOpsGate 只是提示）
+  await assertOpOpen(c.env.DB, 'consumption');
+
+  // 复用上面读到的窗口行：两次读之间若被关窗，档位会被写进已结算的窗
+  const state = await loadVenuePlanState(c.env, club.id, win);
+  const rawSlots = body?.slots;
+  if (rawSlots !== undefined && !Array.isArray(rawSlots)) throw new HttpError(400, 'slots 要给数组');
+  const savedBySlot = new Map(state.booked.map((b) => [b.slot_no, b] as const));
+  const changes: { slotNo: number; activity: string | null }[] = [];
+  const seen = new Set<number>();
+  for (const item of rawSlots ?? []) {
+    if (item === null || typeof item !== 'object') throw new HttpError(400, 'slots 里每一项要是对象');
+    if (!('activity' in item)) throw new HttpError(400, '每个槽要带 activity（清空给 null）');
+    const slotNo = Number((item as { slotNo?: unknown }).slotNo);
+    assertVenueSlotNo(state, slotNo, savedBySlot);
+    if (seen.has(slotNo)) throw new HttpError(400, `档位 ${slotNo} 重复给了`);
+    seen.add(slotNo);
+    const activityRaw = (item as { activity?: unknown }).activity;
+    if (activityRaw !== null && typeof activityRaw !== 'string') throw new HttpError(400, 'activity 要么是活动键要么是 null');
+    if (activityRaw === 'idle') throw new HttpError(400, '空置档不用保存，选「暂不排」即可');
+    if (activityRaw !== null && state.catalog.types[activityRaw] === undefined) {
+      throw new HttpError(400, `没有「${activityRaw}」这种活动`);
+    }
+    // 容量下调留下的超界档位：只允许清空或保持原活动，不允许换个活动继续排在界外
+    const saved = savedBySlot.get(slotNo) ?? null;
+    if (slotNo > state.slotCount && saved !== null && activityRaw !== null && activityRaw !== saved.activity_type) {
+      throw new HttpError(400, `档位 ${slotNo} 已超出本窗 ${state.slotCount} 档，只能清空或保持原活动`);
+    }
+    // 与已保存值相同的槽不重验设施/声望（否则设施降级后连「保持原样」都保存不了）
+    if ((savedBySlot.get(slotNo)?.activity_type ?? null) === activityRaw) continue;
+    // venueSlotStatement 只兜活动存在性，设施/声望门槛在写路径上自己拦
+    if (activityRaw !== null) {
+      const unlock = activityUnlockReason(state.catalog.types[activityRaw], state.facilities, state.reputation);
+      if (unlock !== null) throw new HttpError(400, unlock);
+    }
+    changes.push({ slotNo, activity: activityRaw });
+  }
+
+  const statements = [];
+  for (const change of changes) {
+    statements.push(
+      await venueSlotStatement(
+        c.env,
+        {
+          clubId: club.id,
+          season: win.season,
+          windowSeq: win.window_seq,
+          slotNo: change.slotNo,
+          activityType: change.activity,
+          // 覆盖事件赠档的 '事件' 时必须清回 ''，否则 GET 的 bookedBy 会显示错来源
+          bookedBy: '',
+        },
+        state.catalog,
+      ),
+    );
+  }
+  if (policyChange !== undefined) {
+    statements.push(c.env.DB.prepare(`UPDATE clubs SET venue_policy = ? WHERE id = ?`).bind(policyChange, club.id));
+  }
+  if (statements.length > 0) await c.env.DB.batch(statements);
+
+  // 保存后的整窗预期口径：已保存值 + 本次改动
+  const finals = new Map<number, string>();
+  for (const b of state.booked) finals.set(b.slot_no, b.activity_type);
+  for (const change of changes) {
+    if (change.activity === null) finals.delete(change.slotNo);
+    else finals.set(change.slotNo, change.activity);
+  }
+  const picks: VenuePlanPick[] = [...finals.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([slotNo, activity]) => ({ slotNo, activity }));
+  const plan = quotePicks(state, picks);
+
+  return c.json({
+    slots: plan.quotes,
+    policy: policyChange === undefined ? state.policy : policyChange === '' ? null : policyChange,
+    totals: plan.totals,
+  });
 });
 
 /* ---------- 随机事件（v6.11.0，D2）：待选事件 + 玩家选定 ---------- */

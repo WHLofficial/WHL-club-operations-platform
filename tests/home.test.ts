@@ -318,6 +318,134 @@ describe('窗末主场结算：维护费 + 死忠演化防双记账（v1.5.0 / v
   });
 });
 
+describe('v6.53.0 档期净现金口径 + 上座乘数 K=5 消费', () => {
+  /** 档期预订：一队一窗一槽一活动（0046 的 UNIQUE(club_id, season, window_seq, slot_no)） */
+  function insertBooking(sqlite: DatabaseSync, clubId: number, slotNo: number, activityType: string, season = 1, windowSeq = 1) {
+    sqlite
+      .prepare(
+        `INSERT INTO venue_bookings (club_id, season, window_seq, slot_no, activity_type, created_at)
+         VALUES (?, ?, ?, ?, ?, '2026-07-01T00:00:00Z')`,
+      )
+      .run(clubId, season, windowSeq, slotNo, activityType);
+  }
+
+  function venueOf(sqlite: DatabaseSync, clubId = 1) {
+    return sqlite
+      .prepare('SELECT venue_reputation, next_attendance_mod, attendance_mod_matches FROM stadiums WHERE club_id = ?')
+      .get(clubId) as { venue_reputation: number; next_attendance_mod: number; attendance_mod_matches: number };
+  }
+
+  /** 主场钩子连场：每场一个新 match_id（幂等闸按 match_attendance 主键早退，重号会被吞掉） */
+  async function playMatches(fx: ReturnType<typeof freshEnv>, count: number, from = 100) {
+    for (let i = 0; i < count; i++) {
+      const { statements } = await matchAttendanceStatements(fx.env, {
+        matchId: from + i,
+        season: 1,
+        windowSeq: 1,
+        homeTeamId: 11,
+        awayTeamId: 12,
+      });
+      expect(statements.length).toBeGreaterThan(0);
+      await fx.env.DB.batch(statements);
+    }
+  }
+
+  it('activityTotal 是净现金（gross − opsCost − damage），activityOpsCost 单独披露，与账本三行同源', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedStadium(fx.sqlite, 1, { capacity: 20000, shell: 90 });
+    insertBooking(fx.sqlite, 1, 1, 'concert');
+    const { statements, summary } = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
+    await fx.env.DB.batch(statements);
+    expect(summary.activityClubs).toBe(1);
+    // 净额三条之和：activity/booking(+gross) + maintenance/booking(−damage) + maintenance/booking_ops(−opsCost)
+    const rows = fx.sqlite
+      .prepare(`SELECT kind, ref_type, amount FROM ledger_entries WHERE ref_type IN ('booking', 'booking_ops')`)
+      .all() as { kind: string; ref_type: string; amount: number }[];
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => `${r.kind}/${r.ref_type}`).sort()).toEqual(['activity/booking', 'maintenance/booking', 'maintenance/booking_ops']);
+    const net = rows.reduce((acc, r) => acc + r.amount, 0);
+    expect(summary.activityTotal).toBeCloseTo(net, 2);
+    const ops = rows.find((r) => r.ref_type === 'booking_ops')!;
+    expect(ops.amount).toBeLessThan(0);
+    // summary 是 round2 聚合口径，账本行保留原始三位小数 ⇒ 只比到分位
+    expect(Math.abs(summary.activityOpsCost + ops.amount)).toBeLessThan(0.01);
+    expect(summary.activityOpsCost).toBeGreaterThan(0);
+    expect(summary.activityTotal).toBeGreaterThan(0);
+  });
+
+  it('关窗重放幂等：venue_window_settlements 只一行，声望不二次加、K 不二次置 5', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedStadium(fx.sqlite, 1, { capacity: 20000, shell: 90 });
+    insertBooking(fx.sqlite, 1, 1, 'open_day');
+    const first = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
+    await fx.env.DB.batch(first.statements);
+    const afterFirst = venueOf(fx.sqlite);
+    expect(afterFirst.venue_reputation).toBeCloseTo(1, 6); // open_day reputation_gain = 1
+    expect(afterFirst.next_attendance_mod).toBeCloseTo(1.005, 6);
+    expect(afterFirst.attendance_mod_matches).toBe(5);
+    // 同窗重放：INSERT OR IGNORE 被忽略 ⇒ changes()=0 ⇒ 第二条 UPDATE 整条不生效
+    const again = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
+    await fx.env.DB.batch(again.statements);
+    expect(fx.sqlite.prepare('SELECT COUNT(*) AS n FROM venue_window_settlements').get()).toEqual({ n: 1 });
+    expect(venueOf(fx.sqlite)).toEqual(afterFirst);
+  });
+
+  it('K=5：挂 5 场的乘数每场 −1，第 5 场后回 1 / 0（K 语义只此一处，改 <1 会多一场）', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedStadium(fx.sqlite, 1, { capacity: 20000, shell: 90 });
+    fx.sqlite.prepare('UPDATE stadiums SET next_attendance_mod = 0.95, attendance_mod_matches = 5 WHERE club_id = 1').run();
+    expect(venueOf(fx.sqlite)).toMatchObject({ next_attendance_mod: 0.95, attendance_mod_matches: 5 });
+    for (let elapsed = 1; elapsed <= 5; elapsed++) {
+      await playMatches(fx, 1, 200 + elapsed); // 每轮一个新 match_id 才能进到消费语句
+      const stage = venueOf(fx.sqlite);
+      if (elapsed < 5) {
+        // 前 4 场只减 K、乘数本身不动（K=1 时仍是最后一支「还没用完」的 0.95）
+        expect(stage).toMatchObject({ next_attendance_mod: 0.95 });
+        expect(stage.attendance_mod_matches).toBe(5 - elapsed);
+      }
+    }
+    expect(venueOf(fx.sqlite)).toMatchObject({ next_attendance_mod: 1, attendance_mod_matches: 0 });
+  });
+
+  it('事件预置（K=0）一场即清：0.95 → 1 / 0；mod=1.5 同口径', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedStadium(fx.sqlite, 1, { capacity: 20000, shell: 90 });
+    fx.sqlite.prepare('UPDATE stadiums SET next_attendance_mod = 1.5, attendance_mod_matches = 0 WHERE club_id = 1').run();
+    await playMatches(fx, 1);
+    expect(venueOf(fx.sqlite)).toMatchObject({ next_attendance_mod: 1, attendance_mod_matches: 0 });
+  });
+
+  it('事件预置 + 档期活动同窗：先乘活动 mod 仍留 K=0，下一场即清（不置 5）', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedStadium(fx.sqlite, 1, { capacity: 20000, shell: 90 });
+    fx.sqlite.prepare('UPDATE stadiums SET next_attendance_mod = 1.5, attendance_mod_matches = 0 WHERE club_id = 1').run();
+    insertBooking(fx.sqlite, 1, 1, 'concert'); // attend_mod 0.95
+    const settle = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
+    await fx.env.DB.batch(settle.statements);
+    expect(venueOf(fx.sqlite)).toMatchObject({ next_attendance_mod: 1.425, attendance_mod_matches: 0 });
+    await playMatches(fx, 1);
+    expect(venueOf(fx.sqlite)).toMatchObject({ next_attendance_mod: 1, attendance_mod_matches: 0 });
+  });
+
+  it('多档乘数按聚合值写一次：open_day 1.005 × youth_camp 1.007 = 1.012 / K=5', async () => {
+    const fx = freshEnv();
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedStadium(fx.sqlite, 1, { capacity: 20000, shell: 90 });
+    fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (1, 'youth', 1)`).run();
+    insertBooking(fx.sqlite, 1, 1, 'open_day');
+    insertBooking(fx.sqlite, 1, 2, 'youth_camp');
+    const settle = await windowHomeStatements(fx.env, 1, 1, { chargeNaming: true });
+    await fx.env.DB.batch(settle.statements);
+    // 1.005 × 1.007 = 1.012035 → round3 1.012；按队一次 UPDATE ⇒ K 是 5 不是 10
+    expect(venueOf(fx.sqlite)).toMatchObject({ next_attendance_mod: 1.012, attendance_mod_matches: 5 });
+  });
+});
+
 describe('v6.6.3 订正：青训等级接入死忠演化 + 战绩按 tour 队 id 查赛果', () => {
   function seedFormWins(sqlite: DatabaseSync, count: number) {
     // tour 队 11 近 N 场全胜（club 1 ↔ tour 11 刻意不等，赛果表只认 tour id）

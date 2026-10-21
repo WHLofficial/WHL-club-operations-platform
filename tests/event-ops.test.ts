@@ -183,6 +183,7 @@ function ctxOf(patch: Partial<EventClubContext> = {}): EventClubContext {
       build_credit: 0,
       next_attendance_mod: 1,
       next_weather: '',
+      venue_reputation: 0,
     },
     balance: 50,
     facilities: new Map<string, number>(),
@@ -813,6 +814,55 @@ describe('11 键效果与钳幅（点名触发逐键验证）', () => {
     seedClub(fx2.auth, fx2.sqlite, 1, 11);
     const noWin = await fireNamed(fx2, 'gift_nowin', { booking_gift: { type: 'concert' } });
     expect(noWin.event.notes).toEqual(['赠档 演唱会（现在没有开着的窗口，落空）']);
+  });
+
+  it('booking_gift：设施闸挡电竞、补到 L2 后放行（v6.53.0 P0）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.auth, fx.sqlite, 1, 11);
+    openWindow(fx.sqlite);
+
+    const locked = await fireNamed(fx, 'gift_locked', { booking_gift: { type: 'esports' } });
+    expect(locked.event.notes).toEqual(['赠档 电竞赛事（需要转播设施 L2（当前 L0），落空）']);
+    expect(locked.event.effects.booking_gift).toBeUndefined();
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM venue_bookings`)!.n).toBe(0);
+
+    fx.sqlite.prepare(`INSERT INTO club_facilities (club_id, facility_key, level) VALUES (1, 'broadcast', 2)`).run();
+    const ok = await fireNamed(fx, 'gift_ok', { booking_gift: { type: 'esports' } });
+    expect(ok.event.effects.booking_gift).toEqual({ slot: 1, type: 'esports' });
+    expect(ok.event.notes).toEqual(['赠档 档1 电竞赛事']);
+    expect(
+      sqlGet<{ booked_by: string; activity_type: string }>(
+        fx.sqlite,
+        `SELECT booked_by, activity_type FROM venue_bookings WHERE club_id = 1 AND slot_no = 1`,
+      ),
+    ).toEqual({ booked_by: '事件', activity_type: 'esports' });
+  });
+
+  it('booking_gift：档位上限按 ctx.stadium.capacity（12000→2 槽 / 35000→4 槽）', async () => {
+    const small = freshEnv();
+    seedClub(small.auth, small.sqlite, 1, 11, { capacity: 12000 });
+    openWindow(small.sqlite);
+    small.sqlite
+      .prepare(
+        `INSERT INTO venue_bookings (club_id, season, window_seq, slot_no, activity_type, booked_by, created_at)
+         VALUES (1, 1, 1, 1, 'idle', '', '2026-01-01T00:00:00Z'), (1, 1, 1, 2, 'idle', '', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    const smallFull = await fireNamed(small, 'gift_small_full', { booking_gift: { type: 'concert' } });
+    expect(smallFull.event.notes).toEqual(['赠档 演唱会（档位已满，落空）']);
+
+    const big = freshEnv();
+    seedClub(big.auth, big.sqlite, 1, 11, { capacity: 35000 });
+    openWindow(big.sqlite);
+    big.sqlite
+      .prepare(
+        `INSERT INTO venue_bookings (club_id, season, window_seq, slot_no, activity_type, booked_by, created_at)
+         VALUES (1, 1, 1, 1, 'idle', '', '2026-01-01T00:00:00Z'), (1, 1, 1, 2, 'idle', '', '2026-01-01T00:00:00Z'),
+                (1, 1, 1, 3, 'idle', '', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    const bigGift = await fireNamed(big, 'gift_big', { booking_gift: { type: 'concert' } });
+    expect(bigGift.event.effects.booking_gift).toEqual({ slot: 4, type: 'concert' });
   });
 
   it('satisfaction：落 naming_contracts（钳 ±0.5、[0,2]、PENDING_GUARD），无冠名落空', async () => {

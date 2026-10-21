@@ -1,6 +1,6 @@
 // 主场页签（v6.30.0 A 段：自 pages/club/CoachPanel.tsx 拆入，自家专属）。
-// 只读档案 + 近期主场战报（天气/上座/票务/商业/转播），设施经营/冠名市场/球场档期三卡已在
-// v6.26.0 整体迁入消费中心，这里只留一行入口（取代原「消费中心」大卡）。
+// 只读档案 + 近期主场战报（天气/上座/票务/商业/转播）；设施经营/冠名市场两卡在消费中心
+// （v6.26.0 迁入），球场档期已于 v6.53.0 挪到独立的场馆经营页（/venue），这里只留两行入口。
 // 战报查询（useHomeMatches）住在本组件里：只有激活「主场」页签才挂载、才发请求。
 import { Link } from 'react-router';
 import { useHomeMatches } from '../../lib/queries.ts';
@@ -123,6 +123,8 @@ export default function VenueTab({ home }: { home: StadiumInfo | null }) {
       {home && <HomeMatchesCard />}
       <p className="hint">
         <Link to="/shop">去消费中心经营设施 →</Link>
+        {' · '}
+        <Link to="/venue">去场馆经营排档期 →</Link>
       </p>
     </div>
   );

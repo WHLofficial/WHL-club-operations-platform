@@ -24,6 +24,7 @@ import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
 import { SLOT_MIN, listBookings, loadActivityCatalog, seededUnit, type ActivityCatalog } from './venue-ops.ts';
+import { activityUnlockReason, slotsForCapacity } from '../core/venue.ts';
 import { tourTeamIdsByClub } from './prizes.ts';
 import { loadHeatRules, type HeatRules } from './naming-ops.ts';
 import { spawnVisitOffer } from './market-ops.ts';
@@ -293,6 +294,8 @@ export interface EventStadium {
   build_credit: number;
   next_attendance_mod: number;
   next_weather: string;
+  /** 场馆声望（v6.53.0 P0）：赠档的 activityUnlockReason 门槛输入，无 stadiums 行按 0 */
+  venue_reputation: number;
 }
 
 export interface EventClubContext {
@@ -357,7 +360,7 @@ export async function loadEventContexts(
     env.DB
       .prepare(
         `SELECT club_id, name, capacity, tier, shell_influence, bonus_points, fans, build_credit,
-                next_attendance_mod, next_weather
+                next_attendance_mod, next_weather, venue_reputation
          FROM stadiums WHERE club_id IN (${inList})`,
       )
       .bind(...ids)
@@ -414,6 +417,7 @@ export async function loadEventContexts(
       build_credit: 0,
       next_attendance_mod: 1,
       next_weather: '',
+      venue_reputation: 0,
     };
     const facilityMap = new Map<string, number>();
     for (const f of facilities.results) if (f.club_id === clubId) facilityMap.set(f.facility_key, f.level);
@@ -1005,10 +1009,16 @@ export async function applyEventEffects(
           notes.push(`赠档 ${activityName(ec.catalog, atype)}（现在没有开着的窗口，落空）`);
           break;
         }
+        // v6.53.0 P0：赠档不得绕过设施/声望闸（与 venueSlotStatement 同口径，锁了就不写库）
+        const lockedBy = activityUnlockReason(ec.catalog.types[atype], ctx.facilities, ctx.stadium.venue_reputation);
+        if (lockedBy !== null) {
+          notes.push(`赠档 ${activityName(ec.catalog, atype)}（${lockedBy}，落空）`);
+          break;
+        }
         const rows = await listBookings(db, ctx.clubId, ec.openWindow.season, ec.openWindow.windowSeq);
         const usedSlots = new Set(rows.map((r) => r.slot_no));
         let slot = 0;
-        for (let i = SLOT_MIN; i <= ec.catalog.slots; i++) {
+        for (let i = SLOT_MIN; i <= slotsForCapacity(ctx.stadium.capacity, ec.catalog.slotCap); i++) {
           if (!usedSlots.has(i)) {
             slot = i;
             break;

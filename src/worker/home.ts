@@ -81,6 +81,13 @@ export interface StadiumRow {
   fans_window_start: number;
 }
 
+/** v6.53.0：窗末档期结算需要的球场列（上座乘数与声望）——只在 windowHomeStatements 里批量取。 */
+export interface VenueStadiumRow extends StadiumRow {
+  venue_reputation: number;
+  next_attendance_mod: number;
+  attendance_mod_matches: number;
+}
+
 export async function loadAttendanceModel(db: Env['DB']): Promise<AttendanceModel> {
   const config = createConfigService(db);
   const raw = await config.get('attendance_model');
@@ -331,10 +338,10 @@ export async function matchAttendanceStatements(
   if (existing) return { statements: [], detail: null };
   const stadium = await env.DB
     .prepare(
-      'SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, fans_window_start, next_attendance_mod, next_weather FROM stadiums WHERE club_id = ?',
+      'SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, fans_window_start, next_attendance_mod, attendance_mod_matches, next_weather FROM stadiums WHERE club_id = ?',
     )
     .bind(clubId)
-    .first<StadiumRow & { next_attendance_mod: number; next_weather: string }>();
+    .first<StadiumRow & { next_attendance_mod: number; attendance_mod_matches: number; next_weather: string }>();
   if (!stadium) return { statements: [], detail: null };
 
   // v6.10.0 随机事件预置（一次性消费）：weather_set 写了 next_weather 就用预置天气。
@@ -453,11 +460,18 @@ export async function matchAttendanceStatements(
       )
       .bind(input.matchId, clubId, input.season, input.windowSeq, weather, attendance, ticket, commercial, broadcast),
   );
-  // 事件预置是一次性的：本场消费掉即清零（同批原子；没预置时这两条也是写回默认值）
+  // 上座乘数消费（v6.53.0）：K = attendance_mod_matches 是本乘数还剩几场。
+  // K>1 ⇒ 本场用完减 1 继续挂；K<=1 ⇒ 这是最后一场，用完归 1（事件预置 K=0 也走这条，一场即清）。
+  // next_weather 保持清零（随机事件预置的天气仍是一次性的）。
   statements.push(
     env.DB
       .prepare(
-        `UPDATE stadiums SET next_attendance_mod = 1, next_weather = '', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`,
+        `UPDATE stadiums SET
+           next_attendance_mod = CASE WHEN attendance_mod_matches <= 1 THEN 1 ELSE next_attendance_mod END,
+           attendance_mod_matches = CASE WHEN attendance_mod_matches > 0 THEN attendance_mod_matches - 1 ELSE 0 END,
+           next_weather = '',
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE club_id = ?`,
       )
       .bind(clubId),
   );
@@ -477,7 +491,11 @@ export interface HomeWindowSummary {
   namingClubs: number;
   namingTotal: number;
   activityClubs: number;
+  /** v6.53.0：本窗活动**净现金**（gross − opsCost − damage），不再是毛收入 |
+   * 与流水页三条（activity/booking + maintenance/booking_ops + maintenance/booking）之和一致 */
   activityTotal: number;
+  /** v6.53.0：本窗活动运营成本合计（已含在 activityTotal 的减项里，单独披露便于对账） */
+  activityOpsCost: number;
   moodClubs: number;
   terminatedClubs: number;
   /** v6.14.0 C3 招商轮：本轮定向递出的报价数 / 接班转正的队数（临时窗恒 0） */
@@ -548,13 +566,21 @@ export async function windowHomeStatements(
   const profiles = opts.chargeNaming ? await loadTierProfiles(env.DB) : null;
   const satisfyCfg = opts.chargeNaming ? await loadSatisfyConfig(env.DB) : null;
 
-  const stadiums = await env.DB.prepare('SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, fans_window_start FROM stadiums').all<StadiumRow>();
-  // 设施等级一次批量查（青训级 → evolveFans 涨粉系数 ×(1+0.03n)，v6.6.3；草皮级 → 档期活动的收入加成与损坏减免，v6.9.0）
+  const stadiums = await env.DB
+    .prepare(
+      // v6.53.0：venue_reputation / next_attendance_mod / attendance_mod_matches 是窗末档期结算的 VenueContext 来源
+      'SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, fans_window_start, venue_reputation, next_attendance_mod, attendance_mod_matches FROM stadiums',
+    )
+    .all<VenueStadiumRow>();
+  // 设施等级一次批量查（青训级 → evolveFans 涨粉系数 ×(1+0.03n)，v6.6.3；草皮级 → 档期活动的收入加成与损坏减免，v6.9.0；
+  // v6.53.0 追加 broadcast/commercial —— 活动解锁门槛与容量定价要用到转播/商业等级）
   const facilityRows = await env.DB
-    .prepare(`SELECT club_id, facility_key, level FROM club_facilities WHERE facility_key IN ('youth', 'pitch')`)
+    .prepare(`SELECT club_id, facility_key, level FROM club_facilities WHERE facility_key IN ('youth', 'pitch', 'broadcast', 'commercial')`)
     .all<{ club_id: number; facility_key: string; level: number }>();
   const youthLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'youth').map((r) => [r.club_id, r.level]));
   const pitchLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'pitch').map((r) => [r.club_id, r.level]));
+  // 转播等级进 VenueContext（电竞门槛）；商业等级本函数不用（GET/preview 侧由 loadVenueContext 取）
+  const broadcastLevels = new Map(facilityRows.results.filter((r) => r.facility_key === 'broadcast').map((r) => [r.club_id, r.level]));
   const tourMap = await tourTeamIdsByClub(env, stadiums.results.map((s) => s.club_id));
   // v6.28.0 A 段：级别批量派生（预载 tour 映射 → 一次 AUTH_DB + 一次 TOUR_DB，别逐队派生 20 次）
   const leagues = await deriveClubLeagues(env, season, stadiums.results.map((s) => s.club_id), tourMap);
@@ -570,6 +596,7 @@ export async function windowHomeStatements(
     namingTotal: 0,
     activityClubs: 0,
     activityTotal: 0,
+    activityOpsCost: 0,
     moodClubs: 0,
     terminatedClubs: 0,
     marketOffers: 0,
@@ -697,17 +724,23 @@ export async function windowHomeStatements(
       }
     }
 
-    // 档期活动结算（v6.9.0）：本窗已订档位的收入与草皮损坏（确定性伪随机；无订单则零开销）；
-    // attendBuff = 生效冠名品牌档位的活动收入加成（v6.13.0 C2，头部 +2%）
+    // 档期活动结算（v6.9.0 起，v6.53.0 改净现金口径）：毛收入/运营成本/草皮损坏分开算，
+    // summary 报净额；声望与上座乘数的窗末副作用也由它同批追加（按队一次，重放幂等靠 venue_window_settlements）。
+    // attendBuff = 生效冠名品牌档位的活动收入加成（v6.13.0 C2，头部 +2%）；attendanceRate 与上面同口径。
     const activity = await windowActivityStatements(env, s.club_id, season, windowSeq, activityCatalog, {
-      pitch: pitchLevels.get(s.club_id) ?? 0,
-      youth: youthLevels.get(s.club_id) ?? 0,
+      capacity: s.capacity,
+      reputation: s.venue_reputation,
+      pitchLevel: pitchLevels.get(s.club_id) ?? 0,
+      youthLevel: youthLevels.get(s.club_id) ?? 0,
+      broadcastLevel: broadcastLevels.get(s.club_id) ?? 0,
+      attendanceRate: attendRate,
       attendBuff: profile?.attendBuff ?? 0,
     });
     if (activity.statements.length > 0) {
       statements.push(...activity.statements);
       summary.activityClubs++;
-      summary.activityTotal = Math.round((summary.activityTotal + activity.income - activity.extraMaintenance) * 100) / 100;
+      summary.activityTotal = Math.round((summary.activityTotal + activity.net) * 100) / 100;
+      summary.activityOpsCost = Math.round((summary.activityOpsCost + activity.opsCost) * 100) / 100;
     }
   }
   // 经营信号注记（v6.12.0 D3）：给本窗有非中性信号的队各排一条通知（本仓没有关窗汇总通知，

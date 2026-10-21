@@ -22,6 +22,7 @@ import {
 } from '../src/core/ops-schedule.ts';
 import {
   assertOpOpen,
+  opBlockReason,
   opsScheduleView,
   resetOpsScheduleCache,
   saveOpsRow,
@@ -185,14 +186,21 @@ describe('时刻表注册表与解析（纯函数）', () => {
 });
 
 describe('迁移种子与视图', () => {
-  it('迁移后 11 行全「不限制」、requires_window 与注册表一致、新列就位', () => {
+  it('迁移后 11 行：consumption 随窗起止，其余全「不限制」、requires_window 与注册表一致、新列就位', () => {
     const fx = freshEnv();
     const rows = sqlAll<{ op_key: string; start_anchor: string; end_anchor: string; requires_window: number }>(
       fx.sqlite,
       'SELECT op_key, start_anchor, end_anchor, requires_window FROM ops_schedule ORDER BY rowid',
     );
     expect(rows.length).toBe(11);
-    expect(rows.every((r) => r.start_anchor === 'none' && r.end_anchor === 'none')).toBe(true);
+    // 0078 只把消费档期改成随窗两锚（window_open / window_close），其余 10 行不动
+    expect(rows.find((r) => r.op_key === 'consumption')).toMatchObject({
+      start_anchor: 'window_open',
+      end_anchor: 'window_close',
+    });
+    expect(
+      rows.filter((r) => r.op_key !== 'consumption').every((r) => r.start_anchor === 'none' && r.end_anchor === 'none'),
+    ).toBe(true);
     for (const meta of OPS_KEYS) {
       const row = rows.find((r) => r.op_key === meta.key);
       expect(row, meta.key).toBeDefined();
@@ -205,12 +213,17 @@ describe('迁移种子与视图', () => {
     expect(sqlGet<{ name: string }>(fx.sqlite, "SELECT name FROM pragma_table_info('negotiation_sessions') WHERE name = 'reminded_at'")).toBeDefined();
   });
 
-  it('视图：默认全「不限制」，公开端点不鉴权可读', async () => {
+  it('视图：默认只有消费档期「进行中」，其余 10 行「不限制」', async () => {
     const fx = freshEnv();
     seedWorld(fx);
     const view = await opsScheduleView(fx.env.DB);
     expect(view.rows.length).toBe(11);
-    expect(view.rows.every((r) => r.state === 'unrestricted' && r.stateLabel === '不限制')).toBe(true);
+    expect(view.rows.find((r) => r.key === 'consumption')).toMatchObject({ state: 'open', stateLabel: '进行中' });
+    expect(
+      view.rows
+        .filter((r) => r.key !== 'consumption')
+        .every((r) => r.state === 'unrestricted' && r.stateLabel === '不限制'),
+    ).toBe(true);
     expect(view.window).toMatchObject({ openedAt: '2026-07-01T00:00:00Z' });
     expect(typeof view.now).toBe('string');
 
@@ -218,6 +231,17 @@ describe('迁移种子与视图', () => {
     expect(res.status).toBe(200);
     const out = (await res.json()) as { rows: unknown[] };
     expect(out.rows.length).toBe(11);
+  });
+
+  it('视图：没开窗时消费档期「已结束」，闸门给出 409 文案', async () => {
+    const fx = freshEnv();
+    seedWorld(fx, { windowOpen: false });
+    const view = await opsScheduleView(fx.env.DB);
+    expect(view.rows.find((r) => r.key === 'consumption')).toMatchObject({ state: 'closed', stateLabel: '已结束' });
+    const block = await opBlockReason(fx.env.DB, 'consumption');
+    expect(block?.status).toBe(409);
+    expect(block?.message).toBeTruthy();
+    await expect(assertOpOpen(fx.env.DB, 'consumption')).rejects.toMatchObject({ status: 409 });
   });
 });
 

@@ -1,0 +1,308 @@
+/* 场馆经营页（v6.53.0 P0）。
+   只新增 .vop- 前缀规则：色值/圆角/描边全走 styles.css 的 :root 令牌与既有 .card/.btn/.badge 语汇，不新造设计系统。
+   注意全局没有 .mono 规则（styles.css:840 已注明「.mono 没有全局规则」）：页面里的等宽数字自己声明。 */
+
+.vop-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.vop-page > h1 {
+  margin: 8px 0 0;
+}
+
+/* ---- 头部统计 ---- */
+
+.vop-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px 12px;
+}
+
+.vop-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vop-metric-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.vop-metric-value {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.vop-head-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ---- 窗口横幅 ---- */
+
+.vop-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vop-banner-title {
+  font-weight: 600;
+}
+
+.vop-banner-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 13px;
+}
+
+/* ---- 方针卡 ---- */
+
+.vop-policies {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.vop-policy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vop-policy h3 {
+  margin: 0;
+}
+
+.vop-policy-desc {
+  margin: 0;
+  font-size: 13px;
+}
+
+.vop-policy-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+/* ---- 数字表（槽口径 / 整窗合计共用） ---- */
+
+.vop-figs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.vop-fig {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vop-fig dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.vop-fig dd {
+  margin: 0;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.vop-cap {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- 档位网格 ---- */
+
+.vop-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.vop-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vop-slot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.vop-slot-head strong {
+  font-size: 15px;
+}
+
+.vop-slot-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.vop-slot-field select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+}
+
+.vop-slot-field select:focus {
+  outline: none;
+  border-color: var(--terracotta);
+  box-shadow: 0 0 0 3px rgba(164, 97, 44, 0.15);
+}
+
+.vop-slot-warn {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+/* ---- 活动目录 ---- */
+
+.vop-acts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.vop-act {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.vop-act:hover {
+  border-color: var(--terracotta);
+}
+
+.vop-act-locked {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.vop-act-locked:hover {
+  border-color: var(--border);
+}
+
+.vop-act-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vop-act-blurb {
+  font-size: 13px;
+}
+
+.vop-act-reqs {
+  font-size: 12px;
+  color: var(--warn);
+}
+
+/* ---- sticky 结算条（常驻底部：唯一一份「保存 / 放弃改动」） ---- */
+
+.vop-summary {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 -2px 12px rgba(75, 38, 16, 0.12);
+}
+
+.vop-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+
+.vop-summary-figs {
+  flex: 1 1 260px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 4px 14px;
+  min-width: 0;
+}
+
+.vop-summary-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.vop-count {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.vop-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--bad);
+}
+
+/* 窄屏单列（375 宽不得横向滚动：全部栅格退成一列或两列 minmax(0,1fr)） */
+@media (max-width: 640px) {
+  .vop-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vop-policies,
+  .vop-slots,
+  .vop-acts {
+    grid-template-columns: 1fr;
+  }
+
+  .vop-summary-figs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vop-summary-side {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .vop-summary-side .btn {
+    flex: 1 1 auto;
+  }
+}

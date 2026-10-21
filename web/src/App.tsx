@@ -57,6 +57,8 @@ const AdminBrandsPage = lazy(() => import('./pages/admin/BrandsPage.tsx'));
 const AdminEventsPage = lazy(() => import('./pages/admin/EventsPage.tsx'));
 const AdminShopPage = lazy(() => import('./pages/admin/AdminShopPage.tsx'));
 const ShopPage = lazy(() => import('./pages/shop/ShopPage.tsx'));
+// 场馆经营（v6.53.0 P0）：档期排布从消费中心独立成页
+const VenuePlanPage = lazy(() => import('./pages/venue/VenuePlanPage.tsx'));
 const AdminFinancePage = lazy(() => import('./pages/admin/FinancePage.tsx'));
 const AdminSystemPage = lazy(() => import('./pages/admin/SystemPage.tsx'));
 
@@ -144,12 +146,21 @@ export default function App() {
               </RequireUser>
             }
           />
-          {/* 消费中心（v6.26.0）：五类商品 + 球场消费三卡；须登录（页内按教练身份收表单） */}
+          {/* 消费中心（v6.26.0）：五类商品 + 冠名/设施两卡（球场档期 v6.53.0 已迁 /venue）；须登录（页内按教练身份收表单） */}
           <Route
             path="/shop"
             element={
               <RequireUser>
                 <ShopPage />
+              </RequireUser>
+            }
+          />
+          {/* 场馆经营（v6.53.0）：档期从消费中心拆出来独立成页；须登录（页内按教练身份收整屏） */}
+          <Route
+            path="/venue"
+            element={
+              <RequireUser>
+                <VenuePlanPage />
               </RequireUser>
             }
           />

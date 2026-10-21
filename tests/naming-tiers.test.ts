@@ -14,7 +14,8 @@ import {
 import { signViaOffer } from './market-helpers.ts';
 import type { TierProfile, SatisfyConfig } from '../src/worker/naming-ops.ts';
 import { championBonusStatements, leagueStandings, settleSeason } from '../src/worker/season-settle.ts';
-import { activityIncome } from '../src/worker/venue-ops.ts';
+import { venueQuote } from '../src/core/venue.ts';
+import type { VenueActivityDef, VenueContext } from '../src/core/venue.ts';
 import { evolveFans, loadAttendanceModel } from '../src/worker/home.ts';
 
 interface Fixture {
@@ -106,8 +107,8 @@ const RULES = { topSeatRatio: 8, emergingSlots: 2, topHeatFloor: 1.0, emergingHe
 // ─── TC-CFG ──────────────────────────────────────────────────────────────────
 
 describe('config 三新键与 champion 键（TC-CFG）', () => {
-  it('注册表 68→85（v6.33.1 两键 + v6.47.0 wage_floor_gap + v6.49.0 到期两键 + v6.50.0 海捞两键），market_heat_rules 默认带 champion/deal/ignored，三档 profile 出厂值', async () => {
-    expect(CONFIG_KEYS).toHaveLength(85);
+  it('注册表 68→86（v6.33.1 两键 + v6.47.0 wage_floor_gap + v6.49.0 到期两键 + v6.50.0 海捞两键 + v6.53.0 window_length_hours），market_heat_rules 默认带 champion/deal/ignored，三档 profile 出厂值', async () => {
+    expect(CONFIG_KEYS).toHaveLength(86);
     const fx = freshEnv();
     expect(await loadHeatRules(fx.env.DB)).toEqual({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 });
     expect(await loadSatisfyConfig(fx.env.DB)).toEqual({ attendWeight: 0.5, resultWeight: 0.3, lineBuffer: 0.05, championSatisfaction: 0.1, preferBonus: 0.02, preferBonusCap: 0.04 });
@@ -426,13 +427,29 @@ describe('联赛冠军加成（TC-CHAMP）', () => {
 // ─── TC-BUFF ─────────────────────────────────────────────────────────────────
 
 describe('buff 生效点（TC-BUFF）', () => {
-  it('TC-BUFF-01 activityIncome attendBuff 只乘活动收入、不动损坏', () => {
-    const def = { key: 'concert', name: '演唱会', incomeMin: 3, incomeMax: 8, pitchDamageProb: 0, income: null };
-    const rolls = { income: 0.5, damage: 0 };
-    const base = activityIncome(def as never, 'concert', 0, 0, rolls as never, 0);
-    const buffed = activityIncome(def as never, 'concert', 0, 0, rolls as never, 0.02);
-    expect(buffed.income).toBeCloseTo(base.income * 1.02);
-    expect(buffed.extraMaintenance).toBeCloseTo(base.extraMaintenance);
+  it('TC-BUFF-01 venueQuote attendBuff 只乘活动收入、不动运营成本与损坏', () => {
+    const def: VenueActivityDef = {
+      name: '演唱会', blurb: '', pricing: 'legacy_range',
+      pricePerSeat: 0, fillRate: 1, income: 5.5, incomeMin: 3, incomeMax: 8,
+      costBase: 0.275, costPerSeat: 0.00002, attendMod: 0.95, reputationGain: 2, fansDelta: 0,
+      pitchBoostPerLevel: 0.1, youthBoostPerLevel: 0, broadcastBoostPerLevel: 0,
+      pitchDamageProb: 0.5, damageMin: 2, damageMax: 5, incomeRepBase: 0,
+      requiresFacility: null, requiresLevel: 0, requiresReputation: null,
+    };
+    const ctx: VenueContext = {
+      capacity: 20000, reputation: 0, pitchLevel: 0, youthLevel: 0, broadcastLevel: 0,
+      attendanceRate: 1, attendBuff: 0,
+    };
+    // damageRoll 0.25 < 概率 0.5 ⇒ 这场真的坏了，damage 断言才有意义（2 + 3×0.25 = 2.75）
+    const rolls = { income: 0.5, damage: 0.25, damageRoll: 0.25 };
+    const base = venueQuote(def, ctx, 1, rolls);
+    const buffed = venueQuote(def, { ...ctx, attendBuff: 0.02 }, 1, rolls);
+    expect(base.gross).toBeCloseTo(5.5, 3);
+    expect(buffed.gross).toBeCloseTo(base.gross * 1.02, 3);
+    expect(buffed.damage).toBeCloseTo(2.75, 3);
+    expect(buffed.opsCost).toBe(base.opsCost);
+    expect(buffed.damage).toBe(base.damage);
+    expect(buffed.expectedDamage).toBe(base.expectedDamage);
   });
 
   it('TC-BUFF-02 evolveFans fansBuff 只乘涨粉分支，掉粉不动', async () => {

@@ -528,15 +528,25 @@ export async function settleSeason(
   const cap = ageCapRow?.age_cap ?? null;
   const growableStmt = cap !== null ? growableStatement(db, cap) : null;
 
+  // 批内下标定死：growable 在 statements 之后；seasons 翻转在 champion 之后（v6.53.0 §4.6）
+  const growableIdx = statements.length;
+  const seasonsIdx = statements.length + (growableStmt ? 1 : 0) + champion.statements.length;
   const batchResults = await db.batch([
     ...statements,
     ...(growableStmt ? [growableStmt] : []),
     ...champion.statements,
     db.prepare(`UPDATE seasons SET status = 'settled', settled_at = ${nowSql()} WHERE season = ? AND status != 'settled'`).bind(season),
+    // 赛季末声望衰减（v6.53.0）：只有本赛季真结算（上一条改到行）才衰减，重跑不再动。
+    // 放在 seasons 翻转**之后**：changes() 读的是上一条语句的改动行数。
+    db.prepare(
+      `UPDATE stadiums SET venue_reputation = ROUND(MAX(0, venue_reputation) * 0.9, 2), updated_at = ${nowSql()}
+       WHERE venue_reputation > 0 AND changes() > 0`,
+    ),
   ]);
-  const growable = growableStmt ? (batchResults[statements.length]?.meta.changes ?? 0) : 0;
-  // 结算真发生（批尾 seasons 状态 UPDATE 改了行）才发冠军站内信；无冠名走「无落点」文案分支
-  if ((batchResults[batchResults.length - 1]?.meta.changes ?? 0) > 0 && champion.detail.clubId !== null) {
+  const growable = growableStmt ? (batchResults[growableIdx]?.meta.changes ?? 0) : 0;
+  // 结算真发生（批尾前一条 seasons 状态 UPDATE 改了行）才发冠军站内信；无冠名走「无落点」文案分支。
+  // 不能读 batchResults[batchResults.length - 1]——批尾现在是 stadiums 声望衰减，rep 全 0 时 changes=0 会吞掉通知
+  if ((batchResults[seasonsIdx]?.meta.changes ?? 0) > 0 && champion.detail.clubId !== null) {
     await queueClubNotification(env, champion.detail.clubId, 'naming_champion', {
       club: champion.detail.clubName ?? `俱乐部 #${champion.detail.clubId}`,
       season,

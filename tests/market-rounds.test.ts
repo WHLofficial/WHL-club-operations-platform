@@ -244,6 +244,7 @@ function ctxOf(patch: Partial<EventClubContext> = {}): EventClubContext {
       build_credit: 0,
       next_attendance_mod: 1,
       next_weather: '',
+      venue_reputation: 0,
     },
     balance: 50,
     facilities: new Map<string, number>(),
@@ -1487,8 +1488,8 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
 // ================= TC-CFG：配置 =================
 
 describe('招商轮配置（TC-CFG）', () => {
-  it('TC-CFG-01 CONFIG_KEYS 共 85 项（v6.47.0 加 wage_floor_gap，v6.49.0 加两个到期键，v6.50.0 加海捞两键），两个 market 键在册；默认值就位', async () => {
-    expect(CONFIG_KEYS).toHaveLength(85);
+  it('TC-CFG-01 CONFIG_KEYS 共 86 项（v6.47.0 加 wage_floor_gap，v6.49.0 加两个到期键，v6.50.0 加海捞两键，v6.53.0 加 window_length_hours），两个 market 键在册；默认值就位', async () => {
+    expect(CONFIG_KEYS).toHaveLength(86);
     expect(CONFIG_KEYS).toContain('market_round_rules');
     expect(CONFIG_KEYS).toContain('market_heat_rules');
     const fx = freshEnv();

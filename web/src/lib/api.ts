@@ -1481,15 +1481,7 @@ export interface MarketRoundReopenResult {
   offersPerClub: { clubId: number; brands: string[] }[];
 }
 
-/** 主场档期（v6.9.0）：每窗非比赛日档位的活动预订，收益在窗末随关窗结算 */
-export interface BookingActivityOption {
-  key: string;
-  name: string;
-  /** 预计收入区间（固定收入活动上下界相同）；实际值窗末按档位种子结算 */
-  incomeMin: number;
-  incomeMax: number;
-}
-
+/** 主场档期行的形状（v6.9.0 端点已下线，v6.53.0 的 GET /club/venue-plan 仍复用这个形状） */
 export interface BookingRow {
   id: number;
   slotNo: number;
@@ -1499,22 +1491,105 @@ export interface BookingRow {
   createdAt: string;
 }
 
-export interface BookingsResponse {
-  clubId: number;
-  /** 查的这一窗是否就是当前开窗（关了的历史窗只能看不能改） */
-  open: boolean;
-  season: number | null;
-  windowSeq: number | null;
-  /** 每窗档位总数（config activity_slots） */
-  slots: number;
-  catalog: BookingActivityOption[];
-  bookings: BookingRow[];
+/* ---------- 场馆经营（v6.53.0 P0：容量驱动收入 + 设施门槛 + 方针推荐） ---------- */
+
+/** 方针枚举，与 `clubs.venue_policy` 的取值一致（空串 = 没选过，前端用 null 表示） */
+export type VenuePolicyChoice = 'money' | 'fans' | 'reputation';
+
+/** 单槽/整窗共用的六个数字。口径全在服务端（百万、已四舍五入）：前端只展示，绝不逐槽加总 */
+export interface VenueFigureBlock {
+  gross: number;
+  opsCost: number;
+  expectedDamage: number;
+  expectedNet: number;
+  attendanceMod: number;
+  reputationGain: number;
 }
 
-export interface BookingResult {
-  booking: BookingRow;
-  /** 同一档位被改订时原活动（首次预订为 null） */
-  previous: BookingRow | null;
+/** 整窗合计：饱和系数按同类序位算，逐槽相加会高估，所以合计只认服务端这一份 */
+export type VenueTotals = VenueFigureBlock;
+
+/** 草稿逐槽结果（`POST /club/venue-plan/preview` 的 slots[]、`PUT /club/venue-plan` 的 slots[]） */
+export interface VenueSlotQuote extends VenueFigureBlock {
+  slotNo: number;
+  activity: string;
+  /** 该槽在「同类第几个」上的系数（1 / 0.7 / 0.45）；只展示，不参与前端推导 */
+  saturation: number;
+}
+
+/** GET 里某一槽若排某个活动时的口径（`slots[].quote` 与 `slots[].options[]` 共用） */
+export interface VenueActivityQuote extends VenueFigureBlock {
+  activity: string;
+}
+
+/** `slots[].options[]`：非空 unlockReason = 这一项当前排不了（设施/声望门槛），文案由服务端给 */
+export type VenueActivityOption = VenueActivityQuote & { unlockReason: string | null };
+
+/** GET /api/club/venue-plan：档期一屏的全部真源（槽数、门槛、推荐、已排都不前端算） */
+export interface VenuePlanResponse {
+  clubId: number;
+  /** null = 当前没有进行中的窗：档期仍可试排，但保存会 409 */
+  window: {
+    status: 'open' | 'closed';
+    season: number;
+    windowSeq: number;
+    openedAt: string;
+    /** 只在 window !== null 时给；`opened_at` 为空（存量脏行）时为 null ⇒ 前端降级为「管理员手工关窗」 */
+    closesAt: string | null;
+    reminderSent: boolean;
+  } | null;
+  capacity: number;
+  /** false = 没有 stadium 行：按 2 档试排，不回落 20000 容量 */
+  hasStadium: boolean;
+  /** 派生槽数（= slots.length，自检用；前端不自己算） */
+  slotCount: number;
+  /** config activity_slots（每窗档位上限） */
+  slotCap: number;
+  reputation: number;
+  attendance: { mod: number; matchesLeft: number; clamp: [number, number] };
+  facilities: { key: string; label: string; level: number }[];
+  /** 含 idle（保存校验用），UI 过滤掉只渲染 5 张活动卡 */
+  activities: {
+    key: string;
+    name: string;
+    blurb: string;
+    unlocked: boolean;
+    requirements: { label: string; need: number; current: number }[];
+  }[];
+  slots: {
+    slotNo: number;
+    saturation: number;
+    /** 已保存的活动 key；null = 空槽 */
+    booked: string | null;
+    /** 该槽已排活动在本窗的同类序位口径；空槽 null */
+    quote: VenueActivityQuote | null;
+    /** 该槽「若排某类」的口径，含 idle；是「下一个同类」的算法，别拿来回填当前已排槽 */
+    options: VenueActivityOption[];
+  }[];
+  policy: VenuePolicyChoice | null;
+  recommendations: Record<VenuePolicyChoice, { policy: string; picks: { slotNo: number; activity: string }[]; totals: VenueTotals }>;
+  /** 本窗已落库的档期（元素形状与旧 BookingRow 一致；bookedBy 是 TEXT，赠档写「事件」） */
+  bookings: BookingRow[];
+  /** 旧 activity_config（legacyKeys）非空时的提示 */
+  configWarning: string | null;
+}
+
+/** 页面与纯函数层共用的槽 DTO（`slots[]` 的元素） */
+export type VenueSlotDto = VenuePlanResponse['slots'][number];
+
+/** POST /api/club/venue-plan/preview：只读、不落库、不需要开窗 */
+export interface VenuePreviewResponse {
+  slots: VenueSlotQuote[];
+  totals: VenueTotals;
+  /** 槽号 → 排不了的原因（预览不 reject 门槛，只回报） */
+  unlockReasons: Record<number, string>;
+}
+
+/** PUT /api/club/venue-plan 的回执：保存后整窗的预期口径 */
+export interface VenueSaveResponse {
+  slots: VenueSlotQuote[];
+  policy: VenuePolicyChoice | null;
+  totals: VenueTotals;
 }
 
 /** 随机事件（v6.10.0，D 块）：池只读启停 + 管理端触发 + 流水 */

@@ -274,3 +274,129 @@ describe('关窗', () => {
     expect(fee?.amount).toBe(-1.5); // 15 × 10%
   });
 });
+
+describe('v6.53.0 开窗：首窗清零 + 场馆通知 + 开窗原子性', () => {
+  /** 直接改状态关窗：本组只测开窗侧，不想要关窗结算的副作用 */
+  function closeAllWindows(fx: Fixture) {
+    fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE status = 'open'`);
+  }
+
+  function venueOf(fx: Fixture, clubId: number) {
+    return sqlGet<{ next_attendance_mod: number; attendance_mod_matches: number }>(
+      fx.sqlite,
+      'SELECT next_attendance_mod, attendance_mod_matches FROM stadiums WHERE club_id = ?',
+      clubId,
+    );
+  }
+
+  function openCount(fx: Fixture) {
+    return sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM season_windows WHERE status = 'open'");
+  }
+
+  /** 管理端建队不建球场：乘数/容量相关断言要自己补一行（容量决定本窗档位数） */
+  function seedStadium(fx: Fixture, clubId: number, capacity = 20000) {
+    fx.sqlite.exec(
+      `INSERT INTO stadiums (club_id, name, capacity, tier, shell_influence, bonus_points, fans, created_at, updated_at)
+       VALUES (${clubId}, '', ${capacity}, 0, 0, 0, 1800, '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z')`,
+    );
+  }
+
+  it('本赛季首窗前清零（1 / 0），同赛季第二窗不动上一窗留下的乘数', async () => {
+    const fx = await seedWindow(); // S1 窗 1 开着
+    seedStadium(fx, fx.clubA);
+    seedStadium(fx, fx.clubB);
+    closeAllWindows(fx);
+    fx.sqlite.exec('UPDATE stadiums SET next_attendance_mod = 0.95, attendance_mod_matches = 5');
+    fx.env.rng = () => 0.99; // 不重掷，稳定开窗
+    const res = await post('/api/admin/windows/open', { season: 2 }, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { season: number; windowSeq: number; venueReset: boolean };
+    expect(body).toMatchObject({ season: 2, windowSeq: 1, venueReset: true });
+    expect(venueOf(fx, fx.clubA)).toEqual({ next_attendance_mod: 1, attendance_mod_matches: 0 });
+    expect(venueOf(fx, fx.clubB)).toEqual({ next_attendance_mod: 1, attendance_mod_matches: 0 });
+
+    // 同赛季第二窗：赛季里已经有窗行 ⇒ 不再清零
+    closeAllWindows(fx);
+    fx.sqlite.exec('UPDATE stadiums SET next_attendance_mod = 0.9, attendance_mod_matches = 3');
+    const res2 = await post('/api/admin/windows/open', { season: 2 }, 'tok-admin', fx.env);
+    expect(res2.status).toBe(201);
+    const body2 = (await res2.json()) as { windowSeq: number; venueReset: boolean };
+    expect(body2).toMatchObject({ windowSeq: 2, venueReset: false });
+    expect(venueOf(fx, fx.clubA)).toEqual({ next_attendance_mod: 0.9, attendance_mod_matches: 3 });
+  });
+
+  it('开窗给每个活跃队排一条场馆开窗提醒（档位数按容量派生：20000 ⇒ 3，12000 ⇒ 2）', async () => {
+    const fx = await seedWindow();
+    seedStadium(fx, fx.clubA, 20000);
+    seedStadium(fx, fx.clubB, 12000);
+    closeAllWindows(fx);
+    fx.env.rng = () => 0.99;
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { venueNotified: number };
+    expect(body.venueNotified).toBe(2); // clubA / clubB 各一个绑定账号
+    const rows = sqlAll<{ club_id: number; payload: string }>(
+      fx.sqlite,
+      "SELECT club_id, payload FROM notifications WHERE template = 'venue_window_open' ORDER BY club_id",
+    );
+    expect(rows.map((r) => r.club_id)).toEqual([fx.clubA, fx.clubB].sort((a, b) => a - b));
+    const byClub = new Map(rows.map((r) => [r.club_id, r.payload]));
+    expect(byClub.get(fx.clubA)).toContain('【场馆开窗】');
+    expect(byClub.get(fx.clubA)).toContain('本窗有 3 个档位可排');
+    expect(byClub.get(fx.clubB)).toContain('本窗有 2 个档位可排');
+  });
+
+  it('开窗通知失败只是提醒丢了：仍返回 ok，窗照样开着（通知绝不阻塞主流程）', async () => {
+    const fx = await seedWindow();
+    closeAllWindows(fx);
+    fx.sqlite.exec('DROP TABLE notifications'); // 排通知必抛 → queueClubNotification 内部吞掉返回 0
+    fx.env.rng = () => 0.99;
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { ok: boolean; venueNotified: number };
+    expect(body.ok).toBe(true);
+    expect(body.venueNotified).toBe(0);
+    expect(openCount(fx)).toEqual({ n: 1 });
+  });
+
+  it('P0 ⑧ 原子性：开窗被 DB 中止 ⇒ 经纪人重掷一起回滚，重跑才生效', async () => {
+    const fx = await seedWindow();
+    closeAllWindows(fx);
+    fx.sqlite.exec('UPDATE players SET agent_tier = 1 WHERE id = 50');
+    let call = 0;
+    fx.env.rng = () => (call++ === 0 ? 0.1 : 0.99); // 首个 player 命中重掷 → 0.99 落档 3
+    fx.sqlite.exec(`CREATE TRIGGER fail_open BEFORE INSERT ON season_windows BEGIN SELECT RAISE(ABORT, 'boom'); END;`);
+    const failed = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(failed.status).toBe(500);
+    // 重掷语句在批首、INSERT 在批尾：INSERT 中止 ⇒ 整批回滚，档位不能被改
+    expect(sqlGet<{ agent_tier: number }>(fx.sqlite, 'SELECT agent_tier FROM players WHERE id = 50')).toEqual({ agent_tier: 1 });
+    expect(openCount(fx)).toEqual({ n: 0 });
+
+    fx.sqlite.exec('DROP TRIGGER fail_open');
+    let call2 = 0;
+    fx.env.rng = () => (call2++ === 0 ? 0.1 : 0.99); // 重跑：rng 序列从头再来，同样命中一次重掷
+    const ok = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(ok.status).toBe(201);
+    const body = (await ok.json()) as { rerolled: number };
+    expect(body.rerolled).toBe(1);
+    expect(sqlGet<{ agent_tier: number }>(fx.sqlite, 'SELECT agent_tier FROM players WHERE id = 50')).toEqual({ agent_tier: 3 });
+  });
+
+  it('串行第二次开窗被 409 拦住：open 窗只剩一个，失败那条不改经纪人档位（P0 ⑦ 的应用层闸）', async () => {
+    const fx = await seedWindow();
+    closeAllWindows(fx);
+    fx.sqlite.exec('UPDATE players SET agent_tier = 1 WHERE id = 50');
+    let call = 0;
+    fx.env.rng = () => (call++ === 0 ? 0.1 : 0.99);
+    const first = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(first.status).toBe(201);
+    expect(sqlGet<{ agent_tier: number }>(fx.sqlite, 'SELECT agent_tier FROM players WHERE id = 50')).toEqual({ agent_tier: 3 });
+
+    // 第二次：若跑到重掷会把档位改回 3 以外的值（这里恒 0.1 → 档 1），断言它根本没到那一步
+    fx.env.rng = () => 0.1;
+    const second = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(second.status).toBe(409);
+    expect(openCount(fx)).toEqual({ n: 1 });
+    expect(sqlGet<{ agent_tier: number }>(fx.sqlite, 'SELECT agent_tier FROM players WHERE id = 50')).toEqual({ agent_tier: 3 });
+  });
+});

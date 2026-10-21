@@ -29,6 +29,7 @@ import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults, retryUnresolvedResults, type XpRetrySummary } from './results.ts';
 import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
 import { runExpiryTick, type ExpirySummary } from './expiry-ops.ts';
+import { runVenueReminderTick } from './venue-reminders.ts';
 import opsRoutes from './routes/ops-schedule.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -192,6 +193,15 @@ async function runSettleTick(env: Env) {
   // 一直挂着「N 项没解析到」而永不补 XP，这里按场重放钩子补齐；幂等可重入，
   // 连续 3 次仍没解析到的写「自动重试已放弃」不再占用额度。
   const xpRetry = await retryUnresolvedResults(env);
+  // 档期关窗提醒（v6.53.0 §6.2）：只给「本窗还有空档」的活跃队发一条 venue_slot_reminder，
+  // 去重靠 season_windows.venue_reminder_at。只写 notifications 与那一列 ⇒ **不进 tickChanged**
+  // （否则只发提醒也会白 purge 一次公开缓存）。整段吞错，绝不阻断结算。
+  let venueReminder: Awaited<ReturnType<typeof runVenueReminderTick>> | { error: string };
+  try {
+    venueReminder = await runVenueReminderTick(env);
+  } catch (err) {
+    venueReminder = { error: err instanceof Error ? err.message : String(err) };
+  }
   // bot 通知重试（§12）：失败留 pending，下轮再投
   const notify = await dispatchPendingNotifications(env);
   // 选择型事件兜底（v6.11.0，D2）：超时未选按净额最差结算 + 距时限 24h 提醒（D3 起在通知之后跑）
@@ -209,7 +219,7 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     expiry = { error: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true, ...summary, autoResults, xpRetry, events, notify, expiry };
+  return { ok: true, ...summary, autoResults, xpRetry, venueReminder, events, notify, expiry };
 }
 
 // tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的
@@ -264,3 +274,7 @@ async function scheduledTick(_event: unknown, env: Env, _ctx: { waitUntil(p: Pro
 
 // 默认导出即 app 本体（scheduled 已 Object.assign 上去、fetch 已被 withSentry 原地包装）
 export default app;
+
+// 测试可见（v6.53.0 §6.2 第 7 条）：tickChanged 的判据必须不含 venueReminder——
+// 只发档期提醒不能触发公开缓存 purge。runSettleTick 是私有函数，这里只把判据露出来锁住契约。
+export { tickChanged };

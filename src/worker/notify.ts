@@ -96,6 +96,12 @@ export function renderNotification(template: string, data: Record<string, unknow
     // 经营信号注记（v6.12.0，D3）：关窗批给有非中性信号的队单发一条；data.lines 已是人话注记行
     case 'window_signals':
       return `📶 ${data.club} 本窗（${data.window}）经营信号生效：${data.lines}。`;
+    // 场馆档期（v6.53.0，§6.1）：开窗通知 / 关窗前档位提醒。slots 是容量派生的本窗档位数，
+    // booked/remain 只来自 venue_bookings 的已排档位（不是「还剩几个空位」的实时估算）
+    case 'venue_window_open':
+      return `【场馆开窗】S${data.season} 第 ${data.windowSeq} 窗已开，本窗有 ${data.slots} 个档位可排，去「场馆经营」页安排。`;
+    case 'venue_slot_reminder':
+      return `【档期提醒】S${data.season} 第 ${data.windowSeq} 窗约 ${data.hoursLeft} 小时后关闭，你还有 ${data.remain} 个档位没排（已排 ${data.booked}/${data.slots}）。`;
     // 冠名深度（v6.13.0，C2）：情绪演化回执 / 品牌主动解约 / 联赛冠军加成
     case 'naming_mood':
       return `💙 品牌方情绪：${data.brand} ${data.from} → ${data.to}（${data.reason}）。`;

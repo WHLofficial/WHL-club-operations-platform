@@ -1,5 +1,6 @@
-// 消费中心 /shop（v6.26.0）：五类商品 + 球场消费三卡的统一入口。
-// B 布局（visual companion 定稿）：左主栏商品页签（?tab= 深链）+ 底部球场三卡；右侧栏我的工单常驻（行内展开）。
+// 消费中心 /shop（v6.26.0）：五类商品 + 设施经营/冠名市场两卡的统一入口。
+// B 布局（visual companion 定稿）：左主栏商品页签（?tab= 深链）+ 底部设施/冠名两卡；右侧栏我的工单常驻（行内展开）。
+// v6.53.0：球场档期（原第三卡）迁至独立的场馆经营页 /venue，这里的档期卡与入口一并撤掉。
 // 提交流程：确认框 → 提交即扣费 → 管理组审核 → 通过自动生效 / 拒绝自动退款。
 import { useEffect, useRef, useState } from 'react';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
@@ -13,7 +14,7 @@ import { useShopCatalog, useShopInvalidation, useShopOrders, useShopSquadState, 
 import { useToast } from '../../lib/toast.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import type { ShopOrderDto, ShopPrices, ShopSquadStatePlayer } from '../../lib/api.ts';
-import { BookingsCard, FacilityOpsCard, NamingCard } from './venueCards.tsx';
+import { FacilityOpsCard, NamingCard } from './venueCards.tsx';
 
 type ShopTab = 'pa' | 'badge' | 'role' | 'position' | 'shell';
 
@@ -124,7 +125,7 @@ function ShopContent({
       </section>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-        {/* 左主栏：商品页签 + 表单 + 球场三卡（.shop-main 带 min-width:0，窄屏才压得进视口） */}
+        {/* 左主栏：商品页签 + 表单 + 设施/冠名两卡（.shop-main 带 min-width:0，窄屏才压得进视口） */}
         <div className="shop-main">
           <div className="seg" role="group" aria-label="商品分类">
             {(Object.keys(TAB_LABEL) as ShopTab[]).map((t) => (
@@ -163,7 +164,6 @@ function ShopContent({
 
           <FacilityOpsCard />
           <NamingCard />
-          <BookingsCard />
         </div>
 
         {/* 右侧栏：我的工单 */}

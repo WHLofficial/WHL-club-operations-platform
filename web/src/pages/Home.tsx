@@ -63,7 +63,11 @@ export default function Home() {
         </NavLink>
         <NavLink to="/shop" className="card nav-card">
           <h3>消费中心</h3>
-          <p className="muted">买 PA、徽章、角色、位置热区、队壳申请，加上设施经营、冠名与球场档期，消费都在这一页。</p>
+          <p className="muted">买 PA、徽章、角色、位置热区、队壳申请，加上设施经营与冠名市场，消费都在这一页。</p>
+        </NavLink>
+        <NavLink to="/venue" className="card nav-card">
+          <h3>场馆经营</h3>
+          <p className="muted">每窗的非比赛日档位在这里排：演唱会、电竞、开放日、青训营与赞助活动，收益关窗时结算。</p>
         </NavLink>
         <NavLink to="/clubs" className="card nav-card">
           <h3>球队库</h3>

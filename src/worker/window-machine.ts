@@ -18,6 +18,7 @@ import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 import { queueClubNotification } from './notify.ts';
 import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
+import { slotsForCapacity } from '../core/venue.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -75,7 +76,16 @@ export async function openWindow(
   windowSeqInput: unknown,
   declareGrowthPeriodInput?: unknown,
   temporaryInput?: unknown,
-): Promise<{ ok: true; season: number; windowSeq: number; rerolled: number; growthPeriodDeclared: boolean; isTemporary: boolean }> {
+): Promise<{
+  ok: true;
+  season: number;
+  windowSeq: number;
+  rerolled: number;
+  growthPeriodDeclared: boolean;
+  isTemporary: boolean;
+  venueReset: boolean;
+  venueNotified: number;
+}> {
   const db = env.DB;
   const config = createConfigService(db);
 
@@ -152,11 +162,20 @@ export async function openWindow(
       );
     }
   }
-  if (statements.length > 0) await db.batch(statements);
+  // 经纪人重掷语句不单独提交（P0 ⑧）：并入下面的 openBatch 最前面，
+  // 这样开窗因并发 UNIQUE 失败时重掷一起回滚——不会出现「窗没开、经纪人却被重掷」。
 
   const audit = createAuditStatement(db);
   const declarePeriod = declareGrowthPeriodInput === true;
-  const openBatch = [
+  // 新季首窗清零（v6.53.0）：本赛季还没有任何窗行 ⇒ 上一季遗留的上座乘数/剩余场次一律归零。
+  // 判定与清零都在同一批里，失败整批回滚，不会出现「窗没开但乘数被清」。
+  const seasonWindows = await db
+    .prepare('SELECT COUNT(*) AS n FROM season_windows WHERE season = ?')
+    .bind(season)
+    .first<{ n: number }>();
+  const venueReset = (seasonWindows?.n ?? 0) === 0;
+  const openBatch: D1PreparedStatement[] = [
+    ...statements,
     db
       .prepare(
         `INSERT INTO seasons (season, status, created_at) VALUES (?, 'running', ${nowSql()})
@@ -171,6 +190,15 @@ export async function openWindow(
       )
       .bind(season, windowSeq, isTemporary ? 1 : 0),
   ];
+  if (venueReset) {
+    openBatch.push(
+      db
+        .prepare(
+          `UPDATE stadiums SET next_attendance_mod = 1, attendance_mod_matches = 0, updated_at = ${nowSql()}
+           WHERE next_attendance_mod <> 1 OR attendance_mod_matches <> 0`,
+        ),
+    );
+  }
   if (declarePeriod) {
     openBatch.push(
       ...growthPeriodStatements(db, {
@@ -195,6 +223,7 @@ export async function openWindow(
         growthPeriodDeclared: declarePeriod,
         playersScanned: scanned,
         rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0),
+        venueReset,
       },
     }),
   );
@@ -223,6 +252,31 @@ export async function openWindow(
   } catch {
     // 见上：仅提醒，吞掉
   }
+  // 开窗站内信（v6.53.0 §6.1）：与上面的意向单提醒同口径——批成功后尽力而为，失败不影响开窗。
+  // 每个活跃队本窗能排几个档位由容量派生，slotCap 取 activity_slots（缺省 4）。
+  let venueNotified = 0;
+  try {
+    const slotCap = (await config.getNumber('activity_slots')) ?? 4;
+    const stadiums = await db
+      .prepare(
+        `SELECT c.id AS club_id, COALESCE(s.capacity, 0) AS capacity
+         FROM clubs c LEFT JOIN stadiums s ON s.club_id = c.id
+         WHERE c.status = 'active' ORDER BY c.id`,
+      )
+      .all<{ club_id: number; capacity: number }>();
+    for (const row of stadiums.results) {
+      const slots = slotsForCapacity(row.capacity, slotCap);
+      // activity_slots=0 等于关闭功能：不发「本窗有 0 个档位」的信（与提醒侧同口径）
+      if (slots <= 0) continue;
+      venueNotified += await queueClubNotification(env, row.club_id, 'venue_window_open', {
+        season,
+        windowSeq,
+        slots,
+      });
+    }
+  } catch {
+    // 见上：仅提醒，吞掉
+  }
   return {
     ok: true,
     season,
@@ -230,6 +284,8 @@ export async function openWindow(
     rerolled: [...rerolls.values()].reduce((n, l) => n + l.length, 0),
     growthPeriodDeclared: declarePeriod,
     isTemporary,
+    venueReset,
+    venueNotified,
   };
 }
 

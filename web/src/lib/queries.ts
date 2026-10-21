@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type WageForecast } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -38,7 +38,9 @@ export const qk = {
   unreadByCategory: ['notifications', 'unread-by-category'] as const,
   stadiumBuild: ['club', 'stadium-build'] as const,
   naming: ['club', 'naming'] as const,
-  bookings: ['club', 'bookings'] as const,
+  // 场馆经营（v6.53.0）：档期一屏；预览键在 useVenuePreview 里再挂草稿串（各份草稿各存一份缓存）
+  venuePlan: ['club', 'venue-plan'] as const,
+  venuePreview: ['club', 'venue-plan', 'preview'] as const,
   clubEvents: ['club', 'events'] as const,
   offers: (box: 'in' | 'out', status: string) => ['offers', box, status] as const,
   offer: (id: number) => ['offers', 'detail', id] as const,
@@ -414,6 +416,30 @@ export function useHomeMatches(isCoach: boolean) {
     queryKey: qk.homeMatches,
     queryFn: () => api<HomeMatchesResponse>('/api/club/home-matches'),
     enabled: isCoach,
+  });
+}
+
+// ---- 场馆经营（v6.53.0 P0）----
+
+// 档期一屏（教练端）：窗口 / 容量 / 设施 / 活动门槛 / 每槽已排与候选口径 / 三方针推荐 / 本窗已落库档期
+export function useVenuePlan(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.venuePlan,
+    queryFn: () => api<VenuePlanResponse>('/api/club/venue-plan'),
+    enabled,
+  });
+}
+
+// 草稿预览（只读 POST，不落库、不需要开窗）：picks 是完整草稿，合计由服务端按同类序位算。
+// 键里带草稿串 ⇒ 改回来命中旧缓存不重算；keepPreviousData 让每次改单不闪空——
+// 这是只读查询，不是写操作，页面保存成功后也不失效它（invariant 只动 qk.venuePlan）。
+export function useVenuePreview(picks: readonly { slotNo: number; activity: string | null }[], enabled: boolean) {
+  return useQuery({
+    queryKey: [...qk.venuePreview, picks.map((p) => `${p.slotNo}:${p.activity ?? ''}`).join(',')] as const,
+    queryFn: () => apiPost<VenuePreviewResponse>('/api/club/venue-plan/preview', { slots: picks }),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 }
 

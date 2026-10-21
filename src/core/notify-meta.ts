@@ -39,7 +39,7 @@ export interface NotifyMeta {
   category: NotifyCategoryId;
 }
 
-/** 33 个模板一一对应一枚徽章（原始模板名走徽章 title，不丢信息）。 */
+/** 39 个模板一一对应一枚徽章（原始模板名走徽章 title，不丢信息）。 */
 export const NOTIFY_META: Record<string, NotifyMeta> = {
   result_confirmed: { label: '赛果确认', category: 'result' },
   levelup: { label: '球员成长', category: 'growth' },
@@ -80,6 +80,9 @@ export const NOTIFY_META: Record<string, NotifyMeta> = {
   sea_sealed_lost: { label: '暗标未成', category: 'window' },
   sea_batch_open: { label: '暗标开标', category: 'window' },
   sea_sealed_deadline: { label: '暗标临近', category: 'window' },
+  // v6.53.0 场馆档期 P0：开窗通知 / 关窗前未排满提醒
+  venue_window_open: { label: '场馆开窗', category: 'window' },
+  venue_slot_reminder: { label: '档期提醒', category: 'window' },
 };
 
 /** 未知模板 ⇒ null（前端退化：无修饰色徽章 + 原始模板名 + 不可点）。 */

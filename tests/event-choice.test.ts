@@ -213,6 +213,7 @@ function ctxOf(patch: Partial<EventClubContext> = {}): EventClubContext {
       build_credit: 0,
       next_attendance_mod: 1,
       next_weather: '',
+      venue_reputation: 0,
     },
     balance: 50,
     facilities: new Map<string, number>(),

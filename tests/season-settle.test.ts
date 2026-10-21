@@ -530,3 +530,62 @@ describe('赛季结算（growable 重判+settled）与忠诚支出（v3.0.0 移�
     expect((fx.sqlite.prepare('SELECT growable FROM players WHERE id=2').get() as { growable: number }).growable).toBe(0);
   });
 });
+
+describe('赛季末声望衰减（v6.53.0 §4.6）', () => {
+  it('结算一次 venue_reputation ×0.9（两位小数）；rep=0 的队不动', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    fx.sqlite
+      .prepare(
+        `INSERT INTO stadiums (club_id, name, venue_reputation, created_at, updated_at) VALUES
+           (1, '', 25, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+           (2, '', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    fx.sqlite.prepare(`INSERT INTO seasons (season, status, created_at) VALUES (1, 'running', '2026-01-01T00:00:00Z')`).run(); // 无 age_cap ⇒ 跳 growable
+    insertMatch(fx.tour, { matchId: 9, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 0, stageKind: 'round_robin' });
+    insertBinding(fx.sqlite, 1, 5, 'league_premier');
+    expect((await confirmResult(fx.env, 1, 9, 'user')).prizeError).toBeNull();
+
+    await settleSeason(fx.env, 1, 1, true);
+    const rep = fx.sqlite.prepare('SELECT venue_reputation FROM stadiums WHERE club_id = 1').get() as { venue_reputation: number };
+    expect(rep.venue_reputation).toBe(22.5); // 25 × 0.9
+    const zero = fx.sqlite.prepare('SELECT venue_reputation FROM stadiums WHERE club_id = 2').get() as { venue_reputation: number };
+    expect(zero.venue_reputation).toBe(0);
+
+    // 重跑：409 拦在批前 ⇒ 不再二次衰减
+    await expect(settleSeason(fx.env, 1, 1, true)).rejects.toThrow('已经结算过');
+    expect((fx.sqlite.prepare('SELECT venue_reputation FROM stadiums WHERE club_id = 1').get() as { venue_reputation: number }).venue_reputation).toBe(22.5);
+  });
+
+  it('rep=0 时批尾衰减 changes=0，冠军站内信仍按 seasonsIdx 发（不被批尾吞掉）', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    // 站内信要落到「已绑定账号」才有 web 行：直接补一条 team_binding（不走 bindcode 流程）
+    fx.auth.prepare(`INSERT INTO account (id, name, created_at) VALUES (7, '教练庚', '2026-01-01T00:00:00Z')`).run();
+    fx.auth
+      .prepare(`INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES (7, 1, 'club', '2026-01-01T00:00:00Z')`)
+      .run();
+    fx.sqlite
+      .prepare(
+        `INSERT INTO stadiums (club_id, name, venue_reputation, created_at, updated_at) VALUES
+           (1, '', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run(); // 只有冠军（tour 队 11 → 俱乐部 1）有球场行，且声望 0 ⇒ 批尾衰减 changes=0
+    fx.sqlite.prepare(`INSERT INTO seasons (season, status, created_at) VALUES (1, 'running', '2026-01-01T00:00:00Z')`).run();
+    insertMatch(fx.tour, { matchId: 9, tournamentId: 5, stageId: 50, homeTeamId: 11, awayTeamId: 12, scoreHome: 1, scoreAway: 0, stageKind: 'round_robin' });
+    insertBinding(fx.sqlite, 1, 5, 'league_premier');
+    expect((await confirmResult(fx.env, 1, 9, 'user')).prizeError).toBeNull();
+
+    const res = await settleSeason(fx.env, 1, 1, true);
+    expect(res.champion.clubId).toBe(1); // 冠军判定到了俱乐部，只是没有冠名（无落点仍发站内信）
+    const notes = fx.sqlite
+      .prepare("SELECT club_id, template FROM notifications WHERE template = 'naming_champion' ORDER BY club_id")
+      .all() as { club_id: number; template: string }[];
+    expect(notes).toEqual([{ club_id: 1, template: 'naming_champion' }]);
+  });
+});

@@ -29,17 +29,18 @@ describe('NOTIFY_META 与 worker 模板表', () => {
     expect(RENDER_END).toBeGreaterThan(RENDER_START);
   });
 
-  it('模板集合双向相等（37 条，无重复）', () => {
-    // 32→33 是 v6.49.0 到期引擎（offer_deadline 等三模板）；33→37 是 v6.50.0 海捞暗标段四模板
+  it('模板集合双向相等（39 条，无重复）', () => {
+    // 32→33 是 v6.49.0 到期引擎（offer_deadline 等三模板）；33→37 是 v6.50.0 海捞暗标段四模板；
+    // 37→39 是 v6.53.0 场馆档期两模板（venue_window_open / venue_slot_reminder）
     const templates = renderTemplates();
-    expect(templates).toHaveLength(37);
+    expect(templates).toHaveLength(39);
     expect(new Set(templates).size).toBe(templates.length);
     expect(templates.slice().sort()).toEqual(Object.keys(NOTIFY_META).sort());
   });
 
   it('每条徽章文案非空、唯一、≤6 字', () => {
     const labels = Object.values(NOTIFY_META).map((m) => m.label);
-    expect(labels).toHaveLength(37);
+    expect(labels).toHaveLength(39);
     expect(new Set(labels).size).toBe(labels.length);
     for (const label of labels) {
       expect(label.length).toBeGreaterThan(0);
@@ -95,11 +96,20 @@ describe('NOTIFY_META 与 worker 模板表', () => {
       naming: ['naming_mood', 'naming_terminated', 'naming_champion', 'naming_offer', 'naming_offer_activated'],
       shop: ['shop_order_approved', 'shop_order_rejected'],
       // v6.50.0 海捞暗标段四模板归 window（海捞不是 offer 实体，notificationRefOf 取不到可跳转的 id）
-      window: ['window_signals', 'sea_sealed_lead', 'sea_sealed_lost', 'sea_batch_open', 'sea_sealed_deadline'],
+      // v6.53.0 场馆档期两模板归 window（开窗通知 / 关窗前档位提醒，落点 /venue）
+      window: [
+        'window_signals',
+        'sea_sealed_lead',
+        'sea_sealed_lost',
+        'sea_batch_open',
+        'sea_sealed_deadline',
+        'venue_window_open',
+        'venue_slot_reminder',
+      ],
     };
     const members = Object.values(expected).flat();
-    expect(members).toHaveLength(37);
-    expect(new Set(members).size).toBe(37);
+    expect(members).toHaveLength(39);
+    expect(new Set(members).size).toBe(39);
     for (const [cat, list] of Object.entries(expected)) {
       expect(templatesOf(cat as NotifyCategoryId).slice().sort(), `类目 ${cat} 的成员不符`).toEqual(list.slice().sort());
     }

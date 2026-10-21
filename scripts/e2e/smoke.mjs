@@ -2240,7 +2240,7 @@ async function main() {
       const ROUTES = [
         '/', '/players', `/players/${ids.player}`, `/players/compare?ids=${ids.compare}`, '/clubs', `/clubs/${ids.club}`, '/bind',
         '/market', '/market/board', '/market/free', '/market/activation', '/market/intel', '/market/desk',
-        '/shop', '/club', '/ledger', '/notifications',
+        '/shop', '/venue', '/club', '/ledger', '/notifications',
         '/admin', '/admin/seasons', '/admin/players', '/admin/growth', '/admin/imports',
         '/admin/market', '/admin/clubs', '/admin/clubs/cpu-convert', '/admin/brands', '/admin/events', '/admin/shop', '/admin/finance',
         '/admin/system',
@@ -2985,7 +2985,9 @@ async function main() {
         assert(t.includes(tab), `消费中心缺页签：${tab}`);
       }
       assert(t.includes('我的工单'), '消费中心右栏缺工单列表');
-      assert(t.includes('设施经营') && t.includes('冠名市场') && t.includes('球场档期'), '消费中心缺球场三卡');
+      assert(t.includes('设施经营') && t.includes('冠名市场'), '消费中心缺设施/冠名两卡');
+      // v6.53.0：档期卡已迁独立 /venue，消费中心不该再有「球场档期」
+      assert(!t.includes('球场档期'), '档期卡应已迁出消费中心，仍见「球场档期」');
       // ?tab= 深链落在对应页签
       await page.goto(`${BASE}/shop?tab=position`, { waitUntil: 'networkidle' });
       assert(await page.locator('.seg button.on', { hasText: '位置热区' }).first().isVisible(), '?tab=position 深链没落页签');
@@ -3097,6 +3099,44 @@ async function main() {
       for (const t of ['赛事运营', '球队与名册', '转会与经营', '系统']) {
         assert(groupTitles.includes(t), `管理端侧栏缺分组标题「${t}」（实际：${groupTitles.join('/')}）`);
       }
+    });
+
+    await check('㉓ 场馆经营（venue）：三方针 / 槽位随容量 / 无窗禁存 / 375 零溢出', async () => {
+      await page.goto(`${BASE}/venue`, { waitUntil: 'networkidle' });
+      const vt = await text();
+      assert(vt.includes('场馆经营'), '没进场馆经营页');
+      if (vt.includes('还没有绑定俱乐部') || vt.includes('这里只对教练开放') || vt.includes('俱乐部身份暂时取不到')) {
+        // 降级也要判「真的降级了」：身份闸命中时页面不该渲染槽位/保存按钮，否则就是半渲染
+        assert((await page.locator('.vop-slot').count()) === 0, '身份闸降级时不应渲染档位卡');
+        assert((await page.getByRole('button', { name: '保存档期' }).count()) === 0, '身份闸降级时不该有保存按钮');
+        console.log('   场馆经营：本地会话非本队教练，按身份闸降级（页面可导航 + 文案在位 + 无槽位）');
+        return;
+      }
+      const policies = await page.locator('.vop-policy').count();
+      assert(policies === 3, `方针卡应为 3 张，实见 ${policies}`);
+      const acts = await page.locator('.vop-act').count();
+      assert(acts === 5, `活动卡应为 6 类去掉空置 = 5 张，实见 ${acts}`);
+      const slots = await page.locator('.vop-slot').count();
+      const capMatch = vt.match(/([\d,]+)\s*座/);
+      const cap = capMatch ? Number(capMatch[1].replaceAll(',', '')) : null;
+      const expectSlots = vt.includes('未建球场') || cap === null ? null : cap < 15000 ? 2 : cap < 30000 ? 3 : 4;
+      assert(slots >= 2 && slots <= 4, `槽位应在 2–4 之间，实见 ${slots}`);
+      assert(expectSlots === null || slots === expectSlots, `容量 ${cap} 座应出 ${expectSlots} 个槽，实见 ${slots}`);
+      const saveBtn = page.getByRole('button', { name: '保存档期' });
+      assert((await saveBtn.count()) === 1, '缺「保存档期」按钮');
+      // 结算条：改动后显示服务端整窗合计（不是逐槽相加）
+      assert(vt.includes('整窗预期'), '缺整窗预期结算条');
+      assert(/已排\s*\d+\/\d+/.test(vt), '结算条缺「已排 N/M」计数');
+      if (vt.includes('当前没有进行中的转会窗')) {
+        assert(await saveBtn.isDisabled(), '无转会窗时保存应禁用');
+        assert(((await saveBtn.getAttribute('title')) ?? '').includes('转会窗'), '无窗时保存按钮 title 应说明原因');
+      }
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${BASE}/venue`, { waitUntil: 'networkidle' });
+      const vOv = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      assert(vOv <= 1, `375 场馆经营页文档级横向溢出 ${vOv}px`);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      console.log(`   场馆经营：容量 ${cap ?? '—'} 座，槽位 ${slots}，方针 ${policies} 张`);
     });
 
     await check('⑳ 收件篮徽章 / 跳转 / 窄屏两行卡（v6.40.0，截图落 scratch/）', async () => {

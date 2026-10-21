@@ -1,4 +1,4 @@
-// 站内信落点解析（v6.40.0）：ref 精确 → 类目固定落点 → null（不可点）。
+// 站内信落点解析（v6.40.0）：模板专属落点 → ref 精确 → 类目固定落点 → null（不可点）。
 // 纯函数，不读路由/不读身份——身份相关的降级（如访客看不到 venue 页签）由目标页自己兜底。
 import { categoryOf, type NotifyRef } from '../../../src/core/notify-meta.ts';
 
@@ -35,6 +35,11 @@ function offerListLink(template: string): string {
  */
 export function notificationLink(item: NotifyLinkItem): string | null {
   const { template, clubId, ref } = item;
+  // v6.53.0 场馆经营：两条开窗/档期提醒按模板名落到独立的 /venue 页（类目仍是 window，
+  // 但不能走 case 'window' 的 /clubs/:id?tab=desk，那会把 window_signals / sea_* 一起带偏）。
+  // 放在 categoryOf 之前：落点只依赖模板名，不依赖 NOTIFY_META 的同步时序。
+  if (template === 'venue_window_open' || template === 'venue_slot_reminder') return '/venue';
+
   const cat = categoryOf(template);
   if (!cat) return null; // 未知模板：前端不认，不可点（徽章也只显示原文）
 

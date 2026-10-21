@@ -87,6 +87,22 @@ describe('notificationLink：类目固定落点（无 ref）', () => {
   });
 });
 
+describe('notificationLink：场馆经营落点（v6.53.0）', () => {
+  it('开窗 / 档期提醒两条 ⇒ /venue，带不带 clubId 都一样（TC-LINK-05）', () => {
+    for (const t of ['venue_window_open', 'venue_slot_reminder']) {
+      expect(notificationLink({ template: t, clubId: 7, ref: null })).toBe('/venue');
+      expect(notificationLink({ template: t, clubId: null, ref: null })).toBe('/venue');
+    }
+  });
+
+  it('类目 window 的其余模板仍去俱乐部页签，不被带去 /venue', () => {
+    expect(notificationLink({ template: 'window_signals', clubId: 7, ref: null })).toBe('/clubs/7?tab=desk');
+    for (const t of ['sea_sealed_lead', 'sea_sealed_lost', 'sea_batch_open', 'sea_sealed_deadline']) {
+      expect(notificationLink({ template: t, clubId: 7, ref: null })).toBe('/clubs/7?tab=desk');
+    }
+  });
+});
+
 describe('notificationLink：健壮性与全覆盖', () => {
   it('未知模板恒 null（徽章也只显示原文）（TC-LINK-04）', () => {
     expect(notificationLink({ template: 'legacy_unknown', clubId: 5, ref: null })).toBeNull();
