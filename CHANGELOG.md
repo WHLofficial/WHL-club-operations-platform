@@ -6,9 +6,11 @@
 
 ## [v6.53.1] · 成长录入「非成长」徽章改为小 × 图标（2026-10-21）
 
-**已实现、未上线**（待发布）。判级 **patch**（纯前端样式 + 文案）；`package.json` 6.53.0 → **6.53.1**。
+**已上线 2026-10-21（Version `9c9fd6f7-b74a-4505-a783-d1b187306a4d`，push `7c4de47..4a6e629`）**。判级 **patch**（纯前端样式 + 文案）；`package.json` 6.53.0 → **6.53.1**。
 
 **改动**：成长录入页两处「非成长 · 不计 XP」文字徽章（卡片头 `web/src/pages/admin/GrowthEntryPage.tsx:1187`、桌表行首 `:1389`）改为小 `×` 图标徽章，原语义移入 `title` / `aria-label`（悬停与读屏仍可获知）；`web/src/styles.css` 新增 `.badge.x-mark`（更小内边距、`cursor: help`）。行为不变：非成长球员照常录入、`growth_events.xp` 仍为 0。
+
+**上线记录**：push 后 Workers Builds 未在 7 分钟内出包，改用仓库自带 `npm run deploy` 手动发布 → Version `9c9fd6f7-b74a-4505-a783-d1b187306a4d`；线上入口 `assets/index-Clhw19kI.js` 与本地 `web/dist` 一致；`/api/health` 200、`/venue` 200、`/api/club/venue-plan` 未登录 401。本次无迁移。
 
 ## [v6.53.0] · 球场档期 P0（容量驱动收入 + 设施门槛 + 场馆经营页）（2026-10-20）
 
