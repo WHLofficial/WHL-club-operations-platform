@@ -613,6 +613,14 @@ a.card:hover {
   white-space: nowrap;
 }
 
+/* v6.53.1：非成长球员「不计 XP」用小 × 徽章，语义留在 title / aria-label */
+.badge.x-mark {
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: help;
+}
+
 .badge.green {
   background: #e2f3ea;
   color: #0b7a47;

@@ -4,6 +4,12 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.53.1] · 成长录入「非成长」徽章改为小 × 图标（2026-10-21）
+
+**已实现、未上线**（待发布）。判级 **patch**（纯前端样式 + 文案）；`package.json` 6.53.0 → **6.53.1**。
+
+**改动**：成长录入页两处「非成长 · 不计 XP」文字徽章（卡片头 `web/src/pages/admin/GrowthEntryPage.tsx:1187`、桌表行首 `:1389`）改为小 `×` 图标徽章，原语义移入 `title` / `aria-label`（悬停与读屏仍可获知）；`web/src/styles.css` 新增 `.badge.x-mark`（更小内边距、`cursor: help`）。行为不变：非成长球员照常录入、`growth_events.xp` 仍为 0。
+
 ## [v6.53.0] · 球场档期 P0（容量驱动收入 + 设施门槛 + 场馆经营页）（2026-10-20）
 
 **已上线 2026-10-21**（Version `a7df4fe3-3264-4724-b70a-7ad8c38ca54d`，push `b776ae8..7c4de47`；迁移 `0078_venue_slots_p0.sql` 已于 push 前 apply 生产）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。

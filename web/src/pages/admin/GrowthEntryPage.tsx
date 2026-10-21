@@ -613,7 +613,7 @@ function MatchEntrySection() {
       <p className="hint">
         已确认的非弃权场次都可录（v6.46.0 起含冠军杯淘汰赛 / 超级杯 / 资格赛）；列表按确认时间倒序列出全部可补录比赛，可切换「按赛事」或「按轮次」查看。
         不产成长 XP 的场次只能录出场与评分（行首标「不计 XP」）；本场停赛的球员不能录成长（行内已标红）。
-        非成长球员的录入照收（比赛数据要用），只是不计成长 XP（行内标「非成长 · 不计 XP」，输入与截图预填照常）。
+        非成长球员的录入照收（比赛数据要用），只是不计成长 XP（行内标小 × 徽章，悬停可见「非成长 · 不计 XP」，输入与截图预填照常）。
         出场与评分走截图识别 + 人工确认；
         赛果确定的值（进球、助攻、赛果零封）只读，手录的评分 / 夺回球权 / 扑救可改后重新提交（XP 按差额调整）；
         已录的出场与零封是记过标记，不能撤销。
@@ -1184,7 +1184,9 @@ function EntryPanel({
                   <span className="entry-card-pos">{r.position ?? '—'}</span>
                   {r.sources.length > 0 && <span className="badge gray">已录 · {r.sources.join('、')}</span>}
                   {r.trainee && <span className="badge gray">训练营</span>}
-                  {!r.growable && <span className="badge gray">非成长 · 不计 XP</span>}
+                  {!r.growable && (
+                    <span className="badge gray x-mark" title="非成长 · 不计 XP" aria-label="非成长 · 不计 XP">×</span>
+                  )}
                   {r.suspended && <span className="badge red">{suspendedText(r.suspended)}</span>}
                   {issues.length > 0 && (
                     <span className="badge red" title={issues.join('；')}>
@@ -1386,7 +1388,9 @@ function EntryPanel({
                   <td>
                     {r.name}
                     {noXp && <span className="badge gray entry-src">不计 XP</span>}
-                    {!r.growable && <span className="badge gray entry-src">非成长 · 不计 XP</span>}
+                    {!r.growable && (
+                      <span className="badge gray x-mark" title="非成长 · 不计 XP" aria-label="非成长 · 不计 XP">×</span>
+                    )}
                     {r.sources.length > 0 && <div className="muted entry-src">已录 · {r.sources.join('、')}</div>}
                     {r.trainee && <div className="muted entry-src">训练营</div>}
                     {r.suspended && <div className="bad-text entry-src">{suspendedText(r.suspended)}</div>}
