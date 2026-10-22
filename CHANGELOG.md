@@ -4,6 +4,26 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.53.2] · 全站字体方案：标题宋体 + 正文 Inter + 数字 JetBrains Mono（2026-10-21）
+
+**本地实现完成，未 push / 未 deploy**（上线后回写 Version id 与线上核对结果）。判级 **patch**（纯展示层：换字体、加字体资产与加载声明；零端点、零迁移、零业务规则改动）；`package.json` 6.53.1 → **6.53.2**。计划与裁决 `memory/plan-v6.53.2-font-scheme.md`，测试计划 `docs/test-plans/v6.53.2-font-scheme.md`。
+
+**缘起**：用户要求「给这个中文 Web 应用定一套字体方案，从选型到落地」。原状是 `font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif`，全站无任何 `@font-face`，标题与正文同族，数字只有 19 处 `var(--mono)` 真等宽。
+
+**选型**（三套角色，详见 `UI_DESIGN.md` §7）
+
+- **标题**：Noto Serif SC 600 自托管子集（298,088 B）→ `Source Han Serif SC / Songti SC / STSong / SimSun`。`h1` 页面标题、`h2` 球员名、`h3` 卡片小标题统一衬线，呼应「复古档案室 / 合同卷宗」母题；子集只有 600 一档，**全站标题不要写 700/800**（合成粗体会糊 CJK）。
+- **正文**：`'Inter'`（只覆盖拉丁，48,444 B + latin-ext 74,328 B）→ 系统黑体（`PingFang SC / Hiragino Sans GB / Microsoft YaHei UI / Microsoft YaHei / Noto Sans SC`）。中文正文**不自托管**：12–13px 密集表格下系统字体 hinting 更稳，也省掉 300KB+ 首屏载荷。
+- **数字**：`'JetBrains Mono'`（40,404 B + latin-ext 15,196 B）**放在栈首**——原 `--mono` 把 `ui-monospace` 放第一位，JetBrains 永远轮不到。
+
+**改动**：`web/src/styles.css` 顶部 5 条 `@font-face`（全部 `font-display: swap`；Inter / JetBrains 按 fontsource 标准区间拆 latin / latin-ext 两条 `unicode-range`，后者只在 `Š/Đ/Ł` 出现时下载）；`:root` 新增 `--font-display` / `--font-sans` / `--font-mono`，`--mono` 改为 `var(--font-mono)` 别名（19 处旧引用不用改）；`body` 改用 `var(--font-sans)`；新增 `h1,h2,h3 { font-family: var(--font-display); font-weight: 600 }`。`web/index.html` 只 preload `inter-latin.woff2`（`crossorigin`），298KB 宋体不抢首屏带宽。新增 `web/public/fonts/`（5 个 woff2 + 3 份 OFL + `README.md`）与 `scripts/build-serif-subset.py`（下载 600 TTF → 扫 `web/src` + `src` + 生产 20 队名 + Latin 区段 + 标点 → `pyftsubset`；当前 2187 字，其中 CJK 1526；原 TTF 与字符表落 `scripts/.font-cache/`，已 gitignore）。
+
+**不做什么**：不给中文正文加网络字体；不加 `.mono` 全局规则（球员库 `td.mono` 等仍走正文族，改它要动多张表列宽，留待单独评估）；不动 `Ledger.tsx:202` 的 `strong.mono`（30px 余额仍是 Inter 700）。
+
+**验收实测**：`npm run typecheck` 三份 0 error；`npm run test` **144 文件 / 2390 例全绿**；`npm run test:e2e` **29/29**（含 ⑫ 全路由 375×812 零溢出、㉑ 球员页 375 卡内不横滑）；`npm run build` ✓，`dist/fonts/` 5 woff2 随 public 拷入。截图对照 1440 / 375 的 `/`、`/players`、`/players/260002`、`/clubs`、`/ledger`、`/market`：标题换宋体后可读、无豆腐块，`Ø` 等 Latin-1 字形在子集内。抓包核对 `/`、`/players`、`/players/260002`、`/ledger` 四页：每页只请求 3 个 latin 文件（48,444 + 298,088 + 40,404 = **386,936 B**），**没有任何 latin-ext 请求**，`unicode-range` 懒加载成立。**已知副作用**：Inter 比原 `Segoe UI` 略宽，球员库表格 1440 下横向溢出比改造前多约 19px；该表本就靠 `.table-wrap` 横滚（table 1107px vs 容器 852px），属既有行为，本轮不做列宽手术。
+
+**维护**：球队改名或界面新增生僻字后跑一次 `python scripts/build-serif-subset.py`；不跑则标题逐字回退 `SimSun`（仍是衬线，不会变黑体）。
+
 ## [v6.53.1] · 成长录入「非成长」徽章改为小 × 图标（2026-10-21）
 
 **已上线 2026-10-21（Version `9c9fd6f7-b74a-4505-a783-d1b187306a4d`，push `7c4de47..4a6e629`）**。判级 **patch**（纯前端样式 + 文案）；`package.json` 6.53.0 → **6.53.1**。

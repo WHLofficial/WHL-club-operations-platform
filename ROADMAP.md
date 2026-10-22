@@ -1522,6 +1522,37 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.53.2 · 全站字体方案：标题宋体 + 正文 Inter + 数字 JetBrains Mono（2026-10-21）
+
+**状态**：**本地实现完成，未 push / 未 deploy**（上线后回写 Version id 与线上核对）。判级 **patch**（纯展示层：字体资产 + `@font-face` + 栈顺序，零端点零迁移零生产写）；`package.json` 6.53.1 → **6.53.2**。计划与裁决 `memory/plan-v6.53.2-font-scheme.md`，测试计划 `docs/test-plans/v6.53.2-font-scheme.md`，字体来源与再生成 `web/public/fonts/README.md`。
+
+**缘起**：用户口径「给这个中文 Web 应用定一套字体方案，从选型到落地」。原状 `web/src/styles.css:69` 是 `font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif`，全站无 `@font-face`、无网络字体，标题与正文同族（`h1` 22px、`h3` 17.5px），且 `--mono: ui-monospace, 'JetBrains Mono', …` 把 `ui-monospace` 放在栈首 ⇒ JetBrains 永远轮不到。
+
+**选型裁决**
+
+| # | 角色 | 裁决 | 理由 |
+|---|---|---|---|
+| F1 | 标题 | Noto Serif SC 600 自托管子集（298KB）→ `Source Han Serif SC / Songti SC / STSong / SimSun` | 视觉母题是复古档案室 / 合同卷宗；22px 与 17.5px 下宋体笔画站得住，系统 SimSun 在 17px 已发虚 |
+| F2 | 正文中文 | 系统黑体（PingFang SC / 雅黑 UI / Noto Sans SC），**不自托管** | 中文正文子集也要 300KB+；12–13px 密集表格下系统字体 hinting 更稳 |
+| F3 | 正文西文 | Inter 自托管（只覆盖拉丁） | 球员英文名、CA/PA 高频；x-height 与雅黑接近，中英混排不跳 |
+| F4 | 数字 | JetBrains Mono 自托管变量字体，**改放栈首** | 修 `ui-monospace` 抢占；`--mono` 降为 `--font-mono` 别名，19 处旧引用不用改 |
+
+不做的三件：不给中文正文加网络字体（同 F2）；不加 `.mono` 全局规则（球员库 `td.mono` 等仍走正文族，改它要动多张表列宽）；不动 `Ledger.tsx:202` 的 `strong.mono`（30px 余额仍是 Inter 700，`.mono` 本来就是死标记）。
+
+**交付**
+
+- `web/src/styles.css`：顶部 5 条 `@font-face`（宋体 600 一条、Inter 与 JetBrains 各 latin / latin-ext 两条带 `unicode-range`，全部 `font-display: swap`）；`:root` 新增 `--font-display` / `--font-sans` / `--font-mono`；`body` 改 `var(--font-sans)`；新增 `h1,h2,h3 { font-family: var(--font-display); font-weight: 600 }`。**标题只写 600**：子集只有这一档，700/800 会触发合成粗体、糊 CJK。
+- `web/index.html`：只 preload `inter-latin.woff2`（48KB，`crossorigin`）；298KB 宋体交给 CSS 发现，不跟首屏 JS 抢带宽。
+- `web/public/fonts/`：`noto-serif-sc-600-subset.woff2` 298,088 B、`inter-latin.woff2` 48,444 B、`inter-latin-ext.woff2` 74,328 B、`jbmono-latin.woff2` 40,404 B、`jbmono-latin-ext.woff2` 15,196 B + 3 份 OFL + README。
+- `scripts/build-serif-subset.py`：下载 `@expo-google-fonts/noto-serif-sc@0.4.4` 的 600 TTF → 扫 `web/src` + `src` + 生产 20 队名 + ASCII/Latin-1/Latin-Ext-A + 标点 → `pyftsubset --flavor=woff2`。当前 2187 字（CJK 1526）；14.8MB 原 TTF 与字符表落 `scripts/.font-cache/`（已 gitignore）。
+- `UI_DESIGN.md`：令牌表补三行字体令牌；新增 §7 字体系统（角色 / 文件 / 加载策略 / 两条硬约束）。
+
+**验收实测**：`npm run typecheck` 三份 **0 error**；`npm run test` **144 文件 / 2390 例全绿**；`npm run test:e2e` **29/29**（含 ⑫ 全路由 375×812 零溢出、㉑ 球员页 375 卡内不横滑）；`npm run build` ✓，`dist/fonts/` 5 个 woff2 随 public 拷入。截图对照 1440 / 375 的 `/`、`/players`、`/players/260002`、`/clubs`、`/ledger`、`/market`：标题换宋体后可读、无豆腐块，`Ø` 在子集内；`/players/9502` 仍按既有规则重定向真实 fcId `/players/260002`。抓包核对 `/`、`/players`、`/players/260002`、`/ledger` 四页：每页只命中 3 个 latin 文件（48,444 + 298,088 + 40,404 = **386,936 B**），**无 latin-ext 请求**。fonttools 读回：Inter 子集特性只有 `calt/ccmp/dnom/frac/kern/locl/mark/mkmk/numr/pnum/tnum`，**没有 cv05/cv08**，故不加 `font-feature-settings`（加了是空转）。
+
+**已知副作用**：Inter 比原 `Segoe UI` 略宽，球员库表格 1440 下横向溢出比改造前多约 19px（`.table-wrap` clientW 852 / table 1107，横滚是 v3.3.0 起的既有行为；把 `.mono` 强制 Consolas 只降到 1088，证明与 JetBrains 无关）⇒ 本轮不做列宽手术。
+
+**待办**：① 发布后回写 Version id、线上 `assets/index-*.js` 与 `dist/` 逐字节核对；② 球队改名或界面新增生僻字后重跑 `python scripts/build-serif-subset.py`，否则标题逐字回退 `SimSun`（仍是衬线）；③ `.mono` 全局规则与列宽影响另开一轮评估。
+
 ## v6.53.0 · 球场档期 P0（容量驱动收入 + 设施门槛 + 场馆经营页）（2026-10-20）
 
 **状态**：**已上线 2026-10-21**（Version `a7df4fe3-3264-4724-b70a-7ad8c38ca54d`，push `b776ae8..7c4de47`；迁移 `0078` 已于 push 前 apply 生产并回读）。判级 **minor**（新页面 / 新端点 / 新规则 + 迁移 `0078`）；`package.json` 6.52.0 → **6.53.0**。计划文件 `memory/plan-v6.53.0-venue-slots-p0.md`，测试计划 `docs/test-plans/v6.53.0-venue-slots-p0.md`。
