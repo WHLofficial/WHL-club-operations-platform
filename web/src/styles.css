@@ -2,6 +2,63 @@
    家族定位「同构不同色」：结构类名照抄赛事/竞猜，本站主色 = 徽章焦橙 + 巧克力棕 + 奶油纸。
    令牌为徽章原图 PIL 量化校色结果（UI_DESIGN §6-1），主按钮白字对比 ≥4.5:1。 */
 
+/* ---- 字体（v6.53.2，UI_DESIGN §7）----
+   三套角色：标题=思源宋体子集（卷宗感）、正文西文=Inter、数字=JetBrains Mono；
+   中文正文不自托管，走系统黑体（PingFang / 雅黑 / Noto Sans SC），12–13px 密集表格下
+   系统字体的 hinting 比任何网络字体都稳，也省掉 300KB+ 的正文载荷。
+   字体文件与再生成办法见 web/public/fonts/README.md；OFL 许可见同目录。 */
+@font-face {
+  font-family: 'Noto Serif SC';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/noto-serif-sc-600-subset.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* latin-ext 单独一条 unicode-range：只有球员名里出现 Š/Đ/Ł 这类字符时浏览器才下载（74KB），
+   普通页面不付这份钱 */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jbmono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jbmono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
   --paper: #fdf4e3;         /* 徽章贴纸白（奶油纸） */
   --cream: #fdf4e3;         /* 奶油字：与 --paper 同值，语义=深底上的反白文字 */
@@ -31,7 +88,13 @@
   --bad: #dc2626;
   --warn: #d97706;
   --border: #e6dcc8;
-  --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  /* 字体角色（v6.53.2）：标题 / 正文 / 数字。--mono 保留为旧名，新代码用 --font-mono。
+     正文栈里 Inter 只覆盖拉丁；CJK 落到系统黑体。Windows 优先雅黑 UI 变体（hinting 更贴 UI 字号）。 */
+  --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --mono: var(--font-mono); /* 旧名（v6.53 及以前 19 处 var(--mono)）：等同 --font-mono */
   /* 控件行统一高度（v3.1.1 步骤 1）：按钮 / 段控件 / 输入框 / 下拉在 .control-row 里同高 */
   --control-h: 34px;
   /* 顶栏实际高度（浏览器实测：≥641px 宽 54px，≤640px 折两行 102px）。
@@ -66,13 +129,24 @@ body {
   /* 纸张噪点（feTurbulence data-uri，≤4% 透明度，UI_DESIGN §2） */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
   color: var(--ink);
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.6;
 }
 
 a {
   color: var(--terracotta-deep);
+}
+
+/* 标题统一走宋体子集（v6.53.2）：22px 页面标题 / 17.5px 卡片标题都落在笔画稳的区间，
+   600 是子集里唯一的字重；font-synthesis-weight: none 让「别写 700」成为浏览器强制
+   —— 真写了也不会合成假粗体（CJK 假粗会糊），只是仍按 600 渲染。 */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-synthesis-weight: none;
 }
 
 h1 {

@@ -56,7 +56,9 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 | `--silver-deep` | `#6e747b` | 银色正文字（对 card 4.64） |
 | `--ok / --bad / --warn` | `#0f9960 / #dc2626 / #d97706` | 状态色沿家族原值（warn 仅 banner，避免与主色橙混淆） |
 | `--border` | `#e6dcc8` | 边框（暖调，替代家族冷灰线） |
-| `--mono` | 沿赛事栈 `ui-monospace, "JetBrains Mono", …` | **一切数字**（CA/PA/身价/工资/余额/截止倒计时）mono + `tabular-nums` |
+| `--font-display` | 自托管 `"Noto Serif SC"` 600 子集（298KB）→ `Source Han Serif SC / Songti SC / SimSun` | **一切标题**：h1 页面标题、h2 球员名、h3 卡片小标题（复古档案室的「卷宗标题」气质，v6.53.2 起） |
+| `--font-sans` | 自托管 `"Inter"`（仅拉丁，100–900）→ `PingFang SC / Microsoft YaHei UI / Noto Sans SC` | 正文、表单、按钮、表格；Inter 只管拉丁，中文落系统黑体（12–13px 密集 UI 下 hinting 更稳，也省 300KB+ 正文载荷） |
+| `--font-mono` / `--mono` | 自托管 `"JetBrains Mono"`（100–800 变量）→ `ui-monospace / Cascadia Mono / Consolas` | **数字**（CA/PA/身价/工资/余额/截止倒计时）+ `tabular-nums`；`--mono` 是 v6.53 及以前的旧名，新代码用 `--font-mono` |
 | 圆角刻度 | 4 / 6 / 8 / 10 / 12 / 14 / 999px | 沿家族 |
 
 连带裁决：家族「进行中=橙」在本站与主色冲突 → **进行中/挂牌中改用 `--sky` 浅蓝系**（徽章自身就是橙底蓝衬的配色）；成功绿/危险红/警告橙保留家族语义。
@@ -154,3 +156,39 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 3. 挂牌板顶部「市场快讯 ticker」为**可选件**（赛事 portal 已有母题，是否复用到市场页开发时定）。
 4. 除盖章 scale-in 外不新增任何 keyframe；所有动效过 reduced-motion。
 5. 验收基线：三个对照页（球员详情 / 挂牌板 / 账本）与赛事系统并排看——结构气质一致、颜色气质一眼是「俱乐部站」。
+
+## 7. 字体系统（v6.53.2）
+
+### 7.1 三套角色
+
+| 角色 | 令牌 | 字体 | 落地位置 |
+|---|---|---|---|
+| 标题 | `--font-display` | Noto Serif SC **600**（自托管子集）+ 系统宋体回退 | `h1, h2, h3`（页面标题、球员名、卡片小标题） |
+| 正文 | `--font-sans` | Inter（自托管，只覆盖拉丁）+ 系统黑体回退 | `body` 及一切未指定的文本、表单、按钮 |
+| 数字 | `--font-mono` | JetBrains Mono（自托管变量字体）+ 系统等宽回退 | 所有 `var(--mono)` 处：CA/PA/身价/工资/余额/倒计时/时间戳 |
+
+**为什么标题是宋体**：本站的视觉母题是「复古档案室 + 合同卷宗 + 手账格线」。页面标题用宋体（有衬线、横细竖粗）像卷宗封皮上的印字，22px 下有足够的笔画对比；正文若也用宋体会在 12–13px 的密集表格里糊成一片，因此**宋体只做标题**，正文交给黑体。h1 22px / h2 22.5px / h3 17.5px（个别卡片 15.2–16px）都实测过，笔画清楚。
+
+**为什么正文中文不自托管**：一套中文黑体子集要覆盖 1300+ 汉字，即便裁到最小也是 300KB 量级；正文是首屏最大的文本块，为「换掉雅黑」付这个代价不划算。Inter 只补拉丁（数字、球员英文名、`CA/PA` 之类的缩写），CJK 走系统黑体——Windows 雅黑 / macOS 苹方 / Android Noto Sans SC 都是各自平台 hinting 最好的选择。品牌辨识度由标题宋体 + 数字等宽 + 奶油纸配色承担，而不是靠正文换字。
+
+### 7.2 字体文件（`web/public/fonts/`，Vite 原样拷到 `dist/fonts/`）
+
+| 文件 | 大小 | 来源 | 许可 |
+|---|---|---|---|
+| `noto-serif-sc-600-subset.woff2` | 298,088 B | Noto Serif SC 600（`@expo-google-fonts/noto-serif-sc@0.4.4`）子集化 | OFL-1.1 |
+| `inter-latin.woff2` / `inter-latin-ext.woff2` | 48,444 / 74,328 B | `@fontsource-variable/inter@5.2.5` | OFL-1.1 |
+| `jbmono-latin.woff2` / `jbmono-latin-ext.woff2` | 40,404 / 15,196 B | `@fontsource-variable/jetbrains-mono@5.2.5` | OFL-1.1 |
+
+许可全文在同目录 `OFL-*.txt`；再生成命令与字符集口径见 `web/public/fonts/README.md`。
+
+### 7.3 加载策略
+
+- 全部 `font-display: swap`：先出回退字，字体到了再换，不阻塞渲染。
+- **只 preload `inter-latin.woff2`**（48KB，正文拉丁首屏必用）；298KB 的宋体子集不 preload，交给 CSS 发现，避免和首屏 JS 抢带宽。
+- Inter / JetBrains Mono 的 **latin-ext 单独一条 `unicode-range`**：只有球员名出现 `Š / Đ / Ł / ő` 这类字符时才下载 74KB / 15KB，普通页面不付这份钱。
+- 字体族名与系统字体同名（`Inter` / `Noto Serif SC` / `JetBrains Mono`），但 `@font-face` **不带 `local()`**，不会误用用户机器上可能存在的完整版。
+
+### 7.4 两条硬约束
+
+1. **宋体不要写 `font-weight: 700/800`**：子集里只有 600 一档，浏览器会合成假粗体，CJK 笔画会糊。标题统一 600，并在 `h1,h2,h3` 上写了 `font-synthesis-weight: none` —— 真写了 700 也不会合成，只是仍按 600 渲染。
+2. **子集缺字会回退系统宋体**：`noto-serif-sc-600-subset.woff2` 的字符集 = `web/src` + `src` 全量中文 + 生产 20 支球队名 + ASCII/Latin-1/Latin-Ext-A + 常用标点/货币符号，共 2187 字（其中 CJK 1526）。新增界面文案若用了子集外的生僻字，标题会掉到 `SimSun`；改文案后跑一次 README 里的再生成脚本即可。

@@ -11,6 +11,10 @@ __pycache__/
 scratch/
 handoff-*.md
 
+# 字体子集再生成的中间物（14.8MB 原 TTF + 字符表）：由 scripts/build-serif-subset.py 重新下载，
+# 入库的是 web/public/fonts/*.woff2 成品
+scripts/.font-cache/
+
 # 脑暴视觉伴侣的会话目录（.superpowers/brainstorm/<session>/ 下是本轮原型的 HTML 与状态）：
 # 本地预览产物，不是仓库资产，不入库。
 .superpowers/

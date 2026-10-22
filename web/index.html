@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#87451c" />
     <link rel="icon" type="image/webp" href="/assets/brand/whl-badge-96.webp" />
+    <!-- 只预载正文西文（48KB）；298KB 的宋体子集交给 CSS 发现 + font-display: swap，
+         不跟首屏 JS 抢带宽 -->
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
     <title>WHL 经理办公室</title>
   </head>
   <body>
