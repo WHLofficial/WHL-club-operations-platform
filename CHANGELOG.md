@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.53.5] · 字体源切换到平台共享源 fonts.whleague.win/v1（2026-10-25）
+
+**待上线：R2 阶段 0 远程动作与 push 未执行**——`fonts.whleague.win` 域名尚未建立（建桶 / 对象 put / CORS / 绑域见 `scripts/platform-fonts/README.md` 上传 runbook，均待授权），本地与线上此刻都解析不到该域名；切换提交先落库，域名就绪并过 §10 TC-0 验收后再 push。判级 **patch**（纯展示层：5 条 `@font-face` 的 `src` 与 1 条 preload 换绝对 URL；零端点、零迁移、零业务规则改动）；`package.json` 6.53.4 → **6.53.5**。设计依据 `docs/superpowers/specs/2026-10-24-shared-font-source-design.md`（探索B · 阶段 1 = club 切换），计划 `memory/plan-v6.53.5-shared-font-source.md`，测试计划 `docs/test-plans/v6.53.5-shared-font-source.md`。
+
+**改动**
+
+- `web/src/styles.css`：顶部 5 条 `@font-face` 的 `src` 从 `/fonts/…` 相对路径换 **`https://fonts.whleague.win/v1/…`** 绝对 URL——衬线从本仓单仓子集 `noto-serif-sc-600-subset.woff2`（298,088 B / 2187 字）换成四仓并集 **`noto-serif-sc-600-union.woff2`**（330,604 B / 2389 字，`scripts/platform-fonts/output/v1/` MANIFEST 实测），Inter / JetBrains 四件同名直换（字节与本地逐字相同）。`unicode-range`、`font-weight` 区间（宋体 600 / Inter 100 900 / JBMono 100 800）、`font-display: swap` 全部原样保留，仍无 `local()`。文件头注释加版本锚「字体版本：v1（升级时全局替换 fonts.whleague.win/v1/）」，字体说明改指 `scripts/platform-fonts/README.md`。
+- `web/index.html`：`inter-latin` 的 preload `href` 换绝对 URL，`crossorigin` 保留（字体天然 CORS 模式，缺失会双下载）；注释里的宋体字节数同步订正 298KB → 331KB（union）。
+- `web/public/fonts/` 本地 5 个 woff2 **保留不删**：阶段 4 清理另轮授权，本轮留作回滚垫（`git revert` 即回本地自托管）。
+
+**收益口径（设计稿 §7）**：四站顶层站点同为 `https://whleague.win` ⇒ HTTP 缓存同分区，Inter/JBMono/union 衬线在 club / tour / guess / auth 四站各只下载一次；四站全访首次字体传输 1.43MB → 约 0.47MB（−67%）。club 单仓代价：衬线 298,088 → 330,604 B（+33KB，union 比 club 单仓子集只多 4.5% 字）。
+
+**验收**：本仓无字体断言（v6.53.2 起即无，grep `tests/` 无 woff2/fonts 引用），`tests/domains.test.ts` 的 apex 扫描不受影响（`fonts.whleague.win` 是子域，`whleague\.win(?![a-z0-9.-])` 负向断言不误伤）。全量 test / typecheck / build / e2e 由工作流统一执行；e2e 跨站缓存复用（TC-1）、共享源响应头三件套（TC-0 系列）与线上回读**待域名上线后执行**，见测试计划。
+
 ## [v6.53.4] · 原生表单控件继承站点字体（2026-10-24）
 
 **已上线 2026-10-24**：push `a187494..4578e8d`，Workers Builds 自动出包，生产 Version **`f0889ec2-a4c6-4cb0-ba9d-b59aeace3ee7`**。判级 **patch**（纯展示层：一条继承规则 + 一条 `.mono` 输入规则；零端点、零迁移）。`package.json` 6.53.2 → **6.53.4**（工作区里 6.53.3 已被另一笔未提交的 oidc 会话 TTL 改动占用，本轮不碰 `src/lib/oidc.ts`）。
