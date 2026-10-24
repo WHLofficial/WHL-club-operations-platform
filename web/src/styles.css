@@ -134,6 +134,24 @@ body {
   line-height: 1.6;
 }
 
+/* 原生控件不继承 body 字体（v6.53.3）：Windows 上 button/select/input 落到 Arial，
+   中文退到标准雅黑、▾ 这种符号退到 Cambria Math，和正文的「Inter + 雅黑 UI」不是一套。
+   合约里只要按钮/输入框的字体（字号、字重仍各自定），不碰外观。 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* 标记 .mono 的输入框装的是金额/数字（违约金、报价），跟表格里的数字列一样走等宽。
+   span/td 上的 .mono 仍不设全局规则：那会改多张表的列宽，见 .dossier-table 注释。 */
+input.mono,
+textarea.mono,
+select.mono {
+  font-family: var(--mono);
+}
+
 a {
   color: var(--terracotta-deep);
 }

@@ -1522,9 +1522,21 @@ CF 分析 24h 的两处 504 **都不是用户请求**，而是**边缘 Cache API
 
 **版本收口（2026-10-16）**：赛事仓 `chore(release): 收口 v5.8.0（积分榜重算自愈…）` 提交 `d150f88`（`package.json` 5.7.4 → 5.8.0 + `VERSIONS.md` 第 58 行 + 11 处注释版本串订正）已 push（`4183832..d150f88`）并由 CF Workers Builds 自动部署 Version `1bc9288c-b74a-4431-bd7d-68b13bfbce38`（2026-10-16T10:26:48Z）；回读 `/api/health` 200、线上入口 `assets/index-NQ57Q1kq.js` sha256 `2ec90d7fbc2ffc999954e03aff2ecd23dfa08058cd22a692797eac9aa2f99a3e` 与本地 `dist/` 逐字节一致（页脚版本号随之刷为 v5.8.0）。判级 **minor**（新增管理端端点与用户可见能力）。
 
+## v6.53.4 · 原生表单控件继承站点字体（2026-10-24）
+
+**状态**：**本地实现完成，未 push / 未 deploy**。判级 **patch**（纯展示层：一条继承规则 + 一条 `.mono` 输入规则；零端点、零迁移、零生产写）；`package.json` 6.53.2 → **6.53.4**（工作区里 6.53.3 已被另一笔未提交的 oidc 会话 TTL 改动占用，本轮不碰 `src/lib/oidc.ts`）。
+
+**缘起**：用户反馈「club 注册工作台和阵容部分没有应用新字体选型」。核查结论是**方案已生效、覆盖有缺口**：线上 `assets/index-a0t867je.css` 与本地 `web/dist` 逐字一致，`h1,h2,h3{font-family:var(--font-display)}` 与 `body{font-family:var(--font-sans)}` 都在；真正漏的是原生表单控件 —— `button` / `select` / `input` 不继承 `body` 字体，Windows 上落到 Arial（中文退标准雅黑、`▾` 退 Cambria Math）。CDP 实测工作台页签 26 个控件里 13 个 Arial：`「一线队 ▾ / 未分配 ▾」` 共 11 颗 `.sqc-assign-btn`、两个「选一名球员…」`select`、续约表单的 `input.mono`；阵容页签只有无文字的 `.user-menu-btn` 命中。
+
+**交付**：`web/src/styles.css` 在 `body` 后加 `button, input, select, textarea { font-family: inherit; }`（字号/字重/颜色/边框不动）；另加 `input.mono, textarea.mono, select.mono { font-family: var(--mono); }`（违约金/报价输入框跟表格数字列同族）。`UI_DESIGN.md` §7.4 增第 3 条硬约束。
+
+**验收实测**：CDP `CSS.getPlatformFontsForNode` —— `.sqc-assign-btn` 由 `Cambria Math + Microsoft YaHei` → `Microsoft YaHei UI`，`select` 由 `Arial + Microsoft YaHei` → `Inter + Microsoft YaHei UI`，两页签 Arial 控件 **13 → 0**；`h3` 仍 `Noto Serif SC SemiBold`、`.sqc-v.num` 仍 `JetBrains Mono`。`npm run typecheck` 三份 0 error；`npm run test` **144 文件 / 2390 例全绿**；`npm run test:e2e` **29/29**；`npm run build` ✓。截图 `C:/tmp/fontwork/fix-{desk,squad}-{1440,375}.png`。
+
+**待办**：① 发布后回写 Version id 与线上核对；② `.mono` 全局规则与列宽影响仍另开一轮（本轮只覆盖 `.mono` 输入框）。
+
 ## v6.53.2 · 全站字体方案：标题宋体 + 正文 Inter + 数字 JetBrains Mono（2026-10-21）
 
-**状态**：**本地实现完成，未 push / 未 deploy**（上线后回写 Version id 与线上核对）。判级 **patch**（纯展示层：字体资产 + `@font-face` + 栈顺序，零端点零迁移零生产写）；`package.json` 6.53.1 → **6.53.2**。计划与裁决 `memory/plan-v6.53.2-font-scheme.md`，测试计划 `docs/test-plans/v6.53.2-font-scheme.md`，字体来源与再生成 `web/public/fonts/README.md`。
+**状态**：**已上线 2026-10-23**（Version `99ef5fc8-ef3f-4a0a-8457-9b4df1d4deb9`，push `4a6e629..0c4b222`；线上 `assets/index-a0t867je.css` 含三族 `@font-face`，`/fonts/noto-serif-sc-600-subset.woff2` 200 / 298,088 B）。判级 **patch**（纯展示层：字体资产 + `@font-face` + 栈顺序，零端点零迁移零生产写）；`package.json` 6.53.1 → **6.53.2**。计划与裁决 `memory/plan-v6.53.2-font-scheme.md`，测试计划 `docs/test-plans/v6.53.2-font-scheme.md`，字体来源与再生成 `web/public/fonts/README.md`。
 
 **缘起**：用户口径「给这个中文 Web 应用定一套字体方案，从选型到落地」。原状 `web/src/styles.css:69` 是 `font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif`，全站无 `@font-face`、无网络字体，标题与正文同族（`h1` 22px、`h3` 17.5px），且 `--mono: ui-monospace, 'JetBrains Mono', …` 把 `ui-monospace` 放在栈首 ⇒ JetBrains 永远轮不到。
 

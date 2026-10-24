@@ -188,7 +188,8 @@ WHL 家族的既有设计语言（两个参照站逐文件核实）：**DOM 结�
 - Inter / JetBrains Mono 的 **latin-ext 单独一条 `unicode-range`**：只有球员名出现 `Š / Đ / Ł / ő` 这类字符时才下载 74KB / 15KB，普通页面不付这份钱。
 - 字体族名与系统字体同名（`Inter` / `Noto Serif SC` / `JetBrains Mono`），但 `@font-face` **不带 `local()`**，不会误用用户机器上可能存在的完整版。
 
-### 7.4 两条硬约束
+### 7.4 三条硬约束
 
 1. **宋体不要写 `font-weight: 700/800`**：子集里只有 600 一档，浏览器会合成假粗体，CJK 笔画会糊。标题统一 600，并在 `h1,h2,h3` 上写了 `font-synthesis-weight: none` —— 真写了 700 也不会合成，只是仍按 600 渲染。
 2. **子集缺字会回退系统宋体**：`noto-serif-sc-600-subset.woff2` 的字符集 = `web/src` + `src` 全量中文 + 生产 20 支球队名 + ASCII/Latin-1/Latin-Ext-A + 常用标点/货币符号，共 2187 字（其中 CJK 1526）。新增界面文案若用了子集外的生僻字，标题会掉到 `SimSun`；改文案后跑一次 README 里的再生成脚本即可。
+3. **原生控件不继承 `body` 字体**（v6.53.4）：`button` / `input` / `select` / `textarea` 在 Windows 上默认落到 Arial（中文退标准雅黑、`▾` 退 Cambria Math），所以 `styles.css` 里统一写了 `font-family: inherit`；新加的自定义控件如果是 `contenteditable` 或自绘按钮，别在外层覆写 `font-family`，否则会单独掉队。`.mono` 的输入框走 `var(--mono)`，但 `span` / `td` 上的 `.mono` 仍没有全局规则（要动多张表的列宽，另评）。

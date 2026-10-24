@@ -52,3 +52,13 @@
 - 球队改名、或界面新增生僻字后，跑一次 `python scripts/build-serif-subset.py`；不跑则标题掉到 `SimSun`（仍是衬线）。
 - `.mono` 类在部分表格（球员库 UID/CA/PA）没有全局 `font-family`，是 v3.3.0 的既有收口，不在本轮改动范围；若日后要让「一切数字等宽」，需单独评估列宽。
 - 若将来做 `font-display: optional` 或 metric-matched fallback，可再压 CLS；当前标题行高固定 1.6、CJK 字宽同为 1em，首屏未见明显跳动。
+
+## 6. 收口补记（v6.53.4，2026-10-24）
+
+用户反馈「注册工作台和阵容部分没有应用新字体选型」，排查结论是**方案已生效、原生控件未覆盖**：
+
+- 线上 CSS `assets/index-a0t867je.css` 与本地 `web/dist` 逐字一致，`h1,h2,h3` 衬线规则与 `body` 的 `var(--font-sans)` 都在线；不是发布遗漏。
+- `button` / `select` / `input` 不继承 `body` 字体，Windows 上落到 Arial（中文退标准雅黑、`▾` 退 Cambria Math）。CDP `CSS.getPlatformFontsForNode` 实测 `/clubs/1` 工作台 26 个控件里 13 个 Arial（11 颗 `.sqc-assign-btn` + 2 个 `select` + `input.mono`），阵容页签只有无文字图标按钮命中。
+- 修法：`styles.css` 加 `button, input, select, textarea { font-family: inherit; }`；另给 `input.mono / textarea.mono / select.mono` 指定 `var(--mono)`。`span`/`td` 的 `.mono` 仍不设全局规则（列宽另评）。
+- 复核：两页签 Arial 控件 13 → 0；`h3` 仍 `Noto Serif SC SemiBold`、`.sqc-v.num` 仍 `JetBrains Mono`；typecheck 0 error、vitest 144 文件 / 2390 例、e2e 29/29、build ✓。
+- 口径未变：h4 及以下 13–14px 小标题保持黑体，衬线只在 17.5px 以上标题（UI_DESIGN §7.4）。
