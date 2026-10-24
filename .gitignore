@@ -15,6 +15,10 @@ handoff-*.md
 # 入库的是 web/public/fonts/*.woff2 成品
 scripts/.font-cache/
 
+# 平台字体 union 产物（共享字体源 · 探索B）：可由 scripts/build-platform-fonts.py 复现，
+# 入库的是脚本与 README；产物按版本上传共享源（R2），不入库
+scripts/platform-fonts/output/
+
 # 脑暴视觉伴侣的会话目录（.superpowers/brainstorm/<session>/ 下是本轮原型的 HTML 与状态）：
 # 本地预览产物，不是仓库资产，不入库。
 .superpowers/
