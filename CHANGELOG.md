@@ -6,7 +6,7 @@
 
 ## [v6.53.4] · 原生表单控件继承站点字体（2026-10-24）
 
-**本地实现完成，未 push / 未 deploy**。判级 **patch**（纯展示层：一条继承规则 + 一条 `.mono` 输入规则；零端点、零迁移）。`package.json` 6.53.2 → **6.53.4**（工作区里 6.53.3 已被另一笔未提交的 oidc 会话 TTL 改动占用，本轮不碰 `src/lib/oidc.ts`）。
+**已上线 2026-10-24**：push `a187494..4578e8d`，Workers Builds 自动出包，生产 Version **`f0889ec2-a4c6-4cb0-ba9d-b59aeace3ee7`**。判级 **patch**（纯展示层：一条继承规则 + 一条 `.mono` 输入规则；零端点、零迁移）。`package.json` 6.53.2 → **6.53.4**（工作区里 6.53.3 已被另一笔未提交的 oidc 会话 TTL 改动占用，本轮不碰 `src/lib/oidc.ts`）。
 
 **缘起**：用户反馈「club 注册工作台和阵容部分没有应用新字体选型」。先核生产：`assets/index-a0t867je.css` 与本地 `web/dist` 逐字一致，`h1,h2,h3{font-family:var(--font-display)}`、`body{font-family:var(--font-sans)}`、5 条 `@font-face` 都在线上 —— 三套字体与标题规则确实生效了。漏的是**原生表单控件不继承 `body` 字体**：Windows 上 `button` / `select` / `input` 落到 Arial，中文退到标准雅黑、`▾` 退到 Cambria Math。CDP 实测 `/clubs/1` 工作台页签 26 个控件里 **13 个 Arial**（`.sqc-assign-btn` 的「一线队 ▾ / 未分配 ▾」共 11 颗、两个「选一名球员…」`select`、续约表单的 `input.mono`）；阵容页签只有图标按钮 `.user-menu-btn` 命中（无可见文字）。
 
@@ -17,6 +17,8 @@
 - `span` / `td` 上的 `.mono` 仍不设全局规则：会改多张表的列宽（v6.53.2 待办③，另开一轮评估）。
 
 **验收实测**：CDP `CSS.getPlatformFontsForNode` 复核 —— `.sqc-assign-btn` 从 `Cambria Math + Microsoft YaHei` 变为 `Microsoft YaHei UI`，`select` 从 `Arial + Microsoft YaHei` 变为 `Inter + Microsoft YaHei UI`，两个页签的 Arial 控件 **13 → 0**；`h3` 仍是 `Noto Serif SC SemiBold`、`.sqc-v.num` 仍是 `JetBrains Mono`（没被顺带改掉）。`npm run typecheck` 三份 **0 error**；`npm run test` **144 文件 / 2390 例全绿**；`npm run test:e2e` **29/29**（含 375 零溢出断言）；`npm run build` ✓。截图 `C:/tmp/fontwork/fix-desk-1440.png`、`fix-squad-1440.png`、`fix-desk-375.png`、`fix-squad-375.png`，另加按钮/下拉 3x 特写。
+
+**上线回读**：生产 CSS 从 `assets/index-a0t867je.css` 变为 **`assets/index-Sa2bA2mD.css`**（96,366 B），含 `button,input,select,textarea{font-family:inherit}` 与 `input.mono,textarea.mono,select.mono{font-family:var(--mono)}`；`noto-serif-sc-600-subset.woff2` 200 / 298,088 B、`inter-latin` 200 / 48,444、`jbmono-latin` 200 / 40,404；匿名打开 `/players?limit=20`，页脚 **v6.53.4**，8 个可见 `button/select/input` 的 computed 首族全为 `Inter`。
 
 **界面口径（没变）**：h4 及以下小标题（位置分布 / 年龄结构 / CA 结构 / 阵容名单 / 门将·1）仍是黑体 —— 衬线只用在 17.5px 以上标题，13–14px 宋体笔画发虚（`UI_DESIGN.md` §7.4）。
 
