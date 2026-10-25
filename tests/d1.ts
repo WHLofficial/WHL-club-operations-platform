@@ -160,6 +160,7 @@ const MIGRATION_FILES = [
   '0076_growth_events_match_ref_index.sql',
   '0077_growth_nongrowable_reset.sql',
   '0078_venue_slots_p0.sql',
+  '0079_renewal_demand.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

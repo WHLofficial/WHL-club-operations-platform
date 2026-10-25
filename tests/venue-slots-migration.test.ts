@@ -269,16 +269,18 @@ describe('0078 · 结算台账、登记与空库', () => {
     expect(() => applyMigrations(sqlite)).not.toThrow();
   });
 
-  it('tests/d1.ts 的登记末项与迁移目录按名排序的最新一枚一致', () => {
+  it('tests/d1.ts 的登记与迁移目录不脱节（登记末项 = 目录按名排序最新一枚；本迁移已登记）', () => {
+    // 通用不变量（0079 起不再锁具体文件名，否则每加一枚迁移都要回来改这里）：
+    // 登记末项 = 目录按名排序的最新一枚；0078 自身仍必须在登记内。
     const latest = readdirSync(fileURLToPath(MIGRATIONS_DIR.href))
       .filter((file) => file.endsWith('.sql'))
       .sort()
       .at(-1);
-    expect(latest).toBe(MIGRATION);
 
     const registry = readFileSync(fileURLToPath(new URL('./d1.ts', import.meta.url).href), 'utf8');
     const listed = [...registry.matchAll(/'(\d{4}_[^']+\.sql)'/g)].map((match) => match[1]);
-    expect(listed.at(-1)).toBe(MIGRATION);
+    expect(listed.at(-1)).toBe(latest);
+    expect(listed).toContain(MIGRATION);
   });
 
   it('迁移文件不含 BEGIN/COMMIT（执行器自带事务）', () => {
