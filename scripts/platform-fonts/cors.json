@@ -1,6 +1,10 @@
-[
-  {
-    "AllowedOrigins": ["*"],
-    "AllowedMethods": ["GET"]
-  }
-]
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["*"],
+        "methods": ["GET"]
+      }
+    }
+  ]
+}

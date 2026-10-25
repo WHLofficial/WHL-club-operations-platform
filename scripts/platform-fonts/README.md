@@ -35,6 +35,8 @@ python scripts/build-platform-fonts.py --skip-download # 离线：缓存缺失�
 
 ## 上传 runbook（阶段 0 · 基建）
 
+> **执行记录（2026-10-25）**：①–④ 已全部执行完毕并验证通过——桶 `whl-fonts` 建好；九件对象上传（immutable 头随 put 写入）；CORS 配好（`*` / GET，见 ③ 的形状坑）；`fonts.whleague.win` 已绑定生效。⑤ 验证实测：九件全 200、`content-type` 逐件正确、`cache-control: public, max-age=31536000, immutable`、二次请求 `cf-cache-status: HIT`、带 Origin 回 `access-control-allow-origin: *`、线上 MANIFEST 与本地逐字段一致（即设计稿 TC-0a/0b/0d 已过；TC-1 跨站缓存复用待四仓 push 后在浏览器做）。后续升版（`/v2/`）照 ①② 换版本号重跑即可，③④ 不用重做。
+>
 > ①–③ 都是 **R2 remote 写操作**，执行前须获用户明确授权（本仓危险清单：任何 `--remote` 写）。旗标拼写已于 2026-10-25 对 `wrangler 4.131.1` 的 `--help` 文本逐一核实（`npx wrangler r2 object put --help` / `npx wrangler r2 bucket cors --help` / `npx wrangler r2 bucket create --help`）；凡未在 `--help` 里出现的旗标或面板路径，一律标「未验证」。产物字节口径见 `output/v1/MANIFEST.json`（v1 实测：union woff2 330,604 B，字符集 2389 / CJK 1697，2026-10-25 生成）。
 
 ### ① 建桶
@@ -67,21 +69,27 @@ npx wrangler r2 object put whl-fonts/v1/MANIFEST.json           --file scripts/p
 
 ### ③ 桶 CORS
 
-配置文件即本目录 `cors.json`（`AllowedOrigins: ["*"]` + `AllowedMethods: ["GET"]`，字体加载是无凭据简单请求，够了）：
+配置文件即本目录 `cors.json`（**R2 API 形状** `{"rules":[{"allowed":{"origins":["*"],"methods":["GET"]}}]}`，字体加载是无凭据简单请求，够了）：
 
 ```bash
 npx wrangler r2 bucket cors set whl-fonts --file scripts/platform-fonts/cors.json
 ```
 
-`--file` 必填、`-y`（跳确认）与 `-J`（jurisdiction）均已核实。**已知坑**：wrangler 对 CORS 配置文件有校验 bug（设计稿 §9 步骤 4 引的 issue），合法 JSON 也可能报错——失败就改走面板：R2 → `whl-fonts` → Settings → CORS Policy → 手工贴 `cors.json` 内容（面板路径以当前 UI 为准，「未验证」）。配完只读核对：`npx wrangler r2 bucket cors list whl-fonts`（只读，无授权顾虑）。
+`--file` 必填、`-y`（跳确认）与 `-J`（jurisdiction）均已核实。**实测坑（2026-10-25）**：wrangler 4.131.1 要求文件含 `rules` 数组的 R2 API 形状——最初写成 S3 风格裸数组（`[{"AllowedOrigins":...}]`）被拒，报「The CORS configuration file must contain a 'rules' array」；改为 `{"rules":[{"allowed":{...}}]}` 后一次通过。配完只读核对：`npx wrangler r2 bucket cors list whl-fonts`（只读，无授权顾虑）；面板手工贴（R2 → `whl-fonts` → Settings → CORS Policy）仍是兜底。
 
-### ④ 面板绑自定义域 `fonts.whleague.win`
+### ④ 绑自定义域 `fonts.whleague.win`
 
-r2.dev 与 S3 API 端点**不走边缘缓存**，对象级 `Cache-Control` 不生效（设计稿 §4），必须自定义域。面板步骤（路径以当前 UI 为准，「未验证」）：
+r2.dev 与 S3 API 端点**不走边缘缓存**，对象级 `Cache-Control` 不生效（设计稿 §4），必须自定义域。**CLI 路径（2026-10-25 实测可用）**：
 
-1. Cloudflare Dashboard → R2 → `whl-fonts` → Settings → Custom Domains → **Connect Domain**；
-2. 填 `fonts.whleague.win`（须是本账户 zone 下的子域，DNS 记录由面板自动建）；
-3. 等状态变 Active（证书签发通常几分钟）。
+```bash
+# zone id 只读查询（wrangler OAuth 凭证，zone:read 在默认授权范围）：
+#   curl -s -H "Authorization: Bearer <oauth_token>" "https://api.cloudflare.com/client/v4/zones?name=whleague.win"
+#   → whleague.win zone id = 1fe7b8d2b1c48b6a7982cc6387e311a7（active）
+npx wrangler r2 bucket domain add whl-fonts --domain fonts.whleague.win --zone-id 1fe7b8d2b1c48b6a7982cc6387e311a7 -y
+npx wrangler r2 bucket domain get whl-fonts --domain fonts.whleague.win   # 状态复核
+```
+
+面板备选（路径以当前 UI 为准）：R2 → `whl-fonts` → Settings → Custom Domains → Connect Domain，填 `fonts.whleague.win`，等状态 Active。**实测**：绑域后证书签发约 1 分钟，期间 403，之后 200。
 
 ### ⑤ 验证（只读）
 
