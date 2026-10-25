@@ -4,9 +4,12 @@
 //         生成闸 = seededUnit([season, window, player], 20) < p；超 6 条/队时 PPS 加权无放回抽样收口。
 //   §5.2  普通涨幅 r = clamp(0.80×gap, 0.15, 0.50)；§5.4.3 通胀涨幅 r = clamp(gap, 0.30, 0.60)、rc_raise 顶格 0.25。
 //   §5.3  还价判定与现有谈判同式（successRate + 每轮期望衰减 0.95），roll 钉 seededUnit([demand_id, round], 21)。
-//   §5.4  拒绝后果的累计终局计数：段 = 球员 × 俱乐部 × 当前段（signed_at 即段起点，amendment 不动它、
-//         换队重锚、买回恢复快照 ⇒ 同队续约不清零、换队/回原队都算新段）；expired 计入、挂牌驱赶不计；
-//         段内第 2 次（含）终局升档走直拒三件套。
+//   §5.4  拒绝后果的累计终局计数：段 = 球员 × 俱乐部 × 当前段（段锚 = 最近一次入队时刻：
+//         transfer/activation 买入完成时刻；从未换队 = 首签时刻兜底——终局必晚于合同签署所以安全；
+//         amendment 不产生入队事件 ⇒ 同队续约不清零，换队/回原队都产生 ⇒ 都算新段，rev20 §5.4.4
+//         「多次转会回到原队 = 每次都是新段」）；expired 计入、挂牌驱赶不计；段内第 2 次（含）终局升档。
+//         ⚠️ 段锚绝不能取现行合同 signed_at：买回 A 分支恢复的快照 signed_at 是离开前旧值
+//         （= 旧段起点），旧段终局行不会被 at ≥ 锚 过滤掉，「新段从零」被静默破坏（tests 有反例锁）。
 //   §5.5  rc_floor 取整链；§5.3/§6 expires_at = min(生成 + 3 日, 关窗)。
 // 本模块无 IO；随机源统一走 core/seeded.ts 的 seededUnit（确定性契约）。时间一律 epoch 毫秒，
 // 由调用方与 DB 的 ISO 文本互转。金额单位 m，两位小数走 market-rules.round2。
@@ -387,21 +390,26 @@ export function countsTowardEscalation(kind: DemandFinalKind, byListing = false)
  * 段内可计数终局（§5.4.4 计数口径）：段 = 球员 × 俱乐部 × 当前段。
  *  - 只数 clubId 匹配的行：换队 → 新东家历史为空（清零），同队续约（amendment 不改俱乐部）→ 历史延续
  *    （堵「过期 → 便宜续约洗计数」循环）；
- *  - stintSinceMs = 当前段起点（= 合同 signed_at：换队分支重锚、amendment 不动、买回恢复快照；
- *    从未换队 = 首签时刻）。回原队时同一 club_id 的旧段行因 at < 段起点被排除 ⇒ 回原队 = 新段从零；
- *    买回补记的过期带 at = 买回时刻（≥ 段起点）⇒ 计入新段。
+ *  - segmentAnchorMs = **最近一次入队时刻**（transfer/activation 买入完成时刻；从未换队 = 首签时刻兜底，
+ *    闹涨薪终局必晚于合同签署所以兜底安全）。同一俱乐部二次进出（回原队）时，旧段行 at < 新入队时刻被
+ *    排除 ⇒ 回原队 = 新段从零（rev20 §5.4.4「多次转会回到原队 = 每次都是新段」「旧段计数已随段结束
+ *    不延续」）；买回补记的过期带 at = 买回时刻（= 新锚）⇒ 计入新段（§5.4 A2）。
+ *    ⚠️ 锚绝不能用现行合同 signed_at：amendment 分支不动 signed_at（同队续约场景碰巧正确），但换队
+ *    分支重锚、买回 A 分支恢复快照旧值（= 旧段起点）——回原队时旧段行 at ≥ 该值全量混入，「新段从零」
+ *    被静默破坏（tests/demand-rules.test.ts 有「喂恢复的 signed_at 即混入」的反例锁）。入队时刻只挂
+ *    transfer/activation 完成、与 signed_at 解耦，对「同队续约是否动 signed_at」的将来改动免疫。
  *  - byListing 的过期不计。
- * 传入 null 表示无段起点可用（退化为只按 clubId 圈定）。
+ * 传入 null 表示无锚可用（退化为只按 clubId 圈定）。
  */
 export function segmentFinals<T extends DemandFinalRecord>(
   rows: readonly T[],
   clubId: number,
-  stintSinceMs: number | null,
+  segmentAnchorMs: number | null,
 ): T[] {
   return rows.filter(
     (row) =>
       row.clubId === clubId &&
-      (stintSinceMs === null || row.at >= stintSinceMs) &&
+      (segmentAnchorMs === null || row.at >= segmentAnchorMs) &&
       countsTowardEscalation(row.kind, row.byListing === true),
   );
 }

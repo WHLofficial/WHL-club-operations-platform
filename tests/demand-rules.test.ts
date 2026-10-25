@@ -396,15 +396,29 @@ describe('§5.4.4-5 段计数与升档判定', () => {
     expect(escalatesToDirect(segmentFinals(rows, 2, 4 * D).length)).toBe(false); // 新段从零
   });
 
-  it('回原队 = 新段从零（owner 裁决）：旧段行被段起点排除，买回补记的过期计入新段', () => {
+  it('回原队 = 新段从零（owner 裁决）：旧段行被段锚排除，买回补记的过期计入新段', () => {
     const rows: DemandFinalRecord[] = [
       { kind: 'expired', clubId: 1, at: 2 * D }, // 旧段终局（首段效力期）
       { kind: 'expired', clubId: 1, at: 5 * D, byListing: false }, // 买回（A 分支）补记的一次 expired
     ];
-    // 段起点 = 买回时刻（换队分支重锚的 signed_at 恢复值）→ 旧段行不算
+    // 段锚 = 最近一次入队时刻 = 买回完成时刻 5*D → 旧段行（at=2D）不算
     expect(segmentFinals(rows, 1, 5 * D).map((r) => r.at)).toEqual([5 * D]);
-    // 对照：若无段起点（null 退化口径）会误数旧账 —— 锁定段起点参数的必要性
+    // 对照：若无锚（null 退化口径）会误数旧账 —— 锁定锚参数的必要性
     expect(segmentFinals(rows, 1, null)).toHaveLength(2);
+  });
+
+  it('反例锁：锚喂成买回恢复的 signed_at（旧段起点 1*D）→ 旧段行全量混入', () => {
+    // 设计 rev20：买回 A 分支恢复的快照 signed_at 是离开前旧值（= 旧段起点 1*D，不是买回时刻）。
+    // 若 worker 拿现行合同 signed_at 当锚，旧段终局行 at(2D) ≥ 1D 过滤不掉，「新段从零」被静默破坏：
+    // escalatesToDirect 提前一窗触发直拒三件套（全联盟通告 + 保护期失效，不可逆广播动作）。
+    // 本例钉死这个混入形状 —— 将来有人把锚改回 signed_at，看到 2 行就该知道口径错了。
+    const rows: DemandFinalRecord[] = [
+      { kind: 'expired', clubId: 1, at: 2 * D }, // 旧段终局
+      { kind: 'expired', clubId: 1, at: 5 * D }, // A2 买回补记的 expired（at = 买回时刻）
+    ];
+    expect(segmentFinals(rows, 1, 1 * D)).toHaveLength(2); // 旧段行混入 = 错误口径的特征形状
+    // 同锚下 direct 买回（不补记终局）后的首次新终局也会被旧账顶成升档：
+    expect(escalatesToDirect(segmentFinals([{ kind: 'expired', clubId: 1, at: 2 * D }], 1, 1 * D).length)).toBe(true);
   });
 
   it('挂牌驱赶不计入累计：混在历史里被过滤', () => {
