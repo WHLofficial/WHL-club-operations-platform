@@ -13,6 +13,7 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
+import { seededUnit } from '../core/seeded.ts';
 import { isWindowOpen } from './seasons.ts';
 import { assertOpOpen } from './ops-schedule.ts';
 import {
@@ -267,22 +268,9 @@ export async function loadVenueContext(db: Env['DB'], clubId: number): Promise<V
   };
 }
 
-/** 确定性伪随机 [0,1)：同 seed+draw 恒定（关窗批重跑必须逐字一致）。FNV-1a 喂入 + splitmix32 收尾。 */
-export function seededUnit(seed: number[], draw: number): number {
-  let h = 0x811c9dc5;
-  for (const value of [...seed, draw]) {
-    let x = value | 0;
-    for (let i = 0; i < 4; i++) {
-      h = Math.imul(h ^ (x & 0xff), 0x01000193) >>> 0;
-      x >>>= 8;
-    }
-  }
-  let z = (h + 0x9e3779b9) >>> 0;
-  z = Math.imul(z ^ (z >>> 16), 0x21f0aaad) >>> 0;
-  z = Math.imul(z ^ (z >>> 15), 0x735a2d97) >>> 0;
-  z = (z ^ (z >>> 15)) >>> 0;
-  return z / 4294967296;
-}
+// 确定性伪随机实现已上收 src/core/seeded.ts（v6.54.0，闹涨薪域共用同一随机源）；
+// 这里保留再导出，naming-ops / rumors / 既有测试的引用路径不动。
+export { seededUnit };
 
 export interface ActivityRolls {
   income: number;
