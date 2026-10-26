@@ -83,6 +83,14 @@ export const NOTIFY_META: Record<string, NotifyMeta> = {
   // v6.53.0 场馆档期 P0：开窗通知 / 关窗前未排满提醒
   venue_window_open: { label: '场馆开窗', category: 'window' },
   venue_slot_reminder: { label: '档期提醒', category: 'window' },
+  // v6.54.0 闹涨薪：要求生成 / 24h 截止提醒 / 终局回执 / 直拒档全联盟通告
+  //（归 offer 类——合同谈判域。ref 刻意不造：落点 /market/desk?tab=negotiations&demand=<id>
+  // 不是 NotifyRef 三型之一；深链 id 由 queueClubNotification 附加进 payload.demandId
+  // （worker/notify.ts，仅当生成点 data 带正整数 demandId），前端据此拼深链，见设计 §10.1）
+  demand_created: { label: '球员要求', category: 'offer' },
+  demand_deadline: { label: '要求临近', category: 'offer' },
+  demand_resolved: { label: '要求了结', category: 'offer' },
+  demand_rejected_public: { label: '放行通告', category: 'offer' },
 };
 
 /** 未知模板 ⇒ null（前端退化：无修饰色徽章 + 原始模板名 + 不可点）。 */

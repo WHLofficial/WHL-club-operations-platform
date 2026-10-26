@@ -143,6 +143,22 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `📣 海捞暗标段已开标：本批 ${data.won} 名球员被签走（共 ${data.clubs} 家出标），胜出者与金额见海捞页公示。`;
     case 'sea_sealed_deadline':
       return `⏳ 海捞暗标段北京时间 ${data.deadline} 截止：你还压着 ${data.count} 份密封标，截止前可以改标或撤回。`;
+    // 闹涨薪（v6.54.0）：要求生成 / 24h 截止提醒 / 终局回执（拒绝按档位分文案，升档的谈崩
+    // 走直拒 grade）/ 直拒档全联盟通告（rc = 现行合同违约金，即关窗后可原价激活的数字）
+    case 'demand_created':
+      return `📩 ${data.player} 提出了涨薪要求：${data.target} m/窗（当前 ${data.wage}）${data.rcTo != null ? `，违约金 ${data.rcFrom} → ${data.rcTo}` : ''}，${data.deadline} 前答复，去「签约谈判」处理。`;
+    case 'demand_deadline':
+      return `⏳ 涨薪要求将到期：${data.player} 的要求还剩不到 24 小时（北京时间 ${data.deadline} 截止）。放任过期也算一次，下次他会开得更狠。`;
+    case 'demand_resolved':
+      if (data.outcome === 'accepted') {
+        return `🤝 涨薪要求已接受：${data.player} 将按 ${data.wage} m/窗 续薪${data.rc != null ? `（违约金 ${data.rc} m）` : ''}，窗口关闭后生效，费用为 0。`;
+      }
+      if (data.escalated === true || data.source === 'direct') {
+        return `🚫 涨薪要求已拒绝：${data.player} 被明确放行。关窗起保护期结束，任何球队都能按违约金原价激活；全联盟已收通告，他挂着『不满』标记，直到离队或重签。`;
+      }
+      return `🚫 涨薪要求没谈成：${data.source === 'lowball' ? '还价低于他的底线，视为拒绝整条要求' : '3 轮还价未达成'}。${data.player} 已提交转会申请，下个窗口他还会再提，而且直接开到市场价。`;
+    case 'demand_rejected_public':
+      return `📣 转会通告：「${data.club}」已明确放行 ${data.player}${data.rc != null ? `——关窗起保护期结束，可按违约金原价 ${data.rc} m 激活` : '——关窗起保护期结束'}，他挂着『不满』标记，直到离队或重签。`;
     default:
       return String(data.text ?? '');
   }
@@ -185,8 +201,12 @@ export async function queueClubNotification(
       .bind(...accountIds)
       .all<{ user_id: number; qq: string }>();
     const text = renderNotification(template, data);
-    // v6.40.0：能定位的实体一起落库（收件篮整行跳转用）；无实体模板不带 ref，前端走类目固定落点
+    // v6.40.0：能定位的实体一起落库（收件篮整行跳转用）；无实体模板不带 ref，前端走类目固定落点。
+    // v6.54.0 闹涨薪：落点 /market/desk?tab=negotiations&demand=<id> 不是 NotifyRef 三型之一，
+    // 刻意不造 ref（通知评审修——此前注释声称「前端用 payload.demandId 深链」但 demandId 从未
+    // 进库，深链无来源）；改为 ref 之外附加 payload.demandId（仅当生成点 data 带正整数时）。
     const ref = notificationRefOf(template, data);
+    const demandId = typeof data.demandId === 'number' && Number.isInteger(data.demandId) && data.demandId > 0 ? data.demandId : null;
     // 每个绑定账号都有一条 web 行（收件篮，status='sent' 免投递）；绑了 QQ 的账号另有一条
     // QQ 投递行（status='pending'，cron 投递），两通道互不挤占
     await db.batch([
@@ -196,7 +216,12 @@ export async function queueClubNotification(
             `INSERT INTO notifications (club_id, user_id, channel, template, payload, status, created_at)
              VALUES (?, ?, 'web', ?, ?, 'sent', ${nowSql()})`,
           )
-          .bind(clubId, userId, template, JSON.stringify(ref ? { text, ref } : { text })),
+          .bind(
+            clubId,
+            userId,
+            template,
+            JSON.stringify({ text, ...(ref ? { ref } : {}), ...(demandId !== null ? { demandId } : {}) }),
+          ),
       ),
       ...qqs.results.map((r) =>
         db
@@ -208,6 +233,28 @@ export async function queueClubNotification(
       ),
     ]);
     return accountIds.length + qqs.results.length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 全联盟通告（v6.54.0 demand_rejected_public 直拒档）：发全部真人俱乐部（CPU 队没有
+ * 收件人、也没有站内篮，跳过）。每队各自解析绑定与双通道，见 queueClubNotification；
+ * 通告是尽力而为：任何一队失败不影响其余队，整体失败不抛（通知绝不阻塞主流程，§12-2）。
+ */
+export async function queueAllUserClubsNotification(
+  env: Env,
+  template: string,
+  data: Record<string, unknown>,
+): Promise<number> {
+  try {
+    const clubs = await env.DB.prepare(`SELECT id FROM clubs WHERE is_cpu = 0 ORDER BY id`).all<{ id: number }>();
+    let queued = 0;
+    for (const club of clubs.results) {
+      queued += await queueClubNotification(env, club.id, template, data);
+    }
+    return queued;
   } catch {
     return 0;
   }
