@@ -81,6 +81,16 @@
 
 ---
 
+## v6.54.1 · 收口审捡出的市场域修复：标价区间与挂牌同规、边界取整、toast/z-index（2026-10-26）
+
+**状态**：**本地实现完成，未 push / 未 deploy，随 v6.54.0 同批上线**；判级 patch。测试计划 `docs/test-plans/v6.54.1-transfer-price-bounds.md`。v6.54.0 收口审发现的市场域独立缺陷（与闹涨薪无耦合），零迁移。
+
+**交付（`67b37b4`，12 文件）**：`setOfferSettings` 标价区间改用 `listingPriceBounds`（下限 = max(1, ⌈min(0.5×违约金, 0.5×身价)⌉)，堵「标价 1m + 达线自动同意绕开挂牌五折底线」）；挂牌/标价/最低报价上限一律 `floor`、下限 `ceil`（`market-rules.ts` / `offer-rules.ts`，整数报价体系边界不露小数）；前端新增 `web/src/lib/transfer-bounds.ts`（SideOps 报价面板与挂牌面板共用区间提示）、toast 定时器挂 ref（修连发提前抹掉 + 卸载后 `setToast` 抛错）、toast z-index 100 → 950（修被 ≤760 底部抽屉压住）。收口修复工遗留的 `offers.ts` 标价区间调用空值类型错误由主会话补齐（无违约金合同 → 既有 400 兜底）。
+
+**验收**：typecheck 三份全清；`tests/offers.test.ts` + `tests/market-rules.test.ts` + `tests/offer-rules.test.ts`（首份直接断言 `minOfferPriceBounds`）定向绿；全量随 v6.54.0 终验 154 文件 / 2578 例全绿。
+
+---
+
 ## v6.54.0 · 球员主动要求续约/涨薪（闹涨薪）：生成、收件箱、还价、拒绝三件套、关窗生效（2026-10-26）
 
 **状态**：**本地实现完成，未 push / 未 deploy**；迁移 **`0079_renewal_demand.sql`** 与 **`0080_contract_demands_status_expires.sql` 未 apply 生产**（2026-10-26 `npx wrangler d1 migrations list whl-club --remote` 只读查证：两条仍在待应用清单）。判级 **minor**；`package.json` 6.53.5 → **6.54.0**。设计 `docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md`（rev20）、计划 `memory/plan-v6.54.0-renewal-demand.md`、测试计划 `docs/test-plans/v6.54.0-renewal-demand.md`。**发布纪律**：先 apply 0079/0080，再 push——CF Workers Builds 不跑迁移，缺表会让收件箱与 cron 段整链 500。
@@ -106,7 +116,8 @@
 
 - **生产迁移 0079/0080 未 apply**（见上）。
 - 跨仓通知白名单（`demand_created` / `demand_deadline` / `demand_resolved` / `demand_rejected_public`）本地无法证实，上线前与插件侧确认（与 `window_signals` 同批）。
-- 全量测试 / e2e / 变异验证（计划 16 处）尚未在本轮统一执行。
+- ~~全量测试 / e2e / 变异验证尚未统一执行~~ **实施工作流终验（2026-10-26）**：全量 vitest **154 文件 / 2578 例全绿**、typecheck 三份全清、build 成功；变异验证 **11/12 锁住**；增量共 **13 枚提交**（`882e939..67b37b4`，含 v6.54.1 一枚与变异补测 `9dc29ca`）。**第 12 处变异未锁住 = 真缺口（待 owner 拍板）**：A-direct 买回恢复快照保护期与设计 §5.4「失效延续」机制矛盾——直拒的保护期失效写 pending、离队时按 §5.7 作废，快照记的是剩余值，于是「同窗直拒 → 卖出 → 买回」能洗掉三件套中唯一硬后果（违约金原价可激活）；推荐修法 = **取快照侧修**（离队时存在未生效 rejection pending 则快照保护期列记 0，A/B 分支与隔窗变体一并堵死），配套改 `renewal-window.test.ts` A-direct 断言 8 → 0 并补快照用例。
+- 收口审登记未修（见实施报告卡片）：TC-RD-07/17/24 的 payroll 金额断言未落（M9 悬空，关窗顺序实现正确但无测试锁）；§5.7 两条轻修（交易确认页买家知情提示 + 球员本人作废通知）未实现；0079 的 `idx_contract_demands_player` 与 UNIQUE 自动索引完全冗余（D1 写放大，**0079 未 apply，删除零成本**，v6.6.2 fc_id 同款裁决）；`transfer_requests` 缺 `(club_id, status)` 索引（教练端 GET 全表扫，可挂下一枚迁移）。
 - 设计 §5.6「普通续约免费机会」与 TC-RD-21（RC cap）属 P1，本版不实现。
 - 挂牌驱赶只接了普通挂牌与强制拍卖；激活（`activations.ts`）走的是「球员即将离队」路径，demand 由 `completeTransfer` 的离队作废收口（status='void'，本就不计终局），未额外扩 expired。
 
