@@ -1209,3 +1209,65 @@ describe('v6.50.0 海捞暗标段静态锁（教练侧密封标 + 管理端开�
     }
   });
 });
+
+/* v6.54.0 步骤 8（docs/test-plans/v6.54.0-renewal-demand.md TC-RD-33 / TC-RD-38）：
+   超帽确认弹窗与注册工作台窄屏规则的静态契约。组件测试（OverCapDialog.test.tsx）钉结构，
+   这里钉「规则活在哪一个断点块里、关键声明没被下批重构删掉」——两条都不靠真渲染才红。 */
+describe('v6.54.0 窄屏与超帽确认弹窗静态契约（TC-RD-33 / TC-RD-38）', () => {
+  it('TC-RD-38 · ≤760 底部抽屉：动作上下堆叠且触控 ≥44px；≤640 铺成全屏 sheet', () => {
+    const css = read(STYLES_CSS);
+    const blocks760 = mediaBlocks(css, '@media (max-width: 760px)');
+    expect(
+      blocks760.some((b) => /\.oc-btn\s*\{[^}]*min-height:\s*44px/.test(b)),
+      '≤760 缺 `.oc-btn { min-height: 44px }`（触控目标 ≥44px）',
+    ).toBe(true);
+    expect(
+      blocks760.some((b) => /\.oc-btns\s*\{[^}]*flex-direction:\s*column/.test(b)),
+      '≤760 动作栏应上下堆叠（视觉稿「超帽确认」）',
+    ).toBe(true);
+    const blocks640 = mediaBlocks(css, '@media (max-width: 640px)');
+    expect(
+      blocks640.some((b) => /\.oc-ov\.mkt-ov-drawer \.oc-panel\s*\{[^}]*height:\s*100dvh/.test(b)),
+      '≤640 超帽弹窗应铺成全屏 bottom sheet（height: 100dvh）',
+    ).toBe(true);
+  });
+
+  it('TC-RD-33 · ≤640 筛选可换行、提交栏吸底、待生效第三行可换行（不横滑）', () => {
+    const css = read(STYLES_CSS);
+    const blocks640 = mediaBlocks(css, '@media (max-width: 640px)');
+    expect(
+      blocks640.some((b) => /\.seg\.reg-filter\s*\{[^}]*flex-wrap:\s*wrap/.test(b)),
+      '≤640 注册名单筛选应换成可换行 chip 组（4 个按钮一行装不下）',
+    ).toBe(true);
+    expect(
+      blocks640.some((b) => /\.reg-submit-bar\s*\{[^}]*position:\s*sticky/.test(b)),
+      '≤640 提交栏应吸底（position: sticky）',
+    ).toBe(true);
+    // 挂类锁（照 TC-SWP-05 的 className 形态口径）：只锁 CSS 半边是半盲的——
+    // 改版时删掉/改名 JSX 上的 reg-filter / reg-submit-bar，规则变死代码、窄屏静默失效，
+    // 而上面两条 CSS 断言仍全绿。这里按 token 取，容许类顺序变化与追加类。
+    const desk = read(DESK_TAB);
+    const classTokens = (pat: RegExp): string[] => {
+      const m = pat.exec(desk);
+      return m ? m[1]!.split(/\s+/) : [];
+    };
+    const filterTokens = classTokens(/className=["']([^"']*\breg-filter\b[^"']*)["']/);
+    expect(
+      filterTokens,
+      'DeskTab 的名单筛选必须挂 `seg reg-filter`（≤640 可换行 chip 规则挂在它上面）',
+    ).toContain('seg');
+    const barTokens = classTokens(/className=["']([^"']*\breg-submit-bar\b[^"']*)["']/);
+    expect(
+      barTokens,
+      'DeskTab 提交栏必须挂 `btn-row reg-submit-bar`（≤640 吸底规则挂在它上面）',
+    ).toContain('btn-row');
+    // 第三行可换行、不截断：§10.4 明令窄屏不隐藏 pending 小字
+    expect(/\.sqc-pend-row\s*\{[^}]*white-space:\s*normal/.test(css), '待生效第三行必须允许换行').toBe(true);
+    // 值格内第二行（桌面形态）与第三行共用同一份断行保险
+    expect(
+      /\.sqc-pend,\s*\.sqc-pend-row\s*\{[^}]*overflow-wrap:\s*anywhere/.test(css),
+      '待生效小字/第三行应允许任意断行（不截断）',
+    ).toBe(true);
+  });
+});
+

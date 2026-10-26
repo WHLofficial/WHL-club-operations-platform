@@ -5,7 +5,7 @@
 // v6.37.0 卡片化：注册名单表整表重构为「位置四组容器 + 行解剖卡」，与 SquadTab 同构（组件在 card-parts.tsx）——
 //   行尾「分配 ▾」下拉取代最左分段按钮（三选全称，无合同禁一线/训练营）；违规旗标/无合同/退役徽章随姓名走；
 //   桌面 = 全列合并 +「列…」自选长尾；窄屏（≤760px）= 四视图 chips 快切；非开窗期下拉整体禁用。
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -36,6 +36,8 @@ import { playerPath } from '../../lib/player-link.ts';
 // 前端不许再抄一遍阈值（§10.5「projected 再跑一遍合规预检」）。
 import { checkSquad } from '../../../../src/core/squad-rules.ts';
 import { PENDING_SOURCE_LABEL, delta2, fmt2, fmtShort, pendingFeeSmall, pendingWageSmall } from '../../lib/contract-view.ts';
+import { CapBar } from './CapBar.tsx';
+import { OverCapDialog, type OverCapDriver } from './OverCapDialog.tsx';
 import {
   CardGroup,
   RegCard,
@@ -284,6 +286,8 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
 
   // 全队待生效明细（明细/投影段/筛选三处同源；不含未分配球员——见 stats 注释）
   const pendingPlayers = useMemo(() => squad.players.filter((p) => p.hasPending), [squad.players]);
+  // 折叠条数（§10.5）：桌面 3 条、窄屏 2 条；超出挂「查看全部」（合规必须可查，不许藏）
+  const pendingVisible = narrow ? 2 : 3;
   const [showAllPending, setShowAllPending] = useState(false);
 
   const rows = useMemo(() => {
@@ -344,7 +348,51 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
     setLastResult(null);
   }
 
-  async function submit() {
+  // 超帽确认弹窗（v6.54.0 步骤 8，§10.5 / TC-RD-38）：只装「当前窗合规、关窗后工资越帽」这一种情况。
+  // 触发点在 requestSubmit；真正提交仍走 submitRoster（提交的是当前窗合规名单，超帽留给关窗）。
+  const [overCapOpen, setOverCapOpen] = useState(false);
+  const pendingBlockRef = useRef<HTMLDivElement>(null);
+  // 驱动明细 = 已分配进名单、待生效工资上涨的人（与 projected 的算法同源：只认 stats 的行）。
+  // 按增量降序 —— 谁把工资顶过帽，第一眼就是涨得最多的那个。
+  const overCapDrivers = useMemo<OverCapDriver[]>(() => {
+    return [...stats.firstRows, ...stats.traineeRows]
+      .filter((p) => p.hasPending && p.wage != null && p.pendingWage != null && p.pendingWage - p.wage >= 0.005)
+      .map((p) => ({
+        id: p.id,
+        fcId: p.fcId,
+        name: p.name,
+        delta: Math.round((p.pendingWage! - p.wage!) * 100) / 100,
+        source: p.pendingSource ? PENDING_SOURCE_LABEL[p.pendingSource] : '合同变更',
+      }))
+      .sort((a, b) => b.delta - a.delta);
+  }, [stats]);
+
+  /**
+   * 提交前的客户侧预检（§10.5「合规预检（current / projected 双跑）」）：
+   * - 特例期 warn/off 是「提交放行」档 ⇒ 不拦（否则特例期形同虚设）；
+   * - current 不通过 ⇒ 照旧交给服务端 422，红字沿用现有 issues 渲染（行为不变）；
+   * - projected 硬规则（人数/门将/CA/合同等）不通过 ⇒ 直接阻止（硬规则不走确认弹窗）；
+   * - projected 只差工资帽 ⇒ 弹确认，用户显式选择后才提交；
+   * - 其余（两遍都过 / 没有 pending）⇒ 正常提交。
+   */
+  function requestSubmit() {
+    if (busy) return;
+    if (squad.checkMode === 'enforce' && squadChecks !== null && squadChecks.current.pass && !squadChecks.projected.pass) {
+      const hard = squadChecks.projected.issues.filter((i) => i.rule !== 'wage_cap');
+      if (hard.length > 0) {
+        setIssues(hard);
+        show('关窗时会不满足硬规则，先处理待生效合同再提交。', true);
+        return;
+      }
+      if (squadChecks.projected.issues.some((i) => i.rule === 'wage_cap')) {
+        setOverCapOpen(true);
+        return;
+      }
+    }
+    void submitRoster();
+  }
+
+  async function submitRoster() {
     if (busy) return;
     setBusy(true);
     setIssues(null);
@@ -369,6 +417,8 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
 
   const wageCap = rules?.wageCap ?? null;
   const capLeft = wageCap !== null ? wageCap - stats.wageTotal : null;
+  // 关窗后是否越帽（提交栏警告与弹窗门共用）；0.005 容差 = 两位小数的金额口径
+  const overCap = wageCap !== null && stats.wageProjected > wageCap + 0.005;
 
   return (
     <section className="card">
@@ -454,12 +504,12 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
 
           {/* 逐人待生效明细（§10.5）：不能只藏在球员页合同卡里，提交前必须能看到谁待生效、涨多少 */}
           {pendingPlayers.length > 0 && (
-            <div className="reg-pending">
+            <div className="reg-pending" ref={pendingBlockRef}>
               <div className="reg-pending-head">
                 待生效工资（{pendingPlayers.length}）
                 <span className="muted"> · 本窗关闭时生效</span>
               </div>
-              {(showAllPending ? pendingPlayers : pendingPlayers.slice(0, 3)).map((p) => (
+              {(showAllPending ? pendingPlayers : pendingPlayers.slice(0, pendingVisible)).map((p) => (
                 <div className="reg-pending-row" key={p.id}>
                   <Link className="reg-pending-name" to={playerPath(p)}>
                     {p.name}
@@ -483,7 +533,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
                   </Link>
                 </div>
               ))}
-              {pendingPlayers.length > 3 && (
+              {pendingPlayers.length > pendingVisible && (
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowAllPending((v) => !v)}>
                   {showAllPending ? '收起' : `查看全部 ${pendingPlayers.length} 条`}
                 </button>
@@ -519,7 +569,8 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
           )}
 
           <div className="tier-head">
-            <div className="seg" role="radiogroup" aria-label="按名单筛选">
+            {/* v6.54.0 步骤 8：≤640 换成可换行 chip 组（4 个按钮在 360px 一行装不下，原 inline-flex 会顶出横滑） */}
+            <div className="seg reg-filter" role="radiogroup" aria-label="按名单筛选">
               {(Object.keys(SQUAD_FILTER_LABEL) as SquadFilter[]).map((key) => (
                 <button key={key} type="button" className={filter === key ? 'on' : ''} onClick={() => setFilter(key)}>
                   {SQUAD_FILTER_LABEL[key]}
@@ -629,63 +680,44 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             </div>
           )}
 
-          <div className="btn-row">
-            <button className="btn" type="button" disabled={!editable || busy || !squad.registeredInTournament} onClick={submit}>
+          {/* 提交栏（v6.54.0 步骤 8）：≤640 吸底 + 行内写清待生效与超帽警告，点击前走 requestSubmit 的预检/确认 */}
+          <div className="btn-row reg-submit-bar">
+            <button className="btn" type="button" disabled={!editable || busy || !squad.registeredInTournament} onClick={requestSubmit}>
               {busy ? '提交中…' : squad.registration ? '重新提交注册名单' : '提交注册名单'}
             </button>
-            {squad.registration && <span className="hint">重复提交会整体替换本赛季注册名单，放心改。</span>}
+            <span className="hint">
+              {stats.pendingCount > 0 && `${stats.pendingCount} 份合同待生效`}
+              {overCap && ` · 关窗后 ${fmt2(stats.wageProjected)}m/窗，预计超帽 ${fmt2(stats.wageProjected - (wageCap ?? 0))}m`}
+              {(stats.pendingCount > 0 || overCap) && squad.registration && ' · '}
+              {squad.registration && '重复提交会整体替换本赛季注册名单，放心改。'}
+            </span>
           </div>
+          {/* 超帽确认（§10.5 rev18）：不阻止提交，只保证「知道后果仍提交」是显式选择 */}
+          {overCapOpen && wageCap !== null && (
+            <OverCapDialog
+              current={stats.wageTotal}
+              projected={stats.wageProjected}
+              cap={wageCap}
+              drivers={overCapDrivers}
+              onCancel={() => setOverCapOpen(false)}
+              onProcess={() => {
+                setOverCapOpen(false);
+                // 关弹窗后滚到待生效明细（主路径）；块本身带 scroll-margin-top，不会被吸顶条盖住
+                pendingBlockRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              onConfirm={() => {
+                setOverCapOpen(false);
+                void submitRoster();
+              }}
+            />
+          )}
         </>
       )}
     </section>
   );
 }
 
-/* ---------- 工资帽投影条（v6.54.0 步骤 7，§10.5） ---------- */
-
-/**
- * 横向动态放大：`axisMin = max(0, min(current, projected) − 2)`、`axisMax = max(帽, current, projected) + 2`。
- * 不固定从 0 起（否则 66 vs 68 的差值在整条上几乎看不见），也不在 UI 标起点。
- * 实线=current（金）、斜纹=待生效段（到 projected）、超帽段=红、帽线=4px 红 + 线左侧标签。
- */
-function CapBar({
-  current,
-  projected,
-  cap,
-  title,
-}: {
-  current: number;
-  projected: number;
-  cap: number;
-  title: string;
-}) {
-  const axisMin = Math.max(0, Math.min(current, projected) - 2);
-  const axisMax = Math.max(cap, current, projected) + 2;
-  const span = Math.max(0.01, axisMax - axisMin);
-  const pct = (v: number) => Math.min(100, Math.max(0, ((v - axisMin) / span) * 100));
-  const cur = pct(current);
-  const proj = pct(projected);
-  const capPos = pct(cap);
-  const over = projected > cap;
-  return (
-    <div
-      className="cap-bar cap-bar-proj"
-      role="img"
-      aria-label={`当前工资 ${fmt2(current)}，待生效 ${fmt2(projected)}，工资帽 ${fmt2(cap)}`}
-      title={title}
-    >
-      <span className="cap-seg cap-seg-current" style={{ left: 0, width: `${cur}%` }} />
-      {proj > cur && <span className="cap-seg cap-seg-proj" style={{ left: `${cur}%`, width: `${proj - cur}%` }} />}
-      {over && (
-        <span className="cap-seg cap-seg-over" style={{ left: `${capPos}%`, width: `${Math.max(0, proj - capPos)}%` }} />
-      )}
-      <span className="cap-marker" style={{ left: `${capPos}%` }} aria-hidden="true" />
-      <span className="cap-flag" style={{ left: `${capPos}%` }}>
-        帽 {fmt2(cap)}
-      </span>
-    </div>
-  );
-}
+/* ---------- 工资帽投影条：v6.54.0 步骤 8 起住 pages/club/CapBar.tsx（工作台与超帽弹窗共用） ---------- */
 
 /* ---------- 续约与解约（v0.6.0 旁路，规则 4.4.3 / 4.4.4） ---------- */
 

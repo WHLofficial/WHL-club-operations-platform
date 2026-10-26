@@ -8734,3 +8734,294 @@ button.sqc-pos:hover {
     transform: translateX(-50%);
   }
 }
+
+/* ============================================================================
+   v6.54.0 步骤 8 · 窄屏与超帽确认弹窗（设计 §10.4/§10.5，TC-RD-33 / TC-RD-38）
+   本段类名一律带 oc- / reg-submit / reg-filter / sqc-pend 前缀，只新增规则、不覆盖既有规则。
+   断点沿用仓库惯例：
+     ≤760 = 底部抽屉（与 .mkt-ov-drawer 同配方，浮层壳走 useOverlayShell）
+     ≤640 = 375 真机口径（全屏 sheet、按钮上下堆叠、触控目标 ≥44px）
+   窄屏几何（值区 75% 两行式）是 v6.37.2 用户定稿，本段不动它；只给「待生效」第三行与
+   明细块加换行/可见性保险——§10.4 明令窄屏不隐藏 pending 小字。
+   ============================================================================ */
+
+/* ---- 待生效小字：可换行、不截断（桌面在值格内，窄屏是整行第三行） ---- */
+.sqc-pend,
+.sqc-pend-row {
+  overflow-wrap: anywhere;
+}
+
+/* 「去处理」滚回待生效明细时不被吸顶条盖住 */
+.reg-pending {
+  scroll-margin-top: calc(var(--topbar-h) + 12px);
+}
+
+/* ---- 超帽确认弹窗（§10.5 rev18 五件套） ---- */
+.oc-panel {
+  max-width: 460px;
+}
+
+.oc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.oc-head-text {
+  min-width: 0;
+}
+
+.oc-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.oc-sub {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.oc-x {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+/* 数字行：当前 → 关窗后 / 帽 · 超（超额 danger 红；金额用等宽数字便于对齐） */
+.oc-nums {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 12px 0 2px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.oc-nums b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.oc-arrow,
+.oc-sep {
+  color: var(--muted);
+}
+
+.oc-over {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+/* 驱动明细：球员 · +Δ · 来源；最多 3 条，其余由 oc-more 展开 */
+.oc-list {
+  list-style: none;
+  margin: 10px 0 2px;
+  padding: 0;
+}
+
+.oc-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12.5px;
+}
+
+.oc-list li:last-child {
+  border-bottom: 0;
+}
+
+.oc-driver {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.oc-driver a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.oc-driver a:hover {
+  text-decoration: underline;
+}
+
+.oc-src {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.oc-delta {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--terracotta-deep);
+}
+
+.oc-more {
+  display: block;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--terracotta-deep);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.oc-effect {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #f0d9ae;
+  border-radius: 8px;
+  background: #fdf0dc;
+  color: #92510a;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.oc-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.oc-btn {
+  min-height: 40px;
+}
+
+.oc-foot {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  /* 底部抽屉：动作上下堆叠、整宽、触控 ≥44px（视觉稿「超帽确认」） */
+  .oc-btns {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .oc-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .oc-x {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* 帽线标签在 ≤640 会折到条下方（.cap-bar-proj 既有规则），抽屉里多留一点底部空隙 */
+  .oc-panel .cap-bar.cap-bar-proj {
+    margin-bottom: 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* 375 真机：抽屉铺满全屏（内容单列、动作贴底），不再留两侧空白 */
+  .oc-ov.mkt-ov-drawer {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .oc-ov.mkt-ov-drawer .oc-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .oc-ov .oc-btns {
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    padding-top: 6px;
+    background: var(--card);
+  }
+
+  /* 注册名单筛选（全部/一线队/训练营/仅看待生效）：4 个按钮一行装不下，
+     换成可换行 chip 组 —— §10.5 窄屏「不横向滚动」 */
+  .seg.reg-filter {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 6px;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .seg.reg-filter button {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    /* 触控目标 ≥44px（TC-RD-33 #1）：chip 换行比一个点不中更划算 */
+    min-height: 44px;
+    background: var(--card);
+    color: var(--ink);
+  }
+
+  .seg.reg-filter button + button {
+    border-left: 1px solid var(--border);
+  }
+
+  .seg.reg-filter button.on {
+    background: var(--terracotta);
+    border-color: var(--terracotta-deep);
+    color: #fff;
+  }
+
+  /* 待生效明细：每条换成单列三行（名字/来源/生效时点 → 当前→待生效 → 查看），
+     不横向滚动（§10.5 窄屏） */
+  .reg-pending-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .reg-pending-link {
+    margin-left: 0;
+  }
+
+  .reg-pending-when {
+    font-size: 11px;
+  }
+
+  /* 提交栏吸底：按钮整宽 ≥44px，行内写明待生效份数与超帽警告（§10.5 窄屏） */
+  .reg-submit-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    margin: 14px 0 0;
+    padding: 10px 0 calc(8px + env(safe-area-inset-bottom));
+    background: linear-gradient(transparent, var(--card) 35%);
+  }
+
+  .reg-submit-bar .btn {
+    min-height: 44px;
+  }
+
+  .reg-submit-bar .hint {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+}

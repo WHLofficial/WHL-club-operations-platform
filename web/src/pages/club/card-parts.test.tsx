@@ -178,3 +178,116 @@ describe('SquadCard 宽窄结构（v6.39.1）', () => {
     expect(narrow.container.querySelectorAll('.sqc-v')).toHaveLength(3);
   });
 });
+
+/* ---------- v6.54.0 步骤 8：待生效小字的宽窄两种形态（§10.4 / §10.5） ----------
+   桌面（wide）= 值格内第二行 `(+1.20)3.70`（注册台工资格带「待生效 」前缀）；
+   窄屏（≤760，非 wide）= 值区下方整行第三行 `待生效 工资 3.70(+1.20) · 违约金 25(+5)`。
+   两套格式不混用；窄屏绝不隐藏 pending（合规必须可见）——这是 TC-RD-32/33 的结构锁。 */
+
+const pendingRow = {
+  ...cardRow,
+  wage: 2.5,
+  releaseFee: 20,
+  hasPending: true,
+  pendingWage: 3.7,
+  pendingReleaseFee: 25,
+  pendingSource: 'demand' as const,
+};
+
+describe('待生效小字宽窄两形态（v6.54.0 §10.4/§10.5）', () => {
+  it('注册台宽卡：工资格第二行「待生效 (+1.20)3.70」、RC 格「(+5)25」，并带 aria-label', () => {
+    const row = pendingRow as unknown as SquadPlayerRow;
+    const { container } = render(
+      <MemoryRouter>
+        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    const cells = Array.from(container.querySelectorAll('.sqc-v')).filter((v) => v.querySelector('.sqc-pend'));
+    // 合同视图里变化的两格：工资 / 违约金（wide 走 DESKTOP_CELLS_DESK，按内容定位而不是按固定下标）
+    expect(cells).toHaveLength(2);
+    expect(cells[0]!.textContent).toContain('2.50');
+    expect(cells[0]!.querySelector('.sqc-pend')!.textContent).toBe('待生效 (+1.20)3.70');
+    expect(cells[0]!.getAttribute('aria-label')).toBe('当前工资 2.50；待生效 3.70，加 1.20');
+    expect(cells[1]!.textContent).toContain('20m');
+    expect(cells[1]!.querySelector('.sqc-pend')!.textContent).toBe('(+5)25');
+    // 窄屏第三行不在宽卡上渲染（两套格式不混用）
+    expect(container.querySelector('.sqc-pend-row')).toBeNull();
+  });
+
+  it('阵容宽卡：小字只写差额新值，不带「待生效」前缀（§10.4 球队页口径）', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SquadCard row={pendingRow as unknown as PlayerLibraryRow} view="contract" extras={[]} wide />
+      </MemoryRouter>,
+    );
+    const wageCell = Array.from(container.querySelectorAll('.sqc-v')).find((v) =>
+      v.querySelector('.sqc-pend'),
+    )!;
+    expect(wageCell.querySelector('.sqc-pend')!.textContent).toBe('(+1.20)3.70');
+  });
+
+  it('注册台窄卡：pending 走整行第三行（新值在前），值格内不出第二行', () => {
+    const row = pendingRow as unknown as SquadPlayerRow;
+    const { container } = render(
+      <MemoryRouter>
+        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(container.querySelectorAll('.sqc-pend')).toHaveLength(0);
+    const third = container.querySelector('.sqc-pend-row')!;
+    expect(third.textContent).toBe('待生效 工资 3.70(+1.20) · 违约金 25(+5)');
+    expect(third.getAttribute('aria-label')).toBe('待生效 工资 3.70(+1.20) · 违约金 25(+5)');
+  });
+
+  it('阵容窄卡：同一个第三行（球队页与注册台同形）', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SquadCard row={pendingRow as unknown as PlayerLibraryRow} view="basic" extras={[]} />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('.sqc-pend-row')!.textContent).toBe('待生效 工资 3.70(+1.20) · 违约金 25(+5)');
+  });
+
+  it('RC-only pending：只有违约金变化时工资格不加第二行（宽窄两形态同口径）', () => {
+    const row = {
+      ...pendingRow,
+      pendingWage: 2.5,
+      pendingReleaseFee: 25,
+    } as unknown as SquadPlayerRow;
+    const wide = render(
+      <MemoryRouter>
+        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    const wideCells = Array.from(wide.container.querySelectorAll('.sqc-v')).filter((v) => v.querySelector('.sqc-pend'));
+    // 只有违约金那一格有小字；工资格不加（§10.5「RC-only pending 只 RC 第二行」）
+    expect(wideCells).toHaveLength(1);
+    expect(wideCells[0]!.querySelector('.sqc-pend')!.textContent).toBe('(+5)25');
+
+    const narrow = render(
+      <MemoryRouter>
+        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(narrow.container.querySelector('.sqc-pend-row')!.textContent).toBe('待生效 违约金 25(+5)');
+  });
+
+  it('非 pending 行：宽窄都不渲染任何待生效小字', () => {
+    const row = cardRow as unknown as SquadPlayerRow;
+    const wide = render(
+      <MemoryRouter>
+        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(wide.container.querySelector('.sqc-pend')).toBeNull();
+    expect(wide.container.querySelector('.sqc-pend-row')).toBeNull();
+
+    const narrow = render(
+      <MemoryRouter>
+        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(narrow.container.querySelector('.sqc-pend')).toBeNull();
+    expect(narrow.container.querySelector('.sqc-pend-row')).toBeNull();
+  });
+});
