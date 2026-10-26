@@ -87,7 +87,7 @@
 
 **交付（`67b37b4`，12 文件）**：`setOfferSettings` 标价区间改用 `listingPriceBounds`（下限 = max(1, ⌈min(0.5×违约金, 0.5×身价)⌉)，堵「标价 1m + 达线自动同意绕开挂牌五折底线」）；挂牌/标价/最低报价上限一律 `floor`、下限 `ceil`（`market-rules.ts` / `offer-rules.ts`，整数报价体系边界不露小数）；前端新增 `web/src/lib/transfer-bounds.ts`（SideOps 报价面板与挂牌面板共用区间提示）、toast 定时器挂 ref（修连发提前抹掉 + 卸载后 `setToast` 抛错）、toast z-index 100 → 950（修被 ≤760 底部抽屉压住）。收口修复工遗留的 `offers.ts` 标价区间调用空值类型错误由主会话补齐（无违约金合同 → 既有 400 兜底）。
 
-**验收**：typecheck 三份全清；`tests/offers.test.ts` + `tests/market-rules.test.ts` + `tests/offer-rules.test.ts`（首份直接断言 `minOfferPriceBounds`）定向绿；全量随 v6.54.0 终验 154 文件 / 2578 例全绿。
+**验收**：typecheck 三份全清；`tests/offers.test.ts` + `tests/market-rules.test.ts` + `tests/offer-rules.test.ts`（首份直接断言 `minOfferPriceBounds`）定向绿；全量随 v6.54.0 终验 154 文件 / 2578 例全绿。补交漏提交的 `web/src/lib/transfer-bounds.test.ts`（`8c92f89`，+1 文件 / +5 例）与评审修复 `3ae29c7`（transfer-bounds 改派生 `src/core` 单一出处，不再复制取整公式；SideOps 区间提示缩进订正）后 **2026-10-26 19:0x 复跑实测：typecheck 三份 0 error、全量 vitest 155 文件 / 2583 例全绿**。e2e 两轮尝试未跑通：本地 dev 服务器在工具调用间被回收 / wrangler 冷启动超出探活窗，失败全是 `page.goto` 15s 超时（第一轮 25/29，4 个失败场景为收件篮徽章 / 球员页比赛页签 / 成长档位 / 品牌池，均与本轮改动域无关），非断言失败——留待下轮回归补跑。
 
 ---
 
