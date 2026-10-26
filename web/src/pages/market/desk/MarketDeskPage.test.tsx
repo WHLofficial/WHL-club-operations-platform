@@ -96,6 +96,15 @@ function stubApi(over: { clubError?: boolean } = {}) {
     if (path === '/api/me/bids') return Promise.resolve(BIDS);
     if (path === '/api/offers?box=in&status=pending') return Promise.resolve(OFFERS_IN);
     if (path === '/api/offers?box=out&status=pending') return Promise.resolve(OFFERS_OUT);
+    // v6.54.0：签约谈判页签顶部多了「球员要求」分组——页面级测试只关心挂载与页签，收件箱空
+    if (path === '/api/club/contract-demands')
+      return Promise.resolve({
+        active: [],
+        accepted: [],
+        recent: [],
+        wageContext: { currentTotal: null, pendingDelta: null, wageCap: null },
+      });
+    if (path === '/api/club/transfer-requests') return Promise.resolve({ requests: [] });
     return Promise.reject(new Error(`未预期的请求：${path}`));
   });
 }
@@ -200,6 +209,15 @@ describe('v6.32.0 转会台页签化（MarketDeskPage）', () => {
     expect(container.querySelector('#desk-bids')).toBeTruthy();
     expect(container.querySelector('#desk-nego')).toBeNull();
     expect(screen.getByTestId('loc').textContent).toBe('/market/desk?tab=mine');
+  });
+
+  it('v6.54.0 深链 ?tab=negotiations&demand=<id>：直落签约谈判、不重写 URL（demand 归区块自己读）', async () => {
+    const { container } = renderDesk('/market/desk?tab=negotiations&demand=5');
+    expect((await screen.findAllByText('中场丙')).length).toBeGreaterThan(0);
+    expect(container.querySelector('#desk-nego')).toBeTruthy();
+    expect(container.querySelector('#desk-offers')).toBeNull();
+    // 别名只做语义收口，不改地址栏（与 ?tab=mine 同一纪律）
+    expect(screen.getByTestId('loc').textContent).toBe('/market/desk?tab=negotiations&demand=5');
   });
 
   it('非法 ?tab=xxx 回落签约谈判，且不改写 URL', async () => {

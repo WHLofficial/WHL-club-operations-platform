@@ -954,6 +954,103 @@ export interface TraineeSignResult {
   message: string;
 }
 
+// ---- v6.54.0 球员要求（闹涨薪）：GET /api/club/contract-demands ----
+// 字段与 src/worker/demand-ops.ts 的 DemandCard / ClubDemandInbox 一一对应；金额单位 m。
+// expected_wage 刻意不下发（界面只说「市场价」，§2.1），floor 下发（本队教练还价防呆需要）。
+export interface ContractDemandAttempt {
+  /** 第几轮还价（1 起；UNIQUE(demand_id, round)） */
+  round: number;
+  /** 经理本轮还价（球员不还价，只判定） */
+  wage: number;
+  accepted: boolean;
+  at: string;
+}
+
+export interface ContractDemandCard {
+  id: number;
+  playerId: number;
+  playerName: string | null;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  season: number;
+  windowSeq: number;
+  /** pending/countered=待处理（后者只是存量行兼容）；accepted；rejected；expired；void（不出收件箱） */
+  status: string;
+  /** 终局来源：direct=明确放人 / collapse=没谈成 / lowball=低于底线 / expired；非终局 null */
+  resolution: string | null;
+  currentWage: number;
+  targetWage: number;
+  floorWage: number;
+  raisePct: number;
+  rcCurrent: number;
+  /** 待生效违约金（0 = 他合同里没有违约金条款，退化为只谈工资） */
+  rcFloor: number;
+  round: number;
+  maxRounds: number;
+  expiresAt: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  /** 已接受行关窗 apply 后的时刻；null = 待生效 */
+  appliedAt: string | null;
+  attempts: ContractDemandAttempt[];
+}
+
+/** 接受确认的超帽警示输入（设计 §10.1/§10.5 同源；wageCap=null 表示未定级，不画帽线） */
+export interface DemandWageContext {
+  currentTotal: number | null;
+  pendingDelta: number | null;
+  wageCap: number | null;
+}
+
+export interface ContractDemandInbox {
+  /** 当前开窗的待处理（新/谈判中），按剩余时间升序 */
+  active: ContractDemandCard[];
+  /** 已接受、关窗 apply 前 */
+  accepted: ContractDemandCard[];
+  /** 最近终局（rejected/expired），resolved_at 降序 */
+  recent: ContractDemandCard[];
+  wageContext: DemandWageContext;
+}
+
+/** POST /:id/counter 的同请求即时判定结果（§5.3；negotiating 不是持久态，落在卡上=还价记录 + 轮次） */
+export interface DemandCounterResult {
+  demandId: number;
+  verdict: 'accepted' | 'negotiating' | 'rejected';
+  /** rejected 的终局档：collapse=三轮没谈成 / lowball=低于底线；其余 null */
+  source: 'collapse' | 'lowball' | null;
+  acceptedWage: number | null;
+  round: number;
+  eff: number;
+  p: number;
+  /** 段内第 2 次终局升档（没谈成也走「明确放人」三件套） */
+  escalated: boolean;
+}
+
+export interface DemandAcceptResult {
+  demandId: number;
+  wage: number;
+  releaseFee: number | null;
+}
+
+/** GET /api/club/transfer-requests：存续申请（pending/listed/released；released 即「不满」徽章载体） */
+export interface TransferRequestCard {
+  id: number;
+  playerId: number;
+  playerName: string | null;
+  demandId: number | null;
+  source: string;
+  status: string;
+  listingId: number | null;
+  lastListingWindowSeq: number | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface TransferRequestList {
+  requests: TransferRequestCard[];
+}
+
 // ---- v0.6.0 DTO（附录 A〔5〕：旁路转会 + 匹配 + 窗口 + 强制拍卖）----
 
 // ---- v6.18.0：市场情报（传闻 / 已达成交易 / 海捞资格 / 激活球员）----

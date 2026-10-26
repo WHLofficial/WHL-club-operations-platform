@@ -82,6 +82,15 @@ function renderNego(sessions: NegotiationSession[]) {
   apiMock.mockImplementation((path: string) => {
     if (path === '/api/me/club') return Promise.resolve(ME_CLUB);
     if (path === '/api/negotiations?mine=1') return Promise.resolve({ sessions });
+    // v6.54.0：页签顶部多了「球员要求」分组——本文件只测签约谈判，收件箱一律空
+    if (path === '/api/club/contract-demands')
+      return Promise.resolve({
+        active: [],
+        accepted: [],
+        recent: [],
+        wageContext: { currentTotal: null, pendingDelta: null, wageCap: null },
+      });
+    if (path === '/api/club/transfer-requests') return Promise.resolve({ requests: [] });
     return Promise.reject(new Error(`未预期的请求：${path}`));
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

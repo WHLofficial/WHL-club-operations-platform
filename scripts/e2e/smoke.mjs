@@ -615,6 +615,12 @@ async function main() {
       [/\/api\/offers\?box=in/, DESK_OFFERS_IN],
       [/\/api\/offers\?box=out/, DESK_OFFERS_OUT],
       [/\/api\/negotiations\?mine=1/, DESK_NEGO],
+      // v6.54.0：签约谈判页签顶部多了「球员要求」分组（收件箱 + 存续转会申请）——
+      // 本套 fixture 不覆盖要求卡，一律回空：既不走真 D1，也不让错误条混进 #desk-nego 的文案断言
+      [/\/api\/club\/contract-demands(\?|$)/, { active: [], accepted: [], recent: [], wageContext: { currentTotal: null, pendingDelta: null, wageCap: null } }],
+      [/\/api\/club\/transfer-requests(\?|$)/, { requests: [] }],
+      // v6.54.0 球员要求的还价档位预览（只读）；路径尾部 /preview 不会被上面那条收件箱规则吃掉
+      [/\/api\/club\/contract-demands\/\d+\/preview/, { forecast: '成功率过半', risk: false }],
       [/\/api\/offers\/\d+(\?|$)/, (url) => (/\/api\/offers\/4(\?|$)/.test(url) ? DESK_OFFER_DETAIL_BUYER : DESK_OFFER_DETAIL)],
       [/\/api\/players\/\d+\/offer-settings/, DESK_OFFER_SETTINGS],
       // v6.40.0 工资实时档位：预览端点只读，夹具回一档「过半」

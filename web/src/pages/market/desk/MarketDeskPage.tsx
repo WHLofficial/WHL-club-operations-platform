@@ -6,6 +6,9 @@
 // 静态守卫禁止本页再出现该句）。
 // ?tab=nego|offers|bids 语义保留（旧链 /offers、/negotiations 换址依赖它），?tab=mine 是 bids 的旧 alias
 // （不改写 URL），非法值回落 nego 也不改写；box/status 仍持在本页 searchParams。
+// v6.54.0：?tab=negotiations 是签约谈判页签的正式深链写法（站内信 / 球员页「球员要求」入口带
+// &demand=<id>，故意与内部值 nego 不同名、与 v6.40.0 ?offer= 的写法对齐）；这里显式收成 nego，
+// 不改写 URL（?demand= 由 NegotiationsSection 的球员要求分组读）。
 import { useSearchParams } from 'react-router';
 import { useMyBids, useMyClub, useMyNegotiations, useOffers } from '../../../lib/queries.ts';
 import { MarketNav } from '../shared.tsx';
@@ -18,8 +21,13 @@ type DeskTab = 'nego' | 'offers' | 'bids';
 export default function MarketDeskPage() {
   const [params, setParams] = useSearchParams();
   const tabRaw = params.get('tab');
-  // 旧链接 ?tab=mine 是 bids 的 alias（直接渲染出价页签，不改写 URL、不发重定向）
-  const tab: DeskTab = tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine' ? (tabRaw === 'mine' ? 'bids' : tabRaw) : 'nego';
+  // 旧链接 ?tab=mine 是 bids 的 alias；v6.54.0 的 ?tab=negotiations 是签约谈判的正式深链写法
+  // （站内信 / 球员页「球员要求」入口带 &demand=<id>）——都直接渲染对应页签，不改写 URL、不发重定向。
+  // 别名单列一支，「nego|offers|bids + mine」这句原样保留：tests/mobile-baseline 的静态锁逐字锁它。
+  const tab: DeskTab =
+    tabRaw === 'negotiations'
+      ? 'nego'
+      : (tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine' ? (tabRaw === 'mine' ? 'bids' : tabRaw) : 'nego');
   const box = params.get('box') === 'out' ? 'out' : 'in';
   const status = params.get('status') === 'all' ? 'all' : 'pending';
 

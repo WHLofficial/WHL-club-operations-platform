@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -48,6 +48,11 @@ export const qk = {
   offerSettings: (playerId: number) => ['players', playerId, 'offer-settings'] as const,
   // 我的谈判会话（v6.32.0 自 desk/NegotiationsSection 收编：页签计数与谈判区共用一个键）
   myNegotiations: ['negotiations', 'mine'] as const,
+  // 球员要求（v6.54.0）：同一页签顶部「球员要求」分组的收件箱（三组 + wageContext）。
+  // 预览挂在它下面（['club','contract-demands','preview',…]）——写后 invalidate 同一前缀把档位缓存一并作废。
+  contractDemands: ['club', 'contract-demands'] as const,
+  // 存续转会申请（v6.54.0）：released=「不满」徽章载体；谈崩档卡的后果行据此区分「申请挂着 / 已挂牌」。
+  transferRequests: ['club', 'transfer-requests'] as const,
   homeMatches: ['club', 'home-matches'] as const,
   financeSummary: (season?: number) => ['club', 'finance-summary', season ?? 'current'] as const,
   // 消费中心（v6.26.0）
@@ -127,6 +132,49 @@ export function useWagePreview(sessionId: number, wage: string, enabled: boolean
     retry: false,
     staleTime: 60_000,
   });
+}
+
+// 球员要求收件箱（v6.54.0 步骤 6）：三组 + wageContext 一次到位（服务端刻意不加缓存，
+// 理由见 src/worker/routes/contract-demands.ts 顶部——写后必须立刻翻卡面）。
+export function useContractDemands(isCoach: boolean) {
+  return useQuery({
+    queryKey: qk.contractDemands,
+    queryFn: () => api<ContractDemandInbox>('/api/club/contract-demands'),
+    enabled: isCoach,
+  });
+}
+
+// 存续转会申请（v6.54.0）：谈崩档卡片的后果行要区分「申请挂着 / 已挂牌」，
+// 直拒档的「不满」徽章也以 released 为载体（设计 §5.4）。
+export function useTransferRequests(isCoach: boolean) {
+  return useQuery({
+    queryKey: qk.transferRequests,
+    queryFn: () => api<TransferRequestList>('/api/club/transfer-requests'),
+    enabled: isCoach,
+  });
+}
+
+// 还价档位预览（v6.54.0）：与签约谈判同一套四档词、同一个零副作用纪律（不落库/不耗轮次/不写审计）。
+// 键里带 wage ⇒ 同价复用缓存、慢响应回来时键已换不会被当成当前值；失败静默（预览不挡提交）。
+// 挂在 qk.contractDemands 前缀下：任何写后 invalidate 都连档位缓存一起作废，不会留下旧锚的档位。
+export function useDemandPreview(demandId: number, wage: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...qk.contractDemands, 'preview', demandId, wage] as const,
+    queryFn: () => apiPost<WageForecast>(`/api/club/contract-demands/${demandId}/preview`, { wage: Number(wage) }),
+    enabled: enabled && Number.isInteger(demandId) && demandId > 0 && wage !== '',
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+// 球员要求写后失效（接受 / 还价 / 明确放人）：收件箱三组与 wageContext 同源刷新；
+// 转会申请在三种动作里都可能被重签摘除或新挂，同批作废。
+export function useDemandInvalidation() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.contractDemands });
+    void qc.invalidateQueries({ queryKey: qk.transferRequests });
+  };
 }
 
 export function useSquad(isCoach: boolean): SquadOverview | null {

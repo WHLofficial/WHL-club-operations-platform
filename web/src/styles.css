@@ -8002,3 +8002,290 @@ button.sqc-pos:hover {
 .ops-gate-blocked {
   color: var(--bad);
 }
+
+/* ---- v6.54.0 转会台 · 球员要求（闹涨薪）分组 ----
+   纸面语言与 v6.40.0 谈判桌同源（.nego-thread / .nego-b / .nego-sys 直接用），这里只补分组头、
+   还价区间条、卡内展开区与过期折叠行。不新增色板：主色 terracotta、警示走 --warn / --bad、
+   弱化走 --muted；奶油纸底 --paper 是卡内展开区的纸面。 */
+.demand-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 0 10px;
+}
+
+.demand-group-head h3 {
+  margin: 0;
+}
+
+.demand-meta {
+  font-size: 12px;
+}
+
+/* 分组头右侧的工资口径胶囊：当前 Σ active wage + 已接受未生效增量（wageContext 同源） */
+.demand-pill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.demand-pill b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.demand-card {
+  margin-bottom: 14px;
+  /* 深链落点：给吸顶顶栏留出滚动余量（.is-target 的高亮动画复用全局那套） */
+  scroll-margin-top: 90px;
+}
+
+/* .mono 没有全局规则（只有 .nego-panel / .mkt-desk-card 作用域补过），本分组自己补一份：
+   工资/违约金/时间戳都靠等宽数字对齐 */
+.demand-card .mono,
+.demand-expired-row .mono,
+.demand-group-head .mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 收口态压到纸面底色：一眼分出「还在谈」与「已经了结」 */
+.demand-card.is-closed {
+  background: var(--paper);
+}
+
+.demand-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.demand-head h3 {
+  margin: 0 0 6px;
+}
+
+.demand-due {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 卡内就地展开区（还价 / 接受确认 / 明确放人确认）：无弹窗，先例 = v6.40.0 谈判桌动作栏 */
+.demand-xpan {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.demand-xpan .inline-form {
+  margin: 0;
+}
+
+.demand-xpan .field {
+  margin-bottom: 0;
+}
+
+.demand-xpan-sub {
+  margin: 0;
+}
+
+.demand-xpan-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--cocoa-deep);
+}
+
+/* 接受确认的数字行（与 §10.4 合同双列的读法同源：左项名右值） */
+.demand-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.demand-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.demand-row span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.demand-row b {
+  font-weight: 500;
+  text-align: right;
+  line-height: 1.45;
+}
+
+.demand-arrow {
+  color: var(--muted);
+  font-weight: 400;
+  padding: 0 2px;
+}
+
+/* 还价区间条：floor → target 是有效带（斜纹底），输入值在条上打点；低于底线整条转红 */
+.demand-range {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.demand-range-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.demand-range-head b {
+  color: var(--ink);
+}
+
+.demand-range-track {
+  position: relative;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: repeating-linear-gradient(135deg, #efe0c6 0 5px, #f7ecd8 5px 10px);
+}
+
+.demand-range-track.is-low {
+  border-color: var(--bad);
+}
+
+.demand-range-pin {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--terracotta-deep);
+  transition: left 0.15s ease;
+}
+
+.demand-range-track.is-low .demand-range-pin {
+  background: var(--bad);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demand-range-pin {
+    transition: none;
+  }
+}
+
+.demand-range-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+/* 低还价防呆：红字讲清「低于底线 = 拒绝整条要求」，把终局收敛到显式「明确放人」 */
+.demand-lowball {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--bad);
+}
+
+/* 过期卡：尾部弱化的一行，不再占一张对话流卡 */
+.demand-expired-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  padding: 9px 12px;
+  background: var(--paper);
+  border-radius: 8px;
+  font-size: 12.5px;
+  scroll-margin-top: 90px;
+}
+
+.demand-expired-row b {
+  white-space: nowrap;
+}
+
+.demand-fold {
+  margin: 2px 0 10px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.demand-fold:hover {
+  color: var(--terracotta-deep);
+}
+
+/* 深链落点：.is-target 在文件前部，会被上面的卡面/纸面底色盖掉（后定义同权重胜），
+   所以在本分组末尾补一条更具体的选择器，把高亮重新拿回来。 */
+.demand-card.is-target,
+.demand-expired-row.is-target {
+  background: var(--terracotta-tint);
+  box-shadow: inset 3px 0 0 var(--terracotta);
+  animation: target-flash 1.4s ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demand-card.is-target,
+  .demand-expired-row.is-target {
+    animation: none;
+  }
+}
+
+/* ≤760（与转会台卡片行同一断点）：分组头与数字行上下堆叠，不横向溢出 */
+@media (max-width: 760px) {
+  .demand-group-head {
+    align-items: flex-start;
+  }
+
+  .demand-pill {
+    margin-left: 0;
+  }
+
+  .demand-head {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .demand-due {
+    margin-left: 0;
+  }
+
+  .demand-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .demand-row b {
+    text-align: left;
+  }
+}

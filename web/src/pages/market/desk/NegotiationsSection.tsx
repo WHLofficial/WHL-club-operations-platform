@@ -7,6 +7,8 @@
 // 工资类金额两位小数（money + m），违约金与成交价走整数口径（moneyIntText）；气泡与系统行时间到秒；
 // 工资输入下加实时成功率档位（useWagePreview，350ms 防抖，失败静默）。
 // 这个页签不加拒绝 / 终止谈判（设计不做清单）：谈判只有「谈成」或签训练营两条出口。
+// v6.54.0：页签顶部挂「球员要求」分组（DemandSection）——闹涨薪本质是合同谈判，与对话式谈判桌同一家；
+// 球队工作台不加卡，入口 = 站内信 / 球员页只读块深链 ?tab=negotiations&demand=<id>。
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,6 +21,7 @@ import { useTimeFmt } from '../../../lib/datetime.ts';
 import { money } from '../shared.tsx';
 import OpsGateNote from '../../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../../lib/ops-gate.ts';
+import DemandSection from './DemandSection.tsx';
 
 const TIER_BADGE: Record<number, string> = { 1: 'green', 2: 'gray', 3: 'red' };
 
@@ -80,6 +83,8 @@ export default function NegotiationsSection() {
 
   return (
     <section id="desk-nego" aria-label="签约谈判">
+      {/* v6.54.0：本页签顶部「球员要求」分组（v6.40.0 对话流语言，无弹窗） */}
+      <DemandSection isCoach={isCoach} />
       <h3>签约谈判</h3>
       <p className="hint">
         成交单获管理组批准后，谈判会话自动开在这里：先定新违约金（幅度受限），再按经纪人预期工资谈工资，最多{' '}
