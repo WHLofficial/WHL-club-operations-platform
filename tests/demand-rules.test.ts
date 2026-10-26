@@ -146,6 +146,21 @@ describe('§5.1 生成闸与本地门槛', () => {
     expect(meetsDemandGate(2.5, 2.0)).toBe(false); // expected ≥ wage
   });
 
+  it('边界哨兵：gap 恰 8% 必须生成（锁 >=，不是 >）', () => {
+    // 只有 gap 在 double 下严格等于 DEMAND_GAP_MIN 的输入才能区分 >= 与 >。
+    // 反例：2.5 * (1 + DEMAND_GAP_MIN) = 2.7000000000000002、gap = 0.08000000000000007 > 0.08，
+    // 拿它当「恰 8%」例会把「>= 改 >」的 off-by-one 静默放过去（2026-10-26 变异验证实证）。
+    // 12.5→13.5 与 25→27 两档尺度都严格落在 0.08 上；先锁死这一点——gap 公式若改成
+    // expected/wage−1 之类会挪出 1 ulp，本断言先红，提醒重挑哨兵，别让边界例悄悄失效。
+    expect(demandGap(12.5, 13.5)).toBe(DEMAND_GAP_MIN);
+    expect(demandGap(25, 27)).toBe(DEMAND_GAP_MIN);
+    expect(meetsDemandGate(12.5, 13.5)).toBe(true);
+    expect(meetsDemandGate(25, 27)).toBe(true);
+    // 紧邻边界之下（差 7.97e-15）也必须拒：门槛不能被悄悄放宽
+    expect(demandGap(12.5, 13.4999999999999)).toBeLessThan(DEMAND_GAP_MIN);
+    expect(meetsDemandGate(12.5, 13.4999999999999)).toBe(false);
+  });
+
   it('生成闸确定性：同 (赛季, 窗, 球员) 恒定、roll = seededUnit(..., 20)、不同窗互异', () => {
     expect(demandGateRoll(9, 1, 1)).toBeCloseTo(0.5551041725557297, 12);
     expect(demandFires(9, 2, 1, 0.2)).toBe(true); // roll 0.1534 < 0.2

@@ -720,6 +720,60 @@ describe('counterDemand · 即时判定（判定种子确定性）', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// §5.3 轮次闸（DEMAND_MAX_ROUNDS=3）：第 4 轮必须 409、第 3 轮必须放行
+// ---------------------------------------------------------------------------
+
+describe('counterDemand · 轮次闸边界（第 4 轮 409 / 第 3 轮放行）', () => {
+  it('round=3 且已落 3 条逐轮记录：第 4 轮 409 且零副作用；round=2 的第 3 轮正常推进', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    openWindow(fx);
+    seedDemandOwner(fx, 1);
+    seedDemandOwner(fx, 2);
+
+    // 构造真实的三轮用尽态：round=3 且已有 3 条 attempts。两样都造齐是为了同时堵住两种
+    // 将来重写——`round > MAX + 1`（off-by-one）与 `attempts.length > MAX(+1)`：
+    // 只 seed round 不 seed attempts 时，length 写法会拿 0 去比，边界例反而抓不住。
+    const id = seedPendingDemand(fx, { id: 1, round: 3 });
+    const ins = fx.sqlite.prepare(
+      'INSERT INTO contract_demand_attempts (demand_id, round, wage, accepted) VALUES (?, ?, ?, ?)',
+    );
+    ins.run(id, 1, 3.4, 0);
+    ins.run(id, 2, 3.45, 0);
+    ins.run(id, 3, 3.5, 0);
+
+    // 第 4 轮必须 409：用 then 双分支取值，Error.message 即使非枚举也能断言
+    const caught = await counterDemand(fx.env, counterInput(id, 3.7)).then(
+      () => {
+        throw new Error('第 4 轮还价不应被放行');
+      },
+      (err: unknown) => err,
+    );
+    expect((caught as { status?: number }).status).toBe(409);
+    expect(String((caught as Error).message)).toContain('轮次');
+
+    // 零副作用：轮次不推进、不落第 4 条 attempt、不写审计/待生效变更/转会申请/回执
+    expect(
+      sqlGet<{ status: string; round: number }>(fx.sqlite, 'SELECT status, round FROM contract_demands WHERE id = ?', id),
+    ).toMatchObject({ status: 'pending', round: 3 });
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM contract_demand_attempts WHERE demand_id = ?', id)).toHaveLength(3);
+    expect(sqlAll(fx.sqlite, `SELECT * FROM audit_log WHERE action = 'demand_counter'`)).toHaveLength(0);
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM contract_pending_changes')).toHaveLength(0);
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM transfer_requests')).toHaveLength(0);
+    expect(notificationsOf(fx, 'demand_resolved')).toHaveLength(0);
+
+    // 反向边界：round=2 的第 3 轮必须放行（防把闸写成 `round >= MAX` 提前一轮拒）
+    const id2 = seedPendingDemand(fx, { playerId: 2, round: 2 });
+    ins.run(id2, 1, 3.4, 0);
+    ins.run(id2, 2, 3.45, 0);
+    const r3 = await counterDemand(fx.env, counterInput(id2, 3.7));
+    expect(r3).toMatchObject({ verdict: 'accepted', acceptedWage: 3.7, round: 3 });
+    expect(sqlGet<{ round: number }>(fx.sqlite, 'SELECT round FROM contract_demands WHERE id = ?', id2)!.round).toBe(3);
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM contract_demand_attempts WHERE demand_id = ?', id2)).toHaveLength(3);
+  });
+});
+
 describe('acceptDemand', () => {
   it('在途 pending 挡接受（409）；双 accept 只成一条；接受摘「不满」徽章；审计 rc_fee=0', async () => {
     const fx = freshEnv();
@@ -1091,6 +1145,49 @@ describe('expireDemands · 24h 提醒只发一次', () => {
     const tick = await expireDemands(fx.env, '2026-10-25T20:00:00Z');
     expect(tick.reminded).toBe(0);
     expect(notificationsOf(fx, 'demand_deadline')).toHaveLength(0);
+  });
+
+  it('抢占闸：SELECT 与 UPDATE 之间被另一 tick 抢先 → 本 tick 改 0 行不发信（锁 UPDATE 的 reminded_at 条件）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    openWindow(fx);
+    seedDemandOwner(fx, 1);
+    const id = seedPendingDemand(fx, { playerId: 1, clubId: 1, expiresAt: '2026-10-26T00:00:00Z' }); // 剩 4h
+
+    // 单线程跑不进 SELECT→UPDATE 之间的并发窗口：把 DB.prepare 包一层，在第一次构造
+    // 「抢占 UPDATE」语句时先把行占给另一个 tick（等价于对方在窗口内先 claim），再让本 tick
+    // 执行原语句。无闸实现会把 reminded_at 再写一次并发信 → 本用例红；有闸则改 0 行、
+    // if (changes === 0) continue 生效。只删 SELECT 侧的 reminded_at='' 不会让本用例红（那是
+    // 另一条防线），本用例专锁 claim 自身。
+    const realDb = fx.env.DB;
+    let raced = false;
+    const racedDb = new Proxy(realDb, {
+      get(target, prop) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            if (!raced && /update\s+contract_demands\s+set\s+reminded_at\s*=/i.test(sql)) {
+              raced = true;
+              fx.sqlite
+                .prepare(`UPDATE contract_demands SET reminded_at = '2026-10-25T19:59:00Z' WHERE id = ?`)
+                .run(id);
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const racedEnv = { ...fx.env, DB: racedDb } as Env;
+
+    const tick = await expireDemands(racedEnv, '2026-10-25T20:00:00Z');
+    expect(raced).toBe(true); // 自检：竞态确实注入；SQL 形状变化时必须先改这里，否则本用例什么都没锁
+    expect(tick.reminded).toBe(0);
+    expect(notificationsOf(fx, 'demand_deadline')).toHaveLength(0);
+    // 抢先者的 timestamp 不被本 tick 覆盖
+    expect(sqlGet<{ reminded_at: string }>(fx.sqlite, 'SELECT reminded_at FROM contract_demands WHERE id = ?', id)!.reminded_at).toBe(
+      '2026-10-25T19:59:00Z',
+    );
   });
 });
 
