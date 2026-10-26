@@ -15,7 +15,19 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiPost, apiPut, apiUpload, type ContractDto, type FreeAgentResult, type SeaComps, type SeaSignEligibility, type SeaSubmitResult } from '../../lib/api.ts';
+import {
+  apiPost,
+  apiPut,
+  apiUpload,
+  type ContractDto,
+  type ContractPendingView,
+  type FreeAgentResult,
+  type PlayerDemandState,
+  type SeaComps,
+  type SeaSignEligibility,
+  type SeaSubmitResult,
+} from '../../lib/api.ts';
+import { fmt2, fmtShort } from '../../lib/contract-view.ts';
 import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
@@ -26,6 +38,8 @@ import { money } from '../market/shared.tsx';
 
 export interface SideOpsPlayer {
   id: number;
+  /** 显示名（v6.54.0 步骤 7）：顶部只读块的主语用球员名 */
+  name: string;
   status: string;
   transferListed: boolean;
   /** 公开标价（v6.33.0）：详情端点只下发它，私密最低报价不再经详情透出 */
@@ -43,6 +57,8 @@ function round2(x: number): number {
 export function SideOps({
   player,
   contract,
+  contractPending,
+  demandState,
   isMine,
   isFree,
   isCpu,
@@ -52,11 +68,16 @@ export function SideOps({
   seaSign,
   seaComps,
   pendingMine,
+  onShowContract,
   show,
   refreshAll,
 }: {
   player: SideOpsPlayer;
   contract: ContractDto | null;
+  /** 待生效合同变更（v6.54.0 步骤 7，仅本队教练非空）：续约禁用矩阵与「看双版本合同」入口 */
+  contractPending: ContractPendingView | null;
+  /** 本窗球员要求/转会申请状态（仅本队教练）：四态只读块 */
+  demandState: PlayerDemandState | null;
   isMine: boolean;
   isFree: boolean;
   isCpu: boolean;
@@ -70,6 +91,8 @@ export function SideOps({
   seaComps: SeaComps;
   /** 轮到我处理的收到报价条数（/api/offers?box=in 的 pendingMine） */
   pendingMine: number;
+  /** 跳到本页「合同卷宗」页签并滚到双版本合同卡（§10.2 已接受态的入口） */
+  onShowContract: () => void;
   show: (text: string, err?: boolean) => void;
   refreshAll: () => void;
 }) {
@@ -155,6 +178,37 @@ export function SideOps({
   const releaseFee = contract?.releaseFee ?? null;
   const offerCap = releaseFee !== null && releaseFee > 0 ? round2(releaseFee * 1.5) : null;
   const isTrainee = contract?.contractType === 'trainee';
+
+  // 球员要求四态 + 续约禁用矩阵（v6.54.0 步骤 7，§10.2）：
+  // 服务端只对本队教练下发 demandState/contractPending，这里再按 isCoach/isMine 兜一层，
+  // 避免把他队视角误当本队（例如管理员查看别队球员时命中同一条详情缓存）。
+  const ownerView = isCoach && isMine;
+  const demand = ownerView ? (demandState?.demand ?? null) : null;
+  const transferRequest = ownerView ? (demandState?.transferRequest ?? null) : null;
+  const contractPendingView = ownerView ? contractPending : null;
+  const demandOpen = demand !== null && (demand.status === 'pending' || demand.status === 'countered');
+  const demandAccepted = demand !== null && demand.status === 'accepted';
+  const demandRejected = demand !== null && demand.status === 'rejected';
+  const demandExpired = demand !== null && demand.status === 'expired';
+  const demandUsedThisWindow = ownerView && (demandState?.demandThisWindow ?? false);
+  // 优先级：正在闹涨薪 > 已有待生效变更 > 拒绝后申请存续 > 本窗额度已用
+  //（与 §10.2 的禁用矩阵同序；四种都只是 UI 前置，服务端 createRcChange 仍各自 409）
+  const renewBlock: 'active' | 'pending' | 'request' | 'used' | null = demandOpen
+    ? 'active'
+    : demandRejected || transferRequest !== null
+      ? 'request'
+      : contractPendingView !== null
+        ? 'pending'
+        : demandUsedThisWindow
+          ? 'used'
+          : null;
+  const renewBlockTitle: Record<NonNullable<typeof renewBlock>, string> = {
+    // 术语纪律（GLOSSARY「球员要求」节）：界面不出现「闹涨薪」「收件箱」这类机制/载体词
+    active: '他正在提涨薪要求，先去谈判区处理',
+    pending: '已有待生效合同变更',
+    request: '转会申请存续期间不能续约',
+    used: '本窗他的合同谈判机会已经用过，下窗再谈',
+  };
   // v6.33.0：脏判按「草稿 ≠ settings 现值」逐字段比；settings 没到（私密端点还在路上/失败）禁存，
   // 避免把「进名单必填标价」存成空值打到 400。
   const minDraftValue = minDraft === '' ? null : Number(minDraft);
@@ -178,6 +232,8 @@ export function SideOps({
       void qc.invalidateQueries({ queryKey: qk.myClub });
       void qc.invalidateQueries({ queryKey: qk.squad });
       void qc.invalidateQueries({ queryKey: qk.offerSettings(player.id) });
+      // 挂牌/解约可能作废在途要求与待生效变更，球队页小字与工作台一起刷新
+      void qc.invalidateQueries({ queryKey: ['club', 'pending-contracts'] });
       void qc.invalidateQueries({ queryKey: ['market', 'board'] });
       void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
       void qc.invalidateQueries({ queryKey: qk.seaPhase });
@@ -262,6 +318,69 @@ export function SideOps({
       </div>
     </>
   );
+
+  // 顶部只读块（§10.2 四态）：本队教练才渲染；球员本人的知情面走站内信，不占 SideOps。
+  // 「已接受」的工资/违约金优先取待生效投影（与双版本合同同源），投影缺失时回退要求的 target/rc_floor。
+  let demandNote: ReactElement | null = null;
+  if (ownerView && (demand !== null || transferRequest !== null)) {
+    let tone = '';
+    let text: ReactElement;
+    let action: ReactElement | null = null;
+    if (demandOpen && demand !== null) {
+      const rcPart = demand.rcFloor > 0 ? ` · 违约金提到 ${fmtShort(demand.rcFloor)}m` : '';
+      const roundPart =
+        demand.round > 0
+          ? `上轮你出 ${demand.lastCounterWage === null ? '价' : `${fmt2(demand.lastCounterWage)}m`} 未成，还剩 ${Math.max(
+              0,
+              demand.maxRounds - demand.round,
+            )} 轮。`
+          : '';
+      text = (
+        <>
+          {player.name}已提出涨薪要求（{fmt2(demand.targetWage)}m/窗{rcPart}），到 {fmt.time(demand.expiresAt)} 为止。
+          {roundPart !== '' && ` ${roundPart}`}
+        </>
+      );
+      action = (
+        <Link className="side-demand-link" to={`/market/desk?tab=negotiations&demand=${demand.id}`}>
+          去谈判桌处理 ›
+        </Link>
+      );
+    } else if (demandAccepted && demand !== null) {
+      const wage = contractPendingView?.wage ?? demand.targetWage;
+      const rc = contractPendingView?.releaseFee ?? (demand.rcFloor > 0 ? demand.rcFloor : null);
+      tone = ' ok';
+      text = (
+        <>
+          已接受 · 关窗后生效（{fmt2(wage)}m/窗{rc !== null ? ` · 违约金 ${fmtShort(rc)}m` : ''}）。
+        </>
+      );
+      action = (
+        <button type="button" className="side-demand-link" onClick={onShowContract}>
+          看双版本合同 ›
+        </button>
+      );
+    } else if (transferRequest !== null && transferRequest.status === 'listed') {
+      text = <>已挂牌，等出价。挂牌期间他的要求不会再变。</>;
+    } else if (transferRequest !== null && (transferRequest.status === 'released' || transferRequest.source === 'direct')) {
+      text = <>已明确放行：关窗起保护期结束、全联盟已收通告，挂着「不满」标记。</>;
+    } else if (transferRequest !== null) {
+      text = <>转会申请挂着 · 下窗他会再提且开价更狠。</>;
+    } else if (demandRejected) {
+      text = <>已明确放行：关窗起保护期结束、全联盟已收通告，挂着「不满」标记。</>;
+    } else if (demandExpired) {
+      tone = ' mut';
+      text = <>这个窗口没有谈成。放任不理也算一次——再有下次，他就当被放人了。</>;
+    } else {
+      text = <>本窗他的合同谈判已经有结果。</>;
+    }
+    demandNote = (
+      <div className={`side-demand-note${tone}`} role="status">
+        <span>{text}</span>
+        {action}
+      </div>
+    );
+  }
 
   let body: ReactElement | null;
   if (!isCoach) {
@@ -540,6 +659,9 @@ export function SideOps({
                 />
               </label>
               <p className="side-sub">下限取违约金/身价五折取低（不低于 1m），上限违约金 1.5 倍。</p>
+              {/* §10.2：挂牌/解约保留，但要让教练知道会作废要求或待生效变更 */}
+              {demandOpen && <p className="side-sub">挂牌会作废他的涨薪要求。</p>}
+              {contractPendingView !== null && <p className="side-sub">关窗前离队会让待生效的新合同作废。</p>}
               <OpsGateNote gate={listingGate} className="side-sub" />
               <div className="side-btns">
                 <button
@@ -566,6 +688,8 @@ export function SideOps({
               <p className="side-sub">
                 解约费 = 违约金 ×（3 − 效力赛季数）× 10%（效力满 3 赛季免费）；被解约球员本窗全联盟禁签。再次点击确认。
               </p>
+              {demandOpen && <p className="side-sub">解约会作废他的涨薪要求。</p>}
+              {contractPendingView !== null && <p className="side-sub">关窗前离队会让待生效的新合同作废。</p>}
               <div className="side-btns">
                 <button
                   type="button"
@@ -591,7 +715,15 @@ export function SideOps({
           )}
           {panel === null && (
             <div className="side-btns">
-              <button type="button" className="btn btn-sm" disabled={busy || !windowOpen || releaseFee === null} onClick={() => setPanel('renew')}>
+              {/* 续约禁用矩阵（§10.2）：本窗存在 demand 行（含 expired/占位）一律禁用；
+                  闹涨薪进行中 / 已有待生效变更 / 申请存续各有各自的说明。服务端仍会 409，这里只是前置。 */}
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy || !windowOpen || releaseFee === null || renewBlock !== null}
+                title={renewBlock !== null ? renewBlockTitle[renewBlock] : undefined}
+                onClick={() => setPanel('renew')}
+              >
                 续约
               </button>
               <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen || releaseFee === null} onClick={() => setPanel('list')}>
@@ -893,6 +1025,7 @@ export function SideOps({
           转会窗未开放：续约 / 挂牌 / 解约 / 激活暂不可用；报价仍可送出，关窗期谈成先挂意向单，开窗后由卖方确认才挂牌
         </div>
       )}
+      {demandNote}
       {body}
     </div>
   );

@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -17,6 +17,8 @@ export const qk = {
   clubStanding: (id: number) => ['clubs', 'standing', id] as const,
   seasonsCurrent: ['seasons', 'current'] as const,
   clubRoster: (id: number) => ['players', 'club-roster', id] as const,
+  // 待生效合同变更（v6.54.0 步骤 7）：只在本队教练视角启用；球队页阵容小字与工作台同源失效
+  clubPendingContracts: (id: number) => ['club', 'pending-contracts', id] as const,
   // 球员详情（v6.34.0 收编自 Player.tsx inline query）：详情页与对比页共享同一缓存键。
   // id 一律 string 归一（usePlayerDetail 内 String()）——详情页 useParams 是 string、
   // 对比页可能传 number，键不统一会出现 ['player','7'] 与 ['player',7] 两份缓存
@@ -174,6 +176,11 @@ export function useDemandInvalidation() {
   return () => {
     void qc.invalidateQueries({ queryKey: qk.contractDemands });
     void qc.invalidateQueries({ queryKey: qk.transferRequests });
+    // v6.54.0 步骤 7：接受/拒绝会写/摘待生效合同变更与「不满」申请——
+    // 球队页小字、注册工作台第二行、球员页双版本合同必须同源刷新。
+    void qc.invalidateQueries({ queryKey: ['club', 'pending-contracts'] });
+    void qc.invalidateQueries({ queryKey: qk.squad });
+    void qc.invalidateQueries({ queryKey: ['player'] });
   };
 }
 
@@ -263,6 +270,19 @@ export function useClubRoster(id: number) {
     queryFn: () => api<PlayersLibraryResponse>(`/api/players?club_id=${id}&limit=100`),
     enabled: Number.isInteger(id) && id > 0,
     staleTime: 60_000,
+  });
+}
+
+// 本队待生效合同变更（v6.54.0 步骤 7）：**只有查看自己的队**时才启用（own 由 ClubDetail 判定）。
+// 为什么不并进 useClubRoster：那一条打的是公开缓存端点，塞私有的 pending 会把教练视角写进
+// 访客共享的缓存载荷（§10.4 权限 + TC-RD-44 新鲜度双重要求）。staleTime 给短值，
+// 接受/关窗后写路径 invalidate 前缀即刷新。
+export function useClubPendingContracts(id: number, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.clubPendingContracts(id),
+    queryFn: () => api<PendingContractsResponse>('/api/club/pending-contracts'),
+    enabled: enabled && Number.isInteger(id) && id > 0,
+    staleTime: 15_000,
   });
 }
 

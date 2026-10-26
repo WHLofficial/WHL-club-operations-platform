@@ -7,7 +7,8 @@
 //   行 = 号码 + 姓名 + 徽章（1+N 折叠）+ 副行（标记行首 + 主位置 +N 点展开 · UID），组件在 card-parts.tsx。
 import { useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { useClubRoster } from '../../lib/queries.ts';
+import { useClubPendingContracts, useClubRoster } from '../../lib/queries.ts';
+import { delta2 } from '../../lib/contract-view.ts';
 import { CARD_VIEW_CELLS, DESKTOP_CELLS, groupRowsByPosition, type CardViewKey } from '../../lib/club-cards.ts';
 import { CARD_EXTRA_ITEMS, SQUAD_COLS_KEY, parseCardExtras, toggleClubCol } from '../../lib/club-columns.tsx';
 import MultiSelect from '../../components/MultiSelect.tsx';
@@ -16,11 +17,34 @@ import type { ClubSquadStructure } from '../../lib/api.ts';
 import { DetailLine, HeroStat, Histogram, ShareBar, money, num1 } from './parts.tsx';
 import { CardGroup, SquadCard, VIEW_COL_WIDTH, VIEW_GRID_COLS, ViewChips, extraColDefs } from './card-parts.tsx';
 
-export default function SquadTab({ clubId, squad }: { clubId: number; squad: ClubSquadStructure }) {
+export default function SquadTab({
+  clubId,
+  squad,
+  own,
+}: {
+  clubId: number;
+  squad: ClubSquadStructure;
+  /** 登录者正是本队教练（v6.54.0）：只有此时才拉待生效合同投影，访客不返回（§10.4） */
+  own: boolean;
+}) {
   const rosterQuery = useClubRoster(clubId);
+  // 待生效投影走独立鉴权端点：公开名册缓存里永远没有 pending（不把教练视角写进访客共享载荷）
+  const pendingQuery = useClubPendingContracts(clubId, own);
   const roster = rosterQuery.data ?? null;
-  const rosterRows = roster?.players ?? null;
+  const pending = pendingQuery.data?.pending ?? [];
+  const pendingByPlayer = new Map(pending.map((p) => [p.playerId, p]));
+  // 合并成一套行 DTO：访客没有 pending 数据，行上就是普通 PlayerLibraryRow
+  const rosterRows =
+    roster === null
+      ? null
+      : roster.players.map((row) => {
+          const pc = pendingByPlayer.get(row.id);
+          return pc === undefined
+            ? row
+            : { ...row, hasPending: true, pendingWage: pc.wage, pendingReleaseFee: pc.releaseFee, pendingSource: pc.source };
+        });
   const rosterOverflow = roster !== null && roster.nextCursor !== null;
+  const pendingWageDelta = pending.reduce((sum, p) => sum + (p.wage - p.wageCurrent), 0);
 
   // 长尾自选列进 URL（?cols=），链接可分享、刷新不丢；卡片内置的 8 列不在池子里（恒显）
   const [searchParams, setSearchParams] = useSearchParams();
@@ -47,6 +71,12 @@ export default function SquadTab({ clubId, squad }: { clubId: number; squad: Clu
         <h3>阵容组</h3>
         <span className="muted">在册球员与结构分析</span>
       </div>
+      {/* 静态汇总（§10.4 球队页）：纯提示、不提供跳转；小字不参与工资总额/平均工资统计 */}
+      {own && pending.length > 0 && (
+        <p className="club-pending-summary" role="note">
+          {pending.length} 份待生效 · 工资 {delta2(pendingWageDelta)}m/窗
+        </p>
+      )}
       <div className="club-summary">
         <dl className="club-hero">
           <HeroStat

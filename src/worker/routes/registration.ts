@@ -15,6 +15,7 @@ import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, tierCache } from '../tier.ts';
 import { rowDisplayName } from '../../core/player-name.ts';
 import { influenceCoefs, influenceOf } from '../influence.ts';
+import { loadClubPendingChanges } from '../demand-ops.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -130,12 +131,21 @@ app.get('/club/squad', async (c) => {
   // 放行档先读一次，两条返回路径共用（未绑队也要给出档位，前端才好决定挂不挂红字）
   const checkMode = await loadRegistrationCheckMode(c.env.DB);
   if (!club) {
-    return c.json({ club: null, season: null, players: [], registration: null, compliance: null, rules: null, checkMode });
+    return c.json({
+      club: null,
+      season: null,
+      players: [],
+      registration: null,
+      compliance: null,
+      rules: null,
+      checkMode,
+      pendingSummary: { count: 0, wageDelta: 0 },
+    });
   }
   const season = await getVisibleSeason(c.env.DB);
   const cache = tierCache();
   const tier = await deriveClubTier(c.env, season, club.id, cache);
-  const [players, contractMap, regRows, rules, inflCoefs] = await Promise.all([
+  const [players, contractMap, regRows, rules, inflCoefs, pendingChanges] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
     season
@@ -147,7 +157,11 @@ app.get('/club/squad', async (c) => {
     tier !== null ? loadSquadContext(c.env.DB, tier) : Promise.resolve(null),
     // v6.37.0：名单卡的市场视图要下发影响力（与 /api/players 同源系数与 JS 镜像）
     influenceCoefs(c.env.DB),
+    // v6.54.0 步骤 7（§10.5）：注册工作台的「待生效」第二行与 projected 双预检的数据源。
+    // 本端点已 requireCoach + 本俱乐部绑定，pending 只出现在这里、不进公开列表缓存。
+    loadClubPendingChanges(c.env, club.id),
   ]);
+  const pendingByPlayer = new Map(pendingChanges.map((pc) => [pc.playerId, pc]));
 
   const squadByPlayer = new Map(regRows.results.map((r) => [r.player_id, r.squad]));
   const firstTeam: SquadPlayer[] = [];
@@ -160,6 +174,12 @@ app.get('/club/squad', async (c) => {
   }
   const compliance =
     tier !== null && regRows.results.length > 0 ? checkSquad(firstTeam, trainee, rules!) : null;
+  // 待生效工资增量（全队口径；前端 cap bar 只按「已分配球员」再算一遍，两个口径分开不混用）
+  let pendingWageDelta = 0;
+  for (const pc of pendingChanges) {
+    const current = contractMap.get(pc.playerId);
+    if (current) pendingWageDelta += pc.wage - current.wage;
+  }
 
   return c.json({
     club: { id: club.id, name: club.name, leagueTier: tier },
@@ -168,6 +188,7 @@ app.get('/club/squad', async (c) => {
     registeredInTournament: tier !== null,
     players: players.map((p) => {
       const contract = contractMap.get(p.id) ?? null;
+      const pending = pendingByPlayer.get(p.id) ?? null;
       return {
         id: p.id,
         fcId: p.fc_id,
@@ -207,8 +228,17 @@ app.get('/club/squad', async (c) => {
         }),
         hasContract: contract !== null,
         squad: squadByPlayer.get(p.id) ?? null,
+        // 待生效（v6.54.0 步骤 7，§10.5）：工资/违约金新值 + 来源；releaseFee 为 null = RC 不变，
+        // 前端据此只给工资加第二行。本端点只服务本队教练，不会外泄给访客。
+        hasPending: pending !== null,
+        pendingWage: pending?.wage ?? null,
+        pendingReleaseFee: pending?.releaseFee ?? null,
+        pendingSource: pending?.source ?? null,
+        pendingProtectionTicks: pending?.protectionTicks ?? null,
+        pendingEffectiveWindowSeq: pending?.effectiveWindowSeq ?? null,
       };
     }),
+    pendingSummary: { count: pendingChanges.length, wageDelta: Math.round(pendingWageDelta * 100) / 100 },
     registration: regRows.results.length > 0
       ? {
           firstTeam: regRows.results.filter((r) => r.squad === 'first_team').map((r) => r.player_id),

@@ -6,7 +6,7 @@
 //   行尾「分配 ▾」下拉取代最左分段按钮（三选全称，无合同禁一线/训练营）；违规旗标/无合同/退役徽章随姓名走；
 //   桌面 = 全列合并 +「列…」自选长尾；窄屏（≤760px）= 四视图 chips 快切；非开窗期下拉整体禁用。
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ApiError,
@@ -20,6 +20,7 @@ import {
   type RegistrationResult,
   type SquadIssue,
   type SquadOverview,
+  type SquadPlayerRow,
   type TerminationResult,
 } from '../../lib/api.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
@@ -30,6 +31,11 @@ import { CARD_VIEW_CELLS, DESKTOP_CELLS_DESK, groupRowsByPosition, type CardView
 import { CARD_EXTRA_ITEMS, REG_COLS_KEY, parseCardExtras, toggleClubCol } from '../../lib/club-columns.tsx';
 import MultiSelect from '../../components/MultiSelect.tsx';
 import { useMediaQuery } from '../../lib/use-media.ts';
+import { playerPath } from '../../lib/player-link.ts';
+// 纯合规引擎直接复用（v6.54.0 步骤 7）：current/projected 双跑必须与提交校验同一份规则，
+// 前端不许再抄一遍阈值（§10.5「projected 再跑一遍合规预检」）。
+import { checkSquad } from '../../../../src/core/squad-rules.ts';
+import { PENDING_SOURCE_LABEL, delta2, fmt2, fmtShort, pendingFeeSmall, pendingWageSmall } from '../../lib/contract-view.ts';
 import {
   CardGroup,
   RegCard,
@@ -40,10 +46,16 @@ import {
   type AssignValue,
 } from './card-parts.tsx';
 
-type SquadFilter = 'all' | 'first_team' | 'trainee';
+// v6.54.0：新增「仅看待生效」——筛选只改列表可见性，不改工资总额/排序口径（§10.5）
+type SquadFilter = 'all' | 'first_team' | 'trainee' | 'pending';
 type Assignment = AssignValue;
 
-const SQUAD_FILTER_LABEL: Record<SquadFilter, string> = { all: '全部', first_team: '一线队', trainee: '训练营' };
+const SQUAD_FILTER_LABEL: Record<SquadFilter, string> = {
+  all: '全部',
+  first_team: '一线队',
+  trainee: '训练营',
+  pending: '仅看待生效',
+};
 
 export default function DeskTab({ overview }: { overview: MyClubOverview }) {
   const qc = useQueryClient();
@@ -247,17 +259,38 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
     const first = squad.players.filter((p) => assign[p.id] === 'first_team');
     const trainee = squad.players.filter((p) => assign[p.id] === 'trainee');
     const all = [...first, ...trainee];
+    // 待生效投影只算「已分配进名单」的人：cap bar 是注册口径，未分配的球员不进工资总额
+    let pendingDelta = 0;
+    let pendingCount = 0;
+    for (const p of all) {
+      if (!p.hasPending) continue;
+      pendingCount++;
+      pendingDelta += (p.pendingWage ?? p.wage ?? 0) - (p.wage ?? 0);
+    }
+    const wageTotal = all.reduce((sum, p) => sum + (p.wage ?? 0), 0);
     return {
       firstTeam: first.length,
       goalkeepers: first.filter((p) => p.position === 'GK').length,
       trainee: trainee.length,
-      wageTotal: all.reduce((sum, p) => sum + (p.wage ?? 0), 0),
+      wageTotal,
+      wageProjected: wageTotal + pendingDelta,
+      pendingDelta: Math.round(pendingDelta * 100) / 100,
+      pendingCount,
+      // 行数组单独命名：字段 `trainee` 是人数，不能与数组同名（对象字面量重复键）
+      firstRows: first,
+      traineeRows: trainee,
     };
   }, [squad.players, assign]);
+
+  // 全队待生效明细（明细/投影段/筛选三处同源；不含未分配球员——见 stats 注释）
+  const pendingPlayers = useMemo(() => squad.players.filter((p) => p.hasPending), [squad.players]);
+  const [showAllPending, setShowAllPending] = useState(false);
 
   const rows = useMemo(() => {
     return squad.players.filter((p) => {
       if (filter === 'all') return true;
+      // 仅看待生效：与分配无关，只按 hasPending（§10.5 表头筛选）
+      if (filter === 'pending') return p.hasPending;
       return (assign[p.id] ?? 'none') === filter;
     });
   }, [squad.players, assign, filter]);
@@ -275,6 +308,36 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
     }
     return map;
   }, [issues]);
+
+  // current / projected 双跑合规预检（v6.54.0 §10.5）：与提交校验同一个 checkSquad 纯函数。
+  // 待生效只改工资 ⇒ projected 新增的失败项实际上只会是 wage_cap；其余硬规则两遍一致。
+  // off 档（特例期隔离）不显示，与现有红字口径相同。
+  const squadChecks = useMemo(() => {
+    if (!rules || squad.checkMode === 'off') return null;
+    const toSquadPlayer = (p: SquadPlayerRow, projected: boolean) => ({
+      playerId: p.id,
+      name: p.name,
+      position: p.position,
+      ca: p.ca,
+      pa: p.pa,
+      initialCa: p.baseCa ?? p.ca,
+      growable: p.growable,
+      hasContract: p.hasContract,
+      wage: projected && p.hasPending ? (p.pendingWage ?? p.wage) : p.wage,
+    });
+    return {
+      current: checkSquad(
+        stats.firstRows.map((p) => toSquadPlayer(p, false)),
+        stats.traineeRows.map((p) => toSquadPlayer(p, false)),
+        rules,
+      ),
+      projected: checkSquad(
+        stats.firstRows.map((p) => toSquadPlayer(p, true)),
+        stats.traineeRows.map((p) => toSquadPlayer(p, true)),
+        rules,
+      ),
+    };
+  }, [rules, squad.checkMode, stats]);
 
   function setAssignment(playerId: number, next: Assignment) {
     setAssign((prev) => ({ ...prev, [playerId]: next }));
@@ -367,19 +430,87 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
                 {stats.trainee}/{rules.traineeMax}
               </span>
             </div>
-            <div className="club-stat">
+            <div className="club-stat club-stat-wage">
               <span className="stat-label">工资</span>
               <span className={`stat-value mono${capLeft !== null && capLeft < 0 ? ' bad-text' : ' gold-text'}`}>
-                {wageCap !== null ? `${stats.wageTotal.toFixed(2)}/${wageCap}m` : `${stats.wageTotal.toFixed(2)}m`}
+                {wageCap !== null ? `${fmt2(stats.wageTotal)}/${wageCap}m` : `${fmt2(stats.wageTotal)}m`}
               </span>
+              {/* 双口径副值（§10.5）：主值永远是 current，投影只作提示，不改本窗校验/扣款 */}
+              {stats.pendingCount > 0 && (
+                <span className="stat-sub">
+                  待生效 {fmt2(stats.wageProjected)}m（{delta2(stats.pendingDelta)}）· {stats.pendingCount} 份
+                </span>
+              )}
             </div>
           </div>
           {wageCap !== null && (
-            <div className="cap-bar" title={`${rules.tier ? `${LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier} ` : ''}工资帽 ${wageCap}m（扣款下限 ${wageCap - 15}m）`}>
-              <div
-                className={`cap-bar-fill${capLeft !== null && capLeft < 0 ? ' over' : ''}`}
-                style={{ width: `${Math.min(100, (stats.wageTotal / wageCap) * 100)}%` }}
-              />
+            <CapBar
+              current={stats.wageTotal}
+              projected={stats.wageProjected}
+              cap={wageCap}
+              title={`${rules.tier ? `${LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier} ` : ''}工资帽 ${fmt2(wageCap)}m`}
+            />
+          )}
+
+          {/* 逐人待生效明细（§10.5）：不能只藏在球员页合同卡里，提交前必须能看到谁待生效、涨多少 */}
+          {pendingPlayers.length > 0 && (
+            <div className="reg-pending">
+              <div className="reg-pending-head">
+                待生效工资（{pendingPlayers.length}）
+                <span className="muted"> · 本窗关闭时生效</span>
+              </div>
+              {(showAllPending ? pendingPlayers : pendingPlayers.slice(0, 3)).map((p) => (
+                <div className="reg-pending-row" key={p.id}>
+                  <Link className="reg-pending-name" to={playerPath(p)}>
+                    {p.name}
+                  </Link>
+                  <span className="mono">
+                    {p.pendingWage != null && p.wage != null && Math.abs(p.pendingWage - p.wage) >= 0.005
+                      ? `${fmt2(p.wage)} → ${pendingWageSmall(p.wage, p.pendingWage)}`
+                      : p.pendingSource === 'rejection'
+                        ? '保护期结束'
+                        : '工资不变'}
+                  </span>
+                  {p.pendingReleaseFee != null && (
+                    <span className="mono reg-pending-fee">
+                      违约金 {fmtShort(p.releaseFee ?? 0)} → {pendingFeeSmall(p.releaseFee, p.pendingReleaseFee)}
+                    </span>
+                  )}
+                  <span className="reg-pending-src">{p.pendingSource ? PENDING_SOURCE_LABEL[p.pendingSource] : '合同变更'}</span>
+                  <span className="muted reg-pending-when">本窗关闭时生效</span>
+                  <Link className="reg-pending-link" to={playerPath(p)}>
+                    查看
+                  </Link>
+                </div>
+              ))}
+              {pendingPlayers.length > 3 && (
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowAllPending((v) => !v)}>
+                  {showAllPending ? '收起' : `查看全部 ${pendingPlayers.length} 条`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* current / projected 双预检（§10.5）：current 按现行工资、projected 按关窗后工资各跑一遍。
+              待生效只会新增工资帽失败；硬规则（人数/门将/CA）两遍一致时直接显示「通过」。 */}
+          {squadChecks !== null && stats.pendingCount > 0 && (
+            <div className={`reg-precheck${squadChecks.projected.pass ? '' : ' warn'}`}>
+              <div className="reg-precheck-head">合规预检</div>
+              <div className="reg-precheck-line">
+                当前窗：{squadChecks.current.pass ? '通过' : `未通过（${squadChecks.current.issues.length} 项）`}
+              </div>
+              <div className={`reg-precheck-line${squadChecks.projected.pass ? '' : ' bad-text'}`}>
+                关窗时：
+                {squadChecks.projected.pass
+                  ? '通过'
+                  : (() => {
+                      // 硬规则（人数/门将/CA 等）与工资帽分开说：前者直接阻止提交，后者要显式确认
+                      const hard = squadChecks.projected.issues.filter((i) => i.rule !== 'wage_cap');
+                      if (hard.length > 0) return `不通过 —— ${hard.map((i) => i.message).join('；')}。`;
+                      const wageIssue = squadChecks.projected.issues.find((i) => i.rule === 'wage_cap');
+                      return `需确认 —— ${wageIssue?.message ?? '工资将超出工资帽'}；关窗时必须强制拍卖球员降到帽下。`;
+                    })()}
+              </div>
             </div>
           )}
 
@@ -392,7 +523,9 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
               {(Object.keys(SQUAD_FILTER_LABEL) as SquadFilter[]).map((key) => (
                 <button key={key} type="button" className={filter === key ? 'on' : ''} onClick={() => setFilter(key)}>
                   {SQUAD_FILTER_LABEL[key]}
-                  {key !== 'all' && `（${squad.players.filter((p) => (assign[p.id] ?? 'none') === key).length}）`}
+                  {key === 'pending'
+                    ? `（${pendingPlayers.length}）`
+                    : key !== 'all' && `（${squad.players.filter((p) => (assign[p.id] ?? 'none') === key).length}）`}
                 </button>
               ))}
             </div>
@@ -412,7 +545,9 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
               <p className="muted">
                 {squad.players.length === 0
                   ? '名单还是空的。等管理组导入球员、签下合同之后，这里就是你的更衣室。'
-                  : '这个名单还没有人。用行尾的「分配」下拉，把人分进一线队或训练营。'}
+                  : filter === 'pending'
+                    ? '当前没有待生效的合同变更。'
+                    : '这个名单还没有人。用行尾的「分配」下拉，把人分进一线队或训练营。'}
               </p>
             </div>
           ) : (
@@ -503,6 +638,52 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
         </>
       )}
     </section>
+  );
+}
+
+/* ---------- 工资帽投影条（v6.54.0 步骤 7，§10.5） ---------- */
+
+/**
+ * 横向动态放大：`axisMin = max(0, min(current, projected) − 2)`、`axisMax = max(帽, current, projected) + 2`。
+ * 不固定从 0 起（否则 66 vs 68 的差值在整条上几乎看不见），也不在 UI 标起点。
+ * 实线=current（金）、斜纹=待生效段（到 projected）、超帽段=红、帽线=4px 红 + 线左侧标签。
+ */
+function CapBar({
+  current,
+  projected,
+  cap,
+  title,
+}: {
+  current: number;
+  projected: number;
+  cap: number;
+  title: string;
+}) {
+  const axisMin = Math.max(0, Math.min(current, projected) - 2);
+  const axisMax = Math.max(cap, current, projected) + 2;
+  const span = Math.max(0.01, axisMax - axisMin);
+  const pct = (v: number) => Math.min(100, Math.max(0, ((v - axisMin) / span) * 100));
+  const cur = pct(current);
+  const proj = pct(projected);
+  const capPos = pct(cap);
+  const over = projected > cap;
+  return (
+    <div
+      className="cap-bar cap-bar-proj"
+      role="img"
+      aria-label={`当前工资 ${fmt2(current)}，待生效 ${fmt2(projected)}，工资帽 ${fmt2(cap)}`}
+      title={title}
+    >
+      <span className="cap-seg cap-seg-current" style={{ left: 0, width: `${cur}%` }} />
+      {proj > cur && <span className="cap-seg cap-seg-proj" style={{ left: `${cur}%`, width: `${proj - cur}%` }} />}
+      {over && (
+        <span className="cap-seg cap-seg-over" style={{ left: `${capPos}%`, width: `${Math.max(0, proj - capPos)}%` }} />
+      )}
+      <span className="cap-marker" style={{ left: `${capPos}%` }} aria-hidden="true" />
+      <span className="cap-flag" style={{ left: `${capPos}%` }}>
+        帽 {fmt2(cap)}
+      </span>
+    </div>
   );
 }
 

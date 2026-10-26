@@ -164,6 +164,12 @@ export interface CardMetricRow {
   marketValue: number | null;
   influence: number;
   agentTier: number;
+  /** 待生效合同变更（v6.54.0 步骤 7，§10.4/§10.5）：只有本队教练的行会带这几个字段。
+   *  阵容页与注册台共用同一套值格渲染；访客行上恒为 undefined。 */
+  hasPending?: boolean;
+  pendingWage?: number | null;
+  pendingReleaseFee?: number | null;
+  pendingSource?: 'demand' | 'renewal' | 'rejection' | null;
 }
 
 export interface CardCell {

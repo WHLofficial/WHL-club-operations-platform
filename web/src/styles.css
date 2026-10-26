@@ -8289,3 +8289,448 @@ button.sqc-pos:hover {
     text-align: left;
   }
 }
+
+/* ---------- 双版本合同与待生效投影（v6.54.0 步骤 7，设计 §10.4/§10.5） ---------- */
+/* 本段类名一律带 cv-/side-demand/reg-pending/reg-precheck/sqc-pend/cap-bar-proj 前缀，
+   不覆盖球员库与旧阵容表的既有类（v3.4.0 的 .pos-chip 覆盖教训）。色板沿用现有 token，不新增。 */
+
+/* 合同卡锚点：从 SideOps「看双版本合同」跳过来时不被吸顶条盖住 */
+.cv-anchor {
+  scroll-margin-top: calc(var(--topbar-h) + 12px);
+}
+
+.cv {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 12px 14px;
+  margin-top: 12px;
+}
+
+.cv-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cv-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.cv-sub {
+  font-size: 12px;
+}
+
+.cv-applied {
+  margin: 8px 0 4px;
+  background: #eef7f0;
+  border: 1px solid #cfe6d6;
+  color: #166534;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cv-flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 8px 0;
+}
+
+.cv-now {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cv-arrow {
+  color: var(--terracotta);
+}
+
+.cv-next {
+  color: var(--terracotta-deep);
+  font-weight: 600;
+}
+
+.cv-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e7c79b;
+  border-radius: 4px;
+  background: var(--terracotta-tint);
+  color: var(--terracotta-deep);
+  padding: 1px 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.cv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cv-table th,
+.cv-table td {
+  text-align: left;
+  padding: 7px 6px;
+  border-top: 1px solid var(--border);
+  vertical-align: baseline;
+}
+
+.cv-table thead th {
+  border-top: 0;
+  padding-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.cv-table tbody th {
+  width: 28%;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.cv-table td {
+  font-family: var(--font-mono);
+}
+
+.cv-table-single tbody th {
+  width: 34%;
+}
+
+/* 未变行：保留值、降权；变化行：terracotta-tint 底 + 右侧新值强调（颜色不是唯一信息，值旁带 +Δ） */
+.cv-row-dim th,
+.cv-row-dim td {
+  color: var(--muted);
+}
+
+.cv-row-chg th,
+.cv-row-chg td {
+  background: var(--terracotta-tint);
+}
+
+.cv-row-chg td:last-child {
+  color: var(--terracotta-deep);
+  font-weight: 600;
+}
+
+.cv-delta {
+  margin-left: 4px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--terracotta-deep);
+}
+
+.cv-unchanged {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cv-warn {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #92510a;
+  background: #fdf0dc;
+  border: 1px solid #f0d9ae;
+  border-radius: 8px;
+  padding: 7px 10px;
+  line-height: 1.5;
+}
+
+/* ≤640：合同卡从双列表变上下堆叠（当前 → 待生效），字段带 data-label 行标，不横向滚动 */
+@media (max-width: 640px) {
+  .cv-table,
+  .cv-table tbody,
+  .cv-table tr,
+  .cv-table th,
+  .cv-table td {
+    display: block;
+    width: auto;
+  }
+
+  .cv-table thead {
+    display: none;
+  }
+
+  .cv-table tr {
+    border-top: 1px solid var(--border);
+    padding: 7px 0;
+  }
+
+  .cv-table tr:first-child {
+    border-top: 0;
+  }
+
+  .cv-table tbody th {
+    padding: 0 0 3px;
+  }
+
+  .cv-table td {
+    border-top: 0;
+    padding: 1px 0 1px 10px;
+  }
+
+  .cv-table td::before {
+    content: attr(data-label) ' ';
+    margin-right: 4px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .cv-row-chg {
+    margin: 0 -8px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: var(--terracotta-tint);
+  }
+
+  .cv-row-chg th,
+  .cv-row-chg td {
+    background: transparent;
+  }
+}
+
+/* ---- SideOps 顶部只读块（§10.2 四态）：与 .side-closed-note 同族 ---- */
+.side-demand-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid #ecd3b2;
+  border-radius: 10px;
+  background: var(--terracotta-tint);
+  color: var(--cocoa-deep);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.side-demand-note.ok {
+  background: #eef7f0;
+  border-color: #cfe6d6;
+  color: #166534;
+}
+
+.side-demand-note.mut {
+  background: #f7f2e7;
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.side-demand-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(164, 97, 44, 0.35);
+  background: none;
+  color: var(--terracotta-deep);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.side-demand-note.ok .side-demand-link {
+  color: #166534;
+  border-bottom-color: rgba(22, 101, 52, 0.35);
+}
+
+/* ---- 阵容/注册卡的小字（§10.4）：桌面值格内联，窄屏整行第三行 ---- */
+.sqc-pend {
+  display: block;
+  margin-top: 1px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--warn);
+}
+
+.sqc-pend-row {
+  order: 2;
+  flex-basis: 100%;
+  margin-left: auto;
+  padding-top: 2px;
+  text-align: right;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--warn);
+  white-space: normal;
+}
+
+.club-pending-summary {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+/* ---- 注册工作台：工资双口径副值 / 待生效明细 / 双预检 ---------- */
+.club-stat .stat-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--warn);
+}
+
+.reg-pending {
+  margin: 10px 0;
+  padding: 9px 11px;
+  border: 1px solid #f0d9ae;
+  border-radius: 10px;
+  background: #fff9ef;
+}
+
+.reg-pending-head {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #92510a;
+}
+
+.reg-pending-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 5px 0;
+  border-top: 1px dashed #f0d9ae;
+  font-size: 12px;
+}
+
+.reg-pending-row:first-of-type {
+  border-top: 0;
+}
+
+.reg-pending-name {
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.reg-pending-name:hover {
+  color: var(--terracotta-deep);
+}
+
+.reg-pending-fee,
+.reg-pending-src,
+.reg-pending-when {
+  font-size: 11.5px;
+}
+
+.reg-pending-src {
+  font-weight: 600;
+  color: var(--terracotta-deep);
+}
+
+.reg-pending-link {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--terracotta-deep);
+  text-decoration: none;
+}
+
+.reg-pending .btn {
+  margin-top: 6px;
+}
+
+.reg-precheck {
+  margin: 10px 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reg-precheck.warn {
+  border-color: #f0d9ae;
+  background: #fdf0dc;
+}
+
+.reg-precheck-head {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.reg-precheck-line {
+  padding: 1px 0;
+}
+
+/* ---- 工资帽投影条（§10.5）：实线 current / 斜纹 projected / 4px 红帽线 ---------- */
+.cap-bar.cap-bar-proj {
+  position: relative;
+  overflow: visible;
+  height: 10px;
+  margin: 10px 0 22px;
+}
+
+.cap-bar-proj .cap-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.cap-bar-proj .cap-seg-current {
+  background: var(--gold);
+  border-radius: 999px 0 0 999px;
+}
+
+.cap-bar-proj .cap-seg-proj {
+  background: repeating-linear-gradient(135deg, var(--terracotta) 0 4px, #e7c79b 4px 8px);
+  opacity: 0.9;
+}
+
+.cap-bar-proj .cap-seg-over {
+  background: rgba(220, 38, 38, 0.35);
+  border-radius: 0 999px 999px 0;
+}
+
+.cap-bar-proj .cap-marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--bad);
+  z-index: 5;
+}
+
+.cap-bar-proj .cap-flag {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  transform: translateX(-100%);
+  padding-right: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--bad);
+  z-index: 6;
+}
+
+/* §10.5 窄屏：帽线标签放到条下方，避免与投影段/右端撞车 */
+@media (max-width: 640px) {
+  .cap-bar-proj .cap-flag {
+    top: calc(100% + 3px);
+    bottom: auto;
+    transform: translateX(-50%);
+  }
+}

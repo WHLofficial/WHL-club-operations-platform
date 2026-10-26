@@ -18,6 +18,7 @@ import {
   counterDemand,
   listClubDemands,
   listClubTransferRequests,
+  loadClubPendingChanges,
   previewDemand,
   rejectDemand,
 } from '../demand-ops.ts';
@@ -81,6 +82,17 @@ app.post('/club/contract-demands/:id/reject', async (c) => {
 app.get('/club/transfer-requests', async (c) => {
   const { clubId } = await requireCoachClub(c.env, c.req.raw);
   return c.json(await listClubTransferRequests(c.env, clubId));
+});
+
+// GET /api/club/pending-contracts —— 本队待生效合同变更（v6.54.0 步骤 7，球队页阵容小字的数据源）。
+// 为什么单开一个端点而不塞进 GET /api/players?club_id=：后者是**公开缓存**端点
+// （assertPublicRate + cachedJson，键里没有 user 维度），把教练私有投影塞进去会同时踩两件事：
+// ① 访客命中同一份缓存就看到了 pending 工资/违约金（§10.4 权限硬要求「访客不返回」）；
+// ② 教练写后 24h 内（clubs/roster TTL）看到旧投影。独立端点天然按会话鉴权、不落地公开缓存，
+// 前端只在「查看的正是自己的队」时才请求（SquadTab 的 own 开关）。
+app.get('/club/pending-contracts', async (c) => {
+  const { clubId } = await requireCoachClub(c.env, c.req.raw);
+  return c.json({ pending: await loadClubPendingChanges(c.env, clubId) });
 });
 
 export default app;

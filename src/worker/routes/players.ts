@@ -12,6 +12,9 @@ import { firstPlayerByRef } from '../player-ref.ts';
 import { loadPlayerMatches } from '../player-matches.ts';
 import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
 import { getOpenWindow } from '../seasons.ts';
+import { getAuthUser } from '../../lib/session.ts';
+import { getBoundClub } from '../binding.ts';
+import { loadPlayerContractState } from '../demand-ops.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { loadClubTourTeams, loadTeamLogos } from '../club-logos.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
@@ -1064,6 +1067,23 @@ app.get('/players/:id', async (c) => {
   if (!p) throw new HttpError(404, '球员不存在');
   const id = p.id;
 
+  // 双版本合同（v6.54.0 步骤 7，设计 §10.4）：pending 投影只对本队教练返回。
+  // 详情端点是公开面且不走 cachedJson（每个请求现算），所以按请求判一次归属即可——
+  // 绝不能把 user 维度写进任何公开缓存载荷（照 /api/players 的公开缓存纪律）。
+  let contractState: Awaited<ReturnType<typeof loadPlayerContractState>> | null = null;
+  if (p.club_id !== null) {
+    const viewer = await getAuthUser(c.env, c.req.raw);
+    if (viewer !== null) {
+      try {
+        const bound = await getBoundClub(c.env, viewer.id, c.req.raw);
+        if (bound?.id === p.club_id) contractState = await loadPlayerContractState(c.env, id, p.club_id);
+      } catch {
+        // 跨库绑定查询失败不能把公开球员页打成 500：待生效投影是增强面，失败就退化成「只有现行合同」
+        contractState = null;
+      }
+    }
+  }
+
   // 影响力系数（v6.34.0 增量 1）：与列表端点共用 influenceCoefs，保证两端逐值一致
   const [club, contract, ticksRow, coefs] = await Promise.all([
     p.club_id
@@ -1237,10 +1257,24 @@ app.get('/players/:id', async (c) => {
           effectiveFrom: contract.effective_from,
           serviceSeasons: serviceSeasons(contract.service_ticks ?? 0, currentTicks),
           protected: contract.protection_ticks !== null && currentTicks < contract.protection_ticks,
+          // 保护期绝对刻度（v6.54.0 步骤 7）：双版本合同要写「至第 N 窗」，不能只给布尔
+          protectionTicks: contract.protection_ticks,
           signedSeason: contract.signed_season,
           signedWindowSeq: contract.signed_window_seq,
         }
         : null,
+    // 双版本合同（v6.54.0 步骤 7）：三项只在本队教练视角下非空，其余一律 null（§10.4 权限）
+    contractPending: contractState?.pending ?? null,
+    contractApplied: contractState?.applied ?? null,
+    demandState:
+      contractState === null
+        ? null
+        : {
+            window: contractState.window,
+            demand: contractState.demand,
+            demandThisWindow: contractState.demandThisWindow,
+            transferRequest: contractState.transferRequest,
+          },
     // 海捞情报（v6.17.0）：可签/不可签 + 原因（与 createFreeAgent 守卫链同源）；seaComps 见上方注释
     seaSign: { eligible: verdict.ok, reason: verdict.ok ? null : verdict.reason },
     seaComps,

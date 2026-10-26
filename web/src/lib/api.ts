@@ -310,8 +310,64 @@ export interface ContractDto {
   // v3.0.0 窗刻度：效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
   serviceSeasons: number;
   protected: boolean;
+  /** 保护期绝对刻度（v6.54.0）：双版本合同写「至第 N 窗」用；null/缺省 = 无保护期条款 */
+  protectionTicks?: number | null;
   signedSeason: number | null;
   signedWindowSeq: number | null;
+}
+
+// ---- v6.54.0 步骤 7：双版本合同（设计 §10.4） ----
+// 只对本队教练下发（GET /api/players/:id 与 /api/club/squad 都按会话判归属；
+// 球队页阵容小字走独立的 /api/club/pending-contracts，不污染公开缓存）。
+
+export interface ContractPendingView {
+  playerId: number;
+  playerName: string | null;
+  /** demand=球员要求 / renewal=普通续约 / rejection=直拒后的保护期调整 */
+  source: 'demand' | 'renewal' | 'rejection';
+  demandId: number | null;
+  /** 现行合同旧值 */
+  wageCurrent: number;
+  releaseFeeCurrent: number | null;
+  protectionTicksCurrent: number | null;
+  /** 关窗后的新值；releaseFee / protectionTicks 为 null = 该项不变 */
+  wage: number;
+  releaseFee: number | null;
+  protectionTicks: number | null;
+  effectiveWindowSeq: number;
+  rcFee: number;
+  freeRcChange: boolean;
+}
+
+/** 已生效态（§10.4）：生效后首个窗口内顶部一行小字，下一窗消失；直拒档不产生 */
+export interface ContractAppliedNotice {
+  source: ContractPendingView['source'];
+  appliedAt: string;
+  /** 只有球员要求来源存了旧工资；普通续约审批单不存 ⇒ null */
+  oldWage: number | null;
+}
+
+export interface PlayerDemandState {
+  window: { season: number; windowSeq: number } | null;
+  demand: {
+    id: number;
+    status: string;
+    resolution: string | null;
+    currentWage: number;
+    targetWage: number;
+    floorWage: number;
+    rcCurrent: number;
+    rcFloor: number;
+    round: number;
+    maxRounds: number;
+    expiresAt: string;
+    appliedAt: string | null;
+    /** 最近一轮还价（SideOps「上轮你出 X 未成」）；没有还价记录 null */
+    lastCounterWage: number | null;
+  } | null;
+  /** 本窗任意状态（含 expired / void 占位）是否存在要求行：续约禁用矩阵的硬判据 */
+  demandThisWindow: boolean;
+  transferRequest: { id: number; status: string; source: string; listingId: number | null } | null;
 }
 
 export interface PlayerDetail {
@@ -335,6 +391,12 @@ export interface PlayerDetail {
   };
   club: { id: number; name: string } | null;
   contract: ContractDto | null;
+  /** 待生效合同变更（v6.54.0 步骤 7）：仅本队教练视角非空，公开/他队恒 null（§10.4 权限） */
+  contractPending?: ContractPendingView | null;
+  /** 已生效首窗提示（v6.54.0）：仅本队教练、且生效后还没再关过窗 */
+  contractApplied?: ContractAppliedNotice | null;
+  /** 球员要求/转会申请的当前窗状态（SideOps 四态块与续约禁用矩阵）；仅本队教练 */
+  demandState?: PlayerDemandState | null;
   /** 海捞资格（v6.17.0）：与后端 createFreeAgent 守卫链同源，左栏海捞按钮的可用性与原因都吃它 */
   seaSign: SeaSignEligibility;
   /** 海捞成交参照（v6.17.0）：违约金输入框下方的定价锚 */
@@ -484,6 +546,12 @@ export interface PlayerLibraryRow extends PlayerListItem {
   wage: number | null;
   releaseFee: number | null;
   contractType: string | null;
+  // v6.54.0 步骤 7：阵容页小字。列表端点不返回（公开缓存），由 SquadTab 用
+  // /api/club/pending-contracts 在「自家队」时合并进来——访客行上恒为 undefined。
+  hasPending?: boolean;
+  pendingWage?: number | null;
+  pendingReleaseFee?: number | null;
+  pendingSource?: ContractPendingView['source'] | null;
   // v2.3.0 列联动：筛什么就带什么字段回来（foot/baseCa/fcId 恒回，attrValue 只在 attr 筛选时出现）
   foot: number;
   baseCa: number | null;
@@ -724,6 +792,14 @@ export interface SquadPlayerRow {
   psIds: (number | null)[];
   hasContract: boolean;
   squad: 'first_team' | 'trainee' | null;
+  // 待生效合同变更（v6.54.0 步骤 7，§10.5）：本端点只服务本队教练。
+  // pendingReleaseFee 为 null = 该项不变（RC-only pending 时工资格不加第二行）。
+  hasPending?: boolean;
+  pendingWage?: number | null;
+  pendingReleaseFee?: number | null;
+  pendingSource?: ContractPendingView['source'] | null;
+  pendingProtectionTicks?: number | null;
+  pendingEffectiveWindowSeq?: number | null;
 }
 
 export interface SquadOverview {
@@ -737,6 +813,13 @@ export interface SquadOverview {
   /** 当前放行档（v6.33.1）：未绑定队的早退响应也会带，按必填处理 */
   checkMode: RegistrationCheckMode;
   rules: SquadRules | null;
+  /** 全队待生效合同变更摘要（v6.54.0 步骤 7）：计数 + 工资增量（m/窗） */
+  pendingSummary?: { count: number; wageDelta: number };
+}
+
+/** GET /api/club/pending-contracts（v6.54.0 步骤 7）：球队页阵容小字的数据源 */
+export interface PendingContractsResponse {
+  pending: ContractPendingView[];
 }
 
 export interface RegistrationResult {

@@ -35,6 +35,7 @@ import { abilityLevel } from '../core/negotiation-rules.ts';
 import { POSITION_GROUP_BY_POSITION } from '../core/fc26.ts';
 import { fmtBeijingMinute } from '../core/ops-schedule.ts';
 import { round2 } from '../core/market-rules.ts';
+import { sqlDisplayName } from '../core/player-name.ts';
 import { DEFAULT_WAGE_CAP_BY_TIER } from '../core/squad-rules.ts';
 import { deriveClubTier, tierCache, type Tier } from './tier.ts';
 import { getOpenWindow, getVisibleSeason } from './seasons.ts';
@@ -1755,6 +1756,255 @@ export interface TransferRequestCard {
 
 export interface ClubTransferRequestList {
   requests: TransferRequestCard[];
+}
+
+// ---------------------------------------------------------------------------
+// §10.4/§10.5 前端投影读面（v6.54.0 步骤 7）
+// ---------------------------------------------------------------------------
+// 待生效合同变更的**唯一读口径**：`contract_pending_changes` 里 pending 行 + 现行 contracts
+// 的旧值一次 JOIN 出来。只给「本队教练」看（调用方负责归属校验）——公开面/他队永远拿不到
+// pending 的工资与违约金，这是 §10.4「权限」硬要求。
+// 注意：`contract_pending_changes.release_fee_new` / `protection_ticks_new` 的 NULL 语义是
+// 「该项不变」（0079 注释），不是「没值」；前端据此决定哪一行算变化行。
+
+export interface PendingContractView {
+  playerId: number;
+  playerName: string | null;
+  /** demand=闹涨薪接受 / renewal=普通续约 / rejection=直拒保护期失效 */
+  source: 'demand' | 'renewal' | 'rejection';
+  /** 来源要求行（只有 demand/rejection 有） */
+  demandId: number | null;
+  /** 现行合同旧值（对比列左侧） */
+  wageCurrent: number;
+  releaseFeeCurrent: number | null;
+  protectionTicksCurrent: number | null;
+  /** 关窗后的新值；releaseFee/protectionTicks 为 null = 该项不变 */
+  wage: number;
+  releaseFee: number | null;
+  protectionTicks: number | null;
+  /** 该 pending 在哪一窗关闭时生效（表里只有窗序号，没有赛季列） */
+  effectiveWindowSeq: number;
+  rcFee: number;
+  freeRcChange: boolean;
+}
+
+const PENDING_VIEW_SELECT = `SELECT pc.player_id, ${sqlDisplayName('p')} AS player_name,
+       pc.source, pc.demand_id, pc.wage_new, pc.release_fee_new, pc.protection_ticks_new,
+       pc.effective_window_seq, pc.rc_fee, pc.free_rc_change,
+       c.wage AS wage_current, c.release_fee AS release_fee_current,
+       c.protection_ticks AS protection_ticks_current
+FROM contract_pending_changes pc
+JOIN contracts c ON c.player_id = pc.player_id AND c.is_active = 1
+JOIN players p ON p.id = pc.player_id`;
+
+interface PendingViewRow {
+  player_id: number;
+  player_name: string | null;
+  source: string;
+  demand_id: number | null;
+  wage_new: number;
+  release_fee_new: number | null;
+  protection_ticks_new: number | null;
+  effective_window_seq: number;
+  rc_fee: number;
+  free_rc_change: number;
+  wage_current: number | null;
+  release_fee_current: number | null;
+  protection_ticks_current: number | null;
+}
+
+function toPendingView(r: PendingViewRow): PendingContractView {
+  return {
+    playerId: r.player_id,
+    playerName: r.player_name,
+    source: r.source as PendingContractView['source'],
+    demandId: r.demand_id,
+    wageCurrent: r.wage_current ?? 0,
+    releaseFeeCurrent: r.release_fee_current,
+    protectionTicksCurrent: r.protection_ticks_current,
+    wage: r.wage_new,
+    releaseFee: r.release_fee_new,
+    protectionTicks: r.protection_ticks_new,
+    effectiveWindowSeq: r.effective_window_seq,
+    rcFee: r.rc_fee,
+    freeRcChange: r.free_rc_change === 1,
+  };
+}
+
+/**
+ * 本俱乐部的全部待生效合同变更（阵容页小字 / 注册工作台第二行与投影段）。
+ * 一条查询、按 player_id 归并；`pending` 每球员最多 1 条（部分唯一索引）。
+ */
+export async function loadClubPendingChanges(env: Env, clubId: number): Promise<PendingContractView[]> {
+  const rows = (
+    await env.DB.prepare(`${PENDING_VIEW_SELECT}
+       WHERE pc.club_id = ? AND pc.status = 'pending'
+       ORDER BY pc.id`).bind(clubId).all<PendingViewRow>()
+  ).results;
+  return rows.map(toPendingView);
+}
+
+/** 单个球员的待生效变更（球员页双版本合同卡） */
+export async function loadPlayerPendingChange(
+  env: Env,
+  playerId: number,
+  clubId: number,
+): Promise<PendingContractView | null> {
+  const row = await env.DB.prepare(`${PENDING_VIEW_SELECT}
+       WHERE pc.player_id = ? AND pc.club_id = ? AND pc.status = 'pending'`)
+    .bind(playerId, clubId)
+    .first<PendingViewRow>();
+  return row ? toPendingView(row) : null;
+}
+
+/** 已生效待通知态（§10.4「已生效态」：生效后首个窗口内顶部一行小字，下一窗消失） */
+export interface AppliedContractView {
+  source: PendingContractView['source'];
+  appliedAt: string;
+  /** 只在 demand 来源有（contract_demands.current_wage 存了提要求时的旧工资）；
+   *  renewal 走审批单、表里不存旧值 ⇒ null，前端退回不带旧值的文案 */
+  oldWage: number | null;
+}
+
+/** 本窗球员要求状态（SideOps 四态块 + 续约禁用矩阵的判据） */
+export interface PlayerDemandView {
+  id: number;
+  status: string;
+  resolution: string | null;
+  currentWage: number;
+  targetWage: number;
+  floorWage: number;
+  rcCurrent: number;
+  rcFloor: number;
+  round: number;
+  maxRounds: number;
+  expiresAt: string;
+  appliedAt: string | null;
+  /** 最近一轮还价（SideOps「上轮你出 X 未成」）；没有还价记录 null */
+  lastCounterWage: number | null;
+}
+
+export interface PlayerTransferRequestView {
+  id: number;
+  status: string;
+  source: string;
+  listingId: number | null;
+}
+
+export interface PlayerContractState {
+  pending: PendingContractView | null;
+  applied: AppliedContractView | null;
+  /** 当前开窗窗口；无开窗 null */
+  window: { season: number; windowSeq: number } | null;
+  /** 当前窗的要求行（void 不返回——B 分支占位行没有可展示的面） */
+  demand: PlayerDemandView | null;
+  /** 本窗**任意状态**（含 expired / void 占位）是否存在要求行：续约禁用的硬判据 */
+  demandThisWindow: boolean;
+  transferRequest: PlayerTransferRequestView | null;
+}
+
+/**
+ * 球员页/球队页的合同投影（§10.4 数据契约）。只由本队教练路径调用——
+ * 归属校验在路由层（`player.club_id === 绑定俱乐部`）。
+ *
+ * 「已生效」小字的判据：该球员最近一条 applied 行，且其后**没有更晚关闭的窗口**
+ * （= 正处在生效后的第一个窗口）。各查各的、无 N+1；无 pending/applied 时只有两条轻查询。
+ */
+export async function loadPlayerContractState(env: Env, playerId: number, clubId: number): Promise<PlayerContractState> {
+  const db = env.DB;
+  const win = await getOpenWindow(db);
+  const [pending, demandRow, requestRow, appliedRow] = await Promise.all([
+    loadPlayerPendingChange(env, playerId, clubId),
+    win === null
+      ? Promise.resolve(null)
+      : db
+          .prepare(
+            `SELECT id, status, resolution, current_wage, target_wage, floor_wage, rc_current, rc_floor,
+                    round, expires_at, applied_at,
+                    (SELECT wage FROM contract_demand_attempts a
+                     WHERE a.demand_id = contract_demands.id ORDER BY a.round DESC LIMIT 1) AS last_counter_wage
+             FROM contract_demands
+             WHERE player_id = ? AND club_id = ? AND season = ? AND window_seq = ?`,
+          )
+          .bind(playerId, clubId, win.season, win.windowSeq)
+          .first<{
+            id: number;
+            status: string;
+            resolution: string | null;
+            current_wage: number;
+            target_wage: number;
+            floor_wage: number;
+            rc_current: number;
+            rc_floor: number;
+            round: number;
+            expires_at: string;
+            applied_at: string | null;
+            last_counter_wage: number | null;
+          }>(),
+    db
+      .prepare(
+        `SELECT id, status, source, listing_id FROM transfer_requests
+         WHERE player_id = ? AND club_id = ? AND status IN ('pending','listed','released')
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .bind(playerId, clubId)
+      .first<{ id: number; status: string; source: string; listing_id: number | null }>(),
+    db
+      .prepare(
+        `SELECT pc.source, pc.applied_at, d.current_wage AS old_wage
+         FROM contract_pending_changes pc
+         LEFT JOIN contract_demands d ON d.id = pc.demand_id
+         WHERE pc.player_id = ? AND pc.club_id = ? AND pc.status = 'applied'
+         ORDER BY pc.applied_at DESC, pc.id DESC LIMIT 1`,
+      )
+      .bind(playerId, clubId)
+      .first<{ source: string; applied_at: string | null; old_wage: number | null }>(),
+  ]);
+
+  // 已生效小字只活一个窗口：生效后再关过窗（closed_at 晚于 applied_at）就不再提。
+  // 直拒档（rejection）工资没变，不产生这条提示；renewal 缺旧值也照出（文案退化为不带旧值）。
+  let applied: AppliedContractView | null = null;
+  if (appliedRow?.applied_at != null && appliedRow.source !== 'rejection' && win !== null) {
+    const later = await db
+      .prepare(`SELECT COUNT(*) AS n FROM season_windows WHERE status = 'closed' AND closed_at > ?`)
+      .bind(appliedRow.applied_at)
+      .first<{ n: number }>();
+    if ((later?.n ?? 0) === 0) {
+      applied = {
+        source: appliedRow.source as AppliedContractView['source'],
+        appliedAt: appliedRow.applied_at,
+        oldWage: appliedRow.source === 'demand' ? (appliedRow.old_wage ?? null) : null,
+      };
+    }
+  }
+
+  return {
+    pending,
+    applied,
+    window: win === null ? null : { season: win.season, windowSeq: win.windowSeq },
+    demand:
+      demandRow && demandRow.status !== 'void'
+        ? {
+            id: demandRow.id,
+            status: demandRow.status,
+            resolution: demandRow.resolution,
+            currentWage: demandRow.current_wage,
+            targetWage: demandRow.target_wage,
+            floorWage: demandRow.floor_wage,
+            rcCurrent: demandRow.rc_current,
+            rcFloor: demandRow.rc_floor,
+            round: demandRow.round,
+            maxRounds: DEMAND_MAX_ROUNDS,
+            expiresAt: demandRow.expires_at,
+            appliedAt: demandRow.applied_at,
+            lastCounterWage: demandRow.last_counter_wage,
+          }
+        : null,
+    demandThisWindow: demandRow !== null,
+    transferRequest: requestRow
+      ? { id: requestRow.id, status: requestRow.status, source: requestRow.source, listingId: requestRow.listing_id }
+      : null,
+  };
 }
 
 /**

@@ -714,3 +714,68 @@ describe('同窗守卫（createRcChange）', () => {
     expect(second.ok).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v6.54.0 步骤 7：双版本合同投影（§10.4/§10.5）
+// ---------------------------------------------------------------------------
+
+describe('双版本合同投影', () => {
+  it('本队教练：accept 后球员详情 / 注册名单 / pending-contracts 三面同源；匿名与他队一律看不到', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    openWindow(fx);
+    seedDemandOwner(fx, 1);
+    const id = seedDemand(fx);
+
+    const acc = await post(`${DEMAND_PATH}/${id}/accept`, {}, 'tok-coach', fx.env);
+    expect(acc.status).toBe(200);
+
+    // 匿名：只有现行合同，三项私有投影全 null（公开面不泄漏 pending 工资/违约金）
+    const anon = (await (await get('/api/players/1', undefined, fx.env)).json()) as {
+      contractPending: unknown;
+      contractApplied: unknown;
+      demandState: unknown;
+    };
+    expect(anon.contractPending).toBeNull();
+    expect(anon.contractApplied).toBeNull();
+    expect(anon.demandState).toBeNull();
+
+    // 他队教练（未绑定俱乐部 1）：同样拿不到投影
+    const other = (await (await get('/api/players/1', 'tok-coach2', fx.env)).json()) as { contractPending: unknown };
+    expect(other.contractPending).toBeNull();
+
+    // 本队教练：待生效 + 本窗已接受的要求行
+    const own = (await (await get('/api/players/1', 'tok-coach', fx.env)).json()) as {
+      contractPending: Record<string, unknown> | null;
+      demandState: { demand: Record<string, unknown> | null; demandThisWindow: boolean } | null;
+    };
+    expect(own.contractPending).toMatchObject({
+      playerId: 1,
+      source: 'demand',
+      wageCurrent: 2.5,
+      wage: 3.7,
+      releaseFeeCurrent: 20,
+      releaseFee: 25,
+    });
+    expect(own.demandState?.demand).toMatchObject({ id, status: 'accepted' });
+    expect(own.demandState?.demandThisWindow).toBe(true);
+
+    // 注册工作台：逐人第二行字段 + 全队摘要
+    const squad = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
+      players: { id: number; hasPending?: boolean; pendingWage?: number | null; pendingReleaseFee?: number | null; pendingSource?: string }[];
+      pendingSummary?: { count: number; wageDelta: number };
+    };
+    const row = squad.players.find((p) => p.id === 1);
+    expect(row).toMatchObject({ hasPending: true, pendingWage: 3.7, pendingReleaseFee: 25, pendingSource: 'demand' });
+    expect(squad.pendingSummary).toEqual({ count: 1, wageDelta: 1.2 });
+
+    // 球队页独立端点：本队教练可见；他队 403 / 匿名 401
+    const pending = (await (await get('/api/club/pending-contracts', 'tok-coach', fx.env)).json()) as {
+      pending: { playerId: number; playerName: string | null; wage: number; releaseFee: number | null }[];
+    };
+    expect(pending.pending).toHaveLength(1);
+    expect(pending.pending[0]).toMatchObject({ playerId: 1, playerName: '球员1', wage: 3.7, releaseFee: 25 });
+    expect((await get('/api/club/pending-contracts', 'tok-coach2', fx.env)).status).toBe(403);
+    expect((await get('/api/club/pending-contracts', undefined, fx.env)).status).toBe(401);
+  });
+});

@@ -21,7 +21,6 @@ import {
   AGENT_TIER_LABEL,
   ATTR_GROUPS,
   ATTR_LABELS,
-  CONTRACT_TYPE_LABEL,
   SOURCE_LABEL,
   TRANSFER_TYPE_LABEL,
   nationName,
@@ -62,6 +61,8 @@ import { useMediaQuery } from '../lib/use-media.ts';
 import { SideOps } from './player/SideOps.tsx';
 import ComparePickerOverlay from './player/ComparePickerOverlay.tsx';
 import { MatchesTab } from './player/MatchesTab.tsx';
+// 双版本合同（v6.54.0 步骤 7，设计 §10.4）：本队教练看到 current + pending 对比，公开视角只有 current
+import { ContractDualView } from '../components/ContractDualView.tsx';
 
 type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers' | 'matches';
 
@@ -431,6 +432,7 @@ export default function Player() {
           <SideOps
             player={{
               id: player.id,
+              name: player.name,
               status: player.status,
               transferListed: player.transferListed,
               listPrice: player.listPrice,
@@ -438,6 +440,8 @@ export default function Player() {
               notForSale: player.notForSale,
             }}
             contract={contract}
+            contractPending={data.contractPending ?? null}
+            demandState={data.demandState ?? null}
             isMine={isMine}
             isFree={club === null}
             isCpu={isCpu}
@@ -447,6 +451,13 @@ export default function Player() {
             seaSign={data.seaSign}
             seaComps={data.seaComps}
             pendingMine={receivedPendingQuery.data?.pendingMine ?? 0}
+            onShowContract={() => {
+              setTab('profile');
+              // 等页签渲染完再滚，避免滚到旧高度（§10.2「看双版本合同 →」的落点）
+              requestAnimationFrame(() => {
+                document.getElementById('contract-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }}
             show={show}
             refreshAll={refreshAll}
           />
@@ -506,14 +517,6 @@ export default function Player() {
                     {contract && (
                       <>
                         <tr>
-                          <th>违约金</th>
-                          <td className="num mono">{contract.releaseFee === null ? '—' : `${contract.releaseFee.toFixed(2)}m`}</td>
-                        </tr>
-                        <tr>
-                          <th>工资</th>
-                          <td className="num mono">{contract.wage === null ? '—' : `${contract.wage.toFixed(2)}m / 半赛季`}</td>
-                        </tr>
-                        <tr>
                           <th>签约赛季</th>
                           <td className="mono">
                             {contract.signedSeason === null ? '—' : `S${contract.signedSeason}${contract.signedWindowSeq ? ` 第 ${contract.signedWindowSeq} 窗` : ''}`}
@@ -522,14 +525,6 @@ export default function Player() {
                         <tr>
                           <th>效力时长</th>
                           <td className="mono">{contract.serviceSeasons.toFixed(1)} 年</td>
-                        </tr>
-                        <tr>
-                          <th>保护期</th>
-                          <td className="mono">{contract.protected ? '保护中' : '非保护'}</td>
-                        </tr>
-                        <tr>
-                          <th>合同类型</th>
-                          <td>{CONTRACT_TYPE_LABEL[contract.contractType] ?? contract.contractType}</td>
                         </tr>
                         <tr>
                           <th>成约方式</th>
@@ -548,6 +543,18 @@ export default function Player() {
                   </tbody>
                 </table>
               </div>
+              {/* 双版本合同（v6.54.0 步骤 7，§10.4）：工资/违约金/保护期/合同类型四行；
+                  待生效只对本队教练显示，公开/他队视角只有现行列（组件兜底 + 服务端不下发）。 */}
+              {contract && (
+                <div id="contract-card" className="cv-anchor">
+                  <ContractDualView
+                    contract={contract}
+                    pending={data.contractPending ?? null}
+                    applied={data.contractApplied ?? null}
+                    ownerView={isCoach && isMine}
+                  />
+                </div>
+              )}
               {!contract && (
                 <div className="empty-state">
                   <p className="muted">卷宗里还没有合同。签约、续约之后，条款都会收录在这里。</p>

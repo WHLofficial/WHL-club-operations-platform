@@ -19,6 +19,7 @@ import {
   type InlineBadge,
 } from '../../lib/club-cards.ts';
 import { clubCellClass, clubCellContent, clubColDef, type ClubColRow } from '../../lib/club-columns.tsx';
+import { delta2, fmt2, fmtShort, pendingFeeSmall, pendingNarrowText, pendingWageSmall } from '../../lib/contract-view.ts';
 import { playerPath } from '../../lib/player-link.ts';
 import type { PlayerLibraryRow, SquadIssue, SquadPlayerRow } from '../../lib/api.ts';
 
@@ -147,16 +148,55 @@ export function extraColDefs(extraKeys: readonly string[]): { key: string; label
   return extraKeys.map((key) => ({ key, label: clubColDef(key)?.label ?? key }));
 }
 
-function metricValues(cells: readonly CardCell[], row: CardMetricRow, extras: readonly string[], colRow: ClubColRow): ReactNode[] {
+/**
+ * 待生效小字（v6.54.0 步骤 7，§10.4/§10.5）：
+ * 桌面宽卡 = 工资/违约金值格内的第二行 `(+1.20)3.70` / `(+5)25`；窄屏走 `.sqc-pend-row` 整行。
+ * 只有本队教练合并过 pending 的行才有值（`hasPending`），访客行上恒不渲染。
+ */
+function pendingSub(cellKey: string, row: CardMetricRow): { text: string; aria: string } | null {
+  if (row.hasPending !== true) return null;
+  if (cellKey === 'wage') {
+    const text = pendingWageSmall(row.wage, row.pendingWage ?? null);
+    if (text === null || row.pendingWage == null) return null;
+    const delta = delta2(row.pendingWage - (row.wage ?? 0));
+    return { text, aria: `当前工资 ${fmt2(row.wage ?? 0)}；待生效 ${fmt2(row.pendingWage)}，加 ${delta.replace(/^\+/, '')}` };
+  }
+  if (cellKey === 'releaseFee') {
+    const text = pendingFeeSmall(row.releaseFee, row.pendingReleaseFee ?? null);
+    if (text === null || row.pendingReleaseFee == null) return null;
+    return {
+      text,
+      aria: `当前违约金 ${fmtShort(row.releaseFee ?? 0)}；待生效 ${fmtShort(row.pendingReleaseFee)}`,
+    };
+  }
+  return null;
+}
+
+function metricValues(
+  cells: readonly CardCell[],
+  row: CardMetricRow,
+  extras: readonly string[],
+  colRow: ClubColRow,
+  inlinePending: boolean,
+  pendingPrefix = false,
+): ReactNode[] {
   return [
     ...cells.map((c) => {
       // v6.38.1：shade 在场的值格套全仓五档分段色（attrClass 阈值 50/60/70/80）——
       // nullish 或缺格照旧中性墨色；.sqc-v 墨色源序在后所以 attr-* 需要 .sqc-v.attr-* 的 0-2-0 覆盖（styles.css）
       const v = c.shade?.(row) ?? null;
       const tone = v == null ? '' : ` ${attrClass(v)}`;
+      const sub = inlinePending ? pendingSub(c.key, row) : null;
       return (
-        <span key={c.key} className={`sqc-v${c.num === false ? '' : ' num'}${tone}`}>
+        <span key={c.key} className={`sqc-v${c.num === false ? '' : ' num'}${tone}`} aria-label={sub?.aria}>
           {c.get(row) ?? '—'}
+          {sub !== null && (
+            <small className="sqc-pend">
+              {/* 注册台只在工资格写「待生效」，RC 第二行按 §10.5 只写 `(+5)25` */}
+              {pendingPrefix && c.key === 'wage' ? '待生效 ' : ''}
+              {sub.text}
+            </small>
+          )}
         </span>
       );
     }),
@@ -167,6 +207,27 @@ function metricValues(cells: readonly CardCell[], row: CardMetricRow, extras: re
       </span>
     )),
   ];
+}
+
+/**
+ * 窄屏第三行（§10.4 固定格式）：`待生效 工资 3.70(+1.20) · 违约金 25(+5)`。
+ * 新值在前、差额在后——与桌面值格小字 `(+1.20)3.70` 方向相反，两套不混用。
+ * 行内不出现「关窗后 / 免费」；只在本队教练合并过 pending 的行上渲染。
+ */
+function PendingRow({ row }: { row: CardMetricRow }) {
+  if (row.hasPending !== true) return null;
+  const text = pendingNarrowText({
+    wage: row.wage,
+    pendingWage: row.pendingWage ?? null,
+    releaseFee: row.releaseFee,
+    pendingReleaseFee: row.pendingReleaseFee ?? null,
+  });
+  if (text === null) return null;
+  return (
+    <span className="sqc-pend-row" aria-label={`待生效 ${text}`}>
+      待生效 {text}
+    </span>
+  );
 }
 
 /* ---------- 位置分组容器：组头（色条 + 组名·人数 + 列头）---------- */
@@ -233,7 +294,7 @@ export function SquadCard({
 }) {
   const cells = wide ? DESKTOP_CELLS : CARD_VIEW_CELLS[view];
   const badges = inlineBadgesOf(row);
-  const values = metricValues(cells, row, extras.map((d) => d.key), row);
+  const values = metricValues(cells, row, extras.map((d) => d.key), row, wide === true);
   return (
     <article className={`sqc-row sqc-card${wide ? ' wide' : ''}`}>
       {wide ? (
@@ -260,6 +321,7 @@ export function SquadCard({
         </>
       )}
       <span className="sqc-m">{values}</span>
+      {wide !== true && <PendingRow row={row} />}
     </article>
   );
 }
@@ -426,7 +488,8 @@ export function RegCard({
   // 注册台桌面列用 DESKTOP_CELLS_DESK（11 列，舍「初始CA」「成长空间」）——用户裁决见 club-cards.ts
   const cells = wide ? DESKTOP_CELLS_DESK : CARD_VIEW_CELLS[view];
   const badges = inlineBadgesOf(row);
-  const values = metricValues(cells, row, extras.map((d) => d.key), row);
+  // 注册台是合规/审计读法：第二行明确写「待生效」（§10.5）；阵容页只写差额新值（§10.4）
+  const values = metricValues(cells, row, extras.map((d) => d.key), row, wide === true, true);
   const flagEls = flags.map((f, i) => (
     <span key={`${f.rule}-${i}`} className="sqc-badge sqc-badge-flag" title={f.message ?? f.rule}>
       {ISSUE_RULE_LABEL[f.rule] ?? f.rule}
@@ -458,6 +521,7 @@ export function RegCard({
         </>
       )}
       <span className="sqc-m">{values}</span>
+      {wide !== true && <PendingRow row={row} />}
       <span className="sqc-assign">
         <AssignmentSelect value={assign} hasContract={row.hasContract} disabled={editable === false} onChange={onAssign} />
         {assign === 'trainee' && traineeBlocked && <span className="error-msg">不可成长</span>}

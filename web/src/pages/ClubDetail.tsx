@@ -147,7 +147,8 @@ export default function ClubDetail() {
       </div>
 
       {tab === 'desk' && myOverview && <DeskTab overview={myOverview} />}
-      {tab === 'squad' && <SquadTab clubId={club.id} squad={squad} />}
+      {/* own = 登录者正是本队教练：阵容页据此才拉待生效合同投影（v6.54.0，访客不返回） */}
+      {tab === 'squad' && <SquadTab clubId={club.id} squad={squad} own={own} />}
       {tab === 'transfers' && <TransfersTab contracts={contracts} transfers={transfers} />}
       {tab === 'results' && <ResultsTab standing={standing} standingNote={standingNote} form={form} />}
       {tab === 'venue' && myOverview && <VenueTab home={myOverview.home} />}
