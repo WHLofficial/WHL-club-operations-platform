@@ -13,6 +13,7 @@ import { successRate } from '../src/worker/negotiation-secret.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam, sqlGet, sqlAll } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
+import { segmentFinals } from '../src/core/demand-rules.ts';
 
 // ---------------------------------------------------------------------------
 // 夹具
@@ -777,5 +778,100 @@ describe('双版本合同投影', () => {
     expect(pending.pending[0]).toMatchObject({ playerId: 1, playerName: '球员1', wage: 3.7, releaseFee: 25 });
     expect((await get('/api/club/pending-contracts', 'tok-coach2', fx.env)).status).toBe(403);
     expect((await get('/api/club/pending-contracts', undefined, fx.env)).status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 挂牌驱赶（v6.54.0 §5.4 第 5 条 / §11.2）与「不满」徽章公开可见性（TC-RD-15 / TC-RD-34 #3）
+// ---------------------------------------------------------------------------
+
+describe('挂牌驱赶与「不满」徽章', () => {
+  it('在途 pending → 普通续约 409（一球员最多 1 条待生效合同变更，§5.7）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    openWindow(fx);
+    addPlayer(fx, 1, { clubId: 1 });
+    addContract(fx, 1, 1);
+    // 闹涨薪接受 / 直拒保护期失效 / 上窗迟到的续约都落在同一张表
+    fx.sqlite
+      .prepare(
+        `INSERT INTO contract_pending_changes (player_id, club_id, source, wage_new, status, effective_window_seq)
+         VALUES (1, 1, 'demand', 3.7, 'pending', ${WINDOW})`,
+      )
+      .run();
+    await expect(createRcChange(fx.env, 1, 2, 1, 15)).rejects.toMatchObject({
+      status: 409,
+      message: '他还有一份待生效的合同变更，先等它生效或作废',
+    });
+  });
+
+  it('挂牌端点在同一批里把待处理 demand 置 expired（void_reason=listing）并把存续申请转 listed', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    openWindow(fx);
+    // 球员 1：待处理 demand + 存续申请（pending）
+    addPlayer(fx, 1, { clubId: 1 });
+    addContract(fx, 1, 1, { rc: 20 });
+    const demandId = seedDemand(fx, { playerId: 1, status: 'pending' });
+    fx.sqlite
+      .prepare(`INSERT INTO transfer_requests (player_id, club_id, demand_id, source, status) VALUES (1, 1, ?, 'collapse', 'pending')`)
+      .run(demandId);
+
+    const res = await post('/api/market/listings', { playerId: 1, askPrice: 11 }, 'tok-coach', fx.env);
+    expect(res.status).toBe(201);
+    const listingId = ((await res.json()) as { listingId: number }).listingId;
+
+    expect(
+      sqlGet<{ status: string; resolution: string | null; void_reason: string | null; resolved_at: string | null }>(
+        fx.sqlite,
+        'SELECT status, resolution, void_reason, resolved_at FROM contract_demands WHERE id = ?',
+        demandId,
+      ),
+    ).toMatchObject({ status: 'expired', resolution: 'expired', void_reason: 'listing' });
+    expect(
+      sqlGet<{ status: string; listing_id: number | null; last_listing_window_seq: number | null }>(
+        fx.sqlite,
+        'SELECT status, listing_id, last_listing_window_seq FROM transfer_requests WHERE player_id = 1',
+      ),
+    ).toMatchObject({ status: 'listed', listing_id: listingId, last_listing_window_seq: WINDOW });
+    // 挂牌驱赶的 expired 不计累计终局（§5.4 第 5 条）：计数过滤器对 byListing 行零命中
+    expect(segmentFinals([{ kind: 'expired', clubId: 1, at: Date.now(), byListing: true }], 1, null)).toHaveLength(0);
+    // 自然过期仍计数（对照，防过滤器被整体放宽）
+    expect(segmentFinals([{ kind: 'expired', clubId: 1, at: Date.now(), byListing: false }], 1, null)).toHaveLength(1);
+  });
+
+  it('「不满」徽章全联盟可见：匿名详情与列表都带 unsatisfied；重签 resolved 后摘除', async () => {
+    const fx = freshEnv();
+    fx.env.PUBLIC_CACHE_TTL_MS = '0'; // 列表端点旁路公开缓存，读库即真相（跨用例 L1 不串味）
+    seedClub(fx, 1);
+    seedClub(fx, 2);
+    addPlayer(fx, 1, { clubId: 1 });
+    addContract(fx, 1, 1);
+    const demandId = seedDemand(fx, { playerId: 1, status: 'rejected', resolution: 'direct', resolvedAt: '2026-10-25T00:00:00Z' });
+    fx.sqlite
+      .prepare(`INSERT INTO transfer_requests (player_id, club_id, demand_id, source, status) VALUES (1, 1, ?, 'direct', 'released')`)
+      .run(demandId);
+
+    // 匿名访客：球员详情（公开面）
+    const detail = (await (await get('/api/players/1', undefined, fx.env)).json()) as { player: { unsatisfied: boolean } };
+    expect(detail.player.unsatisfied).toBe(true);
+    // 他队教练：球队页阵容吃的就是公开列表（列表会顺带查队徽，本夹具补最小 team 表）
+    fx.tour.exec(`CREATE TABLE IF NOT EXISTS team (id INTEGER PRIMARY KEY, logo_key TEXT);`);
+    const list = (await (await get('/api/players?club_id=1', 'tok-coach2', fx.env)).json()) as {
+      players: { id: number; unsatisfied: boolean }[];
+    };
+    expect(list.players.find((p) => p.id === 1)?.unsatisfied).toBe(true);
+    // 本队教练的私有投影不受影响（徽章是公开位，不是越权泄漏）
+    const own = (await (await get('/api/players/1', 'tok-coach', fx.env)).json()) as {
+      player: { unsatisfied: boolean };
+      demandState: { transferRequest: { status: string } | null } | null;
+    };
+    expect(own.player.unsatisfied).toBe(true);
+    expect(own.demandState?.transferRequest?.status).toBe('released');
+
+    // 重签（released → resolved）后徽章摘除
+    fx.sqlite.exec(`UPDATE transfer_requests SET status = 'resolved' WHERE player_id = 1`);
+    const after = (await (await get('/api/players/1', undefined, fx.env)).json()) as { player: { unsatisfied: boolean } };
+    expect(after.player.unsatisfied).toBe(false);
   });
 });

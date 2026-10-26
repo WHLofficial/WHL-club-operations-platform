@@ -15,7 +15,7 @@ import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam, sqlG
 import { resetConfigCache } from '../src/core/config.ts';
 import { completeTermination, completeTransfer } from '../src/worker/transfers.ts';
 import { windowHomeStatements } from '../src/worker/home.ts';
-import { expireDemands, rejectDemand } from '../src/worker/demand-ops.ts';
+import { applyPendingContractChanges, expireDemands, rejectDemand } from '../src/worker/demand-ops.ts';
 import { approveTransferDeal, createRcChange } from '../src/worker/bypass.ts';
 import { submitReleaseFee } from '../src/worker/negotiations.ts';
 import { loadNegotiationContext } from '../src/worker/negotiation-context.ts';
@@ -267,7 +267,10 @@ function pausableDb(db: D1Database): { db: D1Database; reached: Promise<void>; r
 // ---------------------------------------------------------------------------
 
 describe('§5.7 关窗 apply 段（home.ts 并入关窗批）', () => {
-  it('demand / renewal / rejection 同一条路径：apply 后写新 wage·RC·保护期，关窗前 contracts 一字不动', async () => {
+  // 注意：本用例是**手工挂 pending 行**锁 apply 引擎的三来源形状兼容，不是普通续约端到端——
+  // 真实 createRcChange → 谈判成约 → renewal pending 的写入链路由 tests/bypass-routes.test.ts 的
+  // 「审核通过…成约只写待生效变更」用例锁（v6.54.0 收口审：原用例名让人误以为续约已迁移）。
+  it('三来源 pending 走同一条 apply 路径（手工挂行）：apply 后写新 wage·RC·保护期，关窗前 contracts 一字不动', async () => {
     const fx = freshEnv();
     seedClub(fx, 1);
     addPlayer(fx, 1, 1);
@@ -686,6 +689,12 @@ describe('离队作废链 / 段计数口径', () => {
       source: 'rc_change',
       contractType: 'formal',
     });
+    // 普通续约改关窗生效（§5.7）：谈成只写 renewal pending，合同不变；这里模拟关窗批把它 apply，
+    // 之后的「续约后合同值」才是新值（也顺带把在途 pending 清掉——rejectDemand 的 assertNoPendingChange
+    // 不允许带着 pending 再走直拒，§11.2）。
+    const applied = await applyPendingContractChanges(fx.env, WINDOW);
+    await fx.env.DB.batch(applied.statements);
+    expect(contractOf(fx, 7)).toMatchObject({ wage: 3, release_fee: 22 });
     // 续约改过合同 → 待处理 demand 按新合同值造（assertContractUnchanged 逐值比对）
     // 段内已有 1 次终局：再拒绝应升档（transfer_requests 直接 released）
     const demandId = addDemand(fx, { playerId: 7, clubId: 1, windowSeq: WINDOW, status: 'pending', wage: 3, rc: 22 });

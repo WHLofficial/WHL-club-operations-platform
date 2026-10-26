@@ -160,6 +160,66 @@ describe('开窗', () => {
     // 提醒只是提醒：意向单还挂着，等卖方点确认
     expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', offerId)).toMatchObject({ status: 'intent' });
   });
+
+  // v6.54.0 §8「放在 openWindow 成功后调用」：开窗返回值带本窗新生成的球员要求条数。
+  // 这里只锁「接线真的在」——生成资格/概率的确定性口径由 tests/demand-ops.test.ts 的固定种子用例锁；
+  // 本用例靠 120 名明显够格球员的批量把「一个都没中」的概率压到可忽略，并逐值对账 DB 行数。
+  it('开窗成功后跑闹涨薪生成批：demandsCreated = 本窗 demand 行数', async () => {
+    const fx = await seedWindow();
+    fx.env.rng = () => 0.99;
+    fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 1 AND window_seq = 1`);
+    const insertPlayer = fx.sqlite.prepare(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, agent_tier)
+       VALUES (?, ?, ?, ?, 'ST', 20, 90, 92, 'normal', 3)`,
+    );
+    const insertContract = fx.sqlite.prepare(
+      `INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, is_active, service_ticks, protection_ticks)
+       VALUES (?, ?, 20, 0.5, 'formal', 'import', 1, 4, 8)`,
+    );
+    for (let i = 0; i < 120; i++) {
+      const pid = 1000 + i;
+      insertPlayer.run(pid, `u${pid}`, `球员${pid}`, fx.clubA);
+      insertContract.run(pid, fx.clubA);
+    }
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { season: number; windowSeq: number; demandsCreated: number };
+    expect(body.season).toBe(1);
+    expect(body.windowSeq).toBe(2);
+    expect(body.demandsCreated).toBeGreaterThan(0);
+    const rows = sqlGet<{ n: number }>(
+      fx.sqlite,
+      'SELECT COUNT(*) AS n FROM contract_demands WHERE season = 1 AND window_seq = 2',
+    );
+    expect(rows?.n).toBe(body.demandsCreated);
+  });
+
+  it('生成批抛错不阻塞开窗（TC-RD-18 #4）：demandsCreated=0、窗口照常 open', async () => {
+    const fx = await seedWindow();
+    fx.env.rng = () => 0.99;
+    fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 1 AND window_seq = 1`);
+    // 让生成批的第一条 contract_demands 查询抛错（模拟迁移未 apply / D1 瞬时故障）
+    const real = fx.env.DB;
+    fx.env.DB = new Proxy(real, {
+      get(target, prop) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            if (String(sql).includes('contract_demands')) throw new Error('boom');
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    }) as typeof real;
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { demandsCreated: number; season: number; windowSeq: number };
+    expect(body.demandsCreated).toBe(0);
+    expect(
+      sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM season_windows WHERE season = 1 AND window_seq = 2'),
+    ).toMatchObject({ status: 'open' });
+  });
 });
 
 describe('关窗', () => {

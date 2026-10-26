@@ -4,6 +4,47 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.54.0] · 球员主动要求续约/涨薪（闹涨薪）：生成、收件箱、还价、拒绝三件套、关窗生效（2026-10-26）
+
+**本地实现完成，未 push / 未 deploy**。判级 **minor**（新域：合同要求收件箱 + 四张新表 + 6 个教练端点 + 球员页/球队页公开徽章；无破坏性契约变更）；`package.json` 6.53.5 → **6.54.0**。设计 `docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md`（rev20）、计划 `memory/plan-v6.54.0-renewal-demand.md`、测试计划 `docs/test-plans/v6.54.0-renewal-demand.md`。
+
+**上线前置（未执行）**：迁移 **`0079_renewal_demand.sql`**（`contract_demands` / `contract_pending_changes` / `contract_demand_attempts` / `transfer_requests` 四表 + `transfers` 快照三列）与 **`0080_contract_demands_status_expires.sql`** 必须先 apply 生产再 push——CF Workers Builds 只跑 `vite build && wrangler deploy`、无迁移步骤。**2026-10-26 只读查证**（`npx wrangler d1 migrations list whl-club --remote`）：两条仍在「Migrations to be applied」，生产未 apply。
+
+**Added**
+
+- 闹涨薪引擎 `src/worker/demand-ops.ts`：常规窗生成（门槛 → 倾向分 p → 确定性闸 → PPS 6 条/队硬上限，UNIQUE + `INSERT OR IGNORE` 幂等）、还价同请求即时判定（3 轮、判定种子 `seededUnit([demand_id, round], 21)`）、接受写 `contract_pending_changes(source='demand', rc_fee=0)`、直拒三件套（保护期失效 pending + 全联盟通告 + `transfer_requests.released`「不满」徽章）、累计第 2 次终局升档、过期与 24h 提醒、离队作废；纯函数层 `src/core/demand-rules.ts`（概率/金额/RC floor 取整/计数/判定）。
+- 教练端路由 `src/worker/routes/contract-demands.ts`：收件箱三组 + `wageContext`、`accept` / `counter` / `preview`（零副作用）/ `reject`、存续转会申请、本队待生效合同（`/api/club/pending-contracts`）。
+- 数据面接线（收口审修复补全）：`openWindow` 成功后调用生成批（返回值新增 `demandsCreated`，失败不阻塞开窗）；`scheduledTick` 新增 `ensureCurrentWindowDemands` 幂等补跑（当前窗无 demand 行才跑，TC-RD-18 #3）。
+- 挂牌驱赶：`POST /api/market/listings` 与管理端强制拍卖在同一批里把待处理 demand 置 `expired`（`void_reason='listing'`，计数侧 `byListing` 过滤 ⇒ **不计累计终局**），并把存续转会申请 `pending → listed` 且回填 `listing_id` / `last_listing_window_seq`（§11.2 / §11.1）。
+- 「不满」徽章全联盟可见（§5.4 三件套之三）：`GET /api/players/:id` 与 `GET /api/players` 列表行新增 `unsatisfied`（`transfer_requests.status='released'` 存续），球员页状态区与球队页阵容卡渲染「不满」；`released → resolved`（重签/离队）即摘除。
+
+**Changed（既有行为变更 ①，必须单独上报）**
+
+- **普通续约（`rc_change`）改关窗生效**（§5.7）：谈成时 contracts 的 `wage` / `release_fee` / `protection_ticks` **一字不动**，改写成 `contract_pending_changes(source='renewal')`；4.4.6「保护期收口」语义保留、时点迁移（`protection_ticks_new=baseTicks`，不写 NULL）；30% 续约费仍在审核通过时即时扣、写流水与审计，pending 记 `rc_fee` / `rc_fee_charged_at`，关窗 apply 不再扣款。4.4.10 窗内回滚（挂牌/激活/解约）改为**作废 renewal pending** + 退费。`source`（成约方式）不在关窗前不变的三列内，保持即时更新。
+- **既有行为变更 ②**：`createRcChange` 新增「该球员存在未终局签约谈判 session（`active` + `signing`）→ 409」，堵住续约单进入 signing 后同一球员还能再提第二张续约单的旧缺口；另加「已有在途 `contract_pending_changes` → 409」（一球员最多 1 条待生效变更）。
+
+**Fixed（收口审发现的实现缺口）**
+
+- `triggerDemandBatch` 生产代码零调用点 ⇒ 开窗与 cron 双入口接线（此前 `contract_demands` 在生产永远是空表，收件箱/还价/通胀/三件套整链空转）。
+- `contract_pending_changes.source='renewal'` 零写入点 ⇒ 普通续约改用关窗生效（见上）。
+- 挂牌端点零 demand 处理 ⇒ 挂牌驱赶已接线（见上）。
+- 「不满」徽章原只经本队教练两个私有面返回，他队/访客不可见 ⇒ 公开球员详情与列表行新增 `unsatisfied`（见上）。
+
+**验收（本轮实测）**
+
+- `npm run typecheck`（默认 + worker + tests 三份）**0 error**。
+- `npm run build` 成功：入口 `dist/assets/index-CcG2ixpN.js` 686.04 kB / gzip 218.16 kB。
+- 定向 vitest（未跑全量，全量由实施工作流统一门禁）：`bypass-routes` 19、`renewal-window` 14、`demand-ops` 39、`demand-api` 20、`window-machine` 14、`players-sort-indexes` 98、`players-library` 59、`market-routes` 39、`market-intel` 26、`demand-schema` 13、`ledger-audit-lock` 9、`routes` 50、`activation-match` 11、`ops-schedule` 17、`mobile-baseline` 44、`Player.test.tsx` 17 —— **16 文件 / 489 例全绿**。
+- 注：收口时仓库根的 `npm run typecheck` 被另一会话在途的 `src/worker/offers.ts:1011`（v6.54.1 标价区间改造：`listingPriceBounds` 收到 `number | null`）打成红——该文件不在本增量改动集内，未触碰；本轮全部改动文件在 18:39 的 typecheck 与 16 文件定向测试中均无错。
+- 新增回归：开窗生成 + 生成抛错不阻塞开窗（TC-RD-18 #1/#4）、`ensureCurrentWindowDemands` 幂等补跑（#3）、挂牌驱赶扩 expired 与申请转 listed、renewal 真实链路写 pending（contracts 不动 + `protection_ticks_new` 非 NULL + `rc_fee` 对账）、窗内回滚作废 renewal pending、「不满」徽章匿名/他队可见与 resolved 摘除、在途 pending 续约 409。
+
+**已知未覆盖 / 待办**
+
+- **生产迁移 0079/0080 未 apply**（见上）；apply 后仍需按发布纪律先迁移再 push。
+- 全量 `npm test` / e2e 未在本轮执行（工作流统一跑）。
+- 跨仓通知白名单（`demand_created` / `demand_deadline` / `demand_resolved` / `demand_rejected_public`）本地无法证实，上线前与插件侧确认（与 `window_signals` 同批）。
+- `match`（匹配报价）不在 §5.7 枚举内，仍按 4.3.3 即时落库（边界已在 `transfers.ts` 注释写明）。
+
 ## [v6.53.5] · 字体源切换到平台共享源 fonts.whleague.win/v1（2026-10-25）
 
 **已上线（2026-10-25）**：① 阶段 0 基建经用户授权执行完毕——桶 `whl-fonts` 建好，九件对象 put（`immutable` 头随 put 写入），CORS 配好（`*` / GET；实测坑：wrangler 4.131.1 拒 S3 风格裸数组，`cors.json` 须用 R2 API 形状 `{"rules":[{"allowed":{…}}]}`，收尾提交 `59a1674`），`fonts.whleague.win` 经 CLI 绑域生效（`wrangler r2 bucket domain add --zone-id 1fe7b8d2…`，证书约 1 分钟，期间 403）；验证过设计稿 TC-0a/0b/0d——九件全 200、`content-type` 逐件正确、`cache-control: public, max-age=31536000, immutable`、二次请求 `cf-cache-status: HIT`、带 Origin 回 `access-control-allow-origin: *`、线上 MANIFEST 与本地逐字段一致。② 用户令「上线」后 push `6d6c862..59a1674`（5 枚）⇒ CF Workers Builds 自动部署 Version **`cf6abdcf-e42e-4962-98fb-9db9983789e7`**（2026-10-25T02:52:24Z）；**四仓同轮上线**（探索B 阶段 1–3 一次做完）：tour push `65e481f..df63dcf` ⇒ Version `5a5b9dc4-bbd3-45ef-9d0f-d8626eb32310`（02:53:15Z）；guess push `8c47dc2..e943160` ⇒ Version `8ac03686-d9c9-45dd-b3cd-4dce59de808e`（02:53:54Z）；auth push `d177aca..95afac0`（**变更集两枚一起**：`a86dbc1` 切换 + `95afac0` CSP 指令顺序修正——font-src 若追加在 BASE_CSP 末尾，client 回调 origin 会整批灌进 font-src 且 form-action 丢白名单，生产登录跳不回 client）⇒ Workers Builds 自动出包（02:52:30Z，auth 也已接自动构建）后另有手动 `wrangler deploy`，生效 Version `3c82d375-6161-4e0e-bad9-bd0dd09ccfaf`（02:54:21Z；CLI 回显 `75a2629c` 为另一值，已知现象）。③ 线上回读（同日实测）：四站全部命中共享源——club 首页 preload 绝对 URL（crossorigin）+ CSS `index-BYHmvzgM.css` 内五件字体各 1 处；tour 同（`index-UJ1T41Zz.css`）；guess 两页 preload + `style.css` 6 处；auth `/login` HTML 四件 URL 且 CSP 头为修正后形态 `font-src https://fonts.whleague.win; form-action 'self' https://club.whleague.win https://guess.whleague.win https://tour.whleague.win`。**已知事项**：guess 线上页脚 `APP_VERSION` 暂为 1.1.1（1.1.2 双写在另一会话在途增量手里，落提交后随下次 push 归位）；TC-1 跨站缓存复用需浏览器实测（curl 无法演示按顶层站点的缓存分区）；阶段 4 清理（删四仓本地 woff2、auth 撤 assets 绑定）待令。判级 **patch**（纯展示层：5 条 `@font-face` 的 `src` 与 1 条 preload 换绝对 URL；零端点、零迁移、零业务规则改动）；`package.json` 6.53.4 → **6.53.5**。设计依据 `docs/superpowers/specs/2026-10-24-shared-font-source-design.md`（探索B · 阶段 1 = club 切换），计划 `memory/plan-v6.53.5-shared-font-source.md`，测试计划 `docs/test-plans/v6.53.5-shared-font-source.md`。

@@ -61,6 +61,8 @@ export interface InlineBadgeRow {
   notForSale?: boolean;
   transferListed?: boolean;
   transferPriced?: boolean;
+  /** 「不满」徽章（v6.54.0 §5.4）：全联盟可见，与挂牌中/谈判中同级；注册名单行没有本键 */
+  unsatisfied?: boolean;
   // 注册名单行才有（/api/club/squad）
   hasContract?: boolean;
   contractType: string | null;
@@ -73,6 +75,7 @@ export interface InlineBadgeRow {
  * 行内徽章，数组顺序即优先级（用户定稿：状态 > 保护期 > 未来之星 > 中国计划），
  * 展示侧只取第 1 个、其余折进 +N。状态类的四态优先级照抄 club-columns transferStatusOf
  * 的注释口径：非卖品 > 挂牌中 > 转会名单 > 已标价；无合同只属于注册名单行。
+ * 「不满」（v6.54.0）插在「挂牌中」之后、「转会名单」之前——同为状态级，且挂牌中更即时。
  * 本模块不 import club-columns（它拉着一串 React 组件），这里按同一口径重写四态判定。
  */
 export function inlineBadgesOf(row: InlineBadgeRow): InlineBadge[] {
@@ -80,6 +83,7 @@ export function inlineBadgesOf(row: InlineBadgeRow): InlineBadge[] {
   if (row.status === 'retired') out.push({ kind: 'status', text: '退役' });
   else if (row.notForSale) out.push({ kind: 'status', text: '非卖品' });
   else if (row.status === 'listed') out.push({ kind: 'status', text: '挂牌中' });
+  else if (row.unsatisfied === true) out.push({ kind: 'status', text: '不满' });
   else if (row.transferListed) out.push({ kind: 'status', text: '转会名单' });
   else if (row.transferPriced === true) out.push({ kind: 'status', text: '已标价' });
   else if (row.hasContract === false) out.push({ kind: 'status', text: '无合同' });

@@ -396,9 +396,53 @@ export async function completeTransfer(
           transfer.window_seq,
         ),
     );
+  } else if (dealTerms && amendment && transfer.type === 'rc_change') {
+    // 普通续约（rc_change）改关窗生效（v6.54.0 §5.7「所有合同变更（闹涨薪接受、普通续约改 RC）
+    // 只写 contract_pending_changes」，既有行为变更①）：
+    // ① contracts 在窗口关闭前**一字不动**——成约只写 pending，关窗批的
+    //    applyPendingContractChanges 才把 wage/release_fee/protection_ticks 落库；
+    // ② 4.4.6 收口语义保留、时点迁移：protection_ticks_new = baseTicks（当下窗数，判定恒不成立），
+    //    **不得写 NULL**（写 NULL 会把「保护期直接结束」静默移除）；
+    // ③ 30% 续约费仍按既有 4.4.6 时点在审核通过时已收（bypass.chargeBypassFee，幂等闸 + 流水 + 审计），
+    //    这里只把「已扣金额」记进 pending 的 rc_fee 供对账；rc_fee_charged_at 直接取那笔流水的
+    //    created_at（真实扣款时刻，不拿成约时刻冒充）；apply 不再扣款（§5.7 第 3 步）；
+    // ④ 一球员同时最多 1 条 pending（0079 的部分唯一索引兜底）；createRcChange 已前置 409，
+    //    这里再带 NOT EXISTS 守卫，并发/迟到行下宁可续约不落 pending 也不撞索引把整批弄崩。
+    // 匹配（match）不在 §5.7 的枚举内，沿用 4.3.3 既有即时落库（见下面的 else 分支）。
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO contract_pending_changes
+             (player_id, club_id, source, demand_id, wage_new, release_fee_new, protection_ticks_new,
+              rc_fee, rc_fee_charged_at, status, effective_window_seq)
+           SELECT ?, ?, 'renewal', NULL, ?, ?, ?, ?,
+                  (SELECT created_at FROM ledger_entries
+                    WHERE kind = 'rc_change_fee' AND ref_type IS 'transfer' AND ref_id = ?),
+                  'pending', ?
+           WHERE ${guard.sql}
+             AND NOT EXISTS (SELECT 1 FROM contract_pending_changes WHERE player_id = ? AND status = 'pending')`,
+        )
+        .bind(
+          transfer.player_id,
+          transfer.to_club_id,
+          dealTerms.wage,
+          dealTerms.releaseFee,
+          baseTicks,
+          transfer.extra_fee ?? 0,
+          transferId,
+          transfer.window_seq ?? 0,
+          ...guard.params,
+          transfer.player_id,
+        ),
+      // source（成约方式）不属于 §5.7「关窗前不变」的三列（wage/release_fee/protection_ticks），
+      // 保持既有即时更新：合同卡「来源」在谈成当下就该反映 negotiation，不必等关窗。
+      db
+        .prepare(`UPDATE contracts SET source = ? WHERE player_id = ? AND is_active = 1 AND club_id = ? AND ${guard.sql}`)
+        .bind(dealTerms.source, transfer.player_id, transfer.to_club_id, ...guard.params),
+    );
   } else if (dealTerms && amendment) {
-    // 续约/匹配：只改 RC/工资/成约方式，保护期到当下收口（4.4.6「保护期直接结束」）——
-    // 把 protection_ticks 设为当前窗数，判定恒不成立；效力基数 service_ticks 不动
+    // 匹配（match）：不在 §5.7 的枚举内（闹涨薪接受 / 普通续约改 RC），沿用既有即时落库——
+    // 只改 RC/工资/成约方式，保护期到当下收口（4.4.6「保护期直接结束」），效力基数 service_ticks 不动。
     statements.push(
       db
         .prepare(

@@ -286,6 +286,8 @@ export interface PlayerListItem {
   /** 转会设置（v6.30.0，列表行口径）：挂牌中 / 非卖品 */
   transferListed: boolean;
   notForSale: boolean;
+  /** 「不满」徽章（v6.54.0 §5.4）：transfer_requests(released) 存续即 true，全联盟可见（列表/详情都返回；缺省视为 false） */
+  unsatisfied?: boolean;
   /** 是否设过最低报价的摘要：列表端点只给布尔，min_offer_price 数值不下发（v6.33.0 起详情也只给公开标价 listPrice，故详情对象上没有本键） */
   transferPriced?: boolean;
   growthTier: number;

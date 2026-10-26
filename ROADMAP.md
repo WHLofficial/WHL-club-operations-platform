@@ -81,7 +81,37 @@
 
 ---
 
-## v6.14.0 · C3 招商轮（品牌报价制 + 主动签约退役）
+## v6.54.0 · 球员主动要求续约/涨薪（闹涨薪）：生成、收件箱、还价、拒绝三件套、关窗生效（2026-10-26）
+
+**状态**：**本地实现完成，未 push / 未 deploy**；迁移 **`0079_renewal_demand.sql`** 与 **`0080_contract_demands_status_expires.sql` 未 apply 生产**（2026-10-26 `npx wrangler d1 migrations list whl-club --remote` 只读查证：两条仍在待应用清单）。判级 **minor**；`package.json` 6.53.5 → **6.54.0**。设计 `docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md`（rev20）、计划 `memory/plan-v6.54.0-renewal-demand.md`、测试计划 `docs/test-plans/v6.54.0-renewal-demand.md`。**发布纪律**：先 apply 0079/0080，再 push——CF Workers Builds 不跑迁移，缺表会让收件箱与 cron 段整链 500。
+
+**裁决（设计 rev20 已拍板，本轮无新拍板）**：① 拒绝后果 = S5+S4″（直拒 = 保护期失效 + 全联盟通告 + 「不满」徽章；谈崩/过期 = 申请挂起 + 下窗按通胀公式必再提）；② 累计第 2 次终局（含 expired，挂牌驱赶除外）升档走直拒三件套；③ 所有合同变更（闹涨薪接受、普通续约改 RC、直拒保护期失效）**关窗才生效**（§5.7）；④ 同窗一次不变量（闹涨薪/续约二选一，任意终局都占本窗额度）；⑤ 一球员同时最多 1 条待生效合同变更；⑥ 回原队按「本窗是否已闹过」分 A/B 两支（A 纯回归、B 按续约谈判，物理面一律延续）；⑦ CPU 队不生成、临时窗不生成。
+
+**交付**
+
+- 迁移 0079（四表：`contract_demands` / `contract_pending_changes` / `contract_demand_attempts` / `transfer_requests`；`transfers` 快照三列）与 0080（`contract_demands` 唯一键/状态口径收口）；两份都已在 `tests/d1.ts` 的 `MIGRATION_FILES`。
+- 纯函数 `src/core/demand-rules.ts`；引擎 `src/worker/demand-ops.ts`（生成/还价判定/接受/直拒三件套/过期与 24h 提醒/离队作废/关窗 apply/收件箱读面/挂牌驱赶语句）。
+- 教练端路由 `src/worker/routes/contract-demands.ts`（收件箱、accept/counter/preview/reject、`/club/transfer-requests`、`/club/pending-contracts`）。
+- 前端：谈判区「球员要求」收件箱与五态卡、`ContractDualView` 双版本合同、SideOps 四态、注册工作台双预检/超帽确认弹窗、窄屏适配（已在 `039fd2f` / `def0c6a` / `e764722` 等提交）。
+- **收口审修复（本轮）**：
+  1. **生成接线**：`openWindow` 成功后调用 `triggerDemandBatch`（新增返回 `demandsCreated`；失败只吞掉不阻塞开窗），`scheduledTick` 新增 `ensureCurrentWindowDemands`（当前窗无 demand 行才跑）——此前 `triggerDemandBatch` 生产零调用点，整条功能不可达。
+  2. **普通续约改关窗生效**（§5.7 / 既有行为变更①）：`completeTransfer` 的 `rc_change` amendment 分支不再即时 UPDATE contracts，改写 `contract_pending_changes(source='renewal', wage_new, release_fee_new, protection_ticks_new=baseTicks, rc_fee, rc_fee_charged_at, effective_window_seq)`；30% 续约费仍在审核通过时即时扣（流水 + 审计幂等），apply 不再扣；4.4.10 窗内回滚改为作废 renewal pending + 退费；`createRcChange` 补「在途 pending → 409」（§5.7 一球员一条）。`match` 不在 §5.7 枚举内，保持即时落库。
+  3. **挂牌驱赶**：普通挂牌与管理端强制拍卖在同一批里 `listingDemandStatements`——待处理 demand → `expired` + `void_reason='listing'`（计数侧 `byListing` 过滤，不计累计终局），存续转会申请 → `listed` + 回填 `listing_id` / `last_listing_window_seq`。语句带「球员确已挂牌」存在性守卫。
+  4. **「不满」徽章公开可见**：`GET /api/players/:id` 的 `player.unsatisfied` 与 `GET /api/players` 列表行 `unsatisfied`（`transfer_requests.status='released'` 存续）；球员页状态区与球队页阵容卡渲染「不满」（`inlineBadgesOf` 排在「挂牌中」之后）；renewal pending apply 时顺便 `released → resolved`（重签摘除）。
+- CHANGELOG 两条 Changed 已分别记录（① 普通续约改关窗生效；② signing 中可再提第二张续约单的旧缺口被堵）。
+
+**验收（本轮实测）**：`npm run typecheck` 在 18:39（改动刚完成时）三份 **0 error**；此后仓库根 typecheck 被另一会话在途的 `src/worker/offers.ts:1011`（v6.54.1 标价区间改造）打成红，该文件与本增量改动集无关、未触碰。`npm run build` 成功（`dist/assets/index-CcG2ixpN.js` 686.04 kB / gzip 218.16 kB）；定向 vitest **16 文件 / 489 例全绿**（bypass-routes 19 / renewal-window 14 / demand-ops 39 / demand-api 20 / window-machine 14 / players-sort-indexes 98 / players-library 59 / market-routes 39 / market-intel 26 / demand-schema 13 / ledger-audit-lock 9 / routes 50 / activation-match 11 / ops-schedule 17 / mobile-baseline 44 / Player.test.tsx 17），**全量 `npm test` 与 e2e 本轮未跑**（由实施工作流统一门禁）。新增回归覆盖：开窗生成 + 生成抛错不阻塞开窗（TC-RD-18 #1/#4）、`ensureCurrentWindowDemands` 幂等补跑（#3）、挂牌驱赶 expired + 申请转 listed、renewal 真实链路写 pending（contracts 不动、`protection_ticks_new=6` 非 NULL、`rc_fee=1.5` 对账）、窗内回滚作废 renewal pending、匿名/他队可见「不满」与 resolved 摘除、在途 pending 续约 409。
+
+**待办 / 已知风险**
+
+- **生产迁移 0079/0080 未 apply**（见上）。
+- 跨仓通知白名单（`demand_created` / `demand_deadline` / `demand_resolved` / `demand_rejected_public`）本地无法证实，上线前与插件侧确认（与 `window_signals` 同批）。
+- 全量测试 / e2e / 变异验证（计划 16 处）尚未在本轮统一执行。
+- 设计 §5.6「普通续约免费机会」与 TC-RD-21（RC cap）属 P1，本版不实现。
+- 挂牌驱赶只接了普通挂牌与强制拍卖；激活（`activations.ts`）走的是「球员即将离队」路径，demand 由 `completeTransfer` 的离队作废收口（status='void'，本就不计终局），未额外扩 expired。
+
+---
+
 
 **状态**：**已上线**（2026-09-29 发布，用户下令「发布」）——push `07f050c..8cf8f12`（7 枚提交，docs 收口枚随行），迁移 `0055`/`0056` 先 apply 生产（`Executed 2 commands in 0.70ms`），CF 自动部署 Version `df0640af-60c2-43c1-a5ba-c25b38a57e02` @2026-09-29T10:09:11Z；上线回读全过（公开端点 200 / 匿名探针 401 / 旧 sign 404 / 线上资产 sha256 与本地一致 / JS 版本串 6.14.0），**生产迁移现状已到 `0056`**。typecheck 三份全清、vitest **60 文件 / 1062 例**全绿（v6.13.0 基线 59/990，净 +1 文件 / +72 例 = 新建 `tests/market-rounds.test.ts`）、build 成功（`index-BbEaJ6rg.js` 611.86 kB / gzip 193.68 kB，修复后重构建）、e2e **11/11**、变异验证 17 处 + 评审修复后 2 处全命中、code-review-skill 全量 diff 评审 P0 1 / P1 3 / P2 4 / P3 6（除登记不改四项外全部修复）。判级 minor（新增用户可见能力；`POST /club/naming/sign` 退役为同仓 web 客户端同批替换、无跨仓消费）。
 

@@ -35,6 +35,7 @@ import { shuffleWithSeed, transferBoardBucket } from '../../core/ad-board.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
+import { listingDemandStatements } from '../demand-ops.ts';
 import { createActivation } from '../activations.ts';
 import { queueClubNotification } from '../notify.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
@@ -311,6 +312,10 @@ app.post('/market/listings', async (c) => {
       origin: 'user',
       after: { playerId, clubId: club.id, askPrice, season: win.season, windowSeq: win.windowSeq },
     }),
+    // 挂牌驱赶（v6.54.0 §5.4 第 5 条 / §11.2）：待处理 demand → expired（void_reason='listing'，
+    // 不计累计终局）；存续转会申请 pending → listed 并回填 listing_id。与插牌/状态改动同批原子，
+    // 语句自带「球员确已挂牌」守卫（并发下状态没变时不误伤）。
+    ...listingDemandStatements(c.env.DB, playerId, club.id),
   ];
   const results = await c.env.DB.batch(statements);
   const inserted = results[0].meta.changes > 0;

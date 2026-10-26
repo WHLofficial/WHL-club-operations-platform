@@ -17,6 +17,7 @@ import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 import { queueClubNotification } from './notify.ts';
 import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
+import { triggerDemandBatch } from './demand-ops.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { slotsForCapacity } from '../core/venue.ts';
 
@@ -85,6 +86,8 @@ export async function openWindow(
   isTemporary: boolean;
   venueReset: boolean;
   venueNotified: number;
+  /** 本窗新生成的球员涨薪要求条数（v6.54.0 §8；生成失败时保持 0，靠 cron 幂等补跑） */
+  demandsCreated: number;
 }> {
   const db = env.DB;
   const config = createConfigService(db);
@@ -277,6 +280,16 @@ export async function openWindow(
   } catch {
     // 见上：仅提醒，吞掉
   }
+  // 球员涨薪要求生成（v6.54.0 §8「放在 openWindow 成功后调用」）：常规窗开窗成功后跑一次生成批。
+  // 与上面两段提醒同纪律——窗口已提交，生成失败不阻塞开窗（TC-RD-18 #4）；失败时本窗没有 demand 行，
+  // scheduledTick 的 ensureCurrentWindowDemands 会在下一个 tick 幂等补跑。临时窗由生成批自己短路。
+  let demandsCreated = 0;
+  try {
+    const batch = await triggerDemandBatch(env, { season, windowSeq, actor, origin: 'user' });
+    demandsCreated = batch.created;
+  } catch {
+    // 仅生成失败：本窗收件箱为空，补跑入口见 demand-ops.ensureCurrentWindowDemands
+  }
   return {
     ok: true,
     season,
@@ -286,6 +299,7 @@ export async function openWindow(
     isTemporary,
     venueReset,
     venueNotified,
+    demandsCreated,
   };
 }
 

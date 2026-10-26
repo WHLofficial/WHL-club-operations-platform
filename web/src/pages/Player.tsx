@@ -421,6 +421,12 @@ export default function Player() {
               <span className={`badge ${player.status === 'listed' ? 'sky' : player.status === 'trainee' ? 'purple' : 'gray'}`}>
                 {STATUS_LABEL[player.status] ?? player.status}
               </span>
+              {/* 「不满」徽章（v6.54.0 §5.4 三件套之三）：与挂牌中/谈判中同级的状态位，全联盟可见，重签/离队才摘 */}
+              {player.unsatisfied === true && (
+                <span className="badge red" title="他已被明确放行且尚未重签——任何球队可按违约金原价激活，直到重签或离队">
+                  不满
+                </span>
+              )}
               {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}
               {player.isFutureStar && <span className="badge gold">未来之星</span>}
               {player.chinaPlan && <span className="badge red">中国计划</span>}
@@ -438,6 +444,7 @@ export default function Player() {
               listPrice: player.listPrice,
               offerAuto: player.offerAuto,
               notForSale: player.notForSale,
+              marketValue: player.marketValue,
             }}
             contract={contract}
             contractPending={data.contractPending ?? null}

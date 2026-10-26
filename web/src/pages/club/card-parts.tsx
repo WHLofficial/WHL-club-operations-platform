@@ -68,6 +68,7 @@ export const VIEW_GRID_COLS: Record<CardViewKey, number> = {
 
 const BADGE_TIP: Record<string, string> = {
   无合同: '等管理组导入合同模板后才能注册',
+  不满: '他已被明确放行且尚未重签——任何球队可按违约金原价激活，直到重签或离队',
 };
 
 export function CardBadges({ badges, extra }: { badges: readonly InlineBadge[]; extra?: ReactNode }) {

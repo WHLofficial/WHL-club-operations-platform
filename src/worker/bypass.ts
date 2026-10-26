@@ -22,6 +22,7 @@ import {
   type ReviewDecision,
 } from './transfers.ts';
 import { openNegotiationSession } from './negotiations.ts';
+import { listingDemandStatements } from './demand-ops.ts';
 import { cpuClubIds } from './growth.ts';
 import { rowDisplayName } from '../core/player-name.ts';
 
@@ -326,7 +327,8 @@ export async function createRcChange(
   // 同窗便宜续约安抚」）；② 该球员存在未终局签约谈判 session（active + signing，与生成侧排除/
   // 关窗检查同口径）→ 一并 409——顺带堵既有缺口：ensureNotInFlight 只查 listings 活跃与
   // transfers 待审，续约单批准进 signing 后同一球员还能再提第二张续约单。
-  // 两道都过 ⇒ 普通续约既有流程零变化（无 demand 行、无 active session 时不新增任何写路径）。
+  // ③ 该球员已有在途 pending（合同变更，三类来源同表）→ 409（§5.7「一球员同时最多 1 条 pending」）。
+  // 三道都过 ⇒ 普通续约既有流程零变化（无 demand 行、无 active session、无 pending 时不新增写路径）。
   const sameWindowDemand = await db
     .prepare('SELECT id FROM contract_demands WHERE player_id = ? AND season = ? AND window_seq = ? LIMIT 1')
     .bind(playerId, win.season, win.windowSeq)
@@ -340,6 +342,14 @@ export async function createRcChange(
     .bind(playerId)
     .first<{ id: number }>();
   if (openSession) throw new HttpError(409, '他还有一场签约谈判没结束，先等它了结再操作');
+  // ③ 一球员同时最多 1 条待生效合同变更（§5.7）：闹涨薪接受 / 直拒保护期失效 / 上窗迟到的
+  // 普通续约 pending 都占位。不前置拦住就会在成约批里撞 0079 的 idx_pending_one_per_player，
+  // 把整批过户打成 500——宁可在这里给一句可读的 409。
+  const inFlightPending = await db
+    .prepare(`SELECT id FROM contract_pending_changes WHERE player_id = ? AND status = 'pending' LIMIT 1`)
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (inFlightPending) throw new HttpError(409, '他还有一份待生效的合同变更，先等它生效或作废');
 
   const oldRc = contract.release_fee;
   const [low, high] = releaseFeeBounds(oldRc);
@@ -740,6 +750,9 @@ export async function createForcedAuction(
       origin: 'user',
       after: { playerId, sellerClubId: clubId, askPrice, season: win.season, windowSeq: win.windowSeq },
     }),
+    // 挂牌驱赶（v6.54.0 §5.4 / §11.2）：强制拍卖同为 listings 行，待处理 demand 同样置 expired
+    // 且标 byListing（不计累计终局——管理动作不该算成球员前科）；存续转会申请 pending → listed。
+    ...listingDemandStatements(db, playerId, clubId),
   ];
   const results = await db.batch(statements);
   if ((results[0].meta.changes ?? 0) === 0 || (results[1].meta.changes ?? 0) === 0) {
@@ -893,9 +906,10 @@ export interface RollbackTrigger {
 }
 
 /**
- * 回滚该球员本窗全部已完成的续约单：RC 与保护期还原到本窗第一张续约单之前，
+ * 回滚该球员本窗全部已完成的续约单（4.4.10）：作废本窗普通续约的
+ * `contract_pending_changes(source='renewal')`（关窗生效后合同三列本窗从未改过，§5.7），
  * 已收续约费逐单退还（退款流水 ref = 续约单本身，幂等闸使任何触发序列下每单只退一次——
- * 同窗可能被多个触发单先后命中回滚）。仅当球员仍归属原续约俱乐部时回滚合同与退款
+ * 同窗可能被多个触发单先后命中回滚）。仅当球员仍归属原续约俱乐部时作废 pending 与退款
  * （若同窗已被卖掉，新合同是新东家谈判的产物，回滚只留审计不留改）。
  * 工资不回滚（假设口径见 TECH_DESIGN 假设表）。
  */
@@ -933,10 +947,18 @@ export async function rollbackRcChangeForPlayer(
   const statements: D1PreparedStatement[] = [];
   const refundable = stillOwned && clubId !== null ? rows.results.filter((r) => (r.extra_fee ?? 0) > 0) : [];
   if (stillOwned) {
+    // 关窗生效（v6.54.0 §5.7）：续约谈成只写 contract_pending_changes，contracts 本窗从未改过，
+    // 回滚的正确动作是**作废这条 pending**（否则关窗批会把已回滚的涨幅照常 apply）。
+    // 旧实现那半句 `UPDATE contracts SET release_fee/protection_ticks` 在本流程里已无事可做，
+    // 留着还会在「pending 已被别的路径收口」时把合同写成旧值——删掉。
     statements.push(
       db
-        .prepare(`UPDATE contracts SET release_fee = ?, protection_ticks = ? WHERE player_id = ? AND is_active = 1`)
-        .bind(ev.oldReleaseFee, ev.oldProtectionTicks, playerId),
+        .prepare(
+          `UPDATE contract_pending_changes SET status = 'void', void_reason = 'rollback'
+           WHERE player_id = ? AND club_id = ? AND source = 'renewal' AND status = 'pending'
+             AND effective_window_seq = ?`,
+        )
+        .bind(playerId, clubId, win.windowSeq),
     );
   }
   for (const r of refundable) {
@@ -959,8 +981,11 @@ export async function rollbackRcChangeForPlayer(
       targetId: playerId,
       origin: 'user',
       after: {
-        restoredReleaseFee: stillOwned ? ev.oldReleaseFee : null,
-        restoredProtectionTicks: stillOwned ? ev.oldProtectionTicks : null,
+        // 合同三列本窗从未落库（§5.7），"还原"的实际动作是作废 pending；这两个字段留给
+        // 运维对照「本窗第一张续约单之前的值」，不再表示发生过写合同
+        priorReleaseFee: stillOwned ? ev.oldReleaseFee : null,
+        priorProtectionTicks: stillOwned ? ev.oldProtectionTicks : null,
+        voidedRenewalPending: stillOwned,
         refund: refundable.reduce((s, r) => s + (r.extra_fee ?? 0), 0),
         refundedTransfers: refundable.map((r) => r.id),
         stillOwned,

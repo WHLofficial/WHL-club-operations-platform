@@ -29,7 +29,7 @@ import { settleOverdue, type SettleSummary } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults, retryUnresolvedResults, type XpRetrySummary } from './results.ts';
 import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
-import { expireDemands, type DemandTickResult } from './demand-ops.ts';
+import { expireDemands, ensureCurrentWindowDemands, type DemandTickResult, type TriggerDemandResult } from './demand-ops.ts';
 import { runExpiryTick, type ExpirySummary } from './expiry-ops.ts';
 import { runVenueReminderTick } from './venue-reminders.ts';
 import opsRoutes from './routes/ops-schedule.ts';
@@ -215,6 +215,17 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     events = { error: err instanceof Error ? err.message : String(err) };
   }
+  // 闹涨薪生成幂等补跑（v6.54.0 步骤 8，设计 §8）：**当前窗还没有 demand 行**时才跑生成批——
+  // 开窗成功路径已跑过一次（window-machine.openWindow），这里兜「生成批当时失败/进程中断」
+  // 与「窗在旧版本代码下开的」两种漏网。已有行直接返回 null，稳态零额外查询开销。
+  // 先在到期兜底之前跑：补生成的行同样要吃 expireDemands 的 TTL/关窗截止口径。
+  // 不进 tickChanged：生成只写 contract_demands + notifications，不在公开缓存 scope 里。
+  let demandEnsure: TriggerDemandResult | null | { error: string };
+  try {
+    demandEnsure = await ensureCurrentWindowDemands(env, { origin: 'cron_tick' });
+  } catch (err) {
+    demandEnsure = { error: err instanceof Error ? err.message : String(err) };
+  }
   // 闹涨薪到期兜底（v6.54.0 步骤 5，设计 §8/§11.1）：TTL 到点置 expired（段内第 2 次终局
   // 升档走直拒三件套）+ 24h 截止提醒（reminded_at 一次性闸）。与 v6.12.0 的纪律一致：
   // 放在通知补发之后、各自 try/catch——迁移未 apply 时只坏这一环，不连坐整个 tick。
@@ -234,7 +245,7 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     expiry = { error: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true, ...summary, autoResults, xpRetry, venueReminder, events, demands, notify, expiry };
+  return { ok: true, ...summary, autoResults, xpRetry, venueReminder, events, demandEnsure, demands, notify, expiry };
 }
 
 // tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的

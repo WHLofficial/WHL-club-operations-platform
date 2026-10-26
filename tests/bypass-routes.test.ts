@@ -179,7 +179,7 @@ describe('续约（rc_change）', () => {
     expect(poor.status).toBe(400);
   });
 
-  it('审核通过：扣续约费 → 进谈判（F 定死、E×续约加薪）→ 成约改合同不换主', async () => {
+  it('审核通过：扣续约费 → 进谈判（F 定死、E×续约加薪）→ 成约只写待生效变更（关窗前合同不动）', async () => {
     const fx = await seedBypass();
     fx.env.rng = () => 0.5; // 续约加薪取区间中点 (0.05+0.15)/2 → ×1.10
     const submit = await post('/api/transfers/rc-change', { playerId: 20, newReleaseFee: 15 }, 'tok-coach', fx.env);
@@ -221,11 +221,39 @@ describe('续约（rc_change）', () => {
       fx.sqlite,
       'SELECT release_fee, wage, source, service_ticks, protection_ticks, signed_at, club_id FROM contracts WHERE player_id = 20 AND is_active = 1',
     );
-    expect(contract?.release_fee).toBe(15);
-    expect(contract?.source).toBe('negotiation');
-    expect(contract?.protection_ticks).toBe(6); // 保护期收口到当下窗数 = 6（4.4.6：更改违约金后原保护期直接结束）
+    // v6.54.0 §5.7（既有行为变更①）：普通续约谈成只写 pending，关窗前 contracts 的
+    // wage/release_fee/protection_ticks 一字不动（下一窗关窗批才 apply）。
+    expect(contract?.release_fee).toBe(10);
+    expect(contract?.wage).toBe(1);
+    expect(contract?.protection_ticks).toBe(3); // 仍是续约前的保护期刻度
     expect(contract?.service_ticks).toBe(0); // 效力基数不动，效力时长延续
     expect(contract?.club_id).toBe(fx.clubA);
+    // source（成约方式）不在关窗前不变的三列里，保持即时更新
+    expect(contract?.source).toBe('negotiation');
+    const pending = sqlGet<{
+      source: string;
+      wage_new: number;
+      release_fee_new: number;
+      protection_ticks_new: number | null;
+      rc_fee: number;
+      rc_fee_charged_at: string | null;
+      status: string;
+      effective_window_seq: number;
+    }>(
+      fx.sqlite,
+      `SELECT source, wage_new, release_fee_new, protection_ticks_new, rc_fee, rc_fee_charged_at, status, effective_window_seq
+       FROM contract_pending_changes WHERE player_id = 20`,
+    );
+    expect(pending).toMatchObject({
+      source: 'renewal',
+      wage_new: expectedE,
+      release_fee_new: 15,
+      protection_ticks_new: 6, // 4.4.6 收口承载在 pending，不得写成 NULL
+      rc_fee: 1.5,
+      status: 'pending',
+      effective_window_seq: 1,
+    });
+    expect(pending?.rc_fee_charged_at).not.toBeNull();
     const player = sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 20');
     expect(player).toEqual({ club_id: fx.clubA, status: 'normal' }); // 不换主、状态不动
     const kinds = sqlAll<{ kind: string; amount: number }>(
@@ -589,15 +617,22 @@ describe('窗内回滚（4.4.10）', () => {
     return { ...fx, transferId };
   }
 
-  it('续约后被挂牌 → RC/保护期还原 + 续约费退还（ref=续约单本身）', async () => {
+  it('续约后被挂牌 → 作废待生效续约 + 续约费退还（ref=续约单本身）', async () => {
     const fx = await seedCompletedRcChange();
     expect((await post('/api/market/listings', { playerId: 20, askPrice: 11 }, 'tok-coach', fx.env)).status).toBe(201);
     const contract = sqlGet<{ release_fee: number; protection_ticks: number | null }>(
       fx.sqlite,
       'SELECT release_fee, protection_ticks FROM contracts WHERE player_id = 20 AND is_active = 1',
     );
-    expect(contract?.release_fee).toBe(10); // 回到本窗第一张续约单之前
-    expect(contract?.protection_ticks).toBe(3); // 还原为续约前的保护期刻度（原 3）
+    // §5.7：关窗前 contracts 本来就保持旧值；回滚的正确动作是作废 renewal pending（否则关窗批照常 apply）
+    expect(contract?.release_fee).toBe(10);
+    expect(contract?.protection_ticks).toBe(3);
+    expect(
+      sqlGet<{ status: string; void_reason: string | null }>(
+        fx.sqlite,
+        `SELECT status, void_reason FROM contract_pending_changes WHERE player_id = 20 ORDER BY id DESC LIMIT 1`,
+      ),
+    ).toMatchObject({ status: 'void', void_reason: 'rollback' });
     const refund = sqlGet<{ amount: number; ref_type: string; ref_id: number }>(
       fx.sqlite,
       `SELECT amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'rc_change_refund' AND club_id = ${fx.clubA}`,

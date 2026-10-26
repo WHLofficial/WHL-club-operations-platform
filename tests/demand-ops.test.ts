@@ -15,6 +15,7 @@ import { resetConfigCache } from '../src/core/config.ts';
 import {
   acceptDemand,
   counterDemand,
+  ensureCurrentWindowDemands,
   expireDemands,
   rejectDemand,
   triggerDemandBatch,
@@ -392,6 +393,48 @@ describe('triggerDemandBatch · 资格门槛与 CPU/窗口形态', () => {
     // /market/desk?tab=negotiations&demand=<id>（设计 §10.1）
     const demandRow = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM contract_demands WHERE player_id = 42')!;
     expect(JSON.parse(String(notes[0]!.payload)).demandId).toBe(demandRow.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 cron 幂等补跑（TC-RD-18 #3）
+// ---------------------------------------------------------------------------
+
+describe('ensureCurrentWindowDemands · scheduledTick 补跑入口', () => {
+  it('无开窗 → null；无行 → 生成；已有行 → null；删掉当窗行 → 再生成一次', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    // ① 没有开窗：整个入口短路（不查 demand 表）
+    expect(await ensureCurrentWindowDemands(fx.env)).toBeNull();
+
+    openWindow(fx);
+    addEligible(fx, 1, 42); // 生成闸 roll 必 firing 的锚（见文件头夹具说明）
+    // ② 当前窗还没有任何 demand 行 ⇒ 跑生成批
+    const first = await ensureCurrentWindowDemands(fx.env, { origin: 'cron_tick' });
+    expect(first?.season).toBe(SEASON);
+    expect(first?.windowSeq).toBe(WINDOW);
+    expect(first?.created).toBe(1);
+    expect(sqlAll(fx.sqlite, `SELECT id FROM contract_demands WHERE season = ${SEASON} AND window_seq = ${WINDOW}`)).toHaveLength(1);
+
+    // ③ 已有行 ⇒ 不再跑（稳态零新增；生成批本身的 UNIQUE + INSERT OR IGNORE 是第二道闸）
+    expect(await ensureCurrentWindowDemands(fx.env)).toBeNull();
+
+    // ④ TC-RD-18 #3：删掉当窗 demand 行后跑 tick → 补生成；再跑 → 0 新行
+    fx.sqlite.exec(`DELETE FROM contract_demands WHERE season = ${SEASON} AND window_seq = ${WINDOW}`);
+    const again = await ensureCurrentWindowDemands(fx.env);
+    expect(again?.created).toBe(1);
+    expect(await ensureCurrentWindowDemands(fx.env)).toBeNull();
+  });
+
+  it('临时窗：入口会跑但生成批自己短路（created=0、不留行）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    openWindow(fx, { temporary: true });
+    addEligible(fx, 1, 42);
+    const result = await ensureCurrentWindowDemands(fx.env);
+    expect(result).not.toBeNull();
+    expect(result?.created).toBe(0);
+    expect(sqlAll(fx.sqlite, 'SELECT id FROM contract_demands')).toHaveLength(0);
   });
 });
 

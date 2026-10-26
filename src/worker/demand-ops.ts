@@ -18,6 +18,9 @@
 //   §8/§11.1 expireDemands —— cron 兜底：TTL 到点置 expired（不生成申请）；24h 截止提醒
 //            reminded_at 一次性闸（同 0050 事件域模式）；段内第 2 次终局（含 expired，
 //            挂牌驱赶的不计——载体 void_reason='listing'）升档走直拒三件套。
+//   §8       ensureCurrentWindowDemands —— scheduledTick 的幂等补跑入口（本窗无 demand 行才跑）。
+//   §5.4/§11.2 listingDemandStatements —— 挂牌端点在同一个 batch 里把待处理 demand 置 expired
+//            （void_reason='listing'，不计累计终局）并把存续转会申请标为 listed。
 //   §5.4/§5.7 voidDemandStatements —— 离队作废：只**返回语句**给调用方并进 completeTransfer
 //            同批（设计 §5.4「作废语句挂 completeTransfer 批内、只对 !amendment 生效」），
 //            本模块不自行提交。
@@ -484,7 +487,74 @@ export async function triggerDemandBatch(env: Env, input: TriggerDemandInput): P
   }
 
   return result;
-}// ---------------------------------------------------------------------------
+}
+
+/**
+ * cron 幂等补跑入口（设计 §8「给 scheduledTick 一个『当前窗未 ensure 则补一次』的幂等入口」，
+ * TC-RD-18 #3）：当前开窗还没有任何 demand 行时才跑生成批；已有行直接返回 null（零读放大）。
+ *
+ * 判据刻意用「本窗 demand 行是否存在」而不是额外的 ensure 标记列——
+ * ① 与 TC-RD-18 #3 的验收口径一致：删掉当窗行后 tick 能补生成、再跑 0 新增；
+ * ② 不新增迁移（v6.54.0 的 0079/0080 已定稿），标记列会成为第二份容易脱节的真相；
+ * ③ 稳态下每窗只有第一次 tick 会走到生成批（生成后行就在），代价上限 = 一个「全队无合格球员」
+ *    的空窗会每 tick 重跑一次——生产 season 9 window 1 实测 16/20 队有合格球员，属可接受的尾部。
+ * 临时窗/无开窗由 triggerDemandBatch 自己短路（这里不重复判定口径）。
+ */
+export async function ensureCurrentWindowDemands(
+  env: Env,
+  opts?: { actor?: number | null; origin?: AuditOrigin },
+): Promise<TriggerDemandResult | null> {
+  const win = await getOpenWindow(env.DB);
+  if (win === null) return null;
+  const seen = await env.DB.prepare(
+    'SELECT 1 AS x FROM contract_demands WHERE season = ? AND window_seq = ? LIMIT 1',
+  )
+    .bind(win.season, win.windowSeq)
+    .first<{ x: number }>();
+  if (seen !== null) return null;
+  return triggerDemandBatch(env, {
+    season: win.season,
+    windowSeq: win.windowSeq,
+    actor: opts?.actor ?? null,
+    origin: opts?.origin ?? 'cron_tick',
+  });
+}
+
+/**
+ * 挂牌驱赶（设计 §5.4 第 5 条 / §11.2）：球员在闹涨薪期间被挂牌 → 待处理 demand 自动 expired，
+ * `void_reason='listing'`（计数侧 `segmentFinals` 按 byListing 过滤 ⇒ **不计累计终局**——
+ * 挂牌是给出路，不等于被无视）。同时把该球员在本队的存续转会申请 `pending → listed` 并回填
+ * `listing_id` / `last_listing_window_seq`（§11.1 状态机里「经理手动挂牌」那条唯一的写入点）。
+ *
+ * 只返回语句、由挂牌端点并入**同一个 batch**（与 INSERT listings / UPDATE players.status 原子）；
+ * 语句自带「球员确已挂牌」存在性守卫：并发下球员状态没被本批改成 listed 时，不误伤 demand/申请。
+ * 强制拍卖（管理端发起）同样走这里：expired 也标 byListing 不计终局——那是管理动作，不该算球员前科。
+ */
+export function listingDemandStatements(db: D1Database, playerId: number, clubId: number): D1PreparedStatement[] {
+  const listedGuard = `EXISTS (SELECT 1 FROM players WHERE id = ? AND club_id = ? AND status = 'listed')`;
+  return [
+    db
+      .prepare(
+        `UPDATE contract_demands SET status = 'expired', resolution = 'expired',
+                resolved_at = ${nowSql()}, void_reason = 'listing'
+         WHERE player_id = ? AND club_id = ? AND status IN ('pending','countered')
+           AND ${listedGuard}`,
+      )
+      .bind(playerId, clubId, playerId, clubId),
+    db
+      .prepare(
+        `UPDATE transfer_requests
+            SET status = 'listed',
+                listing_id = (SELECT id FROM listings WHERE player_id = ? AND seller_club_id = ? AND status IN ('listed','bidding') ORDER BY id DESC LIMIT 1),
+                last_listing_window_seq = (SELECT window_seq FROM listings WHERE player_id = ? AND seller_club_id = ? AND status IN ('listed','bidding') ORDER BY id DESC LIMIT 1)
+          WHERE player_id = ? AND club_id = ? AND status = 'pending'
+            AND ${listedGuard}`,
+      )
+      .bind(playerId, clubId, playerId, clubId, playerId, clubId, playerId, clubId),
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // 公共装载与守卫（谈判 / 终局共用）
 // ---------------------------------------------------------------------------
 
@@ -1348,6 +1418,8 @@ interface PendingApplyRow {
   player_id: number;
   club_id: number;
   demand_id: number | null;
+  /** 'demand' | 'renewal' | 'rejection'：只有 renewal 在 apply 时摘「不满」徽章（重签语义） */
+  source: string;
   wage_new: number;
   release_fee_new: number | null;
   protection_ticks_new: number | null;
@@ -1377,7 +1449,7 @@ export async function applyPendingContractChanges(
   const rows = (
     await db
       .prepare(
-        `SELECT pc.id, pc.player_id, pc.club_id, pc.demand_id,
+        `SELECT pc.id, pc.player_id, pc.club_id, pc.demand_id, pc.source,
                 pc.wage_new, pc.release_fee_new, pc.protection_ticks_new,
                 CASE WHEN c.club_id = pc.club_id THEN 1 ELSE 0 END AS still_at_club
          FROM contract_pending_changes pc
@@ -1449,6 +1521,18 @@ export async function applyPendingContractChanges(
         db
           .prepare(`UPDATE contract_demands SET applied_at = ${nowSql()} WHERE id = ? AND status = 'accepted'`)
           .bind(row.demand_id),
+      );
+    }
+    // 普通续约 apply = 新合同生效（重签）：摘「不满」徽章与存续申请（§5.4 第 1 条「重签时置 resolved」）。
+    // 闹涨薪接受在 accept 当下已摘过一次（重签语义同口径），这里只补 renewal 这条真实签约路径。
+    if (row.source === 'renewal') {
+      statements.push(
+        db
+          .prepare(
+            `UPDATE transfer_requests SET status = 'resolved', resolved_at = ${nowSql()}
+             WHERE player_id = ? AND club_id = ? AND status IN ('pending','listed','released')`,
+          )
+          .bind(row.player_id, row.club_id),
       );
     }
     summary.applied++;

@@ -654,6 +654,10 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
             players.growth_tier, players.growable, players.is_future_star, players.china_plan, players.agent_tier,
             players.badges_silver, players.badges_gold,
             players.transfer_listed, players.not_for_sale, players.list_price,
+            -- 全联盟可见的「不满」徽章（v6.54.0 §5.4 三件套之三）：transfer_requests(released) 存续即标记，
+            -- 与挂牌中/谈判中同级公开。只出布尔、不泄漏 demand 细节（§7「不提供公开端点」的边界内）。
+            -- transfer_requests 的唯一索引以 player_id 开头，这里是 50 行/页的行内点查。
+            EXISTS (SELECT 1 FROM transfer_requests tr WHERE tr.player_id = players.id AND tr.status = 'released') AS unsatisfied,
             json_extract(players.game_attrs, '$.PosID1') AS pos1,
             json_extract(players.game_attrs, '$.PosID2') AS pos2,
             json_extract(players.game_attrs, '$.PosID3') AS pos3,
@@ -698,6 +702,8 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
       transfer_listed: number;
       not_for_sale: number;
       list_price: number | null;
+      /** 0/1：存续「不满」徽章（transfer_requests.released）——公开面只出布尔 */
+      unsatisfied: number;
       pos1: number | null;
       pos2: number | null;
       pos3: number | null;
@@ -801,6 +807,8 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
     releaseFee: r.ct_release_fee,
     contractType: r.ct_contract_type,
     source: r.ct_source,
+    // 「不满」徽章（v6.54.0 §5.4）：全联盟可见的状态位——球员页与球队页阵容共用这一个字段
+    unsatisfied: r.unsatisfied === 1,
     // 窗刻度（v3.0.0）：serviceSeasons = 效力时长（赛季，1 常规窗 = 0.5）；protected = 是否在保护期内
     serviceSeasons: r.ct_player_id === null ? null : serviceSeasons(r.ct_service_ticks ?? 0, r.current_ticks),
     protected: r.ct_protection_ticks !== null && r.current_ticks < r.ct_protection_ticks,
@@ -1085,7 +1093,7 @@ app.get('/players/:id', async (c) => {
   }
 
   // 影响力系数（v6.34.0 增量 1）：与列表端点共用 influenceCoefs，保证两端逐值一致
-  const [club, contract, ticksRow, coefs] = await Promise.all([
+  const [club, contract, ticksRow, coefs, unsatisfiedRow] = await Promise.all([
     p.club_id
       ? c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(p.club_id).first<{ id: number; name: string }>()
       : Promise.resolve(null),
@@ -1111,6 +1119,11 @@ app.get('/players/:id', async (c) => {
       }>(),
     c.env.DB.prepare(`SELECT ${CURRENT_TICKS_SQL} AS n`).first<{ n: number }>(),
     influenceCoefs(c.env.DB),
+    // 「不满」徽章（v6.54.0 §5.4 三件套之三）：公开/他队视角与挂牌中同级可见；
+    // 详情端点不走公开缓存（每请求现算），不存在把私有维度写进共享载荷的问题。
+    c.env.DB.prepare(`SELECT 1 AS x FROM transfer_requests WHERE player_id = ? AND status = 'released' LIMIT 1`)
+      .bind(id)
+      .first<{ x: number }>(),
   ]);
   // 窗刻度（v3.0.0）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
   const currentTicks = ticksRow?.n ?? 0;
@@ -1240,6 +1253,8 @@ app.get('/players/:id', async (c) => {
       listPrice: p.list_price,
       offerAuto: p.offer_auto === 1,
       notForSale: p.not_for_sale === 1,
+      // 「不满」徽章（v6.54.0 §5.4）：transfer_requests(released) 存续即 true；重签/离队摘除
+      unsatisfied: unsatisfiedRow !== null,
       gameAttrs,
       createdAt: p.created_at,
       updatedAt: p.updated_at,
