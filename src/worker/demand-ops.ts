@@ -30,10 +30,14 @@ import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { createConfigService } from '../core/config.ts';
 import { queueAllUserClubsNotification, queueClubNotification } from './notify.ts';
 import { loadNegotiationContext, type NegotiationContext } from './negotiation-context.ts';
-import { expectedWage } from './negotiation-secret.ts';
+import { expectedWage, previewForecast, successRate } from './negotiation-secret.ts';
 import { abilityLevel } from '../core/negotiation-rules.ts';
 import { POSITION_GROUP_BY_POSITION } from '../core/fc26.ts';
 import { fmtBeijingMinute } from '../core/ops-schedule.ts';
+import { round2 } from '../core/market-rules.ts';
+import { DEFAULT_WAGE_CAP_BY_TIER } from '../core/squad-rules.ts';
+import { deriveClubTier, tierCache, type Tier } from './tier.ts';
+import { getOpenWindow, getVisibleSeason } from './seasons.ts';
 import {
   DEMAND_MAX_ROUNDS,
   DEMANDS_PER_CLUB,
@@ -483,6 +487,7 @@ interface DemandOpRow {
   expires_at: string;
   player_name: string | null;
   club_name: string | null;
+  agent_tier: number | null;
   contract_wage: number | null;
   contract_rc: number | null;
   contract_club_id: number | null;
@@ -495,7 +500,7 @@ async function loadDemandRow(db: D1Database, demandId: number): Promise<DemandOp
       `SELECT d.id, d.player_id, d.club_id, d.season, d.window_seq, d.status,
               d.current_wage, d.expected_wage, d.target_wage, d.floor_wage, d.rc_current, d.rc_floor,
               d.round, d.expires_at,
-              p.name AS player_name, cl.name AS club_name,
+              p.name AS player_name, cl.name AS club_name, p.agent_tier AS agent_tier,
               c.wage AS contract_wage, c.release_fee AS contract_rc,
               c.club_id AS contract_club_id, c.is_active AS contract_active
        FROM contract_demands d
@@ -540,8 +545,11 @@ function assertContractUnchanged(row: DemandOpRow): void {
 
 /**
  * 批内合同漂移守卫（§11.2 的 SQL 侧落地）：读预检（assertContractUnchanged）与批执行之间有
- * TOCTOU 窗口，counter/accept 的每条批内语句都追加「现行合同 wage/RC 与谈判锚逐值相等」
- * 条件——漂移时整批 no-op，末位 claim 改 0 行 ⇒ 统一走 409，不产生半套后果。
+ * TOCTOU 窗口，条件拼进批内语句——现行合同 wage/RC 与谈判锚逐值相等才执行。
+ * ⚠️ 机制认知（v6.54.0 评审订正）：**D1 batch 不因「UPDATE 改 0 行」回滚**——条件不满足的
+ * UPDATE 是正常执行（changes=0）而非语句失败，批内已执行语句的效果保留。因此「半套后果」
+ * 的防线不是 claim 本身，而是**全批写语句挂同一个谓词**（见 demandClaimGuard）：任一条件
+ * 不成立时所有语句同时 no-op，claim 读到 0 行 → 409，不产生孤儿行。
  * SQL 侧用子查询逐值比对（contracts.player_id 唯一，无 fan-out）；合同行被删 ⇒ 子查询为
  * NULL ⇒ 条件不成立 ⇒ 同样 no-op（宁拒不放）。
  */
@@ -552,6 +560,23 @@ function demandOpGuard(row: DemandOpRow): { sql: string; params: unknown[] } {
       ` AND (SELECT wage FROM contracts WHERE player_id = ?) = ?` +
       ` AND (SELECT IFNULL(release_fee, 0) FROM contracts WHERE player_id = ?) = ?`,
     params: [row.id, row.id, row.round, row.player_id, row.current_wage, row.player_id, row.rc_current],
+  };
+}
+
+/**
+ * counter/accept 批的统一写守卫 = 末位 claim 的完整谓词（OPEN + round 未动 + 未过期 + 合同
+ * 未漂移）。批内**每条**写语句（审计/逐轮/待生效/申请摘除/三件套/claim）都挂它——
+ * 「三件套只挂 OPEN 守卫、claim 挂全守卫」的旧写法在漂移/刚过期时会让三件套 INSERT 先行
+ * 生效而 claim no-op，留下孤儿 transfer_requests 行（后续终局撞 UNIQUE → 500 / cron 永久
+ * skipped，v6.54.0 评审修）。
+ */
+function demandClaimGuard(row: DemandOpRow, nowIso: string): { sql: string; params: unknown[] } {
+  const drift = demandOpGuard(row);
+  return {
+    sql:
+      `${DEMAND_OPEN_GUARD} AND (SELECT round FROM contract_demands WHERE id = ?) = ?` +
+      ` AND (SELECT expires_at FROM contract_demands WHERE id = ?) > ? AND ${drift.sql}`,
+    params: [row.id, row.id, row.round, row.id, nowIso, ...drift.params],
   };
 }
 
@@ -614,12 +639,16 @@ interface TrioRow {
  * 直拒三件套的两个库内件（「不满」徽章申请 + rejection pending）；通告在批成功后发。
  * requestStatus：direct 档与升档终局走 'released'（存续即「不满」徽章）；
  * 未升档的谈崩/低还价走 'pending'（申请挂起，无三件套）。
+ * guard = 调用方批的统一写守卫（与末位 claim 同谓词，见 demandClaimGuard / reject / expire
+ * 各自的构造）：三件套 INSERT 是 UNIQUE(player_id, club_id, demand_id) 的唯一写入点，守卫
+ * 不齐会让输家批留下孤儿申请行，之后任何终局重试都撞 UNIQUE（v6.54.0 评审修）。
  */
 function directTrioStatements(
   db: D1Database,
   row: TrioRow,
   requestSource: 'direct' | 'collapse' | 'lowball',
   requestStatus: 'pending' | 'released',
+  guard: { sql: string; params: unknown[] },
 ): D1PreparedStatement[] {
   return [
     // 「不满」徽章：released 存续即标记（升档终局走直拒三件套，status 表达后果档，
@@ -627,18 +656,18 @@ function directTrioStatements(
     db
       .prepare(
         `INSERT INTO transfer_requests (player_id, club_id, demand_id, source, status)
-         SELECT ?, ?, ?, ?, ? WHERE ${DEMAND_OPEN_GUARD}`,
+         SELECT ?, ?, ?, ?, ? WHERE ${guard.sql}`,
       )
-      .bind(row.player_id, row.club_id, row.id, requestSource, requestStatus, row.id),
+      .bind(row.player_id, row.club_id, row.id, requestSource, requestStatus, ...guard.params),
     // 保护期失效：protection_ticks 置已过（写 0）；价格两列原样不动（wage_new 必填故带现行值、
     // release_fee_new NULL=不变）——防返潮断言：直拒不动任何价格（TC-RD-34 #1）
     db
       .prepare(
         `INSERT INTO contract_pending_changes
            (player_id, club_id, source, demand_id, wage_new, release_fee_new, protection_ticks_new, rc_fee, status, effective_window_seq)
-         SELECT ?, ?, 'rejection', ?, ?, NULL, 0, 0, 'pending', ? WHERE ${DEMAND_OPEN_GUARD}`,
+         SELECT ?, ?, 'rejection', ?, ?, NULL, 0, 0, 'pending', ? WHERE ${guard.sql}`,
       )
-      .bind(row.player_id, row.club_id, row.id, row.contract_wage ?? row.current_wage, row.window_seq, row.id),
+      .bind(row.player_id, row.club_id, row.id, row.contract_wage ?? row.current_wage, row.window_seq, ...guard.params),
   ];
 }
 
@@ -712,9 +741,10 @@ export async function counterDemand(env: Env, input: CounterDemandInput): Promis
       : false;
 
   const audit = createAuditStatement(db);
-  // counter 批内统一守卫：demand 可操作 + 轮次未动 + 现行合同 wage/RC 与谈判锚逐值相等
-  // （§11.2 漂移）——判 409 的锚是末位 claim，守卫挂每条语句保证漂移时整批 no-op。
-  const guard = demandOpGuard(row);
+  // counter 批内统一守卫 = 末位 claim 的完整谓词（demand 可操作 + 轮次未动 + 未过期 + 现行
+  // 合同 wage/RC 与谈判锚逐值相等，§11.2 漂移）——判 409 的锚是末位 claim，但「整批 no-op」
+  // 靠的是每条语句挂同一谓词（D1 batch 不因 UPDATE 改 0 行回滚，见 demandClaimGuard 注释）。
+  const guard = demandClaimGuard(row, nowIso);
   const statements: D1PreparedStatement[] = [
     audit({
       actor: input.actor,
@@ -774,29 +804,27 @@ export async function counterDemand(env: Env, input: CounterDemandInput): Promis
   }
   if (judged.verdict === 'collapse' || judged.verdict === 'lowball') {
     // 非升档：申请挂起（pending 态，无三件套）；升档：申请转 released + rejection pending 一起落。
-    // 三件套语句只挂 OPEN 守卫（直拒后果与漂移无关）——漂移时末位 claim no-op 整批回滚兜底。
-    const [requestStmt, pendingStmt] = directTrioStatements(db, row, judged.verdict, escalated ? 'released' : 'pending');
+    // 三件套挂与 claim 同谓词的统一守卫——漂移/刚过期时 INSERT 同 no-op，claim 0 行 → 409，
+    // 不留孤儿申请行（v6.54.0 评审修：旧写法只挂 OPEN 守卫，输家批留下撞 UNIQUE 的死局行）。
+    const [requestStmt, pendingStmt] = directTrioStatements(db, row, judged.verdict, escalated ? 'released' : 'pending', guard);
     statements.push(requestStmt);
     if (escalated) statements.push(pendingStmt);
   }
 
-  // claim 放批末：round 相等是并发闸（两个并发还价只有一个能推进），expires 双保险，
-  // 合同漂移等值守卫（§11.2）一并在此判 no-op → 409。
+  // claim 放批末：与本批其他语句逐字同守卫（并发闸 = round 相等，两个并发还价只有一个能推进；
+  // 漂移/过期在守卫里一并判 no-op → 409）。
   // negotiating 只推进 round（status 保持 pending——「谈判中」不是持久态，§5.3）；
   // 终局才写 status/resolution/resolved_by。
   statements.push(
     judged.verdict === 'negotiating'
       ? db
-          .prepare(
-            `UPDATE contract_demands SET round = ?
-             WHERE id = ? AND status IN ('pending','countered') AND round = ? AND expires_at > ? AND ${guard.sql}`,
-          )
-          .bind(round, row.id, row.round, nowIso, ...guard.params)
+          .prepare(`UPDATE contract_demands SET round = ? WHERE id = ? AND ${guard.sql}`)
+          .bind(round, row.id, ...guard.params)
       : db
           .prepare(
             `UPDATE contract_demands SET
                status = ?, resolution = ?, round = ?, resolved_by = ?, resolved_at = ${nowSql()}
-             WHERE id = ? AND status IN ('pending','countered') AND round = ? AND expires_at > ? AND ${guard.sql}`,
+             WHERE id = ? AND ${guard.sql}`,
           )
           .bind(
             judged.verdict === 'accepted' ? 'accepted' : 'rejected',
@@ -804,8 +832,6 @@ export async function counterDemand(env: Env, input: CounterDemandInput): Promis
             round,
             input.actor === null ? 'system' : String(input.actor),
             row.id,
-            row.round,
-            nowIso,
             ...guard.params,
           ),
   );
@@ -891,10 +917,10 @@ export async function acceptDemand(env: Env, input: AcceptDemandInput): Promise<
   const wage = row.target_wage;
   const releaseFeeNew = row.rc_floor > 0 ? row.rc_floor : null;
   const audit = createAuditStatement(db);
-  // accept 批内统一守卫：demand 可操作 + 轮次未动 + 现行合同 wage/RC 与谈判锚逐值相等
-  // （§11.2 漂移的 SQL 侧落地——读预检 assertContractUnchanged 与批之间有 TOCTOU 窗口）；
-  // 漂移时整批 no-op，末位 claim 改 0 行 ⇒ 409，不产生半套后果。
-  const guard = demandOpGuard(row);
+  // accept 批内统一守卫 = 末位 claim 的完整谓词（demand 可操作 + 轮次未动 + 未过期 + 现行
+  // 合同 wage/RC 与谈判锚逐值相等——读预检 assertContractUnchanged 与批之间有 TOCTOU 窗口，
+  // §11.2）；全批语句同一谓词 ⇒ claim 0 行时整批 no-op（机制见 demandClaimGuard 注释）。
+  const guard = demandClaimGuard(row, nowIso);
   const results = await db.batch([
     audit({
       actor: input.actor,
@@ -926,9 +952,9 @@ export async function acceptDemand(env: Env, input: AcceptDemandInput): Promise<
       .prepare(
         `UPDATE contract_demands SET status = 'accepted', resolution = 'accepted',
                 resolved_by = ?, resolved_at = ${nowSql()}
-         WHERE id = ? AND status IN ('pending','countered') AND round = ? AND expires_at > ? AND ${guard.sql}`,
+         WHERE id = ? AND ${guard.sql}`,
       )
-      .bind(input.actor === null ? 'system' : String(input.actor), row.id, row.round, nowIso, ...guard.params),
+      .bind(input.actor === null ? 'system' : String(input.actor), row.id, ...guard.params),
   ]);
   const claimed = Number(results[results.length - 1]?.meta?.changes ?? 0);
   if (claimed === 0) throw new HttpError(409, '这条要求刚被并发处理，请刷新');
@@ -971,7 +997,13 @@ export async function rejectDemand(env: Env, input: RejectDemandInput): Promise<
   await assertNoPendingChange(db, row.player_id);
 
   const audit = createAuditStatement(db);
-  const [requestStmt, pendingStmt] = directTrioStatements(db, row, 'direct', 'released');
+  // 直拒批统一守卫 = 末位 claim 的完整谓词（OPEN + round 未动 + 未过期）；三件套与审计同挂，
+  // claim 0 行时全批 no-op（D1 batch 不因 UPDATE 改 0 行回滚，见 demandClaimGuard 注释）。
+  const guard = {
+    sql: `${DEMAND_OPEN_GUARD} AND (SELECT round FROM contract_demands WHERE id = ?) = ? AND (SELECT expires_at FROM contract_demands WHERE id = ?) > ?`,
+    params: [row.id, row.id, row.round, row.id, nowIso],
+  };
+  const [requestStmt, pendingStmt] = directTrioStatements(db, row, 'direct', 'released', guard);
   const results = await db.batch([
     audit({
       actor: input.actor,
@@ -981,8 +1013,8 @@ export async function rejectDemand(env: Env, input: RejectDemandInput): Promise<
       origin: input.origin,
       before: { status: row.status, round: row.round },
       after: { source: 'direct', wageNew: row.contract_wage ?? row.current_wage, releaseFeeNew: null, protectionTicksNew: 0, rcFee: 0 },
-      guardSql: `${DEMAND_OPEN_GUARD} AND (SELECT round FROM contract_demands WHERE id = ?) = ?`,
-      guardParams: [row.id, row.id, row.round],
+      guardSql: guard.sql,
+      guardParams: guard.params,
     }),
     requestStmt,
     pendingStmt,
@@ -990,9 +1022,9 @@ export async function rejectDemand(env: Env, input: RejectDemandInput): Promise<
       .prepare(
         `UPDATE contract_demands SET status = 'rejected', resolution = 'direct',
                 resolved_by = ?, resolved_at = ${nowSql()}
-         WHERE id = ? AND status IN ('pending','countered') AND round = ? AND expires_at > ?`,
+         WHERE id = ? AND ${guard.sql}`,
       )
-      .bind(input.actor === null ? 'system' : String(input.actor), row.id, row.round, nowIso),
+      .bind(input.actor === null ? 'system' : String(input.actor), row.id, ...guard.params),
   ]);
   const claimed = Number(results[results.length - 1]?.meta?.changes ?? 0);
   if (claimed === 0) throw new HttpError(409, '这条要求刚被并发处理，请刷新');
@@ -1091,7 +1123,13 @@ export async function expireDemands(env: Env, nowIso?: string): Promise<DemandTi
         continue;
       }
       const audit = createAuditStatement(db);
-      const [requestStmt, pendingStmt] = directTrioStatements(db, row, 'direct', 'released');
+      // 升档批统一守卫 = 末位 claim 的完整谓词（OPEN + 已到期）；三件套/审计同挂，
+      // claim 0 行（并发已处理）时全批 no-op，不留孤儿申请行（v6.54.0 评审修）。
+      const guard = {
+        sql: `${DEMAND_OPEN_GUARD} AND (SELECT expires_at FROM contract_demands WHERE id = ?) <= ?`,
+        params: [row.id, row.id, now],
+      };
+      const [requestStmt, pendingStmt] = directTrioStatements(db, row, 'direct', 'released', guard);
       let results: D1Result[];
       try {
         results = await db.batch([
@@ -1103,8 +1141,8 @@ export async function expireDemands(env: Env, nowIso?: string): Promise<DemandTi
             origin: 'cron_tick',
             before: { status: row.status },
             after: { escalated: true, source: 'direct', wageNew: row.contract_wage ?? row.current_wage, protectionTicksNew: 0, rcFee: 0 },
-            guardSql: DEMAND_OPEN_GUARD,
-            guardParams: [row.id],
+            guardSql: guard.sql,
+            guardParams: guard.params,
           }),
           requestStmt,
           pendingStmt,
@@ -1112,9 +1150,9 @@ export async function expireDemands(env: Env, nowIso?: string): Promise<DemandTi
             .prepare(
               `UPDATE contract_demands SET status = 'expired', resolution = 'expired', resolved_by = 'auto',
                       resolved_at = ${nowSql()}
-               WHERE id = ? AND status IN ('pending','countered') AND expires_at <= ?`,
+               WHERE id = ? AND ${guard.sql}`,
             )
-            .bind(row.id, now),
+            .bind(row.id, ...guard.params),
         ]);
       } catch {
         // inFlight 预检与批之间的毫秒竞态撞 idx_pending_one_per_player、或 D1 瞬断：行未消费，
@@ -1274,4 +1312,349 @@ export async function voidDemandStatements(env: Env, playerId: number, reason: s
       .bind(playerId),
   );
   return { statements, demandIds: demands.map((r) => r.id), pendingIds: pendings.map((r) => r.id) };
+}
+
+// ---------------------------------------------------------------------------
+// §7 教练端读面（收件箱 / 还价预览 / 转会申请）——路由 src/worker/routes/contract-demands.ts 的引擎侧
+// ---------------------------------------------------------------------------
+
+/** 最近终局截尾条数（「最近 expired/rejected」，§7；卡数天然受 6 条/队/窗约束，仅防长尾堆积） */
+const DEMAND_INBOX_RECENT_LIMIT = 10;
+/** 已接受待生效组上限（正常每窗 ≤6 条；防「关窗批长期未跑」的极端堆积把 attempts 的 IN 撑大） */
+const DEMAND_INBOX_ACCEPTED_LIMIT = 50;
+/** attempts 分批的 id 数（D1 单查询绑定参数上限 100，留余量；v6.54.0 评审修） */
+const ATTEMPT_ID_CHUNK = 90;
+/** 收件箱三组共用的列集（别名固定：d=contract_demands，p=players） */
+const DEMAND_LIST_SELECT = `SELECT d.id, d.player_id, d.season, d.window_seq, d.status, d.resolution,
+       d.current_wage, d.target_wage, d.floor_wage, d.raise_pct, d.rc_current, d.rc_floor,
+       d.round, d.expires_at, d.created_at, d.resolved_at, d.applied_at,
+       p.name AS player_name, p.position, p.age, p.ca
+FROM contract_demands d
+LEFT JOIN players p ON p.id = d.player_id`;
+
+/** 逐轮记录（卡内对话流的「你的每次还价 + 他的当场回应」；wage=经理本轮还价，accepted=球员判定） */
+export interface DemandAttemptView {
+  round: number;
+  wage: number;
+  accepted: boolean;
+  at: string;
+}
+
+/** 收件箱卡（§10.1 对话流卡的字段契约；金额单位 m）。expected_wage 刻意不出——
+ * 界面口径是「市场价」不显示精确值（§2.1），floor 出（本队教练可见，还价防呆需要，§7）。 */
+export interface DemandCard {
+  id: number;
+  playerId: number;
+  playerName: string | null;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  season: number;
+  windowSeq: number;
+  status: string;
+  /** 终局来源：direct=明确放人 / collapse=3 轮谈崩 / lowball=低于底线 / expired=过期；非终局 null */
+  resolution: string | null;
+  currentWage: number;
+  targetWage: number;
+  floorWage: number;
+  raisePct: number;
+  rcCurrent: number;
+  /** 待生效违约金 floor；0 = 无 RC（wage-only，还价不涉及违约金行） */
+  rcFloor: number;
+  round: number;
+  maxRounds: number;
+  expiresAt: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  /** 已接受行关窗 apply 后置值；NULL=待生效 */
+  appliedAt: string | null;
+  attempts: DemandAttemptView[];
+}
+
+/** wageContext（§7）：接受确认弹窗超帽警示的三个输入（§10.1 分组头 pill 同源） */
+export interface WageContext {
+  /** 当前窗 Σ active 合同工资（m/窗） */
+  currentTotal: number | null;
+  /** 已接受未生效增量 Σ(pending.wage_new − 现行 wage)——闹涨薪与普通续约的 pending 一并计入（§10.5 同口径） */
+  pendingDelta: number | null;
+  /** 工资帽（按级别派生，squad-context 同口径）；未定级/无可用赛季/派生异常为 null——前端不画帽线 */
+  wageCap: number | null;
+}
+
+export interface ClubDemandInbox {
+  /** 当前开窗的待处理（新/谈判中），按剩余时间升序（§10.1 排序）；无开窗 = 空组（窗外不可操作） */
+  active: DemandCard[];
+  /** 已接受待生效（关窗 apply 前，applied_at 为空） */
+  accepted: DemandCard[];
+  /** 最近终局（expired/rejected，供对话流收口与后果态渲染），resolved_at 降序截尾 */
+  recent: DemandCard[];
+  wageContext: WageContext;
+}
+
+interface DemandListRow {
+  id: number;
+  player_id: number;
+  season: number;
+  window_seq: number;
+  status: string;
+  resolution: string | null;
+  current_wage: number;
+  target_wage: number;
+  floor_wage: number;
+  raise_pct: number;
+  rc_current: number;
+  rc_floor: number;
+  round: number;
+  expires_at: string;
+  created_at: string;
+  resolved_at: string | null;
+  applied_at: string | null;
+  player_name: string | null;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+}
+
+/** 工资帽（squad-context.loadSquadContext 的 null 安全变体）：config wage_cap 按级别覆盖、缺省 68/58；
+ * 分级派不到（未报名/杯赛未定级/多座定级冲突抛 500）一律回 null——帽线是增强面，不挡收件箱。 */
+async function wageCapOf(env: Env, clubId: number): Promise<number | null> {
+  try {
+    const db = env.DB;
+    const season = (await getOpenWindow(db))?.season ?? (await getVisibleSeason(db));
+    if (season === null) return null;
+    const tier: Tier | null = await deriveClubTier(env, season, clubId, tierCache());
+    if (tier === null) return null;
+    const capJson = await createConfigService(db).getJson<Partial<Record<Tier, number>>>('wage_cap');
+    return capJson?.[tier] ?? DEFAULT_WAGE_CAP_BY_TIER[tier];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 收件箱三组 + wageContext（§7 GET）。只读本俱乐部（club_id 圈定，不跨俱乐部）；
+ * void（离队作废）不出本表——作废发生在球员离队之后，教练经站内信与审计面看（§10.4 的澄清）。
+ */
+export async function listClubDemands(env: Env, clubId: number): Promise<ClubDemandInbox> {
+  const db = env.DB;
+  const win = await getOpenWindow(db);
+
+  // 三组各查各的（v6.54.0 评审修）：此前一条无 status 过滤的全历史查询 + attempts 把**全部**
+  // 历史行 id 拼进 IN (?,...)——终局行永不删，单队 ≈6 条/窗 × 每季多窗，约 1.5–2 个赛季就破
+  // D1「单查询绑定参数上限 100」（官方 limits）；node:sqlite 上限 32766，本地测试测不出而
+  // 生产会渐进必现 500。收口后 attempts 的 id 集 ≤ active(当前窗) + accepted(≤50) + recent(10)，
+  // 且仍按 90 一批分块，双保险不再随历史增长。
+  const activeRows =
+    win === null
+      ? []
+      : (
+          await db
+            .prepare(
+              `${DEMAND_LIST_SELECT}
+               WHERE d.club_id = ? AND d.status IN ('pending','countered') AND d.season = ? AND d.window_seq = ?
+               ORDER BY d.expires_at ASC, d.id ASC`,
+            )
+            .bind(clubId, win.season, win.windowSeq)
+            .all<DemandListRow>()
+        ).results;
+  const acceptedRows = (
+    await db
+      .prepare(
+        `${DEMAND_LIST_SELECT}
+         WHERE d.club_id = ? AND d.status = 'accepted' AND d.applied_at IS NULL
+         ORDER BY d.id ASC LIMIT ?`,
+      )
+      .bind(clubId, DEMAND_INBOX_ACCEPTED_LIMIT)
+      .all<DemandListRow>()
+  ).results;
+  const recentRows = (
+    await db
+      .prepare(
+        `${DEMAND_LIST_SELECT}
+         WHERE d.club_id = ? AND d.status IN ('expired','rejected')
+         ORDER BY d.resolved_at DESC, d.created_at DESC, d.id DESC LIMIT ?`,
+      )
+      .bind(clubId, DEMAND_INBOX_RECENT_LIMIT)
+      .all<DemandListRow>()
+  ).results;
+
+  // 逐轮记录分块批量装（UNIQUE(demand_id, round) 索引点查；无 N+1）
+  const allIds = [...activeRows, ...acceptedRows, ...recentRows].map((r) => r.id);
+  const attemptsByDemand = new Map<number, DemandAttemptView[]>();
+  for (let i = 0; i < allIds.length; i += ATTEMPT_ID_CHUNK) {
+    const chunk = allIds.slice(i, i + ATTEMPT_ID_CHUNK);
+    const attemptRows = (
+      await db
+        .prepare(
+          `SELECT demand_id, round, wage, accepted, created_at FROM contract_demand_attempts
+           WHERE demand_id IN (${chunk.map(() => '?').join(',')}) ORDER BY demand_id, round`,
+        )
+        .bind(...chunk)
+        .all<{ demand_id: number; round: number; wage: number; accepted: number; created_at: string }>()
+    ).results;
+    for (const a of attemptRows) {
+      const list = attemptsByDemand.get(a.demand_id) ?? [];
+      list.push({ round: a.round, wage: a.wage, accepted: a.accepted === 1, at: a.created_at });
+      attemptsByDemand.set(a.demand_id, list);
+    }
+  }
+
+  const toCard = (r: DemandListRow): DemandCard => ({
+    id: r.id,
+    playerId: r.player_id,
+    playerName: r.player_name,
+    position: r.position,
+    age: r.age,
+    ca: r.ca,
+    season: r.season,
+    windowSeq: r.window_seq,
+    status: r.status,
+    resolution: r.resolution,
+    currentWage: r.current_wage,
+    targetWage: r.target_wage,
+    floorWage: r.floor_wage,
+    raisePct: r.raise_pct,
+    rcCurrent: r.rc_current,
+    rcFloor: r.rc_floor,
+    round: r.round,
+    maxRounds: DEMAND_MAX_ROUNDS,
+    expiresAt: r.expires_at,
+    createdAt: r.created_at,
+    resolvedAt: r.resolved_at,
+    appliedAt: r.applied_at,
+    attempts: attemptsByDemand.get(r.id) ?? [],
+  });
+
+  // 三组的筛选与排序已在各自 SQL 里收口（active 按当前开窗 + 剩余时间升序；accepted 按 id；
+  // recent 按 resolved_at 降序截尾）。void（离队作废）不出本表——见函数头注。
+  const active = activeRows.map(toCard);
+  const accepted = acceptedRows.map(toCard);
+  const recent = recentRows.map(toCard);
+
+  const [totals, deltas] = await Promise.all([
+    db
+      .prepare(`SELECT SUM(wage) AS total FROM contracts WHERE club_id = ? AND is_active = 1`)
+      .bind(clubId)
+      .first<{ total: number | null }>(),
+    // pending 变更对现行工资的差（contracts.player_id 唯一，无 fan-out）；rejection 行 wage_new=现行值 ⇒ 差 0
+    db
+      .prepare(
+        `SELECT SUM(pc.wage_new - c.wage) AS delta
+         FROM contract_pending_changes pc
+         JOIN contracts c ON c.player_id = pc.player_id AND c.is_active = 1
+         WHERE pc.club_id = ? AND pc.status = 'pending'`,
+      )
+      .bind(clubId)
+      .first<{ delta: number | null }>(),
+  ]);
+
+  return {
+    active,
+    accepted,
+    recent,
+    wageContext: {
+      currentTotal: totals?.total != null ? round2(totals.total) : null,
+      pendingDelta: deltas?.delta != null ? round2(deltas.delta) : null,
+      wageCap: await wageCapOf(env, clubId),
+    },
+  };
+}
+
+export interface DemandPreviewResult {
+  /** 四档档位（与 v6.40.0 签约谈判 preview 同词同界 0.2/0.5/0.8，§7；同一真源 negotiation-secret.previewForecast） */
+  forecast: string;
+  /** 危险后缀开关（p < 经纪人档位阈值，evaluateWage 同式）——UI 拼接「（报价过低，有谈崩风险）」同词 */
+  risk: boolean;
+}
+
+/**
+ * 还价档位预览（§7）：零副作用——不落库、不耗轮次、不写审计（previewWage 同纪律）。
+ * 判定式与 judgeCounter 同源同参：eff 按下一轮衰减（round>1 乘 attemptDecay）、
+ * successRate(−9, 0.8)；c ≥ target 恒成、c < floor 恒 lowball（档位分别 1/0）。
+ * 预览与真实提交只差判定 roll 那一下——预览说一套、提交落地另一套是禁手（§6.10-2 同源纪律）。
+ */
+export async function previewDemand(env: Env, demandId: number, clubId: number, wageInput: unknown): Promise<DemandPreviewResult> {
+  const db = env.DB;
+  const row = await loadDemandRow(db, demandId);
+  if (row === null) throw new HttpError(404, '没有这条涨薪要求');
+  // 只读动作不做窗口/到期/合同漂移守卫（最坏情况是对失效锚多看一眼档位）；归属与终局照拦
+  if (row.club_id !== clubId) throw new HttpError(403, '这条要求不属于你的俱乐部');
+  if (row.status !== 'pending' && row.status !== 'countered') throw new HttpError(409, '这条要求已经处理过了');
+  const ctx = await loadNegotiationContext(db);
+  const wage = Math.round(Number(wageInput) * 100) / 100;
+  if (!Number.isFinite(wage) || !(wage > 0) || wage > ctx.wageMax) {
+    throw new HttpError(400, `还价需在 0~${ctx.wageMax} 之间（m/半赛季）`);
+  }
+  const round = row.round + 1;
+  if (round > DEMAND_MAX_ROUNDS) throw new HttpError(409, '还价轮次已用完（最多 3 轮）');
+  const eff = round > 1 ? Math.round(row.target_wage * ctx.attemptDecay * 100) / 100 : row.target_wage;
+  const p = wage >= row.target_wage ? 1 : wage < row.floor_wage ? 0 : successRate(wage, eff, ctx.sigmoidSlope, ctx.sigmoidMid);
+  // 危险后缀阈值随经纪人档位（evaluateWage 同式；tierParamsOf 的两行钳制内联——
+  // 反向 import negotiations.ts 会经 transfers.ts 成环，见 negotiation-secret.ts 挪动注释）
+  const tierParams = ctx.agentTiers[Math.min(3, Math.max(1, Math.round(row.agent_tier ?? 2))) - 1] ?? ctx.agentTiers[1];
+  return { forecast: previewForecast(p), risk: p < (tierParams?.threshold ?? 0.25) };
+}
+
+export interface TransferRequestCard {
+  id: number;
+  playerId: number;
+  playerName: string | null;
+  demandId: number | null;
+  /** 终局来源：direct=明确放人 / collapse=3 轮谈崩 / lowball=低于底线（§5.4 梯度输入） */
+  source: string;
+  /** pending=申请挂起 / listed=已挂牌 / released=「不满」徽章存续（直拒档后果载体） */
+  status: string;
+  listingId: number | null;
+  lastListingWindowSeq: number | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface ClubTransferRequestList {
+  requests: TransferRequestCard[];
+}
+
+/**
+ * 本俱乐部的存续转会申请（§7）。released 一并返回：直拒档的「不满」徽章以它为载体
+ * （存续直到重签/离队，§5.4），教练必须能看到它挂着；resolved=已关闭（重签/离队/成交收口）不进列表。
+ */
+export async function listClubTransferRequests(env: Env, clubId: number): Promise<ClubTransferRequestList> {
+  const rows = (
+    await env.DB
+      .prepare(
+        `SELECT tr.id, tr.player_id, tr.demand_id, tr.source, tr.status, tr.listing_id,
+                tr.last_listing_window_seq, tr.created_at, tr.resolved_at, p.name AS player_name
+         FROM transfer_requests tr
+         LEFT JOIN players p ON p.id = tr.player_id
+         WHERE tr.club_id = ? AND tr.status IN ('pending','listed','released')
+         ORDER BY tr.id DESC`,
+      )
+      .bind(clubId)
+      .all<{
+        id: number;
+        player_id: number;
+        demand_id: number | null;
+        source: string;
+        status: string;
+        listing_id: number | null;
+        last_listing_window_seq: number | null;
+        created_at: string;
+        resolved_at: string | null;
+        player_name: string | null;
+      }>()
+  ).results;
+  return {
+    requests: rows.map((r) => ({
+      id: r.id,
+      playerId: r.player_id,
+      playerName: r.player_name,
+      demandId: r.demand_id,
+      source: r.source,
+      status: r.status,
+      listingId: r.listing_id,
+      lastListingWindowSeq: r.last_listing_window_seq,
+      createdAt: r.created_at,
+      resolvedAt: r.resolved_at,
+    })),
+  };
 }

@@ -15,6 +15,7 @@ import marketRoutes from './routes/market.ts';
 import offersRoutes from './routes/offers.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
+import contractDemandRoutes from './routes/contract-demands.ts';
 import growthRoutes from './routes/growth.ts';
 import shopRoutes from './routes/shop.ts';
 import squadsRoutes from './routes/squads.ts';
@@ -77,6 +78,8 @@ app.route('/api', marketRoutes);
 app.route('/api', offersRoutes);
 app.route('/api', transfersRoutes);
 app.route('/api/negotiations', negotiationRoutes);
+// 闹涨薪收件箱与终局（v6.54.0）：教练端合同谈判区「球员要求」的数据面，全私有端点
+app.route('/api', contractDemandRoutes);
 app.route('/api', growthRoutes);
 // 消费中心教练端（v6.26.0）：目录 / 我的工单 / 提交工单（提交即扣费）
 app.route('/api', shopRoutes);

@@ -1166,6 +1166,51 @@ describe('合同漂移与归属守卫（评审修）', () => {
     expect(sqlAll(fx.sqlite, `SELECT * FROM audit_log WHERE action = 'demand_accept'`)).toHaveLength(0);
   });
 
+  it('低还价 × 合同漂移：409 且三件套不留孤儿申请行（D1 batch 不因 claim 改 0 行回滚）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    seedClub(fx, 2);
+    openWindow(fx);
+    seedDemandOwner(fx, 1);
+    const id = seedPendingDemand(fx);
+    // counter 无读侧漂移预检——409 必来自批内统一守卫；旧写法三件套只挂 OPEN 守卫，
+    // 会在 409 后留下 (player_id, club_id, demand_id) 孤儿行，后续终局撞 UNIQUE → 500
+    fx.sqlite.prepare(`UPDATE contracts SET wage = 3.0 WHERE player_id = 1`).run();
+
+    await expect(counterDemand(fx.env, counterInput(id, 2.0))).rejects.toMatchObject({ status: 409 });
+    // 整批 no-op：无孤儿申请、无 rejection pending、无逐轮记录、圆轮次未动
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM transfer_requests')).toHaveLength(0);
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM contract_pending_changes')).toHaveLength(0);
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM contract_demand_attempts')).toHaveLength(0);
+    expect(sqlGet<{ status: string; round: number }>(fx.sqlite, 'SELECT status, round FROM contract_demands WHERE id = ?', id)!).toMatchObject({
+      status: 'pending',
+      round: 0,
+    });
+
+    // 死局证明（反例）：漂移解除后同一 demand 正常终局——不会撞孤儿行 UNIQUE
+    fx.sqlite.prepare(`UPDATE contracts SET wage = 2.5 WHERE player_id = 1`).run();
+    expect(await counterDemand(fx.env, counterInput(id, 2.0))).toMatchObject({ verdict: 'rejected', source: 'lowball' });
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM transfer_requests')).toHaveLength(1);
+  });
+
+  it('升档低还价 × 合同漂移：rejection pending 同样 no-op（后果语句与 claim 同谓词）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1);
+    seedClub(fx, 2);
+    openWindow(fx);
+    addPlayer(fx, 1, { clubId: 1, name: '张三' });
+    addContract(fx, 1, 1);
+    // 段内已有一次终局 → 本次 lowball 升档走直拒三件套（申请 released + rejection pending）
+    seedDemand(fx, { playerId: 1, clubId: 1, windowSeq: 2, status: 'expired', resolution: 'expired', resolvedAt: '2026-10-01T00:00:00Z' });
+    const id = seedPendingDemand(fx);
+    fx.sqlite.prepare(`UPDATE contracts SET release_fee = 25 WHERE player_id = 1`).run(); // RC 漂移
+
+    await expect(counterDemand(fx.env, counterInput(id, 2.0))).rejects.toMatchObject({ status: 409 });
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM transfer_requests')).toHaveLength(0);
+    expect(sqlAll(fx.sqlite, 'SELECT * FROM contract_pending_changes')).toHaveLength(0);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM contract_demands WHERE id = ?', id)!.status).toBe('pending');
+  });
+
   it('合同行换队（club_id 已是新东家）→ counter/accept/reject 一律 409（assertOpen 归属校验）', async () => {
     const fx = freshEnv();
     seedClub(fx, 1);

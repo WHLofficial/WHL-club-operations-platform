@@ -10,7 +10,7 @@ import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { abilityLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE } from '../core/negotiation-rules.ts';
 import { AGENT_TIER_LABELS } from '../core/negotiation-rules.ts';
-import { attemptExpected, directFail, expectedWage, satisfactionText, successRate } from './negotiation-secret.ts';
+import { attemptExpected, directFail, expectedWage, previewForecast, satisfactionText, successRate } from './negotiation-secret.ts';
 import { loadNegotiationContext, type AgentTierParams, type NegotiationContext } from './negotiation-context.ts';
 import { completeTransfer, loadTransfer, listingIdFromTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
@@ -401,18 +401,9 @@ export interface WageForecast {
   risk: boolean;
 }
 
-// 四档边界 0.2 / 0.5 / 0.8（2026-10-09 用户裁决）：硬编码在 Worker 侧，不进 web/、不进 config、
-// 不与涉密的满意度阈值（0.25/0.6/0.9）同放一个常量组。档位不随经纪人档位变（档位只影响 risk）。
-const PREVIEW_BANDS = [0.8, 0.5, 0.2];
-
-// 措辞故意不复用事后满意度句（😍/🙂/😐/😠 经纪人…）：两套阈值本就不同位，
-// 共用词会在 4.40~4.50m 一带出现「预告比较满意、事后不太满意」的错位缝。
-export function previewForecast(p: number): string {
-  if (p >= PREVIEW_BANDS[0]) return '成功率很高';
-  if (p >= PREVIEW_BANDS[1]) return '成功率过半';
-  if (p >= PREVIEW_BANDS[2]) return '成功率偏低';
-  return '成功率很低';
-}
+// 四档档位文案与 0.2/0.5/0.8 边界已挪到 negotiation-secret.ts（v6.54.0：闹涨薪的还价预览
+// 要与这里「同一套词」，档位必须只有一份真源；本模块再导出保持既有 import 不动）。
+export { previewForecast };
 
 // 工资报价预览：输入即给档位，让盲赌变有据。零副作用——不落库、不耗轮次、不写审计、不触发强约。
 // 鉴权与 GET 我的会话同级（无 assertTradable）：转会禁令只拦「谈」，不拦「看」。

@@ -318,6 +318,26 @@ export async function createRcChange(
     throw new HttpError(400, '训练营合同是固定条款（0.75m / 5m），不能改违约金');
   }
   await ensureNotInFlight(db, playerId);
+  // 同窗一次不变量（v6.54.0 rev20 §5.4）：同一窗一名球员与俱乐部之间最多一条合同谈判线，
+  // 闹涨薪与续约（改违约金）二选一、先到先占。① 本窗存在该球员任意状态的 contract_demands
+  // 行即占额度（UNIQUE(player_id, season, window_seq) 一窗一行；expired 也算——堵「故意过期后
+  // 同窗便宜续约安抚」）；② 该球员存在未终局签约谈判 session（active + signing，与生成侧排除/
+  // 关窗检查同口径）→ 一并 409——顺带堵既有缺口：ensureNotInFlight 只查 listings 活跃与
+  // transfers 待审，续约单批准进 signing 后同一球员还能再提第二张续约单。
+  // 两道都过 ⇒ 普通续约既有流程零变化（无 demand 行、无 active session 时不新增任何写路径）。
+  const sameWindowDemand = await db
+    .prepare('SELECT id FROM contract_demands WHERE player_id = ? AND season = ? AND window_seq = ? LIMIT 1')
+    .bind(playerId, win.season, win.windowSeq)
+    .first<{ id: number }>();
+  if (sameWindowDemand) throw new HttpError(409, '本窗他的合同谈判机会已经用过，下窗再谈');
+  const openSession = await db
+    .prepare(
+      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
+       WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'signing' LIMIT 1`,
+    )
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (openSession) throw new HttpError(409, '他还有一场签约谈判没结束，先等它了结再操作');
 
   const oldRc = contract.release_fee;
   const [low, high] = releaseFeeBounds(oldRc);
