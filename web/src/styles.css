@@ -1174,7 +1174,9 @@ table.matches-table-narrow .rating-badge {
   padding: 10px 18px;
   border-radius: 999px;
   font-size: 14px;
-  z-index: 100;
+  /* 950：必须盖过全屏浮层（.mkt-ov / .cmp-picker-ov 的 900）——谈判桌等浮层动作完成后不关，
+     页面层 toast 原先 z-index 100 会被 ≤760 底部抽屉整个压住（v6.54.1） */
+  z-index: 950;
   box-shadow: 0 6px 18px rgba(43, 29, 18, 0.25);
   white-space: nowrap;
 }
@@ -4897,7 +4899,7 @@ th.num .th-sort {
    toast 只是反馈，不该截点击：整条 pointer-events:none（useToast 只渲染单节点、没有容器，
    也没有可交互子元素，所以不需要「容器 none + 单条 auto」那套）。
    另外成长录入页 ≤760 有常驻视口底的汇总条 .entry-sumbar（fixed、z-index 15、约 76px 高），
-   toast（z-index 100、bottom 28px）会盖住「全部保存」——汇总条走 createPortal 挂在 body 下，
+   toast（z-index 950、bottom 28px）会盖住「全部保存」——汇总条走 createPortal 挂在 body 下，
    用 body:has(.entry-sumbar) 选到同页 toast 上抬 88px（76px 汇总条 + 12px 间隙），
    桌面与其它页面不受影响。 */
 .toast {

@@ -24,10 +24,11 @@ export function validateOfferAmount(amount: number, releaseFee: number | null): 
   return null;
 }
 
-/** 最低报价边界（设计 §2.1：1 ≤ min_offer_price ≤ 1.5×RC；违约金无效返回 null） */
+/** 最低报价边界（设计 §2.1：1 ≤ min_offer_price ≤ 1.5×RC；违约金无效返回 null）。
+ *  上限 floor 取整（v6.54.1，整数报价体系的有效上限本就是 floor；下限仍为 1，私密拒线语义不动） */
 export function minOfferPriceBounds(releaseFee: number | null): { min: number; max: number } | null {
   if (releaseFee === null || !Number.isFinite(releaseFee) || releaseFee <= 0) return null;
-  return { min: OFFER_ABSOLUTE_FLOOR, max: round2(releaseFee * OFFER_CAP_RC) };
+  return { min: OFFER_ABSOLUTE_FLOOR, max: Math.floor(round2(releaseFee * OFFER_CAP_RC)) };
 }
 
 /** 还价必须严格高于当前有效报价额（买方抬价、卖方要更高价，同向上升）。null = 通过 */

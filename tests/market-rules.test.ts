@@ -16,12 +16,21 @@ describe('挂牌价边界（规则 4.4.1.1）', () => {
   it('下限取违约金与身价五折的较低值，且不低于 1m；上限违约金 1.5 倍', () => {
     expect(listingPriceBounds(50, 80)).toEqual({ min: 25, max: 75 }); // min(25, 40)=25
     expect(listingPriceBounds(50, 30)).toEqual({ min: 15, max: 75 }); // min(25, 15)=15
-    expect(listingPriceBounds(1, 100)).toEqual({ min: 1, max: 1.5 }); // 0.5m 五折被 1m 绝对下限顶起
+    expect(listingPriceBounds(1, 100)).toEqual({ min: 1, max: 1 }); // 0.5m 五折被 1m 绝对下限顶起；1.5→floor 1
     expect(listingPriceBounds(10, null)).toEqual({ min: 5, max: 15 }); // 身价缺失只看违约金
   });
 
+  // v6.54.1：边界取整——下限 ceil（取整后不低于真五折底线）、上限 floor（不超 1.5×RC），
+  // 出价/报价强制整数的体系里边界不再露小数
+  it('小数违约金/身价：下限向上取整、上限向下取整', () => {
+    expect(listingPriceBounds(33, null)).toEqual({ min: 17, max: 49 }); // 16.5→17、49.5→49
+    expect(listingPriceBounds(33, 95)).toEqual({ min: 17, max: 49 }); // min(16.5, 47.5)=16.5→17
+    expect(listingPriceBounds(33, 30)).toEqual({ min: 15, max: 49 }); // 15 本就是整数，ceil 不动
+    expect(listingPriceBounds(33.3, null)).toEqual({ min: 17, max: 49 }); // 16.65→17、49.95→49
+  });
+
   it('违约金过低挂不出合规价格', () => {
-    expect(listingPriceBounds(0.6, null)).toBeNull(); // 上限 0.9 < 绝对下限 1
+    expect(listingPriceBounds(0.6, null)).toBeNull(); // 上限 0.9→floor 0 < 绝对下限 1
     expect(listingPriceBounds(0, null)).toBeNull();
   });
 });

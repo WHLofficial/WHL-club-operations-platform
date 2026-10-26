@@ -35,6 +35,7 @@ import { useOpsGate } from '../../lib/ops-gate.ts';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
 import { money } from '../market/shared.tsx';
+import { listingFloorOf, offerCapOf } from '../../lib/transfer-bounds.ts';
 
 export interface SideOpsPlayer {
   id: number;
@@ -46,6 +47,8 @@ export interface SideOpsPlayer {
   listPrice: number | null;
   offerAuto: boolean;
   notForSale: boolean;
+  /** 身价（v6.54.1）：标价/挂牌下限「违约金/身价五折取低」的取数 */
+  marketValue: number | null;
 }
 
 type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'sealed' | 'activate';
@@ -176,7 +179,9 @@ export function SideOps({
   const sealedFee = freeFee.trim() === '' || Number.isNaN(Number(freeFee)) ? null : round2(Number(freeFee) * 0.3);
 
   const releaseFee = contract?.releaseFee ?? null;
-  const offerCap = releaseFee !== null && releaseFee > 0 ? round2(releaseFee * 1.5) : null;
+  const offerCap = offerCapOf(releaseFee);
+  // 标价/挂牌下限（v6.54.1）：与挂牌同规，报价设置面板与挂牌面板的区间提示共用
+  const listingFloor = listingFloorOf(releaseFee, player.marketValue);
   const isTrainee = contract?.contractType === 'trainee';
 
   // 球员要求四态 + 续约禁用矩阵（v6.54.0 步骤 7，§10.2）：
@@ -516,7 +521,9 @@ export function SideOps({
             <label className="side-field">
               <span className="side-lab">
                 <span>标价（m）· 公开</span>
-                <span className="side-range mono">{offerCap !== null ? `${minDraftValue ?? 1}–${offerCap}` : '—'}</span>
+                <span className="side-range mono">
+                {offerCap !== null ? `${Math.max(listingFloor ?? 1, minDraftValue ?? 0)}–${offerCap}` : '—'}
+              </span>
               </span>
               <input
                 className="mono"
@@ -648,7 +655,7 @@ export function SideOps({
               <label className="side-field">
                 <span className="side-lab">
                   <span>挂牌要价（m）</span>
-                  <span className="side-range mono">{offerCap !== null ? `≤ ${offerCap}` : '—'}</span>
+                  <span className="side-range mono">{offerCap !== null ? `${listingFloor ?? 1}–${offerCap}` : '—'}</span>
                 </span>
                 <input
                   className="mono"

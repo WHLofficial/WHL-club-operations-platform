@@ -441,6 +441,22 @@ describe('自动应答（v6.4.0 解耦 + v6.33.0 双线：拒线=私密最低价
     expect(out.status).toBe('pending');
     expect(out.auto).toBeNull();
   });
+
+  // v6.54.1 回归锁：标价贴着新下限（⌈0.5×50⌉=25）时自动同意线语义不变——达标价成交、差一口人工
+  it('标价 = 挂牌下限 25：出价 25 自动同意建挂牌；出价 24 走人工', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    listPlayer(fx, null, 25);
+    const out = (await (await place(fx, 1, 25)).json()) as OfferOut;
+    expect(out).toMatchObject({ status: 'accepted', auto: 'auto_accept' });
+    expect(sqlGet<{ ask_price: number }>(fx.sqlite, 'SELECT ask_price FROM listings WHERE player_id = 1')?.ask_price).toBe(25);
+
+    const fx2 = freshEnv();
+    seedWorld(fx2);
+    listPlayer(fx2, null, 25);
+    const pending = (await (await place(fx2, 1, 24)).json()) as OfferOut;
+    expect(pending).toMatchObject({ status: 'pending', auto: null });
+  });
 });
 
 describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
@@ -562,25 +578,53 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
 });
 
 // v6.33.0：公开标价与私密最低报价的边界（设置校验 / 清线 / 审计 / 预填端点 / 判定纯函数）
+// v6.54.1：标价区间与挂牌同规——夹具球员 1 违约金 50、身价 NULL ⇒ 下限 ⌈25⌉=25、上限 ⌊75⌋=75
 describe('标价 list_price（v6.33.0 公开标价 + 私密最低报价）', () => {
-  it('标价区间两界 400；标价低于最低报价 400；边界 1 / 75 通过', async () => {
+  it('标价两界 400（下限按挂牌五折规）；标价低于最低报价 400；边界 25 / 75 通过', async () => {
     const fx = freshEnv();
     seedWorld(fx);
-    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 0.99, notForSale: false }, 'tok-coach');
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 24.99, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(400);
-    expect(((await res.json()) as OfferOut).error).toContain('标价至少');
+    expect(((await res.json()) as OfferOut).error).toContain('五折');
 
     res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 75.01, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(400);
-    expect(((await res.json()) as OfferOut).error).toContain('报价上限');
+    expect(((await res.json()) as OfferOut).error).toContain('不能超过');
 
     res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 30, notForSale: false }, 'tok-coach');
     expect(res.status).toBe(400);
     expect(((await res.json()) as OfferOut).error).toContain('不能低于最低报价');
 
-    // 边界 1 / 75 都是合法标价（RC 50 × 1.5 = 75）
-    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 1, notForSale: false }, 'tok-coach')).status).toBe(200);
+    // 边界 25 / 75 都是合法标价（下限 = ⌈0.5×50⌉ = 25，上限 = ⌊1.5×50⌋ = 75）
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 25, notForSale: false }, 'tok-coach')).status).toBe(200);
     expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 75, notForSale: false }, 'tok-coach')).status).toBe(200);
+  });
+
+  // v6.54.1：标价对齐挂牌下限——身价参与取低；最低报价下限仍是 1（私密拒线语义不动）
+  it('标价下限吃身价五折取低；最低报价仍可低至 1', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    // 身价 30 → 下限 = ⌈min(25, 15)⌉ = 15：标价 20（低于违约金五折 25 但 ≥ 身价五折）合法
+    fx.sqlite.exec('UPDATE players SET market_value = 30 WHERE id = 1');
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 20, notForSale: false }, 'tok-coach')).status).toBe(200);
+    // 身价抬回 60 → 下限回到 25：同一标价 20 被拒
+    fx.sqlite.exec('UPDATE players SET market_value = 60 WHERE id = 1');
+    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 20, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('不能低于 25');
+
+    // 最低报价（名单外私密线）下限仍是 1，不随挂牌下限收紧
+    expect(
+      (await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, minOfferPrice: 1, notForSale: false }, 'tok-coach')).status,
+    ).toBe(200);
+  });
+
+  it('名单外传标价仍先校验后忽略（不得静默接受越界标价）', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: false, listPrice: 5, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('五折');
   });
 
   it('退名单清标价、保留最低价；置非卖品两条线一起清', async () => {

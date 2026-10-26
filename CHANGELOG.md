@@ -4,6 +4,16 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.54.1] · 收口审捡出的市场域修复：标价区间与挂牌同规、边界取整、toast/z-index（2026-10-26）
+
+**本地实现完成，未 push / 未 deploy，随 v6.54.0 同批上线**。判级 patch（独立于闹涨薪的市场域缺陷修复，v6.54.0 收口审发现）。测试计划 `docs/test-plans/v6.54.1-transfer-price-bounds.md`。
+
+**Fixed**
+
+- **标价区间与挂牌同规**（堵绕底洞）：`setOfferSettings` 的标价原用 `[1, 1.5×RC]`（与最低报价同区间）——标价 1m + 达线自动同意可绕开挂牌「五折底线」整条成交；现改用 `listingPriceBounds`（下限 = max(1, ⌈min(0.5×违约金, 0.5×身价)⌉)，上限 ⌊1.5×违约金⌋）。最低报价保持私密拒线语义 `[1, ⌊1.5×RC⌋]` 不动（v6.33.0 口径）。
+- **边界取整**：出价/报价强制整数的体系里边界不该露小数——挂牌与标价上限 `floor`、下限 `ceil`（`market-rules.ts` / `offer-rules.ts`）。
+- 前端：SideOps 报价面板显示挂牌下限（新增 `web/src/lib/transfer-bounds.ts`，与挂牌面板共用区间提示）；toast 3 秒定时器挂 ref（修连发被提前抹掉 + 卸载后 `setToast` 抛错）；toast z-index 100 → 950（修被 ≤760 底部抽屉压住）。
+
 ## [v6.54.0] · 球员主动要求续约/涨薪（闹涨薪）：生成、收件箱、还价、拒绝三件套、关窗生效（2026-10-26）
 
 **本地实现完成，未 push / 未 deploy**。判级 **minor**（新域：合同要求收件箱 + 四张新表 + 6 个教练端点 + 球员页/球队页公开徽章；无破坏性契约变更）；`package.json` 6.53.5 → **6.54.0**。设计 `docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md`（rev20）、计划 `memory/plan-v6.54.0-renewal-demand.md`、测试计划 `docs/test-plans/v6.54.0-renewal-demand.md`。

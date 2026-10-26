@@ -18,6 +18,9 @@ export function round2(x: number): number {
 
 // 挂牌价（4.4.1.1）：≥1m；下限 = min(0.5×违约金, 0.5×身价)；上限 = 1.5×违约金。
 // 身价缺失时下限只用违约金项；下限 > 上限（违约金过低）返回 null，挂牌不可行。
+// 边界取整（v6.54.1，出价/报价强制整数的体系里边界不该露小数）：下限 ceil（取整后仍不低于
+// 真五折底线）、上限 floor（取整后仍不超 1.5×违约金，与整数报价的有效上限一致）；
+// 上限 floor 后「下限 > 上限」只在违约金过低（⌊1.5×RC⌋ < 1）时可达。
 export function listingPriceBounds(
   releaseFee: number,
   marketValue: number | null,
@@ -28,8 +31,8 @@ export function listingPriceBounds(
   if (marketValue !== null && Number.isFinite(marketValue) && marketValue > 0) {
     floors.push(marketValue * coefs.floorValue);
   }
-  const min = Math.max(LISTING_ABSOLUTE_FLOOR, round2(Math.min(...floors)));
-  const max = round2(releaseFee * coefs.capRc);
+  const min = Math.max(LISTING_ABSOLUTE_FLOOR, Math.ceil(Math.min(...floors)));
+  const max = Math.floor(round2(releaseFee * coefs.capRc));
   if (min > max) return null;
   return { min, max };
 }

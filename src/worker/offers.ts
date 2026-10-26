@@ -15,7 +15,7 @@ import {
   validateStrictRaise,
   type OfferTurn,
 } from '../core/offer-rules.ts';
-import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
+import { bidDeadline, listingPriceBounds, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { getOpenWindow, isWindowOpen } from './seasons.ts';
 import { assertOpOpen } from './ops-schedule.ts';
 import { createConfigService } from '../core/config.ts';
@@ -962,6 +962,8 @@ export async function remindDueOffers(env: Env, opts: ExpiryOpts): Promise<numbe
 // 用户裁决 2026-10-05：进转会名单必须给公开标价（其他队可见，低于标价视为砍价）；
 // 最低报价只有设了才生效（名单内外皆可，拒线），名单外传标价静默忽略；
 // 自动同意线 = 标价（名单内）?? 最低报价（名单外）；非卖品照旧压一切（线、标价与开关被清）。
+// v6.54.1：标价区间与挂牌同规（listingPriceBounds，含五折下限）——标价 1m + 自动同意曾能绕开
+// 挂牌下限整条成交；最低报价区间不动。
 
 export async function setOfferSettings(
   env: Env,
@@ -978,39 +980,56 @@ export async function setOfferSettings(
 ): Promise<{ ok: true; transferListed: boolean; minOfferPrice: number | null; listPrice: number | null; offerAuto: boolean; notForSale: boolean }> {
   const db = env.DB;
   const p = await db
-    .prepare(`SELECT p.id, p.club_id, p.status, p.transfer_listed, p.not_for_sale, ${sqlDisplayName('p')} AS name FROM players p WHERE p.id = ?`)
+    .prepare(`SELECT p.id, p.club_id, p.status, p.transfer_listed, p.not_for_sale, p.market_value, ${sqlDisplayName('p')} AS name FROM players p WHERE p.id = ?`)
     .bind(input.playerId)
-    .first<{ id: number; club_id: number | null; status: string; transfer_listed: number; not_for_sale: number; name: string }>();
+    .first<{ id: number; club_id: number | null; status: string; transfer_listed: number; not_for_sale: number; market_value: number | null; name: string }>();
   if (!p || p.club_id !== input.clubId) throw new HttpError(404, '球员不存在或不在你的队里');
   if (p.status === 'listed') throw new HttpError(409, '这名球员在转会区挂牌中，报价设置先锁定，下架后再改');
   if (p.status !== 'normal') throw new HttpError(400, '当前状态改不了报价设置');
   if (input.transferListed && input.notForSale) throw new HttpError(400, '非卖品和转会名单互斥，二选一');
 
-  // 标价与最低报价共用同一区间 [1, 1.5×RC]（minOfferPriceBounds）；任一有值才查违约金合同
-  let bounds: { min: number; max: number } | null = null;
-  if ((input.minOfferPrice !== null && Number.isFinite(input.minOfferPrice)) || (input.listPrice !== null && Number.isFinite(input.listPrice))) {
-    bounds = minOfferPriceBounds(
+  // 标价与挂牌同规（v6.54.1：listingPriceBounds，下限 = max(1, ⌈min(0.5×违约金, 0.5×身价)⌉)、上限 ⌊1.5×RC⌋）——
+  // 否则标价 1m + 达线自动同意能绕开挂牌五折底线整条成交；最低报价保持 [1, ⌊1.5×RC⌋]
+  //（minOfferPriceBounds，私密拒线语义，v6.33.0 口径不动）。任一有值才查违约金合同。
+  const wantsMin = input.minOfferPrice !== null && Number.isFinite(input.minOfferPrice);
+  const wantsList = input.listPrice !== null && Number.isFinite(input.listPrice);
+  let minBounds: { min: number; max: number } | null = null;
+  let listBounds: { min: number; max: number } | null = null;
+  if (wantsMin || wantsList) {
+    const releaseFee =
       (
         await db
           .prepare(`SELECT release_fee FROM contracts WHERE player_id = ? AND is_active = 1`)
           .bind(input.playerId)
           .first<{ release_fee: number | null }>()
-      )?.release_fee ?? null,
-    );
-    if (!bounds) throw new HttpError(400, '球员没有含违约金的现行合同，定不了报价线');
+      )?.release_fee ?? null;
+    if (wantsMin) {
+      minBounds = minOfferPriceBounds(releaseFee);
+      if (!minBounds) throw new HttpError(400, '球员没有含违约金的现行合同，定不了报价线');
+    }
+    if (wantsList) {
+      // listingPriceBounds 只收 number（market-rules 口径）：无违约金合同在这里归 null，
+      // 交给下方的 400「标不了价」兜底，与 minOfferPriceBounds（可空入参）行为等价。
+      listBounds = releaseFee === null ? null : listingPriceBounds(releaseFee, p.market_value);
+      if (!listBounds) throw new HttpError(400, '球员没有含违约金的现行合同，标不了价');
+    }
   }
 
   let minOfferPrice: number | null = null;
   if (input.minOfferPrice !== null && Number.isFinite(input.minOfferPrice)) {
     minOfferPrice = round2(input.minOfferPrice);
-    if (minOfferPrice < bounds!.min) throw new HttpError(400, `最低报价至少 ${bounds!.min} m`);
-    if (minOfferPrice > bounds!.max) throw new HttpError(400, `最低报价 ${minOfferPrice} m 高于本球员的报价上限 ${bounds!.max} m`);
+    if (minOfferPrice < minBounds!.min) throw new HttpError(400, `最低报价至少 ${minBounds!.min} m`);
+    if (minOfferPrice > minBounds!.max) throw new HttpError(400, `最低报价 ${minOfferPrice} m 高于本球员的报价上限 ${minBounds!.max} m`);
   }
   let listPrice: number | null = null;
   if (input.listPrice !== null && Number.isFinite(input.listPrice)) {
     listPrice = round2(input.listPrice);
-    if (listPrice < bounds!.min) throw new HttpError(400, `标价至少 ${bounds!.min} m`);
-    if (listPrice > bounds!.max) throw new HttpError(400, `标价 ${listPrice} m 高于本球员的报价上限 ${bounds!.max} m`);
+    if (listPrice < listBounds!.min) {
+      throw new HttpError(400, `标价不能低于 ${listBounds!.min} m（下限：违约金/身价五折取低，且不低于 1m）`);
+    }
+    if (listPrice > listBounds!.max) {
+      throw new HttpError(400, `标价不能超过 ${listBounds!.max} m（违约金 1.5 倍上限）`);
+    }
   }
   if (input.transferListed && listPrice === null) {
     throw new HttpError(400, '进转会名单必须给一个公开标价（其他队看得到；低于标价的报价视为砍价）');
