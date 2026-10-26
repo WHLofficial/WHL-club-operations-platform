@@ -210,7 +210,23 @@ export async function triggerDemandBatch(env: Env, input: TriggerDemandInput): P
   const hasOpenRequest = (playerId: number, clubId: number) =>
     openRequests.some((r) => r.player_id === playerId && r.club_id === clubId);
 
-  //  ⑤ 入队时刻（段锚）：一次 GROUP BY 捞全量（transfers 量级千行、生成批只跑一次，免逐球员 N+1）。
+  //  ⑤ 买回额度占位行（status='void'、void_reason='return'，见 transfers.ts 的 B 分支）不再参与
+  //     本窗生成：这类行只是 UNIQUE 额度载体，若留在候选池里会白吃一个 6 条/队的 PPS 槽位。
+  //     **只排除占位行**——正常 demand（pending/accepted/expired…）必须继续留在候选池里，
+  //     否则同窗 ensure 幂等重跑时候选集会收缩、当初落选的球员反而被选中（二次生成），
+  //     那正是 UNIQUE + INSERT OR IGNORE 要防的「重跑零新增」被破坏。
+  const returnQuotaPlayers = new Set(
+    (
+      await db
+        .prepare(
+          `SELECT player_id FROM contract_demands
+           WHERE season = ? AND window_seq = ? AND status = 'void' AND void_reason = 'return'`,
+        )
+        .bind(season, windowSeq)
+        .all<{ player_id: number }>()
+    ).results.map((r) => r.player_id),
+  );
+  //  ⑥ 入队时刻（段锚）：一次 GROUP BY 捞全量（transfers 量级千行、生成批只跑一次，免逐球员 N+1）。
   //     排除 amendment 两型（rc_change/match 是留队续约/匹配，不产生入队事件 ⇒ 段不重锚，
   //     同队续约不清零）；free_agent/transfer/activation/forced_auction 都是入队 ⇒ 重锚。
   const joinedAtMap = new Map<string, number>(
@@ -292,6 +308,7 @@ export async function triggerDemandBatch(env: Env, input: TriggerDemandInput): P
       if (signingSessions.has(row.pid)) continue;
       if (inflightTransfers.has(row.pid)) continue;
       if (hasOpenRequest(row.pid, clubId)) continue;
+      if (returnQuotaPlayers.has(row.pid)) continue;
       if (segmentCount(row.pid, clubId, joinedMsOf(row.pid, clubId)) > 0) {
         // 段内已有终局 → 下窗必再提（p=1.0 绕过概率闸与倾向分，§11.1），按通胀公式开价
         inflation.push({ playerId: row.pid, p: 1, wage: gated.wage, rc: gated.rc, expected: gated.expected, mode: 'inflation', score: 0, name: row.name });
@@ -1312,6 +1329,132 @@ export async function voidDemandStatements(env: Env, playerId: number, reason: s
       .bind(playerId),
   );
   return { statements, demandIds: demands.map((r) => r.id), pendingIds: pendings.map((r) => r.id) };
+}
+
+// ---------------------------------------------------------------------------
+// §5.7 关窗生效：统一 apply / void 段（由 home.ts 的关窗批并入，交易结算之后）
+// ---------------------------------------------------------------------------
+
+export interface PendingApplySummary {
+  /** 本批计划 apply 的条数（仍在本队；批内语句挂 status='pending' 闸，重放空转） */
+  applied: number;
+  /** 本批视作离队而作废的条数 */
+  voided: number;
+}
+
+interface PendingApplyRow {
+  id: number;
+  player_id: number;
+  club_id: number;
+  demand_id: number | null;
+  wage_new: number;
+  release_fee_new: number | null;
+  protection_ticks_new: number | null;
+  still_at_club: number;
+}
+
+/**
+ * §5.7 关窗结算第 3/4 步：对仍在原队、且该窗没有完成转会的 pending 逐条 apply；对已离队的
+ * 置 void。三类来源（demand 闹涨薪 / renewal 普通续约 / rejection 直拒保护期失效）共用同一条
+ * 路径——差别只在列值（renewal 的 protection_ticks_new = 4.4.6 收口的 baseTicks、rejection 的
+ * = 0），所以不做 source 分支。
+ *
+ * 调用位置（closeWindow）保证时序：本窗工资已按旧 wage 结算（payroll 段在前）、本窗交易已按
+ * 原 release_fee 完成（settleOverdue 在关窗批之前）——pending 对 transfer/activation 不可见。
+ * 本函数只返回语句、由关窗批提交（与 home.ts 的维护费/冠名/档期同批原子）；
+ * **先作废离队者、再 apply 留队者**（顺序对结果无影响，但按 §5.7 的第 3→4 步口径写清）。
+ *
+ * 幂等：apply 的合同 UPDATE 与 claim、demand 标记都挂 `status='pending'`；重放空转。
+ * 迟到 apply：`effective_window_seq <= windowSeq` 一并收口——上次关窗批失败留下的行不能永久悬空。
+ * （表里只有窗口序号、没有赛季列；跨赛季同序号只会让迟到行更早 apply，不会提前。）
+ */
+export async function applyPendingContractChanges(
+  env: Env,
+  windowSeq: number,
+): Promise<{ statements: D1PreparedStatement[]; summary: PendingApplySummary }> {
+  const db = env.DB;
+  const rows = (
+    await db
+      .prepare(
+        `SELECT pc.id, pc.player_id, pc.club_id, pc.demand_id,
+                pc.wage_new, pc.release_fee_new, pc.protection_ticks_new,
+                CASE WHEN c.club_id = pc.club_id THEN 1 ELSE 0 END AS still_at_club
+         FROM contract_pending_changes pc
+         LEFT JOIN contracts c ON c.player_id = pc.player_id AND c.is_active = 1
+         WHERE pc.status = 'pending' AND pc.effective_window_seq <= ?
+         ORDER BY pc.id`,
+      )
+      .bind(windowSeq)
+      .all<PendingApplyRow>()
+  ).results;
+
+  const statements: D1PreparedStatement[] = [];
+  const summary: PendingApplySummary = { applied: 0, voided: 0 };
+
+  // ① 已离队者 → void（§5.7 第 4 步）：pending 不生效、demand 作废、转会申请与「不满」徽章收口。
+  // 正常离队路径已在 completeTransfer/completeTermination 当批 void；这里是兜底（历史行、
+  // 那两处批失败、或途中有其他写路径改归属）。只圈本 pending 的俱乐部——别队的申请不连带。
+  for (const row of rows) {
+    if (row.still_at_club === 1) continue;
+    statements.push(
+      db
+        .prepare(
+          `UPDATE contract_pending_changes SET status = 'void', void_reason = 'left_club'
+           WHERE id = ? AND status = 'pending'`,
+        )
+        .bind(row.id),
+      db
+        .prepare(
+          `UPDATE contract_demands SET status = 'void', void_reason = 'left_club',
+                  resolved_at = COALESCE(resolved_at, ${nowSql()})
+           WHERE player_id = ? AND club_id = ? AND status IN ('pending','countered','accepted')`,
+        )
+        .bind(row.player_id, row.club_id),
+      db
+        .prepare(
+          `UPDATE transfer_requests SET status = 'resolved', resolved_at = ${nowSql()}
+           WHERE player_id = ? AND club_id = ? AND status IN ('pending','listed','released')`,
+        )
+        .bind(row.player_id, row.club_id),
+    );
+    summary.voided++;
+  }
+
+  // ② 仍在原队者 → apply（§5.7 第 3 步）：写新 wage / release_fee / 保护期，**不再扣款**
+  //（非免费普通续约的 30% 在接受时已即时扣并写 rc_fee_charged_at；闹涨薪 rc_fee 恒 0）。
+  for (const row of rows) {
+    if (row.still_at_club !== 1) continue;
+    statements.push(
+      db
+        .prepare(
+          `UPDATE contracts SET wage = ?, release_fee = COALESCE(?, release_fee),
+                  protection_ticks = COALESCE(?, protection_ticks)
+           WHERE player_id = ? AND is_active = 1 AND club_id = ?`,
+        )
+        .bind(row.wage_new, row.release_fee_new, row.protection_ticks_new, row.player_id, row.club_id),
+      // claim 挂「合同仍在原队」存在性子查询：读预检与批之间有极小 TOCTOU 窗口，
+      // 归属已变时合同行不被本句覆盖、pending 也保持 pending 等下轮收口（宁可迟到不写错队）。
+      db
+        .prepare(
+          `UPDATE contract_pending_changes SET status = 'applied', applied_at = ${nowSql()}
+           WHERE id = ? AND status = 'pending'
+             AND EXISTS (SELECT 1 FROM contracts WHERE player_id = ? AND is_active = 1 AND club_id = ?)`,
+        )
+        .bind(row.id, row.player_id, row.club_id),
+    );
+    if (row.demand_id !== null) {
+      // demands 表没有 'applied' 状态（0048 的 CHECK 六态）——生效以 applied_at 落值表达（§5.7 状态机）
+      statements.push(
+        db
+          .prepare(`UPDATE contract_demands SET applied_at = ${nowSql()} WHERE id = ? AND status = 'accepted'`)
+          .bind(row.demand_id),
+      );
+    }
+    summary.applied++;
+  }
+
+  // season 不进签名：contract_pending_changes 只有窗口序号、没有赛季列，收口判据只用 windowSeq
+  return { statements, summary };
 }
 
 // ---------------------------------------------------------------------------

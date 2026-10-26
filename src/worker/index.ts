@@ -29,6 +29,7 @@ import { settleOverdue, type SettleSummary } from './market-settle.ts';
 import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults, retryUnresolvedResults, type XpRetrySummary } from './results.ts';
 import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
+import { expireDemands, type DemandTickResult } from './demand-ops.ts';
 import { runExpiryTick, type ExpirySummary } from './expiry-ops.ts';
 import { runVenueReminderTick } from './venue-reminders.ts';
 import opsRoutes from './routes/ops-schedule.ts';
@@ -214,6 +215,17 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     events = { error: err instanceof Error ? err.message : String(err) };
   }
+  // 闹涨薪到期兜底（v6.54.0 步骤 5，设计 §8/§11.1）：TTL 到点置 expired（段内第 2 次终局
+  // 升档走直拒三件套）+ 24h 截止提醒（reminded_at 一次性闸）。与 v6.12.0 的纪律一致：
+  // 放在通知补发之后、各自 try/catch——迁移未 apply 时只坏这一环，不连坐整个 tick。
+  // 不进 tickChanged：expireDemands 只写 contract_demands / transfer_requests / pending，
+  // 都不在公开缓存 scope 里（球员/俱乐部公开载荷不读这三张表），算进来会白 purge。
+  let demands: DemandTickResult | { error: string };
+  try {
+    demands = await expireDemands(env);
+  } catch (err) {
+    demands = { error: err instanceof Error ? err.message : String(err) };
+  }
   // 统一到期引擎（v6.49.0）：报价回合时限 / 签约谈判静默超时 / 运营时刻表到点收口在途。
   // 引擎内部每个适配器各自 try/catch，一个坏不影响其余（与上面 events 同纪律）。
   let expiry: Awaited<ReturnType<typeof runExpiryTick>> | { error: string };
@@ -222,7 +234,7 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     expiry = { error: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true, ...summary, autoResults, xpRetry, venueReminder, events, notify, expiry };
+  return { ok: true, ...summary, autoResults, xpRetry, venueReminder, events, demands, notify, expiry };
 }
 
 // tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的

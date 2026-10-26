@@ -15,6 +15,8 @@ import { closedRegularTicks } from './contract-ticks.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import {
   completeTermination,
+  completeTransfer,
+  loadReturnClubContext,
   loadTransfer,
   transferEvidence,
   type ReviewDecision,
@@ -864,6 +866,21 @@ export async function approveTransferDeal(
       return { status: opened.status };
     }
     default:
+      // §5.4 回原队 A 分支（v6.54.0 步骤 5）：本窗已闹过涨薪的买回 = 跳过签约谈判、纯回归。
+      // 本窗额度已耗尽（放着 demand 行），买家按合同行现值带回工资/RC/合同类型 → 直接过户；
+      // 物理面（效力/保护期/签约时刻）与直拒后果由 completeTransfer 的快照恢复与回挂语句承担。
+      // B 分支（无纠葛买回）续约基准（E × 1.05–1.15）在 submitReleaseFee 里按同一判定施加。
+      const ret = await loadReturnClubContext(
+        env.DB,
+        transfer.player_id,
+        transfer.to_club_id,
+        transfer.season,
+        transfer.window_seq,
+        transferId,
+      );
+      if (ret.sameWindowDemand !== null) {
+        return completeTransfer(env, transferId, actor, 'user', review);
+      }
       return openNegotiationSession(env, transferId, actor, review);
   }
 }

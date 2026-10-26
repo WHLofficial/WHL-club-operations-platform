@@ -12,7 +12,8 @@ import { abilityLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE } fro
 import { AGENT_TIER_LABELS } from '../core/negotiation-rules.ts';
 import { attemptExpected, directFail, expectedWage, previewForecast, satisfactionText, successRate } from './negotiation-secret.ts';
 import { loadNegotiationContext, type AgentTierParams, type NegotiationContext } from './negotiation-context.ts';
-import { completeTransfer, loadTransfer, listingIdFromTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
+import { completeTransfer, isReturnToFormerClub, loadTransfer, listingIdFromTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
+import { seededUnit } from '../core/seeded.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { createConfigService } from '../core/config.ts';
@@ -24,6 +25,9 @@ import { assertOpOpen } from './ops-schedule.ts';
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
+
+/** 买回前东家的续约基准加薪因子 draw 位（v6.54.0；与闹涨薪域 20/21 区分，core/seeded 统一随机源） */
+const RETURN_RAISE_DRAW = 22;
 
 // §6.10-6：判定随机数走 crypto.getRandomValues
 function defaultRng(): number {
@@ -269,7 +273,14 @@ export async function submitReleaseFee(
   }
   const ctx = await loadNegotiationContext(db);
   const level = abilityLevel(player.ca, player.pa, player.age, ctx.youngBlendAge);
-  const e = expectedWage(level, fee, ctx.wageParamA, ctx.wageParamB, ctx.wageParamC);
+  let e = expectedWage(level, fee, ctx.wageParamA, ctx.wageParamB, ctx.wageParamC);
+  // §5.4 回原队 B 分支（v6.54.0 步骤 5）：买回前东家的签约谈判按续约基准（E × U(renewalRaise)，
+  // 规则 4.3.3 同款区间）。普通转会/激活/拍卖在此处算 E（固定 F 的三型在开会时已快照），
+  // 因子用确定性种子钉在 transfer 上——本函数允许重设 F，不能让买家反复重摇挑低 E。
+  if (await isReturnToFormerClub(db, transfer.player_id, transfer.to_club_id)) {
+    const [lo, hi] = ctx.renewalRaise;
+    e = Math.round(e * (1 + lo + (hi - lo) * seededUnit([transferId], RETURN_RAISE_DRAW)) * 100) / 100;
+  }
 
   const audit = createAuditStatement(db);
   const results = await db.batch([

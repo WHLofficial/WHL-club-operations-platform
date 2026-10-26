@@ -34,6 +34,7 @@ import {
   loadEventSignals,
   queueWindowSignalNotes,
 } from './event-ops.ts';
+import { applyPendingContractChanges } from './demand-ops.ts';
 
 export interface AttendanceModel {
   weather_probabilities: Record<string, number>;
@@ -501,6 +502,10 @@ export interface HomeWindowSummary {
   /** v6.14.0 C3 招商轮：本轮定向递出的报价数 / 接班转正的队数（临时窗恒 0） */
   marketOffers: number;
   activatedClubs: number;
+  /** v6.54.0 §5.7：本批 apply 的待生效合同变更条数（含 demand / renewal / rejection 三类） */
+  pendingApplied: number;
+  /** v6.54.0 §5.7：因离队而作废的待生效条数 */
+  pendingVoided: number;
 }
 
 /** 批后补排的俱乐部通知（关窗批提交成功后由调用方逐条 queueClubNotification）。 */
@@ -601,6 +606,8 @@ export async function windowHomeStatements(
     terminatedClubs: 0,
     marketOffers: 0,
     activatedClubs: 0,
+    pendingApplied: 0,
+    pendingVoided: 0,
   };
 
   // v6.14.0 C3 招商轮·清盘段（常规窗）：未签 pending 作废 + 整轮无人签品牌热度 −ignored +
@@ -760,6 +767,15 @@ export async function windowHomeStatements(
     offerNotified.push(...round.offersPerClub);
     activated.push(...activation.activated);
   }
+  // §5.7 关窗生效段（v6.54.0 步骤 5）：统一收口 demand（闹涨薪接受）/ renewal（普通续约）/
+  // rejection（直拒保护期失效）三类 contract_pending_changes。时序由 closeWindow 保证：
+  // 本窗工资已按旧 wage 结算（payroll 段）、本窗交易已按原 release_fee 完成（settleOverdue 在前），
+  // 且 pending 对 transfer/activation 逻辑不可见；apply 后下一窗才用新值。语句并入本批 ⇒
+  // 与窗状态 UPDATE 同批原子（批回滚则 pending 仍是 pending，下轮关窗重试）。
+  const pendingApply = await applyPendingContractChanges(env, windowSeq);
+  statements.push(...pendingApply.statements);
+  summary.pendingApplied = pendingApply.summary.applied;
+  summary.pendingVoided = pendingApply.summary.voided;
   // 情绪变化 / 品牌解约通知（v6.13.0 C2）：批后由调用方排队（批回滚则不发）
   const affected = [...new Set([...moodReports, ...terminatedReports].map((r) => r.clubId))];
   if (affected.length > 0) {

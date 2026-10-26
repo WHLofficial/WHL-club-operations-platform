@@ -21,6 +21,8 @@ import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { growthResetStatements } from './growth.ts';
 import { hookTierRecompute } from './growth-tier.ts';
+import { voidDemandStatements } from './demand-ops.ts';
+import { queueAllUserClubsNotification } from './notify.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -83,6 +85,93 @@ export function listingIdFromTransfer(transfer: TransferRow): number | null {
   return m ? Number(m[1]) : null;
 }
 
+// ---------------------------------------------------------------------------
+// §5.4「回原队」判定（v6.54.0 步骤 5）：当作人没走过
+// ---------------------------------------------------------------------------
+
+/** 离开原队那次 transfer 行上留的合同三列（0079 新增；NULL = 该列当时无值，如无保护期） */
+export interface ReturnClubSnapshot {
+  serviceTicks: number | null;
+  protectionTicks: number | null;
+  signedAt: string | null;
+}
+
+export interface ReturnClubContext {
+  /** 买方是球员历史效力并离开过的俱乐部（transfers 里存在「从该队离开」的已完成非留队单） */
+  isReturn: boolean;
+  /** 离开时点的合同快照（物理面延续的取值来源） */
+  snapshot: ReturnClubSnapshot | null;
+  /** 快照可用：src_service_ticks 非 NULL。0079 apply 之前的存量离开行三列全 NULL，无法恢复 ⇒ 回退常规重锚 */
+  snapshotUsable: boolean;
+  /** 本窗该球员对该队的 demand 行（任意状态）= A 分支判据；无行 = B 无纠葛买回 */
+  sameWindowDemand: { id: number; status: string; resolution: string | null } | null;
+}
+
+/**
+ * 买回原队判定（§5.4 回原队）：
+ * - `isReturn` 的判据是「有从买方离开的记录」，不是「曾经入队过」——初始导入的归属没有入队
+ *   transfer 行，靠 from_club_id 才覆盖得到；rc_change/match 是留队续约/匹配，不算离开。
+ * - `sameWindowDemand` 决定分支：有行 = A（本窗额度已耗尽，跳过谈判纯回归）；无行 = B（可谈判、
+ *   按续约基准、占本窗额度）。判据只看「本窗该队」，与 UNIQUE(player, season, window) 的
+ *   全局一窗一条不冲突：全局唯一键保证同窗不会有第二行。
+ */
+export async function loadReturnClubContext(
+  db: D1Database,
+  playerId: number,
+  toClubId: number | null,
+  season: number | null | undefined,
+  windowSeq: number | null | undefined,
+  excludeTransferId?: number,
+): Promise<ReturnClubContext> {
+  const empty: ReturnClubContext = { isReturn: false, snapshot: null, snapshotUsable: false, sameWindowDemand: null };
+  if (toClubId === null) return empty;
+  const departure = await db
+    .prepare(
+      `SELECT src_service_ticks, src_protection_ticks, src_signed_at
+       FROM transfers
+       WHERE player_id = ? AND from_club_id = ? AND status = 'completed'
+         AND type NOT IN ('rc_change','match')${excludeTransferId === undefined ? '' : ' AND id <> ?'}
+       ORDER BY completed_at DESC, id DESC LIMIT 1`,
+    )
+    .bind(...(excludeTransferId === undefined ? [playerId, toClubId] : [playerId, toClubId, excludeTransferId]))
+    .first<{ src_service_ticks: number | null; src_protection_ticks: number | null; src_signed_at: string | null }>();
+  const sameWindowDemand =
+    season !== null && season !== undefined && windowSeq !== null && windowSeq !== undefined
+      ? await db
+          .prepare(
+            `SELECT id, status, resolution FROM contract_demands
+             WHERE player_id = ? AND club_id = ? AND season = ? AND window_seq = ? LIMIT 1`,
+          )
+          .bind(playerId, toClubId, season, windowSeq)
+          .first<{ id: number; status: string; resolution: string | null }>()
+      : null;
+  if (!departure) return { ...empty, sameWindowDemand };
+  return {
+    isReturn: true,
+    snapshot: {
+      serviceTicks: departure.src_service_ticks,
+      protectionTicks: departure.src_protection_ticks,
+      signedAt: departure.src_signed_at,
+    },
+    snapshotUsable: departure.src_service_ticks !== null,
+    sameWindowDemand,
+  };
+}
+
+/** 轻量判定（签约谈判侧只要一个是/否：买回前东家的 E 走续约基准） */
+export async function isReturnToFormerClub(db: D1Database, playerId: number, toClubId: number | null): Promise<boolean> {
+  if (toClubId === null) return false;
+  const row = await db
+    .prepare(
+      `SELECT 1 AS x FROM transfers
+       WHERE player_id = ? AND from_club_id = ? AND status = 'completed'
+         AND type NOT IN ('rc_change','match') LIMIT 1`,
+    )
+    .bind(playerId, toClubId)
+    .first();
+  return row !== null;
+}
+
 /**
  * 过户单点：按 transfer.type 分支（见文件头），transfer → completed、审核表记、审计，
  * 全部在一个 batch 里。每条挂「transfer 仍处 pending_review/signing」守卫，流水另有
@@ -115,9 +204,18 @@ export async function completeTransfer(
 
   const ctx = await loadMarketContext(db);
   const contract = await db
-    .prepare('SELECT release_fee, contract_type FROM contracts WHERE player_id = ? AND is_active = 1')
+    .prepare(
+      'SELECT release_fee, wage, contract_type, service_ticks, protection_ticks, signed_at FROM contracts WHERE player_id = ? AND is_active = 1',
+    )
     .bind(transfer.player_id)
-    .first<{ release_fee: number | null; contract_type: string }>();
+    .first<{
+      release_fee: number | null;
+      wage: number | null;
+      contract_type: string;
+      service_ticks: number | null;
+      protection_ticks: number | null;
+      signed_at: string | null;
+    }>();
   const rc = contract?.release_fee ?? 0;
   const fee = ownership ? (transfer.fee as number) : 0;
   const tax = ownership
@@ -126,9 +224,26 @@ export async function completeTransfer(
       : transferTax(fee, rc, ctx.taxRates)
     : 0;
   // 球员落位：带条款过户按新合同类型；不带条款（桥接）按现行合同类型还原；
-  // 本队留人（续约/匹配）不动球员归属与状态。
-  const playerStatus = terms
-    ? terms.contractType === 'trainee'
+  // 本队留人（续约/匹配）不动球员归属与状态；A 分支（见下）忽略 terms，按现行合同类型算。
+  // §5.4 回原队（v6.54.0 步骤 5）：买回判据 + 离开时点快照 + 本窗 demand 行（A/B 分支）。
+  // 海捞/训练营不适用（设计明列）：海捞是自由身重新签入（from_club_id 为空、无「离开某队」的
+  // 快照语义），训练营走 0.75m / 5m 固定条款——两者都按常规通道，不沿用旧队效力/保护期。
+  const contractTrainee = contract?.contract_type === 'trainee';
+  const rawReturn =
+    !amendment && !freeAgent && transfer.from_club_id !== null && !contractTrainee
+      ? await loadReturnClubContext(db, transfer.player_id, transfer.to_club_id, transfer.season, transfer.window_seq, transferId)
+      : null;
+  const returnDemand = rawReturn?.sameWindowDemand ?? null;
+  /** A 分支：本窗已闹过（demand 行存在）⇒ 跳过签约谈判、纯回归；terms（若有）一律忽略 */
+  const pureReturn = returnDemand !== null;
+  /** 实际生效的成约条款：A 分支吞掉 terms（工资/RC/类型按合同行现值带回） */
+  const dealTerms = pureReturn ? undefined : terms;
+  const returnCtx = dealTerms?.contractType === 'trainee' ? null : rawReturn;
+  /** A 分支的非直拒终局（谈崩/低还价/过期）：买回要计一次 expired 入新段（§5.4 第 2 条） */
+  const returnCountFinal =
+    pureReturn && returnDemand !== null && returnDemand.resolution !== 'direct' && (returnDemand.status === 'rejected' || returnDemand.status === 'expired');
+  const playerStatus = dealTerms
+    ? dealTerms.contractType === 'trainee'
       ? 'trainee'
       : 'normal'
     : contract?.contract_type === 'trainee'
@@ -225,8 +340,34 @@ export async function completeTransfer(
         db.prepare(`DELETE FROM player_playstyles WHERE player_id = ? AND source = 'china'`).bind(transfer.player_id),
       );
     }
+    // 离开某队时把**被覆盖前**的合同三列快照进 transfer 行（§5.4 物理面延续，迁移 0079）。
+    // 契约值是 completeTransfer 进城时读到的合同行现值：若该窗回滚/重放，整批按状态守卫空转，
+    // 不会把改过的值再快照一次。快照只对真正离开（from 非空、非留队单）写——海捞 from 为空。
+    if (transfer.from_club_id !== null) {
+      statements.push(
+        db
+          .prepare(
+            `UPDATE transfers SET src_service_ticks = ?, src_protection_ticks = ?, src_signed_at = ?
+             WHERE id = ? AND ${guard.sql}`,
+          )
+          .bind(
+            contract?.service_ticks ?? null,
+            contract?.protection_ticks ?? null,
+            contract?.signed_at ?? null,
+            transferId,
+            ...guard.params,
+          ),
+      );
+    }
+    // 离队作废（§5.4/§5.7）：demand → void、在途 pending → void、转会申请（含「不满」徽章）→ resolved。
+    // 只对**真的离开某队**生效（from 非空）——海捞是自由身签入，没有队可离。
+    // 必须排在 A 分支「重挂徽章」语句之前——否则同一批里的收口 UPDATE 会立刻把它 resolved。
+    if (transfer.from_club_id !== null) {
+      const voided = await voidDemandStatements(env, transfer.player_id, 'left_club');
+      statements.push(...voided.statements);
+    }
   }
-  if (terms && freeAgent) {
+  if (dealTerms && freeAgent) {
     // 海捞：落新合同（保护期按窗刻度，训练营无保护期）。contracts.player_id 全局唯一
     //（解约只是 is_active=0），复签走 ON CONFLICT UPSERT 把旧合同行整体翻新
     statements.push(
@@ -245,17 +386,17 @@ export async function completeTransfer(
         .bind(
           transfer.player_id,
           transfer.to_club_id,
-          terms.releaseFee,
-          terms.wage,
-          terms.contractType,
-          terms.source,
+          dealTerms.releaseFee,
+          dealTerms.wage,
+          dealTerms.contractType,
+          dealTerms.source,
           baseTicks,
-          protectionTicksFor(baseTicks, terms.contractType),
+          protectionTicksFor(baseTicks, dealTerms.contractType),
           transfer.season,
           transfer.window_seq,
         ),
     );
-  } else if (terms && amendment) {
+  } else if (dealTerms && amendment) {
     // 续约/匹配：只改 RC/工资/成约方式，保护期到当下收口（4.4.6「保护期直接结束」）——
     // 把 protection_ticks 设为当前窗数，判定恒不成立；效力基数 service_ticks 不动
     statements.push(
@@ -264,9 +405,30 @@ export async function completeTransfer(
           `UPDATE contracts SET wage = ?, release_fee = ?, source = ?, protection_ticks = ?
            WHERE player_id = ? AND is_active = 1 AND club_id = ?`,
         )
-        .bind(terms.wage, terms.releaseFee, terms.source, baseTicks, transfer.player_id, transfer.to_club_id),
+        .bind(dealTerms.wage, dealTerms.releaseFee, dealTerms.source, baseTicks, transfer.player_id, transfer.to_club_id),
     );
-  } else if (terms) {
+  } else if (pureReturn && returnCtx !== null) {
+    // A 分支（本窗已闹过涨薪）：跳过签约谈判、纯回归——工资 / RC / 合同类型按合同行**现值**带回
+    //（别队期间涨幅对球员有效，买方没有压价口子），只恢复归属与物理面快照。
+    // 快照可用时 signed_at 回到离开时点（「签约时刻一并回到离开时点」，§5.4 第 3 条）。
+    const sets = ['club_id = ?'];
+    const params: unknown[] = [transfer.to_club_id];
+    if (returnCtx.snapshotUsable && returnCtx.snapshot !== null) {
+      sets.push('service_ticks = ?', 'protection_ticks = ?', 'signed_at = ?');
+      params.push(returnCtx.snapshot.serviceTicks ?? 0, returnCtx.snapshot.protectionTicks, returnCtx.snapshot.signedAt);
+    }
+    statements.push(
+      db
+        .prepare(`UPDATE contracts SET ${sets.join(', ')} WHERE player_id = ? AND is_active = 1 AND club_id IS ?`)
+        .bind(...params, transfer.player_id, transfer.from_club_id),
+    );
+  } else if (dealTerms) {
+    // 换队（含买回 B 分支）⇒ 合同按谈判结果写。物理面延续（§5.4 第 3 条）：效力基数/保护期取
+    // 离开时点的快照，signed_at = now（B 分支是真新签，覆盖快照签约时刻）；非买回仍按窗刻度重锚。
+    const serviceTicks = returnCtx?.snapshotUsable ? (returnCtx.snapshot?.serviceTicks ?? 0) : baseTicks;
+    const protection = returnCtx?.snapshotUsable
+      ? (returnCtx.snapshot?.protectionTicks ?? null)
+      : protectionTicksFor(baseTicks, dealTerms.contractType);
     statements.push(
       db
         .prepare(
@@ -277,12 +439,12 @@ export async function completeTransfer(
         )
         .bind(
           transfer.to_club_id,
-          terms.wage,
-          terms.releaseFee,
-          terms.source,
-          terms.contractType,
-          baseTicks,
-          protectionTicksFor(baseTicks, terms.contractType),
+          dealTerms.wage,
+          dealTerms.releaseFee,
+          dealTerms.source,
+          dealTerms.contractType,
+          serviceTicks,
+          protection,
           transfer.season,
           transfer.window_seq,
           transfer.player_id,
@@ -290,13 +452,95 @@ export async function completeTransfer(
         ),
     );
   } else if (!amendment) {
-    statements.push(
-      db.prepare(`UPDATE contracts SET club_id = ? WHERE player_id = ? AND is_active = 1 AND club_id IS ?`).bind(
-        transfer.to_club_id,
-        transfer.player_id,
-        transfer.from_club_id,
-      ),
-    );
+    if (returnCtx?.snapshotUsable) {
+      // 无条款的买回桥接（直接调过户、成交不带新合同）：只换归属 + 恢复快照（不重锚）
+      statements.push(
+        db
+          .prepare(
+            `UPDATE contracts SET club_id = ?, service_ticks = ?, protection_ticks = ?, signed_at = ?
+             WHERE player_id = ? AND is_active = 1 AND club_id IS ?`,
+          )
+          .bind(
+            transfer.to_club_id,
+            returnCtx.snapshot?.serviceTicks ?? 0,
+            returnCtx.snapshot?.protectionTicks ?? null,
+            returnCtx.snapshot?.signedAt ?? null,
+            transfer.player_id,
+            transfer.from_club_id,
+          ),
+      );
+    } else {
+      statements.push(
+        db.prepare(`UPDATE contracts SET club_id = ? WHERE player_id = ? AND is_active = 1 AND club_id IS ?`).bind(
+          transfer.to_club_id,
+          transfer.player_id,
+          transfer.from_club_id,
+        ),
+      );
+    }
+  }
+  // 回原队的后果与额度（§5.4「回原队」第 1/2 条）
+  if (returnCtx?.isReturn && transfer.to_club_id !== null) {
+    if (returnDemand !== null && returnDemand.resolution === 'direct') {
+      // A 分支 · 原直拒 → 恢复直拒分支：徽章重挂（ON CONFLICT 把离队时 resolved 的行翻回 released）
+      // + 保护期失效重挂（关窗生效，§5.7）。价格两列按现行值 = 不动价格（防返潮断言 TC-RD-34 #1）。
+      // **两条都挂 transfer 状态守卫**（与同批快照/账本/状态 UPDATE 同谓词，文件头「重复调用整批
+      // 空转」的幂等契约）：并发重入/重试时，第一张单已 completed 的第二批会把其间被离队作废或
+      // 关窗 apply 掉的状态翻回来——徽章变幽灵 released、pending 变第二条（撞 idx_pending_one_per_player）。
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO transfer_requests (player_id, club_id, demand_id, source, status)
+             SELECT ?, ?, ?, 'direct', 'released'
+             WHERE ${guard.sql}
+             ON CONFLICT(player_id, club_id, demand_id) DO UPDATE SET status = 'released', resolved_at = NULL`,
+          )
+          .bind(transfer.player_id, transfer.to_club_id, returnDemand.id, ...guard.params),
+        db
+          .prepare(
+            `INSERT INTO contract_pending_changes
+               (player_id, club_id, source, demand_id, wage_new, release_fee_new, protection_ticks_new, rc_fee, status, effective_window_seq)
+             SELECT ?, ?, 'rejection', ?, ?, NULL, 0, 0, 'pending', ?
+             WHERE NOT EXISTS (SELECT 1 FROM contract_pending_changes WHERE player_id = ? AND status = 'pending')
+               AND ${guard.sql}`,
+          )
+          .bind(
+            transfer.player_id,
+            transfer.to_club_id,
+            returnDemand.id,
+            contract?.wage ?? 0,
+            transfer.window_seq ?? 0,
+            transfer.player_id,
+            ...guard.params,
+          ),
+      );
+    } else if (returnDemand === null && transfer.season !== null && transfer.window_seq !== null) {
+      // B 分支占用本窗额度（§5.4 第 1 条「此后本窗不能再闹涨薪/续约」）：本窗该球员在这一队
+      // 没有 demand 行 ⇒ 放一条 void 占位行。载体只能是 contract_demands——同窗一次的两道守卫
+      //（createRcChange 查本窗任意状态行；生成批的 UNIQUE(player, season, window) 幂等闸）都只认
+      // 这张表。void 不参与段计数，也不进收件箱（listClubDemands 只查 pending/accepted/recent），
+      // 对界面零可见；下一窗/下次换队自会换段。
+      statements.push(
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO contract_demands
+               (player_id, club_id, season, window_seq, status, current_wage, expected_wage, target_wage,
+                floor_wage, raise_pct, rc_current, rc_floor, rc_fee, round, expires_at, seed, void_reason)
+             VALUES (?, ?, ?, ?, 'void', ?, ?, ?, ?, 0, ?, 0, 0, 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 0, 'return')`,
+          )
+          .bind(
+            transfer.player_id,
+            transfer.to_club_id,
+            transfer.season,
+            transfer.window_seq,
+            contract?.wage ?? 0,
+            contract?.wage ?? 0,
+            contract?.wage ?? 0,
+            contract?.wage ?? 0,
+            contract?.release_fee ?? 0,
+          ),
+      );
+    }
   }
   const statusStmtIndex = statements.length;
   statements.push(
@@ -306,6 +550,22 @@ export async function completeTransfer(
       )
       .bind(tax, transferId),
   );
+  // A 分支 · 非直拒终局（谈崩/低还价/过期）→ 买回计一次 expired 入**新段**（§5.4 第 2 条）。
+  // UNIQUE(player_id, season, window_seq) 不允许同窗第二行，故就地把原行重锚成 expired：
+  // resolved_at 取本单 completed_at（必须排在状态 UPDATE 之后读同一批写好的值；段计数是
+  // `at >= 段锚`，早一毫秒都不算）；void_reason 清空（挂牌驱赶的「不计终局」只管当时的挂牌，
+  // 「被卖又被买回」这次折腾要计）。旧段计数不延续 = 段锚换成新 join 后旧终局自然落在锚前。
+  if (returnCountFinal && returnDemand !== null) {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE contract_demands SET status = 'expired', resolution = 'expired', resolved_by = 'system:return',
+                  resolved_at = (SELECT completed_at FROM transfers WHERE id = ?), void_reason = NULL
+           WHERE id = ? AND status IN ('rejected','expired')`,
+        )
+        .bind(transferId, returnDemand.id),
+    );
+  }
   if (review) {
     statements.push(
       db
@@ -328,12 +588,35 @@ export async function completeTransfer(
         playerId: transfer.player_id,
         fromClubId: transfer.from_club_id,
         toClubId: transfer.to_club_id,
-        ...(terms ? { settleSource: terms.source, contractType: terms.contractType } : {}),
+        ...(dealTerms ? { settleSource: dealTerms.source, contractType: dealTerms.contractType } : {}),
+        ...(returnCtx?.isReturn
+          ? {
+              returnToFormerClub: true,
+              returnBranch: pureReturn ? 'A' : 'B',
+              returnDirectRestored: pureReturn && returnDemand?.resolution === 'direct',
+              returnCountedFinal: returnCountFinal,
+            }
+          : {}),
       },
     }),
   );
   const results = await db.batch(statements);
   const statusChange = results[statusStmtIndex]?.meta.changes ?? 0;
+  // A 分支 · 直拒恢复：全联盟通告重发（三件套之一）。批提交成功后才发——批回滚不留假通告；
+  // 通告是尽力而为（queueAllUserClubsNotification 内部吞错），不会把已完成的过户报成失败。
+  if (statusChange > 0 && pureReturn && returnDemand?.resolution === 'direct' && transfer.to_club_id !== null) {
+    const [playerRow, clubRow] = await Promise.all([
+      db.prepare('SELECT name FROM players WHERE id = ?').bind(transfer.player_id).first<{ name: string | null }>(),
+      db.prepare('SELECT name FROM clubs WHERE id = ?').bind(transfer.to_club_id).first<{ name: string | null }>(),
+    ]);
+    await queueAllUserClubsNotification(env, 'demand_rejected_public', {
+      demandId: returnDemand.id,
+      playerId: transfer.player_id,
+      player: playerRow?.name ?? `球员${transfer.player_id}`,
+      club: clubRow?.name ?? `俱乐部${transfer.to_club_id}`,
+      rc: rc > 0 ? rc : null,
+    });
+  }
   // 归属变更后重算档位（v6.48.0 §10.3）：c1（来源球队 = 队壳）与 c2（会籍 = 队壳国家）都锚在
   // club_id 上，换队即可能升/降。续约/匹配（amendment）不动归属，跳过；重放（statusChange = 0）不重算。
   if (statusChange > 0 && !amendment) {
@@ -367,7 +650,11 @@ export async function completeTermination(
   const fee = transfer.extra_fee ?? 0;
   const guard = { sql: `(SELECT status FROM transfers WHERE id = ?) IN ('pending_review', 'signing')`, params: [transferId] };
   const audit = createAuditStatement(db);
+  // 解约也是离队（§5.4/§5.7、TC-RD-45 #4）：demand/在途 pending 作废、转会申请与「不满」徽章收口。
+  // 与转会分支同一锚点——离队即段结束，pending 不再 apply。
+  const voided = await voidDemandStatements(env, transfer.player_id, 'left_club');
   const statements: D1PreparedStatement[] = [
+    ...voided.statements,
     ...(fee > 0
       ? ledgerMovement(db, {
           clubId: transfer.from_club_id,
