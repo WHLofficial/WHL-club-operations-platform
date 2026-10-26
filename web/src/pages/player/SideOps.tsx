@@ -522,8 +522,8 @@ export function SideOps({
               <span className="side-lab">
                 <span>标价（m）· 公开</span>
                 <span className="side-range mono">
-                {offerCap !== null ? `${Math.max(listingFloor ?? 1, minDraftValue ?? 0)}–${offerCap}` : '—'}
-              </span>
+                  {offerCap !== null ? `${Math.max(listingFloor ?? 1, minDraftValue ?? 0)}–${offerCap}` : '—'}
+                </span>
               </span>
               <input
                 className="mono"
