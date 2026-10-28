@@ -288,6 +288,14 @@ function cssRules(css: string): CssRule[] {
   return rules;
 }
 
+/** styles.css 的规则解析缓存：cssRules 对 220KB 文本是 O(规则数×文件长度)（lineAt 逐规则全扫），
+ *  本文件 11 处调用各算一遍在整 suite 并行负载下会撞 5s 超时（2026-10-29 门禁实测）。
+ *  只消重复解析，断言一字不改；styles.css 是静态读，进程内缓存无失效问题。 */
+let stylesRulesCache: CssRule[] | null = null;
+function stylesRules(): CssRule[] {
+  return (stylesRulesCache ??= cssRules(read(STYLES_CSS)));
+}
+
 /** 收集选择器命中规则的某条声明（值 + 行号）；exactToken 用于 `.btn` 这类不能按子串匹配的短类名 */
 function declarations(
   rules: CssRule[],
@@ -364,7 +372,7 @@ describe('v6.20.0 窄屏整治静态扫描闸门（docs/test-plans/v6.20.0-mobil
   });
 
   it('TC-SWP-04 · 抽屉触控目标：三个类存在且命中区 ≥36px（styles.css 规则级）', () => {
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
 
     // 1) 窄屏抽屉的类名契约：styles.css 里必须有规则块
     for (const cls of ['.admin-nav-toggle', '.admin-drawer-close', '.admin-nav-link']) {
@@ -461,7 +469,7 @@ describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-
     expect(src).toContain('document.body');
 
     // styles.css 规则级：六类名各有规则块（TSX 有类、CSS 没规则 = 死类名）
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
     for (const cls of ['entry-cards', 'entry-card', 'entry-card-head', 'entry-card-grid', 'entry-card-foot', 'entry-sumbar']) {
       const hit = rules.filter((r) => token(cls).test(r.selector));
       expect(hit.length, `styles.css 找不到 .${cls} 规则块（v6.21.0 卡片流类名契约）`).toBeGreaterThan(0);
@@ -537,7 +545,7 @@ describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-
     expect(tableAt).toBeGreaterThan(cardsAt);
 
     // styles.css：卡片流规则齐 + 死规则（P2-3 已删）不再回来
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
     for (const cls of ['brand-cards', 'brand-card', 'brand-card-grid', 'brand-new-form', 'brand-card-meta']) {
       const hit = rules.filter((r) => token(cls).test(r.selector));
       expect(hit.length, `styles.css 找不到 .${cls} 规则块（v6.21.0 品牌卡类名契约）`).toBeGreaterThan(0);
@@ -569,7 +577,7 @@ describe('v6.21.0 编辑面板窄屏静态契约（docs/test-plans/v6.21.0-edit-
 describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-public-reading-mobile.md，spec §4）', () => {
   /** 类名独立记号匹配（防 table-sticky-2-broken 式子串假绿，与上方 token 同口径） */
   const token = (cls: string) => new RegExp(`(?<![\\w-])${cls}(?![\\w-])`);
-  const rules = () => cssRules(read(STYLES_CSS));
+  const rules = () => stylesRules();
 
   it('公开阅读 · 球员页事件卡契约（TC-PLR）：断点字面 + 卡片/表格互斥 + 类名规则在 CSS + transfer-table nowrap 保留', () => {
     const src = read(PLAYER_PAGE);
@@ -816,7 +824,7 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
 // 运行时几何（375 零溢出 / 页签可横滑）由 e2e ⑱ 的 375 段验。
 describe('v6.39.0 消费中心窄屏静态锁（消费中心过宽修复）', () => {
   it('TC-SHOP-01 · 两栏 min-width:0 落在 .shop-main/.shop-side（不在内联 style）', () => {
-    const rules = cssRules(read('web/src/styles.css'));
+    const rules = stylesRules();
     for (const cls of ['.shop-main', '.shop-side']) {
       const mw = declarations(rules, cls, 'min-width', true);
       expect(mw.length, `${cls} 缺 min-width 声明（窄屏两栏会被子设施行/工单内容顶宽）`).toBeGreaterThan(0);
@@ -829,7 +837,7 @@ describe('v6.39.0 消费中心窄屏静态锁（消费中心过宽修复）', ()
   });
 
   it('TC-SHOP-02 · 窄屏页签横滑 + 子设施行可换行', () => {
-    const rules = cssRules(read('web/src/styles.css'));
+    const rules = stylesRules();
     const ovx = declarations(rules, '.seg', 'overflow-x');
     expect(
       ovx.some((d) => d.value === 'auto'),
@@ -848,7 +856,7 @@ describe('v6.39.0 消费中心窄屏静态锁（消费中心过宽修复）', ()
 // （两边任一被改走都要有人来看一眼——若将来基类改回 flex，这条会提示同步更新）。
 describe('v6.39.2 桌面宽卡静态锁（列头与值区同款等宽轨网格 + 逐列对齐的几何账）', () => {
   it('TC-WIDE-01 · 列头 .sqc-glegend 与值区 .sqc-card.wide .sqc-m 的轨模板逐字相同（同 minmax/同 gap）', () => {
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
     const legendCols = declarations(rules, '.sqc-glegend', 'grid-template-columns');
     const wideCols = declarations(rules, '.sqc-card.wide .sqc-m', 'grid-template-columns');
     const want = 'repeat(auto-fit, minmax(var(--sqc-wmin, 58px), 1fr))';
@@ -874,7 +882,7 @@ describe('v6.39.2 桌面宽卡静态锁（列头与值区同款等宽轨网格 +
   });
 
   it('TC-WIDE-02 · 列头左右边界对齐值区的几何账（身份列定宽 + 列距 + 组头 11/14 padding）', () => {
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
     // 组头内容盒 = 行卡内容盒（行卡 padding 14/14 无边框；组头有 3px 色条 ⇒ 左 11 + 3 = 14、右 14），
     // 标题列定宽 = 身份列宽、组头 gap = 列距 ⇒ 列头网格与值区网格同起点同宽（e2e ⑨ 量轨右缘差 ≤2px）。
     const headPad = declarations(rules, '.sqc-group.wide .sqc-ghead', 'padding');
@@ -910,7 +918,7 @@ describe('v6.39.2 桌面宽卡静态锁（列头与值区同款等宽轨网格 +
   });
 
   it('TC-WIDE-03 · 注册名单行尾分配列定宽 + 列头右侧让出同宽（否则列头比值区宽一截）', () => {
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
     const assignW = declarations(rules, '.sqc-card.wide.has-assign .sqc-assign', 'width');
     expect(
       assignW.some((d) => d.value === 'var(--sqc-assignw)'),
@@ -964,7 +972,7 @@ describe('v6.39.3 球员库队徽（TC-CREST-01）', () => {
     const keyed = lib.match(/logoKey=\{p\.clubLogoKey\}/g)?.length ?? 0;
     expect(keyed, `宽屏与窄屏两处都应传 logoKey={p.clubLogoKey}，实见 ${keyed} 处`).toBeGreaterThanOrEqual(2);
     expect(lib, '宽屏球队格应有 a.lib-club（徽 + 队名同排的链接）').toContain('className="lib-club"');
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
     expect(
       declarations(rules, '.lib-club', 'display').some((d) => d.value === 'inline-flex'),
       `.lib-club 应 inline-flex 让徽与队名同排，实见 ${JSON.stringify(declarations(rules, '.lib-club', 'display'))}`,
@@ -1137,7 +1145,7 @@ describe('v6.49.0 运营时刻表静态锁（甘特图 + 逐项时段）', () =>
   const SCHEDULE_PAGE = `${WEB_SRC}/pages/admin/SchedulePage.tsx`;
 
   it('TC-SCH-01 · 窄屏横滑与定宽落在样式表（不在内联 style）', () => {
-    const rules = cssRules(read(STYLES_CSS));
+    const rules = stylesRules();
     const ovx = declarations(rules, '.gantt-scroll', 'overflow-x');
     expect(
       ovx.some((d) => d.value === 'auto'),
