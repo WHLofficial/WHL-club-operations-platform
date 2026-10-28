@@ -11,6 +11,9 @@
 //   ⑨ fulfill 删掉意向单收口 UPDATE → 「确认一条，其余意向单收口」组变红
 //   ⑩ finalizeOffer 删掉终态守卫 → 「finalizeOffer 终态守卫」组变红
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
@@ -228,6 +231,24 @@ describe('一买方一意向单（多买方可并存，v6.55.0）', () => {
     const dup = await place(fx, 1, 36, 'tok-coach3');
     expect(dup.status).toBe(409);
     expect(((await dup.json()) as OfferOut).error).toContain('你已经有一条');
+    // TC-A-010 资金口径：预检先于冻结落库——不产生新 offers 行、不产生幽灵 fund_holds 残留
+    //（该买方对该球员仍只有原 intent 一行，冻结仍只有 bId 那一笔 32m held）
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM offers WHERE player_id = 1 AND buyer_club_id = 3")?.n,
+    ).toBe(1);
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM offers WHERE player_id = 1")?.n,
+    ).toBe(2);
+    // 全场 ref_type='offer' 的冻结仍恰两笔（a=30 / bId=32，均 held）——dup 没有多落任何冻结
+    expect(
+      sqlAll<{ ref_id: number; amount: number; status: string }>(
+        fx.sqlite,
+        "SELECT ref_id, amount, status FROM fund_holds WHERE ref_type = 'offer' ORDER BY id",
+      ),
+    ).toEqual([
+      expect.objectContaining({ ref_id: a, amount: 30, status: 'held' }),
+      expect.objectContaining({ ref_id: bId, amount: 32, status: 'held' }),
+    ]);
   });
 
   it('已有意向单：挂牌端点仍 409 intent_exists（文案不再说「一条」）', async () => {
@@ -448,6 +469,34 @@ describe('清单里的意向单（status=intent / intentsMine）', () => {
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as OfferOut).error).toContain('intent');
   });
+
+  it('TC-A-012 · 同球员两条 intent（不同买方）：卖方清单长 2 且 intentsMine=2，买方各自 intentsMine=1', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    const a = await seedIntent(fx, 30); // 买方 club2
+    const b = await seedIntentFor(fx, 'tok-coach3', 32); // 买方 club3
+    expect(a).not.toBe(b);
+
+    // 卖方（club1）收件箱按 intent 过滤：两条都在，intentsMine 计 2（计数 = status='intent' COUNT）
+    const inbox = await app.request('/api/offers?box=in&status=intent', { headers: { Cookie: 'whl_session=tok-coach' } }, fx.env);
+    expect(inbox.status).toBe(200);
+    const inboxBody = (await inbox.json()) as { items: { id: number }[]; intentsMine: number };
+    expect(inboxBody.items.map((r) => r.id).sort()).toEqual([a, b].sort());
+    expect(inboxBody.intentsMine).toBe(2);
+
+    // 两位买方各自发件箱：只看到自己的那条，intentsMine 各记 1
+    for (const [token, own, other] of [
+      ['tok-coach2', a, b],
+      ['tok-coach3', b, a],
+    ] as const) {
+      const outbox = await app.request('/api/offers?box=out&status=intent', { headers: { Cookie: `whl_session=${token}` } }, fx.env);
+      expect(outbox.status).toBe(200);
+      const body = (await outbox.json()) as { items: { id: number }[]; intentsMine: number };
+      expect(body.items.map((r) => r.id)).toEqual([own]);
+      expect(body.items.some((r) => r.id === other)).toBe(false);
+      expect(body.intentsMine).toBe(1);
+    }
+  });
 });
 
 describe('确认一条，其余意向单收口（v6.55.0 择一）', () => {
@@ -580,6 +629,63 @@ describe('双确认与非卖品赛跑（occupy 守卫，v6.55.0）', () => {
     expect(sqlGet(fx.sqlite, 'SELECT id FROM listings WHERE player_id = 1')).toBeUndefined();
     expect(sqlGet(fx.sqlite, 'SELECT status FROM players WHERE id = 1')).toMatchObject({ status: 'normal' });
   });
+
+  // TC-A-019：acceptOffer 的两处 occupy（intent :649-658 / pending acceptOfferCore :381-387）的
+  // not_for_sale NOT EXISTS 属真并发窗语义（两分支各自的 403 预检查读态，拦不住「读态之后、
+  // 占用批之前」的毫秒窗）——intent 形态有上条行为锁，pending 形态在此补行为锁 + 源码文本锁双保险：
+  // 删任一处 NOT EXISTS ⇒ 文本锁红；pending 行为锁再红一次（occupy 成功 → 履约挂牌）。
+  describe('occupy 非卖品守卫（TC-A-019：pending 形态行为锁 + 两处源码文本锁）', () => {
+    it('pending 单开窗同意：读态之后占用批之前被置非卖品 → occupy 守卫拦下，报价原样', async () => {
+      const fx = freshEnv();
+      seedWorld(fx);
+      // 先开窗再下报价：关窗期所下 pending 的 season/window_seq 是 NULL，accept 会走意向单分支
+      //（isWindowOpen 以单上的窗为准），到不了 acceptOfferCore 的 occupy——TC-A-017 同款夹具口径
+      fx.sqlite.exec("INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 2, 'open', '2026-09-01T00:00:00Z')");
+      const res = await place(fx, 1, 30); // turn='seller'，卖方（club1）来同意
+      const id = ((await res.json()) as OfferOut).offerId as number;
+      // 与 intent 形态同手法：acceptOfferCore 的 occupy SQL（`SET status = 'accepted', updated_at`，
+      // 与 intent occupy 的 `SET status = 'accepted', season = ?` 可区分）prepare 时翻转非卖品——
+      // 403 预检查的是读态（此刻仍 0），拦不住这个窗口，只能靠 occupy 的 NOT EXISTS。
+      const real = fx.env.DB;
+      const raceEnv: Env = {
+        ...fx.env,
+        DB: new Proxy(real, {
+          get(target, prop) {
+            if (prop === 'prepare') {
+              return (sql: string) => {
+                if (sql.includes("SET status = 'accepted', updated_at") && sql.includes("status = 'pending'")) {
+                  fx.sqlite.exec('UPDATE players SET not_for_sale = 1 WHERE id = 1');
+                }
+                return target.prepare(sql);
+              };
+            }
+            const value = Reflect.get(target, prop, target);
+            return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+          },
+        }) as D1Database,
+      };
+
+      const acc = await send(raceEnv, 'POST', `/api/offers/${id}/accept`, {}, 'tok-coach');
+      expect(acc.status).toBe(409);
+      expect(((await acc.json()) as OfferOut).code).toBe('not_your_turn');
+      expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', id)).toMatchObject({ status: 'pending' });
+      expect(holdsOf(fx, id)).toEqual([expect.objectContaining({ status: 'held', amount: 30 })]);
+      expect(sqlGet(fx.sqlite, 'SELECT id FROM listings WHERE player_id = 1')).toBeUndefined();
+      expect(sqlGet(fx.sqlite, 'SELECT status FROM players WHERE id = 1')).toMatchObject({ status: 'normal' });
+    });
+
+    it('源码文本锁：acceptOfferCore（pending）与 intent 两处 occupy 的 SQL 都含 not_for_sale NOT EXISTS', async () => {
+      const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/worker/offers.ts'), 'utf8');
+      const guard = 'AND NOT EXISTS (SELECT 1 FROM players nfs WHERE nfs.id = offers.player_id AND nfs.not_for_sale = 1)';
+      // 两处 occupy 共用同一句守卫文本，一处都不可少
+      expect(src.split(guard).length - 1, 'not_for_sale 守卫文本出现次数（intent occupy + pending occupy）').toBeGreaterThanOrEqual(2);
+      // 两处 occupy 各自的签名在场（锁的是「守卫长在 occupy 上」，不是文件里任何位置）
+      expect(src).toContain("SET status = 'accepted', season = ?, window_seq = ?");
+      expect(src).toContain("SET status = 'accepted', updated_at");
+      expect(src).toContain("WHERE id = ? AND status = 'pending' AND turn = ?");
+      expect(src).toContain("AND x.status = 'accepted' AND x.listing_id IS NULL");
+    });
+  });
 });
 
 describe('fulfill 履约守卫（非卖品）与自愈收口', () => {
@@ -659,15 +765,28 @@ describe('finalizeOffer 终态守卫（撤回与确认赛跑输掉，资金不�
     const id = ((await res.json()) as OfferOut).offerId as number;
     // 单线程复现赛跑窗：withdraw 的终态批执行前，卖方已把这条单同意挂牌（accepted + hold 转 listing 冻结）。
     // 终态批的第一条 UPDATE 会 0 行（status 已不是 pending），修掉资金洞后后三条必须跟着空转。
+    // 翻转时机只认 finalizeOffer 终态批（首句 `UPDATE offers SET status = ?, resolved_at = …`）：
+    // withdraw 路由先跑 settleOverdue 的三 SELECT 扫描批，若在任意 batch 前翻转，翻转落在扫描批上
+    // ⇒ withdrawOffer 的状态前置 409 直接短路、终态批根本不执行 ⇒ 删 settledGuard 的变异不红
+    //（TC-A-014 首版 MutationMiss；sqlText 由 tests/d1.ts 的 prepare 挂出）。
     const real = fx.env.DB;
+    const isFinalizeBatch = (stmts: { sqlText?: string }[]) =>
+      stmts.some(
+        (s) =>
+          typeof s.sqlText === 'string' &&
+          s.sqlText.includes('UPDATE offers SET status = ?') &&
+          s.sqlText.includes('resolved_at'),
+      );
     const raceEnv: Env = {
       ...fx.env,
       DB: new Proxy(real, {
         get(target, prop) {
           if (prop === 'batch') {
             return async (stmts: D1PreparedStatement[]) => {
-              fx.sqlite.exec(`UPDATE offers SET status = 'accepted', updated_at = '2026-07-01T01:00:00Z' WHERE id = ${id}`);
-              fx.sqlite.exec(`UPDATE fund_holds SET ref_type = 'listing', ref_id = 77 WHERE ref_type = 'offer' AND ref_id = ${id}`);
+              if (isFinalizeBatch(stmts as { sqlText?: string }[])) {
+                fx.sqlite.exec(`UPDATE offers SET status = 'accepted', updated_at = '2026-07-01T01:00:00Z' WHERE id = ${id}`);
+                fx.sqlite.exec(`UPDATE fund_holds SET ref_type = 'listing', ref_id = 77 WHERE ref_type = 'offer' AND ref_id = ${id}`);
+              }
               return target.batch(stmts);
             };
           }

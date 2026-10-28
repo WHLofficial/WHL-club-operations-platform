@@ -47,6 +47,9 @@ export function createTestD1(sqlite: DatabaseSync): D1Database {
         return { results, meta: { changes, last_row_id: Number(lastRowId) } };
       };
       const stmt = {
+        // 暴露 SQL 原文：Proxy 型赛跑用例要按「批里哪条语句」判别翻转时机（如 offer-intents
+        // 的 finalizeOffer 终态批），没有它只能按批长度猜，扫描批长度一变判据就失效。
+        sqlText: sql,
         bind(...bound: unknown[]) {
           args = bound;
           return stmt;
