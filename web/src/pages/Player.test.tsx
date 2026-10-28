@@ -575,6 +575,23 @@ describe('TC-C-FLAGS：右翼身份徽章卡（v6.56.0）', () => {
     expect(card.textContent).toContain('非成长');
     expect(card.textContent).not.toContain('可成长');
   });
+
+  it('TC-C-FLAGS-03 · 被激活挂牌（status=listed 且未进转会名单）也出「挂牌中」', async () => {
+    // activations.ts 的激活批只置 players.status='listed'、不置 transfer_listed——
+    // 旧顶卡按 STATUS_LABEL 显示该形态，v6.56.0 重排后 IdentityFlags 若只认 transferListed
+    // 即全页丢失挂牌可见性（回归锁：删 `|| player.status === 'listed'` 本例红）。
+    apiMock.mockImplementation((path: string) => {
+      if (/^\/api\/players\/\d+$/.test(path)) {
+        return Promise.resolve(detail(1, { status: 'listed', transferListed: false }));
+      }
+      if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'open' } });
+      if (/^\/api\/players\/\d+\/growth$/.test(path)) return Promise.reject(new Error('用例不打桩成长数据'));
+      return Promise.reject(new Error(`测试没打桩的请求：${path}`));
+    });
+    open();
+    const card = await flagCard();
+    expect(card.textContent).toContain('挂牌中');
+  });
 });
 
 // ---- fit 适配度卡（v6.56.0）：引擎移植件（web/src/lib/fit/）的展示层 ----
@@ -633,6 +650,30 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
     expect(document.querySelector('.fit-card')).toBeNull();
     expect(row.querySelector('.fit-legend')).toBeNull();
     expect(document.querySelectorAll('.attr-group-card').length).toBeGreaterThan(0);
+  });
+
+  it('TC-C-010 · gameAttrs 为 null：属性页签恒渲染（雷达空态行 + 六组属性卡），fit 卡不渲染', async () => {
+    // 2026-10-29 五视口复核实测的回归锁：整页签曾挂 gameAttrs 门，null 时主列整块空白。
+    apiMock.mockImplementation((path: string) => {
+      if (/^\/api\/players\/\d+$/.test(path)) return Promise.resolve(detail(1, { gameAttrs: null }));
+      if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'open' } });
+      if (/^\/api\/players\/\d+\/growth$/.test(path)) return Promise.reject(new Error('用例不打桩成长数据'));
+      return Promise.reject(new Error(`测试没打桩的请求：${path}`));
+    });
+    open();
+    const row = await radarRow();
+
+    // 雷达空态：svg 轴带在，全零/缺数据序列不画数据多边形（AttrRadar 既有口径）
+    expect(row.querySelector('svg.radar-svg-head')).not.toBeNull();
+    expect(row.querySelectorAll('polygon.radar-data').length).toBe(0);
+    // 六组属性卡照常渲染（场上球员 6 组）：组均值出「—」，明细格不出（无数值键）
+    const cards = Array.from(document.querySelectorAll('.attr-group-card'));
+    expect(cards).toHaveLength(6);
+    for (const card of cards) {
+      expect(card.querySelector('.attr-group-avg')?.textContent).toBe('—');
+      expect(card.querySelectorAll('.attr-cell')).toHaveLength(0);
+    }
+    expect(document.querySelector('.fit-card')).toBeNull();
   });
 
   it('TC-C-FIT-03 · 门将只出 GK 族槽位（≤3 条），场上槽位（fitTile 为 null）不展示', async () => {

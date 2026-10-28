@@ -580,9 +580,10 @@ export default function Player() {
             </>
           )}
 
-          {tab === 'attrs' && player.gameAttrs && (
-            <AttrSheet attrs={attrs} position={player.position} playstyles={playstyles} />
-          )}
+          {/* 属性页签恒渲染（TC-C-010）：gameAttrs 为 null 时雷达出空态（轴带在、无数据多边形）、
+              六组属性卡照常渲染（组均值与明细格出「—」），只有 fit 卡不渲染——整页签挂 gameAttrs 门
+              会把主列整块掏空（2026-10-29 e2e 五视口复核实测）。 */}
+          {tab === 'attrs' && <AttrSheet attrs={attrs} position={player.position} playstyles={playstyles} />}
 
           {tab === 'growth' && growth && (
             <GrowthBlock
@@ -799,7 +800,10 @@ function IdentityFlags({ player }: { player: PlayerDetail['player'] }) {
           <span className="flag-note">他已被明确放行且尚未重签——任何球队可按违约金原价激活，直到重签或离队。</span>
         </div>
       )}
-      {player.transferListed && (
+      {/* 挂牌中两形态：transfer_listed = 进转会名单；status='listed' = 被他队激活挂牌
+          （activations.ts 激活批只置 status 不置 transfer_listed）。旧顶卡按 STATUS_LABEL
+          显示两形态（v6.56.0 重排删除后无承接），此处一并承接，缺一即丢可见性。 */}
+      {(player.transferListed || player.status === 'listed') && (
         <div className="flag-row">
           <span className="badge sky">挂牌中</span>
           <span className="flag-note">已在转会名单挂牌：他队可出价或激活；主动下架无入口，窗尾自动收口。</span>
