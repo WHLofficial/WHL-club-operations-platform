@@ -938,7 +938,7 @@ td.num {
   font-variant-numeric: tabular-nums;
 }
 
-/* 合同卷宗（右栏 .dossier 内的两列键值表）：标签列定宽，值列一律左对齐、数值与 .mono 列走等宽。
+/* 合同卷宗（球员页主列 .player-main 内的两列键值表）：标签列定宽，值列一律左对齐、数值与 .mono 列走等宽。
    原先金额行走 td.num（右对齐 + 等宽），其余 .mono 行走默认字体（.mono 没有全局规则），
    同一张表里左右对齐与字体各两套 —— 两列键值表里右对齐也带不来列对齐收益（v3.3.0 收口） */
 .dossier-table th {
@@ -1338,20 +1338,165 @@ table.matches-table-narrow .rating-badge {
   color: var(--cocoa);
 }
 
-/* ---- 球员卡 .player-card（贴纸白边 + 奶油面）与左右栏容器 .dossier ---- */
+/* ---- 球员卡 .player-card（贴纸白边 + 奶油面）与球员页全页重排（v6.56.0：顶卡 hero + 双翼）----
+   旧 .dossier 双栏 / .dossier-side 随重排退役（页签条 .dossier-tabs 仍由球员页/球队页/转会台三处共用）。
+   断点：1050 双翼塌单列 / 760 顶卡折行 + 组卡 2 列 / 320 单列基线（雷达 200、热区 170，不得横向溢出）。 */
 
-.dossier {
+.player-hero {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 24px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* 顶卡是页面级卡框，不随鼠标抬起（.player-card:hover 的 -2px 位移只属于列表里的小卡） */
+.player-hero:hover {
+  transform: none;
+  box-shadow: 0 6px 18px rgba(75, 38, 16, 0.12);
+}
+
+/* 顶卡左格：名字行（h2 + 标记）→ 大数字行 → 元信息行（chips/年龄国籍脚号/花式逆足声望体型/🥇🥈） */
+.player-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.player-hero-id {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.player-hero-id h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+/* 大数字行：CA/PA 28px（.ca-pa）/ 身价 18px（.market-value）沿用卡片旧口径，只把栅格改横排 */
+.player-hero .player-card-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin-bottom: 0;
+}
+
+.player-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.player-hero-facts {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.player-hero-quad {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.player-hero-quad .q-label {
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.player-hero-quad .mono {
+  color: var(--gold-deep);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* 顶卡右格：经纪人性格 + 队徽 64 + 对比入口 */
+.player-hero-side {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-self: end;
+}
+
+/* 对比入口容器在右格内由 flex gap 定位，抵消容器自身的下边距（旧左栏口径） */
+.player-hero .player-card-compare {
+  margin-bottom: 0;
+}
+
+/* 双翼（v6.56.0）：主列 minmax(0,1fr) + 右翼 300px */
+.player-wings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
   align-items: start;
 }
 
-/* 左栏：球员卡 + 六维雷达卡（v3.3.0 把雷达从属性页签搬到球员卡下方） */
-.dossier-side {
+/* 主列 = 页签条 + 页签内容（沿用原 .dossier-file 的卡面口径） */
+.player-main {
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.player-main h3 {
+  margin-top: 0;
+}
+
+/* 右翼：操作区（.side-ops 自带卡面）→ 位置分布 → 身份徽章 → PlayStyles */
+.player-wing {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* 右翼独立卡（位置分布 / 身份徽章 / PlayStyles） */
+.wing-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 10px 12px;
+}
+
+.wing-card-head {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.wing-heat {
+  display: flex;
+  justify-content: center;
+}
+
+/* 身份徽章条目：徽章本体 + 详情文案（无跳转入口；文案即详情） */
+.flag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.flag-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.flag-row .badge {
+  align-self: flex-start;
+}
+
+.flag-note {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .player-card {
@@ -1369,18 +1514,6 @@ table.matches-table-narrow .rating-badge {
   box-shadow: 0 10px 22px rgba(75, 38, 16, 0.16);
 }
 
-.player-card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.player-card-head h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
 /* 官方缩写名（v4.0.0）：显示名是 FC26 派生的完整人名，官方缩写名退到下一行小字。
    em 而不是 px —— 跟着 h2 的字号走，别处改标题大小不用回来改这里。 */
 .official-name {
@@ -1392,25 +1525,8 @@ table.matches-table-narrow .rating-badge {
   color: var(--muted);
 }
 
-.player-card-badges {
-  white-space: nowrap;
-  font-size: 14px;
-}
-
-.player-card-sub {
-  margin: 6px 0 12px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.player-card-numbers {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-/* 对比入口容器（v6.37.0 修）：原先零定义、按钮贴住数字行；只管与上下块的间距 */
+/* 对比入口容器（v6.37.0 修）：原先零定义、按钮贴住数字行；只管与上下块的间距
+   （v6.56.0 起在顶卡右格，间距改由 .player-hero-side 的 gap 管） */
 .player-card-compare {
   margin-bottom: 12px;
 }
@@ -1430,28 +1546,10 @@ table.matches-table-narrow .rating-badge {
   line-height: 1.6;
 }
 
-.player-card-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
 .player-card-agent {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
-}
-
-.dossier-file {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.dossier-file h3 {
-  margin-top: 0;
 }
 
 .fc-archive {
@@ -1830,10 +1928,6 @@ table.matches-table-narrow .rating-badge {
 /* ---- 移动端补充（v0.2.0 新组件） ---- */
 
 @media (max-width: 640px) {
-  .dossier {
-    grid-template-columns: 1fr;
-  }
-
   .club-head-numbers {
     grid-template-columns: 1fr 1fr;
   }
@@ -2250,6 +2344,18 @@ table.matches-table-narrow .rating-badge {
 
 .ledger-balance-sub {
   font-size: 13px;
+}
+
+/* v6.57.0 负可用：中性归因的红字提示（不写「预期收入已收缩」——工资扣穿冻结也会负可用） */
+.ledger-balance-neg {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b3261e;
+}
+
+/* v6.57.0 动用预期收入提示行：出价 / 海捞 / 续约 / 匹配确认区的琥珀色一行 */
+.credit-use-note {
+  color: #92510a;
 }
 
 /* 手账格线：行间淡棕横线（UI_DESIGN §4.2） */
@@ -3029,19 +3135,13 @@ th.num .th-sort {
   opacity: 1;
 }
 
-/* 球员页页签（v0.7.1 d9：合同/属性/成长，左卡常驻） */
+/* 球员页页签（v0.7.1 d9：合同/属性/成长，v6.56.0 起在主列顶部）：.dossier-tabs 同时被球队页/转会台共用 */
 .dossier-tabs {
   margin-bottom: 14px;
 }
 
-/* 属性页签（v0.7.1 d10）：位置矩阵、角色带、星级行、六组细分卡 */
-.pos-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
+/* 属性页签（v0.7.1 d10 → v6.56.0）：位置 chips 已上移顶卡（.pos-chip 类保留）、角色带随 fit 卡退役，
+   星级行并入顶卡；本段只剩位置 chips 与属性组卡网格 */
 .pos-chips {
   display: flex;
   gap: 6px;
@@ -3058,10 +3158,6 @@ th.num .th-sort {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--paper);
-}
-.pos-team {
-  color: var(--muted);
-  font-size: 13px;
 }
 .role-chips {
   display: flex;
@@ -3085,31 +3181,14 @@ th.num .th-sort {
   background: rgba(201, 155, 63, 0.12);
   color: var(--gold-deep);
 }
-.star-line {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 8px 16px;
-  margin-bottom: 14px;
-}
-.star-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.star-cell .mono {
-  font-size: 14px;
-}
+/* 六组属性卡 3 列（v6.56.0：主列独占一翼后 4 列改 3 列，PS 卡搬右翼不再占格）；≤760 组卡 2 列 */
 .attr-group-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-bottom: 14px;
 }
-/* PlayStyles 卡：补第二行 DEF/PHY 右侧那两格（网格第 7 项，跨两列），窄屏整宽 */
-.ps-card {
-  grid-column: span 2;
-}
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .attr-group-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -3162,7 +3241,7 @@ th.num .th-sort {
   color: var(--attr-good);
 }
 
-/* 六维雷达（v0.7.1 d11）：静态 SVG，无动画；v6.2.0 起压进属性页签头部右格 —— 232×156 光图，
+/* 六维雷达（v0.7.1 d11）：静态 SVG，无动画；v6.2.0 起进属性页签头部 → v6.56.0 与 fit 卡并排占主列。
    无卡框（.radar-card 已删）、无文字 legend（.radar-legend 已删），轴标签 = 三字母 + 数值。
    v6.35.0 泛化为四变体共享件（head/big/small/mini）：绘制类统一 radar-*，宽度由变体类或调用方类名给 */
 .radar-svg {
@@ -3170,8 +3249,11 @@ th.num .th-sort {
   flex: none;
   height: auto;
 }
+/* head 变体只在本页属性页签用（对比页走 big/small/mini）：几何仍是 232×156，
+   v6.56.0 放大到 350 宽（≈235 高）——只改布局层宽度，不动 RADAR_GEOM */
 .radar-svg-head {
-  width: 178px;
+  width: 350px;
+  max-width: 100%;
 }
 /* 五档环带（v6.35.0，spec §1.2）：边界 99/80/70/60/50、半径 v/99×R、六边形内叠非圆环；
    tier = 档色（组件内联 style 给色，顶环即外框），neutral = 中性纸灰（对比页叠色/并排下档色会糊） */
@@ -3237,7 +3319,8 @@ th.num .th-sort {
 }
 
 /* 位置热区图（v6.35.0，spec §1.1）：12 块拓扑 + 三态着色；语义 = 可踢位置分布（不是比赛跑动热图）。
-   渲染 147×120 与雷达 178×120 等高并排；类名前缀 heat- 防连坐（v3.4.0 .pos-chip 教训） */
+   默认渲染 147×120（对比页）；球员页右翼「位置分布」用 .heat-wing 放到 264 宽（v6.56.0）。
+   类名前缀 heat- 防连坐（v3.4.0 .pos-chip 教训） */
 .heat-svg {
   width: 147px;
   height: auto;
@@ -3273,40 +3356,163 @@ th.num .th-sort {
   fill: #fff;
 }
 
-/* 属性页签头部（v6.2.0 两栏 → v6.35.0 三列）：左 = 标题/位置/角色，中 = 位置热区图，右 = 队徽 96px + 雷达；
-   星级行与属性卡网格不在这个 grid 里，保持整宽。无位置码时不渲染热区图（attr-head-noheat 回两列） */
-.attr-head {
+/* 属性页签雷达行（v6.56.0）：雷达（head 变体 350 宽）+ fit 适配度卡并排；窄了自动折行（fit 卡掉到雷达下方） */
+.player-radar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+/* fit 适配度卡（v6.56.0，口径照 web/src/lib/fit/fitScore.ts 双指标）：
+   rankShown 绝对分主数字 + fitTile 个人内百分位色点（绿 ≥85 / 黄 ≥50 / 灰 ＜50，阈值见 lib/fit/dot.ts）。
+   卡头一行图例；无数据（attrs 缺键）整卡不渲染（由组件门控，这里只管样式）。 */
+.fit-card {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+
+.fit-card-head {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.fit-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: 104px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
 }
-.attr-head-noheat {
-  grid-template-columns: minmax(0, 1fr) auto;
+
+.fit-key {
+  font-weight: 700;
+  white-space: nowrap;
 }
-/* 宽屏 display:contents ⇒ 热区图与 .attr-head-side 各自占一列；≤760px 折成并排居中一行 */
-.attr-head-visual {
-  display: contents;
+
+.fit-key small {
+  display: block;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--muted);
 }
-.attr-head-side {
+
+/* 分值条：槽底用草皮纸色（与 .heat-pitch 同源），填充色套 attrClass 五档 */
+.fit-bar {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: #f3ead9;
+  overflow: hidden;
+}
+
+.fit-bar i {
+  display: block;
+  height: 100%;
+  background: var(--attr-mid);
+}
+
+.fit-bar i.attr-bad {
+  background: var(--attr-bad);
+}
+
+.fit-bar i.attr-weak {
+  background: var(--attr-weak);
+}
+
+.fit-bar i.attr-mid {
+  background: var(--attr-mid);
+}
+
+.fit-bar i.attr-solid {
+  background: var(--attr-solid);
+}
+
+.fit-bar i.attr-good {
+  background: var(--attr-good);
+}
+
+.fit-val {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 5px;
+  font-weight: 800;
+  font-size: 16px;
 }
-@media (max-width: 760px) {
-  .attr-head {
+
+/* fitTile 个人内百分位色点（三态定稿：绿 ≥85 / 黄 ≥50 / 灰 ＜50，类名来自 lib/fit/dot.ts） */
+.fit-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.fit-dot-good {
+  background: var(--attr-good);
+}
+
+.fit-dot-mid {
+  background: var(--attr-mid);
+}
+
+.fit-dot-low {
+  background: var(--border);
+}
+
+.fit-legend {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* 位置热区图在右翼「位置分布」卡里（v6.56.0：从属性页签头部搬来，264 宽；320 见文末断点块） */
+.heat-svg.heat-wing {
+  width: 264px;
+  max-width: 100%;
+}
+
+/* 球员页重排断点（v6.56.0）：1440 桌面基准 / 1050 双翼塌单列 / 760 顶卡折行 + 组卡 2 列
+   （组卡规则在 .attr-group-grid 段）/ 320 单列基线（雷达 200、热区 170，不得横向溢出） */
+@media (max-width: 1050px) {
+  .player-wings {
     grid-template-columns: 1fr;
   }
-  .attr-head-visual {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
+}
+@media (max-width: 760px) {
+  .player-hero {
+    grid-template-columns: 1fr;
   }
-  .attr-head-side {
-    justify-content: center;
+  /* ≤760 右格折满整行；320 档经纪人/队徽/对比入口挤不下时换行（不得横向溢出） */
+  .player-hero-side {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 320px) {
+  .player-radar-row {
+    flex-direction: column;
+    align-items: center;
+  }
+  .radar-svg-head {
+    width: 200px;
+  }
+  .fit-card {
+    width: 100%;
+  }
+  .heat-svg.heat-wing {
+    width: 170px;
   }
 }
 
@@ -4703,22 +4909,15 @@ th.num .th-sort {
 
 /* ============================================================================
    v6.22.0 窄屏整治第三批（球员公开页事件卡 + 参考型宽表粘列）。新块集中在本段末尾，桌面零变化：
-   ① 球员卷宗单列 ≤900（.dossier 由 280px 1fr 塌成单列）
-   ② 卷宗页签横滑 ≤760（只命中 .dossier-tabs，不动全局 .seg）
+   ① 球员卷宗单列 ≤900 —— 已随 v6.56.0 全页重排退役（.dossier 双栏换成顶卡 + 双翼，断点见 .player-wings 段）
+   ② 卷宗页签横滑 ≤760（只命中 .dossier-tabs，不动全局 .seg；球队页/转会台/球员页三处共用）
    ③ 事件卡片流 ≤760（Player.tsx 转会/成长两表 narrow 分支，与桌面表格 DOM 互斥）
    ④ 参考型宽表粘前两列 ≤760（.table-sticky-2：市场情报成交表 / 出价历史；阵容名单 v6.37.0 已弃表改卡）
    ⑤ Toast 让位（点击穿透 + 成长录入汇总条在场时上抬）
    ============================================================================ */
 
-/* ---- ① 球员卷宗单列（v6.22.0）---------------------------------------------
-   ≤900 卷宗从「左球员卡 280px + 右页签区」塌成单列（900 是既有档位，不是新断点）。
-   >900（含 1280 桌面）仍是 280px 1fr，零变化。原 ≤640 补充块里的 .dossier 单列规则保留不动：
-   那个块还带着 .club-head-numbers / .inline-form / .code-display 三条，不能整块改断点。 */
-@media (max-width: 900px) {
-  .dossier {
-    grid-template-columns: 1fr;
-  }
-}
+/* ---- ① 球员卷宗单列（v6.22.0，v6.56.0 退役）---------------------------------
+   .dossier 双栏与 .dossier-side 已随全页重排删除；单列塌缩改由 .player-wings 的 1050 断点承担。 */
 
 /* ---- ② 卷宗页签横滑（v6.22.0）---------------------------------------------
    ≤760 四个页签并排会挤出视口：整条 .dossier-tabs 改成横向滚动（子项不收缩 + 细滚动条）。

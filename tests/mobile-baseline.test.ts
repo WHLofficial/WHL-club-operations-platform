@@ -6,8 +6,9 @@
 // - TC-ENT-03/09、TC-REG-02、TC-BRD-02、TC-IMP-03（P1-2：测试计划承诺的静态用例落地）——
 //   卡片流类名契约与窄屏/桌面互斥、inputMode、卡片状态枚举、品牌卡对等元信息行、imports 表单重排。
 // v6.22.0 增补（计划 docs/test-plans/v6.22.0-public-reading-mobile.md，spec §4）：
-// - 公开阅读页（Player 事件卡 / table-sticky-2 三表 / TopBar 渐隐提档 ≤1024 / toast 让位 / dossier 900 档）
-//   的静态契约；e2e ⑯ 只在真渲染时红，这里兜「类名/规则被下批重构删掉」的回归。
+// - 公开阅读页（Player 事件卡 / table-sticky-2 三表 / TopBar 渐隐提档 ≤1024 / toast 让位）的静态契约；
+//   e2e ⑯ 只在真渲染时红，这里兜「类名/规则被下批重构删掉」的回归。
+// v6.56.0 改写：旧 dossier 900 单列档随球员页全页重排退役，改钉 .player-wings 的 1050 双翼临界。
 // v6.30.0 增补（C 段：球队详情页两张球员表列集重定）：TC-STK 粘性列位平移用例——
 //   已于 v6.37.0 被改写（两表弃表改卡，原「钉标记/号码/姓名」「钉分配/姓名」断言整体作废，
 //   换成弃表 + 死选择器回归锁，见下方 v6.37.0 describe 内用例）。
@@ -674,15 +675,18 @@ describe('v6.22.0 公开阅读窄屏静态契约（docs/test-plans/v6.22.0-publi
     ).toBe(true);
   });
 
-  it('公开阅读 · dossier 单列断点 640→900：900 块单列规则在场（TC-PLR）', () => {
+  it('公开阅读 · 球员页双翼单列断点 1050：.player-wings 单列规则在场（TC-PLR，v6.56.0 替代旧 dossier 900 档）', () => {
     const css = read(STYLES_CSS);
-    // 块头注释锚（P2-3：lastIndexOf 在文件尾部追加新 900 块时会锚错块，与 TC-IMP-03 同款隐患）
-    const anchor = css.indexOf('/* ---- ① 球员卷宗单列（v6.22.0）');
-    expect(anchor, 'styles.css 找不到 ① dossier 块头注释——块被改名/挪动，锚点需同步').toBeGreaterThan(-1);
-    const start = css.indexOf('@media', anchor);
-    const next = css.indexOf('@media', start + 1);
-    const block = css.slice(start, next === -1 ? undefined : next);
-    expect(block, '≤900 块缺 .dossier 单列 grid 规则').toMatch(/\.dossier\s*\{[^}]*grid-template-columns:[^;}]*1fr/);
+    // v6.56.0 全页重排：旧 .dossier 双栏与它的 900 单列档退役，单列塌缩改由 .player-wings 的 1050 断点承担。
+    // 块体 = 首个 @media 起到下一个 @media（与下方②③④同一手法）。
+    const at = css.indexOf('@media (max-width: 1050px)');
+    expect(at, 'styles.css 找不到 (max-width: 1050px) 块——双翼临界断点被删/改').toBeGreaterThan(-1);
+    const after = css.slice(at + '@media (max-width: 1050px)'.length);
+    const next = after.indexOf('@media');
+    const block = next === -1 ? after : after.slice(0, next);
+    expect(block, '≤1050 块缺 .player-wings 单列 grid 规则').toMatch(/\.player-wings\s*\{[^}]*grid-template-columns:\s*1fr/);
+    // 旧档必须退役：全文不得再出现任何 .dossier 布局规则（双份单列规则会让 900–1050 区间行为不明）
+    expect(css, 'styles.css 仍有旧 .dossier 布局规则（v6.56.0 应退役）').not.toMatch(/\.dossier\s*\{[^}]*grid-template-columns/);
   });
 
   it('公开阅读 · 媒体块归属（P1-1/P2-1）：② 页签横滑 / ③ 事件卡 / ④ sticky-2 规则必须钉在各自的 ≤760 块内', () => {

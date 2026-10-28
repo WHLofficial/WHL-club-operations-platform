@@ -2620,9 +2620,9 @@ async function main() {
         return p ? (p.fcId ?? p.id) : null;
       });
       assert(pid, '取样球员失败（/api/players?limit=1 无数据）——⑯ 玩家页断言前提不成立');
-      // v6.35.0：属性页签头部（位置热区图 + 六维雷达）整块挂在 player.gameAttrs 上，本地夹具只有个别球员
-      // 带 FC 存档（9001-9006 全 NULL）⇒ 先探一个「有存档的球员」来验头部几何，取样球员本身按实际存档态
-      // 断言（无存档 ⇒ 不出 .attr-head 的空态闸门）。attrsPos 与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径。
+      // v6.35.0 探针（v6.56.0 沿用）：雷达/属性组卡整块挂在 player.gameAttrs 上，本地夹具只有个别球员
+      // 带 FC 存档（9001-9006 全 NULL）⇒ 先探一个「有存档的球员」来验几何，取样球员本身按实际存档态
+      // 断言（无存档 ⇒ 不出 .player-radar-row 的空态闸门）。attrsPos 与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径。
       const attrProbe = await page.evaluate(async ([first, posIds]) => {
         const r = await fetch('/api/players?limit=30');
         const ids = r.ok ? ((await r.json()).players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null) : [];
@@ -2651,14 +2651,14 @@ async function main() {
         return { attrsPid, pidAttrs, attrsPos };
       }, [pid, POSITION_IDS]);
 
-      // —— 375：档案单列（900 档）+ 页签不撑破文档 + 转会事件卡互斥且 fit ——
+      // —— 375：双翼塌单列（v6.56.0 断点 1050）+ 页签不撑破文档 + 转会事件卡互斥且 fit ——
       await page.setViewportSize({ width: 375, height: 812 });
       await page.goto(`${BASE}/players/${pid}`, { waitUntil: 'networkidle' });
       const d375 = await page.evaluate(() => {
-        const d = document.querySelector('.dossier');
-        return d ? getComputedStyle(d).gridTemplateColumns : null;
+        const w = document.querySelector('.player-wings');
+        return w ? getComputedStyle(w).gridTemplateColumns : null;
       });
-      assert(d375 && !d375.includes(' '), `375 .dossier 应单列（grid-template-columns="${d375}"）`);
+      assert(d375 && !d375.includes(' '), `375 .player-wings 应塌单列（grid-template-columns="${d375}"）`);
       const ovTabs = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
@@ -2691,34 +2691,39 @@ async function main() {
         return { vw, bad };
       });
       assert(fit.bad.length === 0, `375 事件卡超出视口 ±1px：${fit.bad.join(',')}（vw=${fit.vw}）`);
-      // 属性页签（v6.35.0）：头部 = 位置热区图 + 队徽 + 六维雷达（共享件 AttrRadar variant=head）。
-      // 头部整块只在有 FC 存档时渲染 ⇒ 取样球员无存档时这里只钉空态闸门，头部几何挪到 ⑯ 末段
-      // 用探到的有存档球员验（热区图取决于位置数据 ⇒ 钉「两态之一 + 自洽」，不硬钉有热区）。
+      // 属性页签（v6.56.0）：主列 = 雷达 + fit 适配度卡并排，右翼「位置分布」= 热区图（不再挂在页签头部）。
+      // 雷达/组卡只在有 FC 存档时渲染 ⇒ 取样球员无存档时这里只钉空态闸门，几何挪到 ⑯ 末段用有存档球员验
+      //（热区图取决于位置数据 ⇒ 钉「两态之一 + 自洽」，不硬钉有热区）。
       await page.locator('.dossier-tabs button', { hasText: '属性' }).first().click();
       await page.waitForTimeout(200);
       if (attrProbe.pidAttrs) {
-        await page.locator('.attr-head').first().waitFor({ timeout: TIMEOUT });
+        await page.locator('.player-radar-row').first().waitFor({ timeout: TIMEOUT });
         const head = await page.evaluate(() => {
-          const el = document.querySelector('.attr-head');
-          if (!el) return null;
+          const row = document.querySelector('.player-radar-row');
+          if (!row) return null;
+          const radar = row.querySelector('svg.radar-svg-head');
           return {
-            noheat: el.classList.contains('attr-head-noheat'),
-            heat: el.querySelectorAll('.attr-head-visual svg.heat-svg').length,
-            blocks: el.querySelectorAll('.attr-head-visual rect.heat-block').length,
-            bands: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-band').length,
-            data: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-data').length,
-            dots: el.querySelectorAll('.attr-head-visual svg.radar-svg-head circle.radar-dot').length,
+            heat: document.querySelectorAll('.wing-heat svg.heat-svg.heat-wing').length,
+            blocks: document.querySelectorAll('.wing-heat rect.heat-block').length,
+            fit: document.querySelectorAll('.fit-card .fit-row').length,
+            bands: radar ? radar.querySelectorAll('polygon.radar-band').length : 0,
+            data: radar ? radar.querySelectorAll('polygon.radar-data').length : 0,
+            dots: radar ? radar.querySelectorAll('circle.radar-dot').length : 0,
           };
         });
-        assert(head && head.bands === 5 && head.dots === head.data * 6, `属性页签头部六维雷达形状不对（${JSON.stringify(head)}）`);
+        assert(head && head.bands === 5 && head.dots === head.data * 6, `属性页签雷达形状不对（${JSON.stringify(head)}）`);
         assert(
-          head && (head.noheat ? head.heat === 0 : head.heat === 1 && head.blocks === 12),
-          `属性页签头部热区图与空态标记不自洽（${JSON.stringify(head)}）`,
+          head && (attrProbe.attrsPos ? head.heat === 1 && head.blocks === 12 : head.heat === 0),
+          `右翼位置分布与位置数据不自洽（${JSON.stringify(head)}）`,
         );
+        assert(head && head.fit <= 4, `fit 适配度卡最多 4 条（实见 ${head?.fit}）`);
+        if (!head || head.fit === 0) console.warn('（⑯ 备注：该球员 attrs 齐备但缺 fit 引擎键，fit 卡整卡不渲染——组件单测已锁）');
       } else {
-        const heads = await page.locator('.attr-head').count();
-        assert(heads === 0, `无 FC 存档的球员不该渲染属性页签头部（实见 ${heads} 块）`);
-        console.warn('（⑯ 备注：本地取样球员无 FC 存档，属性页签只验空态闸门；头部几何挪到末段用有存档球员验）');
+        const rows = await page.locator('.player-radar-row').count();
+        assert(rows === 0, `无 FC 存档的球员不该渲染属性页签雷达行（实见 ${rows} 块）`);
+        const heat = await page.locator('.wing-heat').count();
+        assert(heat === 0, `无 FC 存档的球员不该渲染右翼位置分布（实见 ${heat} 块）`);
+        console.warn('（⑯ 备注：本地取样球员无 FC 存档，属性页签只验空态闸门；雷达/热区几何挪到末段用有存档球员验）');
       }
       const ovAttr = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -2732,33 +2737,35 @@ async function main() {
       );
       assert(ovGrow <= 1, `375 成长页签文档级横向溢出 ${ovGrow}px`);
 
-      // —— 768：900 档单列保持 + 表格分支回归（>760）——
+      // —— 768：双翼仍单列（≤1050）+ 表格分支回归（>760）——
       await page.setViewportSize({ width: 768, height: 900 });
       await page.locator('.dossier-tabs button', { hasText: '转会' }).first().click();
       await page.waitForTimeout(200);
       const d768 = await page.evaluate(() => {
-        const d = document.querySelector('.dossier');
+        const w = document.querySelector('.player-wings');
         return {
-          cols: d ? getComputedStyle(d).gridTemplateColumns : null,
+          cols: w ? getComputedStyle(w).gridTemplateColumns : null,
           cards: document.querySelectorAll('.event-card').length,
           tbl: document.querySelectorAll('.transfer-table').length,
         };
       });
-      assert(d768.cols && !d768.cols.includes(' '), `768 .dossier 应仍单列（900 档覆盖）（="${d768.cols}"）`);
+      assert(d768.cols && !d768.cols.includes(' '), `768 .player-wings 应仍单列（1050 断点覆盖）（="${d768.cols}"）`);
       assert(d768.tbl > 0 && d768.cards === 0, `768 应回表格分支（transfer-table=${d768.tbl} event-cards=${d768.cards}）`);
 
-      // —— 1280：桌面双栏 280px+1fr + 表格分支 ——
+      // —— 1280：桌面双翼 1fr+300px + 顶卡 hero 在场 + 表格分支 ——
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.waitForTimeout(200);
       const d1280 = await page.evaluate(() => {
-        const d = document.querySelector('.dossier');
+        const w = document.querySelector('.player-wings');
         return {
-          cols: d ? getComputedStyle(d).gridTemplateColumns : null,
+          cols: w ? getComputedStyle(w).gridTemplateColumns : null,
+          hero: document.querySelectorAll('.player-hero').length,
           cards: document.querySelectorAll('.event-card').length,
           tbl: document.querySelectorAll('.transfer-table').length,
         };
       });
-      assert(d1280.cols && d1280.cols.startsWith('280px'), `1280 .dossier 应双栏 280px+1fr（="${d1280.cols}"）`);
+      assert(d1280.cols && d1280.cols.trim().endsWith('300px'), `1280 .player-wings 应双翼 1fr+300px（="${d1280.cols}"）`);
+      assert(d1280.hero === 1, `1280 顶卡 hero 应恰 1 块（实见 ${d1280.hero}）`);
       assert(d1280.tbl > 0 && d1280.cards === 0, `1280 应表格分支（transfer-table=${d1280.tbl} event-cards=${d1280.cards}）`);
 
       // —— 375 /market/intel：成交表粘前两列（本地 4 条 completed ⇒ 表非空）——
@@ -2816,54 +2823,79 @@ async function main() {
         assert(wide2 === 'static', `1280 intel 应取消粘性（computed=${wide2}）`);
       }
 
-      // —— 属性页签头部几何（v6.35.0）：用探到的有存档球员验真图（上面 375 段若取样球员无存档就只跑了空态闸门）——
+      // —— 属性页签几何（v6.56.0）：用探到的有存档球员验真图（上面 375 段若取样球员无存档就只跑了空态闸门）——
       if (!attrProbe.attrsPid) {
-        console.warn('（⑯ 备注：本地没有带 FC 存档的球员，属性页签头部几何断言整体跳过——静态闸门与单测兜底）');
+        console.warn('（⑯ 备注：本地没有带 FC 存档的球员，属性页签几何断言整体跳过——静态闸门与单测兜底）');
       } else {
         await page.setViewportSize({ width: 375, height: 812 });
         await page.goto(`${BASE}/players/${attrProbe.attrsPid}`, { waitUntil: 'networkidle' });
         await page.locator('.dossier-tabs button', { hasText: '属性' }).first().click();
-        await page.locator('.attr-head').first().waitFor({ timeout: TIMEOUT });
+        await page.locator('.player-radar-row').first().waitFor({ timeout: TIMEOUT });
         const h375 = await page.evaluate(() => {
-          const el = document.querySelector('.attr-head');
-          const vis = document.querySelector('.attr-head-visual');
-          if (!el || !vis) return null;
+          const row = document.querySelector('.player-radar-row');
+          const radar = row?.querySelector('svg.radar-svg-head');
+          if (!row || !radar) return null;
           return {
-            cols: getComputedStyle(el).gridTemplateColumns,
-            vis: getComputedStyle(vis).display,
-            noheat: el.classList.contains('attr-head-noheat'),
-            heat: el.querySelectorAll('.attr-head-visual svg.heat-svg').length,
-            blocks: el.querySelectorAll('.attr-head-visual rect.heat-block').length,
-            main: el.querySelectorAll('.attr-head-visual text.heat-code.heat-main').length,
-            bands: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-band').length,
-            data: el.querySelectorAll('.attr-head-visual svg.radar-svg-head polygon.radar-data').length,
-            dots: el.querySelectorAll('.attr-head-visual svg.radar-svg-head circle.radar-dot').length,
+            heat: document.querySelectorAll('.wing-heat svg.heat-svg.heat-wing').length,
+            blocks: document.querySelectorAll('.wing-heat rect.heat-block').length,
+            main: document.querySelectorAll('.wing-heat text.heat-code.heat-main').length,
+            fit: document.querySelectorAll('.fit-card .fit-row').length,
+            bands: radar.querySelectorAll('polygon.radar-band').length,
+            data: radar.querySelectorAll('polygon.radar-data').length,
+            dots: radar.querySelectorAll('circle.radar-dot').length,
             ov: document.documentElement.scrollWidth - document.documentElement.clientWidth,
           };
         });
-        assert(h375 && !h375.cols.includes(' '), `375 属性页签头部应单列（grid-template-columns="${h375?.cols}"）`);
-        assert(h375 && h375.vis === 'flex', `375 .attr-head-visual 应折成 flex 换行行（display=${h375?.vis}）`);
-        assert(h375 && h375.bands === 5 && h375.dots === h375.data * 6, `375 属性页签头部六维雷达形状不对（${JSON.stringify(h375)}）`);
+        assert(h375 && h375.bands === 5 && h375.dots === h375.data * 6, `375 属性页签雷达形状不对（${JSON.stringify(h375)}）`);
         if (attrProbe.attrsPos) {
           // 探针说这名球员有位置数据 ⇒ 热区图必在，且主位恰 1 块（heatStateOf：首枚有效位置码 = main）
-          assert(
-            h375 && !h375.noheat && h375.heat === 1 && h375.blocks === 12,
-            `有位置数据的球员头部应出 12 块热区图（${JSON.stringify(h375)}）`,
-          );
+          assert(h375 && h375.heat === 1 && h375.blocks === 12, `有位置数据的球员右翼应出 12 块热区图（${JSON.stringify(h375)}）`);
           assert(h375 && h375.main === 1, `热区图主位应恰 1 块（实见 main=${h375?.main}）`);
         } else {
-          assert(h375 && h375.noheat && h375.heat === 0, `无位置数据的球员头部应走 .attr-head-noheat 回退（${JSON.stringify(h375)}）`);
+          assert(h375 && h375.heat === 0, `无位置数据的球员右翼不应出热区图（${JSON.stringify(h375)}）`);
         }
-        assert(h375 && h375.ov <= 1, `375 属性页签头部横向溢出 ${h375?.ov}px`);
+        assert(h375 && h375.fit <= 4, `375 fit 适配度卡最多 4 条（实见 ${h375?.fit}）`);
+        assert(h375 && h375.ov <= 1, `375 属性页签横向溢出 ${h375?.ov}px`);
+        // 320 单列基线（TC-C-024）：最窄档零横向溢出 + 雷达行折纵向 + fit 卡不超上限
+        await page.setViewportSize({ width: 320, height: 700 });
+        await page.waitForTimeout(200);
+        const h320 = await page.evaluate(() => {
+          const row = document.querySelector('.player-radar-row');
+          return {
+            dir: row ? getComputedStyle(row).flexDirection : null,
+            fit: document.querySelectorAll('.fit-card .fit-row').length,
+            ov: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          };
+        });
+        assert(h320 && h320.ov <= 1, `320 球员页文档级横向溢出 ${h320?.ov}px（最坏情况主锁）`);
+        assert(h320 && h320.dir === 'column', `320 属性页签雷达行应折纵向（flex-direction=${h320?.dir}）`);
+        assert(h320 && h320.fit <= 4, `320 fit 卡条目最多 4 条（实见 ${h320?.fit}）`);
         await page.setViewportSize({ width: 1280, height: 900 });
         await page.waitForTimeout(200);
         const h1280 = await page.evaluate(() => {
-          const el = document.querySelector('.attr-head');
-          const vis = document.querySelector('.attr-head-visual');
-          return el && vis ? { cols: getComputedStyle(el).gridTemplateColumns.split(' ').length, vis: getComputedStyle(vis).display } : null;
+          const row = document.querySelector('.player-radar-row');
+          const radar = row?.querySelector('svg.radar-svg-head');
+          const fit = document.querySelector('.fit-card');
+          const side = document.querySelector('.player-wing');
+          const main = document.querySelector('.player-main');
+          if (!row || !radar || !fit || !side || !main) return null;
+          const rr = radar.getBoundingClientRect();
+          const fr = fit.getBoundingClientRect();
+          return {
+            radarW: rr.width,
+            sameRow: Math.abs(rr.top - fr.top) <= 1,
+            wingFirst: side.firstElementChild?.className ?? '',
+            wingRight: side.getBoundingClientRect().left > main.getBoundingClientRect().left,
+          };
         });
-        assert(h1280 && h1280.vis === 'contents', `1280 .attr-head-visual 应 display:contents（=${h1280?.vis}）——三列靠它让热区图/雷达各占一列`);
-        assert(h1280 && h1280.cols === (attrProbe.attrsPos ? 3 : 2), `1280 .attr-head 应是 ${attrProbe.attrsPos ? 3 : 2} 列（实见 ${h1280?.cols}）`);
+        assert(h1280 && h1280.radarW >= 330, `1280 雷达应 ≥330 宽（实见 ${h1280?.radarW}px）——旧 178×120 的整改目标`);
+        assert(h1280 && h1280.sameRow, '1280 雷达与 fit 卡应并排同一行（>1050 双翼）');
+        assert(h1280 && h1280.wingRight, '1280 右翼应在主列右侧（1fr | 300px 双翼）');
+        // 操作区置顶右翼：SideOps 根节点 .side-ops 是右翼第一格（组件始终渲染该根节点）
+        assert(
+          h1280 && String(h1280.wingFirst).includes('side-ops'),
+          `1280 右翼第一格应是 SideOps 操作区（实见 class="${h1280?.wingFirst}"）`,
+        );
       }
     });
 

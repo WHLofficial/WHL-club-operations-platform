@@ -1,5 +1,8 @@
-// 球员卡（UI_DESIGN §4.2 .dossier：左球员卡常驻 + 右页签区，v0.7.1 d9 改 E2 页内页签：
-// 合同=合同卷宗；属性=FC 源数据（细分属性/位置/角色/花式逆足等）；成长=XP 记录与升级；转会记录=单据流水）
+// 球员页（v6.56.0 全页重排，计划 memory/plan-v6.55.0-attr-head-relayout.md）：顶卡 hero + 双翼——
+// 顶卡 = 贴纸卡框 .player-card 摊平（名字/官方缩写名/标记 | CA·PA·身价 | 位置 chips + 年龄/国籍/脚/# +
+// 花式·逆足·声望·体型 + 🥇🥈 | 经纪人性格 + 队徽 64 + 对比入口）；
+// 主列 = 页签条（合同=合同卷宗；属性=FC 源数据（雷达 + fit 适配度卡 + 六组细分属性）；成长=XP 记录与升级；
+// 转会记录=单据流水；比赛=逐场流水）；右翼 = SideOps 操作区（置顶）→ 位置分布热区图 → 身份徽章 → PlayStyles。
 // 成长记录区（§10）：XP 进度条、升级方案二选一（本队教练/管理组）、徽章墙、事件时间线
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -12,6 +15,7 @@ import {
   type GrowthDetail,
   type LevelUpResult,
   type MyClubOverview,
+  type PlayerDetail,
   type PlayerMatchesResponse,
   type PlayerTransfersResponse,
   type TierConditionDetail,
@@ -26,12 +30,21 @@ import {
   nationName,
   playstyleBadges,
   positionName,
-  roleChs,
-  teamName,
 } from '../lib/ref.ts';
 // 状态词统一用球员库那套（v6.2.0 两表合一：ref.ts 的旧表已删，normal=在队 / free=自由身）
-// attrClass 五档分段（v6.19.0 全仓统一口径）也在这里
-import { MARKER_EMOJI, MARKER_LABEL, STATUS_LABEL, attrClass } from '../lib/players-library.ts';
+// attrClass 五档分段（v6.19.0 全仓统一口径）也在这里；STATUS_LABEL 已随顶卡状态徽章下沉退役（v6.56.0）
+import { MARKER_EMOJI, MARKER_LABEL, attrClass } from '../lib/players-library.ts';
+// FIT 适配度卡（v6.56.0 移植引擎落 web/src/lib/fit/）：fit 卡数据源与色点三态阈值
+import { fitDotClass } from '../lib/fit/dot.ts';
+import {
+  fitPosGroup,
+  fitProfileAll,
+  fitTile,
+  type FitGroup,
+  type FitProfile,
+  type FitSlotScore,
+} from '../lib/fit/fitScore.ts';
+import { ROLE_FIT } from '../lib/fit/roleFit.ts';
 // 雷达辅助（v6.34.0 提取共享件）：starText/groupAverage/axesFor 改从 lib/radar.ts 引入
 import { axesFor, groupAverage, starText } from '../lib/radar.ts';
 // 档位条件短标签（v6.48.0 §10.3）：与管理端「成长档位」页共用
@@ -316,8 +329,17 @@ export default function Player() {
   }
   const attrs = player.gameAttrs ?? {};
   const nation = nationName(attrs['naID']);
+  // 位置 chips / 门将判据 / 体测四项（v6.56.0 从属性页签头部提到页面级）：顶卡与右翼热区图共用同一份
+  const posChips = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
+    .map((k) => positionName(attrs[k]))
+    .filter((v): v is string => v !== null);
+  const isGk = player.position === 'GK';
+  const weakfoot = Number(attrs['weakfoot']);
+  const skillmoves = Number(attrs['skillmoves']);
   // 队徽与 CPU 判据（v6.2.0）：公开球队列表里查现属俱乐部；列表没回（缓存未落）时按真人队兜底
   const clubInfo = club ? (clubsListQuery.data?.clubs.find((s) => s.id === club.id) ?? null) : null;
+  // 队徽图 key（v6.56.0 顶卡 hero 用）：没拿到时 TeamLogo 自动回落队名哈希色块，与列表/详情同色
+  const crestLogoKey = clubInfo?.logoKey ?? null;
   // 左栏五态判据：本队 = 登录教练且现属俱乐部就是我的队；「非卖品」字段后端还没有（v6.3.0 报价子系统），运行时暂不可达
   const isMine = club !== null && myClubId === club.id;
   const isCpu = clubInfo?.isCpu ?? false;
@@ -344,133 +366,121 @@ export default function Player() {
           '球员合同'
         )}
       </p>
-      <div className="dossier">
-        <div className="dossier-side">
-          <section className="player-card">
-            <div className="player-card-head">
-              <h2>
-                {player.name}
-                {/* 官方缩写名（v4.0.0）：显示名派生自 FC26 存档，与 FC26db 的官方缩写名不同时
-                    在下面列一行小字——库里认人仍按官方名（`E. Haaland`），只是不再当标题 */}
-                {player.officialName !== undefined && player.officialName !== player.name && (
-                  <span className="official-name">{player.officialName}</span>
-                )}
-              </h2>
-              <span className="player-card-badges">
-                {/* 标记（v6.5.0）：规则 4.2.2 三档互斥切分，悬停出全称；不落档不显示 */}
-                {player.marker && (
-                  <span className="player-marker" title={`标记：${MARKER_LABEL[player.marker]}`}>
-                    {MARKER_EMOJI[player.marker]}
-                  </span>
-                )}
-                {/* 徽章计数（v6.35.0 统一走 BadgeCounts）：金在前、零值抑制，title 由组件挂 */}
-                <BadgeCounts silver={player.badgesSilver} gold={player.badgesGold} density="icon" />
-              </span>
-            </div>
-            <p className="player-card-sub">
-              {player.position ?? '位置待定'} · {nation ?? '国籍未知'} · {player.age ?? '—'} 岁 ·{' '}
-              {player.foot === 1 ? '右脚' : '左脚'}
-            </p>
-            <div className="player-card-numbers">
-              <div>
-                <span className="stat-label">CA</span>
-                <span className={`mono ca-pa ${attrClass(player.ca)}`}>{player.ca}</span>
-              </div>
-              <div>
-                <span className="stat-label">PA</span>
-                <span className={`mono ca-pa ${attrClass(player.pa)}`}>{player.pa}</span>
-              </div>
-              <div>
-                <span className="stat-label">身价</span>
-                <span className="mono market-value">
-                  {player.marketValue === null ? '未定价' : `${player.marketValue.toFixed(2)}m`}
-                </span>
-              </div>
-            </div>
-            {/* 对比入口（v6.34.0 步骤 7 · 入口 B，spec §1；v6.37.0 改页内浮层选人）：
-                球员卡 CA/PA 数字行下方，点开浮层搜人、确认后进对比页。
-                fc_id 缺失的长尾球员整块不渲染——对比页与球员 URL 都按 fc_id 寻址，
-                拿内部 id 拼链接会落 404 */}
-            {player.fcId !== null && (
-              <div className="player-card-compare">
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={(e) => {
-                    // 开浮层的这次 click 不能再冒泡：浮层在本按钮的 React 子树里挂 portal，
-                    // 事件穿 portal 根（onClick=onClose）会把刚开的浮层立刻关掉
-                    e.stopPropagation();
-                    setPickerOpen(true);
-                  }}
-                >
-                  ⇄ 加入对比
-                </button>
-                {pickerOpen && (
-                  <ComparePickerOverlay
-                    own={{ fcId: player.fcId, name: player.name }}
-                    onConfirm={(ids) => {
-                      setPickerOpen(false);
-                      navigate(`/players/compare?ids=${ids.join(',')}`);
-                    }}
-                    onClose={() => setPickerOpen(false)}
-                  />
-                )}
-              </div>
-            )}
-            <div className="player-card-foot">
-              <span className={`badge ${player.status === 'listed' ? 'sky' : player.status === 'trainee' ? 'purple' : 'gray'}`}>
-                {STATUS_LABEL[player.status] ?? player.status}
-              </span>
-              {/* 「不满」徽章（v6.54.0 §5.4 三件套之三）：与挂牌中/谈判中同级的状态位，全联盟可见，重签/离队才摘 */}
-              {player.unsatisfied === true && (
-                <span className="badge red" title="他已被明确放行且尚未重签——任何球队可按违约金原价激活，直到重签或离队">
-                  不满
-                </span>
+      {/* 顶卡 hero（v6.56.0）：原左栏球员卡摊平，贴纸卡框 .player-card 保留。
+          左 = 名字+官方缩写名+标记 / CA·PA·身价 / 位置 chips+年龄·国籍·脚·#号+花式·逆足·声望·体型+🥇🥈；
+          右 = 经纪人性格 + 队徽 64 + 对比入口。状态徽章下沉右翼身份徽章卡（拍板⑧）。 */}
+      <section className="player-card player-hero">
+        <div className="player-hero-main">
+          <div className="player-hero-id">
+            <h2>
+              {player.name}
+              {/* 官方缩写名（v4.0.0）：显示名派生自 FC26 存档，与 FC26db 的官方缩写名不同时
+                  在下面列一行小字——库里认人仍按官方名（`E. Haaland`），只是不再当标题 */}
+              {player.officialName !== undefined && player.officialName !== player.name && (
+                <span className="official-name">{player.officialName}</span>
               )}
-              {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}
-              {player.isFutureStar && <span className="badge gold">未来之星</span>}
-              {player.chinaPlan && <span className="badge red">中国计划</span>}
-              {player.growthTier > 1 && <span className="badge gray">成长档位 {player.growthTier}</span>}
+            </h2>
+            {/* 标记（v6.5.0）：规则 4.2.2 三档互斥切分，悬停出全称；不落档不显示 */}
+            {player.marker && (
+              <span className="player-marker" title={`标记：${MARKER_LABEL[player.marker]}`}>
+                {MARKER_EMOJI[player.marker]}
+              </span>
+            )}
+          </div>
+          <div className="player-card-numbers">
+            <div>
+              <span className="stat-label">CA</span>
+              <span className={`mono ca-pa ${attrClass(player.ca)}`}>{player.ca}</span>
             </div>
-            <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
-          </section>
-
-          <SideOps
-            player={{
-              id: player.id,
-              name: player.name,
-              status: player.status,
-              transferListed: player.transferListed,
-              listPrice: player.listPrice,
-              offerAuto: player.offerAuto,
-              notForSale: player.notForSale,
-              marketValue: player.marketValue,
-            }}
-            contract={contract}
-            contractPending={data.contractPending ?? null}
-            demandState={data.demandState ?? null}
-            isMine={isMine}
-            isFree={club === null}
-            isCpu={isCpu}
-            isCoach={isCoach}
-            myClubId={myClubId}
-            windowOpen={windowOpen}
-            seaSign={data.seaSign}
-            seaComps={data.seaComps}
-            pendingMine={receivedPendingQuery.data?.pendingMine ?? 0}
-            onShowContract={() => {
-              setTab('profile');
-              // 等页签渲染完再滚，避免滚到旧高度（§10.2「看双版本合同 →」的落点）
-              requestAnimationFrame(() => {
-                document.getElementById('contract-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              });
-            }}
-            show={show}
-            refreshAll={refreshAll}
-          />
+            <div>
+              <span className="stat-label">PA</span>
+              <span className={`mono ca-pa ${attrClass(player.pa)}`}>{player.pa}</span>
+            </div>
+            <div>
+              <span className="stat-label">身价</span>
+              <span className="mono market-value">
+                {player.marketValue === null ? '未定价' : `${player.marketValue.toFixed(2)}m`}
+              </span>
+            </div>
+          </div>
+          <div className="player-hero-meta">
+            <span className="pos-chips">
+              {posChips.length > 0 ? (
+                posChips.map((p, i) => (
+                  <span key={p} className={i === 0 ? 'pos-chip pos-chip-main' : 'pos-chip'}>
+                    {p}
+                  </span>
+                ))
+              ) : (
+                <span className="pos-chip">—</span>
+              )}
+            </span>
+            <span className="player-hero-facts">
+              {player.age ?? '—'} 岁 · {nation ?? '国籍未知'} · {player.foot === 1 ? '右脚' : '左脚'} · #{player.number ?? '—'}
+            </span>
+            {/* 花式/逆足/声望/体型（原 star-line 四格并入顶卡，v6.56.0） */}
+            <span className="player-hero-quad">
+              <span className="q-label">花式</span>
+              <span className="mono">{starText(skillmoves)}</span>
+            </span>
+            <span className="player-hero-quad">
+              <span className="q-label">逆足</span>
+              <span className="mono">{starText(weakfoot)}</span>
+            </span>
+            <span className="player-hero-quad">
+              <span className="q-label">声望</span>
+              <span className="mono">{starText(player.prestige ?? NaN)}</span>
+            </span>
+            <span className="player-hero-quad" title="身高 cm / 体重 kg">
+              <span className="q-label">体型</span>
+              <span className="mono">
+                {String(attrs['height'] ?? '—')} / {String(attrs['weight'] ?? '—')}
+              </span>
+            </span>
+            {/* 徽章计数（v6.35.0 统一走 BadgeCounts）：金在前、零值抑制，title 由组件挂 */}
+            <BadgeCounts silver={player.badgesSilver} gold={player.badgesGold} density="icon" />
+          </div>
         </div>
+        <div className="player-hero-side">
+          <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>
+          {/* 队徽（v6.56.0 从属性页签头部搬来，96→64）：自由身没有队徽就不渲染 */}
+          {club && <TeamLogo name={club.name} logoKey={crestLogoKey} size={64} circle={false} />}
+          {/* 对比入口（v6.34.0 步骤 7 · 入口 B，spec §1；v6.37.0 改页内浮层选人；v6.56.0 落 hero 右格）：
+              点开浮层搜人、确认后进对比页。fc_id 缺失的长尾球员整块不渲染——对比页与球员 URL 都按
+              fc_id 寻址，拿内部 id 拼链接会落 404 */}
+          {player.fcId !== null && (
+            <div className="player-card-compare">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={(e) => {
+                  // 开浮层的这次 click 不能再冒泡：浮层在本按钮的 React 子树里挂 portal，
+                  // 事件穿 portal 根（onClick=onClose）会把刚开的浮层立刻关掉
+                  e.stopPropagation();
+                  setPickerOpen(true);
+                }}
+              >
+                ⇄ 加入对比
+              </button>
+              {pickerOpen && (
+                <ComparePickerOverlay
+                  own={{ fcId: player.fcId, name: player.name }}
+                  onConfirm={(ids) => {
+                    setPickerOpen(false);
+                    navigate(`/players/compare?ids=${ids.join(',')}`);
+                  }}
+                  onClose={() => setPickerOpen(false)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </section>
 
-        <section className="dossier-file">
+      {/* 双翼（v6.56.0）：主列 = 页签条 + 五页签内容；右翼 = 操作区置顶 → 位置分布 → 身份徽章 → PlayStyles。
+          ≤1050 双翼塌单列（主列在前、右翼随后）；断点口径见 styles.css 同名段注释。 */}
+      <div className="player-wings">
+        <section className="player-main">
           <div className="seg dossier-tabs" role="radiogroup" aria-label="球员页签">
             {(Object.keys(TAB_LABEL) as PlayerTab[]).map((t) => (
               <button key={t} type="button" className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
@@ -571,14 +581,7 @@ export default function Player() {
           )}
 
           {tab === 'attrs' && player.gameAttrs && (
-            <AttrSheet
-              attrs={attrs}
-              position={player.position}
-              prestige={player.prestige}
-              playstyles={playstyles}
-              club={club}
-              crestLogoKey={clubInfo?.logoKey ?? null}
-            />
+            <AttrSheet attrs={attrs} position={player.position} playstyles={playstyles} />
           )}
 
           {tab === 'growth' && growth && (
@@ -689,107 +692,198 @@ export default function Player() {
 
           {tab === 'matches' && <MatchesTab query={matchesQuery} isGk={player.position === 'GK'} narrow={narrow} />}
         </section>
+
+        <aside className="player-wing">
+          {/* 左栏五态操作区（v6.2.0 骨架 → v6.3.0 接真实端点）整体搬入右翼置顶（v6.56.0）：
+              实现独立成 web/src/pages/player/SideOps.tsx，数据与回调原样下传，函数体一律不动。 */}
+          <SideOps
+            player={{
+              id: player.id,
+              name: player.name,
+              status: player.status,
+              transferListed: player.transferListed,
+              listPrice: player.listPrice,
+              offerAuto: player.offerAuto,
+              notForSale: player.notForSale,
+              marketValue: player.marketValue,
+            }}
+            contract={contract}
+            contractPending={data.contractPending ?? null}
+            demandState={data.demandState ?? null}
+            isMine={isMine}
+            isFree={club === null}
+            isCpu={isCpu}
+            isCoach={isCoach}
+            myClubId={myClubId}
+            windowOpen={windowOpen}
+            seaSign={data.seaSign}
+            seaComps={data.seaComps}
+            pendingMine={receivedPendingQuery.data?.pendingMine ?? 0}
+            onShowContract={() => {
+              setTab('profile');
+              // 等页签渲染完再滚，避免滚到旧高度（§10.2「看双版本合同 →」的落点）
+              requestAnimationFrame(() => {
+                document.getElementById('contract-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }}
+            show={show}
+            refreshAll={refreshAll}
+          />
+          {posChips.length > 0 && (
+            <section className="wing-card">
+              <p className="wing-card-head">位置分布</p>
+              {/* 位置热区图（v6.35.0 三态语义不动；v6.56.0 从属性页签头部搬入右翼，264 宽） */}
+              <div className="wing-heat">
+                <PositionHeatmap posCodes={posChips} isGk={isGk} className="heat-wing" />
+              </div>
+            </section>
+          )}
+          {/* 身份徽章卡（v6.56.0 拍板⑧）：状态徽章从顶卡下沉，每条 = 徽章本体 + 详情文案（文案即详情，无跳转） */}
+          <section className="wing-card">
+            <p className="wing-card-head">身份徽章</p>
+            <IdentityFlags player={player} />
+          </section>
+          {playstyles.length > 0 && (
+            <section className="wing-card">
+              <p className="wing-card-head">PlayStyles</p>
+              <div className="ps-list">
+                {playstyles.map((b) => (
+                  <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} />
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
       </div>
     </div>
   );
 }
 
-// 左栏五态操作区（v6.2.0 骨架 → v6.3.0 接真实端点）：实现独立成 web/src/pages/player/SideOps.tsx，
-// 数据（报价设置三字段 / 合同 / 窗状态 / 待处理徽标）由本页传下去，动作后的刷新回调 refreshAll。
+// 左栏五态操作区本体在 web/src/pages/player/SideOps.tsx（v6.56.0 起挂右翼置顶，props 逐字未动）。
 
-// 属性页签（v0.7.1 d10）：头部两栏（左=标题/位置/角色，右=队徽 96px + 光图六维雷达，v6.2.0）
-// + 星级行 + 六组细分卡（门将七组）；雷达不再套卡框，属性卡网格保持整宽
+// 身份徽章卡（v6.56.0 拍板⑧）：状态徽章从顶卡下沉右翼，每条 = 徽章本体 + 详情文案。
+// 文案即详情，**不进任何跳转入口**（不是详情页）；可成长/非成长恒出其一，其余按实际状态渲染。
+// 「同一状态不在顶卡重复出徽章」由 hero 不渲染这些徽章保证（见页面顶卡注释）。
+function IdentityFlags({ player }: { player: PlayerDetail['player'] }) {
+  return (
+    <div className="flag-list">
+      <div className="flag-row">
+        {player.growable ? <span className="badge sky">可成长</span> : <span className="badge gray">非成长</span>}
+        <span className="flag-note">
+          {player.growable
+            ? '出场比赛记 XP，攒满升级加 CA、发徽章；升级入口在「成长」页签。'
+            : '已到顶：不再累计 XP，也不可再升级发徽章。'}
+        </span>
+      </div>
+      {player.isFutureStar && (
+        <div className="flag-row">
+          <span className="badge gold">未来之星</span>
+          <span className="flag-note">管理组重点培养名单（Growth+）：成长档位 +2。</span>
+        </div>
+      )}
+      {player.chinaPlan && (
+        <div className="flag-row">
+          <span className="badge red">中国计划</span>
+          <span className="flag-note">平台重点培养名单：享自选银 PlayStyle 名额（「成长」页签发放），随离队失效。</span>
+        </div>
+      )}
+      {player.growthTier > 1 && (
+        <div className="flag-row">
+          <span className="badge gray">成长档位 {player.growthTier}</span>
+          <span className="flag-note">按五条件自动核定（可人工锁定），明细见「成长」页签。</span>
+        </div>
+      )}
+      {player.unsatisfied === true && (
+        <div className="flag-row">
+          <span className="badge red">不满</span>
+          <span className="flag-note">他已被明确放行且尚未重签——任何球队可按违约金原价激活，直到重签或离队。</span>
+        </div>
+      )}
+      {player.transferListed && (
+        <div className="flag-row">
+          <span className="badge sky">挂牌中</span>
+          <span className="flag-note">已在转会名单挂牌：他队可出价或激活；主动下架无入口，窗尾自动收口。</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- fit 卡数据装配（v6.56.0，引擎在 web/src/lib/fit/）----
+
+/** game_attrs 形态是 Record<string, unknown>（可带 null，见 web/src/lib/api.ts PlayerDetail 注释）：
+ *  fit 引擎输入要 Record<string, number>，只透传有限数值——null/非数值键不进引擎（缺数据 ≠ 0 分）。 */
+function numericAttrsOf(attrs: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
+}
+
+/** fit 卡展示行：跨位置群槽位（fitTile 为 null）一律不展示——门将不出「最佳场上位置」假象；
+ *  本群可算槽位按 rankShown 降序取前 4。Array.sort 稳定：并列同分保持 ROLE_FIT 表键序（TC-C-009）。 */
+function fitTopRows(profile: FitProfile, group: FitGroup): { slot: string; score: FitSlotScore; tile: number }[] {
+  const rows: { slot: string; score: FitSlotScore; tile: number }[] = [];
+  for (const [slot, score] of profile) {
+    if (!score) continue; // 该角色 6 键全缺 → 整槽位无数据
+    const tile = fitTile(profile, slot, group);
+    if (tile === null) continue; // 跨位置群无档
+    rows.push({ slot, score, tile });
+  }
+  rows.sort((a, b) => b.score.rankShown - a.score.rankShown);
+  return rows.slice(0, 4);
+}
+
+// 属性页签（v0.7.1 d10 → v6.56.0 重排）：雷达（head 变体放大到 350 宽，布局在 styles.css）+ fit 适配度卡
+// 并排一行；下面六组细分卡 3 列（门将七组）。位置 chips / 角色带 / 热区图 / 队徽已上移顶卡与右翼，
+// PlayStyles 卡搬右翼（本页签不再重复渲染）。
 function AttrSheet({
   attrs,
   position,
-  prestige,
   playstyles,
-  club,
-  crestLogoKey,
 }: {
   attrs: Record<string, unknown>;
   position: string | null;
-  prestige: number | null;
-  /** FC 源槽 + 发放明细合并后的清单（页面级算一次，成长页签的候选也要用同一份） */
+  /** FC 源槽 + 发放明细合并后的清单（页面级算一次，成长页签的候选也要用同一份；fit 卡的徽章输入共用） */
   playstyles: PlaystyleSlot[];
-  /** 现属俱乐部（自由身为 null ⇒ 头部不出队徽，雷达贴右） */
-  club: { id: number; name: string } | null;
-  /** 队徽图 key（公开球队列表带回；没拿到时 TeamLogo 自动回落队名哈希色块，与列表/详情同色） */
-  crestLogoKey: string | null;
 }) {
-  const team = teamName(attrs['TeamID']);
-  const posChips = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
-    .map((k) => positionName(attrs[k]))
-    .filter((v): v is string => v !== null);
-  const roles = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5']
-    .map((k) => roleChs(attrs[k]))
-    .filter((v): v is string => v !== null);
-  const weakfoot = Number(attrs['weakfoot']);
-  const skillmoves = Number(attrs['skillmoves']);
   const isGk = position === 'GK';
   const groups = ATTR_GROUPS.filter((g) => isGk || g.key !== 'GKP');
-  // 六维雷达（v6.2.0 移回属性页签头部）：轴口径不变，组值改由共享件按 attrs 现算（v6.35.0 泛化）
+  // 六维雷达（v6.2.0 移回属性页签）：轴口径不变，组值改由共享件按 attrs 现算（v6.35.0 泛化）
   const radarAxes = axesFor(isGk);
+  // fit 适配度卡（v6.56.0）：徽章输入 = 合并清单的存库 psid（金 = 银基 + 100，与引擎口径一致）；
+  // 算不出（属性缺键）整卡不渲染，不摆全灰占位。
+  const fitAttrs = numericAttrsOf(attrs);
+  const fitProfile = fitProfileAll({ attrs: fitAttrs, playstyles: playstyles.map((s) => s.psid) });
+  const fitRows = fitProfile ? fitTopRows(fitProfile, fitPosGroup({ attrs: fitAttrs })) : [];
   return (
     <>
-      <div className={posChips.length > 0 ? 'attr-head' : 'attr-head attr-head-noheat'}>
-        <div>
-          <h3>FC 属性（当季源数据）</h3>
-          <div className="pos-row">
-            <div className="pos-chips">
-              {posChips.length > 0 ? (
-                posChips.map((p, i) => (
-                  <span key={p} className={i === 0 ? 'pos-chip pos-chip-main' : 'pos-chip'}>
-                    {p}
-                  </span>
-                ))
-              ) : (
-                <span className="pos-chip">—</span>
-              )}
-            </div>
-            {team && <span className="pos-team">来源球队 {team}</span>}
-          </div>
-          {roles.length > 0 && (
-            <div className="role-chips">
-              {roles.map((r, i) => (
-                <span
-                  key={`${r}-${i}`}
-                  className={r.includes('++') ? 'role-chip role-plusplus' : /\+\s*$/.test(r) ? 'role-chip role-plus' : 'role-chip'}
-                >
-                  {r}
+      <div className="player-radar-row">
+        <AttrRadar axes={radarAxes} series={[{ attrs }]} variant="head" ariaLabel="六维雷达" />
+        {fitRows.length > 0 && (
+          <div className="fit-card">
+            <p className="fit-card-head">最合适的位置 / 角色（FIT 适配度）</p>
+            {fitRows.map(({ slot, score, tile }) => (
+              <div className="fit-row" key={slot}>
+                <span className="fit-key">
+                  {slot.split('|')[0]}
+                  <small>{ROLE_FIT[slot].zh}</small>
                 </span>
-              ))}
-            </div>
-          )}
-        </div>
-        {/* 宽屏三列（标题｜热区图｜队徽+雷达）；≤760px 折行后热区图与雷达并排居中（spec §1.3） */}
-        <div className="attr-head-visual">
-          {posChips.length > 0 && <PositionHeatmap posCodes={posChips} isGk={isGk} />}
-          <div className="attr-head-side">
-            {club && <TeamLogo name={club.name} logoKey={crestLogoKey} size={96} circle={false} />}
-            <AttrRadar axes={radarAxes} series={[{ attrs }]} variant="head" ariaLabel="六维雷达" />
+                <span className="fit-bar" aria-hidden="true">
+                  <i className={attrClass(score.rankShown)} style={{ width: `${score.rankShown}%` }} />
+                </span>
+                <span className="fit-val">
+                  <span className={`mono fit-score ${attrClass(score.rankShown)}`}>{score.rankShown}</span>
+                  <i className={fitDotClass(tile)} title={`个人内契合 ${tile}`} />
+                </span>
+              </div>
+            ))}
+            <p className="fit-legend">
+              数字 = 联盟绝对适配（0–99，属性 + 徽章 + 位置/角色加分）· 色点 = 个人内契合百分位（绿 ≥85 / 黄 ≥50 / 灰 ＜50）
+            </p>
           </div>
-        </div>
-      </div>
-      <div className="star-line">
-        <div className="star-cell">
-          <span className="attr-name">花式</span>
-          <span className="mono">{starText(skillmoves)}</span>
-        </div>
-        <div className="star-cell">
-          <span className="attr-name">逆足</span>
-          <span className="mono">{starText(weakfoot)}</span>
-        </div>
-        <div className="star-cell">
-          <span className="attr-name">国际声望</span>
-          <span className="mono">{starText(prestige ?? NaN)}</span>
-        </div>
-        <div className="star-cell">
-          <span className="attr-name">身高 / 体重</span>
-          <span className="mono">
-            {String(attrs['height'] ?? '—')} cm / {String(attrs['weight'] ?? '—')} kg
-          </span>
-        </div>
+        )}
       </div>
       <div className="attr-group-grid">
         {groups.map((g) => {
@@ -816,19 +910,6 @@ function AttrSheet({
             </div>
           );
         })}
-        {playstyles.length > 0 && (
-          <div className="attr-group-card ps-card">
-            <div className="attr-group-head">
-              <span className="attr-group-key">PS</span>
-              <span className="attr-name">PlayStyles</span>
-            </div>
-            <div className="ps-list">
-              {playstyles.map((b) => (
-                <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </>
   );

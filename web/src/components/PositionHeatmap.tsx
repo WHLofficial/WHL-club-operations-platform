@@ -1,6 +1,7 @@
 // 位置热区图（v6.35.0，spec docs/superpowers/specs/2026-10-05-player-heatmap-radar-ticks-design.md §1.1）：
 // 12 块位置拓扑 + 主位/副位/未踢三态着色，纯展示（几何、清洗与三态映射都在 lib/heatmap.ts）。
-// 语义 = 可踢位置分布（不是比赛跑动热图）；尺寸照视觉终稿屏：viewBox 245×200、渲染 147×120（与雷达等高）。
+// 语义 = 可踢位置分布（不是比赛跑动热图）；尺寸照视觉终稿屏：viewBox 245×200，默认渲染 147×120
+//（对比页）；v6.56.0 球员页右翼「位置分布」经 className 传 .heat-wing 放大到 264 宽，几何不动。
 import { HEAT_GK_BAND, HEAT_SLOTS, HEAT_VIEW, heatPositionsOf, heatStateOf, heatToneClass } from '../lib/heatmap.ts';
 
 export function PositionHeatmap({
