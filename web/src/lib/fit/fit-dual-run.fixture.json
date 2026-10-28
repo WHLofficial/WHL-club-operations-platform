@@ -1,0 +1,5109 @@
+{
+  "_meta": {
+    "generatedAt": "2026-10-28",
+    "command": "node scripts/fit-dual-run-gen.mjs",
+    "tourRepo": "WHL-tournament-management-system",
+    "tourSource": "git show tactics-v5.10-v5.11",
+    "tourRef": "tactics-v5.10-v5.11@244d49dd3aa624fbc1a969eae6bd2be7817b5d18",
+    "note": "tour 仓 fitScore.ts + roleFit.ts 对固定夹具的 fitProfileAll/fitPosGroup/fitTile 全 49 槽输出；重生成后须人工 diff 确认变化只来自上游引擎升级"
+  },
+  "fixtures": [
+    {
+      "name": "GK_META",
+      "meta": {
+        "attrs": {
+          "acceleration": 40,
+          "aggression": 47,
+          "agility": 54,
+          "balance": 61,
+          "ballcontrol": 68,
+          "composure": 75,
+          "crossing": 82,
+          "curve": 89,
+          "defensiveawareness": 41,
+          "dribbling": 48,
+          "finishing": 55,
+          "headingaccuracy": 62,
+          "interceptions": 69,
+          "jumping": 76,
+          "longpassing": 57,
+          "longshots": 90,
+          "positioning": 42,
+          "reactions": 72,
+          "shortpassing": 60,
+          "shotpower": 63,
+          "sprintspeed": 70,
+          "stamina": 77,
+          "standingtackle": 84,
+          "strength": 91,
+          "vision": 43,
+          "gkreflexes": 90,
+          "gkdiving": 84,
+          "gkpositioning": 81,
+          "gkhandling": 78,
+          "gkkicking": 66,
+          "PosID1": 0
+        }
+      }
+    },
+    {
+      "name": "ST_META",
+      "meta": {
+        "attrs": {
+          "finishing": 90,
+          "positioning": 84,
+          "reactions": 72,
+          "shotpower": 72,
+          "composure": 60,
+          "sprintspeed": 60,
+          "PosID1": 25,
+          "RoleID1": 42,
+          "RoleID2": 142
+        },
+        "playstyles": [
+          7,
+          101
+        ]
+      }
+    },
+    {
+      "name": "OUT_FULL",
+      "meta": {
+        "attrs": {
+          "acceleration": 40,
+          "aggression": 47,
+          "agility": 54,
+          "balance": 61,
+          "ballcontrol": 68,
+          "composure": 75,
+          "crossing": 82,
+          "curve": 89,
+          "defensiveawareness": 41,
+          "dribbling": 48,
+          "finishing": 55,
+          "gkdiving": 62,
+          "gkhandling": 69,
+          "gkkicking": 76,
+          "gkpositioning": 83,
+          "gkreflexes": 90,
+          "headingaccuracy": 42,
+          "interceptions": 49,
+          "jumping": 56,
+          "longpassing": 63,
+          "longshots": 70,
+          "positioning": 77,
+          "reactions": 84,
+          "shortpassing": 91,
+          "shotpower": 43,
+          "sprintspeed": 50,
+          "stamina": 57,
+          "standingtackle": 64,
+          "strength": 71,
+          "vision": 78,
+          "PosID1": 25,
+          "RoleID1": 42,
+          "RoleID2": 142
+        },
+        "playstyles": [
+          7,
+          101
+        ]
+      }
+    },
+    {
+      "name": "EMPTY",
+      "meta": {}
+    },
+    {
+      "name": "OUTSIDE_ONLY",
+      "meta": {
+        "attrs": {
+          "CA": 88,
+          "PA": 95,
+          "freekickaccuracy": 80,
+          "penalties": 70,
+          "RoleID1": 142,
+          "PosID1": 25
+        }
+      }
+    }
+  ],
+  "expected": {
+    "GK_META": {
+      "group": "GK",
+      "profile": {
+        "CAM|C10": {
+          "base": 57.25,
+          "badge": 0,
+          "score": 57.25,
+          "rankRaw": 57.25,
+          "rankShown": 57,
+          "attr": [
+            [
+              "vision",
+              43,
+              10.75
+            ],
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ],
+            [
+              "curve",
+              89,
+              7.416666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CAM|HW": {
+          "base": 54.416666666666664,
+          "badge": 0,
+          "score": 54.416666666666664,
+          "rankRaw": 54.416666666666664,
+          "rankShown": 54,
+          "attr": [
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              12
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "balance",
+              61,
+              5.083333333333333
+            ],
+            [
+              "sprintspeed",
+              70,
+              5.833333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CAM|PL": {
+          "base": 56.666666666666664,
+          "badge": 0,
+          "score": 56.666666666666664,
+          "rankRaw": 56.666666666666664,
+          "rankShown": 57,
+          "attr": [
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "dribbling",
+              48,
+              12
+            ],
+            [
+              "shortpassing",
+              60,
+              10
+            ],
+            [
+              "vision",
+              43,
+              7.166666666666667
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "reactions",
+              72,
+              6
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CAM|SS": {
+          "base": 52.083333333333336,
+          "badge": 0,
+          "score": 52.083333333333336,
+          "rankRaw": 52.083333333333336,
+          "rankShown": 52,
+          "attr": [
+            [
+              "positioning",
+              42,
+              10.5
+            ],
+            [
+              "finishing",
+              55,
+              13.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              9
+            ],
+            [
+              "acceleration",
+              40,
+              3.3333333333333335
+            ],
+            [
+              "longshots",
+              90,
+              7.5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CB|BPD": {
+          "base": 59.333333333333336,
+          "badge": 0,
+          "score": 59.333333333333336,
+          "rankRaw": 59.333333333333336,
+          "rankShown": 59,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "longpassing",
+              57,
+              14.25
+            ],
+            [
+              "standingtackle",
+              84,
+              14
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ],
+            [
+              "vision",
+              43,
+              3.5833333333333335
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CB|D": {
+          "base": 71.66666666666667,
+          "badge": 0,
+          "score": 71.66666666666667,
+          "rankRaw": 71.66666666666667,
+          "rankShown": 72,
+          "attr": [
+            [
+              "jumping",
+              76,
+              19
+            ],
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "strength",
+              91,
+              15.166666666666666
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CB|S": {
+          "base": 68,
+          "badge": 0,
+          "score": 68,
+          "rankRaw": 68,
+          "rankShown": 68,
+          "attr": [
+            [
+              "jumping",
+              76,
+              19
+            ],
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "aggression",
+              47,
+              7.833333333333333
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "strength",
+              91,
+              7.583333333333333
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CB|WDB": {
+          "base": 61.666666666666664,
+          "badge": 0,
+          "score": 61.666666666666664,
+          "rankRaw": 61.666666666666664,
+          "rankShown": 62,
+          "attr": [
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "standingtackle",
+              84,
+              14
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ],
+            [
+              "strength",
+              91,
+              7.583333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CDM|BC": {
+          "base": 62.666666666666664,
+          "badge": 0,
+          "score": 62.666666666666664,
+          "rankRaw": 62.666666666666664,
+          "rankShown": 63,
+          "attr": [
+            [
+              "positioning",
+              42,
+              10.5
+            ],
+            [
+              "finishing",
+              55,
+              13.75
+            ],
+            [
+              "shotpower",
+              63,
+              10.5
+            ],
+            [
+              "stamina",
+              77,
+              12.833333333333334
+            ],
+            [
+              "longshots",
+              90,
+              7.5
+            ],
+            [
+              "strength",
+              91,
+              7.583333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CDM|CH": {
+          "base": 68.16666666666667,
+          "badge": 0,
+          "score": 68.16666666666667,
+          "rankRaw": 68.16666666666667,
+          "rankShown": 68,
+          "attr": [
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "strength",
+              91,
+              15.166666666666666
+            ],
+            [
+              "interceptions",
+              69,
+              11.5
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ],
+            [
+              "jumping",
+              76,
+              6.333333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CDM|DLP": {
+          "base": 64.66666666666667,
+          "badge": 0,
+          "score": 64.66666666666667,
+          "rankRaw": 64.66666666666667,
+          "rankShown": 65,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "longpassing",
+              57,
+              9.5
+            ],
+            [
+              "reactions",
+              72,
+              6
+            ],
+            [
+              "vision",
+              43,
+              3.5833333333333335
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CDM|H": {
+          "base": 67.5,
+          "badge": 0,
+          "score": 67.5,
+          "rankRaw": 67.5,
+          "rankShown": 68,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "interceptions",
+              69,
+              11.5
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ],
+            [
+              "shortpassing",
+              60,
+              5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CDM|WH": {
+          "base": 71.83333333333333,
+          "badge": 0,
+          "score": 71.83333333333333,
+          "rankRaw": 71.83333333333333,
+          "rankShown": 72,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "sprintspeed",
+              70,
+              11.666666666666666
+            ],
+            [
+              "interceptions",
+              69,
+              11.5
+            ],
+            [
+              "shortpassing",
+              60,
+              5
+            ],
+            [
+              "defensiveawareness",
+              41,
+              3.4166666666666665
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CM|BTB": {
+          "base": 65.58333333333333,
+          "badge": 0,
+          "score": 65.58333333333333,
+          "rankRaw": 65.58333333333333,
+          "rankShown": 66,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "stamina",
+              77,
+              12.833333333333334
+            ],
+            [
+              "reactions",
+              72,
+              12
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CM|DLP": {
+          "base": 59,
+          "badge": 0,
+          "score": 59,
+          "rankRaw": 59,
+          "rankShown": 59,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "vision",
+              43,
+              10.75
+            ],
+            [
+              "longpassing",
+              57,
+              9.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "reactions",
+              72,
+              6
+            ],
+            [
+              "stamina",
+              77,
+              6.416666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CM|H": {
+          "base": 67.5,
+          "badge": 0,
+          "score": 67.5,
+          "rankRaw": 67.5,
+          "rankShown": 68,
+          "attr": [
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "interceptions",
+              69,
+              11.5
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "shortpassing",
+              60,
+              5
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CM|HW": {
+          "base": 57.666666666666664,
+          "badge": 0,
+          "score": 57.666666666666664,
+          "rankRaw": 57.666666666666664,
+          "rankShown": 58,
+          "attr": [
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "vision",
+              43,
+              7.166666666666667
+            ],
+            [
+              "reactions",
+              72,
+              6
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "CM|PL": {
+          "base": 61.083333333333336,
+          "badge": 0,
+          "score": 61.083333333333336,
+          "rankRaw": 61.083333333333336,
+          "rankShown": 61,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "longpassing",
+              57,
+              9.5
+            ],
+            [
+              "vision",
+              43,
+              7.166666666666667
+            ],
+            [
+              "reactions",
+              72,
+              6
+            ],
+            [
+              "stamina",
+              77,
+              6.416666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "GK|BPK": {
+          "base": 69.5,
+          "badge": 0,
+          "score": 69.5,
+          "rankRaw": 71.5,
+          "rankShown": 72,
+          "attr": [
+            [
+              "gkkicking",
+              66,
+              16.5
+            ],
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "longpassing",
+              57,
+              9.5
+            ],
+            [
+              "gkreflexes",
+              90,
+              15
+            ],
+            [
+              "gkdiving",
+              84,
+              7
+            ],
+            [
+              "gkhandling",
+              78,
+              6.5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "GK|GK": {
+          "base": 81.5,
+          "badge": 0,
+          "score": 81.5,
+          "rankRaw": 83.5,
+          "rankShown": 84,
+          "attr": [
+            [
+              "gkreflexes",
+              90,
+              22.5
+            ],
+            [
+              "gkdiving",
+              84,
+              21
+            ],
+            [
+              "gkpositioning",
+              81,
+              13.5
+            ],
+            [
+              "gkhandling",
+              78,
+              13
+            ],
+            [
+              "reactions",
+              72,
+              6
+            ],
+            [
+              "gkkicking",
+              66,
+              5.5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 99
+        },
+        "GK|SK": {
+          "base": 80.25,
+          "badge": 0,
+          "score": 80.25,
+          "rankRaw": 82.25,
+          "rankShown": 82,
+          "attr": [
+            [
+              "gkreflexes",
+              90,
+              22.5
+            ],
+            [
+              "gkpositioning",
+              81,
+              20.25
+            ],
+            [
+              "gkdiving",
+              84,
+              14
+            ],
+            [
+              "gkkicking",
+              66,
+              11
+            ],
+            [
+              "gkhandling",
+              78,
+              6.5
+            ],
+            [
+              "reactions",
+              72,
+              6
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 50
+        },
+        "LB|AWB": {
+          "base": 67.25,
+          "badge": 0,
+          "score": 67.25,
+          "rankRaw": 67.25,
+          "rankShown": 67,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LB|FAB": {
+          "base": 61.083333333333336,
+          "badge": 0,
+          "score": 61.083333333333336,
+          "rankRaw": 61.083333333333336,
+          "rankShown": 61,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "standingtackle",
+              84,
+              14
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LB|FB": {
+          "base": 68.33333333333333,
+          "badge": 0,
+          "score": 68.33333333333333,
+          "rankRaw": 68.33333333333333,
+          "rankShown": 68,
+          "attr": [
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "sprintspeed",
+              70,
+              11.666666666666666
+            ],
+            [
+              "stamina",
+              77,
+              12.833333333333334
+            ],
+            [
+              "crossing",
+              82,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LB|IWB": {
+          "base": 53.416666666666664,
+          "badge": 0,
+          "score": 53.416666666666664,
+          "rankRaw": 53.416666666666664,
+          "rankShown": 53,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "longpassing",
+              57,
+              14.25
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "vision",
+              43,
+              3.5833333333333335
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LB|WB": {
+          "base": 68.08333333333333,
+          "badge": 0,
+          "score": 68.08333333333333,
+          "rankRaw": 68.08333333333333,
+          "rankShown": 68,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "standingtackle",
+              84,
+              7
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LM|IF": {
+          "base": 52.166666666666664,
+          "badge": 0,
+          "score": 52.166666666666664,
+          "rankRaw": 52.166666666666664,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              70,
+              5.833333333333333
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LM|W": {
+          "base": 59.333333333333336,
+          "badge": 0,
+          "score": 59.333333333333336,
+          "rankRaw": 59.333333333333336,
+          "rankShown": 59,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LM|WM": {
+          "base": 74.16666666666667,
+          "badge": 0,
+          "score": 74.16666666666667,
+          "rankRaw": 74.16666666666667,
+          "rankShown": 74,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "standingtackle",
+              84,
+              14
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LM|WP": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "vision",
+              43,
+              10.75
+            ],
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LW|IF": {
+          "base": 52.166666666666664,
+          "badge": 0,
+          "score": 52.166666666666664,
+          "rankRaw": 52.166666666666664,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              70,
+              5.833333333333333
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LW|W": {
+          "base": 59.333333333333336,
+          "badge": 0,
+          "score": 59.333333333333336,
+          "rankRaw": 59.333333333333336,
+          "rankShown": 59,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LW|WP": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "vision",
+              43,
+              10.75
+            ],
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RB|AWB": {
+          "base": 67.25,
+          "badge": 0,
+          "score": 67.25,
+          "rankRaw": 67.25,
+          "rankShown": 67,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RB|FAB": {
+          "base": 61.083333333333336,
+          "badge": 0,
+          "score": 61.083333333333336,
+          "rankRaw": 61.083333333333336,
+          "rankShown": 61,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "standingtackle",
+              84,
+              14
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RB|FB": {
+          "base": 68.33333333333333,
+          "badge": 0,
+          "score": 68.33333333333333,
+          "rankRaw": 68.33333333333333,
+          "rankShown": 68,
+          "attr": [
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "standingtackle",
+              84,
+              21
+            ],
+            [
+              "sprintspeed",
+              70,
+              11.666666666666666
+            ],
+            [
+              "stamina",
+              77,
+              12.833333333333334
+            ],
+            [
+              "crossing",
+              82,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RB|IWB": {
+          "base": 53.416666666666664,
+          "badge": 0,
+          "score": 53.416666666666664,
+          "rankRaw": 53.416666666666664,
+          "rankShown": 53,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "longpassing",
+              57,
+              14.25
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "vision",
+              43,
+              3.5833333333333335
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RB|WB": {
+          "base": 68.08333333333333,
+          "badge": 0,
+          "score": 68.08333333333333,
+          "rankRaw": 68.08333333333333,
+          "rankShown": 68,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "standingtackle",
+              84,
+              7
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RM|IF": {
+          "base": 52.166666666666664,
+          "badge": 0,
+          "score": 52.166666666666664,
+          "rankRaw": 52.166666666666664,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              70,
+              5.833333333333333
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RM|W": {
+          "base": 59.333333333333336,
+          "badge": 0,
+          "score": 59.333333333333336,
+          "rankRaw": 59.333333333333336,
+          "rankShown": 59,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RM|WM": {
+          "base": 74.16666666666667,
+          "badge": 0,
+          "score": 74.16666666666667,
+          "rankRaw": 74.16666666666667,
+          "rankShown": 74,
+          "attr": [
+            [
+              "stamina",
+              77,
+              19.25
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "standingtackle",
+              84,
+              14
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ],
+            [
+              "interceptions",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RM|WP": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "vision",
+              43,
+              10.75
+            ],
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RW|IF": {
+          "base": 52.166666666666664,
+          "badge": 0,
+          "score": 52.166666666666664,
+          "rankRaw": 52.166666666666664,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              70,
+              5.833333333333333
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RW|W": {
+          "base": 59.333333333333336,
+          "badge": 0,
+          "score": 59.333333333333336,
+          "rankRaw": 59.333333333333336,
+          "rankShown": 59,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "RW|WP": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "vision",
+              43,
+              10.75
+            ],
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              57,
+              4.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "ST|AF": {
+          "base": 53.333333333333336,
+          "badge": 0,
+          "score": 53.333333333333336,
+          "rankRaw": 53.333333333333336,
+          "rankShown": 53,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              70,
+              17.5
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "positioning",
+              42,
+              7
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "ST|F9": {
+          "base": 53.166666666666664,
+          "badge": 0,
+          "score": 53.166666666666664,
+          "rankRaw": 53.166666666666664,
+          "rankShown": 53,
+          "attr": [
+            [
+              "shortpassing",
+              60,
+              15
+            ],
+            [
+              "vision",
+              43,
+              10.75
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "positioning",
+              42,
+              3.5
+            ],
+            [
+              "finishing",
+              55,
+              4.583333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "ST|PO": {
+          "base": 58.833333333333336,
+          "badge": 0,
+          "score": 58.833333333333336,
+          "rankRaw": 58.833333333333336,
+          "rankShown": 59,
+          "attr": [
+            [
+              "finishing",
+              55,
+              13.75
+            ],
+            [
+              "positioning",
+              42,
+              10.5
+            ],
+            [
+              "reactions",
+              72,
+              12
+            ],
+            [
+              "shotpower",
+              63,
+              10.5
+            ],
+            [
+              "composure",
+              75,
+              6.25
+            ],
+            [
+              "sprintspeed",
+              70,
+              5.833333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "ST|TF": {
+          "base": 67.58333333333333,
+          "badge": 0,
+          "score": 67.58333333333333,
+          "rankRaw": 67.58333333333333,
+          "rankShown": 68,
+          "attr": [
+            [
+              "jumping",
+              76,
+              19
+            ],
+            [
+              "headingaccuracy",
+              62,
+              15.5
+            ],
+            [
+              "strength",
+              91,
+              15.166666666666666
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "positioning",
+              42,
+              3.5
+            ],
+            [
+              "shotpower",
+              63,
+              5.25
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        }
+      }
+    },
+    "ST_META": {
+      "group": "OUT",
+      "profile": {
+        "CAM|C10": null,
+        "CAM|HW": {
+          "base": 60,
+          "badge": 1,
+          "score": 61,
+          "rankRaw": 61,
+          "rankShown": 61,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 46
+        },
+        "CAM|PL": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 50
+        },
+        "CAM|SS": {
+          "base": 87,
+          "badge": 1,
+          "score": 88,
+          "rankRaw": 88,
+          "rankShown": 88,
+          "attr": [
+            [
+              "positioning",
+              84,
+              42
+            ],
+            [
+              "finishing",
+              90,
+              45
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 96
+        },
+        "CB|BPD": null,
+        "CB|D": null,
+        "CB|S": null,
+        "CB|WDB": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "CDM|BC": {
+          "base": 83.25,
+          "badge": 0.5,
+          "score": 83.75,
+          "rankRaw": 83.75,
+          "rankShown": 84,
+          "attr": [
+            [
+              "positioning",
+              84,
+              31.5
+            ],
+            [
+              "finishing",
+              90,
+              33.75
+            ],
+            [
+              "shotpower",
+              72,
+              18
+            ]
+          ],
+          "badgeHits": [
+            7
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 89
+        },
+        "CDM|CH": null,
+        "CDM|DLP": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 50
+        },
+        "CDM|H": null,
+        "CDM|WH": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "CM|BTB": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 50
+        },
+        "CM|DLP": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 50
+        },
+        "CM|H": null,
+        "CM|HW": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 50
+        },
+        "CM|PL": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 50
+        },
+        "GK|BPK": null,
+        "GK|GK": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "GK|SK": {
+          "base": 72,
+          "badge": 0,
+          "score": 72,
+          "rankRaw": 72,
+          "rankShown": 72,
+          "attr": [
+            [
+              "reactions",
+              72,
+              72
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LB|AWB": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "LB|FAB": null,
+        "LB|FB": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "LB|IWB": null,
+        "LB|WB": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "LM|IF": {
+          "base": 80,
+          "badge": 1,
+          "score": 81,
+          "rankRaw": 81,
+          "rankShown": 81,
+          "attr": [
+            [
+              "finishing",
+              90,
+              60
+            ],
+            [
+              "sprintspeed",
+              60,
+              20
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 76
+        },
+        "LM|W": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "LM|WM": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "LM|WP": null,
+        "LW|IF": {
+          "base": 80,
+          "badge": 1,
+          "score": 81,
+          "rankRaw": 81,
+          "rankShown": 81,
+          "attr": [
+            [
+              "finishing",
+              90,
+              60
+            ],
+            [
+              "sprintspeed",
+              60,
+              20
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 76
+        },
+        "LW|W": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "LW|WP": null,
+        "RB|AWB": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "RB|FAB": null,
+        "RB|FB": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "RB|IWB": null,
+        "RB|WB": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "RM|IF": {
+          "base": 80,
+          "badge": 1,
+          "score": 81,
+          "rankRaw": 81,
+          "rankShown": 81,
+          "attr": [
+            [
+              "finishing",
+              90,
+              60
+            ],
+            [
+              "sprintspeed",
+              60,
+              20
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 76
+        },
+        "RM|W": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "RM|WM": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "RM|WP": null,
+        "RW|IF": {
+          "base": 80,
+          "badge": 1,
+          "score": 81,
+          "rankRaw": 81,
+          "rankShown": 81,
+          "attr": [
+            [
+              "finishing",
+              90,
+              60
+            ],
+            [
+              "sprintspeed",
+              60,
+              20
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 76
+        },
+        "RW|W": {
+          "base": 60,
+          "badge": 0,
+          "score": 60,
+          "rankRaw": 60,
+          "rankShown": 60,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              60
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "RW|WP": null,
+        "ST|AF": {
+          "base": 75.42857142857143,
+          "badge": 1.5,
+          "score": 76.92857142857143,
+          "rankRaw": 78.92857142857143,
+          "rankShown": 79,
+          "attr": [
+            [
+              "sprintspeed",
+              60,
+              25.714285714285715
+            ],
+            [
+              "finishing",
+              90,
+              25.714285714285715
+            ],
+            [
+              "positioning",
+              84,
+              24
+            ]
+          ],
+          "badgeHits": [
+            1,
+            7
+          ],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 69
+        },
+        "ST|F9": {
+          "base": 87,
+          "badge": 1,
+          "score": 88,
+          "rankRaw": 90,
+          "rankShown": 90,
+          "attr": [
+            [
+              "positioning",
+              84,
+              42
+            ],
+            [
+              "finishing",
+              90,
+              45
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 96
+        },
+        "ST|PO": {
+          "base": 77.5,
+          "badge": 1.5,
+          "score": 79,
+          "rankRaw": 86,
+          "rankShown": 86,
+          "attr": [
+            [
+              "finishing",
+              90,
+              22.5
+            ],
+            [
+              "positioning",
+              84,
+              21
+            ],
+            [
+              "reactions",
+              72,
+              12
+            ],
+            [
+              "shotpower",
+              72,
+              12
+            ],
+            [
+              "composure",
+              60,
+              5
+            ],
+            [
+              "sprintspeed",
+              60,
+              5
+            ]
+          ],
+          "badgeHits": [
+            7,
+            1
+          ],
+          "posHit": true,
+          "roleHit": 2,
+          "tile": 73
+        },
+        "ST|TF": {
+          "base": 84,
+          "badge": 0,
+          "score": 84,
+          "rankRaw": 86,
+          "rankShown": 86,
+          "attr": [
+            [
+              "finishing",
+              90,
+              45
+            ],
+            [
+              "positioning",
+              84,
+              21
+            ],
+            [
+              "shotpower",
+              72,
+              18
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 92
+        }
+      }
+    },
+    "OUT_FULL": {
+      "group": "OUT",
+      "profile": {
+        "CAM|C10": {
+          "base": 74.25,
+          "badge": 0,
+          "score": 74.25,
+          "rankRaw": 74.25,
+          "rankShown": 74,
+          "attr": [
+            [
+              "vision",
+              78,
+              19.5
+            ],
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ],
+            [
+              "curve",
+              89,
+              7.416666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 95
+        },
+        "CAM|HW": {
+          "base": 52.75,
+          "badge": 1,
+          "score": 53.75,
+          "rankRaw": 53.75,
+          "rankShown": 54,
+          "attr": [
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              12
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "balance",
+              61,
+              5.083333333333333
+            ],
+            [
+              "sprintspeed",
+              50,
+              4.166666666666667
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 11
+        },
+        "CAM|PL": {
+          "base": 68.66666666666667,
+          "badge": 0,
+          "score": 68.66666666666667,
+          "rankRaw": 68.66666666666667,
+          "rankShown": 69,
+          "attr": [
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "dribbling",
+              48,
+              12
+            ],
+            [
+              "shortpassing",
+              91,
+              15.166666666666666
+            ],
+            [
+              "vision",
+              78,
+              13
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "reactions",
+              84,
+              7
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 75
+        },
+        "CAM|SS": {
+          "base": 59.166666666666664,
+          "badge": 1,
+          "score": 60.166666666666664,
+          "rankRaw": 60.166666666666664,
+          "rankShown": 60,
+          "attr": [
+            [
+              "positioning",
+              77,
+              19.25
+            ],
+            [
+              "finishing",
+              55,
+              13.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              9
+            ],
+            [
+              "acceleration",
+              40,
+              3.3333333333333335
+            ],
+            [
+              "longshots",
+              70,
+              5.833333333333333
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 57
+        },
+        "CB|BPD": {
+          "base": 68.16666666666667,
+          "badge": 0,
+          "score": 68.16666666666667,
+          "rankRaw": 68.16666666666667,
+          "rankShown": 68,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "longpassing",
+              63,
+              15.75
+            ],
+            [
+              "standingtackle",
+              64,
+              10.666666666666666
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ],
+            [
+              "vision",
+              78,
+              6.5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 73
+        },
+        "CB|D": {
+          "base": 56.666666666666664,
+          "badge": 0,
+          "score": 56.666666666666664,
+          "rankRaw": 56.666666666666664,
+          "rankShown": 57,
+          "attr": [
+            [
+              "jumping",
+              56,
+              14
+            ],
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "strength",
+              71,
+              11.833333333333334
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 40
+        },
+        "CB|S": {
+          "base": 54.666666666666664,
+          "badge": 0,
+          "score": 54.666666666666664,
+          "rankRaw": 54.666666666666664,
+          "rankShown": 55,
+          "attr": [
+            [
+              "jumping",
+              56,
+              14
+            ],
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "aggression",
+              47,
+              7.833333333333333
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "strength",
+              71,
+              5.916666666666667
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 22
+        },
+        "CB|WDB": {
+          "base": 50,
+          "badge": 0,
+          "score": 50,
+          "rankRaw": 50,
+          "rankShown": 50,
+          "attr": [
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "standingtackle",
+              64,
+              10.666666666666666
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ],
+            [
+              "strength",
+              71,
+              5.916666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 0
+        },
+        "CDM|BC": {
+          "base": 61.416666666666664,
+          "badge": 0.5,
+          "score": 61.916666666666664,
+          "rankRaw": 61.916666666666664,
+          "rankShown": 62,
+          "attr": [
+            [
+              "positioning",
+              77,
+              19.25
+            ],
+            [
+              "finishing",
+              55,
+              13.75
+            ],
+            [
+              "shotpower",
+              43,
+              7.166666666666667
+            ],
+            [
+              "stamina",
+              57,
+              9.5
+            ],
+            [
+              "longshots",
+              70,
+              5.833333333333333
+            ],
+            [
+              "strength",
+              71,
+              5.916666666666667
+            ]
+          ],
+          "badgeHits": [
+            7
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 59
+        },
+        "CDM|CH": {
+          "base": 54.833333333333336,
+          "badge": 0,
+          "score": 54.833333333333336,
+          "rankRaw": 54.833333333333336,
+          "rankShown": 55,
+          "attr": [
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "strength",
+              71,
+              11.833333333333334
+            ],
+            [
+              "interceptions",
+              49,
+              8.166666666666666
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ],
+            [
+              "jumping",
+              56,
+              4.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 24
+        },
+        "CDM|DLP": {
+          "base": 72.33333333333333,
+          "badge": 0,
+          "score": 72.33333333333333,
+          "rankRaw": 72.33333333333333,
+          "rankShown": 72,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "longpassing",
+              63,
+              10.5
+            ],
+            [
+              "reactions",
+              84,
+              7
+            ],
+            [
+              "vision",
+              78,
+              6.5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 88
+        },
+        "CDM|H": {
+          "base": 56.75,
+          "badge": 0,
+          "score": 56.75,
+          "rankRaw": 56.75,
+          "rankShown": 57,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "interceptions",
+              49,
+              8.166666666666666
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ],
+            [
+              "shortpassing",
+              91,
+              7.583333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 42
+        },
+        "CDM|WH": {
+          "base": 57.75,
+          "badge": 0,
+          "score": 57.75,
+          "rankRaw": 57.75,
+          "rankShown": 58,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "sprintspeed",
+              50,
+              8.333333333333334
+            ],
+            [
+              "interceptions",
+              49,
+              8.166666666666666
+            ],
+            [
+              "shortpassing",
+              91,
+              7.583333333333333
+            ],
+            [
+              "defensiveawareness",
+              41,
+              3.4166666666666665
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 51
+        },
+        "CM|BTB": {
+          "base": 72.5,
+          "badge": 0,
+          "score": 72.5,
+          "rankRaw": 72.5,
+          "rankShown": 73,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "stamina",
+              57,
+              9.5
+            ],
+            [
+              "reactions",
+              84,
+              14
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 90
+        },
+        "CM|DLP": {
+          "base": 75.83333333333333,
+          "badge": 0,
+          "score": 75.83333333333333,
+          "rankRaw": 75.83333333333333,
+          "rankShown": 76,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "vision",
+              78,
+              19.5
+            ],
+            [
+              "longpassing",
+              63,
+              10.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "reactions",
+              84,
+              7
+            ],
+            [
+              "stamina",
+              57,
+              4.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 99
+        },
+        "CM|H": {
+          "base": 56.75,
+          "badge": 0,
+          "score": 56.75,
+          "rankRaw": 56.75,
+          "rankShown": 57,
+          "attr": [
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "interceptions",
+              49,
+              8.166666666666666
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "shortpassing",
+              91,
+              7.583333333333333
+            ],
+            [
+              "aggression",
+              47,
+              3.9166666666666665
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 42
+        },
+        "CM|HW": {
+          "base": 72.25,
+          "badge": 0,
+          "score": 72.25,
+          "rankRaw": 72.25,
+          "rankShown": 72,
+          "attr": [
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "vision",
+              78,
+              13
+            ],
+            [
+              "reactions",
+              84,
+              7
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 86
+        },
+        "CM|PL": {
+          "base": 75,
+          "badge": 0,
+          "score": 75,
+          "rankRaw": 75,
+          "rankShown": 75,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "ballcontrol",
+              68,
+              17
+            ],
+            [
+              "longpassing",
+              63,
+              10.5
+            ],
+            [
+              "vision",
+              78,
+              13
+            ],
+            [
+              "reactions",
+              84,
+              7
+            ],
+            [
+              "stamina",
+              57,
+              4.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 97
+        },
+        "GK|BPK": {
+          "base": 78.16666666666667,
+          "badge": 0,
+          "score": 78.16666666666667,
+          "rankRaw": 78.16666666666667,
+          "rankShown": 78,
+          "attr": [
+            [
+              "gkkicking",
+              76,
+              19
+            ],
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "longpassing",
+              63,
+              10.5
+            ],
+            [
+              "gkreflexes",
+              90,
+              15
+            ],
+            [
+              "gkdiving",
+              62,
+              5.166666666666667
+            ],
+            [
+              "gkhandling",
+              69,
+              5.75
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "GK|GK": {
+          "base": 76.66666666666667,
+          "badge": 0,
+          "score": 76.66666666666667,
+          "rankRaw": 76.66666666666667,
+          "rankShown": 77,
+          "attr": [
+            [
+              "gkreflexes",
+              90,
+              22.5
+            ],
+            [
+              "gkdiving",
+              62,
+              15.5
+            ],
+            [
+              "gkpositioning",
+              83,
+              13.833333333333334
+            ],
+            [
+              "gkhandling",
+              69,
+              11.5
+            ],
+            [
+              "reactions",
+              84,
+              7
+            ],
+            [
+              "gkkicking",
+              76,
+              6.333333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "GK|SK": {
+          "base": 79,
+          "badge": 0,
+          "score": 79,
+          "rankRaw": 79,
+          "rankShown": 79,
+          "attr": [
+            [
+              "gkreflexes",
+              90,
+              22.5
+            ],
+            [
+              "gkpositioning",
+              83,
+              20.75
+            ],
+            [
+              "gkdiving",
+              62,
+              10.333333333333334
+            ],
+            [
+              "gkkicking",
+              76,
+              12.666666666666666
+            ],
+            [
+              "gkhandling",
+              69,
+              5.75
+            ],
+            [
+              "reactions",
+              84,
+              7
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": null
+        },
+        "LB|AWB": {
+          "base": 57.25,
+          "badge": 0,
+          "score": 57.25,
+          "rankRaw": 57.25,
+          "rankShown": 57,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 46
+        },
+        "LB|FAB": {
+          "base": 64.33333333333333,
+          "badge": 0,
+          "score": 64.33333333333333,
+          "rankRaw": 64.33333333333333,
+          "rankShown": 64,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "standingtackle",
+              64,
+              10.666666666666666
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 66
+        },
+        "LB|FB": {
+          "base": 55,
+          "badge": 0,
+          "score": 55,
+          "rankRaw": 55,
+          "rankShown": 55,
+          "attr": [
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "sprintspeed",
+              50,
+              8.333333333333334
+            ],
+            [
+              "stamina",
+              57,
+              9.5
+            ],
+            [
+              "crossing",
+              82,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 26
+        },
+        "LB|IWB": {
+          "base": 63.916666666666664,
+          "badge": 0,
+          "score": 63.916666666666664,
+          "rankRaw": 63.916666666666664,
+          "rankShown": 64,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "longpassing",
+              63,
+              15.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "vision",
+              78,
+              6.5
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 62
+        },
+        "LB|WB": {
+          "base": 56.416666666666664,
+          "badge": 0,
+          "score": 56.416666666666664,
+          "rankRaw": 56.416666666666664,
+          "rankShown": 56,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "standingtackle",
+              64,
+              5.333333333333333
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 35
+        },
+        "LM|IF": {
+          "base": 50.5,
+          "badge": 1,
+          "score": 51.5,
+          "rankRaw": 51.5,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              50,
+              4.166666666666667
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 2
+        },
+        "LM|W": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 13
+        },
+        "LM|WM": {
+          "base": 59.166666666666664,
+          "badge": 0,
+          "score": 59.166666666666664,
+          "rankRaw": 59.166666666666664,
+          "rankShown": 59,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "standingtackle",
+              64,
+              10.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 53
+        },
+        "LM|WP": {
+          "base": 71.33333333333333,
+          "badge": 0,
+          "score": 71.33333333333333,
+          "rankRaw": 71.33333333333333,
+          "rankShown": 71,
+          "attr": [
+            [
+              "vision",
+              78,
+              19.5
+            ],
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 77
+        },
+        "LW|IF": {
+          "base": 50.5,
+          "badge": 1,
+          "score": 51.5,
+          "rankRaw": 51.5,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              50,
+              4.166666666666667
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 2
+        },
+        "LW|W": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 13
+        },
+        "LW|WP": {
+          "base": 71.33333333333333,
+          "badge": 0,
+          "score": 71.33333333333333,
+          "rankRaw": 71.33333333333333,
+          "rankShown": 71,
+          "attr": [
+            [
+              "vision",
+              78,
+              19.5
+            ],
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 77
+        },
+        "RB|AWB": {
+          "base": 57.25,
+          "badge": 0,
+          "score": 57.25,
+          "rankRaw": 57.25,
+          "rankShown": 57,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 46
+        },
+        "RB|FAB": {
+          "base": 64.33333333333333,
+          "badge": 0,
+          "score": 64.33333333333333,
+          "rankRaw": 64.33333333333333,
+          "rankShown": 64,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "standingtackle",
+              64,
+              10.666666666666666
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 66
+        },
+        "RB|FB": {
+          "base": 55,
+          "badge": 0,
+          "score": 55,
+          "rankRaw": 55,
+          "rankShown": 55,
+          "attr": [
+            [
+              "defensiveawareness",
+              41,
+              10.25
+            ],
+            [
+              "standingtackle",
+              64,
+              16
+            ],
+            [
+              "sprintspeed",
+              50,
+              8.333333333333334
+            ],
+            [
+              "stamina",
+              57,
+              9.5
+            ],
+            [
+              "crossing",
+              82,
+              6.833333333333333
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 26
+        },
+        "RB|IWB": {
+          "base": 63.916666666666664,
+          "badge": 0,
+          "score": 63.916666666666664,
+          "rankRaw": 63.916666666666664,
+          "rankShown": 64,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "longpassing",
+              63,
+              15.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "defensiveawareness",
+              41,
+              6.833333333333333
+            ],
+            [
+              "vision",
+              78,
+              6.5
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 62
+        },
+        "RB|WB": {
+          "base": 56.416666666666664,
+          "badge": 0,
+          "score": 56.416666666666664,
+          "rankRaw": 56.416666666666664,
+          "rankShown": 56,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "acceleration",
+              40,
+              6.666666666666667
+            ],
+            [
+              "standingtackle",
+              64,
+              5.333333333333333
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 35
+        },
+        "RM|IF": {
+          "base": 50.5,
+          "badge": 1,
+          "score": 51.5,
+          "rankRaw": 51.5,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              50,
+              4.166666666666667
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 2
+        },
+        "RM|W": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 13
+        },
+        "RM|WM": {
+          "base": 59.166666666666664,
+          "badge": 0,
+          "score": 59.166666666666664,
+          "rankRaw": 59.166666666666664,
+          "rankShown": 59,
+          "attr": [
+            [
+              "stamina",
+              57,
+              14.25
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "standingtackle",
+              64,
+              10.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ],
+            [
+              "interceptions",
+              49,
+              4.083333333333333
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 53
+        },
+        "RM|WP": {
+          "base": 71.33333333333333,
+          "badge": 0,
+          "score": 71.33333333333333,
+          "rankRaw": 71.33333333333333,
+          "rankShown": 71,
+          "attr": [
+            [
+              "vision",
+              78,
+              19.5
+            ],
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 77
+        },
+        "RW|IF": {
+          "base": 50.5,
+          "badge": 1,
+          "score": 51.5,
+          "rankRaw": 51.5,
+          "rankShown": 52,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "agility",
+              54,
+              13.5
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "sprintspeed",
+              50,
+              4.166666666666667
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 2
+        },
+        "RW|W": {
+          "base": 54.333333333333336,
+          "badge": 0,
+          "score": 54.333333333333336,
+          "rankRaw": 54.333333333333336,
+          "rankShown": 54,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "crossing",
+              82,
+              13.666666666666666
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 13
+        },
+        "RW|WP": {
+          "base": 71.33333333333333,
+          "badge": 0,
+          "score": 71.33333333333333,
+          "rankRaw": 71.33333333333333,
+          "rankShown": 71,
+          "attr": [
+            [
+              "vision",
+              78,
+              19.5
+            ],
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "agility",
+              54,
+              4.5
+            ],
+            [
+              "longpassing",
+              63,
+              5.25
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": false,
+          "roleHit": 0,
+          "tile": 77
+        },
+        "ST|AF": {
+          "base": 54.166666666666664,
+          "badge": 1.5,
+          "score": 55.666666666666664,
+          "rankRaw": 57.666666666666664,
+          "rankShown": 58,
+          "attr": [
+            [
+              "acceleration",
+              40,
+              10
+            ],
+            [
+              "sprintspeed",
+              50,
+              12.5
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "positioning",
+              77,
+              12.833333333333334
+            ],
+            [
+              "ballcontrol",
+              68,
+              5.666666666666667
+            ],
+            [
+              "dribbling",
+              48,
+              4
+            ]
+          ],
+          "badgeHits": [
+            1,
+            7
+          ],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 33
+        },
+        "ST|F9": {
+          "base": 72.58333333333333,
+          "badge": 1,
+          "score": 73.58333333333333,
+          "rankRaw": 75.58333333333333,
+          "rankShown": 76,
+          "attr": [
+            [
+              "shortpassing",
+              91,
+              22.75
+            ],
+            [
+              "vision",
+              78,
+              19.5
+            ],
+            [
+              "ballcontrol",
+              68,
+              11.333333333333334
+            ],
+            [
+              "dribbling",
+              48,
+              8
+            ],
+            [
+              "positioning",
+              77,
+              6.416666666666667
+            ],
+            [
+              "finishing",
+              55,
+              4.583333333333333
+            ]
+          ],
+          "badgeHits": [
+            1
+          ],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 92
+        },
+        "ST|PO": {
+          "base": 64.58333333333333,
+          "badge": 1.5,
+          "score": 66.08333333333333,
+          "rankRaw": 73.08333333333333,
+          "rankShown": 73,
+          "attr": [
+            [
+              "finishing",
+              55,
+              13.75
+            ],
+            [
+              "positioning",
+              77,
+              19.25
+            ],
+            [
+              "reactions",
+              84,
+              14
+            ],
+            [
+              "shotpower",
+              43,
+              7.166666666666667
+            ],
+            [
+              "composure",
+              75,
+              6.25
+            ],
+            [
+              "sprintspeed",
+              50,
+              4.166666666666667
+            ]
+          ],
+          "badgeHits": [
+            7,
+            1
+          ],
+          "posHit": true,
+          "roleHit": 2,
+          "tile": 70
+        },
+        "ST|TF": {
+          "base": 55.5,
+          "badge": 0,
+          "score": 55.5,
+          "rankRaw": 57.5,
+          "rankShown": 58,
+          "attr": [
+            [
+              "jumping",
+              56,
+              14
+            ],
+            [
+              "headingaccuracy",
+              42,
+              10.5
+            ],
+            [
+              "strength",
+              71,
+              11.833333333333334
+            ],
+            [
+              "finishing",
+              55,
+              9.166666666666666
+            ],
+            [
+              "positioning",
+              77,
+              6.416666666666667
+            ],
+            [
+              "shotpower",
+              43,
+              3.5833333333333335
+            ]
+          ],
+          "badgeHits": [],
+          "posHit": true,
+          "roleHit": 0,
+          "tile": 31
+        }
+      }
+    },
+    "EMPTY": {
+      "group": "OUT",
+      "profile": null
+    },
+    "OUTSIDE_ONLY": {
+      "group": "OUT",
+      "profile": null
+    }
+  }
+}
