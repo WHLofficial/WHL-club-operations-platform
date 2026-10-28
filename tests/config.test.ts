@@ -121,8 +121,23 @@ describe('config 服务（§13）', () => {
     expect(rows2.find((r) => r.key === 'wage_param_a')?.value).toBe(CONFIG_MASK);
   });
 
-  it('注册表 86 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0/v6.28.0/v6.33.1/v6.47.0/v6.49.0/v6.50.0/v6.53.0 各域参数）', () => {
-    expect(CONFIG_KEYS.length).toBe(86); // v6.47.0 加 wage_floor_gap；v6.49.0 加 offer_turn_hours / negotiation_silence_hours；v6.50.0 加 sea_enabled / sea_sealed_hours；v6.53.0 加 window_length_hours
+  it('注册表 87 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0/v6.28.0/v6.33.1/v6.47.0/v6.49.0/v6.50.0/v6.53.0/v6.57.0 各域参数）', () => {
+    expect(CONFIG_KEYS.length).toBe(87); // v6.47.0 加 wage_floor_gap；v6.49.0 加 offer_turn_hours / negotiation_silence_hours；v6.50.0 加 sea_enabled / sea_sealed_hours；v6.53.0 加 window_length_hours；v6.57.0 加 expected_income_rate
+  });
+
+  // v6.57.0 预期收入额度系数 k：在册 + 默认 1.0 与 SQL 侧 COALESCE 兜底同源，运营 PUT 不再 400
+  it('expected_income_rate 键在册、默认 1.0（与 ledger.ts/0081 的 COALESCE 兜底同值）、可写可删', async () => {
+    expect(CONFIG_KEYS).toContain('expected_income_rate');
+    expect(CONFIG_DEFAULTS.expected_income_rate).toBe('1.0');
+    const { service } = setup();
+    // 库中无覆盖时读默认 1.0（额度 = 在途净收入 × 1.0）
+    await expect(service.get('expected_income_rate')).resolves.toBe('1.0');
+    // 运营调低：写入成功（未注册时 set 抛 RangeError「未注册的 config 键」）
+    await service.set('expected_income_rate', '0.5');
+    await expect(service.get('expected_income_rate')).resolves.toBe('0.5');
+    // 删覆盖回默认
+    await service.set('expected_income_rate', null);
+    await expect(service.get('expected_income_rate')).resolves.toBe('1.0');
   });
 
   // v6.28.0 A/B 段：级别系数（影响力公式）与每场死忠系数

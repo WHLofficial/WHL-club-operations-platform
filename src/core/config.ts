@@ -100,6 +100,10 @@ export const CONFIG_KEYS = [
   // v6.50.0 海捞两阶段：暗标段总开关（默认关＝现状即时海捞）+ 暗标段时长（管理端表单默认填充值）
   'sea_enabled',
   'sea_sealed_hours',
+  // v6.57.0 预期收入额度线：额度 = 在途卖人净收入 × k，钳制式 MIN(MAX(x,0),1)；
+  // 与迁移 0081 三触发器 / ledger.ts 的 COALESCE 兜底 '1.0' 同值——不注册则运营 PUT 一律 400，
+  // k 恒走 SQL 侧兜底，「k 键留给运营调」落空
+  'expected_income_rate',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -359,6 +363,9 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   // 时刻表里填「暗标段终点」时的默认时长（实际以 transfer_sea_sealed 行的具体时间为准）。
   sea_enabled: 'false',
   sea_sealed_hours: '72',
+  // v6.57.0 预期收入额度系数 k：默认 1.0（全额计入可支配），与 SQL 侧 COALESCE 兜底同值；
+  // 钳制在 SQL 里做（MIN(MAX(x,0),1)），config 只存原值
+  expected_income_rate: '1.0',
 };
 
 export const CONFIG_SECRET_KEYS: ReadonlySet<string> = new Set([
