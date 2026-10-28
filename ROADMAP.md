@@ -81,6 +81,38 @@
 
 ---
 
+## v6.57.0 · 预期收入额度线：窗口内预支未到账的卖人收入（2026-10-28）
+
+**状态**：**本地实现完成，未 push / 未 deploy，迁移 0081 未 apply 生产**；判级 minor（新能力：额度公式 + 触发器重建 + balance 三字段 + 前端增强档）。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`（v3，三轮审查全消化）、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。
+
+**裁决**（设计 §0，2026-10-27 用户拍板）：额度来源 = 竞价领先出价 + 待审/谈判中**成交类**单（type 白名单）；落空自然收缩（实时公式不预入账，负可用挡冻结型支出）；折扣率 k=1.0；作用面 = 转会类全部消费点（球场扩建/商场工单明确排除，保持现金口径）；展示走增强档（余额端点新字段 + 弹层动用额）。
+
+**交付（`0a4e5b7`，22 文件）**：迁移 **`0081`**（0005/0063/0070 三个资金触发器重建：资金式接 creditLine 子查询、全部 NULL 可达闸位包死（幽灵挂牌/无账本行/幽灵标从 fail-open 改拒）、非资金闸逐字保留；`tests/d1.ts` MIGRATION_FILES 已追加）；`ledger.ts` 公式单点定义（`balanceSnapshot` / `expectedIncomeBreakdown` / `creditLineGuard`，触发器内嵌同段文本、`tests/expected-income.test.ts` 文本锁 + 行为锁双兜）；`GET /api/club/balance` 统一走 ledger（响应加 expectedIncome / creditLine / available）；`chargeBypassFee` 批内守卫同步接额度（堵「预检放行、扣款 409 死锁且重试永不过」）+ settled/extra_fee 双守卫任一判定（堵静默失败）；offers 三处 + sea/market 资金文案标明含额度；前端 `web/src/lib/credit-line.ts`（动用额 = max(0, 支出 − (balance − held + 本人本单旧冻结))，回加口径与 market/offers×2/sea-sealed 四处服务端预检同源）、Ledger/转会台余额行「可支配 X m（含预期收入 Y m）」+ 负可用中性红字（不写「预期收入已收缩」）、MarketBoardPage/ListingsBidsSection 两处前端自算收编、出价/海捞暗标明标/续约/匹配确认区「本次动用预期收入 W m」。**stadium-ops / shop-ops 现金口径一行不动**（Q4 排除的回归锁 = 两组既有测试保持绿）。
+
+**验收**：typecheck 三份全清；全量 vitest **164 文件 / 2679 例（2676 通过 + 3 skip）全绿**；build 成功（`index-BNEPNJzQ.js` 702.48 kB / gzip 222.15 kB）。同源锁覆盖：额度足放行/来源落空拒绝、config 缺行 1.0 与写 'abc' 归 0 两层一致、删 k 项/删 type 过滤/恢复只判末句各定向变异必红、0081 与 ledger.ts 片段逐字文本锁。**待办**：0081 生产 apply 另行授权（先 apply 再 push）；e2e 冒烟 + 弹层真机复核留给主会话收口。
+
+---
+
+## v6.56.0 · 球员页全页重排 + fit 适配度引擎移植（2026-10-28）
+
+**状态**：**本地实现完成，未 push / 未 deploy**；判级 minor（新页面结构 + 新展示能力）。计划 `memory/plan-v6.55.0-attr-head-relayout.md`（按裁决改号 v6.56.0）、测试计划 `docs/test-plans/v6.56.0-attr-head-relayout.md`（25 TC）。
+
+**交付（`078df4c`，17 文件 +2819 行）**：**fit 引擎移植**——自 tour 仓 `shared/` 复制 `fitScore.ts`（207 行，fitProfileAll/fitTile/fitTileTip 双指标：个人内百分位 + 联盟绝对分）与 `roleFit.ts`（826 行，49 槽权重冻结表 + RoleID/PosID 映射）进 `web/src/lib/fit/`，断言逐字迁移（roleFit 源核对改用本仓 `ref/playstyle.json` 真源，比 tour 冻结表更硬）；新增 `fit-parity.test.ts` 全量快照双跑（固定种子确定性 fixture 对 tour 引擎逐字段比对，tour 仓不在场自动 skip）。**球员页重排**——顶卡 hero（贴纸卡框精髓：名字/官方缩写/标记 + CA/PA/身价大数字 + 位置 chips + 花式/逆足/声望/体型 quads + 🥇🥈 + 经纪人/队徽 64/对比入口）+ 双翼 grid `minmax(0,1fr) | 300px`：主列五页签默认属性（雷达 350 宽 + fit 卡前 4 槽三态色点 85/50），右翼 SideOps 置顶 + 热区 + 身份徽章卡 + PlayStyles 卡；旧 `.attr-head` 三列 / `.star-line` / `.dossier` 布局规则退役，1050 双翼临界断点由 `tests/mobile-baseline.test.ts` 静态锁改写钉死；AttrRadar/PositionHeatmap 只动尺寸注释（语义零变化回归锁）。
+
+**验收**：typecheck 三份全清；全量 vitest 164 文件 / 2679 例全绿；build 成功。**待办**：四视口截图复核（1440/1050 两侧/760/320）与 320 零横向溢出 e2e 留给主会话收口。
+
+---
+
+## v6.55.0 · 标价↔最低报价自动对齐 + 意向单多笔并存·开窗择一（2026-10-28）
+
+**状态**：**本地实现完成，未 push / 未 deploy**；判级 minor（新规则语义）；零迁移零生产写（生产快照：在途 intent 9 条/9 球员、违例 0、同买方并存 0——无需数据订正）。设计 `docs/superpowers/specs/2026-10-27-intent-multi-and-price-align-design.md`、测试计划 `docs/test-plans/v6.55.0-intent-multi-and-price-align.md`（31 TC）。
+
+**交付（`53f624f`，18 文件）**：**标价对齐**——`setOfferSettings` 旧值分流：新标价低于库中旧标价（含首挂 NULL）⇒ 最低报价自动对齐降至新标价（响应 `minOfferPriceAdjusted{from,to}`，前端回灌草稿 null→''）；标价未动或上升（是底线越界）⇒ 维持 400；对齐支位于全部区间校验之后；审计仅对齐时追加 `minAlignedTo`（对齐值 = 公开标价，无私密信息，严格 toEqual 与 `not.toContain('40')` 哨兵不弱化）。**意向单多笔并存**——唯一性球员级放宽为买方级（enterIntent NOT EXISTS 加 buyer 维度、dup 预检扩 `IN ('pending','intent')`）；确认/开窗同意的 occupy 叠双闸（同球员悬挂 accepted + 非卖品赛跑）；fulfill 批新增收口 UPDATE（同球员其余 intent → expired，守卫 `EXISTS(listed)`，blanket 释放/事件两条复用语句自动覆盖）；落选方收 `offer_intent_lost`（NOTIFY_META 43→44，深链落「我送出的」）；`finalizeOffer` 后三条挂终态守卫（堵撤回/确认赛跑时误释放赢家冻结的资金洞）；`rollbackGhostOffer` 幽灵单回滚；开窗提醒 LIMIT 200 OFFSET 翻页取全 + 按 (player) 聚合（卖方一条 N 家择一、买方各一条竞争提示，N=1 文案不变）。竞态复现用手测 Proxy 拦 D1 在单线程里造毫秒窗（非卖品赛跑 / 终态守卫两组）。
+
+**验收**：typecheck 三份全清；全量 vitest 164 文件 / 2679 例全绿；build 成功。测试计划点名的待补 TC（校验顺序 A-004 / 对齐边界 A-005 / SideOps 组件 A-007 / 同球员 205 买方跨翻页 A-027 / OffersSection 多 intent hint A-031 / 落选徽章）全部落成自动化用例。**待办**：变异清单逐条执行 + e2e 冒烟留给主会话收口。
+
+---
+
 ## v6.54.1 · 收口审捡出的市场域修复：标价区间与挂牌同规、边界取整、toast/z-index（2026-10-26）
 
 **状态**：**本地实现完成，未 push / 未 deploy，随 v6.54.0 同批上线**；判级 patch。测试计划 `docs/test-plans/v6.54.1-transfer-price-bounds.md`。v6.54.0 收口审发现的市场域独立缺陷（与闹涨薪无耦合），零迁移。

@@ -4,6 +4,35 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.57.0] · 预期收入额度线：窗口内预支未到账的卖人收入（2026-10-28）
+
+**本地实现完成，未 push / 未 deploy；迁移 0081 未 apply 生产（apply 另行授权）**。判级 minor。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。
+
+**Added**
+
+- **额度公式**：`expectedIncome = Σ每球员在途净额取最高`（源① 挂牌最高 active 出价 / 源② 待审·签约中**成交类**单——type 白名单 `transfer/activation/forced_auction`，挡 rc_change 等假额度）× k（config `expected_income_rate`，钳制式：缺行 1.0、写非法值归 0 = 关闸，fail 严格方向）；`available = balance − held + creditLine`。落空自然收缩（驳回/作废即缩水，负可用挡冻结型支出，「负=欠款」沿用现状哲学）。
+- **迁移 0081**：0005/0063/0070 三个资金触发器资金式接额度子查询，顺手包死全部 NULL 可达闸位（幽灵挂牌/无账本行/幽灵标原为 fail-open）；非资金闸逐字保留。
+- **四处公式真源收口**：ledger.ts 单点定义 + balance 端点统一走 ledger（新字段 expectedIncome/creditLine）+ chargeBypassFee 批内守卫同步接额度（堵 409 死锁）与 settled/extra_fee 双守卫（堵静默失败）+ 五处资金文案标明含额度。
+- **前端增强档**：Ledger/转会台余额行「可支配 X m（含预期收入 Y m）」+ 负可用中性红字；MarketBoardPage/ListingsBidsSection 两处自算收编；`credit-line.ts` 动用额（旧冻结回加四处同源）；出价/海捞/续约/匹配确认区「本次动用预期收入 W m」。球场扩建与商场工单保持现金口径不动（Q4 明确排除）。
+
+## [v6.56.0] · 球员页全页重排 + fit 适配度引擎移植（2026-10-28）
+
+**本地实现完成，未 push / 未 deploy**。判级 minor。计划 `memory/plan-v6.55.0-attr-head-relayout.md`、测试计划 `docs/test-plans/v6.56.0-attr-head-relayout.md`（25 TC）。
+
+**Added**
+
+- **fit 引擎移植**（自 tour 仓 `shared/`）：`web/src/lib/fit/`——fitScore 双指标（fitTile 个人内百分位分池出档 / rankShown 联盟绝对分）、roleFit 49 槽权重冻结表；断言逐字迁移 + `fit-parity.test.ts` 对 tour 引擎全量快照双跑（tour 仓不在场自动 skip）。
+- **球员页 hero + 双翼重排**：顶卡 hero（贴纸卡框 + CA/PA/身价大数字 + quads + 对比入口）、双翼 `minmax(0,1fr)|300px`、属性页签雷达 350 宽 + fit 卡（前 4 槽三态色点 85/50）、右翼 SideOps 置顶 + 热区 + 身份徽章卡 + PlayStyles 卡；旧 `.attr-head`/`.star-line`/`.dossier` 布局退役，1050 双翼临界断点（mobile-baseline 静态锁改写）；雷达/热区语义零变化回归锁。
+
+## [v6.55.0] · 标价↔最低报价自动对齐 + 意向单多笔并存·开窗择一（2026-10-28）
+
+**本地实现完成，未 push / 未 deploy**。判级 minor；零迁移零生产写。设计 `docs/superpowers/specs/2026-10-27-intent-multi-and-price-align-design.md`、测试计划 `docs/test-plans/v6.55.0-intent-multi-and-price-align.md`（31 TC）。
+
+**Added**
+
+- **标价对齐**：降标价（含首挂）⇒ 最低报价自动对齐降至新标价（`minOfferPriceAdjusted{from,to}` 回执，前端回灌草稿）；抬底线/标价上升维持 400；审计仅对齐时追加 `minAlignedTo`（哨兵不弱化）。
+- **意向单多笔并存**：唯一性球员级 → 买方级；卖方开窗择一确认，落选方自动失效收口 + `offer_intent_lost` 落选通知（NOTIFY_META 43→44）；确认 occupy 双闸（悬挂 accepted + 非卖品赛跑）、fulfill 批收口 UPDATE、`finalizeOffer` 终态守卫（堵资金洞）、`rollbackGhostOffer`、开窗提醒翻页取全 + 按球员聚合分角色文案。
+
 ## [v6.54.1] · 收口审捡出的市场域修复：标价区间与挂牌同规、边界取整、toast/z-index（2026-10-26）
 
 **本地实现完成，未 push / 未 deploy，随 v6.54.0 同批上线**。判级 patch（独立于闹涨薪的市场域缺陷修复，v6.54.0 收口审发现）。测试计划 `docs/test-plans/v6.54.1-transfer-price-bounds.md`。
