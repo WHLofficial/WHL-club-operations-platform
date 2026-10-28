@@ -72,6 +72,26 @@ const POSITION_IDS = (() => {
   }
 })();
 
+// fit 引擎属性键集（⑯ 探针的 fit 判据，TC-C-024）：`web/src/lib/fit/roleFit.ts` 同样不进 dist
+// 静态资产，Node 侧正则抽取 ROLE_FIT 每条 `attrs` 的键并集（= FIT_ATTR_KEYS 的定义：全表键
+// 并集去重排序，不含 CA/PA）。键集与组件渲染同源——fit 卡只在 gameAttrs 含任一引擎键（数值）
+// 时渲染，探针若只看 gameAttrs 非 null，探到的球员可整卡不渲染、`fit <= 4` 断言空转假绿。
+const FIT_KEYS = (() => {
+  try {
+    const src = readFileSync(join(process.cwd(), 'web', 'src', 'lib', 'fit', 'roleFit.ts'), 'utf8');
+    const keys = new Set();
+    for (const m of src.matchAll(/\[\s*"([a-z0-9_]+)"\s*,\s*\d\s*\]/g)) keys.add(m[1]);
+    keys.delete('CA');
+    keys.delete('PA');
+    const out = [...keys].sort();
+    if (out.length === 0) throw new Error('ROLE_FIT attrs 正则抽取 0 键（表格式变更）');
+    return out;
+  } catch (e) {
+    console.warn(`（备注：读不到/解析不了 web/src/lib/fit/roleFit.ts（${e.message}）——fit 判据退回「gameAttrs 非 null」宽口径）`);
+    return null;
+  }
+})();
+
 if (!existsSync(CHROME)) {
   console.error(`找不到 Chrome：${CHROME}\n用 E2E_CHROME=<chrome.exe> 指定路径。`);
   process.exit(2);
@@ -2620,10 +2640,13 @@ async function main() {
         return p ? (p.fcId ?? p.id) : null;
       });
       assert(pid, '取样球员失败（/api/players?limit=1 无数据）——⑯ 玩家页断言前提不成立');
-      // v6.35.0 探针（v6.56.0 沿用）：雷达/属性组卡整块挂在 player.gameAttrs 上，本地夹具只有个别球员
-      // 带 FC 存档（9001-9006 全 NULL）⇒ 先探一个「有存档的球员」来验几何，取样球员本身按实际存档态
-      // 断言（无存档 ⇒ 不出 .player-radar-row 的空态闸门）。attrsPos 与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径。
-      const attrProbe = await page.evaluate(async ([first, posIds]) => {
+      // v6.35.0 探针（v6.56.0 沿用；TC-C-024 订正判据）：雷达/属性组卡整块挂在 player.gameAttrs 上，
+      // fit 卡再进一步——只在 gameAttrs 含 fit 引擎键（数值）时渲染。attrsPid 因此取「有存档且含
+      // 引擎键」的球员，与渲染同源：否则探到的球员 fit 卡整卡不渲染、`fit <= 4` 断言空转假绿
+      //（计划 TC-C-024 的变异 = 判据写死不看夹具）。keys 由 Node 侧读 roleFit.ts 传入（该文件
+      // 不进 dist，浏览器 fetch 不到）；keys=null（读表失败）时退回「gameAttrs 非 null」宽口径。
+      // attrsPos 与后端 hotZonesOf 的 `v >= 0 ? v : null` 同口径。
+      const attrProbe = await page.evaluate(async ([first, posIds, fitKeys]) => {
         const r = await fetch('/api/players?limit=30');
         const ids = r.ok ? ((await r.json()).players ?? []).map((p) => p.fcId ?? p.id).filter((v) => v != null) : [];
         // 位置判据与 positionName 同源（空槽 null/undefined/'' 不认，且只认 ref 表里 name !== '-' 的 id）；
@@ -2633,6 +2656,10 @@ async function main() {
           const n = Number(v);
           return posIds === null ? Number.isFinite(n) && n >= 0 : Number.isFinite(n) && posIds.includes(n);
         };
+        // fit 判据与 Player.tsx 的 numericAttrsOf + fitProfileAll 同源：引擎键且有有限数值才进引擎
+        const fitOk = (a) =>
+          a !== null &&
+          Object.keys(a).some((k) => fitKeys.includes(k) && typeof a[k] === 'number' && Number.isFinite(a[k]));
         let attrsPid = null;
         let pidAttrs = false;
         let attrsPos = false;
@@ -2642,14 +2669,14 @@ async function main() {
           const a = ((await d.json()).player ?? {}).gameAttrs ?? null;
           const pos = a !== null && ['PosID1', 'PosID2', 'PosID3', 'PosID4'].some((k) => posOk(a[k]));
           if (id === first) pidAttrs = a !== null;
-          if (a !== null && attrsPid === null) {
+          if (a !== null && attrsPid === null && (fitKeys === null || fitOk(a))) {
             attrsPid = id;
             attrsPos = pos;
           }
           if (attrsPid !== null && id === first) break; // 取样球员排在最前 ⇒ 首轮就能定案
         }
         return { attrsPid, pidAttrs, attrsPos };
-      }, [pid, POSITION_IDS]);
+      }, [pid, POSITION_IDS, FIT_KEYS]);
 
       // —— 375：双翼塌单列（v6.56.0 断点 1050）+ 页签不撑破文档 + 转会事件卡互斥且 fit ——
       await page.setViewportSize({ width: 375, height: 812 });
@@ -2719,11 +2746,20 @@ async function main() {
         assert(head && head.fit <= 4, `fit 适配度卡最多 4 条（实见 ${head?.fit}）`);
         if (!head || head.fit === 0) console.warn('（⑯ 备注：该球员 attrs 齐备但缺 fit 引擎键，fit 卡整卡不渲染——组件单测已锁）');
       } else {
+        // TC-C-010（2026-10-29 五视口复核订正）：无 FC 存档时属性页签恒渲染——雷达行空态在
+        //（轴带在、无数据多边形）、六组属性卡照常（值出「—」），只有 fit 卡与右翼热区不渲染。
+        // 旧断言「雷达行 0」与该 P0 预期相悖（整页签被 gameAttrs 门掏空、主列全白）。
         const rows = await page.locator('.player-radar-row').count();
-        assert(rows === 0, `无 FC 存档的球员不该渲染属性页签雷达行（实见 ${rows} 块）`);
+        assert(rows === 1, `无 FC 存档的球员属性页签应出雷达空态行（实见 ${rows} 块）`);
+        const emptySheet = await page.evaluate(() => ({
+          groups: document.querySelectorAll('.attr-group-card').length,
+          fit: document.querySelectorAll('.fit-card').length,
+        }));
+        assert(emptySheet.groups >= 5, `无 FC 存档的球员六组属性卡应照常渲染（实见 ${emptySheet.groups} 块）`);
+        assert(emptySheet.fit === 0, `无 FC 存档的球员不该渲染 fit 卡（实见 ${emptySheet.fit} 块）`);
         const heat = await page.locator('.wing-heat').count();
         assert(heat === 0, `无 FC 存档的球员不该渲染右翼位置分布（实见 ${heat} 块）`);
-        console.warn('（⑯ 备注：本地取样球员无 FC 存档，属性页签只验空态闸门；雷达/热区几何挪到末段用有存档球员验）');
+        console.warn('（⑯ 备注：本地取样球员无 FC 存档，属性页签按 TC-C-010 验空态渲染；雷达/热区几何挪到末段用有存档球员验）');
       }
       const ovAttr = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -2854,7 +2890,8 @@ async function main() {
         } else {
           assert(h375 && h375.heat === 0, `无位置数据的球员右翼不应出热区图（${JSON.stringify(h375)}）`);
         }
-        assert(h375 && h375.fit <= 4, `375 fit 适配度卡最多 4 条（实见 ${h375?.fit}）`);
+        // attrsPid 判据已与 fit 渲染同源（含引擎键）⇒ fit 卡必在场，条目数 ≥1 且 ≤4（TC-C-024）
+        assert(h375 && h375.fit >= 1 && h375.fit <= 4, `375 fit 适配度卡应 1-4 条（实见 ${h375?.fit}）`);
         assert(h375 && h375.ov <= 1, `375 属性页签横向溢出 ${h375?.ov}px`);
         // 320 单列基线（TC-C-024）：最窄档零横向溢出 + 雷达行折纵向 + fit 卡不超上限
         await page.setViewportSize({ width: 320, height: 700 });
@@ -2869,7 +2906,8 @@ async function main() {
         });
         assert(h320 && h320.ov <= 1, `320 球员页文档级横向溢出 ${h320?.ov}px（最坏情况主锁）`);
         assert(h320 && h320.dir === 'column', `320 属性页签雷达行应折纵向（flex-direction=${h320?.dir}）`);
-        assert(h320 && h320.fit <= 4, `320 fit 卡条目最多 4 条（实见 ${h320?.fit}）`);
+        // attrsPid 判据与 fit 渲染同源 ⇒ 320 下 fit 卡条目数 ≥1 且 ≤4（TC-C-024，非空转）
+        assert(h320 && h320.fit >= 1 && h320.fit <= 4, `320 fit 卡条目应 1-4 条（实见 ${h320?.fit}）`);
         await page.setViewportSize({ width: 1280, height: 900 });
         await page.waitForTimeout(200);
         const h1280 = await page.evaluate(() => {
