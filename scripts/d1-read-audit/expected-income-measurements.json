@@ -1,0 +1,307 @@
+{
+  "note": "v6.57.0/收口审 TC-B-018：预期收入额度三形状生产实测（只读探针，SQL 由 src/worker/ledger.ts 真函数产生，零漂移）",
+  "generatedAt": "2026-10-28T23:55:36.845Z",
+  "totals": {
+    "listings": 0,
+    "transfers": 28,
+    "bids": 0,
+    "active_bids": 0,
+    "fund_holds": 36
+  },
+  "listingsCensus": [],
+  "transfersCensus": [
+    {
+      "club": 110374,
+      "total": 5,
+      "inflight": 0
+    },
+    {
+      "club": 45,
+      "total": 4,
+      "inflight": 0
+    },
+    {
+      "club": 9,
+      "total": 3,
+      "inflight": 0
+    },
+    {
+      "club": 10,
+      "total": 3,
+      "inflight": 0
+    },
+    {
+      "club": 73,
+      "total": 3,
+      "inflight": 0
+    },
+    {
+      "club": 21,
+      "total": 2,
+      "inflight": 0
+    },
+    {
+      "club": 33,
+      "total": 2,
+      "inflight": 0
+    },
+    {
+      "club": 241,
+      "total": 2,
+      "inflight": 0
+    },
+    {
+      "club": 2,
+      "total": 1,
+      "inflight": 0
+    },
+    {
+      "club": 13,
+      "total": 1,
+      "inflight": 0
+    },
+    {
+      "club": 280,
+      "total": 1,
+      "inflight": 0
+    },
+    {
+      "club": 131681,
+      "total": 1,
+      "inflight": 0
+    }
+  ],
+  "holdsCensus": [
+    {
+      "club": 66,
+      "total": 9,
+      "held": 3
+    },
+    {
+      "club": 11,
+      "total": 5,
+      "held": 2
+    },
+    {
+      "club": 33,
+      "total": 5,
+      "held": 1
+    },
+    {
+      "club": 280,
+      "total": 5,
+      "held": 3
+    },
+    {
+      "club": 45,
+      "total": 4,
+      "held": 4
+    },
+    {
+      "club": 73,
+      "total": 4,
+      "held": 2
+    },
+    {
+      "club": 243,
+      "total": 3,
+      "held": 0
+    },
+    {
+      "club": 112172,
+      "total": 1,
+      "held": 1
+    }
+  ],
+  "matrix": [
+    {
+      "shape": "balance",
+      "club": 110374,
+      "label": "最长历史",
+      "rowsRead": 8,
+      "returned": 1,
+      "scans": [],
+      "tempBtree": false,
+      "plans": []
+    },
+    {
+      "shape": "credit",
+      "club": 110374,
+      "label": "最长历史",
+      "rowsRead": 7,
+      "returned": 1,
+      "scans": [
+        "CONSTANT",
+        "CONSTANT",
+        "src",
+        "p"
+      ],
+      "tempBtree": true,
+      "plans": [
+        "SCAN CONSTANT ROW",
+        "SCALAR SUBQUERY 13",
+        "CO-ROUTINE p",
+        "CO-ROUTINE src",
+        "COMPOUND QUERY",
+        "LEFT-MOST SUBQUERY",
+        "SEARCH l USING INDEX idx_listings_seller (seller_club_id=?)",
+        "SEARCH b EXISTS USING INDEX idx_bids_listing_amount (listing_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH b USING INDEX idx_bids_listing_amount (listing_id=?)",
+        "UNION ALL",
+        "SEARCH t USING INDEX idx_transfers_from (from_club_id=?)",
+        "MATERIALIZE (subquery-8)",
+        "SCAN CONSTANT ROW",
+        "SCALAR SUBQUERY 7",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCAN src",
+        "SEARCH c USING INDEX sqlite_autoindex_contracts_1 (player_id=?) LEFT-JOIN",
+        "SCAN (subquery-8)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "SCALAR SUBQUERY 6",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCALAR SUBQUERY 6",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCAN p",
+        "SCALAR SUBQUERY 1",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)"
+      ]
+    },
+    {
+      "shape": "breakdown",
+      "club": 110374,
+      "label": "最长历史",
+      "rowsRead": 8,
+      "returned": 0,
+      "scans": [],
+      "tempBtree": false,
+      "plans": []
+    },
+    {
+      "shape": "balance",
+      "club": 45,
+      "label": "次长历史",
+      "rowsRead": 12,
+      "returned": 1,
+      "scans": [],
+      "tempBtree": false,
+      "plans": []
+    },
+    {
+      "shape": "credit",
+      "club": 45,
+      "label": "次长历史",
+      "rowsRead": 6,
+      "returned": 1,
+      "scans": [
+        "CONSTANT",
+        "CONSTANT",
+        "src",
+        "p"
+      ],
+      "tempBtree": true,
+      "plans": [
+        "SCAN CONSTANT ROW",
+        "SCALAR SUBQUERY 13",
+        "CO-ROUTINE p",
+        "CO-ROUTINE src",
+        "COMPOUND QUERY",
+        "LEFT-MOST SUBQUERY",
+        "SEARCH l USING INDEX idx_listings_seller (seller_club_id=?)",
+        "SEARCH b EXISTS USING INDEX idx_bids_listing_amount (listing_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH b USING INDEX idx_bids_listing_amount (listing_id=?)",
+        "UNION ALL",
+        "SEARCH t USING INDEX idx_transfers_from (from_club_id=?)",
+        "MATERIALIZE (subquery-8)",
+        "SCAN CONSTANT ROW",
+        "SCALAR SUBQUERY 7",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCAN src",
+        "SEARCH c USING INDEX sqlite_autoindex_contracts_1 (player_id=?) LEFT-JOIN",
+        "SCAN (subquery-8)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "SCALAR SUBQUERY 6",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCALAR SUBQUERY 6",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCAN p",
+        "SCALAR SUBQUERY 1",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)"
+      ]
+    },
+    {
+      "shape": "breakdown",
+      "club": 45,
+      "label": "次长历史",
+      "rowsRead": 7,
+      "returned": 0,
+      "scans": [],
+      "tempBtree": false,
+      "plans": []
+    },
+    {
+      "shape": "balance",
+      "club": 1,
+      "label": "零历史",
+      "rowsRead": 2,
+      "returned": 1,
+      "scans": [],
+      "tempBtree": false,
+      "plans": []
+    },
+    {
+      "shape": "credit",
+      "club": 1,
+      "label": "零历史",
+      "rowsRead": 1,
+      "returned": 1,
+      "scans": [
+        "CONSTANT",
+        "CONSTANT",
+        "src",
+        "p"
+      ],
+      "tempBtree": true,
+      "plans": [
+        "SCAN CONSTANT ROW",
+        "SCALAR SUBQUERY 13",
+        "CO-ROUTINE p",
+        "CO-ROUTINE src",
+        "COMPOUND QUERY",
+        "LEFT-MOST SUBQUERY",
+        "SEARCH l USING INDEX idx_listings_seller (seller_club_id=?)",
+        "SEARCH b EXISTS USING INDEX idx_bids_listing_amount (listing_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH b USING INDEX idx_bids_listing_amount (listing_id=?)",
+        "UNION ALL",
+        "SEARCH t USING INDEX idx_transfers_from (from_club_id=?)",
+        "MATERIALIZE (subquery-8)",
+        "SCAN CONSTANT ROW",
+        "SCALAR SUBQUERY 7",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCAN src",
+        "SEARCH c USING INDEX sqlite_autoindex_contracts_1 (player_id=?) LEFT-JOIN",
+        "SCAN (subquery-8)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "SCALAR SUBQUERY 6",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCALAR SUBQUERY 6",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)",
+        "SCAN p",
+        "SCALAR SUBQUERY 1",
+        "SEARCH config USING INDEX sqlite_autoindex_config_1 (key=?)"
+      ]
+    },
+    {
+      "shape": "breakdown",
+      "club": 1,
+      "label": "零历史",
+      "rowsRead": 2,
+      "returned": 0,
+      "scans": [],
+      "tempBtree": false,
+      "plans": []
+    }
+  ]
+}

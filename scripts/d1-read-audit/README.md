@@ -570,5 +570,31 @@ SELECT players.id FROM players
 
 **复现**：`node scripts/d1-read-audit/verify-0044.mjs`、`node scripts/measure-d1-reads.mjs --only=sort-fc-id --json-out=scripts/d1-read-audit/measurements-after.json`（`--only` 一次只收一个 id，`sort-pa-initial` 同理）。
 
+## 十二、预期收入额度（v6.57.0 / 收口审 TC-B-018，2026-10-29 生产实测）
+
+`scripts/d1-read-audit/probe-expected-income.mjs`（**只读探针**，REST `/query` 管理通道）。与前几节探针不同的一点：**SQL 不手抄**——直接 `import src/worker/ledger.ts` 的真函数（`balanceSnapshot` / `expectedIncomeBreakdown` / `creditLineSql`，Node 24 原生剥类型），量到的就是线上形状，ledger.ts 改公式探针自动跟上。量三类形状 × 三档球队（按 listings+transfers 历史总数取最长 / 次长 / 零历史对照）。
+
+- **balance**（余额快照，`/api/club/balance` 每调用一次）：行读 = 该队 fund_holds 行数 + 两源历史总数 + 若干 config/账户点查。
+- **credit**（`creditLineSql` 单独求值）：0081 三个资金触发器与 bypass/offer 守卫内嵌的同一片段——**每次 fund_holds 写入（出价/报价/海捞冻结）重求值一次，它的行读就是触发器写放大的单位成本**。
+- **breakdown**（转会台「预计收入」拆解端点）：同一子查询多一层 ORDER BY。
+
+**全库现状（2026-10-29）**：listings 0 / transfers 28 / bids 0（active 0）/ fund_holds 36——市场刚起步，本节登记的是**基线 + 增长轴**，不是高水位；行读矩阵随交易量增长应复测。
+
+**行读矩阵**（数字来自 `expected-income-measurements.json`，复现命令见节尾）：
+
+| 形状 | club 110374（最长历史：5 transfers） | club 45（次长：4 fund_holds + 4 transfers） | club 1（零历史） |
+|---|---|---|---|
+| balance | 8 | 12 | 2 |
+| credit（写放大单位） | 7 | 6 | 1 |
+| breakdown | 8 | 7 | 2 |
+
+**计划取证（EXPLAIN QUERY PLAN，生产真引擎）**：三来源基表全走索引——`SEARCH l USING INDEX idx_listings_seller (seller_club_id=?)`、bids 的 EXISTS 探测与 MAX 标量都 `SEARCH b USING INDEX idx_bids_listing_amount (listing_id=?)`、`SEARCH t USING INDEX idx_transfers_from (from_club_id=?)`；contracts 走 `sqlite_autoindex_contracts_1 (player_id=?)`（唯一约束自带）、config 走 PK。与 `tests/expected-income.test.ts:431` 的 EXPLAIN 结构锁互为印证（本地真迁移夹具 + 生产真引擎双口径）。
+
+**已知形状（定性可接受，登记不改）**：① 计划里的 `SCAN CONSTANT ROW` / `SCAN (subquery-8)` 是税率常量行集（1 行）；`SCAN src` / `SCAN p` 是在途行集物化（CO-ROUTINE）后的扫描——行数受「该队**在途**单数」约束（≤ 在途 listings+transfers，当前 0–1），不随历史总量增长；② `USE TEMP B-TREE FOR GROUP BY` 只排该队逐笔在途行，同一上界；③ club 45 的 balance（12）高于 club 110374（8）符合模型：fund_holds 的 SUM 经 `idx_fund_holds_club` 逐行累加，冻结多的队多读。
+
+**增长轴（将来做部分索引时对照）**：listings / transfers 两源按 seller/from 走索引后**读全历史再内存滤状态**，行读 ≈ `3 + fund_holds(队) + listings_历史(队) + transfers_历史(队)`。当前全库历史单数极小；若将来单队历史过千且快照/冻结写入频次上升，可把状态收进索引（`idx_listings_seller` → `(seller_club_id, status)` 或 partial `WHERE status IN ('listed','bidding')`），以本节矩阵为 before 基线。
+
+**复现**：`node scripts/d1-read-audit/probe-expected-income.mjs`（wrangler OAuth token 过期时先跑任一条 `npx wrangler d1 execute whl-club --remote --command "SELECT 1" --json` 刷新，只读安全）。
+
 
 
