@@ -162,6 +162,7 @@ const MIGRATION_FILES = [
   '0078_venue_slots_p0.sql',
   '0079_renewal_demand.sql',
   '0080_contract_demands_status_expires.sql',
+  '0081_expected_income_credit_line.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

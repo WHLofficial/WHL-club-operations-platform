@@ -87,16 +87,28 @@ describe('财政余额与流水账（附录 A〔6〕）', () => {
     const fx = freshEnv();
     const bal = await get('/api/club/balance', 'tok-coach', fx.env);
     expect(bal.status).toBe(200);
-    expect((await bal.json()) as Record<string, unknown>).toEqual({ club: null, balance: null, held: null, available: null });
+    expect((await bal.json()) as Record<string, unknown>).toEqual({
+      club: null,
+      balance: null,
+      held: null,
+      available: null,
+      expectedIncome: null,
+      creditLine: null,
+    });
     const ledger = await get('/api/club/ledger', 'tok-coach', fx.env);
     expect(ledger.status).toBe(200);
     expect((await ledger.json()) as Record<string, unknown>).toEqual({ club: null, entries: [], nextCursor: null });
   });
 
-  it('余额口径 = 余额 − 冻结（held），与出价校验一致', async () => {
+  it('余额口径 = 余额 − 冻结（held）+ 预期收入额度，与出价校验一致', async () => {
     const fx = freshEnv();
     const clubId = await bindCoach(fx);
     await seedOpening(fx, clubId, 100);
+    // 挂牌 9 必须真实在场、listed 且挂牌价 ≤ 冻结额：0081 给 bid 闸包了 NULL 闸位（幽灵挂牌直接拒）
+    // 与既有金额闸（首笔冻结 ≥ 挂牌价），夹具直插 held 冻结前先落一张合法低价挂牌，
+    // 否则 WHL_BID_REJECT_CLOSED / WHL_BID_REJECT_AMOUNT
+    fx.sqlite.exec(`INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at, season, window_seq)
+       VALUES (9, 11, ${clubId}, 'normal', 10, 'listed', '2026-07-01T00:00:00Z', 1, 1)`);
     fx.sqlite.exec(
       `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
        VALUES (${clubId}, 12.5, 'held', 'listing', 9, '2026-07-01T00:00:00Z'),
@@ -104,8 +116,23 @@ describe('财政余额与流水账（附录 A〔6〕）', () => {
     );
     const res = await get('/api/club/balance', 'tok-coach', fx.env);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { club: { id: number }; balance: number; held: number; available: number };
-    expect(body).toEqual({ club: { id: clubId, name: '阿森纳' }, balance: 100, held: 12.5, available: 87.5 });
+    const body = (await res.json()) as {
+      club: { id: number };
+      balance: number;
+      held: number;
+      expectedIncome: number;
+      creditLine: number;
+      available: number;
+    };
+    // v6.57.0：本队没有在途卖人 ⇒ 额度 0，可支配仍是 balance − held
+    expect(body).toEqual({
+      club: { id: clubId, name: '阿森纳' },
+      balance: 100,
+      held: 12.5,
+      expectedIncome: 0,
+      creditLine: 0,
+      available: 87.5,
+    });
   });
 
   it('流水新→旧倒序，DTO camelCase；翻页 cursor 取上一页末条，35 条分两页', async () => {

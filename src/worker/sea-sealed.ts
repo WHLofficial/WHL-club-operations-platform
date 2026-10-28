@@ -15,7 +15,7 @@ import { fmtBeijingMinute, resolveOpsRow } from '../core/ops-schedule.ts';
 import { sqlDisplayName, rowDisplayName } from '../core/player-name.ts';
 import { createConfigService } from '../core/config.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
-import { availableBalance } from './ledger.ts';
+import { balanceSnapshot } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
 import { checkSeaSignEligible, createBypassTransfer } from './bypass.ts';
 import { loadOpsRows, loadWindowRef, saveOpsRow } from './ops-schedule.ts';
@@ -322,7 +322,8 @@ export async function submitSealedBid(
   }
 
   // 可用余额预检（触发器是同一事务里的兜底）：改标时自己那份旧冻结可以顶上来
-  const available = round2(await availableBalance(db, clubId));
+  const snap = await balanceSnapshot(db, clubId);
+  const available = round2(snap.available);
   const ownHold =
     existing?.hold_id !== null && existing?.hold_id !== undefined
       ? ((
@@ -335,7 +336,7 @@ export async function submitSealedBid(
   if (round2(available + ownHold) < signFee) {
     throw new HttpError(
       400,
-      `可用资金不足：出标即冻结签入费（新违约金的 30% = ${signFee} m），当前可支配 ${available} m`,
+      `可用资金不足：出标即冻结签入费（新违约金的 30% = ${signFee} m），当前可支配 ${available} m（已含预期收入 ${round2(snap.creditLine)} m）`,
       'sea_no_funds',
     );
   }

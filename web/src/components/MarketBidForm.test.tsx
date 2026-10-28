@@ -47,3 +47,74 @@ describe('MarketBidForm（v6.24.0）', () => {
     expect(input.value).toBe('20');
   });
 });
+
+// v6.57.0 动用预期收入提示：口径 = creditUse（出价 − (available − creditLine + 旧冻结)），
+// 三态 = 正好够不显示 / 差一点显示 / 快照缺失不显示；oldHold 回加（抬价顶替）单独锁。
+// 提示文案跨 JSX 节点，断言读 hint 的 textContent（不去匹配被换行拆开的花括号段）。
+describe('MarketBidForm 动用预期收入提示（v6.57.0）', () => {
+  const hintText = (): string => Array.from(document.querySelectorAll('span.hint')).map((el) => el.textContent ?? '').join('\n');
+
+  it('差一点用额度：提示行出现且金额正确', async () => {
+    const user = userEvent.setup();
+    render(
+      <MarketBidForm
+        mode="normal"
+        askPrice={10}
+        nextMinBid={11}
+        available={130}
+        creditLine={40}
+        onBid={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    // 预填 11：现金自由 90 ⇒ 11 不动用额度，无提示
+    expect(hintText()).not.toContain('本次动用预期收入');
+    const input = screen.getByLabelText('出价（m）');
+    await user.clear(input);
+    await user.type(input, '120');
+    // 现金自由 90 ⇒ 动用 30（不是 120——120 是出价额）
+    expect(hintText()).toContain('本次动用预期收入 30.00m');
+    expect(hintText()).toContain('当前可支配 130.00m');
+  });
+
+  it('正好够（现金部分足够）与快照缺失：都不显示提示', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <MarketBidForm mode="normal" askPrice={10} nextMinBid={11} available={130} creditLine={40} onBid={vi.fn().mockResolvedValue(undefined)} />,
+    );
+    let input = screen.getByLabelText('出价（m）');
+    await user.clear(input);
+    await user.type(input, '90');
+    expect(hintText()).not.toContain('本次动用预期收入');
+
+    rerender(
+      <MarketBidForm mode="normal" askPrice={10} nextMinBid={11} available={null} creditLine={null} onBid={vi.fn().mockResolvedValue(undefined)} />,
+    );
+    input = screen.getByLabelText('出价（m）');
+    await user.clear(input);
+    await user.type(input, '120');
+    expect(hintText()).not.toContain('本次动用预期收入');
+  });
+
+  it('oldHold 回加：抬价顶替旧冻结后按净差额算动用额', async () => {
+    const user = userEvent.setup();
+    render(
+      <MarketBidForm
+        mode="normal"
+        askPrice={10}
+        nextMinBid={11}
+        available={130}
+        creditLine={40}
+        oldHold={30}
+        onBid={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    const input = screen.getByLabelText('出价（m）');
+    await user.clear(input);
+    // 净差额基准 = 90 + 30 = 120：出 120 动用 0（不回加会误报动用 30）
+    await user.type(input, '120');
+    expect(hintText()).not.toContain('本次动用预期收入');
+    await user.clear(input);
+    await user.type(input, '140');
+    expect(hintText()).toContain('本次动用预期收入 20.00m');
+  });
+});

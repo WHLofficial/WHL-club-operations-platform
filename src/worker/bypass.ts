@@ -8,7 +8,7 @@ import { releaseFeeBounds } from '../core/negotiation-rules.ts';
 import { rcChangeFee, terminationFee, freeAgentFee, matchDiff, FORCED_AUCTION_PRICE } from '../core/bypass-rules.ts';
 import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { loadMarketContext } from './market-context.ts';
-import { availableBalance, ledgerMovement } from './ledger.ts';
+import { availableBalance, creditLineGuard, ledgerMovement } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
 import { assertOpOpen, opBlockReason } from './ops-schedule.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
@@ -153,13 +153,24 @@ async function chargeBypassFee(
   if (available < amount) {
     throw new HttpError(409, `俱乐部可用资金不足：这笔费用要 ${round2(amount)} m，当前可支配 ${available} m`);
   }
+  // 批内守卫必须与 availableBalance 同一公式（含预期收入额度）：预检放行而守卫按现金式判，
+  // 会让「靠额度刚好够」的单据在扣费那一批 409，且重试永远不过（审核死锁）。
+  const credit = creditLineGuard(clubId);
   const guardSql =
     `(SELECT status FROM transfers WHERE id = ?) = 'pending_review'` +
     ` AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
     ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
     (sealedHold ? ` + COALESCE((SELECT amount FROM fund_holds WHERE id = ? AND status = 'held'), 0)` : '') +
+    ` + ${credit.sql}` +
     ` >= ?`;
-  const guardParams = [transferId, clubId, clubId, ...(sealedHold ? [sealedHold.id] : []), amount];
+  const guardParams = [
+    transferId,
+    clubId,
+    clubId,
+    ...(sealedHold ? [sealedHold.id] : []),
+    ...credit.params,
+    amount,
+  ];
   // 留痕与账本共用同一套守卫，且**排在账本之前**落库：两者评估的是同一份库存状态，
   // 故「是否真扣到这笔费」的判断完全一致 —— 审核重放（该 kind 已有流水）或批内余额守卫
   // 没过时都不会留下失实的 bypass_fee 行（createAuditStatement 无法表达 WHERE，此处手写）
@@ -181,19 +192,29 @@ async function chargeBypassFee(
     guardSql,
     guardParams,
   });
-  const statements = [
-    auditStmt,
-    ...ledger,
+  // 解冻封标与写附加费两条 UPDATE 都挂同一守卫：只挂其中一条时，守卫没过的那条 0 行、
+  // 另一条照样落库——冻结白 settled（费用没收、流程照走）或附加费写上了而钱没扣。
+  // 顺序硬约束：两条**必须排在账本之前**——守卫读的是当时的余额，排在扣款之后会把刚扣的钱
+  // 又算进缺口（余额刚好够额度的单子会在这一步 0 行，账已扣、费没记、冻结没解）。
+  const guarded = [
     ...(sealedHold
-      ? [db.prepare(`UPDATE fund_holds SET status = 'settled' WHERE id = ? AND status = 'held'`).bind(sealedHold.id)]
+      ? [
+          db
+            .prepare(`UPDATE fund_holds SET status = 'settled' WHERE id = ? AND status = 'held' AND ${guardSql}`)
+            .bind(sealedHold.id, ...guardParams),
+        ]
       : []),
     db
-      .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'pending_review' AND extra_fee IS NULL`)
-      .bind(amount, transferId),
+      .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'pending_review' AND extra_fee IS NULL AND ${guardSql}`)
+      .bind(amount, transferId, ...guardParams),
   ];
+  const statements = [auditStmt, ...guarded, ...ledger];
   const results = await db.batch(statements);
-  // 流水没落：要么这笔已收过（幂等重试，静默返回），要么批内余额/状态守卫没过（资金刚被并发动用）
-  if ((results[statements.length - 1]?.meta.changes ?? 0) === 0) {
+  // 这笔费到底扣没扣：看两条守卫 UPDATE 里有没有任一条真改了行（它们与账本读同一份批前资金状态）。
+  // 只判末句会在「extra_fee 早被 createBypassTransfer 预填」时恒得 0，把已扣费的成功当失败；
+  // 只判 settled 又会在守卫失效时漏掉未扣款。两者都没有 → 回查流水区分「幂等重放」与「真失败」。
+  const charged = results.slice(1, 1 + guarded.length).some((r) => (r?.meta.changes ?? 0) > 0);
+  if (!charged) {
     const already = await db
       .prepare(`SELECT id FROM ledger_entries WHERE kind = ? AND ref_type IS 'transfer' AND ref_id IS ?`)
       .bind(kind, transferId)

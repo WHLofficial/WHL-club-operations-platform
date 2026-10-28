@@ -164,7 +164,7 @@ export default function Ledger() {
     queryFn: () => api<ClubBalance>('/api/club/balance'),
     retry: false,
   });
-  const balance = balanceQuery.data ?? { club: null, balance: null, held: null, available: null };
+  const balance = balanceQuery.data ?? { club: null, balance: null, held: null, available: null, expectedIncome: null, creditLine: null };
   const ledgerQuery = useInfiniteQuery({
     // 切类型就从头翻：kind 进 key
     queryKey: ['ledger', kind],
@@ -204,9 +204,17 @@ export default function Ledger() {
               </strong>
             </div>
             <div className="ledger-balance-sub muted">
-              可支配 {balance?.available?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'}m ·
+              可支配 {balance?.available?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'}m
+              {(balance?.creditLine ?? 0) > 0
+                ? `（含预期收入 ${balance!.creditLine!.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m）`
+                : ''}
+              {' · '}
               冻结中 {balance?.held?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'}m
             </div>
+            {/* v6.57.0 负可用：中性归因——工资扣穿冻结也会负可用，不写「预期收入已收缩」 */}
+            {balance?.available != null && balance.available < 0 && (
+              <div className="ledger-balance-neg">当前可支配为负（冻结或欠款占用），新增报价 / 出价类操作将被拒。</div>
+            )}
           </div>
 
           {isCoach && <FinanceSummaryCard />}

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
 import { apiPost, type BidPlaceResult, type MarketListing, type MatchDecisionResult } from '../../lib/api.ts';
+import { creditUse } from '../../lib/credit-line.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import { TeamLogo } from '../../components/TeamLogo.tsx';
 import { playerPath } from '../../lib/player-link.ts';
@@ -42,12 +43,15 @@ export function MarketListingOverlay({
   listingId,
   myClub,
   available,
+  creditLine,
   onClose,
   onBidDone,
 }: {
   listingId: number;
   myClub: MarketMyClub | null;
   available: number | null;
+  /** 预期收入额度（v6.57.0）：与 available 同源的余额端点快照字段，出价/匹配提示用 */
+  creditLine: number | null;
   onClose: () => void;
   /** 出价 / 匹配决定成功后让页面刷新「已冻结资金」口径 */
   onBidDone: () => void;
@@ -142,6 +146,7 @@ export function MarketListingOverlay({
             detail={detail}
             myClub={myClub}
             available={available}
+            creditLine={creditLine}
             remaining={remaining}
             success={success}
             matchFee={matchFee}
@@ -165,6 +170,7 @@ function OverlayBody({
   detail,
   myClub,
   available,
+  creditLine,
   remaining,
   success,
   matchFee,
@@ -180,6 +186,7 @@ function OverlayBody({
   detail: NonNullable<ReturnType<typeof useListingDetail>['data']>;
   myClub: MarketMyClub | null;
   available: number | null;
+  creditLine: number | null;
   remaining: number | null;
   success: string | null;
   matchFee: string;
@@ -289,12 +296,26 @@ function OverlayBody({
 
       {canBid && l.firstBidPending && isActivator && (
         <>
-          <MarketBidForm mode="activation-first" askPrice={l.askPrice} nextMinBid={l.nextMinBid} available={available} onBid={onBid} />
+          <MarketBidForm
+            mode="activation-first"
+            askPrice={l.askPrice}
+            nextMinBid={l.nextMinBid}
+            available={available}
+            creditLine={creditLine}
+            onBid={onBid}
+          />
           <span className="hint">{dateTime(l.activationDeadline)} 前不落价，激活作废还占本窗额度。</span>
         </>
       )}
       {canBid && !l.firstBidPending && l.matchPhase === null && (
-        <MarketBidForm mode="normal" askPrice={l.askPrice} nextMinBid={l.nextMinBid} available={available} onBid={onBid} />
+        <MarketBidForm
+          mode="normal"
+          askPrice={l.askPrice}
+          nextMinBid={l.nextMinBid}
+          available={available}
+          creditLine={creditLine}
+          onBid={onBid}
+        />
       )}
 
       {isSeller && l.matchPhase === 'matching' && (
@@ -340,7 +361,11 @@ function OverlayBody({
           {matchDiff !== null && matchDiff > 0 && (
             <p className="hint">
               预估差额回收 <span className="mono">{matchDiff.toFixed(2)}</span> m（新违约金 {Number(matchFee).toFixed(2)} − 现违约金{' '}
-              {oldRc.toFixed(2)}），审核通过时从账户回收。
+              {oldRc.toFixed(2)}），审核通过时从账户回收
+              {creditUse(matchDiff, { available, creditLine }) > 0
+                ? `，其中本次动用预期收入 ${money(creditUse(matchDiff, { available, creditLine }))} m`
+                : ''}
+              。
             </p>
           )}
         </div>

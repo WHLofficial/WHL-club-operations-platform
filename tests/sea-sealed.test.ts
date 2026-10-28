@@ -599,6 +599,99 @@ describe('结算链：审核 → 谈判（签入费与冻结的对齐）', () =>
   });
 });
 
+// v6.57.0 预期收入额度：chargeBypassFee 的批内守卫必须与 availableBalance 同源（含额度）。
+// 预检按「余额 − 冻结 + 额度」放行而批内守卫按现金式判，会让靠额度刚好够的单据在扣费那一批
+// 409「资金刚被其他操作占用」，且重试永远不过（审核死锁）。两处一旦漂移，下面两个用例必红。
+describe('结算链：附加费批内守卫（预期收入额度）', () => {
+  /** 给俱乐部挂一笔在途成交单当额度来源：球员无合同 ⇒ 全额落 40% 档，净额 = fee × 0.6 */
+  function seedSellCredit(fx: Fixture, clubId: number, fee: number): number {
+    fx.sqlite.exec(`
+      INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, created_at)
+        VALUES ('transfer', 991, ${clubId}, ${CLUB_B}, ${fee}, 'pending_review', 4, 1, '2026-07-01T00:00:00Z');
+    `);
+    return sqlGet<{ id: number }>(fx.sqlite, 'SELECT MAX(id) AS id FROM transfers')!.id;
+  }
+
+  /**
+   * 竞态注入：把 env.DB 包一层，在「扣费那一批」（含 ledgerMovement 的账户 upsert）真正执行前改库，
+   * 模拟预检读完之后、批内守卫之前资金被并发动用 —— 只有批内守卫能拦下。
+   */
+  function raceBeforeFeeBatch(fx: Fixture, mutate: () => void): void {
+    const real = fx.env.DB;
+    let prepared: string[] = [];
+    let fired = false;
+    fx.env.DB = {
+      prepare(sql: string) {
+        prepared.push(sql);
+        return real.prepare(sql);
+      },
+      batch(stmts: unknown[]) {
+        const hit = !fired && prepared.some((sql) => sql.includes('INSERT INTO ledger_accounts'));
+        prepared = [];
+        if (hit) {
+          fired = true;
+          mutate();
+        }
+        return real.batch(stmts as never);
+      },
+    } as unknown as D1Database;
+  }
+
+  it('预检含额度放行、批内守卫同源放行（不 409 死锁）：余额 0 只用额度付签入费', async () => {
+    const { fx } = await seedSealed();
+    seedSellCredit(fx, CLUB_A, 100); // 净 60
+    fx.sqlite.exec(`UPDATE ledger_accounts SET balance = 0 WHERE club_id = ${CLUB_A}`);
+    // 出标即冻结 6m —— 余额 0，这笔冻结本身就靠额度过闸
+    expect((await post('/api/transfers/sea-sealed', { playerId: 24, newReleaseFee: 20 }, A, fx.env)).status).toBe(201);
+    await post('/api/admin/sea-sealed/open', {}, 'tok-admin', fx.env);
+    const taskId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE type = 'transfer_confirm'")!.id;
+    const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
+    expect(approve.status).toBe(200);
+
+    const signFee = freeAgentFee(20);
+    expect(
+      sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = ?', CLUB_A),
+    ).toMatchObject({ balance: -signFee }); // 从 0 扣成负数（负=欠款）
+    expect(
+      sqlGet<{ amount: number; kind: string }>(fx.sqlite, "SELECT amount, kind FROM ledger_entries WHERE kind = 'free_agent_fee'"),
+    ).toMatchObject({ amount: -signFee, kind: 'free_agent_fee' });
+    expect(holdStatus(fx, bidRow(fx, 24, CLUB_A)!.hold_id)).toBe('settled');
+    expect(heldTotal(fx, CLUB_A)).toBe(0);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE sealed_bid_id IS NOT NULL')).toMatchObject({
+      status: 'signing',
+    });
+  });
+
+  it('批内守卫不过：显式 409，且冻结不白 settled、费用不扣、附加费不写、单据仍在待审', async () => {
+    const { fx } = await seedSealed();
+    const creditId = seedSellCredit(fx, CLUB_A, 100);
+    fx.sqlite.exec(`UPDATE ledger_accounts SET balance = 0 WHERE club_id = ${CLUB_A}`);
+    expect((await post('/api/transfers/sea-sealed', { playerId: 24, newReleaseFee: 20 }, A, fx.env)).status).toBe(201);
+    await post('/api/admin/sea-sealed/open', {}, 'tok-admin', fx.env);
+    const taskId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE type = 'transfer_confirm'")!.id;
+    // 预检读完、扣费批执行前：额度来源被驳回（生产里是并发的审核驳回 / 撤单）
+    raceBeforeFeeBatch(fx, () => fx.sqlite.exec(`UPDATE transfers SET status = 'rejected' WHERE id = ${creditId}`));
+    const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
+    expect(approve.status).toBe(409);
+    expect(((await approve.json()) as { error: string }).error).toContain('资金刚被其他操作占用');
+
+    const signFee = freeAgentFee(20);
+    expect(
+      sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = ?', CLUB_A),
+    ).toMatchObject({ balance: 0 });
+    expect(sqlAll(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind = 'free_agent_fee'")).toEqual([]);
+    // 冻结仍是 held（两条守卫 UPDATE 都挂守卫：不会再出现「钱没扣、冻结白 settled」）
+    expect(holdStatus(fx, bidRow(fx, 24, CLUB_A)!.hold_id)).toBe('held');
+    expect(heldTotal(fx, CLUB_A)).toBe(signFee);
+    expect(
+      sqlGet<{ status: string; extra_fee: number | null }>(
+        fx.sqlite,
+        'SELECT status, extra_fee FROM transfers WHERE sealed_bid_id IS NOT NULL',
+      ),
+    ).toMatchObject({ status: 'pending_review', extra_fee: null });
+  });
+});
+
 describe('管理端：明账 + 立即开标 / 延长 / 取消', () => {
   it('明账：金额与冻结状态全可见，汇总按球员/标数/队数/最高价', async () => {
     const { fx, batchId } = await seedSealed();

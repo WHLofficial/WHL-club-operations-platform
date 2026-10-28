@@ -15,6 +15,7 @@ import { closedRegularTicks } from '../contract-ticks.ts';
 import { POSITION_BY_ID, POSITION_GROUP_BY_POSITION, POSITION_GROUPS } from '../../core/fc26.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, influenceTierCoef, loadInfluenceTierCoefs } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
+import { balanceSnapshot } from '../ledger.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
 import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms } from '../naming-ops.ts';
@@ -745,20 +746,16 @@ app.get('/me/club', async (c) => {
   });
 });
 
-// 财政余额（附录 A〔6〕）：余额 / 冻结 / 可支配，口径与出价校验一致（§7.4）
+// 财政余额（附录 A〔6〕）：余额 / 冻结 / 预期收入 / 额度 / 可支配，口径与出价校验一致（§7.4）
+// v6.57.0：公式统一走 ledger.ts（availableBalance 同一额度式），不再在端点里手写 balance − held
 app.get('/club/balance', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (!club) return c.json({ club: null, balance: null, held: null, available: null });
-  const row = await c.env.DB.prepare(
-    `SELECT (SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) AS balance,
-            (SELECT COALESCE(SUM(amount), 0) FROM fund_holds WHERE club_id = ? AND status = 'held') AS held`,
-  )
-    .bind(club.id, club.id)
-    .first<{ balance: number; held: number }>();
-  const balance = row?.balance ?? 0;
-  const held = row?.held ?? 0;
-  return c.json({ club: { id: club.id, name: club.name }, balance, held, available: balance - held });
+  if (!club) {
+    return c.json({ club: null, balance: null, held: null, available: null, expectedIncome: null, creditLine: null });
+  }
+  const snapshot = await balanceSnapshot(c.env.DB, club.id);
+  return c.json({ club: { id: club.id, name: club.name }, ...snapshot });
 });
 
 // 流水账（附录 A〔6〕）：新→旧倒序翻页，cursor=上一页最后一条的 id；hard LIMIT+1 探下一页

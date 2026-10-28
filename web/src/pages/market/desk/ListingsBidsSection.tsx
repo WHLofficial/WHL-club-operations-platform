@@ -1,10 +1,9 @@
 // 转会台 · 我的出价区（v6.23.0 从 pages/MarketMinePage.tsx 搬入；v6.24.0 批次 C：挂牌表单删除、锚 id desk-mine → desk-bids）。
 // 挂牌入口仍在球员档案左栏（SideOps），后端 POST /api/market/listings 端点保留。
 // v6.23.0 新增：成交出价若停在「挂牌待审核」阶段，徽标改「待审核」（listingStatus 推导，不加请求）。
-import { useMemo } from 'react';
 import { Link } from 'react-router';
 import type { MyBidRow } from '../../../lib/api.ts';
-import { useMyBids, useMyClub } from '../../../lib/queries.ts';
+import { useClubBalance, useMyBids, useMyClub } from '../../../lib/queries.ts';
 import { playerPath } from '../../../lib/player-link.ts';
 import { BID_STATUS_LABEL, money } from '../shared.tsx';
 
@@ -17,26 +16,46 @@ function bidBadge(b: MyBidRow): { label: string; cls: string } {
 export default function ListingsBidsSection() {
   const { isCoach, club: myClub } = useMyClub();
   const { bids: myBids } = useMyBids(isCoach);
-
-  const heldTotal = useMemo(() => (myBids ?? []).filter((b) => b.holdStatus === 'held').reduce((s, b) => s + b.amount, 0), [myBids]);
-  const available = myClub?.balance !== null && myClub !== null ? (myClub.balance ?? 0) - heldTotal : null;
+  // v6.57.0 收编：可支配 / 冻结读余额端点（含预期收入额度；冻结口径覆盖报价 / 海捞——
+  // 旧自算只减挂牌出价冻结，会与账本页「可支配」互相打架）
+  const { data: snap } = useClubBalance(isCoach);
 
   return (
     <section id="desk-bids" aria-label="我的出价">
-      {myBids !== null && <MyBidsSection bids={myBids} available={available} balance={myClub?.balance ?? null} />}
+      {myBids !== null && (
+        <MyBidsSection
+          bids={myBids}
+          available={snap?.available ?? null}
+          held={snap?.held ?? null}
+          creditLine={snap?.creditLine ?? null}
+          balance={myClub?.balance ?? null}
+        />
+      )}
     </section>
   );
 }
 
 /* ---------- 我的出价 ---------- */
 
-function MyBidsSection({ bids, available, balance }: { bids: MyBidRow[]; available: number | null; balance: number | null }) {
+function MyBidsSection({
+  bids,
+  available,
+  held,
+  creditLine,
+  balance,
+}: {
+  bids: MyBidRow[];
+  available: number | null;
+  held: number | null;
+  creditLine: number | null;
+  balance: number | null;
+}) {
   return (
     <section className="card">
       <h3>我的出价</h3>
       <p className="hint">
-        账户余额 {money(balance)}m，冻结中 {money(bids.filter((b) => b.holdStatus === 'held').reduce((s, b) => s + b.amount, 0))}m，
-        可支配 {money(available)}m。出价即冻结，被超出或落选自动解冻。
+        账户余额 {money(balance)}m，冻结中 {money(held)}m（含报价 / 海捞），
+        可支配 {money(available)}m{(creditLine ?? 0) > 0 ? `（含预期收入 ${money(creditLine)}m）` : ''}。出价即冻结，被超出或落选自动解冻。
       </p>
       <div className="table-wrap">
         <table>
