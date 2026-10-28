@@ -161,6 +161,130 @@ describe('开窗', () => {
     expect(sqlGet(fx.sqlite, 'SELECT status FROM offers WHERE id = ?', offerId)).toMatchObject({ status: 'intent' });
   });
 
+  // v6.55.0 意向单多笔并存：开窗提醒按 (player_id) 聚合——卖方每球员一条（N 家求购择一确认），
+  // 买方各带自己单 id 一条（N 家竞争提示）；N=1 保持原文案（上一用例）。
+  it('开窗提醒多买方聚合：卖方合并成一条择一确认，买方各收竞争提示', async () => {
+    const fx = await seedWindow();
+    fx.sqlite.exec("UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 1 AND window_seq = 1");
+    // clubB 走正常链路落一条意向单
+    const offerRes = await post('/api/offers', { playerId: 50, amount: 15 }, 'tok-coach2', fx.env);
+    expect(offerRes.status).toBe(201);
+    const offerId = ((await offerRes.json()) as { offerId: number }).offerId;
+    const intentRes = await post(`/api/offers/${offerId}/accept`, {}, 'tok-coach', fx.env);
+    expect(((await intentRes.json()) as { status: string }).status).toBe('intent');
+    // 第三队（clubC）直插同球员第二条意向单 + 授权库绑定（通知要落到真人收件篮）。
+    // D1 的 run() 不吃参数，一律先 bind 再 run（夹具的 node:sqlite 直写才允许 run(...args)）
+    const clubC = await createClub(fx, '丙队');
+    const authDb = fx.env.AUTH_DB;
+    expect(authDb).toBeDefined();
+    await authDb!
+      .prepare('INSERT INTO team (tour_team_id, club_id, name, created_at) VALUES (?, ?, ?, ?)')
+      .bind(clubC, clubC, '丙队', '2026-01-01T00:00:00Z')
+      .run();
+    const teamId = (await authDb!.prepare('SELECT id FROM team WHERE club_id = ?').bind(clubC).first<{ id: number }>())!.id;
+    await authDb!
+      .prepare("INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES (4, ?, 'club', '2026-01-01T00:00:00Z')")
+      .bind(teamId)
+      .run();
+    fx.sqlite
+      .prepare(
+        `INSERT INTO offers (player_id, buyer_club_id, seller_club_id, amount, init_amount, round, status, turn, season, window_seq, created_at, updated_at)
+         VALUES (50, ?, ?, 18, 18, 0, 'intent', 'seller', NULL, NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
+      )
+      .run(clubC, fx.clubA);
+
+    fx.env.rng = () => 0.99; // 不重掷，稳定开窗
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    // 卖方 1 条（N=2 择一确认，不再按单各发一条），两家买方各 1 条 → 共 3 条
+    const notices = sqlAll<{ club_id: number; payload: string }>(
+      fx.sqlite,
+      "SELECT club_id, payload FROM notifications WHERE template = 'offer_intent_window_open' ORDER BY club_id",
+    );
+    expect(notices).toHaveLength(3);
+    const seller = notices.find((n) => n.club_id === fx.clubA)!;
+    expect(seller.payload).toContain('2 家求购');
+    expect(seller.payload).toContain('择一确认');
+    const buyerNotices = notices.filter((n) => n.club_id !== fx.clubA);
+    expect(buyerNotices).toHaveLength(2);
+    for (const n of buyerNotices) {
+      expect(n.payload).toContain('2 家意向竞争');
+      expect(n.payload).toContain('撤回解冻');
+    }
+  });
+
+  // 第三轮终验：开窗提醒原单轮 LIMIT 200 在 >200 条时静默丢提醒——翻页取全后 205 条全部送达
+  it('开窗提醒翻页取全：205 条意向单全部收到提醒（单轮 LIMIT 200 只会出 400 条）', async () => {
+    const fx = await seedWindow();
+    fx.sqlite.exec("UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 1 AND window_seq = 1");
+    const insertPlayer = fx.sqlite.prepare(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES (?, ?, ?, ?, 'ST', 26, 85, 88, 'normal')`,
+    );
+    const insertIntent = fx.sqlite.prepare(
+      `INSERT INTO offers (player_id, buyer_club_id, seller_club_id, amount, init_amount, round, status, turn, season, window_seq, created_at, updated_at)
+       VALUES (?, ?, ?, 15, 15, 0, 'intent', 'seller', NULL, NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
+    );
+    for (let i = 0; i < 205; i++) {
+      const pid = 1000 + i;
+      insertPlayer.run(pid, `u${pid}`, `球员${pid}`, fx.clubA);
+      insertIntent.run(pid, fx.clubB, fx.clubA);
+    }
+    fx.env.rng = () => 0.99;
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+    // 205 球员 ×（卖方 1 + 买方 1）= 410 条；单轮 LIMIT 200 的旧实现只会出 400 条
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'offer_intent_window_open'")?.n).toBe(410);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'offer_intent_window_open' AND club_id = ?", fx.clubA)?.n).toBe(205);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'offer_intent_window_open' AND club_id = ?", fx.clubB)?.n).toBe(205);
+  });
+
+  // TC-A-027：聚合折叠跨翻页边界——同球员 205 个买方，翻页取全后卖方仍只折叠成 1 条；
+  // 单轮 LIMIT 200 的新写法只会出 201（卖方 1 + 前 200 个买方），翻页写回单轮变异必红。
+  it('TC-A-027 同球员 205 买方跨翻页聚合：卖方 1 条 + 买方 205 条，无一丢', async () => {
+    const fx = await seedWindow();
+    fx.sqlite.exec("UPDATE season_windows SET status = 'closed', closed_at = '2026-08-01T00:00:00Z' WHERE season = 1 AND window_seq = 1");
+    const authDb = fx.env.AUTH_DB;
+    expect(authDb).toBeDefined();
+    const insertClub = fx.sqlite.prepare(`INSERT INTO clubs (id, name, league_tier, status) VALUES (?, ?, 'premier', 'active')`);
+    const insertIntent = fx.sqlite.prepare(
+      `INSERT INTO offers (player_id, buyer_club_id, seller_club_id, amount, init_amount, round, status, turn, season, window_seq, created_at, updated_at)
+       VALUES (50, ?, ?, 15, 15, 0, 'intent', 'seller', NULL, NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
+    );
+    const insertTeam = authDb!.prepare('INSERT INTO team (tour_team_id, club_id, name, created_at) VALUES (?, ?, ?, ?)');
+    const insertBinding = authDb!.prepare("INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES (?, ?, 'club', '2026-01-01T00:00:00Z')");
+    for (let i = 0; i < 205; i++) {
+      const clubId = 2000 + i;
+      insertClub.run(clubId, `买方${clubId}`);
+      insertIntent.run(clubId, fx.clubA);
+      // 每个买方 club 必须在 AUTH_DB 有真人绑定（team_binding JOIN team）：无绑定的 club 被
+      // queueClubNotification 直接跳过（accountIds.length===0 即 return 0，不落通知行），断言不可达
+      // （测试 D1 桩是 bind-only：参数走 .bind(...)，run() 不收参）
+      await insertTeam.bind(clubId, clubId, `买方${clubId}`, '2026-01-01T00:00:00Z').run();
+      const teamId = (await authDb!.prepare('SELECT id FROM team WHERE club_id = ?').bind(clubId).first<{ id: number }>())!.id;
+      await insertBinding.bind(1000 + i, teamId).run();
+    }
+    fx.env.rng = () => 0.99;
+    const res = await post('/api/admin/windows/open', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(201);
+
+    // 206 = 卖方聚合 1（205 家求购择一确认）+ 买方 205（各带自己单 id）
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'offer_intent_window_open'")?.n).toBe(206);
+    const sellerRows = sqlAll<{ payload: string }>(
+      fx.sqlite,
+      "SELECT payload FROM notifications WHERE template = 'offer_intent_window_open' AND club_id = ?",
+      fx.clubA,
+    );
+    expect(sellerRows).toHaveLength(1);
+    expect(sellerRows[0].payload).toContain('205 家求购');
+    expect(sellerRows[0].payload).toContain('确认一条后其余自动失效');
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'offer_intent_window_open' AND club_id BETWEEN 2000 AND 2204")?.n,
+    ).toBe(205);
+    expect(
+      sqlGet<{ payload: string }>(fx.sqlite, "SELECT payload FROM notifications WHERE template = 'offer_intent_window_open' AND club_id = 2000")?.payload,
+    ).toContain('205 家意向竞争');
+  });
+
   // v6.54.0 §8「放在 openWindow 成功后调用」：开窗返回值带本窗新生成的球员要求条数。
   // 这里只锁「接线真的在」——生成资格/概率的确定性口径由 tests/demand-ops.test.ts 的固定种子用例锁；
   // 本用例靠 120 名明显够格球员的批量把「一个都没中」的概率压到可忽略，并逐值对账 DB 行数。

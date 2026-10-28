@@ -68,12 +68,24 @@ export function renderNotification(template: string, data: Record<string, unknow
     // 关窗期报价 / 意向单（v6.29.0）：同意不挂牌、开窗提醒、卖方确认挂牌、任一方了结（双方各收一条）
     case 'offer_intent_created':
       return `📝 意向单：${data.player} 的 ${data.amount} m 已谈拢，但转会窗没开——先挂成意向单，开窗后由卖方确认才生成挂牌。`;
-    case 'offer_intent_window_open':
+    // v6.55.0 意向单多笔并存：开窗提醒按 role/buyers 分支（卖方合并择一确认 / 买方提示竞争），N=1 保持原文案
+    case 'offer_intent_window_open': {
+      const buyers = typeof data.buyers === 'number' && data.buyers > 1 ? data.buyers : 1;
+      if (buyers > 1 && data.role === 'seller') {
+        return `🔔 转会窗已开：${data.player} 有 ${buyers} 家求购意向，去转会台择一确认挂牌——确认一条后其余自动失效。`;
+      }
+      if (buyers > 1 && data.role === 'buyer') {
+        return `🔔 转会窗已开：${data.player} 存在 ${buyers} 家意向竞争，等待卖方选择（可随时撤回解冻）。`;
+      }
       return `🔔 转会窗已开：${data.player} 的意向单（${data.amount} m）可以推进了——卖方到谈判桌点确认即挂牌，不确认就继续挂着。`;
+    }
     case 'offer_intent_confirmed':
       return `🤝 意向单已确认：${data.player} 以 ${data.amount} m 达成协议，已自动挂牌并锁定你的出价为领先。`;
     case 'offer_intent_closed':
       return `↩️ 意向单了结：${data.player} 的 ${data.amount} m 意向单已被对方${data.action}，冻结已退回。`;
+    // 落选通知（v6.55.0）：卖方确认了别家的意向单，本方意向单被收口批自动失效（ref = 自己那张单）
+    case 'offer_intent_lost':
+      return `📉 意向落选：${data.player} 已与其他球队达成意向并挂牌，你的意向单自动失效，仍可去转会区出价竞争（冻结已解冻）。`;
     // 激活通知证据制（v6.4.0 改动 4）：激活必附 QQ 通知截图，被激活方可举报（举报不冻结匹配窗）
     case 'activation_notice':
       return `📣 激活通知：你的球员 ${data.player} 被「${data.activatorName}」按激活转会激活（金额 ${data.fee} m）。对方已提交 QQ 通知截图（管理端可查），如未收到 QQ 通知请到该球员页举报。`;

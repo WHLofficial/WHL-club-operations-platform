@@ -2,8 +2,10 @@
 // 纯函数，不读路由/不读身份——身份相关的降级（如访客看不到 venue 页签）由目标页自己兜底。
 import { categoryOf, type NotifyRef } from '../../../src/core/notify-meta.ts';
 
-/** 收件方确定为「发起方（买方）」的报价模板：单子在「我送出的」箱子里，其余默认「我收到的」。 */
-const OUTBOX_OFFER_TEMPLATES = new Set(['offer_rejected', 'offer_auto_rejected']);
+/** 收件方确定为「发起方（买方）」的报价模板：单子在「我送出的」箱子里，其余默认「我收到的」。
+ *  offer_intent_lost（v6.55.0）：落选方是买方、单在 box=out，显式入组——不得进 NEGO_TEMPLATES
+ *  （归类后深链会被改写成谈判桌页签），也不得依赖默认 box=in。 */
+const OUTBOX_OFFER_TEMPLATES = new Set(['offer_rejected', 'offer_auto_rejected', 'offer_intent_lost']);
 
 /** 议价类模板：走谈判桌页签，不放 box / offer（议价单不在报价箱列表里）。 */
 const NEGO_TEMPLATES = new Set([

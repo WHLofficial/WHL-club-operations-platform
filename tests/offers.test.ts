@@ -192,6 +192,28 @@ describe('送报价（设计 §8 六拒 + 冻结）', () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as OfferOut).error).toContain('可用资金不足');
   });
+
+  it('预期收入额度（v6.57.0）：额度够就能报价；卖单被驳回后可用转负，新报价被挡且文案标明含额度', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    // 买方（club2）有一笔在途成交单：fee 60，球员无合同 → 40% 税 → 净 36；余额清零，只靠额度
+    fx.sqlite.exec(`
+      INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, created_at)
+        VALUES ('transfer', 99, 2, 1, 60, 'pending_review', 1, 1, '2026-07-01T00:00:00Z');
+      INSERT INTO players (id, uid, name, club_id, position, ca, pa, status, fc_id) VALUES
+        (5, 'uid5', '球员丙', 1, 'CB', 78, 80, 'normal', 15);
+      INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, effective_from, is_active)
+        VALUES (5, 1, 50, 2, 'formal', 'import', '2026-07-01', 1);
+      UPDATE ledger_accounts SET balance = 0 WHERE club_id = 2;
+    `);
+    expect((await place(fx, 1, 30)).status).toBe(201); // 36 ≥ 30：靠额度过闸
+    fx.sqlite.exec("UPDATE transfers SET status = 'rejected' WHERE from_club_id = 2"); // 卖单落空
+    const blocked = await place(fx, 5, 30); // 换一名球员，避开同买方重复 409
+    expect(blocked.status).toBe(400);
+    const err = ((await blocked.json()) as OfferOut).error ?? '';
+    expect(err).toContain('可用资金不足');
+    expect(err).toContain('已含预期收入 0 m'); // 额度随驳回收缩
+  });
 });
 
 describe('还价（必须严格抬高 / 轮次 / 冻结顶替）', () => {
@@ -580,7 +602,7 @@ describe('报价设置（PUT /api/players/:id/offer-settings）', () => {
 // v6.33.0：公开标价与私密最低报价的边界（设置校验 / 清线 / 审计 / 预填端点 / 判定纯函数）
 // v6.54.1：标价区间与挂牌同规——夹具球员 1 违约金 50、身价 NULL ⇒ 下限 ⌈25⌉=25、上限 ⌊75⌋=75
 describe('标价 list_price（v6.33.0 公开标价 + 私密最低报价）', () => {
-  it('标价两界 400（下限按挂牌五折规）；标价低于最低报价 400；边界 25 / 75 通过', async () => {
+  it('标价两界 400（下限按挂牌五折规）；边界 25 / 75 通过', async () => {
     const fx = freshEnv();
     seedWorld(fx);
     let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 24.99, notForSale: false }, 'tok-coach');
@@ -591,13 +613,75 @@ describe('标价 list_price（v6.33.0 公开标价 + 私密最低报价）', () 
     expect(res.status).toBe(400);
     expect(((await res.json()) as OfferOut).error).toContain('不能超过');
 
-    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 30, notForSale: false }, 'tok-coach');
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as OfferOut).error).toContain('不能低于最低报价');
-
     // 边界 25 / 75 都是合法标价（下限 = ⌈0.5×50⌉ = 25，上限 = ⌊1.5×50⌋ = 75）
     expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 25, notForSale: false }, 'tok-coach')).status).toBe(200);
     expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 75, notForSale: false }, 'tok-coach')).status).toBe(200);
+  });
+
+  // v6.55.0 标价↔最低报价自动对齐：effectiveList < effectiveMin 按库中旧值分流——
+  // 降标价（含首次设标价）⇒ 对齐；标价未动或上升（是最低报价越的界）⇒ 400
+  it('旧值三分支：降标价对齐 / 首挂对齐 from=null / 抬底线或标价上升 400', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    // ① 降标价对齐：旧标价 60、旧 min 40；新标价 30（请求里显式传了更高的 min 40 也以标价为主）⇒ min 自动降到 30
+    expect(
+      (await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 60, notForSale: false }, 'tok-coach')).status,
+    ).toBe(200);
+    let res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 30, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, minOfferPrice: 30, listPrice: 30, minOfferPriceAdjusted: { from: 40, to: 30 } });
+    expect(sqlGet(fx.sqlite, 'SELECT list_price, min_offer_price FROM players WHERE id = 1')).toMatchObject({ list_price: 30, min_offer_price: 30 });
+    // 审计仅对齐时带 minAlignedTo（= 公开标价，无私密信息）；旧底线数值不进留痕（from 不落审计）
+    const row = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'offer_settings' ORDER BY id DESC LIMIT 1");
+    expect(JSON.parse(row!.after)).toEqual({ transferListed: true, listPrice: 30, offerFloorOn: true, offerAuto: false, notForSale: false, minAlignedTo: 30 });
+    expect(row!.after).not.toContain('40');
+
+    // ② 首挂对齐（旧标价 NULL 归对齐支）：全新球员第一次设线，标价低于底线 ⇒ 对齐，from=null（库中无旧 min）
+    const res2 = await send(fx.env, 'PUT', '/api/players/2/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 30, notForSale: false }, 'tok-coach2');
+    expect(res2.status).toBe(200);
+    expect(await res2.json()).toMatchObject({ ok: true, minOfferPrice: 30, listPrice: 30, minOfferPriceAdjusted: { from: null, to: 30 } });
+
+    // ③ 抬底线（标价未动）与标价上升：最低报价越界归 400，不静默对齐
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 70, listPrice: 30, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('不能低于最低报价');
+    // 标价上升（30 → 45）+ min 70：仍是 400
+    res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 70, listPrice: 45, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    // 400 之后落库值原样（30 / 30）
+    expect(sqlGet(fx.sqlite, 'SELECT list_price, min_offer_price FROM players WHERE id = 1')).toMatchObject({ list_price: 30, min_offer_price: 30 });
+  });
+
+  // TC-A-004：对齐在全部区间校验之后——超上限的最低报价必须 400，不得被静默对齐成标价存进去
+  it('TC-A-004 校验顺序：超上限的最低报价先于旧值分流 400（不被静默对齐）', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    // 旧标价 75（= ⌊1.5×50⌋ 上限）、旧 min 未设
+    expect((await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 75, notForSale: false }, 'tok-coach')).status).toBe(200);
+    const auditRows = () => sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'offer_settings'")!.n;
+    const auditBefore = auditRows();
+
+    // 80 超 min 上限 75、70 < 旧标价 75 属降标价：若对齐支排在 min 区间校验之前，
+    // 80 会被静默替换成 70 存库（本应 400）——变异把这支前挪，本用例必红
+    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, listPrice: 70, minOfferPrice: 80, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as OfferOut).error).toContain('最低报价 80 m 高于本球员的报价上限 75 m');
+    // 两列不动（min 未被静默对齐成 70）、审计不新增
+    expect(sqlGet(fx.sqlite, 'SELECT list_price, min_offer_price FROM players WHERE id = 1')).toMatchObject({ list_price: 75, min_offer_price: null });
+    expect(auditRows()).toBe(auditBefore);
+  });
+
+  // TC-A-005：对齐落点取标价五折下限（25）时不再触发二次校验（对齐值 ≥ min 自身下界 1）
+  it('TC-A-005 对齐落点边界：五折下限对齐不越 min 下界、不触发二次 400', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    expect(
+      (await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 40, listPrice: 75, notForSale: false }, 'tok-coach')).status,
+    ).toBe(200);
+    const res = await send(fx.env, 'PUT', '/api/players/1/offer-settings', { transferListed: true, minOfferPrice: 30, listPrice: 25, notForSale: false }, 'tok-coach');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, minOfferPrice: 25, listPrice: 25, minOfferPriceAdjusted: { from: 40, to: 25 } });
+    expect(sqlGet(fx.sqlite, 'SELECT list_price, min_offer_price FROM players WHERE id = 1')).toMatchObject({ list_price: 25, min_offer_price: 25 });
   });
 
   // v6.54.1：标价对齐挂牌下限——身价参与取低；最低报价下限仍是 1（私密拒线语义不动）

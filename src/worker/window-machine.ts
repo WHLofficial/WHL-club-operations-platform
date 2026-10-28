@@ -240,17 +240,50 @@ export async function openWindow(
   // 这里是刻意吞掉的尽力而为——此刻窗口已提交，通知失败不该让调用方以为开窗失败；
   // 失败只影响提醒（不回溯、不重试），排查靠通知表缺行，业务异常在下面各语句里都已各自报错。
   try {
-    const intents = await db
-      .prepare(
-        `SELECT o.id, o.amount, o.buyer_club_id, o.seller_club_id, ${sqlDisplayName('p')} AS player_name
-         FROM offers o JOIN players p ON p.id = o.player_id
-         WHERE o.status = 'intent' ORDER BY o.id LIMIT 200`,
-      )
-      .all<{ id: number; amount: number; buyer_club_id: number; seller_club_id: number; player_name: string }>();
-    for (const it of intents.results) {
-      const data = { player: it.player_name, amount: it.amount, offerId: it.id, season, windowSeq };
-      await queueClubNotification(env, it.buyer_club_id, 'offer_intent_window_open', data);
-      await queueClubNotification(env, it.seller_club_id, 'offer_intent_window_open', data);
+    // v6.55.0 意向单多笔并存：翻页取全（第三轮终验：单轮 LIMIT 200 在 >200 条时静默丢提醒），
+    // 再按 (player_id) 聚合——卖方每球员一条（N 家求购择一确认，offerId 取首条），
+    // 买方各带自己单 id 一条（N 家竞争提示）。
+    const intents: { id: number; amount: number; buyer_club_id: number; seller_club_id: number; player_id: number; player_name: string }[] = [];
+    for (let offset = 0; ; offset += 200) {
+      const page = await db
+        .prepare(
+          `SELECT o.id, o.amount, o.buyer_club_id, o.seller_club_id, o.player_id, ${sqlDisplayName('p')} AS player_name
+           FROM offers o JOIN players p ON p.id = o.player_id
+           WHERE o.status = 'intent' ORDER BY o.id LIMIT 200 OFFSET ?`,
+        )
+        .bind(offset)
+        .all<{ id: number; amount: number; buyer_club_id: number; seller_club_id: number; player_id: number; player_name: string }>();
+      intents.push(...page.results);
+      if (page.results.length < 200) break;
+    }
+    const byPlayer = new Map<number, typeof intents>();
+    for (const it of intents) {
+      const list = byPlayer.get(it.player_id) ?? [];
+      list.push(it);
+      byPlayer.set(it.player_id, list);
+    }
+    for (const rows of byPlayer.values()) {
+      const data = {
+        player: rows[0].player_name,
+        amount: rows[0].amount,
+        offerId: rows[0].id,
+        season,
+        windowSeq,
+        role: 'seller',
+        buyers: rows.length,
+      };
+      await queueClubNotification(env, rows[0].seller_club_id, 'offer_intent_window_open', data);
+      for (const it of rows) {
+        await queueClubNotification(env, it.buyer_club_id, 'offer_intent_window_open', {
+          player: it.player_name,
+          amount: it.amount,
+          offerId: it.id,
+          season,
+          windowSeq,
+          role: 'buyer',
+          buyers: rows.length,
+        });
+      }
     }
   } catch {
     // 见上：仅提醒，吞掉

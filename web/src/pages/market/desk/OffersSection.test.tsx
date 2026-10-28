@@ -618,3 +618,35 @@ describe('v6.40.2 开桌即读（列表行播种，TC-DESK-11..14）', () => {
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/offers/5'));
   });
 });
+
+// v6.55.0 意向单多笔并存（TC-A-031）：同球员多条 intent 时 hint 显隐与行级定位
+describe('v6.55.0 意向单多笔并存（OffersSection，TC-A-031）', () => {
+  it('TC-A-031a 同球员 2 条 intent：hint「确认一条后其余自动失效」显示，两行各自 data-offer-id 可定位', async () => {
+    renderSection([
+      offer({ id: 5, role: 'seller' }),
+      offer({ id: 6, role: 'seller', amount: 13, counterpart: { id: 4, name: '第三家俱乐部' } }),
+    ]);
+    expect(await screen.findByText(/确认一条后其余自动失效/)).toBeTruthy();
+    // 行级定位：两条 intent 各占一行（同一球员没被折叠），各自的谈判桌按钮都在
+    expect(document.querySelector('[data-offer-id="5"]')).toBeTruthy();
+    expect(document.querySelector('[data-offer-id="6"]')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '谈判桌' })).toHaveLength(2);
+  });
+
+  it('TC-A-031b 仅 1 条 intent：hint 不显示', async () => {
+    renderSection([offer({ id: 5, role: 'seller' })]);
+    expect(await screen.findByText('意向单·等开窗')).toBeTruthy();
+    expect(screen.queryByText(/确认一条后其余自动失效/)).toBeNull();
+  });
+
+  it('TC-A-031c 同球员 intent 行与 pending 行并存：两类行都渲染、不互相挤掉，单条 intent 不显 hint', async () => {
+    renderSection([
+      offer({ id: 5, role: 'seller', status: 'intent' }),
+      offer({ id: 6, role: 'seller', status: 'pending', myTurn: true, turn: 'seller', amount: 11 }),
+    ]);
+    expect(await screen.findByText('意向单·等开窗')).toBeTruthy();
+    expect(screen.getByText('待回复')).toBeTruthy();
+    expect(document.querySelectorAll('[data-offer-id]')).toHaveLength(2);
+    expect(screen.queryByText(/确认一条后其余自动失效/)).toBeNull();
+  });
+});

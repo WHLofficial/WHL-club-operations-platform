@@ -62,14 +62,202 @@ export function ledgerMovement(db: D1Database, input: MovementInput): D1Prepared
   ];
 }
 
-// 可用余额 = 余额 − 全部现行冻结（出价校验口径；触发器 0005 在事务内兜底同一公式）
-export async function availableBalance(db: D1Database, clubId: number): Promise<number> {
+// ── 预期收入额度（设计 §1：窗口内预支未到账的卖人收入）────────────────────────
+// 在途卖人收入的税后净额 × k 进「可支配」，让卖方在成交单真正过户前先周转。
+//   源① listings：仍可竞价（listed/bidding）且有 active 出价 → 取最高 active 出价额；
+//   源② transfers：待审/签约中（pending_review/signing）且**只认成交类**
+//        （transfer/activation/forced_auction）——rc_change/match/free_agent/termination
+//        的 from_club_id 也会等于本队、fee 写的是新违约金/差额，但永远不产生卖方收入，
+//        不筛类型就是凭空造额度（rc_change 交 30% 新老差额就能挂出约 1.5×RC 的假额度）。
+// 同一球员多源只取毛额最高的一份（同一份未来收入不重复计）；强制拍卖按 auction_tax_rate
+// 整单税率，其余分段累进（与过户实算 transfers.ts:222-224 同源）。
+// ⚠️ 本片段是公式的**单点定义**：迁移 0081 的三个资金触发器内嵌同一段文本（占位符换成
+//   NEW.club_id），同源由 tests/expected-income.test.ts 的文本锁 + 行为锁兜住，改这里必须同步改那里。
+const EXPECTED_INCOME_RATE_SQL = `MIN(MAX(CAST(COALESCE((SELECT value FROM config WHERE key = 'expected_income_rate'), '1.0') AS REAL), 0), 1)`;
+
+// 分段税率是逗号串（'0.10,0.20,0.40'），不能用 json_extract（非 JSON 会打断 INSERT），
+// 用 instr/substr 三段提取；缺逗号时该段解析为 NULL（整行净额 NULL ⇒ 不计额度，fail 严格方向）。
+const TAX_RATES_ROW_SQL = `(SELECT CAST(NULLIF(substr(v, 1, instr(v, ',') - 1), '') AS REAL) AS r1,
+              CAST(NULLIF(substr(v, instr(v, ',') + 1, instr(substr(v, instr(v, ',') + 1), ',') - 1), '') AS REAL) AS r2,
+              CAST(NULLIF(substr(v, instr(v, ',') + instr(substr(v, instr(v, ',') + 1), ',') + 1), '') AS REAL) AS r3,
+              COALESCE(CAST(NULLIF((SELECT value FROM config WHERE key = 'auction_tax_rate'), '') AS REAL), 0.5) AS auction
+       FROM (SELECT COALESCE((SELECT value FROM config WHERE key = 'tax_rates'), '0.10,0.20,0.40') AS v))`;
+
+/** 在途收入逐笔明细（未去重，同一球员可能多行；净额/税额由 SQL 算，应用层不重算税率） */
+function inflightIncomeSql(clubRef: string): string {
+  return `SELECT d.source AS source,
+             d.ref_id AS ref_id,
+             d.player_id AS player_id,
+             d.gross AS gross,
+             d.tax AS tax,
+             d.gross - d.tax AS net
+      FROM (SELECT src.source AS source,
+                   src.ref_id AS ref_id,
+                   src.player_id AS player_id,
+                   src.gross AS gross,
+                   ROUND(CASE WHEN src.forced = 1
+                              THEN src.gross * r.auction
+                              ELSE MIN(src.gross, COALESCE(c.release_fee, 0)) * r.r1
+                                   + MAX(0, MIN(src.gross, COALESCE(c.release_fee, 0) * 1.5) - COALESCE(c.release_fee, 0)) * r.r2
+                                   + MAX(0, src.gross - COALESCE(c.release_fee, 0) * 1.5) * r.r3
+                         END, 2) AS tax
+            FROM (SELECT 'listing' AS source,
+                         l.id AS ref_id,
+                         l.player_id AS player_id,
+                         (SELECT MAX(b.amount) FROM bids b WHERE b.listing_id = l.id AND b.status = 'active') AS gross,
+                         CASE WHEN l.type = 'forced' THEN 1 ELSE 0 END AS forced
+                  FROM listings l
+                  WHERE l.seller_club_id = ${clubRef}
+                    AND l.status IN ('listed', 'bidding')
+                    AND l.type NOT IN ('activation')
+                    AND EXISTS (SELECT 1 FROM bids b WHERE b.listing_id = l.id AND b.status = 'active')
+                  UNION ALL
+                  SELECT 'transfer' AS source,
+                         t.id AS ref_id,
+                         t.player_id AS player_id,
+                         t.fee AS gross,
+                         CASE WHEN t.type = 'forced_auction' THEN 1 ELSE 0 END AS forced
+                  FROM transfers t
+                  WHERE t.from_club_id = ${clubRef}
+                    AND t.status IN ('pending_review', 'signing')
+                    AND t.type IN ('transfer', 'activation', 'forced_auction')
+                    AND t.fee IS NOT NULL) AS src
+            LEFT JOIN contracts c ON c.player_id = src.player_id AND c.is_active = 1
+            CROSS JOIN ${TAX_RATES_ROW_SQL} AS r) AS d`;
+}
+
+/** 每球员取毛额最高的一份（SQLite 裸列语义：与 MAX(gross) 同行取净额/来源/单号） */
+function pickedIncomeSql(clubRef: string): string {
+  return `(SELECT dd.player_id AS player_id,
+                 MAX(dd.gross) AS gross,
+                 dd.source AS source,
+                 dd.ref_id AS ref_id,
+                 dd.tax AS tax,
+                 dd.net AS net
+          FROM (${inflightIncomeSql(clubRef)}) AS dd
+          GROUP BY dd.player_id) AS p`;
+}
+
+/** 预期收入（未乘 k，m） */
+function expectedIncomeSql(clubRef: string): string {
+  return `COALESCE((SELECT ROUND(SUM(p.net), 2) FROM ${pickedIncomeSql(clubRef)}), 0)`;
+}
+
+/**
+ * 预期收入额度（m）= 在途卖人净收入 × k。三份资金触发器内嵌同一段文本（见文件头注释）。
+ * k 走钳制式：config 缺行按 1.0；写非法值（如 'abc'）被 CAST 成 0.0 ⇒ 额度归零（fail 严格方向）。
+ */
+export function creditLineSql(clubRef: string): string {
+  return `COALESCE(ROUND((SELECT SUM(p.net) * ${EXPECTED_INCOME_RATE_SQL} FROM ${pickedIncomeSql(clubRef)}), 2), 0)`;
+}
+
+/**
+ * 触发器之外的手写守卫要内嵌额度片段时用这个：片段里的 clubRef 一律写成 '?'，
+ * 参数按占位符出现次数重复 clubId。必须与同一片段的 SQL 成对绑定——漏绑会静默落 NULL
+ * （D1/node:sqlite 对缺位参数不报错），守卫就退化成恒假或恒真。
+ */
+export function creditLineGuard(clubId: number): { sql: string; params: number[] } {
+  const sql = creditLineSql('?');
+  return { sql, params: clubParams(sql, clubId) };
+}
+
+function paramCount(sql: string): number {
+  return (sql.match(/\?/g) ?? []).length;
+}
+
+/** 片段里的 clubRef 一律写成 '?'，按出现次数产出绑定参数（顺序即文本顺序） */
+function clubParams(sql: string, clubId: number): number[] {
+  return Array.from({ length: paramCount(sql) }, () => clubId);
+}
+
+function round2(x: number): number {
+  return Math.round((x + Number.EPSILON) * 100) / 100;
+}
+
+export interface BalanceSnapshot {
+  balance: number;
+  /** 全部现行冻结（出价 / 报价 / 海捞） */
+  held: number;
+  /** 在途卖人收入（税后净额，未乘 k） */
+  expectedIncome: number;
+  /** 预期收入额度 = expectedIncome × k */
+  creditLine: number;
+  /** 可支配 = balance − held + creditLine */
+  available: number;
+}
+
+/**
+ * 余额快照（/api/club/balance 与展示层共用）：余额 / 冻结 / 预期收入 / 额度 / 可支配。
+ * 一次查询算完——在途明细只求值一次，expectedIncome 与 creditLine 出自同一份明细。
+ */
+export async function balanceSnapshot(db: D1Database, clubId: number): Promise<BalanceSnapshot> {
+  const expected = expectedIncomeSql('?');
   const row = await db
     .prepare(
-      `SELECT (SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?)
-              - (SELECT COALESCE(SUM(amount), 0) FROM fund_holds WHERE club_id = ? AND status = 'held') AS available`,
+      `SELECT b.balance AS balance, b.held AS held, b.expected AS expected_income,
+              ROUND(b.expected * ${EXPECTED_INCOME_RATE_SQL}, 2) AS credit_line
+       FROM (SELECT COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0) AS balance,
+                    COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0) AS held,
+                    ${expected} AS expected) AS b`,
     )
-    .bind(clubId, clubId)
+    .bind(clubId, clubId, ...clubParams(expected, clubId))
+    .first<{ balance: number; held: number; expected_income: number; credit_line: number }>();
+  const balance = row?.balance ?? 0;
+  const held = row?.held ?? 0;
+  const expectedIncome = row?.expected_income ?? 0;
+  const creditLine = row?.credit_line ?? 0;
+  return { balance, held, expectedIncome, creditLine, available: round2(balance - held + creditLine) };
+}
+
+export interface ExpectedIncomeItem {
+  /** listing = 挂牌在途出价；transfer = 待审/签约中的成交单 */
+  source: 'listing' | 'transfer';
+  /** 挂牌 id 或转会单 id */
+  refId: number;
+  playerId: number;
+  /** 毛额（m） */
+  gross: number;
+  /** 交易税（m，已按现行 RC / 拍卖税率算好） */
+  tax: number;
+  /** 税后净额（m） */
+  net: number;
+}
+
+/**
+ * 逐笔在途源明细（同一球员只出被计入的那一份，SUM(net) 即 expectedIncome）。
+ * 前端「预计收入」拆解与测试对账用，不做 IO 以外的加工。
+ */
+export async function expectedIncomeBreakdown(db: D1Database, clubId: number): Promise<ExpectedIncomeItem[]> {
+  const picked = pickedIncomeSql('?');
+  const rows = await db
+    .prepare(
+      `SELECT p.source AS source, p.ref_id AS ref_id, p.player_id AS player_id,
+              p.gross AS gross, p.tax AS tax, p.net AS net
+       FROM ${picked}
+       ORDER BY p.net DESC, p.player_id`,
+    )
+    .bind(...clubParams(picked, clubId))
+    .all<{ source: 'listing' | 'transfer'; ref_id: number; player_id: number; gross: number; tax: number; net: number }>();
+  return rows.results.map((r) => ({
+    source: r.source,
+    refId: r.ref_id,
+    playerId: r.player_id,
+    gross: r.gross,
+    tax: r.tax,
+    net: r.net,
+  }));
+}
+
+// 可用余额 = 余额 − 全部现行冻结 + 预期收入额度（出价校验口径；0081 的三个资金触发器在事务内兜底同一公式）
+export async function availableBalance(db: D1Database, clubId: number): Promise<number> {
+  const credit = creditLineSql('?');
+  const row = await db
+    .prepare(
+      `SELECT COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)
+              - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)
+              + ${credit} AS available`,
+    )
+    .bind(clubId, clubId, ...clubParams(credit, clubId))
     .first<{ available: number }>();
   return row?.available ?? 0;
 }

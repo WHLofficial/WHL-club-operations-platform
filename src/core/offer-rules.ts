@@ -7,7 +7,8 @@ export const OFFER_ABSOLUTE_FLOOR = 1;
 /** 报价上限系数：与挂牌价上限同源（违约金 1.5 倍），用户裁决 2026-09（设计 §2.1） */
 export const OFFER_CAP_RC = 1.5;
 
-export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
+// intent（v6.55.0 补进类型）：关窗期谈成的意向单，字符串裸用已久，加分支前先补齐
+export type OfferStatus = 'pending' | 'intent' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
 export type OfferTurn = 'buyer' | 'seller';
 
 /**

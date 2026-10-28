@@ -18,12 +18,16 @@ describe('notificationLink：ref 精确落点', () => {
     expect(notificationLink({ template: 'offer_accepted', clubId: 5, ref: offer(42) })).toBe(
       '/market/desk?tab=offers&box=in&offer=42',
     );
-    // 收件方确定为买方（发起方）的两枚：单子在我「送出的」箱里
+    // 收件方确定为买方（发起方）的三枚：单子在我「送出的」箱里
     expect(notificationLink({ template: 'offer_rejected', clubId: 5, ref: offer() })).toBe(
       '/market/desk?tab=offers&box=out&offer=7',
     );
     expect(notificationLink({ template: 'offer_auto_rejected', clubId: 5, ref: offer() })).toBe(
       '/market/desk?tab=offers&box=out&offer=7',
+    );
+    // v6.55.0 落选通知：落选方是买方，ref = 自己那张单，深链落「我送出的」并带单号
+    expect(notificationLink({ template: 'offer_intent_lost', clubId: 5, ref: offer(9) })).toBe(
+      '/market/desk?tab=offers&box=out&offer=9',
     );
     // 双收件方/卖方收件的：走 in（错箱只是少一次点击）
     expect(notificationLink({ template: 'offer_expired', clubId: 5, ref: offer() })).toBe(
@@ -127,9 +131,10 @@ describe('notificationLink：健壮性与全覆盖', () => {
     expect([...seen].sort()).toEqual(['activation', 'event', 'growth', 'naming', 'offer', 'result', 'shop', 'window']);
   });
 
-  it('offerBoxOf 只认两枚「买方单收」模板', () => {
+  it('offerBoxOf 只认三枚「买方单收」模板', () => {
     expect(offerBoxOf('offer_rejected')).toBe('out');
     expect(offerBoxOf('offer_auto_rejected')).toBe('out');
+    expect(offerBoxOf('offer_intent_lost')).toBe('out');
     expect(offerBoxOf('offer_received')).toBe('in');
     expect(offerBoxOf('offer_expired')).toBe('in');
     expect(offerBoxOf('result_confirmed')).toBe('in');

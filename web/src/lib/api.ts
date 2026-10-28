@@ -414,6 +414,8 @@ export interface OfferSettingsDto {
   listPrice: number | null;
   offerAuto: boolean;
   notForSale: boolean;
+  /** 标价低于最低报价被自动对齐的回执（v6.55.0，仅 PUT 返回）：from=库中旧最低报价（首挂无旧值 null），to=对齐后的最低报价 */
+  minOfferPriceAdjusted?: { from: number | null; to: number } | null;
 }
 
 /** 海捞资格判定（v6.17.0） */
@@ -1368,6 +1370,10 @@ export interface ClubBalance {
   balance: number | null;
   held: number | null;
   available: number | null;
+  /** 在途卖人收入（税后净额，未乘 k；v6.57.0 起随余额端点下发） */
+  expectedIncome: number | null;
+  /** 预期收入额度 = expectedIncome × k（已含在 available 里，展示拆解用） */
+  creditLine: number | null;
 }
 
 export interface LedgerEntryRow {

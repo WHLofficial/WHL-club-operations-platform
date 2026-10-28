@@ -197,6 +197,13 @@ export default function OffersSection({
   const pendingMine = list.data?.pendingMine ?? 0;
   // v6.29.0：我是卖方、等我确认挂牌（或放弃）的意向单条数
   const intentsMine = list.data?.intentsMine ?? 0;
+  // v6.55.0 意向单多笔并存：同球员挂了多条意向单（卖方视角本页可见）时提示择一，单条不提示。
+  // 买方视角 box=out 里自己的意向单受买方级唯一约束，天然不会 >1，无需再按角色过滤。
+  const intentCountByPlayer = new Map<number, number>();
+  for (const o of items ?? []) {
+    if (o.status === 'intent') intentCountByPlayer.set(o.player.id, (intentCountByPlayer.get(o.player.id) ?? 0) + 1);
+  }
+  const multiIntentHint = [...intentCountByPlayer.values()].some((n) => n > 1);
 
   function switchBox(next: 'in' | 'out') {
     onBoxChange(next);
@@ -283,6 +290,11 @@ export default function OffersSection({
         名单不产生自动行为：低于最低报价自动拒（与开关无关）；标价与「自动同意」开关同时满足才自动成交，否则进人工谈判。
       </p>
       {toastNode}
+      {multiIntentHint && (
+        <p className="hint">
+          有球员挂了多家求购意向同时待确认：确认一条后其余自动失效（其余买方会收到落选通知、冻结自动解冻）。
+        </p>
+      )}
 
       <div className="seg" role="radiogroup" aria-label="报价页签">
         <button type="button" className={box === 'in' ? 'on' : ''} onClick={() => switchBox('in')}>

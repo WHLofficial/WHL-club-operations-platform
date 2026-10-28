@@ -29,20 +29,20 @@ describe('NOTIFY_META 与 worker 模板表', () => {
     expect(RENDER_END).toBeGreaterThan(RENDER_START);
   });
 
-  it('模板集合双向相等（43 条，无重复）', () => {
+  it('模板集合双向相等（44 条，无重复）', () => {
     // 32→33 是 v6.49.0 到期引擎（offer_deadline 等三模板）；33→37 是 v6.50.0 海捞暗标段四模板；
     // 37→39 是 v6.53.0 场馆档期两模板（venue_window_open / venue_slot_reminder）；
     // 39→43 是 v6.54.0 闹涨薪四模板（demand_created / demand_deadline / demand_resolved /
-    // demand_rejected_public，设计文档 §7）
+    // demand_rejected_public，设计文档 §7）；43→44 是 v6.55.0 意向单落选通知（offer_intent_lost）
     const templates = renderTemplates();
-    expect(templates).toHaveLength(43);
+    expect(templates).toHaveLength(44);
     expect(new Set(templates).size).toBe(templates.length);
     expect(templates.slice().sort()).toEqual(Object.keys(NOTIFY_META).sort());
   });
 
   it('每条徽章文案非空、唯一、≤6 字', () => {
     const labels = Object.values(NOTIFY_META).map((m) => m.label);
-    expect(labels).toHaveLength(43);
+    expect(labels).toHaveLength(44);
     expect(new Set(labels).size).toBe(labels.length);
     for (const label of labels) {
       expect(label.length).toBeGreaterThan(0);
@@ -82,6 +82,8 @@ describe('NOTIFY_META 与 worker 模板表', () => {
         'offer_intent_window_open',
         'offer_intent_confirmed',
         'offer_intent_closed',
+        // v6.55.0 意向单多笔并存：落选方（买方）的通知
+        'offer_intent_lost',
         // v6.49.0 到期引擎：报价临近 / 谈判超时 / 谈判临近
         'offer_deadline',
         'negotiation_timeout',
@@ -115,8 +117,8 @@ describe('NOTIFY_META 与 worker 模板表', () => {
       ],
     };
     const members = Object.values(expected).flat();
-    expect(members).toHaveLength(43);
-    expect(new Set(members).size).toBe(43);
+    expect(members).toHaveLength(44);
+    expect(new Set(members).size).toBe(44);
     for (const [cat, list] of Object.entries(expected)) {
       expect(templatesOf(cat as NotifyCategoryId).slice().sort(), `类目 ${cat} 的成员不符`).toEqual(list.slice().sort());
     }

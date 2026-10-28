@@ -39,7 +39,7 @@ export interface NotifyMeta {
   category: NotifyCategoryId;
 }
 
-/** 39 个模板一一对应一枚徽章（原始模板名走徽章 title，不丢信息）。 */
+/** 44 个模板一一对应一枚徽章（原始模板名走徽章 title，不丢信息）。 */
 export const NOTIFY_META: Record<string, NotifyMeta> = {
   result_confirmed: { label: '赛果确认', category: 'result' },
   levelup: { label: '球员成长', category: 'growth' },
@@ -55,6 +55,8 @@ export const NOTIFY_META: Record<string, NotifyMeta> = {
   offer_intent_window_open: { label: '窗口开启', category: 'offer' },
   offer_intent_confirmed: { label: '议价确认', category: 'offer' },
   offer_intent_closed: { label: '议价关闭', category: 'offer' },
+  // v6.55.0 意向单多笔并存：卖方确认了别家，本方意向单被收口批自动失效
+  offer_intent_lost: { label: '落选意向', category: 'offer' },
   activation_notice: { label: '激活通知', category: 'activation' },
   activation_reported: { label: '激活上报', category: 'activation' },
   activation_matched: { label: '激活匹配', category: 'activation' },

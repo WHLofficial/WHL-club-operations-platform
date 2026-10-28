@@ -29,7 +29,7 @@ import { cpuClubIds } from '../growth.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 import { loadMarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
-import { availableBalance } from '../ledger.ts';
+import { balanceSnapshot } from '../ledger.ts';
 import { POSITION_BY_ID } from '../../core/fc26.ts';
 import { shuffleWithSeed, transferBoardBucket } from '../../core/ad-board.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
@@ -246,13 +246,14 @@ app.post('/market/listings', async (c) => {
     );
   }
 
-  // 意向单硬锁（v6.29.0）：同球员有 status='intent' 的单子时不能再挂牌——先了结意向单
-  // （等开窗由卖方确认挂牌，或任一方撤回/放弃），否则同一球员会同时有挂牌与意向单两条成交通道。
+  // 意向单硬锁（v6.29.0；v6.55.0 多笔并存后文案不再说「一条」）：同球员有 status='intent' 的单子时
+  // 不能再挂牌——先了结意向单（等开窗由卖方确认挂牌，或任一方撤回/放弃），
+  // 否则同一球员会同时有挂牌与意向单两条成交通道。
   // idx_offers_player (player_id, status) 上的一次索引查询，不改变挂牌其余流程。
   const intent = await c.env.DB.prepare(`SELECT id FROM offers WHERE player_id = ? AND status = 'intent' LIMIT 1`)
     .bind(playerId)
     .first<{ id: number }>();
-  if (intent) throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再挂牌', 'intent_exists');
+  if (intent) throw new HttpError(409, '这名球员已有意向单在等开窗，先了结它再挂牌', 'intent_exists');
 
   const dup = await c.env.DB.prepare(`SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'pending_review') LIMIT 1`)
     .bind(playerId)
@@ -1012,10 +1013,13 @@ app.post('/market/listings/:id/bids', async (c) => {
     .prepare(`SELECT amount FROM fund_holds WHERE club_id = ? AND ref_type = 'listing' AND ref_id = ? AND status = 'held' LIMIT 1`)
     .bind(club.id, id)
     .first<{ amount: number }>();
-  const available = await availableBalance(c.env.DB, club.id);
-  const effectiveAvailable = available + (myHold?.amount ?? 0);
+  const snap = await balanceSnapshot(c.env.DB, club.id);
+  const effectiveAvailable = round2(snap.available + (myHold?.amount ?? 0));
   if (amount > round2(effectiveAvailable + Number.EPSILON)) {
-    throw new HttpError(400, `可用资金不足：可支配 ${round2(effectiveAvailable)} m，出价需要 ${round2(amount)} m（出价即冻结）`);
+    throw new HttpError(
+      400,
+      `可用资金不足：可支配 ${effectiveAvailable} m（已含预期收入 ${round2(snap.creditLine)} m），出价需要 ${round2(amount)} m（出价即冻结）`,
+    );
   }
 
   const audit = createAuditStatement(c.env.DB);

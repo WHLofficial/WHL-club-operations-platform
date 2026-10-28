@@ -373,3 +373,26 @@ describe('收件篮 · 结构（TC-UI-04）', () => {
     expect(document.querySelector('.seg.inbox-tabs')).toBeTruthy();
   });
 });
+
+// v6.55.0 意向单落选（TC-A-023 的前端件）：offer_intent_lost 走 offer 类目徽章「落选意向」
+describe('收件篮 · 落选意向徽章（v6.55.0）', () => {
+  it('offer_intent_lost 渲染徽章「落选意向」（NOTIFY_META category=offer → blue）', async () => {
+    ALL = [
+      item({
+        id: 1,
+        template: 'offer_intent_lost',
+        text: '📉 意向落选：球员甲 已与其他球队达成意向并挂牌，你的意向单自动失效，仍可去转会区出价竞争（冻结已解冻）。',
+        ref: { type: 'offer', id: 9 },
+      }),
+    ];
+    renderPage();
+    await ready();
+
+    // 元数据按字面量锁（不从被测常量自证）
+    expect(NOTIFY_META.offer_intent_lost).toEqual({ label: '落选意向', category: 'offer' });
+    const badge = within(document.querySelector('.inbox-rows') as HTMLElement).getByTitle('offer_intent_lost');
+    expect(badge.textContent).toBe('落选意向');
+    // 配色按 TC-UI-01 的 TONE 表同源锁：offer 类 = blue
+    expect(badge.className).toBe('badge blue');
+  });
+});

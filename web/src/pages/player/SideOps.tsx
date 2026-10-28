@@ -22,16 +22,18 @@ import {
   type ContractDto,
   type ContractPendingView,
   type FreeAgentResult,
+  type OfferSettingsDto,
   type PlayerDemandState,
   type SeaComps,
   type SeaSignEligibility,
   type SeaSubmitResult,
 } from '../../lib/api.ts';
 import { fmt2, fmtShort } from '../../lib/contract-view.ts';
-import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase } from '../../lib/queries.ts';
+import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../lib/ops-gate.ts';
+import { creditUse } from '../../lib/credit-line.ts';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
 import { money } from '../market/shared.tsx';
@@ -178,7 +180,26 @@ export function SideOps({
   // 出标冻结额 = 新违约金 × 30%（与后端 freeAgentFee 同口径；真数仍以服务端回执为准）
   const sealedFee = freeFee.trim() === '' || Number.isNaN(Number(freeFee)) ? null : round2(Number(freeFee) * 0.3);
 
+  // v6.57.0 预期收入额度：B 态出价 / 海捞（暗标冻结·明标审核时收）/ 续约差额的「动用预期收入」
+  // 提示共用一份余额快照；快照缺失（非教练 / 端点未回）creditUse 回 0，整行不渲染。
+  const { data: balSnap } = useClubBalance(isCoach);
+  const availSnap = balSnap ?? null;
+  // 改标时旧冻结被顶替释放：动用额按净差额算（回加旧标冻结）
+  const sealedUse = creditUse(
+    sealedFee ?? 0,
+    availSnap,
+    mySealedBid?.status === 'sealed' ? round2(Number(mySealedBid.newReleaseFee) * 0.3) : 0,
+  );
+  const seaSignUse = creditUse(sealedFee ?? 0, availSnap);
+
   const releaseFee = contract?.releaseFee ?? null;
+  // 续约「提高付差额的 30%」：输入无效 / 未提高时 spend=0（动用额行不渲染）
+  const renewSpend = (() => {
+    const v = Number(renewFee);
+    if (releaseFee === null || renewFee.trim() === '' || Number.isNaN(v) || v <= releaseFee) return 0;
+    return round2((v - releaseFee) * 0.3);
+  })();
+  const renewUse = creditUse(renewSpend, availSnap);
   const offerCap = offerCapOf(releaseFee);
   // 标价/挂牌下限（v6.54.1）：与挂牌同规，报价设置面板与挂牌面板的区间提示共用
   const listingFloor = listingFloorOf(releaseFee, player.marketValue);
@@ -252,13 +273,23 @@ export function SideOps({
 
   function saveSettings() {
     void run(async () => {
-      await apiPut(`/api/players/${player.id}/offer-settings`, {
+      const r = await apiPut<OfferSettingsDto>(`/api/players/${player.id}/offer-settings`, {
         transferListed: listDraft,
         minOfferPrice: minDraftValue,
         listPrice: listPriceValue,
         offerAuto: autoDraft,
         notForSale: nfsDraft,
       });
+      // v6.55.0 对齐回执：标价低于最低报价被自动对齐时，用响应值回灌全部草稿（null → ''，
+      // 直接 String(null) 会产出 "null" 字符串 → 脏判恒真 → 下次保存发 NaN），避免表单停留在脏草稿
+      if (r.minOfferPriceAdjusted) {
+        setListDraft(r.transferListed);
+        setMinDraft(r.minOfferPrice === null ? '' : String(r.minOfferPrice));
+        setListPriceDraft(r.listPrice === null ? '' : String(r.listPrice));
+        setAutoDraft(r.offerAuto);
+        setNfsDraft(r.notForSale);
+        return `最低报价已随标价降至 ${r.minOfferPriceAdjusted.to} m（最低报价不能高于标价）`;
+      }
       return '报价设置已保存。';
     });
   }
@@ -468,7 +499,8 @@ export function SideOps({
                 mode={l.firstBidPending && isActivator ? 'activation-first' : 'normal'}
                 askPrice={l.askPrice}
                 nextMinBid={l.nextMinBid}
-                available={null}
+                available={availSnap?.available ?? null}
+                creditLine={availSnap?.creditLine ?? null}
                 onBid={submitBid}
               />
             ) : (
@@ -628,6 +660,7 @@ export function SideOps({
                 />
               </label>
               <p className="side-sub">提高付差额的 30%、降低免费；保护期从审核通过起重新起算。</p>
+              {renewUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(renewUse)} m（加价 30% 审核时收取）。</p>}
               <div className="side-btns">
                 <button
                   type="button"
@@ -814,6 +847,7 @@ export function SideOps({
               密封标：金额与出标方保密，统一截止后价高者得（同额先出的胜出）。出标即冻结签入费（新违约金的 30%），
               截止前可改可撤；胜出后进管理组审核 → 工资谈判。
             </p>
+            {sealedUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(sealedUse)} m。</p>}
             {sealedPhase && (
               <p className="side-sub">
                 {sealedLeft === null ? '暗标段进行中' : `距截止还剩 ${fmtClock(sealedLeft)}`}
@@ -875,6 +909,7 @@ export function SideOps({
             </label>
             <SeaCompsBlock seaComps={seaComps} />
             <p className="side-sub">签入即付海捞费并定新合同；签完本窗内他队还能竞价挖角。</p>
+            {seaSignUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(seaSignUse)} m（签入费审核时收取）。</p>}
             <OpsGateNote gate={seaGate} className="side-sub" />
             <div className="side-btns">
               <button

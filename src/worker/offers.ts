@@ -21,7 +21,7 @@ import { assertOpOpen } from './ops-schedule.ts';
 import { createConfigService } from '../core/config.ts';
 import { fmtBeijingMinute } from '../core/ops-schedule.ts';
 import type { ExpiryOpts } from './expiry-ops.ts';
-import { availableBalance } from './ledger.ts';
+import { balanceSnapshot } from './ledger.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
@@ -163,15 +163,19 @@ export async function placeOffer(
   const amountError = validateOfferAmount(amount, p.release_fee);
   if (amountError) throw new HttpError(400, amountError, 'amount_out_of_bounds');
 
+  // v6.55.0 意向单多笔并存：dup 预检把 intent 一并算活跃（同一买方对同一球员 pending / intent 各至多一条）
   const dup = await db
-    .prepare(`SELECT id FROM offers WHERE player_id = ? AND buyer_club_id = ? AND status = 'pending' LIMIT 1`)
+    .prepare(`SELECT id FROM offers WHERE player_id = ? AND buyer_club_id = ? AND status IN ('pending', 'intent') LIMIT 1`)
     .bind(input.playerId, input.clubId)
     .first<{ id: number }>();
   if (dup) throw new HttpError(409, '你已经有一条还在这名球员头上的报价，先撤回或等它了结');
 
-  const available = await availableBalance(db, input.clubId);
-  if (amount > round2(available + Number.EPSILON)) {
-    throw new HttpError(400, `可用资金不足：可支配 ${round2(available)} m，报价需要 ${round2(amount)} m（报价即冻结）`);
+  const snap = await balanceSnapshot(db, input.clubId);
+  if (amount > round2(snap.available + Number.EPSILON)) {
+    throw new HttpError(
+      400,
+      `可用资金不足：可支配 ${round2(snap.available)} m（已含预期收入 ${round2(snap.creditLine)} m），报价需要 ${round2(amount)} m（报价即冻结）`,
+    );
   }
 
   const audit = createAuditStatement(db);
@@ -230,7 +234,10 @@ export async function placeOffer(
     // 否则 listings.season/window_seq 会被写成 NULL，凭空造出一张窗外挂牌。
     if (!win) {
       if (!(await enterIntent(env, offer, input.clubId, input.actor))) {
-        throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
+        // 幽灵单回滚（v6.55.0）：dup 预检是读不是闸，同买方并发自动同意时本单的 pending + 冻结可能已提交；
+        // 买方级意向闸挡回后先把本单终态化（rejected + 释放冻结 + 事件/审计）再报 409，不留幽灵单
+        await rollbackGhostOffer(env, offer, input.actor);
+        throw new HttpError(409, '你已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
       }
       await notifyIntentCreated(env, offer);
       return { offerId, status: 'intent', auto };
@@ -287,12 +294,12 @@ export async function counterOffer(
 
   // 资金预检只对买方（卖方还价不出钱，买方接受时才补足冻结——见 acceptOffer）
   if (role === 'buyer') {
-    const available = await availableBalance(db, input.clubId);
+    const snap = await balanceSnapshot(db, input.clubId);
     const myHeld = offer.hold_id !== null ? offer.amount : 0;
-    if (amount > round2(available + myHeld + Number.EPSILON)) {
+    if (amount > round2(snap.available + myHeld + Number.EPSILON)) {
       throw new HttpError(
         400,
-        `可用资金不足：可支配 ${round2(available)} m${myHeld > 0 ? `（旧价冻结 ${round2(myHeld)} m 会被顶替释放）` : ''}，还价需要 ${round2(amount)} m`,
+        `可用资金不足：可支配 ${round2(snap.available)} m（已含预期收入 ${round2(snap.creditLine)} m）${myHeld > 0 ? `（旧价冻结 ${round2(myHeld)} m 会被顶替释放）` : ''}，还价需要 ${round2(amount)} m`,
       );
     }
   }
@@ -371,8 +378,14 @@ export async function counterOffer(
  */
 async function acceptOfferCore(env: Env, offer: OfferContextRow, actor: number | null, byTurn: OfferTurn, eventKind: 'accept' | 'auto_accept' | 'confirm' = 'accept'): Promise<number> {
   const db = env.DB;
+  // v6.55.0 叠非卖品赛跑守卫：读态（loadOffer）与占用批之间球员刚被设非卖品时不再占用
+  //（fulfill 的挂牌守卫只查 status 不查 not_for_sale，setOfferSettings 只改标记不改 status）
   const occupy = await db
-    .prepare(`UPDATE offers SET status = 'accepted', updated_at = ${nowSql()} WHERE id = ? AND status = 'pending' AND turn = ?`)
+    .prepare(
+      `UPDATE offers SET status = 'accepted', updated_at = ${nowSql()}
+       WHERE id = ? AND status = 'pending' AND turn = ?
+         AND NOT EXISTS (SELECT 1 FROM players nfs WHERE nfs.id = offers.player_id AND nfs.not_for_sale = 1)`,
+    )
     .bind(offer.id, byTurn)
     .run();
   if ((occupy.meta.changes ?? 0) !== 1) throw new HttpError(409, '这条报价刚被处理过了，或还没轮到你同意', 'not_your_turn');
@@ -408,12 +421,26 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
     calendar: octx.calendar,
   }).deadlineAt;
   const audit = createAuditStatement(db);
-  // 履约守卫：offer 已占用且还没建挂牌；fresh listing = last_insert_rowid 确实是本次建出的那张
+  // 履约守卫：offer 已占用且还没建挂牌；fresh listing = last_insert_rowid 确实是本次建出的那张。
+  // v6.55.0：EXISTS 追加 not_for_sale = 0——occupy 与 fulfill 批之间的同请求窗内翻非卖品时，
+  // 只查 club/status 的旧守卫拦不住（setOfferSettings 只改标记不改 status），非卖品照样挂牌。
   const freshListing =
     `EXISTS (SELECT 1 FROM listings WHERE id = last_insert_rowid()
              AND player_id = (SELECT player_id FROM offers WHERE id = ?)
              AND seller_club_id = (SELECT seller_club_id FROM offers WHERE id = ?)
              AND ask_price = (SELECT amount FROM offers WHERE id = ?) AND status = 'listed')`;
+  // 落选意向单（批前的 intent 快照，v6.55.0 多笔并存）：本单确认挂牌后收口批会把同球员其余
+  // intent 转 expired，这里先记下各自买方与单 id，履约成功后逐个发 offer_intent_lost
+  //（ref = 各自的单，深链落「我送出的」）。这个位置覆盖三条调用路径（intent 确认 / 开窗期同意
+  // pending / 自愈补履约），调用方无需各自补发。
+  const lostIntents = await db
+    .prepare(
+      `SELECT o.id, o.buyer_club_id, ${sqlDisplayName('p')} AS player_name
+       FROM offers o JOIN players p ON p.id = o.player_id
+       WHERE o.player_id = ? AND o.status = 'intent' AND o.id != ?`,
+    )
+    .bind(offer.player_id, offer.id)
+    .all<{ id: number; buyer_club_id: number; player_name: string }>();
   const results = await db.batch([
     db
       .prepare(
@@ -421,12 +448,13 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
          SELECT player_id, seller_club_id, 'normal', amount, 'listed', ${nowSql()}, ?, ?, season, window_seq
          FROM offers
          WHERE id = ? AND status = 'accepted' AND listing_id IS NULL
-           AND EXISTS (SELECT 1 FROM players WHERE id = offers.player_id AND club_id = offers.seller_club_id AND status = 'normal')`,
+           AND EXISTS (SELECT 1 FROM players WHERE id = offers.player_id AND club_id = offers.seller_club_id AND status = 'normal' AND not_for_sale = 0)`,
       )
       .bind(listedDay, listingDeadline, offerId),
-    // players 的 listed 化必须排在 INSERT 之后：守卫要求 status='normal'，同批内先改后查必然 0 行
+    // players 的 listed 化必须排在 INSERT 之后：守卫要求 status='normal'，同批内先改后查必然 0 行；
+    // not_for_sale = 0 与 INSERT 的守卫对齐——INSERT 因非卖品失败时不得把球员翻转成 listed
     db
-      .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`)
+      .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal' AND not_for_sale = 0`)
       .bind(offer.player_id, offer.seller_club_id),
     db
       .prepare(
@@ -455,6 +483,18 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
          WHERE player_id = ? AND status = 'pending' AND id != ?`,
       )
       .bind(offer.player_id, offer.id),
+    // v6.55.0 意向单多笔并存：本单确认挂牌后，同球员其余意向单一并失效（买方级并存放开了球员级唯一）。
+    // 守卫用「该球员的 listed 挂牌真实存在」：批开始时球员必无 listed 挂牌（确认前置 player_status='normal'，
+    // expireStaleOffers 保证），批内 INSERT 是唯一来源 ⇒ 挂牌失败时守卫恒假、不误伤他人意向单。
+    // 不带窗过滤（跨窗存活的老意向单一并收，Q2d 裁决）；排在 blanket 释放与 expire 事件之前，
+    // 新收的 expired 单由既有两条复用语句自动覆盖——零新增释放/事件语句。
+    db
+      .prepare(
+        `UPDATE offers SET status = 'expired', resolved_at = ${nowSql()}, updated_at = ${nowSql()}
+         WHERE player_id = ? AND status = 'intent' AND id != ?
+           AND EXISTS (SELECT 1 FROM listings WHERE player_id = ? AND status = 'listed')`,
+      )
+      .bind(offer.player_id, offer.id, offer.player_id),
     db
       .prepare(
         `UPDATE fund_holds SET status = 'released'
@@ -487,6 +527,12 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
     const listing = Number(results[1].meta.last_row_id);
     // 挂牌提交即触发本窗续约回滚（与 market.ts 挂牌同口径；履约成功才触发）
     await rollbackRcChangeForPlayer(env, offer.player_id, actor, { refType: 'listing', refId: listing });
+    // 落选通知（与续约回滚同位置，v6.55.0）：逐个通知落选意向单的买方，排除胜者买方
+    for (const lost of lostIntents.results) {
+      if (lost.buyer_club_id !== offer.buyer_club_id) {
+        await queueClubNotification(env, lost.buyer_club_id, 'offer_intent_lost', { player: lost.player_name, offerId: lost.id });
+      }
+    }
     return listing;
   }
   // 0 行：守卫失败（球员状态坏）。listing_id 仍 NULL → 调用方走自愈/报错
@@ -502,11 +548,11 @@ async function topUpBuyerHold(env: Env, offer: OfferContextRow, buyerClubId: num
   if (offer.hold_id === null) return;
   const holdRow = await db.prepare(`SELECT amount FROM fund_holds WHERE id = ? AND status = 'held'`).bind(offer.hold_id).first<{ amount: number }>();
   if (!holdRow || round2(holdRow.amount) === round2(offer.amount)) return;
-  const available = await availableBalance(db, buyerClubId);
-  if (offer.amount > round2(available + holdRow.amount + Number.EPSILON)) {
+  const snap = await balanceSnapshot(db, buyerClubId);
+  if (offer.amount > round2(snap.available + holdRow.amount + Number.EPSILON)) {
     throw new HttpError(
       400,
-      `可用资金不足：接受这个还价需要 ${round2(offer.amount)} m（可支配 ${round2(available + holdRow.amount)} m，旧价冻结 ${round2(holdRow.amount)} m 会被顶替）`,
+      `可用资金不足：接受这个还价需要 ${round2(offer.amount)} m（可支配 ${round2(snap.available + holdRow.amount)} m，已含预期收入 ${round2(snap.creditLine)} m，旧价冻结 ${round2(holdRow.amount)} m 会被顶替）`,
     );
   }
   try {
@@ -531,9 +577,9 @@ async function topUpBuyerHold(env: Env, offer: OfferContextRow, buyerClubId: num
 }
 
 /**
- * 关窗期同意 = 落意向单（v6.29.0）：占用守卫仍是「pending + 轮到你」，另加球员级唯一
- * （同一球员同时只允许一条 intent）的 NOT EXISTS 原子闸；不建挂牌、不动兄弟单、冻结保持 held。
- * 返回 false 表示原子闸没放行（调用方再查一次给可读报错）。
+ * 关窗期同意 = 落意向单（v6.29.0）：占用守卫仍是「pending + 轮到你」，另加买方级唯一
+ * （同一买方对同一球员只允许一条 intent；v6.55.0 起多家买方可并存）的 NOT EXISTS 原子闸；
+ * 不建挂牌、不动兄弟单、冻结保持 held。返回 false 表示原子闸没放行（调用方再查一次给可读报错）。
  */
 async function enterIntent(env: Env, offer: OfferContextRow, actorClubId: number, actor: number | null): Promise<boolean> {
   const db = env.DB;
@@ -541,7 +587,8 @@ async function enterIntent(env: Env, offer: OfferContextRow, actorClubId: number
     .prepare(
       `UPDATE offers SET status = 'intent', updated_at = ${nowSql()}
        WHERE id = ? AND status = 'pending' AND turn = ?
-         AND NOT EXISTS (SELECT 1 FROM offers x WHERE x.player_id = offers.player_id AND x.status = 'intent')`,
+         AND NOT EXISTS (SELECT 1 FROM offers x WHERE x.player_id = offers.player_id
+                         AND x.status = 'intent' AND x.buyer_club_id = offers.buyer_club_id)`,
     )
     .bind(offer.id, offer.turn)
     .run();
@@ -599,9 +646,17 @@ export async function acceptOffer(
       .prepare(`SELECT DISTINCT buyer_club_id FROM offers WHERE player_id = ? AND status = 'pending' AND id != ?`)
       .bind(offer.player_id, offer.id)
       .all<{ buyer_club_id: number }>();
-    // 归窗占用：season/window_seq 写回当前开着的窗，随后履约批照旧（挂牌 / hold 转正 / 领先出价 / 兄弟单过期）
+    // 归窗占用：season/window_seq 写回当前开着的窗，随后履约批照旧（挂牌 / hold 转正 / 领先出价 / 兄弟单过期）。
+    // v6.55.0 叠两道赛跑守卫：同球员已有悬挂 accepted（占用成功履约未跑）⇒ 双确认第二笔直接 409，
+    // 不走「悬挂 → 自愈 → 过期」的闪变路径；球员刚被设非卖品 ⇒ 不再占用（409 走既有文案）。
     const occupy = await db
-      .prepare(`UPDATE offers SET status = 'accepted', season = ?, window_seq = ?, updated_at = ${nowSql()} WHERE id = ? AND status = 'intent'`)
+      .prepare(
+        `UPDATE offers SET status = 'accepted', season = ?, window_seq = ?, updated_at = ${nowSql()}
+         WHERE id = ? AND status = 'intent'
+           AND NOT EXISTS (SELECT 1 FROM offers x WHERE x.player_id = offers.player_id
+                           AND x.status = 'accepted' AND x.listing_id IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM players nfs WHERE nfs.id = offers.player_id AND nfs.not_for_sale = 1)`,
+      )
       .bind(win.season, win.windowSeq, offer.id)
       .run();
     if ((occupy.meta.changes ?? 0) !== 1) throw new HttpError(409, '这条意向单刚被处理过了，刷新看看');
@@ -635,15 +690,16 @@ export async function acceptOffer(
   // 卖方还价抬高过 → 买方的冻结还停在旧额：接受前先补足到当前报价额（占用/转意向之前）
   if (role === 'buyer') await topUpBuyerHold(env, offer, input.clubId);
 
-  // 关窗期同意 → 落意向单：不挂牌、不动兄弟单、冻结保持 held；球员级唯一先给可读报错
+  // 关窗期同意 → 落意向单：不挂牌、不动兄弟单、冻结保持 held；买方级唯一先给可读报错
+  //（v6.55.0 多买方可并存，别家的意向单不再拦你）
   if (!(await isWindowOpen(db, offer.season, offer.window_seq))) {
-    const intentRef = `SELECT id FROM offers WHERE player_id = ? AND status = 'intent' LIMIT 1`;
-    if (await db.prepare(intentRef).bind(offer.player_id).first<{ id: number }>()) {
-      throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
+    const intentRef = `SELECT id FROM offers WHERE player_id = ? AND buyer_club_id = ? AND status = 'intent' LIMIT 1`;
+    if (await db.prepare(intentRef).bind(offer.player_id, input.clubId).first<{ id: number }>()) {
+      throw new HttpError(409, '你已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
     }
     if (!(await enterIntent(env, offer, input.clubId, input.actor))) {
-      if (await db.prepare(intentRef).bind(offer.player_id).first<{ id: number }>()) {
-        throw new HttpError(409, '这名球员已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
+      if (await db.prepare(intentRef).bind(offer.player_id, input.clubId).first<{ id: number }>()) {
+        throw new HttpError(409, '你已经有一条意向单在等开窗，先了结它再谈', 'intent_exists');
       }
       throw new HttpError(409, '这条报价刚被处理过了，或还没轮到你同意', 'not_your_turn');
     }
@@ -683,21 +739,33 @@ async function finalizeOffer(
     origin: AuditOrigin;
     kind: 'reject' | 'withdraw' | 'auto_reject' | 'expire';
     note?: string | null;
-    fromStatus?: 'pending' | 'intent'; // 缺省 pending；了结意向单必须显式给 'intent'
+    fromStatus?: 'pending' | 'intent' | 'accepted'; // 缺省 pending；了结意向单给 'intent'、自愈失败的孤儿单给 'accepted'
   },
 ): Promise<boolean> {
   const db = env.DB;
   const audit = createAuditStatement(db);
+  // v6.55.0 终态守卫：批内后三条各挂「这条单确实到了目标终态」的同一道闸——撤回/拒绝与确认赛跑
+  // 输掉时（第一条 changes=0，单已被对方占用），冻结释放、事件与审计全部空转。否则会出现资金洞：
+  // 赢家已把这条 hold 转成 ref_type='listing'（bids 指着它），输家照旧释放 ⇒ 成交扣款无冻结可扣
+  //（ledgerMovement 无余额守卫，余额可被打负）。
+  const settledGuard = '(SELECT status FROM offers WHERE id = ?) = ?';
+  const settledParams = [offer.id, opts.status];
   const results = await db.batch([
     db
       .prepare(`UPDATE offers SET status = ?, resolved_at = ${nowSql()}, updated_at = ${nowSql()} WHERE id = ? AND status = ?`)
       .bind(opts.status, offer.id, opts.fromStatus ?? 'pending'),
-    db.prepare(`UPDATE fund_holds SET status = 'released' WHERE id = (SELECT hold_id FROM offers WHERE id = ?) AND status = 'held'`).bind(offer.id),
     db
       .prepare(
-        `INSERT INTO offer_events (offer_id, actor_club_id, kind, amount, note, at) VALUES (?, ?, ?, ?, ?, ${nowSql()})`,
+        `UPDATE fund_holds SET status = 'released'
+         WHERE id = (SELECT hold_id FROM offers WHERE id = ?) AND status = 'held' AND ${settledGuard}`,
       )
-      .bind(offer.id, opts.actorClubId, opts.kind, offer.amount, opts.note ?? null),
+      .bind(offer.id, ...settledParams),
+    db
+      .prepare(
+        `INSERT INTO offer_events (offer_id, actor_club_id, kind, amount, note, at)
+         SELECT ?, ?, ?, ?, ?, ${nowSql()} WHERE ${settledGuard}`,
+      )
+      .bind(offer.id, opts.actorClubId, opts.kind, offer.amount, opts.note ?? null, ...settledParams),
     audit({
       actor: opts.actor,
       action: `offer_${opts.kind}`,
@@ -705,9 +773,28 @@ async function finalizeOffer(
       targetId: offer.id,
       origin: opts.origin,
       after: { status: opts.status, amount: offer.amount, actorClubId: opts.actorClubId },
+      guardSql: settledGuard,
+      guardParams: settledParams,
     }),
   ]);
   return (results[0].meta.changes ?? 0) > 0;
+}
+
+/**
+ * 幽灵单回滚（v6.55.0）：placeOffer 关窗自动同意路径里，dup 预检（读）拦不住同买方并发自动同意，
+ * 本单的 pending + 冻结可能已经提交、随后被 enterIntent 的买方级意向闸挡回——把这笔落单终态化
+ * （rejected + 释放冻结 + reject 事件/审计），调用方再抛 409。真并发窗单线程测试不可达，
+ * 直测见 tests/offer-intents.test.ts 的 rollbackGhostOffer 组（触发条件已写在用例注释里）。
+ */
+export async function rollbackGhostOffer(env: Env, offer: OfferRow, actor: number | null): Promise<boolean> {
+  return finalizeOffer(env, offer, {
+    status: 'rejected',
+    actorClubId: null,
+    actor,
+    origin: 'user',
+    kind: 'reject',
+    note: '并发意向闸挡回，幽灵单自动撤销',
+  });
 }
 
 /** 卖方拒绝（pending 任意轮次都能拒；关窗期的 intent 则是「放弃」，设计 §3 + v6.29.0） */
@@ -802,7 +889,9 @@ export async function expireStaleOffers(env: Env, opts: { origin: AuditOrigin; a
       summary.fulfilled++;
     } else {
       const offer = await db.prepare(`SELECT * FROM offers WHERE id = ?`).bind(row.id).first<OfferRow>();
-      if (offer && (await finalizeOffer(env, offer, { status: 'expired', actorClubId: null, actor, origin, kind: 'expire', note: '球员状态已变，无法成约' }))) {
+      // 孤儿单是 accepted（占用成功、履约没跑）：fromStatus 必须显式给 'accepted'，
+      // 缺省 'pending' 会让首条 UPDATE 空转、孤儿单永远挂在 accepted（v6.55.0 随非卖品守卫补上）
+      if (offer && (await finalizeOffer(env, offer, { status: 'expired', fromStatus: 'accepted', actorClubId: null, actor, origin, kind: 'expire', note: '球员状态已变，无法成约' }))) {
         summary.expired++;
       }
     }
@@ -977,12 +1066,35 @@ export async function setOfferSettings(
     offerAuto: boolean;
     notForSale: boolean;
   },
-): Promise<{ ok: true; transferListed: boolean; minOfferPrice: number | null; listPrice: number | null; offerAuto: boolean; notForSale: boolean }> {
+): Promise<{
+  ok: true;
+  transferListed: boolean;
+  minOfferPrice: number | null;
+  listPrice: number | null;
+  offerAuto: boolean;
+  notForSale: boolean;
+  /** 标价低于最低报价被自动对齐的回执（v6.55.0）：from=库中旧最低报价（无旧值 null），to=对齐后的最低报价 */
+  minOfferPriceAdjusted: { from: number | null; to: number } | null;
+}> {
   const db = env.DB;
   const p = await db
-    .prepare(`SELECT p.id, p.club_id, p.status, p.transfer_listed, p.not_for_sale, p.market_value, ${sqlDisplayName('p')} AS name FROM players p WHERE p.id = ?`)
+    .prepare(
+      `SELECT p.id, p.club_id, p.status, p.transfer_listed, p.not_for_sale, p.market_value, p.list_price, p.min_offer_price,
+              ${sqlDisplayName('p')} AS name
+       FROM players p WHERE p.id = ?`,
+    )
     .bind(input.playerId)
-    .first<{ id: number; club_id: number | null; status: string; transfer_listed: number; not_for_sale: number; market_value: number | null; name: string }>();
+    .first<{
+      id: number;
+      club_id: number | null;
+      status: string;
+      transfer_listed: number;
+      not_for_sale: number;
+      market_value: number | null;
+      list_price: number | null;
+      min_offer_price: number | null;
+      name: string;
+    }>();
   if (!p || p.club_id !== input.clubId) throw new HttpError(404, '球员不存在或不在你的队里');
   if (p.status === 'listed') throw new HttpError(409, '这名球员在转会区挂牌中，报价设置先锁定，下架后再改');
   if (p.status !== 'normal') throw new HttpError(400, '当前状态改不了报价设置');
@@ -1036,12 +1148,23 @@ export async function setOfferSettings(
   }
 
   // 非卖品 = 一切报价自动拒（设计 §2.1）：标价、最低报价与开关被压掉
-  const effectiveMin = input.notForSale ? null : minOfferPrice;
+  let effectiveMin = input.notForSale ? null : minOfferPrice;
   // 名单外传标价静默忽略（标价只属于挂牌状态，与 transfer_listed_at 对称）
   const effectiveList = input.notForSale || !input.transferListed ? null : listPrice;
   const effectiveAuto = input.notForSale || (effectiveList === null && effectiveMin === null) ? false : input.offerAuto;
+  // v6.55.0 旧值分流（标价↔最低报价自动对齐）：effectiveList < effectiveMin 在请求体上只有一个谓词，
+  // 用库中旧标价区分用户意图——新标价低于旧标价（旧标价 NULL = 首次设标价，从无到有没有「反向」语义）
+  // ⇒ 用户在降标价，最低报价自动对齐到新标价（无论请求是否显式传了更高的 min——标价是主导方）；
+  // 标价未动或上升（是最低报价越的界）⇒ 400 拒绝。对齐放在所有区间校验之后：显式超上限的最低报价
+  // 已在上面 400，不会被静默替换；对齐后的新最低报价 ≥ 标价下限（五折线）≥ min 自身下限，边界恒成立。
+  let minOfferPriceAdjusted: { from: number | null; to: number } | null = null;
   if (effectiveList !== null && effectiveMin !== null && effectiveList < effectiveMin) {
-    throw new HttpError(400, `标价 ${effectiveList} m 不能低于最低报价 ${effectiveMin} m（低于线就成砍价了）`);
+    if (p.list_price === null || effectiveList < p.list_price) {
+      minOfferPriceAdjusted = { from: p.min_offer_price, to: effectiveList };
+      effectiveMin = effectiveList;
+    } else {
+      throw new HttpError(400, `标价 ${effectiveList} m 不能低于最低报价 ${effectiveMin} m（低于线就成砍价了）`);
+    }
   }
 
   // 置非卖品 = 一切报价自动拒：把既有 pending 与关窗期意向单一并自动拒 + 释放冻结（v6.29.0）
@@ -1091,6 +1214,9 @@ export async function setOfferSettings(
         offerFloorOn: effectiveMin !== null,
         offerAuto: effectiveAuto,
         notForSale: input.notForSale,
+        // v6.55.0：仅对齐发生时追加对齐落点（对齐值 = 公开标价，无私密信息；无条件加键会打破
+        // tests/offers.test.ts 的严格 toEqual 与「私密数值不进留痕」哨兵）
+        ...(minOfferPriceAdjusted !== null ? { minAlignedTo: minOfferPriceAdjusted.to } : {}),
       },
     }),
   ];
@@ -1134,5 +1260,6 @@ export async function setOfferSettings(
     listPrice: effectiveList,
     offerAuto: effectiveAuto,
     notForSale: input.notForSale,
+    minOfferPriceAdjusted,
   };
 }

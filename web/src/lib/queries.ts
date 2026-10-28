@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -111,6 +111,17 @@ export function useMyBids(isCoach: boolean): { bids: MyBidRow[] | null; refresh:
     enabled: isCoach,
   });
   return { bids: data ?? null, refresh: () => void qc.invalidateQueries({ queryKey: qk.myBids }) };
+}
+
+// 余额快照（v6.57.0 额度三字段随端点下发）：Ledger 余额卡 / 转会台 / 在售市场 / 出价弹层的
+// 「可支配（含预期收入）」与动用额共用；写路径既有 ['club','balance'] invalidate 自动覆盖刷新。
+export function useClubBalance(enabled = true) {
+  return useQuery({
+    queryKey: ['club', 'balance'],
+    queryFn: () => api<ClubBalance>('/api/club/balance'),
+    enabled,
+    retry: false,
+  });
 }
 
 // 我的谈判会话（v6.32.0 自 desk/NegotiationsSection 收编）：转会台页签计数与谈判区块共用同一个
