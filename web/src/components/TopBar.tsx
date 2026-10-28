@@ -43,8 +43,10 @@ export default function TopBar() {
   }, [menuOpen]);
 
   // v6.20.0：窄屏顶栏第二行是横滑页签，当前页签可能停在视口外（用户看不出自己在哪）。
-  // 路由变化后把 .is-active 滚进视野并居中，只动横向：inline 居中，block 用 'nearest' ——
-  // 元素纵向已经完整可见时不动纵向滚动（顶栏 sticky 常驻视口，所以不会把整页顶上去）。
+  // 路由变化后把 .is-active 滚进视野，只动横向：inline 用 'nearest'——最小滚动让活动页签
+  // 贴边齐平即可保证可见，居中会把两侧邻项裁成半字（2026-10-29 e2e 760 复核：760 落在
+  // 「全称+横滑」带内，居中滚动使左缘「球员库」/右缘「财政账本」首尾字被切）。block 用
+  // 'nearest'——元素纵向已完整可见时不动纵向滚动（顶栏 sticky 常驻视口）。
   // 宽屏没有横向溢出，这次调用是无害 no-op；jsdom 没实现 scrollIntoView，先探测再调。
   useEffect(() => {
     const nav = navRef.current;
@@ -54,7 +56,7 @@ export default function TopBar() {
       const reduce =
         typeof window.matchMedia === 'function' &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+      active.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
     }
   }, [pathname]);
 

@@ -1,6 +1,7 @@
 // 市场共享件（v2.2.0 拆页，v6.18.0 扩为四页，v6.24.0 扩为五页，v6.31.0 扩为六页）：常量、格式化、子导航。
 // 数据层 hooks 在 lib/queries.ts（TanStack Query）。
-import { NavLink } from 'react-router';
+import { useEffect, useRef } from 'react';
+import { NavLink, useLocation } from 'react-router';
 
 export type ListingFilter = 'active' | 'pending_review' | 'ended' | 'all';
 
@@ -39,8 +40,20 @@ export function money(x: number | null | undefined): string {
 }
 
 export function MarketNav() {
+  // ≤640 横滑带内活动页签可能停在视野外（2026-10-29 e2e 320 复核实测：/market/desk 的
+  // 活动页签被截到只剩半个字），路由变化后把 .on 滚进视野；宽屏无溢出是无害 no-op，
+  // jsdom 没实现 scrollIntoView，先探测再调（与 TopBar 同手法）。
+  // 注：本注释不得出现各页签字面——tests/mobile-baseline.test.ts 按源文本 indexOf 锁页签顺序。
+  const navRef = useRef<HTMLElement | null>(null);
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const active = navRef.current?.querySelector<HTMLElement>('a.on');
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'auto' });
+    }
+  }, [pathname]);
   return (
-    <nav className="seg" aria-label="市场分区">
+    <nav ref={navRef} className="seg" aria-label="市场分区">
       <NavLink to="/market" end className={({ isActive }) => (isActive ? 'on' : '')}>
         在售市场
       </NavLink>
