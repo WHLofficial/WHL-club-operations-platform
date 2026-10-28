@@ -1270,6 +1270,27 @@ table.matches-table-narrow .rating-badge {
   }
 }
 
+/* ---- ⑧ 320 顶栏首行：品牌与用户区贴近（2026-10-29 e2e 320 复核）----
+   ≤640 首行栅格 auto minmax(0,1fr) 下，320 视口品牌（nowrap，auto 轨不缩）+ 用户区
+   （justify-self:end，1fr 轨收 0 后内容向左溢出）会把行间距吃光（实测 ≈0）。360 及以下
+   对两端各收一档，恢复可见空隙；不动栅格结构，超 360 的档位不受影响。 */
+@media (max-width: 360px) {
+  .brand {
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    gap: 6px;
+  }
+
+  .brand-logo {
+    width: 20px;
+    height: 20px;
+  }
+
+  .userbox {
+    gap: 6px;
+  }
+}
+
 /* ---- 印章 .stamp（UI_DESIGN §4.2 签名件：双线框 + -3° 微旋 + 落章动效，全站唯一新 keyframe） ---- */
 
 .stamp {
