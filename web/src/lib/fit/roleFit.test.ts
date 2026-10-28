@@ -9,6 +9,7 @@
 // ④ RoleID/PosID 冻结映射的哨兵值（142 = ST 禁区之王 ++，与本仓 web/assets/ref/role.json
 //   对齐的那次人工核对）；
 // ⑤ FIT_ATTR_KEYS 确实是权重表键并集（trim 放宽的口径不被手抄漂移）。
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { playstyleById } from "../ref.ts";
 import {
@@ -125,5 +126,63 @@ describe("RoleID/PosID 冻结映射（scripts/freeze-fc26-refs.mjs 生成）", (
     expect(FC26_POS_BY_ID[5]).toBe("CB");
     expect(FC26_POS_BY_ID[-1]).toBe("-");
     expect(Object.keys(FC26_POS_BY_ID)).toHaveLength(13);
+  });
+});
+
+// TC-C-003（docs/test-plans/v6.56.0-attr-head-relayout.md）：role.json 反推跨检——
+// 上游真源 web/assets/ref/role.json 与冻结表 FC26_ROLE_BY_ID 的零漂移探测器：上游改表而
+// 冻结表未重冻结时本组红。定位口径（评审点名的坐标系坑）：role.json 的 chs/en 首段是
+// 位置码（GK/RB/ST…单段），不是冻结表两段式 slot——禁止直读比对（直读必 98 全 bad、
+// 探测器变常红，实测在案）；必须「同位置码槽位内按 zh 精确匹配」转换坐标后再比。
+describe("TC-C-003 role.json 反推跨检（冻结表与上游零漂移）", () => {
+  // 单行紧凑 JSON（实测 6065 字符、99 个对象 = 98 条非零 id + 1 条 id 0 占位），按对象遍历不按行读
+  const roleJson = JSON.parse(
+    readFileSync(new URL("../../../assets/ref/role.json", import.meta.url), "utf8"),
+  ) as { id: number; en: string; chs: string }[];
+
+  /** 尾缀档位：++ → 2、+ → 1；其余 = 数据坏（报错不静默） */
+  function tierOfTail(tail: string, ctx: string): 1 | 2 {
+    if (tail === "++") return 2;
+    if (tail === "+") return 1;
+    throw new Error(`${ctx}：尾缀「${tail}」不是 +/++（上游格式变更，需人工核对后同步冻结表）`);
+  }
+
+  it("上游 98 条（id 1-… 非 0 占位）逐条三步定位后与 FC26_ROLE_BY_ID 全对", () => {
+    const entries = roleJson.filter((r) => r.id !== 0);
+    expect(entries, "role.json 非零 id 条数").toHaveLength(98);
+    let matched = 0;
+
+    for (const r of entries) {
+      const ctx = `role.json#${r.id}（chs=「${r.chs}」 en=「${r.en}」）`;
+      // ① tier 双取交叉：id 段口径 ↔ chs/en 尾缀口径，不一致 = 数据坏
+      const tierById: 1 | 2 = r.id >= 101 ? 2 : 1;
+      const chsParts = r.chs.trim().split(/\s+/);
+      const enParts = r.en.trim().split(/\s+/);
+      expect(chsParts.length, ctx).toBeGreaterThanOrEqual(3);
+      expect(enParts.length, ctx).toBeGreaterThanOrEqual(3);
+      const tierChs = tierOfTail(chsParts[chsParts.length - 1], ctx);
+      const tierEn = tierOfTail(enParts[enParts.length - 1], ctx);
+      expect(tierChs, `${ctx} chs 尾缀档`).toBe(tierById);
+      expect(tierEn, `${ctx} en 尾缀档`).toBe(tierById);
+      // ② 坐标转换 + en 首段交叉：位置码两侧一致；同位置码槽位内按 zh 精确匹配定位唯一 slot
+      const posCode = chsParts[0];
+      const zh = chsParts.slice(1, -1).join(" ");
+      expect(enParts[0], `${ctx} en 首段位置码`).toBe(posCode);
+      const hits = Object.entries(ROLE_FIT).filter(
+        ([slot, p]) => slot.split("|")[0] === posCode && p.zh === zh,
+      );
+      if (hits.length !== 1) {
+        throw new Error(
+          `${ctx}：位置码 ${posCode} 内按 zh「${zh}」定位到 ${hits.length} 个槽位（${hits.map(([s]) => s).join(", ") || "无"}）——上游改名/同名新角色，需人工核对`,
+        );
+      }
+      // ③ 终比对：定位出的 slot+tier 与冻结表逐字一致
+      const frozen = FC26_ROLE_BY_ID[r.id];
+      expect(frozen, `${ctx} 冻结表缺行`).toBeDefined();
+      expect(frozen.slot, ctx).toBe(hits[0][0]);
+      expect(frozen.tier, ctx).toBe(tierById);
+      matched += 1;
+    }
+    expect(matched).toBe(98);
   });
 });
