@@ -271,6 +271,36 @@ describe('续约（rc_change）', () => {
     expect(JSON.parse(feeAudit[0]!.after)).toMatchObject({ kind: 'rc_change_fee', amount: 1.5, clubId: fx.clubA });
   });
 
+  // TC-B-019（续约费腿）：现金 0、费用全靠预期收入额度——预检含额度放行，批内守卫与它同源
+  //（含 ` + credit.sql`）⇒ 审核不 409 死锁。守卫退回现金式时本例必红（409 且重试永不过）。
+  it('现金 0 用额度付续约费：审核通过不 409，rc_change_fee 恰扣一次', async () => {
+    const fx = await seedBypass();
+    fx.env.rng = () => 0.5;
+    // 额度来源：clubA 名下在途成交单（player 21，RC 20 → 税 2 → 净 18）
+    fx.sqlite.exec(`
+      INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, created_at)
+        VALUES ('transfer', 21, ${fx.clubA}, ${fx.clubB}, 20, 'pending_review', 4, 1, '2026-07-01T00:00:00Z');
+      UPDATE ledger_accounts SET balance = 0 WHERE club_id = ${fx.clubA};
+    `);
+    const submit = await post('/api/transfers/rc-change', { playerId: 20, newReleaseFee: 15 }, 'tok-coach', fx.env);
+    expect(submit.status).toBe(201);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const taskId = await openReviewTaskId(fx);
+
+    const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
+    expect(approve.status).toBe(200);
+
+    expect(
+      sqlAll<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE club_id = ${fx.clubA} AND kind = 'rc_change_fee'`),
+    ).toEqual([{ amount: -1.5 }]);
+    expect(
+      sqlGet<{ extra_fee: number | null; status: string }>(fx.sqlite, 'SELECT extra_fee, status FROM transfers WHERE id = ?', transferId),
+    ).toMatchObject({ extra_fee: 1.5, status: 'signing' });
+    expect(
+      sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = ?', fx.clubA),
+    ).toMatchObject({ balance: -1.5 }); // 从 0 扣成负数（负=欠款），额度来源后续照常对冲
+  });
+
   it('审核驳回：不扣费、单据落 rejected', async () => {
     const fx = await seedBypass();
     const submit = await post('/api/transfers/rc-change', { playerId: 20, newReleaseFee: 12 }, 'tok-coach', fx.env);

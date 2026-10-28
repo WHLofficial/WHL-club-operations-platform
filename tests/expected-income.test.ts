@@ -7,11 +7,16 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createTestDb } from './d1.ts';
-import { availableBalance, balanceSnapshot, creditLineSql, expectedIncomeBreakdown } from '../src/worker/ledger.ts';
+import type { Env } from '../src/worker/env.ts';
+import { availableBalance, balanceSnapshot, creditLineGuard, creditLineSql, expectedIncomeBreakdown } from '../src/worker/ledger.ts';
+import { closeSilentSessions, openNegotiationSession, voidSigningCore } from '../src/worker/negotiations.ts';
 
 const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), '../src/db/migrations');
 const readMig = (file: string) => readFileSync(join(MIG_DIR, file), 'utf8');
 const norm = (sql: string) => sql.replace(/\s+/g, ' ').trim();
+// 本文件直用 node:sqlite；两个取行小助手让 TC-B-038 的断言体不用到处写 .prepare().get()
+const sqlGet = <T>(sqlite: DatabaseSync, sql: string): T | undefined => sqlite.prepare(sql).get() as T | undefined;
+const sqlAll = <T>(sqlite: DatabaseSync, sql: string): T[] => sqlite.prepare(sql).all() as T[];
 
 const TRIGGERS = ['fund_holds_bid_guard', 'fund_holds_offer_guard', 'fund_holds_sea_sealed_guard'] as const;
 
@@ -126,6 +131,52 @@ describe('预期收入额度公式（设计 §1）', () => {
     expect(await availableBalance(db, 1)).toBe(63);
   });
 
+  // TC-B-003 源②：forced_auction 按 auction_tax_rate 整单税率（0.5）——100m 净 50；
+  // 漏 forced 分支会按分段累进算成净 90（税 10），额度虚高 40
+  it('源②：transfers type=forced_auction 整单税率（100m → 净 50，不是分段累进的 90）', async () => {
+    const { sqlite, db } = setup();
+    sqlite.exec(`
+      UPDATE listings SET status = 'delisted' WHERE id = 100;
+      INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, created_at) VALUES
+        ('forced_auction', 11, 1, 2, 100, 'pending_review', '2026-01-01T00:00:00Z');
+    `);
+    expect(await availableBalance(db, 1)).toBe(50);
+    expect(await expectedIncomeBreakdown(db, 1)).toEqual([
+      { source: 'transfer', refId: expect.any(Number), playerId: 11, gross: 100, tax: 50, net: 50 },
+    ]);
+  });
+
+  // TC-B-005b 正路径：activation 成交单是签入方付给卖方的激活费，计入（净 = fee × 0.9，RC 100 首段）。
+  // 与「源① activation 挂牌排除」（本文件 :171 组）互补：挂牌不算、成单才算。
+  it('源②：transfers type=activation 正路径计入（90m → 税 9 → 净 81）', async () => {
+    const { sqlite, db } = setup();
+    sqlite.exec(`
+      UPDATE listings SET status = 'delisted' WHERE id = 100;
+      INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, created_at) VALUES
+        ('activation', 11, 1, 2, 90, 'pending_review', '2026-01-01T00:00:00Z');
+    `);
+    expect(await availableBalance(db, 1)).toBe(81);
+  });
+
+  // TC-B-004：分段累进按现行 active 合同的 RC 预算——is_active=0 的合同不进预算。
+  // contracts 对 player_id 有 UNIQUE（一球员一行合同），两态用同一行切：
+  // ① is_active=0（RC 500 不认账）⇒ RC=0 ⇒ 税 20 / 净 30——误取它得税 5 / 净 45，断言即红；
+  // ② 改回 is_active=1 且 RC=30 ⇒ transferTax(50,30) = 3+3+2 = 8（与 src/core/tax.test.ts 同值）⇒ 净 42。
+  it('源②：分段税只认 is_active=1 的合同 RC（is_active=0 不进预算）', async () => {
+    const { sqlite, db } = setup();
+    sqlite.exec(`
+      UPDATE listings SET status = 'delisted' WHERE id = 100;
+      INSERT INTO players (id, uid, name, club_id, status, ca, pa) VALUES (14, 'u14', '丁', 1, 'normal', 70, 80);
+      INSERT INTO contracts (player_id, club_id, release_fee, wage, is_active) VALUES (14, 1, 500, 1, 0);
+      INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, created_at) VALUES
+        ('transfer', 14, 1, 2, 50, 'pending_review', '2026-01-01T00:00:00Z');
+    `);
+    expect(await availableBalance(db, 1)).toBe(30);
+    // 合同转正（is_active=1，RC 30）：税 8 ⇒ 净 42
+    sqlite.exec("UPDATE contracts SET is_active = 1, release_fee = 30 WHERE player_id = 14");
+    expect(await availableBalance(db, 1)).toBe(42);
+  });
+
   it('强制拍卖按 auction_tax_rate 整单税率（100m → 净 50m，不是分段累进的 90m）', async () => {
     const { sqlite, db } = setup();
     // 一名球员只能有一单活跃挂牌（idx_listings_active_player）⇒ 先把 200 下架再挂强制拍卖
@@ -153,6 +204,19 @@ describe('预期收入额度公式（设计 §1）', () => {
     expect(await availableBalance(db, 1)).toBe(81); // 上限钳到 1
     setK(sqlite, null);
     expect(await availableBalance(db, 1)).toBe(81);
+    // TC-B-007 钳制矩阵补格（全部走 SQL CAST 语义，不许应用层用 JS Number 静默兜 1.0）：
+    // '' → CAST=0 → 0；'-1' → CAST=-1 → 钳到 0；' 0.5 ' / '0.5abc' → 前缀解析 0.5；
+    // '0' → 0。'0.5abc' 是哨兵格：JS Number('0.5abc')=NaN，兜 1.0 会得 81（两层打架）。
+    setK(sqlite, '');
+    expect(await availableBalance(db, 1)).toBe(0);
+    setK(sqlite, '-1');
+    expect(await availableBalance(db, 1)).toBe(0);
+    setK(sqlite, ' 0.5 ');
+    expect(await availableBalance(db, 1)).toBe(40.5);
+    setK(sqlite, '0.5abc');
+    expect(await availableBalance(db, 1)).toBe(40.5);
+    setK(sqlite, '0');
+    expect(await availableBalance(db, 1)).toBe(0);
   });
 
   it('balanceSnapshot 三字段同源：expectedIncome 未乘 k、creditLine 乘 k、available 合成', async () => {
@@ -356,5 +420,121 @@ describe('0081 触发器同源锁（三个资金闸）', () => {
     const mig81 = norm(readMig('0081_expected_income_credit_line.sql'));
     const frag = norm(creditLineSql('NEW.club_id'));
     expect(mig81.split(frag)).toHaveLength(4); // 出现 3 次 ⇒ split 出 4 段
+  });
+
+  // TC-B-018：额度子查询的写放大最坏情况——三个来源基表都必须走索引（SEARCH），不得全表 SCAN。
+  // 依赖索引：idx_transfers_from（from_club_id）/ idx_listings_seller（seller_club_id）/
+  // idx_bids_listing_amount（listing_id, amount）——0001_init.sql 建表时在场，删索引即红。
+  // 行读量级（登记口径，不设硬线）：子查询按 from_club_id/seller_club_id 点筛 + 每挂牌一次
+  // bids 索引取 MAX，长历史队（200 笔终态单）行读 ≈ 在途单数 × 常数，不随历史总量线性增长；
+  // 生产量级登记归 scripts/d1-read-audit/ 的探针体系，本条只锁「不得 SCAN」的结构性底线。
+  it('额度子查询 EXPLAIN QUERY PLAN：三来源基表全走索引，无 SCAN transfers/listings/bids', async () => {
+    const { db } = setup();
+    const credit = creditLineGuard(1);
+    const plan = (
+      await db.prepare(`EXPLAIN QUERY PLAN SELECT ${credit.sql}`).bind(...credit.params).all()
+    ).results as { detail: string }[];
+    expect(plan.length).toBeGreaterThan(0);
+    const details = plan.map((r) => r.detail).join('\n');
+    // EXPLAIN 文本里基表以别名出现（t/l/b），锚「USING INDEX <索引名>」：索引被删时 SQLite
+    // 回落 SCAN，对应 USING INDEX 断言即红——等价于「无 SCAN transfers/listings/bids」。
+    expect(details, 'transfers 侧必须走 idx_transfers_from').toContain('USING INDEX idx_transfers_from');
+    expect(details, 'listings 侧必须走 idx_listings_seller').toContain('USING INDEX idx_listings_seller');
+    expect(details, 'bids 侧必须走 idx_bids_listing_amount').toContain('USING INDEX idx_bids_listing_amount');
+  });
+});
+
+// TC-B-038（§2.4 落空表第 2 行，P0）：签约谈判作废 / 静默超时后额度归零且源①不复活。
+// 三向合取是必要的：只改 transfers 不改 listing，额度会以源①形态复活；只撤 bids 不 delisted，
+// 源①虽归零但名单残留。夹具顺序照 tests/expiry-ops.test.ts 的 seedSigning：先 listed（
+// fund_holds_bid_guard 只认 listed/bidding）→ 冻结 → 出价 → 再改 pending_review。
+describe('TC-B-038 签约谈判落空（作废 / 静默超时 → 额度归零且源①不复活）', () => {
+  function seedSigningDeal(): { sqlite: DatabaseSync; db: D1Database } {
+    const { sqlite, db } = createTestDb();
+    sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status, created_at) VALUES
+        (1, '卖方', 'premier', 'active', '2026-01-01T00:00:00Z'),
+        (2, '买方', 'premier', 'active', '2026-01-01T00:00:00Z'),
+        (3, '第三方', 'premier', 'active', '2026-01-01T00:00:00Z');
+      INSERT INTO players (id, uid, name, club_id, status, ca, pa) VALUES
+        (21, 'u21', '成交中', 1, 'listed', 100, 120),
+        (22, 'u22', '旁证', 3, 'normal', 80, 90);
+      INSERT INTO contracts (player_id, club_id, release_fee, wage, is_active) VALUES
+        (21, 1, 100, 1, 1), (22, 3, 100, 1, 1);
+      INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES
+        (1, 0, '2026-01-01T00:00:00Z'), (2, 100, '2026-01-01T00:00:00Z'), (3, 0, '2026-01-01T00:00:00Z');
+      -- 主链：卖方 1 的挂牌被买 2 出价 100，收标成单（pending_review）——买 2 的 100 是自有现金，
+      -- 插冻结时 fund_holds_bid_guard 要考买方资金；卖方 1 保持 0，额度断言才干净
+      INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at) VALUES
+        (300, 21, 1, 'normal', 10, 'listed', '2026-01-01T00:00:00Z');
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at) VALUES
+        (301, 2, 100, 'held', 'listing', 300, '2026-01-01T00:00:00Z');
+      INSERT INTO bids (id, listing_id, club_id, amount, created_at, status, hold_id) VALUES
+        (301, 300, 2, 100, '2026-01-01T00:00:00Z', 'active', 301);
+      UPDATE listings SET status = 'pending_review' WHERE id = 300;
+      INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
+        VALUES (300, 'transfer', 21, 1, 2, 100, 'pending_review', 1, 1, 'listing:300', '2026-01-01T00:00:00Z');
+      -- 旁证挂牌：作废后用「还能不能靠额度冻钱」证明额度真的归零（amount ≥ ask，只考资金闸）
+      INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at) VALUES
+        (310, 22, 3, 'normal', 40, 'listed', '2026-01-01T00:00:00Z');
+    `);
+    return { sqlite, db };
+  }
+
+  /** 三向合取 + 额度归零 + 触发器拒绝（两态共用的断言体）；negotiations 三函数吃 Env（内部取 env.DB） */
+  async function expectCollapsedToZero(sqlite: DatabaseSync, db: D1Database): Promise<void> {
+    expect(sqlGet(sqlite, "SELECT status FROM transfers WHERE id = 300")).toMatchObject({ status: 'rejected' });
+    // 源①不复活（一）：挂牌不在 ('listed','bidding') —— delisted 才断掉在途收入
+    const listing = sqlGet<{ status: string }>(sqlite, "SELECT status FROM listings WHERE id = 300");
+    expect(['listed', 'bidding']).not.toContain(listing!.status);
+    // 源①不复活（二）：该挂牌出价全 withdrawn、买方冻结 released
+    expect(
+      sqlAll<{ status: string }>(sqlite, 'SELECT status FROM bids WHERE listing_id = 300').map((r) => r.status),
+    ).toEqual(['withdrawn']);
+    expect(
+      sqlAll<{ status: string }>(sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'listing' AND ref_id = 300").map((r) => r.status),
+    ).toEqual(['released']);
+    // 额度 90 → 0
+    expect(await availableBalance(db, 1)).toBe(0);
+    // 触发器方向：对旁证挂牌冻 45（amount ≥ ask 40，只考资金闸）——额度归零后被拒
+    expect(() => hold(sqlite, 1, 45, 'listing', 310)).toThrow('WHL_BID_REJECT_FUNDS');
+  }
+
+  it('a) 签约谈判作废批（voidSigningCore）：signing → 三向合取 + 额度 90 → 0', async () => {
+    const { sqlite, db } = seedSigningDeal();
+    const env = { DB: db } as unknown as Env;
+    // 计划入口：openNegotiationSession 把 pending_review 推到 signing（不带 fixedReleaseFee，不碰工资表）
+    expect((await openNegotiationSession(env, 300, null)).status).toBe('signing');
+    // fee 100，RC 100 首段 10% → 净 90 = 额度（k 缺省 1.0）
+    expect(await availableBalance(db, 1)).toBe(90);
+    // 作废前触发器放行（额度足）；随后清掉这笔测试冻结，不干扰后续断言
+    expect(() => hold(sqlite, 1, 45, 'listing', 310)).not.toThrow();
+    sqlite.exec('DELETE FROM fund_holds WHERE club_id = 1');
+
+    const session = sqlGet<{ id: number }>(sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = 300');
+    expect(session).toBeDefined();
+    expect(
+      await voidSigningCore(env, session!.id, {
+        actor: null,
+        origin: 'cron_tick',
+        action: 'negotiation_timeout',
+        deadlineNote: '签约谈判作废（测试）',
+        reason: 'silence_timeout',
+      }),
+    ).toBe('done');
+    await expectCollapsedToZero(sqlite, db);
+  });
+
+  it('b) 静默超时（closeSilentSessions 到期引擎）：anchor 早于 72h → 同一作废批收口，额度 90 → 0', async () => {
+    const { sqlite, db } = seedSigningDeal();
+    const env = { DB: db } as unknown as Env;
+    expect((await openNegotiationSession(env, 300, null)).status).toBe('signing');
+    expect(await availableBalance(db, 1)).toBe(90);
+    // 静默锚点 = MAX(expiry_anchor_at, created_at, 末次 attempt)：openNegotiationSession 的
+    // created_at 是真实 now，会把锚点顶到未来——两列一起打到过去（≤ cutoff = now − 72h）
+    sqlite.exec("UPDATE negotiation_sessions SET expiry_anchor_at = '2026-01-01T00:00:00Z', created_at = '2026-01-01T00:00:00Z' WHERE transfer_id = 300");
+    const closed = await closeSilentSessions(env, { origin: 'cron_tick', nowIso: '2026-01-05T00:00:00Z', closeAll: false, limit: 50, remindLeadHours: 24 });
+    expect(closed).toBe(1);
+    await expectCollapsedToZero(sqlite, db);
   });
 });

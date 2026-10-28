@@ -690,6 +690,38 @@ describe('结算链：附加费批内守卫（预期收入额度）', () => {
       ),
     ).toMatchObject({ status: 'pending_review', extra_fee: null });
   });
+
+  // TC-B-021②：判别形态「settled 改行而 extra_fee 0 行（extra_fee 已预填）」——
+  // 解约/续约链路的单据在建单时就预填 extra_fee（bypass.ts:476），海捞链路正常为 null；
+  // 该形态在扣费批里 extra_fee UPDATE 恒 0 行，扣没扣只能由 settled 或流水判定，
+  // 不能把「已扣费的成功」误判成失败（ Charged 判别吃两条守卫 UPDATE 的并集）。
+  it('extra_fee 已预填的密封单：扣费一次、冻结 settled、不 409、预填值不被覆盖', async () => {
+    const { fx } = await seedSealed();
+    expect((await post('/api/transfers/sea-sealed', { playerId: 24, newReleaseFee: 20 }, A, fx.env)).status).toBe(201);
+    await post('/api/admin/sea-sealed/open', {}, 'tok-admin', fx.env);
+    const signFee = freeAgentFee(20);
+    // 直插预填形态（生产对应解约链路的建单预填；海捞链路本身 null，这里只造判别形态）
+    fx.sqlite.exec('UPDATE transfers SET extra_fee = 6 WHERE sealed_bid_id IS NOT NULL');
+    const taskId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE type = 'transfer_confirm'")!.id;
+    const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
+    expect(approve.status).toBe(200);
+
+    // 费用恰好扣一次、冻结 settled、预填值不被二次改写
+    expect(
+      sqlAll<{ amount: number }>(fx.sqlite, "SELECT amount FROM ledger_entries WHERE kind = 'free_agent_fee'"),
+    ).toEqual([{ amount: -signFee }]);
+    expect(
+      sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = ?', CLUB_A),
+    ).toMatchObject({ balance: 100 - signFee });
+    expect(holdStatus(fx, bidRow(fx, 24, CLUB_A)!.hold_id)).toBe('settled');
+    expect(heldTotal(fx, CLUB_A)).toBe(0);
+    expect(
+      sqlGet<{ status: string; extra_fee: number | null }>(
+        fx.sqlite,
+        'SELECT status, extra_fee FROM transfers WHERE sealed_bid_id IS NOT NULL',
+      ),
+    ).toMatchObject({ status: 'signing', extra_fee: signFee });
+  });
 });
 
 describe('管理端：明账 + 立即开标 / 延长 / 取消', () => {
