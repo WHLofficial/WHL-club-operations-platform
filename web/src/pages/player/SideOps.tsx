@@ -200,6 +200,13 @@ export function SideOps({
     return round2((v - releaseFee) * 0.3);
   })();
   const renewUse = creditUse(renewSpend, availSnap);
+  // 解约费客户端预览（与 core terminationFee 同式）：serviceSeasons 由服务端按现行窗刻度算好
+  // 随合同下发；满 3 赛季免费。服务端提交时仍按同一公式实算并重做资金预检。
+  const termSpend =
+    releaseFee !== null && contract !== null && contract.serviceSeasons < 3
+      ? round2(releaseFee * (3 - contract.serviceSeasons) * 0.1)
+      : 0;
+  const termUse = creditUse(termSpend, availSnap);
   const offerCap = offerCapOf(releaseFee);
   // 标价/挂牌下限（v6.54.1）：与挂牌同规，报价设置面板与挂牌面板的区间提示共用
   const listingFloor = listingFloorOf(releaseFee, player.marketValue);
@@ -728,6 +735,7 @@ export function SideOps({
               <p className="side-sub">
                 解约费 = 违约金 ×（3 − 效力赛季数）× 10%（效力满 3 赛季免费）；被解约球员本窗全联盟禁签。再次点击确认。
               </p>
+              {termUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(termUse)} m（解约费审核时收取）。</p>}
               {demandOpen && <p className="side-sub">解约会作废他的涨薪要求。</p>}
               {contractPendingView !== null && <p className="side-sub">关窗前离队会让待生效的新合同作废。</p>}
               <div className="side-btns">

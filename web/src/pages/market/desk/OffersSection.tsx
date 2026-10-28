@@ -32,10 +32,13 @@ import {
 } from '../../../lib/api.ts';
 import { playerPath } from '../../../lib/player-link.ts';
 import { moneyIntText } from '../../../lib/club-cards.ts';
+import { money } from '../../market/shared.tsx';
+import { creditUse } from '../../../lib/credit-line.ts';
 import { useMediaQuery } from '../../../lib/use-media.ts';
 import { useOverlayShell } from '../../../lib/use-overlay-shell.ts';
 import {
   offerDetailQuery,
+  useClubBalance,
   useOfferDetail,
   useOfferSettings,
   useOffers,
@@ -523,6 +526,24 @@ function OfferDesk({
   const counterWhy = settled ? '这一单已经了结' : intent ? '意向单已谈成，等开窗后确认挂牌' : '还没轮到你，等对方表态';
   const acceptWhy = settled ? '这一单已经了结' : '还没轮到你，等对方表态';
 
+  // 动用额行（v6.57.0 设计 §2.3 弹层补齐）：买方还价 / 买方接受才产生资金动作（卖方还价不出钱、
+  // 接受是收钱，拒绝/撤回是退款）。快照缺失（端点未回）creditUse 回 0，整行不渲染。
+  const { data: balSnap } = useClubBalance(buyer);
+  // 本人现行冻结 = 自己最后一次出价（事件流可查，与 topUpBuyerHold 读到的 holdRow.amount 同值；
+  // 事件没到就不渲染接受行，不冒充「无旧冻结」——漏回加会把动用额算大一整个旧冻结）
+  const myLastBid =
+    buyer && offer
+      ? ([...events]
+          .reverse()
+          .find((e) => (e.kind === 'open' || e.kind === 'counter') && e.actor?.id === offer.buyerClub.id && e.amount !== null)
+          ?.amount ?? null)
+      : null;
+  // 还价：服务端预检口径 = 新价 ≤ 可支配 + 旧价冻结（myHeld = offer.amount），动用额同式回加
+  const counterUse = buyer && canCounter && counterOk && balSnap ? creditUse(counterValue, balSnap, offer.amount) : 0;
+  // 接受（买方补足冻结）：spend = 当前价、旧冻结回加本人最后一次出价
+  const acceptUse =
+    buyer && pending && myTurn && myLastBid !== null && balSnap ? creditUse(offer.amount, balSnap, myLastBid) : 0;
+
   // 名单规则行：只在球员还在转会名单里时出现（不在名单就不留空行）；卖方多打一枪设置端点读底价
   const listed = offer ? (seller ? (settings?.transferListed ?? offer.player.listPrice !== null) : offer.player.listPrice !== null) : false;
 
@@ -705,6 +726,14 @@ function OfferDesk({
                     <input value={noteDraft} maxLength={100} placeholder="给对方的一句话" onChange={(e) => onNoteDraft(e.target.value)} />
                   </label>
                 </div>
+              )}
+
+              {/* 动用预期收入行（设计 §2.3）：现金不够的部分由额度垫，>0 才渲染 */}
+              {counterUse > 0 && (
+                <p className="nego-reason credit-use-note">本次动用预期收入 {money(counterUse)} m（旧价冻结会被顶替释放）。</p>
+              )}
+              {acceptUse > 0 && (
+                <p className="nego-reason credit-use-note">本次动用预期收入 {money(acceptUse)} m（接受时先补足冻结到 {moneyIntText(offer.amount)}）。</p>
               )}
 
               {pending && !myTurn && <p className="nego-reason">还没轮到你，等对方表态。</p>}
