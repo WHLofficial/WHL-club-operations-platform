@@ -9,7 +9,7 @@ import { createTestD1, applyMigrations, createAuthDb, authRegisterClubTeam } fro
 import { resetConfigCache } from '../src/core/config.ts';
 import { POSITION_ADJACENCY, ROLE_POSITION_BY_ID, ROLE_BASE_NAMES, SHOP_PS_NAMES } from '../src/core/shop.ts';
 import { confirmImport } from '../src/worker/players-import.ts';
-import { prepareShopPlan } from '../src/worker/shop-ops.ts';
+import { createClubOrder, prepareShopPlan } from '../src/worker/shop-ops.ts';
 import roleRef from '../web/assets/ref/role.json';
 import playstyleRef from '../web/assets/ref/playstyle.json';
 import positionRef from '../web/assets/ref/position.json';
@@ -693,5 +693,114 @@ describe('TC-D 开窗闸', () => {
     );
     expect(admin.status).toBe(201);
     expect(balanceOf(fx, 101)).toBe(35);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TC-O：消费券 + 现金拆分扣费与拒绝双退（v6.58.0）
+
+describe('TC-O 工单券+现金拆分与双退', () => {
+  function setVouchers(fx: Fixture, clubId: number, n: number) {
+    fx.sqlite.prepare('UPDATE ledger_accounts SET vouchers = ? WHERE club_id = ?').run(n, clubId);
+  }
+  function vouchersOf(fx: Fixture, clubId: number): number {
+    return (fx.sqlite.prepare('SELECT vouchers FROM ledger_accounts WHERE club_id = ?').get(clubId) as { vouchers: number }).vouchers;
+  }
+  const voucherEntries = (fx: Fixture) =>
+    fx.sqlite.prepare('SELECT kind, amount, balance_after FROM voucher_entries ORDER BY id').all() as {
+      kind: string;
+      amount: number;
+      balance_after: number;
+    }[];
+
+  it('TC-O-001 三种形状：券足额 15 / 券部分 5+10 / 无券 0+15', async () => {
+    for (const shape of [
+      { vouchers: 20, order: 15, used: 15, cash: 0 },
+      { vouchers: 5, order: 15, used: 5, cash: 10 },
+      { vouchers: 0, order: 15, used: 0, cash: 15 },
+    ]) {
+      const fx = freshEnv();
+      seedClub(fx, 101, 50);
+      seedPlayer(fx, 1, { clubId: 101, pa: 88 });
+      setVouchers(fx, 101, shape.vouchers);
+      const res = await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 1 } });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { order: { amount: number; voucherUsed: number; cashPaid: number; id: number } };
+      expect(body.order).toMatchObject({ amount: shape.order, voucherUsed: shape.used, cashPaid: shape.cash });
+      expect(vouchersOf(fx, 101)).toBe(shape.vouchers - shape.used);
+      expect(balanceOf(fx, 101)).toBe(50 - shape.cash);
+      // 现金流水只记实付（0 不落流水）；券流水记 shop_use
+      const cash = fx.sqlite.prepare("SELECT amount FROM ledger_entries WHERE kind = 'shop_purchase' AND ref_type = 'shop_order'").all() as { amount: number }[];
+      if (shape.cash > 0) expect(cash).toEqual([{ amount: -shape.cash }]);
+      else expect(cash).toHaveLength(0);
+      const v = voucherEntries(fx).filter((e) => e.kind === 'shop_use');
+      if (shape.used > 0) expect(v).toEqual([{ kind: 'shop_use', amount: -shape.used, balance_after: shape.vouchers - shape.used }]);
+      else expect(v).toHaveLength(0);
+    }
+  });
+
+  it('TC-O-002 拒绝双退：现金 amount−voucher_used、券 voucher_used 各自回原；通知带明细', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101, pa: 88 });
+    setVouchers(fx, 101, 5);
+    const orderId = ((await (await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 1 } })).json()) as { order: { id: number } }).order.id;
+    expect(vouchersOf(fx, 101)).toBe(0);
+    expect(balanceOf(fx, 101)).toBe(40);
+    expect((await reject(fx, orderId, '不买了')).status).toBe(200);
+    expect(vouchersOf(fx, 101)).toBe(5);
+    expect(balanceOf(fx, 101)).toBe(50);
+    expect(voucherEntries(fx).filter((e) => e.kind === 'shop_refund')).toEqual([
+      { kind: 'shop_refund', amount: 5, balance_after: 5 },
+    ]);
+    const cashRefund = fx.sqlite
+      .prepare("SELECT amount FROM ledger_entries WHERE kind = 'shop_purchase' AND ref_type = 'shop_refund'")
+      .all() as { amount: number }[];
+    expect(cashRefund).toEqual([{ amount: 10 }]);
+    const note = fx.sqlite.prepare("SELECT payload FROM notifications WHERE template = 'shop_order_rejected' ORDER BY id DESC LIMIT 1").get() as
+      | { payload: string }
+      | undefined;
+    expect(note?.payload).toContain('现金 10 m + 消费券 5 m');
+    // 重复拒绝 409，券/现金不再变
+    expect((await reject(fx, orderId, '再拒一次')).status).toBe(409);
+    expect(vouchersOf(fx, 101)).toBe(5);
+    expect(balanceOf(fx, 101)).toBe(50);
+  });
+
+  it('TC-O-003 守卫交错：券够但现金不够 / 现金够但券被并发扣空——都删单且两笔都不扣', async () => {
+    // ① 券够、现金不够：券守卫同时押现金余额 → 券也不扣
+    const a = freshEnv();
+    seedClub(a, 101, 5);
+    seedPlayer(a, 1, { clubId: 101, pa: 88 });
+    setVouchers(a, 101, 5);
+    const resA = await coachPost(a, { category: 'pa', payload: { playerId: 1, points: 1 } });
+    expect(resA.status).toBe(400);
+    expect(vouchersOf(a, 101)).toBe(5);
+    expect(balanceOf(a, 101)).toBe(5);
+    expect(a.sqlite.prepare('SELECT COUNT(*) AS n FROM shop_orders').get()).toEqual({ n: 0 });
+    expect(voucherEntries(a)).toHaveLength(0);
+
+    // ② 现金够、券在读后被并发扣空：批内券守卫失败，现金 changes()>0 链也失败
+    const b = freshEnv();
+    seedClub(b, 101, 50);
+    seedPlayer(b, 1, { clubId: 101, pa: 88 });
+    setVouchers(b, 101, 20);
+    const env: Env = {
+      ...b.env,
+      DB: {
+        prepare: (sql: string) => b.env.DB.prepare(sql),
+        batch: async (stmts: D1PreparedStatement[]) => {
+          b.sqlite.exec('UPDATE ledger_accounts SET vouchers = 0 WHERE club_id = 101');
+          return b.env.DB.batch(stmts);
+        },
+      } as unknown as D1Database,
+    };
+    await expect(
+      createClubOrder(env, { userId: 1, clubId: 101, category: 'pa', payload: { playerId: 1, points: 1 } }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(vouchersOf(b, 101)).toBe(0);
+    expect(balanceOf(b, 101)).toBe(50);
+    expect(b.sqlite.prepare('SELECT COUNT(*) AS n FROM shop_orders').get()).toEqual({ n: 0 });
+    expect(voucherEntries(b)).toHaveLength(0);
   });
 });

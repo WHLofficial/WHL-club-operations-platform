@@ -44,11 +44,16 @@ import {
   type PlaystyleKind,
 } from '../core/fc26.ts';
 import { ledgerMovement } from './ledger.ts';
+import { voucherBalance, voucherMovement } from './voucher.ts';
 import { queueClubNotification } from './notify.ts';
 import type { Env } from './env.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+}
+
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
 // 审批效果守卫：只在本批状态流转成功（此前仍 pending）时生效
@@ -520,7 +525,8 @@ export async function prepareShopPlan(
 // ---------------------------------------------------------------------------
 // 工单编排：建单（教练 / 管理组代录）、审批、拒绝
 
-const ORDER_COLS = 'id, source, club_id, ordered_by, category, payload_json, amount, status, note, reviewed_by, reviewed_at, reject_reason, created_at';
+const ORDER_COLS =
+  'id, source, club_id, ordered_by, category, payload_json, amount, voucher_used, status, note, reviewed_by, reviewed_at, reject_reason, created_at';
 
 export interface ShopOrderRow {
   id: number;
@@ -530,6 +536,8 @@ export interface ShopOrderRow {
   category: ShopCategory;
   payload_json: string;
   amount: number | null;
+  /** 券抵额（v6.58.0）：实付现金 = amount − voucher_used；老单默认 0 */
+  voucher_used: number;
   status: 'pending' | 'approved' | 'rejected';
   note: string | null;
   reviewed_by: number | null;
@@ -555,6 +563,8 @@ export function orderDto(row: ShopOrderRow, playerName?: string | null) {
     payload,
     summary: payload ? shopOrderSummary(row.category, payload, playerName) : '（参数无法解析）',
     amount: row.amount,
+    voucherUsed: row.voucher_used,
+    cashPaid: row.amount == null ? null : Math.round((row.amount - row.voucher_used) * 100) / 100,
     status: row.status,
     note: row.note,
     reviewedBy: row.reviewed_by,
@@ -592,41 +602,61 @@ export async function createClubOrder(
   if (amount === null) throw new HttpError(400, '工单参数不完整，无法计价');
   const summary = shopOrderSummary(opts.category, payload, plan.playerName);
 
+  // 先券后钱强制全额抵（与建设域同口径）：券够多少抵多少，剩余走现金
+  const vouchers = await voucherBalance(db, opts.clubId);
+  const voucherUsed = round2(Math.min(vouchers, amount));
+  const cash = round2(amount - voucherUsed);
   const order = await db
     .prepare(
-      `INSERT INTO shop_orders (source, club_id, ordered_by, category, payload_json, amount, status, note, created_at)
-       VALUES ('club', ?, ?, ?, ?, ?, 'pending', ?, ${nowSql()}) RETURNING ${ORDER_COLS}`,
+      `INSERT INTO shop_orders (source, club_id, ordered_by, category, payload_json, amount, voucher_used, status, note, created_at)
+       VALUES ('club', ?, ?, ?, ?, ?, ?, 'pending', ?, ${nowSql()}) RETURNING ${ORDER_COLS}`,
     )
-    .bind(opts.clubId, opts.userId, opts.category, JSON.stringify(payload), amount, opts.note ?? null)
+    .bind(opts.clubId, opts.userId, opts.category, JSON.stringify(payload), amount, voucherUsed, opts.note ?? null)
     .first<ShopOrderRow>();
   if (!order) throw new HttpError(500, '工单创建失败');
 
-  // 扣费与审计同批：余额守卫没过 → 删单 + 400
+  // 扣费与审计同批：券/现金两个守卫任一没过 → 整批空转 + 删单 400。
+  // 券语句排批首，且它的守卫同时要求「现金也够」；现金语句用 changes()>0 串在券后面，
+  // 这样不存在「券扣了现金不够」或反过来的中间态（测试计划 TC-O-003 的最坏交错）。
   const audit = createAuditStatement(db);
-  const charge = ledgerMovement(db, {
+  const parts: D1PreparedStatement[] = [];
+  const voucherIndex = voucherUsed > 0 ? parts.push(...voucherMovement(db, {
     clubId: opts.clubId,
-    delta: -amount,
+    delta: -voucherUsed,
+    kind: 'shop_use',
+    refType: 'shop_order',
+    refId: order.id,
+    memo: `消费工单 #${order.id} 消费券抵扣：${summary}`,
+    guardSql:
+      '(SELECT COALESCE(vouchers, 0) FROM ledger_accounts WHERE club_id = ?) >= ? AND (SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) >= ?',
+    guardParams: [opts.clubId, voucherUsed, opts.clubId, cash],
+  })) - 2 : -1;
+  const cashIndex = cash > 0 ? parts.push(...ledgerMovement(db, {
+    clubId: opts.clubId,
+    delta: -cash,
     kind: 'shop_purchase',
     refType: 'shop_order',
     refId: order.id,
     memo: `消费工单 #${order.id}：${summary}`,
-    guardSql: '(SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) >= ?',
-    guardParams: [opts.clubId, amount],
-  });
+    guardSql: `${voucherUsed > 0 ? 'changes() > 0 AND ' : ''}(SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) >= ?`,
+    guardParams: [opts.clubId, cash],
+  })) - 2 : -1;
   const results = await db.batch([
-    ...charge,
+    ...parts,
     audit({
       actor: opts.userId,
       action: 'shop_order_create',
       targetType: 'shop_order',
       targetId: order.id,
       origin: 'user',
-      after: { category: opts.category, amount, summary },
+      after: { category: opts.category, amount, voucherUsed, cash, summary },
+      ...(voucherIndex >= 0 ? { guardSql: 'changes() > 0' } : {}),
     }),
   ]);
-  if ((results[0]?.meta?.changes ?? 0) === 0) {
+  const charged = (idx: number) => idx < 0 || (results[idx]?.meta?.changes ?? 0) > 0;
+  if (!charged(voucherIndex) || !charged(cashIndex)) {
     await db.prepare('DELETE FROM shop_orders WHERE id = ?').bind(order.id).run();
-    throw new HttpError(400, '余额不足，工单未提交');
+    throw new HttpError(400, '余额或消费券不足，工单未提交');
   }
   return { order, summary };
 }
@@ -747,19 +777,39 @@ export async function rejectShopOrder(
   const summary = payload ? shopOrderSummary(order.category, payload) : '（参数无法解析）';
   const audit = createAuditStatement(db);
   const statements: D1PreparedStatement[] = [];
+  const voucherUsed = order.voucher_used ?? 0;
+  const cashRefund = round2((order.amount ?? 0) - voucherUsed);
   if (order.source === 'club' && order.amount != null && order.amount > 0) {
-    statements.push(
-      ...ledgerMovement(db, {
-        clubId: order.club_id,
-        delta: order.amount,
-        kind: 'shop_purchase',
-        refType: 'shop_refund',
-        refId: order.id,
-        memo: `消费工单 #${order.id} 拒绝退款：${summary}`,
-        guardSql: pendingGuard(),
-        guardParams: [order.id],
-      }),
-    );
+    // 双退（v6.58.0）：现金退 amount − voucher_used，券退 voucher_used；两段同挂 pending 守卫，
+    // 老单 voucher_used=0 时券段不生成，行为与切换前逐值一致。
+    if (voucherUsed > 0) {
+      statements.push(
+        ...voucherMovement(db, {
+          clubId: order.club_id,
+          delta: voucherUsed,
+          kind: 'shop_refund',
+          refType: 'shop_order',
+          refId: order.id,
+          memo: `消费工单 #${order.id} 拒绝退回消费券：${summary}`,
+          guardSql: pendingGuard(),
+          guardParams: [order.id],
+        }),
+      );
+    }
+    if (cashRefund > 0) {
+      statements.push(
+        ...ledgerMovement(db, {
+          clubId: order.club_id,
+          delta: cashRefund,
+          kind: 'shop_purchase',
+          refType: 'shop_refund',
+          refId: order.id,
+          memo: `消费工单 #${order.id} 拒绝退款：${summary}`,
+          guardSql: pendingGuard(),
+          guardParams: [order.id],
+        }),
+      );
+    }
   }
   statements.push(
     audit({
@@ -790,6 +840,8 @@ export async function rejectShopOrder(
     summary,
     reason,
     refund: order.source === 'club' && order.amount != null && order.amount > 0,
+    cashRefund,
+    voucherRefund: voucherUsed,
     orderId: order.id,
   });
   return { order: { ...order, status: 'rejected', reviewed_by: opts.reviewerId, reject_reason: reason }, summary };

@@ -137,8 +137,20 @@ export function renderNotification(template: string, data: Record<string, unknow
     // 消费中心（v6.26.0）：工单生效回执 / 拒绝退款
     case 'shop_order_approved':
       return `🛒 消费工单已生效：${data.summary}${data.note ? `（备注：${data.note}）` : ''}${data.external ? '（外部录入）' : ''}。`;
-    case 'shop_order_rejected':
-      return `🛒 消费工单被拒绝：${data.summary}。理由：${data.reason}${data.refund ? '（费用已退回余额）' : ''}。`;
+    case 'shop_order_rejected': {
+      // v6.58.0：券+现金双退，明细随 data 带上（老单只有现金退）
+      const cash = typeof data.cashRefund === 'number' ? data.cashRefund : null;
+      const voucher = typeof data.voucherRefund === 'number' ? data.voucherRefund : 0;
+      const refundText =
+        data.refund && voucher > 0
+          ? `（已退回现金 ${cash ?? 0} m + 消费券 ${voucher} m）`
+          : data.refund && cash !== null
+            ? `（已退回 ${cash} m 到余额）`
+            : data.refund
+              ? '（费用已退回余额）'
+              : '';
+      return `🛒 消费工单被拒绝：${data.summary}。理由：${data.reason}${refundText}。`;
+    }
     // 签约谈判超时（v6.49.0 到期引擎）：静默超时自动作废 / 距超时不足 24h 提醒
     case 'negotiation_timeout':
       return `⌛ 签约谈判超时：${data.player} 的签约谈判已自动作废（${data.reason}），冻结已退回、球员回到原俱乐部，可重新挂牌。`;
