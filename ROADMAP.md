@@ -81,6 +81,16 @@
 
 ---
 
+## v6.57.2 · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）
+
+**状态**：**本地实现完成，未 push / 未 deploy**。判级 patch，两项用户裁决：① 窄屏（≤1050）**只把 SideOps 操作区**提到主列之前（位置分布 / 身份徽章 / PlayStyles 三卡留底部），宽屏布局不动；② FIT 卡底部图例说明文字整段删除。
+
+**交付**：`web/src/pages/Player.tsx` 右翼拆两个 aside——`player-wing-ops`（只装 SideOps）与 `player-wing-rest`（三卡），DOM 保持 main→ops→rest（宽屏阅读序与 tab 序不变）；`web/src/styles.css` 的 `.player-wings` 改 `grid-template-areas`：宽屏 `'main ops'/'main rest'`（`gap: 14px 18px`，行距 14 延续原翼内 flex 间距）、≤1050 块改 `'ops'/'main'/'rest'` + `gap: 18px`（延续原窄屏间距），1050 单列规则保留（`tests/mobile-baseline.test.ts` 的断点锁仍绿）；fit-legend JSX 与死样式一并删除；`Player.test.tsx` TC-C-FIT-01 改锁 `.fit-legend` 不渲染。**SideOps.tsx 函数体零改动**（v6.56.0 约束保持）。
+
+**验收**：typecheck 三份全清；vitest **164 文件 / 2696 例全绿**；e2e **29/29**（smoke 1280 的 `wingFirst`=side-ops 与 `wingRight` 几何断言自然通过）；320 / 760 / 1440 截图目验——截图样本按用户要求换**有位置热区**的球员（posChips 取 `PosID1-4` 键；上次 e2e 抽到无热区球员致位置分布卡整卡不渲染），本轮样本阿七 `fc_id=999999`（`game_attrs` 含 `PosID1:25/PosID2:23`，热区 ST/RW 高亮在场）；320 四页零横向溢出。测试计划 `docs/test-plans/v6.57.2-narrow-ops-first.md`。留痕：定向合并跑曾现 2 例偶发时序红，单跑/复跑全绿、与本改动无关。
+
+---
+
 ## v6.57.1 · 收口审：三组终验 + 变异验证捡出的修复 + 性能口径补测（2026-10-29）
 
 **状态**：**本地实现完成，未 push / 未 deploy；迁移 0081 仍未 apply 生产（另行授权，先 apply 再 push）**。判级 patch（对 v6.55.0 / v6.56.0 / v6.57.0 三个本地提交的收口审，由 dynamic-workflows 工作流执行：三组终验与 code-review 四评审并行 → 三计划变异串行 → 分诊 → 修复与门禁循环 → e2e/视口二轮 → 收口提交；全程工人模型 GLM-5.3-Flash，GLM-5.3 周额度中断后按用户预案降级）。

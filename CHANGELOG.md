@@ -4,6 +4,15 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.57.2] · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）
+
+**本地实现完成，未 push / 未 deploy**。判级 patch，两项用户裁决，测试计划 `docs/test-plans/v6.57.2-narrow-ops-first.md`。
+
+**Changed**
+
+- 球员页窄屏（≤1050）堆叠序改为：顶卡 → **操作区**（报价/挂牌/海捞/续约）→ 主列页签 → 位置分布/身份徽章/PlayStyles；宽屏（>1050）布局不动（grid-template-areas 双口径，DOM 阅读序不变）。
+- FIT 适配度卡底部的图例说明文字（「数字 = 联盟绝对适配…」）整段删除，对应死样式一并清理。
+
 ## [v6.57.1] · 收口审：三组终验与变异验证捡出的修复 + 性能口径补测（2026-10-29）
 
 **本地实现完成，未 push / 未 deploy；迁移 0081 未 apply 生产（apply 另行授权）**。判级 patch。终验/变异/修复由 dynamic-workflows 收口工作流执行（全 Flash），全量证据与不修项清单见 [ROADMAP.md](./ROADMAP.md) v6.57.1 节。
