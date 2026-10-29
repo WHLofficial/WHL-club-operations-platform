@@ -6,7 +6,7 @@
 
 ## [v6.58.0] · 候选名单（FM shortlist）+ 消费券俱乐部级券账（2026-10-29）
 
-**未上线**：本地分支 `feat/v6.58.0-shortlist-voucher`（17 个提交，含 code-review 修复），迁移 `0082`/`0083` 已应用到本地 dev 库，**生产未 apply、未 push、未部署**（push main 触发 CF 自动部署，需用户明确下令）。上线顺序：**先 apply `0082` → push/部署 → 确认线上版本 → 再 apply `0083`**；`0083` 会搬运旧列存量与部署窗口内旧 worker 新写入的 `build_credit`，反过来先清旧列会让这段返还/事件发券丢失。跨仓通知模板白名单（`shortlist_*` 三模板，与 `demand_*` 同款待确认）计入上线清单。判级 minor（新增用户可见能力；建设券语义升格、旧列清零，无跨仓契约破坏）。设计/测试计划见 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。
+**已上线（2026-10-29）**：push `b712c32..e16c74f`（17 个提交，含 code-review 修复），CF Workers Builds 部署 Version `81ee3c18-cc28-455e-a8b0-ceb1d73b4595` @2026-10-29T05:22:31Z。迁移 `0082` 于 push 前 apply、`0083` 在确认线上版本后 apply（顺序见下方 Fixed 🔴）；上线对账生产 20 俱乐部 / 18 账户 / 18 球场，旧列 `build_credit` 全 0 ⇒ `migrate` 流水 0 条、券余额 0、`vouchers` vs `SUM(voucher_entries)` 零差异；冒烟 `/api/health` 200、公开页 200、`?shortlist=1` 与券端点匿名 401、前端资产 `index-F1ljf5ws.js`。跨仓通知模板白名单（`shortlist_*` 三模板，与 `demand_*` 同款）仍待办。判级 minor（新增用户可见能力；建设券语义升格、旧列清零，无跨仓契约破坏）。设计/测试计划见 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。
 
 **Added**
 
