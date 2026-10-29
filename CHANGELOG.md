@@ -6,7 +6,7 @@
 
 ## [v6.59.0] · 消费中心「球场与冠名」页签 + 子设施档位上限 + 队壳首窗（2026-10-29）
 
-**未上线（本地待发）**：分支 `feat/v6.59.0-venue-tab`，无迁移、无 schema 变更；push 后由 CF Workers Builds 自动部署。判级 minor（消费中心页结构、施工规则与队壳窗口均有用户可见变化，端点仅新增响应字段，向后兼容）。测试计划见 `docs/test-plans/v6.59.0-venue-tab-shell-window.md`。
+**已上线（2026-10-29）**：push `1db7dee..f584130`（分支 `feat/v6.59.0-venue-tab`），CF Workers Builds 自动部署 Version `bab2d987-cc20-420b-ad55-20e62cc8bfb5` @2026-10-29T08:16:13Z；无迁移、无 schema 变更。生产冒烟 `/api/health`、`/`、`/shop`、`/players`、`/market`、`/ledger` 全 200，`build-info` 与队壳下单匿名 401，线上 `ShopPage-DgSGhRTF.js` 与本地构建逐字节一致（含「球场与冠名 / 已达上限 / 建议达到 / 赛季第 1 个窗口」文案）。判级 minor（消费中心页结构、施工规则与队壳窗口均有用户可见变化，端点仅新增响应字段，向后兼容）。测试计划见 `docs/test-plans/v6.59.0-venue-tab-shell-window.md`。
 
 **Added**
 
