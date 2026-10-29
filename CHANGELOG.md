@@ -20,6 +20,7 @@
 - TC-A/TC-B 计划缺口补强：occupy 非卖品守卫源码文本锁、多笔意向清单断言、dup 409 幽灵冻结残留断言、额度子查询 EXPLAIN 结构锁、TC-B-038 作废/静默超时三向合取等（vitest 164 文件 / 2696 例全绿）。
 - fit 对拍改快照制常开锁（原写死路径恒 skip）+ role.json 反推跨检 + smoke 探针判据与 fit 渲染同源。
 - `scripts/d1-read-audit/probe-expected-income.mjs` 生产只读探针（SQL 直接 import ledger.ts 真函数，零漂移）与实测登记（`README.md` 第十二节）：balance 8/12/2 行读、credit（触发器写放大单位）7/6/1、breakdown 8/7/2，三来源基表全 SEARCH 走索引。
+- 额度线**并发压测口径**（`scripts/load/credit-line-load.mjs` + 测试计划 `docs/test-plans/v6.57.1-concurrency-load.md`，本地真栈）：800 并发读快照恒等式零违例；24 并发挤兑恰 `floor(可支配/100)`=15 单接受、9 单资金拒、零 5xx；压后库内/快照对账吻合；直库超冻被 0081 触发器拦截。
 
 ## [v6.57.0] · 预期收入额度线：窗口内预支未到账的卖人收入（2026-10-28）
 
