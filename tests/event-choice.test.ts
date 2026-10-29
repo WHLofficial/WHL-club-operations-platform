@@ -210,7 +210,6 @@ function ctxOf(patch: Partial<EventClubContext> = {}): EventClubContext {
       shell_influence: 0,
       bonus_points: 0,
       fans: 1800,
-      build_credit: 0,
       next_attendance_mod: 1,
       next_weather: '',
       venue_reputation: 0,

@@ -14,7 +14,6 @@ import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
 import { getOpenWindow } from '../seasons.ts';
 import { getAuthUser, requireUser } from '../../lib/session.ts';
 import { getBoundClub } from '../binding.ts';
-import { getBoundClub } from '../binding.ts';
 import { loadPlayerContractState } from '../demand-ops.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { loadClubTourTeams, loadTeamLogos } from '../club-logos.ts';
