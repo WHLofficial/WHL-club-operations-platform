@@ -607,13 +607,13 @@ function expectedFitRows(attrs: Record<string, unknown>, playstyles?: number[]):
 }
 
 describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
-  it('TC-C-FIT-01 · 有 attrs：前 4 条按 rankShown 降序，位置码/角色名/主数字与引擎对拍，图例在场', async () => {
+  it('TC-C-FIT-01 · 有 attrs：前 4 条按 rankShown 降序，位置码/角色名/主数字与引擎对拍；图例文字已按 v6.57.2 裁决删除', async () => {
     open();
     await radarRow();
     const card = document.querySelector('.fit-card') as HTMLElement | null;
     expect(card).not.toBeNull();
     expect(card!.querySelector('.fit-card-head')?.textContent).toContain('FIT 适配度');
-    expect(card!.querySelector('.fit-legend')?.textContent).toContain('绿 ≥85');
+    expect(card!.querySelector('.fit-legend')).toBeNull();
 
     const rows = Array.from(card!.querySelectorAll('.fit-row'));
     // 页面 playstyles = playstyleBadges(attrs) 合并后的存库 psid：PSID1=1（银）、PSID13=101（金）

@@ -1448,15 +1448,22 @@ table.matches-table-narrow .rating-badge {
 }
 
 /* 双翼（v6.56.0）：主列 minmax(0,1fr) + 右翼 300px */
+/* 双翼（v6.56.0 顶卡 + 双翼；v6.57.2 拆三子块）：宽屏 main 跨两行居左、操作区/三卡居右列；
+   窄屏（≤1050）areas 改 'ops' 'main' 'rest'——操作区提到主列之前，三卡留底部（用户裁决） */
 .player-wings {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 18px;
+  grid-template-areas:
+    'main ops'
+    'main rest';
+  /* 行距 14 = 原翼内 flex gap（SideOps ↔ 三卡）；列距 18 = 原主列↔翼 */
+  gap: 14px 18px;
   align-items: start;
 }
 
 /* 主列 = 页签条 + 页签内容（沿用原 .dossier-file 的卡面口径） */
 .player-main {
+  grid-area: main;
   min-width: 0;
   background: var(--card);
   border: 1px solid var(--border);
@@ -1468,12 +1475,19 @@ table.matches-table-narrow .rating-badge {
   margin-top: 0;
 }
 
-/* 右翼：操作区（.side-ops 自带卡面）→ 位置分布 → 身份徽章 → PlayStyles */
+/* 右翼：操作区（.side-ops 自带卡面）→ 位置分布 → 身份徽章 → PlayStyles。
+   v6.57.2 拆成两个 aside：ops（只装操作区）与 rest（三卡），areas 见 .player-wings */
 .player-wing {
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+}
+.player-wing-ops {
+  grid-area: ops;
+}
+.player-wing-rest {
+  grid-area: rest;
 }
 
 /* 右翼独立卡（位置分布 / 身份徽章 / PlayStyles） */
@@ -3490,13 +3504,6 @@ th.num .th-sort {
   background: var(--border);
 }
 
-.fit-legend {
-  margin: 0;
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
 /* 位置热区图在右翼「位置分布」卡里（v6.56.0：从属性页签头部搬来，264 宽；320 见文末断点块） */
 .heat-svg.heat-wing {
   width: 264px;
@@ -3508,6 +3515,12 @@ th.num .th-sort {
 @media (max-width: 1050px) {
   .player-wings {
     grid-template-columns: 1fr;
+    /* v6.57.2：窄屏堆叠序 = 操作区 → 主列 → 三卡（DOM 仍 main→ops→rest，宽屏阅读序不变） */
+    grid-template-areas:
+      'ops'
+      'main'
+      'rest';
+    gap: 18px;
   }
 }
 @media (max-width: 760px) {

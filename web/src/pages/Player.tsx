@@ -694,9 +694,10 @@ export default function Player() {
           {tab === 'matches' && <MatchesTab query={matchesQuery} isGk={player.position === 'GK'} narrow={narrow} />}
         </section>
 
-        <aside className="player-wing">
-          {/* 左栏五态操作区（v6.2.0 骨架 → v6.3.0 接真实端点）整体搬入右翼置顶（v6.56.0）：
-              实现独立成 web/src/pages/player/SideOps.tsx，数据与回调原样下传，函数体一律不动。 */}
+        <aside className="player-wing player-wing-ops">
+          {/* 操作区独立成翼（v6.57.2）：宽屏仍居右列顶部；窄屏由 .player-wings 的 grid-template-areas
+              提到主列之前（用户裁决：只前置操作区，位置分布/身份徽章/PlayStyles 留在底部）。
+              实现独立成 web/src/pages/player/SideOps.tsx（v6.56.0），数据与回调原样下传，函数体一律不动。 */}
           <SideOps
             player={{
               id: player.id,
@@ -730,6 +731,8 @@ export default function Player() {
             show={show}
             refreshAll={refreshAll}
           />
+        </aside>
+        <aside className="player-wing player-wing-rest">
           {posChips.length > 0 && (
             <section className="wing-card">
               <p className="wing-card-head">位置分布</p>
@@ -883,9 +886,6 @@ function AttrSheet({
                 </span>
               </div>
             ))}
-            <p className="fit-legend">
-              数字 = 联盟绝对适配（0–99，属性 + 徽章 + 位置/角色加分）· 色点 = 个人内契合百分位（绿 ≥85 / 黄 ≥50 / 灰 ＜50）
-            </p>
           </div>
         )}
       </div>
