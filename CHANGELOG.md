@@ -6,7 +6,7 @@
 
 ## [v6.60.0] · 激活通知截图弹窗（2026-10-29）
 
-**已上线（2026-10-29）**：push `186f087..373bd7a`（分支 `feat/v6.60.0-activation-proof-dialog`），CF Workers Builds 自动部署 Version `44b7e14d-696e-438b-ba80-b91dae4780b6` @2026-10-29T13:53:55Z；无迁移、无 schema 变更，也无后端/契约变更，沿用 `POST /api/media/activation`（5MB，png/jpeg/webp）→ `POST /api/market/activations`（`playerId` + `proofMediaKey`）。生产 `/`、`/players`、`/market`、`/shop`、`/ledger` 与 `/api/health` 全 200（d1/tour_db/kv 全 ok），`POST /api/market/activations` 匿名 401；线上资产 `index-Ck8kRwo1.js` 与本地最终构建逐字节一致（714,139 B，含「上传激活通知截图」「激活挂牌已提交」「6.60.0」文案）。判级 minor（激活流程新增强制截图引导，用户可见）。设计与测试计划见 `docs/superpowers/specs/2026-10-29-activation-proof-dialog-design.md`、`docs/test-plans/v6.60.0-activation-proof-dialog.md`。
+**已上线（2026-10-29）**：push `186f087..373bd7a`（分支 `feat/v6.60.0-activation-proof-dialog`），CF Workers Builds 自动部署 Version `44b7e14d-696e-438b-ba80-b91dae4780b6` @2026-10-29T13:53:55Z；无迁移、无 schema 变更，也无后端/契约变更，沿用 `POST /api/media/activation`（5MB，png/jpeg/webp）→ `POST /api/market/activations`（`playerId` + `proofMediaKey`）。生产 `/`、`/players`、`/market`、`/shop`、`/ledger` 与 `/api/health` 全 200（d1/tour_db/kv 全 ok），`POST /api/market/activations` 匿名 401；线上资产 `index-Ck8kRwo1.js` 与本地最终构建逐字节一致（714,139 B，含「上传激活通知截图」「激活挂牌已提交」「6.60.0」文案）。上线记录文档提交触发同构重部署 Version `832f9492-4733-4f3a-9fae-047f4276b7b5` @2026-10-29T13:57:16Z，前端资产哈希不变。判级 minor（激活流程新增强制截图引导，用户可见）。设计与测试计划见 `docs/superpowers/specs/2026-10-29-activation-proof-dialog-design.md`、`docs/test-plans/v6.60.0-activation-proof-dialog.md`。
 
 **Added**
 
