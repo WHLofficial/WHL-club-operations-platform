@@ -83,7 +83,7 @@
 
 ## v6.60.1 · 球员页角色带恢复（2026-10-29）
 
-**状态**：**未上线**——本地分支 `fix/v6.60.1-player-roles`（基于 v6.60.0 `b4468a5`），未 push、未部署；纯前端展示修复，无后端/迁移/契约变化。判级 patch。起因：用户报告「UI 重排后球员的 roles 被丢弃了」。
+**状态**：**已上线（2026-10-29）**——push `b4468a5..49bafcd`（分支 `fix/v6.60.1-player-roles`），CF Workers Builds 自动部署 Version `14f48584-68d0-48d8-83e3-aa85da1b15d5` @2026-10-29T14:43:33Z；纯前端展示修复，无后端/迁移/契约变化。判级 patch。起因：用户报告「UI 重排后球员的 roles 被丢弃了」。
 
 **交付**
 
@@ -91,9 +91,9 @@
 - 修复：`web/src/pages/Player.tsx` 恢复 `roles` 派生（`RoleID1..5` → `roleChs`，空槽过滤）并在顶卡 hero 增加 `.player-hero-roles` 一行（`角色` 标签 + chips）；`+` / `++` 沿用 `role-plus` / `role-plusplus`；无有效角色整条不渲染。`web/src/styles.css` 增加该行 flex-wrap 样式，320 档随行换行。
 - 语义边界：FIT 卡展示「最合适的位置 / 角色」推荐，顶卡展示球员当前装备角色，两者并存不互相替代。
 
-**验收**：typecheck 三份全清；vitest **169 文件 / 2741 例全绿**（新增 `web/src/pages/Player.test.tsx` 的 TC-PLAYER-ROLE-01/02）；build `web/dist/assets/index-pp6VPxdP.js` **714.55 kB / gzip 225.61 kB**；e2e **29/29**（本地 `npm run dev` 8791 读构建产物）。
+**验收**：typecheck 三份全清；vitest **169 文件 / 2741 例全绿**（新增 `web/src/pages/Player.test.tsx` 的 TC-PLAYER-ROLE-01/02）；build `web/dist/assets/index-pp6VPxdP.js` **714.55 kB / gzip 225.61 kB**；e2e **29/29**（本地 `npm run dev` 8791 读构建产物）。生产 `/api/health` 200（d1/tour_db/kv 全 ok）；线上资产与本地构建逐字节一致（714,552 B）；`/players/17`（重定向 `/players/230621`）实渲染顶卡「角色 GK 门将 ++」（`role-chip role-plusplus`），1280 与 320 两档均无横向溢出。
 
-**遗留**：未 push/部署，等用户明确下令；上线后手机窄屏目测角色带换行。
+**遗留**：无。
 
 ## v6.60.0 · 激活通知截图弹窗（2026-10-29）
 

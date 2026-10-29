@@ -6,7 +6,7 @@
 
 ## [v6.60.1] · 球员页角色带恢复（2026-10-29）
 
-**未上线**：本地分支 `fix/v6.60.1-player-roles`（基于 v6.60.0 `b4468a5`），无 push、无部署；纯前端展示修复，无后端、迁移或契约变化。判级 patch。
+**已上线（2026-10-29）**：push `b4468a5..49bafcd`（分支 `fix/v6.60.1-player-roles`），CF Workers Builds 自动部署 Version `14f48584-68d0-48d8-83e3-aa85da1b15d5` @2026-10-29T14:43:33Z；无后端、迁移或契约变化。生产 `/api/health` 200（d1/tour_db/kv 全 ok），线上资产 `index-pp6VPxdP.js` 与本地构建逐字节一致（714,552 B）；生产球员页 `/players/17`（重定向到 `/players/230621`）实渲染顶卡「角色 GK 门将 ++」（`role-chip role-plusplus`），1280 与 320 两档均无横向溢出。判级 patch。
 
 **Fixed**
 
@@ -16,7 +16,7 @@
 
 **验收**：typecheck 三份全清；vitest **169 文件 / 2741 例全绿**（新增 TC-PLAYER-ROLE-01/02：角色带在顶卡且 `+` 档配色正确、占位 0/null 时整条不渲染）；build `web/dist/assets/index-pp6VPxdP.js` **714.55 kB / gzip 225.61 kB**；e2e **29/29**（本地 wrangler 8791 读构建产物）。
 
-**遗留**：未 push/部署，等用户明确下令。
+**遗留**：无（生产 1280/320 两档已实测角色带渲染且不溢出）。
 
 ## [v6.60.0] · 激活通知截图弹窗（2026-10-29）
 
