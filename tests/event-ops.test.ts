@@ -86,16 +86,16 @@ interface ClubOpts {
 function seedClub(auth: DatabaseSync, sqlite: DatabaseSync, clubId: number, tourTeamId: number, opts: ClubOpts = {}) {
   sqlite.prepare(`INSERT INTO clubs (id, name, league_tier, status) VALUES (?, ?, 'premier', 'active')`).run(clubId, `俱乐部${clubId}`);
   sqlite
-    .prepare(`INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (?, ?, '2026-01-01T00:00:00Z')`)
-    .run(clubId, opts.balance ?? 50);
+    .prepare(`INSERT INTO ledger_accounts (club_id, balance, vouchers, updated_at) VALUES (?, ?, ?, '2026-01-01T00:00:00Z')`)
+    .run(clubId, opts.balance ?? 50, opts.buildCredit ?? 0);
   if (opts.stadium === false) {
     authRegisterClubTeam(auth, tourTeamId, clubId, `队${tourTeamId}`);
     return;
   }
   sqlite
     .prepare(
-      `INSERT INTO stadiums (club_id, name, capacity, tier, shell_influence, bonus_points, fans, build_credit, next_attendance_mod, next_weather, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      `INSERT INTO stadiums (club_id, name, capacity, tier, shell_influence, bonus_points, fans, next_attendance_mod, next_weather, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
     )
     .run(
       clubId,
@@ -104,7 +104,6 @@ function seedClub(auth: DatabaseSync, sqlite: DatabaseSync, clubId: number, tour
       opts.tier ?? 0,
       opts.shell ?? 0,
       opts.fans ?? 1800,
-      opts.buildCredit ?? 0,
       opts.nextMod ?? 1,
       opts.nextWeather ?? '',
     );
@@ -570,7 +569,7 @@ describe('队况上下文 loadEventContexts', () => {
     const ctxs = await loadEventContexts(fx.env, [1, 2], 1, 1);
     const c1 = ctxs.get(1)!;
     expect(c1.name).toBe('俱乐部1');
-    expect(c1.stadium).toMatchObject({ capacity: 20000, tier: 2, fans: 3000, build_credit: 4, next_weather: '雨', name: '酋长球场' });
+    expect(c1.stadium).toMatchObject({ capacity: 20000, tier: 2, fans: 3000, next_weather: '雨', name: '酋长球场' });
     expect(c1.balance).toBe(88);
     expect(c1.facilities.get('youth')).toBe(3);
     expect(c1.brand).toBe('斯科尔汽水');
@@ -687,22 +686,23 @@ describe('11 键效果与钳幅（点名触发逐键验证）', () => {
     expect(sqlGet<{ next_weather: string }>(fx.sqlite, `SELECT next_weather FROM stadiums WHERE club_id = 1`)!.next_weather).toBe('雨');
   });
 
-  it('build_credit / influence：直改列、钳 ±5 / ±10，influence 底 0', async () => {
+  it('build_credit / influence：券账 +2（钳 ±5）、影响力改列钳 ±10 且底 0', async () => {
     const fx = freshEnv();
     seedClub(fx.auth, fx.sqlite, 1, 11, { buildCredit: 2, shell: 5 });
     await fireNamed(fx, 'credit_ev', { build_credit: 3, influence: 7 });
-    expect(sqlGet<{ build_credit: number; shell_influence: number }>(fx.sqlite, `SELECT build_credit, shell_influence FROM stadiums WHERE club_id = 1`)).toEqual({
-      build_credit: 5,
-      shell_influence: 12,
-    });
+    expect(sqlGet<{ shell_influence: number }>(fx.sqlite, `SELECT shell_influence FROM stadiums WHERE club_id = 1`)).toEqual({ shell_influence: 12 });
+    expect(sqlGet<{ vouchers: number }>(fx.sqlite, `SELECT vouchers FROM ledger_accounts WHERE club_id = 1`)!.vouchers).toBe(5);
+    const e1 = sqlGet<{ kind: string; amount: number; balance_after: number }>(
+      fx.sqlite,
+      `SELECT kind, amount, balance_after FROM voucher_entries WHERE club_id = 1`,
+    )!;
+    expect(e1).toMatchObject({ kind: 'event_grant', amount: 3, balance_after: 5 });
 
     const fx2 = freshEnv();
     seedClub(fx2.auth, fx2.sqlite, 1, 11, { buildCredit: 2, shell: 5 });
     await fireNamed(fx2, 'credit_big', { build_credit: 99, influence: -99 });
-    expect(sqlGet<{ build_credit: number; shell_influence: number }>(fx2.sqlite, `SELECT build_credit, shell_influence FROM stadiums WHERE club_id = 1`)).toEqual({
-      build_credit: 7, // 钳到 +5
-      shell_influence: 0, // 钳到 -10 后再抬 0
-    });
+    expect(sqlGet<{ shell_influence: number }>(fx2.sqlite, `SELECT shell_influence FROM stadiums WHERE club_id = 1`)).toEqual({ shell_influence: 0 }); // 钳到 -10 后再抬 0
+    expect(sqlGet<{ vouchers: number }>(fx2.sqlite, `SELECT vouchers FROM ledger_accounts WHERE club_id = 1`)!.vouchers).toBe(7); // 钳到 +5
   });
 
   it('facility：delta 收敛 ±1、钳 0-5、行缺失同批补 0 级行；未知设施键/已到界落空', async () => {
@@ -933,9 +933,11 @@ describe('occurrence 状态闸：整批重放安全', () => {
 
     const before = {
       ledger: sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries`)!.n,
-      stadium: sqlGet<{ fans: number; build_credit: number; next_attendance_mod: number }>(
+      voucherEntries: sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM voucher_entries`)!.n,
+      vouchers: sqlGet<{ vouchers: number }>(fx.sqlite, `SELECT vouchers FROM ledger_accounts WHERE club_id = 1`)!.vouchers,
+      stadium: sqlGet<{ fans: number; next_attendance_mod: number }>(
         fx.sqlite,
-        `SELECT fans, build_credit, next_attendance_mod FROM stadiums WHERE club_id = 1`,
+        `SELECT fans, next_attendance_mod FROM stadiums WHERE club_id = 1`,
       )!,
     };
     expect(before.ledger).toBe(1);
@@ -959,10 +961,12 @@ describe('occurrence 状态闸：整批重放安全', () => {
     await fx.env.DB.batch(run.statements);
 
     expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries`)!.n).toBe(before.ledger);
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM voucher_entries`)!.n).toBe(before.voucherEntries);
+    expect(sqlGet<{ vouchers: number }>(fx.sqlite, `SELECT vouchers FROM ledger_accounts WHERE club_id = 1`)!.vouchers).toBe(before.vouchers);
     expect(
-      sqlGet<{ fans: number; build_credit: number; next_attendance_mod: number }>(
+      sqlGet<{ fans: number; next_attendance_mod: number }>(
         fx.sqlite,
-        `SELECT fans, build_credit, next_attendance_mod FROM stadiums WHERE club_id = 1`,
+        `SELECT fans, next_attendance_mod FROM stadiums WHERE club_id = 1`,
       ),
     ).toEqual(before.stadium);
     expect(sqlGet<{ status: string }>(fx.sqlite, `SELECT status FROM event_occurrences WHERE id = ${occurrenceId}`)!.status).toBe('resolved');

@@ -18,7 +18,7 @@ ALTER TABLE shop_orders ADD COLUMN voucher_used REAL NOT NULL DEFAULT 0;
 CREATE TABLE voucher_entries (
   id INTEGER PRIMARY KEY,
   club_id INTEGER NOT NULL REFERENCES clubs(id),
-  kind TEXT NOT NULL,                -- migrate / build_refund / build_use / shop_use / shop_refund / admin_grant
+  kind TEXT NOT NULL,                -- migrate / build_refund / build_use / shop_use / shop_refund / admin_grant / event_grant
   amount REAL NOT NULL,              -- 正=入账 负=出账（与 ledger_entries 同口径）
   balance_after REAL NOT NULL,       -- 防错账：按 (club, id) 顺序可复算
   ref_type TEXT,

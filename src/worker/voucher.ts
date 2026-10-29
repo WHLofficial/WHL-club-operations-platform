@@ -13,7 +13,8 @@ export type VoucherKind =
   | 'build_use' // 建设支出抵扣
   | 'shop_use' // 消费中心工单抵扣
   | 'shop_refund' // 工单被拒退回
-  | 'admin_grant'; // 管理组发放
+  | 'admin_grant' // 管理组发放
+  | 'event_grant'; // 随机事件效果发券（v6.58.0 起走券账，替代直改 stadiums.build_credit）
 
 export interface VoucherMovementInput {
   clubId: number;

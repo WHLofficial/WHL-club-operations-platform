@@ -22,6 +22,7 @@ import { createConfigService } from '../core/config.ts';
 import { walkoverLoser } from '../core/walkover.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
+import { voucherMovement } from './voucher.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
 import { SLOT_MIN, listBookings, loadActivityCatalog, type ActivityCatalog } from './venue-ops.ts';
 import { seededUnit } from '../core/seeded.ts';
@@ -292,7 +293,6 @@ export interface EventStadium {
   shell_influence: number;
   bonus_points: number;
   fans: number;
-  build_credit: number;
   next_attendance_mod: number;
   next_weather: string;
   /** 场馆声望（v6.53.0 P0）：赠档的 activityUnlockReason 门槛输入，无 stadiums 行按 0 */
@@ -360,7 +360,7 @@ export async function loadEventContexts(
   const [stadiums, clubs, accounts, facilities, naming, bookings, tourTeams] = await Promise.all([
     env.DB
       .prepare(
-        `SELECT club_id, name, capacity, tier, shell_influence, bonus_points, fans, build_credit,
+        `SELECT club_id, name, capacity, tier, shell_influence, bonus_points, fans,
                 next_attendance_mod, next_weather, venue_reputation
          FROM stadiums WHERE club_id IN (${inList})`,
       )
@@ -415,7 +415,6 @@ export async function loadEventContexts(
       shell_influence: 0,
       bonus_points: 0,
       fans: 0,
-      build_credit: 0,
       next_attendance_mod: 1,
       next_weather: '',
       venue_reputation: 0,
@@ -609,7 +608,7 @@ function describeEffectPlain(key: string, value: unknown, signalDefs?: EventSign
     case 'brand_heat':
       return `品牌热度 ${signedNum(numOf(value) ?? 0)}`;
     case 'build_credit':
-      return `建设券 ${signedNum(numOf(value) ?? 0)}`;
+      return `消费券 ${signedNum(numOf(value) ?? 0)}`;
     case 'influence':
       return `队壳影响力 ${signedNum(numOf(value) ?? 0)}`;
     case 'signals': {
@@ -892,18 +891,24 @@ export async function applyEventEffects(
         notes.push(`品牌热度 ${signedNum(v)}（${ctx.brand}）`);
         break;
       }
-      // 建设券：直改余额，无流水（插件同）
+      // 消费券（v6.58.0 升格）：走 voucherMovement 记流水，与「建设返还/管理组发放」同一本账
       case 'build_credit': {
         const v = clampNum(numOf(value) ?? 0, -ec.clamps.buildCredit, ec.clamps.buildCredit);
         if (v === 0) break;
         statements.push(
-          guarded(`UPDATE stadiums SET build_credit = MAX(0, ROUND(build_credit + ?, 3)), updated_at = ${nowSql()} WHERE club_id = ?`, [
-            v,
-            ctx.clubId,
-          ]),
+          ...voucherMovement(db, {
+            clubId: ctx.clubId,
+            delta: v,
+            kind: 'event_grant',
+            refType: 'event',
+            refId: occ.id,
+            memo: `事件「${ctx.name}」发放消费券`,
+            guardSql: PENDING_GUARD,
+            guardParams: [occ.id],
+          }),
         );
         applied.build_credit = v;
-        notes.push(`建设券 ${signedNum(v)}`);
+        notes.push(`消费券 ${signedNum(v)}`);
         break;
       }
       // 队壳影响力：≥0（钳 ±clamps.influence）
