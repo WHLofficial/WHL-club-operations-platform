@@ -1313,3 +1313,24 @@ describe('D3 经营信号收集与关窗消费', () => {
     expect(JSON.parse(notice.payload).text).toContain('粉丝情绪 +2.00');
   });
 });
+
+// 评审修复（v6.58.0 🟡④）：事件负向发券必须按可用券截断，不能把券账扣成负数。
+describe('event build_credit 负向按券余额截断（评审修复）', () => {
+  it('券 2 遇 -3 → 只扣 2 到 0；再遇 -1 → 落空不落负流水；正向照常', async () => {
+    const fx = freshEnv();
+    seedClub(fx.auth, fx.sqlite, 1, 11, { buildCredit: 2 });
+    await fireNamed(fx, 'credit_down', { build_credit: -3 });
+    expect(sqlGet<{ vouchers: number }>(fx.sqlite, 'SELECT vouchers FROM ledger_accounts WHERE club_id = 1')!.vouchers).toBe(0);
+    expect(
+      sqlAll<{ amount: number; balance_after: number }>(fx.sqlite, "SELECT amount, balance_after FROM voucher_entries WHERE club_id = 1 AND kind = 'event_grant'"),
+    ).toEqual([{ amount: -2, balance_after: 0 }]);
+
+    // 券已 0：再发负券 → 无变化、无流水（守住「券不可为负」）
+    await fireNamed(fx, 'credit_down_again', { build_credit: -1 });
+    expect(sqlGet<{ vouchers: number }>(fx.sqlite, 'SELECT vouchers FROM ledger_accounts WHERE club_id = 1')!.vouchers).toBe(0);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM voucher_entries WHERE club_id = 1 AND kind = 'event_grant'").length).toBe(1);
+
+    await fireNamed(fx, 'credit_up', { build_credit: 1.5 });
+    expect(sqlGet<{ vouchers: number }>(fx.sqlite, 'SELECT vouchers FROM ledger_accounts WHERE club_id = 1')!.vouchers).toBe(1.5);
+  });
+});

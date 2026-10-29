@@ -83,13 +83,15 @@
 
 ## v6.58.0 · 候选名单（FM shortlist）+ 消费券俱乐部级券账（2026-10-29）
 
-**状态**：**未上线**——本地分支 `feat/v6.58.0-shortlist-voucher`（9 个提交），迁移 `0082`/`0083` 只在本地 dev 库应用；**未 push、未部署**（push main 即 CF Workers Builds 自动部署，等用户明确下令），生产 apply 顺序 push 前先 apply 0082/0083。判级 minor（新增用户可见能力；建设券升格为券账、旧列清零，无跨仓契约破坏）。依据 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。
+**状态**：**未上线**——本地分支 `feat/v6.58.0-shortlist-voucher`（17 个提交，含 code-review 修复），迁移 `0082`/`0083` 只在本地 dev 库应用；**未 push、未部署**（push main 即 CF Workers Builds 自动部署，等用户明确下令）。生产 apply 顺序：**先 `0082` → push/部署 → 确认线上版本 → 再 `0083`**——`0083` 会把部署窗口内旧 worker 新写入的 `build_credit` 一并搬走；反过来先清零会让这段返还/事件发券丢账。跨仓通知模板白名单（`shortlist_*` 三模板，与 `demand_*` 同款待办）计入上线轮清单。判级 minor（新增用户可见能力；建设券升格为券账、旧列清零，无跨仓契约破坏）。依据 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。
 
 **交付**：① 候选名单——`player_shortlist`（cap `shortlist_cap` 默认 30）+ 五端点（列表/ids/加入/备注/移出），加入用一条 SQL 同时拦重复与上限（409 区分），`?shortlist=1` 走 EXISTS 绕公开缓存；球员库星标列（登录可见）、「只看候选名单」筛选、球员页 SideOps 开关、球队台 ShortlistCard。② 三事件站内信 `shortlist_listed`/`sold`/`released`：收藏者俱乐部收、操作方排除，五条成交路径收敛 `completeTransfer`、解约挂 `completeTermination`。③ 券账——`ledger_accounts.vouchers` + `voucher_entries`（`voucherMovement` 与 `ledger.ts` 同构：账户 upsert 批首幂等闸+守卫、流水 `changes()>0`、`balance_after` 同批复算）；建设支出/返还切券账，事件发券改 `event_grant`，工单先券后钱+双退各自回原；财政账本「消费券流水」页签；管理端发券端点（全量/指定、`requestId` 幂等）+ 俱乐部页入口。④ 迁移 `0082` 建表加列、`0083` 幂等搬运 `build_credit` 并清零。⑤（同日追加裁决）强制拍卖到期/窗尾无人出价按解约处置：球员下海（去归属变自由身）+ 本窗不可海捞，10% 下架费照收，收口复用 `completeTermination`；球员页 FIT 卡改展示个人内百分位（三档依据），不显示绝对分。
 
-**验收**：typecheck 三份全清；vitest **167 文件 / 2714 例全绿**（v6.57.2 基线 164/2696）；e2e **29/29**（两项追加后复跑仍全绿；本地 `--var AUTH_MODE:shared`；⚠️ 默认 oidc 下 `__Host-` cookie 在 127.0.0.1 被 Chrome 丢弃，e2e 会话种不进去，属环境口径非代码）；build 成功（`index-D9yonutA.js` 710.09 kB / gzip 224.00 kB）；`ledger-audit-lock` 扩到 `voucherMovement` 写入者；变异 **7/7 命中**（删幂等闸、删券守卫、双退漏券、删 cap、删操作方排除、漏截止字段、漏解约路径），其中「漏截止字段」首轮空转（只断言标签），已把 TC-N-001 补强为「截止时刻按 `fmtBeijingMinute` 的真值」后命中。e2e 捡出并修复 `ids` 端点缺 `entries` 导致的球员页白屏。
+**验收**：typecheck 三份全清；vitest **167 文件 / 2721 例全绿**（v6.57.2 基线 164/2696；含 7 例 code-review 回归）；e2e **29/29**（本地 `--var AUTH_MODE:shared`；⚠️ 默认 oidc 下 `__Host-` cookie 在 127.0.0.1 被 Chrome 丢弃，e2e 会话种不进去，属环境口径非代码）；build 成功（`index-F1ljf5ws.js` 710.67 kB / gzip 224.22 kB）；`ledger-audit-lock` 扩到 `voucherMovement` 写入者；变异 **7/7 命中**（删幂等闸、删券守卫、双退漏券、删 cap、删操作方排除、漏截止字段、漏解约路径），其中「漏截止字段」首轮空转（只断言标签），已把 TC-N-001 补强为「截止时刻按 `fmtBeijingMinute` 的真值」后命中。e2e 捡出并修复 `ids` 端点缺 `entries` 导致的球员页白屏。
 
-**遗留**：`GLOSSARY.md` 的「候选名单/消费券」两条只暂存提交，工作区另有他会话的「球员要求」段未提交；迁移 `0082/0083` 生产 apply 待上线轮。
+**code-review 修复（2 🔴 + 11 🟡，同日完成）**：🔴 券余额等值守卫在 REAL 上精确比较（0.4/0.11 余额施工永久 409）→ 删等值守卫、金额/余额 `ROUND(…,2)`、`0083` 搬运同步取整；🔴 上线顺序丢券 → runbook 改「0082 → 部署 → 0083」。🟡 零券不落 0 元 `build_use`；事件负券按可用券截断、工单负券按 0 抵；强拍解约失败清理半成品单；候选列表补 `fcId`；发券逐家审计 + 分片 + `granted/replayed`（`all=true` 跳过 CPU）；发券 UI `requestId` 打开表单即固定；候选通知有界并发 8；三处候选操作接 toast；券流水游标翻页；`GLOSSARY` 补事件发放；FIT 档位函数去掉字符串裁剪；星标/移出去掉双拉。新增回归 TC-B-003 / TC-V-004 / TC-V-005 / TC-O-004 / TC-G-002（发券部分重放）/ TC-S-001 fcId 断言与事件负券用例。
+
+**遗留**：`GLOSSARY.md` 的「候选名单/消费券」改动只暂存消费券词条 hunk，工作区另有他会话的「球员要求」段未提交；迁移 `0082/0083` 生产 apply 与跨仓通知模板白名单确认待上线轮。
 
 ---
 ## v6.57.2 · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）

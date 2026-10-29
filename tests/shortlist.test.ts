@@ -29,15 +29,15 @@ function freshEnv(): Fixture {
       (1, 100, '2026-01-01T00:00:00Z'), (2, 100, '2026-01-01T00:00:00Z'), (3, 100, '2026-01-01T00:00:00Z');
     INSERT INTO stadiums (club_id, name, capacity, tier) VALUES (1, '场', 20000, 0), (2, '场', 20000, 0), (3, '场', 20000, 0);
     INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (1, 1, 'open', '2026-07-01T00:00:00Z');
-    INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES
-      (1, 'fc1', '一号', 1, 'ST', 24, 80, 88, 30, 'normal'),
-      (2, 'fc2', '二号', 1, 'CM', 25, 78, 85, 20, 'normal'),
-      (3, 'fc3', '三号', NULL, 'GK', 22, 70, 80, 10, 'free');
+    INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status, fc_id) VALUES
+      (1, 'fc1', '一号', 1, 'ST', 24, 80, 88, 30, 'normal', 501),
+      (2, 'fc2', '二号', 1, 'CM', 25, 78, 85, 20, 'normal', 502),
+      (3, 'fc3', '三号', NULL, 'GK', 22, 70, 80, 10, 'free', 503);
     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from)
       VALUES (1, 1, 1, 20, 2, 'formal', 1, '2026-07-01'),
              (2, 2, 1, 16, 2, 'formal', 1, '2026-07-01');
-    INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status)
-      VALUES ${ids.map((id, i) => `(${id}, 'cap${id}', '候选${i}', NULL, 'CM', 24, 70, 80, 5, 'free')`).join(', ')};
+    INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status, fc_id)
+      VALUES ${ids.map((id, i) => `(${id}, 'cap${id}', '候选${i}', NULL, 'CM', 24, 70, 80, 5, 'free', ${1000 + i})`).join(', ')};
   `);
   const tour = new DatabaseSync(':memory:');
   tour.exec(
@@ -99,12 +99,17 @@ describe('TC-S 候选名单 CRUD / 上限 / 隔离 / 筛选', () => {
     expect((await add(fx, 'tok-c1', 1)).status).toBe(409); // 重复
     const body = (await (await list(fx)).json()) as {
       cap: number;
-      items: { id: number; playerId: number; note: string | null; player: { name: string; clubName: string | null; status: string; ca: number | null } }[];
+      items: {
+        id: number;
+        playerId: number;
+        note: string | null;
+        player: { name: string; clubName: string | null; status: string; ca: number | null; fcId: number | null };
+      }[];
     };
     expect(body.cap).toBe(30);
     expect(body.items).toHaveLength(2);
-    expect(body.items[0]).toMatchObject({ playerId: 3, note: '自由身门将', player: { name: '三号', clubName: null, status: 'free' } });
-    expect(body.items[1]).toMatchObject({ playerId: 1, note: '本队前锋', player: { clubName: '卖队', ca: 80 } });
+    expect(body.items[0]).toMatchObject({ playerId: 3, note: '自由身门将', player: { name: '三号', clubName: null, status: 'free', fcId: 503 } });
+    expect(body.items[1]).toMatchObject({ playerId: 1, note: '本队前锋', player: { clubName: '卖队', ca: 80, fcId: 501 } });
 
     // 备注修改 / 移除
     const rowId = body.items[1]!.id;

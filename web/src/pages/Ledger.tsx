@@ -192,7 +192,7 @@ export default function Ledger() {
   });
   const entries = ledgerQuery.data ? ledgerQuery.data.pages.flatMap((p) => p.entries) : [];
   const voucherQuery = useVoucherLedger('', tab === 'voucher');
-  const voucherEntries = voucherQuery.data?.entries ?? [];
+  const voucherEntries = voucherQuery.data ? voucherQuery.data.pages.flatMap((p) => p.entries) : [];
   const lastPage = ledgerQuery.data?.pages[ledgerQuery.data.pages.length - 1] ?? null;
   const nextCursor = ledgerQuery.hasNextPage ? (lastPage?.nextCursor ?? null) : null;
   const loaded = !ledgerQuery.isPending;
@@ -335,6 +335,11 @@ export default function Ledger() {
                     </tbody>
                   </table>
                 </div>
+              )}
+              {voucherQuery.hasNextPage && (
+                <button className="btn" type="button" disabled={voucherQuery.isFetching} onClick={() => void voucherQuery.fetchNextPage()}>
+                  {voucherQuery.isFetching ? '读取中…' : '再看 30 笔'}
+                </button>
               )}
             </div>
           )}

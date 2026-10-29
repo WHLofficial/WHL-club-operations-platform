@@ -237,8 +237,18 @@ async function releaseForcedNoBid(
       .first<{ id: number; status: string }>();
     if (row && row.status !== 'completed') await completeTermination(env, row.id, actor, origin);
   } catch (e) {
-    // 结算尽力而为：球员仍留在原队（等同旧口径），不阻塞其余挂牌收口；下次惰性结算按 key 重试。
+    // 结算尽力而为：不阻塞其余挂牌收口。此处无法「下次再试」——listing 已是 delisted，
+    // 不会再进本分支，所以把半成品 pending_review 单删掉，免得它挡住后续在途判定
+    // （findInFlight 看到 pending 就当成还有一笔解约在办）。球员留在原队，等同旧口径。
     console.warn(`[market-settle] 强制拍卖无出价转解约失败 listing=${listing.id}:`, e);
+    try {
+      await env.DB
+        .prepare("DELETE FROM transfers WHERE idempotency_key = ? AND status = 'pending_review'")
+        .bind(key)
+        .run();
+    } catch (cleanupError) {
+      console.warn(`[market-settle] 清理失败解约单失败 listing=${listing.id}:`, cleanupError);
+    }
   }
 }
 

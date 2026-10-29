@@ -6,7 +6,7 @@
 
 ## [v6.58.0] · 候选名单（FM shortlist）+ 消费券俱乐部级券账（2026-10-29）
 
-**未上线**：本地分支 `feat/v6.58.0-shortlist-voucher`（9 个提交），迁移 `0082`/`0083` 已应用到本地 dev 库，**生产未 apply、未 push、未部署**（push main 触发 CF 自动部署，需用户明确下令）。判级 minor（新增用户可见能力；建设券语义升格、旧列清零，无跨仓契约破坏）。设计/测试计划见 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。
+**未上线**：本地分支 `feat/v6.58.0-shortlist-voucher`（17 个提交，含 code-review 修复），迁移 `0082`/`0083` 已应用到本地 dev 库，**生产未 apply、未 push、未部署**（push main 触发 CF 自动部署，需用户明确下令）。上线顺序：**先 apply `0082` → push/部署 → 确认线上版本 → 再 apply `0083`**；`0083` 会搬运旧列存量与部署窗口内旧 worker 新写入的 `build_credit`，反过来先清旧列会让这段返还/事件发券丢失。跨仓通知模板白名单（`shortlist_*` 三模板，与 `demand_*` 同款待确认）计入上线清单。判级 minor（新增用户可见能力；建设券语义升格、旧列清零，无跨仓契约破坏）。设计/测试计划见 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。
 
 **Added**
 
@@ -28,7 +28,13 @@
 
 - `GET /club/shortlist/ids` 补 `entries[{id,playerId}]`：首版只回 `playerIds`，球员页 SideOps 取行 id 移出时 `undefined.find` 白屏（e2e ⑤f/⑯/㉑ 捡出）。
 
-**验收**：typecheck 三份全清；vitest **167 文件 / 2714 例全绿**；e2e **29/29**（本地 shared 模式）；build 成功（`index-D9yonutA.js` 710.09 kB / gzip 224.00 kB，含两项追加）；测试计划 §四变异 **7/7 命中**（其中挂牌截止断言原为空转，已补强为「截止时刻真值」值断言后命中）。
+**Fixed（2026-10-29 code-review：2 🔴 + 11 🟡 全部修复）**
+
+- 🔴 券余额等值守卫在 REAL 上精确比较：`0.4` / `0.11` 这类常见余额扩建直接 409（`0.4−0.1=0.30000000000000004`）。删等值守卫（`changes()>0` 串联已足够），`voucherMovement` 金额与余额 `ROUND(…,2)`，`0083` 搬运与重算同步取整。
+- 🔴 上线顺序丢券：runbook 改为「`0082` → 部署 → 确认版本 → `0083`」（原因见上方未上线说明）。
+- 🟡 零券施工不再落 0 元 `build_use` 流水；事件负向 `build_credit` 按可用券截断、工单负券按 0 抵不多收现金；强拍解约失败清理半成品 `pending_review` 单（不再挡住重试）；候选列表补 `fcId`；发券改为**逐家审计 + 40 家分片 + 返回 `granted/replayed`**（`all=true` 跳过 CPU 队）；发券 UI 的 `requestId` 改为打开表单时固定（超时重试不会换 id 双发）；候选通知改**有界并发 8**（单个 watcher 失败不阻断其余）；球员页/球队台/球员库三处候选操作失败接 toast；券流水支持游标「再看 30 笔」；`GLOSSARY` 补「事件发放」来源；FIT 档位改为 `fitTone()` 直接返回档位（去掉字符串裁剪）；星标/移出去掉 refetch + invalidate 双拉。
+
+**验收**：typecheck 三份全清；vitest **167 文件 / 2721 例全绿**（新增 7 例评审回归）；e2e **29/29**（本地 shared 模式）；build 成功（`index-F1ljf5ws.js` 710.67 kB / gzip 224.22 kB）；测试计划 §四变异 **7/7 命中**（其中挂牌截止断言原为空转，已补强为「截止时刻真值」值断言后命中）。
 
 ## [v6.57.2] · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）
 

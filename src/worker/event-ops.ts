@@ -304,6 +304,8 @@ export interface EventClubContext {
   name: string;
   stadium: EventStadium;
   balance: number;
+  /** 消费券余额（v6.58.0）：负向效果按可用余额截断，券账不允许出现负余额 */
+  vouchers?: number;
   facilities: Map<string, number>;
   /** 生效冠名品牌（无冠名 = null） */
   brand: string | null;
@@ -368,9 +370,9 @@ export async function loadEventContexts(
       .all<EventStadium>(),
     env.DB.prepare(`SELECT id, name FROM clubs WHERE id IN (${inList})`).bind(...ids).all<{ id: number; name: string }>(),
     env.DB
-      .prepare(`SELECT club_id, balance FROM ledger_accounts WHERE club_id IN (${inList})`)
+      .prepare(`SELECT club_id, balance, vouchers FROM ledger_accounts WHERE club_id IN (${inList})`)
       .bind(...ids)
-      .all<{ club_id: number; balance: number }>(),
+      .all<{ club_id: number; balance: number; vouchers: number }>(),
     env.DB
       .prepare(`SELECT club_id, facility_key, level FROM club_facilities WHERE club_id IN (${inList})`)
       .bind(...ids)
@@ -427,6 +429,7 @@ export async function loadEventContexts(
       name: clubs.results.find((c) => c.id === clubId)?.name ?? `俱乐部${clubId}`,
       stadium,
       balance: accounts.results.find((a) => a.club_id === clubId)?.balance ?? 0,
+      vouchers: accounts.results.find((a) => a.club_id === clubId)?.vouchers ?? 0,
       facilities: facilityMap,
       brand: naming.results.find((n) => n.club_id === clubId)?.brand ?? null,
       namingId: naming.results.find((n) => n.club_id === clubId)?.id ?? null,
@@ -893,7 +896,10 @@ export async function applyEventEffects(
       }
       // 消费券（v6.58.0 升格）：走 voucherMovement 记流水，与「建设返还/管理组发放」同一本账
       case 'build_credit': {
-        const v = clampNum(numOf(value) ?? 0, -ec.clamps.buildCredit, ec.clamps.buildCredit);
+        const raw = clampNum(numOf(value) ?? 0, -ec.clamps.buildCredit, ec.clamps.buildCredit);
+        // 负向效果按可用券余额截断（旧代码直改 stadiums.build_credit 时是 MAX(0, …)）；
+        // voucherMovement 另有「余额 + delta >= 0」的批内闸兜并发扣空。
+        const v = raw < 0 ? -Math.min(-raw, Math.max(0, ctx.vouchers ?? 0)) : raw;
         if (v === 0) break;
         statements.push(
           ...voucherMovement(db, {
@@ -903,6 +909,9 @@ export async function applyEventEffects(
             refType: 'event',
             refId: occ.id,
             memo: `事件「${ctx.name}」发放消费券`,
+            // occurrence 的 PENDING_GUARD 本身保证一次；关掉 kind+ref 幂等闸，
+            // 免得同一事件配置两笔 build_credit 时第二笔被静默吞掉。
+            idempotent: false,
             guardSql: PENDING_GUARD,
             guardParams: [occ.id],
           }),

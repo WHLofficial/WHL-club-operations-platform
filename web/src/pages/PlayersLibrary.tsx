@@ -13,6 +13,7 @@ import { ATTR_LABELS } from '../lib/ref.ts';
 import { renderClubCol } from '../lib/club-columns.tsx';
 import { useAuthOptional } from '../lib/auth.tsx';
 import { useShortlistIds, useShortlistInvalidation } from '../lib/queries.ts';
+import { useToast } from '../lib/toast.tsx';
 import { apiSend } from '../lib/api.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { playerPath } from '../lib/player-link.ts';
@@ -148,6 +149,7 @@ export default function PlayersLibrary() {
   const shortlistSet = new Set(shortlistIdsQuery.data?.playerIds ?? []);
   const shortlistRowByPlayer = new Map((shortlistIdsQuery.data?.entries ?? []).map((e) => [e.playerId, e.id]));
   const [starBusy, setStarBusy] = useState<number | null>(null);
+  const { show, toastNode } = useToast();
   const [filters, setFilters] = useState<Filters>(filtersFromUrl);
   // null=未手动干预（列跟随筛选联动）；一旦手动勾选，改为以手动清单为准
   const [manualCols, setManualCols] = useState<string[] | null>(() =>
@@ -300,10 +302,11 @@ export default function PlayersLibrary() {
       } else {
         await apiSend('POST', '/api/club/shortlist', { playerId });
       }
-      await shortlistIdsQuery.refetch();
+      // 只走失效：invalidateShortlist 已包含 ids，直接 refetch 会重复请求
       invalidateShortlist();
-    } catch {
-      // 失败不吞提示：列表刷新即可看到真实状态（错因由 apiSend 抛出的 message 可从控制台查）
+    } catch (err) {
+      // 上限 30 / 未绑队等 409/403 要让用户看见（原来静默吞掉，点星标像没反应）
+      show(err instanceof Error ? err.message : '候选名单操作失败', true);
     } finally {
       setStarBusy(null);
     }
@@ -454,6 +457,7 @@ export default function PlayersLibrary() {
 
   return (
     <div className="container">
+      {toastNode}
       <h2>球员库</h2>
       <p className="muted">全联盟的公开名册。点姓名进球员合同；筛了哪一项，表里就自动多哪一列（列选择器里手动调过则以手动为准）。</p>
 

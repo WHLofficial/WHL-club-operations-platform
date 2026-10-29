@@ -140,3 +140,61 @@ describe('TC-V-003 幂等闸（club 维度）', () => {
     expect(await voucherBalance(db, 1)).toBe(14.5); // 12.5 存量 + 2
   });
 });
+
+// 评审修复（v6.58.0 🟡③④）：REAL 尾差按分入账；任何路径都不许把券扣成负数。
+describe('TC-V-004 REAL 尾差与负余额闸（评审修复）', () => {
+  it('0.4 / 0.11 扣减后余额精确到分，可继续扣到 0；余额不足整段拒绝', async () => {
+    const { sqlite, db } = freshDb();
+    const grant = (clubId: number, amount: number) =>
+      db.batch([
+        ...voucherMovement(db, { clubId, delta: amount, kind: 'admin_grant', refType: 'admin', refId: 1, memo: `发放 ${amount}`, idempotent: false }),
+      ]);
+    const use = (clubId: number, amount: number, refId: number) =>
+      db.batch([
+        ...voucherMovement(db, { clubId, delta: -amount, kind: 'build_use', refType: 'stadium', refId, memo: `扣 ${amount}`, idempotent: false }),
+      ]);
+
+    await grant(2, 0.4);
+    await use(2, 0.1, 1);
+    expect(await voucherBalance(db, 2)).toBe(0.3); // 不是 0.30000000000000004
+    await use(2, 0.2, 2);
+    expect(await voucherBalance(db, 2)).toBe(0.1);
+    await use(2, 0.1, 3);
+    expect(await voucherBalance(db, 2)).toBe(0);
+
+    // 负余额闸：0 券再扣 0.1 → changes=0，不落流水
+    const before = sqlAll(sqlite, 'SELECT id FROM voucher_entries WHERE club_id = 2').length;
+    const blocked = await use(2, 0.1, 4);
+    expect(blocked[0]?.meta.changes).toBe(0);
+    expect(sqlAll(sqlite, 'SELECT id FROM voucher_entries WHERE club_id = 2').length).toBe(before);
+
+    // 0.11 的尾差同样按分收敛（club3 迁移存量 8，故终值 8 + 0.11 − 0.1 = 8.01）
+    await grant(3, 0.11);
+    await use(3, 0.1, 5);
+    expect(await voucherBalance(db, 3)).toBe(8.01);
+
+    // 每笔流水与余额都精确到两位小数（不把 0.30000000000000004 留在账上）
+    for (const e of sqlAll<{ amount: number; balance_after: number }>(sqlite, 'SELECT amount, balance_after FROM voucher_entries WHERE club_id IN (2, 3)')) {
+      expect(Math.round(e.amount * 100) / 100).toBe(e.amount);
+      expect(Math.round(e.balance_after * 100) / 100).toBe(e.balance_after);
+    }
+  });
+});
+
+// 评审修复（v6.58.0 🔴①）：0083 搬运必须 ROUND 到分，否则旧列的二进制尾差会原样写进券账。
+describe('TC-V-005 0083 搬运按分取整（评审修复）', () => {
+  it('build_credit = 0.1+0.2 搬成 0.30，流水与余额一致', () => {
+    const sqlite = new DatabaseSync(':memory:');
+    applyMigrations(sqlite, '0081_expected_income_credit_line.sql');
+    sqlite.exec(`
+      INSERT INTO clubs (id, name, status) VALUES (1, 'A 队', 'active');
+      INSERT INTO stadiums (club_id, capacity, tier) VALUES (1, 20000, 0);
+      UPDATE stadiums SET build_credit = 0.1 + 0.2 WHERE club_id = 1;
+    `);
+    runMigration(sqlite, '0082_vouchers_shortlist.sql');
+    runMigration(sqlite, '0083_vouchers_backfill.sql');
+    const entry = sqlGet<{ amount: number; balance_after: number }>(sqlite, 'SELECT amount, balance_after FROM voucher_entries WHERE club_id = 1');
+    expect(entry).toEqual({ amount: 0.3, balance_after: 0.3 });
+    expect(sqlGet<{ vouchers: number }>(sqlite, 'SELECT vouchers FROM ledger_accounts WHERE club_id = 1')?.vouchers).toBe(0.3);
+  });
+});

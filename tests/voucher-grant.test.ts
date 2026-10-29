@@ -49,28 +49,33 @@ describe('TC-G-001 管理组发券', () => {
     const { env, sqlite } = freshEnv();
     const res = await post(env, 'tok-admin', { clubIds: [1, 2], amount: 3.5, note: '补偿', requestId: 'req-1' });
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ granted: 2, amount: 3.5, total: 7 });
+    expect(await res.json()).toEqual({ granted: 2, replayed: 0, amount: 3.5, total: 7 });
     expect(vouchersOf(sqlite, 1)).toBe(3.5);
     expect(vouchersOf(sqlite, 2)).toBe(3.5);
     expect(sqlAll<{ club_id: number; amount: number }>(sqlite, "SELECT club_id, amount FROM voucher_entries WHERE kind='admin_grant' ORDER BY club_id")).toEqual([
       { club_id: 1, amount: 3.5 },
       { club_id: 2, amount: 3.5 },
     ]);
-    const audit = sqlAll<{ actor: number; origin: string; after: string }>(sqlite, "SELECT actor, origin, after FROM audit_log WHERE action='voucher_grant'");
-    expect(audit).toHaveLength(1);
+    // 评审修复：审计逐个俱乐部落（不再只留一条「末家 changes 兜底」），且 after 带 clubId
+    const audit = sqlAll<{ actor: number; origin: string; after: string }>(sqlite, "SELECT actor, origin, after FROM audit_log WHERE action='voucher_grant' ORDER BY id");
+    expect(audit).toHaveLength(2);
     expect(audit[0]).toMatchObject({ actor: 1, origin: 'user' });
+    expect(JSON.parse(audit[0]!.after)).toMatchObject({ clubId: 1, amount: 3.5, requestId: 'req-1' });
+    expect(JSON.parse(audit[1]!.after)).toMatchObject({ clubId: 2 });
 
     // 同一个 requestId 重放：券余额与流水不变，也不再留第二条审计
-    expect((await post(env, 'tok-admin', { clubIds: [1, 2], amount: 3.5, note: '补偿', requestId: 'req-1' })).status).toBe(201);
+    const replay = await post(env, 'tok-admin', { clubIds: [1, 2], amount: 3.5, note: '补偿', requestId: 'req-1' });
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toMatchObject({ granted: 0, replayed: 2, total: 0 });
     expect(vouchersOf(sqlite, 1)).toBe(3.5);
     expect(sqlAll(sqlite, "SELECT id FROM voucher_entries WHERE kind='admin_grant'")).toHaveLength(2);
-    expect(sqlAll(sqlite, "SELECT id FROM audit_log WHERE action='voucher_grant'")).toHaveLength(1);
+    expect(sqlAll(sqlite, "SELECT id FROM audit_log WHERE action='voucher_grant'")).toHaveLength(2);
 
     // 不带 requestId：管理员主动重复发放允许（每次一条审计）
     await post(env, 'tok-admin', { clubIds: [1], amount: 1, note: '二次' });
     await post(env, 'tok-admin', { clubIds: [1], amount: 1, note: '二次' });
     expect(vouchersOf(sqlite, 1)).toBe(5.5);
-    expect(sqlAll(sqlite, "SELECT id FROM audit_log WHERE action='voucher_grant'")).toHaveLength(3);
+    expect(sqlAll(sqlite, "SELECT id FROM audit_log WHERE action='voucher_grant'")).toHaveLength(4);
 
     // 对账不变量
     for (const row of sqlAll<{ club_id: number; vouchers: number }>(sqlite, 'SELECT club_id, vouchers FROM ledger_accounts')) {
@@ -79,11 +84,13 @@ describe('TC-G-001 管理组发券', () => {
     }
   });
 
-  it('all=true 发全部俱乐部；参数/权限/不存在俱乐部各自被拒', async () => {
+  it('all=true 只发真实俱乐部（跳过 CPU 队）；参数/权限/不存在俱乐部各自被拒', async () => {
     const { env, sqlite } = freshEnv();
+    sqlite.exec(`INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (3, '机器人队 (CPU)', 'premier', 'active', 1);`);
     expect(await post(env, 'tok-admin', { all: true, amount: 2, note: '全联盟' })).toHaveProperty('status', 201);
     expect(vouchersOf(sqlite, 1)).toBe(2);
     expect(vouchersOf(sqlite, 2)).toBe(2);
+    expect(vouchersOf(sqlite, 3)).toBe(0);
 
     const bad = [
       { clubIds: [1], amount: 0, note: 'x' },
@@ -99,5 +106,20 @@ describe('TC-G-001 管理组发券', () => {
       await res.json();
     }
     expect((await post(env, 'tok-coach', { clubIds: [1], amount: 1, note: 'x' })).status).toBe(403);
+  });
+
+  it('TC-G-002 同 requestId 换俱乐部集合：只给没发过的入账，返回 granted/replayed 如实计数', async () => {
+    const { env, sqlite } = freshEnv();
+    expect(await (await post(env, 'tok-admin', { clubIds: [1], amount: 2, note: '部分', requestId: 'req-part' })).json()).toMatchObject({
+      granted: 1,
+      replayed: 0,
+    });
+    // 同一个 requestId 再带上 club2：club1 幂等跳过、club2 真实入账
+    const res = await post(env, 'tok-admin', { clubIds: [1, 2], amount: 2, note: '部分', requestId: 'req-part' });
+    expect(await res.json()).toMatchObject({ granted: 1, replayed: 1, amount: 2, total: 2 });
+    expect(vouchersOf(sqlite, 1)).toBe(2);
+    expect(vouchersOf(sqlite, 2)).toBe(2);
+    // 审计只给真实入账的两家各一条
+    expect(sqlAll(sqlite, "SELECT id FROM audit_log WHERE action='voucher_grant'")).toHaveLength(2);
   });
 });

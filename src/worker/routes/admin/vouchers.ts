@@ -42,7 +42,8 @@ app.post('/vouchers/grant', async (c) => {
 
   let clubIds: number[];
   if (body.all === true) {
-    const rows = await c.env.DB.prepare('SELECT id FROM clubs ORDER BY id').all<{ id: number }>();
+    // CPU 队不是平台俱乐部（无绑定教练，也不参与建设/消费），发券只会制造无人花的余额
+    const rows = await c.env.DB.prepare('SELECT id FROM clubs WHERE is_cpu = 0 ORDER BY id').all<{ id: number }>();
     clubIds = rows.results.map((r) => r.id);
   } else {
     if (!Array.isArray(body.clubIds) || body.clubIds.length === 0) throw new HttpError(400, 'clubIds 必须是非空数组（或传 all: true）');
@@ -57,31 +58,47 @@ app.post('/vouchers/grant', async (c) => {
   const missing = clubIds.filter((id) => !found.has(id));
   if (missing.length > 0) throw new HttpError(404, `俱乐部不存在：${missing.join(', ')}`);
 
-  const statements = clubIds.flatMap((clubId) =>
-    voucherMovement(c.env.DB, {
-      clubId,
-      delta: amount,
-      kind: 'admin_grant',
-      refType: requestId === null ? 'admin' : `admin:${requestId}`,
-      refId: user.id,
-      memo: `管理组发放消费券：${note}`,
-      idempotent: requestId === null ? false : true,
-    }),
-  );
-  statements.push(
-    createAuditStatement(c.env.DB)({
-      actor: user.id,
-      action: 'voucher_grant',
-      targetType: 'voucher',
-      targetId: null,
-      origin: 'user',
-      after: { clubIds, amount, note, requestId },
-      // 幂等重放（同 requestId）时不落第二条审计：最后一条券流水没动就不留痕
-      guardSql: 'changes() > 0',
-    }),
-  );
-  await c.env.DB.batch(statements);
-  return c.json({ granted: clubIds.length, amount, total: round2(amount * clubIds.length) }, 201);
+  // 分片写：每家 3 条语句（账户 upsert / 流水 / 审计），40 家 = 120 条/批，避免一次 batch
+  // 随俱乐部数无限增长；某片失败时前面的片已入账，同 requestId 重试按 payload 幂等补齐。
+  const GRANT_CHUNK = 40;
+  let granted = 0;
+  for (let i = 0; i < clubIds.length; i += GRANT_CHUNK) {
+    const chunk = clubIds.slice(i, i + GRANT_CHUNK);
+    const statements: D1PreparedStatement[] = [];
+    const auditIndexes: number[] = [];
+    for (const clubId of chunk) {
+      statements.push(
+        ...voucherMovement(c.env.DB, {
+          clubId,
+          delta: amount,
+          kind: 'admin_grant',
+          refType: requestId === null ? 'admin' : `admin:${requestId}`,
+          refId: user.id,
+          memo: `管理组发放消费券：${note}`,
+          idempotent: requestId === null ? false : true,
+        }),
+      );
+      // 审计逐个俱乐部落：守卫只看「本家流水真的写了没」（上一条语句的 changes()），
+      // 幂等重放（同 requestId 已发过）时这一家不留第二条审计。
+      statements.push(
+        createAuditStatement(c.env.DB)({
+          actor: user.id,
+          action: 'voucher_grant',
+          targetType: 'voucher',
+          targetId: null,
+          origin: 'user',
+          after: { clubId, amount, note, requestId },
+          guardSql: 'changes() > 0',
+        }),
+      );
+      auditIndexes.push(statements.length - 1);
+    }
+    const outs = await c.env.DB.batch(statements);
+    for (const idx of auditIndexes) {
+      if ((outs[idx]?.meta.changes ?? 0) > 0) granted += 1;
+    }
+  }
+  return c.json({ granted, replayed: clubIds.length - granted, amount, total: round2(amount * granted) }, 201);
 });
 
 export default app;

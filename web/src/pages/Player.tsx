@@ -35,7 +35,7 @@ import {
 // attrClass 五档分段（v6.19.0 全仓统一口径）也在这里；STATUS_LABEL 已随顶卡状态徽章下沉退役（v6.56.0）
 import { MARKER_EMOJI, MARKER_LABEL, attrClass } from '../lib/players-library.ts';
 // FIT 适配度卡（v6.56.0 移植引擎落 web/src/lib/fit/）：fit 卡数据源与色点三态阈值
-import { fitDotClass } from '../lib/fit/dot.ts';
+import { fitDotClass, fitTone } from '../lib/fit/dot.ts';
 import {
   fitPosGroup,
   fitProfileAll,
@@ -880,10 +880,10 @@ function AttrSheet({
                   <small>{ROLE_FIT[slot].zh}</small>
                 </span>
                 <span className="fit-bar" aria-hidden="true">
-                  <i className={fitDotClass(tile).replace('fit-dot ', '')} style={{ width: `${tile}%` }} />
+                  <i className={`fit-dot-${fitTone(tile)}`} style={{ width: `${tile}%` }} />
                 </span>
                 <span className="fit-val">
-                  <span className={`mono fit-score ${fitDotClass(tile).replace('fit-dot ', '')}`}>{tile}</span>
+                  <span className={`mono fit-score fit-dot-${fitTone(tile)}`}>{tile}</span>
                   <i className={fitDotClass(tile)} title={`个人内契合百分位 ${tile}（同族槽位内，越高越契合）`} />
                 </span>
               </div>

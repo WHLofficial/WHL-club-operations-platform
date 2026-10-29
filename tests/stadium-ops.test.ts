@@ -352,3 +352,41 @@ describe('开窗闸（v6.30.0）', () => {
     expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action IN ('stadium_expand','stadium_upgrade','facility_upgrade')").length).toBe(3);
   });
 });
+
+// 评审修复（v6.58.0 🔴①）：券余额是 REAL，旧实现用「期望值等值守卫」比对 JS round2，
+// 0.4 / 0.11 这类常见余额算出来带二进制尾差（0.4-0.1=0.30000000000000004）→ 永久 409。
+// 现在等值守卫已删（changes()>0 串联足够），金额统一 ROUND 到分进账。
+describe('TC-B-003 REAL 尾差余额可正常施工（评审修复）', () => {
+  it('0.4 与 0.11 券余额扩建/升级/设施升级都不再 409，余额按分入账', async () => {
+    const a = freshEnv();
+    seedClub(a.sqlite, { credit: 0.4 });
+    const expanded = await expandStadium(a.env, 1, 100, 1);
+    expect(expanded).toMatchObject({ cost: 0.1, creditUsed: 0.1, cash: 0, refund: 0.03 });
+    expect(vouchersOf(a.sqlite)).toBe(0.33);
+
+    const b = freshEnv();
+    seedClub(b.sqlite, { credit: 0.11 });
+    await expect(expandStadium(b.env, 1, 100, 1)).resolves.toMatchObject({ creditUsed: 0.1, cash: 0 });
+    expect(vouchersOf(b.sqlite)).toBe(0.04);
+
+    const tier = freshEnv();
+    seedClub(tier.sqlite, { credit: 0.11 });
+    await expect(upgradeStadiumTier(tier.env, 1, 1)).resolves.toMatchObject({ cost: 3, creditUsed: 0.11, cash: 2.89, refund: 0.75 });
+    expect(vouchersOf(tier.sqlite)).toBe(0.75);
+
+    const facility = freshEnv();
+    seedClub(facility.sqlite, { credit: 0.11, balance: 10 });
+    await expect(upgradeFacilityLevel(facility.env, 1, 'commercial', 1)).resolves.toMatchObject({ cost: 3, creditUsed: 0.11, cash: 2.89, refund: 0.75 });
+    expect(vouchersOf(facility.sqlite)).toBe(0.75);
+  });
+
+  it('零券施工不落 0 元 build_use 流水；返还仍记 build_refund', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { credit: 0 });
+    await expandStadium(fx.env, 1, 100, 1);
+    expect(vouchersOf(fx.sqlite)).toBe(0.03);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM voucher_entries WHERE kind = 'build_use'").length).toBe(0);
+    const refund = sqlAll<{ amount: number; balance_after: number }>(fx.sqlite, "SELECT amount, balance_after FROM voucher_entries WHERE kind = 'build_refund'");
+    expect(refund).toEqual([{ amount: 0.03, balance_after: 0.03 }]);
+  });
+});

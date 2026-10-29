@@ -98,12 +98,7 @@ async function payAndRefund(
 
 /** 券可用守卫（批内对批前状态求值；并发扣空时整段失败，见 tests/stadium-ops.test.ts 最坏情况用例） */
 function voucherEnoughGuard(): string {
-  return '(SELECT COALESCE(vouchers, 0) FROM ledger_accounts WHERE club_id = ?) >= ?';
-}
-
-/** 券余额等于期望值守卫：把「现金/券扣款失败但后续语句照落」的中间态挡在批内。 */
-function voucherEqualsGuard(): string {
-  return '(SELECT COALESCE(vouchers, 0) FROM ledger_accounts WHERE club_id = ?) = ?';
+  return 'COALESCE((SELECT vouchers FROM ledger_accounts WHERE club_id = ?), 0) >= ?';
 }
 
 /** 球场扩建：seats 必须是 100 的正整数倍，扩建后不超当前档位座位上限。 */
@@ -145,7 +140,7 @@ export async function expandStadium(
     guardSql: voucherEnoughGuard(),
     guardParams: [clubId, creditUsed],
   });
-  const useVoucher = voucherMovement(env.DB, {
+  const useVoucher = creditUsed > 0 ? voucherMovement(env.DB, {
     clubId,
     delta: -creditUsed,
     kind: 'build_use',
@@ -155,8 +150,8 @@ export async function expandStadium(
     idempotent: false,
     guardSql: voucherEnoughGuard(),
     guardParams: [clubId, creditUsed],
-  });
-  const refundVoucher = voucherMovement(env.DB, {
+  }) : []; // 零券不落 0 元流水（券流水页会显示「支 0.00」）
+  const refundVoucher = refund > 0 ? voucherMovement(env.DB, {
     clubId,
     delta: refund,
     kind: 'build_refund',
@@ -164,16 +159,17 @@ export async function expandStadium(
     refId: clubId,
     memo: `球场扩建返还 ${refund.toFixed(2)}M（${(ratio * 100).toFixed(0)}%）`,
     idempotent: false,
-    guardSql: `changes() > 0 AND ${voucherEqualsGuard()}`,
-    guardParams: [clubId, round2(vouchers - creditUsed)],
-  });
+    // 只串「上一段真的落库」：现金/券扣款被守卫拦下时 changes()=0，返券与主场写入都不得落。
+    // 不再比对券余额期望值——REAL 减法尾差会让等值闸随机 409（v6.58.1 回归修复）。
+    guardSql: 'changes() > 0',
+  }) : [];
   const guard = env.DB
     .prepare(
       `UPDATE stadiums SET capacity = capacity + ?,
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE club_id = ? AND capacity + ? <= ? AND changes() > 0 AND ${voucherEqualsGuard()}`,
+       WHERE club_id = ? AND capacity + ? <= ? AND changes() > 0`,
     )
-    .bind(seats, clubId, seats, tierEntry.max_seats, clubId, afterVouchers);
+    .bind(seats, clubId, seats, tierEntry.max_seats);
   // 保护住的写与审计和账本同批提交（TECH_DESIGN:893「流水+余额+审计」单批不变量）；
   // 审计追加在末尾，故守卫改按显式下标取结果，不能用 outs.length-1
   const statements = [
@@ -188,8 +184,7 @@ export async function expandStadium(
       targetId: clubId,
       origin: 'user',
       before: { capacity: stadium.capacity, tier: stadium.tier, voucherBalance: vouchers },
-      guardSql: `changes() > 0 AND ${voucherEqualsGuard()}`,
-      guardParams: [clubId, afterVouchers],
+      guardSql: 'changes() > 0',
       after: {
         capacity: nextCapacity,
         tier: stadium.tier,
@@ -248,7 +243,7 @@ export async function upgradeStadiumTier(
     guardSql: voucherEnoughGuard(),
     guardParams: [clubId, creditUsed],
   });
-  const useVoucher = voucherMovement(env.DB, {
+  const useVoucher = creditUsed > 0 ? voucherMovement(env.DB, {
     clubId,
     delta: -creditUsed,
     kind: 'build_use',
@@ -258,8 +253,8 @@ export async function upgradeStadiumTier(
     idempotent: false,
     guardSql: voucherEnoughGuard(),
     guardParams: [clubId, creditUsed],
-  });
-  const refundVoucher = voucherMovement(env.DB, {
+  }) : [];
+  const refundVoucher = refund > 0 ? voucherMovement(env.DB, {
     clubId,
     delta: refund,
     kind: 'build_refund',
@@ -267,16 +262,15 @@ export async function upgradeStadiumTier(
     refId: clubId,
     memo: `球场升级返还 ${refund.toFixed(2)}M（${(ratio * 100).toFixed(0)}%）`,
     idempotent: false,
-    guardSql: `changes() > 0 AND ${voucherEqualsGuard()}`,
-    guardParams: [clubId, round2(vouchers - creditUsed)],
-  });
+    guardSql: 'changes() > 0',
+  }) : [];
   const guard = env.DB
     .prepare(
       `UPDATE stadiums SET tier = tier + 1,
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE club_id = ? AND tier = ? AND changes() > 0 AND ${voucherEqualsGuard()}`,
+       WHERE club_id = ? AND tier = ? AND changes() > 0`,
     )
-    .bind(clubId, stadium.tier, clubId, afterVouchers);
+    .bind(clubId, stadium.tier);
   const statements = [
     ...ledger,
     ...useVoucher,
@@ -289,8 +283,7 @@ export async function upgradeStadiumTier(
       targetId: clubId,
       origin: 'user',
       before: { capacity: stadium.capacity, tier: stadium.tier, voucherBalance: vouchers },
-      guardSql: `changes() > 0 AND ${voucherEqualsGuard()}`,
-      guardParams: [clubId, afterVouchers],
+      guardSql: 'changes() > 0',
       after: {
         capacity: stadium.capacity,
         tier: stadium.tier + 1,
@@ -347,7 +340,7 @@ export async function upgradeFacilityLevel(
     guardSql: voucherEnoughGuard(),
     guardParams: [clubId, creditUsed],
   });
-  const useVoucher = voucherMovement(env.DB, {
+  const useVoucher = creditUsed > 0 ? voucherMovement(env.DB, {
     clubId,
     delta: -creditUsed,
     kind: 'build_use',
@@ -357,8 +350,8 @@ export async function upgradeFacilityLevel(
     idempotent: false,
     guardSql: voucherEnoughGuard(),
     guardParams: [clubId, creditUsed],
-  });
-  const refundVoucher = voucherMovement(env.DB, {
+  }) : [];
+  const refundVoucher = refund > 0 ? voucherMovement(env.DB, {
     clubId,
     delta: refund,
     kind: 'build_refund',
@@ -366,20 +359,19 @@ export async function upgradeFacilityLevel(
     refId: clubId,
     memo: `${key} 设施升级返还 ${refund.toFixed(2)}M（${(ratio * 100).toFixed(0)}%）`,
     idempotent: false,
-    guardSql: `changes() > 0 AND ${voucherEqualsGuard()}`,
-    guardParams: [clubId, round2(vouchers - creditUsed)],
-  });
-  // 等级守卫与券余额期望值同批判定：券扣款失败时新增/升级都不得落库
+    guardSql: 'changes() > 0',
+  }) : [];
+  // 等级守卫与券扣款同批判定：券/现金扣款失败时新增/升级都不得落库
   const facilityUpsert = env.DB
     .prepare(
       `INSERT INTO club_facilities (club_id, facility_key, level, updated_at)
        SELECT ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE changes() > 0 AND ${voucherEqualsGuard()}
+       WHERE changes() > 0
        ON CONFLICT(club_id, facility_key) DO UPDATE SET
          level = club_facilities.level + 1, updated_at = excluded.updated_at
-       WHERE club_facilities.level = ? AND ${voucherEqualsGuard()}`,
+       WHERE club_facilities.level = ?`,
     )
-    .bind(clubId, key, level + 1, clubId, afterVouchers, level, clubId, afterVouchers);
+    .bind(clubId, key, level + 1, level);
   const statements = [
     ...ledger,
     ...useVoucher,
@@ -392,8 +384,7 @@ export async function upgradeFacilityLevel(
       targetId: clubId,
       origin: 'user',
       before: { facility: key, level, voucherBalance: vouchers },
-      guardSql: `changes() > 0 AND ${voucherEqualsGuard()}`,
-      guardParams: [clubId, afterVouchers],
+      guardSql: 'changes() > 0',
       after: {
         facility: key,
         level: level + 1,

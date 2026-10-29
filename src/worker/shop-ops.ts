@@ -604,7 +604,8 @@ export async function createClubOrder(
 
   // 先券后钱强制全额抵（与建设域同口径）：券够多少抵多少，剩余走现金
   const vouchers = await voucherBalance(db, opts.clubId);
-  const voucherUsed = round2(Math.min(vouchers, amount));
+  // 券余额理论上不为负；脏数据/历史遗留也要按 0 截断，否则 cash = amount + |vouchers| 会多收钱
+  const voucherUsed = round2(Math.min(Math.max(vouchers, 0), amount));
   const cash = round2(amount - voucherUsed);
   const order = await db
     .prepare(
@@ -628,7 +629,7 @@ export async function createClubOrder(
     refId: order.id,
     memo: `消费工单 #${order.id} 消费券抵扣：${summary}`,
     guardSql:
-      '(SELECT COALESCE(vouchers, 0) FROM ledger_accounts WHERE club_id = ?) >= ? AND (SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) >= ?',
+      'COALESCE((SELECT vouchers FROM ledger_accounts WHERE club_id = ?), 0) >= ? AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0) >= ?',
     guardParams: [opts.clubId, voucherUsed, opts.clubId, cash],
   })) - 2 : -1;
   const cashIndex = cash > 0 ? parts.push(...ledgerMovement(db, {

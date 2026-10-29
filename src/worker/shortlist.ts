@@ -47,6 +47,28 @@ const TEMPLATE_OF: Record<ShortlistEvent['type'], string> = {
   released: 'shortlist_released',
 };
 
+/** 通知扇出的并发上限：每个 watcher 约 3~4 次 D1 往返，串行会在热门球员上拖到秒级。 */
+const NOTIFY_CONCURRENCY = 8;
+
+/** 有界并发 map（结果累加；单个 watcher 失败只记 0，不影响其余）。 */
+async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<number>): Promise<number> {
+  let next = 0;
+  let total = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      try {
+        total += await fn(items[i]!);
+      } catch {
+        // 尽力而为：单个俱乐部的通知失败不阻断其余
+      }
+    }
+  });
+  await Promise.all(workers);
+  return total;
+}
+
 export async function notifyShortlistWatchers(env: Env, playerId: number, event: ShortlistEvent): Promise<number> {
   try {
     const watchers = await env.DB
@@ -75,9 +97,7 @@ export async function notifyShortlistWatchers(env: Env, playerId: number, event:
       data.fee = event.fee;
     }
     let queued = 0;
-    for (const w of watchers.results) {
-      queued += await queueClubNotification(env, w.club_id, template, data);
-    }
+    queued = await mapLimit(watchers.results, NOTIFY_CONCURRENCY, (w) => queueClubNotification(env, w.club_id, template, data));
     return queued;
   } catch {
     return 0;

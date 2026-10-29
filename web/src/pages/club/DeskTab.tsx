@@ -881,9 +881,9 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
 
 /** 我的球队 · 候选名单：FM shortlist 的查看/移出入口；加入走球员库星标或球员页 SideOps。 */
 function ShortlistCard() {
-  const qc = useQueryClient();
   const query = useShortlist();
   const invalidate = useShortlistInvalidation();
+  const { show, toastNode } = useToast();
   const [busyId, setBusyId] = useState<number | null>(null);
   const items = query.data?.items ?? [];
   const cap = query.data?.cap ?? 30;
@@ -893,8 +893,9 @@ function ShortlistCard() {
     setBusyId(id);
     try {
       await apiSend('DELETE', `/api/club/shortlist/${id}`);
-      await qc.invalidateQueries({ queryKey: qk.shortlist });
       invalidate();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '移出候选名单失败', true);
     } finally {
       setBusyId(null);
     }
@@ -902,6 +903,7 @@ function ShortlistCard() {
 
   return (
     <section className="card">
+      {toastNode}
       <h3>
         候选名单 <span className="muted">（{items.length} / {cap}）</span>
       </h3>

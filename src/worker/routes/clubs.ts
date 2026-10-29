@@ -917,6 +917,7 @@ app.get('/club/shortlist', async (c) => {
       market_value: number | null;
       club_id: number | null;
       status: string | null;
+      fc_id: number | null;
       club_name: string | null;
     }>();
   return c.json({
@@ -937,6 +938,7 @@ app.get('/club/shortlist', async (c) => {
         clubId: r.club_id,
         clubName: r.club_name,
         status: r.status,
+        fcId: r.fc_id,
       },
     })),
   });

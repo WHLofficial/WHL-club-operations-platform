@@ -48,6 +48,12 @@ export function voucherMovement(db: D1Database, input: VoucherMovementInput): D1
     );
     guardParams.push(input.kind, input.refType, input.refId, input.clubId);
   }
+  // 券余额永不为负：负 delta 自动带上批前余额闸（调用方另加的业务闸照旧）。
+  // 放在调用方 guardSql 之前，参数顺序与下发顺序一致。
+  if (input.delta < 0) {
+    guardParts.push('COALESCE((SELECT vouchers FROM ledger_accounts WHERE club_id = ?), 0) + ? >= 0');
+    guardParams.push(input.clubId, input.delta);
+  }
   if (input.guardSql) {
     guardParts.push(`(${input.guardSql})`);
     guardParams.push(...(input.guardParams ?? []));
@@ -61,17 +67,19 @@ export function voucherMovement(db: D1Database, input: VoucherMovementInput): D1
     db
       .prepare(
         `INSERT INTO ledger_accounts (club_id, balance, vouchers, updated_at)
-         SELECT ?, 0, ?, ${nowSql()} WHERE ${where}
-         ON CONFLICT(club_id) DO UPDATE SET vouchers = vouchers + excluded.vouchers, updated_at = excluded.updated_at
+         SELECT ?, 0, ROUND(?, 2), ${nowSql()} WHERE ${where}
+         ON CONFLICT(club_id) DO UPDATE SET vouchers = ROUND(vouchers + excluded.vouchers, 2), updated_at = excluded.updated_at
          WHERE ${where}`,
       )
       .bind(input.clubId, input.delta, ...guardParams, ...guardParams),
     // 2) 流水：以「账户语句真的动了账（changes() > 0）」为闸——幂等重放 / 守卫没过时账户
     //    changes=0，流水整段不落，两段始终同生共死。balance_after 读同批更新后的券余额。
+    //    金额与余额都在写侧 ROUND 到分：REAL 减法尾差（0.4-0.1=0.30000000000000004）不进账，
+    //    下游按「余额 == 期望值」做的等值比较才有意义。
     db
       .prepare(
         `INSERT INTO voucher_entries (club_id, kind, amount, balance_after, ref_type, ref_id, memo, created_at)
-         SELECT ?, ?, ?, (SELECT vouchers FROM ledger_accounts WHERE club_id = ?), ?, ?, ?, ${nowSql()} WHERE changes() > 0`,
+         SELECT ?, ?, ROUND(?, 2), (SELECT ROUND(vouchers, 2) FROM ledger_accounts WHERE club_id = ?), ?, ?, ?, ${nowSql()} WHERE changes() > 0`,
       )
       .bind(input.clubId, input.kind, input.delta, input.clubId, input.refType, input.refId, input.memo),
   ];

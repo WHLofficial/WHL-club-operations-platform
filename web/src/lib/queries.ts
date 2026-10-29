@@ -609,9 +609,16 @@ export function useShortlistIds(enabled = true) {
 }
 
 export function useVoucherLedger(kind: string, enabled = true) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.voucherLedger(kind),
-    queryFn: () => api<VoucherLedgerResponse>(`/api/club/vouchers${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams();
+      if (kind) qs.set('kind', kind);
+      if (pageParam !== null) qs.set('cursor', String(pageParam));
+      return api<VoucherLedgerResponse>(`/api/club/vouchers${qs.size > 0 ? `?${qs}` : ''}`);
+    },
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled,
     retry: false,
   });

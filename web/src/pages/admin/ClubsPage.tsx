@@ -37,8 +37,9 @@ function ClubsSection() {
   const [countryEdit, setCountryEdit] = useState<{ club: string; clubId: number; value: string } | null>(null);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
   const [stadium, setStadium] = useState<{ club: string; clubId: number; form: StadiumForm; tierName: string | null; fans: number; influence: StadiumAdmin['influence'] } | null>(null);
-  // 消费券发放（v6.58.0）：行内「发消费券」→ 下方小表单；requestId 防网络重试重复入账
-  const [grant, setGrant] = useState<{ club: string; clubId: number; amount: string; note: string; busy: boolean } | null>(null);
+  // 消费券发放（v6.58.0）：行内「发消费券」→ 下方小表单；requestId 在打开表单时生成一次，
+  // 网络超时后同一次填写重试复用同一个 id（点击时才生成会在重试时换 id → 可能双发）。
+  const [grant, setGrant] = useState<{ club: string; clubId: number; amount: string; note: string; busy: boolean; requestId: string } | null>(null);
 
   const { data: clubsData, error: clubsError } = useQuery({
     queryKey: ADMIN_CLUBS_KEY,
@@ -338,7 +339,7 @@ function ClubsSection() {
                     <button
                       className="btn btn-ghost btn-sm"
                       type="button"
-                      onClick={() => setGrant({ club: club.name, clubId: club.id, amount: '', note: '', busy: false })}
+                      onClick={() => setGrant({ club: club.name, clubId: club.id, amount: '', note: '', busy: false, requestId: `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` })}
                     >
                       发消费券
                     </button>
@@ -383,13 +384,18 @@ function ClubsSection() {
                   if (!note) return show('备注必填', true);
                   setGrant({ ...grant, busy: true });
                   try {
-                    const res = await apiPost<{ granted: number; amount: number; total: number }>('/api/admin/vouchers/grant', {
+                    const res = await apiPost<{ granted: number; replayed?: number; amount: number; total: number }>('/api/admin/vouchers/grant', {
                       clubIds: [grant.clubId],
                       amount,
                       note,
-                      requestId: `ui-${Date.now().toString(36)}`,
+                      requestId: grant.requestId,
                     });
-                    show(`已给 ${grant.club} 发放 ${res.amount.toFixed(2)} m 消费券`);
+                    show(
+                      res.granted > 0
+                        ? `已给 ${grant.club} 发放 ${res.amount.toFixed(2)} m 消费券`
+                        : `这笔发放此前已入账（requestId 重放），未重复发放`,
+                      res.granted === 0,
+                    );
                     setGrant(null);
                   } catch (err) {
                     show(err instanceof Error ? err.message : '发放失败', true);

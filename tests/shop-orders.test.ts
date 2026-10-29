@@ -803,4 +803,17 @@ describe('TC-O 工单券+现金拆分与双退', () => {
     expect(b.sqlite.prepare('SELECT COUNT(*) AS n FROM shop_orders').get()).toEqual({ n: 0 });
     expect(voucherEntries(b)).toHaveLength(0);
   });
+
+  it('TC-O-004 券余额为负（历史脏数据）：按 0 抵，不多收现金也不反向加券', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101, pa: 88 });
+    setVouchers(fx, 101, -5);
+    const res = await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 1 } });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { order: { amount: number; voucherUsed: number; cashPaid: number } };
+    expect(body.order).toMatchObject({ amount: 15, voucherUsed: 0, cashPaid: 15 });
+    expect(balanceOf(fx, 101)).toBe(35);
+    expect(voucherEntries(fx)).toHaveLength(0);
+  });
 });

@@ -34,6 +34,7 @@ import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInva
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../lib/ops-gate.ts';
+import { useToast } from '../../lib/toast.tsx';
 import { creditUse } from '../../lib/credit-line.ts';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
@@ -138,6 +139,7 @@ export function SideOps({
   const shortlistQuery = useShortlistIds(isCoach);
   const shortlistEntry = shortlistQuery.data?.entries.find((e) => e.playerId === player.id) ?? null;
   const invalidateShortlist = useShortlistInvalidation();
+  const { show: showToast, toastNode } = useToast();
   const [starBusy, setStarBusy] = useState(false);
   async function toggleShortlist(): Promise<void> {
     if (starBusy) return;
@@ -145,8 +147,11 @@ export function SideOps({
     try {
       if (shortlistEntry !== null) await apiSend('DELETE', `/api/club/shortlist/${shortlistEntry.id}`);
       else await apiSend('POST', '/api/club/shortlist', { playerId: player.id });
-      await shortlistQuery.refetch();
+      // 失效即触发 ids 重取，别再手动 refetch 一次（会打两次同一接口）
       invalidateShortlist();
+    } catch (err) {
+      // 上限 30 / 未绑队等 409/403 要让用户看见，不能吞成未处理 rejection
+      showToast(err instanceof Error ? err.message : '候选名单操作失败', true);
     } finally {
       setStarBusy(false);
     }
@@ -1088,6 +1093,7 @@ export function SideOps({
 
   return (
     <div className="side-ops">
+      {toastNode}
       {!windowOpen && (
         <div className="side-closed-note">
           转会窗未开放：续约 / 挂牌 / 解约 / 激活暂不可用；报价仍可送出，关窗期谈成先挂意向单，开窗后由卖方确认才挂牌
