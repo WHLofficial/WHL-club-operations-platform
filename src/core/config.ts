@@ -104,6 +104,8 @@ export const CONFIG_KEYS = [
   // 与迁移 0081 三触发器 / ledger.ts 的 COALESCE 兜底 '1.0' 同值——不注册则运营 PUT 一律 400，
   // k 恒走 SQL 侧兜底，「k 键留给运营调」落空
   'expected_income_rate',
+  // v6.58.0 候选名单上限（0–100；0 = 关闭功能，超限 409）
+  'shortlist_cap',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -187,6 +189,8 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     4: { name: '国际级', min_seats: 50000, max_seats: 100000, base_maintenance: 14.0, per_10k_rate: 0.2, attend_coef: 1.4, upgrade_cost: 0.0 },
   }),
   voucher_refund: '0.25',
+  // v6.58.0 候选名单上限（界 0–100，0 = 关闭；越界或非法值在取用处钳制）
+  shortlist_cap: '30',
   // v2.5.0 设施经营：首位=扩建单价（M/100 座），后五位=子设施升到 1-5 级费用（插件 formula.py:407 口径）
   facility_prices: '0.1,3,5,8,12,16',
   // 球场档位开放进度（插件 max_open_tier 口径，S9 初仅开放 0→1）
