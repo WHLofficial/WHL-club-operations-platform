@@ -6,7 +6,7 @@
 
 ## [v6.60.0] · 激活通知截图弹窗（2026-10-29）
 
-**未上线**：本地分支 `feat/v6.60.0-activation-proof-dialog`（基线 `186f087`，文档提交 `de59459`），无 push、无部署。无后端/迁移/契约变更，沿用 `POST /api/media/activation`（5MB，png/jpeg/webp）→ `POST /api/market/activations`（`playerId` + `proofMediaKey`）。判级 minor（激活流程新增强制截图引导，用户可见）。设计与测试计划见 `docs/superpowers/specs/2026-10-29-activation-proof-dialog-design.md`、`docs/test-plans/v6.60.0-activation-proof-dialog.md`。
+**已上线（2026-10-29）**：push `186f087..373bd7a`（分支 `feat/v6.60.0-activation-proof-dialog`），CF Workers Builds 自动部署 Version `44b7e14d-696e-438b-ba80-b91dae4780b6` @2026-10-29T13:53:55Z；无迁移、无 schema 变更，也无后端/契约变更，沿用 `POST /api/media/activation`（5MB，png/jpeg/webp）→ `POST /api/market/activations`（`playerId` + `proofMediaKey`）。生产 `/`、`/players`、`/market`、`/shop`、`/ledger` 与 `/api/health` 全 200（d1/tour_db/kv 全 ok），`POST /api/market/activations` 匿名 401；线上资产 `index-Ck8kRwo1.js` 与本地最终构建逐字节一致（714,139 B，含「上传激活通知截图」「激活挂牌已提交」「6.60.0」文案）。判级 minor（激活流程新增强制截图引导，用户可见）。设计与测试计划见 `docs/superpowers/specs/2026-10-29-activation-proof-dialog-design.md`、`docs/test-plans/v6.60.0-activation-proof-dialog.md`。
 
 **Added**
 
@@ -21,7 +21,7 @@
 
 **验收**：typecheck 三份全清；vitest **169 文件 / 2739 例全绿**（较 v6.59.0 基线 167/2724 净 +2 文件 / +15 例，含组件 11 例、市场页提交链 2 例、SideOps 成功链 1 例）；build `web/dist/assets/index-Ck8kRwo1.js` **714.14 kB / gzip 225.52 kB**；e2e **29/29**（本地 wrangler 8791 读构建产物）。code-review 无阻断项；已补「先上传截图拿 key，再带 `playerId`+`proofMediaKey` 建激活」与 SideOps 成功路径用例。
 
-**遗留**：上线后需手机真机手测相册选图、桌面拖拽与失败重试（本地 e2e 不覆盖真实相册）；未 push/部署，等用户明确下令。
+**遗留**：上线后需手机真机手测相册选图、桌面拖拽与失败重试（本地 e2e 不覆盖真实相册）。
 
 ## [v6.59.0] · 消费中心「球场与冠名」页签 + 子设施档位上限 + 队壳首窗（2026-10-29）
 

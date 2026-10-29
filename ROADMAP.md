@@ -83,7 +83,7 @@
 
 ## v6.60.0 · 激活通知截图弹窗（2026-10-29）
 
-**状态**：**未上线**——本地分支 `feat/v6.60.0-activation-proof-dialog`（基线 `186f087`，文档提交 `de59459`），未 push、未部署；无后端/迁移/契约变更，沿用 `POST /api/media/activation` → `POST /api/market/activations`。判级 minor（激活流程新增强制截图引导，用户可见）。依据用户同日要求：激活前必须先在 QQ 私信对方主教练并上传激活通知截图，把规则与检查项做成弹窗一次讲清。
+**状态**：**已上线（2026-10-29）**——push `186f087..373bd7a`（分支 `feat/v6.60.0-activation-proof-dialog`），CF Workers Builds 自动部署 Version `44b7e14d-696e-438b-ba80-b91dae4780b6` @2026-10-29T13:53:55Z；无迁移、无 schema 变更，也无后端/契约变更，沿用 `POST /api/media/activation` → `POST /api/market/activations`。判级 minor（激活流程新增强制截图引导，用户可见）。依据用户同日要求：激活前必须先在 QQ 私信对方主教练并上传激活通知截图，把规则与检查项做成弹窗一次讲清。
 
 **交付**
 
@@ -92,9 +92,9 @@
 - 入口收敛：`MarketActivationPage` 的 `proofTarget` 改存球员对象，点「激活」直接开弹窗（删除隐藏 file input / `onProofChosen` / 旧证据制长说明）；`SideOps` 两处「激活」（非卖品 / 别队普通球员）共用同一弹窗，删除 `proofFile`、内嵌文件框与 `activatePanel`，新增 `proofOpen` 与 `confirmActivation`；`Player.tsx` 传 `myClubName`/`opponentClubName`。
 - 成功后沿用原链路：市场页 `setProofTarget(null)` + `onActivated` + 失效 `['market','activatable']` / `['market','board']`；SideOps `refreshAfterMutation()` + 提示「激活挂牌已提交：5 分钟内出首价才算数。」。`styles.css` 新增 `.proof-*` 样式。
 
-**验收**：typecheck 三份全清；vitest **169 文件 / 2739 例全绿**（较 v6.59.0 基线 167/2724 净 +2 文件 / +15 例；`ActivationProofDialog.test.tsx` 11 例覆盖空/类型/5MB 边界、拖拽多文件取第一、换图 revoke、取消不发请求、失败重试、提交中锁关闭；市场页 2 例与 SideOps 5 例覆盖真实提交链与成功提示）；build `web/dist/assets/index-Ck8kRwo1.js` **714.14 kB / gzip 225.52 kB**；e2e **29/29**（本地 `npm run dev` 8791 读构建产物；5173 被另一会话占用，未另起 dev:web）。code-review 无阻断项，补测后复跑全量。测试计划 `docs/test-plans/v6.60.0-activation-proof-dialog.md`。
+**验收**：typecheck 三份全清；vitest **169 文件 / 2739 例全绿**（较 v6.59.0 基线 167/2724 净 +2 文件 / +15 例；`ActivationProofDialog.test.tsx` 11 例覆盖空/类型/5MB 边界、拖拽多文件取第一、换图 revoke、取消不发请求、失败重试、提交中锁关闭；市场页 2 例与 SideOps 5 例覆盖真实提交链与成功提示）；build `web/dist/assets/index-Ck8kRwo1.js` **714.14 kB / gzip 225.52 kB**；e2e **29/29**（本地 `npm run dev` 8791 读构建产物；5173 被另一会话占用，未另起 dev:web）。code-review 无阻断项，补测后复跑全量。测试计划 `docs/test-plans/v6.60.0-activation-proof-dialog.md`。生产冒烟：`/`、`/players`、`/market`、`/shop`、`/ledger` 与 `/api/health` 全 200（d1/tour_db/kv 全 ok），激活端点匿名 401；线上 `index-Ck8kRwo1.js` 与本地构建逐字节一致（714,139 B，含三处新文案与 `6.60.0` 版本串）。
 
-**遗留**：上线后需手机真机手测相册选图、桌面拖拽与失败重试（e2e 不覆盖真实相册）；未 push/部署，等用户明确下令。
+**遗留**：上线后需手机真机手测相册选图、桌面拖拽与失败重试（e2e 不覆盖真实相册）。
 
 ## v6.59.0 · 消费中心「球场与冠名」页签 + 子设施档位上限 + 队壳首窗（2026-10-29）
 
