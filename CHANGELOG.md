@@ -6,7 +6,7 @@
 
 ## [v6.58.1] · FIT 卡展示修复（色块/百分号/门将口径）+ 候选名单按钮配色（2026-10-29）
 
-**未上线**：本地分支 `fix/v6.58.1-fit-display`，基于已上线的 v6.58.0（`250c375`）；**未 push、未部署**。判级 patch（纯展示修复，无契约与数据变更）。
+**已上线（2026-10-29）**：push `250c375..29be48b`（分支 `fix/v6.58.1-fit-display`），CF Workers Builds 自动部署，前端资产 `index-C1cbOFAR.js`；生产 `/api/health` 200，`/players/17`（Donnarumma）FIT 卡四行为 99% / 92% / 85% / 0%，分数背景透明。tour 仓 v5.11.1 同口径同日发布（`78ad9c2..b007f62`，资产 `index-BiZQNXZt.js`）。判级 patch（纯展示修复，无契约与数据变更）。
 
 **Fixed**
 
