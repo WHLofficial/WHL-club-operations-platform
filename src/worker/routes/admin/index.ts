@@ -20,6 +20,7 @@ import weatherRoutes from './weather.ts';
 import shopRoutes from './shop.ts';
 import opsScheduleRoutes from './ops-schedule.ts';
 import seaSealedRoutes from './sea-sealed.ts';
+import vouchersRoutes from './vouchers.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -49,5 +50,7 @@ app.route('/', shopRoutes);
 app.route('/', opsScheduleRoutes);
 // v6.50.0：海捞暗标段（GET /api/admin/sea-sealed + POST /sea-sealed/open|extend|cancel）
 app.route('/', seaSealedRoutes);
+// v6.58.0：消费券发放（POST /api/admin/vouchers/grant）
+app.route('/', vouchersRoutes);
 
 export default app;
