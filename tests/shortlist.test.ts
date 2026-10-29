@@ -6,6 +6,7 @@ import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlAll, sqlGet } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { completeTermination, completeTransfer } from '../src/worker/transfers.ts';
+import { fmtBeijingMinute } from '../src/core/ops-schedule.ts';
 
 interface Fixture {
   env: Env;
@@ -195,8 +196,17 @@ describe('TC-N 候选名单三事件通知与操作方排除', () => {
     expect(watcher).toHaveLength(1);
     expect(watcher[0]!.template).toBe('shortlist_listed');
     expect(watcher[0]!.payload).toContain('挂牌价 15 m');
-    expect(watcher[0]!.payload).toContain('预计竞价截止');
     expect(watcher[0]!.payload).toContain('一号');
+    // 截止时刻必须是真值（v6.58.0 变异验证补强）：只断言标签会放过 data.deadline 丢失，
+    // 模板会把 undefined 原样印进正文。
+    const listing = sqlGet<{ deadline_at: string | null; activation_deadline: string | null }>(
+      fx.sqlite,
+      'SELECT deadline_at, activation_deadline FROM listings WHERE player_id = 1',
+    );
+    const deadline = listing?.deadline_at ?? listing?.activation_deadline ?? null;
+    expect(deadline).toBeTruthy();
+    expect(watcher[0]!.payload).toContain(`预计竞价截止 ${fmtBeijingMinute(deadline!)}`);
+    expect(watcher[0]!.payload).not.toContain('undefined');
     expect(JSON.parse(watcher[0]!.payload).ref).toEqual({ type: 'player', id: 1 });
     expect(notifs(fx, 1)).toHaveLength(0);
   });
