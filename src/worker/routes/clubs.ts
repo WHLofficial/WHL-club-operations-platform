@@ -17,7 +17,7 @@ import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, 
 import { createConfigService } from '../../core/config.ts';
 import { balanceSnapshot } from '../ledger.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
-import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
+import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS, facilityCapForTier } from '../stadium-ops.ts';
 import { voucherBalance } from '../voucher.ts';
 import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms } from '../naming-ops.ts';
 import { acceptOffer, activateQueuedStatements, listClubOffers } from '../market-ops.ts';
@@ -1251,6 +1251,7 @@ app.get('/club/stadium/build-info', async (c) => {
     .bind(club.id)
     .all<{ facility_key: string; level: number }>();
   const levelOf = (key: string) => facilities.results.find((f) => f.facility_key === key)?.level ?? 0;
+  const facilityCap = facilityCapForTier(stadium.tier);
   const balance = await loadBalance(c.env.DB, club.id);
   const win = await getOpenWindow(c.env.DB);
   return c.json({
@@ -1259,6 +1260,9 @@ app.get('/club/stadium/build-info', async (c) => {
     balance,
     expansionPer100: prices.expansionPer100,
     maxOpenTier,
+    maxOpenTierName: tierTable[String(maxOpenTier)]?.name ?? null,
+    // v6.59.0：子设施上限随球场档位（tier+1，最高 5）
+    facilityCap,
     refundRatio,
     // v6.30.0：施工开窗闸的前端判据，与三个 POST 端点的 409 no_window 同源
     open: win !== null,
@@ -1275,12 +1279,12 @@ app.get('/club/stadium/build-info', async (c) => {
           minSeats: nextEntry.min_seats,
           upgradeCost: tierEntry?.upgrade_cost ?? null,
           open: stadium.tier + 1 <= maxOpenTier,
-          capacityOk: stadium.capacity >= nextEntry.min_seats,
         }
       : null,
     facilities: FACILITY_KEYS.map((key) => {
       const level = levelOf(key);
-      return { key, level, nextCost: level >= 5 ? null : (prices.upgradeCosts[level] ?? null) };
+      const nextCost = level >= facilityCap ? null : (prices.upgradeCosts[level] ?? null);
+      return { key, level, cap: facilityCap, nextCost, canUpgrade: nextCost !== null };
     }),
   });
 });

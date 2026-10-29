@@ -1960,6 +1960,25 @@ table.matches-table-narrow .rating-badge {
   min-width: 0;
 }
 
+/* v6.59.0 设施经营：五个子设施各占一行（说明 + 升级按钮），窄屏自动换行不溢出 */
+.facility-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.facility-row-name {
+  flex: 0 0 96px;
+}
+
+.facility-row-desc {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
 /* ---- 移动端补充（v0.2.0 新组件） ---- */
 
 @media (max-width: 640px) {

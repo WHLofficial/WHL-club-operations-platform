@@ -1203,7 +1203,7 @@ describe('自家页签：工作台与主场', () => {
 
     const stadium = (await screen.findByText('主场档案')).closest('section') as HTMLElement;
     expect(stadium.textContent).toContain('酋长球场');
-    expect(stadium.textContent).toContain('专业（3 级）');
+    expect(stadium.textContent).toContain('专业（4 级）');
     expect(stadium.textContent).toContain('60,000');
     // 影响力构成仍然点名级别系数与系数值（web/src/lib/influence.test.ts 的静态契约）
     expect(stadium.textContent).toContain('× 级别系数');

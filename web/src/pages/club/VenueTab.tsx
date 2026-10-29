@@ -20,7 +20,7 @@ function StadiumCard({ home }: { home: StadiumInfo }) {
     <section className="card">
       <h3>主场档案</h3>
       <p>
-        <b>{home.namingVenueName || home.name || '未冠名'}</b> · {home.tierName ?? `档位 ${home.tier}`}（{home.tier} 级） · 容量{' '}
+        <b>{home.namingVenueName || home.name || '未冠名'}</b> · {home.tierName ?? `档位 ${home.tier + 1}`}（{home.tier + 1} 级） · 容量{' '}
         <span className="mono">{home.capacity.toLocaleString()}</span> 座 · 死忠球迷{' '}
         <span className="mono">{Math.round(home.fans).toLocaleString()}</span>
       </p>

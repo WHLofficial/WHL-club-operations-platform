@@ -162,23 +162,36 @@ describe('球场升级', () => {
     await expect(upgradeStadiumTier(fx.env, 1, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('暂未开放') });
   });
 
-  it('容量不足升新档被拒；最高档再升被拒', async () => {
+  it('座位低于建议值也能升档（v6.59.0 删除下限）；最高档再升被拒', async () => {
     const fx = freshEnv();
-    seedClub(fx.sqlite, { capacity: 12000 });
-    await expect(upgradeStadiumTier(fx.env, 1, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('容量不足') });
+    seedClub(fx.sqlite, { capacity: 12000, balance: 10 });
+    const r = await upgradeStadiumTier(fx.env, 1, 1);
+    expect(r.tier).toBe(1);
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 12000, tier: 1 });
 
     const top = freshEnv();
     seedClub(top.sqlite, { tier: 4, capacity: 60000 });
     await expect(upgradeStadiumTier(top.env, 1, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('最高档位') });
-    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_upgrade'").length).toBe(0);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_upgrade'").length).toBe(1);
     expect(sqlAll(top.sqlite, "SELECT id FROM audit_log WHERE action='stadium_upgrade'").length).toBe(0);
   });
 });
 
 describe('子设施升级', () => {
-  it('无行从 0 级起升（费用 3M），逐级抬价；满级被拒；非法 key 被拒', async () => {
+  it('上限随球场档位：社区级(1) 到 1 级即封顶；高档位可继续升，5 级封顶；非法 key 被拒', async () => {
+    // 社区级（tier 0）= 子设施上限 1 级：第一次可升，第二次即被档位上限拦
+    const low = freshEnv();
+    seedClub(low.sqlite, { credit: 2, balance: 100 });
+    const low1 = await upgradeFacilityLevel(low.env, 1, 'commercial', 1);
+    expect(low1).toEqual({ cost: 3, creditUsed: 2, cash: 1, refund: 0.75, level: 1 });
+    await expect(upgradeFacilityLevel(low.env, 1, 'commercial', 1)).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('当前球场档位上限（1 级）'),
+    });
+
+    // 国际级（tier 4）= 上限 5 级：0→1→2 照常，5 级封顶
     const fx = freshEnv();
-    seedClub(fx.sqlite, { credit: 2, balance: 10 });
+    seedClub(fx.sqlite, { tier: 4, credit: 2, balance: 100 });
     const r1 = await upgradeFacilityLevel(fx.env, 1, 'commercial', 1);
     expect(r1).toEqual({ cost: 3, creditUsed: 2, cash: 1, refund: 0.75, level: 1 });
     expect(sqlGet<{ level: number }>(fx.sqlite, "SELECT level FROM club_facilities WHERE club_id=1 AND facility_key='commercial'")?.level).toBe(1);
@@ -194,7 +207,7 @@ describe('子设施升级', () => {
     expect(sqlGet<{ level: number }>(fx.sqlite, "SELECT level FROM club_facilities WHERE club_id=1 AND facility_key='commercial'")?.level).toBe(2);
 
     fx.sqlite.exec("UPDATE club_facilities SET level = 5 WHERE club_id=1 AND facility_key='commercial'");
-    await expect(upgradeFacilityLevel(fx.env, 1, 'commercial', 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('满级') });
+    await expect(upgradeFacilityLevel(fx.env, 1, 'commercial', 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('上限') });
     await expect(upgradeFacilityLevel(fx.env, 1, 'casino', 1)).rejects.toMatchObject({ status: 400 });
     // 两次成功各一条留痕；满级/非法 key 在批前抛，不留痕
     expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='facility_upgrade'").length).toBe(2);
@@ -239,18 +252,24 @@ describe('路由（requireCoach + getBoundClub + build-info）', () => {
       voucherBalance: number;
       expansionPer100: number;
       maxOpenTier: number;
+      maxOpenTierName: string | null;
+      facilityCap: number;
       open: boolean;
       tier: { level: number; name: string; maxSeats: number };
-      nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean; capacityOk: boolean } | null;
-      facilities: { key: string; level: number; nextCost: number | null }[];
+      nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean } | null;
+      facilities: { key: string; level: number; cap: number; nextCost: number | null; canUpgrade: boolean }[];
     };
     expect(body.voucherBalance).toBe(0.4);
     expect(body.open).toBe(true);
     expect(body.expansionPer100).toBe(0.1);
+    expect(body.maxOpenTier).toBe(1);
+    expect(body.maxOpenTierName).toBe('地区级');
+    expect(body.facilityCap).toBe(1);
     expect(body.tier).toMatchObject({ level: 0, name: '社区级', maxSeats: 25000 });
-    expect(body.nextTier).toMatchObject({ name: '地区级', minSeats: 20000, upgradeCost: 3, open: true, capacityOk: true });
+    expect(body.nextTier).toMatchObject({ name: '地区级', minSeats: 20000, upgradeCost: 3, open: true });
+    expect(body.nextTier).not.toHaveProperty('capacityOk');
     expect(body.facilities).toHaveLength(5);
-    expect(body.facilities[0]).toMatchObject({ key: 'commercial', level: 0, nextCost: 3 });
+    expect(body.facilities[0]).toMatchObject({ key: 'commercial', level: 0, cap: 1, nextCost: 3, canUpgrade: true });
 
     const expand = await app.request(
       '/api/club/stadium/expand',
@@ -324,18 +343,18 @@ describe('开窗闸（v6.30.0）', () => {
     expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
   });
 
-  it('关窗期参数 / 状态非法仍先报 400；关窗时 build-info 报 open=false', async () => {
+  it('关窗期参数非法仍先报 400；低容量升档不再拦（落到关窗 409）；关窗时 build-info 报 open=false', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite, { window: false });
     // 参数非法优先于没开窗：非 100 倍数、白名单外设施类型都必须是 400
     expect((await post(fx, '/api/club/stadium/expand', { seats: 150 })).status).toBe(400);
     expect((await post(fx, '/api/club/facilities/upgrade', { key: 'casino' })).status).toBe(400);
-    // 状态非法（容量不足升档）同样先报 400
+    // 座位低于建议值不再是错误（v6.59.0 删下限）：关窗时直接落到 409 no_window
     const low = freshEnv();
     seedClub(low.sqlite, { capacity: 12000, window: false });
     const lowRes = await post(low, '/api/club/stadium/upgrade');
-    expect(lowRes.status).toBe(400);
-    expect((await lowRes.json()) as { error?: string }).toMatchObject({ error: expect.stringContaining('容量不足') });
+    expect(lowRes.status).toBe(409);
+    expect((await lowRes.json()) as { error?: string }).toMatchObject({ error: expect.stringContaining('窗口') });
     // 关窗时前端判据必须为 false（三类施工按钮靠它置灰）
     const info = await app.request('/api/club/stadium/build-info', { headers: { Cookie: 'whl_session=tok-coach' } }, fx.env);
     expect(info.status).toBe(200);

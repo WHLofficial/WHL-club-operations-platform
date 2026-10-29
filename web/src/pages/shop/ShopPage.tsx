@@ -1,5 +1,6 @@
-// 消费中心 /shop（v6.26.0）：五类商品 + 设施经营/冠名市场两卡的统一入口。
-// B 布局（visual companion 定稿）：左主栏商品页签（?tab= 深链）+ 底部设施/冠名两卡；右侧栏我的工单常驻（行内展开）。
+// 消费中心 /shop（v6.26.0）：五类商品 + 设施经营/冠名市场的统一入口。
+// B 布局（visual companion 定稿）：左主栏商品页签（?tab= 深链）+ 右侧栏我的工单常驻（行内展开）。
+// v6.59.0：设施经营 + 冠名市场合并为「球场与冠名」首个页签；队壳申请只在赛季第 1 窗开放。
 // v6.53.0：球场档期（原第三卡）迁至独立的场馆经营页 /venue，这里的档期卡与入口一并撤掉。
 // 提交流程：确认框 → 提交即扣费 → 管理组审核 → 通过自动生效 / 拒绝自动退款。
 import { useEffect, useRef, useState } from 'react';
@@ -16,7 +17,7 @@ import { useTimeFmt } from '../../lib/datetime.ts';
 import type { ShopOrderDto, ShopPrices, ShopSquadStatePlayer } from '../../lib/api.ts';
 import { FacilityOpsCard, NamingCard } from './venueCards.tsx';
 
-type ShopTab = 'pa' | 'badge' | 'role' | 'position' | 'shell';
+type ShopTab = 'venue' | 'pa' | 'badge' | 'role' | 'position' | 'shell';
 
 // v6.29.0：关窗期消费工单（POST /api/shop/orders）后端一律 409 no_window——
 // 下单入口统一置灰，并把同一句提示摆在提交区近旁。窗口态复用公开端点 /api/seasons/current。
@@ -25,6 +26,7 @@ const WINDOW_CLOSED_NOTE = '关窗期间不能提交消费工单，开窗后再�
 const OPS_CLOSED_NOTE = '消费中心当前不在开放时段（见管理端运营时刻表）';
 
 const TAB_LABEL: Record<ShopTab, string> = {
+  venue: '球场与冠名',
   pa: '买 PA',
   badge: '徽章',
   role: '角色（职责）',
@@ -41,7 +43,8 @@ const STATUS_BADGE: Record<ShopOrderDto['status'], { cls: string; label: string 
 export default function ShopPage() {
   const [params, setParams] = useSearchParams();
   const tabRaw = params.get('tab');
-  const tab: ShopTab = tabRaw === 'badge' || tabRaw === 'role' || tabRaw === 'position' || tabRaw === 'shell' ? tabRaw : 'pa';
+  const tab: ShopTab =
+    tabRaw === 'venue' || tabRaw === 'badge' || tabRaw === 'role' || tabRaw === 'position' || tabRaw === 'shell' ? tabRaw : 'pa';
   // v6.40.0：站内信深链 ?order=<id>——从收件篮点进来直接展开这张工单（列表一次全量，无游标）
   const orderParam = Number(params.get('order'));
   const targetOrder = Number.isInteger(orderParam) && orderParam > 0 ? orderParam : null;
@@ -104,6 +107,8 @@ function ShopContent({
   // v6.49.0：消费中心整体时段（consumption 键）——与窗口闸叠加，任一不过都点不动
   const consumptionGate = useOpsGate('consumption');
   const opsOpen = consumptionGate?.blocked !== true;
+  // v6.59.0：队壳只在赛季第 1 窗开放（后端同口径 409 shell_first_window）
+  const firstWindow = windowOpen && seasons.data?.window?.windowSeq === 1;
 
   return (
     <>
@@ -125,7 +130,7 @@ function ShopContent({
       </section>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-        {/* 左主栏：商品页签 + 表单 + 设施/冠名两卡（.shop-main 带 min-width:0，窄屏才压得进视口） */}
+        {/* 左主栏：商品页签 + 表单（.shop-main 带 min-width:0，窄屏才压得进视口） */}
         <div className="shop-main">
           <div className="seg" role="group" aria-label="商品分类">
             {(Object.keys(TAB_LABEL) as ShopTab[]).map((t) => (
@@ -140,7 +145,13 @@ function ShopContent({
             </p>
           )}
           <OpsGateNote gate={consumptionGate} className="hint" />
-          {catalogError ? (
+          {tab === 'venue' ? (
+            // 设施/冠名自成一页签，不依赖商品目录的加载态（catalog 只服务另外五类商品）
+            <>
+              <FacilityOpsCard />
+              <NamingCard />
+            </>
+          ) : catalogError ? (
             <section className="card">
               <p className="muted">{catalogError}</p>
             </section>
@@ -158,12 +169,11 @@ function ShopContent({
               {tab === 'badge' && <BadgeCard opsOpen={opsOpen} prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
               {tab === 'role' && <RoleCard opsOpen={opsOpen} prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
               {tab === 'position' && <PositionCard opsOpen={opsOpen} prices={catalog.prices} players={players} loading={squadState.isPending} windowOpen={windowOpen} />}
-              {tab === 'shell' && <ShellCard prices={catalog.prices} hpremium={catalog.hpremiumClubIds} windowOpen={windowOpen} opsOpen={opsOpen} />}
+              {tab === 'shell' && (
+                <ShellCard prices={catalog.prices} hpremium={catalog.hpremiumClubIds} windowOpen={windowOpen} firstWindow={firstWindow} opsOpen={opsOpen} />
+              )}
             </>
           )}
-
-          <FacilityOpsCard />
-          <NamingCard />
         </div>
 
         {/* 右侧栏：我的工单 */}
@@ -635,7 +645,19 @@ function playerZonesAt(p: ShopSquadStatePlayer, n: number): string | null {
 
 /* ---------- 队壳申请 ---------- */
 
-function ShellCard({ prices, hpremium, windowOpen, opsOpen }: { prices: ShopPrices; hpremium: number[]; windowOpen: boolean; opsOpen: boolean }) {
+function ShellCard({
+  prices,
+  hpremium,
+  windowOpen,
+  firstWindow,
+  opsOpen,
+}: {
+  prices: ShopPrices;
+  hpremium: number[];
+  windowOpen: boolean;
+  firstWindow: boolean;
+  opsOpen: boolean;
+}) {
   const { show } = useToast();
   const invalidate = useShopInvalidation();
   const [note, setNote] = useState('');
@@ -649,6 +671,8 @@ function ShellCard({ prices, hpremium, windowOpen, opsOpen }: { prices: ShopPric
       <h3>队壳申请</h3>
       <p className="hint">
         申请费 <span className="mono">{prices.clubShell}</span> m（提交即扣，拒绝自动退款）。同一时间只能有一张待审申请；管理组线下挑壳建档后发绑定码，凭码到我的球队绑定。
+        队壳申请只在赛季第 1 个窗口（赛季初窗口）开放。
+        {!firstWindow && ' 现在不是赛季初窗口，等赛季初再来。'}
         {isHpremium && ' ⚠️ 豪门俱乐部队壳事项请在群内咨询管理组，系统不受理申请。'}
       </p>
       <div className="inline-form">
@@ -656,8 +680,18 @@ function ShellCard({ prices, hpremium, windowOpen, opsOpen }: { prices: ShopPric
         <button
           className="btn btn-sm"
           type="button"
-          disabled={busy || isHpremium || !windowOpen || !opsOpen}
-          title={isHpremium ? '豪门队壳事项请在群内咨询管理组' : !windowOpen ? WINDOW_CLOSED_NOTE : !opsOpen ? OPS_CLOSED_NOTE : undefined}
+          disabled={busy || isHpremium || !firstWindow || !opsOpen}
+          title={
+            isHpremium
+              ? '豪门队壳事项请在群内咨询管理组'
+              : !windowOpen
+                ? WINDOW_CLOSED_NOTE
+                : !firstWindow
+                  ? '队壳申请只在赛季第 1 个窗口（赛季初窗口）开放'
+                  : !opsOpen
+                    ? OPS_CLOSED_NOTE
+                    : undefined
+          }
           onClick={() => {
             if (!window.confirm(`确认提交队壳申请，支付 ${prices.clubShell.toFixed(2)}m？（提交即扣费，拒绝自动退款）`)) return;
             setBusy(true);

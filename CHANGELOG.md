@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.59.0] · 消费中心「球场与冠名」页签 + 子设施档位上限 + 队壳首窗（2026-10-29）
+
+**未上线（本地待发）**：分支 `feat/v6.59.0-venue-tab`，无迁移、无 schema 变更；push 后由 CF Workers Builds 自动部署。判级 minor（消费中心页结构、施工规则与队壳窗口均有用户可见变化，端点仅新增响应字段，向后兼容）。测试计划见 `docs/test-plans/v6.59.0-venue-tab-shell-window.md`。
+
+**Added**
+
+- 消费中心新增「球场与冠名」页签并排第一：设施经营卡与冠名市场卡从主栏底部移入该页签，其余商品页签不再渲染两卡；`?tab=venue` 可深链直达，缺省仍落「买 PA」。
+- `GET /api/club/stadium/build-info` 新增 `facilityCap` 与每项设施的 `cap` / `canUpgrade`（子设施上限 = 球场档位 `tier+1`，最高 5）；`maxOpenTierName` 供前端展示开放到的档位名。
+
+**Changed**
+
+- 球场升级删除「容量 ≥ 下一档 `min_seats`」硬闸：座位低于建议值也能升档（仍受开放进度 `stadium_max_open_tier` 与资金/消费券闸约束）；文案改「建议达到 N 座」，`nextTier.capacityOk` 字段移除。
+- 面向用户的球场档位整体 +1（库内 `tier=0` 显示「社区级 (1)」）：设施卡、升级行、开放进度、主场档案四处统一。
+- 子设施上限随球场档位：社区级只能升到 1 级，升球场后逐级解锁；到当前上限显示「已达上限（升级球场后解锁）」，只有 5 级才显示「满级」；五个子设施改为各自成行并附效果说明，医疗中心本轮前端隐藏。
+- 队壳申请只在赛季第 1 个窗口（`window_seq=1` 且开窗）放行：后端 409 `shell_first_window`，前端按钮同口径禁用并显示专属提示。
+
+**验收**：typecheck 三份全清；vitest **167 文件 / 2724 例全绿**；build `index-CPlHw6a3.js` 710.75 kB / gzip 222.89 kB；e2e **29/29**（⑱ 改为校验页签顺序与 `?tab=venue` 两卡归属，375 下页签 6 个可横滑、`.facility-row` 四行零溢出）。
+
 ## [v6.58.1] · FIT 卡展示修复（色块/百分号/门将口径）+ 候选名单按钮配色（2026-10-29）
 
 **已上线（2026-10-29）**：push `250c375..29be48b`（分支 `fix/v6.58.1-fit-display`），CF Workers Builds 自动部署，前端资产 `index-C1cbOFAR.js`；生产 `/api/health` 200，`/players/17`（Donnarumma）FIT 卡四行为 99% / 92% / 85% / 0%，分数背景透明。tour 仓 v5.11.1 同口径同日发布（`78ad9c2..b007f62`，资产 `index-BiZQNXZt.js`）。判级 patch（纯展示修复，无契约与数据变更）。

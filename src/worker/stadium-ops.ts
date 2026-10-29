@@ -1,6 +1,6 @@
 // 设施经营（v2.5.0，规则=revenue 插件 README §三/§四 + TECH_DESIGN §8/§13）：
-// 球场扩建（100 座步进、限当前档位座位区间）/ 球场升级（容量≥新档下限 + 开放进度闸）/
-// 子设施升级（五类 0-5 级）。建设支出全额 ×voucher_refund 返消费券（v6.58.0 前叫建设券，
+// 球场扩建（100 座步进、限当前档位座位区间）/ 球场升级（档位座位上限 + 开放进度闸）/
+// 子设施升级（五类，上限随球场档位 tier+1）。建设支出全额 ×voucher_refund 返消费券（v6.58.0 前叫建设券，
 // 已升格为俱乐部级券余额，见 src/worker/voucher.ts），券可抵扣建设支出与消费中心工单（先券后钱）；
 // 混合支付时账本只记现金部分，券流水记 build_use / build_refund，memo 注明券抵。
 import type { Env } from './env.ts';
@@ -16,6 +16,11 @@ import { createAuditStatement } from '../lib/audit.ts';
 export const FACILITY_KEYS = ['commercial', 'broadcast', 'pitch', 'youth', 'medical'] as const;
 
 export const EXPANSION_STEP = 100;
+
+/** 子设施等级上限 = 球场档位 + 1（社区级 0 档 → 1 级，国际级 4 档 → 5 级）。 */
+export function facilityCapForTier(tier: number): number {
+  return Math.min(5, tier + 1);
+}
 
 interface StadiumBuildRow {
   club_id: number;
@@ -204,7 +209,7 @@ export async function expandStadium(
   return { cost, creditUsed, cash, refund, capacity: nextCapacity };
 }
 
-/** 球场升级：容量 ≥ 新档下限；新档不得超过开放进度（stadium_max_open_tier）。 */
+/** 球场升级：容量随档位上限校验，新档不得超过开放进度（stadium_max_open_tier）。 */
 export async function upgradeStadiumTier(
   env: Env,
   clubId: number,
@@ -218,9 +223,6 @@ export async function upgradeStadiumTier(
   const maxOpenTier = await loadMaxOpenTier(env.DB);
   if (stadium.tier + 1 > maxOpenTier) {
     throw new HttpError(400, `第 ${stadium.tier + 1} 档暂未开放（当前开放到第 ${maxOpenTier} 档）`);
-  }
-  if (stadium.capacity < nextEntry.min_seats) {
-    throw new HttpError(400, `容量不足：升入${nextEntry.name}至少要 ${nextEntry.min_seats} 座，先扩建`);
   }
   const config = createConfigService(env.DB);
   const cost = round2(tierEntry.upgrade_cost);
@@ -303,7 +305,7 @@ export async function upgradeStadiumTier(
   return { cost, creditUsed, cash, refund, tier: stadium.tier + 1 };
 }
 
-/** 子设施升级：五类白名单，0-5 级，升到下一级费用按 facility_prices[当前级]。 */
+/** 子设施升级：五类白名单，上限随球场档位（tier+1，最高 5 级），费用按 facility_prices[当前级]。 */
 export async function upgradeFacilityLevel(
   env: Env,
   clubId: number,
@@ -317,11 +319,14 @@ export async function upgradeFacilityLevel(
     .bind(clubId, key)
     .first<{ level: number }>();
   const level = row?.level ?? 0;
-  if (level >= 5) throw new HttpError(400, '该设施已满级（5 级）');
+  const stadium = await loadStadium(env.DB, clubId); // 无球场档案 404 早失败；档位决定子设施上限
+  const cap = facilityCapForTier(stadium.tier);
+  if (level >= cap) {
+    throw new HttpError(400, `该设施已达当前球场档位上限（${cap} 级），升级球场后可继续升级`);
+  }
   const config = createConfigService(env.DB);
   const cost = round2(prices.upgradeCosts[level]!);
   const ratio = (await config.getNumber('voucher_refund')) ?? 0.25;
-  await loadStadium(env.DB, clubId); // 无球场档案 404 早失败（本函数不读容量/档位）
   // v6.30.0 开窗闸（同 expandStadium：校验先行、动钱在后）
   if (!(await getOpenWindow(env.DB))) throw new HttpError(409, '转会窗口没开，现在不能升级设施', 'no_window');
   // v6.49.0 运营时刻表：消费中心整体一套时段

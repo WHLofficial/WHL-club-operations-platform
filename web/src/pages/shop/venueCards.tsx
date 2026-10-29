@@ -1,5 +1,5 @@
-// 设施与冠名两卡（v6.26.0 自 CoachPanel.tsx 整体迁入消费中心）：设施经营 / 冠名市场。
-// 球场档期（原第三卡）已于 v6.53.0 迁至独立的场馆经营页 web/src/pages/venue/VenuePlanPage.tsx。
+// 设施与冠名两卡（v6.26.0 自 CoachPanel.tsx 整体迁入消费中心，v6.59.0 起同处「球场与冠名」页签）：
+// 设施经营 / 冠名市场。球场档期（原第三卡）已于 v6.53.0 迁至独立的场馆经营页 web/src/pages/venue/VenuePlanPage.tsx。
 // 自包含组件：各自 useQuery + invalidate，端点与刷新口径一字未动；CoachPanel 侧只留只读档案卡。
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -35,6 +35,14 @@ const FACILITY_LABEL: Record<string, string> = {
   pitch: '草皮',
   youth: '青训中心',
   medical: '医疗中心',
+};
+
+// 子设施说明（v6.59.0，口径对齐 src/core/attendance.ts / venue.ts / home.ts 的现行系数）
+const FACILITY_DESC: Record<string, string> = {
+  commercial: '每升 1 级：每场商业收入 +0.1m / 万观众（2 万观众约 +0.2m / 场）',
+  broadcast: '每升 1 级：每场转播收入 +0.3m',
+  pitch: '每升 1 级：球场活动收入 +10%；草皮受损概率 −15%',
+  youth: '每升 1 级：死忠涨粉速度 +3%；青训类活动收入 +10%',
 };
 
 // v6.30.0 施工开窗闸：三类施工按钮的统一置灰原因（与后端 409 no_window 同口径）
@@ -132,10 +140,13 @@ export function FacilityOpsCard() {
     seatsValid && capacityHeadroom !== null && seatCount > capacityHeadroom
       ? `超当前档位上限，最多还能扩 ${capacityHeadroom.toLocaleString()} 座`
       : null;
-  const upgradeBlocked = !info.nextTier || !info.nextTier.open || !info.nextTier.capacityOk;
+  const upgradeBlocked = !info.nextTier || !info.nextTier.open;
   // v6.30.0：门控吃 build-info 的 open（与后端 409 no_window 同一判据），不再单拉窗口端点
   // v6.49.0：消费中心时段（consumption）再叠一层，任一不过都点不动
   const windowOpen = info.open && consumptionGate?.blocked !== true;
+  // v6.59.0：档位显示整体 +1（库内 0 档 = 社区级 (1)）
+  const tierNo = info.tier.level + 1;
+  const facilityRows = info.facilities.filter((f) => f.key !== 'medical'); // 医疗中心本轮不开放
 
   return (
     <section className="card">
@@ -143,12 +154,13 @@ export function FacilityOpsCard() {
       <OpsGateNote gate={consumptionGate} className="hint" />
       <p className="hint">
         消费券余额 <span className="mono">{info.voucherBalance.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}% + 管理组发放，可抵扣建设与消费工单）· 当前余额{' '}
-        <span className="mono">{info.balance.toFixed(2)}</span> M · 开放至 {info.maxOpenTier} 级
+        <span className="mono">{info.balance.toFixed(2)}</span> M · 球场档位开放至 {info.maxOpenTierName ?? `第 ${info.maxOpenTier + 1} 档`} ({info.maxOpenTier + 1})
         {!windowOpen && ` · ${CLOSED_BUILD_HINT}。`}
       </p>
 
       <p>
-        <b>扩建</b>（当前 {info.tier.capacity.toLocaleString()} 座 / 档位上限 {info.tier.maxSeats?.toLocaleString() ?? '—'}）：
+        <b>扩建</b>（当前 {info.tier.name} ({tierNo}) · 容量 {info.tier.capacity.toLocaleString()} 座 / 上限{' '}
+        {info.tier.maxSeats?.toLocaleString() ?? '—'} 座）：
         {/* v6.20.0 窄屏：座位数输入最宽 90px，窄屏按容器收缩 */}
         <input
           className="mono"
@@ -180,25 +192,17 @@ export function FacilityOpsCard() {
         <b>球场升级</b>：
         {info.nextTier ? (
           <>
-            下一档 {info.nextTier.name}（至少 {info.nextTier.minSeats.toLocaleString()} 座）· 费用{' '}
+            下一档 {info.nextTier.name} ({tierNo + 1})（建议达到 {info.nextTier.minSeats.toLocaleString()} 座）· 费用{' '}
             <span className="mono">{info.nextTier.upgradeCost?.toFixed(2) ?? '—'}</span> M
             <button
               className="btn btn-sm"
               type="button"
               disabled={busy || upgradeBlocked || !windowOpen}
               style={{ marginLeft: 8 }}
-              title={
-                !windowOpen
-                  ? CLOSED_BUILD_HINT
-                  : upgradeBlocked
-                    ? !info.nextTier.open
-                      ? `第 ${info.tier.level + 1} 档暂未开放`
-                      : '容量不足，先扩建'
-                    : undefined
-              }
+              title={!windowOpen ? CLOSED_BUILD_HINT : upgradeBlocked ? `第 ${tierNo + 1} 档暂未开放` : undefined}
               onClick={() => void run('/api/club/stadium/upgrade', {}, `升级到${info.nextTier!.name}`)}
             >
-              {upgradeBlocked ? (info.nextTier.open ? '容量不足' : '未开放') : '升级'}
+              {upgradeBlocked ? '未开放' : '升级'}
             </button>
           </>
         ) : (
@@ -206,30 +210,34 @@ export function FacilityOpsCard() {
         )}
       </p>
 
-      {/* v6.39.0 窄屏修复：子设施行原本 5 个 nowrap 项相邻、行内没有断行点，窄屏会把整栏顶宽溢出。
-          改成 flex + wrap：项内不折（名字+档位+按钮一体），项之间可换行。 */}
-      <p style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-        <b>子设施</b>
-        {info.facilities.map((f) => (
-          <span key={f.key} style={{ whiteSpace: 'nowrap' }}>
-            {FACILITY_LABEL[f.key] ?? f.key} <span className="mono">{f.level}</span> 级
+      <p className="hint" style={{ marginBottom: 4 }}>
+        子设施上限随球场档位：当前 {info.tier.name} ({tierNo})，子设施可升到 {info.facilityCap}
+      </p>
+      <div>
+        {facilityRows.map((f) => (
+          <div key={f.key} className="facility-row">
+            <span className="facility-row-name">
+              <b>{FACILITY_LABEL[f.key] ?? f.key}</b> <span className="mono">{f.level}</span>
+            </span>
+            <span className="hint facility-row-desc">{FACILITY_DESC[f.key] ?? ''}</span>
             {f.nextCost !== null ? (
               <button
                 className="btn btn-ghost btn-sm"
                 type="button"
                 disabled={busy || !windowOpen}
-                style={{ marginLeft: 4 }}
-                title={!windowOpen ? CLOSED_BUILD_HINT : `升到 ${f.level + 1} 级：${f.nextCost.toFixed(2)}M`}
-                onClick={() => void run('/api/club/facilities/upgrade', { key: f.key }, `${FACILITY_LABEL[f.key] ?? f.key}升到 ${f.level + 1} 级`)}
+                title={!windowOpen ? CLOSED_BUILD_HINT : `升到 ${f.level + 1}：${f.nextCost.toFixed(2)}M`}
+                onClick={() => void run('/api/club/facilities/upgrade', { key: f.key }, `${FACILITY_LABEL[f.key] ?? f.key}升到 ${f.level + 1}`)}
               >
                 升级 {f.nextCost.toFixed(2)}M
               </button>
             ) : (
-              <span className="muted"> 满级</span>
+              <span className="muted" style={{ whiteSpace: 'nowrap' }}>
+                {f.cap >= 5 ? '满级' : '已达上限（升级球场后解锁）'}
+              </span>
             )}
-          </span>
+          </div>
         ))}
-      </p>
+      </div>
     </section>
   );
 }

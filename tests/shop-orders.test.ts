@@ -407,6 +407,20 @@ describe('TC-A 队壳申请', () => {
     resetConfigCache();
     expect((await coachPost(fx, { category: 'club_shell', payload: {} })).status).toBe(403);
   });
+
+  it('TC-A13 队壳只在赛季第 1 窗：第 2 窗 / 没有开窗都 409', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    fx.sqlite.prepare(`UPDATE season_windows SET window_seq = 2`).run();
+    const second = await coachPost(fx, { category: 'club_shell', payload: {} });
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { error: string }).error).toContain('赛季第 1 个窗口');
+
+    fx.sqlite.prepare('DELETE FROM season_windows').run();
+    const closed = await coachPost(fx, { category: 'club_shell', payload: {} });
+    expect(closed.status).toBe(409);
+    expect(((await closed.json()) as { error: string }).error).toContain('转会窗口没开');
+  });
 });
 
 // ---------------------------------------------------------------------------

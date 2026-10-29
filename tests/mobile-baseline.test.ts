@@ -844,7 +844,12 @@ describe('v6.39.0 消费中心窄屏静态锁（消费中心过宽修复）', ()
       `.seg 缺 overflow-x:auto（窄屏页签条比视口宽时会被裁掉且滑不动），实见 ${JSON.stringify(ovx)}`,
     ).toBe(true);
     const venue = read('web/src/pages/shop/venueCards.tsx');
-    expect(venue, '子设施行应 flex + wrap（项间可换行，项内不折）').toContain("flexWrap: 'wrap'");
+    expect(venue, '子设施行应挂 .facility-row（v6.59.0 起换行规则在样式表）').toContain('className="facility-row"');
+    const wrap = declarations(rules, '.facility-row', 'flex-wrap');
+    expect(
+      wrap.some((d) => d.value === 'wrap'),
+      `.facility-row 缺 flex-wrap:wrap（子设施行窄屏会被顶宽溢出），实见 ${JSON.stringify(wrap)}`,
+    ).toBe(true);
   });
 });
 

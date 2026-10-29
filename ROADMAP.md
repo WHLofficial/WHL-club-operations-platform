@@ -81,6 +81,22 @@
 
 ---
 
+## v6.59.0 · 消费中心「球场与冠名」页签 + 子设施档位上限 + 队壳首窗（2026-10-29）
+
+**状态**：**未上线（本地待发）**——分支 `feat/v6.59.0-venue-tab`，无迁移、无 schema 变更。判级 minor（页结构、施工规则、队壳窗口均有用户可见变化；`build-info` 仅新增响应字段，向后兼容）。依据用户同日消费中心改造要求：设施经营与冠名市场合成独立首屏页签、球场升级不再拿座位卡人、子设施上限与球场级别对齐、医疗中心暂不开放、队壳只在赛季第 1 窗。
+
+**交付**
+
+- 页签：「球场与冠名」排第一（`ShopTab='venue'`，`?tab=venue` 深链），设施经营 + 冠名市场两卡从主栏底部迁入；其余页签保持原三态分支，不再渲染两卡。
+- 球场升级：删 `upgradeStadiumTier` 的座位下限闸（原「容量不足：升入 X 至少要 N 座」），`nextTier.capacityOk` 随之移除；前端文案「（建议达到 N 座）」，按钮只分「未开放 / 升级」。
+- 档位编号：面向用户整体 +1（库内 `tier=0` → 社区级 (1)），设施卡当前/下一档/开放进度与主场档案（`VenueTab`）四处统一；(X) 只加在球场档位名后。
+- 子设施：`facilityCapForTier(tier)=min(5,tier+1)` 进 `stadium-ops`，越限 400「已达当前球场档位上限（N 级），升级球场后可继续升级」；`build-info` 回 `facilityCap`、每项 `cap/canUpgrade`；前端到限「已达上限（升级球场后解锁）」，5 级才「满级」；五条改为独立行 + 效果说明（商业 +0.1m/万观众、转播 +0.3m、草皮收入 +10%/受损 −15%、青训涨粉 +3%/青训活动 +10%），医疗中心隐藏（后端 key 与等级保留）。
+- 队壳：`createClubOrder` 的 `club_shell` 分支加 `getOpenWindow` 第 1 窗闸（409 `shell_first_window`，无窗仍走通用「转会窗口没开」）；`ShellCard` 增 `firstWindow`，按钮禁用与 title 同口径。
+
+**验收**：typecheck 三份全清；vitest **167 文件 / 2724 例全绿**；build `index-CPlHw6a3.js` 710.75 kB / gzip 222.89 kB；e2e **29/29**（⑱ 校验页签顺序、`?tab=venue` 卡片归属、375 下 6 页签横滑与 `.facility-row` 四行零溢出）。测试计划 `docs/test-plans/v6.59.0-venue-tab-shell-window.md`；回归落点 `tests/stadium-ops.test.ts`（删下限 / 档位上限 / build-info）、`tests/shop-orders.test.ts` TC-A13、`web/src/pages/shop/venueCards.test.tsx`、`tests/mobile-baseline.test.ts` TC-SHOP-02。
+
+**遗留**：医疗中心无常驻数值效果（本轮只隐藏 UI，直调 `/api/club/facilities/upgrade` 仍可升，留待设计）；子设施 5 级封顶与球场最高档 5 一致，后续若扩档需同步 `facilityCapForTier`。
+
 ## v6.58.1 · FIT 卡展示修复（色块/百分号/门将口径）+ 候选名单按钮配色（2026-10-29）
 
 **状态**：**已上线（2026-10-29）**——push `250c375..29be48b`（分支 `fix/v6.58.1-fit-display`），CF Workers Builds 自动部署，前端资产 `index-C1cbOFAR.js`；生产 `/api/health` 200，`/players/17` FIT 四行 99% / 92% / 85% / 0%、分数背景透明。tour v5.11.1 同日发布（`78ad9c2..b007f62`）。判级 patch（纯展示修复，无契约与数据变更）。依据用户同日截图反馈：FIT 卡数字变成色块、需加百分号、门将外场位置应为 0 且三槽位从 85% 起；「加入候选名单」按钮色需与「加入对比」一致。

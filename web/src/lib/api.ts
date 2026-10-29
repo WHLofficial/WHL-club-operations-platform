@@ -1533,12 +1533,16 @@ export interface StadiumBuildInfo {
   balance: number;
   expansionPer100: number;
   maxOpenTier: number;
+  /** 开放进度上限对应的档位名（前端展示「开放至 地区级 (2)」） */
+  maxOpenTierName: string | null;
+  /** 子设施当前可升到的等级上限（随球场档位，tier+1，最高 5） */
+  facilityCap: number;
   refundRatio: number;
   /** v6.30.0 施工开窗闸：当前是否有开着的转会窗口——关窗时三类施工按钮全部置灰（后端同口径 409 no_window） */
   open: boolean;
   tier: { level: number; name: string | null; capacity: number; minSeats: number | null; maxSeats: number | null };
-  nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean; capacityOk: boolean } | null;
-  facilities: { key: string; level: number; nextCost: number | null }[];
+  nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean } | null;
+  facilities: { key: string; level: number; cap: number; nextCost: number | null; canUpgrade: boolean }[];
 }
 
 export interface BuildPaymentResult {

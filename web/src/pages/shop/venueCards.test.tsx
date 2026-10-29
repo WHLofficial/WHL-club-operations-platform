@@ -25,16 +25,18 @@ function buildInfo(patch: Partial<StadiumBuildInfo> = {}): StadiumBuildInfo {
     balance: 12,
     expansionPer100: 1.2,
     maxOpenTier: 3,
+    maxOpenTierName: '大区级',
+    facilityCap: 1,
     refundRatio: 0.5,
     open: true,
     tier: { level: 0, name: '社区球场', capacity: 20000, minSeats: 10000, maxSeats: 30000 },
-    nextTier: { name: '市级球场', minSeats: 25000, upgradeCost: 8, open: true, capacityOk: true },
+    nextTier: { name: '市级球场', minSeats: 25000, upgradeCost: 8, open: true },
     facilities: [
-      { key: 'commercial', level: 0, nextCost: 3 },
-      { key: 'broadcast', level: 0, nextCost: 3.5 },
-      { key: 'pitch', level: 0, nextCost: 4 },
-      { key: 'youth', level: 0, nextCost: 4.5 },
-      { key: 'medical', level: 0, nextCost: 5 },
+      { key: 'commercial', level: 0, cap: 1, nextCost: 3, canUpgrade: true },
+      { key: 'broadcast', level: 0, cap: 1, nextCost: 3.5, canUpgrade: true },
+      { key: 'pitch', level: 0, cap: 1, nextCost: 4, canUpgrade: true },
+      { key: 'youth', level: 0, cap: 1, nextCost: 4.5, canUpgrade: true },
+      { key: 'medical', level: 0, cap: 1, nextCost: 5, canUpgrade: true },
     ],
     ...patch,
   };
@@ -63,7 +65,7 @@ afterEach(() => {
 });
 
 describe('v6.30.0 施工开窗闸（设施经营卡）', () => {
-  it('关窗：扩建 / 升档 / 五类子设施按钮全部置灰，title 与卡内提示同文案', async () => {
+  it('关窗：扩建 / 升档 / 四类子设施按钮全部置灰，title 与卡内提示同文案（医疗本轮隐藏）', async () => {
     renderCard(buildInfo({ open: false }));
     expect(await screen.findByText('设施经营')).toBeTruthy();
 
@@ -78,14 +80,16 @@ describe('v6.30.0 施工开窗闸（设施经营卡）', () => {
     expect(tier.disabled).toBe(true);
     expect(tier.getAttribute('title')).toBe(CLOSED_HINT);
 
-    // 五类子设施各一个按钮：金额互不相同，逐一点名
-    for (const name of ['升级 3.00M', '升级 3.50M', '升级 4.00M', '升级 4.50M', '升级 5.00M']) {
+    // 四类子设施各一个按钮：金额互不相同，逐一点名；医疗中心本轮不展示
+    for (const name of ['升级 3.00M', '升级 3.50M', '升级 4.00M', '升级 4.50M']) {
       const btn = screen.getByRole('button', { name }) as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
       expect(btn.getAttribute('title')).toBe(CLOSED_HINT);
     }
 
-    // 卡内七个施工按钮全灰，一个可点的都没有
+    expect(screen.queryByRole('button', { name: '升级 5.00M' })).toBeNull();
+    expect(screen.queryByText('医疗中心')).toBeNull();
+    // 卡内六个施工按钮全灰，一个可点的都没有
     expect(screen.getAllByRole('button').filter((b) => !(b as HTMLButtonElement).disabled).length).toBe(0);
   });
 
@@ -104,14 +108,20 @@ describe('v6.30.0 施工开窗闸（设施经营卡）', () => {
 
     const facility = screen.getByRole('button', { name: '升级 3.00M' }) as HTMLButtonElement;
     expect(facility.disabled).toBe(false);
-    expect(facility.getAttribute('title')).toBe('升到 1 级：3.00M');
+    expect(facility.getAttribute('title')).toBe('升到 1：3.00M');
+
+    // v6.59.0 文案：档位带 (X)、座位下限改「建议达到」、子设施说明逐条
+    expect(screen.getAllByText(/社区球场 \(1\)/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/建议达到 25,000 座/)).toBeTruthy();
+    expect(screen.queryByText(/至少 25,000 座/)).toBeNull();
+    expect(screen.getByText(/每场商业收入 \+0\.1m \/ 万观众/)).toBeTruthy();
   });
 
   it('关窗优先：状态原因（未开放）不改写 title，提示仍指向开窗', async () => {
     renderCard(
       buildInfo({
         open: false,
-        nextTier: { name: '市级球场', minSeats: 25000, upgradeCost: 8, open: false, capacityOk: false },
+        nextTier: { name: '市级球场', minSeats: 25000, upgradeCost: 8, open: false },
       }),
     );
     expect(await screen.findByText('设施经营')).toBeTruthy();
@@ -120,5 +130,20 @@ describe('v6.30.0 施工开窗闸（设施经营卡）', () => {
     expect(tier.disabled).toBe(true);
     expect(tier.getAttribute('title')).toBe(CLOSED_HINT);
     expect(screen.queryByText(/档暂未开放/)).toBeNull();
+  });
+
+  it('子设施到当前档位上限：提示「已达上限（升级球场后解锁）」，不是「满级」', async () => {
+    renderCard(
+      buildInfo({
+        facilities: [
+          { key: 'commercial', level: 1, cap: 1, nextCost: null, canUpgrade: false },
+          { key: 'broadcast', level: 0, cap: 1, nextCost: 3.5, canUpgrade: true },
+        ],
+      }),
+    );
+    expect(await screen.findByText('设施经营')).toBeTruthy();
+    expect(screen.getByText('已达上限（升级球场后解锁）')).toBeTruthy();
+    expect(screen.queryByText('满级')).toBeNull();
+    expect(screen.queryByRole('button', { name: '升级 3.00M' })).toBeNull();
   });
 });

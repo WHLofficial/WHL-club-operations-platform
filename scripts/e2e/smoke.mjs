@@ -3057,19 +3057,25 @@ async function main() {
       await page.goto(`${BASE}/shop`, { waitUntil: 'networkidle' });
       const t = await text();
       assert(t.includes('消费中心'), '没进消费中心');
-      for (const tab of ['买 PA', '徽章', '角色（职责）', '位置热区', '队壳申请']) {
+      for (const tab of ['球场与冠名', '买 PA', '徽章', '角色（职责）', '位置热区', '队壳申请']) {
         assert(t.includes(tab), `消费中心缺页签：${tab}`);
       }
+      // v6.59.0：球场与冠名合成独立页签且排第一，设施/冠名两卡只在该页签渲染
+      assert(
+        (await page.locator('.seg button').first().innerText()).includes('球场与冠名'),
+        '消费中心首屏页签应为「球场与冠名」',
+      );
       assert(t.includes('我的工单'), '消费中心右栏缺工单列表');
-      assert(t.includes('设施经营') && t.includes('冠名市场'), '消费中心缺设施/冠名两卡');
-      // v6.53.0：档期卡已迁独立 /venue，消费中心不该再有「球场档期」
-      assert(!t.includes('球场档期'), '档期卡应已迁出消费中心，仍见「球场档期」');
+      await page.goto(`${BASE}/shop?tab=venue`, { waitUntil: 'networkidle' });
+      const vt = await text();
+      assert(vt.includes('设施经营') && vt.includes('冠名市场'), '「球场与冠名」页签缺设施/冠名两卡');
+      assert(!vt.includes('球场档期'), '档期卡应已迁出消费中心，仍见「球场档期」');
       // ?tab= 深链落在对应页签
       await page.goto(`${BASE}/shop?tab=position`, { waitUntil: 'networkidle' });
       assert(await page.locator('.seg button.on', { hasText: '位置热区' }).first().isVisible(), '?tab=position 深链没落页签');
       // 375 窄屏（v6.39.0 消费中心过宽修复：用户截图里右栏/页脚被裁）：文档零横向溢出 + 页签单行横滑 + 子设施行可换行
       await page.setViewportSize({ width: 375, height: 812 });
-      await page.goto(`${BASE}/shop`, { waitUntil: 'networkidle' });
+      await page.goto(`${BASE}/shop?tab=venue`, { waitUntil: 'networkidle' });
       const ovShop = await page.evaluate(() => ({
         ov: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         wide: [...document.querySelectorAll('body *')]
@@ -3095,16 +3101,16 @@ async function main() {
         segGeom.ovx === 'auto' && segGeom.wrap === 'nowrap',
         `375 消费中心页签应单行横滑（overflow-x:auto + flex-wrap:nowrap），实见 ${JSON.stringify(segGeom)}——② 块被删/挪块时红`,
       );
-      assert(segGeom.buttons >= 5 && segGeom.scrollable, `375 页签条应真的有 5 个页签且可横滑，实见 ${JSON.stringify(segGeom)}`);
+      assert(segGeom.buttons >= 6 && segGeom.scrollable, `375 页签条应有 6 个页签且可横滑，实见 ${JSON.stringify(segGeom)}`);
       const facRow = await page.evaluate(() => {
-        const p = [...document.querySelectorAll('p')].find((el) => el.textContent?.includes('子设施'));
-        if (!p) return null;
-        const cs = getComputedStyle(p);
-        const kids = [...p.children];
+        const row = document.querySelector('.facility-row');
+        if (!row) return null;
+        const cs = getComputedStyle(row);
+        const kids = [...row.children];
         return {
           display: cs.display,
           wrap: cs.flexWrap,
-          rows: new Set(kids.map((k) => Math.round(k.getBoundingClientRect().top))).size,
+          rows: document.querySelectorAll('.facility-row').length,
           items: kids.length,
           right: Math.max(...kids.map((k) => Math.round(k.getBoundingClientRect().right))),
           vw: document.documentElement.clientWidth,
@@ -3115,6 +3121,7 @@ async function main() {
         `子设施行应 flex + wrap 可换行，实见 ${JSON.stringify(facRow)}`,
       );
       assert(facRow === null || facRow.right <= facRow.vw + 1, `子设施行右侧超出视口：${JSON.stringify(facRow)}`);
+      assert(facRow === null || facRow.rows === 4, `子设施应四行（医疗本轮隐藏），实见 ${JSON.stringify(facRow)}`);
       await page.screenshot({ path: join(SHOT_DIR, 'e2e-shop-375.png'), fullPage: true });
       console.log(
         `   375 消费中心：文档溢出 ${ovShop.ov}px；页签 ${JSON.stringify(segGeom)}；子设施行 ${

@@ -13,6 +13,7 @@
 //   防重复退、防「审批/拒绝并发时给已生效的单退款」。
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
+import { getOpenWindow } from './seasons.ts';
 import { CONFIG_DEFAULTS, createConfigService } from '../core/config.ts';
 import {
   CLUB_SHELL_PENDING_LIMIT,
@@ -590,6 +591,11 @@ export async function createClubOrder(
   if (opts.category === 'club_shell') {
     if (settings.hpremiumClubIds.includes(opts.clubId)) {
       throw new HttpError(403, '豪门俱乐部队壳事项请在群内咨询管理组，系统不受理申请');
+    }
+    // 队壳只在赛季第 1 窗（赛季初窗口）开放：窗口序号以 season_windows 当前开放窗为准
+    const win = await getOpenWindow(db);
+    if (!win || win.windowSeq !== 1) {
+      throw new HttpError(409, '队壳申请只在赛季第 1 个窗口（赛季初窗口）开放；现在不是赛季初窗口，等赛季初再来。', 'shell_first_window');
     }
     const pending = await db
       .prepare("SELECT COUNT(*) AS n FROM shop_orders WHERE club_id = ? AND category = 'club_shell' AND status = 'pending'")
