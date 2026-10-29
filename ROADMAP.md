@@ -81,6 +81,21 @@
 
 ---
 
+## v6.60.0 · 激活通知截图弹窗（2026-10-29）
+
+**状态**：**未上线**——本地分支 `feat/v6.60.0-activation-proof-dialog`（基线 `186f087`，文档提交 `de59459`），未 push、未部署；无后端/迁移/契约变更，沿用 `POST /api/media/activation` → `POST /api/market/activations`。判级 minor（激活流程新增强制截图引导，用户可见）。依据用户同日要求：激活前必须先在 QQ 私信对方主教练并上传激活通知截图，把规则与检查项做成弹窗一次讲清。
+
+**交付**
+
+- 新组件 `web/src/pages/market/ActivationProofDialog.tsx`：拖拽/点选 png、jpg、webp（≤5MB），object URL 预览、重新选择（换图/卸载都 revoke）；按空文件 / 类型 / 体积顺序校验，错误就地 `role="alert"` 显示并清空选择；只有「确认激活」才 `await onConfirm(file)`，提交中锁 Esc/遮罩/取消/重选，失败留在弹窗可重试。
+- 文案：标题「上传激活通知截图」；说明先 QQ 私信对方主教练；三项检查（你的俱乐部名 / 球员名 / 「竞价结束后请选择是否匹配」）；`myClubName` 存在时用真实队名与球员名拼示例，否则回退规则原文。
+- 入口收敛：`MarketActivationPage` 的 `proofTarget` 改存球员对象，点「激活」直接开弹窗（删除隐藏 file input / `onProofChosen` / 旧证据制长说明）；`SideOps` 两处「激活」（非卖品 / 别队普通球员）共用同一弹窗，删除 `proofFile`、内嵌文件框与 `activatePanel`，新增 `proofOpen` 与 `confirmActivation`；`Player.tsx` 传 `myClubName`/`opponentClubName`。
+- 成功后沿用原链路：市场页 `setProofTarget(null)` + `onActivated` + 失效 `['market','activatable']` / `['market','board']`；SideOps `refreshAfterMutation()` + 提示「激活挂牌已提交：5 分钟内出首价才算数。」。`styles.css` 新增 `.proof-*` 样式。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2739 例全绿**（较 v6.59.0 基线 167/2724 净 +2 文件 / +15 例；`ActivationProofDialog.test.tsx` 11 例覆盖空/类型/5MB 边界、拖拽多文件取第一、换图 revoke、取消不发请求、失败重试、提交中锁关闭；市场页 2 例与 SideOps 5 例覆盖真实提交链与成功提示）；build `web/dist/assets/index-Ck8kRwo1.js` **714.14 kB / gzip 225.52 kB**；e2e **29/29**（本地 `npm run dev` 8791 读构建产物；5173 被另一会话占用，未另起 dev:web）。code-review 无阻断项，补测后复跑全量。测试计划 `docs/test-plans/v6.60.0-activation-proof-dialog.md`。
+
+**遗留**：上线后需手机真机手测相册选图、桌面拖拽与失败重试（e2e 不覆盖真实相册）；未 push/部署，等用户明确下令。
+
 ## v6.59.0 · 消费中心「球场与冠名」页签 + 子设施档位上限 + 队壳首窗（2026-10-29）
 
 **状态**：**已上线（2026-10-29）**——push `1db7dee..f584130`（分支 `feat/v6.59.0-venue-tab`），CF Workers Builds 自动部署 Version `bab2d987-cc20-420b-ad55-20e62cc8bfb5` @2026-10-29T08:16:13Z（此后仅文档提交的同构重部署，前端资产哈希不变）；无迁移、无 schema 变更。判级 minor（页结构、施工规则、队壳窗口均有用户可见变化；`build-info` 仅新增响应字段，向后兼容）。依据用户同日消费中心改造要求：设施经营与冠名市场合成独立首屏页签、球场升级不再拿座位卡人、子设施上限与球场级别对齐、医疗中心暂不开放、队壳只在赛季第 1 窗。

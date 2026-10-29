@@ -4,6 +4,25 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.0] · 激活通知截图弹窗（2026-10-29）
+
+**未上线**：本地分支 `feat/v6.60.0-activation-proof-dialog`（基线 `186f087`，文档提交 `de59459`），无 push、无部署。无后端/迁移/契约变更，沿用 `POST /api/media/activation`（5MB，png/jpeg/webp）→ `POST /api/market/activations`（`playerId` + `proofMediaKey`）。判级 minor（激活流程新增强制截图引导，用户可见）。设计与测试计划见 `docs/superpowers/specs/2026-10-29-activation-proof-dialog-design.md`、`docs/test-plans/v6.60.0-activation-proof-dialog.md`。
+
+**Added**
+
+- 新增共用弹窗 `web/src/pages/market/ActivationProofDialog.tsx`：拖拽/点选 png、jpg、webp，≤5MB，object URL 预览、可重新选择；按空文件 / 类型 / 体积顺序校验并就地报错；提交中锁关闭（Esc、遮罩、取消、重选），失败留在弹窗可重试，只有点「确认激活」才真正上传+建单。
+- 文案：标题「上传激活通知截图」；说明「激活前，先在 QQ 私信对方主教练，再把通知截图传上来。」；三项检查为俱乐部名、球员名、「竞价结束后请选择是否匹配」；有真实队名/球员名时拼示例，否则回退规则原文。
+- 两个激活入口统一走该弹窗：转会市场激活页（`MarketActivationPage`）与球员页 `SideOps`；删除隐藏 file input 与旧「证据制」长说明。
+
+**Changed**
+
+- 激活成功后的失效与提示沿用原链路：市场页失效 `['market','activatable']` / `['market','board']` 并摆出首价表单；SideOps 走 `refreshAfterMutation()` 并提示「激活挂牌已提交：5 分钟内出首价才算数。」。
+- `web/src/styles.css` 新增 `.proof-*`（拖拽区/清单/示例/预览/错误）样式。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2739 例全绿**（较 v6.59.0 基线 167/2724 净 +2 文件 / +15 例，含组件 11 例、市场页提交链 2 例、SideOps 成功链 1 例）；build `web/dist/assets/index-Ck8kRwo1.js` **714.14 kB / gzip 225.52 kB**；e2e **29/29**（本地 wrangler 8791 读构建产物）。code-review 无阻断项；已补「先上传截图拿 key，再带 `playerId`+`proofMediaKey` 建激活」与 SideOps 成功路径用例。
+
+**遗留**：上线后需手机真机手测相册选图、桌面拖拽与失败重试（本地 e2e 不覆盖真实相册）；未 push/部署，等用户明确下令。
+
 ## [v6.59.0] · 消费中心「球场与冠名」页签 + 子设施档位上限 + 队壳首窗（2026-10-29）
 
 **已上线（2026-10-29）**：push `1db7dee..f584130`（分支 `feat/v6.59.0-venue-tab`），CF Workers Builds 自动部署 Version `bab2d987-cc20-420b-ad55-20e62cc8bfb5` @2026-10-29T08:16:13Z（此后仅文档提交的同构重部署，前端资产哈希不变）；无迁移、无 schema 变更。生产冒烟 `/api/health`、`/`、`/shop`、`/players`、`/market`、`/ledger` 全 200，`build-info` 与队壳下单匿名 401，线上 `ShopPage-DgSGhRTF.js` 与本地构建逐字节一致（含「球场与冠名 / 已达上限 / 建议达到 / 赛季第 1 个窗口」文案）。判级 minor（消费中心页结构、施工规则与队壳窗口均有用户可见变化，端点仅新增响应字段，向后兼容）。测试计划见 `docs/test-plans/v6.59.0-venue-tab-shell-window.md`。
