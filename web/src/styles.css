@@ -1434,6 +1434,19 @@ table.matches-table-narrow .rating-badge {
   letter-spacing: 1px;
 }
 
+/* 顶卡角色带（v6.60.1 补回）：原属性页签头部的 RoleID1–5 chips，独立一行、随 320 档换行 */
+.player-hero-roles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.player-hero-roles .q-label {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
 /* 顶卡右格：经纪人性格 + 队徽 64 + 对比入口 */
 .player-hero-side {
   display: flex;

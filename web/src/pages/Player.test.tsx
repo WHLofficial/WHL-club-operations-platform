@@ -162,6 +162,37 @@ function open(id = 1): ReturnType<typeof userEvent.setup> {
   return userEvent.setup();
 }
 
+describe('TC-PLAYER-ROLE：顶卡角色带（v6.60.1 补回 v6.56.0 重排丢失）', () => {
+  it('TC-PLAYER-ROLE-01 · RoleID1–5 渲染在顶卡，`+` 档沿用 role-plus 配色', async () => {
+    open();
+    await screen.findByText('林承宇');
+
+    const band = document.querySelector('.player-hero-roles') as HTMLElement | null;
+    expect(band).not.toBeNull();
+    expect(band!.textContent).toContain('角色');
+    const chip = within(band!).getByText('RB 边后卫 +');
+    expect(chip.className).toContain('role-chip');
+    expect(chip.className).toContain('role-plus');
+    expect(chip.className).not.toContain('role-plusplus');
+  });
+
+  it('TC-PLAYER-ROLE-02 · 无有效角色（占位 0/null）时整条角色带不渲染', async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (/^\/api\/players\/\d+$/.test(path)) {
+        return Promise.resolve(
+          detail(1, { gameAttrs: { ...ATTR_BASE, RoleID1: 0, RoleID2: null, RoleID3: undefined } }),
+        );
+      }
+      if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'open' } });
+      if (/^\/api\/players\/\d+\/growth$/.test(path)) return Promise.reject(new Error('用例不打桩成长数据'));
+      return Promise.reject(new Error(`测试没打桩的请求：${path}`));
+    });
+    open();
+    await screen.findByText('林承宇');
+    expect(document.querySelector('.player-hero-roles')).toBeNull();
+  });
+});
+
 describe('TC-CMP-DET：详情页「对比」入口（v6.34.0 建立，v6.37.0 改为点击开浮层）', () => {
   it('TC-CMP-PICK-01 · 入口在顶卡 hero 右格（经纪人性格/队徽之后），渲染为按钮（不再是 link）', async () => {
     open();

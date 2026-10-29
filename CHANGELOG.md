@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.1] · 球员页角色带恢复（2026-10-29）
+
+**未上线**：本地分支 `fix/v6.60.1-player-roles`（基于 v6.60.0 `b4468a5`），无 push、无部署；纯前端展示修复，无后端、迁移或契约变化。判级 patch。
+
+**Fixed**
+
+- v6.56.0 球员页全页重排（`f5f2453`）删除了属性页签头部 `RoleID1–5` 角色带，提交说明称已上移顶卡与右翼，但实际只搬了位置 chips 与热区图，角色带整块没有落点——球员页不再显示任何角色，只有对比页还保留。
+- 现补回顶卡 hero：`角色` 标签 + 五槽 chips，`+` / `++` 沿用 `role-plus` / `role-plusplus` 配色；空槽与占位 `0` 由 `roleChs` 过滤，无有效角色时整条不渲染（不摆空标签）。新增 `.player-hero-roles` 样式，随窄屏换行、不横向溢出。
+- FIT 卡的「最合适位置 / 角色」是推荐结果，与这条「球员当前装备角色」语义不同，两者并存。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2741 例全绿**（新增 TC-PLAYER-ROLE-01/02：角色带在顶卡且 `+` 档配色正确、占位 0/null 时整条不渲染）；build `web/dist/assets/index-pp6VPxdP.js` **714.55 kB / gzip 225.61 kB**；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：未 push/部署，等用户明确下令。
+
 ## [v6.60.0] · 激活通知截图弹窗（2026-10-29）
 
 **已上线（2026-10-29）**：push `186f087..373bd7a`（分支 `feat/v6.60.0-activation-proof-dialog`），CF Workers Builds 自动部署 Version `44b7e14d-696e-438b-ba80-b91dae4780b6` @2026-10-29T13:53:55Z；无迁移、无 schema 变更，也无后端/契约变更，沿用 `POST /api/media/activation`（5MB，png/jpeg/webp）→ `POST /api/market/activations`（`playerId` + `proofMediaKey`）。生产 `/`、`/players`、`/market`、`/shop`、`/ledger` 与 `/api/health` 全 200（d1/tour_db/kv 全 ok），`POST /api/market/activations` 匿名 401；线上资产 `index-Ck8kRwo1.js` 与本地最终构建逐字节一致（714,139 B，含「上传激活通知截图」「激活挂牌已提交」「6.60.0」文案）。上线记录文档提交触发同构重部署 Version `832f9492-4733-4f3a-9fae-047f4276b7b5` @2026-10-29T13:57:16Z，前端资产哈希不变。判级 minor（激活流程新增强制截图引导，用户可见）。设计与测试计划见 `docs/superpowers/specs/2026-10-29-activation-proof-dialog-design.md`、`docs/test-plans/v6.60.0-activation-proof-dialog.md`。

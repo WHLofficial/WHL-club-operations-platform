@@ -30,6 +30,7 @@ import {
   nationName,
   playstyleBadges,
   positionName,
+  roleChs,
 } from '../lib/ref.ts';
 // 状态词统一用球员库那套（v6.2.0 两表合一：ref.ts 的旧表已删，normal=在队 / free=自由身）
 // attrClass 五档分段（v6.19.0 全仓统一口径）也在这里；STATUS_LABEL 已随顶卡状态徽章下沉退役（v6.56.0）
@@ -333,6 +334,11 @@ export default function Player() {
   const posChips = ['PosID1', 'PosID2', 'PosID3', 'PosID4']
     .map((k) => positionName(attrs[k]))
     .filter((v): v is string => v !== null);
+  // 角色带（v6.56.0 重排时漏搬，v6.60.1 补回顶卡）：FC 源槽 RoleID1–5 的中文名，
+  // `+` / `++` 尾缀沿用 role-chip 三态配色；空槽/占位 0 由 roleChs 过滤。
+  const roles = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5']
+    .map((k) => roleChs(attrs[k]))
+    .filter((v): v is string => v !== null);
   const isGk = player.position === 'GK';
   const weakfoot = Number(attrs['weakfoot']);
   const skillmoves = Number(attrs['skillmoves']);
@@ -440,6 +446,21 @@ export default function Player() {
             {/* 徽章计数（v6.35.0 统一走 BadgeCounts）：金在前、零值抑制，title 由组件挂 */}
             <BadgeCounts silver={player.badgesSilver} gold={player.badgesGold} density="icon" />
           </div>
+          {/* 角色带（v6.60.1 补回）：原属性页签头部的 RoleID1–5 chips，重排后独立成顶卡一行；
+              与 FIT 卡的「最合适角色」不同，这里展示的是球员当前装备的角色与 `+`/`++` 档。 */}
+          {roles.length > 0 && (
+            <div className="player-hero-roles">
+              <span className="q-label">角色</span>
+              {roles.map((r, i) => (
+                <span
+                  key={`${r}-${i}`}
+                  className={r.includes('++') ? 'role-chip role-plusplus' : /\+\s*$/.test(r) ? 'role-chip role-plus' : 'role-chip'}
+                >
+                  {r}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="player-hero-side">
           <p className="player-card-agent">经纪人性格 🕴 {AGENT_TIER_LABEL[player.agentTier] ?? player.agentTier}</p>

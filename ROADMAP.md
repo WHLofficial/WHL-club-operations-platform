@@ -81,6 +81,20 @@
 
 ---
 
+## v6.60.1 · 球员页角色带恢复（2026-10-29）
+
+**状态**：**未上线**——本地分支 `fix/v6.60.1-player-roles`（基于 v6.60.0 `b4468a5`），未 push、未部署；纯前端展示修复，无后端/迁移/契约变化。判级 patch。起因：用户报告「UI 重排后球员的 roles 被丢弃了」。
+
+**交付**
+
+- 根因：v6.56.0 全页重排（`f5f2453`）把属性页签头部的 `RoleID1–5` 角色带整块删除，提交说明称「位置 chips / 角色带……已上移顶卡与右翼」，实际只搬了位置 chips 与热区图，角色带没有落点；此后只有 `PlayerCompare` 还渲染 `role-chips`。
+- 修复：`web/src/pages/Player.tsx` 恢复 `roles` 派生（`RoleID1..5` → `roleChs`，空槽过滤）并在顶卡 hero 增加 `.player-hero-roles` 一行（`角色` 标签 + chips）；`+` / `++` 沿用 `role-plus` / `role-plusplus`；无有效角色整条不渲染。`web/src/styles.css` 增加该行 flex-wrap 样式，320 档随行换行。
+- 语义边界：FIT 卡展示「最合适的位置 / 角色」推荐，顶卡展示球员当前装备角色，两者并存不互相替代。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2741 例全绿**（新增 `web/src/pages/Player.test.tsx` 的 TC-PLAYER-ROLE-01/02）；build `web/dist/assets/index-pp6VPxdP.js` **714.55 kB / gzip 225.61 kB**；e2e **29/29**（本地 `npm run dev` 8791 读构建产物）。
+
+**遗留**：未 push/部署，等用户明确下令；上线后手机窄屏目测角色带换行。
+
 ## v6.60.0 · 激活通知截图弹窗（2026-10-29）
 
 **状态**：**已上线（2026-10-29）**——push `186f087..373bd7a`（分支 `feat/v6.60.0-activation-proof-dialog`），CF Workers Builds 自动部署 Version `44b7e14d-696e-438b-ba80-b91dae4780b6` @2026-10-29T13:53:55Z；无迁移、无 schema 变更，也无后端/契约变更，沿用 `POST /api/media/activation` → `POST /api/market/activations`。判级 minor（激活流程新增强制截图引导，用户可见）。依据用户同日要求：激活前必须先在 QQ 私信对方主教练并上传激活通知截图，把规则与检查项做成弹窗一次讲清。
