@@ -6,7 +6,7 @@
 
 ## [v6.57.2] · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）
 
-**本地实现完成，未 push / 未 deploy**。判级 patch，两项用户裁决，测试计划 `docs/test-plans/v6.57.2-narrow-ops-first.md`。
+**已随 2026-10-29 批次上线**（Version `a05fb061-4ca1-4d6c-b587-ae592fb30c3d`，push `0fa1141..b712c32` 共 24 提交，0081 已于 push 前 apply；上线记录见 [ROADMAP.md](./ROADMAP.md) v6.57.2 节）。判级 patch，两项用户裁决，测试计划 `docs/test-plans/v6.57.2-narrow-ops-first.md`。
 
 **Changed**
 
@@ -15,7 +15,7 @@
 
 ## [v6.57.1] · 收口审：三组终验与变异验证捡出的修复 + 性能口径补测（2026-10-29）
 
-**本地实现完成，未 push / 未 deploy；迁移 0081 未 apply 生产（apply 另行授权）**。判级 patch。终验/变异/修复由 dynamic-workflows 收口工作流执行（全 Flash），全量证据与不修项清单见 [ROADMAP.md](./ROADMAP.md) v6.57.1 节。
+**已随 2026-10-29 批次上线**（迁移 0081 已于 push 前 apply 到生产）。判级 patch。终验/变异/修复由 dynamic-workflows 收口工作流执行（全 Flash），全量证据与不修项清单见 [ROADMAP.md](./ROADMAP.md) v6.57.1 节。
 
 **Fixed**
 
@@ -33,7 +33,7 @@
 
 ## [v6.57.0] · 预期收入额度线：窗口内预支未到账的卖人收入（2026-10-28）
 
-**本地实现完成，未 push / 未 deploy；迁移 0081 未 apply 生产（apply 另行授权）**。判级 minor。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。
+**已随 2026-10-29 批次上线**（迁移 0081 已于 push 前 apply 到生产）。判级 minor。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。
 
 **Added**
 
@@ -44,7 +44,7 @@
 
 ## [v6.56.0] · 球员页全页重排 + fit 适配度引擎移植（2026-10-28）
 
-**本地实现完成，未 push / 未 deploy**。判级 minor。计划 `memory/plan-v6.55.0-attr-head-relayout.md`、测试计划 `docs/test-plans/v6.56.0-attr-head-relayout.md`（25 TC）。
+**已随 2026-10-29 批次上线**。判级 minor。计划 `memory/plan-v6.55.0-attr-head-relayout.md`、测试计划 `docs/test-plans/v6.56.0-attr-head-relayout.md`（25 TC）。
 
 **Added**
 
@@ -53,7 +53,7 @@
 
 ## [v6.55.0] · 标价↔最低报价自动对齐 + 意向单多笔并存·开窗择一（2026-10-28）
 
-**本地实现完成，未 push / 未 deploy**。判级 minor；零迁移零生产写。设计 `docs/superpowers/specs/2026-10-27-intent-multi-and-price-align-design.md`、测试计划 `docs/test-plans/v6.55.0-intent-multi-and-price-align.md`（31 TC）。
+**已随 2026-10-29 批次上线**（零迁移零生产写）。判级 minor。设计 `docs/superpowers/specs/2026-10-27-intent-multi-and-price-align-design.md`、测试计划 `docs/test-plans/v6.55.0-intent-multi-and-price-align.md`（31 TC）。
 
 **Added**
 

@@ -83,7 +83,9 @@
 
 ## v6.57.2 · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）
 
-**状态**：**本地实现完成，未 push / 未 deploy**。判级 patch，两项用户裁决：① 窄屏（≤1050）**只把 SideOps 操作区**提到主列之前（位置分布 / 身份徽章 / PlayStyles 三卡留底部），宽屏布局不动；② FIT 卡底部图例说明文字整段删除。
+**状态**：**已随 2026-10-29 批次上线**（见本节末上线记录）。判级 patch，两项用户裁决：① 窄屏（≤1050）**只把 SideOps 操作区**提到主列之前（位置分布 / 身份徽章 / PlayStyles 三卡留底部），宽屏布局不动；② FIT 卡底部图例说明文字整段删除。
+
+**上线记录（2026-10-29，用户授权「apply 并 push」）**：迁移 **`0081` 已于 push 前 apply 到生产**（`Executed 7 commands in 1.82ms`；只读核验：待应用清零、`fund_holds_bid/offer/sea_sealed_guard` 三触发器在场且 SQL 全部含 `expected_income_rate` 额度式）；随后 push `0fa1141..b712c32`（**24 个提交**，v6.55.0 / v6.56.0 / v6.57.0 / v6.57.1 / v6.57.2 整批）触发 CF Workers Builds 自动部署，生产 Version **`a05fb061-4ca1-4d6c-b587-ae592fb30c3d`**（2026-10-29T01:39:20Z，Source `Unknown (deployment)`）；线上入口资产 `index-BhPVQkXy.js` / `index-BgtFgYw9.css` 与本地 6.57.2 重建产物逐字同名（线上 JS 版本串 `6.57.2`、含 v6.57.0 特征串）；上线回读 `/api/health` / `/api/players?limit=1` / `/api/market/listings` / `/api/clubs` / `/api/squads` 全 200。⚠️ 工具口径留痕：`wrangler deployments list`（4.131.1）的列表是**旧→新**排序、最新部署在尾部——本次曾据首行误判「未部署」，以线上资产版本串为准纠正。
 
 **交付**：`web/src/pages/Player.tsx` 右翼拆两个 aside——`player-wing-ops`（只装 SideOps）与 `player-wing-rest`（三卡），DOM 保持 main→ops→rest（宽屏阅读序与 tab 序不变）；`web/src/styles.css` 的 `.player-wings` 改 `grid-template-areas`：宽屏 `'main ops'/'main rest'`（`gap: 14px 18px`，行距 14 延续原翼内 flex 间距）、≤1050 块改 `'ops'/'main'/'rest'` + `gap: 18px`（延续原窄屏间距），1050 单列规则保留（`tests/mobile-baseline.test.ts` 的断点锁仍绿）；fit-legend JSX 与死样式一并删除；`Player.test.tsx` TC-C-FIT-01 改锁 `.fit-legend` 不渲染。**SideOps.tsx 函数体零改动**（v6.56.0 约束保持）。
 
@@ -93,7 +95,7 @@
 
 ## v6.57.1 · 收口审：三组终验 + 变异验证捡出的修复 + 性能口径补测（2026-10-29）
 
-**状态**：**本地实现完成，未 push / 未 deploy；迁移 0081 仍未 apply 生产（另行授权，先 apply 再 push）**。判级 patch（对 v6.55.0 / v6.56.0 / v6.57.0 三个本地提交的收口审，由 dynamic-workflows 工作流执行：三组终验与 code-review 四评审并行 → 三计划变异串行 → 分诊 → 修复与门禁循环 → e2e/视口二轮 → 收口提交；全程工人模型 GLM-5.3-Flash，GLM-5.3 周额度中断后按用户预案降级）。
+**状态**：**已随 2026-10-29 批次上线**（0081 已于 push 前 apply，见 v6.57.2 节上线记录）。判级 patch（对 v6.55.0 / v6.56.0 / v6.57.0 三个本地提交的收口审，由 dynamic-workflows 工作流执行：三组终验与 code-review 四评审并行 → 三计划变异串行 → 分诊 → 修复与门禁循环 → e2e/视口二轮 → 收口提交；全程工人模型 GLM-5.3-Flash，GLM-5.3 周额度中断后按用户预案降级）。
 
 **终验与变异（只读，产出 31 条发现）**：三组终验对照设计稿/测试计划逐条审 `git show` 全量 diff——v6.55 终验 9 条 / v6.57 终验 7 条 / v6.56 终验 13 条 / code-review 终审 2 条。变异验证 38 条逐条执行（改一处 → 定向跑 → 核对变红的正是该断言 → 还原），命中 29（v6.55 9/10 · v6.56 12/14 · v6.57 8/14）；未命中 9 条逐一归因——大部分转为测试缺口由补强提交闭合，两条（TC-A-014 路由形态锁、TC-B-021②）经实证判定为用例形态问题/预言不可观测。分诊：须修 15 / 不修 18。
 
@@ -123,7 +125,7 @@
 
 ## v6.57.0 · 预期收入额度线：窗口内预支未到账的卖人收入（2026-10-28）
 
-**状态**：**本地实现完成，未 push / 未 deploy，迁移 0081 未 apply 生产**；判级 minor（新能力：额度公式 + 触发器重建 + balance 三字段 + 前端增强档）。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`（v3，三轮审查全消化）、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。
+**状态**：**已随 2026-10-29 批次上线**（0081 已于 push 前 apply，见 v6.57.2 节上线记录）；判级 minor（新能力：额度公式 + 触发器重建 + balance 三字段 + 前端增强档）。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`（v3，三轮审查全消化）、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。
 
 **裁决**（设计 §0，2026-10-27 用户拍板）：额度来源 = 竞价领先出价 + 待审/谈判中**成交类**单（type 白名单）；落空自然收缩（实时公式不预入账，负可用挡冻结型支出）；折扣率 k=1.0；作用面 = 转会类全部消费点（球场扩建/商场工单明确排除，保持现金口径）；展示走增强档（余额端点新字段 + 弹层动用额）。
 
@@ -135,7 +137,7 @@
 
 ## v6.56.0 · 球员页全页重排 + fit 适配度引擎移植（2026-10-28）
 
-**状态**：**本地实现完成，未 push / 未 deploy**；判级 minor（新页面结构 + 新展示能力）。计划 `memory/plan-v6.55.0-attr-head-relayout.md`（按裁决改号 v6.56.0）、测试计划 `docs/test-plans/v6.56.0-attr-head-relayout.md`（25 TC）。
+**状态**：**已随 2026-10-29 批次上线**（见 v6.57.2 节上线记录）；判级 minor（新页面结构 + 新展示能力）。计划 `memory/plan-v6.55.0-attr-head-relayout.md`（按裁决改号 v6.56.0）、测试计划 `docs/test-plans/v6.56.0-attr-head-relayout.md`（25 TC）。
 
 **交付（`078df4c`，17 文件 +2819 行）**：**fit 引擎移植**——自 tour 仓 `shared/` 复制 `fitScore.ts`（207 行，fitProfileAll/fitTile/fitTileTip 双指标：个人内百分位 + 联盟绝对分）与 `roleFit.ts`（826 行，49 槽权重冻结表 + RoleID/PosID 映射）进 `web/src/lib/fit/`，断言逐字迁移（roleFit 源核对改用本仓 `ref/playstyle.json` 真源，比 tour 冻结表更硬）；新增 `fit-parity.test.ts` 全量快照双跑（固定种子确定性 fixture 对 tour 引擎逐字段比对，tour 仓不在场自动 skip）。**球员页重排**——顶卡 hero（贴纸卡框精髓：名字/官方缩写/标记 + CA/PA/身价大数字 + 位置 chips + 花式/逆足/声望/体型 quads + 🥇🥈 + 经纪人/队徽 64/对比入口）+ 双翼 grid `minmax(0,1fr) | 300px`：主列五页签默认属性（雷达 350 宽 + fit 卡前 4 槽三态色点 85/50），右翼 SideOps 置顶 + 热区 + 身份徽章卡 + PlayStyles 卡；旧 `.attr-head` 三列 / `.star-line` / `.dossier` 布局规则退役，1050 双翼临界断点由 `tests/mobile-baseline.test.ts` 静态锁改写钉死；AttrRadar/PositionHeatmap 只动尺寸注释（语义零变化回归锁）。
 
@@ -145,7 +147,7 @@
 
 ## v6.55.0 · 标价↔最低报价自动对齐 + 意向单多笔并存·开窗择一（2026-10-28）
 
-**状态**：**本地实现完成，未 push / 未 deploy**；判级 minor（新规则语义）；零迁移零生产写（生产快照：在途 intent 9 条/9 球员、违例 0、同买方并存 0——无需数据订正）。设计 `docs/superpowers/specs/2026-10-27-intent-multi-and-price-align-design.md`、测试计划 `docs/test-plans/v6.55.0-intent-multi-and-price-align.md`（31 TC）。
+**状态**：**已随 2026-10-29 批次上线**（见 v6.57.2 节上线记录）；判级 minor（新规则语义）；零迁移零生产写（生产快照：在途 intent 9 条/9 球员、违例 0、同买方并存 0——无需数据订正）。设计 `docs/superpowers/specs/2026-10-27-intent-multi-and-price-align-design.md`、测试计划 `docs/test-plans/v6.55.0-intent-multi-and-price-align.md`（31 TC）。
 
 **交付（`53f624f`，18 文件）**：**标价对齐**——`setOfferSettings` 旧值分流：新标价低于库中旧标价（含首挂 NULL）⇒ 最低报价自动对齐降至新标价（响应 `minOfferPriceAdjusted{from,to}`，前端回灌草稿 null→''）；标价未动或上升（是底线越界）⇒ 维持 400；对齐支位于全部区间校验之后；审计仅对齐时追加 `minAlignedTo`（对齐值 = 公开标价，无私密信息，严格 toEqual 与 `not.toContain('40')` 哨兵不弱化）。**意向单多笔并存**——唯一性球员级放宽为买方级（enterIntent NOT EXISTS 加 buyer 维度、dup 预检扩 `IN ('pending','intent')`）；确认/开窗同意的 occupy 叠双闸（同球员悬挂 accepted + 非卖品赛跑）；fulfill 批新增收口 UPDATE（同球员其余 intent → expired，守卫 `EXISTS(listed)`，blanket 释放/事件两条复用语句自动覆盖）；落选方收 `offer_intent_lost`（NOTIFY_META 43→44，深链落「我送出的」）；`finalizeOffer` 后三条挂终态守卫（堵撤回/确认赛跑时误释放赢家冻结的资金洞）；`rollbackGhostOffer` 幽灵单回滚；开窗提醒 LIMIT 200 OFFSET 翻页取全 + 按 (player) 聚合（卖方一条 N 家择一、买方各一条竞争提示，N=1 文案不变）。竞态复现用手测 Proxy 拦 D1 在单线程里造毫秒窗（非卖品赛跑 / 终态守卫两组）。
 
