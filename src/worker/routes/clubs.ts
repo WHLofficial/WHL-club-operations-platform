@@ -18,6 +18,7 @@ import { createConfigService } from '../../core/config.ts';
 import { balanceSnapshot } from '../ledger.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
+import { voucherBalance, voucherMovement } from '../voucher.ts';
 import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms } from '../naming-ops.ts';
 import { acceptOffer, activateQueuedStatements, listClubOffers } from '../market-ops.ts';
 import { queueClubNotification } from '../notify.ts';
@@ -1032,11 +1033,15 @@ app.get('/club/stadium/build-info', async (c) => {
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   const stadium = await c.env.DB
-    .prepare('SELECT club_id, capacity, tier, build_credit FROM stadiums WHERE club_id = ?')
+    .prepare('SELECT club_id, capacity, tier FROM stadiums WHERE club_id = ?')
     .bind(club.id)
-    .first<{ club_id: number; capacity: number; tier: number; build_credit: number }>();
+    .first<{ club_id: number; capacity: number; tier: number }>();
   if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
-  const [tierTable, prices] = await Promise.all([loadTierTable(c.env.DB), loadFacilityPrices(c.env.DB)]);
+  const [tierTable, prices, vouchers] = await Promise.all([
+    loadTierTable(c.env.DB),
+    loadFacilityPrices(c.env.DB),
+    voucherBalance(c.env.DB, club.id),
+  ]);
   const config = createConfigService(c.env.DB);
   const maxOpenTier = (await config.getNumber('stadium_max_open_tier')) ?? 1;
   const refundRatio = (await config.getNumber('voucher_refund')) ?? 0.25;
@@ -1050,7 +1055,8 @@ app.get('/club/stadium/build-info', async (c) => {
   const balance = await loadBalance(c.env.DB, club.id);
   const win = await getOpenWindow(c.env.DB);
   return c.json({
-    credit: stadium.build_credit,
+    // v6.58.0：券余额升格为俱乐部级（建设返 25% + 管理组发放），字段名从 credit 改为 voucherBalance
+    voucherBalance: vouchers,
     balance,
     expansionPer100: prices.expansionPer100,
     maxOpenTier,

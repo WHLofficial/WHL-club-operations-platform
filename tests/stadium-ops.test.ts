@@ -42,7 +42,7 @@ function freshEnv(): Fixture {
   return { env, sqlite, tour, kv };
 }
 
-// 默认球场：档位 0（1.2-2.5 万座），容量 20000，建设券 0.4，余额 5；
+// 默认球场：档位 0（1.2-2.5 万座），容量 20000，消费券 0.4，余额 5；
 // v6.30.0 起默认补一条开窗行（关窗用例传 { window: false }）——施工闸在函数内，
 // 直接调 expandStadium / upgradeStadiumTier / upgradeFacilityLevel 的用例也必须先有窗
 function seedClub(
@@ -52,14 +52,18 @@ function seedClub(
   sqlite.exec(`
     INSERT INTO clubs (id, name, league_tier, status) VALUES (1, '阿森纳', 'premier', 'active');
     INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 1, '2026-01-01T00:00:00Z');
-    INSERT INTO stadiums (club_id, name, capacity, tier, build_credit) VALUES (1, '酋长球场', ${opts.capacity ?? 20000}, ${opts.tier ?? 0}, ${opts.credit ?? 0.4});
-    INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (1, ${opts.balance ?? 5}, '2026-01-01T00:00:00Z');
+    INSERT INTO stadiums (club_id, name, capacity, tier) VALUES (1, '酋长球场', ${opts.capacity ?? 20000}, ${opts.tier ?? 0});
+    INSERT INTO ledger_accounts (club_id, balance, vouchers, updated_at) VALUES (1, ${opts.balance ?? 5}, ${opts.credit ?? 0.4}, '2026-01-01T00:00:00Z');
   `);
   if (opts.window !== false) openWindow(sqlite);
 }
 
 function stadiumRow(sqlite: DatabaseSync) {
-  return sqlGet<{ capacity: number; tier: number; build_credit: number }>(sqlite, 'SELECT capacity, tier, build_credit FROM stadiums WHERE club_id = 1')!;
+  return sqlGet<{ capacity: number; tier: number }>(sqlite, 'SELECT capacity, tier FROM stadiums WHERE club_id = 1')!;
+}
+
+function vouchersOf(sqlite: DatabaseSync): number {
+  return sqlGet<{ vouchers: number }>(sqlite, 'SELECT vouchers FROM ledger_accounts WHERE club_id = 1')?.vouchers ?? 0;
 }
 
 // v6.30.0 开窗闸：三个施工动作只在窗内放行；seedClub 默认开窗，关窗用例显式传 { window: false }
@@ -78,7 +82,7 @@ function auditRow(sqlite: DatabaseSync, action: string) {
   )!;
 }
 
-describe('建设券拆分与返还（纯函数）', () => {
+describe('消费券拆分与返还（纯函数）', () => {
   it('先券后钱：券足额全抵、券不足补现金、负券按 0', () => {
     expect(splitPayment(1.0, 0.4)).toEqual({ creditUsed: 0.4, cash: 0.6 });
     expect(splitPayment(1.0, 5)).toEqual({ creditUsed: 1, cash: 0 });
@@ -99,20 +103,21 @@ describe('球场扩建', () => {
     seedClub(fx.sqlite);
     const r1 = await expandStadium(fx.env, 1, 1000, 1);
     expect(r1).toEqual({ cost: 1, creditUsed: 0.4, cash: 0.6, refund: 0.25, capacity: 21000 });
-    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 21000, tier: 0, build_credit: 0.25 });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 21000, tier: 0 });
+    expect(vouchersOf(fx.sqlite)).toBeCloseTo(0.25, 5);
     expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(4.4);
     const entry = sqlGet<{ kind: string; amount: number; memo: string }>(fx.sqlite, "SELECT kind, amount, memo FROM ledger_entries WHERE kind='stadium_expand'");
     expect(entry).toMatchObject({ kind: 'stadium_expand', amount: -0.6 });
     // 留痕：操作人 + 改动前后球场状态（扩建前 20000 座/0.4 券 → 后 21000 座/0.25 券）
     const a1 = auditRow(fx.sqlite, 'stadium_expand');
     expect(a1).toMatchObject({ actor: 1, target_type: 'stadium', target_id: 1, origin: 'user' });
-    expect(JSON.parse(a1.before)).toEqual({ capacity: 20000, tier: 0, buildCredit: 0.4 });
-    expect(JSON.parse(a1.after)).toMatchObject({ capacity: 21000, buildCredit: 0.25, seats: 1000, cost: 1, creditUsed: 0.4, cash: 0.6, refund: 0.25 });
+    expect(JSON.parse(a1.before)).toEqual({ capacity: 20000, tier: 0, voucherBalance: 0.4 });
+    expect(JSON.parse(a1.after)).toMatchObject({ capacity: 21000, voucherBalance: 0.25, seats: 1000, cost: 1, creditUsed: 0.4, cash: 0.6, refund: 0.25 });
 
     // 第二次扩建（0 券余 → 全现金 + 返券），幂等闸不得拦
     const r2 = await expandStadium(fx.env, 1, 100, 1);
     expect(r2).toEqual({ cost: 0.1, creditUsed: 0.1, cash: 0, refund: 0.03, capacity: 21100 });
-    expect(stadiumRow(fx.sqlite).build_credit).toBeCloseTo(0.18, 5);
+    expect(vouchersOf(fx.sqlite)).toBeCloseTo(0.18, 5);
     expect(sqlAll(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind='stadium_expand'").length).toBe(2);
     // 可重复发生的操作：每次各留一条，第二次 before 取上一次的落库值
     expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(2);
@@ -120,8 +125,8 @@ describe('球场扩建', () => {
       fx.sqlite,
       "SELECT before, after FROM audit_log WHERE action='stadium_expand' ORDER BY id DESC LIMIT 1",
     )!;
-    expect(JSON.parse(latest.before)).toEqual({ capacity: 21000, tier: 0, buildCredit: 0.25 });
-    expect(JSON.parse(latest.after)).toMatchObject({ capacity: 21100, buildCredit: 0.18, seats: 100, cost: 0.1, cash: 0 });
+    expect(JSON.parse(latest.before)).toEqual({ capacity: 21000, tier: 0, voucherBalance: 0.25 });
+    expect(JSON.parse(latest.after)).toMatchObject({ capacity: 21100, voucherBalance: 0.18, seats: 100, cost: 0.1, cash: 0 });
   });
 
   it('非 100 倍数 / 超档位座位上限 / 余额不足（券也不够）各被拒', async () => {
@@ -146,11 +151,12 @@ describe('球场升级', () => {
     seedClub(fx.sqlite, { credit: 1 });
     const r = await upgradeStadiumTier(fx.env, 1, 1);
     expect(r).toEqual({ cost: 3, creditUsed: 1, cash: 2, refund: 0.75, tier: 1 });
-    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 1, build_credit: 0.75 });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 1 });
+    expect(vouchersOf(fx.sqlite)).toBeCloseTo(0.75, 5);
     const a = auditRow(fx.sqlite, 'stadium_upgrade');
     expect(a).toMatchObject({ actor: 1, target_type: 'stadium', target_id: 1 });
-    expect(JSON.parse(a.before)).toEqual({ capacity: 20000, tier: 0, buildCredit: 1 });
-    expect(JSON.parse(a.after)).toMatchObject({ capacity: 20000, tier: 1, buildCredit: 0.75, tierName: '地区级', cost: 3, cash: 2 });
+    expect(JSON.parse(a.before)).toEqual({ capacity: 20000, tier: 0, voucherBalance: 1 });
+    expect(JSON.parse(a.after)).toMatchObject({ capacity: 20000, tier: 1, voucherBalance: 0.75, tierName: '地区级', cost: 3, cash: 2 });
 
     // 默认 max_open_tier=1：再升第 2 档被开放进度拦
     await expect(upgradeStadiumTier(fx.env, 1, 1)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('暂未开放') });
@@ -177,11 +183,11 @@ describe('子设施升级', () => {
     expect(r1).toEqual({ cost: 3, creditUsed: 2, cash: 1, refund: 0.75, level: 1 });
     expect(sqlGet<{ level: number }>(fx.sqlite, "SELECT level FROM club_facilities WHERE club_id=1 AND facility_key='commercial'")?.level).toBe(1);
     // 券余额 = 种子 2M − 抵扣 2M + 返还 0.75M（费用 3M × 0.25）
-    expect(sqlGet<{ build_credit: number }>(fx.sqlite, 'SELECT build_credit FROM stadiums WHERE club_id=1')?.build_credit).toBeCloseTo(0.75, 5);
+    expect(vouchersOf(fx.sqlite)).toBeCloseTo(0.75, 5);
     const a = auditRow(fx.sqlite, 'facility_upgrade');
     expect(a).toMatchObject({ actor: 1, target_type: 'stadium', target_id: 1 });
-    expect(JSON.parse(a.before)).toEqual({ facility: 'commercial', level: 0 });
-    expect(JSON.parse(a.after)).toMatchObject({ facility: 'commercial', level: 1, buildCredit: 0.75, cost: 3, cash: 1 });
+    expect(JSON.parse(a.before)).toEqual({ facility: 'commercial', level: 0, voucherBalance: 2 });
+    expect(JSON.parse(a.after)).toMatchObject({ facility: 'commercial', level: 1, voucherBalance: 0.75, cost: 3, cash: 1 });
 
     const r2 = await upgradeFacilityLevel(fx.env, 1, 'commercial', 1);
     expect(r2.cost).toBe(5); // 1→2 级费用
@@ -195,6 +201,32 @@ describe('子设施升级', () => {
   });
 });
 
+describe('TC-B-002 券守卫并发（最坏情况）', () => {
+  it('读后券被并发扣空：整批空转（座位/券/现金/流水/审计都不动），报 409', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { credit: 1, balance: 5 });
+    // 模拟另一会话在「读余额」与「提交批」之间把券扣空：batch 执行前先清零券余额
+    const env: Env = {
+      ...fx.env,
+      DB: {
+        prepare: (sql: string) => fx.env.DB.prepare(sql),
+        batch: async (stmts: D1PreparedStatement[]) => {
+          fx.sqlite.exec('UPDATE ledger_accounts SET vouchers = 0 WHERE club_id = 1');
+          return fx.env.DB.batch(stmts);
+        },
+      } as unknown as D1Database,
+    };
+    await expect(expandStadium(env, 1, 1000, 1)).rejects.toMatchObject({ status: 409 });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0 });
+    expect(vouchersOf(fx.sqlite)).toBe(0);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(5);
+    expect(sqlAll(fx.sqlite, 'SELECT id FROM voucher_entries').length).toBe(0);
+    expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
+    // 审计挂同一券余额守卫：守卫没过的那次不留「after 已生效」的失实快照
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
+  });
+});
+
 describe('路由（requireCoach + getBoundClub + build-info）', () => {
   it('build-info 拉全预览；expand 201；未绑定 403', async () => {
     const fx = freshEnv();
@@ -204,7 +236,7 @@ describe('路由（requireCoach + getBoundClub + build-info）', () => {
     const info = await get('/api/club/stadium/build-info');
     expect(info.status).toBe(200);
     const body = (await info.json()) as {
-      credit: number;
+      voucherBalance: number;
       expansionPer100: number;
       maxOpenTier: number;
       open: boolean;
@@ -212,7 +244,7 @@ describe('路由（requireCoach + getBoundClub + build-info）', () => {
       nextTier: { name: string; minSeats: number; upgradeCost: number; open: boolean; capacityOk: boolean } | null;
       facilities: { key: string; level: number; nextCost: number | null }[];
     };
-    expect(body.credit).toBe(0.4);
+    expect(body.voucherBalance).toBe(0.4);
     expect(body.open).toBe(true);
     expect(body.expansionPer100).toBe(0.1);
     expect(body.tier).toMatchObject({ level: 0, name: '社区级', maxSeats: 25000 });
@@ -252,7 +284,8 @@ describe('开窗闸（v6.30.0）', () => {
       code: 'no_window',
       error: '转会窗口没开，现在不能扩建球场',
     });
-    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0, build_credit: 0.4 });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0 });
+    expect(vouchersOf(fx.sqlite)).toBe(0.4);
     expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(5);
     expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
     expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
@@ -267,7 +300,8 @@ describe('开窗闸（v6.30.0）', () => {
       code: 'no_window',
       error: '转会窗口没开，现在不能升级球场档位',
     });
-    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0, build_credit: 0.4 });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0 });
+    expect(vouchersOf(fx.sqlite)).toBe(0.4);
     expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(5);
     expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_upgrade'").length).toBe(0);
     expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
@@ -283,7 +317,8 @@ describe('开窗闸（v6.30.0）', () => {
       error: '转会窗口没开，现在不能升级设施',
     });
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM club_facilities')?.n).toBe(0);
-    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0, build_credit: 0.4 });
+    expect(stadiumRow(fx.sqlite)).toEqual({ capacity: 20000, tier: 0 });
+    expect(vouchersOf(fx.sqlite)).toBe(0.4);
     expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(5);
     expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='facility_upgrade'").length).toBe(0);
     expect(sqlAll(fx.sqlite, 'SELECT id FROM ledger_entries').length).toBe(0);
