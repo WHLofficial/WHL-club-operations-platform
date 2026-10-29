@@ -39,6 +39,7 @@ import { creditUse } from '../../lib/credit-line.ts';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
 import { money } from '../market/shared.tsx';
+import { ActivationProofDialog } from '../market/ActivationProofDialog.tsx';
 import { listingFloorOf, offerCapOf } from '../../lib/transfer-bounds.ts';
 
 export interface SideOpsPlayer {
@@ -55,7 +56,7 @@ export interface SideOpsPlayer {
   marketValue: number | null;
 }
 
-type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'sealed' | 'activate';
+type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'sealed';
 
 function round2(x: number): number {
   return Math.round((x + Number.EPSILON) * 100) / 100;
@@ -75,6 +76,8 @@ export function SideOps({
   seaSign,
   seaComps,
   pendingMine,
+  myClubName,
+  opponentClubName,
   onShowContract,
   show,
   refreshAll,
@@ -98,6 +101,9 @@ export function SideOps({
   seaComps: SeaComps;
   /** 轮到我处理的收到报价条数（/api/offers?box=in 的 pendingMine） */
   pendingMine: number;
+  /** 激活通知弹窗的示例文案（v6.60.0）：我的队名与球员现属队名，缺失时用规则原文示例 */
+  myClubName?: string | null;
+  opponentClubName?: string | null;
   /** 跳到本页「合同卷宗」页签并滚到双版本合同卡（§10.2 已接受态的入口） */
   onShowContract: () => void;
   show: (text: string, err?: boolean) => void;
@@ -133,8 +139,8 @@ export function SideOps({
   const [renewFee, setRenewFee] = useState('');
   const [askPrice, setAskPrice] = useState('');
   const [freeFee, setFreeFee] = useState('');
-  // 激活证据截图（v6.4.0 改动 4：证据制，激活必附 QQ 通知截图）
-  const [proofFile, setProofFile] = useState<File | null>(null);
+  // 激活通知截图弹窗（v6.60.0）：旧内嵌文件框改共用弹窗，点击「激活」直接打开
+  const [proofOpen, setProofOpen] = useState(false);
   // 候选名单开关（v6.58.0）：教练态自取 ids；未绑队 403 / 匿名不渲染（data 为 undefined 即隐藏）
   const shortlistQuery = useShortlistIds(isCoach);
   const shortlistEntry = shortlistQuery.data?.entries.find((e) => e.playerId === player.id) ?? null;
@@ -170,7 +176,7 @@ export function SideOps({
     setNfsDraft(player.notForSale);
     setPanel(null);
     setArmed(false);
-    setProofFile(null);
+    setProofOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上：只跟随 player.id
   }, [player.id]);
 
@@ -277,6 +283,20 @@ export function SideOps({
       listPriceValue !== settingsData.listPrice ||
       autoDraft !== settingsData.offerAuto);
 
+  // 写操作成功后的统一刷新面：激活弹窗也要走同一套，避免两条路径失效范围不一致。
+  function refreshAfterMutation() {
+    invalidateOffers();
+    void qc.invalidateQueries({ queryKey: qk.myClub });
+    void qc.invalidateQueries({ queryKey: qk.squad });
+    void qc.invalidateQueries({ queryKey: qk.offerSettings(player.id) });
+    // 挂牌/解约可能作废在途要求与待生效变更，球队页小字与工作台一起刷新
+    void qc.invalidateQueries({ queryKey: ['club', 'pending-contracts'] });
+    void qc.invalidateQueries({ queryKey: ['market', 'board'] });
+    void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
+    void qc.invalidateQueries({ queryKey: qk.seaPhase });
+    refreshAll();
+  }
+
   async function run(fn: () => Promise<string>) {
     if (busy) return;
     setBusy(true);
@@ -284,16 +304,7 @@ export function SideOps({
       show(await fn());
       setPanel(null);
       setArmed(false);
-      invalidateOffers();
-      void qc.invalidateQueries({ queryKey: qk.myClub });
-      void qc.invalidateQueries({ queryKey: qk.squad });
-      void qc.invalidateQueries({ queryKey: qk.offerSettings(player.id) });
-      // 挂牌/解约可能作废在途要求与待生效变更，球队页小字与工作台一起刷新
-      void qc.invalidateQueries({ queryKey: ['club', 'pending-contracts'] });
-      void qc.invalidateQueries({ queryKey: ['market', 'board'] });
-      void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
-      void qc.invalidateQueries({ queryKey: qk.seaPhase });
-      refreshAll();
+      refreshAfterMutation();
     } catch (err) {
       show(err instanceof Error ? err.message : '操作失败', true);
     } finally {
@@ -324,14 +335,20 @@ export function SideOps({
     });
   }
 
-  // 激活提交（v6.4.0 改动 4）：先传 QQ 通知截图拿 key，再带 key 建激活挂牌
-  function submitActivation() {
-    if (!proofFile) return;
-    void run(async () => {
-      const up = await apiUpload<{ key: string }>('/api/media/activation', proofFile.type, proofFile);
+  // 激活提交（v6.60.0）：弹窗确认后才传 QQ 通知截图拿 key，再带 key 建激活挂牌。
+  // 失败不在这里吞：抛回弹窗，让错误显示在用户正在看的表单里，可直接重试。
+  async function confirmActivation(file: File) {
+    if (busy) throw new Error('还有操作在处理中，稍后再试');
+    setBusy(true);
+    try {
+      const up = await apiUpload<{ key: string }>('/api/media/activation', file.type, file);
       await apiPost('/api/market/activations', { playerId: player.id, proofMediaKey: up.key });
-      return '激活挂牌已提交：5 分钟内出首价才算数。';
-    });
+      show('激活挂牌已提交：5 分钟内出首价才算数。');
+      setProofOpen(false);
+      refreshAfterMutation();
+    } finally {
+      setBusy(false);
+    }
   }
 
   // 出价提交（v6.4.0 改动 6，别队挂牌分支）：与转会区详情同一端点，成功后联动失效
@@ -358,32 +375,6 @@ export function SideOps({
       return '举报已提交，管理组会核查对方的 QQ 通知截图。';
     });
   }
-
-  const activatePanel = (
-    <>
-      <label className="side-field">
-        <span className="side-lab">
-          <span>QQ 通知截图</span>
-          <span className="side-range mono">≤ 5MB</span>
-        </span>
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
-          aria-label="QQ 通知截图"
-        />
-      </label>
-      <p className="side-sub">证据制：先上传你在 QQ 里通知对方俱乐部的截图（png / jpg / webp），再提交激活。对方如未收到通知可以举报，管理组会核查截图。</p>
-      <div className="side-btns">
-        <button type="button" className="btn btn-sm" disabled={busy || !proofFile} onClick={submitActivation}>
-          提交激活
-        </button>
-        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => setPanel(null)}>
-          取消
-        </button>
-      </div>
-    </>
-  );
 
   // 顶部只读块（§10.2 四态）：本队教练才渲染；球员本人的知情面走站内信，不占 SideOps。
   // 「已接受」的工资/违约金优先取待生效投影（与双版本合同同源），投影缺失时回退要求的 target/rc_floor。
@@ -834,18 +825,14 @@ export function SideOps({
     body = (
       <section className="side-sec">
         <div className="side-sec-head">球队操作</div>
-        {panel === 'activate' ? (
-          activatePanel
-        ) : (
-          <div className="side-btns">
-            <button type="button" className="btn btn-sm" disabled title="此球员为非卖品">
-              报价
-            </button>
-            <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen} onClick={() => setPanel('activate')}>
-              激活
-            </button>
-          </div>
-        )}
+        <div className="side-btns">
+          <button type="button" className="btn btn-sm" disabled title="此球员为非卖品">
+            报价
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen} onClick={() => setProofOpen(true)}>
+            激活
+          </button>
+        </div>
         <p className="side-sub">此球员为非卖品！激活不受非卖品限制。</p>
       </section>
     );
@@ -1075,14 +1062,12 @@ export function SideOps({
               </button>
             </div>
           </>
-        ) : panel === 'activate' ? (
-          activatePanel
         ) : (
           <div className="side-btns">
             <button type="button" className="btn btn-sm" disabled={busy} onClick={() => setPanel('offer')}>
               报价
             </button>
-            <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen} onClick={() => setPanel('activate')}>
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen} onClick={() => setProofOpen(true)}>
               激活
             </button>
           </div>
@@ -1115,6 +1100,15 @@ export function SideOps({
         </div>
       )}
       {body}
+      {proofOpen && (
+        <ActivationProofDialog
+          playerName={player.name}
+          opponentClubName={opponentClubName}
+          myClubName={myClubName}
+          onClose={() => setProofOpen(false)}
+          onConfirm={confirmActivation}
+        />
+      )}
     </div>
   );
 }

@@ -3841,6 +3841,108 @@ th.num .th-sort {
   justify-content: flex-end;
 }
 
+/* 激活通知截图弹窗（v6.60.0）：先讲清三样信息，再选图预览，确认后才上传 */
+.proof-dialog {
+  width: min(460px, 100%);
+}
+.proof-checklist p {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.proof-checklist ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.proof-example {
+  font-size: 13px;
+}
+.proof-example summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.proof-example p {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: 6px;
+  line-height: 1.6;
+}
+.proof-drop {
+  width: 100%;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.proof-drop:hover,
+.proof-drop.over {
+  border-color: var(--terracotta);
+  background: rgba(164, 97, 44, 0.06);
+}
+.proof-drop:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.proof-drop-main {
+  font-weight: 600;
+}
+.proof-drop-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.proof-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.proof-preview img {
+  width: 72px;
+  height: 72px;
+  flex: none;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.proof-preview-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.proof-preview-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proof-preview-size {
+  font-size: 12px;
+  color: var(--muted);
+}
+.proof-file-input {
+  display: none;
+}
+.proof-error {
+  margin: 0;
+  color: var(--bad);
+  font-size: 13px;
+}
+
 /* ---------- 球队页（v3.4.0）：分级分段卡片 ---------- */
 
 /* 队徽：有图出徽图，没有就按队名哈希出首字色块（镜像赛事平台 TeamLogo）。

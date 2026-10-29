@@ -12,10 +12,15 @@ import type { OfferSettingsDto } from '../../lib/api.ts';
 import { resetOpsSchedule } from '../../lib/ops-gate.ts';
 import { SideOps } from './SideOps.tsx';
 
-const { apiMock, apiPutMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiPutMock: vi.fn() }));
+const { apiMock, apiPutMock, apiPostMock, apiUploadMock } = vi.hoisted(() => ({
+  apiMock: vi.fn(),
+  apiPutMock: vi.fn(),
+  apiPostMock: vi.fn(),
+  apiUploadMock: vi.fn(),
+}));
 vi.mock('../../lib/api.ts', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../lib/api.ts')>();
-  return { ...mod, api: apiMock, apiPut: apiPutMock, apiPost: vi.fn(), apiUpload: vi.fn() };
+  return { ...mod, api: apiMock, apiPut: apiPutMock, apiPost: apiPostMock, apiUpload: apiUploadMock };
 });
 
 // settings 端点回的现值（面板草稿的预填源）；PUT 的响应由各用例单独 mock
@@ -24,13 +29,16 @@ const SETTINGS: OfferSettingsDto = { transferListed: true, minOfferPrice: 40, li
 function stubApi(): void {
   apiMock.mockImplementation((path: string) => {
     if (path === '/api/players/1/offer-settings') return Promise.resolve(SETTINGS);
+    // 候选名单开关与余额条：教练态常驻查询，给空态即可，本文件只验证报价设置与激活入口
+    if (path === '/api/club/shortlist/ids') return Promise.resolve({ playerIds: [], entries: [] });
+    if (path === '/api/club/balance') return Promise.resolve({ balance: 100 });
     // useOpsGate 的模块级单例：返回空表 ⇒ 闸门未加载，不置灰（真闸在服务端）
     if (path === '/api/ops-schedule') return Promise.resolve({ rows: [] });
     return Promise.reject(new Error(`未预期的请求：${path}`));
   });
 }
 
-function renderOps() {
+function renderOps(overrides: Partial<Parameters<typeof SideOps>[0]> = {}) {
   const show = vi.fn();
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -62,6 +70,7 @@ function renderOps() {
           onShowContract={() => {}}
           show={show}
           refreshAll={() => {}}
+          {...overrides}
         />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -81,12 +90,20 @@ async function ready(): Promise<{ minInput: HTMLInputElement; listInput: HTMLInp
 beforeEach(() => {
   stubApi();
   resetOpsSchedule();
+  apiPostMock.mockReset();
+  apiUploadMock.mockReset();
+  Object.assign(URL, {
+    createObjectURL: vi.fn(() => 'blob:proof-preview'),
+    revokeObjectURL: vi.fn(),
+  });
 });
 
 afterEach(() => {
   cleanup();
   apiMock.mockReset();
   apiPutMock.mockReset();
+  apiPostMock.mockReset();
+  apiUploadMock.mockReset();
 });
 
 describe('SideOps 报价设置对齐回执（v6.55.0，TC-A-007）', () => {
@@ -157,5 +174,67 @@ describe('SideOps 报价设置对齐回执（v6.55.0，TC-A-007）', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
     await waitFor(() => expect(show).toHaveBeenCalledWith('报价设置已保存。'));
     expect(listInput.value).toBe('55');
+  });
+});
+
+describe('SideOps 激活入口（v6.60.0，TC-E）', () => {
+  it('别队球员点「激活」打开共用截图弹窗，选图后预览', async () => {
+    renderOps({
+      isMine: false,
+      myClubName: '利物浦',
+      opponentClubName: '国际米兰',
+      player: {
+        id: 1,
+        name: '球员乙',
+        status: 'normal',
+        transferListed: false,
+        listPrice: null,
+        offerAuto: false,
+        notForSale: false,
+        marketValue: null,
+      },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: '激活' }));
+    const dialog = await screen.findByRole('dialog', { name: '上传激活通知截图' });
+    expect(dialog.textContent).toContain('先在 QQ 私信对方主教练');
+    expect(dialog.textContent).toContain('利物浦主教练');
+
+    const file = new File(['x'], 'proof.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText('选择激活通知截图'), { target: { files: [file] } });
+    expect(await screen.findByAltText('激活通知截图预览')).toBeTruthy();
+  });
+
+  it('确认后按序上传截图并建激活，成功关弹窗并提示首价窗', async () => {
+    apiUploadMock.mockResolvedValue({ key: 'activation/1/proof.png' });
+    apiPostMock.mockResolvedValue({ ok: true });
+    const { show } = renderOps({
+      isMine: false,
+      myClubName: '利物浦',
+      opponentClubName: '国际米兰',
+      player: {
+        id: 1,
+        name: '球员乙',
+        status: 'normal',
+        transferListed: false,
+        listPrice: null,
+        offerAuto: false,
+        notForSale: false,
+        marketValue: null,
+      },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: '激活' }));
+    const file = new File(['x'], 'proof.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText('选择激活通知截图'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: '确认激活' }));
+
+    await waitFor(() => expect(apiUploadMock).toHaveBeenCalledWith('/api/media/activation', 'image/png', file));
+    expect(apiPostMock).toHaveBeenCalledWith('/api/market/activations', {
+      playerId: 1,
+      proofMediaKey: 'activation/1/proof.png',
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(show).toHaveBeenCalledWith('激活挂牌已提交：5 分钟内出首价才算数。');
   });
 });

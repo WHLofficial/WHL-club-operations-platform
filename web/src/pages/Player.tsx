@@ -721,6 +721,8 @@ export default function Player() {
             seaSign={data.seaSign}
             seaComps={data.seaComps}
             pendingMine={receivedPendingQuery.data?.pendingMine ?? 0}
+            myClubName={myClubQuery.data?.club?.name ?? null}
+            opponentClubName={club?.name ?? null}
             onShowContract={() => {
               setTab('profile');
               // 等页签渲染完再滚，避免滚到旧高度（§10.2「看双版本合同 →」的落点）

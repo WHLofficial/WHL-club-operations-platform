@@ -1,7 +1,7 @@
 // 激活 /market/activation（v6.24.0 批次 C）：从海里拆出的独立页——可激活名单（模式切换 + 名字搜索）
 // 与「激活 → 落首价」一条链走完。后端 v6.24.0：激活挂牌先进 5 分钟首价窗，激活方须在窗内出首价（=激活价）
 // 才转公开竞价，所以激活成功后本页直接把首价表单摆出来（复用 MarketBidForm 的 activation-first 形态）。
-// 证据制（v6.4.0）：激活须先上传 QQ 通知截图。需登录（路由守卫），端点是教练端点（club.squad.manage）。
+// 证据制（v6.4.0）：激活须先上传 QQ 通知截图；v6.60.0 起改为弹窗先讲标准、预览后确认。需登录（路由守卫），端点是教练端点（club.squad.manage）。
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,7 @@ import { useToast } from '../../lib/toast.tsx';
 import { playerPath } from '../../lib/player-link.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
+import { ActivationProofDialog } from './ActivationProofDialog.tsx';
 import { MarketNav, money } from './shared.tsx';
 
 /** 激活成功、待落首价的挂牌（v6.24.0：激活方须在首价窗内自己落首价） */
@@ -58,13 +59,13 @@ export default function MarketActivationPage() {
             />
           )}
           <ActivateSection
+            myClubName={club.name}
             onActivated={(p) => {
               setPending(p);
               show(
                 `已激活 ${p.playerName}：请在 ${dateTime(p.firstBidDeadline)} 前落激活首价（表单已摆到页面上方），逾期激活作废（还占本窗激活额度）。`,
               );
             }}
-            onError={(m) => show(m, true)}
           />
         </>
       )}
@@ -133,11 +134,11 @@ function FirstBidSection({
 /* ---------- 激活别队球员（规则 4.4.2，GET /api/market/activatable） ---------- */
 
 function ActivateSection({
+  myClubName,
   onActivated,
-  onError,
 }: {
+  myClubName: string;
   onActivated: (p: PendingFirstBid) => void;
-  onError: (msg: string) => void;
 }) {
   const qc = useQueryClient();
   // v6.49.0：激活受「激活」时段约束（后端 assertOpOpen 硬闸，这里置灰 + 说明）
@@ -146,30 +147,27 @@ function ActivateSection({
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [proofTarget, setProofTarget] = useState<number | null>(null);
-  const proofInputRef = useRef<HTMLInputElement | null>(null);
+  const [proofTarget, setProofTarget] = useState<ActivatablePlayer | null>(null);
   const { data, isError, error } = useActivatable(mode, submitted);
 
-  // 激活是证据制（v6.4.0）：先让教练选 QQ 通知截图 → 上传拿 key → 带 proofMediaKey 建挂牌。
+  // 激活是证据制（v6.4.0）：弹窗里选 QQ 通知截图 → 预览确认 → 上传拿 key → 带 proofMediaKey 建挂牌。
   // 评审 P1-1：此前按钮只发 playerId，后端 400「要先上传 QQ 通知截图」必现，链路是断的。
   function requestActivate(p: ActivatablePlayer) {
     if (busyId !== null || p.activationFee === null) return;
-    setProofTarget(p.id);
-    proofInputRef.current?.click();
+    setProofTarget(p);
   }
 
-  async function onProofChosen(file: File | null) {
-    const playerId = proofTarget;
-    setProofTarget(null);
-    if (!file || playerId === null || busyId !== null) return;
-    setBusyId(playerId);
+  async function confirmProof(file: File) {
+    if (proofTarget === null || busyId !== null) return;
+    const target = proofTarget;
+    setBusyId(target.id);
     try {
       const up = await apiUpload<{ key: string }>('/api/media/activation', file.type, file);
-      const res = await apiPost<ActivationResult>('/api/market/activations', { playerId, proofMediaKey: up.key });
-      const target = data?.players.find((x) => x.id === playerId);
+      const res = await apiPost<ActivationResult>('/api/market/activations', { playerId: target.id, proofMediaKey: up.key });
+      setProofTarget(null);
       // 激活生成挂牌，且首价窗已开启：把待落首价交给页面（v6.24.0，激活方须自己落首价）
       onActivated({
-        playerName: target?.name ?? '球员',
+        playerName: target.name,
         listingId: res.listingId,
         askPrice: res.askPrice,
         kind: res.kind,
@@ -178,8 +176,6 @@ function ActivateSection({
       // 激活生成新挂牌：可激活名单（两种模式）与在售市场板一并失效
       void qc.invalidateQueries({ queryKey: ['market', 'activatable'] });
       void qc.invalidateQueries({ queryKey: ['market', 'board'] });
-    } catch (err) {
-      onError(err instanceof Error ? err.message : '激活失败');
     } finally {
       setBusyId(null);
     }
@@ -274,23 +270,19 @@ function ActivateSection({
               </tbody>
             </table>
           </div>
-          {/* 证据制（v6.4.0）：激活必须附 QQ 通知截图，选中文件即上传并提交 */}
-          <input
-            ref={proofInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            style={{ display: 'none' }}
-            aria-label="QQ 通知截图"
-            onChange={(e) => {
-              const file = e.target.files?.[0] ?? null;
-              e.target.value = '';
-              void onProofChosen(file);
-            }}
-          />
           <p className="hint">
-            训练营球员激活费固定 5.00m；正式球员按违约金与保护期计。点「激活」后先选你在 QQ 里通知对方俱乐部的截图（证据制，png / jpg / webp ≤ 5MB），上传即提交；对方如未收到通知可以举报。
+            训练营球员激活费固定 5.00m；正式球员按违约金与保护期计。点「激活」会先弹出上传说明：按规则先在 QQ 私信对方主教练，再上传激活通知截图。
             激活成功后本页会摆出首价表单：5 分钟内落首价（=激活价）才转公开竞价。
           </p>
+          {proofTarget !== null && (
+            <ActivationProofDialog
+              playerName={proofTarget.name}
+              opponentClubName={proofTarget.club.name}
+              myClubName={myClubName}
+              onClose={() => setProofTarget(null)}
+              onConfirm={confirmProof}
+            />
+          )}
         </>
       )}
     </section>
