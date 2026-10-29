@@ -21,7 +21,7 @@ const CLOSED_HINT = '转会窗口没开，开窗后才能施工';
 
 function buildInfo(patch: Partial<StadiumBuildInfo> = {}): StadiumBuildInfo {
   return {
-    credit: 1.5,
+    voucherBalance: 1.5,
     balance: 12,
     expansionPer100: 1.2,
     maxOpenTier: 3,

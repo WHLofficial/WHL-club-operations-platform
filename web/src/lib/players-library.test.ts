@@ -73,7 +73,8 @@ describe('排序键', () => {
   });
 
   it('29 个键都有列承载（id 除外：它就是「没有点任何列」的默认态）', () => {
-    const covered = new Set<string>([...FIXED_COLUMNS.map((c) => c.sort), ...COL_DEFS.map((d) => d.sort)]);
+    // v6.58.0：星标列没有排序键（d.sort 为 undefined），Set 里不能算一个成员
+    const covered = new Set<string>([...FIXED_COLUMNS.map((c) => c.sort), ...COL_DEFS.flatMap((d) => (d.sort ? [d.sort] : []))]);
     for (const key of SORT_KEYS) {
       if (key === 'id') continue;
       expect(covered.has(key), `${key} 没有对应表头列，用户点不到`).toBe(true);

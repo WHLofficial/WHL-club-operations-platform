@@ -23,6 +23,8 @@ export interface FilterPanelProps {
   manualCols: string[] | null;
   toggleCol: (key: string) => void;
   resetCols: () => void;
+  /** v6.58.0：登录态才显示「只看候选名单」（匿名没有名单，勾了只会 401） */
+  showShortlist: boolean;
 }
 
 // PlayStyle 下拉数据（v3.1.1 步骤 4）：银徽章与金徽章是两件事——金徽在库里存「基础 ID+100」
@@ -85,6 +87,7 @@ export default function FilterPanel({
   manualCols,
   toggleCol,
   resetCols,
+  showShortlist,
 }: FilterPanelProps) {
   // 成对区间输入（v3.1.1 步骤 2）：同属性的上下限并成一行两列，左「最低」右「最高」。
   // 字段名与 URL 键一律不动（还是 caMin/caMax 这一套），这里只改版式与文案。
@@ -251,6 +254,12 @@ export default function FilterPanel({
                 <input type="checkbox" checked={filters.chinaPlan} onChange={(e) => set('chinaPlan', e.target.checked)} />
                 仅中国计划
               </label>
+              {showShortlist && (
+                <label className="field check">
+                  <input type="checkbox" checked={filters.shortlist} onChange={(e) => set('shortlist', e.target.checked)} />
+                  只看候选名单
+                </label>
+              )}
               <label className="field">
                 FC ID
                 <input type="number" value={filters.fcId} onChange={(e) => set('fcId', e.target.value)} placeholder="精确查号" />

@@ -1474,9 +1474,62 @@ export interface NotificationsUnreadByCategory {
   byCategory: Partial<Record<NotifyCategoryId, number>>;
 }
 
+// 候选名单（v6.58.0）：俱乐部私有的球员跟踪名单
+export interface ShortlistPlayer {
+  name: string;
+  fcId: number | null;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  marketValue: number | null;
+  clubId: number | null;
+  clubName: string | null;
+  status: string | null;
+}
+
+export interface ShortlistItem {
+  id: number;
+  playerId: number;
+  note: string | null;
+  createdAt: string;
+  player: ShortlistPlayer;
+}
+
+export interface ShortlistResponse {
+  clubId: number;
+  cap: number;
+  items: ShortlistItem[];
+}
+
+export interface ShortlistIdsResponse {
+  clubId: number;
+  playerIds: number[];
+  entries: { id: number; playerId: number }[];
+}
+
+export interface VoucherLedgerEntry {
+  id: number;
+  kind: string;
+  amount: number;
+  balanceAfter: number;
+  refType: string | null;
+  refId: number | null;
+  memo: string | null;
+  createdAt: string;
+}
+
+export interface VoucherLedgerResponse {
+  club: { id: number; name: string } | null;
+  balance?: number;
+  entries: VoucherLedgerEntry[];
+  nextCursor: number | null;
+}
+
 // 设施经营预览（v2.5.0）
 export interface StadiumBuildInfo {
-  credit: number;
+  /** 消费券余额（v6.58.0 由建设券升格，字段名从 credit 改为 voucherBalance） */
+  voucherBalance: number;
   balance: number;
   expansionPer100: number;
   maxOpenTier: number;
@@ -2687,6 +2740,9 @@ export interface ShopOrderDto {
   payload: Record<string, unknown> | null;
   summary: string;
   amount: number | null;
+  /** 券抵额（v6.58.0）：实付现金 = amount − voucherUsed */
+  voucherUsed: number;
+  cashPaid: number | null;
   status: ShopOrderStatus;
   note: string | null;
   reviewedBy: number | null;

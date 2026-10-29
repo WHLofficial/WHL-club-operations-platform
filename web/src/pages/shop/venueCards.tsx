@@ -105,7 +105,7 @@ export function FacilityOpsCard() {
       const out = await apiPost<BuildPaymentResult>(path, body);
       refresh();
       show(
-        `${done}：费用 ${out.cost.toFixed(2)}M${out.creditUsed > 0 ? `（建设券抵 ${out.creditUsed.toFixed(2)}M）` : ''}，实付 ${out.cash.toFixed(2)}M，返建设券 ${out.refund.toFixed(2)}M。`,
+        `${done}：费用 ${out.cost.toFixed(2)}M${out.creditUsed > 0 ? `（消费券抵 ${out.creditUsed.toFixed(2)}M）` : ''}，实付 ${out.cash.toFixed(2)}M，返消费券 ${out.refund.toFixed(2)}M。`,
       );
     } catch (err) {
       show(err instanceof Error ? err.message : '操作失败', true);
@@ -142,7 +142,7 @@ export function FacilityOpsCard() {
       <h3>设施经营</h3>
       <OpsGateNote gate={consumptionGate} className="hint" />
       <p className="hint">
-        建设券余额 <span className="mono">{info.credit.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}%，可抵扣后续建设）· 当前余额{' '}
+        消费券余额 <span className="mono">{info.voucherBalance.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}% + 管理组发放，可抵扣建设与消费工单）· 当前余额{' '}
         <span className="mono">{info.balance.toFixed(2)}</span> M · 开放至 {info.maxOpenTier} 级
         {!windowOpen && ` · ${CLOSED_BUILD_HINT}。`}
       </p>

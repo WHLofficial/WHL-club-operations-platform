@@ -11,6 +11,9 @@ import { ATTR_LABELS } from '../lib/ref.ts';
 // ../lib/club-columns.tsx，球队页两张球员表与本页共用同一份实现；这里 re-export 保持对外形状。
 // v6.35.0：psNames（拼字符串）改成 psBadgesOf（给渲染用的清单），ps 列统一走 PlaystyleBadge compact。
 import { renderClubCol } from '../lib/club-columns.tsx';
+import { useAuthOptional } from '../lib/auth.tsx';
+import { useShortlistIds, useShortlistInvalidation } from '../lib/queries.ts';
+import { apiSend } from '../lib/api.ts';
 import { useMediaQuery } from '../lib/use-media.ts';
 import { playerPath } from '../lib/player-link.ts';
 // 球员对比勾选（v6.34.0 步骤 7）：URL ?compare= 预置解析与第三人色都复用对比域纯函数
@@ -138,6 +141,13 @@ function SortHeader({
 }
 
 export default function PlayersLibrary() {
+  const auth = useAuthOptional();
+  const authed = auth?.user != null;
+  const shortlistIdsQuery = useShortlistIds(authed);
+  const invalidateShortlist = useShortlistInvalidation();
+  const shortlistSet = new Set(shortlistIdsQuery.data?.playerIds ?? []);
+  const shortlistRowByPlayer = new Map((shortlistIdsQuery.data?.entries ?? []).map((e) => [e.playerId, e.id]));
+  const [starBusy, setStarBusy] = useState<number | null>(null);
   const [filters, setFilters] = useState<Filters>(filtersFromUrl);
   // null=未手动干预（列跟随筛选联动）；一旦手动勾选，改为以手动清单为准
   const [manualCols, setManualCols] = useState<string[] | null>(() =>
@@ -164,6 +174,11 @@ export default function PlayersLibrary() {
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
   };
+
+  // 匿名打开带 ?shortlist=1 的链接：清掉该条件（该端点 401），而不是整页报错
+  useEffect(() => {
+    if (!authed && filters.shortlist) setFilters((f) => ({ ...f, shortlist: false }));
+  }, [authed, filters.shortlist]);
 
   // 筛选进 URL（replaceState 不产生历史记录）
   const query = useMemo(() => filtersToQuery(filters), [filters]);
@@ -271,6 +286,28 @@ export default function PlayersLibrary() {
     const rank = new Map(COL_DEFS.map((d, i) => [d.key, i]));
     return [...new Set(cols)].sort((a, b) => (rank.get(a) ?? 999) - (rank.get(b) ?? 999));
   }, [manualCols, autoCols]);
+
+  // 匿名不显示星标列（登录后它随 DEFAULT_COLS 默认出现；手动 cols 里残留也过滤掉）
+  const effectiveCols = useMemo(() => (authed ? activeCols : activeCols.filter((k) => k !== 'shortlist')), [activeCols, authed]);
+
+  async function toggleStar(playerId: number): Promise<void> {
+    if (!authed || starBusy !== null) return;
+    setStarBusy(playerId);
+    try {
+      const rowId = shortlistRowByPlayer.get(playerId);
+      if (rowId !== undefined) {
+        await apiSend('DELETE', `/api/club/shortlist/${rowId}`);
+      } else {
+        await apiSend('POST', '/api/club/shortlist', { playerId });
+      }
+      await shortlistIdsQuery.refetch();
+      invalidateShortlist();
+    } catch {
+      // 失败不吞提示：列表刷新即可看到真实状态（错因由 apiSend 抛出的 message 可从控制台查）
+    } finally {
+      setStarBusy(null);
+    }
+  }
 
   const toggleCol = (key: string) => {
     setManualCols((prev) => {
@@ -534,7 +571,8 @@ export default function PlayersLibrary() {
               toggleRole={toggleRole}
               resetAll={resetAll}
               activeCount={chips.length}
-              activeCols={activeCols}
+              activeCols={effectiveCols}
+              showShortlist={authed}
               manualCols={manualCols}
               toggleCol={toggleCol}
               resetCols={() => setManualCols(null)}
@@ -656,6 +694,22 @@ export default function PlayersLibrary() {
                         <div className="lib-card-body">
                           <div className="lib-card-head">
                             <span className="lib-card-name">{p.name}</span>
+                            {authed && (
+                              <button
+                                type="button"
+                                className={`lib-star${shortlistSet.has(p.id) ? ' on' : ''}`}
+                                aria-pressed={shortlistSet.has(p.id)}
+                                aria-label={shortlistSet.has(p.id) ? `从候选名单移除 ${p.name}` : `把 ${p.name} 加入候选名单`}
+                                disabled={starBusy === p.id}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  void toggleStar(p.id);
+                                }}
+                              >
+                                {shortlistSet.has(p.id) ? '★' : '☆'}
+                              </button>
+                            )}
                             {p.marker && (
                               <span className="lib-card-marker" title={MARKER_LABEL[p.marker]}>
                                 {MARKER_EMOJI[p.marker]}
@@ -723,7 +777,8 @@ export default function PlayersLibrary() {
                           onSort={sortBy}
                         />
                       ))}
-                      {activeCols.map((key) => {
+                      {effectiveCols.map((key) => {
+                        if (key === 'shortlist') return <th key={key}>候选</th>;
                         const def = COL_DEFS.find((d) => d.key === key);
                         const label = key.startsWith('attr:') ? key.slice(5) : def?.label ?? key;
                         // 认不出的列（手改 ?cols= 塞进来的）不装作能排：照常出表头，只是不可点
@@ -793,7 +848,25 @@ export default function PlayersLibrary() {
                           <td>
                             <span className={`badge ${STATUS_BADGE[p.status] ?? 'gray'}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
                           </td>
-                          {activeCols.map((key) => renderClubCol(key, p))}
+                          {effectiveCols.map((key) => {
+                            if (key !== 'shortlist') return renderClubCol(key, p);
+                            const starred = shortlistSet.has(p.id);
+                            return (
+                              <td key="shortlist" className="lib-star-cell">
+                                <button
+                                  type="button"
+                                  className={`lib-star${starred ? ' on' : ''}`}
+                                  aria-pressed={starred}
+                                  aria-label={starred ? `从候选名单移除 ${p.name}` : `把 ${p.name} 加入候选名单`}
+                                  title={starred ? '已在候选名单，点击移出' : '加入候选名单'}
+                                  disabled={starBusy === p.id}
+                                  onClick={() => void toggleStar(p.id)}
+                                >
+                                  {starred ? '★' : '☆'}
+                                </button>
+                              </td>
+                            );
+                          })}
                         </tr>
                       );
                     })}

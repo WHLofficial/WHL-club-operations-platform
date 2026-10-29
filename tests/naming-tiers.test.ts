@@ -108,7 +108,7 @@ const RULES = { topSeatRatio: 8, emergingSlots: 2, topHeatFloor: 1.0, emergingHe
 
 describe('config 三新键与 champion 键（TC-CFG）', () => {
   it('注册表 68→87（v6.33.1 两键 + v6.47.0 wage_floor_gap + v6.49.0 到期两键 + v6.50.0 海捞两键 + v6.53.0 window_length_hours + v6.57.0 expected_income_rate），market_heat_rules 默认带 champion/deal/ignored，三档 profile 出厂值', async () => {
-    expect(CONFIG_KEYS).toHaveLength(87);
+    expect(CONFIG_KEYS).toHaveLength(88); // v6.58.0 加 shortlist_cap
     const fx = freshEnv();
     expect(await loadHeatRules(fx.env.DB)).toEqual({ winStreak: 0.03, slump: 0.02, clampLow: 0.5, clampHigh: 1.5, champion: 0.1, deal: 0.02, ignored: -0.03 });
     expect(await loadSatisfyConfig(fx.env.DB)).toEqual({ attendWeight: 0.5, resultWeight: 0.3, lineBuffer: 0.05, championSatisfaction: 0.1, preferBonus: 0.02, preferBonusCap: 0.04 });

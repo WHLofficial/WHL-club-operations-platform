@@ -37,6 +37,8 @@ function ClubsSection() {
   const [countryEdit, setCountryEdit] = useState<{ club: string; clubId: number; value: string } | null>(null);
   const [newCode, setNewCode] = useState<{ club: string; code: string; expiresAt: string } | null>(null);
   const [stadium, setStadium] = useState<{ club: string; clubId: number; form: StadiumForm; tierName: string | null; fans: number; influence: StadiumAdmin['influence'] } | null>(null);
+  // 消费券发放（v6.58.0）：行内「发消费券」→ 下方小表单；requestId 防网络重试重复入账
+  const [grant, setGrant] = useState<{ club: string; clubId: number; amount: string; note: string; busy: boolean } | null>(null);
 
   const { data: clubsData, error: clubsError } = useQuery({
     queryKey: ADMIN_CLUBS_KEY,
@@ -333,11 +335,75 @@ function ClubsSection() {
                     <button className="btn btn-ghost btn-sm" type="button" onClick={() => openStadium(club)}>
                       主场
                     </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      onClick={() => setGrant({ club: club.name, clubId: club.id, amount: '', note: '', busy: false })}
+                    >
+                      发消费券
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {grant && (
+        <div className="code-card">
+          <p>
+            <b>{grant.club}</b> ← 发放消费券（俱乐部级券余额；建设返还与管理组发放共用一本账）
+          </p>
+          <div className="import-grid">
+            <label className="field">
+              金额（m）
+              <input
+                className="mono"
+                value={grant.amount}
+                onChange={(e) => setGrant({ ...grant, amount: e.target.value })}
+                placeholder="如 5"
+              />
+            </label>
+            <label className="field">
+              备注（必填，进审计）
+              <input value={grant.note} onChange={(e) => setGrant({ ...grant, note: e.target.value })} placeholder="如 联赛奖励" />
+            </label>
+          </div>
+          <div className="btn-row">
+            <button
+              className="btn"
+              type="button"
+              disabled={grant.busy}
+              onClick={() => {
+                void (async () => {
+                  const amount = Number(grant.amount);
+                  const note = grant.note.trim();
+                  if (!Number.isFinite(amount) || amount <= 0) return show('金额必须是大于 0 的数', true);
+                  if (!note) return show('备注必填', true);
+                  setGrant({ ...grant, busy: true });
+                  try {
+                    const res = await apiPost<{ granted: number; amount: number; total: number }>('/api/admin/vouchers/grant', {
+                      clubIds: [grant.clubId],
+                      amount,
+                      note,
+                      requestId: `ui-${Date.now().toString(36)}`,
+                    });
+                    show(`已给 ${grant.club} 发放 ${res.amount.toFixed(2)} m 消费券`);
+                    setGrant(null);
+                  } catch (err) {
+                    show(err instanceof Error ? err.message : '发放失败', true);
+                    setGrant({ ...grant, busy: false });
+                  }
+                })();
+              }}
+            >
+              {grant.busy ? '发放中…' : '确认发放'}
+            </button>
+            <button className="btn btn-ghost" type="button" disabled={grant.busy} onClick={() => setGrant(null)}>
+              取消
+            </button>
+          </div>
         </div>
       )}
 

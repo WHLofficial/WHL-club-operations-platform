@@ -57,6 +57,18 @@ describe('财政域留痕同源锁', () => {
     expect(offenders, `这些文件写了账本却没有审计：${offenders.join('、')}`).toEqual([]);
   });
 
+  it('券账写入者也必须自带审计（v6.58.0，voucherMovement 同 ledgerMovement 纪律）', () => {
+    const voucherWriters = sources.filter((s) => s.source.includes('voucherMovement(')).map((w) => w.rel);
+    expect(voucherWriters).toContain('worker/voucher.ts');
+    const offenders = voucherWriters
+      .filter((rel) => rel !== 'worker/voucher.ts')
+      .filter((rel) => {
+        const src = sources.find((s) => s.rel === rel)!.source;
+        return !AUDIT_MARKERS.some((m) => src.includes(m));
+      });
+    expect(offenders, `这些文件写了券账却没有审计：${offenders.join('、')}`).toEqual([]);
+  });
+
   it('audit_log 的写入只走 lib/audit.ts；bypass.ts 是唯一手写例外（需自带 WHERE 守卫）', () => {
     const inserters = sources.filter((s) => /INSERT\s+INTO\s+audit_log/i.test(s.source)).map((s) => s.rel).sort();
     expect(inserters).toEqual(['lib/audit.ts', 'worker/bypass.ts']);

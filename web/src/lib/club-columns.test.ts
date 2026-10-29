@@ -76,9 +76,11 @@ describe('固定列（v6.30.0 C 段）', () => {
 });
 
 describe('可选列池（默认全不显示）', () => {
-  it('16 项 = 球员库 COL_DEFS 去掉工资/解约金，顺序保持不变', () => {
+  it('16 项 = 球员库 COL_DEFS 去掉工资/解约金与候选星标列，顺序保持不变', () => {
     expect(CLUB_OPTIONAL_COLS).toHaveLength(16);
-    expect(CLUB_OPTIONAL_COLS).toEqual(COL_DEFS.filter((d) => d.key !== 'wage' && d.key !== 'releaseFee'));
+    expect(CLUB_OPTIONAL_COLS).toEqual(
+      COL_DEFS.filter((d) => d.key !== 'wage' && d.key !== 'releaseFee' && d.key !== 'shortlist'),
+    );
     expect(CLUB_OPTIONAL_COLS.map((d) => d.key)).toEqual([
       'marketValue',
       'badges',

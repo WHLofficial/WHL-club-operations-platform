@@ -9260,3 +9260,40 @@ button.sqc-pos:hover {
     line-height: 1.5;
   }
 }
+
+/* ── 候选名单（v6.58.0）：球员库星标列 / 球员页开关 / 账本页签 ── */
+.lib-star {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+.lib-star.on {
+  color: #d9a400;
+}
+.lib-star:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.lib-star-cell {
+  width: 34px;
+  text-align: center;
+}
+.side-shortlist {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.side-shortlist .btn.on {
+  color: #d9a400;
+}
+.ledger-tabs {
+  display: flex;
+  gap: 8px;
+}

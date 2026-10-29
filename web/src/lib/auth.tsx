@@ -44,3 +44,8 @@ export function useAuth(): AuthState {
   if (ctx === null) throw new Error('useAuth 必须在 AuthProvider 内使用');
   return ctx;
 }
+
+/** 可选登录态（v6.58.0）：组件测试常裸渲染页面、没有 AuthProvider；把「无 provider」当匿名。 */
+export function useAuthOptional(): AuthState | null {
+  return useContext(AuthContext);
+}

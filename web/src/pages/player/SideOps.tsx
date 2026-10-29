@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   apiPost,
   apiPut,
+  apiSend,
   apiUpload,
   type ContractDto,
   type ContractPendingView,
@@ -29,7 +30,7 @@ import {
   type SeaSubmitResult,
 } from '../../lib/api.ts';
 import { fmt2, fmtShort } from '../../lib/contract-view.ts';
-import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance } from '../../lib/queries.ts';
+import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance, useShortlistIds, useShortlistInvalidation } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../lib/ops-gate.ts';
@@ -133,6 +134,23 @@ export function SideOps({
   const [freeFee, setFreeFee] = useState('');
   // 激活证据截图（v6.4.0 改动 4：证据制，激活必附 QQ 通知截图）
   const [proofFile, setProofFile] = useState<File | null>(null);
+  // 候选名单开关（v6.58.0）：教练态自取 ids；未绑队 403 / 匿名不渲染（data 为 undefined 即隐藏）
+  const shortlistQuery = useShortlistIds(isCoach);
+  const shortlistEntry = shortlistQuery.data?.entries.find((e) => e.playerId === player.id) ?? null;
+  const invalidateShortlist = useShortlistInvalidation();
+  const [starBusy, setStarBusy] = useState(false);
+  async function toggleShortlist(): Promise<void> {
+    if (starBusy) return;
+    setStarBusy(true);
+    try {
+      if (shortlistEntry !== null) await apiSend('DELETE', `/api/club/shortlist/${shortlistEntry.id}`);
+      else await apiSend('POST', '/api/club/shortlist', { playerId: player.id });
+      await shortlistQuery.refetch();
+      invalidateShortlist();
+    } finally {
+      setStarBusy(false);
+    }
+  }
 
   // 草稿只在换球员时重置：保存后数据刷新（字段值变化）会把用户在刷新窗口内的下一次操作
   // 覆盖掉（草稿回跳、保存按钮失效），所以金额草稿不从 player 灌——等 settings 数据到达灌一次。
@@ -1076,6 +1094,20 @@ export function SideOps({
         </div>
       )}
       {demandNote}
+      {shortlistQuery.data !== undefined && (
+        <div className="side-shortlist">
+          <span className="side-lab">候选名单</span>
+          <button
+            type="button"
+            className={`btn btn-sm btn-ghost${shortlistEntry !== null ? ' on' : ''}`}
+            aria-pressed={shortlistEntry !== null}
+            disabled={starBusy}
+            onClick={() => void toggleShortlist()}
+          >
+            {shortlistEntry !== null ? '✓ 已在候选名单（点击移出）' : '☆ 加入候选名单'}
+          </button>
+        </div>
+      )}
       {body}
     </div>
   );

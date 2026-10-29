@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ShortlistIdsResponse, type ShortlistResponse, type VoucherLedgerResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -61,6 +61,10 @@ export const qk = {
   shopCatalog: ['shop', 'catalog'] as const,
   shopSquadState: ['shop', 'squad-state'] as const,
   shopOrders: ['shop', 'orders'] as const,
+  // 候选名单（v6.58.0）：名单本体与星标 ids 分开存；ids 供球员库/球员页轻量复用
+  shortlist: ['club', 'shortlist'] as const,
+  shortlistIds: ['club', 'shortlist', 'ids'] as const,
+  voucherLedger: (kind: string) => ['club', 'vouchers', kind] as const,
 };
 
 export interface MarketMyClub {
@@ -582,6 +586,45 @@ export function useShopOrders(enabled: boolean) {
     enabled,
     retry: false,
   });
+}
+
+// 候选名单（v6.58.0）：名单本体 / 星标 ids / 券流水
+export function useShortlist(enabled = true) {
+  return useQuery({
+    queryKey: qk.shortlist,
+    queryFn: () => api<ShortlistResponse>('/api/club/shortlist'),
+    enabled,
+    retry: false,
+  });
+}
+
+export function useShortlistIds(enabled = true) {
+  return useQuery({
+    queryKey: qk.shortlistIds,
+    queryFn: () => api<ShortlistIdsResponse>('/api/club/shortlist/ids'),
+    enabled,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export function useVoucherLedger(kind: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.voucherLedger(kind),
+    queryFn: () => api<VoucherLedgerResponse>(`/api/club/vouchers${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
+    enabled,
+    retry: false,
+  });
+}
+
+// 写后联动：名单/ids + 带 ?shortlist=1 的球员列表（前缀 ['players'] 一并失效）
+export function useShortlistInvalidation() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.shortlist });
+    void qc.invalidateQueries({ queryKey: qk.shortlistIds });
+    void qc.invalidateQueries({ queryKey: ['players'] });
+  };
 }
 
 // 提交/审核动作后的联动失效：工单列表 + 表单状态 + 余额（扣费/退款都动余额）

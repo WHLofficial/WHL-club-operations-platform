@@ -241,7 +241,6 @@ function ctxOf(patch: Partial<EventClubContext> = {}): EventClubContext {
       shell_influence: 0,
       bonus_points: 0,
       fans: 18000,
-      build_credit: 0,
       next_attendance_mod: 1,
       next_weather: '',
       venue_reputation: 0,
@@ -1489,7 +1488,7 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
 
 describe('招商轮配置（TC-CFG）', () => {
   it('TC-CFG-01 CONFIG_KEYS 共 87 项（v6.47.0 加 wage_floor_gap，v6.49.0 加两个到期键，v6.50.0 加海捞两键，v6.53.0 加 window_length_hours，v6.57.0 加 expected_income_rate），两个 market 键在册；默认值就位', async () => {
-    expect(CONFIG_KEYS).toHaveLength(87);
+    expect(CONFIG_KEYS).toHaveLength(88); // v6.58.0 加 shortlist_cap
     expect(CONFIG_KEYS).toContain('market_round_rules');
     expect(CONFIG_KEYS).toContain('market_heat_rules');
     const fx = freshEnv();

@@ -48,7 +48,8 @@ const CLUB_FIXED_COL_KEYS: ReadonlySet<string> = new Set(['wage', 'releaseFee'])
 
 // 可选列池（16）：球员库 COL_DEFS 去掉 工资/解约金。派生而非手抄 ——
 // 球员库加列时这里自动跟上，club-columns.test.ts 的 16 项断言会在池子变形时报警
-export const CLUB_OPTIONAL_COLS = COL_DEFS.filter((d) => !CLUB_FIXED_COL_KEYS.has(d.key));
+// v6.58.0：候选星标列只属球员库（球队页两张表不挂收藏），不进球队页列池
+export const CLUB_OPTIONAL_COLS = COL_DEFS.filter((d) => d.key !== 'shortlist' && !CLUB_FIXED_COL_KEYS.has(d.key));
 
 const CLUB_OPT_COL_KEYS: ReadonlySet<string> = new Set(CLUB_OPTIONAL_COLS.map((d) => d.key));
 

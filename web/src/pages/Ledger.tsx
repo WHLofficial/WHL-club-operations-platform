@@ -10,7 +10,7 @@ import {
 } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { useTimeFmt } from '../lib/datetime.ts';
-import { useFinanceSummary } from '../lib/queries.ts';
+import { useFinanceSummary, useVoucherLedger } from '../lib/queries.ts';
 import type { FinanceWindow } from '../lib/api.ts';
 
 /** 类型筛选选项：§7.1 枚举 + 奖金模板（prize_*），顺序按常见收支在前 */
@@ -46,6 +46,17 @@ function money2(n: number): string {
 // v6.10.0 加「事件」列：随机事件的资金流水（kind='event'，可为负；maintenance/fans 等效果不进本列）。
 // v6.26.0 加「消费」列：消费中心工单（kind='shop_purchase'，扣费为负；拒绝退款是同 kind 的正向流水，同列相抵）。
 const FINANCE_NAMED_KINDS = ['wage', 'maintenance', 'naming_fee', 'naming_bonus', 'naming_penalty', 'activity', 'event', 'luxury_tax', 'shop_purchase'] as const;
+
+// 消费券流水类型（v6.58.0）：与迁移 0082 的 kind 枚举一一对应
+const VOUCHER_KIND_LABEL: Record<string, string> = {
+  migrate: '存量迁移',
+  build_refund: '建设返还',
+  build_use: '建设抵扣',
+  shop_use: '工单抵扣',
+  shop_refund: '工单退回',
+  admin_grant: '管理组发放',
+  event_grant: '事件发放',
+};
 
 function otherKindsSum(byKind: Record<string, number>): number {
   return Object.entries(byKind).reduce((s, [k, v]) => (FINANCE_NAMED_KINDS.includes(k as never) ? s : s + v), 0);
@@ -156,6 +167,7 @@ export default function Ledger() {
   // v6.25.0：时间显示走共享时区层（默认北京时间，顶栏时钟图标可切）
   const { dateTime } = useTimeFmt();
   const [kind, setKind] = useState('');
+  const [tab, setTab] = useState<'cash' | 'voucher'>('cash');
   const { user } = useAuth();
   const isCoach = user?.role === 'coach' || user?.role === 'admin';
   // 余额拉失败按「全空」展示（旧行为 .catch 落全 null）
@@ -179,6 +191,8 @@ export default function Ledger() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const entries = ledgerQuery.data ? ledgerQuery.data.pages.flatMap((p) => p.entries) : [];
+  const voucherQuery = useVoucherLedger('', tab === 'voucher');
+  const voucherEntries = voucherQuery.data?.entries ?? [];
   const lastPage = ledgerQuery.data?.pages[ledgerQuery.data.pages.length - 1] ?? null;
   const nextCursor = ledgerQuery.hasNextPage ? (lastPage?.nextCursor ?? null) : null;
   const loaded = !ledgerQuery.isPending;
@@ -196,6 +210,14 @@ export default function Ledger() {
         </div>
       ) : (
         <div className="ledger-book">
+          <div className="ledger-tabs">
+            <button type="button" className={`btn btn-sm${tab === 'cash' ? '' : ' btn-ghost'}`} onClick={() => setTab('cash')}>
+              现金流水
+            </button>
+            <button type="button" className={`btn btn-sm${tab === 'voucher' ? '' : ' btn-ghost'}`} onClick={() => setTab('voucher')}>
+              消费券流水
+            </button>
+          </div>
           <div className="card ledger-balance">
             <div className="ledger-balance-main">
               <span className="ledger-balance-label">俱乐部余额</span>
@@ -219,6 +241,7 @@ export default function Ledger() {
 
           {isCoach && <FinanceSummaryCard />}
 
+          {tab === 'cash' && (
           <div className="card">
             <label className="field">
               流水类型
@@ -273,6 +296,48 @@ export default function Ledger() {
               </button>
             )}
           </div>
+          )}
+          {tab === 'voucher' && (
+            <div className="card">
+              {voucherQuery.isError ? (
+                <p className="error-msg">{voucherQuery.error instanceof Error ? voucherQuery.error.message : '券流水读不出来'}</p>
+              ) : voucherQuery.isPending ? (
+                <p className="muted">正在读券流水…</p>
+              ) : voucherEntries.length === 0 ? (
+                <p className="muted">还没有消费券流水。建设支出返还 / 管理组发放之后会记在这里。</p>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>摘要</th>
+                        <th className="num">金额</th>
+                        <th className="num">余额</th>
+                        <th>时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {voucherEntries.map((e) => (
+                        <tr key={e.id}>
+                          <td>
+                            <span className={`ledger-side ${e.amount >= 0 ? 'in' : 'out'}`}>{e.amount >= 0 ? '收' : '支'}</span>
+                          </td>
+                          <td>
+                            <span className="badge">{VOUCHER_KIND_LABEL[e.kind] ?? e.kind}</span>
+                            {e.memo && <span className="ledger-memo">{e.memo}</span>}
+                          </td>
+                          <td className={`num mono ${e.amount >= 0 ? 'ledger-in' : 'ledger-out'}`}>{fmtAmount(e.amount)}</td>
+                          <td className="num mono">{e.balanceAfter.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}</td>
+                          <td className="mono ledger-time">{dateTime(e.createdAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -740,14 +740,23 @@ function OrdersCard({ targetOrder }: { targetOrder: number | null }) {
                     </span>
                   )}
                   <span style={{ marginLeft: 6 }}>{o.categoryLabel}</span>
-                  {o.amount !== null && <span className="mono gold-text" style={{ float: 'right' }}>−{o.amount.toFixed(2)}m</span>}
+                  {o.amount !== null && (
+                    <span className="mono gold-text" style={{ float: 'right' }}>
+                      −{o.amount.toFixed(2)}m
+                      {o.voucherUsed > 0 && (
+                        <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>
+                          券抵 {o.voucherUsed.toFixed(2)} · 实付 {(o.cashPaid ?? 0).toFixed(2)}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </div>
                 <p className="hint" style={{ margin: '2px 0 0' }}>
                   {o.summary} · {time(o.createdAt)}
                 </p>
                 {o.status === 'rejected' && o.rejectReason && (
                   <p className="error-msg" style={{ margin: '2px 0 0' }}>
-                    理由：{o.rejectReason}（费用已退回）
+                    理由：{o.rejectReason}（{o.voucherUsed > 0 ? '现金与消费券已退回' : '费用已退回'}）
                   </p>
                 )}
                 {open && (

@@ -12,6 +12,7 @@ import {
   ApiError,
   api,
   apiPost,
+  apiSend,
   type ClubEventChooseResult,
   type ClubEventRecent,
   type ClubEventsResponse,
@@ -24,7 +25,7 @@ import {
   type TerminationResult,
 } from '../../lib/api.ts';
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
-import { qk } from '../../lib/queries.ts';
+import { qk, useShortlist, useShortlistInvalidation } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { CARD_VIEW_CELLS, DESKTOP_CELLS_DESK, groupRowsByPosition, type CardViewKey } from '../../lib/club-cards.ts';
@@ -76,6 +77,7 @@ export default function DeskTab({ overview }: { overview: MyClubOverview }) {
 
   return (
     <div className="club-block">
+      <ShortlistCard />
       {club.transferBanned && (
         <section className="card banner banner-bad" role="alert">
           ⛔ 本俱乐部的转会权限已被管理组冻结：挂牌、出价、海捞、激活、议价等新操作都会被拦下。请联系管理组处理相关事项。
@@ -870,6 +872,86 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
             </p>
           )}
         </>
+      )}
+    </section>
+  );
+}
+
+/* ---------- 候选名单卡（v6.58.0） ---------- */
+
+/** 我的球队 · 候选名单：FM shortlist 的查看/移出入口；加入走球员库星标或球员页 SideOps。 */
+function ShortlistCard() {
+  const qc = useQueryClient();
+  const query = useShortlist();
+  const invalidate = useShortlistInvalidation();
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const items = query.data?.items ?? [];
+  const cap = query.data?.cap ?? 30;
+
+  async function remove(id: number): Promise<void> {
+    if (busyId !== null) return;
+    setBusyId(id);
+    try {
+      await apiSend('DELETE', `/api/club/shortlist/${id}`);
+      await qc.invalidateQueries({ queryKey: qk.shortlist });
+      invalidate();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h3>
+        候选名单 <span className="muted">（{items.length} / {cap}）</span>
+      </h3>
+      {query.isError ? (
+        <p className="muted">{query.error instanceof Error ? query.error.message : '候选名单读不出来'}</p>
+      ) : query.isPending ? (
+        <p className="muted">正在读候选名单…</p>
+      ) : items.length === 0 ? (
+        <p className="muted">还没有候选球员。到球员库点「候选」列的星标，或在球员页操作区加入。</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="dossier-table">
+            <thead>
+              <tr>
+                <th>球员</th>
+                <th>所属</th>
+                <th>位置</th>
+                <th className="num">年龄</th>
+                <th className="num">CA</th>
+                <th className="num">PA</th>
+                <th>备注</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    {item.player.fcId !== null ? (
+                      <Link to={playerPath({ id: item.playerId, fcId: item.player.fcId })}>{item.player.name}</Link>
+                    ) : (
+                      item.player.name
+                    )}
+                  </td>
+                  <td>{item.player.clubName ?? '自由身'}</td>
+                  <td>{item.player.position ?? '—'}</td>
+                  <td className="num mono">{item.player.age ?? '—'}</td>
+                  <td className="num mono">{item.player.ca ?? '—'}</td>
+                  <td className="num mono">{item.player.pa ?? '—'}</td>
+                  <td>{item.note ?? '—'}</td>
+                  <td>
+                    <button type="button" className="btn btn-sm btn-ghost" disabled={busyId === item.id} onClick={() => void remove(item.id)}>
+                      移出
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

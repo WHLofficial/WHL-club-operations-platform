@@ -18,7 +18,7 @@ import { createConfigService } from '../../core/config.ts';
 import { balanceSnapshot } from '../ledger.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
-import { voucherBalance, voucherMovement } from '../voucher.ts';
+import { voucherBalance } from '../voucher.ts';
 import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms } from '../naming-ops.ts';
 import { acceptOffer, activateQueuedStatements, listClubOffers } from '../market-ops.ts';
 import { queueClubNotification } from '../notify.ts';
@@ -894,7 +894,7 @@ app.get('/club/shortlist', async (c) => {
   const cap = shortlistCapClamp(await createConfigService(c.env.DB).getNumber('shortlist_cap'));
   const rows = await c.env.DB.prepare(
     `SELECT s.id, s.player_id, s.note, s.created_at,
-            p.display_name, p.name, p.position, p.age, p.ca, p.pa, p.market_value, p.club_id, p.status,
+            p.display_name, p.name, p.position, p.age, p.ca, p.pa, p.market_value, p.club_id, p.status, p.fc_id,
             pc.name AS club_name
      FROM player_shortlist s
      JOIN players p ON p.id = s.player_id

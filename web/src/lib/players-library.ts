@@ -91,6 +91,8 @@ export interface Filters {
   roles: number[];
   status: string;
   growable: 'all' | '1' | '0';
+  /** v6.58.0：只看本俱乐部候选名单（登录态；服务端 ?shortlist=1，绕开公开缓存） */
+  shortlist: boolean;
   sort: SortKey;
   order: 'asc' | 'desc';
   club: string; // ''=全部 | 'free'=自由身 | 俱乐部 id
@@ -139,6 +141,7 @@ export const EMPTY_FILTERS: Filters = {
   roles: [],
   status: '',
   growable: 'all',
+  shortlist: false,
   sort: 'id',
   order: 'desc',
   club: '',
@@ -219,6 +222,7 @@ export function filtersFromUrl(): Filters {
   f.roles = str('role') ? [...new Set(str('role').split(',').map(Number).filter((n) => isRoleId(n)))] : [];
   f.status = str('status');
   if (str('growable') === '1' || str('growable') === '0') f.growable = str('growable') as '1' | '0';
+  f.shortlist = str('shortlist') === '1';
   const sortParam = str('sort');
   if (isSortKey(sortParam)) f.sort = sortParam;
   if (str('order') === 'asc') f.order = 'asc';
@@ -253,6 +257,7 @@ export function filtersToQuery(f: Filters): string {
   put('position', f.positions.join(','));
   put('status', f.status);
   put('growable', f.growable === 'all' ? '' : f.growable);
+  if (f.shortlist) p.set('shortlist', '1');
   put('sort', f.sort === 'id' ? '' : f.sort);
   put('order', f.sort === 'id' ? '' : f.order);
   put('club_id', f.club);
@@ -304,7 +309,7 @@ export function filtersToQuery(f: Filters): string {
 
 // ---- 列系统：基础列恒在；可变列默认两列，其余由筛选联动自动加（手动调过则以手动为准） ----
 
-export const DEFAULT_COLS = ['marketValue', 'badges'];
+export const DEFAULT_COLS = ['shortlist', 'marketValue', 'badges'];
 
 // 固定 11 列（标签 / 排序键 / 是否数值列）。数组顺序就是表头与单元格的渲染顺序，改动前先看页面行渲染同序。
 // 标记列 v6.19.0 从可选列提为固定列（用户指令：放 UID 后面第二列），COL_DEFS 里的同名行已退役
@@ -322,7 +327,8 @@ export const FIXED_COLUMNS: { label: string; sort: SortKey; num?: boolean }[] = 
   { label: '状态', sort: 'status' },
 ];
 
-export const COL_DEFS: { key: string; label: string; sort: SortKey; num?: boolean }[] = [
+export const COL_DEFS: { key: string; label: string; /** v6.58.0：星标列没有可排序键（表头在页面侧特殊处理） */ sort?: SortKey; num?: boolean }[] = [
+  { key: 'shortlist', label: '候选' },
   { key: 'marketValue', label: '身价', sort: 'market_value', num: true },
   { key: 'badges', label: '徽章', sort: 'badges' },
   { key: 'prestige', label: '声望', sort: 'prestige', num: true },
@@ -430,6 +436,7 @@ export function filterChips(f: Filters, clubs: readonly { id: number; name: stri
     push('club', `俱乐部：${name}`, { club: '' });
   }
   if (f.growable !== 'all') push('growable', f.growable === '1' ? '仅可成长' : '仅非成长', { growable: 'all' });
+  if (f.shortlist) push('shortlist', '只看候选名单', { shortlist: false });
 
   for (const [minKey, maxKey, label, unit] of RANGE_CHIP_GROUPS) {
     const min = f[minKey] as string;

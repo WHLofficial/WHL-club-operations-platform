@@ -122,7 +122,7 @@ describe('config 服务（§13）', () => {
   });
 
   it('注册表 87 键（§13 + v2.1.0/v2.5.0/v2.6.0/v2.7.0/v6.8.0/v6.9.0/v6.10.0/v6.12.0/v6.13.0/v6.14.0/v6.26.0/v6.28.0/v6.33.1/v6.47.0/v6.49.0/v6.50.0/v6.53.0/v6.57.0 各域参数）', () => {
-    expect(CONFIG_KEYS.length).toBe(87); // v6.47.0 加 wage_floor_gap；v6.49.0 加 offer_turn_hours / negotiation_silence_hours；v6.50.0 加 sea_enabled / sea_sealed_hours；v6.53.0 加 window_length_hours；v6.57.0 加 expected_income_rate
+    expect(CONFIG_KEYS.length).toBe(88); // v6.47.0 加 wage_floor_gap；v6.49.0 加 offer_turn_hours / negotiation_silence_hours；v6.50.0 加 sea_enabled / sea_sealed_hours；v6.53.0 加 window_length_hours；v6.57.0 加 expected_income_rate；v6.58.0 加 shortlist_cap
   });
 
   // v6.57.0 预期收入额度系数 k：在册 + 默认 1.0 与 SQL 侧 COALESCE 兜底同源，运营 PUT 不再 400
