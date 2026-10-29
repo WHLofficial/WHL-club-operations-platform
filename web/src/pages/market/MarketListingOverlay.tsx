@@ -231,7 +231,9 @@ function OverlayBody({
                   : null;
   const halfPrice = l.matchPhase === 'matching' ? (l.highestBid ?? l.askPrice) : null;
   const note = isSeller
-    ? '这是你的挂牌：竞价截止后最高价进审核过户；可在球员页维护报价设置。窗尾无人出价将自动下架（收下架费）。'
+    ? l.type === 'forced'
+      ? '这是强制拍卖：竞价截止后最高价进审核过户。到期无人出价将下架（收 10% 下架费），球员按解约处置变自由身，本窗所有球队都不能海捞他。'
+      : '这是你的挂牌：竞价截止后最高价进审核过户；可在球员页维护报价设置。窗尾无人出价将自动下架（收下架费）。'
     : l.matchPhase === 'matching' && halfPrice !== null
       ? `竞价已截止。被激活方 ${l.sellerClub.name} 可在匹配窗内付「新违约金 > ${money(halfPrice)}m」的差额把球员留下，到期未匹配则按 ${money(halfPrice)}m 成交。`
       : l.firstBidPending

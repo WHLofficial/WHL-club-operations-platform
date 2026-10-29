@@ -370,7 +370,7 @@ describe('强制拍卖（4.4.5）', () => {
     expect(body.listings.find((r) => r.id === listingId)?.deadlineAt).toBe(row?.deadline_at);
   });
 
-  it('v6.24.1：forced listed 到期无人出价 → 提前下架 + 10% 下架费（0.1m），球员还原', async () => {
+  it('v6.58.0：forced listed 到期无人出价 → 下架 + 10% 下架费，球员按解约处置变自由身且本窗不可捞', async () => {
     const fx = await seedAuction();
     const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
     expect(create.status).toBe(201);
@@ -385,13 +385,28 @@ describe('强制拍卖（4.4.5）', () => {
       status: 'delisted',
       deadline_note: '截止时刻无人出价',
     });
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 45')?.status).toBe('normal');
+    // 解约处置：去归属变自由身 + 解约单留档（transfers 行是海捞禁签闸的事实来源）
+    const released = sqlGet<{ status: string; club_id: number | null }>(fx.sqlite, 'SELECT status, club_id FROM players WHERE id = 45');
+    expect(released).toMatchObject({ status: 'free', club_id: null });
+    const term = sqlGet<{ id: number; status: string; season: number }>(
+      fx.sqlite,
+      `SELECT id, status, season FROM transfers WHERE idempotency_key = 'forced_no_bid:${listingId}'`,
+    );
+    expect(term).toMatchObject({ status: 'completed', season: 1 });
+    expect(sqlGet<{ is_active: number }>(fx.sqlite, 'SELECT is_active FROM contracts WHERE player_id = 45 AND is_active = 1')).toBeUndefined();
     expect(
       sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND club_id = ${fx.club}`)?.amount,
     ).toBe(-0.1);
+    // 本窗不可捞起：走真实端点整条守卫链（窗口 → 归属 → 状态 → 本窗禁签）
+    const sign = await post('/api/transfers/free-agent', { playerId: 45, newReleaseFee: 10 }, 'tok-coach2', fx.env);
+    expect(sign.status).toBe(409);
+    expect(((await sign.json()) as { error: string }).error).toContain('本窗口被解约过');
+    // 幂等：再次结算不改球员、不重复建解约单
+    await get('/api/market/listings?status=all', 'tok-admin', fx.env);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM transfers WHERE idempotency_key = 'forced_no_bid:" + listingId + "'")?.n).toBe(1);
   });
 
-  it('窗尾无人出价 → 下架收 10% 挂牌费（0.1m）', async () => {
+  it('窗尾无人出价 → 下架收 10% 挂牌费（0.1m），球员同样按解约下海（v6.58.0）', async () => {
     const fx = await seedAuction();
     const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
     expect(create.status).toBe(201);
@@ -400,6 +415,11 @@ describe('强制拍卖（4.4.5）', () => {
     await get('/api/market/listings?status=all', 'tok-admin', fx.env);
     const listing = sqlGet<{ status: string; deadline_note: string }>(fx.sqlite, 'SELECT status, deadline_note FROM listings WHERE id = ?', ((await create.json()) as { listingId: number }).listingId);
     expect(listing?.status).toBe('delisted');
+    // 窗尾收口同样按解约处置（无人出价的强制拍卖没有「留队」出口）
+    expect(sqlGet<{ status: string; club_id: number | null }>(fx.sqlite, 'SELECT status, club_id FROM players WHERE id = 45')).toMatchObject({
+      status: 'free',
+      club_id: null,
+    });
     const feeEntry = sqlGet<{ amount: number }>(
       fx.sqlite,
       `SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND club_id = ${fx.club}`,

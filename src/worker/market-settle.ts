@@ -13,6 +13,7 @@ import { loadMarketContext, type MarketContext } from './market-context.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { detectBidAlerts } from './bid-alerts.ts';
 import { expireStaleOffers } from './offers.ts';
+import { completeTermination } from './transfers.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 
@@ -144,13 +145,14 @@ export async function settleListingForReview(
 // 激活挂牌例外：卖家没主动挂牌，激活失效/窗尾收口都不收下架费，球员还原训练营态。
 // source（评审修复 P2-④）：'deadline' = 截止时刻到点无人出价；'window_end' = 转会窗关闭收口。
 export async function delistUnbid(
-  db: D1Database,
+  env: Env,
   listing: ListingCore,
   ctx: MarketContext,
   actor: number | null,
   origin: AuditOrigin,
   source: 'deadline' | 'window_end' = 'window_end',
 ): Promise<'delisted' | 'already'> {
+  const db = env.DB;
   const isActivation = listing.type === 'activation';
   const fee = isActivation ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
   const audit = createAuditStatement(db);
@@ -203,7 +205,41 @@ export async function delistUnbid(
     }),
   ];
   const results = await db.batch(statements);
-  return (results[0]?.meta.changes ?? 0) > 0 ? 'delisted' : 'already';
+  const changed = (results[0]?.meta.changes ?? 0) > 0;
+  // v6.58.0 用户裁决：强制拍卖到期无人出价按「被解约」处置——球员去归属变自由身。
+  // 解约单落 transfers(type=termination, status=completed) 后，checkSeaSignEligible 的
+  // 「本窗解约禁签」闸自然生效（本窗不可捞起）；其余收口（成长清零/徽章/候选名单通知）复用
+  // completeTermination，避免两套解约语义漂移。
+  if (changed && listing.type === 'forced') await releaseForcedNoBid(env, listing, actor, origin);
+  return changed ? 'delisted' : 'already';
+}
+
+// 幂等：解约单以 forced_no_bid:{listingId} 为 idempotency_key；重复结算只会命中已完成的单。
+async function releaseForcedNoBid(
+  env: Env,
+  listing: ListingCore,
+  actor: number | null,
+  origin: AuditOrigin,
+): Promise<void> {
+  const key = `forced_no_bid:${listing.id}`;
+  try {
+    await env.DB
+      .prepare(
+        `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
+         SELECT 'termination', ?, ?, NULL, 0, 'pending_review', ?, ?, ?, ${nowSql()}
+         WHERE NOT EXISTS (SELECT 1 FROM transfers WHERE idempotency_key = ?)`,
+      )
+      .bind(listing.player_id, listing.seller_club_id, listing.season, listing.window_seq, key, key)
+      .run();
+    const row = await env.DB
+      .prepare('SELECT id, status FROM transfers WHERE idempotency_key = ?')
+      .bind(key)
+      .first<{ id: number; status: string }>();
+    if (row && row.status !== 'completed') await completeTermination(env, row.id, actor, origin);
+  } catch (e) {
+    // 结算尽力而为：球员仍留在原队（等同旧口径），不阻塞其余挂牌收口；下次惰性结算按 key 重试。
+    console.warn(`[market-settle] 强制拍卖无出价转解约失败 listing=${listing.id}:`, e);
+  }
 }
 
 // 激活出价窗失效（4.4.2.2）：激活方未在窗口内落价 → 激活无效。卖家没收下架费，
@@ -425,7 +461,7 @@ async function runSettleOverdue(
     if (windowClosed) {
       // 窗尾收口：没人出价的下架收费；还有竞价的强制收口（成交确认交管理组裁量）
       if (row.status === 'listed') {
-        if ((await delistUnbid(db, core, ctx, actor, origin)) === 'delisted') summary.delisted++;
+        if ((await delistUnbid(env, core, ctx, actor, origin)) === 'delisted') summary.delisted++;
       } else {
         const r = await settleByContractType(env, core, actor, origin, 'bidding', ctx);
         if (r === 'settled') summary.settled++;
@@ -459,7 +495,7 @@ async function runSettleOverdue(
       // v6.24.0：listed 到期同样收口——无人（活跃）出价 → 提前下架（原窗尾口径）；
       // 有人出价（报价成交自动挂牌等特殊路径）走原静默结算并按合同类型分流
       if (row.status === 'listed' && row.bid_count === 0) {
-        if ((await delistUnbid(db, core, ctx, actor, origin, 'deadline')) === 'delisted') summary.delisted++;
+        if ((await delistUnbid(env, core, ctx, actor, origin, 'deadline')) === 'delisted') summary.delisted++;
       } else {
         const r = await settleByContractType(env, core, actor, origin, row.status === 'bidding' ? 'bidding' : 'listed', ctx);
         if (r === 'settled') summary.settled++;
