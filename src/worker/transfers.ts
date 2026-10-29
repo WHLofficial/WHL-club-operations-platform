@@ -23,6 +23,7 @@ import { growthResetStatements } from './growth.ts';
 import { hookTierRecompute } from './growth-tier.ts';
 import { voidDemandStatements } from './demand-ops.ts';
 import { queueAllUserClubsNotification } from './notify.ts';
+import { notifyShortlistWatchers } from './shortlist.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -665,6 +666,13 @@ export async function completeTransfer(
   // club_id 上，换队即可能升/降。续约/匹配（amendment）不动归属，跳过；重放（statusChange = 0）不重算。
   if (statusChange > 0 && !amendment) {
     await hookTierRecompute(db, { kind: 'players', playerIds: [transfer.player_id] }, { actor, origin });
+    // 候选名单「被签走」（v6.58.0）：五条成交路径全部收敛到本函数，故只挂这一处。
+    // 买方 = 操作方；收藏者就是买方时不发（助手内排除）。
+    await notifyShortlistWatchers(env, transfer.player_id, {
+      type: 'sold',
+      operatorClubId: transfer.to_club_id,
+      fee: transfer.fee,
+    });
   }
   return { status: statusChange > 0 ? 'completed' : 'already' };
 }
@@ -760,6 +768,8 @@ export async function completeTermination(
   // 档位落到 1 + c3/c4/c5。重放（statusChange = 0）不重算。
   if (statusChange > 0) {
     await hookTierRecompute(db, { kind: 'players', playerIds: [transfer.player_id] }, { actor, origin });
+    // 候选名单「解约变自由身」（v6.58.0）：操作方 = 原俱乐部；收藏者就是它时不发
+    await notifyShortlistWatchers(env, transfer.player_id, { type: 'released', operatorClubId: transfer.from_club_id });
   }
   return { status: statusChange > 0 ? 'completed' : 'already' };
 }

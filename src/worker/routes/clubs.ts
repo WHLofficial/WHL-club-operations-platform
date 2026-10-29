@@ -16,7 +16,7 @@ import { POSITION_BY_ID, POSITION_GROUP_BY_POSITION, POSITION_GROUPS } from '../
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, influenceTierCoef, loadInfluenceTierCoefs } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
 import { balanceSnapshot } from '../ledger.ts';
-import { sqlDisplayName } from '../../core/player-name.ts';
+import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS } from '../stadium-ops.ts';
 import { voucherBalance, voucherMovement } from '../voucher.ts';
 import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms } from '../naming-ops.ts';
@@ -815,6 +815,198 @@ app.get('/club/ledger', async (c) => {
     })),
     nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
   });
+});
+
+// 消费券流水（v6.58.0）：与账本同形（新→旧倒序、cursor 翻页），读 voucher_entries
+app.get('/club/vouchers', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
+  if (!club) return c.json({ club: null, entries: [], nextCursor: null });
+  const conditions = ['club_id = ?'];
+  const args: unknown[] = [club.id];
+  const kind = c.req.query('kind');
+  if (kind !== undefined && kind !== '') {
+    if (!/^[a-z_]+$/.test(kind)) throw new HttpError(400, '流水类型不对');
+    conditions.push('kind = ?');
+    args.push(kind);
+  }
+  const cursor = c.req.query('cursor');
+  if (cursor !== undefined) {
+    const n = Number(cursor);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'cursor 不对');
+    conditions.push('id < ?');
+    args.push(n);
+  }
+  const rows = await c.env.DB.prepare(
+    `SELECT id, kind, amount, balance_after, ref_type, ref_id, memo, created_at
+     FROM voucher_entries WHERE ${conditions.join(' AND ')} ORDER BY id DESC LIMIT ${LEDGER_PAGE_SIZE + 1}`,
+  )
+    .bind(...args)
+    .all<{
+      id: number;
+      kind: string;
+      amount: number;
+      balance_after: number;
+      ref_type: string | null;
+      ref_id: number | null;
+      memo: string | null;
+      created_at: string;
+    }>();
+  const hasMore = rows.results.length > LEDGER_PAGE_SIZE;
+  const page = hasMore ? rows.results.slice(0, LEDGER_PAGE_SIZE) : rows.results;
+  return c.json({
+    club: { id: club.id, name: club.name },
+    balance: await voucherBalance(c.env.DB, club.id),
+    entries: page.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      amount: r.amount,
+      balanceAfter: r.balance_after,
+      refType: r.ref_type,
+      refId: r.ref_id,
+      memo: r.memo,
+      createdAt: r.created_at,
+    })),
+    nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+  });
+});
+
+// 候选名单（v6.58.0，FM shortlist 语义）：俱乐部私有的球员跟踪名单，任何状态球员都能收。
+// 上限走 config shortlist_cap（默认 30、界 0–100）；入队用 SQL 守卫同时拦重复与超限，
+// 不靠「先 COUNT 再 INSERT」的读改写（并发两次同球员只落一条）。
+const SHORTLIST_DEFAULT_CAP = 30;
+const SHORTLIST_NOTE_MAX = 200;
+
+function shortlistCapClamp(n: number | null): number {
+  if (n === null || !Number.isFinite(n)) return SHORTLIST_DEFAULT_CAP;
+  return Math.min(100, Math.max(0, Math.floor(n)));
+}
+
+async function shortlistContext(c: { env: Env; req: { raw: Request } }) {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再用候选名单');
+  return { user, club };
+}
+
+app.get('/club/shortlist', async (c) => {
+  const { club } = await shortlistContext(c);
+  const cap = shortlistCapClamp(await createConfigService(c.env.DB).getNumber('shortlist_cap'));
+  const rows = await c.env.DB.prepare(
+    `SELECT s.id, s.player_id, s.note, s.created_at,
+            p.display_name, p.name, p.position, p.age, p.ca, p.pa, p.market_value, p.club_id, p.status,
+            pc.name AS club_name
+     FROM player_shortlist s
+     JOIN players p ON p.id = s.player_id
+     LEFT JOIN clubs pc ON pc.id = p.club_id
+     WHERE s.club_id = ?
+     ORDER BY s.id DESC LIMIT 200`,
+  )
+    .bind(club.id)
+    .all<{
+      id: number;
+      player_id: number;
+      note: string | null;
+      created_at: string;
+      display_name: string | null;
+      name: string;
+      position: string | null;
+      age: number | null;
+      ca: number | null;
+      pa: number | null;
+      market_value: number | null;
+      club_id: number | null;
+      status: string | null;
+      club_name: string | null;
+    }>();
+  return c.json({
+    clubId: club.id,
+    cap,
+    items: rows.results.map((r) => ({
+      id: r.id,
+      playerId: r.player_id,
+      note: r.note,
+      createdAt: r.created_at,
+      player: {
+        name: rowDisplayName(r),
+        position: r.position,
+        age: r.age,
+        ca: r.ca,
+        pa: r.pa,
+        marketValue: r.market_value,
+        clubId: r.club_id,
+        clubName: r.club_name,
+        status: r.status,
+      },
+    })),
+  });
+});
+
+// 登录态小端点：球员库星标列数据源。公开列表是两级缓存，绝不能把 per-user 星标混进去。
+app.get('/club/shortlist/ids', async (c) => {
+  const { club } = await shortlistContext(c);
+  const rows = await c.env.DB.prepare('SELECT player_id FROM player_shortlist WHERE club_id = ? ORDER BY id DESC')
+    .bind(club.id)
+    .all<{ player_id: number }>();
+  return c.json({ clubId: club.id, playerIds: rows.results.map((r) => r.player_id) });
+});
+
+app.post('/club/shortlist', async (c) => {
+  const { user, club } = await shortlistContext(c);
+  const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown; note?: unknown } | null;
+  const playerId = Number(body?.playerId);
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, 'playerId 必须是正整数');
+  const note = typeof body?.note === 'string' ? body.note.trim() : '';
+  if (note.length > SHORTLIST_NOTE_MAX) throw new HttpError(400, `备注最多 ${SHORTLIST_NOTE_MAX} 字`);
+  const player = await c.env.DB.prepare('SELECT id FROM players WHERE id = ?').bind(playerId).first<{ id: number }>();
+  if (!player) throw new HttpError(404, '找不到这名球员');
+  const cap = shortlistCapClamp(await createConfigService(c.env.DB).getNumber('shortlist_cap'));
+  const res = await c.env.DB.prepare(
+    `INSERT INTO player_shortlist (club_id, player_id, note, added_by, created_at)
+     SELECT ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE (SELECT COUNT(*) FROM player_shortlist WHERE club_id = ?) < ?
+       AND NOT EXISTS (SELECT 1 FROM player_shortlist WHERE club_id = ? AND player_id = ?)`,
+  )
+    .bind(club.id, playerId, note || null, user.id, club.id, cap, club.id, playerId)
+    .run();
+  if ((res.meta.changes ?? 0) === 0) {
+    const dup = await c.env.DB.prepare('SELECT 1 AS x FROM player_shortlist WHERE club_id = ? AND player_id = ?')
+      .bind(club.id, playerId)
+      .first();
+    if (dup) throw new HttpError(409, '这名球员已经在候选名单里');
+    throw new HttpError(409, cap <= 0 ? '候选名单上限为 0（功能未开启）' : `候选名单最多 ${cap} 人`);
+  }
+  const item = await c.env.DB.prepare('SELECT id, player_id, note, created_at FROM player_shortlist WHERE id = ?')
+    .bind(Number(res.meta.last_row_id))
+    .first<{ id: number; player_id: number; note: string | null; created_at: string }>();
+  return c.json(
+    { item: item ? { id: item.id, playerId: item.player_id, note: item.note, createdAt: item.created_at } : null },
+    201,
+  );
+});
+
+app.patch('/club/shortlist/:id', async (c) => {
+  const { club } = await shortlistContext(c);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'id 不对');
+  const body = (await c.req.raw.json().catch(() => null)) as { note?: unknown } | null;
+  if (!body || !('note' in body)) throw new HttpError(400, '缺 note');
+  const note = typeof body.note === 'string' ? body.note.trim() : '';
+  if (note.length > SHORTLIST_NOTE_MAX) throw new HttpError(400, `备注最多 ${SHORTLIST_NOTE_MAX} 字`);
+  const res = await c.env.DB.prepare('UPDATE player_shortlist SET note = ? WHERE id = ? AND club_id = ?')
+    .bind(note || null, id, club.id)
+    .run();
+  if ((res.meta.changes ?? 0) === 0) throw new HttpError(404, '候选名单里没有这条记录');
+  return c.json({ ok: true, id, note: note || null });
+});
+
+app.delete('/club/shortlist/:id', async (c) => {
+  const { club } = await shortlistContext(c);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'id 不对');
+  const res = await c.env.DB.prepare('DELETE FROM player_shortlist WHERE id = ? AND club_id = ?').bind(id, club.id).run();
+  if ((res.meta.changes ?? 0) === 0) throw new HttpError(404, '候选名单里没有这条记录');
+  return c.json({ ok: true, id });
 });
 
 // 近期主场战报（v6.7.0，B1）：match_attendance（迁移 0018）此前没有任何读端点，教练在页面上

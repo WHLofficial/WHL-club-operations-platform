@@ -29,20 +29,21 @@ describe('NOTIFY_META 与 worker 模板表', () => {
     expect(RENDER_END).toBeGreaterThan(RENDER_START);
   });
 
-  it('模板集合双向相等（44 条，无重复）', () => {
+  it('模板集合双向相等（47 条，无重复）', () => {
     // 32→33 是 v6.49.0 到期引擎（offer_deadline 等三模板）；33→37 是 v6.50.0 海捞暗标段四模板；
     // 37→39 是 v6.53.0 场馆档期两模板（venue_window_open / venue_slot_reminder）；
     // 39→43 是 v6.54.0 闹涨薪四模板（demand_created / demand_deadline / demand_resolved /
-    // demand_rejected_public，设计文档 §7）；43→44 是 v6.55.0 意向单落选通知（offer_intent_lost）
+    // demand_rejected_public，设计文档 §7）；43→44 是 v6.55.0 意向单落选通知（offer_intent_lost）；
+    // 44→47 是 v6.58.0 候选名单跟踪三模板（shortlist_listed / sold / released）
     const templates = renderTemplates();
-    expect(templates).toHaveLength(44);
+    expect(templates).toHaveLength(47);
     expect(new Set(templates).size).toBe(templates.length);
     expect(templates.slice().sort()).toEqual(Object.keys(NOTIFY_META).sort());
   });
 
   it('每条徽章文案非空、唯一、≤6 字', () => {
     const labels = Object.values(NOTIFY_META).map((m) => m.label);
-    expect(labels).toHaveLength(44);
+    expect(labels).toHaveLength(47);
     expect(new Set(labels).size).toBe(labels.length);
     for (const label of labels) {
       expect(label.length).toBeGreaterThan(0);
@@ -114,11 +115,15 @@ describe('NOTIFY_META 与 worker 模板表', () => {
         'sea_sealed_deadline',
         'venue_window_open',
         'venue_slot_reminder',
+        // v6.58.0 候选名单跟踪：挂牌 / 签走 / 解约（转会窗口域；notificationRefOf 特意给 player 深链）
+        'shortlist_listed',
+        'shortlist_sold',
+        'shortlist_released',
       ],
     };
     const members = Object.values(expected).flat();
-    expect(members).toHaveLength(44);
-    expect(new Set(members).size).toBe(44);
+    expect(members).toHaveLength(47);
+    expect(new Set(members).size).toBe(47);
     for (const [cat, list] of Object.entries(expected)) {
       expect(templatesOf(cat as NotifyCategoryId).slice().sort(), `类目 ${cat} 的成员不符`).toEqual(list.slice().sort());
     }
@@ -146,6 +151,13 @@ describe('notificationRefOf：只抽 UI 真能定位的三型', () => {
       type: 'player',
       id: 6,
     });
+  });
+
+  it('候选名单三模板带 playerId ⇒ player（window 类目的定向例外）', () => {
+    expect(notificationRefOf('shortlist_listed', { playerId: 6 })).toEqual({ type: 'player', id: 6 });
+    expect(notificationRefOf('shortlist_sold', { playerId: 6 })).toEqual({ type: 'player', id: 6 });
+    expect(notificationRefOf('shortlist_released', { playerId: 6 })).toEqual({ type: 'player', id: 6 });
+    expect(notificationRefOf('shortlist_listed', {})).toBeNull();
   });
 
   it('商城工单带 orderId ⇒ shop_order', () => {

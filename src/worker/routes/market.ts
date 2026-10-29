@@ -36,6 +36,7 @@ import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { listingDemandStatements } from '../demand-ops.ts';
+import { notifyShortlistWatchers } from '../shortlist.ts';
 import { createActivation } from '../activations.ts';
 import { queueClubNotification } from '../notify.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
@@ -325,6 +326,14 @@ app.post('/market/listings', async (c) => {
 
   // 4.4.10：挂牌提交即触发本窗续约回滚（触发 ref = 转会区挂牌记录）
   await rollbackRcChangeForPlayer(c.env, playerId, user.id, { refType: 'listing', refId: listingId });
+
+  // 候选名单「被挂牌」（v6.58.0）：操作方 = 卖方俱乐部；deadline_at 已落库
+  await notifyShortlistWatchers(c.env, playerId, {
+    type: 'listed',
+    operatorClubId: club.id,
+    price: round2(askPrice),
+    deadline: firstDeadline,
+  });
 
   return c.json({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);
 });

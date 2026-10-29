@@ -12,7 +12,8 @@ import { firstPlayerByRef } from '../player-ref.ts';
 import { loadPlayerMatches } from '../player-matches.ts';
 import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
 import { getOpenWindow } from '../seasons.ts';
-import { getAuthUser } from '../../lib/session.ts';
+import { getAuthUser, requireUser } from '../../lib/session.ts';
+import { getBoundClub } from '../binding.ts';
 import { getBoundClub } from '../binding.ts';
 import { loadPlayerContractState } from '../demand-ops.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
@@ -205,6 +206,14 @@ function influenceExpr(coefs: { g: number; s: number }): string {
 // 写路径 bump 一次即整体失效——键空间（筛选 × 排序 × 游标）无法枚举，只能这么失效。
 app.get('/players', async (c) => {
   assertPublicRate(c, 'players');
+  // v6.58.0 候选名单筛选：per-user 数据，绕开两级公开缓存（缓存键是共享的，混进来会串号）。
+  // 匿名 401；登录但没绑俱乐部 → 空名单（不是错误——观众也能逛球员库）。
+  if (c.req.query('shortlist') === '1') {
+    const user = await requireUser(c.env, c.req.raw);
+    const club = await getBoundClub(c.env, user.id, c.req.raw);
+    if (!club) return c.json({ players: [], nextCursor: null });
+    return c.json(await listPlayers(c, club.id));
+  }
   const data = await cachedJson(
     `players:${canonicalQuery(c.req.url)}`,
     ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS),
@@ -236,10 +245,15 @@ function buildPlayerFilters(
   c: Context<{ Bindings: Env }>,
   exprs: { caExpr: string; paExpr: string; inflExpr: string },
   sortKey: string,
+  shortlistClubId: number | null = null,
 ): { filters: string[]; filterArgs: unknown[]; attrValueExpr: string | null; psSlotSelects: string } {
   const { caExpr, paExpr, inflExpr } = exprs;
   const filters: string[] = [];
   const filterArgs: unknown[] = [];
+  if (shortlistClubId !== null) {
+    filters.push('EXISTS (SELECT 1 FROM player_shortlist ps WHERE ps.club_id = ? AND ps.player_id = players.id)');
+    filterArgs.push(shortlistClubId);
+  }
   const clubId = c.req.query('club_id');
   if (clubId !== undefined) {
     if (clubId === 'free') {
@@ -596,7 +610,7 @@ function parseSortKey(c: Context<{ Bindings: Env }>): string {
   return sortRaw;
 }
 
-async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
+async function listPlayers(c: Context<{ Bindings: Env }>, shortlistClubId: number | null = null): Promise<{
   players: unknown[];
   nextCursor: string | null;
 }> {
@@ -604,7 +618,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>): Promise<{
   const { caExpr, paExpr, inflExpr, coefs } = exprs;
   const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
   const sortRaw = parseSortKey(c);
-  const { filters, filterArgs, attrValueExpr, psSlotSelects } = buildPlayerFilters(c, exprs, sortRaw);
+  const { filters, filterArgs, attrValueExpr, psSlotSelects } = buildPlayerFilters(c, exprs, sortRaw, shortlistClubId);
   const cursorConds: string[] = [];
   const cursorArgs: unknown[] = [];
 

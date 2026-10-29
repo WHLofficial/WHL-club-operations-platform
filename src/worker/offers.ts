@@ -23,6 +23,7 @@ import { fmtBeijingMinute } from '../core/ops-schedule.ts';
 import type { ExpiryOpts } from './expiry-ops.ts';
 import { balanceSnapshot } from './ledger.ts';
 import { queueClubNotification } from './notify.ts';
+import { notifyShortlistWatchers } from './shortlist.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
 import { loadMarketContext } from './market-context.ts';
@@ -527,6 +528,13 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
     const listing = Number(results[1].meta.last_row_id);
     // 挂牌提交即触发本窗续约回滚（与 market.ts 挂牌同口径；履约成功才触发）
     await rollbackRcChangeForPlayer(env, offer.player_id, actor, { refType: 'listing', refId: listing });
+    // 候选名单「被挂牌」（v6.58.0）：同意报价即生成挂牌，操作方 = 卖方俱乐部
+    await notifyShortlistWatchers(env, offer.player_id, {
+      type: 'listed',
+      operatorClubId: offer.seller_club_id,
+      price: offer.amount,
+      deadline: listingDeadline,
+    });
     // 落选通知（与续约回滚同位置，v6.55.0）：逐个通知落选意向单的买方，排除胜者买方
     for (const lost of lostIntents.results) {
       if (lost.buyer_club_id !== offer.buyer_club_id) {

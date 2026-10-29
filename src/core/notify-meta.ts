@@ -71,6 +71,10 @@ export const NOTIFY_META: Record<string, NotifyMeta> = {
   naming_offer: { label: '冠名报价', category: 'naming' },
   naming_offer_activated: { label: '冠名生效', category: 'naming' },
   shop_order_approved: { label: '工单通过', category: 'shop' },
+  // v6.58.0 候选名单跟踪：挂牌 / 签走 / 解约，归转会窗口类目
+  shortlist_listed: { label: '候选挂牌', category: 'window' },
+  shortlist_sold: { label: '候选签走', category: 'window' },
+  shortlist_released: { label: '候选解约', category: 'window' },
   shop_order_rejected: { label: '工单驳回', category: 'shop' },
   window_signals: { label: '窗口信号', category: 'window' },
   // v6.49.0 到期引擎：报价将到期提醒 / 签约谈判超时与将超时
@@ -128,6 +132,11 @@ function refId(value: unknown): number | null {
 export function notificationRefOf(template: string, data: Record<string, unknown>): NotifyRef | null {
   const meta = NOTIFY_META[template];
   if (!meta) return null;
+  // 候选名单三模板落在 window 类目（没有实体页），但 data.playerId 能定位球员页
+  if (template.startsWith('shortlist_')) {
+    const id = refId(data.playerId);
+    return id === null ? null : { type: 'player', id };
+  }
   if (meta.category === 'offer') {
     const id = refId(data.offerId);
     return id === null ? null : { type: 'offer', id };

@@ -135,6 +135,15 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `✅ 品牌接替生效：${venuePart}（${data.pkgName}套餐，${data.feePerWindow}M/窗 × ${data.windows} 窗）。\n${sign}`;
     }
     // 消费中心（v6.26.0）：工单生效回执 / 拒绝退款
+    // 候选名单跟踪（v6.58.0）：被挂牌 / 被签走 / 解约变自由身；操作方 = 收藏者时不发（上游已排除）
+    case 'shortlist_listed':
+      return `你的候选名单球员 ${data.player} 已被 ${data.club} 俱乐部挂牌，挂牌价 ${data.price} m，预计竞价截止 ${data.deadline}。`;
+    case 'shortlist_sold':
+      return data.fee == null
+        ? `你的候选名单球员 ${data.player} 已被 ${data.buyer} 俱乐部签走（自由身签入）。`
+        : `你的候选名单球员 ${data.player} 已被 ${data.buyer} 俱乐部签走，成交价 ${data.fee} m。`;
+    case 'shortlist_released':
+      return `你的候选名单球员 ${data.player} 已与 ${data.club} 俱乐部解约，成为自由身。`;
     case 'shop_order_approved':
       return `🛒 消费工单已生效：${data.summary}${data.note ? `（备注：${data.note}）` : ''}${data.external ? '（外部录入）' : ''}。`;
     case 'shop_order_rejected': {
