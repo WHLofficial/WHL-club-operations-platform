@@ -1,10 +1,10 @@
 {
   "_meta": {
-    "generatedAt": "2026-10-28",
+    "generatedAt": "2026-10-29",
     "command": "node scripts/fit-dual-run-gen.mjs",
     "tourRepo": "WHL-tournament-management-system",
-    "tourSource": "git show tactics-v5.10-v5.11",
-    "tourRef": "tactics-v5.10-v5.11@244d49dd3aa624fbc1a969eae6bd2be7817b5d18",
+    "tourSource": "worktree",
+    "tourRef": "tactics-v5.10-v5.11@3e6e91fbe3ab40c27cfa1a0978f76782c8a9c213",
     "note": "tour 仓 fitScore.ts + roleFit.ts 对固定夹具的 fitProfileAll/fitPosGroup/fitTile 全 49 槽输出；重生成后须人工 diff 确认变化只来自上游引擎升级"
   },
   "fixtures": [
@@ -173,7 +173,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CAM|HW": {
           "base": 54.416666666666664,
@@ -216,7 +216,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CAM|PL": {
           "base": 56.666666666666664,
@@ -259,7 +259,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CAM|SS": {
           "base": 52.083333333333336,
@@ -302,7 +302,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CB|BPD": {
           "base": 59.333333333333336,
@@ -345,7 +345,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CB|D": {
           "base": 71.66666666666667,
@@ -388,7 +388,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CB|S": {
           "base": 68,
@@ -431,7 +431,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CB|WDB": {
           "base": 61.666666666666664,
@@ -474,7 +474,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CDM|BC": {
           "base": 62.666666666666664,
@@ -517,7 +517,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CDM|CH": {
           "base": 68.16666666666667,
@@ -560,7 +560,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CDM|DLP": {
           "base": 64.66666666666667,
@@ -603,7 +603,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CDM|H": {
           "base": 67.5,
@@ -646,7 +646,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CDM|WH": {
           "base": 71.83333333333333,
@@ -689,7 +689,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CM|BTB": {
           "base": 65.58333333333333,
@@ -732,7 +732,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CM|DLP": {
           "base": 59,
@@ -775,7 +775,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CM|H": {
           "base": 67.5,
@@ -818,7 +818,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CM|HW": {
           "base": 57.666666666666664,
@@ -861,7 +861,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "CM|PL": {
           "base": 61.083333333333336,
@@ -904,7 +904,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "GK|BPK": {
           "base": 69.5,
@@ -947,7 +947,7 @@
           "badgeHits": [],
           "posHit": true,
           "roleHit": 0,
-          "tile": 0
+          "tile": 85
         },
         "GK|GK": {
           "base": 81.5,
@@ -1033,7 +1033,7 @@
           "badgeHits": [],
           "posHit": true,
           "roleHit": 0,
-          "tile": 50
+          "tile": 92
         },
         "LB|AWB": {
           "base": 67.25,
@@ -1076,7 +1076,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LB|FAB": {
           "base": 61.083333333333336,
@@ -1119,7 +1119,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LB|FB": {
           "base": 68.33333333333333,
@@ -1162,7 +1162,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LB|IWB": {
           "base": 53.416666666666664,
@@ -1205,7 +1205,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LB|WB": {
           "base": 68.08333333333333,
@@ -1248,7 +1248,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LM|IF": {
           "base": 52.166666666666664,
@@ -1291,7 +1291,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LM|W": {
           "base": 59.333333333333336,
@@ -1334,7 +1334,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LM|WM": {
           "base": 74.16666666666667,
@@ -1377,7 +1377,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LM|WP": {
           "base": 54.333333333333336,
@@ -1420,7 +1420,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LW|IF": {
           "base": 52.166666666666664,
@@ -1463,7 +1463,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LW|W": {
           "base": 59.333333333333336,
@@ -1506,7 +1506,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "LW|WP": {
           "base": 54.333333333333336,
@@ -1549,7 +1549,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RB|AWB": {
           "base": 67.25,
@@ -1592,7 +1592,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RB|FAB": {
           "base": 61.083333333333336,
@@ -1635,7 +1635,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RB|FB": {
           "base": 68.33333333333333,
@@ -1678,7 +1678,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RB|IWB": {
           "base": 53.416666666666664,
@@ -1721,7 +1721,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RB|WB": {
           "base": 68.08333333333333,
@@ -1764,7 +1764,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RM|IF": {
           "base": 52.166666666666664,
@@ -1807,7 +1807,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RM|W": {
           "base": 59.333333333333336,
@@ -1850,7 +1850,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RM|WM": {
           "base": 74.16666666666667,
@@ -1893,7 +1893,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RM|WP": {
           "base": 54.333333333333336,
@@ -1936,7 +1936,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RW|IF": {
           "base": 52.166666666666664,
@@ -1979,7 +1979,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RW|W": {
           "base": 59.333333333333336,
@@ -2022,7 +2022,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "RW|WP": {
           "base": 54.333333333333336,
@@ -2065,7 +2065,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "ST|AF": {
           "base": 53.333333333333336,
@@ -2108,7 +2108,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "ST|F9": {
           "base": 53.166666666666664,
@@ -2151,7 +2151,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "ST|PO": {
           "base": 58.833333333333336,
@@ -2194,7 +2194,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         },
         "ST|TF": {
           "base": 67.58333333333333,
@@ -2237,7 +2237,7 @@
           "badgeHits": [],
           "posHit": false,
           "roleHit": 0,
-          "tile": null
+          "tile": 0
         }
       }
     },

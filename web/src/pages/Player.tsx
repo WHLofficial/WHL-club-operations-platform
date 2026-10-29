@@ -828,8 +828,9 @@ function numericAttrsOf(attrs: Record<string, unknown>): Record<string, number> 
   return out;
 }
 
-/** fit 卡展示行：跨位置群槽位（fitTile 为 null）一律不展示——门将不出「最佳场上位置」假象；
- *  本群可算槽位按个人内百分位（fitTile）降序取前 4。Array.sort 稳定：并列保持 ROLE_FIT 表键序（TC-C-009）。
+/** fit 卡展示行：本群可算槽位按个人内百分位降序取前 4。Array.sort 稳定：并列保持 ROLE_FIT 表键序（TC-C-009）。
+ *  门将口径已进引擎 fitTile（2026-10-29）：门将三槽 85–99、外场槽位 0%；场上群仍隐藏门将槽位
+ *  （fitTile 为 null，不出「最佳场上位置」假象）。
  *  2026-10-29 用户裁决：卡片只展示相对个人百分位（绿黄橙三档的同一依据），不展示 rankShown 绝对分，
  *  避免“本站估算的 FIT 分”被当成第二种能力值。 */
 function fitTopRows(profile: FitProfile, group: FitGroup): { slot: string; score: FitSlotScore; tile: number }[] {
@@ -837,7 +838,7 @@ function fitTopRows(profile: FitProfile, group: FitGroup): { slot: string; score
   for (const [slot, score] of profile) {
     if (!score) continue; // 该角色 6 键全缺 → 整槽位无数据
     const tile = fitTile(profile, slot, group);
-    if (tile === null) continue; // 跨位置群无档
+    if (tile === null) continue; // 场上群的 GK 族槽不出行
     rows.push({ slot, score, tile });
   }
   rows.sort((a, b) => b.tile - a.tile);
@@ -880,11 +881,11 @@ function AttrSheet({
                   <small>{ROLE_FIT[slot].zh}</small>
                 </span>
                 <span className="fit-bar" aria-hidden="true">
-                  <i className={`fit-dot-${fitTone(tile)}`} style={{ width: `${tile}%` }} />
+                  <i className={`fit-tone-${fitTone(tile)}`} style={{ width: `${tile}%` }} />
                 </span>
                 <span className="fit-val">
-                  <span className={`mono fit-score fit-dot-${fitTone(tile)}`}>{tile}</span>
-                  <i className={fitDotClass(tile)} title={`个人内契合百分位 ${tile}（同族槽位内，越高越契合）`} />
+                  <span className={`mono fit-score fit-tone-${fitTone(tile)}`}>{tile}%</span>
+                  <i className={fitDotClass(tile)} title={`个人内契合百分位 ${tile}%（同族槽位内，越高越契合）`} />
                 </span>
               </div>
             ))}

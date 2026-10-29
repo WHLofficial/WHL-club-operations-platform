@@ -1105,7 +1105,7 @@ export function SideOps({
           <span className="side-lab">候选名单</span>
           <button
             type="button"
-            className={`btn btn-sm btn-ghost${shortlistEntry !== null ? ' on' : ''}`}
+            className={`btn btn-sm${shortlistEntry !== null ? ' on' : ''}`}
             aria-pressed={shortlistEntry !== null}
             disabled={starBusy}
             onClick={() => void toggleShortlist()}

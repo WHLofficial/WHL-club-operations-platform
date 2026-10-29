@@ -4,6 +4,18 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.58.1] · FIT 卡展示修复（色块/百分号/门将口径）+ 候选名单按钮配色（2026-10-29）
+
+**未上线**：本地分支 `fix/v6.58.1-fit-display`，基于已上线的 v6.58.0（`250c375`）；**未 push、未部署**。判级 patch（纯展示修复，无契约与数据变更）。
+
+**Fixed**
+
+- FIT 适配度卡的主数字不再被色块覆盖：v6.58.0 把分数与进度条也挂上 `.fit-dot-*`，而 `.fit-dot-good/mid/low` 自带实心底色、文字又染同色，数字渲染成纯色方块。现拆成 `fit-tone-*`（只给文字/条上色），`.fit-dot-*` 只留给圆点；分数后统一加 `%`（如 `99%`）。
+- 门将口径改为**引擎级**（用户追加要求「tour 那边的计算公式也要对齐」）：`fitTile` 对门将群把三个门将槽位的个人内百分位映射到 **85–99**（99/92/85，最差也绿档）、外场槽位统一 **0%**（门将不客串，不再隐藏）；场上群球员的 GK 槽位仍无档。展示层删除 `gkDisplayTile` 二次映射。tour 仓同口径修复（v5.11.1：`shared/fitScore.ts` + `fitTileTip` 门将外场文案 + `fitBenchTopTags` 跳过跨群槽），club 移植件与 tour 逐字同步，`fit-dual-run.fixture.json` 按 tour 新引擎重生成（`_meta.tourRef=tactics-v5.10-v5.11@3e6e91f`）。
+- 球员页「加入候选名单」按钮去掉 `btn-ghost`，恢复主色赭色 `--terracotta`（#a4612c），与「加入对比」同色；选中态用 `--terracotta-deep`。
+
+**验收**：club typecheck 三份全清；vitest **167 文件 / 2722 例全绿**（引擎门将映射/外场 0/对拍快照同步 + 新增 tip 用例）；e2e **29/29**；build `index-C1cbOFAR.js` 710.74 kB / gzip 224.25 kB。tour typecheck 两份全清、vitest **57 文件 / 697 例通过（7 跳过）**、build `index-hxiuqAVQ.js` 501.63 kB / gzip 161.97 kB。本地用生产 Donnarumma 属性实测：FIT 卡 `GK 门将 99%` / `GK 清道夫门将 92%` / `GK 出球型门将 85%` / `LB 边后卫 0%`，分数背景透明；登录态按钮背景 `rgb(164, 97, 44)` 与「加入对比」一致。
+
 ## [v6.58.0] · 候选名单（FM shortlist）+ 消费券俱乐部级券账（2026-10-29）
 
 **已上线（2026-10-29）**：push `b712c32..e16c74f`（17 个提交，含 code-review 修复），CF Workers Builds 部署 Version `81ee3c18-cc28-455e-a8b0-ceb1d73b4595` @2026-10-29T05:22:31Z。迁移 `0082` 于 push 前 apply、`0083` 在确认线上版本后 apply（顺序见下方 Fixed 🔴）；上线对账生产 20 俱乐部 / 18 账户 / 18 球场，旧列 `build_credit` 全 0 ⇒ `migrate` 流水 0 条、券余额 0、`vouchers` vs `SUM(voucher_entries)` 零差异；冒烟 `/api/health` 200、公开页 200、`?shortlist=1` 与券端点匿名 401、前端资产 `index-F1ljf5ws.js`。跨仓通知模板白名单（`shortlist_*` 三模板，与 `demand_*` 同款）仍待办。判级 minor（新增用户可见能力；建设券语义升格、旧列清零，无跨仓契约破坏）。设计/测试计划见 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。

@@ -596,7 +596,8 @@ describe('TC-C-FLAGS：右翼身份徽章卡（v6.56.0）', () => {
 
 // ---- fit 适配度卡（v6.56.0）：引擎移植件（web/src/lib/fit/）的展示层 ----
 
-/** 与页面同一份口径（attrs 全数值 → 引擎 → 同群过滤 → 个人内百分位降序前 4） */
+/** 与页面同一份口径（attrs 全数值 → 引擎 → 同群过滤 → 个人内百分位降序前 4）。
+ *  门将口径已在引擎内（GK 三槽 85–99、外场槽位 0），展示层不再二次映射。 */
 function expectedFitRows(
   attrs: Record<string, unknown>,
   playstyles?: number[],
@@ -604,8 +605,11 @@ function expectedFitRows(
   const profile = fitProfileAll({ attrs: attrs as Record<string, number>, playstyles })!;
   const group = fitPosGroup({ attrs: attrs as Record<string, number> });
   return [...profile.entries()]
-    .filter((entry): entry is [string, FitSlotScore] => entry[1] !== null && fitTile(profile, entry[0], group) !== null)
-    .map(([slot, score]) => [slot, score, fitTile(profile, slot, group)!] as [string, FitSlotScore, number])
+    .flatMap(([slot, score]): [string, FitSlotScore, number][] => {
+      if (score === null) return [];
+      const tile = fitTile(profile, slot, group);
+      return tile === null ? [] : [[slot, score, tile]];
+    })
     .sort((a, b) => b[2] - a[2])
     .slice(0, 4);
 }
@@ -629,16 +633,19 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
     rows.forEach((el, i) => {
       const [slot, score, tile] = exp[i];
       expect(el.querySelector('.fit-key')?.textContent).toBe(`${slot.split('|')[0]}${ROLE_FIT[slot].zh}`);
-      expect(el.querySelector('.fit-score')?.textContent).toBe(String(tile));
+      expect(el.querySelector('.fit-score')?.textContent).toBe(`${tile}%`);
       expect((el.querySelector('.fit-bar i') as HTMLElement).style.width).toBe(`${tile}%`);
       expect(el.querySelector('.fit-dot')).not.toBeNull();
+      // 分数/条只上文字色，不再套 .fit-dot-*（否则整块底色把数字盖成色块）
+      expect(el.querySelector('.fit-score')?.classList.contains(`fit-tone-${tile >= 85 ? 'good' : tile >= 50 ? 'mid' : 'low'}`)).toBe(true);
+      expect(el.querySelector('.fit-score')?.classList.contains('fit-dot-good')).toBe(false);
       if (tile !== score.rankShown) sawRawDiff = true;
       expect(el.querySelector('.fit-score')?.textContent).not.toBe(String(score.rankShown));
     });
     // 夹具必须存在「百分位 ≠ 绝对分」的行，否则漏值断言是空转
     expect(sawRawDiff).toBe(true);
     // 降序硬断言（并列同分按 ROLE_FIT 键序的稳定序不另断）
-    const nums = rows.map((el) => Number(el.querySelector('.fit-score')?.textContent));
+    const nums = rows.map((el) => Number(el.querySelector('.fit-score')?.textContent?.replace('%', '')));
     expect([...nums].sort((a, b) => b - a)).toEqual(nums);
   });
 
@@ -686,8 +693,8 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
     expect(document.querySelector('.fit-card')).toBeNull();
   });
 
-  it('TC-C-FIT-03 · 门将只出 GK 族槽位（≤3 条），场上槽位（fitTile 为 null）不展示', async () => {
-    // 门将夹具：gk 五维 + 反应/短传/长传，PosID1=0（GK）——场上槽位可能可算但跨群无档
+  it('TC-C-FIT-03 · 门将三槽 85–99、外场槽位 0%（引擎口径），卡片仍只取前 4 行', async () => {
+    // 门将夹具：gk 五维 + 反应/短传/长传，PosID1=0（GK）——场上槽位可算，引擎按门将不客串记 0
     const GK_ATTRS: Record<string, unknown> = {
       gkreflexes: 90,
       gkdiving: 84,
@@ -714,15 +721,21 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
     expect(card).not.toBeNull();
     const rows = Array.from(card!.querySelectorAll('.fit-row'));
     const exp = expectedFitRows(GK_ATTRS);
-    // 门将群只有 3 个槽位（GK|GK / GK|SK / GK|BPK），不足 4 条不凑数
+    // 门将群：GK 三槽位压到 85–99（最差也是绿档），外场槽位按 0% 展示（不再整行隐藏）
     expect(exp.length).toBeGreaterThan(0);
-    expect(exp.every(([slot]) => slot.startsWith('GK|'))).toBe(true);
     expect(rows).toHaveLength(exp.length);
-    expect(rows.length).toBeLessThanOrEqual(3);
+    expect(rows.length).toBeLessThanOrEqual(4);
+    for (const [, , tile] of exp.filter(([slot]) => slot.startsWith('GK|'))) {
+      expect(tile).toBeGreaterThanOrEqual(85);
+      expect(tile).toBeLessThanOrEqual(99);
+    }
+    for (const [, , tile] of exp.filter(([slot]) => !slot.startsWith('GK|'))) {
+      expect(tile).toBe(0);
+    }
     rows.forEach((el, i) => {
       const [slot, , tile] = exp[i];
       expect(el.querySelector('.fit-key')?.textContent).toBe(`${slot.split('|')[0]}${ROLE_FIT[slot].zh}`);
-      expect(el.querySelector('.fit-score')?.textContent).toBe(String(tile));
+      expect(el.querySelector('.fit-score')?.textContent).toBe(`${tile}%`);
     });
   });
 });

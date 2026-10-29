@@ -1,5 +1,5 @@
 // TC-C-005 · fit 全量快照对拍（docs/test-plans/v6.56.0-attr-head-relayout.md）：
-// web/src/lib/fit/fit-dual-run.fixture.json 是 tour 仓引擎（tactics-v5.10-v5.11@244d49d…，
+// web/src/lib/fit/fit-dual-run.fixture.json 是 tour 仓引擎（tactics-v5.10-v5.11@3e6e91f…，
 // 见 _meta.tourRef）对本仓 web/src/lib/fit/fitScore.ts 的逐字移植源件、对固定夹具算出的
 // fitProfileAll 全 49 槽输出快照；本文件用本仓引擎对同一夹具**现算**并逐槽逐字段对拍——
 // 本仓任一权重/加分/百分位/档位口径改动即红，第一处 diff 点名夹具、槽位与字段。

@@ -3504,13 +3504,15 @@ th.num .th-sort {
   background: var(--border);
 }
 
-/* v6.58.0：fit 卡主数字/分值条改用个人内百分位（三档同色点），不再用 CA 五档配色 */
-.fit-bar i.fit-dot-good { background: var(--attr-good); }
-.fit-bar i.fit-dot-mid { background: var(--attr-mid); }
-.fit-bar i.fit-dot-low { background: var(--border); }
-.fit-score.fit-dot-good { color: var(--attr-good); }
-.fit-score.fit-dot-mid { color: var(--attr-mid); }
-.fit-score.fit-dot-low { color: var(--muted); }
+/* v6.58.0：fit 卡主数字/分值条改用个人内百分位（三档同色点），不再用 CA 五档配色。
+   v6.58.1：分数/条用 fit-tone-*（只上色），fit-dot-* 留给圆点——否则 .fit-dot-good 的底色
+   会把分数 span 铺成纯色块。 */
+.fit-bar i.fit-tone-good { background: var(--attr-good); }
+.fit-bar i.fit-tone-mid { background: var(--attr-mid); }
+.fit-bar i.fit-tone-low { background: var(--border); }
+.fit-score.fit-tone-good { color: var(--attr-good); }
+.fit-score.fit-tone-mid { color: var(--attr-mid); }
+.fit-score.fit-tone-low { color: var(--muted); }
 
 /* 位置热区图在右翼「位置分布」卡里（v6.56.0：从属性页签头部搬来，264 宽；320 见文末断点块） */
 .heat-svg.heat-wing {
@@ -9299,7 +9301,8 @@ button.sqc-pos:hover {
   border-bottom: 1px solid var(--border);
 }
 .side-shortlist .btn.on {
-  color: #d9a400;
+  background: var(--terracotta-deep);
+  color: #fff;
 }
 .ledger-tabs {
   display: flex;
