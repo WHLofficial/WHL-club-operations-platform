@@ -146,6 +146,19 @@ describe('TC-S 候选名单 CRUD / 上限 / 隔离 / 筛选', () => {
     expect(((await off.json()) as { error: string }).error).toContain('功能未开启');
   });
 
+  it('TC-S-002b ids 端点同时回 playerIds 与行 id（球员页移出要用行 id）', async () => {
+    const fx = freshEnv();
+    await add(fx, 'tok-c1', 1);
+    await add(fx, 'tok-c1', 3);
+    const body = (await (await ids(fx, 'tok-c1')).json()) as {
+      playerIds: number[];
+      entries: { id: number; playerId: number }[];
+    };
+    expect(body.playerIds.sort()).toEqual([1, 3]);
+    expect(body.entries.map((e) => e.playerId).sort()).toEqual([1, 3]);
+    for (const e of body.entries) expect(e.id).toBeGreaterThan(0);
+  });
+
   it('TC-S-003 ?shortlist=1 只出本队名单；匿名 401；未绑定空；公开列表不含星标字段', async () => {
     const fx = freshEnv();
     await add(fx, 'tok-c1', 1);

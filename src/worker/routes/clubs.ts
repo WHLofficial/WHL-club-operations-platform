@@ -945,10 +945,15 @@ app.get('/club/shortlist', async (c) => {
 // 登录态小端点：球员库星标列数据源。公开列表是两级缓存，绝不能把 per-user 星标混进去。
 app.get('/club/shortlist/ids', async (c) => {
   const { club } = await shortlistContext(c);
-  const rows = await c.env.DB.prepare('SELECT player_id FROM player_shortlist WHERE club_id = ? ORDER BY id DESC')
+  const rows = await c.env.DB.prepare('SELECT id, player_id FROM player_shortlist WHERE club_id = ? ORDER BY id DESC')
     .bind(club.id)
-    .all<{ player_id: number }>();
-  return c.json({ clubId: club.id, playerIds: rows.results.map((r) => r.player_id) });
+    .all<{ id: number; player_id: number }>();
+  return c.json({
+    clubId: club.id,
+    playerIds: rows.results.map((r) => r.player_id),
+    // 行 id 供球员页「移出」直接 DELETE /club/shortlist/:id（v6.58.0）
+    entries: rows.results.map((r) => ({ id: r.id, playerId: r.player_id })),
+  });
 });
 
 app.post('/club/shortlist', async (c) => {
