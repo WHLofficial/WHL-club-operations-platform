@@ -829,7 +829,9 @@ function numericAttrsOf(attrs: Record<string, unknown>): Record<string, number> 
 }
 
 /** fit 卡展示行：跨位置群槽位（fitTile 为 null）一律不展示——门将不出「最佳场上位置」假象；
- *  本群可算槽位按 rankShown 降序取前 4。Array.sort 稳定：并列同分保持 ROLE_FIT 表键序（TC-C-009）。 */
+ *  本群可算槽位按个人内百分位（fitTile）降序取前 4。Array.sort 稳定：并列保持 ROLE_FIT 表键序（TC-C-009）。
+ *  2026-10-29 用户裁决：卡片只展示相对个人百分位（绿黄橙三档的同一依据），不展示 rankShown 绝对分，
+ *  避免“本站估算的 FIT 分”被当成第二种能力值。 */
 function fitTopRows(profile: FitProfile, group: FitGroup): { slot: string; score: FitSlotScore; tile: number }[] {
   const rows: { slot: string; score: FitSlotScore; tile: number }[] = [];
   for (const [slot, score] of profile) {
@@ -838,7 +840,7 @@ function fitTopRows(profile: FitProfile, group: FitGroup): { slot: string; score
     if (tile === null) continue; // 跨位置群无档
     rows.push({ slot, score, tile });
   }
-  rows.sort((a, b) => b.score.rankShown - a.score.rankShown);
+  rows.sort((a, b) => b.tile - a.tile);
   return rows.slice(0, 4);
 }
 
@@ -871,18 +873,18 @@ function AttrSheet({
         {fitRows.length > 0 && (
           <div className="fit-card">
             <p className="fit-card-head">最合适的位置 / 角色（FIT 适配度）</p>
-            {fitRows.map(({ slot, score, tile }) => (
+            {fitRows.map(({ slot, tile }) => (
               <div className="fit-row" key={slot}>
                 <span className="fit-key">
                   {slot.split('|')[0]}
                   <small>{ROLE_FIT[slot].zh}</small>
                 </span>
                 <span className="fit-bar" aria-hidden="true">
-                  <i className={attrClass(score.rankShown)} style={{ width: `${score.rankShown}%` }} />
+                  <i className={fitDotClass(tile).replace('fit-dot ', '')} style={{ width: `${tile}%` }} />
                 </span>
                 <span className="fit-val">
-                  <span className={`mono fit-score ${attrClass(score.rankShown)}`}>{score.rankShown}</span>
-                  <i className={fitDotClass(tile)} title={`个人内契合 ${tile}`} />
+                  <span className={`mono fit-score ${fitDotClass(tile).replace('fit-dot ', '')}`}>{tile}</span>
+                  <i className={fitDotClass(tile)} title={`个人内契合百分位 ${tile}（同族槽位内，越高越契合）`} />
                 </span>
               </div>
             ))}

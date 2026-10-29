@@ -3504,6 +3504,14 @@ th.num .th-sort {
   background: var(--border);
 }
 
+/* v6.58.0：fit 卡主数字/分值条改用个人内百分位（三档同色点），不再用 CA 五档配色 */
+.fit-bar i.fit-dot-good { background: var(--attr-good); }
+.fit-bar i.fit-dot-mid { background: var(--attr-mid); }
+.fit-bar i.fit-dot-low { background: var(--border); }
+.fit-score.fit-dot-good { color: var(--attr-good); }
+.fit-score.fit-dot-mid { color: var(--attr-mid); }
+.fit-score.fit-dot-low { color: var(--muted); }
+
 /* 位置热区图在右翼「位置分布」卡里（v6.56.0：从属性页签头部搬来，264 宽；320 见文末断点块） */
 .heat-svg.heat-wing {
   width: 264px;

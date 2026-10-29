@@ -596,18 +596,22 @@ describe('TC-C-FLAGS：右翼身份徽章卡（v6.56.0）', () => {
 
 // ---- fit 适配度卡（v6.56.0）：引擎移植件（web/src/lib/fit/）的展示层 ----
 
-/** 与页面同一份口径（attrs 全数值 → 引擎 → 同群过滤 → rankShown 降序前 4） */
-function expectedFitRows(attrs: Record<string, unknown>, playstyles?: number[]): [string, FitSlotScore][] {
+/** 与页面同一份口径（attrs 全数值 → 引擎 → 同群过滤 → 个人内百分位降序前 4） */
+function expectedFitRows(
+  attrs: Record<string, unknown>,
+  playstyles?: number[],
+): [string, FitSlotScore, number][] {
   const profile = fitProfileAll({ attrs: attrs as Record<string, number>, playstyles })!;
   const group = fitPosGroup({ attrs: attrs as Record<string, number> });
   return [...profile.entries()]
     .filter((entry): entry is [string, FitSlotScore] => entry[1] !== null && fitTile(profile, entry[0], group) !== null)
-    .sort((a, b) => b[1].rankShown - a[1].rankShown)
+    .map(([slot, score]) => [slot, score, fitTile(profile, slot, group)!] as [string, FitSlotScore, number])
+    .sort((a, b) => b[2] - a[2])
     .slice(0, 4);
 }
 
 describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
-  it('TC-C-FIT-01 · 有 attrs：前 4 条按 rankShown 降序，位置码/角色名/主数字与引擎对拍；图例文字已按 v6.57.2 裁决删除', async () => {
+  it('TC-C-FIT-01 · 有 attrs：前 4 条按个人内百分位降序，主数字=百分位且不泄露 rankShown；图例文字已按 v6.57.2 裁决删除', async () => {
     open();
     await radarRow();
     const card = document.querySelector('.fit-card') as HTMLElement | null;
@@ -621,12 +625,18 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
     expect(rows).toHaveLength(exp.length);
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.length).toBeLessThanOrEqual(4);
+    let sawRawDiff = false;
     rows.forEach((el, i) => {
-      const [slot, score] = exp[i];
+      const [slot, score, tile] = exp[i];
       expect(el.querySelector('.fit-key')?.textContent).toBe(`${slot.split('|')[0]}${ROLE_FIT[slot].zh}`);
-      expect(el.querySelector('.fit-score')?.textContent).toBe(String(score.rankShown));
+      expect(el.querySelector('.fit-score')?.textContent).toBe(String(tile));
+      expect((el.querySelector('.fit-bar i') as HTMLElement).style.width).toBe(`${tile}%`);
       expect(el.querySelector('.fit-dot')).not.toBeNull();
+      if (tile !== score.rankShown) sawRawDiff = true;
+      expect(el.querySelector('.fit-score')?.textContent).not.toBe(String(score.rankShown));
     });
+    // 夹具必须存在「百分位 ≠ 绝对分」的行，否则漏值断言是空转
+    expect(sawRawDiff).toBe(true);
     // 降序硬断言（并列同分按 ROLE_FIT 键序的稳定序不另断）
     const nums = rows.map((el) => Number(el.querySelector('.fit-score')?.textContent));
     expect([...nums].sort((a, b) => b - a)).toEqual(nums);
@@ -710,9 +720,9 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
     expect(rows).toHaveLength(exp.length);
     expect(rows.length).toBeLessThanOrEqual(3);
     rows.forEach((el, i) => {
-      const [slot, score] = exp[i];
+      const [slot, , tile] = exp[i];
       expect(el.querySelector('.fit-key')?.textContent).toBe(`${slot.split('|')[0]}${ROLE_FIT[slot].zh}`);
-      expect(el.querySelector('.fit-score')?.textContent).toBe(String(score.rankShown));
+      expect(el.querySelector('.fit-score')?.textContent).toBe(String(tile));
     });
   });
 });
