@@ -19,11 +19,16 @@
 
 - 「建设券」统一更名「消费券」，审计字段 `buildCredit`→`voucherBalance`，`GET /club/stadium/build-info` 回 `voucherBalance`；config 注册 `shortlist_cap`（注册表 88 键）。
 
+**Changed（同日用户追加裁决）**
+
+- 强制拍卖到期/窗尾无人出价：不再「球员留队」，改按**解约处置**——球员去归属变自由身（解约单 `type=termination`、`idempotency_key=forced_no_bid:{listingId}` 留档），`checkSeaSignEligible` 的本窗解约禁签闸自然生效（**本窗所有球队都不能海捞他**）；10% 下架费照收。成长清零/徽章/候选名单「解约」通知复用 `completeTermination`，不另起一套解约语义；admin 强制拍卖说明与卖家浮层文案同步。
+- 球员页 FIT 适配度卡改展示**个人内百分位**（`fitTile`，即绿/黄/橙三档的同一依据），主数字与分值条都换百分位，不再显示 `rankShown` 绝对分——避免「本站估算 FIT 分」被当成第二种能力值；展示行改按百分位降序。
+
 **Fixed**
 
 - `GET /club/shortlist/ids` 补 `entries[{id,playerId}]`：首版只回 `playerIds`，球员页 SideOps 取行 id 移出时 `undefined.find` 白屏（e2e ⑤f/⑯/㉑ 捡出）。
 
-**验收**：typecheck 三份全清；vitest **167 文件 / 2714 例全绿**；e2e **29/29**（本地 shared 模式）；build 成功（`index-SQrv08K-.js` 710.07 kB / gzip 223.97 kB）；测试计划 §四变异 **7/7 命中**（其中挂牌截止断言原为空转，已补强为「截止时刻真值」值断言后命中）。
+**验收**：typecheck 三份全清；vitest **167 文件 / 2714 例全绿**；e2e **29/29**（本地 shared 模式）；build 成功（`index-D9yonutA.js` 710.09 kB / gzip 224.00 kB，含两项追加）；测试计划 §四变异 **7/7 命中**（其中挂牌截止断言原为空转，已补强为「截止时刻真值」值断言后命中）。
 
 ## [v6.57.2] · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）
 
