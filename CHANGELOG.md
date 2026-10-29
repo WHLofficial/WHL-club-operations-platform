@@ -4,6 +4,27 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.58.0] · 候选名单（FM shortlist）+ 消费券俱乐部级券账（2026-10-29）
+
+**未上线**：本地分支 `feat/v6.58.0-shortlist-voucher`（9 个提交），迁移 `0082`/`0083` 已应用到本地 dev 库，**生产未 apply、未 push、未部署**（push main 触发 CF 自动部署，需用户明确下令）。判级 minor（新增用户可见能力；建设券语义升格、旧列清零，无跨仓契约破坏）。设计/测试计划见 `memory/plan-v6.58.0-shortlist-voucher.md`、`docs/test-plans/v6.58.0-shortlist-voucher.md`。
+
+**Added**
+
+- 候选名单（FM shortlist）：俱乐部级私人跟踪名单（`player_shortlist`，cap=`shortlist_cap` 默认 30，界 0–100）；五端点 GET 列表 / GET ids / POST / PATCH 备注 / DELETE；球员库星标列（登录态可见，窄屏卡片同）、「只看候选名单」筛选与 `?shortlist=1`（服务端绕公开缓存）、球员页 SideOps 开关、球队页工作台 ShortlistCard。
+- 三事件站内信：被挂牌（挂牌价 + 预计截止）/ 被签走（成交价 + 买方）/ 解约变自由身（原俱乐部）；只发收藏者俱乐部且排除操作方。五条成交路径统一挂在 `completeTransfer`，解约挂 `completeTermination`。
+- 消费券（券账）：`ledger_accounts.vouchers` + `voucher_entries`，券余额与流水同批原子；建设域支出/返还改走券账，随机事件发券改 `event_grant`；消费中心工单**先券后钱**强制全额抵扣、拒绝双退（现金 `amount−voucher_used` + 券 `voucher_used` 各自回原）；财政账本新增「消费券流水」页签；管理端 `POST /api/admin/vouchers/grant`（按俱乐部或全量、`requestId` 幂等）+ 俱乐部页行内发放入口。
+- 迁移 `0082` 建表/加列、`0083` 把存量 `stadiums.build_credit` 幂等搬进券账（补账户行、写 `migrate` 流水、按流水重算余额、清零旧列；拆两枚文件保证可重放测试）。
+
+**Changed**
+
+- 「建设券」统一更名「消费券」，审计字段 `buildCredit`→`voucherBalance`，`GET /club/stadium/build-info` 回 `voucherBalance`；config 注册 `shortlist_cap`（注册表 88 键）。
+
+**Fixed**
+
+- `GET /club/shortlist/ids` 补 `entries[{id,playerId}]`：首版只回 `playerIds`，球员页 SideOps 取行 id 移出时 `undefined.find` 白屏（e2e ⑤f/⑯/㉑ 捡出）。
+
+**验收**：typecheck 三份全清；vitest **167 文件 / 2714 例全绿**；e2e **29/29**（本地 shared 模式）；build 成功（`index-SQrv08K-.js` 710.07 kB / gzip 223.97 kB）；测试计划 §四变异 **7/7 命中**（其中挂牌截止断言原为空转，已补强为「截止时刻真值」值断言后命中）。
+
 ## [v6.57.2] · 球员页窄屏操作区前置 + fit 图例删除（2026-10-29）
 
 **已随 2026-10-29 批次上线**（Version `a05fb061-4ca1-4d6c-b587-ae592fb30c3d`，push `0fa1141..b712c32` 共 24 提交，0081 已于 push 前 apply；上线记录见 [ROADMAP.md](./ROADMAP.md) v6.57.2 节）。判级 patch，两项用户裁决，测试计划 `docs/test-plans/v6.57.2-narrow-ops-first.md`。
