@@ -4,6 +4,23 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.57.1] · 收口审：三组终验与变异验证捡出的修复 + 性能口径补测（2026-10-29）
+
+**本地实现完成，未 push / 未 deploy；迁移 0081 未 apply 生产（apply 另行授权）**。判级 patch。终验/变异/修复由 dynamic-workflows 收口工作流执行（全 Flash），全量证据与不修项清单见 [ROADMAP.md](./ROADMAP.md) v6.57.1 节。
+
+**Fixed**
+
+- config 注册 `expected_income_rate` 键（运营调 k 不再 400「未注册的 config 键」，默认 1.0）。
+- 球员页：被激活挂牌球员恢复「挂牌中」可见性（重排回归）；属性页签空态不再掏空主列；窄屏横滑页签路由切换后滚进视野；≤360 顶栏首行间距。
+- 报价/还价/接受弹层与解约确认区补「本次动用预期收入」行（v6.57.0 设计 §2.3 补漏）。
+- 提交切分倒置 rebase：v6.55.0 等四个提交重写为单点 checkout 自包含（原引用 v6.57 才落地的符号，bisect 有坑；未推送故安全）。
+
+**Added（测试与审计）**
+
+- TC-A/TC-B 计划缺口补强：occupy 非卖品守卫源码文本锁、多笔意向清单断言、dup 409 幽灵冻结残留断言、额度子查询 EXPLAIN 结构锁、TC-B-038 作废/静默超时三向合取等（vitest 164 文件 / 2696 例全绿）。
+- fit 对拍改快照制常开锁（原写死路径恒 skip）+ role.json 反推跨检 + smoke 探针判据与 fit 渲染同源。
+- `scripts/d1-read-audit/probe-expected-income.mjs` 生产只读探针（SQL 直接 import ledger.ts 真函数，零漂移）与实测登记（`README.md` 第十二节）：balance 8/12/2 行读、credit（触发器写放大单位）7/6/1、breakdown 8/7/2，三来源基表全 SEARCH 走索引。
+
 ## [v6.57.0] · 预期收入额度线：窗口内预支未到账的卖人收入（2026-10-28）
 
 **本地实现完成，未 push / 未 deploy；迁移 0081 未 apply 生产（apply 另行授权）**。判级 minor。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。

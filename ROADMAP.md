@@ -81,6 +81,34 @@
 
 ---
 
+## v6.57.1 · 收口审：三组终验 + 变异验证捡出的修复 + 性能口径补测（2026-10-29）
+
+**状态**：**本地实现完成，未 push / 未 deploy；迁移 0081 仍未 apply 生产（另行授权，先 apply 再 push）**。判级 patch（对 v6.55.0 / v6.56.0 / v6.57.0 三个本地提交的收口审，由 dynamic-workflows 工作流执行：三组终验与 code-review 四评审并行 → 三计划变异串行 → 分诊 → 修复与门禁循环 → e2e/视口二轮 → 收口提交；全程工人模型 GLM-5.3-Flash，GLM-5.3 周额度中断后按用户预案降级）。
+
+**终验与变异（只读，产出 31 条发现）**：三组终验对照设计稿/测试计划逐条审 `git show` 全量 diff——v6.55 终验 9 条 / v6.57 终验 7 条 / v6.56 终验 13 条 / code-review 终审 2 条。变异验证 38 条逐条执行（改一处 → 定向跑 → 核对变红的正是该断言 → 还原），命中 29（v6.55 9/10 · v6.56 12/14 · v6.57 8/14）；未命中 9 条逐一归因——大部分转为测试缺口由补强提交闭合，两条（TC-A-014 路由形态锁、TC-B-021②）经实证判定为用例形态问题/预言不可观测。分诊：须修 15 / 不修 18。
+
+**修复（13 个提交）**：
+- `11380fc` fix(finance)：config 注册 `expected_income_rate` 键（`CONFIG_KEYS`/`CONFIG_DEFAULTS`，默认 `'1.0'`）——此前运营 PUT 调 k 一律 400「未注册的 config 键」，设计「k 留给运营调」落空；连带 `tests/market-rounds.test.ts` 键数锁 86→87（198/198 复验绿）。
+- `b0e42ca` test(finance)：TC-B 补强——**EXPLAIN QUERY PLAN 结构锁**（`tests/expected-income.test.ts:431`，三来源基表必须走 `idx_transfers_from` / `idx_listings_seller` / `idx_bids_listing_amount`，删任一索引即红）+ TC-B-038 作废/静默超时三向合取（P0）+ TC-B-003/004/005b/007/013/019 半边用例补齐。
+- `8427363` test(offer)：TC-A 补强——occupy 非卖品守卫源码文本锁（原「删掉那行无用例红」）+ TC-A-012 多笔清单断言（同球员两条 intent：卖方 intentsMine=2、买方各 1）+ TC-A-010 dup 409 无幽灵冻结残留断言 + d1 测试夹具挂出 sqlText。
+- `440eff8` fix(web)：报价/还价/接受弹层（OffersSection）与解约确认区（SideOps）补「本次动用预期收入」行——v6.57.0 设计 §2.3 漏掉的两组确认弹层。
+- `05aae9c` fix(web)：恢复被激活挂牌球员的「挂牌中」可见性（重排把 IdentityFlags 收窄到 `transferListed`，而激活批只置 `status='listed'` 不置 `transfer_listed`，旧顶卡有此展示、重排后丢失）+ 属性页签空态（整页签挂 gameAttrs 门曾把主列掏空）。
+- `4978541` / `83d348c` fix(web)：视口复核员看图发现的两处窄屏问题（横滑页签路由切换后滚进视野 / ≤360 顶栏首行两端收档恢复间距）。
+- `d0944b1` test(web)：**TC-C-005（P0）收口**——fit 对拍从「写死 tour 仓绝对路径、本机即恒 skip、零台机器受保护」改**快照制常开锁**；`aa77c48` 补 role.json 反推跨检（TC-C-003，冻结表与上游零漂移）；`c7a580b` styles.css 规则解析进程内缓存；`a83e6f0` smoke ⑯ 探针判据与 fit 渲染同源（TC-C-024）+ 无 FC 存档空态口径改 TC-C-010（原断言与定稿规格相悖）。
+- **提交切分倒置 rebase**：终验发现 v6.55 的 `53f624f` 引用了 v6.57 才落地的符号（`balanceSnapshot` / `credit-line.ts` / `useClubBalance` / `minOfferPriceAdjusted`），单点 checkout typecheck/vitest 必红、bisect 有坑；未推送故 rebase 重写整链（`53f624f`/`078df4c`/`0a4e5b7`/`afb71de` → `c198c52`/`f5f2453`/`694d7ae`/`983d38a`），重写后 v6.55 单点自包含已亲证（`git show c198c52:src/worker/ledger.ts` 含 `balanceSnapshot` 定义、`credit-line.ts` 在场）。
+
+**判定不成立（3 条，实证留痕）**：① TC-B-021② charged 判别变异预言——改回「只判末句 extra_fee」实测 63/63 绿（回查路径使两分支在状态层收敛，「费用静默不扣」不可达；资金风险在守卫本身且既有「批内守卫不过」用例已锁）；② market-rounds TC-CFG-01 钉 86——是 config 修复的连带断言更新，非缺陷；③ smoke.mjs:2750 旧断言——与 TC-C-010 定稿规格相悖，属用例自身问题。
+
+**门禁与 e2e**：typecheck 三份全清；vitest **164 文件 / 2696 例全绿**；build 成功；`npm run test:e2e` **29/29** 两轮（第一轮 29/29 但视口复核发现 3 处布局问题 → 修复重建复跑仍 29/29）；五宽度截图（1440/1051/1049/760/320 × 球员页/转会台/市场/看板）落 `scratch/shots/`，320 零横向溢出。
+
+**性能口径补测（TC-B-018 收尾，`5572710`）**：`scripts/d1-read-audit/probe-expected-income.mjs` 生产只读探针（**SQL 直接 import ledger.ts 真函数，零漂移**）——balance 8/12/2 行读、credit（**触发器写放大单位**，每次 fund_holds 写入重求值一次）7/6/1、breakdown 8/7/2（最长历史/次长/零历史三档）；EXPLAIN 生产取证三来源基表全 `SEARCH` 走索引（contracts 走 `sqlite_autoindex_contracts_1`），与 `tests/expected-income.test.ts:431` 本地锁双口径互证；SCAN 只落在在途行集物化与税率常量行集（受在途单数约束、不随历史增长）；增长轴与部分索引候选登记在 `scripts/d1-read-audit/README.md` 第十二节。全库现状 listings 0 / transfers 28 / fund_holds 36——**基线而非高水位**，交易量上来后应复测。
+
+**不修项（18 条低危）与全量证据**：收口工作流报告卡「遗留项收口报告」（46 条发现逐条证据）。代表性项——`offers.ts:696` 买方预检误绑（原子闸仍正确拦住，仅幽灵并发形态误报文案）、blanket expire 跨窗重复事件（v6.55 之前即如此）、hero hover 级联冲突、「来源球队」/RoleID 角色带从球员页删除无承接（计划清单未列，恢复需产品拍板）。
+
+**已知未覆盖**：负载/压测口径（本轮只做行读结构与单次成本，无并发压测）；GLM-5.3（individual-coding-plan）周额度 2026-11-02 重置后，可用其对本轮收口审做一次独立复核（本轮全 Flash 执行）。
+
+---
+
 ## v6.57.0 · 预期收入额度线：窗口内预支未到账的卖人收入（2026-10-28）
 
 **状态**：**本地实现完成，未 push / 未 deploy，迁移 0081 未 apply 生产**；判级 minor（新能力：额度公式 + 触发器重建 + balance 三字段 + 前端增强档）。设计 `docs/superpowers/specs/2026-10-27-expected-income-credit-line-design.md`（v3，三轮审查全消化）、测试计划 `docs/test-plans/v6.57.0-expected-income-credit-line.md`（38 TC）。
