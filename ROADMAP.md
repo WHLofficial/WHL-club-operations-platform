@@ -83,7 +83,7 @@
 
 ## v6.60.5 · 强制拍卖认 FC ID、自由身可挂、期限 X+2；成长入口按归属收口（2026-10-30）
 
-**状态**：**未上线**——本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。判级 patch。起因：管理端强制拍卖输入球员页 FC ID 报「无归属或不存在」；用户追加「强拍期限 X 挂 X+2」与「别队教练/管理组能点我的球员成长方案」。
+**状态**：**已上线（2026-10-30）**——push `ffbb870..c30a7d0`（分支 `fix/v6.60.5-forced-fc-growth-perm`），CF Workers Builds 自动部署 Version `d5c2a0b1-d9a1-42f8-9ff5-08aa77abd45e` @2026-10-30T10:18:19Z；无迁移、无 schema 变更。生产 `/`、`/players`、`/market`、`/admin/market`、`/api/market/listings`、`/api/players` 全 200，`/api/health` d1/tour_db/kv 全 ok；线上资产 `index-9JmPjVqr.js` 与本地构建一致（714,834 B）。判级 patch。起因：管理端强制拍卖输入球员页 FC ID 报「无归属或不存在」；用户追加「自由身也能强制挂牌，拍卖款销毁」「强拍期限 X 挂 X+2」与「别队教练/管理组能点我的球员成长方案」。
 
 **交付**
 
@@ -94,7 +94,7 @@
 
 **验收**：typecheck 三份全清；vitest **169 文件 / 2752 例全绿**（`tests/forced-auction.test.ts` 增 FC ID/自由身/X+2、自由身成交与无出价，`tests/market-rules.test.ts` 增 minOffsetDays，`web/src/pages/Player.test.tsx` 增 TC-GROWTH-PERM-01/02/03）；build `index-9JmPjVqr.js` 714.83 kB / gzip 225.69 kB；e2e **29/29**（本地 wrangler 8791 读构建产物）。
 
-**遗留**：发布需用户明确下令；跨仓通知模板白名单确认不在本版本范围。
+**遗留**：上线完成；跨仓通知模板白名单确认不在本版本范围。
 
 ## v6.60.4 · 放行即保护期结束（2026-10-30）
 
