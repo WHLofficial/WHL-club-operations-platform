@@ -182,6 +182,21 @@ async function seedSealed(): Promise<{ fx: Fixture; batchId: number }> {
 }
 
 describe('暗标段：阶段与惰性建批', () => {
+  // 回归：marketRoutes（index.ts:77）先于 transfersRoutes（:80）挂载，`/transfers/:id` 若不吃数字限定，
+  // 会把 `/transfers/sea-sealed` 当单据 ID 解析成 400「单据 ID 不对」，整块暗标 UI 因此恒为「海捞签入」。
+  it('GET /api/transfers/sea-sealed 走教练读接口，不被 /transfers/:id 抢走', async () => {
+    const { fx, batchId } = await seedSealed();
+    const res = await get('/api/transfers/sea-sealed', A, fx.env);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { state: string; batch: { id: number } | null }).toMatchObject({
+      enabled: true,
+      state: 'sealed',
+      batch: { id: batchId },
+    });
+    // 单据详情的数字路径照旧可用
+    expect((await get('/api/transfers/999999', A, fx.env)).status).toBe(404);
+  });
+
   it('sea_enabled 默认关闭 ⇒ 教练侧 off，出标被拒（线上行为与今天一致）', async () => {
     const { fx } = await seedSealed();
     setSeaEnabled(fx, false);

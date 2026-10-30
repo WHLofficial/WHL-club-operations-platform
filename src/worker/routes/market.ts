@@ -1169,7 +1169,9 @@ app.get('/me/bids', async (c) => {
 });
 
 // GET /api/transfers/:id —— 单据详情（公开）
-app.get('/transfers/:id', async (c) => {
+// id 限定纯数字：marketRoutes 在 transfersRoutes 之前挂（index.ts:77/:80），
+// 不限定的话 `/transfers/:id` 会把 `/transfers/sea-sealed` 吃掉（教练侧暗标读接口恒 400）。
+app.get('/transfers/:id{[0-9]+}', async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '单据 ID 不对');
   const t = await c.env.DB.prepare(

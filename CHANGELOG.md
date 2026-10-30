@@ -4,6 +4,15 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.6] · 单据详情路由抢占暗标读接口（2026-10-30）
+
+**线上故障修复**：`GET /api/transfers/sea-sealed` 在生产恒返回 400「单据 ID 不对」。`src/worker/routes/market.ts` 的公开单据详情 `app.get('/transfers/:id')` 随 `marketRoutes` 在 `src/worker/index.ts:77` 先于 `transfersRoutes`（`:80`）挂载，Hono 先命中先赢，`sea-sealed` 被当单据 ID 解析成 `NaN`。教练侧 `useSeaPhase` 因此恒为 error（`retry:false`），`SideOps` 落回「海捞签入」按钮、`/market/free` 倒计时卡片整块不渲染——暗标段上线当日实际无法出标。
+
+**Fixed**
+
+- `src/worker/routes/market.ts:1172` 路径参数加数字限定：`app.get('/transfers/:id{[0-9]+}')`，非数字路径交回 `transfersRoutes`；数字单据详情行为不变（不存在的 ID 仍 404）。
+- `tests/sea-sealed.test.ts` 补回归用例：`GET /api/transfers/sea-sealed` 必须 200 且 `state==='sealed'`，同时 `GET /api/transfers/999999` 仍 404。此前该路径只有 POST 覆盖，GET 一律直接调 `loadSeaPhaseView` 函数，所以抢占一直没被测试发现。
+
 ## [v6.60.5] · 强制拍卖认 FC ID、自由身可挂、期限 X+2；成长入口按归属收口（2026-10-30）
 
 **已上线（2026-10-30）**：push `ffbb870..c30a7d0`（分支 `fix/v6.60.5-forced-fc-growth-perm`），CF Workers Builds 自动部署 Version `d5c2a0b1-d9a1-42f8-9ff5-08aa77abd45e` @2026-10-30T10:18:19Z；无迁移、无 schema 变更。生产 `/`、`/players`、`/market`、`/admin/market`、`/api/market/listings`、`/api/players` 全 200，`/api/health` d1/tour_db/kv 全 ok；线上资产 `index-9JmPjVqr.js` 与本地构建一致（714,834 B）。依据用户口径：「管理端强制拍卖仍然会报错无归属或不存在」「自由身也能强制挂牌，拍卖款销毁」「强制拍卖期限 X 日挂牌 X+2 日预计成交」「管理组也不能替他人选成长方案」。判级 patch。
