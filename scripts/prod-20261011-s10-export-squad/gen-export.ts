@@ -22,7 +22,9 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import * as XLSX_NS from 'xlsx';
-import { FC26_GAME_ATTR_COLUMNS, FC_EDITOR_GAME_ATTR_COLUMNS } from '../../src/core/fc26.ts';
+import { FC_EDITOR_GAME_ATTR_COLUMNS } from '../../src/core/fc26.ts';
+// v6.61.0：34 项能力的加成计算与后端/详情同源（core/growth-attrs），不许在脚本里另写一份系数
+import { ATTR_KEYS, buffedValue, growthDelta } from '../../src/core/growth-attrs.ts';
 
 // xlsx 是 CJS 包，ESM 下具名导出探测不到（readFile/writeFile 只在 default 上）⇒ 统一从 default 取。
 const XLSX: typeof XLSX_NS = (XLSX_NS as unknown as { default?: typeof XLSX_NS }).default ?? XLSX_NS;
@@ -92,8 +94,8 @@ if (MODES > 1) {
 
 // ---------------------------------------------------------------- 常量（与库内/Editor 两侧键名对齐）
 
-/** 34 项细分能力：FC26 键名与 Editor 列名逐字相同，两侧取交集做交叉校验。 */
-const ATTR34 = FC26_GAME_ATTR_COLUMNS.slice(FC26_GAME_ATTR_COLUMNS.indexOf('sprintspeed'));
+/** 34 项细分能力：v6.61.0 起取自 core/growth-attrs（与后端 ATTR_KEYS 同一份），键名与 Editor 列名逐字相同。 */
+const ATTR34 = ATTR_KEYS;
 const EDITOR_ATTR34 = FC_EDITOR_GAME_ATTR_COLUMNS.filter((k) => ATTR34.includes(k));
 const ROLE_SLOTS = ['RoleID1', 'RoleID2', 'RoleID3', 'RoleID4', 'RoleID5'];
 const PS_SLOTS = Array.from({ length: 12 }, (_, i) => `PSID${i + 1}`);
@@ -280,6 +282,8 @@ type DbPlayer = {
   foot: number | null;
   ca: number | null;
   pa: number | null;
+  /** v6.61.0：属性成长加成的基线（delta = max(0, ca − COALESCE(base_ca, ca))）；缺行按 null ⇒ delta 0 */
+  base_ca: number | null;
   club_id: number | null;
   status: string | null;
   game_attrs: string | null;
@@ -306,6 +310,9 @@ type Snapshot = {
   source: string;
   prevDir: string;
   squad: string;
+  /** v6.61.0：生成时点的 growth_attr_bonus 开关。--verify/--diff-prev 用快照这份复算，
+   *  不读线上 config（那两个模式离线跑）；旧快照没有该字段按关（不加成）。 */
+  attrBonusEnabled: boolean;
   clubs: SnapshotClub[];
   players: SnapshotPlayer[];
 };
@@ -322,7 +329,7 @@ type Refs = {
 // ---------------------------------------------------------------- 取数
 
 const PLAYER_SQL = `SELECT p.id, p.fc_id, p.name, p.first_name, p.last_name, p.common_name,
-  p.number, p.foot, p.ca, p.pa, p.club_id, p.status, p.game_attrs,
+  p.number, p.foot, p.ca, p.pa, p.base_ca, p.club_id, p.status, p.game_attrs,
   (SELECT r.squad FROM registrations r WHERE r.player_id = p.id AND r.season = ${SEASON} LIMIT 1) AS reg_squad,
   (SELECT c.contract_type FROM contracts c WHERE c.player_id = p.id AND c.is_active = 1 LIMIT 1) AS ctype
 FROM players p WHERE p.club_id IS NOT NULL AND COALESCE(p.status, '') <> 'retired' ORDER BY p.club_id, p.fc_id`;
@@ -340,6 +347,7 @@ function mapPlayer(r: Record<string, unknown>): DbPlayer {
     foot: numOrNull(r['foot']),
     ca: numOrNull(r['ca']),
     pa: numOrNull(r['pa']),
+    base_ca: numOrNull(r['base_ca']),
     club_id: numOrNull(r['club_id']),
     status: str(r['status']),
     game_attrs: str(r['game_attrs']),
@@ -364,10 +372,11 @@ function readProd(): { clubs: { id: number; name: string }[]; players: DbPlayer[
   return { clubs, players };
 }
 
-function readSnapshot(path: string): { clubs: { id: number; name: string }[]; players: DbPlayer[] } {
+function readSnapshot(path: string): { clubs: { id: number; name: string }[]; players: DbPlayer[]; attrBonusEnabled: boolean } {
   const snap = JSON.parse(readFileSync(resolve(path), 'utf8')) as Snapshot;
   if (!Array.isArray(snap.players) || !Array.isArray(snap.clubs)) throw new Error(`快照 ${path} 结构不对（缺 clubs/players）`);
-  return { clubs: snap.clubs.map((c) => ({ id: c.id, name: c.name })), players: snap.players };
+  // 旧快照没有 attrBonusEnabled ⇒ 按关（不加成），与其缺 base_ca ⇒ delta 0 一致
+  return { clubs: snap.clubs.map((c) => ({ id: c.id, name: c.name })), players: snap.players, attrBonusEnabled: snap.attrBonusEnabled ?? false };
 }
 
 // ---------------------------------------------------------------- s901（对照 + 三列缺口取值）
@@ -444,7 +453,7 @@ function readPrev(dir: string): PrevIndex {
 
 type Values = Record<string, string | number | null>;
 
-function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | null {
+function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter, enabled: boolean): Values | null {
   if (p.fc_id == null) {
     rep.bump('无法导出：缺 fc_id', `players.id=${p.id} ${p.name ?? ''}`);
     return null;
@@ -462,6 +471,10 @@ function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | nul
     rep.bump('game_attrs 为空', `fc ${fc}`);
   }
 
+  // v6.61.0：成长点数与后端同一份 core/growth-attrs.growthDelta。旧快照没有 base_ca ⇒ null ⇒ delta 0
+  //（等于不加成），因此旧快照必须重跑一次才有加成列。
+  const delta = growthDelta(p.ca, p.base_ca, enabled);
+
   const at = (key: string): number | null => {
     if (!(key in attrs)) {
       rep.bump(`game_attrs 缺键：${key}`, `fc ${fc}`);
@@ -469,7 +482,9 @@ function buildValues(p: SnapshotPlayer, refs: Refs, rep: Reporter): Values | nul
     }
     const n = numOrNull(attrs[key]);
     if (n == null) rep.bump(`game_attrs 键值为空：${key}`, `fc ${fc}`);
-    return n;
+    // 34 项能力列走加成出口（与列表/详情同一函数）；缺键/空值仍 null 不造值。
+    // delta=0 时 min(99, v) 恒等（值域 1-99），开关关 = 逐格回源值
+    return ATTR34.includes(key) ? buffedValue(n, delta) : n;
   };
 
   const posText = (key: string): string => {
@@ -639,9 +654,24 @@ function buildSnapshot(): { snap: Snapshot; built: BuiltClub[]; rep: Reporter; p
   const prev = readPrev(PREV_DIR);
   for (const p of prev.problems) rep.bump(`s901 读取告警：${p}`);
 
-  const src = SOURCE ? readSnapshot(SOURCE) : readProd();
-  if (SOURCE) console.log(`  源：快照 ${resolve(SOURCE)}（${src.players.length} 人）`);
-  else console.log(`  源：生产 D1 ${LOCAL ? '--local' : '--remote'}（${src.players.length} 人）`);
+  // v6.61.0：加成开关随快照落盘（verify/diff-prev 用快照那份复算，不读线上 config）。
+  // 现跑生产：读 config（缺行按开，与迁移默认 '1' 同向；口径按字符串 !== '0'，管理端写入恒 '0'/'1'）；
+  // --source 快照重跑：用快照落盘那份，不连库。
+  let src: { clubs: { id: number; name: string }[]; players: DbPlayer[] };
+  let attrBonusEnabled: boolean;
+  if (SOURCE) {
+    const loaded = readSnapshot(SOURCE);
+    src = { clubs: loaded.clubs, players: loaded.players };
+    attrBonusEnabled = loaded.attrBonusEnabled;
+    console.log(`  源：快照 ${resolve(SOURCE)}（${src.players.length} 人）`);
+    console.log(`  属性成长加成（growth_attr_bonus）：${attrBonusEnabled ? '开' : '关'}（随快照）`);
+  } else {
+    src = readProd();
+    const switchRows = d1Rows(`SELECT value FROM config WHERE key = 'growth_attr_bonus'`);
+    attrBonusEnabled = switchRows.length === 0 || String(switchRows[0]?.['value'] ?? '') !== '0';
+    console.log(`  源：生产 D1 ${LOCAL ? '--local' : '--remote'}（${src.players.length} 人）`);
+    console.log(`  属性成长加成（growth_attr_bonus）：${attrBonusEnabled ? '开' : '关'}`);
+  }
 
   const players: SnapshotPlayer[] = src.players.map((p) => ({
     ...p,
@@ -654,7 +684,7 @@ function buildSnapshot(): { snap: Snapshot; built: BuiltClub[]; rep: Reporter; p
     const kept = SQUAD === 'first_team' ? mine.filter((p) => p.reg_squad === 'first_team') : mine;
     const rows: { fc: number; vals: Values }[] = [];
     for (const p of kept) {
-      const vals = buildValues(p, refs, rep);
+      const vals = buildValues(p, refs, rep, attrBonusEnabled);
       if (vals) rows.push({ fc: p.fc_id as number, vals });
     }
     // 行序：已存在的按 s901 内原顺序，新人按 fc_id 升序追加
@@ -692,6 +722,7 @@ function buildSnapshot(): { snap: Snapshot; built: BuiltClub[]; rep: Reporter; p
     source: SOURCE ? resolve(SOURCE) : `d1:${DB}:${LOCAL ? 'local' : 'remote'}`,
     prevDir: PREV_DIR,
     squad: SQUAD,
+    attrBonusEnabled,
     clubs: built.map((b) => b.club),
     players,
   };
@@ -748,6 +779,8 @@ function reportLines(snap: Snapshot, built: BuiltClub[], rep: Reporter, prev: Pr
   L.push(`- 输出目录：${OUT_DIR}`);
   L.push(`- s901 对照目录：${snap.prevDir}`);
   L.push(`- 表头真源：src/core/fc26.ts 的 FC_EDITOR_GAME_ATTR_COLUMNS（${FC_EDITOR_GAME_ATTR_COLUMNS.length} 列）`);
+  // v6.61.0：34 项能力列 = min(99, 初始 + delta)，与列表/详情同一份 core/growth-attrs
+  L.push(`- 属性成长加成：${snap.attrBonusEnabled ? '开（34 项 = min(99, 初始属性 + delta)）' : '关（growth_attr_bonus=0，全部源值）'}`);
   L.push(`- 合计：${built.length} 队 / ${total} 人`, '');
 
   L.push('## 1 逐队行数', '', '| club id | 文件名 | 队名来源 | 一线队 | 训练营 | 导出行数 | s901 行数 | 差 |', '|---|---|---|---|---|---|---|---|');
@@ -789,7 +822,7 @@ function recomputeRows(snap: Snapshot): { built: BuiltClub[]; rep: Reporter } {
     const kept = snap.squad === 'first_team' ? mine.filter((p) => p.reg_squad === 'first_team') : mine;
     const rows: { fc: number; vals: Values }[] = [];
     for (const p of kept) {
-      const vals = buildValues(p, refs, rep);
+      const vals = buildValues(p, refs, rep, snap.attrBonusEnabled ?? false);
       if (vals) rows.push({ fc: p.fc_id as number, vals });
     }
     rows.sort((a, b) => {
@@ -841,6 +874,15 @@ function runVerify(): number {
       const line = aoa[i + 1];
       if (!line) continue;
       const wantRow = toRow(r.vals, r.fc);
+      // v6.61.0：34 项能力列（加成出口）逐行断言 0 ≤ v ≤ 99 —— 钳制在 buffedValue 里做了，
+      // 这里独立复核（出现越界说明 min(99, …) 被绕开或映射错了列）
+      for (const key of ATTR34) {
+        const ci = FC_EDITOR_GAME_ATTR_COLUMNS.indexOf(key);
+        const got = line[ci] ?? null;
+        if (typeof got === 'number' && (got < 0 || got > 99)) {
+          diffs.push({ club: b.club.id, fc: r.fc, col: key, want: '0..99', got, kind: '越界' });
+        }
+      }
       FC_EDITOR_GAME_ATTR_COLUMNS.forEach((col, ci) => {
         const wantV = wantRow[ci];
         const gotV = line[ci] ?? null;
@@ -928,7 +970,7 @@ function runDiffPrev(): number {
   L.push('');
   L.push('## 分级口径', '');
   L.push('- **A 硬闸**（playerid / Position1-4 / teamid / nationality / preferredfoot / height / weight / weakfootabilitytypecode / 三列缺口）：S9 时两侧逐字一致（0 处）；此后出现差异要么平台内改过、要么映射出错 ⇒ **必须 0，非 0 停下人工确认**。');
-  L.push('- **B 数值**（overallrating / potential / 34 项能力）：导出取库内现值（`ca` / `pa` + `game_attrs`），与 2026-09-05 快照不同是平台内成长与订正的正常结果 ⇒ 不算失败，逐条列。');
+  L.push('- **B 数值**（overallrating / potential / 34 项能力）：导出取库内现值（`ca` / `pa` + `game_attrs`），与 2026-09-05 快照不同是平台内成长与订正的正常结果 ⇒ 不算失败，逐条列。**v6.61.0 起 34 项能力含平台成长加成**（min(99, 初始 + delta)，growth_attr_bonus 开关随快照），与 s901 的差异会明显变多，是预期内不是映射错误。');
   L.push('- **C 文本**（role1-5 / Playstyles / Playstyles+）：导出按**库内槽位顺序** + 平台反查表出值（忠实线上库）；与 s901 的写法（连字符 / 双空格 / 大小写）、顺序、生涯特性差异 ⇒ 不算失败，逐条列。');
   L.push('- **D 平台侧可编辑**（firstname / lastname / commonname / number）：平台是姓名与球衣号的真源（v6.0.0 起在平台内维护、可编辑）⇒ 不算失败，逐条列。');
   L.push('');
