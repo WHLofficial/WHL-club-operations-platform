@@ -1423,6 +1423,8 @@ interface PendingApplyRow {
   wage_new: number;
   release_fee_new: number | null;
   protection_ticks_new: number | null;
+  /** §5.6 rev22：1 = 本次续约走了免费通道，apply 时同批消耗 contracts.free_rc_change_used */
+  free_rc_change: number;
   still_at_club: number;
 }
 
@@ -1450,7 +1452,7 @@ export async function applyPendingContractChanges(
     await db
       .prepare(
         `SELECT pc.id, pc.player_id, pc.club_id, pc.demand_id, pc.source,
-                pc.wage_new, pc.release_fee_new, pc.protection_ticks_new,
+                pc.wage_new, pc.release_fee_new, pc.protection_ticks_new, pc.free_rc_change,
                 CASE WHEN c.club_id = pc.club_id THEN 1 ELSE 0 END AS still_at_club
          FROM contract_pending_changes pc
          LEFT JOIN contracts c ON c.player_id = pc.player_id AND c.is_active = 1
@@ -1495,16 +1497,20 @@ export async function applyPendingContractChanges(
 
   // ② 仍在原队者 → apply（§5.7 第 3 步）：写新 wage / release_fee / 保护期，**不再扣款**
   //（非免费普通续约的 30% 在接受时已即时扣并写 rc_fee_charged_at；闹涨薪 rc_fee 恒 0）。
+  // 免费续约（§5.6 rev22）的消耗时点就在这里：free_rc_change=1 的行同批把
+  // contracts.free_rc_change_used 置 1（CASE 内联在 contracts 的同一句 UPDATE 里，
+  // 与效果语句同批同守卫；demand 行该列恒 0 不受影响=闹涨薪不消耗）。
   for (const row of rows) {
     if (row.still_at_club !== 1) continue;
     statements.push(
       db
         .prepare(
           `UPDATE contracts SET wage = ?, release_fee = COALESCE(?, release_fee),
-                  protection_ticks = COALESCE(?, protection_ticks)
+                  protection_ticks = COALESCE(?, protection_ticks),
+                  free_rc_change_used = CASE WHEN ? = 1 THEN 1 ELSE free_rc_change_used END
            WHERE player_id = ? AND is_active = 1 AND club_id = ?`,
         )
-        .bind(row.wage_new, row.release_fee_new, row.protection_ticks_new, row.player_id, row.club_id),
+        .bind(row.wage_new, row.release_fee_new, row.protection_ticks_new, row.free_rc_change, row.player_id, row.club_id),
       // claim 挂「合同仍在原队」存在性子查询：读预检与批之间有极小 TOCTOU 窗口，
       // 归属已变时合同行不被本句覆盖、pending 也保持 pending 等下轮收口（宁可迟到不写错队）。
       db

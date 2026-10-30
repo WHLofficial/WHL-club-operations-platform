@@ -121,11 +121,13 @@ async function seedBypass(): Promise<BypassFixture> {
        (21, 'fc21', '老将', ${clubA}, 'CB', 29, 85, 85, 75, 25, 'normal'),
        (22, 'fc22', '新秀', ${clubA}, 'CM', 17, 55, 78, 55, 3, 'trainee'),
        (23, 'fc23', '无据', ${clubA}, 'GK', 30, 70, 70, 70, 5, 'normal');
-     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from, service_ticks, protection_ticks) VALUES
-       (1, 20, ${clubA}, 10, 1, 'formal', 1, '2020-01-01', 0, 3),
-       (2, 21, ${clubA}, 20, 2.5, 'formal', 1, '2026-08-01', 6, 9),
-       (3, 22, ${clubA}, 5, 0.75, 'trainee', 1, '2026-08-01', 6, NULL),
-       (4, 23, ${clubA}, 8, 1, 'formal', 1, NULL, 6, 9);`,
+     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from, service_ticks, protection_ticks, free_rc_change_used) VALUES
+       -- player 20 的合同显式 used=1：本文件锁的是「非免费」收费路径（v6.62.0 起 used=0 会自动走
+       -- 免费通道）；免费正向用例在 tests/free-rc-change.test.ts。
+       (1, 20, ${clubA}, 10, 1, 'formal', 1, '2020-01-01', 0, 3, 1),
+       (2, 21, ${clubA}, 20, 2.5, 'formal', 1, '2026-08-01', 6, 9, 0),
+       (3, 22, ${clubA}, 5, 0.75, 'trainee', 1, '2026-08-01', 6, NULL, 0),
+       (4, 23, ${clubA}, 8, 1, 'formal', 1, NULL, 6, 9, 0);`,
   );
   return { ...fx, clubA, clubB };
 }
@@ -154,7 +156,7 @@ describe('续约（rc_change）', () => {
     expect(t?.fee).toBe(15);
     expect(t?.status).toBe('pending_review');
     expect(t?.review_task_id).toBeGreaterThan(0);
-    expect(JSON.parse(t?.evidence ?? '{}')).toEqual({ oldReleaseFee: 10, oldProtectionTicks: 3 });
+    expect(JSON.parse(t?.evidence ?? '{}')).toEqual({ oldReleaseFee: 10, oldProtectionTicks: 3, freeRcChange: false });
     const task = sqlGet<{ payload: string }>(fx.sqlite, 'SELECT payload FROM review_tasks WHERE ref_id = ?', body.transferId);
     expect(JSON.parse(task?.payload ?? '{}')).toMatchObject({ kind: 'rc_change', oldReleaseFee: 10, newReleaseFee: 15, changeFee: 1.5 });
   });

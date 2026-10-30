@@ -33,6 +33,8 @@ function nowSql() {
 interface RcChangeEvidence {
   oldReleaseFee: number;
   oldProtectionTicks: number | null;
+  /** rev22 §5.6：本次续约是否走免费通道（free_rc_change_used=0 自动动用）；缺字段按非免费（历史在途单兼容） */
+  freeRcChange?: boolean;
 }
 
 interface OwnPlayerRow {
@@ -332,9 +334,9 @@ export async function createRcChange(
     throw new HttpError(400, player.status === 'listed' ? '这名球员在挂牌流程里，不能续约' : '当前状态不能续约');
   }
   const contract = await db
-    .prepare('SELECT release_fee, contract_type, protection_ticks FROM contracts WHERE player_id = ? AND is_active = 1')
+    .prepare('SELECT release_fee, contract_type, protection_ticks, free_rc_change_used FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(playerId)
-    .first<{ release_fee: number | null; contract_type: string; protection_ticks: number | null }>();
+    .first<{ release_fee: number | null; contract_type: string; protection_ticks: number | null; free_rc_change_used: number }>();
   if (!contract || contract.release_fee === null || contract.release_fee <= 0) {
     throw new HttpError(409, '球员没有含违约金的现行合同，先让管理组补合同');
   }
@@ -377,7 +379,11 @@ export async function createRcChange(
   if (newFee < low || newFee > high) {
     throw new HttpError(400, `新违约金需在 ${low}~${high} 之间（整数 m，原违约金 ${oldRc} m）`);
   }
-  const changeFee = rcChangeFee(oldRc, newFee);
+  // 免费续约机会（§5.6 rev22）：free_rc_change_used=0 的合同下一张续约单自动走免费通道——
+  // 提价免收差额 30%（审核侧凭 evidence 跳过扣款）、不收口保护期（pending 写 NULL，apply 侧
+  // COALESCE 接住）；降价同样消耗。用完后一切维持现状。
+  const isFree = contract.free_rc_change_used === 0;
+  const changeFee = isFree ? 0 : rcChangeFee(oldRc, newFee);
   if (changeFee > 0) {
     const available = await availableBalance(db, clubId);
     if (round2(available) < changeFee) {
@@ -396,7 +402,7 @@ export async function createRcChange(
     extraFee: null,
     season: win.season,
     windowSeq: win.windowSeq,
-    evidence: { oldReleaseFee: oldRc, oldProtectionTicks: contract.protection_ticks },
+    evidence: { oldReleaseFee: oldRc, oldProtectionTicks: contract.protection_ticks, freeRcChange: isFree },
     payload: {
       kind: 'rc_change',
       playerId,
@@ -405,6 +411,7 @@ export async function createRcChange(
       oldReleaseFee: oldRc,
       newReleaseFee: newFee,
       changeFee,
+      freeRcChange: isFree,
       season: win.season,
       windowSeq: win.windowSeq,
     },
@@ -884,7 +891,9 @@ export async function approveTransferDeal(
       return completeTermination(env, transferId, actor, 'user', review);
     case 'rc_change': {
       const ev = transferEvidence<RcChangeEvidence>(transfer);
-      const fee = rcChangeFee(ev?.oldReleaseFee ?? 0, transfer.fee ?? 0);
+      // 免费续约豁免（§5.6 rev22）的真落点在审核侧：evidence 带 freeRcChange 时跳过差额 30%
+      //（chargeBypassFee 不走，无流水无审计）。evidence 缺该字段的历史在途单按非免费处理。
+      const fee = ev?.freeRcChange === true ? 0 : rcChangeFee(ev?.oldReleaseFee ?? 0, transfer.fee ?? 0);
       if (fee > 0 && transfer.to_club_id !== null) {
         await chargeBypassFee(
           env,

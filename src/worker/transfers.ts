@@ -391,7 +391,9 @@ export async function completeTransfer(
   }
   if (dealTerms && freeAgent) {
     // 海捞：落新合同（保护期按窗刻度，训练营无保护期）。contracts.player_id 全局唯一
-    //（解约只是 is_active=0），复签走 ON CONFLICT UPSERT 把旧合同行整体翻新
+    //（解约只是 is_active=0），复签走 ON CONFLICT UPSERT 把旧合同行整体翻新。
+    // 免费续约机会（§5.6）：excluded 取 INSERT 默认 0——旧合同行（可能已用掉机会）撞车
+    // 翻新时必须归 0，否则残留旧值。
     statements.push(
       db
         .prepare(
@@ -403,7 +405,8 @@ export async function completeTransfer(
              contract_type = excluded.contract_type, source = excluded.source,
              signed_at = excluded.signed_at, effective_from = excluded.effective_from,
              service_ticks = excluded.service_ticks, protection_ticks = excluded.protection_ticks,
-             signed_season = excluded.signed_season, signed_window_seq = excluded.signed_window_seq, is_active = 1`,
+             signed_season = excluded.signed_season, signed_window_seq = excluded.signed_window_seq,
+             free_rc_change_used = excluded.free_rc_change_used, is_active = 1`,
         )
         .bind(
           transfer.player_id,
@@ -423,24 +426,28 @@ export async function completeTransfer(
     // 只写 contract_pending_changes」，既有行为变更①）：
     // ① contracts 在窗口关闭前**一字不动**——成约只写 pending，关窗批的
     //    applyPendingContractChanges 才把 wage/release_fee/protection_ticks 落库；
-    // ② 4.4.6 收口语义保留、时点迁移：protection_ticks_new = baseTicks（当下窗数，判定恒不成立），
-    //    **不得写 NULL**（写 NULL 会把「保护期直接结束」静默移除）；
-    // ③ 30% 续约费仍按既有 4.4.6 时点在审核通过时已收（bypass.chargeBypassFee，幂等闸 + 流水 + 审计），
-    //    这里只把「已扣金额」记进 pending 的 rc_fee 供对账；rc_fee_charged_at 直接取那笔流水的
-    //    created_at（真实扣款时刻，不拿成约时刻冒充）；apply 不再扣款（§5.7 第 3 步）；
+    // ② 4.4.6 收口语义保留、时点迁移：非免费续约 protection_ticks_new = baseTicks（当下窗数，
+    //    判定恒不成立），**不得写 NULL**（写 NULL 会把「保护期直接结束」静默移除）；
+    //    免费续约是唯一例外（§5.6 rev22）：evidence 带 freeRcChange 时写 NULL = 保护期该项不变
+    //    （apply 侧 COALESCE 接住），apply 成功同批消耗 free_rc_change_used；
+    // ③ 30% 续约费仍按既有 4.4.6 时点在审核通过时已收（bypass.chargeBypassFee，幂等闸 + 流水 + 审计；
+    //    免费单审核侧跳过、extra_fee 为 NULL）——这里只把「已扣金额」记进 pending 的 rc_fee 供对账；
+    //    rc_fee_charged_at 直接取那笔流水的 created_at（真实扣款时刻，不拿成约时刻冒充）；
+    //    apply 不再扣款（§5.7 第 3 步）；
     // ④ 一球员同时最多 1 条 pending（0079 的部分唯一索引兜底）；createRcChange 已前置 409，
     //    这里再带 NOT EXISTS 守卫，并发/迟到行下宁可续约不落 pending 也不撞索引把整批弄崩。
     // 匹配（match）不在 §5.7 的枚举内，沿用 4.3.3 既有即时落库（见下面的 else 分支）。
+    const rcFree = transferEvidence<{ freeRcChange?: boolean }>(transfer)?.freeRcChange === true;
     statements.push(
       db
         .prepare(
           `INSERT INTO contract_pending_changes
              (player_id, club_id, source, demand_id, wage_new, release_fee_new, protection_ticks_new,
-              rc_fee, rc_fee_charged_at, status, effective_window_seq)
+              rc_fee, rc_fee_charged_at, free_rc_change, status, effective_window_seq)
            SELECT ?, ?, 'renewal', NULL, ?, ?, ?, ?,
                   (SELECT created_at FROM ledger_entries
                     WHERE kind = 'rc_change_fee' AND ref_type IS 'transfer' AND ref_id = ?),
-                  'pending', ?
+                  ?, 'pending', ?
            WHERE ${guard.sql}
              AND NOT EXISTS (SELECT 1 FROM contract_pending_changes WHERE player_id = ? AND status = 'pending')`,
         )
@@ -449,9 +456,10 @@ export async function completeTransfer(
           transfer.to_club_id,
           dealTerms.wage,
           dealTerms.releaseFee,
-          baseTicks,
+          rcFree ? null : baseTicks,
           transfer.extra_fee ?? 0,
           transferId,
+          rcFree ? 1 : 0,
           transfer.window_seq ?? 0,
           ...guard.params,
           transfer.player_id,
@@ -491,6 +499,7 @@ export async function completeTransfer(
   } else if (dealTerms && saleFromClubId === null) {
     // 无归属球员（被 bypass 解约后仍在强制拍卖里成交）：没有可延续的现行合同，
     // 按谈判结果新签一份；成交款已在上面因 saleFromClubId=null 而不入任何俱乐部账，等同销毁。
+    // 免费机会随新签归 0（同海捞 upsert 的 excluded 兜底，防旧行残留）。
     const protection = protectionTicksFor(baseTicks, dealTerms.contractType);
     statements.push(
       db
@@ -503,7 +512,8 @@ export async function completeTransfer(
              contract_type = excluded.contract_type, source = excluded.source,
              signed_at = excluded.signed_at, effective_from = excluded.effective_from,
              service_ticks = excluded.service_ticks, protection_ticks = excluded.protection_ticks,
-             signed_season = excluded.signed_season, signed_window_seq = excluded.signed_window_seq, is_active = 1`,
+             signed_season = excluded.signed_season, signed_window_seq = excluded.signed_window_seq,
+             free_rc_change_used = excluded.free_rc_change_used, is_active = 1`,
         )
         .bind(
           transfer.player_id,
@@ -521,6 +531,8 @@ export async function completeTransfer(
   } else if (dealTerms) {
     // 换队（含买回 B 分支）⇒ 合同按谈判结果写。物理面延续（§5.4 第 3 条）：效力基数/保护期取
     // 离开时点的快照，signed_at = now（B 分支是真新签，覆盖快照签约时刻）；非买回仍按窗刻度重锚。
+    // 免费续约机会随换队刷新（§5.6 rev22「转会后刷新」）：UPDATE 不像 INSERT 有 DEFAULT 兜底，
+    // 必须显式归 0，否则用过机会的球员换队后免费被旧合同行偷走（普通换队与 B 买回都走这条）。
     const serviceTicks = returnCtx?.snapshotUsable ? (returnCtx.snapshot?.serviceTicks ?? 0) : baseTicks;
     const protection = returnCtx?.snapshotUsable
       ? (returnCtx.snapshot?.protectionTicks ?? null)
@@ -530,7 +542,8 @@ export async function completeTransfer(
         .prepare(
           `UPDATE contracts SET club_id = ?, wage = ?, release_fee = ?, source = ?, contract_type = ?,
              signed_at = ${nowSql()}, effective_from = strftime('%Y-%m-%d', 'now'),
-             service_ticks = ?, protection_ticks = ?, signed_season = ?, signed_window_seq = ?
+             service_ticks = ?, protection_ticks = ?, signed_season = ?, signed_window_seq = ?,
+             free_rc_change_used = 0
            WHERE player_id = ? AND is_active = 1 AND club_id IS ?`,
         )
         .bind(
@@ -549,11 +562,13 @@ export async function completeTransfer(
     );
   } else if (!amendment) {
     if (returnCtx?.snapshotUsable) {
-      // 无条款的买回桥接（直接调过户、成交不带新合同）：只换归属 + 恢复快照（不重锚）
+      // 无条款的买回桥接（直接调过户、成交不带新合同）：只换归属 + 恢复快照（不重锚）。
+      // 免费机会不进快照（不是资产）、但换队即刷新（§5.6）——归 0 与带条款换队同口径。
       statements.push(
         db
           .prepare(
-            `UPDATE contracts SET club_id = ?, service_ticks = ?, protection_ticks = ?, signed_at = ?
+            `UPDATE contracts SET club_id = ?, service_ticks = ?, protection_ticks = ?, signed_at = ?,
+               free_rc_change_used = 0
              WHERE player_id = ? AND is_active = 1 AND club_id IS ?`,
           )
           .bind(
@@ -567,11 +582,15 @@ export async function completeTransfer(
       );
     } else {
       statements.push(
-        db.prepare(`UPDATE contracts SET club_id = ? WHERE player_id = ? AND is_active = 1 AND club_id IS ?`).bind(
-          transfer.to_club_id,
-          transfer.player_id,
-          saleFromClubId,
-        ),
+        db
+          .prepare(
+            `UPDATE contracts SET club_id = ?, free_rc_change_used = 0 WHERE player_id = ? AND is_active = 1 AND club_id IS ?`,
+          )
+          .bind(
+            transfer.to_club_id,
+            transfer.player_id,
+            saleFromClubId,
+          ),
       );
     }
   }
