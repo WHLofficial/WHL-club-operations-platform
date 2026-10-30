@@ -608,6 +608,24 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE player_id = 10 AND event_type = 'levelup'")?.n).toBe(2);
   });
 
+  it('TC-GROWTH-PA-02 v6.60.3：CA 到顶后带徽章的方案照样发徽章（只截断 CA）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 张三已 81/81（无剩余潜力）；档 3 方案 1 = +2CA + 1 银徽章
+    fx.sqlite.exec("UPDATE players SET ca = 81, pa = 81, growth_xp = 10 WHERE id = 10");
+
+    const res = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { plan: { ca: number; silver: number }; playstyles: unknown[] };
+    expect(body.plan).toMatchObject({ ca: 0, silver: 1 });
+    expect(body.playstyles).toHaveLength(1);
+    expect(sqlGet<{ ca: number; badges_silver: number }>(fx.sqlite, 'SELECT ca, badges_silver FROM players WHERE id = 10')).toEqual({
+      ca: 81,
+      badges_silver: 1,
+    });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 10')?.n).toBe(1);
+  });
+
   it('档位核定 1-5 落库+审计；越界 400', async () => {
     const fx = freshEnv();
     seedPlatform(fx);

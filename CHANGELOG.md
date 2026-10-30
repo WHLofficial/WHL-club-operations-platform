@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.3] · 成长 CA 不得超过 PA（2026-10-30）
+
+**已上线（2026-10-30）**：push `7d14dd4..556cbb2`（分支 `fix/v6.60.3-ca-pa-cap`），CF Workers Builds 自动部署 Version `b0680776-2eae-4346-ae29-a0afaec6c836` @2026-10-30T08:04:16Z；无迁移、无 schema/API 形状变更。判级 patch（P0 竞速修复）。依据用户口径：「成长不能超过PA」。
+
+**Fixed**
+
+- `src/worker/growth.ts` `applyLevelUp`：读取 `ca/pa`，方案 CA 增量按 `max(0, min(plan.ca, pa - ca))` 截断；SQL 再用 `ca = MIN(COALESCE(pa, ca + ?), ca + ?)` 兜底，任何路径都不会把 CA 写超 PA。
+- 带徽章的成长不受影响：CA 到顶后方案仍按原数量发银/金徽章、级数照常消费；返回/审计/通知使用实际入账 CA 增量（`requestedCa` 另存原方案值）。
+- 生产数据订正：`players.id=42`（W. Pacho，club 33）本窗 S9W2 三次 +1CA 升级后 92/90；按「回退本窗」口径恢复 CA 89、levels_applied 0、保留 growth_xp 34 与徽章，删除 levelup 事件 7941/7948/7949，并写 `growth_levelup_rollback` 审计。订正后生产 `ca > pa` 行数为 0。
+
+**验收**：typecheck 三份全清；vitest `tests/growth.test.ts` **28 例全绿**（新增 TC-GROWTH-PA-01 截断/到顶、TC-GROWTH-PA-02 到顶仍发徽章）；全量套件在新增 PA-02 前为 **169 文件 / 2744 例全绿**；build `web/dist/assets/index-DB3FXRkK.js` **714.55 kB / gzip 225.61 kB**，线上逐字节一致（714,552 B，含 `6.60.3`）。
+
+**遗留**：无（保护期「立即结束」是同日另一项修复，另行记录）。
+
 ## [v6.60.2] · 强制拍卖：取消须有归属、无归属成交款销毁（2026-10-30）
 
 **已上线（2026-10-30）**：push `dabfccf..f577661`（分支 `fix/v6.60.2-forced-auction-ownership`），CF Workers Builds 自动部署 Version `4b7c5258-7df6-4151-9098-4b1b6d26a98a` @2026-10-30T07:46:32Z；无迁移，无 API 形状变更。生产 `/`、`/market`、`/api/health` 全 200（d1/tour_db/kv 全 ok），管理端强制拍卖预检匿名 401；线上资产 `index-Bur5g9dD.js` 与本地构建逐字节一致（714,552 B，含 `6.60.2` 版本串）；部署后复核生产券账（巴黎 5 / 利物浦 15）、318 人 XP 4307.5、球员 2 free 均未被改动。判级 patch。依据用户同日口径：「强制拍卖取消必须有归属的限制，无归属球员拍卖得到的钱是走销毁」。
