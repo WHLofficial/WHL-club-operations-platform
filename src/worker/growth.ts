@@ -609,7 +609,7 @@ export async function applyLevelUp(
   const db = env.DB;
   const player = await db
     .prepare(
-      'SELECT id, name, display_name, club_id, growable, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE id = ?',
+      'SELECT id, name, display_name, club_id, growable, growth_tier, growth_xp, levels_applied, badges_silver, badges_gold, ca, pa FROM players WHERE id = ?',
     )
     .bind(playerId)
     .first<{
@@ -623,6 +623,8 @@ export async function applyLevelUp(
       levels_applied: number;
       badges_silver: number;
       badges_gold: number;
+      ca: number | null;
+      pa: number | null;
     }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
 
@@ -641,6 +643,11 @@ export async function applyLevelUp(
     throw new HttpError(400, `方案序号不对，档 ${player.growth_tier} 有 ${plans.length} 个可选方案`);
   }
   const plan = plans[planIndex]!;
+  // v6.60.3 用户裁决：CA 永远不能超过 PA。方案增量按剩余潜力截断（CA 已到顶时增量为 0，
+  // 徽章/级数照常结算）；PA 缺失（长尾导入）不做封顶，避免把未定的潜力当 0。
+  const caGain =
+    player.pa === null || player.ca === null ? plan.ca : Math.max(0, Math.min(plan.ca, player.pa - player.ca));
+  const appliedPlan = { ...plan, ca: caGain };
   const capSilver = (await config.getNumber('badge_cap_silver')) ?? 12;
   const capGold = (await config.getNumber('badge_cap_gold')) ?? 3;
   const nextLevelNo = player.levels_applied + 1;
@@ -650,10 +657,10 @@ export async function applyLevelUp(
   await db.batch([
     db
       .prepare(
-        `UPDATE players SET ca = ca + ?, badges_silver = MIN(?, badges_silver + ?), badges_gold = MIN(?, badges_gold + ?),
+        `UPDATE players SET ca = MIN(COALESCE(pa, ca + ?), ca + ?), badges_silver = MIN(?, badges_silver + ?), badges_gold = MIN(?, badges_gold + ?),
            levels_applied = levels_applied + 1, updated_at = ${nowSql()} WHERE id = ?`,
       )
-      .bind(plan.ca, capSilver, plan.silver, capGold, plan.gold, playerId),
+      .bind(caGain, caGain, capSilver, plan.silver, capGold, plan.gold, playerId),
     ...insertPlaystyleStatements(db, playerId, grants, 'growth', actor),
     ...recordGrowthEventStatements(db, {
       playerId,
@@ -673,17 +680,17 @@ export async function applyLevelUp(
     targetType: 'player',
     targetId: playerId,
     origin: 'user',
-    after: { tier: player.growth_tier, planIndex, plan, playstyles: grants },
+    after: { tier: player.growth_tier, planIndex, plan: appliedPlan, requestedCa: plan.ca, playstyles: grants },
   });
   // 通知教练（§12；尽力而为，没绑 QQ 静默跳过）
   await queueClubNotification(env, player.club_id, 'levelup', {
     player: rowDisplayName(player),
     playerId,
-    ca: plan.ca,
+    ca: caGain,
     silver: plan.silver,
     gold: plan.gold,
   });
-  return { ok: true, plan, levelsApplied: nextLevelNo, pendingLeft: pending - 1, playstyles: grants };
+  return { ok: true, plan: appliedPlan, levelsApplied: nextLevelNo, pendingLeft: pending - 1, playstyles: grants };
 }
 
 // ---- 中国球员计划自选银徽章（§10：config.china_badges 落地）----

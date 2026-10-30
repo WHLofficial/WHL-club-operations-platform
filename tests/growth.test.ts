@@ -590,6 +590,24 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     expect(anon.status).toBe(401);
   });
 
+  it('TC-GROWTH-PA-01 v6.60.3：升级 CA 不得超过 PA（剩余潜力不足时按差额截断，到顶后为 0）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 张三 80/81，待办 2 次；档 3 方案 0 = +3CA，第一次只能 +1，第二次已到顶 +0
+    fx.sqlite.exec("UPDATE players SET ca = 80, pa = 81, growth_xp = 20 WHERE id = 10");
+
+    const first = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { plan: { ca: number } }).plan.ca).toBe(1);
+    expect(sqlGet<{ ca: number; pa: number }>(fx.sqlite, 'SELECT ca, pa FROM players WHERE id = 10')).toEqual({ ca: 81, pa: 81 });
+
+    const second = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as { plan: { ca: number } }).plan.ca).toBe(0);
+    expect(sqlGet<{ ca: number; pa: number }>(fx.sqlite, 'SELECT ca, pa FROM players WHERE id = 10')).toEqual({ ca: 81, pa: 81 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE player_id = 10 AND event_type = 'levelup'")?.n).toBe(2);
+  });
+
   it('档位核定 1-5 落库+审计；越界 400', async () => {
     const fx = freshEnv();
     seedPlatform(fx);
