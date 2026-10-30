@@ -420,11 +420,11 @@ export function SideOps({
     } else if (transferRequest !== null && transferRequest.status === 'listed') {
       text = <>已挂牌，等出价。挂牌期间他的要求不会再变。</>;
     } else if (transferRequest !== null && (transferRequest.status === 'released' || transferRequest.source === 'direct')) {
-      text = <>已明确放行：关窗起保护期结束、全联盟已收通告，挂着「不满」标记。</>;
+      text = <>已明确放行：保护期已结束、全联盟已收通告，挂着「不满」标记。</>;
     } else if (transferRequest !== null) {
       text = <>转会申请挂着 · 下窗他会再提且开价更狠。</>;
     } else if (demandRejected) {
-      text = <>已明确放行：关窗起保护期结束、全联盟已收通告，挂着「不满」标记。</>;
+      text = <>已明确放行：保护期已结束、全联盟已收通告，挂着「不满」标记。</>;
     } else if (demandExpired) {
       tone = ' mut';
       text = <>这个窗口没有谈成。放任不理也算一次——再有下次，他就当被放人了。</>;

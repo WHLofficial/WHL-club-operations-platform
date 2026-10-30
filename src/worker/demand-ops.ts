@@ -12,7 +12,7 @@
 //            status 保持 pending、round 推进（呈现层按 round>0 显示「第 N/3 轮」）。
 //   §5.3/§5.7 acceptDemand —— 接受写 contract_pending_changes(source='demand', rc_fee=0)，
 //            contracts 关窗前一字不动；同批摘除存续「不满」徽章 / 关闭未挂牌申请（重签语义）。
-//   §5.4     rejectDemand —— 直拒三件套：rejection pending（protection_ticks 置已过=0、
+//   §5.4     rejectDemand —— 直拒三件套：保护期当场置 0（v6.60.4 起不再走关窗 pending）、
 //            价格两列原样不动）+ demand_rejected_public 全联盟通告 + transfer_requests
 //            released「不满」徽章；同批原子。
 //   §8/§11.1 expireDemands —— cron 兜底：TTL 到点置 expired（不生成申请）；24h 截止提醒
@@ -724,9 +724,10 @@ interface TrioRow {
 }
 
 /**
- * 直拒三件套的两个库内件（「不满」徽章申请 + rejection pending）；通告在批成功后发。
+ * 直拒三件套的两个库内件（「不满」徽章申请 + 保护期立即失效）；通告在批成功后发。
  * requestStatus：direct 档与升档终局走 'released'（存续即「不满」徽章）；
  * 未升档的谈崩/低还价走 'pending'（申请挂起，无三件套）。
+ * v6.60.4 用户裁决：放行即保护期结束，不再写 rejection pending 等关窗——合同保护期当场置 0。
  * guard = 调用方批的统一写守卫（与末位 claim 同谓词，见 demandClaimGuard / reject / expire
  * 各自的构造）：三件套 INSERT 是 UNIQUE(player_id, club_id, demand_id) 的唯一写入点，守卫
  * 不齐会让输家批留下孤儿申请行，之后任何终局重试都撞 UNIQUE（v6.54.0 评审修）。
@@ -747,15 +748,14 @@ function directTrioStatements(
          SELECT ?, ?, ?, ?, ? WHERE ${guard.sql}`,
       )
       .bind(row.player_id, row.club_id, row.id, requestSource, requestStatus, ...guard.params),
-    // 保护期失效：protection_ticks 置已过（写 0）；价格两列原样不动（wage_new 必填故带现行值、
-    // release_fee_new NULL=不变）——防返潮断言：直拒不动任何价格（TC-RD-34 #1）
+    // 保护期立即失效：直拒/升档放行当场把 protection_ticks 置 0（价格两列一律不动）。
+    // 只改仍在原队、仍 active 的合同行——归属漂移时整批随守卫 no-op，不会写到新东家头上。
     db
       .prepare(
-        `INSERT INTO contract_pending_changes
-           (player_id, club_id, source, demand_id, wage_new, release_fee_new, protection_ticks_new, rc_fee, status, effective_window_seq)
-         SELECT ?, ?, 'rejection', ?, ?, NULL, 0, 0, 'pending', ? WHERE ${guard.sql}`,
+        `UPDATE contracts SET protection_ticks = 0
+         WHERE player_id = ? AND is_active = 1 AND club_id = ? AND ${guard.sql}`,
       )
-      .bind(row.player_id, row.club_id, row.id, row.contract_wage ?? row.current_wage, row.window_seq, ...guard.params),
+      .bind(row.player_id, row.club_id, ...guard.params),
   ];
 }
 
@@ -891,12 +891,12 @@ export async function counterDemand(env: Env, input: CounterDemandInput): Promis
     );
   }
   if (judged.verdict === 'collapse' || judged.verdict === 'lowball') {
-    // 非升档：申请挂起（pending 态，无三件套）；升档：申请转 released + rejection pending 一起落。
-    // 三件套挂与 claim 同谓词的统一守卫——漂移/刚过期时 INSERT 同 no-op，claim 0 行 → 409，
+    // 非升档：申请挂起（pending 态，无三件套）；升档：申请转 released + 保护期当场失效一起落。
+    // 三件套挂与 claim 同谓词的统一守卫——漂移/刚过期时 UPDATE 同 no-op，claim 0 行 → 409，
     // 不留孤儿申请行（v6.54.0 评审修：旧写法只挂 OPEN 守卫，输家批留下撞 UNIQUE 的死局行）。
-    const [requestStmt, pendingStmt] = directTrioStatements(db, row, judged.verdict, escalated ? 'released' : 'pending', guard);
+    const [requestStmt, protectionStmt] = directTrioStatements(db, row, judged.verdict, escalated ? 'released' : 'pending', guard);
     statements.push(requestStmt);
-    if (escalated) statements.push(pendingStmt);
+    if (escalated) statements.push(protectionStmt);
   }
 
   // claim 放批末：与本批其他语句逐字同守卫（并发闸 = round 相等，两个并发还价只有一个能推进；
@@ -1070,7 +1070,7 @@ export interface RejectDemandInput {
 }
 
 /**
- * 经理点「明确放人」：rejected(source='direct') + 直拒三件套（rejection pending 保护期置已过、
+ * 经理点「明确放人」：rejected(source='direct') + 直拒三件套（保护期当场置 0、
  * 全联盟通告、「不满」徽章 released）——不动任何价格、不动成长、不动资金（rev20 定稿）。
  * 直拒本身就是最硬档，段内累计计数不改变它的后果。
  */
@@ -1081,7 +1081,7 @@ export async function rejectDemand(env: Env, input: RejectDemandInput): Promise<
   if (row === null) throw new HttpError(404, '没有这条涨薪要求');
   const winStatus = await windowStatusOf(db, row.season, row.window_seq);
   assertOpen(row, input.clubId, nowIso, winStatus);
-  // 直拒写 rejection pending 时已有其他 pending → 409（§11.2；理论不可达，守卫仍要有）
+  // 直拒时已有其他 pending → 409（§11.2；理论不可达，守卫仍要有）
   await assertNoPendingChange(db, row.player_id);
 
   const audit = createAuditStatement(db);
@@ -1091,7 +1091,7 @@ export async function rejectDemand(env: Env, input: RejectDemandInput): Promise<
     sql: `${DEMAND_OPEN_GUARD} AND (SELECT round FROM contract_demands WHERE id = ?) = ? AND (SELECT expires_at FROM contract_demands WHERE id = ?) > ?`,
     params: [row.id, row.id, row.round, row.id, nowIso],
   };
-  const [requestStmt, pendingStmt] = directTrioStatements(db, row, 'direct', 'released', guard);
+  const [requestStmt, protectionStmt] = directTrioStatements(db, row, 'direct', 'released', guard);
   const results = await db.batch([
     audit({
       actor: input.actor,
@@ -1105,7 +1105,7 @@ export async function rejectDemand(env: Env, input: RejectDemandInput): Promise<
       guardParams: guard.params,
     }),
     requestStmt,
-    pendingStmt,
+    protectionStmt,
     db
       .prepare(
         `UPDATE contract_demands SET status = 'rejected', resolution = 'direct',
@@ -1217,7 +1217,7 @@ export async function expireDemands(env: Env, nowIso?: string): Promise<DemandTi
         sql: `${DEMAND_OPEN_GUARD} AND (SELECT expires_at FROM contract_demands WHERE id = ?) <= ?`,
         params: [row.id, row.id, now],
       };
-      const [requestStmt, pendingStmt] = directTrioStatements(db, row, 'direct', 'released', guard);
+      const [requestStmt, protectionStmt] = directTrioStatements(db, row, 'direct', 'released', guard);
       let results: D1Result[];
       try {
         results = await db.batch([
@@ -1233,7 +1233,7 @@ export async function expireDemands(env: Env, nowIso?: string): Promise<DemandTi
             guardParams: guard.params,
           }),
           requestStmt,
-          pendingStmt,
+          protectionStmt,
           db
             .prepare(
               `UPDATE contract_demands SET status = 'expired', resolution = 'expired', resolved_by = 'auto',

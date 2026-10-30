@@ -510,21 +510,15 @@ describe('§5.4 回原队（TC-RD-43）', () => {
     expect(out.status).toBe('completed');
 
     const back = contractOf(fx, 1);
-    // 工资/RC 按合同行现值（别队期间涨幅有效），效力/保护期/签约时刻按快照恢复
-    expect(back).toMatchObject({ club_id: 1, wage: 3, release_fee: 25, service_ticks: 4, protection_ticks: 8, signed_at: OLD_SIGNED });
+    // 工资/RC 按合同行现值（别队期间涨幅有效），效力/签约时刻按快照恢复；保护期放行即失效
+    expect(back).toMatchObject({ club_id: 1, wage: 3, release_fee: 25, service_ticks: 4, protection_ticks: 0, signed_at: OLD_SIGNED });
     // 徽章重挂
     expect(sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM transfer_requests WHERE demand_id = ?', demandId)).toMatchObject({
       status: 'released',
       resolved_at: null,
     });
-    // 保护期失效重挂（关窗生效）：rejection pending，价格不动
-    expect(pendingOf(fx, 1)).toMatchObject({
-      source: 'rejection',
-      protection_ticks_new: 0,
-      release_fee_new: null,
-      wage_new: 3,
-      status: 'pending',
-    });
+    // v6.60.4：保护期立即失效，不再写 rejection pending
+    expect(sqlAll(fx.sqlite, `SELECT * FROM contract_pending_changes WHERE source = 'rejection'`)).toHaveLength(0);
     // 全联盟通告重发（进 notifications web 行）
     const notices = sqlAll<Record<string, unknown>>(fx.sqlite, `SELECT * FROM notifications WHERE template = 'demand_rejected_public'`);
     expect(notices.length).toBeGreaterThan(0);
@@ -564,11 +558,10 @@ describe('§5.4 回原队（TC-RD-43）', () => {
     const second = await completeTransfer(env2, 2, null, 'user');
     expect(second.status).toBe('completed');
 
-    // 模拟「第一批的后果在放行前被别的流程收口」：徽章 resolved、rejection pending 已 apply
+    // 模拟「第一批的后果在放行前被别的流程收口」：徽章 resolved（v6.60.4 起不再有 rejection pending）
     fx.sqlite
       .prepare(`UPDATE transfer_requests SET status = 'resolved', resolved_at = '2026-10-24T00:00:00Z' WHERE demand_id = ?`)
       .run(demandId);
-    fx.sqlite.prepare(`UPDATE contract_pending_changes SET status = 'applied' WHERE player_id = 1 AND source = 'rejection'`).run();
 
     gate.release();
     const firstOut = await first;
@@ -578,10 +571,10 @@ describe('§5.4 回原队（TC-RD-43）', () => {
     expect(sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM transfer_requests WHERE demand_id = ?', demandId)).toMatchObject({
       status: 'resolved',
     });
-    // 不得插出第二条 rejection pending（idx_pending_one_per_player 会一直占到下次关窗）
+    // 不得插出 rejection pending（保护期已改为立即失效，不再走关窗队列）
     expect(
       sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM contract_pending_changes WHERE player_id = 1`),
-    ).toMatchObject({ n: 1 });
+    ).toMatchObject({ n: 0 });
     expect(
       sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM contract_pending_changes WHERE player_id = 1 AND status = 'pending'`),
     ).toMatchObject({ n: 0 });

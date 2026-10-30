@@ -4,6 +4,21 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.4] · 放行即保护期结束（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.3-ca-pa-cap`（基于 v6.60.3 `51bd43d`），未 push、未部署；无迁移、无 API 形状变更。判级 patch。依据用户口径：「放行球员应该是立即结束保护期，不是关窗后」。
+
+**Changed**
+
+- `src/worker/demand-ops.ts` `directTrioStatements`：第二条由写 `contract_pending_changes(source='rejection', protection_ticks_new=0)` 改为同批 `UPDATE contracts SET protection_ticks = 0 WHERE player_id = ? AND is_active = 1 AND club_id = ? AND guard`；rejectDemand、counterDemand 升档、expireDemands 升档三条路径共用，保护期当场结束，不再等关窗。
+- `src/worker/transfers.ts` 买回 A 分支（原直拒恢复）：同一批把 rejection pending 换成 `UPDATE contracts SET protection_ticks = 0`，挂在 transfer 状态守卫上，排在合同快照恢复之后；价格两列仍原样。
+- 文案同步：`src/worker/notify.ts` 两处站内信、`web/src/pages/market/desk/DemandSection.tsx` 确认/后果/升档文案、`web/src/pages/player/SideOps.tsx` 两处状态行，统一「保护期立即结束/已结束」。
+- 历史 rejection pending 行仍由 `applyPendingContractChanges` 兼容（旧数据按原关窗时点 apply），新路径不再产生。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2745 例全绿**（`tests/demand-ops.test.ts` direct/升档断言改为无 pending + `contracts.protection_ticks=0` + 价格不变；`tests/renewal-window.test.ts` 买回 A 分支同步；`web/src/pages/market/desk/DemandSection.test.tsx` 新文案）；build `web/dist/assets/index-DcqhI3Bf.js` **714.54 kB / gzip 225.60 kB**。
+
+**遗留**：未 push/部署，等用户明确下令。
+
 ## [v6.60.3] · 成长 CA 不得超过 PA（2026-10-30）
 
 **已上线（2026-10-30）**：push `7d14dd4..556cbb2`（分支 `fix/v6.60.3-ca-pa-cap`），CF Workers Builds 自动部署 Version `b0680776-2eae-4346-ae29-a0afaec6c836` @2026-10-30T08:04:16Z；无迁移、无 schema/API 形状变更。判级 patch（P0 竞速修复）。依据用户口径：「成长不能超过PA」。

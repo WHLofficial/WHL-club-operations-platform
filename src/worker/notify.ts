@@ -187,11 +187,11 @@ export function renderNotification(template: string, data: Record<string, unknow
         return `🤝 涨薪要求已接受：${data.player} 将按 ${data.wage} m/窗 续薪${data.rc != null ? `（违约金 ${data.rc} m）` : ''}，窗口关闭后生效，费用为 0。`;
       }
       if (data.escalated === true || data.source === 'direct') {
-        return `🚫 涨薪要求已拒绝：${data.player} 被明确放行。关窗起保护期结束，任何球队都能按违约金原价激活；全联盟已收通告，他挂着『不满』标记，直到离队或重签。`;
+        return `🚫 涨薪要求已拒绝：${data.player} 被明确放行。保护期立即结束，任何球队都能按违约金原价激活；全联盟已收通告，他挂着『不满』标记，直到离队或重签。`;
       }
       return `🚫 涨薪要求没谈成：${data.source === 'lowball' ? '还价低于他的底线，视为拒绝整条要求' : '3 轮还价未达成'}。${data.player} 已提交转会申请，下个窗口他还会再提，而且直接开到市场价。`;
     case 'demand_rejected_public':
-      return `📣 转会通告：「${data.club}」已明确放行 ${data.player}${data.rc != null ? `——关窗起保护期结束，可按违约金原价 ${data.rc} m 激活` : '——关窗起保护期结束'}，他挂着『不满』标记，直到离队或重签。`;
+      return `📣 转会通告：「${data.club}」已明确放行 ${data.player}${data.rc != null ? `——保护期立即结束，可按违约金原价 ${data.rc} m 激活` : '——保护期立即结束'}，他挂着『不满』标记，直到离队或重签。`;
     default:
       return String(data.text ?? '');
   }

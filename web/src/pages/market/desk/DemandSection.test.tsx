@@ -142,7 +142,8 @@ describe('v6.54.0 球员要求 · 五态与分组头（DemandSection）', () => 
     // 已接受：关窗后生效 + 双版本合同入口
     expect(screen.getByText(/已接受 · 关窗后生效/)).toBeTruthy();
     // 明确放人：三件套；没谈成：申请挂着
-    expect(screen.getByText(/已放行 · 关窗起/)).toBeTruthy();
+    expect(screen.getByText(/已放行/)).toBeTruthy();
+    expect(screen.getByText(/保护期已结束/)).toBeTruthy();
     expect(screen.getByText(/转会申请挂着/)).toBeTruthy();
     // 已过期：尾部弱化行
     expect(screen.getByText(/这个窗口没有谈成/)).toBeTruthy();
@@ -265,14 +266,14 @@ describe('v6.54.0 球员要求 · 接受与明确放人（DemandSection）', () 
     fireEvent.click(await screen.findByRole('button', { name: '拒绝' }));
 
     expect(screen.getByText('明确放他走？')).toBeTruthy();
-    expect(screen.getByText(/保护期结束/)).toBeTruthy();
+    expect(screen.getByText(/保护期立即结束/)).toBeTruthy();
     expect(screen.getByText(/全联盟会收到通告/)).toBeTruthy();
     // 静止期不得发请求——两段式的意义就在这
     expect(apiPostMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '明确放人' }));
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/club/contract-demands/1/reject', {}));
-    expect(await screen.findByText('已明确放人。关窗起他的保护期结束，全联盟会收到通告。')).toBeTruthy();
+    expect(await screen.findByText('已明确放人。他的保护期立即结束，全联盟会收到通告。')).toBeTruthy();
   });
 });
 

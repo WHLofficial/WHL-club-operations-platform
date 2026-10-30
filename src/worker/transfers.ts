@@ -571,10 +571,11 @@ export async function completeTransfer(
   if (returnCtx?.isReturn && transfer.to_club_id !== null) {
     if (returnDemand !== null && returnDemand.resolution === 'direct') {
       // A 分支 · 原直拒 → 恢复直拒分支：徽章重挂（ON CONFLICT 把离队时 resolved 的行翻回 released）
-      // + 保护期失效重挂（关窗生效，§5.7）。价格两列按现行值 = 不动价格（防返潮断言 TC-RD-34 #1）。
+      // + 保护期立即失效（v6.60.4 用户裁决：放行当场结束，不再写 rejection pending 等关窗）。
+      // 价格两列按现行值 = 不动价格（防返潮断言 TC-RD-34 #1）。
       // **两条都挂 transfer 状态守卫**（与同批快照/账本/状态 UPDATE 同谓词，文件头「重复调用整批
       // 空转」的幂等契约）：并发重入/重试时，第一张单已 completed 的第二批会把其间被离队作废或
-      // 关窗 apply 掉的状态翻回来——徽章变幽灵 released、pending 变第二条（撞 idx_pending_one_per_player）。
+      // 关窗 apply 掉的状态翻回来——徽章变幽灵 released；保护期 UPDATE 也随守卫空转。
       statements.push(
         db
           .prepare(
@@ -586,21 +587,10 @@ export async function completeTransfer(
           .bind(transfer.player_id, transfer.to_club_id, returnDemand.id, ...guard.params),
         db
           .prepare(
-            `INSERT INTO contract_pending_changes
-               (player_id, club_id, source, demand_id, wage_new, release_fee_new, protection_ticks_new, rc_fee, status, effective_window_seq)
-             SELECT ?, ?, 'rejection', ?, ?, NULL, 0, 0, 'pending', ?
-             WHERE NOT EXISTS (SELECT 1 FROM contract_pending_changes WHERE player_id = ? AND status = 'pending')
-               AND ${guard.sql}`,
+            `UPDATE contracts SET protection_ticks = 0
+             WHERE player_id = ? AND is_active = 1 AND club_id = ? AND ${guard.sql}`,
           )
-          .bind(
-            transfer.player_id,
-            transfer.to_club_id,
-            returnDemand.id,
-            contract?.wage ?? 0,
-            transfer.window_seq ?? 0,
-            transfer.player_id,
-            ...guard.params,
-          ),
+          .bind(transfer.player_id, transfer.to_club_id, ...guard.params),
       );
     } else if (returnDemand === null && transfer.season !== null && transfer.window_seq !== null) {
       // B 分支占用本窗额度（§5.4 第 1 条「此后本窗不能再闹涨薪/续约」）：本窗该球员在这一队

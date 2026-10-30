@@ -296,7 +296,7 @@ function DemandCard({
       await apiPost(`/api/club/contract-demands/${card.id}/reject`, {});
       setPanel(null);
       onChanged();
-      show('已明确放人。关窗起他的保护期结束，全联盟会收到通告。');
+      show('已明确放人。他的保护期立即结束，全联盟会收到通告。');
     } catch (err) {
       show(err instanceof Error ? err.message : '操作失败', true);
     } finally {
@@ -444,7 +444,7 @@ function counterToast(card: ContractDemandCard, res: DemandCounterResult): strin
   }
   if (res.verdict === 'rejected') {
     // 累计第 2 次终局升档（§5.4.4）：服务端 escalated 已把后果换成直拒三件套，回执必须同步说清
-    if (res.escalated) return '这是他累计第 2 次没谈成，按「明确放人」处理：关窗起保护期结束，全联盟会收到通告。';
+    if (res.escalated) return '这是他累计第 2 次没谈成，按「明确放人」处理：保护期立即结束，全联盟会收到通告。';
     return res.source === 'lowball'
       ? '这个数低于他的底线：他拒绝了整条要求，提交了转会申请。'
       : '三轮没谈成。他提交了转会申请，下个窗口还会再提。';
@@ -702,7 +702,7 @@ function RejectPanel({
     <div className="demand-xpan">
       <div className="demand-xpan-title">明确放他走？</div>
       <div className="banner warn">
-        关窗起他的<b>保护期结束</b>——
+        他的<b>保护期立即结束</b>——
         {card.rcCurrent > 0 ? (
           <>
             任何球队都能按违约金原价 <b className="mono">{rcText(card.rcCurrent)}</b> 激活他
@@ -744,7 +744,7 @@ function ClosedState({ card, request }: { card: ContractDemandCard; request: Tra
   if (card.resolution === 'direct') {
     return (
       <p className="banner warn">
-        已放行 · 关窗起<b>保护期结束</b>、全联盟已收通告，他挂着「不满」标记——
+        已放行 · <b>保护期已结束</b>、全联盟已收通告，他挂着「不满」标记——
         {card.rcCurrent > 0 ? (
           <>
             可被按违约金原价 <b className="mono">{rcText(card.rcCurrent)}</b> 激活
@@ -762,7 +762,7 @@ function ClosedState({ card, request }: { card: ContractDemandCard; request: Tra
   if (request?.status === 'released') {
     return (
       <p className="banner warn">
-        这是他累计第 2 次没谈成，按「明确放人」处理：关窗起<b>保护期结束</b>、全联盟已收通告，他挂着「不满」标记，
+        这是他累计第 2 次没谈成，按「明确放人」处理：<b>保护期已结束</b>、全联盟已收通告，他挂着「不满」标记，
         直到离队或重新签约。
         <Link to={playerPath({ id: card.playerId })}>看他的页面 ›</Link>
       </p>

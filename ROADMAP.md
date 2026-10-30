@@ -81,6 +81,21 @@
 
 ---
 
+## v6.60.4 · 放行即保护期结束（2026-10-30）
+
+**状态**：**未上线**——本地分支 `fix/v6.60.3-ca-pa-cap`（基于 v6.60.3 `51bd43d`），未 push、未部署；无迁移、无 API 形状变更。判级 patch。起因：用户口径「放行球员应该是立即结束保护期，不是关窗后」。
+
+**交付**
+
+- `src/worker/demand-ops.ts` `directTrioStatements`：保护期动作由「写 rejection pending 等关窗 apply」改为同批 `UPDATE contracts SET protection_ticks = 0`（挂 OPEN/round/expires 与归属守卫）；rejectDemand、counterDemand 升档、expireDemands 升档三条路径共用。
+- `src/worker/transfers.ts` 买回 A 分支：原直拒恢复时不再插入 rejection pending，改为同批把合同保护期置 0（挂 transfer 状态守卫、排在快照恢复之后）；工资/违约金仍原样。
+- 文案：`src/worker/notify.ts`、`web/src/pages/market/desk/DemandSection.tsx`、`web/src/pages/player/SideOps.tsx` 全部改「保护期立即结束/已结束」，不再出现「关窗起」。
+- 兼容：历史 rejection pending 仍走 `applyPendingContractChanges` 关窗 apply（旧数据不丢）；新操作不再产生 pending。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2745 例全绿**（direct/升档：无 rejection pending、`protection_ticks=0` 立即生效、工资/RC 不变；买回 A 分支同步；DemandSection 文案）；build `index-DcqhI3Bf.js` 714.54 kB / gzip 225.60 kB。
+
+**遗留**：未 push/部署，等用户明确下令。
+
 ## v6.60.3 · 成长 CA 不得超过 PA（2026-10-30）
 
 **状态**：**已上线（2026-10-30）**——push `7d14dd4..556cbb2`（分支 `fix/v6.60.3-ca-pa-cap`），CF Workers Builds 自动部署 Version `b0680776-2eae-4346-ae29-a0afaec6c836` @2026-10-30T08:04:16Z；无迁移、无 schema/API 形状变更。判级 patch（P0 竞速修复）。依据用户口径：「成长不能超过PA」「执行成长后 CA＞PA 的压到 PA，但带徽章的成长不受影响」。

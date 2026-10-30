@@ -860,7 +860,7 @@ describe('acceptDemand', () => {
 // ---------------------------------------------------------------------------
 
 describe('rejectDemand · 直拒三件套（原子）', () => {
-  it('direct：rejection pending（价格两列不动、保护期置已过）+ released 徽章 + 全联盟通告；contracts 全字段不变', async () => {
+  it('direct：保护期立即失效（价格两列不动）+ released 徽章 + 全联盟通告；不再写 rejection pending', async () => {
     const fx = freshEnv();
     seedClub(fx, 1);
     seedClub(fx, 2);
@@ -875,27 +875,17 @@ describe('rejectDemand · 直拒三件套（原子）', () => {
     const demand = sqlGet<{ status: string; resolution: string }>(fx.sqlite, 'SELECT * FROM contract_demands WHERE id = ?', id)!;
     expect(demand).toMatchObject({ status: 'rejected', resolution: 'direct' });
 
-    // 三件套之一：rejection pending——保护期置已过写 0，价格两列原样（否决方案防返潮断言）
-    const pending = sqlGet<Record<string, unknown>>(fx.sqlite, `SELECT * FROM contract_pending_changes WHERE source = 'rejection'`)!;
-    expect(pending).toMatchObject({
-      player_id: 1,
-      club_id: 1,
-      demand_id: id,
-      wage_new: 2.5,
-      release_fee_new: null,
-      protection_ticks_new: 0,
-      rc_fee: 0,
-      status: 'pending',
-    });
+    // v6.60.4：保护期当场置 0，不再写 rejection pending 等关窗
+    expect(sqlAll(fx.sqlite, `SELECT * FROM contract_pending_changes WHERE source = 'rejection'`)).toHaveLength(0);
     // 三件套之三：「不满」徽章 released 存续（不待关窗）
     const request = sqlGet<{ status: string; source: string; demand_id: number }>(fx.sqlite, 'SELECT * FROM transfer_requests')!;
     expect(request).toMatchObject({ status: 'released', source: 'direct', demand_id: id });
-    // contracts 全字段不变（保护期不由 reject 立即改——由 pending 承载、关窗才落）
+    // 只有保护期立即失效；工资/违约金原样（防返潮断言）
     const contract = sqlGet<{ wage: number; release_fee: number; protection_ticks: number }>(
       fx.sqlite,
       'SELECT wage, release_fee, protection_ticks FROM contracts WHERE player_id = 1',
     )!;
-    expect(contract).toEqual({ wage: 2.5, release_fee: 20, protection_ticks: 8 });
+    expect(contract).toEqual({ wage: 2.5, release_fee: 20, protection_ticks: 0 });
 
     // 三件套之二：全联盟通告 = 两个真人俱乐部各一落，CPU 队零落；本队另有回执
     const publicNotes = notificationsOf(fx, 'demand_rejected_public');
@@ -972,8 +962,9 @@ describe('expireDemands · 过期与累计升档', () => {
 
     const demand = sqlGet<{ status: string; resolution: string; resolved_by: string }>(fx.sqlite, 'SELECT * FROM contract_demands WHERE id = ?', id)!;
     expect(demand).toMatchObject({ status: 'expired', resolution: 'expired', resolved_by: 'auto' });
-    // 升档三件套齐活
-    expect(sqlGet<Record<string, unknown>>(fx.sqlite, `SELECT * FROM contract_pending_changes WHERE source = 'rejection'`)).toBeTruthy();
+    // 升档三件套齐活：保护期当场失效，不写 rejection pending
+    expect(sqlAll(fx.sqlite, `SELECT * FROM contract_pending_changes WHERE source = 'rejection'`)).toHaveLength(0);
+    expect(sqlGet<{ protection_ticks: number }>(fx.sqlite, 'SELECT protection_ticks FROM contracts WHERE player_id = 1')?.protection_ticks).toBe(0);
     expect(sqlGet<{ status: string; source: string }>(fx.sqlite, 'SELECT * FROM transfer_requests')!).toMatchObject({
       status: 'released',
       source: 'direct',
