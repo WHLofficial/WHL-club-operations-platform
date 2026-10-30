@@ -757,7 +757,9 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       });
       show(
         res.freeRcChange === true
-          ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，本次免费（提价不收差额），保护期不变。`
+          ? res.newReleaseFee > res.oldReleaseFee
+            ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，本次免费：提价不收差额，保护期不变。`
+            : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，本次免费：降价不收费，保护期不变。`
           : res.changeFee > 0
             ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，加价部分 30% 共 ${res.changeFee.toFixed(2)}m 待审核时收，保护期在本窗关闭时结束。`
             : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，降价免费，保护期在本窗关闭时结束。`,

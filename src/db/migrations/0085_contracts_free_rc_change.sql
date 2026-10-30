@@ -6,5 +6,5 @@
 -- 0079 的 contract_pending_changes.free_rc_change（DEFAULT 0，此前零写入）自本版启用为「当次是否免费」标记。
 ALTER TABLE contracts ADD COLUMN free_rc_change_used INTEGER NOT NULL DEFAULT 0;
 
--- 回滚（机会是状态非资产，丢列只回到「已用」，可接受；历史 pending 的 free_rc_change 标记失真不影响资金）：
+-- 回滚（机会是状态非资产，无资金风险；但 DROP 后重加列默认 0 = 全员免费机会重发，重放需知情）：
 -- ALTER TABLE contracts DROP COLUMN free_rc_change_used;
