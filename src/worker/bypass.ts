@@ -697,11 +697,8 @@ export async function inspectForcedAuction(env: Env, playerIdInput: unknown): Pr
   if (!win) blockers.push({ status: 409, message: '转会窗口没开，现在不能发起强制拍卖', errCode: 'no_window' });
   const opBlock = await opBlockReason(db, 'transfer_forced_auction');
   if (opBlock) blockers.push(opBlock);
-  // CPU 队不入账（v2.0.0，用户裁决）：CPU 队球员即整队都是「海里的」，不参与强制拍卖
-  // （否则拍卖成交会把成交价记到 CPU 队头上）。自由身没有俱乐部，不受此闸影响。
-  if (player.club_id !== null && (await cpuClubIds(db)).has(player.club_id)) {
-    blockers.push({ status: 400, message: 'CPU 队球员不参与强制拍卖（CPU 队不入账）' });
-  }
+  // v6.60.7：CPU 队球员也可强制拍卖（用户裁决）。CPU 队一律不入账，成交款在
+  // completeTransfer 按「无收款人」销毁；下架费/解约也按无卖方处理。
   // v6.60.5：自由身也能强拍（成交款无收款人，由 completeTransfer 销毁）。
   // 自由身要求 status='free'；有俱乐部仍要求 'normal'。
   if (player.status === 'listed') {
@@ -950,7 +947,11 @@ export async function approveTransferDeal(
       // v6.60.5：自由身强制拍卖没有现行合同可谈 RC——成交价在竞价时已定死，按海捞口径开会
       // （fixedReleaseFee = 成交价），买家直接谈工资；成约时 completeTransfer 的
       // saleFromClubId=null 分支新签合同，成交款销毁。
-      if (transfer.type === 'forced_auction' && transfer.from_club_id === null) {
+      // v6.60.7：CPU 队同理——CPU 不入账，也不按队内合同谈 RC，直接固定成交价。
+      if (
+        transfer.type === 'forced_auction' &&
+        (transfer.from_club_id === null || (await cpuClubIds(env.DB)).has(transfer.from_club_id))
+      ) {
         if (transfer.fee === null) throw new HttpError(409, '转会单缺成交价，数据不完整');
         return openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: transfer.fee });
       }

@@ -4,6 +4,21 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.7] · CPU 队球员可强制拍卖，成交款销毁（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「CPU 队球员不参与强制拍卖改掉，可以参与，跟自由身一样」。判级 patch。
+
+**Changed**
+
+- 管理端强制拍卖取消 CPU 队门将：`src/worker/bypass.ts` `inspectForcedAuction` 不再对 `is_cpu` 球队报 400；预检与建单都可挂 CPU 球员。`approveTransferDeal` 对 `from_club_id` 为空或卖方为 CPU 的强制拍卖统一按成交价固定 F，跳过 RC 第一步直接谈工资。
+- 成交与下架按「无收款人」处理：`src/worker/transfers.ts` 的 `saleFromClubId` 对 CPU 卖方置空（买方照付、**成交款销毁**、无卖方 `transfer_out`/`transfer_tax`），但球员落位用 `moveFromClubId` 仍从 CPU 队摘出，并新签 `release_fee = 成交价` 的合同；中国徽章回收/合同快照/需求清理改用 `moveFrom` 判据。
+- `src/worker/market-settle.ts`：CPU 卖方到期无人出价不收下架费、不写 `delist_fee`、不造 `forced_no_bid` 解约单，球员留在 CPU 队；普通挂牌与有归属强拍行为不变。
+- 市场列表/详情/我的出价对 CPU 卖方仍显示球队名（`seller_club_id` 非空），与自由身「自由身」展示不同；金额结算口径相同。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2754 例全绿**（`tests/forced-auction.test.ts` 增 CPU 成交与 CPU 无人出价用例，原 CPU 400 用例改为可挂）；build `index-CO-4PJe-.js` 714.95 kB / gzip 225.70 kB（原始 714,946 B）；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：发布待用户明确下令。
+
 ## [v6.60.6] · 单据详情路由抢占暗标读接口（2026-10-30）
 
 **线上故障修复**：`GET /api/transfers/sea-sealed` 在生产恒返回 400「单据 ID 不对」。`src/worker/routes/market.ts` 的公开单据详情 `app.get('/transfers/:id')` 随 `marketRoutes` 在 `src/worker/index.ts:77` 先于 `transfersRoutes`（`:80`）挂载，Hono 先命中先赢，`sea-sealed` 被当单据 ID 解析成 `NaN`。教练侧 `useSeaPhase` 因此恒为 error（`retry:false`），`SideOps` 落回「海捞签入」按钮、`/market/free` 倒计时卡片整块不渲染——暗标段上线当日实际无法出标。

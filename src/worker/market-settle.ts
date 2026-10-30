@@ -158,8 +158,15 @@ export async function delistUnbid(
 ): Promise<'delisted' | 'already'> {
   const db = env.DB;
   const isActivation = listing.type === 'activation';
-  // 自由身强制拍卖没有卖方，下架费无人可收；成交款同样销毁（completeTransfer 的 from_club_id 空分支）。
-  const fee = isActivation || listing.seller_club_id === null ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
+  // 自由身/CPU 队强制拍卖没有可入账的卖方：下架费无人可收，成交款同样销毁
+  // （completeTransfer 的 saleFromClubId=null 分支）。
+  const sellerIsCpu =
+    listing.type === 'forced' &&
+    listing.seller_club_id !== null &&
+    (((await db.prepare('SELECT is_cpu FROM clubs WHERE id = ?').bind(listing.seller_club_id).first<{ is_cpu: number }>())?.is_cpu ??
+      0) === 1);
+  const proceedsDestroyed = listing.type === 'forced' && (listing.seller_club_id === null || sellerIsCpu);
+  const fee = isActivation || proceedsDestroyed ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
   const audit = createAuditStatement(db);
   const unbidNote = source === 'deadline' ? '截止时刻无人出价' : '窗口结束无人出价';
   const statements = [
@@ -216,8 +223,9 @@ export async function delistUnbid(
   // 解约单落 transfers(type=termination, status=completed) 后，checkSeaSignEligible 的
   // 「本窗解约禁签」闸自然生效（本窗不可捞起）；其余收口（成长清零/徽章/候选名单通知）复用
   // completeTermination，避免两套解约语义漂移。
-  // v6.60.5：自由身强制拍卖（seller_club_id 为空）本来就没有合同可解，直接回到 free，不造解约单。
-  if (changed && listing.type === 'forced' && listing.seller_club_id !== null) await releaseForcedNoBid(env, listing, actor, origin);
+  // v6.60.5/6.60.7：自由身与 CPU 队本来都没有可解的平台合同，直接回到 free/normal，
+  // 不造 forced_no_bid 解约单。
+  if (changed && listing.type === 'forced' && !proceedsDestroyed) await releaseForcedNoBid(env, listing, actor, origin);
   return changed ? 'delisted' : 'already';
 }
 

@@ -339,7 +339,7 @@ describe('强制拍卖（4.4.5）', () => {
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 59')?.status).toBe('free');
   });
 
-  it('v6.51.0 preview：CPU 队 / 已在流程里 —— 预检报原因，建单同一句 400', async () => {
+  it('v6.51.0 preview：CPU 队可强拍 / 已在流程里 —— 预检报原因，建单同一句 400', async () => {
     const fx = await seedAuction();
     fx.sqlite.exec(
       `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
@@ -347,9 +347,12 @@ describe('强制拍卖（4.4.5）', () => {
          (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
     );
     const cpuPreview = await get('/api/admin/forced-auctions/preview?playerId=60', 'tok-admin', fx.env);
-    const cpuBody = (await cpuPreview.json()) as { blockers: { status: number; message: string }[] };
-    expect(cpuBody.blockers).toHaveLength(1);
-    expect(cpuBody.blockers[0].message).toContain('CPU 队球员不参与强制拍卖');
+    const cpuBody = (await cpuPreview.json()) as {
+      blockers: { status: number; message: string }[];
+      reference: { clubId: number | null; clubName: string | null };
+    };
+    expect(cpuBody.blockers).toEqual([]);
+    expect(cpuBody.reference).toMatchObject({ clubId: 131681, clubName: 'AC米兰(CPU)' });
 
     // 已在挂牌流程里（player 45 先挂出）⇒ 预检与建单都挡住
     expect((await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env)).status).toBe(201);
@@ -362,16 +365,96 @@ describe('强制拍卖（4.4.5）', () => {
     expect(((await again.json()) as { error: string }).error).toBe(busyBody.blockers[0].message);
   });
 
-  it('CPU 队球员不参与强制拍卖（v2.0.0：CPU 队不入账）', async () => {
+  it('v6.60.7：CPU 队球员可强拍，成交款销毁且 CPU 无流水，按成交价新签合同', async () => {
     const fx = await seedAuction();
     fx.sqlite.exec(
       `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
        INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
          (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
     );
-    const res = await post('/api/admin/forced-auctions', { playerId: 60 }, 'tok-admin', fx.env);
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain('CPU 队球员不参与强制拍卖');
+    const create = await post('/api/admin/forced-auctions', { playerId: 60, askPrice: 6 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    expect(
+      sqlGet<{ seller_club_id: number | null }>(fx.sqlite, 'SELECT seller_club_id FROM listings WHERE id = ?', listingId),
+    ).toEqual({ seller_club_id: 131681 });
+
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach2', fx.env)).status).toBe(201);
+    fx.sqlite.exec(
+      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
+                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
+    );
+    await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
+    const transferRow = sqlGet<{ id: number; type: string; status: string; fee: number; from_club_id: number | null }>(
+      fx.sqlite,
+      'SELECT id, type, status, fee, from_club_id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    expect(transferRow).toMatchObject({ type: 'forced_auction', status: 'pending_review', fee: 6, from_club_id: 131681 });
+
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    // CPU 卖方没有平台合同可谈 RC，按成交价固定 F，直接谈工资
+    const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
+    const session = ((await mine.json()) as {
+      sessions: { id: number; transferId: number; releaseFee: number | null; expectedWage: number | null }[];
+    }).sessions.find((s) => s.transferId === transferRow!.id);
+    expect(session).toMatchObject({ releaseFee: 6 });
+    expect(session?.expectedWage).toBeGreaterThan(0);
+    expect(
+      (await post(`/api/negotiations/${session!.id}/offer`, { wage: session!.expectedWage }, 'tok-coach2', fx.env)).status,
+    ).toBe(200);
+
+    expect(
+      sqlGet<{ status: string; tax: number; fee: number; from_club_id: number | null }>(
+        fx.sqlite,
+        'SELECT status, tax, fee, from_club_id FROM transfers WHERE id = ?',
+        transferRow!.id,
+      ),
+    ).toMatchObject({ status: 'completed', tax: 0, fee: 6, from_club_id: 131681 });
+    expect(
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE club_id = ${fx.buyer} AND kind = 'transfer_in'`)
+        ?.amount,
+    ).toBe(-6);
+    // CPU 队一律不入账：没有卖方收入、没有税，也没有任何流水
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind IN ('transfer_out','transfer_tax')")?.n,
+    ).toBe(0);
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM ledger_entries WHERE club_id = 131681')?.n).toBe(0);
+    expect(sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 60')).toEqual({
+      club_id: fx.buyer,
+      status: 'normal',
+    });
+    expect(
+      sqlGet<{ club_id: number; release_fee: number; is_active: number }>(
+        fx.sqlite,
+        'SELECT club_id, release_fee, is_active FROM contracts WHERE player_id = 60',
+      ),
+    ).toEqual({ club_id: fx.buyer, release_fee: 6, is_active: 1 });
+  });
+
+  it('v6.60.7：CPU 队强拍无人出价 → 不收下架费、不造解约单，球员留在 CPU 队', async () => {
+    const fx = await seedAuction();
+    fx.sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
+       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
+    );
+    const create = await post('/api/admin/forced-auctions', { playerId: 60, askPrice: 4 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour') WHERE id = ${listingId}`);
+    await get('/api/market/listings?status=all', 'tok-admin', fx.env);
+
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('delisted');
+    expect(sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 60')).toEqual({
+      club_id: 131681,
+      status: 'normal',
+    });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'delist_fee'")?.n).toBe(0);
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM transfers WHERE idempotency_key = ?', `forced_no_bid:${listingId}`)?.n,
+    ).toBe(0);
   });
 
   it('v6.51.0 挂牌价可指定：缺省 1m / 指定则落库并抬高首价门槛 / 两位小数 / 非正数 400', async () => {

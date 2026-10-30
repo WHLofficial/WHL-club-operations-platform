@@ -220,17 +220,25 @@ export async function completeTransfer(
   const rc = contract?.release_fee ?? 0;
   // 强制拍卖的卖方必须仍持有球员；若球员已被 bypass 解约（club_id NULL），本次成交仍可落到买方，
   // 但没有收款人，成交款全额销毁（不记 transfer_out / transfer_tax）。归属变成别队则直接拒绝，
-  // 避免把别人的球员卖出去。
+  // 避免把别人的球员卖出去。v6.60.7：CPU 队球员按「无收款人」处理——CPU 一律不入账，
+  // 球员仍从原 CPU 队摘出落到买方。
   const ownerRow = await db
-    .prepare('SELECT club_id FROM players WHERE id = ?')
+    .prepare(
+      `SELECT p.club_id, COALESCE(c.is_cpu, 0) AS owner_is_cpu
+         FROM players p LEFT JOIN clubs c ON c.id = p.club_id
+        WHERE p.id = ?`,
+    )
     .bind(transfer.player_id)
-    .first<{ club_id: number | null }>();
+    .first<{ club_id: number | null; owner_is_cpu: number }>();
   const sellerOwnsPlayer = transfer.from_club_id !== null && ownerRow?.club_id === transfer.from_club_id;
   const forcedUnowned = transfer.type === 'forced_auction' && ownerRow?.club_id === null;
+  const forcedCpuSeller = transfer.type === 'forced_auction' && sellerOwnsPlayer && (ownerRow?.owner_is_cpu ?? 0) === 1;
   if (transfer.type === 'forced_auction' && !sellerOwnsPlayer && !forcedUnowned) {
     throw new HttpError(409, '球员归属已变更，强制拍卖单不能过户');
   }
-  const saleFromClubId = sellerOwnsPlayer ? transfer.from_club_id : null;
+  const saleFromClubId = sellerOwnsPlayer && !forcedCpuSeller ? transfer.from_club_id : null;
+  // 球员实际从哪支球队摘出：CPU 卖方虽无收款，也要把球员从 CPU 队挪走。
+  const moveFromClubId = saleFromClubId !== null ? saleFromClubId : forcedCpuSeller ? ownerRow?.club_id ?? null : null;
   const fee = ownership ? (transfer.fee as number) : 0;
   const tax = ownership && saleFromClubId !== null
     ? transfer.type === 'forced_auction'
@@ -270,7 +278,7 @@ export async function completeTransfer(
   // 只有「真的离开某支球队」才回收：转出方为空的海捞是签入（自由身球员无队可离），
   // 从 CPU 队摘人转出方不为空、照旧回收。留队续约/匹配（amendment）不动。
   const chinaPlaystyleCount =
-    amendment || saleFromClubId === null
+    amendment || moveFromClubId === null
       ? 0
       : ((await db
           .prepare(`SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = ? AND source = 'china'`)
@@ -342,7 +350,7 @@ export async function completeTransfer(
           `UPDATE players SET club_id = ?, status = ?, number = NULL, updated_at = ${nowSql()}
            WHERE id = ? AND (club_id IS ? OR club_id = ?)`,
         )
-        .bind(transfer.to_club_id, playerStatus, transfer.player_id, saleFromClubId, saleFromClubId),
+        .bind(transfer.to_club_id, playerStatus, transfer.player_id, moveFromClubId, moveFromClubId),
     );
     // 中国计划徽章随离队失效（§10）：明细行回收，台账计数同步减。计数在 batch 外先读出来，
     // 免得依赖批内语句顺序；重放时已无 china 行可减、DELETE 空转，整批仍然幂等。
@@ -357,7 +365,7 @@ export async function completeTransfer(
     // 离开某队时把**被覆盖前**的合同三列快照进 transfer 行（§5.4 物理面延续，迁移 0079）。
     // 契约值是 completeTransfer 进城时读到的合同行现值：若该窗回滚/重放，整批按状态守卫空转，
     // 不会把改过的值再快照一次。快照只对真正离开（from 非空、非留队单）写——海捞 from 为空。
-    if (saleFromClubId !== null) {
+    if (moveFromClubId !== null) {
       statements.push(
         db
           .prepare(
@@ -376,7 +384,7 @@ export async function completeTransfer(
     // 离队作废（§5.4/§5.7）：demand → void、在途 pending → void、转会申请（含「不满」徽章）→ resolved。
     // 只对**真的离开某队**生效（from 非空）——海捞是自由身签入，没有队可离。
     // 必须排在 A 分支「重挂徽章」语句之前——否则同一批里的收口 UPDATE 会立刻把它 resolved。
-    if (saleFromClubId !== null) {
+    if (moveFromClubId !== null) {
       const voided = await voidDemandStatements(env, transfer.player_id, 'left_club');
       statements.push(...voided.statements);
     }

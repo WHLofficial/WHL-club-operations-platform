@@ -81,6 +81,21 @@
 
 ---
 
+## v6.60.7 · CPU 队球员可强制拍卖，成交款销毁（2026-10-30）
+
+**状态**：**未上线**——分支 `fix/v6.60.5-forced-fc-growth-perm`，HEAD 为 v6.60.6 文档提交，CPU 改动待提交；无迁移、无 schema 变更。判级 patch。起因：用户「CPU 队球员不参与强制拍卖改掉，可以参与，跟自由身一样」。
+
+**交付**
+
+- `src/worker/bypass.ts`：`inspectForcedAuction` 删除 CPU 队 400 门将，CPU 球员正常出预检与建单；`approveTransferDeal` 对 `from_club_id === null` 或卖方 `is_cpu=1` 的强制拍卖统一按成交价固定 F、跳过 RC 第一步直接谈工资。
+- `src/worker/transfers.ts`：owner 查询带 `clubs.is_cpu`；`saleFromClubId` 对 CPU 卖方置空（买方照付、成交款销毁、无卖方流水与税），`moveFromClubId` 仍保留 CPU 队以便把球员摘出；中国徽章回收 / 合同快照 / 需求清理按 `moveFrom` 判断。
+- `src/worker/market-settle.ts`：CPU 卖方无人出价不收下架费、不写 `delist_fee`、不造 `forced_no_bid` 解约单，球员留在 CPU 队；普通挂牌与有归属强拍不变。
+- `tests/forced-auction.test.ts`：CPU 预检改可挂；原 CPU 400 用例改为「CPU 成交（买方付 6、CPU 零流水、无 transfer_out/tax、球员归买方、新合同 release_fee=6）」与「CPU 无人出价（不下架费/不造解约单/球员留 CPU normal）」。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2754 例全绿**；build `index-CO-4PJe-.js` 714.95 kB / gzip 225.70 kB（原始 714,946 B）；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：发布需用户明确下令；跨仓通知模板白名单确认不在本版本范围。
+
 ## v6.60.6 · 单据详情路由抢占暗标读接口（2026-10-30）
 
 **状态**：**已上线（2026-10-30）**——push `2e1692f..cf9b74b`（分支 `fix/v6.60.5-forced-fc-growth-perm`），CF Workers Builds 自动部署 Version `1742a5c3-11ff-4ed5-b195-13ad24e488c9` @2026-10-30T10:53:51Z；无迁移、无 schema 变更。上线回读：`GET /api/transfers/sea-sealed` 由 400「单据 ID 不对」变 401「未登录」、`GET /api/transfers/999999` 仍 404、`GET /api/transfers/free-agent` 由 400 变 404、`/api/health` 三项全 ok、`/` 200；线上入口资产 `index-DYE0HKG3.js`（本版只改后端，哈希变化来自页脚版本号注入）。判级 patch。起因：用户报「我打开球员页面，显示海捞签入，不是暗标」，随后「发布赶紧」。
