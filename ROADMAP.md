@@ -81,6 +81,22 @@
 
 ---
 
+## v6.60.6 · 单据详情路由抢占暗标读接口（2026-10-30）
+
+**状态**：**已上线（2026-10-30）**——push `2e1692f..cf9b74b`（分支 `fix/v6.60.5-forced-fc-growth-perm`），CF Workers Builds 自动部署 Version `1742a5c3-11ff-4ed5-b195-13ad24e488c9` @2026-10-30T10:53:51Z；无迁移、无 schema 变更。上线回读：`GET /api/transfers/sea-sealed` 由 400「单据 ID 不对」变 401「未登录」、`GET /api/transfers/999999` 仍 404、`GET /api/transfers/free-agent` 由 400 变 404、`/api/health` 三项全 ok、`/` 200；线上入口资产 `index-DYE0HKG3.js`（本版只改后端，哈希变化来自页脚版本号注入）。判级 patch。起因：用户报「我打开球员页面，显示海捞签入，不是暗标」，随后「发布赶紧」。
+
+**故障机理**：`src/worker/routes/market.ts:1172` 的公开单据详情 `app.get('/transfers/:id')` 随 `marketRoutes` 在 `src/worker/index.ts:77` 先挂、`transfersRoutes` 在 `:80` 后挂，Hono 先命中先赢 ⇒ `GET /api/transfers/sea-sealed` 被当单据 ID，`Number('sea-sealed')` 为 `NaN`，进 `HttpError(400, '单据 ID 不对')`。教练侧 `useSeaPhase`（`web/src/lib/queries.ts:379`，`retry:false`）恒 error ⇒ `SideOps.tsx:205` `sealedPhase` false ⇒ 按钮落到 `:970`「海捞签入」；`MarketFreePage.tsx:61` 因 `data===undefined` 整块不渲染。三个 POST 端点未被抢占，但前端够不到，暗标段当日无法出标。
+
+**交付**
+
+- `src/worker/routes/market.ts:1172`：`app.get('/transfers/:id{[0-9]+}')`，参数限定纯数字，非数字路径交回 `transfersRoutes`；数字单据详情与不存在的 ID（404）行为不变。
+- `tests/sea-sealed.test.ts`：`describe('暗标段：阶段与惰性建批')` 首条新增回归用例——`GET /api/transfers/sea-sealed` 必须 200 且 `state==='sealed'`、`batch.id` 对上，同时 `GET /api/transfers/999999` 仍 404。此前该路径只有 POST 覆盖，GET 一律直接调 `loadSeaPhaseView`，所以线上抢占一直没被测试发现。
+- 验证：`npx vitest run tests/sea-sealed.test.ts` 29 passed、`npm test` 169 files / 2753 tests 全通过、`npm run typecheck`（三个 tsconfig）无报错。
+
+**生产状态备注**：暗标段首日（窗口 `season=9 / window_seq=2`，时刻表 `transfer_sea_sealed` 两端 absolute，`start_at=2026-10-30T10:35:00.000Z`、`end_at=2026-10-31T04:30:00.000Z`）因批次只由 `loadSeaPhaseView` / `requireOpenBatch` 惰性创建、而读接口被抢占后无人能触发，开段前已用 D1 手工预置批次 `sea_batches.id=1`（`status='sealed'`，`sealed_at=2026-10-30T10:35:27.185Z`，`deadline_at` 与时刻表 `end_at` 逐字符一致），使 `createFreeAgent` 的 `sea_sealed_phase` 明标闸生效。**根因修复后这步手工预置不再需要**；后续版本的待办见「已知问题」：收标期判据应以时刻表为权威源（不依赖批次存在）、管理端补未结算批次兜底、截止后 `closing` 状态的前端回显。
+
+---
+
 ## v6.60.5 · 强制拍卖认 FC ID、自由身可挂、期限 X+2；成长入口按归属收口（2026-10-30）
 
 **状态**：**已上线（2026-10-30）**——push `ffbb870..c30a7d0`（分支 `fix/v6.60.5-forced-fc-growth-perm`），CF Workers Builds 自动部署 Version `d5c2a0b1-d9a1-42f8-9ff5-08aa77abd45e` @2026-10-30T10:18:19Z；无迁移、无 schema 变更。生产 `/`、`/players`、`/market`、`/admin/market`、`/api/market/listings`、`/api/players` 全 200，`/api/health` d1/tour_db/kv 全 ok；线上资产 `index-9JmPjVqr.js` 与本地构建一致（714,834 B）。判级 patch。起因：管理端强制拍卖输入球员页 FC ID 报「无归属或不存在」；用户追加「自由身也能强制挂牌，拍卖款销毁」「强拍期限 X 挂 X+2」与「别队教练/管理组能点我的球员成长方案」。

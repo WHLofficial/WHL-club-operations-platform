@@ -8,6 +8,8 @@
 
 **线上故障修复**：`GET /api/transfers/sea-sealed` 在生产恒返回 400「单据 ID 不对」。`src/worker/routes/market.ts` 的公开单据详情 `app.get('/transfers/:id')` 随 `marketRoutes` 在 `src/worker/index.ts:77` 先于 `transfersRoutes`（`:80`）挂载，Hono 先命中先赢，`sea-sealed` 被当单据 ID 解析成 `NaN`。教练侧 `useSeaPhase` 因此恒为 error（`retry:false`），`SideOps` 落回「海捞签入」按钮、`/market/free` 倒计时卡片整块不渲染——暗标段上线当日实际无法出标。
 
+**已上线（2026-10-30）**：push `2e1692f..cf9b74b`（分支 `fix/v6.60.5-forced-fc-growth-perm`），CF Workers Builds 自动部署 Version `1742a5c3-11ff-4ed5-b195-13ad24e488c9` @2026-10-30T10:53:51Z；无迁移、无 schema 变更。上线回读：`GET /api/transfers/sea-sealed` 由 400 变 401「未登录」（说明请求已落到教练读接口的守卫上）、`GET /api/transfers/999999` 仍 404（数字单据详情照旧）、`GET /api/transfers/free-agent` 由 400 变 404（非数字路径不再被单据详情接住）、`/api/health` d1/tour_db/kv 全 ok、`/` 200。线上入口资产 `index-DYE0HKG3.js`：本版仅改后端，哈希变化来自页脚版本号注入口径（`vite.config.ts` 从 package.json 注入 `6.60.6`）。判级 patch。
+
 **Fixed**
 
 - `src/worker/routes/market.ts:1172` 路径参数加数字限定：`app.get('/transfers/:id{[0-9]+}')`，非数字路径交回 `transfersRoutes`；数字单据详情行为不变（不存在的 ID 仍 404）。
