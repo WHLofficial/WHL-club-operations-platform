@@ -1153,6 +1153,10 @@ describe('球员库排序键（v3.1.0）', () => {
   it('属性列排序：attr:<属性键> 过白名单、走数值游标、翻页不重不漏', async () => {
     const fx = freshEnv();
     seedSortRows(fx.sqlite);
+    // v6.61.0：seedSortRows 的 ca/base_ca 刻意错开（delta 最高 22），会改属性排序的期望序——
+    // 这里关掉加成开关，锁定「开关关 = 按源值排序」的排序机制本身；加成态的排序另有专门用例。
+    // 开关行的缺省值已由迁移 0084 落表（'1'），这里改值即可
+    fx.sqlite.exec(`UPDATE config SET value = '0' WHERE key = 'growth_attr_bonus'`);
     // 只给 6 行塞属性值，另 2 行没有这个键（NULL 当 0，与其它数值键同口径）
     for (const [id, v] of [
       [1, 80],
@@ -1564,6 +1568,124 @@ describe('球员元数据批量 /api/players/meta（v6.38.0）', () => {
     expect(spaced.players[0].height).toBe(189);
     const dup = (await (await get('/api/players/meta?fcIds=2500801,2500801', env)).json()) as MetaBody;
     expect(dup.players[0].height).toBe(189);
+  });
+});
+
+describe('属性成长加成（v6.61.0）：显示属性 = min(99, 初始 + max(0, ca − base_ca))', () => {
+  // 41 涨 5（ca80/base75）、42 不涨（80/80）、43 缺 finishing 键、44 撞 99（98+10）、45 无存档。
+  // gkdiving 验门将键同样加成，height/CA 验非 34 项键不动。
+  function seedBonus(sqlite: DatabaseSync): void {
+    sqlite.exec(`
+      INSERT INTO players (id, uid, name, ca, pa, base_ca, fc_id, game_attrs) VALUES
+        (41, 'a41', '涨五', 80, 90, 75, 41, '{"finishing":80,"gkdiving":55,"height":180,"CA":70}'),
+        (42, 'a42', '不涨', 80, 90, 80, 42, '{"finishing":66}'),
+        (43, 'a43', '缺键', 80, 90, 75, 43, '{"vision":70}'),
+        (44, 'a44', '撞顶', 90, 95, 80, 44, '{"finishing":98}'),
+        (45, 'a45', '无存档', 80, 90, 75, 45, NULL);
+    `);
+  }
+  interface BonusList {
+    players: { id: number; attrValue?: number | null }[];
+  }
+  interface BonusDetail {
+    player: { ca: number; gameAttrs: Record<string, unknown> | null };
+  }
+  interface BonusMeta {
+    players: { fcId: number; height: number | null; attrs: Record<string, unknown> | null }[];
+  }
+
+  it('列表 attrValue：34 项键加成、撞 99 封顶、缺键透传 null、无存档 null', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    const body = (await (await get('/api/players?attr=finishing', fx.env)).json()) as BonusList;
+    expect(body.players.map((p) => [p.id, p.attrValue])).toEqual([
+      [41, 85],
+      [42, 66],
+      [43, null],
+      [44, 99],
+      [45, null],
+    ]);
+  });
+
+  it('区间筛选吃加成值：attr_min=85 只中 41/44（源值 80/98 的 42 不中、缺键的 43 不中）', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    const body = (await (await get('/api/players?attr=finishing&attr_min=85', fx.env)).json()) as BonusList;
+    expect(body.players.map((p) => p.id)).toEqual([41, 44]);
+    const count = await app.request(
+      '/api/cron/players-count?attr=finishing&attr_min=85',
+      { method: 'GET', headers: { 'X-Cron-Key': 'test-cron-key' } },
+      { ...fx.env, CRON_KEY: 'test-cron-key' },
+    );
+    expect(((await count.json()) as { count: number }).count).toBe(2);
+  });
+
+  it('排序吃加成值：desc = [44(99), 41(85), 42(66), 45/43(缺键 0，按 id 倒序)]', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    const body = (await (await get('/api/players?sort=attr:finishing', fx.env)).json()) as BonusList;
+    expect(body.players.map((p) => p.id)).toEqual([44, 41, 42, 45, 43]);
+  });
+
+  it('view=initial：delta 自然归 0，attrValue 回源值、attr_min=85 只中 44', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    const body = (await (await get('/api/players?view=initial&attr=finishing', fx.env)).json()) as BonusList;
+    expect(body.players.map((p) => [p.id, p.attrValue])).toEqual([
+      [41, 80],
+      [42, 66],
+      [43, null],
+      [44, 98],
+      [45, null],
+    ]);
+    const filtered = (await (await get('/api/players?view=initial&attr=finishing&attr_min=85', fx.env)).json()) as BonusList;
+    expect(filtered.players.map((p) => p.id)).toEqual([44]);
+  });
+
+  it('开关关闭（config growth_attr_bonus=0）：列表回源值', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    fx.sqlite.exec(`UPDATE config SET value = '0' WHERE key = 'growth_attr_bonus'`);
+    resetConfigCache();
+    const body = (await (await get('/api/players?attr=finishing&attr_min=85', fx.env)).json()) as BonusList;
+    // 源值 80/66/缺/98/缺 ⇒ 只有 44 中 85 线
+    expect(body.players.map((p) => [p.id, p.attrValue])).toEqual([[44, 98]]);
+  });
+
+  it('详情 gameAttrs：34 项键加成（含门将）、非 34 项键原样、缺键不补、无存档 null；ca 仍是现值', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    const a = (await (await get('/api/players/41', fx.env)).json()) as BonusDetail;
+    expect(a.player.ca).toBe(80);
+    expect(a.player.gameAttrs).toEqual({ finishing: 85, gkdiving: 60, height: 180, CA: 70 });
+    const b = (await (await get('/api/players/44', fx.env)).json()) as BonusDetail;
+    expect(b.player.gameAttrs?.finishing).toBe(99);
+    const c = (await (await get('/api/players/43', fx.env)).json()) as BonusDetail;
+    // vision 也在 34 项内：70 + delta5 = 75；finishing 缺键不补
+    expect(c.player.gameAttrs).toEqual({ vision: 75 });
+    const d = (await (await get('/api/players/45', fx.env)).json()) as BonusDetail;
+    expect(d.player.gameAttrs).toBe(null);
+  });
+
+  it('开关关闭：详情 gameAttrs 回源值', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    fx.sqlite.exec(`UPDATE config SET value = '0' WHERE key = 'growth_attr_bonus'`);
+    resetConfigCache();
+    const a = (await (await get('/api/players/41', fx.env)).json()) as BonusDetail;
+    expect(a.player.gameAttrs).toEqual({ finishing: 80, gkdiving: 55, height: 180, CA: 70 });
+  });
+
+  it('meta attrs：34 项键加成、height/CA 原样；开关关闭回源值（契约对面仓消费）', async () => {
+    const fx = freshEnv();
+    seedBonus(fx.sqlite);
+    const on = (await (await get('/api/players/meta?fcIds=41', fx.env)).json()) as BonusMeta;
+    expect(on.players[0]?.attrs).toEqual({ finishing: 85, gkdiving: 60, height: 180, CA: 70 });
+    expect(on.players[0]?.height).toBe(180);
+    fx.sqlite.exec(`UPDATE config SET value = '0' WHERE key = 'growth_attr_bonus'`);
+    resetConfigCache();
+    const off = (await (await get('/api/players/meta?fcIds=41', fx.env)).json()) as BonusMeta;
+    expect(off.players[0]?.attrs).toEqual({ finishing: 80, gkdiving: 55, height: 180, CA: 70 });
   });
 });
 

@@ -4,7 +4,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
-import { FC26_GAME_ATTR_COLUMNS, PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleIdOf } from '../../core/fc26.ts';
+import { PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleIdOf } from '../../core/fc26.ts';
 import { serviceSeasons, freeAgentFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
@@ -19,6 +19,9 @@ import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { loadClubTourTeams, loadTeamLogos } from '../club-logos.ts';
 import { SORT_KEY_NAMES, TEXT_SORT_KEYS, type SortKeyName } from '../../core/players-sort.ts';
 import { MARKER_VALUES, MARKER_WEIGHT, markerOf, markerWeightSql, type PlayerMarker } from '../../core/squad-rules.ts';
+import { createConfigService } from '../../core/config.ts';
+// 34 项细分属性白名单 ATTR_KEYS 也从这里来（v6.61.0 收口单一来源：列表/筛选/排序/详情/meta/导出同一份）
+import { ATTR_KEYS, attrBonusEnabled, attrValueSql, buffedAttrs, growthDelta, growthDeltaSql } from '../../core/growth-attrs.ts';
 import { influenceCoefs, influenceOf } from '../influence.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -30,9 +33,7 @@ const app = new Hono<{ Bindings: Env }>();
 const PLAYER_STATUS = ['normal', 'listed', 'trainee', 'free', 'retired'] as const;
 const CONTRACT_TYPES = ['formal', 'trainee'] as const;
 const CONTRACT_SOURCES = ['negotiation', 'forced', 'direct', 'import'] as const;
-// 细分属性白名单（FC26 源列尾段：sprintspeed 起共 34 项 = 29 外场 + 5 门将）；
-// attr 筛选的 json_extract 键必须在此表内，拼 SQL 前拦住任意键注入
-const ATTR_KEYS: readonly string[] = FC26_GAME_ATTR_COLUMNS.slice(FC26_GAME_ATTR_COLUMNS.indexOf('sprintspeed'));
+// 位置 / 状态等派生口径见下方各 CASE；细分属性的取值/加成口径全部在 core/growth-attrs.ts
 const POSITION_NAMES: readonly string[] = Object.values(POSITION_BY_ID);
 
 // 球员库排序键（v0.7.1 d6；v3.1.0 扩到表头每一列）：表本身在 src/core/players-sort.ts，
@@ -109,12 +110,22 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
   };
 }
 
-// 细分属性的排序表达式（表头每个属性列都能点）：属性值存在 game_attrs 的 JSON 里，可能是数字、字符串或缺键；
-// NULL 当 0 与其它数值键同口径（否则 keyset 的 NULL 比较恒为假会漏行）。键必须先在 ATTR_KEYS 白名单里过一遍
-function attrSortExpr(key: string): string {
-  // `+ 0`：属性值理论上是数字，但若哪天混进字符串（'80' 或 '★'），游标侧 Number() 会得 NaN / 与 TEXT
-  // 比较恒假 ⇒ 翻页静默截断。算术转换把两者都拉回数值域（非数字当 0），与其它数值键同口径
-  return `COALESCE(json_extract(players.game_attrs, '$.${key}') + 0, 0)`;
+// 细分属性的排序表达式（表头每个属性列都能点）：v6.61.0 起排序吃加成后的值 ——
+// attrValueSql 生成的表达式缺键时 json_extract 为 NULL、标量 min() 返 NULL，而 keyset 的 NULL 比较
+// 恒为假会漏行 ⇒ 排序/游标侧包一层 COALESCE(…, 0)，与其它数值键同口径（取值/筛选侧不包，缺键透传 NULL）。
+// 键必须先在 ATTR_KEYS 白名单里过一遍
+function attrSortExpr(key: string, deltaSql: string): string {
+  return `COALESCE(${attrValueSql(key, deltaSql)}, 0)`;
+}
+
+// 属性加成开关（v6.61.0）：config growth_attr_bonus（默认 '1'），0 = 关 ⇒ delta 全按 0、三处回源值。
+// 读不出来按开（与迁移默认同向）：配置故障不能把公开球员库打挂。
+async function attrBonusOn(db: Env['DB']): Promise<boolean> {
+  try {
+    return attrBonusEnabled(await createConfigService(db).getNumber('growth_attr_bonus'));
+  } catch {
+    return true;
+  }
 }
 
 // 编 cursor 用的行内字段：非 id 排序时 SELECT 额外带出 `sort_key`（与 ORDER BY 同一表达式，保证游标值与排序值逐位一致）
@@ -213,10 +224,15 @@ app.get('/players', async (c) => {
     if (!club) return c.json({ players: [], nextCursor: null });
     return c.json(await listPlayers(c, club.id));
   }
+  // v6.61.0：attr 取值/筛选/排序随 growth_attr_bonus 开关变 ⇒ 开关值必须进缓存键（':b1'/':b0'），
+  // 否则关掉开关后 TTL 内还吐加成值（列表「没变、详情变了」）。这次读同时传进 listPlayers，
+  // 保证缓存键后缀与载荷口径来自同一次读（config memo 到期恰逢改值的错位窗口不存在）。
+  // 后缀只在列表键上，与 meta 键（players:meta:<ids>）和列表键的 '=' 形态互不相等，无跨端点撞键风险。
+  const attrBonus = await attrBonusOn(c.env.DB);
   const data = await cachedJson(
-    `players:${canonicalQuery(c.req.url)}`,
+    `players:${canonicalQuery(c.req.url)}:b${attrBonus ? 1 : 0}`,
     ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS),
-    () => listPlayers(c),
+    () => listPlayers(c, null, attrBonus),
     { scope: 'players', env: c.env, ctx: waitUntilOf(c) },
   );
   return c.json(data);
@@ -242,7 +258,7 @@ function eqFilter(col: string, key: string, value: number, sortKey: string): str
 // sortKey 只决定等值键用哪种写法（见 eqFilter），不参与筛选语义 —— 两种写法筛出的人相同。
 function buildPlayerFilters(
   c: Context<{ Bindings: Env }>,
-  exprs: { caExpr: string; paExpr: string; inflExpr: string },
+  exprs: { caExpr: string; paExpr: string; inflExpr: string; deltaSql: string },
   sortKey: string,
   shortlistClubId: number | null = null,
 ): { filters: string[]; filterArgs: unknown[]; attrValueExpr: string | null; psSlotSelects: string } {
@@ -435,11 +451,15 @@ function buildPlayerFilters(
   // 细分属性区间：attr + attr_min/attr_max（键在白名单内才放行）；命中行的属性值随响应带回（前端自动加列用）。
   // attr 单独给（不带任何区间）也算合法：只把该属性的值带回响应、不做数值过滤。
   // 以前这里直接 400，而前端「选一个细分属性」这个动作本身就只发 attr —— 等于选一下就报一次错。
+  // v6.61.0：取值与区间筛选都吃**加成后的值**（attrValueSql，与排序/详情/导出同源）；
+  // 旧写法 COALESCE(json_extract+0, 0) 会把缺键当 0、套上 delta 就凭空造值 —— 换成缺键透传 NULL
+  // （标量 min() 任一参数 NULL 即返 NULL），列表/详情/导出三方才不会分叉。NULL 参与比较恒假 ⇒
+  // 区间筛选「缺该属性的行」不命中，与旧行为一致。
   let attrValueExpr: string | null = null;
   const attr = c.req.query('attr');
   if (attr !== undefined && attr !== '') {
     if (!(ATTR_KEYS as readonly string[]).includes(attr)) throw new HttpError(400, 'attr 不是可筛选的属性键');
-    const attrExpr = `json_extract(players.game_attrs, '$.${attr}')`;
+    const attrExpr = attrValueSql(attr, exprs.deltaSql);
     attrValueExpr = attrExpr;
     for (const [param, op] of [
       ['attr_min', '>='],
@@ -580,18 +600,27 @@ function buildPlayerFilters(
 // 视图口径（v3.2.0 抽出）：列表与内部计数端点必须用同一套表达式，否则「有多少人」会与
 // 列表实际筛出的人对不上。改动这里等于同时改两个端点。coefs 一并返回——响应里的 influence
 // 用 JS 镜像算，必须与 SQL 表达式同源。
+// v6.61.0：deltaSql = 属性成长点数的 SQL 片段（随视图口径：view=initial 的 caExpr 恒等于
+// COALESCE(base_ca, ca) ⇒ delta 自然归 0，不需要额外分支）；开关关闭时按 '0'，表达式退化为纯钳制。
+// attrBonus 可由调用方传入（列表路由为缓存键已读过一次，传进来保证「键后缀 = 载荷口径」同一次读；
+// 不传就现读——计数端点等无键可对齐的调用点）。
 async function buildViewExprs(
   c: Context<{ Bindings: Env }>,
-): Promise<{ caExpr: string; paExpr: string; inflExpr: string; coefs: { g: number; s: number } }> {
+  attrBonus?: boolean,
+): Promise<{ caExpr: string; paExpr: string; inflExpr: string; coefs: { g: number; s: number }; attrBonus: boolean; deltaSql: string }> {
   const viewRaw = c.req.query('view');
   if (viewRaw !== undefined && viewRaw !== 'initial') throw new HttpError(400, 'view 只能是 initial');
   const initial = viewRaw === 'initial';
   const coefs = await influenceCoefs(c.env.DB);
+  const caExpr = initial ? 'COALESCE(players.base_ca, players.ca)' : 'players.ca';
+  const bonus = attrBonus ?? (await attrBonusOn(c.env.DB));
   return {
-    caExpr: initial ? 'COALESCE(players.base_ca, players.ca)' : 'players.ca',
+    caExpr,
     paExpr: initial ? "COALESCE(json_extract(players.game_attrs, '$.PA'), players.pa)" : 'players.pa',
     inflExpr: influenceExpr(coefs),
     coefs,
+    attrBonus: bonus,
+    deltaSql: bonus ? growthDeltaSql(caExpr) : '0',
   };
 }
 
@@ -609,12 +638,16 @@ function parseSortKey(c: Context<{ Bindings: Env }>): string {
   return sortRaw;
 }
 
-async function listPlayers(c: Context<{ Bindings: Env }>, shortlistClubId: number | null = null): Promise<{
+async function listPlayers(
+  c: Context<{ Bindings: Env }>,
+  shortlistClubId: number | null = null,
+  attrBonus?: boolean,
+): Promise<{
   players: unknown[];
   nextCursor: string | null;
 }> {
-  const exprs = await buildViewExprs(c);
-  const { caExpr, paExpr, inflExpr, coefs } = exprs;
+  const exprs = await buildViewExprs(c, attrBonus);
+  const { caExpr, paExpr, inflExpr, coefs, deltaSql } = exprs;
   const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
   const sortRaw = parseSortKey(c);
   const { filters, filterArgs, attrValueExpr, psSlotSelects } = buildPlayerFilters(c, exprs, sortRaw, shortlistClubId);
@@ -626,7 +659,7 @@ async function listPlayers(c: Context<{ Bindings: Env }>, shortlistClubId: numbe
   // id 键固定 ASC（旧调用兼容），其 URL 参数由前端清掉，所以它同时也是「无排序参数」的默认态
   const order = sortRaw === 'id' || c.req.query('order') === 'asc' ? 'asc' : 'desc';
   // ORDER BY、sort_key、游标比较三处共用这一个表达式
-  const sortExpr = attrSort !== null ? attrSortExpr(attrSort) : sortRaw === 'id' ? 'players.id' : sortExprs[sort];
+  const sortExpr = attrSort !== null ? attrSortExpr(attrSort, deltaSql) : sortRaw === 'id' ? 'players.id' : sortExprs[sort];
 
   let orderBy: string;
   if (sortRaw === 'id') {
@@ -925,8 +958,11 @@ async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: stri
 
 // GET /api/players/meta?fcIds=<逗号分隔 fc_id> —— 批量球员元数据（v6.38.0，跨仓名册同步用）
 // 契约字段名固定（对面仓照此实现，勿改名）：players[] 每项 { fcId, height, attrs, playstyles }。
-//   attrs     = game_attrs 原样整包（71 键，含 PSID1-15 与身高），不做字段筛选；无值/坏 JSON 给 null
-//   height    = attrs.height（players 表没有 height 列，身高只在 game_attrs 里）；取不到给 null
+//   attrs     = game_attrs 整包（71 键，含 PSID1-15 与身高），不做字段筛选；无值/坏 JSON 给 null。
+//               v6.61.0 起整包里的 34 项细分属性已按 delta 加成（buffedAttrs，与详情同源）——
+//               对面仓（tour）发版前收到的还是初始值，跨仓发版顺序见 ROADMAP
+//   height    = attrs.height（players 表没有 height 列，身高只在 game_attrs 里）；取不到给 null。
+//               身高不在 34 项内 ⇒ 永远是原值，不受加成影响
 //   playstyles = 发放明细表 player_playstyles 的 psid 数组，金徽换算成「基础 ID + 100」
 //                （与 web/assets/ref/playstyle.json 和 game_attrs.PSID* 同一编号空间：银 1-99 / 金 101-199；
 //                该表 psid 列存基础 ID、金徽由 kind='gold' 表示，不换算的话纯数字数组里金银分不出来）
@@ -966,6 +1002,8 @@ function parseMetaFcIds(raw: string | undefined): number[] {
 
 interface PlayerMetaRow {
   fc_id: number;
+  ca: number | null;
+  base_ca: number | null;
   game_attrs: string | null;
   psid: number | null;
   kind: 'silver' | 'gold' | null;
@@ -986,7 +1024,7 @@ function metaHeightOf(attrs: Record<string, unknown> | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[]): Promise<{ players: PlayerMeta[] }> {
+async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[], attrBonus: boolean): Promise<{ players: PlayerMeta[] }> {
   const byFcId = new Map<number, PlayerMeta>();
   // fc_id IN 分批（§17.2-1，写法同 players-import.fetchExisting）：上限 90 与批大小同值 ⇒ 今天必是一批，
   // 循环只为兜住上限将来调大，不为提前优化。
@@ -995,7 +1033,8 @@ async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[]): 
     const marks = slice.map(() => '?').join(', ');
     const rows = await c.env.DB
       .prepare(
-        `SELECT players.fc_id AS fc_id, players.game_attrs AS game_attrs, pp.psid AS psid, pp.kind AS kind
+        `SELECT players.fc_id AS fc_id, players.ca AS ca, players.base_ca AS base_ca,
+                players.game_attrs AS game_attrs, pp.psid AS psid, pp.kind AS kind
            FROM players LEFT JOIN player_playstyles pp ON pp.player_id = players.id
           WHERE players.fc_id IN (${marks})
           ORDER BY players.fc_id, pp.slot`,
@@ -1009,7 +1048,11 @@ async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[]): 
         if (r.game_attrs) {
           try {
             const parsed = JSON.parse(r.game_attrs) as unknown;
-            attrs = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+            // v6.61.0：34 项细分属性按 delta 加成后下发（与详情同一份 buffedAttrs；身高不在 34 项内不动）
+            attrs =
+              parsed && typeof parsed === 'object'
+                ? buffedAttrs(parsed as Record<string, unknown>, growthDelta(r.ca, r.base_ca, attrBonus))
+                : null;
           } catch {
             attrs = null;
           }
@@ -1028,11 +1071,13 @@ async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[]): 
 app.get('/players/meta', async (c) => {
   assertPublicRate(c, 'players');
   const fcIds = parseMetaFcIds(c.req.query('fcIds'));
+  // 开关进缓存键（同列表 ':b' 后缀）：关掉后 TTL 内不能再吐加成包
+  const attrBonus = await attrBonusOn(c.env.DB);
   const data = await cachedJson(
     // 键按解析后的 id 列表（去重 + 请求顺序），不用 canonicalQuery：会与列表端点跨端点撞键（见上方注释）
-    `players:meta:${fcIds.join(',')}`,
+    `players:meta:${fcIds.join(',')}:b${attrBonus ? 1 : 0}`,
     ttlForScope('players', c.env.PUBLIC_CACHE_TTL_MS),
-    () => loadPlayersMeta(c, fcIds),
+    () => loadPlayersMeta(c, fcIds, attrBonus),
     { scope: 'players', env: c.env, ctx: waitUntilOf(c) },
   );
   return c.json(data);
@@ -1106,7 +1151,7 @@ app.get('/players/:id', async (c) => {
   }
 
   // 影响力系数（v6.34.0 增量 1）：与列表端点共用 influenceCoefs，保证两端逐值一致
-  const [club, contract, ticksRow, coefs, unsatisfiedRow] = await Promise.all([
+  const [club, contract, ticksRow, coefs, unsatisfiedRow, attrBonus] = await Promise.all([
     p.club_id
       ? c.env.DB.prepare('SELECT id, name FROM clubs WHERE id = ?').bind(p.club_id).first<{ id: number; name: string }>()
       : Promise.resolve(null),
@@ -1137,6 +1182,8 @@ app.get('/players/:id', async (c) => {
     c.env.DB.prepare(`SELECT 1 AS x FROM transfer_requests WHERE player_id = ? AND status = 'released' LIMIT 1`)
       .bind(id)
       .first<{ x: number }>(),
+    // 属性加成开关（v6.61.0）：详情不走缓存 ⇒ 不用进键，随请求读即可
+    attrBonusOn(c.env.DB),
   ]);
   // 窗刻度（v3.0.0）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
   const currentTicks = ticksRow?.n ?? 0;
@@ -1221,10 +1268,14 @@ app.get('/players/:id', async (c) => {
     }
   }
 
+  // 属性成长加成（v6.61.0）：34 项细分属性 = min(99, 初始属性 + max(0, ca − base_ca))，与列表/
+  // 筛选/排序/导出同一份 core/growth-attrs；CA/PA/身高/PSID 等其余键原样。页面不加「含成长」标注
+  // （用户裁决：玩家知道）。缺键透传 null，不凭空造值。
   let gameAttrs: Record<string, unknown> | null = null;
   if (p.game_attrs) {
     try {
-      gameAttrs = JSON.parse(p.game_attrs) as Record<string, unknown>;
+      const parsed = JSON.parse(p.game_attrs) as Record<string, unknown>;
+      gameAttrs = buffedAttrs(parsed, growthDelta(p.ca, p.base_ca, attrBonus));
     } catch {
       gameAttrs = null;
     }
