@@ -131,6 +131,19 @@ describe('MarketCard 卡脚领先买家（v6.60.8）', () => {
   });
 });
 
+// v6.60.9：CA/PA 与价格三行包进 .mkt-card-mid，窄屏才有得换位（几何规则在 styles.css ≤760 块）
+describe('MarketCard 中段容器（v6.60.9）', () => {
+  it('rail 与价格三行同属 .mkt-card-mid，DOM 顺序仍是 CA/PA 在前（换位交给 CSS order）', () => {
+    const { container } = renderCard(listing({ highestBid: 99, highestBidder: { id: 4, name: '领先俱乐部' }, bidCount: 2 }));
+    const mid = container.querySelector('.mkt-card-mid');
+    expect(mid).toBeTruthy();
+    expect(mid!.children[0]!.className).toBe('mkt-rail');
+    expect(mid!.children[1]!.className).toBe('mkt-rows');
+    // 卡脚留在容器外，始终占整卡宽
+    expect(mid!.querySelector('.mkt-card-foot')).toBeNull();
+  });
+});
+
 // v6.60.8：浮层是点开才挂载的，详情请求原本也压到那一刻。卡片被指向 / 按下 / 聚焦时先预取，
 // 点开时详情多半已在缓存（hook 侧口径见 queries.ts 的 useListingPrefetch）
 describe('MarketCard 详情预取（v6.60.8）', () => {

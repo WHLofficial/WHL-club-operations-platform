@@ -5316,7 +5316,8 @@ th.num .th-sort {
 }
 
 /* ---- ⑦ 在售市场卡柜与挂牌浮层（v6.24.0）------------------------------------
-   卡片 = rail 骨架 A（左栏 CA/PA 两枚大数字，五档配色复用全仓 .attr-* 的 color）；
+   卡片 = rail 骨架 A（CA/PA 两枚大数字：桌面自成一条，≤760 重排到价格三行右边的竖列；
+   五档配色复用全仓 .attr-* 的 color）；
    底部读秒走 tabular-nums 防跳字；三态徽标（竞价中 / 等激活方出价 / 等待匹配）用 .mkt-badge-*。
    浮层：桌面居中弹层，≤760 变底部抽屉（上滑出 + 安全区内边距）。
    分类一律 mkt- 前缀，与退役中的旧 .market-card 互不交叉（旧类仍有 desk 消费方，勿删）。
@@ -5393,6 +5394,14 @@ th.num .th-sort {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* CA/PA 与价格三行的一层容器（v6.60.9）：桌面竖排，≤760 见本块末尾的横排块 */
+.mkt-card-mid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
 
 /* rail 骨架 A：CA / PA 大数字（颜色来自 .attr-*，这里只管排版） */
@@ -5750,6 +5759,30 @@ th.num .th-sort {
   from {
     transform: translateY(18px);
     opacity: .55;
+  }
+}
+
+/* 挂牌卡窄屏重排（v6.60.9）：CA/PA 从「挂牌价上面一条」改成「价格三行右边的竖列」——
+   375 视口实测每张卡从 258px 掉到 191px（省 66px，正好是 rail 一整条 + 层间 8px）。
+   DOM 顺序仍是 rail → rows，用 order 把 rail 换到右边，读屏顺序不变；rail 的左边框在横排下
+   正好当分隔线，无需另加边框。 */
+@media (max-width: 760px) {
+  .mkt-card-mid {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mkt-card-mid .mkt-rows {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .mkt-card-mid .mkt-rail {
+    order: 1;
+    flex: 0 0 auto;
+    gap: 16px;
+    padding-left: 10px;
   }
 }
 

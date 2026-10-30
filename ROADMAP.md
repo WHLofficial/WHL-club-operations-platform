@@ -81,6 +81,20 @@
 
 ---
 
+## v6.60.9 · 挂牌卡窄屏 CA/PA 挪到价格三行右边（2026-10-30）
+
+**状态**：**未上线**——分支 `fix/v6.60.5-forced-fc-growth-perm`，紧接 v6.60.8；无迁移、无 schema 变更。判级 patch。起因：用户「挂牌卡窄屏把CAPA模块放在挂牌价当前最高出价次数的右边，以节省纵向空间」。
+
+**交付**
+
+- `web/src/pages/market/MarketBoardPage.tsx`：`.mkt-rail`（CA/PA）与 `.mkt-rows`（挂牌价 / 当前最高 / 出价次数）包进新容器 `.mkt-card-mid`；桌面排布与 DOM 顺序都不动，换位只走 CSS。
+- `web/src/styles.css`：`.mkt-card-mid` 基规则竖排；`@media (max-width: 760px)` 里翻 `row`、`.mkt-rail{order:1;flex:0 0 auto}` 换到右侧、`.mkt-rows{flex:1 1 auto;min-width:0}` 吃左侧，rail 的左边框当分隔线。真机几何：375 卡片高 258 → 191.4（省 66px）；320 行宽 142px、无行内溢出、文档零横向溢出；1440 仍竖排。
+- 测试：`MarketCard.test.tsx` +1 例锁容器与 DOM 顺序；新增 `tests/market-card-narrow-layout.test.ts` 3 例（基规则 / ≤760 块三条声明 / JSX 归属）。
+
+**验收**：typecheck 三份全清；vitest **171 文件 / 2764 例全绿**；build `index-BNmzvrwg.js` 714.95 kB / gzip 225.71 kB（原始 714,946 B）、CSS `index-zWdqEd9v.css`；e2e **29/29**（首轮 ⑫ 超时误报，单跑通过、全量重跑全绿）。
+
+**遗留**：发布待用户明确下令。
+
 ## v6.60.8 · 挂牌卡队徽与领先买家、浮层首开、CA/PA 配色（2026-10-30）
 
 **状态**：**已上线（2026-10-30）**——push `cf9b74b..2cf8df6`（分支 `fix/v6.60.5-forced-fc-growth-perm` → `main`，与 v6.60.7 同一趟推送），CF Workers Builds 自动部署 Version `7fb2d985-7dfd-435e-857f-225b14305387` @2026-10-30T11:58:58.619Z；无迁移、无 schema 变更。判级 patch。起因：用户「修复转会区卡片队徽显示回退到色块+首字的问题；修复剩余时间右边显示的不是当前领先买家的问题」，随后追加「点击挂牌卡浮层首次开启慢」「挂牌卡的 CA/PA 要对齐五档配色方案」。

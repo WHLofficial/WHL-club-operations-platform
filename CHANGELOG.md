@@ -4,6 +4,18 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.9] · 挂牌卡窄屏 CA/PA 挪到价格三行右边（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「挂牌卡窄屏把CAPA模块放在挂牌价当前最高出价次数的右边，以节省纵向空间」。判级 patch。
+
+**Changed**
+
+- `web/src/pages/market/MarketBoardPage.tsx`：`MarketCard` 的 `.mkt-rail`（CA/PA）与 `.mkt-rows`（挂牌价 / 当前最高 / 出价次数）包进新的 `.mkt-card-mid`。桌面形态不变（CA/PA 自成一条压在价格三行上），DOM 顺序也不动（rail 仍在前），换位只靠 CSS。
+- `web/src/styles.css`：新增 `.mkt-card-mid`（`flex-direction: column`）与 `@media (max-width: 760px)` 重排块——容器翻成 `row`，`.mkt-rail` 给 `order: 1` 换到右边（读屏顺序仍按 DOM）、`flex: 0 0 auto` 不被压，`.mkt-rows` 给 `flex: 1 1 auto` 吃左侧剩余宽度；rail 原有的左边框在横排下正好当分隔线，不另加边框。真机几何（构建产物 + 卡片真 DOM 在 Chrome 里量）：375 视口卡片高 **258px → 191.4px**（省 66px，等于 rail 一整条 + 层间 8px）；320 视口价格三行仍有 142px 宽、`rowOverflow=false`、文档零横向溢出；1440 视口仍竖排（rail 在 rows 上方）。
+- 测试：`web/src/pages/market/MarketCard.test.tsx` 新增「中段容器」1 例（rail 与 rows 同属 `.mkt-card-mid`、DOM 顺序仍 rail 在前、卡脚在容器外）；新增 `tests/market-card-narrow-layout.test.ts` 3 例——文本级锁住容器竖排基规则、「≤760 块里 row + `.mkt-rail{order:1}` + `.mkt-rows{flex:1 1 auto}`」、以及 JSX 里 rail/rows 确实落在容器内（媒体块或 order 被下批重构删掉就红）。
+
+**验收**：typecheck 三份全清；vitest **171 文件 / 2764 例全绿**（新增 `tests/market-card-narrow-layout.test.ts` 3 例、`MarketCard.test.tsx` +1 例）；build `index-BNmzvrwg.js` 714.95 kB / gzip 225.71 kB（原始 714,946 B）、CSS `index-zWdqEd9v.css` 113.89 kB；e2e **29/29**（首轮 ⑫ 全路由 375 溢出扫描超时误报，单跑 ⑫ 92s 通过，全量重跑 29/29）。
+
 ## [v6.60.8] · 挂牌卡队徽与领先买家、浮层首开、CA/PA 配色（2026-10-30）
 
 **已上线（2026-10-30）**：push `cf9b74b..2cf8df6`（分支 `fix/v6.60.5-forced-fc-growth-perm` → `main`，与 v6.60.7 同一趟推送），CF Workers Builds 自动部署 Version `7fb2d985-7dfd-435e-857f-225b14305387` @2026-10-30T11:58:58.619Z；无迁移、无 schema 变更。依据用户口径：「修复转会区卡片队徽显示回退到色块+首字的问题」「修复剩余时间右边显示的不是当前领先买家的问题」，以及随后追加的「点击挂牌卡浮层首次开启慢」「挂牌卡的 CA/PA 要对齐五档配色方案」。判级 patch。

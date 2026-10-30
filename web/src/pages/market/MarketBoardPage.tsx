@@ -155,35 +155,39 @@ export function MarketCard({
         {listing.player.position ?? '—'} · {listing.player.age ?? '—'} 岁
       </div>
 
-      <div className="mkt-rail">
-        <span className="mkt-rail-cell">
-          <span className="mkt-rail-lab">CA</span>
-          <span className={`mkt-rail-num mono${listing.player.ca === null ? '' : ` ${attrClass(listing.player.ca)}`}`}>
-            {listing.player.ca ?? '—'}
+      {/* CA/PA 与价格三行包在一层里（v6.60.9）：桌面竖排（CA/PA 一条、价格三行一条），
+          ≤760 改成横排——rail 换到右边当竖列，省掉一整条卡高。DOM 顺序不动，靠 CSS order 换位。 */}
+      <div className="mkt-card-mid">
+        <div className="mkt-rail">
+          <span className="mkt-rail-cell">
+            <span className="mkt-rail-lab">CA</span>
+            <span className={`mkt-rail-num mono${listing.player.ca === null ? '' : ` ${attrClass(listing.player.ca)}`}`}>
+              {listing.player.ca ?? '—'}
+            </span>
           </span>
-        </span>
-        <span className="mkt-rail-cell">
-          <span className="mkt-rail-lab">PA</span>
-          <span className={`mkt-rail-num mono${listing.player.pa === null ? '' : ` ${attrClass(listing.player.pa)}`}`}>
-            {listing.player.pa ?? '—'}
+          <span className="mkt-rail-cell">
+            <span className="mkt-rail-lab">PA</span>
+            <span className={`mkt-rail-num mono${listing.player.pa === null ? '' : ` ${attrClass(listing.player.pa)}`}`}>
+              {listing.player.pa ?? '—'}
+            </span>
           </span>
-        </span>
-      </div>
+        </div>
 
-      <div className="mkt-rows">
-        <div className="mkt-row">
-          <span className="mkt-labr">{listing.type === 'activation' ? '激活价' : '挂牌价'}</span>
-          <span className="mkt-val mono">{money(listing.askPrice)}m</span>
-        </div>
-        <div className="mkt-row">
-          <span className="mkt-labr">当前最高</span>
-          <span className={`mkt-val mono${listing.highestBid != null ? ' mkt-hi' : ''}`}>
-            {listing.highestBid == null ? '还没人出价' : `${money(listing.highestBid)}m`}
-          </span>
-        </div>
-        <div className="mkt-row">
-          <span className="mkt-labr">出价次数</span>
-          <span className="mkt-val mono mkt-count">{listing.bidCount} 次</span>
+        <div className="mkt-rows">
+          <div className="mkt-row">
+            <span className="mkt-labr">{listing.type === 'activation' ? '激活价' : '挂牌价'}</span>
+            <span className="mkt-val mono">{money(listing.askPrice)}m</span>
+          </div>
+          <div className="mkt-row">
+            <span className="mkt-labr">当前最高</span>
+            <span className={`mkt-val mono${listing.highestBid != null ? ' mkt-hi' : ''}`}>
+              {listing.highestBid == null ? '还没人出价' : `${money(listing.highestBid)}m`}
+            </span>
+          </div>
+          <div className="mkt-row">
+            <span className="mkt-labr">出价次数</span>
+            <span className="mkt-val mono mkt-count">{listing.bidCount} 次</span>
+          </div>
         </div>
       </div>
 
