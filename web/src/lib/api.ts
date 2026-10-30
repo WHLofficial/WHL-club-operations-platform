@@ -804,6 +804,8 @@ export interface SquadPlayerRow {
   pendingSource?: ContractPendingView['source'] | null;
   pendingProtectionTicks?: number | null;
   pendingEffectiveWindowSeq?: number | null;
+  /** v6.62.0 §5.6：免费续约机会可用（free_rc_change_used=0），续约入口据此提示「本次免费」 */
+  freeRcAvailable?: boolean;
 }
 
 export interface SquadOverview {
@@ -1265,6 +1267,8 @@ export interface RcChangeResult {
   oldReleaseFee: number;
   newReleaseFee: number;
   changeFee: number;
+  /** v6.62.0 §5.6：本次走了免费通道（提价免差额、保护期不变；降价也置 true） */
+  freeRcChange?: boolean;
 }
 
 export interface TerminationResult {

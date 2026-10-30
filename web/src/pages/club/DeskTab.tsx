@@ -756,9 +756,11 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
         newReleaseFee: Number(newFee),
       });
       show(
-        res.changeFee > 0
-          ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，加价部分 30% 共 ${res.changeFee.toFixed(2)}m 待审核时收。`
-          : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，降价免费，保护期从审核通过那一刻重新起算。`,
+        res.freeRcChange === true
+          ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，本次免费（提价不收差额），保护期不变。`
+          : res.changeFee > 0
+            ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，加价部分 30% 共 ${res.changeFee.toFixed(2)}m 待审核时收，保护期在本窗关闭时结束。`
+            : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，降价免费，保护期在本窗关闭时结束。`,
       );
       setRcPlayerId('');
       setNewFee('');
@@ -795,8 +797,9 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
       <h3>续约与解约</h3>
       {toastNode}
       <p className="hint">
-        两种方式都直接开单送管理组审核：续约改违约金（违约金 ≤ 20m 时幅度 ±10m、超过 20m 时幅度 ±50%；提高付差额的 30%，降低免费，
-        原保护期自审核通过起结束）；解约效力满 3 赛季免费，不足 3 赛季按违约金 ×（3 − 效力赛季数）× 10% 回收解约费，被解约球员本窗全联盟禁签。
+        两种方式都直接开单送管理组审核：续约改违约金（违约金 ≤ 20m 时幅度 ±10m、超过 20m 时幅度 ±50%）。每份合同有一次免费续约机会——
+        提价不收差额、保护期不变，用完后提高付差额的 30%、降低免费，保护期在本窗关闭时结束。解约效力满 3 赛季免费，
+        不足 3 赛季按违约金 ×（3 − 效力赛季数）× 10% 回收解约费，被解约球员本窗全联盟禁签。
       </p>
       {formal.length === 0 ? (
         <p className="muted">队里还没有带正式合同的球员，这两条操作都做不了。</p>
@@ -840,7 +843,10 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
           {rcPlayer && rcBounds && (
             <p className="hint">
               {rcPlayer.name} 现违约金 {(rcPlayer.releaseFee ?? 0).toFixed(2)}m，允许幅度 {rcBounds.label}：
-              {' '}{rcBounds.lo.toFixed(2)} – {rcBounds.hi.toFixed(2)}m。提高要付差额的 30%，降低免费。
+              {' '}{rcBounds.lo.toFixed(2)} – {rcBounds.hi.toFixed(2)}m。
+              {rcPlayer.freeRcAvailable
+                ? '本次免费：提价不收差额、保护期不变（每份合同一次）。'
+                : '提高要付差额的 30%，降低免费；保护期在本窗关闭时结束。'}
             </p>
           )}
 

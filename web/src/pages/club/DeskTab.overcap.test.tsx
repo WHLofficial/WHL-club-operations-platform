@@ -214,3 +214,32 @@ describe('注册工作台：关窗后超帽的提交前确认（v6.54.0 §10.5 /
     expect(apiPostMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('续约入口的免费提示（v6.62.0 §5.6 / TC-RF-12）', () => {
+  it('freeRcAvailable=true：选人后提示「本次免费：提价不收差额、保护期不变」', async () => {
+    renderDesk(
+      squadFixture({
+        players: [player({ id: 7, name: '张三', freeRcAvailable: true }), player({ id: 8, name: '李四' })],
+      }),
+    );
+    expect(await screen.findByText(/续约与解约/)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('续约球员'), { target: { value: '7' } });
+    const hint = screen.getByText(/允许幅度/);
+    expect(hint.textContent).toContain('本次免费：提价不收差额、保护期不变');
+  });
+
+  it('freeRcAvailable 缺省（已用）：提示恢复现状口径，不出「本次免费」', async () => {
+    renderDesk(
+      squadFixture({
+        players: [player({ id: 8, name: '李四' })],
+      }),
+    );
+    expect(await screen.findByText(/续约与解约/)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('续约球员'), { target: { value: '8' } });
+    const hint = screen.getByText(/允许幅度/);
+    expect(hint.textContent).toContain('提高要付差额的 30%');
+    expect(hint.textContent).not.toContain('本次免费');
+  });
+});

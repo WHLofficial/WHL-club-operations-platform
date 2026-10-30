@@ -152,6 +152,7 @@ export function ContractDualView({
           </span>
           <span className="cv-next">待生效（本窗关闭后）</span>
           <span className="cv-badge">{PENDING_SOURCE_LABEL[pending.source]}</span>
+          {pending.freeRcChange && <span className="cv-badge">本次免费</span>}
           <span className="cv-badge">本窗关闭时</span>
         </div>
       )}

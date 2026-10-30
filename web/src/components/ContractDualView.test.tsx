@@ -87,4 +87,13 @@ describe('ContractDualView（v6.54.0 §10.4）', () => {
     expect(screen.queryByText('待生效')).toBeNull();
     expect(screen.queryByText('待生效（本窗关闭后）')).toBeNull();
   });
+
+  it('免费续约（v6.62.0 §5.6）：freeRcChange=true 渲染「本次免费」徽标，false 不渲染', () => {
+    render(<ContractDualView contract={CONTRACT} pending={{ ...PENDING, freeRcChange: true }} applied={null} ownerView />);
+    expect(screen.getByText('本次免费')).toBeTruthy();
+
+    cleanup();
+    render(<ContractDualView contract={CONTRACT} pending={PENDING} applied={null} ownerView />);
+    expect(screen.queryByText('本次免费')).toBeNull();
+  });
 });

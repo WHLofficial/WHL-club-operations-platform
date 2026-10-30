@@ -75,11 +75,13 @@ interface ContractInfo {
   source: string | null;
   serviceSeasons: number | null;
   protected: boolean;
+  // v6.62.0 §5.6：免费续约机会还没用（0 = 下一张续约单自动免费）
+  freeRcUsed: number;
 }
 
 async function loadContractMap(env: Env, clubId: number): Promise<Map<number, ContractInfo>> {
   const rows = await env.DB.prepare(
-    `SELECT player_id, wage, release_fee, contract_type, source, service_ticks, protection_ticks,
+    `SELECT player_id, wage, release_fee, contract_type, source, service_ticks, protection_ticks, free_rc_change_used,
             ${CURRENT_TICKS_SQL} AS current_ticks
      FROM contracts WHERE club_id = ? AND is_active = 1 LIMIT 500`,
   )
@@ -92,6 +94,7 @@ async function loadContractMap(env: Env, clubId: number): Promise<Map<number, Co
       source: string | null;
       service_ticks: number | null;
       protection_ticks: number | null;
+      free_rc_change_used: number;
       current_ticks: number;
     }>();
   return new Map(
@@ -105,6 +108,7 @@ async function loadContractMap(env: Env, clubId: number): Promise<Map<number, Co
         // 效力时长（赛季）与保护期口径同 routes/players.ts:799-800
         serviceSeasons: serviceSeasons(r.service_ticks ?? 0, r.current_ticks),
         protected: r.protection_ticks !== null && r.current_ticks < r.protection_ticks,
+        freeRcUsed: r.free_rc_change_used,
       },
     ]),
   );
@@ -236,6 +240,8 @@ app.get('/club/squad', async (c) => {
         pendingSource: pending?.source ?? null,
         pendingProtectionTicks: pending?.protectionTicks ?? null,
         pendingEffectiveWindowSeq: pending?.effectiveWindowSeq ?? null,
+        // 免费续约机会（v6.62.0 §5.6）：只有本队教练可见，控制续约入口的「本次免费」提示
+        freeRcAvailable: contract !== null && contract.freeRcUsed === 0,
       };
     }),
     pendingSummary: { count: pendingChanges.length, wageDelta: Math.round(pendingWageDelta * 100) / 100 },
