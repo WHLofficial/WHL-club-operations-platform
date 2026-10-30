@@ -775,7 +775,7 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
   });
 });
 
-describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属俱乐部的教练能操作（v6.60.5）', () => {
+describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属俱乐部的教练能操作（v6.60.5 立，v6.60.11 改判据为绑定）', () => {
   function growthFixture(): GrowthDetail {
     return {
       player: {
@@ -851,9 +851,21 @@ describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属�
     expect(screen.queryByText('只有球员所属俱乐部的教练能选升级方案。')).toBeNull();
   });
 
-  it('TC-GROWTH-PERM-03 · 管理组也不能替球员所属俱乐部选方案/发徽章', async () => {
+  it('TC-GROWTH-PERM-03 · 兼任本队教练的管理账号能选方案/发徽章（角色不再一票否决）', async () => {
     authState.user = { role: 'admin' };
     stubGrowthPage(11);
+    const user = open();
+    await screen.findByText('林承宇');
+    await user.click(screen.getByRole('button', { name: '成长' }));
+
+    expect(await screen.findByRole('button', { name: /方案 1/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /发放中国计划徽章/ })).toBeTruthy();
+    expect(screen.queryByText('只有球员所属俱乐部的教练能选升级方案。')).toBeNull();
+  });
+
+  it('TC-GROWTH-PERM-04 · 管理账号绑的不是这支队时仍是只读（不绑队的纯管理账号同样只读）', async () => {
+    authState.user = { role: 'admin' };
+    stubGrowthPage(33);
     const user = open();
     await screen.findByText('林承宇');
     await user.click(screen.getByRole('button', { name: '成长' }));

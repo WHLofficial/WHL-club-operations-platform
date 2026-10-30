@@ -6,17 +6,19 @@
 
 | 键 | 改前 | 改后 | 生效面 |
 | --- | --- | --- | --- |
+| `squad_min` | `19` | **`20`** | 注册校验 `squad_size` 下限、工作台「一线队 N/上限」的下限（同轮追加，脚本 `04-squad-min-20.sql`） |
 | `squad_max` | `32` | **`30`** | 注册校验 `squad_size`、教练工作台「一线队 N/上限」 |
 | `trainee_max` | `8` | **`7`** | 注册校验 `trainee_size`、工作台「训练营 N/上限」 |
 | `ca_pa_limits` | premier `growthPa87: 7`、second `6` | 两档都 **`6`** | 注册校验 `ca_pa` 的成长名额档、阵容卡片绿标计数 |
 
-`ge90` / `ge87` / `squad_min`（19）/ `gk_min` 保持原值。
+`ge90` / `ge87` / `gk_min` 保持原值。
 
 ## 执行
 
 ```bash
 npx wrangler d1 execute whl-club --remote --file scripts/prod-20261030-squad-limits-revert/01-precheck.sql
 npx wrangler d1 execute whl-club --remote --file scripts/prod-20261030-squad-limits-revert/02-apply.sql
+npx wrangler d1 execute whl-club --remote --file scripts/prod-20261030-squad-limits-revert/04-squad-min-20.sql
 npx wrangler d1 execute whl-club --remote --file scripts/prod-20261030-squad-limits-revert/03-verify.sql
 ```
 
@@ -25,6 +27,7 @@ npx wrangler d1 execute whl-club --remote --file scripts/prod-20261030-squad-lim
 ## 回滚
 
 ```sql
+UPDATE config SET value = '19' WHERE key = 'squad_min';
 UPDATE config SET value = '32' WHERE key = 'squad_max';
 UPDATE config SET value = '8'  WHERE key = 'trainee_max';
 UPDATE config SET value = json_set(value, '$.premier.growthPa87', 7, '$.second.growthPa87', 6) WHERE key = 'ca_pa_limits';

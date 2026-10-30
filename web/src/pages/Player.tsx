@@ -606,6 +606,8 @@ export default function Player() {
               会把主列整块掏空（2026-10-29 e2e 五视口复核实测）。 */}
           {tab === 'attrs' && <AttrSheet attrs={attrs} position={player.position} playstyles={playstyles} />}
 
+          {/* 成长入口写权限（v6.60.11）：本队即教练——以绑定判、不看角色，兼任本队教练的管理账号
+              也要能自己选方案；服务端同样按绑定判（growth.ts 的 getBoundClub），两边口径一致 */}
           {tab === 'growth' && growth && (
             <GrowthBlock
               growth={growth}
@@ -616,7 +618,7 @@ export default function Player() {
               silverOptions={silverOptions}
               goldOptions={goldOptions}
               chinaPlan={player.chinaPlan}
-              canManage={user?.role === 'coach' && isMine}
+              canManage={isCoach && isMine}
               busy={busy}
               onChoosePlan={choosePlan}
               onTogglePick={togglePick}

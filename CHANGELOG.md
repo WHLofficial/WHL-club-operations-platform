@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.11] · 兼任本队教练的管理账号能自己选成长方案（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「我作为超管和里昂教练，怎么不能选我队人的成长方案？」。判级 patch。
+
+**Fixed**
+
+- v6.60.5 把成长入口从「本队教练或管理组」收成「球员所属俱乐部的教练」时，判据写成了 `user.role === 'admin' || 绑定不匹配`——管理组账号被角色一票否决，连带把「超管本人就是这支队教练」的情况也挡在外面（生产里超管兼任里昂教练）。现在两处服务端闸（`POST /api/growth/levelup/:playerId`、`POST /api/growth/china-playstyles/:playerId`，`src/worker/routes/growth.ts`）只按认证中心绑定判：`getBoundClub(user)` 的俱乐部必须等于球员 `club_id`。没绑队的纯管理账号 `getBoundClub` 返回 null，照样 403——「管理组不能代办」的初衷不变，变的是「兼任教练的管理账号能自己办」。
+- `web/src/pages/Player.tsx`：`GrowthBlock` 的 `canManage` 由 `user?.role === 'coach' && isMine` 改为 `isCoach && isMine`（`isCoach` = 教练或管理组，`isMine` = 绑定俱乐部就是这名球员现属俱乐部），与服务端同口径；按钮与只读提示的切换只认绑定。
+- 测试：`tests/growth.test.ts` 新增 1 例——把管理账号绑到球员所属俱乐部后可升级（200，CA 78→79），绑的是别队则 403；`web/src/pages/Player.test.tsx` 的 TC-GROWTH-PERM-03 改判「兼任本队教练的管理账号能选方案」、新增 TC-GROWTH-PERM-04「管理账号绑的不是这支队时仍只读」。
+
+**同轮生产数据（无代码变更）**：`config.squad_min` 19 → **20**（一线队下限），脚本 `scripts/prod-20261030-squad-limits-revert/04-squad-min-20.sql`，回滚见该目录 README。
+
+**验收**：typecheck 三份全清；vitest **172 文件 / 2770 例全绿**（`tests/growth.test.ts` 29 例、`Player.test.tsx` 32 例）。
+
 ## [v6.60.10] · 强制挂牌在转会区置顶、卡头「强拍」徽标（2026-10-30）
 
 **未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「强制挂牌在转会区始终排在最前」。判级 patch。

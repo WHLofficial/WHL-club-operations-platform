@@ -153,6 +153,8 @@ app.get('/players/:id/growth', async (c) => {
 });
 
 // 升级方案二选一（§10.2）：球员所属俱乐部的教练，逐次消费待办；带徽章的方案要一起交 picks
+// 教练判定以认证中心绑定为准、不看角色（v6.60.11）：兼任本队教练的管理账号要能自己操作，
+// 没绑队的纯管理账号 getBoundClub 返回 null，照样 403。
 app.post('/growth/levelup/:playerId', async (c) => {
   const user = await requireUser(c.env, c.req.raw);
   const playerId = Number(c.req.param('playerId'));
@@ -162,7 +164,7 @@ app.post('/growth/levelup/:playerId', async (c) => {
   const player = await c.env.DB.prepare('SELECT id, club_id FROM players WHERE id = ?').bind(playerId).first<{ id: number; club_id: number | null }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (user.role === 'admin' || !club || club.id !== player.club_id) {
+  if (!club || club.id !== player.club_id) {
     throw new HttpError(403, '只有球员所属俱乐部的教练能选升级方案');
   }
   const out = await applyLevelUp(c.env, user.id, playerId, body?.planIndex, body?.picks);
@@ -170,6 +172,7 @@ app.post('/growth/levelup/:playerId', async (c) => {
 });
 
 // 中国球员计划自选银徽章（§10）：球员所属俱乐部的教练，名额 = config.china_badges − 已发数
+// 同上（v6.60.11）：以绑定判教练，兼任本队教练的管理账号不再被角色挡在外面
 app.post('/growth/china-playstyles/:playerId', async (c) => {
   const user = await requireUser(c.env, c.req.raw);
   const playerId = Number(c.req.param('playerId'));
@@ -182,7 +185,7 @@ app.post('/growth/china-playstyles/:playerId', async (c) => {
   if (!player) throw new HttpError(404, '找不到这名球员');
   if (player.china_plan !== 1) throw new HttpError(409, '这名球员不在中国球员计划里');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (user.role === 'admin' || !club || club.id !== player.club_id) {
+  if (!club || club.id !== player.club_id) {
     throw new HttpError(403, '只有球员所属俱乐部的教练能发中国计划徽章');
   }
   const out = await grantChinaPlaystyles(c.env, user.id, playerId, body?.picks);

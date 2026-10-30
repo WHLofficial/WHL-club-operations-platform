@@ -595,6 +595,21 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     expect(anon.status).toBe(401);
   });
 
+  it('v6.60.11：管理账号绑定了球员所属俱乐部时就是该队教练，能自己选方案（角色不再一票否决）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec("UPDATE players SET growth_xp = 12 WHERE id = 20");
+    // 账号甲（role=admin）同时是曼城的教练——生产里超管兼任里昂教练就是这个形状
+    fx.sqlite.exec("INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (2, 1, '2026-01-01T00:00:00Z')");
+
+    const res = await post('/api/growth/levelup/20', { planIndex: 0 }, 'tok-admin', fx.env); // 赵六属曼城
+    expect(res.status).toBe(200);
+    expect(sqlGet<{ ca: number }>(fx.sqlite, 'SELECT ca FROM players WHERE id = 20')?.ca).toBe(79);
+    // 绑的是曼城，动不了阿森纳的人
+    const otherClub = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    expect(otherClub.status).toBe(403);
+  });
+
   it('TC-GROWTH-PA-01 v6.60.3：升级 CA 不得超过 PA（剩余潜力不足时按差额截断，到顶后为 0）', async () => {
     const fx = freshEnv();
     seedPlatform(fx);
