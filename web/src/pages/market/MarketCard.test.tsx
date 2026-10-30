@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // v6.24.0 批次 B 卡片口径（TC-B03）：状态徽标三态统一——只看挂单状态与首价窗，不看是否已有人出价；
 // 顺带锁住 rail 骨架的 CA/PA 五档配色挂类与底部读秒文案。
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import type { MarketListing } from '../../lib/api.ts';
 import { MarketCard } from './MarketBoardPage.tsx';
@@ -32,10 +32,14 @@ function listing(patch: Partial<MarketListing> = {}): MarketListing {
   };
 }
 
-function renderCard(l: MarketListing) {
+function renderCard(
+  l: MarketListing,
+  logoOf?: (clubId: number | null) => string | null,
+  onPrefetch?: () => void,
+) {
   return render(
     <MemoryRouter>
-      <MarketCard listing={l} mine={false} onOpen={() => {}} />
+      <MarketCard listing={l} mine={false} logoOf={logoOf} onPrefetch={onPrefetch} onOpen={() => {}} />
     </MemoryRouter>,
   );
 }
@@ -94,9 +98,58 @@ describe('MarketCard rail 与读秒（v6.24.0）', () => {
     renderCard(listing({ deadlineAt: null }));
     expect(screen.getByText('⏱ 剩 —')).toBeTruthy();
   });
+});
 
-  it('队名与卖方 logo 同排出现在卡脚', () => {
+// v6.60.8：卡脚右侧从卖方改成当前领先买家（卖方身份由卡头的队徽承担）
+describe('MarketCard 卡脚领先买家（v6.60.8）', () => {
+  it('有出价时卡脚右侧是领先买家，不再重复卖方队名', () => {
+    renderCard(listing({ highestBid: 99, highestBidder: { id: 4, name: '领先俱乐部' }, bidCount: 2 }));
+    expect(screen.getByText('领先俱乐部')).toBeTruthy();
+    expect(screen.queryByText('卖方俱乐部')).toBeNull();
+  });
+
+  it('无人出价时卡脚右侧给占位文案，不拿卖方名充数', () => {
     renderCard(listing());
-    expect(screen.getByText('卖方俱乐部')).toBeTruthy();
+    expect(screen.getByText('无人领先')).toBeTruthy();
+    expect(screen.queryByText('卖方俱乐部')).toBeNull();
+  });
+
+  it('卖方与领先买家的队徽都吃 club_id → logoKey 映射，不再回落色块', () => {
+    const { container } = renderCard(
+      listing({ highestBid: 99, highestBidder: { id: 4, name: '领先俱乐部' }, bidCount: 2 }),
+      (clubId) => (clubId === null ? null : `club-${clubId}.png`),
+    );
+    expect(screen.getByAltText('卖方俱乐部').getAttribute('src')).toBe('/api/media/club-3.png');
+    expect(screen.getByAltText('领先俱乐部').getAttribute('src')).toBe('/api/media/club-4.png');
+    expect(container.querySelectorAll('.team-logo-fallback').length).toBe(0);
+  });
+
+  it('映射缺 key 时才回落色块（自由身卖方 / 目录里没有的队）', () => {
+    const { container } = renderCard(listing({ highestBid: 99, highestBidder: { id: 4, name: '领先俱乐部' }, bidCount: 2 }), () => null);
+    expect(container.querySelectorAll('.team-logo-fallback').length).toBe(2);
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+});
+
+// v6.60.8：浮层是点开才挂载的，详情请求原本也压到那一刻。卡片被指向 / 按下 / 聚焦时先预取，
+// 点开时详情多半已在缓存（hook 侧口径见 queries.ts 的 useListingPrefetch）
+describe('MarketCard 详情预取（v6.60.8）', () => {
+  it('指针进入、按下、聚焦都触发预取，点击仍只负责开浮层', () => {
+    const prefetched = vi.fn();
+    let opened = 0;
+    render(
+      <MemoryRouter>
+        <MarketCard listing={listing()} mine={false} onPrefetch={prefetched} onOpen={() => { opened += 1; }} />
+      </MemoryRouter>,
+    );
+    const card = screen.getByRole('button');
+    // React 的 onPointerEnter 是从 pointerover 合成出来的，所以这里发 pointerOver
+    fireEvent.pointerOver(card);
+    fireEvent.pointerDown(card);
+    fireEvent.focus(card);
+    expect(prefetched).toHaveBeenCalledTimes(3);
+    expect(opened).toBe(0);
+    fireEvent.click(card);
+    expect(opened).toBe(1);
   });
 });

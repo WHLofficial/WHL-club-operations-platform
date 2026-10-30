@@ -44,6 +44,7 @@ export function MarketListingOverlay({
   myClub,
   available,
   creditLine,
+  logoOf,
   onClose,
   onBidDone,
 }: {
@@ -52,6 +53,8 @@ export function MarketListingOverlay({
   available: number | null;
   /** 预期收入额度（v6.57.0）：与 available 同源的余额端点快照字段，出价/匹配提示用 */
   creditLine: number | null;
+  /** club_id → 队徽 R2 键（v6.60.8，与卡片同口径：页面用 /api/clubs 目录折好传进来）；缺省时 TeamLogo 回落色块 */
+  logoOf?: (clubId: number | null) => string | null;
   onClose: () => void;
   /** 出价 / 匹配决定成功后让页面刷新「已冻结资金」口径 */
   onBidDone: () => void;
@@ -147,6 +150,7 @@ export function MarketListingOverlay({
             myClub={myClub}
             available={available}
             creditLine={creditLine}
+            logoOf={logoOf}
             remaining={remaining}
             success={success}
             matchFee={matchFee}
@@ -171,6 +175,7 @@ function OverlayBody({
   myClub,
   available,
   creditLine,
+  logoOf,
   remaining,
   success,
   matchFee,
@@ -187,6 +192,8 @@ function OverlayBody({
   myClub: MarketMyClub | null;
   available: number | null;
   creditLine: number | null;
+  /** club_id → 队徽 R2 键；缺省时 TeamLogo 回落色块（见 MarketListingOverlay 的同名 prop） */
+  logoOf?: (clubId: number | null) => string | null;
   remaining: number | null;
   success: string | null;
   matchFee: string;
@@ -281,7 +288,7 @@ function OverlayBody({
         <div>
           <dt>卖方</dt>
           <dd className="mkt-ov-club">
-            <TeamLogo name={l.sellerClub.name} size={16} /> {l.sellerClub.name}
+            <TeamLogo name={l.sellerClub.name} logoKey={logoOf?.(l.sellerClub.id)} size={16} /> {l.sellerClub.name}
           </dd>
         </div>
       </dl>
@@ -392,7 +399,7 @@ function OverlayBody({
                 <tr key={b.id}>
                   <td>
                     <span className="mkt-ov-bidder">
-                      <TeamLogo name={b.clubName} size={16} />
+                      <TeamLogo name={b.clubName} logoKey={logoOf?.(b.clubId)} size={16} />
                       <Link to={`/clubs/${b.clubId}`}>{b.clubName}</Link>
                     </span>
                   </td>

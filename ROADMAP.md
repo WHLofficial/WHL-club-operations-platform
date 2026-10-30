@@ -81,6 +81,22 @@
 
 ---
 
+## v6.60.8 · 挂牌卡队徽与领先买家、浮层首开、CA/PA 配色（2026-10-30）
+
+**状态**：**未上线**——分支 `fix/v6.60.5-forced-fc-growth-perm`，紧接 v6.60.7；无迁移、无 schema 变更。判级 patch。起因：用户「修复转会区卡片队徽显示回退到色块+首字的问题；修复剩余时间右边显示的不是当前领先买家的问题」，随后追加「点击挂牌卡浮层首次开启慢」「挂牌卡的 CA/PA 要对齐五档配色方案」。
+
+**交付**
+
+- `web/src/pages/market/MarketBoardPage.tsx`：卡头/卡脚的 `TeamLogo` 此前没传 `logoKey`，一律回落成「队名哈希色块 + 首字」。改用 `useClubsList()`（`/api/clubs`，服务端 clubs scope 缓存 24h）折 `club_id → logoKey` 映射，`logoOf(clubId)` 下传卡片与浮层；`MarketCard` 新增可选 `logoOf`，浮层 `MarketListingOverlay` 新增可选 `logoOf`（壳与 `OverlayBody` 两层都传，「卖方」行随之出真徽）。真源仍是比赛系统 `team.logo_key`，`clubs.logo_key` 休眠列不读不写；`/market/listings` 这个无 `cachedJson`、公开限流 60 req/60s/IP 的热端点不加读。
+- 卡脚右侧（`.mkt-card-foot`）由卖方改成当前领先买家：`领先` 标签（新类 `.mkt-tn-lab`）+ 买家队徽 + 队名，无人出价给「无人领先」（`.mkt-tn.mkt-tn-none`）；卖方身份由卡头承担。与浮层「当前最高」行、`SideOps` 同口径。
+- 浮层首开提速：`web/src/lib/queries.ts` 提出 `listingDetailQuery(id)` 供 `useListingDetail` 与新的 `useListingPrefetch()` 共用 key/URL；卡片 `onPointerEnter` / `onPointerDown` / `onFocus` 预取详情（沿用全局 30s staleTime，命中不白重取）。`src/worker/routes/market.ts` 详情端点把 `MAX(amount)` 与 `market_bid_paused` 两条串行 `await` 并进首个 `Promise.all`，从四趟 D1 往返降到两趟（`nextMinBid` 口径与 404 行为不变）。
+- `web/src/styles.css`：`.mkt-rail-num` 的 `color: var(--ink)` 与 `.attr-*` 同特异性且后定义，把 CA/PA 档位色压成墨色。按 `.sqc-v.attr-*` 既有写法补 `.mkt-rail-num.attr-bad|weak|mid|solid|good` 五条覆盖，无值占位仍走 `--ink`。
+- 测试：`web/src/pages/market/MarketCard.test.tsx` 卡脚口径改写 + 「卡脚领先买家」4 例 + 「详情预取」1 例（共 12 例）；新增 `tests/market-card-attr-tone.test.ts` 2 例，文本级锁住五档覆盖规则存在且排在 `.mkt-rail-num` 基规则之后。
+
+**验收**：typecheck 三份全清；vitest **170 文件 / 2760 例全绿**；build `index-BLrSp8W9.js` 714.95 kB / gzip 225.71 kB（原始 714,946 B）；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：发布需用户明确下令。
+
 ## v6.60.7 · CPU 队球员可强制拍卖，成交款销毁（2026-10-30）
 
 **状态**：**未上线**——分支 `fix/v6.60.5-forced-fc-growth-perm`，HEAD 为 v6.60.6 文档提交，CPU 改动待提交；无迁移、无 schema 变更。判级 patch。起因：用户「CPU 队球员不参与强制拍卖改掉，可以参与，跟自由身一样」。

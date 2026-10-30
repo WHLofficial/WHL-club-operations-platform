@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.8] · 挂牌卡队徽与领先买家、浮层首开、CA/PA 配色（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「修复转会区卡片队徽显示回退到色块+首字的问题」「修复剩余时间右边显示的不是当前领先买家的问题」，以及随后追加的「点击挂牌卡浮层首次开启慢」「挂牌卡的 CA/PA 要对齐五档配色方案」。判级 patch。
+
+**Fixed**
+
+- **队徽回落色块**：`web/src/pages/market/MarketBoardPage.tsx` 调 `TeamLogo` 时没传 `logoKey`，卖方与领先买家的队徽一律走 `team-logo-fallback`（队名哈希色块 + 首字）。现在页面用 `useClubsList()`（`/api/clubs`，服务端 clubs scope 缓存 24h、公开放行）折一张 `club_id → logoKey` 映射，`logoOf(clubId)` 同时传给卡片与浮层；浮层「卖方」行由 `MarketListingOverlay` 的 `logoOf?` 透到 `OverlayBody` 后一并生效。队徽真源仍是比赛系统 `team.logo_key`（`/api/clubs` 内部走 AUTH_DB `team.club_id` → TOUR_DB `team.logo_key`），本平台 `clubs.logo_key` 休眠列照旧不读不写；不把两次只读塞进 `/market/listings`（该端点无 `cachedJson`、公开限流 60 req/60s/IP，热路径不加读）。
+- **卡脚右侧改为当前领先买家**：`MarketCard` 的 `.mkt-card-foot` 右半原先是卖方队名 + 卖方徽，与卡头重复且看不出谁在领先；现渲染 `highestBidder`（`领先` 小标签 + 买家队徽 + 队名，`.mkt-tn-lab` 新增），无人出价时给「无人领先」占位（`.mkt-tn.mkt-tn-none`），卖方向由卡头承担。与浮层 `MarketListingOverlay` 的「当前最高」行、`SideOps` 的同一口径对齐。
+- **浮层首开慢**：浮层是点开才挂载的，详情请求（还要先跑 30s 合并的惰性结算）整个压在点下去那一刻。前端新增 `useListingPrefetch()`（`web/src/lib/queries.ts`，与 `useListingDetail` 共用 `listingDetailQuery(id)` 的 key/URL），卡片在 `onPointerEnter` / `onPointerDown` / `onFocus` 时 `prefetchQuery`，点开时多半已在缓存，且沿用全局 30s staleTime 不会白重取；后端 `src/worker/routes/market.ts` 详情端点把 `MAX(amount)`（最高活跃出价）与 `market_bid_paused` 两条串行 `await` 并进首个 `Promise.all`，整个端点从四趟 D1 往返降到两趟。
+- **CA/PA 五档配色**：`web/src/styles.css` 的 `.mkt-rail-num` 自带 `color: var(--ink)`，与 `.attr-*` 同特异性又后定义，把 CA/PA 的档位色整片压成墨色（类照挂、色全丢）。按全仓既有写法（同 `.sqc-v.attr-*`）补 `.mkt-rail-num.attr-bad|weak|mid|solid|good` 五条覆盖，无值占位仍走 `--ink`。
+- 测试：`web/src/pages/market/MarketCard.test.tsx` 改卡脚口径并新增「卡脚领先买家」4 例、「详情预取」1 例（12 例）；新增 `tests/market-card-attr-tone.test.ts` 2 例——文本级锁住五档覆盖规则存在且排在基规则之后（类名挂不挂看得见，层叠结果只有 CSS 能定，组件测试照绿）。
+
+**验收**：typecheck 三份全清；vitest **170 文件 / 2760 例全绿**（新增 `tests/market-card-attr-tone.test.ts` 2 例、`MarketCard.test.tsx` +1 例）；build `index-BLrSp8W9.js` 714.95 kB / gzip 225.71 kB（原始 714,946 B）；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：发布待用户明确下令。
+
 ## [v6.60.7] · CPU 队球员可强制拍卖，成交款销毁（2026-10-30）
 
 **未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「CPU 队球员不参与强制拍卖改掉，可以参与，跟自由身一样」。判级 patch。

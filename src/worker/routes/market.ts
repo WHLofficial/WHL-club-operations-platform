@@ -817,8 +817,11 @@ app.get('/market/listings/:id', async (c) => {
   await settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 });
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
-  const listing = await c.env.DB.prepare(
-    `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
+  // v6.60.8 浮层首开提速：最高出价与「全市场暂停出价」开关都不依赖 listing 行之外的结果，
+  // 原先串在 return 前后各 await 一次 = 多两趟 D1 往返。并进这一趟后，全端点只剩两趟串行往返。
+  const [listing, highestActive, bidPausedRaw] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
             l.listed_day, l.deadline_at, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
             ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.age, p.ca, p.pa,
             cl.name AS seller_name, ca2.name AS activator_name
@@ -827,9 +830,14 @@ app.get('/market/listings/:id', async (c) => {
      LEFT JOIN clubs cl ON cl.id = l.seller_club_id
      LEFT JOIN clubs ca2 ON ca2.id = l.activated_by
      WHERE l.id = ?`,
-  )
-    .bind(id)
-    .first<ListingRow>();
+    )
+      .bind(id)
+      .first<ListingRow>(),
+    c.env.DB.prepare(`SELECT MAX(amount) AS highest FROM bids WHERE listing_id = ? AND status = 'active'`)
+      .bind(id)
+      .first<{ highest: number | null }>(),
+    createConfigService(c.env.DB).get('market_bid_paused'),
+  ]);
   if (!listing) throw new HttpError(404, '这单挂牌不存在（或还没产生）');
 
   const [contract, bids, ctx, windowOpen] = await Promise.all([
@@ -864,10 +872,6 @@ app.get('/market/listings/:id', async (c) => {
         minOffsetDays: listing.type === 'forced' ? 2 : 1,
       }).deadlineAt;
   }
-  const highestActive = await c.env.DB
-    .prepare(`SELECT MAX(amount) AS highest FROM bids WHERE listing_id = ? AND status = 'active'`)
-    .bind(id)
-    .first<{ highest: number | null }>();
   // 评审修复（P2-②）：出价必须为整数，最低可出价向上取整——ceil(最高价+步长) / ceil(挂牌价)，
   // 与 validateBidAmount（整数准入）和表单预填口径一致，避免前端预填一个提交必被拒的小数
   const nextMinBid =
@@ -876,7 +880,7 @@ app.get('/market/listings/:id', async (c) => {
       : Math.ceil(listing.ask_price);
 
   return c.json({
-    marketBidPaused: (await createConfigService(c.env.DB).get('market_bid_paused')) === 'true',
+    marketBidPaused: bidPausedRaw === 'true',
     listing: {
       id: listing.id,
       player: { id: listing.player_id, fcId: listing.player_fc_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },

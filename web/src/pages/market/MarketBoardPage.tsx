@@ -2,11 +2,11 @@
 // v6.24.0：卡片换成 rail 骨架（左栏 CA/PA 大数字）+ 三态徽标 + 底部读秒倒计时，队名一律配 TeamLogo；
 // 详情、出价表单、被激活方匹配决定、出价历史全部搬进 MarketListingOverlay（桌面弹层 / ≤760 底部抽屉）。
 // 海捞在 /market/free，挂牌+出价+报价+谈判在 /market/desk（v6.23.0 合并），市场情报在 /market/intel。
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { MarketListing } from '../../lib/api.ts';
 import { TeamLogo } from '../../components/TeamLogo.tsx';
-import { useBoard, useClubBalance, useMarketInvalidation, useMyBids, useMyClub } from '../../lib/queries.ts';
+import { useBoard, useClubBalance, useClubsList, useListingPrefetch, useMarketInvalidation, useMyBids, useMyClub } from '../../lib/queries.ts';
 import { attrClass } from '../../lib/players-library.ts';
 import { playerPath } from '../../lib/player-link.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
@@ -28,6 +28,20 @@ export default function MarketBoardPage() {
       ? boardQuery.error.message
       : '市场打不开了，稍后再试'
     : '';
+
+  // 队徽（v6.60.8）：卡柜此前调 TeamLogo 没传 logoKey，卖方与领先买家的队徽一律回落成「队名哈希色块 + 首字」。
+  // 真源是比赛系统 team.logo_key，`GET /api/clubs` 目录已按 club_id 折好（服务端 clubs scope 缓存 24h，前端 30s
+  // staleTime），拿它做一次 id → logoKey 映射即可；不在 /market/listings 这个「不缓存、每 30s 就可能重取」的
+  // 热端点里再加 AUTH_DB 映射 + TOUR_DB 点查两条只读。目录里没有的 club_id 返回 null，由 TeamLogo 回落。
+  const { data: clubsDir } = useClubsList();
+  const logoOf = useMemo(() => {
+    const logoByClub = new Map<number, string>();
+    for (const club of clubsDir?.clubs ?? []) if (club.logoKey) logoByClub.set(club.id, club.logoKey);
+    return (clubId: number | null) => (clubId === null ? null : (logoByClub.get(clubId) ?? null));
+  }, [clubsDir]);
+
+  // 浮层首开提速（v6.60.8）：卡片被指向/聚焦/按下时先取详情，点开时多半已在缓存（详见 useListingPrefetch）
+  const prefetchListing = useListingPrefetch();
 
   // v6.57.0 收编：可支配读余额端点（含预期收入额度；冻结口径覆盖报价 / 海捞，
   // 旧自算只减挂牌出价冻结，会与账本页「可支配」打架）；myBids 仍留给出价后的刷新回调
@@ -67,7 +81,14 @@ export default function MarketBoardPage() {
         ) : (
           <div className="mkt-grid">
             {board.listings.map((l) => (
-              <MarketCard key={l.id} listing={l} mine={myClub?.id === l.sellerClub.id} onOpen={() => setSelected(l.id)} />
+              <MarketCard
+                key={l.id}
+                listing={l}
+                mine={myClub?.id === l.sellerClub.id}
+                logoOf={logoOf}
+                onPrefetch={() => prefetchListing(l.id)}
+                onOpen={() => setSelected(l.id)}
+              />
             ))}
           </div>
         )}
@@ -79,6 +100,7 @@ export default function MarketBoardPage() {
           myClub={myClub ?? null}
           available={available}
           creditLine={creditLine}
+          logoOf={logoOf}
           onClose={() => setSelected(null)}
           onBidDone={() => {
             invalidateMarket(selected);
@@ -92,14 +114,35 @@ export default function MarketBoardPage() {
 
 /* ---------- 卡柜单卡（v2.2.0 起；v6.24.0 rail 骨架） ---------- */
 
-export function MarketCard({ listing, mine, onOpen }: { listing: MarketListing; mine: boolean; onOpen: () => void }) {
+export function MarketCard({
+  listing,
+  mine,
+  onOpen,
+  logoOf,
+  onPrefetch,
+}: {
+  listing: MarketListing;
+  mine: boolean;
+  onOpen: () => void;
+  /** club_id → 队徽 R2 键（真源 = 比赛系统 team.logo_key，见本页 /api/clubs 目录映射）；缺省时 TeamLogo 回落色块 */
+  logoOf?: (clubId: number | null) => string | null;
+  /** 指向 / 聚焦 / 按下卡片时预取详情（v6.60.8）：点开浮层时详情多半已在缓存 */
+  onPrefetch?: () => void;
+}) {
   const badge = listingBadge(listing);
   const remaining = useCountdown(pickDeadline(listing));
 
   return (
-    <button type="button" className={`mkt-card${mine ? ' mkt-mine' : ''}`} onClick={onOpen}>
+    <button
+      type="button"
+      className={`mkt-card${mine ? ' mkt-mine' : ''}`}
+      onClick={onOpen}
+      onPointerEnter={onPrefetch}
+      onPointerDown={onPrefetch}
+      onFocus={onPrefetch}
+    >
       <div className="mkt-card-head">
-        <TeamLogo name={listing.sellerClub.name} size={22} />
+        <TeamLogo name={listing.sellerClub.name} logoKey={logoOf?.(listing.sellerClub.id)} size={22} />
         <Link className="mkt-nm" to={playerPath(listing.player)} onClick={(e) => e.stopPropagation()}>
           {listing.player.name}
         </Link>
@@ -148,10 +191,17 @@ export function MarketCard({ listing, mine, onOpen }: { listing: MarketListing; 
         <span className={`mkt-timer mono${remaining !== null && remaining < 3600 ? ' mkt-soon' : ''}`}>
           ⏱ 剩 {remaining === null ? '—' : fmtClock(remaining)}
         </span>
-        <span className="mkt-tn">
-          <TeamLogo name={listing.sellerClub.name} size={16} />
-          <span className="mkt-tn-txt">{listing.sellerClub.name}</span>
-        </span>
+        {/* 卡脚右侧是「当前领先买家」（v6.60.8）：此前放的是卖方，与卡头卖方队徽重复，且看不出谁在领先。
+            「领先」小标签用来和卡头的卖方徽区分开；无人出价给占位文案，别把卖方名错读成买家。 */}
+        {listing.highestBidder === null ? (
+          <span className="mkt-tn mkt-tn-none">无人领先</span>
+        ) : (
+          <span className="mkt-tn" title={`当前领先：${listing.highestBidder.name}`}>
+            <span className="mkt-tn-lab">领先</span>
+            <TeamLogo name={listing.highestBidder.name} logoKey={logoOf?.(listing.highestBidder.id)} size={16} />
+            <span className="mkt-tn-txt">{listing.highestBidder.name}</span>
+          </span>
+        )}
       </div>
     </button>
   );

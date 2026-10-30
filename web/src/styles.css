@@ -5427,6 +5427,29 @@ th.num .th-sort {
   white-space: nowrap;
 }
 
+/* 五档配色（v6.60.8）：上面的 .mkt-rail-num 显式给了 color，与 .attr-* 同特异性、又后定义，
+   把档位色整个压掉了，CA/PA 一律墨色。按全仓既有写法（同 .sqc-v.attr-*）用「组件类 + 档位类」
+   把五档色盖回来；无值时数字不带档位类，仍走上面的 --ink。 */
+.mkt-rail-num.attr-bad {
+  color: var(--attr-bad);
+}
+
+.mkt-rail-num.attr-weak {
+  color: var(--attr-weak);
+}
+
+.mkt-rail-num.attr-mid {
+  color: var(--attr-mid);
+}
+
+.mkt-rail-num.attr-solid {
+  color: var(--attr-solid);
+}
+
+.mkt-rail-num.attr-good {
+  color: var(--attr-good);
+}
+
 .mkt-rows {
   display: flex;
   flex-direction: column;
@@ -5497,6 +5520,18 @@ th.num .th-sort {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* 卡脚右侧的「领先」小字标签（v6.60.8）：卡头已是卖方徽，靠标签点明这枚徽属于当前领先买家 */
+.mkt-tn-lab {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* 无人出价：占位文案与倒计时同排右对齐，不折行（不抢队名的 ellipsis 逻辑） */
+.mkt-tn.mkt-tn-none {
+  white-space: nowrap;
 }
 
 /* 三态徽标（v6.24.0）：不看是否已有人出价，只看挂单状态与首价窗 */

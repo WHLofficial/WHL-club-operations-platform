@@ -313,14 +313,34 @@ export function usePlayerDetail(id: string | number | null | undefined) {
   });
 }
 
+// 挂牌详情（v6.60.8）：详情浮层与卡片预取共用这一份 key + URL，避免两处各写一份口径
+function listingDetailQuery(id: number) {
+  return {
+    queryKey: qk.listing(id),
+    queryFn: () => api<MarketListingDetail>(`/api/market/listings/${id}`),
+  };
+}
+
 export function useListingDetail(id: number | null) {
   return useQuery({
-    queryKey: qk.listing(id ?? 0),
-    queryFn: () => api<MarketListingDetail>(`/api/market/listings/${id}`),
+    ...listingDetailQuery(id ?? 0),
     enabled: id !== null,
     // 切换别的挂牌时保留旧详情展示（旧行为：新详情到达前旧卡不清空）
     placeholderData: keepPreviousData,
   });
+}
+
+/**
+ * 挂牌详情预取（v6.60.8）：浮层是点开才挂载的，详情请求也就压到点下去那一刻——首次开启得空等一整趟
+ * 往返（详情端点还要先跑 30s 合并的惰性结算）。卡柜在指针进入 / 聚焦 / 按下卡片时先取一次，点开时详情
+ * 多半已在缓存里；沿用全局 30s staleTime，真命中时 useListingDetail 不会再立刻重取。
+ * 只预取用户真正指向过的卡片，不给整屏几十张一次挂满请求。
+ */
+export function useListingPrefetch() {
+  const qc = useQueryClient();
+  return (id: number) => {
+    void qc.prefetchQuery(listingDetailQuery(id));
+  };
 }
 
 // 出价/挂牌/激活后的联动失效：板（全部筛选项）+ 我的出价 + 当前详情
