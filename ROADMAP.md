@@ -81,6 +81,26 @@
 
 ---
 
+## v6.62.0 · 普通续约免费机会：每合同一次免费改违约金（2026-10-31）
+
+**状态**：**已实现待上线**——分支 `feat/v6.62.0-renewal-free`（自 v6.61.0 收口点 `eb42144` 切出，3 个提交：`7381a2c` 后端+迁移+测试 / `b9b0bf8` 前端 / `fdcb4f6` 评审修复）。**迁移 `0085_contracts_free_rc_change.sql` 必须先 apply 到生产再 push**（CF 自动部署无迁移步骤）；上线后按测试计划 TC-P-01..03 做只读探针。判级 minor。计划 `memory/plan-v6.62.0-renewal-free.md`、测试计划 `docs/test-plans/v6.62.0-renewal-free.md`。
+
+**裁决**（owner m04060 rev4 登记 → rev22 拍板转正，设计稿 §5.6 定稿）：每份合同一次免费改违约金续约，`free_rc_change_used=0` 时下一张续约单**自动**走免费通道——不设经理勾选（保护期延续对俱乐部纯收益，自动不亏）；30% 差额维持**审核通过时扣**（现行流程无独立「接受」时刻，豁免真落点在 `approveTransferDeal` 读 evidence）；**降价同消耗**（免费通道的实质权益是「不收口保护期」，与方向无关——否则「降价白嫖保护期→提价又免费」两次白嫖）；**匹配不刷新**（同「同队改 RC 不算转会」口径，换队照刷）。grilling Q1 收口定稿：续约按 4.4.6 收口保护期，**免费续约是唯一保留保护期的续约**（rev21「重建保护期」叙事作废，否决理由留档设计稿）。
+
+**交付**
+
+- 迁移 `0085`：`contracts` 加 `free_rc_change_used INTEGER NOT NULL DEFAULT 0`（零回填=历史合同全是「还没用过」）；`tests/d1.ts` MIGRATION_FILES 追加。
+- 提交侧 `createRcChange`：读列判 `isFree` → `changeFee=0`（余额预检自动跳过）→ evidence/payload 带 `freeRcChange`。
+- 审核侧 `approveTransferDeal` case 'rc_change'：evidence `freeRcChange===true` 跳过 `chargeBypassFee`（无流水无审计）；缺字段的历史在途单按非免费。
+- amendment 分支（`transfers.ts`）：pending 写 `free_rc_change`；免费时 `protection_ticks_new=NULL`（apply 侧 COALESCE 接住=该项不变）、非免费维持 `=baseTicks`（收口）。
+- apply 侧 `applyPendingContractChanges`：免费行同批 `UPDATE contracts SET free_rc_change_used=1`（CASE 内联在 contracts 同一句 UPDATE，天然同批同守卫；demand 行该列恒 0=闹涨薪不消耗）。
+- 刷新四路：换队 UPDATE（含 B 买回）、买回桥接两态、海捞 upsert、无归属新签 upsert——全归 0；match 与 A 分支不碰（A 用合同行现值）。
+- UI：squad 端点下发 `freeRcAvailable`；DeskTab 续约入口/提交回执按免费态与方向分支；ContractDualView「本次免费」徽标；顺带订正旧保护期口径文案。
+
+**验收**：typecheck 三份全清；vitest **174 文件 / 2,816 例全绿**（v6.61.0 基线 173/2,798，净 +1 文件 / +18 例：新 `tests/free-rc-change.test.ts` 15 例 + ContractDualView 1 例 + DeskTab 2 例）；build 6.62.0；e2e 29/29；本地迁移 0085 落表（幂等轨道）。**变异验证三靶恰红**（按将来最可能重构方式）：审核侧改回无条件 `rcChangeFee` 重算 → TC-RF-01/07 红（免费单被扣款）；换队 UPDATE 与 upsert 漏归 0 → TC-RF-04/A 分支红（残留 used=1）；apply 漏置 1 → TC-RF-01/03 红（免费永不消耗）。**评审（code-review-skill）**：无 🔴；🟡×2 已修（免费降价回执误写「提价不收差额」→ 按方向分支；迁移回滚注释「丢列回到已用」写反 → 订正为「重加列=全员机会重发，重放需知情」）。
+
+**已知边界（登记不改）**：`registration.ts` 的 `freeRcAvailable` 对训练营合同也为 true，但前端续约下拉只收 `contractType==='formal'`，无暴露面；免费通道不改变 RC 边界 / 同窗一次 / `renewalRaise` 谈判基准（TC-RF-11 锁）；「假意接受、旧价卖人」套利按 §5.7 既定登记维持。
+
 ## v6.61.0 · 属性成长加成：34 项 = min(99, 初始 + delta) + S9 属性回写批（2026-10-30）
 
 **状态**：**已上线（2026-10-30）**——push `d5889d0..0cde538`（分支 `feat/v6.61.0-attr-growth` → `main`，7 个提交含 v6.60.10-11 的 docs 存稿），CF Workers Builds 自动部署 Version **`bc3c082e-4abe-4df1-ae55-ac0b21d65624`** @2026-10-30T17:17:35Z；迁移 `0084` 已于 push 前 apply（`Executed 2 commands`，config 行 `growth_attr_bonus='1'` 在场）。判级 minor。上线顺序按既定口径：**回写批（用户确认后 6 片落库 + verify 0 差异 + 代际键 1288）→ 0084 apply → push → 代际键再 bump 1289（作废旧代码在 1288 下算出的未加成 L2）→ 生产探针**。**同产物换版**：上线记录提交 `6141102` 随「发布」指令 push（`0cde538..6141102`，2026-10-30T17:47:49Z）再触发一次部署 Version **`b1e14c5a-32d4-433b-ab2c-635f150d5834`**——纯文档提交，线上资产仍 `index-o4xq99j1.js`、health 200、加成探针复验 86 ⇒ **生产最新 Version 以后者为准**。计划 `memory/plan-v6.61.0-growth-attr-bonus.md`、交接 `memory/handoff-v6.61.0-growth-attr-bonus.md`、测试计划 `docs/test-plans/v6.61.0-attr-growth.md`。

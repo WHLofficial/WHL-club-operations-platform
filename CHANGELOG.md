@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.62.0] · 普通续约免费机会（2026-10-31）
+
+**已实现待上线**：分支 `feat/v6.62.0-renewal-free`（`7381a2c` 后端 + `b9b0bf8` 前端 + `fdcb4f6` 评审修复）。**迁移 `0085_contracts_free_rc_change.sql` 必须先 apply 到生产再 push**（CF 自动部署无迁移步骤）。判级 minor。设计真源：`docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md` rev22 §5.6（owner 拍板四题：自动动用 / 30% 维持审核通过时扣 / 降价同消耗 / 匹配不刷新；grilling Q1 收口定稿：免费续约是唯一保留保护期的续约）。
+
+**Added**
+
+- `contracts.free_rc_change_used`（迁移 0085，DEFAULT 0 零回填）：每份合同一次免费改违约金续约——`used=0` 的合同下一张续约单**自动**走免费通道：提价免收差额 30%（审核侧凭 evidence `freeRcChange` 跳过 `chargeBypassFee`，缺字段的历史在途单按非免费兼容）、不收口保护期（pending `protection_ticks_new = NULL`，apply 侧 COALESCE 接住）；apply 成功同批消耗（CASE 内联在 contracts 同一句 UPDATE）；降价同消耗。0079 零写入的 `contract_pending_changes.free_rc_change` 启用为当次标记。
+- 转会后刷新：`completeTransfer` 换队 UPDATE / 买回桥接两态 / 海捞与无归属新签 upsert（excluded 兜底防旧行残留）四路归 0；match 与闹涨薪接受不消耗。
+- UI：`/api/club/squad` 下发 `freeRcAvailable`（仅本队教练面）；DeskTab 续约入口「本次免费：提价不收差额、保护期不变」提示与提交回执按方向分支；ContractDualView 待生效行渲染「本次免费」徽标。
+
+**Changed**
+
+- DeskTab 续约 hint 的旧保护期口径订正：「原保护期自审核通过起结束 / 重新起算」→ 收口 = 在本窗关闭时结束（免费续约是唯一保留保护期的续约）。
+
+**验收**：typecheck 三份全清；vitest **174 文件 / 2,816 例全绿**（v6.61.0 基线 173/2,798，净 +1 文件 / +18 例）；build 6.62.0；e2e 29/29；本地迁移 0085 落表；变异验证三靶恰红（审核侧改回无条件重算 / 换队 UPDATE 与 upsert 漏归 0 / apply 漏置 1）。测试计划 `docs/test-plans/v6.62.0-renewal-free.md`。
+
 ## [v6.61.0] · 属性成长加成（2026-10-30）
 
 **已上线（2026-10-30）**：push `d5889d0..0cde538`，CF Workers Builds Version `bc3c082e-4abe-4df1-ae55-ac0b21d65624`（2026-10-30T17:17:35Z）；迁移 `0084` 先于 push apply。前置生产数据批（同日执行，用户确认）：S9 属性回写 6 片落库（254 人 × 2,336 键回 FC26db 原值，`--verify` 差异 0）+ 公开缓存代际键 bump 两轮（1288 回写后 / 1289 部署后）。判级 minor。34 项细分属性改为「初始属性 + CA 成长点数」统一展示：`delta = max(0, ca − COALESCE(base_ca, ca))`、`显示属性 = min(99, 初始 + delta)`，唯一 helper `src/core/growth-attrs.ts`，列表/筛选/排序/详情/meta/导出五处共用；开关 `growth_attr_bonus`（默认开，'0'=三处回源值，双向实测）；页面不加「含成长」标注。生产探针：三方一致（列表 == 详情 == 导出 xlsx，样本 delta 13/8/3/0，撞 99 封顶验证过）、初始视图回源值、门将键同样加成、非 34 项键（身高/CA/PA/PSID）原样；tour 仓 meta 为纯展示消费、契约形状未变，无需发版。上线记录见 ROADMAP v6.61.0 节。
