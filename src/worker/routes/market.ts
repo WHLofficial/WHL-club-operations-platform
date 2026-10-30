@@ -116,6 +116,11 @@ app.get('/market/listings', async (c) => {
     playerId = n;
   }
   const ph = statuses.map(() => '?').join(', ');
+  // 排序（v6.60.10）：强制拍卖单（type='forced'，管理端介入挂出的强拍）永远置顶，其余按 id 倒序（最近挂牌在前）。
+  // 只用一个 CASE 表达式而不是两趟查询，一页 50 条仍是一条语句；代价是 cursor 键集（l.id < ?）跨页只在同一档内连续
+  // ——本仓前端不分页（卡柜、球员页、管理端都是无 cursor 的单次取），所以翻页语义退化不影响任何调用方。
+  // 排序要物化匹配行（扫描走不了 id 索引），但现网非终态挂牌一共 24 条（listed 16 / bidding 8，2026-10-30 实测），
+  // 远小于 LIMIT 50 之下的 rows read 余量，不另加索引。
   const rows = await c.env.DB.prepare(
     `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
             l.listed_day, l.deadline_at, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
@@ -125,7 +130,7 @@ app.get('/market/listings', async (c) => {
      JOIN players p ON p.id = l.player_id
      LEFT JOIN clubs cl ON cl.id = l.seller_club_id
      WHERE l.status IN (${ph}) ${cursor !== null ? 'AND l.id < ?' : ''} ${playerId !== null ? 'AND l.player_id = ?' : ''}
-     ORDER BY l.id DESC LIMIT 50`,
+     ORDER BY CASE l.type WHEN 'forced' THEN 0 ELSE 1 END, l.id DESC LIMIT 50`,
   )
     .bind(...statuses, ...(cursor !== null ? [cursor] : []), ...(playerId !== null ? [playerId] : []))
     .all<ListingRow>();

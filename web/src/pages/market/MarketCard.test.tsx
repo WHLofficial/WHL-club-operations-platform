@@ -166,3 +166,20 @@ describe('MarketCard 详情预取（v6.60.8）', () => {
     expect(opened).toBe(1);
   });
 });
+
+// v6.60.10：强制拍卖单在卡柜里恒排最前（后端排序口径见 tests/market-listing-order.test.ts），
+// 卡头再用一枚「强拍」徽标说清这单是管理端挂的，不是卖方自己挂的普通单
+describe('MarketCard 强拍徽标（v6.60.10）', () => {
+  it('type=forced 出「强拍」，普通单与激活单都不出', () => {
+    const { unmount } = renderCard(listing({ type: 'forced' }));
+    expect(screen.getByText('强拍')).toBeTruthy();
+    unmount();
+
+    const normal = renderCard(listing({ type: 'normal' }));
+    expect(screen.queryByText('强拍')).toBeNull();
+    normal.unmount();
+
+    renderCard(listing({ type: 'activation', activatedBy: 4 }));
+    expect(screen.queryByText('强拍')).toBeNull();
+  });
+});

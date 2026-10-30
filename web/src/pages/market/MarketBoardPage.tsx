@@ -147,6 +147,8 @@ export function MarketCard({
           {listing.player.name}
         </Link>
         <span className="badge-stack">
+          {/* 强拍标记（v6.60.10）：强制拍卖单在卡柜里恒排最前，卡头要能看出这是管理端挂的单，不是普通挂牌 */}
+          {listing.type === 'forced' && <span className="badge red">强拍</span>}
           {listing.type === 'activation' && <span className="badge purple">激活</span>}
           <span className={`mkt-badge ${badge.tone}`}>{badge.text}</span>
         </span>

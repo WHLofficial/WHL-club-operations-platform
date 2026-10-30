@@ -4,9 +4,23 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.10] · 强制挂牌在转会区置顶、卡头「强拍」徽标（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「强制挂牌在转会区始终排在最前」。判级 patch。
+
+**Changed**
+
+- `src/worker/routes/market.ts`：卡柜 `GET /api/market/listings` 的排序由 `ORDER BY l.id DESC` 改为 `ORDER BY CASE l.type WHEN 'forced' THEN 0 ELSE 1 END, l.id DESC`——管理端挂的强制拍卖单恒在这 50 条里排最前，同一档内仍按新旧倒序；仍是一条语句，不额外加查询。已核全仓无 `cursor` 消费方（`web/src/lib/queries.ts:215` 的 `useBoard`、`:225` 的 `usePlayerListing`、`web/src/pages/admin/MarketPage.tsx:427` 都是单次取），键集翻页若将来启用也只会在同一档内连续。
+- `web/src/pages/market/MarketBoardPage.tsx`：卡头 `.badge-stack` 里补一枚红色「强拍」徽标（`listing.type === 'forced'`），放在激活徽标之前。排序把强拍顶到最前后，光靠位置看不出它为什么在最前，徽标把这层身份说出来。浮层与卡头共用的 `listingBadge()`（`web/src/pages/market/MarketListingOverlay.tsx:22`）不动，forced 单在浮层里仍按竞价状态显示「竞价中」。
+- 测试：新增 `tests/market-listing-order.test.ts` 3 例——两条强拍 + 两条普通混排后取序为 `[4,2,3,1]`、强拍 id 更小仍置顶（`[1,9,5]`）、`status=all` 与 `status=active` 同口径；`web/src/pages/market/MarketCard.test.tsx` 新增「强拍徽标」1 例（forced 出「强拍」，normal / activation 都不出）。
+
+**同轮生产数据（无代码变更）**：按用户口径「＜87 且 PA≥87 且未练满可成长改回6个，一线队改回30人上限，训练营改回7人上限」，生产 `config` 三行回调——`squad_max` 32 → **30**、`trainee_max` 8 → **7**、`ca_pa_limits` 顶级 `growthPa87` 7 → **6**（次级本就是 6）。代码默认值本来就是 30 / 7 / 6（`src/core/config.ts:125-130`、`src/core/squad-rules.ts:18-19`），是生产库被调上去的，故只改数据；`squad_min`(19) / `gk_min` / `ge90` / `ge87` 不动。SQL 与回滚语句见 `scripts/prod-20261030-squad-limits-revert/`；`CONFIG_TTL_MS = 60_000`，改完一分钟内全边缘生效，不清缓存、不重新部署。
+
+**验收**：typecheck 三份全清；vitest **172 文件 / 2768 例全绿**（新增 `tests/market-listing-order.test.ts` 3 例、`MarketCard.test.tsx` +1 例）；build `index-16jJxkri.js` 714.95 kB / gzip 225.72 kB、CSS `index-zWdqEd9v.css`（与 v6.60.9 同哈希）。
+
 ## [v6.60.9] · 挂牌卡窄屏 CA/PA 挪到价格三行右边（2026-10-30）
 
-**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「挂牌卡窄屏把CAPA模块放在挂牌价当前最高出价次数的右边，以节省纵向空间」。判级 patch。
+**已上线（2026-10-30）**：push `2cf8df6..81d9926`（分支 `fix/v6.60.5-forced-fc-growth-perm` → `main`，同趟带上 v6.60.8 的上线记录 `b1d1c46`），CF Workers Builds 自动部署 Version `1d276ba6-462f-44e7-b3af-6c32c29f1874` @2026-10-30T13:00:23.546Z；无迁移、无 schema 变更。依据用户口径：「挂牌卡窄屏把CAPA模块放在挂牌价当前最高出价次数的右边，以节省纵向空间」。判级 patch。
 
 **Changed**
 
@@ -15,6 +29,8 @@
 - 测试：`web/src/pages/market/MarketCard.test.tsx` 新增「中段容器」1 例（rail 与 rows 同属 `.mkt-card-mid`、DOM 顺序仍 rail 在前、卡脚在容器外）；新增 `tests/market-card-narrow-layout.test.ts` 3 例——文本级锁住容器竖排基规则、「≤760 块里 row + `.mkt-rail{order:1}` + `.mkt-rows{flex:1 1 auto}`」、以及 JSX 里 rail/rows 确实落在容器内（媒体块或 order 被下批重构删掉就红）。
 
 **验收**：typecheck 三份全清；vitest **171 文件 / 2764 例全绿**（新增 `tests/market-card-narrow-layout.test.ts` 3 例、`MarketCard.test.tsx` +1 例）；build `index-BNmzvrwg.js` 714.95 kB / gzip 225.71 kB（原始 714,946 B）、CSS `index-zWdqEd9v.css` 113.89 kB；e2e **29/29**（首轮 ⑫ 全路由 375 溢出扫描超时误报，单跑 ⑫ 92s 通过，全量重跑 29/29）。
+
+**上线回读**：线上入口资产 `index-BNmzvrwg.js` ＋ `index-zWdqEd9v.css`（与本地构建同哈希）；`/api/health` 200；`/api/market/listings` 200。
 
 ## [v6.60.8] · 挂牌卡队徽与领先买家、浮层首开、CA/PA 配色（2026-10-30）
 

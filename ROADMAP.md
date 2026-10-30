@@ -81,9 +81,24 @@
 
 ---
 
+## v6.60.10 · 强制挂牌在转会区置顶、卡头「强拍」徽标（2026-10-30）
+
+**状态**：**未上线**——分支 `fix/v6.60.5-forced-fc-growth-perm`，紧接 v6.60.9；无迁移、无 schema 变更。判级 patch。起因：用户「发布，随后做“强制挂牌在转会区始终排在最前”」，同轮追加「＜87 且 PA≥87 且未练满可成长改回6个，一线队改回30人上限，训练营改回7人上限」。
+
+**交付**
+
+- `src/worker/routes/market.ts`：卡柜排序 `ORDER BY l.id DESC` → `ORDER BY CASE l.type WHEN 'forced' THEN 0 ELSE 1 END, l.id DESC LIMIT 50`，强拍单恒在当页最前、同档内仍按新旧倒序；仍是一条语句。已核全仓无 `cursor` 消费方（`useBoard` / `usePlayerListing` / 管理端市场页都是单次取）。
+- `web/src/pages/market/MarketBoardPage.tsx`：卡头 `.badge-stack` 补红色「强拍」徽标（`type === 'forced'`），排在激活徽标之前；浮层与卡头共用的 `listingBadge()` 不动，forced 单在浮层里仍按竞价状态显示。
+- 测试：新增 `tests/market-listing-order.test.ts` 3 例（混排取序 / 强拍 id 更小仍置顶 / `status=all` 同口径）；`MarketCard.test.tsx` +1 例锁强拍徽标三态。
+- 同轮生产数据（无代码变更）：生产 `config` 回调 `squad_max` 32→30、`trainee_max` 8→7、`ca_pa_limits` 顶级 `growthPa87` 7→6（次级本就是 6）；代码默认值本就是 30/7/6（`src/core/config.ts:125-130`、`src/core/squad-rules.ts:18-19`），故只改数据。SQL 与回滚见 `scripts/prod-20261030-squad-limits-revert/`；`CONFIG_TTL_MS = 60_000`，一分钟内全边缘生效。
+
+**验收**：typecheck 三份全清；vitest **172 文件 / 2768 例全绿**；build `index-16jJxkri.js` 714.95 kB / gzip 225.72 kB、CSS `index-zWdqEd9v.css`（与 v6.60.9 同哈希）。
+
+**遗留**：发布待用户明确下令。
+
 ## v6.60.9 · 挂牌卡窄屏 CA/PA 挪到价格三行右边（2026-10-30）
 
-**状态**：**未上线**——分支 `fix/v6.60.5-forced-fc-growth-perm`，紧接 v6.60.8；无迁移、无 schema 变更。判级 patch。起因：用户「挂牌卡窄屏把CAPA模块放在挂牌价当前最高出价次数的右边，以节省纵向空间」。
+**状态**：**已上线（2026-10-30）**——push `2cf8df6..81d9926`（分支 `fix/v6.60.5-forced-fc-growth-perm` → `main`，同趟带上 v6.60.8 的上线记录 `b1d1c46`），CF Workers Builds 自动部署 Version `1d276ba6-462f-44e7-b3af-6c32c29f1874` @2026-10-30T13:00:23.546Z；无迁移、无 schema 变更。判级 patch。起因：用户「挂牌卡窄屏把CAPA模块放在挂牌价当前最高出价次数的右边，以节省纵向空间」。
 
 **交付**
 
@@ -93,7 +108,7 @@
 
 **验收**：typecheck 三份全清；vitest **171 文件 / 2764 例全绿**；build `index-BNmzvrwg.js` 714.95 kB / gzip 225.71 kB（原始 714,946 B）、CSS `index-zWdqEd9v.css`；e2e **29/29**（首轮 ⑫ 超时误报，单跑通过、全量重跑全绿）。
 
-**遗留**：发布待用户明确下令。
+**上线回读**：线上入口资产 `index-BNmzvrwg.js` ＋ `index-zWdqEd9v.css`（与本地构建同哈希）；`/api/health` 200；`/api/market/listings` 200。
 
 ## v6.60.8 · 挂牌卡队徽与领先买家、浮层首开、CA/PA 配色（2026-10-30）
 
