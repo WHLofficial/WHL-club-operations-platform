@@ -81,6 +81,26 @@
 
 ---
 
+## v6.61.0 · 属性成长加成：34 项 = min(99, 初始 + delta) + S9 属性回写批（2026-10-30）
+
+**状态**：**本地完成、未 push 未部署**（用户指令：全部做完等下令）。判级 minor。迁移 `0084` **未 apply 到生产**（push 前必须先 apply，见上线注意）。计划 `memory/plan-v6.61.0-growth-attr-bonus.md`、交接 `memory/handoff-v6.61.0-growth-attr-bonus.md`、测试计划 `docs/test-plans/v6.61.0-attr-growth.md`。
+
+**口径**：`delta = max(0, ca − COALESCE(base_ca, ca))`（ROADMAP 既定「涨幅」，不另造字段）、`显示属性 = min(99, 初始属性 + delta)`，只作用于 34 项细分属性（`FC26_GAME_ATTR_COLUMNS` sprintspeed 起切片，含 5 门将键）；缺键/空值透传 null 不造值；`view=initial` 的 caExpr 恒等于 `COALESCE(base_ca, ca)` ⇒ delta 自然归 0；开关 `growth_attr_bonus`（默认 '1'，'0'=三处全回源值）；页面不加「含成长」标注（用户裁决「玩家知道」）。属性表达式全仓只有一份 helper `src/core/growth-attrs.ts`（`growthDelta` / `buffedValue` / `buffedAttrs` / `growthDeltaSql` / `attrValueSql`），列表、区间筛选、属性排序、详情、meta、导出共用。
+
+**交付**
+
+- **任务 1（回写批，本地部分已完、写库等确认）** `scripts/prod-20261025-s9-attr-rewind/`：`gen-rewind-sql.ts` 读 FC26db xlsx（`E:/Downloads/FC26db20251217_fixed.xlsx` Base sheet，平台 v0.2.0 导入源）+ S9 两份 sql 解析出「谁改了哪些键、S9 写入值」，产出 `sql/01-06-rewind.sql`（6 片 / **254 人 / 2,336 键**，每片 ≤50 人，每键一条 `json_extract = S9写入值` 守卫，重放 changes=0）；`rewind-report.md` 含逐人逐键 2,336 行表与分片 sha256。**只读预检两轮全绿**（15:47 宽口径、16:26 严格 typeof 口径）：players 缺行 0 / 守卫键不匹配 0。回滚 = S9 `abilities-update-0{1,2}.sql` 原样重放；S9 的 `rollback/` 在回写后作废。`.gitignore` 忽略本批 `sql/`。
+- **任务 2（核心纯函数）** `src/core/growth-attrs.ts` + `tests/growth-attrs.test.ts`（20 例）：delta 边界 / 缺键透传 / 字符串 / 钳 99 / 门将键 / 开关 / SQL 表达式逐字锁。SQL 侧取值 `MIN(99, json_extract + 0 + MAX(0, COALESCE(caExpr,0) − COALESCE(base_ca, ca, 0)))`——标量 min 任一参 NULL 即 NULL ⇒ 缺键透传（替换掉旧 `COALESCE(...+0,0)` 会把缺键当 0、套 delta 就造值的缺陷）；delta 片段两侧 COALESCE 兜住 ca NULL 行。
+- **任务 3（开关）** `src/core/config.ts` 注册表 88→89 + 默认 `growth_attr_bonus: '1'`；迁移 `0084_growth_attr_bonus.sql`（INSERT … ON CONFLICT DO NOTHING，照抄 0060 形态）；`tests/d1.ts` MIGRATION_FILES 追加。
+- **任务 4（后端）** `src/worker/routes/players.ts`：`buildViewExprs` 出 `deltaSql`（随视图口径，开关关 = '0'）；attr 取值 / `attr_min·max` 区间 / `sort=attr:*` 排序（`COALESCE(…,0)` 保 keyset）三处共用 `attrValueSql`；详情 `gameAttrs` 跑 `buffedAttrs(parsed, growthDelta(ca, base_ca, 开关))`；`/players/meta` 的 attrs 整包加成（SELECT 补 `ca`/`base_ca`，height 不在 34 项内永原样）；**缓存键带开关**：列表 `players:<canonicalQuery>:b{0|1}`、meta `players:meta:<ids>:b{0|1}`（开关切换后 TTL 内不再吐旧口径；roster/count 不依赖开关不加后缀）；路由读一次开关传进 `listPlayers`，键后缀与载荷口径同一次读。老缺陷顺带修正：attr 筛选/取值缺键从「0」改回「null」。
+- **任务 5（导出）** `scripts/prod-20261011-s10-export-squad/gen-export.ts`：`DbPlayer`+SELECT 补 `base_ca`；`ATTR34` 改从 growth-attrs 引；`at()` 内部走 `buffedValue`（只有 ATTR34 命中的键加成，PosID/naID/height/weight 复用同口不加成）；`Snapshot.attrBonusEnabled` 随快照落盘（`--verify`/`--diff-prev` 离线复算用快照那份，`--source` 重跑不连库）；`--verify` 新增 34 列逐行 `0 ≤ v ≤ 99` 越界断言；`--diff-prev` B 数值段注明「34 项含平台成长加成」；**旧快照必须重跑**（无 `base_ca` ⇒ delta 0 = 不加成）。
+- **任务 6（前端）**：零逻辑改动，详情/列表加成后下发自动跟随；前端无自算 delta（grep 证）。
+- 复审（code-review-skill + 独立 agent 复核）：无 🔴；🟡×3 已修（开关单请求双读→键与载荷同源；预检口径改严格 typeof 与 SQL 守卫一致；parseS9 非白名单键从静默跳过改为显式告警 + PSID/RoleID 豁免），🟢 注记 2 处（JS/SQL 异形值分歧按不可达、导出开关字符串口径）。
+
+**验收**：typecheck 三份全清；vitest **173 文件 / 2,798 例全绿**（v6.60.11 基线 172/2,770；新增 `tests/growth-attrs.test.ts` 20 例、`players-library.test.ts` v6.61.0 describe 8 例，config 计数 3 处改 89）；build 6.61.0 成功；导出脚本本地 dry-run 通过。
+
+**上线注意（等用户下令后的顺序）**：① 确认回写批 → 逐片 `--file` 执行 + `--verify` 差异 0 + 手动 bump `cache:epoch:public`（脚本直写 D1 不触发 purge）；② `0084` apply 到生产（先迁移后 push，Workers Builds 无迁移步骤）；③ push（push 即自动部署）；④ 生产探针：三方一致 / 初始视图 / 开关关闭 / 缓存失效（测试计划 TC-P-01…06）；⑤ 赛事仓 `GET /api/players/meta` 契约已变（attrs 34 项带加成），tour 侧需同步发版（其消费逻辑多为主键/身高/花式，34 项数值仅展示）；⑥ 上线前真导一队进游戏验「游戏读 overallrating 列、不按 34 项重算」（Q1，全项目唯一无仓库证据的假设）。
+
 ## v6.60.11 · 兼任本队教练的管理账号能自己选成长方案（2026-10-30）
 
 **状态**：**已上线（2026-10-30）**——与 v6.60.10 同趟 push `81d9926..d5889d0`（分支 `fix/v6.60.5-forced-fc-growth-perm` → `main`），CF Workers Builds 自动部署 Version `4002b34f-389f-4443-87ce-908f332906be` @2026-10-30T13:33:05.580Z；无迁移、无 schema 变更。判级 patch。起因：用户「我作为超管和里昂教练，怎么不能选我队人的成长方案？」。

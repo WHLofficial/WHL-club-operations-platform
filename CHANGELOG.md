@@ -4,6 +4,23 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.61.0] · 属性成长加成（2026-10-30）
+
+**本地完成、未 push 未部署**；迁移 `0084` 未 apply。判级 minor。34 项细分属性改为「初始属性 + CA 成长点数」统一展示：`delta = max(0, ca − COALESCE(base_ca, ca))`、`显示属性 = min(99, 初始 + delta)`，唯一 helper `src/core/growth-attrs.ts`，列表/筛选/排序/详情/meta/导出五处共用；开关 `growth_attr_bonus`（默认开，'0'=三处回源值）；页面不加「含成长」标注。
+
+**Added**
+
+- `src/core/growth-attrs.ts`：`growthDelta` / `buffedValue` / `buffedAttrs` / `growthDeltaSql` / `attrValueSql`（SQL 取值表达式唯一生成器，缺键透传 NULL）；`tests/growth-attrs.test.ts` 20 例。
+- config 注册 `growth_attr_bonus`（默认 '1'）+ 迁移 `0084_growth_attr_bonus.sql`。
+- S9 属性回写批 `scripts/prod-20261025-s9-attr-rewind/`：254 人 × 2,336 键改回 FC26db 原值（S9 手工订正转为由 delta 重新加成，避免「S9 值 + delta」双份）；只读预检 0 差异，**写生产库等用户确认**。
+
+**Changed**
+
+- `src/worker/routes/players.ts`：attr 取值/区间筛选/属性排序吃加成值，详情 `gameAttrs` 与 `/players/meta` attrs 整包加成；列表与 meta 缓存键带开关后缀 `:b{0|1}`；顺带修 attr 缺键取值从 0 回归 null（缺键不再凭空得 delta）。
+- `scripts/prod-20261011-s10-export-squad/gen-export.ts`：34 项能力列走同一 `buffedValue` 出口；`--verify` 加 0–99 越界断言；快照带 `base_ca` 与 `attrBonusEnabled`（旧快照需重跑）。
+
+**验收**：typecheck 三份全清；vitest **173 文件 / 2,798 例全绿**；build 6.61.0。测试计划 `docs/test-plans/v6.61.0-attr-growth.md`。
+
 ## [v6.60.11] · 兼任本队教练的管理账号能自己选成长方案（2026-10-30）
 
 **已上线（2026-10-30）**：与 v6.60.10 同趟推送 `81d9926..d5889d0`，CF Workers Builds Version `4002b34f-389f-4443-87ce-908f332906be`（2026-10-30T13:33:05.580Z）。无迁移、无 schema 变更。依据用户口径：「我作为超管和里昂教练，怎么不能选我队人的成长方案？」。判级 patch。
