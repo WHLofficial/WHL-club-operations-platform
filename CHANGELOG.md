@@ -6,7 +6,7 @@
 
 ## [v6.60.11] · 兼任本队教练的管理账号能自己选成长方案（2026-10-30）
 
-**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「我作为超管和里昂教练，怎么不能选我队人的成长方案？」。判级 patch。
+**已上线（2026-10-30）**：与 v6.60.10 同趟推送 `81d9926..d5889d0`，CF Workers Builds Version `4002b34f-389f-4443-87ce-908f332906be`（2026-10-30T13:33:05.580Z）。无迁移、无 schema 变更。依据用户口径：「我作为超管和里昂教练，怎么不能选我队人的成长方案？」。判级 patch。
 
 **Fixed**
 
@@ -18,9 +18,11 @@
 
 **验收**：typecheck 三份全清；vitest **172 文件 / 2770 例全绿**（`tests/growth.test.ts` 29 例、`Player.test.tsx` 32 例）。
 
+**上线回读**：入口资产 `assets/index-DNEanvbb.js` + `assets/index-zWdqEd9v.css`（与本地构建同哈希；JS 714,915 B / gzip 225.71 kB、CSS 113,889 B）；`/api/health` 三项 d1/tour_db/kv 全 ok；`/api/market/listings` 200、24 条在售，强拍三条（id 19/18/17）在位次 1–3（v6.60.10 的排序同时生效）；`config` 四项 `squad_min=20 / squad_max=30 / trainee_max=7 / ca_pa_limits 两档 growthPa87=6`。
+
 ## [v6.60.10] · 强制挂牌在转会区置顶、卡头「强拍」徽标（2026-10-30）
 
-**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。依据用户口径：「强制挂牌在转会区始终排在最前」。判级 patch。
+**已上线（2026-10-30）**：与 v6.60.11 同趟推送 `81d9926..d5889d0`，CF Workers Builds Version `4002b34f-389f-4443-87ce-908f332906be`（2026-10-30T13:33:05.580Z）。无迁移、无 schema 变更。依据用户口径：「强制挂牌在转会区始终排在最前」。判级 patch。
 
 **Changed**
 
