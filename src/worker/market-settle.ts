@@ -32,7 +32,7 @@ export interface SettleSummary {
 interface ActiveListingRow {
   id: number;
   player_id: number;
-  seller_club_id: number;
+  seller_club_id: number | null;
   type: string;
   ask_price: number;
   status: string;
@@ -48,7 +48,7 @@ interface ActiveListingRow {
 export interface ListingCore {
   id: number;
   player_id: number;
-  seller_club_id: number;
+  seller_club_id: number | null;
   type?: string;
   ask_price: number;
   season: number | null;
@@ -158,7 +158,8 @@ export async function delistUnbid(
 ): Promise<'delisted' | 'already'> {
   const db = env.DB;
   const isActivation = listing.type === 'activation';
-  const fee = isActivation ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
+  // 自由身强制拍卖没有卖方，下架费无人可收；成交款同样销毁（completeTransfer 的 from_club_id 空分支）。
+  const fee = isActivation || listing.seller_club_id === null ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
   const audit = createAuditStatement(db);
   const unbidNote = source === 'deadline' ? '截止时刻无人出价' : '窗口结束无人出价';
   const statements = [
@@ -171,14 +172,15 @@ export async function delistUnbid(
     // 与并发出价交错（本句 0 行改）时，旧版会把球员还原成非挂牌态、把冻结放掉、写幻影审计
     db
       .prepare(
-        `UPDATE players SET status = CASE WHEN (
-           SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1
-         ) = 'trainee' THEN 'trainee' ELSE 'normal' END, updated_at = ${nowSql()}
+        `UPDATE players SET status = CASE
+           WHEN club_id IS NULL THEN 'free'
+           WHEN (SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1) = 'trainee' THEN 'trainee'
+           ELSE 'normal' END, updated_at = ${nowSql()}
          WHERE id = ? AND status = 'listed'
            AND EXISTS (SELECT 1 FROM listings WHERE id = ? AND status = 'delisted')`,
       )
       .bind(listing.player_id, listing.player_id, listing.id),
-    ...(fee > 0
+    ...(fee > 0 && listing.seller_club_id !== null
       ? ledgerMovement(db, {
           clubId: listing.seller_club_id,
           delta: -fee,
@@ -214,7 +216,8 @@ export async function delistUnbid(
   // 解约单落 transfers(type=termination, status=completed) 后，checkSeaSignEligible 的
   // 「本窗解约禁签」闸自然生效（本窗不可捞起）；其余收口（成长清零/徽章/候选名单通知）复用
   // completeTermination，避免两套解约语义漂移。
-  if (changed && listing.type === 'forced') await releaseForcedNoBid(env, listing, actor, origin);
+  // v6.60.5：自由身强制拍卖（seller_club_id 为空）本来就没有合同可解，直接回到 free，不造解约单。
+  if (changed && listing.type === 'forced' && listing.seller_club_id !== null) await releaseForcedNoBid(env, listing, actor, origin);
   return changed ? 'delisted' : 'already';
 }
 
@@ -501,6 +504,8 @@ async function runSettleOverdue(
         deadlineHours: ctx.deadlineHours,
         silenceHours: ctx.silenceHours,
         calendar: ctx.calendar,
+        // v6.60.5：存量强制拍卖行回退计算同样按 X+2 起算
+        minOffsetDays: row.type === 'forced' ? 2 : 1,
       });
       met = deadline.met;
       noteDay = deadline.deadlineDay;

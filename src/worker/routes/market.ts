@@ -53,7 +53,7 @@ interface ListingRow {
   id: number;
   player_id: number;
   player_fc_id: number | null;
-  seller_club_id: number;
+  seller_club_id: number | null;
   type: string;
   ask_price: number;
   status: string;
@@ -74,7 +74,7 @@ interface ListingRow {
   age: number | null;
   ca: number | null;
   pa: number | null;
-  seller_name: string;
+  seller_name: string | null;
 }
 
 function statusFilter(raw: string | undefined): string[] {
@@ -123,7 +123,7 @@ app.get('/market/listings', async (c) => {
             cl.name AS seller_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
-     JOIN clubs cl ON cl.id = l.seller_club_id
+     LEFT JOIN clubs cl ON cl.id = l.seller_club_id
      WHERE l.status IN (${ph}) ${cursor !== null ? 'AND l.id < ?' : ''} ${playerId !== null ? 'AND l.player_id = ?' : ''}
      ORDER BY l.id DESC LIMIT 50`,
   )
@@ -174,12 +174,13 @@ app.get('/market/listings', async (c) => {
             deadlineHours: ctx.deadlineHours,
             silenceHours: ctx.silenceHours,
             calendar: ctx.calendar,
+            minOffsetDays: r.type === 'forced' ? 2 : 1,
           }).deadlineAt;
       }
       return {
         id: r.id,
         player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, age: r.age, ca: r.ca, pa: r.pa },
-        sellerClub: { id: r.seller_club_id, name: r.seller_name },
+        sellerClub: { id: r.seller_club_id, name: r.seller_name ?? '自由身' },
         type: r.type,
         askPrice: r.ask_price,
         status: r.status,
@@ -823,7 +824,7 @@ app.get('/market/listings/:id', async (c) => {
             cl.name AS seller_name, ca2.name AS activator_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
-     JOIN clubs cl ON cl.id = l.seller_club_id
+     LEFT JOIN clubs cl ON cl.id = l.seller_club_id
      LEFT JOIN clubs ca2 ON ca2.id = l.activated_by
      WHERE l.id = ?`,
   )
@@ -860,6 +861,7 @@ app.get('/market/listings/:id', async (c) => {
         deadlineHours: ctx.deadlineHours,
         silenceHours: ctx.silenceHours,
         calendar: ctx.calendar,
+        minOffsetDays: listing.type === 'forced' ? 2 : 1,
       }).deadlineAt;
   }
   const highestActive = await c.env.DB
@@ -878,7 +880,7 @@ app.get('/market/listings/:id', async (c) => {
     listing: {
       id: listing.id,
       player: { id: listing.player_id, fcId: listing.player_fc_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },
-      sellerClub: { id: listing.seller_club_id, name: listing.seller_name },
+      sellerClub: { id: listing.seller_club_id, name: listing.seller_name ?? '自由身' },
       type: listing.type,
       askPrice: listing.ask_price,
       status: listing.status,
@@ -949,7 +951,7 @@ app.post('/market/listings/:id/bids', async (c) => {
     .first<{
       id: number;
       player_id: number;
-      seller_club_id: number;
+      seller_club_id: number | null;
       type: string;
       ask_price: number;
       status: string;
@@ -1045,6 +1047,8 @@ app.post('/market/listings/:id/bids', async (c) => {
       deadlineHours: mctx.deadlineHours,
       silenceHours: mctx.silenceHours,
       calendar: mctx.calendar,
+      // v6.60.5：强制拍卖整体比普通挂牌多一天（X 挂、最早 X+2 判定）
+      minOffsetDays: listing.type === 'forced' ? 2 : 1,
     }).deadlineAt;
   }
   // 出价推进带过线守卫（竞价 deadline_at 或激活首价窗 activation_deadline 已过 = 拒绝刷新；
@@ -1120,11 +1124,11 @@ app.get('/me/bids', async (c) => {
     `SELECT b.id, b.listing_id, b.amount, b.created_at, b.status AS bid_status,
             f.status AS hold_status, l.status AS listing_status, l.ask_price,
             p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
-            cl.name AS seller_name
+            COALESCE(cl.name, '自由身') AS seller_name
      FROM bids b
      JOIN listings l ON l.id = b.listing_id
      JOIN players p ON p.id = l.player_id
-     JOIN clubs cl ON cl.id = l.seller_club_id
+     LEFT JOIN clubs cl ON cl.id = l.seller_club_id
      LEFT JOIN fund_holds f ON f.id = b.hold_id
      WHERE b.club_id = ?
      ORDER BY b.id DESC LIMIT 100`,

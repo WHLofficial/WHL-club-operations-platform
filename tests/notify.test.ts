@@ -42,6 +42,7 @@ function freshEnv(): Fixture {
     SYNC_SECRET: SECRET,
   };
   kv.set('sess:tok-admin', JSON.stringify({ userId: 1 }));
+  kv.set('sess:tok-coach', JSON.stringify({ userId: 2 }));
   return { env, sqlite, tour, kv };
 }
 
@@ -290,7 +291,7 @@ describe('写入点端到端（§11 确认钩子② + §10.2 升级）', () => {
       INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 2, '2026-01-01T00:00:00Z');
       INSERT INTO qq_links (user_id, qq, verified_at) VALUES (2, '30003', '2026-01-01T00:00:00Z');
     `);
-    const lv = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    const lv = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach', fx.env);
     expect(lv.status).toBe(200);
     const rows = sqlAll<{ channel: string; status: string; payload: string }>(
       fx.sqlite,

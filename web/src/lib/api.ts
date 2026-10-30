@@ -897,7 +897,7 @@ export type MatchPhase = 'first_bid' | 'matching' | null;
 export interface MarketListing {
   id: number;
   player: { id: number; fcId: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
-  sellerClub: { id: number; name: string };
+  sellerClub: { id: number | null; name: string };
   type: string;
   askPrice: number;
   status: ListingStatus;
@@ -1327,6 +1327,8 @@ export interface CloseWindowResult {
 /** 强制拍卖人选参考值（v6.51.0：队内非门将 CA 前六只作参考，不再强制） */
 export interface ForcedAuctionReference {
   playerId: number;
+  /** EA 球员 ID（球员页 URL 上的号）；可能为空 */
+  fcId: number | null;
   playerName: string;
   clubId: number | null;
   clubName: string | null;

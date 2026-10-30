@@ -87,6 +87,8 @@ export interface BidDeadlineInput {
   deadlineHours: [number, number];
   silenceHours: number;
   calendar: TradeCalendar;
+  /** 最早判定日起点（相对挂牌日，默认 1 = 次日起）。强制拍卖传 2，整体比普通挂牌多一天。 */
+  minOffsetDays?: number;
 }
 
 export interface BidDeadlineResult {
@@ -98,13 +100,15 @@ export interface BidDeadlineResult {
 // 截止判定（4.4.7）：挂牌次日起，在交易日 {start}:00-{end}:00 时段内找「自上一出价起
 // 连续 silenceHours 小时无新出价」且整段落在时段内的最早时刻；落不下就顺延到下一交易日。
 // 无人出价的挂牌同样判定（v6.24.0：挂牌即落 deadline_at），lastBidAt 为 null 时以挂牌时刻为静默起点。
+// minOffsetDays（v6.60.5）：强制拍卖传 2，X 日挂牌最早 X+2 日判定；普通挂牌默认 X+1。
 export function bidDeadline(input: BidDeadlineInput): BidDeadlineResult {
   const [startHour, endHour] = input.deadlineHours;
   const lastBidMs = input.lastBidAt !== null ? Date.parse(input.lastBidAt) : Date.parse(`${input.listedDay}T00:00:00+08:00`);
   const baseDayMs = parseDayMs(input.listedDay);
   const nowMs = input.now.getTime();
+  const firstOffset = Math.max(1, Math.trunc(input.minOffsetDays ?? 1));
 
-  for (let offset = 1; offset <= 90; offset++) {
+  for (let offset = firstOffset; offset <= 90; offset++) {
     const dayStr = shanghaiDateStr(baseDayMs + offset * 86_400_000);
     if (!isTradingDay(dayStr, input.calendar)) continue;
     const windowStart = dayWindowMs(dayStr, startHour);

@@ -81,6 +81,21 @@
 
 ---
 
+## v6.60.5 · 强制拍卖认 FC ID、自由身可挂、期限 X+2；成长入口按归属收口（2026-10-30）
+
+**状态**：**未上线**——本地分支 `fix/v6.60.5-forced-fc-growth-perm`，待用户下令发布；无迁移、无 schema 变更。判级 patch。起因：管理端强制拍卖输入球员页 FC ID 报「无归属或不存在」；用户追加「强拍期限 X 挂 X+2」与「别队教练/管理组能点我的球员成长方案」。
+
+**交付**
+
+- `src/worker/bypass.ts`：`inspectForcedAuction` 平台 ID 优先、回落 `fc_id`；自由身（`club_id IS NULL AND status='free'`）也放行，`findInFlight` 用解析后的平台 id；`createForcedAuction` 首算截止传 `minOffsetDays: 2`，自由身单 `seller_club_id` 留空；`ForcedAuctionReference` 加 `fcId`。自由身成交走 `completeTransfer` 的 `saleFromClubId = null` 分支：买方照付、**成交款销毁**、按成交价新签合同；取消回 `free`，到期无出价不收下架费也不造解约单。
+- `src/core/market-rules.ts`：`BidDeadlineInput.minOffsetDays`（默认 1）；`src/worker/routes/market.ts` 创建/出价/列表/详情与 `src/worker/market-settle.ts` 存量回退统一强制拍卖按 2、普通挂牌按 1；列表/详情/我的出价改为 `LEFT JOIN clubs`，自由身卖方展示「自由身」。
+- `web/src/pages/admin/MarketPage.tsx`：预检错误可见（去掉静默 catch）、标签/说明改为平台 ID 或 FC ID 且自由身也能强拍；`web/src/lib/api.ts` 同步 `fcId` 与卖方 `id: number | null`。
+- `web/src/pages/Player.tsx`：成长方案与中国计划徽章写入口按 `canManage`（仅球员所属俱乐部的教练；管理组也不能代办）显隐，非所属教练（含管理组）只看到说明；服务端 `routes/growth.ts` 无绑定或非所属俱乐部一律 403，管理组不再豁免。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2752 例全绿**（`tests/forced-auction.test.ts` 增 FC ID/自由身/X+2、自由身成交与无出价，`tests/market-rules.test.ts` 增 minOffsetDays，`web/src/pages/Player.test.tsx` 增 TC-GROWTH-PERM-01/02/03）；build `index-9JmPjVqr.js` 714.83 kB / gzip 225.69 kB；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：发布需用户明确下令；跨仓通知模板白名单确认不在本版本范围。
+
 ## v6.60.4 · 放行即保护期结束（2026-10-30）
 
 **状态**：**已上线（2026-10-30）**——push `51bd43d..4671c36`（分支 `fix/v6.60.3-ca-pa-cap`），CF Workers Builds 自动部署 Version `69aa5509-0f0f-4945-b246-2268d8eb2429` @2026-10-30T08:29:48Z；无迁移、无 API 形状变更。判级 patch。起因：用户口径「放行球员应该是立即结束保护期，不是关窗后」。

@@ -407,7 +407,7 @@ function referenceLine(p: ForcedAuctionPreview): string {
       ? '缺 CA 数据，参考不可算'
       : `非门将 CA 队内第 ${r.caRank} 位${r.topSixLine !== null ? `（前六线 CA ${r.topSixLine}）` : ''}`;
   const verdict = r.inTopSix === true ? '落在前六' : r.inTopSix === false ? '不在前六（同样可挂）' : null;
-  const head = `${r.playerName}${r.clubName ? `（${r.clubName}）` : ''}｜参考：${rank}${verdict ? `，${verdict}` : ''}`;
+  const head = `${r.playerName}（${r.clubName ?? '自由身'}）｜参考：${rank}${verdict ? `，${verdict}` : ''}`;
   return p.blockers.length > 0 ? `${head}｜⚠ 现在挂出会被拒：${p.blockers[0].message}` : `${head}｜可挂出`;
 }
 
@@ -431,11 +431,11 @@ function ForcedAuctionSection() {
   const previewReady = playerId !== '' && Number.isInteger(playerIdNum) && playerIdNum > 0;
   const askPriceNum = Number(askPrice);
   const askPriceReady = askPrice !== '' && Number.isFinite(askPriceNum) && askPriceNum > 0;
-  const { data: preview } = useQuery({
+  const { data: preview, error: previewError } = useQuery({
     queryKey: ['admin', 'forced-auction-preview', playerId],
-    queryFn: () =>
-      api<ForcedAuctionPreview>(`/api/admin/forced-auctions/preview?playerId=${playerIdNum}`).catch(() => null),
+    queryFn: () => api<ForcedAuctionPreview>(`/api/admin/forced-auctions/preview?playerId=${playerIdNum}`),
     enabled: previewReady,
+    retry: false,
   });
 
   const reload = () => {
@@ -503,14 +503,17 @@ function ForcedAuctionSection() {
       <h2>强制拍卖</h2>
       {toastNode}
       <p className="hint">
-        准入失败时的处置手段：按给定挂牌价强拍（默认 1m，起拍价即挂牌价，之后每次加价 ≥ 1m；到期/窗尾无人出价收 10% 挂牌价下架费，球员按解约处置变自由身——本窗所有球队都不能海捞他）。
-        人选不限——本队任何正式球员都可挂，门将、CA 前六之外的也能挂；
+        准入失败时的处置手段：按给定挂牌价强拍（默认 1m，起拍价即挂牌价，之后每次加价 ≥ 1m）。
+        到期/窗尾无人出价：有归属球员收 10% 挂牌价下架费并按解约处置变自由身（本窗所有球队都不能海捞他）；
+        自由身球员不收下架费、保持自由身。
+        人选不限——任何正式球员或自由身都可挂，门将、CA 前六之外的也能挂；
+        球员 ID 填平台 ID 或球员页上的 FC ID 都认（平台 ID 优先）。
         「非门将 CA 前六」只是填了球员 ID 后给出的参考值（并标出前六线），不拦截挂出。
-        成交整单税 50%。未成交前可以取消；行内可单独暂停/恢复这一件的出价（其余市场照常）。
+        成交时：有归属球员整单税 50%；自由身球员没有收款方，成交款全额销毁。未成交前可以取消；行内可单独暂停/恢复这一件的出价（其余市场照常）。
       </p>
       <div className="inline-form">
         <div className="field">
-          <label htmlFor="forced-player">球员 ID</label>
+          <label htmlFor="forced-player">球员 ID（平台或 FC）</label>
           <input id="forced-player" className="mono" type="number" min="1" value={playerId} onChange={(e) => setPlayerId(e.target.value)} />
         </div>
         <div className="field">
@@ -527,6 +530,9 @@ function ForcedAuctionSection() {
           onConfirm={create}
         />
       </div>
+      {previewReady && previewError && (
+        <p className="error-msg">{previewError instanceof Error ? previewError.message : '预检失败，稍后重试'}</p>
+      )}
       {previewReady && preview && <p className="hint">{referenceLine(preview)}</p>}
 
       {forced.length > 0 && (

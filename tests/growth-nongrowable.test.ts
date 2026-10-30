@@ -63,10 +63,18 @@ function freshEnv(): Fixture {
      CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
      INSERT INTO user (id, name, role, locked, must_change_pw) VALUES
        (1, '管理组甲', 'admin', 0, 0),
-       (2, '教练乙', 'coach', 0, 0);`,
+       (2, '教练乙', 'coach', 0, 0),
+       (3, '教练甲', 'coach', 0, 0);`,
   );
   const auth = new DatabaseSync(':memory:');
-  auth.exec('CREATE TABLE team (id INTEGER PRIMARY KEY, club_id INTEGER, tour_team_id INTEGER);');
+  auth.exec(`CREATE TABLE team (id INTEGER PRIMARY KEY, club_id INTEGER, tour_team_id INTEGER);
+    CREATE TABLE team_binding (
+      account_id INTEGER NOT NULL,
+      team_id INTEGER NOT NULL,
+      bound_via TEXT NOT NULL,
+      bound_at TEXT NOT NULL,
+      PRIMARY KEY (account_id, team_id)
+    );`);
   const kv = new Map<string, string>();
   const env: Env = {
     DB: createTestD1(sqlite),
@@ -82,6 +90,7 @@ function freshEnv(): Fixture {
   };
   kv.set('sess:tok-admin', JSON.stringify({ userId: 1 }));
   kv.set('sess:tok-coach', JSON.stringify({ userId: 2 }));
+  kv.set('sess:tok-coach1', JSON.stringify({ userId: 3 }));
   // 可见赛季（批量补录的事件都盖这个赛季；赛季行直接 INSERT，绕开 rejudgeGrowable）
   sqlite.exec(
     `INSERT INTO seasons (season, status, created_at) VALUES
@@ -115,7 +124,13 @@ function seedPlatform(fx: Fixture): void {
       (40, 'p40', 'G. Null', 1, 'ST', 'normal', 1, 0, 0, 70, 80, 20, NULL, 401);
     INSERT INTO contracts (player_id, club_id, contract_type, is_active) VALUES
       (12, 1, 'trainee', 1), (13, 1, 'trainee', 1), (20, 2, 'formal', 1), (21, 2, 'formal', 1);
-    INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (2, 2, '2026-01-01T00:00:00Z');
+    INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (2, 2, '2026-01-01T00:00:00Z'), (1, 3, '2026-01-01T00:00:00Z');
+  `);
+  // AUTH_DB 是绑定真源（有它时不会回落到本地 club_bindings）：两个教练各绑一队
+  fx.auth.exec(`
+    INSERT INTO team (id, club_id, tour_team_id) VALUES (90, 2, NULL), (91, 1, NULL);
+    INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES
+      (2, 90, 'tour', '2026-01-01T00:00:00Z'), (3, 91, 'tour', '2026-01-01T00:00:00Z');
   `);
 }
 
@@ -709,7 +724,7 @@ describe('NG-08 升级闸门：非成长球员 409（排在 pending 判定之前
     const before = (await (await get('/api/players/102/growth', 'tok-admin', fx.env)).json()) as { player: { pendingLevelUps: number; growthXp: number } };
     expect(before.player).toMatchObject({ pendingLevelUps: 0, growthXp: 25 });
 
-    const res = await post('/api/growth/levelup/11', { planIndex: 0 }, 'tok-admin', fx.env);
+    const res = await post('/api/growth/levelup/11', { planIndex: 0 }, 'tok-coach1', fx.env);
     expect(res.status).toBe(409);
     expect(await errorText(res)).toContain('非成长球员不能消费升级');
     expect(sqlGet<{ ca: number; levels_applied: number }>(fx.sqlite, 'SELECT ca, levels_applied FROM players WHERE id = 11')).toMatchObject({ ca: 88, levels_applied: 0 });
@@ -718,7 +733,7 @@ describe('NG-08 升级闸门：非成长球员 409（排在 pending 判定之前
     // 迁移清零后 pending=0：仍要先报「非成长」而不是「没有待处理的升级」（顺序不可反）
     runMigration(fx.sqlite, '0077_growth_nongrowable_reset.sql');
     expect(xpOf(fx, 11)).toBe(0);
-    const afterMigration = await post('/api/growth/levelup/11', { planIndex: 0 }, 'tok-admin', fx.env);
+    const afterMigration = await post('/api/growth/levelup/11', { planIndex: 0 }, 'tok-coach1', fx.env);
     expect(afterMigration.status).toBe(409);
     expect(await errorText(afterMigration)).toContain('非成长球员不能消费升级');
 
@@ -733,7 +748,7 @@ describe('NG-08 升级闸门：非成长球员 409（排在 pending 判定之前
     const before = (await (await get('/api/players/101/growth', 'tok-admin', fx.env)).json()) as { player: { pendingLevelUps: number; growthXp: number } };
     expect(before.player).toMatchObject({ pendingLevelUps: 2, growthXp: 25 });
 
-    const res = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    const res = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach1', fx.env);
     expect(res.status).toBe(200);
     // 档 2 方案 0 = +2 CA（DEFAULT_UPGRADE_PLANS[2]）
     expect(await res.json()).toMatchObject({ plan: { ca: 2, silver: 0, gold: 0 }, levelsApplied: 1, pendingLeft: 1 });

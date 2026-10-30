@@ -11,18 +11,21 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PlayerDetail } from '../lib/api.ts';
+import type { GrowthDetail, PlayerDetail } from '../lib/api.ts';
 import { fitPosGroup, fitProfileAll, fitTile, type FitSlotScore } from '../lib/fit/fitScore.ts';
 import { ROLE_FIT } from '../lib/fit/roleFit.ts';
 import Player from './Player.tsx';
 
-const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
+const { apiMock, authState } = vi.hoisted(() => ({
+  apiMock: vi.fn(),
+  authState: { user: null as { role: string } | null },
+}));
 vi.mock('../lib/api.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api.ts')>();
   return { ...actual, api: apiMock };
 });
-// 公开页不要求登录：真实 useAuth 在 provider 外会抛，打桩成未登录（教练分支全关）
-vi.mock('../lib/auth.tsx', () => ({ useAuth: () => ({ user: null }) }));
+// 公开页默认未登录；成长权限用例把 role 切成教练再按 myClub 是否本队区分
+vi.mock('../lib/auth.tsx', () => ({ useAuth: () => authState }));
 // 左栏操作区与本用例无关（会依赖俱乐部登录态与多个私有端点）：整块换成空实现
 vi.mock('./player/SideOps.tsx', () => ({ SideOps: () => null }));
 
@@ -131,6 +134,7 @@ beforeEach(() => {
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
   apiMock.mockReset();
+  authState.user = null;
   apiMock.mockImplementation((path: string) => {
     // 详情页加载后会做规范 URL 跳转（?/players/1 → /players/20801），两个 id 都认
     if (/^\/api\/players\/\d+$/.test(path)) return Promise.resolve(detail(1));
@@ -768,5 +772,94 @@ describe('TC-C-FIT：fit 适配度卡（v6.56.0）', () => {
       expect(el.querySelector('.fit-key')?.textContent).toBe(`${slot.split('|')[0]}${ROLE_FIT[slot].zh}`);
       expect(el.querySelector('.fit-score')?.textContent).toBe(`${tile}%`);
     });
+  });
+});
+
+describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属俱乐部的教练能操作（v6.60.5）', () => {
+  function growthFixture(): GrowthDetail {
+    return {
+      player: {
+        id: 1,
+        name: '林承宇',
+        ca: 147,
+        growthTier: 2,
+        growthXp: 0,
+        levelsApplied: 0,
+        badgesSilver: 3,
+        badgesGold: 2,
+        growable: true,
+        status: 'active',
+        xpPerLevel: 10,
+        pendingLevelUps: 1,
+        upgradePlans: [{ ca: 1, silver: 0, gold: 0 }],
+        chinaPlaystyles: { quota: 3, granted: 0, left: 3 },
+      },
+      playstyleDetails: [],
+      events: [],
+    };
+  }
+
+  function clubOverview(id: number) {
+    return {
+      club: { id, name: `俱乐部 ${id}`, leagueTier: 'premier', logoKey: null, status: 'active' },
+      balance: 0,
+      squadCount: 0,
+      window: null,
+      home: null,
+    };
+  }
+
+  function stubGrowthPage(myClubId: number) {
+    apiMock.mockImplementation((path: string) => {
+      if (/^\/api\/players\/\d+$/.test(path)) {
+        const d = detail(1, { clubId: 11, status: 'active', fcId: 1, chinaPlan: true });
+        d.club = { id: 11, name: '球员所属队' };
+        return Promise.resolve(d);
+      }
+      if (path === '/api/me/club') return Promise.resolve(clubOverview(myClubId));
+      if (path === '/api/clubs') return Promise.resolve({ clubs: [] });
+      if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'open' } });
+      if (/^\/api\/players\/\d+\/growth$/.test(path)) return Promise.resolve(growthFixture());
+      if (path.startsWith('/api/offers')) return Promise.resolve({ offers: [], total: 0 });
+      return Promise.reject(new Error(`测试没打桩的请求：${path}`));
+    });
+  }
+
+  it('TC-GROWTH-PERM-01 · 别队教练看不到方案选择，只看到说明', async () => {
+    authState.user = { role: 'coach' };
+    stubGrowthPage(22);
+    const user = open();
+    await screen.findByText('林承宇');
+    const growthTab = screen.getByRole('button', { name: '成长' });
+    await user.click(growthTab);
+    expect(growthTab.className).toContain('on');
+
+    expect(await screen.findByText('只有球员所属俱乐部的教练能选升级方案。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /方案 1/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /发放中国计划徽章/ })).toBeNull();
+  });
+
+  it('TC-GROWTH-PERM-02 · 本队教练仍能选方案与发放中国计划徽章', async () => {
+    authState.user = { role: 'coach' };
+    stubGrowthPage(11);
+    const user = open();
+    await screen.findByText('林承宇');
+    await user.click(screen.getByRole('button', { name: '成长' }));
+
+    expect(await screen.findByRole('button', { name: /方案 1/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /发放中国计划徽章/ })).toBeTruthy();
+    expect(screen.queryByText('只有球员所属俱乐部的教练能选升级方案。')).toBeNull();
+  });
+
+  it('TC-GROWTH-PERM-03 · 管理组也不能替球员所属俱乐部选方案/发徽章', async () => {
+    authState.user = { role: 'admin' };
+    stubGrowthPage(11);
+    const user = open();
+    await screen.findByText('林承宇');
+    await user.click(screen.getByRole('button', { name: '成长' }));
+
+    expect(await screen.findByText('只有球员所属俱乐部的教练能选升级方案。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /方案 1/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /发放中国计划徽章/ })).toBeNull();
   });
 });

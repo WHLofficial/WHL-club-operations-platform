@@ -40,7 +40,8 @@ function freshEnv(): Fixture {
      CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
      INSERT INTO user (id, name, role, locked, must_change_pw) VALUES
        (1, '管理组甲', 'admin', 0, 0),
-       (2, '教练乙', 'coach', 0, 0);`,
+       (2, '教练乙', 'coach', 0, 0),
+       (3, '教练甲', 'coach', 0, 0);`,
   );
   const kv = new Map<string, string>();
   const env: Env = {
@@ -56,6 +57,7 @@ function freshEnv(): Fixture {
   };
   kv.set('sess:tok-admin', JSON.stringify({ userId: 1 }));
   kv.set('sess:tok-coach', JSON.stringify({ userId: 2 }));
+  kv.set('sess:tok-coach1', JSON.stringify({ userId: 3 }));
   return { env, sqlite, tour, kv };
 }
 
@@ -87,7 +89,7 @@ function seedPlatform(fx: Fixture): void {
       (21, 'p21', '钱七', 2, 'GK', 'normal', 1, 0, 0, 74),
       (22, 'p22', '孙八', 2, 'CM', 'normal', 2, 0, 1, 70);
     INSERT INTO contracts (player_id, club_id, contract_type, is_active) VALUES (12, 1, 'trainee', 1);
-    INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (2, 2, '2026-01-01T00:00:00Z');
+    INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (2, 2, '2026-01-01T00:00:00Z'), (1, 3, '2026-01-01T00:00:00Z');
   `);
 }
 
@@ -430,7 +432,7 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     seedPlatform(fx);
     fx.sqlite.exec("UPDATE players SET growth_xp = 25 WHERE id = 10"); // 待办 2
 
-    const lv1 = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    const lv1 = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach1', fx.env);
     expect(lv1.status).toBe(200);
     const r1 = (await lv1.json()) as { plan: { ca: number }; levelsApplied: number; pendingLeft: number };
     expect(r1.plan).toEqual({ ca: 3, silver: 0, gold: 0 });
@@ -438,10 +440,10 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     expect(r1.pendingLeft).toBe(1);
     expect(sqlGet<{ ca: number }>(fx.sqlite, 'SELECT ca FROM players WHERE id = 10')?.ca).toBe(83);
 
-    const outOfRange = await post('/api/growth/levelup/10', { planIndex: 5 }, 'tok-admin', fx.env); // 有待办但方案号越界
+    const outOfRange = await post('/api/growth/levelup/10', { planIndex: 5 }, 'tok-coach1', fx.env); // 有待办但方案号越界
     expect(outOfRange.status).toBe(400);
 
-    const lv2 = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    const lv2 = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-coach1', fx.env);
     const r2 = (await lv2.json()) as {
       plan: { ca: number; silver: number };
       levelsApplied: number;
@@ -456,7 +458,7 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
       { slot: 1, kind: 'silver', psid: 1, source: 'growth' }, // 明细存基础 ID
     ]);
 
-    const drained = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    const drained = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach1', fx.env);
     expect(drained.status).toBe(409);
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM growth_events WHERE event_type = 'levelup'")?.n).toBe(2);
 
@@ -478,24 +480,24 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     seedPlatform(fx);
     fx.sqlite.exec("UPDATE players SET growth_xp = 25 WHERE id = 10"); // 待办 2；档 3 方案 1 = 2CA + 1 银
 
-    const none = await post('/api/growth/levelup/10', { planIndex: 1 }, 'tok-admin', fx.env);
+    const none = await post('/api/growth/levelup/10', { planIndex: 1 }, 'tok-coach1', fx.env);
     expect(none.status).toBe(400);
     expect(((await none.json()) as { error: string }).error).toContain('要发 1 个银 PlayStyle');
 
-    const bogus = await post('/api/growth/levelup/10', { planIndex: 1, picks: [9] }, 'tok-admin', fx.env); // 9 不在白名单
+    const bogus = await post('/api/growth/levelup/10', { planIndex: 1, picks: [9] }, 'tok-coach1', fx.env); // 9 不在白名单
     expect(bogus.status).toBe(400);
     expect(((await bogus.json()) as { error: string }).error).toContain('不在可发放清单里');
 
-    const gold = await post('/api/growth/levelup/10', { planIndex: 1, picks: [101] }, 'tok-admin', fx.env); // 该方案不发金徽
+    const gold = await post('/api/growth/levelup/10', { planIndex: 1, picks: [101] }, 'tok-coach1', fx.env); // 该方案不发金徽
     expect(gold.status).toBe(400);
 
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles')?.n).toBe(0);
     expect(sqlGet<{ ca: number; levels_applied: number }>(fx.sqlite, 'SELECT ca, levels_applied FROM players WHERE id = 10')).toMatchObject({ ca: 80, levels_applied: 0 });
 
     // 先发一次，再用同一个 PlayStyle 升级 → 已拥有
-    const first = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    const first = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-coach1', fx.env);
     expect(first.status).toBe(200);
-    const again = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    const again = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-coach1', fx.env);
     expect(again.status).toBe(400);
     expect(((await again.json()) as { error: string }).error).toContain('已经在这名球员身上');
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles')?.n).toBe(1);
@@ -508,11 +510,11 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
       `UPDATE players SET growth_xp = 10, game_attrs = '{"PSID1": 3}' WHERE id = 10`, // 槽 1 被 FC 源占（银 3）
     );
 
-    const dup = await post('/api/growth/levelup/10', { planIndex: 1, picks: [3] }, 'tok-admin', fx.env);
+    const dup = await post('/api/growth/levelup/10', { planIndex: 1, picks: [3] }, 'tok-coach1', fx.env);
     expect(dup.status).toBe(400);
     expect(((await dup.json()) as { error: string }).error).toContain('已经在这名球员身上');
 
-    const ok = await post('/api/growth/levelup/10', { planIndex: 1, picks: [5] }, 'tok-admin', fx.env);
+    const ok = await post('/api/growth/levelup/10', { planIndex: 1, picks: [5] }, 'tok-coach1', fx.env);
     expect(ok.status).toBe(200);
     expect(((await ok.json()) as { playstyles: unknown }).playstyles).toEqual([{ slot: 2, psid: 5, gold: false }]); // 跳过槽 1
   });
@@ -522,11 +524,11 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     seedPlatform(fx);
     fx.sqlite.exec("UPDATE players SET growth_xp = 10 WHERE id = 10");
 
-    const lv = await post('/api/growth/levelup/10', { planIndex: 2, picks: [101, 102] }, 'tok-admin', fx.env); // 档 3 方案 2 = 3CA + 2 银
+    const lv = await post('/api/growth/levelup/10', { planIndex: 2, picks: [101, 102] }, 'tok-coach1', fx.env); // 档 3 方案 2 = 3CA + 2 银
     expect(lv.status).toBe(400); // 方案 2 是 2 银，给金徽数量对不上
 
     fx.sqlite.exec("UPDATE players SET growth_tier = 5 WHERE id = 10"); // 档 5 方案 1 = 3CA + 1 金
-    const goldLv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [101] }, 'tok-admin', fx.env);
+    const goldLv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [101] }, 'tok-coach1', fx.env);
     expect(goldLv.status).toBe(200);
     expect(((await goldLv.json()) as { playstyles: unknown }).playstyles).toEqual([{ slot: 13, psid: 101, gold: true }]);
     expect(sqlGet<{ slot: number; kind: string; psid: number }>(fx.sqlite, 'SELECT slot, kind, psid FROM player_playstyles WHERE player_id = 10')).toMatchObject({
@@ -546,7 +548,7 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
         SELECT 10, v, 'silver', v, 'growth', '2026-01-01T00:00:00.000Z' FROM s;
     `);
 
-    const lv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [55] }, 'tok-admin', fx.env);
+    const lv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [55] }, 'tok-coach1', fx.env);
     expect(lv.status).toBe(400);
     expect(((await lv.json()) as { error: string }).error).toContain('银槽已满（12 个）');
     expect(sqlGet<{ ca: number; badges_silver: number; levels_applied: number }>(fx.sqlite, 'SELECT ca, badges_silver, levels_applied FROM players WHERE id = 10')).toMatchObject({
@@ -565,7 +567,7 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
         (40, 'p40', '老将', 1, 'ST', 'normal', 5, 10, 90, 12, 3);
     `);
 
-    const lv = await post('/api/growth/levelup/40', { planIndex: 2, picks: [1, 2] }, 'tok-admin', fx.env); // [3CA+2银]
+    const lv = await post('/api/growth/levelup/40', { planIndex: 2, picks: [1, 2] }, 'tok-coach1', fx.env); // [3CA+2银]
     expect(lv.status).toBe(200);
     expect(sqlGet<{ ca: number; badges_silver: number; badges_gold: number }>(fx.sqlite, 'SELECT ca, badges_silver, badges_gold FROM players WHERE id = 40')).toMatchObject({
       ca: 93,
@@ -575,13 +577,16 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 40')?.n).toBe(2);
   });
 
-  it('非管理组只能给自己俱乐部球员升级；未登录 401', async () => {
+  it('只有球员所属俱乐部的教练能升级；管理组也不能代办；未登录 401', async () => {
     const fx = freshEnv();
     seedPlatform(fx);
     fx.sqlite.exec("UPDATE players SET growth_xp = 12 WHERE id = 20");
 
     const other = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach', fx.env); // 张三属阿森纳
     expect(other.status).toBe(403);
+    const admin = await post('/api/growth/levelup/20', { planIndex: 0 }, 'tok-admin', fx.env); // 管理组不绑队，不能代办
+    expect(admin.status).toBe(403);
+    expect(((await admin.json()) as { error: string }).error).toContain('球员所属俱乐部的教练');
     const mine = await post('/api/growth/levelup/20', { planIndex: 0 }, 'tok-coach', fx.env); // 赵六属曼城
     expect(mine.status).toBe(200);
     expect(sqlGet<{ ca: number }>(fx.sqlite, 'SELECT ca FROM players WHERE id = 20')?.ca).toBe(79); // 档1 方案 +1CA
@@ -596,12 +601,12 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     // 张三 80/81，待办 2 次；档 3 方案 0 = +3CA，第一次只能 +1，第二次已到顶 +0
     fx.sqlite.exec("UPDATE players SET ca = 80, pa = 81, growth_xp = 20 WHERE id = 10");
 
-    const first = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    const first = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach1', fx.env);
     expect(first.status).toBe(200);
     expect(((await first.json()) as { plan: { ca: number } }).plan.ca).toBe(1);
     expect(sqlGet<{ ca: number; pa: number }>(fx.sqlite, 'SELECT ca, pa FROM players WHERE id = 10')).toEqual({ ca: 81, pa: 81 });
 
-    const second = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-admin', fx.env);
+    const second = await post('/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach1', fx.env);
     expect(second.status).toBe(200);
     expect(((await second.json()) as { plan: { ca: number } }).plan.ca).toBe(0);
     expect(sqlGet<{ ca: number; pa: number }>(fx.sqlite, 'SELECT ca, pa FROM players WHERE id = 10')).toEqual({ ca: 81, pa: 81 });
@@ -614,7 +619,7 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     // 张三已 81/81（无剩余潜力）；档 3 方案 1 = +2CA + 1 银徽章
     fx.sqlite.exec("UPDATE players SET ca = 81, pa = 81, growth_xp = 10 WHERE id = 10");
 
-    const res = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-admin', fx.env);
+    const res = await post('/api/growth/levelup/10', { planIndex: 1, picks: [1] }, 'tok-coach1', fx.env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { plan: { ca: number; silver: number }; playstyles: unknown[] };
     expect(body.plan).toMatchObject({ ca: 0, silver: 1 });
@@ -684,12 +689,14 @@ describe('中国计划徽章发放（v3.3.0：中国计划自选 3 个银 PlaySt
 
     const otherClub = await post('/api/growth/china-playstyles/30', { picks: [4, 5, 6] }, 'tok-coach', fx.env);
     expect(otherClub.status).toBe(403);
-    expect((await post('/api/growth/china-playstyles/30', { picks: [4, 5, 6] }, 'tok-admin', fx.env)).status).toBe(200); // 管理组通吃
+    const adminOther = await post('/api/growth/china-playstyles/30', { picks: [4, 5, 6] }, 'tok-admin', fx.env);
+    expect(adminOther.status).toBe(403); // 管理组也不能替球员所属俱乐部发
+    expect((await post('/api/growth/china-playstyles/30', { picks: [4, 5, 6] }, 'tok-coach1', fx.env)).status).toBe(200); // club1 教练发
 
     const anon = await app.request('/api/growth/china-playstyles/30', { method: 'POST', body: JSON.stringify({ picks: [] }) }, fx.env);
     expect(anon.status).toBe(401);
-    expect((await post('/api/growth/china-playstyles/abc', { picks: [] }, 'tok-admin', fx.env)).status).toBe(400);
-    expect((await post('/api/growth/china-playstyles/999', { picks: [] }, 'tok-admin', fx.env)).status).toBe(404);
+    expect((await post('/api/growth/china-playstyles/abc', { picks: [] }, 'tok-coach1', fx.env)).status).toBe(400);
+    expect((await post('/api/growth/china-playstyles/999', { picks: [] }, 'tok-coach1', fx.env)).status).toBe(404);
   });
 
   it('数量必须对得上名额：少给 / 多给 / 重复 / 不在清单都 400，一个字段都不写', async () => {

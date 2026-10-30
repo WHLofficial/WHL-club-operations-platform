@@ -1,5 +1,5 @@
 // 成长公开/教练端点（附录 A〔6〕，§10）：成长史查询（🌐）、升级方案二选一与中国计划徽章
-// （👤 本队教练或管理组）
+// （👤 球员所属俱乐部的教练）
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
@@ -152,7 +152,7 @@ app.get('/players/:id/growth', async (c) => {
   });
 });
 
-// 升级方案二选一（§10.2）：本队教练或管理组，逐次消费待办；带徽章的方案要一起交 picks
+// 升级方案二选一（§10.2）：球员所属俱乐部的教练，逐次消费待办；带徽章的方案要一起交 picks
 app.post('/growth/levelup/:playerId', async (c) => {
   const user = await requireUser(c.env, c.req.raw);
   const playerId = Number(c.req.param('playerId'));
@@ -161,15 +161,15 @@ app.post('/growth/levelup/:playerId', async (c) => {
 
   const player = await c.env.DB.prepare('SELECT id, club_id FROM players WHERE id = ?').bind(playerId).first<{ id: number; club_id: number | null }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
-  if (user.role !== 'admin') {
-    const club = await getBoundClub(c.env, user.id, c.req.raw);
-    if (!club || club.id !== player.club_id) throw new HttpError(403, '只有本队教练（或管理组）能选升级方案');
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
+  if (user.role === 'admin' || !club || club.id !== player.club_id) {
+    throw new HttpError(403, '只有球员所属俱乐部的教练能选升级方案');
   }
   const out = await applyLevelUp(c.env, user.id, playerId, body?.planIndex, body?.picks);
   return c.json(out);
 });
 
-// 中国球员计划自选银徽章（§10）：本队教练或管理组，名额 = config.china_badges − 已发数
+// 中国球员计划自选银徽章（§10）：球员所属俱乐部的教练，名额 = config.china_badges − 已发数
 app.post('/growth/china-playstyles/:playerId', async (c) => {
   const user = await requireUser(c.env, c.req.raw);
   const playerId = Number(c.req.param('playerId'));
@@ -181,9 +181,9 @@ app.post('/growth/china-playstyles/:playerId', async (c) => {
     .first<{ id: number; club_id: number | null; china_plan: number }>();
   if (!player) throw new HttpError(404, '找不到这名球员');
   if (player.china_plan !== 1) throw new HttpError(409, '这名球员不在中国球员计划里');
-  if (user.role !== 'admin') {
-    const club = await getBoundClub(c.env, user.id, c.req.raw);
-    if (!club || club.id !== player.club_id) throw new HttpError(403, '只有本队教练（或管理组）能发中国计划徽章');
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
+  if (user.role === 'admin' || !club || club.id !== player.club_id) {
+    throw new HttpError(403, '只有球员所属俱乐部的教练能发中国计划徽章');
   }
   const out = await grantChinaPlaystyles(c.env, user.id, playerId, body?.picks);
   return c.json(out);

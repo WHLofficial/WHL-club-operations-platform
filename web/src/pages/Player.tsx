@@ -616,6 +616,7 @@ export default function Player() {
               silverOptions={silverOptions}
               goldOptions={goldOptions}
               chinaPlan={player.chinaPlan}
+              canManage={user?.role === 'coach' && isMine}
               busy={busy}
               onChoosePlan={choosePlan}
               onTogglePick={togglePick}
@@ -985,6 +986,7 @@ function GrowthBlock({
   silverOptions,
   goldOptions,
   chinaPlan,
+  canManage,
   busy,
   onChoosePlan,
   onTogglePick,
@@ -1000,6 +1002,8 @@ function GrowthBlock({
   silverOptions: readonly number[];
   goldOptions: readonly number[];
   chinaPlan: boolean;
+  /** 球员所属俱乐部的教练：成长方案/中国计划徽章的写入口只给他看（服务端同样有这个闸，管理组不能代办） */
+  canManage: boolean;
   busy: boolean;
   onChoosePlan: (planIndex: number) => void;
   onTogglePick: (psid: number, silverLimit: number, goldLimit: number) => void;
@@ -1032,7 +1036,8 @@ function GrowthBlock({
         <p className="hint">训练营球员 v6.45.0 起与正式球员同口径按场次记 XP（训练营赛季那行固定经验另算）。</p>
       )}
       {p.tierBasis && <TierBasisLine tier={p.growthTier} basis={p.tierBasis} />}
-      {p.pendingLevelUps > 0 && p.upgradePlans.length > 0 && (        <>
+      {p.pendingLevelUps > 0 && p.upgradePlans.length > 0 && canManage && (
+        <>
           <div className="upgrade-plans">
             {p.upgradePlans.map((plan, i) => (
               <button
@@ -1088,34 +1093,41 @@ function GrowthBlock({
           )}
         </>
       )}
+      {p.pendingLevelUps > 0 && !canManage && (
+        <p className="hint">只有球员所属俱乐部的教练能选升级方案。</p>
+      )}
       <p className="hint">
         徽章墙：🥇 {p.badgesGold}/3 · 🥈 {p.badgesSilver}/12（金槽 3 个 + 银槽 12 个；台账到帽后选带徽章的方案也不再涨）
       </p>
       {chinaPlan && (
         <div className="china-ps">
           <h4>中国计划徽章</h4>
-          {china.left > 0 ? (
-            <>
-              <p className="hint">
-                自选 {china.left} 个银 PlayStyle（名额 {china.quota} 个，已发 {china.granted} 个）。这些徽章随离队失效，
-                升级得来的徽章不受影响。
+          {canManage ? (
+            china.left > 0 ? (
+              <>
+                <p className="hint">
+                  自选 {china.left} 个银 PlayStyle（名额 {china.quota} 个，已发 {china.granted} 个）。这些徽章随离队失效，
+                  升级得来的徽章不受影响。
+                </p>
+                <PlaystylePickGrid
+                  kind="silver"
+                  options={silverOptions}
+                  selected={chinaPicks}
+                  limit={china.left}
+                  disabled={busy}
+                  onToggle={(psid) => onToggleChinaPick(psid, china.left)}
+                />
+                <button type="button" className="btn" disabled={busy || !chinaReady} onClick={() => onGrantChina(china.left)}>
+                  发放中国计划徽章{chinaReady ? '' : `（还差 ${china.left - chinaPicks.length} 个）`}
+                </button>
+              </>
+            ) : (
+              <p className="muted">
+                名额已发完（{china.granted}/{china.quota}）。
               </p>
-              <PlaystylePickGrid
-                kind="silver"
-                options={silverOptions}
-                selected={chinaPicks}
-                limit={china.left}
-                disabled={busy}
-                onToggle={(psid) => onToggleChinaPick(psid, china.left)}
-              />
-              <button type="button" className="btn" disabled={busy || !chinaReady} onClick={() => onGrantChina(china.left)}>
-                发放中国计划徽章{chinaReady ? '' : `（还差 ${china.left - chinaPicks.length} 个）`}
-              </button>
-            </>
+            )
           ) : (
-            <p className="muted">
-              名额已发完（{china.granted}/{china.quota}）。
-            </p>
+            <p className="hint">只有球员所属俱乐部的教练能发中国计划徽章。</p>
           )}
           {chinaGranted.length > 0 && (
             <div className="ps-list">

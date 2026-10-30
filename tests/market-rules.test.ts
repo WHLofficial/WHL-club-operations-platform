@@ -107,6 +107,26 @@ describe('截止惰性判定（规则 4.4.7）', () => {
     expect(r.deadlineAt).toBe('2026-07-02T13:00:00.000Z'); // 7-02 21:00
   });
 
+  it('强制拍卖 minOffsetDays=2：X 日挂牌最早 X+2 日判定（普通挂牌 X+1）', () => {
+    const base = {
+      lastBidAt: null,
+      listedDay: '2026-07-01',
+      now: new Date('2026-07-01T10:00:00.000Z'),
+      deadlineHours: hours,
+      silenceHours: 3,
+      calendar: 'none' as const,
+    };
+    const forced = bidDeadline({ ...base, minOffsetDays: 2 });
+    expect(forced.deadlineDay).toBe('2026-07-03');
+    expect(forced.deadlineAt).toBe('2026-07-03T13:00:00.000Z'); // 上海 7-03 21:00
+    expect(forced.met).toBe(false);
+    expect(bidDeadline(base).deadlineDay).toBe('2026-07-02');
+    // 同日出价也保持一天差：普通 X+1 21:00，强拍 X+2 21:00
+    const bidAt = '2026-07-01T06:00:00.000Z'; // 上海 14:00
+    expect(bidDeadline({ ...base, lastBidAt: bidAt, minOffsetDays: 2 }).deadlineDay).toBe('2026-07-03');
+    expect(bidDeadline({ ...base, lastBidAt: bidAt }).deadlineDay).toBe('2026-07-02');
+  });
+
   it('节假日顺延到下一交易日（交易日历）', () => {
     const calendar = parseTradeCalendar('{"holidays":["2026-07-02"]}');
     expect(isTradingDay('2026-07-02', calendar)).toBe(false);

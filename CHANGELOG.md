@@ -4,6 +4,23 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.5] · 强制拍卖认 FC ID、自由身可挂、期限 X+2；成长入口按归属收口（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.5-forced-fc-growth-perm`（发布待授权）。无迁移、无 schema 变更。依据用户口径：「管理端强制拍卖仍然会报错无归属或不存在」「强制拍卖期限相比普通挂牌延长一天，即 X 日挂牌 X+2 日预计成交」「我为什么能选择别人球员的成长方案」。判级 patch。
+
+**Fixed**
+
+- 管理端强制拍卖 ID 口径：`src/worker/bypass.ts` `inspectForcedAuction` 先按平台 `players.id` 查，查不到再按 `players.fc_id` 查（平台 ID 优先）；球员页上的 FC ID 现在可直接填。两套 ID 都查不到才报 404「球员不存在（平台 ID 和 FC ID 都查不到这个号）」；`ForcedAuctionReference` / 前端类型新增 `fcId`。
+- 自由身也可强制挂牌：预检放行 `club_id IS NULL AND status='free'`，`listings.seller_club_id` 留空；成交时 `completeTransfer` 走 `saleFromClubId = null` 分支，买方照付、**成交款销毁**，并按成交价新签合同。自由身单取消回到 `free`；到期无人出价不收下架费、不造解约单（原本就没有合同可解）；有归属球员仍按下架费 + 解约处置。
+- 预检里的在途判断改用解析后的平台 `player.id`（原来直接拿用户输入，FC ID 会查错行）。
+- 强制拍卖期限延长：`src/core/market-rules.ts` `bidDeadline` 新增 `minOffsetDays`，强制拍卖创建、出价重算、列表/详情存量回退、惰性结算回退统一按 2 起算（X 日挂牌最早 X+2 日判定/预计成交）；普通挂牌保持 X+1。
+- 管理端面板：预检失败不再被 `.catch(() => null)` 吞掉，直接显示后端原因；输入标签与说明改为「平台 ID 或 FC ID 都认，自由身也能强拍」；自由身成交款销毁、无下架费的口径写进提示。
+- 球员页成长权限：`web/src/pages/Player.tsx` 的 `GrowthBlock` 新增 `canManage`（仅球员所属俱乐部的教练；管理组也不能代办），非所属教练（含管理组）不再渲染升级方案按钮与中国计划发放控件，只显示「只有球员所属俱乐部的教练能…」说明；服务端 `routes/growth.ts` 同步收紧——无绑定或非球员所属俱乐部一律 403，管理组不再豁免。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2752 例全绿**（新增强制拍卖 FC ID/自由身/X+2 用例、自由身成交/无出价用例与球员页成长权限三条（含管理组不可代办））；build `index-9JmPjVqr.js` 714.83 kB / gzip 225.69 kB；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：跨仓通知模板白名单、上线操作待用户下令。
+
 ## [v6.60.4] · 放行即保护期结束（2026-10-30）
 
 **已上线（2026-10-30）**：push `51bd43d..4671c36`（分支 `fix/v6.60.3-ca-pa-cap`），CF Workers Builds 自动部署 Version `69aa5509-0f0f-4945-b246-2268d8eb2429` @2026-10-30T08:29:48Z；无迁移、无 API 形状变更。生产 `/`、`/market`、`/api/health` 全 200（d1/tour_db/kv 全 ok）；线上资产 `index-DcqhI3Bf.js` 与本地构建逐字节一致（714,540 B，含 `6.60.4` 版本串）。判级 patch。依据用户口径：「放行球员应该是立即结束保护期，不是关窗后」。
