@@ -168,6 +168,7 @@ const MIGRATION_FILES = [
   '0081_expected_income_credit_line.sql',
   '0082_vouchers_shortlist.sql',
   '0083_vouchers_backfill.sql',
+  '0084_growth_attr_bonus.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

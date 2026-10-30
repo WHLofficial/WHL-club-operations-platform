@@ -83,6 +83,8 @@ export const CONFIG_KEYS = [
   'shop_prices',
   'shop_hpremium_clubs',
   'fc26_pa_cap',
+  // v6.61.0 属性成长加成开关：0 = 关（列表/筛选/排序/详情/meta/导出全部回源值），其余按开
+  'growth_attr_bonus',
   'results_auto_confirm',
   'review_amount_threshold',
   'bid_pattern_alert',
@@ -351,6 +353,8 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   }),
   shop_hpremium_clubs: '[]',
   fc26_pa_cap: '95',
+  // v6.61.0 属性成长加成：34 项细分属性按 min(99, 初始 + max(0, ca − base_ca)) 展示；'0' = 整体关掉回源值
+  growth_attr_bonus: '1',
   // v6.28.0 影响力体系 A 段：级别系数（总影响力 =（队壳 + 阵容）× 系数 + 奖励分；
   // 未登记/未定级运行期一律回 1.0）
   influence_tier_coefs: JSON.stringify({ premier: 1.2, second: 1.0 }),
