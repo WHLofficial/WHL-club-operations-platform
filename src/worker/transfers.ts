@@ -218,8 +218,21 @@ export async function completeTransfer(
       signed_at: string | null;
     }>();
   const rc = contract?.release_fee ?? 0;
+  // 强制拍卖的卖方必须仍持有球员；若球员已被 bypass 解约（club_id NULL），本次成交仍可落到买方，
+  // 但没有收款人，成交款全额销毁（不记 transfer_out / transfer_tax）。归属变成别队则直接拒绝，
+  // 避免把别人的球员卖出去。
+  const ownerRow = await db
+    .prepare('SELECT club_id FROM players WHERE id = ?')
+    .bind(transfer.player_id)
+    .first<{ club_id: number | null }>();
+  const sellerOwnsPlayer = transfer.from_club_id !== null && ownerRow?.club_id === transfer.from_club_id;
+  const forcedUnowned = transfer.type === 'forced_auction' && ownerRow?.club_id === null;
+  if (transfer.type === 'forced_auction' && !sellerOwnsPlayer && !forcedUnowned) {
+    throw new HttpError(409, '球员归属已变更，强制拍卖单不能过户');
+  }
+  const saleFromClubId = sellerOwnsPlayer ? transfer.from_club_id : null;
   const fee = ownership ? (transfer.fee as number) : 0;
-  const tax = ownership
+  const tax = ownership && saleFromClubId !== null
     ? transfer.type === 'forced_auction'
       ? round2(fee * ctx.auctionTaxRate)
       : transferTax(fee, rc, ctx.taxRates)
@@ -231,7 +244,7 @@ export async function completeTransfer(
   // 快照语义），训练营走 0.75m / 5m 固定条款——两者都按常规通道，不沿用旧队效力/保护期。
   const contractTrainee = contract?.contract_type === 'trainee';
   const rawReturn =
-    !amendment && !freeAgent && transfer.from_club_id !== null && !contractTrainee
+    !amendment && !freeAgent && saleFromClubId !== null && !contractTrainee
       ? await loadReturnClubContext(db, transfer.player_id, transfer.to_club_id, transfer.season, transfer.window_seq, transferId)
       : null;
   const returnDemand = rawReturn?.sameWindowDemand ?? null;
@@ -257,7 +270,7 @@ export async function completeTransfer(
   // 只有「真的离开某支球队」才回收：转出方为空的海捞是签入（自由身球员无队可离），
   // 从 CPU 队摘人转出方不为空、照旧回收。留队续约/匹配（amendment）不动。
   const chinaPlaystyleCount =
-    amendment || transfer.from_club_id === null
+    amendment || saleFromClubId === null
       ? 0
       : ((await db
           .prepare(`SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = ? AND source = 'china'`)
@@ -292,10 +305,10 @@ export async function completeTransfer(
         guardParams: guard.params,
       }),
     );
-    if (transfer.from_club_id !== null) {
+    if (saleFromClubId !== null) {
       statements.push(
         ...ledgerMovement(db, {
-          clubId: transfer.from_club_id,
+          clubId: saleFromClubId,
           delta: fee,
           kind: 'transfer_out',
           refType: 'transfer',
@@ -306,7 +319,7 @@ export async function completeTransfer(
         }),
         ...(tax > 0
           ? ledgerMovement(db, {
-              clubId: transfer.from_club_id,
+              clubId: saleFromClubId,
               delta: -tax,
               kind: 'transfer_tax',
               refType: 'transfer',
@@ -329,7 +342,7 @@ export async function completeTransfer(
           `UPDATE players SET club_id = ?, status = ?, number = NULL, updated_at = ${nowSql()}
            WHERE id = ? AND (club_id IS ? OR club_id = ?)`,
         )
-        .bind(transfer.to_club_id, playerStatus, transfer.player_id, transfer.from_club_id, transfer.from_club_id),
+        .bind(transfer.to_club_id, playerStatus, transfer.player_id, saleFromClubId, saleFromClubId),
     );
     // 中国计划徽章随离队失效（§10）：明细行回收，台账计数同步减。计数在 batch 外先读出来，
     // 免得依赖批内语句顺序；重放时已无 china 行可减、DELETE 空转，整批仍然幂等。
@@ -344,7 +357,7 @@ export async function completeTransfer(
     // 离开某队时把**被覆盖前**的合同三列快照进 transfer 行（§5.4 物理面延续，迁移 0079）。
     // 契约值是 completeTransfer 进城时读到的合同行现值：若该窗回滚/重放，整批按状态守卫空转，
     // 不会把改过的值再快照一次。快照只对真正离开（from 非空、非留队单）写——海捞 from 为空。
-    if (transfer.from_club_id !== null) {
+    if (saleFromClubId !== null) {
       statements.push(
         db
           .prepare(
@@ -363,7 +376,7 @@ export async function completeTransfer(
     // 离队作废（§5.4/§5.7）：demand → void、在途 pending → void、转会申请（含「不满」徽章）→ resolved。
     // 只对**真的离开某队**生效（from 非空）——海捞是自由身签入，没有队可离。
     // 必须排在 A 分支「重挂徽章」语句之前——否则同一批里的收口 UPDATE 会立刻把它 resolved。
-    if (transfer.from_club_id !== null) {
+    if (saleFromClubId !== null) {
       const voided = await voidDemandStatements(env, transfer.player_id, 'left_club');
       statements.push(...voided.statements);
     }
@@ -465,7 +478,37 @@ export async function completeTransfer(
     statements.push(
       db
         .prepare(`UPDATE contracts SET ${sets.join(', ')} WHERE player_id = ? AND is_active = 1 AND club_id IS ?`)
-        .bind(...params, transfer.player_id, transfer.from_club_id),
+        .bind(...params, transfer.player_id, saleFromClubId),
+    );
+  } else if (dealTerms && saleFromClubId === null) {
+    // 无归属球员（被 bypass 解约后仍在强制拍卖里成交）：没有可延续的现行合同，
+    // 按谈判结果新签一份；成交款已在上面因 saleFromClubId=null 而不入任何俱乐部账，等同销毁。
+    const protection = protectionTicksFor(baseTicks, dealTerms.contractType);
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO contracts (player_id, club_id, release_fee, wage, contract_type, source, signed_at, effective_from,
+                                  service_ticks, protection_ticks, signed_season, signed_window_seq, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ${nowSql()}, strftime('%Y-%m-%d', 'now'), ?, ?, ?, ?, 1)
+           ON CONFLICT(player_id) DO UPDATE SET
+             club_id = excluded.club_id, release_fee = excluded.release_fee, wage = excluded.wage,
+             contract_type = excluded.contract_type, source = excluded.source,
+             signed_at = excluded.signed_at, effective_from = excluded.effective_from,
+             service_ticks = excluded.service_ticks, protection_ticks = excluded.protection_ticks,
+             signed_season = excluded.signed_season, signed_window_seq = excluded.signed_window_seq, is_active = 1`,
+        )
+        .bind(
+          transfer.player_id,
+          transfer.to_club_id,
+          dealTerms.releaseFee,
+          dealTerms.wage,
+          dealTerms.contractType,
+          dealTerms.source,
+          baseTicks,
+          protection,
+          transfer.season,
+          transfer.window_seq,
+        ),
     );
   } else if (dealTerms) {
     // 换队（含买回 B 分支）⇒ 合同按谈判结果写。物理面延续（§5.4 第 3 条）：效力基数/保护期取
@@ -493,7 +536,7 @@ export async function completeTransfer(
           transfer.season,
           transfer.window_seq,
           transfer.player_id,
-          transfer.from_club_id,
+          saleFromClubId,
         ),
     );
   } else if (!amendment) {
@@ -511,7 +554,7 @@ export async function completeTransfer(
             returnCtx.snapshot?.protectionTicks ?? null,
             returnCtx.snapshot?.signedAt ?? null,
             transfer.player_id,
-            transfer.from_club_id,
+            saleFromClubId,
           ),
       );
     } else {
@@ -519,7 +562,7 @@ export async function completeTransfer(
         db.prepare(`UPDATE contracts SET club_id = ? WHERE player_id = ? AND is_active = 1 AND club_id IS ?`).bind(
           transfer.to_club_id,
           transfer.player_id,
-          transfer.from_club_id,
+          saleFromClubId,
         ),
       );
     }
@@ -631,8 +674,9 @@ export async function completeTransfer(
         fee: transfer.fee,
         tax,
         playerId: transfer.player_id,
-        fromClubId: transfer.from_club_id,
+        fromClubId: saleFromClubId,
         toClubId: transfer.to_club_id,
+        ...(transfer.type === 'forced_auction' && saleFromClubId === null ? { proceedsDestroyed: true } : {}),
         ...(dealTerms ? { settleSource: dealTerms.source, contractType: dealTerms.contractType } : {}),
         ...(returnCtx?.isReturn
           ? {

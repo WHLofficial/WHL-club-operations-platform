@@ -793,10 +793,32 @@ export async function cancelForcedAuction(env: Env, actor: number, listingIdInpu
   const listingId = Number(listingIdInput);
   if (!Number.isInteger(listingId) || listingId <= 0) throw new HttpError(400, 'listingId 应为挂牌 ID');
   const listing = await db
-    .prepare('SELECT id, player_id, status, type FROM listings WHERE id = ?')
+    .prepare(
+      `SELECT l.id, l.player_id, l.status, l.type, l.seller_club_id,
+              p.club_id AS player_club_id, p.status AS player_status
+         FROM listings l LEFT JOIN players p ON p.id = l.player_id
+        WHERE l.id = ?`,
+    )
     .bind(listingId)
-    .first<{ id: number; player_id: number; status: string; type: string }>();
+    .first<{
+      id: number;
+      player_id: number;
+      status: string;
+      type: string;
+      seller_club_id: number | null;
+      player_club_id: number | null;
+      player_status: string | null;
+    }>();
   if (!listing || listing.type !== 'forced') throw new HttpError(404, '强制拍卖单不存在');
+  // 取消是「还原挂牌」动作：球员必须仍归原卖家，否则会把已解约/已转会的球员
+  // 强行改回 normal（无归属 + normal 的脏状态）。归属变了就不许取消，交给结算/下架收口。
+  if (
+    listing.seller_club_id === null ||
+    listing.player_club_id === null ||
+    listing.player_club_id !== listing.seller_club_id
+  ) {
+    throw new HttpError(409, '球员已无归属或已不在原俱乐部，不能取消强制拍卖');
+  }
   if (listing.status !== 'listed' && listing.status !== 'bidding') {
     throw new HttpError(409, '这单拍卖已经截止进审核，走审核驳回流程');
   }
@@ -807,8 +829,8 @@ export async function cancelForcedAuction(env: Env, actor: number, listingIdInpu
       .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '管理组取消强制拍卖' WHERE id = ? AND type = 'forced' AND status IN ('listed', 'bidding')`)
       .bind(listingId),
     db
-      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
-      .bind(listing.player_id),
+      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'listed'`)
+      .bind(listing.player_id, listing.seller_club_id),
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
     db
       .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`)
@@ -819,7 +841,7 @@ export async function cancelForcedAuction(env: Env, actor: number, listingIdInpu
       targetType: 'listing',
       targetId: listingId,
       origin: 'user',
-      after: { playerId: listing.player_id },
+      after: { playerId: listing.player_id, sellerClubId: listing.seller_club_id },
     }),
   ]);
   return { ok: true };

@@ -81,6 +81,20 @@
 
 ---
 
+## v6.60.2 · 强制拍卖：取消须有归属、无归属成交款销毁（2026-10-30）
+
+**状态**：**未上线**——本地分支 `fix/v6.60.1-player-roles`（基于 v6.60.1 `dabfccf`），未 push、未部署；无迁移、无 API 形状变更。判级 patch。起因：用户中途口径「强制拍卖取消必须有归属的限制，无归属球员拍卖得到的钱是走销毁」。
+
+**交付**
+
+- 取消闸：`src/worker/bypass.ts` `cancelForcedAuction` 查 listing + 球员归属；卖家为空、球员 `club_id IS NULL` 或已不等于卖家 → 409「球员已无归属或已不在原俱乐部，不能取消强制拍卖」；球员还原 UPDATE 增加 `club_id = 卖家 AND status='listed'` 守卫，避免把无归属球员改成 `normal`；审计带 `sellerClubId`。
+- 成交建单：`src/worker/market-settle.ts` `settleListingForReview` 对强制拍卖按当前球员归属决定 `from_club_id`——球员已无归属写 NULL，让成交款进入「无卖方」路径。
+- 过户：`src/worker/transfers.ts` `completeTransfer` 增加归属校验（强制拍卖只允许仍归原卖家或已无归属；变成别队 409），以 `saleFromClubId` 统一卖方账务与球员落位：无归属时不记 `transfer_out`/`transfer_tax`（钱销毁），球员从 NULL 落到买方，并按谈判条款新签/复活合同；审计标 `proceedsDestroyed`。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2743 例全绿**（`tests/forced-auction.test.ts` 新增两条：无归属取消 409 且 listing/球员状态不变；无归属成交买方 -5m、卖方 `transfer_out`/`transfer_tax` 均为 0、球员与合同落买方）；build `index-Bur5g9dD.js` 714.55 kB / gzip 225.61 kB；e2e **29/29**。
+
+**遗留**：未 push/部署，等用户明确下令；生产发券/XP/bypass 解约已执行并留审计，与本版本代码变更分开。
+
 ## v6.60.1 · 球员页角色带恢复（2026-10-29）
 
 **状态**：**已上线（2026-10-29）**——push `b4468a5..49bafcd`（分支 `fix/v6.60.1-player-roles`），CF Workers Builds 自动部署 Version `14f48584-68d0-48d8-83e3-aa85da1b15d5` @2026-10-29T14:43:33Z；纯前端展示修复，无后端/迁移/契约变化。判级 patch。起因：用户报告「UI 重排后球员的 roles 被丢弃了」。

@@ -426,4 +426,81 @@ describe('强制拍卖（4.4.5）', () => {
     );
     expect(feeEntry?.amount).toBe(-0.1);
   });
+
+  it('v6.60.2：取消强制拍卖要求球员仍有归属，无归属时 409 且不改球员状态', async () => {
+    const fx = await seedAuction();
+    const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    // 模拟 bypass 解约：球员去归属变自由身，拍卖单还挂在市场里
+    fx.sqlite.exec(`UPDATE players SET club_id = NULL, status = 'free' WHERE id = 45`);
+
+    const res = await post(`/api/admin/forced-auctions/${listingId}/cancel`, {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain('球员已无归属或已不在原俱乐部');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('listed');
+    expect(sqlGet<{ status: string; club_id: number | null }>(fx.sqlite, 'SELECT status, club_id FROM players WHERE id = 45')).toEqual({
+      status: 'free',
+      club_id: null,
+    });
+  });
+
+  it('v6.60.2：无归属球员强制拍卖成交，买方付钱但卖方无入账（成交款销毁）', async () => {
+    const fx = await seedAuction();
+    const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
+
+    // 模拟 bypass 解约：球员已无归属，但合同行还在（谈判/成约要读现行 RC）
+    fx.sqlite.exec(`UPDATE players SET club_id = NULL, status = 'free' WHERE id = 45`);
+    fx.sqlite.exec(
+      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
+                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
+    );
+    await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
+
+    const transferRow = sqlGet<{ id: number; type: string; status: string; fee: number; from_club_id: number | null }>(
+      fx.sqlite,
+      'SELECT id, type, status, fee, from_club_id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    expect(transferRow).toMatchObject({ type: 'forced_auction', status: 'pending_review', fee: 5, from_club_id: null });
+
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    const feeRes = await post(`/api/negotiations/${transferRow!.id}/release-fee`, { fee: 15 }, 'tok-coach2', fx.env);
+    expect(feeRes.status).toBe(200);
+    const e = ((await feeRes.json()) as { expectedWage: number }).expectedWage;
+    expect((await post(`/api/negotiations/${transferRow!.id}/offer`, { wage: e }, 'tok-coach2', fx.env)).status).toBe(200);
+
+    expect(
+      sqlGet<{ status: string; tax: number; fee: number; from_club_id: number | null }>(
+        fx.sqlite,
+        'SELECT status, tax, fee, from_club_id FROM transfers WHERE id = ?',
+        transferRow!.id,
+      ),
+    ).toMatchObject({ status: 'completed', tax: 0, fee: 5, from_club_id: null });
+    // 买方照付，卖方没有任何 transfer_out / transfer_tax 入账
+    expect(
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE club_id = ${fx.buyer} AND kind = 'transfer_in'`)
+        ?.amount,
+    ).toBe(-5);
+    expect(
+      sqlGet<{ n: number }>(
+        fx.sqlite,
+        `SELECT COUNT(*) AS n FROM ledger_entries WHERE club_id = ${fx.club} AND kind IN ('transfer_out','transfer_tax')`,
+      )?.n,
+    ).toBe(0);
+    expect(sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 45')).toEqual({
+      club_id: fx.buyer,
+      status: 'normal',
+    });
+    expect(
+      sqlGet<{ club_id: number; is_active: number }>(
+        fx.sqlite,
+        'SELECT club_id, is_active FROM contracts WHERE player_id = 45',
+      ),
+    ).toEqual({ club_id: fx.buyer, is_active: 1 });
+  });
 });

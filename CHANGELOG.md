@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.60.2] · 强制拍卖：取消须有归属、无归属成交款销毁（2026-10-30）
+
+**未上线**：本地分支 `fix/v6.60.1-player-roles`（基于 v6.60.1 `dabfccf`），未 push、未部署；无迁移，无 API 形状变更。判级 patch。依据用户同日口径：「强制拍卖取消必须有归属的限制，无归属球员拍卖得到的钱是走销毁」。
+
+**Changed**
+
+- `src/worker/bypass.ts` `cancelForcedAuction`：取消前 LEFT JOIN 球员校验归属；原卖家为空、球员无归属或已不在原卖家，409「球员已无归属或已不在原俱乐部，不能取消强制拍卖」，不再把无归属球员强改成 `normal`；还原语句同时押 `club_id = 原卖家 AND status='listed'`；审计补 `sellerClubId`。
+- `src/worker/market-settle.ts` `settleListingForReview`：强制拍卖成交建单时，若球员已无归属（`players.club_id IS NULL`），transfer 的 `from_club_id` 写 NULL——成交款没有收款人，走现有「from 为空」路径销毁。
+- `src/worker/transfers.ts` `completeTransfer`：先读球员当前归属；强制拍卖只有「仍归原卖家」或「已无归属」两种可过户，归属变成别队直接 409「球员归属已变更，强制拍卖单不能过户」。`saleFromClubId` 统一承接卖方账务/球员归属守卫/徽章回收/合同快照/demand 作废：无归属时不记 `transfer_out`、不记 `transfer_tax`（成交款全额销毁），球员从 `club_id IS NULL` 落到买方，并按谈判结果新签/复活合同；审计 after 加 `proceedsDestroyed: true`。
+
+**验收**：typecheck 三份全清；vitest **169 文件 / 2743 例全绿**（新增 `tests/forced-auction.test.ts` 两条：无归属取消 409 且不改球员状态；无归属成交买方扣 5m、卖方零入账、球员与合同落到买方）；build `web/dist/assets/index-Bur5g9dD.js` **714.55 kB / gzip 225.61 kB**；e2e **29/29**（本地 wrangler 8791 读构建产物）。
+
+**遗留**：未 push/部署，等用户明确下令；生产运营发券/XP/解约已另行执行并留审计，不属于本版本代码变更。
+
 ## [v6.60.1] · 球员页角色带恢复（2026-10-29）
 
 **已上线（2026-10-29）**：push `b4468a5..49bafcd`（分支 `fix/v6.60.1-player-roles`），CF Workers Builds 自动部署 Version `14f48584-68d0-48d8-83e3-aa85da1b15d5` @2026-10-29T14:43:33Z；无后端、迁移或契约变化。生产 `/api/health` 200（d1/tour_db/kv 全 ok），线上资产 `index-pp6VPxdP.js` 与本地构建逐字节一致（714,552 B）；生产球员页 `/players/17`（重定向到 `/players/230621`）实渲染顶卡「角色 GK 门将 ++」（`role-chip role-plusplus`），1280 与 320 两档均无横向溢出。判级 patch。

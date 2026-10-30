@@ -76,7 +76,11 @@ export async function settleListingForReview(
       .prepare(
         `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
          SELECT CASE l.type WHEN 'activation' THEN 'activation' WHEN 'forced' THEN 'forced_auction' ELSE 'transfer' END,
-                l.player_id, l.seller_club_id,
+                l.player_id,
+                -- 强制拍卖时球员已无归属（被 bypass 解约等）：转出方写 NULL，成交款没有收款人可记，
+                -- 由 completeTransfer 的「from_club_id 为空」分支自然销毁；球员仍从自由身落到买方。
+                CASE WHEN l.type = 'forced' AND (SELECT club_id FROM players WHERE id = l.player_id) IS NULL
+                     THEN NULL ELSE l.seller_club_id END,
                 (SELECT club_id FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
                 (SELECT amount FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
                 'pending_review', l.season, l.window_seq, ?, ${nowSql()}
