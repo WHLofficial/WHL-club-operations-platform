@@ -6,7 +6,7 @@
 
 ## [v6.60.4] · 放行即保护期结束（2026-10-30）
 
-**未上线**：本地分支 `fix/v6.60.3-ca-pa-cap`（基于 v6.60.3 `51bd43d`），未 push、未部署；无迁移、无 API 形状变更。判级 patch。依据用户口径：「放行球员应该是立即结束保护期，不是关窗后」。
+**已上线（2026-10-30）**：push `51bd43d..4671c36`（分支 `fix/v6.60.3-ca-pa-cap`），CF Workers Builds 自动部署 Version `69aa5509-0f0f-4945-b246-2268d8eb2429` @2026-10-30T08:29:48Z；无迁移、无 API 形状变更。生产 `/`、`/market`、`/api/health` 全 200（d1/tour_db/kv 全 ok）；线上资产 `index-DcqhI3Bf.js` 与本地构建逐字节一致（714,540 B，含 `6.60.4` 版本串）。判级 patch。依据用户口径：「放行球员应该是立即结束保护期，不是关窗后」。
 
 **Changed**
 
@@ -17,7 +17,7 @@
 
 **验收**：typecheck 三份全清；vitest **169 文件 / 2745 例全绿**（`tests/demand-ops.test.ts` direct/升档断言改为无 pending + `contracts.protection_ticks=0` + 价格不变；`tests/renewal-window.test.ts` 买回 A 分支同步；`web/src/pages/market/desk/DemandSection.test.tsx` 新文案）；build `web/dist/assets/index-DcqhI3Bf.js` **714.54 kB / gzip 225.60 kB**。
 
-**遗留**：未 push/部署，等用户明确下令。
+**遗留**：无。
 
 ## [v6.60.3] · 成长 CA 不得超过 PA（2026-10-30）
 

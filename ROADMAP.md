@@ -83,7 +83,7 @@
 
 ## v6.60.4 · 放行即保护期结束（2026-10-30）
 
-**状态**：**未上线**——本地分支 `fix/v6.60.3-ca-pa-cap`（基于 v6.60.3 `51bd43d`），未 push、未部署；无迁移、无 API 形状变更。判级 patch。起因：用户口径「放行球员应该是立即结束保护期，不是关窗后」。
+**状态**：**已上线（2026-10-30）**——push `51bd43d..4671c36`（分支 `fix/v6.60.3-ca-pa-cap`），CF Workers Builds 自动部署 Version `69aa5509-0f0f-4945-b246-2268d8eb2429` @2026-10-30T08:29:48Z；无迁移、无 API 形状变更。判级 patch。起因：用户口径「放行球员应该是立即结束保护期，不是关窗后」。
 
 **交付**
 
@@ -92,9 +92,9 @@
 - 文案：`src/worker/notify.ts`、`web/src/pages/market/desk/DemandSection.tsx`、`web/src/pages/player/SideOps.tsx` 全部改「保护期立即结束/已结束」，不再出现「关窗起」。
 - 兼容：历史 rejection pending 仍走 `applyPendingContractChanges` 关窗 apply（旧数据不丢）；新操作不再产生 pending。
 
-**验收**：typecheck 三份全清；vitest **169 文件 / 2745 例全绿**（direct/升档：无 rejection pending、`protection_ticks=0` 立即生效、工资/RC 不变；买回 A 分支同步；DemandSection 文案）；build `index-DcqhI3Bf.js` 714.54 kB / gzip 225.60 kB。
+**验收**：typecheck 三份全清；vitest **169 文件 / 2745 例全绿**（direct/升档：无 rejection pending、`protection_ticks=0` 立即生效、工资/RC 不变；买回 A 分支同步；DemandSection 文案）；build `index-DcqhI3Bf.js` 714.54 kB / gzip 225.60 kB；e2e 不在本版本范围（纯后端状态机 + 文案）。生产 `/`、`/market`、`/api/health` 全 200（d1/tour_db/kv 全 ok）；线上资产与本地逐字节一致（714,540 B，含 `6.60.4`）。
 
-**遗留**：未 push/部署，等用户明确下令。
+**遗留**：无。
 
 ## v6.60.3 · 成长 CA 不得超过 PA（2026-10-30）
 
