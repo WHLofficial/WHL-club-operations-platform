@@ -6,7 +6,7 @@
 
 ## [v6.61.0] · 属性成长加成（2026-10-30）
 
-**本地完成、未 push 未部署**；迁移 `0084` 未 apply。判级 minor。34 项细分属性改为「初始属性 + CA 成长点数」统一展示：`delta = max(0, ca − COALESCE(base_ca, ca))`、`显示属性 = min(99, 初始 + delta)`，唯一 helper `src/core/growth-attrs.ts`，列表/筛选/排序/详情/meta/导出五处共用；开关 `growth_attr_bonus`（默认开，'0'=三处回源值）；页面不加「含成长」标注。
+**已上线（2026-10-30）**：push `d5889d0..0cde538`，CF Workers Builds Version `bc3c082e-4abe-4df1-ae55-ac0b21d65624`（2026-10-30T17:17:35Z）；迁移 `0084` 先于 push apply。前置生产数据批（同日执行，用户确认）：S9 属性回写 6 片落库（254 人 × 2,336 键回 FC26db 原值，`--verify` 差异 0）+ 公开缓存代际键 bump 两轮（1288 回写后 / 1289 部署后）。判级 minor。34 项细分属性改为「初始属性 + CA 成长点数」统一展示：`delta = max(0, ca − COALESCE(base_ca, ca))`、`显示属性 = min(99, 初始 + delta)`，唯一 helper `src/core/growth-attrs.ts`，列表/筛选/排序/详情/meta/导出五处共用；开关 `growth_attr_bonus`（默认开，'0'=三处回源值，双向实测）；页面不加「含成长」标注。生产探针：三方一致（列表 == 详情 == 导出 xlsx，样本 delta 13/8/3/0，撞 99 封顶验证过）、初始视图回源值、门将键同样加成、非 34 项键（身高/CA/PA/PSID）原样；tour 仓 meta 为纯展示消费、契约形状未变，无需发版。上线记录见 ROADMAP v6.61.0 节。
 
 **Added**
 

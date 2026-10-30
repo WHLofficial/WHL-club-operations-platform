@@ -83,7 +83,7 @@
 
 ## v6.61.0 · 属性成长加成：34 项 = min(99, 初始 + delta) + S9 属性回写批（2026-10-30）
 
-**状态**：**本地完成、未 push 未部署**（用户指令：全部做完等下令）。判级 minor。迁移 `0084` **未 apply 到生产**（push 前必须先 apply，见上线注意）。计划 `memory/plan-v6.61.0-growth-attr-bonus.md`、交接 `memory/handoff-v6.61.0-growth-attr-bonus.md`、测试计划 `docs/test-plans/v6.61.0-attr-growth.md`。
+**状态**：**已上线（2026-10-30）**——push `d5889d0..0cde538`（分支 `feat/v6.61.0-attr-growth` → `main`，7 个提交含 v6.60.10-11 的 docs 存稿），CF Workers Builds 自动部署 Version **`bc3c082e-4abe-4df1-ae55-ac0b21d65624`** @2026-10-30T17:17:35Z；迁移 `0084` 已于 push 前 apply（`Executed 2 commands`，config 行 `growth_attr_bonus='1'` 在场）。判级 minor。上线顺序按既定口径：**回写批（用户确认后 6 片落库 + verify 0 差异 + 代际键 1288）→ 0084 apply → push → 代际键再 bump 1289（作废旧代码在 1288 下算出的未加成 L2）→ 生产探针**。计划 `memory/plan-v6.61.0-growth-attr-bonus.md`、交接 `memory/handoff-v6.61.0-growth-attr-bonus.md`、测试计划 `docs/test-plans/v6.61.0-attr-growth.md`。
 
 **口径**：`delta = max(0, ca − COALESCE(base_ca, ca))`（ROADMAP 既定「涨幅」，不另造字段）、`显示属性 = min(99, 初始属性 + delta)`，只作用于 34 项细分属性（`FC26_GAME_ATTR_COLUMNS` sprintspeed 起切片，含 5 门将键）；缺键/空值透传 null 不造值；`view=initial` 的 caExpr 恒等于 `COALESCE(base_ca, ca)` ⇒ delta 自然归 0；开关 `growth_attr_bonus`（默认 '1'，'0'=三处全回源值）；页面不加「含成长」标注（用户裁决「玩家知道」）。属性表达式全仓只有一份 helper `src/core/growth-attrs.ts`（`growthDelta` / `buffedValue` / `buffedAttrs` / `growthDeltaSql` / `attrValueSql`），列表、区间筛选、属性排序、详情、meta、导出共用。
 
@@ -99,7 +99,17 @@
 
 **验收**：typecheck 三份全清；vitest **173 文件 / 2,798 例全绿**（v6.60.11 基线 172/2,770；新增 `tests/growth-attrs.test.ts` 20 例、`players-library.test.ts` v6.61.0 describe 8 例，config 计数 3 处改 89）；build 6.61.0 成功；导出脚本本地 dry-run 通过。
 
-**上线注意（等用户下令后的顺序）**：① 确认回写批 → 逐片 `--file` 执行 + `--verify` 差异 0 + 手动 bump `cache:epoch:public`（脚本直写 D1 不触发 purge）；② `0084` apply 到生产（先迁移后 push，Workers Builds 无迁移步骤）；③ push（push 即自动部署）；④ 生产探针：三方一致 / 初始视图 / 开关关闭 / 缓存失效（测试计划 TC-P-01…06）；⑤ 赛事仓 `GET /api/players/meta` 契约已变（attrs 34 项带加成），tour 侧需同步发版（其消费逻辑多为主键/身高/花式，34 项数值仅展示）；⑥ 上线前真导一队进游戏验「游戏读 overallrating 列、不按 34 项重算」（Q1，全项目唯一无仓库证据的假设）。
+**上线记录（2026-10-30 探针实测，样本来自生产只读 SELECT）**
+
+- **回写批**：见 `scripts/prod-20261025-s9-attr-rewind/README.md` 留痕节（6 片 254 人 / rows_written 1,016 / 重放幂等 / verify 2,336 键差异 0 / 抽 5 人全 ✓ / 代际键 1287→1288）。
+- **线上资产**：`index-o4xq99j1.js` 与本地 6.61.0 构建同名同版本串；`/api/health` 200。
+- **三方一致（样本 delta 13 / 8 / 3 / 0）**：fc 73885（fin 初始 73，+13）→ 列表 `attrValue` **86** == 详情 `gameAttrs.finishing` **86** == 导出 xlsx 单元格 **86**；fc 260592（81+8）→ **89** 三方一致；fc 239085（fin 初始 96，+3）→ **99 撞顶封住**，三方一致；fc 231443（delta 0）→ **90** 三方一致。`overallrating` 列均为现值 CA（94/85/90）不受加成影响。
+- **门将键加成**：73885 `gkreflexes` 初始 7 → 详情 **20**（7+13）；非 34 项键原样（`height` 185、`CA` 键 72 不动；响应 `ca` 字段恒现值 85）。
+- **初始视图**：`?view=initial&attr=finishing&fc_id=73885` → **73**（不加成，delta 自然归 0 验证成立）。
+- **meta 契约**：`/api/players/meta?fcIds=73885` → `attrs.finishing` 86、`height` 185 原样。
+- **开关双向实测**：config 置 '0'（等 60s isolate memo 过期）→ 列表 / 详情 / meta 三处同时回源值（73 / 96 / 73）；置回 '1' 后恢复 86 / 86。config 行终态 '1'。
+- **tour 仓 meta 契约**：赛事仓 `worker/lib/clubMeta.ts` 把 meta 镜像进 `player_meta`（整点 cron）→ `coach.ts` 名册属性行**纯展示**消费，PSID 徽章键与 height 均不在 34 项内、契约形状未变 ⇒ **tour 侧无需发版**，下个整点 meta 同步自动吃到加成值（已核实 2026-10-30）。
+- **未跑**：本地 e2e——wrangler dev 本轮环境性挂起（TCP 可连、零请求日志、`/api/health` 同样无响应，重搭仍复现；属运行时层问题，与路由代码无关——health 不经过本轮任何改动路径）。本增量前端零逻辑改动，回归依据以 2,798 单测 + 生产探针为准；e2e 待环境恢复后按测试计划补跑。
 
 ## v6.60.11 · 兼任本队教练的管理账号能自己选成长方案（2026-10-30）
 
