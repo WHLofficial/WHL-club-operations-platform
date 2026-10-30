@@ -60,3 +60,8 @@ scripts/prod-20261006-s9-walkover-fix/sql/0[2346]-*.sql
 # 故分片不入库；manifest.json（逐笔明细）、只读预检/复查（01-precheck / 03 / 03a）、rollback/ 与
 # README/报告照旧入库。
 scripts/prod-20261011-s9-weather-recalc/sql/02*.sql
+
+# 2026-10-30 S9 属性回写批（v6.61.0 任务 1）：写分片可由 gen-rewind-sql.ts 从 FC26db xlsx +
+# S9 的 abilities-update-0{1,2}.sql 逐字复现（rewind-report.md 含逐片 sha256 与逐人逐键 2,336 行明细），
+# 故分片不入库；生成器、README 与三份报告照旧入库。
+scripts/prod-20261025-s9-attr-rewind/sql/
