@@ -41,5 +41,10 @@ node gen-rewind-sql.ts --verify              # 写后验收（生产 SELECT）�
 ## 留痕（2026-10-30）
 
 - 生成：6 片 / 254 人 / 2,336 键（`rewind-report.md` 含逐片 sha256 与逐键表）。
-- 只读预检：**players 缺行 0 / 守卫键不匹配 0**（`precheck-report.md`，2026-10-30T15:47Z 生产）。
-- 写库：待用户确认后执行（本节补执行记录）。
+- 只读预检：**players 缺行 0 / 守卫键不匹配 0**（`precheck-report.md`，两轮：15:47Z 宽口径 + 16:26Z 严格 typeof 口径）。
+- **写库：已于 2026-10-31 执行完毕（用户确认）**。逐片 `wrangler d1 execute --remote --file`：
+  01–05 各 50 人（rows_read 50 / rows_written 200）、06 4 人（4 / 16），合计 **254 人 / rows_written 1,016**（每行 4 写 = players 行 + 3 条索引项）。
+  幂等实证：重放第 1 片 rows_written = **0**（守卫全不命中；汇总 `changes:1` 是 D1 计数噪音，以 rows_written 为准）。
+- **写后验收：`--verify` 与 FC26db 差异 0**（2,336 键全过）+ 抽 5 人 34 项全键表全 ✓（`verify-report.md`，2026-10-30T17:09Z 生产）。
+- **缓存代际：`cache:epoch:public` 1287 → 1288**（SESSION_KV，wrangler kv key put，读回确认）——脚本直写 D1 不经 HTTP 写路径，此步保证公开读立即出回写后的新值。
+- 尚未做：`0084` apply 生产、push 上线（等用户下令；顺序见 ROADMAP v6.61.0 节「上线注意」）。
