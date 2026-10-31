@@ -15,6 +15,8 @@
 
 **验收**：typecheck 三份全清；`web/src/pages/market/desk/NegotiationsSection.test.tsx` **21 例**全绿（v6.65.1 基线 15 例，+6）；变异验证——把默认值改回「恒展开」时「两条以上默认全收起」必红；全量 vitest **180 文件 / 2,912 例**全绿；`npm run build` 通过。测试计划 `docs/test-plans/v6.65.2-nego-collapse.md`。判级 **patch**（前端视图态 + 一个派生字段；零迁移、零生产写、无接口语义变更）。
 
+**已上线（2026-10-31）**：push `eaaa3e0..a18b214`，Cloudflare Version `77daa2c2-cb76-4275-b47a-46bdcffae23a` @2026-10-31T15:42:26Z（零迁移）。上线回读：`/api/health` 200；入口资产换成 `assets/index-CvIvlf9d.js`（包内版本串 `6.65.2`×1）；谈判分包 `assets/MarketDeskPage-DZWzntg-.js` 内「上次报价 / 静默还剩 / 有新反馈 / 即将作废 / whl-nego-fold-v1」齐全。
+
 ## [v6.65.1] · 消费中心「角色（职责）」新增下拉永远为空 + 双加号标签双写（2026-10-31）
 
 **Fixed**
