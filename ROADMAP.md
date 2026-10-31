@@ -89,6 +89,24 @@
 
 ---
 
+## v6.64.3 · 激活竞价截止后训练营合同同样进 24h 匹配窗 + 出价死线跳过出价当日（2026-10-31）
+
+**状态**：**已开发，待 owner 下令上线**（2026-10-31，今晚 20:55 前须 push——21:00 生产首次挂牌结算依赖本版）——本地提交后待 push（push 即触发 CF Workers Builds 自动部署，并随行 v6.64.2 两枚未推送提交）。**生产迁移现状：已到 `0087`**（本版零迁移、零生产写）。
+
+**缘起**（2026-10-31，owner 两则指令）：① 「训练营无匹配是错误的，应当是匹配之后为正式合同只能进一线队」——v6.24.0 的 `settleByContractType` 给训练营合同开了「竞价截止直进待审」豁免，但匹配成约必然转正式合同（`chooseTrainee` 拒收 match 型过户），训练营合同也应可付新 RC 匹配留人；② 「要警惕不应出现在某日 18:00 出价、当日 21:00 就截止」——`bidDeadline` 的静默起点取 `max(lastBid, 开窗)`，时段内的出价（18:00-20:59）静默段落在当日时段内，产生当日死线。
+
+**裁决**（grilling 四轮收口，计划 `memory/plan-v6.64.1-trainee-activation-match-and-bid-day.md` §八）：匹配（撤豁免，激活一律进 24h 匹配窗）+ 出价死线（判定日跳过出价当日 ⇒ 死线恒为下一交易日 21:00；存量已落库 `deadline_at` 不回改）。版本号原排 v6.64.1，因 seaSign 会话占用 6.64.1/6.64.2 改号 v6.64.3，批次二（上下放机制）相应排 v6.64.4。
+
+**交付**：
+- `src/worker/market-settle.ts`：`settleByContractType` 撤训练营豁免（删合同类型查询分支），激活挂牌竞价截止后一律 `matched_pending`（`match_deadline = now + matchWindowHours`、`deadline_at` 收口为 NULL）；到期无人决定走既有 `settleListingForReview` 按竞价最高价成交。残留单（listed 带出价崩溃残留）注释同步。
+- `src/core/market-rules.ts`：`bidDeadline` 循环加 `if (dayStr <= bidDayStr) continue`——候选判定日必须晚于出价当日；跳过后候选日开窗必然晚于出价时刻，静默段起点恒为判定日开窗。无出价挂牌（lastBidAt=null → 出价日=挂牌日）不受影响。
+- 文案：`MarketActivationPage.tsx`（撤 `kind === 'trainee'` 三元，「落激活首价」提示统一为「竞价截止后进 24 小时匹配窗」）、`MarketListingOverlay.tsx`（同口径）；`activations.ts` 头注释同步。
+- 测试：`tests/market-rules.test.ts` 死线断言改写（19:00 出价 → 次日 21:00；白天出价 → 次日 21:00；20:30/强拍/节假日为改前改后同值的回归锚）；`tests/activation.test.ts` 三个用例改写/补匹配窗到期步（TC-A04/A05/A10 训练营 → matched_pending → 到期按最高价成交进待审）。测试计划 `docs/test-plans/v6.64.3-trainee-match-and-bid-deadline.md`（TC-01..11 + 变异 M1/M2/M3）。
+
+**验收（实测）**：`npm run typecheck` 三份全清；vitest **177 文件 / 2,860 例**全绿（v6.64.2 基线 177/2,860，本版改写既有断言净增 0）；`npm run build` 通过。变异验证：M1 删 `dayStr <= bidDayStr` 跳过行 ⇒ 恰好两条新死线用例红、四条同值回归锚绿；M2 恢复训练营豁免 ⇒ 恰好 TC-A04/A05/A10 红；M3（成交价口径）由既有 TC-A11 锁定。**评审修复**：三处源码注释版本号 v6.64.1 → v6.64.3、残留单分流注释同步新口径。判级 **patch**（零迁移、零新端点、零契约变更）。
+
+**今晚 21:00 结算的生产预期**（上线后）：#23 Barrios（训练营激活、有出价）→ `matched_pending`（match_deadline ≈ 结算时刻+24h）而非直进待审；#5 Kanté（正式合同）→ `matched_pending` 不变；两条无出价普通挂牌 → 下架收 10% 费；#31（自由身强拍）→ 回自由身零费用；#29 → 次日 21:00（存量落库值不回改）。
+
 ## v6.64.2 · 无东家的名单行把广告板打白屏（2026-10-31）
 
 **状态**：**已开发，待 owner 下令上线**（2026-10-31）——本地提交后待 push（push 即触发 CF Workers Builds 自动部署）。**生产迁移现状：已到 `0087`**（本版零迁移）。
