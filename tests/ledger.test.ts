@@ -94,6 +94,8 @@ describe('财政余额与流水账（附录 A〔6〕）', () => {
       available: null,
       expectedIncome: null,
       creditLine: null,
+      activationIncome: null,
+      activationCredit: null,
     });
     const ledger = await get('/api/club/ledger', 'tok-coach', fx.env);
     expect(ledger.status).toBe(200);
@@ -122,6 +124,8 @@ describe('财政余额与流水账（附录 A〔6〕）', () => {
       held: number;
       expectedIncome: number;
       creditLine: number;
+      activationIncome: number;
+      activationCredit: number;
       available: number;
     };
     // v6.57.0：本队没有在途卖人 ⇒ 额度 0，可支配仍是 balance − held
@@ -131,6 +135,8 @@ describe('财政余额与流水账（附录 A〔6〕）', () => {
       held: 12.5,
       expectedIncome: 0,
       creditLine: 0,
+      activationIncome: 0,
+      activationCredit: 0,
       available: 87.5,
     });
   });

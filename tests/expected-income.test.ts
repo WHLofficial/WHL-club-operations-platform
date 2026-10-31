@@ -1,4 +1,4 @@
-// 预期收入额度（设计 §1/§2.1，v6.57.0）：公式三层同源 + 迁移 0081 三个资金触发器的同源锁。
+// 预期收入额度（设计 §1/§2.1，v6.57.0；v6.64.0 增被激活挂牌源③）：公式三层同源 + 迁移 0081→0087 三个资金触发器的同源锁。
 // 口径：在途卖人收入的税后净额 × k 进「可支配」；k = config expected_income_rate（钳制 0–1，缺行 1.0）。
 // 锁的目标是「应用层算的额度」与「触发器在事务内兜底的额度」逐字/逐值一致——两边任一侧漂移都要红。
 import { describe, expect, it } from 'vitest';
@@ -92,7 +92,7 @@ describe('预期收入额度公式（设计 §1）', () => {
     const { db } = setup();
     expect(await availableBalance(db, 1)).toBe(81);
     expect(await expectedIncomeBreakdown(db, 1)).toEqual([
-      { source: 'listing', refId: 100, playerId: 11, gross: 90, tax: 9, net: 81 },
+      { source: 'listing', refId: 100, playerId: 11, gross: 90, tax: 9, net: 81, activation: false },
     ]);
     // 没有在途卖人的俱乐部额度为 0（买方不会被卖方的额度带飞）
     expect(await availableBalance(db, 2)).toBe(0);
@@ -142,7 +142,7 @@ describe('预期收入额度公式（设计 §1）', () => {
     `);
     expect(await availableBalance(db, 1)).toBe(50);
     expect(await expectedIncomeBreakdown(db, 1)).toEqual([
-      { source: 'transfer', refId: expect.any(Number), playerId: 11, gross: 100, tax: 50, net: 50 },
+      { source: 'transfer', refId: expect.any(Number), playerId: 11, gross: 100, tax: 50, net: 50, activation: false },
     ]);
   });
 
@@ -188,7 +188,7 @@ describe('预期收入额度公式（设计 §1）', () => {
         VALUES (101, 2, 100, '2026-01-01T00:00:00Z', 'active');
     `);
     expect(await expectedIncomeBreakdown(db, 3)).toEqual([
-      { source: 'listing', refId: 101, playerId: 12, gross: 100, tax: 50, net: 50 },
+      { source: 'listing', refId: 101, playerId: 12, gross: 100, tax: 50, net: 50, activation: false },
     ]);
     expect(await availableBalance(db, 3)).toBe(50);
   });
@@ -219,7 +219,7 @@ describe('预期收入额度公式（设计 §1）', () => {
     expect(await availableBalance(db, 1)).toBe(0);
   });
 
-  it('balanceSnapshot 三字段同源：expectedIncome 未乘 k、creditLine 乘 k、available 合成', async () => {
+  it('balanceSnapshot 五字段同源：expectedIncome/activationIncome 未乘 k、creditLine/activationCredit 乘 k、available 合成', async () => {
     const { sqlite, db } = setup();
     setK(sqlite, '0.5');
     hold(sqlite, 1, 40, 'listing', 200);
@@ -228,15 +228,17 @@ describe('预期收入额度公式（设计 §1）', () => {
       held: 40,
       expectedIncome: 81,
       creditLine: 40.5,
+      activationIncome: 0,
+      activationCredit: 0,
       available: 0.5,
     });
   });
 
-  it('源①：listed 无出价计零；activation 挂牌与 matched_pending 一律排除', async () => {
+  it('源③（v6.64.0）：被激活挂牌计入（激活价保底 / 抢价取高）；未激活与 matched_pending 排除', async () => {
     const { sqlite, db } = setup();
     // 200 是 club3 的 listed 挂牌但没有 active 出价 ⇒ 流拍方向不计（下架费是负收益，不是收入）
     expect(await expectedIncomeBreakdown(db, 3)).toEqual([]);
-    // activation 挂牌：即使有 active 出价、type 也不是 forced ⇒ 仍排除（激活是签入方掏钱，不产生卖方收入）
+    // activation 挂牌但未被激活（activated_by 缺失）：即使有 active 出价也不计（「被激活」判据）
     sqlite.exec(`
       UPDATE listings SET status = 'delisted' WHERE id = 200;
       INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at)
@@ -245,14 +247,67 @@ describe('预期收入额度公式（设计 §1）', () => {
         VALUES (202, 2, 50, '2026-01-01T00:00:00Z', 'active');
     `);
     expect(await expectedIncomeBreakdown(db, 3)).toEqual([]);
-    // matched_pending（匹配等待窗）：冻结已进待审/匹配，不再算在途挂牌收入
+    // 激活动作补上 activated_by（＝被激活）→ 计入：抢价 50 > 激活价 40，取 50（税 5 → 净 45），行带 activation 标记
+    sqlite.exec("UPDATE listings SET activated_by = 2 WHERE id = 202");
+    expect(await expectedIncomeBreakdown(db, 3)).toEqual([
+      { source: 'listing', refId: 202, playerId: 12, gross: 50, tax: 5, net: 45, activation: true },
+    ]);
+    // 出价撤走 → 激活价保底（grilling Q1）：gross = ask_price 40（税 4 → 净 36）
+    sqlite.exec("UPDATE bids SET status = 'withdrawn' WHERE listing_id = 202");
+    expect(await expectedIncomeBreakdown(db, 3)).toEqual([
+      { source: 'listing', refId: 202, playerId: 12, gross: 40, tax: 4, net: 36, activation: true },
+    ]);
+    // matched_pending（激活方落价成交等待审核）：listing 侧退出，transfers 源②接管（此夹具无 transfer 单 ⇒ 空）
     sqlite.exec("UPDATE listings SET status = 'matched_pending' WHERE id = 202");
     expect(await expectedIncomeBreakdown(db, 3)).toEqual([]);
-    // 换回普通挂牌 + bidding 才计入（50 → 税 5 → 净 45）
+    // 换回普通挂牌 + bidding + 活跃出价才按源①计（50 → 税 5 → 净 45，activation 标记熄灭）
     sqlite.exec("UPDATE listings SET status = 'bidding', type = 'normal' WHERE id = 202");
+    sqlite.exec("UPDATE bids SET status = 'active' WHERE listing_id = 202");
     expect(await expectedIncomeBreakdown(db, 3)).toEqual([
-      { source: 'listing', refId: 202, playerId: 12, gross: 50, tax: 5, net: 45 },
+      { source: 'listing', refId: 202, playerId: 12, gross: 50, tax: 5, net: 45, activation: false },
     ]);
+  });
+
+  it('源③快照拆解：activationIncome/activationCredit 与主数同源（部分和），available 含额度', async () => {
+    const { sqlite, db } = setup();
+    // club3 只剩一张被激活挂牌（player 12，无出价，激活价 40 保底 → 税 4 → 净 36）；k 默认 1.0
+    sqlite.exec(`
+      UPDATE listings SET status = 'delisted' WHERE id = 200;
+      INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at, activated_by)
+        VALUES (202, 12, 3, 'activation', 40, 'listed', '2026-01-01T00:00:00Z', 2);
+    `);
+    expect(await balanceSnapshot(db, 3)).toEqual({
+      balance: 0,
+      held: 0,
+      expectedIncome: 36,
+      creditLine: 36,
+      activationIncome: 36,
+      activationCredit: 36,
+      available: 36,
+    });
+    // k=0.5：creditLine 与 activationCredit 同折，部分和关系不破
+    setK(sqlite, '0.5');
+    expect(await balanceSnapshot(db, 3)).toEqual({
+      balance: 0,
+      held: 0,
+      expectedIncome: 36,
+      creditLine: 18,
+      activationIncome: 36,
+      activationCredit: 18,
+      available: 18,
+    });
+    // 额度垫着也能冻结（offer 路径，amount=冻结额）：held 18 + 额度 18 → available 0
+    seedOffer(sqlite, 18);
+    hold(sqlite, 3, 18, 'offer', 1);
+    expect(await balanceSnapshot(db, 3)).toEqual({
+      balance: 0,
+      held: 18,
+      expectedIncome: 36,
+      creditLine: 18,
+      activationIncome: 36,
+      activationCredit: 18,
+      available: 0,
+    });
   });
 });
 
@@ -320,7 +375,7 @@ describe('自然收缩（设计 §2.4）', () => {
   });
 });
 
-describe('0081 触发器同源锁（三个资金闸）', () => {
+describe('0081/0087 触发器同源锁（三个资金闸）', () => {
   it('三个触发器都装了额度式（MIGRATION_FILES 追加的迁移确实跑了）', () => {
     const { sqlite } = setup();
     for (const name of TRIGGERS) {
@@ -346,6 +401,24 @@ describe('0081 触发器同源锁（三个资金闸）', () => {
     sqlite.exec("UPDATE fund_holds SET status = 'released' WHERE club_id = 1");
     expect(await availableBalance(db, 1)).toBe(0);
     expect(() => hold(sqlite, 1, 45, 'listing', 200)).toThrow('WHL_BID_REJECT_FUNDS');
+  });
+
+  it('源③（v6.64.0）：被激活挂牌的保底激活价也进触发器额度，作废即收缩（触发器与应用层同值）', async () => {
+    const { sqlite, db } = setup();
+    // 俱乐部 3 拿到一张被激活挂牌（player 12 现行合同 RC 分段下 ask 40 → 税 4 → 净 36）
+    sqlite.exec(`
+      UPDATE listings SET status = 'delisted' WHERE id = 200;
+      INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at, activated_by)
+        VALUES (202, 12, 3, 'activation', 40, 'listed', '2026-01-01T00:00:00Z', 2);
+    `);
+    expect(await availableBalance(db, 3)).toBe(36);
+    // 激活价保底下触发器放行 36（报价额=冻结额，offer AMOUNT 闸匹配）
+    seedOffer(sqlite, 36);
+    hold(sqlite, 3, 36, 'offer', 1);
+    expect(await availableBalance(db, 3)).toBe(0);
+    // 激活作废（激活方窗内未落价 → delisted）：源③收缩，已花出去的部分把可用压成负（负=欠款）
+    sqlite.exec("UPDATE listings SET status = 'delisted', deadline_note = '激活方未在出价窗内落价，激活无效' WHERE id = 202");
+    expect(await availableBalance(db, 3)).toBe(-36);
   });
 
   it("config 缺 expected_income_rate 按 1.0、写 'abc' 按 0：可用余额与三个触发器两层一致", async () => {
@@ -392,20 +465,24 @@ describe('0081 触发器同源锁（三个资金闸）', () => {
     expect(() => hold(sqlite, 1, 45, 'sea_sealed', 1)).toThrow('WHL_SEA_REJECT_CLOSED');
   });
 
-  it('0063 的 offer 非资金闸文本在 0081 里逐字保留；deadline 闸没被重建', () => {
+  it('0063 的 offer 非资金闸文本在 0081/0087 里逐字保留；deadline 闸没被重建', () => {
     const mig81 = norm(readMig('0081_expected_income_credit_line.sql'));
+    const mig87 = norm(readMig('0087_activation_listing_income.sql'));
     const mig63 = norm(readMig('0063_offers_intent.sql'));
     const closedLock = norm(`SELECT RAISE(ABORT, 'WHL_OFFER_REJECT_CLOSED')
       WHERE IFNULL((SELECT status FROM offers WHERE id = NEW.ref_id), '') != 'pending';`);
     const amountLock = norm(`SELECT RAISE(ABORT, 'WHL_OFFER_REJECT_AMOUNT')
       WHERE NEW.amount != (SELECT amount FROM offers WHERE id = NEW.ref_id);`);
-    // 原迁移里在 + 0081 重建后也在（漏抄/改写会让设计 A 的既有断言大面积假红）
+    // 原迁移里在 + 0081 重建后也在 + 0087 重放时同样逐字保留（漏抄/改写会让设计 A 的既有断言大面积假红）
     expect(mig63).toContain(closedLock);
     expect(mig63).toContain(amountLock);
     expect(mig81).toContain(closedLock);
     expect(mig81).toContain(amountLock);
-    // deadline 闸（0040/0059）不在本轮修复面，0081 不得碰它
+    expect(mig87).toContain(closedLock);
+    expect(mig87).toContain(amountLock);
+    // deadline 闸（0040/0059）不在修复面，0081/0087 都不得碰它
     expect(mig81).not.toContain('fund_holds_bid_deadline_guard');
+    expect(mig87).not.toContain('fund_holds_bid_deadline_guard');
   });
 
   it('NULL 可达闸位包死：幽灵挂牌 / 无账本行 / 幽灵海捞标一律拒（旧版比较得 NULL 会放行）', () => {
@@ -416,10 +493,13 @@ describe('0081 触发器同源锁（三个资金闸）', () => {
     expect(() => hold(sqlite, 2, 0.3, 'sea_sealed', 777)).toThrow('WHL_SEA_REJECT_CLOSED');
   });
 
-  it('文本锁：0081 内嵌的额度片段与 ledger.ts 逐字同源（三份）', () => {
-    const mig81 = norm(readMig('0081_expected_income_credit_line.sql'));
+  it('文本锁：0087 内嵌的额度片段与 ledger.ts 逐字同源（三份）；0081 留旧公式作历史', () => {
+    const mig87 = norm(readMig('0087_activation_listing_income.sql'));
     const frag = norm(creditLineSql('NEW.club_id'));
-    expect(mig81.split(frag)).toHaveLength(4); // 出现 3 次 ⇒ split 出 4 段
+    expect(mig87.split(frag)).toHaveLength(4); // 出现 3 次 ⇒ split 出 4 段
+    // v6.64.0 起现行触发器是 0087（源③在公式里）；0081 文件按纪律不再改，其内嵌片段是旧公式
+    expect(mig87).toContain("AND l.type = 'activation'");
+    expect(mig87).toContain('AND l.activated_by IS NOT NULL');
   });
 
   // TC-B-018：额度子查询的写放大最坏情况——三个来源基表都必须走索引（SEARCH），不得全表 SCAN。
