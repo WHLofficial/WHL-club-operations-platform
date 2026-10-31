@@ -434,6 +434,8 @@ interface ListBody17 {
     serviceSeasons: number | null;
     protected: boolean;
     psIds?: (number | null)[];
+    /** v6.63.0：合并清单（FC 槽 + 发放明细，抑制态已消失），存库 ID 形（金 +100） */
+    playstyles?: { slot: number; psid: number; gold: boolean; source: string }[];
     /** 带 attr 筛选/排序时随行带回的属性值（前端自动加列显示用） */
     attrValue?: number | null;
   }[];
