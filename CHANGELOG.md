@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.65.0] · 转会区提速（真凶：结算逐行 note UPDATE ≈12s）+ 热刷新按钮（2026-10-31）
+
+**Added**
+
+- 转会区标题行「↻ 刷新」热刷新按钮：一次拉平转会区板子 + 我的出价 + （教练态）可支配余额；刷新中禁用 + 「刷新中…」，旁标「更新于 HH:MM:SS」；列表 keepPreviousData，刷新期间旧卡不闪空。服务端 listings 本就零缓存直读 D1，refetch 即真·最新（出价/新挂牌立刻可见）。
+- 转会区首载骨架卡（6 张脉冲占位）替代「正在翻卡柜…」等待文案。
+
+**Performance**
+
+- **真凶修复**（`market-settle.ts`）：结算对每张在售单逐行 `UPDATE deadline_note`（生产 35 张 = 35 趟串行 D1 往返 ≈12s；listings 端点 TTFB 实测 12–16s，30s 合并窗跨 isolate 无效 ⇒ 每请求全量支付）改为「SELECT 带 note 列、JS 比对现值、只把变更行进一次 `db.batch`」——常态零写、有变更 1 趟；批内保留 `status IN ('listed','bidding')` 写闸与不等守卫，`notesUpdated` 按 meta.changes 计（语义与逐行版逐字一致）。所有挂 `lazy_settle` 的读端点与出价 POST 同步受益。
+- `loadMarketContext` 11 键 config 单键 SELECT 合一：新 `ConfigService.getMany`（一条 `key IN (…)`；缺行回落注册表默认并回填单键缓存，两口径互不污染）；`config.ts` 抽出 `parseNumberValue / parseNumberListValue / parseJsonValue` 纯函数供单键 getter 复用（零行为变化）。
+- listings 出价聚合折进主查询（LEFT JOIN 分组子查询 + `MAX(CASE WHEN status='active')` 取领先方，响应字段逐格不变），ctx 与主查询并行 ⇒ 响应路径 ~40 趟往返压到 1–2 趟。
+- listings / listings/:id 读端点结算挪 `waitUntil` 后台跑（grilling 裁决接受「一个刷新周期的显示延迟」）；挂牌 / 出价 / 报价写端点仍同步结算，操作正确性不受影响。
+
+**验收**：typecheck 三份全清；vitest **179 文件 / 2,874 例**全绿（v6.64.3 基线 177/2,860，+2 文件 +14 例 = `tests/market-board-perf.test.ts` 7 例 + `web/src/pages/market/MarketBoardPage.test.tsx` 4 例 + config getMany 3 例）；`npm run build` 通过；变异三靶恰红（ctx 拆回 11 单键 / 聚合拆回两条分查 / note 拆回逐行，还原后 sha256 逐字节核对）；e2e 冒烟在独立 worktree 环境阻塞未跑通（空库 401 噪声 + 拷 state 后本地 workerd 损坏，非代码回归，留痕 ROADMAP；e2e 留作部署授权轮补跑）。测试计划 `docs/test-plans/v6.65.0-market-hot-refresh.md`。判级 **minor**（新增用户可见能力 + 热端点响应路径重构；零迁移、零生产写、零契约变更）。**生产复测待部署授权后**：同口径 TTFB×5 对比基线 12–16s + listings 响应逐格 diff。
+
 ## [v6.64.5] · 撤回「出价当日不判定」：18:43 出价当晚 21:43 截止（2026-10-31）
 
 **Fixed**
