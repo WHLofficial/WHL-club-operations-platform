@@ -83,6 +83,22 @@
 
 ---
 
+## v6.63.3 · 旁路操作费用预览：解约 / 海捞确认前看得见要花多少（2026-10-31）
+
+**状态**：本地已提交（`7db78c4` 代码 + docs 枚），**未 push 未部署**。
+
+**缘起**：owner 两条（2026-10-31）——「解约确认弹窗不显示解约费用」+「海捞看不见海捞费的问题也改了，类似」。探查结论：费用数字从来没上过屏——球员页解约面板（`SideOps` `panel === 'term'`）只有公式文案，客户端 v6.57.0 起就算好的 `termSpend` 只喂给了「动用预期收入」行；工作台「续约与解约」（`DeskTab` BypassSection）选中球员后完全没费用预览，金额只在提交成功 toast 里出现；海捞明标面板同病。数据两侧都齐（`contract.serviceSeasons` / `SquadPlayerRow.releaseFee` 均已下发），属纯渲染缺口。
+
+**交付**：
+- 新增 `web/src/lib/bypass-fee-preview.ts`：`terminationFeePreview(releaseFee, serviceSeasons)` 与 `freeAgentFeePreview(newReleaseFeeDraft)`——派生自 core `terminationFee` / `freeAgentFee` 单一出处（transfer-bounds.ts 先例，组件里不抄公式）；解约档等价调用 `terminationFee(rc, 0, serviceSeasons × 2)`（1 常规窗 = 0.5 赛季，函数只用窗数差）；违约金 / 效力 / 输入缺失或非法回 null，调用侧退回公式文案**不冒充免费**。
+- `web/src/pages/player/SideOps.tsx`：解约面板三态文案（付费 =「本次解约费 X m = 违约金 ×（3 − 效力 N 赛季）× 10%，审核时收取」/ 效力满 3 赛季 = 明示免费 / 无含违约金合同 = 保持公式版，服务端仍 409）；海捞明标面板实时显示「海捞费 X m（新违约金的 30%）」；暗标面板 label 的冻结额改同一派生并把 `sealedFee` 更名 `signFee`（明暗两标共用，顺带修掉输入 0/Infinity 时显示「冻结 0 / 冻结 Infinity」的旧行为）。
+- `web/src/pages/club/DeskTab.tsx`：选中解约球员后 hint 带费用预览（同三态，`termFee` null 时退回原句）。
+- 测试：`web/src/lib/bypass-fee-preview.test.ts` 6 例（core 同值锁 + 半赛季步进逐档对照旧内联公式 + 非法输入）+ `web/src/pages/club/DeskTab.bypass-fees.test.tsx` 2 例（jsdom：付费 hint「解约费 3.00m」/ 免费 hint 无金额）。
+
+**验收（实测）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **177 文件 / 2,851 例**全绿（v6.63.2 基线 175/2,843，+2 文件 / +8 例）；`npm run build` 通过（`index-DBY05skM.js` 717.48 kB / gzip 226.60 kB）；code-review-skill 复查一处并已修（SideOps 付费/免费二分补 `releaseFee <= 0` 守卫——异常数据下不再误报「本次解约免费」，服务端实际会 409）。判级 **patch**（零迁移、零新端点、零后端改动；金额真源仍是服务端提交实算与回执）。测试计划 `docs/test-plans/v6.63.3-bypass-fee-preview.md`。
+
+**明确不做**：续约面板的费用预览（用户没要，另议）；SideOps 组件级挂载测试（hooks 依赖多、无现成先例，以派生函数单测 + DeskTab 组件测试 + 手工验收替代）。
+
 ## v6.63.2 · 海捞单直签训练营按 5m 违约金重算签入费（2026-10-31）
 
 **状态**：已上线（2026-10-31）。push `b043e27..d5f9224` → CF Workers Builds 自动部署，生效 Version **`a8940315-d4d2-481c-9875-33397b568443`** @2026-10-31T05:10:47Z；零迁移，生产库无变更。
