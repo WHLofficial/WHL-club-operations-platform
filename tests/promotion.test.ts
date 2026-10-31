@@ -404,3 +404,117 @@ describe('上调（训练营 → 正式合同谈判，v6.64.4）', () => {
     expect(((await normal.json()) as { error: string }).error).toContain('已经在一线队了');
   });
 });
+
+describe('解约冻结 + 自助取消（v6.64.4）', () => {
+  it('TC-T1 解约提交即冻结：fund_holds ref_type=termination 冻结算定金额；训练营解约同样冻结（RC=5m 费 1.25）', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    // 球员 1：RC 50 / 效力 0.5 赛季 → 费 50×(3−0.5)×0.1 = 12.5
+    const res = await send(fx.env, 'POST', '/api/transfers/termination', { playerId: 1 }, 'tok-coach');
+    expect(res.status).toBe(201);
+    const { transferId } = (await res.json()) as { transferId: number };
+    const hold = sqlGet<{ amount: number; status: string; ref_type: string; ref_id: number }>(
+      fx.sqlite,
+      'SELECT amount, status, ref_type, ref_id FROM fund_holds WHERE ref_type = \'termination\'',
+    );
+    expect(hold).toMatchObject({ amount: 12.5, status: 'held', ref_type: 'termination', ref_id: transferId });
+
+    // 训练营球员解约（后端白名单本就含 trainee）：费 = 5×2.5×0.1 = 1.25，同样冻结
+    const trainee = await send(fx.env, 'POST', '/api/transfers/termination', { playerId: 6 }, 'tok-coach');
+    expect(trainee.status).toBe(201);
+    expect(sqlGet<{ amount: number }>(fx.sqlite, "SELECT amount FROM fund_holds WHERE ref_type = 'termination' AND ref_id != ?", transferId)?.amount).toBe(1.25);
+  });
+
+  it('TC-T2 审核通过按冻结额收费（hold→settled + termination_fee 流水），不重算', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    const res = await send(fx.env, 'POST', '/api/transfers/termination', { playerId: 1 }, 'tok-coach');
+    const { transferId } = (await res.json()) as { transferId: number };
+    const taskId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE ref_id = ? AND status = 'open'", transferId)?.id;
+    const approve = await send(fx.env, 'POST', `/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin');
+    expect(approve.status).toBe(200);
+
+    expect(sqlGet<{ amount: number }>(fx.sqlite, "SELECT amount FROM ledger_entries WHERE kind = 'termination_fee'")?.amount).toBe(-12.5);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(87.5);
+    expect(sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM fund_holds WHERE ref_type = 'termination'")).toMatchObject({ status: 'settled' });
+    expect(sqlGet<{ status: string; club_id: number | null }>(fx.sqlite, 'SELECT status, club_id FROM players WHERE id = 1')).toEqual({ status: 'free', club_id: null });
+  });
+
+  it('TC-T3 驳回 / 教练取消都解冻退款式：hold→released、零扣款；取消单据落 cancelled', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    const a = await send(fx.env, 'POST', '/api/transfers/termination', { playerId: 1 }, 'tok-coach');
+    const { transferId: idA } = (await a.json()) as { transferId: number };
+    const taskA = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE ref_id = ? AND status = 'open'", idA)?.id;
+    expect((await send(fx.env, 'POST', `/api/admin/reviews/${taskA}/reject`, {}, 'tok-admin')).status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM fund_holds WHERE ref_id = ?', idA)).toMatchObject({ status: 'released' });
+
+    const b = await send(fx.env, 'POST', '/api/transfers/termination', { playerId: 2 }, 'tok-coach');
+    const { transferId: idB } = (await b.json()) as { transferId: number };
+    const cancel = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId: idB }, 'tok-coach');
+    expect(cancel.status).toBe(200);
+    expect(((await cancel.json()) as { status: string }).status).toBe('cancelled');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', idB)).toMatchObject({ status: 'cancelled' });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM fund_holds WHERE ref_id = ?', idB)).toMatchObject({ status: 'released' });
+    expect(sqlGet<{ note: string }>(fx.sqlite, "SELECT note FROM review_tasks WHERE ref_id = ?", idB)).toMatchObject({ note: '教练自助取消' });
+    expect(sqlGet<{ action: string; actor: number }>(fx.sqlite, "SELECT action, actor FROM audit_log WHERE action = 'transfer_self_cancel'")).toMatchObject({ action: 'transfer_self_cancel', actor: 2 });
+    // 零扣款
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'termination_fee'")).toMatchObject({ n: 0 });
+  });
+
+  it('TC-C1 续约单自助取消：单据 cancelled、审核任务收口；上调预约取消后 tick 不再开会', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    const rc = await send(fx.env, 'POST', '/api/transfers/rc-change', { playerId: 1, newReleaseFee: 60 }, 'tok-coach');
+    expect(rc.status).toBe(201);
+    const { transferId } = (await rc.json()) as { transferId: number };
+    const cancel = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId }, 'tok-coach');
+    expect(cancel.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)).toMatchObject({ status: 'cancelled' });
+
+    // 上调预约（模拟闸关时的练满预约）可取消
+    fx.sqlite.exec(
+      `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, evidence, created_at)
+       VALUES ('promotion', 6, 1, 1, 0, 'pending_review', 1, 2, '{"releaseFee":15}', '2026-07-02T00:00:00Z')`,
+    );
+    const promoId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM transfers WHERE type = 'promotion'")!.id;
+    const cancelPromo = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId: promoId }, 'tok-coach');
+    expect(cancelPromo.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', promoId)).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('TC-C2 上调谈判中自助取消：会话作废、球员还原训练营态、单据驳回，之后可重申', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    const opened = await promote(fx, 6, 10);
+    const { transferId } = (await opened.json()) as { transferId: number };
+    const cancel = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId }, 'tok-coach');
+    expect(cancel.status).toBe(200);
+    expect(((await cancel.json()) as { status: string }).status).toBe('rejected');
+
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)).toMatchObject({ status: 'rejected' });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM negotiation_sessions ORDER BY id DESC LIMIT 1')).toMatchObject({ status: 'cancelled' });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 6')).toMatchObject({ status: 'trainee' });
+
+    // 谈崩可重申：新 F 重算
+    const again = await promote(fx, 6, 12);
+    expect(again.status).toBe(201);
+  });
+
+  it('TC-C3 别人的单据 403、非可取消类型 400、已终局 409', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    const opened = await promote(fx, 6, 10);
+    const { transferId } = (await opened.json()) as { transferId: number };
+    const foreign = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId }, 'tok-coach2');
+    expect(foreign.status).toBe(403);
+
+    const notCancellable = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId: 999999 }, 'tok-coach');
+    expect(notCancellable.status).toBe(404);
+
+    const done = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId }, 'tok-coach');
+    expect(done.status).toBe(200);
+    const replay = await send(fx.env, 'POST', '/api/transfers/cancel', { transferId }, 'tok-coach');
+    expect(replay.status).toBe(409);
+  });
+});

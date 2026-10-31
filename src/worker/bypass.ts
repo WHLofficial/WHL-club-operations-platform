@@ -21,7 +21,7 @@ import {
   transferEvidence,
   type ReviewDecision,
 } from './transfers.ts';
-import { openNegotiationSession } from './negotiations.ts';
+import { openNegotiationSession, voidSigningCore } from './negotiations.ts';
 import { listingDemandStatements } from './demand-ops.ts';
 import { cpuClubIds } from './growth.ts';
 import { rowDisplayName } from '../core/player-name.ts';
@@ -521,9 +521,109 @@ export async function createTermination(
     },
     action: 'bypass_termination',
   });
-  // 4.4.10：解约提交即触发本窗续约回滚（触发 ref = 解约单）
+  // v6.64.4 解约冻结（Q19）：提交时按算定金额冻结（fund_holds ref_type='termination'），
+  // 审核按冻结额收不重算（completeTermination 消费 hold）、驳回/取消解冻（rejectTransfer/自助取消）。
+  // 冻结失败（并发输掉余额）⇒ 补偿取消刚建的单据 + 400，不留无担保在途单。
+  if (fee > 0) {
+    const credit = creditLineGuard(clubId);
+    const frozen = await db
+      .prepare(
+        `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+         SELECT ?, ?, 'held', 'termination', ?, ${nowSql()}
+         WHERE (SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?)
+             - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)
+             + ${credit.sql} >= ?`,
+      )
+      .bind(clubId, fee, transferId, clubId, clubId, ...credit.params, fee)
+      .run();
+    if ((frozen.meta.changes ?? 0) === 0) {
+      await db.batch([
+        db.prepare(`UPDATE transfers SET status = 'cancelled' WHERE id = ? AND status = 'pending_review'`).bind(transferId),
+        db
+          .prepare(
+            `UPDATE review_tasks SET status = 'rejected', decided_by = ?, decided_at = ${nowSql()}, note = '解约费冻结失败，单据自动取消'
+             WHERE ref_id = ? AND type = 'transfer_confirm' AND status = 'open'`,
+          )
+          .bind(actor, transferId),
+      ]);
+      throw new HttpError(400, `可用资金不足：解约费要 ${fee} m（提交即冻结，审核通过时销毁），当前可支配不足`);
+    }
+  }
+  // 4.4.10：解约提交即触发本窗续约回滚（触发 ref = 解约单）。排在冻结成功之后：
+  // 冻结失败自动取消时不该波及本窗续约。
   await rollbackRcChangeForPlayer(env, playerId, actor, { refType: 'transfer', refId: transferId });
   return { ok: true, transferId, terminationFee: fee };
+}
+
+// ---- 自助取消（v6.64.4，用户裁决 2026-10-31）：续约 / 解约 / 上调还没被审核时，教练可在球员面板一键取消 ----
+
+const CANCELLABLE_TYPES: ReadonlySet<string> = new Set(['rc_change', 'termination', 'promotion']);
+
+export interface CancelOwnResult {
+  ok: true;
+  status: 'cancelled' | 'rejected';
+}
+
+/**
+ * 教练自助取消自己发起的单据：
+ * - pending_review（续约单 / 解约单 / 上调预约）→ 单据 'cancelled' + 审核任务收口（note 自助取消）
+ *   + 解约随单冻结解冻；审计 actor = 本人。已作废的续约 pending 不复活（4.4.10 回滚只进不退）。
+ * - 上调已进谈判（signing）→ voidSigningCore 对称收口：会话作废、球员还原训练营态、单据驳回，
+ *   之后可重申（谈崩可重申同口径）。
+ * - 其他类型 / 别人的单据 / 已终局 → 拒绝。
+ */
+export async function cancelOwnTransfer(env: Env, clubId: number, actor: number, transferIdInput: unknown): Promise<CancelOwnResult> {
+  const db = env.DB;
+  const transferId = Number(transferIdInput);
+  if (!Number.isInteger(transferId) || transferId <= 0) throw new HttpError(400, 'transferId 应为单据 ID');
+  const transfer = await loadTransfer(db, transferId);
+  if (!transfer) throw new HttpError(404, '单据不存在');
+  if (!CANCELLABLE_TYPES.has(transfer.type)) throw new HttpError(400, '这类单据不支持自助取消');
+  if (transfer.from_club_id !== clubId) throw new HttpError(403, '只能取消自己队发起的单据');
+
+  if (transfer.status === 'signing') {
+    if (transfer.type !== 'promotion') throw new HttpError(409, '这单已进签约谈判，等它了结');
+    const session = await db
+      .prepare(`SELECT id FROM negotiation_sessions WHERE transfer_id = ? AND status = 'active' LIMIT 1`)
+      .bind(transferId)
+      .first<{ id: number }>();
+    if (!session) throw new HttpError(409, '这场谈判已经结束了');
+    const done = await voidSigningCore(env, session.id, {
+      actor,
+      origin: 'user',
+      action: 'transfer_self_cancel',
+      deadlineNote: '教练自助取消',
+      reason: 'self_cancel',
+    });
+    if (done !== 'done') throw new HttpError(409, '这场谈判已经结束了');
+    return { ok: true, status: 'rejected' };
+  }
+  if (transfer.status !== 'pending_review') {
+    throw new HttpError(409, `单据已经终局（${transfer.status}），不能取消`);
+  }
+
+  const audit = createAuditStatement(db);
+  await db.batch([
+    db.prepare(`UPDATE transfers SET status = 'cancelled' WHERE id = ? AND status = 'pending_review'`).bind(transferId),
+    db
+      .prepare(
+        `UPDATE review_tasks SET status = 'rejected', decided_by = ?, decided_at = ${nowSql()}, note = '教练自助取消'
+         WHERE ref_id = ? AND type = 'transfer_confirm' AND status = 'open'`,
+      )
+      .bind(actor, transferId),
+    ...(transfer.type === 'termination'
+      ? [db.prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'termination' AND ref_id = ? AND status = 'held'`).bind(transferId)]
+      : []),
+    audit({
+      actor,
+      action: 'transfer_self_cancel',
+      targetType: 'transfer',
+      targetId: transferId,
+      origin: 'user',
+      after: { type: transfer.type, playerId: transfer.player_id },
+    }),
+  ]);
+  return { ok: true, status: 'cancelled' };
 }
 
 // ---- 海捞（规则 4.4.3：签入自由球员，签入费 = 新违约金 × 30%，新 RC 不设上下限） ----

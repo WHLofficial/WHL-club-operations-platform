@@ -13,7 +13,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach, type SessionUser } from '../../lib/session.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
-import { createRcChange, createTermination, createFreeAgent } from '../bypass.ts';
+import { createRcChange, createTermination, createFreeAgent, cancelOwnTransfer } from '../bypass.ts';
 import { createActivation, submitMatch } from '../activations.ts';
 import { demotePlayer, promotePlayer } from '../promotion.ts';
 import { loadSeaPhaseView, submitSealedBid, withdrawSealedBid } from '../sea-sealed.ts';
@@ -81,6 +81,14 @@ app.post('/transfers/promotion', async (c) => {
   const body = await readJson(c);
   const result = await promotePlayer(c.env, clubId, user.id, body?.playerId, body?.newReleaseFee);
   return c.json(result, 201);
+});
+
+// v6.64.4 自助取消：续约 / 解约 / 上调还没被审核时，教练在球员面板一键取消（解约随单解冻）
+app.post('/transfers/cancel', async (c) => {
+  const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
+  const body = await readJson(c);
+  const result = await cancelOwnTransfer(c.env, clubId, user.id, body?.transferId);
+  return c.json(result);
 });
 
 // ---- 海捞两阶段·暗标段（v6.50.0；设计见 memory/design-sea-two-phase.md）----

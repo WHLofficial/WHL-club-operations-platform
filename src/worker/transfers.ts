@@ -829,17 +829,24 @@ export async function completeTermination(
   const voided = await voidDemandStatements(env, transfer.player_id, 'left_club');
   const statements: D1PreparedStatement[] = [
     ...voided.statements,
+    // v6.64.4 解约冻结：提交时已冻结（fund_holds ref_type='termination'），这里消费冻结——
+    // hold → settled 与扣款同批（守卫同谓词）；存量无 hold 的在途单（0088 前提交）照旧直接扣。
     ...(fee > 0
-      ? ledgerMovement(db, {
-          clubId: transfer.from_club_id,
-          delta: -fee,
-          kind: 'termination_fee',
-          refType: 'transfer',
-          refId: transferId,
-          memo: '解约费（销毁）',
-          guardSql: guard.sql,
-          guardParams: guard.params,
-        })
+      ? [
+          db
+            .prepare(`UPDATE fund_holds SET status = 'settled' WHERE ref_type = 'termination' AND ref_id = ? AND status = 'held'`)
+            .bind(transferId),
+          ...ledgerMovement(db, {
+            clubId: transfer.from_club_id,
+            delta: -fee,
+            kind: 'termination_fee',
+            refType: 'transfer',
+            refId: transferId,
+            memo: '解约费（销毁）',
+            guardSql: guard.sql,
+            guardParams: guard.params,
+          }),
+        ]
       : []),
     // 属性恢复初始（4.4.4）：CA 回 base_ca；成长所得数值归零（XP/已消费级数）——
     // 解约即回初始态，重签后从零重新成长。历史留档：合同行只置 is_active=0、growth_events 一行不删，
@@ -933,6 +940,10 @@ export async function rejectTransfer(
     db
       .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id IS ? AND status = 'held'`)
       .bind(listingId),
+    // v6.64.4 解约冻结解冻：驳回时释放提交时冻结的解约费（其他单据类型没有这种 hold，空转）
+    db
+      .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'termination' AND ref_id IS ? AND status = 'held'`)
+      .bind(transferId),
     db
       .prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`)
       .bind(listingId),
