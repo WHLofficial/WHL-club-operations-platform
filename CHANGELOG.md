@@ -6,7 +6,7 @@
 
 ## [v6.63.0] · 徽章 × PlayStyle 全面合并（2026-10-31）
 
-**本地收口，未 push 未部署**——部署顺序硬约束：迁移 `0086` 先 apply（含台账 backfill ≈36,602 行写，单独授权低峰执行）再 push。分支 `feat/v6.63.0-playstyle-merge`，5 个提交。判级 minor（台账口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。测试计划 `docs/test-plans/v6.63.0-playstyle-merge.md`。
+**已上线（2026-10-31）**：迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`，全表台账与迁移同源表达式对账 silver_drift=0 / gold_drift=0）；push `56d00fd..f412485`（7 个提交）触发 CF Workers Builds 自动部署，生效 Version `310624e6-1cae-4ad8-8f1e-e0e03a95c175` @2026-10-31T04:10:31Z（发布轮 package.json 漏 bump，随 `f412485` 订正重部署）。上线探针：`?ps=` 抑制/发放命中、列表与详情 `playstyles` 合并清单、`sort=ps/badges` 全部实测通过，线上版本串 `6.63.0`。判级 minor（台账口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。测试计划 `docs/test-plans/v6.63.0-playstyle-merge.md`。
 
 **Changed**
 
