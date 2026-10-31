@@ -73,6 +73,8 @@
 
 **此前批次 v6.16.0 / v6.15.0**（均 2026-10-01 发布上线——顶部段落链当时漏更两版，随 v6.17.0 收口补记；细节见下文同名节）：v6.16.0 管理端成长批量补录台（Version `5cddbf5b-…`，零迁移）；v6.15.0 场次天气预报 + 预留 tour 展示接口（迁移 `0057`，Version `20c24c71-…`）。**生产迁移现状：已到 `0057`**。
 
+**本版本 v6.63.0**（徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制；含迁移 `0086`）——**本地收口，未 push 未部署**（分支 `feat/v6.63.0-playstyle-merge`，5 个提交 `d19f551` core+写路径 / `b00edda` 迁移+读路径 / `0b42db7` 前端+GLOSSARY / `983716e` 评审修复 / 本 docs 枚）。**迁移 `0086`（247 清洗 + 台账 backfill ≈36,602 行写 + DROP `idx_players_sort_ps` + config 清两键）需单独授权低峰 apply，之后立即 push**（Q4 剧本）。判级 minor（口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈——边界判断留痕测试计划）。typecheck 三份全清、vitest **175 文件 / 2836 例**全绿、e2e **29/29**、变异验证 4 靶全命中、code-review 🔴×1 已修。细节见下文 v6.63.0 节。
+
 **上一版本 v6.14.0**（C3 招商轮：品牌报价制 + 主动签约退役；含迁移 `0055`/`0056`）——**已上线**（2026-09-29 发布，用户下令「发布」）：本地 7 枚提交 `ec3fa98..8cf8f12` 已 push（`07f050c..8cf8f12`，v6.14.0 六枚 + docs 收口枚随行）；迁移 `0055`/`0056` 于 push 前 apply 生产（`Executed 2 commands in 0.70ms`，只读核验两表 + 3 条 offer 索引含两个部分唯一 + `brand_visit` 种子 + `claim_token` 列在场，`d1_migrations` 56 条），CF Workers Builds 自动部署生产 Version **`df0640af-60c2-43c1-a5ba-c25b38a57e02`**（2026-09-29T10:09:11Z，Source `Unknown (deployment)`）。上线回读：`/api/health` / `/api/players?limit=1` / `/api/clubs` / `/api/squads` / `/api/market/listings` 全 200；匿名探针 `/api/admin/brands/market-round` / `/api/club/naming/quote` / `POST /api/club/naming/offers/1/accept` 均 401（挂载且守卫生效）；旧 `POST /api/club/naming/sign` 404（已下线）；线上入口资产 `index-BbEaJ6rg.js`（611.86 kB / gzip 193.68 kB，sha256 `630cd160…`）与本地构建逐字节一致、线上 JS 版本串 `6.14.0`。**生产迁移现状：已到 `0056`**。typecheck 三份全清、vitest **60 文件 / 1062 例**全绿（v6.13.0 基线 59/990，净 +1 文件 / +72 例 = 新建 `tests/market-rounds.test.ts`）、e2e **11/11**、变异验证 17 处 + 评审修复后 2 处全命中、code-review-skill 评审 P0 1 / P1 3 / P2 4 / P3 6（除登记不改外全修）。判级 minor（新增用户可见能力；`POST /club/naming/sign` 退役为同仓 web 客户端同批替换、无跨仓消费）。细节见下文 v6.14.0 节。
 
 **上一版本 v6.13.0**（C2 冠名深度：档位性格 + 情绪演化 + 品牌主动解约 + 联赛冠军加成；含迁移 `0054`）——**已上线**（2026-09-28 发布批次）：迁移 `0054` 已于 push 前 apply 到生产（`Executed 5 commands in 3.56ms`，只读核验 `brand_pool` 3 头部 / 2 新兴 / 2 口碑、`d1_migrations` 末条 `0054_brand_tiers.sql`），随后 push `77f6eea..07f050c`（14 个提交）触发 CF Workers Builds 自动部署，生产 Version **`1e3cc95a-7f43-41ee-8fd4-93fe69169774`**（2026-09-28T15:50:43Z，Source `Unknown (deployment)`）。上线回读：`/api/health` / `/api/clubs` / `/api/players?limit=1` / `/api/squads` / `/api/market/listings` 全 200；`/api/cron/players-count` 403（CRON_KEY fail-closed 符合预期）；匿名探针 `/api/admin/brands` / `/api/club/naming/quote` / `/api/club/events` / `POST /api/admin/seasons/1/settle-season` 均 401（挂载且守卫生效）；线上入口资产 `index-nK5xirMD.js` + `index-BY0ef8kg.css` 与本地 6.13.0 重构建产物 sha256 逐字节一致（线上 JS 版本串 `6.13.0`）。**生产迁移现状：已到 `0054`**。测试计划首次按 qa-test-planner 约定设计（`docs/test-plans/v6.13.0-c2.md`）。插件只当参照系、可玩性偏离留痕（Q5 裁决），细节见下文 v6.13.0 节。
@@ -81,9 +83,36 @@
 
 ---
 
+## v6.63.0 · 徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制（2026-10-31）
+
+**状态**：本地收口，**未 push 未部署**（部署顺序硬约束：迁移 `0086` 先 apply 再 push，Q4 剧本；backfill ≈36,602 行写 ≈ 免费档日写 73%，单独授权低峰执行）。
+
+**缘起与体检结论**（2026-10-30）：「徽章」=「发放所得的 PlayStyle」，同一域概念被拆成三份存储、两套名字——`game_attrs.PSID1-15`（FC 源快照）、`players.badges_silver/gold`（台账计数，只数发放）、`player_playstyles`（0031 发放明细）。分裂实证：球员库「徽章」列与「PlayStyle」列互斥各显示半个概念；`?ps=` 筛不到发放；`sort=ps` 与 `sort=badges` 各数一份；球员页头部计数与右翼清单两个口径；商店页签叫「徽章」、下拉叫「选 PlayStyle」。探针事实：明细表 33 行、247/557 两处跨段违规（发放判重只做同段去重的三层同根因）。
+
+**用户裁决**（主体五项 + grilling Q1-Q11，两轮修正定案）：① 方案 A 不动存储、统一读侧出口与术语；②「徽章」列退役并入 PlayStyle；③ `?ps=` 覆盖发放所得；④ 排序统一全量；⑤ 🥇×2 🥈×1 与上限全按「FC 自带 + 发放」总和。Q8/Q9 金顶银 = **可逆抑制**（用户先要求「删除」、后裁定「被顶 FC 银不回归无法接受」——两裁决合成：金在银四口径（展示/计数/筛选/meta）消失、金走银自动回归；发放银真删行、FC 银槽留 game_attrs 原貌，`game_attrs` 零写面）。Q10 位置资格单向（外场挡 GK 项 51-56、GK 可见全部）。Q1 商店保留「徽章」俗称、其余场景改 PlayStyle。
+
+**交付**：
+- `src/core/playstyle-rules.ts`（新）：`mergedPlaystyleList`（合并清单：FC 槽 + 明细，含抑制与来源角标）、`fullPlaystyleCounts`、`planPlaystylePicks`（自 fc26.ts 迁入并扩展跨段规则：择银遇金三语境挡；成长择金遇发放银自动替换、FC 银派生抑制；商店/中国计划挡）、`fullCountSql`（SQL 同源表达式）、`PlaystyleSource` 补 `'shop'/'external'`。fc26.ts 加 `PS_GK_BASE_IDS` / `playstyleAllowedForPosition`。
+- 写路径五处收口为「明细变更后 `recountBadgeStatements`（SQL 实时算，消除计划-执行窗口竞态）」：成长 levelup / 中国计划、商店买徽章与银升金、转会 china 回收、解约（**不再台账归零**——FC 槽计数保留）、导入（major 四步序：折算 → 同段删重 → 重算；minor 也重算）。
+- 读路径：`sort=ps` 与 `sort=badges` 同指台账列和（`BADGES_FULL_EXPR`，走 0036 索引）；`?ps=` 逐银值 `槽命中 AND NOT EXISTS 发放金同基础` + `players.id IN` 物化子查询；列表行恒带 15 槽列与合并清单 `playstyles`；详情端点 `player.playstyles`（合并清单）；meta `playstyles` 改全量（形状不变，tour 零代码自愈）。
+- 前端：徽章列退役（COL_DEFS 删行、默认列 `['shortlist','marketValue','ps']`、旧偏好/旧 URL 的 badges 键静默收敛）；ps 列吃合并清单；成长选择器跨段规则 + 「替换银版」标注 + 位置收窄；商店双向互斥（保留徽章措辞）；详情右翼与对比页同吃合并清单 + 来源角标；`BADGE_KIND_LABEL` 与 levelup 通知模板改「金/银 PlayStyle」。
+- 迁移 `0086`：247 清洗（删发放银 24，557 零变更）、台账 backfill（与 `fullCountSql` 逐字同源锁）、`DROP INDEX idx_players_sort_ps`、config 清 `badge_cap_silver/gold`。
+- 管理端 PATCH 退役 `badgesSilver/badgesGold` 直写（步骤 0 盘点新发现的写点，派生值不可直改）。
+- GLOSSARY：PlayStyle 域词条 + 「徽章」限定商店语境 + 全量计数词条；tour 仓 `VERSIONS.md` 第 72 行知会 meta 契约内容语义变更（零代码）。
+
+**验收（实测）**：typecheck 三份全清；vitest **175 文件 / 2836 例**全绿（v6.62.0 基线 174/2831）；e2e **29/29**；变异验证 4 靶全命中（删抑制过滤 3 红 / 删择银遇金挡 1 红 / 删 SQL NOT EXISTS 同源锁+运行时锁 2 红 / 位置资格失效 2 红）；code-review-skill 评审 🔴×1（`?ps=` 金值进发放明细 IN 未剥 +100 → 发放金永不命中）已修 + 补端到端锁。测试计划 `docs/test-plans/v6.63.0-playstyle-merge.md`。
+
+**已知后果与边界**：台账语义变更波及所有 `badgesSilver/Gold` 消费方（前端四处、跨仓零消费已证）；中国计划名额按现存 `source='china'` 行数计（被成长金顶掉的 china 银释放名额）；被抑制的 FC 银槽物理上仍被 FC 数据占用（抑制不释放槽位）；历史通知/审计里的「徽章」字样不回改。
+
+计划 `memory/plan-v6.63.0-playstyle-merge.md`（版本号自 v6.62.0 顺延，开工时订正）。
+
 ## v6.62.0 · 普通续约免费机会：每合同一次免费改违约金（2026-10-31）
 
-**状态**：**已上线（2026-10-31）**——push `6141102..4cd2d52`（分支 `feat/v6.62.0-renewal-free` → `main`，6 个提交：`eb42144` v6.61.0 docs 存稿 + `7381a2c` 后端+迁移+测试 / `b9b0bf8` 前端 / `fdcb4f6` 评审修复 / `c1be7ba` docs 收口 / `4cd2d52` 海捞复签守护用例补提交），CF Workers Builds 自动部署 Version **`dbc4564d-09d6-47f9-809b-f722159113c5`** @2026-10-31T00:37:29Z；迁移 `0085` 已于 push 前 apply（`Executed 2 commands in 2.67ms`）。判级 minor。上线探针（只读）：生产 `contracts` 517 行 `SUM(free_rc_change_used)=0`（零回填口径正确）、`d1_migrations` 末条 `0085`、`/api/health` 200、线上首页资产 `index-O44TeQIk.js` 与本地 6.62.0 构建同名；TC-P-02/03（首张免费单 apply 后回读、UI 截图）待真实使用后按测试计划核对。**发布轮插曲**：M-02b 变异靶的海捞复签守护用例曾漏提交（变异验证时临时写入跑过），发布前补提交 `4cd2d52` 并重跑变异验证（删 `excluded` 兜底 ⇒ 恰好只红该用例断言）；另一会话当时从 `c1be7ba` 切出 `feat/v6.63.0-playstyle-merge` 分支，该提交曾误落其上，已用指针操作归位——`feat/v6.63.0-playstyle-merge` 头仍指 `4cd2d52`（共享同一 commit，将来 merge 无重复）。计划 `memory/plan-v6.62.0-renewal-free.md`、测试计划 `docs/test-plans/v6.62.0-renewal-free.md`。
+**状态**：**已上线（2026-10-31）**——push `6141102..4cd2d52`（分支 `feat/v6.62.0-renewal-free` → `main`，6 个提交：`eb42144` v6.61.0 docs 存稿 + `7381a2c` 后端+迁移+测试 / `b9b0bf8` 前端 / `fdcb4f6` 评审修复 / `c1be7ba` docs 收口 / `4cd2d52` 海捞复签守护用例补提交），CF Workers Builds 自动部署 Version **`dbc4564d-09d6-47f9-809b-f722159113c5`** @2026-10-31T00:37:29Z；迁移 `0085` 已于 push 前 apply（`Executed 2 commands in 2.67ms`）。判级 minor。上线探针（只读）：生产 `contracts` 517 行 `SUM(free_rc_change_used)=0`（零回填口径正确）、`d1_migrations` 末条 `0085`、`/api/health` 200、线上首页资产 `index-O44TeQIk.js` 与本地 6.62.0 构建同名；TC-P-02/03（首张免费单 apply 后回读、UI 截图）待真实使用后按测试计划核对。**上线后裁决（同日 02:08Z 追加，owner：停审单也要免费）**：兼容口径从「evidence 缺字段按非免费」反转为**按免费兜底**——判定从 `=== true` 放宽为 `!== false`（审核侧 `bypass.approveTransferDeal` 免 30% + 成约侧 `transfers.completeTransfer` amendment 分支 pending 免费 NULL，两处同改）。依据：0085 零回填 DEFAULT 0 ⇒ 旧在途单提交时机会必然未消耗，兜底免费零不公；显式 `false`（used=1 提交的新单）仍收费。三权益闭环：免 30%、保护期不收口、apply 同批消耗（不会白拿两次）。**零迁移零数据批**——停审单此时尚无 pending 行（审核通过开谈判成约时才写），代码兜底即全闭环。TC-RF-10 反转为全链路免费断言，双变异验证（两处各自改回旧判定恰好只红对应段）。生产在途 9 张（探针实测），push `4cd2d52..56d00fd` 随发布线上线（Version `d759a4f8-9450-4bcc-8785-88f56f4f1c0b` @02:08:59Z，纯后端 fix、线上资产同 `index-O44TeQIk.js`）。
+
+**发布轮工程插曲**：① M-02b 海捞复签守护用例曾漏提交（变异时临时写入跑过），发布前补提交 `4cd2d52` 并重跑变异恰红；② 另一会话从 `c1be7ba` 切出 `feat/v6.63.0-playstyle-merge` 并在同一工作区开发（12 源文件 + 6 测试未提交），兜底 fix 的 hunk 曾与其在 `transfers.ts` 共存——按 hunk 撤/恢复分离提交，fix 单独成 commit `8bcbe34`；③ 工作区被污染无法直接证明发布树全绿，用独立 worktree（junction 复用 node_modules）干净验证：typecheck 三份清 + 2,814 例绿 + 2 例 CRLF checkout 伪影（worktree 行尾转换致跨行 `toContain` 失配，主仓 LF 工作区对照 98 例全绿证实）；④ 发布后另一会话把 v6.63.0 前两个提交（含迁移 0086，**待单独授权低峰 apply**）基于 `56d00fd` 续提交——发布线成为其祖先，push fast-forward 互不干扰。
+
+计划 `memory/plan-v6.62.0-renewal-free.md`、测试计划 `docs/test-plans/v6.62.0-renewal-free.md`。
 
 **裁决**（owner m04060 rev4 登记 → rev22 拍板转正，设计稿 §5.6 定稿）：每份合同一次免费改违约金续约，`free_rc_change_used=0` 时下一张续约单**自动**走免费通道——不设经理勾选（保护期延续对俱乐部纯收益，自动不亏）；30% 差额维持**审核通过时扣**（现行流程无独立「接受」时刻，豁免真落点在 `approveTransferDeal` 读 evidence）；**降价同消耗**（免费通道的实质权益是「不收口保护期」，与方向无关——否则「降价白嫖保护期→提价又免费」两次白嫖）；**匹配不刷新**（同「同队改 RC 不算转会」口径，换队照刷）。grilling Q1 收口定稿：续约按 4.4.6 收口保护期，**免费续约是唯一保留保护期的续约**（rev21「重建保护期」叙事作废，否决理由留档设计稿）。
 

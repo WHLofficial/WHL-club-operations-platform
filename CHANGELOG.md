@@ -4,9 +4,27 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.63.0] · 徽章 × PlayStyle 全面合并（2026-10-31）
+
+**本地收口，未 push 未部署**——部署顺序硬约束：迁移 `0086` 先 apply（含台账 backfill ≈36,602 行写，单独授权低峰执行）再 push。分支 `feat/v6.63.0-playstyle-merge`，5 个提交。判级 minor（台账口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。测试计划 `docs/test-plans/v6.63.0-playstyle-merge.md`。
+
+**Changed**
+
+- 「徽章」域全面收口为「PlayStyle」：台账 `badges_silver/gold` 从「只数发放所得」改为**全量派生值**（= FC 槽数减被发放金抑制的银槽 + 发放明细行数），写路径五处（成长 levelup / 中国计划 / 商店买徽章与银升金 / 转会 china 回收 / 解约 / 导入）全部改为明细变更后同批重算；解约不再台账归零（FC 自带槽计数保留）；上限守卫收敛到槽位结构 12 银 / 3 金，`config.badge_cap_silver/gold` 与管理端直写徽章数退役。
+- 银金跨段规则（修复 247/557 存量违规根因「判重只做同段」）：择银遇金三语境同挡；成长择金遇银自动「去银留金」（发放银删行、FC 银走可逆抑制——金在展示/计数/筛选/meta 四口径消失、金行消失自动回归）；商店择金遇银挡并引导走「银升金」。
+- 位置资格（单向）：外场拿不到 GK 专属项（基础 ID 51-56，银金两段），GK 可见全部 36 项；position 未知保守挡。
+- 读侧统一：`sort=ps` 与 `sort=badges` 同指台账列和；`?ps=` 覆盖发放所得（被抑制银不命中）；列表行与详情端点下发合并清单 `playstyles`（含抑制与来源）；`/api/players/meta` 的 `playstyles` 改合并清单（形状不变，tour 零代码自愈）。
+- 前端：球员库/球队页「徽章」列退役并入 PlayStyle 列（默认列换 `ps`，旧列偏好静默收敛）；成长选择器标「替换银版」、商店双向互斥（保留「徽章」俗称）；详情右翼与对比页挂来源角标；BadgeCounts 与 levelup 通知文案改「金/银 PlayStyle」。
+
+**Removed**
+
+- 迁移 0086：`idx_players_sort_ps`（15 槽计数索引，sort=ps 改走 0036 台账索引后无用，每次重导省 18,301 行写）；config 两帽键；球员 247 的违规发放银 24 行（删银保金；557 零变更走派生抑制）。
+
+**验收**：typecheck 三份全清；vitest **175 文件 / 2,836 例全绿**（v6.62.0 基线 174/2,831）；e2e 29/29；变异验证 4 靶全命中；code-review 🔴×1（`?ps=` 金值进发放明细 IN 未剥 +100）已修 + 补端到端锁。
+
 ## [v6.62.0] · 普通续约免费机会（2026-10-31）
 
-**已上线（2026-10-31）**：push `6141102..4cd2d52`（`7381a2c` 后端 + `b9b0bf8` 前端 + `fdcb4f6` 评审修复 + `4cd2d52` 海捞守护用例补提交），CF Workers Builds Version `dbc4564d-09d6-47f9-809b-f722159113c5`（2026-10-31T00:37:29Z）；迁移 `0085` 先于 push apply。上线探针：生产 `contracts` 517 行 `SUM(free_rc_change_used)=0`、`d1_migrations` 末条 `0085`、health 200、线上资产 `index-O44TeQIk.js`。判级 minor。设计真源：`docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md` rev22 §5.6（owner 拍板四题：自动动用 / 30% 维持审核通过时扣 / 降价同消耗 / 匹配不刷新；grilling Q1 收口定稿：免费续约是唯一保留保护期的续约）。
+**已上线（2026-10-31）**：push `6141102..4cd2d52`（`7381a2c` 后端 + `b9b0bf8` 前端 + `fdcb4f6` 评审修复 + `4cd2d52` 海捞守护用例补提交），CF Workers Builds Version `dbc4564d-09d6-47f9-809b-f722159113c5`（2026-10-31T00:37:29Z）；迁移 `0085` 先于 push apply。上线探针：生产 `contracts` 517 行 `SUM(free_rc_change_used)=0`、`d1_migrations` 末条 `0085`、health 200、线上资产 `index-O44TeQIk.js`。**上线后裁决追加（同日 push `4cd2d52..56d00fd`，Version `d759a4f8`）**：停审的 0085 前在途续约单（生产 9 张）也按免费走——审核侧与成约侧判定放宽为「evidence 未显式 `false` 即免费」（旧单提交时机会必然未消耗，零不公；显式 `false` 的新单仍收费），三权益闭环（免 30% / 保护期不收口 / apply 消耗），零迁移零数据批。判级 minor。设计真源：`docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md` rev22 §5.6（owner 拍板四题：自动动用 / 30% 维持审核通过时扣 / 降价同消耗 / 匹配不刷新；grilling Q1 收口定稿：免费续约是唯一保留保护期的续约）。
 
 **Added**
 
