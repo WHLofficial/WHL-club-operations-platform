@@ -841,7 +841,9 @@ export function SideOps({
     // 这些拦截都在后端守卫链里判过一遍，前端只负责原样禁用并展示原因。
     // v6.50.0 海捞暗标段：收标期内这里换成密封标（金额保密 / 统一截止 / 价高者得），
     // 常规海捞表单原样留给明标段；两种表单的资格开关都是同一份 seaSign。
+    // closing（已过截止、还没开标）既不能出标也不能走常规海捞：按钮只留禁用态，等 30s 轮询翻成 open。
     const canSeal = sealedPhase && mySealedBid?.status !== 'won' && mySealedBid?.status !== 'lost';
+    const sealedClosing = seaPhase?.state === 'closing';
     body = (
       <section className="side-sec">
         <div className="side-sec-head">球队操作</div>
@@ -866,17 +868,21 @@ export function SideOps({
               截止前可改可撤；胜出后进管理组审核 → 工资谈判。
             </p>
             {sealedUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(sealedUse)} m。</p>}
-            {sealedPhase && (
-              <p className="side-sub">
-                {sealedLeft === null ? '暗标段进行中' : `距截止还剩 ${fmtClock(sealedLeft)}`}
-                {seaPhase?.batch ? `（截止 ${fmt.time(seaPhase.batch.deadlineAt)}）` : ''}
-              </p>
+            {sealedClosing ? (
+              <p className="side-sub">收标已截止，等待管理组开标（页面每 30 秒自动刷新一次）：现在不能再出标或改标。</p>
+            ) : (
+              sealedPhase && (
+                <p className="side-sub">
+                  {sealedLeft === null ? '暗标段进行中' : `距截止还剩 ${fmtClock(sealedLeft)}`}
+                  {seaPhase?.batch ? `（截止 ${fmt.time(seaPhase.batch.deadlineAt)}）` : ''}
+                </p>
+              )
             )}
             <div className="side-btns">
               <button
                 type="button"
                 className="btn btn-sm"
-                disabled={busy || !seaSign.eligible || freeFee === '' || !sealedPhase}
+                disabled={busy || !seaSign.eligible || freeFee === '' || !sealedPhase || sealedClosing}
                 onClick={() =>
                   void run(async () => {
                     const r = await apiPost<SeaSubmitResult>('/api/transfers/sea-sealed', {
@@ -895,7 +901,7 @@ export function SideOps({
                 <button
                   type="button"
                   className="btn btn-sm btn-ghost"
-                  disabled={busy || !sealedPhase}
+                  disabled={busy || !sealedPhase || sealedClosing}
                   onClick={() =>
                     void run(async () => {
                       await apiPost('/api/transfers/sea-sealed/withdraw', { playerId: player.id });
@@ -953,17 +959,17 @@ export function SideOps({
           </>
         ) : (
           <div className="side-btns">
-            {canSeal ? (
+            {canSeal || sealedClosing ? (
               <button
                 type="button"
                 className="btn btn-sm"
-                disabled={busy || !seaSign.eligible}
+                disabled={busy || !seaSign.eligible || sealedClosing}
                 onClick={() => {
                   if (mySealedBid?.status === 'sealed') setFreeFee(String(mySealedBid.newReleaseFee));
                   setPanel('sealed');
                 }}
               >
-                {mySealedBid?.status === 'sealed' ? '改标 / 撤标' : '暗标出标'}
+                {sealedClosing ? '收标已截止 · 等待开标' : mySealedBid?.status === 'sealed' ? '改标 / 撤标' : '暗标出标'}
               </button>
             ) : (
               <button type="button" className="btn btn-sm" disabled={busy || !seaSign.eligible} onClick={() => setPanel('freeagent')}>
@@ -977,7 +983,9 @@ export function SideOps({
             你在本窗暗标段给这名球员出的标：
             <span className="mono"> {mySealedBid.newReleaseFee.toFixed(2)}m</span>
             {mySealedBid.status === 'sealed'
-              ? '（收标中，可改可撤）'
+              ? sealedClosing
+                ? '（收标已截止，等待开标）'
+                : '（收标中，可改可撤）'
               : mySealedBid.status === 'won'
                 ? '（胜出，等管理组审核）'
                 : mySealedBid.status === 'lost'

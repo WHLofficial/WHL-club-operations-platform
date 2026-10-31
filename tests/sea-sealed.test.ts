@@ -366,7 +366,7 @@ describe('开标', () => {
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM sea_batches WHERE id = ?', batchId)).toMatchObject({
       status: 'opened',
     });
-    // 通知：胜出方收 lead（带金额），非胜出方收「更高标」不公开金额
+    // 通知：胜出方收 lead（带金额），非胜出方收「同额但更早、或更高」且不公开金额
     expect(JSON.parse(notices(fx, 'sea_sealed_lead', CLUB_B)[0].payload).text).toContain('20');
     expect(notices(fx, 'sea_sealed_lead')[0].club_id).toBe(CLUB_B);
     const lostText = notices(fx, 'sea_sealed_lost', CLUB_A).map((n) => JSON.parse(n.payload).text).join('');
@@ -387,6 +387,10 @@ describe('开标', () => {
     expect(bidRow(fx, 24, CLUB_A)).toMatchObject({ id: early.bidId, status: 'won' });
     expect(bidRow(fx, 24, CLUB_B)!.status).toBe('lost');
     expect(sqlGet<{ to_club_id: number }>(fx.sqlite, 'SELECT to_club_id FROM transfers')).toMatchObject({ to_club_id: CLUB_A });
+    // 同额落败不是「有人出得更高」：文案要说「同额但更早」，且照样不漏金额
+    const lostTie = notices(fx, 'sea_sealed_lost', CLUB_B).map((n) => JSON.parse(n.payload).text).join('');
+    expect(lostTie).toContain('同额但更早');
+    expect(lostTie).not.toContain('20');
   });
 
   it('开标重跑资格链：收标期间被挂牌 ⇒ 整组作废 + 解冻 + 通知作废原因', async () => {

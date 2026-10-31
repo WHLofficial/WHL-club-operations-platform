@@ -60,6 +60,9 @@ function SeaPhaseSection() {
 
   if (data === undefined || data.state === 'off' || data.state === 'none') return null;
 
+  // closing = 已过截止、批次还没开标：出标与撤回在后端都是 409，前端一律关掉
+  const closing = data.state === 'closing';
+
   const withdraw = (playerId: number) => {
     setBusyId(playerId);
     setErr('');
@@ -75,7 +78,7 @@ function SeaPhaseSection() {
         ? '暗标段收标中'
         : `暗标段收标中 · 还剩 ${fmtClock(left)}`
       : data.state === 'closing'
-        ? '暗标段已截止，正在开标'
+        ? '暗标段已截止，等待开标'
         : '暗标段已开标';
 
   return (
@@ -92,7 +95,12 @@ function SeaPhaseSection() {
           </>
         )}
       </div>
-      {data.state === 'sealed' || data.state === 'closing' ? (
+      {closing ? (
+        <p className="hint">
+          收标已截止，等待统一开标：出标与撤回都已关闭，页面每 30 秒自动刷新一次，开标后这里直接出结果。胜出者进管理组审核 →
+          工资谈判；没胜出的球队，冻结自动解冻。
+        </p>
+      ) : data.state === 'sealed' ? (
         <p className="hint">
           本窗自由身池走密封标：金额与出标方保密，统一截止后价高者得（同额先出的胜出）。出标即冻结新违约金的 30%
           （= 签入费），截止前可改可撤；入口在球员档案左栏（E 态）。
@@ -120,8 +128,10 @@ function SeaPhaseSection() {
                     </span>
                   </span>
                   <span className="form-tail">
-                    <span className={`badge ${SEA_BID_BADGE[b.status].badge}`}>{SEA_BID_BADGE[b.status].label}</span>{' '}
-                    {b.status === 'sealed' && (
+                    <span className={`badge ${SEA_BID_BADGE[b.status].badge}`}>
+                      {closing && b.status === 'sealed' ? '已截止' : SEA_BID_BADGE[b.status].label}
+                    </span>{' '}
+                    {b.status === 'sealed' && !closing && (
                       <button
                         type="button"
                         className="btn btn-sm btn-ghost"

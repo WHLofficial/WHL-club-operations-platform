@@ -396,12 +396,19 @@ export function useSeaLookup(q: string) {
 
 // 海捞暗标段状态（教练端点 v6.50.0）：阶段横幅 / 我的密封标 / 开标公示都读这一份。
 // 倒计时用 lib/use-countdown.ts 本地读秒，所以这里不必按秒刷新；出标/撤标后由调用方 invalidate。
+// 但 sealed→closing（到点）与 closing→open（开标）这两次状态翻转只有服务端知道：
+// 不轮询就会一直停在「收标中 00:00」和旧表单上，所以这一段 30s 拉一次。
+const SEA_PHASE_POLL_MS = 30_000;
 export function useSeaPhase(enabled = true) {
   return useQuery({
     queryKey: qk.seaPhase,
     queryFn: () => api<SeaPhaseView>('/api/transfers/sea-sealed'),
     enabled,
     retry: false,
+    refetchInterval: (query) => {
+      const state = query.state.data?.state;
+      return state === 'sealed' || state === 'closing' ? SEA_PHASE_POLL_MS : false;
+    },
   });
 }
 

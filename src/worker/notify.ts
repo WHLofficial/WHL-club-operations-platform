@@ -171,7 +171,7 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `🏆 暗标胜出：${data.player} 你以最高标 ${data.amount} m 拿下（签入费 ${data.signFee} m 在审核通过时收），接下来是审核 → 工资谈判 → 过户。`;
     case 'sea_sealed_lost':
       return data.reason === 'outbid'
-        ? `📉 暗标没拿下：${data.player} 有更高的密封标（金额与出标方不公开），你的签入费冻结已解冻；明标段还能常规海捞。`
+        ? `📉 暗标没拿下：${data.player} 被别人以同额但更早、或更高的密封标拿下（金额与出标方不公开），你的签入费冻结已解冻；明标段还能常规海捞。`
         : `⚠️ 暗标作废：${data.player} 的标没能生效（${data.voidReason}），你的签入费冻结已解冻。`;
     case 'sea_batch_open':
       return `📣 海捞暗标段已开标：本批 ${data.won} 名球员被签走（共 ${data.clubs} 家出标），胜出者与金额见海捞页公示。`;
