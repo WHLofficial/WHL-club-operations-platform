@@ -15,6 +15,7 @@ import { requireCoach, type SessionUser } from '../../lib/session.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
 import { createRcChange, createTermination, createFreeAgent } from '../bypass.ts';
 import { createActivation, submitMatch } from '../activations.ts';
+import { demotePlayer } from '../promotion.ts';
 import { loadSeaPhaseView, submitSealedBid, withdrawSealedBid } from '../sea-sealed.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -63,6 +64,14 @@ app.post('/transfers/match', async (c) => {
   const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
   const body = await readJson(c);
   const result = await submitMatch(c.env, clubId, user.id, body?.listingId, body?.newReleaseFee);
+  return c.json(result, 201);
+});
+
+// v6.64.4 上调/下放：下放 = 正式合同一线队球员即时转训练营条款（每窗 2 名额）；上调见下方 /promotion
+app.post('/transfers/demote', async (c) => {
+  const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
+  const body = await readJson(c);
+  const result = await demotePlayer(c.env, clubId, user.id, body?.playerId);
   return c.json(result, 201);
 });
 

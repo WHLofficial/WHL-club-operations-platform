@@ -62,7 +62,8 @@ async function findInFlight(db: D1Database, playerId: number): Promise<'listing'
   return null;
 }
 
-async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void> {
+// v6.64.4 起导出给 promotion.ts（下放同样要躲开在途单据与在途谈判）
+export async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void> {
   const kind = await findInFlight(db, playerId);
   if (kind === 'listing') throw new HttpError(400, '这名球员已经有一单在市场流程里了，等它结束再操作');
   if (kind === 'pending') throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
