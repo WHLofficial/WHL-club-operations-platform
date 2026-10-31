@@ -64,7 +64,14 @@ export function ledgerMovement(db: D1Database, input: MovementInput): D1Prepared
 
 // ── 预期收入额度（设计 §1：窗口内预支未到账的卖人收入）────────────────────────
 // 在途卖人收入的税后净额 × k 进「可支配」，让卖方在成交单真正过户前先周转。
-//   源① listings：仍可竞价（listed/bidding）且有 active 出价 → 取最高 active 出价额；
+//   源① listings：仍可竞价（listed/bidding）、非 activation 且有 active 出价 → 取最高 active 出价额；
+//   源③（v6.64.0）被激活挂牌：type='activation' 且 activated_by 非空（激活动作必带值）、仍在
+//        listed/bidding → 取 MAX(最高 active 出价, 激活价 ask_price)。激活价是激活方已提交
+//        申请的保底收入（作废占一窗一次额度、激活前查过资金门槛）；激活作废（窗内未落价）
+//        或落价进 matched_pending 后本源退出，额度随实时公式收缩（§2.4 自然收缩）。
+//        v6.57.0 注释曾说「激活是签入方掏钱不产生卖方收入」——那是错的：激活挂牌的
+//        seller_club_id 是球员现属队、成交后收钱（源② transfers type='activation' 一直计）。
+//        当时不计的真实原因是首价窗在途态还没进设计；现按 grilling Q1-Q4 裁决纳入。
 //   源② transfers：待审/签约中（pending_review/signing）且**只认成交类**
 //        （transfer/activation/forced_auction）——rc_change/match/free_agent/termination
 //        的 from_club_id 也会等于本队、fee 写的是新违约金/差额，但永远不产生卖方收入，
@@ -112,6 +119,17 @@ function inflightIncomeSql(clubRef: string): string {
                     AND l.type NOT IN ('activation')
                     AND EXISTS (SELECT 1 FROM bids b WHERE b.listing_id = l.id AND b.status = 'active')
                   UNION ALL
+                  SELECT 'listing' AS source,
+                         l.id AS ref_id,
+                         l.player_id AS player_id,
+                         MAX(COALESCE((SELECT MAX(b.amount) FROM bids b WHERE b.listing_id = l.id AND b.status = 'active'), 0), l.ask_price) AS gross,
+                         0 AS forced
+                  FROM listings l
+                  WHERE l.seller_club_id = ${clubRef}
+                    AND l.type = 'activation'
+                    AND l.activated_by IS NOT NULL
+                    AND l.status IN ('listed', 'bidding')
+                  UNION ALL
                   SELECT 'transfer' AS source,
                          t.id AS ref_id,
                          t.player_id AS player_id,
@@ -126,21 +144,21 @@ function inflightIncomeSql(clubRef: string): string {
             CROSS JOIN ${TAX_RATES_ROW_SQL} AS r) AS d`;
 }
 
-/** 每球员取毛额最高的一份（SQLite 裸列语义：与 MAX(gross) 同行取净额/来源/单号） */
-function pickedIncomeSql(clubRef: string): string {
-  return `(SELECT dd.player_id AS player_id,
+/** 每球员取毛额最高的一份（SQLite 裸列语义：与 MAX(gross) 同行取净额/来源/单号）。裸子查询，供 WITH 物化共用 */
+function pickedRowsSql(clubRef: string): string {
+  return `SELECT dd.player_id AS player_id,
                  MAX(dd.gross) AS gross,
                  dd.source AS source,
                  dd.ref_id AS ref_id,
                  dd.tax AS tax,
                  dd.net AS net
           FROM (${inflightIncomeSql(clubRef)}) AS dd
-          GROUP BY dd.player_id) AS p`;
+          GROUP BY dd.player_id`;
 }
 
-/** 预期收入（未乘 k，m） */
-function expectedIncomeSql(clubRef: string): string {
-  return `COALESCE((SELECT ROUND(SUM(p.net), 2) FROM ${pickedIncomeSql(clubRef)}), 0)`;
+/** FROM 子句形态（带括号与别名 p）——触发器内嵌文本走这个；文本锁逐字比对 */
+function pickedIncomeSql(clubRef: string): string {
+  return `(${pickedRowsSql(clubRef)}) AS p`;
 }
 
 /**
@@ -182,31 +200,62 @@ export interface BalanceSnapshot {
   expectedIncome: number;
   /** 预期收入额度 = expectedIncome × k */
   creditLine: number;
+  /** v6.64.0：被激活挂牌在途税后净额（未乘 k，expectedIncome 的组成部分，与主数同源同一次明细） */
+  activationIncome: number;
+  /** v6.64.0：activationIncome × k（财政页「其中被激活挂牌」展示口径，与 creditLine 同层真部分和） */
+  activationCredit: number;
   /** 可支配 = balance − held + creditLine */
   available: number;
 }
 
 /**
- * 余额快照（/api/club/balance 与展示层共用）：余额 / 冻结 / 预期收入 / 额度 / 可支配。
- * 一次查询算完——在途明细只求值一次，expectedIncome 与 creditLine 出自同一份明细。
+ * 余额快照（/api/club/balance 与展示层共用）：余额 / 冻结 / 预期收入 / 额度 / 可支配，
+ * 另带被激活挂牌部分（v6.64.0：activationIncome 未乘 k、activationCredit ×k 后与 creditLine 同层）。
+ * 一次查询算完——CTE 把在途明细物化一次，expectedIncome / activationIncome / creditLine 同源。
  */
 export async function balanceSnapshot(db: D1Database, clubId: number): Promise<BalanceSnapshot> {
-  const expected = expectedIncomeSql('?');
+  const picked = pickedRowsSql('?');
   const row = await db
     .prepare(
-      `SELECT b.balance AS balance, b.held AS held, b.expected AS expected_income,
-              ROUND(b.expected * ${EXPECTED_INCOME_RATE_SQL}, 2) AS credit_line
+      `WITH picked AS (${picked}),
+            agg AS (
+              SELECT COALESCE((SELECT ROUND(SUM(p.net), 2) FROM picked p), 0) AS expected,
+                     COALESCE((SELECT ROUND(SUM(p.net), 2) FROM picked p
+                               WHERE p.source = 'listing'
+                                 AND EXISTS (SELECT 1 FROM listings al WHERE al.id = p.ref_id
+                                               AND al.type = 'activation' AND al.activated_by IS NOT NULL)), 0) AS activation
+            )
+       SELECT b.balance AS balance, b.held AS held, a.expected AS expected_income, a.activation AS activation_income,
+              ROUND(a.expected * ${EXPECTED_INCOME_RATE_SQL}, 2) AS credit_line,
+              ROUND(a.activation * ${EXPECTED_INCOME_RATE_SQL}, 2) AS activation_credit
        FROM (SELECT COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0) AS balance,
-                    COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0) AS held,
-                    ${expected} AS expected) AS b`,
+                    COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0) AS held) AS b
+       CROSS JOIN agg AS a`,
     )
-    .bind(clubId, clubId, ...clubParams(expected, clubId))
-    .first<{ balance: number; held: number; expected_income: number; credit_line: number }>();
+    .bind(...clubParams(picked, clubId), clubId, clubId)
+    .first<{
+      balance: number;
+      held: number;
+      expected_income: number;
+      activation_income: number;
+      credit_line: number;
+      activation_credit: number;
+    }>();
   const balance = row?.balance ?? 0;
   const held = row?.held ?? 0;
   const expectedIncome = row?.expected_income ?? 0;
+  const activationIncome = row?.activation_income ?? 0;
   const creditLine = row?.credit_line ?? 0;
-  return { balance, held, expectedIncome, creditLine, available: round2(balance - held + creditLine) };
+  const activationCredit = row?.activation_credit ?? 0;
+  return {
+    balance,
+    held,
+    expectedIncome,
+    creditLine,
+    activationIncome,
+    activationCredit,
+    available: round2(balance - held + creditLine),
+  };
 }
 
 export interface ExpectedIncomeItem {
@@ -221,6 +270,8 @@ export interface ExpectedIncomeItem {
   tax: number;
   /** 税后净额（m） */
   net: number;
+  /** v6.64.0：本行来自被激活挂牌（type='activation' 且 activated_by 非空，毛额 = MAX(出价, 激活价)） */
+  activation: boolean;
 }
 
 /**
@@ -232,12 +283,22 @@ export async function expectedIncomeBreakdown(db: D1Database, clubId: number): P
   const rows = await db
     .prepare(
       `SELECT p.source AS source, p.ref_id AS ref_id, p.player_id AS player_id,
-              p.gross AS gross, p.tax AS tax, p.net AS net
+              p.gross AS gross, p.tax AS tax, p.net AS net,
+              (p.source = 'listing' AND EXISTS (SELECT 1 FROM listings al WHERE al.id = p.ref_id
+                                                  AND al.type = 'activation' AND al.activated_by IS NOT NULL)) AS activation
        FROM ${picked}
        ORDER BY p.net DESC, p.player_id`,
     )
     .bind(...clubParams(picked, clubId))
-    .all<{ source: 'listing' | 'transfer'; ref_id: number; player_id: number; gross: number; tax: number; net: number }>();
+    .all<{
+      source: 'listing' | 'transfer';
+      ref_id: number;
+      player_id: number;
+      gross: number;
+      tax: number;
+      net: number;
+      activation: number;
+    }>();
   return rows.results.map((r) => ({
     source: r.source,
     refId: r.ref_id,
@@ -245,6 +306,7 @@ export async function expectedIncomeBreakdown(db: D1Database, clubId: number): P
     gross: r.gross,
     tax: r.tax,
     net: r.net,
+    activation: r.activation === 1,
   }));
 }
 

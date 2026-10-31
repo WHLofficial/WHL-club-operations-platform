@@ -753,7 +753,7 @@ app.get('/club/balance', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) {
-    return c.json({ club: null, balance: null, held: null, available: null, expectedIncome: null, creditLine: null });
+    return c.json({ club: null, balance: null, held: null, available: null, expectedIncome: null, creditLine: null, activationIncome: null, activationCredit: null });
   }
   const snapshot = await balanceSnapshot(c.env.DB, club.id);
   return c.json({ club: { id: club.id, name: club.name }, ...snapshot });
