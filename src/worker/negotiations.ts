@@ -21,6 +21,8 @@ import { fmtBeijingMinute } from '../core/ops-schedule.ts';
 import { queueClubNotification } from './notify.ts';
 import type { ExpiryOpts } from './expiry-ops.ts';
 import { assertOpOpen } from './ops-schedule.ts';
+import { freeAgentFee, freeAgentFeeGap } from '../core/bypass-rules.ts';
+import { availableBalance, creditLineGuard, ledgerMovement } from './ledger.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -451,6 +453,69 @@ export async function previewWage(
   return { forecast: previewForecast(evaluation.p), risk: evaluation.risk };
 }
 
+// v6.63.2：海捞的签入费在审核通过时按「提交的违约金 × 30%」收；直签训练营会把违约金落回
+// 固定的 5m（规则 4.3.4(1)）——提交价低于 5m 时那笔费收少了要补收（否则等于拿 2m 违约金
+// 花 0.6m 白拿一份 5m 的训练营合同），高于 5m 时多收的要退。钱都走同一本账，销毁侧记流水。
+async function adjustTraineeSignFee(env: Env, transfer: TransferRow, clubId: number, actor: number | null): Promise<void> {
+  if (transfer.type !== 'free_agent') return;
+  const gap = freeAgentFeeGap(transfer.extra_fee ?? 0, TRAINEE_RELEASE_FEE);
+  if (gap === 0) return;
+  const db = env.DB;
+  const required = freeAgentFee(TRAINEE_RELEASE_FEE);
+  const collecting = gap > 0;
+  const amount = Math.abs(gap);
+  if (collecting) {
+    const available = Math.round((await availableBalance(db, clubId)) * 100) / 100;
+    if (available < amount) {
+      throw new HttpError(
+        409,
+        `这单海捞提交的违约金低于训练营固定的 ${TRAINEE_RELEASE_FEE} m，签入费要补收 ${amount} m；俱乐部可支配 ${available} m 不够，先补足资金再签进训练营`,
+      );
+    }
+  }
+  // 补收时守卫与 availableBalance 同公式（含预期收入额度），并在批内对**批前**资金状态求值：
+  // 预检过了但并发把余额占掉时，账本与附加费两条都不落。退款是入账，只守单据阶段。
+  const credit = creditLineGuard(clubId);
+  const guardSql = collecting
+    ? `(SELECT status FROM transfers WHERE id = ?) = 'signing'` +
+      ` AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
+      ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
+      ` + ${credit.sql}` +
+      ` >= ?`
+    : `(SELECT status FROM transfers WHERE id = ?) = 'signing'`;
+  const guardParams = collecting ? [transfer.id, clubId, clubId, ...credit.params, amount] : [transfer.id];
+  const results = await db.batch([
+    ...ledgerMovement(db, {
+      clubId,
+      delta: collecting ? -amount : amount,
+      kind: collecting ? 'free_agent_fee_topup' : 'free_agent_fee_refund',
+      refType: 'transfer',
+      refId: transfer.id,
+      memo: collecting
+        ? `海捞签入费补差（合同违约金按训练营 ${TRAINEE_RELEASE_FEE}m 计，合计 ${required}m，销毁）`
+        : `海捞签入费退还（合同违约金按训练营 ${TRAINEE_RELEASE_FEE}m 计，合计 ${required}m）`,
+      guardSql,
+      guardParams,
+    }),
+    db
+      .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'signing' AND ${guardSql}`)
+      .bind(required, transfer.id, ...guardParams),
+    createAuditStatement(db)({
+      actor,
+      action: collecting ? 'bypass_fee_topup' : 'bypass_fee_refund',
+      targetType: 'transfer',
+      targetId: transfer.id,
+      origin: 'user',
+      before: { fee: transfer.fee, extraFee: transfer.extra_fee },
+      after: { gap, extraFee: required, reason: 'trainee_rc_floor' },
+    }),
+  ]);
+  // 账本那句的闸没过（并发动用）就查不到这笔流水——补收没落账不许白过成约。
+  if ((results[1]?.meta.changes ?? 0) === 0) {
+    throw new HttpError(409, collecting ? '补收签入费时资金刚被其他操作占用，稍后再试' : '退还签入费没落账，稍后再试');
+  }
+}
+
 // 直签训练营：固定条款立即成约（需求方裁决，不占 4.3.4(3) 下放名额）。
 // 续约/匹配是本队留人操作，不存在「签入」，不能借道把自家球员转进训练营（下放名额闸不被绕过）。
 export async function chooseTrainee(
@@ -466,6 +531,7 @@ export async function chooseTrainee(
   if (transfer.type === 'rc_change' || transfer.type === 'match') {
     throw new HttpError(400, '续约和匹配是留人操作，球员本来就在队里，不能转进训练营');
   }
+  await adjustTraineeSignFee(env, transfer, clubId, actor);
   await settleActiveSession(env, session, TRAINEE_WAGE, 'trainee', actor, null);
   return { ok: true, result: 'trainee', wage: TRAINEE_WAGE, message: settleMessage('trainee') };
 }

@@ -70,6 +70,14 @@ export function freeAgentFee(newRc: number): number {
   return round2(newRc * FREE_AGENT_FEE_RATE);
 }
 
+/** 海捞签入费差额（4.4.3 + 4.3.4(1)）：海捞按提交时的违约金收费，而直签训练营会把违约金
+ * 落回固定 5m——两者不一致时那笔费要按合同重算：正数补收、负数退还、0 不动。 */
+export function freeAgentFeeGap(paidFee: number, contractRc: number): number {
+  const required = freeAgentFee(contractRc);
+  const paid = Number.isFinite(paidFee) && paidFee > 0 ? round2(paidFee) : 0;
+  return round2(required - paid);
+}
+
 /** 匹配差额（4.4.2.4）：新违约金 − 原违约金，付给联赛销毁（PRD 裁决 6） */
 export function matchDiff(oldRc: number, newRc: number): number {
   if (newRc <= oldRc) throw new RangeError('匹配新违约金必须高于原违约金');

@@ -561,6 +561,127 @@ describe('海捞（free_agent）', () => {
     expect(done).toMatchObject({ status: 'completed', tax: 0, extra_fee: 1.8 });
   });
 
+  it('海捞直签训练营：提交违约金低于 5 时补收签入费差额（v6.63.2）', async () => {
+    const fx = await seedBypass();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free');`,
+    );
+    fx.env.rng = () => 0.9;
+    const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 2 }, 'tok-coach2', fx.env);
+    expect(submit.status).toBe(201);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    // 审核时按 2m × 30% 收 0.6
+    expect(
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE kind = 'free_agent_fee' AND club_id = ${fx.clubB}`)
+        ?.amount,
+    ).toBeCloseTo(-0.6, 2);
+    const sessionId = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)
+      ?.id as number;
+    const balance = () =>
+      sqlGet<{ balance: number }>(fx.sqlite, `SELECT balance FROM ledger_accounts WHERE club_id = ${fx.clubB}`)?.balance ?? 0;
+    const before = balance();
+    expect((await post(`/api/negotiations/${sessionId}/trainee`, {}, 'tok-coach2', fx.env)).status).toBe(200);
+    // 训练营违约金固定 5m ⇒ 签入费应收 1.5，差额 0.9 在成约前补收
+    expect(
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE kind = 'free_agent_fee_topup' AND club_id = ${fx.clubB}`)
+        ?.amount,
+    ).toBeCloseTo(-0.9, 2);
+    expect(Math.round((before - balance()) * 100) / 100).toBe(0.9);
+    expect(sqlGet<{ status: string; extra_fee: number }>(fx.sqlite, 'SELECT status, extra_fee FROM transfers WHERE id = ?', transferId)).toMatchObject(
+      { status: 'completed', extra_fee: 1.5 },
+    );
+    expect(
+      sqlGet<{ release_fee: number; contract_type: string; wage: number }>(
+        fx.sqlite,
+        'SELECT release_fee, contract_type, wage FROM contracts WHERE player_id = 24',
+      ),
+    ).toMatchObject({ release_fee: 5, contract_type: 'trainee', wage: 0.75 });
+  });
+
+  it('海捞直签训练营：提交违约金高于 5 时退还多收的签入费', async () => {
+    const fx = await seedBypass();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free');`,
+    );
+    fx.env.rng = () => 0.9;
+    const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 8 }, 'tok-coach2', fx.env);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    // 审核时按 8m × 30% 收 2.4
+    expect(
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE kind = 'free_agent_fee' AND club_id = ${fx.clubB}`)
+        ?.amount,
+    ).toBeCloseTo(-2.4, 2);
+    const sessionId = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)
+      ?.id as number;
+    const balance = () =>
+      sqlGet<{ balance: number }>(fx.sqlite, `SELECT balance FROM ledger_accounts WHERE club_id = ${fx.clubB}`)?.balance ?? 0;
+    const before = balance();
+    expect((await post(`/api/negotiations/${sessionId}/trainee`, {}, 'tok-coach2', fx.env)).status).toBe(200);
+    // 训练营违约金固定 5m ⇒ 签入费只该收 1.5，多收的 0.9 在成约前退回
+    expect(
+      sqlGet<{ amount: number }>(fx.sqlite, `SELECT amount FROM ledger_entries WHERE kind = 'free_agent_fee_refund' AND club_id = ${fx.clubB}`)
+        ?.amount,
+    ).toBeCloseTo(0.9, 2);
+    expect(Math.round((balance() - before) * 100) / 100).toBe(0.9);
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'free_agent_fee_topup'`)?.n,
+    ).toBe(0);
+    expect(sqlGet<{ status: string; extra_fee: number }>(fx.sqlite, 'SELECT status, extra_fee FROM transfers WHERE id = ?', transferId)).toMatchObject(
+      { status: 'completed', extra_fee: 1.5 },
+    );
+  });
+
+  it('海捞直签训练营：提交违约金正好 5 时不动签入费', async () => {
+    const fx = await seedBypass();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free');`,
+    );
+    fx.env.rng = () => 0.9;
+    const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 5 }, 'tok-coach2', fx.env);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    const sessionId = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)
+      ?.id as number;
+    expect((await post(`/api/negotiations/${sessionId}/trainee`, {}, 'tok-coach2', fx.env)).status).toBe(200);
+    expect(
+      sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries WHERE kind IN ('free_agent_fee_topup', 'free_agent_fee_refund')`)
+        ?.n,
+    ).toBe(0);
+    expect(sqlGet<{ extra_fee: number }>(fx.sqlite, 'SELECT extra_fee FROM transfers WHERE id = ?', transferId)?.extra_fee).toBeCloseTo(1.5, 2);
+  });
+
+  it('海捞直签训练营：可用资金不够补差时挡下成约（409）', async () => {
+    const fx = await seedBypass();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free');
+       UPDATE ledger_accounts SET balance = 1 WHERE club_id = ${fx.clubB};`,
+    );
+    fx.env.rng = () => 0.9;
+    const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 2 }, 'tok-coach2', fx.env);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const taskId = await openReviewTaskId(fx);
+    // 0.6 收得上（余额 1），补差 0.9 就只剩 0.4 了
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    const sessionId = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', transferId)
+      ?.id as number;
+    const trainee = await post(`/api/negotiations/${sessionId}/trainee`, {}, 'tok-coach2', fx.env);
+    expect(trainee.status).toBe(409);
+    expect(((await trainee.json()) as { error: string }).error).toContain('要补收');
+    // 成约没发生：单据仍在签约阶段、会话仍 active、没有补差流水
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)?.status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM negotiation_sessions WHERE id = ?', sessionId)?.status).toBe('active');
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'free_agent_fee_topup'`)?.n).toBe(0);
+  });
+
   it('被解约球员下窗可复签：合同行 UPSERT 翻新（旧行 is_active 复位）', async () => {
     const fx = await seedBypass();
     fx.env.rng = () => 0.5;

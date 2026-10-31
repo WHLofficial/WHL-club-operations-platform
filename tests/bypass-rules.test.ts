@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activationFee,
   freeAgentFee,
+  freeAgentFeeGap,
   isProtected,
   matchDiff,
   protectionTicksFor,
@@ -94,6 +95,18 @@ describe('freeAgentFee（海捞签入费 4.4.3）', () => {
     expect(freeAgentFee(20)).toBe(6);
     expect(freeAgentFee(5)).toBe(1.5);
     expect(freeAgentFee(1)).toBe(0.3);
+  });
+});
+
+describe('freeAgentFeeGap（海捞费按训练营 5m 重算）', () => {
+  it('提交价低于 5 要补收、高于 5 要退、持平为 0', () => {
+    expect(freeAgentFeeGap(freeAgentFee(2), 5)).toBe(0.9);
+    expect(freeAgentFeeGap(freeAgentFee(8), 5)).toBe(-0.9);
+    expect(freeAgentFeeGap(freeAgentFee(5), 5)).toBe(0);
+  });
+
+  it('没收费（解约/续约/匹配单）时按全额算', () => {
+    expect(freeAgentFeeGap(0, 5)).toBe(1.5);
   });
 });
 

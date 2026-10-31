@@ -83,6 +83,21 @@
 
 ---
 
+## v6.63.2 · 海捞单直签训练营按 5m 违约金重算签入费（2026-10-31）
+
+**状态**：已实现，待上线（未 push）。
+
+**缘起**：owner 两条裁决（2026-10-31）——「海捞直接签训练营合同的，要检查海捞给的违约金是否小于 5，如果少，要按 5 违约金补收海捞费用差值」+「如果超过了 5 违约金也要退款」。症结是签入费与合同形态的时点错位：海捞签入费在**审核通过**时按「提交的违约金 × 30%」收（4.4.3），而「直签训练营」（4.3.4(1)，条款固定 0.75m / 5m）是**过审之后**在谈判里才选的——提交 2m 违约金能花 0.6m 白拿一份 5m 训练营合同；反过来提交 8m 后转训练营，2.4m 又收多了。
+
+**交付**：
+- `src/core/bypass-rules.ts`：新增 `freeAgentFeeGap(paidFee, contractRc)`，返回 `freeAgentFee(contractRc) − paidFee`（正=补收、负=退款、0=不动），前后端同源。
+- `src/worker/negotiations.ts`：新增 `adjustTraineeSignFee(env, transfer, clubId, actor)`，在 `chooseTrainee` 里 `settleActiveSession` 之前调用——只认 `type='free_agent'`；补收先过 `availableBalance`（含预期收入额度）预检，不足 409 且不落任何账；一个 `db.batch` 里写 `ledgerMovement`（`free_agent_fee_topup` / `free_agent_fee_refund`）+ 守卫版 `UPDATE transfers SET extra_fee = 1.5` + 审计（`bypass_fee_topup` / `bypass_fee_refund`，`after.reason='trainee_rc_floor'`）；账本那句 changes=0 即 409，不留「补收没落账却成约」的窗口。补收的资金守卫与 `availableBalance` 同公式（余额 − 在途冻结 + 预期收入额度 ≥ 差额），对**批前**状态求值；退款是入账，只守单据仍 `signing`。
+- `web/src/pages/market/desk/NegotiationsSection.tsx`：`OfferStep` 里算 `traineeFeeGap`，按钮下明示「会补收 / 会退回 Xm（签入费合计 1.5m）」；删掉此前误挂在 `SessionCard` 的同名变量（typecheck 报未使用 + 子组件作用域报错）。
+
+**验收（实测）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **175 文件 / 2,843 例**全绿（v6.63.1 基线 175/2,837）；`npm run build` 通过；code-review-skill 复查无阻断项（两处非阻断：退款分支仍会构造一次用不到的 `creditLineGuard`——纯字符串拼接、无查询；差额结算与成约不是同一事务，中途中断时重试即可自愈，因为差额已归零）。判级 **patch**（零迁移、零新端点、无存储形状变更）。测试计划 `docs/test-plans/v6.63.2-trainee-sign-fee-gap.md`。
+
+**已知边界**：只有训练营这一条路会改合同违约金而不动 `transfers.fee`；明标常规工资谈判成约仍按提交价收费，签入费不重算（设计如此）。差额结算排在成约之前，若 `settleActiveSession` 因基础设施错误失败，教练重试即可（差额已归零、不会二次扣款）。
+
 ## v6.63.1 · 海捞暗标截止后的收标态收口 + 同额落败文案（2026-10-31）
 
 **状态**：已上线（2026-10-31）。

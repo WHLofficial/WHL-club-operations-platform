@@ -4,6 +4,16 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.63.2] · 海捞单直签训练营按 5m 违约金重算签入费（2026-10-31）
+
+**Added**
+
+- 海捞（明标与暗标胜出同一条路）的单据在「直接签训练营」时，签入费按训练营固定的 5m 违约金重算：提交价低于 5m **补收**差额（否则等于拿 2m 违约金花 0.6m 白拿一份 5m 训练营合同），高于 5m **退还**多收的差额，正好 5m 不动。结算落在成约动作里（`chooseTrainee`）、`settleActiveSession` 之前，同批把 `transfers.extra_fee` 改成 1.5，钱走 `ledger_entries` 的 `free_agent_fee_topup` / `free_agent_fee_refund` 两笔流水（幂等键 `(club, kind, transfer, refId)`，重放不长钱、不吞钱）。补收过不了资金闸（可支配含预期收入额度）就 409 挡下，不白过成约；退款是入账，不设资金闸。
+- 核心纯函数 `freeAgentFeeGap(paidFee, contractRc)`（`src/core/bypass-rules.ts`）：正数补收、负数退还、0 不动，前端与后端同源。
+- 谈判卡片「直接签训练营」按钮下明示方向与金额：会补收 Xm / 会退回 Xm（合计 1.5m），补收口径附「可用资金不够会被挡下」。
+
+**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **175 文件 / 2,843 例**全绿（v6.63.1 基线 175/2,837，+6 例 = 差额函数 3 例 + 端到端 3 例）；`npm run build` 通过；code-review-skill 复查无阻断项。零迁移、零新端点。测试计划 `docs/test-plans/v6.63.2-trainee-sign-fee-gap.md`。
+
 ## [v6.63.1] · 暗标截止后的收标态收口 + 同额落败文案（2026-10-31）
 
 **已上线（2026-10-31）**：push `f412485..` 触发 CF Workers Builds 自动部署（版本号随本轮 bump，线上版本串 `6.63.1`）。

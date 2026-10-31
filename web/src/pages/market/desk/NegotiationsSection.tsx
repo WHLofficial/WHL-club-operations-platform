@@ -19,6 +19,7 @@ import { playerPath } from '../../../lib/player-link.ts';
 import { moneyIntText } from '../../../lib/club-cards.ts';
 import { useTimeFmt } from '../../../lib/datetime.ts';
 import { money } from '../shared.tsx';
+import { freeAgentFee, freeAgentFeeGap } from '../../../../../src/core/bypass-rules.ts';
 import OpsGateNote from '../../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../../lib/ops-gate.ts';
 import DemandSection from './DemandSection.tsx';
@@ -357,6 +358,12 @@ function OfferStep({
   const [debounced, setDebounced] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmTrainee, setConfirmTrainee] = useState(false);
+  // v6.63.2：海捞单的签入费按提交时的违约金收，训练营的违约金却固定 5m——直签要按合同重算差额
+  // （正数补收、负数退还，后端同口径）
+  const traineeFeeGap =
+    session.transfer.type === 'free_agent' && session.transfer.fee !== null
+      ? freeAgentFeeGap(freeAgentFee(session.transfer.fee), TRAINEE_RELEASE_FEE)
+      : 0;
 
   // 输入停下 350ms 再问档位：边敲边打请求既费流量又让胶囊乱跳。
   useEffect(() => {
@@ -505,7 +512,20 @@ function OfferStep({
             直接签训练营（{money(TRAINEE_WAGE)}m / 违约金 {moneyIntText(TRAINEE_RELEASE_FEE) ?? '—'}）
           </button>
         )}
-        <span className="hint">训练营条款固定，不占本窗 2 个下放名额；点了就成约过户，不能反悔。</span>
+        <span className="hint">
+          训练营条款固定，不占本窗 2 个下放名额；点了就成约过户，不能反悔。
+          {traineeFeeGap !== 0 && (
+            <>
+              {' '}
+              这单的违约金 <span className="mono">{moneyIntText(session.transfer.fee) ?? '—'}</span>m
+              {traineeFeeGap > 0 ? '低于' : '高于'}训练营的{' '}
+              <span className="mono">{moneyIntText(TRAINEE_RELEASE_FEE) ?? '—'}</span>m，签进训练营会
+              {traineeFeeGap > 0 ? '补收' : '退回'}签入费 <b>{money(Math.abs(traineeFeeGap))}m</b>（签入费合计{' '}
+              <span className="mono">{money(freeAgentFee(TRAINEE_RELEASE_FEE))}</span>m
+              {traineeFeeGap > 0 ? '，可用资金不够会被挡下' : ''}）。
+            </>
+          )}
+        </span>
       </div>
     </>
   );
