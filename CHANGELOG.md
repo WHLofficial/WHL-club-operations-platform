@@ -48,6 +48,8 @@
 
 **验收**：typecheck 三份全清；vitest **178 文件 / 2,887 例**全绿；`npm run build` 通过；变异验证六处定向变红。测试计划 `docs/test-plans/v6.64.4-promotion-demotion.md`。判级 **minor**（零迁移、零生产写）。**版本串说明**：package.json 由 v6.64.5 bump 到 6.64.5 并已上线，本版沿用 6.64.5 串。
 
+**已上线（2026-10-31）**：push `c4a7729..5b5ab66`（10 枚 = 本版代码 8 枚 + v6.64.5 上线记录 1 枚 + 本版收口文档 1 枚）触发 CF 自动部署，生效 Version `47f466ee-bdb8-42ef-9dda-a3a0836ffb6b` @2026-10-31T12:18:02Z（零迁移）。上线回读：health 200；匿名 `POST /api/transfers/demote` 与 `GET /api/club/players/1/requests` 均 401「未登录」；`GET /api/ops-schedule` 12 行含「上调/下放」行，生产已配专用闸位（absolute 起点 `2026-11-04T13:00:00.000Z`、终点 window_close，当前「未开始」）；线上入口 `assets/index-DCPPgNbC.js`（724,203 B）含「下放」×9、「上调」×13、「提交即冻结」×4、`transfer_promotion`×1。
+
 ## [v6.64.3] · 激活竞价截止后训练营合同同样进 24h 匹配窗 + 出价死线跳过出价当日（2026-10-31）
 
 **Fixed**

@@ -145,7 +145,7 @@
 
 ## v6.64.4 · 上调/下放机制：名单段 × 合同类型双向挂钩（2026-10-31）
 
-**状态**：**已开发，待 owner 下令上线**（2026-10-31）——本地 8 个提交待 push（push 即触发 CF Workers Builds 自动部署；与 v6.64.5 的上线路径无关，v6.64.5 已从 origin/main 单枚先行）。**生产迁移现状：已到 `0087`**（本版零迁移、零生产写）。批次二，承接 v6.64.3 的设计（grilling 四轮收口，定案见记忆计划 `plan-v6.64.4-promotion-demotion.md` 与 `plan-v6.64.1-…md` §八）。
+**状态**：**已上线（2026-10-31）**——owner 下令「push」，push `c4a7729..5b5ab66`（10 枚 = 本版代码 8 枚 + v6.64.5 上线记录文档 1 枚 + 本版收口文档 1 枚）触发 CF Workers Builds 自动部署，生产 Version **`47f466ee-bdb8-42ef-9dda-a3a0836ffb6b`** @2026-10-31T12:18:02Z（零迁移）。上线回读：health 200；匿名 `POST /api/transfers/demote` 与 `GET /api/club/players/1/requests` 均 401「未登录」（路由在、守卫生效）；`GET /api/ops-schedule` 200 共 12 行、`transfer_promotion`「上调/下放」行在场——**生产已配专用闸位时刻：absolute 起点 `2026-11-04T13:00:00.000Z`（北京 11-04 20:00）、终点 window_close，当前「未开始」**，即本版上线后下放/上调入口按 owner 设定的时刻开启（早于该时刻按钮会被 `op_closed` 拦，预约的练满自动上调同样等到点才开会）；线上入口资产 `assets/index-DCPPgNbC.js`（724,203 B）含版本串 `6.64.5`×1（本版沿用 v6.64.5 串）、「下放」×9、「上调」×13、「提交即冻结」×4、`transfer_promotion`×1（「自助取消」是代码注释用语，UI 按钮文案为「取消」）。**生产迁移现状：已到 `0087`**（本版零迁移、零生产写）。批次二，承接 v6.64.3 的设计（grilling 四轮收口，定案见记忆计划 `plan-v6.64.4-promotion-demotion.md` 与 `plan-v6.64.1-…md` §八）。
 
 **缘起**：owner 裁决「正式合同进训练营视为下放，自动转为训练营合同 5m/0.75m；训练营合同进一线队视为上调，要新谈正式合同」——注册名单与合同类型双向挂钩，配套解约冻结、自助取消、练满自动上调。
 
@@ -157,11 +157,12 @@
 - `b8286e3` **feat(transfers)** 解约冻结 + 自助取消：解约提交即按算定金额冻结（`fund_holds ref_type='termination'`，余额守卫含预期收入额度；冻结失败并发输掉 ⇒ 补偿取消刚建单据不留裸单，续约回滚挪到冻结成功后）；审核按冻结额收不重算（hold→settled）、驳回解冻；`POST /api/transfers/cancel`——续约/解约/上调预约一键取消（单据 cancelled、审核任务收口、解冻、审计 actor=本人、已作废续约不复活），上调 signing 走 voidSigningCore 对称收口（可重申）。
 - `0391a0a` **feat(web)** UI：SideOps 正式合同一线队加「下放」（双击确认）；训练营分支从只读说明扩成可操作（上调 F 输入 + 附加费实时预览 + 解约）；两队通用「在途单据」列表（新端点 `GET /api/club/players/:id/requests`）一键取消；解约文案改「提交即冻结」；ref.ts 标签加 demote/promotion；static-lock 测试补 transfer_promotion 面。
 - `d3a25df` **fix(notify)**：上调三模板（promotion_opened/reserved/forced）登记 NOTIFY_META（双向相等测试拦住漏登记）；routes.test 注册用例改按双向校验新语义。
+- `5b5ab66` **fix(transfers)**（code-review 评审修复）：同窗「下放→上调回→再下放」会撞 `demote:{pid}:{s}:{w}` 幂等键 UNIQUE 打 500 ⇒ 加 `demotedThisWindow` 守卫给可读 409「他本窗已经下放过一次（含被再上调回的情形），下窗再操作」。
 - （文档枚随本节提交。）
 
-**验收（实测）**：typecheck 三份全清；vitest **178 文件 / 2,887 例**全绿（v6.64.2 基线 177/2,860，净 +1 文件 / +27 例，主要在新建 `tests/promotion.test.ts` 20 例 + window-machine/expiry-ops/ops-schedule/squad-rules/routes 增补）；`npm run build` 通过。**变异验证六处全命中无空转**：M1 match 去 contract_type 写入 ⇒ TC-M1 红；M4 下放守卫削 pa−ca ⇒ 恰 TC-D3 红；M5 匹配当窗例外删除 ⇒ 恰 TC-D4 红；M7 关窗强约查询落空 ⇒ 恰窗机用例红；M8 解约冻结禁用 ⇒ 恰 TC-T1/T2/T3 三红；M12 chooseTrainee 放行 promotion ⇒ 恰 TC-P8 红（M2/M3/M6/M10/M11 由数值/存在性断言直锁）。测试计划 `docs/test-plans/v6.64.4-promotion-demotion.md`（TC-M/R/D/P/T/C 六组）。判级 **minor**（新增两条端点 + 注册校验规则收紧；零迁移、零契约破坏）。
+**验收（实测）**：typecheck 三份全清；vitest **178 文件 / 2,887 例**全绿（v6.64.2 基线 177/2,860，净 +1 文件 / +27 例，主要在新建 `tests/promotion.test.ts` 21 例 + window-machine/expiry-ops/ops-schedule/squad-rules/routes 增补）；`npm run build` 通过。**变异验证六处全命中无空转**：M1 match 去 contract_type 写入 ⇒ TC-M1 红；M4 下放守卫削 pa−ca ⇒ 恰 TC-D3 红；M5 匹配当窗例外删除 ⇒ 恰 TC-D4 红；M7 关窗强约查询落空 ⇒ 恰窗机用例红；M8 解约冻结禁用 ⇒ 恰 TC-T1/T2/T3 三红；M12 chooseTrainee 放行 promotion ⇒ 恰 TC-P8 红（M2/M3/M6/M10/M11 由数值/存在性断言直锁）。测试计划 `docs/test-plans/v6.64.4-promotion-demotion.md`（TC-M/R/D/P/T/C 六组）。判级 **minor**（新增两条端点 + 注册校验规则收紧；零迁移、零契约破坏）。
 
-**上线后生产回读要点**：管理端运营时刻表出现「上调/下放」行（默认随窗全窗）；S9 存量 9 例（一线队 6 人 trainee 合同、训练营 3 人 formal 合同）窗内用按钮自愈、S10 注册提交硬拦；当窗如有在途上调，关窗批 summary 的 `promotionForceSettled` 计数可见。**版本串说明**：package.json 版本由 v6.64.5 会话 bump 到 6.64.5 并已以此上线（Version 29581a52），本版沿用 6.64.5 串上线（CHANGELOG 各版按语义号记账）。
+**上线后待观察**：S9 存量 9 例（一线队 6 人 trainee 合同、训练营 3 人 formal 合同）待窗内用按钮自愈、S10 注册提交硬拦；闸位 11-04 20:00（北京）开启后若当窗有在途上调，关窗批 summary 的 `promotionForceSettled` 计数可见。**版本串说明**：package.json 版本由 v6.64.5 会话 bump 到 6.64.5 并已以此上线（Version 29581a52），本版沿用 6.64.5 串上线（CHANGELOG 各版按语义号记账）。
 
 ## v6.64.3 · 激活竞价截止后训练营合同同样进 24h 匹配窗 + 出价死线跳过出价当日（2026-10-31）
 
