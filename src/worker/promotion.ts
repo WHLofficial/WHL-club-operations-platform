@@ -103,6 +103,16 @@ export async function demotePlayer(env: Env, clubId: number, actor: number, play
     .bind(playerId, win.season, win.windowSeq)
     .first<{ id: number }>();
   if (matchedThisWindow) throw new HttpError(409, '本窗刚经匹配留队的球员不能下放，下窗再操作');
+  // 同窗同员二次下放拦在入口：名额载体行的幂等键 `demote:{pid}:{窗}` 是 UNIQUE——被再上调回
+  // 一线队的球员当窗再下放会撞键打成 500，这里给可读 409（次窗键换段自然放行）。
+  const demotedThisWindow = await db
+    .prepare(
+      `SELECT id FROM transfers WHERE player_id = ? AND type = 'demote' AND status = 'completed'
+         AND season = ? AND window_seq = ? LIMIT 1`,
+    )
+    .bind(playerId, win.season, win.windowSeq)
+    .first<{ id: number }>();
+  if (demotedThisWindow) throw new HttpError(409, '他本窗已经下放过一次（含被再上调回的情形），下窗再操作');
   // 名额（4.3.4(3)：每窗 2 名，含已被再上调走的——名额按事件计不退）
   const used = await db
     .prepare(

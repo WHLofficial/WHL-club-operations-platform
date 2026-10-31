@@ -226,6 +226,22 @@ describe('下放（正式合同 → 训练营条款，v6.64.4）', () => {
     expect(((await noWindow.json()) as { code?: string }).code).toBe('no_window');
   });
 
+  it('TC-D7 下放→上调回→再下放：同窗二次下放给可读 409（不撞幂等键 UNIQUE 打 500）', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    fx.env.rng = () => 0.7;
+    expect((await demote(fx, 2)).status).toBe(201);
+    // 上调回一线队（工资谈成）
+    const opened = await promote(fx, 2, 10);
+    const { sessionId, expectedWage } = (await opened.json()) as { sessionId: number; expectedWage: number };
+    expect((await send(fx.env, 'POST', `/api/negotiations/${sessionId}/offer`, { wage: expectedWage }, 'tok-coach')).status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 2')).toMatchObject({ status: 'normal' });
+    // 再下放：入口可读 409（守卫顺序在练满/可成长检查之后、名额检查之前均可达）
+    const again = await demote(fx, 2);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toContain('已经下放过一次');
+  });
+
   it('闸位收口：transfer_promotion 行到点止 → 409 op_closed（窗口仍开但时段已过）', async () => {
     const fx = freshPromotionEnv();
     seedPromotionWorld(fx);
