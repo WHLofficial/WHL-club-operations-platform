@@ -109,6 +109,26 @@
 
 **测试计划**：`docs/test-plans/v6.64.5-bid-deadline-same-day.md`。**生产迁移现状：已到 `0087`**。
 
+## v6.64.4 · 上调/下放机制：名单段 × 合同类型双向挂钩（2026-10-31）
+
+**状态**：**已开发，待 owner 下令上线**（2026-10-31）——本地 8 个提交待 push（push 即触发 CF Workers Builds 自动部署；与 v6.64.5 的上线路径无关，v6.64.5 已从 origin/main 单枚先行）。**生产迁移现状：已到 `0087`**（本版零迁移、零生产写）。批次二，承接 v6.64.3 的设计（grilling 四轮收口，定案见记忆计划 `plan-v6.64.4-promotion-demotion.md` 与 `plan-v6.64.1-…md` §八）。
+
+**缘起**：owner 裁决「正式合同进训练营视为下放，自动转为训练营合同 5m/0.75m；训练营合同进一线队视为上调，要新谈正式合同」——注册名单与合同类型双向挂钩，配套解约冻结、自助取消、练满自动上调。
+
+**交付**（8 个提交，重整后哈希）：
+- `8ef41db` **fix(transfers)**：match 成约补 contract_type 翻 formal + players trainee→normal——v6.64.3 让训练营合同也能被匹配留队，但 match 分支只改数值不翻类型（「匹配之后为正式合同」的收口）。
+- `e64d6d9` **feat(ops)**：`transfer_promotion` 闸位（第 12 键；零迁移方案 = `loadOpsRows` 对缺种子行键按 meta 默认锚**合成内存行**（随窗全窗），`saveOpsRow` 改 upsert 首存物化）+ 注册双向校验：`checkSquad` 加 `trainee_contract` / `first_team_contract` 两规则（SquadPlayer 加 contractType，registration/DeskTab/管理端 compliance 三处构造同源）；存量 9 例不回填、窗内按钮自愈、注册提交硬拦。
+- `a8ef3c4` **feat(transfers)** 下放：`POST /api/transfers/demote`——合同即时转训练营条款（RC=5 / 0.75m / `source='demote'`、保护期清空、**效力保留**）、球员回训练营态；落 `transfers type='demote'` 履历行兼作**名额载体**（4.3.4(3) 每窗 2 名，首个实现消费者）。守卫：练满/非成长对称拦截（与 `trainee_growth` 同口径）、本窗匹配留队不可下放（次窗恢复）、在途单据/谈判一票否决、保护期**可**下放。批内顺序按 offers.ts 先例（履约 INSERT 与审计挂 pre-state 守卫在前）。
+- `c5c3171` **feat(transfers)** 上调：`POST /api/transfers/promotion`——`type='promotion'` 单（from=to=本队、无转会费无审核）直开签约谈判（F 定死进 `FIXED_FEE_TYPES`，开会快照 E）；**F ≤ 15 免费、超出 (F−15)×0.3 销毁**（提交预检、成约 `promotion_fee` 流水并落 extra_fee）；成约合同翻 formal（保护期按新签重锚、效力保留、free_rc_change_used 刷新）。**练满自动上调**：`applyLevelUp` 达成 ca≥pa 自动建单——闸开直接开会、闸关落 `pending_review` 预约，`runSettleTick` 新步 `openReservedPromotions` 兜底开会（顺带治建单/开会两批间崩溃孤儿）。**锁定**：谈判期间他队激活/自家解约/二次上调一票否决。**窗关强约**：closeWindow 对 promotion 会话**无条件**按 E 成约（不挡关窗、不占 `window_force_settle` 口径）、预约单不进待审计数；到期引擎加 promotion 适配器；静默作废/提醒排除 promotion（终局 = 成约/谈崩/自取消/强约）。`chooseTrainee` 拒收 promotion。
+- `b8286e3` **feat(transfers)** 解约冻结 + 自助取消：解约提交即按算定金额冻结（`fund_holds ref_type='termination'`，余额守卫含预期收入额度；冻结失败并发输掉 ⇒ 补偿取消刚建单据不留裸单，续约回滚挪到冻结成功后）；审核按冻结额收不重算（hold→settled）、驳回解冻；`POST /api/transfers/cancel`——续约/解约/上调预约一键取消（单据 cancelled、审核任务收口、解冻、审计 actor=本人、已作废续约不复活），上调 signing 走 voidSigningCore 对称收口（可重申）。
+- `0391a0a` **feat(web)** UI：SideOps 正式合同一线队加「下放」（双击确认）；训练营分支从只读说明扩成可操作（上调 F 输入 + 附加费实时预览 + 解约）；两队通用「在途单据」列表（新端点 `GET /api/club/players/:id/requests`）一键取消；解约文案改「提交即冻结」；ref.ts 标签加 demote/promotion；static-lock 测试补 transfer_promotion 面。
+- `d3a25df` **fix(notify)**：上调三模板（promotion_opened/reserved/forced）登记 NOTIFY_META（双向相等测试拦住漏登记）；routes.test 注册用例改按双向校验新语义。
+- （文档枚随本节提交。）
+
+**验收（实测）**：typecheck 三份全清；vitest **178 文件 / 2,887 例**全绿（v6.64.2 基线 177/2,860，净 +1 文件 / +27 例，主要在新建 `tests/promotion.test.ts` 20 例 + window-machine/expiry-ops/ops-schedule/squad-rules/routes 增补）；`npm run build` 通过。**变异验证六处全命中无空转**：M1 match 去 contract_type 写入 ⇒ TC-M1 红；M4 下放守卫削 pa−ca ⇒ 恰 TC-D3 红；M5 匹配当窗例外删除 ⇒ 恰 TC-D4 红；M7 关窗强约查询落空 ⇒ 恰窗机用例红；M8 解约冻结禁用 ⇒ 恰 TC-T1/T2/T3 三红；M12 chooseTrainee 放行 promotion ⇒ 恰 TC-P8 红（M2/M3/M6/M10/M11 由数值/存在性断言直锁）。测试计划 `docs/test-plans/v6.64.4-promotion-demotion.md`（TC-M/R/D/P/T/C 六组）。判级 **minor**（新增两条端点 + 注册校验规则收紧；零迁移、零契约破坏）。
+
+**上线后生产回读要点**：管理端运营时刻表出现「上调/下放」行（默认随窗全窗）；S9 存量 9 例（一线队 6 人 trainee 合同、训练营 3 人 formal 合同）窗内用按钮自愈、S10 注册提交硬拦；当窗如有在途上调，关窗批 summary 的 `promotionForceSettled` 计数可见。**版本串说明**：package.json 版本由 v6.64.5 会话 bump 到 6.64.5 并已以此上线（Version 29581a52），本版沿用 6.64.5 串上线（CHANGELOG 各版按语义号记账）。
+
 ## v6.64.3 · 激活竞价截止后训练营合同同样进 24h 匹配窗 + 出价死线跳过出价当日（2026-10-31）
 
 **状态**：**已开发，待 owner 下令上线**（2026-10-31，今晚 20:55 前须 push——21:00 生产首次挂牌结算依赖本版）——本地提交后待 push（push 即触发 CF Workers Builds 自动部署，并随行 v6.64.2 两枚未推送提交）。**生产迁移现状：已到 `0087`**（本版零迁移、零生产写）。
