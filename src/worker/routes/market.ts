@@ -488,7 +488,17 @@ app.get('/market/transfer-board', async (c) => {
              FROM player_promotions WHERE ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
            ) WHERE rn = 1
          ) pm ON pm.player_id = p.id
-         WHERE p.transfer_listed = 1 AND p.club_id IS NOT NULL
+         WHERE p.transfer_listed = 1
+           AND p.club_id IS NOT NULL
+           -- v6.64.2：以下四种状态自动下架——挂牌中（已在转会区，另有要价与截止，不重复展示）、
+           -- 退役（不可交易）、训练营（固定条款，卖出走激活，不走报价）、非卖品（一切报价自动拒）
+           AND p.status NOT IN ('listed', 'retired', 'trainee')
+           AND p.not_for_sale = 0
+           -- 已经有人买定在走流程（等审核 / 签约谈判）时不再招报价
+           AND NOT EXISTS (
+             SELECT 1 FROM transfers t
+             WHERE t.player_id = p.id AND t.status IN ('pending_review', 'signing')
+           )
          ORDER BY CASE WHEN pm.tier IN (1, 2) THEN pm.tier ELSE 0 END DESC,
                   p.transfer_listed_at IS NULL, p.transfer_listed_at DESC, p.id DESC
          LIMIT ?`,

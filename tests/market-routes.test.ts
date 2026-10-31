@@ -507,6 +507,11 @@ describe('审核队列与过户单点（§6.4-2）', () => {
     const fx = freshEnv();
     const mf = await seedMarket(fx);
     await listPlayer(mf, 10, 15);
+    // v6.64.2：这名球员同时挂着旧东家的广告板设置（名单 / 标价 / 最低报价 / 名单戳），换队后必须一起清
+    fx.sqlite.exec(
+      `UPDATE players SET transfer_listed = 1, list_price = 30, min_offer_price = 28, offer_auto = 1,
+         transfer_listed_at = '2026-09-01T00:00:00.000Z' WHERE id = 10`,
+    );
     await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
     await ageListingForDeadline(fx);
 
@@ -566,6 +571,27 @@ describe('审核队列与过户单点（§6.4-2）', () => {
     expect(sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 10')).toMatchObject({
       club_id: mf.bidderClub,
       status: 'normal',
+    });
+    // v6.64.2：换队后旧东家的报价设置全部清空（否则广告板会把旧标价挂到新东家名下）
+    expect(
+      sqlGet<{
+        transfer_listed: number;
+        list_price: number | null;
+        min_offer_price: number | null;
+        offer_auto: number;
+        not_for_sale: number;
+        transfer_listed_at: string | null;
+      }>(
+        fx.sqlite,
+        'SELECT transfer_listed, list_price, min_offer_price, offer_auto, not_for_sale, transfer_listed_at FROM players WHERE id = 10',
+      ),
+    ).toMatchObject({
+      transfer_listed: 0,
+      list_price: null,
+      min_offer_price: null,
+      offer_auto: 0,
+      not_for_sale: 0,
+      transfer_listed_at: null,
     });
     expect(
       sqlGet<{ wage: number; release_fee: number; source: string; contract_type: string; signed_at: string | null }>(

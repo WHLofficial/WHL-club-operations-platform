@@ -150,6 +150,28 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
     expect(out.players.every((p) => p.clubName !== null)).toBe(true);
   });
 
+  it('自动下架的四种状态（v6.64.2）：挂牌中 / 退役 / 训练营 / 非卖品，以及有人买定在走流程', async () => {
+    const fx = freshEnv();
+    seedBoard(fx);
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, fc_id, transfer_listed, list_price, not_for_sale, transfer_listed_at) VALUES
+        (10, 'uid10', '挂牌中', 1, 'ST', 25, 80, 80, 'listed', 21, 1, 50, 0, '2026-03-01T00:00:00.000Z'),
+        (11, 'uid11', '已退役', 1, 'ST', 38, 70, 70, 'retired', 22, 1, 50, 0, '2026-03-02T00:00:00.000Z'),
+        (12, 'uid12', '训练营', 1, 'ST', 18, 55, 75, 'trainee', 23, 1, 50, 0, '2026-03-03T00:00:00.000Z'),
+        (13, 'uid13', '非卖品', 1, 'ST', 26, 82, 82, 'normal', 24, 1, 50, 1, '2026-03-04T00:00:00.000Z'),
+        (14, 'uid14', '在途单据', 1, 'ST', 27, 83, 83, 'normal', 25, 1, 50, 0, '2026-03-05T00:00:00.000Z'),
+        (15, 'uid15', '正常在板', 1, 'ST', 28, 84, 84, 'normal', 26, 1, 50, 0, '2026-03-06T00:00:00.000Z');
+      INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, created_at)
+        VALUES (900, 'transfer', 14, 1, 2, 30, 'pending_review', 4, 1, '2026-03-05T00:00:00.000Z');
+    `);
+    freezeNow();
+    const out = await board(fx);
+    const ids = out.players.map((p) => p.id);
+    expect(ids).toContain(15);
+    for (const hidden of [10, 11, 12, 13, 14]) expect(ids).not.toContain(hidden);
+    expect(out.total).toBe(8); // 原名单 7 人 + 15
+  });
+
   it('排序：付费档按着重度 → 挂出时间 → id；普通档按时间桶轮换（锁死时钟取字面量）', async () => {
     const fx = freshEnv();
     seedBoard(fx);

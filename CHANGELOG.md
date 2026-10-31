@@ -11,10 +11,12 @@
 - `/market/board` 白屏。生产 player 90（Iñigo Martínez）在 10-31 04:54Z 被解约（`transfers id=36`，`from_club_id=33`）后成了自由身，但**旧东家的挂牌标记没清**——`players.transfer_listed` 仍是 1 ⇒ 广告板按 `transfer_listed = 1` 把他捞出来，行的 `clubName` 是 null ⇒ `TeamLogo` 的 `colorOf()` 对 null 做 `for..of` 抛 `TypeError: t is not iterable`，React 无错误边界整棵树卸载，整页白得只剩底色。三处一起修：`TeamLogo` 的 `name` 改可空并按空队名兜底（`—`）、广告板副标题 `clubName ?? '—'`、`TransferBoardRow` 类型照真实载荷改成 `clubId: number | null` / `clubName: string | null`（旧类型写死 `string`，让 null 骗过了 typecheck）。
 - `GET /api/market/transfer-board` 名单口径加 `AND p.club_id IS NOT NULL`：名单语义是「各队挂出的转会名单」，没有东家的人在板上既没有卖家可报价、卡面也没有球队，属于过期的挂牌标记。
 - 解约完成时一并清挂牌设置（`transfer_listed = 0`、`list_price` / `min_offer_price` / `transfer_listed_at` 置 NULL、`offer_auto` / `not_for_sale` 归 0），从源头断掉「离队后仍带着旧东家的名单与标价」这类脏数据；下家接手后也不会继承别人的挂牌价。
+- 广告板补齐「自动下架」口径（`GET /api/market/transfer-board` 的 WHERE 一次收口）：**已在转会区挂牌中**（`status = 'listed'`，任何阶段——listed / bidding / matched_pending，此时转会区另有要价与截止，不重复展示、也不该出现两套价格）、**已退役**（不可交易）、**训练营合同**（固定条款，卖出走激活不走报价）、**非卖品**（`not_for_sale = 1`，一切报价自动拒，摆出来只会招来必被拒的报价）、**已有买定在走流程**（存在 `pending_review` / `signing` 的 transfers，等审核或签约谈判中）一律不出现在板上；`total` 同步。
+- 球员换队成约时清掉旧东家的报价设置（同一个 `UPDATE players` 里连同 `club_id` 一起改），避免离队后旧标价跟着球员挂到新东家名下。
 
 **根因链**：解约不清挂牌 → 广告板捞到无东家行 → 队名为 null → TeamLogo 抛错 → 无错误边界整页白屏。修复不会让历史脏数据回魂：SQL 已挡在板外，前端也做了 null 兜底（KV 里 1h 的旧缓存带着 null 行也不会再白屏）。
 
-**验收**：typecheck 三份全清；vitest **177 文件 / 2,859 例**全绿（v6.64.1 基线 177/2,856，+3 例）；`npm run build` 通过。测试计划 `docs/test-plans/v6.64.2-board-clubless.md`。判级 **patch**（零迁移、零新端点；公开端点名单口径收紧一行）。
+**验收**：typecheck 三份全清；vitest **177 文件 / 2,860 例**全绿（v6.64.1 基线 177/2,856，+4 例）；`npm run build` 通过。测试计划 `docs/test-plans/v6.64.2-board-clubless.md`。判级 **patch**（零迁移、零新端点；公开端点名单口径收紧一行）。
 
 ## [v6.64.1] · 签约谈判在途的球员不能再被海捞（2026-10-31）
 

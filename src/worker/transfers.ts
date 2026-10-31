@@ -344,10 +344,15 @@ export async function completeTransfer(
     // 球员归属变更（普通/激活/拍卖/海捞）；本队留人不动 players。
     // 号码随归属清空（v4.0.0）：球衣号是俱乐部的东西，换队后新东家重新定号，
     // 留着旧号会让「同队不重复」在两个队之间打架、也会把旧号带进新队的阵容表。
+    // v6.64.2：旧东家的报价设置（转会名单 / 标价 / 最低报价 / 名单戳）一并清掉——换队后这些
+    // 都属于上一家俱乐部，留着会让广告板把旧标价挂到新东家名下。
     statements.push(
       db
         .prepare(
-          `UPDATE players SET club_id = ?, status = ?, number = NULL, updated_at = ${nowSql()}
+          `UPDATE players SET club_id = ?, status = ?, number = NULL,
+             transfer_listed = 0, list_price = NULL, min_offer_price = NULL, offer_auto = 0,
+             not_for_sale = 0, transfer_listed_at = NULL,
+             updated_at = ${nowSql()}
            WHERE id = ? AND (club_id IS ? OR club_id = ?)`,
         )
         .bind(transfer.to_club_id, playerStatus, transfer.player_id, moveFromClubId, moveFromClubId),
