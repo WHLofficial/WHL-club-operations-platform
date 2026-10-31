@@ -311,6 +311,43 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect(transfer).toMatchObject({ type: 'activation', status: 'pending_review', fee: 6, to_club_id: fx.rivalClub });
   });
 
+  it('训练营合同被匹配留队：成约即转正式合同、球员回一线队（TC-M1，v6.64.4 收口）', async () => {
+    const fx = await seedTrainee(freshEnv());
+    fx.env.rng = () => 0.7;
+    const { body } = await activateTrainee(fx);
+    const listingId = body.listingId!;
+    // 激活方落首价 + 他队抬价 → 竞价截止 → 24h 匹配等待（v6.64.3 起训练营同样进匹配窗）
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach3', fx.env)).status).toBe(201);
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    resetSettleCoalesce();
+    await get('/api/market/listings', undefined, fx.env);
+
+    // 被激活方匹配留队：新 RC 25 > 竞价最高 6，差额 20（25−5）审核时销毁
+    const match = await post('/api/transfers/match', { listingId, newReleaseFee: 25 }, 'tok-coach', fx.env);
+    expect(match.status).toBe(201);
+
+    const taskId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE type = 'transfer_confirm' AND status = 'open'")?.id;
+    const approve = await post(`/api/admin/reviews/${taskId!}/approve`, {}, 'tok-admin', fx.env);
+    expect(approve.status).toBe(200);
+
+    const session = sqlGet<{ id: number; release_fee: number | null; expected_wage: number | null }>(
+      fx.sqlite,
+      'SELECT id, release_fee, expected_wage FROM negotiation_sessions ORDER BY id DESC LIMIT 1',
+    );
+    expect(session?.release_fee).toBe(25);
+    expect((await post(`/api/negotiations/${session!.id}/offer`, { wage: session?.expected_wage }, 'tok-coach', fx.env)).status).toBe(200);
+
+    // 成约：合同翻 formal（RC=25、来源 negotiation），球员回一线队、效力留在本队
+    const contract = sqlGet<{ contract_type: string; release_fee: number; wage: number; source: string; club_id: number }>(
+      fx.sqlite,
+      'SELECT contract_type, release_fee, wage, source, club_id FROM contracts WHERE player_id = 20 AND is_active = 1',
+    );
+    expect(contract).toMatchObject({ contract_type: 'formal', release_fee: 25, source: 'negotiation', club_id: fx.ownerClub });
+    const player = sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 20');
+    expect(player).toEqual({ club_id: fx.ownerClub, status: 'normal' });
+  });
+
   it('首价窗过线：冻结触发器兜并发 ABORT、出价 409；窗内没落价的激活被作废（TC-A06）', async () => {
     const fx = await seedTrainee(freshEnv());
     const { body } = await activateTrainee(fx);

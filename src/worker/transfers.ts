@@ -477,13 +477,28 @@ export async function completeTransfer(
   } else if (dealTerms && amendment) {
     // 匹配（match）：不在 §5.7 的枚举内（闹涨薪接受 / 普通续约改 RC），沿用既有即时落库——
     // 只改 RC/工资/成约方式，保护期到当下收口（4.4.6「保护期直接结束」），效力基数 service_ticks 不动。
+    // v6.64.4：合同类型跟条款走、球员状态随类型翻——v6.64.3 起训练营合同也能被匹配留队
+    //（「匹配之后为正式合同」），原实现只改数值不翻类型，成约后仍是 trainee 类型/trainee 态。
     statements.push(
       db
         .prepare(
-          `UPDATE contracts SET wage = ?, release_fee = ?, source = ?, protection_ticks = ?
+          `UPDATE contracts SET wage = ?, release_fee = ?, source = ?, protection_ticks = ?, contract_type = ?
            WHERE player_id = ? AND is_active = 1 AND club_id = ?`,
         )
-        .bind(dealTerms.wage, dealTerms.releaseFee, dealTerms.source, baseTicks, transfer.player_id, transfer.to_club_id),
+        .bind(
+          dealTerms.wage,
+          dealTerms.releaseFee,
+          dealTerms.source,
+          baseTicks,
+          dealTerms.contractType,
+          transfer.player_id,
+          transfer.to_club_id,
+        ),
+    );
+    statements.push(
+      db
+        .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'trainee'`)
+        .bind(transfer.player_id),
     );
   } else if (pureReturn && returnCtx !== null) {
     // A 分支（本窗已闹过涨薪）：跳过签约谈判、纯回归——工资 / RC / 合同类型按合同行**现值**带回
