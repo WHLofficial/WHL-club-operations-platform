@@ -4,7 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.64.0] · 被激活挂牌的在途收入纳入预期收入（2026-10-31）
+
+**已上线（2026-10-31）**：迁移 `0087` 于 push 前 apply 生产（重放三资金触发器，零数据写入），push `d5f9224..8b189cc` 触发 CF Workers Builds 自动部署，生效 Version `a102024c-b5db-4f7f-a979-db708bed2268` @2026-10-31T06:25:08Z（同批带上 v6.63.3 两枚）。上线探针：health 200、线上资产 `index-Jec9N4rn.js` 与本地 6.64.0 重构建 sha256 逐字节一致、版本串 `6.64.0`、`/api/club/balance` 匿名 401。判级 minor（资金闸口径变更 + 展示字段新增，契约向后兼容）。测试计划 `docs/test-plans/v6.64.0-activation-income.md`。
+
+**Changed**
+
+- 预期收入额度加**源③**：被激活挂牌（`type='activation'` 且 `activated_by IS NOT NULL`、仍在 listed/bidding）的在途收入计入——毛额 = MAX(最高 active 出价, 激活价 ask_price)，激活价保底（激活方已提交申请、作废即收缩）；税沿用分段累进与过户实算同源；`matched_pending` 起由 transfers 源②接管不重复计。出价/报价/海捞的可用资金判定随之变宽（迁移 `0087` 重放三个资金触发器，同源新公式）。
+- `GET /api/club/balance` 新增 `activationIncome`（被激活挂牌在途税后净额，未乘 k）与 `activationCredit`（×k 后与 creditLine 同层）；财政页余额卡「（含预期收入 Y m · 其中被激活挂牌 Z m）」，Z>0 才显示，title 注明口径。
+
+**Fixed**
+
+- 修正 v6.57.0 的错误注释「激活是签入方掏钱不产生卖方收入」——激活挂牌的卖家（球员现属队）一直由 transfers 源②计收入；首版源③还抓掉 SQLite 两参 `MAX(NULL, ask)` 传播 NULL 的真缺陷（出价缺失时整行被静默跳过，`COALESCE(出价, 0)` 修掉）。
+
+**验收**：typecheck 三份全清；vitest **177 文件 / 2,854 例**全绿（v6.63.3 基线 177/2,851）；e2e 29/29；变异三靶恰红（删源③ / 去 COALESCE / matched_pending 不退场）；code-review 🟡×1 已修（TC-M02 幂等重放用例补上）。
+
 ## [v6.63.3] · 旁路操作费用预览：解约 / 海捞确认前看得见要花多少（2026-10-31）
+
+**已上线（2026-10-31）**：随 v6.64.0 同批 push（Version `a102024c`，见上条）。
 
 **Fixed**
 

@@ -75,6 +75,8 @@
 
 **本版本 v6.63.0**（徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制；含迁移 `0086`）——**已上线（2026-10-31）**：迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`；只读核验：`d1_migrations` 末条 0086、247 发放银 24 已删保金台账 7/2、557 零数据变更且 FC 槽原貌保留台账 3/2、`idx_players_sort_ps` 消失、config 两键清零、**全表台账与迁移同源表达式对账 silver_drift=0 / gold_drift=0（18,301 行）**）；随后 push `56d00fd..f412485`（7 个提交）触发 CF Workers Builds 两轮自动部署——`f24537fa`（04:09:15Z，功能代码）→ **`310624e6`（04:10:31Z，生效 100%）**。发布轮插曲两枚：评审轮端到端用例超出 `ListBody17` 类型声明（发布复验 typecheck 抓出，`1f252a5` 补字段）；收口时 package.json 漏 bump（首轮部署版本串仍 6.62.0），随 `f412485` 订正重部署。上线探针：`/api/health` 200、线上首页资产 `index-d2h1BMYI.js` 与本地 6.63.0 构建逐字同名、线上版本串 `6.63.0`；`?ps=1` 不含 557（FC 银 1 被发放金 1 派生抑制）、`?ps=101` 命中 557、`?ps=124` 命中 247（发放金以基础 ID 筛中）；列表响应带 `playstyles` 合并清单（`source` 字段在场）、557 详情 `playstyles` = FC 银 16/41/32 + 发放金 101/131（被抑制银 1/31 消失）、`badges 3/2`；`sort=ps` 与 `sort=badges` 均 200。发布前复验 vitest **175 文件 / 2837 例**全绿（较收口 2836 多 1 例为工作区另一会话在途 oidc 用例）。判级 minor（口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。typecheck 三份全清、e2e **29/29**、变异验证 4 靶全命中、code-review 🔴×1 已修。**生产迁移现状：已到 `0086`**。细节见下文 v6.63.0 节。
 
+**本版本 v6.64.0**（被激活挂牌的在途收入纳入预期收入 + 财政页单列数额；含迁移 `0087`）——**已上线（2026-10-31）**：grilling Q1-Q4 裁决定案（激活价保底计入 / 连资金闸一起变宽 / 统一乘 k / 财政页 Z 与 Y 同口径 ×k 后真部分和）。迁移 `0087` 于 push 前 apply 生产（重放三资金触发器，零数据写入，`Executed 7 commands in 2.20ms`；只读核验 `d1_migrations` 末条 0087、三触发器 SQL 均含源③ `activated_by IS NOT NULL` 语句）；push `d5f9224..8b189cc`（7 提交 = 另一会话 v6.63.3 两枚 + 本版本五枚）触发 CF Workers Builds 自动部署，生产 Version **`a102024c-b5db-4f7f-a979-db708bed2268`** @2026-10-31T06:25:08Z（100%）。上线回读：`/api/health` 200、线上首页资产 `index-Jec9N4rn.js`（717.91 kB / gzip 226.77 kB，sha256 `013b9c6a…`）与本地 6.64.0 重构建逐字节一致、线上版本串 `6.64.0`、`/api/club/balance` 匿名 401（教练门控 + 挂载生效）。发布前复验 vitest **177 文件 / 2,854 例**全绿。实施要点：源③毛额 = MAX(最高 active 出价, 激活价)——实施中抓掉 SQLite 两参 `MAX(NULL, ask)` 传播 NULL 的真缺陷（出价缺失时源③整行被静默跳过，COALESCE 0 修掉）；`balanceSnapshot` 改 CTE 物化明细一次（`pickedRowsSql` 裸子查询共用，文本锁证明触发器内嵌文本逐字不变）；`activationIncome`（未乘 k）+ `activationCredit`（×k）两字段同源派生。typecheck 三份全清、e2e **29/29**、变异三靶恰红（删源③ 4 红 / 去 COALESCE 4 红 / matched_pending 不退场 2 红）、code-review 🟡×1 已修（TC-M02 幂等重放用例）。判级 minor（资金闸口径变更 + 新增展示字段；`/api/club/balance` 契约向后兼容——新字段可选）。**生产迁移现状：已到 `0087`**。细节见下文 v6.64.0 节。
+
 **上一版本 v6.14.0**（C3 招商轮：品牌报价制 + 主动签约退役；含迁移 `0055`/`0056`）——**已上线**（2026-09-29 发布，用户下令「发布」）：本地 7 枚提交 `ec3fa98..8cf8f12` 已 push（`07f050c..8cf8f12`，v6.14.0 六枚 + docs 收口枚随行）；迁移 `0055`/`0056` 于 push 前 apply 生产（`Executed 2 commands in 0.70ms`，只读核验两表 + 3 条 offer 索引含两个部分唯一 + `brand_visit` 种子 + `claim_token` 列在场，`d1_migrations` 56 条），CF Workers Builds 自动部署生产 Version **`df0640af-60c2-43c1-a5ba-c25b38a57e02`**（2026-09-29T10:09:11Z，Source `Unknown (deployment)`）。上线回读：`/api/health` / `/api/players?limit=1` / `/api/clubs` / `/api/squads` / `/api/market/listings` 全 200；匿名探针 `/api/admin/brands/market-round` / `/api/club/naming/quote` / `POST /api/club/naming/offers/1/accept` 均 401（挂载且守卫生效）；旧 `POST /api/club/naming/sign` 404（已下线）；线上入口资产 `index-BbEaJ6rg.js`（611.86 kB / gzip 193.68 kB，sha256 `630cd160…`）与本地构建逐字节一致、线上 JS 版本串 `6.14.0`。**生产迁移现状：已到 `0056`**。typecheck 三份全清、vitest **60 文件 / 1062 例**全绿（v6.13.0 基线 59/990，净 +1 文件 / +72 例 = 新建 `tests/market-rounds.test.ts`）、e2e **11/11**、变异验证 17 处 + 评审修复后 2 处全命中、code-review-skill 评审 P0 1 / P1 3 / P2 4 / P3 6（除登记不改外全修）。判级 minor（新增用户可见能力；`POST /club/naming/sign` 退役为同仓 web 客户端同批替换、无跨仓消费）。细节见下文 v6.14.0 节。
 
 **上一版本 v6.13.0**（C2 冠名深度：档位性格 + 情绪演化 + 品牌主动解约 + 联赛冠军加成；含迁移 `0054`）——**已上线**（2026-09-28 发布批次）：迁移 `0054` 已于 push 前 apply 到生产（`Executed 5 commands in 3.56ms`，只读核验 `brand_pool` 3 头部 / 2 新兴 / 2 口碑、`d1_migrations` 末条 `0054_brand_tiers.sql`），随后 push `77f6eea..07f050c`（14 个提交）触发 CF Workers Builds 自动部署，生产 Version **`1e3cc95a-7f43-41ee-8fd4-93fe69169774`**（2026-09-28T15:50:43Z，Source `Unknown (deployment)`）。上线回读：`/api/health` / `/api/clubs` / `/api/players?limit=1` / `/api/squads` / `/api/market/listings` 全 200；`/api/cron/players-count` 403（CRON_KEY fail-closed 符合预期）；匿名探针 `/api/admin/brands` / `/api/club/naming/quote` / `/api/club/events` / `POST /api/admin/seasons/1/settle-season` 均 401（挂载且守卫生效）；线上入口资产 `index-nK5xirMD.js` + `index-BY0ef8kg.css` 与本地 6.13.0 重构建产物 sha256 逐字节一致（线上 JS 版本串 `6.13.0`）。**生产迁移现状：已到 `0054`**。测试计划首次按 qa-test-planner 约定设计（`docs/test-plans/v6.13.0-c2.md`）。插件只当参照系、可玩性偏离留痕（Q5 裁决），细节见下文 v6.13.0 节。
@@ -83,9 +85,26 @@
 
 ---
 
+## v6.64.0 · 被激活挂牌的在途收入纳入预期收入 + 财政页单列数额（2026-10-31）
+
+**状态**：**已上线（2026-10-31）**——迁移 `0087` 于 push 前 apply 生产（重放三资金触发器，零数据写入秒级，核验见顶部摘要段）；push `d5f9224..8b189cc` → CF Workers Builds 自动部署，生效 Version **`a102024c-b5db-4f7f-a979-db708bed2268`** @2026-10-31T06:25:08Z；上线回读全过（health 200 / 资产 sha256 `013b9c6a…` 与本地 6.64.0 重构建逐字节一致 / 版本串 6.64.0 / `/api/club/balance` 匿名 401）。**生产迁移现状：已到 `0087`**。同批上线的还有 v6.63.3（旁路操作费用预览，另一会话的两枚提交随行）。
+
+**缘起与 grilling 裁决**（2026-10-31，用户两轮措辞定形「被激活挂牌的税后收入也纳入预期收入，但要在财政页明确说明数额」，四题全按推荐）：v6.57.0 预期收入在 listings 侧用 `type NOT IN ('activation')` 把激活挂牌整体排除，被激活挂牌（激活动作 INSERT `type='activation'` 挂牌、5 分钟首价窗）从被激活到落价成 transfer 单之间的在途收入不计。裁决：**Q1** 无出价按激活费保底计入（激活方已提交申请、作废占一窗一次额度且激活前查过资金门槛；作废即收缩，负=欠款哲学兜底）；**Q2** 连资金闸一起变宽（避免财政页与出价校验口径分裂）；**Q3** 统一乘 k 无特例；**Q4** 财政页「其中被激活挂牌 Z m」与 Y 同口径（×k 后真部分和）。
+
+**交付**（5 提交 `46b5cc3` 后端 / `bc47db1` 前端 / `0240f24` 测试 / `762c949` bump / `8b189cc` 评审补强）：
+- `src/worker/ledger.ts`：`inflightIncomeSql` 加源③（`type='activation'` 且 `activated_by IS NOT NULL` 且 listed/bidding，毛额 = `MAX(COALESCE(最高 active 出价, 0), ask_price)`）；`BalanceSnapshot` 加 `activationIncome`（未乘 k）与 `activationCredit`（×k）；`balanceSnapshot` 改 CTE 物化（`pickedRowsSql` 裸子查询与 `pickedIncomeSql` 共用，拼接文本逐字不变）；`ExpectedIncomeItem` 加 `activation` 标记；删零引用 `expectedIncomeSql`；注释订正 v6.57.0 的错误说法（「激活不产生卖方收入」——源②一直计 activation 卖方收入）。
+- 迁移 `0087_activation_listing_income.sql`：重放 0081 三触发器（外壳与非资金闸逐字保留、公式段换新）；`tests/d1.ts` 追加。
+- `/api/club/balance`：未绑定 null 分支与正常分支带新字段；`web/src/lib/api.ts` `ClubBalance` 加可选字段（旧夹具零涟漪）；`Ledger.tsx` 余额卡「（含预期收入 Y m · 其中被激活挂牌 Z m）」Z>0 才显示 + title 口径说明。
+
+**实施真缺陷**：SQLite 两参 `MAX(NULL, ask)` 传播 NULL——首版源③在出价缺失时 gross 变 NULL、净 NULL 被聚合跳过，激活价保底完全失效（快照拆解用例与触发器行为用例同时红）。修法 `COALESCE(出价, 0)`；该坑本身成了变异靶 M-02。
+
+**验收（实测）**：typecheck 三份全清；vitest **177 文件 / 2,854 例**全绿（v6.63.3 基线 177/2,851，+3 例 = 源③行为锁 / 快照拆解 / 触发器同值锁 / TC-M02 幂等重放）；e2e **29/29**；变异三靶恰红（M-01 删源③ 4 红 / M-02 去 COALESCE 4 红 / M-03 matched_pending 不退场 2 红）；code-review-skill 🟡×1 已修（测试计划承诺的 TC-M02 未实现 → 补幂等重放用例）+ 三条留痕不修（活跃挂牌唯一索引 `idx_listings_active_player` 保证同球员普通/被激活挂牌不并存、「取毛额最高一份」不会错切部分和；`ask_price` 异常 NULL 走 fail 严格方向与 0081 AMOUNT 闸假定同口径；trainee 激活税基沿用「与过户实算同源」既有锁）。测试计划 `docs/test-plans/v6.64.0-activation-income.md`。判级 minor（资金闸口径变更 + 展示字段新增；契约向后兼容）。
+
+计划 `memory/plan-v6.64.0-activation-income.md`（含 grilling 四裁决原文）。
+
 ## v6.63.3 · 旁路操作费用预览：解约 / 海捞确认前看得见要花多少（2026-10-31）
 
-**状态**：本地已提交（`7db78c4` 代码 + docs 枚），**未 push 未部署**。
+**状态**：**已上线（2026-10-31）**——随 v6.64.0 同批 push（`7db78c4` 代码 + docs 枚随行，Version `a102024c` @06:25:08Z，见顶部 v6.64.0 摘要段）。
 
 **缘起**：owner 两条（2026-10-31）——「解约确认弹窗不显示解约费用」+「海捞看不见海捞费的问题也改了，类似」。探查结论：费用数字从来没上过屏——球员页解约面板（`SideOps` `panel === 'term'`）只有公式文案，客户端 v6.57.0 起就算好的 `termSpend` 只喂给了「动用预期收入」行；工作台「续约与解约」（`DeskTab` BypassSection）选中球员后完全没费用预览，金额只在提交成功 toast 里出现；海捞明标面板同病。数据两侧都齐（`contract.serviceSeasons` / `SquadPlayerRow.releaseFee` 均已下发），属纯渲染缺口。
 
