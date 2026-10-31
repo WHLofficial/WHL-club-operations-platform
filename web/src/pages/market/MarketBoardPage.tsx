@@ -2,7 +2,10 @@
 // v6.24.0：卡片换成 rail 骨架（左栏 CA/PA 大数字）+ 三态徽标 + 底部读秒倒计时，队名一律配 TeamLogo；
 // 详情、出价表单、被激活方匹配决定、出价历史全部搬进 MarketListingOverlay（桌面弹层 / ≤760 底部抽屉）。
 // 海捞在 /market/free，挂牌+出价+报价+谈判在 /market/desk（v6.23.0 合并），市场情报在 /market/intel。
+// v6.65.0：标题行加「↻ 刷新」热刷新按钮（板子 + 我的出价 + 教练态余额一次拉平，刷新中禁用 + 旧卡不闪空）
+// 和「更新于」时间；首载骨架卡替代一行等待文案。
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import type { MarketListing } from '../../lib/api.ts';
 import { TeamLogo } from '../../components/TeamLogo.tsx';
@@ -14,6 +17,9 @@ import { AdBoardTeaser } from './MarketAdBoardPage.tsx';
 import { MarketListingOverlay, listingBadge, pickDeadline } from './MarketListingOverlay.tsx';
 import { FILTER_LABEL, MarketNav, money, type ListingFilter } from './shared.tsx';
 
+// 首载骨架卡张数：与一屏常见卡数对齐即可，纯占位
+const SKEL_CARDS = [0, 1, 2, 3, 4, 5];
+
 export default function MarketBoardPage() {
   const [filter, setFilter] = useState<ListingFilter>('active');
   const [selected, setSelected] = useState<number | null>(null);
@@ -21,6 +27,16 @@ export default function MarketBoardPage() {
   const { refresh: refreshMine } = useMyBids(isCoach);
   const boardQuery = useBoard(filter);
   const invalidateMarket = useMarketInvalidation();
+  const qc = useQueryClient();
+
+  // 热刷新（v6.65.0）：服务端 listings 端点零缓存直读 D1，refetch 即真·最新（出价/新挂牌立刻可见）。
+  // 顺带拉平「我的出价」与教练态余额——竞逐出价时这三样是一起看的，分两次点反而要等两趟。
+  const refreshAll = () => {
+    void boardQuery.refetch();
+    refreshMine();
+    if (isCoach) void qc.invalidateQueries({ queryKey: ['club', 'balance'] });
+  };
+  const updatedAt = boardQuery.dataUpdatedAt ? new Date(boardQuery.dataUpdatedAt).toLocaleTimeString('zh-CN', { hour12: false }) : null;
 
   const board = boardQuery.data ?? null;
   const loadError = boardQuery.isError
@@ -59,7 +75,16 @@ export default function MarketBoardPage() {
       <AdBoardTeaser />
 
       <section className="card">
-        <h3>转会区</h3>
+        <div className="mkt-board-head">
+          <h3>转会区</h3>
+          <div className="mkt-board-tools">
+            {updatedAt && <span className="mkt-updated mono">更新于 {updatedAt}</span>}
+            {/* 热刷新（v6.65.0）：isFetching 含后台重取，禁用防连点；board 已 keepPreviousData，刷新期旧卡不闪空 */}
+            <button className="btn btn-ghost" type="button" disabled={boardQuery.isFetching} onClick={refreshAll}>
+              {boardQuery.isFetching ? '刷新中…' : '↻ 刷新'}
+            </button>
+          </div>
+        </div>
         <div className="seg" role="radiogroup" aria-label="按状态筛选挂牌">
           {(Object.keys(FILTER_LABEL) as ListingFilter[]).map((f) => (
             <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>
@@ -70,7 +95,23 @@ export default function MarketBoardPage() {
 
         {board === null ? (
           loadError ? null : (
-            <p className="muted">正在翻卡柜…</p>
+            <div className="mkt-grid" aria-hidden="true">
+              {SKEL_CARDS.map((i) => (
+                <div key={i} className="mkt-card mkt-skel">
+                  <div className="mkt-card-head">
+                    <span className="skel-bar" style={{ width: '45%' }} />
+                  </div>
+                  <span className="skel-bar" style={{ width: '30%' }} />
+                  <div className="mkt-card-mid">
+                    <span className="skel-bar" style={{ width: '20%' }} />
+                    <div className="mkt-rows">
+                      <span className="skel-bar" style={{ width: '70%' }} />
+                      <span className="skel-bar" style={{ width: '60%' }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )
         ) : board.listings.length === 0 ? (
           <div className="empty-state">

@@ -9527,3 +9527,46 @@ button.sqc-pos:hover {
   display: flex;
   gap: 8px;
 }
+
+/* ---- 转会区标题行工具与首载骨架卡（v6.65.0）----
+   标题行 flex：h3 左、热刷新按钮 + 更新时间右；≤760 收窄时换行不挤压。
+   骨架卡借用 mkt-card 外壳但禁掉交互，条块用统一脉冲动画。 */
+.mkt-board-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+.mkt-board-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mkt-updated {
+  font-size: 12px;
+  color: var(--muted);
+}
+.mkt-skel {
+  cursor: default;
+  pointer-events: none;
+}
+.skel-bar {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--border);
+  animation: mkt-skel-pulse 1.2s ease-in-out infinite;
+}
+.skel-bar + .skel-bar {
+  margin-top: 8px;
+}
+@keyframes mkt-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
