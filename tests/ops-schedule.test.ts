@@ -457,6 +457,7 @@ describe('v6.49.0 教练侧写入口静态锁', () => {
     ['web/src/pages/player/SideOps.tsx', "useOpsGate('transfer_listing')"],
     ['web/src/pages/player/SideOps.tsx', "useOpsGate('transfer_sea_open')"],
     ['web/src/pages/player/SideOps.tsx', "useOpsGate('transfer_offer')"],
+    ['web/src/pages/player/SideOps.tsx', "useOpsGate('transfer_promotion')"],
     ['web/src/components/MarketBidForm.tsx', "useOpsGate('transfer_listing')"],
     ['web/src/pages/market/MarketAdBoardPage.tsx', "useOpsGate('transfer_offer')"],
     ['web/src/pages/market/MarketActivationPage.tsx', "useOpsGate('transfer_activation')"],

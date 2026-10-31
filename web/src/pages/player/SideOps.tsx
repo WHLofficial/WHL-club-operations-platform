@@ -11,7 +11,8 @@
 // 报价设置是意图标记不锁窗，关窗时也能改。
 // v6.29.0：报价（POST /api/offers）移出窗门控——关窗期也能送报价/还价/同意，
 // 关窗期谈成先挂「意向单」（status=intent），开窗后由卖方确认才挂牌。
-// 训练营球员（contractType=trainee）：合同固定、只能被激活带走，不显示报价设置与挂牌/续约。
+// 训练营球员（contractType=trainee）：合同固定、可被激活带走（v6.64.4 起对方有 24h 匹配权）；
+// 本队可「上调」（谈正式合同回一线队）与「解约」。正式合同一线队球员可「下放」（即时转训练营条款）。
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -30,7 +31,7 @@ import {
   type SeaSubmitResult,
 } from '../../lib/api.ts';
 import { fmt2, fmtShort } from '../../lib/contract-view.ts';
-import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance, useShortlistIds, useShortlistInvalidation } from '../../lib/queries.ts';
+import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance, useShortlistIds, useShortlistInvalidation, useMyPlayerRequests, type PlayerRequestRow } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../lib/ops-gate.ts';
@@ -42,6 +43,7 @@ import { money } from '../market/shared.tsx';
 import { ActivationProofDialog } from '../market/ActivationProofDialog.tsx';
 import { listingFloorOf, offerCapOf } from '../../lib/transfer-bounds.ts';
 import { freeAgentFeePreview, terminationFeePreview } from '../../lib/bypass-fee-preview.ts';
+import { promotionSurcharge } from '../../../../src/core/bypass-rules.ts';
 
 export interface SideOpsPlayer {
   id: number;
@@ -57,10 +59,20 @@ export interface SideOpsPlayer {
   marketValue: number | null;
 }
 
-type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'sealed';
+type Panel = null | 'offer' | 'renew' | 'list' | 'term' | 'freeagent' | 'sealed' | 'demote' | 'promote';
 
 function round2(x: number): number {
   return Math.round((x + Number.EPSILON) * 100) / 100;
+}
+
+// 在途单据一行话（v6.64.4 自助取消列表）
+function requestLine(r: PlayerRequestRow): string {
+  if (r.type === 'rc_change') return '续约申请待审核';
+  if (r.type === 'termination') {
+    return r.extraFee !== null && r.extraFee > 0 ? `解约申请待审核（解约费 ${r.extraFee.toFixed(2)}m 已冻结）` : '解约申请待审核（免费）';
+  }
+  if (r.type === 'promotion') return r.status === 'signing' ? '上调谈判进行中' : '上调已预约（时段开启后自动开始）';
+  return '在途单据';
 }
 
 export function SideOps({
@@ -117,6 +129,8 @@ export function SideOps({
   const listingGate = useOpsGate('transfer_listing');
   const seaGate = useOpsGate('transfer_sea_open');
   const offerGate = useOpsGate('transfer_offer');
+  // v6.64.4：上调/下放自己的闸位（合成默认行 = 随窗全窗）
+  const promoGate = useOpsGate('transfer_promotion');
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
   const [bidBusy, setBidBusy] = useState(false);
@@ -140,6 +154,7 @@ export function SideOps({
   const [renewFee, setRenewFee] = useState('');
   const [askPrice, setAskPrice] = useState('');
   const [freeFee, setFreeFee] = useState('');
+  const [promoteFee, setPromoteFee] = useState('');
   // 激活通知截图弹窗（v6.60.0）：旧内嵌文件框改共用弹窗，点击「激活」直接打开
   const [proofOpen, setProofOpen] = useState(false);
   // 候选名单开关（v6.58.0）：教练态自取 ids；未绑队 403 / 匿名不渲染（data 为 undefined 即隐藏）
@@ -178,6 +193,7 @@ export function SideOps({
     setPanel(null);
     setArmed(false);
     setProofOpen(false);
+    setPromoteFee('');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上：只跟随 player.id
   }, [player.id]);
 
@@ -236,6 +252,8 @@ export function SideOps({
   // 预览数按 0（动用额行不渲染），面板文案退回公式版，不冒充免费。
   const termSpend = terminationFeePreview(releaseFee, contract?.serviceSeasons ?? null) ?? 0;
   const termUse = creditUse(termSpend, availSnap);
+  // 上调附加费预览（v6.64.4）：F>15 的 (F−15)×0.3，成约时销毁；输入框下实时提示
+  const promoSurchargePreview = promoteFee === '' ? 0 : promotionSurcharge(Number(promoteFee) || 0);
   const offerCap = offerCapOf(releaseFee);
   // 标价/挂牌下限（v6.54.1）：与挂牌同规，报价设置面板与挂牌面板的区间提示共用
   const listingFloor = listingFloorOf(releaseFee, player.marketValue);
@@ -245,6 +263,33 @@ export function SideOps({
   // 服务端只对本队教练下发 demandState/contractPending，这里再按 isCoach/isMine 兜一层，
   // 避免把他队视角误当本队（例如管理员查看别队球员时命中同一条详情缓存）。
   const ownerView = isCoach && isMine;
+  // v6.64.4 自助取消：本队球员的在途单据（续约/解约/上调），一键取消
+  const requestsQuery = useMyPlayerRequests(player.id, ownerView);
+  const requests = ownerView ? (requestsQuery.data?.requests ?? []) : [];
+  // 在途单据列表（本队教练）：一键自助取消（解约随单解冻、上调谈判对称收口）
+  const requestsBlock =
+    ownerView && requests.length > 0 ? (
+      <div className="side-requests">
+        {requests.map((r) => (
+          <div key={r.transferId} className="side-sub" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span>{requestLine(r)}</span>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  await apiPost('/api/transfers/cancel', { transferId: r.transferId });
+                  return '已取消：冻结（如有）即时解冻。';
+                })
+              }
+            >
+              取消
+            </button>
+          </div>
+        ))}
+      </div>
+    ) : null;
   const demand = ownerView ? (demandState?.demand ?? null) : null;
   const transferRequest = ownerView ? (demandState?.transferRequest ?? null) : null;
   const contractPendingView = ownerView ? contractPending : null;
@@ -293,6 +338,7 @@ export function SideOps({
     void qc.invalidateQueries({ queryKey: ['club', 'pending-contracts'] });
     void qc.invalidateQueries({ queryKey: ['market', 'board'] });
     void qc.invalidateQueries({ queryKey: ['market', 'listing-by-player', player.id] });
+    void qc.invalidateQueries({ queryKey: ['club', 'player-requests', player.id] });
     void qc.invalidateQueries({ queryKey: qk.seaPhase });
     refreshAll();
   }
@@ -750,11 +796,11 @@ export function SideOps({
                 {contract === null || releaseFee === null || releaseFee <= 0
                   ? '解约费 = 违约金 ×（3 − 效力赛季数）× 10%（效力满 3 赛季免费）'
                   : termSpend > 0
-                    ? `本次解约费 ${money(termSpend)} m = 违约金 ×（3 − 效力 ${contract.serviceSeasons} 赛季）× 10%，审核时收取`
+                    ? `本次解约费 ${money(termSpend)} m = 违约金 ×（3 − 效力 ${contract.serviceSeasons} 赛季）× 10%，提交即冻结、审核通过时销毁`
                     : `效力 ${contract.serviceSeasons} 赛季已满 3 赛季，本次解约免费`}
                 ；被解约球员本窗全联盟禁签。再次点击确认。
               </p>
-              {termUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(termUse)} m（解约费审核时收取）。</p>}
+              {termUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(termUse)} m（解约费提交即冻结）。</p>}
               {demandOpen && <p className="side-sub">解约会作废他的涨薪要求。</p>}
               {contractPendingView !== null && <p className="side-sub">关窗前离队会让待生效的新合同作废。</p>}
               <div className="side-btns">
@@ -770,12 +816,41 @@ export function SideOps({
                     void run(async () => {
                       const r = await apiPost<{ terminationFee: number }>('/api/transfers/termination', { playerId: player.id });
                       return `解约申请已提交：${
-                        r.terminationFee > 0 ? `解约费 ${r.terminationFee.toFixed(2)}m 待审核时回收` : '效力满 3 赛季免费'
+                        r.terminationFee > 0 ? `解约费 ${r.terminationFee.toFixed(2)}m 已冻结（审核通过时销毁，驳回/取消即解冻）` : '效力满 3 赛季免费'
                       }。`;
                     });
                   }}
                 >
                   {armed ? '确认解约' : '解约'}
+                </button>
+              </div>
+            </>
+          )}
+          {panel === 'demote' && (
+            <>
+              <p className="side-sub">
+                下放 = 转进训练营：合同即时转训练营条款（工资 0.75m / 违约金 5m），效力累计保留、保护期结束，
+                本窗工资按新合同在关窗结算。每窗每队 2 个名额；练满球员与本窗刚匹配留队的球员不可下放。
+                下一注册期把他排进训练营名单。再次点击确认。
+              </p>
+              <OpsGateNote gate={promoGate} className="side-sub" />
+              <div className="side-btns">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-danger"
+                  disabled={busy || promoGate?.blocked}
+                  onClick={() => {
+                    if (!armed) {
+                      setArmed(true);
+                      return;
+                    }
+                    void run(async () => {
+                      const r = await apiPost<{ releaseFee: number; wage: number }>('/api/transfers/demote', { playerId: player.id });
+                      return `已下放：合同转训练营条款（违约金 ${r.releaseFee}m / 工资 ${r.wage}m），生效即时。`;
+                    });
+                  }}
+                >
+                  {armed ? '确认下放' : '下放'}
                 </button>
               </div>
             </>
@@ -796,6 +871,9 @@ export function SideOps({
               <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen || releaseFee === null} onClick={() => setPanel('list')}>
                 挂牌
               </button>
+              <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !windowOpen || promoGate?.blocked} onClick={() => setPanel('demote')}>
+                下放
+              </button>
               <button type="button" className="btn btn-sm btn-danger" disabled={busy || !windowOpen} onClick={() => setPanel('term')}>
                 解约
               </button>
@@ -809,6 +887,7 @@ export function SideOps({
             </div>
           )}
           {releaseFee === null && <p className="side-sub">没有含违约金的现行合同，续约/挂牌先找管理组补合同。</p>}
+          {requestsBlock}
         </section>
         <Link className="side-entry" to="/market/desk?tab=offers&box=in">
           <span>我收到的报价</span>
@@ -819,11 +898,109 @@ export function SideOps({
       </>
     );
   } else if (isMine) {
-    // 本队训练营球员：合同固定，唯一出口是被激活转会
+    // 本队训练营球员（v6.64.4）：上调（谈正式合同回一线队）/ 解约（冻结解约费）；合同固定条款照旧说明
     body = (
       <section className="side-sec">
         <div className="side-sec-head">球队操作</div>
-        <p className="side-sub">训练营球员：合同固定（工资 0.75m / 违约金 5m），只能被其他球队按激活转会带走。</p>
+        {panel === 'promote' && (
+          <>
+            <label className="side-field">
+              <span className="side-lab">
+                <span>新违约金（m）</span>
+                <span className="side-range mono">{promoSurchargePreview > 0 ? `附加费 ${money(promoSurchargePreview)}` : '≤15m 免费'}</span>
+              </span>
+              <input
+                className="mono"
+                inputMode="decimal"
+                value={promoteFee}
+                onChange={(e) => setPromoteFee(e.target.value.replace(/[^0-9.]/g, ''))}
+                aria-label="新违约金"
+              />
+            </label>
+            <p className="side-sub">
+              上调 = 谈正式合同回一线队：违约金 ≤15m 免费，超出部分付 ×0.3（成约时销毁，驳回/谈崩不收）。
+              提交即开谈判并锁定（他队不能激活他），窗关按预期工资强制成约；谈崩可重申。
+            </p>
+            <OpsGateNote gate={promoGate} className="side-sub" />
+            <div className="side-btns">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy || promoteFee === '' || promoGate?.blocked || player.status !== 'trainee'}
+                onClick={() =>
+                  void run(async () => {
+                    const r = await apiPost<{ releaseFee: number; surcharge: number }>('/api/transfers/promotion', {
+                      playerId: player.id,
+                      newReleaseFee: Number(promoteFee),
+                    });
+                    return `上调谈判已开启：新违约金 ${r.releaseFee}m${
+                      r.surcharge > 0 ? `（附加费 ${r.surcharge.toFixed(2)}m 成约时销毁）` : ''
+                    }，去谈判桌报价。`;
+                  })
+                }
+              >
+                开启上调谈判
+              </button>
+            </div>
+          </>
+        )}
+        {panel === 'term' && (
+          <>
+            <p className="side-sub">
+              {termSpend > 0
+                ? `本次解约费 ${money(termSpend)} m = 违约金 ×（3 − 效力 ${contract?.serviceSeasons ?? 0} 赛季）× 10%，提交即冻结、审核通过时销毁`
+                : '效力已满 3 赛季，本次解约免费'}
+              ；被解约球员本窗全联盟禁签。再次点击确认。
+            </p>
+            {termUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(termUse)} m（解约费提交即冻结）。</p>}
+            <div className="side-btns">
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                disabled={busy}
+                onClick={() => {
+                  if (!armed) {
+                    setArmed(true);
+                    return;
+                  }
+                  void run(async () => {
+                    const r = await apiPost<{ terminationFee: number }>('/api/transfers/termination', { playerId: player.id });
+                    return `解约申请已提交：${
+                      r.terminationFee > 0 ? `解约费 ${r.terminationFee.toFixed(2)}m 已冻结（审核通过时销毁，驳回/取消即解冻）` : '效力满 3 赛季免费'
+                    }。`;
+                  });
+                }}
+              >
+                {armed ? '确认解约' : '解约'}
+              </button>
+            </div>
+          </>
+        )}
+        {panel === null && (
+          <div className="side-btns">
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy || !windowOpen || player.status !== 'trainee' || promoGate?.blocked}
+              title={player.status !== 'trainee' ? '只有训练营名单里的球员能上调' : undefined}
+              onClick={() => setPanel('promote')}
+            >
+              上调
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" disabled={busy || !windowOpen} onClick={() => setPanel('term')}>
+              解约
+            </button>
+          </div>
+        )}
+        {panel !== null && (
+          <div className="side-btns">
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => { setPanel(null); setArmed(false); }}>
+              取消
+            </button>
+          </div>
+        )}
+        <p className="side-sub">训练营球员：合同固定（工资 0.75m / 违约金 5m），他队可按 5m 激活——24h 匹配窗内你可付更高违约金留人（转正式合同）。</p>
+        {requestsBlock}
       </section>
     );
   } else if (player.notForSale) {

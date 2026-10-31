@@ -1962,6 +1962,26 @@ app.get('/club/events', async (c) => {
   return c.json({ clubId: club.id, ...view });
 });
 
+// GET /api/club/players/:id/requests —— 本队球员的在途单据（v6.64.4 自助取消的数据源）：
+// 续约 / 解约 / 上调（含预约与谈判中）三类，只认本队发起（from_club_id）。
+app.get('/club/players/:id/requests', async (c) => {
+  const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
+  const club = await getBoundClub(c.env, user.id, c.req.raw);
+  if (!club) throw new HttpError(403, '先绑定俱乐部再看在途单据');
+  const playerId = Number(c.req.param('id'));
+  if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
+  const rows = await c.env.DB.prepare(
+    `SELECT id AS transferId, type, status, extra_fee AS extraFee, created_at AS createdAt
+     FROM transfers
+     WHERE player_id = ? AND from_club_id = ? AND status IN ('pending_review', 'signing')
+       AND type IN ('rc_change', 'termination', 'promotion')
+     ORDER BY id DESC LIMIT 10`,
+  )
+    .bind(playerId, club.id)
+    .all<{ transferId: number; type: string; status: string; extraFee: number | null; createdAt: string }>();
+  return c.json({ requests: rows.results });
+});
+
 app.post('/club/events/:id/choose', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);

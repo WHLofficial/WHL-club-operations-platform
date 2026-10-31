@@ -133,6 +133,8 @@ export const SOURCE_LABEL: Record<string, string> = {
   forced: '强制成约',
   direct: '直败结算',
   import: '历史导入',
+  demote: '下放转训练营',
+  promotion: '上调转正式',
 };
 
 export const CONTRACT_TYPE_LABEL: Record<string, string> = {
@@ -149,6 +151,8 @@ export const TRANSFER_TYPE_LABEL: Record<string, string> = {
   termination: '解约',
   free_agent: '海捞签入',
   match: '匹配留队',
+  demote: '下放',
+  promotion: '上调',
 };
 
 export const LEAGUE_TIER_LABEL: Record<string, string> = {

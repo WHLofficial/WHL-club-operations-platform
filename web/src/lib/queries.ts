@@ -228,6 +228,25 @@ export function usePlayerListing(playerId: number, enabled = true) {
   });
 }
 
+// 本队球员的在途单据（v6.64.4 自助取消）：续约 / 解约 / 上调（含预约与谈判中），只认本队发起。
+// staleTime 0——提交/取消后 invalidate 立即重取，列表不陈旧。
+export interface PlayerRequestRow {
+  transferId: number;
+  type: string;
+  status: string;
+  extraFee: number | null;
+  createdAt: string;
+}
+
+export function useMyPlayerRequests(playerId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ['club', 'player-requests', playerId],
+    queryFn: () => api<{ requests: PlayerRequestRow[] }>(`/api/club/players/${playerId}/requests`),
+    enabled: enabled && Number.isInteger(playerId) && playerId > 0,
+    staleTime: 0,
+  });
+}
+
 // 报价设置（v6.33.0）：本队教练的私密预填源。staleTime 0——保存后 invalidate 立即重取，
 // 面板草稿以它对脏；未登录（401）走 query error，调用方按「数据没到 = 禁存」处理
 export function useOfferSettings(playerId: number, enabled: boolean) {
