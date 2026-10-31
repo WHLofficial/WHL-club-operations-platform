@@ -41,6 +41,7 @@ import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
 import { money } from '../market/shared.tsx';
 import { ActivationProofDialog } from '../market/ActivationProofDialog.tsx';
 import { listingFloorOf, offerCapOf } from '../../lib/transfer-bounds.ts';
+import { freeAgentFeePreview, terminationFeePreview } from '../../lib/bypass-fee-preview.ts';
 
 export interface SideOpsPlayer {
   id: number;
@@ -206,8 +207,9 @@ export function SideOps({
   const mySealedBid = seaPhase?.myBids.find((b) => b.playerId === player.id) ?? null;
   const sealedLeft = useCountdown(sealedPhase ? (seaPhase?.batch?.deadlineAt ?? null) : null);
   const fmt = useTimeFmt();
-  // 出标冻结额 = 新违约金 × 30%（与后端 freeAgentFee 同口径；真数仍以服务端回执为准）
-  const sealedFee = freeFee.trim() === '' || Number.isNaN(Number(freeFee)) ? null : round2(Number(freeFee) * 0.3);
+  // 签入费预览（海捞费 = 新违约金 × 30%，core freeAgentFee 单一出处；明标「审核时收」、
+  // 暗标「出标即冻结」共用一份；真数仍以服务端回执为准）
+  const signFee = freeAgentFeePreview(freeFee);
 
   // v6.57.0 预期收入额度：B 态出价 / 海捞（暗标冻结·明标审核时收）/ 续约差额的「动用预期收入」
   // 提示共用一份余额快照；快照缺失（非教练 / 端点未回）creditUse 回 0，整行不渲染。
@@ -215,11 +217,11 @@ export function SideOps({
   const availSnap = balSnap ?? null;
   // 改标时旧冻结被顶替释放：动用额按净差额算（回加旧标冻结）
   const sealedUse = creditUse(
-    sealedFee ?? 0,
+    signFee ?? 0,
     availSnap,
     mySealedBid?.status === 'sealed' ? round2(Number(mySealedBid.newReleaseFee) * 0.3) : 0,
   );
-  const seaSignUse = creditUse(sealedFee ?? 0, availSnap);
+  const seaSignUse = creditUse(signFee ?? 0, availSnap);
 
   const releaseFee = contract?.releaseFee ?? null;
   // 续约「提高付差额的 30%」：输入无效 / 未提高时 spend=0（动用额行不渲染）
@@ -229,12 +231,10 @@ export function SideOps({
     return round2((v - releaseFee) * 0.3);
   })();
   const renewUse = creditUse(renewSpend, availSnap);
-  // 解约费客户端预览（与 core terminationFee 同式）：serviceSeasons 由服务端按现行窗刻度算好
-  // 随合同下发；满 3 赛季免费。服务端提交时仍按同一公式实算并重做资金预检。
-  const termSpend =
-    releaseFee !== null && contract !== null && contract.serviceSeasons < 3
-      ? round2(releaseFee * (3 - contract.serviceSeasons) * 0.1)
-      : 0;
+  // 解约费预览（v6.63.3 改派生自 core terminationFee 单一出处，bypass-fee-preview；
+  // serviceSeasons 由服务端按现行窗刻度算好随合同下发）。无含违约金合同时回 null →
+  // 预览数按 0（动用额行不渲染），面板文案退回公式版，不冒充免费。
+  const termSpend = terminationFeePreview(releaseFee, contract?.serviceSeasons ?? null) ?? 0;
   const termUse = creditUse(termSpend, availSnap);
   const offerCap = offerCapOf(releaseFee);
   // 标价/挂牌下限（v6.54.1）：与挂牌同规，报价设置面板与挂牌面板的区间提示共用
@@ -747,7 +747,12 @@ export function SideOps({
           {panel === 'term' && (
             <>
               <p className="side-sub">
-                解约费 = 违约金 ×（3 − 效力赛季数）× 10%（效力满 3 赛季免费）；被解约球员本窗全联盟禁签。再次点击确认。
+                {contract === null || releaseFee === null || releaseFee <= 0
+                  ? '解约费 = 违约金 ×（3 − 效力赛季数）× 10%（效力满 3 赛季免费）'
+                  : termSpend > 0
+                    ? `本次解约费 ${money(termSpend)} m = 违约金 ×（3 − 效力 ${contract.serviceSeasons} 赛季）× 10%，审核时收取`
+                    : `效力 ${contract.serviceSeasons} 赛季已满 3 赛季，本次解约免费`}
+                ；被解约球员本窗全联盟禁签。再次点击确认。
               </p>
               {termUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(termUse)} m（解约费审核时收取）。</p>}
               {demandOpen && <p className="side-sub">解约会作废他的涨薪要求。</p>}
@@ -852,7 +857,7 @@ export function SideOps({
             <label className="side-field">
               <span className="side-lab">
                 <span>新违约金（m）</span>
-                <span className="side-range mono">{sealedFee === null ? '—' : `冻结 ${sealedFee}`}</span>
+                <span className="side-range mono">{signFee === null ? '—' : `冻结 ${signFee}`}</span>
               </span>
               <input
                 className="mono"
@@ -932,7 +937,12 @@ export function SideOps({
               />
             </label>
             <SeaCompsBlock seaComps={seaComps} />
-            <p className="side-sub">签入即付海捞费并定新合同；签完本窗内他队还能竞价挖角。</p>
+            <p className="side-sub">
+              {signFee === null
+                ? '签入即付海捞费（新违约金的 30%）并定新合同'
+                : `海捞费 ${money(signFee)} m（新违约金的 30%），审核时收取并定新合同`}
+              ；签完本窗内他队还能竞价挖角。
+            </p>
             {seaSignUse > 0 && <p className="side-sub credit-use-note">本次动用预期收入 {money(seaSignUse)} m（签入费审核时收取）。</p>}
             <OpsGateNote gate={seaGate} className="side-sub" />
             <div className="side-btns">

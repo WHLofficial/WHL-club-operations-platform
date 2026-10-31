@@ -36,6 +36,7 @@ import { playerPath } from '../../lib/player-link.ts';
 // 纯合规引擎直接复用（v6.54.0 步骤 7）：current/projected 双跑必须与提交校验同一份规则，
 // 前端不许再抄一遍阈值（§10.5「projected 再跑一遍合规预检」）。
 import { checkSquad } from '../../../../src/core/squad-rules.ts';
+import { terminationFeePreview } from '../../lib/bypass-fee-preview.ts';
 import { PENDING_SOURCE_LABEL, delta2, fmt2, fmtShort, pendingFeeSmall, pendingWageSmall } from '../../lib/contract-view.ts';
 import { CapBar } from './CapBar.tsx';
 import { OverCapDialog, type OverCapDriver } from './OverCapDialog.tsx';
@@ -738,6 +739,8 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
   );
   const rcPlayer = formal.find((p) => String(p.id) === rcPlayerId) ?? null;
   const termPlayer = formal.find((p) => String(p.id) === termPlayerId) ?? null;
+  // 解约费预览（v6.63.3，core terminationFee 单一出处；违约金 / 效力缺失回 null → hint 退回原文案）
+  const termFee = termPlayer === null ? null : terminationFeePreview(termPlayer.releaseFee, termPlayer.serviceSeasons);
 
   const rcBounds = useMemo(() => {
     if (!rcPlayer) return null;
@@ -876,6 +879,10 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
           </div>
           {termPlayer && (
             <p className="hint">
+              {termFee !== null &&
+                (termFee > 0
+                  ? `解约费 ${termFee.toFixed(2)}m（效力 ${termPlayer.serviceSeasons} 赛季，审核时收取）。`
+                  : `效力 ${termPlayer.serviceSeasons} 赛季已满 3 赛季，本次解约免费。`)}
               解约 {termPlayer.name} 后他将进入自由球员名单，本窗内全联盟（包括你家）都不能再签他。
             </p>
           )}
