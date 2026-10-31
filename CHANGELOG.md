@@ -6,6 +6,8 @@
 
 ## [v6.64.1] · 签约谈判在途的球员不能再被海捞（2026-10-31）
 
+**已上线（2026-10-31）**：push `8b189cc..42931e1` 触发 CF Workers Builds 自动部署，生效 Version `53b6aa02-50d8-45bb-b609-c320e2ccf21e` @2026-10-31T07:25:00Z（零迁移）。上线回读：health 200、入口资产 `index-D9OFJQ2i.js` 与本地 6.64.1 构建同名同哈希、两名在签约谈判的生产球员 `seaSign` 返回新文案、干净自由身仍可捞。
+
 **Fixed**
 
 - 海捞资格链补「在签约谈判」一关。海捞单审核通过后单据进 `signing`（签约谈判），球员此时还没过户、`players.club_id` 仍为空，而旧的在途判定（`findInFlight`）只认 `pending_review`——同一名球员还能被第二家（或原队）再提一张单，两张单最后会抢同一名球员。现在 `checkSeaSignEligible`（`src/worker/bypass.ts`）在 pending 之后加 `signing` 判定，返回 400「这名球员的海捞单已经进入签约谈判，等它成约或作废再操作」（`stage='signing'`、`errCode='sea_signing'`）。
