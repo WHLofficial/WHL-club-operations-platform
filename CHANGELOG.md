@@ -6,6 +6,8 @@
 
 ## [v6.63.2] · 海捞单直签训练营按 5m 违约金重算签入费（2026-10-31）
 
+**已上线（2026-10-31）**：push `b043e27..d5f9224` 触发 CF Workers Builds 自动部署，生效 Version **`a8940315-d4d2-481c-9875-33397b568443`** @2026-10-31T05:10:47Z（零迁移）；线上入口资产 `index-BBQdC4HH.js`、谈判分包 `MarketDeskPage-CadCsNBG.js` 已含「签入费合计 / 补收 / 可用资金不够会被挡下」文案，线上版本串 `6.63.2`。
+
 **Added**
 
 - 海捞（明标与暗标胜出同一条路）的单据在「直接签训练营」时，签入费按训练营固定的 5m 违约金重算：提交价低于 5m **补收**差额（否则等于拿 2m 违约金花 0.6m 白拿一份 5m 训练营合同），高于 5m **退还**多收的差额，正好 5m 不动。结算落在成约动作里（`chooseTrainee`）、`settleActiveSession` 之前，同批把 `transfers.extra_fee` 改成 1.5，钱走 `ledger_entries` 的 `free_agent_fee_topup` / `free_agent_fee_refund` 两笔流水（幂等键 `(club, kind, transfer, refId)`，重放不长钱、不吞钱）。补收过不了资金闸（可支配含预期收入额度）就 409 挡下，不白过成约；退款是入账，不设资金闸。
