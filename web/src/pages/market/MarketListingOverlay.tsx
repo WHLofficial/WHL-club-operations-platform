@@ -296,7 +296,7 @@ function OverlayBody({
       {note !== null && <p className="mkt-ov-note">{note}</p>}
       {l.type === 'activation' && (
         <p className="mkt-ov-note">
-          激活价落定后进入公开竞价；竞价截止后：训练营合同直进待审，正式合同进 24 小时匹配窗（基准=竞价最高价），由{' '}
+          激活价落定后进入公开竞价；竞价截止后进 24 小时匹配窗（基准=竞价最高价），由{' '}
           {l.sellerClub.name} 决定匹配（球员留队）还是放行。买方签约时可直签训练营合同（不占下放名额）或谈正式合同。
         </p>
       )}

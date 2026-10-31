@@ -314,9 +314,11 @@ function noteText(day: string, hours: [number, number], calendar: TradeCalendar)
   return `截止判定：${Number(m)}月${Number(d)}日 ${hours[0]}:00-${hours[1]}:00${suffix}`;
 }
 
-// v6.24.0：截止后按合同类型分流（只对激活挂牌）——被激活方对该球员的现行合同是正式合同
-// （即非训练营）时，先给 24h 匹配等待（match_deadline = now + matchWindowHours，匹配基准 = 竞价最高价）；
-// 训练营合同条款固定（固定 5m，无匹配可言）与普通挂牌照旧直接进待审。
+// v6.24.0：截止后按合同类型分流（只对激活挂牌）——正式合同先给 24h 匹配等待
+// （match_deadline = now + matchWindowHours，匹配基准 = 竞价最高价）。
+// v6.64.3：训练营合同同样进匹配窗——原「固定条款无匹配可言、直进待审」豁免撤销（用户裁决：
+// 匹配成约必然转正式合同，chooseTrainee 拒收 match 型过户；训练营合同也可付新 RC 匹配留人）。
+// 匹配窗到期无人决定 → 按竞价最高价成交进待审，与正式合同同一条收口路径。
 // 返回 matching = 已转匹配等待，settled/already 与 settleListingForReview 同义。
 async function settleByContractType(
   env: Env,
@@ -327,19 +329,14 @@ async function settleByContractType(
   ctx: MarketContext,
 ): Promise<'settled' | 'matching' | 'already'> {
   if (core.type === 'activation') {
-    const contract = await env.DB.prepare('SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1 LIMIT 1')
-      .bind(core.player_id)
-      .first<{ contract_type: string | null }>();
-    if (contract?.contract_type !== 'trainee') {
-      const matchDeadline = new Date(Date.now() + ctx.matchWindowHours * 3600_000).toISOString();
-      const r = await env.DB.prepare(
-        `UPDATE listings SET status = 'matched_pending', match_deadline = ?, deadline_at = NULL, deadline_note = NULL
-         WHERE id = ? AND status = ?`,
-      )
-        .bind(matchDeadline, core.id, fromStatus)
-        .run();
-      return (r.meta.changes ?? 0) > 0 ? 'matching' : 'already';
-    }
+    const matchDeadline = new Date(Date.now() + ctx.matchWindowHours * 3600_000).toISOString();
+    const r = await env.DB.prepare(
+      `UPDATE listings SET status = 'matched_pending', match_deadline = ?, deadline_at = NULL, deadline_note = NULL
+       WHERE id = ? AND status = ?`,
+    )
+      .bind(matchDeadline, core.id, fromStatus)
+      .run();
+    return (r.meta.changes ?? 0) > 0 ? 'matching' : 'already';
   }
   return settleListingForReview(env.DB, core, actor, origin, fromStatus);
 }
@@ -442,7 +439,7 @@ async function runSettleOverdue(
   }
 
   // 激活首价已落但未收口（收口前崩溃的残留）：listed 已过期且带出价（v6.24.0 后新单不会停在此态，
-  // 仅存量/异常残留）→ 与正常截止同口径分流（正式合同进匹配等待，训练营直接进待审）
+  // 仅存量/异常残留）→ 与正常截止同口径分流（v6.64.3 起一律进匹配等待）
   const remnantRows = (remnantScan.results ?? []) as (ListingCore & { status: string })[];
   for (const row of remnantRows) {
     const r = await settleByContractType(env, row, actor, origin, 'listed', ctx);

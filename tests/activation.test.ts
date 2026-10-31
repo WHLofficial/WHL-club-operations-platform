@@ -8,6 +8,7 @@ import { createTestD1, applyMigrations, sqlGet, sqlAll, attachAuthChannel, authR
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { bidDeadline } from '../src/core/market-rules.ts';
+import { resetSettleCoalesce } from '../src/worker/market-settle.ts';
 
 interface Fixture {
   env: Env;
@@ -227,7 +228,7 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     expect((body as { error?: string }).error).toContain('可用资金不足');
   });
 
-  it('首价窗内他队出价无效、激活方首价必须恰好 5m；落价转公开竞价，截止后按训练营条款直接待审（TC-A04/A05/A10）', async () => {
+  it('首价窗内他队出价无效、激活方首价必须恰好 5m；截止后训练营同样进匹配窗、到期按最高价成交（TC-A04/A05/A10）', async () => {
     const fx = await seedTrainee(freshEnv());
     const { body } = await activateTrainee(fx);
     const listingId = body.listingId!;
@@ -283,10 +284,25 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     const rival = await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach3', fx.env);
     expect(rival.status).toBe(201);
 
-    // 竞价截止（拨过去）→ 被激活方是训练营合同：无匹配可言，直接进待审，成交价=最终最高价
+    // 竞价截止（拨过去）→ v6.64.1：训练营合同同样进 24h 匹配窗（不再直进待审）
     fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    resetSettleCoalesce();
     expect((await get('/api/market/listings', undefined, fx.env)).status).toBe(200);
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('pending_review');
+    const matched = sqlGet<{ status: string; deadline_at: string | null; match_deadline: string | null }>(
+      fx.sqlite,
+      'SELECT status, deadline_at, match_deadline FROM listings WHERE id = ?',
+      listingId,
+    );
+    expect(matched?.status).toBe('matched_pending');
+    expect(matched?.deadline_at).toBeNull(); // 竞价截止时刻收口，换成匹配窗截止
+    expect(matched?.match_deadline).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // 还没成交：过户要等被激活方放行 / 匹配窗到期
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM transfers')?.n).toBe(0);
+
+    // 匹配窗到期无人决定 → 按竞价最高价成交进待审（type='activation'，fee=最终最高价，买方=最后出价方）
+    fx.sqlite.exec(`UPDATE listings SET match_deadline = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    resetSettleCoalesce();
+    await get('/api/market/listings', undefined, fx.env);
     const transfer = sqlGet<{ type: string; status: string; fee: number; to_club_id: number }>(
       fx.sqlite,
       'SELECT type, status, fee, to_club_id FROM transfers WHERE idempotency_key = ?',
@@ -385,6 +401,12 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     const settleRes = await get('/api/market/listings', undefined, fx.env);
     await settleRes.json();
 
+    // v6.64.1：训练营合同同样进 24h 匹配窗 → 拨到期、再结算一次才进待审
+    fx.sqlite.exec(`UPDATE listings SET match_deadline = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    resetSettleCoalesce();
+    const settleRes2 = await get('/api/market/listings', undefined, fx.env);
+    await settleRes2.json();
+
     const transfer = sqlGet<{ id: number; type: string; status: string; to_club_id: number; fee: number }>(
       fx.sqlite,
       'SELECT id, type, status, to_club_id, fee FROM transfers WHERE idempotency_key = ?',
@@ -448,6 +470,12 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
     const settleRes = await get('/api/market/listings', undefined, fx.env);
     await settleRes.json();
+
+    // v6.64.1：训练营合同同样进匹配窗 → 拨到期再结算，才落待审与审核任务
+    fx.sqlite.exec(`UPDATE listings SET match_deadline = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    resetSettleCoalesce();
+    const settleRes2 = await get('/api/market/listings', undefined, fx.env);
+    await settleRes2.json();
 
     const transfer = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM transfers WHERE idempotency_key = ?', `listing:${listingId}`);
     const task = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM review_tasks WHERE ref_id = ? AND status = ' + "'open'", transfer!.id);

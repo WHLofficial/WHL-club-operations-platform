@@ -115,9 +115,7 @@ function FirstBidSection({
       <h3>落激活首价</h3>
       <p className="hint">
         已激活 {pending.playerName}，挂牌 {money(pending.askPrice)}m：请在 {dateTime(pending.firstBidDeadline)} 前落首价，
-        {pending.kind === 'trainee'
-          ? '落价后转入公开竞价；竞价截止后训练营合同直进管理组审核。'
-          : '落价后转入公开竞价；竞价截止后进 24 小时匹配窗，等原属俱乐部决定是否匹配（基准=竞价最高价）。'}
+        落价后转入公开竞价；竞价截止后进 24 小时匹配窗，等原属俱乐部决定是否匹配（基准=竞价最高价）。
         逾期激活作废（还占本窗激活额度）。
       </p>
       <MarketBidForm
