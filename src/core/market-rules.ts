@@ -101,20 +101,19 @@ export interface BidDeadlineResult {
 // 连续 silenceHours 小时无新出价」且整段落在时段内的最早时刻；落不下就顺延到下一交易日。
 // 无人出价的挂牌同样判定（v6.24.0：挂牌即落 deadline_at），lastBidAt 为 null 时以挂牌时刻为静默起点。
 // minOffsetDays（v6.60.5）：强制拍卖传 2，X 日挂牌最早 X+2 日判定；普通挂牌默认 X+1。
-// v6.64.3：判定日一律晚于出价当日——X 日出价最早 X+1 日判定，堵掉「当日 18:00-20:59 出价、
-// 当日 21:00 就截止」。跳过后候选日的开窗时刻必然晚于出价时刻，静默段起点恒为判定日开窗。
+// v6.64.5：撤回 v6.64.3 的「判定日一律晚于出价当日」。判定的起点是**挂牌日**次日（minOffsetDays），
+// 挂牌当天不管几点出价都不可能当日成交；出价当日只要静默段整段落在时段内就可以判定
+// （18:43 出价 + 3h = 当日 21:43 截止，时段 18:00-23:00 装得下），装不下（20:30 出价 → 23:30）才顺延。
 export function bidDeadline(input: BidDeadlineInput): BidDeadlineResult {
   const [startHour, endHour] = input.deadlineHours;
   const lastBidMs = input.lastBidAt !== null ? Date.parse(input.lastBidAt) : Date.parse(`${input.listedDay}T00:00:00+08:00`);
   const baseDayMs = parseDayMs(input.listedDay);
   const nowMs = input.now.getTime();
   const firstOffset = Math.max(1, Math.trunc(input.minOffsetDays ?? 1));
-  const bidDayStr = shanghaiDateStr(lastBidMs);
 
   for (let offset = firstOffset; offset <= 90; offset++) {
     const dayStr = shanghaiDateStr(baseDayMs + offset * 86_400_000);
     if (!isTradingDay(dayStr, input.calendar)) continue;
-    if (dayStr <= bidDayStr) continue;
     const windowStart = dayWindowMs(dayStr, startHour);
     const windowEnd = dayWindowMs(dayStr, endHour);
     const blockStart = Math.max(lastBidMs, windowStart);

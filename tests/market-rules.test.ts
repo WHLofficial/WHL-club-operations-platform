@@ -67,8 +67,8 @@ describe('出价校验（规则 4.4.1.2）', () => {
 describe('截止惰性判定（规则 4.4.7）', () => {
   const hours: [number, number] = [18, 23];
 
-  it('出价当日不可判定：X 日出价最早 X+1 日 21:00 截止（v6.64.1 堵当日截止）', () => {
-    // 最后出价上海 7-01 19:00（旧口径：当日 22:00 截止）→ 判定日跳过 7-01，死线 7-02 21:00
+  it('18-23 点内静默满 3 小时即截止（段内静默起点=最后出价时刻）', () => {
+    // 最后出价上海 7-01 19:00 → 判定时刻 22:00（v6.64.5 撤回「跳过出价当日」）
     const r = bidDeadline({
       lastBidAt: '2026-07-01T11:00:00.000Z', // 上海 19:00
       listedDay: '2026-06-30',
@@ -77,21 +77,49 @@ describe('截止惰性判定（规则 4.4.7）', () => {
       silenceHours: 3,
       calendar: 'none',
     });
-    expect(r.deadlineDay).toBe('2026-07-02');
-    expect(r.deadlineAt).toBe('2026-07-02T13:00:00.000Z'); // 上海 21:00
+    expect(r.deadlineDay).toBe('2026-07-01');
+    expect(r.deadlineAt).toBe('2026-07-01T14:00:00.000Z'); // 上海 22:00
     expect(r.met).toBe(false);
+    expect(bidDeadline({ lastBidAt: '2026-07-01T11:00:00.000Z', listedDay: '2026-06-30', now: new Date('2026-07-01T14:00:00.000Z'), deadlineHours: hours, silenceHours: 3, calendar: 'none' }).met).toBe(true);
   });
 
-  it('挂牌次日起才可判定；白天出价同样跳过出价当日，从次日 18 点起算', () => {
+  it('上海 18:43 出价 → 当日 21:43 截止（v6.64.5 回归锚：不能被顺延到次日）', () => {
+    const r = bidDeadline({
+      lastBidAt: '2026-10-31T10:43:30.152Z', // 上海 18:43:30
+      listedDay: '2026-10-30',
+      now: new Date('2026-10-31T10:50:00.000Z'),
+      deadlineHours: hours,
+      silenceHours: 3,
+      calendar: 'none',
+    });
+    expect(r.deadlineDay).toBe('2026-10-31');
+    expect(r.deadlineAt).toBe('2026-10-31T13:43:30.152Z'); // 上海 21:43:30
+  });
+
+  it('挂牌次日起才可判定；白天出价的判定窗从当日 18 点起算', () => {
     // 挂牌日 7-01，7-01 当天（N 日）不可判定
     const n = bidDeadline({ lastBidAt: null, listedDay: '2026-07-01', now: new Date('2026-07-01T14:00:00.000Z'), deadlineHours: hours, silenceHours: 3, calendar: 'none' });
     expect(n.deadlineDay).toBe('2026-07-02');
     expect(n.met).toBe(false);
-    // 最后出价在 7-02 白天 12:00（上海）→ 判定日跳过 7-02，死线 7-03 21:00
+    // 最后出价在 7-02 白天 12:00（上海）→ 无出价段 18:00-21:00，当日 21:00 截止
     const d = bidDeadline({ lastBidAt: '2026-07-02T04:00:00.000Z', listedDay: '2026-07-01', now: new Date('2026-07-02T10:00:00.000Z'), deadlineHours: hours, silenceHours: 3, calendar: 'none' });
-    expect(d.deadlineDay).toBe('2026-07-03');
-    expect(d.deadlineAt).toBe('2026-07-03T13:00:00.000Z'); // 上海 21:00
+    expect(d.deadlineDay).toBe('2026-07-02');
+    expect(d.deadlineAt).toBe('2026-07-02T13:00:00.000Z'); // 上海 21:00
     expect(d.met).toBe(false);
+  });
+
+  it('挂牌当天出价也进不了当天：判定日恒为挂牌日次日（v6.64.5 护栏）', () => {
+    // 7-01 18:00 挂牌、18:01 就有人出价 → 最早 7-02 21:00，不可能当日成交
+    const r = bidDeadline({
+      lastBidAt: '2026-07-01T10:01:00.000Z', // 上海 18:01
+      listedDay: '2026-07-01',
+      now: new Date('2026-07-01T10:05:00.000Z'),
+      deadlineHours: hours,
+      silenceHours: 3,
+      calendar: 'none',
+    });
+    expect(r.deadlineDay).toBe('2026-07-02');
+    expect(r.deadlineAt).toBe('2026-07-02T13:00:00.000Z'); // 上海次日 21:00
   });
 
   it('20 点后出价同样是次日 21:00（改前改后同值，回归锚）', () => {
