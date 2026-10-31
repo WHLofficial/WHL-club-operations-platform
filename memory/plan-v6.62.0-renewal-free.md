@@ -57,4 +57,5 @@ owner m04060 的「每份合同一次免费改 RC 续约」转正落地：`free_
 - **代码偏差一处（对设计稿的订正）**：设计稿 §5.6 把换队分支记成「`INSERT … ON CONFLICT` 逐列枚举」——实际代码普通换队走 **UPDATE**（无 DEFAULT 兜底），B 买回也走换队 UPDATE；真实落点是四处：换队 UPDATE 与买回桥接两态显式 `free_rc_change_used = 0`、海捞与无归属两处 upsert 加 `excluded` 列。已同步 ROADMAP/CHANGELOG 表述。
 - **变异靶同步**：M-02 拆两变体验证（换队 UPDATE 漏 0 / upsert 漏 excluded 列），各自恰红。
 - **验收实测**：typecheck 三份清；vitest 174 文件 / 2,816 例全绿（基线 173/2,798）；build 6.62.0；e2e 29/29；本地迁移落表；变异三靶恰红；code-review-skill 无 🔴、🟡×2 已修（免费降价回执方向词、迁移回滚注释）。
-- **上线待办**：① 生产 apply 0085（先于 push）；② push（等用户指令）；③ 上线探针 TC-P-01..03（测试计划 §10）。
+- **上线（2026-10-31 已执行）**：① 0085 生产 apply（`Executed 2 commands in 2.67ms`）；② push `6141102..4cd2d52` → main，CF 自动部署 Version `dbc4564d-09d6-47f9-809b-f722159113c5`（00:37:29Z）；③ 探针：contracts 517 行 SUM=0、迁移末条 0085、health 200、线上资产 `index-O44TeQIk.js`；TC-P-02/03 待真实免费单后核对。
+- **发布轮插曲**：M-02b 海捞复签守护用例曾漏提交（变异时临时写入），发布前补提交 `4cd2d52` 并重跑变异恰红；另一会话从 `c1be7ba` 切出 `feat/v6.63.0-playstyle-merge`，该提交曾误落其上，已指针归位——该分支头仍指 `4cd2d52`（共享 commit，merge 无重复），多会话共用仓库时提交前先 `git branch --show-current` 核对。

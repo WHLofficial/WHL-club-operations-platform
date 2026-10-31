@@ -83,7 +83,7 @@
 
 ## v6.62.0 · 普通续约免费机会：每合同一次免费改违约金（2026-10-31）
 
-**状态**：**已实现待上线**——分支 `feat/v6.62.0-renewal-free`（自 v6.61.0 收口点 `eb42144` 切出，3 个提交：`7381a2c` 后端+迁移+测试 / `b9b0bf8` 前端 / `fdcb4f6` 评审修复）。**迁移 `0085_contracts_free_rc_change.sql` 必须先 apply 到生产再 push**（CF 自动部署无迁移步骤）；上线后按测试计划 TC-P-01..03 做只读探针。判级 minor。计划 `memory/plan-v6.62.0-renewal-free.md`、测试计划 `docs/test-plans/v6.62.0-renewal-free.md`。
+**状态**：**已上线（2026-10-31）**——push `6141102..4cd2d52`（分支 `feat/v6.62.0-renewal-free` → `main`，6 个提交：`eb42144` v6.61.0 docs 存稿 + `7381a2c` 后端+迁移+测试 / `b9b0bf8` 前端 / `fdcb4f6` 评审修复 / `c1be7ba` docs 收口 / `4cd2d52` 海捞复签守护用例补提交），CF Workers Builds 自动部署 Version **`dbc4564d-09d6-47f9-809b-f722159113c5`** @2026-10-31T00:37:29Z；迁移 `0085` 已于 push 前 apply（`Executed 2 commands in 2.67ms`）。判级 minor。上线探针（只读）：生产 `contracts` 517 行 `SUM(free_rc_change_used)=0`（零回填口径正确）、`d1_migrations` 末条 `0085`、`/api/health` 200、线上首页资产 `index-O44TeQIk.js` 与本地 6.62.0 构建同名；TC-P-02/03（首张免费单 apply 后回读、UI 截图）待真实使用后按测试计划核对。**发布轮插曲**：M-02b 变异靶的海捞复签守护用例曾漏提交（变异验证时临时写入跑过），发布前补提交 `4cd2d52` 并重跑变异验证（删 `excluded` 兜底 ⇒ 恰好只红该用例断言）；另一会话当时从 `c1be7ba` 切出 `feat/v6.63.0-playstyle-merge` 分支，该提交曾误落其上，已用指针操作归位——`feat/v6.63.0-playstyle-merge` 头仍指 `4cd2d52`（共享同一 commit，将来 merge 无重复）。计划 `memory/plan-v6.62.0-renewal-free.md`、测试计划 `docs/test-plans/v6.62.0-renewal-free.md`。
 
 **裁决**（owner m04060 rev4 登记 → rev22 拍板转正，设计稿 §5.6 定稿）：每份合同一次免费改违约金续约，`free_rc_change_used=0` 时下一张续约单**自动**走免费通道——不设经理勾选（保护期延续对俱乐部纯收益，自动不亏）；30% 差额维持**审核通过时扣**（现行流程无独立「接受」时刻，豁免真落点在 `approveTransferDeal` 读 evidence）；**降价同消耗**（免费通道的实质权益是「不收口保护期」，与方向无关——否则「降价白嫖保护期→提价又免费」两次白嫖）；**匹配不刷新**（同「同队改 RC 不算转会」口径，换队照刷）。grilling Q1 收口定稿：续约按 4.4.6 收口保护期，**免费续约是唯一保留保护期的续约**（rev21「重建保护期」叙事作废，否决理由留档设计稿）。
 

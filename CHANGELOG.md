@@ -6,7 +6,7 @@
 
 ## [v6.62.0] · 普通续约免费机会（2026-10-31）
 
-**已实现待上线**：分支 `feat/v6.62.0-renewal-free`（`7381a2c` 后端 + `b9b0bf8` 前端 + `fdcb4f6` 评审修复）。**迁移 `0085_contracts_free_rc_change.sql` 必须先 apply 到生产再 push**（CF 自动部署无迁移步骤）。判级 minor。设计真源：`docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md` rev22 §5.6（owner 拍板四题：自动动用 / 30% 维持审核通过时扣 / 降价同消耗 / 匹配不刷新；grilling Q1 收口定稿：免费续约是唯一保留保护期的续约）。
+**已上线（2026-10-31）**：push `6141102..4cd2d52`（`7381a2c` 后端 + `b9b0bf8` 前端 + `fdcb4f6` 评审修复 + `4cd2d52` 海捞守护用例补提交），CF Workers Builds Version `dbc4564d-09d6-47f9-809b-f722159113c5`（2026-10-31T00:37:29Z）；迁移 `0085` 先于 push apply。上线探针：生产 `contracts` 517 行 `SUM(free_rc_change_used)=0`、`d1_migrations` 末条 `0085`、health 200、线上资产 `index-O44TeQIk.js`。判级 minor。设计真源：`docs/superpowers/specs/2026-10-21-player-renewal-demand-design.md` rev22 §5.6（owner 拍板四题：自动动用 / 30% 维持审核通过时扣 / 降价同消耗 / 匹配不刷新；grilling Q1 收口定稿：免费续约是唯一保留保护期的续约）。
 
 **Added**
 
