@@ -892,8 +892,9 @@ export async function approveTransferDeal(
     case 'rc_change': {
       const ev = transferEvidence<RcChangeEvidence>(transfer);
       // 免费续约豁免（§5.6 rev22）的真落点在审核侧：evidence 带 freeRcChange 时跳过差额 30%
-      //（chargeBypassFee 不走，无流水无审计）。evidence 缺该字段的历史在途单按非免费处理。
-      const fee = ev?.freeRcChange === true ? 0 : rcChangeFee(ev?.oldReleaseFee ?? 0, transfer.fee ?? 0);
+      //（chargeBypassFee 不走，无流水无审计）。上线后裁决（owner）：缺字段 = 0085 上线前的在途单
+      //——0085 零回填 DEFAULT 0，提交时机会必然未消耗，按免费兜底；显式 false（used=1 提交的新单）仍收费。
+      const fee = ev?.freeRcChange !== false ? 0 : rcChangeFee(ev?.oldReleaseFee ?? 0, transfer.fee ?? 0);
       if (fee > 0 && transfer.to_club_id !== null) {
         await chargeBypassFee(
           env,

@@ -428,7 +428,8 @@ export async function completeTransfer(
     //    applyPendingContractChanges 才把 wage/release_fee/protection_ticks 落库；
     // ② 4.4.6 收口语义保留、时点迁移：非免费续约 protection_ticks_new = baseTicks（当下窗数，
     //    判定恒不成立），**不得写 NULL**（写 NULL 会把「保护期直接结束」静默移除）；
-    //    免费续约是唯一例外（§5.6 rev22）：evidence 带 freeRcChange 时写 NULL = 保护期该项不变
+    //    免费续约是唯一例外（§5.6 rev22）：evidence 未显式 false（true 或缺字段=0085 前在途单，
+    //    上线后裁决按免费兜底）时写 NULL = 保护期该项不变
     //    （apply 侧 COALESCE 接住），apply 成功同批消耗 free_rc_change_used；
     // ③ 30% 续约费仍按既有 4.4.6 时点在审核通过时已收（bypass.chargeBypassFee，幂等闸 + 流水 + 审计；
     //    免费单审核侧跳过、extra_fee 为 NULL）——这里只把「已扣金额」记进 pending 的 rc_fee 供对账；
@@ -437,7 +438,7 @@ export async function completeTransfer(
     // ④ 一球员同时最多 1 条 pending（0079 的部分唯一索引兜底）；createRcChange 已前置 409，
     //    这里再带 NOT EXISTS 守卫，并发/迟到行下宁可续约不落 pending 也不撞索引把整批弄崩。
     // 匹配（match）不在 §5.7 的枚举内，沿用 4.3.3 既有即时落库（见下面的 else 分支）。
-    const rcFree = transferEvidence<{ freeRcChange?: boolean }>(transfer)?.freeRcChange === true;
+    const rcFree = transferEvidence<{ freeRcChange?: boolean }>(transfer)?.freeRcChange !== false;
     statements.push(
       db
         .prepare(

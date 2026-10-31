@@ -615,7 +615,7 @@ describe('TC-RF-07/08 · 回滚与离队不消耗', () => {
 // ---------------------------------------------------------------------------
 
 describe('TC-RF-10/11 · 兼容与守卫', () => {
-  it('兼容：在途单 evidence 无 freeRcChange 按非免费（审核照扣 30%）', async () => {
+  it('兼容（上线后裁决）：0085 前在途单 evidence 无 freeRcChange 按免费走全链路——不扣款、保护期不收口、apply 消耗', async () => {
     const fx = freshEnv();
     seedClub(fx, 1, 100);
     seedClub(fx, 2);
@@ -623,7 +623,7 @@ describe('TC-RF-10/11 · 兼容与守卫', () => {
     addPlayer(fx, 1, 1);
     addContract(fx, 1, 1, { wage: 2.5, rc: 10, service: 4, protection: 8, used: 0 });
 
-    // 0085 上线前已在途的续约单：evidence 只有旧两字段
+    // 0085 上线前已在途的续约单：evidence 只有旧两字段（无 freeRcChange）
     addTransfer(fx, {
       id: 5,
       type: 'rc_change',
@@ -633,9 +633,22 @@ describe('TC-RF-10/11 · 兼容与守卫', () => {
       fee: 15,
       evidence: JSON.stringify({ oldReleaseFee: 10, oldProtectionTicks: 8 }),
     });
+    // 审核侧兜底：缺字段按免费——0085 零回填 DEFAULT 0，提交时机会必然未消耗
     const approve = await approveTransferDeal(fx.env, 5, 1, { taskId: 5, decidedBy: 1, decision: 'approved' });
     expect(approve.status).toBe('signing');
-    expect(ledgerKinds(fx, 1, 'rc_change_fee')).toEqual([{ amount: -1.5 }]);
+    expect(ledgerKinds(fx, 1, 'rc_change_fee')).toEqual([]);
+
+    // 谈判成约：成约侧兜底同样生效——pending 免费（free_rc_change=1）、保护期写 NULL 不收口
+    const eFree = await renewalExpectedWage(fx, 15);
+    const session = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = 5');
+    const offer = await offerWage(fx.env, session!.id, 1, 1, eFree);
+    expect((offer as { result: string }).result).toBe('success');
+    const pending = sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM contract_pending_changes WHERE player_id = 1');
+    expect(pending).toMatchObject({ source: 'renewal', free_rc_change: 1, protection_ticks_new: null, rc_fee: 0, status: 'pending' });
+
+    // apply：机会消耗——每合同一次的口径闭环，旧单免费走完不会白拿第二次
+    await closeWindow(fx);
+    expect(contractOf(fx, 1)).toMatchObject({ release_fee: 15, protection_ticks: 8, free_rc_change_used: 1 });
   });
 
   it('守卫不因免费放开：训练营 400 / RC 越界 400 / 同窗 demand 409 / 在途 pending 409', async () => {
