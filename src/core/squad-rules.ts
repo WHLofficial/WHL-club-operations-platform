@@ -31,8 +31,9 @@ export const WAGE_FLOOR_GAP = 15;
 // 注册校验放行档（v6.33.1 特例期开关 registration_check_mode）：
 // - enforce（默认）：照常拦，不通过就 422；
 // - warn：体检照算、工作台照出红字，但提交放行（响应带 issues 供留痕）；
-// - off：隔离——提交不再走拦截闸，**实际放行 checkSquad 能报的全部 7 条规则**：
+// - off：隔离——提交不再走拦截闸，**实际放行 checkSquad 能报的全部 9 条规则**：
 //   squad_size（人数）、gk（门将下限）、trainee_size（训练营人数）、trainee_growth（训练营成长）、
+//   trainee_contract / first_team_contract（v6.64.4 名单段 × 合同类型双向挂钩）、
 //   ca_pa（初始 CA/PA 三档梯度）、contract（无现行合同）、wage_cap（工资帽）；
 //   教练侧工作台也不挂红字（checkSquad 仍被调用，结果只用于响应字段）。
 // 只作用于教练侧两条路径（GET /club/squad 与 POST /club/registrations）；
@@ -54,6 +55,8 @@ export interface SquadPlayer {
   initialCa: number | null;
   growable: boolean;
   hasContract: boolean;
+  /** 现行合同类型（v6.64.4 双向校验：名单段与合同类型挂钩；无合同为 null，走既有 contract 规则） */
+  contractType: 'formal' | 'trainee' | null;
   wage: number | null;
 }
 
@@ -72,6 +75,8 @@ export type SquadIssueRule =
   | 'gk'
   | 'trainee_size'
   | 'trainee_growth'
+  | 'trainee_contract'
+  | 'first_team_contract'
   | 'ca_pa'
   | 'wage_cap'
   | 'contract';
@@ -182,6 +187,24 @@ export function checkSquad(firstTeam: SquadPlayer[], trainee: SquadPlayer[], ctx
       rule: 'trainee_growth',
       message: `训练营球员必须可成长且 PA−CA＞0：${nameList(badTrainee)}`,
       playerIds: badTrainee.map((p) => p.playerId),
+    });
+  }
+  // v6.64.4 名单段 × 合同类型双向挂钩（下放/上调即时转类型；存量违例用按钮自愈，注册提交硬拦）：
+  // 训练营名单全 trainee 合同、一线队名单无 trainee 合同。无合同球员不重复报（contract 规则已覆盖）。
+  const badTraineeContract = trainee.filter((p) => p.hasContract && p.contractType !== 'trainee');
+  if (badTraineeContract.length > 0) {
+    issues.push({
+      rule: 'trainee_contract',
+      message: `训练营名单只能放训练营合同的球员（正式合同请先「下放」转训练营条款，或把球员移回一线队）：${nameList(badTraineeContract)}`,
+      playerIds: badTraineeContract.map((p) => p.playerId),
+    });
+  }
+  const badFirstTeamContract = firstTeam.filter((p) => p.hasContract && p.contractType === 'trainee');
+  if (badFirstTeamContract.length > 0) {
+    issues.push({
+      rule: 'first_team_contract',
+      message: `一线队名单不能放训练营合同的球员（请先「上调」谈正式合同，或把球员移进训练营名单）：${nameList(badFirstTeamContract)}`,
+      playerIds: badFirstTeamContract.map((p) => p.playerId),
     });
   }
 

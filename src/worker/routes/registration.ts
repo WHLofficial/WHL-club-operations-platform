@@ -124,6 +124,8 @@ function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadP
     initialCa: p.base_ca ?? p.ca,
     growable: p.growable === 1,
     hasContract: contract !== null,
+    // API/DB 侧是宽 string；core 判定只认两值，未知值归 null（不参与双向挂钩）
+    contractType: contract?.contractType === 'trainee' ? 'trainee' : contract?.contractType === 'formal' ? 'formal' : null,
     wage: contract?.wage ?? null,
   };
 }

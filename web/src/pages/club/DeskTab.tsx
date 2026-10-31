@@ -35,7 +35,7 @@ import { useMediaQuery } from '../../lib/use-media.ts';
 import { playerPath } from '../../lib/player-link.ts';
 // 纯合规引擎直接复用（v6.54.0 步骤 7）：current/projected 双跑必须与提交校验同一份规则，
 // 前端不许再抄一遍阈值（§10.5「projected 再跑一遍合规预检」）。
-import { checkSquad } from '../../../../src/core/squad-rules.ts';
+import { checkSquad, type SquadPlayer } from '../../../../src/core/squad-rules.ts';
 import { terminationFeePreview } from '../../lib/bypass-fee-preview.ts';
 import { PENDING_SOURCE_LABEL, delta2, fmt2, fmtShort, pendingFeeSmall, pendingWageSmall } from '../../lib/contract-view.ts';
 import { CapBar } from './CapBar.tsx';
@@ -321,7 +321,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
   // off 档（特例期隔离）不显示，与现有红字口径相同。
   const squadChecks = useMemo(() => {
     if (!rules || squad.checkMode === 'off') return null;
-    const toSquadPlayer = (p: SquadPlayerRow, projected: boolean) => ({
+    const toSquadPlayer = (p: SquadPlayerRow, projected: boolean): SquadPlayer => ({
       playerId: p.id,
       name: p.name,
       position: p.position,
@@ -330,6 +330,8 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
       initialCa: p.baseCa ?? p.ca,
       growable: p.growable,
       hasContract: p.hasContract,
+      // API 侧是宽 string，core 判定只认两值；未知值归 null（走 hasContract 判定，不参与双向挂钩）
+      contractType: p.contractType === 'trainee' ? 'trainee' : p.contractType === 'formal' ? 'formal' : null,
       wage: projected && p.hasPending ? (p.pendingWage ?? p.wage) : p.wage,
     });
     return {

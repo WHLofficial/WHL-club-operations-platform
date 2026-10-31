@@ -106,10 +106,10 @@ const ISO_PAST = '2026-07-01T00:00:00.000Z';
 const ISO_FUTURE = '2099-01-01T00:00:00.000Z';
 
 describe('时刻表注册表与解析（纯函数）', () => {
-  it('OPS_KEYS = 11 项、key 唯一、requiresWindow 口径正确', () => {
-    expect(OPS_KEYS.length).toBe(11);
+  it('OPS_KEYS = 12 项、key 唯一、requiresWindow 口径正确（v6.64.4 加 transfer_promotion）', () => {
+    expect(OPS_KEYS.length).toBe(12);
     const keys = OPS_KEYS.map((k) => k.key);
-    expect(new Set(keys).size).toBe(11);
+    expect(new Set(keys).size).toBe(12);
     expect(keys).toEqual([
       'transfer_listing',
       'transfer_offer',
@@ -120,6 +120,7 @@ describe('时刻表注册表与解析（纯函数）', () => {
       'transfer_match',
       'transfer_termination',
       'transfer_rc_change',
+      'transfer_promotion',
       'transfer_forced_auction',
       'consumption',
     ]);
@@ -128,6 +129,11 @@ describe('时刻表注册表与解析（纯函数）', () => {
       'transfer_offer',
       'transfer_negotiation',
     ]);
+    // 合成默认：transfer_promotion 随窗全窗（下放/上调随窗开关），其余键不设默认锚
+    const promotion = OPS_KEYS.find((k) => k.key === 'transfer_promotion')!;
+    expect(promotion.defaultStartAnchor).toBe('window_open');
+    expect(promotion.defaultEndAnchor).toBe('window_close');
+    expect(OPS_KEYS.filter((k) => k.defaultStartAnchor !== undefined).map((k) => k.key)).toEqual(['transfer_promotion']);
   });
 
   it('五态解析：不限制 / 未开始 / 进行中 / 已结束（含随窗两锚与无窗）', () => {
@@ -186,7 +192,7 @@ describe('时刻表注册表与解析（纯函数）', () => {
 });
 
 describe('迁移种子与视图', () => {
-  it('迁移后 11 行：consumption 随窗起止，其余全「不限制」、requires_window 与注册表一致、新列就位', () => {
+  it('迁移后 11 行（transfer_promotion 无种子行，由合成默认兜底）：consumption 随窗起止，其余全「不限制」', () => {
     const fx = freshEnv();
     const rows = sqlAll<{ op_key: string; start_anchor: string; end_anchor: string; requires_window: number }>(
       fx.sqlite,
@@ -203,6 +209,11 @@ describe('迁移种子与视图', () => {
     ).toBe(true);
     for (const meta of OPS_KEYS) {
       const row = rows.find((r) => r.op_key === meta.key);
+      // v6.64.4 后登记的键零迁移不落种子行，靠 loadOpsRows 合成（见视图用例）
+      if (meta.defaultStartAnchor !== undefined) {
+        expect(row, `${meta.key} 不应有种子行`).toBeUndefined();
+        continue;
+      }
       expect(row, meta.key).toBeDefined();
       expect(row!.requires_window).toBe(meta.requiresWindow ? 1 : 0);
     }
@@ -213,15 +224,22 @@ describe('迁移种子与视图', () => {
     expect(sqlGet<{ name: string }>(fx.sqlite, "SELECT name FROM pragma_table_info('negotiation_sessions') WHERE name = 'reminded_at'")).toBeDefined();
   });
 
-  it('视图：默认只有消费档期「进行中」，其余 10 行「不限制」', async () => {
+  it('视图：12 行（合成 transfer_promotion 默认随窗全窗），消费档期进行中、其余不限制', async () => {
     const fx = freshEnv();
     seedWorld(fx);
     const view = await opsScheduleView(fx.env.DB);
-    expect(view.rows.length).toBe(11);
+    expect(view.rows.length).toBe(12);
     expect(view.rows.find((r) => r.key === 'consumption')).toMatchObject({ state: 'open', stateLabel: '进行中' });
+    expect(view.rows.find((r) => r.key === 'transfer_promotion')).toMatchObject({
+      state: 'open',
+      stateLabel: '进行中',
+      startAnchor: 'window_open',
+      endAnchor: 'window_close',
+      requiresWindow: true,
+    });
     expect(
       view.rows
-        .filter((r) => r.key !== 'consumption')
+        .filter((r) => r.key !== 'consumption' && r.key !== 'transfer_promotion')
         .every((r) => r.state === 'unrestricted' && r.stateLabel === '不限制'),
     ).toBe(true);
     expect(view.window).toMatchObject({ openedAt: '2026-07-01T00:00:00Z' });
@@ -230,18 +248,23 @@ describe('迁移种子与视图', () => {
     const res = await send(fx.env, 'GET', '/api/ops-schedule', undefined);
     expect(res.status).toBe(200);
     const out = (await res.json()) as { rows: unknown[] };
-    expect(out.rows.length).toBe(11);
+    expect(out.rows.length).toBe(12);
   });
 
-  it('视图：没开窗时消费档期「已结束」，闸门给出 409 文案', async () => {
+  it('视图：没开窗时消费档期与合成的上调/下放行「已结束」，闸门给出 409 文案', async () => {
     const fx = freshEnv();
     seedWorld(fx, { windowOpen: false });
     const view = await opsScheduleView(fx.env.DB);
     expect(view.rows.find((r) => r.key === 'consumption')).toMatchObject({ state: 'closed', stateLabel: '已结束' });
+    expect(view.rows.find((r) => r.key === 'transfer_promotion')).toMatchObject({ state: 'closed' });
     const block = await opBlockReason(fx.env.DB, 'consumption');
     expect(block?.status).toBe(409);
     expect(block?.message).toBeTruthy();
     await expect(assertOpOpen(fx.env.DB, 'consumption')).rejects.toMatchObject({ status: 409 });
+    // 合成行同样有牙：无窗时上调/下放被 409 挡住（label 来自 meta）
+    const promoBlock = await opBlockReason(fx.env.DB, 'transfer_promotion');
+    expect(promoBlock?.status).toBe(409);
+    expect(promoBlock?.message).toContain('上调/下放已结束');
   });
 });
 
@@ -294,6 +317,41 @@ describe('管理端保存（PUT /api/admin/ops-schedule）', () => {
 
     const view = await opsScheduleView(fx.env.DB);
     expect(view.rows.find((r) => r.key === 'transfer_termination')).toMatchObject({ state: 'closed' });
+  });
+
+  it('保存合成行（transfer_promotion）：upsert 物化落库，再保存走同一条路径更新', async () => {
+    const fx = freshEnv();
+    seedWorld(fx);
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ops_schedule WHERE op_key = 'transfer_promotion'")).toMatchObject({ n: 0 });
+
+    const res = await send(
+      fx.env,
+      'PUT',
+      '/api/admin/ops-schedule',
+      { key: 'transfer_promotion', startAnchor: 'window_open', startAt: null, endAnchor: 'window_close', endAt: null, requiresWindow: true, closeInflight: true, note: '随窗开关' },
+      'tok-admin',
+    );
+    expect(res.status).toBe(200);
+    const row = sqlGet<{ start_anchor: string; end_anchor: string; note: string; updated_by: number }>(
+      fx.sqlite,
+      'SELECT * FROM ops_schedule WHERE op_key = ?',
+      'transfer_promotion',
+    );
+    expect(row).toMatchObject({ start_anchor: 'window_open', end_anchor: 'window_close', note: '随窗开关', updated_by: 1 });
+    const audit = sqlGet<{ action: string }>(fx.sqlite, "SELECT action FROM audit_log WHERE action = 'ops_schedule_set' ORDER BY id DESC LIMIT 1");
+    expect(audit).toMatchObject({ action: 'ops_schedule_set' });
+
+    // 二次保存（已有物理行）：更新而非重复插入
+    const again = await send(
+      fx.env,
+      'PUT',
+      '/api/admin/ops-schedule',
+      { key: 'transfer_promotion', startAnchor: 'none', startAt: null, endAnchor: 'none', endAt: null, requiresWindow: true },
+      'tok-admin',
+    );
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { row: { state: string } }).row.state).toBe('unrestricted');
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ops_schedule WHERE op_key = 'transfer_promotion'")).toMatchObject({ n: 1 });
   });
 
   it('非法输入 400 / 未知键 404 / 非管理员 403', async () => {

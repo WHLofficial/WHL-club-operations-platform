@@ -12,6 +12,7 @@ function player(overrides: Partial<SquadPlayer> = {}): SquadPlayer {
     initialCa: 80,
     growable: true,
     hasContract: true,
+    contractType: 'formal',
     wage: 1,
     ...overrides,
   };
@@ -68,22 +69,45 @@ describe('阵容注册合规引擎（规则 4.2）', () => {
   });
 
   it('训练营超 7 人被拒', () => {
-    const trainee = Array.from({ length: 8 }, (_, i) => player({ playerId: 100 + i, name: `青训${i + 1}`, ca: 60, pa: 75 }));
+    const trainee = Array.from({ length: 8 }, (_, i) =>
+      player({ playerId: 100 + i, name: `青训${i + 1}`, ca: 60, pa: 75, contractType: 'trainee' }),
+    );
     const res = checkSquad(firstTeam(20), trainee, ctx());
     expect(res.issues).toEqual([expect.objectContaining({ rule: 'trainee_size', message: '训练营最多注册 7 人，当前 8 人' })]);
   });
 
   it('训练营球员不可成长或 PA−CA≤0 被拒（点到名）', () => {
     const trainee = [
-      player({ playerId: 101, name: '张三', ca: 60, pa: 75 }),
-      player({ playerId: 102, name: '李四', growable: false, ca: 60, pa: 75 }),
-      player({ playerId: 103, name: '王五', ca: 70, pa: 70 }),
+      player({ playerId: 101, name: '张三', ca: 60, pa: 75, contractType: 'trainee' }),
+      player({ playerId: 102, name: '李四', growable: false, ca: 60, pa: 75, contractType: 'trainee' }),
+      player({ playerId: 103, name: '王五', ca: 70, pa: 70, contractType: 'trainee' }),
     ];
     const res = checkSquad(firstTeam(20), trainee, ctx());
     expect(res.issues).toHaveLength(1);
     expect(res.issues[0].rule).toBe('trainee_growth');
     expect(res.issues[0].message).toContain('李四、王五');
     expect(res.issues[0].playerIds).toEqual([102, 103]);
+  });
+
+  // v6.64.4 名单段 × 合同类型双向挂钩：下放/上调即时转类型后，注册名单不允许错位
+  it('训练营名单放正式合同球员被拒（trainee_contract）；一线队放训练营合同球员被拒（first_team_contract）', () => {
+    const traineeSide = checkSquad(firstTeam(20), [player({ playerId: 101, name: '错放甲', ca: 60, pa: 75, contractType: 'formal' })], ctx());
+    expect(traineeSide.issues).toEqual([expect.objectContaining({ rule: 'trainee_contract', playerIds: [101] })]);
+
+    const team = firstTeam(20);
+    team[0] = player({ playerId: 1, name: '球员一', position: 'GK', contractType: 'trainee' });
+    const firstSide = checkSquad(team, [], ctx());
+    expect(firstSide.issues).toEqual([expect.objectContaining({ rule: 'first_team_contract' })]);
+    expect(firstSide.issues[0].playerIds).toEqual([1]);
+  });
+
+  it('无合同球员只报 contract 规则，不重复报双向挂钩两条', () => {
+    const res = checkSquad(
+      firstTeam(20),
+      [player({ playerId: 101, name: '没合同', ca: 60, pa: 75, hasContract: false, contractType: null, wage: null })],
+      ctx(),
+    );
+    expect(res.issues.map((i) => i.rule)).toEqual(['contract']);
   });
 
   it('初始CA≥90 超过 1 名被拒（顶级）', () => {
@@ -160,7 +184,7 @@ describe('阵容注册合规引擎（规则 4.2）', () => {
     expect(capped.issues[0].message).toContain('工资合计 40.00 m/半赛季，超出工资帽 30 m');
     expect(checkSquad(team, [], ctx({ wageCap: null })).issues).toHaveLength(0);
     // 训练营工资也计入
-    const withTrainee = checkSquad(firstTeam(20, 2), [player({ playerId: 99, wage: TRAINEE_WAGE })], ctx({ wageCap: 40 }));
+    const withTrainee = checkSquad(firstTeam(20, 2), [player({ playerId: 99, wage: TRAINEE_WAGE, contractType: 'trainee' })], ctx({ wageCap: 40 }));
     expect(withTrainee.issues).toHaveLength(1);
     expect(withTrainee.issues[0].rule).toBe('wage_cap');
   });

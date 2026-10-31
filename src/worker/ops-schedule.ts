@@ -60,6 +60,21 @@ export async function loadOpsRows(db: D1Database): Promise<Map<string, OpsRow>> 
       note: r.note,
     });
   }
+  // v6.64.4：后登记的操作键（如 transfer_promotion）没有 0069 的种子行——按 meta 默认锚合成
+  // 内存行，管理端可见可配置；首次保存即经 upsert 物化落库。合成默认随窗全窗（下放/上调随窗开关）。
+  for (const meta of OPS_KEYS) {
+    if (rows.has(meta.key)) continue;
+    rows.set(meta.key, {
+      opKey: meta.key,
+      startAnchor: meta.defaultStartAnchor ?? 'none',
+      startAt: null,
+      endAnchor: meta.defaultEndAnchor ?? 'none',
+      endAt: null,
+      requiresWindow: meta.requiresWindow,
+      closeInflight: true,
+      note: '',
+    });
+  }
   cache = { at, rows };
   return rows;
 }
@@ -202,14 +217,20 @@ export async function saveOpsRow(env: Env, opKey: string, input: OpsSaveInput, a
     note,
   };
   const audit = createAuditStatement(db);
+  // upsert（v6.64.4）：合成默认行首次保存即物化；已落库的行与原 UPDATE 等值。
   await db.batch([
     db
       .prepare(
-        `UPDATE ops_schedule SET start_anchor = ?, start_at = ?, end_anchor = ?, end_at = ?, requires_window = ?,
-                close_inflight = ?, note = ?, updated_by = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE op_key = ?`,
+        `INSERT INTO ops_schedule (op_key, start_anchor, start_at, end_anchor, end_at, requires_window, close_inflight, note, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT(op_key) DO UPDATE SET
+           start_anchor = excluded.start_anchor, start_at = excluded.start_at,
+           end_anchor = excluded.end_anchor, end_at = excluded.end_at,
+           requires_window = excluded.requires_window, close_inflight = excluded.close_inflight,
+           note = excluded.note, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
       )
       .bind(
+        opKey,
         after.startAnchor,
         after.startAt,
         after.endAnchor,
@@ -218,7 +239,6 @@ export async function saveOpsRow(env: Env, opKey: string, input: OpsSaveInput, a
         after.closeInflight ? 1 : 0,
         after.note,
         actor,
-        opKey,
       ),
     audit({
       actor,

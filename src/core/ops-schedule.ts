@@ -15,9 +15,12 @@ export interface OpsKeyMeta {
   group: string;
   requiresWindow: boolean; // 该操作是否本来就受现有窗口闸门约束（迁移 seed 同值；管理端表单默认）
   desc: string;
+  /** 缺种子行时的合成默认锚（v6.64.4：迁移 0069 只种了当时登记的 11 键；缺省 none = 不限制） */
+  defaultStartAnchor?: OpsStartAnchor;
+  defaultEndAnchor?: OpsEndAnchor;
 }
 
-// 11 个操作键：10 项转会操作 + 消费中心整体。审核单不设时段（管理组工作流，非球员操作）。
+// 12 个操作键：11 项转会操作 + 消费中心整体。审核单不设时段（管理组工作流，非球员操作）。
 export const OPS_KEYS: readonly OpsKeyMeta[] = [
   { key: 'transfer_listing', label: '挂牌与出价', group: '转会', requiresWindow: true, desc: '上架挂牌与对挂牌出价（含强制拍卖同链）' },
   { key: 'transfer_offer', label: '报价', group: '转会', requiresWindow: false, desc: '对名单球员发起报价 / 还价（v6.29.0 起不受窗口限制）' },
@@ -28,6 +31,7 @@ export const OPS_KEYS: readonly OpsKeyMeta[] = [
   { key: 'transfer_match', label: '匹配窗', group: '转会', requiresWindow: true, desc: '激活 / 正式合同的 24h 匹配窗' },
   { key: 'transfer_termination', label: '解约', group: '转会', requiresWindow: true, desc: '解约本队球员（进海捞池）' },
   { key: 'transfer_rc_change', label: '续约', group: '转会', requiresWindow: true, desc: '改违约金续约（rc-change）' },
+  { key: 'transfer_promotion', label: '上调/下放', group: '转会', requiresWindow: true, desc: '一线队 ⇄ 训练营双向调整（下放即时转训练营条款，上调开签约谈判）', defaultStartAnchor: 'window_open', defaultEndAnchor: 'window_close' },
   { key: 'transfer_forced_auction', label: '强制拍卖', group: '转会', requiresWindow: true, desc: '管理端发起的强制拍卖挂牌' },
   { key: 'consumption', label: '消费中心', group: '消费', requiresWindow: true, desc: '消费工单 / 球场扩建升级 / 设施 / 冠名 / 档期预订' },
 ];

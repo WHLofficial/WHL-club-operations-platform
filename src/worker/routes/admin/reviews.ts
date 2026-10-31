@@ -106,7 +106,7 @@ app.get('/compliance', async (c) => {
   }>();
   const regRows = await c.env.DB.prepare(
     `SELECT r.club_id, r.player_id, r.squad, ${sqlDisplayName('p')} AS name, p.position, p.ca, p.pa, p.base_ca, p.growable,
-            ct.player_id AS contract_player_id, ct.wage
+            ct.player_id AS contract_player_id, ct.wage, ct.contract_type
      FROM registrations r
      JOIN players p ON p.id = r.player_id
      LEFT JOIN contracts ct ON ct.player_id = r.player_id AND ct.is_active = 1 AND ct.club_id = r.club_id
@@ -125,6 +125,7 @@ app.get('/compliance', async (c) => {
       growable: number;
       contract_player_id: number | null;
       wage: number | null;
+      contract_type: string | null;
     }>();
 
   const cache = tierCache();
@@ -162,6 +163,7 @@ app.get('/compliance', async (c) => {
         initialCa: r.base_ca ?? r.ca,
         growable: r.growable === 1,
         hasContract: r.contract_player_id !== null,
+        contractType: r.contract_type === 'trainee' ? 'trainee' : r.contract_type === 'formal' ? 'formal' : null,
         wage: r.contract_player_id !== null ? r.wage ?? 0 : null,
       });
       const firstTeam = mine.filter((r) => r.squad === 'first_team').map(toSp);
