@@ -135,6 +135,21 @@ describe('转会广告板（GET /api/market/transfer-board）', () => {
     expect(out.players.some((p) => p.id === 4)).toBe(false);
   });
 
+  it('无东家的过期挂牌不进板（v6.64.2）：club_id 为空的人没有卖家可报价', async () => {
+    const fx = freshEnv();
+    seedBoard(fx);
+    // 球员 9：transfer_listed 还挂着，但人已经是自由身（club_id 为 NULL）——前端会拿到 clubName: null
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, fc_id, transfer_listed, list_price, transfer_listed_at)
+       VALUES (9, 'uid9', '浪人', NULL, 'CB', 34, 85, 85, 'free', 19, 1, 15, '2026-01-01T00:00:00.000Z');`,
+    );
+    freezeNow();
+    const out = await board(fx);
+    expect(out.total).toBe(7);
+    expect(out.players.some((p) => p.id === 9)).toBe(false);
+    expect(out.players.every((p) => p.clubName !== null)).toBe(true);
+  });
+
   it('排序：付费档按着重度 → 挂出时间 → id；普通档按时间桶轮换（锁死时钟取字面量）', async () => {
     const fx = freshEnv();
     seedBoard(fx);

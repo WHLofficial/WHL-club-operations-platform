@@ -785,10 +785,15 @@ export async function completeTermination(
     // 重放安全：players UPDATE 有 club_id 闸，reset 事件靠 UNIQUE(player_id, match_ref, event_type) 去重。
     // v6.63.0：台账不再是「归零」——徽章明细全删后按全量公式重算，FC 自带的 PlayStyle 槽
     //（含被发放金抑制的银槽，金行随明细删除而回归）全额计入台账；只有发放所得清零。
+    // v6.64.2：解约即离队，旧东家的挂牌设置一并清掉——transfer_listed 留着不清，广告板就会
+    // 捞出「无东家的名单行」（clubName 为空，前端 TeamLogo 拿到 null 直接抛错白屏）。
     db
       .prepare(
         `UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE(base_ca, ca),
-           growth_xp = 0, levels_applied = 0, updated_at = ${nowSql()}
+           growth_xp = 0, levels_applied = 0,
+           transfer_listed = 0, list_price = NULL, min_offer_price = NULL, offer_auto = 0,
+           not_for_sale = 0, transfer_listed_at = NULL,
+           updated_at = ${nowSql()}
          WHERE id = ? AND club_id = ?`,
       )
       .bind(transfer.player_id, transfer.from_club_id),

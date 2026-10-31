@@ -20,23 +20,26 @@ export function TeamLogo({
   size = 24,
   circle = true,
 }: {
-  name: string;
+  // v6.64.2：公开名单里会出现没有东家的球员（club_id 为空 ⇒ 队名 null）。以前直接 for..of 队名
+  // 会抛 "null is not iterable"、整页白屏，所以这里按空队名兜底。
+  name: string | null | undefined;
   logoKey?: string | null;
   size?: number;
   circle?: boolean;
 }) {
+  const label = name ?? '';
   const box: CSSProperties = { width: size, height: size };
   const shape = circle ? 'team-logo team-logo-round' : 'team-logo';
   const url = mediaUrl(logoKey);
   if (url) {
-    return <img className={shape} src={url} alt={name} style={box} />;
+    return <img className={shape} src={url} alt={label || '未知球队'} style={box} />;
   }
   return (
     <span
       className={`${shape} team-logo-fallback`}
-      style={{ ...box, background: colorOf(name), fontSize: Math.max(10, Math.round(size * 0.46)) }}
+      style={{ ...box, background: colorOf(label), fontSize: Math.max(10, Math.round(size * 0.46)) }}
     >
-      {name.slice(0, 1)}
+      {label.slice(0, 1) || '—'}
     </span>
   );
 }

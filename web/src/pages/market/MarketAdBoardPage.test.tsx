@@ -109,6 +109,21 @@ describe('v6.31.0 广告板页（MarketAdBoardPage）', () => {
     expect(fallbacks[0].textContent).toBe('曼');
   });
 
+  it('无东家的名单行不白屏（v6.64.2）：clubName 为 null 时队徽兜底「—」、副标题不出现 "null"', async () => {
+    // 生产事故复现：名单里混进自由身球员（club_id 为空）⇒ clubName / logoKey 都是 null。
+    // 旧 TeamLogo 对 null 队名做 for..of 抛 TypeError，React 整棵树卸掉 ⇒ 整页白屏。
+    const { container } = renderPage(
+      board([row({ id: 90, name: '无主甲', clubId: null, clubName: null, logoKey: null, status: 'free' })]),
+    );
+    expect(await screen.findByText('无主甲')).toBeTruthy();
+    // 页头仍在 ⇒ 没有整页崩
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('转会市场 · 广告板');
+    const fallback = container.querySelector('.adb-card .team-logo-fallback');
+    expect(fallback?.textContent).toBe('—');
+    expect(screen.getByText('ST · 24 岁 · —')).toBeTruthy();
+    expect(container.textContent).not.toContain('null');
+  });
+
   it('置顶区：只放 emphasis=2 的行，标题带个数与付费位口径', async () => {    const { container } = renderPage(MIXED);
     expect(await screen.findByText('置顶甲')).toBeTruthy();
     expect(screen.getByText('1 个 · 付费位，按到期时间排')).toBeTruthy();

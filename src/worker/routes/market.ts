@@ -443,6 +443,8 @@ interface TransferBoardDbRow {
 // GET /api/market/transfer-board?limit= —— 转会广告板（v6.31.0）：各队「列入转会名单」的球员公开面。
 // 只收 players.transfer_listed = 1；emphasis 取 player_promotions 现行最高档（0 普通 / 1 推荐 / 2 置顶），
 // 该表本版只有读路径（付费写流程未实现，接口预留给「列入转会名单时的有偿选项」）。
+// v6.64.2：再排除没有东家的球员（club_id 为空）——名单语义是「各队挂出的转会名单」，无归属的人
+// 既没有卖家可报价、卡面也没有球队（前端曾经因此白屏），属于过期的挂牌标记。
 // 公开数值只下发标价 list_price（/api/players 列表仍只下发布尔位，v6.30.0 口径不变）。
 // 顺序：付费档（1/2）按着重度 → 挂出时间 → id；没有付费加权的（emphasis = 0）按「时间桶」轮换
 // （5 分钟一桶，种子化洗牌 ⇒ 同一桶内所有访客同一份乱序、跨 isolate 同序）——见 core/ad-board.ts。
@@ -486,7 +488,7 @@ app.get('/market/transfer-board', async (c) => {
              FROM player_promotions WHERE ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
            ) WHERE rn = 1
          ) pm ON pm.player_id = p.id
-         WHERE p.transfer_listed = 1
+         WHERE p.transfer_listed = 1 AND p.club_id IS NOT NULL
          ORDER BY CASE WHEN pm.tier IN (1, 2) THEN pm.tier ELSE 0 END DESC,
                   p.transfer_listed_at IS NULL, p.transfer_listed_at DESC, p.id DESC
          LIMIT ?`,

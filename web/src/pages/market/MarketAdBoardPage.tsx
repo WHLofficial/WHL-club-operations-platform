@@ -27,9 +27,10 @@ function amount(v: number | null | undefined): string {
 }
 
 // 副标题：位置 · 年龄 · 球队（位置沿用球员库的「空格分隔」口径）
+// v6.64.2：没有东家的名单行（club_id 为空）不能把 clubName 打成 "null"，留「—」
 function subline(row: TransferBoardRow): string {
   const pos = row.positions.length > 0 ? row.positions.join(' ') : '—';
-  return `${pos} · ${row.age ?? '—'} 岁 · ${row.clubName}`;
+  return `${pos} · ${row.age ?? '—'} 岁 · ${row.clubName ?? '—'}`;
 }
 
 // 着重度角标：1 推荐（橙）/ 2 置顶（金）/ 0 普通（无角标）

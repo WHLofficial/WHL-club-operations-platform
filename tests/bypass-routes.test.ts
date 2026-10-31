@@ -746,6 +746,44 @@ describe('海捞（free_agent）', () => {
     expect(term?.status).toBe('completed');
   });
 
+  it('解约即清挂牌设置：transfer_listed / 标价 / 名单戳一起归零（v6.64.2 白屏根因）', async () => {
+    const fx = await seedBypass();
+    fx.env.rng = () => 0.5;
+    // 乡贤先被列进转会名单（有标价、最低报价、自动同意）
+    fx.sqlite.exec(
+      `UPDATE players SET transfer_listed = 1, list_price = 41, min_offer_price = 39, offer_auto = 1,
+         not_for_sale = 0, transfer_listed_at = '2026-10-12T03:07:08.173Z'
+       WHERE id = 20;`,
+    );
+    expect((await post('/api/transfers/termination', { playerId: 20 }, 'tok-coach', fx.env)).status).toBe(201);
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    // 离队后不能继续挂着旧东家的名单/标价——否则广告板会捞出「无东家的名单行」并把页面打白
+    const row = sqlGet<{
+      club_id: number | null;
+      status: string;
+      transfer_listed: number;
+      list_price: number | null;
+      min_offer_price: number | null;
+      offer_auto: number;
+      not_for_sale: number;
+      transfer_listed_at: string | null;
+    }>(
+      fx.sqlite,
+      'SELECT club_id, status, transfer_listed, list_price, min_offer_price, offer_auto, not_for_sale, transfer_listed_at FROM players WHERE id = 20',
+    );
+    expect(row).toMatchObject({
+      club_id: null,
+      status: 'free',
+      transfer_listed: 0,
+      list_price: null,
+      min_offer_price: null,
+      offer_auto: 0,
+      not_for_sale: 0,
+      transfer_listed_at: null,
+    });
+  });
+
   it('海捞真自由身是签入不是离队：中国计划徽章一行不删、台账不动（v3.3.0）', async () => {
     const fx = await seedBypass();
     fx.sqlite.exec(`

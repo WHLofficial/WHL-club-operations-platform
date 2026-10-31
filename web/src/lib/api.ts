@@ -1209,8 +1209,10 @@ export interface TransferBoardRow {
   age: number | null;
   ca: number;
   pa: number;
-  clubId: number;
-  clubName: string;
+  clubId: number | null;
+  // v6.64.2：端点已排除无东家的球员（club_id 为空不进名单），但类型必须照真实载荷写——
+  // 旧类型声明的 string 让「队名 null」骗过了 typecheck，直接在 TeamLogo 里抛错白屏。
+  clubName: string | null;
   /** 挂牌队的 R2 队徽 key（v6.32.0；无徽 null → TeamLogo 回落队名哈希色块） */
   logoKey: string | null;
   listPrice: number | null;

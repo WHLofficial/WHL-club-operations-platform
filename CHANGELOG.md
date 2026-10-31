@@ -4,6 +4,18 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.64.2] · 无东家的名单行把广告板打白屏（2026-10-31）
+
+**Fixed**
+
+- `/market/board` 白屏。生产 player 90（Iñigo Martínez）在 10-31 04:54Z 被解约（`transfers id=36`，`from_club_id=33`）后成了自由身，但**旧东家的挂牌标记没清**——`players.transfer_listed` 仍是 1 ⇒ 广告板按 `transfer_listed = 1` 把他捞出来，行的 `clubName` 是 null ⇒ `TeamLogo` 的 `colorOf()` 对 null 做 `for..of` 抛 `TypeError: t is not iterable`，React 无错误边界整棵树卸载，整页白得只剩底色。三处一起修：`TeamLogo` 的 `name` 改可空并按空队名兜底（`—`）、广告板副标题 `clubName ?? '—'`、`TransferBoardRow` 类型照真实载荷改成 `clubId: number | null` / `clubName: string | null`（旧类型写死 `string`，让 null 骗过了 typecheck）。
+- `GET /api/market/transfer-board` 名单口径加 `AND p.club_id IS NOT NULL`：名单语义是「各队挂出的转会名单」，没有东家的人在板上既没有卖家可报价、卡面也没有球队，属于过期的挂牌标记。
+- 解约完成时一并清挂牌设置（`transfer_listed = 0`、`list_price` / `min_offer_price` / `transfer_listed_at` 置 NULL、`offer_auto` / `not_for_sale` 归 0），从源头断掉「离队后仍带着旧东家的名单与标价」这类脏数据；下家接手后也不会继承别人的挂牌价。
+
+**根因链**：解约不清挂牌 → 广告板捞到无东家行 → 队名为 null → TeamLogo 抛错 → 无错误边界整页白屏。修复不会让历史脏数据回魂：SQL 已挡在板外，前端也做了 null 兜底（KV 里 1h 的旧缓存带着 null 行也不会再白屏）。
+
+**验收**：typecheck 三份全清；vitest **177 文件 / 2,859 例**全绿（v6.64.1 基线 177/2,856，+3 例）；`npm run build` 通过。测试计划 `docs/test-plans/v6.64.2-board-clubless.md`。判级 **patch**（零迁移、零新端点；公开端点名单口径收紧一行）。
+
 ## [v6.64.1] · 签约谈判在途的球员不能再被海捞（2026-10-31）
 
 **已上线（2026-10-31）**：push `8b189cc..42931e1` 触发 CF Workers Builds 自动部署，生效 Version `53b6aa02-50d8-45bb-b609-c320e2ccf21e` @2026-10-31T07:25:00Z（零迁移）。上线回读：health 200、入口资产 `index-D9OFJQ2i.js` 与本地 6.64.1 构建同名同哈希、两名在签约谈判的生产球员 `seaSign` 返回新文案、干净自由身仍可捞。
