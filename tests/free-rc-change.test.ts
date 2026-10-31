@@ -464,6 +464,26 @@ describe('TC-RF-04/05/09 · 换队刷新与不动列', () => {
     expect(contractOf(fx, 2)).toMatchObject({ free_rc_change_used: 0 });
   });
 
+  it('海捞复签 UPSERT 翻新旧合同行：used=1 的旧行翻新后归 0（excluded 兜底）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 1, 100);
+    seedClub(fx, 2);
+    openWindowRow(fx);
+    addPlayer(fx, 5, 1);
+    addContract(fx, 5, 1, { wage: 2.5, rc: 20, service: 4, protection: 8, used: 1 });
+    // 解约（bypass 路径的终态）：行保留 is_active=0、球员去归属——复签时 INSERT 撞 player_id 走 upsert
+    fx.sqlite.exec(`UPDATE contracts SET is_active = 0 WHERE player_id = 5; UPDATE players SET club_id = NULL WHERE id = 5`);
+
+    addTransfer(fx, { id: 6, type: 'free_agent', playerId: 5, from: null, to: 2, fee: 20 });
+    await completeTransfer(fx.env, 6, null, 'user', undefined, {
+      wage: 3,
+      releaseFee: 20,
+      source: 'free_agent',
+      contractType: 'formal',
+    });
+    expect(contractOf(fx, 5)).toMatchObject({ club_id: 2, free_rc_change_used: 0 });
+  });
+
   it('A 分支买回（纯回归）：免费列用合同行现值、不进快照恢复', async () => {
     const fx = freshEnv();
     seedClub(fx, 1);
