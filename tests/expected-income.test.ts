@@ -386,6 +386,18 @@ describe('0081/0087 触发器同源锁（三个资金闸）', () => {
     }
   });
 
+  it('TC-M02：0087 幂等重放——DROP IF EXISTS + CREATE 再跑一遍，触发器定义逐字不变', () => {
+    const { sqlite } = setup();
+    const before = TRIGGERS.map(
+      (name) => (sqlite.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(name) as { sql: string }).sql,
+    );
+    sqlite.exec(readMig('0087_activation_listing_income.sql'));
+    const after = TRIGGERS.map(
+      (name) => (sqlite.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(name) as { sql: string }).sql,
+    );
+    expect(after).toEqual(before);
+  });
+
   it('额度足放行、无额度拒绝；来源落空后同一笔冻结被拒（应用层与触发器同值）', async () => {
     const { sqlite, db } = setup();
     expect(await availableBalance(db, 1)).toBe(81);
