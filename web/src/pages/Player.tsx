@@ -61,12 +61,12 @@ import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 import {
   PS_GOLD_BASE,
   PS_GRANTABLE_BASE_IDS,
-  mergePlaystyleSlots,
   playstyleIdOf,
   playstyleKindOf,
   type PlaystyleKind,
   type PlaystyleSlot,
 } from '../../../src/core/fc26.ts';
+import { mergedPlaystyleList } from '../../../src/core/playstyle-rules.ts';
 import { useToast } from '../lib/toast.tsx';
 import { qk, useOffersReceivedPending, usePlayerDetail, useSeasonsCurrent } from '../lib/queries.ts';
 import { useAuth } from '../lib/auth.tsx';
@@ -349,10 +349,11 @@ export default function Player() {
   // 左栏五态判据：本队 = 登录教练且现属俱乐部就是我的队；「非卖品」字段后端还没有（v6.3.0 报价子系统），运行时暂不可达
   const isMine = club !== null && myClubId === club.id;
   const isCpu = clubInfo?.isCpu ?? false;
-  // PlayStyle 清单 = FC 源槽 + 发放明细（v3.3.0）：明细存基础 ID，合并时换算成存库 ID 并去重
-  const playstyles = mergePlaystyleSlots(
+  // PlayStyle 清单 = FC 源槽 + 发放明细（v3.3.0；v6.63.0 含可逆抑制与来源角标）：明细存基础 ID，
+  // 合并时换算成存库 ID 并去重，被发放金顶掉的 FC 银槽不出现
+  const playstyles = mergedPlaystyleList(
     playstyleBadges(attrs),
-    (growth?.playstyleDetails ?? []).map((d) => ({ slot: d.slot, kind: d.kind, psid: d.psid })),
+    (growth?.playstyleDetails ?? []).map((d) => ({ slot: d.slot, kind: d.kind, psid: d.psid, source: d.source })),
   );
   const ownedPsids = playstyles.map((s) => s.psid);
   const silverOptions = PS_GRANTABLE_BASE_IDS.filter((id) => !ownedPsids.includes(id));

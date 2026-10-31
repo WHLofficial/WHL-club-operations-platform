@@ -548,7 +548,7 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
         SELECT 10, v, 'silver', v, 'growth', '2026-01-01T00:00:00.000Z' FROM s;
     `);
 
-    const lv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [55] }, 'tok-coach1', fx.env);
+    const lv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [45] }, 'tok-coach1', fx.env);
     expect(lv.status).toBe(400);
     expect(((await lv.json()) as { error: string }).error).toContain('银槽已满（12 个）');
     expect(sqlGet<{ ca: number; badges_silver: number; levels_applied: number }>(fx.sqlite, 'SELECT ca, badges_silver, levels_applied FROM players WHERE id = 10')).toMatchObject({
@@ -558,10 +558,11 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     });
   });
 
-  it('徽章封顶：台账到帽后不再加，CA 照加', async () => {
+  it('台账是派生值：手工漂移的台账在下次明细变更时被全量重算纠正，CA 照加', async () => {
     const fx = freshEnv();
     seedPlatform(fx);
-    // 台账被管理端手工顶到帽（12），槽位其实还空着 —— 计数封顶只挡台账，不挡 CA
+    // 台账被手工顶到帽（12/3）而明细为空 —— v6.63.0 起台账 = 合并清单计数（派生值），
+    // 任何明细变更都按全量公式重算，漂移随之被纠正；上限守卫 = 槽位结构，不再有独立台账帽
     fx.sqlite.exec(`
       INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, ca, badges_silver, badges_gold) VALUES
         (40, 'p40', '老将', 1, 'ST', 'normal', 5, 10, 90, 12, 3);
@@ -571,8 +572,8 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     expect(lv.status).toBe(200);
     expect(sqlGet<{ ca: number; badges_silver: number; badges_gold: number }>(fx.sqlite, 'SELECT ca, badges_silver, badges_gold FROM players WHERE id = 40')).toMatchObject({
       ca: 93,
-      badges_silver: 12,
-      badges_gold: 3,
+      badges_silver: 2,
+      badges_gold: 0,
     });
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 40')?.n).toBe(2);
   });

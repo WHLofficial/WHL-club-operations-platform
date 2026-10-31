@@ -19,7 +19,7 @@ import { round2 } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
-import { growthResetStatements } from './growth.ts';
+import { growthResetStatements, recountBadgeStatements } from './growth.ts';
 import { hookTierRecompute } from './growth-tier.ts';
 import { voidDemandStatements } from './demand-ops.ts';
 import { queueAllUserClubsNotification } from './notify.ts';
@@ -352,14 +352,12 @@ export async function completeTransfer(
         )
         .bind(transfer.to_club_id, playerStatus, transfer.player_id, moveFromClubId, moveFromClubId),
     );
-    // 中国计划徽章随离队失效（§10）：明细行回收，台账计数同步减。计数在 batch 外先读出来，
-    // 免得依赖批内语句顺序；重放时已无 china 行可减、DELETE 空转，整批仍然幂等。
+    // 中国计划徽章随离队失效（§10）：明细行回收，台账按全量公式重算（v6.63.0：计数是派生值，
+    // 不再增量减 —— 被这些行抑制的 FC 银槽同步回归）。重放时已无 china 行可删、DELETE 空转，整批仍然幂等。
     if (chinaPlaystyleCount > 0) {
       statements.push(
-        db
-          .prepare(`UPDATE players SET badges_silver = MAX(0, badges_silver - ?), updated_at = ${nowSql()} WHERE id = ?`)
-          .bind(chinaPlaystyleCount, transfer.player_id),
         db.prepare(`DELETE FROM player_playstyles WHERE player_id = ? AND source = 'china'`).bind(transfer.player_id),
+        recountBadgeStatements(db, transfer.player_id),
       );
     }
     // 离开某队时把**被覆盖前**的合同三列快照进 transfer 行（§5.4 物理面延续，迁移 0079）。
@@ -781,20 +779,23 @@ export async function completeTermination(
           guardParams: guard.params,
         })
       : []),
-    // 属性恢复初始（4.4.4）：CA 回 base_ca；成长所得同时数值归零（XP/已消费级数/徽章）——
+    // 属性恢复初始（4.4.4）：CA 回 base_ca；成长所得数值归零（XP/已消费级数）——
     // 解约即回初始态，重签后从零重新成长。历史留档：合同行只置 is_active=0、growth_events 一行不删，
     // 另写一条 reset 划断事件（见 growthResetStatements）供里程碑统计从解约后重新累计。
     // 重放安全：players UPDATE 有 club_id 闸，reset 事件靠 UNIQUE(player_id, match_ref, event_type) 去重。
+    // v6.63.0：台账不再是「归零」——徽章明细全删后按全量公式重算，FC 自带的 PlayStyle 槽
+    //（含被发放金抑制的银槽，金行随明细删除而回归）全额计入台账；只有发放所得清零。
     db
       .prepare(
         `UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE(base_ca, ca),
-           growth_xp = 0, levels_applied = 0, badges_silver = 0, badges_gold = 0, updated_at = ${nowSql()}
+           growth_xp = 0, levels_applied = 0, updated_at = ${nowSql()}
          WHERE id = ? AND club_id = ?`,
       )
       .bind(transfer.player_id, transfer.from_club_id),
     db.prepare(`UPDATE contracts SET is_active = 0 WHERE player_id = ? AND is_active = 1`).bind(transfer.player_id),
-    // 徽章明细一并归零（v3.3.0：台账在上一句已清零，明细表不能留残行，否则重签后又漂回两个口径）
+    // 徽章明细一并归零（v3.3.0），台账随后按 FC 槽重算（v6.63.0：台账 = 派生值）
     db.prepare(`DELETE FROM player_playstyles WHERE player_id = ?`).bind(transfer.player_id),
+    recountBadgeStatements(db, transfer.player_id),
     ...growthResetStatements(db, transfer.player_id, `termination:${transferId}`, transfer.season, transfer.window_seq),
   ];
   const statusStmtIndex = statements.length;

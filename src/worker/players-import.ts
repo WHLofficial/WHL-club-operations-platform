@@ -7,6 +7,11 @@ import { createConfigService } from '../core/config.ts';
 import { IMPORT_ROW_LIMIT, normalizeImportBatch, type ImportChannel, type NormalizedPlayer } from '../core/import.ts';
 import { fetchPurchases, replayStatements } from './shop-ops.ts';
 import { hookTierRecompute } from './growth-tier.ts';
+import { fullCountSql } from '../core/playstyle-rules.ts';
+
+function nowSql() {
+  return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+}
 
 export type ImportMode = 'minor' | 'major';
 
@@ -144,11 +149,12 @@ export async function previewImport(env: Env, body: unknown) {
 // ON CONFLICT(fc_id) 只写 FC 源列；is_future_star（管理组终审）、growable（赛季结算重判）冲突时不更新。
 // club_id 只在新插入时写（CPU 队球员的队籍，v2.0.0）；冲突时不更新，免得覆盖认领/解约后的归属。
 export function upsertStatement(db: D1Database, p: NormalizedPlayer, mode: ImportMode = 'minor'): D1PreparedStatement {
+  // v6.63.0：major 模式不再折算台账计数（badges_silver/gold 那两项已删）—— 台账是派生值，
+  // 由折算/删重后的明细行 + 新版 FC 槽在 recountImportedBadgesStatements 里按全量公式重算。
   const growthUpdate =
     mode === 'major'
       ? `ca = excluded.ca + (max(players.ca - players.base_ca, 0) + 2) / 3,
-         base_ca = excluded.ca, growth_xp = 0, levels_applied = 0,
-         badges_silver = (badges_silver + 2) / 3, badges_gold = (badges_gold + 2) / 3,`
+         base_ca = excluded.ca, growth_xp = 0, levels_applied = 0,`
       : `ca = excluded.ca + max(players.ca - players.base_ca, 0), base_ca = excluded.ca,`;
   return db
     .prepare(
@@ -180,8 +186,7 @@ export function upsertStatement(db: D1Database, p: NormalizedPlayer, mode: Impor
     );
 }
 
-// 大换版折算：发放明细每段（银/金）保留最早的 ceil(n/3) 行，与台账计数折算（(x+2)/3）同一条规则，
-// 否则换版后台账说 1 个、属性页列 3 个，又漂回两个口径。
+// 大换版折算（四步序之②）：发放明细每段（银/金）保留最早的 ceil(n/3) 行。
 // 「最早」按槽号排（发放总是落在最小空槽，槽号顺序即发放顺序）。
 // 用窗口函数先在 CTE 里把排名与总数算完再删，避免 DELETE 的 WHERE 自引用本表 —— 那会踩
 // SQLite「边扫边删」的执行策略，计数随删除变化时结果不可预期。整表一次跑、幂等（删完 rank ≤ keep）。
@@ -192,8 +197,42 @@ export const FOLD_PLAYSTYLES_SQL = `WITH ranked AS (
 )
 DELETE FROM player_playstyles WHERE id IN (SELECT id FROM ranked WHERE rn > (total + 2) / 3)`;
 
+// 大换版同段删重（四步序之③，v6.63.0）：明细行撞新版 FC 槽（同段同基础）则删行 —— FC 源为准，
+// 撞的那份跟着版本走；被发放金顶掉的 FC 银不在删重之列（金顶银是可逆抑制，不是删除）。
+// 金段比较用「FC 槽存库形 = 明细基础 ID + 100」。整表一次跑、幂等（删完无匹配）。
+export const DEDUPE_PLAYSTYLES_SQL = `DELETE FROM player_playstyles WHERE id IN (
+  SELECT pp.id FROM player_playstyles pp
+  JOIN players p ON p.id = pp.player_id
+  JOIN json_each(p.game_attrs) je ON CAST(substr(je.key, 5) AS INTEGER) BETWEEN 1 AND 15
+  WHERE (pp.kind = 'silver' AND CAST(substr(je.key, 5) AS INTEGER) BETWEEN 1 AND 12 AND CAST(je.value AS INTEGER) = pp.psid)
+     OR (pp.kind = 'gold' AND CAST(substr(je.key, 5) AS INTEGER) BETWEEN 13 AND 15 AND CAST(je.value AS INTEGER) = pp.psid + 100)
+)`;
+
 export function foldPlaystylesStatement(db: D1Database): D1PreparedStatement {
   return db.prepare(FOLD_PLAYSTYLES_SQL);
+}
+
+export function dedupePlaystylesStatement(db: D1Database): D1PreparedStatement {
+  return db.prepare(DEDUPE_PLAYSTYLES_SQL);
+}
+
+// 四步序之④（v6.63.0）：game_attrs 整列覆盖后，按全量公式重算本批导入球员的台账
+// （FC 槽数减被发放金抑制的银槽 + 折算/删重后留存的明细行数）。major 与 minor 都要跑 ——
+// 两种模式都整列覆盖 game_attrs，FC 槽变了台账跟着变。按 fc_id 定位、每片 ≤50 人分批。
+export function recountImportedBadgesStatements(db: D1Database, fcIds: readonly number[]): D1PreparedStatement[] {
+  const out: D1PreparedStatement[] = [];
+  for (let i = 0; i < fcIds.length; i += 50) {
+    const slice = fcIds.slice(i, i + 50);
+    out.push(
+      db
+        .prepare(
+          `UPDATE players SET badges_silver = ${fullCountSql('silver')}, badges_gold = ${fullCountSql('gold')}, updated_at = ${nowSql()}
+           WHERE fc_id IN (${slice.map(() => '?').join(', ')})`,
+        )
+        .bind(...slice),
+    );
+  }
+  return out;
 }
 
 export async function confirmImport(env: Env, actor: number, body: unknown) {
@@ -246,8 +285,18 @@ export async function confirmImport(env: Env, actor: number, body: unknown) {
     await env.DB.batch(statements);
     written += slice.length;
   }
-  // 大换版：台账计数已在 upsert 里折算，明细表跟着折（整表一次，幂等）
-  if (payload.mode === 'major') await foldPlaystylesStatement(env.DB).run();
+  // 大换版四步序之②③：台账计数折算已废（upsert 不再写 badges 列），明细表先折（每段留最早
+  // ceil(n/3)）再删与新版 FC 槽同段撞车的行（FC 源为准）；两步都整表一次、幂等。
+  if (payload.mode === 'major') {
+    await foldPlaystylesStatement(env.DB).run();
+    await dedupePlaystylesStatement(env.DB).run();
+  }
+  // 四步序之④：game_attrs 整列覆盖后按全量公式重算本批球员的台账（major/minor 都要 ——
+  // FC 槽变了台账跟着变）。在档位重算之前，与 hookTierRecompute 的写入面互不相交。
+  if (outcome.players.length > 0) {
+    const stmts = recountImportedBadgesStatements(env.DB, outcome.players.map((p) => p.fcId));
+    for (const s of stmts) await s.run();
+  }
   // 导入收尾重算档位（v6.48.0 §10.3）：导入覆盖 age / china_plan / game_attrs（含 naID、TeamID）
   // 与 is_future_star，五个条件里除 c1/c2 的队壳基准外都可能变。按 fc_id 定位（导入行只有 fc_id，
   // 免得再查一遍本地 id）；只写差异——重导入没动档位时零写入。

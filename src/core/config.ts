@@ -44,8 +44,6 @@ export const CONFIG_KEYS = [
   'trainee_xp_half',
   'china_xp_bonus',
   'china_badges',
-  'badge_cap_silver',
-  'badge_cap_gold',
   'wage_param_a',
   'wage_param_b',
   'wage_param_c',
@@ -311,9 +309,8 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   trainee_xp_half: '15',
   china_xp_bonus: '20',
   china_badges: '3',
-  // v3.3.0：银徽上限与「12 个银槽」合并成一个口径（原先 15 只是台账计数上限，装不下第 13 个）
-  badge_cap_silver: '12',
-  badge_cap_gold: '3',
+  // v3.3.0 曾有 badge_cap_silver/gold 两键（台账计数上限）；v6.63.0 台账改全量派生值、
+  // 上限守卫收敛到槽位结构（12 银 / 3 金），两键退役 —— 生产 config 表里的行由迁移 0086 清除
   wage_param_a: '0.02',
   wage_param_b: '1.9',
   wage_param_c: '0.45',

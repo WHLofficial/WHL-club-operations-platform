@@ -564,7 +564,7 @@ describe('球员批量维护（v1.3.0）', () => {
       {
         items: [
           { id: 1, marketValue: 30.5, ca: 82 },
-          { id: 2, status: 'trainee', badgesGold: 1 },
+          { id: 2, status: 'trainee', prestige: 4 },
         ],
       },
       'tok-admin',
@@ -573,7 +573,7 @@ describe('球员批量维护（v1.3.0）', () => {
     expect(res.status).toBe(200);
     expect((await res.json()) as { updated: number }).toMatchObject({ ok: true, updated: 2 });
     expect(sqlGet<{ market_value: number }>(fx.sqlite, 'SELECT market_value FROM players WHERE id = 1')).toMatchObject({ market_value: 30.5 });
-    expect(sqlGet<{ status: string; badges_gold: number }>(fx.sqlite, 'SELECT status, badges_gold FROM players WHERE id = 2')).toMatchObject({ status: 'trainee', badges_gold: 1 });
+    expect(sqlGet<{ status: string; prestige: number }>(fx.sqlite, 'SELECT status, prestige FROM players WHERE id = 2')).toMatchObject({ status: 'trainee', prestige: 4 });
     const audits = sqlAll<{ target_id: number; before: string; after: string }>(
       fx.sqlite,
       "SELECT target_id, before, after FROM audit_log WHERE action = 'player_batch' ORDER BY target_id",
@@ -581,8 +581,8 @@ describe('球员批量维护（v1.3.0）', () => {
     expect(audits.length).toBe(2);
     expect(JSON.parse(audits[0]!.before)).toEqual({ market_value: null, ca: 80 });
     expect(JSON.parse(audits[0]!.after)).toEqual({ market_value: 30.5, ca: 82 });
-    expect(JSON.parse(audits[1]!.before)).toEqual({ status: 'normal', badges_gold: 0 });
-    expect(JSON.parse(audits[1]!.after)).toEqual({ status: 'trainee', badges_gold: 1 });
+    expect(JSON.parse(audits[1]!.before)).toEqual({ status: 'normal', prestige: 0 });
+    expect(JSON.parse(audits[1]!.after)).toEqual({ status: 'trainee', prestige: 4 });
   });
 
   it('任一项出错整批拒绝（400 带项号），不落库', async () => {
@@ -728,7 +728,9 @@ describe('导入管线（§5.4）', () => {
       fx.sqlite,
       'SELECT ca, base_ca, market_value, status, badges_gold, growth_tier FROM players WHERE fc_id = 277225',
     );
-    expect(p2).toMatchObject({ ca: 78, base_ca: 78, market_value: 55, status: 'listed', badges_gold: 2, growth_tier: 3 });
+    expect(p2).toMatchObject({ ca: 78, base_ca: 78, market_value: 55, status: 'listed', growth_tier: 3 });
+    // badges_gold 不再是运营列而是派生值（v6.63.0）：重导覆盖 game_attrs 后重算，手工漂移的 2 归 0
+    expect(p2?.badges_gold).toBe(0);
   });
 
   it('队籍：CPU 队球员落队籍、老队 id 走别名，其余队导入不留归属（v2.0.0）', async () => {

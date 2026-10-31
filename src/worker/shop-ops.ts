@@ -40,10 +40,12 @@ import {
   ROLE_SLOT_KEYS,
   isRoleId,
   nextFreePlaystyleSlot,
+  playstyleIdOf,
   playstyleSlotRange,
   playstyleSlotsOf,
   type PlaystyleKind,
 } from '../core/fc26.ts';
+import { fullCountSql, planPlaystylePicks, type PlaystylePickFailureCode } from '../core/playstyle-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { voucherBalance, voucherMovement } from './voucher.ts';
 import { queueClubNotification } from './notify.ts';
@@ -60,6 +62,27 @@ function round2(n: number): number {
 // 审批效果守卫：只在本批状态流转成功（此前仍 pending）时生效
 function pendingGuard(): string {
   return `(SELECT status FROM shop_orders WHERE id = ?) = 'pending'`;
+}
+
+type GrantedRowSource = 'growth' | 'china' | 'shop' | 'external' | 'manual';
+
+/** 商店「徽章」文案（Q1：商店保留俗称）：按 core 校验的 code 映射成商店口吻，其余透传 */
+function shopBadgeMessage(code: PlaystylePickFailureCode, fallback: string, kind: PlaystyleKind): string {
+  const seg = kind === 'silver' ? '银徽章' : '金徽章';
+  switch (code) {
+    case 'already_owned':
+      return `这名球员已经有这个${seg}`;
+    case 'silver_blocked_by_gold':
+      return `这名球员已经有这个金徽章，不能再买${seg}`;
+    case 'gold_blocked_by_silver':
+      return `这名球员已经有这个银徽章，${seg}请用「银升金」升级`;
+    case 'position_denied':
+      return 'GK 专属 PlayStyle 不能发给非门将球员';
+    case 'slot_full':
+      return `${seg}槽位已满，先腾出${kind === 'silver' ? '银' : '金'}槽再买`;
+    default:
+      return fallback;
+  }
 }
 
 export interface ShopSettings {
@@ -293,19 +316,26 @@ export async function prepareShopPlan(
       if (!PS_GRANTABLE_BASE_IDS.includes(p.psid)) throw new HttpError(400, '这个 PlayStyle 不在可发放清单里');
       const kind: PlaystyleKind = p.kind;
       const granted = await db
-        .prepare('SELECT slot, kind, psid FROM player_playstyles WHERE player_id = ?')
+        .prepare('SELECT slot, kind, psid, source FROM player_playstyles WHERE player_id = ?')
         .bind(player.id)
-        .all<{ slot: number; kind: PlaystyleKind; psid: number }>();
+        .all<{ slot: number; kind: PlaystyleKind; psid: number; source: GrantedRowSource }>();
       const fcSlots = playstyleSlotsOf(gameAttrs(player));
-      const ownedPsids = new Set<number>([
-        ...fcSlots.filter((s) => (s.gold ? 'gold' : 'silver') === kind).map((s) => s.psid % 100),
-        ...granted.results.filter((g) => g.kind === kind).map((g) => g.psid),
-      ]);
-      if (ownedPsids.has(p.psid)) throw new HttpError(400, `这名球员已经有这个${kind === 'silver' ? '银' : '金'}徽章`);
-      const usedSlots = [...fcSlots.map((s) => s.slot), ...granted.results.map((g) => g.slot)];
-      const freeSlot = nextFreePlaystyleSlot(kind, usedSlots);
-      if (freeSlot === null) throw new HttpError(400, kind === 'silver' ? '银徽章槽已满（12 个）' : '金徽章槽已满（3 个）');
-      const capCol = kind === 'silver' ? 'badges_silver' : 'badges_gold';
+      // v6.63.0：跨段判重 + 位置资格收敛到 core planPlaystylePicks（context 'shop'：择金遇银挡）；
+      // 商店口吻保留「徽章」俗称（Q1），失败按 code 映射文案
+      const outcome = planPlaystylePicks([playstyleIdOf(p.psid, kind)], {
+        silverCount: kind === 'silver' ? 1 : 0,
+        goldCount: kind === 'gold' ? 1 : 0,
+        ownedPsids: [
+          ...fcSlots.map((s) => s.psid),
+          ...granted.results.map((g) => playstyleIdOf(g.psid, g.kind)),
+        ],
+        usedSlots: [...fcSlots.map((s) => s.slot), ...granted.results.map((g) => g.slot)],
+        context: 'shop',
+        position: player.position,
+        grantedRows: granted.results,
+      });
+      if (!outcome.ok) throw new HttpError(400, shopBadgeMessage(outcome.code, outcome.message, kind));
+      const freeSlot = outcome.slots[0]!.slot;
       return {
         playerId: player.id,
         playerName: player.display_name ?? player.name,
@@ -317,9 +347,10 @@ export async function prepareShopPlan(
                WHERE ${pendingGuard()}`,
             )
             .bind(actor, orderId),
+          // 台账重算用 SQL 公式在执行时实时算（v6.63.0 全量口径），不吃计划-执行窗口的竞态
           db2
             .prepare(
-              `UPDATE players SET ${capCol} = MIN(${capCol} + 1, ${kind === 'silver' ? 15 : 3}), updated_at = ${nowSql()}
+              `UPDATE players SET badges_silver = ${fullCountSql('silver')}, badges_gold = ${fullCountSql('gold')}, updated_at = ${nowSql()}
                WHERE id = ${player.id} AND ${pendingGuard()}`,
             )
             .bind(orderId),
@@ -352,9 +383,11 @@ export async function prepareShopPlan(
                WHERE id = ${row.id} AND kind = 'silver' AND ${pendingGuard()}`,
             )
             .bind(orderId),
+          // 台账重算（v6.63.0 全量口径）：原银行变形后自动退出银数；若球员有同基础 FC 银，
+          // 新金行的派生抑制让它在计数与清单里同时消失 —— 无需额外语句
           db2
             .prepare(
-              `UPDATE players SET badges_silver = MAX(badges_silver - 1, 0), badges_gold = MIN(badges_gold + 1, 3), updated_at = ${nowSql()}
+              `UPDATE players SET badges_silver = ${fullCountSql('silver')}, badges_gold = ${fullCountSql('gold')}, updated_at = ${nowSql()}
                WHERE id = ${player.id} AND ${pendingGuard()}`,
             )
             .bind(orderId),

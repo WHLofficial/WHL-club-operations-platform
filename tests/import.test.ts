@@ -107,62 +107,72 @@ describe('导入归一化（v2.8.0 I4：naID 值域 + TeamID 脏值警告）', (
 });
 
 describe('球员导入换版模式（v2.8.0 I1，规则 §5.4）', () => {
-  it('小换版：CA 增量平移、成长字段全保留；新插入球员两模式等价', async () => {
+  it('小换版：CA 增量平移、成长字段全保留；台账按 FC 槽 + 留存明细重算', async () => {
     const fx = freshEnv();
     seedGrowingPlayer(fx.sqlite);
+    // 台账是派生值（v6.63.0）：重导覆盖 game_attrs 后重算 = FC 槽数 + 留存明细行数。
+    // 给 7 银 2 金明细 + FC 银槽 PSID1=5：重算银 = 1（FC）+ 7（明细）= 8，金 = 2
+    fx.sqlite.exec(`
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at)
+        WITH RECURSIVE s(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM s WHERE v < 7)
+        SELECT 100, v, 'silver', v, 'growth', '2026-01-01T00:00:00.000Z' FROM s;
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (100, 13, 'gold', 1, 'growth', '2026-01-01T00:00:00.000Z'),
+        (100, 14, 'gold', 2, 'china', '2026-01-01T00:00:00.000Z');
+    `);
     // 新球员 101：CA 66；老球员 102：δ=0（ca=base_ca=80），源值降到 78 也不加值
     fx.sqlite.exec(`INSERT INTO players (id, uid, name, ca, base_ca, growth_xp, fc_id) VALUES (102, 'fc102', '平甲', 80, 80, 5, 102);`);
 
-    const preview = await post(
-      '/api/admin/players/import/preview',
-      { channel: 'A', mode: 'minor', rows: [rowA(100), rowA(101, { CA: 66, Name: '新乙' }), rowA(102, { CA: 78 })] },
-      fx.env,
-    );
+    const rows = (fc: number, over: Record<string, unknown> = {}) => [rowA(100, { PSID1: 5, ...over }), rowA(101, { CA: 66, Name: '新乙' }), rowA(102, { CA: 78 })];
+    const preview = await post('/api/admin/players/import/preview', { channel: 'A', mode: 'minor', rows: rows(100) }, fx.env);
     expect(preview.status).toBe(200);
     const pv = (await preview.json()) as { stats: Record<string, number> };
     expect(pv.stats).toMatchObject({ total: 3, valid: 3, error: 0, warning: 0, insertEstimate: 1, updateEstimate: 2, growthPlayers: 1, xpToWipe: 0 });
 
-    const confirm = await post(
-      '/api/admin/players/import/confirm',
-      { channel: 'A', mode: 'minor', rows: [rowA(100), rowA(101, { CA: 66, Name: '新乙' }), rowA(102, { CA: 78 })] },
-      fx.env,
-    );
+    const confirm = await post('/api/admin/players/import/confirm', { channel: 'A', mode: 'minor', rows: rows(100) }, fx.env);
     expect(confirm.status).toBe(200);
-    // 成长甲：源 70 + δ5 = 75；经验/级别/徽章原样
+    // 成长甲：源 70 + δ5 = 75；经验/级别原样；台账 = FC 银 1 + 明细 7 = 8 / 金 2
     expect(sqlGet(fx.sqlite, 'SELECT ca, base_ca, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE fc_id = 100')).toEqual({
       ca: 75,
       base_ca: 70,
       growth_xp: 12,
       levels_applied: 2,
-      badges_silver: 7,
+      badges_silver: 8,
       badges_gold: 2,
     });
+    // 明细一行未动（小换版不折算）
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 100')?.n).toBe(9);
     // 新球员按源值落库（两模式同路径）；δ=0 行不加值
     expect(sqlGet(fx.sqlite, 'SELECT ca, base_ca, growth_xp FROM players WHERE fc_id = 101')).toEqual({ ca: 66, base_ca: 66, growth_xp: 0 });
     expect(sqlGet(fx.sqlite, 'SELECT ca, base_ca, growth_xp FROM players WHERE fc_id = 102')).toEqual({ ca: 78, base_ca: 78, growth_xp: 5 });
   });
 
-  it('大换版：ceil(δ/3)、XP 清零、levels 归零、徽章银金各自折算；预览给出将清零经验总量', async () => {
+  it('大换版：ceil(δ/3)、XP 清零、levels 归零；明细折算 + 同段删重后台账按全量重算', async () => {
     const fx = freshEnv();
     seedGrowingPlayer(fx.sqlite);
+    // 7 银 2 金明细：major 折算后银留 3（psid 1-3）、金留 1（psid 1）；FC 银槽 PSID1=5 与留存银不撞
+    fx.sqlite.exec(`
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at)
+        WITH RECURSIVE s(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM s WHERE v < 7)
+        SELECT 100, v, 'silver', v, 'growth', '2026-01-01T00:00:00.000Z' FROM s;
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (100, 13, 'gold', 1, 'growth', '2026-01-01T00:00:00.000Z'),
+        (100, 14, 'gold', 2, 'china', '2026-01-01T00:00:00.000Z');
+    `);
 
-    const preview = await post(
-      '/api/admin/players/import/preview',
-      { channel: 'A', mode: 'major', rows: [rowA(100)] },
-      fx.env,
-    );
+    const preview = await post('/api/admin/players/import/preview', { channel: 'A', mode: 'major', rows: [rowA(100, { PSID1: 5 })] }, fx.env);
     expect(preview.status).toBe(200);
     expect(((await preview.json()) as { stats: Record<string, number> }).stats).toMatchObject({ growthPlayers: 1, xpToWipe: 12 });
 
-    const confirm = await post('/api/admin/players/import/confirm', { channel: 'A', mode: 'major', rows: [rowA(100)] }, fx.env);
+    const confirm = await post('/api/admin/players/import/confirm', { channel: 'A', mode: 'major', rows: [rowA(100, { PSID1: 5 })] }, fx.env);
     expect(confirm.status).toBe(200);
-    // CA = 源 70 + ceil(5/3)=2 → 72；银 7→ceil(7/3)=3，金 2→ceil(2/3)=1
+    // CA = 源 70 + ceil(5/3)=2 → 72；台账 = 折算留存明细（银 3 / 金 1）+ FC 银 1 枚
     expect(sqlGet(fx.sqlite, 'SELECT ca, base_ca, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE fc_id = 100')).toEqual({
       ca: 72,
       base_ca: 70,
       growth_xp: 0,
       levels_applied: 0,
-      badges_silver: 3,
+      badges_silver: 4,
       badges_gold: 1,
     });
     // 审计批次带 mode

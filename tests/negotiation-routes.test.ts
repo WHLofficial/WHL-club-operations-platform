@@ -226,7 +226,7 @@ describe('报价判定三路径', () => {
     expect((await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: 4 }, 'tok-coach2', fx.env)).status).toBe(409);
   });
 
-  it('离队回收中国计划徽章：成约后 china 明细删掉、台账同步减，成长得来的留着', async () => {
+  it('离队回收中国计划徽章：成约后 china 明细删掉、台账按留存明细重算，成长得来的留着', async () => {
     const fx = await seedSigning(freshEnv());
     fx.sqlite.exec(`
       UPDATE players SET badges_silver = 5, china_plan = 1 WHERE id = 10;
@@ -241,11 +241,11 @@ describe('报价判定三路径', () => {
     const res = await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: 3.11 }, 'tok-coach2', fx.env);
     expect(res.status).toBe(200);
     expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM players WHERE id = 10')?.club_id).toBe(fx.buyerClub);
-    // 走的是成长得来的 1 个留在身上，2 个中国计划的随离队失效
+    // 走的是成长得来的 1 个留在身上，2 个中国计划的随离队失效；台账 = FC 槽 0 + 留存明细 1（v6.63.0 派生重算）
     expect(
       sqlAll<{ slot: number; source: string }>(fx.sqlite, 'SELECT slot, source FROM player_playstyles WHERE player_id = 10 ORDER BY slot'),
     ).toEqual([{ slot: 1, source: 'growth' }]);
-    expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 10')?.badges_silver).toBe(3);
+    expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 10')?.badges_silver).toBe(1);
   });
 
   it('三轮未谈拢 → 按 E 强制成约', async () => {

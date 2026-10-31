@@ -211,6 +211,20 @@ export function isGrantablePlaystyleId(psid: number): boolean {
   return isPlaystyleId(psid) && PS_GRANTABLE_BASE_IDS.includes(basePlaystyleId(psid));
 }
 
+// GK 专属项（v6.63.0，Q10 单向裁决）：ref 表 type="Goalkeeper" 的 6 个基础项，外场拿不到（银金两段
+// 都挡），GK 可见全部 36 项。与 web/assets/ref/playstyle.json 的 type 逐项对齐（tests/playstyles.test.ts 守住）。
+export const PS_GK_BASE_IDS: readonly number[] = [51, 52, 53, 54, 55, 56];
+
+export function isGoalkeeperPosition(position: string | null): boolean {
+  return position === 'GK';
+}
+
+// 位置资格：GK 全放开；其余位置（含 position 未知的保守口径）挡 GK 专属项
+export function playstyleAllowedForPosition(baseId: number, position: string | null): boolean {
+  if (isGoalkeeperPosition(position)) return true;
+  return !PS_GK_BASE_IDS.includes(baseId);
+}
+
 // 槽位段界：银 1-12、金 13-15（发放落槽与筛选铺条件共用，别再各写一次段界）
 export function playstyleSlotRange(kind: PlaystyleKind): { min: number; max: number } {
   return kind === 'gold'
@@ -242,87 +256,6 @@ export function playstyleSlotsOf(attrs: Record<string, unknown>): PlaystyleSlot[
     const slot = i + 1;
     return [{ slot, psid, gold: isGoldPlaystyleId(psid) || slot > PS_SILVER_SLOT_COUNT }];
   });
-}
-
-export interface PlaystylePickPlan {
-  /** 本次要发放的银 / 金数量（来自升级方案或中国计划） */
-  silverCount: number;
-  goldCount: number;
-  /** 球员已拥有的 PlayStyle（存库形式）：FC 源槽 + 既有发放明细 */
-  ownedPsids: readonly number[];
-  /** 球员已占用的槽位号：FC 源槽 + 既有发放明细 */
-  usedSlots: readonly number[];
-}
-
-export type PlaystylePickOutcome =
-  | { ok: true; slots: PlaystyleSlot[] }
-  | { ok: false; message: string };
-
-// picks 校验与落槽（纯函数，写库前先把话说清楚）：picks 用存库形式（银 1-99 / 金 101-199），
-// kind 由 ID 自己决定，所以调用方不必额外声明哪几个是金的。
-export function planPlaystylePicks(picks: readonly number[], plan: PlaystylePickPlan): PlaystylePickOutcome {
-  const silver: number[] = [];
-  const gold: number[] = [];
-  for (const psid of picks) {
-    if (!isGrantablePlaystyleId(psid)) {
-      return { ok: false, message: `PlayStyle ${psid} 不在可发放清单里` };
-    }
-    const bucket = playstyleKindOf(psid) === 'gold' ? gold : silver;
-    if (bucket.includes(psid)) return { ok: false, message: '同一个 PlayStyle 不能在同一段里选两次' };
-    if (plan.ownedPsids.includes(psid)) {
-      return { ok: false, message: `PlayStyle ${psid} 已经在这名球员身上了` };
-    }
-    bucket.push(psid);
-  }
-  if (silver.length !== plan.silverCount) {
-    return { ok: false, message: `本次要发 ${plan.silverCount} 个银 PlayStyle，收到 ${silver.length} 个` };
-  }
-  if (gold.length !== plan.goldCount) {
-    return { ok: false, message: `本次要发 ${plan.goldCount} 个金 PlayStyle，收到 ${gold.length} 个` };
-  }
-  const usedSlots = [...plan.usedSlots];
-  const slots: PlaystyleSlot[] = [];
-  const assign = (kind: PlaystyleKind, ids: readonly number[]): string | null => {
-    for (const psid of ids) {
-      const slot = nextFreePlaystyleSlot(kind, usedSlots);
-      if (slot === null) {
-        const total = playstyleSlotRange(kind).max - playstyleSlotRange(kind).min + 1;
-        return `${kind === 'gold' ? '金' : '银'}槽已满（${total} 个）`;
-      }
-      usedSlots.push(slot);
-      slots.push({ slot, psid, gold: kind === 'gold' });
-    }
-    return null;
-  };
-  const silverIssue = assign('silver', silver);
-  if (silverIssue !== null) return { ok: false, message: silverIssue };
-  const goldIssue = assign('gold', gold);
-  if (goldIssue !== null) return { ok: false, message: goldIssue };
-  return { ok: true, slots };
-}
-
-// 属性页清单 = FC 源槽 + 发放明细。发放时已排除「已拥有」，但大换版折算后 FC 源数据整列换新，
-// 可能与留下的明细行撞同一项 ⇒ 按 (段, 基础 ID) 去重，撞了以 FC 源为准（那一份跟着版本走）。
-export interface GrantedPlaystyleSlot {
-  slot: number;
-  kind: PlaystyleKind;
-  /** 基础 ID（1-99） */
-  psid: number;
-}
-
-export function mergePlaystyleSlots(
-  fc: readonly PlaystyleSlot[],
-  granted: readonly GrantedPlaystyleSlot[],
-): PlaystyleSlot[] {
-  const out: PlaystyleSlot[] = fc.map((s) => ({ slot: s.slot, psid: s.psid, gold: s.gold }));
-  const seen = new Set(fc.map((s) => `${s.gold ? 'gold' : 'silver'}:${basePlaystyleId(s.psid)}`));
-  for (const g of granted) {
-    const key = `${g.kind}:${g.psid}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ slot: g.slot, psid: playstyleIdOf(g.psid, g.kind), gold: g.kind === 'gold' });
-  }
-  return out.sort((a, b) => a.slot - b.slot);
 }
 
 // 角色槽位与两段 ID 口径（v6.6.0）：RoleID1-5 五个槽，**槽位与档位没有对应关系** —— 生产里

@@ -1487,8 +1487,8 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
 // ================= TC-CFG：配置 =================
 
 describe('招商轮配置（TC-CFG）', () => {
-  it('TC-CFG-01 CONFIG_KEYS 共 89 项（v6.47.0 加 wage_floor_gap，v6.49.0 加两个到期键，v6.50.0 加海捞两键，v6.53.0 加 window_length_hours，v6.57.0 加 expected_income_rate，v6.61.0 加 growth_attr_bonus），两个 market 键在册；默认值就位', async () => {
-    expect(CONFIG_KEYS).toHaveLength(89); // v6.58.0 加 shortlist_cap；v6.61.0 加 growth_attr_bonus
+  it('TC-CFG-01 CONFIG_KEYS 共 87 项（v6.47.0 加 wage_floor_gap，v6.49.0 加两个到期键，v6.50.0 加海捞两键，v6.53.0 加 window_length_hours，v6.57.0 加 expected_income_rate，v6.61.0 加 growth_attr_bonus；v6.63.0 退役 badge_cap 两键），两个 market 键在册；默认值就位', async () => {
+    expect(CONFIG_KEYS).toHaveLength(87); // v6.58.0 加 shortlist_cap；v6.61.0 加 growth_attr_bonus；v6.63.0 退役 badge_cap_silver / badge_cap_gold
     expect(CONFIG_KEYS).toContain('market_round_rules');
     expect(CONFIG_KEYS).toContain('market_heat_rules');
     const fx = freshEnv();

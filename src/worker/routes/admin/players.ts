@@ -21,8 +21,6 @@ const PLAYER_PATCH_FIELDS = [
   'isFutureStar',
   'growable',
   'prestige',
-  'badgesSilver',
-  'badgesGold',
   'ca',
   'baseCa',
   'pa',
@@ -82,15 +80,10 @@ function parsePlayerUpdates(body: Record<string, unknown>): { updates: Record<st
     if (v !== null && (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 5)) errors.push('国际声望须在 1-5 之间');
     else updates.prestige = v;
   }
-  if ('badgesSilver' in body) {
-    const v = Number(body.badgesSilver);
-    if (!Number.isInteger(v) || v < 0 || v > 12) errors.push('银徽章数须在 0-12 之间');
-    else updates.badges_silver = v;
-  }
-  if ('badgesGold' in body) {
-    const v = Number(body.badgesGold);
-    if (!Number.isInteger(v) || v < 0 || v > 3) errors.push('金徽章数须在 0-3 之间');
-    else updates.badges_gold = v;
+  // v6.63.0：银/金徽章数退役为派生值（= 合并清单段内数量），直写会被下一次明细变更的重算冲掉；
+  // 修正通道 = 成长 / 消费中心 / 中国计划的发放与回收（管理端直发走 china 端点）。
+  if ('badgesSilver' in body || 'badgesGold' in body) {
+    errors.push('银/金 PlayStyle 计数是派生值不能直改，请通过成长、消费中心或中国计划的发放与回收调整');
   }
   const unknown = Object.keys(body).filter((k) => !(PLAYER_PATCH_FIELDS as readonly string[]).includes(k));
   if (unknown.length > 0) errors.push(`不支持的字段：${unknown.join('、')}`);

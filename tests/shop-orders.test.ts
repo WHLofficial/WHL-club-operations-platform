@@ -214,7 +214,8 @@ describe('TC-A 徽章：白名单 / 重复 / 槽满', () => {
     // FC 源占了银槽 1，发放落最小空槽 2
     expect(row).toEqual({ slot: 2, kind: 'silver', psid: 2, source: 'shop' });
     const counts = fx.sqlite.prepare('SELECT badges_silver AS s, badges_gold AS g FROM players WHERE id = 1').get() as { s: number; g: number };
-    expect(counts.s).toBe(1);
+    // v6.63.0 全量口径：FC 自带银 1 枚 + 发放银 1 枚 = 2（旧口径只数发放所得）
+    expect(counts.s).toBe(2);
     expect(counts.g).toBe(0);
   });
 
@@ -249,8 +250,9 @@ describe('TC-A 徽章：白名单 / 重复 / 槽满', () => {
     const row = fx.sqlite.prepare('SELECT slot, kind, psid FROM player_playstyles WHERE player_id = 1').get() as { slot: number; kind: string; psid: number };
     expect(row).toEqual({ slot: 15, kind: 'gold', psid: 3 });
     const counts = fx.sqlite.prepare('SELECT badges_silver AS s, badges_gold AS g FROM players WHERE id = 1').get() as { s: number; g: number };
+    // v6.63.0 全量口径：FC 金槽 101/102 两枚 + 升出的金一枚 = 3（PSID15 已置 null 不计）；发放银变形后退出银数
     expect(counts.s).toBe(0);
-    expect(counts.g).toBe(1);
+    expect(counts.g).toBe(3);
   });
 });
 
