@@ -8180,6 +8180,61 @@ button.sqc-pos:hover {
   }
 }
 
+/* v6.65.2 签约谈判卡头折叠：整行可点，chevron 是唯一的真按钮（键盘/读屏走它）。
+   正文用 hidden 隐藏而不是卸载——OfferStep 的工资草稿与两段式确认必须活着。 */
+.nego-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.nego-head h3 {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.nego-fold {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.nego-fold[aria-expanded='true'] {
+  transform: rotate(180deg);
+}
+
+.nego-fold:hover {
+  border-color: var(--terracotta);
+  color: var(--terracotta);
+}
+
+/* 收起时正文整块不显示；hidden 属性由浏览器兜底，这里显式声明防 reset 覆盖 */
+.nego-body[hidden] {
+  display: none;
+}
+
+/* 摘要行：单行内放得下就不换行，窄屏允许折行 */
+.nego-sum {
+  margin: 6px 0 0;
+}
+
+.nego-fresh {
+  color: var(--terracotta);
+  font-weight: 600;
+}
+
 /* v6.40.0 签约谈判：卡内对话流。气泡/系统行复用上面 .nego-b / .nego-sys 那套（浮层与卡片同形），
    .nego-thread 只是给它们一个不滚动的容器——谈判区在卡片里，整页滚动，不另开内滚动区。 */
 .nego-thread {

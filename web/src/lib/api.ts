@@ -1020,6 +1020,8 @@ export interface NegotiationSession {
   expectedWage: number | null;
   attemptsUsed: number;
   remaining: number;
+  // v6.65.2：静默作废时刻（后端按 anchor + negotiation_silence_hours 算好），卡头倒计时用
+  expiresAt: string | null;
   lastSatisfaction: string | null;
   lastRisk: boolean;
   attempts: { attemptNo: number; offeredWage: number; result: string; at: string; feedback: string | null }[];

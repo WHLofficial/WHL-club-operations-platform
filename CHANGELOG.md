@@ -4,6 +4,17 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.65.2] · 签约谈判区每条会话可折叠（卡头摘要 + 正文收起）（2026-10-31）
+
+**Added**
+
+- 签约谈判区（转会台 · 谈判页签）每条进行中的会话现在可折叠：卡头常驻球员、阶段徽标、「剩 N 轮」、上次报价、预期工资与静默剩余时间，完整对话流与报价框收进正文；卡头整行可点（球员链接/输入/按钮除外），右侧 chevron 是真按钮（`aria-expanded` / `aria-controls`）。
+- 默认态：单条会话保持展开（不退化），**两条以上全部收起**；手动展开/收起记 `localStorage`（`whl-nego-fold-v1`），读取时按当前进行中会话裁剪并设 100 条上限。
+- 「有新反馈」最小提示（`whl-nego-seen-v1` 记最后展开时间，末轮经纪人反馈晚于它时在卡头显示），不做红点与未读数。
+- 静默作废倒计时：`GET /api/negotiations?mine=1` 的会话对象新增 `expiresAt`（后端按 `MAX(expiry_anchor_at, created_at, 最后一次报价) + negotiation_silence_hours` 算好，与到期引擎同一个 `SILENT_ANCHOR_SQL`），卡头按分钟重算剩余小时数，到点显示「即将作废」。
+
+**验收**：typecheck 三份全清；`web/src/pages/market/desk/NegotiationsSection.test.tsx` **21 例**全绿（v6.65.1 基线 15 例，+6）；变异验证——把默认值改回「恒展开」时「两条以上默认全收起」必红；全量 vitest **180 文件 / 2,912 例**全绿；`npm run build` 通过。测试计划 `docs/test-plans/v6.65.2-nego-collapse.md`。判级 **patch**（前端视图态 + 一个派生字段；零迁移、零生产写、无接口语义变更）。
+
 ## [v6.65.1] · 消费中心「角色（职责）」新增下拉永远为空 + 双加号标签双写（2026-10-31）
 
 **Fixed**

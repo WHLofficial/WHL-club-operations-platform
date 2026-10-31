@@ -643,7 +643,8 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source,
               t.type AS transfer_type, t.status AS transfer_status, t.fee,
               cf.name AS from_name, ct.name AS to_name, c_cur.release_fee AS current_rc,
-              p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier
+              p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier,
+              ${SILENT_ANCHOR_SQL} AS silent_anchor
        FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
        JOIN players p ON p.id = s.player_id
@@ -676,7 +677,11 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       ca: number | null;
       pa: number | null;
       agent_tier: number;
+      silent_anchor: string;
     }>();
+
+  // v6.65.2：静默截止时刻给前端做倒计时，口径与到期引擎同一个 anchor（SILENT_ANCHOR_SQL）
+  const silenceH = await silenceHours(db);
 
   // 自愈扫描：会话已结算但过户未跟上的，先重放过户再返回
   for (const row of rows.results) {
@@ -748,6 +753,8 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       expectedWage: r.expected_wage,
       attemptsUsed: r.attempt_count,
       remaining: Math.max(0, ctx.maxAttempts - r.attempt_count),
+      // 静默截止时刻（锚 + 配置小时数）；存量行为空串时给 null，前端不做倒计时
+      expiresAt: r.silent_anchor ? new Date(Date.parse(r.silent_anchor) + silenceH * 3600_000).toISOString() : null,
       lastSatisfaction,
       lastRisk,
       attempts: attempts.map((a) => ({ attemptNo: a.attempt_no, offeredWage: a.offered_wage, result: a.result, at: a.created_at, feedback: a.feedback })),
