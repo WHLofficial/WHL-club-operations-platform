@@ -225,10 +225,17 @@ export default function Ledger() {
                 {balance?.balance === null || balance?.balance === undefined ? '…' : `${balance.balance.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m`}
               </strong>
             </div>
-            <div className="ledger-balance-sub muted">
+            <div
+              className="ledger-balance-sub muted"
+              title="预期收入 = 在途卖人收入税后净额 × 系数 k（挂牌在途出价 / 被激活挂牌保底激活价 / 待审签约中的成交单）；被激活挂牌 = 激活方已提交激活、首价窗内的在途收入，激活作废或成交过户后自动收缩"
+            >
               可支配 {balance?.available?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'}m
               {(balance?.creditLine ?? 0) > 0
-                ? `（含预期收入 ${balance!.creditLine!.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m）`
+                ? `（含预期收入 ${balance!.creditLine!.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m${
+                    (balance?.activationCredit ?? 0) > 0
+                      ? ` · 其中被激活挂牌 ${balance!.activationCredit!.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}m`
+                      : ''
+                  }）`
                 : ''}
               {' · '}
               冻结中 {balance?.held?.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) ?? '…'}m

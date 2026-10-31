@@ -1393,6 +1393,10 @@ export interface ClubBalance {
   expectedIncome: number | null;
   /** 预期收入额度 = expectedIncome × k（已含在 available 里，展示拆解用） */
   creditLine: number | null;
+  /** v6.64.0：被激活挂牌在途税后净额（未乘 k，expectedIncome 的组成部分） */
+  activationIncome?: number | null;
+  /** v6.64.0：activationIncome × k（「其中被激活挂牌」展示口径，与 creditLine 同层真部分和） */
+  activationCredit?: number | null;
 }
 
 export interface LedgerEntryRow {
