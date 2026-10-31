@@ -544,8 +544,11 @@ async function runSettleOverdue(
     }
   }
   if (noteWrites.length > 0) {
-    const noteResults = await db.batch(noteWrites);
-    summary.notesUpdated += noteResults.filter((r) => r.meta.changes > 0).length;
+    // 分块 ≤90（§17 惯例）：LIMIT 200 下最坏 200 条，别赌 D1 单批语句数上限
+    for (let i = 0; i < noteWrites.length; i += 90) {
+      const noteResults = await db.batch(noteWrites.slice(i, i + 90));
+      summary.notesUpdated += noteResults.filter((r) => r.meta.changes > 0).length;
+    }
   }
 
   // 自愈：pending_review 但单据缺失（结算建单跨语句崩溃的残留），补齐 transfer + 审核任务。

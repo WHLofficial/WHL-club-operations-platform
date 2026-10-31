@@ -108,7 +108,10 @@ app.get('/market/listings', async (c) => {
   // 逐行 note UPDATE 串行往返），30s 合并窗跨 isolate 无效 ⇒ 每发列表请求都全额支付。
   // Workers 里挂 waitUntil 后台跑完，响应不再等它；测试没有 executionCtx（waitUntilOf 回 undefined）
   // 退化为就地 await，行为与旧版逐字一致。写路径（挂牌/出价/报价）仍同步结算，操作正确性不受影响。
-  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch(() => {});
+  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch((e) => {
+    // 后台失败不能静默：没有日志就无从发现结算长期挂死（coalesce 只在成功后记账，下次请求自动重试）
+    console.error('[market] 读路径后台结算失败:', e);
+  });
   const wu = waitUntilOf(c);
   if (wu) wu.waitUntil(settleRun);
   else await settleRun;
@@ -832,7 +835,9 @@ app.post('/market/listings/:id/activation-report', async (c) => {
 // GET /api/market/listings/:id —— 详情 + 出价历史
 app.get('/market/listings/:id', async (c) => {
   // v6.65.0：读路径结算挪出响应关键路径（与列表端点同款，见 /market/listings 处注释）
-  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch(() => {});
+  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch((e) => {
+    console.error('[market] 读路径后台结算失败:', e);
+  });
   const detailWu = waitUntilOf(c);
   if (detailWu) detailWu.waitUntil(settleRun);
   else await settleRun;
