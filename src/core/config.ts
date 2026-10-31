@@ -405,12 +405,54 @@ export function resetConfigCache(): void {
   cache.clear();
 }
 
+// ---- 解析纯函数（v6.65.0 从三个 getter 抽出）----
+// 入参一律是「已回落注册表默认」的原值（fetchRaw / getMany 的产出，见 fetchRaw 的 `?? CONFIG_DEFAULTS[key]`）；
+// `fallback === raw` 守卫防的是默认值本身坏时把同一个坏串反复解析。
+export function parseNumberValue(key: ConfigKey, raw: string | null): number | null {
+  const parsed = raw === null ? Number.NaN : Number(raw);
+  if (Number.isFinite(parsed)) return parsed;
+  const fallbackRaw = CONFIG_DEFAULTS[key];
+  if (fallbackRaw === undefined) return null;
+  const fallback = Number(fallbackRaw);
+  return Number.isFinite(fallback) ? fallback : null;
+}
+
+export function parseNumberListValue(key: ConfigKey, raw: string | null): number[] | null {
+  const source = raw === null ? CONFIG_DEFAULTS[key] : raw;
+  if (source === undefined || source === null) return null;
+  const parts = source.split(',').map((s) => Number(s.trim()));
+  if (parts.length === 0 || parts.some((n) => !Number.isFinite(n))) {
+    const fallback = CONFIG_DEFAULTS[key];
+    if (fallback === undefined || fallback === raw) return null;
+    return fallback.split(',').map((s) => Number(s.trim()));
+  }
+  return parts;
+}
+
+export function parseJsonValue<T>(key: ConfigKey, raw: string | null): T | null {
+  const source = raw === null ? CONFIG_DEFAULTS[key] : raw;
+  if (source === undefined || source === null) return null;
+  try {
+    return JSON.parse(source) as T;
+  } catch {
+    const fallback = CONFIG_DEFAULTS[key];
+    if (fallback === undefined || fallback === raw) return null;
+    try {
+      return JSON.parse(fallback) as T;
+    } catch {
+      return null;
+    }
+  }
+}
+
 export interface ConfigService {
   /** 原值：库里没有就落默认，再没有就是 null */
   get(key: ConfigKey): Promise<string | null>;
   getNumber(key: ConfigKey): Promise<number | null>;
   getNumberList(key: ConfigKey): Promise<number[] | null>;
   getJson<T>(key: ConfigKey): Promise<T | null>;
+  /** 批量取原值（v6.65.0）：一条 `key IN (…)` 查询，逐键回落注册表默认并回填单键缓存——热路径装配用 */
+  getMany(keys: readonly ConfigKey[]): Promise<Partial<Record<ConfigKey, string | null>>>;
   /** 写库并立刻失效本 isolate 缓存；value=null 删覆盖（回到默认）。键必须在注册表内 */
   set(key: ConfigKey, value: string | null): Promise<void>;
   /** 管理端视图：涉密键只给掩码 */
@@ -438,43 +480,42 @@ export function createConfigService(db: D1Database, opts: { now?: () => number }
     get: (key) => fetchRaw(key),
 
     async getNumber(key) {
-      const raw = await fetchRaw(key);
-      const parsed = raw === null ? Number.NaN : Number(raw);
-      if (Number.isFinite(parsed)) return parsed;
-      const fallbackRaw = CONFIG_DEFAULTS[key];
-      if (fallbackRaw === undefined) return null;
-      const fallback = Number(fallbackRaw);
-      return Number.isFinite(fallback) ? fallback : null;
+      return parseNumberValue(key, await fetchRaw(key));
     },
 
     async getNumberList(key) {
-      const raw = await fetchRaw(key);
-      const source = raw === null ? CONFIG_DEFAULTS[key] : raw;
-      if (source === undefined || source === null) return null;
-      const parts = source.split(',').map((s) => Number(s.trim()));
-      if (parts.length === 0 || parts.some((n) => !Number.isFinite(n))) {
-        const fallback = CONFIG_DEFAULTS[key];
-        if (fallback === undefined || fallback === raw) return null;
-        return fallback.split(',').map((s) => Number(s.trim()));
-      }
-      return parts;
+      return parseNumberListValue(key, await fetchRaw(key));
     },
 
     async getJson<T>(key: ConfigKey) {
-      const raw = await fetchRaw(key);
-      const source = raw === null ? CONFIG_DEFAULTS[key] : raw;
-      if (source === undefined || source === null) return null;
-      try {
-        return JSON.parse(source) as T;
-      } catch {
-        const fallback = CONFIG_DEFAULTS[key];
-        if (fallback === undefined || fallback === raw) return null;
-        try {
-          return JSON.parse(fallback) as T;
-        } catch {
-          return null;
+      return parseJsonValue<T>(key, await fetchRaw(key));
+    },
+
+    // v6.65.0：热路径装配（loadMarketContext 等）专用。与 fetchRaw 同口径——缺行回落注册表默认、
+    // 回填单键缓存 ⇒ getMany 与单键 get 在 TTL 窗内读到同值，互不污染
+    async getMany(keys) {
+      const uniq = [...new Set(keys)];
+      const out: Partial<Record<ConfigKey, string | null>> = {};
+      const missing: ConfigKey[] = [];
+      for (const key of uniq) {
+        const hit = cache.get(key);
+        if (hit && now() - hit.at < CONFIG_TTL_MS) out[key] = hit.value;
+        else missing.push(key);
+      }
+      if (missing.length > 0) {
+        const ph = missing.map(() => '?').join(', ');
+        const rows = await db
+          .prepare(`SELECT key, value FROM config WHERE key IN (${ph})`)
+          .bind(...missing)
+          .all<{ key: string; value: string | null }>();
+        const byKey = new Map(rows.results.map((r) => [r.key, r.value]));
+        for (const key of missing) {
+          const value = byKey.get(key) ?? CONFIG_DEFAULTS[key] ?? null;
+          cache.set(key, { value, at: now() });
+          out[key] = value;
         }
       }
+      return out;
     },
 
     async set(key, value) {

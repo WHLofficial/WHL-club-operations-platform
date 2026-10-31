@@ -180,4 +180,50 @@ describe('config 服务（§13）', () => {
     expect(rows.find((r) => r.key === 'squads_include_trainee')).toMatchObject({ secret: false, value: 'true' });
     expect(rows.find((r) => r.key === 'registration_check_mode')).toMatchObject({ secret: false, value: 'warn' });
   });
+
+  // v6.65.0：热路径批量取值（loadMarketContext 消费）。与单键同口径：覆盖生效、坏值留在原值
+  // 由解析层回落默认、缺行落注册表默认——getMany 只管取原值，不重复实现解析。
+  it('getMany：批量取值与单键同口径（覆盖 / 缺行落默认）', async () => {
+    const { service, db } = setup();
+    await db
+      .prepare(
+        `INSERT INTO config (key, value, updated_at) VALUES
+           ('bid_step_min', '3', '2026-01-01T00:00:00Z'),
+           ('listing_floor_coefs', 'abc', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    const raw = await service.getMany(['bid_step_min', 'listing_floor_coefs', 'deadline_hours', 'tax_rates']);
+    expect(raw.bid_step_min).toBe('3');
+    expect(raw.listing_floor_coefs).toBe('abc');
+    expect(raw.deadline_hours).toBe('18,23');
+    expect(raw.tax_rates).toBe('0.10,0.20,0.40');
+    // 解析层结果与单键 getter 一致（坏值回落默认）
+    await expect(service.getNumber('bid_step_min')).resolves.toBe(3);
+    await expect(service.getNumberList('listing_floor_coefs')).resolves.toEqual([0.5, 0.5]);
+    await expect(service.getNumberList('deadline_hours')).resolves.toEqual([18, 23]);
+  });
+
+  it('getMany：set 后立即可见，与单键读同值（缓存互不污染）', async () => {
+    const { service } = setup();
+    await service.set('bid_step_min', '2');
+    await expect(service.getMany(['bid_step_min'])).resolves.toMatchObject({ bid_step_min: '2' });
+    await expect(service.getNumber('bid_step_min')).resolves.toBe(2);
+    // 反向：单键读缓存热后，getMany 仍读到同值
+    await service.set('bid_step_min', '5');
+    await expect(service.getMany(['bid_step_min'])).resolves.toMatchObject({ bid_step_min: '5' });
+  });
+
+  it('getMany：冷缓存一条 IN 查询（语句数锁）', async () => {
+    const { db } = setup();
+    const sqls: string[] = [];
+    const wrapped = {
+      prepare(sql: string) {
+        sqls.push(sql);
+        return db.prepare(sql);
+      },
+    } as unknown as D1Database;
+    const service = createConfigService(wrapped, { now: () => 1_000_000 });
+    await service.getMany(['bid_step_min', 'deadline_hours', 'tax_rates']);
+    expect(sqls.filter((s) => s.includes('FROM config')).length).toBe(1);
+  });
 });

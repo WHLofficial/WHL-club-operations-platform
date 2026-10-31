@@ -39,6 +39,7 @@ interface ActiveListingRow {
   listed_day: string | null;
   last_bid_at: string | null;
   deadline_at: string | null;
+  deadline_note: string | null;
   season: number | null;
   window_seq: number | null;
   window_status: string | null;
@@ -459,7 +460,7 @@ async function runSettleOverdue(
 
   const active = await db
     .prepare(
-      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_day, l.last_bid_at, l.deadline_at, l.season, l.window_seq,
+      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_day, l.last_bid_at, l.deadline_at, l.deadline_note, l.season, l.window_seq,
               sw.status AS window_status,
               (SELECT COUNT(*) FROM bids WHERE listing_id = l.id AND status = 'active') AS bid_count
        FROM listings l
@@ -468,6 +469,13 @@ async function runSettleOverdue(
        ORDER BY l.id LIMIT 200`,
     )
     .all<ActiveListingRow>();
+
+  // v6.65.0：note 刷新不再逐行 await——生产实测（2026-10-31）35 张在售单 = 35 趟串行往返 ≈ 12s，
+  // 全部撞在每个读端点与出价请求上（30s 合并窗跨 isolate 无效）。改为 JS 比对现值、只收变更行，
+  // 循环结束后一次 db.batch 发送：常态（note 未变）零写，有变更 1 趟往返。
+  // met 行走收口、未到期行才进 note，行集合互斥 ⇒ 收口动作夹在中间不影响批次内容；
+  // 批内每条保留 status 写闸与 note 不等守卫，写时再验一次态（与逐行版语义逐字一致）。
+  const noteWrites: ReturnType<D1Database['prepare']>[] = [];
 
   for (const row of active.results) {
     const core: ListingCore = {
@@ -527,11 +535,17 @@ async function runSettleOverdue(
       continue;
     }
     const note = noteText(noteDay, ctx.deadlineHours, ctx.calendar);
-    const r = await db
-      .prepare(`UPDATE listings SET deadline_note = ? WHERE id = ? AND status IN ('listed', 'bidding') AND (deadline_note IS NULL OR deadline_note != ?)`)
-      .bind(note, row.id, note)
-      .run();
-    if (r.meta.changes > 0) summary.notesUpdated++;
+    if (row.deadline_note !== note) {
+      noteWrites.push(
+        db
+          .prepare(`UPDATE listings SET deadline_note = ? WHERE id = ? AND status IN ('listed', 'bidding') AND (deadline_note IS NULL OR deadline_note != ?)`)
+          .bind(note, row.id, note),
+      );
+    }
+  }
+  if (noteWrites.length > 0) {
+    const noteResults = await db.batch(noteWrites);
+    summary.notesUpdated += noteResults.filter((r) => r.meta.changes > 0).length;
   }
 
   // 自愈：pending_review 但单据缺失（结算建单跨语句崩溃的残留），补齐 transfer + 审核任务。

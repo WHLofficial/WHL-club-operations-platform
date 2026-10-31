@@ -75,6 +75,11 @@ interface ListingRow {
   ca: number | null;
   pa: number | null;
   seller_name: string | null;
+  // v6.65.0：出价聚合折进主查询后的随行列（LEFT JOIN 分组子查询，无出价全 null）
+  highest: number | null;
+  bid_total: number | null;
+  leader_club_id: number | null;
+  leader_name: string | null;
 }
 
 function statusFilter(raw: string | undefined): string[] {
@@ -99,8 +104,14 @@ function statusFilter(raw: string | undefined): string[] {
 app.get('/market/listings', async (c) => {
   // v6.40.2：公开读端点也要限速——这条既无鉴权又整跑惰性结算，是匿名放大最便宜的入口
   assertPublicRate(c, 'market');
-  // v6.40.2：读路径结算可合并（30s 窗内只真跑一次）
-  await settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 });
+  // v6.65.0：读路径结算挪出响应关键路径——生产实测（2026-10-31）全量结算 ≈12s（35 张在售单的
+  // 逐行 note UPDATE 串行往返），30s 合并窗跨 isolate 无效 ⇒ 每发列表请求都全额支付。
+  // Workers 里挂 waitUntil 后台跑完，响应不再等它；测试没有 executionCtx（waitUntilOf 回 undefined）
+  // 退化为就地 await，行为与旧版逐字一致。写路径（挂牌/出价/报价）仍同步结算，操作正确性不受影响。
+  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch(() => {});
+  const wu = waitUntilOf(c);
+  if (wu) wu.waitUntil(settleRun);
+  else await settleRun;
   const statuses = statusFilter(c.req.query('status'));
   const cursorRaw = c.req.query('cursor');
   let cursor: number | null = null;
@@ -119,51 +130,36 @@ app.get('/market/listings', async (c) => {
   // 排序（v6.60.10）：强制拍卖单（type='forced'，管理端介入挂出的强拍）永远置顶，其余按 id 倒序（最近挂牌在前）。
   // 只用一个 CASE 表达式而不是两趟查询，一页 50 条仍是一条语句；代价是 cursor 键集（l.id < ?）跨页只在同一档内连续
   // ——本仓前端不分页（卡柜、球员页、管理端都是无 cursor 的单次取），所以翻页语义退化不影响任何调用方。
-  // 排序要物化匹配行（扫描走不了 id 索引），但现网非终态挂牌一共 24 条（listed 16 / bidding 8，2026-10-30 实测），
-  // 远小于 LIMIT 50 之下的 rows read 余量，不另加索引。
-  const rows = await c.env.DB.prepare(
-    `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
+  // 排序要物化匹配行（扫描走不了 id 索引），但现网非终态挂牌量远小于 LIMIT 50 之下的 rows read 余量，不另加索引。
+  // v6.65.0：出价聚合折进主查询（LEFT JOIN 分组子查询；active 出价每单至多一条，MAX(CASE) 取领先方，
+  // bids 全表生产实测 83 行，物化无压力），ctx 与主查询无依赖并行——响应路径从「结算阻塞 + 5 趟串行」压到 1–2 趟往返。
+  const [rowsRes, ctx] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT l.id, l.player_id, l.seller_club_id, l.type, l.ask_price, l.status, l.listed_at, l.last_bid_at,
             l.listed_day, l.deadline_at, l.deadline_note, l.season, l.window_seq, l.activated_by, l.activation_deadline, l.match_deadline, l.bid_paused,
             ${sqlDisplayName('p')} AS player_name, p.fc_id AS player_fc_id, p.position, p.age, p.ca, p.pa,
-            cl.name AS seller_name
+            cl.name AS seller_name,
+            ba.highest, ba.bid_total, ba.leader_club_id, lc.name AS leader_name
      FROM listings l
      JOIN players p ON p.id = l.player_id
      LEFT JOIN clubs cl ON cl.id = l.seller_club_id
+     LEFT JOIN (
+       SELECT b.listing_id, MAX(b.amount) AS highest, COUNT(*) AS bid_total,
+              MAX(CASE WHEN b.status = 'active' THEN b.club_id END) AS leader_club_id
+       FROM bids b GROUP BY b.listing_id
+     ) ba ON ba.listing_id = l.id
+     LEFT JOIN clubs lc ON lc.id = ba.leader_club_id
      WHERE l.status IN (${ph}) ${cursor !== null ? 'AND l.id < ?' : ''} ${playerId !== null ? 'AND l.player_id = ?' : ''}
      ORDER BY CASE l.type WHEN 'forced' THEN 0 ELSE 1 END, l.id DESC LIMIT 50`,
-  )
-    .bind(...statuses, ...(cursor !== null ? [cursor] : []), ...(playerId !== null ? [playerId] : []))
-    .all<ListingRow>();
-
-  // 出价聚合（最高价 + 出价次数 + 领先出价方，改动 5），IN 分块 ≤90（§17）。
-  // 领先出价方 = active 出价（每单至多一条：新出价落库即把旧 active 全部 superseded）。
-  const ids = rows.results.map((r) => r.id);
-  const agg = new Map<number, { highest: number; count: number }>();
-  const leader = new Map<number, { id: number; name: string }>();
-  for (let i = 0; i < ids.length; i += 90) {
-    const slice = ids.slice(i, i + 90);
-    const ph2 = slice.map(() => '?').join(', ');
-    const bidRows = await c.env.DB.prepare(
-      `SELECT listing_id, MAX(amount) AS highest, COUNT(*) AS count FROM bids WHERE listing_id IN (${ph2}) GROUP BY listing_id`,
     )
-      .bind(...slice)
-      .all<{ listing_id: number; highest: number; count: number }>();
-    for (const b of bidRows.results) agg.set(b.listing_id, { highest: b.highest, count: b.count });
-    const activeRows = await c.env.DB.prepare(
-      `SELECT b.listing_id, b.club_id, cl.name AS club_name
-       FROM bids b JOIN clubs cl ON cl.id = b.club_id
-       WHERE b.listing_id IN (${ph2}) AND b.status = 'active'`,
-    )
-      .bind(...slice)
-      .all<{ listing_id: number; club_id: number; club_name: string }>();
-    for (const b of activeRows.results) leader.set(b.listing_id, { id: b.club_id, name: b.club_name });
-  }
-
-  const ctx = await loadMarketContext(c.env.DB);
+      .bind(...statuses, ...(cursor !== null ? [cursor] : []), ...(playerId !== null ? [playerId] : []))
+      .all<ListingRow>(),
+    loadMarketContext(c.env.DB),
+  ]);
+  const rows = rowsRes;
   const now = new Date();
   return c.json({
     listings: rows.results.map((r) => {
-      const a = agg.get(r.id) ?? null;
       let deadlineAt: string | null = null;
       // 截止绝对时刻化（v6.4.0）：优先读落库列（出价时按 bidDeadline 算定），存量行 NULL 回落实时算。
       // v6.24.0：挂牌即落 deadline_at，listed 的普通挂牌也回截止时刻（卡片倒计时锚点）；
@@ -192,9 +188,9 @@ app.get('/market/listings', async (c) => {
         listedAt: r.listed_at,
         lastBidAt: r.last_bid_at,
         bidPaused: r.bid_paused === 1,
-        highestBid: a?.highest ?? null,
-        highestBidder: leader.get(r.id) ?? null,
-        bidCount: a?.count ?? 0,
+        highestBid: r.highest ?? null,
+        highestBidder: r.leader_club_id !== null && r.leader_name !== null ? { id: r.leader_club_id, name: r.leader_name } : null,
+        bidCount: r.bid_total ?? 0,
         activatedBy: r.activated_by,
         activationDeadline: r.activation_deadline,
         matchDeadline: r.match_deadline,
@@ -206,7 +202,7 @@ app.get('/market/listings', async (c) => {
                 ? 'matching'
                 : null
             : null,
-        firstBidPending: r.type === 'activation' && (a?.count ?? 0) === 0 && r.activated_by !== null,
+        firstBidPending: r.type === 'activation' && (r.bid_total ?? 0) === 0 && r.activated_by !== null,
         deadlineAt,
         deadlineNote: r.deadline_note,
       };
@@ -835,8 +831,11 @@ app.post('/market/listings/:id/activation-report', async (c) => {
 
 // GET /api/market/listings/:id —— 详情 + 出价历史
 app.get('/market/listings/:id', async (c) => {
-  // v6.40.2：读路径结算可合并（30s 窗内只真跑一次）
-  await settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 });
+  // v6.65.0：读路径结算挪出响应关键路径（与列表端点同款，见 /market/listings 处注释）
+  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch(() => {});
+  const detailWu = waitUntilOf(c);
+  if (detailWu) detailWu.waitUntil(settleRun);
+  else await settleRun;
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) throw new HttpError(400, '挂牌 ID 不对');
   // v6.60.8 浮层首开提速：最高出价与「全市场暂停出价」开关都不依赖 listing 行之外的结果，
