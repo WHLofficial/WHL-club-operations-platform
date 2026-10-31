@@ -108,6 +108,8 @@ function detail(id: number, over: Partial<PlayerDetail['player']> = {}): PlayerD
       fcId: 20801,
       growthXp: 0,
       gameAttrs: ATTR_BASE,
+      // v6.63.0：详情下发合并清单；默认给空数组（有 PlayStyle 的用例单独覆盖）
+      playstyles: [],
       createdAt: '2026-01-01',
       updatedAt: '2026-01-01',
       listPrice: null,
@@ -836,10 +838,10 @@ describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属�
 
     expect(await screen.findByText('只有球员所属俱乐部的教练能选升级方案。')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /方案 1/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /发放中国计划徽章/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /发放中国计划 PlayStyle/ })).toBeNull();
   });
 
-  it('TC-GROWTH-PERM-02 · 本队教练仍能选方案与发放中国计划徽章', async () => {
+  it('TC-GROWTH-PERM-02 · 本队教练仍能选方案与发放中国计划 PlayStyle', async () => {
     authState.user = { role: 'coach' };
     stubGrowthPage(11);
     const user = open();
@@ -847,7 +849,7 @@ describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属�
     await user.click(screen.getByRole('button', { name: '成长' }));
 
     expect(await screen.findByRole('button', { name: /方案 1/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /发放中国计划徽章/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /发放中国计划 PlayStyle/ })).toBeTruthy();
     expect(screen.queryByText('只有球员所属俱乐部的教练能选升级方案。')).toBeNull();
   });
 
@@ -859,7 +861,7 @@ describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属�
     await user.click(screen.getByRole('button', { name: '成长' }));
 
     expect(await screen.findByRole('button', { name: /方案 1/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /发放中国计划徽章/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /发放中国计划 PlayStyle/ })).toBeTruthy();
     expect(screen.queryByText('只有球员所属俱乐部的教练能选升级方案。')).toBeNull();
   });
 
@@ -872,6 +874,6 @@ describe('TC-GROWTH-PERM：成长方案与中国计划徽章只有球员所属�
 
     expect(await screen.findByText('只有球员所属俱乐部的教练能选升级方案。')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /方案 1/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /发放中国计划徽章/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /发放中国计划 PlayStyle/ })).toBeNull();
   });
 });

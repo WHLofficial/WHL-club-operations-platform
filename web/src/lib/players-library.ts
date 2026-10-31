@@ -309,7 +309,9 @@ export function filtersToQuery(f: Filters): string {
 
 // ---- 列系统：基础列恒在；可变列默认两列，其余由筛选联动自动加（手动调过则以手动为准） ----
 
-export const DEFAULT_COLS = ['shortlist', 'marketValue', 'badges'];
+// v6.63.0：「徽章」列退役并入 PlayStyle 一列（同一域概念只留一个出口），默认列随之换 ps。
+// 旧偏好里存了 'badges' 的用户：渲染时未知列被跳过（renderClubCol 侧不崩），重新保存偏好即收敛。
+export const DEFAULT_COLS = ['shortlist', 'marketValue', 'ps'];
 
 // 固定 11 列（标签 / 排序键 / 是否数值列）。数组顺序就是表头与单元格的渲染顺序，改动前先看页面行渲染同序。
 // 标记列 v6.19.0 从可选列提为固定列（用户指令：放 UID 后面第二列），COL_DEFS 里的同名行已退役
@@ -330,7 +332,8 @@ export const FIXED_COLUMNS: { label: string; sort: SortKey; num?: boolean }[] = 
 export const COL_DEFS: { key: string; label: string; /** v6.58.0：星标列没有可排序键（表头在页面侧特殊处理） */ sort?: SortKey; num?: boolean }[] = [
   { key: 'shortlist', label: '候选' },
   { key: 'marketValue', label: '身价', sort: 'market_value', num: true },
-  { key: 'badges', label: '徽章', sort: 'badges' },
+  // v6.63.0：'badges'（徽章）列退役并入 'ps'（PlayStyle）—— 同一域概念只留一个出口；
+  // sort=badges 排序键保留作 URL 兼容（与 sort=ps 同指台账列和）
   { key: 'prestige', label: '声望', sort: 'prestige', num: true },
   { key: 'baseCa', label: '初始 CA', sort: 'base_ca', num: true },
   { key: 'growthGap', label: '成长空间', sort: 'growth_gap', num: true },

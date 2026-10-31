@@ -41,7 +41,8 @@ describe('BadgeCounts 渲染', () => {
     const spans = Array.from(container.querySelectorAll('span.badge-count'));
     expect(spans.map((el) => el.textContent)).toEqual(['🥇×2', '🥈×1']);
     expect(spans.map((el) => el.getAttribute('class'))).toEqual(['badge-count badge-count-icon', 'badge-count badge-count-icon']);
-    expect(spans.map((el) => el.getAttribute('title'))).toEqual(['金徽章', '银徽章']);
+    // v6.63.0：全量口径 + 文案改「金/银 PlayStyle」（「徽章」俗称只留在商店语境）
+    expect(spans.map((el) => el.getAttribute('title'))).toEqual(['金 PlayStyle', '银 PlayStyle']);
   });
 
   it('text 密度：类名带金银（颜色走 token），不挂 title', () => {

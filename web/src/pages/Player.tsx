@@ -28,7 +28,6 @@ import {
   SOURCE_LABEL,
   TRANSFER_TYPE_LABEL,
   nationName,
-  playstyleBadges,
   positionName,
   roleChs,
 } from '../lib/ref.ts';
@@ -61,12 +60,13 @@ import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 import {
   PS_GOLD_BASE,
   PS_GRANTABLE_BASE_IDS,
+  basePlaystyleId,
+  playstyleAllowedForPosition,
   playstyleIdOf,
   playstyleKindOf,
   type PlaystyleKind,
   type PlaystyleSlot,
 } from '../../../src/core/fc26.ts';
-import { mergedPlaystyleList } from '../../../src/core/playstyle-rules.ts';
 import { useToast } from '../lib/toast.tsx';
 import { qk, useOffersReceivedPending, usePlayerDetail, useSeasonsCurrent } from '../lib/queries.ts';
 import { useAuth } from '../lib/auth.tsx';
@@ -102,6 +102,7 @@ function PlaystylePickGrid({
   limit,
   disabled,
   onToggle,
+  supersede,
 }: {
   kind: PlaystyleKind;
   options: readonly number[];
@@ -109,6 +110,8 @@ function PlaystylePickGrid({
   limit: number;
   disabled: boolean;
   onToggle: (psid: number) => void;
+  /** 成长语境金选项遇已有银版的基础 ID 集（v6.63.0：自动「去银留金」，按钮上标出来） */
+  supersede?: ReadonlySet<number>;
 }) {
   if (options.length === 0) {
     return <p className="muted">没有可选的 {kind === 'gold' ? '金' : '银'} PlayStyle：白名单里的都已在身上。</p>;
@@ -119,6 +122,9 @@ function PlaystylePickGrid({
     <div className="ps-pick-grid">
       {options.map((psid) => {
         const on = selected.includes(psid);
+        // 金选项遇已有银版（发放银或 FC 银）：成长语境可点，落库时自动替换 —— 银版发放行删除、
+        // FC 自带银被新金抑制（金行消失时自动回归）
+        const willSupersede = kind === 'gold' && supersede?.has(basePlaystyleId(psid)) === true;
         return (
           <button
             key={psid}
@@ -126,9 +132,11 @@ function PlaystylePickGrid({
             className={`ps-pick${on ? ' on' : ''}`}
             aria-pressed={on}
             disabled={disabled || (!on && full)}
+            title={willSupersede ? '已有银版：确认后自动替换成金版（银版随之移除）' : undefined}
             onClick={() => onToggle(psid)}
           >
             <PlaystyleBadge psid={psid} gold={kind === 'gold'} />
+            {willSupersede && <span className="ps-pick-supersede">替换银版</span>}
           </button>
         );
       })}
@@ -272,7 +280,7 @@ export default function Player() {
         `/api/growth/china-playstyles/${growth.player.id}`,
         { picks: chinaPicks },
       );
-      show(`中国计划徽章已发 ${r.granted} 个${r.left > 0 ? `，还剩 ${r.left} 个名额` : '，名额已发完'}。`);
+      show(`中国计划 PlayStyle 已发 ${r.granted} 个${r.left > 0 ? `，还剩 ${r.left} 个名额` : '，名额已发完'}。`);
       setChinaPicks([]);
       refreshAll();
     } catch (err) {
@@ -349,15 +357,21 @@ export default function Player() {
   // 左栏五态判据：本队 = 登录教练且现属俱乐部就是我的队；「非卖品」字段后端还没有（v6.3.0 报价子系统），运行时暂不可达
   const isMine = club !== null && myClubId === club.id;
   const isCpu = clubInfo?.isCpu ?? false;
-  // PlayStyle 清单 = FC 源槽 + 发放明细（v3.3.0；v6.63.0 含可逆抑制与来源角标）：明细存基础 ID，
-  // 合并时换算成存库 ID 并去重，被发放金顶掉的 FC 银槽不出现
-  const playstyles = mergedPlaystyleList(
-    playstyleBadges(attrs),
-    (growth?.playstyleDetails ?? []).map((d) => ({ slot: d.slot, kind: d.kind, psid: d.psid, source: d.source })),
+  // PlayStyle 清单（v6.63.0）：详情端点直接下发合并清单（FC 槽 + 发放明细，含可逆抑制与来源
+  // 角标），与列表行/对比页同口径 —— 不再由前端现算，也不再依赖 growth 查询的加载状态
+  const playstyles = player.playstyles ?? [];
+  // v6.63.0 跨段规则 + 位置资格：银选项遇金版（任何来源）隐藏；金选项遇银版保留（成长自动替换，
+  // 网格上标「替换银版」）；外场拿不到 GK 专属项（基础 ID 51-56，Q10 单向）。
+  const ownedGoldBases = new Set(playstyles.filter((s) => s.gold).map((s) => basePlaystyleId(s.psid)));
+  const ownedSilverBases = new Set(playstyles.filter((s) => !s.gold).map((s) => basePlaystyleId(s.psid)));
+  const growthPosition = player.position;
+  const silverOptions = PS_GRANTABLE_BASE_IDS.filter(
+    (id) => playstyleAllowedForPosition(id, growthPosition) && !ownedGoldBases.has(id) && !ownedSilverBases.has(id),
   );
-  const ownedPsids = playstyles.map((s) => s.psid);
-  const silverOptions = PS_GRANTABLE_BASE_IDS.filter((id) => !ownedPsids.includes(id));
-  const goldOptions = PS_GRANTABLE_BASE_IDS.map((id) => id + PS_GOLD_BASE).filter((id) => !ownedPsids.includes(id));
+  // 金选项用存库形（基础 ID + 100，与 picks/PlaystyleBadge 同一编号空间）
+  const goldOptions = PS_GRANTABLE_BASE_IDS.filter((id) => playstyleAllowedForPosition(id, growthPosition) && !ownedGoldBases.has(id)).map(
+    (id) => id + PS_GOLD_BASE,
+  );
   const armedPlanDef = armedPlan === null ? null : growth?.player.upgradePlans[armedPlan] ?? null;
   const transfers = transfersQuery.data?.transfers ?? [];
 
@@ -618,6 +632,7 @@ export default function Player() {
               chinaPicks={chinaPicks}
               silverOptions={silverOptions}
               goldOptions={goldOptions}
+              supersedeSilver={ownedSilverBases}
               chinaPlan={player.chinaPlan}
               canManage={isCoach && isMine}
               busy={busy}
@@ -779,7 +794,7 @@ export default function Player() {
               <p className="wing-card-head">PlayStyles</p>
               <div className="ps-list">
                 {playstyles.map((b) => (
-                  <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} />
+                  <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} source={b.source} />
                 ))}
               </div>
             </section>
@@ -988,6 +1003,7 @@ function GrowthBlock({
   chinaPicks,
   silverOptions,
   goldOptions,
+  supersedeSilver,
   chinaPlan,
   canManage,
   busy,
@@ -1004,6 +1020,8 @@ function GrowthBlock({
   chinaPicks: number[];
   silverOptions: readonly number[];
   goldOptions: readonly number[];
+  /** 已有银版的基础 ID 集（v6.63.0）：成长语境金选项标「替换银版」 */
+  supersedeSilver: ReadonlySet<number>;
   chinaPlan: boolean;
   /** 球员所属俱乐部的教练：成长方案/中国计划徽章的写入口只给他看（服务端同样有这个闸，管理组不能代办） */
   canManage: boolean;
@@ -1089,8 +1107,14 @@ function GrowthBlock({
                   selected={picks}
                   limit={armedPlanDef.gold}
                   disabled={busy}
+                  supersede={supersedeSilver}
                   onToggle={(psid) => onTogglePick(psid, armedPlanDef.silver, armedPlanDef.gold)}
                 />
+              )}
+              {supersedeSilver.size > 0 && armedPlanDef.gold > 0 && (
+                <p className="hint">
+                  金 PlayStyle 遇已有银版会自动替换：发放所得的银版随之移除，FC 自带的银版被金版顶住（金版移除后自动回归）。
+                </p>
               )}
             </div>
           )}
@@ -1100,11 +1124,12 @@ function GrowthBlock({
         <p className="hint">只有球员所属俱乐部的教练能选升级方案。</p>
       )}
       <p className="hint">
-        徽章墙：🥇 {p.badgesGold}/3 · 🥈 {p.badgesSilver}/12（金槽 3 个 + 银槽 12 个；台账到帽后选带徽章的方案也不再涨）
+        PlayStyle：🥇 {p.badgesGold}/3 · 🥈 {p.badgesSilver}/12（金槽 3 个 + 银槽 12 个；计数含 FC 自带与发放所得，按全量算上限 ——
+        v6.63.0 起台账即全量派生值）
       </p>
       {chinaPlan && (
         <div className="china-ps">
-          <h4>中国计划徽章</h4>
+          <h4>中国计划 PlayStyle</h4>
           {canManage ? (
             china.left > 0 ? (
               <>
@@ -1121,7 +1146,7 @@ function GrowthBlock({
                   onToggle={(psid) => onToggleChinaPick(psid, china.left)}
                 />
                 <button type="button" className="btn" disabled={busy || !chinaReady} onClick={() => onGrantChina(china.left)}>
-                  发放中国计划徽章{chinaReady ? '' : `（还差 ${china.left - chinaPicks.length} 个）`}
+                  发放中国计划 PlayStyle{chinaReady ? '' : `（还差 ${china.left - chinaPicks.length} 个）`}
                 </button>
               </>
             ) : (

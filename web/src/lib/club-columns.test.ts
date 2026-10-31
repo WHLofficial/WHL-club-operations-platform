@@ -21,7 +21,6 @@ import {
   type ClubColRow,
 } from './club-columns.tsx';
 import { COL_DEFS } from './players-library.ts';
-import { BadgeCounts } from '../components/BadgeCounts.tsx';
 import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
 describe('固定列（v6.30.0 C 段）', () => {
@@ -76,14 +75,13 @@ describe('固定列（v6.30.0 C 段）', () => {
 });
 
 describe('可选列池（默认全不显示）', () => {
-  it('16 项 = 球员库 COL_DEFS 去掉工资/解约金与候选星标列，顺序保持不变', () => {
-    expect(CLUB_OPTIONAL_COLS).toHaveLength(16);
+  it('15 项 = 球员库 COL_DEFS 去掉工资/解约金与候选星标列，顺序保持不变（v6.63.0：badges 列退役并入 ps）', () => {
+    expect(CLUB_OPTIONAL_COLS).toHaveLength(15);
     expect(CLUB_OPTIONAL_COLS).toEqual(
       COL_DEFS.filter((d) => d.key !== 'wage' && d.key !== 'releaseFee' && d.key !== 'shortlist'),
     );
     expect(CLUB_OPTIONAL_COLS.map((d) => d.key)).toEqual([
       'marketValue',
-      'badges',
       'prestige',
       'baseCa',
       'growthGap',
@@ -112,17 +110,18 @@ describe('可选列池（默认全不显示）', () => {
     expect(clubVisibleCols('')).toEqual([]);
   });
 
-  it('坏值与池子外的键一律忽略：工资/解约金（已升固定列）、球员库的 attr: 列、瞎写的键', () => {
+  it('坏值与池子外的键一律忽略：工资/解约金（已升固定列）、退役的 badges、球员库的 attr: 列、瞎写的键', () => {
     expect(clubVisibleCols('wage,releaseFee')).toEqual([]);
     expect(parseClubColsParam('attr:ca')).toBeNull();
     expect(parseClubColsParam('nope,,bad')).toBeNull();
-    expect(clubVisibleCols('badges,nope,foot')).toEqual(['badges', 'foot']);
+    // v6.63.0：badges 列退役 —— 旧 URL 里的键随池子过滤静默收敛
+    expect(clubVisibleCols('badges,nope,foot')).toEqual(['foot']);
     // 键前后的空格照球员库 parseColsParam 的口径先 trim 再判
-    expect(clubVisibleCols(' wage , badges ')).toEqual(['badges']);
+    expect(clubVisibleCols(' wage , badges ')).toEqual([]);
   });
 
   it('合法值原样保留（显示顺序跟参数走）', () => {
-    expect(parseClubColsParam('foot,badges')).toEqual(['foot', 'badges']);
+    expect(parseClubColsParam('foot')).toEqual(['foot']);
   });
 
   it('两套 URL 键分开：阵容名单 cols / 注册名单 regcols（两表在不同页签，防串味）', () => {
@@ -132,11 +131,12 @@ describe('可选列池（默认全不显示）', () => {
 
   it('卡片化长尾池 parseCardExtras：只留额外列，内置键（旧 URL 遗留）与坏值滤掉', () => {
     expect(CARD_EXTRA_ITEMS.length).toBeGreaterThan(0);
-    expect(parseCardExtras('contractType,badges')).toEqual(['contractType', 'badges']);
+    // v6.63.0：badges 随可选池退役，卡片长尾池同样滤掉
+    expect(parseCardExtras('contractType,badges')).toEqual(['contractType']);
     // 旧表时代遗留的 ?cols=marketValue：身价已是内置列，滤掉防重复渲染成第二列
     // （wage/releaseFee 在 parseClubColsParam 上游就滤了，这里拦的是仍在可选池内的内置键）
     expect(parseCardExtras('marketValue,contractType')).toEqual(['contractType']);
-    expect(parseCardExtras('baseCa,badges')).toEqual(['badges']);
+    expect(parseCardExtras('baseCa,badges')).toEqual([]);
     expect(parseCardExtras('nope')).toEqual([]);
     expect(parseCardExtras(null)).toEqual([]);
   });
@@ -146,7 +146,7 @@ describe('排序键落在可选列时自动显列（照球员库 sortColumnVisib
   it('可选列：没选上就补一列，已选上不重复补', () => {
     expect(clubVisibleCols(null, 'market_value')).toEqual(['marketValue']);
     expect(clubVisibleCols(null, 'foot')).toEqual(['foot']);
-    expect(clubVisibleCols('foot,badges', 'market_value')).toEqual(['foot', 'badges', 'marketValue']);
+    expect(clubVisibleCols('foot,ps', 'market_value')).toEqual(['foot', 'ps', 'marketValue']);
     expect(clubVisibleCols('marketValue', 'market_value')).toEqual(['marketValue']);
   });
 
@@ -254,23 +254,17 @@ describe('可选列单元格渲染（与球员库共用一份，元素级断言�
 
   // v6.35.0 徽章/PlayStyle 统一：这两个单元格是本轮唯一改过的表格组装点，spec §4 登记过「只有底层单测、
   // 组装层无断言」的缺口 —— 这里用元素级断言补上（不渲染 DOM，与上面几例同法）。
-  it('徽章列：两枚全 0 出「—」，有值走 BadgeCounts 的 text 密度（v6.35.0）', () => {
-    expect(childOf('badges', row)).toBe('—');
-    const cell = childOf('badges', { ...row, badgesSilver: 3, badgesGold: 2 }) as ReactElement<{
-      silver: number;
-      gold: number;
-      density: string;
-    }>;
-    expect(cell.type).toBe(BadgeCounts);
-    expect(cell.props).toMatchObject({ silver: 3, gold: 2, density: 'text' });
-  });
-
-  it('ps 列：无 psIds / 全是空槽出「—」，有徽章走 PlaystyleBadge compact 并归一金段 ID（v6.35.0）', () => {
+  // v6.63.0：「徽章」列退役并入 ps —— 单元格 case 删除，ps 列改吃合并清单 playstyles。
+  it('ps 列：无 playstyles / 空清单出「—」，FC 与发放明细都走 PlaystyleBadge compact（psid 归一成基础 ID）', () => {
     expect(childOf('ps', row)).toBe('—');
-    expect(childOf('ps', { ...row, psIds: [null, 0, 1.5, -3] })).toBe('—');
-    // 下标 0 的银段 1 ⇒ 槽 1 银徽；下标 12 的金段 103 ⇒ 槽 13 金徽，psid 归一成基础 ID 3
-    const psIds = [1, null, null, null, null, null, null, null, null, null, null, null, 103];
-    const badges = childOf('ps', { ...row, psIds }) as ReactElement<{ psid: number; gold: boolean; compact: boolean }>[];
+    expect(childOf('ps', { ...row, playstyles: [] })).toBe('—');
+    const badges = childOf('ps', {
+      ...row,
+      playstyles: [
+        { slot: 1, psid: 1, gold: false, source: 'fc' },
+        { slot: 13, psid: 103, gold: true, source: 'shop' },
+      ],
+    }) as ReactElement<{ psid: number; gold: boolean; compact: boolean }>[];
     expect(badges.map((b) => b.type)).toEqual([PlaystyleBadge, PlaystyleBadge]);
     expect(badges.map((b) => b.props)).toEqual([
       { psid: 1, gold: false, compact: true },

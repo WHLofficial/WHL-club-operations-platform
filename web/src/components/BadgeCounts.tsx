@@ -1,5 +1,7 @@
 // 徽章计数（v6.35.0 统一）：金在前、零值抑制、符号与文案同源。
 // 收的是台账计数（badgesGold / badgesSilver），不是属性槽里的徽章清单 —— 清单渲染走 PlaystyleBadge。
+// v6.63.0：台账 = 全量派生值（FC 槽数减被发放金抑制 + 发放明细），文案同步改「金/银 PlayStyle」
+//（「徽章」俗称按 Q1 只保留在消费中心商店语境）。
 // 三种密度只是场合差异，语义同一份：
 //   icon  🥇×2 🥈×1 —— 卡片头（球员卡 / 升级方案行）：emoji 自带颜色，宽度最小
 //   text  2金 1银    —— 表格单元格与对比页：数字在前，窄列不抢眼
@@ -16,7 +18,7 @@ export interface BadgeCountItem {
 }
 
 /** 文字场合的金/银全称（升级提示等句子里用；符号场合走 badgeCountLabel 的 🥇/🥈） */
-export const BADGE_KIND_LABEL: Record<BadgeKind, string> = { gold: '金徽章', silver: '银徽章' };
+export const BADGE_KIND_LABEL: Record<BadgeKind, string> = { gold: '金 PlayStyle', silver: '银 PlayStyle' };
 
 /** 金在前 + 零值抑制：计数顺序的唯一出处（组件与文字摘要都从这里取，别各写一遍） */
 export function badgeCountItems(silver: number, gold: number): BadgeCountItem[] {

@@ -304,17 +304,17 @@ describe('左栏开合与摘要条（宽屏）', () => {
     expect(within(side).getByRole('button', { name: /^PlayStyle · 1/ })).toBeTruthy();
   });
 
-  it('显示列下拉：手动去掉一列后出现「恢复自动」，恢复后回到自动清单', async () => {
+  it('显示列下拉：手动去掉一列后出现「恢复自动」，恢复后回到自动清单（v6.63.0 默认列含 PlayStyle）', async () => {
     const user = open();
     await screen.findByRole('link', { name: /Šeško/ });
     const side = document.getElementById('library-side') as HTMLElement;
     await user.click(within(side).getByRole('button', { name: /^显示列/ }));
-    await user.click(within(side).getByRole('checkbox', { name: '徽章' }));
-    await waitFor(() => expect(headerButtons().some((b) => b.textContent?.startsWith('徽章'))).toBe(false));
+    await user.click(within(side).getByRole('checkbox', { name: 'PlayStyle' }));
+    await waitFor(() => expect(headerButtons().some((b) => b.textContent?.startsWith('PlayStyle'))).toBe(false));
     expect(search()).toContain('cols=');
 
     await user.click(within(side).getByRole('button', { name: '恢复自动' }));
-    await waitFor(() => expect(headerButtons().some((b) => b.textContent?.startsWith('徽章'))).toBe(true));
+    await waitFor(() => expect(headerButtons().some((b) => b.textContent?.startsWith('PlayStyle'))).toBe(true));
   });
 });
 
@@ -554,41 +554,47 @@ describe('窄屏筛选抽屉', () => {
   });
 });
 
-// v3.2.1：列表的 PlayStyle 单元格。psBadgesOf 收的是「数组下标」，而 core/ref 的 playstyleIsGold
-// 收的是「槽号（1 起）」—— 传下标时下标 12（= PSID13，金槽）走不到「金槽」分支，银段 ID 落在金槽
-// 会被显示成银的，与属性页的 🥇 不一致。这条口径差只有异常数据才看得见，所以按纯函数直测。
-// v6.35.0：psNames（拼字符串）换成 psBadgesOf（清单），表格单元格改渲染 PlaystyleBadge compact，
-// 名称与金/银标记都从这里出；空槽的 0 也在这里挡掉（core/playstyleSlotsOf 同口径）。
-describe('psBadgesOf：槽号从 1 起，空槽不产出条目', () => {
-  it('银槽里的银段 ID 不加 gold', () => {
-    // 下标 0/6 = PSID1/PSID7，都在银槽内
-    expect(psBadgesOf(row({ id: 1, name: 'A', psIds: [1, null, null, null, null, null, 7] }))).toEqual([
+// v6.63.0：列表的 PlayStyle 单元格改吃合并清单 playstyles（FC 槽 + 发放明细，含可逆抑制与
+// 来源）—— 后端已经合并好，psBadgesOf 只是「存库 ID → 基础 ID + 金银位」的渲染映射。
+// 被发放金顶掉的 FC 银不在清单里（后端抑制），跨段重复也不会双显；旧 psIds（FC 槽原值）不再参与。
+describe('psBadgesOf：合并清单 → 渲染清单', () => {
+  it('FC 槽与发放明细照单渲染，金徽剥掉 +100 只留基础 ID', () => {
+    expect(
+      psBadgesOf(row({
+        id: 1,
+        name: 'A',
+        playstyles: [
+          { slot: 1, psid: 1, gold: false, source: 'fc' },
+          { slot: 2, psid: 7, gold: false, source: 'growth' },
+          { slot: 13, psid: 103, gold: true, source: 'shop' },
+        ],
+      })),
+    ).toEqual([
       { psid: 1, gold: false },
       { psid: 7, gold: false },
+      { psid: 3, gold: true },
     ]);
   });
 
-  it('PSID13（下标 12）是金槽：银段 ID 也按金徽渲染', () => {
-    const psIds = [...Array(12).fill(null), 25]; // 下标 12 ⇒ 槽号 13
-    expect(psBadgesOf(row({ id: 1, name: 'A', psIds }))).toEqual([{ psid: 25, gold: true }]);
-  });
-
-  it('金段 ID 无论落哪一槽都按金徽渲染，且剥掉 +100 只留基础 ID', () => {
-    expect(psBadgesOf(row({ id: 1, name: 'A', psIds: [103] }))).toEqual([{ psid: 3, gold: true }]);
-    // 金段 ID 落在银槽同样判金（isGoldPlaystyleId 分支）
-    expect(psBadgesOf(row({ id: 1, name: 'A', psIds: [null, 113, null] }))).toEqual([{ psid: 13, gold: true }]);
-  });
-
-  it('空槽（null / 0 / 非整数）不产出条目 —— 后端 psIds 会把空槽的 0 透出来', () => {
-    expect(psBadgesOf(row({ id: 1, name: 'A', psIds: [null, 0, 1.5, -3, 7] }))).toEqual([
-      { psid: 7, gold: false },
+  it('被发放金顶掉的 FC 银不在清单（后端抑制），映射层原样透传（557 终态）', () => {
+    expect(
+      psBadgesOf(row({
+        id: 2,
+        name: 'B',
+        playstyles: [
+          { slot: 13, psid: 101, gold: true, source: 'growth' },
+          { slot: 14, psid: 131, gold: true, source: 'growth' },
+        ],
+      })),
+    ).toEqual([
+      { psid: 1, gold: true },
+      { psid: 31, gold: true },
     ]);
   });
 
-  it('全空槽与空数组都出空清单（表格渲染成破折号）', () => {
-    expect(psBadgesOf(row({ id: 1, name: 'A', psIds: [null, null] }))).toEqual([]);
-    expect(psBadgesOf(row({ id: 1, name: 'A', psIds: [] }))).toEqual([]);
-    expect(psBadgesOf(row({ id: 1, name: 'A' }))).toEqual([]);
+  it('空清单与缺字段都出空清单（表格渲染成破折号）', () => {
+    expect(psBadgesOf(row({ id: 3, name: 'C', playstyles: [] }))).toEqual([]);
+    expect(psBadgesOf(row({ id: 4, name: 'D' }))).toEqual([]);
   });
 });
 

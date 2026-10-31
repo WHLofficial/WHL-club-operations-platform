@@ -6,10 +6,9 @@
 //   ② URL 键分成 cols（阵容名单）与 regcols（注册名单）—— 两张表在不同页签，用不同键防串味。
 import type { ReactElement, ReactNode } from 'react';
 import { COL_DEFS, attrClass, money, parseColsParam, type SortKey } from './players-library.ts';
-import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL, playstyleIsGold } from './ref.ts';
+import { AGENT_TIER_LABEL, CONTRACT_TYPE_LABEL, SOURCE_LABEL } from './ref.ts';
 import { basePlaystyleId } from '../../../src/core/fc26.ts';
 import { CARD_BUILTIN_COL_KEYS } from './club-cards.ts';
-import { BadgeCounts, badgeCountItems } from '../components/BadgeCounts.tsx';
 import { PlaystyleBadge } from '../components/PlaystyleBadge.tsx';
 
 /* ---------- 固定列 ---------- */
@@ -177,6 +176,8 @@ export interface ClubColRow {
   chinaPlan: boolean;
   agentTier: number;
   psIds?: (number | null)[] | null;
+  /** 合并清单（v6.63.0）：FC 槽 + 发放明细，含可逆抑制与来源 —— ps 列与球队页两张表都从这里渲染 */
+  playstyles?: { slot: number; psid: number; gold: boolean; source: string }[];
   fcId: number | null;
   // 违约金/工资在球队页是固定列（不由本函数渲染），但球员库的可选列池里有这两键 —— 一并收着
   releaseFee: number | null;
@@ -192,23 +193,14 @@ export interface PsBadgeRef {
   gold: boolean;
 }
 
-// PlayStyle 槽位原值 → 徽章清单（psIds 与槽位对齐、缺槽 null）
-// 空槽不产出条目：null / 0 / 非整数都跳过 —— 与 core/fc26.ts 的 playstyleSlotsOf 同口径
-// （后端 psIds 只把 null/非有限数归一，空槽的 0 会透出来，直接渲染就成了「0」）
-// 金徽判定与基础 ID 剥离都走 core/ref 的口径，别在这里再写一遍 >=100 / -100
-// slot 是数组下标（0 起），playstyleIsGold 收的是槽号（1 起）⇒ 这里 +1，否则下标 12 的 PSID13
-// 走不到「金槽」分支（v3.2.1：银段 ID 落在金槽时会显示成银，与属性页的 🥇 不一致）
+// PlayStyle 合并清单 → 徽章清单（v6.63.0 起吃列表行新带的 playstyles：FC 槽 + 发放明细，
+// 含可逆抑制 —— 被发放金顶掉的 FC 银根本不在清单里，跨段重复也不会双显）。
+// psIds（FC 槽原值）仍在响应里、但渲染出口已切 playstyles，不再从槽位反推。
 // v6.30.0：自 pages/PlayersLibrary.tsx 移入本模块（球员库照旧从这里 re-export）
 // v6.35.0：由拼字符串（psNames）改成给渲染用的清单，ps 列改用 PlaystyleBadge compact
-export function psBadgesOf(row: { psIds?: (number | null)[] | null }): PsBadgeRef[] {
-  if (!row.psIds || row.psIds.length === 0) return [];
-  const out: PsBadgeRef[] = [];
-  row.psIds.forEach((v, slot) => {
-    if (v === null || !Number.isInteger(v) || v <= 0) return;
-    const gold = playstyleIsGold(v, slot + 1);
-    out.push({ psid: basePlaystyleId(v), gold });
-  });
-  return out;
+export function psBadgesOf(row: { playstyles?: { psid: number; gold: boolean }[] | null }): PsBadgeRef[] {
+  if (!row.playstyles || row.playstyles.length === 0) return [];
+  return row.playstyles.map((item) => ({ psid: basePlaystyleId(item.psid), gold: item.gold }));
 }
 
 /**
@@ -221,12 +213,7 @@ export function clubCellContent(key: string, p: ClubColRow): ReactNode {
   switch (key) {
     case 'marketValue':
       return money(p.marketValue);
-    case 'badges':
-      return badgeCountItems(p.badgesSilver, p.badgesGold).length === 0 ? (
-        '—'
-      ) : (
-        <BadgeCounts silver={p.badgesSilver} gold={p.badgesGold} density="text" />
-      );
+    // v6.63.0：'badges'（徽章）列退役并入 'ps' —— case 同步删除，旧列偏好在页面侧过滤收敛
     case 'prestige':
       return p.prestige ?? '—';
     case 'baseCa':
@@ -273,7 +260,6 @@ export function clubCellContent(key: string, p: ClubColRow): ReactNode {
 export function clubCellClass(key: string, p: ClubColRow): string {
   if (key.startsWith('attr:')) return 'num mono';
   switch (key) {
-    case 'badges':
     case 'fcId':
       return 'mono';
     case 'ps':

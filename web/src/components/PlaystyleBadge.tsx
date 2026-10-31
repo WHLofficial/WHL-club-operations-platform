@@ -7,12 +7,37 @@
 // 不拉图标，独立类名 ps-badge-compact（不挂 ps-badge，免得跟 pill 的 padding/radius 打架）；
 // 金徽走 --badge-gold-* token 上色，银徽只留文字（一列十几枚银徽全上底色太吵）。
 // 金/银判定与名称口径仍与整徽同源。
+//
+// v6.63.0 来源角标（Q2）：source 非 'fc' 时在 pill 尾部挂小标（悬停出全称）——「成长 / 中国计划 /
+// 商店 / 外部 / 管理组」；compact（表格）不标。
 import { playstyleById, playstyleIconUrl } from '../lib/ref.ts';
 
-export function PlaystyleBadge({ psid, gold, compact = false }: { psid: number; gold: boolean; compact?: boolean }) {
+/** 发放来源的全称（角标悬停用；'fc' = FC 档案自带，不挂角标） */
+export const PLAYSTYLE_SOURCE_LABEL: Record<string, string> = {
+  fc: 'FC 档案',
+  growth: '成长',
+  china: '中国计划',
+  shop: '商店',
+  external: '外部',
+  manual: '管理组',
+};
+
+export function PlaystyleBadge({
+  psid,
+  gold,
+  compact = false,
+  source,
+}: {
+  psid: number;
+  gold: boolean;
+  compact?: boolean;
+  source?: string;
+}) {
   const row = playstyleById.get(psid);
   const label = row?.chs ?? row?.en ?? `PS ${psid}`;
-  const title = gold ? `${label}（金）` : label;
+  const sourceLabel = source !== undefined && source !== 'fc' ? (PLAYSTYLE_SOURCE_LABEL[source] ?? source) : null;
+  // title 恒带来源（compact 表格里悬停仍可读）；角标只在非 compact 的 pill 形态渲染（Q2）
+  const title = `${label}（${gold ? '金' : '银'}）${sourceLabel !== null ? ` · 来源：${sourceLabel}` : ''}`;
   if (compact) {
     return (
       <span className={`ps-badge-compact${gold ? ' ps-badge-compact-gold' : ''}`} title={title}>
@@ -34,6 +59,7 @@ export function PlaystyleBadge({ psid, gold, compact = false }: { psid: number; 
       />
       <span aria-hidden="true">{gold ? '🥇' : '🥈'}</span>
       <span>{label}</span>
+      {sourceLabel !== null && <span className="ps-badge-source">{sourceLabel}</span>}
     </span>
   );
 }

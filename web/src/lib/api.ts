@@ -382,6 +382,8 @@ export interface PlayerDetail {
     fcId: number | null;
     growthXp: number;
     gameAttrs: Record<string, unknown> | null;
+    /** 合并清单（v6.63.0）：FC 槽 + 发放明细，含可逆抑制与来源 —— 详情右翼与对比页同吃一份 */
+    playstyles: PlayerListItemPlaystyle[];
     createdAt: string;
     updatedAt: string;
     // 报价设置（v6.3.0；v6.4.0 加 offer_auto 与名单解耦；v6.33.0 标价）——球员页左栏报价设置与五态判据吃这几个字段；
@@ -567,6 +569,17 @@ export interface PlayerLibraryRow extends PlayerListItem {
   attrValue?: number;
   // ps 筛选时带回的 PSID1-15 槽位原值（长度 15、缺槽 null；金徽=基础 ID+100，金槽 13+）
   psIds?: (number | null)[];
+  // v6.63.0：合并清单（FC 槽减被发放金抑制 + 发放明细），恒回 —— ps 列渲染、
+  // 成长/商店选择器的「已拥有」判断、BadgeCounts 的全量计数都从这里出发
+  playstyles?: PlayerListItemPlaystyle[];
+}
+
+/** 合并清单项（v6.63.0）：psid 是存库 ID（银 1-99 / 金 101-199），source 出自 core/playstyle-rules */
+export interface PlayerListItemPlaystyle {
+  slot: number;
+  psid: number;
+  gold: boolean;
+  source: 'fc' | 'growth' | 'china' | 'shop' | 'external' | 'manual';
 }
 
 export interface PlayersLibraryResponse {

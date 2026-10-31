@@ -42,7 +42,8 @@ export function renderNotification(template: string, data: Record<string, unknow
     case 'result_confirmed':
       return `📋 赛果已确认：${data.home} ${data.score} ${data.away}（S${data.season}·窗${data.windowSeq}${data.competition ? ` · ${data.competition}` : ''}）。`;
     case 'levelup':
-      return `🎉 ${data.player} 升级完成：+${data.ca} CA${data.silver ? `，银徽章 +${data.silver}` : ''}${data.gold ? `，金徽章 +${data.gold}` : ''}。`;
+      // v6.63.0：文案改 PlayStyle（Q1：「徽章」俗称只保留在消费中心商店语境）
+      return `🎉 ${data.player} 升级完成：+${data.ca} CA${data.silver ? `，银 PlayStyle +${data.silver}` : ''}${data.gold ? `，金 PlayStyle +${data.gold}` : ''}。`;
     // 报价 / 议价（v6.3.0，设计 §5）：金额单位 m，均带 offerId 供跳转
     case 'offer_received':
       return `📩 收到报价：${data.amount} m 报 ${data.player}（对方已冻结资金），去谈判桌处理。`;

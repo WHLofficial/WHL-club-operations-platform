@@ -290,7 +290,16 @@ export default function PlayersLibrary() {
   }, [manualCols, autoCols]);
 
   // 匿名不显示星标列（登录后它随 DEFAULT_COLS 默认出现；手动 cols 里残留也过滤掉）
-  const effectiveCols = useMemo(() => (authed ? activeCols : activeCols.filter((k) => k !== 'shortlist')), [activeCols, authed]);
+  // v6.63.0：「徽章」列退役并入 PlayStyle —— 旧列偏好里存了 'badges' 的在这里静默收敛，
+  // 免得表头落出 key 字面量、单元格渲染走不进任何 case。
+  const knownCols = useMemo(() => new Set(COL_DEFS.map((d) => d.key)), []);
+  const effectiveCols = useMemo(
+    () =>
+      (authed ? activeCols : activeCols.filter((k) => k !== 'shortlist')).filter(
+        (k) => k.startsWith('attr:') || knownCols.has(k),
+      ),
+    [activeCols, authed, knownCols],
+  );
 
   async function toggleStar(playerId: number): Promise<void> {
     if (!authed || starBusy !== null) return;

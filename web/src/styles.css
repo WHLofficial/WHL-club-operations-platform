@@ -1644,6 +1644,15 @@ table.matches-table-narrow .rating-badge {
   height: 16px;
 }
 
+/* v6.63.0：来源角标（PlaystyleBadge source）—— pill 尾部的小字标（悬停 title 出全称） */
+.ps-badge-source {
+  margin-left: 2px;
+  padding: 0 6px;
+  border-left: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+}
+
 /* v6.35.0：表格 ps 列的 compact 形态（PlaystyleBadge compact）—— 一列可能十几枚徽章，
    不铺 pill 底、不拉 webp 图标；金徽走 --badge-gold-* token，银徽只留文字（免得整列都是色块）。
    独立类名（不挂 .ps-badge），省得跟 pill 的 padding / radius 抢优先级 */
@@ -1679,6 +1688,14 @@ table.matches-table-narrow .rating-badge {
   padding: 0;
   cursor: pointer;
   border-radius: 999px;
+}
+
+/* v6.63.0：金选项「替换银版」小标（成长语境，选中即自动去银留金） */
+.ps-pick-supersede {
+  display: block;
+  font-size: 11px;
+  color: var(--warn, #b45309);
+  text-align: center;
 }
 
 .ps-pick .ps-badge {

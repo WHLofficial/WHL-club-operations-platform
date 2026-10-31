@@ -72,15 +72,18 @@ describe('排序键', () => {
     expect(firstOrderFor(`attr:${FIRST_ATTR}`)).toBe('desc');
   });
 
-  it('29 个键都有列承载（id 除外：它就是「没有点任何列」的默认态）', () => {
+  it('29 个键都有列承载（id 除外：默认态；badges 除外：v6.63.0 退役列、排序键仅作 URL 兼容）', () => {
     // v6.58.0：星标列没有排序键（d.sort 为 undefined），Set 里不能算一个成员
     const covered = new Set<string>([...FIXED_COLUMNS.map((c) => c.sort), ...COL_DEFS.flatMap((d) => (d.sort ? [d.sort] : []))]);
     for (const key of SORT_KEYS) {
-      if (key === 'id') continue;
+      // sort=badges 与 sort=ps 同指台账列和（后端），前端列头只有 PlayStyle 一列 —— badges 键保留
+      // 在 SORT_KEYS 与后端白名单里作 URL 兼容，但不再有表头承载（这条覆盖性断言的刻意例外）
+      if (key === 'id' || key === 'badges') continue;
       expect(covered.has(key), `${key} 没有对应表头列，用户点不到`).toBe(true);
     }
     expect(covered.has('id'), 'id 是默认态，不该有列').toBe(false);
-    expect(covered.size).toBe(SORT_KEYS.length - 1);
+    // SORT_KEYS.length − 1（id）再 − 1（badges 退役列，v6.63.0）
+    expect(covered.size).toBe(SORT_KEYS.length - 2);
   });
 });
 
@@ -394,7 +397,8 @@ describe('列联动与可见性', () => {
     expect(parseColsParam('')).toBeNull();
     expect(parseColsParam('不是列')).toBeNull();
     expect(parseColsParam('attr:foo')).toBeNull();
-    expect(parseColsParam(' marketValue , badges ')).toEqual(['marketValue', 'badges']);
+    // v6.63.0：badges 列退役 —— parseColsParam 按现行 COL_DEFS 认键，退役键被过滤
+    expect(parseColsParam(' marketValue , badges ')).toEqual(['marketValue']);
     expect(parseColsParam(`marketValue,attr:${FIRST_ATTR},不是列`)).toEqual(['marketValue', `attr:${FIRST_ATTR}`]);
   });
 });

@@ -12,7 +12,6 @@ import { colorFor, groupAverages, parseCompareIds, rowMarks } from '../lib/compa
 import {
   ATTR_GROUPS,
   ATTR_LABELS,
-  playstyleBadges,
   positionName,
   roleChs,
 } from '../lib/ref.ts';
@@ -629,11 +628,13 @@ function MetaSection({ slots }: { slots: ReadySlot[] }) {
       <div className="cmp-meta-row">
         <span className="cmp-meta-label">徽章</span>
         {slots.map((s) => {
-          const badges = playstyleBadges(s.detail.player.gameAttrs ?? {});
+          // v6.63.0：吃详情端点下发的合并清单（FC 槽 + 发放明细，含可逆抑制与来源角标）——
+          // 不再从 gameAttrs 槽位反推（那半份看不见发放所得与被抑制的银）
+          const badges = s.detail.player.playstyles ?? [];
           return (
             <span className="cmp-meta-cell" key={s.id}>
               {badges.length > 0 ? (
-                badges.map((b) => <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} />)
+                badges.map((b) => <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} source={b.source} />)
               ) : (
                 <span className="cmp-mut">—</span>
               )}

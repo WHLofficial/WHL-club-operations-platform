@@ -119,6 +119,8 @@ function detail(
       fcId: 200000 + id,
       growthXp: 0,
       gameAttrs: attrs,
+      // v6.63.0：详情下发合并清单；默认给空数组（有 PlayStyle 的用例单独覆盖）
+      playstyles: [],
       createdAt: '2026-01-01',
       updatedAt: '2026-01-01',
       listPrice: null,
@@ -534,10 +536,21 @@ describe('TC-CMP-POS：四行成组', () => {
     expect(container.querySelector('.cmp-meta .role-plusplus')).toBeTruthy();
   });
 
-  it('TC-CMP-POS-04 · 徽章＝FC 源槽清单（银＋金各一）且不打 /growth 等额外端点', async () => {
-    const { container } = await openTwo();
+  it('TC-CMP-POS-04 · 徽章＝详情下发的合并清单（银＋金各一）且不打 /growth 等额外端点', async () => {
+    // v6.63.0：徽章行改吃 detail.player.playstyles（FC 槽 + 发放明细合并，含抑制与来源）——
+    // 不再从 gameAttrs 槽位反推，夹具随之直接给清单（形状与后端一致）
+    const withPs = (id: number): PlayerDetail => {
+      const base = detail(id);
+      return { ...base, player: { ...base.player, playstyles: [
+        { slot: 1, psid: 1, gold: false, source: 'fc' as const },
+        { slot: 13, psid: 101, gold: true, source: 'fc' as const },
+      ] } };
+    };
+    behaviors = { '1': withPs(1), '2': withPs(2) };
+    const { container } = await open('/players/compare?ids=1,2');
+    await waitFor(() => expect(container.querySelector('.cmp-meta')).toBeTruthy());
     const badgeCells = rowOf('徽章').querySelectorAll('.ps-badge');
-    expect(badgeCells.length).toBe(4); // 每人 2 枚（PSID1 银 + PSID13 金）
+    expect(badgeCells.length).toBe(4); // 每人 2 枚（银 1 + 金 101）
     expect(rowOf('徽章').querySelectorAll('.ps-gold').length).toBe(2);
     expect(calls.every((c) => /^\/api\/players\/\d+$/.test(c))).toBe(true);
     expect(calls.some((c) => c.includes('growth'))).toBe(false);

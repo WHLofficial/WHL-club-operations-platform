@@ -8,7 +8,7 @@ import OpsGateNote from '../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../lib/ops-gate.ts';
 import { useSearchParams } from 'react-router';
 import { apiPost } from '../../lib/api.ts';
-import { PS_GRANTABLE_BASE_IDS, POSITION_BY_ID } from '../../../../src/core/fc26.ts';
+import { PS_GRANTABLE_BASE_IDS, POSITION_BY_ID, playstyleAllowedForPosition } from '../../../../src/core/fc26.ts';
 import { areAdjacent } from '../../../../src/core/shop.ts';
 import { playstyleById, roleById } from '../../lib/ref.ts';
 import { useShopCatalog, useShopInvalidation, useShopOrders, useShopSquadState, useMyClub, useSeasonsCurrent } from '../../lib/queries.ts';
@@ -296,8 +296,14 @@ function BadgeCard({ opsOpen, prices, players, loading, windowOpen }: { prices: 
 
   const options = (() => {
     if (!player) return [];
-    if (op === 'silver') return PS_GRANTABLE_BASE_IDS.filter((id) => !player.ownedSilver.includes(id));
-    if (op === 'gold') return PS_GRANTABLE_BASE_IDS.filter((id) => !player.ownedGold.includes(id));
+    // v6.63.0 跨段互斥 + 位置资格（商店口吻保留「徽章」）：
+    //   买银 → 已有金版（任何来源）或银版都隐藏；GK 专属项（51-56）只给门将
+    //   买金 → 已有金版隐藏；已有银版的也隐藏（银升金走「银徽升金」页签）
+    //   银升金 → 已有发放银里还没金版的那些（升级不改基础 ID，位置资格天然满足）
+    const gkOk = (id: number) => playstyleAllowedForPosition(id, player.position);
+    if (op === 'silver')
+      return PS_GRANTABLE_BASE_IDS.filter((id) => gkOk(id) && !player.ownedSilver.includes(id) && !player.ownedGold.includes(id));
+    if (op === 'gold') return PS_GRANTABLE_BASE_IDS.filter((id) => gkOk(id) && !player.ownedGold.includes(id) && !player.ownedSilver.includes(id));
     return player.ownedSilver.filter((id) => !player.ownedGold.includes(id));
   })();
   const silverFull = player != null && player.silverUsed >= 12;
@@ -310,7 +316,8 @@ function BadgeCard({ opsOpen, prices, players, loading, windowOpen }: { prices: 
       <h3>徽章</h3>
       <p className="hint">
         银徽章 <span className="mono">{prices.badgeSilver}</span> m / 金徽章 <span className="mono">{prices.badgeGold}</span> m / 银升金{' '}
-        <span className="mono">{prices.badgeSilverToGold}</span> m；每名球员上限 3 金 12 银。
+        <span className="mono">{prices.badgeSilverToGold}</span> m；每名球员上限 3 金 12 银。银金互斥：已有银版的买不了金版（走「银徽升金」），
+        已有金版的买不了银版；GK 专属项只卖给门将。
       </p>
       <div className="seg" role="group" aria-label="徽章操作">
         {(['silver', 'gold', 'upgrade'] as BadgeOp[]).map((o) => (
