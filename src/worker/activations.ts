@@ -68,6 +68,15 @@ export async function createActivation(
   if (player.status !== 'normal' && player.status !== 'trainee') {
     throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '当前状态不能被激活');
   }
+  // v6.64.4 上调锁定：训练营球员在上调谈判期间不可被激活（合同正在被改写成正式条款）
+  const promoLock = await db
+    .prepare(
+      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
+       WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'signing' AND t.type = 'promotion' LIMIT 1`,
+    )
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (promoLock) throw new HttpError(409, '这名球员正在上调谈判中，等它成约或作废再激活');
 
   const contract = await db
     .prepare('SELECT release_fee, contract_type, service_ticks, protection_ticks FROM contracts WHERE player_id = ? AND is_active = 1')

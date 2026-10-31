@@ -469,6 +469,15 @@ export async function createTermination(
   if (player.status !== 'normal' && player.status !== 'trainee') {
     throw new HttpError(400, player.status === 'listed' ? '这名球员在挂牌流程里，不能解约' : '当前状态不能解约');
   }
+  // v6.64.4 上调锁定：上调谈判期间合同正在被改写，解约会把谈判的合同改写打成幽灵完成
+  const promoLock = await db
+    .prepare(
+      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
+       WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'signing' AND t.type = 'promotion' LIMIT 1`,
+    )
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (promoLock) throw new HttpError(409, '他正在上调谈判中，等它成约或作废再解约');
   const contract = await db
     .prepare('SELECT release_fee, service_ticks FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(playerId)

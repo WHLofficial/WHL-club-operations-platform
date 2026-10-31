@@ -98,6 +98,13 @@ export function renderNotification(template: string, data: Record<string, unknow
       return `✅ 放行：#${data.listingId} 的激活被对方放行，按竞价最高价成交进审核。`;
     case 'activation_match_expired':
       return `⌛ 匹配窗结束：#${data.listingId} 的激活匹配窗到期未匹配，按竞价最高价成交进审核。`;
+    // 上调/下放（v6.64.4）：练满自动开/预约 + 窗关强约
+    case 'promotion_opened':
+      return `⬆️ ${data.player} 已练满，上调谈判自动开启（违约金 ${data.releaseFee} m，谈崩可重申调整），请到谈判桌报价。`;
+    case 'promotion_reserved':
+      return `⏸ ${data.player} 已练满：上调单已预约（违约金 ${data.releaseFee} m），「上调/下放」时段开启后自动开始谈判。`;
+    case 'promotion_forced':
+      return `⏫ 关窗强约：${data.player} 的上调谈判按预期工资成约，合同转正式，球员回一线队。`;
     // 随机事件（v6.10.0，D 块）：即发型触发即广播；data.notes 是效果播报（资金/死忠/设施…）
     case 'event_triggered':
       return `🎲 ${data.club} 触发事件「${data.name}」：${data.text}${data.notes ? `（${data.notes}）` : ''}`;

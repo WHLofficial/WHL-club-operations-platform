@@ -20,6 +20,7 @@ import {
   type SupersedeTarget,
 } from '../core/playstyle-rules.ts';
 import { queueClubNotification } from './notify.ts';
+import { autoOpenPromotionAtTraineeMax } from './promotion.ts';
 import { rowDisplayName } from '../core/player-name.ts';
 import type { Env } from './env.ts';
 
@@ -716,6 +717,11 @@ export async function applyLevelUp(
     silver: plan.silver,
     gold: plan.gold,
   });
+  // v6.64.4 练满自动上调（Q9）：训练营球员成长到顶（ca+caGain ≥ pa）即自动建上调单——
+  // 闸开直接开会、闸关落预约；内部尽力而为（异常留 pending_review 单由 tick 兜底），不阻断升级返回。
+  if (player.pa !== null && player.ca !== null && player.ca + caGain >= player.pa) {
+    await autoOpenPromotionAtTraineeMax(env, playerId, actor);
+  }
   return { ok: true, plan: appliedPlan, levelsApplied: nextLevelNo, pendingLeft: pending - 1, playstyles: grants };
 }
 

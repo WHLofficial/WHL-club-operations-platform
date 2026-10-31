@@ -15,7 +15,7 @@ import { requireCoach, type SessionUser } from '../../lib/session.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
 import { createRcChange, createTermination, createFreeAgent } from '../bypass.ts';
 import { createActivation, submitMatch } from '../activations.ts';
-import { demotePlayer } from '../promotion.ts';
+import { demotePlayer, promotePlayer } from '../promotion.ts';
 import { loadSeaPhaseView, submitSealedBid, withdrawSealedBid } from '../sea-sealed.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -67,11 +67,19 @@ app.post('/transfers/match', async (c) => {
   return c.json(result, 201);
 });
 
-// v6.64.4 上调/下放：下放 = 正式合同一线队球员即时转训练营条款（每窗 2 名额）；上调见下方 /promotion
+// v6.64.4 上调/下放：下放 = 正式合同一线队球员即时转训练营条款（每窗 2 名额）；
+// 上调 = 训练营球员直开签约谈判谈正式合同（F>15 付 (F−15)×0.3 附加费，成约收取）
 app.post('/transfers/demote', async (c) => {
   const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
   const body = await readJson(c);
   const result = await demotePlayer(c.env, clubId, user.id, body?.playerId);
+  return c.json(result, 201);
+});
+
+app.post('/transfers/promotion', async (c) => {
+  const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
+  const body = await readJson(c);
+  const result = await promotePlayer(c.env, clubId, user.id, body?.playerId, body?.newReleaseFee);
   return c.json(result, 201);
 });
 

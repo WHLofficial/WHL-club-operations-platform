@@ -13,7 +13,7 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { transferTax } from '../core/tax.ts';
-import { protectionTicksFor } from '../core/bypass-rules.ts';
+import { protectionTicksFor, promotionSurcharge } from '../core/bypass-rules.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
 import { round2 } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
@@ -195,7 +195,8 @@ export async function completeTransfer(
   }
   if (transfer.to_club_id === null) throw new HttpError(409, '转会单缺签入方，数据不完整');
 
-  const amendment = transfer.type === 'rc_change' || transfer.type === 'match';
+  // 本队留人（本队 = from = to）：续约 / 匹配 / 上调——不动归属、不记账本，合同按条款改写
+  const amendment = transfer.type === 'rc_change' || transfer.type === 'match' || transfer.type === 'promotion';
   const freeAgent = transfer.type === 'free_agent';
   const ownership = !amendment && !freeAgent;
   if (ownership && transfer.fee === null) throw new HttpError(409, '转会单缺成交价，数据不完整');
@@ -473,6 +474,47 @@ export async function completeTransfer(
       db
         .prepare(`UPDATE contracts SET source = ? WHERE player_id = ? AND is_active = 1 AND club_id = ? AND ${guard.sql}`)
         .bind(dealTerms.source, transfer.player_id, transfer.to_club_id, ...guard.params),
+    );
+  } else if (dealTerms && amendment && transfer.type === 'promotion') {
+    // 上调（v6.64.4）：训练营合同 → 正式合同即时落库（与 match 同口径，不进 §5.7 关窗生效）。
+    // RC/工资按谈判结果；合同类型翻 formal、保护期按新签重锚（protectionTicksFor）、效力累计保留
+    //（service_ticks 不动）、免费续约机会随新签刷新；球员随类型回一线队。
+    // 附加费（F>15 的 (F−15)×0.3）在这里销毁——上调无审核步，成约即唯一扣费点；
+    // 提交时已预检，成约时不做余额硬闸（与解约费同口径，不足扣成负 = 欠款）。
+    const surcharge = promotionSurcharge(dealTerms.releaseFee);
+    statements.push(
+      db
+        .prepare(
+          `UPDATE contracts SET wage = ?, release_fee = ?, source = ?, contract_type = 'formal',
+             protection_ticks = ?, free_rc_change_used = 0
+           WHERE player_id = ? AND is_active = 1 AND club_id = ?`,
+        )
+        .bind(
+          dealTerms.wage,
+          dealTerms.releaseFee,
+          dealTerms.source,
+          protectionTicksFor(baseTicks, dealTerms.contractType),
+          transfer.player_id,
+          transfer.to_club_id,
+        ),
+      db
+        .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'trainee'`)
+        .bind(transfer.player_id),
+      db
+        .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND ${guard.sql}`)
+        .bind(surcharge, transferId, ...guard.params),
+      ...(surcharge > 0
+        ? ledgerMovement(db, {
+            clubId: transfer.to_club_id,
+            delta: -surcharge,
+            kind: 'promotion_fee',
+            refType: 'transfer',
+            refId: transferId,
+            memo: `上调附加费（违约金 ${dealTerms.releaseFee}m 超 15m 部分 × 0.3，销毁）`,
+            guardSql: guard.sql,
+            guardParams: guard.params,
+          })
+        : []),
     );
   } else if (dealTerms && amendment) {
     // 匹配（match）：不在 §5.7 的枚举内（闹涨薪接受 / 普通续约改 RC），沿用既有即时落库——

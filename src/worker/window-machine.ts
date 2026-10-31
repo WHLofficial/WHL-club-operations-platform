@@ -370,16 +370,37 @@ export async function closeWindow(
     .first<{ n: number }>();
   if ((matched?.n ?? 0) > 0) throw new HttpError(409, `还有 ${matched?.n} 单激活在匹配等待期，等匹配窗结束（或被激活方决定）再关窗`);
 
+  // v6.64.4 上调预约不挡关窗：pending_review 的 promotion 单是「练满预约/孤儿开会」，跨窗携带，
+  // 由 tick 的 openReservedPromotions 在闸开后开会——不属于「审核队列没处理」。
   const pending = await db
-    .prepare(`SELECT COUNT(*) AS n FROM transfers WHERE status = 'pending_review'`)
+    .prepare(`SELECT COUNT(*) AS n FROM transfers WHERE status = 'pending_review' AND type != 'promotion'`)
     .first<{ n: number }>();
   if ((pending?.n ?? 0) > 0) throw new HttpError(409, `审核队列还有 ${pending?.n} 张单没处理，先处理完再关窗`);
+
+  // v6.64.4 上调窗关强约：promotion 会话**无条件**按 E 快照成约（F 定死 ⇒ E 恒在），
+  // 不走下面的 window_force_settle 口径、也不挡关窗（用户裁决「窗关强约成约」）。
+  const promoSessions = await db
+    .prepare(
+      `SELECT s.id, s.club_id, ${sqlDisplayName('p')} AS player_name
+       FROM negotiation_sessions s
+       JOIN transfers t ON t.id = s.transfer_id
+       JOIN players p ON p.id = s.player_id
+       WHERE s.status = 'active' AND t.status = 'signing' AND t.type = 'promotion' ORDER BY s.id LIMIT 200`,
+    )
+    .all<{ id: number; club_id: number; player_name: string }>();
+  let promotionForceSettled = 0;
+  for (const s of promoSessions.results) {
+    if (await forceSettleAtExpected(env, s.id, actor)) {
+      promotionForceSettled++;
+      await queueClubNotification(env, s.club_id, 'promotion_forced', { player: s.player_name });
+    }
+  }
 
   const sessions = await db
     .prepare(
       `SELECT s.id, s.expected_wage FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
-       WHERE s.status = 'active' AND t.status = 'signing' ORDER BY s.id LIMIT 200`,
+       WHERE s.status = 'active' AND t.status = 'signing' AND t.type != 'promotion' ORDER BY s.id LIMIT 200`,
     )
     .all<{ id: number; expected_wage: number | null }>();
   let forceSettled = 0;
@@ -431,6 +452,7 @@ export async function closeWindow(
         windowSeq: win.windowSeq,
         isTemporary,
         forceSettled,
+        promotionForceSettled,
         loyaltyCount: loyalty.summary.count,
         loyaltyTotal: loyalty.summary.total, // 扣款金额绝对值（正数；余额可扣成负 = 欠款）
         // 同批扣款的逐类汇总：逐笔流水已各自带 memo/ref，此处补「这次关窗一共扣了多少」的可核对口径

@@ -9,7 +9,7 @@ import type { AuditOrigin } from '../lib/audit.ts';
 import { resolveOpsRow } from '../core/ops-schedule.ts';
 import { loadOpsRows, loadWindowRef } from './ops-schedule.ts';
 import { expireDueOffers, remindDueOffers } from './offers.ts';
-import { closeSilentSessions, remindSilentSessions } from './negotiations.ts';
+import { closeSilentSessions, remindSilentSessions, forceSettlePromotionSessions } from './negotiations.ts';
 import { expireDueSeaBatches, remindDueSeaBatches } from './sea-sealed.ts';
 
 /** 单轮每个适配器最多处理的行数（与 event-ops 的 EVENT_TICK_LIMIT 同量级，防一个适配器霸占 tick）。 */
@@ -41,6 +41,9 @@ export interface ExpiryAdapter {
 const EXPIRY_ADAPTERS: ExpiryAdapter[] = [
   { name: 'offer', opsKey: 'transfer_offer', close: expireDueOffers, remind: remindDueOffers },
   { name: 'negotiation', opsKey: 'transfer_negotiation', close: closeSilentSessions, remind: remindSilentSessions },
+  // v6.64.4 上调：闸关（含随窗关）时残留的 promotion 会话按 E 强约成约——与关窗批同口径的双保险；
+  // closeAll=false（闸开着）不动作（上调没有静默超时，终局 = 成约/谈崩/自取消/强约）
+  { name: 'promotion', opsKey: 'transfer_promotion', close: forceSettlePromotionSessions },
   // v6.50.0 海捞暗标：到点开标；时刻表行提前结束（close_inflight）⇒ 不等 deadline 直接开标。
   // 两阶段关掉时（sea_enabled=false）这里顺带把还收着标的批次整批作废 + 解冻，不留悬挂冻结
   { name: 'sea_sealed', opsKey: 'transfer_sea_sealed', close: expireDueSeaBatches, remind: remindDueSeaBatches },

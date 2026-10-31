@@ -347,6 +347,46 @@ describe('开窗', () => {
 });
 
 describe('关窗', () => {
+  it('v6.64.4 上调窗关强约：promotion 会话无条件按 E 成约，不挡关窗、不需 force；预约不进待审计数', async () => {
+    const fx = await seedWindow();
+    // 甲队训练营球员 + 上调单进谈判（F=10 定死，E 快照在开会时落）
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, growth_tier) VALUES
+         (60, 'fc60', '甲青训', ${fx.clubA}, 'ST', 18, 62, 80, 'trainee', 1);
+       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES
+         (2, 60, ${fx.clubA}, 5, 0.75, 'trainee', 1, '2026-06-01');`,
+    );
+    const promote = await post('/api/transfers/promotion', { playerId: 60, newReleaseFee: 10 }, 'tok-coach', fx.env);
+    expect(promote.status).toBe(201);
+    const session = sqlGet<{ id: number; expected_wage: number | null }>(
+      fx.sqlite,
+      "SELECT id, expected_wage FROM negotiation_sessions WHERE status = 'active' ORDER BY id DESC LIMIT 1",
+    );
+    expect(session?.expected_wage).not.toBeNull();
+
+    // 无 force、无 window_force_settle 配置：关窗不被上调谈判挡住，且按 E 强约成约
+    const close1 = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+    expect(close1.status).toBe(200);
+    const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'window_close' ORDER BY id DESC LIMIT 1");
+    expect(JSON.parse(audit!.after)).toMatchObject({ promotionForceSettled: 1 });
+
+    const done = sqlGet<{ status: string; extra_fee: number | null }>(fx.sqlite, "SELECT status, extra_fee FROM transfers WHERE type = 'promotion'");
+    expect(done).toMatchObject({ status: 'completed', extra_fee: 0 });
+    const settled = sqlGet<{ settle_source: string | null; settled_wage: number | null }>(
+      fx.sqlite,
+      'SELECT settle_source, settled_wage FROM negotiation_sessions WHERE id = ?',
+      session!.id,
+    );
+    expect(settled).toMatchObject({ settle_source: 'forced', settled_wage: session!.expected_wage });
+    const contract = sqlGet<{ contract_type: string; release_fee: number; source: string }>(
+      fx.sqlite,
+      'SELECT contract_type, release_fee, source FROM contracts WHERE player_id = 60 AND is_active = 1',
+    );
+    expect(contract).toMatchObject({ contract_type: 'formal', release_fee: 10, source: 'forced' });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 60')).toMatchObject({ status: 'normal' });
+    expect(sqlGet<{ template: string }>(fx.sqlite, "SELECT template FROM notifications WHERE template = 'promotion_forced'")).toBeDefined();
+  });
+
   it('关窗成功：窗尾收口把竞价单转待审（新待审留给下一窗处理）', async () => {
     const fx = await seedWindow();
     await seedLiveBidding(fx);

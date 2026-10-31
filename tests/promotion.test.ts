@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { applyMigrations, createTestD1, sqlGet, sqlAll } from './d1.ts';
+import { applyMigrations, createTestD1, sqlGet } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { resetOpsScheduleCache } from '../src/worker/ops-schedule.ts';
 import { resetSettleCoalesce } from '../src/worker/market-settle.ts';
@@ -72,15 +72,15 @@ export function seedPromotionWorld(fx: Fixture, opts: { windowOpen?: boolean } =
       (1, 1, 'closed', 0, '2026-05-01T00:00:00Z', '2026-06-01T00:00:00Z');
     INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at) VALUES (1, 2, '${open ? 'open' : 'closed'}', 0, '2026-07-01T00:00:00Z');
     INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 2, '2026-01-01T00:00:00Z'), (2, 5, '2026-01-01T00:00:00Z');
-    INSERT INTO players (id, uid, name, club_id, position, ca, pa, growable, status, fc_id) VALUES
-      (1, 'uid1', '下放甲', 1, 'ST', 80, 85, 1, 'normal', 11),
-      (2, 'uid2', '下放乙', 1, 'CM', 78, 84, 1, 'normal', 12),
-      (3, 'uid3', '下放丙', 1, 'GK', 76, 83, 1, 'normal', 13),
-      (4, 'uid4', '练满丁', 1, 'ST', 85, 85, 1, 'normal', 14),
-      (5, 'uid5', '死木头', 1, 'CB', 70, 70, 0, 'normal', 15),
-      (6, 'uid6', '青训己', 1, 'ST', 62, 80, 1, 'trainee', 16),
-      (7, 'uid7', '别队庚', 2, 'CM', 79, 86, 1, 'normal', 17),
-      (8, 'uid8', '在途辛', 1, 'CM', 77, 84, 1, 'normal', 18);
+    INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, status, fc_id) VALUES
+      (1, 'uid1', '下放甲', 1, 'ST', 24, 80, 85, 1, 'normal', 11),
+      (2, 'uid2', '下放乙', 1, 'CM', 23, 78, 84, 1, 'normal', 12),
+      (3, 'uid3', '下放丙', 1, 'GK', 22, 76, 83, 1, 'normal', 13),
+      (4, 'uid4', '练满丁', 1, 'ST', 25, 85, 85, 1, 'normal', 14),
+      (5, 'uid5', '死木头', 1, 'CB', 28, 70, 70, 0, 'normal', 15),
+      (6, 'uid6', '青训己', 1, 'ST', 18, 62, 80, 1, 'trainee', 16),
+      (7, 'uid7', '别队庚', 2, 'CM', 24, 79, 86, 1, 'normal', 17),
+      (8, 'uid8', '在途辛', 1, 'CM', 23, 77, 84, 1, 'normal', 18);
     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, source, effective_from, protection_ticks, is_active) VALUES
       (1, 1, 1, 50, 2, 'formal', 'import', '2026-07-01', 1, 1),
       (2, 2, 1, 40, 2, 'formal', 'import', '2026-07-01', NULL, 1),
@@ -106,6 +106,13 @@ export function send(env: Env, method: 'GET' | 'POST' | 'PUT', path: string, bod
 function demote(fx: Fixture, playerId: number, token = 'tok-coach') {
   return send(fx.env, 'POST', '/api/transfers/demote', { playerId }, token);
 }
+
+function promote(fx: Fixture, playerId: number, newReleaseFee: number, token = 'tok-coach') {
+  return send(fx.env, 'POST', '/api/transfers/promotion', { playerId, newReleaseFee }, token);
+}
+
+// 激活证据制 key（模式见 activations.ts PROOF_KEY_PATTERN；key 内嵌激活方俱乐部 id）
+const proofKey = (clubId: number) => `activation/${clubId}/t${Math.random().toString(36).slice(2, 8)}.png`;
 
 describe('下放（正式合同 → 训练营条款，v6.64.4）', () => {
   it('TC-D1 下放成功：合同即转训练营条款、保护期清空、球员回训练营态、落 demote 履历行', async () => {
@@ -187,8 +194,8 @@ describe('下放（正式合同 → 训练营条款，v6.64.4）', () => {
     expect(traineeStatus.status).toBe(400);
     expect(((await traineeStatus.json()) as { error: string }).error).toContain('当前状态不能下放');
     // S9 存量形态（status=normal + trainee 合同）：合同类型闸拦——他已经领训练营条款了
-    fx.sqlite.exec(`INSERT INTO players (id, uid, name, club_id, position, ca, pa, growable, status, fc_id)
-      VALUES (9, 'uid9', '存量壬', 1, 'CM', 66, 82, 1, 'normal', 19)`);
+    fx.sqlite.exec(`INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, status, fc_id)
+      VALUES (9, 'uid9', '存量壬', 1, 'CM', 22, 66, 82, 1, 'normal', 19)`);
     fx.sqlite.exec(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, source, effective_from, is_active)
       VALUES (9, 9, 1, 5, 0.75, 'trainee', 'trainee', '2026-07-01', 1)`);
     const legacyShape = await demote(fx, 9);
@@ -231,5 +238,169 @@ describe('下放（正式合同 → 训练营条款，v6.64.4）', () => {
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('op_closed');
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM transfers WHERE type = 'demote'")).toMatchObject({ n: 0 });
+  });
+});
+
+describe('上调（训练营 → 正式合同谈判，v6.64.4）', () => {
+  it('TC-P1 提交即开会：F 定死、E 快照、期间锁定（激活/解约/二次上调被拦）', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    const res = await promote(fx, 6, 10);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { ok: boolean; transferId: number; sessionId: number; releaseFee: number; surcharge: number; expectedWage: number };
+    expect(body).toMatchObject({ ok: true, releaseFee: 10, surcharge: 0 });
+    expect(body.expectedWage).toBeGreaterThan(0);
+
+    const transfer = sqlGet<{ type: string; status: string; from_club_id: number; to_club_id: number; fee: number }>(
+      fx.sqlite,
+      "SELECT type, status, from_club_id, to_club_id, fee FROM transfers WHERE type = 'promotion'",
+    );
+    expect(transfer).toMatchObject({ type: 'promotion', status: 'signing', from_club_id: 1, to_club_id: 1, fee: 0 });
+    const session = sqlGet<{ status: string; release_fee: number | null; expected_wage: number | null }>(
+      fx.sqlite,
+      'SELECT status, release_fee, expected_wage FROM negotiation_sessions WHERE id = ?',
+      body.sessionId,
+    );
+    expect(session).toMatchObject({ status: 'active', release_fee: 10 });
+    expect(session?.expected_wage).toBe(body.expectedWage);
+
+    // F 定死（FIXED_FEE_TYPES）：submitReleaseFee 拒绝
+    const refee = await send(fx.env, 'POST', `/api/negotiations/${body.transferId}/release-fee`, { fee: 8 }, 'tok-coach');
+    expect(refee.status).toBe(400);
+    expect(((await refee.json()) as { error: string }).error).toContain('已经定死');
+
+    // 锁定：他队激活 409、自家解约 409、二次上调 409
+    const act = await send(fx.env, 'POST', '/api/transfers/activation', { playerId: 6, proofMediaKey: proofKey(2) }, 'tok-coach2');
+    expect(act.status).toBe(409);
+    expect(((await act.json()) as { error: string }).error).toContain('上调谈判中');
+    const term = await send(fx.env, 'POST', '/api/transfers/termination', { playerId: 6 }, 'tok-coach');
+    expect(term.status).toBe(409);
+    const again = await promote(fx, 6, 12);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toContain('签约谈判没结束');
+  });
+
+  it('TC-P2 工资谈成：合同翻 formal（保护期重锚、效力保留）、球员回一线队；F≤15 零附加费', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    fx.env.rng = () => 0.7;
+    const opened = await promote(fx, 6, 10);
+    const { sessionId, expectedWage } = (await opened.json()) as { sessionId: number; expectedWage: number };
+    fx.sqlite.exec(`UPDATE contracts SET service_ticks = 2 WHERE player_id = 6`);
+    expect((await send(fx.env, 'POST', `/api/negotiations/${sessionId}/offer`, { wage: expectedWage }, 'tok-coach')).status).toBe(200);
+
+    const contract = sqlGet<{ contract_type: string; release_fee: number; wage: number; source: string; protection_ticks: number | null; service_ticks: number; free_rc_change_used: number }>(
+      fx.sqlite,
+      'SELECT contract_type, release_fee, wage, source, protection_ticks, service_ticks, free_rc_change_used FROM contracts WHERE player_id = 6 AND is_active = 1',
+    );
+    expect(contract).toMatchObject({ contract_type: 'formal', release_fee: 10, source: 'negotiation', service_ticks: 2, free_rc_change_used: 0 });
+    // 保护期按新签重锚：已关常规窗 1（窗1）+ 3 个常规窗
+    expect(contract?.protection_ticks).toBe(4);
+    const player = sqlGet<{ club_id: number; status: string }>(fx.sqlite, 'SELECT club_id, status FROM players WHERE id = 6');
+    expect(player).toEqual({ club_id: 1, status: 'normal' });
+    // 零附加费：无 promotion_fee 流水、extra_fee = 0
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'promotion_fee'")).toMatchObject({ n: 0 });
+    expect(sqlGet<{ extra_fee: number | null }>(fx.sqlite, "SELECT extra_fee FROM transfers WHERE type = 'promotion'")?.extra_fee).toBe(0);
+  });
+
+  it('TC-P3 F=25 附加费 (25−15)×0.3=3m：提交预检通过、成约销毁并落 extra_fee', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    fx.env.rng = () => 0.7;
+    const opened = await promote(fx, 6, 25);
+    expect(opened.status).toBe(201);
+    const { sessionId, expectedWage, surcharge } = (await opened.json()) as { sessionId: number; expectedWage: number; surcharge: number };
+    expect(surcharge).toBe(3);
+    expect((await send(fx.env, 'POST', `/api/negotiations/${sessionId}/offer`, { wage: expectedWage }, 'tok-coach')).status).toBe(200);
+
+    expect(sqlGet<{ amount: number }>(fx.sqlite, "SELECT amount FROM ledger_entries WHERE kind = 'promotion_fee'")?.amount).toBe(-3);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(97);
+    expect(sqlGet<{ extra_fee: number | null }>(fx.sqlite, "SELECT extra_fee FROM transfers WHERE type = 'promotion'")?.extra_fee).toBe(3);
+  });
+
+  it('TC-P4 附加费余额不足：提交即 400 且不留单', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    fx.sqlite.exec(`UPDATE ledger_accounts SET balance = 2 WHERE club_id = 1`);
+    const res = await promote(fx, 6, 25);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('上调附加费');
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM transfers WHERE type = 'promotion'")).toMatchObject({ n: 0 });
+  });
+
+  it('TC-P6 闸关强约（到期引擎适配器）：上调会话按 E 成约，不进静默作废', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    fx.env.rng = () => 0.7;
+    const opened = await promote(fx, 6, 10);
+    const { expectedWage } = (await opened.json()) as { expectedWage: number };
+    // 闸到点止（窗口仍开）
+    fx.sqlite.exec(
+      `INSERT INTO ops_schedule (op_key, start_anchor, start_at, end_anchor, end_at, requires_window, close_inflight)
+       VALUES ('transfer_promotion', 'window_open', NULL, 'absolute', '2026-07-05T00:00:00.000Z', 1, 1)`,
+    );
+    resetOpsScheduleCache();
+    const tick = await send(fx.env, 'POST', '/api/cron/tick', {});
+    expect(tick.status).toBe(200);
+    const summary = (await tick.json()) as { expiry: { byAdapter: Record<string, number> } };
+    expect(summary.expiry.byAdapter.promotion).toBe(1);
+
+    const session = sqlGet<{ status: string; settle_source: string | null; settled_wage: number | null }>(
+      fx.sqlite,
+      'SELECT status, settle_source, settled_wage FROM negotiation_sessions ORDER BY id DESC LIMIT 1',
+    );
+    expect(session).toMatchObject({ status: 'settled', settle_source: 'forced', settled_wage: expectedWage });
+    expect(sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE type = 'promotion'")).toMatchObject({ status: 'completed' });
+    expect(sqlGet<{ contract_type: string }>(fx.sqlite, 'SELECT contract_type FROM contracts WHERE player_id = 6 AND is_active = 1')).toMatchObject({ contract_type: 'formal' });
+  });
+
+  it('TC-P7 练满自动开/预约：闸开直接开会 + 通知；闸关落 pending_review 预约，闸开后 tick 开会', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    // 青训己（6）距练满 1 级：ca 79 / pa 80，growth_xp=10（1 级待办）
+    fx.sqlite.exec(`UPDATE players SET ca = 79, pa = 80, growth_xp = 10, levels_applied = 0 WHERE id = 6`);
+    const lvl = await send(fx.env, 'POST', '/api/growth/levelup/6', { planIndex: 0 }, 'tok-coach');
+    expect(lvl.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE type = 'promotion'")).toMatchObject({ status: 'signing' });
+    expect(sqlGet<{ template: string }>(fx.sqlite, "SELECT template FROM notifications WHERE template = 'promotion_opened'")).toBeDefined();
+
+    // 闸关分支：新练满 → 预约（pending_review）
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, status, fc_id, growth_xp, levels_applied)
+       VALUES (10, 'uid10', '青训癸', 1, 'CM', 18, 79, 80, 1, 'trainee', 20, 10, 0)`,
+    );
+    fx.sqlite.exec(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, source, effective_from, is_active)
+      VALUES (10, 10, 1, 5, 0.75, 'trainee', 'trainee', '2026-07-01', 1)`);
+    fx.sqlite.exec(
+      `INSERT INTO ops_schedule (op_key, start_anchor, start_at, end_anchor, end_at, requires_window, close_inflight)
+       VALUES ('transfer_promotion', 'window_open', NULL, 'absolute', '2026-07-05T00:00:00.000Z', 1, 1)`,
+    );
+    resetOpsScheduleCache();
+    const lvl2 = await send(fx.env, 'POST', '/api/growth/levelup/10', { planIndex: 0 }, 'tok-coach');
+    expect(lvl2.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE player_id = 10 AND type = 'promotion'")).toMatchObject({ status: 'pending_review' });
+    expect(sqlGet<{ template: string }>(fx.sqlite, "SELECT template FROM notifications WHERE template = 'promotion_reserved'")).toBeDefined();
+
+    // 闸重开（默认合成行回归）→ tick 兜底开会
+    fx.sqlite.exec(`DELETE FROM ops_schedule WHERE op_key = 'transfer_promotion'`);
+    resetOpsScheduleCache();
+    const tick = await send(fx.env, 'POST', '/api/cron/tick', {});
+    expect(tick.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE player_id = 10 AND type = 'promotion'")).toMatchObject({ status: 'signing' });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM negotiation_sessions')).toMatchObject({ n: 2 });
+  });
+
+  it('TC-P8 上调会话不能转训练营合同（chooseTrainee 拒绝）；正式合同一线队球员再上调 400', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    const opened = await promote(fx, 6, 10);
+    const { sessionId } = (await opened.json()) as { sessionId: number };
+    const trainee = await send(fx.env, 'POST', `/api/negotiations/${sessionId}/trainee`, {}, 'tok-coach');
+    expect(trainee.status).toBe(400);
+    expect(((await trainee.json()) as { error: string }).error).toContain('不能转进训练营');
+
+    const normal = await promote(fx, 1, 10);
+    expect(normal.status).toBe(400);
+    expect(((await normal.json()) as { error: string }).error).toContain('已经在一线队了');
   });
 });

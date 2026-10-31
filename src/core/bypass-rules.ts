@@ -64,6 +64,16 @@ export function rcChangeFee(oldRc: number, newRc: number): number {
   return round2((newRc - oldRc) * RC_CHANGE_FEE_RATE);
 }
 
+// 上调（v6.64.4，规则 4.3.4 上调谈正式合同）：F ≤ 15 免费（= releaseFeeBounds(5) 的上限），
+// 超出部分付 (F−15)×0.3 销毁（用户裁决 2026-10-31：提交预检、成约收取、谈崩不收）
+export const PROMOTION_FREE_RC = 15;
+export const PROMOTION_SURCHARGE_RATE = 0.3;
+
+export function promotionSurcharge(fee: number): number {
+  if (fee <= PROMOTION_FREE_RC) return 0;
+  return round2((fee - PROMOTION_FREE_RC) * PROMOTION_SURCHARGE_RATE);
+}
+
 /** 海捞签入费（4.4.3）：新违约金 × 30% */
 export function freeAgentFee(newRc: number): number {
   if (!Number.isFinite(newRc) || newRc <= 0) throw new RangeError('新违约金须为正数');

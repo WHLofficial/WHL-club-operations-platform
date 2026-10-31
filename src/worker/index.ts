@@ -31,6 +31,7 @@ import { autoConfirmResults, retryUnresolvedResults, type XpRetrySummary } from 
 import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
 import { expireDemands, ensureCurrentWindowDemands, type DemandTickResult, type TriggerDemandResult } from './demand-ops.ts';
 import { runExpiryTick, type ExpirySummary } from './expiry-ops.ts';
+import { openReservedPromotions } from './promotion.ts';
 import { runVenueReminderTick } from './venue-reminders.ts';
 import opsRoutes from './routes/ops-schedule.ts';
 
@@ -245,7 +246,15 @@ async function runSettleTick(env: Env) {
   } catch (err) {
     expiry = { error: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true, ...summary, autoResults, xpRetry, venueReminder, events, demandEnsure, demands, notify, expiry };
+  // v6.64.4 上调预约开会兜底：练满预约与「建单、开会两批之间崩溃」的孤儿，闸开即开会。
+  // 只写 transfers / negotiation_sessions / notifications（球员归属与状态不变）⇒ 不进 tickChanged。
+  let promotionReservations: number | { error: string };
+  try {
+    promotionReservations = await openReservedPromotions(env, 'cron_tick');
+  } catch (err) {
+    promotionReservations = { error: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, ...summary, autoResults, xpRetry, venueReminder, events, demandEnsure, demands, notify, expiry, promotionReservations };
 }
 
 // tick 是否真的动了**公开数据**（v3.2.0 的 purge 判据）：只看 settleOverdue 的

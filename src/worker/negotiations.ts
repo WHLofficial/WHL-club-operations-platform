@@ -124,6 +124,7 @@ export async function openNegotiationSession(
   actor: number | null,
   review?: ReviewDecision,
   opts: OpenSessionOptions = {},
+  origin: AuditOrigin = 'user',
 ): Promise<{ status: 'signing' | 'already'; expectedWage?: number }> {
   const db = env.DB;
   const transfer = await loadTransfer(db, transferId);
@@ -172,7 +173,7 @@ export async function openNegotiationSession(
       action: 'negotiation_open',
       targetType: 'negotiation',
       targetId: transferId,
-      origin: 'user',
+      origin,
       after: {
         playerId: transfer.player_id,
         clubId: transfer.to_club_id,
@@ -230,7 +231,7 @@ async function requireMyActiveSession(
 }
 
 // F 在提交时已定死的成约路径（续约/匹配/海捞）：附加费按 F 收，谈判中不得再改
-export const FIXED_FEE_TYPES: ReadonlySet<string> = new Set(['rc_change', 'match', 'free_agent']);
+export const FIXED_FEE_TYPES: ReadonlySet<string> = new Set(['rc_change', 'match', 'free_agent', 'promotion']);
 
 // 提交新违约金（整数 m）：±10/±50% 区间按球员现行 RC 校验；重算并快照 E（重设允许）
 export async function submitReleaseFee(
@@ -528,8 +529,8 @@ export async function chooseTrainee(
   const { session, transfer } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
   // v6.49.0 运营时刻表：签约谈判自己的时段（选训练营合同 = 谈判的推进动作）
   await assertOpOpen(db, 'transfer_negotiation');
-  if (transfer.type === 'rc_change' || transfer.type === 'match') {
-    throw new HttpError(400, '续约和匹配是留人操作，球员本来就在队里，不能转进训练营');
+  if (transfer.type === 'rc_change' || transfer.type === 'match' || transfer.type === 'promotion') {
+    throw new HttpError(400, '上调、续约和匹配都是留队操作，球员本来就在队里，不能转进训练营');
   }
   await adjustTraineeSignFee(env, transfer, clubId, actor);
   await settleActiveSession(env, session, TRAINEE_WAGE, 'trainee', actor, null);
@@ -607,6 +608,30 @@ export async function forceSettleAtExpected(env: Env, sessionId: number, actor: 
   if (!session || session.status !== 'active' || session.expected_wage === null) return false;
   await settleActiveSession(env, session, session.expected_wage, 'forced', actor, null);
   return true;
+}
+
+// v6.64.4 上调强约（到期引擎适配器 + 关窗批共用）：promotion 会话按 E 快照无条件成约。
+// E 在开会时已快照（F 定死），false 只可能是会话已终局的竞态。closeAll=false（闸开着）不动作。
+export async function forceSettlePromotionSessions(env: Env, opts: ExpiryOpts): Promise<number> {
+  if (!opts.closeAll) return 0;
+  const db = env.DB;
+  const res = await db
+    .prepare(
+      `SELECT s.id, s.club_id, ${sqlDisplayName('p')} AS player_name
+       FROM negotiation_sessions s
+       JOIN transfers t ON t.id = s.transfer_id
+       JOIN players p ON p.id = s.player_id
+       WHERE s.status = 'active' AND t.status = 'signing' AND t.type = 'promotion' ORDER BY s.id LIMIT ?`,
+    )
+    .bind(opts.limit)
+    .all<{ id: number; club_id: number; player_name: string }>();
+  let settled = 0;
+  for (const row of res.results) {
+    if (!(await forceSettleAtExpected(env, row.id, null))) continue;
+    settled++;
+    await queueClubNotification(env, row.club_id, 'promotion_forced', { player: row.player_name });
+  }
+  return settled;
 }
 
 // 我的谈判列表（§6.10-2：只出 结局/剩余次数/满意度文案/风险布尔/E 数值；eff/p/阈值不出服务端）
@@ -819,9 +844,10 @@ const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.crea
              COALESCE((SELECT MAX(a.created_at) FROM negotiation_attempts a WHERE a.session_id = s.id), ''))`;
 
 const SILENT_SESSION_SELECT = `
-  SELECT s.id, s.transfer_id, s.club_id, ${SILENT_ANCHOR_SQL} AS anchor,
+  SELECT s.id, s.transfer_id, s.club_id, t.type AS transfer_type, ${SILENT_ANCHOR_SQL} AS anchor,
          ${sqlDisplayName('p')} AS player_name
   FROM negotiation_sessions s
+  JOIN transfers t ON t.id = s.transfer_id
   JOIN players p ON p.id = s.player_id`;
 
 export async function closeSilentSessions(env: Env, opts: ExpiryOpts): Promise<number> {
@@ -830,8 +856,10 @@ export async function closeSilentSessions(env: Env, opts: ExpiryOpts): Promise<n
   const cutoff = isoMinusHours(opts.nowIso, hours);
   let rows: SilentSessionRow[];
   if (opts.closeAll) {
+    // v6.64.4：上调谈判不随 transfer_negotiation 行收口作废——它的终局是 成约/谈崩/自取消/关窗强约
+    //（promotion 适配器与关窗批负责强约），混进这里会被静默作废语义误伤。
     const res = await db
-      .prepare(`${SILENT_SESSION_SELECT} WHERE s.status = 'active' ORDER BY s.id LIMIT ?`)
+      .prepare(`${SILENT_SESSION_SELECT} WHERE s.status = 'active' AND t.type != 'promotion' ORDER BY s.id LIMIT ?`)
       .bind(opts.limit)
       .all<SilentSessionRow>();
     rows = res.results;
@@ -841,7 +869,7 @@ export async function closeSilentSessions(env: Env, opts: ExpiryOpts): Promise<n
       .bind(opts.nowIso)
       .run();
     const res = await db
-      .prepare(`${SILENT_SESSION_SELECT} WHERE s.status = 'active' AND s.expiry_anchor_at != '' AND ${SILENT_ANCHOR_SQL} <= ? ORDER BY s.id LIMIT ?`)
+      .prepare(`${SILENT_SESSION_SELECT} WHERE s.status = 'active' AND t.type != 'promotion' AND s.expiry_anchor_at != '' AND ${SILENT_ANCHOR_SQL} <= ? ORDER BY s.id LIMIT ?`)
       .bind(cutoff, opts.limit)
       .all<SilentSessionRow>();
     rows = res.results;
@@ -877,7 +905,7 @@ export async function remindSilentSessions(env: Env, opts: ExpiryOpts): Promise<
   const res = await db
     .prepare(
       `${SILENT_SESSION_SELECT}
-       WHERE s.status = 'active' AND s.expiry_anchor_at != '' AND s.reminded_at = ''
+       WHERE s.status = 'active' AND t.type != 'promotion' AND s.expiry_anchor_at != '' AND s.reminded_at = ''
          AND ${SILENT_ANCHOR_SQL} <= ? AND ${SILENT_ANCHOR_SQL} > ?
        ORDER BY s.id LIMIT ?`,
     )
