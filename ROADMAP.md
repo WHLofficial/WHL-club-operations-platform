@@ -83,6 +83,22 @@
 
 ---
 
+## v6.63.1 · 海捞暗标截止后的收标态收口 + 同额落败文案（2026-10-31）
+
+**状态**：已上线（2026-10-31）。
+
+**缘起**：v6.60.6 修好暗标读接口后，v6.50.0 遗留的两处「截止之后」口径问题在 S9W2 暗标截止（北京时间 10-31 12:30）前暴露：`useSeaPhase` 没有轮询，而 `sealed→closing`（到点）与 `closing→open`（开标）都只有服务端知道 ⇒ 截止后页面停在「收标中 00:00」、开标后也不自愈；`SideOps` 的 `sealedPhase` 只认 `'sealed'` ⇒ 截止后按钮回落成「海捞签入」，点了必 409 `sea_sealed_phase`（后端自 v6.50.0 起就拦）；海捞页把 `closing` 当 `sealed` 渲染 ⇒ 撤回按钮露在截止后，点了必 409 `sea_deadline_passed`。
+
+**交付**：
+- `web/src/lib/queries.ts`：`useSeaPhase` 加 `refetchInterval`，仅在 `sealed`/`closing` 态每 30 秒拉一次（`SEA_PHASE_POLL_MS`）；`open`/`off`/`none` 不轮询。
+- `web/src/pages/market/MarketFreePage.tsx`：早退守卫后取 `closing`；横幅「暗标段已截止，等待开标」；提示条拆三段（closing 段说明出标与撤回已关闭、每 30 秒自动刷）；「我的出标」在 closing 时徽标改「已截止」、撤回按钮隐藏。
+- `web/src/pages/player/SideOps.tsx`：新增 `sealedClosing`；closing 时按钮只留禁用态「收标已截止 · 等待开标」（不再回落「海捞签入」）、密封标面板的出标/改标/撤回一并禁用并给等待提示、底部状态文案改「（收标已截止，等待开标）」。
+- `src/worker/notify.ts`：`sea_sealed_lost` 的 `outbid` 分支改「被别人以同额但更早、或更高的密封标拿下」，与 `openSeaBatch` 的 `new_release_fee DESC, submitted_at ASC, id ASC` 排序口径一致。
+
+**验收（实测）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **175 文件 / 2837 例**全绿（v6.63.0 基线 175/2836，+1 例 = 同额落败文案断言）；`npm run build` 通过；code-review-skill 复查后去掉一处冗余（closing 徽标重复指定 `sky`，`sealed` 本就是 sky）。判级 **patch**（纯展示 + 文案 + 前端轮询，无规则/存储/契约变更，零迁移）。
+
+**已知边界（未修，留待后续）**：暗标段**开始**那一刻（`unrestricted`/`not_started` → `sealed`）仍无轮询，页面不会自动冒出暗标入口，需手动刷新——客户端拿不到开段时刻，属 v6.50.0 起的既有边界；收标期间每个开着海捞页/球员页的教练每 30 秒一次小查询，量级可忽略。
+
 ## v6.63.0 · 徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制（2026-10-31）
 
 **状态**：**已上线（2026-10-31）**——迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`，只读核验与全表对账见顶部摘要段：247/557 终态正确、silver_drift=0 / gold_drift=0）；push `56d00fd..f412485`（7 个提交 = 5 枚收口 + `1f252a5` 类型补字段 + `f412485` 版本号 bump 订正）→ CF Workers Builds 两轮部署，生效 Version **`310624e6-1cae-4ad8-8f1e-e0e03a95c175`** @2026-10-31T04:10:31Z；上线探针全过（`?ps=` 抑制/发放命中、合并清单、统一排序、版本串 6.63.0，详见顶部摘要段）。**生产迁移现状：已到 `0086`**。

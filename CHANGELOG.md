@@ -4,6 +4,15 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.63.1] · 暗标截止后的收标态收口 + 同额落败文案（2026-10-31）
+
+**已上线（2026-10-31）**：push `f412485..` 触发 CF Workers Builds 自动部署（版本号随本轮 bump，线上版本串 `6.63.1`）。
+
+**Fixed**
+
+- 海捞暗标**截止后**（`closing`，批次尚未开标）不再露出可点的出标 / 改标 / 撤回入口：`useSeaPhase` 在 `sealed`/`closing` 态每 30 秒轮询（此前完全不轮询 —— `sealed→closing`（到点）与 `closing→open`（开标）这两次翻转只有服务端知道，页面会永远停在「收标中 00:00」，开标后也不自愈）；海捞页横幅改「暗标段已截止，等待开标」、撤回按钮隐藏、「我的出标」徽标改「已截止」；球员页按钮改禁用态「收标已截止 · 等待开标」，不再回落到「海捞签入」（那条路后端必 409 `sea_sealed_phase`）。
+- `sea_sealed_lost` 的同额落败文案由「有更高的密封标」改为「被别人以同额但更早、或更高的密封标拿下」，与「同额先出胜」的排序口径一致（`tests/sea-sealed.test.ts` 同额用例补断言）。
+
 ## [v6.63.0] · 徽章 × PlayStyle 全面合并（2026-10-31）
 
 **已上线（2026-10-31）**：迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`，全表台账与迁移同源表达式对账 silver_drift=0 / gold_drift=0）；push `56d00fd..f412485`（7 个提交）触发 CF Workers Builds 自动部署，生效 Version `310624e6-1cae-4ad8-8f1e-e0e03a95c175` @2026-10-31T04:10:31Z（发布轮 package.json 漏 bump，随 `f412485` 订正重部署）。上线探针：`?ps=` 抑制/发放命中、列表与详情 `playstyles` 合并清单、`sort=ps/badges` 全部实测通过，线上版本串 `6.63.0`。判级 minor（台账口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。测试计划 `docs/test-plans/v6.63.0-playstyle-merge.md`。
