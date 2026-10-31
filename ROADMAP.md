@@ -92,6 +92,21 @@
 
 ---
 
+## v6.65.1 · 消费中心「角色（职责）」新增下拉永远为空 + 双加号标签双写（2026-10-31）
+
+**状态**：**已开发，待 owner 下令上线**（2026-10-31，owner 报障「消费中心-角色永远显示没有可加角色」后查证并修复；本地提交，push 需另行下令）。**生产迁移现状：已到 `0087`**（本版零迁移、零服务端改动）。
+
+**根因**（查证）：`web/src/pages/shop/ShopPage.tsx` RoleCard 的 `roleOptions` 枚举写死 `[1, 2, 3, 4, 5]`——角色全表 49 个基础 ID 只覆盖 GK 门将 / GK 清道夫门将 / RB 边后卫 / RB 伪后卫 / RB 边翼卫 5 个，热区不含 GK/RB 的球员（绝大多数）「新增」下拉必然为空、永远显示「热区下没有可新增的角色」；v6.26.0 建档当天（`837349e`，2026-10-04）写死、从未改过，一天起缺陷。服务端 `src/worker/shop-ops.ts` 本就按 1–149 全表 + `ROLE_POSITION_BY_ID` 对热区校验，纯前端藏项。
+
+**交付**：
+- 枚举改从 role.json 全量基础段派生（非零且 <100），热区过滤与 ownedBases 判重（同角色按基础段、两档都不可新增，升档走「单加号升双加号」）不动。
+- 顺带修同卡 `roleLabel` 双写后缀：chs 双加号段本就带「++」、剥后缀正则只剥「 +」⇒ 所有双加号角色渲染成「XX ++ ++」；正则改 `/ \+{1,2}$/`。
+- 测试：`web/src/pages/shop/ShopPage.test.tsx` 新增 TC-R1–R4（渲染 `/shop?tab=role`：ST 出 8 项 / 已拥有判重 / GK 6 项与多热区 18 项 / 升级去除语义与空态提示）。
+
+**验收（实测）**：typecheck 三份全清；vitest **178 文件 / 2,892 例**全绿（净 +4）；`npm run build` 通过；变异 **M1**（枚举回退写死）TC-R1/R2/R3 三红、TC-R4 绿，**M2**（删判重过滤）恰 TC-R2 红。测试计划 `docs/test-plans/v6.65.1-shop-role-add-options.md`（qa-test-planner）。判级 **patch**。
+
+---
+
 ## v6.65.0 · 转会区提速（真凶：结算逐行 note UPDATE ≈12s）+ 热刷新按钮（2026-10-31）
 
 **状态**：**已开发，待 owner 下令上线**（2026-10-31）——零迁移、零生产写。**生产迁移现状：已到 `0087`**。
@@ -122,7 +137,6 @@
 **踩坑**：worktree 上 `tsc -p tsconfig.json` 只覆盖 web（根 tsconfig include 是 `web`），worker 侧错误要 `npm run typecheck` 三份才抓得到——本轮 DTO 残留 `agg` 引用正是被全量 typecheck 抓出；worktree 本地 state 是全新的，e2e 会话与 AUTH_DB/tour 基线数据要从主工作区拷 `.wrangler/state`（601M，纯本地）。
 
 ---
-
 
 ## v6.64.5 · 撤回「出价当日不判定」：18:43 出价当晚 21:43 截止（2026-10-31）
 

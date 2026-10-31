@@ -4,6 +4,15 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.65.1] · 消费中心「角色（职责）」新增下拉永远为空 + 双加号标签双写（2026-10-31）
+
+**Fixed**
+
+- 「新增角色」下拉的可选项枚举写死 `[1, 2, 3, 4, 5]`（v6.26.0 建档当天引入）——角色全表 49 个基础 ID 只覆盖 GK 门将 / GK 清道夫门将 / RB 边后卫 / RB 伪后卫 / RB 边翼卫 5 个，热区不含 GK/RB 的球员（绝大多数）下拉必然为空，永远显示「热区下没有可新增的角色」。改为从 role.json 全量基础段（非零且 <100）派生，热区过滤与判重逻辑不变；服务端本就按 1–149 全表校验，零改动。
+- 顺带修掉同卡 `roleLabel` 的双写后缀：chs 的双加号段本就带「++」，剥后缀正则只剥「 +」导致所有双加号角色渲染成「XX ++ ++」（如「GK 门将 ++ ++」）；正则改剥 `\+{1,2}`。
+
+**验收**：typecheck 三份全清；vitest **178 文件 / 2,892 例**全绿（v6.64.4 基线 178/2,887，净 +4 例 = `web/src/pages/shop/ShopPage.test.tsx` 新增 TC-R1–R4）；`npm run build` 通过；变异验证 M1（枚举回退写死）TC-R1/R2/R3 三红、M2（删判重过滤）恰 TC-R2 红。测试计划 `docs/test-plans/v6.65.1-shop-role-add-options.md`。判级 **patch**（前端一行枚举 + 一行正则；零迁移、零服务端改动）。
+
 ## [v6.65.0] · 转会区提速（真凶：结算逐行 note UPDATE ≈12s）+ 热刷新按钮（2026-10-31）
 
 **Added**
@@ -19,7 +28,6 @@
 - listings / listings/:id 读端点结算挪 `waitUntil` 后台跑（grilling 裁决接受「一个刷新周期的显示延迟」）；挂牌 / 出价 / 报价写端点仍同步结算，操作正确性不受影响。
 
 **验收**：typecheck 三份全清；vitest **179 文件 / 2,874 例**全绿（v6.64.3 基线 177/2,860，+2 文件 +14 例 = `tests/market-board-perf.test.ts` 7 例 + `web/src/pages/market/MarketBoardPage.test.tsx` 4 例 + config getMany 3 例）；`npm run build` 通过；变异三靶恰红（ctx 拆回 11 单键 / 聚合拆回两条分查 / note 拆回逐行，还原后 sha256 逐字节核对）；e2e 冒烟在独立 worktree 环境阻塞未跑通（空库 401 噪声 + 拷 state 后本地 workerd 损坏，非代码回归，留痕 ROADMAP；e2e 留作部署授权轮补跑）。测试计划 `docs/test-plans/v6.65.0-market-hot-refresh.md`。判级 **minor**（新增用户可见能力 + 热端点响应路径重构；零迁移、零生产写、零契约变更）。**生产复测待部署授权后**：同口径 TTFB×5 对比基线 12–16s + listings 响应逐格 diff。
-
 ## [v6.64.5] · 撤回「出价当日不判定」：18:43 出价当晚 21:43 截止（2026-10-31）
 
 **Fixed**
