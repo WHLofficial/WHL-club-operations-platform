@@ -13,6 +13,8 @@
 
 **验收**：typecheck 三份全清；vitest **178 文件 / 2,892 例**全绿（v6.64.4 基线 178/2,887，净 +4 例 = `web/src/pages/shop/ShopPage.test.tsx` 新增 TC-R1–R4）；`npm run build` 通过；变异验证 M1（枚举回退写死）TC-R1/R2/R3 三红、M2（删判重过滤）恰 TC-R2 红。测试计划 `docs/test-plans/v6.65.1-shop-role-add-options.md`。判级 **patch**（前端一行枚举 + 一行正则；零迁移、零服务端改动）。
 
+**已上线（2026-10-31）**：owner 指定版本号 6.65.1（6.64.6 / 6.65.0 已被其他会话占用），本地两枚提交重做后 rebase 到 v6.65.0 之上 push `c98da95..eaaa3e0`，生效 Version `8c2ef026-7a12-451e-9f40-209ce7bf18fa` @14:09:45Z（零迁移）。上线回读：health 200；线上 ShopPage chunk `ShopPage-D1P5r4UG.js` 含修复实现 ×1、旧写死枚举 ×0、`roleLabel` 正则 ×1（入口 bundle 不含懒加载页面代码，回读要查 chunk 而非入口）。合并基线复跑：typecheck 三份清、vitest 180 文件 / 2,906 例全绿。
+
 ## [v6.65.0] · 转会区提速（真凶：结算逐行 note UPDATE ≈12s）+ 热刷新按钮（2026-10-31）
 
 **Added**
