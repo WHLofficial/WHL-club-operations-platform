@@ -68,7 +68,7 @@ async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void
   if (kind === 'pending') throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
 }
 
-export type SeaSignStage = 'window' | 'ownership' | 'status' | 'banned' | 'listing' | 'pending' | 'ok';
+export type SeaSignStage = 'window' | 'ownership' | 'status' | 'banned' | 'listing' | 'pending' | 'signing' | 'ok';
 
 export interface SeaSignVerdict {
   stage: SeaSignStage;
@@ -87,6 +87,8 @@ export interface SeaSignVerdict {
  * 拦截原因取决于第一道亮红灯的关（如先查归属再查状态）。
  * v6.18.0：routes/market.ts 的 GET /market/sea-lookup 有一份批量快照副本（同一条守卫链摊成
  * 4 条批量查询），两处口径必须同步改，tests 有跨实现一致性用例锁。
+ * v6.64.1：加'在签约谈判'一关——findInFlight 只认 pending_review，海捞单审核通过进 signing
+ * 后球员仍无归属，会放第二家（或原队）再提一单，撞同一名球员两张单。
  */
 export async function checkSeaSignEligible(
   db: D1Database,
@@ -123,6 +125,20 @@ export async function checkSeaSignEligible(
     return { stage: 'listing', ok: false, status: 400, reason: '这名球员已经有一单在市场流程里了，等它结束再操作' };
   if (inFlight === 'pending')
     return { stage: 'pending', ok: false, status: 400, reason: '这名球员有一张单据正在等管理组审核，先等审核结果' };
+  // 审核通过 → 单据进 signing（签约谈判），这时球员还没过户，归属仍是空的；不拦就会有人
+  // 再提一单，等两张单都会走到 completeTransfer 抢同一名球员
+  const signing = await db
+    .prepare(`SELECT id FROM transfers WHERE player_id = ? AND status = 'signing' LIMIT 1`)
+    .bind(player.id)
+    .first<{ id: number }>();
+  if (signing)
+    return {
+      stage: 'signing',
+      ok: false,
+      status: 400,
+      reason: '这名球员的海捞单已经进入签约谈判，等它成约或作废再操作',
+      errCode: 'sea_signing',
+    };
   return { stage: 'ok', ok: true, status: 200, reason: '' };
 }
 

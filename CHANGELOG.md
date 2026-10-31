@@ -4,6 +4,15 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.64.1] · 签约谈判在途的球员不能再被海捞（2026-10-31）
+
+**Fixed**
+
+- 海捞资格链补「在签约谈判」一关。海捞单审核通过后单据进 `signing`（签约谈判），球员此时还没过户、`players.club_id` 仍为空，而旧的在途判定（`findInFlight`）只认 `pending_review`——同一名球员还能被第二家（或原队）再提一张单，两张单最后会抢同一名球员。现在 `checkSeaSignEligible`（`src/worker/bypass.ts`）在 pending 之后加 `signing` 判定，返回 400「这名球员的海捞单已经进入签约谈判，等它成约或作废再操作」（`stage='signing'`、`errCode='sea_signing'`）。
+- `GET /api/market/sea-lookup` 的批量快照副本同步改口径（`status IN ('pending_review','signing')` 一条查询、按状态分两个集合），球员页与情报台不会再给出相反结论。明标提交、暗标出标、开标重判共用同一条资格链，一处生效全覆盖；已作废/已成约的单据不受影响（后者由归属关接手，文案不同）。
+
+**验收**：typecheck 三份全清；vitest **177 文件 / 2,856 例**全绿（v6.64.0 基线 177/2,854，+2 例）；`npm run build` 通过。测试计划 `docs/test-plans/v6.64.1-sea-signing-gate.md`。判级 **patch**（零迁移、零新端点、零契约变更）。
+
 ## [v6.64.0] · 被激活挂牌的在途收入纳入预期收入（2026-10-31）
 
 **已上线（2026-10-31）**：迁移 `0087` 于 push 前 apply 生产（重放三资金触发器，零数据写入），push `d5f9224..8b189cc` 触发 CF Workers Builds 自动部署，生效 Version `a102024c-b5db-4f7f-a979-db708bed2268` @2026-10-31T06:25:08Z（同批带上 v6.63.3 两枚）。上线探针：health 200、线上资产 `index-Jec9N4rn.js` 与本地 6.64.0 重构建 sha256 逐字节一致、版本串 `6.64.0`、`/api/club/balance` 匿名 401。判级 minor（资金闸口径变更 + 展示字段新增，契约向后兼容）。测试计划 `docs/test-plans/v6.64.0-activation-income.md`。

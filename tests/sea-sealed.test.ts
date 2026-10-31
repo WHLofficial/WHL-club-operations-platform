@@ -336,6 +336,18 @@ describe('密封标：冻结 / 改标 / 撤回', () => {
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toContain('本窗口被解约过');
   });
+
+  it('资格链复用：海捞单进了签约谈判的球员不能出标（v6.64.1）', async () => {
+    const { fx } = await seedSealed();
+    fx.sqlite.exec(
+      `INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
+       VALUES (901, 'free_agent', 24, NULL, ${CLUB_B}, 8, 'signing', 4, 1, 'fa:24:signing', '2026-07-02T00:00:00Z');`,
+    );
+    const res = await post('/api/transfers/sea-sealed', { playerId: 24, newReleaseFee: 10 }, A, fx.env);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('签约谈判');
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM sea_sealed_bids WHERE player_id = 24")?.n).toBe(0);
+  });
 });
 
 describe('开标', () => {

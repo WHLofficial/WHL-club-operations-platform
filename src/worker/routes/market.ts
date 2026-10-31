@@ -570,7 +570,7 @@ interface SeaLookupRow {
 // 或名字查 ≤8 名候选，各带可捞判定。⚠️ 本批量判定是 bypass.ts checkSeaSignEligible（单条真源：
 // 球员详情 seaSign + createFreeAgent 提交链）的情报台快照副本：守卫顺序与文案逐字对齐，
 // 两处口径必须同步改（tests 有跨实现一致性用例锁）。守卫链摊成 4 条批量查询：cpuClubIds / 本窗禁签 /
-// 挂牌在途 / 审核在途。
+// 挂牌在途 / 单据在途（pending_review 与 signing 同一条查询，按状态分两个集合）。
 app.get('/market/sea-lookup', async (c) => {
   await requireCoach(c.env, c.req.raw, 'club.squad.manage');
 
@@ -623,16 +623,20 @@ app.get('/market/sea-lookup', async (c) => {
     .all<{ player_id: number }>();
   for (const r of usedListings.results) listed.add(r.player_id);
   const pending = new Set<number>();
-  const usedPending = await c.env.DB.prepare(
-    `SELECT player_id FROM transfers WHERE status = 'pending_review' AND player_id IN (${ph})`,
+  const signing = new Set<number>();
+  const usedDocs = await c.env.DB.prepare(
+    `SELECT player_id, status FROM transfers WHERE status IN ('pending_review', 'signing') AND player_id IN (${ph})`,
   )
     .bind(...ids)
-    .all<{ player_id: number }>();
-  for (const r of usedPending.results) pending.add(r.player_id);
+    .all<{ player_id: number; status: string }>();
+  for (const r of usedDocs.results) {
+    if (r.status === 'signing') signing.add(r.player_id);
+    else pending.add(r.player_id);
+  }
 
   return c.json({
     results: candidates.map((r) => {
-      // 阶段顺序与 checkSeaSignEligible 一致：window → ownership → status → banned → listing → pending
+      // 阶段顺序与 checkSeaSignEligible 一致：window → ownership → status → banned → listing → pending → signing
       let reason: string | null = null;
       if (!win) reason = '转会窗口没开，现在不能海捞';
       else if (r.club_id !== null && !cpuIds.has(r.club_id)) reason = '海捞只能签无归属的球员（这名球员有东家）';
@@ -640,6 +644,7 @@ app.get('/market/sea-lookup', async (c) => {
       else if (banned.has(r.id)) reason = '这名球员本窗口被解约过，本窗口所有球队都不能签他';
       else if (listed.has(r.id)) reason = '这名球员已经有一单在市场流程里了，等它结束再操作';
       else if (pending.has(r.id)) reason = '这名球员有一张单据正在等管理组审核，先等审核结果';
+      else if (signing.has(r.id)) reason = '这名球员的海捞单已经进入签约谈判，等它成约或作废再操作';
       return {
         id: r.id,
         fcId: r.fc_id,

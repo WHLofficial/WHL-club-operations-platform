@@ -810,6 +810,7 @@ const BAD_STATUS = '当前状态不能海捞';
 const BANNED = '这名球员本窗口被解约过，本窗口所有球队都不能签他';
 const IN_FLIGHT = '这名球员已经有一单在市场流程里了，等它结束再操作';
 const PENDING = '这名球员有一张单据正在等管理组审核，先等审核结果';
+const SIGNING = '这名球员的海捞单已经进入签约谈判，等它成约或作废再操作';
 
 interface LookupCase {
   id: number;
@@ -843,6 +844,12 @@ function seedLookupMatrix(fx: Fixture): LookupCase[] {
   addListing(fx, { playerId: 608, sellerClubId: CLUB_B, status: 'listed' });
   addPlayer(fx, { id: 609, name: '审核在途', fcId: 900609 });
   addTransfer(fx, { playerId: 609, type: 'transfer', fromClubId: null, toClubId: CLUB_A, status: 'pending_review', completedAt: null });
+  // ⑩ 签约谈判在途（海捞单审核通过、还没成约：球员仍无归属，但已被锁住）
+  addPlayer(fx, { id: 610, name: '谈判在途', fcId: 900610 });
+  addTransfer(fx, { playerId: 610, type: 'free_agent', fromClubId: null, toClubId: CLUB_A, fee: 8, status: 'signing', completedAt: null });
+  // ⑪ 单据已作废（不构成在途，不能误伤）
+  addPlayer(fx, { id: 611, name: '单据已废', fcId: 900611 });
+  addTransfer(fx, { playerId: 611, type: 'free_agent', fromClubId: null, toClubId: CLUB_A, fee: 8, status: 'rejected', completedAt: null });
 
   return [
     { id: 601, label: '无归属可签', eligible: true, reason: null },
@@ -854,6 +861,8 @@ function seedLookupMatrix(fx: Fixture): LookupCase[] {
     { id: 607, label: '上窗解约', eligible: true, reason: null },
     { id: 608, label: '在途挂牌', eligible: false, reason: IN_FLIGHT },
     { id: 609, label: '审核在途', eligible: false, reason: PENDING },
+    { id: 610, label: '签约谈判在途', eligible: false, reason: SIGNING },
+    { id: 611, label: '单据已作废', eligible: true, reason: null },
   ];
 }
 

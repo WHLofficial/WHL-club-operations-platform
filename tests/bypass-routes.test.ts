@@ -682,6 +682,36 @@ describe('海捞（free_agent）', () => {
     expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'free_agent_fee_topup'`)?.n).toBe(0);
   });
 
+  it('海捞单进了签约谈判：其他队再提海捞被挡，资格查询也不可捞（v6.64.1）', async () => {
+    const fx = await seedBypass();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free');`,
+    );
+    fx.env.rng = () => 0.9;
+    const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 8 }, 'tok-coach2', fx.env);
+    expect(submit.status).toBe(201);
+    const taskId = await openReviewTaskId(fx);
+    // 审核通过 ⇒ 单据进 signing，球员还没过户（club_id 仍为空）
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE player_id = 24')?.status).toBe('signing');
+
+    // 另一支队（也是原队）再提海捞：应当拒绝并说明在签约谈判
+    const again = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 10 }, 'tok-coach', fx.env);
+    expect(again.status).toBe(400);
+    expect(((await again.json()) as { error: string }).error).toContain('签约谈判');
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM transfers WHERE player_id = 24 AND type = 'free_agent'")?.n).toBe(1);
+
+    // 情报台快照同一口径
+    const lookup = await get('/api/market/sea-lookup?q=24', 'tok-coach', fx.env);
+    expect(lookup.status).toBe(200);
+    const body = (await lookup.json()) as { results: { id: number; seaSign: { eligible: boolean; reason: string | null } }[] };
+    expect(body.results[0]).toMatchObject({
+      id: 24,
+      seaSign: { eligible: false, reason: '这名球员的海捞单已经进入签约谈判，等它成约或作废再操作' },
+    });
+  });
+
   it('被解约球员下窗可复签：合同行 UPSERT 翻新（旧行 is_active 复位）', async () => {
     const fx = await seedBypass();
     fx.env.rng = () => 0.5;
