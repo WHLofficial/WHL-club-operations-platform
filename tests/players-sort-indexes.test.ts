@@ -7,7 +7,6 @@ import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { resetGuards } from '../src/lib/guard.ts';
 import { sqlFold } from '../src/core/name-fold.ts';
-import { PS_SLOT_COUNT } from '../src/core/fc26.ts';
 import { applyMigrations, createTestD1, createTestKV } from './d1.ts';
 import { markerWeightSql } from '../src/core/squad-rules.ts';
 
@@ -29,7 +28,9 @@ const INDEXED_SORTS: ReadonlyArray<readonly [sort: string, index: string, extra?
   ['status', 'idx_players_sort_status'],
   ['name', 'idx_players_sort_name'],
   ['uid', 'idx_players_sort_uid'],
-  ['ps', 'idx_players_sort_ps'],
+  // v6.63.0：sort=ps 与 sort=badges 同表达式（台账列和，全量派生值）—— 0034 的 15 槽索引
+  // idx_players_sort_ps 随迁移 0086 退役，ps 键名保留作 URL 兼容，走 badges 的索引。
+  ['ps', 'idx_players_sort_badges'],
   // 初始视图把 ca 换成 COALESCE(base_ca, ca)，与 0027 的 COALESCE(ca, 0) 是两个表达式 ⇒ 单独一条索引
   ['ca', 'idx_players_sort_initial_ca', '&view=initial'],
   // 0035 两条常驻列（FIXED_COLUMNS —— 永远在表头，用户不必打开列面板就能点到）
@@ -153,13 +154,13 @@ describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
 
   }
 
-  it('二十五条排序索引都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
+  it('排序索引（去重后二十四条）都在 schema 里，且尾列带 id（keyset 游标是 (排序键, id) 双列比较）', () => {
     const sqlite = baseSqlite();
-    const names = INDEXED_SORTS.map(([, index]) => `'${index}'`).join(', ');
+    const names = [...new Set(INDEXED_SORTS.map(([, index]) => index))].map((n) => `'${n}'`).join(', ');
     const rows = sqlite
       .prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name IN (${names}) ORDER BY name`)
       .all() as { name: string; sql: string }[];
-    expect(rows.map((r) => r.name)).toEqual([...INDEXED_SORTS.map(([, index]) => index)].sort());
+    expect(rows.map((r) => r.name)).toEqual([...new Set(INDEXED_SORTS.map(([, index]) => index))].sort());
     for (const row of rows) expect(row.sql.replace(/\s+/g, ' ')).toMatch(/,\s*id\s*\)\s*;?\s*$/);
   });
 
@@ -177,20 +178,16 @@ describe('排序表达式索引与查询表达式同源（v3.2.0）', () => {
     expect(row!.sql).toContain(sqlFold('COALESCE(display_name, name)'));
   });
 
-  // 0034 的两条表达式同样手抄不得：ps 是 15 个近乎相同的项相加（漏一个、括号错一层，索引照样建得出来
-  // 但匹配不上查询），initial-ca 是嵌套 COALESCE（只建内层 COALESCE(base_ca, ca) 会静默失配，
-  // 0027 的 COALESCE(ca, 0) 就是这么漏掉初始视图的）。
-  it('PS 排序索引的槽计数表达式与 core 同源（PS_SLOT_COUNT 项，每项自带括号）', () => {
+  // 0034 的 initial-ca 表达式手抄不得：嵌套 COALESCE（只建内层 COALESCE(base_ca, ca) 会静默失配，
+  // 0027 的 COALESCE(ca, 0) 就是这么漏掉初始视图的）。（0034 的 ps 槽计数索引已于 v6.63.0 随
+  // 迁移 0086 退役 —— sort=ps 与 sort=badges 同指台账列和，同源性由 BADGES_FULL_EXPR 单点定义保证。）
+  it('初始视图 CA 排序索引的嵌套 COALESCE 表达式在 schema 里', () => {
     const sqlite = baseSqlite();
     const row = sqlite
-      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_players_sort_ps'`)
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_players_sort_initial_ca'`)
       .get() as { sql: string } | undefined;
     expect(row).toBeDefined();
-    const expr = `(${Array.from(
-      { length: PS_SLOT_COUNT },
-      (_, i) => `(json_extract(game_attrs, '$.PSID${i + 1}') IS NOT NULL)`,
-    ).join(' + ')})`;
-    expect(row!.sql.replace(/\s+/g, ' ')).toContain(expr);
+    expect(row!.sql.replace(/\s+/g, ' ')).toContain("COALESCE(COALESCE(base_ca, ca), 0)");
   });
 
   it('初始视图的 ca 索引建在完整排序键上（内层 COALESCE(base_ca, ca) 之外还有一层 COALESCE(…, 0)）', () => {

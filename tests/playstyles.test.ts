@@ -24,6 +24,7 @@ import {
   type PlaystyleSlot,
 } from '../src/core/fc26.ts';
 import {
+  fullCountSql,
   fullPlaystyleCounts,
   mergedPlaystyleList,
   planPlaystylePicks,
@@ -409,5 +410,31 @@ describe('planPlaystylePicks 跨段规则（v6.63.0）', () => {
     });
     const gkOut = planPlaystylePicks([51], { ...empty, silverCount: 1, position: 'GK' });
     expect(gkOut).toMatchObject({ ok: true, slots: [{ slot: 1, psid: 51, gold: false }] });
+  });
+});
+
+// ---- 迁移 0086 同源锁（v6.63.0）：台账 backfill 的 SQL 与 core 表达式逐字一致 ----
+// 台账公式只此一处定义（fullCountSql），迁移文件是它的展开副本 —— 副本漂了，backfill 就和
+// 运行时重算各说各话。清洗（247 删银保金 / 557 零变更）与退役对象也在锁内。
+describe('迁移 0086 与 core 同源锁', () => {
+  const migrationSql = readFileSync(
+    fileURLToPath(new URL('../src/db/migrations/0086_playstyle_full_count.sql', import.meta.url).href),
+    'utf8',
+  );
+
+  it('backfill 两条 UPDATE 表达式 = fullCountSql 逐字展开', () => {
+    expect(migrationSql).toContain(`badges_silver = ${fullCountSql('silver')}`);
+    expect(migrationSql).toContain(`badges_gold = ${fullCountSql('gold')}`);
+  });
+
+  it('清洗行：247 删发放银 24（557 零变更，不出现 557 的任何写语句）', () => {
+    expect(migrationSql).toContain("WHERE player_id = 247\n   AND kind = 'silver'\n   AND psid = 24");
+    // 557 的 FC 银 1/31 靠派生抑制吸收 —— 迁移里不允许出现按 557 定位的删除
+    expect(migrationSql).not.toMatch(/player_id = 557/);
+  });
+
+  it('退役对象：idx_players_sort_ps 与 config 两帽键', () => {
+    expect(migrationSql).toContain('DROP INDEX IF EXISTS idx_players_sort_ps');
+    expect(migrationSql).toContain("key IN ('badge_cap_silver', 'badge_cap_gold')");
   });
 });

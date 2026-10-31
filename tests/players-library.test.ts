@@ -1042,7 +1042,8 @@ const SORT_VALUE: Record<string, (r: SortRow) => number | string> = {
   future_star: (r) => r.futureStar,
   china_plan: (r) => r.chinaPlan,
   agent_tier: (r) => r.agentTier,
-  ps: (r) => r.psCount,
+  // v6.63.0：sort=ps 与 sort=badges 同表达式（台账列和，全量派生值）—— 15 槽计数口径退役
+  ps: (r) => r.badgeSilver + r.badgeGold,
   fc_id: (r) => r.fcId ?? 0,
   wage: (r) => r.wage ?? 0,
   release_fee: (r) => r.releaseFee ?? 0,
@@ -1545,9 +1546,9 @@ describe('球员元数据批量 /api/players/meta（v6.38.0）', () => {
     const listBody2 = (await listAfter.json()) as { players: Record<string, unknown>[]; nextCursor: string | null };
     expect(listBody2).toEqual(listBody);
     expect(listBody2).toHaveProperty('nextCursor');
-    // 列表行也带 fcId（不能拿它分辨）；meta 行独有的是 attrs/playstyles——旧实现这里拿到的是 meta 体 ⇒ 红
+    // 列表行也带 fcId（不能拿它分辨）；v6.63.0 起列表行也带 playstyles（合并清单），meta 行独有的是 attrs
     expect(listBody2.players.length).toBeGreaterThan(0);
-    expect(listBody2.players.some((p) => 'attrs' in p || 'playstyles' in p)).toBe(false);
+    expect(listBody2.players.some((p) => 'attrs' in p)).toBe(false);
   });
 
   it('400 不入缓存：TTL>0 下非法 fcIds 先打一次，合法请求仍走真实流程并正常入缓存', async () => {

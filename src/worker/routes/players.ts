@@ -4,7 +4,10 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
-import { PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleIdOf } from '../../core/fc26.ts';
+import { PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleSlotsOf } from '../../core/fc26.ts';
+import { mergedPlaystyleList, type GrantedPlaystyleRow } from '../../core/playstyle-rules.ts';
+
+type GrantedRowSource = GrantedPlaystyleRow['source'];
 import { serviceSeasons, freeAgentFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
@@ -57,12 +60,10 @@ const POSITION_SORT_CASE = `CASE players.position
 const STATUS_SORT_CASE = `CASE players.status
   WHEN 'normal' THEN 1 WHEN 'listed' THEN 2 WHEN 'trainee' THEN 3 WHEN 'free' THEN 4 WHEN 'retired' THEN 5
   ELSE 0 END`;
-// PlayStyle 列按「挂了几个」排：PSID1-15 的非空槽计数（金徽槽存的是基础 ID+100，仍是同一个槽）。
-// 每个 IS NOT NULL 必须自带括号：SQLite 里 + 的优先级高于 IS NOT NULL，不括起来会被解析成一整串比较
-const PS_COUNT_EXPR = `(${Array.from(
-  { length: PS_SLOT_COUNT },
-  (_, i) => `(json_extract(players.game_attrs, '$.PSID${i + 1}') IS NOT NULL)`,
-).join(' + ')})`;
+// 台账列和（v6.63.0）：badges_silver/gold 已是「FC 槽数（减被抑制）+ 发放明细」的全量派生值，
+// sort=ps 与 sort=badges 统一指它（键名保留作 URL 兼容）—— 15 槽表达式索引 idx_players_sort_ps
+// 随迁移 0086 退役，排序走 0036 的台账索引，每次重导省 18,301 行写。
+const BADGES_FULL_EXPR = '(COALESCE(players.badges_silver, 0) + COALESCE(players.badges_gold, 0))';
 
 // 排序表达式：ORDER BY、SELECT 里的 sort_key、游标比较表达式三处共用同一份，保证游标值与排序值逐位一致；
 // 视图口径（caExpr/paExpr）与运行时影响力系数（inflExpr）都在这儿注入
@@ -83,7 +84,7 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
     influence: ctx.inflExpr,
     status: STATUS_SORT_CASE,
     market_value: 'COALESCE(players.market_value, 0)',
-    badges: '(COALESCE(players.badges_silver, 0) + COALESCE(players.badges_gold, 0))',
+    badges: BADGES_FULL_EXPR,
     prestige: 'COALESCE(players.prestige, 0)',
     base_ca: 'COALESCE(players.base_ca, 0)',
     // 标记（v6.5.0）：规则 4.2.2 三档的互斥权重（🔴3 → 🟡2 → 🟢1 → 无标记 0），与迁移 0042 的索引同源。
@@ -95,7 +96,7 @@ function buildSortExprs(ctx: { caExpr: string; paExpr: string; inflExpr: string 
     future_star: 'COALESCE(players.is_future_star, 0)',
     china_plan: 'COALESCE(players.china_plan, 0)',
     agent_tier: 'COALESCE(players.agent_tier, 0)',
-    ps: PS_COUNT_EXPR,
+    ps: BADGES_FULL_EXPR,
     fc_id: 'COALESCE(players.fc_id, 0)',
     // 合同维度全部取现行合同（与列表 LEFT JOIN contracts ... is_active = 1 同源）；无合同的一方按 0 / 空串
     wage: 'COALESCE(ct.wage, 0)',
@@ -473,13 +474,17 @@ function buildPlayerFilters(
       filterArgs.push(n);
     }
   }
-  // PlayStyle 多选（v3.1.1 步骤 4 改语义）：银徽章 ID（1-99）只命中银槽 1-12，
-  // 金徽章 ID（101-199，= 基础 ID+100）只命中金槽 13-15。
-  // 改之前是 `IN (n, n+100)` 全槽匹配，于是「筛某银徽章」会把只挂了对应金徽章的球员
-  // 一并捞出来（两类徽章在数据上是两件事，界面上分了两段，命中语义必须跟着分）；
-  // 顺带修掉一个真 bug：白名单只收 1-99，点金徽章必然 400。
+  // PlayStyle 多选（v3.1.1 步骤 4 改语义；v6.63.0 覆盖发放所得）：银徽章 ID（1-99）命中银槽 1-12
+  // 或发放银明细；金徽章 ID（101-199，= 基础 ID+100）命中金槽 13-15 或发放金明细。
+  // 被发放金抑制的 FC 银不命中（Q11：筛选也吃合并清单口径）—— 每个银值独立
+  // `(银槽命中 AND NOT EXISTS(发放金同基础))`，NOT EXISTS 只在槽命中行求值（SQLite AND 短路）。
+  // 发放明细走 `players.id IN (SELECT player_id …)` 物化子查询（明细表仅数十行）；发放银不必排除
+  // 被顶（顶替时已删行，同基础银金在明细里不可能并存）。
   const psRaw = c.req.query('ps');
-  let psSlotSelects = '';
+  // 15 槽列恒定输出（v6.63.0）：列表行的 playstyles 合并清单（FC 槽 + 发放明细，含抑制）要在
+  // 行组装时用 FC 槽数据 —— 不再只在 ?ps= 筛选时带出。
+  const psSlots = Array.from({ length: PS_SLOT_COUNT }, (_, i) => `json_extract(players.game_attrs, '$.PSID${i + 1}')`);
+  let psSlotSelects = psSlots.map((s, i) => `, ${s} AS ps${i + 1}`).join('');
   if (psRaw !== undefined) {
     const list = [
       ...new Set(
@@ -495,18 +500,33 @@ function buildPlayerFilters(
     if (list.some((n) => !isPlaystyleId(n))) {
       throw new HttpError(400, `ps 应为银徽章 ID（1-${PS_SILVER_MAX}）或金徽章 ID（${PS_GOLD_MIN}-${PS_GOLD_MAX}）`);
     }
-    const psSlots = Array.from({ length: PS_SLOT_COUNT }, (_, i) => `json_extract(players.game_attrs, '$.PSID${i + 1}')`);
     // 银值 × 银槽、金值 × 金槽：值只跟同段的槽比对，槽位段界来自 core/fc26 的口径常量
-    const checks: string[] = [];
+    const parts: string[] = [];
     for (const value of list) {
       const slots = isGoldPlaystyleId(value) ? psSlots.slice(PS_SILVER_SLOT_COUNT) : psSlots.slice(0, PS_SILVER_SLOT_COUNT);
-      for (const slot of slots) {
-        checks.push(`${slot} = ?`);
+      const slotHit = slots.map((s) => `${s} = ?`).join(' OR ');
+      if (isGoldPlaystyleId(value)) {
+        parts.push(`(${slotHit})`);
+        for (let i = 0; i < slots.length; i += 1) filterArgs.push(value);
+      } else {
+        parts.push(`((${slotHit}) AND NOT EXISTS (SELECT 1 FROM player_playstyles pp WHERE pp.player_id = players.id AND pp.kind = 'gold' AND pp.psid = ?))`);
+        for (let i = 0; i < slots.length; i += 1) filterArgs.push(value);
         filterArgs.push(value);
       }
     }
-    filters.push(`(${checks.join(' OR ')})`);
-    psSlotSelects = psSlots.map((s, i) => `, ${s} AS ps${i + 1}`).join('');
+    const silverValues = list.filter((v) => !isGoldPlaystyleId(v));
+    const goldValues = list.filter((v) => isGoldPlaystyleId(v));
+    if (silverValues.length > 0) {
+      const marks = silverValues.map(() => '?').join(', ');
+      parts.push(`players.id IN (SELECT player_id FROM player_playstyles WHERE kind = 'silver' AND psid IN (${marks}))`);
+      filterArgs.push(...silverValues);
+    }
+    if (goldValues.length > 0) {
+      const marks = goldValues.map(() => '?').join(', ');
+      parts.push(`players.id IN (SELECT player_id FROM player_playstyles WHERE kind = 'gold' AND psid IN (${marks}))`);
+      filterArgs.push(...goldValues);
+    }
+    filters.push(`(${parts.join(' OR ')})`);
   }
   // 角色多选（v6.6.0）：RoleID1-5 五槽 OR —— 任一槽持有该 ID 即命中。
   // 槽位与档位没有对应关系（`++` 档能落在任何一槽），所以不像 ps 那样按槽段切分；
@@ -808,6 +828,24 @@ async function listPlayers(
     const n = Number(v);
     return Number.isFinite(n) ? (POSITION_BY_ID[n] ?? null) : null;
   };
+  // 发放明细（v6.63.0）：页内批量点查（player_id IN，走 (player_id, slot) 索引），行组装时
+  // 与 FC 槽合并成 playstyles（含可逆抑制与来源角标）—— 前端各面直接吃同一份清单。
+  const pageIds = rows.results.slice(0, limit).map((r) => r.id);
+  const grantedByPlayer = new Map<number, GrantedPlaystyleRow[]>();
+  if (pageIds.length > 0) {
+    const marks = pageIds.map(() => '?').join(', ');
+    const granted = await c.env.DB
+      .prepare(
+        `SELECT player_id, slot, kind, psid, source FROM player_playstyles WHERE player_id IN (${marks}) ORDER BY player_id, slot`,
+      )
+      .bind(...pageIds)
+      .all<{ player_id: number; slot: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
+    for (const g of granted.results) {
+      const list = grantedByPlayer.get(g.player_id) ?? [];
+      list.push({ slot: g.slot, kind: g.kind, psid: g.psid, source: g.source });
+      grantedByPlayer.set(g.player_id, list);
+    }
+  }
   const players = rows.results.slice(0, limit).map((r) => ({
     id: r.id,
     uid: r.uid,
@@ -860,14 +898,17 @@ async function listPlayers(
     protected: r.ct_protection_ticks !== null && r.current_ticks < r.ct_protection_ticks,
     attrValue: attrValueExpr ? (r.attr_value ?? null) : undefined,
     // 槽位对齐：保留 15 长度、缺槽为 null——前端金徽判定要按真实槽位（13+ 为金槽）
-    psIds: psSlotSelects
-      ? Array.from({ length: PS_SLOT_COUNT }, (_, i) => {
-          const v = (r as Record<string, unknown>)[`ps${i + 1}`];
-          return v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
-        })
-      : undefined,
+    psIds: Array.from({ length: PS_SLOT_COUNT }, (_, i) => {
+      const v = (r as Record<string, unknown>)[`ps${i + 1}`];
+      return v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
+    }),
+    // 合并清单（v6.63.0）：FC 槽 + 发放明细，含可逆抑制与来源角标 —— 前端 PlayStyle 列、
+    // 计数、成长/商店选择器的「已拥有」判断都从这里出发
+    playstyles: mergedPlaystyleList(
+      playstyleSlotsOf(Object.fromEntries(Array.from({ length: PS_SLOT_COUNT }, (_, i) => [`PSID${i + 1}`, (r as Record<string, unknown>)[`ps${i + 1}`]]))),
+      grantedByPlayer.get(r.id) ?? [],
+    ),
   }));
-
   let nextCursor: string | null = null;
   if (rows.results.length > limit) {
     const last = rows.results[limit - 1]!;
@@ -963,7 +1004,8 @@ async function loadRoster(c: Context<{ Bindings: Env }>): Promise<{ roster: stri
 //               对面仓（tour）发版前收到的还是初始值，跨仓发版顺序见 ROADMAP
 //   height    = attrs.height（players 表没有 height 列，身高只在 game_attrs 里）；取不到给 null。
 //               身高不在 34 项内 ⇒ 永远是原值，不受加成影响
-//   playstyles = 发放明细表 player_playstyles 的 psid 数组，金徽换算成「基础 ID + 100」
+//   playstyles = 合并清单（v6.63.0：FC 槽减被发放金抑制 + 发放明细，按 (段, 基础 ID) 去重）的 psid
+//                数组，金徽换算成「基础 ID + 100」
 //                （与 web/assets/ref/playstyle.json 和 game_attrs.PSID* 同一编号空间：银 1-99 / 金 101-199；
 //                该表 psid 列存基础 ID、金徽由 kind='gold' 表示，不换算的话纯数字数组里金银分不出来）
 // 查不到的 fcId 不出现、不报错；重复 fcId 去重；响应顺序 = 请求顺序（前端按 fcId 对号入座）。
@@ -1007,6 +1049,7 @@ interface PlayerMetaRow {
   game_attrs: string | null;
   psid: number | null;
   kind: 'silver' | 'gold' | null;
+  slot: number | null;
 }
 
 interface PlayerMeta {
@@ -1025,7 +1068,7 @@ function metaHeightOf(attrs: Record<string, unknown> | null): number | null {
 }
 
 async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[], attrBonus: boolean): Promise<{ players: PlayerMeta[] }> {
-  const byFcId = new Map<number, PlayerMeta>();
+  const byFcId = new Map<number, { meta: PlayerMeta; parsed: Record<string, unknown> | null; granted: GrantedPlaystyleRow[] }>();
   // fc_id IN 分批（§17.2-1，写法同 players-import.fetchExisting）：上限 90 与批大小同值 ⇒ 今天必是一批，
   // 循环只为兜住上限将来调大，不为提前优化。
   for (let i = 0; i < fcIds.length; i += META_FC_IDS_MAX) {
@@ -1034,7 +1077,7 @@ async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[], a
     const rows = await c.env.DB
       .prepare(
         `SELECT players.fc_id AS fc_id, players.ca AS ca, players.base_ca AS base_ca,
-                players.game_attrs AS game_attrs, pp.psid AS psid, pp.kind AS kind
+                players.game_attrs AS game_attrs, pp.psid AS psid, pp.kind AS kind, pp.slot AS slot
            FROM players LEFT JOIN player_playstyles pp ON pp.player_id = players.id
           WHERE players.fc_id IN (${marks})
           ORDER BY players.fc_id, pp.slot`,
@@ -1045,26 +1088,30 @@ async function loadPlayersMeta(c: Context<{ Bindings: Env }>, fcIds: number[], a
       let entry = byFcId.get(r.fc_id);
       if (!entry) {
         let attrs: Record<string, unknown> | null = null;
+        let parsed: Record<string, unknown> | null = null;
         if (r.game_attrs) {
           try {
-            const parsed = JSON.parse(r.game_attrs) as unknown;
+            const raw = JSON.parse(r.game_attrs) as unknown;
+            parsed = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
             // v6.61.0：34 项细分属性按 delta 加成后下发（与详情同一份 buffedAttrs；身高不在 34 项内不动）
-            attrs =
-              parsed && typeof parsed === 'object'
-                ? buffedAttrs(parsed as Record<string, unknown>, growthDelta(r.ca, r.base_ca, attrBonus))
-                : null;
+            attrs = parsed ? buffedAttrs(parsed, growthDelta(r.ca, r.base_ca, attrBonus)) : null;
           } catch {
             attrs = null;
           }
         }
-        entry = { fcId: r.fc_id, height: metaHeightOf(attrs), attrs, playstyles: [] };
+        entry = { meta: { fcId: r.fc_id, height: metaHeightOf(attrs), attrs, playstyles: [] }, parsed, granted: [] };
         byFcId.set(r.fc_id, entry);
       }
-      // 明细表按槽位升序（ORDER BY pp.slot）：psid 是基础 ID，金徽在此换算成 +100 的存库/参考表 ID
-      if (r.psid !== null && r.kind !== null) entry.playstyles.push(playstyleIdOf(r.psid, r.kind));
+      // 明细行归组（psid 是基础 ID；合并清单一并在组收完后做，FC 槽的抑制在这里生效）
+      if (r.psid !== null && r.kind !== null) entry.granted.push({ slot: r.slot ?? 0, kind: r.kind, psid: r.psid, source: 'growth' });
     }
   }
-  return { players: fcIds.flatMap((id) => { const e = byFcId.get(id); return e ? [e] : []; }) };
+  // v6.63.0：playstyles 从「发放明细」改为合并清单（FC 槽减被发放金抑制 + 明细），形状不变
+  //（存库 ID 数组：银 1-99 / 金 101-199）。tour 侧零代码自愈（它只消费数字数组）。
+  for (const entry of byFcId.values()) {
+    entry.meta.playstyles = mergedPlaystyleList(playstyleSlotsOf(entry.parsed ?? {}), entry.granted).map((item) => item.psid);
+  }
+  return { players: fcIds.flatMap((id) => { const e = byFcId.get(id); return e ? [e.meta] : []; }) };
 }
 
 // 路由必须注册在 /players/:id 之前（同 roster，见上）

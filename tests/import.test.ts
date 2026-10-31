@@ -123,13 +123,13 @@ describe('球员导入换版模式（v2.8.0 I1，规则 §5.4）', () => {
     // 新球员 101：CA 66；老球员 102：δ=0（ca=base_ca=80），源值降到 78 也不加值
     fx.sqlite.exec(`INSERT INTO players (id, uid, name, ca, base_ca, growth_xp, fc_id) VALUES (102, 'fc102', '平甲', 80, 80, 5, 102);`);
 
-    const rows = (fc: number, over: Record<string, unknown> = {}) => [rowA(100, { PSID1: 5, ...over }), rowA(101, { CA: 66, Name: '新乙' }), rowA(102, { CA: 78 })];
-    const preview = await post('/api/admin/players/import/preview', { channel: 'A', mode: 'minor', rows: rows(100) }, fx.env);
+    const rows = (over: Record<string, unknown> = {}) => [rowA(100, { PSID1: 5, ...over }), rowA(101, { CA: 66, Name: '新乙' }), rowA(102, { CA: 78 })];
+    const preview = await post('/api/admin/players/import/preview', { channel: 'A', mode: 'minor', rows: rows() }, fx.env);
     expect(preview.status).toBe(200);
     const pv = (await preview.json()) as { stats: Record<string, number> };
     expect(pv.stats).toMatchObject({ total: 3, valid: 3, error: 0, warning: 0, insertEstimate: 1, updateEstimate: 2, growthPlayers: 1, xpToWipe: 0 });
 
-    const confirm = await post('/api/admin/players/import/confirm', { channel: 'A', mode: 'minor', rows: rows(100) }, fx.env);
+    const confirm = await post('/api/admin/players/import/confirm', { channel: 'A', mode: 'minor', rows: rows() }, fx.env);
     expect(confirm.status).toBe(200);
     // 成长甲：源 70 + δ5 = 75；经验/级别原样；台账 = FC 银 1 + 明细 7 = 8 / 金 2
     expect(sqlGet(fx.sqlite, 'SELECT ca, base_ca, growth_xp, levels_applied, badges_silver, badges_gold FROM players WHERE fc_id = 100')).toEqual({
