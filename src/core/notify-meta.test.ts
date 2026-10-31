@@ -29,21 +29,22 @@ describe('NOTIFY_META 与 worker 模板表', () => {
     expect(RENDER_END).toBeGreaterThan(RENDER_START);
   });
 
-  it('模板集合双向相等（47 条，无重复）', () => {
+  it('模板集合双向相等（50 条，无重复）', () => {
     // 32→33 是 v6.49.0 到期引擎（offer_deadline 等三模板）；33→37 是 v6.50.0 海捞暗标段四模板；
     // 37→39 是 v6.53.0 场馆档期两模板（venue_window_open / venue_slot_reminder）；
     // 39→43 是 v6.54.0 闹涨薪四模板（demand_created / demand_deadline / demand_resolved /
     // demand_rejected_public，设计文档 §7）；43→44 是 v6.55.0 意向单落选通知（offer_intent_lost）；
-    // 44→47 是 v6.58.0 候选名单跟踪三模板（shortlist_listed / sold / released）
+    // 44→47 是 v6.58.0 候选名单跟踪三模板（shortlist_listed / sold / released）；
+    // 47→50 是 v6.64.4 上调三模板（promotion_opened / reserved / forced）
     const templates = renderTemplates();
-    expect(templates).toHaveLength(47);
+    expect(templates).toHaveLength(50);
     expect(new Set(templates).size).toBe(templates.length);
     expect(templates.slice().sort()).toEqual(Object.keys(NOTIFY_META).sort());
   });
 
   it('每条徽章文案非空、唯一、≤6 字', () => {
     const labels = Object.values(NOTIFY_META).map((m) => m.label);
-    expect(labels).toHaveLength(47);
+    expect(labels).toHaveLength(50);
     expect(new Set(labels).size).toBe(labels.length);
     for (const label of labels) {
       expect(label.length).toBeGreaterThan(0);
@@ -119,11 +120,15 @@ describe('NOTIFY_META 与 worker 模板表', () => {
         'shortlist_listed',
         'shortlist_sold',
         'shortlist_released',
+        // v6.64.4 上调/下放：练满自动开 / 预约 / 窗关强约（转会窗口域）
+        'promotion_opened',
+        'promotion_reserved',
+        'promotion_forced',
       ],
     };
     const members = Object.values(expected).flat();
-    expect(members).toHaveLength(47);
-    expect(new Set(members).size).toBe(47);
+    expect(members).toHaveLength(50);
+    expect(new Set(members).size).toBe(50);
     for (const [cat, list] of Object.entries(expected)) {
       expect(templatesOf(cat as NotifyCategoryId).slice().sort(), `类目 ${cat} 的成员不符`).toEqual(list.slice().sort());
     }

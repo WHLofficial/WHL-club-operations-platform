@@ -86,6 +86,10 @@ export const NOTIFY_META: Record<string, NotifyMeta> = {
   sea_sealed_lost: { label: '暗标未成', category: 'window' },
   sea_batch_open: { label: '暗标开标', category: 'window' },
   sea_sealed_deadline: { label: '暗标临近', category: 'window' },
+  // v6.64.4 上调/下放：练满自动开 / 预约 / 窗关强约
+  promotion_opened: { label: '上调开启', category: 'window' },
+  promotion_reserved: { label: '上调预约', category: 'window' },
+  promotion_forced: { label: '上调强约', category: 'window' },
   // v6.53.0 场馆档期 P0：开窗通知 / 关窗前未排满提醒
   venue_window_open: { label: '场馆开窗', category: 'window' },
   venue_slot_reminder: { label: '档期提醒', category: 'window' },

@@ -1078,15 +1078,16 @@ describe('注册名单提交与校验（附录 A〔2〕）', () => {
       sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'registration_submit'")!.after,
     ).toContain('"season":1');
 
-    // 重提交：101 转一线队，102/103 移出 → 状态回 normal；快照整体替换无重复
-    const again = await post('/api/club/registrations', regBody([...FULL_FIRST, 101], []), 'tok-coach', fx.env);
+    // 重提交：102/103 移出训练营 → 状态回 normal；快照整体替换无重复。
+    //（101 是训练营合同，v6.64.4 起一线队名单不能放训练营合同——他要回一线队得走「上调」谈正式合同）
+    const again = await post('/api/club/registrations', regBody(FULL_FIRST, [101]), 'tok-coach', fx.env);
     expect(again.status).toBe(200);
     const statuses = sqlAll<{ id: number; status: string }>(
       fx.sqlite,
       'SELECT id, status FROM players WHERE id IN (101, 102, 103) ORDER BY id',
     );
     expect(statuses).toEqual([
-      { id: 101, status: 'normal' },
+      { id: 101, status: 'trainee' },
       { id: 102, status: 'normal' },
       { id: 103, status: 'normal' },
     ]);
