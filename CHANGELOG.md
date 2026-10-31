@@ -76,7 +76,9 @@
 - listings 出价聚合折进主查询（LEFT JOIN 分组子查询 + `MAX(CASE WHEN status='active')` 取领先方，响应字段逐格不变），ctx 与主查询并行 ⇒ 响应路径 ~40 趟往返压到 1–2 趟。
 - listings / listings/:id 读端点结算挪 `waitUntil` 后台跑（grilling 裁决接受「一个刷新周期的显示延迟」）；挂牌 / 出价 / 报价写端点仍同步结算，操作正确性不受影响。
 
-**验收**：typecheck 三份全清；vitest **179 文件 / 2,874 例**全绿（v6.64.3 基线 177/2,860，+2 文件 +14 例 = `tests/market-board-perf.test.ts` 7 例 + `web/src/pages/market/MarketBoardPage.test.tsx` 4 例 + config getMany 3 例）；`npm run build` 通过；变异三靶恰红（ctx 拆回 11 单键 / 聚合拆回两条分查 / note 拆回逐行，还原后 sha256 逐字节核对）；e2e 冒烟在独立 worktree 环境阻塞未跑通（空库 401 噪声 + 拷 state 后本地 workerd 损坏，非代码回归，留痕 ROADMAP；e2e 留作部署授权轮补跑）。测试计划 `docs/test-plans/v6.65.0-market-hot-refresh.md`。判级 **minor**（新增用户可见能力 + 热端点响应路径重构；零迁移、零生产写、零契约变更）。**生产复测待部署授权后**：同口径 TTFB×5 对比基线 12–16s + listings 响应逐格 diff。
+**验收**：typecheck 三份全清；vitest **179 文件 / 2,874 例**全绿（v6.64.3 基线 177/2,860，+2 文件 +14 例 = `tests/market-board-perf.test.ts` 7 例 + `web/src/pages/market/MarketBoardPage.test.tsx` 4 例 + config getMany 3 例）；`npm run build` 通过；变异三靶恰红（ctx 拆回 11 单键 / 聚合拆回两条分查 / note 拆回逐行，还原后 sha256 逐字节核对）；e2e 冒烟在独立 worktree 环境阻塞未跑通（空库 401 噪声 + 拷 state 后本地 workerd 损坏，非代码回归，留痕 ROADMAP；e2e 留作部署授权轮补跑）。测试计划 `docs/test-plans/v6.65.0-market-hot-refresh.md`。判级 **minor**（新增用户可见能力 + 热端点响应路径重构；零迁移、零生产写、零契约变更）。
+
+**已上线（2026-10-31）**：owner 下令「发布」。rebase 追平 origin/main 前移的 11 枚（v6.64.4/v6.64.5，代码零冲突）后 push `5b5ab66..c98da95`（4 枚，哈希重整），生效 Version `2029e9cd-4e8c-4b8d-ad79-f1b0622f2df5` @13:35:52Z（零迁移）；push 前合并树复验 180 文件 / 2,902 例全绿。**生产复测**：listings TTFB×5 **1.29–2.69s**（基线 12.1–15.7s，提速 ~7–10 倍，与 health/clubs 同量级）；响应字段逐格核对通过（bidding 样本 `highestBidder`/`bidCount`/`deadlineNote` 全部正常）；SPA 五条深路径与 `/api/squads`、`/api/players?limit=1` 全 200；线上入口资产与本地 dist 逐字同名。
 ## [v6.64.5] · 撤回「出价当日不判定」：18:43 出价当晚 21:43 截止（2026-10-31）
 
 **Fixed**
