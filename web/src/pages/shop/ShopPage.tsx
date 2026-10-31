@@ -381,7 +381,9 @@ type RoleOp = 'add' | 'upgrade' | 'remove';
 
 function roleLabel(id: number): string {
   const r = roleById.get(id);
-  return r ? `${r.chs.replace(/ \+$/, '')}${id > 100 ? ' ++' : ' +'}` : `角色 #${id}`;
+  if (!r) return `角色 #${id}`;
+  // chs 单加号段带「 +」、双加号段带「 ++」，统一剥掉再按档位拼，双加号原样拼会出「++ ++」
+  return `${r.chs.replace(/ \+{1,2}$/, '')}${id > 100 ? ' ++' : ' +'}`;
 }
 
 function RoleCard({ opsOpen, prices, players, loading, windowOpen }: { prices: ShopPrices; players: ShopSquadStatePlayer[]; loading: boolean; windowOpen: boolean; opsOpen: boolean }) {
@@ -397,10 +399,11 @@ function RoleCard({ opsOpen, prices, players, loading, windowOpen }: { prices: S
 
   const roleOptions = (() => {
     if (!player || op !== 'add') return [];
-    // 新增角色必须在球员注册位置（热区）下选：双加号 = 基础 ID + 100
-    return [1, 2, 3, 4, 5].flatMap((base) =>
-      player.zones.includes(rolePositionOfClient(base)) ? [base, base + 100] : [],
-    );
+    // 新增角色必须在球员注册位置（热区）下选：双加号 = 基础 ID + 100。
+    // 基础段取 role.json 全表（非零且 <100），不写死子集——v6.65.1 前写死 [1..5]，GK/RB 之外的位置下拉恒空
+    return [...roleById.keys()]
+      .filter((id) => id >= 1 && id < 100)
+      .flatMap((base) => (player.zones.includes(rolePositionOfClient(base)) ? [base, base + 100] : []));
   })();
   const ownedBases = new Set((player?.roles ?? []).map((r) => (r.roleId > 100 ? r.roleId - 100 : r.roleId)));
   const addOptions = roleOptions.filter((id) => !ownedBases.has(id > 100 ? id - 100 : id));

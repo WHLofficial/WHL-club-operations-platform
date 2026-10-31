@@ -2,7 +2,7 @@
 // v6.40.0：商城工单深链（?order=<id>）——从收件篮「工单通过 / 工单驳回」点进来直接展开目标工单并高亮。
 // 页面很重（左主栏商品 + 球场三卡 + 右栏工单），这里只给工单链路上的端点备料：
 // 目录端点故意失败 ⇒ 商品卡走「读不出来」分支，不牵连价格表夹具（本文件不测商品卡）。
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -37,14 +37,21 @@ function order(patch: Record<string, unknown> = {}) {
   };
 }
 
-function renderShop(route: string, orders: Record<string, unknown>[]) {
+function renderShop(
+  route: string,
+  orders: Record<string, unknown>[],
+  opts: { catalog?: Record<string, unknown>; players?: Record<string, unknown>[] } = {},
+) {
   apiMock.mockImplementation((path: string) => {
     if (path === '/api/me') return Promise.resolve({ user: { id: 1, name: '测试教练', role: 'coach' }, authMode: 'shared', authHome: null });
     if (path === '/api/me/club') return Promise.resolve({ club: { id: 1, name: '我的俱乐部' }, balance: 120.5 });
     if (path === '/api/shop/orders') return Promise.resolve({ clubId: 1, orders });
-    if (path === '/api/shop/squad-state') return Promise.resolve({ players: [] });
-    if (path === '/api/seasons/current') return Promise.resolve({ window: { status: 'closed' } });
-    if (path === '/api/shop/catalog') return Promise.reject(new Error('本测试不拉商品目录'));
+    if (path === '/api/shop/squad-state') return Promise.resolve({ clubId: 1, players: opts.players ?? [] });
+    // 给了 players 就按开窗渲染（角色/位置卡的操作按钮只在开窗可用）
+    if (path === '/api/seasons/current') return Promise.resolve({ window: { status: opts.players ? 'open' : 'closed' } });
+    if (path === '/api/shop/catalog') {
+      return opts.catalog ? Promise.resolve(opts.catalog) : Promise.reject(new Error('本测试不拉商品目录'));
+    }
     return Promise.reject(new Error(`未预期的请求：${path}`));
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -100,5 +107,144 @@ describe('v6.40.0 站内信深链落点（ShopPage 工单，TC-JUMP-02）', () =
     expect(hintOf()).toBeNull();
     // 默认收起：详情块（单号）不渲染
     expect((document.querySelector('[data-order-id="9"]') as HTMLElement).textContent).not.toContain('单号');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* v6.65.1：角色（职责）卡回归（TC-R1–R4，docs/test-plans/v6.65.1-shop-role-add-options.md） */
+
+const SHOP_CATALOG = {
+  prices: {
+    paPerPoint: 5,
+    clubShell: 100,
+    badgeSilver: 8,
+    badgeGold: 20,
+    badgeSilverToGold: 12,
+    roleAddPlus: 3,
+    roleAddPlusPlus: 5,
+    roleUpgrade: 2,
+    roleRemove: 1,
+    positionAdd: 4,
+    positionRemove: 2,
+    positionReplace: 3,
+  },
+  paCap: 99,
+  hpremiumClubIds: [],
+};
+
+function squadPlayer(patch: Record<string, unknown> = {}) {
+  return {
+    id: 6,
+    name: '测试前锋',
+    number: 9,
+    growable: true,
+    pa: 90,
+    position: 'ST',
+    zones: ['ST', null, null, null],
+    roles: [],
+    ownedSilver: [],
+    ownedGold: [],
+    silverUsed: 0,
+    goldUsed: 0,
+    ...patch,
+  };
+}
+
+function roleCard(): HTMLElement {
+  const el = [...document.querySelectorAll('.card')].find((n) => n.querySelector('h3')?.textContent === '角色（职责）');
+  expect(el, '角色（职责）卡应渲染').toBeTruthy();
+  return el as HTMLElement;
+}
+
+async function openRoleTabWithPlayer(player: Record<string, unknown>) {
+  cleanup();
+  renderShop('/shop?tab=role', [], { catalog: SHOP_CATALOG, players: [player] });
+  await waitFor(roleCard);
+  const card = roleCard();
+  // 名单查询与价目不同步：先等球员下拉真的装填了选项，再选（change 落在空 select 上会被吞掉）
+  await waitFor(() => {
+    const sel = card.querySelectorAll('select')[0] as HTMLSelectElement;
+    expect([...sel.options].some((o) => o.value === String(player.id))).toBe(true);
+  });
+  fireEvent.change(card.querySelectorAll('select')[0], { target: { value: String(player.id) } });
+  return card;
+}
+
+function selectTexts(card: HTMLElement, index: number): string[] {
+  const sel = card.querySelectorAll('select')[index] as HTMLSelectElement;
+  return [...sel.options].map((o) => o.text);
+}
+
+describe('v6.65.1 角色（职责）新增下拉（TC-R1–R4）', () => {
+  it('TC-R1 ST 球员出 ST 段全部 8 项，不再是「热区下没有可新增的角色」', async () => {
+    const card = await openRoleTabWithPlayer(squadPlayer());
+    await waitFor(() => expect((card.querySelectorAll('select')[1] as HTMLSelectElement).options.length).toBe(9));
+    expect(selectTexts(card, 1)[0]).toBe('选角色…');
+    expect(selectTexts(card, 1).slice(1)).toEqual([
+      'ST 突前前锋 +',
+      'ST 突前前锋 ++',
+      'ST 禁区之王 +',
+      'ST 禁区之王 ++',
+      'ST 伪九号 +',
+      'ST 伪九号 ++',
+      'ST 站桩中锋 +',
+      'ST 站桩中锋 ++',
+    ]);
+    fireEvent.change(card.querySelectorAll('select')[1], { target: { value: '141' } });
+    const submit = [...card.querySelectorAll('button')].find((b) => b.textContent === '提交') as HTMLButtonElement;
+    expect(submit.disabled, '选中合法角色后提交应可用').toBe(false);
+  });
+
+  it('TC-R2 已有「突前前锋 +」：该角色两档都不出现在新增（升档走升级操作）；已拥有标签不双写 ++', async () => {
+    const card = await openRoleTabWithPlayer(squadPlayer({ roles: [{ slot: 1, roleId: 41 }] }));
+    await waitFor(() => expect((card.querySelectorAll('select')[1] as HTMLSelectElement).options.length).toBe(7));
+    const labels = selectTexts(card, 1).slice(1);
+    expect(labels, '单加号已拥有不可再新增').not.toContain('ST 突前前锋 +');
+    expect(labels, '双加号也不可新增——同角色判重按基础段，升档走「单加号升双加号」').not.toContain('ST 突前前锋 ++');
+    expect(labels).toHaveLength(6);
+    expect(card.textContent).toContain('第 1 槽 ST 突前前锋 +');
+    expect(card.textContent, '双加号后缀只渲染一次（v6.65.1 前是「++ ++」）').not.toContain('++ ++');
+  });
+
+  it('TC-R3 GK 球员出 GK 段 6 项（出球型门将回归）；主位 ST + 热区 RB 出两段 18 项', async () => {
+    const gk = await openRoleTabWithPlayer(
+      squadPlayer({ id: 7, name: '测试门将', number: 1, position: 'GK', zones: ['GK', null, null, null] }),
+    );
+    await waitFor(() => expect((gk.querySelectorAll('select')[1] as HTMLSelectElement).options.length).toBe(7));
+    expect(selectTexts(gk, 1).slice(1)).toEqual([
+      'GK 门将 +',
+      'GK 门将 ++',
+      'GK 清道夫门将 +',
+      'GK 清道夫门将 ++',
+      'GK 出球型门将 +',
+      'GK 出球型门将 ++',
+    ]);
+
+    const wide = await openRoleTabWithPlayer(
+      squadPlayer({ id: 8, name: '测试多面手', number: 7, position: 'ST', zones: ['ST', 'RB', null, null] }),
+    );
+    await waitFor(() => expect((wide.querySelectorAll('select')[1] as HTMLSelectElement).options.length).toBe(19));
+    const labels = selectTexts(wide, 1).slice(1);
+    expect(labels).toContain('RB 边后卫 +');
+    expect(labels).toContain('RB 进攻型边翼卫 ++');
+    expect(labels).toContain('RB 内切型边后卫 +');
+    expect(labels).toContain('ST 突前前锋 +');
+    expect(labels).toHaveLength(18);
+  });
+
+  it('TC-R4 升级只列单加号槽、去除列全部；无角色时的提示照旧', async () => {
+    const segBtn = (root: HTMLElement, label: string) =>
+      [...root.querySelectorAll('.seg button')].find((b) => b.textContent === label) as HTMLButtonElement;
+    const card = await openRoleTabWithPlayer(squadPlayer({ roles: [{ slot: 1, roleId: 41 }, { slot: 2, roleId: 141 }] }));
+    fireEvent.click(segBtn(card, '单加号升双加号'));
+    expect(selectTexts(card, 1)).toEqual(['选槽位（单加号）…', '第 1 槽：ST 突前前锋 +']);
+    fireEvent.click(segBtn(card, '去除'));
+    expect(selectTexts(card, 1)).toEqual(['选槽位（已有角色）…', '第 1 槽：ST 突前前锋 +', '第 2 槽：ST 突前前锋 ++']);
+
+    const empty = await openRoleTabWithPlayer(squadPlayer({ id: 9, name: '白板球员', number: 8 }));
+    fireEvent.click(segBtn(empty, '单加号升双加号'));
+    expect(selectTexts(empty, 1)[0]).toBe('没有单加号角色可升');
+    fireEvent.click(segBtn(empty, '去除'));
+    expect(selectTexts(empty, 1)[0]).toBe('没有角色可去除');
   });
 });
