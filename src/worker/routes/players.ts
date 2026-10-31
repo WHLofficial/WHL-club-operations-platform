@@ -4,7 +4,7 @@ import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
-import { PS_FILTER_MAX_ITEMS, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleSlotsOf } from '../../core/fc26.ts';
+import { PS_FILTER_MAX_ITEMS, PS_GOLD_BASE, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleSlotsOf } from '../../core/fc26.ts';
 import { mergedPlaystyleList, type GrantedPlaystyleRow } from '../../core/playstyle-rules.ts';
 
 type GrantedRowSource = GrantedPlaystyleRow['source'];
@@ -522,9 +522,11 @@ function buildPlayerFilters(
       filterArgs.push(...silverValues);
     }
     if (goldValues.length > 0) {
-      const marks = goldValues.map(() => '?').join(', ');
+      // 明细表 psid 存基础 ID：金值（101-199 存库形）先剥掉 +100 再进 IN
+      const goldBases = goldValues.map((v) => v - PS_GOLD_BASE);
+      const marks = goldBases.map(() => '?').join(', ');
       parts.push(`players.id IN (SELECT player_id FROM player_playstyles WHERE kind = 'gold' AND psid IN (${marks}))`);
-      filterArgs.push(...goldValues);
+      filterArgs.push(...goldBases);
     }
     filters.push(`(${parts.join(' OR ')})`);
   }
@@ -1318,15 +1320,22 @@ app.get('/players/:id', async (c) => {
   // 属性成长加成（v6.61.0）：34 项细分属性 = min(99, 初始属性 + max(0, ca − base_ca))，与列表/
   // 筛选/排序/导出同一份 core/growth-attrs；CA/PA/身高/PSID 等其余键原样。页面不加「含成长」标注
   // （用户裁决：玩家知道）。缺键透传 null，不凭空造值。
-  let gameAttrs: Record<string, unknown> | null = null;
+  let parsedAttrs: Record<string, unknown> | null = null;
   if (p.game_attrs) {
     try {
-      const parsed = JSON.parse(p.game_attrs) as Record<string, unknown>;
-      gameAttrs = buffedAttrs(parsed, growthDelta(p.ca, p.base_ca, attrBonus));
+      parsedAttrs = JSON.parse(p.game_attrs) as Record<string, unknown>;
     } catch {
-      gameAttrs = null;
+      parsedAttrs = null;
     }
   }
+  const gameAttrs = parsedAttrs ? buffedAttrs(parsedAttrs, growthDelta(p.ca, p.base_ca, attrBonus)) : null;
+
+  // 合并清单（v6.63.0）：FC 槽 + 发放明细，含可逆抑制与来源 —— 详情右翼与对比页同吃一份，
+  // 与列表行的 playstyles 同口径（台账全量计数也在这一份上成立）
+  const grantedRows = await c.env.DB
+    .prepare('SELECT slot, kind, psid, source FROM player_playstyles WHERE player_id = ? ORDER BY slot')
+    .bind(id)
+    .all<{ slot: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
 
   return c.json({
     player: {
@@ -1367,6 +1376,8 @@ app.get('/players/:id', async (c) => {
       // 「不满」徽章（v6.54.0 §5.4）：transfer_requests(released) 存续即 true；重签/离队摘除
       unsatisfied: unsatisfiedRow !== null,
       gameAttrs,
+      // 合并清单（v6.63.0）：FC 槽 + 发放明细，含可逆抑制与来源角标 —— 与列表行同口径
+      playstyles: mergedPlaystyleList(playstyleSlotsOf(parsedAttrs ?? {}), grantedRows.results),
       createdAt: p.created_at,
       updatedAt: p.updated_at,
     },

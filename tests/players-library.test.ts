@@ -690,6 +690,30 @@ describe('球员库 计数与新筛选（v2.3.0）', () => {
     expect((await get(`/api/players?ps=${Array.from({ length: 101 }, (_, i) => i + 1).join(',')}`, fx.env)).status).toBe(400);
   });
 
+  it('PlayStyle 筛选覆盖发放所得（v6.63.0）：发放银/金命中、被发放金抑制的 FC 银不命中', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, game_attrs) VALUES
+        (61, 'g1', '混合甲', '{"PSID1":1,"PSID2":31}'),
+        (62, 'g2', '纯明细乙', NULL);
+      INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
+        (61, 3, 'silver', 8, 'growth', '2026-01-01T00:00:00Z'),
+        (61, 13, 'gold', 1, 'growth', '2026-01-02T00:00:00Z'),
+        (62, 14, 'gold', 6, 'shop', '2026-01-03T00:00:00Z');
+    `);
+    // 发放银 8 命中（61）；发放金 6（ps=106）命中（62）—— 金值剥 +100 进明细 IN（评审修复的缺陷位）
+    expect((await list17('/api/players?ps=8', fx.env)).players.map((p) => p.id)).toEqual([61]);
+    expect((await list17('/api/players?ps=106', fx.env)).players.map((p) => p.id)).toEqual([62]);
+    // FC 银 1 被发放金 1 抑制：ps=1 不命中；金版 ps=101 命中（FC 金槽 0 + 发放金 1）
+    expect((await list17('/api/players?ps=1', fx.env)).players.map((p) => p.id)).toEqual([]);
+    expect((await list17('/api/players?ps=101', fx.env)).players.map((p) => p.id)).toEqual([61]);
+    // 61 的发放银 8 不被「发放金 1」误杀：NOT EXISTS 只看同基础（8 vs 1）—— 逐银值口径
+    expect((await list17('/api/players?ps=8,106', fx.env)).players.map((p) => p.id)).toEqual([61, 62]);
+    // 响应带合并清单：61 = FC 银 31（未被顶）+ 发放银 8 + 发放金 101；FC 银 1 被抑制不出现在清单里
+    const row61 = (await list17('/api/players?ps=8', fx.env)).players.find((p) => p.id === 61)!;
+    expect(row61.playstyles?.map((s) => `${s.gold ? 'g' : 's'}${s.psid}:${s.source}`)).toEqual(['s31:fc', 's8:growth', 'g101:growth']);
+  });
+
   it('club_id=free 筛无归属球员；market_value 区间', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);

@@ -538,6 +538,20 @@ describe('升级方案二选一与档位核定（§10.2/§10.3）', () => {
     });
   });
 
+  it('发放金顶掉 FC 同基础银（557 重现）：台账重算不含被抑制的 FC 银（v6.63.0 运行时锁）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    // 557 场景：FC 自带银 1/31，升级发金 31 —— 重算银 = FC 2 枚 − 被抑制 1 枚 = 1，金 = 发放 1
+    // （夹具球员原本无 game_attrs，先落 '{}' 再 json_set：json_set(NULL,…) 返回 NULL）
+    fx.sqlite.exec(`
+      UPDATE players SET growth_xp = 10, growth_tier = 5,
+        game_attrs = json_set(COALESCE(game_attrs, '{}'), '$.PSID1', 1, '$.PSID2', 31) WHERE id = 10;
+    `);
+    const lv = await post('/api/growth/levelup/10', { planIndex: 1, picks: [131] }, 'tok-coach1', fx.env);
+    expect(lv.status).toBe(200);
+    expect(sqlGet<{ s: number; g: number }>(fx.sqlite, 'SELECT badges_silver AS s, badges_gold AS g FROM players WHERE id = 10')).toEqual({ s: 1, g: 1 });
+  });
+
   it('银槽满 12 后不再发（400），CA 与台账一个都不动', async () => {
     const fx = freshEnv();
     seedPlatform(fx);
