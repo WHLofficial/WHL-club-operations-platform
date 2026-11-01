@@ -246,7 +246,7 @@ export interface PlayerRequestRow {
 export function useMyPlayerRequests(playerId: number, enabled: boolean) {
   return useQuery({
     queryKey: ['club', 'player-requests', playerId],
-    queryFn: () => api<{ requests: PlayerRequestRow[] }>(`/api/club/players/${playerId}/requests`),
+    queryFn: () => api<{ requests: PlayerRequestRow[]; negotiating?: boolean }>(`/api/club/players/${playerId}/requests`),
     enabled: enabled && Number.isInteger(playerId) && playerId > 0,
     staleTime: 0,
   });

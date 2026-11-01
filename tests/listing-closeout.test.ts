@@ -144,15 +144,30 @@ async function settleToReview(fx: Fixture & { seller: number; buyer: number }): 
 }
 
 describe('挂单终态收口（v6.66.0）', () => {
-  it('审核通过 → 谈判成约 → 过户：挂单必须落 delisted，球员才能再做其它操作', async () => {
+  it('审核通过 → 挂单立刻收口：球员已过户、文件已结算，谈判期间闸门仍按「在途」挡', async () => {
     const fx = await seedDeal();
     const { listingId, transferId } = await settleToReview(fx);
 
     expect((await post(`/api/admin/reviews/${await openReviewTaskId(fx)}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
-    // 审核通过只把单据推进谈判，挂单仍是 pending_review（收口要靠成交）
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe(
-      'pending_review',
+    // v6.66.0：审核通过 = 扣款 + 过户 + 挂单收口，一线队立刻换人
+    expect(sqlGet<{ status: string; deadline_note: string | null }>(fx.sqlite, 'SELECT status, deadline_note FROM listings WHERE id = ?', listingId)).toEqual({
+      status: 'delisted',
+      deadline_note: '已成交',
+    });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)?.status).toBe('completed');
+    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM players WHERE id = 70')?.club_id).toBe(fx.buyer);
+    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM contracts WHERE player_id = 70 AND is_active = 1')?.club_id).toBe(
+      fx.buyer,
     );
+    // 条款还没谈定 ⇒ 仍算在途，别让他在买方被挂牌/激活/续约
+    await expect(ensureNotInFlight(fx.env.DB, 70)).rejects.toThrow('这名球员已经成交，还有一场签约谈判没结束，等它结束再操作');
+    // 球员页「合同谈判中」小标的数据源（v6.66.0 D9）
+    const negotiatingOf = async (): Promise<boolean | undefined> => {
+      const res = await get('/api/club/players/70/requests', 'tok-buyer', fx.env);
+      if (res.status !== 200) throw new Error(`player-requests -> ${res.status} ${await res.text()}`);
+      return ((await res.json()) as { negotiating?: boolean }).negotiating;
+    };
+    expect(await negotiatingOf()).toBe(true);
 
     const mine = await get('/api/negotiations?mine=1', 'tok-buyer', fx.env);
     const session = ((await mine.json()) as { sessions: { id: number; transferId: number; expectedWage: number | null }[] }).sessions.find(
@@ -167,34 +182,27 @@ describe('挂单终态收口（v6.66.0）', () => {
     const offer = await post(`/api/negotiations/${session!.id}/offer`, { wage: expectedWage }, 'tok-buyer', fx.env);
     if (offer.status !== 200) throw new Error(`offer -> ${offer.status} ${await offer.text()}`);
 
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)?.status).toBe('completed');
-    // 本用例的靶子：成交后挂单必须收口
+    // 谈成只落条款：单据仍是 completed、归属不动、挂单不会二次改写
+    expect(
+      sqlGet<{ status: string; terms_applied: number }>(fx.sqlite, 'SELECT status, terms_applied FROM transfers WHERE id = ?', transferId),
+    ).toEqual({ status: 'completed', terms_applied: 1 });
     expect(sqlGet<{ status: string; deadline_note: string | null }>(fx.sqlite, 'SELECT status, deadline_note FROM listings WHERE id = ?', listingId)).toEqual({
       status: 'delisted',
       deadline_note: '已成交',
     });
-    // 球员确实走了：归属与合同都在买方
-    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM players WHERE id = 70')?.club_id).toBe(fx.buyer);
-    expect(sqlGet<{ club_id: number }>(fx.sqlite, 'SELECT club_id FROM contracts WHERE player_id = 70 AND is_active = 1')?.club_id).toBe(
-      fx.buyer,
-    );
-    // 收口的直接收益：这名球员不再被 findInFlight 当成「还在市场流程里」
+    // 谈判一收口，这名球员就彻底自由了
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM negotiation_sessions WHERE transfer_id = ?', transferId)).toEqual({ status: 'settled' });
     await expect(ensureNotInFlight(fx.env.DB, 70)).resolves.toBeUndefined();
+    // 谈定之后小标消失
+    expect(await negotiatingOf()).toBe(false);
   });
 
-  it('findInFlight 的谈判段：only「已结算 + 会话还开着」才算在途，signing 仍让给旧判据', async () => {
+  it('findInFlight 的谈判段：单据已结算 + 会话还开着才算在途，会话收口即放开', async () => {
     const fx = await seedDeal();
     const { transferId } = await settleToReview(fx);
     expect((await post(`/api/admin/reviews/${await openReviewTaskId(fx)}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
 
-    // 挂单在 v6.68.0 翻转后于过户时收口；这里先把它挪走，才能单独观察谈判段
-    fx.sqlite.exec(`UPDATE listings SET status = 'delisted' WHERE player_id = 70`);
-
-    // 今天（v6.66.0）的常态：会话 active 但单据 signing —— 旧判据负责，谈判段不越位改文案
-    await expect(ensureNotInFlight(fx.env.DB, 70)).resolves.toBeUndefined();
-
-    // v6.68.0 翻转后的常态：单据已 completed、会话还没谈定 —— 必须当成在途
-    fx.sqlite.exec(`UPDATE transfers SET status = 'completed' WHERE id = ${transferId}`);
+    // v6.66.0 的常态：单据 completed、会话 active ⇒ 必须当成在途
     await expect(ensureNotInFlight(fx.env.DB, 70)).rejects.toThrow('这名球员已经成交，还有一场签约谈判没结束，等它结束再操作');
 
     // 会话一收口（谈成/超时强约），闸就放开

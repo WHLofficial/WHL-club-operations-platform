@@ -455,8 +455,8 @@ describe('激活转会（规则 4.4.2：训练营球员唯一流动出口）', (
     // 激活成交与普通成交一样走谈判（需求方裁决 2026-09）
     const approve = await post(`/api/admin/reviews/${task!.id}/approve`, { note: '激活成交确认' }, 'tok-admin', fx.env);
     expect(approve.status).toBe(200);
-    expect(((await approve.json()) as { status: string }).status).toBe('signing');
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transfer!.id)?.status).toBe('signing');
+    expect(((await approve.json()) as { status: string }).status).toBe('completed');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transfer!.id)?.status).toBe('completed');
 
     // 会话分配给买方；卖方不可操作
     const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);

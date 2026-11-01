@@ -288,13 +288,22 @@ describe('到期引擎：签约谈判静默超时', () => {
     expect(third.reminded).toBe(0);
   });
 
-  it('会话不在签约阶段（转会单已了结）⇒ 静默跳过，不报错', async () => {
+  // v6.66.0：换队类单据在审核通过时就已经 completed（人已过户、钱已到账），
+  // 静默超时不能再「作废把人还原回卖方」——只能按 E 强约把条款落地。
+  it('单据已结算、会话还开着 ⇒ 按 E 强约收口（settle_source=forced），单据与归属不动', async () => {
     const fx = freshEnv();
     seedWorld(fx);
     seedSigning(fx, { sessionId: 1, ageHours: 100, anchorHoursAgo: 100 });
     fx.sqlite.exec(`UPDATE transfers SET status = 'completed' WHERE id = 9`);
     const out = await runExpiryTick(fx.env, 'cron_tick');
-    expect(out).toMatchObject({ closed: 0, errors: [] });
+    expect(out).toMatchObject({ closed: 1, errors: [] });
+    expect(
+      fx.sqlite.prepare('SELECT status, settle_source FROM negotiation_sessions WHERE id = 1').get() as {
+        status: string;
+        settle_source: string;
+      },
+    ).toMatchObject({ status: 'settled', settle_source: 'forced' });
+    expect((fx.sqlite.prepare('SELECT status FROM transfers WHERE id = 9').get() as { status: string }).status).toBe('completed');
   });
 });
 

@@ -1996,7 +1996,16 @@ app.get('/club/players/:id/requests', async (c) => {
   )
     .bind(playerId, club.id)
     .all<{ transferId: number; type: string; status: string; extraFee: number | null; createdAt: string }>();
-  return c.json({ requests: rows.results });
+  // 「合同谈判中」小标（v6.66.0 第 3 期 D9）：成交即过户之后，单据在开谈那刻就是 completed、
+  // 条款等谈定才落（transfers.terms_applied）。这种「人已在队内、合同还没谈定」的状态不再由
+  // transfers.status 表达，只能看有没有 active 会话。
+  const negotiatingRow = await c.env.DB.prepare(
+    `SELECT 1 AS n FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
+     WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'completed' AND t.terms_applied = 0 LIMIT 1`,
+  )
+    .bind(playerId)
+    .first<{ n: number }>();
+  return c.json({ requests: rows.results, negotiating: negotiatingRow !== null });
 });
 
 app.post('/club/events/:id/choose', async (c) => {

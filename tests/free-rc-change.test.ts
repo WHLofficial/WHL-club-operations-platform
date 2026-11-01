@@ -236,7 +236,7 @@ async function runRenewal(fx: Fixture, playerId: number, clubId: number, newFee:
     decidedBy: 1,
     decision: 'approved',
   });
-  expect(approve.status).toBe('signing');
+  expect(approve.status).toBe('completed');
   const e = await renewalExpectedWage(fx, newFee);
   const session = sqlGet<{ id: number }>(fx.sqlite, 'SELECT id FROM negotiation_sessions WHERE transfer_id = ?', submit.transferId)!;
   const offer = await offerWage(fx.env, session.id, clubId, 1, e);
@@ -322,7 +322,7 @@ describe('TC-RF-01/02 · 免费全链路与二次收费', () => {
       decidedBy: 1,
       decision: 'approved',
     });
-    expect(approve.status).toBe('signing');
+    expect(approve.status).toBe('completed');
     expect(ledgerKinds(fx, 1, 'rc_change_fee')).toEqual([]);
     expect(sqlGet<{ extra_fee: number | null }>(fx.sqlite, 'SELECT extra_fee FROM transfers WHERE id = ?', submit.transferId)).toEqual({ extra_fee: null });
 
@@ -635,7 +635,7 @@ describe('TC-RF-10/11 · 兼容与守卫', () => {
     });
     // 审核侧兜底：缺字段按免费——0085 零回填 DEFAULT 0，提交时机会必然未消耗
     const approve = await approveTransferDeal(fx.env, 5, 1, { taskId: 5, decidedBy: 1, decision: 'approved' });
-    expect(approve.status).toBe('signing');
+    expect(approve.status).toBe('completed');
     expect(ledgerKinds(fx, 1, 'rc_change_fee')).toEqual([]);
 
     // 谈判成约：成约侧兜底同样生效——pending 免费（free_rc_change=1）、保护期写 NULL 不收口

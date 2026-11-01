@@ -128,7 +128,7 @@
 
 ## v6.66.0 · 审核通过即过户：成交挂单收口 → 判据替换 → 顺序翻转（2026-11-01）
 
-**状态**：**进行中**——第 1、2/3 期已实现并本地验收（2026-11-01），第 3 期待做；未 push、未部署。零迁移（第 3 期会加迁移 `0088`）。**生产迁移现状仍到 `0087`**。
+**状态**：**已完成、待上线**——三期全部实现并本地验收（2026-11-01），未 push、未部署。新增迁移 `0088_transfer_terms_after_ownership.sql`（`transfers` 四列 + 一索引），上线须**先 apply 迁移再 push**。**生产迁移现状仍到 `0087`**。
 
 **缘起**：owner 2026-11-01 连问两事——「为什么挂牌截止之后变成待审核了（即使是审核之后、谈判之后）？」与「应当在谈判之前球员就过户、钱就划转，要考虑到谈判不可能导致球员退回原队的，不用防这点」。经 brainstorming + grilling 十问定案（裁决 D1–D10 见 `memory/design-transfer-before-negotiation.md`），owner 先要求「先落文档，然后 brainstorming，然后 grilling」，再下令「按顺序开工，并分配版本号」，随后把三期收敛为**一个版本号** v6.66.0（三个提交）。
 
@@ -148,6 +148,19 @@
 - `tests/negotiation-guard.test.ts`（5 例）锁「单据 completed + 会话 active」这一翻转后形状，并锁 signing 残留兜底。
 
 **验收（第 1–2 期实测）**：`npm run typecheck` 三份全清；`npm test` **182 文件 / 2,944 例**全绿（基线 180 / 2,937；第 1 期 +2、第 2 期 +5）；变异：第 1 期三靶全红、第 2 期两靶全红（谓词恒假 / 删 signing 兜底）。第 2 期既有 2,939 例零改动全绿 ⇒ 判据替换对今天行为等价。判级 **minor**。
+
+**第 3 期交付（已完成）**
+
+- **顺序翻转**：`src/worker/bypass.ts` 的 `approveTransferDeal` 抽出 `settleThenOpen(opts)` = `assertExpectedWageReady` → `completeTransfer`（不带条款，人+钱+税+挂单当场落定）→ `openNegotiationSession`；rc_change / free_agent / match / forced_auction（无卖方或 CPU）/ 默认换队五个出口全部改走它。`promotion` 是唯一例外（无审核步，附加费依赖谈成 RC），仍走「成约才结算」。
+- **条款与归属分家**：`src/worker/transfers.ts` 新增 `applyContractTerms(env, transferId, terms, actor, origin)`——按 type 分四支写 wage/RC/类型/签约时刻，幂等闸 `transfers.terms_applied = 0`，末尾按 `contractType` 翻球员状态（trainee/normal）。`settleActiveSession` 与 `healSettlement` 按「单据 completed → 落条款 / 仍 signing → 走旧 `completeTransfer`」分流；`openNegotiationSession` 接受已完成单、不再写 `status='signing'`。
+- **静默超时不再作废**：`closeSilentSessions` 对已完成单改走「按 E 强约，E 为空则按现行条款 settled」，`voidSigningCore` 对 completed 单短路返回 already（人已在买方，作废没有语义）。
+- **撤销**：新模块 `src/worker/deal-revert.ts` 的 `revertDeal`——非 completed 拒、关窗拒、该球员之后还有成交单拒、无快照拒；单批反向两笔账（税与附加费不退）、按 `transfers.pre_settle_snapshot` 还原球员归属与合同、关掉活跃会话、单据落 `reverted`。入口 `src/worker/market-intervene.ts` 的 `adminCancelSigning` → `adminRevertDeal`（completed 走撤销、signing 仍走旧作废），`POST /api/admin/negotiations/:id/void` 同步。
+- 迁移 `0088_transfer_terms_after_ownership.sql`：`pre_settle_snapshot` / `terms_applied` / `reverted_at` / `revert_reason` + `idx_transfers_player_status`；`tests/d1.ts` 的 `MIGRATION_FILES` 已登记。
+- 测试：`tests/deal-revert.test.ts`（4 例）、`tests/apply-contract-terms.test.ts`（4 例）；改写 26 处时序断言（旧「审核通过→signing→成约才过户」）；`tests/expiry-ops.test.ts` 的「已了结单静默跳过」按新语义改为「按 E 强约收口」。
+
+**验收（第 3 期实测）**：`npm test` **184 文件 / 2,952 例**全绿（第 2 期 182 / 2,944，+2 文件 +8 例）；`npm run typecheck` 三份全清；变异三靶全红（条款幂等闸恒真 / 撤销不退款 / 审核通过不过户 ⇒ TC-AT + TC-RV + 挂牌收口与审批链共 8 例红）。`web/src/pages/PlayersLibrary.test.tsx` 的「回到宽屏自动放掉抽屉」在并行全量下偶发（单跑 37 例全绿，既有 resize 时序抖动）。
+
+影响面（**未上线，仅本地**）：成交路径的 `transfers` 行从 `signing` 变 `completed` 更早出现——`ledger.ts` 预期收入源②（`pending_review`/`signing`）会提早退出，属预期（钱已到账）；前端「合同谈判中」小标、市场页「待审核」页签保留原样。
 
 **同步在生产之外的前提**：生产 20 条 `pending_review` 中 14 条联单 `completed`（球员已在买方、钱已划转），6 条仍 `signing`；修复脚本只碰前者，`signing` 的等本版新路径自然收口。
 

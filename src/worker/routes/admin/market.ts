@@ -6,7 +6,7 @@ import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { createConfigService } from '../../../core/config.ts';
-import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminCancelSigning, requireReason } from '../../market-intervene.ts';
+import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminRevertDeal, requireReason } from '../../market-intervene.ts';
 import { listWindows, openWindow, closeWindow } from '../../window-machine.ts';
 import { createForcedAuction, cancelForcedAuction, inspectForcedAuction } from '../../bypass.ts';
 import { readJson } from './shared.ts';
@@ -51,7 +51,7 @@ app.post('/negotiations/:id/void', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const body = (await readJson(c)) as Record<string, unknown> | null;
   const reason = await requireReason(body);
-  const status = await adminCancelSigning(c.env, Number(c.req.param('id')), user.id, reason);
+  const status = await adminRevertDeal(c.env, Number(c.req.param('id')), user.id, reason);
   return c.json({ ok: true, status });
 });
 

@@ -36,17 +36,17 @@ owner 2026-11-01 两问：「为什么挂牌截止之后变成待审核了（即
 
 原做法备忘：抽一个共用片段（形如 `EXISTS (SELECT 1 FROM negotiation_sessions s WHERE s.transfer_id = t.id AND s.status = 'active')`），逐处替换；因今天所有 active 会话都挂在 `signing` 单据上，替换后行为等价 ⇒ 全量测试必须零变化（181 / 2,939 不动）。变异验证：把新判据改成恒真，看 8 处对应的既有用例是否变红。
 
-## 第 3 期 · 顺序翻转（迁移 0088）
+## 第 3 期 · 顺序翻转（迁移 0088，已完成 2026-11-01）
 
-- [ ] 迁移 `0088_transfer_before_negotiation.sql`：`transfers` 加 `pre_settle_snapshot TEXT`（JSON）/ `terms_applied_at` / `reverted_at` / `revert_reason`
-- [ ] `completeTransfer`：amendment 类补无条款分支（当前 `else if (!amendment)` 把写合同锁在 `transfers.ts:624`）；返回后由调用方开谈判
-- [ ] 审核通过分流改为：先 `completeTransfer`（不带条款）→ 单据 `completed` → 再 `openNegotiationSession`（去掉 `pending_review` 硬闸，改 `completed` + 无 active 会话）
-- [ ] 新模块 `applyContractTerms(db, transferId, terms)`：返回语句数组，写 wage / RC（+ promotion 附加费）；`settleActiveSession` 成约只写条款，不再二次过户
-- [ ] `promotion` 例外：无审核步（`src/worker/transfers.ts:482`）且附加费依赖谈成 RC，仍走谈判成约
-- [ ] `adminRevertDeal`（由 `src/worker/market-intervene.ts:132 adminCancelSigning` 改造）：理由必填、二次确认、限 `currentWindow(db) != null`（`src/worker/contract-ticks.ts:14-28`）；覆盖含 rc_change / match / promotion；快照还原归属+资金+条款，单据置 `reverted`
-- [ ] `voidSigningCore` / `rejectTransfer` / `healSettlement` 判据同步（`healSettlement` 现要求 `signing`）
-- [ ] 前端「合同谈判中」紫色小标（球员卡 / 阵容行），市场页「待审核」页签保留
-- [ ] 测试计划扩到下三节；全量回归 + 变异验证
+- [x] 迁移 `0088_transfer_terms_after_ownership.sql`：`transfers` 加 `pre_settle_snapshot TEXT`（JSON）/ `terms_applied INTEGER NOT NULL DEFAULT 0` / `reverted_at` / `revert_reason` + `idx_transfers_player_status`；`tests/d1.ts` 的 `MIGRATION_FILES` 已登记
+- [x] `completeTransfer`：首句写 `pre_settle_snapshot`；`else if (!amendment)` 补 `contract === null` 时的占位合同 UPSERT（wage/RC 0、signed_at NULL）
+- [x] 审核通过分流改为：`approveTransferDeal` 的 `settleThenOpen` = 先 `completeTransfer`（不带条款）→ 再 `openNegotiationSession`；`openNegotiationSession` 的硬闸接受 `pending_review | completed`
+- [x] `applyContractTerms(env, transferId, terms, actor, origin)`（`src/worker/transfers.ts`）：按类型写 wage/RC/合同类型/签约时刻，`terms_applied` 幂等闸；`settleActiveSession`、`healSettlement` 成约只写条款，不再二次过户
+- [x] `promotion` 例外：无审核步且附加费依赖谈成 RC，仍走谈判成约（`applyContractTerms` 对其 409）
+- [x] `adminRevertDeal`（由 `adminCancelSigning` 改造，`POST /api/admin/negotiations/:id/void`）：completed 走 `revertDeal`、signing 仍走 `voidSigningCore`；理由必填、限 `currentWindow(db) != null`、之后无新成交单；快照还原归属+资金+条款，单据置 `reverted`（`src/worker/deal-revert.ts`）
+- [x] `voidSigningCore` 对 completed 单短路（人已在买方）；`healSettlement` 按 completed/signing 分流；`closeSilentSessions` 对 completed 单改强约
+- [x] 前端「合同谈判中」紫色小标（球员页在途区，数据源 `/api/club/players/:id/requests` 的 `negotiating`），市场页「待审核」页签保留
+- [x] 测试计划扩到 §7；全量回归 184 文件 / 2,952 例；变异三靶全红
 
 ## 硬约束
 

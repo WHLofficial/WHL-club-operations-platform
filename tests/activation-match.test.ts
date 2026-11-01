@@ -309,7 +309,7 @@ describe('匹配 / 放行 / 到期', () => {
     const taskId = await openReviewTaskId(fx);
     const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
     expect(approve.status).toBe(200);
-    expect(((await approve.json()) as { status: string }).status).toBe('signing');
+    expect(((await approve.json()) as { status: string }).status).toBe('completed');
 
     // 差额 15m 销毁（原东家付）
     const diffEntry = sqlGet<{ amount: number }>(

@@ -12,7 +12,15 @@ import { abilityLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE, void
 import { AGENT_TIER_LABELS } from '../core/negotiation-rules.ts';
 import { attemptExpected, directFail, expectedWage, previewForecast, satisfactionText, successRate } from './negotiation-secret.ts';
 import { loadNegotiationContext, type AgentTierParams, type NegotiationContext } from './negotiation-context.ts';
-import { completeTransfer, isReturnToFormerClub, loadTransfer, listingIdFromTransfer, type ReviewDecision, type TransferRow } from './transfers.ts';
+import {
+  applyContractTerms,
+  completeTransfer,
+  isReturnToFormerClub,
+  loadTransfer,
+  listingIdFromTransfer,
+  type ReviewDecision,
+  type TransferRow,
+} from './transfers.ts';
 import { seededUnit } from '../core/seeded.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
@@ -118,6 +126,22 @@ export interface OpenSessionOptions {
   renewalRaise?: boolean;
 }
 
+/**
+ * 开会话前的预检（v6.66.0 第 3 期）：审核通过时先过户再开谈，若「E 算不出来」这类 409 发生在
+ * 结算之后，就会留下「钱已付、人已走、无谈判」的死单。调用方在结算之前先调本函数。
+ */
+export async function assertExpectedWageReady(
+  db: D1Database,
+  transfer: TransferRow,
+  opts: OpenSessionOptions,
+): Promise<void> {
+  if (opts.fixedReleaseFee === undefined) return;
+  const player = await loadPlayerFacts(db, transfer.player_id);
+  if (!player || player.ca === null || player.pa === null || player.age === null) {
+    throw new HttpError(409, '球员能力数据不完整，无法计算预期工资');
+  }
+}
+
 export async function openNegotiationSession(
   env: Env,
   transferId: number,
@@ -125,12 +149,17 @@ export async function openNegotiationSession(
   review?: ReviewDecision,
   opts: OpenSessionOptions = {},
   origin: AuditOrigin = 'user',
-): Promise<{ status: 'signing' | 'already'; expectedWage?: number }> {
+): Promise<{ status: 'completed' | 'signing' | 'already'; expectedWage?: number }> {
   const db = env.DB;
   const transfer = await loadTransfer(db, transferId);
   if (!transfer) throw new HttpError(404, '转会单不存在');
   if (transfer.status === 'signing') return { status: 'already' };
-  if (transfer.status !== 'pending_review') throw new HttpError(409, `转会单当前状态是 ${transfer.status}，不能进入签约谈判`);
+  // v6.66.0：换队类单据在审核通过时已 completed（钱已付、人已走），会话挂在已结算的单上；
+  // 上调（无审核步、附加费依赖谈成的 RC）仍从 pending_review 开谈，保持「成约才结算」。
+  const settled = transfer.status === 'completed';
+  if (!settled && transfer.status !== 'pending_review') {
+    throw new HttpError(409, `转会单当前状态是 ${transfer.status}，不能进入签约谈判`);
+  }
   if (transfer.to_club_id === null) throw new HttpError(409, '转会单缺签入方，数据不完整');
 
   let seededE: number | null = null;
@@ -151,15 +180,20 @@ export async function openNegotiationSession(
   }
 
   const audit = createAuditStatement(db);
-  const statements: D1PreparedStatement[] = [
-    db.prepare(`UPDATE transfers SET status = 'signing' WHERE id = ? AND status = 'pending_review'`).bind(transferId),
+  const statements: D1PreparedStatement[] = [];
+  if (!settled) {
+    statements.push(
+      db.prepare(`UPDATE transfers SET status = 'signing' WHERE id = ? AND status = 'pending_review'`).bind(transferId),
+    );
+  }
+  statements.push(
     db
       .prepare(
         `INSERT INTO negotiation_sessions (transfer_id, player_id, club_id, release_fee, expected_wage, attempt_count, status, created_at)
          VALUES (?, ?, ?, ?, ?, 0, 'active', ${nowSql()})`,
       )
       .bind(transferId, transfer.player_id, transfer.to_club_id, opts.fixedReleaseFee ?? null, seededE),
-  ];
+  );
   if (review) {
     statements.push(
       db
@@ -184,24 +218,34 @@ export async function openNegotiationSession(
   try {
     const results = await db.batch(statements);
     const statusChange = results[0]?.meta.changes ?? 0;
-    return { status: statusChange > 0 ? 'signing' : 'already', expectedWage: seededE ?? undefined };
+    // settled（换队类）：单据在审核通过时已经 completed，会话 INSERT 成功即算「已开谈」
+    const opened = statusChange > 0;
+    return { status: settled ? (opened ? 'completed' : 'already') : opened ? 'signing' : 'already', expectedWage: seededE ?? undefined };
   } catch (err) {
     if (String(err).includes('UNIQUE')) return { status: 'already' };
     throw err;
   }
 }
 
-// 会话已结算但过户未跟上（两 batch 之间崩溃）→ 按会话快照重放过户（幂等）
+// 会话已结算但后续两步没跟上（两 batch 之间崩溃）→ 按会话快照重放（幂等）：
+// v6.66.0 起换队类单据在开会话之前就已过户，所以这里只补「条款落地」；
+// 上调（仍走「成约才结算」）补的是整张过户单。
 export async function healSettlement(env: Env, session: SessionRow, actor: number | null, origin: AuditOrigin): Promise<void> {
   if (session.status !== 'settled' || !session.settle_source) return;
   const transfer = await loadTransfer(env.DB, session.transfer_id);
-  if (!transfer || transfer.status !== 'signing') return;
-  await completeTransfer(env, session.transfer_id, actor, origin, undefined, {
+  if (!transfer) return;
+  const terms = {
     wage: session.settled_wage ?? TRAINEE_WAGE,
     releaseFee: session.release_fee ?? TRAINEE_RELEASE_FEE,
     source: session.settle_source,
-    contractType: session.settle_source === 'trainee' ? 'trainee' : 'formal',
-  });
+    contractType: (session.settle_source === 'trainee' ? 'trainee' : 'formal') as 'trainee' | 'formal',
+  };
+  if (transfer.status === 'completed') {
+    await applyContractTerms(env, session.transfer_id, terms, actor, origin);
+    return;
+  }
+  if (transfer.status !== 'signing') return;
+  await completeTransfer(env, session.transfer_id, actor, origin, undefined, terms);
 }
 
 async function requireMyActiveSession(
@@ -216,17 +260,13 @@ async function requireMyActiveSession(
   if (session.club_id !== clubId) throw new HttpError(403, '只有签约方可以操作这次谈判');
   const transfer = await loadTransfer(db, session.transfer_id);
   if (!transfer) throw new HttpError(404, '转会单不存在');
-  if (transfer.status === 'completed' && session.status === 'active') {
-    // 反向自愈：过户已到而会话未记（理论不可达，防御性收口）
-    await db
-      .prepare(`UPDATE negotiation_sessions SET status = 'settled', settled_at = ${nowSql()} WHERE id = ? AND status = 'active'`)
-      .bind(session.id)
-      .run();
-    session.status = 'settled';
-  }
+  // v6.66.0：单据 completed + 会话 active 现在是**正常态**（审核通过即过户，条款还在谈）。
+  // 旧版的「反向自愈」在这里会把每一场正常谈判当场判死，已删。
   await healSettlement(env, session, actor, 'user');
   if (session.status !== 'active') throw new HttpError(409, '这场谈判已经结束了');
-  if (transfer.status !== 'signing') throw new HttpError(409, '这单转会不在签约阶段');
+  if (transfer.status !== 'signing' && transfer.status !== 'completed') {
+    throw new HttpError(409, '这单转会不在签约阶段');
+  }
   return { session, transfer };
 }
 
@@ -244,8 +284,11 @@ export async function submitReleaseFee(
   const db = env.DB;
   const transfer = await loadTransfer(db, transferId);
   if (!transfer) throw new HttpError(404, '转会单不存在');
-  if (transfer.status === 'completed') throw new HttpError(409, '这单转会已经完成了');
-  if (transfer.status !== 'signing') throw new HttpError(409, '这单转会还没进入签约谈判');
+  // v6.66.0：换队类在审核通过时已 completed（钱付了、人走了），条款还在谈，
+  // 所以「已完成」正是提交新违约金的常态；只有还没进谈判的单才拒。
+  if (transfer.status !== 'signing' && transfer.status !== 'completed') {
+    throw new HttpError(409, '这单转会还没进入签约谈判');
+  }
   // v6.49.0 运营时刻表：签约谈判自己的时段（提交违约金 = 谈判的第一步动作）
   await assertOpOpen(db, 'transfer_negotiation');
   if (FIXED_FEE_TYPES.has(transfer.type)) {
@@ -478,12 +521,12 @@ async function adjustTraineeSignFee(env: Env, transfer: TransferRow, clubId: num
   // 预检过了但并发把余额占掉时，账本与附加费两条都不落。退款是入账，只守单据阶段。
   const credit = creditLineGuard(clubId);
   const guardSql = collecting
-    ? `(SELECT status FROM transfers WHERE id = ?) = 'signing'` +
+    ? `(SELECT status FROM transfers WHERE id = ?) IN ('signing', 'completed')` +
       ` AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
       ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
       ` + ${credit.sql}` +
       ` >= ?`
-    : `(SELECT status FROM transfers WHERE id = ?) = 'signing'`;
+    : `(SELECT status FROM transfers WHERE id = ?) IN ('signing', 'completed')`;
   const guardParams = collecting ? [transfer.id, clubId, clubId, ...credit.params, amount] : [transfer.id];
   const results = await db.batch([
     ...ledgerMovement(db, {
@@ -499,7 +542,7 @@ async function adjustTraineeSignFee(env: Env, transfer: TransferRow, clubId: num
       guardParams,
     }),
     db
-      .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status = 'signing' AND ${guardSql}`)
+      .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND status IN ('signing', 'completed') AND ${guardSql}`)
       .bind(required, transfer.id, ...guardParams),
     createAuditStatement(db)({
       actor,
@@ -591,12 +634,20 @@ async function settleActiveSession(
     throw err;
   }
   if (settleSource !== 'record') {
-    await completeTransfer(env, session.transfer_id, actor, 'user', undefined, {
+    const terms = {
       wage: settleWage ?? TRAINEE_WAGE,
       releaseFee: settleSource === 'trainee' ? TRAINEE_RELEASE_FEE : session.release_fee ?? TRAINEE_RELEASE_FEE,
       source: settleSource,
-      contractType: settleSource === 'trainee' ? 'trainee' : 'formal',
-    });
+      contractType: (settleSource === 'trainee' ? 'trainee' : 'formal') as 'trainee' | 'formal',
+    };
+    // 批次 2：换队类单据已 completed（钱与归属在审核通过时就落定）⇒ 只落条款；
+    // 上调是唯一「成约才结算」的类型，仍走整张过户。
+    const transfer = await loadTransfer(db, session.transfer_id);
+    if (transfer?.status === 'completed') {
+      await applyContractTerms(env, session.transfer_id, terms, actor, 'user');
+    } else {
+      await completeTransfer(env, session.transfer_id, actor, 'user', undefined, terms);
+    }
   }
   return {};
 }
@@ -718,7 +769,8 @@ export async function listMySessions(env: Env, clubId: number, opts: MySessionsO
 
   // 自愈扫描：会话已结算但过户未跟上的，先重放过户再返回（已结束区里才可能出现这种行）
   for (const row of endedPage.results) {
-    if (row.status === 'settled' && row.settle_source && row.transfer_status === 'signing') {
+    // v6.66.0：换队类单据在成约前就已 completed，自愈扫描要看两种形态（applyContractTerms 自带幂等闸）
+    if (row.status === 'settled' && row.settle_source && (row.transfer_status === 'signing' || row.transfer_status === 'completed')) {
       await healSettlement(
         env,
         {
@@ -940,6 +992,23 @@ const SILENT_SESSION_SELECT = `
   JOIN transfers t ON t.id = s.transfer_id
   JOIN players p ON p.id = s.player_id`;
 
+/**
+ * 已完成单据的超时兜底（v6.66.0 D3）：签约方一直没交新违约金、E 出不来时，按球员**现行合同**
+ * 的工资收口。取的是他原本的条款，不凭空造新价；会话照常 settled + settle_source='forced'，
+ * 不留悬空会话，也不动归属（人已经在买方队里了）。
+ */
+async function settleAtBaseTerms(env: Env, row: SilentSessionRow): Promise<boolean> {
+  const db = env.DB;
+  const session = await loadSession(db, row.id);
+  if (!session || session.status !== 'active') return false;
+  const contract = await db
+    .prepare(`SELECT wage FROM contracts WHERE player_id = ? AND is_active = 1`)
+    .bind(session.player_id)
+    .first<{ wage: number | null }>();
+  await settleActiveSession(env, session, contract?.wage ?? 0, 'forced', null, null);
+  return true;
+}
+
 export async function closeSilentSessions(env: Env, opts: ExpiryOpts): Promise<number> {
   const db = env.DB;
   const hours = await silenceHours(db);
@@ -967,6 +1036,21 @@ export async function closeSilentSessions(env: Env, opts: ExpiryOpts): Promise<n
   let closed = 0;
   for (const row of rows) {
     const reasonText = opts.closeAll ? '签约谈判通道已结束' : `超过 ${hours} 小时没有动作`;
+    // v6.66.0（D3）：换队类单据在审核通过时就 completed —— 人已经到买方、钱已经划走，
+    // 「超时作废」在这个形态下等于把球员从买方手里抢走（D2 明确不留退回原队的出口）。
+    // 所以已完成单的超时收口改成「按 E 强约，E 未出则按球员现行条款强约」，settle_source 仍记 forced。
+    const transfer = await loadTransfer(db, row.transfer_id);
+    if (transfer?.status === 'completed') {
+      const forced = (await forceSettleAtExpected(env, row.id, null)) || (await settleAtBaseTerms(env, row));
+      if (!forced) continue;
+      closed++;
+      await queueClubNotification(env, row.club_id, 'negotiation_timeout', { player: row.player_name, hours, reason: reasonText });
+      const sellerDone = await sellerClubOf(db, row.transfer_id);
+      if (sellerDone !== null && sellerDone !== row.club_id) {
+        await queueClubNotification(env, sellerDone, 'negotiation_timeout', { player: row.player_name, hours, reason: reasonText });
+      }
+      continue;
+    }
     const result = await voidSigningCore(env, row.id, {
       actor: null,
       origin: opts.origin,

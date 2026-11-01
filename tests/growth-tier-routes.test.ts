@@ -331,7 +331,7 @@ describe('§10.3 触发点：改未来之星 / 导入 / 合同认领（v6.48.0�
 describe('§10.3 挂钩清单（源码扫描，v6.48.0）', () => {
   // 写 players.club_id 的地方必须挂重算，否则 c1/c2 会停在旧归属上——而这种错档位在页面上看不出来。
   // 新开一条写归属的路径时，这个测试会红：把文件加进 HOOKED 并在该处调用 hookTierRecompute。
-  const HOOKED = ['transfers.ts', 'contracts-import.ts', 'players-import.ts'];
+  const HOOKED = ['transfers.ts', 'contracts-import.ts', 'players-import.ts', 'deal-revert.ts'];
 
   function walk(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

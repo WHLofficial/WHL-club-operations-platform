@@ -190,7 +190,7 @@ describe('续约（rc_change）', () => {
     const taskId = await openReviewTaskId(fx);
     const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
     expect(approve.status).toBe(200);
-    expect(((await approve.json()) as { status: string }).status).toBe('signing');
+    expect(((await approve.json()) as { status: string }).status).toBe('completed');
 
     const eBase = expectedWage(6, 15, 0.02, 1.9, 0.45); // 26 岁 CA80 → 等级 6
     const expectedE = Math.round(eBase * 1.1 * 100) / 100;
@@ -297,7 +297,7 @@ describe('续约（rc_change）', () => {
     ).toEqual([{ amount: -1.5 }]);
     expect(
       sqlGet<{ extra_fee: number | null; status: string }>(fx.sqlite, 'SELECT extra_fee, status FROM transfers WHERE id = ?', transferId),
-    ).toMatchObject({ extra_fee: 1.5, status: 'signing' });
+    ).toMatchObject({ extra_fee: 1.5, status: 'completed' });
     expect(
       sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = ?', fx.clubA),
     ).toMatchObject({ balance: -1.5 }); // 从 0 扣成负数（负=欠款），额度来源后续照常对冲
@@ -525,7 +525,7 @@ describe('海捞（free_agent）', () => {
     const taskId = await openReviewTaskId(fx);
     const approve = await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env);
     expect(approve.status).toBe(200);
-    expect(((await approve.json()) as { status: string }).status).toBe('signing');
+    expect(((await approve.json()) as { status: string }).status).toBe('completed');
 
     const session = sqlGet<{ release_fee: number | null; expected_wage: number | null; club_id: number }>(
       fx.sqlite,
@@ -677,7 +677,7 @@ describe('海捞（free_agent）', () => {
     expect(trainee.status).toBe(409);
     expect(((await trainee.json()) as { error: string }).error).toContain('要补收');
     // 成约没发生：单据仍在签约阶段、会话仍 active、没有补差流水
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)?.status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)?.status).toBe('completed');
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM negotiation_sessions WHERE id = ?', sessionId)?.status).toBe('active');
     expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'free_agent_fee_topup'`)?.n).toBe(0);
   });
@@ -692,14 +692,14 @@ describe('海捞（free_agent）', () => {
     const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 8 }, 'tok-coach2', fx.env);
     expect(submit.status).toBe(201);
     const taskId = await openReviewTaskId(fx);
-    // 审核通过 ⇒ 单据进 signing，球员还没过户（club_id 仍为空）
+    // v6.66.0：审核通过 ⇒ 单据直接 completed、球员当场过户（不再有「已签约未过户」的中间态）
     expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE player_id = 24')?.status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE player_id = 24')?.status).toBe('completed');
 
-    // 另一支队（也是原队）再提海捞：应当拒绝并说明在签约谈判
+    // 另一支队（也是原队）再提海捞：球员已经有东家，归属闸直接挡下（谈判期由 findInFlight 兜底）
     const again = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 10 }, 'tok-coach', fx.env);
     expect(again.status).toBe(400);
-    expect(((await again.json()) as { error: string }).error).toContain('签约谈判');
+    expect(((await again.json()) as { error: string }).error).toContain('有东家');
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM transfers WHERE player_id = 24 AND type = 'free_agent'")?.n).toBe(1);
 
     // 情报台快照同一口径
@@ -708,7 +708,7 @@ describe('海捞（free_agent）', () => {
     const body = (await lookup.json()) as { results: { id: number; seaSign: { eligible: boolean; reason: string | null } }[] };
     expect(body.results[0]).toMatchObject({
       id: 24,
-      seaSign: { eligible: false, reason: '这名球员的海捞单已经进入签约谈判，等它成约或作废再操作' },
+      seaSign: { eligible: false, reason: '海捞只能签无归属的球员（这名球员有东家）' },
     });
   });
 

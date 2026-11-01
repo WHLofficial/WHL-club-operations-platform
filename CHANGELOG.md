@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.66.0] · 审核通过即过户：成交挂单收口（第 1/3 期，进行中）
+## [v6.66.0] · 审核通过即过户：成交收口 → 判据替换 → 顺序翻转（2026-11-01）
 
 **Fixed**
 
@@ -26,7 +26,18 @@
 - 海捞/出标保留一层历史残留兜底：单据已 `signing` 而会话没建出来时仍算在途（`findNegotiationInFlight`）。
 - 判据替换对今天的行为等价（所有 active 会话都挂在 `signing` 单据上）：既有 2,939 例零改动全绿。
 
-**验收（第 1–2 期）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **182 文件 / 2,944 例**全绿（v6.65.4 基线 180 / 2,937，第 1 期 +2、第 2 期 +5）；第 1 期变异三靶全红，第 2 期变异两靶全红（谓词恒假 / 删 signing 兜底）。判级 **minor**。测试计划 `docs/test-plans/v6.66.0-listing-closeout.md`。**生产迁移现状：仍到 `0087`**（本版零迁移）。
+**Changed（第 3 期）**
+
+- **审核通过即过户**：`approveTransferDeal` 改走 `settleThenOpen`——先 `completeTransfer`（球员归属、合同归属、资金、交易税、挂单收口一次落定），再开签约谈判。谈判从此只谈条款，「谈崩退回原队」不再存在（裁决 D2）。rc_change / free_agent / match / forced_auction / 普通换队五类统一；`promotion` 例外（无审核步，附加费依赖谈成 RC，仍成约时结算）。
+- **条款后置落地**：新增 `applyContractTerms`（`src/worker/transfers.ts`），按类型写 wage / 违约金 / 合同类型 / 签约时刻，幂等闸 `terms_applied = 0`；`settleActiveSession`、`healSettlement` 遇到已完成单只落条款，未完成单仍走旧 `completeTransfer`。`openNegotiationSession` 接受已完成单，不再把单据改成 `signing`。
+- **静默超时收口改为强约**：`closeSilentSessions` 对已完成单先试 `forceSettleAtExpected`，E 为空则按现行合同工资强约（`settle_source = 'forced'`），不再作废。
+
+**Added（第 3 期）**
+
+- `revertDeal`（`src/worker/deal-revert.ts`）：整笔回滚已成交交易——买方退款 / 卖方回款（税与附加费不退）、按 `transfers.pre_settle_snapshot` 还原球员归属与合同、关掉活跃会话、单据落 `reverted`、审计 `transfer_revert`。硬闸：必须已结算、必须窗内、该球员此后无新成交单、必须有快照。入口 `adminRevertDeal`（原 `adminCancelSigning`），理由必填，另记一条 `admin_negotiation_void` 管理审计。
+- 迁移 `0088_transfer_terms_after_ownership.sql`：`transfers.pre_settle_snapshot` / `terms_applied` / `reverted_at` / `revert_reason` + `idx_transfers_player_status`。
+
+**验收（全三期）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **184 文件 / 2,952 例**全绿（v6.65.4 基线 180 / 2,937，第 1 期 +2、第 2 期 +5、第 3 期 +8）；变异：第 1 期三靶、第 2 期两靶、第 3 期三靶全部按预期变红。判级 **minor**。测试计划 `docs/test-plans/v6.66.0-listing-closeout.md`。**上线须先 apply 迁移 `0088` 再 push；生产迁移现状仍到 `0087`**。
 
 ## [v6.65.4] · 谈判桌收口 + 入口 HTML 不缓存（2026-11-01）
 

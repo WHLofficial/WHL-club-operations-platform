@@ -523,12 +523,12 @@ describe('审核队列与过户单点（§6.4-2）', () => {
 
     const approve = await post(`/api/admin/reviews/${taskId}/approve`, { note: '成交确认' }, 'tok-admin', fx.env);
     expect(approve.status).toBe(200);
-    expect(((await approve.json()) as { status: string }).status).toBe('signing');
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('signing');
+    expect(((await approve.json()) as { status: string }).status).toBe('completed');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('completed');
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM review_tasks WHERE id = ?', taskId)?.status).toBe('approved');
-    // 谈判期间资金仍冻结、账本未动
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM fund_holds')?.status).toBe('held');
-    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE ref_type = 'transfer'")?.n).toBe(0);
+    // v6.66.0：审核通过即过户——冻结当场结算、买方已付款；谈判只谈条款，不再等成约才走账
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM fund_holds')?.status).toBe('settled');
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE ref_type = 'transfer'")?.n).toBeGreaterThan(0);
 
     // 只有签约方（买方）能动会话
     expect((await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach', fx.env)).status).toBe(403);
@@ -862,7 +862,8 @@ describe('管理介入扩权（v1.3.0）', () => {
     await adminPost(`/api/admin/reviews/${task2.id}/approve`, {}, 'tok-admin', fx.env);
     const sess2 = fx.sqlite.prepare('SELECT id FROM negotiation_sessions WHERE transfer_id = 2').get() as { id: number };
     expect((await adminPost(`/api/admin/negotiations/${sess2.id}/void`, { reason: '交易破裂' }, 'tok-admin', fx.env)).status).toBe(200);
-    expect((fx.sqlite.prepare('SELECT status FROM transfers WHERE id = 2').get() as { status: string }).status).toBe('rejected');
+    // v6.66.0：已完成单的「作废」是整笔回滚（revertDeal），不再是「驳回待审单」
+    expect((fx.sqlite.prepare('SELECT status FROM transfers WHERE id = 2').get() as { status: string }).status).toBe('reverted');
     expect((fx.sqlite.prepare("SELECT COUNT(*) AS n FROM fund_holds WHERE status = 'held'").get() as { n: number }).n).toBe(0);
     expect((fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'admin_negotiation_void'").get() as { n: number }).n).toBe(1);
   });

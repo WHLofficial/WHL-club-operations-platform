@@ -266,10 +266,18 @@ export function SideOps({
   // v6.64.4 自助取消：本队球员的在途单据（续约/解约/上调），一键取消
   const requestsQuery = useMyPlayerRequests(player.id, ownerView);
   const requests = ownerView ? (requestsQuery.data?.requests ?? []) : [];
+  // 合同谈判中（v6.66.0 D9）：成交即过户，单据已是 completed、条款还在谈——用紫色小标提示
+  const negotiating = ownerView && requestsQuery.data?.negotiating === true;
   // 在途单据列表（本队教练）：一键自助取消（解约随单解冻、上调谈判对称收口）
   const requestsBlock =
-    ownerView && requests.length > 0 ? (
+    ownerView && (requests.length > 0 || negotiating) ? (
       <div className="side-requests">
+        {negotiating ? (
+          <div className="side-sub" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="badge purple">合同谈判中</span>
+            <span>这笔交易已经成交、球员已过户，合同条款还在谈。</span>
+          </div>
+        ) : null}
         {requests.map((r) => (
           <div key={r.transferId} className="side-sub" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
             <span>{requestLine(r)}</span>

@@ -609,7 +609,7 @@ describe('结算链：审核 → 谈判（签入费与冻结的对齐）', () =>
     // 冻结在同一次扣费里销毁（等于「这笔费已收」），否则谈判期内可用额被双重扣减
     expect(holdStatus(fx, bidRow(fx, 24, CLUB_A)!.hold_id)).toBe('settled');
     expect(heldTotal(fx, CLUB_A)).toBe(0);
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers')).toMatchObject({ status: 'signing' });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers')).toMatchObject({ status: 'completed' });
   });
 
   it('审核驳回：冻结解冻 + 标作废（单据未成约），可用额回满', async () => {
@@ -689,7 +689,7 @@ describe('结算链：附加费批内守卫（预期收入额度）', () => {
     expect(holdStatus(fx, bidRow(fx, 24, CLUB_A)!.hold_id)).toBe('settled');
     expect(heldTotal(fx, CLUB_A)).toBe(0);
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE sealed_bid_id IS NOT NULL')).toMatchObject({
-      status: 'signing',
+      status: 'completed',
     });
   });
 
@@ -751,7 +751,7 @@ describe('结算链：附加费批内守卫（预期收入额度）', () => {
         fx.sqlite,
         'SELECT status, extra_fee FROM transfers WHERE sealed_bid_id IS NOT NULL',
       ),
-    ).toMatchObject({ status: 'signing', extra_fee: signFee });
+    ).toMatchObject({ status: 'completed', extra_fee: signFee });
   });
 });
 

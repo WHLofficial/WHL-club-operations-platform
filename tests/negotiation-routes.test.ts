@@ -86,7 +86,9 @@ interface SigningFixture extends Fixture {
 }
 
 // 卖方（100m）/买方（50m）+ 球员 10（RC 20、wage 2、26 岁 CA85 PA88）成交待审 → 批准进 signing
-async function seedSigning(fx: Fixture): Promise<SigningFixture> {
+// v6.66.0：审核通过 = 过户。测试里凡是「过户前球员身上该有的东西」（球衣号、徽章），
+// 都得用 beforeApprove 在批准之前布置好，否则会被搬到买方之后才写入。
+async function seedSigning(fx: Fixture, beforeApprove?: (f: Fixture) => void): Promise<SigningFixture> {
   const sellerClub = await createClub(fx, '卖方');
   const buyerClub = await createClub(fx, '买方');
   const auth = attachAuthChannel(fx.env);
@@ -122,9 +124,10 @@ async function seedSigning(fx: Fixture): Promise<SigningFixture> {
   await get('/api/market/listings?status=pending_review', 'tok-viewer', fx.env);
   const queue = await get('/api/admin/reviews', 'tok-admin', fx.env);
   const taskId = ((await queue.json()) as { reviews: { id: number }[] }).reviews[0].id;
+  beforeApprove?.(fx);
   const approve = await post(`/api/admin/reviews/${taskId}/approve`, { note: '成交确认' }, 'tok-admin', fx.env);
   expect(approve.status).toBe(200);
-  expect(((await approve.json()) as { status: string }).status).toBe('signing');
+  expect(((await approve.json()) as { status: string }).status).toBe('completed');
   const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
   const sessionId = ((await mine.json()) as { sessions: { id: number }[] }).sessions[0].id;
   return { ...fx, sellerClub, buyerClub, sessionId };
@@ -199,10 +202,9 @@ describe('新违约金与 E 快照', () => {
 
 describe('报价判定三路径', () => {
   it('成功：报价 ≥ E 必成，成约即过户写合同', async () => {
-    const fx = await seedSigning(freshEnv());
-    await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
     // 球衣号是俱乐部的东西：换队后新东家重新定号，旧号必须清掉
-    fx.sqlite.exec("UPDATE players SET number = '11' WHERE id = 10");
+    const fx = await seedSigning(freshEnv(), (f) => f.sqlite.exec("UPDATE players SET number = '11' WHERE id = 10"));
+    await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
     fx.env.rng = () => 0.9;
     const res = await post(`/api/negotiations/${fx.sessionId}/offer`, { wage: 3.11 }, 'tok-coach2', fx.env);
     expect(res.status).toBe(200);
@@ -227,14 +229,14 @@ describe('报价判定三路径', () => {
   });
 
   it('离队回收中国计划徽章：成约后 china 明细删掉、台账按留存明细重算，成长得来的留着', async () => {
-    const fx = await seedSigning(freshEnv());
-    fx.sqlite.exec(`
+    const seedBadges = `
       UPDATE players SET badges_silver = 5, china_plan = 1 WHERE id = 10;
       INSERT INTO player_playstyles (player_id, slot, kind, psid, source, created_at) VALUES
         (10, 1, 'silver', 1, 'growth', '2026-01-01T00:00:00Z'),
         (10, 2, 'silver', 2, 'china', '2026-01-02T00:00:00Z'),
         (10, 3, 'silver', 3, 'china', '2026-01-03T00:00:00Z');
-    `);
+    `;
+    const fx = await seedSigning(freshEnv(), (f) => f.sqlite.exec(seedBadges));
 
     await post('/api/negotiations/1/release-fee', { fee: 20 }, 'tok-coach2', fx.env);
     fx.env.rng = () => 0.9;
@@ -397,7 +399,7 @@ describe('工资预览（成功率档位）', () => {
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM negotiation_attempts WHERE session_id = ?', fx.sessionId)?.n).toBe(0);
     expect(sqlGet<{ attempt_count: number }>(fx.sqlite, 'SELECT attempt_count FROM negotiation_sessions WHERE id = ?', fx.sessionId)?.attempt_count).toBe(0);
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'negotiation_offer'")?.n).toBe(auditBefore);
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('completed');
   });
 
   it('未交 RC / 非法值 / 越界 / 不升价被拒；档位不随经纪人档位变', async () => {
@@ -439,7 +441,7 @@ describe('工资预览（成功率档位）', () => {
     const res = await post(`/api/negotiations/${fx.sessionId}/preview`, { wage: 9 }, 'tok-coach2', fx.env);
     expect(res.status).toBe(409);
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM negotiation_sessions WHERE id = ?', fx.sessionId)?.status).toBe('active');
-    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('signing');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('completed');
   });
 });
 

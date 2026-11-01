@@ -7,6 +7,7 @@ import { loadTransfer } from './transfers.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { settleListingForReview, type ListingCore } from './market-settle.ts';
 import { forceSettleAtExpected, playerRestoreSql, voidSigningCore } from './negotiations.ts';
+import { revertDeal } from './deal-revert.ts';
 
 async function loadListingCore(db: Env['DB'], listingId: number): Promise<ListingCore | null> {
   return db
@@ -123,19 +124,37 @@ export async function adminForceSign(env: Env, sessionId: number, actor: number,
   return ok ? 'done' : 'already';
 }
 
-// 作废签约谈判（交易破裂处置）：会话关闭、转会单驳回、资金解冻、球员还原、挂牌下架
-// 收口本体在 negotiations.ts 的 voidSigningCore（到期引擎超时作废共用同一处）；这里只保留
-// 管理端特有的 404/409 前置话术。
-export async function adminCancelSigning(env: Env, sessionId: number, actor: number, reason: string): Promise<'done' | 'already'> {
+// 撤销这笔交易（v6.66.0 D8，原 adminCancelSigning）：两种形态按单据状态分流。
+//   · completed（换队类已经付过钱、人已经到买方）→ revertDeal 整笔回滚（钱、归属、合同、快照）；
+//   · signing（上调这类「成约才结算」的单）→ 仍走 voidSigningCore：会话关闭、资金解冻、球员还原。
+// 两者都要求写理由，都会留下 admin_negotiation_void / transfer_revert 审计。
+export async function adminRevertDeal(env: Env, sessionId: number, actor: number, reason: string): Promise<'done' | 'already'> {
   const db = env.DB;
   const session = await db
     .prepare('SELECT id, transfer_id, status FROM negotiation_sessions WHERE id = ?')
     .bind(sessionId)
     .first<{ id: number; transfer_id: number; status: string }>();
   if (!session) throw new HttpError(404, '谈判会话不存在');
-  if (session.status !== 'active') throw new HttpError(409, '这条谈判已经结束');
   const transfer = await loadTransfer(db, session.transfer_id);
-  if (!transfer || transfer.status !== 'signing') throw new HttpError(409, '转会单不在签约阶段，不能作废谈判');
+  if (!transfer) throw new HttpError(404, '转会单不存在');
+  if (transfer.status === 'completed') {
+    const result = await revertDeal(env, session.transfer_id, actor, reason);
+    if (result.status !== 'reverted') return 'already';
+    // 管理动作本身也留痕（revertDeal 记的是交易层 transfer_revert，这行记的是「谁点的撤销」）
+    await db.batch([
+      createAuditStatement(db)({
+        actor,
+        action: 'admin_negotiation_void',
+        targetType: 'transfer',
+        targetId: session.transfer_id,
+        origin: 'user',
+        after: { reason, form: 'revert' },
+      }),
+    ]);
+    return 'done';
+  }
+  if (session.status !== 'active') throw new HttpError(409, '这条谈判已经结束');
+  if (transfer.status !== 'signing') throw new HttpError(409, '这条谈判已经结束，不能作废');
   return voidSigningCore(env, sessionId, {
     actor,
     origin: 'user',
@@ -144,3 +163,6 @@ export async function adminCancelSigning(env: Env, sessionId: number, actor: num
     reason,
   });
 }
+
+/** @deprecated 用 adminRevertDeal（v6.66.0 起交易撤销覆盖两种单据形态） */
+export const adminCancelSigning = adminRevertDeal;

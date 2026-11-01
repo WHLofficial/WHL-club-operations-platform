@@ -21,7 +21,7 @@ import {
   transferEvidence,
   type ReviewDecision,
 } from './transfers.ts';
-import { openNegotiationSession, voidSigningCore } from './negotiations.ts';
+import { assertExpectedWageReady, openNegotiationSession, voidSigningCore, type OpenSessionOptions } from './negotiations.ts';
 import { findActiveNegotiationSession, findActivePromotionSession, findNegotiationInFlight } from './negotiation-guard.ts';
 import { listingDemandStatements } from './demand-ops.ts';
 import { cpuClubIds } from './growth.ts';
@@ -1012,6 +1012,14 @@ export async function approveTransferDeal(
 ): Promise<{ status: string }> {
   const transfer = await loadTransfer(env.DB, transferId);
   if (!transfer) throw new HttpError(404, '转会单不存在');
+  // v6.66.0 第 3 期：审核通过 = 终局交易。先扣款+过户+收口挂单（不带条款），再开签约谈判——
+  // 卖方阵容里立刻没有这个人，买方立刻有（工资/RC 沿用旧值），谈判只谈合同条款。
+  // 预检放在结算之前：E 算不出来（球员能力数据缺失）时不能先把钱花了。
+  const settleThenOpen = async (opts: OpenSessionOptions = {}) => {
+    await assertExpectedWageReady(env.DB, transfer, opts);
+    await completeTransfer(env, transferId, actor, 'user', review);
+    return openNegotiationSession(env, transferId, actor, review, opts);
+  };
   switch (transfer.type) {
     case 'termination':
       return completeTermination(env, transferId, actor, 'user', review);
@@ -1033,7 +1041,7 @@ export async function approveTransferDeal(
         );
       }
       // F 提交时已定死：开会即快照 E（× 续约加薪区间，规则 4.3.3）
-      const opened = await openNegotiationSession(env, transferId, actor, review, {
+      const opened = await settleThenOpen({
         fixedReleaseFee: transfer.fee ?? undefined,
         renewalRaise: true,
       });
@@ -1053,7 +1061,7 @@ export async function approveTransferDeal(
         );
       }
       // F 提交时已定死：开会即快照 E（不乘续约加薪）
-      const opened = await openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: f || undefined });
+      const opened = await settleThenOpen({ fixedReleaseFee: f || undefined });
       return { status: opened.status };
     }
     case 'match': {
@@ -1076,7 +1084,7 @@ export async function approveTransferDeal(
         );
       }
       // F 提交时已定死：开会即快照 E（匹配不乘续约加薪）
-      const opened = await openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: f || undefined });
+      const opened = await settleThenOpen({ fixedReleaseFee: f || undefined });
       return { status: opened.status };
     }
     default:
@@ -1089,7 +1097,7 @@ export async function approveTransferDeal(
         (transfer.from_club_id === null || (await cpuClubIds(env.DB)).has(transfer.from_club_id))
       ) {
         if (transfer.fee === null) throw new HttpError(409, '转会单缺成交价，数据不完整');
-        return openNegotiationSession(env, transferId, actor, review, { fixedReleaseFee: transfer.fee });
+        return settleThenOpen({ fixedReleaseFee: transfer.fee });
       }
       // §5.4 回原队 A 分支（v6.54.0 步骤 5）：本窗已闹过涨薪的买回 = 跳过签约谈判、纯回归。
       // 本窗额度已耗尽（放着 demand 行），买家按合同行现值带回工资/RC/合同类型 → 直接过户；
@@ -1106,7 +1114,7 @@ export async function approveTransferDeal(
       if (ret.sameWindowDemand !== null) {
         return completeTransfer(env, transferId, actor, 'user', review);
       }
-      return openNegotiationSession(env, transferId, actor, review);
+      return settleThenOpen();
   }
 }
 
