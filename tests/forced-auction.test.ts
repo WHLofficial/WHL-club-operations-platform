@@ -8,6 +8,7 @@ import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
 import { bidDeadline } from '../src/core/market-rules.ts';
 import { loadMarketContext } from '../src/worker/market-context.ts';
+import { closeSilentSessions } from '../src/worker/negotiations.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
@@ -439,6 +440,62 @@ describe('强制拍卖（4.4.5）', () => {
         'SELECT club_id, release_fee, is_active FROM contracts WHERE player_id = 60',
       ),
     ).toEqual({ club_id: fx.buyer, release_fee: 12, is_active: 1 });
+  });
+
+  // v6.67.0 回归：放开后「RC 未定、E 未出」的强拍单可能被静默/关通道收口。不能按占位合同
+  // （wage 0）兜底，否则等于签出工资 0 的合同；默认按成交价当违约金 + 该 RC 的预期工资强约。
+  it('v6.67.0：强拍单没定违约金就静默收口 → 按成交价当违约金、工资取预期值', async () => {
+    const fx = await seedAuction();
+    fx.sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
+       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
+    );
+    const create = await post('/api/admin/forced-auctions', { playerId: 60, askPrice: 6 }, 'tok-admin', fx.env);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach2', fx.env)).status).toBe(201);
+    fx.sqlite.exec(
+      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
+                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
+    );
+    await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
+    const transferRow = sqlGet<{ id: number }>(
+      fx.sqlite,
+      'SELECT id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+
+    const session = sqlGet<{ id: number; release_fee: number | null; expected_wage: number | null }>(
+      fx.sqlite,
+      'SELECT id, release_fee, expected_wage FROM negotiation_sessions WHERE transfer_id = ?',
+      transferRow!.id,
+    );
+    expect(session).toMatchObject({ release_fee: null, expected_wage: null });
+
+    // 买家一直没提交 RC，谈判通道收口（closeAll）→ 按成交价 6m 强约
+    await closeSilentSessions(fx.env, {
+      origin: 'cron_tick',
+      nowIso: '2027-01-01T00:00:00Z',
+      closeAll: true,
+      limit: 50,
+      remindLeadHours: 0,
+    });
+
+    expect(
+      sqlGet<{ status: string; settle_source: string | null }>(
+        fx.sqlite,
+        'SELECT status, settle_source FROM negotiation_sessions WHERE id = ?',
+        session!.id,
+      ),
+    ).toEqual({ status: 'settled', settle_source: 'forced' });
+    const contract = sqlGet<{ wage: number; release_fee: number }>(
+      fx.sqlite,
+      'SELECT wage, release_fee FROM contracts WHERE player_id = 60 AND is_active = 1',
+    );
+    expect(contract).toMatchObject({ release_fee: 6 });
+    expect(contract!.wage).toBeGreaterThan(0);
   });
 
   it('v6.60.7：CPU 队强拍无人出价 → 不收下架费、不造解约单，球员留在 CPU 队', async () => {

@@ -1025,6 +1025,22 @@ async function settleAtBaseTerms(env: Env, row: SilentSessionRow): Promise<boole
   const db = env.DB;
   const session = await loadSession(db, row.id);
   if (!session || session.status !== 'active') return false;
+  // v6.67.0：强拍单放开后可能出现「RC 未定、E 未出」就被静默/关通道收口。这时不能按现行合同兜底：
+  // 自由身 / CPU 球员过户时落的是占位合同（wage 0、signed_at NULL），按它强约会签出工资 0 的合同。
+  // 默认口径 = 成交价当违约金（与本版之前「定死成成交价」一致）、工资取该违约金的预期值。
+  if (session.release_fee === null) {
+    const transfer = await loadTransfer(db, session.transfer_id);
+    if (transfer?.type === 'forced_auction' && transfer.fee !== null && transfer.fee > 0) {
+      const player = await loadPlayerFacts(db, session.player_id);
+      if (player && player.ca !== null && player.pa !== null && player.age !== null) {
+        const ctx = await loadNegotiationContext(db);
+        const level = abilityLevel(player.ca, player.pa, player.age, ctx.youngBlendAge);
+        const e = expectedWage(level, transfer.fee, ctx.wageParamA, ctx.wageParamB, ctx.wageParamC);
+        await settleActiveSession(env, { ...session, release_fee: transfer.fee }, e, 'forced', null, null);
+        return true;
+      }
+    }
+  }
   const contract = await db
     .prepare(`SELECT wage FROM contracts WHERE player_id = ? AND is_active = 1`)
     .bind(session.player_id)
