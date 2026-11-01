@@ -101,6 +101,44 @@
 
 ---
 
+## v6.67.0 · 强制拍卖放开新违约金 + 球员库下方翻页条（2026-11-02）
+
+**状态**：**已实现并本地验收（2026-11-02），待 owner 下令上线**——零迁移；上线前生产迁移现状已到 `0088`，无需 apply 任何迁移。上线后还须跑一次数据修复（`scripts/prod-20261102-forced-rc-open/`），把三笔在途强拍单拉回「定违约金」这一步。
+
+**缘起**：owner 2026-11-02 连问两事——「现在强制拍卖成交方不能自定违约金吗？？？」（生产实测三笔强拍单 transfer 139/140/141 的会话 `release_fee` 被写死成成交价 28/15/10，买家只能谈工资）与「强拍玩家队的球员，新违约金跟普通转会的一致，如果是 CPU 队或自由身，则可以自由定」；再补一句口径收敛「或者说有旧合同的就按旧合同算上下限，没有的就自由，你看哪种实现合适」。第二件事：「翻页按钮不仅在上面有，也得在下面复制一份」。
+
+**裁决（grilling 2026-11-02）**：
+
+- Q1 版本：v6.66.0 / v6.66.1 已上线并占用号段 ⇒ 定 **v6.67.0**（minor：强拍单的违约金从「定死」变成买方自定）。
+- Q2 分档依据：**按「过户前」有没有合同**，不按卖方是 CPU 还是自由身——`releaseFeeBounds` 的入参本来就是旧 RC，没基准就没法算，自由是自然兜底；且生产 48 名 CPU 球员 0 份 active 合同、自由身球员也无合同，与「按卖方类型」在数据上等价；`cpuClubIds` 在 `src/worker/growth.ts:306`，跨模块引用有环。
+- Q3 自由定的边界：**下限 1、上限不设**；「高价成交 + 低 RC」两头获利写成已知风险（`expectedWage = a × level^b × RC^c`，`src/worker/negotiation-secret.ts:1-3`，随 RC 单调升，仍是一道经济刹车）。
+- Q4 在途单怎么救：**不清 `release_fee`**（`settleActiveSession` 的兜底是 `session.release_fee ?? TRAINEE_RELEASE_FEE`，清 F 会把违约金落成 5m），只清 `expected_wage`，前端把「F 有值、E 为空」当「预填但未确认」，回到第一步。
+- Q5 前端第一步判据**只对 `forced_auction` 放宽**：普通转会仍是 `releaseFee === null`，避免把「F 已定、等工资」的普通单错误拉回第一步。
+- Q6 新开的强拍单若关窗前没定 RC：与普通转会一致，关窗 409 逼谈（不按成交价兜底）。
+- Q7 审核队列文案：match 摘要补「（原 Xm）」，旧违约金用 `newReleaseFee − diff` 反算，不改差额口径、不改服务端 payload。
+- Q8 期 B 翻页条：**不做 sticky**（视口底部已被对比收集栏占用），紧贴表格末尾；独立提交，与期 A 同一次 push。
+
+**交付**：
+
+1. `src/worker/bypass.ts`：审核通过分支删掉 `forced_auction && (from_club_id === null || cpuClubIds(...))` → `settleThenOpen({ fixedReleaseFee: transfer.fee })`，强制拍卖统一走不带固定 F 的开会路径。
+2. `src/worker/negotiations.ts`：新增导出 `rcBoundsFor(transfer, liveReleaseFee)`（快照 `contract.release_fee` → 现行合同行 → `null`）；`submitReleaseFee` 删掉「无现行合同 → 409」与 `releaseFeeBounds(contract.release_fee ?? 0)`；`SESSION_COLS` 增 `t.pre_settle_snapshot AS transfer_snapshot`，列表 DTO 的 `rcBounds` 与提交闸同源。
+3. `src/worker/transfers.ts`：`parsePreSettleSnapshot` 入参放宽成 `Pick<TransferRow, 'pre_settle_snapshot'>`，供上面两处复用。
+4. `web/src/lib/api.ts`：`TransferType` 联合 + `NegotiationSession.transfer.type` 收窄。
+5. `web/src/pages/market/desk/NegotiationsSection.tsx`：`needsReleaseFee()`；徽标 / 开场文案 / 第一步切换三处同源；`ReleaseFeeStep` 预填 F、`rcBounds === null` 时提示「可自由定（整数 m，下限 1）」。
+6. `web/src/pages/admin/MarketPage.tsx`：`bypassSummary` 导出 + match 摘要「（原 Xm）」。
+7. `web/src/pages/PlayersLibrary.tsx` + `web/src/styles.css`：`pagerBar` 上下各一份，`.lib-bar-bottom` 只加外边距。
+8. `scripts/prod-20261102-forced-rc-open/`：预检 / 应用（只 `SET expected_wage = NULL`，WHERE 限 `transfer_id IN (139,140,141)` 且 `type='forced_auction'`）/ 回读 / README（含回滚 SQL 按原值 4.66 / 2.73 / 2.27 写回）。
+9. `package.json` 6.66.1 → 6.67.0。
+10. 评审补丁（`settleAtBaseTerms`，`src/worker/negotiations.ts`）：「RC 未定、E 未出」的强拍单被静默 / 关通道收口时，先把成交价当默认违约金、工资取该 RC 的预期值——否则会按占位合同（`wage = 0`）签出工资 0 的合同，RC 还会被兜底成 5m。
+
+**用例**：`tests/forced-auction.test.ts` 两条旧断言改新口径（CPU / 自由身单会话 `{releaseFee: null, expectedWage: null, rcBounds: null}`，提交 12 / 8 直接成约，最终合同 RC 同值）+ 新增「真实俱乐部球员强拍按过户前合同定」（player 46 种子 RC=20 ⇒ 区间 `[10,30]`，`fee: 9` → 400、`fee: 30` → 通过）；`web/src/pages/market/desk/NegotiationsSection.test.tsx` 两条（强拍在途单回第一步 + 预填 + 「可自由定」；普通转会区间提示不变）；`web/src/pages/admin/MarketPage.summary.test.tsx` 两条（「新违约金 3.00m（原 1.00m） > 出价 2.00m，回收差额 2.00m」+ 缺字段退化成「（原 —）」）；`web/src/pages/PlayersLibrary.test.tsx` 分页条两条用例改 `getAllBy*`（两份、下方那份在 `.lib-bar-bottom` 内、点下方也能翻页）。变异靶：把 `needsReleaseFee` 的 `forced_auction` 条件去掉 → 强拍在途单用例必红；把 `rcBoundsFor` 的快照优先级去掉（直接读现行合同）→ 真实俱乐部用例必红（买方占位合同 `release_fee = 0` ⇒ 区间变 `[1,10]`，`fee: 30` 会 400）。
+
+**验收（实测）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **185 文件 / 2,966 例**全绿（v6.66.1 基线 184 / 2,960）；定向 `tests/forced-auction.test.ts` 17 例、`NegotiationsSection.test.tsx` + `ListingsBidsSection.test.tsx` 33 例、`PlayersLibrary.test.tsx` 37 例、新增 `MarketPage.summary.test.tsx` 2 例全绿；`npm run build` 通过。判级 **minor**。测试计划 `docs/test-plans/v6.67.0-forced-rc.md`。
+
+**已知边界**：自由定没有上限，「高价成交 + 低违约金」可以两头获利（裁决 Q3 记为已知风险）；快照只覆盖 `0088` apply（2026-11-01T14:50Z）之后成交的单，更早的在途单回落现行合同行——若该行已归买方且是占位合同（`release_fee = 0`），会得到 `[1,10]` 而不是自由定，生产现存三笔因球员无合同行而落 `null`，不受影响；审核队列的「原 Xm」是反算值，`diff` 字段缺失时显示「（原 —）」；买入方一直不提交违约金、谈判被静默 / 关通道收口时，默认按成交价当违约金 + 该 RC 的预期工资强约（评审补丁），不再按占位合同签出工资 0。
+
+---
+
 ## v6.65.2 · 签约谈判区每条会话可折叠（2026-10-31）
 
 **状态**：**已上线（2026-10-31）**——push `eaaa3e0..a18b214`，生效 Version `77daa2c2-cb76-4275-b47a-46bdcffae23a` @2026-10-31T15:42:26Z（零迁移、零生产写）。上线回读：health 200；入口 `assets/index-CvIvlf9d.js` 版本串 `6.65.2`×1；谈判分包 `assets/MarketDeskPage-DZWzntg-.js` 含「上次报价 / 静默还剩 / 有新反馈 / 即将作废 / whl-nego-fold-v1」。**生产迁移现状：已到 `0087`**。

@@ -4,6 +4,29 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.67.0] · 强制拍卖放开新违约金 + 球员库下方翻页条（2026-11-02）
+
+**Changed**
+
+- **强制拍卖与普通转会同一口径**：成交后不再把新违约金定死成成交价。`src/worker/bypass.ts` 审核通过分支删掉 `forced_auction`（卖方为自由身或 CPU 队）→ `settleThenOpen({ fixedReleaseFee: transfer.fee })` 那段，强制拍卖改走不带 `fixedReleaseFee` 的开会路径（其余四类的固定口径不变）；会话落 `release_fee = NULL`，买家在签约谈判第一步自己定违约金。
+- **上下限基准改成「过户前」的合同**：新增 `rcBoundsFor(transfer, liveReleaseFee)`（`src/worker/negotiations.ts`），优先读 `transfers.pre_settle_snapshot` 里的 `contract.release_fee`——v6.66.0 第 3 期起审核通过即过户，此时 `contracts` 行已归买方，不能当基准；快照缺失（迁移 `0088` 之前开出的在途单）才回落现行合同行；两者都没有 ⇒ 返回 `null` = 自由定（下限 1、上限不设）。`submitReleaseFee` 与 `GET /api/negotiations?mine=1` 的 `rcBounds` 用同一份函数，不会出现「DTO 给区间、提交却不校验」。
+- **修掉「球员没有现行合同 → 409 数据不完整」的死路**：自由身 / CPU 队球员本就没有现行合同，旧实现靠 `fixedReleaseFee` 绕过这道闸；放开后按「无基准 = 自由定」处理。
+- **前端第一步判据收窄**：`needsReleaseFee(s)` = `releaseFee === null || (transfer.type === 'forced_auction' && expectedWage === null)`——普通转会行为不变；强制拍卖即使 F 有值、只要 E 还没确认也回到第一步，并把 F 预填进输入框（在途单清掉 E 后即可就地重定）。`rcBounds === null` 时提示改「可自由定（整数 m，下限 1）」，阶段徽标与开场文案同步。
+- `web/src/lib/api.ts`：`NegotiationSession.transfer.type` 从 `string` 收窄成 `TransferType` 联合（`transfer | free_agent | match | forced_auction | rc_change | promotion | termination`）。
+- **审核队列补旧违约金**：`web/src/pages/admin/MarketPage.tsx` 的 match 摘要用 `newReleaseFee − diff` 反算并渲染「（原 Xm）」（payload 里没有 `oldReleaseFee`；反算对历史行同样成立），只改文案、差额口径不动。
+- **球员库翻页条复制到列表下方**：`web/src/pages/PlayersLibrary.tsx` 抽出 `pagerBar` 元素，表格上方与列表结束各挂一份（下方包 `.lib-bar lib-bar-bottom`）；`web/src/styles.css` 加 `.lib-bar-bottom`，不做 sticky——视口底部已被对比收集栏占用。
+- 版本 6.66.1 → 6.67.0，零迁移。
+
+**Fixed**
+
+- **强拍单「没定违约金就被静默收口」会签出工资 0 的合同**（评审捡出）：放开后会话可以停在「RC 未定、E 未出」，而 `closeSilentSessions` 对已完成单的兜底是「按现行合同工资强约」——自由身 / CPU 球员过户时落的是占位合同（`wage = 0`、`signed_at = NULL`），按它强约会白签一份工资 0 的合同，RC 还会被 `session.release_fee ?? TRAINEE_RELEASE_FEE` 落成 5m。`settleAtBaseTerms`（`src/worker/negotiations.ts`）改为：强制拍卖单 RC 未定时先把成交价当默认违约金、工资取该违约金的预期值（`expectedWage(level, fee, …)`），与本版之前「定死成成交价」的默认结果一致。
+
+**数据修复（一次性，上线回读通过后执行）**
+
+- `scripts/prod-20261102-forced-rc-open/`（预检 / 应用 / 回读 / README）：把 2026-11-01T13:00Z 成交后进入签约谈判的三笔强制拍卖单（transfer 139 Bastoni → 慕尼黑1860 28m、140 Pulisic → 里昂 15m、141 Reijnders → 曼联 10m）的 `negotiation_sessions.expected_wage` 清空，让三家回到第一步自己定违约金。**只清 E、不清 F**：`settleActiveSession` 的兜底是 `session.release_fee ?? TRAINEE_RELEASE_FEE`，清 F 会把违约金落成 5m；F 留着正好当预填。
+
+**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **185 文件 / 2,966 例**全绿（v6.66.1 基线 184 / 2,960）；`npm run build` 通过。判级 **minor**（新增用户可见能力：强拍单的违约金由买方自定）。测试计划 `docs/test-plans/v6.67.0-forced-rc.md`。
+
 ## [v6.66.1] · 消费中心候选放开到本队全部球员（含训练营）（2026-11-02）
 
 **Added**
