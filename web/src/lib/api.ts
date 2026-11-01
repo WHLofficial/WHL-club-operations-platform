@@ -2761,6 +2761,8 @@ export interface ShopSquadStatePlayer {
   name: string;
   number: number | null;
   growable: boolean;
+  /** 名单桶（normal / listed / trainee…）：只用于下拉分组 */
+  status: string;
   pa: number | null;
   position: string | null;
   /** 热区，定长 4 位（下标 = 槽号 - 1，主位在前，空槽 null） */

@@ -35,8 +35,9 @@ app.get('/shop/squad-state', async (c) => {
   if (!club) throw new HttpError(403, '先绑定俱乐部再逛消费中心');
   const players = await c.env.DB
     .prepare(
-      `SELECT id, display_name, name, number, growable, pa, position, game_attrs FROM players
-       WHERE club_id = ? AND status IN ('normal', 'listed') ORDER BY number IS NULL, number, id`,
+      // v6.66.1：候选放开到本队全部名单桶（含训练营）；status 只用于前端分组，不参与过滤
+      `SELECT id, display_name, name, number, growable, pa, position, game_attrs, status FROM players
+       WHERE club_id = ? ORDER BY number IS NULL, number, id`,
     )
     .bind(club.id)
     .all<{
@@ -48,6 +49,7 @@ app.get('/shop/squad-state', async (c) => {
       pa: number | null;
       position: string | null;
       game_attrs: string | null;
+      status: string;
     }>();
   const ids = players.results.map((p) => p.id);
   const granted = new Map<number, { slot: number; kind: 'silver' | 'gold'; psid: number }[]>();

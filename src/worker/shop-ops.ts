@@ -216,6 +216,8 @@ export interface SquadStatePlayer {
   name: string;
   number: number | null;
   growable: boolean;
+  /** 名单桶（normal / listed / trainee…）：仅作前端分组，不参与任何资格判断 */
+  status: string;
   pa: number | null;
   position: string | null;
   /** 热区，定长 4 位（下标 = 槽号 - 1，主位在前，空槽 null） */
@@ -230,7 +232,7 @@ export interface SquadStatePlayer {
 }
 
 export function squadStateOf(
-  row: { id: number; display_name: string | null; name: string; number: number | null; growable: number; pa: number | null; position: string | null; game_attrs: string | null },
+  row: { id: number; display_name: string | null; name: string; number: number | null; growable: number; status: string; pa: number | null; position: string | null; game_attrs: string | null },
   grantedRows: { slot: number; kind: PlaystyleKind; psid: number }[],
 ): SquadStatePlayer {
   const core = { ...row, club_id: null } as unknown as PlayerCoreRow;
@@ -258,6 +260,7 @@ export function squadStateOf(
     name: row.display_name ?? row.name,
     number: row.number,
     growable: row.growable === 1,
+    status: row.status,
     pa: row.pa,
     position: row.position,
     zones: zoneSlots,

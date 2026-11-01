@@ -199,6 +199,13 @@ function ShopContent({
   );
 }
 
+// v6.66.1：下拉按名单桶分组（服务端候选已放开到本队全部球员）；未知状态落「其他」，空组不渲染
+const PLAYER_GROUPS: { status: string; label: string }[] = [
+  { status: 'normal', label: '一线队' },
+  { status: 'trainee', label: '训练营' },
+  { status: 'listed', label: '挂牌中' },
+];
+
 // 每类商品共用的球员下拉：value 存内部 id
 function PlayerSelect({
   players,
@@ -212,14 +219,23 @@ function PlayerSelect({
   filter?: (p: ShopSquadStatePlayer) => boolean;
 }) {
   const list = filter ? players.filter(filter) : players;
+  const known = new Set(PLAYER_GROUPS.map((g) => g.status));
+  const groups = [
+    ...PLAYER_GROUPS.map((g) => ({ ...g, items: list.filter((p) => p.status === g.status) })),
+    { status: 'other', label: '其他', items: list.filter((p) => !known.has(p.status)) },
+  ].filter((g) => g.items.length > 0);
   return (
     <select value={value} onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}>
       <option value="">选球员…</option>
-      {list.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.number !== null ? `#${p.number} ` : ''}
-          {p.name}
-        </option>
+      {groups.map((g) => (
+        <optgroup key={g.status} label={g.label}>
+          {g.items.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.number !== null ? `#${p.number} ` : ''}
+              {p.name}
+            </option>
+          ))}
+        </optgroup>
       ))}
     </select>
   );
