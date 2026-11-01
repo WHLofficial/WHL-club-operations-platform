@@ -3137,6 +3137,13 @@ table.matches-table-narrow .rating-badge {
   margin-bottom: 12px;
 }
 
+/* 列表下方的第二份翻页条（v6.67.0 期 B）：只有翻页条、没有摘要，
+   所以压掉自身下边距、与列表拉开 12px；翻页条靠 .library-pager 的 margin-left:auto 贴右 */
+.lib-bar-bottom {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
 /* 球员库表格单元格不折行（v3.2.1）：12 列挤在约 980px 里时，「Baseline Utd」按空格断行、
    「2金7银」按 CJK 任意断行，一行数据被撑成三四行。
    只限球员库 —— 管理员页的表格靠折行塞长文案，不动。th 早已是 nowrap（见上方表格段）。

@@ -225,6 +225,21 @@ export default function PlayersLibrary() {
   const busy = libQuery.isFetching;
   const canPrev = pageIdx > 1 && !busy;
   const canNext = (pageIdx < pageCount || (libQuery.hasNextPage && !busy)) && !busy;
+  /* 翻页条元素只建一次、上下各挂一份（v6.67.0 期 B）：表格上方贴摘要条右侧、表格下方
+     单独一行贴右。元素对象复用是安全的——React 会各自挂载成独立节点，不会 remount。 */
+  const pagerBar = (
+    <div className="library-pager">
+      <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => setPageIdx((p) => p - 1)}>
+        上一页
+      </button>
+      <span className="muted">
+        {`第 ${pageIdx} 页 · 已加载 ${loadedCount} 名 · ${libQuery.hasNextPage ? '还有更多' : '已到末页'}`}
+      </span>
+      <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
+        下一页
+      </button>
+    </div>
+  );
 
   // ---- 对比勾选派生（v6.34.0 步骤 7）----
   const compareFull = comparePicks.length >= COMPARE_MAX;
@@ -621,17 +636,7 @@ export default function PlayersLibrary() {
                   ))}
                 </div>
               )}
-              <div className="library-pager">
-                <button className="btn btn-sm" type="button" disabled={!canPrev} onClick={() => setPageIdx((p) => p - 1)}>
-                  上一页
-                </button>
-                <span className="muted">
-                  {`第 ${pageIdx} 页 · 已加载 ${loadedCount} 名 · ${libQuery.hasNextPage ? '还有更多' : '已到末页'}`}
-                </span>
-                <button className="btn btn-sm" type="button" disabled={!canNext} onClick={goNext}>
-                  下一页
-                </button>
-              </div>
+              {pagerBar}
             </div>
 
             {rows === null ? (
@@ -889,6 +894,10 @@ export default function PlayersLibrary() {
                 {!narrow && <StickyScrollbar target={tableWrapRef} />}
               </>
             )}
+
+            {/* 列表下方的翻页条（v6.67.0 期 B）：翻到长列表底部不必再滚回表头。
+                不做 sticky——视口底已经被对比收集栏占着，两条吸底会互相压住 */}
+            {rows !== null && rows.length > 0 && <div className="lib-bar lib-bar-bottom">{pagerBar}</div>}
 
             {/* 对比收集栏（v6.34.0 步骤 7，spec §9）：sticky 吸底、0 人不渲染；
                 窄屏压一行（姓名只留姓、清空走 chips 上的 ×，不出「清空」文字按钮）。

@@ -326,25 +326,34 @@ describe('分页条（游标式）', () => {
     const user = open();
     await screen.findByRole('link', { name: /Šeško/ });
 
-    expect(screen.getByText('第 1 页 · 已加载 2 名 · 还有更多')).toBeTruthy();
-    const next = screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement;
-    expect(next.disabled).toBe(false);
+    // v6.67.0 期 B：翻页条上下各一份（表头右侧 + 列表末尾），文案与禁用态同源
+    expect(screen.getAllByText('第 1 页 · 已加载 2 名 · 还有更多').length).toBe(2);
+    const nexts = screen.getAllByRole('button', { name: '下一页' }) as HTMLButtonElement[];
+    expect(nexts.length).toBe(2);
+    expect(nexts.every((b) => !b.disabled)).toBe(true);
+    expect(nexts[0].closest('.lib-bar-bottom')).toBeNull();
+    expect(nexts[1].closest('.lib-bar-bottom')).not.toBeNull();
 
-    await user.click(next);
-    await waitFor(() => expect(screen.getByText('第 2 页 · 已加载 4 名 · 还有更多')).toBeTruthy());
+    // 点列表末尾那一份也真的翻页——两份共用同一份 pageIdx 状态
+    await user.click(nexts[1]);
+    await waitFor(() => expect(screen.getAllByText('第 2 页 · 已加载 4 名 · 还有更多').length).toBe(2));
     expect(lastListQuery()).toContain('cursor=c1');
-    expect((screen.getByRole('button', { name: '上一页' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getAllByRole('button', { name: '上一页' }) as HTMLButtonElement[]).every((b) => !b.disabled),
+    ).toBe(true);
   });
 
   it('nextCursor 为 null ⇒ 显示「已到末页」，下一页按钮禁用（不再白发请求）', async () => {
     const user = open();
     await screen.findByRole('link', { name: /Šeško/ });
 
-    expect(screen.getByText('第 1 页 · 已加载 2 名 · 已到末页')).toBeTruthy();
-    expect((screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText('第 1 页 · 已加载 2 名 · 已到末页').length).toBe(2);
+    const nexts = screen.getAllByRole('button', { name: '下一页' }) as HTMLButtonElement[];
+    expect(nexts.length).toBe(2);
+    expect(nexts.every((b) => b.disabled)).toBe(true);
 
     const before = apiMock.mock.calls.filter((call) => String(call[0]).startsWith('/api/players?')).length;
-    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await user.click(nexts[1]);
     const after = apiMock.mock.calls.filter((call) => String(call[0]).startsWith('/api/players?')).length;
     expect(after).toBe(before);
   });
