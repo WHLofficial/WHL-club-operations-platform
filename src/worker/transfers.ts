@@ -716,6 +716,19 @@ export async function completeTransfer(
       )
       .bind(tax, transferId),
   );
+  // v6.66.0：成交是挂单的终态之一——成功路径过去不回写 listings，挂单永远钉在 pending_review，
+  // findInFlight 把球员当「还在市场流程里」，续约/解约/海捞/上调全被一票否决（生产 2026-11-01
+  // 有 14 条这样的脏行）。这里与失败路径（negotiations.ts voidSigningCore、rejectTransfer）对齐收口。
+  if (listingId !== null) {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE listings SET status = 'delisted', deadline_note = '已成交'
+            WHERE id = ? AND status IN ('listed', 'bidding', 'matched_pending', 'pending_review')`,
+        )
+        .bind(listingId),
+    );
+  }
   // A 分支 · 非直拒终局（谈崩/低还价/过期）→ 买回计一次 expired 入**新段**（§5.4 第 2 条）。
   // UNIQUE(player_id, season, window_seq) 不允许同窗第二行，故就地把原行重锚成 expired：
   // resolved_at 取本单 completed_at（必须排在状态 UPDATE 之后读同一批写好的值；段计数是

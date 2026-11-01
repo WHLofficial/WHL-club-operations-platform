@@ -126,6 +126,26 @@
 
 ---
 
+## v6.66.0 · 审核通过即过户：成交挂单收口 → 判据替换 → 顺序翻转（2026-11-01）
+
+**状态**：**进行中**——第 1/3 期已实现并本地验收（2026-11-01），第 2、3 期待做；未 push、未部署。零迁移（第 3 期会加迁移 `0088`）。**生产迁移现状仍到 `0087`**。
+
+**缘起**：owner 2026-11-01 连问两事——「为什么挂牌截止之后变成待审核了（即使是审核之后、谈判之后）？」与「应当在谈判之前球员就过户、钱就划转，要考虑到谈判不可能导致球员退回原队的，不用防这点」。经 brainstorming + grilling 十问定案（裁决 D1–D10 见 `memory/design-transfer-before-negotiation.md`），owner 先要求「先落文档，然后 brainstorming，然后 grilling」，再下令「按顺序开工，并分配版本号」，随后把三期收敛为**一个版本号** v6.66.0（三个提交）。
+
+**第 1 期交付（已完成）**
+
+- `src/worker/transfers.ts`：`completeTransfer` 成功批次补挂单收口 `UPDATE listings SET status = 'delisted', deadline_note = '已成交' WHERE id = ? AND status IN ('listed','bidding','matched_pending','pending_review')`，幂等；`listingId` 取自 `listingIdFromTransfer`，`match:<id>` 形态仍由 `src/worker/activations.ts:296` 自行收口。
+- `src/worker/bypass.ts`：`findInFlight` 返回类型加 `'negotiation'`，SQL 为 `s.status = 'active' AND t.status <> 'signing'`；`ensureNotInFlight` 补对应用文案。
+- `tests/listing-closeout.test.ts`（2 例）：成交后挂单终态 + 球员/合同归属；谈判段的 signing 放行 / completed+active 拦截 / settled 放行。
+- `scripts/prod-20261101-listing-closeout/`：`01-precheck.sql` / `02-apply.sql` / `03-verify.sql` / `README.md`，生产预检 20 条 = 14 `completed` + 6 `signing`。
+- `docs/test-plans/v6.66.0-listing-closeout.md`、`memory/design-transfer-before-negotiation.md`。
+
+**验收（第 1 期实测）**：`npm run typecheck` 三份全清；`npm test` **181 文件 / 2,939 例**全绿（基线 180 / 2,937）；变异三靶全红。判级 **minor**。
+
+**同步在生产之外的前提**：生产 20 条 `pending_review` 中 14 条联单 `completed`（球员已在买方、钱已划转），6 条仍 `signing`；修复脚本只碰前者，`signing` 的等本版新路径自然收口。
+
+---
+
 ## v6.65.4 · 谈判桌收口：已结束的谈判折叠区 + 球员要求单卡可折叠（2026-11-01）
 
 **状态**：**已开发，待 owner 下令上线**（2026-11-01）。零迁移、零生产写；生产迁移现状仍到 `0087`。

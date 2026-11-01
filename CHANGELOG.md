@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.66.0] · 审核通过即过户：成交挂单收口（第 1/3 期，进行中）
+
+**Fixed**
+
+- **成交的挂牌不再永远停在「待审核」**：`completeTransfer` 的成功批次里补一条 `UPDATE listings SET status = 'delisted', deadline_note = '已成交'`（状态白名单 `listed` / `bidding` / `matched_pending` / `pending_review`），与联单状态、球员归属、合同归属同批提交。此前只有失败路径（审核驳回、谈判作废、激活匹配留人）会收口挂单，成交路径从不回写，生产因此积了 20 条 `pending_review`，其中 14 条联单早已 `completed`、球员早已在买方。
+- **被挂单卡死的球队恢复操作权**：`findInFlight`（`src/worker/bypass.ts`）把 `pending_review` 当「在途」判据，于是这 14 名已过户球员的续约、解约、海捞、上调全部被拒（「这名球员已经有一单在市场流程里了」）。收口后自动解封。
+- 一次性数据修复脚本 `scripts/prod-20261101-listing-closeout/`（预检 / 应用 / 回读 / README），只改 `listings` 一个字段，按 `transfers.idempotency_key = 'listing:<id>'` 关联已成交联单；生产 14 行可修、6 行仍在 `signing`（等它们自行成交）。
+
+**Added**
+
+- `findInFlight` 新增 `'negotiation'` 段：球员有 `status='active'` 的谈判会话、且其联单已不在 `signing` 时也判为在途，文案「这名球员已经成交，还有一场签约谈判没结束，等它结束再操作」。今天零行为变化（所有 active 会话都挂在 `signing` 上），是为「成交即过户、条款后谈」预埋的闸。
+
+**Changed**
+
+- 设计定稿 `memory/design-transfer-before-negotiation.md`：把「扣钱 + 挪人」整体提前到审核通过，谈判只谈合同条款；同版本分三期落地（本版第 1 期只做收口与预埋闸，不改结算顺序）。
+
+**验收（第 1 期）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **181 文件 / 2,939 例**全绿（v6.65.4 基线 180 / 2,937，+2）；变异验证三靶全红（删收口语句 / 去掉 `<> 'signing'` / 去掉 `s.status = 'active'`）。判级 **minor**。测试计划 `docs/test-plans/v6.66.0-listing-closeout.md`。**生产迁移现状：仍到 `0087`**（本版零迁移）。
+
 ## [v6.65.4] · 谈判桌收口 + 入口 HTML 不缓存（2026-11-01）
 
 **Added**

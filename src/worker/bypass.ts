@@ -46,7 +46,7 @@ interface OwnPlayerRow {
 }
 
 // 球员已在市场/审核流程里的一票否决（4.4.10「正在被挂牌、解约的球员不可更改违约金」同源）
-async function findInFlight(db: D1Database, playerId: number): Promise<'listing' | 'pending' | null> {
+async function findInFlight(db: D1Database, playerId: number): Promise<'listing' | 'pending' | 'negotiation' | null> {
   const listing = await db
     .prepare(
       `SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'matched_pending', 'pending_review') LIMIT 1`,
@@ -59,6 +59,18 @@ async function findInFlight(db: D1Database, playerId: number): Promise<'listing'
     .bind(playerId)
     .first<{ id: number }>();
   if (pending) return 'pending';
+  // v6.66.0：过户外加「签约谈判在途」。今天所有 active 会话都还挂在 transfers.status='signing' 上，
+  // 各调用点另有专门的 signing 闸，所以这里用 `<> 'signing'` 把既有口径让给旧判据，只为
+  // 「单据已结算、条款还没谈定」那一步兜底——否则球员过户后在买方是 normal，全仓没有任何闸
+  // 挡住他再挂牌/再激活，谈定的合同会落到已经转走的球员身上。
+  const negotiation = await db
+    .prepare(
+      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
+        WHERE t.player_id = ? AND s.status = 'active' AND t.status <> 'signing' LIMIT 1`,
+    )
+    .bind(playerId)
+    .first<{ id: number }>();
+  if (negotiation) return 'negotiation';
   return null;
 }
 
@@ -67,6 +79,7 @@ export async function ensureNotInFlight(db: D1Database, playerId: number): Promi
   const kind = await findInFlight(db, playerId);
   if (kind === 'listing') throw new HttpError(400, '这名球员已经有一单在市场流程里了，等它结束再操作');
   if (kind === 'pending') throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
+  if (kind === 'negotiation') throw new HttpError(400, '这名球员已经成交，还有一场签约谈判没结束，等它结束再操作');
 }
 
 export type SeaSignStage = 'window' | 'ownership' | 'status' | 'banned' | 'listing' | 'pending' | 'signing' | 'ok';
