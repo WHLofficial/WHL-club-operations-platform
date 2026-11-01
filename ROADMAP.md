@@ -122,6 +122,32 @@
 
 ---
 
+## v6.65.3 · 消费中心资金口径统一（现金 → 可支配 + 券）：RB 莱比锡「徽章提交没反应」查证与全消费域收口（2026-11-01）
+
+**状态**：**已开发、本地提交，待 owner 下令上线**（2026-11-01；版本号由 owner 指定 6.65.3——初拟 6.66.0 后改）。零迁移、零生产写。**生产迁移现状：已到 `0087`**。
+
+**缘起**：RB 莱比锡（club 112172）反馈「消费中心-徽章的提交按钮点了没反应」。生产只读查证坐实不是按钮缺陷：31 人逐人复算 squad-state 口径均可买 22–34 项；时刻表 `consumption` 进行中、窗口开着（transfer_promotion 11-04 未开始与本单无关）；confirm 链路正常（audit_log 3411–3414 显示该教练 11-07–11-09 连发 4 笔 12m 角色单全部到达服务端）。**真因是口径分裂**——消费域（六个商品类 + 球场扩建/升级）守卫只看裸现金余额，而转会域全线用 `availableBalance` = 余额 − 现行冻结 + 在途收入额度（`src/worker/ledger.ts:314`）。该队现金 0.35m + 券 0.45m、在途收入额度实算 **44m** ⇒ 可支配 44m+，整个消费中心却事实死亡。**失败反馈不可见放大误判**：守卫不过时工单「先落库再删除」，券参与时审计还被 `changes()>0` 守卫连带跳过，前端只有 3 秒 toast（`web/src/lib/toast.tsx:22`）。
+
+**裁决（grilling 2026-11-01，owner 全取推荐项）**：① 球场域同批统一「可支配 + 券」，优先扣券；② 冠名退约维持无资金守卫（赔款是合同义务、允许透支，负数由后续收入回补），确认弹窗提前亮赔款金额；③ 商品区顶部改拆解「可支配 X（现金 Y · 券 Z · 含在途收入额度 W，冻结占用 H）」，数据扩 `/api/me/club`；④ 失败反馈本轮只做最小版（文案带差额数字），工单 `failed` 状态留痕留待远期；⑤ 接受消费扣费把现金余额花成负（授信消费，与转会域同构；提交即扣费 ⇒ 授信缩水无追溯问题）；⑥ 版本 6.65.3。
+
+**交付**：
+1. `src/worker/shop-ops.ts`：`createClubOrder` 新增可支配预检（INSERT 前 `balanceSnapshot`，不够直接 400 带差额，不再落单+删单）；批内现金守卫换 `creditLineGuard` 同款公式（`balance − held + creditLine >= cash`），券守卫保留并保持「首句守卫失败 = 全批空转」；竞态兜底路径同步新文案。
+2. `src/worker/stadium-ops.ts`：`payAndRefund` 预检换可支配口径（文案带差额与拆解）；新 `cashMoveGuard` = 券够 AND 可支配够（券检查必须留在首句，否则现金单落、券链全断），三处现金流水（扩建/升档/子设施）接入。
+3. `src/worker/routes/clubs.ts`：`/api/me/club` 响应加 `funds{available,balance,held,creditLine,vouchers}`；球场 build-info 加 `available`；`/api/club/naming/quote` 有约分支加 `terminatePenalty`（`terminatePenaltyOf` 现算）。
+4. `web/src/pages/shop/ShopPage.tsx`：顶部拆解条（funds 缺省回落旧「资金余额」）；`payNote()` 券抵/实付标注接入五卡确认弹窗。
+5. `web/src/pages/shop/venueCards.tsx`：球场卡明示可支配；退约与换约(terminate)确认弹窗亮赔款金额（>0 时）并注明可透支。
+6. 类型：`MyClubOverview.funds`、`MarketMyClub.funds`、`StadiumBuildInfo.available`、`NamingQuoteResponse.terminatePenalty`。
+
+**测试**（计划 `docs/test-plans/v6.65.3-shop-funds-caliber.md`，qa-test-planner 设计）：`tests/shop-orders.test.ts` 新增 TC-F-01–05（授信覆盖可买并扣成负 / 冻结挤占 400 带差额且不落单不留痕 / 授信也不足文案带券抵与还需现金 / 可支配 0 纯券单可买 / 可支配负纯券单仍拒）；`tests/stadium-ops.test.ts` 新增 TC-S-01–03（授信覆盖扩建 / 冻结挤占 400 / 批内券被扣空整批空转）；`tests/market-rounds.test.ts` TC-ROUTE-01 扩 TC-N-01（有约下发 terminatePenalty = max(0,剩窗−1)×窗费×0.3，无约不下发）；`web/src/pages/shop/ShopPage.test.tsx` 新增 TC-W-01–03（拆解条 / 缺省回落 / 确认弹窗券抵 0.45 实付 7.55）；`web/src/pages/shop/venueCards.test.tsx` 新增 2 例（退约确认亮「将赔 2.40M」；键缺失明示「无赔金」）。
+
+**验收（实测）**：`npm run typecheck` 三份 tsconfig 全清；全量 `npm test` **180 文件 / 2,925 例全绿**（v6.65.2 基线 180/2,912，+13 例）；`npm run build` 通过（`index-C6CEu02y.js` 724.23 kB / gzip 228.28 kB）。**变异验证 7 靶全命中**：M1 shop 批内守卫换回裸余额 → TC-F-01 红；M2 **单层（只改批内守卫）不红——预检层仍按 balanceSnapshot 拦；双层同改（预检条件改 `balance + creditLine`）恰 TC-F-02 红**（v6.15.0 纵深防御教训复现）；M3 预检文案去数字 → TC-F-03 红；M4 `payAndRefund` 预检换回裸余额 → TC-S-01 红；M5 `cashMoveGuard` 去掉券检查 → TC-S-03 红；M6 quote 不下发 terminatePenalty → TC-ROUTE-01 红；M7 前端拆解条退化 → TC-W-01 红。判级 **minor**（资金判定规则变更 + 用户可见字段与文案；零迁移、零生产写、零破坏性契约变更）。
+
+**行为变更（上线后须知道）**：① 有出价冻结的队，消费可用额度 = 可支配（冻结部分不可花，以前冻结不影响消费）；② 授信成为消费真实可花的钱，现金可被扣成负、靠卖人完成回正；③ 球场扩建/升级同口径；④ 冠名退约维持可透支但确认弹窗先亮赔款。
+
+**待办**：工单 `failed` 状态留痕（远期，不动工单生命周期）；上线后复测 RB 莱比锡（其可支配 44m+、现金 0.35 的形状可直接验证徽章单可提交）。
+
+---
+
 ## v6.65.1 · 消费中心「角色（职责）」新增下拉永远为空 + 双加号标签双写（2026-10-31）
 
 **状态**：**已上线（2026-10-31）**——owner 下令「发布，但版本号应该是 6.65.1 了」（6.64.6 / 6.65.0 已被其他会话占用），故把本地两枚提交重做（版本标注与测试计划文件名全部改写为 6.65.1）、rebase 到已上线的 v6.65.0（`c98da95`）之上后 push `c98da95..eaaa3e0`（4 枚 = 本版 fix + docs + v6.64.4 补的两枚 docs：测试计划入库与上线记录）。生效 Version **`8c2ef026-7a12-451e-9f40-209ce7bf18fa`** @2026-10-31T14:09:45Z（CF 自动部署，紧随 push 约 1 分钟；零迁移）。上线回读：health 200；线上入口 `assets/index-Bj5ZKHwB.js`（724,203 B）版本串 `6.65.1`×1——**路由懒加载，ShopPage 是独立 chunk，入口 bundle 不含页面代码，页面字符串要查 chunk**；`assets/ShopPage-D1P5r4UG.js`（36,545 B）含修复实现 `[...keys()].filter(n=>n>=1&&n<100).flatMap(...)` ×1、旧写死 `[1,2,3,4,5].flatMap` ×0、`roleLabel` 正则 `/ \+{1,2}$/` ×1；同线还有 v6.65.0 的 `assets/MarketBoardPage-UehjnuBI.js`（「刷新中」「更新于」在场）。**生产迁移现状：已到 `0087`**（本版零迁移、零服务端改动）。
