@@ -96,7 +96,8 @@ async function payAndRefund(
   const vouchers = await voucherBalance(env.DB, clubId);
   const { creditUsed, cash } = splitPayment(cost, vouchers);
   const snap = await balanceSnapshot(env.DB, clubId);
-  const available = round2(snap.available);
+  // balanceSnapshot 已把 available 归到 2 位小数，与 cashMoveGuard 的 ROUND(...,2) 同式（金额按分结算）。
+  const available = snap.available;
   if (available < cash) {
     throw new HttpError(
       400,
@@ -114,15 +115,16 @@ function voucherEnoughGuard(): string {
 }
 
 /** 现金流水的批内守卫（v6.65.3）：券够 + 可支配够（与 payAndRefund 预检同式）。券检查必须留在
- *  批内首句——现金流水排第一，券不足时靠它让全批空转；只留可支配会让现金单落、券链全断。 */
+ *  批内首句——现金流水排第一，券不足时靠它让全批空转；只留可支配会让现金单落、券链全断。
+ *  可支配按 ROUND(...,2) 比较（金额按分结算），与预检的 round2 对齐。 */
 function cashMoveGuard(clubId: number, creditUsed: number, cash: number): { sql: string; params: number[] } {
   const credit = creditLineGuard(clubId);
   return {
     sql:
       `${voucherEnoughGuard()} AND ` +
-      `COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
+      `ROUND(COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
       ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
-      ` + ${credit.sql} >= ?`,
+      ` + ${credit.sql}, 2) >= ?`,
     params: [clubId, creditUsed, clubId, clubId, ...credit.params, cash],
   };
 }
@@ -226,7 +228,7 @@ export async function expandStadium(
   ];
   const outs = await env.DB.batch(statements);
   if ((outs[ledger.length + useVoucher.length + refundVoucher.length]?.meta.changes ?? 0) === 0) {
-    throw new HttpError(409, '扩建落库被拦（座位区间/消费券余额校验未过或并发改动），请重试');
+    throw new HttpError(409, '扩建落库被拦（座位区间/可支配资金/消费券余额校验未过或并发改动），请重试');
   }
   return { cost, creditUsed, cash, refund, capacity: nextCapacity };
 }
@@ -323,7 +325,7 @@ export async function upgradeStadiumTier(
   ];
   const outs = await env.DB.batch(statements);
   if ((outs[ledger.length + useVoucher.length + refundVoucher.length]?.meta.changes ?? 0) === 0) {
-    throw new HttpError(409, '升级落库被拦（档位已被并发改动或消费券校验未过），请重试');
+    throw new HttpError(409, '升级落库被拦（档位已被并发改动或可支配资金/消费券校验未过），请重试');
   }
   return { cost, creditUsed, cash, refund, tier: stadium.tier + 1 };
 }
@@ -427,7 +429,7 @@ export async function upgradeFacilityLevel(
   ];
   const outs = await env.DB.batch(statements);
   if ((outs[ledger.length + useVoucher.length + refundVoucher.length]?.meta.changes ?? 0) === 0) {
-    throw new HttpError(409, '设施升级落库被拦（等级已被并发改动或消费券校验未过），请重试');
+    throw new HttpError(409, '设施升级落库被拦（等级已被并发改动或可支配资金/消费券校验未过），请重试');
   }
   return { cost, creditUsed, cash, refund, level: level + 1 };
 }

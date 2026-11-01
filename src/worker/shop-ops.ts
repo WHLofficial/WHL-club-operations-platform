@@ -651,8 +651,10 @@ export async function createClubOrder(
   const cash = round2(amount - voucherUsed);
   // v6.65.3 可支配预检（与批内守卫同公式）：常见的资金不足在落单前拦下并带差额数字；
   // 批内守卫继续兜「预检后到扣费前」的竞态（授信缩水 / 冻结增加）。
+  // balanceSnapshot 的 available 已是 2 位小数，批内守卫用 ROUND(...,2) 与之同式——
+  // 金额按分结算，REAL 尾差（3.999…）不得把整额单判成不够。
   const snap = await balanceSnapshot(db, opts.clubId);
-  if (round2(snap.available) < cash) {
+  if (snap.available < cash) {
     throw new HttpError(
       400,
       `可支配资金不够：本次还需现金 ${cash.toFixed(2)} m（消费券已抵 ${voucherUsed.toFixed(2)} m），当前可支配 ${round2(snap.available).toFixed(2)} m` +
@@ -672,11 +674,12 @@ export async function createClubOrder(
   // 券语句排批首，且它的守卫同时要求「可支配也够」；现金语句用 changes()>0 串在券后面，
   // 这样不存在「券扣了可支配不够」或反过来的中间态（测试计划 TC-O-003 的最坏交错）。
   // 可支配守卫与 availableBalance 同公式（含预期收入额度），与预检一字同源（creditLineGuard 片段）。
+  // ROUND(...,2) 与预检的 round2 对齐：金额按分结算，浮点尾差不得让「预检过、批内拒」。
   const credit = creditLineGuard(opts.clubId);
   const availableGuardSql =
-    `COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
+    `ROUND(COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
     ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
-    ` + ${credit.sql}`;
+    ` + ${credit.sql}, 2)`;
   const availableGuardParams = [opts.clubId, opts.clubId, ...credit.params];
   const audit = createAuditStatement(db);
   const parts: D1PreparedStatement[] = [];

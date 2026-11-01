@@ -155,7 +155,7 @@ export function FacilityOpsCard() {
       <p className="hint">
         消费券余额 <span className="mono">{info.voucherBalance.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}% + 管理组发放，可抵扣建设与消费工单）· 当前余额{' '}
         <span className="mono">{info.balance.toFixed(2)}</span> M · 可支配{' '}
-        <span className="mono">{info.available.toFixed(2)}</span> M（含在途收入额度，施工守卫口径）· 球场档位开放至 {info.maxOpenTierName ?? `第 ${info.maxOpenTier + 1} 档`} ({info.maxOpenTier + 1})
+        <span className="mono">{(info.available ?? info.balance).toFixed(2)}</span> M（含在途收入额度，施工守卫口径）· 球场档位开放至 {info.maxOpenTierName ?? `第 ${info.maxOpenTier + 1} 档`} ({info.maxOpenTier + 1})
         {!windowOpen && ` · ${CLOSED_BUILD_HINT}。`}
       </p>
 

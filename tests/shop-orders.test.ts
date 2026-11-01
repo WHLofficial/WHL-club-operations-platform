@@ -924,4 +924,15 @@ describe('TC-F 可支配口径（v6.65.3）', () => {
     expect(res.status).toBe(400);
     expect(orderCount(fx)).toBe(0);
   });
+
+  it('TC-F-06 浮点尾差按 2 位小数判够：余额 3.999… 买 4m 不被拦（预检与批内守卫同式）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 3.9999999999999996); // 余额是 REAL 累加，尾差常态
+    seedPlayer(fx, 1, { clubId: 101 });
+    const res = await postBadge(fx); // 4m 全现金：round2 预检与 ROUND(...,2) 守我们都应判够
+    expect(res.status).toBe(201);
+    expect(orderCount(fx)).toBe(1);
+    expect(cashEntries(fx)).toEqual([{ amount: -4 }]);
+    expect(balanceOf(fx, 101)).toBeCloseTo(0, 10);
+  });
 });

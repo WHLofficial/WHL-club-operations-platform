@@ -201,6 +201,14 @@ describe('可支配口径（v6.65.3）', () => {
     expect(sqlAll(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind='stadium_expand'").length).toBe(0);
     expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
   });
+
+  it('TC-S-04 浮点尾差按 2 位小数判够：余额 3.999… 付 4m 扩建不被拦（预检与批内守卫同式）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { balance: 3.9999999999999996, credit: 0 });
+    const r = await expandStadium(fx.env, 1, 4000, 1); // 4m 全现金
+    expect(r).toMatchObject({ cost: 4, creditUsed: 0, cash: 4 });
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBeCloseTo(0, 10);
+  });
 });
 
 describe('球场升级', () => {
