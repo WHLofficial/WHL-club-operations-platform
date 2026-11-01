@@ -1,0 +1,21 @@
+# Workers Assets 响应头规则（随部署上传；dev 由 Miniflare 解析）
+# 注意：同路径多条规则会按文件顺序追加，不做覆盖——所以不能写 /* 通配，否则
+# no-store 会拼到资产/字体的缓存头后面，把长缓存作废。
+
+# 带内容哈希的构建产物：内容永不变化，长缓存（旧哈希文件被删也不影响已缓存页面）
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 字体文件名不带哈希，给一周缓存，更新最多一周内生效
+/fonts/*
+  Cache-Control: public, max-age=604800
+
+# 入口 HTML 不缓存。每次部署会整体替换带内容哈希的入口 JS；若浏览器或边缘节点留着
+# 旧 HTML，它引用的脚本已不存在，请求该 URL 会命中 SPA fallback 拿到 HTML
+# （Content-Type: text/html + nosniff），module script 被拒执行 ⇒ React 永不挂载，
+# 整页白屏（2026-11-01 iPhone Safari 事故的根治项）。
+/index.html
+  Cache-Control: no-store
+
+/
+  Cache-Control: no-store

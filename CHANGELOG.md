@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.65.4] · 谈判桌收口：已结束的谈判折叠区 + 球员要求单卡可折叠（2026-11-01）
+## [v6.65.4] · 谈判桌收口 + 入口 HTML 不缓存（2026-11-01）
 
 **Added**
 
@@ -17,7 +17,13 @@
 - `GET /api/negotiations?mine=1` 从「三态混排 LIMIT 50」改为**进行中全量 + 已结束分页**：新增响应字段 `ended`、`endedNextBefore`，新查询参数 `endedBefore`、`endedLimit`（默认 10，上限 50，非法值 400）；前端 `useMyNegotiations` 换成 `useInfiniteQuery`，页签计数仍只数进行中。
 - 已结束会话不再随列表下发逐轮 `attempts`，历史页一次只拉一页，避免响应膨胀。
 
-**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` 180 文件 / **2,937 例**全绿（v6.65.3 基线 180 / 2,927）；`npm run build` 通过。判级 **minor**。测试计划 `docs/test-plans/v6.65.4-desk-collapse.md`。
+**Fixed**
+
+- 新增 `web/public/_headers`（Workers Assets 响应头规则，随 `vite build` 拷进 `web/dist` 并随部署上传）：`/` 与 `/index.html` 设 `Cache-Control: no-store`；`/assets/*` 设 `public, max-age=31536000, immutable`（带内容哈希的产物内容不可变）；`/fonts/*` 设 `public, max-age=604800`（文件名不带哈希，留一周更新窗口）。
+- 根因（owner 报「苹果 14 的 Safari 访问 club.whleague.win 一直卡在空白页」）：**当前代码没有崩溃**——iPhone 13 模拟访问生产 v6.65.3 正常渲染、零 console error。白屏来自**浏览器或边缘节点留着旧版 `index.html`**：今天生产部署 4 次（v6.65.0 `2029e9cd` 13:35Z、v6.65.1、v6.65.2、v6.65.3），每次部署整体替换带哈希的入口 JS，旧哈希文件被删除；旧 HTML 请求已删除的 `assets/index-HK_qSiFW.js` 时命中 `not_found_handling: single-page-application` 的 fallback，拿到 `Content-Type: text/html`（870 B）+ `X-Content-Type-Options: nosniff`，module script 被浏览器拒执行 ⇒ `#root` 永远为空。CSS 若哈希未变则仍能加载，于是只剩背景色、内容区空白——与截图一致。
+- 注意：`_headers` 同路径多条规则是**按文件顺序追加**（本地 `wrangler dev` 实测），不是覆盖。因此没有写 `/*` 通配——`/*` 的 `no-store` 会拼到资产与字体的缓存头后面（实测 `public, max-age=31536000, immutable, no-store`），等于把长缓存作废。SPA 深路径（如 `/market/board`）保持默认 `public, max-age=0, must-revalidate`，每次加载都会回源校验。
+
+**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` 180 文件 / **2,937 例**全绿（v6.65.3 基线 180 / 2,927）；`npm run build` 通过且 `web/dist/_headers` 随产物生成；本地 `wrangler dev --port 8799` 实测响应头——`/` → `no-store`、`/assets/index-*.js` → `public, max-age=31536000, immutable`、`/fonts/inter-latin.woff2` → `public, max-age=604800`、`/market/board` → `public, max-age=0, must-revalidate`。无服务端代码改动、零迁移、零生产写。判级 **minor**（谈判桌新增可见能力；`_headers` 为 patch 级修补，随同一版本上线）。测试计划 `docs/test-plans/v6.65.4-desk-collapse.md`。上线后需回读生产首页响应头，确认 `cache-control: no-store` 且 `cf-cache-status` 不再是 `HIT`。
 
 ## [v6.65.3] · 消费中心资金口径统一（现金 → 可支配 + 券）（2026-11-01）
 
