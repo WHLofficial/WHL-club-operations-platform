@@ -24,7 +24,8 @@ export default function MarketPage() {
 /* ---------- 审核队列（v0.4.0 成交确认 + v0.6.0 旁路单据） ---------- */
 
 // 旁路单据的摘要行（payload 由 createBypassTransfer / submitMatch 冻结）
-function bypassSummary(r: AdminReviewRow): string | null {
+// 导出仅为单测（v6.67.0 的「原 Xm」反算），页面里仍只在本文件使用
+export function bypassSummary(r: AdminReviewRow): string | null {
   const p = (r.payload ?? {}) as Record<string, unknown>;
   const num = (k: string) => (typeof p[k] === 'number' ? (p[k] as number).toFixed(2) : '—');
   switch (p.kind) {
@@ -34,8 +35,14 @@ function bypassSummary(r: AdminReviewRow): string | null {
       return `解约费 ${(p.terminationFee as number) > 0 ? num('terminationFee') : '0.00'}m，本窗禁签`;
     case 'free_agent':
       return `新违约金 ${num('newReleaseFee')}m，签入费 ${num('signFee')}m（30%）`;
-    case 'match':
-      return `匹配留队：新违约金 ${num('newReleaseFee')}m > 出价 ${num('previousBid')}m，回收差额 ${num('diff')}m`;
+    case 'match': {
+      // v6.67.0：旧违约金不在 payload 里（activations.ts 只冻结 previousBid/newReleaseFee/diff），
+      // 用「新 − 差额」反算补进摘要，避免审核员把「新违约金 3m、差额 2m」误读成差额 = 出价。
+      const diff = typeof p.diff === 'number' ? p.diff : null;
+      const next = typeof p.newReleaseFee === 'number' ? p.newReleaseFee : null;
+      const oldRc = diff !== null && next !== null ? `${(next - diff).toFixed(2)}m` : '—';
+      return `匹配留队：新违约金 ${num('newReleaseFee')}m（原 ${oldRc}） > 出价 ${num('previousBid')}m，回收差额 ${num('diff')}m`;
+    }
     default:
       return null;
   }
