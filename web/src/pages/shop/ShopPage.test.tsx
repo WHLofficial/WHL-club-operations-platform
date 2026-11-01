@@ -40,11 +40,12 @@ function order(patch: Record<string, unknown> = {}) {
 function renderShop(
   route: string,
   orders: Record<string, unknown>[],
-  opts: { catalog?: Record<string, unknown>; players?: Record<string, unknown>[] } = {},
+  opts: { catalog?: Record<string, unknown>; players?: Record<string, unknown>[]; funds?: Record<string, number> } = {},
 ) {
   apiMock.mockImplementation((path: string) => {
     if (path === '/api/me') return Promise.resolve({ user: { id: 1, name: '测试教练', role: 'coach' }, authMode: 'shared', authHome: null });
-    if (path === '/api/me/club') return Promise.resolve({ club: { id: 1, name: '我的俱乐部' }, balance: 120.5 });
+    if (path === '/api/me/club')
+      return Promise.resolve({ club: { id: 1, name: '我的俱乐部' }, balance: 120.5, ...(opts.funds ? { funds: opts.funds } : {}) });
     if (path === '/api/shop/orders') return Promise.resolve({ clubId: 1, orders });
     if (path === '/api/shop/squad-state') return Promise.resolve({ clubId: 1, players: opts.players ?? [] });
     // 给了 players 就按开窗渲染（角色/位置卡的操作按钮只在开窗可用）
@@ -246,5 +247,53 @@ describe('v6.65.1 角色（职责）新增下拉（TC-R1–R4）', () => {
     expect(selectTexts(empty, 1)[0]).toBe('没有单加号角色可升');
     fireEvent.click(segBtn(empty, '去除'));
     expect(selectTexts(empty, 1)[0]).toBe('没有角色可去除');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* v6.65.3 可支配拆解条与确认弹窗券抵标注（TC-W-01–03，docs/test-plans/v6.65.3-shop-funds-caliber.md） */
+describe('v6.65.3 可支配拆解条与券抵标注', () => {
+  const FUNDS = { available: 44.35, balance: 0.35, held: 2, creditLine: 46, vouchers: 0.45 };
+
+  it('TC-W-01 funds 下发：顶部为可支配拆解（含在途收入额度与冻结占用），不再只给现金余额', async () => {
+    renderShop('/shop', [], { funds: FUNDS });
+    await waitFor(() => expect(document.body.textContent).toContain('可支配 44.35m'));
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('现金 0.35');
+    expect(text).toContain('券 0.45');
+    expect(text).toContain('在途收入额度 46.00');
+    expect(text).toContain('冻结占用 2.00');
+    expect(text).not.toContain('资金余额');
+  });
+
+  it('TC-W-02 无 funds 字段（半旧响应）：回落「资金余额」旧行径', async () => {
+    renderShop('/shop', [], {});
+    await waitFor(() => expect(document.body.textContent).toContain('资金余额'));
+    expect(document.body.textContent).toContain('120.50m');
+    expect(document.body.textContent).not.toContain('可支配');
+  });
+
+  it('TC-W-03 确认弹窗标注券抵实付：券 0.45 买 8m 银徽 → 「消费券抵 0.45m，实付 7.55m」', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    cleanup();
+    renderShop('/shop?tab=badge', [], { catalog: SHOP_CATALOG, players: [squadPlayer()], funds: FUNDS });
+    let card: HTMLElement | undefined;
+    await waitFor(() => {
+      card = [...document.querySelectorAll('.card')].find((n) => n.querySelector('h3')?.textContent === '徽章') as HTMLElement | undefined;
+      expect(card, '徽章卡应渲染').toBeTruthy();
+    });
+    // 名单查询与价目不同步：先等球员下拉真的装填了选项，再选（change 落在空 select 上会被吞掉）
+    await waitFor(() => {
+      const sel = card!.querySelectorAll('select')[0] as HTMLSelectElement;
+      expect([...sel.options].some((o) => o.value === '6')).toBe(true);
+    });
+    fireEvent.change(card!.querySelectorAll('select')[0], { target: { value: '6' } });
+    await waitFor(() => expect((card!.querySelectorAll('select')[1] as HTMLSelectElement).options.length).toBeGreaterThan(1));
+    fireEvent.change(card!.querySelectorAll('select')[1], { target: { value: '1' } });
+    fireEvent.click([...card!.querySelectorAll('button')].find((b) => b.textContent === '提交')!);
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    const text = String(confirmSpy.mock.calls[0]![0]);
+    expect(text).toContain('支付 8.00m');
+    expect(text).toContain('消费券抵 0.45m，实付 7.55m');
   });
 });

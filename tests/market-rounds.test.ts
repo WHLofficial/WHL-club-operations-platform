@@ -1554,21 +1554,25 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     await seedOpenRound(fx.env);
     const bare = await getAs('/api/club/naming/quote', fx.env);
     expect(bare.status).toBe(200);
-    const bareBody = (await bare.json()) as { contract?: unknown; offers: unknown[] };
+    const bareBody = (await bare.json()) as { contract?: unknown; offers: unknown[]; terminatePenalty?: number };
     expect(bareBody.contract).toBeUndefined();
     expect(bareBody.offers).toEqual([]);
+    expect(bareBody.terminatePenalty).toBeUndefined(); // 无约分支不下发赔款预览（v6.65.3 TC-N-01）
 
     await signViaOffer(fx.env, 1, '星海通讯', 1);
     const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
     const withContract = await getAs('/api/club/naming/quote', fx.env);
     const body = (await withContract.json()) as {
-      contract: { brand: string; tier: string; satisfyFloor: number; windowsRemaining: number };
+      contract: { brand: string; tier: string; satisfyFloor: number; windowsRemaining: number; feePerWindow: number };
       renewal: unknown;
       offers: { id: number; brand: string; tier: string; amount: number; status: string }[];
+      terminatePenalty: number;
     };
     expect(body.contract.brand).toBe('星海通讯');
     expect(body.contract.tier).toBe('口碑');
     expect(body.contract.satisfyFloor).toBeGreaterThan(0);
+    // v6.65.3 TC-N-01：有约分支下发退约赔款预览 = max(0, 剩余窗−1) × 每窗费 × 30%
+    expect(body.terminatePenalty).toBeCloseTo(Math.max(0, body.contract.windowsRemaining - 1) * body.contract.feePerWindow * 0.3, 2);
     expect(body.renewal).not.toBeNull();
     expect(body.offers.map((o) => o.id)).toContain(offerId);
     expect(body.offers[0]!.tier).toBe('口碑');

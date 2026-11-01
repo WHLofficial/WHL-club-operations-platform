@@ -3,12 +3,12 @@
 // - 门控改吃 build-info 的 open（不再单拉窗口端点）；关窗时扩建 / 升档 / 五类子设施按钮全部置灰
 // - 按钮 title 与卡内一行提示同文案「转会窗口没开，开窗后才能施工」
 // - 关窗优先于其他置灰理由（未开放 / 容量不足）：title 不得被状态原因顶掉
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StadiumBuildInfo } from '../../lib/api.ts';
-import { FacilityOpsCard } from './venueCards.tsx';
+import { FacilityOpsCard, NamingCard } from './venueCards.tsx';
 
 // 组件从 lib/api.ts 取 api：一处 mock 覆盖全部请求
 const { apiMock, apiPostMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiPostMock: vi.fn() }));
@@ -23,6 +23,7 @@ function buildInfo(patch: Partial<StadiumBuildInfo> = {}): StadiumBuildInfo {
   return {
     voucherBalance: 1.5,
     balance: 12,
+    available: 12,
     expansionPer100: 1.2,
     maxOpenTier: 3,
     maxOpenTierName: '大区级',
@@ -60,6 +61,7 @@ function renderCard(info: StadiumBuildInfo) {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   apiMock.mockReset();
   apiPostMock.mockReset();
 });
@@ -145,5 +147,67 @@ describe('v6.30.0 施工开窗闸（设施经营卡）', () => {
     expect(screen.getByText('已达上限（升级球场后解锁）')).toBeTruthy();
     expect(screen.queryByText('满级')).toBeNull();
     expect(screen.queryByRole('button', { name: '升级 3.00M' })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v6.65.3 冠名退约确认弹窗先亮赔款（TC-W-04）：quote 下发 terminatePenalty 预览，
+// 确认文案带具体金额；键缺失（半旧响应）明示「无赔金」
+describe('v6.65.3 冠名退约确认弹窗先亮赔款', () => {
+  const contract = {
+    id: 1,
+    clubId: 112172,
+    brand: '锐步',
+    baseFee: 3,
+    packageNo: 1,
+    pkgName: '轻量',
+    feePerWindow: 4,
+    windowsTotal: 6,
+    windowsRemaining: 3,
+    bonusAmount: 0,
+    betAttend: null,
+    betFans: null,
+    status: 'active',
+    startedSeason: 9,
+    startedWindow: 1,
+    satisfaction: 1,
+    venueName: null,
+    betTerms: null,
+    brandProfile: null,
+    tier: '口碑',
+    satisfyFloor: null,
+  };
+
+  function renderNaming(quote: Record<string, unknown>) {
+    apiMock.mockImplementation((path: string) => {
+      if (path === '/api/club/naming/quote') return Promise.resolve(quote);
+      return Promise.reject(new Error(`未预期的请求：${path}`));
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <NamingCard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('有赔款：退约确认文案带「赔金 2.40M」并说明可透支', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderNaming({ contract, terminatePenalty: 2.4, offers: [] });
+    fireEvent.click(await screen.findByText('退冠名'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    const text = String(confirmSpy.mock.calls[0]![0]);
+    expect(text).toContain('将赔 2.40M');
+    expect(text).toContain('余额不足将扣成负数');
+  });
+
+  it('键缺失或赔款为 0：确认文案明示「无赔金」', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderNaming({ contract: { ...contract, windowsRemaining: 1 }, offers: [] });
+    fireEvent.click(await screen.findByText('退冠名'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(String(confirmSpy.mock.calls[0]![0])).toContain('无赔金');
   });
 });

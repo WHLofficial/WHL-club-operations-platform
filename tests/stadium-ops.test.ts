@@ -145,6 +145,64 @@ describe('球场扩建', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 可支配口径（v6.65.3）：施工预检与批内守卫 = 余额 − 现行冻结 + 在途收入额度（先券后钱不变）。
+// 授信来源与 shop 同款：一笔待审转会（本队卖人），无合同行时税按 40% → 额度 = fee × 0.6。
+describe('可支配口径（v6.65.3）', () => {
+  function seedInflightSale(sqlite: DatabaseSync, fee: number) {
+    sqlite
+      .prepare(
+        `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, created_at)
+         VALUES ('transfer', 1, 1, 2, ?, 'pending_review', '2026-01-01T00:00:00Z')`,
+      )
+      .run(fee);
+  }
+
+  it('TC-S-01 现金不足但授信覆盖：扩建成功，余额扣成负数', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { balance: 2, credit: 0 });
+    seedInflightSale(fx.sqlite, 10); // 额度 6 → 可支配 2 + 6 = 8
+    const r = await expandStadium(fx.env, 1, 4000, 1); // 4000 座 × 0.1M/100 = 4m 全现金
+    expect(r).toMatchObject({ cost: 4, creditUsed: 0, cash: 4 });
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(-2);
+  });
+
+  it('TC-S-02 冻结挤占可支配：400 文案带可支配数字，球场与账本原样', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { balance: 10, credit: 0 });
+    fx.sqlite
+      .prepare(`INSERT INTO fund_holds (club_id, amount, status, created_at) VALUES (1, 9, 'held', '2026-01-01T00:00:00Z')`)
+      .run();
+    await expect(expandStadium(fx.env, 1, 4000, 1)).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('可支配'),
+    });
+    expect(stadiumRow(fx.sqlite).capacity).toBe(20000);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind='stadium_expand'").length).toBe(0);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
+  });
+
+  it('TC-S-03 批内竞态：预检后券被并发扣空 → 首句守卫（券检查保留）整批空转', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite, { balance: 50, credit: 20 });
+    const env: Env = {
+      ...fx.env,
+      DB: {
+        prepare: (sql: string) => fx.env.DB.prepare(sql),
+        batch: async (stmts: D1PreparedStatement[]) => {
+          fx.sqlite.exec('UPDATE ledger_accounts SET vouchers = 0 WHERE club_id = 1');
+          return fx.env.DB.batch(stmts);
+        },
+      } as unknown as D1Database,
+    };
+    await expect(expandStadium(env, 1, 500, 1)).rejects.toMatchObject({ status: 409 });
+    expect(stadiumRow(fx.sqlite).capacity).toBe(20000);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(50);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM ledger_entries WHERE kind='stadium_expand'").length).toBe(0);
+    expect(sqlAll(fx.sqlite, "SELECT id FROM audit_log WHERE action='stadium_expand'").length).toBe(0);
+  });
+});
+
 describe('球场升级', () => {
   it('容量达标 + 档位开放 → 扣当前档升级费，tier+1；开放进度闸拦二次升级', async () => {
     const fx = freshEnv();

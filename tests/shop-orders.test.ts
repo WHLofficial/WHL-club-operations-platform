@@ -833,3 +833,95 @@ describe('TC-O 工单券+现金拆分与双退', () => {
     expect(voucherEntries(fx)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TC-F 可支配口径（v6.65.3）：消费守卫 = 余额 − 现行冻结 + 在途收入额度（先券后钱不变），
+// 预检带差额且不落单。用例编号对应 docs/test-plans/v6.65.3-shop-funds-caliber.md。
+describe('TC-F 可支配口径（v6.65.3）', () => {
+  // 授信来源：一笔待审转会（本队卖人）。无合同行时税按最高档 40% → 净额 = fee × 0.6，
+  // expected_income_rate 缺省 1.0 ⇒ 额度 = 0.6 × fee。
+  function seedInflightSale(fx: Fixture, fee: number) {
+    fx.sqlite
+      .prepare(
+        `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, created_at)
+         VALUES ('transfer', 1, 101, 102, ?, 'pending_review', '2026-01-01T00:00:00Z')`,
+      )
+      .run(fee);
+  }
+
+  function orderCount(fx: Fixture): number {
+    return (fx.sqlite.prepare('SELECT COUNT(*) AS n FROM shop_orders').get() as { n: number }).n;
+  }
+
+  function cashEntries(fx: Fixture): { amount: number }[] {
+    return fx.sqlite.prepare("SELECT amount FROM ledger_entries WHERE kind = 'shop_purchase'").all() as { amount: number }[];
+  }
+
+  async function postBadge(fx: Fixture) {
+    return coachPost(fx, { category: 'badge', payload: { playerId: 1, kind: 'silver', psid: 1 } });
+  }
+
+  it('TC-F-01 现金不足但授信覆盖：下单成功，余额扣成负数（授信消费）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 2);
+    seedPlayer(fx, 1, { clubId: 101 });
+    seedInflightSale(fx, 10); // 额度 6 → 可支配 2 + 6 = 8
+    const res = await postBadge(fx); // 银 4m 全现金
+    expect(res.status).toBe(201);
+    expect(balanceOf(fx, 101)).toBe(-2);
+    expect(orderCount(fx)).toBe(1);
+    expect(cashEntries(fx)).toEqual([{ amount: -4 }]);
+  });
+
+  it('TC-F-02 冻结挤占可支配：400 带差额数字，不落单不留痕', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 10);
+    seedPlayer(fx, 1, { clubId: 101 });
+    fx.sqlite
+      .prepare(`INSERT INTO fund_holds (club_id, amount, status, created_at) VALUES (101, 8, 'held', '2026-01-01T00:00:00Z')`)
+      .run();
+    const res = await postBadge(fx); // 4m > 可支配 10 − 8 = 2
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('可支配');
+    expect(body.error).toContain('2.00');
+    expect(orderCount(fx)).toBe(0);
+    expect(cashEntries(fx)).toHaveLength(0);
+    expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='shop_order_create'").get()).toEqual({ n: 0 });
+  });
+
+  it('TC-F-03 授信也不足：文案带券抵与还需现金数字（RB 莱比锡事故形状）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 0.35);
+    seedPlayer(fx, 1, { clubId: 101 });
+    fx.sqlite.prepare('UPDATE ledger_accounts SET vouchers = 0.45 WHERE club_id = 101').run();
+    const res = await postBadge(fx); // 4m：券抵 0.45，还需现金 3.55 > 可支配 0.35
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('还需现金 3.55');
+    expect(body.error).toContain('消费券已抵 0.45');
+    expect(orderCount(fx)).toBe(0);
+  });
+
+  it('TC-F-04 先券后钱不变：可支配为 0 也能花纯券单', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 0);
+    seedPlayer(fx, 1, { clubId: 101 });
+    fx.sqlite.prepare('UPDATE ledger_accounts SET vouchers = 5 WHERE club_id = 101').run();
+    const res = await postBadge(fx); // 4m 全券抵，cash = 0
+    expect(res.status).toBe(201);
+    expect(balanceOf(fx, 101)).toBe(0);
+    expect((fx.sqlite.prepare('SELECT vouchers FROM ledger_accounts WHERE club_id = 101').get() as { vouchers: number }).vouchers).toBe(1);
+    expect(cashEntries(fx)).toHaveLength(0);
+  });
+
+  it('TC-F-05 边界：可支配为负 + 纯券单仍拒（与旧「负余额拒纯券单」同方向）', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 0);
+    seedPlayer(fx, 1, { clubId: 101 });
+    fx.sqlite.prepare('UPDATE ledger_accounts SET balance = -5, vouchers = 5 WHERE club_id = 101').run();
+    const res = await postBadge(fx); // 券全抵 cash = 0，但可支配 −5 < 0
+    expect(res.status).toBe(400);
+    expect(orderCount(fx)).toBe(0);
+  });
+});
