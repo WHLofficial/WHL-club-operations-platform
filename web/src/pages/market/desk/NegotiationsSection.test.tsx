@@ -143,6 +143,30 @@ describe('v6.40.0 签约谈判对话流（NegotiationsSection）', () => {
     expect(await screen.findByText('违约金定为 9m。经纪人预期工资 5.50m/半赛季，开谈吧。')).toBeTruthy();
   });
 
+  // v6.67.0：强制拍卖放开后，在途单会带着预填 RC 回到第一步（release_fee 留着当预填、expected_wage 已清空）
+  it('v6.67.0：强制拍卖在途单（RC 预填、预期工资未确认）回到第一步，预填值带出', async () => {
+    renderNego([
+      negoSession({
+        transfer: { type: 'forced_auction', status: 'completed', fee: 15 },
+        releaseFee: 15,
+        expectedWage: null,
+        rcBounds: null,
+      }),
+    ]);
+    const input = (await screen.findByLabelText('新违约金（m）')) as HTMLInputElement;
+    expect(input.value).toBe('15');
+    // 没有过户前合同 ⇒ 可自由定，不再写「幅度受限」
+    expect(screen.getByText(/可自由定（整数 m，下限 1）/)).toBeTruthy();
+    expect(screen.queryByText(/幅度受限/)).toBeNull();
+    expect(screen.queryByLabelText('工资报价（m/半赛季）')).toBeNull();
+  });
+
+  // 回归：判据收窄只对强制拍卖生效，普通转会 RC 未定时照旧是第一步、照旧显示区间
+  it('v6.67.0：普通转会 RC 未定时仍是第一步，区间提示不变', async () => {
+    renderNego([negoSession({ rcBounds: [4, 8] })]);
+    expect(await screen.findByText(/幅度受限：只能在 4~8m 之间（整数）。/)).toBeTruthy();
+  });
+
   it('工资回合：违约金与预期工资进系统行，我方报价在右、经纪人反馈在左，报价记录表已折进对话流', async () => {
     renderNego([negoSession(WAGE_ROUND)]);
     expect(await screen.findByText(/违约金定为/)).toBeTruthy();

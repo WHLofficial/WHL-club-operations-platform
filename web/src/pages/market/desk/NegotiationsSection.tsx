@@ -201,7 +201,7 @@ export default function NegotiationsSection() {
       <DemandSection isCoach={isCoach} />
       <h3>签约谈判</h3>
       <p className="hint">
-        成交单获管理组批准后，谈判会话自动开在这里：先定新违约金（幅度受限），再按经纪人预期工资谈工资，最多{' '}
+        成交单获管理组批准后，谈判会话自动开在这里：先定新违约金（有旧合同就按它的 ±10/±50%，没有则自行定），再按经纪人预期工资谈工资，最多{' '}
         <span className="mono">{MAX_NEGO_ROUNDS}</span> 轮；任何时候都可以直接签训练营合同（固定{' '}
         <span className="mono">{money(TRAINEE_WAGE)}</span>m / 违约金{' '}
         <span className="mono">{moneyIntText(TRAINEE_RELEASE_FEE) ?? '—'}</span>，不占本窗下放名额）。成约那一刻球员过户、钱款到账。
@@ -359,6 +359,15 @@ function NumberPrompt({
 
 /* ---------- 单个进行中的会话 ---------- */
 
+/**
+ * 第一步（定新违约金）是否还没做完（v6.67.0）。
+ * 常规 = `releaseFee === null`；强制拍卖放开后还会遇到「RC 已预填、但预期工资未确认」的在途单
+ * （数据库里 `release_fee` 留着当预填值、`expected_wage` 清空），这类同样要回到第一步。
+ */
+function needsReleaseFee(s: NegotiationSession): boolean {
+  return s.releaseFee === null || (s.transfer.type === 'forced_auction' && s.expectedWage === null);
+}
+
 function SessionCard({
   session,
   open,
@@ -398,8 +407,8 @@ function SessionCard({
         <h3>
         <Link to={playerPath(s.player)}>{s.player.name}</Link> · 签约谈判
         <span className="badge purple">谈判中</span>
-        {/* v6.23.0 阶段徽标：违约金未定 = 第一步，定了才进工资谈判 */}
-        {s.releaseFee === null ? (
+        {/* v6.23.0 阶段徽标：违约金未定 = 第一步，定了才进工资谈判（v6.67.0 判据见 needsReleaseFee） */}
+        {needsReleaseFee(s) ? (
           <span className="badge sky">第一步 · 定违约金</span>
         ) : (
           <span className="badge gold">工资谈判 · 剩 {s.remaining} 轮</span>
@@ -436,8 +445,8 @@ function SessionCard({
 
       {/* 对话流：会话开场 →（逐轮）我方报价 / 经纪人反馈 / 结果 → 结算。动作区在流底部，跟对话读下来就是一条线 */}
       <div className="nego-thread">
-        {s.releaseFee === null ? (
-          <p className="nego-sys">谈判会话开启：先定新违约金（整数，幅度受限），定完给出经纪人预期工资。</p>
+        {needsReleaseFee(s) ? (
+          <p className="nego-sys">谈判会话开启：先定新违约金（整数），定完给出经纪人预期工资。</p>
         ) : (
           <p className="nego-sys">
             违约金定为 <span className="mono">{moneyIntText(s.releaseFee) ?? '—'}</span> · 预期工资{' '}
@@ -470,7 +479,7 @@ function SessionCard({
         {s.settled && <p className="nego-sys">{s.settled.message}</p>}
       </div>
 
-      {s.releaseFee === null ? (
+      {needsReleaseFee(s) ? (
         <ReleaseFeeStep session={s} onChanged={onChanged} onError={onError} show={show} />
       ) : (
         <OfferStep session={s} lastOffer={lastOffer} onChanged={onChanged} onSettled={onSettled} onError={onError} show={show} />
@@ -495,7 +504,8 @@ function ReleaseFeeStep({
 }) {
   // v6.49.0：签约谈判受「签约谈判」时段约束
   const gate = useOpsGate('transfer_negotiation');
-  const [fee, setFee] = useState('');
+  // v6.67.0：强制拍卖放开后，在途单可能带着预填的 RC 回到第一步（expected_wage 被清空）
+  const [fee, setFee] = useState(session.releaseFee === null ? '' : String(session.releaseFee));
   const [busy, setBusy] = useState(false);
 
   async function submit() {
@@ -526,7 +536,7 @@ function ReleaseFeeStep({
           step="1"
           value={fee}
           onChange={(e) => setFee(e.target.value)}
-          placeholder={session.rcBounds ? `${session.rcBounds[0]}~${session.rcBounds[1]}` : ''}
+          placeholder={session.rcBounds ? `${session.rcBounds[0]}~${session.rcBounds[1]}` : '自由定'}
         />
       </div>
       <OpsGateNote gate={gate} />
@@ -536,7 +546,7 @@ function ReleaseFeeStep({
       <span className="hint">
         {session.rcBounds
           ? `幅度受限：只能在 ${session.rcBounds[0]}~${session.rcBounds[1]}m 之间（整数）。`
-          : '幅度受限（整数 m）。'}
+          : '可自由定（整数 m，下限 1）：这单没有旧合同作基准，不设上下限。'}
         定完会给出经纪人预期工资。
       </span>
     </div>

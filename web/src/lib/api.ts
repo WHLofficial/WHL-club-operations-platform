@@ -1007,11 +1007,21 @@ export interface AdminReviews {
   reviews: AdminReviewRow[];
 }
 
+/** 转会单类型（与 src/worker 侧 transfer.type 取值一致；v6.67.0 由 string 收紧为联合类型） */
+export type TransferType =
+  | 'transfer'
+  | 'free_agent'
+  | 'match'
+  | 'forced_auction'
+  | 'rc_change'
+  | 'promotion'
+  | 'termination';
+
 export interface NegotiationSession {
   id: number;
   transferId: number;
   status: 'active' | 'settled' | 'cancelled';
-  transfer: { type: string; status: string; fee: number | null };
+  transfer: { type: TransferType; status: string; fee: number | null };
   fromClubName: string | null;
   toClubName: string | null;
   player: { id: number; fcId: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
