@@ -5,7 +5,7 @@
 // 混合支付时账本只记现金部分，券流水记 build_use / build_refund，memo 注明券抵。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { ledgerMovement } from './ledger.ts';
+import { creditLineGuard, ledgerMovement, balanceSnapshot } from './ledger.ts';
 import { voucherBalance, voucherMovement } from './voucher.ts';
 import { getOpenWindow } from './seasons.ts';
 import { assertOpOpen } from './ops-schedule.ts';
@@ -84,7 +84,9 @@ function tierEntryOf(tierTable: Record<string, TierEntry>, tier: number): TierEn
   return entry;
 }
 
-/** 资金检查 + 券拆分 + 返券计算（读侧；写侧语句由调用方组 batch）。 */
+/** 资金检查 + 券拆分 + 返券计算（读侧；写侧语句由调用方组 batch）。
+ *  v6.65.3 口径统一：预检换「可支配 = 余额 − 现行冻结 + 在途收入额度」（availableBalance 同公式，
+ *  与转会域一致），文案带差额；批内守卫（cashMoveGuard）与本预检同式，防预检后竞态。 */
 async function payAndRefund(
   env: Env,
   clubId: number,
@@ -93,9 +95,14 @@ async function payAndRefund(
 ): Promise<{ creditUsed: number; cash: number; refund: number; vouchers: number }> {
   const vouchers = await voucherBalance(env.DB, clubId);
   const { creditUsed, cash } = splitPayment(cost, vouchers);
-  const balance = await loadBalance(env.DB, clubId);
-  if (balance < cash) {
-    throw new HttpError(400, `资金不够：还需现金 ${cash.toFixed(2)}M（消费券已抵 ${creditUsed.toFixed(2)}M），当前余额 ${balance.toFixed(2)}M`);
+  const snap = await balanceSnapshot(env.DB, clubId);
+  const available = round2(snap.available);
+  if (available < cash) {
+    throw new HttpError(
+      400,
+      `可支配资金不够：本次还需现金 ${cash.toFixed(2)}M（消费券已抵 ${creditUsed.toFixed(2)}M），当前可支配 ${available.toFixed(2)}M` +
+        `（现金 ${round2(snap.balance).toFixed(2)} + 在途收入额度 ${round2(snap.creditLine).toFixed(2)} − 冻结 ${round2(snap.held).toFixed(2)}），施工未执行`,
+    );
   }
   const refund = creditRefund(cost, refundRatio);
   return { creditUsed, cash, refund, vouchers };
@@ -104,6 +111,20 @@ async function payAndRefund(
 /** 券可用守卫（批内对批前状态求值；并发扣空时整段失败，见 tests/stadium-ops.test.ts 最坏情况用例） */
 function voucherEnoughGuard(): string {
   return 'COALESCE((SELECT vouchers FROM ledger_accounts WHERE club_id = ?), 0) >= ?';
+}
+
+/** 现金流水的批内守卫（v6.65.3）：券够 + 可支配够（与 payAndRefund 预检同式）。券检查必须留在
+ *  批内首句——现金流水排第一，券不足时靠它让全批空转；只留可支配会让现金单落、券链全断。 */
+function cashMoveGuard(clubId: number, creditUsed: number, cash: number): { sql: string; params: number[] } {
+  const credit = creditLineGuard(clubId);
+  return {
+    sql:
+      `${voucherEnoughGuard()} AND ` +
+      `COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
+      ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
+      ` + ${credit.sql} >= ?`,
+    params: [clubId, creditUsed, clubId, clubId, ...credit.params, cash],
+  };
 }
 
 /** 球场扩建：seats 必须是 100 的正整数倍，扩建后不超当前档位座位上限。 */
@@ -134,6 +155,7 @@ export async function expandStadium(
   const { creditUsed, cash, refund, vouchers } = await payAndRefund(env, clubId, cost, ratio);
   const afterVouchers = round2(vouchers - creditUsed + refund);
 
+  const moveGuard = cashMoveGuard(clubId, creditUsed, cash);
   const ledger = ledgerMovement(env.DB, {
     clubId,
     delta: -cash,
@@ -142,8 +164,8 @@ export async function expandStadium(
     refId: clubId,
     memo: `球场扩建 +${seats} 座（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，消费券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
     idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
-    guardSql: voucherEnoughGuard(),
-    guardParams: [clubId, creditUsed],
+    guardSql: moveGuard.sql,
+    guardParams: moveGuard.params,
   });
   const useVoucher = creditUsed > 0 ? voucherMovement(env.DB, {
     clubId,
@@ -234,6 +256,7 @@ export async function upgradeStadiumTier(
   const { creditUsed, cash, refund, vouchers } = await payAndRefund(env, clubId, cost, ratio);
   const afterVouchers = round2(vouchers - creditUsed + refund);
 
+  const moveGuard = cashMoveGuard(clubId, creditUsed, cash);
   const ledger = ledgerMovement(env.DB, {
     clubId,
     delta: -cash,
@@ -242,8 +265,8 @@ export async function upgradeStadiumTier(
     refId: clubId,
     memo: `球场升级 → ${nextEntry.name}（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，消费券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
     idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
-    guardSql: voucherEnoughGuard(),
-    guardParams: [clubId, creditUsed],
+    guardSql: moveGuard.sql,
+    guardParams: moveGuard.params,
   });
   const useVoucher = creditUsed > 0 ? voucherMovement(env.DB, {
     clubId,
@@ -334,6 +357,7 @@ export async function upgradeFacilityLevel(
   const { creditUsed, cash, refund, vouchers } = await payAndRefund(env, clubId, cost, ratio);
   const afterVouchers = round2(vouchers - creditUsed + refund);
 
+  const moveGuard = cashMoveGuard(clubId, creditUsed, cash);
   const ledger = ledgerMovement(env.DB, {
     clubId,
     delta: -cash,
@@ -342,8 +366,8 @@ export async function upgradeFacilityLevel(
     refId: clubId,
     memo: `${key} 设施升到 ${level + 1} 级（费用 ${cost.toFixed(2)}M${creditUsed > 0 ? `，消费券抵 ${creditUsed.toFixed(2)}M` : ''}）`,
     idempotent: false, // 玩家主动操作可重复发生，不开 kind+ref 查重闸
-    guardSql: voucherEnoughGuard(),
-    guardParams: [clubId, creditUsed],
+    guardSql: moveGuard.sql,
+    guardParams: moveGuard.params,
   });
   const useVoucher = creditUsed > 0 ? voucherMovement(env.DB, {
     clubId,

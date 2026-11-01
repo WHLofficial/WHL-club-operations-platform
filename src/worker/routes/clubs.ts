@@ -15,11 +15,11 @@ import { closedRegularTicks } from '../contract-ticks.ts';
 import { POSITION_BY_ID, POSITION_GROUP_BY_POSITION, POSITION_GROUPS } from '../../core/fc26.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, influenceTierCoef, loadInfluenceTierCoefs } from '../home.ts';
 import { createConfigService } from '../../core/config.ts';
-import { balanceSnapshot } from '../ledger.ts';
+import { availableBalance, balanceSnapshot } from '../ledger.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { expandStadium, upgradeStadiumTier, upgradeFacilityLevel, loadFacilityPrices, loadBalance, FACILITY_KEYS, facilityCapForTier } from '../stadium-ops.ts';
 import { voucherBalance } from '../voucher.ts';
-import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms } from '../naming-ops.ts';
+import { quoteBrands, terminateNaming, renewNaming, getActiveNaming, loadNamingParams, loadAdoptedBrands, loadIndustryFactors, loadTierProfiles, composeVenueName, venueNameOf, parseBetTerms, terminatePenaltyOf } from '../naming-ops.ts';
 import { acceptOffer, activateQueuedStatements, listClubOffers } from '../market-ops.ts';
 import { queueClubNotification } from '../notify.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
@@ -672,7 +672,7 @@ app.get('/me/club', async (c) => {
   if (!club) {
     return c.json({ club: null, balance: null, squadCount: null, window: null });
   }
-  const [account, roster, win, tier] = await Promise.all([
+  const [account, roster, win, tier, snap, vouchers] = await Promise.all([
     c.env.DB.prepare('SELECT balance FROM ledger_accounts WHERE club_id = ?')
       .bind(club.id)
       .first<{ balance: number }>(),
@@ -684,6 +684,9 @@ app.get('/me/club', async (c) => {
     ).first<{ season: number; window_seq: number }>(),
     // v1.2.0：级别由报名派生（§3.2 改判），休眠列不再回显
     deriveClubTier(c.env, await getVisibleSeason(c.env.DB), club.id),
+    // v6.65.3：消费中心顶部拆解条用——可支配口径与出价校验/消费守卫同式（balanceSnapshot 一次算完）
+    balanceSnapshot(c.env.DB, club.id),
+    voucherBalance(c.env.DB, club.id),
   ]);
   // v1.5.0：主场档案（球场/设施/影响力构成）随 /me/club 一并下发（无球场行=null）
   const stadium = await c.env.DB
@@ -741,6 +744,14 @@ app.get('/me/club', async (c) => {
       transferBanned: club.transfer_banned === 1,
     },
     balance: account?.balance ?? 0,
+    // v6.65.3：可支配拆解（消费中心顶部条用）——available = balance − held + creditLine，与守卫同式
+    funds: {
+      available: snap.available,
+      balance: account?.balance ?? 0,
+      held: snap.held,
+      creditLine: snap.creditLine,
+      vouchers,
+    },
     squadCount: roster?.n ?? 0,
     window: win ? { season: win.season, windowSeq: win.window_seq } : null,
     home,
@@ -1253,11 +1264,15 @@ app.get('/club/stadium/build-info', async (c) => {
   const levelOf = (key: string) => facilities.results.find((f) => f.facility_key === key)?.level ?? 0;
   const facilityCap = facilityCapForTier(stadium.tier);
   const balance = await loadBalance(c.env.DB, club.id);
+  // v6.65.3：球场卡与守卫同口径展示可支配（现金不够时靠授信仍可施工）
+  const available = await availableBalance(c.env.DB, club.id);
   const win = await getOpenWindow(c.env.DB);
   return c.json({
     // v6.58.0：券余额升格为俱乐部级（建设返 25% + 管理组发放），字段名从 credit 改为 voucherBalance
     voucherBalance: vouchers,
     balance,
+    // v6.65.3：可支配（余额 − 现行冻结 + 在途收入额度），与消费/施工守卫同式
+    available,
     expansionPer100: prices.expansionPer100,
     maxOpenTier,
     maxOpenTierName: tierTable[String(maxOpenTier)]?.name ?? null,
@@ -1443,6 +1458,8 @@ app.get('/club/naming/quote', async (c) => {
         tier: brandTier,
         satisfyFloor: profiles[tierKey]?.satisfyFloor ?? null,
       },
+      // v6.65.3：退约赔款预览（确认弹窗先亮金额；服务端为唯一权威，退约时现算）
+      terminatePenalty: terminatePenaltyOf(params, contract.windows_remaining, contract.fee_per_window),
       renewal,
       offers,
     });

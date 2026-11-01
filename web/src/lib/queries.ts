@@ -71,6 +71,8 @@ export interface MarketMyClub {
   id: number;
   name: string;
   balance: number | null;
+  /** v6.65.3：可支配拆解（消费中心顶部条用）；半旧响应无此字段为 undefined */
+  funds?: { available: number; balance: number; held: number; creditLine: number; vouchers: number };
   isCoach: boolean;
 }
 
@@ -102,7 +104,7 @@ export function useMyClub(): MyClubState {
   return {
     loading: user != null && isPending,
     isCoach,
-    club: !isError && data?.club ? { ...data.club, balance: data.balance, isCoach } : null,
+    club: !isError && data?.club ? { ...data.club, balance: data.balance, funds: data.funds ?? undefined, isCoach } : null,
     failed: user != null && isError,
   };
 }

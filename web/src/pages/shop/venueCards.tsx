@@ -154,7 +154,8 @@ export function FacilityOpsCard() {
       <OpsGateNote gate={consumptionGate} className="hint" />
       <p className="hint">
         消费券余额 <span className="mono">{info.voucherBalance.toFixed(2)}</span> M（建设支出返 {Math.round(info.refundRatio * 100)}% + 管理组发放，可抵扣建设与消费工单）· 当前余额{' '}
-        <span className="mono">{info.balance.toFixed(2)}</span> M · 球场档位开放至 {info.maxOpenTierName ?? `第 ${info.maxOpenTier + 1} 档`} ({info.maxOpenTier + 1})
+        <span className="mono">{info.balance.toFixed(2)}</span> M · 可支配{' '}
+        <span className="mono">{info.available.toFixed(2)}</span> M（含在途收入额度，施工守卫口径）· 球场档位开放至 {info.maxOpenTierName ?? `第 ${info.maxOpenTier + 1} 档`} ({info.maxOpenTier + 1})
         {!windowOpen && ` · ${CLOSED_BUILD_HINT}。`}
       </p>
 
@@ -271,7 +272,12 @@ export function NamingCard() {
 
   // 接报价（v6.14.0 C3）：无现约不带 mode 直接签；有现约必选 queued（到期接替）/ terminate（解约换签）
   async function accept(offer: ClubOffer, mode?: 'queued' | 'terminate') {
-    if (mode === 'terminate' && !window.confirm('换约要提前解约现合同：赔金按剩余窗口费的 30% 计（当窗费用照收）。确定解约当前并签新？')) return;
+    // v6.65.3：确认弹窗先亮赔款金额（quote 预览；服务端退约时现算为准）
+    if (mode === 'terminate') {
+      const p = quote?.terminatePenalty ?? 0;
+      const tail = p > 0 ? `：赔金 ${p.toFixed(2)}M（剩余窗口费的 30%，当窗费用照收；余额不足将扣成负数）` : '（无赔金）';
+      if (!window.confirm(`换约要提前解约现合同${tail}。确定解约当前并签新？`)) return;
+    }
     setBusy(true);
     try {
       const out = await apiPost<NamingOfferAcceptResult>(`/api/club/naming/offers/${offer.id}/accept`, mode ? { mode } : {});
@@ -315,7 +321,9 @@ export function NamingCard() {
   }
 
   async function terminate() {
-    if (!window.confirm('提前解约要赔剩余窗口费用（当窗照收后的 30%）。确定退冠名？')) return;
+    // v6.65.3：确认弹窗先亮赔款金额（quote 预览；服务端退约时现算为准，余额不足将扣成负数）
+    const penalty = quote?.terminatePenalty ?? 0;
+    if (!window.confirm(penalty > 0 ? `提前解约将赔 ${penalty.toFixed(2)}M（剩余窗口费的 30%，当窗照收；余额不足将扣成负数）。确定退冠名？` : '提前解约无赔金。确定退冠名？')) return;
     setBusy(true);
     try {
       const out = await apiPost<NamingTerminateResult>('/api/club/naming/terminate', {});

@@ -96,6 +96,8 @@ export interface SeasonsCurrent {
 export interface MyClubOverview {
   club: { id: number; name: string; leagueTier: string | null; logoKey: string | null; status: string; transferBanned?: boolean } | null;
   balance: number | null;
+  // v6.65.3：可支配拆解（消费中心顶部条用），与消费守卫同口径；半旧响应无此字段
+  funds?: { available: number; balance: number; held: number; creditLine: number; vouchers: number } | null;
   squadCount: number | null;
   window: { season: number; windowSeq: number } | null;
   // v1.5.0：主场档案（球场/设施/影响力构成）；无球场行 = null
@@ -1558,6 +1560,8 @@ export interface StadiumBuildInfo {
   /** 消费券余额（v6.58.0 由建设券升格，字段名从 credit 改为 voucherBalance） */
   voucherBalance: number;
   balance: number;
+  /** v6.65.3：可支配（余额 − 现行冻结 + 在途收入额度），与施工守卫同口径展示 */
+  available: number;
   expansionPer100: number;
   maxOpenTier: number;
   /** 开放进度上限对应的档位名（前端展示「开放至 地区级 (2)」） */
@@ -1695,6 +1699,8 @@ export interface ClubOffer {
 
 export interface NamingQuoteResponse {
   contract?: NamingContract;
+  /** v6.65.3：退约赔款预览（有现约时下发）——确认弹窗先亮金额；服务端退约时现算为准 */
+  terminatePenalty?: number;
   /** 续约候选（有现约时下发）：按当前队况与品牌现热度现算的同一品牌报价；品牌已弃用则缺省 */
   renewal?: BrandQuote | null;
   /** 收到的报价（v6.14.0 C3）：签约入口只此一处（品牌直签列表已退役） */

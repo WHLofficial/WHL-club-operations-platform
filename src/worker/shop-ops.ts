@@ -7,8 +7,11 @@
 //   WHERE id=?)='pending'`）→ 状态流转放批末（WHERE status='pending'）]。守卫压 'pending' 而非
 //   'approved'：并发抢同一单时，后到批的效果守卫读到已提交的终态、整段 no-op，状态 UPDATE
 //   changes=0 → 409；若守卫压 'approved'，后到批会重复执行效果。
-// - 扣费：先 INSERT 工单拿 id，再批内 ledgerMovement(-amount, guardSql 原子余额守卫)——守卫没过
-//   （changes=0）删除工单行并报「余额不足」。金额提交时锁定进单，改价不影响已提交的单。
+// - 扣费（v6.65.3 口径统一）：预检与批内守卫同走「可支配 = 余额 − 现行冻结 + 在途收入额度」
+//   （availableBalance 同公式，与转会域一致）——预检不够直接 400 带差额（不落单）；预检过了仍
+//   先 INSERT 工单拿 id、批内 ledgerMovement(-cash, guardSql 可支配守卫) 兜并发竞态，守卫没过
+//   （changes=0）删除工单行并报 400。券照旧优先：voucherUsed = min(券, amount)。
+//   金额提交时锁定进单，改价不影响已提交的单。
 // - 退款：ledgerMovement(+amount, refType='shop_refund') 吃默认幂等闸 + status='pending' 守卫，
 //   防重复退、防「审批/拒绝并发时给已生效的单退款」。
 import { HttpError } from '../lib/http.ts';
@@ -46,7 +49,7 @@ import {
   type PlaystyleKind,
 } from '../core/fc26.ts';
 import { fullCountSql, planPlaystylePicks, type PlaystylePickFailureCode } from '../core/playstyle-rules.ts';
-import { ledgerMovement } from './ledger.ts';
+import { creditLineGuard, ledgerMovement, balanceSnapshot } from './ledger.ts';
 import { voucherBalance, voucherMovement } from './voucher.ts';
 import { queueClubNotification } from './notify.ts';
 import type { Env } from './env.ts';
@@ -646,6 +649,16 @@ export async function createClubOrder(
   // 券余额理论上不为负；脏数据/历史遗留也要按 0 截断，否则 cash = amount + |vouchers| 会多收钱
   const voucherUsed = round2(Math.min(Math.max(vouchers, 0), amount));
   const cash = round2(amount - voucherUsed);
+  // v6.65.3 可支配预检（与批内守卫同公式）：常见的资金不足在落单前拦下并带差额数字；
+  // 批内守卫继续兜「预检后到扣费前」的竞态（授信缩水 / 冻结增加）。
+  const snap = await balanceSnapshot(db, opts.clubId);
+  if (round2(snap.available) < cash) {
+    throw new HttpError(
+      400,
+      `可支配资金不够：本次还需现金 ${cash.toFixed(2)} m（消费券已抵 ${voucherUsed.toFixed(2)} m），当前可支配 ${round2(snap.available).toFixed(2)} m` +
+        `（现金 ${round2(snap.balance).toFixed(2)} + 在途收入额度 ${round2(snap.creditLine).toFixed(2)} − 冻结 ${round2(snap.held).toFixed(2)}），工单未提交`,
+    );
+  }
   const order = await db
     .prepare(
       `INSERT INTO shop_orders (source, club_id, ordered_by, category, payload_json, amount, voucher_used, status, note, created_at)
@@ -655,9 +668,16 @@ export async function createClubOrder(
     .first<ShopOrderRow>();
   if (!order) throw new HttpError(500, '工单创建失败');
 
-  // 扣费与审计同批：券/现金两个守卫任一没过 → 整批空转 + 删单 400。
-  // 券语句排批首，且它的守卫同时要求「现金也够」；现金语句用 changes()>0 串在券后面，
-  // 这样不存在「券扣了现金不够」或反过来的中间态（测试计划 TC-O-003 的最坏交错）。
+  // 扣费与审计同批：券/可支配两个守卫任一没过 → 整批空转 + 删单 400。
+  // 券语句排批首，且它的守卫同时要求「可支配也够」；现金语句用 changes()>0 串在券后面，
+  // 这样不存在「券扣了可支配不够」或反过来的中间态（测试计划 TC-O-003 的最坏交错）。
+  // 可支配守卫与 availableBalance 同公式（含预期收入额度），与预检一字同源（creditLineGuard 片段）。
+  const credit = creditLineGuard(opts.clubId);
+  const availableGuardSql =
+    `COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0)` +
+    ` - COALESCE((SELECT SUM(amount) FROM fund_holds WHERE club_id = ? AND status = 'held'), 0)` +
+    ` + ${credit.sql}`;
+  const availableGuardParams = [opts.clubId, opts.clubId, ...credit.params];
   const audit = createAuditStatement(db);
   const parts: D1PreparedStatement[] = [];
   const voucherIndex = voucherUsed > 0 ? parts.push(...voucherMovement(db, {
@@ -668,8 +688,8 @@ export async function createClubOrder(
     refId: order.id,
     memo: `消费工单 #${order.id} 消费券抵扣：${summary}`,
     guardSql:
-      'COALESCE((SELECT vouchers FROM ledger_accounts WHERE club_id = ?), 0) >= ? AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0) >= ?',
-    guardParams: [opts.clubId, voucherUsed, opts.clubId, cash],
+      `COALESCE((SELECT vouchers FROM ledger_accounts WHERE club_id = ?), 0) >= ? AND ${availableGuardSql} >= ?`,
+    guardParams: [opts.clubId, voucherUsed, ...availableGuardParams, cash],
   })) - 2 : -1;
   const cashIndex = cash > 0 ? parts.push(...ledgerMovement(db, {
     clubId: opts.clubId,
@@ -678,8 +698,8 @@ export async function createClubOrder(
     refType: 'shop_order',
     refId: order.id,
     memo: `消费工单 #${order.id}：${summary}`,
-    guardSql: `${voucherUsed > 0 ? 'changes() > 0 AND ' : ''}(SELECT COALESCE(balance, 0) FROM ledger_accounts WHERE club_id = ?) >= ?`,
-    guardParams: [opts.clubId, cash],
+    guardSql: `${voucherUsed > 0 ? 'changes() > 0 AND ' : ''}${availableGuardSql} >= ?`,
+    guardParams: [...availableGuardParams, cash],
   })) - 2 : -1;
   const results = await db.batch([
     ...parts,
@@ -696,7 +716,12 @@ export async function createClubOrder(
   const charged = (idx: number) => idx < 0 || (results[idx]?.meta?.changes ?? 0) > 0;
   if (!charged(voucherIndex) || !charged(cashIndex)) {
     await db.prepare('DELETE FROM shop_orders WHERE id = ?').bind(order.id).run();
-    throw new HttpError(400, '余额或消费券不足，工单未提交');
+    // 竞态兜底路径（预检已拦掉常态失败）：按批后最新可支配报差额
+    const after = await balanceSnapshot(db, opts.clubId);
+    throw new HttpError(
+      400,
+      `可支配资金不够：本次还需现金 ${cash.toFixed(2)} m（消费券已抵 ${voucherUsed.toFixed(2)} m），当前可支配 ${round2(after.available).toFixed(2)} m，工单未提交`,
+    );
   }
   return { order, summary };
 }
