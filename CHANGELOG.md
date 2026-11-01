@@ -24,8 +24,11 @@
 **数据修复（一次性，上线回读通过后执行）**
 
 - `scripts/prod-20261102-forced-rc-open/`（预检 / 应用 / 回读 / README）：把 2026-11-01T13:00Z 成交后进入签约谈判的三笔强制拍卖单（transfer 139 Bastoni → 慕尼黑1860 28m、140 Pulisic → 里昂 15m、141 Reijnders → 曼联 10m）的 `negotiation_sessions.expected_wage` 清空，让三家回到第一步自己定违约金。**只清 E、不清 F**：`settleActiveSession` 的兜底是 `session.release_fee ?? TRAINEE_RELEASE_FEE`，清 F 会把违约金落成 5m；F 留着正好当预填。
+- **执行结果（2026-11-02T02:26Z）**：实际只改了 **2 行**——transfer 139 在跑脚本前已经自己 settle 完（session 78 `settled` @2026-11-01T14:22:07Z、transfer `completed`，合同 `release_fee = 28`、`wage = 4`，按旧口径定死，已不可回溯），脚本的 `status = 'active'` 条件自动跳过它；140 / 141 两行 `expected_wage` 已置 NULL、`release_fee` 保持 15 / 10、会话仍 `active`。其它在途会话未被误伤。
 
 **验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **185 文件 / 2,966 例**全绿（v6.66.1 基线 184 / 2,960）；`npm run build` 通过。判级 **minor**（新增用户可见能力：强拍单的违约金由买方自定）。测试计划 `docs/test-plans/v6.67.0-forced-rc.md`。
+
+**上线**：push `b63f2b1..4f863f8`（6 枚）触发 CF Workers Builds 自动部署，生效 Version `03aa9167-1ac7-4f76-8579-bb76fce67840` @2026-11-01T18:21:07Z（100% 流量）。回读：`/api/health` 200（d1 / tour_db / kv 全 ok）、生产入口 `assets/index-05_JknL-.js` 与本地构建逐字同名、包内版本串 `6.67.0`、CSS 含 `.lib-bar-bottom`、首页仍 `cache-control: no-store`。
 
 ## [v6.66.1] · 消费中心候选放开到本队全部球员（含训练营）（2026-11-02）
 
