@@ -40,7 +40,7 @@ export default function MarketDeskPage() {
   const offersOut = useOffers('out', 'pending', isCoach);
 
   const counts: Record<DeskTab, number> = {
-    nego: (negotiations.data ?? []).filter((s) => s.status === 'active').length,
+    nego: (negotiations.data?.pages[0]?.sessions ?? []).filter((s) => s.status === 'active').length,
     offers: (offersIn.data?.pendingMine ?? 0) + (offersOut.data?.pendingMine ?? 0),
     bids: (myBids ?? []).filter((b) => b.status === 'active').length,
   };

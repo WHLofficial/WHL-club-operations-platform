@@ -335,9 +335,12 @@ describe('结算-过户分批自愈', () => {
          release_fee = 20, expected_wage = 3.11 WHERE id = ${fx.sessionId}`,
     );
     const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
-    const session = ((await mine.json()) as { sessions: { id: number; status: string; settled: { wage: number; source: string; message: string } }[] }).sessions[0];
-    expect(session.status).toBe('settled');
-    expect(session.settled).toMatchObject({ wage: 3.11, source: 'negotiation' });
+    // v6.65.4：已结算的会话进「已结束」区（sessions 只留进行中）
+    const ended = ((await mine.json()) as {
+      ended: { id: number; status: string; settled: { wage: number; source: string; message: string } }[];
+    }).ended[0];
+    expect(ended.status).toBe('settled');
+    expect(ended.settled).toMatchObject({ wage: 3.11, source: 'negotiation' });
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = 1')?.status).toBe('completed');
     expect(
       sqlGet<{ wage: number; source: string }>(fx.sqlite, 'SELECT wage, source FROM contracts WHERE player_id = 10 AND is_active = 1'),
@@ -481,5 +484,88 @@ describe('逐轮反馈落库（对话流左气泡）', () => {
         fx.sessionId,
       ),
     ).toEqual({ feedback: '😍 经纪人非常满意', risk: 0 });
+  });
+});
+
+// v6.65.4：进行中全量、已结束分页；作废原因从 audit_log 派生
+describe('已结束的谈判分页与作废原因（v6.65.4）', () => {
+  type Mine = {
+    sessions: { id: number; status: string }[];
+    ended: {
+      id: number;
+      status: string;
+      outcome: string | null;
+      voidReason: string | null;
+      endedAt: string | null;
+      attempts: unknown[];
+    }[];
+    endedNextBefore: number | null;
+  };
+
+  function seedEnded(fx: SigningFixture, count: number) {
+    const stmts: string[] = [];
+    for (let i = 1; i <= count; i += 1) {
+      const pid = 100 + i;
+      const tid = 200 + i;
+      const sid = 300 + i;
+      const settled = i % 2 === 0;
+      const day = String(i).padStart(2, '0');
+      stmts.push(
+        `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status)
+           VALUES (${pid}, 'fc${pid}', '旧将${i}', ${fx.sellerClub}, 'ST', 25, 70, 70, 5, 'normal');
+         INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, created_at)
+           VALUES (${tid}, 'transfer', ${pid}, ${fx.sellerClub}, ${fx.buyerClub}, 5, '${settled ? 'completed' : 'rejected'}', 1, 1, '2026-07-01T00:00:00Z');
+         INSERT INTO negotiation_sessions (id, transfer_id, player_id, club_id, expected_wage, attempt_count, status, created_at, settled_at, settled_wage, settle_source, release_fee)
+           VALUES (${sid}, ${tid}, ${pid}, ${fx.buyerClub}, 3, 1, '${settled ? 'settled' : 'cancelled'}', '2026-07-02T00:00:00Z', '2026-08-${day}T00:00:00Z', ${settled ? '3.2' : 'NULL'}, ${settled ? "'negotiation'" : 'NULL'}, 8);`,
+      );
+      if (!settled) {
+        stmts.push(
+          `INSERT INTO audit_log (actor, action, target_type, target_id, after, at, origin)
+             VALUES (NULL, 'negotiation_timeout', 'negotiation', ${sid}, '{"reason":"silence_timeout"}', '2026-08-${day}T00:00:00Z', 'trigger');`,
+        );
+      }
+    }
+    fx.sqlite.exec(stmts.join('\n'));
+  }
+
+  it('进行中无上限；已结束默认 10 条、按结束时间倒序并给游标，翻页能拿到底', async () => {
+    const fx = await seedSigning(freshEnv());
+    seedEnded(fx, 12);
+    const first = (await (await get('/api/negotiations?mine=1', 'tok-coach2', fx.env)).json()) as Mine;
+    expect(first.sessions.map((s) => s.id)).toEqual([fx.sessionId]);
+    expect(first.ended).toHaveLength(10);
+    expect(first.ended[0].endedAt).toBe('2026-08-12T00:00:00Z');
+    expect(first.endedNextBefore).toBe(first.ended[9].id);
+
+    const second = (await (
+      await get(`/api/negotiations?mine=1&endedBefore=${first.endedNextBefore}`, 'tok-coach2', fx.env)
+    ).json()) as Mine;
+    expect(second.ended).toHaveLength(2);
+    expect(second.endedNextBefore).toBeNull();
+  });
+
+  it('作废原因来自 audit_log；已结束行不返 attempts、成交行 outcome=signed', async () => {
+    const fx = await seedSigning(freshEnv());
+    seedEnded(fx, 4);
+    const mine = (await (await get('/api/negotiations?mine=1', 'tok-coach2', fx.env)).json()) as Mine;
+    const voided = mine.ended.find((s) => s.status === 'cancelled');
+    const signed = mine.ended.find((s) => s.status === 'settled');
+    expect(voided?.outcome).toBe('void');
+    expect(voided?.voidReason).toContain('静默超时');
+    expect(voided?.attempts).toEqual([]);
+    expect(signed?.outcome).toBe('signed');
+    expect(signed?.voidReason).toBeNull();
+    expect(signed?.attempts).toEqual([]);
+  });
+
+  it('endedLimit 生效且非法值 400', async () => {
+    const fx = await seedSigning(freshEnv());
+    seedEnded(fx, 5);
+    const three = (await (await get('/api/negotiations?mine=1&endedLimit=3', 'tok-coach2', fx.env)).json()) as Mine;
+    expect(three.ended).toHaveLength(3);
+    expect(three.endedNextBefore).not.toBeNull();
+    for (const bad of ['0', 'abc', '-1']) {
+      expect((await get(`/api/negotiations?mine=1&endedLimit=${bad}`, 'tok-coach2', fx.env)).status).toBe(400);
+    }
   });
 });

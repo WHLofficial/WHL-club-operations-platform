@@ -307,4 +307,45 @@ describe('v6.54.0 球员要求 · 过期折叠（DemandSection）', () => {
     expect(screen.getByText('过期9')).toBeTruthy();
     expect(container.querySelector('[data-demand-id="9"]')!.className).toContain('is-target');
   });
+
+  // v6.65.4：每张卡各自可折叠，卡头整行可点，正文 hidden 不卸载
+  describe('v6.65.4 单卡折叠', () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it('默认态：待处理展开、已接受收起', async () => {
+      renderDemand(
+        inbox({
+          active: [demand({ id: 1, playerName: '张三' })],
+          accepted: [demand({ id: 2, playerName: '李四', status: 'accepted', resolution: 'accepted' })],
+        }),
+      );
+      await screen.findAllByText('张三');
+      expect(document.getElementById('demand-body-1')?.hidden).toBe(false);
+      expect(document.getElementById('demand-body-2')?.hidden).toBe(true);
+      expect(screen.getAllByRole('button', { name: '收起这张要求' })).toHaveLength(1);
+      expect(screen.getByRole('button', { name: '展开这张要求' })).toBeTruthy();
+    });
+
+    it('收起再展开：还价草稿还在（hidden 不卸载）', async () => {
+      renderDemand(inbox({ active: [demand({ id: 1 })] }));
+      fireEvent.click(await screen.findByRole('button', { name: '还价' }));
+      fireEvent.change(screen.getByLabelText('还价工资（m/窗）'), { target: { value: '3.5' } });
+
+      fireEvent.click(screen.getByRole('button', { name: '收起这张要求' }));
+      expect(document.getElementById('demand-body-1')?.hidden).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: '展开这张要求' }));
+      expect((screen.getByLabelText('还价工资（m/窗）') as HTMLInputElement).value).toBe('3.5');
+    });
+
+    it('深链指定 id 强制展开已结束的卡', async () => {
+      renderDemand(
+        inbox({ accepted: [demand({ id: 2, status: 'accepted', resolution: 'accepted' })] }),
+        '/market/desk?tab=negotiations&demand=2',
+      );
+      await screen.findByText('球员要求');
+      expect(document.getElementById('demand-body-2')?.hidden).toBe(false);
+    });
+  });
 });

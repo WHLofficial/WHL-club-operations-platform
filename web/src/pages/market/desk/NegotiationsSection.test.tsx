@@ -54,6 +54,9 @@ function negoSession(patch: Partial<NegotiationSession> = {}): NegotiationSessio
     lastRisk: false,
     attempts: [],
     settled: null,
+    endedAt: null,
+    outcome: null,
+    voidReason: null,
     ...patch,
   };
 }
@@ -79,10 +82,14 @@ const WAGE_ROUND: Partial<NegotiationSession> = {
   ],
 };
 
-function renderNego(sessions: NegotiationSession[]) {
+function renderNego(sessions: NegotiationSession[], ended: NegotiationSession[] = [], endedNextBefore: number | null = null) {
   apiMock.mockImplementation((path: string) => {
     if (path === '/api/me/club') return Promise.resolve(ME_CLUB);
-    if (path === '/api/negotiations?mine=1') return Promise.resolve({ sessions });
+    if (path.startsWith('/api/negotiations?mine=1')) {
+      // 第二页只回空 ended，够断言游标被带上
+      if (path.includes('endedBefore=')) return Promise.resolve({ sessions, ended: [], endedNextBefore: null });
+      return Promise.resolve({ sessions, ended, endedNextBefore });
+    }
     // v6.54.0：页签顶部多了「球员要求」分组——本文件只测签约谈判，收件箱一律空
     if (path === '/api/club/contract-demands')
       return Promise.resolve({
@@ -366,5 +373,49 @@ describe('v6.65.2 谈判卡折叠', () => {
     expect(text).toContain('上次报价');
     expect(text).toContain('预期工资');
     expect(text).toContain('静默还剩');
+  });
+});
+
+// v6.65.4：已结束的谈判收进页签底部一块，默认收起
+describe('v6.65.4 已结束的谈判区', () => {
+  const settled = negoSession({
+    id: 31,
+    status: 'settled',
+    settled: { wage: 3.2, source: 'negotiation', message: '谈成了' },
+    endedAt: '2026-08-12T00:00:00Z',
+    outcome: 'signed',
+  });
+  const voided = negoSession({
+    id: 32,
+    status: 'cancelled',
+    settled: null,
+    endedAt: '2026-08-11T00:00:00Z',
+    outcome: 'void',
+    voidReason: '静默超时自动作废：超过静默时限还没有新报价',
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('默认收起成一行；展开后成交显示工资、作废显示原因', async () => {
+    renderNego([negoSession({})], [settled, voided]);
+    const head = await screen.findByRole('button', { name: /已结束的谈判 · 2 场/ });
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelectorAll('.nego-ended-row')).toHaveLength(0);
+
+    fireEvent.click(head);
+    expect(await screen.findByText('3.20m/窗')).toBeTruthy();
+    expect(screen.getByText(/静默超时自动作废/)).toBeTruthy();
+    expect(document.querySelectorAll('.nego-ended-row')).toHaveLength(2);
+  });
+
+  it('还有下一页时点「查看更多」按游标取第二页', async () => {
+    renderNego([negoSession({})], [settled], 31);
+    fireEvent.click(await screen.findByRole('button', { name: /已结束的谈判 · 1 场/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看更多' }));
+    await waitFor(() => {
+      expect(apiMock.mock.calls.some(([p]) => String(p).includes('endedBefore=31'))).toBe(true);
+    });
   });
 });

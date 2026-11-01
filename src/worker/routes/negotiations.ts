@@ -1,5 +1,5 @@
 // 签约谈判路由（附录 A〔4〕，👤=登录教练；操作限签入方俱乐部）
-// GET /api/negotiations?mine=1            我的谈判会话（含已结束，LIMIT 50）
+// GET /api/negotiations?mine=1            我的谈判会话（进行中全量 + 已结束分页，v6.65.4）
 // POST /api/negotiations/:transferId/release-fee   提交新 RC（返回 E 数值，仅签入方）
 // POST /api/negotiations/:sessionId/offer          工资报价（满意度文案返回）
 // POST /api/negotiations/:sessionId/preview        工资预览（只读：返回成功率档位 + 风险布尔）
@@ -31,7 +31,22 @@ async function requireTradableCoachClub(env: Env, request: Request): Promise<{ u
 app.get('/', async (c) => {
   const { clubId } = await requireCoachClub(c.env, c.req.raw);
   if (c.req.query('mine') !== '1') throw new HttpError(400, '只支持 ?mine=1 查自己的谈判');
-  return c.json({ sessions: await listMySessions(c.env, clubId) });
+  // v6.65.4 已结束区：游标 + 每页 10 条（上限 50），非法值直接 400 而不是悄悄回退默认
+  const rawBefore = c.req.query('endedBefore');
+  const rawLimit = c.req.query('endedLimit');
+  let endedBefore: number | null = null;
+  if (rawBefore !== undefined && rawBefore !== '') {
+    const n = Number(rawBefore);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, '已结束区的游标不对');
+    endedBefore = n;
+  }
+  let endedLimit = 10;
+  if (rawLimit !== undefined && rawLimit !== '') {
+    const n = Number(rawLimit);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, '已结束区每页条数不对');
+    endedLimit = Math.min(50, n);
+  }
+  return c.json(await listMySessions(c.env, clubId, { endedBefore, endedLimit }));
 });
 
 app.post('/:transferId/release-fee', async (c) => {

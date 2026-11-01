@@ -41,3 +41,19 @@ export function releaseFeeBounds(oldFee: number): [number, number] {
   }
   return [Math.max(1, Math.ceil(oldFee * 0.5)), Math.floor(oldFee * 1.5)];
 }
+
+/**
+ * 谈判作废原因 → 玩家看得懂的一句话（v6.65.4）。
+ * 入参是落库原值：`audit_log.action` 与 `audit_log.after` 里的 `reason`。
+ * 三条写入点见 negotiations.ts（超时）、bypass.ts（自助取消）、market-intervene.ts（管理介入）。
+ */
+export function voidReasonText(action: string | null, reason: string | null): string {
+  const why = (reason ?? '').trim();
+  if (why === 'silence_timeout') return '静默超时自动作废：超过静默时限还没有新报价';
+  if (why === 'ops_end') return '时段收口自动作废：谈判时段结束时仍没谈成';
+  if (why === 'self_cancel') return '教练自助取消';
+  if (action === 'admin_negotiation_void') return why ? `管理组作废：${why}` : '管理组作废';
+  if (action === 'negotiation_timeout') return '超时自动作废';
+  if (action === 'transfer_self_cancel') return '教练自助取消';
+  return why ? `已作废：${why}` : '已作废';
+}

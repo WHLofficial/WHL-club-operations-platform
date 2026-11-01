@@ -1,6 +1,6 @@
 // 谈判公开规则单测（§6.7：等级映射 / 成长年龄 / 新 RC 区间）
 import { describe, expect, it } from 'vitest';
-import { abilityLevel, AGENT_TIER_LABELS, ratingLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE } from '../src/core/negotiation-rules.ts';
+import { abilityLevel, AGENT_TIER_LABELS, ratingLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE, voidReasonText } from '../src/core/negotiation-rules.ts';
 
 describe('ratingLevel（十档映射）', () => {
   it.each([
@@ -53,5 +53,20 @@ describe('训练营合同常量与档位名', () => {
     expect(AGENT_TIER_LABELS[1]).toBe('温和');
     expect(AGENT_TIER_LABELS[2]).toBe('普通');
     expect(AGENT_TIER_LABELS[3]).toBe('苛刻');
+  });
+});
+
+// v6.65.4：已结束谈判的作废原因文案（audit_log 的 action/reason 映射成人话）
+describe('voidReasonText（作废原因）', () => {
+  it('静默超时 / 时段收口 / 自助取消 三档固定文案', () => {
+    expect(voidReasonText('negotiation_timeout', 'silence_timeout')).toContain('静默超时');
+    expect(voidReasonText('negotiation_timeout', 'ops_end')).toContain('时段收口');
+    expect(voidReasonText('transfer_self_cancel', 'self_cancel')).toContain('自助取消');
+  });
+
+  it('管理组作废带上理由；理由缺失时退回 action 兜底', () => {
+    expect(voidReasonText('admin_negotiation_void', '球员拒绝续约')).toBe('管理组作废：球员拒绝续约');
+    expect(voidReasonText('admin_negotiation_void', null)).toContain('管理组');
+    expect(voidReasonText(null, null)).toBe('已作废');
   });
 });

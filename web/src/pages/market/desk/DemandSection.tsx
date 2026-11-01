@@ -68,6 +68,39 @@ function utcIso(raw: string): string {
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
 }
 
+// v6.65.4：每张要求卡可折叠（与谈判卡同一套交互）。折叠是纯视图态——正文用 hidden 隐藏而不是卸载，
+// 否则还价面板里已经选好的数字、两段式确认都会被清掉。
+type FoldMap = Record<string, 'open' | 'closed'>;
+const DEMAND_FOLD_KEY = 'whl-demand-fold-v1';
+const DEMAND_FOLD_LIMIT = 200;
+
+function readDemandFold(): FoldMap {
+  try {
+    const raw = localStorage.getItem(DEMAND_FOLD_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: FoldMap = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v === 'open' || v === 'closed') out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeDemandFold(map: FoldMap) {
+  try {
+    const keys = Object.keys(map);
+    const trimmed: FoldMap = {};
+    for (const k of keys.slice(Math.max(0, keys.length - DEMAND_FOLD_LIMIT))) trimmed[k] = map[k];
+    localStorage.setItem(DEMAND_FOLD_KEY, JSON.stringify(trimmed));
+  } catch {
+    // 隐私模式 / 配额满：折叠状态记不住不影响功能
+  }
+}
+
 export default function DemandSection({ isCoach }: { isCoach: boolean }) {
   const { show, toastNode } = useToast();
   const invalidate = useDemandInvalidation();
@@ -97,6 +130,37 @@ export default function DemandSection({ isCoach }: { isCoach: boolean }) {
   const expiredShown = showAllExpired || targetInHiddenExpired ? expired : expired.slice(0, EXPIRED_VISIBLE);
   const expiredHidden = expired.length - expiredShown.length;
   const allIds = new Set([...active, ...accepted, ...recent].map((c) => c.id));
+
+  // v6.65.4 单卡折叠：默认按状态走（待处理 / 还价中展开，已接受 / 已拒绝收起），
+  // 手动操作过以本地记录为准；深链 ?demand=<id> 一律强制展开。
+  const [fold, setFold] = useState<FoldMap>(() => readDemandFold());
+  const cardOpen = (card: ContractDemandCard): boolean => {
+    if (targetId === card.id) return true;
+    const stored = fold[String(card.id)];
+    if (stored !== undefined) return stored === 'open';
+    return card.status === 'pending' || card.status === 'countered';
+  };
+  const toggleCard = (card: ContractDemandCard) => {
+    setFold((prev) => {
+      const next = { ...prev, [String(card.id)]: cardOpen(card) ? 'closed' : 'open' } as FoldMap;
+      writeDemandFold(next);
+      return next;
+    });
+  };
+  // 从「没有待处理」变回「有待处理」时不沿用旧的收起态：新要求要自己冒出来。
+  const prevActiveCount = useRef(active.length);
+  useEffect(() => {
+    if (prevActiveCount.current === 0 && active.length > 0) {
+      setFold((prev) => {
+        const next = { ...prev };
+        for (const c of active) delete next[String(c.id)];
+        writeDemandFold(next);
+        return next;
+      });
+    }
+    prevActiveCount.current = active.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.length]);
 
   // 目标卡滚到可视区（jsdom 没有 scrollIntoView，守卫写法照 OffersSection 的先例）
   useEffect(() => {
@@ -175,6 +239,8 @@ export default function DemandSection({ isCoach }: { isCoach: boolean }) {
           request={requestOf(card)}
           wageContext={wageContext}
           isTarget={targetId === card.id}
+          open={cardOpen(card)}
+          onToggle={() => toggleCard(card)}
           show={show}
           onChanged={invalidate}
           setRef={registerRef(card.id)}
@@ -188,6 +254,8 @@ export default function DemandSection({ isCoach }: { isCoach: boolean }) {
           request={requestOf(card)}
           wageContext={wageContext}
           isTarget={targetId === card.id}
+          open={cardOpen(card)}
+          onToggle={() => toggleCard(card)}
           show={show}
           onChanged={invalidate}
           setRef={registerRef(card.id)}
@@ -201,6 +269,8 @@ export default function DemandSection({ isCoach }: { isCoach: boolean }) {
           request={requestOf(card)}
           wageContext={wageContext}
           isTarget={targetId === card.id}
+          open={cardOpen(card)}
+          onToggle={() => toggleCard(card)}
           show={show}
           onChanged={invalidate}
           setRef={registerRef(card.id)}
@@ -238,6 +308,8 @@ function DemandCard({
   request,
   wageContext,
   isTarget,
+  open,
+  onToggle,
   show,
   onChanged,
   setRef,
@@ -246,11 +318,12 @@ function DemandCard({
   request: TransferRequestCard | null;
   wageContext: DemandWageContext;
   isTarget: boolean;
+  open: boolean;
+  onToggle: () => void;
   show: (text: string, err?: boolean) => void;
   onChanged: () => void;
   setRef: (el: HTMLElement | null) => void;
-}) {
-  const { time, dateTimeSec } = useTimeFmt();
+}) {  const { time, dateTimeSec } = useTimeFmt();
   const [panel, setPanel] = useState<'counter' | 'accept' | 'reject' | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -310,7 +383,14 @@ function DemandCard({
       data-demand-id={card.id}
       ref={setRef}
     >
-      <div className="demand-head">
+      <div
+        className="demand-head"
+        onClick={(e) => {
+          // 卡片头整行可点，但球员链接、按钮、输入框要保留自己的行为
+          if ((e.target as HTMLElement).closest('a, button, input, textarea, select')) return;
+          onToggle();
+        }}
+      >
         <h3>
           <Link to={playerPath({ id: card.playerId })}>{who}</Link> · 涨薪要求
           <span className={`badge ${badge.cls}`}>{badge.label}</span>
@@ -321,7 +401,22 @@ function DemandCard({
           )}
         </h3>
         <span className="demand-due mono">{deadlineText(card, time)}</span>
+        <button
+          type="button"
+          className="demand-toggle"
+          aria-expanded={open}
+          aria-controls={`demand-body-${card.id}`}
+          aria-label={open ? '收起这张要求' : '展开这张要求'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+        >
+          ▾
+        </button>
       </div>
+      {/* v6.65.4：正文 hidden 不卸载，保住还价面板里已填的数字与两段式确认 */}
+      <div id={`demand-body-${card.id}`} className="demand-body" hidden={!open}>
       <p className="hint">
         {card.position ?? '—'} · {card.age ?? '—'} 岁 · CA <span className="mono">{card.ca ?? '—'}</span>
         {/* 设计 §10.1 的副行还要求「效力 N 赛季」：收件箱 DTO 目前不下发 service_ticks 换算值
@@ -409,6 +504,7 @@ function DemandCard({
       ) : (
         <ClosedState card={card} request={request} />
       )}
+      </div>
     </section>
   );
 }

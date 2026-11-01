@@ -8,7 +8,7 @@
 // 即按会话快照重放 completeTransfer（过户单点本身幂等，见 transfers.ts）。
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
-import { abilityLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE } from '../core/negotiation-rules.ts';
+import { abilityLevel, releaseFeeBounds, TRAINEE_RELEASE_FEE, TRAINEE_WAGE, voidReasonText } from '../core/negotiation-rules.ts';
 import { AGENT_TIER_LABELS } from '../core/negotiation-rules.ts';
 import { attemptExpected, directFail, expectedWage, previewForecast, satisfactionText, successRate } from './negotiation-secret.ts';
 import { loadNegotiationContext, type AgentTierParams, type NegotiationContext } from './negotiation-context.ts';
@@ -635,56 +635,89 @@ export async function forceSettlePromotionSessions(env: Env, opts: ExpiryOpts): 
 }
 
 // 我的谈判列表（§6.10-2：只出 结局/剩余次数/满意度文案/风险布尔/E 数值；eff/p/阈值不出服务端）
-export async function listMySessions(env: Env, clubId: number): Promise<unknown[]> {
-  const db = env.DB;
-  const ctx = await loadNegotiationContext(db);
-  const rows = await db
-    .prepare(
-      `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source,
+// v6.65.4：进行中与已结束拆两条查询——历史不再挤占 active 的 50 行上限，已结束按 settled_at 倒序分页。
+export interface MySessionsOpts {
+  /** 已结束区的游标：只取 id < endedBefore 的行（null = 第一页） */
+  endedBefore?: number | null;
+  /** 已结束区每页条数，调用方已夹到 1..50 */
+  endedLimit?: number;
+}
+
+export interface MySessionsResult {
+  sessions: unknown[];
+  ended: unknown[];
+  /** 还有更早的已结束会话时给下一页的游标，否则 null */
+  endedNextBefore: number | null;
+}
+
+// 静默截止的锚点：到期引擎与列表倒计时共用这一个表达式（v6.65.2 起上移到列表常量之前）
+const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.created_at, ''),
+             COALESCE((SELECT MAX(a.created_at) FROM negotiation_attempts a WHERE a.session_id = s.id), ''))`;
+
+const SESSION_COLS = `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source, s.settled_at,
               t.type AS transfer_type, t.status AS transfer_status, t.fee,
               cf.name AS from_name, ct.name AS to_name, c_cur.release_fee AS current_rc,
               p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier,
-              ${SILENT_ANCHOR_SQL} AS silent_anchor
-       FROM negotiation_sessions s
+              ${SILENT_ANCHOR_SQL} AS silent_anchor`;
+
+const SESSION_JOINS = `FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
        JOIN players p ON p.id = s.player_id
        LEFT JOIN clubs cf ON cf.id = t.from_club_id
        LEFT JOIN clubs ct ON ct.id = t.to_club_id
-       LEFT JOIN contracts c_cur ON c_cur.player_id = s.player_id AND c_cur.is_active = 1
-       WHERE s.club_id = ? ORDER BY s.id DESC LIMIT 50`,
-    )
+       LEFT JOIN contracts c_cur ON c_cur.player_id = s.player_id AND c_cur.is_active = 1`;
+
+interface SessionListRow {
+  id: number;
+  transfer_id: number;
+  status: string;
+  release_fee: number | null;
+  expected_wage: number | null;
+  attempt_count: number;
+  settled_wage: number | null;
+  settle_source: string | null;
+  settled_at: string | null;
+  transfer_type: string;
+  transfer_status: string;
+  fee: number | null;
+  from_name: string | null;
+  to_name: string | null;
+  current_rc: number | null;
+  player_id: number;
+  player_fc_id: number | null;
+  player_name: string;
+  position: string | null;
+  age: number | null;
+  ca: number | null;
+  pa: number | null;
+  agent_tier: number;
+  silent_anchor: string;
+}
+
+export async function listMySessions(env: Env, clubId: number, opts: MySessionsOpts = {}): Promise<MySessionsResult> {
+  const db = env.DB;
+  const ctx = await loadNegotiationContext(db);
+  const endedLimit = opts.endedLimit ?? 10;
+  const endedBefore = opts.endedBefore ?? null;
+
+  const active = await db
+    .prepare(`${SESSION_COLS} ${SESSION_JOINS} WHERE s.club_id = ? AND s.status = 'active' ORDER BY s.id DESC`)
     .bind(clubId)
-    .all<{
-      id: number;
-      transfer_id: number;
-      status: string;
-      release_fee: number | null;
-      expected_wage: number | null;
-      attempt_count: number;
-      settled_wage: number | null;
-      settle_source: string | null;
-      transfer_type: string;
-      transfer_status: string;
-      fee: number | null;
-      from_name: string | null;
-      to_name: string | null;
-      current_rc: number | null;
-      player_id: number;
-      player_fc_id: number | null;
-      player_name: string;
-      position: string | null;
-      age: number | null;
-      ca: number | null;
-      pa: number | null;
-      agent_tier: number;
-      silent_anchor: string;
-    }>();
+    .all<SessionListRow>();
+  const endedPage = await db
+    .prepare(
+      `${SESSION_COLS} ${SESSION_JOINS}
+       WHERE s.club_id = ? AND s.status IN ('settled', 'cancelled') AND (? IS NULL OR s.id < ?)
+       ORDER BY COALESCE(s.settled_at, '') DESC, s.id DESC LIMIT ?`,
+    )
+    .bind(clubId, endedBefore, endedBefore, endedLimit)
+    .all<SessionListRow>();
 
   // v6.65.2：静默截止时刻给前端做倒计时，口径与到期引擎同一个 anchor（SILENT_ANCHOR_SQL）
   const silenceH = await silenceHours(db);
 
-  // 自愈扫描：会话已结算但过户未跟上的，先重放过户再返回
-  for (const row of rows.results) {
+  // 自愈扫描：会话已结算但过户未跟上的，先重放过户再返回（已结束区里才可能出现这种行）
+  for (const row of endedPage.results) {
     if (row.status === 'settled' && row.settle_source && row.transfer_status === 'signing') {
       await healSettlement(
         env,
@@ -707,7 +740,8 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
     }
   }
 
-  const ids = rows.results.map((r) => r.id);
+  // 对话流只给进行中的会话（v6.65.4：已结束区不返 attempts，避免历史页一次拉几百条）
+  const ids = active.results.map((r) => r.id);
   const attemptRows: AttemptListRow[] = [];
   for (let i = 0; i < ids.length; i += 90) {
     const slice = ids.slice(i, i + 90);
@@ -726,8 +760,13 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
     bySession.set(a.session_id, list);
   }
 
-  return rows.results.map((r) => {
-    const attempts = bySession.get(r.id) ?? [];
+  // 作废原因只对 cancelled 的走一次批量审计查询
+  const voidReasons = await loadVoidReasons(
+    db,
+    endedPage.results.filter((r) => r.status === 'cancelled').map((r) => r.id),
+  );
+
+  const toDto = (r: SessionListRow, attempts: AttemptListRow[], voidReason: string | null) => {
     const last = attempts[attempts.length - 1] ?? null;
     let lastSatisfaction: string | null = null;
     let lastRisk = false;
@@ -761,8 +800,55 @@ export async function listMySessions(env: Env, clubId: number): Promise<unknown[
       settled: r.status === 'settled' && r.settle_source
         ? { wage: r.settled_wage, source: r.settle_source, message: settleMessage(r.settle_source) }
         : null,
+      // v6.65.4 已结束区：结束时间 / 结局 / 作废原因（进行中的会话三项都是 null）
+      endedAt: r.status === 'active' ? null : r.settled_at,
+      outcome: r.status === 'active' ? null : r.status === 'settled' ? ('signed' as const) : ('void' as const),
+      voidReason,
     };
-  });
+  };
+
+  return {
+    sessions: active.results.map((r) => toDto(r, bySession.get(r.id) ?? [], null)),
+    ended: endedPage.results.map((r) => toDto(r, [], voidReasons.get(r.id) ?? null)),
+    endedNextBefore: endedPage.results.length === endedLimit ? endedPage.results[endedPage.results.length - 1].id : null,
+  };
+}
+
+/**
+ * 已作废会话的作废原因（v6.65.4，零迁移）：从 audit_log 批量取最近一条作废审计，
+ * 把 `action` + `after.reason` 交给纯映射函数转人话。
+ */
+async function loadVoidReasons(db: Env['DB'], sessionIds: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const ACTIONS = ['negotiation_timeout', 'transfer_self_cancel', 'admin_negotiation_void'];
+  for (let i = 0; i < sessionIds.length; i += 90) {
+    const slice = sessionIds.slice(i, i + 90);
+    if (slice.length === 0) continue;
+    const placeholders = slice.map(() => '?').join(', ');
+    const batch = await db
+      .prepare(
+        `SELECT target_id, action, after FROM audit_log
+         WHERE target_type = 'negotiation' AND target_id IN (${placeholders})
+           AND action IN (${ACTIONS.map(() => '?').join(', ')})
+         ORDER BY target_id, id DESC`,
+      )
+      .bind(...slice, ...ACTIONS)
+      .all<{ target_id: number; action: string | null; after: string | null }>();
+    for (const row of batch.results) {
+      if (out.has(row.target_id)) continue; // DESC 排序：每个会话取第一条（最近一次）
+      let reason: string | null = null;
+      if (row.after) {
+        try {
+          const parsed = JSON.parse(row.after) as { reason?: unknown };
+          reason = typeof parsed.reason === 'string' ? parsed.reason : null;
+        } catch {
+          reason = null;
+        }
+      }
+      out.set(row.target_id, voidReasonText(row.action, reason));
+    }
+  }
+  return out;
 }
 
 // ---- 作废签约谈判的收口（v6.49.0：管理介入与到期引擎共用一处） ----
@@ -846,9 +932,6 @@ interface SilentSessionRow {
   anchor: string;
   player_name: string;
 }
-
-const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.created_at, ''),
-             COALESCE((SELECT MAX(a.created_at) FROM negotiation_attempts a WHERE a.session_id = s.id), ''))`;
 
 const SILENT_SESSION_SELECT = `
   SELECT s.id, s.transfer_id, s.club_id, t.type AS transfer_type, ${SILENT_ANCHOR_SQL} AS anchor,

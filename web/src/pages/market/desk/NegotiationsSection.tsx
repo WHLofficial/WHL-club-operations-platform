@@ -121,9 +121,11 @@ function attemptSysText(a: NegotiationSession['attempts'][number]): string | nul
 export default function NegotiationsSection() {
   const { show, toastNode } = useToast();
   const { isCoach } = useMyClub();
+  const { time } = useTimeFmt();
   const qc = useQueryClient();
   const sessionsQuery = useMyNegotiations(isCoach);
-  const sessions = sessionsQuery.data ?? null;
+  // v6.65.4：响应分成进行中（sessions）与已结束（ended，游标分页），进行中不再受 50 行上限挤压
+  const sessions = sessionsQuery.data?.pages[0]?.sessions ?? null;
   const loadError = sessionsQuery.isError
     ? sessionsQuery.error instanceof Error
       ? sessionsQuery.error.message
@@ -132,7 +134,16 @@ export default function NegotiationsSection() {
   const refresh = () => qc.invalidateQueries({ queryKey: qk.myNegotiations });
 
   const [justSigned, setJustSigned] = useState<{ id: number; name: string } | null>(null);
-  const active = useMemo(() => (sessions ?? []).filter((s) => s.status === 'active'), [sessions]);
+  const active = useMemo(() => sessions ?? [], [sessions]);
+
+  // 已结束区：多页拼起来后按 id 去重（游标翻页的边界会重叠一行）
+  const ended = useMemo(() => {
+    const seen = new Set<number>();
+    return (sessionsQuery.data?.pages ?? [])
+      .flatMap((p) => p.ended)
+      .filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
+  }, [sessionsQuery.data]);
+  const [endedOpen, setEndedOpen] = useState(false);
 
   // v6.65.2：折叠状态与「最后看过」都放本地。默认值只在没有记录时生效：多张全收起、单张保持展开。
   const now = useMinuteTick();
@@ -231,6 +242,51 @@ export default function NegotiationsSection() {
           />
         );
       })}
+
+      {/* v6.65.4 已结束区：默认收起，按结束时间倒序；正文只放最终结局，不拉对话流 */}
+      {ended.length > 0 && (
+        <div className="nego-ended">
+          <button
+            type="button"
+            className="nego-ended-head"
+            aria-expanded={endedOpen}
+            onClick={() => setEndedOpen((v) => !v)}
+          >
+            <span className="nego-ended-title">已结束的谈判 · {ended.length} 场</span>
+            <span className="nego-fold" aria-hidden="true">
+              ▾
+            </span>
+          </button>
+          {endedOpen && (
+            <div className="nego-ended-list">
+              {ended.map((s) => (
+                <div className="nego-ended-row" key={s.id}>
+                  <span className={`badge ${s.outcome === 'signed' ? 'green' : 'gray'}`}>
+                    {s.outcome === 'signed' ? '成交' : '作废'}
+                  </span>
+                  <Link to={playerPath({ id: s.player.id })}>{s.player.name}</Link>
+                  <span className="mono">
+                    {s.outcome === 'signed' ? `${money(s.settled?.wage ?? 0)}m/窗` : '未签约'}
+                  </span>
+                  <span className="muted">{s.toClubName ?? '—'}</span>
+                  <span className="mono nego-ended-at">{s.endedAt ? time(s.endedAt) : '—'}</span>
+                  {s.outcome === 'void' && <span className="muted">{s.voidReason ?? '已作废'}</span>}
+                </div>
+              ))}
+              {sessionsQuery.hasNextPage && (
+                <button
+                  type="button"
+                  className="btn btn-ghost nego-ended-more"
+                  disabled={sessionsQuery.isFetchingNextPage}
+                  onClick={() => void sessionsQuery.fetchNextPage()}
+                >
+                  {sessionsQuery.isFetchingNextPage ? '正在翻…' : '查看更多'}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ShortlistIdsResponse, type ShortlistResponse, type VoucherLedgerResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type NegotiationSession, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type ShortlistIdsResponse, type ShortlistResponse, type VoucherLedgerResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type MyNegotiations, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -131,11 +131,14 @@ export function useClubBalance(enabled = true) {
 }
 
 // 我的谈判会话（v6.32.0 自 desk/NegotiationsSection 收编）：转会台页签计数与谈判区块共用同一个
-// query 键，命中缓存不重复发请求。
+// query 键，命中缓存不重复发请求。v6.65.4 起响应分成进行中（sessions）与已结束（ended，游标分页）。
 export function useMyNegotiations(isCoach: boolean) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.myNegotiations,
-    queryFn: async () => (await api<{ sessions: NegotiationSession[] }>('/api/negotiations?mine=1')).sessions,
+    queryFn: ({ pageParam }) =>
+      api<MyNegotiations>(`/api/negotiations?mine=1${pageParam === null ? '' : `&endedBefore=${pageParam}`}`),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.endedNextBefore,
     enabled: isCoach,
   });
 }

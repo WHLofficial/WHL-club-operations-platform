@@ -8764,6 +8764,96 @@ button.sqc-pos:hover {
   color: var(--terracotta-deep);
 }
 
+/* v6.65.4 单卡折叠：卡头整行可点，右侧 chevron 是真按钮（键盘可达）。
+   正文 hidden 只是不显示，DOM 与内部状态都留着（还价面板的草稿不能丢）。 */
+.demand-head {
+  cursor: pointer;
+}
+
+.demand-body[hidden] {
+  display: none;
+}
+
+.demand-toggle {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.demand-toggle:hover {
+  color: var(--terracotta-deep);
+  border-color: var(--terracotta);
+}
+
+.demand-toggle[aria-expanded='true'] {
+  transform: rotate(180deg);
+}
+
+/* 已结束的谈判（v6.65.4）：页面底部一块，默认收起成一行 */
+.nego-ended {
+  margin: 18px 0 8px;
+}
+
+.nego-ended-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.nego-ended-title {
+  font-weight: 600;
+}
+
+.nego-ended-head[aria-expanded='true'] .nego-fold {
+  transform: rotate(180deg);
+}
+
+.nego-ended-list {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.nego-ended-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-warm, var(--paper));
+  font-size: 13px;
+}
+
+.nego-ended-at {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.nego-ended-more {
+  justify-self: start;
+}
+
 /* 深链落点：.is-target 在文件前部，会被上面的卡面/纸面底色盖掉（后定义同权重胜），
    所以在本分组末尾补一条更具体的选择器，把高亮重新拿回来。 */
 .demand-card.is-target,

@@ -1028,6 +1028,18 @@ export interface NegotiationSession {
   lastRisk: boolean;
   attempts: { attemptNo: number; offeredWage: number; result: string; at: string; feedback: string | null }[];
   settled: { wage: number | null; source: string; message: string } | null;
+  // v6.65.4 已结束区：结束时间 / 结局 / 作废原因（进行中的会话三项都是 null，attempts 也只给进行中）
+  endedAt: string | null;
+  outcome: 'signed' | 'void' | null;
+  voidReason: string | null;
+}
+
+// GET /api/negotiations?mine=1 的响应（v6.65.4 起进行中与已结束分开）：
+// sessions = 进行中全量；ended = 已结束一页（默认 10 条，按结束时间倒序）；endedNextBefore = 下一页游标
+export interface MyNegotiations {
+  sessions: NegotiationSession[];
+  ended: NegotiationSession[];
+  endedNextBefore: number | null;
 }
 
 // 工资预览（v6.40.0）：POST /api/negotiations/:sessionId/preview 的响应。只读——不落库、不耗轮次、

@@ -65,7 +65,9 @@ const NEGOTIATIONS = {
   sessions: [
     negoSession({}),
     negoSession({ id: 22, transferId: 32, releaseFee: 9, rcBounds: [6, 12], remaining: 2, attemptsUsed: 1 }),
-    // settled 会话：页签计数不得计入（只数 active），也不再渲染「已落定的谈判」表
+  ],
+  // 已结算会话进「已结束」区（v6.65.4）：页签计数只数 active，区块默认收起
+  ended: [
     negoSession({
       id: 23,
       transferId: 33,
@@ -74,9 +76,12 @@ const NEGOTIATIONS = {
       remaining: 0,
       attemptsUsed: 1,
       settled: { wage: 6.25, source: 'negotiation', message: '谈妥签约' },
+      endedAt: '2026-09-20T00:00:00Z',
+      outcome: 'signed',
       player: { id: 8, fcId: 100008, name: '前锋丁', position: 'ST', age: 26, ca: 78, pa: 80 },
     }),
   ],
+  endedNextBefore: null,
 };
 
 const BIDS = {
