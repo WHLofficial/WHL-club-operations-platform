@@ -538,6 +538,64 @@ describe('TC-B 审批与拒绝', () => {
 });
 
 // ---------------------------------------------------------------------------
+// v6.66.1：消费中心候选放开到本队全部球员（含训练营）
+// 用例编号对应 docs/test-plans/v6.66.1-shop-all-players.md（TC-S1–S4）
+
+async function squadState(fx: Fixture) {
+  const res = await app.request('/api/shop/squad-state', { headers: { Cookie: COACH } }, fx.env);
+  expect(res.status).toBe(200);
+  return (await res.json()) as { clubId: number; players: { id: number; status: string }[] };
+}
+
+describe('v6.66.1 全队候选（TC-S1–S4）', () => {
+  it('TC-S1 normal / listed / trainee 三状态齐出且 status 正确', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101, status: 'normal' });
+    seedPlayer(fx, 2, { clubId: 101, status: 'listed' });
+    seedPlayer(fx, 3, { clubId: 101, status: 'trainee' });
+    const state = await squadState(fx);
+    expect(state.clubId).toBe(101);
+    expect(state.players.map((p) => p.id)).toEqual([1, 2, 3]);
+    expect(state.players.map((p) => p.status)).toEqual(['normal', 'listed', 'trainee']);
+  });
+
+  it('TC-S2 排除他队与 club_id 为空的球员', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101 });
+    seedPlayer(fx, 4, { clubId: 102 });
+    seedPlayer(fx, 5, { clubId: null });
+    const state = await squadState(fx);
+    expect(state.players.map((p) => p.id)).toEqual([1]);
+  });
+
+  it('TC-S3 训练营球员买 PA：提交 201、审批后 PA 生效', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    // 本用例只种一名球员 ⇒ 自增主键为 1（seedPlayer 的 id 参数写的是 fc_id）
+    seedPlayer(fx, 1, { clubId: 101, status: 'trainee', growable: 1, pa: 88 });
+    const res = await coachPost(fx, { category: 'pa', payload: { playerId: 1, points: 2 } });
+    expect(res.status).toBe(201);
+    const orderId = ((await res.json()) as { order: { id: number } }).order.id;
+    expect((await approve(fx, orderId)).status).toBe(200);
+    expect((fx.sqlite.prepare('SELECT pa FROM players WHERE id = 1').get() as { pa: number }).pa).toBe(90);
+  });
+
+  it('TC-S4 训练营球员买徽章：prepare + approve 全通', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 1, { clubId: 101, status: 'trainee' });
+    const res = await coachPost(fx, { category: 'badge', payload: { playerId: 1, kind: 'gold', psid: 5 } });
+    expect(res.status).toBe(201);
+    const orderId = ((await res.json()) as { order: { id: number } }).order.id;
+    expect((await approve(fx, orderId)).status).toBe(200);
+    const row = fx.sqlite.prepare("SELECT kind, psid, source FROM player_playstyles WHERE player_id = 1 AND source = 'shop'").get();
+    expect(row).toEqual({ kind: 'gold', psid: 5, source: 'shop' });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TC-C：数据语义与保护
 
 describe('TC-C 数据语义与同值锁', () => {

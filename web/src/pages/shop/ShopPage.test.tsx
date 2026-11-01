@@ -9,10 +9,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../lib/auth.tsx';
 import ShopPage from './ShopPage.tsx';
 
-const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
+const { apiMock, apiPostMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiPostMock: vi.fn() }));
 vi.mock('../../lib/api.ts', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../lib/api.ts')>();
-  return { ...mod, api: apiMock, apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn() };
+  return { ...mod, api: apiMock, apiPost: apiPostMock, apiPut: vi.fn(), apiDelete: vi.fn() };
 });
 
 function order(patch: Record<string, unknown> = {}) {
@@ -72,6 +72,7 @@ const hintOf = () => document.querySelector('.banner.warn[role="status"]');
 afterEach(() => {
   cleanup();
   apiMock.mockReset();
+  apiPostMock.mockReset();
 });
 
 describe('v6.40.0 站内信深链落点（ShopPage 工单，TC-JUMP-02）', () => {
@@ -139,6 +140,7 @@ function squadPlayer(patch: Record<string, unknown> = {}) {
     name: '测试前锋',
     number: 9,
     growable: true,
+    status: 'normal',
     pa: 90,
     position: 'ST',
     zones: ['ST', null, null, null],
@@ -295,5 +297,87 @@ describe('v6.65.3 可支配拆解条与券抵标注', () => {
     const text = String(confirmSpy.mock.calls[0]![0]);
     expect(text).toContain('支付 8.00m');
     expect(text).toContain('消费券抵 0.45m，实付 7.55m');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* v6.66.1 全队球员分组（TC-W1–W3、TC-R1，docs/test-plans/v6.66.1-shop-all-players.md） */
+
+function playerSelect(): HTMLSelectElement {
+  const el = document.querySelector('select') as HTMLSelectElement | null;
+  expect(el, '球员下拉应渲染').toBeTruthy();
+  return el as HTMLSelectElement;
+}
+
+function groupSummary(sel: HTMLSelectElement) {
+  return [...sel.querySelectorAll('optgroup')].map((g) => ({
+    label: g.getAttribute('label'),
+    ids: [...g.querySelectorAll('option')].map((o) => (o as HTMLOptionElement).value),
+  }));
+}
+
+describe('v6.66.1 球员下拉按名单桶分组', () => {
+  it('TC-W1 三状态分组、文本保持 #号 姓名、未知状态落「其他」', async () => {
+    const players = [
+      squadPlayer({ id: 6, name: '一线前锋', number: 9, status: 'normal' }),
+      squadPlayer({ id: 7, name: '青训小将', number: null, status: 'trainee' }),
+      squadPlayer({ id: 8, name: '挂牌中场', number: 5, status: 'listed' }),
+      squadPlayer({ id: 9, name: '外租球员', number: null, status: 'loan' }),
+    ];
+    renderShop('/shop?tab=badge', [], { catalog: SHOP_CATALOG, players });
+    await waitFor(() => expect(document.querySelectorAll('optgroup').length).toBe(4));
+
+    const sel = playerSelect();
+    expect(groupSummary(sel)).toEqual([
+      { label: '一线队', ids: ['6'] },
+      { label: '训练营', ids: ['7'] },
+      { label: '挂牌中', ids: ['8'] },
+      { label: '其他', ids: ['9'] },
+    ]);
+    // 占位项留在 select 直属层，不属于任何组
+    expect((sel.options[0] as HTMLOptionElement).value).toBe('');
+    expect(sel.options[0]!.parentElement?.tagName).toBe('SELECT');
+    expect([...sel.querySelectorAll('optgroup option')].map((o) => o.textContent)).toEqual([
+      '#9 一线前锋',
+      '青训小将',
+      '#5 挂牌中场',
+      '外租球员',
+    ]);
+  });
+
+  it('TC-W3 只有未知状态时仍渲染「其他」组，不静默丢人', async () => {
+    renderShop('/shop?tab=badge', [], { catalog: SHOP_CATALOG, players: [squadPlayer({ id: 9, name: '外租球员', status: 'loan' })] });
+    await waitFor(() => expect(document.querySelectorAll('optgroup').length).toBe(1));
+    expect(groupSummary(playerSelect())).toEqual([{ label: '其他', ids: ['9'] }]);
+  });
+
+  it('TC-W2 空组不渲染 + 训练营球员提交 body 带正确 playerId', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    apiPostMock.mockResolvedValue({ summary: '给 青训小将 加 1 点 PA' });
+    renderShop('/shop?tab=pa', [], { catalog: SHOP_CATALOG, players: [squadPlayer({ id: 7, name: '青训小将', number: null, status: 'trainee' })] });
+    await waitFor(() => expect(document.querySelectorAll('optgroup').length).toBe(1));
+
+    const sel = playerSelect();
+    expect(groupSummary(sel)).toEqual([{ label: '训练营', ids: ['7'] }]);
+    fireEvent.change(sel, { target: { value: '7' } });
+    await waitFor(() => {
+      const submit = [...document.querySelectorAll('button')].find((b) => b.textContent === '提交') as HTMLButtonElement | undefined;
+      expect(submit, 'PA 卡提交按钮应渲染').toBeTruthy();
+      expect(submit!.disabled).toBe(false);
+    });
+    fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === '提交')!);
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
+    expect(apiPostMock).toHaveBeenCalledWith('/api/shop/orders', { category: 'pa', payload: { playerId: 7, points: 1 }, note: null });
+    confirmSpy.mockRestore();
+  });
+
+  it('TC-R1 PA 卡 growable 过滤不变：不可成长的训练营球员仍不出现在买 PA 下拉', async () => {
+    const players = [
+      squadPlayer({ id: 7, name: '青训小将', number: null, status: 'trainee', growable: true }),
+      squadPlayer({ id: 10, name: '成年陪练', number: 3, status: 'trainee', growable: false }),
+    ];
+    renderShop('/shop?tab=pa', [], { catalog: SHOP_CATALOG, players });
+    await waitFor(() => expect(document.querySelectorAll('optgroup').length).toBe(1));
+    expect(groupSummary(playerSelect())).toEqual([{ label: '训练营', ids: ['7'] }]);
   });
 });
