@@ -18,6 +18,7 @@ import {
   isReturnToFormerClub,
   loadTransfer,
   listingIdFromTransfer,
+  parsePreSettleSnapshot,
   type ReviewDecision,
   type TransferRow,
 } from './transfers.ts';
@@ -273,6 +274,23 @@ async function requireMyActiveSession(
 // F 在提交时已定死的成约路径（续约/匹配/海捞）：附加费按 F 收，谈判中不得再改
 export const FIXED_FEE_TYPES: ReadonlySet<string> = new Set(['rc_change', 'match', 'free_agent', 'promotion']);
 
+/**
+ * 新违约金上下限的基准（v6.67.0）：**过户前**那份合同，不是现行合同。
+ *
+ * 换队类单据在审核通过时就过户了，此时现行合同已经是买方那一份；自由身/无合同成交还会先落一份
+ * `release_fee = 0` 的占位合同（transfers.ts 的桥接分支），拿它算区间会把「本来没有旧合同」的单
+ * 错卡在 1~10m。所以一律读 `pre_settle_snapshot.contract`；快照缺失（0088 之前的在途单）才回落
+ * 现行合同行——那时还没过户，现行合同仍是卖方那份。两者都没有 ⇒ null = 可自由定（下限 1、上限不设）。
+ */
+export function rcBoundsFor(
+  transfer: Pick<TransferRow, 'pre_settle_snapshot'>,
+  liveReleaseFee: number | null,
+): [number, number] | null {
+  const snap = parsePreSettleSnapshot(transfer);
+  const base = snap ? (snap.contract?.release_fee ?? null) : liveReleaseFee;
+  return base === null ? null : releaseFeeBounds(base);
+}
+
 // 提交新违约金（整数 m）：±10/±50% 区间按球员现行 RC 校验；重算并快照 E（重设允许）
 export async function submitReleaseFee(
   env: Env,
@@ -305,13 +323,17 @@ export async function submitReleaseFee(
 
   const fee = Number(feeInput);
   if (!Number.isInteger(fee) || fee <= 0) throw new HttpError(400, '新违约金须为正整数（单位 m）');
-  const contract = await db
+  // v6.67.0：上下限以过户前合同为基准；没有过户前合同（自由身/CPU 强拍）⇒ 可自由定。
+  // 现行合同行只给 0088 之前的在途单兜底（那时还没过户，现行合同仍是卖方那份）。
+  const live = await db
     .prepare('SELECT release_fee FROM contracts WHERE player_id = ? AND is_active = 1')
     .bind(transfer.player_id)
     .first<{ release_fee: number | null }>();
-  if (!contract) throw new HttpError(409, '球员没有现行合同，数据不完整');
-  const [low, high] = releaseFeeBounds(contract.release_fee ?? 0);
-  if (fee < low || fee > high) throw new HttpError(400, `新违约金需在 ${low}~${high} 之间（整数 m）`);
+  const bounds = rcBoundsFor(transfer, live?.release_fee ?? null);
+  if (bounds) {
+    const [low, high] = bounds;
+    if (fee < low || fee > high) throw new HttpError(400, `新违约金需在 ${low}~${high} 之间（整数 m）`);
+  }
 
   const player = await loadPlayerFacts(db, transfer.player_id);
   if (!player || player.ca === null || player.pa === null || player.age === null) {
@@ -706,7 +728,7 @@ const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.crea
              COALESCE((SELECT MAX(a.created_at) FROM negotiation_attempts a WHERE a.session_id = s.id), ''))`;
 
 const SESSION_COLS = `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source, s.settled_at,
-              t.type AS transfer_type, t.status AS transfer_status, t.fee,
+              t.type AS transfer_type, t.status AS transfer_status, t.fee, t.pre_settle_snapshot AS transfer_snapshot,
               cf.name AS from_name, ct.name AS to_name, c_cur.release_fee AS current_rc,
               p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.age, p.ca, p.pa, p.agent_tier,
               ${SILENT_ANCHOR_SQL} AS silent_anchor`;
@@ -731,6 +753,7 @@ interface SessionListRow {
   transfer_type: string;
   transfer_status: string;
   fee: number | null;
+  transfer_snapshot: string | null;
   from_name: string | null;
   to_name: string | null;
   current_rc: number | null;
@@ -839,8 +862,9 @@ export async function listMySessions(env: Env, clubId: number, opts: MySessionsO
       agentTier: r.agent_tier,
       agentTierLabel: AGENT_TIER_LABELS[r.agent_tier] ?? '普通',
       releaseFee: r.release_fee,
-      // 新 RC 合法区间是公开规则（4.3.1 ±10/±50%），给前端做表单提示
-      rcBounds: r.current_rc !== null && r.status === 'active' ? releaseFeeBounds(r.current_rc) : null,
+      // 新 RC 合法区间是公开规则（4.3.1 ±10/±50%），给前端做表单提示；
+      // v6.67.0：基准是过户前合同，没有基准 ⇒ null（前端提示「可自由定」）
+      rcBounds: r.status === 'active' ? rcBoundsFor({ pre_settle_snapshot: r.transfer_snapshot }, r.current_rc) : null,
       expectedWage: r.expected_wage,
       attemptsUsed: r.attempt_count,
       remaining: Math.max(0, ctx.maxAttempts - r.attempt_count),

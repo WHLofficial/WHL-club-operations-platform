@@ -123,7 +123,7 @@ export interface PreSettleSnapshot {
   tax: number;
 }
 
-export function parsePreSettleSnapshot(transfer: TransferRow): PreSettleSnapshot | null {
+export function parsePreSettleSnapshot(transfer: Pick<TransferRow, 'pre_settle_snapshot'>): PreSettleSnapshot | null {
   if (!transfer.pre_settle_snapshot) return null;
   try {
     return JSON.parse(transfer.pre_settle_snapshot) as PreSettleSnapshot;

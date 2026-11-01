@@ -394,16 +394,24 @@ describe('强制拍卖（4.4.5）', () => {
 
     const taskId = await openReviewTaskId(fx);
     expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
-    // CPU 卖方没有平台合同可谈 RC，按成交价固定 F，直接谈工资
+    // v6.67.0：强制拍卖不再按成交价固定 F——CPU 卖方没有过户前合同 ⇒ 可自由定（rcBounds = null）
     const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
     const session = ((await mine.json()) as {
-      sessions: { id: number; transferId: number; releaseFee: number | null; expectedWage: number | null }[];
+      sessions: {
+        id: number;
+        transferId: number;
+        releaseFee: number | null;
+        expectedWage: number | null;
+        rcBounds: [number, number] | null;
+      }[];
     }).sessions.find((s) => s.transferId === transferRow!.id);
-    expect(session).toMatchObject({ releaseFee: 6 });
-    expect(session?.expectedWage).toBeGreaterThan(0);
-    expect(
-      (await post(`/api/negotiations/${session!.id}/offer`, { wage: session!.expectedWage }, 'tok-coach2', fx.env)).status,
-    ).toBe(200);
+    expect(session).toMatchObject({ releaseFee: null, expectedWage: null, rcBounds: null });
+    // 12m 超出「以 0 为基准」会算出的 1~10 区间 ⇒ 能过就证明真的是自由定
+    const feeRes = await post(`/api/negotiations/${session!.id}/release-fee`, { fee: 12 }, 'tok-coach2', fx.env);
+    expect(feeRes.status).toBe(200);
+    const e = ((await feeRes.json()) as { releaseFee: number; expectedWage: number }).expectedWage;
+    expect(e).toBeGreaterThan(0);
+    expect((await post(`/api/negotiations/${session!.id}/offer`, { wage: e }, 'tok-coach2', fx.env)).status).toBe(200);
 
     expect(
       sqlGet<{ status: string; tax: number; fee: number; from_club_id: number | null }>(
@@ -430,7 +438,7 @@ describe('强制拍卖（4.4.5）', () => {
         fx.sqlite,
         'SELECT club_id, release_fee, is_active FROM contracts WHERE player_id = 60',
       ),
-    ).toEqual({ club_id: fx.buyer, release_fee: 6, is_active: 1 });
+    ).toEqual({ club_id: fx.buyer, release_fee: 12, is_active: 1 });
   });
 
   it('v6.60.7：CPU 队强拍无人出价 → 不收下架费、不造解约单，球员留在 CPU 队', async () => {
@@ -775,16 +783,23 @@ describe('强制拍卖（4.4.5）', () => {
     const taskId = await openReviewTaskId(fx);
     expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
 
-    // 自由身没有现行合同：开会时按成交价固定 F（没有 release-fee 第一步），直接谈工资
+    // v6.67.0：自由身没有过户前合同 ⇒ 同样可自由定违约金（不再是按成交价定死）
     const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
     const session = ((await mine.json()) as {
-      sessions: { id: number; transferId: number; releaseFee: number | null; expectedWage: number | null }[];
+      sessions: {
+        id: number;
+        transferId: number;
+        releaseFee: number | null;
+        expectedWage: number | null;
+        rcBounds: [number, number] | null;
+      }[];
     }).sessions.find((s) => s.transferId === transferRow!.id);
-    expect(session).toMatchObject({ releaseFee: 5 });
-    expect(session?.expectedWage).toBeGreaterThan(0);
-    expect(
-      (await post(`/api/negotiations/${session!.id}/offer`, { wage: session!.expectedWage }, 'tok-coach2', fx.env)).status,
-    ).toBe(200);
+    expect(session).toMatchObject({ releaseFee: null, expectedWage: null, rcBounds: null });
+    const feeRes = await post(`/api/negotiations/${session!.id}/release-fee`, { fee: 8 }, 'tok-coach2', fx.env);
+    expect(feeRes.status).toBe(200);
+    const e = ((await feeRes.json()) as { releaseFee: number; expectedWage: number }).expectedWage;
+    expect(e).toBeGreaterThan(0);
+    expect((await post(`/api/negotiations/${session!.id}/offer`, { wage: e }, 'tok-coach2', fx.env)).status).toBe(200);
 
     expect(
       sqlGet<{ status: string; tax: number; fee: number; from_club_id: number | null }>(
@@ -810,6 +825,60 @@ describe('强制拍卖（4.4.5）', () => {
         fx.sqlite,
         'SELECT club_id, release_fee, is_active FROM contracts WHERE player_id = 61',
       ),
-    ).toEqual({ club_id: fx.buyer, release_fee: 5, is_active: 1 });
+    ).toEqual({ club_id: fx.buyer, release_fee: 8, is_active: 1 });
+  });
+
+  // v6.67.0：强制拍卖与普通转会同一口径——卖方是真实俱乐部时，买方在签约谈判里按**过户前合同**
+  // 定新违约金（区间 ±10/±50%），不再是旧口径那样连带合同成交也只能谈工资
+  it('v6.67.0：真实俱乐部球员强拍，买方按过户前合同定违约金（区间 10~30）', async () => {
+    const fx = await seedAuction();
+    const create = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
+    fx.sqlite.exec(
+      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
+                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
+    );
+    await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
+
+    const transferRow = sqlGet<{ id: number; type: string; from_club_id: number | null }>(
+      fx.sqlite,
+      'SELECT id, type, from_club_id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    expect(transferRow).toMatchObject({ type: 'forced_auction', from_club_id: fx.club });
+
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+
+    // 过户前合同 RC = 20 ⇒ 区间仍是 10~30（拿买方那份合同或占位合同都会算错）
+    const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
+    const session = ((await mine.json()) as {
+      sessions: {
+        id: number;
+        transferId: number;
+        releaseFee: number | null;
+        expectedWage: number | null;
+        rcBounds: [number, number] | null;
+      }[];
+    }).sessions.find((s) => s.transferId === transferRow!.id);
+    expect(session).toMatchObject({ releaseFee: null, rcBounds: [10, 30] });
+
+    expect(
+      (await post(`/api/negotiations/${session!.id}/release-fee`, { fee: 9 }, 'tok-coach2', fx.env)).status,
+    ).toBe(400);
+    const feeRes = await post(`/api/negotiations/${session!.id}/release-fee`, { fee: 30 }, 'tok-coach2', fx.env);
+    expect(feeRes.status).toBe(200);
+    const e = ((await feeRes.json()) as { expectedWage: number }).expectedWage;
+    expect((await post(`/api/negotiations/${session!.id}/offer`, { wage: e }, 'tok-coach2', fx.env)).status).toBe(200);
+
+    expect(
+      sqlGet<{ club_id: number; release_fee: number; is_active: number }>(
+        fx.sqlite,
+        'SELECT club_id, release_fee, is_active FROM contracts WHERE player_id = 46',
+      ),
+    ).toEqual({ club_id: fx.buyer, release_fee: 30, is_active: 1 });
   });
 });

@@ -1088,17 +1088,9 @@ export async function approveTransferDeal(
       return { status: opened.status };
     }
     default:
-      // v6.60.5：自由身强制拍卖没有现行合同可谈 RC——成交价在竞价时已定死，按海捞口径开会
-      // （fixedReleaseFee = 成交价），买家直接谈工资；成约时 completeTransfer 的
-      // saleFromClubId=null 分支新签合同，成交款销毁。
-      // v6.60.7：CPU 队同理——CPU 不入账，也不按队内合同谈 RC，直接固定成交价。
-      if (
-        transfer.type === 'forced_auction' &&
-        (transfer.from_club_id === null || (await cpuClubIds(env.DB)).has(transfer.from_club_id))
-      ) {
-        if (transfer.fee === null) throw new HttpError(409, '转会单缺成交价，数据不完整');
-        return settleThenOpen({ fixedReleaseFee: transfer.fee });
-      }
+      // v6.67.0：强制拍卖与普通转会同一口径——新违约金由买方在签约谈判里按**过户前合同**谈
+      // （区间见 negotiations.ts 的 rcBoundsFor）；自由身/CPU 卖方没有过户前合同 ⇒ 可自由定。
+      // 旧口径（v6.60.5 自由身、v6.60.7 CPU 卖方把 RC 定死成成交价）已取消。
       // §5.4 回原队 A 分支（v6.54.0 步骤 5）：本窗已闹过涨薪的买回 = 跳过签约谈判、纯回归。
       // 本窗额度已耗尽（放着 demand 行），买家按合同行现值带回工资/RC/合同类型 → 直接过户；
       // 物理面（效力/保护期/签约时刻）与直拒后果由 completeTransfer 的快照恢复与回挂语句承担。
