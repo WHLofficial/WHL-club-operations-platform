@@ -42,6 +42,7 @@ import { sqlDisplayName } from '../core/player-name.ts';
 import { DEFAULT_WAGE_CAP_BY_TIER } from '../core/squad-rules.ts';
 import { deriveClubTier, tierCache, type Tier } from './tier.ts';
 import { getOpenWindow, getVisibleSeason } from './seasons.ts';
+import { ACTIVE_SESSION_SQL } from './negotiation-guard.ts';
 import {
   DEMAND_MAX_ROUNDS,
   DEMANDS_PER_CLUB,
@@ -186,14 +187,12 @@ export async function triggerDemandBatch(env: Env, input: TriggerDemandInput): P
       (r) => r.player_id,
     ),
   );
-  //  ② 未终局签约谈判 session（active + signing，与关窗检查同口径 window-machine.ts:331）
+  //  ② 未终局签约谈判 session（v6.66.0：只看会话 active，与关窗检查同口径，
+  //     见 negotiation-guard.ts——单据状态已不足以表达「谈判在途」）
   const signingSessions = new Set(
     (
       await db
-        .prepare(
-          `SELECT s.player_id AS pid FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
-           WHERE s.status = 'active' AND t.status = 'signing'`,
-        )
+        .prepare(`SELECT s.player_id AS pid FROM negotiation_sessions s WHERE ${ACTIVE_SESSION_SQL}`)
         .all<{ pid: number }>()
     ).results.map((r) => r.pid),
   );

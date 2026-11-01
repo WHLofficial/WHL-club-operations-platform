@@ -17,7 +17,7 @@ owner 2026-11-01 两问：「为什么挂牌截止之后变成待审核了（即
 - [x] typecheck 三份全清、`npm test` 181 / 2,939 全绿
 - [ ] 本地 commit
 
-## 第 2 期 · 判据替换（不改行为）
+## 第 2 期 · 判据替换（已完成，2026-11-01）
 
 把「谈判在途」的判据从 `transfers.status='signing'` 换成「存在 active 会话」，为第 3 期铺路。8 处：
 
@@ -32,7 +32,9 @@ owner 2026-11-01 两问：「为什么挂牌截止之后变成待审核了（即
 | 7 | `src/worker/demand-ops.ts:194` | 涨薪诉求生成 |
 | 8 | `src/worker/season-settle.ts:222` | 赛季结算阻塞 |
 
-做法：抽一个共用片段（形如 `EXISTS (SELECT 1 FROM negotiation_sessions s WHERE s.transfer_id = t.id AND s.status = 'active')`），逐处替换；因今天所有 active 会话都挂在 `signing` 单据上，替换后行为等价 ⇒ 全量测试必须零变化（181 / 2,939 不动）。变异验证：把新判据改成恒真，看 8 处对应的既有用例是否变红。
+落实：新模块 `src/worker/negotiation-guard.ts`（`ACTIVE_SESSION_SQL` + `findActiveNegotiationSession` / `findActivePromotionSession` / `findNegotiationInFlight`）；8 处全部替换，另加海捞两处口径（`checkSeaSignEligible` + `/api/market/sea-lookup` 批量副本）；新增 `tests/negotiation-guard.test.ts` 5 例。验收：typecheck 三份全清、`npm test` 182 / 2,944 全绿（既有 2,939 例零改动）、变异两靶全红。
+
+原做法备忘：抽一个共用片段（形如 `EXISTS (SELECT 1 FROM negotiation_sessions s WHERE s.transfer_id = t.id AND s.status = 'active')`），逐处替换；因今天所有 active 会话都挂在 `signing` 单据上，替换后行为等价 ⇒ 全量测试必须零变化（181 / 2,939 不动）。变异验证：把新判据改成恒真，看 8 处对应的既有用例是否变红。
 
 ## 第 3 期 · 顺序翻转（迁移 0088）
 

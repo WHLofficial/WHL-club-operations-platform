@@ -18,6 +18,7 @@ import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 import { queueClubNotification } from './notify.ts';
 import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
 import { triggerDemandBatch } from './demand-ops.ts';
+import { ACTIVE_SESSION_SQL } from './negotiation-guard.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { slotsForCapacity } from '../core/venue.ts';
 
@@ -385,7 +386,7 @@ export async function closeWindow(
        FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
        JOIN players p ON p.id = s.player_id
-       WHERE s.status = 'active' AND t.status = 'signing' AND t.type = 'promotion' ORDER BY s.id LIMIT 200`,
+       WHERE ${ACTIVE_SESSION_SQL} AND t.type = 'promotion' ORDER BY s.id LIMIT 200`,
     )
     .all<{ id: number; club_id: number; player_name: string }>();
   let promotionForceSettled = 0;
@@ -400,7 +401,7 @@ export async function closeWindow(
     .prepare(
       `SELECT s.id, s.expected_wage FROM negotiation_sessions s
        JOIN transfers t ON t.id = s.transfer_id
-       WHERE s.status = 'active' AND t.status = 'signing' AND t.type != 'promotion' ORDER BY s.id LIMIT 200`,
+       WHERE ${ACTIVE_SESSION_SQL} AND t.type != 'promotion' ORDER BY s.id LIMIT 200`,
     )
     .all<{ id: number; expected_wage: number | null }>();
   let forceSettled = 0;

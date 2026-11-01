@@ -18,9 +18,15 @@
 
 **Changed**
 
-- 设计定稿 `memory/design-transfer-before-negotiation.md`：把「扣钱 + 挪人」整体提前到审核通过，谈判只谈合同条款；同版本分三期落地（本版第 1 期只做收口与预埋闸，不改结算顺序）。
+- 设计定稿 `memory/design-transfer-before-negotiation.md`：把「扣钱 + 挪人」整体提前到审核通过，谈判只谈合同条款；同版本分三期落地。
 
-**验收（第 1 期）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **181 文件 / 2,939 例**全绿（v6.65.4 基线 180 / 2,937，+2）；变异验证三靶全红（删收口语句 / 去掉 `<> 'signing'` / 去掉 `s.status = 'active'`）。判级 **minor**。测试计划 `docs/test-plans/v6.66.0-listing-closeout.md`。**生产迁移现状：仍到 `0087`**（本版零迁移）。
+**Changed（第 2 期）**
+
+- 「谈判在途」判据从 `transfers.status = 'signing'` 换成 `negotiation_sessions.status = 'active'`，收敛到新模块 `src/worker/negotiation-guard.ts`（`ACTIVE_SESSION_SQL` + 三个 helper）：8 处闸（上调锁 ×2、续约闸、下放/解约前置、上调窗关强约、关窗强结、涨薪诉求排除集、赛季结算阻塞）加海捞两处口径（`checkSeaSignEligible` 与 `/api/market/sea-lookup` 批量副本）同步替换。过户提前到开谈之前后，单据在开谈那刻就已 `completed`，旧判据会让这些闸全部静默失效。
+- 海捞/出标保留一层历史残留兜底：单据已 `signing` 而会话没建出来时仍算在途（`findNegotiationInFlight`）。
+- 判据替换对今天的行为等价（所有 active 会话都挂在 `signing` 单据上）：既有 2,939 例零改动全绿。
+
+**验收（第 1–2 期）**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **182 文件 / 2,944 例**全绿（v6.65.4 基线 180 / 2,937，第 1 期 +2、第 2 期 +5）；第 1 期变异三靶全红，第 2 期变异两靶全红（谓词恒假 / 删 signing 兜底）。判级 **minor**。测试计划 `docs/test-plans/v6.66.0-listing-closeout.md`。**生产迁移现状：仍到 `0087`**（本版零迁移）。
 
 ## [v6.65.4] · 谈判桌收口 + 入口 HTML 不缓存（2026-11-01）
 

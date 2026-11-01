@@ -128,7 +128,7 @@
 
 ## v6.66.0 · 审核通过即过户：成交挂单收口 → 判据替换 → 顺序翻转（2026-11-01）
 
-**状态**：**进行中**——第 1/3 期已实现并本地验收（2026-11-01），第 2、3 期待做；未 push、未部署。零迁移（第 3 期会加迁移 `0088`）。**生产迁移现状仍到 `0087`**。
+**状态**：**进行中**——第 1、2/3 期已实现并本地验收（2026-11-01），第 3 期待做；未 push、未部署。零迁移（第 3 期会加迁移 `0088`）。**生产迁移现状仍到 `0087`**。
 
 **缘起**：owner 2026-11-01 连问两事——「为什么挂牌截止之后变成待审核了（即使是审核之后、谈判之后）？」与「应当在谈判之前球员就过户、钱就划转，要考虑到谈判不可能导致球员退回原队的，不用防这点」。经 brainstorming + grilling 十问定案（裁决 D1–D10 见 `memory/design-transfer-before-negotiation.md`），owner 先要求「先落文档，然后 brainstorming，然后 grilling」，再下令「按顺序开工，并分配版本号」，随后把三期收敛为**一个版本号** v6.66.0（三个提交）。
 
@@ -140,7 +140,14 @@
 - `scripts/prod-20261101-listing-closeout/`：`01-precheck.sql` / `02-apply.sql` / `03-verify.sql` / `README.md`，生产预检 20 条 = 14 `completed` + 6 `signing`。
 - `docs/test-plans/v6.66.0-listing-closeout.md`、`memory/design-transfer-before-negotiation.md`。
 
-**验收（第 1 期实测）**：`npm run typecheck` 三份全清；`npm test` **181 文件 / 2,939 例**全绿（基线 180 / 2,937）；变异三靶全红。判级 **minor**。
+**第 2 期交付（已完成）**
+
+- 新模块 `src/worker/negotiation-guard.ts`：`ACTIVE_SESSION_SQL`（批量谓词，别名固定 `s`）+ `findActiveNegotiationSession` / `findActivePromotionSession` / `findNegotiationInFlight`（海捞另留 signing 残留兜底）。
+- 8 处判据替换：`src/worker/activations.ts`（上调期不可激活）、`src/worker/bypass.ts`（续约闸、解约上调锁、海捞关）、`src/worker/promotion.ts`（下放/解约前置）、`src/worker/window-machine.ts`（上调窗关强约清单、关窗强结清单）、`src/worker/demand-ops.ts`（涨薪诉求排除集）、`src/worker/season-settle.ts`（赛季结算阻塞）。
+- `/api/market/sea-lookup` 批量副本同步（`src/worker/routes/market.ts`）：待审单据仍按 `pending_review`，谈判在途取 active 会话并与 `signing` 单据取并集。
+- `tests/negotiation-guard.test.ts`（5 例）锁「单据 completed + 会话 active」这一翻转后形状，并锁 signing 残留兜底。
+
+**验收（第 1–2 期实测）**：`npm run typecheck` 三份全清；`npm test` **182 文件 / 2,944 例**全绿（基线 180 / 2,937；第 1 期 +2、第 2 期 +5）；变异：第 1 期三靶全红、第 2 期两靶全红（谓词恒假 / 删 signing 兜底）。第 2 期既有 2,939 例零改动全绿 ⇒ 判据替换对今天行为等价。判级 **minor**。
 
 **同步在生产之外的前提**：生产 20 条 `pending_review` 中 14 条联单 `completed`（球员已在买方、钱已划转），6 条仍 `signing`；修复脚本只碰前者，`signing` 的等本版新路径自然收口。
 

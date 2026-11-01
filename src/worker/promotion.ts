@@ -14,6 +14,7 @@ import { getOpenWindow } from './seasons.ts';
 import { assertOpOpen, opBlockReason } from './ops-schedule.ts';
 import { ensureNotInFlight } from './bypass.ts';
 import { openNegotiationSession } from './negotiations.ts';
+import { findActiveNegotiationSession } from './negotiation-guard.ts';
 import { availableBalance } from './ledger.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { queueClubNotification } from './notify.ts';
@@ -40,13 +41,7 @@ interface OwnPlayerRow {
 // 该球员有没有进行中的签约谈判（active 会话 + signing 单据）。下放/解约/激活都必须躲开
 // 上调谈判期（合同正在被改写），与 createRcChange 的同款检查同口径。
 async function rejectIfNegotiating(db: Env['DB'], playerId: number): Promise<void> {
-  const open = await db
-    .prepare(
-      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
-       WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'signing' LIMIT 1`,
-    )
-    .bind(playerId)
-    .first<{ id: number }>();
+  const open = await findActiveNegotiationSession(db, playerId);
   if (open) throw new HttpError(409, '他还有一场签约谈判没结束，先等它了结再操作');
 }
 

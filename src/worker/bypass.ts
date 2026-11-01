@@ -22,6 +22,7 @@ import {
   type ReviewDecision,
 } from './transfers.ts';
 import { openNegotiationSession, voidSigningCore } from './negotiations.ts';
+import { findActiveNegotiationSession, findActivePromotionSession, findNegotiationInFlight } from './negotiation-guard.ts';
 import { listingDemandStatements } from './demand-ops.ts';
 import { cpuClubIds } from './growth.ts';
 import { rowDisplayName } from '../core/player-name.ts';
@@ -139,13 +140,10 @@ export async function checkSeaSignEligible(
     return { stage: 'listing', ok: false, status: 400, reason: '这名球员已经有一单在市场流程里了，等它结束再操作' };
   if (inFlight === 'pending')
     return { stage: 'pending', ok: false, status: 400, reason: '这名球员有一张单据正在等管理组审核，先等审核结果' };
-  // 审核通过 → 单据进 signing（签约谈判），这时球员还没过户，归属仍是空的；不拦就会有人
-  // 再提一单，等两张单都会走到 completeTransfer 抢同一名球员
-  const signing = await db
-    .prepare(`SELECT id FROM transfers WHERE player_id = ? AND status = 'signing' LIMIT 1`)
-    .bind(player.id)
-    .first<{ id: number }>();
-  if (signing)
+  // 审核通过 → 开签约谈判。v6.66.0 起球员在开谈之前就已过户、单据已 completed（signing 不再出现），
+  // 所以「海捞单正在谈判」只能看会话（negotiation-guard.ts）；不拦就会被第二家（或原队）再提一单。
+  const negotiating = inFlight === 'negotiation' || (await findNegotiationInFlight(db, player.id));
+  if (negotiating)
     return {
       stage: 'signing',
       ok: false,
@@ -387,13 +385,7 @@ export async function createRcChange(
     .bind(playerId, win.season, win.windowSeq)
     .first<{ id: number }>();
   if (sameWindowDemand) throw new HttpError(409, '本窗他的合同谈判机会已经用过，下窗再谈');
-  const openSession = await db
-    .prepare(
-      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
-       WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'signing' LIMIT 1`,
-    )
-    .bind(playerId)
-    .first<{ id: number }>();
+  const openSession = await findActiveNegotiationSession(db, playerId);
   if (openSession) throw new HttpError(409, '他还有一场签约谈判没结束，先等它了结再操作');
   // ③ 一球员同时最多 1 条待生效合同变更（§5.7）：闹涨薪接受 / 直拒保护期失效 / 上窗迟到的
   // 普通续约 pending 都占位。不前置拦住就会在成约批里撞 0079 的 idx_pending_one_per_player，
@@ -483,13 +475,8 @@ export async function createTermination(
     throw new HttpError(400, player.status === 'listed' ? '这名球员在挂牌流程里，不能解约' : '当前状态不能解约');
   }
   // v6.64.4 上调锁定：上调谈判期间合同正在被改写，解约会把谈判的合同改写打成幽灵完成
-  const promoLock = await db
-    .prepare(
-      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
-       WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'signing' AND t.type = 'promotion' LIMIT 1`,
-    )
-    .bind(playerId)
-    .first<{ id: number }>();
+  // v6.66.0：判据换「会话 active」（negotiation-guard.ts），理由同 createRcChange。
+  const promoLock = await findActivePromotionSession(db, playerId);
   if (promoLock) throw new HttpError(409, '他正在上调谈判中，等它成约或作废再解约');
   const contract = await db
     .prepare('SELECT release_fee, service_ticks FROM contracts WHERE player_id = ? AND is_active = 1')

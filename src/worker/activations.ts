@@ -17,6 +17,7 @@ import { rollbackRcChangeForPlayer } from './bypass.ts';
 import { settleListingForReview } from './market-settle.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
+import { findActivePromotionSession } from './negotiation-guard.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -69,13 +70,9 @@ export async function createActivation(
     throw new HttpError(400, player.status === 'listed' ? '这名球员已经在挂牌流程里了' : '当前状态不能被激活');
   }
   // v6.64.4 上调锁定：训练营球员在上调谈判期间不可被激活（合同正在被改写成正式条款）
-  const promoLock = await db
-    .prepare(
-      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
-       WHERE s.player_id = ? AND s.status = 'active' AND t.status = 'signing' AND t.type = 'promotion' LIMIT 1`,
-    )
-    .bind(playerId)
-    .first<{ id: number }>();
+  // v6.66.0：判据从「单据 signing」换成「会话 active」——过户提前到开谈之前后单据已 completed，
+  // 按单据状态判在途会让这道锁静默失效（negotiation-guard.ts）。
+  const promoLock = await findActivePromotionSession(db, playerId);
   if (promoLock) throw new HttpError(409, '这名球员正在上调谈判中，等它成约或作废再激活');
 
   const contract = await db

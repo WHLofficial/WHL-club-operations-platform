@@ -36,6 +36,7 @@ import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { listingDemandStatements } from '../demand-ops.ts';
+import { ACTIVE_SESSION_SQL } from '../negotiation-guard.ts';
 import { notifyShortlistWatchers } from '../shortlist.ts';
 import { createActivation } from '../activations.ts';
 import { queueClubNotification } from '../notify.ts';
@@ -581,7 +582,7 @@ interface SeaLookupRow {
 // 或名字查 ≤8 名候选，各带可捞判定。⚠️ 本批量判定是 bypass.ts checkSeaSignEligible（单条真源：
 // 球员详情 seaSign + createFreeAgent 提交链）的情报台快照副本：守卫顺序与文案逐字对齐，
 // 两处口径必须同步改（tests 有跨实现一致性用例锁）。守卫链摊成 4 条批量查询：cpuClubIds / 本窗禁签 /
-// 挂牌在途 / 单据在途（pending_review 与 signing 同一条查询，按状态分两个集合）。
+// 挂牌在途 / 待审单据 / 谈判在途（v6.66.0 起「谈判在途」看 negotiation_sessions，不看单据状态）。
 app.get('/market/sea-lookup', async (c) => {
   await requireCoach(c.env, c.req.raw, 'club.squad.manage');
 
@@ -644,6 +645,14 @@ app.get('/market/sea-lookup', async (c) => {
     if (r.status === 'signing') signing.add(r.player_id);
     else pending.add(r.player_id);
   }
+  // v6.66.0：谈判在途 = 有 active 会话（与 bypass.ts checkSeaSignEligible 同口径，见 negotiation-guard.ts）。
+  // 过户提前到开谈之前后，单据在开谈那刻就已 completed，只剩会话能表达「海捞单在签约谈判」。
+  const negotiating = await c.env.DB.prepare(
+    `SELECT s.player_id AS pid FROM negotiation_sessions s WHERE ${ACTIVE_SESSION_SQL} AND s.player_id IN (${ph})`,
+  )
+    .bind(...ids)
+    .all<{ pid: number }>();
+  for (const r of negotiating.results) signing.add(r.pid);
 
   return c.json({
     results: candidates.map((r) => {

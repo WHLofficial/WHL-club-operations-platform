@@ -13,6 +13,7 @@ import { serviceSeasons } from '../core/bypass-rules.ts';
 import { clubIdByTourTeam, loadPrizeTable } from './prizes.ts';
 import { getActiveNaming, loadHeatRules, loadSatisfyConfig } from './naming-ops.ts';
 import { queueClubNotification } from './notify.ts';
+import { ACTIVE_SESSION_SQL } from './negotiation-guard.ts';
 
 function nowSql(): string {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -220,7 +221,7 @@ export async function checkSeasonSettle(env: Env, season: number): Promise<Seaso
   const activeSessions = await db
     .prepare(
       `SELECT COUNT(*) AS n FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
-       WHERE s.status = 'active' AND t.status = 'signing' AND t.season = ?`,
+       WHERE ${ACTIVE_SESSION_SQL} AND t.season = ?`,
     )
     .bind(season)
     .first<{ n: number }>();
