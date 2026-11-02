@@ -47,6 +47,13 @@
 | D5 | 核验时点 = 关窗（开赛）时一次 |
 | D6 | 核验不过**只记录、不阻断**：不卡关窗、不卡结算、不卡下一窗 |
 | D7 | 结构走 A 案：纯推导 + 关窗快照 + 一张工资基线表，不建"活名单"表 |
+| D8 | **写入侧零拦截**：超帽、超名额不拦签约/报价/关窗；系统只提供红字与数字（用户 2026-11-02：「不要超帽禁止交易。我们要自由度高而不是低」） |
+| D9 | 红字收敛在**聚合层**：超帽只出现「超 X m」，人数/门将/训练营/CA 名额各一行；逐人性质的问题收进所属分区标题旁一句话（点名，可跳球员页） |
+| D10 | 关窗核验不通过 → **给该队教练发站内信**（同批写入、按窗口去重、内容只含金额与规则名，不含球员姓名） |
+| D11 | CPU 队**也写** `registrations` 存档与 `squad_audits` 行（`pass=1`、`issues=[]`、`stats` 真实）；存档/看板逐队全出，是否灰显由前端按 `clubs.is_cpu` 判断 |
+| D12 | 上线当期**不补部署基线**：本期 `baseline=null`，CapBar 直接退成两段（现在 / 待生效），不加解释文案；下一窗起三段 |
+| D13 | `inCount`/`outCount` = `transfer` / `activation` / `forced_auction` / `free_agent` / **`termination`**；排除 `rc_change` / `match`（留队改条款，人数没变） |
+| D14 | `projected` 只预估**已过户、条款未定**（`terms_applied=0`）的球员；在途 `pending_review` / 在谈单不预估 |
 
 ---
 
@@ -158,6 +165,15 @@ CREATE TABLE squad_audits (
 - **不阻断**：核验失败不进任何 `if (issues) throw`；关窗批照常提交，`window_close` 审计里带 `squadAudit: { fail: n, clubs: [clubId...] }`。
 - 幂等：`INSERT ... ON CONFLICT(season, window_seq, club_id) DO UPDATE`，重复触发不产生重复行。
 - 管理端：`GET /api/admin/squad-audits?season=&windowSeq=` 返回历史；工作台与管理端各显示"最近一次关窗核验"。
+### 3.6 交互与展示细则（grilling 定稿）
+
+- **未签约区可点**：整行跳 `/players/:fcId`，球员页能看到完整档案与合同状态。
+- **红字布局**：工作台顶部一条「体检」区，逐条列不过的规则（超帽 / 人数 / 门将 / 训练营人数 / CA 名额各一行）；CapBar 只负责工资三段与「超 X m」。逐人问题（`trainee_growth` / `trainee_contract` / `first_team_contract` / `contract`）收在所属分区标题旁，格式「训练营 8 人 · 其中 2 人不合格（张三、李四）」，名字可点。
+- **关窗看板**：逐队全列（含 CPU，前端按 `isCpu` 灰显）；默认排序 = 不通过的队在前、按超帽金额降序，其余按队名。
+- **核验通知**：`notify.ts` 与 `core/notify-meta.ts` 双写模板 `squad_audit_failed`；关窗批内同批写入，去重键 `(season, window_seq, club_id)`；内容含超帽金额与不过的规则名，不含球员姓名。
+- **管理端历史名单报表**：默认全出（含 CPU 行），DTO 带 `isCpu`，前端灰显；`?includeCpu=0` 可关。
+- **`registration_check_mode`**：代码删除读取，`config` 表里的行保留不删。
+
 ### 3.5 迁移 0089
 
 只新增两张表（`club_wage_baselines` / `squad_audits`）+ 索引 `idx_squad_audits_season`。`registrations` 表结构不动，`tests/d1.ts` 的 `MIGRATION_FILES` 追加文件名。
@@ -168,7 +184,7 @@ CREATE TABLE squad_audits (
 
 - 不做"活名单表"，不做名单版本历史（`registrations` 每窗覆盖一次，历史按 season/window 天然分版本）。
 - 不做转出金额拆解（只给人数）。
-- 不在转会/签约/上调路径加任何工资帽或 CA 名额闸（D4/D6）。
+- 不在转会/签约/上调路径加任何工资帽或 CA 名额闸（D4/D6/D8：**写入侧零拦截**，这一条是用户明确裁决的高优先级边界，不接受任何形式的"软拦截"或"二次确认"）。
 - 不动 `checkSquad` 的 9 条规则本身，也不改 `wage_cap` 数值。
 - 不给教练"不报名"开关（D1）。
 - CPU 队不参与核验与基线（`cpuClubIds`）。
@@ -192,6 +208,7 @@ CREATE TABLE squad_audits (
 - `tests/squad-view.test.ts`：正式/训练营分栏、无合同进 unsigned、退役不进、在售仍在、跨队合同不算。
 - `tests/squad-wages.test.ts`：`now` 与 `window-payroll` 汇总一致（同一 fixture 两个口径对拍）、基线缺失时 `delta=null`。
 - `tests/squad-audit.test.ts`：关窗写存档 + `squad_audits` 行、超帽时不阻断关窗、重复关窗幂等。
+- `tests/squad-notify.test.ts`：不通过的队收到通知、通过的队收不到、同窗重跑不重复发、内容不含球员姓名。
 - `tests/window-overview.test.ts`：看板逐队数与关窗核验同口径（同 fixture 下 `GET /api/admin/window/overview` 的 `pass/issues` 与关窗后 `squad_audits` 行一致）、`pendingTransfers`/`activeSessions` 与关窗 409 条件一致。
 - 既有 `tests/registration*.test.ts` 全面改写：提交类用例删除，改为"镜像正确性 + 红字正确性"。
 - 变异验证：① 让 `loadSquadView` 忽略 `is_active` ⇒ 用例红；② 关窗核验改成 `throw` ⇒ "不阻断"用例红；③ 基线 SQL 漏 `GROUP BY club_id` ⇒ 工资对拍用例红。

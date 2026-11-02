@@ -161,3 +161,14 @@ CREATE INDEX IF NOT EXISTS idx_squad_audits_season ON squad_audits(season, windo
 | `demand-rules.registered` 语义变化 | 期一对拍用例：旧口径与新口径布尔值一致的球员集合断言 |
 | 关窗批变长 | 核验在批外先算；批内只加 INSERT/DELETE（每队 ~1 + N 条） |
 | 基线表首窗缺失（历史数据） | `baseline=null` → 前端退化为两段，不显示 0 |
+
+
+---
+
+## grilling 增补（2026-11-02 定稿，覆盖上文默认值）
+
+- **写入侧零拦截**（D8）：任何"超帽/超名额就拒绝"的实现都算跑偏，验收时以「没有任何分支因 `issues` 非空而 return/throw」为判据（关窗核验、转会、签约三处都要 grep 一遍）。
+- 期一：红字收敛到聚合层（顶部体检区 + 分区标题旁一句）；未签约区整行可点跳球员页；`registration_check_mode` 代码删、config 行留。
+- 期二：`baseline=null` 时 CapBar 直接两段、不加解释文案；`inCount/outCount` 含 `termination`；`projected` 只算 `terms_applied=0` 的人。
+- 期三：看板逐队全列（CPU 灰显）、不通过置顶按超帽降序；CPU 也写 `registrations` 存档与 `squad_audits`（`pass=1`、`issues=[]`）；核验不通过发站内信 `squad_audit_failed`（同批写、按窗口去重、不含球员姓名）；管理端历史报表默认全出并带 `isCpu`。
+- 新增测试：`tests/squad-notify.test.ts`（通知去重与内容）、`tests/window-overview.test.ts`（看板与核验同口径 + 排序）、CPU 存档用例。
