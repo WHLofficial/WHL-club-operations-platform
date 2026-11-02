@@ -101,6 +101,27 @@
 
 ---
 
+## v6.68.0 · 管理审核工作台（期 A：全站实体编号露出）（2026-11-02）
+
+**状态**：期 A 已实现并本地验收，待 push；期 B（队列单号/直链/键盘/批选）与期 C（`/admin/workbench`）未开工。零迁移（`0089` 属期 C）。
+
+**缘起**：owner「管理面板审核根本不好用，要输好多 ID，有些 AI 比如挂牌 ID 我都无法在 UI 层面获取到」。Explore 取证：后台 8 处手输实体 id，而挂牌 id 只在 3 处报错/toast 里临时露出、出价 id 只做 React key、谈判会话 id 只做 DOM id ⇒ 管理动作需要的编号在界面上根本读不到。
+
+**裁决（grilling 两轮，Q1–Q12）**：Q1 批量审批不支持改价；Q2 在途表默认隐藏 CPU（表头可切换）；Q3 工作台独立页 `/admin/workbench`，审核队列不搬；Q4 A→B→C 分三次 push；Q5 编号形态 = 灰色 `#123` 点击复制 + toast；Q6 强拍活动表并入工作台；Q7 `/market?listing=` 新增支持（只认整数 + 在售三态，用完 `replace` 清参）；Q8 工作台单端点全包、公开 feed 的查询抽公共函数复用；Q9 加 `0089_bids_status_index.sql`（生产 `bids` 仅 133 行，仍按 owner 决定加）；Q10 批选逐条继续、逐条回显、不回滚已成功；Q11「去处置」带参 `/admin/market?entity=transfer&id=`，B 期写进现有干预框、C 期接管到工作台；Q12 激活凭证管理员全可见 + 卖方可见（新端点 `GET /api/market/listings/:id/proof`），公开 feed 不加字段。
+
+**期 A 交付**：
+1. `web/src/lib/clipboard.ts`：`copyText(text)` —— Clipboard API 优先，失败退回临时 textarea + `execCommand`。
+2. `web/src/components/IdTag.tsx`：灰色 `#123` 文本按钮，点击复制**纯数字** + toast；失败标红并提示手动选择。词表 `IdKind` = 挂牌 / 出价 / 报价 / 谈判 / 转会 / 球员 / 俱乐部 / 工单。
+3. 10 处落点：`/market` 卡片（静态露号）· 挂牌浮层（挂牌 + 卖方俱乐部）· 我的出价表（出价 · 挂牌，新增「编号」列）· 谈判桌会话行（谈判 · 转会）· 报价台（已挂牌 / 报价）· 球员页侧栏两处（本队 / 外队挂牌）· 后台强拍活动表（新增「编号」列）· 后台待升级表（球员）· 后台俱乐部表（俱乐部）· 后台消费工单表（工单 + 俱乐部）。
+4. `src/worker/routes/admin/reviews.ts` 增选 `rt.ref_id`，`report.listingId` 透出（期 B 直链用）。
+5. `web/src/styles.css` 新增 `.id-tag` 规则组（含 `.failed` / `.static` / `:focus-visible`）。
+
+**验收**：`npm run typecheck` 三份全清；`npm test` **186 文件 / 2,973 例全绿**（基线 185 / 2,970）；`npm run build` 通过（入口 `dist/assets/index-DaYh9GiD.js`）。测试计划 `docs/test-plans/v6.68.0-workbench-phase-a.md`。
+
+**已知边界**：每个 `IdTag` 自持一个 `useToast` 实例，连续点两个编号会在同一位置叠两条 toast（3 秒各自消失）；换全局单例 toast 属跨页面重构，本期不做。
+
+---
+
 ## v6.67.2 · 消费工单外部录入：提示可见 + FC id 兜底（2026-11-02）
 
 **状态**：**已上线（2026-11-02）**——Version `80ab924d-c942-4c59-bd2a-cf72386676d9`，push `1c21080..cdac2ea`；零迁移。

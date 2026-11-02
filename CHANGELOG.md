@@ -4,6 +4,18 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.68.0] · 管理审核工作台（期 A：全站实体编号露出）（2026-11-02）
+
+**Added**
+
+- **编号可见即可复制**：新增 `IdTag`（`web/src/components/IdTag.tsx`）——灰色 `#123` 文本按钮，点击把**纯数字**写进剪贴板并 toast「已复制 挂牌 #18」，失败（Clipboard API 不可用且 `execCommand` 也失败）则按钮标红 + toast「复制失败，请手动选择 #18」。复制能力抽成 `copyText`（`web/src/lib/clipboard.ts`，Clipboard API 优先、临时 textarea 降级——管理后台常在 iframe / http 预览里打开，只写 `writeText` 会直接抛）。
+- **10 处落点**（此前管理动作要手输、界面上却读不到的 id）：①`/market` 在售卡片副行露出挂牌号（卡片整体是 `<button>`，故只露号不给点，点开浮层再复制）；②挂牌浮层头部挂牌号 + 卖方俱乐部号；③我的转会台「我的出价」新增「编号」列（出价 · 挂牌）；④谈判桌会话行（谈判 · 转会）；⑤报价台（已挂牌 / 报价）；⑥球员页侧栏「挂牌中」两处（本队 / 外队）；⑦后台强拍活动表新增「编号」列；⑧后台待升级表球员号；⑨后台俱乐部表俱乐部号；⑩后台消费工单表工单号 + 俱乐部号。
+- 激活举报的审核行透出 `report.listingId`（`src/worker/routes/admin/reviews.ts` 增选 `rt.ref_id`）——期 B 的「去处置」直链要用它，不再从 payload 里猜。
+
+**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **186 文件 / 2,973 例全绿**（v6.67.2 基线 185 / 2,970，新增 `IdTag.test.tsx` 2 例与举报队列 `listingId` 断言）；`npm run build` 通过（入口 `dist/assets/index-DaYh9GiD.js`）。判级 **minor**（纯前端展示与复制；零迁移、零资金、零权限变更）。测试计划 `docs/test-plans/v6.68.0-workbench-phase-a.md`。
+
+**设计**：`docs/superpowers/specs/2026-11-02-admin-review-workbench-design.md`（Q1–Q12 决策记录；期 B = 队列单号/直链/键盘/批选，期 C = `/admin/workbench` 五表 + 凭证可见）。
+
 ## [v6.67.2] · 消费工单外部录入：提示可见 + FC id 兜底（2026-11-02）
 
 **Fixed**
