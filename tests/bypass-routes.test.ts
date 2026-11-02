@@ -906,3 +906,71 @@ describe('窗内回滚（4.4.10）', () => {
     expect(contract?.release_fee).toBe(10);
   });
 });
+
+describe('批量审核（v6.68.0 期 B · POST /api/admin/reviews/batch）', () => {
+  async function seedTwoRcChanges(fx: Fixture): Promise<{ taskIds: number[]; transferIds: number[] }> {
+    const transferIds: number[] = [];
+    for (const [playerId, newReleaseFee] of [
+      [20, 15],
+      [21, 25],
+    ] as const) {
+      const res = await post('/api/transfers/rc-change', { playerId, newReleaseFee }, 'tok-coach', fx.env);
+      expect(res.status).toBe(201);
+      transferIds.push(((await res.json()) as { transferId: number }).transferId);
+    }
+    const queue = await get('/api/admin/reviews', 'tok-admin', fx.env);
+    const reviews = ((await queue.json()) as { reviews: { id: number; transfer: { id: number } }[] }).reviews;
+    const taskIds = transferIds.map((id) => reviews.find((r) => r.transfer.id === id)!.id);
+    return { taskIds, transferIds };
+  }
+
+  it('批量批准：逐条处理、各自进审计，另写一条 admin_review_batch 汇总', async () => {
+    const fx = await seedBypass();
+    const { taskIds, transferIds } = await seedTwoRcChanges(fx);
+
+    const res = await post('/api/admin/reviews/batch', { action: 'approve', ids: taskIds, note: '批量过' }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; results: { id: number; ok: boolean }[] };
+    expect(body.results).toEqual(taskIds.map((id) => ({ id, ok: true })));
+    // 两条续约单都落 completed（续约无签约谈判，批准即生效）
+    for (const transferId of transferIds) {
+      expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM transfers WHERE id = ?', transferId)?.status).toBe('completed');
+    }
+    const batchAudit = sqlAll<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'admin_review_batch'");
+    expect(batchAudit).toHaveLength(1);
+    expect(JSON.parse(batchAudit[0]!.after)).toMatchObject({ action: 'approve', ids: taskIds, ok: 2, failed: 0, note: '批量过' });
+  });
+
+  it('已处理过的单子只在该条上报错，不拖垮整批', async () => {
+    const fx = await seedBypass();
+    const { taskIds } = await seedTwoRcChanges(fx);
+    expect((await post('/api/admin/reviews/batch', { action: 'approve', ids: [taskIds[0]] }, 'tok-admin', fx.env)).status).toBe(200);
+
+    const again = await post('/api/admin/reviews/batch', { action: 'reject', ids: [taskIds[0], taskIds[1]] }, 'tok-admin', fx.env);
+    expect(again.status).toBe(200);
+    const body = (await again.json()) as { results: { id: number; ok: boolean; error?: string }[] };
+    expect(body.results[0]).toEqual({ id: taskIds[0], ok: false, error: '已处理' });
+    expect(body.results[1]).toEqual({ id: taskIds[1], ok: true });
+  });
+
+  it('入参校验：动作非法 / 空集 / 超 50 条都直接 400，重复 id 去重后只处理一次', async () => {
+    const fx = await seedBypass();
+    const { taskIds } = await seedTwoRcChanges(fx);
+    expect((await post('/api/admin/reviews/batch', { action: 'void', ids: taskIds }, 'tok-admin', fx.env)).status).toBe(400);
+    expect((await post('/api/admin/reviews/batch', { action: 'approve', ids: [] }, 'tok-admin', fx.env)).status).toBe(400);
+    expect(
+      (await post('/api/admin/reviews/batch', { action: 'approve', ids: Array.from({ length: 51 }, (_, i) => i + 1) }, 'tok-admin', fx.env)).status,
+    ).toBe(400);
+
+    const dup = await post('/api/admin/reviews/batch', { action: 'approve', ids: [taskIds[0], taskIds[0]] }, 'tok-admin', fx.env);
+    expect(dup.status).toBe(200);
+    expect(((await dup.json()) as { results: unknown[] }).results).toHaveLength(1);
+  });
+
+  it('批量接口不接改价：body.fee 被忽略（Q1 裁决）', async () => {
+    const fx = await seedBypass();
+    const { taskIds, transferIds } = await seedTwoRcChanges(fx);
+    expect((await post('/api/admin/reviews/batch', { action: 'approve', ids: [taskIds[0]], fee: 99 }, 'tok-admin', fx.env)).status).toBe(200);
+    expect(sqlGet<{ fee: number }>(fx.sqlite, 'SELECT fee FROM transfers WHERE id = ?', transferIds[0])?.fee).toBe(15);
+  });
+});

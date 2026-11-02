@@ -1007,6 +1007,12 @@ export interface AdminReviews {
   reviews: AdminReviewRow[];
 }
 
+/** 批量批准 / 驳回的逐条结果（v6.68.0 期 B）：一条失败不影响其它。 */
+export interface AdminReviewBatchResult {
+  ok: boolean;
+  results: { id: number; ok: boolean; error?: string }[];
+}
+
 /** 转会单类型（与 src/worker 侧 transfer.type 取值一致；v6.67.0 由 string 收紧为联合类型） */
 export type TransferType =
   | 'transfer'

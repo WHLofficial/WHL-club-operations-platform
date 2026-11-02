@@ -5,7 +5,7 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../lib/auth.tsx';
 import MarketBoardPage from './MarketBoardPage.tsx';
 
@@ -37,12 +37,17 @@ const LISTING = {
   deadlineNote: null,
 };
 
-function renderPage(role: 'coach' | 'user') {
-  const calls = { listings: 0, bids: 0, balance: 0 };
+function renderPage(role: 'coach' | 'user', opts: { entry?: string } = {}) {
+  const calls = { listings: 0, bids: 0, balance: 0, detail: 0 };
   let gate: ((v: unknown) => void) | null = null;
   apiMock.mockImplementation(async (path: string) => {
     if (path === '/api/me') return { user: { id: 2, name: '教练乙', role }, authMode: 'shared' };
     if (path === '/api/me/club') return { club: { id: 33, name: '挂牌联' }, isCoach: role === 'coach' };
+    // v6.68.0 期 B：`?listing=` 直开会拉详情
+    if (path === '/api/market/listings/1') {
+      calls.detail += 1;
+      return { listing: LISTING, bids: [] };
+    }
     if (path.startsWith('/api/market/listings?')) {
       calls.listings += 1;
       if (calls.listings === 1) return { listings: [LISTING], cursor: null };
@@ -66,7 +71,7 @@ function renderPage(role: 'coach' | 'user') {
   const view = render(
     <QueryClientProvider client={qc}>
       <AuthProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[opts.entry ?? '/market']}>
           <MarketBoardPage />
         </MemoryRouter>
       </AuthProvider>
@@ -74,6 +79,21 @@ function renderPage(role: 'coach' | 'user') {
   );
   return { ...view, calls, release: () => gate?.({ listings: [LISTING], cursor: null }) };
 }
+
+beforeEach(() => {
+  // 浮层（MarketListingOverlay）经 useMediaQuery 读 matchMedia，jsdom 没这个 API，缺桩整树崩。
+  // 恒 false = 桌面口径：浮层走弹窗分支，断言按桌面 DOM 写。
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+});
 
 afterEach(cleanup);
 
@@ -113,5 +133,25 @@ describe('转会区热刷新按钮（v6.65.0）', () => {
     fireEvent.click(btn);
     await waitFor(() => expect(calls.listings).toBe(2));
     expect(calls.balance).toBe(0);
+  });
+});
+
+describe('?listing= 直开浮层（v6.68.0 期 B）', () => {
+  it('命中在售挂单：自动拉详情并打开浮层', async () => {
+    const { container, calls } = renderPage('coach', { entry: '/market?listing=1' });
+    await waitFor(() => expect(container.textContent).toContain('王牌'));
+    await waitFor(() => expect(calls.detail).toBeGreaterThanOrEqual(1));
+  });
+
+  it('挂单不在当前列表（已撤/已下架）：静默忽略，不拉详情', async () => {
+    const { container, calls } = renderPage('coach', { entry: '/market?listing=999' });
+    await waitFor(() => expect(container.textContent).toContain('王牌'));
+    expect(calls.detail).toBe(0);
+  });
+
+  it('非整数参数直接丢弃', async () => {
+    const { container, calls } = renderPage('coach', { entry: '/market?listing=abc' });
+    await waitFor(() => expect(container.textContent).toContain('王牌'));
+    expect(calls.detail).toBe(0);
   });
 });

@@ -760,6 +760,39 @@ a.card:hover {
   opacity: 0.75;
 }
 
+/* v6.68.0 期 B：审核队列的批选 / 键盘游标 / 批量操作条 */
+.table-wrap:focus-visible {
+  outline: 2px solid var(--sky-deep);
+  outline-offset: 2px;
+}
+
+.tick {
+  width: 2.2rem;
+  text-align: center;
+}
+
+.tick input {
+  cursor: pointer;
+}
+
+/* 「去处置」落到队列行时的短暂高亮（2.6s 后自动褪色） */
+tr.row-hit {
+  background: color-mix(in srgb, var(--sky) 18%, transparent);
+  transition: background 0.4s ease;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-2, #faf6ee);
+}
+
 .badge.green {
   background: #e2f3ea;
   color: #0b7a47;

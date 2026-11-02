@@ -1,9 +1,11 @@
 // 管理端 · 转会页：审核队列（含市场干预）+ 暂停出价 + 强制拍卖（规则 4.4.5；v6.51.0 起人选不限、前六为参考）+ 海捞暗标段（v6.50.0）+ 转会窗口状态机（TECH_DESIGN §11/§6.4-6）
 // （原 Admin.tsx 三 section，v2.1.0 拆分；暂停出价为v2.1.0 commit 5 新增）
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionPreview, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
+import { Link, useSearchParams } from 'react-router';
+import { api, apiPost, type AdminReviewBatchResult, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionPreview, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
 import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
+import { playerPath } from '../../lib/player-link.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
 import { IdTag } from '../../components/IdTag.tsx';
@@ -73,6 +75,14 @@ function ReviewsSection() {
   const [feeDrafts, setFeeDrafts] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
   const [interveneId, setInterveneId] = useState('');
+  // v6.68.0 期 B：批选 + 键盘游标
+  const [picked, setPicked] = useState<number[]>([]);
+  const [cursor, setCursor] = useState(0);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [highlightTransfer, setHighlightTransfer] = useState<number | null>(null);
+  const queueRef = useRef<HTMLDivElement | null>(null);
+  const interveneRef = useRef<HTMLDivElement | null>(null);
+  const [params, setParams] = useSearchParams();
 
   const { data: reviews, error: reviewsError } = useQuery({
     queryKey: ['admin', 'reviews', status],
@@ -82,6 +92,37 @@ function ReviewsSection() {
   useEffect(() => {
     if (reviewsError) show(reviewsError instanceof Error ? reviewsError.message : '审核队列加载失败', true);
   }, [reviewsError, show]);
+
+  // 「去处置」落地（v6.68.0 期 B）：entity=transfer 定位并高亮队列行（动作本来就在行内）；
+  // entity=listing|bid|session 才是干预框认的 id，预填后滚到干预区。参数用掉即 replace 清掉，
+  // 刷新/后退不重复触发。不把 transfer id 塞进干预框——那框里的按钮会按「挂牌/出价/谈判」解释它。
+  useEffect(() => {
+    const entity = params.get('entity');
+    const raw = params.get('id');
+    if (entity === null && raw === null) return;
+    const id = Number(raw);
+    if (entity === 'transfer' && Number.isInteger(id) && id > 0) {
+      setHighlightTransfer(id);
+      setStatus('open');
+    } else if ((entity === 'listing' || entity === 'bid' || entity === 'session') && Number.isInteger(id) && id > 0) {
+      setInterveneId(String(id));
+      window.setTimeout(() => interveneRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
+    }
+    const next = new URLSearchParams(params);
+    next.delete('entity');
+    next.delete('id');
+    setParams(next, { replace: true });
+  }, [params, setParams]);
+
+  // 高亮的行渲染出来后再滚过去
+  useEffect(() => {
+    if (highlightTransfer === null) return;
+    const el = document.getElementById(`review-transfer-${highlightTransfer}`);
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      window.setTimeout(() => setHighlightTransfer(null), 2600);
+    }
+  }, [highlightTransfer, reviews]);
 
   const reload = () => queryClient.invalidateQueries({ queryKey: ['admin', 'reviews'] });
 
@@ -130,6 +171,74 @@ function ReviewsSection() {
     }
   }
 
+  // 批选：只有 transfer_confirm 行可勾（激活举报要逐条看截图，Q1 之外的既有口径）
+  const actionable = (reviews ?? []).filter((r) => r.report === null && r.status === 'open');
+  const pickedRows = actionable.filter((r) => picked.includes(r.id));
+
+  function togglePick(id: number) {
+    setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function runBatch(action: 'approve' | 'reject') {
+    if (batchBusy || pickedRows.length === 0) return;
+    const reason = await ask(
+      `批量${action === 'approve' ? '批准' : '驳回'} ${pickedRows.length} 条的原因（会写进每条审计）：`,
+    );
+    if (!reason) return;
+    setBatchBusy(true);
+    try {
+      const res = await apiPost<AdminReviewBatchResult>('/api/admin/reviews/batch', {
+        action,
+        ids: pickedRows.map((r) => r.id),
+        note: reason,
+      });
+      const ok = res.results.filter((r) => r.ok).length;
+      const failed = res.results.filter((r) => !r.ok);
+      show(
+        failed.length === 0
+          ? `批量${action === 'approve' ? '批准' : '驳回'}完成：${ok} 条。`
+          : `批量${action === 'approve' ? '批准' : '驳回'}：成功 ${ok} 条，失败 ${failed.length} 条（${failed
+              .map((f) => `#${f.id} ${f.error ?? '失败'}`)
+              .join('；')}）。`,
+        failed.length > 0,
+      );
+      setPicked([]);
+      await reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : '批量操作失败', true);
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  // 键盘（v6.68.0 期 B）：j/k 移游标、a 批准、r 驳回、Esc 清选择。
+  // 只挂在队列容器上——焦点在输入框里时不上屏，避免一边填备注一边触发批准。
+  function onQueueKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (actionable.length === 0) return;
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCursor((c) => Math.min(c + 1, actionable.length - 1));
+      return;
+    }
+    if (e.key === 'k' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setCursor((c) => Math.max(c - 1, 0));
+      return;
+    }
+    if (e.key === 'Escape') {
+      setPicked([]);
+      return;
+    }
+    if (e.key === 'a' || e.key === 'r') {
+      const row = actionable[Math.min(cursor, actionable.length - 1)];
+      if (!row) return;
+      e.preventDefault();
+      void decide(row, e.key === 'a' ? 'approve' : 'reject');
+    }
+  }
+
   return (
     <section className="card admin-section">
       <h2>审核队列</h2>
@@ -152,10 +261,21 @@ function ReviewsSection() {
       ) : reviews.length === 0 ? (
         <EmptyState>{status === 'open' ? '没有待审的单子。市场很平静。' : '这一栏暂时没有记录。'}</EmptyState>
       ) : (
-        <div className="table-wrap">
+        // 队列容器同时是键盘作用域（tabIndex + onKeyDown）；包裹关系必须保持 .table-wrap 紧邻表格（TC-SWP-01）
+        <div className="table-wrap" ref={queueRef} tabIndex={0} role="group" aria-label="审核队列表（j / k 移动，a 批准，r 驳回）" onKeyDown={onQueueKeyDown}>
           <table>
             <thead>
               <tr>
+                {status === 'open' && (
+                  <th className="tick">
+                    <input
+                      type="checkbox"
+                      aria-label="全选本页待审"
+                      checked={actionable.length > 0 && picked.length === actionable.length}
+                      onChange={(e) => setPicked(e.target.checked ? actionable.map((r) => r.id) : [])}
+                    />
+                  </th>
+                )}
                 <th>球员</th>
                 <th>单据</th>
                 <th>内容</th>
@@ -170,12 +290,20 @@ function ReviewsSection() {
                 if (r.report !== null) {
                   return (
                     <tr key={r.id}>
+                      {status === 'open' && <td className="tick muted" title="激活举报需逐条看截图，不能批选">—</td>}
                       <td>
-                        {r.transfer.player.name}
+                        <Link to={playerPath(r.transfer.player)}>{r.transfer.player.name}</Link>{' '}
+                        <IdTag kind="球员" value={r.transfer.player.id} />
                         <span className="muted">（CA {r.transfer.player.ca ?? '—'}）</span>
                       </td>
                       <td>
                         <span className="badge purple">激活举报</span>
+                        {r.report.listingId !== null && (
+                          <>
+                            {' '}
+                            <IdTag kind="挂牌" value={r.report.listingId} />
+                          </>
+                        )}
                       </td>
                       <td>
                         被激活方举报未收到 QQ 通知；激活方 <b>{r.report.activatorClubName ?? '—'}</b>
@@ -208,6 +336,11 @@ function ReviewsSection() {
                             <button className="btn btn-sm" type="button" disabled={busyId === r.id} onClick={() => resolveReport(r)}>
                               {busyId === r.id ? '处理中…' : '处理完毕'}
                             </button>
+                            {r.report.listingId !== null && (
+                              <Link className="btn btn-sm" to={`/market?listing=${r.report.listingId}`}>
+                                去处置
+                              </Link>
+                            )}
                           </div>
                         ) : (
                           <span className="muted">{r.note ?? '—'}</span>
@@ -219,15 +352,31 @@ function ReviewsSection() {
                 const summary = bypassSummary(r);
                 const alerts = Array.isArray(r.payload?.alerts) ? ((r.payload!.alerts) as { kind: string; text: string }[]) : [];
                 return (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    id={`review-transfer-${r.transfer.id}`}
+                    className={highlightTransfer === r.transfer.id ? 'row-hit' : undefined}
+                  >
+                    {status === 'open' && (
+                      <td className="tick">
+                        <input
+                          type="checkbox"
+                          aria-label={`选择 ${r.transfer.player.name} 的单`}
+                          checked={picked.includes(r.id)}
+                          onChange={() => togglePick(r.id)}
+                        />
+                      </td>
+                    )}
                     <td>
-                      {r.transfer.player.name}
+                      <Link to={playerPath(r.transfer.player)}>{r.transfer.player.name}</Link>{' '}
+                      <IdTag kind="球员" value={r.transfer.player.id} />
                       <span className="muted">（CA {r.transfer.player.ca ?? '—'}）</span>
                     </td>
                     <td>
                       <span className={`badge ${r.transfer.type === 'forced_auction' ? 'red' : summary ? 'purple' : 'sky'}`}>
                         {TRANSFER_TYPE_LABEL[r.transfer.type] ?? r.transfer.type}
-                      </span>
+                      </span>{' '}
+                      <IdTag kind="转会" value={r.transfer.id} />
                       {alerts.length > 0 && (
                         <span className="badge red" title={alerts.map((a) => a.text).join('；')}>
                           ⚠️ 异常出价 ×{alerts.length}
@@ -286,6 +435,9 @@ function ReviewsSection() {
                           <button className="btn btn-sm btn-danger" type="button" disabled={busyId === r.id} onClick={() => decide(r, 'reject')}>
                             驳回
                           </button>
+                          <Link className="btn btn-sm" to={`/admin/market?entity=transfer&id=${r.transfer.id}`}>
+                            去处置
+                          </Link>
                         </div>
                       ) : (
                         <span className="muted">{r.note ?? '—'}</span>
@@ -299,7 +451,22 @@ function ReviewsSection() {
         </div>
       )}
 
-      <div className="market-intervene">
+      {status === 'open' && picked.length > 0 && (
+        <div className="batch-bar" role="region" aria-label="批量操作">
+          <span className="muted">已选 {picked.length} 条</span>
+          <button className="btn btn-sm" type="button" disabled={batchBusy} onClick={() => void runBatch('approve')}>
+            {batchBusy ? '处理中…' : `批量批准（${picked.length}）`}
+          </button>
+          <button className="btn btn-sm btn-danger" type="button" disabled={batchBusy} onClick={() => void runBatch('reject')}>
+            批量驳回（{picked.length}）
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => setPicked([])}>
+            清空
+          </button>
+        </div>
+      )}
+
+      <div className="market-intervene" ref={interveneRef}>
         <h3>市场干预</h3>
         <p className="hint">
           对卡在竞价/匹配窗或签约谈判的单据直接处置：撤出价、强制送审、强制作废（解冻资金、球员还原）、
