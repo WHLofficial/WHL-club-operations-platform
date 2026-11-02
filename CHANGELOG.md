@@ -4,6 +4,27 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.68.2] · 管理审核工作台（期 C：在途工作台 / 激活凭证 / 侧栏滚动）（2026-11-02）
+
+**Added**
+
+- **新页 `/admin/workbench`（审核工作台）**：把散在各页的在途单据收成五张表 —— 在途挂牌、活跃出价、进行中谈判、待审·签约中的转会、强拍活动，每表上限 50 条。行内直接给动作：挂牌「暂停/恢复出价」「强制送审」「强制作废」；出价「撤销」；谈判「强制成交」「作废」；强拍「取消」；转会给「去审核」深链（`/admin/market?entity=transfer&id=`）。需要写原因的动作统一走原因框，成功后自动刷表。
+- **CPU 参与方默认隐藏**：标题旁显示「已隐藏 N 条」，勾选「显示 CPU」才带出来。强拍表不过滤 —— CPU 只会当卖方，强拍量又少，运营需要一眼看全。
+- **搜索兜底**（顶部输入框，300ms 防抖）：纯数字并行探七种 id（球员内部 id / FC id / 俱乐部 / 挂牌 / 出价 / 谈判 / 转会），文字查球员名与俱乐部名；命中的行在工作台里自动高亮，球员命中另给新窗口链接。
+- **新端点**：`GET /api/admin/workbench/in-flight?cpu=0|1`（五表一次取全，列表只回 `hasProof` 布尔）、`GET /api/admin/workbench/search?q=`（>64 字符 400）、`GET /api/admin/workbench/proof/:listingId`（管理员直取凭证地址）。
+- **激活凭证有了正门**：`GET /api/market/listings/:id/proof` 只放给「这单的卖方 + 管理员」，卖方在 `/market` 的挂牌浮层与转会台报价卡上直接点「查看激活凭证」——非激活单或没上传凭证时按钮自己隐去，不会变成一条点不动的死链。挂牌的公开 feed 仍不下发凭证字段。
+- **迁移 `0089_bids_status_index.sql`**：`CREATE INDEX IF NOT EXISTS idx_bids_status ON bids (status);`（工作台与队列都按 status 筛出价）。
+
+**Fixed**
+
+- **后台侧栏在桌面端被视口裁掉**：`.admin-sidebar` 是 `position: sticky`，条目多到超过视口高度时底部几项既滚不到、整页滚动也带不出来。桌面端（≥761px）加 `max-height: calc(100dvh - var(--topbar-h) - 24px)` + `overflow-y: auto` + `overscroll-behavior: contain`；窄屏抽屉原本就能滚，未动。
+- **工作台数字搜索的 SQL 别名缺失**（`FROM bids WHERE b.id = ?`，没给表起别名）：数字搜索会直接 500，被新用例当场抓住。
+
+**Notes**
+
+- 在途转会的 CPU 过滤只看**卖方**：CPU 不会买人，把买方也过一遍会把「真人买 CPU 球员」这种正需要审核的单一起藏掉。
+- **验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **187 文件 / 2,986 例全绿**（期 B 基线 186 / 2,980，新增 `tests/workbench.test.ts` 6 例）；`npm run build` 通过（入口 `dist/assets/index-DoyxBhYG.js`）。判级 **minor**（审核台能力补全，不改判据、不动资金；一条纯索引迁移）。测试计划 `docs/test-plans/v6.68.2-workbench-phase-c.md`。
+
 ## [v6.68.1] · 管理审核工作台（期 B：队列单号 / 直链 / 键盘 / 批选）（2026-11-02）
 
 **Added**
