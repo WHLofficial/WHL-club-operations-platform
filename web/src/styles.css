@@ -3803,6 +3803,19 @@ th.num .th-sort {
   border-radius: 10px;
   box-shadow: inset 0 -3px 0 var(--cocoa-deep);
 }
+
+/* 桌面侧栏自己滚（v6.68.2）：分组加到 17 项后整列比视口还高，sticky 元素被窗口下沿裁掉，
+   整页滚动也滚不出下面那几项（它钉在视口里）。给它可用高度 + 内部滚动，条目再多也点得到。
+   窄屏不走这条：≤760px 时侧栏是固定定位的抽屉，那里已经有 top/bottom + overflow-y。 */
+@media (min-width: 761px) {
+  .admin-sidebar {
+    max-height: calc(100vh - var(--topbar-h) - 24px);
+    max-height: calc(100dvh - var(--topbar-h) - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+}
 .admin-nav-link {
   display: block;
   padding: 7px 10px;

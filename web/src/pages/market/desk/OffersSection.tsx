@@ -32,6 +32,7 @@ import {
 } from '../../../lib/api.ts';
 import { playerPath } from '../../../lib/player-link.ts';
 import { IdTag } from '../../../components/IdTag.tsx';
+import ActivationProofButton from '../ActivationProofButton.tsx';
 import { moneyIntText } from '../../../lib/club-cards.ts';
 import { money } from '../../market/shared.tsx';
 import { creditUse } from '../../../lib/credit-line.ts';
@@ -586,6 +587,8 @@ function OfferDesk({
                   <span className="muted">
                     报价 <IdTag kind="报价" value={offer.id} />
                   </span>
+                  {/* v6.68.2：卖方能看这单的激活凭证（非激活单/无凭证时按钮自己隐藏） */}
+                  {seller && offer.listingId !== null && <ActivationProofButton listingId={offer.listingId} />}
                 </h3>
                 <button className="mkt-ov-x" type="button" aria-label="关闭谈判桌" ref={closeRef} onClick={onClose}>
                   ✕

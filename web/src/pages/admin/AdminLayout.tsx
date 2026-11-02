@@ -40,6 +40,7 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
     title: '转会与经营',
     items: [
       { to: '/admin/market', label: '转会' },
+      { to: '/admin/workbench', label: '审核工作台' },
       { to: '/admin/schedule', label: '时刻表' },
       { to: '/admin/brands', label: '品牌池' },
       { to: '/admin/shop', label: '消费工单' },

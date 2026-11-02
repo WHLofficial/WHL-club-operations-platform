@@ -35,6 +35,8 @@ const NAV_BEFORE: { label: string; to: string }[] = [
   { label: '成长档位', to: '/admin/tier' },
   { label: '导入', to: '/admin/imports' },
   { label: '转会', to: '/admin/market' },
+  // v6.68.2 期 C：审核工作台（五张在途表 + 搜索），挂在「转会与经营」组紧跟转会
+  { label: '审核工作台', to: '/admin/workbench' },
   { label: '时刻表', to: '/admin/schedule' },
   { label: '俱乐部', to: '/admin/clubs' },
   { label: '品牌池', to: '/admin/brands' },
@@ -50,7 +52,7 @@ const SHAPE_AFTER: { title: string | null; labels: string[] }[] = [
   { title: null, labels: ['总览'] },
   { title: '赛事运营', labels: ['赛季', '事件'] },
   { title: '球队与名册', labels: ['俱乐部', '球员', '成长录入', '成长档位', '导入'] },
-  { title: '转会与经营', labels: ['转会', '时刻表', '品牌池', '消费工单', '财政'] },
+  { title: '转会与经营', labels: ['转会', '审核工作台', '时刻表', '品牌池', '消费工单', '财政'] },
   { title: '系统', labels: ['系统'] },
 ];
 
@@ -87,7 +89,7 @@ function navShape(el: HTMLElement): { title: string | null; labels: string[] }[]
 }
 
 describe('管理端侧栏四域分组（v6.28.0）', () => {
-  it('TC-NAV-D1/D2：14 项一项不差，to 与分组前逐字一致；组标题与归属固定', () => {
+  it('TC-NAV-D1/D2：15 项一项不差，to 与分组前逐字一致；组标题与归属固定', () => {
     renderLayout('/admin');
     const side = nav();
     const links = within(side).getAllByRole('link');

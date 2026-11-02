@@ -48,6 +48,8 @@ const AdminGrowthPage = lazy(() => import('./pages/admin/GrowthEntryPage.tsx'));
 const AdminTierPage = lazy(() => import('./pages/admin/TierPage.tsx'));
 const AdminImportsPage = lazy(() => import('./pages/admin/ImportsPage.tsx'));
 const AdminMarketPage = lazy(() => import('./pages/admin/MarketPage.tsx'));
+// v6.68.2：审核工作台（在途五表 + 搜索 + 行内处置）
+const AdminWorkbenchPage = lazy(() => import('./pages/admin/WorkbenchPage.tsx'));
 // 运营时刻表（v6.49.0）：逐项时段 + 只读甘特图
 const AdminSchedulePage = lazy(() => import('./pages/admin/SchedulePage.tsx'));
 const AdminClubsPage = lazy(() => import('./pages/admin/ClubsPage.tsx'));
@@ -191,6 +193,7 @@ export default function App() {
             <Route path="tier" element={<AdminTierPage />} />
             <Route path="imports" element={<AdminImportsPage />} />
             <Route path="market" element={<AdminMarketPage />} />
+            <Route path="workbench" element={<AdminWorkbenchPage />} />
             <Route path="schedule" element={<AdminSchedulePage />} />
             <Route path="clubs" element={<AdminClubsPage />} />
             <Route path="clubs/cpu-convert" element={<AdminCpuConvertPage />} />

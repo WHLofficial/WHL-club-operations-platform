@@ -10,6 +10,7 @@ import { apiPost, type BidPlaceResult, type MarketListing, type MatchDecisionRes
 import { creditUse } from '../../lib/credit-line.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import { IdTag } from '../../components/IdTag.tsx';
+import ActivationProofButton from './ActivationProofButton.tsx';
 import { TeamLogo } from '../../components/TeamLogo.tsx';
 import { playerPath } from '../../lib/player-link.ts';
 import { useListingDetail, useMarketInvalidation, type MarketMyClub } from '../../lib/queries.ts';
@@ -328,6 +329,13 @@ function OverlayBody({
           creditLine={creditLine}
           onBid={onBid}
         />
+      )}
+
+      {/* v6.68.2：被激活方的凭证入口（只有卖方能看到，按钮自己判定有没有） */}
+      {isSeller && l.type === 'activation' && (
+        <div className="inline-form">
+          <ActivationProofButton listingId={l.id} label="查看激活凭证" />
+        </div>
       )}
 
       {isSeller && l.matchPhase === 'matching' && (

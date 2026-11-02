@@ -1013,6 +1013,103 @@ export interface AdminReviewBatchResult {
   results: { id: number; ok: boolean; error?: string }[];
 }
 
+// ---- 审核工作台（v6.68.2 期 C） ----
+// 五张在途表一次取全：字段与 `src/worker/workbench.ts` 的 Workbench* 一一对应。
+
+export interface WorkbenchListingRow {
+  id: number;
+  playerId: number;
+  playerFcId: number | null;
+  playerName: string;
+  sellerClubId: number | null;
+  sellerClubName: string;
+  type: string;
+  status: string;
+  askPrice: number;
+  highestBid: number | null;
+  bidCount: number;
+  bidPaused: boolean;
+  deadlineAt: string | null;
+  hasProof: boolean;
+}
+
+export interface WorkbenchBidRow {
+  id: number;
+  listingId: number;
+  playerId: number;
+  playerFcId: number | null;
+  playerName: string;
+  clubId: number;
+  clubName: string;
+  amount: number;
+  createdAt: string;
+}
+
+export interface WorkbenchSessionRow {
+  id: number;
+  playerId: number;
+  playerFcId: number | null;
+  playerName: string;
+  clubId: number;
+  clubName: string;
+  transferId: number;
+  releaseFee: number | null;
+  expectedWage: number | null;
+  attemptCount: number;
+  expiryAnchorAt: string | null;
+}
+
+export interface WorkbenchTransferRow {
+  id: number;
+  playerId: number;
+  playerFcId: number | null;
+  playerName: string;
+  fromClubId: number | null;
+  fromName: string;
+  toClubId: number | null;
+  toName: string;
+  type: string;
+  status: string;
+  fee: number | null;
+  createdAt: string;
+}
+
+export interface WorkbenchForcedRow {
+  listingId: number;
+  playerId: number;
+  playerFcId: number | null;
+  playerName: string;
+  sellerClubId: number | null;
+  sellerClubName: string;
+  status: string;
+  askPrice: number;
+  highestBid: number | null;
+  bidPaused: boolean;
+  deadlineAt: string | null;
+}
+
+export interface WorkbenchInFlight {
+  listings: WorkbenchListingRow[];
+  bids: WorkbenchBidRow[];
+  sessions: WorkbenchSessionRow[];
+  transfers: WorkbenchTransferRow[];
+  forced: WorkbenchForcedRow[];
+  counts: { listings: number; bids: number; sessions: number; transfers: number; forced: number };
+  /** 默认隐藏 CPU 时四张转会类表各被藏掉多少条 */
+  hidden: { listings: number; bids: number; sessions: number; transfers: number };
+}
+
+export interface WorkbenchSearchHit {
+  kind: 'player' | 'club' | 'listing' | 'bid' | 'negotiation' | 'transfer';
+  id: number;
+  label: string;
+  sublabel?: string;
+}
+
+export interface WorkbenchSearchResult {
+  results: WorkbenchSearchHit[];
+}
+
 /** 转会单类型（与 src/worker 侧 transfer.type 取值一致；v6.67.0 由 string 收紧为联合类型） */
 export type TransferType =
   | 'transfer'
