@@ -124,7 +124,9 @@
 
 ## v6.67.1 · 强拍单静默收口的兜底口径修正（2026-11-02）
 
-**状态**：**已实现并本地验收，待 push 上线**——零迁移。
+**状态**：**已上线（2026-11-02）**——零迁移。push `4f863f8..1c21080`（2 枚 = 修补 + docs 收口）触发 CF Workers Builds 自动部署，生效 Version **`1a237f00-8fb0-4905-bf57-5f1ccb9392b2`** @2026-11-02T00:18:54Z（100% 流量，前版 `03aa9167`）。上线回读：`/api/health` 200（d1 / tour_db / kv 全 ok）、生产入口 `assets/index-XLXhFpi_.js` 与本地构建逐字同名、包内版本串 `6.67.1`。
+
+**配套数据修复（owner 下令后已执行，2026-11-02T00:19Z）**：`scripts/prod-20261102-bastoni-reopen/` 把 transfer 139 / session 78 拉回「第一步 · 定违约金」——session 78 `settled → active`、`expected_wage` 清空、`release_fee` 28 留作预填、`terms_applied` 1 → 0、补一条真口径的过户前快照（`contract: null` ⇒ `rcBoundsFor` 返回 null ⇒ 1860 可自由定违约金）。合同 545（28 / 4）、球员归属（player 43 → club 33）、账本均未动；回读 `attempt_count` 仍 1、`attempts` 1 行 ⇒ 新报价会拿到 `attempt_no = 2`，不与历史行撞键。
 
 **缘起**：v6.67.0 把强拍单的违约金交还给买家后，会话可以停在「RC 还没定 / E 还没确认」。这条路径被静默或关通道收口时，兜底逻辑仍是「按现行合同工资强约」——自由身 / CPU 球员过户落的是占位合同（`wage = 0`、`signed_at = NULL`），会签出**工资 0** 的合同，RC 还会被 `session.release_fee ?? TRAINEE_RELEASE_FEE` 落成 5m。v6.67.0 的补丁只覆盖了「`release_fee` 也为 NULL」的形态，而一次性数据修复之后的 140（Pulisic 15m）/ 141（Reijnders 10m）正是「F 有预填 + E 已清空 + 球员无合同」⇒ 漏网。
 
