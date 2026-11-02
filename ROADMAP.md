@@ -111,7 +111,7 @@
 
 **交付**：
 
-1. `src/worker/shop-ops.ts` 的 `loadPlayer`：先按本地 `id` 查，查不到再按 `fc_id` 兜底（生产 18,301 行 `fc_id` 无空值无重复）；命中但归属不符 ⇒ 400 `这个 FC id 属于俱乐部 #N，不是俱乐部 #M`；两种键都没有 ⇒ 404 `找不到这名球员（本地 id 或 FC id 都没有这条记录）`。五个分类共用该入口，一起获得兜底。
+1. `src/worker/shop-ops.ts` 的 `loadPlayer`：先按本地 `id` 查，查不到再按 `fc_id` 兜底（生产 18,301 行 `fc_id` 无空值无重复）；命中但归属不符 ⇒ 400 `这个 FC id 属于俱乐部 #N，不是俱乐部 #M`（命中自由身球员写「自由身（不属于任何俱乐部）」，不吐 `#null`）；两种键都没有 ⇒ 404 `找不到这名球员（本地 id 或 FC id 都没有这条记录）`。五个分类共用该入口，一起获得兜底。
 2. `web/src/pages/admin/AdminShopPage.tsx`：页面级与「外部录入」卡各补 `toastNode` 渲染（页面级挂页尾、卡片级挂卡片底部）。
 3. 队壳单「取消」被吞：`window.prompt(...) ?? ''` 改成先判 `null` 再 trim（原写法让那句 `return` 成死代码，点取消仍会继续通过）。
 4. 外部录入卡的球员输入框 placeholder 改「球员 id / FC id」。
