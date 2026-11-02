@@ -10,7 +10,7 @@ import { useSearchParams } from 'react-router';
 import { apiPost } from '../../lib/api.ts';
 import { PS_GRANTABLE_BASE_IDS, POSITION_BY_ID, playstyleAllowedForPosition } from '../../../../src/core/fc26.ts';
 import { areAdjacent } from '../../../../src/core/shop.ts';
-import { playstyleById, roleById } from '../../lib/ref.ts';
+import { playstyleById, playstyleDescOf, playstyleEffectOf, roleById } from '../../lib/ref.ts';
 import { useShopCatalog, useShopInvalidation, useShopOrders, useShopSquadState, useMyClub, useSeasonsCurrent } from '../../lib/queries.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
@@ -346,6 +346,8 @@ function BadgeCard({ opsOpen, prices, players, loading, windowOpen, vouchers }: 
   const goldFull = player != null && player.goldUsed >= 3;
   const opBlocked = (op === 'silver' && silverFull) || ((op === 'gold' || op === 'upgrade') && goldFull);
   const disabled = loading || player === null || psid === null || !options.includes(psid) || opBlocked || !windowOpen || !opsOpen;
+  // v6.69.0：选中徽章后行内给一句定位句 + 当前档位效果（银徽买银、金徽买金/升金）
+  const psDesc = psid === null ? null : playstyleDescOf(psid);
 
   return (
     <section className="card">
@@ -400,6 +402,13 @@ function BadgeCard({ opsOpen, prices, players, loading, windowOpen, vouchers }: 
           提交
         </button>
       </div>
+      {psDesc !== null && (
+        <p className="hint ps-shop-desc">
+          {psDesc.info}
+          <br />
+          {op === 'silver' ? `🥈 ${psDesc.desc}` : `🥇 ${playstyleEffectOf(psid ?? 0, true) ?? ''}`}
+        </p>
+      )}
       {player && (
         <p className="hint" style={{ marginBottom: 0 }}>
           银槽 <span className="mono">{player.silverUsed}/12</span> · 金槽 <span className="mono">{player.goldUsed}/3</span>

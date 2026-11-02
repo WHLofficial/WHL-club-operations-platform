@@ -794,7 +794,8 @@ export default function Player() {
               <p className="wing-card-head">PlayStyles</p>
               <div className="ps-list">
                 {playstyles.map((b) => (
-                  <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} source={b.source} />
+                  // v6.69.0：openable —— 窄屏点徽章弹说明，桌面仍走原生 title
+                  <PlaystyleBadge key={`${b.slot}-${b.psid}`} psid={b.psid} gold={b.gold} source={b.source} openable />
                 ))}
               </div>
             </section>

@@ -71,6 +71,18 @@ app.use('/api/*', async (c, next) => {
   else await task;
 });
 
+// v6.69.0：图标子树走 Worker（wrangler.jsonc 的 run_worker_first 同步扩了 /assets/icons/*）。
+// 静态资源绑定在 SPA 模式下会把「文件不存在」也答成 200 text/html —— <img> 解码失败只是静默坏图，
+// 而 /assets/* 又带 immutable 一年缓存，错判会被长期记住。这里只把「命中 SPA 回落」的请求改判 404；
+// 真文件原样透传，_headers 的缓存头不受影响。页面深链的回落不放宽也不收紧。
+app.get('/assets/icons/*', async (c) => {
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  const type = res.headers.get('content-type') ?? '';
+  // 404 也显式 no-store：将来补图后不能被浏览器/中间层记成「这个路径永远没有」
+  if (type.includes('text/html')) return c.body(null, 404, { 'cache-control': 'no-store' });
+  return res;
+});
+
 app.route('/api', clubsRoutes);
 app.route('/api', playersRoutes);
 app.route('/api', registrationRoutes);

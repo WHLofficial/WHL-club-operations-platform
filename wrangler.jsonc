@@ -19,7 +19,9 @@
     "directory": "./web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    // v6.69.0：图标子树必须先进 Worker —— SPA 回落会把缺失的 .webp 也答成 200 text/html，
+    // 浏览器按图片解码失败只是静默坏图，缓存层还会把这份 HTML 当图片存一年。
+    "run_worker_first": ["/api/*", "/assets/icons/*"]
   },
   "d1_databases": [
     {

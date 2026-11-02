@@ -194,6 +194,11 @@ export default function TopBar() {
             </button>
             {menuOpen && (
               <div className="user-menu" role="menu" aria-label="用户菜单">
+                {/* v6.69.0：PlayStyles 图鉴入口（公开页；放在时区之前，低频但比时区常用） */}
+                <NavLink to="/playstyles" role="menuitem" className="user-menu-link" onClick={() => setMenuOpen(false)}>
+                  PlayStyles 图鉴
+                </NavLink>
+                <div className="user-menu-sep" role="separator" />
                 {/* 顶栏不再挂时钟图标，当前时区档只在这里能一眼看到 */}
                 <p className="user-menu-head" role="presentation">
                   显示时区：{tzLabel(tz)}
