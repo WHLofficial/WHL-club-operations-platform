@@ -16,6 +16,8 @@
 
 **设计**：`docs/superpowers/specs/2026-11-02-admin-review-workbench-design.md`（Q1–Q12 决策记录；期 B = 队列单号/直链/键盘/批选，期 C = `/admin/workbench` 五表 + 凭证可见）。
 
+**上线**：push `ada44b5..f6f8ca7`（3 枚）触发 CF Workers Builds 自动部署，生效 Version `fbbd97cc-7e41-4d51-b08e-12a79316517b` @2026-11-02T05:34:03Z（100% 流量）。回读：`/api/health` 200、生产入口 `assets/index-DcIQ3f0L.js`（725,987 B）与本地同源重建**逐字节一致**（sha256 `68eafc5c…`）、包内版本串 `6.68.0` 且含 IdTag 文案「点击复制／已复制」。
+
 ## [v6.67.2] · 消费工单外部录入：提示可见 + FC id 兜底（2026-11-02）
 
 **Fixed**
