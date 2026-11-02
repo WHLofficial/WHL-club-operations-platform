@@ -3,6 +3,7 @@
 import nationRef from '../../assets/ref/nation.json';
 import positionRef from '../../assets/ref/position.json';
 import playstyleRef from '../../assets/ref/playstyle.json';
+import playstyleDescRef from '../../assets/ref/playstyle-desc.json';
 import roleRef from '../../assets/ref/role.json';
 import teamRef from '../../assets/ref/team.json';
 import { isGoldPlaystyleId, PS_SILVER_SLOT_COUNT, playstyleSlotsOf } from '../../../src/core/fc26.ts';
@@ -67,6 +68,34 @@ export function playstyleBadges(attrs: Record<string, unknown>): PlaystyleBadgeS
 
 export function playstyleIconUrl(id: number): string {
   return `/assets/icons/playstyles/${id}.webp`;
+}
+
+// PlayStyle 描述（v6.69.0）：36 条基础项各一段定位句 + 银/金两档效果，金徽按「基础 ID+100」
+// 复用基础项那一行。英文底稿取自 futbin /26/playstyles（memory/playstyle-futbin-source.md），
+// 中文为本站重写；描述只作文案展示，不参与发放/槽位校验。
+export interface PlaystyleDesc {
+  id: number;
+  info: string;
+  desc: string;
+  descPlus: string;
+}
+
+export const playstyleDescById = indexBy(playstyleDescRef as PlaystyleDesc[]);
+
+/** 金徽 ID（基础+100）折算回基础项；未知 ID 原样返回，交给查表落空 */
+export function playstyleBaseId(psid: number): number {
+  return psid >= 100 ? psid - 100 : psid;
+}
+
+export function playstyleDescOf(psid: number): PlaystyleDesc | null {
+  return playstyleDescById.get(playstyleBaseId(psid)) ?? null;
+}
+
+/** 当前档位对应的效果文案：金徽取 descPlus，银徽取 desc；表里没有该项返回 null */
+export function playstyleEffectOf(psid: number, gold: boolean): string | null {
+  const row = playstyleDescOf(psid);
+  if (row === null) return null;
+  return gold ? row.descPlus : row.desc;
 }
 
 // 细分属性中文名（34 项，顺序 = FC26 的细分属性列顺序，与 players-library.ts 的 ATTR_KEYS、

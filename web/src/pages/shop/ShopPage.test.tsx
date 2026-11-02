@@ -381,3 +381,49 @@ describe('v6.66.1 球员下拉按名单桶分组', () => {
     expect(groupSummary(playerSelect())).toEqual([{ label: '训练营', ids: ['7'] }]);
   });
 });
+
+// v6.69.0：徽章卡选中 PlayStyle 后，在提交键下方行内补定位句 + 当前档位效果；
+// 切档会清空已选徽章，所以每次都要重新选一遍。
+describe('v6.69.0 徽章卡行内说明', () => {
+  function badgeCard(): HTMLElement {
+    const el = [...document.querySelectorAll('.card')].find((n) => n.querySelector('h3')?.textContent === '徽章');
+    expect(el, '徽章卡应渲染').toBeTruthy();
+    return el as HTMLElement;
+  }
+
+  it('银徽档：显示定位句 + 🥈 效果；切金徽档后显示 🥇 效果', async () => {
+    renderShop('/shop?tab=badge', [], { catalog: SHOP_CATALOG, players: [squadPlayer()] });
+    await waitFor(badgeCard);
+    const card = badgeCard();
+    // 名单查询与价目不同步：先等球员下拉真的装填了选项，再选（change 落在空 select 上会被吞掉）
+    await waitFor(() => {
+      const sel = card.querySelectorAll('select')[0] as HTMLSelectElement;
+      expect([...sel.options].some((o) => o.value === '6')).toBe(true);
+    });
+    fireEvent.change(card.querySelectorAll('select')[0], { target: { value: '6' } });
+    await waitFor(() => {
+      const ps = card.querySelectorAll('select')[1] as HTMLSelectElement;
+      expect([...ps.options].some((o) => o.value === '1')).toBe(true);
+    });
+    fireEvent.change(card.querySelectorAll('select')[1], { target: { value: '1' } });
+
+    const desc = card.querySelector('.ps-shop-desc')!;
+    expect(desc.textContent).toContain('搓向死角');
+    expect(desc.textContent).toContain('🥈 搓射出手更快');
+
+    const goldBtn = [...card.querySelectorAll('.seg button')].find((b) => b.textContent === '买金徽章') as HTMLButtonElement;
+    fireEvent.click(goldBtn);
+    await waitFor(() => {
+      const ps = card.querySelectorAll('select')[1] as HTMLSelectElement;
+      expect([...ps.options].some((o) => o.value === '1')).toBe(true);
+    });
+    fireEvent.change(card.querySelectorAll('select')[1], { target: { value: '1' } });
+    expect(card.querySelector('.ps-shop-desc')!.textContent).toContain('🥇 搓射出手明显更快');
+  });
+
+  it('未选徽章时不渲染行内说明', async () => {
+    renderShop('/shop?tab=badge', [], { catalog: SHOP_CATALOG, players: [squadPlayer()] });
+    await waitFor(badgeCard);
+    expect(badgeCard().querySelector('.ps-shop-desc')).toBeNull();
+  });
+});

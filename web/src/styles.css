@@ -373,6 +373,22 @@ h3 {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* v6.69.0：菜单里的链接项（PlayStyles 图鉴）—— 与 menu button 同款排布，去掉链接默认下划线 */
+.user-menu a.user-menu-link {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--cream);
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.user-menu a.user-menu-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .user-menu button[aria-checked='true'] {
   color: var(--terracotta);
   font-weight: 600;
@@ -1726,6 +1742,189 @@ table.matches-table-narrow .rating-badge {
 .ps-icon {
   width: 16px;
   height: 16px;
+}
+
+/* v6.69.0 图标着色：源素材银版是近白剪影（#fcfcf6）、金版是浅金菱形（#ffd85d），
+   直接贴在奶油底（--paper / --badge-gold-bg）上几乎看不见。银压到 38% 亮度当深灰字形，
+   金压到 78% 并略提饱和；图片本身是透明底，filter 只作用在字形/菱形上，不会染出一块方底。 */
+.ps-badge:not(.ps-gold) .ps-icon,
+.ps-icon-silver {
+  filter: brightness(0.38);
+}
+
+.ps-gold .ps-icon,
+.ps-card-icon-gold {
+  filter: brightness(0.78) saturate(1.15);
+}
+
+/* 窄屏可点的整徽：外观与静态 pill 一致，只补回 button 的默认差异 */
+.ps-badge-open {
+  font: inherit;
+  cursor: pointer;
+}
+
+.ps-badge-open:hover {
+  border-color: var(--terracotta);
+}
+
+/* v6.69.0 说明弹层（PlaystyleSheet）：窄屏底部 sheet，桌面不进这条路径 */
+.ps-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.ps-sheet {
+  width: 100%;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 14px 16px 20px;
+  background: var(--card);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.ps-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ps-sheet-head strong {
+  flex: 1;
+  font-size: 15px;
+}
+
+.ps-sheet-tier {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ps-sheet-tier.gold {
+  border-color: var(--badge-gold-line);
+  background: var(--badge-gold-bg);
+  color: var(--badge-gold-fg);
+}
+
+.ps-sheet-close {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.ps-sheet-info {
+  margin: 10px 0;
+}
+
+.ps-sheet-effects {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.ps-sheet-effects > div {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.ps-sheet-effects > div.on {
+  border-color: var(--terracotta);
+  background: var(--terracotta-tint);
+}
+
+.ps-sheet-effects dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ps-sheet-effects dd {
+  margin: 2px 0 0;
+}
+
+/* v6.69.0 图鉴页 /playstyles：六类分组 + 卡栅格；卡片内先图标/中英名，再定位句与两档效果 */
+.ps-section {
+  margin-top: 18px;
+}
+
+.ps-section h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.ps-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.ps-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.ps-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ps-card-icons {
+  display: flex;
+  gap: 2px;
+}
+
+.ps-card-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.ps-card-name {
+  display: flex;
+  flex-direction: column;
+}
+
+.ps-card-en {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ps-card-info {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ps-card-effects {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.ps-card-effects dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ps-card-effects dd {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* 商店徽章卡：选中后的行内说明，紧跟表单 */
+.ps-shop-desc {
+  margin: 6px 0 0;
 }
 
 /* v6.63.0：来源角标（PlaystyleBadge source）—— pill 尾部的小字标（悬停 title 出全称） */

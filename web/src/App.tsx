@@ -26,6 +26,9 @@ const MarketIntelPage = lazy(() => import('./pages/market/MarketIntelPage.tsx'))
 // 转会台（v6.23.0）：市场「我的」+ 转会报价 + 签约谈判三域合并成一页
 const MarketDeskPage = lazy(() => import('./pages/market/desk/MarketDeskPage.tsx'));
 
+// PlayStyles 图鉴（v6.69.0）：公开页，36 条基础项 + 银/金两档效果；入口在右上角 ≡ 菜单
+const Playstyles = lazy(() => import('./pages/Playstyles.tsx'));
+
 // 旧路由退役（v6.23.0）：/offers 与 /negotiations 换址到转会台，保留 box 参数、replace 不留历史栈；
 // 登录拦截交给 desk 路由自己（RequireUser）。/market/mine 一并退役，不再保留路由。
 function OffersRedirect() {
@@ -107,6 +110,8 @@ export default function App() {
             }
           />
           <Route path="/players" element={<PlayersLibrary />} />
+          {/* PlayStyles 图鉴（v6.69.0）：公开页，入口在 ≡ 菜单 */}
+          <Route path="/playstyles" element={<Playstyles />} />
           {/* 球员对比（v6.34.0）：静态段写在 /players/:id 之前（React Router 静态段优先，调序只为可读） */}
           <Route path="/players/compare" element={<PlayerCompare />} />
           <Route path="/players/:id" element={<Player />} />

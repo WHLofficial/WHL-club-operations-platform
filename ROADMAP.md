@@ -75,7 +75,9 @@
 
 **上一版本 v6.63.0**（徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制；含迁移 `0086`）——**已上线（2026-10-31）**：迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`；只读核验：`d1_migrations` 末条 0086、247 发放银 24 已删保金台账 7/2、557 零数据变更且 FC 槽原貌保留台账 3/2、`idx_players_sort_ps` 消失、config 两键清零、**全表台账与迁移同源表达式对账 silver_drift=0 / gold_drift=0（18,301 行）**）；随后 push `56d00fd..f412485`（7 个提交）触发 CF Workers Builds 两轮自动部署——`f24537fa`（04:09:15Z，功能代码）→ **`310624e6`（04:10:31Z，生效 100%）**。发布轮插曲两枚：评审轮端到端用例超出 `ListBody17` 类型声明（发布复验 typecheck 抓出，`1f252a5` 补字段）；收口时 package.json 漏 bump（首轮部署版本串仍 6.62.0），随 `f412485` 订正重部署。上线探针：`/api/health` 200、线上首页资产 `index-d2h1BMYI.js` 与本地 6.63.0 构建逐字同名、线上版本串 `6.63.0`；`?ps=1` 不含 557（FC 银 1 被发放金 1 派生抑制）、`?ps=101` 命中 557、`?ps=124` 命中 247（发放金以基础 ID 筛中）；列表响应带 `playstyles` 合并清单（`source` 字段在场）、557 详情 `playstyles` = FC 银 16/41/32 + 发放金 101/131（被抑制银 1/31 消失）、`badges 3/2`；`sort=ps` 与 `sort=badges` 均 200。发布前复验 vitest **175 文件 / 2837 例**全绿（较收口 2836 多 1 例为工作区另一会话在途 oidc 用例）。判级 minor（口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。typecheck 三份全清、e2e **29/29**、变异验证 4 靶全命中、code-review 🔴×1 已修。**生产迁移现状：已到 `0086`**。细节见下文 v6.63.0 节。
 
-**本版本 v6.66.1**（消费中心候选放开到本队全部球员，含训练营；零迁移零生产写）——**已上线（2026-11-02）**：push `3b4af50..0f1d706` 3 枚（feat / test / docs，本版从 `origin/main` 新开分支 `feat/v6.66.1-shop-all-players` 落地，未夹带 v6.66.0 的两枚记录 docs），生效 Version `befe1fbd-29a9-41e5-b5db-2af25ce35182` @2026-11-01T17:35:07Z（100% 流量，前版 `b4dbecfd`）。上线回读（2026-11-01T17:36Z）：生产入口 `assets/index-CP-WPN7s.js` 与本地 `web/dist/index.html` 逐字同名，包内版本串 `6.66.1`×1、无 `6.66.0` 残留，三分组文案「一线队 / 训练营 / 挂牌中 / 其他」均在包内；`/api/health` 200、`/api/shop/squad-state` 匿名 401（门控未被放宽）、`/` 仍 `cache-control: no-store`。**缘起**：owner 要求「消费中心里，本队所有球员（包括训练营）都应该能买」，经 grilling 两轮定案（版本 6.66.1——6.65.5 号段已被越过；三分组不 join contracts；挂牌中仍可消费；不校验合同）。交付：`GET /api/shop/squad-state` 去掉唯一 status 白名单（`src/worker/routes/shop.ts:36-41` 的 `status IN ('normal','listed')`）改裸 `club_id = ?`，行类型与 `SquadStatePlayer` / `ShopSquadStatePlayer` 补 `status`，`web/src/pages/shop/ShopPage.tsx` 的 `PlayerSelect` 改 `<optgroup>` 三分组「一线队 / 训练营 / 挂牌中」+ 未知状态「其他」+ 空组不渲染。服务端 `loadPlayer` 与五类商品守卫本就不看 status，消费资格与审批语义零改动。验收：typecheck 三份全清、定向 2 文件 / 60 例全绿、全量 vitest **184 文件 / 2,960 例**全绿（v6.66.0 基线 184 / 2,952，+8）、build 通过、变异 M1–M5（SQL 回白名单 / DTO 去 status / 分组恒一线队 / loadPlayer 加白名单 / 删训练营组）全红。判级 **minor**（新增用户可见能力）。测试计划 `docs/test-plans/v6.66.1-shop-all-players.md`。**生产迁移现状：已到 `0088`（本版零迁移）**。细节见下文 v6.66.1 节。
+**本版本 v6.69.0**（PlayStyles 图标 / 说明 / 图鉴 / 静态资源 404 修复；零迁移零生产写）——**已上线（2026-11-02）**：push `bfdae7c..d78d120` 4 枚（feat / test / docs / 文案收口），生效 Version `3b1cb1ba-728a-43eb-bf82-27615a91c60d` @2026-11-02T15:39:26Z（100%）。上线回读：生产入口 `assets/index-C4675Bf3.js` 与本地构建逐字同名，包内版本串 `6.69.0`×1，新增文案「远距离扑救 / 一对一出击 / 门将扩大扑救范围」均在包内、`预览线` 0 处；`/assets/icons/playstyles/1.webp` 200 `image/webp` 1,222 B、`101.webp` 200 2,422 B、`9999.webp` **404 空体**（不再回落 SPA HTML）；`/playstyles` 200 `text/html`、`/api/health` 200。**缘起**：owner 要求「从 futbin 里看看能不能获取 playstyles 的图标」，随后追加「把 playstyle 描述介绍等工作做了」，并拍板四入口全做、图鉴入口放右上角 ≡。**交付**：72 枚 64×64 WebP（36 银 + 36 金，共 136 KB）落 `web/public/assets/icons/playstyles/`；`web/assets/ref/playstyle-desc.json` 36 条中文（定位句 + 银/金两档，底稿取自 FUTBIN `26/playstyles`、中文重写）；新页 `/playstyles` 六类图鉴 + ≡ 菜单入口；徽章桌面 `title` / 窄屏底部说明层；商店徽章卡行内说明；`run_worker_first` 扩 `/assets/icons/*`，Worker 把 SPA 回落改判 404（`no-store`）。验收：typecheck 三份清、`npm test` **191 文件 / 3,008 例**全绿（新增 3 文件 19 例）、build 通过、变异 M1–M7 全红。判级 **minor**。测试计划 `docs/test-plans/v6.69.0-playstyles.md`。细节见下文 v6.69.0 节。
+
+**上一版本 v6.66.1**（消费中心候选放开到本队全部球员，含训练营；零迁移零生产写）——**已上线（2026-11-02）**：push `3b4af50..0f1d706` 3 枚（feat / test / docs，本版从 `origin/main` 新开分支 `feat/v6.66.1-shop-all-players` 落地，未夹带 v6.66.0 的两枚记录 docs），生效 Version `befe1fbd-29a9-41e5-b5db-2af25ce35182` @2026-11-01T17:35:07Z（100% 流量，前版 `b4dbecfd`）。上线回读（2026-11-01T17:36Z）：生产入口 `assets/index-CP-WPN7s.js` 与本地 `web/dist/index.html` 逐字同名，包内版本串 `6.66.1`×1、无 `6.66.0` 残留，三分组文案「一线队 / 训练营 / 挂牌中 / 其他」均在包内；`/api/health` 200、`/api/shop/squad-state` 匿名 401（门控未被放宽）、`/` 仍 `cache-control: no-store`。**缘起**：owner 要求「消费中心里，本队所有球员（包括训练营）都应该能买」，经 grilling 两轮定案（版本 6.66.1——6.65.5 号段已被越过；三分组不 join contracts；挂牌中仍可消费；不校验合同）。交付：`GET /api/shop/squad-state` 去掉唯一 status 白名单（`src/worker/routes/shop.ts:36-41` 的 `status IN ('normal','listed')`）改裸 `club_id = ?`，行类型与 `SquadStatePlayer` / `ShopSquadStatePlayer` 补 `status`，`web/src/pages/shop/ShopPage.tsx` 的 `PlayerSelect` 改 `<optgroup>` 三分组「一线队 / 训练营 / 挂牌中」+ 未知状态「其他」+ 空组不渲染。服务端 `loadPlayer` 与五类商品守卫本就不看 status，消费资格与审批语义零改动。验收：typecheck 三份全清、定向 2 文件 / 60 例全绿、全量 vitest **184 文件 / 2,960 例**全绿（v6.66.0 基线 184 / 2,952，+8）、build 通过、变异 M1–M5（SQL 回白名单 / DTO 去 status / 分组恒一线队 / loadPlayer 加白名单 / 删训练营组）全红。判级 **minor**（新增用户可见能力）。测试计划 `docs/test-plans/v6.66.1-shop-all-players.md`。**生产迁移现状：已到 `0088`（本版零迁移）**。细节见下文 v6.66.1 节。
 
 **上一版本 v6.66.0**（审核通过即过户：成交挂单收口 → 谈判在途判据替换 → 顺序翻转 + 交易撤销）——**已上线（2026-11-01）**：push `e011986..3b4af50`（4 枚 = v6.65.4 上线记录 `6cda6a6` + 三期 `18507fd` / `5ad6a45` / `3b4af50`），生效 Version `b4dbecfd-9e81-4e43-834d-d643b4b55130` @2026-11-01T14:51:47Z；迁移 `0088_transfer_terms_after_ownership.sql` 于 push 前 apply 生产；25 条历史 `pending_review` 挂单已收口（`still_blocking=0`，余 4 条仍在谈判）。细节见下文 v6.66.0 节。
 
@@ -101,7 +103,7 @@
 
 ---
 
-## v6.69.0 · 名单镜像与窗口期薪资（期一：名单由合同推导）（2026-11-03）
+## v6.70.0 · 名单镜像与窗口期薪资（2026-11-03）
 
 **状态**：**已完成、待上线** —— 三期全部实现并本地验收；**上线须先 apply 迁移 `0090`、`0091` 再 push**。未 push、未部署。
 
@@ -136,10 +138,30 @@
 **验收（期一实测）**
 
 - `npm run typecheck`：三份 tsconfig 全清。
-- `npm test`：**188 文件 / 2,977 例全绿**（期一 186 / 2,969 + 期二 3 例 + 期三 5 例）。
+- `npm test`：**192 文件 / 2,999 例全绿**（合入 PlayStyles 主线后；本版净增 16 例）。
 - `npm run build`：通过。
 - 判级 **minor**。
+## v6.69.0 · PlayStyles 图标、说明与图鉴（2026-11-02）
 
+**状态**：**已上线（2026-11-02）**：push `bfdae7c..d78d120` 4 枚（feat / test / docs / 文案收口），生效 Version `3b1cb1ba-728a-43eb-bf82-27615a91c60d` @15:39:26Z；上线回读见文首「本版本」段。零迁移、零生产写、零新依赖。验收：`npm run typecheck` 三份 tsconfig 全清；`npm test` **191 文件 / 3,008 例**全绿（新增 3 个测试文件 19 例）；`npm run build` 通过（仅既有 >500 kB chunk 警告）；变异 M1–M7 逐条变红。
+
+**缘起**：owner 先要「从 futbin 拿 playstyles 图标」，查证发现 `web/public/assets/icons/playstyles/` 从未存在（线上每枚图标都在拉 SPA 回落 HTML），futbin 对脚本全 403（Cloudflare 人机验证）；最终经 owner 在 Edge 打开的 FUTBIN 页，用 Windows UI Automation 读整页文本取得 36 条英文底稿，图标改用 GitHub 镜像 `canicccv/FC26-Playstyles`。随后 owner 追加「把 playstyle 描述介绍等工作做了」，并拍板四入口全做、图鉴入口放 ≡ 菜单。
+
+**交付**：
+1. `web/public/assets/icons/playstyles/<psid>.webp`：36 银（1–8/11–16/21–26/31–35/41–45/51–56）+ 36 金（+100），64×64 WebP q88，共 72 文件 / 135,978 B；清单 `web/assets/ref/playstyle-icons.json`。
+2. `web/assets/ref/playstyle-desc.json`：36 条 `{id,info,desc,descPlus}` 中文；金徽按基础 id+100 复用。
+3. `web/src/lib/ref.ts`：`playstyleDescOf` / `playstyleEffectOf` / `playstyleBaseId`。
+4. `web/src/components/PlaystyleBadge.tsx`：整徽 `title` 追加定位句 + 当前档效果；`openable` 在 ≤640px 变按钮；关弹层焦点还回徽章。
+5. `web/src/components/PlaystyleSheet.tsx`：底部说明层（Esc / 遮罩 / 关闭键，锁 body 滚动）。
+6. `web/src/pages/Playstyles.tsx` + `/playstyles` 路由 + `TopBar` ≡ 菜单入口。
+7. `web/src/pages/shop/ShopPage.tsx`：徽章卡选中后行内显示定位句 + 当前档效果。
+8. `src/worker/index.ts` + `wrangler.jsonc`：`run_worker_first` 扩 `/assets/icons/*`，Worker 把 `text/html` 回落改判 404（`cache-control: no-store`），真文件与 `_headers` 缓存头透传。
+
+**用例**：`web/src/lib/playstyle-desc.test.ts`（D1–D4）、`web/src/lib/playstyle-icons.test.ts`（A1–A3）、`web/src/pages/Playstyles.test.tsx`（G1–G4）、`PlaystyleBadge.test.tsx` 扩 5 例、`TopBar.test.tsx` 1 例、`ShopPage.test.tsx` 2 例、`tests/assets-404.test.ts`（3 例）。变异：漏描述 / 金徽抄银徽 / title 丢描述 / 宽屏也变按钮 / 图鉴少一类 / 商店固定银档 / 404 不判 HTML —— 全部 RED。
+
+**已知边界**：图标镜像无 LICENSE，仅作玩法说明；`/assets/*` 缓存一年，换图须换路径段；说明是中文重写，非官方逐字；窄屏弹层只覆盖球员页徽章墙，表格 compact 与商店内联不走弹层；`/playstyles` 公开页、无埋点。
+
+---
 ## v6.68.2 · 管理审核工作台（期 C：在途工作台 / 激活凭证 / 侧栏滚动）（2026-11-02）
 
 **状态**：**已上线（2026-11-02，Version `1dfa776e-dfa0-4289-b88b-1404854a7b4d`）**。迁移 `0089` 于 push 前 apply 生产（`Executed 2 commands in 0.60ms`，`idx_bids_status` 在场）；push `6ce3776..bfdae7c`（3 枚）触发自动部署；上线回读：`/api/health` 200、生产入口 `assets/index-DoyxBhYG.js` 与本地构建 sha256 逐字节一致（`36ee8ef6…`）、包内版本串 `6.68.2`、`/api/admin/workbench/*` 与 `/api/market/listings/:id/proof` 匿名全 401。

@@ -10,7 +10,13 @@
 //
 // v6.63.0 来源角标（Q2）：source 非 'fc' 时在 pill 尾部挂小标（悬停出全称）——「成长 / 中国计划 /
 // 商店 / 外部 / 管理组」；compact（表格）不标。
-import { playstyleById, playstyleIconUrl } from '../lib/ref.ts';
+//
+// v6.69.0 描述：整徽的 title 追加定位句 + 当前档位效果（桌面宽屏走原生 tooltip）；
+// openable 的整徽在窄屏（≤640px）渲染成按钮，点开 PlaystyleSheet 看三段文案 ——
+// 窄屏没有 hover，title 等于不可达。compact 保持原样（表格里一列十几枚，不加长文案）。
+import { useEffect, useRef, useState } from 'react';
+import { playstyleById, playstyleDescOf, playstyleEffectOf, playstyleIconUrl } from '../lib/ref.ts';
+import { PlaystyleSheet } from './PlaystyleSheet.tsx';
 
 /** 发放来源的全称（角标悬停用；'fc' = FC 档案自带，不挂角标） */
 export const PLAYSTYLE_SOURCE_LABEL: Record<string, string> = {
@@ -22,32 +28,67 @@ export const PLAYSTYLE_SOURCE_LABEL: Record<string, string> = {
   manual: '管理组',
 };
 
+// 与 styles.css 的移动断点同值（max-width: 640px）
+const NARROW_QUERY = '(max-width: 640px)';
+
+function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_QUERY).matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(NARROW_QUERY);
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
 export function PlaystyleBadge({
   psid,
   gold,
   compact = false,
   source,
+  openable = false,
 }: {
   psid: number;
   gold: boolean;
   compact?: boolean;
   source?: string;
+  /** 窄屏把整徽渲染成按钮并弹出说明（详情页徽章墙用；不要放进已有 button 里） */
+  openable?: boolean;
 }) {
   const row = playstyleById.get(psid);
   const label = row?.chs ?? row?.en ?? `PS ${psid}`;
   const sourceLabel = source !== undefined && source !== 'fc' ? (PLAYSTYLE_SOURCE_LABEL[source] ?? source) : null;
   // title 恒带来源（compact 表格里悬停仍可读）；角标只在非 compact 的 pill 形态渲染（Q2）
-  const title = `${label}（${gold ? '金' : '银'}）${sourceLabel !== null ? ` · 来源：${sourceLabel}` : ''}`;
+  const baseTitle = `${label}（${gold ? '金' : '银'}）${sourceLabel !== null ? ` · 来源：${sourceLabel}` : ''}`;
+  const desc = playstyleDescOf(psid);
+  const effect = playstyleEffectOf(psid, gold);
+  const title = desc === null ? baseTitle : `${baseTitle}\n${desc.info}\n${gold ? '金' : '银'}：${effect ?? ''}`;
+  const narrow = useNarrowViewport();
+  const [open, setOpen] = useState(false);
+  const openRef = useRef<HTMLButtonElement>(null);
+
+  /** 关弹层时把焦点还给触发它的徽章（否则移动端焦点掉回 body） */
+  const closeSheet = () => {
+    setOpen(false);
+    openRef.current?.focus();
+  };
+
   if (compact) {
     return (
-      <span className={`ps-badge-compact${gold ? ' ps-badge-compact-gold' : ''}`} title={title}>
+      <span className={`ps-badge-compact${gold ? ' ps-badge-compact-gold' : ''}`} title={baseTitle}>
         <span aria-hidden="true">{gold ? '🥇' : '🥈'}</span>
         <span>{label}</span>
       </span>
     );
   }
-  return (
-    <span className={`ps-badge${gold ? ' ps-gold' : ''}`} title={title}>
+
+  const inner = (
+    <>
       <img
         className="ps-icon"
         src={playstyleIconUrl(psid)}
@@ -60,6 +101,31 @@ export function PlaystyleBadge({
       <span aria-hidden="true">{gold ? '🥇' : '🥈'}</span>
       <span>{label}</span>
       {sourceLabel !== null && <span className="ps-badge-source">{sourceLabel}</span>}
+    </>
+  );
+
+  if (openable && narrow) {
+    return (
+      <>
+        <button
+          ref={openRef}
+          type="button"
+          className={`ps-badge ps-badge-open${gold ? ' ps-gold' : ''}`}
+          title={title}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => setOpen(true)}
+        >
+          {inner}
+        </button>
+        {open && <PlaystyleSheet psid={psid} gold={gold} onClose={closeSheet} />}
+      </>
+    );
+  }
+
+  return (
+    <span className={`ps-badge${gold ? ' ps-gold' : ''}`} title={title}>
+      {inner}
     </span>
   );
 }

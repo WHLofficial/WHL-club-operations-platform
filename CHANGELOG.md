@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.69.0] · 名单镜像与窗口期薪资（期一：名单由合同推导）（2026-11-03）
+## [v6.70.0] · 名单镜像与窗口期薪资（2026-11-03）
 
 **Changed**
 
@@ -25,9 +25,27 @@
 **Notes**
 
 - **口径移植**：原「注册名单提交与校验」的 9 条规则一条没少，仍然只在 `GET /club/squad` 的 `compliance` 里算；变的只是名单来源与提交动作。
-- **验收**：`npm run typecheck` 三份清；`npm test` **188 文件 / 2,977 例**全绿（期三新增 `tests/squad-audit.test.ts` 3 例、看板 badge 2 例）；`npm run build` 通过。判级 **minor**（新增推导视图能力；下线的写入口唯一消费方是本仓 SPA，且其能力已被镜像取代，不构成跨仓契约破坏）。
-- 版本号由计划稿的 v6.67.0 顺延为 **v6.69.0**（6.67.x 已被强拍/消费工单批次占用）。
+- **验收**：`npm run typecheck` 三份清；`npm test` **192 文件 / 2,999 例**全绿（期三新增 `tests/squad-audit.test.ts` 3 例、看板 badge 2 例）；`npm run build` 通过。判级 **minor**（新增推导视图能力；下线的写入口唯一消费方是本仓 SPA，且其能力已被镜像取代，不构成跨仓契约破坏）。
+- 版本号由计划稿的 v6.67.0 顺延为 **v6.70.0**（6.67.x 已被强拍/消费工单批次占用，6.69.0 已被 PlayStyles 批次占用）。
+## [v6.69.0] · PlayStyles 图标、说明与图鉴（2026-11-02）
 
+**Added**
+
+- **72 枚 PlayStyle 图标**（36 银 + 36 金，64×64 WebP，合计 136 KB）落到 `web/public/assets/icons/playstyles/`，清单 `web/assets/ref/playstyle-icons.json`。此前该目录根本不存在，线上每枚徽章图标都在拉 SPA 回落的 HTML。
+- **36 条中文说明** `web/assets/ref/playstyle-desc.json`：每条定位句 + 银/金两档效果；英文底稿取自 FUTBIN `26/playstyles` 整页，中文为本站重写；金徽按「基础 id + 100」复用基础项那一行。
+- **新页 `/playstyles`**：六类分组（射门 / 传球 / 防守 / 控球 / 体格 / 门将），每项双图标 + 中英名 + 定位句 + 两档效果；入口在右上角 ≡ 菜单。
+- **徽章说明**：桌面宽屏走原生 `title`（定位句 + 当前档效果）；窄屏点徽章弹底部说明层（Esc / 遮罩 / 关闭键退出，焦点还给触发徽章）。
+- **商店徽章卡行内说明**：选中徽章后显示定位句 + 当前档效果（银徽买银、金徽买金/升金）。
+
+**Fixed**
+
+- **`/assets/icons/*` 缺失文件不再命中 SPA 回落**：`run_worker_first` 扩到该子树，Worker 只把 `text/html` 回落改判 404（`cache-control: no-store`），真文件与 `_headers` 的 immutable 缓存头原样透传。
+
+**Notes**
+
+- 图标来自 GitHub `canicccv/FC26-Playstyles`（仓库无 LICENSE，仅作玩法说明；将来 EA 改版式需换源并换路径段 —— `/assets/*` 缓存一年）。
+- 说明文案是中文重写，不是官方逐字文案；`+` 不是线性增强，单独成句。
+- **验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **191 文件 / 3,008 例全绿**（新增 3 个测试文件 19 例）；`npm run build` 通过；变异 M1–M7 逐条变红。测试计划 `docs/test-plans/v6.69.0-playstyles.md`。
 ## [v6.68.2] · 管理审核工作台（期 C：在途工作台 / 激活凭证 / 侧栏滚动）（2026-11-02）
 
 **Added**
