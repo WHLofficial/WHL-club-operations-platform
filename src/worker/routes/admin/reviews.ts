@@ -208,6 +208,7 @@ interface ReviewTaskRow {
   /** v6.68.0：transfer_confirm 指向 transfers.id，activation_report 指向 listings.id */
   ref_id: number;
   player_id: number;
+  player_fc_id: number | null;
   player_name: string;
   position: string | null;
   ca: number | null;
@@ -228,7 +229,7 @@ app.get('/reviews', async (c) => {
     `SELECT rt.id, rt.ref_id, rt.type, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
             t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax, t.extra_fee,
             l.status AS listing_status, l.ask_price, l.activation_proof,
-            p.id AS player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
+            p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
             cf.name AS from_name, ct.name AS to_name, ca2.name AS activator_name
      FROM review_tasks rt
      LEFT JOIN transfers t ON t.id = rt.ref_id AND rt.type = 'transfer_confirm'
@@ -268,7 +269,7 @@ app.get('/reviews', async (c) => {
         fee: r.fee,
         tax: r.tax,
         extraFee: r.extra_fee,
-        player: { id: r.player_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
+        player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
         fromClubName: r.from_name,
         toClubName: r.to_name,
       },
@@ -375,6 +376,63 @@ app.post('/reviews/:id/resolve', async (c) => {
     after: { listingId: task.ref_id, note },
   });
   return c.json({ ok: true, status: 'approved' });
+});
+
+// POST /api/admin/reviews/batch —— 批量批准 / 驳回（v6.68.0 期 B）
+// 逐条调用单条处理的核心，**不加外层事务**：一条失败只记在自己的结果里，其它照跑（Q10 裁决）。
+// 批量不支持改价（Q1 裁决）——单条 approve 的 body.fee 这里不接，要改价就逐条走原端点。
+// 已处理过的单子不抛整体错误，返回 { ok: false, error: '已处理' }，让前端逐条回显。
+app.post('/reviews/batch', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as { action?: unknown; ids?: unknown; note?: unknown } | null;
+  const action = body?.action;
+  if (action !== 'approve' && action !== 'reject') throw new HttpError(400, '批量动作只支持 approve / reject');
+  if (!Array.isArray(body?.ids)) throw new HttpError(400, 'ids 必须是数组');
+  const ids = [...new Set(body.ids.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length === 0) throw new HttpError(400, '没有要处理的审核任务');
+  if (ids.length > 50) throw new HttpError(400, '一次最多处理 50 条');
+  const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
+
+  const results: { id: number; ok: boolean; error?: string }[] = [];
+  for (const taskId of ids) {
+    try {
+      const task = await c.env.DB.prepare(`SELECT id, ref_id, status FROM review_tasks WHERE id = ? AND type = 'transfer_confirm'`)
+        .bind(taskId)
+        .first<{ id: number; ref_id: number; status: string }>();
+      if (!task) throw new HttpError(404, '审核任务不存在');
+      if (task.status !== 'open') throw new HttpError(409, '已处理');
+      if (!(await loadTransfer(c.env.DB, task.ref_id))) throw new HttpError(404, '转会单不存在');
+      if (action === 'approve') {
+        await approveTransferDeal(c.env, task.ref_id, user.id, {
+          taskId,
+          decidedBy: user.id,
+          decision: 'approved',
+          note: note ?? undefined,
+        });
+      } else {
+        await rejectTransfer(c.env, task.ref_id, user.id, 'user', {
+          taskId,
+          decidedBy: user.id,
+          decision: 'rejected',
+          note: note ?? undefined,
+        });
+      }
+      results.push({ id: taskId, ok: true });
+    } catch (err) {
+      results.push({ id: taskId, ok: false, error: err instanceof HttpError ? err.message : '处理失败' });
+    }
+  }
+
+  const okCount = results.filter((r) => r.ok).length;
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'admin_review_batch',
+    targetType: 'review_task',
+    targetId: ids[0],
+    origin: 'user',
+    after: { action, ids, ok: okCount, failed: results.length - okCount, note },
+  });
+  return c.json({ ok: true, results });
 });
 
 export default app;
