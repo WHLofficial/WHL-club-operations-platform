@@ -125,8 +125,9 @@
 5. `POST /api/admin/reviews/batch`（上限 50、去重、逐条、汇总审计 `admin_review_batch`）。
 6. `/market?listing=<id>` 一次性直达 + 清参。
 7. `package.json` 6.68.0 → 6.68.1。
+8. 评审补丁：切页签清空批选/游标（「已选 N」与实际提交条数对齐）+ `j`/`k` 游标可视高亮（`tr.row-cursor`）。
 
-**验证**：typecheck 三份清 · `npm test` **186 文件 / 2,980 例全绿**（期 A 基线 2,973，新增 4 例批量用例 + 3 例 `?listing=`）· `npm run build` 通过（入口 `dist/assets/index-Bf7TnbEj.js`）。测试计划 `docs/test-plans/v6.68.1-workbench-phase-b.md`。
+**验证**：typecheck 三份清 · `npm test` **186 文件 / 2,980 例全绿**（期 A 基线 2,973，新增 4 例批量用例 + 3 例 `?listing=`）· `npm run build` 通过（入口 `dist/assets/index-Do1RtXRQ.js`）。测试计划 `docs/test-plans/v6.68.1-workbench-phase-b.md`。
 
 **已知边界**：队列键盘与批选交互无单测（`ReviewsSection` 未抽独立组件，整页渲染要打桩四个 section），走手动 TC-UIQ-01~05；批选只覆盖当页 100 条。
 
