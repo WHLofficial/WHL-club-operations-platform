@@ -175,6 +175,13 @@ function ReviewsSection() {
   const actionable = (reviews ?? []).filter((r) => r.report === null && r.status === 'open');
   const pickedRows = actionable.filter((r) => picked.includes(r.id));
 
+  // 切页签时清掉选择：留在「已批准」页签里的 id 已经不在 actionable 里，
+  // 不清会让「已选 N」与实际能提交的条数对不上（评审捡出）。
+  useEffect(() => {
+    setPicked([]);
+    setCursor(0);
+  }, [status]);
+
   function togglePick(id: number) {
     setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
@@ -271,7 +278,7 @@ function ReviewsSection() {
                     <input
                       type="checkbox"
                       aria-label="全选本页待审"
-                      checked={actionable.length > 0 && picked.length === actionable.length}
+                      checked={pickedRows.length > 0 && pickedRows.length === actionable.length}
                       onChange={(e) => setPicked(e.target.checked ? actionable.map((r) => r.id) : [])}
                     />
                   </th>
@@ -355,7 +362,14 @@ function ReviewsSection() {
                   <tr
                     key={r.id}
                     id={`review-transfer-${r.transfer.id}`}
-                    className={highlightTransfer === r.transfer.id ? 'row-hit' : undefined}
+                    className={
+                      [
+                        highlightTransfer === r.transfer.id ? 'row-hit' : '',
+                        actionable[cursor]?.id === r.id ? 'row-cursor' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ') || undefined
+                    }
                   >
                     {status === 'open' && (
                       <td className="tick">
@@ -451,14 +465,14 @@ function ReviewsSection() {
         </div>
       )}
 
-      {status === 'open' && picked.length > 0 && (
+      {status === 'open' && pickedRows.length > 0 && (
         <div className="batch-bar" role="region" aria-label="批量操作">
-          <span className="muted">已选 {picked.length} 条</span>
+          <span className="muted">已选 {pickedRows.length} 条</span>
           <button className="btn btn-sm" type="button" disabled={batchBusy} onClick={() => void runBatch('approve')}>
-            {batchBusy ? '处理中…' : `批量批准（${picked.length}）`}
+            {batchBusy ? '处理中…' : `批量批准（${pickedRows.length}）`}
           </button>
           <button className="btn btn-sm btn-danger" type="button" disabled={batchBusy} onClick={() => void runBatch('reject')}>
-            批量驳回（{picked.length}）
+            批量驳回（{pickedRows.length}）
           </button>
           <button className="btn btn-sm" type="button" onClick={() => setPicked([])}>
             清空

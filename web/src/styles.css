@@ -781,6 +781,12 @@ tr.row-hit {
   transition: background 0.4s ease;
 }
 
+/* j / k 游标所在行：内描边，不挤动布局 */
+tr.row-cursor > td {
+  outline: 2px solid var(--sky-deep);
+  outline-offset: -2px;
+}
+
 .batch-bar {
   display: flex;
   align-items: center;
