@@ -26,6 +26,7 @@
 
 - **口径移植**：原「注册名单提交与校验」的 9 条规则一条没少，仍然只在 `GET /club/squad` 的 `compliance` 里算；变的只是名单来源与提交动作。
 - **验收**：`npm run typecheck` 三份清；`npm test` **192 文件 / 2,999 例**全绿（期三新增 `tests/squad-audit.test.ts` 3 例、看板 badge 2 例）；`npm run build` 通过。判级 **minor**（新增推导视图能力；下线的写入口唯一消费方是本仓 SPA，且其能力已被镜像取代，不构成跨仓契约破坏）。
+- **上线（2026-11-03）**：迁移 `0090` / `0091` 先 apply（`Executed …` 两表齐备），push `c37e8dd..615dd2e`，生效 Version `009487d6-7e35-44b0-98a4-143177843425`；回读 `/api/health` 200、入口 `assets/index-D1_mw3fi.js` 与本地构建同名、版本串 `6.70.0`、管理端块 `MarketPage-skDj_QjA.js` 含 `windows/overview`。
 - 版本号由计划稿的 v6.67.0 顺延为 **v6.70.0**（6.67.x 已被强拍/消费工单批次占用，6.69.0 已被 PlayStyles 批次占用）。
 ## [v6.69.0] · PlayStyles 图标、说明与图鉴（2026-11-02）
 
