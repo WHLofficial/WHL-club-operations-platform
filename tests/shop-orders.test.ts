@@ -87,6 +87,8 @@ interface PlayerOpts {
   position?: string;
   gameAttrs?: Record<string, unknown>;
   status?: string;
+  /** v6.67.2：FC 侧球员 id；默认与本地 id 相同（老用例语义不变） */
+  fcId?: number;
 }
 
 function seedPlayer(fx: Fixture, id: number, opts: PlayerOpts = {}) {
@@ -103,7 +105,7 @@ function seedPlayer(fx: Fixture, id: number, opts: PlayerOpts = {}) {
       opts.clubId === undefined ? 101 : opts.clubId,
       opts.growable ?? 1,
       opts.status ?? 'normal',
-      id,
+      opts.fcId ?? id,
       JSON.stringify(opts.gameAttrs ?? { PosID1: 25 }),
     );
 }
@@ -512,6 +514,53 @@ describe('TC-B 审批与拒绝', () => {
     const id2 = ((await res2.json()) as { order: { id: number } }).order.id;
     expect((await reject(fx, id2, '来源材料不全')).status).toBe(200);
     expect(balanceOf(fx, 101)).toBe(50);
+  });
+
+  // v6.67.2：外部代录的球员 id 兼容 FC id（管理组界面只给得到 FC id）
+  it('TC-B08 external 球员键：FC id 命中本队 → 按本地球员生效', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 42, { clubId: 101, pa: 88, fcId: 256196 });
+    const res = await app.request(
+      '/api/admin/shop/orders',
+      { method: 'POST', headers: { 'content-type': 'application/json', Cookie: ADMIN }, body: JSON.stringify({ clubId: 101, category: 'pa', payload: { playerId: 256196, points: 2 } }) },
+      fx.env,
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { order: { id: number } };
+    expect((await approve(fx, created.order.id)).status).toBe(200);
+    // 生效落在这名球员身上（按 fc_id 定位，本地 id 是自增的），且没有凭空多出球员行
+    expect((fx.sqlite.prepare('SELECT pa FROM players WHERE fc_id = 256196').get() as { pa: number }).pa).toBe(90);
+    expect(fx.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get()).toMatchObject({ n: 1 });
+  });
+
+  it('TC-B09 external 球员键：FC id 属于别的俱乐部 → 400 点明归属', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedClub(fx, 102, 50, false);
+    seedPlayer(fx, 43, { clubId: 102, fcId: 300001 });
+    const res = await app.request(
+      '/api/admin/shop/orders',
+      { method: 'POST', headers: { 'content-type': 'application/json', Cookie: ADMIN }, body: JSON.stringify({ clubId: 101, category: 'pa', payload: { playerId: 300001, points: 1 } }) },
+      fx.env,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('属于俱乐部 #102');
+    expect(body.error).toContain('不是俱乐部 #101');
+    expect(fx.sqlite.prepare('SELECT COUNT(*) AS n FROM shop_orders').get()).toMatchObject({ n: 0 });
+  });
+
+  it('TC-B10 external 球员键：本地 id 与 FC id 都查不到 → 404 文案点明两种键', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    const res = await app.request(
+      '/api/admin/shop/orders',
+      { method: 'POST', headers: { 'content-type': 'application/json', Cookie: ADMIN }, body: JSON.stringify({ clubId: 101, category: 'pa', payload: { playerId: 999999, points: 1 } }) },
+      fx.env,
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toContain('本地 id 或 FC id');
   });
 
   it('TC-B07 端点契约：匿名 401、非管理 403、未绑定 403、列表筛选', async () => {

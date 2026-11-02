@@ -30,7 +30,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
 const PS_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26, 31, 32, 33, 34, 35, 41, 42, 43, 44, 45, 51, 52, 53, 54, 55, 56];
 
 export default function AdminShopPage() {
-  const { show } = useToast();
+  const { show, toastNode } = useToast();
   const { dateTime } = useTimeFmt();
   const qc = useQueryClient();
   const [status, setStatus] = useState('pending');
@@ -48,9 +48,10 @@ export default function AdminShopPage() {
     let note: string | null = null;
     if (order.category === 'club_shell') {
       // 队壳单线下建壳后交付绑定码：通过时把交付壳名写进备注（可空）
-      note = window.prompt('队壳交付壳名（写入备注，可留空）：') ?? '';
-      if (note === null) return;
-      note = note.trim() || null;
+      // v6.67.2：以前写 `?? ''` 让「取消」变成空串，下面那句 return 成了死代码——点取消也会继续通过。
+      const input = window.prompt('队壳交付壳名（写入备注，可留空）：');
+      if (input === null) return;
+      note = input.trim() || null;
     }
     const amountNote = order.amount !== null ? `，费用已在提交时扣取` : '（外部录入，不涉及平台资金）';
     if (!window.confirm(`确认通过并生效？\n\n${order.clubName ? `「${order.clubName}」· ` : ''}${order.summary}${amountNote}`)) return;
@@ -185,6 +186,7 @@ export default function AdminShopPage() {
           </div>
         )}
       </section>
+      {toastNode}
     </>
   );
 }
@@ -192,7 +194,9 @@ export default function AdminShopPage() {
 /* ---------- 外部增益代录（折叠卡） ---------- */
 
 function ExternalCreateCard({ onCreated }: { onCreated: () => void }) {
-  const { show } = useToast();
+  // v6.67.2：本页两处 useToast 是各自独立的本地 state，卡片自己的 show 只有渲染自己的 toastNode 才看得见
+  // ——以前只取 show 不渲节点，创建失败（400/404）与成功提示全落到空气里，生产上表现为「点了没反应」。
+  const { show, toastNode } = useToast();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [clubId, setClubId] = useState('');
@@ -275,7 +279,7 @@ function ExternalCreateCard({ onCreated }: { onCreated: () => void }) {
               ))}
             </select>
             {category !== 'club_shell' && (
-              <input className="mono" style={{ width: 'min(110px, 100%)' }} placeholder="球员 id" value={playerId} onChange={(e) => setPlayerId(e.target.value.replace(/[^\d]/g, ''))} />
+              <input className="mono" style={{ width: 'min(130px, 100%)' }} placeholder="球员 id / FC id" value={playerId} onChange={(e) => setPlayerId(e.target.value.replace(/[^\d]/g, ''))} />
             )}
           </div>
           <div className="inline-form">
@@ -363,6 +367,7 @@ function ExternalCreateCard({ onCreated }: { onCreated: () => void }) {
           </p>
         </>
       )}
+      {toastNode}
     </section>
   );
 }

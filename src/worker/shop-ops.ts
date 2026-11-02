@@ -167,14 +167,27 @@ interface PlayerCoreRow {
   game_attrs: string | null;
 }
 
+const PLAYER_CORE_COLS = 'id, name, display_name, club_id, growable, pa, position, game_attrs';
+
 async function loadPlayer(db: D1Database, clubId: number, playerId: number): Promise<PlayerCoreRow> {
   const row = await db
-    .prepare('SELECT id, name, display_name, club_id, growable, pa, position, game_attrs FROM players WHERE id = ?')
+    .prepare(`SELECT ${PLAYER_CORE_COLS} FROM players WHERE id = ?`)
     .bind(playerId)
     .first<PlayerCoreRow>();
-  if (!row) throw new HttpError(404, '找不到这名球员');
-  if (row.club_id !== clubId) throw new HttpError(400, '球员不属于你的俱乐部');
-  return row;
+  if (row) {
+    if (row.club_id !== clubId) throw new HttpError(400, '球员不属于你的俱乐部');
+    return row;
+  }
+  // v6.67.2：管理组手里通常只有 FC 的球员 id（界面从不显示本地球员 id），按本地 id 查不到时再按
+  // fc_id 兜底——生产 fc_id 无空值、无重复，可以当第二主键（见 memory/plan-v6.67.2-shop-external-id.md）。
+  // 命中但归属不符要报出实际俱乐部：管理组口本来就能看到全联盟，含糊成 404 只会让人再填错一次。
+  const byFc = await db
+    .prepare(`SELECT ${PLAYER_CORE_COLS} FROM players WHERE fc_id = ?`)
+    .bind(playerId)
+    .first<PlayerCoreRow>();
+  if (!byFc) throw new HttpError(404, '找不到这名球员（本地 id 或 FC id 都没有这条记录）');
+  if (byFc.club_id !== clubId) throw new HttpError(400, `这个 FC id 属于俱乐部 #${byFc.club_id}，不是俱乐部 #${clubId}`);
+  return byFc;
 }
 
 function gameAttrs(row: PlayerCoreRow): Record<string, unknown> {
