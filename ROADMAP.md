@@ -103,7 +103,7 @@
 
 ## v6.67.2 · 消费工单外部录入：提示可见 + FC id 兜底（2026-11-02）
 
-**状态**：**已实现并本地验收，待 push 上线**——零迁移。分支 `fix/v6.67.2-shop-external`（基于 `origin/main` = `1c21080`）。
+**状态**：**已上线（2026-11-02）**——Version `80ab924d-c942-4c59-bd2a-cf72386676d9`，push `1c21080..cdac2ea`；零迁移。
 
 **缘起**：管理组在 `/admin/shop`「外部录入」填 `俱乐部 33 / 球员 256196 / 金徽章`，弹确认、点确定，界面毫无反应、工单没建出来。生产取证：`shop_orders` 6 行全是 `source='club'`、`source='external'` 0 行，`audit_log` 里 `shop_order_external` 0 条 ⇒ 创建从未落库。两条根因叠在一起：①256196 是 **FC 的球员 id**（Pacho，本地 `players.id` = 42），`loadPlayer` 只按本地 id 查 ⇒ 404；②这一页的 `useToast()` 只取了 `show`、从没渲染 `toastNode` ⇒ 所有提示（400/403/404/409）连同成功提示一起静默（全 admin 目录只有这一页漏了）。
 
@@ -120,7 +120,9 @@
 
 **已知边界**：本次不给 `AdminShopPage` 新开前端单测（该页此前无测试文件，搭 mock 成本高于收益）；toast 渲染靠人工回读验收。审批/拒绝仍走 `window.confirm` / `window.prompt`（Q1 明确不改造）。
 
-**验收**：`npm run typecheck`（三份 tsconfig）、`npm test`、`npm run build` 见 CHANGELOG 执行记录；判级 **minor**。测试计划 `docs/test-plans/v6.67.2-shop-external-id.md`。
+**验收**：`npm run typecheck`（三份 tsconfig）、`npm test` **185 文件 / 2,971 例全绿**、`npm run build` 通过（入口 `dist/assets/index-CRNtZO3p.js`）；判级 **minor**。测试计划 `docs/test-plans/v6.67.2-shop-external-id.md`。
+
+**上线回读**（2026-11-02T02:23:37Z 生效）：`/api/health` 200（d1 / tour_db / kv 全 ok）；生产入口 `assets/index-CRNtZO3p.js` 与本地构建逐字同名（724,711 B）、包内版本串 `6.67.2`；后台分块 `AdminShopPage-DfxkpD7w.js` 与本地同尺寸（10,170 B）且含新 placeholder「球员 id / FC id」；`/` 仍 `cache-control: no-store`（v6.65.4 的 `_headers` 未回退）。**Worker 侧新文案未做线上验证**（相关端点需 admin 凭据，匿名只能拿到 401），以「部署版本对应提交 `cdac2ea`」为准。
 
 ## v6.67.1 · 强拍单静默收口的兜底口径修正（2026-11-02）
 

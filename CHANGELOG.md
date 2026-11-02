@@ -13,7 +13,9 @@
 - **队壳单点「取消」仍会继续通过**：`AdminShopPage.tsx` 的 `note = window.prompt(...) ?? ''; if (note === null) return;` 里 `?? ''` 把取消变成空串，那句 return 成了死代码。改成先判 `null` 再 trim。
 - 「外部录入」卡的球员输入框 placeholder 改「球员 id / FC id」（成功 toast 沿用既有 `summary`，会带出解析到的球员名）。
 
-**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **185 文件 / 2,970 例全绿**（v6.67.1 基线 185 / 2,967，新增 TC-B08/B09/B10）；`npm run build` 通过（入口 `dist/assets/index-CRNtZO3p.js`）。判级 **minor**（两处静默失败 + 一处可用性；不动资金、不动归属、零迁移）。测试计划 `docs/test-plans/v6.67.2-shop-external-id.md`。
+**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **185 文件 / 2,971 例全绿**（v6.67.1 基线 185 / 2,967，新增 TC-B08/B09/B10/B11）；`npm run build` 通过（入口 `dist/assets/index-CRNtZO3p.js`）。判级 **minor**（两处静默失败 + 一处可用性；不动资金、不动归属、零迁移）。测试计划 `docs/test-plans/v6.67.2-shop-external-id.md`。
+
+**上线**：push `1c21080..cdac2ea`（4 枚）触发 CF Workers Builds 自动部署，生效 Version `80ab924d-c942-4c59-bd2a-cf72386676d9` @2026-11-02T02:23:37Z（100% 流量）。回读：`/api/health` 200（d1 / tour_db / kv 全 ok）、生产入口 `assets/index-CRNtZO3p.js` 与本地构建逐字同名（724,711 B）、包内版本串 `6.67.2`、`AdminShopPage-DfxkpD7w.js` 与本地同尺寸且含新 placeholder「球员 id / FC id」、`/` 仍 `cache-control: no-store`。
 
 
 
