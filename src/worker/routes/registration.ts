@@ -6,10 +6,10 @@ import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
 import { checkSquad, markerOf } from '../../core/squad-rules.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
-import { loadSquadView, toSquadPlayer as viewToSquadPlayer } from '../squad-view.ts';
+import { loadSquadView, projectLoyaltyExpense, toSquadPlayer as viewToSquadPlayer } from '../squad-view.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { PS_SLOT_COUNT } from '../../core/fc26.ts';
-import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
+import { CURRENT_TICKS_SQL, closedRegularTicks } from '../contract-ticks.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
 import { loadSquadContext } from '../squad-context.ts';
 import { getBoundClub } from '../binding.ts';
@@ -134,7 +134,7 @@ app.get('/club/squad', async (c) => {
   const cache = tierCache();
   const tier = await deriveClubTier(c.env, season, club.id, cache);
   // v6.67.0 期一（D1）：名单由合同推导，不再读 registrations 快照
-  const [players, contractMap, view, rules, inflCoefs, pendingChanges] = await Promise.all([
+  const [players, contractMap, view, rules, inflCoefs, pendingChanges, loyalty] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
     loadSquadView(c.env.DB, club.id),
@@ -145,6 +145,8 @@ app.get('/club/squad', async (c) => {
     // v6.54.0 步骤 7（§10.5）：注册工作台的「待生效」第二行与 projected 双预检的数据源。
     // 本端点已 requireCoach + 本俱乐部绑定，pending 只出现在这里、不进公开列表缓存。
     loadClubPendingChanges(c.env, club.id),
+    // 预计忠诚支出（规则 4.3.2）：只在中期末窗关窗时扣，工作台按现行合同预演一次供教练排预算
+    closedRegularTicks(c.env.DB).then((n) => projectLoyaltyExpense(c.env.DB, club.id, n + 1)),
   ]);
   const pendingByPlayer = new Map(pendingChanges.map((pc) => [pc.playerId, pc]));
 
@@ -235,6 +237,7 @@ app.get('/club/squad', async (c) => {
     compliance,
     /** 未签约球员 ID（D2：单开一区，不占人数、不计工资） */
     unsigned: unsignedIds,
+    loyalty,
     rules: rules === null
       ? null
       : {

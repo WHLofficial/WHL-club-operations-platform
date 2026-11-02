@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations } from './d1.ts';
-import { loadSquadView, loadSquadViews } from '../src/worker/squad-view.ts';
+import { loadSquadView, loadSquadViews, projectLoyaltyExpense } from '../src/worker/squad-view.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { readFileSync } from 'node:fs';
 
@@ -71,5 +71,32 @@ describe('名单镜像（合同推导）', () => {
     const src = readFileSync('src/worker/routes/registration.ts', 'utf8');
     expect(src).not.toContain("app.post('/club/registrations'");
     expect(src).not.toContain('loadRegistrationCheckMode');
+  });
+});
+
+describe('预计忠诚支出（规则 4.3.2 口径）', () => {
+  it('按关窗后窗刻度取档：1.5 赛季 × 10%、0.5 赛季 × 5%，只算本队 active 合同', async () => {
+    const { env, sqlite } = fixture();
+    sqlite.exec(`
+      INSERT INTO clubs (id, name) VALUES (1, '甲队'), (2, '乙队');
+      INSERT INTO players (id, uid, name, club_id, status) VALUES (11, 'p11', '甲一', 1, 'normal'), (21, 'p21', '乙一', 2, 'normal');
+      INSERT INTO contracts (player_id, club_id, wage, release_fee, contract_type, service_ticks, is_active)
+        VALUES (11, 1, 5, 40, 'formal', 2, 1),
+               (21, 2, 4, 100, 'formal', 6, 1);
+    `);
+    // ticksAfterClose=4 → 1 个常规窗 = 0.5 赛季：service_ticks 2 → 1.0 赛季（5%）；
+    // 40 × 5% = 2.00，乙队的合同不计入
+    expect(await projectLoyaltyExpense(env.DB, 1, 4)).toEqual({ total: 2, count: 1 });
+  });
+
+  it('没有 active 合同 / 违约金为 0 / 档位 0% 时不计', async () => {
+    const { env, sqlite } = fixture();
+    sqlite.exec(`
+      INSERT INTO clubs (id, name) VALUES (1, '甲队');
+      INSERT INTO players (id, uid, name, club_id, status) VALUES (11, 'p11', '甲一', 1, 'normal');
+      INSERT INTO contracts (player_id, club_id, wage, release_fee, contract_type, service_ticks, is_active)
+        VALUES (11, 1, 5, 0, 'formal', 8, 1);
+    `);
+    expect(await projectLoyaltyExpense(env.DB, 1, 8)).toEqual({ total: 0, count: 0 });
   });
 });

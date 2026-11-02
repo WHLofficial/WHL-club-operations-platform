@@ -116,6 +116,7 @@
 - 管理端 `GET /registrations` / `GET /compliance` 当前季实时算（`source:'live'`，带 `isCpu` / `unsigned`），历史季读存档。
 - `demand-ops` 的 roster 改由合同类型推导。
 - 前端工作台：「阵容与注册」标题、行尾「分配 ▾」列退役、未签约区单开红字 banner、提交栏与超帽确认弹窗一并退役。
+- 工作台显示「预计忠诚支出」（`GET /club/squad` 的 `loyalty`，同 `loyaltyMovements` 口径预演，不落账）。
 
 **验收（期一实测）**
 

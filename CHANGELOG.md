@@ -15,6 +15,7 @@
 
 **Added**
 
+- **工作台显示「预计忠诚支出」**（规则 4.3.2）：`GET /club/squad` 新增 `loyalty: { total, count }`，由 `projectLoyaltyExpense` 按现行合同与关窗后窗刻度预演一次（同 `loyaltyMovements` 的取档与舍入口径，不落账）；工作台工资格右侧出「忠诚支出 X.XXm · N 份」，教练排预算时和工资一起看。
 - `tests/squad-view.test.ts`：正式/训练营/未签约/退役四个分桶、多队一次取、他队合同不干扰本队判定，外加密钥静态锁（`app.post('/club/registrations'` 与 `loadRegistrationCheckMode` 不得回归）。
 
 **Notes**

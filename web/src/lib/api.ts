@@ -829,6 +829,8 @@ export interface SquadOverview {
   players: SquadPlayerRow[];
   /** 未签约球员 ID（v6.67.0 D2）：不占人数、不计工资，单开一区 */
   unsigned: number[];
+  /** 预计忠诚支出（规则 4.3.2）：中期窗关窗时按现行合同一次性扣，只做展示 */
+  loyalty: { total: number; count: number };
   compliance: SquadCompliance | null;
   rules: SquadRules | null;
   /** 全队待生效合同变更摘要（v6.54.0 步骤 7）：计数 + 工资增量（m/窗） */

@@ -4,6 +4,8 @@
 // 这类漂移不可能再发生。registrations 表降级为关窗存档（D3），读路径不再依赖它。
 import type { SquadPlayer } from '../core/squad-rules.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
+import { createConfigService } from '../core/config.ts';
+import { serviceSeasons } from '../core/bypass-rules.ts';
 
 /** 一行的形状：既够 checkSquad 用（SquadPlayer），也带展示需要的 status / releaseFee */
 export interface SquadViewRow extends SquadPlayer {
@@ -122,4 +124,40 @@ export function toSquadPlayer(row: SquadViewRow): SquadPlayer {
     contractType: row.contractType,
     wage: row.wage,
   };
+}
+
+/**
+ * 预计忠诚支出（规则 4.3.2）：只在中期末窗关窗时扣，按关窗后的窗刻度算效力
+ * （1 个常规窗 = 0.5 赛季），取满足的最高档 × 合同违约金。这里按「现行合同不变、
+ * 下一个常规窗就是中期窗」预演一次，只做展示，不落账。
+ *
+ * 与 `src/worker/season-settle.ts` 的 `loyaltyMovements` 同口径（同 config 键、同取档规则、
+ * 同两位小数舍入口径），差别只是不写流水。
+ */
+export async function projectLoyaltyExpense(
+  db: D1Database,
+  clubId: number,
+  ticksAfterClose: number,
+): Promise<{ total: number; count: number }> {
+  const tiersRaw = await createConfigService(db).get('loyalty_tiers');
+  const tiers = (tiersRaw ? JSON.parse(tiersRaw) : [[0.5, 0.05], [1.5, 0.1], [2.5, 0.2], [3.5, 0]]) as [number, number][];
+  tiers.sort((a, b) => a[0] - b[0]);
+  const contracts = await db
+    .prepare(
+      `SELECT release_fee, service_ticks FROM contracts
+       WHERE is_active = 1 AND club_id = ? AND release_fee IS NOT NULL`,
+    )
+    .bind(clubId)
+    .all<{ release_fee: number; service_ticks: number | null }>();
+  let total = 0;
+  let count = 0;
+  for (const ct of contracts.results) {
+    const seasons = serviceSeasons(ct.service_ticks ?? 0, ticksAfterClose);
+    let rate = 0;
+    for (const [minSeasons, r] of tiers) if (seasons >= minSeasons) rate = r;
+    if (rate <= 0 || ct.release_fee <= 0) continue;
+    total = Math.round((total + Math.round(ct.release_fee * rate * 100) / 100) * 100) / 100;
+    count += 1;
+  }
+  return { total, count };
 }

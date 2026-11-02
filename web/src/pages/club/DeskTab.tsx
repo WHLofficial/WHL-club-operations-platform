@@ -397,6 +397,11 @@ function RegistrationSection({ squad }: { squad: SquadOverview }) {
                 </span>
               )}
             </div>
+            <div className="club-stat">
+              <span className="stat-label">忠诚支出</span>
+              <span className="stat-value mono gold-text">{fmt2(squad.loyalty.total)}m</span>
+              <span className="stat-sub">中期窗按现行合同预扣 · {squad.loyalty.count} 份</span>
+            </div>
           </div>
           {wageCap !== null && (
             <CapBar

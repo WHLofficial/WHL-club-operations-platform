@@ -213,6 +213,7 @@ function squadFixture(clubId: number): SquadOverview {
     registeredInTournament: true,
     players: [],
     unsigned: [],
+  loyalty: { total: 1.5, count: 3 },
     compliance: null,
     rules: null,
   };
@@ -1022,6 +1023,9 @@ describe('自家页签：工作台与主场', () => {
     expect(desk.querySelector('.sqc-assign-btn')).toBeNull();
     expect(within(desk).getByText(/未签约（1 人）/)).toBeTruthy();
     expect(within(desk).getAllByText(/李四/).length).toBeGreaterThan(0);
+    // 预计忠诚支出（规则 4.3.2）：教练排预算时和工资一起看
+    expect(within(desk).getByText('忠诚支出')).toBeTruthy();
+    expect(within(desk).getByText('1.50m')).toBeTruthy();
   });
 
   it('主场：主场档案（影响力级别系数文案）+ 近期主场战报 + 去消费中心的一行入口', async () => {
