@@ -9410,6 +9410,36 @@ button.sqc-pos:hover {
   opacity: 0.9;
 }
 
+.cap-bar-proj .cap-seg-delta {
+  background: rgba(198, 150, 60, 0.45);
+}
+
+.cap-bar-proj .cap-marker-base {
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0.6;
+}
+
+.cap-bar-proj .cap-flag-base {
+  bottom: auto;
+  top: calc(100% + 3px);
+  color: var(--muted, #6b7280);
+  font-weight: 600;
+}
+
+.cap-bar-proj .cap-over-note {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 3px);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--bad);
+  white-space: nowrap;
+  z-index: 6;
+}
+
 .cap-bar-proj .cap-seg-over {
   background: rgba(220, 38, 38, 0.35);
   border-radius: 0 999px 999px 0;

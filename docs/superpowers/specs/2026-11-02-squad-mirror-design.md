@@ -108,7 +108,7 @@ wages: {
 ```
 
 - `now` 与 `window-payroll.ts:53` 同源（全部 active 合同，含训练营 0.75），**注册口径与扣费口径从此是同一个数**。
-- 基线表（迁移 0089）：
+- 基线表（迁移 0090）：
 
 ```sql
 CREATE TABLE club_wage_baselines (
@@ -146,7 +146,7 @@ CREATE TABLE club_wage_baselines (
 
 
 1. **名单存档**：对每个非 CPU 队 `DELETE FROM registrations WHERE season = ? AND club_id = ?` + 按当窗末镜像逐行 `INSERT`。这是 `registrations` 唯一的写入点。
-2. **核验结果**（迁移 0089）：
+2. **核验结果**（迁移 0090）：
 
 ```sql
 CREATE TABLE squad_audits (
@@ -174,7 +174,7 @@ CREATE TABLE squad_audits (
 - **管理端历史名单报表**：默认全出（含 CPU 行），DTO 带 `isCpu`，前端灰显；`?includeCpu=0` 可关。
 - **`registration_check_mode`**：代码删除读取，`config` 表里的行保留不删。
 
-### 3.5 迁移 0089
+### 3.5 迁移 0090
 
 只新增两张表（`club_wage_baselines` / `squad_audits`）+ 索引 `idx_squad_audits_season`。`registrations` 表结构不动，`tests/d1.ts` 的 `MIGRATION_FILES` 追加文件名。
 
@@ -196,7 +196,7 @@ CREATE TABLE squad_audits (
 | 期 | 内容 | 可独立上线 |
 |---|---|---|
 | 一 | `squad-view.ts` + `GET /club/squad` 改现算 + 三项消费方迁移 + 退役提交接口与 `check_mode` + 前端未签约区 | 是（行为变化：不再有提交动作） |
-| 二 | 迁移 0089 的 `club_wage_baselines` + `openWindow` 写基线 + `wages` 字段 + `CapBar` 三段 | 是（迁移须先 apply） |
+| 二 | 迁移 0090 的 `club_wage_baselines` + `openWindow` 写基线 + `wages` 字段 + `CapBar` 三段 | 是（迁移须先 apply） |
 | 三 | `GET /api/admin/window/overview` 实时看板 + 关窗页全联盟表 + 关窗写 `registrations` 存档 + `squad_audits` + 管理端体检页 + 工作台"最近一次核验" | 是 |
 
 ---

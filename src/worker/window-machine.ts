@@ -194,6 +194,19 @@ export async function openWindow(
       )
       .bind(season, windowSeq, isTemporary ? 1 : 0),
   ];
+  // v6.69.0 期二（D12）：开窗瞬间给每支非 CPU 球队记一行工资基线，供工作台算「窗初 → 现在」。
+  // 与 window-payroll 的扣费口径同源（全部 active 合同），只是这里留一份窗初快照。
+  openBatch.push(
+    db
+      .prepare(
+        `INSERT OR REPLACE INTO club_wage_baselines (season, window_seq, club_id, wage_total, player_count)
+         SELECT ?, ?, ct.club_id, COALESCE(SUM(ct.wage), 0), COUNT(*)
+         FROM contracts ct JOIN clubs c ON c.id = ct.club_id
+         WHERE ct.is_active = 1 AND ct.club_id IS NOT NULL AND ct.wage IS NOT NULL AND COALESCE(c.is_cpu, 0) = 0
+         GROUP BY ct.club_id`,
+      )
+      .bind(season, windowSeq),
+  );
   if (venueReset) {
     openBatch.push(
       db

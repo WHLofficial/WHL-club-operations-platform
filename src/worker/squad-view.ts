@@ -161,3 +161,83 @@ export async function projectLoyaltyExpense(
   }
   return { total, count };
 }
+
+/** 窗口期薪资三段（v6.69.0 期二，设计稿 §3.3）。now 与 window-payroll 的扣费基数同源：
+ *  全部 is_active 合同（含训练营 0.75），所以「工作台看到的数」和「窗末要扣的数」是同一个。 */
+export interface SquadWages {
+  /** 级别帽值（顶级 68 / 次级 58）；未报名定级赛事为 null */
+  cap: number | null;
+  /** 窗开瞬间的工资（本窗无基线行则为 null —— D12：不补部署基线，前端退成两段） */
+  baseline: number | null;
+  /** Σ 当前 active 合同 */
+  now: number;
+  /** now + 待生效合同增量（D14：只算已过户、条款未定的人，在途单不预估） */
+  projected: number;
+  /** now - baseline */
+  delta: number | null;
+  /** 本窗转入 / 转出人数（D13：含 termination，排除 rc_change / match） */
+  inCount: number;
+  outCount: number;
+  /** max(0, now - cap) */
+  overspend: number;
+}
+
+const SWITCHING_TYPES_IN = "('transfer', 'activation', 'forced_auction', 'free_agent')";
+const SWITCHING_TYPES_OUT = "('transfer', 'activation', 'forced_auction', 'free_agent', 'termination')";
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+export async function loadSquadWages(
+  db: D1Database,
+  clubId: number,
+  opts: { cap: number | null; pendingDelta: number; season: number | null; windowSeq: number | null },
+): Promise<SquadWages> {
+  const nowRow = await db
+    .prepare(
+      `SELECT COALESCE(SUM(wage), 0) AS total FROM contracts
+       WHERE is_active = 1 AND club_id = ? AND wage IS NOT NULL`,
+    )
+    .bind(clubId)
+    .first<{ total: number }>();
+  const now = round2(nowRow?.total ?? 0);
+
+  let baseline: number | null = null;
+  let inCount = 0;
+  let outCount = 0;
+  if (opts.season !== null && opts.windowSeq !== null) {
+    const row = await db
+      .prepare(`SELECT wage_total FROM club_wage_baselines WHERE season = ? AND window_seq = ? AND club_id = ?`)
+      .bind(opts.season, opts.windowSeq, clubId)
+      .first<{ wage_total: number }>();
+    baseline = row ? round2(row.wage_total) : null;
+    const [inc, out] = await Promise.all([
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM transfers
+           WHERE to_club_id = ? AND season = ? AND window_seq = ? AND status = 'completed' AND type IN ${SWITCHING_TYPES_IN}`,
+        )
+        .bind(clubId, opts.season, opts.windowSeq)
+        .first<{ n: number }>(),
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM transfers
+           WHERE from_club_id = ? AND season = ? AND window_seq = ? AND status = 'completed' AND type IN ${SWITCHING_TYPES_OUT}`,
+        )
+        .bind(clubId, opts.season, opts.windowSeq)
+        .first<{ n: number }>(),
+    ]);
+    inCount = inc?.n ?? 0;
+    outCount = out?.n ?? 0;
+  }
+
+  const projected = round2(now + opts.pendingDelta);
+  return {
+    cap: opts.cap,
+    baseline,
+    now,
+    projected,
+    delta: baseline === null ? null : round2(now - baseline),
+    inCount,
+    outCount,
+    overspend: opts.cap === null ? 0 : Math.max(0, round2(now - opts.cap)),
+  };
+}

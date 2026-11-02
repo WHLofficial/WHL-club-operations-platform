@@ -214,6 +214,7 @@ function squadFixture(clubId: number): SquadOverview {
     players: [],
     unsigned: [],
   loyalty: { total: 1.5, count: 3 },
+  wages: { cap: 68, baseline: 40, now: 42, projected: 44, delta: 2, inCount: 1, outCount: 0, overspend: 0 },
     compliance: null,
     rules: null,
   };
@@ -1026,6 +1027,10 @@ describe('自家页签：工作台与主场', () => {
     // 预计忠诚支出（规则 4.3.2）：教练排预算时和工资一起看
     expect(within(desk).getByText('忠诚支出')).toBeTruthy();
     expect(within(desk).getByText('1.50m')).toBeTruthy();
+    // 薪资三段（期二）：窗初基线 + 本窗进出（fixture: baseline 40 / now 42 / +1 −0）
+    expect(within(desk).getByText('窗初 40.00')).toBeTruthy();
+    expect(within(desk).getByText('+1 / −0')).toBeTruthy();
+    expect(within(desk).getByText(/窗初 40\.00m（\+2\.00）/)).toBeTruthy();
   });
 
   it('主场：主场档案（影响力级别系数文案）+ 近期主场战报 + 去消费中心的一行入口', async () => {

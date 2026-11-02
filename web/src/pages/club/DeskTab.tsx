@@ -402,12 +402,24 @@ function RegistrationSection({ squad }: { squad: SquadOverview }) {
               <span className="stat-value mono gold-text">{fmt2(squad.loyalty.total)}m</span>
               <span className="stat-sub">中期窗按现行合同预扣 · {squad.loyalty.count} 份</span>
             </div>
+            <div className="club-stat">
+              <span className="stat-label">本窗流动</span>
+              <span className="stat-value mono">
+                +{squad.wages.inCount} / −{squad.wages.outCount}
+              </span>
+              <span className="stat-sub">
+                {squad.wages.baseline !== null && squad.wages.delta !== null
+                  ? `窗初 ${fmt2(squad.wages.baseline)}m（${delta2(squad.wages.delta)}）`
+                  : '本窗无窗初基线'}
+              </span>
+            </div>
           </div>
           {wageCap !== null && (
             <CapBar
               current={stats.wageTotal}
               projected={stats.wageProjected}
               cap={wageCap}
+              baseline={squad.wages.baseline}
               title={`${rules.tier ? `${LEAGUE_TIER_LABEL[rules.tier] ?? rules.tier} ` : ''}工资帽 ${fmt2(wageCap)}m`}
             />
           )}

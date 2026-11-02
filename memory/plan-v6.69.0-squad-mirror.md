@@ -184,3 +184,11 @@ CREATE INDEX IF NOT EXISTS idx_squad_audits_season ON squad_audits(season, windo
 - `demand-ops` 的 roster 没有改成传 `contractType` 进 `demand-rules`，而是直接在 SQL 用 `CASE` 出 `squad` 列 —— 规则函数的入参形状因此没变，改动面更小。
 - 前端多删了三样东西（计划里没写全）：`reg-submit-bar` 吸底样式、`DeskTab.overcap.test.tsx`（超帽确认弹窗随提交一起退役）、`RegCard` 的 `.sqc-assign` 单元格与 `traineeBlocked` 文案。
 - 测试侧：`tests/registration-modes.test.ts` 整文件删除（只测已退役的放行档），`tests/routes.test.ts` 的「注册名单提交与校验」describe 一并删除。
+
+### 期二（已完成，2026-11-03）
+
+- 迁移编号用 **0090**（计划稿写的 0089 已被 v6.68.2 的 `0089_bids_status_index.sql` 占用）；设计稿里的编号已同步改。
+- 基线写入点放在 `openWindow` 的 `openBatch` 里（`INSERT OR REPLACE ... SELECT ... FROM contracts JOIN clubs`，`COALESCE(c.is_cpu,0)=0`），与关窗扣费同源。
+- `loadSquadWages(db, clubId, { cap, pendingDelta, season, windowSeq })` 只读，不进任何批；`cap` 由 `rules.wageCap` 传入（未报名时为 null）。
+- 进出人数按 `transfers.season/window_seq` 过滤，而不是按 `completed_at` 区间：单据本来就记了所属窗，少一次时间解析，且撤销（`status='reverted'`）天然不计。
+- 变异验证：`outCount` 去掉 `termination` ⇒ TC-WG-03 变红（`expected 1 to be 2`）。

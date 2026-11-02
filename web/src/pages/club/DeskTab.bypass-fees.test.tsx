@@ -77,6 +77,8 @@ const SQUAD: SquadOverview = {
   registeredInTournament: true,
   players: [player({ id: 7, name: '张三' }), player({ id: 8, name: '李四', serviceSeasons: 3.5 })],
   unsigned: [],
+  loyalty: { total: 1.5, count: 3 },
+  wages: { cap: 68, baseline: 40, now: 42, projected: 44, delta: 2, inCount: 1, outCount: 0, overspend: 0 },
   compliance: null,
   rules: RULES,
 };

@@ -831,6 +831,17 @@ export interface SquadOverview {
   unsigned: number[];
   /** 预计忠诚支出（规则 4.3.2）：中期窗关窗时按现行合同一次性扣，只做展示 */
   loyalty: { total: number; count: number };
+  /** 窗口期薪资三段（v6.69.0 期二）：now 与窗末扣费同源；baseline 缺失退两段 */
+  wages: {
+    cap: number | null;
+    baseline: number | null;
+    now: number;
+    projected: number;
+    delta: number | null;
+    inCount: number;
+    outCount: number;
+    overspend: number;
+  };
   compliance: SquadCompliance | null;
   rules: SquadRules | null;
   /** 全队待生效合同变更摘要（v6.54.0 步骤 7）：计数 + 工资增量（m/窗） */

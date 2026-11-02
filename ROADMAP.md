@@ -103,7 +103,7 @@
 
 ## v6.69.0 · 名单镜像与窗口期薪资（期一：名单由合同推导）（2026-11-03）
 
-**状态**：**进行中** —— 期一已完成并本地验收；期二（基线表 + 薪资三段）、期三（关窗看板 + 核验存档 + 通知）未开始。未 push、未部署。
+**状态**：**进行中** —— 期一、期二已完成并本地验收；期三（关窗看板 + 核验存档 + 通知）未开始。未 push、未部署。
 
 **缘起**
 
@@ -118,10 +118,17 @@
 - 前端工作台：「阵容与注册」标题、行尾「分配 ▾」列退役、未签约区单开红字 banner、提交栏与超帽确认弹窗一并退役。
 - 工作台显示「预计忠诚支出」（`GET /club/squad` 的 `loyalty`，同 `loyaltyMovements` 口径预演，不落账）。
 
+**期二交付（已完成）**
+
+- 迁移 `0090_club_wage_baselines.sql`（`season, window_seq, club_id` 主键 + `wage_total` / `player_count`），开窗批 `openWindow` 写入、排除 CPU 队。
+- `GET /club/squad` 新增 `wages` 九字段（`cap` / `baseline` / `now` / `projected` / `delta` / `inCount` / `outCount` / `overspend`）。
+- CapBar 三段：窗初基线细线 + 深金增量段 + 待生效斜纹，超帽「超 X m」；无基线退两段并标注。
+- 工作台新增「本窗流动 +N / −M」格与窗初对比小字。
+
 **验收（期一实测）**
 
 - `npm run typecheck`：三份 tsconfig 全清。
-- `npm test`：**186 文件 / 2,967 例全绿**（基线 187 / 2,986 → 删 2 个只测已退役入口的文件、合并 15 个提交/放行档用例、新增 `tests/squad-view.test.ts` 4 例）。
+- `npm test`：**187 文件 / 2,972 例全绿**（期一 186 / 2,969 + 期二 `tests/squad-wages.test.ts` 3 例）。
 - `npm run build`：通过。
 - 判级 **minor**。
 

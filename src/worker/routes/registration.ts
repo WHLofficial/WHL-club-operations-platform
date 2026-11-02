@@ -6,7 +6,7 @@ import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
 import { checkSquad, markerOf } from '../../core/squad-rules.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
-import { loadSquadView, projectLoyaltyExpense, toSquadPlayer as viewToSquadPlayer } from '../squad-view.ts';
+import { loadSquadView, loadSquadWages, projectLoyaltyExpense, toSquadPlayer as viewToSquadPlayer } from '../squad-view.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { PS_SLOT_COUNT } from '../../core/fc26.ts';
 import { CURRENT_TICKS_SQL, closedRegularTicks } from '../contract-ticks.ts';
@@ -134,7 +134,7 @@ app.get('/club/squad', async (c) => {
   const cache = tierCache();
   const tier = await deriveClubTier(c.env, season, club.id, cache);
   // v6.67.0 期一（D1）：名单由合同推导，不再读 registrations 快照
-  const [players, contractMap, view, rules, inflCoefs, pendingChanges, loyalty] = await Promise.all([
+  const [players, contractMap, view, rules, inflCoefs, pendingChanges, loyalty, openWindow] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
     loadSquadView(c.env.DB, club.id),
@@ -147,6 +147,7 @@ app.get('/club/squad', async (c) => {
     loadClubPendingChanges(c.env, club.id),
     // 预计忠诚支出（规则 4.3.2）：只在中期末窗关窗时扣，工作台按现行合同预演一次供教练排预算
     closedRegularTicks(c.env.DB).then((n) => projectLoyaltyExpense(c.env.DB, club.id, n + 1)),
+    getOpenWindow(c.env.DB),
   ]);
   const pendingByPlayer = new Map(pendingChanges.map((pc) => [pc.playerId, pc]));
 
@@ -173,6 +174,15 @@ app.get('/club/squad', async (c) => {
     const current = contractMap.get(pc.playerId);
     if (current) pendingWageDelta += pc.wage - current.wage;
   }
+
+  // v6.69.0 期二（§3.3）：薪资三段。now 与窗末扣费同源（全部 active 合同），
+  // baseline 缺失就退两段（D12），不拿 0 冒充窗初。
+  const wages = await loadSquadWages(c.env.DB, club.id, {
+    cap: rules?.wageCap ?? null,
+    pendingDelta: Math.round(pendingWageDelta * 100) / 100,
+    season: openWindow?.season ?? null,
+    windowSeq: openWindow?.windowSeq ?? null,
+  });
 
   return c.json({
     club: { id: club.id, name: club.name, leagueTier: tier },
@@ -238,6 +248,7 @@ app.get('/club/squad', async (c) => {
     /** 未签约球员 ID（D2：单开一区，不占人数、不计工资） */
     unsigned: unsignedIds,
     loyalty,
+    wages,
     rules: rules === null
       ? null
       : {
