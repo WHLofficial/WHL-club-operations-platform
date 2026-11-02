@@ -4,6 +4,19 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.67.2] · 消费工单外部录入：提示可见 + FC id 兜底（2026-11-02）
+
+**Fixed**
+
+- **`/admin/shop` 的操作提示从来没渲染过**：`useToast()`（`web/src/lib/toast.tsx`）是本地 hook，返回 `{ show, toastNode }`，必须把 `toastNode` 渲出来才有 toast；`web/src/pages/admin/AdminShopPage.tsx` 两处（页面级与「外部录入」卡）都只取了 `show`，全 admin 目录里只有这一页漏了节点 ⇒ 这个页面上所有成功/失败提示（400 / 403 / 404 / 409）都静默丢弃。两处各自补渲自己的 `toastNode`（页面级挂页尾、卡片级挂卡片底部）。
+- **外部录入填 FC id 必然失败**：`loadPlayer`（`src/worker/shop-ops.ts`）只按本地 `players.id` 查，而管理组界面从不显示本地 id、手里只有 FC 的球员 id ⇒ 命中不到就 404「找不到这名球员」，再被上面那条吞掉，表现成「弹了确认、点了确定、什么都没发生」。改成先按 `id` 查，查不到再按 `fc_id` 兜底（生产 `fc_id` 无空值、无重复）：命中且归属正确即放行；命中但属于别队报 400 并点明归属（`这个 FC id 属于俱乐部 #N，不是俱乐部 #M`）；两种键都没有报 404 并写明「本地 id 或 FC id」。五个分类（pa / badge / badge_upgrade / role / position）共用这一个入口，一起获得兜底。
+- **队壳单点「取消」仍会继续通过**：`AdminShopPage.tsx` 的 `note = window.prompt(...) ?? ''; if (note === null) return;` 里 `?? ''` 把取消变成空串，那句 return 成了死代码。改成先判 `null` 再 trim。
+- 「外部录入」卡的球员输入框 placeholder 改「球员 id / FC id」（成功 toast 沿用既有 `summary`，会带出解析到的球员名）。
+
+**验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **185 文件 / 2,970 例全绿**（v6.67.1 基线 185 / 2,967，新增 TC-B08/B09/B10）；`npm run build` 通过（入口 `dist/assets/index-CRNtZO3p.js`）。判级 **minor**（两处静默失败 + 一处可用性；不动资金、不动归属、零迁移）。测试计划 `docs/test-plans/v6.67.2-shop-external-id.md`。
+
+
+
 ## [v6.67.1] · 强拍单静默收口的兜底口径修正（2026-11-02）
 
 **Fixed**

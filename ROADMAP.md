@@ -101,6 +101,27 @@
 
 ---
 
+## v6.67.2 · 消费工单外部录入：提示可见 + FC id 兜底（2026-11-02）
+
+**状态**：**已实现并本地验收，待 push 上线**——零迁移。分支 `fix/v6.67.2-shop-external`（基于 `origin/main` = `1c21080`）。
+
+**缘起**：管理组在 `/admin/shop`「外部录入」填 `俱乐部 33 / 球员 256196 / 金徽章`，弹确认、点确定，界面毫无反应、工单没建出来。生产取证：`shop_orders` 6 行全是 `source='club'`、`source='external'` 0 行，`audit_log` 里 `shop_order_external` 0 条 ⇒ 创建从未落库。两条根因叠在一起：①256196 是 **FC 的球员 id**（Pacho，本地 `players.id` = 42），`loadPlayer` 只按本地 id 查 ⇒ 404；②这一页的 `useToast()` 只取了 `show`、从没渲染 `toastNode` ⇒ 所有提示（400/403/404/409）连同成功提示一起静默（全 admin 目录只有这一页漏了）。
+
+**裁决（grilling 2026-11-02）**：Q1 只修三处，不顺手把 confirm/prompt 换成卡内确认；Q2 FC id 命中但属于别队 ⇒ 400 并点明归属（owner 选 C，管理组口本就能看全联盟）；Q3 两种键都查不到的 404 文案写明「本地 id 或 FC id」；Q4 两处各自渲染自己的 `toastNode`（不动组件签名）；Q5 placeholder 改「球员 id / FC id」+ 成功 toast 沿用既有 `summary` 带出球员名；Q6 走 **v6.67.2** 独立分支、push 等令。
+
+**交付**：
+
+1. `src/worker/shop-ops.ts` 的 `loadPlayer`：先按本地 `id` 查，查不到再按 `fc_id` 兜底（生产 18,301 行 `fc_id` 无空值无重复）；命中但归属不符 ⇒ 400 `这个 FC id 属于俱乐部 #N，不是俱乐部 #M`；两种键都没有 ⇒ 404 `找不到这名球员（本地 id 或 FC id 都没有这条记录）`。五个分类共用该入口，一起获得兜底。
+2. `web/src/pages/admin/AdminShopPage.tsx`：页面级与「外部录入」卡各补 `toastNode` 渲染（页面级挂页尾、卡片级挂卡片底部）。
+3. 队壳单「取消」被吞：`window.prompt(...) ?? ''` 改成先判 `null` 再 trim（原写法让那句 `return` 成死代码，点取消仍会继续通过）。
+4. 外部录入卡的球员输入框 placeholder 改「球员 id / FC id」。
+5. 测试：`tests/shop-orders.test.ts` 新增 TC-B08（FC id 命中本队 ⇒ 201 且生效落在这名球员、不多出行）、TC-B09（FC id 属于别队 ⇒ 400 含双向俱乐部号，且不落工单）、TC-B10（两键都没有 ⇒ 404 含「本地 id 或 FC id」）；`seedPlayer` 新增 `fcId` 选项（默认同 id，老用例语义不变）。
+6. 版本 6.67.1 → 6.67.2。
+
+**已知边界**：本次不给 `AdminShopPage` 新开前端单测（该页此前无测试文件，搭 mock 成本高于收益）；toast 渲染靠人工回读验收。审批/拒绝仍走 `window.confirm` / `window.prompt`（Q1 明确不改造）。
+
+**验收**：`npm run typecheck`（三份 tsconfig）、`npm test`、`npm run build` 见 CHANGELOG 执行记录；判级 **minor**。测试计划 `docs/test-plans/v6.67.2-shop-external-id.md`。
+
 ## v6.67.1 · 强拍单静默收口的兜底口径修正（2026-11-02）
 
 **状态**：**已实现并本地验收，待 push 上线**——零迁移。
