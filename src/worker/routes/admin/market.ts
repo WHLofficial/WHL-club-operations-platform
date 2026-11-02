@@ -8,6 +8,7 @@ import { HttpError } from '../../../lib/http.ts';
 import { createConfigService } from '../../../core/config.ts';
 import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminRevertDeal, requireReason } from '../../market-intervene.ts';
 import { listWindows, openWindow, closeWindow } from '../../window-machine.ts';
+import { loadWindowOverview } from '../../squad-audit.ts';
 import { createForcedAuction, cancelForcedAuction, inspectForcedAuction } from '../../bypass.ts';
 import { readJson } from './shared.ts';
 
@@ -131,6 +132,12 @@ app.post('/windows/open', async (c) => {
     | { season?: unknown; windowSeq?: unknown; declareGrowthPeriod?: unknown; temporary?: unknown }
     | null;
   return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq, body?.declareGrowthPeriod, body?.temporary), 201);
+});
+
+// GET /api/admin/windows/overview —— 关窗页实时看板（v6.69.0 期三）：逐队名单/工资/体检，CPU 也列
+app.get('/windows/overview', async (c) => {
+  await requireAdmin(c.env, c.req.raw);
+  return c.json({ clubs: await loadWindowOverview(c.env) });
 });
 
 // POST /api/admin/windows/close —— 关窗（前置校验；force 需 window_force_settle=true）

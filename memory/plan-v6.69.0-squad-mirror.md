@@ -192,3 +192,11 @@ CREATE INDEX IF NOT EXISTS idx_squad_audits_season ON squad_audits(season, windo
 - `loadSquadWages(db, clubId, { cap, pendingDelta, season, windowSeq })` 只读，不进任何批；`cap` 由 `rules.wageCap` 传入（未报名时为 null）。
 - 进出人数按 `transfers.season/window_seq` 过滤，而不是按 `completed_at` 区间：单据本来就记了所属窗，少一次时间解析，且撤销（`status='reverted'`）天然不计。
 - 变异验证：`outCount` 去掉 `termination` ⇒ TC-WG-03 变红（`expected 1 to be 2`）。
+
+### 期三（已完成，2026-11-03）
+
+- 迁移 `0091_squad_audits.sql`，`tests/d1.ts` 已登记。
+- `computeAudit` 是看板与存档的唯一口径；`loadWindowOverview` 只排序、`squadAuditStatements` 只产语句，两者都不写库。
+- 关窗批里 `squadAuditStatements` 只在常规窗调用（临时窗不动赛季存档）；通知在批成功后才发（批回滚不发假信）。
+- 站内信去重查 `notifications.payload LIKE '%"season":N,"windowSeq":M%'` —— 关窗本身是原子闸，这里是双保险。
+- 变异验证：CPU 免检改 `if (true)` ⇒ TC-AU-01/02 红；删排序比较器 ⇒ TC-AU-01 红；规则名不中文化 ⇒ TC-AU-02 红。

@@ -3,7 +3,7 @@
 // payload 由 activations.ts 冻结，只有 previousBid / newReleaseFee / diff，没有 oldReleaseFee ⇒ 用「新 − 差额」反算。
 import { describe, expect, it } from 'vitest';
 import type { AdminReviewRow } from '../../lib/api.ts';
-import { bypassSummary } from './MarketPage.tsx';
+import { auditLabel, bypassSummary } from './MarketPage.tsx';
 
 function review(payload: Record<string, unknown>): AdminReviewRow {
   return { transfer: { type: 'match', player: { name: '中场丙' } }, payload } as unknown as AdminReviewRow;
@@ -20,5 +20,14 @@ describe('v6.67.0 审核队列摘要', () => {
     expect(bypassSummary(review({ kind: 'match', previousBid: 2, newReleaseFee: 3 }))).toBe(
       '匹配留队：新违约金 3.00m（原 —） > 出价 2.00m，回收差额 —m',
     );
+  });
+});
+
+describe('v6.69.0 关窗看板体检列', () => {
+  it('规则名去重保序并中文化；多条问题时只列规则，不点球员', () => {
+    expect(auditLabel([{ rule: 'wage_cap' }, { rule: 'squad_size' }, { rule: 'wage_cap' }])).toBe('工资帽 / 人数');
+  });
+  it('没有问题时退成「不通过」，不给空 badge', () => {
+    expect(auditLabel([])).toBe('不通过');
   });
 });

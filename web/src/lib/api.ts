@@ -821,6 +821,24 @@ export interface SquadPlayerRow {
   freeRcAvailable?: boolean;
 }
 
+/** GET /api/admin/windows/overview（v6.69.0 期三）：关窗页实时看板逐队一行 */
+export interface WindowOverviewRow {
+  clubId: number;
+  name: string;
+  isCpu: boolean;
+  tier: string | null;
+  firstTeam: number;
+  trainee: number;
+  unsigned: number;
+  wageNow: number;
+  wageCap: number | null;
+  overspend: number;
+  pass: boolean;
+  issues: { rule: string; message: string }[];
+  pendingTransfers: number;
+  activeSessions: number;
+}
+
 export interface SquadOverview {
   club: { id: number; name: string; leagueTier: string | null } | null;
   season: number | null;

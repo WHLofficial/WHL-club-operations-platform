@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { api, apiPost, type AdminReviewBatchResult, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionPreview, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
+import { api, apiPost, type AdminReviewBatchResult, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionPreview, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowOverviewRow, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
 import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
 import { playerPath } from '../../lib/player-link.ts';
 import { useToast } from '../../lib/toast.tsx';
@@ -900,6 +900,7 @@ function WindowsSection() {
         <input type="checkbox" checked={declarePeriod} onChange={(e) => setDeclarePeriod(e.target.checked)} />
         同时宣告新成长期（里程碑从开窗时点重新累计；成长期不绑窗口，之后也可以手动宣告）
       </label>
+      <WindowOverview />
       <div className="inline-form">
         <ConfirmButton
           label="关闭当前窗口"
@@ -953,6 +954,90 @@ function WindowsSection() {
         </div>
       )}
     </section>
+  );
+}
+
+
+/* ---------- 关窗页实时看板（v6.69.0 期三） ---------- */
+
+const AUDIT_RULE_LABEL: Record<string, string> = {
+  squad_size: '人数',
+  gk: '门将',
+  trainee: '训练营',
+  wage_cap: '工资帽',
+  ca_pa: 'CA/PA',
+  contract: '无合同',
+};
+
+/** 体检 badge 文案：同一支球队多条问题只列规则名，去重保序（D9：逐人细节收进球员页） */
+export function auditLabel(issues: { rule: string }[]): string {
+  return [...new Set(issues.map((i) => AUDIT_RULE_LABEL[i.rule] ?? i.rule))].join(' / ') || '不通过';
+}
+
+// 逐队一行，不通过的置顶（后端已排序）；CPU 队也列（灰显），方便对齐「它为什么也在花钱」。
+function WindowOverview() {
+  const { data, error } = useQuery({
+    queryKey: ['admin', 'window-overview'],
+    queryFn: () => api<{ clubs: WindowOverviewRow[] }>('/api/admin/windows/overview'),
+    refetchInterval: 30_000,
+  });
+  if (error) return <p className="bad-text">看板读取失败：{(error as Error).message}</p>;
+  if (!data) return <p className="muted">正在核对各队阵容…</p>;
+  const failed = data.clubs.filter((r) => !r.pass && !r.isCpu).length;
+  return (
+    <div>
+      <p className="hint">
+        关窗前体检（口径与教练页一致：名单=合同推导）：{failed === 0 ? '当前所有球队均通过。' : `${failed} 支球队不通过——`}
+        {failed > 0 && '核验只记录、不阻断关窗；名单与体检结果会随关窗存档，不通过的队会收到站内信。'}
+      </p>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>球队</th>
+              <th className="num">一线</th>
+              <th className="num">训练营</th>
+              <th className="num">未签约</th>
+              <th className="num">工资</th>
+              <th className="num">帽</th>
+              <th className="num">超</th>
+              <th>体检</th>
+              <th className="num">在途单</th>
+              <th className="num">谈判</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.clubs.map((r) => (
+              <tr key={r.clubId} style={r.isCpu ? { opacity: 0.55 } : undefined}>
+                <td>
+                  {r.name}
+                  {r.isCpu && <span className="badge gray">CPU</span>}
+                </td>
+                <td className="num mono">{r.firstTeam}</td>
+                <td className="num mono">{r.trainee}</td>
+                <td className="num mono">{r.unsigned > 0 ? <span className="bad-text">{r.unsigned}</span> : 0}</td>
+                <td className="num mono">{r.wageNow.toFixed(2)}</td>
+                <td className="num mono">{r.wageCap === null ? '—' : r.wageCap.toFixed(0)}</td>
+                <td className="num mono">{r.overspend > 0 ? <span className="bad-text">{r.overspend.toFixed(2)}</span> : '—'}</td>
+                <td>
+                  {r.isCpu ? (
+                    <span className="badge gray">免检</span>
+                  ) : r.pass ? (
+                    <span className="badge ok">通过</span>
+                  ) : (
+                    <span className="badge bad" title={r.issues.map((i) => i.message).join(' · ')}>
+                      {auditLabel(r.issues)}
+                    </span>
+                  )}
+                </td>
+                <td className="num mono">{r.pendingTransfers}</td>
+                <td className="num mono">{r.activeSessions}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

@@ -15,6 +15,9 @@
 
 **Added**
 
+- **关窗页实时看板（期三）**：新端点 `GET /api/admin/windows/overview` 逐队返回 `{ firstTeam, trainee, unsigned, wageNow, wageCap, overspend, pass, issues, pendingTransfers, activeSessions }`，不通过置顶、按超帽降序，CPU 队也列（前端灰显、免检）。关窗面板上方直接渲染成表，30 秒刷新一次。
+- **关窗核验存档（期三）**：迁移 `0091_squad_audits.sql`；关窗同一原子批里写 `registrations` 快照（season/club/player/squad）与 `squad_audits`（pass / issues_json / stats_json）。核验只记录、不阻断关窗（D6）；CPU 队同样写一行（pass=1、issues=[]）。
+- **核验不通过通知（期三）**：关窗批提交成功后，给不通过的真人队发一条站内信（模板 `squad_audit_failed`），只含规则名与金额，不点球员姓名；按 `(season, window_seq, club)` 去重。
 - **窗口期薪资三段（期二）**：`GET /club/squad` 新增 `wages: { cap, baseline, now, projected, delta, inCount, outCount, overspend }`。`now` 与窗末扣费同源（全部 `is_active` 合同，含训练营 0.75），`baseline` 取新表 `club_wage_baselines`（迁移 `0090`，开窗批写入、排除 CPU 队），`projected` 只含已过户未定条款的增量（D14），`inCount/outCount` 按本窗 `completed` 单计（D13：含 `termination`，排除 `rc_change`/`match`）。CapBar 变三段「窗初 → 现在 → 待生效」，超帽时右侧显示「超 X m」；本窗无基线行时退两段并标注「本窗无窗初基线」（D12）。
 - **工作台显示「预计忠诚支出」**（规则 4.3.2）：`GET /club/squad` 新增 `loyalty: { total, count }`，由 `projectLoyaltyExpense` 按现行合同与关窗后窗刻度预演一次（同 `loyaltyMovements` 的取档与舍入口径，不落账）；工作台工资格右侧出「忠诚支出 X.XXm · N 份」，教练排预算时和工资一起看。
 - `tests/squad-view.test.ts`：正式/训练营/未签约/退役四个分桶、多队一次取、他队合同不干扰本队判定，外加密钥静态锁（`app.post('/club/registrations'` 与 `loadRegistrationCheckMode` 不得回归）。
@@ -22,7 +25,7 @@
 **Notes**
 
 - **口径移植**：原「注册名单提交与校验」的 9 条规则一条没少，仍然只在 `GET /club/squad` 的 `compliance` 里算；变的只是名单来源与提交动作。
-- **验收**：`npm run typecheck` 三份清；`npm test` **187 文件 / 2,972 例**全绿（期二新增 `tests/squad-wages.test.ts` 3 例）；`npm run build` 通过。判级 **minor**（新增推导视图能力；下线的写入口唯一消费方是本仓 SPA，且其能力已被镜像取代，不构成跨仓契约破坏）。
+- **验收**：`npm run typecheck` 三份清；`npm test` **188 文件 / 2,977 例**全绿（期三新增 `tests/squad-audit.test.ts` 3 例、看板 badge 2 例）；`npm run build` 通过。判级 **minor**（新增推导视图能力；下线的写入口唯一消费方是本仓 SPA，且其能力已被镜像取代，不构成跨仓契约破坏）。
 - 版本号由计划稿的 v6.67.0 顺延为 **v6.69.0**（6.67.x 已被强拍/消费工单批次占用）。
 
 ## [v6.68.2] · 管理审核工作台（期 C：在途工作台 / 激活凭证 / 侧栏滚动）（2026-11-02）

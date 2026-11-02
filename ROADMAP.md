@@ -103,7 +103,7 @@
 
 ## v6.69.0 · 名单镜像与窗口期薪资（期一：名单由合同推导）（2026-11-03）
 
-**状态**：**进行中** —— 期一、期二已完成并本地验收；期三（关窗看板 + 核验存档 + 通知）未开始。未 push、未部署。
+**状态**：**已完成、待上线** —— 三期全部实现并本地验收；**上线须先 apply 迁移 `0090`、`0091` 再 push**。未 push、未部署。
 
 **缘起**
 
@@ -125,10 +125,18 @@
 - CapBar 三段：窗初基线细线 + 深金增量段 + 待生效斜纹，超帽「超 X m」；无基线退两段并标注。
 - 工作台新增「本窗流动 +N / −M」格与窗初对比小字。
 
+**期三交付（已完成）**
+
+- 迁移 `0091_squad_audits.sql`：`squad_audits(season, window_seq, club_id, pass, issues_json, stats_json, created_at)` + 索引。
+- 新模块 `src/worker/squad-audit.ts`：`loadWindowOverview`（看板，逐队全列含 CPU）与 `squadAuditStatements`（关窗批存档语句），共用同一份 `computeAudit`。
+- 关窗批：`registrations` 快照 + `squad_audits` 与「窗口关闭」同一原子步；临时窗不入档。
+- 关窗后给不通过真人队发 `squad_audit_failed` 站内信（按窗口去重、只给规则名与金额）。
+- 管理端转会页关窗面板上方新增实时看板表（不通过置顶、按超帽降序、CPU 灰显）。
+
 **验收（期一实测）**
 
 - `npm run typecheck`：三份 tsconfig 全清。
-- `npm test`：**187 文件 / 2,972 例全绿**（期一 186 / 2,969 + 期二 `tests/squad-wages.test.ts` 3 例）。
+- `npm test`：**188 文件 / 2,977 例全绿**（期一 186 / 2,969 + 期二 3 例 + 期三 5 例）。
 - `npm run build`：通过。
 - 判级 **minor**。
 

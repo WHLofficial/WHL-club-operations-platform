@@ -16,6 +16,7 @@ import { loyaltyMovements } from './season-settle.ts';
 import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
 import { queueClubNotification } from './notify.ts';
+import { SQUAD_RULE_LABEL, squadAuditStatements } from './squad-audit.ts';
 import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
 import { triggerDemandBatch } from './demand-ops.ts';
 import { ACTIVE_SESSION_SQL } from './negotiation-guard.ts';
@@ -451,6 +452,9 @@ export async function closeWindow(
       loyalty = await loyaltyMovements(db, actor, win.season, win.windowSeq, (await closedRegularTicks(db)) + 1);
     }
   }
+  // v6.69.0 期三（§3.4 / D3 / D6）：关窗同一原子步里写名单存档与体检结果。
+  // 临时窗不动赛季存档（它不推进效力、也不改变阵容语义），只做常规窗。
+  const squadAudit = isTemporary ? null : await squadAuditStatements(env, win.season, win.windowSeq);
   const results = await db.batch([
     db
       .prepare(`UPDATE season_windows SET status = 'closed', closed_at = ${nowSql()} WHERE season = ? AND window_seq = ? AND status = 'open'`)
@@ -477,8 +481,36 @@ export async function closeWindow(
     ...payroll.statements,
     ...home.statements,
     ...loyalty.statements,
+    ...(squadAudit?.statements ?? []),
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '窗口刚被关过了');
+  // 核验不通过通知（v6.69.0 D10）：同批成败之后才发，按 (season, window_seq, club) 去重；
+  // 只给金额与规则名，不点球员姓名（球员页才是明细入口）。
+  if (squadAudit) {
+    for (const a of squadAudit.audits) {
+      if (a.isCpu || a.pass) continue;
+      const dup = await db
+        .prepare(
+          `SELECT 1 AS n FROM notifications WHERE club_id = ? AND template = 'squad_audit_failed'
+           AND payload LIKE ? LIMIT 1`,
+        )
+        .bind(a.clubId, `%"season":${win.season},"windowSeq":${win.windowSeq}%`)
+        .first<{ n: number }>();
+      if (dup) continue;
+      const rules = [...new Set(a.issues.map((i) => SQUAD_RULE_LABEL[i.rule] ?? i.rule))].join('、');
+      const text =
+        `⚠️ S${win.season} 第 ${win.windowSeq} 窗关窗体检：阵容不通过（涉及规则：${rules || '无'}）。` +
+        (a.overspend > 0 ? `工资 ${a.wageNow.toFixed(2)}m，超出帽值 ${a.overspend.toFixed(2)}m。` : `工资 ${a.wageNow.toFixed(2)}m。`) +
+        `本次不处置，下窗关闭前请按教练页红字清单调整。`;
+      await queueClubNotification(env, a.clubId, 'squad_audit_failed', {
+        text,
+        season: win.season,
+        windowSeq: win.windowSeq,
+        overspend: a.overspend,
+        rules,
+      });
+    }
+  }
   // 情绪变化 / 品牌解约通知（v6.13.0 C2）：批提交成功后才排队——批回滚不发假通知
   for (const n of home.notifications) {
     await queueClubNotification(env, n.clubId, n.template, n.data);
