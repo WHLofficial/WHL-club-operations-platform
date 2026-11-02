@@ -4,6 +4,25 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.69.0] · 名单镜像与窗口期薪资（期一：名单由合同推导）（2026-11-03）
+
+**Changed**
+
+- **名单不再由人提交，改为合同的镜像**：`GET /api/club/squad` 的 `players` 现在由 `players ⋈ contracts` 推导（新模块 `src/worker/squad-view.ts` 的 `loadSquadView`）——无在队合同 = 未签约区、`contract_type='trainee'` = 训练营、其余 = 一线队。响应删 `registration` / `checkMode`，新增 `unsigned`（未签约球员 id）。工作台标题改「阵容与注册」，行尾「分配 ▾」列整体退役（`RegCard` 不再有 assign/editable/onAssign）。
+- **`POST /api/club/registrations` 下线**：写入口退役，名单不再可编辑。`registration_check_mode` 的 config 行保留（历史配置不删），但代码读取全部移除（`loadRegistrationCheckMode` / `parseRegistrationCheckMode` / `RegistrationCheckMode` / 前端 `RegistrationResult`）。
+- **管理端体检改实时口径**：`GET /api/admin/registrations` 与 `GET /api/admin/compliance` 对当前季按视图现算（`source:'live'`，每队带 `isCpu` / `unsigned`），历史季仍读 `registrations` 存档（`source:'archive'`）；「没提交名单」这个状态消失，空队直接命中 `squad_size`。
+- **需求规则改读合同**：`src/worker/demand-ops.ts` 的 roster 不再 `LEFT JOIN registrations`，`squad` 由 `contracts.contract_type` 推导。
+
+**Added**
+
+- `tests/squad-view.test.ts`：正式/训练营/未签约/退役四个分桶、多队一次取、他队合同不干扰本队判定，外加密钥静态锁（`app.post('/club/registrations'` 与 `loadRegistrationCheckMode` 不得回归）。
+
+**Notes**
+
+- **口径移植**：原「注册名单提交与校验」的 9 条规则一条没少，仍然只在 `GET /club/squad` 的 `compliance` 里算；变的只是名单来源与提交动作。
+- **验收**：`npm run typecheck` 三份清；`npm test` **186 文件 / 2,967 例**全绿；`npm run build` 通过。判级 **minor**（新增推导视图能力；下线的写入口唯一消费方是本仓 SPA，且其能力已被镜像取代，不构成跨仓契约破坏）。
+- 版本号由计划稿的 v6.67.0 顺延为 **v6.69.0**（6.67.x 已被强拍/消费工单批次占用）。
+
 ## [v6.68.2] · 管理审核工作台（期 C：在途工作台 / 激活凭证 / 侧栏滚动）（2026-11-02）
 
 **Added**

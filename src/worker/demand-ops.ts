@@ -287,13 +287,13 @@ export async function triggerDemandBatch(env: Env, input: TriggerDemandInput): P
       await db
         .prepare(
           `SELECT p.id AS pid, p.name, p.ca, p.pa, p.age, p.position, p.status, p.is_future_star, p.agent_tier,
-                  c.wage, c.release_fee, c.contract_type, r.squad
+                  c.wage, c.release_fee, c.contract_type,
+                  CASE WHEN c.contract_type = 'formal' THEN 'first_team' WHEN c.contract_type = 'trainee' THEN 'trainee' END AS squad
            FROM contracts c
            JOIN players p ON p.id = c.player_id
-           LEFT JOIN registrations r ON r.player_id = p.id AND r.season = ? AND r.club_id = c.club_id
            WHERE c.is_active = 1 AND c.club_id = ?`,
         )
-        .bind(season, clubId)
+        .bind(clubId)
         .all<RosterRow>()
     ).results;
 

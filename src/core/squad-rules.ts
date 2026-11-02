@@ -38,12 +38,6 @@ export const WAGE_FLOOR_GAP = 15;
 //   教练侧工作台也不挂红字（checkSquad 仍被调用，结果只用于响应字段）。
 // 只作用于教练侧两条路径（GET /club/squad 与 POST /club/registrations）；
 // 管理端 /api/admin/compliance 的扫描永远看真实结果，开关不改它。
-export type RegistrationCheckMode = 'enforce' | 'warn' | 'off';
-
-/** 白名单解析：只认 warn/off，其余（含 null、脏值）一律 enforce —— 坏值不会意外放行 */
-export function parseRegistrationCheckMode(raw: string | null | undefined): RegistrationCheckMode {
-  return raw === 'warn' || raw === 'off' ? raw : 'enforce';
-}
 
 export interface SquadPlayer {
   playerId: number;
@@ -146,6 +140,16 @@ function nameList(players: SquadPlayer[]): string {
   const names = players.map((p) => p.name);
   if (names.length <= 5) return names.join('、');
   return `${names.slice(0, 5).join('、')} 等 ${names.length} 人`;
+}
+
+/** 注册校验放行档（v6.33.1 特例期开关）。v6.69.0 起教练侧不再读它（名单由合同推导、没有提交动作），
+ *  但 config 行保留、解析口径继续钉在白名单里 —— 历史配置与运营文档仍引用这三个值。 */
+export type RegistrationCheckMode = 'enforce' | 'warn' | 'off';
+
+const CHECK_MODES: readonly RegistrationCheckMode[] = ['enforce', 'warn', 'off'];
+
+export function parseRegistrationCheckMode(raw: string | null | undefined): RegistrationCheckMode {
+  return (CHECK_MODES as readonly string[]).includes(raw ?? '') ? (raw as RegistrationCheckMode) : 'enforce';
 }
 
 export function checkSquad(firstTeam: SquadPlayer[], trainee: SquadPlayer[], ctx: SquadRuleContext): SquadCheckResult {

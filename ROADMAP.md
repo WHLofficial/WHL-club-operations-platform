@@ -101,6 +101,29 @@
 
 ---
 
+## v6.69.0 · 名单镜像与窗口期薪资（期一：名单由合同推导）（2026-11-03）
+
+**状态**：**进行中** —— 期一已完成并本地验收；期二（基线表 + 薪资三段）、期三（关窗看板 + 核验存档 + 通知）未开始。未 push、未部署。
+
+**缘起**
+
+教练反馈（2026-11-02）：窗口期内买入的球员不进名单，工作台工资条只算名单里的人、关窗扣费却按全部现行合同汇总 —— 教练看不见自己正在超帽，也无法在窗口期调整名单（注册只在备赛期可提交）。设计稿 `docs/superpowers/specs/2026-11-02-squad-mirror-design.md`，裁决 D1–D14。
+
+**期一交付（已完成）**
+
+- 新模块 `src/worker/squad-view.ts`：`loadSquadView` / `loadSquadViews` 把「球队名单」变成 `players ⋈ contracts` 的纯推导视图（firstTeam / trainee / unsigned 三桶）。
+- `GET /api/club/squad` 改读视图；`POST /api/club/registrations` 下线；`registration_check_mode` 的读取代码删除（config 行保留）。
+- 管理端 `GET /registrations` / `GET /compliance` 当前季实时算（`source:'live'`，带 `isCpu` / `unsigned`），历史季读存档。
+- `demand-ops` 的 roster 改由合同类型推导。
+- 前端工作台：「阵容与注册」标题、行尾「分配 ▾」列退役、未签约区单开红字 banner、提交栏与超帽确认弹窗一并退役。
+
+**验收（期一实测）**
+
+- `npm run typecheck`：三份 tsconfig 全清。
+- `npm test`：**186 文件 / 2,967 例全绿**（基线 187 / 2,986 → 删 2 个只测已退役入口的文件、合并 15 个提交/放行档用例、新增 `tests/squad-view.test.ts` 4 例）。
+- `npm run build`：通过。
+- 判级 **minor**。
+
 ## v6.68.2 · 管理审核工作台（期 C：在途工作台 / 激活凭证 / 侧栏滚动）（2026-11-02）
 
 **状态**：**已上线（2026-11-02，Version `1dfa776e-dfa0-4289-b88b-1404854a7b4d`）**。迁移 `0089` 于 push 前 apply 生产（`Executed 2 commands in 0.60ms`，`idx_bids_status` 在场）；push `6ce3776..bfdae7c`（3 枚）触发自动部署；上线回读：`/api/health` 200、生产入口 `assets/index-DoyxBhYG.js` 与本地构建 sha256 逐字节一致（`36ee8ef6…`）、包内版本串 `6.68.2`、`/api/admin/workbench/*` 与 `/api/market/listings/:id/proof` 匿名全 401。

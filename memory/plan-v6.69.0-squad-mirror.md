@@ -1,7 +1,7 @@
-# 实施计划 · v6.67.0 名单镜像与窗口期薪资可视化
+# 实施计划 · v6.69.0 名单镜像与窗口期薪资可视化
 
 设计稿：`docs/superpowers/specs/2026-11-02-squad-mirror-design.md`（提交 `2094d30`）
-版本：单版本 **v6.67.0**，三期 = 三个提交，每期可独立上线。
+版本：单版本 **v6.69.0**，三期 = 三个提交，每期可独立上线。
 硬约束：未授权不 push / 不 deploy / 不跑 `--remote` 写；迁移 0089 须**先 apply 再 push**。
 
 ## 现状锚点（改动前必须对的坐标）
@@ -172,3 +172,15 @@ CREATE INDEX IF NOT EXISTS idx_squad_audits_season ON squad_audits(season, windo
 - 期二：`baseline=null` 时 CapBar 直接两段、不加解释文案；`inCount/outCount` 含 `termination`；`projected` 只算 `terms_applied=0` 的人。
 - 期三：看板逐队全列（CPU 灰显）、不通过置顶按超帽降序；CPU 也写 `registrations` 存档与 `squad_audits`（`pass=1`、`issues=[]`）；核验不通过发站内信 `squad_audit_failed`（同批写、按窗口去重、不含球员姓名）；管理端历史报表默认全出并带 `isCpu`。
 - 新增测试：`tests/squad-notify.test.ts`（通知去重与内容）、`tests/window-overview.test.ts`（看板与核验同口径 + 排序）、CPU 存档用例。
+
+---
+
+## 执行记录
+
+### 期一（已完成，2026-11-03）
+
+- `loadSquadView(db, clubId)` 取的是 `D1Database` 而不是 `Env`（和既有 `loadSquadContext(db, …)` 同口径，调用方不必多传环境）。
+- 分桶用「非 trainee 一律 firstTeam」（含脏值），比计划里的 `formal → firstTeam` 更宽容：脏 `contract_type` 不会把球员从名单里漏掉。
+- `demand-ops` 的 roster 没有改成传 `contractType` 进 `demand-rules`，而是直接在 SQL 用 `CASE` 出 `squad` 列 —— 规则函数的入参形状因此没变，改动面更小。
+- 前端多删了三样东西（计划里没写全）：`reg-submit-bar` 吸底样式、`DeskTab.overcap.test.tsx`（超帽确认弹窗随提交一起退役）、`RegCard` 的 `.sqc-assign` 单元格与 `traineeBlocked` 文案。
+- 测试侧：`tests/registration-modes.test.ts` 整文件删除（只测已退役的放行档），`tests/routes.test.ts` 的「注册名单提交与校验」describe 一并删除。

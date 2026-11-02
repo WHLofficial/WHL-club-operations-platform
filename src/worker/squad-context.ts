@@ -6,8 +6,6 @@ import { createConfigService } from '../core/config.ts';
 import {
   DEFAULT_CA_PA_LIMITS,
   DEFAULT_WAGE_CAP_BY_TIER,
-  parseRegistrationCheckMode,
-  type RegistrationCheckMode,
   type SquadLimits,
   type SquadRuleContext,
 } from '../core/squad-rules.ts';
@@ -35,10 +33,4 @@ export async function loadSquadContext(db: D1Database, tier: Tier | null): Promi
     // v6.39.0：工资帽按级别（用户令 2026-10-06：顶级 68 / 次级 58；config 的 wage_cap 覆盖整表或按档覆盖）
     wageCap: wageCapJson?.[tier] ?? DEFAULT_WAGE_CAP_BY_TIER[tier],
   };
-}
-
-/** 注册校验放行档（v6.33.1 特例期开关）：教练侧「工作台读取」与「提交校验」共用这一个读法，
- *  口径与白名单都收在 core/squad-rules 的 parseRegistrationCheckMode（坏值一律回 enforce）。 */
-export async function loadRegistrationCheckMode(db: D1Database): Promise<RegistrationCheckMode> {
-  return parseRegistrationCheckMode(await createConfigService(db).get('registration_check_mode'));
 }

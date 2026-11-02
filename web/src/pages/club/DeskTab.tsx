@@ -5,11 +5,10 @@
 // v6.37.0 卡片化：注册名单表整表重构为「位置四组容器 + 行解剖卡」，与 SquadTab 同构（组件在 card-parts.tsx）——
 //   行尾「分配 ▾」下拉取代最左分段按钮（三选全称，无合同禁一线/训练营）；违规旗标/无合同/退役徽章随姓名走；
 //   桌面 = 全列合并 +「列…」自选长尾；窄屏（≤760px）= 四视图 chips 快切；非开窗期下拉整体禁用。
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ApiError,
   api,
   apiPost,
   apiSend,
@@ -18,7 +17,6 @@ import {
   type ClubEventsResponse,
   type MyClubOverview,
   type RcChangeResult,
-  type RegistrationResult,
   type SquadIssue,
   type SquadOverview,
   type SquadPlayerRow,
@@ -39,7 +37,6 @@ import { checkSquad, type SquadPlayer } from '../../../../src/core/squad-rules.t
 import { terminationFeePreview } from '../../lib/bypass-fee-preview.ts';
 import { PENDING_SOURCE_LABEL, delta2, fmt2, fmtShort, pendingFeeSmall, pendingWageSmall } from '../../lib/contract-view.ts';
 import { CapBar } from './CapBar.tsx';
-import { OverCapDialog, type OverCapDriver } from './OverCapDialog.tsx';
 import {
   CardGroup,
   RegCard,
@@ -85,7 +82,7 @@ export default function DeskTab({ overview }: { overview: MyClubOverview }) {
         </section>
       )}
 
-      {squad && <RegistrationSection squad={squad} onRefresh={refreshSquad} />}
+      {squad && <RegistrationSection squad={squad} />}
 
       {squad && <BypassSection squad={squad} onRefresh={refreshSquad} />}
 
@@ -212,31 +209,17 @@ function EventsCard() {
 
 /* ---------- 注册工作台 ---------- */
 
-function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: () => void }) {
-  const { show, toastNode } = useToast();
-  // 分配表：未提交过 → 以空表起步；已提交过 → 以快照起步
-  const [assign, setAssign] = useState<Record<number, Assignment>>(() => {
-    const init: Record<number, Assignment> = {};
-    if (squad.registration) {
-      for (const id of squad.registration.firstTeam) init[id] = 'first_team';
-      for (const id of squad.registration.trainee) init[id] = 'trainee';
-    }
-    return init;
-  });
+function RegistrationSection({ squad }: { squad: SquadOverview }) {
+  const { toastNode } = useToast();
+  // v6.67.0 期一（D1）：名单由合同推导，教练不再手动分配——assign 只做展示映射
+  const assign = useMemo<Record<number, Assignment>>(() => {
+    const map: Record<number, Assignment> = {};
+    for (const p of squad.players) if (p.squad) map[p.id] = p.squad;
+    return map;
+  }, [squad.players]);
   const [filter, setFilter] = useState<SquadFilter>('all');
-  const [busy, setBusy] = useState(false);
-  // 特例期 off 档不挂红字（v6.33.1）：compliance 即使不通过也保持空白
-  const [issues, setIssues] = useState<SquadIssue[] | null>(
-    squad.checkMode !== 'off' && squad.compliance && !squad.compliance.pass ? squad.compliance.issues : null,
-  );
-  const [lastResult, setLastResult] = useState<RegistrationResult | null>(null);
-
-  // issues 跟随 squad 更新（v6.33.1 复查修复）：父组件不给 key，换档位 / 换名单 / 提交后 refreshSquad
-  // 刷新 squad 时，红字必须收敛到最新体检结果，不能停在首挂算出的那一版。
-  // 依赖整份 squad（checkMode 与 compliance 都是它的字段），不放 issues 免得自触发。
-  useEffect(() => {
-    setIssues(squad.checkMode !== 'off' && squad.compliance && !squad.compliance.pass ? squad.compliance.issues : null);
-  }, [squad]);
+  // 红字直接来自服务端体检（v6.67.0 起没有"放行档"这个开关）
+  const issues: SquadIssue[] | null = squad.compliance && !squad.compliance.pass ? squad.compliance.issues : null;
 
   // v6.30.0 C 段：可选列进 URL（?regcols=）—— 与阵容名单的 ?cols= 分开键，两张表在不同页签，防串味。
   // v6.37.0 卡片化：解析收敛到长尾池（旧 URL 里表格时代的内置键不算数），卡片内置 8 列恒显。
@@ -252,7 +235,6 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
   }
 
   const rules = squad.rules;
-  const editable = squad.season !== null;
 
   // 窄屏四视图 chips 的当前视图；桌面无 chips（全列合并），这个状态闲置
   const narrow = useMediaQuery('(max-width: 760px)');
@@ -320,7 +302,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
   // 待生效只改工资 ⇒ projected 新增的失败项实际上只会是 wage_cap；其余硬规则两遍一致。
   // off 档（特例期隔离）不显示，与现有红字口径相同。
   const squadChecks = useMemo(() => {
-    if (!rules || squad.checkMode === 'off') return null;
+    if (!rules) return null;
     const toSquadPlayer = (p: SquadPlayerRow, projected: boolean): SquadPlayer => ({
       playerId: p.id,
       name: p.name,
@@ -346,113 +328,31 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
         rules,
       ),
     };
-  }, [rules, squad.checkMode, stats]);
+  }, [rules, stats]);
 
-  function setAssignment(playerId: number, next: Assignment) {
-    setAssign((prev) => ({ ...prev, [playerId]: next }));
-    setLastResult(null);
-  }
-
-  // 超帽确认弹窗（v6.54.0 步骤 8，§10.5 / TC-RD-38）：只装「当前窗合规、关窗后工资越帽」这一种情况。
-  // 触发点在 requestSubmit；真正提交仍走 submitRoster（提交的是当前窗合规名单，超帽留给关窗）。
-  const [overCapOpen, setOverCapOpen] = useState(false);
-  const pendingBlockRef = useRef<HTMLDivElement>(null);
-  // 驱动明细 = 已分配进名单、待生效工资上涨的人（与 projected 的算法同源：只认 stats 的行）。
-  // 按增量降序 —— 谁把工资顶过帽，第一眼就是涨得最多的那个。
-  const overCapDrivers = useMemo<OverCapDriver[]>(() => {
-    return [...stats.firstRows, ...stats.traineeRows]
-      .filter((p) => p.hasPending && p.wage != null && p.pendingWage != null && p.pendingWage - p.wage >= 0.005)
-      .map((p) => ({
-        id: p.id,
-        fcId: p.fcId,
-        name: p.name,
-        delta: Math.round((p.pendingWage! - p.wage!) * 100) / 100,
-        source: p.pendingSource ? PENDING_SOURCE_LABEL[p.pendingSource] : '合同变更',
-      }))
-      .sort((a, b) => b.delta - a.delta);
-  }, [stats]);
-
-  /**
-   * 提交前的客户侧预检（§10.5「合规预检（current / projected 双跑）」）：
-   * - 特例期 warn/off 是「提交放行」档 ⇒ 不拦（否则特例期形同虚设）；
-   * - current 不通过 ⇒ 照旧交给服务端 422，红字沿用现有 issues 渲染（行为不变）；
-   * - projected 硬规则（人数/门将/CA/合同等）不通过 ⇒ 直接阻止（硬规则不走确认弹窗）；
-   * - projected 只差工资帽 ⇒ 弹确认，用户显式选择后才提交；
-   * - 其余（两遍都过 / 没有 pending）⇒ 正常提交。
-   */
-  function requestSubmit() {
-    if (busy) return;
-    if (squad.checkMode === 'enforce' && squadChecks !== null && squadChecks.current.pass && !squadChecks.projected.pass) {
-      const hard = squadChecks.projected.issues.filter((i) => i.rule !== 'wage_cap');
-      if (hard.length > 0) {
-        setIssues(hard);
-        show('关窗时会不满足硬规则，先处理待生效合同再提交。', true);
-        return;
-      }
-      if (squadChecks.projected.issues.some((i) => i.rule === 'wage_cap')) {
-        setOverCapOpen(true);
-        return;
-      }
-    }
-    void submitRoster();
-  }
-
-  async function submitRoster() {
-    if (busy) return;
-    setBusy(true);
-    setIssues(null);
-    try {
-      const firstTeam = squad.players.filter((p) => assign[p.id] === 'first_team').map((p) => p.id);
-      const trainee = squad.players.filter((p) => assign[p.id] === 'trainee').map((p) => p.id);
-      const res = await apiPost<RegistrationResult>('/api/club/registrations', { firstTeam, trainee });
-      setLastResult(res);
-      // warn 档放行后要把真实体检结果继续挂成红字；off 档隐藏；enforce 通过时 issues 恒为 []（清空）
-      setIssues(res.checkMode !== 'off' && res.issues.length > 0 ? res.issues : null);
-      show(`注册名单已提交：一线队 ${res.firstTeam} 人、训练营 ${res.trainee} 人。`);
-      onRefresh();
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 422 && Array.isArray(err.issues)) {
-        setIssues(err.issues);
-      }
-      show(err instanceof Error ? err.message : '提交失败', true);
-    } finally {
-      setBusy(false);
-    }
-  }
+  // 未签约区（D2）：不占人数、不计工资，但挂了红字要点名
+  const unsignedRows = useMemo(() => squad.players.filter((p) => !p.hasContract), [squad.players]);
 
   const wageCap = rules?.wageCap ?? null;
   const capLeft = wageCap !== null ? wageCap - stats.wageTotal : null;
-  // 关窗后是否越帽（提交栏警告与弹窗门共用）；0.005 容差 = 两位小数的金额口径
-  const overCap = wageCap !== null && stats.wageProjected > wageCap + 0.005;
 
   return (
     <section className="card">
       <div className="tier-head">
-        <h3>注册工作台{squad.season !== null ? ` · 第 ${squad.season} 赛季` : ''}</h3>
-        <span className="muted">注册名单与名额校验</span>
+        <h3>阵容与注册{squad.season !== null ? ` · 第 ${squad.season} 赛季` : ''}</h3>
+        <span className="muted">名单随合同自动更新</span>
       </div>
       {toastNode}
       {!squad.registeredInTournament ? (
         <div className="banner bad">
-          尚未在赛事平台报名，请等待赛事平台管理员确认报名。名单可以在下面先排，但报名完成前提交不了注册。
+          尚未在赛事平台报名，请等待赛事平台管理员确认报名。下面按合同显示的阵容暂时不做合规体检。
         </div>
       ) : squad.rules?.tier && (
         <div className="banner ok">
           报名状态：<span className={`badge ${squad.rules.tier === 'premier' ? 'gold' : 'gray'}`}>
             {LEAGUE_TIER_LABEL[squad.rules.tier] ?? squad.rules.tier}
           </span>{' '}
-          已由赛事报名派生，可正常提交注册。
-        </div>
-      )}
-      {/* v6.33.1 特例期放行档：off 隔离 / warn 提示；enforce（正常档）不挂提示条 */}
-      {squad.checkMode === 'off' && (
-        <div className="banner warn">
-          特例期：注册校验已隔离——提交只做归属/重复校验；一线队人数、门将、训练营人数与资格、CA/PA 梯度、现行合同、工资帽都不再拦，管理员已临时放行。
-        </div>
-      )}
-      {squad.checkMode === 'warn' && (
-        <div className="banner info">
-          特例期：注册校验为提示模式——红字是真实体检结果，不通过也可以提交。
+          已由赛事报名派生，按合同自动生成的阵容会照此体检。
         </div>
       )}
       {!rules ? (
@@ -509,7 +409,7 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
 
           {/* 逐人待生效明细（§10.5）：不能只藏在球员页合同卡里，提交前必须能看到谁待生效、涨多少 */}
           {pendingPlayers.length > 0 && (
-            <div className="reg-pending" ref={pendingBlockRef}>
+            <div className="reg-pending">
               <div className="reg-pending-head">
                 待生效工资（{pendingPlayers.length}）
                 <span className="muted"> · 本窗关闭时生效</span>
@@ -567,10 +467,6 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
                     })()}
               </div>
             </div>
-          )}
-
-          {!editable && (
-            <div className="banner warn">当前没有开放注册的赛季（只有备赛期能提交名单）。名单暂时只读。</div>
           )}
 
           <div className="tier-head">
@@ -641,20 +537,15 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
                     cells={cells}
                     extras={extras}
                     wide={!narrow}
-                    // 行尾恒有「分配 ▾」列 ⇒ 组头列头右侧让出同宽（--sqc-assignw），列头才与值区对齐
-                    assign
                   >
                     {g.rows.map((p) => (
                       <RegCard
                         key={p.id}
                         row={p}
                         view={view}
-                        assign={assign[p.id] ?? 'none'}
                         flags={flagged.get(p.id) ?? []}
                         extras={extras}
                         wide={!narrow}
-                        editable={editable}
-                        onAssign={(next) => setAssignment(p.id, next)}
                       />
                     ))}
                   </CardGroup>
@@ -674,47 +565,14 @@ function RegistrationSection({ squad, onRefresh }: { squad: SquadOverview; onRef
             </div>
           )}
           {/* 绿「通过」条在 off 档不出现（v6.33.1）：隔离期里它会被误读成管理员真做了体检 */}
-          {issues === null && squad.checkMode !== 'off' && squad.compliance?.pass && lastResult === null && (
+          {issues === null && squad.compliance?.pass && (
             <div className="banner ok">资格检查通过，可以安心开赛。</div>
           )}
-          {lastResult !== null && (
-            <div className="banner ok">
-              第 {lastResult.season} 赛季注册完成：一线队 {lastResult.firstTeam} 人、训练营 {lastResult.trainee} 人，工资{' '}
-              {wageCap !== null ? `${lastResult.wageTotal.toFixed(2)}/${wageCap}` : lastResult.wageTotal.toFixed(2)}m。
-              <span className="stamp stamp-ok stamp-inline">注册完成</span>
+          {unsignedRows.length > 0 && (
+            <div className="banner warn">
+              <b>未签约（{unsignedRows.length} 人）：</b>
+              不占人数、不计工资，但上不了场。{unsignedRows.map((p) => p.name).join('、')}
             </div>
-          )}
-
-          {/* 提交栏（v6.54.0 步骤 8）：≤640 吸底 + 行内写清待生效与超帽警告，点击前走 requestSubmit 的预检/确认 */}
-          <div className="btn-row reg-submit-bar">
-            <button className="btn" type="button" disabled={!editable || busy || !squad.registeredInTournament} onClick={requestSubmit}>
-              {busy ? '提交中…' : squad.registration ? '重新提交注册名单' : '提交注册名单'}
-            </button>
-            <span className="hint">
-              {stats.pendingCount > 0 && `${stats.pendingCount} 份合同待生效`}
-              {overCap && ` · 关窗后 ${fmt2(stats.wageProjected)}m/窗，预计超帽 ${fmt2(stats.wageProjected - (wageCap ?? 0))}m`}
-              {(stats.pendingCount > 0 || overCap) && squad.registration && ' · '}
-              {squad.registration && '重复提交会整体替换本赛季注册名单，放心改。'}
-            </span>
-          </div>
-          {/* 超帽确认（§10.5 rev18）：不阻止提交，只保证「知道后果仍提交」是显式选择 */}
-          {overCapOpen && wageCap !== null && (
-            <OverCapDialog
-              current={stats.wageTotal}
-              projected={stats.wageProjected}
-              cap={wageCap}
-              drivers={overCapDrivers}
-              onCancel={() => setOverCapOpen(false)}
-              onProcess={() => {
-                setOverCapOpen(false);
-                // 关弹窗后滚到待生效明细（主路径）；块本身带 scroll-margin-top，不会被吸顶条盖住
-                pendingBlockRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }}
-              onConfirm={() => {
-                setOverCapOpen(false);
-                void submitRoster();
-              }}
-            />
           )}
         </>
       )}

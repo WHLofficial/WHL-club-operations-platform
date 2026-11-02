@@ -9715,28 +9715,6 @@ button.sqc-pos:hover {
   .reg-pending-when {
     font-size: 11px;
   }
-
-  /* 提交栏吸底：按钮整宽 ≥44px，行内写明待生效份数与超帽警告（§10.5 窄屏） */
-  .reg-submit-bar {
-    position: sticky;
-    bottom: 0;
-    z-index: 20;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-    margin: 14px 0 0;
-    padding: 10px 0 calc(8px + env(safe-area-inset-bottom));
-    background: linear-gradient(transparent, var(--card) 35%);
-  }
-
-  .reg-submit-bar .btn {
-    min-height: 44px;
-  }
-
-  .reg-submit-bar .hint {
-    font-size: 11px;
-    line-height: 1.5;
-  }
 }
 
 /* ── 候选名单（v6.58.0）：球员库星标列 / 球员页开关 / 账本页签 ── */

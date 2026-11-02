@@ -773,8 +773,6 @@ export interface SquadCompliance {
  * 注册校验放行档（v6.33.1 特例期开关 registration_check_mode）：
  * enforce=照常拦；warn=体检照算照显示、但不拦提交；off=教练侧隔离（不体检、不挂红字）。
  */
-export type RegistrationCheckMode = 'enforce' | 'warn' | 'off';
-
 export interface SquadPlayerRow {
   id: number;
   fcId: number | null;
@@ -826,13 +824,12 @@ export interface SquadPlayerRow {
 export interface SquadOverview {
   club: { id: number; name: string; leagueTier: string | null } | null;
   season: number | null;
-  // 报名状态探测（v1.2.0）：true=已报定级赛事（leagueTier 非空）；false=未报名，提交会被 400 拦下
+  // 报名状态探测（v1.2.0）：true=已报定级赛事（leagueTier 非空）；false=未报名，规则与体检都不做
   registeredInTournament: boolean;
   players: SquadPlayerRow[];
-  registration: { firstTeam: number[]; trainee: number[] } | null;
+  /** 未签约球员 ID（v6.67.0 D2）：不占人数、不计工资，单开一区 */
+  unsigned: number[];
   compliance: SquadCompliance | null;
-  /** 当前放行档（v6.33.1）：未绑定队的早退响应也会带，按必填处理 */
-  checkMode: RegistrationCheckMode;
   rules: SquadRules | null;
   /** 全队待生效合同变更摘要（v6.54.0 步骤 7）：计数 + 工资增量（m/窗） */
   pendingSummary?: { count: number; wageDelta: number };
@@ -841,18 +838,6 @@ export interface SquadOverview {
 /** GET /api/club/pending-contracts（v6.54.0 步骤 7）：球队页阵容小字的数据源 */
 export interface PendingContractsResponse {
   pending: ContractPendingView[];
-}
-
-export interface RegistrationResult {
-  ok: boolean;
-  season: number;
-  firstTeam: number;
-  trainee: number;
-  wageTotal: number;
-  /** 提交时的放行档（v6.33.1） */
-  checkMode: RegistrationCheckMode;
-  /** 本次体检问题；enforce 通过时恒为 []，warn/off 下可能非空（off 由前端隐藏） */
-  issues: SquadIssue[];
 }
 
 export interface ContractImportPreview {

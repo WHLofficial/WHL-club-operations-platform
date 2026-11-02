@@ -941,7 +941,8 @@ describe('v6.39.2 桌面宽卡静态锁（列头与值区同款等宽轨网格 +
     expect(squad, 'SquadTab 应把 wide 传给分组/卡片').toContain('wide=');
     expect(desk, 'DeskTab 应把 wide 传给分组/卡片').toContain('wide=');
     const deskGroup = desk.slice(desk.indexOf('<CardGroup'), desk.indexOf('</CardGroup>'));
-    expect(deskGroup, 'DeskTab 的 CardGroup 应传 assign（列头右侧让出分配列）').toContain('assign');
+    // v6.67.0 D1：名单由合同推导，注册台不再有「分配 ▾」列 —— 两个名单页签都不传 assign
+    expect(deskGroup, 'DeskTab 的 CardGroup 不该再传 assign（分配列已随手动名单一起退役）').not.toContain('assign');
     const squadGroup = squad.slice(squad.indexOf('<CardGroup'), squad.indexOf('</CardGroup>'));
     expect(squadGroup, 'SquadTab 的 CardGroup 不该传 assign（阵容行没有分配列）').not.toContain('assign');
   });
@@ -1256,10 +1257,11 @@ describe('v6.54.0 窄屏与超帽确认弹窗静态契约（TC-RD-33 / TC-RD-38�
       blocks640.some((b) => /\.seg\.reg-filter\s*\{[^}]*flex-wrap:\s*wrap/.test(b)),
       '≤640 注册名单筛选应换成可换行 chip 组（4 个按钮一行装不下）',
     ).toBe(true);
+    // v6.67.0 D1：没有"提交名单"这回事了，吸底提交栏随之退役
     expect(
       blocks640.some((b) => /\.reg-submit-bar\s*\{[^}]*position:\s*sticky/.test(b)),
-      '≤640 提交栏应吸底（position: sticky）',
-    ).toBe(true);
+      '≤640 提交栏吸底规则应已随提交入口一起移除',
+    ).toBe(false);
     // 挂类锁（照 TC-SWP-05 的 className 形态口径）：只锁 CSS 半边是半盲的——
     // 改版时删掉/改名 JSX 上的 reg-filter / reg-submit-bar，规则变死代码、窄屏静默失效，
     // 而上面两条 CSS 断言仍全绿。这里按 token 取，容许类顺序变化与追加类。
@@ -1273,11 +1275,8 @@ describe('v6.54.0 窄屏与超帽确认弹窗静态契约（TC-RD-33 / TC-RD-38�
       filterTokens,
       'DeskTab 的名单筛选必须挂 `seg reg-filter`（≤640 可换行 chip 规则挂在它上面）',
     ).toContain('seg');
-    const barTokens = classTokens(/className=["']([^"']*\breg-submit-bar\b[^"']*)["']/);
-    expect(
-      barTokens,
-      'DeskTab 提交栏必须挂 `btn-row reg-submit-bar`（≤640 吸底规则挂在它上面）',
-    ).toContain('btn-row');
+    // 同理锁 JSX 半边：提交栏类名不许再出现（防有人只删 CSS 留死代码 / 或把入口偷偷加回来）
+    expect(desk, 'DeskTab 不应再渲染 reg-submit-bar（名单是只读镜像）').not.toContain('reg-submit-bar');
     // 第三行可换行、不截断：§10.4 明令窄屏不隐藏 pending 小字
     expect(/\.sqc-pend-row\s*\{[^}]*white-space:\s*normal/.test(css), '待生效第三行必须允许换行').toBe(true);
     // 值格内第二行（桌面形态）与第三行共用同一份断行保险

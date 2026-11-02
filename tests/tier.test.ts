@@ -99,8 +99,6 @@ function seedPlayers(fx: Fixture): { fullFirst: number[]; fullTrainee: number[] 
   return { fullFirst: Array.from({ length: 20 }, (_, i) => i + 1), fullTrainee: [101, 102, 103] };
 }
 
-const regBody = (firstTeam: number[], trainee: number[]) => ({ firstTeam, trainee });
-
 beforeEach(() => {
   resetConfigCache();
 });
@@ -123,9 +121,14 @@ describe('分级派生（v1.2.0：报名定级）', () => {
     expect(overview.registeredInTournament).toBe(true);
     expect(overview.rules?.tier).toBe('premier');
 
-    const res = await post('/api/club/registrations', regBody(fullFirst, fullTrainee), 'tok-coach', fx.env);
-    expect(res.status).toBe(200);
-    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM registrations')!.n).toBe(23);
+    // v6.67.0 起名单由合同推导：全队 20 一线 + 3 训练营，体检直接通过（不再有提交动作）
+    const body = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
+      compliance: { pass: boolean; stats: { firstTeam: number; trainee: number } } | null;
+      unsigned: number[];
+    };
+    expect(body.compliance?.pass).toBe(true);
+    expect(body.compliance?.stats).toMatchObject({ firstTeam: fullFirst.length, trainee: fullTrainee.length });
+    expect(body.unsigned).toEqual([]);
   });
 
   it('报名次级联赛 → second 梯度生效（CA≥87 最多 3 名，第 4 名被点名）', async () => {
@@ -135,16 +138,12 @@ describe('分级派生（v1.2.0：报名定级）', () => {
     enter(fx, 102);
     seedPlayers(fx);
     fx.sqlite.exec("UPDATE players SET ca = 90 WHERE id = 2; UPDATE players SET ca = 88 WHERE id = 3; UPDATE players SET ca = 87 WHERE id = 4; UPDATE players SET ca = 87 WHERE id = 5");
-    const res = await post(
-      '/api/club/registrations',
-      regBody([1, 2, 3, 4, ...Array.from({ length: 16 }, (_, i) => i + 5)], []),
-      'tok-coach',
-      fx.env,
-    );
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { issues: { rule: string; message: string }[] };
+    const body = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
+      compliance: { pass: boolean; issues: { rule: string; message: string }[] } | null;
+    };
+    expect(body.compliance?.pass).toBe(false);
     expect(
-      body.issues.some(
+      body.compliance!.issues.some(
         (i) => i.rule === 'ca_pa' && i.message.includes('CA≥87 的球员最多 3 名') && i.message.includes('当前 4 名'),
       ),
     ).toBe(true);
@@ -163,12 +162,9 @@ describe('分级派生（v1.2.0：报名定级）', () => {
     expect(overview.registeredInTournament).toBe(false);
     expect(overview.rules).toBeNull();
 
-    const res = await post('/api/club/registrations', regBody([1], []), 'tok-coach', fx.env);
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string; code: string };
-    expect(body.code).toBe('tier_pending');
-    expect(body.error).toBe('尚未在赛事平台报名，请等待赛事平台管理员确认报名');
-    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action='registration_submit'")!.n).toBe(0);
+    // 没有定级赛事 ⇒ 规则为空、体检不做（红字只可能来自前端 banner）
+    const body = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as { compliance: unknown };
+    expect(body.compliance).toBeNull();
   });
 
   it('只报杯赛也算未报名（杯赛不参与定级）', async () => {
@@ -177,9 +173,12 @@ describe('分级派生（v1.2.0：报名定级）', () => {
     bindSeason(fx);
     enter(fx, 103);
     seedPlayers(fx);
-    const res = await post('/api/club/registrations', regBody([1], []), 'tok-coach', fx.env);
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain('尚未在赛事平台报名');
+    const body = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
+      registeredInTournament: boolean;
+      rules: unknown;
+    };
+    expect(body.registeredInTournament).toBe(false);
+    expect(body.rules).toBeNull();
   });
 
   it('双定级报名是数据异常：500 冲突提示', async () => {
@@ -189,7 +188,8 @@ describe('分级派生（v1.2.0：报名定级）', () => {
     enter(fx, 101);
     enter(fx, 102);
     seedPlayers(fx);
-    const res = await post('/api/club/registrations', regBody([1], []), 'tok-coach', fx.env);
+    // 双定级在派生阶段就是数据异常：读名单同样 500
+    const res = await get('/api/club/squad', 'tok-coach', fx.env);
     expect(res.status).toBe(500);
     expect(((await res.json()) as { error: string }).error).toContain('分级数据冲突');
   });

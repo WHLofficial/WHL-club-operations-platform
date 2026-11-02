@@ -466,26 +466,16 @@ export function AssignmentSelect({
 export function RegCard({
   row,
   view,
-  assign,
   flags,
   extras,
   wide,
-  editable,
-  onAssign,
 }: {
   row: SquadPlayerRow;
   view: CardViewKey;
-  assign: AssignValue;
   flags: readonly SquadIssue[];
   extras: readonly { key: string; label: string }[];
   wide?: boolean;
-  /** false = 非开窗期，整行分配只读（旧表格把全部分段按钮 disable 的同口径） */
-  editable?: boolean;
-  onAssign: (next: AssignValue) => void;
 }) {
-  // 与桌面旧 SquadRow 同口径：不可成长（或无成长空间）的球员分进训练营会报错；
-  // 只在真的分进训练营时才显示（不是「潜在进不去」就喊）
-  const traineeBlocked = !row.growable || (row.pa ?? 0) - (row.ca ?? 0) <= 0;
   // 注册台桌面列用 DESKTOP_CELLS_DESK（11 列，舍「初始CA」「成长空间」）——用户裁决见 club-cards.ts
   const cells = wide ? DESKTOP_CELLS_DESK : CARD_VIEW_CELLS[view];
   const badges = inlineBadgesOf(row);
@@ -523,10 +513,6 @@ export function RegCard({
       )}
       <span className="sqc-m">{values}</span>
       {wide !== true && <PendingRow row={row} />}
-      <span className="sqc-assign">
-        <AssignmentSelect value={assign} hasContract={row.hasContract} disabled={editable === false} onChange={onAssign} />
-        {assign === 'trainee' && traineeBlocked && <span className="error-msg">不可成长</span>}
-      </span>
     </article>
   );
 }

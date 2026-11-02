@@ -161,18 +161,17 @@ describe('SquadCard 宽窄结构（v6.39.1）', () => {
     const row = cardRow as unknown as SquadPlayerRow;
     const wide = render(
       <MemoryRouter>
-        <RegCard row={row} view="basic" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+        <RegCard row={row} view="basic" flags={[]} extras={[]} wide />
       </MemoryRouter>,
     );
     const article = wide.container.querySelector('article.sqc-card')!;
     expect(article.className).toContain('wide');
-    expect(article.className).toContain('has-assign');
     expect(wide.container.querySelectorAll('.sqc-v')).toHaveLength(DESKTOP_CELLS_DESK.length);
     expect(DESKTOP_CELLS_DESK.length).toBe(11);
 
     const narrow = render(
       <MemoryRouter>
-        <RegCard row={row} view="basic" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+        <RegCard row={row} view="basic" flags={[]} extras={[]} />
       </MemoryRouter>,
     );
     expect(narrow.container.querySelectorAll('.sqc-v')).toHaveLength(3);
@@ -199,7 +198,7 @@ describe('待生效小字宽窄两形态（v6.54.0 §10.4/§10.5）', () => {
     const row = pendingRow as unknown as SquadPlayerRow;
     const { container } = render(
       <MemoryRouter>
-        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+        <RegCard row={row} view="contract" flags={[]} extras={[]} wide />
       </MemoryRouter>,
     );
     const cells = Array.from(container.querySelectorAll('.sqc-v')).filter((v) => v.querySelector('.sqc-pend'));
@@ -230,7 +229,7 @@ describe('待生效小字宽窄两形态（v6.54.0 §10.4/§10.5）', () => {
     const row = pendingRow as unknown as SquadPlayerRow;
     const { container } = render(
       <MemoryRouter>
-        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+        <RegCard row={row} view="contract" flags={[]} extras={[]} />
       </MemoryRouter>,
     );
     expect(container.querySelectorAll('.sqc-pend')).toHaveLength(0);
@@ -256,7 +255,7 @@ describe('待生效小字宽窄两形态（v6.54.0 §10.4/§10.5）', () => {
     } as unknown as SquadPlayerRow;
     const wide = render(
       <MemoryRouter>
-        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+        <RegCard row={row} view="contract" flags={[]} extras={[]} wide />
       </MemoryRouter>,
     );
     const wideCells = Array.from(wide.container.querySelectorAll('.sqc-v')).filter((v) => v.querySelector('.sqc-pend'));
@@ -266,7 +265,7 @@ describe('待生效小字宽窄两形态（v6.54.0 §10.4/§10.5）', () => {
 
     const narrow = render(
       <MemoryRouter>
-        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+        <RegCard row={row} view="contract" flags={[]} extras={[]} />
       </MemoryRouter>,
     );
     expect(narrow.container.querySelector('.sqc-pend-row')!.textContent).toBe('待生效 违约金 25(+5)');
@@ -276,7 +275,7 @@ describe('待生效小字宽窄两形态（v6.54.0 §10.4/§10.5）', () => {
     const row = cardRow as unknown as SquadPlayerRow;
     const wide = render(
       <MemoryRouter>
-        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} wide onAssign={() => {}} />
+        <RegCard row={row} view="contract" flags={[]} extras={[]} wide />
       </MemoryRouter>,
     );
     expect(wide.container.querySelector('.sqc-pend')).toBeNull();
@@ -284,7 +283,7 @@ describe('待生效小字宽窄两形态（v6.54.0 §10.4/§10.5）', () => {
 
     const narrow = render(
       <MemoryRouter>
-        <RegCard row={row} view="contract" assign="none" flags={[]} extras={[]} onAssign={() => {}} />
+        <RegCard row={row} view="contract" flags={[]} extras={[]} />
       </MemoryRouter>,
     );
     expect(narrow.container.querySelector('.sqc-pend')).toBeNull();

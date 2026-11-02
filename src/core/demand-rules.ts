@@ -69,7 +69,7 @@ export interface DemandScoreInput {
   age: number;
   isFutureStar: boolean;
   agentTier: 1 | 2 | 3;
-  /** 是否注册 first_team（registrations.squad='first_team'） */
+  /** 是否一线队（v6.67.0 起由合同类型推导：contract_type='formal'） */
   firstTeam: boolean;
   recent: DemandRecentForm | null;
   /** 队内 CA 升序排名（1 起，只数 first_team） */

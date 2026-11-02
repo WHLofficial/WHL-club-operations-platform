@@ -4,13 +4,14 @@ import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach } from '../../lib/session.ts';
+import { checkSquad, markerOf } from '../../core/squad-rules.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
-import { checkSquad, markerOf, type SquadPlayer } from '../../core/squad-rules.ts';
+import { loadSquadView, toSquadPlayer as viewToSquadPlayer } from '../squad-view.ts';
 import { serviceSeasons } from '../../core/bypass-rules.ts';
 import { PS_SLOT_COUNT } from '../../core/fc26.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
-import { getOpenWindow, getRegistrableSeason, getVisibleSeason } from '../seasons.ts';
-import { loadRegistrationCheckMode, loadSquadContext } from '../squad-context.ts';
+import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
+import { loadSquadContext } from '../squad-context.ts';
 import { getBoundClub } from '../binding.ts';
 import { deriveClubTier, tierCache } from '../tier.ts';
 import { rowDisplayName } from '../../core/player-name.ts';
@@ -114,28 +115,10 @@ async function loadContractMap(env: Env, clubId: number): Promise<Map<number, Co
   );
 }
 
-function toSquadPlayer(p: OwnedPlayerRow, contract: ContractInfo | null): SquadPlayer {
-  return {
-    playerId: p.id,
-    name: rowDisplayName(p),
-    position: p.position,
-    ca: p.ca,
-    pa: p.pa,
-    initialCa: p.base_ca ?? p.ca,
-    growable: p.growable === 1,
-    hasContract: contract !== null,
-    // API/DB 侧是宽 string；core 判定只认两值，未知值归 null（不参与双向挂钩）
-    contractType: contract?.contractType === 'trainee' ? 'trainee' : contract?.contractType === 'formal' ? 'formal' : null,
-    wage: contract?.wage ?? null,
-  };
-}
-
 // GET /api/club/squad —— 注册工作台数据：全队名单 + 现行合同 + 当前快照 + 快照体检
 app.get('/club/squad', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.registrations.submit');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  // 放行档先读一次，两条返回路径共用（未绑队也要给出档位，前端才好决定挂不挂红字）
-  const checkMode = await loadRegistrationCheckMode(c.env.DB);
   if (!club) {
     return c.json({
       club: null,
@@ -144,21 +127,17 @@ app.get('/club/squad', async (c) => {
       registration: null,
       compliance: null,
       rules: null,
-      checkMode,
       pendingSummary: { count: 0, wageDelta: 0 },
     });
   }
   const season = await getVisibleSeason(c.env.DB);
   const cache = tierCache();
   const tier = await deriveClubTier(c.env, season, club.id, cache);
-  const [players, contractMap, regRows, rules, inflCoefs, pendingChanges] = await Promise.all([
+  // v6.67.0 期一（D1）：名单由合同推导，不再读 registrations 快照
+  const [players, contractMap, view, rules, inflCoefs, pendingChanges] = await Promise.all([
     loadOwnedPlayers(c.env, club.id),
     loadContractMap(c.env, club.id),
-    season
-      ? c.env.DB.prepare('SELECT player_id, squad FROM registrations WHERE season = ? AND club_id = ?')
-          .bind(season, club.id)
-          .all<{ player_id: number; squad: string }>()
-      : Promise.resolve({ results: [] as { player_id: number; squad: string }[] }),
+    loadSquadView(c.env.DB, club.id),
     // v1.2.0：未报名定级赛事时 rules 置空，前端挂红色「未报名」状态条
     tier !== null ? loadSquadContext(c.env.DB, tier) : Promise.resolve(null),
     // v6.37.0：名单卡的市场视图要下发影响力（与 /api/players 同源系数与 JS 镜像）
@@ -169,17 +148,23 @@ app.get('/club/squad', async (c) => {
   ]);
   const pendingByPlayer = new Map(pendingChanges.map((pc) => [pc.playerId, pc]));
 
-  const squadByPlayer = new Map(regRows.results.map((r) => [r.player_id, r.squad]));
-  const firstTeam: SquadPlayer[] = [];
-  const trainee: SquadPlayer[] = [];
-  for (const p of players) {
-    const squad = squadByPlayer.get(p.id) ?? null;
-    const sp = toSquadPlayer(p, contractMap.get(p.id) ?? null);
-    if (squad === 'first_team') firstTeam.push(sp);
-    else if (squad === 'trainee') trainee.push(sp);
-  }
+  const squadByPlayer = new Map<number, 'first_team' | 'trainee'>();
+  for (const r of view.firstTeam) squadByPlayer.set(r.playerId, 'first_team');
+  for (const r of view.trainee) squadByPlayer.set(r.playerId, 'trainee');
+  // 未签约的人不进体检（D2）：他们只出现在「未签约」区，红字靠 contract 规则点名
   const compliance =
-    tier !== null && regRows.results.length > 0 ? checkSquad(firstTeam, trainee, rules!) : null;
+    tier !== null && rules !== null
+      ? checkSquad(view.firstTeam.map(viewToSquadPlayer), view.trainee.map(viewToSquadPlayer), rules)
+      : null;
+  const unsignedIds = players.filter((p) => !squadByPlayer.has(p.id)).map((p) => p.id);
+  if (unsignedIds.length > 0 && compliance !== null) {
+    compliance.issues.push({
+      rule: 'contract',
+      message: `有 ${unsignedIds.length} 名球员没有在队合同（不占人数、不计工资，但上不了场）`,
+      playerIds: unsignedIds,
+    });
+    compliance.pass = false;
+  }
   // 待生效工资增量（全队口径；前端 cap bar 只按「已分配球员」再算一遍，两个口径分开不混用）
   let pendingWageDelta = 0;
   for (const pc of pendingChanges) {
@@ -247,14 +232,9 @@ app.get('/club/squad', async (c) => {
       };
     }),
     pendingSummary: { count: pendingChanges.length, wageDelta: Math.round(pendingWageDelta * 100) / 100 },
-    registration: regRows.results.length > 0
-      ? {
-          firstTeam: regRows.results.filter((r) => r.squad === 'first_team').map((r) => r.player_id),
-          trainee: regRows.results.filter((r) => r.squad === 'trainee').map((r) => r.player_id),
-        }
-      : null,
     compliance,
-    checkMode,
+    /** 未签约球员 ID（D2：单开一区，不占人数、不计工资） */
+    unsigned: unsignedIds,
     rules: rules === null
       ? null
       : {
@@ -327,129 +307,6 @@ app.post('/club/players/:id/number', async (c) => {
   ]);
 
   return c.json({ ok: true, id: playerId, number });
-});
-
-function parseIdList(raw: unknown, label: string): number[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) throw new HttpError(400, `${label} 应为球员 ID 数组`);
-  const ids: number[] = [];
-  for (const x of raw) {
-    const n = Number(x);
-    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, `${label}里有不合法的球员 ID`);
-    ids.push(n);
-  }
-  const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
-  if (dupes.length > 0) throw new HttpError(400, `${label}里出现了重复球员：${dupes.join('、')}`);
-  return ids;
-}
-
-// POST /api/club/registrations —— 提交注册名单（快照整体替换，重复提交安全）
-app.post('/club/registrations', async (c) => {
-  const user = await requireCoach(c.env, c.req.raw, 'club.registrations.submit');
-  const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (!club) throw new HttpError(404, '你的账号还没绑定俱乐部，先到「球队登记」完成归属');
-
-  const body = (await c.req.raw.json().catch(() => null)) as { firstTeam?: unknown; trainee?: unknown } | null;
-  if (!body) throw new HttpError(400, '请求格式不对');
-  const firstTeamIds = parseIdList(body.firstTeam, '一线队名单');
-  const traineeIds = parseIdList(body.trainee, '训练营名单');
-
-  const overlap = firstTeamIds.filter((id) => traineeIds.includes(id));
-  if (overlap.length > 0) throw new HttpError(400, `同一球员不能同时进一线队和训练营：${overlap.join('、')}`);
-
-  const season = await getRegistrableSeason(c.env.DB);
-  if (season === null) {
-    throw new HttpError(409, '当前没有开放注册的赛季（只有备赛期能提交名单）', 'no_season');
-  }
-
-  // v1.2.0：级别由赛事报名派生——没报定级赛事不许提交，规则 4.2 的合规梯度无从谈起
-  const tier = await deriveClubTier(c.env, season, club.id, tierCache());
-  if (tier === null) {
-    throw new HttpError(400, '尚未在赛事平台报名，请等待赛事平台管理员确认报名', 'tier_pending');
-  }
-
-  const [players, contractMap, rules, checkMode] = await Promise.all([
-    loadOwnedPlayers(c.env, club.id),
-    loadContractMap(c.env, club.id),
-    loadSquadContext(c.env.DB, tier),
-    loadRegistrationCheckMode(c.env.DB),
-  ]);
-  const byId = new Map(players.map((p) => [p.id, p]));
-  const allRequested = [...firstTeamIds, ...traineeIds];
-  const notOwned = allRequested.filter((id) => !byId.has(id));
-  if (notOwned.length > 0) throw new HttpError(400, `这些球员不在你的队里：${notOwned.join('、')}`);
-  const retired = allRequested.filter((id) => byId.get(id)!.status === 'retired');
-  if (retired.length > 0) {
-    throw new HttpError(400, `退役球员不能注册：${retired.map((id) => byId.get(id)!.name).join('、')}`);
-  }
-
-  const firstTeam = firstTeamIds.map((id) => toSquadPlayer(byId.get(id)!, contractMap.get(id) ?? null));
-  const trainee = traineeIds.map((id) => toSquadPlayer(byId.get(id)!, contractMap.get(id) ?? null));
-
-  const result = checkSquad(firstTeam, trainee, rules);
-  // 放行档（v6.33.1 registration_check_mode）：只有 enforce 会拦；warn/off 一律放行，
-  // 且 issues 照常回给前端（warn 挂着当提示、off 由前端隐藏）——放行不等于把问题藏起来，
-  // 审计里也记下当时是哪一档放的行、放行了哪些规则。
-  if (!result.pass && checkMode === 'enforce') {
-    return c.json({ error: '名单没过注册校验', code: 'squad_invalid', issues: result.issues, stats: result.stats }, 422);
-  }
-  // 审计只放规则名：去重 + 稳定排序（定序便于事后比对），不带 playerIds 与消息正文以控制审计体积；
-  // enforce 通过时自然为空数组，同样恒写 `[]` 便于分析
-  const issueRules = [...new Set(result.issues.map((i) => i.rule))].sort();
-
-  const prev = await c.env.DB.prepare('SELECT player_id, squad FROM registrations WHERE season = ? AND club_id = ?')
-    .bind(season, club.id)
-    .all<{ player_id: number; squad: string }>();
-  const prevTrainee = prev.results.filter((r) => r.squad === 'trainee').map((r) => r.player_id);
-  const newTraineeSet = new Set(traineeIds);
-  const demoted = prevTrainee.filter((id) => !newTraineeSet.has(id));
-
-  const audit = createAuditStatement(c.env.DB);
-  const statements = [
-    c.env.DB.prepare('DELETE FROM registrations WHERE season = ? AND club_id = ?').bind(season, club.id),
-    ...firstTeamIds.map((id) =>
-      c.env.DB.prepare('INSERT INTO registrations (season, club_id, player_id, squad) VALUES (?, ?, ?, ?)')
-        .bind(season, club.id, id, 'first_team'),
-    ),
-    ...traineeIds.map((id) =>
-      c.env.DB.prepare('INSERT INTO registrations (season, club_id, player_id, squad) VALUES (?, ?, ?, ?)')
-        .bind(season, club.id, id, 'trainee'),
-    ),
-  ];
-  if (traineeIds.length > 0) {
-    const ph = traineeIds.map(() => '?').join(', ');
-    statements.push(
-      c.env.DB.prepare(`UPDATE players SET status = 'trainee', updated_at = ${nowSql()} WHERE id IN (${ph})`).bind(...traineeIds),
-    );
-  }
-  if (demoted.length > 0) {
-    const ph = demoted.map(() => '?').join(', ');
-    statements.push(
-      c.env.DB.prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id IN (${ph}) AND status = 'trainee'`).bind(...demoted),
-    );
-  }
-  statements.push(
-    audit({
-      actor: user.id,
-      action: 'registration_submit',
-      targetType: 'club',
-      targetId: club.id,
-      origin: 'user',
-      after: { season, firstTeam: firstTeamIds.length, trainee: traineeIds.length, checkMode, issues: issueRules },
-    }),
-  );
-  await c.env.DB.batch(statements);
-
-  return c.json({
-    ok: true,
-    season,
-    firstTeam: firstTeamIds.length,
-    trainee: traineeIds.length,
-    wageTotal: result.stats.wageTotal,
-    checkMode,
-    /** 本次体检问题；enforce 下必为空（非空就 422 了），warn/off 下可能非空 */
-    issues: result.issues,
-  });
 });
 
 export default app;

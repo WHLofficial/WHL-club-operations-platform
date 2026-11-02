@@ -76,9 +76,8 @@ const SQUAD: SquadOverview = {
   season: 9,
   registeredInTournament: true,
   players: [player({ id: 7, name: '张三' }), player({ id: 8, name: '李四', serviceSeasons: 3.5 })],
-  registration: { firstTeam: [7, 8], trainee: [] },
+  unsigned: [],
   compliance: null,
-  checkMode: 'enforce',
   rules: RULES,
 };
 
@@ -123,7 +122,7 @@ afterEach(() => {
 describe('工作台解约费用预览（v6.63.3）', () => {
   it('效力 1.5 赛季：hint 出解约费 3.00m（违约金 20 × 1.5 × 10%）', async () => {
     renderDesk();
-    expect(await screen.findByText(/注册工作台/)).toBeTruthy();
+    expect(await screen.findByText(/阵容与注册/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('解约球员'), { target: { value: '7' } });
     const hint = screen.getByText(/自由球员名单/);
     expect(hint.textContent).toContain('解约费 3.00m（效力 1.5 赛季，审核时收取）');
@@ -132,7 +131,7 @@ describe('工作台解约费用预览（v6.63.3）', () => {
 
   it('效力 3.5 赛季：hint 明示免费、不出现金额', async () => {
     renderDesk();
-    expect(await screen.findByText(/注册工作台/)).toBeTruthy();
+    expect(await screen.findByText(/阵容与注册/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('解约球员'), { target: { value: '8' } });
     const hint = screen.getByText(/自由球员名单/);
     expect(hint.textContent).toContain('效力 3.5 赛季已满 3 赛季，本次解约免费');
