@@ -101,6 +101,18 @@
 
 ---
 
+## v6.67.1 · 强拍单静默收口的兜底口径修正（2026-11-02）
+
+**状态**：**已实现并本地验收，待 push 上线**——零迁移。
+
+**缘起**：v6.67.0 把强拍单的违约金交还给买家后，会话可以停在「RC 还没定 / E 还没确认」。这条路径被静默或关通道收口时，兜底逻辑仍是「按现行合同工资强约」——自由身 / CPU 球员过户落的是占位合同（`wage = 0`、`signed_at = NULL`），会签出**工资 0** 的合同，RC 还会被 `session.release_fee ?? TRAINEE_RELEASE_FEE` 落成 5m。v6.67.0 的补丁只覆盖了「`release_fee` 也为 NULL」的形态，而一次性数据修复之后的 140（Pulisic 15m）/ 141（Reijnders 10m）正是「F 有预填 + E 已清空 + 球员无合同」⇒ 漏网。
+
+**修正**：`settleAtBaseTerms`（`src/worker/negotiations.ts`）的判定从 `session.release_fee === null` 改成 `session.expected_wage === null`（E 有值时本就走 `forceSettleAtExpected`，不会进这里）；违约金取「会话预填 F，没有就用成交价」，工资取该违约金的预期值 `expectedWage(level, rc, …)`。结果与 v6.66 之前「定死成成交价 + 开会即快照 E」一致。
+
+**用例**：`tests/forced-auction.test.ts` 新增「预填了违约金的强拍单静默收口 → 沿用预填 F，工资取预期值」（CPU 强拍 6m 成交 → 审核通过 → 把会话改成 `release_fee = 6`、`expected_wage = NULL` → `closeSilentSessions({ closeAll: true })` → 断言合同 `release_fee = 6`、`wage > 0`）；把条件改回旧写法做变异验证，实测 `wage = 0`、用例如期变红。
+
+**验收**：`npm test` **185 文件 / 2,967 例全绿**、`npm run typecheck`（三份 tsconfig）通过、`npm run build` 通过；版本 6.67.0 → 6.67.1。
+
 ## v6.67.0 · 强制拍卖放开新违约金 + 球员库下方翻页条（2026-11-02）
 
 **状态**：**已上线（2026-11-02）**——零迁移（上线前生产迁移现状已到 `0088`，无需 apply）。push `b63f2b1..4f863f8`（6 枚 = 服务端 / 前端第一步 / 审核队列文案 / 翻页条 / 评审补丁 / docs 收口）触发 CF Workers Builds 自动部署，生效 Version **`03aa9167-1ac7-4f76-8579-bb76fce67840`** @2026-11-01T18:21:07Z（100% 流量）。上线回读（2026-11-01T18:22Z）：`/api/health` 200（d1 / tour_db / kv 全 ok）、生产入口 `assets/index-05_JknL-.js` 与本地构建逐字同名、包内版本串 `6.67.0`、CSS 含 `.lib-bar-bottom`、`/` 仍 `cache-control: no-store`。
