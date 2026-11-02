@@ -563,6 +563,21 @@ describe('TC-B 审批与拒绝', () => {
     expect(((await res.json()) as { error: string }).error).toContain('本地 id 或 FC id');
   });
 
+  it('TC-B11 external 球员键：FC id 属于自由身球员 → 400 说「自由身」不吐 #null', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 101, 50);
+    seedPlayer(fx, 44, { clubId: null, fcId: 300002 });
+    const res = await app.request(
+      '/api/admin/shop/orders',
+      { method: 'POST', headers: { 'content-type': 'application/json', Cookie: ADMIN }, body: JSON.stringify({ clubId: 101, category: 'pa', payload: { playerId: 300002, points: 1 } }) },
+      fx.env,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('自由身');
+    expect(body.error).not.toContain('#null');
+  });
+
   it('TC-B07 端点契约：匿名 401、非管理 403、未绑定 403、列表筛选', async () => {
     const fx = freshEnv();
     seedClub(fx, 101, 50);

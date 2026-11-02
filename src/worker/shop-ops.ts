@@ -186,7 +186,10 @@ async function loadPlayer(db: D1Database, clubId: number, playerId: number): Pro
     .bind(playerId)
     .first<PlayerCoreRow>();
   if (!byFc) throw new HttpError(404, '找不到这名球员（本地 id 或 FC id 都没有这条记录）');
-  if (byFc.club_id !== clubId) throw new HttpError(400, `这个 FC id 属于俱乐部 #${byFc.club_id}，不是俱乐部 #${clubId}`);
+  if (byFc.club_id !== clubId) {
+    const owner = byFc.club_id === null ? '自由身（不属于任何俱乐部）' : `俱乐部 #${byFc.club_id}`;
+    throw new HttpError(400, `这个 FC id 属于${owner}，不是俱乐部 #${clubId}`);
+  }
   return byFc;
 }
 
