@@ -24,6 +24,7 @@
 - 零迁移；`/admin/workbench` 五表与凭证可见属期 C。
 - **评审补丁**：①切审核页签时清空批选与游标——原来留在「已批准」页签的 id 不在可批量集合里，会让「已选 N」与实际提交条数对不上；批量条与全选框统一改用派生集合计数。②`j` / `k` 游标补上可视高亮（`tr.row-cursor` 内描边），原来只有内部下标、界面上看不出选中哪行。
 - **验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **186 文件 / 2,980 例全绿**（期 A 基线 2,973，新增 4 例批量端点用例 + 3 例 `?listing=` 用例）；`npm run build` 通过（入口 `dist/assets/index-Do1RtXRQ.js`）。判级 **minor**（审核台效率改造，不改判据、不动资金、零迁移）。测试计划 `docs/test-plans/v6.68.1-workbench-phase-b.md`。
+- **上线**：push `f6f8ca7..6ce3776`（6 枚）触发 CF Workers Builds 自动部署，生效 Version `99c65e61-73b6-4ddb-966b-df0d24ecb208` @2026-11-02T06:45:24Z（100% 流量，前版 `fbbd97cc`）。回读：`/api/health` 200（d1 / tour_db / kv 全 ok）、生产入口 `assets/index-Do1RtXRQ.js` 与本地构建 sha256 逐字节一致（`3dcec149…`）、包内版本串 `6.68.1`、`/` 仍 `cache-control: no-store`。
 
 ## [v6.68.0] · 管理审核工作台（期 A：全站实体编号露出）（2026-11-02）
 
