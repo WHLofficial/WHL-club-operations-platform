@@ -23,6 +23,7 @@
 **Notes**
 
 - 在途转会的 CPU 过滤只看**卖方**：CPU 不会买人，把买方也过一遍会把「真人买 CPU 球员」这种正需要审核的单一起藏掉。
+- **上线**：迁移 `0089` 于 push 前 apply 生产（`Executed 2 commands in 0.60ms`；只读核验 `idx_bids_status` 在场、`d1_migrations` 有该行）；push `6ce3776..bfdae7c`（3 枚）触发 CF Workers Builds 自动部署，生效 Version `1dfa776e-dfa0-4289-b88b-1404854a7b4d` @2026-11-02T07:38:59Z（100% 流量，前版 `99c65e61`）。回读：`/api/health` 200（d1 / tour_db / kv 全 ok）、生产入口 `assets/index-DoyxBhYG.js` 与本地构建 sha256 逐字节一致（`36ee8ef6…`）、包内版本串 `6.68.2`、三个新端点匿名访问全 401（挂载且守卫生效）。
 - **验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **187 文件 / 2,986 例全绿**（期 B 基线 186 / 2,980，新增 `tests/workbench.test.ts` 6 例）；`npm run build` 通过（入口 `dist/assets/index-DoyxBhYG.js`）。判级 **minor**（审核台能力补全，不改判据、不动资金；一条纯索引迁移）。测试计划 `docs/test-plans/v6.68.2-workbench-phase-c.md`。
 
 ## [v6.68.1] · 管理审核工作台（期 B：队列单号 / 直链 / 键盘 / 批选）（2026-11-02）
