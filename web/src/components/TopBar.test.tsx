@@ -121,4 +121,13 @@ describe('v6.41.0 顶栏 ≡ 菜单', () => {
     const userbox = document.querySelector('.userbox');
     expect(userbox?.lastElementChild?.className).toBe('user-menu-wrap');
   });
+
+  it('v6.69.0：菜单里有 PlayStyles 图鉴入口，点完收起菜单', () => {
+    renderBar();
+    openMenu();
+    const link = screen.getByRole('menuitem', { name: 'PlayStyles 图鉴' });
+    expect(link.getAttribute('href')).toBe('/playstyles');
+    fireEvent.click(link);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
 });
