@@ -4,6 +4,26 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.68.1] · 管理审核工作台（期 B：队列单号 / 直链 / 键盘 / 批选）（2026-11-02）
+
+**Added**
+
+- **队列行内读得到、点得到**：球员名改成 `/players/<fc_id>` 链接，旁边 `IdTag 球员` 露内部 id；单据列露 `IdTag 转会`（举报行露 `IdTag 挂牌`）。`GET /api/admin/reviews` 补选 `p.fc_id`，链接用稳定身份而不是会随重导入变化的主键。
+- **「去处置」直链**：转发行 → `/admin/market?entity=transfer&id=<transfers.id>`，落地后滚动并高亮该行（2.6s 褪色）；举报行 → `/market?listing=<listings.id>`，落地即自动打开该挂牌浮层。`?entity=listing|bid|session&id=` 则预填到市场干预框并滚过去——**transfer id 不会被塞进干预框**：那个框的五个按钮会把 id 当「挂牌/出价/谈判」解释，塞错就是点错动作。
+- **键盘**：队列容器获得焦点后 `j` / `k`（或 ↑↓）移游标、`a` 批准、`r` 驳回、`Esc` 清选择；焦点在输入框内时全部让路，不会一边填备注一边误批。
+- **批选**：每行勾选 + 表头全选（当页最多 100 条），底部批量条「批量批准（N）」「批量驳回（N）」各问一次原因，逐条回显成功/失败。只允许勾 `transfer_confirm`——激活举报要逐条看截图，勾不到。
+- **新端点** `POST /api/admin/reviews/batch`：`{ action: 'approve' | 'reject', ids: number[], note?: string }`，上限 50 条、`ids` 去重、逐条处理；某条已处理只在该条返回 `{ ok: false, error: '已处理' }`，不影响同批其它单。每条仍写自己的审计，另写一条 `admin_review_batch` 汇总。
+
+**Changed**
+
+- `/market` 支持 `?listing=<id>` 一次性直达（只认正整数；命中当前在售列表才开浮层，已撤/已下架的静默忽略；参数读完立刻 `replace` 清掉，刷新不会反复弹）。
+
+**Notes**
+
+- 批量**不支持改价**（Q1 裁决）：要裁定价就逐条走原端点。批量接口即使收到 `fee` 也忽略。
+- 零迁移；`/admin/workbench` 五表与凭证可见属期 C。
+- **验收**：`npm run typecheck` 三份 tsconfig 全清；`npm test` **186 文件 / 2,980 例全绿**（期 A 基线 2,973，新增 4 例批量端点用例 + 3 例 `?listing=` 用例）；`npm run build` 通过（入口 `dist/assets/index-Bf7TnbEj.js`）。判级 **minor**（审核台效率改造，不改判据、不动资金、零迁移）。测试计划 `docs/test-plans/v6.68.1-workbench-phase-b.md`。
+
 ## [v6.68.0] · 管理审核工作台（期 A：全站实体编号露出）（2026-11-02）
 
 **Added**

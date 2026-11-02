@@ -113,8 +113,9 @@ export function IdTag({ kind, value, className }: { kind: '挂牌' | '出价' | 
 
 每条待审行右侧加一个「去处置」按钮：
 
-- `transfer_confirm` → 跳 `/admin/market?entity=transfer&id=<id>`。**B 期先实现过渡形态**：`MarketPage` 读这两个参数 → 把 id 写进现有干预输入框 + 滚动到干预区；**C 期接管**同一参数，改为跳 `/admin/workbench?entity=transfer&id=<id>` 并在对应在途表里展开该行。
+- `transfer_confirm` → 跳 `/admin/market?entity=transfer&id=<id>`。**B 期落地为「定位 + 高亮队列行」**（2.6s 褪色），不写进干预框：干预框的五个动作只认挂牌/出价/谈判 id，把 transfer id 塞进去等于让它被当成另一类实体解释，点错动作的风险大于便利。C 期由 `/admin/workbench?entity=transfer&id=<id>` 接管同一组参数并在在途表里展开该行。
 - `activation_report` → 跳 `/market?listing=<id>`。**这是新增行为**：`MarketBoardPage` 目前不读任何查询参数（`useState` 开浮层），B 期给它加一次性读取——命中且在售（`listed`/`bidding`/`matched_pending`）就自动打开浮层，参数无效或被消费后从 URL 移除（`replace`），不污染历史。
+- `?entity=listing|bid|session&id=<id>`（工作台搜索/外链兜底）→ 预填干预框并滚到干预区——这三类才是干预框认的 id。
 
 期 B 落地「带参跳转 + 高亮」，期 C 再把工作台接上。
 
