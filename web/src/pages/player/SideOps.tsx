@@ -33,6 +33,7 @@ import {
 import { fmt2, fmtShort } from '../../lib/contract-view.ts';
 import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance, useShortlistIds, useShortlistInvalidation, useMyPlayerRequests, type PlayerRequestRow } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
+import { IdTag } from '../../components/IdTag.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../lib/ops-gate.ts';
 import { useToast } from '../../lib/toast.tsx';
@@ -519,6 +520,15 @@ export function SideOps({
             <span>{leaderBid.clubName}</span>
           </div>
         )}
+        {l && (
+          // v6.68.0 期 A：挂牌编号可在球员页直接复制（此前只出现在下架/举报的报错里）
+          <div className="side-row">
+            <span className="attr-name">挂牌编号</span>
+            <span>
+              <IdTag kind="挂牌" value={l.id} />
+            </span>
+          </div>
+        )}
         <div className="side-btns">
           <Link className="btn btn-sm" to="/market">
             去转会区
@@ -567,6 +577,12 @@ export function SideOps({
               <span className="attr-name">当前最高</span>
               <span className="mono gold-text">
                 {l.highestBidder ? `${l.highestBidder.name} · ${money(l.highestBid)}m` : l.highestBid != null ? `${money(l.highestBid)}m` : '暂无出价'}
+              </span>
+            </div>
+            <div className="side-row">
+              <span className="attr-name">挂牌编号</span>
+              <span>
+                <IdTag kind="挂牌" value={l.id} />
               </span>
             </div>
             {canBid ? (

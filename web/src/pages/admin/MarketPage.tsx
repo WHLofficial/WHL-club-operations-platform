@@ -6,6 +6,7 @@ import { api, apiPost, type AdminReviewRow, type AdminReviews, type CloseWindowR
 import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
+import { IdTag } from '../../components/IdTag.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
 import { usePrompt } from '../../components/PromptDialog.tsx';
 import { useTimeFmt, utcIsoToZhWall, zhWallToUtcIso } from '../../lib/datetime.ts';
@@ -550,6 +551,7 @@ function ForcedAuctionSection() {
                 <th>球员</th>
                 <th className="num">起拍价（m）</th>
                 <th className="num">当前最高（m）</th>
+                <th>编号</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -562,6 +564,10 @@ function ForcedAuctionSection() {
                     </td>
                   <td className="num mono">{l.askPrice.toFixed(2)}</td>
                   <td className="num mono">{l.highestBid?.toFixed(2) ?? '—'}</td>
+                  {/* v6.68.0 期 A：强拍/暂停/取消都按挂牌 id 调用，这里直接给出可复制编号 */}
+                  <td>
+                    <IdTag kind="挂牌" value={l.id} />
+                  </td>
                   <td>
                     <div className="inline-form">
                       <ConfirmButton

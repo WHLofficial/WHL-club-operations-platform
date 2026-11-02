@@ -989,7 +989,7 @@ export interface AdminReviewRow {
   note: string | null;
   decidedAt: string | null;
   // 激活举报核查任务（v6.4.0 改动 4）；transfer_confirm 行为 null
-  report: { listingStatus: string | null; askPrice: number | null; proofKey: string | null; activatorClubName: string | null } | null;
+  report: { listingId: number | null; listingStatus: string | null; askPrice: number | null; proofKey: string | null; activatorClubName: string | null } | null;
   transfer: {
     id: number;
     type: string;

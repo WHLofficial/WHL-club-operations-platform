@@ -31,6 +31,7 @@ import {
   type OffersListResponse,
 } from '../../../lib/api.ts';
 import { playerPath } from '../../../lib/player-link.ts';
+import { IdTag } from '../../../components/IdTag.tsx';
 import { moneyIntText } from '../../../lib/club-cards.ts';
 import { money } from '../../market/shared.tsx';
 import { creditUse } from '../../../lib/credit-line.ts';
@@ -576,7 +577,15 @@ function OfferDesk({
                 <h3 className="nego-title">
                   <Link to={playerPath(offer.player)}>{offer.player.name}</Link>
                   <span className={`badge ${STATUS_BADGE[offer.status].cls}`}>{STATUS_BADGE[offer.status].label}</span>
-                  {offer.listingId !== null && <span className="badge green">已挂牌 #{offer.listingId}</span>}
+                  {/* v6.68.0 期 A：编号改成可复制（原来只有静态「已挂牌 #N」文本） */}
+                  {offer.listingId !== null && (
+                    <span className="badge green">
+                      已挂牌 <IdTag kind="挂牌" value={offer.listingId} />
+                    </span>
+                  )}
+                  <span className="muted">
+                    报价 <IdTag kind="报价" value={offer.id} />
+                  </span>
                 </h3>
                 <button className="mkt-ov-x" type="button" aria-label="关闭谈判桌" ref={closeRef} onClick={onClose}>
                   ✕

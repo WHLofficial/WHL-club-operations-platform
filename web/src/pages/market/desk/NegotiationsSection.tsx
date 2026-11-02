@@ -13,6 +13,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../../../lib/api.ts';
+import { IdTag } from '../../../components/IdTag.tsx';
 import { useToast } from '../../../lib/toast.tsx';
 import { useMyClub, useMyNegotiations, useWagePreview, qk } from '../../../lib/queries.ts';
 import { playerPath } from '../../../lib/player-link.ts';
@@ -434,6 +435,9 @@ function SessionCard({
         <span className="mono">{s.expectedWage === null ? '待定' : `${money(s.expectedWage)}m`}</span> · 静默还剩{' '}
         <span className="mono">{silence}</span>
         {fresh && <span className="nego-fresh"> · 有新反馈</span>}
+        {/* v6.68.0 期 A：会话/转会编号可直接复制（管理端作废、强制成交都要填它） */}
+        {' · '}
+        谈判 <IdTag kind="谈判" value={s.id} /> · 转会 <IdTag kind="转会" value={s.transferId} />
       </p>
       <div id={`nego-body-${s.id}`} className="nego-body" hidden={!open}>
       <p className="hint">

@@ -715,6 +715,51 @@ a.card:hover {
   cursor: help;
 }
 
+/* v6.68.0：可复制的实体编号（IdTag）——灰色等宽文本按钮，点一下复制。
+   刻意不加背景色/边框：它出现在表格与卡片里，只该是一段能点的灰字。 */
+.id-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.id-tag:hover {
+  color: inherit;
+  text-decoration: underline;
+  opacity: 1;
+}
+
+.id-tag:focus-visible {
+  outline: 2px solid var(--sky-deep);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 复制失败（降级路径也没成）：标红提示用户手动选择 */
+.id-tag.failed {
+  color: #b91c1c;
+  opacity: 1;
+}
+
+/* 只露号不复制（外层本身是可点容器时用，如 /market 卡片是 button） */
+.id-tag.static {
+  cursor: default;
+}
+
+.id-tag.static:hover {
+  color: var(--muted);
+  text-decoration: none;
+  opacity: 0.75;
+}
+
 .badge.green {
   background: #e2f3ea;
   color: #0b7a47;

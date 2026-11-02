@@ -3,6 +3,7 @@
 // v6.23.0 新增：成交出价若停在「挂牌待审核」阶段，徽标改「待审核」（listingStatus 推导，不加请求）。
 import { Link } from 'react-router';
 import type { MyBidRow } from '../../../lib/api.ts';
+import { IdTag } from '../../../components/IdTag.tsx';
 import { useClubBalance, useMyBids, useMyClub } from '../../../lib/queries.ts';
 import { playerPath } from '../../../lib/player-link.ts';
 import { BID_STATUS_LABEL, money } from '../shared.tsx';
@@ -66,12 +67,14 @@ function MyBidsSection({
               <th className="num">我的出价（m）</th>
               <th>出价状态</th>
               <th>资金</th>
+              {/* v6.68.0 期 A：出价/挂牌编号可直接复制，管理动作要 ID 时不用再猜 */}
+              <th>编号</th>
             </tr>
           </thead>
           <tbody>
             {bids.length === 0 ? (
               <tr>
-                <td colSpan={5} className="muted">
+                <td colSpan={6} className="muted">
                   还没出过价。去在售市场挑一件挂单，或到激活页捞别家小将。
                 </td>
               </tr>
@@ -93,6 +96,9 @@ function MyBidsSection({
                       {b.holdStatus === 'released' && <span className="stamp-inline stamp-inline-ok">已解冻</span>}
                       {b.holdStatus === 'settled' && <span className="stamp stamp-hold stamp-inline">已划转</span>}
                       {b.holdStatus === null && <span className="muted">—</span>}
+                    </td>
+                    <td>
+                      <IdTag kind="出价" value={b.id} /> · <IdTag kind="挂牌" value={b.listingId} />
                     </td>
                   </tr>
                 );

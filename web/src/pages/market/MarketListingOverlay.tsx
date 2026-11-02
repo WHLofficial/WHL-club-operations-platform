@@ -9,6 +9,7 @@ import { Link } from 'react-router';
 import { apiPost, type BidPlaceResult, type MarketListing, type MatchDecisionResult } from '../../lib/api.ts';
 import { creditUse } from '../../lib/credit-line.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
+import { IdTag } from '../../components/IdTag.tsx';
 import { TeamLogo } from '../../components/TeamLogo.tsx';
 import { playerPath } from '../../lib/player-link.ts';
 import { useListingDetail, useMarketInvalidation, type MarketMyClub } from '../../lib/queries.ts';
@@ -260,7 +261,8 @@ function OverlayBody({
       </div>
       <p className="mkt-ov-sub">
         <Link to={playerPath(l.player)}>{l.player.position ?? '—'}</Link> · {l.player.age ?? '—'} 岁 · CA{' '}
-        <span className="mono">{l.player.ca ?? '—'}</span> · PA <span className="mono">{l.player.pa ?? '—'}</span>
+        <span className="mono">{l.player.ca ?? '—'}</span> · PA <span className="mono">{l.player.pa ?? '—'}</span> ·{' '}
+        <IdTag kind="挂牌" value={l.id} />
       </p>
 
       <dl className="mkt-ov-rows">
@@ -288,7 +290,8 @@ function OverlayBody({
         <div>
           <dt>卖方</dt>
           <dd className="mkt-ov-club">
-            <TeamLogo name={l.sellerClub.name} logoKey={logoOf?.(l.sellerClub.id)} size={16} /> {l.sellerClub.name}
+            <TeamLogo name={l.sellerClub.name} logoKey={logoOf?.(l.sellerClub.id)} size={16} /> {l.sellerClub.name}{' '}
+            {l.sellerClub.id !== null && <IdTag kind="俱乐部" value={l.sellerClub.id} />}
           </dd>
         </div>
       </dl>

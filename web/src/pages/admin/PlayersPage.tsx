@@ -7,6 +7,7 @@ import { SEASON_CURRENT_KEY, fetchSeasonCurrent } from '../../lib/adminQueries.t
 import { LEAGUE_TIER_LABEL } from '../../lib/ref.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
+import { IdTag } from '../../components/IdTag.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
 
@@ -564,7 +565,7 @@ function GrowthSection() {
                 summary.pendingLevelUps.map((p) => (
                   <tr key={p.playerId}>
                     <td>
-                      {p.name} <span className="muted">#{p.playerId}</span>
+                      {p.name} <IdTag kind="球员" value={p.playerId} />
                     </td>
                     <td>档 {p.growthTier}</td>
                     <td className="mono">{p.pending}</td>

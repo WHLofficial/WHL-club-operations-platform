@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiPost, type AdminShopOrderRow } from '../../lib/api.ts';
 import { ADMIN_SHOP_KEY, fetchAdminShopOrders } from '../../lib/adminQueries.ts';
 import { useToast } from '../../lib/toast.tsx';
+import { IdTag } from '../../components/IdTag.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
 import { POSITION_BY_ID } from '../../../../src/core/fc26.ts';
 import { playstyleById, roleById } from '../../lib/ref.ts';
@@ -143,9 +144,13 @@ export default function AdminShopPage() {
               <tbody>
                 {orders.map((o) => (
                   <tr key={o.id}>
-                    <td className="mono muted">#{o.id}</td>
+                    <td>
+                      <IdTag kind="工单" value={o.id} />
+                    </td>
                     <td className="mono muted">{dateTime(o.createdAt)}</td>
-                    <td>{o.clubName ?? '—'}</td>
+                    <td>
+                      {o.clubName ?? '—'} <IdTag kind="俱乐部" value={o.clubId} />
+                    </td>
                     <td>{o.categoryLabel}</td>
                     <td>
                       {o.summary}

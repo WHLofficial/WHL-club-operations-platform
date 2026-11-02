@@ -195,7 +195,12 @@ export function MarketCard({
         </span>
       </div>
       <div className="mkt-card-sub">
-        {listing.player.position ?? '—'} · {listing.player.age ?? '—'} 岁
+        {listing.player.position ?? '—'} · {listing.player.age ?? '—'} 岁 ·{' '}
+        {/* 卡片整体是个 button，不能再嵌可点的 IdTag（button 套 button 非法）⇒ 这里只露号，
+            要复制点开浮层用头部那个 IdTag（v6.68.0 期 A）。 */}
+        <span className="id-tag static" title={`挂牌 #${listing.id}`}>
+          #{listing.id}
+        </span>
       </div>
 
       {/* CA/PA 与价格三行包在一层里（v6.60.9）：桌面竖排（CA/PA 一条、价格三行一条），

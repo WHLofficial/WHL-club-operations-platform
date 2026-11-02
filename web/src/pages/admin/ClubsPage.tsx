@@ -8,6 +8,7 @@ import { LEAGUE_TIER_LABEL, nationById } from '../../lib/ref.ts';
 import { influenceCoefText } from '../../lib/influence.ts';
 import { useToast } from '../../lib/toast.tsx';
 import ConfirmButton from '../../components/ConfirmButton.tsx';
+import { IdTag } from '../../components/IdTag.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
 import { usePrompt } from '../../components/PromptDialog.tsx';
 import { useTimeFmt } from '../../lib/datetime.ts';
@@ -273,7 +274,7 @@ function ClubsSection() {
               {clubs.map((club) => (
                 <tr key={club.id}>
                   <td>
-                    {club.name} <span className="muted">#{club.id}</span>
+                    {club.name} <IdTag kind="俱乐部" value={club.id} />
                     {club.transferBanned && <span className="badge red" title="挂单/出价/海捞/议价已被拦下">转会冻结</span>}
                   </td>
                   <td>{club.leagueTier ? (LEAGUE_TIER_LABEL[club.leagueTier] ?? club.leagueTier) : <span className="muted">未定级</span>}</td>

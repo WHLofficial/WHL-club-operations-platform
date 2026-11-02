@@ -205,6 +205,8 @@ interface ReviewTaskRow {
   ask_price: number | null;
   activation_proof: string | null;
   activator_name: string | null;
+  /** v6.68.0：transfer_confirm 指向 transfers.id，activation_report 指向 listings.id */
+  ref_id: number;
   player_id: number;
   player_name: string;
   position: string | null;
@@ -223,7 +225,7 @@ app.get('/reviews', async (c) => {
   if (!['open', 'approved', 'rejected', 'all'].includes(status)) throw new HttpError(400, 'status 只能是 open / approved / rejected / all');
   const where = status === 'all' ? `rt.type IN ('transfer_confirm', 'activation_report')` : `rt.type IN ('transfer_confirm', 'activation_report') AND rt.status = ?`;
   const rows = await c.env.DB.prepare(
-    `SELECT rt.id, rt.type, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
+    `SELECT rt.id, rt.ref_id, rt.type, rt.status, rt.payload, rt.decided_by, rt.decided_at, rt.note,
             t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax, t.extra_fee,
             l.status AS listing_status, l.ask_price, l.activation_proof,
             p.id AS player_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
@@ -250,7 +252,14 @@ app.get('/reviews', async (c) => {
       decidedAt: r.decided_at,
       report:
         r.type === 'activation_report'
-          ? { listingStatus: r.listing_status, askPrice: r.ask_price, proofKey: r.activation_proof, activatorClubName: r.activator_name }
+          ? {
+              // v6.68.0 期 A：挂牌 id 透出（原来前端只能从举报 payload 里猜，期 B 直链要用）
+              listingId: r.ref_id,
+              listingStatus: r.listing_status,
+              askPrice: r.ask_price,
+              proofKey: r.activation_proof,
+              activatorClubName: r.activator_name,
+            }
           : null,
       transfer: {
         id: r.transfer_id,
