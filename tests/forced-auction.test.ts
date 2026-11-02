@@ -498,6 +498,58 @@ describe('强制拍卖（4.4.5）', () => {
     expect(contract!.wage).toBeGreaterThan(0);
   });
 
+  // 生产形态回归（v6.67.0 数据修复后的 140 / 141）：会话里留着预填的 release_fee、E 已清空，
+  // 球员没有现行合同。静默收口必须沿用预填 F 当违约金，不能因为 F 非空就落到「按现行合同工资」——
+  // 那会签出工资 0 的合同。
+  it('v6.67.0：预填了违约金的强拍单静默收口 → 沿用预填 F，工资取预期值', async () => {
+    const fx = await seedAuction();
+    fx.sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES (131681, 'AC米兰(CPU)', 'premier', 'active', 1);
+       INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (60, 'fc60', '米兰头牌', 131681, 'ST', 26, 95, 95, 'normal');`,
+    );
+    const create = await post('/api/admin/forced-auctions', { playerId: 60, askPrice: 6 }, 'tok-admin', fx.env);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 6 }, 'tok-coach2', fx.env)).status).toBe(201);
+    fx.sqlite.exec(
+      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
+                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
+    );
+    await get('/api/market/listings?status=all', 'tok-coach2', fx.env);
+    const transferRow = sqlGet<{ id: number }>(
+      fx.sqlite,
+      'SELECT id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+
+    // 模拟生产：旧口径把 F 定死成成交价 + 数据修复只清 E
+    const session = sqlGet<{ id: number }>(
+      fx.sqlite,
+      'SELECT id FROM negotiation_sessions WHERE transfer_id = ?',
+      transferRow!.id,
+    );
+    fx.sqlite.exec(
+      `UPDATE negotiation_sessions SET release_fee = 6, expected_wage = NULL WHERE id = ${session!.id}`,
+    );
+
+    await closeSilentSessions(fx.env, {
+      origin: 'cron_tick',
+      nowIso: '2027-01-01T00:00:00Z',
+      closeAll: true,
+      limit: 50,
+      remindLeadHours: 0,
+    });
+
+    const contract = sqlGet<{ wage: number; release_fee: number }>(
+      fx.sqlite,
+      'SELECT wage, release_fee FROM contracts WHERE player_id = 60 AND is_active = 1',
+    );
+    expect(contract).toMatchObject({ release_fee: 6 });
+    expect(contract!.wage).toBeGreaterThan(0);
+  });
+
   it('v6.60.7：CPU 队强拍无人出价 → 不收下架费、不造解约单，球员留在 CPU 队', async () => {
     const fx = await seedAuction();
     fx.sqlite.exec(
