@@ -173,6 +173,7 @@ const MIGRATION_FILES = [
   '0086_playstyle_full_count.sql',
   '0087_activation_listing_income.sql',
   '0088_transfer_terms_after_ownership.sql',
+  '0089_bids_status_index.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {

@@ -18,6 +18,8 @@ import brandsRoutes from './brands.ts';
 import eventsRoutes from './events.ts';
 import weatherRoutes from './weather.ts';
 import shopRoutes from './shop.ts';
+// v6.68.2：审核工作台（GET /api/admin/workbench/in-flight|search + /workbench/proof/:listingId）
+import workbenchRoutes from './workbench.ts';
 import opsScheduleRoutes from './ops-schedule.ts';
 import seaSealedRoutes from './sea-sealed.ts';
 import vouchersRoutes from './vouchers.ts';
@@ -46,6 +48,7 @@ app.route('/', eventsRoutes);
 app.route('/', weatherRoutes);
 // v6.26.0：消费中心管理端（GET/POST /api/admin/shop/orders + POST /api/admin/shop/orders/:id/approve|reject）
 app.route('/', shopRoutes);
+app.route('/', workbenchRoutes);
 // v6.49.0：运营时刻表（GET/PUT /api/admin/ops-schedule，逐项设时段 + 读全表）
 app.route('/', opsScheduleRoutes);
 // v6.50.0：海捞暗标段（GET /api/admin/sea-sealed + POST /sea-sealed/open|extend|cancel）

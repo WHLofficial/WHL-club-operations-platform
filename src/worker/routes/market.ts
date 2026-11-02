@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
-import { requireCoach } from '../../lib/session.ts';
+import { requireCoach, requireUser } from '../../lib/session.ts';
 import { assertPublicRate, cachedJson, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
@@ -839,6 +839,25 @@ app.post('/market/listings/:id/activation-report', async (c) => {
   if ((results[0].meta.changes ?? 0) !== 1) throw new HttpError(409, '举报没落库，刷新再试');
   await queueClubNotification(c.env, listing.activated_by, 'activation_reported', { listingId: id, playerId: listing.player_id });
   return c.json({ ok: true }, 201);
+});
+
+// GET /api/market/listings/:id/proof —— 激活凭证地址（v6.68.2 期 C，Q12 裁决）
+// 可见范围：这单挂牌的卖方俱乐部 + 管理员，其余人 403。公开 feed 不加这个字段——
+// 它现在是匿名端点（只有 IP 限速、无身份解析），把凭证 key 塞进去等于对全联盟公开 QQ 截图。
+app.get('/market/listings/:id/proof', async (c) => {
+  const user = await requireUser(c.env, c.req.raw);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '挂牌 ID 不对');
+  const row = await c.env.DB.prepare('SELECT seller_club_id, activation_proof FROM listings WHERE id = ?')
+    .bind(id)
+    .first<{ seller_club_id: number | null; activation_proof: string | null }>();
+  if (!row) throw new HttpError(404, '这单挂牌不存在');
+  if (user.role !== 'admin') {
+    const club = await getBoundClub(c.env, user.id, c.req.raw);
+    if (!club || row.seller_club_id !== club.id) throw new HttpError(403, '只有被激活方可以看这份凭证');
+  }
+  if (!row.activation_proof) throw new HttpError(404, '这单激活没有上传凭证');
+  return c.json({ url: `/api/media/${row.activation_proof}` });
 });
 
 // GET /api/market/listings/:id —— 详情 + 出价历史
