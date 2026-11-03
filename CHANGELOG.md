@@ -19,7 +19,7 @@
 
 - 零迁移、零新端点；本期只做期 A，球员页浮层/入口角标在期 B/C。
 - 验收：`npm run typecheck` 三份清；`npm test` **193 文件 / 3,018 例**全绿；`npm run build` 通过。
-- 上线（2026-11-03）：push 触发 CF Workers Builds；Version / 入口资产待回读。
+- 上线（2026-11-03 13:53 CST / 05:53Z）：push `915db6e..b5836a8` 到 `main`，CF Workers Builds 自动部署 Version `d5741771-4237-43e8-8643-d41e6decd9fa`（100%）；生产入口 `assets/index-DobnR3oB.js` 与本地构建 sha256 一致（`a9f60df9…`），包内版本串 `6.72.0`×1、无 `6.71.0` 残留；`/api/health` 200、`/market/desk` 200、匿名 `/api/me/bids` 与 `/api/negotiations?mine=1` 401、`/` 仍 `cache-control: no-store`。
 
 ## [v6.71.0] · 下放名额可配置 + 训练营硬拦 + 自愈地板（2026-11-03）
 
