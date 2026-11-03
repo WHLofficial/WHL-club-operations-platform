@@ -87,6 +87,13 @@ export function playstyleBaseId(psid: number): number {
   return psid >= 100 ? psid - 100 : psid;
 }
 
+/** 门将 PlayStyle（基础 51-56，数据表 type === 'Goalkeeper'）。图标素材是「菱形 + 不透明黑色
+ *  字形」，与外场 60 枚「菱形 + 镂空字形」不是同一套：银徽整体压暗会黑底黑字、字形消失，
+ *  所以徽章要按家族分开上色（styles.css 的 .ps-icon-gk）。 */
+export function isGkPlaystyle(psid: number): boolean {
+  return playstyleById.get(psid)?.type === 'Goalkeeper';
+}
+
 export function playstyleDescOf(psid: number): PlaystyleDesc | null {
   return playstyleDescById.get(playstyleBaseId(psid)) ?? null;
 }

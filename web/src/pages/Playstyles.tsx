@@ -1,7 +1,7 @@
 // PlayStyles 图鉴（v6.69.0）：36 条基础项按 EA 六类分组，每条给出银/金图标、中英名、
 // 定位句与两档效果。入口在右上角 ≡ 菜单（公开页，不挂登录门）。
 // 数据三源：名称/分类 ref/playstyle.json，描述 ref/playstyle-desc.json，图标 public/assets/icons/playstyles。
-import { playstyleDescOf, playstyleIconUrl } from '../lib/ref.ts';
+import { isGkPlaystyle, playstyleDescOf, playstyleIconUrl } from '../lib/ref.ts';
 import playstyleRef from '../../assets/ref/playstyle.json';
 
 const TYPE_ORDER = ['Finishing', 'Passing', 'Defending', 'Ballcontrol', 'Physical', 'Goalkeeper'] as const;
@@ -29,7 +29,7 @@ const BASES = (playstyleRef as Row[])
 function Icon({ psid, gold }: { psid: number; gold: boolean }) {
   return (
     <img
-      className={`ps-icon ps-card-icon${gold ? ' ps-card-icon-gold' : ' ps-icon-silver'}`}
+      className={`ps-icon ps-card-icon ${gold ? 'ps-icon-gold' : 'ps-icon-silver'}${isGkPlaystyle(psid) ? ' ps-icon-gk' : ''}`}
       src={playstyleIconUrl(psid)}
       alt={gold ? '金徽图标' : '银徽图标'}
       loading="lazy"

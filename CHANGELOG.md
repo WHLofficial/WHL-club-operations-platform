@@ -4,6 +4,25 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.74.1] · 修复：PlayStyle 图标分家族着色、整徽去掉重复奖牌 emoji（2026-11-03）
+
+**Fixed**
+
+- **门将 PlayStyle（基础 51-56 / 金 151-156）的图标在银徽下整枚被压暗**：72 枚 webp 实为两套素材——外场 60 枚的字形是菱形内部的**镂空孔**，门将 12 枚是「白/金菱形 + 不透明黑字形」。旧规则 `.ps-badge:not(.ps-gold) .ps-icon { filter: brightness(0.38) }` 对门将等于黑底黑字，银门将徽是一块黑板。新增 `isGkPlaystyle(psid)`（按 `playstyle.json` 的 `type === 'Goalkeeper'`，不硬编码 51-56），门将图标加 `ps-icon-gk`，银徽改走 `invert(1)`（黑菱形 + 白字形）。
+- **外场金徽对比度不足**：`brightness(0.78)` 后橄榄金菱形 + 奶油色字形约 2:1，16px 下字形发糊；改 `brightness(0.62) saturate(1.45)`（约 3.1:1）。
+- **`PlaystyleSheet` 弹层里的金徽从未吃到 filter**（旧选择器 `.ps-gold .ps-icon` 不匹配弹层），白金菱形贴在白卡上；弹层图标改用同一套 `ps-icon-silver|gold` 档位类。
+- **徽章与 🥇/🥈 同时出现**：v6.69.0 补齐图标后，emoji 从「v6.34.0 图标 404 的兜底」变成同一信息的第二次表达。整徽去掉常驻 emoji，仅在 `img onError` 时退回 🥇/🥈（档位不丢）；compact 表格无图标，emoji 保留。
+
+**Notes**
+
+- 图标文件与路径未动（`/assets/*` immutable 一年且文件名无哈希，换字节须换路径段）；compact 表格仍不拉图标（v6.35.0 性能裁决）。
+- 图鉴页 `/playstyles` 同步新类名，旧 `ps-card-icon-gold` 废弃。
+
+**验收**
+
+- `npm run typecheck` 三份清；`npm test` **197 文件 / 3,062 例**全绿；`npm run build` 通过（入口 744.96 kB / gzip 233.49 kB）。
+- 本地用真实 `styles.css` + 真实 webp 在 Chrome 无头模式 2x 渲染比对：门将银徽由黑板变黑菱形 + 白字形，金外场字形清晰。
+
 ## [v6.74.0] · 转会台改版期 C：球员页状态条与转会浮层（2026-11-03）
 
 **Added**

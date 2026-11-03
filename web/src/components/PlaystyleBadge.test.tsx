@@ -4,6 +4,7 @@
 // title 带「（银）」（v6.63.0 起金银同构）；名称查 playstyle.json（金徽存库 id = 基础 id + 100），
 // 查不到回落 `PS {psid}`。v6.63.0 来源角标：source 非 'fc' 在 pill 尾部挂小标、title 追加全称。
 // v6.69.0：整徽 title 追加定位句 + 当前档位效果；openable 在窄屏变按钮并弹 PlaystyleSheet。
+// v6.74.1：整徽不再叠 🥇/🥈（图标即档位），图标 404 时才退回 emoji；门将图标多 ps-icon-gk。
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PlaystyleBadge } from './PlaystyleBadge.tsx';
@@ -30,7 +31,7 @@ function mockMatchMedia(matches: boolean) {
 }
 
 describe('PlaystyleBadge 共享件（提取后行为零变化）', () => {
-  it('金徽：ps-badge ps-gold ＋🥇＋「（金）」title＋金段图标', () => {
+  it('金徽：ps-badge ps-gold ＋「（金）」title＋金档图标（v6.74.1 不再叠 🥇）', () => {
     const { container } = render(<PlaystyleBadge psid={101} gold />);
     const badge = container.querySelector('.ps-badge')!;
     expect(badge.getAttribute('class')).toBe('ps-badge ps-gold');
@@ -39,24 +40,43 @@ describe('PlaystyleBadge 共享件（提取后行为零变化）', () => {
     expect(img.getAttribute('src')).toBe('/assets/icons/playstyles/101.webp');
     expect(img.getAttribute('alt')).toBe('');
     expect(img.getAttribute('loading')).toBe('lazy');
-    expect(Array.from(badge.querySelectorAll('span[aria-hidden="true"]'), (el) => el.textContent)).toEqual(['🥇']);
-    expect(badge.textContent).toBe('🥇精准搓射 +');
+    expect(img.getAttribute('class')).toBe('ps-icon ps-icon-gold');
+    expect(badge.querySelectorAll('span[aria-hidden="true"]')).toHaveLength(0);
+    expect(badge.textContent).toBe('精准搓射 +');
   });
 
-  it('银徽：只 ps-badge ＋🥈＋ title 带（银）标记', () => {
+  it('银徽：只 ps-badge ＋ title 带（银）标记＋银档图标', () => {
     const { container } = render(<PlaystyleBadge psid={1} gold={false} />);
     const badge = container.querySelector('.ps-badge')!;
     expect(badge.getAttribute('class')).toBe('ps-badge');
     expect(badge.getAttribute('title')).toBe(`精准搓射（银）\n${DESC_1}\n银：${SILVER_1}`);
-    expect(badge.querySelector('img.ps-icon')!.getAttribute('src')).toBe('/assets/icons/playstyles/1.webp');
-    expect(badge.textContent).toBe('🥈精准搓射');
+    const img = badge.querySelector('img.ps-icon')!;
+    expect(img.getAttribute('src')).toBe('/assets/icons/playstyles/1.webp');
+    expect(img.getAttribute('class')).toBe('ps-icon ps-icon-silver');
+    expect(badge.textContent).toBe('精准搓射');
   });
 
   it('ref 表查不到时回落 `PS {psid}`：仍渲染徽章，图标照挂', () => {
     const { container } = render(<PlaystyleBadge psid={9999} gold={false} />);
     const badge = container.querySelector('.ps-badge')!;
     expect(badge.getAttribute('title')).toBe('PS 9999（银）');
-    expect(badge.textContent).toBe('🥈PS 9999');
+    expect(badge.textContent).toBe('PS 9999');
+  });
+
+  it('门将素材（51-56）多一枚 ps-icon-gk：图标换成黑底白字那套 filter', () => {
+    const { container } = render(<PlaystyleBadge psid={51} gold={false} />);
+    expect(container.querySelector('img.ps-icon')!.getAttribute('class')).toBe('ps-icon ps-icon-silver ps-icon-gk');
+    const gold = render(<PlaystyleBadge psid={151} gold />);
+    expect(gold.container.querySelector('img.ps-icon')!.getAttribute('class')).toBe('ps-icon ps-icon-gold ps-icon-gk');
+  });
+
+  it('图标 404 时退回 🥇/🥈，档位不至于丢（v6.74.1）', () => {
+    const { container } = render(<PlaystyleBadge psid={101} gold />);
+    const badge = container.querySelector('.ps-badge')!;
+    fireEvent.error(badge.querySelector('img.ps-icon')!);
+    expect(badge.querySelector('img')).toBeNull();
+    expect(Array.from(badge.querySelectorAll('span[aria-hidden="true"]'), (el) => el.textContent)).toEqual(['🥇']);
+    expect(badge.textContent).toBe('🥇精准搓射 +');
   });
 
   it('来源角标（v6.63.0）：非 fc 来源挂小标、title 追加全称；fc 与未传都不挂', () => {

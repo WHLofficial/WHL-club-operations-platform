@@ -14,8 +14,12 @@
 // v6.69.0 描述：整徽的 title 追加定位句 + 当前档位效果（桌面宽屏走原生 tooltip）；
 // openable 的整徽在窄屏（≤640px）渲染成按钮，点开 PlaystyleSheet 看三段文案 ——
 // 窄屏没有 hover，title 等于不可达。compact 保持原样（表格里一列十几枚，不加长文案）。
+//
+// v6.74.1 图标即档位：72 枚 webp 补齐后，「图标 + 🥇/🥈」是同一信息的两次表达，整徽去掉 emoji
+// （compact 无图标，🥇/🥈 保留）；图标按 ps-icon-silver / ps-icon-gold 显式上色，门将素材
+// （黑字形）再加 ps-icon-gk 走另一套 filter。
 import { useEffect, useRef, useState } from 'react';
-import { playstyleById, playstyleDescOf, playstyleEffectOf, playstyleIconUrl } from '../lib/ref.ts';
+import { isGkPlaystyle, playstyleById, playstyleDescOf, playstyleEffectOf, playstyleIconUrl } from '../lib/ref.ts';
 import { PlaystyleSheet } from './PlaystyleSheet.tsx';
 
 /** 发放来源的全称（角标悬停用；'fc' = FC 档案自带，不挂角标） */
@@ -69,6 +73,9 @@ export function PlaystyleBadge({
   const effect = playstyleEffectOf(psid, gold);
   const title = desc === null ? baseTitle : `${baseTitle}\n${desc.info}\n${gold ? '金' : '银'}：${effect ?? ''}`;
   const narrow = useNarrowViewport();
+  const [iconFailed, setIconFailed] = useState(false);
+  const isGk = isGkPlaystyle(psid);
+  const iconClass = `ps-icon ${gold ? 'ps-icon-gold' : 'ps-icon-silver'}${isGk ? ' ps-icon-gk' : ''}`;
   const [open, setOpen] = useState(false);
   const openRef = useRef<HTMLButtonElement>(null);
 
@@ -89,16 +96,17 @@ export function PlaystyleBadge({
 
   const inner = (
     <>
-      <img
-        className="ps-icon"
-        src={playstyleIconUrl(psid)}
-        alt=""
-        loading="lazy"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.display = 'none';
-        }}
-      />
-      <span aria-hidden="true">{gold ? '🥇' : '🥈'}</span>
+      {iconFailed ? (
+        <span aria-hidden="true">{gold ? '🥇' : '🥈'}</span>
+      ) : (
+        <img
+          className={iconClass}
+          src={playstyleIconUrl(psid)}
+          alt=""
+          loading="lazy"
+          onError={() => setIconFailed(true)}
+        />
+      )}
       <span>{label}</span>
       {sourceLabel !== null && <span className="ps-badge-source">{sourceLabel}</span>}
     </>

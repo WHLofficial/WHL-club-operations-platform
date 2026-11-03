@@ -2,7 +2,7 @@
 // 桌面宽屏不走这里（原生 title 已能显示同一份文案），所以只挂在 openable 的整徽上。
 // 不做焦点循环：弹层只有「关闭」一个可交互元素，Esc / 遮罩 / 关闭键三路都能退出。
 import { useEffect, useRef } from 'react';
-import { playstyleById, playstyleDescOf, playstyleEffectOf, playstyleIconUrl } from '../lib/ref.ts';
+import { isGkPlaystyle, playstyleById, playstyleDescOf, playstyleEffectOf, playstyleIconUrl } from '../lib/ref.ts';
 
 export function PlaystyleSheet({ psid, gold, onClose }: { psid: number; gold: boolean; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -36,7 +36,7 @@ export function PlaystyleSheet({ psid, gold, onClose }: { psid: number; gold: bo
       >
         <div className="ps-sheet-head">
           <img
-            className={`ps-icon${gold ? '' : ' ps-icon-silver'}`}
+            className={`ps-icon ${gold ? 'ps-icon-gold' : 'ps-icon-silver'}${isGkPlaystyle(psid) ? ' ps-icon-gk' : ''}`}
             src={playstyleIconUrl(psid)}
             alt=""
             onError={(e) => {

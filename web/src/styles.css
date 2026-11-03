@@ -1795,16 +1795,28 @@ table.matches-table-narrow .rating-badge {
 }
 
 /* v6.69.0 图标着色：源素材银版是近白剪影（#fcfcf6）、金版是浅金菱形（#ffd85d），
-   直接贴在奶油底（--paper / --badge-gold-bg）上几乎看不见。银压到 38% 亮度当深灰字形，
-   金压到 78% 并略提饱和；图片本身是透明底，filter 只作用在字形/菱形上，不会染出一块方底。 */
-.ps-badge:not(.ps-gold) .ps-icon,
+   直接贴在奶油底（--paper / --badge-gold-bg）上几乎看不见。图片本身是透明底，filter
+   只作用在字形/菱形上，不会染出一块方底。
+   v6.74.1 分家族：外场 30 枚的字形是菱形内部的**镂空孔**（只能透出背后的底色），门将 6 枚
+   （.ps-icon-gk，基础 51-56）却是「白/金菱形 + 不透明黑字形」——整枚压暗会黑底黑字、字形
+   整个消失（旧规则下银门将徽是一块黑板）。所以门将另走一套：银徽反相（黑菱形 + 白字形），
+   金徽保持黑字形、只略压亮度。 */
 .ps-icon-silver {
   filter: brightness(0.38);
 }
 
-.ps-gold .ps-icon,
-.ps-card-icon-gold {
-  filter: brightness(0.78) saturate(1.15);
+.ps-icon-gk.ps-icon-silver {
+  filter: invert(1);
+}
+
+/* 金色：外场字形是孔洞、透出的是金色 pill 底，菱形必须压得比银徽更狠（0.62）字形才立得住；
+   门将自带黑字形，压到 0.86 只是让菱形别抢过字形。 */
+.ps-icon-gold {
+  filter: brightness(0.62) saturate(1.45);
+}
+
+.ps-icon-gk.ps-icon-gold {
+  filter: brightness(0.86) saturate(1.1);
 }
 
 /* 窄屏可点的整徽：外观与静态 pill 一致，只补回 button 的默认差异 */
