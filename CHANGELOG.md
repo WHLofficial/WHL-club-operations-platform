@@ -4,6 +4,21 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.72.1] · 修复：一条已结算的上调会话把签约谈判列表打成 409（2026-11-03）
+
+**Fixed**
+
+- **签约谈判页签整个空掉（生产 club 66，2026-11-03 13:35 CST）**：`listMySessions`（`src/worker/negotiations.ts`）的自愈扫描对「已结束」行逐条 `healSettlement`，而 `applyContractTerms`（`src/worker/transfers.ts`）把上调拦截排在 `terms_applied` 幂等闸之前 ⇒ 一条已成品的上调会话（Talbi，transfer 188）每读一次列表就抛 409「上调单在成约时结算，不走条款落地」，整个 `GET /api/negotiations?mine=1` 随之 409。前端 `sessions` 恒 null、`loadError` 有值，既不渲染进行中行也不渲染空态卡，页签计数 0，页面上只剩一条黄色错误提示 —— 两笔在谈上调单（Jacquet / Mawissa）因此完全不可见。
+- **修法（两处）**：① 自愈扫描跳过 `transfer_type = 'promotion' && transfer_status = 'completed'` 的行（这类单在成约那一刻已结算，没有待落的条款），并给每行包 try/catch —— 读路径不允许被单行自愈拖死；② `applyContractTerms` 把 `terms_applied` 幂等闸提到上调拦截之前，已结算的上调单重放返回 `already` 而不是 409。
+- **回归**：`tests/negotiation-routes.test.ts` 新增「已结算的上调单不会打断列表（仍是 200，进已结束区）」；`tests/apply-contract-terms.test.ts` 新增「已结算的上调单重放返回 already，不再抛 409」。两条在旧代码上恰好红、新代码全绿（变异验证）。
+
+**Notes**
+
+- 零迁移、零契约变更、判级 patch。
+- 本地实测：复刻生产形态（completed + `terms_applied=1` 的 promotion 单 + 已结算会话）时 `GET /api/negotiations?mine=1` 从 `409 {"error":"上调单在成约时结算，不走条款落地"}` 变为 `200`，进行中会话与已结束区都在。
+- 验收：`npm run typecheck` 三份清；`npm test` **193 文件 / 3,020 例**全绿（v6.72.0 基线 3,018，+2 例）。
+- 影响面：只有同时存在「已结算谈判 + 成品上调单」的俱乐部会中招；列表每次读都会重放同一条 409。**尚未部署**。
+
 ## [v6.72.0] · 转会台按球员聚合（期 A；零迁移零新端点）（2026-11-03）
 
 **Changed**
