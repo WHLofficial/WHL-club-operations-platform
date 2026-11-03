@@ -4,6 +4,26 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.74.0] · 转会台改版期 C：球员页状态条与转会浮层（2026-11-03）
+
+**Added**
+
+- **`GET /api/players/:id/transfer-panel`**（`src/worker/routes/desk.ts`）：球员页状态条与浮层的一次性数据源。选单规则 = `listed/bidding/matched_pending/pending_review` 最新一单，否则最新 `delisted`；挂牌字段与 `GET /api/market/listings/:id` 完全同口径（复用新抽出的 `listingDetailOf`，含 `releaseFee`、`nextMinBid`、`deadlineAt`、`firstBidPending`、`marketBidPaused`）。另回该单最近 50 笔出价、我跨全部挂牌的 20 笔出价（带 `listingId`/`holdStatus`）、报价 in/out 各 20 条、我作买方的最新谈判（`expiresAt` 由静默锚点派生、`settled.message` 复用 `settleMessage`）、最近一次换队成交。未绑队教练 200（`club=null`、个人数组空、公开挂牌段照常）；`Cache-Control: private, no-store`；惰性结算走 `waitUntil`，30s 合并窗。
+- **`useTransferPanel`**（`web/src/lib/queries.ts`）：`qk.transferPanel(playerId)`，`staleTime` 30s；出价/报价/谈判写后失效同时覆盖 `['market','transfer-panel']`。
+- **`PlayerTransferPanel` / `PlayerTransferDialog`**（`web/src/pages/market/desk/`）：六段式浮层（头部、状态条、出价历史、报价摘要、谈判摘要、动作区），桌面居中 560px、≤760px 底部抽屉；`useOverlayShell` 管焦点陷阱/Esc/锁滚；点报价摘要先关自己再跳 `/market/desk?tab=offers&offer=<id>`，不叠两层。
+- **球员页 `SideOps` 状态条**：本队/外队挂牌保留原有要价、最高出价、内联出价表单，补状态行（挂牌中/已截止待审/首价落定等匹配）与「查看详情 ›」浮层入口；已结束按 `transfer` 分态为「已售出 / 已签下 / 未中标 / 未成交」，不再出现「输给」；「去转会区」改深链 `?tab=bids&player=<id>`。
+
+**Notes**
+
+- 零迁移、零业务规则/资金口径改动；公开挂牌段在未绑队时也可读。
+- 期 A 的三页签聚合、期 B 的入口/角标逻辑不动；桌内行展开复用同一 panel 留给后续版本。
+
+**验收**
+
+- `npm run typecheck` 三份清；`npm test` **197 文件 / 3,062 例**全绿（期 B 基线 195 / 3,038，净 +2 文件 / +24 例）；`npm run build` 通过（入口 744.96 kB / gzip 233.50 kB，>500 kB 警告为既有）。
+- 测试计划 `docs/test-plans/v6.74.0-transfer-desk-phase-c.md`。
+- 本地完成、未 push、未部署。
+
 ## [v6.73.1] · 修复：关窗页看板工资按关窗后口径（2026-11-03）
 
 **Fixed**
