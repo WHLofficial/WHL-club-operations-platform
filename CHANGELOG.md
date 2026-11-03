@@ -4,6 +4,29 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.71.0] · 下放名额可配置 + 训练营硬拦 + 自愈地板（2026-11-03）
+
+**Added**
+
+- **下放名额配置 `demote_quota`**：JSON `{default?, by_club?, by_window?}`，按 `by_window["season:windowSeq"][clubId]` → `by_club[clubId]` → `default` → 2 解析，值夹 0..99 整数。本窗（9:2）已给皇家马德里（243）/ 诺丁汉森林（14）/ RB 莱比锡（112172）各 7 个名额。`src/worker/promotion.ts` 新增 `demoteQuotaFor` / `traineeMaxFor` / `traineeCountFor`。
+- **下放训练营硬拦**：`trainee_max` 满员时 409「训练营已满（上限 N 人）」，不再能把训练营人数顶到上限之上。
+- **下放作废待生效变更**：同一批把该球员 `contract_demands`（pending/countered/accepted）与 `contract_pending_changes`（pending）置 `void`、`void_reason='demoted'`，防止关窗时把 trainee 的 0.75/5 覆盖成续约条款。
+- **名额与训练营人数进入 INSERT 原子守卫**：`insertGuard` 同时校验球员状态/归属、本窗已用名额、训练营人数；audit / 合同 / 球员 / 作废语句共用 `settledGuard`，INSERT 为 0 行时整批 no-op。
+
+**Fixed**
+
+- 下放名额硬编码 2 → 配置化；409 文案给出实际名额数。
+- `healSettlement` 对 `settle_source='trainee'` 补 `TRAINEE_RELEASE_FEE` 地板——修 Jan Virgili（2292）RC 被 tick 自愈从 5 重放成 1。
+- `completeTransfer` 成约时同批置 `transfers.terms_applied=1`，堵住 tick 自愈重放窗口。
+- 合同导入按 `contract_type` 同步 `players.status`（normal↔trainee），修 5 条导入脏数据；生产已修 671/1331→trainee、915/1148/1157→normal、2292 RC→5（2026-11-03）。
+- 前端文案去掉「每窗每队 2 个」硬编码（`SideOps` / `NegotiationsSection`）。
+
+**Notes**
+
+- 零迁移；`demote_quota` 未配置时回默认 2。
+- 验收：`npm run typecheck` 三份清；`npm test` **192 文件 / 3,007 例**全绿（新增 8 例）；`npm run build` 通过。
+- 上线（2026-11-03）：`wrangler deploy` 生效 Version `99b7169e-9acd-4adf-b33e-82f378603088`；生产入口 `assets/index-De3yG08v.js` 版本串 `6.71.0`；`/api/health` 200；`demote_quota` 已 upsert 并回读 243/14/112172 = 7、default 2。
+
 ## [v6.70.0] · 名单镜像与窗口期薪资（2026-11-03）
 
 **Changed**

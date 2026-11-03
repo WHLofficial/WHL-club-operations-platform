@@ -75,6 +75,8 @@
 
 **上一版本 v6.63.0**（徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制；含迁移 `0086`）——**已上线（2026-10-31）**：迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`；只读核验：`d1_migrations` 末条 0086、247 发放银 24 已删保金台账 7/2、557 零数据变更且 FC 槽原貌保留台账 3/2、`idx_players_sort_ps` 消失、config 两键清零、**全表台账与迁移同源表达式对账 silver_drift=0 / gold_drift=0（18,301 行）**）；随后 push `56d00fd..f412485`（7 个提交）触发 CF Workers Builds 两轮自动部署——`f24537fa`（04:09:15Z，功能代码）→ **`310624e6`（04:10:31Z，生效 100%）**。发布轮插曲两枚：评审轮端到端用例超出 `ListBody17` 类型声明（发布复验 typecheck 抓出，`1f252a5` 补字段）；收口时 package.json 漏 bump（首轮部署版本串仍 6.62.0），随 `f412485` 订正重部署。上线探针：`/api/health` 200、线上首页资产 `index-d2h1BMYI.js` 与本地 6.63.0 构建逐字同名、线上版本串 `6.63.0`；`?ps=1` 不含 557（FC 银 1 被发放金 1 派生抑制）、`?ps=101` 命中 557、`?ps=124` 命中 247（发放金以基础 ID 筛中）；列表响应带 `playstyles` 合并清单（`source` 字段在场）、557 详情 `playstyles` = FC 银 16/41/32 + 发放金 101/131（被抑制银 1/31 消失）、`badges 3/2`；`sort=ps` 与 `sort=badges` 均 200。发布前复验 vitest **175 文件 / 2837 例**全绿（较收口 2836 多 1 例为工作区另一会话在途 oidc 用例）。判级 minor（口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。typecheck 三份全清、e2e **29/29**、变异验证 4 靶全命中、code-review 🔴×1 已修。**生产迁移现状：已到 `0086`**。细节见下文 v6.63.0 节。
 
+**本版本 v6.71.0**（下放名额可配置 + 训练营硬拦 + 自愈地板；零迁移）——**已上线（2026-11-03）**：`npm run deploy`（build + wrangler deploy）生效 Version `99b7169e-9acd-4adf-b33e-82f378603088`，生产入口 `assets/index-De3yG08v.js` 版本串 `6.71.0`、`/api/health` 200、匿名 `POST /api/transfers/demote` 401。`demote_quota` 已 upsert 为 `{"default":2,"by_window":{"9:2":{"243":7,"14":7,"112172":7}}}`，只读回读 243/14/112172 = 7、default = 2。**缘起**：owner 要求「上调下放从入口到出口校验」，并给皇家马德里 / RB 莱比锡 / 诺丁汉森林本窗各 7 个下放名额（不受默认 2 个限制）。**交付**：`demote_quota` 配置与 `demoteQuotaFor` / `traineeMaxFor` / `traineeCountFor`；下放 INSERT 原子名额/训练营守卫 + `settledGuard`；下放同批作废 `contract_demands` / `contract_pending_changes`（`void_reason='demoted'`）；`healSettlement` 补训练营 5m 地板；`completeTransfer` 成约置 `terms_applied=1`；合同导入按合同类型同步 `players.status`；前端文案去硬编码。**生产数据修复（2026-11-03）**：切尔西 671/1331→trainee、915/1148/1157→normal，Virgili 2292 RC→5。验收：typecheck 三份清、`npm test` **192 文件 / 3,007 例**全绿（+8 例）、build 通过；code-review-skill 无阻塞项。判级 **minor**。细节见下文 v6.71.0 节。
+
 **本版本 v6.70.0**（名单镜像与窗口期薪资可视化；迁移 `0090` / `0091`）——**已上线（2026-11-03）**：push `c37e8dd..615dd2e`（4 枚功能提交 + `chore(release)` 合入 PlayStyles 主线），生效 Version `009487d6-7e35-44b0-98a4-143177843425` @2026-11-03T01:49:18Z。上线前 `wrangler d1 migrations apply whl-club --remote` 先落 `0090_club_wage_baselines.sql` / `0091_squad_audits.sql`（`sqlite_master` 回读两表齐备）。上线回读：`/api/health` 200；生产入口 `assets/index-D1_mw3fi.js` 与本地构建逐字同名、包内版本串 `6.70.0`×1，新增文案「阵容与注册」「窗初」「未签约」「忠诚支出」在包内；管理端懒加载块 `assets/MarketPage-skDj_QjA.js` 200 且含 `windows/overview` 与「免检」。**交付**：名单改 `players ⋈ contracts` 纯推导（新模块 `src/worker/squad-view.ts`），`POST /api/club/registrations` 下线；`GET /club/squad` 新增 `unsigned` / `wages` 九字段 / `loyalty`；开窗批写 `club_wage_baselines`、关窗批写 `registrations` 快照与 `squad_audits`；CapBar 三段；管理端 `GET /api/admin/windows/overview` 实时看板；关窗给不通过真人队发 `squad_audit_failed` 站内信。验收：typecheck 三份清、`npm test` **192 文件 / 2,999 例**全绿、build 通过、期二/期三变异各三靶全红。判级 **minor**。测试计划 `docs/test-plans/v6.70.0-squad-mirror.md`。细节见下文 v6.70.0 节。
 
 **本版本 v6.69.0**（PlayStyles 图标 / 说明 / 图鉴 / 静态资源 404 修复；零迁移零生产写）——**已上线（2026-11-02）**：push `bfdae7c..d78d120` 4 枚（feat / test / docs / 文案收口），生效 Version `3b1cb1ba-728a-43eb-bf82-27615a91c60d` @2026-11-02T15:39:26Z（100%）。上线回读：生产入口 `assets/index-C4675Bf3.js` 与本地构建逐字同名，包内版本串 `6.69.0`×1，新增文案「远距离扑救 / 一对一出击 / 门将扩大扑救范围」均在包内、`预览线` 0 处；`/assets/icons/playstyles/1.webp` 200 `image/webp` 1,222 B、`101.webp` 200 2,422 B、`9999.webp` **404 空体**（不再回落 SPA HTML）；`/playstyles` 200 `text/html`、`/api/health` 200。**缘起**：owner 要求「从 futbin 里看看能不能获取 playstyles 的图标」，随后追加「把 playstyle 描述介绍等工作做了」，并拍板四入口全做、图鉴入口放右上角 ≡。**交付**：72 枚 64×64 WebP（36 银 + 36 金，共 136 KB）落 `web/public/assets/icons/playstyles/`；`web/assets/ref/playstyle-desc.json` 36 条中文（定位句 + 银/金两档，底稿取自 FUTBIN `26/playstyles`、中文重写）；新页 `/playstyles` 六类图鉴 + ≡ 菜单入口；徽章桌面 `title` / 窄屏底部说明层；商店徽章卡行内说明；`run_worker_first` 扩 `/assets/icons/*`，Worker 把 SPA 回落改判 404（`no-store`）。验收：typecheck 三份清、`npm test` **191 文件 / 3,008 例**全绿（新增 3 文件 19 例）、build 通过、变异 M1–M7 全红。判级 **minor**。测试计划 `docs/test-plans/v6.69.0-playstyles.md`。细节见下文 v6.69.0 节。
@@ -104,6 +106,34 @@
 **更早版本 v6.12.0**（D3 随机事件域第三块：满意度与经营信号消费端 + LLM 草稿工坊 + 种子扩池；含迁移 `0051`/`0052`/`0053` 并直接编辑了未 apply 的 `0047`）——**已随 2026-09-28 发布批次上线**：迁移 `0045`–`0053` 共 9 枚已于 push 前 apply 到生产（`npm run db:migrate:remote` 一次全过，只读核验 `brand_pool` 7 行 / `event_pool` 30 条种子 / `d1_migrations` 53 / `satisfaction`·`reminded_at`·`next_attendance_mod`·`next_weather` 列全在场，待应用清单归零），随后 push `68fc154..77f6eea`（20 个提交，覆盖 A / B / C1 / E / D1 / D2 / D3 七块）触发 CF Workers Builds 自动部署，生产 Version **`55a54d84-9ca6-4b7d-999f-27064197238d`**（2026-09-28T10:02:19Z，Source `Unknown (deployment)`）。上线回读：`/api/health` / `/api/players?limit=1` / `/api/market/listings` / `/api/clubs` / `/api/squads` 全 200；D3 端点匿名探针 `/api/admin/events/pool` / `/api/admin/events/drafts` / `/api/admin/events/llm-status` / `/api/club/events` 均 401（挂载且守卫生效）；线上入口资产 `index-CF1Lyhhj.js` + `index-BY0ef8kg.css` 与本地 v6.12.0 重构建产物 sha256 逐字节一致（线上 JS 版本串 `6.12.0`；首次比对不一致是本地 dist 构建于 bump 版本号之前，重构建后一致）。同批上线的还有：上一版本 v6.11.0（D2 随机事件域第二块：选择型事件 + 玩家互动 + 超时兜底；含迁移 `0050`）、v6.10.0（D1 随机事件域第一块：`event_pool` 24 条种子 + `event_occurrences` + 管理端触发 + 11 键效果即时结算；含迁移 `0047`/`0048`/`0049`）、v6.9.0（E 块球场档期：`venue_bookings` + 5 类活动预订 + 关窗结算入账；含迁移 `0046`）、v6.8.0（C1 冠名活化：品牌池落库 + 行业系数 + 续约 + 热度动态；含迁移 `0045`）、v6.7.0（B 块可见性：近期主场战报 + 窗口财务汇总；零迁移零生产写，本地 `51a2380` + `5327b27`）与 v6.6.3（fix 订正：青训等级接入死忠演化 + 战绩查询按 tour 队 id 认人，本地 `1dd3924`）——各版本细节见下文同名节。**生产迁移现状：已到 `0054`**（v6.13.0 发布批次 apply）。再上一版本 v6.6.2（迁移 `0044` 已于 2026-09-27 apply 到生产；本批只加两条索引与测试锁、无 `src/` 运行时改动 ⇒ 收益即时生效；**已 push `6925cbd..68fc154` 并随 CF 自动部署上线**，Version `c15bb1ea-5d3c-4619-9730-687e99fbeaae`，2026-09-27T16:25:37Z，同批带上 v6.6.1 上线记录与另一会话的 e2e 修复 `68fc154`；生产迁移已到 `0044`）。v6.6.2 = 排序索引 batch 8（`fc_id` 排序侧 + `view=initial` 的 `pa` 变体）+ `fc_id` 筛选保持裸列的实测例外，见下文同名节；v6.6.1（已 push `49e6802..6925cbd` 并随 CF 自动部署上线，Version `1f5498c5-569e-41e9-8544-7901c1beae65`，2026-09-27T08:11:24Z）= 排序索引 batch 7（`china_plan` / `agent_tier` / `growth_gap` 两个视图口径）+ 成长空间筛选同源；同一次 push 还带上了 v6.6.0（球员库按角色筛选）与一份文档纪律说明。v6.3.0 设计定稿见记忆目录 `design-v6.3.0-offer-negotiation.md`；v6.3.1 是财政域留痕补齐 + 一笔线上订正（生产库已订正）；v6.3.2 给 `audit_log` 加 `origin` 列（来源通道）并把 `actor` 契约统一为「人类行为人 id，机器一律 NULL」（含迁移 `0039`，部署有顺序约束；历史 100 行 `origin` 回填已于 2026-09-26 执行，`null_origin = 0`）。v6.2.0 / v6.3.0 / v6.3.1 均已上线（v6.2.0 与 v6.3.0 收口时误记为「未 push 未部署」，2026-09-26 订正）；v6.4.0（报价子系统）/ v6.4.1（筛选侧同源化）/ v6.5.0（球员「标记」属性 + 队徽修复）/ v6.6.0（角色筛选）见下文各节。
 
 ---
+
+## v6.71.0 · 下放名额配置、训练营硬拦与自愈地板（2026-11-03）
+
+**状态**：**已上线（2026-11-03）**：`npm run deploy`（build + wrangler deploy）生效 Version `99b7169e-9acd-4adf-b33e-82f378603088`；零迁移。生产入口 `assets/index-De3yG08v.js` 版本串 `6.71.0`；`/api/health` 200、匿名 `POST /api/transfers/demote` 401。`demote_quota` 已 upsert 并回读 243/14/112172 = 7、default 2。
+
+**缘起**
+
+owner 要求「上调下放进行一次从入口到出口的校验」，并给皇家马德里（243）/ RB 莱比锡（112172）/ 诺丁汉森林（14）本窗各 7 个下放名额（不受默认 2 个限制）。校验发现：名额硬编码 2；下放不校验训练营人数；下放不作废待生效续约（关窗会把 trainee 0.75/5 覆盖成续约条款）；名额「读后写」并发可超额；`healSettlement` 对训练营会话取 `session.release_fee` 而非 5，把 Virgili 的 RC 从 5 重放成 1；合同导入不同步 `players.status`，生产留 5 条两边卡死的行。
+
+**交付**
+
+- `src/core/config.ts` 新增 `demote_quota`（`{default?, by_club?, by_window?}`，缺省 2）；`src/worker/promotion.ts` 新增 `demoteQuotaFor` / `traineeMaxFor` / `traineeCountFor`，下放预检与 INSERT 原子守卫同值（名额 + 训练营人数）；audit / 合同 / 球员 / 作废语句共用 `settledGuard`，INSERT 0 行整批 no-op。
+- 下放同一批作废 `contract_demands`（pending/countered/accepted）与 `contract_pending_changes`（pending），`void_reason='demoted'`；审计 after 带 `voidedDemandIds` / `voidedPendingIds`。
+- `healSettlement` 对 `settle_source='trainee'` 使用 `TRAINEE_RELEASE_FEE`；`completeTransfer` 在 `dealTerms` 存在时同批置 `transfers.terms_applied=1`。
+- `contracts-import.ts` 按导入的 `contract_type` 同步 `players.status` 的 normal↔trainee 同向不一致（挂牌等其它状态不动）。
+- 前端文案：`SideOps` 去掉「每窗每队 2 个」；`NegotiationsSection` 去掉「2 个」。
+
+**生产数据修复（2026-11-03）**
+
+- 切尔西 5 条导入脏行按合同类型对齐 `players.status`：671/1331 → trainee，915/1148/1157 → normal（实测 changes 2 / 3）。
+- Jan Virgili（2292）的 trainee 合同 `release_fee` 由 1 改回 5（实测 changes 1）。
+- `demote_quota` upsert 为 `{"default":2,"by_window":{"9:2":{"243":7,"14":7,"112172":7}}}`（实测 changes 1）。
+
+**验收**
+
+- `npm run typecheck` 三份清；`npm test` **192 文件 / 3,007 例**全绿（新增 8 例：TC-D8~D12、成约 `terms_applied`、自愈 RC 地板、导入 status 同步）；`npm run build` 通过。
+- code-review-skill：无阻塞项；登记三点（全局 `trainee_max` 会限制实际可用名额、导入 status 同步不避开进行中的上调谈判、UI 不显示本队实际名额）。
+- 实际可用上限：皇马现有 3 名 trainee、诺丁汉 1、莱比锡 0；`trainee_max=7` 时本窗最多再下放 4 / 6 / 7 人。要放满 7 人需先上调现有 trainee，或调高 `trainee_max`。
 
 ## v6.70.0 · 名单镜像与窗口期薪资（2026-11-03）
 
