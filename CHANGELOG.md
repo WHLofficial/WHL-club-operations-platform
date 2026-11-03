@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.72.2] · 修复：「我的出价」展开任意球员整页白屏（2026-11-03）
+
+**Fixed**
+
+- **转会台「我的出价」点开任意一行就白屏**：`GET /api/market/listings/:id`（`src/worker/routes/market.ts`）的响应里一直没有 `highestBid` / `highestBidder` 两个字段，但前端 `MarketListingDetail` 复用 `MarketListing` 的类型声明、转会台面板又按 `listing.highestBidder !== null` 判断——详情里该字段是 `undefined`，判真后读 `.name` 抛 `TypeError: Cannot read properties of undefined (reading 'name')`；`web/src` 没有 ErrorBoundary，React 直接卸载整棵树 ⇒ 整页空白（`#root.innerHTML` 长度归零）。
+- **修法**：① 详情端点补回 `highestBid` / `highestBidder`，由端点内已有的 `MAX(amount)` 与出价历史两趟结果直接算，零额外 D1 往返；② 转会台面板两个字段改按 `== null` 判，旧缓存 / 缺字段的载荷也不再炸。
+- **回归**：`tests/market-routes.test.ts` 两条断言补进既有用例——有出价时详情回 `highestBid=15` 与领先方队名，无出价时两字段显式 `null`。旧代码上这两条恰好红（其余 37 绿），新代码全绿。
+
+**Notes**
+
+- 零迁移、零契约变更（补的是前端类型早已声明的字段）、判级 patch。
+- 本地实测：种子会话打开 `/market/desk?tab=bids`，展开挂牌 #103 —— 修前 `pageerror: Cannot read properties of undefined (reading 'name')`、`#root` 空、整页白屏；修后面板正常显示「要价 9.00m · 当前最高 9.00m（Baseline Utd）」与出价表单，无 console 报错。
+- 验收：`npm run typecheck` 三份清；`npm test` **193 文件 / 3,020 例**全绿；`npm run build` 通过。
+
 ## [v6.72.1] · 修复：一条已结算的上调会话把签约谈判列表打成 409（2026-11-03）
 
 **Fixed**
