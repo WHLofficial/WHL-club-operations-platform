@@ -25,7 +25,7 @@
 
 - 零迁移；`demote_quota` 未配置时回默认 2。
 - 验收：`npm run typecheck` 三份清；`npm test` **192 文件 / 3,007 例**全绿（新增 8 例）；`npm run build` 通过。
-- 上线（2026-11-03）：`wrangler deploy` 生效 Version `99b7169e-9acd-4adf-b33e-82f378603088`；生产入口 `assets/index-De3yG08v.js` 版本串 `6.71.0`；`/api/health` 200；`demote_quota` 已 upsert 并回读 243/14/112172 = 7、default 2。
+- 上线（2026-11-03）：`wrangler deploy` 生效 Version `99b7169e-9acd-4adf-b33e-82f378603088`；随后 push `615dd2e..915db6e` 到 `main`，CF Workers Builds 自动部署 Version `39184915-3978-4189-8bce-8682c5487e94`（同产物）。生产入口 `assets/index-De3yG08v.js` 版本串 `6.71.0`；`/api/health` 200；`demote_quota` 已 upsert 并回读 243/14/112172 = 7、default 2。
 
 ## [v6.70.0] · 名单镜像与窗口期薪资（2026-11-03）
 

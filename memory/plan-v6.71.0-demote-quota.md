@@ -95,10 +95,13 @@ UPDATE contracts SET release_fee=5 WHERE player_id=2292 AND is_active=1 AND cont
 - `npm run typecheck`。
 - 生产只读复核：名额计数、trainee 人数、pending 清理。
 
-## 完成状态（2026-11-03 本地）
+## 完成状态（2026-11-03）
 
-- 代码、测试、文案、测试计划增补均已完成；未提交、未 push、未部署。
-- `npm run typecheck` 三份清；`npm test` **192 文件 / 3,007 例全绿**（新增 8 例：TC-D8~D12、apply-contract-terms 2 例、导入 status 同步 1 例）。
-- 生产写未执行：wrangler remote 连续报 `Unable to resolve Cloudflare's API hostname`，等网络恢复后按第 8/9 节执行数据修复与 `demote_quota` 配置。
+- 代码、测试、文案、测试计划增补均已完成并 `npm run deploy` 上线；push `615dd2e..915db6e` 到 `main` 触发 CF 自动部署。
+- Version：手动部署 `99b7169e-9acd-4adf-b33e-82f378603088` → 自动部署 `39184915-3978-4189-8bce-8682c5487e94`（同产物 `assets/index-De3yG08v.js`，版本串 6.71.0）。
+- `npm run typecheck` 三份清；`npm test` **192 文件 / 3,007 例全绿**；`npm run build` 通过。
+- 生产数据修复已执行：切尔西 671/1331→trainee（changes 2）、915/1148/1157→normal（changes 3）、Virgili 2292 RC→5（changes 1）。
+- `demote_quota` 已 upsert 并回读：243/14/112172 = 7、default 2。
 - 可用名额提醒：皇马现有 3 名 trainee，`trainee_max=7` ⇒ 本窗最多再下放 4 人；诺丁汉 1 ⇒ 6；莱比锡 0 ⇒ 7。要真正用满 7 个名额，需先上调现有 trainee 或调高全局 `trainee_max`。
+- 环境备注：本机解析器对 `api.cloudflare.com` 返回畸形响应，已在 hosts 加临时映射 `104.19.192.29 api.cloudflare.com` 恢复 wrangler 访问；后续如再遇 `Unable to resolve Cloudflare's API hostname` 先检查该行。
 
