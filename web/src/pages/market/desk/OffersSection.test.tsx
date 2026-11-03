@@ -487,8 +487,8 @@ describe('v6.40.0 对话式谈判桌（OffersSection）', () => {
     const badge = screen.getByText('砍价');
     expect(badge.className).toContain('badge');
     expect(badge.className).toContain('orange');
-    // 挂在整数金额后面，是「当前价」格的一部分，不占独立列（单位 m 由 moneyIntText 自带）
-    expect(badge.closest('td')?.textContent).toBe('12m砍价');
+    // 挂在整数金额后面，是金额格的一部分，不占独立列（单位 m 由 moneyIntText 自带）
+    expect(badge.closest('.desk-amount')?.textContent).toBe('12m砍价');
   });
 
   it('砍价徽标：达到/超过标价（16 ≥ 15）不出现', async () => {
@@ -505,32 +505,29 @@ describe('v6.40.0 对话式谈判桌（OffersSection）', () => {
 
   // ---- ≤760px：表格换卡片行（横滑根因是 .table-wrap{overflow-x:auto}） ----
 
-  it('窄屏：清单渲染卡片行（对手 · 金额 · 轮次 · 秒级时间戳 + 谈判桌），不再渲染表格', async () => {
+  it('窄屏：清单渲染按球员聚合行（对手 · 金额 · 轮次 + 谈判桌），不再渲染表格', async () => {
     renderSection([offer({ status: 'pending', role: 'seller', myTurn: true, turn: 'seller' })], undefined, 0, '/', false, true);
-    const cards = await waitFor(() => {
-      const el = document.querySelector('.mkt-desk-cards');
-      if (!el) throw new Error('还没有卡片列表');
+    const rows = await waitFor(() => {
+      const el = document.querySelector('.desk-list');
+      if (!el) throw new Error('还没有球员行');
       return el as HTMLElement;
     });
-    const card = within(cards);
-    expect(card.getByText('测试球员')).toBeTruthy();
-    expect(card.getByText('对方俱乐部')).toBeTruthy();
-    expect(card.getByText('12m')).toBeTruthy();
-    // 窄屏金额写法（m04916）：「对手 · 金额」——十位小数换成「对方俱乐部 · 12m」
-    expect(document.querySelector('.dc-mid')?.textContent).toMatch(/对方俱乐部\s*·\s*12m/);
-    expect(card.getByText('R2')).toBeTruthy();
-    expect(card.getByText('待你表态')).toBeTruthy();
-    expect(card.getByText('砍价')).toBeTruthy();
-    expect(cards.querySelector('table')).toBeNull();
-    expect(cards.textContent).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
-    expect(card.getByRole('button', { name: '谈判桌' })).toBeTruthy();
+    const row = within(rows);
+    expect(row.getByText('测试球员')).toBeTruthy();
+    expect(row.getByText(/对方俱乐部/)).toBeTruthy();
+    expect(row.getByText('12m')).toBeTruthy();
+    expect(row.getByText(/R2/)).toBeTruthy();
+    expect(row.getByText('待你回应')).toBeTruthy();
+    expect(row.getByText('砍价')).toBeTruthy();
+    expect(rows.querySelector('table')).toBeNull();
+    expect(row.getByRole('button', { name: '谈判桌' })).toBeTruthy();
   });
 
-  it('窄屏：卡片行也能开桌（同一份 openId），目标行高亮仍生效', async () => {
+  it('窄屏：球员行也能开桌（同一份 openId），目标行高亮仍生效', async () => {
     const o = offer({ id: 5, status: 'pending' });
     renderSection([o], detailResponse(o, pendingEvents()), 0, '/market/desk?tab=offers&box=in&offer=5', false, true);
     await screen.findByRole('dialog');
-    await waitFor(() => expect(document.querySelector('.mkt-desk-card.is-target')).toBeTruthy());
+    await waitFor(() => expect(document.querySelector('.desk-row.is-target')).toBeTruthy());
     expect(document.querySelectorAll('.is-target').length).toBe(1);
   });
 });
@@ -621,16 +618,19 @@ describe('v6.40.2 开桌即读（列表行播种，TC-DESK-11..14）', () => {
 
 // v6.55.0 意向单多笔并存（TC-A-031）：同球员多条 intent 时 hint 显隐与行级定位
 describe('v6.55.0 意向单多笔并存（OffersSection，TC-A-031）', () => {
-  it('TC-A-031a 同球员 2 条 intent：hint「确认一条后其余自动失效」显示，两行各自 data-offer-id 可定位', async () => {
+  it('TC-A-031a 同球员 2 条 intent：hint「确认一条后其余自动失效」显示，聚合成一行、行内两条历史', async () => {
     renderSection([
       offer({ id: 5, role: 'seller' }),
       offer({ id: 6, role: 'seller', amount: 13, counterpart: { id: 4, name: '第三家俱乐部' } }),
     ]);
     expect(await screen.findByText(/确认一条后其余自动失效/)).toBeTruthy();
-    // 行级定位：两条 intent 各占一行（同一球员没被折叠），各自的谈判桌按钮都在
-    expect(document.querySelector('[data-offer-id="5"]')).toBeTruthy();
-    expect(document.querySelector('[data-offer-id="6"]')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: '谈判桌' })).toHaveLength(2);
+    // v6.72.0 期 A：同一球员只占一行；两条 intent 在行内历史里，各自可定位
+    expect(document.querySelectorAll('[data-offer-id]')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '谈判桌' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /展开 测试球员 详情/ }));
+    await waitFor(() => expect(document.querySelectorAll('.desk-hist-row')).toHaveLength(2));
+    expect(document.querySelector('[data-offer-id]')?.getAttribute('data-player-id')).toBe('9');
+    expect(screen.getAllByRole('button', { name: '谈判桌' })).toHaveLength(3); // 行尾 + 两条历史
   });
 
   it('TC-A-031b 仅 1 条 intent：hint 不显示', async () => {
@@ -639,14 +639,16 @@ describe('v6.55.0 意向单多笔并存（OffersSection，TC-A-031）', () => {
     expect(screen.queryByText(/确认一条后其余自动失效/)).toBeNull();
   });
 
-  it('TC-A-031c 同球员 intent 行与 pending 行并存：两类行都渲染、不互相挤掉，单条 intent 不显 hint', async () => {
+  it('TC-A-031c 同球员 intent 与 pending 并存：聚合成一行，当前单为 pending、历史里仍见 intent', async () => {
     renderSection([
       offer({ id: 5, role: 'seller', status: 'intent' }),
       offer({ id: 6, role: 'seller', status: 'pending', myTurn: true, turn: 'seller', amount: 11 }),
     ]);
-    expect(await screen.findByText('意向单·等开窗')).toBeTruthy();
-    expect(screen.getByText('待回复')).toBeTruthy();
-    expect(document.querySelectorAll('[data-offer-id]')).toHaveLength(2);
+    expect(await screen.findByText('待你回应')).toBeTruthy();
+    expect(document.querySelectorAll('[data-offer-id]')).toHaveLength(1);
     expect(screen.queryByText(/确认一条后其余自动失效/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /展开 测试球员 详情/ }));
+    await waitFor(() => expect(document.querySelectorAll('.desk-hist-row')).toHaveLength(2));
+    expect(screen.getByText('意向单·等开窗')).toBeTruthy();
   });
 });

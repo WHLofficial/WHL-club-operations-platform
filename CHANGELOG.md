@@ -4,6 +4,23 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.72.0] · 转会台按球员聚合（期 A；零迁移零新端点）（2026-11-03）
+
+**Changed**
+
+- **我的转会台三页签按球员聚合**：报价 / 出价 / 签约谈判每个球员只占一行；当前单/当前谈判在行内，历史单据展开可见（桌面行内展开，≤760px 底部抽屉）。新增 `web/src/pages/market/desk/status.ts`（统一状态词表与徽标）、`desk-rows.ts`（纯函数分组/当前单/动作）、`DeskPlayerRow.tsx`（共用行）。
+- **报价页签**：保留对话浮层与 `?offer=` 深链，行主按钮仍为「谈判桌」；同一球员的多条报价/意向单收进行内历史，切换 box/status 清空展开态。
+- **出价页签**：行内按当前挂牌展示 `MarketBidForm`，历史出价展开；余额与 100 笔上限提示保留。
+- **签约谈判**：`SessionCard` 保留在行内，单行默认展开、多行默认收起；已结束谈判仍走页尾折叠。
+- **读路径惰性结算**：`GET /api/me/bids` 与 `GET /api/negotiations?mine=1` 补 30s coalesce `settleOverdue`（`waitUntil`，无 executionCtx 回退 `await`），避免刚截止的挂牌/静默会话在列表里多留一帧。
+- **移动端**：共用行在 ≤760px 用抽屉，桌面行高 56px；`useMediaQuery` 对无 `matchMedia` 环境兜底。
+
+**Notes**
+
+- 零迁移、零新端点；本期只做期 A，球员页浮层/入口角标在期 B/C。
+- 验收：`npm run typecheck` 三份清；`npm test` **193 文件 / 3,018 例**全绿；`npm run build` 通过。
+- 上线（2026-11-03）：push 触发 CF Workers Builds；Version / 入口资产待回读。
+
 ## [v6.71.0] · 下放名额可配置 + 训练营硬拦 + 自愈地板（2026-11-03）
 
 **Added**

@@ -1178,6 +1178,14 @@ app.get('/me/bids', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) return c.json({ club: null, bids: [] });
+  // v6.72.0 期 A：转会台读路径也惰性结算一次，避免挂牌刚截止时出价页签还显示旧状态。
+  // 30s 合并窗 + waitUntil：不把全量结算压进响应；测试没有 executionCtx 时就地 await。
+  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch((e) => {
+    console.error('[market] 我的出价读路径后台结算失败:', e);
+  });
+  const wu = waitUntilOf(c);
+  if (wu) wu.waitUntil(settleRun);
+  else await settleRun;
   const rows = await c.env.DB.prepare(
     `SELECT b.id, b.listing_id, b.amount, b.created_at, b.status AS bid_status,
             f.status AS hold_status, l.status AS listing_status, l.ask_price,

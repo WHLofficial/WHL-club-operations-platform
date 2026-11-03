@@ -25,7 +25,6 @@ import {
   apiPost,
   type OfferDetailResponse,
   type OfferEventRow,
-  type OfferListItem,
   type OfferSettingsDto,
   type OfferStatus,
   type OffersListResponse,
@@ -36,7 +35,6 @@ import ActivationProofButton from '../ActivationProofButton.tsx';
 import { moneyIntText } from '../../../lib/club-cards.ts';
 import { money } from '../../market/shared.tsx';
 import { creditUse } from '../../../lib/credit-line.ts';
-import { useMediaQuery } from '../../../lib/use-media.ts';
 import { useOverlayShell } from '../../../lib/use-overlay-shell.ts';
 import {
   offerDetailQuery,
@@ -48,20 +46,9 @@ import {
 } from '../../../lib/queries.ts';
 import { useToast } from '../../../lib/toast.tsx';
 import { useTimeFmt } from '../../../lib/datetime.ts';
-
-// 清单窄屏断点：与浮层底部抽屉同一条（760px 是本站主流断点，见 Player.tsx / ComparePickerOverlay）
-const CARDS_QUERY = '(max-width: 760px)';
-
-const STATUS_BADGE: Record<OfferStatus, { label: string; cls: string }> = {
-  pending: { label: '待回复', cls: 'sky' },
-  // v6.29.0 意向单：关窗期双方谈成，先挂意向单（不生成挂牌、冻结继续）；开窗后卖方确认才物化
-  intent: { label: '意向单·等开窗', cls: 'gold' },
-  // v6.23.0 阶段徽标：同意报价即自动挂牌，文案点明「已进入竞价」，免得与成约混淆
-  accepted: { label: '已接受·挂牌竞价中', cls: 'green' },
-  rejected: { label: '被拒绝', cls: 'red' },
-  withdrawn: { label: '已撤回', cls: 'gray' },
-  expired: { label: '已过期', cls: 'gray' },
-};
+import DeskPlayerRow from './DeskPlayerRow.tsx';
+import { groupOffersByPlayer, type OfferPlayerRow } from './desk-rows.ts';
+import { offerBadge } from './status.ts';
 
 const EVENT_LABEL: Record<string, string> = {
   open: '送出报价',
@@ -142,10 +129,8 @@ export default function OffersSection({
   onStatusChange: (next: 'pending' | 'all') => void;
 }) {
   const { show, toastNode } = useToast();
-  const { time, dateTimeSec } = useTimeFmt();
   const qc = useQueryClient();
   const invalidateOffers = useOffersInvalidation();
-  const cards = useMediaQuery(CARDS_QUERY);
 
   const list = useOffers(box, status, true);
   const [params] = useSearchParams();
@@ -162,7 +147,8 @@ export default function OffersSection({
   // 两段式确认的目标动作（拒绝 / 放弃 / 撤回）：点在就地确认条上才真发请求
   const [confirming, setConfirming] = useState<OfferAction | null>(null);
   const [busy, setBusy] = useState(false);
-  const rowRefs = useRef(new Map<number, HTMLElement>());
+  // 行内历史是独立开关；开「谈判桌」不等于展开行（窄屏抽屉与浮层叠在一起会互相抢焦点）
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
   const lastFilter = useRef<string | null>(null);
 
   const detailData = detail.data ?? null;
@@ -187,9 +173,9 @@ export default function OffersSection({
   // 目标行在场时滚到它（jsdom 没有 scrollIntoView，守卫写法照 MarketActivationPage 的先例）
   useEffect(() => {
     if (targetOfferId === null || openId !== targetOfferId) return;
-    const el = rowRefs.current.get(targetOfferId);
+    const el = document.querySelector(`[data-offer-id="${targetOfferId}"]`) as HTMLElement | null;
     if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
-  }, [targetOfferId, openId, list.data, cards]);
+  }, [targetOfferId, openId, list.data]);
 
   // 换单 / 关桌时把草稿与确认条复位，免得一单的输入漏到下一单
   useEffect(() => {
@@ -213,11 +199,13 @@ export default function OffersSection({
   function switchBox(next: 'in' | 'out') {
     onBoxChange(next);
     setOpenId(null);
+    setExpandedRows(new Set<number>());
   }
 
   function switchStatus(next: 'pending' | 'all') {
     onStatusChange(next);
     setOpenId(null);
+    setExpandedRows(new Set<number>());
   }
 
   async function act(action: OfferAction) {
@@ -260,28 +248,22 @@ export default function OffersSection({
     }
   }
 
-  // 一排可点开的「谈判桌」按钮：桌面表格行 / 窄屏卡片行共用同一份行数据与 openId
   // v6.40.2：悬停 / 聚焦就预取详情——真点开时多半已进缓存（全局 staleTime 30s），浮层只剩渲染
   const prefetchDesk = (id: number) => void qc.prefetchQuery(offerDetailQuery(id));
-  const openButton = (o: OfferListItem) => (
-    <button
-      type="button"
-      className="btn btn-sm btn-ghost"
-      aria-expanded={openId === o.id}
-      onPointerEnter={() => prefetchDesk(o.id)}
-      onFocus={() => prefetchDesk(o.id)}
-      onClick={() => setOpenId(openId === o.id ? null : o.id)}
-    >
-      谈判桌
-    </button>
-  );
+  const rows = items === null ? null : groupOffersByPlayer(items);
 
-  const targetClass = (o: OfferListItem) => (targetOfferId === o.id && openId === o.id ? 'is-target' : undefined);
+  function toggleRow(playerId: number) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(playerId)) next.delete(playerId);
+      else next.add(playerId);
+      return next;
+    });
+  }
 
-  const registerRow = (o: OfferListItem) => (el: HTMLElement | null) => {
-    if (el) rowRefs.current.set(o.id, el);
-    else rowRefs.current.delete(o.id);
-  };
+  function openOffer(id: number) {
+    setOpenId((prev) => (prev === id ? null : id));
+  }
 
   return (
     <section id="desk-offers" aria-label="报价">
@@ -334,108 +316,68 @@ export default function OffersSection({
         </div>
       )}
 
-      {items !== null && items.length > 0 && cards && (
-        <div className="mkt-desk-cards">
-          {items.map((o) => {
-            const badge = STATUS_BADGE[o.status];
-            return (
-              <div key={o.id} className={`mkt-desk-card${targetClass(o) ? ' is-target' : ''}`} data-offer-id={o.id} ref={registerRow(o)}>
-                <div className="dc-top">
-                  <Link to={playerPath(o.player)}>{o.player.name}</Link>
-                  <span className={`badge ${badge.cls}`}>{badge.label}</span>
-                </div>
-                <div className="dc-mid">
-                  <span className="dc-opp">{o.counterpart.name}</span>
-                  {' · '}
-                  <span className="mono dc-amount">{moneyIntText(o.amount)}</span>
-                  <span className="muted mono">R{o.round}</span>
-                  {o.status === 'pending' ? (
-                    o.myTurn ? (
-                      <span className="badge gold">待你表态</span>
-                    ) : (
-                      <span className="muted">等对方</span>
-                    )
-                  ) : o.status === 'intent' ? (
-                    o.role === 'seller' ? (
-                      <span className="badge gold">待卖方确认</span>
-                    ) : (
-                      <span className="muted">等对方确认</span>
-                    )
-                  ) : null}
-                  {o.status === 'pending' && o.role === 'seller' && o.player.listPrice !== null && o.amount < o.player.listPrice && (
-                    <span className="badge orange">砍价</span>
-                  )}
-                </div>
-                <div className="dc-bot">
-                  <span className="muted mono">{dateTimeSec(o.updatedAt)}</span>
-                  {openButton(o)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {items !== null && items.length > 0 && !cards && (
+      {rows !== null && rows.length > 0 && (
         <section className="card admin-section">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>球员</th>
-                  <th>{box === 'in' ? '买方' : '卖家'}</th>
-                  <th className="num">当前价</th>
-                  <th className="num">轮次</th>
-                  <th>轮到谁</th>
-                  <th>状态</th>
-                  <th>最近动作</th>
-                  <th aria-label="操作" />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((o) => {
-                  const badge = STATUS_BADGE[o.status];
-                  return (
-                    <tr key={o.id} data-offer-id={o.id} className={targetClass(o)} ref={registerRow(o)}>
-                      <td>
-                        <Link to={playerPath(o.player)}>{o.player.name}</Link>
-                      </td>
-                      <td>{o.counterpart.name}</td>
-                      <td className="num mono">
-                        {moneyIntText(o.amount)}
-                        {/* 砍价徽标（v6.33.0）：卖方视角、活单、报价低于对方公开标价时标出（标价本身公开，徽标不泄底线） */}
-                        {o.status === 'pending' && o.role === 'seller' && o.player.listPrice !== null && o.amount < o.player.listPrice && (
-                          <span className="badge orange">砍价</span>
-                        )}
-                      </td>
-                      <td className="num mono">R{o.round}</td>
-                      <td>
-                        {o.status === 'pending' ? (
-                          o.myTurn ? (
-                            <span className="badge gold">待你表态</span>
-                          ) : (
-                            <span className="muted">等对方</span>
-                          )
-                        ) : o.status === 'intent' ? (
-                          o.role === 'seller' ? (
-                            <span className="badge gold">待卖方确认</span>
-                          ) : (
-                            <span className="muted">等对方确认</span>
-                          )
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td>
-                        <span className={`badge ${badge.cls}`}>{badge.label}</span>
-                      </td>
-                      <td className="muted">{time(o.updatedAt)}</td>
-                      <td>{openButton(o)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="desk-list">
+            {rows.map((row) => {
+              const openInRow = openId !== null && row.offers.some((o) => o.id === openId);
+              const targetInRow = targetOfferId !== null && row.offers.some((o) => o.id === targetOfferId);
+              const dataOfferId = targetInRow && targetOfferId !== null ? targetOfferId : row.current.id;
+              const isTarget = targetInRow && openId === targetOfferId;
+              const haggling =
+                row.current.status === 'pending' &&
+                row.current.role === 'seller' &&
+                row.current.player.listPrice !== null &&
+                row.current.amount < row.current.player.listPrice;
+              const intentTurn =
+                row.current.status === 'intent'
+                  ? row.current.role === 'seller'
+                    ? '待卖方确认'
+                    : '等对方确认'
+                  : null;
+              return (
+                <DeskPlayerRow
+                  key={row.player.id}
+                  player={row.player}
+                  meta={
+                    <>
+                      {row.current.counterpart.name} · R{row.current.round}
+                      {row.offers.length > 1 ? ` · ${row.offers.length} 单` : ''}
+                      {intentTurn && (
+                        <>
+                          {' '}
+                          <span className="badge gold">{intentTurn}</span>
+                        </>
+                      )}
+                    </>
+                  }
+                  amount={moneyIntText(row.amount) ?? '—'}
+                  amountBadges={haggling ? <span className="badge orange">砍价</span> : undefined}
+                  badge={row.badge}
+                  action={{ ...row.action, label: '谈判桌' }}
+                  onAction={() => openOffer(row.current.id)}
+                  onActionHover={() => prefetchDesk(row.current.id)}
+                  actionExpanded={openInRow}
+                  expanded={expandedRows.has(row.player.id)}
+                  onToggle={() => toggleRow(row.player.id)}
+                  dataOfferId={dataOfferId}
+                  rowClassName={isTarget ? 'is-target' : undefined}
+                >
+                  <OfferPlayerPanel
+                    row={row}
+                    openId={openId}
+                    onOpen={(id) => {
+                      setExpandedRows((prev) => {
+                        const next = new Set(prev);
+                        next.delete(row.player.id);
+                        return next;
+                      });
+                      openOffer(id);
+                    }}
+                  />
+                </DeskPlayerRow>
+              );
+            })}
           </div>
           {list.data?.nextCursor && (
             <p className="muted">还有更早的单子没列出来（清单按最近动作排，只列 50 条；更早的用「全部」筛选往后翻）。</p>
@@ -462,6 +404,58 @@ export default function OffersSection({
         />
       )}
     </section>
+  );
+}
+
+function OfferPlayerPanel({
+  row,
+  openId,
+  onOpen,
+}: {
+  row: OfferPlayerRow;
+  openId: number | null;
+  onOpen: (id: number) => void;
+}) {
+  const { dateTimeSec } = useTimeFmt();
+  return (
+    <>
+      <div>
+        <p className="desk-panel-title">这球员的报价</p>
+        <ul className="desk-history">
+          {row.offers.map((o) => {
+            const badge = offerBadge(o);
+            return (
+              <li key={o.id} className={`desk-hist-row${o.id === row.current.id ? ' is-current' : ''}`}>
+                <div className="desk-hist-main">
+                  <span className="mono">{moneyIntText(o.amount)}</span>{' '}
+                  <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                  <div className="desk-hist-sub">
+                    {o.counterpart.name} · R{o.round} · {dateTimeSec(o.updatedAt)}
+                  </div>
+                </div>
+                <span className="desk-hist-tag">
+                  <IdTag kind="报价" value={o.id} />
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  aria-expanded={openId === o.id}
+                  onClick={() => onOpen(o.id)}
+                >
+                  谈判桌
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <div>
+        <p className="desk-panel-title">说明</p>
+        <p className="hint">
+          同一球员只占一行；行内列的是我和他之间的历史单。点「谈判桌」看整条对话，点行尾主按钮看当前这一单。
+        </p>
+      </div>
+    </>
   );
 }
 
@@ -577,7 +571,7 @@ function OfferDesk({
               <div className="nego-head-top">
                 <h3 className="nego-title">
                   <Link to={playerPath(offer.player)}>{offer.player.name}</Link>
-                  <span className={`badge ${STATUS_BADGE[offer.status].cls}`}>{STATUS_BADGE[offer.status].label}</span>
+                  <span className={`badge ${offerBadge(offer).cls}`}>{offerBadge(offer).label}</span>
                   {/* v6.68.0 期 A：编号改成可复制（原来只有静态「已挂牌 #N」文本） */}
                   {offer.listingId !== null && (
                     <span className="badge green">

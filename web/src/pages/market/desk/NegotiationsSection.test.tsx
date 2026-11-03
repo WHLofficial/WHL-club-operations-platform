@@ -319,11 +319,14 @@ describe('v6.40.0 签约谈判对话流（NegotiationsSection）', () => {
   });
 });
 
-// v6.65.2：每条会话可折叠（B 交互 + C 信息密度）。折叠是视图态——正文 hidden 而不卸载，
-// 已填的工资草稿必须活过一轮收起/展开。
-describe('v6.65.2 谈判卡折叠', () => {
-  const FOLD_KEY = 'whl-nego-fold-v1';
-  const SEEN_KEY = 'whl-nego-seen-v1';
+// v6.72.0 期 A：谈判页签也按球员聚合；单行默认展开，多行默认收起。
+// 正文仍然 hidden 而不卸载（keepMounted），已填的工资草稿要活过一轮收起/展开。
+describe('v6.72.0 谈判球员行折叠', () => {
+  const other = negoSession({
+    id: 23,
+    transferId: 33,
+    player: { id: 8, fcId: 100008, name: '前锋丁', position: 'ST', age: 26, ca: 70, pa: 80 },
+  });
 
   beforeEach(() => {
     localStorage.clear();
@@ -333,67 +336,61 @@ describe('v6.65.2 谈判卡折叠', () => {
     localStorage.clear();
   });
 
-  function foldButtons() {
-    return screen.getAllByRole('button', { name: /(展开|收起)谈判详情/ }) as HTMLButtonElement[];
+  function chevrons() {
+    return screen.getAllByRole('button', { name: /^(展开|收起) .+ 详情$/ }) as HTMLButtonElement[];
   }
 
-  it('两条以上默认全收起：正文隐藏，chevron 均 aria-expanded=false', async () => {
-    renderNego([negoSession({}), negoSession(WAGE_ROUND)]);
-    await screen.findAllByText('中场丙');
+  it('两条不同球员的会话：各占一行，默认全收起', async () => {
+    renderNego([negoSession({}), other]);
+    await screen.findAllByText(/中场丙|前锋丁/);
     // 正文仍在 DOM 里（输入态要活着），但整块带 hidden
+    expect(document.querySelectorAll('.desk-row').length).toBe(2);
     expect(document.querySelectorAll('.nego-body').length).toBe(2);
     expect(document.querySelectorAll('.nego-body:not([hidden])').length).toBe(0);
-    const buttons = foldButtons();
+    const buttons = chevrons();
     expect(buttons.length).toBe(2);
     for (const b of buttons) expect(b.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('点 chevron 展开该条：aria-expanded 翻真，正文显示', async () => {
-    renderNego([negoSession({}), negoSession(WAGE_ROUND)]);
-    await screen.findAllByText('中场丙');
-    fireEvent.click(foldButtons()[0]);
-    expect(foldButtons()[0].getAttribute('aria-expanded')).toBe('true');
+  it('点 chevron 展开该行：aria-expanded 翻真，正文显示', async () => {
+    renderNego([negoSession({}), other]);
+    await screen.findAllByText(/中场丙|前锋丁/);
+    fireEvent.click(chevrons()[0]);
+    expect(chevrons()[0].getAttribute('aria-expanded')).toBe('true');
     expect(document.querySelectorAll('.nego-body:not([hidden])').length).toBe(1);
   });
 
-  it('点卡头非交互区也能切换；点 chevron 只翻一次（不因冒泡翻两次）', async () => {
-    renderNego([negoSession({}), negoSession(WAGE_ROUND)]);
-    const name = (await screen.findAllByText('中场丙'))[0];
-    fireEvent.click(name.closest('h3')!); // 卡头空白区（h3 自身，非链接/按钮）
-    expect(foldButtons()[0].getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(foldButtons()[0]);
-    expect(foldButtons()[0].getAttribute('aria-expanded')).toBe('false');
+  it('点行体非交互区也能切换；点 chevron 只翻一次（不因冒泡翻两次）', async () => {
+    renderNego([negoSession({}), other]);
+    await screen.findAllByText(/中场丙|前锋丁/);
+    fireEvent.click(document.querySelectorAll('.desk-row-main')[0]);
+    expect(chevrons()[0].getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(chevrons()[0]);
+    expect(chevrons()[0].getAttribute('aria-expanded')).toBe('false');
   });
 
   it('收起再展开：已填的工资草稿还在（正文用 hidden 没被卸载）', async () => {
     renderNego([negoSession(WAGE_ROUND)]);
     const input = (await screen.findByLabelText('工资报价（m/半赛季）')) as HTMLInputElement;
     fireEvent.change(input, { target: { value: '5.5' } });
-    fireEvent.click(foldButtons()[0]);
-    expect(foldButtons()[0].getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(foldButtons()[0]);
+    fireEvent.click(chevrons()[0]);
+    expect(chevrons()[0].getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(chevrons()[0]);
     const again = screen.getByLabelText('工资报价（m/半赛季）') as HTMLInputElement;
     expect(again.value).toBe('5.5');
   });
 
-  it('localStorage 记的 closed 优先于默认值，且已回流的会话键会被裁掉', async () => {
-    localStorage.setItem(FOLD_KEY, JSON.stringify({ '21': 'closed', '999': 'closed' }));
-    renderNego([negoSession({})]); // 单条，但本地记了收起
+  it('单条默认展开；localStorage 里的旧折叠键不再参与', async () => {
+    localStorage.setItem('whl-nego-fold-v1', JSON.stringify({ '21': 'closed' }));
+    renderNego([negoSession({})]);
     await screen.findByText('中场丙');
-    expect(foldButtons()[0].getAttribute('aria-expanded')).toBe('false');
-    const stored = JSON.parse(localStorage.getItem(FOLD_KEY) ?? '{}') as Record<string, string>;
-    expect(stored['999']).toBeUndefined();
+    expect(chevrons()[0].getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('摘要行三段常驻；末轮反馈晚于最后展开时间时提示「有新反馈」', async () => {
-    localStorage.setItem(FOLD_KEY, JSON.stringify({ '22': 'closed' }));
-    localStorage.setItem(SEEN_KEY, JSON.stringify({ '22': '2026-09-19T00:00:00.000Z' }));
-    renderNego([negoSession(WAGE_ROUND), negoSession({})]);
-    await screen.findAllByText('中场丙');
-    const sums = Array.from(document.querySelectorAll('.nego-sum')).map((el) => el.textContent ?? '');
-    const fresh = sums.find((t) => t.includes('有新反馈'));
-    expect(fresh).toBeTruthy();
-    const text = fresh ?? '';
+  it('摘要行三段常驻（上次报价 / 预期工资 / 静默还剩）', async () => {
+    renderNego([negoSession(WAGE_ROUND)]);
+    await screen.findByText(/违约金定为/);
+    const text = document.querySelector('.nego-sum')?.textContent ?? '';
     expect(text).toContain('上次报价');
     expect(text).toContain('预期工资');
     expect(text).toContain('静默还剩');

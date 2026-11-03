@@ -138,12 +138,14 @@ const TABLES_BY_FILE_MIN: Record<string, number> = {
   'web/src/pages/market/MarketIntelPage.tsx': 1,
   // v6.23.0 转会台：原 Negotiations/Offers/MarketMinePage 三页的表格随代码搬进 desk 三区；
   // v6.32.0：NegotiationsSection 删「已落定的谈判」表（历史归球队中心转会页签）⇒ 2 → 1（报价记录表）
-  'web/src/pages/market/desk/ListingsBidsSection.tsx': 1,
+  // v6.72.0 期 A：出价页签按球员聚合，出价表改 .desk-row ⇒ 1 → 0
+  'web/src/pages/market/desk/ListingsBidsSection.tsx': 0,
   // v6.40.0 签约谈判对话式：报价记录表折进卡内对话流（逐轮反馈左气泡 + 结果系统行）⇒ 1 → 0
   'web/src/pages/market/desk/NegotiationsSection.tsx': 0,
   // v6.40.0 报价谈判对话式：行下谈判桌的事件表改对话流（无表）⇒ 2 → 1（只剩报价清单表；
   // ≤760px 该表在渲染层被卡片行替代，但「清单仍有表」这条契约照旧，表还在源码里）
-  'web/src/pages/market/desk/OffersSection.tsx': 1,
+  // v6.72.0 期 A：报价页签按球员聚合，报价清单表改 .desk-row ⇒ 1 → 0（对话浮层不变）
+  'web/src/pages/market/desk/OffersSection.tsx': 0,
 };
 /** 全树 <table> 基线 = 点名页之和（v6.37.0 起 45，v6.40.0 起 43）：跌破说明扫描器空转（假绿） */
 const TABLE_BASELINE = Object.values(TABLES_BY_FILE_MIN).reduce((sum, n) => sum + n, 0);

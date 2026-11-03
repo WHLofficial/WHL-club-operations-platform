@@ -5,9 +5,13 @@
 import { useEffect, useState } from 'react';
 
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  // jsdom / 非浏览器环境没有 matchMedia：按桌面处理，别在渲染期直接抛
+  const [matches, setMatches] = useState(() =>
+    typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false,
+  );
 
   useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
     const mq = window.matchMedia(query);
     // query 变化时立刻对齐一次，别等下一次跨断点
     setMatches(mq.matches);

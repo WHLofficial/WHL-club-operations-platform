@@ -24,6 +24,9 @@ import { freeAgentFee, freeAgentFeeGap } from '../../../../../src/core/bypass-ru
 import OpsGateNote from '../../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../../lib/ops-gate.ts';
 import DemandSection from './DemandSection.tsx';
+import DeskPlayerRow from './DeskPlayerRow.tsx';
+import { groupNegotiationsByPlayer } from './desk-rows.ts';
+import { needsReleaseFee } from './status.ts';
 
 const TIER_BADGE: Record<number, string> = { 1: 'green', 2: 'gray', 3: 'red' };
 
@@ -38,46 +41,7 @@ const MAX_NEGO_ROUNDS = 3;
 const TRAINEE_WAGE = 0.75;
 const TRAINEE_RELEASE_FEE = 5;
 
-// v6.65.2：每条会话可折叠（B 交互 + C 信息密度）。折叠是纯视图态——正文用 hidden 隐藏而不是卸载，
-// 否则 OfferStep 里已填的工资、两段式确认和 ReleaseFeeStep 的输入都会被清空。
-const FOLD_KEY = 'whl-nego-fold-v1';
-const SEEN_KEY = 'whl-nego-seen-v1';
-const FOLD_LIMIT = 100;
-
-function readStore<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    const parsed: unknown = JSON.parse(raw);
-    return parsed !== null && typeof parsed === 'object' ? (parsed as T) : fallback;
-  } catch {
-    return fallback; // 存了脏值就当没有
-  }
-}
-
-function writeStore(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // 隐私模式 / 配额满：折叠状态丢了不影响谈判本身
-  }
-}
-
-/** 只留当前进行中的会话，并按上限裁剪——会话结算后 id 不再出现，键不裁会一直堆积 */
-function pruneStore<T>(map: Record<string, T>, ids: number[]): Record<string, T> {
-  const keep = new Set(ids.map(String));
-  const next: Record<string, T> = {};
-  for (const [key, value] of Object.entries(map)) {
-    if (!keep.has(key)) continue;
-    next[key] = value;
-    if (Object.keys(next).length >= FOLD_LIMIT) break;
-  }
-  return next;
-}
-
-function sameSize(a: object, b: object): boolean {
-  return Object.keys(a).length === Object.keys(b).length;
-}
+// v6.72.0 期 A：行折叠改由 DeskPlayerRow 统一承载；桌面收起时面板 hidden 保留表单输入。
 
 /** 静默作废剩余时间：每分钟重算一次，到点显示「即将作废」（真正作废由 cron 的静默扫描执行） */
 function useMinuteTick(): number {
@@ -146,48 +110,30 @@ export default function NegotiationsSection() {
   }, [sessionsQuery.data]);
   const [endedOpen, setEndedOpen] = useState(false);
 
-  // v6.65.2：折叠状态与「最后看过」都放本地。默认值只在没有记录时生效：多张全收起、单张保持展开。
+  // v6.72.0 期 A：一行一球员；默认只在单行时展开，用户手动开合后以 openIds 为准。
   const now = useMinuteTick();
-  const [fold, setFold] = useState<Record<string, 'open' | 'closed'>>(() => readStore(FOLD_KEY, {}));
-  const [seen, setSeen] = useState<Record<string, string>>(() => readStore(SEEN_KEY, {}));
-  const activeIds = active.map((s) => s.id);
-  const activeIdsKey = activeIds.join(',');
+  const rows = useMemo(() => groupNegotiationsByPlayer(active), [active]);
+  const [openIds, setOpenIds] = useState<Set<number>>(new Set());
+  const [touched, setTouched] = useState(false);
 
-  // 拿到列表后才能裁剪：列表还没回来时 active 是空的，先裁会把本地记录全清掉。
-  useEffect(() => {
-    if (sessions === null) return;
-    setFold((prev) => {
-      const next = pruneStore(prev, activeIds);
-      if (sameSize(prev, next)) return prev;
-      writeStore(FOLD_KEY, next);
-      return next;
-    });
-    setSeen((prev) => {
-      const next = pruneStore(prev, activeIds);
-      if (sameSize(prev, next)) return prev;
-      writeStore(SEEN_KEY, next);
-      return next;
-    });
-  }, [activeIdsKey]);
+  function openRow(playerId: number) {
+    setTouched(true);
+    setOpenIds((prev) => new Set(prev).add(playerId));
+  }
 
-  function markSeen(id: number) {
-    const at = new Date().toISOString();
-    setSeen((prev) => {
-      const next = pruneStore({ ...prev, [String(id)]: at }, activeIds);
-      writeStore(SEEN_KEY, next);
+  function toggleRow(playerId: number) {
+    const currentlyOpen = isRowOpen(playerId);
+    setTouched(true);
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyOpen) next.delete(playerId);
+      else next.add(playerId);
       return next;
     });
   }
 
-  function toggleFold(id: number, nextOpen: boolean) {
-    const value: 'open' | 'closed' = nextOpen ? 'open' : 'closed';
-    setFold((prev) => {
-      const next = pruneStore({ ...prev, [String(id)]: value }, activeIds);
-      writeStore(FOLD_KEY, next);
-      return next;
-    });
-    if (nextOpen) markSeen(id); // 展开即「看过了」
-  }
+  const isRowOpen = (playerId: number): boolean =>
+    touched ? openIds.has(playerId) : rows.length === 1;
 
   // 成约即过户 ⇒ 顺手把新援的球衣号定了（v4.0.0）。号码不是必填，所以留「先跳过」。
   async function afterSettled(msg: string, player: { id: number; name: string }) {
@@ -221,26 +167,48 @@ export default function NegotiationsSection() {
         </div>
       )}
 
-      {active.map((s) => {
-        const stored = fold[String(s.id)];
-        const open = stored === undefined ? active.length < 2 : stored === 'open';
-        const last = s.attempts.length > 0 ? s.attempts[s.attempts.length - 1] : null;
-        const seenAt = seen[String(s.id)] ?? null;
-        // 收起态下，末轮反馈晚于「最后一次展开」才提示；从没展开过的不打标，免得新会话一进来全是提示
-        const fresh = !open && seenAt !== null && last !== null && last.at > seenAt;
+      {rows.map((row) => {
+        const s = row.current;
+        const open = isRowOpen(row.player.id);
+        const amount =
+          s.releaseFee !== null
+            ? (moneyIntText(s.releaseFee) ?? '—')
+            : s.expectedWage !== null
+              ? `${money(s.expectedWage)}m`
+              : '—';
         return (
-          <SessionCard
+          <DeskPlayerRow
             key={s.id}
-            session={s}
-            open={open}
-            fresh={fresh}
-            silence={silenceText(s.expiresAt, now)}
-            onToggle={() => toggleFold(s.id, !open)}
-            onChanged={refresh}
-            onSettled={afterSettled}
-            onError={(m) => show(m, true)}
-            show={show}
-          />
+            player={row.player}
+            meta={
+              <>
+                {s.fromClubName ?? '—'} → {s.toClubName ?? '—'} · 经纪人{s.agentTierLabel} · 静默{' '}
+                {silenceText(s.expiresAt, now)}
+                {row.history.length > 1 ? ` · ${row.history.length} 场在途` : ''}
+              </>
+            }
+            amount={amount}
+            badge={row.badge}
+            action={row.action}
+            actionExpanded={open}
+            onAction={() => openRow(row.player.id)}
+            expanded={open}
+            onToggle={() => toggleRow(row.player.id)}
+            keepMounted
+          >
+            <SessionCard
+              session={s}
+              open={open}
+              fresh={false}
+              silence={silenceText(s.expiresAt, now)}
+              onToggle={() => toggleRow(row.player.id)}
+              onChanged={refresh}
+              onSettled={afterSettled}
+              onError={(m) => show(m, true)}
+              show={show}
+              hideHeader
+            />
+          </DeskPlayerRow>
         );
       })}
 
@@ -360,16 +328,7 @@ function NumberPrompt({
 
 /* ---------- 单个进行中的会话 ---------- */
 
-/**
- * 第一步（定新违约金）是否还没做完（v6.67.0）。
- * 常规 = `releaseFee === null`；强制拍卖放开后还会遇到「RC 已预填、但预期工资未确认」的在途单
- * （数据库里 `release_fee` 留着当预填值、`expected_wage` 清空），这类同样要回到第一步。
- */
-function needsReleaseFee(s: NegotiationSession): boolean {
-  return s.releaseFee === null || (s.transfer.type === 'forced_auction' && s.expectedWage === null);
-}
-
-function SessionCard({
+export function SessionCard({
   session,
   open,
   fresh,
@@ -379,6 +338,7 @@ function SessionCard({
   onSettled,
   onError,
   show,
+  hideHeader = false,
 }: {
   session: NegotiationSession;
   open: boolean;
@@ -389,6 +349,8 @@ function SessionCard({
   onSettled: (msg: string, player: { id: number; name: string }) => Promise<void>;
   onError: (msg: string) => void;
   show: (text: string, err?: boolean) => void;
+  /** 期 A 球员行已经承载球员名/阶段/折叠按钮，卡头不再重复 */
+  hideHeader?: boolean;
 }) {
   const s = session;
   const { dateTimeSec } = useTimeFmt();
@@ -398,6 +360,7 @@ function SessionCard({
   return (
     <section className="card">
       {/* v6.65.2 卡头：整行可点（链接/输入/按钮除外），右侧 chevron 是真按钮，键盘与 aria 都靠它 */}
+      {!hideHeader && (
       <div
         className="nego-head"
         onClick={(e) => {
@@ -430,6 +393,7 @@ function SessionCard({
           <span aria-hidden="true">▾</span>
         </button>
       </div>
+      )}
       <p className="hint nego-sum">
         上次报价 <span className="mono">{lastOffer === null ? '尚未报价' : `${money(lastOffer)}m`}</span> · 预期工资{' '}
         <span className="mono">{s.expectedWage === null ? '待定' : `${money(s.expectedWage)}m`}</span> · 静默还剩{' '}

@@ -10026,3 +10026,233 @@ button.sqc-pos:hover {
     opacity: 1;
   }
 }
+
+/* ============================================================================
+   v6.72.0 期 A · 转会台按球员聚合（.desk-*）：
+   三个页签共用一套行：桌面 56px 五列 grid，≤760 同一份行改两行卡片，
+   展开内容在桌面内联、窄屏走 .mkt-ov* 底部抽屉（DeskPlayerRow 负责）。
+   断点只有 760 一条；640/900 是顶栏的，不要混进来。
+   ============================================================================ */
+
+.desk-list {
+  margin-top: 10px;
+}
+
+.desk-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.desk-row:last-child {
+  border-bottom: 0;
+}
+
+.desk-row-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px 130px 104px 32px;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  cursor: pointer;
+}
+
+.desk-row-main:hover {
+  background: rgba(43, 29, 18, 0.03);
+}
+
+.desk-row.is-open .desk-row-main {
+  background: rgba(43, 29, 18, 0.03);
+}
+
+.desk-player {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.desk-player a {
+  align-self: flex-start;
+  max-width: 100%;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.desk-player a:hover {
+  text-decoration: underline;
+}
+
+.desk-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desk-amount {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.desk-badge {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.desk-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.desk-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.desk-chevron:hover {
+  background: rgba(43, 29, 18, 0.06);
+}
+
+.desk-chevron span {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.desk-chevron[aria-expanded='true'] span {
+  transform: rotate(180deg);
+}
+
+.desk-row-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0 16px;
+  border-top: 1px dashed var(--border);
+}
+
+.desk-row-panel > .card {
+  grid-column: 1 / -1;
+}
+
+.desk-panel-title {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.desk-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.desk-hist-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12.5px;
+}
+
+.desk-hist-row:last-child {
+  border-bottom: 0;
+}
+
+.desk-hist-row.is-current {
+  background: rgba(43, 29, 18, 0.03);
+}
+
+.desk-hist-main {
+  min-width: 0;
+}
+
+.desk-hist-sub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desk-hist-tag {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.desk-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.desk-drawer-body {
+  max-height: min(60vh, 560px);
+  padding: 12px 14px calc(16px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+.desk-empty {
+  padding: 14px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+@media (max-width: 760px) {
+  .desk-row-main {
+    grid-template-areas:
+      'player amount chevron'
+      'badge action action';
+    grid-template-columns: minmax(0, 1fr) auto 28px;
+    gap: 6px 10px;
+    min-height: 64px;
+    padding: 10px 0;
+  }
+
+  .desk-player {
+    grid-area: player;
+  }
+
+  .desk-amount {
+    grid-area: amount;
+    font-size: 15px;
+  }
+
+  .desk-badge {
+    grid-area: badge;
+  }
+
+  .desk-action {
+    grid-area: action;
+  }
+
+  .desk-chevron {
+    grid-area: chevron;
+  }
+
+  .desk-row-panel {
+    display: none;
+  }
+}

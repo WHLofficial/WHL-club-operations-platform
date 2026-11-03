@@ -8,7 +8,9 @@ import { Hono } from 'hono';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach, type SessionUser } from '../../lib/session.ts';
+import { waitUntilOf } from '../../lib/guard.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
+import { settleOverdue } from '../market-settle.ts';
 import { chooseTrainee, listMySessions, offerWage, previewWage, submitReleaseFee } from '../negotiations.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -31,6 +33,14 @@ async function requireTradableCoachClub(env: Env, request: Request): Promise<{ u
 app.get('/', async (c) => {
   const { clubId } = await requireCoachClub(c.env, c.req.raw);
   if (c.req.query('mine') !== '1') throw new HttpError(400, '只支持 ?mine=1 查自己的谈判');
+  // v6.72.0 期 A：谈判台读路径惰性结算，避免静默到期的会话在列表里多留一帧。
+  // 30s 合并窗 + waitUntil；测试没有 executionCtx 时就地 await。
+  const settleRun = settleOverdue(c.env, { origin: 'lazy_settle', coalesceMs: 30_000 }).catch((e) => {
+    console.error('[negotiations] 我的谈判读路径后台结算失败:', e);
+  });
+  const wu = waitUntilOf(c);
+  if (wu) wu.waitUntil(settleRun);
+  else await settleRun;
   // v6.65.4 已结束区：游标 + 每页 10 条（上限 50），非法值直接 400 而不是悄悄回退默认
   const rawBefore = c.req.query('endedBefore');
   const rawLimit = c.req.query('endedLimit');
