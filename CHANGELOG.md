@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.73.1] · 修复：关窗页看板工资按关窗后口径（2026-11-03）
+
+**Fixed**
+
+- **关窗页看板的「工资 / 超」与关窗体检、站内信、`squad_audits` 存档都只算现行合同**，本窗到期的续约、涨薪要在关窗批里才写进合同，于是「关窗前体检通过、关窗后立刻超帽」，站内信也报旧数字。
+- **修法**：`src/worker/squad-audit.ts` 新增 `loadPendingWages`，只取 `status='pending' AND effective_window_seq <= 当前窗序号` 且合同仍在 pending 所属俱乐部的行（与 `applyPendingContractChanges` 的 `still_at_club` 判据一致）；`SquadAuditRow.wageAfter = wageNow + Σ(wage_new − wage)`，超帽 / `wage_cap` 体检 / 站内信 / 存档统一吃关窗后口径。管理端看板「工资」列显示 `wageAfter`，鼠标悬停给现行值。
+
+**Notes**
+
+- 零迁移；本窗工资扣费仍按旧 wage（`windowPayrollStatements` 在 apply 之前，设计口径未动）。
+- 生产现状（2026-11-03 只读）：S9 第 2 窗开着，13 队共 51 条待生效；最大增额诺丁汉森林 47.87→50.84，皇马 60.06→51.08（裁薪）。
+- 回归：`tests/squad-audit.test.ts` 两条（本窗到期才计入 / 下一窗不提前算；站内信与存档数字），旧代码恰红。
+- 验收：`npm run typecheck` 三份清；`npm test` **195 文件 / 3,040 例**全绿；`npm run build` 通过；本地浏览器看板 Baseline Utd 工资列 16.10（现行 8.60 + 待生效 7.50）。
+
 ## [v6.73.0] · 转会台改版期 B：入口与角标（2026-11-03）
 
 **Added**
