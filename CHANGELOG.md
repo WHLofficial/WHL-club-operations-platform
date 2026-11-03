@@ -17,6 +17,7 @@
 - 生产现状（2026-11-03 只读）：S9 第 2 窗开着，13 队共 51 条待生效；最大增额诺丁汉森林 47.87→50.84，皇马 60.06→51.08（裁薪）。
 - 回归：`tests/squad-audit.test.ts` 两条（本窗到期才计入 / 下一窗不提前算；站内信与存档数字），旧代码恰红。
 - 验收：`npm run typecheck` 三份清；`npm test` **195 文件 / 3,040 例**全绿；`npm run build` 通过；本地浏览器看板 Baseline Utd 工资列 16.10（现行 8.60 + 待生效 7.50）。
+- 上线（2026-11-03 18:18 CST / 10:18Z，与 v6.73.0 期 B 同批）：push `67916ca..a44e280`，CF Workers Builds 自动部署 Version `57f73b8c-dee6-4a91-b673-d4651a95324b`（100%）；生产入口 `assets/index-D3i-9jo6.js` 与本地构建 sha256 一致（`a206151f…`），包内版本串 `6.73.1`、管理端懒加载块 `MarketPage-IVjsww4y.js` 含 `wageAfter`；`/api/admin/windows/overview` 匿名 401。
 
 ## [v6.73.0] · 转会台改版期 B：入口与角标（2026-11-03）
 
@@ -38,6 +39,7 @@
 - 变异验证：删 `l.status='bidding'` ⇒ 3 红；删报价 `turn` 条件 ⇒ 2 红；深链默认页签改回 `nego` ⇒ 1 红；TopBar 去掉 `total>0` 条件 ⇒ 2 红；`refetchInterval` 改 `false` ⇒ 1 红；均已恢复。
 - 验收：`npm run typecheck` 三份全清；`npm test` **195 文件 / 3,038 例**全绿（v6.72.2 基线 193 / 3,020，净 +2 文件 / +18 例）；`npm run build` 成功，入口 `assets/index-DxrUk2fh.js`（730.79 kB / gzip 230.57 kB），版本串 `6.73.0`。
 - 判级 minor（新增用户可见入口与角标能力；向后兼容，无迁移）。
+- 上线（2026-11-03 18:18 CST / 10:18Z，与 v6.73.1 同批 push）：Version `57f73b8c-…`、入口 `assets/index-D3i-9jo6.js`（两版同产物）；`/api/market/desk/summary` 匿名 401、`/market/desk?tab=bids&player=248` 200。
 
 ## [v6.72.2] · 修复：「我的出价」展开任意球员整页白屏（2026-11-03）
 
