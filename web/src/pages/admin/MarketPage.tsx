@@ -1016,7 +1016,9 @@ function WindowOverview() {
                 <td className="num mono">{r.firstTeam}</td>
                 <td className="num mono">{r.trainee}</td>
                 <td className="num mono">{r.unsigned > 0 ? <span className="bad-text">{r.unsigned}</span> : 0}</td>
-                <td className="num mono">{r.wageNow.toFixed(2)}</td>
+                <td className="num mono" title={`现行 ${r.wageNow.toFixed(2)}m`}>
+                  {r.wageAfter.toFixed(2)}
+                </td>
                 <td className="num mono">{r.wageCap === null ? '—' : r.wageCap.toFixed(0)}</td>
                 <td className="num mono">{r.overspend > 0 ? <span className="bad-text">{r.overspend.toFixed(2)}</span> : '—'}</td>
                 <td>

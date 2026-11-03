@@ -831,6 +831,8 @@ export interface WindowOverviewRow {
   trainee: number;
   unsigned: number;
   wageNow: number;
+  /** 关窗后工资（v6.72.3）：现行合同 + 本窗到期落地的续约/涨薪 */
+  wageAfter: number;
   wageCap: number | null;
   overspend: number;
   pass: boolean;

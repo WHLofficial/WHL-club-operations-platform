@@ -500,7 +500,7 @@ export async function closeWindow(
       const rules = [...new Set(a.issues.map((i) => SQUAD_RULE_LABEL[i.rule] ?? i.rule))].join('、');
       const text =
         `⚠️ S${win.season} 第 ${win.windowSeq} 窗关窗体检：阵容不通过（涉及规则：${rules || '无'}）。` +
-        (a.overspend > 0 ? `工资 ${a.wageNow.toFixed(2)}m，超出帽值 ${a.overspend.toFixed(2)}m。` : `工资 ${a.wageNow.toFixed(2)}m。`) +
+        (a.overspend > 0 ? `工资 ${a.wageAfter.toFixed(2)}m，超出帽值 ${a.overspend.toFixed(2)}m。` : `工资 ${a.wageAfter.toFixed(2)}m。`) +
         `本次不处置，下窗关闭前请按教练页红字清单调整。`;
       await queueClubNotification(env, a.clubId, 'squad_audit_failed', {
         text,

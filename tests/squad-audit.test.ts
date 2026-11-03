@@ -129,4 +129,60 @@ describe('关窗核验与看板', () => {
     const row = sqlite.prepare('SELECT COUNT(*) AS n FROM registrations').get() as { n: number };
     expect(row.n).toBe(3);
   });
+
+  // v6.72.3：看板 / 体检 / 站内信一律按关窗后工资算——本窗到期的续约、涨薪关窗即落地，
+  // 用现行合同数字会给管理员一个「关窗前通过、关窗后超帽」的假绿。
+  it('工资按关窗后口径：本窗到期的续约/涨薪计入工资、超帽与体检', async () => {
+    const fx = fixture();
+    const { env, sqlite } = fx;
+    seed(sqlite);
+    seedTier(fx);
+    sqlite.exec('UPDATE contracts SET wage = 30 WHERE club_id = 1'); // 现行 60，帽 68
+    sqlite.exec(`INSERT INTO contract_pending_changes (player_id, club_id, source, wage_new, effective_window_seq, status, created_at)
+      VALUES (11, 1, 'renewal', 40, 1, 'pending', '2026-01-01')`);
+
+    // 没开窗：没有「本窗」，待生效不提前计入
+    let rows = await loadWindowOverview(env);
+    expect(rows[0].wageNow).toBe(60);
+    expect(rows[0].wageAfter).toBe(60);
+    expect(rows[0].overspend).toBe(0);
+
+    await openWindow(env, 1, 1, 1);
+    rows = await loadWindowOverview(env);
+    expect(rows[0].wageNow).toBe(60);
+    expect(rows[0].wageAfter).toBe(70); // 60 + (40 - 30)
+    expect(rows[0].overspend).toBe(2);
+    const cap = rows[0].issues.find((i) => i.rule === 'wage_cap')!;
+    expect(cap.message).toContain('70.00');
+
+    // 下一窗才生效的行不提前算
+    sqlite.exec('UPDATE contract_pending_changes SET effective_window_seq = 2');
+    rows = await loadWindowOverview(env);
+    expect(rows[0].wageAfter).toBe(60);
+  });
+
+  it('关窗站内信与存档用关窗后工资', async () => {
+    const fx = fixture();
+    const { env, sqlite } = fx;
+    seed(sqlite);
+    seedTier(fx);
+    sqlite.exec('UPDATE contracts SET wage = 30 WHERE club_id = 1');
+    sqlite.exec(`INSERT INTO contract_pending_changes (player_id, club_id, source, wage_new, effective_window_seq, status, created_at)
+      VALUES (11, 1, 'renewal', 40, 1, 'pending', '2026-01-01')`);
+    await openWindow(env, 1, 1, 1);
+    await closeWindow(env, 1, false);
+
+    const note = sqlite
+      .prepare(`SELECT payload FROM notifications WHERE club_id = 1 AND template = 'squad_audit_failed'`)
+      .get() as { payload: string } | undefined;
+    expect(note?.payload).toContain('70.00');
+
+    const audit = sqlite
+      .prepare('SELECT stats_json FROM squad_audits WHERE season = 1 AND window_seq = 1 AND club_id = 1')
+      .get() as { stats_json: string };
+    expect(JSON.parse(audit.stats_json)).toMatchObject({ wageNow: 60, wageAfter: 70, overspend: 2 });
+    // 关窗批真把新工资写进了合同
+    const wage = sqlite.prepare('SELECT wage FROM contracts WHERE player_id = 11').get() as { wage: number };
+    expect(wage.wage).toBe(40);
+  });
 });

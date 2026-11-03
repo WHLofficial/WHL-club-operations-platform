@@ -11,7 +11,7 @@ import { loadSquadContext } from './squad-context.ts';
 import { loadSquadViews, toSquadPlayer } from './squad-view.ts';
 import { checkSquad } from '../core/squad-rules.ts';
 import type { SquadIssue, SquadRuleContext } from '../core/squad-rules.ts';
-import { getVisibleSeason } from './seasons.ts';
+import { getOpenWindow, getVisibleSeason } from './seasons.ts';
 
 /** 规则名 → 中文（通知与看板 badge 共用；D10：只给金额与规则名，不点球员） */
 export const SQUAD_RULE_LABEL: Record<string, string> = {
@@ -33,6 +33,8 @@ export interface SquadAuditRow {
   trainee: number;
   unsigned: number;
   wageNow: number;
+  /** 关窗后工资（v6.72.3）：现行合同 + 本窗到期的待生效变更，口径与 applyPendingContractChanges 一致 */
+  wageAfter: number;
   wageCap: number | null;
   overspend: number;
   pass: boolean;
@@ -49,8 +51,40 @@ interface ClubRow {
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
+/**
+ * 本窗关窗时会落地的工资（v6.72.3）：`contract_pending_changes` 里 `effective_window_seq <= windowSeq`
+ * 的 pending 行，关窗批会把 `wage_new` 写进 contracts（demand-ops.ts `applyPendingContractChanges`）。
+ *
+ * 判据与 apply 段完全一致：只算「合同仍在 pending 所属俱乐部」的行——球员本窗已转会/解约时
+ * apply 会把这些行 void 掉（`left_club`），它们的工资不该预先计入。
+ * 看板、关窗体检、站内信与存档共用这一份口径，否则关窗那一刻数字会突然变脸。
+ */
+async function loadPendingWages(
+  env: Env,
+  windowSeq: number | null,
+): Promise<{ wageByPlayer: Map<number, number>; deltaByClub: Map<number, number> }> {
+  const wageByPlayer = new Map<number, number>();
+  const deltaByClub = new Map<number, number>();
+  if (windowSeq === null) return { wageByPlayer, deltaByClub };
+  const rows = (
+    await env.DB.prepare(
+      `SELECT pc.player_id, pc.club_id, pc.wage_new, c.wage AS wage_now
+       FROM contract_pending_changes pc
+       JOIN contracts c ON c.player_id = pc.player_id AND c.is_active = 1 AND c.club_id = pc.club_id
+       WHERE pc.status = 'pending' AND pc.effective_window_seq <= ?`,
+    )
+      .bind(windowSeq)
+      .all<{ player_id: number; club_id: number; wage_new: number; wage_now: number | null }>()
+  ).results;
+  for (const r of rows) {
+    wageByPlayer.set(r.player_id, r.wage_new);
+    deltaByClub.set(r.club_id, (deltaByClub.get(r.club_id) ?? 0) + (r.wage_new - (r.wage_now ?? 0)));
+  }
+  return { wageByPlayer, deltaByClub };
+}
+
 /** 逐队体检（内存态）：看板与关窗存档共用，避免两套口径。 */
-async function computeAudit(env: Env, season: number | null): Promise<
+async function computeAudit(env: Env, season: number | null, windowSeq: number | null): Promise<
   { clubs: ClubRow[]; views: Awaited<ReturnType<typeof loadSquadViews>>; contexts: Map<number, SquadRuleContext | null>; audits: SquadAuditRow[] }
 > {
   const db = env.DB;
@@ -78,6 +112,9 @@ async function computeAudit(env: Env, season: number | null): Promise<
   ).results) {
     wages.set(r.club_id, round2(r.total));
   }
+
+  // 本窗到期、关窗即落地的待生效工资（v6.72.3）：看板 / 体检 / 站内信 / 存档统一按关窗后口径
+  const { wageByPlayer, deltaByClub } = await loadPendingWages(env, windowSeq);
 
   const pending = new Map<number, number>();
   for (const r of (
@@ -113,13 +150,21 @@ async function computeAudit(env: Env, season: number | null): Promise<
     const ctx = contexts.get(club.id) ?? null;
     const isCpu = club.is_cpu === 1;
     const wageNow = wages.get(club.id) ?? 0;
+    // 关窗后工资：把本窗到期的续约 / 涨薪换进去，体检的 wage 规则与超帽同源
+    const wageAfter = round2(wageNow + (deltaByClub.get(club.id) ?? 0));
     const wageCap = ctx?.wageCap ?? null;
+    const withPendingWage = (rows: typeof view.firstTeam): typeof rows =>
+      wageByPlayer.size === 0 ? rows : rows.map((r) => (wageByPlayer.has(r.playerId) ? { ...r, wage: wageByPlayer.get(r.playerId)! } : r));
     // CPU 队不走规则、恒判通过（D11 / Q16）；stats 照实给，看板灰显。
     let pass = true;
     let issues: { rule: string; message: string }[] = [];
     if (!isCpu) {
       if (ctx !== null) {
-        const result = checkSquad(view.firstTeam.map(toSquadPlayer), view.trainee.map(toSquadPlayer), ctx);
+        const result = checkSquad(
+          withPendingWage(view.firstTeam).map(toSquadPlayer),
+          withPendingWage(view.trainee).map(toSquadPlayer),
+          ctx,
+        );
         pass = result.pass;
         issues = result.issues.map((i: SquadIssue) => ({ rule: i.rule, message: i.message }));
       }
@@ -140,8 +185,9 @@ async function computeAudit(env: Env, season: number | null): Promise<
       trainee: view.trainee.length,
       unsigned: view.unsigned.length,
       wageNow,
+      wageAfter,
       wageCap,
-      overspend: wageCap === null ? 0 : Math.max(0, round2(wageNow - wageCap)),
+      overspend: wageCap === null ? 0 : Math.max(0, round2(wageAfter - wageCap)),
       pass,
       issues,
       pendingTransfers: pending.get(club.id) ?? 0,
@@ -157,7 +203,9 @@ async function computeAudit(env: Env, season: number | null): Promise<
  */
 export async function loadWindowOverview(env: Env): Promise<SquadAuditRow[]> {
   const season = await getVisibleSeason(env.DB);
-  const { audits } = await computeAudit(env, season);
+  // 看板按「即将关闭的那个窗」算待生效：开着窗就是它，没开窗则没有会落地的变更
+  const win = await getOpenWindow(env.DB);
+  const { audits } = await computeAudit(env, season, win?.windowSeq ?? null);
   return audits.sort((a, b) => {
     if (a.pass !== b.pass) return a.pass ? 1 : -1;
     if (b.overspend !== a.overspend) return b.overspend - a.overspend;
@@ -175,7 +223,7 @@ export async function squadAuditStatements(
   windowSeq: number,
 ): Promise<{ statements: D1PreparedStatement[]; audits: SquadAuditRow[] }> {
   const db = env.DB;
-  const { views, audits } = await computeAudit(env, season);
+  const { views, audits } = await computeAudit(env, season, windowSeq);
   const statements: D1PreparedStatement[] = [];
   for (const audit of audits) {
     const view = views.get(audit.clubId) ?? { firstTeam: [], trainee: [], unsigned: [] };
@@ -207,6 +255,7 @@ export async function squadAuditStatements(
             trainee: audit.trainee,
             unsigned: audit.unsigned,
             wageNow: audit.wageNow,
+            wageAfter: audit.wageAfter,
             wageCap: audit.wageCap,
             overspend: audit.overspend,
             isCpu: audit.isCpu,
