@@ -932,6 +932,12 @@ app.get('/market/listings/:id', async (c) => {
     highestActive?.highest !== null && highestActive?.highest !== undefined
       ? Math.ceil(highestActive.highest + ctx.bidStepMin)
       : Math.ceil(listing.ask_price);
+  // v6.72.2：详情一直没回 highestBid / highestBidder，但前端类型（MarketListing 的扩展）和转会台
+  // 「当前最高」都在读它们——详情里是 undefined，`highestBidder !== null` 判真后读 .name 直接抛错，
+  // 展开行整页白屏。所需两趟查询都已在上面，直接由已有结果算，不加油耗。
+  const topBidAmount = highestActive?.highest ?? null;
+  const leader = topBidAmount === null ? null : (bids.results.find((b) => b.status === 'active' && b.amount === topBidAmount) ?? null);
+
 
   return c.json({
     marketBidPaused: bidPausedRaw === 'true',
@@ -945,6 +951,8 @@ app.get('/market/listings/:id', async (c) => {
       listedAt: listing.listed_at,
       lastBidAt: listing.last_bid_at,
       bidPaused: listing.bid_paused === 1,
+      highestBid: topBidAmount,
+      highestBidder: leader === null ? null : { id: leader.club_id, name: leader.club_name },
       releaseFee: contract?.release_fee ?? null,
       deadlineAt,
       deadlineNote: listing.deadline_note,

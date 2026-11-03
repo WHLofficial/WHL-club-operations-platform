@@ -254,10 +254,16 @@ describe('出价与资金冻结（§6.4-1 / §7.4）', () => {
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')?.status).toBe('bidding');
 
     const detail = await get('/api/market/listings/1', 'tok-coach2', fx.env);
-    const d = (await detail.json()) as { listing: { status: string; nextMinBid: number; windowOpen: boolean }; bids: unknown[] };
+    const d = (await detail.json()) as {
+      listing: { status: string; nextMinBid: number; windowOpen: boolean; highestBid: number | null; highestBidder: { id: number; name: string } | null };
+      bids: unknown[];
+    };
     expect(d.listing.status).toBe('bidding');
     expect(d.listing.nextMinBid).toBe(16);
     expect(d.listing.windowOpen).toBe(true);
+    // v6.72.2：详情补回最高价与领先方；转会台展开行直接读它们（缺失时曾整页白屏）
+    expect(d.listing.highestBid).toBe(15);
+    expect(d.listing.highestBidder).toMatchObject({ id: mf.bidderClub, name: '竞标队' });
     expect(d.bids).toHaveLength(1);
   });
 
@@ -917,8 +923,14 @@ describe('暂停出价（v2.1.0：全局开关 + 单挂牌冻结）', () => {
     expect(boardRows.find((r) => r.id === id1)?.bidPaused).toBe(true);
     expect(boardRows.find((r) => r.id === id2)?.bidPaused).toBe(false);
     const detail = await get(`/api/market/listings/${id1}`, 'tok-viewer', fx.env);
-    const detailBody = (await detail.json()) as { marketBidPaused: boolean; listing: { bidPaused: boolean } };
+    const detailBody = (await detail.json()) as {
+      marketBidPaused: boolean;
+      listing: { bidPaused: boolean; highestBid: number | null; highestBidder: { id: number; name: string } | null };
+    };
     expect(detailBody.listing.bidPaused).toBe(true);
+    // 无人出价时两个字段必须是显式 null（前端按 null 判「暂无」；undefined 会炸字段读取）
+    expect(detailBody.listing.highestBid).toBeNull();
+    expect(detailBody.listing.highestBidder).toBeNull();
     expect(detailBody.marketBidPaused).toBe(false);
     // 恢复后可出价；重复暂停同向操作幂等（仍在竞价期）
     expect((await post(`/api/admin/market/listings/${id1}/resume-bid`, {}, 'tok-admin', fx.env)).status).toBe(200);

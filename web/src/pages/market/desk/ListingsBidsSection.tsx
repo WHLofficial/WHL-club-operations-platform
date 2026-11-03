@@ -201,10 +201,12 @@ function BidPlayerPanel({
         {detail.isError && <div className="banner bad">{detail.error instanceof Error ? detail.error.message : '挂牌详情拉取失败'}</div>}
         {listing !== null && canBid && (
           <>
+            {/* v6.72.2：两个字段一律按 null 判（详情旧版/缓存缺字段时是 undefined —— 原先 `!== null`
+                判真后读 .name 抛错，整页白屏） */}
             <p className="hint">
               要价 <span className="mono">{money(listing.askPrice)}m</span> · 当前最高{' '}
-              <span className="mono">{listing.highestBid === null ? '暂无' : `${money(listing.highestBid)}m`}</span>
-              {listing.highestBidder !== null && <>（{listing.highestBidder.name}）</>}
+              <span className="mono">{listing.highestBid == null ? '暂无' : `${money(listing.highestBid)}m`}</span>
+              {listing.highestBidder != null && <>（{listing.highestBidder.name}）</>}
             </p>
             <MarketBidForm
               mode={listing.firstBidPending && listing.activatedBy === myClubId ? 'activation-first' : 'normal'}
