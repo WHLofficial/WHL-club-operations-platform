@@ -8,7 +8,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OfferSettingsDto } from '../../lib/api.ts';
+import type { OfferSettingsDto, TransferPanelResponse } from '../../lib/api.ts';
 import { resetOpsSchedule } from '../../lib/ops-gate.ts';
 import { SideOps } from './SideOps.tsx';
 
@@ -26,9 +26,35 @@ vi.mock('../../lib/api.ts', async (importOriginal) => {
 // settings 端点回的现值（面板草稿的预填源）；PUT 的响应由各用例单独 mock
 const SETTINGS: OfferSettingsDto = { transferListed: true, minOfferPrice: 40, listPrice: 60, offerAuto: false, notForSale: false };
 
-function stubApi(): void {
+// 期 C 状态条：默认空面板（无历史 ⇒ 不渲染额外状态条），个别用例换成有成交/谈判的面板
+const EMPTY_PANEL: TransferPanelResponse = {
+  club: { id: 1, name: '我的队' },
+  player: {
+    id: 1,
+    fcId: 1001,
+    name: '球员甲',
+    position: 'ST',
+    age: 25,
+    ca: 80,
+    pa: 88,
+    clubId: 1,
+    clubName: '我的队',
+    isMine: true,
+    status: 'normal',
+  },
+  listing: null,
+  bids: [],
+  myBids: [],
+  offers: { in: [], out: [] },
+  negotiation: null,
+  transfer: null,
+  asOf: '2026-01-01T00:00:00Z',
+};
+
+function stubApi(panel: TransferPanelResponse = EMPTY_PANEL): void {
   apiMock.mockImplementation((path: string) => {
     if (path === '/api/players/1/offer-settings') return Promise.resolve(SETTINGS);
+    if (path === '/api/players/1/transfer-panel') return Promise.resolve(panel);
     // 候选名单开关与余额条：教练态常驻查询，给空态即可，本文件只验证报价设置与激活入口
     if (path === '/api/club/shortlist/ids') return Promise.resolve({ playerIds: [], entries: [] });
     if (path === '/api/club/balance') return Promise.resolve({ balance: 100 });
@@ -236,5 +262,32 @@ describe('SideOps 激活入口（v6.60.0，TC-E）', () => {
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(show).toHaveBeenCalledWith('激活挂牌已提交：5 分钟内出首价才算数。');
+  });
+});
+
+describe('SideOps 期 C 转会状态条', () => {
+  it('已结束本队球员：一行「已售出」+ 查看详情打开浮层，浮层里不出现出价入口', async () => {
+    stubApi({
+      ...EMPTY_PANEL,
+      player: { ...EMPTY_PANEL.player, status: 'normal' },
+      transfer: {
+        id: 9,
+        type: 'transfer',
+        fee: 61,
+        fromClubId: 1,
+        fromClubName: '我的队',
+        toClubId: 4,
+        toClubName: '新东家',
+        completedAt: '2026-01-05T00:00:00Z',
+      },
+    });
+    renderOps();
+    await screen.findByText(/已售出 · 成交价 61.00m（去 新东家）/);
+    fireEvent.click(screen.getByRole('button', { name: '查看详情 ›' }));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    await screen.findByText('转会详情');
+    expect(screen.queryByRole('button', { name: /落激活首价/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
