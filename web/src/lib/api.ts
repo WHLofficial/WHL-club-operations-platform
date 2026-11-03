@@ -969,6 +969,57 @@ export interface MarketListingDetail {
   bids: { id: number; clubId: number; clubName: string; amount: number; createdAt: string; status: string }[];
 }
 
+/** 球员转会浮层（v6.74.0 期 C，设计 §6.1）：球员页状态条 / 浮层 / 转会台行展开共用一份响应 */
+export interface TransferPanelResponse {
+  club: { id: number; name: string } | null;
+  player: {
+    id: number;
+    fcId: number | null;
+    name: string;
+    position: string | null;
+    age: number | null;
+    ca: number | null;
+    pa: number | null;
+    clubId: number | null;
+    clubName: string | null;
+    isMine: boolean;
+    status: string;
+  };
+  /** 在流程内的最新一单；没有则回落最新已结束单；从未挂牌为 null */
+  listing: (MarketListingDetail['listing'] & { marketBidPaused: boolean }) | null;
+  bids: MarketListingDetail['bids'];
+  myBids: {
+    id: number;
+    listingId: number;
+    amount: number;
+    createdAt: string;
+    status: string;
+    holdStatus: 'held' | 'released' | 'settled' | null;
+  }[];
+  offers: { in: OfferListItem[]; out: OfferListItem[] };
+  negotiation: {
+    id: number;
+    status: 'active' | 'settled' | 'cancelled';
+    releaseFee: number | null;
+    expectedWage: number | null;
+    attemptsUsed: number;
+    remaining: number;
+    expiresAt: string | null;
+    settled: { wage: number; source: string; message: string } | null;
+  } | null;
+  transfer: {
+    id: number;
+    type: string;
+    fee: number | null;
+    fromClubId: number | null;
+    fromClubName: string | null;
+    toClubId: number | null;
+    toClubName: string | null;
+    completedAt: string | null;
+  } | null;
+  asOf: string;
+}
+
 export interface ActivationResult {
   ok: boolean;
   listingId: number;

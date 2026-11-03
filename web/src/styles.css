@@ -10329,3 +10329,80 @@ button.sqc-pos:hover {
     display: none;
   }
 }
+
+/* ---- 球员转会浮层（v6.74.0 期 C，设计 §6.3/§6.4）----
+   桌面居中；≤760px 走底部抽屉（与 .lib-drawer 同视觉语言）。内容六段依次排布。 */
+.transfer-dialog {
+  width: min(560px, 100%);
+  max-height: min(86vh, 900px);
+  overflow: auto;
+}
+.transfer-dialog.is-narrow {
+  width: 100%;
+  max-height: 88vh;
+  border-radius: 16px 16px 0 0;
+  align-self: flex-end;
+}
+.modal-mask:has(.transfer-dialog.is-narrow) {
+  align-items: flex-end;
+  padding: 0;
+}
+.transfer-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+  padding-bottom: 8px;
+}
+.transfer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.transfer-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.transfer-panel-head > :last-child {
+  margin-left: auto;
+}
+.transfer-panel-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.transfer-panel-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+  padding-top: 10px;
+}
+.transfer-panel-title {
+  font-size: 12px;
+  color: var(--mut, #8a7a68);
+  letter-spacing: 0.04em;
+}
+.transfer-panel-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.transfer-panel-link > :nth-child(2) {
+  margin-left: auto;
+}
+.transfer-panel-link:hover {
+  background: var(--hover, rgba(0, 0, 0, 0.04));
+}

@@ -27,7 +27,7 @@ import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { buildRumors, resolveRumorWindow } from '../rumors.ts';
 import { cpuClubIds } from '../growth.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
-import { loadMarketContext } from '../market-context.ts';
+import { loadMarketContext, type MarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
 import { balanceSnapshot } from '../ledger.ts';
 import { POSITION_BY_ID } from '../../core/fc26.ts';
@@ -50,7 +50,7 @@ function nowSql() {
 
 const LISTING_STATUSES = ['listed', 'bidding', 'matched_pending', 'pending_review', 'delisted'] as const;
 
-interface ListingRow {
+export interface ListingRow {
   id: number;
   player_id: number;
   player_fc_id: number | null;
@@ -860,6 +860,102 @@ app.get('/market/listings/:id/proof', async (c) => {
   return c.json({ url: `/api/media/${row.activation_proof}` });
 });
 
+export interface ListingBidRow {
+  id: number;
+  club_id: number;
+  amount: number;
+  created_at: string;
+  status: string;
+  club_name: string;
+}
+
+/**
+ * 挂牌详情 DTO 装配（v6.74.0 期 C 抽出）：`GET /market/listings/:id` 与球员转会浮层
+ * （`GET /players/:id/transfer-panel`）共用同一份口径——截止时刻、最低可出价、领先方、
+ * matchPhase 这些派生字段只在这里算一次，浮层不再手抄（v6.72.2 详情少字段白屏即前车之鉴）。
+ */
+export function listingDetailOf(
+  listing: ListingRow,
+  input: {
+    highest: number | null;
+    marketBidPaused: boolean;
+    contract: { release_fee: number | null } | null;
+    ctx: MarketContext;
+    windowOpen: boolean;
+    bids: ListingBidRow[];
+  },
+) {
+  const { highest, contract, ctx, windowOpen, bids } = input;
+
+  let deadlineAt: string | null = null;
+  // v6.24.0：listed 的普通挂牌也回截止时刻（挂牌即落 deadline_at）；激活首价窗看 activationDeadline
+  // v6.24.1：与列表口径一致——强制拍卖创建即落列，listed 同轨回传（激活仍豁免，看首价窗列）
+  if ((listing.status === 'bidding' || (listing.status === 'listed' && listing.type !== 'activation')) && listing.listed_day !== null) {
+    // 优先读落库列（v6.4.0 改动 A），存量行 NULL 回落实时算
+    deadlineAt =
+      listing.deadline_at ??
+      bidDeadline({
+        lastBidAt: listing.last_bid_at,
+        listedDay: listing.listed_day,
+        now: new Date(),
+        deadlineHours: ctx.deadlineHours,
+        silenceHours: ctx.silenceHours,
+        calendar: ctx.calendar,
+        minOffsetDays: listing.type === 'forced' ? 2 : 1,
+      }).deadlineAt;
+  }
+  // 评审修复（P2-②）：出价必须为整数，最低可出价向上取整——ceil(最高价+步长) / ceil(挂牌价)，
+  // 与 validateBidAmount（整数准入）和表单预填口径一致，避免前端预填一个提交必被拒的小数
+  const nextMinBid = highest !== null ? Math.ceil(highest + ctx.bidStepMin) : Math.ceil(listing.ask_price);
+  // v6.72.2：详情必须回 highestBid / highestBidder，前端类型和转会台「当前最高」都在读它们
+  const topBidAmount = highest;
+  const leader = topBidAmount === null ? null : (bids.find((b) => b.status === 'active' && b.amount === topBidAmount) ?? null);
+
+  return {
+    marketBidPaused: input.marketBidPaused,
+    listing: {
+      id: listing.id,
+      player: { id: listing.player_id, fcId: listing.player_fc_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },
+      sellerClub: { id: listing.seller_club_id, name: listing.seller_name ?? '自由身' },
+      type: listing.type,
+      askPrice: listing.ask_price,
+      status: listing.status,
+      listedAt: listing.listed_at,
+      lastBidAt: listing.last_bid_at,
+      bidPaused: listing.bid_paused === 1,
+      highestBid: topBidAmount,
+      highestBidder: leader === null ? null : { id: leader.club_id, name: leader.club_name },
+      releaseFee: contract?.release_fee ?? null,
+      deadlineAt,
+      deadlineNote: listing.deadline_note,
+      windowOpen,
+      nextMinBid,
+      bidStepMin: ctx.bidStepMin,
+      activatedBy: listing.activated_by,
+      activatorName: listing.activator_name ?? null,
+      activationDeadline: listing.activation_deadline,
+      matchDeadline: listing.match_deadline,
+      matchPhase:
+        listing.type === 'activation'
+          ? listing.status === 'listed'
+            ? 'first_bid'
+            : listing.status === 'matched_pending'
+              ? 'matching'
+              : null
+          : null,
+      firstBidPending: listing.type === 'activation' && bids.length === 0 && listing.activated_by !== null,
+    },
+    bids: bids.map((b) => ({
+      id: b.id,
+      clubId: b.club_id,
+      clubName: b.club_name,
+      amount: b.amount,
+      createdAt: b.created_at,
+      status: b.status,
+    })),
+  };
+}
+
 // GET /api/market/listings/:id —— 详情 + 出价历史
 app.get('/market/listings/:id', async (c) => {
   // v6.65.0：读路径结算挪出响应关键路径（与列表端点同款，见 /market/listings 处注释）
@@ -909,79 +1005,16 @@ app.get('/market/listings/:id', async (c) => {
     isWindowOpen(c.env.DB, listing.season, listing.window_seq),
   ]);
 
-  let deadlineAt: string | null = null;
-  // v6.24.0：listed 的普通挂牌也回截止时刻（挂牌即落 deadline_at）；激活首价窗看 activationDeadline
-  // v6.24.1：与列表口径一致——强制拍卖创建即落列，listed 同轨回传（激活仍豁免，看首价窗列）
-  if ((listing.status === 'bidding' || (listing.status === 'listed' && listing.type !== 'activation')) && listing.listed_day !== null) {
-    // 优先读落库列（v6.4.0 改动 A），存量行 NULL 回落实时算
-    deadlineAt =
-      listing.deadline_at ??
-      bidDeadline({
-        lastBidAt: listing.last_bid_at,
-        listedDay: listing.listed_day,
-        now: new Date(),
-        deadlineHours: ctx.deadlineHours,
-        silenceHours: ctx.silenceHours,
-        calendar: ctx.calendar,
-        minOffsetDays: listing.type === 'forced' ? 2 : 1,
-      }).deadlineAt;
-  }
-  // 评审修复（P2-②）：出价必须为整数，最低可出价向上取整——ceil(最高价+步长) / ceil(挂牌价)，
-  // 与 validateBidAmount（整数准入）和表单预填口径一致，避免前端预填一个提交必被拒的小数
-  const nextMinBid =
-    highestActive?.highest !== null && highestActive?.highest !== undefined
-      ? Math.ceil(highestActive.highest + ctx.bidStepMin)
-      : Math.ceil(listing.ask_price);
-  // v6.72.2：详情一直没回 highestBid / highestBidder，但前端类型（MarketListing 的扩展）和转会台
-  // 「当前最高」都在读它们——详情里是 undefined，`highestBidder !== null` 判真后读 .name 直接抛错，
-  // 展开行整页白屏。所需两趟查询都已在上面，直接由已有结果算，不加油耗。
-  const topBidAmount = highestActive?.highest ?? null;
-  const leader = topBidAmount === null ? null : (bids.results.find((b) => b.status === 'active' && b.amount === topBidAmount) ?? null);
-
-
-  return c.json({
-    marketBidPaused: bidPausedRaw === 'true',
-    listing: {
-      id: listing.id,
-      player: { id: listing.player_id, fcId: listing.player_fc_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },
-      sellerClub: { id: listing.seller_club_id, name: listing.seller_name ?? '自由身' },
-      type: listing.type,
-      askPrice: listing.ask_price,
-      status: listing.status,
-      listedAt: listing.listed_at,
-      lastBidAt: listing.last_bid_at,
-      bidPaused: listing.bid_paused === 1,
-      highestBid: topBidAmount,
-      highestBidder: leader === null ? null : { id: leader.club_id, name: leader.club_name },
-      releaseFee: contract?.release_fee ?? null,
-      deadlineAt,
-      deadlineNote: listing.deadline_note,
+  return c.json(
+    listingDetailOf(listing, {
+      highest: highestActive?.highest ?? null,
+      marketBidPaused: bidPausedRaw === 'true',
+      contract,
+      ctx,
       windowOpen,
-      nextMinBid,
-      bidStepMin: ctx.bidStepMin,
-      activatedBy: listing.activated_by,
-      activatorName: listing.activator_name ?? null,
-      activationDeadline: listing.activation_deadline,
-      matchDeadline: listing.match_deadline,
-      matchPhase:
-        listing.type === 'activation'
-          ? listing.status === 'listed'
-            ? 'first_bid'
-            : listing.status === 'matched_pending'
-              ? 'matching'
-              : null
-          : null,
-      firstBidPending: listing.type === 'activation' && bids.results.length === 0 && listing.activated_by !== null,
-    },
-    bids: bids.results.map((b) => ({
-      id: b.id,
-      clubId: b.club_id,
-      clubName: b.club_name,
-      amount: b.amount,
-      createdAt: b.created_at,
-      status: b.status,
-    })),
-  });
+      bids: bids.results,
+    }),
+  );
 });
 
 // POST /api/market/listings/:id/bids —— 出价（资金冻结先行，§6.4-1）

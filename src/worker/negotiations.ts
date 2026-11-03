@@ -725,8 +725,8 @@ export interface MySessionsResult {
   endedNextBefore: number | null;
 }
 
-// 静默截止的锚点：到期引擎与列表倒计时共用这一个表达式（v6.65.2 起上移到列表常量之前）
-const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.created_at, ''),
+// 静默截止的锚点：到期引擎、谈判列表倒计时与球员转会浮层共用这一个表达式（v6.65.2 起上移到列表常量之前）
+export const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.created_at, ''),
              COALESCE((SELECT MAX(a.created_at) FROM negotiation_attempts a WHERE a.session_id = s.id), ''))`;
 
 const SESSION_COLS = `SELECT s.id, s.transfer_id, s.status, s.release_fee, s.expected_wage, s.attempt_count, s.settled_wage, s.settle_source, s.settled_at,
@@ -1007,7 +1007,8 @@ function isoMinusHours(iso: string, hours: number): string {
   return new Date(Date.parse(iso) - hours * 3600_000).toISOString();
 }
 
-async function silenceHours(db: D1Database): Promise<number> {
+// 谈判静默小时数（球员转会浮层倒计时也读这个口径，别另起一份 config 读取）
+export async function silenceHours(db: D1Database): Promise<number> {
   const hours = await createConfigService(db).getNumber('negotiation_silence_hours');
   return hours && hours > 0 ? hours : NEGOTIATION_SILENCE_HOURS_DEFAULT;
 }

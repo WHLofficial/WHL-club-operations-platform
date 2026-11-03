@@ -31,7 +31,7 @@ import {
   type SeaSubmitResult,
 } from '../../lib/api.ts';
 import { fmt2, fmtShort } from '../../lib/contract-view.ts';
-import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance, useShortlistIds, useShortlistInvalidation, useMyPlayerRequests, type PlayerRequestRow } from '../../lib/queries.ts';
+import { qk, useOfferSettings, usePlayerListing, useListingDetail, useMarketInvalidation, useOffersInvalidation, useSeaPhase, useClubBalance, useShortlistIds, useShortlistInvalidation, useMyPlayerRequests, useTransferPanel, type PlayerRequestRow } from '../../lib/queries.ts';
 import { MarketBidForm } from '../../components/MarketBidForm.tsx';
 import { IdTag } from '../../components/IdTag.tsx';
 import OpsGateNote from '../../components/OpsGateNote.tsx';
@@ -42,6 +42,7 @@ import { useTimeFmt } from '../../lib/datetime.ts';
 import { fmtClock, useCountdown } from '../../lib/use-countdown.ts';
 import { money } from '../market/shared.tsx';
 import { ActivationProofDialog } from '../market/ActivationProofDialog.tsx';
+import { PlayerTransferDialog } from '../market/desk/PlayerTransferDialog.tsx';
 import { listingFloorOf, offerCapOf } from '../../lib/transfer-bounds.ts';
 import { freeAgentFeePreview, terminationFeePreview } from '../../lib/bypass-fee-preview.ts';
 import { promotionSurcharge } from '../../../../src/core/bypass-rules.ts';
@@ -158,6 +159,8 @@ export function SideOps({
   const [promoteFee, setPromoteFee] = useState('');
   // 激活通知截图弹窗（v6.60.0）：旧内嵌文件框改共用弹窗，点击「激活」直接打开
   const [proofOpen, setProofOpen] = useState(false);
+  // 期 C：转会浮层（状态条「查看详情」打开；内容与球员页状态条同源 transfer-panel）
+  const [transferOpen, setTransferOpen] = useState(false);
   // 候选名单开关（v6.58.0）：教练态自取 ids；未绑队 403 / 匿名不渲染（data 为 undefined 即隐藏）
   const shortlistQuery = useShortlistIds(isCoach);
   const shortlistEntry = shortlistQuery.data?.entries.find((e) => e.playerId === player.id) ?? null;
@@ -194,6 +197,7 @@ export function SideOps({
     setPanel(null);
     setArmed(false);
     setProofOpen(false);
+    setTransferOpen(false);
     setPromoteFee('');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上：只跟随 player.id
   }, [player.id]);
@@ -215,6 +219,10 @@ export function SideOps({
   const playerListingQuery = usePlayerListing(player.id, isCoach && player.status === 'listed');
   const activeListingId = playerListingQuery.data?.listings[0]?.id ?? null;
   const listedDetailQuery = useListingDetail(activeListingId);
+  const listedLeft = useCountdown(listedDetailQuery.data?.listing.deadlineAt ?? null);
+  // 期 C：状态条与浮层共用的球员转会面板（教练视角；后排观众不请求）
+  const transferPanelQuery = useTransferPanel(player.id, isCoach);
+  const transferPanel = transferPanelQuery.data ?? null;
 
   // v6.50.0 海捞暗标段：收标期内自由身池整体走密封标（后端 createFreeAgent 同期间被 409 拦），
   // E 态因此换一套表单。只在 E 态球员上取这份数据（其他态零请求）；金额保密，只有自己那份回得来。
@@ -495,6 +503,50 @@ export function SideOps({
   }
 
   let body: ReactElement | null;
+  // 期 C 状态条（设计 §6.2）：非挂牌态但仍有转会历史/在途单据时，先给一行结论 + 浮层入口。
+  // 挂牌态的历史由上两条分支自己承载，这里不重复渲染。
+  // 只有与我有关的成交单才进状态条（设计 §6.2：club 非空且 transfer 与我有关）
+  const myTransfer =
+    transferPanel?.transfer != null &&
+    (transferPanel.transfer.fromClubId === myClubId || transferPanel.transfer.toClubId === myClubId);
+  const liveOfferCount =
+    transferPanel === null
+      ? 0
+      : [...transferPanel.offers.in, ...transferPanel.offers.out].filter((o) => o.status === 'pending' || o.status === 'intent').length;
+  const panelHasHistory =
+    transferPanel !== null &&
+    player.status !== 'listed' &&
+    (myTransfer ||
+      transferPanel.negotiation !== null ||
+      transferPanel.myBids.length > 0 ||
+      liveOfferCount > 0 ||
+      (transferPanel.listing !== null && transferPanel.listing.status === 'delisted'));
+  const endedLine = (() => {
+    if (!panelHasHistory || transferPanel === null) return null;
+    const t = transferPanel.transfer;
+    if (t !== null && t.completedAt !== null) {
+      const fee = t.fee === null ? '未披露' : `${money(t.fee)}m`;
+      if (t.fromClubId === myClubId) return `已售出 · 成交价 ${fee}（去 ${t.toClubName ?? '—'}）`;
+      if (t.toClubId === myClubId) return `已签下 · 成交价 ${fee}`;
+      return `已结束 · 成交价 ${fee}（${t.fromClubName ?? '—'} → ${t.toClubName ?? '—'}）`;
+    }
+    if (transferPanel.negotiation?.status === 'active') return `签约谈判中 · 剩余 ${transferPanel.negotiation.remaining} 轮`;
+    if (liveOfferCount > 0) return `报价 ${liveOfferCount} 笔在途`;
+    if (transferPanel.myBids.length > 0) return `出价 ${transferPanel.myBids.length} 笔`;
+    return `已结束 · 未成交${transferPanel.listing?.deadlineNote ? ` · ${transferPanel.listing.deadlineNote}` : ''}`;
+  })();
+  const endedNote =
+    endedLine !== null ? (
+      <section className="side-sec side-transfer-state">
+        <div className="side-sec-head">转会状态</div>
+        <p className="side-sub">{endedLine}</p>
+        <div className="side-btns">
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setTransferOpen(true)}>
+            查看详情 ›
+          </button>
+        </div>
+      </section>
+    ) : null;
   if (!isCoach) {
     body = null;
   } else if (isMine && player.status === 'listed') {
@@ -529,8 +581,20 @@ export function SideOps({
             </span>
           </div>
         )}
+        {l && (
+          <p className="side-sub">
+            {l.status === 'pending_review'
+              ? '已截止 · 待管理组审核'
+              : l.status === 'matched_pending'
+                ? '首价落定 · 等匹配'
+                : `挂牌中${l.deadlineAt ? ` · 截止 ${fmtClock(listedLeft ?? 0)}` : ''}`}
+          </p>
+        )}
         <div className="side-btns">
-          <Link className="btn btn-sm" to="/market">
+          <button type="button" className="btn btn-sm" onClick={() => setTransferOpen(true)}>
+            查看详情 ›
+          </button>
+          <Link className="btn btn-sm btn-ghost" to={`/market/desk?tab=bids&player=${player.id}`}>
             去转会区
           </Link>
           {activatedByOther && (
@@ -585,6 +649,23 @@ export function SideOps({
                 <IdTag kind="挂牌" value={l.id} />
               </span>
             </div>
+            {(() => {
+              const mine = transferPanel?.myBids.find((b) => b.listingId === l.id) ?? null;
+              if (mine === null) return null;
+              const count = transferPanel?.bids.filter((b) => b.status === 'active' || b.status === 'superseded' || b.status === 'won').length ?? 0;
+              return (
+                <div className="side-row">
+                  <span className="attr-name">我的出价</span>
+                  <span>
+                    <span className="mono">{money(mine.amount)}m</span> ·{' '}
+                    <span className={mine.status === 'active' ? 'gold-text' : ''}>
+                      {mine.status === 'active' ? '领先中' : mine.status === 'superseded' ? '被超出' : mine.status === 'won' ? '已中标' : mine.status === 'withdrawn' ? '已撤回' : mine.status}
+                    </span>
+                    {count > 0 ? <span className="side-sub"> · 共 {count} 笔</span> : null}
+                  </span>
+                </div>
+              );
+            })()}
             {canBid ? (
               <MarketBidForm
                 mode={l.firstBidPending && isActivator ? 'activation-first' : 'normal'}
@@ -608,7 +689,10 @@ export function SideOps({
               </p>
             )}
             <div className="side-btns">
-              <Link className="btn btn-sm btn-ghost" to="/market">
+              <button type="button" className="btn btn-sm" onClick={() => setTransferOpen(true)}>
+                查看详情 ›
+              </button>
+              <Link className="btn btn-sm btn-ghost" to={`/market/desk?tab=bids&player=${player.id}`}>
                 去转会区看详情
               </Link>
             </div>
@@ -1305,6 +1389,7 @@ export function SideOps({
         </div>
       )}
       {demandNote}
+      {endedNote}
       {shortlistQuery.data !== undefined && (
         <div className="side-shortlist">
           <span className="side-lab">候选名单</span>
@@ -1320,6 +1405,13 @@ export function SideOps({
         </div>
       )}
       {body}
+      {transferOpen && (
+        <PlayerTransferDialog
+          playerId={player.id}
+          onClose={() => setTransferOpen(false)}
+          onChanged={() => void qc.invalidateQueries({ queryKey: qk.transferPanel(player.id) })}
+        />
+      )}
       {proofOpen && (
         <ActivationProofDialog
           playerName={player.name}

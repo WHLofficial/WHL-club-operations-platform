@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type DeskSummary, type ShortlistIdsResponse, type ShortlistResponse, type VoucherLedgerResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type MyNegotiations, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type DeskSummary, type ShortlistIdsResponse, type ShortlistResponse, type VoucherLedgerResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type MyNegotiations, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferPanelResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -26,6 +26,8 @@ export const qk = {
   myBids: ['market', 'my-bids'] as const,
   // 转会台待办汇总（v6.73.0 期 B）：顶栏小入口 / 红点 / MarketNav 数字 / 桌内页签共用一份
   deskSummary: ['market', 'desk', 'summary'] as const,
+  // 球员转会浮层（v6.74.0 期 C）：球员页状态条 / 浮层 / 转会台行展开共用，30s 过期
+  transferPanel: (playerId: number) => ['market', 'transfer-panel', playerId] as const,
   board: (status: string) => ['market', 'board', status] as const,
   listing: (id: number) => ['market', 'listing', id] as const,
   rumors: ['market', 'rumors'] as const,
@@ -250,6 +252,17 @@ export function usePlayerListing(playerId: number, enabled = true) {
   });
 }
 
+// 球员转会浮层（v6.74.0 期 C，设计 §6.1）：球员页状态条、浮层、转会台行展开共用。
+// 30s 过期；市场/报价写操作会 invalidate 这个前缀（见 useMarketInvalidation）。
+export function useTransferPanel(playerId: number, enabled = true) {
+  return useQuery({
+    queryKey: qk.transferPanel(playerId),
+    queryFn: () => api<TransferPanelResponse>(`/api/players/${playerId}/transfer-panel`),
+    enabled: enabled && Number.isInteger(playerId) && playerId > 0,
+    staleTime: 30_000,
+  });
+}
+
 // 本队球员的在途单据（v6.64.4 自助取消）：续约 / 解约 / 上调（含预约与谈判中），只认本队发起。
 // staleTime 0——提交/取消后 invalidate 立即重取，列表不陈旧。
 export interface PlayerRequestRow {
@@ -391,6 +404,7 @@ export function useMarketInvalidation() {
     void qc.invalidateQueries({ queryKey: ['market', 'board'] });
     void qc.invalidateQueries({ queryKey: qk.myBids });
     void qc.invalidateQueries({ queryKey: qk.deskSummary });
+    void qc.invalidateQueries({ queryKey: ['market', 'transfer-panel'] });
     if (listingId !== null) void qc.invalidateQueries({ queryKey: qk.listing(listingId) });
   };
 }
@@ -558,6 +572,7 @@ export function useOffersInvalidation() {
     void qc.invalidateQueries({ queryKey: ['offers'] });
     void qc.invalidateQueries({ queryKey: qk.myClub });
     void qc.invalidateQueries({ queryKey: qk.deskSummary });
+    void qc.invalidateQueries({ queryKey: ['market', 'transfer-panel'] });
   };
 }
 
