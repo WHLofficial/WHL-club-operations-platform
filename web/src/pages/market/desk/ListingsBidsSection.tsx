@@ -1,7 +1,7 @@
 // 转会台 · 我的出价区（v6.23.0 从 pages/MarketMinePage.tsx 搬入；v6.72.0 期 A 按球员聚合）。
 // 同一球员的多笔出价只占一行；行内展开看我在这单上的全部出价 + 历史挂牌，仍能加价。
 // 出价表单、余额提示、冻结口径沿用 v6.57.0/v6.24.0；期 A 不新增端点。
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { apiPost, type MyBidRow } from '../../../lib/api.ts';
 import { IdTag } from '../../../components/IdTag.tsx';
@@ -11,11 +11,12 @@ import { playerPath } from '../../../lib/player-link.ts';
 import { useToast } from '../../../lib/toast.tsx';
 import { useTimeFmt } from '../../../lib/datetime.ts';
 import { money } from '../shared.tsx';
+import DeskFocusHint from './DeskFocusHint.tsx';
 import DeskPlayerRow from './DeskPlayerRow.tsx';
 import { groupBidsByPlayer, type BidPlayerRow } from './desk-rows.ts';
 import { bidBadge, canBidOf } from './status.ts';
 
-export default function ListingsBidsSection() {
+export default function ListingsBidsSection({ focusPlayerId = null }: { focusPlayerId?: number | null }) {
   const { isCoach, club: myClub } = useMyClub();
   const { bids: myBids } = useMyBids(isCoach);
   // v6.57.0 收编：可支配 / 冻结读余额端点（含预期收入额度；冻结口径覆盖报价 / 海捞——
@@ -32,6 +33,7 @@ export default function ListingsBidsSection() {
           held={snap?.held ?? null}
           creditLine={snap?.creditLine ?? null}
           balance={myClub?.balance ?? null}
+          focusPlayerId={focusPlayerId}
         />
       )}
     </section>
@@ -47,6 +49,7 @@ function MyBidsSection({
   held,
   creditLine,
   balance,
+  focusPlayerId,
 }: {
   bids: MyBidRow[];
   myClubId: number | null;
@@ -54,11 +57,27 @@ function MyBidsSection({
   held: number | null;
   creditLine: number | null;
   balance: number | null;
+  focusPlayerId: number | null;
 }) {
   const { show, toastNode } = useToast();
   const invalidate = useMarketInvalidation();
   const rows = groupBidsByPlayer(bids);
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [expanded, setExpanded] = useState<Set<number>>(() =>
+    focusPlayerId === null ? new Set() : new Set([focusPlayerId]),
+  );
+
+  // v6.73.0 期 B：深链目标球员挂载即展开；路由里换了球员也照做（同一页签内切深链）
+  useEffect(() => {
+    if (focusPlayerId === null) return;
+    setExpanded((prev) => new Set(prev).add(focusPlayerId));
+  }, [focusPlayerId]);
+
+  // 目标行渲染后滚到中间（jsdom 没实现 scrollIntoView，先探测再调，照 OffersSection 的先例）
+  useEffect(() => {
+    if (focusPlayerId === null) return;
+    const el = document.querySelector(`[data-player-id="${focusPlayerId}"]`) as HTMLElement | null;
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+  }, [focusPlayerId, rows.length]);
 
   function toggle(playerId: number) {
     setExpanded((prev) => {
@@ -95,6 +114,10 @@ function MyBidsSection({
         同一球员只占一行；行内看我在当前挂牌上的全部出价。{bids.length === 100 ? '最多展示最近 100 笔。' : ''}
       </p>
       {toastNode}
+
+      {focusPlayerId !== null && !rows.some((r) => r.player.id === focusPlayerId) && (
+        <DeskFocusHint playerId={focusPlayerId} current="bids" />
+      )}
 
       {rows.length === 0 ? (
         <div className="card empty-state">

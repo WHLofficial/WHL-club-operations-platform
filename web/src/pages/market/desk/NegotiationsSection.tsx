@@ -24,6 +24,7 @@ import { freeAgentFee, freeAgentFeeGap } from '../../../../../src/core/bypass-ru
 import OpsGateNote from '../../../components/OpsGateNote.tsx';
 import { useOpsGate } from '../../../lib/ops-gate.ts';
 import DemandSection from './DemandSection.tsx';
+import DeskFocusHint from './DeskFocusHint.tsx';
 import DeskPlayerRow from './DeskPlayerRow.tsx';
 import { groupNegotiationsByPlayer } from './desk-rows.ts';
 import { needsReleaseFee } from './status.ts';
@@ -83,7 +84,7 @@ function attemptSysText(a: NegotiationSession['attempts'][number]): string | nul
 
 // 我的谈判会话在 lib/queries.ts（页签计数与谈判区共用一个 query 键）
 
-export default function NegotiationsSection() {
+export default function NegotiationsSection({ focusPlayerId = null }: { focusPlayerId?: number | null }) {
   const { show, toastNode } = useToast();
   const { isCoach } = useMyClub();
   const { time } = useTimeFmt();
@@ -96,7 +97,11 @@ export default function NegotiationsSection() {
       ? sessionsQuery.error.message
       : '谈判名单打不开了，稍后再试'
     : '';
-  const refresh = () => qc.invalidateQueries({ queryKey: qk.myNegotiations });
+  // v6.73.0 期 B：谈判动作也要让顶栏角标/页签计数立刻掉数，不能等 60s 轮询
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: qk.deskSummary });
+    return qc.invalidateQueries({ queryKey: qk.myNegotiations });
+  };
 
   const [justSigned, setJustSigned] = useState<{ id: number; name: string } | null>(null);
   const active = useMemo(() => sessions ?? [], [sessions]);
@@ -115,6 +120,19 @@ export default function NegotiationsSection() {
   const rows = useMemo(() => groupNegotiationsByPlayer(active), [active]);
   const [openIds, setOpenIds] = useState<Set<number>>(new Set());
   const [touched, setTouched] = useState(false);
+
+  // v6.73.0 期 B：?player= 深链目标——挂载即展开该球员行，数据到位后滚到中间
+  useEffect(() => {
+    if (focusPlayerId === null) return;
+    setTouched(true);
+    setOpenIds((prev) => new Set(prev).add(focusPlayerId));
+  }, [focusPlayerId]);
+
+  useEffect(() => {
+    if (focusPlayerId === null) return;
+    const el = document.querySelector(`[data-player-id="${focusPlayerId}"]`) as HTMLElement | null;
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+  }, [focusPlayerId, rows.length]);
 
   function openRow(playerId: number) {
     setTouched(true);
@@ -155,6 +173,10 @@ export default function NegotiationsSection() {
       </p>
       {loadError && <div className="banner warn">{loadError}</div>}
       {toastNode}
+
+      {sessions !== null && focusPlayerId !== null && !rows.some((r) => r.player.id === focusPlayerId) && (
+        <DeskFocusHint playerId={focusPlayerId} current="nego" />
+      )}
 
       {justSigned !== null && <NumberPrompt player={justSigned} onDone={() => setJustSigned(null)} show={show} />}
 

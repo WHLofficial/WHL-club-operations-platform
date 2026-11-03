@@ -2,6 +2,8 @@
 // 数据层 hooks 在 lib/queries.ts（TanStack Query）。
 import { useEffect, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router';
+import { useAuthOptional } from '../../lib/auth.tsx';
+import { useDeskSummary } from '../../lib/queries.ts';
 
 export type ListingFilter = 'active' | 'pending_review' | 'ended' | 'all';
 
@@ -46,6 +48,11 @@ export function MarketNav() {
   // 注：本注释不得出现各页签字面——tests/mobile-baseline.test.ts 按源文本 indexOf 锁页签顺序。
   const navRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
+  // v6.73.0 期 B：角标与顶栏/桌内同源（useDeskSummary 只请求一次）；匿名/观众不请求。
+  // 用 useAuthOptional：市场页组件测试常裸渲染、没有 AuthProvider（v6.58.0 既有先例）。
+  const auth = useAuthOptional();
+  const isCoach = auth?.user?.role === 'coach' || auth?.user?.role === 'admin';
+  const deskTodo = useDeskSummary(isCoach).data?.total ?? 0;
   useEffect(() => {
     const active = navRef.current?.querySelector<HTMLElement>('a.on');
     if (active && typeof active.scrollIntoView === 'function') {
@@ -57,6 +64,16 @@ export function MarketNav() {
       <NavLink to="/market" end className={({ isActive }) => (isActive ? 'on' : '')}>
         在售市场
       </NavLink>
+      {/* v6.73.0 期 B（owner Q9 A）：我的转会台挪到第 2 位，紧跟「在售市场」；数字 = 待办数，0 不渲染。
+          tests/mobile-baseline.test.ts 按源文本 indexOf 锁页签顺序，改顺序必须同步改该测试。 */}
+      <NavLink
+        to="/market/desk"
+        className={({ isActive }) => (isActive ? 'on' : '')}
+        aria-label={`我的转会台，${deskTodo} 项待办`}
+      >
+        我的转会台
+        {deskTodo > 0 && <span className="seg-count">{deskTodo > 99 ? '99+' : deskTodo}</span>}
+      </NavLink>
       {/* v6.31.0：广告板（各队转会名单按着重度分两区展示） */}
       <NavLink to="/market/board" className={({ isActive }) => (isActive ? 'on' : '')}>
         广告板
@@ -67,10 +84,6 @@ export function MarketNav() {
       {/* v6.24.0：独立成页（激活挂牌 + 首价落定） */}
       <NavLink to="/market/activation" className={({ isActive }) => (isActive ? 'on' : '')}>
         激活
-      </NavLink>
-      {/* v6.23.0：旧「我的」(/market/mine) 并入转会台，NavLink 不用 end —— desk 内切 tab 时本项保持高亮 */}
-      <NavLink to="/market/desk" className={({ isActive }) => (isActive ? 'on' : '')}>
-        我的转会台
       </NavLink>
       <NavLink to="/market/intel" className={({ isActive }) => (isActive ? 'on' : '')}>
         市场情报

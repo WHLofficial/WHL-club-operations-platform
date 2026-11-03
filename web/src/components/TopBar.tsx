@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router';
 import { isSuperAdmin, TOUR_SITE_URL, type MeUser } from '../lib/api.ts';
 import { useAuth } from '../lib/auth.tsx';
 import { setTzPref, tzLabel, useTzPref, type TzPref } from '../lib/datetime.ts';
-import { useUnreadCount } from '../lib/queries.ts';
+import { useUnreadCount, useDeskSummary } from '../lib/queries.ts';
 
 const ROLE_LABEL: Record<MeUser['role'], string> = { admin: '管理组', coach: '教练', viewer: '观众' };
 
@@ -17,6 +17,9 @@ const TZ_OPTIONS: readonly [TzPref, string][] = [
 export default function TopBar() {
   const { user, authMode } = useAuth();
   const unread = useUnreadCount().data ?? 0;
+  // v6.73.0 期 B：转会台待办角标（只在教练/管理组请求；失败静默隐藏）
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
+  const deskTodo = useDeskSummary(isCoach).data?.total ?? 0;
   const barRef = useRef<HTMLElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
@@ -134,6 +137,8 @@ export default function TopBar() {
           >
             <span className="nav-tf">转会中心</span>
             <span className="nav-ts">转会</span>
+            {/* v6.73.0 期 B：有待办时右上角红点（绝对定位零占宽，≤640 不破坏 8 项预算） */}
+            {deskTodo > 0 && <span className="nav-dot" aria-hidden="true" />}
           </NavLink>
           {/* 消费中心（v6.26.0）：五类商品工单 + 球场消费三卡；v6.26.1 补顶栏入口（原先只有首页/我的球队卡片） */}
           <NavLink to="/shop" className={({ isActive }) => `nav-tab${isActive ? ' is-active' : ''}`} aria-label="消费中心">
@@ -152,6 +157,17 @@ export default function TopBar() {
           )}
         </nav>
         <div className="userbox">
+          {/* v6.73.0 期 B：宽屏（≥901px）右上角文字入口；≤900 靠红点 + 市场子导航数字 */}
+          {user && isCoach && (
+            <NavLink
+              to="/market/desk"
+              className="desk-shortcut"
+              aria-label={`我的转会台，${deskTodo} 项待办`}
+            >
+              我的转会台
+              {deskTodo > 0 && <span className="desk-shortcut-count">{deskTodo > 99 ? '99+' : deskTodo}</span>}
+            </NavLink>
+          )}
           {user === undefined ? null : user ? (
             <>
               {/* v6.25.0：文字链接换信封图标，未读红点锚图标右上（原 .inbox-unread-dot 语义不变） */}

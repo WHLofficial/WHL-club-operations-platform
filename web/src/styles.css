@@ -250,6 +250,7 @@ h3 {
 }
 
 .nav-tab {
+  position: relative;
   color: rgba(253, 244, 227, 0.82);
   text-decoration: none;
   padding: 6px 12px;
@@ -267,6 +268,55 @@ h3 {
   background: var(--terracotta);
   color: #fff;
   font-weight: 600;
+}
+
+/* v6.73.0 期 B：转会中心待办红点——绝对定位零占宽，360px 下 8 项预算不被撑破 */
+.nav-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 1px rgba(43, 30, 22, 0.45);
+}
+
+/* v6.73.0 期 B：宽屏右上角「我的转会台」文字入口（≤900 由 .desk-shortcut 隐藏） */
+.desk-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cream);
+  text-decoration: none;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.desk-shortcut:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.desk-shortcut-count {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #2b1e16;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* ≤900：文字入口不渲染（641–900 顶栏已要横滑，再塞 90px 会挤掉两三项），靠红点 + 子导航数字 */
+@media (max-width: 900px) {
+  .desk-shortcut {
+    display: none;
+  }
 }
 
 .userbox {
@@ -2183,11 +2233,34 @@ table.matches-table-narrow .rating-badge {
 
 /* 市场三页子导航（v2.2.0）：seg 里放 NavLink（a），样式对齐 button */
 .seg a {
+  position: relative;
   padding: 7px 14px;
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
   text-decoration: none;
+}
+
+/* v6.73.0 期 B：MarketNav 待办数字（与顶栏小入口同源；0 不渲染） */
+.seg-count {
+  display: inline-block;
+  min-width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #2b1e16;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  vertical-align: 1px;
+}
+
+.seg a.on .seg-count {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--cocoa);
 }
 
 .seg a + a {

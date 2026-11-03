@@ -46,6 +46,7 @@ import {
 } from '../../../lib/queries.ts';
 import { useToast } from '../../../lib/toast.tsx';
 import { useTimeFmt } from '../../../lib/datetime.ts';
+import DeskFocusHint from './DeskFocusHint.tsx';
 import DeskPlayerRow from './DeskPlayerRow.tsx';
 import { groupOffersByPlayer, type OfferPlayerRow } from './desk-rows.ts';
 import { offerBadge } from './status.ts';
@@ -122,11 +123,14 @@ export default function OffersSection({
   status,
   onBoxChange,
   onStatusChange,
+  focusPlayerId = null,
 }: {
   box: 'in' | 'out';
   status: 'pending' | 'all';
   onBoxChange: (next: 'in' | 'out') => void;
   onStatusChange: (next: 'pending' | 'all') => void;
+  /** v6.73.0 期 B：?player= 深链目标（内部球员 id） */
+  focusPlayerId?: number | null;
 }) {
   const { show, toastNode } = useToast();
   const qc = useQueryClient();
@@ -176,6 +180,18 @@ export default function OffersSection({
     const el = document.querySelector(`[data-offer-id="${targetOfferId}"]`) as HTMLElement | null;
     if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
   }, [targetOfferId, openId, list.data]);
+
+  // v6.73.0 期 B：?player= 深链目标——挂载即展开该球员行，数据到位后滚到中间
+  useEffect(() => {
+    if (focusPlayerId === null) return;
+    setExpandedRows((prev) => new Set(prev).add(focusPlayerId));
+  }, [focusPlayerId]);
+
+  useEffect(() => {
+    if (focusPlayerId === null) return;
+    const el = document.querySelector(`[data-player-id="${focusPlayerId}"]`) as HTMLElement | null;
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+  }, [focusPlayerId, list.data]);
 
   // 换单 / 关桌时把草稿与确认条复位，免得一单的输入漏到下一单
   useEffect(() => {
@@ -281,6 +297,9 @@ export default function OffersSection({
         <p className="hint">
           有球员挂了多家求购意向同时待确认：确认一条后其余自动失效（其余买方会收到落选通知、冻结自动解冻）。
         </p>
+      )}
+      {focusPlayerId !== null && rows !== null && !rows.some((r) => r.player.id === focusPlayerId) && (
+        <DeskFocusHint playerId={focusPlayerId} current="offers" />
       )}
 
       <div className="seg" role="radiogroup" aria-label="报价页签">

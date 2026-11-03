@@ -997,6 +997,14 @@ export interface MyBidRow {
   sellerClubName: string;
 }
 
+/** 转会台待办汇总（v6.73.0 期 B）：导航角标 / 桌内待办条共用；未绑队全 0 */
+export interface DeskSummary {
+  negotiations: number;
+  offers: number;
+  bids: number;
+  total: number;
+}
+
 export interface AdminReviewRow {
   id: number;
   kind: string;

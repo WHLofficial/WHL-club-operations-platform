@@ -1,7 +1,7 @@
 // 用户端数据层共享 keys 与 fetchers（v2.2.0 commit 4）。
 // 口径沿用v2.1.0 管理端：queryKey 层级化、写后精确 invalidate、不引入 useMutation。
 import { useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { api, apiPost, type ActivatableResponse, type ShortlistIdsResponse, type ShortlistResponse, type VoucherLedgerResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type MyNegotiations, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
+import { api, apiPost, type ActivatableResponse, type DeskSummary, type ShortlistIdsResponse, type ShortlistResponse, type VoucherLedgerResponse, type ClubBalance, type ClubDetail, type ClubStanding, type ClubSummary, type ContractDemandInbox, type FinanceSummaryResponse, type HomeMatchesResponse, type MarketDealsResponse, type MarketListings, type MarketListingDetail, type MyBidRow, type MyClubOverview, type MyNegotiations, type NamingQuoteResponse, type NotificationsPage, type NotificationsUnreadByCategory, type OfferDetailResponse, type OfferSettingsDto, type OffersListResponse, type PendingContractsResponse, type PlayerDetail, type PlayersLibraryResponse, type RumorsResponse, type SeaLookupResponse, type SeaPhaseView, type SeasonsCurrent, type ShopCatalog, type ShopOrdersResponse, type ShopSquadStateResponse, type SquadOverview, type TransferBoardResponse, type TransferRequestList, type WageForecast, type VenuePlanResponse, type VenuePreviewResponse } from './api.ts';
 import type { NotifyCategoryId } from '../../../src/core/notify-meta.ts';
 import { useAuth } from './auth.tsx';
 
@@ -24,6 +24,8 @@ export const qk = {
   // 对比页可能传 number，键不统一会出现 ['player','7'] 与 ['player',7] 两份缓存
   player: (id: string) => ['player', id] as const,
   myBids: ['market', 'my-bids'] as const,
+  // 转会台待办汇总（v6.73.0 期 B）：顶栏小入口 / 红点 / MarketNav 数字 / 桌内页签共用一份
+  deskSummary: ['market', 'desk', 'summary'] as const,
   board: (status: string) => ['market', 'board', status] as const,
   listing: (id: number) => ['market', 'listing', id] as const,
   rumors: ['market', 'rumors'] as const,
@@ -117,6 +119,21 @@ export function useMyBids(isCoach: boolean): { bids: MyBidRow[] | null; refresh:
     enabled: isCoach,
   });
   return { bids: data ?? null, refresh: () => void qc.invalidateQueries({ queryKey: qk.myBids }) };
+}
+
+// 转会台待办汇总（v6.73.0 期 B）：只读 COUNT，60s 轮询 + 回前台补一枪（owner 已拍板 Q7 A）。
+// 只在教练/管理组开启；失败静默（角标/红点隐藏），不阻塞任何页面。
+export function useDeskSummary(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.deskSummary,
+    queryFn: () => api<DeskSummary>('/api/market/desk/summary'),
+    enabled,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
 }
 
 // 余额快照（v6.57.0 额度三字段随端点下发）：Ledger 余额卡 / 转会台 / 在售市场 / 出价弹层的
@@ -367,12 +384,13 @@ export function useListingPrefetch() {
   };
 }
 
-// 出价/挂牌/激活后的联动失效：板（全部筛选项）+ 我的出价 + 当前详情
+// 出价/挂牌/激活后的联动失效：板（全部筛选项）+ 我的出价 + 当前详情 + 转会台角标
 export function useMarketInvalidation() {
   const qc = useQueryClient();
   return (listingId: number | null) => {
     void qc.invalidateQueries({ queryKey: ['market', 'board'] });
     void qc.invalidateQueries({ queryKey: qk.myBids });
+    void qc.invalidateQueries({ queryKey: qk.deskSummary });
     if (listingId !== null) void qc.invalidateQueries({ queryKey: qk.listing(listingId) });
   };
 }
@@ -533,12 +551,13 @@ export function useOfferDetail(id: number | null, enabled: boolean, seed?: Offer
   });
 }
 
-// 报价动作后的联动失效：两个 box 的全部状态 + 单条详情 + 我的俱乐部（冻结影响可用余额）
+// 报价动作后的联动失效：两个 box 的全部状态 + 单条详情 + 我的俱乐部（冻结影响可用余额）+ 转会台角标
 export function useOffersInvalidation() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: ['offers'] });
     void qc.invalidateQueries({ queryKey: qk.myClub });
+    void qc.invalidateQueries({ queryKey: qk.deskSummary });
   };
 }
 

@@ -12,6 +12,8 @@ import playersRoutes, { countPlayers } from './routes/players.ts';
 import registrationRoutes from './routes/registration.ts';
 import seasonsRoutes from './routes/seasons.ts';
 import marketRoutes from './routes/market.ts';
+// 转会台汇总（v6.73.0 期 B）：导航角标 / 桌内待办条的轻量计数；期 C 的 transfer-panel 也落这里
+import deskRoutes from './routes/desk.ts';
 import offersRoutes from './routes/offers.ts';
 import transfersRoutes from './routes/transfers.ts';
 import negotiationRoutes from './routes/negotiations.ts';
@@ -88,6 +90,8 @@ app.route('/api', playersRoutes);
 app.route('/api', registrationRoutes);
 app.route('/api', seasonsRoutes);
 app.route('/api', marketRoutes);
+// 转会台汇总（v6.73.0 期 B）：单独成文件，避免 market.ts 继续膨胀
+app.route('/api', deskRoutes);
 // 报价 / 议价（v6.3.0）：全部私有端点；同意即挂牌走 /api/offers 写路径，写路径 purge 已在 cache-policy 登记
 app.route('/api', offersRoutes);
 app.route('/api', transfersRoutes);

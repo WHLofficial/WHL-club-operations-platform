@@ -9,40 +9,63 @@
 // v6.54.0：?tab=negotiations 是签约谈判页签的正式深链写法（站内信 / 球员页「球员要求」入口带
 // &demand=<id>，故意与内部值 nego 不同名、与 v6.40.0 ?offer= 的写法对齐）；这里显式收成 nego，
 // 不改写 URL（?demand= 由 NegotiationsSection 的球员要求分组读）。
+// v6.73.0 期 B：页签数字改 A 口径待办数（desk/summary，与顶栏红点/子导航数字同源）；
+// ?player=<内部 id> 深链落到对应页签并展开该球员行；只有 player 没有 tab 时默认落 bids。
 import { useSearchParams } from 'react-router';
-import { useMyBids, useMyClub, useMyNegotiations, useOffers } from '../../../lib/queries.ts';
+import { useDeskSummary, useMyBids, useMyClub, useMyNegotiations, useOffers } from '../../../lib/queries.ts';
 import { MarketNav } from '../shared.tsx';
 import ListingsBidsSection from './ListingsBidsSection.tsx';
 import NegotiationsSection from './NegotiationsSection.tsx';
 import OffersSection from './OffersSection.tsx';
+import { groupBidsByPlayer } from './desk-rows.ts';
+import { isActiveListing } from './status.ts';
 
 type DeskTab = 'nego' | 'offers' | 'bids';
 
 export default function MarketDeskPage() {
   const [params, setParams] = useSearchParams();
   const tabRaw = params.get('tab');
+  // 深链目标球员（内部 id）；只有它没有 tab 时默认落 bids（期 B 裁决）
+  const playerRaw = Number(params.get('player'));
+  const focusPlayerId = Number.isInteger(playerRaw) && playerRaw > 0 ? playerRaw : null;
   // 旧链接 ?tab=mine 是 bids 的 alias；v6.54.0 的 ?tab=negotiations 是签约谈判的正式深链写法
   // （站内信 / 球员页「球员要求」入口带 &demand=<id>）——都直接渲染对应页签，不改写 URL、不发重定向。
   // 别名单列一支，「nego|offers|bids + mine」这句原样保留：tests/mobile-baseline 的静态锁逐字锁它。
   const tab: DeskTab =
     tabRaw === 'negotiations'
       ? 'nego'
-      : (tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine' ? (tabRaw === 'mine' ? 'bids' : tabRaw) : 'nego');
+      : tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine'
+        ? tabRaw === 'mine'
+          ? 'bids'
+          : tabRaw
+        : focusPlayerId !== null
+          ? 'bids'
+          : 'nego';
   const box = params.get('box') === 'out' ? 'out' : 'in';
   const status = params.get('status') === 'all' ? 'all' : 'pending';
 
   const { loading, isCoach, club: myClub, failed: clubFailed } = useMyClub();
   const { bids: myBids } = useMyBids(isCoach);
-  // 页签计数：三个数字全部由各区块自身的数据派生（与区块同一批 query 键，TanStack 缓存自动复用，
-  // 切页签不会重复发请求）；报价计数 = 两侧 pendingMine 之和（in + out 都可能轮到我表态）。
+  // v6.73.0 期 B：页签数字 = A 口径待办数（谈判 active / 报价轮到我 / 出价被超出），
+  // 与顶栏红点、MarketNav 数字共用同一份 useDeskSummary（TanStack 缓存只发一次）。
+  const summary = useDeskSummary(isCoach);
+  const todo: Record<DeskTab, number> = {
+    nego: summary.data?.negotiations ?? 0,
+    offers: summary.data?.offers ?? 0,
+    bids: summary.data?.bids ?? 0,
+  };
+  // 「进行中」口径与「待办」不同：谈判 active（与待办相同）、报价 pending + intent 全量、
+  // 出价页签里当前挂牌仍在流程内的球员行（含领先与被超出）。两个数分开，不混成一个。
   const negotiations = useMyNegotiations(isCoach);
   const offersIn = useOffers('in', 'pending', isCoach);
   const offersOut = useOffers('out', 'pending', isCoach);
-
-  const counts: Record<DeskTab, number> = {
+  const offerIds = new Set<number>();
+  for (const o of [...(offersIn.data?.items ?? []), ...(offersOut.data?.items ?? [])]) offerIds.add(o.id);
+  const inProgress: Record<DeskTab, number> = {
     nego: (negotiations.data?.pages[0]?.sessions ?? []).filter((s) => s.status === 'active').length,
-    offers: (offersIn.data?.pendingMine ?? 0) + (offersOut.data?.pendingMine ?? 0),
-    bids: (myBids ?? []).filter((b) => b.status === 'active').length,
+    offers:
+      offerIds.size + (offersIn.data?.intentsMine ?? 0) + (offersOut.data?.intentsMine ?? 0),
+    bids: groupBidsByPlayer(myBids ?? []).filter((r) => isActiveListing(r.current.listingStatus)).length,
   };
 
   function goTab(next: DeskTab) {
@@ -100,24 +123,34 @@ export default function MarketDeskPage() {
             <span className="badge green">成约过户</span>
           </p>
 
-          {/* 页签条：自带计数，条件挂载一次只挂一个区块 */}
+          {/* 页签条：自带待办数（A 口径），条件挂载一次只挂一个区块 */}
           <div className="seg dossier-tabs" role="radiogroup" aria-label="转会台页签">
             <button type="button" className={tab === 'nego' ? 'on' : ''} onClick={() => goTab('nego')}>
-              签约谈判 <span className="mono">{counts.nego}</span>
+              签约谈判 <span className="mono">{todo.nego}</span>
             </button>
             <button type="button" className={tab === 'offers' ? 'on' : ''} onClick={() => goTab('offers')}>
-              报价 <span className="mono">{counts.offers}</span>
+              报价 <span className="mono">{todo.offers}</span>
             </button>
             <button type="button" className={tab === 'bids' ? 'on' : ''} onClick={() => goTab('bids')}>
-              我的出价 <span className="mono">{counts.bids}</span>
+              我的出价 <span className="mono">{todo.bids}</span>
             </button>
           </div>
+          {/* v6.73.0 期 B：待办与进行中分开（待办 = 该你动，进行中 = 在途全量） */}
+          <p className="hint desk-todo-line">
+            待办 <span className="mono">{todo[tab]}</span> · 进行中 <span className="mono">{inProgress[tab]}</span>
+          </p>
 
-          {tab === 'nego' && <NegotiationsSection />}
+          {tab === 'nego' && <NegotiationsSection focusPlayerId={focusPlayerId} />}
           {tab === 'offers' && (
-            <OffersSection box={box} status={status} onBoxChange={switchBox} onStatusChange={switchStatus} />
+            <OffersSection
+              box={box}
+              status={status}
+              onBoxChange={switchBox}
+              onStatusChange={switchStatus}
+              focusPlayerId={focusPlayerId}
+            />
           )}
-          {tab === 'bids' && <ListingsBidsSection />}
+          {tab === 'bids' && <ListingsBidsSection focusPlayerId={focusPlayerId} />}
         </>
       )}
     </div>
