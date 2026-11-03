@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations } from './d1.ts';
-import { applyContractTerms } from '../src/worker/transfers.ts';
+import { applyContractTerms, completeTransfer } from '../src/worker/transfers.ts';
+import { healSettlement } from '../src/worker/negotiations.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
 function fixture(): { env: Env; sqlite: DatabaseSync } {
@@ -84,5 +85,54 @@ describe('applyContractTerms（v6.66.0 只落条款，不再过户）', () => {
     await expect(applyContractTerms(env, 501, { wage: 4, releaseFee: 30, source: 'negotiation', contractType: 'formal' }, 1)).rejects.toThrow(
       '不能落合同条款',
     );
+  });
+
+  // v6.71.0：成约路径自己写了条款，必须同批把 terms_applied 置 1；否则 tick 自愈会把已完成单
+  // 当成「条款未落」重放，训练营合同会被会话里的低价 RC 覆写（生产 Virgili 事故）。
+  it('completeTransfer 带条款成约同批置 terms_applied=1', async () => {
+    const { env, sqlite } = fixture();
+    seedPlaceholderDeal(sqlite);
+    sqlite.exec(`UPDATE transfers SET type = 'free_agent', from_club_id = NULL, fee = 0, status = 'signing' WHERE id = 501`);
+    expect(
+      await completeTransfer(env, 501, 1, 'user', undefined, {
+        wage: 0.75,
+        releaseFee: 5,
+        source: 'trainee',
+        contractType: 'trainee',
+      }),
+    ).toEqual({ status: 'completed' });
+    expect(contractRow(sqlite)).toMatchObject({ wage: 0.75, release_fee: 5, contract_type: 'trainee' });
+    expect(sqlite.prepare('SELECT terms_applied FROM transfers WHERE id = 501').get()).toEqual({ terms_applied: 1 });
+  });
+
+  it('healSettlement 对训练营会话用 5m 地板，不重放会话里的低价 RC', async () => {
+    const { env, sqlite } = fixture();
+    seedPlaceholderDeal(sqlite);
+    sqlite.exec(`
+      UPDATE transfers SET type = 'free_agent', from_club_id = NULL, fee = 0, status = 'completed', terms_applied = 0 WHERE id = 501;
+      UPDATE contracts SET wage = 0.75, release_fee = 5, contract_type = 'trainee', source = 'trainee' WHERE player_id = 70;
+      UPDATE players SET status = 'trainee' WHERE id = 70;
+      INSERT INTO negotiation_sessions (id, transfer_id, player_id, club_id, expected_wage, status, release_fee, settled_wage, settle_source, settled_at)
+        VALUES (77, 501, 70, 2, 0.51, 'settled', 1, 0.75, 'trainee', '2026-11-01T22:17:45Z');
+    `);
+    await healSettlement(
+      env,
+      {
+        id: 77,
+        transfer_id: 501,
+        player_id: 70,
+        club_id: 2,
+        expected_wage: 0.51,
+        release_fee: 1,
+        attempt_count: 0,
+        status: 'settled',
+        settled_wage: 0.75,
+        settle_source: 'trainee',
+      },
+      null,
+      'cron_tick',
+    );
+    expect(contractRow(sqlite)).toMatchObject({ wage: 0.75, release_fee: 5, contract_type: 'trainee' });
+    expect(sqlite.prepare('SELECT terms_applied FROM transfers WHERE id = 501').get()).toEqual({ terms_applied: 1 });
   });
 });

@@ -10,6 +10,7 @@ import { resetConfigCache } from '../src/core/config.ts';
 import { resetOpsScheduleCache } from '../src/worker/ops-schedule.ts';
 import { resetSettleCoalesce } from '../src/worker/market-settle.ts';
 import { TRAINEE_WAGE, TRAINEE_RC } from '../src/core/squad-rules.ts';
+import { demoteQuotaFor, traineeMaxFor } from '../src/worker/promotion.ts';
 
 interface Fixture {
   env: Env;
@@ -109,6 +110,16 @@ function demote(fx: Fixture, playerId: number, token = 'tok-coach') {
 
 function promote(fx: Fixture, playerId: number, newReleaseFee: number, token = 'tok-coach') {
   return send(fx.env, 'POST', '/api/transfers/promotion', { playerId, newReleaseFee }, token);
+}
+
+function setConfig(fx: Fixture, key: string, value: string): void {
+  fx.sqlite
+    .prepare(
+      `INSERT INTO config (key, value, updated_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    .run(key, value);
+  resetConfigCache();
 }
 
 // 激活证据制 key（模式见 activations.ts PROOF_KEY_PATTERN；key 内嵌激活方俱乐部 id）
@@ -240,6 +251,127 @@ describe('下放（正式合同 → 训练营条款，v6.64.4）', () => {
     const again = await demote(fx, 2);
     expect(again.status).toBe(409);
     expect(((await again.json()) as { error: string }).error).toContain('已经下放过一次');
+  });
+
+  it('TC-D8 名额可由 config 按窗/按队授予：本窗 club 1 给 7 个，第 8 个 409；未授予的队仍按 default', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, growable, status, fc_id) VALUES
+        (10, 'uid10', '下放庚', 1, 'CM', 22, 70, 82, 1, 'normal', 20),
+        (11, 'uid11', '下放辛', 1, 'CM', 22, 70, 82, 1, 'normal', 21),
+        (12, 'uid12', '下放壬', 1, 'CM', 22, 70, 82, 1, 'normal', 22),
+        (13, 'uid13', '下放癸', 1, 'CM', 22, 70, 82, 1, 'normal', 23);
+      INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, source, effective_from, is_active) VALUES
+        (10, 10, 1, 30, 2, 'formal', 'import', '2026-07-01', 1),
+        (11, 11, 1, 30, 2, 'formal', 'import', '2026-07-01', 1),
+        (12, 12, 1, 30, 2, 'formal', 'import', '2026-07-01', 1),
+        (13, 13, 1, 30, 2, 'formal', 'import', '2026-07-01', 1);
+    `);
+    // 隔离名额判据：默认 trainee_max=7 会先把第 7 个下放拦掉（皇马在生产的实际约束）
+    setConfig(fx, 'trainee_max', '20');
+    setConfig(fx, 'demote_quota', JSON.stringify({ default: 2, by_window: { '1:2': { 1: 7 } } }));
+    for (const id of [1, 2, 3, 8, 10, 11, 12]) {
+      expect((await demote(fx, id)).status).toBe(201);
+    }
+    const eighth = await demote(fx, 13);
+    expect(eighth.status).toBe(409);
+    expect(((await eighth.json()) as { error: string }).error).toContain('本窗下放名额（7 名）已用完');
+    // 没被点名的球队仍回 default
+    expect(await demoteQuotaFor(fx.env.DB, 2, { season: 1, windowSeq: 2 })).toBe(2);
+  });
+
+  it('TC-D9 训练营人数硬拦：上限 2、已有 1 人 → 再下放 1 人后满员，第 3 个 409', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    setConfig(fx, 'trainee_max', '2');
+    expect((await demote(fx, 1)).status).toBe(201);
+    const blocked = await demote(fx, 2);
+    expect(blocked.status).toBe(409);
+    expect(((await blocked.json()) as { error: string }).error).toContain('训练营已满（上限 2 人）');
+    // 失败者合同不动
+    expect(
+      sqlGet<{ contract_type: string; release_fee: number; wage: number }>(
+        fx.sqlite,
+        'SELECT contract_type, release_fee, wage FROM contracts WHERE player_id = 2 AND is_active = 1',
+      ),
+    ).toMatchObject({ contract_type: 'formal', release_fee: 40, wage: 2 });
+  });
+
+  it('TC-D10 下放作废待生效续约/闹涨薪，合同只落训练营固定条款', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    fx.sqlite.exec(`
+      INSERT INTO contract_pending_changes (player_id, club_id, source, demand_id, wage_new, release_fee_new, protection_ticks_new, rc_fee, free_rc_change, status, effective_window_seq)
+        VALUES (1, 1, 'renewal', NULL, 5, 40, NULL, 0, 0, 'pending', 2);
+      INSERT INTO contract_demands (player_id, club_id, season, window_seq, status, current_wage, expected_wage, target_wage, floor_wage, raise_pct, seed, expires_at)
+        VALUES (2, 1, 1, 2, 'pending', 2, 3, 3.5, 2.8, 0.5, 42, '2026-07-05T00:00:00Z');
+    `);
+    expect((await demote(fx, 1)).status).toBe(201);
+    expect((await demote(fx, 2)).status).toBe(201);
+    expect(
+      sqlGet<{ status: string; void_reason: string }>(
+        fx.sqlite,
+        "SELECT status, void_reason FROM contract_pending_changes WHERE player_id = 1",
+      ),
+    ).toMatchObject({ status: 'void', void_reason: 'demoted' });
+    expect(
+      sqlGet<{ status: string; void_reason: string }>(
+        fx.sqlite,
+        "SELECT status, void_reason FROM contract_demands WHERE player_id = 2",
+      ),
+    ).toMatchObject({ status: 'void', void_reason: 'demoted' });
+    // 作废的 pending 不再被落库；合同只有训练营 0.75 / 5
+    expect(
+      sqlGet<{ contract_type: string; release_fee: number; wage: number }>(
+        fx.sqlite,
+        'SELECT contract_type, release_fee, wage FROM contracts WHERE player_id = 1 AND is_active = 1',
+      ),
+    ).toMatchObject({ contract_type: 'trainee', release_fee: TRAINEE_RC, wage: TRAINEE_WAGE });
+    const audit = sqlGet<{ after: string }>(
+      fx.sqlite,
+      "SELECT after FROM audit_log WHERE action = 'player_demote' AND target_id = 1 ORDER BY id DESC LIMIT 1",
+    );
+    expect(audit).toBeDefined();
+    expect(JSON.parse(audit!.after)).toMatchObject({ voidedPendingIds: [1] });
+  });
+
+  it('TC-D11 名额 0 时入口 409，合同/履历/审计都不落', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    setConfig(fx, 'demote_quota', JSON.stringify({ default: 0 }));
+    const res = await demote(fx, 1);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain('本窗下放名额（0 名）已用完');
+    expect(
+      sqlGet<{ contract_type: string; release_fee: number; wage: number }>(
+        fx.sqlite,
+        'SELECT contract_type, release_fee, wage FROM contracts WHERE player_id = 1 AND is_active = 1',
+      ),
+    ).toMatchObject({ contract_type: 'formal', release_fee: 50, wage: 2 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM transfers WHERE type = 'demote'")).toMatchObject({ n: 0 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'player_demote'")).toMatchObject({ n: 0 });
+  });
+
+  it('TC-D12 demoteQuotaFor 解析优先级（窗口 → 球队 → 默认）与非法值回落', async () => {
+    const fx = freshPromotionEnv();
+    seedPromotionWorld(fx);
+    setConfig(
+      fx,
+      'demote_quota',
+      JSON.stringify({ default: 3, by_club: { '1': 5 }, by_window: { '1:2': { '1': 7 } } }),
+    );
+    expect(await demoteQuotaFor(fx.env.DB, 1, { season: 1, windowSeq: 2 })).toBe(7);
+    expect(await demoteQuotaFor(fx.env.DB, 1, { season: 1, windowSeq: 1 })).toBe(5);
+    expect(await demoteQuotaFor(fx.env.DB, 2, { season: 1, windowSeq: 2 })).toBe(3);
+    setConfig(fx, 'demote_quota', JSON.stringify({ default: 'x', by_club: { '1': 120 } }));
+    expect(await demoteQuotaFor(fx.env.DB, 1, { season: 1, windowSeq: 2 })).toBe(2);
+    setConfig(fx, 'demote_quota', '{bad json');
+    expect(await demoteQuotaFor(fx.env.DB, 1, { season: 1, windowSeq: 2 })).toBe(2);
+    setConfig(fx, 'trainee_max', '2');
+    expect(await traineeMaxFor(fx.env.DB)).toBe(2);
+    setConfig(fx, 'trainee_max', 'abc');
+    expect(await traineeMaxFor(fx.env.DB)).toBe(7);
   });
 
   it('闸位收口：transfer_promotion 行到点止 → 409 op_closed（窗口仍开但时段已过）', async () => {

@@ -326,6 +326,30 @@ describe('§10.3 触发点：改未来之星 / 导入 / 合同认领（v6.48.0�
     const row = sqlGet<{ club_id: number; growth_tier: number }>(fx.sqlite, 'SELECT club_id, growth_tier FROM players WHERE id = 9');
     expect(row).toMatchObject({ club_id: 1, growth_tier: 3 });
   });
+
+  // v6.71.0：导入只写合同，过去不碰 players.status，两份导入各说各话会留下
+  // 「normal + trainee 合同」「trainee + formal 合同」两种两边都卡死的行（生产 S9 有 5 条）。
+  it('合同导入按合同类型同步 players.status（只掰同向不一致）', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, fc_id, age, status, game_attrs) VALUES
+        (5, 'fc5', '训练营甲', 1, 105, 20, 'normal', '{"TeamID": 1, "naID": 14}'),
+        (6, 'fc6', '一线乙', 1, 106, 24, 'trainee', '{"TeamID": 1, "naID": 14}'),
+        (7, 'fc7', '挂牌丙', 1, 107, 24, 'listed', '{"TeamID": 1, "naID": 14}');
+    `);
+    await confirmContractsImport(fx.env, 1, {
+      clubId: 1,
+      rows: [
+        { uid: 105, releaseFee: 5, wage: 0.75, contractType: 'trainee', effectiveFrom: '2026-01-01' },
+        { uid: 106, releaseFee: 30, wage: 2, contractType: 'formal', effectiveFrom: '2026-01-01' },
+        { uid: 107, releaseFee: 5, wage: 0.75, contractType: 'trainee', effectiveFrom: '2026-01-01' },
+      ],
+    });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 5')).toMatchObject({ status: 'trainee' });
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 6')).toMatchObject({ status: 'normal' });
+    // 挂牌等其它状态不被导入改写
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 7')).toMatchObject({ status: 'listed' });
+  });
 });
 
 describe('§10.3 挂钩清单（源码扫描，v6.48.0）', () => {

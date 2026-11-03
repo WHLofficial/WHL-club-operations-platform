@@ -184,6 +184,19 @@ export async function previewContractsImport(env: Env, body: unknown) {
   };
 }
 
+// v6.71.0：导入只写合同、不动 players.status；两份导入（球员 / 合同）各说各话时会留下
+// 「normal + trainee 合同」或「trainee + formal 合同」两种两边都卡死的行（生产 S9 有 5 条）。
+// 这里按刚写入的合同类型把状态的**同向不一致**掰回来，只碰 normal/trainee 两态，不碰挂牌等状态。
+function syncPlayerStatusStatement(db: D1Database, c: Classified): D1PreparedStatement {
+  const trainee = c.contract.contractType === 'trainee';
+  return db
+    .prepare(
+      `UPDATE players SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status = ?`,
+    )
+    .bind(trainee ? 'trainee' : 'normal', c.playerId, trainee ? 'normal' : 'trainee');
+}
+
 function upsertContractStatement(
   db: D1Database,
   clubId: number,
@@ -244,6 +257,7 @@ export async function confirmContractsImport(env: Env, actor: number, body: unkn
     const statements: D1PreparedStatement[] = [];
     for (const c of slice) {
       statements.push(upsertContractStatement(env.DB, payload.clubId, c, await baseTicksFor(c.contract.effectiveFrom)));
+      statements.push(syncPlayerStatusStatement(env.DB, c));
     }
     if (claimIds.length > 0) {
       const ph = claimIds.map(() => '?').join(', ');

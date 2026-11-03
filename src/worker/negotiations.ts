@@ -237,7 +237,9 @@ export async function healSettlement(env: Env, session: SessionRow, actor: numbe
   if (!transfer) return;
   const terms = {
     wage: session.settled_wage ?? TRAINEE_WAGE,
-    releaseFee: session.release_fee ?? TRAINEE_RELEASE_FEE,
+    // v6.71.0：训练营会话的 RC 固定 5。过去这里直接取 session.release_fee（报价时的值，可能 < 5），
+    // 自愈重放会把合同里已经落好的 5 覆写成 1（生产 Virgili 2026-11-01 就是这样被写坏的）。
+    releaseFee: session.settle_source === 'trainee' ? TRAINEE_RELEASE_FEE : (session.release_fee ?? TRAINEE_RELEASE_FEE),
     source: session.settle_source,
     contractType: (session.settle_source === 'trainee' ? 'trainee' : 'formal') as 'trainee' | 'formal',
   };

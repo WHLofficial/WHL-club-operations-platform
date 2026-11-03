@@ -816,6 +816,15 @@ export async function completeTransfer(
       )
       .bind(tax, transferId),
   );
+  // v6.71.0：成约路径已经在上面把条款落到合同/待生效表，同批把幂等闸置 1。过去只有
+  // applyContractTerms 置闸，completeTransfer 走「成约才结算」时闸一直为 0——tick 自愈
+  // （healSettlement）会把已完成单当成「条款未落」再重放一遍；formal 单重放同值无感，
+  // 训练营单会把固定的 5m RC 覆写回会话里的报价（生产 Virgili 2026-11-01 的事故）。
+  if (dealTerms) {
+    statements.push(
+      db.prepare(`UPDATE transfers SET terms_applied = 1 WHERE id = ? AND terms_applied = 0`).bind(transferId),
+    );
+  }
   // v6.66.0：成交是挂单的终态之一——成功路径过去不回写 listings，挂单永远钉在 pending_review，
   // findInFlight 把球员当「还在市场流程里」，续约/解约/海捞/上调全被一票否决（生产 2026-11-01
   // 有 14 条这样的脏行）。这里与失败路径（negotiations.ts voidSigningCore、rejectTransfer）对齐收口。

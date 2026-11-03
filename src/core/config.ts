@@ -24,6 +24,9 @@ export const CONFIG_KEYS = [
   'squad_max',
   'gk_min',
   'trainee_max',
+  // v6.71.0：每窗每队下放名额。结构 { default?, by_club?, by_window? }；
+  // by_window["season:windowSeq"] 优先，其次 by_club，最后 default（缺省 2）。只对点名窗口生效。
+  'demote_quota',
   'ca_pa_limits',
   'wage_cap',
   // v6.47.0：扣工资下限的帽值裕度（= 帽值 − gap）；'0' = 不设下限（用户令 2026-10-13 取消穷鬼线）
@@ -128,6 +131,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   squad_max: '30',
   gk_min: '1',
   trainee_max: '7',
+  demote_quota: '{"default":2}',
   ca_pa_limits: JSON.stringify(DEFAULT_CA_PA_LIMITS), // 规则 4.2.2 梯度原文，config 表可覆盖
   // v6.39.0：按级别工资帽（用户令 2026-10-06：顶级 68 / 次级 58）
   // v6.47.0：下限由 wage_floor_gap 驱动（默认 0 = 取消穷鬼线，用户令 2026-10-13）；

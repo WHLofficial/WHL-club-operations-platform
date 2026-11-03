@@ -735,7 +735,7 @@ function OfferStep({
           </button>
         )}
         <span className="hint">
-          训练营条款固定，不占本窗 2 个下放名额；点了就成约过户，不能反悔。
+          训练营条款固定，不占本窗下放名额；点了就成约过户，不能反悔。
           {traineeFeeGap !== 0 && (
             <>
               {' '}

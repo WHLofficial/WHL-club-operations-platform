@@ -7,6 +7,7 @@ import type { Env } from './env.ts';
 import type { AuditOrigin } from '../lib/audit.ts';
 import { HttpError } from '../lib/http.ts';
 import { TRAINEE_WAGE, TRAINEE_RC } from '../core/squad-rules.ts';
+import { createConfigService } from '../core/config.ts';
 import { promotionSurcharge, PROMOTION_FREE_RC } from '../core/bypass-rules.ts';
 import { round2 } from '../core/market-rules.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
@@ -25,7 +26,57 @@ function nowSql() {
 
 // 每窗每队下放名额（规则 4.3.4(3)）。载体 = transfers type='demote' 的 completed 行（club+窗计数），
 // 兼作球员「转会记录」履历，无需新表。
-export const DEMOTE_QUOTA_PER_WINDOW = 2;
+// v6.71.0：名额改由 config `demote_quota` 提供；默认仍是 2，按窗口/球队的授予写在 by_window 里，
+// 过期自动回落，不需要跟着赛季改代码。
+export const DEMOTE_QUOTA_DEFAULT = 2;
+
+interface DemoteQuotaConfig {
+  default?: unknown;
+  by_club?: Record<string, unknown>;
+  by_window?: Record<string, Record<string, unknown>>;
+}
+
+function quotaNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 99) return null;
+  return n;
+}
+
+// 解析优先级：by_window["season:windowSeq"][clubId] → by_club[clubId] → default → 2。
+// 任一层的非法值都跳过（不让一条脏配置把入口打成 500）。
+export async function demoteQuotaFor(
+  db: Env['DB'],
+  clubId: number,
+  win: { season: number; windowSeq: number },
+): Promise<number> {
+  const cfg = await createConfigService(db).getJson<DemoteQuotaConfig>('demote_quota');
+  if (!cfg || typeof cfg !== 'object') return DEMOTE_QUOTA_DEFAULT;
+  const perWindow = cfg.by_window?.[`${win.season}:${win.windowSeq}`];
+  if (perWindow && typeof perWindow === 'object') {
+    const v = quotaNumber((perWindow as Record<string, unknown>)[String(clubId)]);
+    if (v !== null) return v;
+  }
+  const perClub = cfg.by_club;
+  if (perClub && typeof perClub === 'object') {
+    const v = quotaNumber(perClub[String(clubId)]);
+    if (v !== null) return v;
+  }
+  return quotaNumber(cfg.default) ?? DEMOTE_QUOTA_DEFAULT;
+}
+
+export async function traineeMaxFor(db: Env['DB']): Promise<number> {
+  const n = await createConfigService(db).getNumber('trainee_max');
+  if (n === null || !Number.isFinite(n)) return 7;
+  return Math.max(0, Math.trunc(n));
+}
+
+export async function traineeCountFor(db: Env['DB'], clubId: number): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM contracts WHERE club_id = ? AND is_active = 1 AND contract_type = 'trainee'`)
+    .bind(clubId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
 
 interface OwnPlayerRow {
   id: number;
@@ -108,7 +159,9 @@ export async function demotePlayer(env: Env, clubId: number, actor: number, play
     .bind(playerId, win.season, win.windowSeq)
     .first<{ id: number }>();
   if (demotedThisWindow) throw new HttpError(409, '他本窗已经下放过一次（含被再上调回的情形），下窗再操作');
-  // 名额（4.3.4(3)：每窗 2 名，含已被再上调走的——名额按事件计不退）
+  // 名额（4.3.4(3)：每窗每队 N 名，含已被再上调走的——名额按事件计不退）。N 由 config 授予，
+  // 默认 2；点名窗口（by_window["9:2"]）可给特定球队 7 个，过期自动回落，不需要跟着赛季改代码。
+  const quota = await demoteQuotaFor(db, clubId, win);
   const used = await db
     .prepare(
       `SELECT COUNT(*) AS n FROM transfers
@@ -116,15 +169,41 @@ export async function demotePlayer(env: Env, clubId: number, actor: number, play
     )
     .bind(clubId, win.season, win.windowSeq)
     .first<{ n: number }>();
-  if ((used?.n ?? 0) >= DEMOTE_QUOTA_PER_WINDOW) {
-    throw new HttpError(409, `本窗下放名额（${DEMOTE_QUOTA_PER_WINDOW} 名）已用完，下窗再操作`);
+  if ((used?.n ?? 0) >= quota) {
+    throw new HttpError(409, `本窗下放名额（${quota} 名）已用完，下窗再操作`);
+  }
+  // v6.71.0：训练营人数硬拦。下放入口过去只校验注册名单（trainee_max），不校验当前人数，
+  // 可能把球队下放成 8 人训练营；这里与注册校验同口径，先到先得。
+  const traineeMax = await traineeMaxFor(db);
+  const traineeUsed = await traineeCountFor(db, clubId);
+  if (traineeUsed >= traineeMax) {
+    throw new HttpError(409, `训练营已满（上限 ${traineeMax} 人），先上调或等名额空出再下放`);
   }
   await ensureNotInFlight(db, playerId);
   await rejectIfNegotiating(db, playerId);
 
+  // 下放会作废球员待生效的续约/闹涨薪（合同条款改回训练营固定值，旧 pending 再 apply 会破坏 0.75/5）。
+  // 先取出 id 只用于审计 after；真正的作废语句在批内挂 settledGuard，INSERT 0 行时整批 no-op。
+  const pendingRows = await db
+    .prepare(`SELECT id FROM contract_pending_changes WHERE player_id = ? AND status = 'pending'`)
+    .bind(playerId)
+    .all<{ id: number }>();
+  const demandRows = await db
+    .prepare(`SELECT id FROM contract_demands WHERE player_id = ? AND status IN ('pending','countered','accepted')`)
+    .bind(playerId)
+    .all<{ id: number }>();
+
   const audit = createAuditStatement(db);
-  // 全批挂「仍是一线队 normal」同一谓词：并发下先到者赢，后到者整批空转（INSERT 0 行 → 409）。
-  const guard = `(SELECT status FROM players WHERE id = ${playerId}) = 'normal' AND (SELECT club_id FROM players WHERE id = ${playerId}) = ${clubId}`;
+  // 三层守卫：
+  // - statusGuard：仍是一线队 normal 且在本队（并发下先到者赢）。
+  // - insertGuard：statusGuard + 名额未满 + 训练营未满；INSERT 用它做原子闸。
+  // - settledGuard：statusGuard + 本单已落库（幂等键 EXISTS）；同批后续语句全部用它，
+  //   保证 INSERT 0 行时审计/合同/球员状态/作废语句一起空转。
+  const statusGuard = `(SELECT status FROM players WHERE id = ${playerId}) = 'normal' AND (SELECT club_id FROM players WHERE id = ${playerId}) = ${clubId}`;
+  const insertGuard = `${statusGuard}
+    AND (SELECT COUNT(*) FROM transfers WHERE type = 'demote' AND from_club_id = ${clubId} AND season = ${win.season} AND window_seq = ${win.windowSeq} AND status = 'completed') < ${quota}
+    AND (SELECT COUNT(*) FROM contracts WHERE club_id = ${clubId} AND is_active = 1 AND contract_type = 'trainee') < ${traineeMax}`;
+  const settledGuard = `${statusGuard} AND EXISTS (SELECT 1 FROM transfers WHERE idempotency_key = 'demote:${playerId}:${win.season}:${win.windowSeq}')`;
   // 顺序硬约束（同 offers.ts 建单同款坑）：履约 INSERT 与审计必须排在两个 UPDATE 之前——
   // 同批内先改后查，守卫会读到改后状态恒假、整批空转。
   const results = await db.batch([
@@ -132,7 +211,7 @@ export async function demotePlayer(env: Env, clubId: number, actor: number, play
       .prepare(
         `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, tax, extra_fee, status, season, window_seq, idempotency_key, evidence, created_at, completed_at)
          SELECT 'demote', ?, ?, ?, 0, 0, 0, 'completed', ?, ?, ?, ?, ${nowSql()}, ${nowSql()}
-         WHERE ${guard}`,
+         WHERE ${insertGuard}`,
       )
       .bind(
         playerId,
@@ -149,18 +228,39 @@ export async function demotePlayer(env: Env, clubId: number, actor: number, play
       targetType: 'player',
       targetId: playerId,
       origin: 'user',
-      after: { clubId, oldReleaseFee: contract.release_fee, releaseFee: TRAINEE_RC, wage: TRAINEE_WAGE, season: win.season, windowSeq: win.windowSeq },
-      guardSql: guard,
+      after: {
+        clubId,
+        oldReleaseFee: contract.release_fee,
+        releaseFee: TRAINEE_RC,
+        wage: TRAINEE_WAGE,
+        season: win.season,
+        windowSeq: win.windowSeq,
+        voidedDemandIds: demandRows.results.map((r) => r.id),
+        voidedPendingIds: pendingRows.results.map((r) => r.id),
+      },
+      guardSql: settledGuard,
     }),
     db
       .prepare(
         `UPDATE contracts SET contract_type = 'trainee', release_fee = ?, wage = ?, source = 'demote',
             protection_ticks = NULL, free_rc_change_used = 0
-         WHERE player_id = ? AND is_active = 1 AND club_id = ? AND contract_type != 'trainee'`,
+         WHERE player_id = ? AND is_active = 1 AND club_id = ? AND contract_type != 'trainee' AND ${settledGuard}`,
       )
       .bind(TRAINEE_RC, TRAINEE_WAGE, playerId, clubId),
     db
-      .prepare(`UPDATE players SET status = 'trainee', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`)
+      .prepare(
+        `UPDATE contract_demands SET status = 'void', void_reason = 'demoted', resolved_at = ${nowSql()}
+         WHERE player_id = ? AND status IN ('pending','countered','accepted') AND ${settledGuard}`,
+      )
+      .bind(playerId),
+    db
+      .prepare(
+        `UPDATE contract_pending_changes SET status = 'void', void_reason = 'demoted'
+         WHERE player_id = ? AND status = 'pending' AND ${settledGuard}`,
+      )
+      .bind(playerId),
+    db
+      .prepare(`UPDATE players SET status = 'trainee', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND ${settledGuard}`)
       .bind(playerId, clubId),
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0) {
