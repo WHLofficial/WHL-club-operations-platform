@@ -17,6 +17,7 @@
 - 零迁移、零契约变更（补的是前端类型早已声明的字段）、判级 patch。
 - 本地实测：种子会话打开 `/market/desk?tab=bids`，展开挂牌 #103 —— 修前 `pageerror: Cannot read properties of undefined (reading 'name')`、`#root` 空、整页白屏；修后面板正常显示「要价 9.00m · 当前最高 9.00m（Baseline Utd）」与出价表单，无 console 报错。
 - 验收：`npm run typecheck` 三份清；`npm test` **193 文件 / 3,020 例**全绿；`npm run build` 通过。
+- 上线（2026-11-03 14:57 CST / 06:57Z）：push `b7cbb0e..67916ca` 到 `main`，CF Workers Builds 自动部署 Version `b6aa3ff7-0a01-4d06-a8b2-5d18a674ed38`（100%）；生产入口 `assets/index-BlKyrTi1.js` 与本地构建 sha256 逐字节一致（`b7775563…`，版本串 `6.72.2`）；`/` 200、`/api/health` 200。生产实数据复核：挂牌 41（`bidding`，有 5 条出价、4 条 superseded）详情回 `highestBid 20 / highestBidder {73, 巴黎圣日耳曼}`，与板面聚合一致；无出价挂牌（1，`delisted`）回显式 `null`。
 
 ## [v6.72.1] · 修复：一条已结算的上调会话把签约谈判列表打成 409（2026-11-03）
 
