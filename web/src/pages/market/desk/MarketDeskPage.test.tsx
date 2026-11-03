@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 // v6.32.0 转会台页签化，页面级聚焦测试（区块内部行为归各自组件，见 OffersSection.test.tsx）：
 // - 默认落签约谈判、三区块条件挂载（一次只挂一个）
-// - 页签自带计数：谈判=active 会话数 / 报价=两侧 pendingMine 之和 / 出价=active 出价数
+// - v6.73.0 期 B 起页签计数改 A 口径待办数（desk/summary）；实测 fixture 2/3/1
 // - ?tab= 深链语义：offers+bids 直落、mine alias 不改写 URL、非法值回落 nego 也不改写、点当前页签不写 URL
-// - 待办速览条退役、流水线说明条精简一行（机制句收进报价区块 hint）
+// - v6.73.0 期 B：?player= 深链展开该球员行；只有 player 没 tab 时默认落 bids；目标不在本页签给提示条
 // - 门禁三分支（教练身份失败 / 非教练）、计数查询与区块查询同键去重
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -39,6 +39,8 @@ const ME_CLUB = {
 const OFFERS_IN = { club: { id: 1, name: '阿森纳' }, box: 'in', items: [], nextCursor: null, pendingMine: 1, intentsMine: 0 };
 // out 侧 pendingMine=2：报价计数「两侧之和」这个不变量只有在这才可分辨（e2e 夹具 out=0 分不出，见测试计划 §3）
 const OFFERS_OUT = { club: { id: 1, name: '阿森纳' }, box: 'out', items: [], nextCursor: null, pendingMine: 2, intentsMine: 0 };
+// v6.73.0 期 B：页签数字改读 desk/summary（A 口径待办数），与 fixture 里三条待办对齐
+const DESK_SUMMARY = { negotiations: 2, offers: 3, bids: 1, total: 6 };
 
 const negoSession = (over: Record<string, unknown>) => ({
   id: 21,
@@ -99,8 +101,28 @@ function stubApi(over: { clubError?: boolean } = {}) {
     }
     if (path === '/api/negotiations?mine=1') return Promise.resolve(NEGOTIATIONS);
     if (path === '/api/me/bids') return Promise.resolve(BIDS);
+    if (path === '/api/market/desk/summary') return Promise.resolve(DESK_SUMMARY);
     if (path === '/api/offers?box=in&status=pending') return Promise.resolve(OFFERS_IN);
     if (path === '/api/offers?box=out&status=pending') return Promise.resolve(OFFERS_OUT);
+    // v6.73.0 期 B 深链展开行后，区块会按 listingId 拉挂牌详情（期 A 既有行为）
+    if (path.startsWith('/api/market/listings/'))
+      return Promise.resolve({
+        listing: {
+          id: Number(path.split('/').pop()),
+          playerId: 5,
+          sellerClubId: 2,
+          askPrice: 7,
+          status: 'bidding',
+          windowOpen: true,
+          bidPaused: false,
+          firstBidPending: false,
+          activatedBy: null,
+          nextMinBid: 9,
+          highestBid: 8,
+          highestBidder: { id: 2, name: '巴黎圣日耳曼' },
+        },
+        marketBidPaused: false,
+      });
     // v6.54.0：签约谈判页签顶部多了「球员要求」分组——页面级测试只关心挂载与页签，收件箱空
     if (path === '/api/club/contract-demands')
       return Promise.resolve({
@@ -214,6 +236,33 @@ describe('v6.32.0 转会台页签化（MarketDeskPage）', () => {
     expect(container.querySelector('#desk-bids')).toBeTruthy();
     expect(container.querySelector('#desk-nego')).toBeNull();
     expect(screen.getByTestId('loc').textContent).toBe('/market/desk?tab=mine');
+  });
+
+  it('v6.73.0 期 B：只有 ?player= 没有 tab 时默认落我的出价，并展开该球员行', async () => {
+    const { container } = renderDesk('/market/desk?player=5');
+    // 展开面板出现（行内历史标题）+ 出价区块挂载
+    expect(await screen.findByText('我的出价历史')).toBeTruthy();
+    expect(container.querySelector('#desk-bids')).toBeTruthy();
+    expect(screen.getByTestId('loc').textContent).toBe('/market/desk?player=5');
+    // 行本身进入展开态（chevron aria-expanded=true）
+    const row = container.querySelector('[data-player-id="5"]')!;
+    expect(row.querySelector('.desk-chevron')!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('v6.73.0 期 B：?player= 指向的球员不在本页签时给提示条 + 另外两个页签链接', async () => {
+    const { container } = renderDesk('/market/desk?tab=bids&player=999');
+    expect(await screen.findByText(/这名球员不在本页签/)).toBeTruthy();
+    expect(container.querySelector('#desk-bids')).toBeTruthy();
+    const links = [...container.querySelectorAll('.desk-focus-hint a')].map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/market/desk?tab=offers&player=999', '/market/desk?tab=nego&player=999']);
+  });
+
+  it('v6.73.0 期 B：?tab=offers&player= 也照同样规则展开 / 提示（报价页夹具为空 ⇒ 提示条）', async () => {
+    const { container } = renderDesk('/market/desk?tab=offers&player=5');
+    expect(await screen.findByText(/报价被接受 ≠ 成交/)).toBeTruthy();
+    expect(await screen.findByText(/这名球员不在本页签/)).toBeTruthy();
+    const links = [...container.querySelectorAll('.desk-focus-hint a')].map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/market/desk?tab=bids&player=5', '/market/desk?tab=nego&player=5']);
   });
 
   it('v6.54.0 深链 ?tab=negotiations&demand=<id>：直落签约谈判、不重写 URL（demand 归区块自己读）', async () => {

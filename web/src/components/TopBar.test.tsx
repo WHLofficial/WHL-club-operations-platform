@@ -9,14 +9,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MeUser } from '../lib/api.ts';
 import TopBar from './TopBar.tsx';
 
-const { authState, unreadState } = vi.hoisted(() => ({
+const { authState, unreadState, deskState } = vi.hoisted(() => ({
   authState: { user: null as unknown, authMode: 'oidc' as 'oidc' | 'shared' },
   unreadState: { n: 0 },
+  deskState: { total: 0 },
 }));
 vi.mock('../lib/auth.tsx', () => ({
   useAuth: () => ({ user: authState.user, authMode: authState.authMode, authHome: null }),
 }));
-vi.mock('../lib/queries.ts', () => ({ useUnreadCount: () => ({ data: unreadState.n }) }));
+vi.mock('../lib/queries.ts', () => ({
+  useUnreadCount: () => ({ data: unreadState.n }),
+  // 与真实 hook 同语义：enabled=false（匿名/观众）时没有数据
+  useDeskSummary: (enabled: boolean) => ({
+    data: enabled && deskState.total > 0 ? { negotiations: 0, offers: 0, bids: 0, total: deskState.total } : undefined,
+  }),
+}));
 
 const ADMIN: MeUser = { id: 1, name: '管理员', role: 'admin', locked: false, mustChangePw: false };
 const COACH: MeUser = { id: 5, name: '教练甲', role: 'coach', locked: false, mustChangePw: false };
@@ -36,6 +43,7 @@ beforeEach(() => {
   authState.user = null;
   authState.authMode = 'oidc';
   unreadState.n = 0;
+  deskState.total = 0;
 });
 afterEach(cleanup);
 
@@ -129,5 +137,47 @@ describe('v6.41.0 顶栏 ≡ 菜单', () => {
     expect(link.getAttribute('href')).toBe('/playstyles');
     fireEvent.click(link);
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+});
+
+describe('v6.73.0 期 B 转会台入口与红点', () => {
+  it('教练有待办：右上角入口带数字，转会中心出现红点', () => {
+    authState.user = COACH;
+    deskState.total = 5;
+    renderBar();
+    const shortcut = screen.getByRole('link', { name: '我的转会台，5 项待办' });
+    expect(shortcut.getAttribute('href')).toBe('/market/desk');
+    expect(shortcut.textContent).toContain('5');
+    expect(document.querySelector('.nav-tab .nav-dot')).toBeTruthy();
+  });
+
+  it('total=0：入口只留文案、不显示 0，也没有红点', () => {
+    authState.user = COACH;
+    renderBar();
+    const shortcut = screen.getByRole('link', { name: '我的转会台，0 项待办' });
+    expect(shortcut.textContent).toBe('我的转会台');
+    expect(document.querySelector('.nav-dot')).toBeNull();
+  });
+
+  it('>99 显示 99+（aria-label 仍报全量）', () => {
+    authState.user = ADMIN;
+    deskState.total = 150;
+    renderBar();
+    const shortcut = screen.getByRole('link', { name: '我的转会台，150 项待办' });
+    expect(shortcut.textContent).toContain('99+');
+  });
+
+  it('观众不渲染入口、也没有红点', () => {
+    authState.user = { id: 9, name: '观众乙', role: 'viewer', locked: false, mustChangePw: false };
+    deskState.total = 5;
+    renderBar();
+    expect(screen.queryByRole('link', { name: /我的转会台/ })).toBeNull();
+    expect(document.querySelector('.nav-dot')).toBeNull();
+  });
+
+  it('匿名不渲染入口', () => {
+    deskState.total = 5;
+    renderBar();
+    expect(screen.queryByRole('link', { name: /我的转会台/ })).toBeNull();
   });
 });

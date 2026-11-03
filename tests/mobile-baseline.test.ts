@@ -759,8 +759,9 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     expect(top, 'TopBar 仍留着「签约谈判」旧入口').not.toContain('签约谈判');
 
     const nav = read(SHARED);
-    // v6.31.0：广告板插在「在售市场」之后（第 2 项，按用户裁决不放最末）——与 e2e ⑤c 的 href 清单同源
-    const labels = ['在售市场', '广告板', '海捞', '激活', '我的转会台', '市场情报'];
+    // v6.73.0 期 B（owner Q9 A）：我的转会台挪到第 2 位，紧跟「在售市场」；
+    // 广告板自 v6.31.0 起顺延为第 3 位——与 e2e ⑤c 的 href 清单同源
+    const labels = ['在售市场', '我的转会台', '广告板', '海捞', '激活', '市场情报'];
     let prev = -1;
     for (const label of labels) {
       const at = nav.indexOf(label);
@@ -771,6 +772,8 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     for (const href of ['to="/market"', 'to="/market/board"', 'to="/market/free"', 'to="/market/activation"', 'to="/market/desk"', 'to="/market/intel"']) {
       expect(nav, `MarketNav 缺 ${href} 入口`).toContain(href);
     }
+    // v6.73.0 期 B：待办数字与顶栏/桌内同源（0 不渲染由组件条件保证）
+    expect(nav, 'MarketNav 缺待办数字 .seg-count').toContain('seg-count');
   });
 
   it('换址入口保留 box 映射 + 转会台默认落在谈判区（V1 红点）', () => {
@@ -782,9 +785,11 @@ describe('v6.23.0 转会中心导航静态契约（docs/test-plans/v6.23.0-trans
     expect(app, 'App.tsx 不应再挂 /market/mine 路由').not.toContain('path="/market/mine"');
 
     const desk = read(DESK);
-    expect(desk, '?tab 只认 nego|offers|bids（mine 是 bids 的 alias），缺省应落 nego').toContain(
-      "tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine' ? (tabRaw === 'mine' ? 'bids' : tabRaw) : 'nego'",
+    expect(desk, '?tab 只认 nego|offers|bids（mine 是 bids 的 alias）').toContain(
+      "tabRaw === 'offers' || tabRaw === 'bids' || tabRaw === 'mine'",
     );
+    expect(desk, 'v6.73.0 期 B：缺省无 player 时仍落 nego').toContain(": 'nego'");
+    expect(desk, 'v6.73.0 期 B：只有 player 没有 tab 时默认落 bids').toContain('focusPlayerId !== null');
     // v6.32.0 页签化：流水线说明条精简一行徽标链（机制句唯一讲解点在报价区块 hint，页面不得再重复）；
     // 待办速览条退役（计数进页签），三区块条件挂载（照球队中心 dossier-tabs 模式）
     expect(desk, '转会台缺流水线说明条').toContain('aria-label="转会流水线"');
