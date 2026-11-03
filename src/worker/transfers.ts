@@ -944,11 +944,14 @@ export async function applyContractTerms(
   const db = env.DB;
   const transfer = await loadTransfer(db, transferId);
   if (!transfer) throw new HttpError(404, '转会单不存在');
-  // 上调在提交时没有审核步、附加费依赖谈成的 RC，仍在成约那一步一起结算（design §2 关键点 4）
-  if (transfer.type === 'promotion') throw new HttpError(409, '上调单在成约时结算，不走条款落地');
   if (transfer.status !== 'completed') throw new HttpError(409, `转会单当前状态是 ${transfer.status}，不能落合同条款`);
   if (transfer.to_club_id === null) throw new HttpError(409, '转会单缺签入方，数据不完整');
+  // 幂等闸排在上调拦截之前（v6.73.0）：上调单在成约那一刻已由 completeTransfer 结算并置 terms_applied，
+  // 自愈重放到这里本该是「什么都没发生」。过去先抛 409，于是只要队里有一条已结算的上调会话，
+  // 整个 GET /api/negotiations?mine=1 就 409（生产 club 66 2026-11-03 签约谈判页签整个空掉）。
   if (transfer.terms_applied) return { status: 'already' };
+  // 上调在提交时没有审核步、附加费依赖谈成的 RC，仍在成约那一步一起结算（design §2 关键点 4）
+  if (transfer.type === 'promotion') throw new HttpError(409, '上调单在成约时结算，不走条款落地');
 
   const snapshot = parsePreSettleSnapshot(transfer);
   const baseTicks = snapshot?.baseTicks ?? (await closedRegularTicks(db));

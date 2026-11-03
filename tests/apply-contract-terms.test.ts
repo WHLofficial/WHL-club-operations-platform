@@ -87,6 +87,19 @@ describe('applyContractTerms（v6.66.0 只落条款，不再过户）', () => {
     );
   });
 
+  // v6.73.0：上调单成约时已结算过，重放必须是无事发生的 already。过去先抛 409，
+  // 一条已结算的上调会话就能把整个 GET /api/negotiations?mine=1 打成 409（生产 club 66 2026-11-03）。
+  it('已结算的上调单重放返回 already，不再抛 409', async () => {
+    const { env, sqlite } = fixture();
+    seedPlaceholderDeal(sqlite, { type: 'promotion' });
+    sqlite.exec('UPDATE transfers SET terms_applied = 1 WHERE id = 501');
+
+    expect(await applyContractTerms(env, 501, { wage: 4, releaseFee: 30, source: 'negotiation', contractType: 'formal' }, 1)).toEqual({
+      status: 'already',
+    });
+    expect(contractRow(sqlite)).toMatchObject({ wage: 0, release_fee: 0 });
+  });
+
   // v6.71.0：成约路径自己写了条款，必须同批把 terms_applied 置 1；否则 tick 自愈会把已完成单
   // 当成「条款未落」重放，训练营合同会被会话里的低价 RC 覆写（生产 Virgili 事故）。
   it('completeTransfer 带条款成约同批置 terms_applied=1', async () => {

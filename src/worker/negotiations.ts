@@ -796,24 +796,33 @@ export async function listMySessions(env: Env, clubId: number, opts: MySessionsO
   for (const row of endedPage.results) {
     // v6.66.0：换队类单据在成约前就已 completed，自愈扫描要看两种形态（applyContractTerms 自带幂等闸）
     if (row.status === 'settled' && row.settle_source && (row.transfer_status === 'signing' || row.transfer_status === 'completed')) {
-      await healSettlement(
-        env,
-        {
-          id: row.id,
-          transfer_id: row.transfer_id,
-          player_id: row.player_id,
-          club_id: clubId,
-          expected_wage: row.expected_wage,
-          release_fee: row.release_fee,
-          attempt_count: row.attempt_count,
-          status: row.status,
-          settled_wage: row.settled_wage,
-          settle_source: row.settle_source,
-        },
-        null,
-        // GET 顺手自愈：不是人类主动触发，记惰性结算
-        'lazy_settle',
-      );
+      // v6.73.0：已成品（completed）的上调单在成约那一步就结算完了，快照里没有「还没落的条款」，
+      // 重放只会撞 applyContractTerms 的上调拦截。生产 club 66 2026-11-03 就是这条把整张
+      // GET /api/negotiations?mine=1 打成 409，签约谈判页签整个空掉（两笔在谈上调单看不到）。
+      if (row.transfer_type === 'promotion' && row.transfer_status === 'completed') continue;
+      try {
+        await healSettlement(
+          env,
+          {
+            id: row.id,
+            transfer_id: row.transfer_id,
+            player_id: row.player_id,
+            club_id: clubId,
+            expected_wage: row.expected_wage,
+            release_fee: row.release_fee,
+            attempt_count: row.attempt_count,
+            status: row.status,
+            settled_wage: row.settled_wage,
+            settle_source: row.settle_source,
+          },
+          null,
+          // GET 顺手自愈：不是人类主动触发，记惰性结算
+          'lazy_settle',
+        );
+      } catch (err) {
+        // 读路径不允许被单行自愈拖死：任何一行失败只留痕，列表照常返回
+        console.warn('lazy healSettlement failed', row.id, err);
+      }
     }
   }
 

@@ -348,6 +348,24 @@ describe('结算-过户分批自愈', () => {
       sqlGet<{ wage: number; source: string }>(fx.sqlite, 'SELECT wage, source FROM contracts WHERE player_id = 10 AND is_active = 1'),
     ).toEqual({ wage: 3.11, source: 'negotiation' });
   });
+
+  // v6.73.0：已成品（completed）的上调单在成约时已结算，自愈扫描重放它会撞 applyContractTerms 的上调拦截。
+  // 过去一条这样的历史会话就能把整个 GET /api/negotiations?mine=1 打成 409，签约谈判页签整个空掉
+  // （生产 club 66 2026-11-03：Talbi 上调结算后，Jacquet / Mawissa 两笔在谈上调单全看不到）。
+  it('已结算的上调单不会打断列表（仍是 200，进已结束区）', async () => {
+    const fx = await seedSigning(freshEnv());
+    fx.sqlite.exec(`
+      INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, created_at, completed_at, terms_applied)
+        VALUES (9911, 'promotion', 10, ${fx.buyerClub}, ${fx.buyerClub}, 0, 'completed', 1, 1, '2026-07-02T00:00:00Z', '2026-07-02T00:00:00Z', 1);
+      INSERT INTO negotiation_sessions (id, transfer_id, player_id, club_id, expected_wage, attempt_count, status, created_at, settled_at, release_fee, settled_wage, settle_source)
+        VALUES (9911, 9911, 10, ${fx.buyerClub}, 2.0, 0, 'settled', '2026-07-02T00:00:00Z', '2026-07-02T00:00:00Z', 5, 2.0, 'negotiation');
+    `);
+    const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
+    expect(mine.status).toBe(200);
+    const body = (await mine.json()) as { sessions: { id: number }[]; ended: { id: number }[] };
+    expect(body.sessions.map((s) => s.id)).toContain(fx.sessionId);
+    expect(body.ended.map((s) => s.id)).toContain(9911);
+  });
 });
 
 describe('响应面收敛（§6.10-2）', () => {
