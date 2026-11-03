@@ -4,6 +4,27 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.73.0] · 转会台改版期 B：入口与角标（2026-11-03）
+
+**Added**
+
+- **`GET /api/market/desk/summary`**（`src/worker/routes/desk.ts`）：教练端点，一次 `db.batch` 出三域待办数——谈判 `active`、报价轮到我（in 看 `turn='seller'`、out 看 `turn='buyer'`）、出价「我在该挂牌上的最新一笔已 `superseded` 且挂牌仍 `bidding`」；未绑队回全 0（200），响应头 `Cache-Control: private, no-store`。**不跑 `settleOverdue`**（owner Q6 A：角标允许落后一个结算窗，进入转会台时三条读路径的 30s coalesce 会收口）。
+- **`useDeskSummary`**（`web/src/lib/queries.ts`）：`qk.deskSummary`，`staleTime` / `refetchInterval` 各 60s、后台停轮询、回前台补一枪、失败静默；顶栏 / 市场子导航 / 桌内页签 / 待办条共用一份缓存。
+- **顶栏入口**（`web/src/components/TopBar.tsx`）：右上角「我的转会台」文字入口（≥901px 显示，`total=0` 只留文案、>99 显示 `99+`，`aria-label` 报全量）+「转会中心」上的 `.nav-dot` 红点（绝对定位不占宽）。
+- **市场子导航**（`web/src/pages/market/shared.tsx`）：`我的转会台` 挪到第 2 位（owner Q9 A），带 `.seg-count` 数字；`/market` 仍落在售市场。
+- **深链**（`MarketDeskPage` + 三个区块）：`/market/desk?tab=bids|offers|nego&player=<内部 id>` 落到对应页签并展开该球员行；只有 `player` 没有 `tab` 时默认 `bids`；目标不在当前列表时出提示条 + 另外两个页签链接（保留 `player`）；旧 `?tab=mine` / `?tab=negotiations` / `?offer=` / `?demand=` 语义不变。
+- **桌内待办条**：页签数字改 A 口径待办数，页签下方显示 `待办 N · 进行中 M`；「进行中」= 谈判 `active` / 报价 `pending + intent`（in/out 按 id 去重）/ 出价当前挂牌仍在流程内的球员行，与「待办」分开。
+- **写后失效**：`useMarketInvalidation`、`useOffersInvalidation`、`NegotiationsSection` 的 `refresh` 都补 `qk.deskSummary`，角标不再等 60s。
+
+**Notes**
+
+- 零迁移、零业务规则/资金口径/审核流程改动；期 C 的 `transfer-panel` 与球员页状态条/浮层不在本版。
+- `MarketNav` 改用 `useAuthOptional`：市场页组件测试常裸渲染、没有 `AuthProvider`，取不到登录态时按匿名处理（不请求角标）。
+- 测试计划：`docs/test-plans/v6.73.0-transfer-desk-phase-b.md`。新增 `tests/desk-summary.test.ts`（7 例）、`web/src/lib/desk-summary-query.test.tsx`（3 例），并补 `MarketDeskPage.test.tsx` 深链 4 例、`TopBar.test.tsx` 角标 5 例；`tests/mobile-baseline.test.ts` 同步 MarketNav 新顺序。
+- 变异验证：删 `l.status='bidding'` ⇒ 3 红；删报价 `turn` 条件 ⇒ 2 红；深链默认页签改回 `nego` ⇒ 1 红；TopBar 去掉 `total>0` 条件 ⇒ 2 红；`refetchInterval` 改 `false` ⇒ 1 红；均已恢复。
+- 验收：`npm run typecheck` 三份全清；`npm test` **195 文件 / 3,038 例**全绿（v6.72.2 基线 193 / 3,020，净 +2 文件 / +18 例）；`npm run build` 成功，入口 `assets/index-DxrUk2fh.js`（730.79 kB / gzip 230.57 kB），版本串 `6.73.0`。
+- 判级 minor（新增用户可见入口与角标能力；向后兼容，无迁移）。
+
 ## [v6.72.2] · 修复：「我的出价」展开任意球员整页白屏（2026-11-03）
 
 **Fixed**
