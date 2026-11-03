@@ -75,7 +75,7 @@
 
 **上一版本 v6.63.0**（徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制；含迁移 `0086`）——**已上线（2026-10-31）**：迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`；只读核验：`d1_migrations` 末条 0086、247 发放银 24 已删保金台账 7/2、557 零数据变更且 FC 槽原貌保留台账 3/2、`idx_players_sort_ps` 消失、config 两键清零、**全表台账与迁移同源表达式对账 silver_drift=0 / gold_drift=0（18,301 行）**）；随后 push `56d00fd..f412485`（7 个提交）触发 CF Workers Builds 两轮自动部署——`f24537fa`（04:09:15Z，功能代码）→ **`310624e6`（04:10:31Z，生效 100%）**。发布轮插曲两枚：评审轮端到端用例超出 `ListBody17` 类型声明（发布复验 typecheck 抓出，`1f252a5` 补字段）；收口时 package.json 漏 bump（首轮部署版本串仍 6.62.0），随 `f412485` 订正重部署。上线探针：`/api/health` 200、线上首页资产 `index-d2h1BMYI.js` 与本地 6.63.0 构建逐字同名、线上版本串 `6.63.0`；`?ps=1` 不含 557（FC 银 1 被发放金 1 派生抑制）、`?ps=101` 命中 557、`?ps=124` 命中 247（发放金以基础 ID 筛中）；列表响应带 `playstyles` 合并清单（`source` 字段在场）、557 详情 `playstyles` = FC 银 16/41/32 + 发放金 101/131（被抑制银 1/31 消失）、`badges 3/2`；`sort=ps` 与 `sort=badges` 均 200。发布前复验 vitest **175 文件 / 2837 例**全绿（较收口 2836 多 1 例为工作区另一会话在途 oidc 用例）。判级 minor（口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。typecheck 三份全清、e2e **29/29**、变异验证 4 靶全命中、code-review 🔴×1 已修。**生产迁移现状：已到 `0086`**。细节见下文 v6.63.0 节。
 
-**本版本 v6.72.1**（修复：已结算的上调会话把签约谈判列表打成 409；零迁移零契约变更）——**仅本地提交，未 push 未部署**：生产 club 66 在 2026-11-03 13:35 CST 报「签约谈判区看不到球员」，实为页签整个空掉 —— `listMySessions` 的自愈扫描逐条 `healSettlement` 已结束行，`applyContractTerms` 又先把上调拦截排在 `terms_applied` 幂等闸之前，于是 Talbi 那笔已成品的上调会话（transfer 188）让每次 `GET /api/negotiations?mine=1` 都抛 409，前端 `sessions` 恒 null、页签计数 0，两笔在谈上调单（Jacquet / Mawissa）不可见。**修法**：自愈扫描跳过 `promotion + completed` 行并给每行包 try/catch；`terms_applied` 幂等闸提到上调拦截之前。回归两条（`tests/negotiation-routes.test.ts` / `tests/apply-contract-terms.test.ts`），旧代码恰红、新代码全绿。验收：typecheck 三份清、`npm test` **193 文件 / 3,020 例**全绿（+2 例）、本地复刻生产形态从 `409` 转 `200`。判级 patch。
+**本版本 v6.72.1**（修复：已结算的上调会话把签约谈判列表打成 409；零迁移零契约变更）——**已上线（2026-11-03）**：push `bf728aa..b7cbb0e` 到 `main`，CF Workers Builds 自动部署 Version `504b1d89-9b31-4cb9-8a03-2fc18e83cf32`（100%）；生产入口 `assets/index-X-L78Gaf.js` 与本地构建 sha256 逐字节一致（`c5572ff2…`，版本串 `6.72.1`×1）；`/api/health` 200、`/` 200、匿名 `/api/negotiations?mine=1` 401。生产 club 66 在 2026-11-03 13:35 CST 报「签约谈判区看不到球员」，实为页签整个空掉 —— `listMySessions` 的自愈扫描逐条 `healSettlement` 已结束行，`applyContractTerms` 又先把上调拦截排在 `terms_applied` 幂等闸之前，于是 Talbi 那笔已成品的上调会话（transfer 188）让每次 `GET /api/negotiations?mine=1` 都抛 409，前端 `sessions` 恒 null、页签计数 0，两笔在谈上调单（Jacquet / Mawissa）不可见。**修法**：自愈扫描跳过 `promotion + completed` 行并给每行包 try/catch；`terms_applied` 幂等闸提到上调拦截之前。回归两条（`tests/negotiation-routes.test.ts` / `tests/apply-contract-terms.test.ts`），旧代码恰红、新代码全绿。验收：typecheck 三份清、`npm test` **193 文件 / 3,020 例**全绿（+2 例）、本地复刻生产形态从 `409` 转 `200`。判级 patch。
 
 **上一版本 v6.72.0**（转会台按球员聚合 · 期 A；零迁移零新端点）——**已上线（2026-11-03）**：push `915db6e..b5836a8` 到 `main`，CF Workers Builds 自动部署 Version `d5741771-4237-43e8-8643-d41e6decd9fa`（100%）；生产入口 `assets/index-DobnR3oB.js` 与本地构建 sha256 一致（`a9f60df9…`），版本串 `6.72.0`×1、无 `6.71.0` 残留；`/api/health` 200、`/market/desk` 200、匿名 `/api/me/bids` 与 `/api/negotiations?mine=1` 401。**交付**：报价 / 出价 / 签约谈判三页签按球员聚合，桌面行内展开、≤760px 抽屉；新增 `status.ts` / `desk-rows.ts` / `DeskPlayerRow.tsx`，`GET /api/me/bids` 与 `GET /api/negotiations?mine=1` 补 30s coalesce 惰性结算。验收：typecheck 三份清、`npm test` 193 文件 / 3,018 例全绿、build 通过。细节见 CHANGELOG v6.72.0 与设计稿 `docs/superpowers/specs/2026-11-02-transfer-desk-redesign-design.md`。
 
@@ -113,7 +113,7 @@
 
 ## v6.72.1 · 修复：已结算的上调会话把签约谈判列表打成 409（2026-11-03）
 
-**状态**：**仅本地提交，未 push 未部署**。零迁移、零契约变更，判级 patch。
+**状态**：**已上线（2026-11-03 14:30 CST / 06:30Z）**：push `bf728aa..b7cbb0e` 到 `main` 触发 CF Workers Builds，Version `504b1d89-9b31-4cb9-8a03-2fc18e83cf32`（100%）。零迁移、零契约变更，判级 patch。
 
 **症状**：club 66 教练打开「签约谈判」页签，计数 0、一个球员行都没有，规则说明下面只剩一条黄框「上调单在成约时结算，不走条款落地」；当时该队有两笔进行中的上调谈判（Jérémy Jacquet / Christian Mawissa）。
 
@@ -123,7 +123,7 @@
 
 **验收**：`npm run typecheck` 三份清；`npm test` **193 文件 / 3,020 例**全绿（v6.72.0 基线 3,018，+2 例）；变异验证（临时 stash 掉 `src/` 改动）两条新用例恰好红，恢复后全绿；本地按生产形态造数（promotion `completed` + `terms_applied=1` + 已结算会话）复现 `409 {"error":"上调单在成约时结算，不走条款落地"}`，修后同一请求 `200`，进行中会话 100 与已结束 9101 都在。
 
-**遗留**：生产仍需部署才能恢复 club 66 的页签（`git push` → CF Workers Builds 自动部署），待下令。
+**遗留**：生产复验需教练账号打开 club 66 的「签约谈判」页签（无写操作，两笔在谈单应重新出现，页签计数 2）；本版本未做教练侧登录实测。
 
 ## v6.71.0 · 下放名额配置、训练营硬拦与自愈地板（2026-11-03）
 
