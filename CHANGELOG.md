@@ -4,6 +4,31 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.76.0] · 一线队号码分配：批量改 / 清 / 对调（2026-11-04）
+
+**Added**
+
+- **`PUT /api/club/squad/numbers`**（`src/worker/routes/registration.ts`）：一次提交「最终态」`assignments[{playerId, number: 1–99|null}]`，最多 100 人。`requireCoach('club.squad.manage')` → `getBoundClub` → `getOpenWindow`；只写变动行；同一 D1 batch 先把变动行置 NULL、再用 `CASE` 写最终值，因此对调/链式换位不会撞新唯一索引；每人一条 `player_number` 审计（统一走 `lib/audit.ts`）。payload 内重复球员/号码 400、外队球员 404、与未提交队友撞号 409 `{code:'number_conflict',conflicts:[{number,playerId,playerName}]}`，整单不落库。
+- **迁移 `0092_players_club_number_unique.sql`**：`CREATE UNIQUE INDEX idx_players_club_number ON players(club_id, number) WHERE number IS NOT NULL`；并发窗口由 DB 兜底，唯一约束错误转 409。`tests/d1.ts` 已登记。
+- **`SquadNumbersDialog`**（`web/src/pages/club/SquadNumbersDialog.tsx`）：左侧未分配名单（GK/DF/MF/FW → CA 降序），右侧 1–99 十列网格；选中球员点空号落位、点已占用号在草稿内直接对调；清除、撤销、脏改动关闭确认；409 保留草稿、冲突格标红、顶部点名占用者。桌面居中浮层，≤760px 底部抽屉；名单全名最多两行，格子只放姓、单行省略，选中条永远全名。
+- **两处入口**：阵容页 `tier-head`「号码分配」（本人执教 + 开窗才显示）；球员页合同卷宗「号码分配」，打开后预选当前球员并滚到其号码。
+- **缓存**：保存成功先乐观回写 `qk.squad`，再失效 `qk.clubRoster(clubId)`、变动球员 `qk.player(id)`、`qk.squad`。
+
+**Changed**
+
+- 单条 `POST /club/players/:id/number` 复用同一校验/写入核心；清空已是 null 的号码视为 no-op，不再写一条 before/after 都为 null 的假审计（`tests/routes.test.ts` 审计断言由 4 条改 3 条）。
+- `useSeasonsCurrent(enabled = true)` 增加可选开关，阵容页只在本人视角请求当前窗口。
+
+**Notes**
+
+- 部署前必须先 `npm run db:migrate:remote` 落 `0092`，再 push；否则并发撞号没有 DB 唯一索引兜底，只剩应用层先查后写。
+- 不做全队一键清空、冲突自动合并、独立页面或新的读接口；号码唯一性现在由应用层预检 + DB 部分唯一索引双保险。
+
+**验收**
+
+- `npm run typecheck` 三份清；`npm test` **200 文件 / 3,094 例**全绿（新增 3 个测试文件 28 例）；`npm run build` 通过（入口 755.67 kB / gzip 236.89 kB）。
+- 新增/改写回归：`tests/squad-numbers.test.ts` **20 例**（对调/链式/清号/no-op/审计/重复/外部冲突整单不落库/非本队/非法号/漏 number 字段/100 上限/关窗/401/403/100 人清号切块/99 人分配切块/唯一索引兜底 409/单条成功/单条冲突）；`SquadNumbersDialog.test.tsx` **6 例**；`SquadTab.numbers-entry.test.tsx` **2 例**。
+
 ## [v6.75.0] · 出价脱离挂牌时段；强制拍卖脱离转会窗口并归下一窗（2026-11-04）
 
 **Changed**
