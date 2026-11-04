@@ -3,8 +3,6 @@
 // 转会区详情与球员页左栏「别队挂牌」出价途径共用，提交统一走 onBid 回调。
 import { useEffect, useRef, useState } from 'react';
 import { money } from '../pages/market/shared.tsx';
-import OpsGateNote from './OpsGateNote.tsx';
-import { useOpsGate } from '../lib/ops-gate.ts';
 import { creditUse } from '../lib/credit-line.ts';
 
 export function MarketBidForm({
@@ -27,8 +25,7 @@ export function MarketBidForm({
   oldHold?: number;
   onBid: (amount: number) => Promise<void>;
 }) {
-  // v6.49.0：出价受「挂牌竞价」时段约束（后端 assertOpOpen 硬闸，这里置灰 + 说明）
-  const gate = useOpsGate('transfer_listing');
+  // v6.75.0（A）：出价不再受「挂牌」时段约束——有挂牌、未到截止即可出；服务端仍复核。
   const [amount, setAmount] = useState(String(nextMinBid));
   const [busy, setBusy] = useState(false);
   // 预填跟随（v6.24.0）：服务端的 nextMinBid 变化（有人出了更高的价）时同步输入框；
@@ -51,8 +48,7 @@ export function MarketBidForm({
   if (mode === 'activation-first') {
     return (
       <div className="inline-form">
-        <OpsGateNote gate={gate} />
-        <button className="btn" type="button" disabled={busy || gate?.blocked} onClick={submit}>
+        <button className="btn" type="button" disabled={busy} onClick={submit}>
           {busy ? '出价中…' : `落激活首价（${money(askPrice)}m）`}
         </button>
         <span className="hint">激活金额固定，出价即冻结。</span>
@@ -67,7 +63,6 @@ export function MarketBidForm({
 
   return (
     <div className="inline-form">
-      <OpsGateNote gate={gate} />
       <div className="field">
         <label htmlFor="bid-amount">出价（m）</label>
         <input
@@ -83,7 +78,7 @@ export function MarketBidForm({
           }}
         />
       </div>
-      <button className="btn" type="button" disabled={busy || !integerOk || Number(amount) < nextMinBid || gate?.blocked} onClick={submit}>
+      <button className="btn" type="button" disabled={busy || !integerOk || Number(amount) < nextMinBid} onClick={submit}>
         {busy ? '出价中…' : `出价（至少 ${money(nextMinBid)}m）`}
       </button>
       <span className="hint">

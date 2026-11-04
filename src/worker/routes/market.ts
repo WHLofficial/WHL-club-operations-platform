@@ -1081,11 +1081,10 @@ app.post('/market/listings/:id/bids', async (c) => {
   if (listing.status !== 'listed' && listing.status !== 'bidding') {
     throw new HttpError(409, listing.status === 'pending_review' ? '这单已经截止，正在等管理组审核' : '这单已经结束，不能再出价');
   }
+  // v6.75.0（A）：出价不再看 transfer_listing 时刻表——有挂牌 + 未到截止即可出。
   if (!(await isWindowOpen(c.env.DB, listing.season, listing.window_seq))) {
     throw new HttpError(409, '这单所属的转会窗口已经关了');
   }
-  // v6.49.0 运营时刻表：出价与挂牌共用 transfer_listing 时段
-  await assertOpOpen(c.env.DB, 'transfer_listing');
 
   const isActivation = listing.type === 'activation';
   // 评审修复（P2-③）：highest/total 只认 active 出价——与冻结触发器（0005）、结算分流

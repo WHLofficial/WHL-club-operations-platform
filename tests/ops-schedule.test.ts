@@ -458,7 +458,7 @@ describe('v6.49.0 教练侧写入口静态锁', () => {
     ['web/src/pages/player/SideOps.tsx', "useOpsGate('transfer_sea_open')"],
     ['web/src/pages/player/SideOps.tsx', "useOpsGate('transfer_offer')"],
     ['web/src/pages/player/SideOps.tsx', "useOpsGate('transfer_promotion')"],
-    ['web/src/components/MarketBidForm.tsx', "useOpsGate('transfer_listing')"],
+    // v6.75.0（A）：MarketBidForm 出价与「挂牌」时段解绑，不再挂 transfer_listing 闸
     ['web/src/pages/market/MarketAdBoardPage.tsx', "useOpsGate('transfer_offer')"],
     ['web/src/pages/market/MarketActivationPage.tsx', "useOpsGate('transfer_activation')"],
     ['web/src/pages/market/desk/NegotiationsSection.tsx', "useOpsGate('transfer_negotiation')"],
@@ -472,6 +472,12 @@ describe('v6.49.0 教练侧写入口静态锁', () => {
       expect(src.includes(needle), `${file} 缺 ${needle}（时刻表挡不住这个入口）`).toBe(true);
       expect(src.includes('<OpsGateNote'), `${file} 缺 <OpsGateNote> 提示条（挡住时要说明原因）`).toBe(true);
     }
+  });
+
+  it('v6.75.0：出价表单与「挂牌」时段解绑（A）', () => {
+    const src = read('web/src/components/MarketBidForm.tsx');
+    expect(src.includes("useOpsGate('transfer_listing')")).toBe(false);
+    expect(src.includes('<OpsGateNote')).toBe(false);
   });
 
   it('闸门挂在组件顶层（不许出现在早退之后，否则 hook 顺序会炸）', () => {

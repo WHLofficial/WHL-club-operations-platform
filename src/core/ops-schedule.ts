@@ -22,7 +22,7 @@ export interface OpsKeyMeta {
 
 // 12 个操作键：11 项转会操作 + 消费中心整体。审核单不设时段（管理组工作流，非球员操作）。
 export const OPS_KEYS: readonly OpsKeyMeta[] = [
-  { key: 'transfer_listing', label: '挂牌与出价', group: '转会', requiresWindow: true, desc: '上架挂牌与对挂牌出价（含强制拍卖同链）' },
+  { key: 'transfer_listing', label: '挂牌', group: '转会', requiresWindow: true, desc: '上架普通 / 激活挂牌（出价不受本条限制，v6.75.0 起出价只看挂牌本身）' },
   { key: 'transfer_offer', label: '报价', group: '转会', requiresWindow: false, desc: '对名单球员发起报价 / 还价（v6.29.0 起不受窗口限制）' },
   { key: 'transfer_negotiation', label: '签约谈判', group: '转会', requiresWindow: false, desc: '审核通过后的工资谈判（提交新违约金 / 出价）' },
   { key: 'transfer_sea_sealed', label: '海捞·暗标段', group: '转会', requiresWindow: true, desc: '自由身池密封标段（统一截止开标）' },
