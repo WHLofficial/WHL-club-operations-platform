@@ -77,6 +77,7 @@ import ComparePickerOverlay from './player/ComparePickerOverlay.tsx';
 import { MatchesTab } from './player/MatchesTab.tsx';
 // 双版本合同（v6.54.0 步骤 7，设计 §10.4）：本队教练看到 current + pending 对比，公开视角只有 current
 import { ContractDualView } from '../components/ContractDualView.tsx';
+import { SquadNumbersDialog } from './club/SquadNumbersDialog.tsx';
 
 type PlayerTab = 'profile' | 'attrs' | 'growth' | 'transfers' | 'matches';
 
@@ -158,6 +159,7 @@ export default function Player() {
   // 球衣号草稿（v4.0.0）：null = 还没动过，显示服务端的值；改过之后是本地输入
   const [numberDraft, setNumberDraft] = useState<string | null>(null);
   const [numberBusy, setNumberBusy] = useState(false);
+  const [numbersOpen, setNumbersOpen] = useState(false);
   // 对比选人浮层（v6.37.0）：入口按钮打开，确认后整页导航进对比页
   const [pickerOpen, setPickerOpen] = useState(false);
   // 窄屏（≤760）走卡片流（v6.22.0）：只决定渲染分支，数据与状态完全复用
@@ -558,6 +560,9 @@ export default function Player() {
                                 清号
                               </button>
                             )}
+                            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setNumbersOpen(true)}>
+                              号码分配
+                            </button>
                           </span>
                         ) : (
                           (player.number ?? '—')
@@ -802,6 +807,9 @@ export default function Player() {
           )}
         </aside>
       </div>
+      {numbersOpen && club !== null && (
+        <SquadNumbersDialog preselectPlayerId={player.id} onClose={() => setNumbersOpen(false)} />
+      )}
     </div>
   );
 }

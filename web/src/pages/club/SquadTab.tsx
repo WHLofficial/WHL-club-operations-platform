@@ -7,7 +7,7 @@
 //   行 = 号码 + 姓名 + 徽章（1+N 折叠）+ 副行（标记行首 + 主位置 +N 点展开 · UID），组件在 card-parts.tsx。
 import { useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { useClubPendingContracts, useClubRoster } from '../../lib/queries.ts';
+import { useClubPendingContracts, useClubRoster, useSeasonsCurrent } from '../../lib/queries.ts';
 import { delta2 } from '../../lib/contract-view.ts';
 import { CARD_VIEW_CELLS, DESKTOP_CELLS, groupRowsByPosition, type CardViewKey } from '../../lib/club-cards.ts';
 import { CARD_EXTRA_ITEMS, SQUAD_COLS_KEY, parseCardExtras, toggleClubCol } from '../../lib/club-columns.tsx';
@@ -16,6 +16,7 @@ import { useMediaQuery } from '../../lib/use-media.ts';
 import type { ClubSquadStructure } from '../../lib/api.ts';
 import { DetailLine, HeroStat, Histogram, ShareBar, money, num1 } from './parts.tsx';
 import { CardGroup, SquadCard, VIEW_COL_WIDTH, VIEW_GRID_COLS, ViewChips, extraColDefs } from './card-parts.tsx';
+import { SquadNumbersDialog } from './SquadNumbersDialog.tsx';
 
 export default function SquadTab({
   clubId,
@@ -30,6 +31,10 @@ export default function SquadTab({
   const rosterQuery = useClubRoster(clubId);
   // 待生效投影走独立鉴权端点：公开名册缓存里永远没有 pending（不把教练视角写进访客共享载荷）
   const pendingQuery = useClubPendingContracts(clubId, own);
+  // 号码分配只在本人执教且转会窗开放时露入口；访客不发这个请求。
+  const seasonsQuery = useSeasonsCurrent(own);
+  const windowOpen = seasonsQuery.data?.window?.status === 'open';
+  const [numbersOpen, setNumbersOpen] = useState(false);
   const roster = rosterQuery.data ?? null;
   const pending = pendingQuery.data?.pending ?? [];
   const pendingByPlayer = new Map(pending.map((p) => [p.playerId, p]));
@@ -70,6 +75,11 @@ export default function SquadTab({
       <div className="tier-head">
         <h3>阵容组</h3>
         <span className="muted">在册球员与结构分析</span>
+        {own && windowOpen && (
+          <button type="button" className="btn btn-ghost btn-sm sqn-entry" onClick={() => setNumbersOpen(true)}>
+            号码分配
+          </button>
+        )}
       </div>
       {/* 静态汇总（§10.4 球队页）：纯提示、不提供跳转；小字不参与工资总额/平均工资统计 */}
       {own && pending.length > 0 && (
@@ -202,6 +212,7 @@ export default function SquadTab({
           </>
         )}
       </div>
+      {numbersOpen && <SquadNumbersDialog onClose={() => setNumbersOpen(false)} />}
     </section>
   );
 }

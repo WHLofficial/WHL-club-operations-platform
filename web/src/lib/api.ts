@@ -22,17 +22,26 @@ export function isSuperAdmin(user: MeUser | null | undefined): boolean {
 /** 登录入口模式（统一认证步骤②）：oidc=认证中心，shared=赛事系统共享会话（旧行为） */
 export type AuthMode = 'oidc' | 'shared';
 
+export interface NumberConflict {
+  number: string;
+  playerId: number;
+  playerName: string;
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
   /** 422 校验类错误的明细（如注册合规 issues），由响应体透传 */
   issues?: SquadIssue[];
+  /** 409 号码冲突的结构化明细（v6.76.0 号码批量分配） */
+  conflicts?: NumberConflict[];
 
-  constructor(status: number, message: string, code?: string, issues?: SquadIssue[]) {
+  constructor(status: number, message: string, code?: string, issues?: SquadIssue[], conflicts?: NumberConflict[]) {
     super(message);
     this.status = status;
     this.code = code;
     this.issues = issues;
+    this.conflicts = conflicts;
   }
 }
 
@@ -61,7 +70,13 @@ export async function apiSend<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', pa
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new ApiError(res.status, errMessage(data), data?.code, Array.isArray(data?.issues) ? data.issues : undefined);
+    throw new ApiError(
+      res.status,
+      errMessage(data),
+      data?.code,
+      Array.isArray(data?.issues) ? data.issues : undefined,
+      Array.isArray(data?.conflicts) ? data.conflicts : undefined,
+    );
   }
   return data as T;
 }
@@ -839,6 +854,12 @@ export interface WindowOverviewRow {
   issues: { rule: string; message: string }[];
   pendingTransfers: number;
   activeSessions: number;
+}
+
+/** PUT /api/club/squad/numbers（v6.76.0）：最终态批量分配；applied 只含真正变动的球员 */
+export interface SquadNumbersResponse {
+  ok: boolean;
+  applied: { playerId: number; before: string | null; after: string | null }[];
 }
 
 export interface SquadOverview {

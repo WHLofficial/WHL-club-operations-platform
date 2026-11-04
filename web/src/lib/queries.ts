@@ -223,13 +223,16 @@ export function useDemandInvalidation() {
   };
 }
 
-export function useSquad(isCoach: boolean): SquadOverview | null {
-  const { data } = useQuery({
+export function useSquadQuery(isCoach: boolean) {
+  return useQuery({
     queryKey: qk.squad,
     queryFn: () => api<SquadOverview>('/api/club/squad'),
     enabled: isCoach,
   });
-  return data ?? null;
+}
+
+export function useSquad(isCoach: boolean): SquadOverview | null {
+  return useSquadQuery(isCoach).data ?? null;
 }
 
 // 转会区：状态切换用 keepPreviousData 防闪「正在翻卡柜」
@@ -302,10 +305,11 @@ export function useClubsList() {
 
 // 当前赛季与窗口（v6.2.0）：公开端点，球员页左栏按 window.status 门控转会操作提示；
 // 真正的开关在管理端市场页（/api/admin/windows/open|close），这里只读。
-export function useSeasonsCurrent() {
+export function useSeasonsCurrent(enabled = true) {
   return useQuery({
     queryKey: qk.seasonsCurrent,
     queryFn: () => api<SeasonsCurrent>('/api/seasons/current'),
+    enabled,
     staleTime: 60_000,
   });
 }
