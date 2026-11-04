@@ -75,7 +75,7 @@
 
 **上一版本 v6.63.0**（徽章 × PlayStyle 全面合并：台账全量派生 + 跨段发放规则 + 位置资格 + 可逆抑制；含迁移 `0086`）——**已上线（2026-10-31）**：迁移 `0086` 于 push 前 apply 生产（`Executed 5 commands in 303.32ms`；只读核验：`d1_migrations` 末条 0086、247 发放银 24 已删保金台账 7/2、557 零数据变更且 FC 槽原貌保留台账 3/2、`idx_players_sort_ps` 消失、config 两键清零、**全表台账与迁移同源表达式对账 silver_drift=0 / gold_drift=0（18,301 行）**）；随后 push `56d00fd..f412485`（7 个提交）触发 CF Workers Builds 两轮自动部署——`f24537fa`（04:09:15Z，功能代码）→ **`310624e6`（04:10:31Z，生效 100%）**。发布轮插曲两枚：评审轮端到端用例超出 `ListBody17` 类型声明（发布复验 typecheck 抓出，`1f252a5` 补字段）；收口时 package.json 漏 bump（首轮部署版本串仍 6.62.0），随 `f412485` 订正重部署。上线探针：`/api/health` 200、线上首页资产 `index-d2h1BMYI.js` 与本地 6.63.0 构建逐字同名、线上版本串 `6.63.0`；`?ps=1` 不含 557（FC 银 1 被发放金 1 派生抑制）、`?ps=101` 命中 557、`?ps=124` 命中 247（发放金以基础 ID 筛中）；列表响应带 `playstyles` 合并清单（`source` 字段在场）、557 详情 `playstyles` = FC 银 16/41/32 + 发放金 101/131（被抑制银 1/31 消失）、`badges 3/2`；`sort=ps` 与 `sort=badges` 均 200。发布前复验 vitest **175 文件 / 2837 例**全绿（较收口 2836 多 1 例为工作区另一会话在途 oidc 用例）。判级 minor（口径重定义但存储形状不变、契约字段名不变、tour 零代码自愈）。typecheck 三份全清、e2e **29/29**、变异验证 4 靶全命中、code-review 🔴×1 已修。**生产迁移现状：已到 `0086`**。细节见下文 v6.63.0 节。
 
-**本版本 v6.76.0**（一线队号码分配：批量改 / 清 / 对调；迁移 `0092`）——**本地完成，未 push 未部署**。新增 `PUT /api/club/squad/numbers`（最终态 assignments ≤100；同 batch 先置 NULL 再写最终值，支持对调/链式；只写变动行；409 结构化冲突；每人一条审计）；迁移 `0092` 部分唯一索引兜底并发；`SquadNumbersDialog`（桌面浮层 / ≤760px 底部抽屉，草稿对调、清除、撤销、脏关闭确认、409 保留草稿）；阵容页与球员页两处入口；保存后乐观回写并失效名单/球员缓存。基于 v6.75.0。验收：typecheck 三份清、`npm test` **200 文件 / 3,094 例**全绿、`npm run build` 通过。测试计划 `docs/test-plans/v6.76.0-squad-numbers.md`。判级 minor；**部署前先 `npm run db:migrate:remote`**。细节见下文 v6.76.0 节。
+**本版本 v6.76.0**（一线队号码分配：批量改 / 清 / 对调；迁移 `0092`）——**已上线（2026-11-04）**：迁移 `0092` 先 apply 生产（`Executed 2 commands`；同队重复 0），push `a1e8689..61f1ee9`（4 枚，含既有纯文档 `b173695`）触发 CF Workers Builds 自动部署；线上入口 `index-IpCOlsNz.js` / `index-CW2YvtML.css` 与本地构建 sha256 逐字节一致，包内版本串 `6.76.0`；`/api/health` 200，`PUT /api/club/squad/numbers` 匿名 401、未知子路径 404。新增 `PUT /api/club/squad/numbers`（最终态 assignments ≤100；同 batch 先置 NULL 再写最终值，支持对调/链式；只写变动行；409 结构化冲突；每人一条审计）；迁移 `0092` 部分唯一索引兜底并发；`SquadNumbersDialog`（桌面浮层 / ≤760px 底部抽屉，草稿对调、清除、撤销、脏关闭确认、409 保留草稿）；阵容页与球员页两处入口；保存后乐观回写并失效名单/球员缓存。**移动端 360/390px 选中条被 flex 压缩、按钮与号码格标题重叠已本地修复（待二次上线）**。基于 v6.75.0。验收：typecheck 三份清、`npm test` **200 文件 / 3,095 例**全绿、`npm run build` 通过。测试计划 `docs/test-plans/v6.76.0-squad-numbers.md`。判级 minor。细节见下文 v6.76.0 节。
 
 **上一版本 v6.74.0**（转会台改版期 C：球员页状态条、转会浮层与 `transfer-panel`；零迁移）——**本地完成，未 push 未部署**。新增 `GET /api/players/:id/transfer-panel`（active 优先/否则最新 delisted；挂牌字段复用 `listingDetailOf` 与详情端点同口径；bids 50 笔、myBids 跨挂牌 20 笔、offers in/out 各 20、买方最新谈判、最近换队成交；未绑队 200；`private, no-store`；惰性结算 `waitUntil`）；`useTransferPanel`（30s stale，写后失效）；`PlayerTransferPanel` / `PlayerTransferDialog` 六段浮层（桌面 560px / ≤760px 底部抽屉）；`SideOps` 三态状态条与已结束分态（已售出/已签下/未中标/未成交），「去转会区」改深链。验收：typecheck 三份清、`npm test` **197 文件 / 3,062 例**全绿、`npm run build` 通过。测试计划 `docs/test-plans/v6.74.0-transfer-desk-phase-c.md`。判级 minor。细节见下文 v6.74.0 节。
 
@@ -123,7 +123,7 @@
 
 ## v6.76.0 · 一线队号码分配：批量改 / 清 / 对调（2026-11-04）
 
-**状态**：**本地完成，未 push 未部署**。迁移 `0092`；判级 **minor**。设计口径来自本轮 grilling Q1–Q15；视觉稿由 owner 定稿；测试计划 `docs/test-plans/v6.76.0-squad-numbers.md`。
+**状态**：**已上线（2026-11-04）**；移动端 360/390px 选中条重叠已本地修复，**待二次上线**。迁移 `0092`；判级 **minor**。设计口径来自本轮 grilling Q1–Q15；视觉稿由 owner 定稿；测试计划 `docs/test-plans/v6.76.0-squad-numbers.md`。
 
 **缘起**：owner 反馈球员改号必须一人一页、不能互换、看不到 1–99 空号；确认做浮层号码分配，不做独立更衣室页面。核心能力是「一份最终态批量提交」，改/清/换同批完成。
 
@@ -138,7 +138,9 @@
 
 **边界**：不做全队一键清空、冲突自动合并、独立页面、新的读接口；号码唯一性 = 应用层预检 + DB 部分唯一索引。
 
-**测试**：`tests/squad-numbers.test.ts` **20 例**、`SquadNumbersDialog.test.tsx` **6 例**、`SquadTab.numbers-entry.test.tsx` **2 例**；`tests/routes.test.ts` 审计断言改为 3 条（清空已是 null 视为 no-op）；全量 **200 文件 / 3,094 例**、typecheck 三份、build 均通过。
+**测试**：`tests/squad-numbers.test.ts` **20 例**、`SquadNumbersDialog.test.tsx` **7 例**、`SquadTab.numbers-entry.test.tsx` **2 例**；`tests/routes.test.ts` 审计断言改为 3 条（清空已是 null 视为 no-op）；全量 **200 文件 / 3,095 例**、typecheck 三份、build 均通过。上线产物 `index-IpCOlsNz.js` / `index-CW2YvtML.css`；修复后本地构建 `index-Duw4iyAT.js` / `index-C059s3ns.css`。
+
+**修复（待二次上线）**：`.sqn-main` 是受高度约束的 flex 列，`.sqn-selection` 默认 `flex-shrink:1` 被压到 `min-height:48px`，360/390px 下换行后的操作按钮溢出并与「1–99 · 按十位排列」重叠。`.sqn-selection` 加 `flex:none`、`.sqn-main` 加 `min-width:0`；CDP 覆盖 360/390/768 实测正常，补静态布局回归锁（dialog 第 7 例）。
 
 ## v6.74.0 · 转会台改版期 C：球员页状态条与转会浮层（2026-11-03）
 

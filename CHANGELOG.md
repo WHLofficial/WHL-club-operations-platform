@@ -19,6 +19,10 @@
 - 单条 `POST /club/players/:id/number` 复用同一校验/写入核心；清空已是 null 的号码视为 no-op，不再写一条 before/after 都为 null 的假审计（`tests/routes.test.ts` 审计断言由 4 条改 3 条）。
 - `useSeasonsCurrent(enabled = true)` 增加可选开关，阵容页只在本人视角请求当前窗口。
 
+**Fixed**
+
+- 移动端（360/390px）选中条被 `.sqn-main` 的 flex 纵向压缩到 `min-height:48px`，换行后的「清除号码/取消选择」溢出到条外，与「1–99 · 按十位排列」重叠。`.sqn-selection` 加 `flex:none`、`.sqn-main` 加 `min-width:0`；补一条静态布局回归锁。**已本地修复，待二次上线。**
+
 **Notes**
 
 - 部署前必须先 `npm run db:migrate:remote` 落 `0092`，再 push；否则并发撞号没有 DB 唯一索引兜底，只剩应用层先查后写。
@@ -26,8 +30,14 @@
 
 **验收**
 
-- `npm run typecheck` 三份清；`npm test` **200 文件 / 3,094 例**全绿（新增 3 个测试文件 28 例）；`npm run build` 通过（入口 755.67 kB / gzip 236.89 kB）。
-- 新增/改写回归：`tests/squad-numbers.test.ts` **20 例**（对调/链式/清号/no-op/审计/重复/外部冲突整单不落库/非本队/非法号/漏 number 字段/100 上限/关窗/401/403/100 人清号切块/99 人分配切块/唯一索引兜底 409/单条成功/单条冲突）；`SquadNumbersDialog.test.tsx` **6 例**；`SquadTab.numbers-entry.test.tsx` **2 例**。
+- `npm run typecheck` 三份清；`npm test` **200 文件 / 3,095 例**全绿（新增 3 个测试文件 29 例）；`npm run build` 通过（入口 755.67 kB / gzip 236.89 kB，CSS 131.53 kB）。
+- 新增/改写回归：`tests/squad-numbers.test.ts` **20 例**（对调/链式/清号/no-op/审计/重复/外部冲突整单不落库/非本队/非法号/漏 number 字段/100 上限/关窗/401/403/100 人清号切块/99 人分配切块/唯一索引兜底 409/单条成功/单条冲突）；`SquadNumbersDialog.test.tsx` **7 例**；`SquadTab.numbers-entry.test.tsx` **2 例**。
+
+**上线**（2026-11-04）
+
+- 迁移 `0092` 先 apply 生产（`Executed 2 commands`；回读同队重复 0，`migrations list --remote` ⇒ No migrations to apply）。
+- push `a1e8689..61f1ee9`（4 枚：本批 3 枚 + 既有纯文档提交 `b173695`）触发 CF Workers Builds 自动部署。线上入口 `index-IpCOlsNz.js` / `index-CW2YvtML.css` 与本地构建 **sha256 逐字节一致**（JS `5e7f143d…`、CSS `3402666e…`），包内版本串 `6.76.0`；`/api/health` 200，`PUT /api/club/squad/numbers` 匿名 401（路由在场），未知子路径 404。
+- `wrangler deployments list` 未出现本批新记录（与 v6.22.0 同类现象，构建触发不可见），以线上资产/版本串回读为准。
 
 ## [v6.75.0] · 出价脱离挂牌时段；强制拍卖脱离转会窗口并归下一窗（2026-11-04）
 
