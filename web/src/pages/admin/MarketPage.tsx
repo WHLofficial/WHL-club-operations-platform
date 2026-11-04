@@ -12,6 +12,7 @@ import { IdTag } from '../../components/IdTag.tsx';
 import EmptyState from '../../components/EmptyState.tsx';
 import { usePrompt } from '../../components/PromptDialog.tsx';
 import { useTimeFmt, utcIsoToZhWall, zhWallToUtcIso } from '../../lib/datetime.ts';
+import { reviewClubDisplay, type ReviewClubPart } from './review-club.ts';
 
 export default function MarketPage() {
   return (
@@ -66,7 +67,38 @@ function completedMessage(r: AdminReviewRow): string {
   }
 }
 
-function ReviewsSection() {
+// 俱乐部列（2026-11-04 设计稿 §3/§5）：取义走 reviewClubDisplay 纯函数，这里只管渲染；
+// 激活举报行与成交行共用本函数，避免两套口径。名字与 id 都在场才出「队名 + IdTag」，
+// 空端只出 —（不挂标签）；角色/原队只是消歧小字，挂 .muted。
+function clubCell(r: AdminReviewRow) {
+  const d = reviewClubDisplay(r);
+  const one = (p: ReviewClubPart) =>
+    p.name && p.id !== null ? (
+      <>
+        {p.name} <IdTag kind="俱乐部" value={p.id} />
+      </>
+    ) : (
+      '—'
+    );
+  return (
+    <td>
+      {d.arrow ? (
+        <>
+          {one(d.main[0])} → {one(d.main[1])}
+        </>
+      ) : (
+        <>
+          {one(d.main[0])}
+          {d.role !== null && <span className="muted">（{d.role}）</span>}
+        </>
+      )}
+      {d.origin !== null && <div className="muted">原队 {one(d.origin)}</div>}
+    </td>
+  );
+}
+
+// 导出仅为单测（2026-11-04 俱乐部列渲染用例），页面里仍只在本文件使用（同 bypassSummary 前例）
+export function ReviewsSection() {
   const { show, toastNode } = useToast();
   const { ask, promptNode } = usePrompt();
   const queryClient = useQueryClient();
@@ -284,6 +316,7 @@ function ReviewsSection() {
                   </th>
                 )}
                 <th>球员</th>
+                <th>俱乐部</th>
                 <th>单据</th>
                 <th>内容</th>
                 <th className="num">金额（m）</th>
@@ -303,6 +336,7 @@ function ReviewsSection() {
                         <IdTag kind="球员" value={r.transfer.player.id} />
                         <span className="muted">（CA {r.transfer.player.ca ?? '—'}）</span>
                       </td>
+                      {clubCell(r)}
                       <td>
                         <span className="badge purple">激活举报</span>
                         {r.report.listingId !== null && (
@@ -386,6 +420,7 @@ function ReviewsSection() {
                       <IdTag kind="球员" value={r.transfer.player.id} />
                       <span className="muted">（CA {r.transfer.player.ca ?? '—'}）</span>
                     </td>
+                    {clubCell(r)}
                     <td>
                       <span className={`badge ${r.transfer.type === 'forced_auction' ? 'red' : summary ? 'purple' : 'sky'}`}>
                         {TRANSFER_TYPE_LABEL[r.transfer.type] ?? r.transfer.type}

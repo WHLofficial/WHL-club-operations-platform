@@ -597,10 +597,13 @@ describe('激活通知证据制（v6.4.0 改动 4）', () => {
     expect(sqlGet(fx.sqlite, "SELECT id FROM notifications WHERE template = 'activation_reported'")).toBeDefined();
     // 管理端队列可见 report 行，resolve 收口
     const queue = await get('/api/admin/reviews?status=open', 'tok-admin', fx.env);
-    const row = ((await queue.json()) as { reviews: { id: number; kind: string; report: { listingId: number | null; proofKey: string | null } | null }[] }).reviews.find((r) => r.kind === 'activation_report');
+    const row = ((await queue.json()) as { reviews: { id: number; kind: string; report: { listingId: number | null; proofKey: string | null; activatorClubId: number | null; activatorClubName: string | null } | null }[] }).reviews.find((r) => r.kind === 'activation_report');
     expect(row?.report).toMatchObject({ proofKey: sqlGet<{ activation_proof: string }>(fx.sqlite, 'SELECT activation_proof FROM listings WHERE id = ?', listingId)?.activation_proof ?? null });
     // v6.68.0 期 A：report 透出挂牌 id（期 B 的「去处置」直链要用，不再从 payload 里猜）
     expect(row?.report?.listingId).toBe(listingId);
+    // TC-RV-CLUB-03：激活方俱乐部 id 与名称同时透出且互相匹配（队徽直链要用 id，不再靠名字反查）
+    expect(row?.report?.activatorClubId).toBe(fx.buyerClub);
+    expect(row?.report?.activatorClubName).toBe('激活队');
     const resolve = await post(`/api/admin/reviews/${row!.id}/resolve`, { note: '截图属实' }, 'tok-admin', fx.env);
     expect(resolve.status).toBe(200);
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM review_tasks WHERE id = ?', row!.id)).toMatchObject({ status: 'approved' });

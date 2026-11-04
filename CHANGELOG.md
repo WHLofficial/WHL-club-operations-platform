@@ -4,6 +4,19 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.76.1] · 审核队列新增「俱乐部」列（2026-11-05）
+
+**Added**
+
+- **审核队列「俱乐部」列**（`web/src/pages/admin/MarketPage.tsx`）：在「球员」后独立成列，直接回答「这单是谁做的」——普通 / 激活 / 强拍显示 `转出 → 转入`（空端 `—`），海捞显示签入方并小字「签入」、原队非空时第二行「原队 X」，解约 / 续约 / 留队显示操作方，激活举报显示激活方；队名后挂 `IdTag kind="俱乐部"`。
+- **API 加性字段**（`src/worker/routes/admin/reviews.ts`）：`transfer.fromClubId` / `transfer.toClubId`（`COALESCE(t.from_club_id, l.seller_club_id)` / `COALESCE(t.to_club_id, l.activated_by)`）、`report.activatorClubId`（`l.activated_by`）；`web/src/lib/api.ts` 的 `AdminReviewRow` 同步。
+- **取义纯函数** `reviewClubDisplay()`（`web/src/pages/admin/review-club.ts`）+ 11 例单测（`web/src/pages/admin/review-club.test.ts`），渲染层只负责画。
+
+**Notes**
+
+- 零迁移、无写路径；旧字段全部保留，前后端可独立回滚。
+- 窄屏沿用 `.table-wrap` 横向滚动；队名过长不截断，随单元格换行。
+
 ## [v6.76.0] · 一线队号码分配：批量改 / 清 / 对调（2026-11-04）
 
 **Added**

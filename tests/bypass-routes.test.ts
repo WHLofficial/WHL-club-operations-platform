@@ -408,6 +408,23 @@ describe('解约（termination）', () => {
     expect(((await res.json()) as { terminationFee: number }).terminationFee).toBeCloseTo(terminationFee(8, 6, 6), 2);
   });
 
+  // TC-RV-CLUB-02：审核队列 transfer 透出来去俱乐部 id —— 解约单 fromClubId = 东家、toClubId 为空
+  it('审核队列透出俱乐部 id：解约单 fromClubId 非空且 toClubId 为空', async () => {
+    const fx = await seedBypass();
+    const submit = await post('/api/transfers/termination', { playerId: 21 }, 'tok-coach', fx.env);
+    expect(submit.status).toBe(201);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const queue = await get('/api/admin/reviews?status=open', 'tok-admin', fx.env);
+    const rows = ((await queue.json()) as {
+      reviews: { transfer: { id: number; fromClubId: number | null; toClubId: number | null; fromClubName: string | null; toClubName: string | null } }[];
+    }).reviews;
+    const row = rows.find((r) => r.transfer.id === transferId);
+    expect(row?.transfer.fromClubId).toBe(fx.clubA);
+    expect(row?.transfer.toClubId).toBeNull();
+    expect(row?.transfer.fromClubName).toBe('甲队');
+    expect(row?.transfer.toClubName).toBeNull();
+  });
+
   it('在流程中的球员不能解约（4.4.10）', async () => {
     const fx = await seedBypass();
     expect((await post('/api/transfers/rc-change', { playerId: 20, newReleaseFee: 12 }, 'tok-coach', fx.env)).status).toBe(201);
@@ -458,6 +475,27 @@ describe('海捞（free_agent）', () => {
     expect((await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 0 }, 'tok-coach', fx.env)).status).toBe(400);
     expect((await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 3.5 }, 'tok-coach', fx.env)).status).toBe(400);
     expect((await post('/api/transfers/free-agent', { playerId: 20, newReleaseFee: 7 }, 'tok-coach', fx.env)).status).toBe(400);
+  });
+
+  // TC-RV-CLUB-01：审核队列 transfer 透出来去俱乐部 id —— 真无归属海捞单 toClubId 非空且 fromClubId 为空
+  it('审核队列透出俱乐部 id：海捞单 toClubId 非空且 fromClubId 为空', async () => {
+    const fx = await seedBypass();
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (24, 'fc24', '浪人', NULL, 'ST', 27, 78, 80, 'free');`,
+    );
+    const submit = await post('/api/transfers/free-agent', { playerId: 24, newReleaseFee: 7 }, 'tok-coach', fx.env);
+    expect(submit.status).toBe(201);
+    const { transferId } = (await submit.json()) as { transferId: number };
+    const queue = await get('/api/admin/reviews?status=open', 'tok-admin', fx.env);
+    const rows = ((await queue.json()) as {
+      reviews: { transfer: { id: number; fromClubId: number | null; toClubId: number | null; fromClubName: string | null; toClubName: string | null } }[];
+    }).reviews;
+    const row = rows.find((r) => r.transfer.id === transferId);
+    expect(row?.transfer.toClubId).toBe(fx.clubA);
+    expect(row?.transfer.fromClubId).toBeNull();
+    expect(row?.transfer.toClubName).toBe('甲队');
+    expect(row?.transfer.fromClubName).toBeNull();
   });
 
   it('CPU 队球员可海捞：海捞速查带东家 → 成约后从 CPU 队摘出，CPU 队账上不动（v2.0.0）', async () => {

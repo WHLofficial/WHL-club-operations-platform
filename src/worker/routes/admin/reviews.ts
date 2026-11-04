@@ -307,6 +307,9 @@ interface ReviewTaskRow {
   pa: number | null;
   from_name: string | null;
   to_name: string | null;
+  from_club_id: number | null;
+  to_club_id: number | null;
+  activator_club_id: number | null;
 }
 
 // GET /api/admin/reviews?status=open —— 成交确认队列 + 激活举报核查（v6.4.0 改动 4）
@@ -322,7 +325,10 @@ app.get('/reviews', async (c) => {
             t.id AS transfer_id, t.status AS transfer_status, t.type AS transfer_type, t.fee, t.tax, t.extra_fee,
             l.status AS listing_status, l.ask_price, l.activation_proof,
             p.id AS player_id, p.fc_id AS player_fc_id, ${sqlDisplayName('p')} AS player_name, p.position, p.ca, p.pa,
-            cf.name AS from_name, ct.name AS to_name, ca2.name AS activator_name
+            cf.name AS from_name, ct.name AS to_name, ca2.name AS activator_name,
+            COALESCE(t.from_club_id, l.seller_club_id) AS from_club_id,
+            COALESCE(t.to_club_id, l.activated_by) AS to_club_id,
+            l.activated_by AS activator_club_id
      FROM review_tasks rt
      LEFT JOIN transfers t ON t.id = rt.ref_id AND rt.type = 'transfer_confirm'
      LEFT JOIN listings l ON l.id = rt.ref_id AND rt.type = 'activation_report'
@@ -352,6 +358,7 @@ app.get('/reviews', async (c) => {
               askPrice: r.ask_price,
               proofKey: r.activation_proof,
               activatorClubName: r.activator_name,
+              activatorClubId: r.activator_club_id,
             }
           : null,
       transfer: {
@@ -364,6 +371,8 @@ app.get('/reviews', async (c) => {
         player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa },
         fromClubName: r.from_name,
         toClubName: r.to_name,
+        fromClubId: r.from_club_id,
+        toClubId: r.to_club_id,
       },
     })),
   });

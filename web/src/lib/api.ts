@@ -1087,7 +1087,7 @@ export interface AdminReviewRow {
   note: string | null;
   decidedAt: string | null;
   // 激活举报核查任务（v6.4.0 改动 4）；transfer_confirm 行为 null
-  report: { listingId: number | null; listingStatus: string | null; askPrice: number | null; proofKey: string | null; activatorClubName: string | null } | null;
+  report: { listingId: number | null; listingStatus: string | null; askPrice: number | null; proofKey: string | null; activatorClubName: string | null; activatorClubId: number | null } | null;
   transfer: {
     id: number;
     type: string;
@@ -1098,6 +1098,8 @@ export interface AdminReviewRow {
     player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null };
     fromClubName: string | null;
     toClubName: string | null;
+    fromClubId: number | null;
+    toClubId: number | null;
   };
 }
 
