@@ -10613,12 +10613,14 @@ button.sqc-pos:hover {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
   min-height: 0;
   padding: 14px 18px 12px;
   overflow: auto;
 }
 .sqn-selection {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 9px;
   min-height: 48px;

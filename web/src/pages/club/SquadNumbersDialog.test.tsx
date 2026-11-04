@@ -4,6 +4,7 @@
 // 球员页入口预选当前球员并选中其号码。
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type SquadOverview, type SquadPlayerRow } from '../../lib/api.ts';
 import { SquadNumbersDialog } from './SquadNumbersDialog.tsx';
@@ -197,5 +198,12 @@ describe('SquadNumbersDialog · 球员页入口', () => {
     await screen.findByRole('dialog', { name: '一线队号码分配' });
     await waitFor(() => expect(screen.getByRole('button', { name: '9 号，丁' }).className).toContain('is-selected'));
     expect(screen.getAllByText('丁').length).toBeGreaterThan(0);
+  });
+});
+
+describe('SquadNumbersDialog · 移动端布局回归', () => {
+  it('选中条不参与 flex 压缩，换行后的操作按钮不会压到号码格标题', () => {
+    const css = readFileSync('web/src/styles.css', 'utf8');
+    expect(css).toMatch(/\.sqn-selection \{[^}]*flex: none;/s);
   });
 });
