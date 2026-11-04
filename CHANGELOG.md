@@ -34,7 +34,7 @@
 
 **Fixed**
 
-- 移动端（360/390px）选中条被 `.sqn-main` 的 flex 纵向压缩到 `min-height:48px`，换行后的「清除号码/取消选择」溢出到条外，与「1–99 · 按十位排列」重叠。`.sqn-selection` 加 `flex:none`、`.sqn-main` 加 `min-width:0`；补一条静态布局回归锁。**已本地修复，待二次上线。**
+- 移动端（360/390px）选中条被 `.sqn-main` 的 flex 纵向压缩到 `min-height:48px`，换行后的「清除号码/取消选择」溢出到条外，与「1–99 · 按十位排列」重叠。`.sqn-selection` 加 `flex:none`、`.sqn-main` 加 `min-width:0`；补一条静态布局回归锁。**已二次上线（2026-11-04）。**
 
 **Notes**
 
@@ -51,6 +51,11 @@
 - 迁移 `0092` 先 apply 生产（`Executed 2 commands`；回读同队重复 0，`migrations list --remote` ⇒ No migrations to apply）。
 - push `a1e8689..61f1ee9`（4 枚：本批 3 枚 + 既有纯文档提交 `b173695`）触发 CF Workers Builds 自动部署。线上入口 `index-IpCOlsNz.js` / `index-CW2YvtML.css` 与本地构建 **sha256 逐字节一致**（JS `5e7f143d…`、CSS `3402666e…`），包内版本串 `6.76.0`；`/api/health` 200，`PUT /api/club/squad/numbers` 匿名 401（路由在场），未知子路径 404。
 - `wrangler deployments list` 未出现本批新记录（与 v6.22.0 同类现象，构建触发不可见），以线上资产/版本串回读为准。
+
+**二次上线 · 移动端修复**（2026-11-04）
+
+- push `61f1ee9..b205a3f`（2 枚：`cba5682` fix + `b205a3f` docs）触发 CF Workers Builds 自动部署；本次零迁移。
+- 线上入口 `index-Duw4iyAT.js` / `index-C059s3ns.css` 与本地构建 **sha256 逐字节一致**（JS `21f2930a…`、CSS `292b1790…`），含修复规则 `.sqn-selection{display:flex;flex:none;…}`；包内版本串 `6.76.0`；`/api/health` 200，`PUT /api/club/squad/numbers` 匿名 401，未知子路径 404。
 
 ## [v6.75.0] · 出价脱离挂牌时段；强制拍卖脱离转会窗口并归下一窗（2026-11-04）
 
