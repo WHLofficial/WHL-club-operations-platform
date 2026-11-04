@@ -1084,11 +1084,12 @@ describe('球衣号设定（v4.0.0）', () => {
       fx.sqlite,
       "SELECT before, after FROM audit_log WHERE action = 'player_number' ORDER BY id",
     );
-    expect(audits).toHaveLength(4);
+    // v6.76.0：清空已是 null 的号码是 no-op，不再留一条假审计
+    expect(audits).toHaveLength(3);
     expect(JSON.parse(audits[0].before)).toEqual({ number: null });
     expect(JSON.parse(audits[0].after)).toEqual({ number: '9' });
-    expect(JSON.parse(audits[3].before)).toEqual({ number: null });
-    expect(JSON.parse(audits[3].after)).toEqual({ number: null });
+    expect(JSON.parse(audits[2].before)).toEqual({ number: '10' });
+    expect(JSON.parse(audits[2].after)).toEqual({ number: null });
 
     await post('/api/club/players/2/number', { number: 9 }, 'tok-coach', fx.env);
     const squad = (await (await get('/api/club/squad', 'tok-coach', fx.env)).json()) as {
