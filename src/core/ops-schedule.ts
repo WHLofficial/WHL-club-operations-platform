@@ -32,7 +32,7 @@ export const OPS_KEYS: readonly OpsKeyMeta[] = [
   { key: 'transfer_termination', label: '解约', group: '转会', requiresWindow: true, desc: '解约本队球员（进海捞池）' },
   { key: 'transfer_rc_change', label: '续约', group: '转会', requiresWindow: true, desc: '改违约金续约（rc-change）' },
   { key: 'transfer_promotion', label: '上调/下放', group: '转会', requiresWindow: true, desc: '一线队 ⇄ 训练营双向调整（下放即时转训练营条款，上调开签约谈判）', defaultStartAnchor: 'window_open', defaultEndAnchor: 'window_close' },
-  { key: 'transfer_forced_auction', label: '强制拍卖', group: '转会', requiresWindow: true, desc: '管理端发起的强制拍卖挂牌' },
+  { key: 'transfer_forced_auction', label: '强制拍卖', group: '转会', requiresWindow: false, desc: '管理端发起的强制拍卖挂牌（v6.75.0 起不受转会窗口限制）' },
   { key: 'consumption', label: '消费中心', group: '消费', requiresWindow: true, desc: '消费工单 / 球场扩建升级 / 设施 / 冠名 / 档期预订' },
 ];
 

@@ -84,7 +84,12 @@ export async function settleListingForReview(
                      THEN NULL ELSE l.seller_club_id END,
                 (SELECT club_id FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
                 (SELECT amount FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
-                'pending_review', l.season, l.window_seq, ?, ${nowSql()}
+                'pending_review',
+                -- v6.75.0：窗口外发起的强拍（l.season 为 NULL）结算时若已有窗开了，直接归当前窗；
+                -- 仍无窗则落 NULL，由开窗批回填到下一窗
+                COALESCE(l.season, (SELECT season FROM season_windows WHERE status = 'open' ORDER BY season DESC, window_seq DESC LIMIT 1)),
+                COALESCE(l.window_seq, (SELECT window_seq FROM season_windows WHERE status = 'open' ORDER BY season DESC, window_seq DESC LIMIT 1)),
+                ?, ${nowSql()}
          FROM listings l
          WHERE l.id = ? AND l.status = 'pending_review'
            AND EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id AND status = 'active')`,
@@ -488,7 +493,8 @@ async function runSettleOverdue(
       window_seq: row.window_seq,
     };
     const windowClosed = row.window_status === 'closed';
-    if (windowClosed) {
+    // v6.75.0：强拍脱离窗口——关窗不收口，寿命只由自己的 deadline_at 决定（下面 met 分支照常结算）
+    if (windowClosed && row.type !== 'forced') {
       // 窗尾收口：没人出价的下架收费；还有竞价的强制收口（成交确认交管理组裁量）
       if (row.status === 'listed') {
         if ((await delistUnbid(env, core, ctx, actor, origin)) === 'delisted') summary.delisted++;

@@ -70,7 +70,7 @@ export function canBidOf(
 ): boolean {
   return (
     (l.status === 'listed' || l.status === 'bidding') &&
-    l.windowOpen &&
+    (l.windowOpen || l.type === 'forced') &&
     !l.bidPaused &&
     !marketBidPaused &&
     !(l.firstBidPending && l.activatedBy !== myClubId)

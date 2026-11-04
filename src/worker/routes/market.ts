@@ -1081,8 +1081,9 @@ app.post('/market/listings/:id/bids', async (c) => {
   if (listing.status !== 'listed' && listing.status !== 'bidding') {
     throw new HttpError(409, listing.status === 'pending_review' ? '这单已经截止，正在等管理组审核' : '这单已经结束，不能再出价');
   }
-  // v6.75.0（A）：出价不再看 transfer_listing 时刻表——有挂牌 + 未到截止即可出。
-  if (!(await isWindowOpen(c.env.DB, listing.season, listing.window_seq))) {
+  // v6.75.0：强拍脱离窗口——关窗后仍可按自己的 deadline 出价；普通/激活挂牌仍要求所属窗口开着。
+  // 出价不再看 transfer_listing 时刻表（v6.75.0 A）：有挂牌 + 未到截止即可出。
+  if (listing.type !== 'forced' && !(await isWindowOpen(c.env.DB, listing.season, listing.window_seq))) {
     throw new HttpError(409, '这单所属的转会窗口已经关了');
   }
 

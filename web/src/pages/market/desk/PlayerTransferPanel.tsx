@@ -279,7 +279,7 @@ export function PlayerTransferPanel({
         ) : (
           <p className="side-sub">
             {listing !== null && (listing.status === 'listed' || listing.status === 'bidding')
-              ? !listing.windowOpen
+              ? !listing.windowOpen && listing.type !== 'forced'
                 ? '窗口已关，开窗后再来。'
                 : listing.bidPaused || listing.marketBidPaused
                   ? '这单暂时停价。'

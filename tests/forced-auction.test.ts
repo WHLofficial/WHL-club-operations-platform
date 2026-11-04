@@ -9,6 +9,8 @@ import { createTestD1, applyMigrations, sqlGet, attachAuthChannel, authRegisterC
 import { bidDeadline } from '../src/core/market-rules.ts';
 import { loadMarketContext } from '../src/worker/market-context.ts';
 import { closeSilentSessions } from '../src/worker/negotiations.ts';
+import { settleOverdue } from '../src/worker/market-settle.ts';
+import { resetOpsScheduleCache } from '../src/worker/ops-schedule.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 
@@ -190,7 +192,7 @@ describe('强制拍卖（4.4.5）', () => {
     expect(((await noCa.json()) as Resp).reference).toMatchObject({ ca: null, caRank: null, inTopSix: null, isGk: false });
   });
 
-  it('v6.51.0 preview：参考值 + 闸门原因（开窗可挂 / 无窗报 no_window / 404 / 需管理员）', async () => {
+  it('v6.51.0 preview：参考值 + 闸门原因（开窗可挂 / 关窗也可挂，v6.75.0 起强拍脱离窗口 / 404 / 需管理员）', async () => {
     const fx = await seedAuction();
     const preview = await get('/api/admin/forced-auctions/preview?playerId=46', 'tok-admin', fx.env);
     expect(preview.status).toBe(200);
@@ -201,15 +203,19 @@ describe('强制拍卖（4.4.5）', () => {
     expect(body.blockers).toEqual([]);
     expect(body.reference).toMatchObject({ playerId: 46, playerName: '第七', clubName: '受罚队', caRank: 7, inTopSix: false, topSixLine: 82 });
 
-    // 关窗 ⇒ 预检只报原因（不改任何状态），建单仍 409 —— 同一句口径
+    // v6.75.0 乙：关窗不再拦强拍——预检无原因、建单成功、赛季/窗落 NULL（等成交或下一窗归属）
     fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-07-02T00:00:00Z' WHERE season = 1 AND window_seq = 1`);
     const closed = await get('/api/admin/forced-auctions/preview?playerId=46', 'tok-admin', fx.env);
     const closedBody = (await closed.json()) as { blockers: { errCode?: string; message: string }[] };
-    expect(closedBody.blockers.map((b) => b.errCode)).toEqual(['no_window']);
+    expect(closedBody.blockers).toEqual([]);
     const created = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
-    expect(created.status).toBe(409);
-    expect(((await created.json()) as { error: string }).error).toBe(closedBody.blockers[0].message);
-    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM listings WHERE player_id = 46`)?.n).toBe(0);
+    expect(created.status).toBe(201);
+    expect(
+      sqlGet<{ season: number | null; window_seq: number | null }>(
+        fx.sqlite,
+        `SELECT season, window_seq FROM listings WHERE player_id = 46`,
+      ),
+    ).toEqual({ season: null, window_seq: null });
 
     // 球员不存在：预检与建单同源 404
     expect((await get('/api/admin/forced-auctions/preview?playerId=999', 'tok-admin', fx.env)).status).toBe(404);
@@ -758,16 +764,27 @@ describe('强制拍卖（4.4.5）', () => {
     ).toBe(0);
   });
 
-  it('窗尾无人出价 → 下架收 10% 挂牌费（0.1m），球员同样按解约下海（v6.58.0）', async () => {
+  it('v6.75.0 关窗不收口强拍：按自己的 deadline 到期下架收 10% 挂牌费，球员按解约下海', async () => {
     const fx = await seedAuction();
     const create = await post('/api/admin/forced-auctions', { playerId: 45 }, 'tok-admin', fx.env);
     expect(create.status).toBe(201);
-    // 关窗触发窗尾收口
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    // 关窗：普通单会被窗尾收口，强拍不在此列
     fx.sqlite.exec(`UPDATE season_windows SET status = 'closed' WHERE season = 1 AND window_seq = 1`);
     await get('/api/market/listings?status=all', 'tok-admin', fx.env);
-    const listing = sqlGet<{ status: string; deadline_note: string }>(fx.sqlite, 'SELECT status, deadline_note FROM listings WHERE id = ?', ((await create.json()) as { listingId: number }).listingId);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('listed');
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 45')?.status).toBe('listed');
+    // 到自己的截止：照常下架收费 + 解约（直接跑结算，跳过读端点的 30s 合并窗）
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = '2020-01-01T00:00:00.000Z' WHERE id = ${listingId}`);
+    await settleOverdue(fx.env, { origin: 'lazy_settle', now: new Date() });
+    const listing = sqlGet<{ status: string; deadline_note: string }>(
+      fx.sqlite,
+      'SELECT status, deadline_note FROM listings WHERE id = ?',
+      listingId,
+    );
     expect(listing?.status).toBe('delisted');
-    // 窗尾收口同样按解约处置（无人出价的强制拍卖没有「留队」出口）
+    expect(listing?.deadline_note).toContain('截止');
+    // 到期无人出价同样按解约处置（无人出价的强制拍卖没有「留队」出口）
     expect(sqlGet<{ status: string; club_id: number | null }>(fx.sqlite, 'SELECT status, club_id FROM players WHERE id = 45')).toMatchObject({
       status: 'free',
       club_id: null,
@@ -777,6 +794,97 @@ describe('强制拍卖（4.4.5）', () => {
       `SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND club_id = ${fx.club}`,
     );
     expect(feeEntry?.amount).toBe(-0.1);
+  });
+
+  it('v6.75.0 A+乙：挂牌时段关着也能出价；关窗后强拍仍可出价，普通单照旧被收口', async () => {
+    const fx = await seedAuction();
+    const forced = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
+    expect(forced.status).toBe(201);
+    const forcedId = ((await forced.json()) as { listingId: number }).listingId;
+    const normal = await post('/api/market/listings', { playerId: 45, askPrice: 10 }, 'tok-coach', fx.env);
+    expect(normal.status).toBe(201);
+    const normalId = ((await normal.json()) as { listingId: number }).listingId;
+
+    // 只关「挂牌」时段，窗还开着：出价不再受时刻表约束（A），普通单与强拍都能出
+    fx.sqlite.exec(
+      `UPDATE ops_schedule SET start_anchor = 'none', start_at = NULL, end_anchor = 'absolute', end_at = '2020-01-01T00:00:00Z' WHERE op_key = 'transfer_listing'`,
+    );
+    resetOpsScheduleCache();
+    expect((await post(`/api/market/listings/${normalId}/bids`, { amount: 10 }, 'tok-coach2', fx.env)).status).toBe(201);
+    expect((await post(`/api/market/listings/${forcedId}/bids`, { amount: 1 }, 'tok-coach2', fx.env)).status).toBe(201);
+
+    // 关窗：普通单被窗尾收口，强拍继续按自己的 deadline 跑（乙）
+    fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-07-02T00:00:00Z' WHERE season = 1 AND window_seq = 1`);
+    await settleOverdue(fx.env, { origin: 'lazy_settle', now: new Date() });
+    expect((await post(`/api/market/listings/${normalId}/bids`, { amount: 11 }, 'tok-coach2', fx.env)).status).toBe(409);
+    expect((await post(`/api/market/listings/${forcedId}/bids`, { amount: 2 }, 'tok-coach2', fx.env)).status).toBe(201);
+  });
+
+  it('v6.75.0 窗口外发起的强拍，结算时已有开窗 → 直接记该窗', async () => {
+    const fx = await seedAuction();
+    fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-07-02T00:00:00Z' WHERE season = 1 AND window_seq = 1`);
+    const create = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 1 }, 'tok-coach2', fx.env)).status).toBe(201);
+    // 下一窗先开，再结算
+    expect((await post('/api/admin/windows/open', { season: 2, windowSeq: 1 }, 'tok-admin', fx.env)).status).toBe(201);
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = '2020-01-01T00:00:00.000Z' WHERE id = ${listingId}`);
+    await settleOverdue(fx.env, { origin: 'lazy_settle', now: new Date() });
+    expect(
+      sqlGet<{ season: number | null; window_seq: number | null }>(
+        fx.sqlite,
+        'SELECT season, window_seq FROM transfers WHERE idempotency_key = ?',
+        `listing:${listingId}`,
+      ),
+    ).toEqual({ season: 2, window_seq: 1 });
+  });
+
+  it('v6.75.0 窗口外强拍成交：赛季先落 NULL，下一窗开窗回填 transfers + contracts', async () => {
+    const fx = await seedAuction();
+    fx.sqlite.exec(`UPDATE season_windows SET status = 'closed', closed_at = '2026-07-02T00:00:00Z' WHERE season = 1 AND window_seq = 1`);
+    const create = await post('/api/admin/forced-auctions', { playerId: 46 }, 'tok-admin', fx.env);
+    expect(create.status).toBe(201);
+    const listingId = ((await create.json()) as { listingId: number }).listingId;
+    expect(
+      sqlGet<{ season: number | null; window_seq: number | null }>(fx.sqlite, 'SELECT season, window_seq FROM listings WHERE id = ?', listingId),
+    ).toEqual({ season: null, window_seq: null });
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
+    fx.sqlite.exec(
+      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
+                            listed_day = strftime('%Y-%m-%d', 'now', '-12 days'), deadline_at = NULL WHERE id = ${listingId}`,
+    );
+    await settleOverdue(fx.env, { origin: 'lazy_settle', now: new Date() });
+    const transferRow = sqlGet<{ id: number; season: number | null; window_seq: number | null }>(
+      fx.sqlite,
+      'SELECT id, season, window_seq FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    expect(transferRow).toMatchObject({ season: null, window_seq: null });
+
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/approve`, {}, 'tok-admin', fx.env)).status).toBe(200);
+    const mine = await get('/api/negotiations?mine=1', 'tok-coach2', fx.env);
+    const session = ((await mine.json()) as { sessions: { id: number; transferId: number }[] }).sessions.find(
+      (s) => s.transferId === transferRow!.id,
+    );
+    const feeRes = await post(`/api/negotiations/${session!.id}/release-fee`, { fee: 30 }, 'tok-coach2', fx.env);
+    expect(feeRes.status).toBe(200);
+    const e = ((await feeRes.json()) as { expectedWage: number }).expectedWage;
+    expect((await post(`/api/negotiations/${session!.id}/offer`, { wage: e }, 'tok-coach2', fx.env)).status).toBe(200);
+    expect(
+      sqlGet<{ signed_season: number | null; signed_window_seq: number | null }>(
+        fx.sqlite,
+        'SELECT signed_season, signed_window_seq FROM contracts WHERE player_id = 46 AND is_active = 1',
+      ),
+    ).toEqual({ signed_season: null, signed_window_seq: null });
+
+    expect((await post('/api/admin/windows/open', { season: 2, windowSeq: 1 }, 'tok-admin', fx.env)).status).toBe(201);
+    expect(sqlGet(fx.sqlite, 'SELECT season, window_seq FROM transfers WHERE id = ?', transferRow!.id)).toEqual({ season: 2, window_seq: 1 });
+    expect(
+      sqlGet(fx.sqlite, 'SELECT signed_season, signed_window_seq FROM contracts WHERE player_id = 46 AND is_active = 1'),
+    ).toEqual({ signed_season: 2, signed_window_seq: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, `SELECT COUNT(*) AS n FROM audit_log WHERE action = 'transfer_season_backfill'`)?.n).toBe(1);
   });
 
   it('v6.60.2：取消强制拍卖要求球员仍有归属，无归属时 409 且不改球员状态', async () => {

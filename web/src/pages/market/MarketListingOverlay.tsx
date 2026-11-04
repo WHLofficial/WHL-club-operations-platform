@@ -217,11 +217,11 @@ function OverlayBody({
     myClub.isCoach &&
     myClub.id !== l.sellerClub.id &&
     (l.status === 'listed' || l.status === 'bidding') &&
-    l.windowOpen &&
+    (l.windowOpen || l.type === 'forced') &&
     !l.bidPaused &&
     !detail.marketBidPaused;
   const canBid = baseCanBid && !(l.firstBidPending && !isActivator);
-  const bidHint = !l.windowOpen
+  const bidHint = !l.windowOpen && l.type !== 'forced'
     ? '这单所属的转会窗口已经关了。'
     : l.bidPaused
       ? '这单被管理组暂停出价，已出的价与到期结算不受影响。'

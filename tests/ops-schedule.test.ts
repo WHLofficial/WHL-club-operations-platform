@@ -124,10 +124,11 @@ describe('时刻表注册表与解析（纯函数）', () => {
       'transfer_forced_auction',
       'consumption',
     ]);
-    // 报价与签约谈判是 v6.29.0 起不依赖开窗的两个操作，其余都随窗
+    // 报价与签约谈判是 v6.29.0 起不依赖开窗的两个操作；v6.75.0 加强制拍卖（乙），其余都随窗
     expect(OPS_KEYS.filter((k) => !k.requiresWindow).map((k) => k.key)).toEqual([
       'transfer_offer',
       'transfer_negotiation',
+      'transfer_forced_auction',
     ]);
     // 合成默认：transfer_promotion 随窗全窗（下放/上调随窗开关），其余键不设默认锚
     const promotion = OPS_KEYS.find((k) => k.key === 'transfer_promotion')!;
@@ -215,7 +216,9 @@ describe('迁移种子与视图', () => {
         continue;
       }
       expect(row, meta.key).toBeDefined();
-      expect(row!.requires_window).toBe(meta.requiresWindow ? 1 : 0);
+      // v6.75.0：强拍脱离窗口（元数据 false），但 0069 种子行是历史值 1、迁移不可改——按种子值锁
+      const seededRequiresWindow = meta.key === 'transfer_forced_auction' ? 1 : meta.requiresWindow ? 1 : 0;
+      expect(row!.requires_window).toBe(seededRequiresWindow);
     }
     // 到期锚与提醒抢占列（0069 四个 ALTER）
     expect(sqlGet<{ name: string }>(fx.sqlite, "SELECT name FROM pragma_table_info('offers') WHERE name = 'expiry_anchor_at'")).toBeDefined();

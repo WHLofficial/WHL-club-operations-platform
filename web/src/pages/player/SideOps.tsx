@@ -618,7 +618,7 @@ export function SideOps({
     const canBid =
       l !== null &&
       (l.status === 'listed' || l.status === 'bidding') &&
-      l.windowOpen &&
+      (l.windowOpen || l.type === 'forced') &&
       !l.bidPaused &&
       !ld?.marketBidPaused &&
       !(l.firstBidPending && !isActivator);
@@ -677,7 +677,7 @@ export function SideOps({
               />
             ) : (
               <p className="side-sub">
-                {!l.windowOpen
+                {!l.windowOpen && l.type !== 'forced'
                   ? '这单所属的转会窗口已经关了，暂不能出价；开窗后再来。'
                   : l.status === 'pending_review'
                     ? '这单已截止，正在等管理组审核。'

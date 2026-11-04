@@ -754,7 +754,8 @@ export interface ForcedAuctionResult {
 
 /**
  * 强制拍卖预检（v6.51.0）：算人选参考值 + 收集闸门原因。建单与管理端 preview 端点吃这一处口径——
- * 人选不限门将、不限 CA 前六；保留的硬闸：窗口在开、运营时刻表、非 CPU 队、球员状态可挂牌、不在市场流程里。
+ * 人选不限门将、不限 CA 前六；保留的硬闸：运营时刻表、球员状态可挂牌、不在市场流程里。
+ * v6.75.0：强拍脱离转会窗口——窗口关着也能发起，存续与出价都不看窗口。
  */
 export async function inspectForcedAuction(env: Env, playerIdInput: unknown): Promise<ForcedAuctionInspection> {
   const db = env.DB;
@@ -826,8 +827,6 @@ export async function inspectForcedAuction(env: Env, playerIdInput: unknown): Pr
   };
 
   const blockers: ForcedAuctionBlocker[] = [];
-  const win = await getOpenWindow(db);
-  if (!win) blockers.push({ status: 409, message: '转会窗口没开，现在不能发起强制拍卖', errCode: 'no_window' });
   const opBlock = await opBlockReason(db, 'transfer_forced_auction');
   if (opBlock) blockers.push(opBlock);
   // v6.60.7：CPU 队球员也可强制拍卖（用户裁决）。CPU 队一律不入账，成交款在
@@ -874,8 +873,7 @@ export async function createForcedAuction(
   if (block) throw new HttpError(block.status, block.message, block.errCode);
   const playerId = reference.playerId;
   const clubId = reference.clubId;
-  const win = await getOpenWindow(db); // 预检已确认在开，这里取 season/windowSeq 落库
-  if (!win) throw new HttpError(409, '转会窗口没开，现在不能发起强制拍卖', 'no_window');
+  const win = await getOpenWindow(db); // v6.75.0：窗口开着就记归属；关着落 NULL，成交/开窗后归下一窗
   await ensureNotInFlight(db, playerId); // 预检后有单据刚进流程的兜底
 
   const audit = createAuditStatement(db);
@@ -910,14 +908,14 @@ export async function createForcedAuction(
         `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, deadline_at, season, window_seq)
          VALUES (?, ?, 'forced', ?, 'listed', ${nowSql()}, ?, ?, ?, ?)`,
       )
-      .bind(playerId, clubId, askPrice, listedDay, firstDeadline, win.season, win.windowSeq),
+      .bind(playerId, clubId, askPrice, listedDay, firstDeadline, win?.season ?? null, win?.windowSeq ?? null),
     audit({
       actor,
       action: 'forced_auction_create',
       targetType: 'listing',
       targetId: null,
       origin: 'user',
-      after: { playerId, sellerClubId: clubId, askPrice, season: win.season, windowSeq: win.windowSeq },
+      after: { playerId, sellerClubId: clubId, askPrice, season: win?.season ?? null, windowSeq: win?.windowSeq ?? null },
     }),
     // 挂牌驱赶（v6.54.0 §5.4 / §11.2）：强制拍卖同为 listings 行，待处理 demand 同样置 expired
     // 且标 byListing（不计累计终局——管理动作不该算成球员前科）；存续转会申请 pending → listed。

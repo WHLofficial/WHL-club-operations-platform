@@ -4,6 +4,25 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.75.0] · 出价脱离挂牌时段；强制拍卖脱离转会窗口并归下一窗（2026-11-04）
+
+**Changed**
+
+- **出价不再受「挂牌」运营时段限制（A）**：`POST /api/market/listings/:id/bids` 删掉 `assertOpOpen('transfer_listing')`，出价只受「挂牌存在 + 未到 `deadline_at` + 未被暂停」约束；挂牌创建仍受转会窗口与 `transfer_listing` 时段约束。时刻表该行改名「挂牌」，出价表单 `MarketBidForm` 去掉 `useOpsGate` 置灰与 `OpsGateNote`。
+- **强制拍卖完全脱离转会窗口（乙）**：管理端可在关窗期发起（删掉预检的 `no_window` 硬闸），关窗批不再收口强拍（寿命只由自己的 `deadline_at` 决定），出价对 `type='forced'` 豁免窗口闸；窗口内发起、关窗后成交的强拍仍保留发起窗。`transfer_forced_auction` 时刻表保持 `none/none`（随时可发），`requiresWindow` 元数据改 `false`。
+- **窗口外强拍成交归下一窗**：结算时若已有开窗直接记该窗；否则 `transfers.season/window_seq` 先落 NULL。下一窗开窗批把 `transfers`（`forced_auction` + `forced_no_bid` 解约单）与对应 `contracts.signed_season/signed_window_seq` 回填成新窗，并写一条 `transfer_season_backfill` 汇总审计（`after` 含 transfers/contracts 计数）。`review_tasks.payload` 快照不改。
+- 前端出价资格对强拍放行：`MarketListingOverlay`、`desk/status.ts`、`PlayerTransferPanel`、`SideOps` 改为 `l.windowOpen || l.type === 'forced'`；关窗提示不再对强拍显示。
+
+**Notes**
+
+- 零迁移；`listings/transfers.season/window_seq` 原本允许 NULL，生产 `transfers` 无 NULL 赛季行，无需补历史。
+- 合同回填只动 `is_active = 1 AND signed_season IS NULL AND source <> 'import'` 且球员名下存在 NULL 赛季强拍成交单的行，避免误改导入合同。
+
+**验收**
+
+- `npm run typecheck` 三份清；`npm test` **197 文件 / 3,066 例**全绿。
+- 新增/改写的回归：`tests/forced-auction.test.ts` **21 例**（A：时段关着普通单/强拍都能出价；乙：关窗后强拍继续、普通单被收口；窗口外发起结算记当前开窗；成交 NULL → 开窗回填 transfers + contracts + 审计）；`tests/ops-schedule.test.ts` 锁同步（`!requiresWindow` 列表、静态锁删 `MarketBidForm` 并加反向断言、0069 种子行强拍特判）。
+
 ## [v6.74.1] · 修复：PlayStyle 图标分家族着色、整徽去掉重复奖牌 emoji（2026-11-03）
 
 **Fixed**

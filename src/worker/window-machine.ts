@@ -179,6 +179,20 @@ export async function openWindow(
     .bind(season)
     .first<{ n: number }>();
   const venueReset = (seasonWindows?.n ?? 0) === 0;
+  // v6.75.0：窗口外发起的强拍在关窗期成交/解约 → season/window_seq 落 NULL。
+  // 下一窗开窗时统一归到本窗；先数一遍，批里再改，0 行不写审计。
+  const backfill = await db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM transfers
+           WHERE season IS NULL AND (type = 'forced_auction' OR idempotency_key LIKE 'forced_no_bid:%')) AS transfers,
+         (SELECT COUNT(*) FROM contracts
+           WHERE is_active = 1 AND signed_season IS NULL AND COALESCE(source, '') <> 'import'
+             AND player_id IN (SELECT player_id FROM transfers WHERE season IS NULL AND type = 'forced_auction')) AS contracts`,
+    )
+    .first<{ transfers: number; contracts: number }>();
+  const backfillCount = backfill?.transfers ?? 0;
+  const contractBackfillCount = backfill?.contracts ?? 0;
   const openBatch: D1PreparedStatement[] = [
     ...statements,
     db
@@ -215,6 +229,33 @@ export async function openWindow(
           `UPDATE stadiums SET next_attendance_mod = 1, attendance_mod_matches = 0, updated_at = ${nowSql()}
            WHERE next_attendance_mod <> 1 OR attendance_mod_matches <> 0`,
         ),
+    );
+  }
+  // v6.75.0：关窗期成交的强拍归到本窗。合同先改——它按 transfers 里仍为 NULL 的行定位球员；
+  // 随后 transfers 本身再落窗。两句同批，失败一起回滚。
+  if (backfillCount > 0) {
+    openBatch.push(
+      db
+        .prepare(
+          `UPDATE contracts SET signed_season = ?, signed_window_seq = ?
+           WHERE is_active = 1 AND signed_season IS NULL AND COALESCE(source, '') <> 'import'
+             AND player_id IN (SELECT player_id FROM transfers WHERE season IS NULL AND type = 'forced_auction')`,
+        )
+        .bind(season, windowSeq),
+      db
+        .prepare(
+          `UPDATE transfers SET season = ?, window_seq = ?
+           WHERE season IS NULL AND (type = 'forced_auction' OR idempotency_key LIKE 'forced_no_bid:%')`,
+        )
+        .bind(season, windowSeq),
+      audit({
+        actor,
+        action: 'transfer_season_backfill',
+        targetType: 'season_window',
+        targetId: null,
+        origin: 'user',
+        after: { season, windowSeq, transfers: backfillCount, contracts: contractBackfillCount },
+      }),
     );
   }
   if (declarePeriod) {
