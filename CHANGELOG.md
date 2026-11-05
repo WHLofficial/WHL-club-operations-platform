@@ -16,7 +16,7 @@
 
 - `groupId` 只进审计日志，不校验成员关系；日志只记群号与 ask/bound 数，不落 QQ。
 - 生产实测：`qq_links` 0 行、`AUTH_DB.identity(provider='qq')` 11 行（10 行有球队绑定），故主源改为 identity；设计文档 §4.7 已同步口径。
-- 上线后还需 `wrangler secret put BOT_IDENTITY_SECRET`（插件侧配同一值），端点才会从 503 变为可用。
+- `BOT_IDENTITY_SECRET` 已于上线当日 `wrangler secret put` 写入生产（插件侧需配同一值）；配置前端点返回 503（fail-closed），配置后匿名 / 错签 403、签名请求 200。
 
 ## [v6.76.1] · 审核队列新增「俱乐部」列（2026-11-05）
 
