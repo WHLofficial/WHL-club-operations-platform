@@ -11,6 +11,7 @@ import { HttpError } from '../../lib/http.ts';
 import { verifyTeamSync } from '../../lib/hmac.ts';
 import { createClubFromTourTeam } from './admin/clubs.ts';
 import { applyWeatherPush, parseWeatherPush, WEATHER_SYNC_PATH } from '../weather-ops.ts';
+import { BOT_BINDINGS_PATH, lookupBotBindings, parseBotBindingsBody } from '../bot-bindings.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -117,6 +118,40 @@ app.post('/weather-sync', async (c) => {
     }
     throw e;
   }
+});
+
+// v6.77.0：AstrBot 联赛顾问的只读身份通道。机器人把当前群成员 QQ 批量送来，
+// 平台只回这些 QQ 的俱乐部绑定；不提供列表/模糊搜索，避免变成 QQ 枚举器。
+// 密钥 BOT_IDENTITY_SECRET 与两条写通道分开，未配同样 503（身份不能静默降级成猜）。
+app.post('/bot/bindings', async (c) => {
+  const raw = await c.req.text();
+  const verdict = await verifyTeamSync(
+    c.env.BOT_IDENTITY_SECRET,
+    BOT_BINDINGS_PATH,
+    raw,
+    c.req.header('x-timestamp') ?? null,
+    c.req.header('x-sign') ?? null,
+  );
+  if (verdict === 'unconfigured') {
+    return c.json({ error: 'unconfigured', message: '本仓未配置 BOT_IDENTITY_SECRET，拒绝身份查询' }, 503);
+  }
+  if (verdict === 'reject') return c.json({ error: 'bad_signature', message: '签名校验失败' }, 403);
+
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return c.json({ error: 'bad_json', message: '请求体不是合法 JSON' }, 400);
+  }
+  const parsed = parseBotBindingsBody(body);
+  if (!parsed.ok) return c.json({ error: 'bad_request', message: parsed.message }, 400);
+
+  const bindings = await lookupBotBindings(c.env, parsed.payload.qqs);
+  console.log(
+    `[internal] bot-bindings group=${parsed.payload.groupId} asked=${parsed.payload.qqs.length} ` +
+      `bound=${bindings.filter((b) => b.bound).length}`,
+  );
+  return c.json({ ok: true, bindings });
 });
 
 export default app;

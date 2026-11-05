@@ -36,6 +36,11 @@ export interface Env {
   // 插件那侧只需知道天气这一把，旋转任一把不影响另一条通道。
   // 入站未配 = POST /api/internal/weather-sync 一律 503（写端点 fail-closed，同 team-upsert）。
   WEATHER_SYNC_SECRET?: string;
+  // v6.77.0：AstrBot 联赛顾问的**只读**身份通道（QQ → 俱乐部绑定）。与上面两把机器密钥分开
+  // （wrangler secret put BOT_IDENTITY_SECRET，与插件配置 bot_identity_secret 同值）：
+  // 这把钥匙只能读、不能写，泄露的爆炸半径是「群成员绑定可见」，不是「能建俱乐部/改天气」。
+  // 未配 = POST /api/internal/bot/bindings 一律 503（读端点也 fail-closed，避免静默降级成猜身份）。
+  BOT_IDENTITY_SECRET?: string;
   // v6.1.1：Sentry 错误追踪（@sentry/hono/cloudflare 中间件）。DSN 走 secret
   // （wrangler secret put SENTRY_DSN；配 secret 会生成 Source=Secret Change 的新版本）。
   // **未配 = 完全旁路**：SDK 不初始化、零上报零网络，本地 .dev.vars 不配即可。

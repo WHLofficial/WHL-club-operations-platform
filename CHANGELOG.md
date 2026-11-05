@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.77.0] · 机器通道：Bot 批量身份查询端点（2026-11-05）
+
+**Added**
+
+- **`POST /api/internal/bot/bindings`**（`src/worker/bot-bindings.ts`、挂载于 `src/worker/routes/internal.ts`）：只读、HMAC 签名（`X-Timestamp` / `X-Sign`，规范串 `POST|path|ts|raw`，±300s），一次最多 200 个 QQ → 俱乐部身份。响应 `{ok, bindings[{qq, bound, clubId, clubName, teamName, isCpu}]}`，只回请求里出现过的 QQ，不返回 `account_id`、财务与合同。
+- **数据源**：`AUTH_DB.identity(provider='qq')` 主源 → `team_binding` / `team` 取队与俱乐部；未命中回落本地 `qq_links` → `user_id` → AUTH_DB；`AUTH_DB` 未配时回落本地 `club_bindings`；`clubs` 补 `clubName` / `isCpu`。
+- **新密钥 `BOT_IDENTITY_SECRET`**（与 `TEAM_SYNC_SECRET` / `WEATHER_SYNC_SECRET` 分离）：未配置 503、验签失败或时间窗越界 403、请求体形状不合法 400。
+
+**Notes**
+
+- `groupId` 只进审计日志，不校验成员关系；日志只记群号与 ask/bound 数，不落 QQ。
+- 生产实测：`qq_links` 0 行、`AUTH_DB.identity(provider='qq')` 11 行（10 行有球队绑定），故主源改为 identity；设计文档 §4.7 已同步口径。
+- 上线后还需 `wrangler secret put BOT_IDENTITY_SECRET`（插件侧配同一值），端点才会从 503 变为可用。
+
 ## [v6.76.1] · 审核队列新增「俱乐部」列（2026-11-05）
 
 **Added**
