@@ -3,11 +3,15 @@
 // 【移植】自 WHL-tournament-management-system/shared/roleFit.ts 复制（fit 引擎移植增量），
 // 除本文出现的模块路径注记外逐字未改；上游改权重表须同步过来，勿在本仓单方面改数。
 //
-// 冻结日期：2026-10-25。来源口径：
+// 冻结日期：2026-10-25。2026-11-06 用户评审修正（v5，20 角色 / 26 槽位）：
+// - 外场全部移除 stamina；边路/前腰/非站桩前锋补 agility；边后卫按角色至少 2 项防守属性。
+// - GK|BPK 改为反应 3、站位 2、扑救 1；GK 族第 6 项不再统一 reactions。
+// - ST|AF=加速/射术/跑位/射门力量/控球/敏捷；ST|F9 保留跑位；ST|PO 补敏捷。
+// 来源口径：
 // ① 权重与徽章的最终标准是 FC26 官方角色定义，手工定稿（每角色恰 6 项关键属性，权重 3/3/2/2/1/1）；
 // ② 数据驱动初稿（.tmp/fit-analysis/，2026-10-23 生产快照 570 人）只当交叉校验：
 //    11 个「一致」角色直接采纳初稿；7 组偏移角色按官方画像修正（ST 三角色 spec 已定稿：
-//    AF=加速/冲刺/射术/跑位、TF=弹跳/头球/力量、PO=射术/跑位/反应）；29 个漏算角色
+//    AF=加速/射术/跑位、TF=弹跳/头球/力量、PO=射术/跑位/反应）；29 个漏算角色
 //    （LB/RB 边卫族、RW/WP 族、CAM|SS、GK|BPK 等）按真实足球踢法语义起草；
 // ③ 徽章取相关性初稿（ps-relevance：角色人群徽章拥有率 rate≥25% 且 lift>0 优先）与官方推荐
 //    合并，只存银基 psid（3-6 个；金徽 = 银基 + 100，由引擎侧识别，与本仓 src/core/fc26.ts
@@ -21,7 +25,7 @@
 //   角色级权重（重心只影响热区 roleHeat）；新增角色漏配时 web/src/lib/fit/roleFit.test.ts
 //   会红（CI 防漏配）。
 // - CA/PA 不进 fit 公式、不进本表（spec §3：CA 只代表主位置整体水平，用户定稿）。
-// - GK 族第 6 项统一用 reactions：FC26 门将只有 5 项 gk* 属性，出球型门将另用短传/长传区分。
+// - GK 族第 6 项：GK|BPK 用 gkdiving，其余用 reactions；FC26 门将只有 5 项 gk* 属性。
 // - 冻结后不联网（ref 真源在本仓 web/assets/ref/）；升级只在 FC26 版本大改时重跑冻结脚本 + 重审权重。
 
 export interface RoleFitProfile {
@@ -62,6 +66,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
     badges: [54, 55, 52],
   },
   // 出球型门将：漏算起草——短传/长传/kicking（用脚下出球与门将五维区分）
+  // 2026-11-06 评审：反应必须为 3，补站位；短传/长传降为 2/1。
   // 2026-10-26 数据裁决（原 2026-10-25 存疑销案）：保留 52=步法——它是 BPK 人群强区分徽章
   // （BPK 80% vs 其他门将 48%），而语义上更贴的 14=Tiki Taka 全联盟 0 人持有（换成死键）；
   // 出球属性画像获数据确认（短传 44.9 vs 38.2、长传 46.4 vs 40.5、开球 78.2 vs 73.0）
@@ -69,11 +74,11 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
     zh: "出球型门将",
     attrs: [
       ["gkkicking", 3],
-      ["shortpassing", 3],
-      ["longpassing", 2],
-      ["gkreflexes", 2],
+      ["shortpassing", 2],
+      ["longpassing", 1],
+      ["gkreflexes", 3],
+      ["gkpositioning", 2],
       ["gkdiving", 1],
-      ["gkhandling", 1],
     ],
     badges: [52, 51, 13],
   },
@@ -86,7 +91,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["defensiveawareness", 3],
       ["standingtackle", 3],
       ["sprintspeed", 2],
-      ["stamina", 2],
+      ["agility", 2],
       ["crossing", 1],
       ["interceptions", 1],
     ],
@@ -96,12 +101,12 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   "LB|WB": {
     zh: "边翼卫",
     attrs: [
-      ["stamina", 3],
       ["sprintspeed", 3],
-      ["crossing", 2],
+      ["crossing", 3],
       ["acceleration", 2],
-      ["standingtackle", 1],
-      ["dribbling", 1],
+      ["standingtackle", 2],
+      ["interceptions", 1],
+      ["agility", 1],
     ],
     badges: [15, 42, 41],
   },
@@ -113,8 +118,8 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["defensiveawareness", 3],
       ["ballcontrol", 2],
       ["standingtackle", 2],
-      ["longpassing", 1],
       ["interceptions", 1],
+      ["agility", 1],
     ],
     badges: [12, 21, 33],
   },
@@ -124,12 +129,12 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   "LB|AWB": {
     zh: "进攻型边翼卫",
     attrs: [
-      ["stamina", 3],
       ["sprintspeed", 3],
-      ["crossing", 2],
+      ["crossing", 3],
       ["acceleration", 2],
-      ["agility", 1],
-      ["ballcontrol", 1],
+      ["standingtackle", 1],
+      ["interceptions", 1],
+      ["agility", 2],
     ],
     badges: [42, 15, 32, 41, 21],
   },
@@ -141,8 +146,8 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["longpassing", 3],
       ["dribbling", 2],
       ["defensiveawareness", 2],
-      ["vision", 1],
       ["interceptions", 1],
+      ["agility", 1],
     ],
     badges: [12, 14, 33],
   },
@@ -152,7 +157,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["defensiveawareness", 3],
       ["standingtackle", 3],
       ["sprintspeed", 2],
-      ["stamina", 2],
+      ["agility", 2],
       ["crossing", 1],
       ["interceptions", 1],
     ],
@@ -161,12 +166,12 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   "RB|WB": {
     zh: "边翼卫",
     attrs: [
-      ["stamina", 3],
       ["sprintspeed", 3],
-      ["crossing", 2],
+      ["crossing", 3],
       ["acceleration", 2],
-      ["standingtackle", 1],
-      ["dribbling", 1],
+      ["standingtackle", 2],
+      ["interceptions", 1],
+      ["agility", 1],
     ],
     badges: [15, 42, 41],
   },
@@ -177,8 +182,8 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["defensiveawareness", 3],
       ["ballcontrol", 2],
       ["standingtackle", 2],
-      ["longpassing", 1],
       ["interceptions", 1],
+      ["agility", 1],
     ],
     badges: [12, 21, 33],
   },
@@ -187,12 +192,12 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   "RB|AWB": {
     zh: "进攻型边翼卫",
     attrs: [
-      ["stamina", 3],
       ["sprintspeed", 3],
-      ["crossing", 2],
+      ["crossing", 3],
       ["acceleration", 2],
-      ["agility", 1],
-      ["ballcontrol", 1],
+      ["standingtackle", 1],
+      ["interceptions", 1],
+      ["agility", 2],
     ],
     badges: [42, 15, 32, 41, 21],
   },
@@ -203,8 +208,8 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["longpassing", 3],
       ["dribbling", 2],
       ["defensiveawareness", 2],
-      ["vision", 1],
       ["interceptions", 1],
+      ["agility", 1],
     ],
     badges: [12, 14, 33],
   },
@@ -270,8 +275,8 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   "CDM|H": {
     zh: "镇守",
     attrs: [
-      ["stamina", 3],
       ["standingtackle", 3],
+      ["strength", 3],
       ["interceptions", 2],
       ["defensiveawareness", 2],
       ["aggression", 1],
@@ -279,16 +284,16 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
     ],
     badges: [23, 42, 35],
   },
-  // 拖后组织核心：采纳 fit-dist 初稿，徽章取 ps-relevance top5
+  // 拖后组织核心：2026-11-06 评审——在 CM|DLP 基础上偏防守，控球/反应让位拦截/防守意识
   "CDM|DLP": {
     zh: "拖后组织核心",
     attrs: [
       ["shortpassing", 3],
-      ["stamina", 3],
-      ["ballcontrol", 2],
+      ["vision", 3],
       ["longpassing", 2],
-      ["reactions", 1],
-      ["vision", 1],
+      ["interceptions", 2],
+      ["defensiveawareness", 1],
+      ["composure", 1],
     ],
     badges: [13, 11, 14, 35, 42],
   },
@@ -313,7 +318,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   "CDM|WH": {
     zh: "半边卫",
     attrs: [
-      ["stamina", 3],
+      ["strength", 3],
       ["standingtackle", 3],
       ["sprintspeed", 2],
       ["interceptions", 2],
@@ -329,7 +334,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["positioning", 3],
       ["finishing", 3],
       ["shotpower", 2],
-      ["stamina", 2],
+      ["jumping", 2],
       ["longshots", 1],
       ["strength", 1],
     ],
@@ -345,8 +350,8 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
     attrs: [
       ["shortpassing", 3],
       ["ballcontrol", 3],
-      ["stamina", 2],
       ["reactions", 2],
+      ["standingtackle", 2],
       ["dribbling", 1],
       ["longpassing", 1],
     ],
@@ -357,7 +362,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
     zh: "镇守",
     attrs: [
       ["standingtackle", 3],
-      ["stamina", 3],
+      ["strength", 3],
       ["interceptions", 2],
       ["defensiveawareness", 2],
       ["shortpassing", 1],
@@ -365,7 +370,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
     ],
     badges: [23, 24, 42],
   },
-  // 拖后组织核心（CM 版）：漏算起草——比 CDM 版更靠前，视野权重上调
+  // 拖后组织核心（CM 版）：漏算起草——比 CDM 版更靠前、更组织；CDM 版偏防守
   "CM|DLP": {
     zh: "拖后组织核心",
     attrs: [
@@ -374,7 +379,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["longpassing", 2],
       ["ballcontrol", 2],
       ["reactions", 1],
-      ["stamina", 1],
+      ["composure", 1],
     ],
     badges: [11, 14, 16, 13],
   },
@@ -387,7 +392,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["longpassing", 2],
       ["vision", 2],
       ["reactions", 1],
-      ["stamina", 1],
+      ["composure", 1],
     ],
     badges: [11, 31, 13, 16],
   },
@@ -432,15 +437,15 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
     ],
     badges: [16, 11, 33],
   },
-  // 边中场：漏算起草——边路工兵，体能 + 传中 + 回防
+  // 边中场：漏算起草——两向边前卫，短传 + 传中 + 回防（2026-11-06 评审：体力让位）
   "LM|WM": {
     zh: "边中场",
     attrs: [
-      ["stamina", 3],
       ["sprintspeed", 3],
-      ["crossing", 2],
+      ["crossing", 3],
+      ["shortpassing", 2],
       ["standingtackle", 2],
-      ["dribbling", 1],
+      ["agility", 1],
       ["interceptions", 1],
     ],
     badges: [42, 15, 21],
@@ -485,11 +490,11 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   "RM|WM": {
     zh: "边中场",
     attrs: [
-      ["stamina", 3],
       ["sprintspeed", 3],
-      ["crossing", 2],
+      ["crossing", 3],
+      ["shortpassing", 2],
       ["standingtackle", 2],
-      ["dribbling", 1],
+      ["agility", 1],
       ["interceptions", 1],
     ],
     badges: [42, 15, 21],
@@ -508,16 +513,16 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   },
 
   // ── CAM（4）──
-  // 组织核心：采纳 fit-dist 初稿（徽章与 spec 语义吻合：第一脚触球/别出心裁/精准直塞）
+  // 组织核心：2026-11-06 评审——短传升 3、盘带降 2、反应让位远射，比 CM|PL 更进攻
   "CAM|PL": {
     zh: "组织核心",
     attrs: [
+      ["shortpassing", 3],
       ["ballcontrol", 3],
-      ["dribbling", 3],
-      ["shortpassing", 2],
+      ["dribbling", 2],
       ["vision", 2],
       ["agility", 1],
-      ["reactions", 1],
+      ["longshots", 1],
     ],
     badges: [33, 16, 11],
   },
@@ -558,7 +563,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["shortpassing", 3],
       ["ballcontrol", 2],
       ["dribbling", 2],
-      ["longpassing", 1],
+      ["agility", 1],
       ["curve", 1],
     ],
     badges: [16, 11, 14],
@@ -639,18 +644,18 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
   },
 
   // ── ST（4）──
-  // 突前前锋：官方画像修正（spec 定稿：加速/冲刺/射术/跑位）——初稿被站桩型 RoleID 污染
+  // 突前前锋：官方画像修正（2026-11-06 评审：加速/射术/跑位/射门力量/控球/敏捷）——初稿被站桩型 RoleID 污染
   // 徽章评审记录（2026-10-25）：初稿的 5=精准头球来自同源被污染的 AF 人群（头球语义属 ST|TF，
   // 其徽章已含 5），换成 32=灵动迅捷，速度型终结画像不带走站桩残留
   "ST|AF": {
     zh: "突前前锋",
     attrs: [
       ["acceleration", 3],
-      ["sprintspeed", 3],
-      ["finishing", 2],
+      ["finishing", 3],
       ["positioning", 2],
+      ["shotpower", 2],
       ["ballcontrol", 1],
-      ["dribbling", 1],
+      ["agility", 1],
     ],
     badges: [3, 1, 7, 32],
   },
@@ -674,9 +679,9 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["shortpassing", 3],
       ["vision", 3],
       ["ballcontrol", 2],
-      ["dribbling", 2],
-      ["positioning", 1],
+      ["positioning", 2],
       ["finishing", 1],
+      ["agility", 1],
     ],
     badges: [31, 33, 1, 41],
   },
@@ -689,7 +694,7 @@ export const ROLE_FIT: Record<string, RoleFitProfile> = {
       ["reactions", 2],
       ["shotpower", 2],
       ["composure", 1],
-      ["sprintspeed", 1],
+      ["agility", 1],
     ],
     badges: [7, 1, 8],
   },
