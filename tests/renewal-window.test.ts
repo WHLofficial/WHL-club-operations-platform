@@ -370,6 +370,52 @@ describe('§5.4 回原队（TC-RD-43）', () => {
     expect(c.signed_at).not.toBe(OLD_SIGNED);
   });
 
+  it('激活/强制拍卖/解约：过户时写 deal_time 快照，等级按成交时球员数据', async () => {
+    // ST + ca80/pa85/age24 = 年轻混合档；role 固定 FW
+    const expectedLevel = abilityLevel(80, 85, 24, 25);
+    const cases = [
+      { type: 'activation', to: 2 },
+      { type: 'forced_auction', to: 2 },
+      { type: 'termination', to: null },
+    ] as const;
+
+    for (const [index, c] of cases.entries()) {
+      const fx = freshEnv();
+      seedClub(fx, 1);
+      seedClub(fx, 2);
+      addPlayer(fx, 1, 1);
+      addContract(fx, 1, 1, { wage: 2.5, rc: 20, service: 4, protection: 8, signedAt: OLD_SIGNED });
+      addTransfer(fx, { id: index + 1, type: c.type, playerId: 1, from: 1, to: c.to, fee: 10 });
+
+      if (c.type === 'termination') {
+        await completeTermination(fx.env, index + 1, null, 'user');
+      } else {
+        await completeTransfer(fx.env, index + 1, null, 'user', undefined, {
+          wage: 3,
+          releaseFee: 25,
+          source: 'negotiation',
+          contractType: 'formal',
+        });
+      }
+
+      const row = sqlGet<{
+        player_level: number | null;
+        player_role: string | null;
+        snapshot_source: string | null;
+        snapshot_at: string | null;
+      }>(
+        fx.sqlite,
+        'SELECT player_level, player_role, snapshot_source, snapshot_at FROM transfers WHERE id = ?',
+        index + 1,
+      )!;
+      expect(row.player_level).toBe(expectedLevel);
+      expect(row.player_role).toBe('FW');
+      expect(row.snapshot_source).toBe('deal_time');
+      expect(typeof row.snapshot_at).toBe('string');
+      expect(row.snapshot_at).not.toBe('');
+    }
+  });
+
   it('B 无纠葛买回：快照恢复效力/保护期、signed_at 新签、合同按谈判结果、占本窗额度且不计终局', async () => {
     const fx = freshEnv();
     seedClub(fx, 1);

@@ -359,20 +359,67 @@ app.get('/market/rumors', async (c) => {
   return c.json({ rumors: data });
 });
 
-// GET /api/market/deals —— 最近成交（v6.18.0 公开情报）：已完成单据最近 50 条。
-// 走 0058 的 idx_transfers_status_time 早停（≈50 行索引条目 + 50 次 players 点查）。
+// GET /api/market/deals —— 最近成交（v6.18.0 公开情报）：已完成单据，默认最近 50 条。
+// model-refit Phase 3（§5.1）公开分页：limit（默认 50、上限 200）+ before 游标（completed_at + id
+// 的 base64，避免同一时刻多笔漏数据）+ 可选 season/window_seq 过滤；响应带 nextCursor/hasMore。
+// 无参数旧请求行为不变：仍返回最近 50 条（只是载荷多了 nextCursor/hasMore/快照三字段）。
+// 走 0058 的 idx_transfers_status_time 早停（≈limit 行索引条目 + 点查）。
 // 金额语义按 type 不同：transfer/activation/forced_auction 的 fee = 成交价；free_agent/rc_change/match
 // 的 fee = 新违约金；termination 的 fee = 0；extra_fee = 审核销毁的附加费（解约费/续约费/海捞费/匹配差额）。
 // 中文标签由前端 TRANSFER_TYPE_LABEL 负责。to_club 侧必须 LEFT JOIN：termination 行 to_club_id 为 NULL，
-// INNER JOIN 会把解约单整行丢掉。
+// INNER JOIN 会把解约单整行丢掉。playerLevel/playerRole/snapshotSource = 0093 成交快照（未回填/未
+// 写入为 null）；snapshot_at 只落库不下发（插件不消费）。
+
+/** 游标 = base64(`${completed_at ?? ''}|${id}`)：completed_at 是 DB 生成的 ISO 串（不含 |），id 兜分隔 */
+function encodeDealCursor(completedAt: string | null, id: number): string {
+  return btoa(`${completedAt ?? ''}|${id}`);
+}
+
+function decodeDealCursor(raw: string): { completedAt: string | null; id: number } {
+  let decoded: string;
+  try {
+    decoded = atob(raw);
+  } catch {
+    throw new HttpError(400, 'before 游标不对');
+  }
+  const sep = decoded.lastIndexOf('|');
+  if (sep < 0) throw new HttpError(400, 'before 游标不对');
+  const id = Number(decoded.slice(sep + 1));
+  if (!Number.isInteger(id) || id < 0) throw new HttpError(400, 'before 游标不对');
+  return { completedAt: decoded.slice(0, sep) === '' ? null : decoded.slice(0, sep), id };
+}
+
 app.get('/market/deals', async (c) => {
   assertPublicRate(c, 'market');
+  // limit 口径与 /market/transfer-board 一致：非整数 / ≤0 / 空串回落默认（躲开 Number('')=0 的坑），上限 200
+  const rawLimit = c.req.query('limit');
+  const parsedLimit = Number(rawLimit);
+  const limit =
+    rawLimit !== undefined && rawLimit.trim() !== '' && Number.isInteger(parsedLimit) && parsedLimit > 0
+      ? Math.min(200, parsedLimit)
+      : 50;
+  // before 游标：空串按没给算；解码失败 / 形状不对一律 400
+  const rawBefore = c.req.query('before');
+  const cursor = rawBefore !== undefined && rawBefore !== '' ? decodeDealCursor(rawBefore) : null;
+  // season / window_seq：给了就必须是整数（否则 400），没给不过滤
+  const seasonQ = c.req.query('season');
+  const season = seasonQ !== undefined && seasonQ !== '' ? Number(seasonQ) : null;
+  if (season !== null && (!Number.isInteger(season) || season < 0)) throw new HttpError(400, 'season 应为非负整数');
+  const windowSeqQ = c.req.query('window_seq');
+  const windowSeq = windowSeqQ !== undefined && windowSeqQ !== '' ? Number(windowSeqQ) : null;
+  if (windowSeq !== null && (!Number.isInteger(windowSeq) || windowSeq < 0)) {
+    throw new HttpError(400, 'window_seq 应为非负整数');
+  }
+  // 缓存 key 带全部参数（归一化后的值）：不同形状的请求互不串缓存，旧的无参请求共享一个键
+  const cacheKey = `market-deals:${limit}:${rawBefore ?? ''}:${season ?? ''}:${windowSeq ?? ''}`;
   const data = await cachedJson(
-    'market-deals',
+    cacheKey,
     ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS),
     async () => {
+      // 多取 1 行探路（peek）：有第 limit+1 行才回 nextCursor，边界处不会把「刚好取完」误报成还有下一页
       const rows = await c.env.DB.prepare(
         `SELECT t.id, t.type, t.player_id, t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at,
+                t.player_level, t.player_role, t.snapshot_source,
                 ${sqlDisplayName('p')} AS player_name,
                 cf.name AS from_club_name, ct.name AS to_club_name
          FROM transfers t
@@ -380,38 +427,61 @@ app.get('/market/deals', async (c) => {
          LEFT JOIN clubs cf ON cf.id = t.from_club_id
          LEFT JOIN clubs ct ON ct.id = t.to_club_id
          WHERE t.status = 'completed'
+           ${cursor !== null ? "AND (t.completed_at < ? OR (t.completed_at = ? AND t.id < ?))" : ''}
+           ${season !== null ? 'AND t.season = ?' : ''}
+           ${windowSeq !== null ? 'AND t.window_seq = ?' : ''}
          ORDER BY t.completed_at DESC, t.id DESC
-         LIMIT 50`,
-      ).all<{
-        id: number;
-        type: string;
-        player_id: number;
-        fee: number | null;
-        extra_fee: number | null;
-        season: number | null;
-        window_seq: number | null;
-        completed_at: string | null;
-        player_name: string;
-        from_club_name: string | null;
-        to_club_name: string | null;
-      }>();
-      return rows.results.map((r) => ({
-        id: r.id,
-        type: r.type,
-        playerId: r.player_id,
-        playerName: r.player_name,
-        fromClubName: r.from_club_name,
-        toClubName: r.to_club_name,
-        fee: r.fee,
-        extraFee: r.extra_fee,
-        season: r.season,
-        windowSeq: r.window_seq,
-        completedAt: r.completed_at,
-      }));
+         LIMIT ?`,
+      )
+        .bind(
+          ...(cursor !== null ? [cursor.completedAt, cursor.completedAt, cursor.id] : []),
+          ...(season !== null ? [season] : []),
+          ...(windowSeq !== null ? [windowSeq] : []),
+          limit + 1,
+        )
+        .all<{
+          id: number;
+          type: string;
+          player_id: number;
+          fee: number | null;
+          extra_fee: number | null;
+          season: number | null;
+          window_seq: number | null;
+          completed_at: string | null;
+          player_level: number | null;
+          player_role: string | null;
+          snapshot_source: string | null;
+          player_name: string;
+          from_club_name: string | null;
+          to_club_name: string | null;
+        }>();
+      const hasMore = rows.results.length > limit;
+      const page = hasMore ? rows.results.slice(0, limit) : rows.results;
+      const last = page.length > 0 ? page[page.length - 1] : null;
+      return {
+        deals: page.map((r) => ({
+          id: r.id,
+          type: r.type,
+          playerId: r.player_id,
+          playerName: r.player_name,
+          fromClubName: r.from_club_name,
+          toClubName: r.to_club_name,
+          fee: r.fee,
+          extraFee: r.extra_fee,
+          season: r.season,
+          windowSeq: r.window_seq,
+          completedAt: r.completed_at,
+          playerLevel: r.player_level,
+          playerRole: r.player_role,
+          snapshotSource: r.snapshot_source,
+        })),
+        nextCursor: hasMore && last ? encodeDealCursor(last.completed_at, last.id) : null,
+        hasMore,
+      };
     },
     { scope: 'market', env: c.env, ctx: waitUntilOf(c) },
   );
-  return c.json({ deals: data });
+  return c.json(data);
 });
 
 interface TransferBoardDbRow {

@@ -19,6 +19,8 @@ import { round2 } from '../core/market-rules.ts';
 import { ledgerMovement } from './ledger.ts';
 import { loadMarketContext } from './market-context.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
+import { createConfigService } from '../core/config.ts';
+import { abilityLevel } from '../core/negotiation-rules.ts';
 import { growthResetStatements, recountBadgeStatements } from './growth.ts';
 import { hookTierRecompute } from './growth-tier.ts';
 import { voidDemandStatements } from './demand-ops.ts';
@@ -27,6 +29,50 @@ import { notifyShortlistWatchers } from './shortlist.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+}
+
+// 成交快照（model-refit Phase 3 §5.2）：过户那一刻把球员的能力等级与位置组拍进单据，
+// 插件侧「真实成交回归」用历史等级而非当前等级（后来升级不污染旧成交）。
+// 算不出（缺 CA/PA/年龄、位置不在映射内）写 NULL 不猜；snapshot_source 恒 'deal_time'，
+// 历史单据的回填在 0093 迁移里标 'current_backfill'。位置组口径 = 插件回归模型的
+// CB/FB/MF/FW/GK（FB=边后卫，与平台四档 DF 故意不同——CB/FB 分开是拟合语义，别「统一」掉）。
+// 0093 的回填 SQL 逐字复刻本处两支口径，任一侧漂移测试都会红。
+function advisorRoleOf(position: string | null): string | null {
+  switch (position) {
+    case 'GK':
+      return 'GK';
+    case 'CB':
+      return 'CB';
+    case 'RB':
+    case 'LB':
+      return 'FB';
+    case 'CDM':
+    case 'RM':
+    case 'CM':
+    case 'LM':
+    case 'CAM':
+      return 'MF';
+    case 'RW':
+    case 'ST':
+    case 'LW':
+      return 'FW';
+    default:
+      return null;
+  }
+}
+
+/** 成交时刻的 (level, role)：level 按 §6.7 十档 + 年轻混合（young_blend_age，缺省 25）；role 按上表 */
+async function dealSnapshotOf(
+  db: D1Database,
+  playerId: number,
+): Promise<{ level: number | null; role: string | null }> {
+  const youngBlendAge = (await createConfigService(db).getNumber('young_blend_age')) ?? 25;
+  const p = await db
+    .prepare('SELECT ca, pa, age, position FROM players WHERE id = ?')
+    .bind(playerId)
+    .first<{ ca: number | null; pa: number | null; age: number | null; position: string | null }>();
+  const level = p && p.ca !== null && p.pa !== null && p.age !== null ? abilityLevel(p.ca, p.pa, p.age, youngBlendAge) : null;
+  return { level, role: p ? advisorRoleOf(p.position) : null };
 }
 
 export interface ReviewDecision {
@@ -808,13 +854,18 @@ export async function completeTransfer(
       );
     }
   }
+  // 成交快照（0093）：等级/位置组按成交那一刻的 players 行拍入单据；守卫保证重放（status 已
+  // completed 时本语句空转）不会拿后来的球员数据覆盖已写快照
+  const dealSnap = await dealSnapshotOf(db, transfer.player_id);
   const statusStmtIndex = statements.length;
   statements.push(
     db
       .prepare(
-        `UPDATE transfers SET status = 'completed', tax = ?, completed_at = ${nowSql()} WHERE id = ? AND status IN ('pending_review', 'signing')`,
+        `UPDATE transfers SET status = 'completed', tax = ?, completed_at = ${nowSql()},
+           player_level = ?, player_role = ?, snapshot_source = 'deal_time', snapshot_at = ${nowSql()}
+         WHERE id = ? AND status IN ('pending_review', 'signing')`,
       )
-      .bind(tax, transferId),
+      .bind(tax, dealSnap.level, dealSnap.role, transferId),
   );
   // v6.71.0：成约路径已经在上面把条款落到合同/待生效表，同批把幂等闸置 1。过去只有
   // applyContractTerms 置闸，completeTransfer 走「成约才结算」时闸一直为 0——tick 自愈
@@ -1164,13 +1215,18 @@ export async function completeTermination(
     recountBadgeStatements(db, transfer.player_id),
     ...growthResetStatements(db, transfer.player_id, `termination:${transferId}`, transfer.season, transfer.window_seq),
   ];
+  // 成交快照（0093）：解约同样是成交——快照取解约那一刻（本批 players 行把 CA 重置回 base_ca
+  // 之前，读在批外，正是成交时点）；算不出写 NULL，不拿重置后的值充数
+  const dealSnap = await dealSnapshotOf(db, transfer.player_id);
   const statusStmtIndex = statements.length;
   statements.push(
     db
       .prepare(
-        `UPDATE transfers SET status = 'completed', tax = 0, completed_at = ${nowSql()} WHERE id = ? AND status IN ('pending_review', 'signing')`,
+        `UPDATE transfers SET status = 'completed', tax = 0, completed_at = ${nowSql()},
+           player_level = ?, player_role = ?, snapshot_source = 'deal_time', snapshot_at = ${nowSql()}
+         WHERE id = ? AND status IN ('pending_review', 'signing')`,
       )
-      .bind(transferId),
+      .bind(dealSnap.level, dealSnap.role, transferId),
   );
   if (review) {
     statements.push(

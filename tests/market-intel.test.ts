@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
-import { applyMigrations, createTestD1, sqlAll } from './d1.ts';
+import { applyMigrations, createTestD1, runMigration, sqlAll } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 import { resetGuards } from '../src/lib/guard.ts';
 import { seededUnit } from '../src/worker/venue-ops.ts';
@@ -190,14 +190,18 @@ interface TransferSeed {
   season?: number | null;
   windowSeq?: number | null;
   completedAt?: string | null;
+  // 0093 成交快照三列（snapshot_at 只落库不回显，接口面没有）：undefined → NULL
+  playerLevel?: number | null;
+  playerRole?: string | null;
+  snapshotSource?: string | null;
 }
 
 function addTransfer(fx: Fixture, t: TransferSeed): number {
   const at = t.completedAt === undefined ? '2026-07-02T00:00:00Z' : t.completedAt;
   const info = fx.sqlite
     .prepare(
-      `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, extra_fee, status, season, window_seq, completed_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, extra_fee, status, season, window_seq, completed_at, created_at, player_level, player_role, snapshot_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       t.type ?? 'transfer',
@@ -211,6 +215,9 @@ function addTransfer(fx: Fixture, t: TransferSeed): number {
       t.windowSeq ?? 1,
       at,
       at,
+      t.playerLevel ?? null,
+      t.playerRole ?? null,
+      t.snapshotSource ?? null,
     );
   return Number(info.lastInsertRowid);
 }
@@ -577,6 +584,9 @@ const DEAL_KEYS = [
   'season',
   'windowSeq',
   'completedAt',
+  'playerLevel',
+  'playerRole',
+  'snapshotSource',
 ];
 
 interface DealRow {
@@ -591,12 +601,28 @@ interface DealRow {
   season: number | null;
   windowSeq: number | null;
   completedAt: string | null;
+  playerLevel: number | null;
+  playerRole: string | null;
+  snapshotSource: string | null;
+}
+
+interface DealsPayload {
+  deals: DealRow[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 async function deals(fx: Fixture, token?: string): Promise<DealRow[]> {
   const res = await get('/api/market/deals', token, fx.env);
   expect(res.status).toBe(200);
   return ((await res.json()) as { deals: DealRow[] }).deals;
+}
+
+/** 全载荷（分页/游标/兼容用例读 nextCursor/hasMore） */
+async function dealsRaw(fx: Fixture, query = '', token?: string): Promise<DealsPayload> {
+  const res = await get(`/api/market/deals${query}`, token, fx.env);
+  expect(res.status).toBe(200);
+  return (await res.json()) as DealsPayload;
 }
 
 describe('TC-DEAL 成交公示（GET /api/market/deals）', () => {
@@ -733,7 +759,9 @@ describe('TC-DEAL 成交公示（GET /api/market/deals）', () => {
     expect(sql).toBeDefined();
     expect(sql ?? '').toContain(`t.status = 'completed'`);
     expect(sql ?? '').toContain('ORDER BY t.completed_at DESC, t.id DESC');
-    expect(sql ?? '').toContain('LIMIT 50');
+    // Phase 3 分页：limit 参数化（无参默认 50 + 1 行 peek 探路），游标/过滤条件按需拼接
+    expect(sql ?? '').toContain('LIMIT ?');
+    expect(sql ?? '').not.toContain('LIMIT 50');
 
     const plan = explain(fx, sql ?? '');
     expect(plan).toContain('idx_transfers_status_time'); // 0058 的 (status, completed_at DESC, id DESC)
@@ -767,6 +795,255 @@ describe('TC-DEAL 成交公示（GET /api/market/deals）', () => {
     const rows = await deals(fx);
     expect(rows).toHaveLength(1);
     expect(rows[0].playerName).toBe('新甲');
+  });
+
+  // ---------------------------------------------------------------- Phase 3 公开分页（§5.1）
+
+  /** 灌 n 笔 completed（秒数递增 ⇒ completed_at 互不相同），返回按 DESC 排好的 id 序列 */
+  function seedCompletedIds(fx: Fixture, n: number): number[] {
+    const ins = fx.sqlite.prepare(
+      `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, completed_at, created_at)
+       VALUES ('transfer', 700, ${CLUB_A}, ${CLUB_B}, 10, 'completed', 4, 1, ?, ?)`,
+    );
+    const ids: number[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const at = `2026-05-01T00:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}Z`;
+      ids.push(Number(ins.run(at, at).lastInsertRowid));
+    }
+    return ids.reverse(); // completed_at 递增插入 ⇒ DESC 序 = 插入序倒序
+  }
+
+  it('TC-DEAL-09 分页：limit + nextCursor + hasMore 全量遍历不漏不重', async () => {
+    const fx = seedDeals();
+    const allDesc = seedCompletedIds(fx, 55);
+
+    const page1 = await dealsRaw(fx, '?limit=20');
+    expect(page1.deals).toHaveLength(20);
+    expect(page1.hasMore).toBe(true);
+    expect(page1.nextCursor).not.toBeNull();
+    expect(page1.deals.map((r) => r.id)).toEqual(allDesc.slice(0, 20));
+
+    // 沿游标走到头：每页 20 条、页间不重不漏、末页 hasMore=false 且 nextCursor=null
+    const seen = page1.deals.map((r) => r.id);
+    let cursor = page1.nextCursor;
+    let pages = 1;
+    while (cursor !== null) {
+      const page = await dealsRaw(fx, `?before=${encodeURIComponent(cursor)}&limit=20`);
+      seen.push(...page.deals.map((r) => r.id));
+      cursor = page.nextCursor;
+      pages += 1;
+      expect(pages).toBeLessThan(10); // 防死循环：55 条 @20 最多 3 页
+    }
+    expect(seen).toEqual(allDesc);
+    expect(new Set(seen).size).toBe(55);
+
+    // 恰好一页的量：peek 探路判「没有下一页」，不虚报 hasMore
+    const exact = await dealsRaw(fx, '?limit=55');
+    expect(exact.deals).toHaveLength(55);
+    expect(exact.hasMore).toBe(false);
+    expect(exact.nextCursor).toBeNull();
+  });
+
+  it('TC-DEAL-10 游标键集 (completed_at, id)：同一时刻多笔不漏不重', async () => {
+    const fx = seedDeals();
+    const ins = fx.sqlite.prepare(
+      `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, completed_at, created_at)
+       VALUES ('transfer', 700, ${CLUB_A}, ${CLUB_B}, 10, 'completed', 4, 1, ?, ?)`,
+    );
+    // 6 笔同秒 3 笔（07-04）+ 3 笔（07-03）：只按 completed_at 游标会整秒漏行，(completed_at, id) 键集才对
+    const expected: number[] = []; // 07-04 先插（更新），DESC = 各秒批内 id DESC
+    for (const at of ['2026-07-04T00:00:00Z', '2026-07-03T00:00:00Z']) {
+      const batch: number[] = [];
+      for (let i = 0; i < 3; i += 1) batch.push(Number(ins.run(at, at).lastInsertRowid));
+      expected.push(...batch.reverse());
+    }
+
+    const page1 = await dealsRaw(fx, '?limit=2');
+    expect(page1.deals.map((r) => r.id)).toEqual(expected.slice(0, 2));
+    const seen = page1.deals.map((r) => r.id);
+    let cursor = page1.nextCursor;
+    while (cursor !== null) {
+      const page = await dealsRaw(fx, `?before=${encodeURIComponent(cursor)}&limit=2`);
+      seen.push(...page.deals.map((r) => r.id));
+      cursor = page.nextCursor;
+    }
+    expect(seen).toEqual(expected); // 3 笔同秒全回收，没有跨秒漏行
+    expect(new Set(seen).size).toBe(6);
+  });
+
+  it('TC-DEAL-11 游标形态错误一律 400', async () => {
+    const fx = seedDeals();
+    addTransfer(fx, { playerId: 700, toClubId: CLUB_B, completedAt: '2026-07-01T00:00:00Z' });
+    for (const bad of [
+      '!!!not-base64',
+      btoa('no-separator'), // 缺分隔符
+      btoa('2026-07-04T00:00:00Z|abc'), // id 不是整数
+      btoa('2026-07-04T00:00:00Z|-1'), // id 负数
+    ]) {
+      const res = await get(`/api/market/deals?before=${encodeURIComponent(bad)}`, undefined, fx.env);
+      expect(res.status, bad).toBe(400);
+      expect(await res.json()).toEqual({ error: 'before 游标不对' });
+    }
+  });
+
+  it('TC-DEAL-12 limit 上限 200、非法值回落默认 50', async () => {
+    const fx = seedDeals();
+    seedCompletedIds(fx, 250);
+
+    // 上限钳 200（limit=500 只回 200 且还有下一页）
+    const capped = await dealsRaw(fx, '?limit=500');
+    expect(capped.deals).toHaveLength(200);
+    expect(capped.hasMore).toBe(true);
+
+    // 非整数 / ≤0 / 空串 / 非数字：一律回落默认 50（口径与 /market/transfer-board 的 limit 一致）
+    for (const q of ['?limit=abc', '?limit=0', '?limit=-3', '?limit=2.5', '?limit=']) {
+      const r = await dealsRaw(fx, q);
+      expect(r.deals, q).toHaveLength(50);
+    }
+  });
+
+  it('TC-DEAL-13 season / window_seq 过滤与非法值 400', async () => {
+    const fx = seedDeals();
+    const s4w1 = addTransfer(fx, { playerId: 700, toClubId: CLUB_B, season: 4, windowSeq: 1, completedAt: '2026-07-05T00:00:00Z' });
+    const s4w2 = addTransfer(fx, { playerId: 700, toClubId: CLUB_B, season: 4, windowSeq: 2, completedAt: '2026-07-04T00:00:00Z' });
+    const s5w1 = addTransfer(fx, { playerId: 701, toClubId: CLUB_A, season: 5, windowSeq: 1, completedAt: '2026-07-03T00:00:00Z' });
+
+    expect((await dealsRaw(fx, '?season=4&window_seq=1')).deals.map((r) => r.id)).toEqual([s4w1]);
+    expect((await dealsRaw(fx, '?season=4')).deals.map((r) => r.id)).toEqual([s4w1, s4w2]);
+    expect((await dealsRaw(fx, '?window_seq=1')).deals.map((r) => r.id)).toEqual([s4w1, s5w1]);
+    // 过滤后为空：空载荷也要带全分页三件套
+    const empty = await dealsRaw(fx, '?season=9');
+    expect(empty.deals).toEqual([]);
+    expect(empty.hasMore).toBe(false);
+    expect(empty.nextCursor).toBeNull();
+
+    for (const q of ['?season=x', '?season=1.5', '?window_seq=-1']) {
+      const res = await get(`/api/market/deals${q}`, undefined, fx.env);
+      expect(res.status, q).toBe(400);
+    }
+  });
+
+  it('TC-DEAL-14 旧请求兼容：无参数仍回最近 50 条（载荷多了分页三件套）', async () => {
+    const fx = seedDeals();
+    const allDesc = seedCompletedIds(fx, 55);
+    // 中间混 5 笔未完成：旧口径「只出 completed 最近 50」不变
+    for (let i = 0; i < 5; i += 1) {
+      addTransfer(fx, { playerId: 701, status: 'pending_review', completedAt: null });
+    }
+
+    const payload = await dealsRaw(fx); // 无任何参数 = 旧客户端的请求形状
+    expect(payload.deals).toHaveLength(50);
+    expect(payload.deals.map((r) => r.id)).toEqual(allDesc.slice(0, 50));
+    expect(payload.hasMore).toBe(true);
+    for (const r of payload.deals) expect(r.completedAt).not.toBeNull();
+
+    // 少于 50 条时（生产旧客户端的第一页）：全部返回、无下一页
+    const small = seedDeals();
+    const one = addTransfer(small, { playerId: 700, toClubId: CLUB_B, completedAt: '2026-07-01T00:00:00Z' });
+    const smallPayload = await dealsRaw(small);
+    expect(smallPayload.deals.map((r) => r.id)).toEqual([one]);
+    expect(smallPayload.hasMore).toBe(false);
+    expect(smallPayload.nextCursor).toBeNull();
+  });
+
+  it('TC-DEAL-15 缓存 key 带全部参数：不同参数互不串缓存', async () => {
+    const fx = seedDeals('60000');
+    const first = addTransfer(fx, { playerId: 700, toClubId: CLUB_B, completedAt: '2026-07-01T00:00:00Z' });
+
+    const p1 = await dealsRaw(fx, '?limit=1');
+    expect(p1.deals.map((r) => r.id)).toEqual([first]);
+
+    // 库变了但同参数 → L1 命中回旧载荷（缓存仍然生效，key 没被参数打散）
+    addTransfer(fx, { playerId: 701, toClubId: CLUB_A, completedAt: '2026-07-06T00:00:00Z' });
+    expect((await dealsRaw(fx, '?limit=1')).deals.map((r) => r.id)).toEqual([first]);
+
+    // 不同 limit / 不同 season → 不同 key，读库出新载荷（证明参数确实进键）
+    const p2 = await dealsRaw(fx, '?limit=2');
+    expect(p2.deals).toHaveLength(2);
+    const ps = await dealsRaw(fx, '?limit=1&season=999');
+    expect(ps.deals).toEqual([]);
+  });
+
+  it('TC-DEAL-16 快照字段回显：有则原样、无则 null，snapshot_at 不下发', async () => {
+    const fx = seedDeals();
+    addTransfer(fx, {
+      playerId: 700,
+      toClubId: CLUB_B,
+      completedAt: '2026-07-03T00:00:00Z',
+      playerLevel: 8.5,
+      playerRole: 'FW',
+      snapshotSource: 'deal_time',
+    });
+    addTransfer(fx, { playerId: 701, toClubId: CLUB_A, completedAt: '2026-07-01T00:00:00Z' }); // 无快照（未回填）
+
+    const rows = await deals(fx);
+    expect(rows[0].playerLevel).toBe(8.5);
+    expect(rows[0].playerRole).toBe('FW');
+    expect(rows[0].snapshotSource).toBe('deal_time');
+    expect(rows[1].playerLevel).toBeNull();
+    expect(rows[1].playerRole).toBeNull();
+    expect(rows[1].snapshotSource).toBeNull();
+    // 键序锁（DEAL_KEYS）已保证只回显三字段：snapshot_at 只落库，公开接口不下发
+  });
+});
+
+// ---------------------------------------------------------------- 0093 快照迁移（TC-SNAP）
+
+describe('TC-SNAP 0093 成交快照迁移', () => {
+  it('TC-SNAP-01 历史回填：等级/位置组按当前 players 补、来源 current_backfill、幂等守卫', () => {
+    const sqlite = new DatabaseSync(':memory:');
+    // 先跑到 0092 再摆存量，最后单独跑 0093（tests/d1.ts runMigration 的「回填迁移」用法）
+    applyMigrations(sqlite, '0092_players_club_number_unique.sql');
+    sqlite.exec(
+      `INSERT INTO clubs (id, name, league_tier, status, is_cpu) VALUES
+         (${CLUB_A}, '甲队', 'premier', 'active', 0),
+         (${CLUB_B}, '乙队', 'premier', 'active', 0);`,
+    );
+    // 期望值 = core/negotiation-rules.ts ratingLevel/abilityLevel 的手算对账（混合年龄 ≤ 25 取 (CA档+PA档)/2）
+    const cases: Array<{ id: number; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null; level: number | null; role: string | null }> = [
+      { id: 801, name: '年轻混合', position: 'ST', age: 24, ca: 92, pa: 94, level: 9.5, role: 'FW' },
+      { id: 802, name: '成年只看CA', position: 'CM', age: 30, ca: 76, pa: 80, level: 5, role: 'MF' },
+      { id: 803, name: '混合含边界25', position: 'CB', age: 25, ca: 65, pa: 65, level: 3, role: 'CB' },
+      { id: 804, name: '缺PA不猜', position: 'LB', age: 22, ca: 80, pa: null, level: null, role: 'FB' },
+      { id: 805, name: '顶档', position: 'RB', age: 20, ca: 93, pa: 93, level: 10, role: 'FB' },
+      { id: 806, name: '档线之下', position: 'GK', age: 28, ca: 59, pa: 59, level: 1, role: 'GK' },
+      { id: 807, name: '怪位置不猜', position: 'Bogus', age: 26, ca: 70, pa: 70, level: 4, role: null },
+      { id: 808, name: '无位置不猜', position: null, age: 26, ca: 70, pa: 70, level: 4, role: null },
+    ];
+    const addP = sqlite.prepare(
+      `INSERT INTO players (id, uid, name, display_name, fc_id, club_id, position, age, ca, pa, status)
+       VALUES (?, ?, ?, NULL, NULL, ${CLUB_A}, ?, ?, ?, ?, 'normal')`,
+    );
+    for (const p of cases) addP.run(p.id, `fc${p.id}`, p.name, p.position, p.age, p.ca, p.pa);
+    const addT = sqlite.prepare(
+      `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, completed_at, created_at)
+       VALUES ('transfer', ?, ${CLUB_A}, ${CLUB_B}, 10, 'completed', 4, 1, '2026-07-02T00:00:00Z', '2026-07-02T00:00:00Z')`,
+    );
+    for (const p of cases) addT.run(p.id);
+    // 未完成单据不回填；转让给玩家 801 的第二笔（非 completed）同样是存量噪音
+    sqlite
+      .prepare(
+        `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, status, season, window_seq)
+         VALUES ('transfer', 801, ${CLUB_A}, ${CLUB_B}, 'pending_review', 4, 1)`,
+      )
+      .run();
+
+    runMigration(sqlite, '0093_transfer_player_snapshot.sql');
+
+    for (const p of cases) {
+      const row = sqlite
+        .prepare('SELECT player_level, player_role, snapshot_source, snapshot_at FROM transfers WHERE player_id = ? AND status = \'completed\'')
+        .get(p.id) as { player_level: number | null; player_role: string | null; snapshot_source: string | null; snapshot_at: string | null };
+      expect(row.player_level, `${p.name} level`).toBe(p.level);
+      expect(row.player_role, `${p.name} role`).toBe(p.role);
+      expect(row.snapshot_source, `${p.name} source`).toBe('current_backfill');
+      expect(typeof row.snapshot_at).toBe('string');
+    }
+    // 非completed行四列全空：回填只碰 completed
+    const pending = sqlite
+      .prepare('SELECT player_level, player_role, snapshot_source, snapshot_at FROM transfers WHERE status = \'pending_review\'')
+      .get() as { player_level: null; player_role: null; snapshot_source: null; snapshot_at: null };
+    expect(pending).toEqual({ player_level: null, player_role: null, snapshot_source: null, snapshot_at: null });
   });
 });
 
