@@ -31,6 +31,8 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
     items: [
       { to: '/admin/clubs', label: '俱乐部' },
       { to: '/admin/players', label: '球员' },
+      // 身价（v6.79.0）：球员 market_value 的阶梯调价页，跟球员属性维护归同域
+      { to: '/admin/values', label: '身价' },
       { to: '/admin/growth', label: '成长录入' },
       { to: '/admin/tier', label: '成长档位' },
       { to: '/admin/imports', label: '导入' },

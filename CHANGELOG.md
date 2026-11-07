@@ -4,6 +4,22 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.79.0] · 身价初值与调价页（2026-11-07）
+
+**Added**
+
+- **迁移 `0095_player_model_value.sql`**：`players` 加 `model_value REAL`（模型参考价，插件离线种子脚本生成 SQL 写入、全量覆盖，管理端只读展示，不是规则输入）；身价初值仍走 `market_value`（种子 COALESCE 只填 NULL，与 `model_value` 分开两列）。`idx_transfers_player` 由 0001 的单列 `(player_id)` 重建为 `(player_id, id)` 复合索引（同名索引先 DROP 再建，防 `IF NOT EXISTS` 静默吞掉），供最近成交子查询反向扫第一条即停。
+- **公开 `/api/players` 带出 `modelValue`**（`src/worker/routes/players.ts`）：恒下发（bot 在群里本就公开报估价，无新增泄露），未写入为 null。
+- **opt-in 最近成交 `withLastDeal=1`**（`src/worker/routes/players.ts`）：子查询只认 `status='completed'` 且 `type ∈ {transfer, activation, forced_auction}`（与插件「真实成交」口径一致，比 `/api/market/deals` 严），按 `id DESC` 取最新一笔，回 `{fee, season, windowSeq}` 或 null；不带参数时 select 不加列、payload 不出 `lastDeal` 键（与旧版 payload 完全一致）；参数非 `1` 一律 400；缓存键按查询串自动区分两形态、互不串。
+- **管理端「身价」页**（`web/src/pages/admin/ValuesPage.tsx`，路由 `/admin/values`，侧栏「球队与名册」组紧跟「球员」）：阶梯 ±一档 + 手输绝对值进暂存，底部批量提交走现有 `/api/admin/players/batch`（≤200/批）；模型参考价与最近成交只读列；状态筛选默认 `normal`（18k 行不默认全拉），off-ladder 正数只提示不拦、负数前端拦截不提交。
+- **身价阶梯纯函数**（`web/src/lib/valueLadder.ts`）：`snap` / `next` / `prev`，档表 = ≤10 整数步长 1、(10,30] 固定档 12–30、>30 为 5 的倍数 ≥35 无限延伸；snap 距离并列取低档、x ≤ 0 → 1。插件仓 `services/market_value.py` 同规则实现，两端用设计 §2 同一组对拍样例锁定。
+
+**Changed**
+
+- 公开列表 payload 为加性变更：恒增 `modelValue`；`lastDeal` 仅在 `withLastDeal=1` 时出现——不带参数的请求体与旧版逐字节一致。
+- 管理端侧栏「球队与名册」组 15→16 项（`AdminLayout.tsx` + `App.tsx` 懒加载路由）；移动端基线登记 ValuesPage 表格内编辑 `<input>` 定宽 `5.5rem`（窄屏保底 `.table-wrap` 横滚）。
+- 测试：`tests/players-library.test.ts` 新增 5 例（modelValue 恒带出、withLastDeal 两形态、成交筛选口径、同球员多笔取 id 最大、缓存键两形态不串）；`tests/d1.ts` 登记迁移 0095；`web/src/lib/valueLadder.test.ts` 11 例对拍样例；`web/src/pages/admin/ValuesPage.test.tsx` 3 例（负数前端拦截、off-ladder 照常提交、两路差异不合流）；`AdminLayout.test.tsx` 导航断言 15→16 项。
+
 ## [v6.78.0] · PlayStyle 来源覆盖 + 训练营 XP 自动整季/半季（2026-11-07，已上线 Version 947eeb96）
 
 **Added**

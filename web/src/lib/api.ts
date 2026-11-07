@@ -558,8 +558,19 @@ export interface PlayerMatchesResponse {
 
 // ---- v0.7.1 d8：球员库（公开 /api/players，keyset 游标分页）----
 
+/** 最近成交摘要（v6.79.0 身价页）：仅 /api/players?withLastDeal=1 下发；口径 = status='completed' 且 type ∈ {transfer, activation, forced_auction}（设计 §0 裁决 4，与插件「真实成交」一致）——比 /api/market/deals 严：deals 只过滤 status，还含 free_agent / rc_change / match 等带新违约金的类型 */
+export interface LastDealInfo {
+  fee: number | null;
+  season: number | null;
+  windowSeq: number | null;
+}
+
 export interface PlayerLibraryRow extends PlayerListItem {
   growable: boolean;
+  // v6.79.0 身价页：模型参考价（公开 /api/players 恒下发，种子前为 null）
+  modelValue?: number | null;
+  // v6.79.0 身价页：最近成交（仅 withLastDeal=1 时下发；fee 单位 m）
+  lastDeal?: LastDealInfo | null;
   clubName: string | null;
   // v6.39.3：队徽 R2 键（真源=比赛系统 team.logo_key）；自由身或未接徽为 null，前端 TeamLogo 回落队名哈希色块
   clubLogoKey: string | null;

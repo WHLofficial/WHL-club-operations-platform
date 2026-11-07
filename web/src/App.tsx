@@ -46,6 +46,8 @@ const AdminLayout = lazy(() => import('./pages/admin/AdminLayout.tsx'));
 const AdminOverviewPage = lazy(() => import('./pages/admin/OverviewPage.tsx'));
 const AdminSeasonsPage = lazy(() => import('./pages/admin/SeasonsPage.tsx'));
 const AdminPlayersPage = lazy(() => import('./pages/admin/PlayersPage.tsx'));
+// 身价（v6.79.0）：阶梯 ±一档调 market_value，模型参考与最近成交只读
+const AdminValuesPage = lazy(() => import('./pages/admin/ValuesPage.tsx'));
 const AdminGrowthPage = lazy(() => import('./pages/admin/GrowthEntryPage.tsx'));
 // 成长档位（v6.48.0 §10.3）：自动核定一键重算 + 未设国家的队 + 变更清单
 const AdminTierPage = lazy(() => import('./pages/admin/TierPage.tsx'));
@@ -194,6 +196,7 @@ export default function App() {
             <Route index element={<AdminOverviewPage />} />
             <Route path="seasons" element={<AdminSeasonsPage />} />
             <Route path="players" element={<AdminPlayersPage />} />
+            <Route path="values" element={<AdminValuesPage />} />
             <Route path="growth" element={<AdminGrowthPage />} />
             <Route path="tier" element={<AdminTierPage />} />
             <Route path="imports" element={<AdminImportsPage />} />

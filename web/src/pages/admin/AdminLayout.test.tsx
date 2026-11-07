@@ -31,6 +31,8 @@ const NAV_BEFORE: { label: string; to: string }[] = [
   { label: '总览', to: '/admin' },
   { label: '赛季', to: '/admin/seasons' },
   { label: '球员', to: '/admin/players' },
+  // v6.79.0：身价页（球员 market_value 阶梯调价），挂「球队与名册」组紧跟球员
+  { label: '身价', to: '/admin/values' },
   { label: '成长录入', to: '/admin/growth' },
   { label: '成长档位', to: '/admin/tier' },
   { label: '导入', to: '/admin/imports' },
@@ -51,7 +53,7 @@ const NAV_BEFORE: { label: string; to: string }[] = [
 const SHAPE_AFTER: { title: string | null; labels: string[] }[] = [
   { title: null, labels: ['总览'] },
   { title: '赛事运营', labels: ['赛季', '事件'] },
-  { title: '球队与名册', labels: ['俱乐部', '球员', '成长录入', '成长档位', '导入'] },
+  { title: '球队与名册', labels: ['俱乐部', '球员', '身价', '成长录入', '成长档位', '导入'] },
   { title: '转会与经营', labels: ['转会', '审核工作台', '时刻表', '品牌池', '消费工单', '财政'] },
   { title: '系统', labels: ['系统'] },
 ];
@@ -89,7 +91,7 @@ function navShape(el: HTMLElement): { title: string | null; labels: string[] }[]
 }
 
 describe('管理端侧栏四域分组（v6.28.0）', () => {
-  it('TC-NAV-D1/D2：15 项一项不差，to 与分组前逐字一致；组标题与归属固定', () => {
+  it('TC-NAV-D1/D2：16 项一项不差，to 与分组前逐字一致；组标题与归属固定', () => {
     renderLayout('/admin');
     const side = nav();
     const links = within(side).getAllByRole('link');

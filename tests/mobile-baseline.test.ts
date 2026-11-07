@@ -271,6 +271,12 @@ const FIXED_WIDTH_ALLOWLIST = [
     literal: '12',
     why: '页签行 <span aria-hidden> 分隔装饰块，不承载内容宽度（12px 是视觉分隔，不是布局保底）；v6.23.0 随报价区从 pages/Offers.tsx 搬来',
   },
+  {
+    file: 'web/src/pages/admin/ValuesPage.tsx',
+    prop: 'width' as const,
+    literal: '5.5rem',
+    why: '身价管理页表格内编辑 <input> 定宽（评审 P0-1 同口径：min(N,100%) 的百分比分量会改变桌面列宽分配），窄屏保底由 .table-wrap 横滚承担',
+  },
 ];
 
 const fixedWidthKey = (v: { file: string; prop: string; literal: string }): string => `${v.file}|${v.prop}|${v.literal}`;
