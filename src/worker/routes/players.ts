@@ -881,31 +881,42 @@ async function listPlayers(
   const grantedByPlayer = new Map<number, GrantedPlaystyleRow[]>();
   const originByPlayer = new Map<number, PlaystyleOriginRow[]>();
   if (pageIds.length > 0) {
-    const marks = pageIds.map(() => '?').join(', ');
-    const granted = await c.env.DB
-      .prepare(
-        `SELECT player_id, slot, kind, psid, source FROM player_playstyles WHERE player_id IN (${marks}) ORDER BY player_id, slot`,
-      )
-      .bind(...pageIds)
-      .all<{ player_id: number; slot: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
-    for (const g of granted.results) {
-      const list = grantedByPlayer.get(g.player_id) ?? [];
-      list.push({ slot: g.slot, kind: g.kind, psid: g.psid, source: g.source });
-      grantedByPlayer.set(g.player_id, list);
+    // D1 每查询绑定参数上限 100：页满 100 人时 origins 还要 +1 个 season 就越限
+    // （v6.79.0 身价页 limit=100 首次踩中，9x 行一直正常所以长期潜伏）。按 98/批
+    // 分片点查，组装逻辑不变；单人明细只会落在一个分片里，批内排序即可保序。
+    const bindBatchMax = 98;
+    for (let i = 0; i < pageIds.length; i += bindBatchMax) {
+      const chunk = pageIds.slice(i, i + bindBatchMax);
+      const marks = chunk.map(() => '?').join(', ');
+      const granted = await c.env.DB
+        .prepare(
+          `SELECT player_id, slot, kind, psid, source FROM player_playstyles WHERE player_id IN (${marks}) ORDER BY player_id, slot`,
+        )
+        .bind(...chunk)
+        .all<{ player_id: number; slot: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
+      for (const g of granted.results) {
+        const list = grantedByPlayer.get(g.player_id) ?? [];
+        list.push({ slot: g.slot, kind: g.kind, psid: g.psid, source: g.source });
+        grantedByPlayer.set(g.player_id, list);
+      }
     }
     // PlayStyle 来源覆盖（v6.78.0）：只覆盖来源角标，不参与槽位/计数/抑制（见 0094 迁移注释）。
     // 只取当前展示赛季的标记——来源表按 season 存，避免 S9 的角标漏到后续赛季同基础徽章上。
     const originSeason = await getVisibleSeason(c.env.DB);
-    const origins = await c.env.DB
-      .prepare(
-        `SELECT DISTINCT player_id, kind, psid, source FROM player_playstyle_origin WHERE player_id IN (${marks}) AND season = ? ORDER BY player_id, kind, psid`,
-      )
-      .bind(...pageIds, originSeason ?? 0)
-      .all<{ player_id: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
-    for (const row of origins.results) {
-      const list = originByPlayer.get(row.player_id) ?? [];
-      list.push({ kind: row.kind, psid: row.psid, source: row.source });
-      originByPlayer.set(row.player_id, list);
+    for (let i = 0; i < pageIds.length; i += bindBatchMax) {
+      const chunk = pageIds.slice(i, i + bindBatchMax);
+      const marks = chunk.map(() => '?').join(', ');
+      const origins = await c.env.DB
+        .prepare(
+          `SELECT DISTINCT player_id, kind, psid, source FROM player_playstyle_origin WHERE player_id IN (${marks}) AND season = ? ORDER BY player_id, kind, psid`,
+        )
+        .bind(...chunk, originSeason ?? 0)
+        .all<{ player_id: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
+      for (const row of origins.results) {
+        const list = originByPlayer.get(row.player_id) ?? [];
+        list.push({ kind: row.kind, psid: row.psid, source: row.source });
+        originByPlayer.set(row.player_id, list);
+      }
     }
   }
   const players = rows.results.slice(0, limit).map((r) => ({
