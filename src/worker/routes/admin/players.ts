@@ -175,7 +175,6 @@ app.post('/players/batch', async (c) => {
   if (errors.length > 0) throw new HttpError(400, errors.join('；'));
 
   const ids = updatesList.map((u) => u.id);
-  const placeholders = ids.map(() => '?').join(',');
   type PlayerCurrent = {
     id: number;
     market_value: number | null;
@@ -191,12 +190,20 @@ app.post('/players/batch', async (c) => {
     base_ca: number | null;
     pa: number | null;
   };
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, market_value, status, growth_tier, growth_tier_locked, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id IN (${placeholders})`,
-  )
-    .bind(...ids)
-    .all<PlayerCurrent>();
-  const currentById = new Map(results.map((r) => [r.id, r]));
+  // D1 每查询绑定参数上限 100：批量上限 PLAYER_BATCH_MAX=200，按 98/批分片点查后合并
+  // （批量维护上线以来的潜伏雷：>98 条的批在这一步 500，v6.79.0 身价页大批提交首次踩中）。
+  const currentRows: PlayerCurrent[] = [];
+  for (let i = 0; i < ids.length; i += 98) {
+    const slice = ids.slice(i, i + 98);
+    const ph = slice.map(() => '?').join(',');
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, market_value, status, growth_tier, growth_tier_locked, is_future_star, growable, prestige, badges_silver, badges_gold, ca, base_ca, pa FROM players WHERE id IN (${ph})`,
+    )
+      .bind(...slice)
+      .all<PlayerCurrent>();
+    currentRows.push(...results);
+  }
+  const currentById = new Map(currentRows.map((r) => [r.id, r]));
   const missing = ids.filter((id) => !currentById.has(id));
   if (missing.length > 0) throw new HttpError(400, `球员不存在：${missing.join('、')}`);
 
