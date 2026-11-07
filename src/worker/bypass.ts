@@ -9,7 +9,7 @@ import { rcChangeFee, terminationFee, freeAgentFee, matchDiff, FORCED_AUCTION_PR
 import { bidDeadline, round2, shanghaiDateStr } from '../core/market-rules.ts';
 import { loadMarketContext } from './market-context.ts';
 import { availableBalance, creditLineGuard, ledgerMovement } from './ledger.ts';
-import { getOpenWindow, type OpenWindow } from './seasons.ts';
+import { getOpenWindow } from './seasons.ts';
 import { assertOpOpen, opBlockReason } from './ops-schedule.ts';
 import { closedRegularTicks } from './contract-ticks.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
@@ -22,9 +22,9 @@ import {
   type ReviewDecision,
 } from './transfers.ts';
 import { assertExpectedWageReady, openNegotiationSession, voidSigningCore, type OpenSessionOptions } from './negotiations.ts';
-import { findActiveNegotiationSession, findActivePromotionSession, findNegotiationInFlight } from './negotiation-guard.ts';
+import { findActiveNegotiationSession, findActivePromotionSession } from './negotiation-guard.ts';
 import { listingDemandStatements } from './demand-ops.ts';
-import { cpuClubIds } from './growth.ts';
+import { ensureNotInFlight, flowState, seaVerdicts } from './player-flow-state.ts';
 import { rowDisplayName } from '../core/player-name.ts';
 
 function nowSql() {
@@ -44,114 +44,6 @@ interface OwnPlayerRow {
   display_name: string | null;
   club_id: number | null;
   status: string;
-}
-
-// 球员已在市场/审核流程里的一票否决（4.4.10「正在被挂牌、解约的球员不可更改违约金」同源）
-async function findInFlight(db: D1Database, playerId: number): Promise<'listing' | 'pending' | 'negotiation' | null> {
-  const listing = await db
-    .prepare(
-      `SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'matched_pending', 'pending_review') LIMIT 1`,
-    )
-    .bind(playerId)
-    .first<{ id: number }>();
-  if (listing) return 'listing';
-  const pending = await db
-    .prepare(`SELECT id FROM transfers WHERE player_id = ? AND status = 'pending_review' LIMIT 1`)
-    .bind(playerId)
-    .first<{ id: number }>();
-  if (pending) return 'pending';
-  // v6.66.0：过户外加「签约谈判在途」。今天所有 active 会话都还挂在 transfers.status='signing' 上，
-  // 各调用点另有专门的 signing 闸，所以这里用 `<> 'signing'` 把既有口径让给旧判据，只为
-  // 「单据已结算、条款还没谈定」那一步兜底——否则球员过户后在买方是 normal，全仓没有任何闸
-  // 挡住他再挂牌/再激活，谈定的合同会落到已经转走的球员身上。
-  const negotiation = await db
-    .prepare(
-      `SELECT s.id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id
-        WHERE t.player_id = ? AND s.status = 'active' AND t.status <> 'signing' LIMIT 1`,
-    )
-    .bind(playerId)
-    .first<{ id: number }>();
-  if (negotiation) return 'negotiation';
-  return null;
-}
-
-// v6.64.4 起导出给 promotion.ts（下放同样要躲开在途单据与在途谈判）
-export async function ensureNotInFlight(db: D1Database, playerId: number): Promise<void> {
-  const kind = await findInFlight(db, playerId);
-  if (kind === 'listing') throw new HttpError(400, '这名球员已经有一单在市场流程里了，等它结束再操作');
-  if (kind === 'pending') throw new HttpError(400, '这名球员有一张单据正在等管理组审核，先等审核结果');
-  if (kind === 'negotiation') throw new HttpError(400, '这名球员已经成交，还有一场签约谈判没结束，等它结束再操作');
-}
-
-export type SeaSignStage = 'window' | 'ownership' | 'status' | 'banned' | 'listing' | 'pending' | 'signing' | 'ok';
-
-export interface SeaSignVerdict {
-  stage: SeaSignStage;
-  ok: boolean;
-  /** ok=false 时调用方应抛的 HttpError 状态码 */
-  status: number;
-  /** ok=false 时给用户看的中文原因 */
-  reason: string;
-  errCode?: string;
-}
-
-/**
- * 海捞资格判定（v6.17.0）：与 createFreeAgent 的守卫链同源——它不是镜像，createFreeAgent
- * 直接吃这里的 verdict 抛错，判定口径永不漂移。stage 供球员详情的 seaComps 决定要不要算
- * 成交参照（被 ownership/status 两关拦下的球员没有参照意义）。守卫顺序不得调整：用户看到的
- * 拦截原因取决于第一道亮红灯的关（如先查归属再查状态）。
- * v6.18.0：routes/market.ts 的 GET /market/sea-lookup 有一份批量快照副本（同一条守卫链摊成
- * 4 条批量查询），两处口径必须同步改，tests 有跨实现一致性用例锁。
- * v6.64.1：加'在签约谈判'一关——findInFlight 只认 pending_review，海捞单审核通过进 signing
- * 后球员仍无归属，会放第二家（或原队）再提一单，撞同一名球员两张单。
- */
-export async function checkSeaSignEligible(
-  db: D1Database,
-  player: { id: number; club_id: number | null; status: string },
-  win: OpenWindow | null,
-): Promise<SeaSignVerdict> {
-  if (!win)
-    return { stage: 'window', ok: false, status: 409, reason: '转会窗口没开，现在不能海捞', errCode: 'no_window' };
-  // 海捞 = 签无归属的球员（4.4.4）。CPU 队球员带 club_id 但仍是海里人（v2.0.0，用户裁决）：
-  // 出账与落位都按「从 CPU 队签走」处理，不给 CPU 队记任何账。
-  const cpuIds = await cpuClubIds(db);
-  if (player.club_id !== null && !cpuIds.has(player.club_id)) {
-    return { stage: 'ownership', ok: false, status: 400, reason: '海捞只能签无归属的球员（这名球员有东家）' };
-  }
-  if (player.status === 'retired' || player.status === 'listed')
-    return { stage: 'status', ok: false, status: 400, reason: '当前状态不能海捞' };
-  // 4.4.4：本转会窗被解约的球员，所有球队本窗都无法签入
-  const banned = await db
-    .prepare(
-      `SELECT id FROM transfers WHERE player_id = ? AND type = 'termination' AND status = 'completed'
-         AND season = ? AND window_seq = ? LIMIT 1`,
-    )
-    .bind(player.id, win.season, win.windowSeq)
-    .first<{ id: number }>();
-  if (banned)
-    return {
-      stage: 'banned',
-      ok: false,
-      status: 409,
-      reason: '这名球员本窗口被解约过，本窗口所有球队都不能签他',
-    };
-  const inFlight = await findInFlight(db, player.id);
-  if (inFlight === 'listing')
-    return { stage: 'listing', ok: false, status: 400, reason: '这名球员已经有一单在市场流程里了，等它结束再操作' };
-  if (inFlight === 'pending')
-    return { stage: 'pending', ok: false, status: 400, reason: '这名球员有一张单据正在等管理组审核，先等审核结果' };
-  // 审核通过 → 开签约谈判。v6.66.0 起球员在开谈之前就已过户、单据已 completed（signing 不再出现），
-  // 所以「海捞单正在谈判」只能看会话（negotiation-guard.ts）；不拦就会被第二家（或原队）再提一单。
-  const negotiating = inFlight === 'negotiation' || (await findNegotiationInFlight(db, player.id));
-  if (negotiating)
-    return {
-      stage: 'signing',
-      ok: false,
-      status: 400,
-      reason: '这名球员的海捞单已经进入签约谈判，等它成约或作废再操作',
-      errCode: 'sea_signing',
-    };
-  return { stage: 'ok', ok: true, status: 200, reason: '' };
 }
 
 // 旁路附加费扣收：流水幂等闸（kind+ref 只记一次）+ 单据守卫 + 批内可用余额守卫
@@ -671,9 +563,9 @@ export async function createFreeAgent(
     .bind(playerId)
     .first<OwnPlayerRow>();
   if (!player) throw new HttpError(404, '球员不存在');
-  // 守卫链（窗口 → 归属 → 状态 → 本窗禁签 → 在途）整体收进 checkSeaSignEligible，
-  // 球员详情的 seaSign 前置判定吃同一个函数（v6.17.0），两边口径不会漂移
-  const verdict = await checkSeaSignEligible(db, player, win);
+  // 守卫链（窗口 → 归属 → 状态 → 本窗禁签 → 在途）整体收进 seaVerdicts（player-flow-state.ts，
+  // v6.17.0 起与球员详情 seaSign 同源），单人场景传长度 1
+  const verdict = (await seaVerdicts(db, [player], win)).get(player.id)!;
   if (!verdict.ok) throw new HttpError(verdict.status, verdict.reason, verdict.errCode);
 
   const signFee = freeAgentFee(newFee);
@@ -837,7 +729,7 @@ export async function inspectForcedAuction(env: Env, playerIdInput: unknown): Pr
     blockers.push({ status: 400, message: '这名球员已经在挂牌流程里了' });
   } else if (player.club_id === null ? player.status !== 'free' : player.status !== 'normal') {
     blockers.push({ status: 400, message: '当前状态不能强制拍卖' });
-  } else if ((await findInFlight(db, player.id)) === 'listing') {
+  } else if ((await flowState(db, [player.id])).get(player.id)?.listing) {
     blockers.push({ status: 400, message: '这名球员已经有一单在市场流程里了，等它结束再操作' });
   }
 

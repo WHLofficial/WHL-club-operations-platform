@@ -13,7 +13,7 @@ import { round2 } from '../core/market-rules.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { getOpenWindow } from './seasons.ts';
 import { assertOpOpen, opBlockReason } from './ops-schedule.ts';
-import { ensureNotInFlight } from './bypass.ts';
+import { ensureNotInFlight } from './player-flow-state.ts';
 import { openNegotiationSession } from './negotiations.ts';
 import { findActiveNegotiationSession } from './negotiation-guard.ts';
 import { availableBalance } from './ledger.ts';

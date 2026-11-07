@@ -25,7 +25,7 @@ import { activationFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { buildRumors, resolveRumorWindow } from '../rumors.ts';
-import { cpuClubIds } from '../growth.ts';
+import { seaVerdicts } from '../player-flow-state.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 import { loadMarketContext, type MarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
@@ -36,7 +36,6 @@ import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { listingDemandStatements } from '../demand-ops.ts';
-import { ACTIVE_SESSION_SQL } from '../negotiation-guard.ts';
 import { notifyShortlistWatchers } from '../shortlist.ts';
 import { createActivation } from '../activations.ts';
 import { queueClubNotification } from '../notify.ts';
@@ -649,10 +648,8 @@ interface SeaLookupRow {
 }
 
 // GET /api/market/sea-lookup —— 海捞速查（v6.18.0 教练情报台）：按球员 ID（fc_id 优先、内部 id 兜底）
-// 或名字查 ≤8 名候选，各带可捞判定。⚠️ 本批量判定是 bypass.ts checkSeaSignEligible（单条真源：
-// 球员详情 seaSign + createFreeAgent 提交链）的情报台快照副本：守卫顺序与文案逐字对齐，
-// 两处口径必须同步改（tests 有跨实现一致性用例锁）。守卫链摊成 4 条批量查询：cpuClubIds / 本窗禁签 /
-// 挂牌在途 / 待审单据 / 谈判在途（v6.66.0 起「谈判在途」看 negotiation_sessions，不看单据状态）。
+// 或名字查 ≤8 名候选，各带可捞判定。资格判定 = seaVerdicts（player-flow-state.ts 的七关链真源，
+// 球员详情 seaSign 与 createFreeAgent 提交链同源）；候选捞取（点查 / LIKE 前 8 条）留在端点内。
 app.get('/market/sea-lookup', async (c) => {
   await requireCoach(c.env, c.req.raw, 'club.squad.manage');
 
@@ -683,58 +680,18 @@ app.get('/market/sea-lookup', async (c) => {
   }
   if (candidates.length === 0) return c.json({ results: [] });
 
-  const ids = candidates.map((r) => r.id);
-  const ph = ids.map(() => '?').join(', ');
-  const cpuIds = await cpuClubIds(c.env.DB);
-  const banned = new Set<number>();
-  if (win) {
-    const rows = await c.env.DB.prepare(
-      `SELECT player_id FROM transfers WHERE type = 'termination' AND status = 'completed'
-         AND season = ? AND window_seq = ? AND player_id IN (${ph})`,
-    )
-      .bind(win.season, win.windowSeq, ...ids)
-      .all<{ player_id: number }>();
-    for (const r of rows.results) banned.add(r.player_id);
-  }
-  const listed = new Set<number>();
-  const usedListings = await c.env.DB.prepare(
-    `SELECT player_id FROM listings WHERE status IN ('listed', 'bidding', 'matched_pending', 'pending_review')
-       AND player_id IN (${ph})`,
-  )
-    .bind(...ids)
-    .all<{ player_id: number }>();
-  for (const r of usedListings.results) listed.add(r.player_id);
-  const pending = new Set<number>();
-  const signing = new Set<number>();
-  const usedDocs = await c.env.DB.prepare(
-    `SELECT player_id, status FROM transfers WHERE status IN ('pending_review', 'signing') AND player_id IN (${ph})`,
-  )
-    .bind(...ids)
-    .all<{ player_id: number; status: string }>();
-  for (const r of usedDocs.results) {
-    if (r.status === 'signing') signing.add(r.player_id);
-    else pending.add(r.player_id);
-  }
-  // v6.66.0：谈判在途 = 有 active 会话（与 bypass.ts checkSeaSignEligible 同口径，见 negotiation-guard.ts）。
-  // 过户提前到开谈之前后，单据在开谈那刻就已 completed，只剩会话能表达「海捞单在签约谈判」。
-  const negotiating = await c.env.DB.prepare(
-    `SELECT s.player_id AS pid FROM negotiation_sessions s WHERE ${ACTIVE_SESSION_SQL} AND s.player_id IN (${ph})`,
-  )
-    .bind(...ids)
-    .all<{ pid: number }>();
-  for (const r of negotiating.results) signing.add(r.pid);
+  // 资格判定整体交给 seaVerdicts（v6.80.0 收编批量副本）：cpuIds / 本窗解约禁签 / 在途三查批量装载，
+  // 开窗批内 ≤5 条查询与改前持平；win=null 时零查询、每行拦在 window 关。响应逐格不变：
+  // eligible = verdict.ok，reason = ok 时 null、否则七关文案。
+  const verdicts = await seaVerdicts(
+    c.env.DB,
+    candidates.map((r) => ({ id: r.id, club_id: r.club_id, status: r.status })),
+    win,
+  );
 
   return c.json({
     results: candidates.map((r) => {
-      // 阶段顺序与 checkSeaSignEligible 一致：window → ownership → status → banned → listing → pending → signing
-      let reason: string | null = null;
-      if (!win) reason = '转会窗口没开，现在不能海捞';
-      else if (r.club_id !== null && !cpuIds.has(r.club_id)) reason = '海捞只能签无归属的球员（这名球员有东家）';
-      else if (r.status === 'retired' || r.status === 'listed') reason = '当前状态不能海捞';
-      else if (banned.has(r.id)) reason = '这名球员本窗口被解约过，本窗口所有球队都不能签他';
-      else if (listed.has(r.id)) reason = '这名球员已经有一单在市场流程里了，等它结束再操作';
-      else if (pending.has(r.id)) reason = '这名球员有一张单据正在等管理组审核，先等审核结果';
-      else if (signing.has(r.id)) reason = '这名球员的海捞单已经进入签约谈判，等它成约或作废再操作';
+      const verdict = verdicts.get(r.id)!;
       return {
         id: r.id,
         fcId: r.fc_id,
@@ -744,7 +701,7 @@ app.get('/market/sea-lookup', async (c) => {
         ca: r.ca,
         pa: r.pa,
         clubName: r.club_name,
-        seaSign: { eligible: reason === null, reason },
+        seaSign: { eligible: verdict.ok, reason: verdict.ok ? null : verdict.reason },
       };
     }),
   });

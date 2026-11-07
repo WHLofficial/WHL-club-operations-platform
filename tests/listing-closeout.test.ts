@@ -1,9 +1,9 @@
 // 挂单终态收口（v6.66.0）：成交是挂单的终态之一。
 // 回归的是「成功路径不回写 listings」——挂牌截止把挂单写成 pending_review，审核通过→谈判成约→
-// 球员过户、钱划转，但挂单一直钉在 pending_review，findInFlight 把球员当「还在市场流程里」，
+// 球员过户、钱划转，但挂单一直钉在 pending_review，在途三查把球员当「还在市场流程里」，
 // 续约/解约/海捞/上调全被一票否决（2026-11-01 生产有 14 条）。
 //
-// 第二个用例锁 findInFlight 的谈判段：`s.status='active' AND t.status <> 'signing'` 里的
+// 第二个用例锁 ensureNotInFlight 的谈判段：`s.status='active' AND t.status <> 'signing'` 里的
 // `<> 'signing'` 是刻意的——今天所有 active 会话都还挂在 signing 上，各调用点另有 signing 闸，
 // 谈判段只为「单据已结算、条款未谈定」（v6.68.0 翻转后的常态）兜底。
 import { describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, attachAuthChannel, authRegisterClubTeam } from './d1.ts';
-import { ensureNotInFlight } from '../src/worker/bypass.ts';
+import { ensureNotInFlight } from '../src/worker/player-flow-state.ts';
 import { TOUR_TEAM_SEED_SQL } from './tour-team-seed.ts';
 import { resetConfigCache } from '../src/core/config.ts';
 

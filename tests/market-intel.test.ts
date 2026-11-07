@@ -1071,17 +1071,6 @@ function lookupRaw(fx: Fixture, query: string, token?: string) {
   return get(`/api/market/sea-lookup${query}`, token, fx.env);
 }
 
-async function playerSeaSign(
-  fx: Fixture,
-  playerId: number,
-  token: string | undefined = 'tok-coach',
-): Promise<{ eligible: boolean; reason: string | null }> {
-  const res = await get(`/api/players/${playerId}`, token, fx.env);
-  expect(res.status).toBe(200);
-  return ((await res.json()) as { seaSign: { eligible: boolean; reason: string | null } }).seaSign;
-}
-
-const NO_WINDOW = '转会窗口没开，现在不能海捞';
 const HAS_OWNER = '海捞只能签无归属的球员（这名球员有东家）';
 const BAD_STATUS = '当前状态不能海捞';
 const BANNED = '这名球员本窗口被解约过，本窗口所有球队都不能签他';
@@ -1096,7 +1085,7 @@ interface LookupCase {
   reason: string | null;
 }
 
-/** 九类球员：覆盖 checkSeaSignEligible 守卫链的每一关（单条真源与批量快照必须逐球员一致） */
+/** 九类球员：覆盖海捞资格七关链的每一关（判定真源 = seaVerdicts，端点只透传，见 player-flow-state.test.ts） */
 function seedLookupMatrix(fx: Fixture): LookupCase[] {
   seedClubs(fx);
   addCpuClub(fx);
@@ -1236,7 +1225,7 @@ describe('TC-LOOKUP 海捞点查（GET /api/market/sea-lookup）', () => {
     expect((await lookupRaw(fx, '?q=601', 'tok-admin')).status).toBe(200);
   });
 
-  it('TC-LOOKUP-05 批量判定与详情 seaSign 逐球员一致（跨实现强锁）', async () => {
+  it('TC-LK-01 端点资格判定逐格金样（单实现：候选 → seaVerdicts 透传；未开窗由 TC-SV-01 锁）', async () => {
     const fx = freshEnv();
     const cases = seedLookupMatrix(fx);
 
@@ -1244,21 +1233,7 @@ describe('TC-LOOKUP 海捞点查（GET /api/market/sea-lookup）', () => {
       const rows = await lookup(fx, String(c.id));
       expect(rows, c.label).toHaveLength(1);
       expect(rows[0].id, c.label).toBe(c.id);
-      expect(rows[0].seaSign, `${c.label} 批量判定`).toEqual({ eligible: c.eligible, reason: c.reason });
-      // 与单条真源（球员详情 seaSign）逐字一致：守卫顺序或文案任一漂移都会红
-      expect(await playerSeaSign(fx, c.id), `${c.label} 详情判定`).toEqual(rows[0].seaSign);
-    }
-  });
-
-  it('TC-LOOKUP-06 未开窗时全员拦在窗口关', async () => {
-    const fx = freshEnv();
-    const cases = seedLookupMatrix(fx);
-    closeWindow(fx);
-
-    for (const c of cases) {
-      const rows = await lookup(fx, String(c.id));
-      expect(rows[0].seaSign, c.label).toEqual({ eligible: false, reason: NO_WINDOW });
-      expect(await playerSeaSign(fx, c.id), c.label).toEqual({ eligible: false, reason: NO_WINDOW });
+      expect(rows[0].seaSign, `${c.label} 资格判定`).toEqual({ eligible: c.eligible, reason: c.reason });
     }
   });
 

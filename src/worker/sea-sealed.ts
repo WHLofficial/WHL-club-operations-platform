@@ -17,7 +17,8 @@ import { createConfigService } from '../core/config.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { balanceSnapshot } from './ledger.ts';
 import { getOpenWindow, type OpenWindow } from './seasons.ts';
-import { checkSeaSignEligible, createBypassTransfer } from './bypass.ts';
+import { createBypassTransfer } from './bypass.ts';
+import { seaVerdicts } from './player-flow-state.ts';
 import { loadOpsRows, loadWindowRef, saveOpsRow } from './ops-schedule.ts';
 import { queueClubNotification } from './notify.ts';
 import type { ExpiryOpts } from './expiry-ops.ts';
@@ -309,7 +310,7 @@ export async function submitSealedBid(
     .bind(playerId)
     .first<{ id: number; name: string; display_name: string | null; club_id: number | null; status: string }>();
   if (!player) throw new HttpError(404, '球员不存在');
-  const verdict = await checkSeaSignEligible(db, player, win);
+  const verdict = (await seaVerdicts(db, [player], win)).get(playerId)!;
   if (!verdict.ok) throw new HttpError(verdict.status, verdict.reason, verdict.errCode);
 
   const signFee = freeAgentFee(newFee);
@@ -518,11 +519,9 @@ export async function openSeaBatch(
   for (const group of groups.values()) {
     const first = group[0];
     for (const b of group) participants.add(b.club_id);
-    const verdict = await checkSeaSignEligible(
-      db,
-      { id: first.player_id, club_id: first.player_club_id, status: first.player_status },
-      win,
-    );
+    const verdict = (
+      await seaVerdicts(db, [{ id: first.player_id, club_id: first.player_club_id, status: first.player_status }], win)
+    ).get(first.player_id)!;
     if (!verdict.ok) {
       // 该球员在收标期间被挂牌 / 易主 / 已有在途单 / 本窗被解约 ⇒ 整组标作废并解冻
       for (const b of group) {

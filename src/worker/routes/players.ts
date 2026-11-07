@@ -13,7 +13,7 @@ import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 import { loadPlayerMatches } from '../player-matches.ts';
-import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
+import { seaVerdicts, type SeaSignVerdict } from '../player-flow-state.ts';
 import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
 import { getAuthUser, requireUser } from '../../lib/session.ts';
 import { getBoundClub } from '../binding.ts';
@@ -1313,12 +1313,12 @@ app.get('/players/:id', async (c) => {
   // 窗刻度（v3.0.0）：效力时长（赛季）= 0.5 ×(已关常规窗数 − 签约基数)；保护期 = 窗数未到 protection_ticks
   const currentTicks = ticksRow?.n ?? 0;
 
-  // 海捞情报（v6.17.0）：资格判定与 createFreeAgent 守卫链同源——checkSeaSignEligible 就是那条链，
-  // 不是镜像。成交参照只对守卫链全过的球员才算：详情是公开面，参照在前端只出现在
+  // 海捞情报（v6.17.0）：资格判定与 createFreeAgent 守卫链同源——seaVerdicts（player-flow-state.ts）
+  // 就是那条链，不是镜像。成交参照只对守卫链全过的球员才算：详情是公开面，参照在前端只出现在
   // 「可签 → 展开海捞面板」这一条路径里，非 ok 状态算了也无人消费（评审 P1，6.17.0）；
   // 同档 = 成交球员现值 CA ±5 内最近 ≤5 笔，没有同类则回落全局最近 3 笔，一笔都没有就空态。
   const seaWin = await getOpenWindow(c.env.DB);
-  const verdict: SeaSignVerdict = await checkSeaSignEligible(c.env.DB, p, seaWin);
+  const verdict: SeaSignVerdict = (await seaVerdicts(c.env.DB, [p], seaWin)).get(p.id)!;
   const compsSkip = verdict.stage !== 'ok';
   const seaComps: {
     scope: 'same_tier' | 'global' | 'none';

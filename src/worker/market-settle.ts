@@ -226,7 +226,7 @@ export async function delistUnbid(
   const results = await db.batch(statements);
   const changed = (results[0]?.meta.changes ?? 0) > 0;
   // v6.58.0 用户裁决：强制拍卖到期无人出价按「被解约」处置——球员去归属变自由身。
-  // 解约单落 transfers(type=termination, status=completed) 后，checkSeaSignEligible 的
+  // 解约单落 transfers(type=termination, status=completed) 后，seaVerdicts 的
   // 「本窗解约禁签」闸自然生效（本窗不可捞起）；其余收口（成长清零/徽章/候选名单通知）复用
   // completeTermination，避免两套解约语义漂移。
   // v6.60.5/6.60.7：自由身与 CPU 队本来都没有可解的平台合同，直接回到 free/normal，
@@ -260,7 +260,7 @@ async function releaseForcedNoBid(
   } catch (e) {
     // 结算尽力而为：不阻塞其余挂牌收口。此处无法「下次再试」——listing 已是 delisted，
     // 不会再进本分支，所以把半成品 pending_review 单删掉，免得它挡住后续在途判定
-    // （findInFlight 看到 pending 就当成还有一笔解约在办）。球员留在原队，等同旧口径。
+    // （在途三查看到 pending 就当成还有一笔解约在办）。球员留在原队，等同旧口径。
     console.warn(`[market-settle] 强制拍卖无出价转解约失败 listing=${listing.id}:`, e);
     try {
       await env.DB
