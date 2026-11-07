@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.78.0] · PlayStyle 来源覆盖 + 训练营 XP 自动整季/半季（2026-11-07，本地完成，未上线）
+## [v6.78.0] · PlayStyle 来源覆盖 + 训练营 XP 自动整季/半季（2026-11-07，已上线 Version 947eeb96）
 
 **Added**
 
@@ -17,9 +17,8 @@
 **Notes**
 
 - 计数/筛选/导出不变：来源标记只改「来源角标」，`fullCountSql`、筛选子查询、raw FC 槽都不动；70 枚绿底的 41 枚 FC 已有项因此与成长徽章同口径显示；Diogo Costa 52/53/56、Penders 52/53/54/55 这 7 枚门将银徽显示「商店」，仍计入原有 FC 银徽数。
-- 上线顺序（未执行）：先 apply `0094`，再执行备份 → 回退（Endrick/Pavlović）→ 27 条 growth 补发 → 70 条继承标记 → 7 条消费标记 → Liberali FC 槽 34→6 → recount → verify → purge 公开缓存，最后再 push/部署；代码先于数据部署会因新表不存在 500，数据先于代码部署则角标暂不生效（可接受）。
+- 上线记录（2026-11-07）：生产先 apply `0094`，再执行备份 → 回退（Endrick/Pavlović）→ 27 条 growth 补发 → 70 条继承标记 → 7 条消费标记 → Liberali FC 槽 34→6 → recount → verify；`player_playstyle_origin` 生产 verify 全绿（growth=70、shop=7、54 人绿底逐人 ok、grants=27、15 人台账 0 mismatch、Endrick ca82/levels0、Pavlović ca83/levels0、Liberali psid1=6），`cache:epoch:public` 3171→3172。push `d2583c4..fb2972b` 触发 CF Workers Builds 自动部署 Version **`947eeb96-988b-44e2-8304-5992b967b6aa`** @2026-11-07T03:24:44Z（100%）；线上入口 `assets/index-BG9fS58h.js`，回读 `/api/health` 200、Endrick 详情 psid31 `source='growth'`、Diogo Costa 52/53/56 `source='shop'`、管理端懒加载块 `PlayersPage-CDutniCf.js` 含「半季 15，按合同在本季窗 1 前还是窗 2」文案。
 - 本地验证：typecheck 三份清、`npm test` 202 文件 / 3,150 例全绿、`npm run build` 通过；数据 SQL 在 node:sqlite 合成库验证 growth=70、shop=7、27 条补发、15 人台账 0 mismatch、Liberali psid1=6，rollback 可回到 30 条发放 / 882 ca84 / 442 ca85 / Liberali psid1=34。
-- 未 push、未部署、未写生产。
 
 ## [v6.77.0] · 机器通道：Bot 批量身份查询端点（2026-11-05）
 
