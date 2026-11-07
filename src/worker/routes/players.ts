@@ -5,7 +5,7 @@ import { HttpError } from '../../lib/http.ts';
 import { assertPublicRate, cachedJson, canonicalQuery, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
 import { PS_FILTER_MAX_ITEMS, PS_GOLD_BASE, PS_GOLD_MAX, PS_GOLD_MIN, PS_SILVER_MAX, PS_SILVER_SLOT_COUNT, PS_SLOT_COUNT, POSITION_BY_ID, ROLE_BASE_MAX, ROLE_FILTER_MAX_ITEMS, ROLE_PLUS_MAX, ROLE_PLUS_MIN, ROLE_SLOT_KEYS, isGoldPlaystyleId, isPlaystyleId, isRoleId, playstyleSlotsOf } from '../../core/fc26.ts';
-import { mergedPlaystyleList, type GrantedPlaystyleRow } from '../../core/playstyle-rules.ts';
+import { mergedPlaystyleList, type GrantedPlaystyleRow, type PlaystyleOriginRow } from '../../core/playstyle-rules.ts';
 
 type GrantedRowSource = GrantedPlaystyleRow['source'];
 import { serviceSeasons, freeAgentFee } from '../../core/bypass-rules.ts';
@@ -14,7 +14,7 @@ import { sqlDisplayName, rowDisplayName } from '../../core/player-name.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 import { loadPlayerMatches } from '../player-matches.ts';
 import { checkSeaSignEligible, type SeaSignVerdict } from '../bypass.ts';
-import { getOpenWindow } from '../seasons.ts';
+import { getOpenWindow, getVisibleSeason } from '../seasons.ts';
 import { getAuthUser, requireUser } from '../../lib/session.ts';
 import { getBoundClub } from '../binding.ts';
 import { loadPlayerContractState } from '../demand-ops.ts';
@@ -834,6 +834,7 @@ async function listPlayers(
   // 与 FC 槽合并成 playstyles（含可逆抑制与来源角标）—— 前端各面直接吃同一份清单。
   const pageIds = rows.results.slice(0, limit).map((r) => r.id);
   const grantedByPlayer = new Map<number, GrantedPlaystyleRow[]>();
+  const originByPlayer = new Map<number, PlaystyleOriginRow[]>();
   if (pageIds.length > 0) {
     const marks = pageIds.map(() => '?').join(', ');
     const granted = await c.env.DB
@@ -846,6 +847,20 @@ async function listPlayers(
       const list = grantedByPlayer.get(g.player_id) ?? [];
       list.push({ slot: g.slot, kind: g.kind, psid: g.psid, source: g.source });
       grantedByPlayer.set(g.player_id, list);
+    }
+    // PlayStyle 来源覆盖（v6.78.0）：只覆盖来源角标，不参与槽位/计数/抑制（见 0094 迁移注释）。
+    // 只取当前展示赛季的标记——来源表按 season 存，避免 S9 的角标漏到后续赛季同基础徽章上。
+    const originSeason = await getVisibleSeason(c.env.DB);
+    const origins = await c.env.DB
+      .prepare(
+        `SELECT DISTINCT player_id, kind, psid, source FROM player_playstyle_origin WHERE player_id IN (${marks}) AND season = ? ORDER BY player_id, kind, psid`,
+      )
+      .bind(...pageIds, originSeason ?? 0)
+      .all<{ player_id: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
+    for (const row of origins.results) {
+      const list = originByPlayer.get(row.player_id) ?? [];
+      list.push({ kind: row.kind, psid: row.psid, source: row.source });
+      originByPlayer.set(row.player_id, list);
     }
   }
   const players = rows.results.slice(0, limit).map((r) => ({
@@ -909,6 +924,7 @@ async function listPlayers(
     playstyles: mergedPlaystyleList(
       playstyleSlotsOf(Object.fromEntries(Array.from({ length: PS_SLOT_COUNT }, (_, i) => [`PSID${i + 1}`, (r as Record<string, unknown>)[`ps${i + 1}`]]))),
       grantedByPlayer.get(r.id) ?? [],
+      originByPlayer.get(r.id) ?? [],
     ),
   }));
   let nextCursor: string | null = null;
@@ -1336,6 +1352,12 @@ app.get('/players/:id', async (c) => {
     .prepare('SELECT slot, kind, psid, source FROM player_playstyles WHERE player_id = ? ORDER BY slot')
     .bind(id)
     .all<{ slot: number; kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
+  // PlayStyle 来源覆盖（v6.78.0）：只改来源角标，槽位/psid 仍取 FC 或发放明细；与列表同一赛季口径
+  const originSeason = await getVisibleSeason(c.env.DB);
+  const originRows = await c.env.DB
+    .prepare('SELECT kind, psid, source FROM player_playstyle_origin WHERE player_id = ? AND season = ? ORDER BY kind, psid')
+    .bind(id, originSeason ?? 0)
+    .all<{ kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
 
   return c.json({
     player: {
@@ -1377,7 +1399,7 @@ app.get('/players/:id', async (c) => {
       unsatisfied: unsatisfiedRow !== null,
       gameAttrs,
       // 合并清单（v6.63.0）：FC 槽 + 发放明细，含可逆抑制与来源角标 —— 与列表行同口径
-      playstyles: mergedPlaystyleList(playstyleSlotsOf(parsedAttrs ?? {}), grantedRows.results),
+      playstyles: mergedPlaystyleList(playstyleSlotsOf(parsedAttrs ?? {}), grantedRows.results, originRows.results),
       createdAt: p.created_at,
       updatedAt: p.updated_at,
     },

@@ -197,6 +197,62 @@ describe('mergedPlaystyleList：合并清单（抑制 + 来源）', () => {
   });
 });
 
+describe('mergedPlaystyleList：PlayStyle 来源覆盖（v6.78.0）', () => {
+  it('FC 银项命中标记 → 来源覆盖为 growth，槽位/psid 不变', () => {
+    expect(mergedPlaystyleList([fc(1, 31, false)], [], [{ kind: 'silver', psid: 31, source: 'growth' }])).toEqual([
+      { slot: 1, psid: 31, gold: false, source: 'growth' },
+    ]);
+  });
+
+  it('金徽按基础 ID 命中（FC 151 ↔ 标记 gold 51）', () => {
+    expect(mergedPlaystyleList([fc(13, 151, true)], [], [{ kind: 'gold', psid: 51, source: 'growth' }])).toEqual([
+      { slot: 13, psid: 151, gold: true, source: 'growth' },
+    ]);
+  });
+
+  it('段或基础 ID 不同不误伤', () => {
+    expect(
+      mergedPlaystyleList([fc(1, 3, false), fc(2, 5, false)], [], [{ kind: 'gold', psid: 3, source: 'growth' }]),
+    ).toEqual([
+      { slot: 1, psid: 3, gold: false, source: 'fc' },
+      { slot: 2, psid: 5, gold: false, source: 'fc' },
+    ]);
+  });
+
+  it('消费所得：FC 银项命中 shop 标记 → 来源覆盖为 shop，条数/槽位不变', () => {
+    expect(mergedPlaystyleList([fc(4, 52, false), fc(5, 53, false)], [], [
+      { kind: 'silver', psid: 52, source: 'shop' },
+      { kind: 'silver', psid: 53, source: 'shop' },
+    ])).toEqual([
+      { slot: 4, psid: 52, gold: false, source: 'shop' },
+      { slot: 5, psid: 53, gold: false, source: 'shop' },
+    ]);
+  });
+
+  it('不改条数与抑制：被发放金顶掉的 FC 银仍不产出', () => {
+    const fcSlots = [fc(1, 1, false), fc(2, 31, false), fc(13, 103, true)];
+    const granted = [gr(14, 'gold', 1)];
+    const origins = [{ kind: 'silver' as const, psid: 31, source: 'growth' as const }];
+    const withMark = mergedPlaystyleList(fcSlots, granted, origins);
+    const without = mergedPlaystyleList(fcSlots, granted);
+    expect(withMark).toHaveLength(3);
+    expect(withMark.map(({ slot, psid, gold }) => ({ slot, psid, gold }))).toEqual(
+      without.map(({ slot, psid, gold }) => ({ slot, psid, gold })),
+    );
+    expect(withMark.find((item) => item.psid === 31)?.source).toBe('growth');
+    expect(fullPlaystyleCounts(fcSlots, granted)).toEqual({ silver: 1, gold: 2 });
+  });
+
+  it('发放明细保留自身 source：growth 仍是 growth，china 不被误标', () => {
+    expect(
+      mergedPlaystyleList([], [gr(2, 'silver', 23)], [{ kind: 'silver', psid: 23, source: 'growth' }]),
+    ).toEqual([{ slot: 2, psid: 23, gold: false, source: 'growth' }]);
+    expect(
+      mergedPlaystyleList([], [gr(2, 'silver', 23, 'china')], [{ kind: 'silver', psid: 23, source: 'growth' }]),
+    ).toEqual([{ slot: 2, psid: 23, gold: false, source: 'china' }]);
+  });
+});
+
 describe('fullPlaystyleCounts：全量计数（台账口径）', () => {
   it('空明细 = FC 槽数；发放各行照加', () => {
     const fcSlots = [fc(1, 3, false), fc(2, 5, false), fc(13, 103, true)];

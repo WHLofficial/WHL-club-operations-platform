@@ -51,17 +51,34 @@ export interface MergedPlaystyleItem {
   source: MergedPlaystyleSource;
 }
 
+// ---- PlayStyle 来源覆盖（v6.78.0）----
+// 来源表只回答「这枚 FC 徽章的真实来源是什么」——它不是发放明细：不占槽、不参与抑制/计数，
+// 合并时只把 FC 源项的来源覆盖为标记的 source（growth 显示「成长」、shop 显示「商店」），
+// 槽位/psid/条数不动；发放明细保留自己的 source（非成长来源的行不会被误标）。这样 41 枚本来
+// 就在 FC 槽里的继承徽章、7 枚被导入写进 FC 槽的消费徽章，都不用搬数据就能和发放徽章同口径
+// （用户 2026-11-07 裁决 A + 门将银徽记作消费所得）。
+export interface PlaystyleOriginRow {
+  kind: PlaystyleKind;
+  /** 基础 ID（1-99） */
+  psid: number;
+  /** 覆盖后的来源（growth / shop / china / external / manual） */
+  source: PlaystyleSource;
+}
+
 /**
- * 合并清单（v6.63.0 全口径）：FC 槽 + 发放明细。
+ * 合并清单（v6.63.0 全口径；v6.78.0 加来源覆盖）。
  *   · 被发放金抑制的 FC 银槽不产出（Q11：筛选也不命中 —— 消费方都从这份清单出发）
  *   · 同 (段, 基础 ID) 撞车以 FC 源为准（大换版折算残余；正常流程发放判重挡了，防御式兜底）
+ *   · 来源标记只把 FC 源角标改成标记的 source，不改槽位/psid/条数，也不触发抑制；明细行保留自身 source
  *   · 按 slot 升序
  */
 export function mergedPlaystyleList(
   fc: readonly PlaystyleSlot[],
   granted: readonly GrantedPlaystyleRow[],
+  origins: readonly PlaystyleOriginRow[] = [],
 ): MergedPlaystyleItem[] {
   const suppressed = suppressedBaseIds(granted);
+  const originSources = new Map(origins.map((o) => [`${o.kind}:${o.psid}`, o.source]));
   const out: MergedPlaystyleItem[] = [];
   const seen = new Set<string>();
   for (const s of fc) {
@@ -70,13 +87,23 @@ export function mergedPlaystyleList(
     const key = `${s.gold ? 'gold' : 'silver'}:${base}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ slot: s.slot, psid: s.psid, gold: s.gold, source: 'fc' });
+    out.push({
+      slot: s.slot,
+      psid: s.psid,
+      gold: s.gold,
+      source: originSources.get(key) ?? 'fc',
+    });
   }
   for (const g of granted) {
     const key = `${g.kind}:${g.psid}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ slot: g.slot, psid: playstyleIdOf(g.psid, g.kind), gold: g.kind === 'gold', source: g.source });
+    out.push({
+      slot: g.slot,
+      psid: playstyleIdOf(g.psid, g.kind),
+      gold: g.kind === 'gold',
+      source: g.source,
+    });
   }
   return out.sort((a, b) => a.slot - b.slot);
 }

@@ -716,6 +716,34 @@ describe('球员库 计数与新筛选（v2.3.0）', () => {
     expect(row61.playstyles?.map((s) => `${s.gold ? 'g' : 's'}${s.psid}:${s.source}`)).toEqual(['s31:fc', 's8:growth', 'g101:growth']);
   });
 
+  it('PlayStyle 来源覆盖只取当前赛季（v6.78.0）：旧赛季标记不覆盖', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, game_attrs) VALUES
+        (64, 'o1', '来源甲', '{"PSID1":31}'),
+        (65, 'o2', '来源乙', '{"PSID1":52}');
+      INSERT INTO seasons (season, status) VALUES (9, 'running');
+      INSERT INTO player_playstyle_origin (player_id, season, kind, psid, source, note, created_at) VALUES
+        (64, 9, 'silver', 31, 'growth', 'S8→S9 1/3 继承', '2026-01-04T00:00:00Z'),
+        (65, 8, 'silver', 52, 'shop', '旧赛季标记', '2026-01-05T00:00:00Z');
+    `);
+    const row64 = (await list17('/api/players?ps=31', fx.env)).players.find((p) => p.id === 64)!;
+    expect(row64.playstyles).toEqual([{ slot: 1, psid: 31, gold: false, source: 'growth' }]);
+    // 旧赛季（8）的 shop 标记不能漏到当前赛季（9）的同基础 FC 徽章上
+    const row65 = (await list17('/api/players?ps=52', fx.env)).players.find((p) => p.id === 65)!;
+    expect(row65.playstyles).toEqual([{ slot: 1, psid: 52, gold: false, source: 'fc' }]);
+
+    // 详情同口径：当前赛季命中、旧赛季忽略
+    const d64 = (await (await get('/api/players/64', fx.env)).json()) as {
+      player: { playstyles: { slot: number; psid: number; gold: boolean; source: string }[] };
+    };
+    expect(d64.player.playstyles).toEqual([{ slot: 1, psid: 31, gold: false, source: 'growth' }]);
+    const d65 = (await (await get('/api/players/65', fx.env)).json()) as {
+      player: { playstyles: { slot: number; psid: number; gold: boolean; source: string }[] };
+    };
+    expect(d65.player.playstyles).toEqual([{ slot: 1, psid: 52, gold: false, source: 'fc' }]);
+  });
+
   it('club_id=free 筛无归属球员；market_value 区间', async () => {
     const fx = freshEnv();
     seedPlayers(fx.sqlite);
