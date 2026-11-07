@@ -1,8 +1,12 @@
 // 球员在途状态读模型（v6.80.0）：flowState 三 kind / seaVerdicts 七关链 / ensureNotInFlight 三档。
 // 判级 patch 的表驱动锁：七关与三档文案逐字、谓词双形态并存（计划裁决 8「宁可带兜底」）、
-// 98 分片跨片合并不丢不串。端点级用例（sea-lookup TC-LK）与跨实现锁退役（TC-RET）在第二批，
-// 见 docs/test-plans/v6.80.0-player-flow-state.md。
+// 98 分片跨片合并不丢不串；TC-LK-02 批内查询计数锁（=5，含无 bind 的 cpuIds）；TC-RET-01/02/03
+// 源码锁（bypass 无转发导出 / 协议注释清零 / 全 src import 收口 + ACTIVE_SESSION_SQL 不复制）。
+// 端点级用例（sea-lookup TC-LK-01 金样）在 tests/market-intel.test.ts，蓝图见
+// docs/test-plans/v6.80.0-player-flow-state.md。
 import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { createTestDb } from './d1.ts';
 import { HttpError } from '../src/lib/http.ts';
@@ -60,16 +64,20 @@ function seedSession(sqlite: DatabaseSync, id: number, playerId: number, transfe
     .run(id, transferId, playerId, status, AT);
 }
 
-// 语句计数包装：记每条 prepare 的 SQL 与 bind 参数个数（tests/d1.ts:50 暴露 sqlText 的同型先例）
+// 语句计数包装：记每条 prepare 的 SQL 与 bind 参数个数（tests/d1.ts:50 暴露 sqlText 的同型先例）。
+// prepare 时即计数——无 bind 参数的查询（如 cpuClubIds 的 prepare(SQL).all()）也必须计入，
+// 否则 seaVerdicts 批内 5 条只数到 4（评审第 1 轮条 2）。
 function counting(db: D1Database) {
   const calls: { sql: string; binds: number }[] = [];
   const wrapped = {
     prepare(sql: string) {
       const stmt = db.prepare(sql);
+      const call = { sql, binds: 0 };
+      calls.push(call);
       return {
         sqlText: sql,
         bind(...args: unknown[]) {
-          calls.push({ sql, binds: args.length });
+          call.binds = args.length;
           return stmt.bind(...(args as never[]));
         },
         first: stmt.first.bind(stmt),
@@ -416,7 +424,8 @@ describe('seaVerdicts 七关链', () => {
 
     const { db: counted, calls } = counting(db);
     await seaVerdicts(counted, players, S4W1);
-    expect(calls.length).toBeLessThanOrEqual(5);
+    // 与改前端点副本持平的精确口径：cpuIds / 挂牌 / 单据 / 会话 / 禁签各 1 条（cpuIds 无 bind 也要计入）
+    expect(calls.length).toBe(5);
     for (const call of calls) expect(call.binds).toBeLessThanOrEqual(98);
 
     const noWindow = counting(db);
@@ -472,5 +481,68 @@ describe('ensureNotInFlight', () => {
     // 裁决 8 双谓词并存的行为锁：拆掉 `<> 'signing'` 甲变红，删旧连接谓词乙变红
     await expect(ensureNotInFlight(db, 830)).resolves.toBeUndefined();
     await expect(ensureNotInFlight(db, 831)).rejects.toThrow('这名球员已经成交，还有一场签约谈判没结束，等它结束再操作');
+  });
+});
+
+// ---- TC-RET 源码锁（测试计划 §3.5；domains.test.ts 全仓扫描先例）：----
+// 迁移后的干净状态（bypass 无转发导出 / 协议注释清零 / import 全收口）没有任何运行时信号，
+// 改回去不会有编译或测试失败，所以在这里用文本扫描锁死。
+
+function workerSrc(rel: string): string {
+  // .href 传 string——workers-types 全局 URL 与 node:url 的 URL 类型冲突（tests/d1.ts:186 同款绕法）
+  return readFileSync(fileURLToPath(new URL(`../src/worker/${rel}`, import.meta.url).href), 'utf8');
+}
+
+/** 递归列出目录下全部 .ts（不含 .d.ts），返回相对 tests/ 的路径 */
+function listTs(relDir: string): string[] {
+  const out: string[] = [];
+  const dir = fileURLToPath(new URL(relDir, import.meta.url).href);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const rel = `${relDir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...listTs(rel));
+    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) out.push(rel);
+  }
+  return out;
+}
+
+describe('TC-RET 源码锁（v6.80.0 迁移收口）', () => {
+  it('TC-RET-01 bypass.ts 不留转发导出：四者唯一来源 = player-flow-state.ts', () => {
+    const bypass = workerSrc('bypass.ts');
+    for (const name of ['ensureNotInFlight', 'checkSeaSignEligible', 'findInFlight', 'SeaSignVerdict']) {
+      // 覆盖 `export function/type/const NAME` 与 `export { NAME } from ...`（含多行花括号）两种转发形态
+      const reExport = new RegExp(`export\\s*\\{[^}]*\\b${name}\\b|export[^;\\n]*\\b${name}\\b`);
+      expect(bypass, `bypass.ts 不得再 export ${name}`).not.toMatch(reExport);
+    }
+    const flow = workerSrc('player-flow-state.ts');
+    expect(flow).toContain('export async function flowState');
+    expect(flow).toContain('export async function seaVerdicts');
+    expect(flow).toContain('export async function ensureNotInFlight');
+    expect(flow).toContain('export type SeaSignStage');
+    expect(flow).toContain('export interface SeaSignVerdict');
+  });
+
+  it('TC-RET-02 「两处口径必须同步改」注释协议已消灭（bypass.ts + routes/market.ts）', () => {
+    expect(workerSrc('bypass.ts')).not.toContain('两处口径必须同步改');
+    expect(workerSrc('routes/market.ts')).not.toContain('两处口径必须同步改');
+  });
+
+  it('TC-RET-03 迁出符号的 import 全部来自 player-flow-state.ts；ACTIVE_SESSION_SQL 只 import 不复制', () => {
+    // src/ 与 tests/ 全部 .ts 的命名 import 块（[^}]* 跨行）逐一核对来源
+    const names = ['ensureNotInFlight', 'seaVerdicts', 'SeaSignVerdict', 'SeaSignStage', 'flowState'];
+    const namedImport = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
+    for (const rel of [...listTs('../src'), ...listTs('../tests')]) {
+      const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url).href), 'utf8');
+      for (const match of src.matchAll(namedImport)) {
+        const imported = match[1]!.split(',').map((s) => s.trim().replace(/^type\s+/, ''));
+        const from = match[2]!;
+        for (const name of names) {
+          if (imported.includes(name)) {
+            expect(from, `${rel} 的 ${name} import 来源`).toMatch(/player-flow-state\.ts$/);
+          }
+        }
+      }
+    }
+    // 裁决 7：v6.66.0 单行真源只在 negotiation-guard.ts，本模块不得字面复制
+    expect(workerSrc('player-flow-state.ts')).not.toMatch(/ACTIVE_SESSION_SQL\s*=/);
   });
 });

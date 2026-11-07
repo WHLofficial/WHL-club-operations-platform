@@ -4,6 +4,24 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.80.0] · 球员在途状态读模型（2026-11-08，本地提交未推送）
+
+**Added**
+
+- **`src/worker/player-flow-state.ts`（新模块）**：「这名球员现在能不能动」判定的唯一读源（GLOSSARY「球员在途」词条）。`flowState(db, playerIds[])` 批量在途三查——每人 `{listing, pendingReview, signing}` 三布尔、批量一等（单查 = 长度 1）、98/批分片（v6.79.1 惯例）、每分片 3 条 IN（listings 四态 / transfers 双状态 / active 会话）；`seaVerdicts(db, players, win)` 海捞资格七关链批量裁定（window→ownership→status→banned→listing→pending→signing，顺序与文案逐字同原 bypass.ts `checkSeaSignEligible`，CPU 队例外随迁）；`ensureNotInFlight` 写路径一票否决（三档文案逐字）。`signing` 谓词双形态并存（裁决 8「宁可带兜底，不可破坏判级」）：海捞口径 = 任意 active 会话（`s.player_id` 直查），`ensureNotInFlight` 的 negotiation 档保留旧连接谓词（active 会话 JOIN transfers 且 `t.status <> 'signing'`，步骤 0 存量「signing 单 × active 会话」本地 1 / 生产 0）；seaVerdicts 的 signing 关另保 `transfers.status='signing'` 单据残留兜底。`ACTIVE_SESSION_SQL` 从 `negotiation-guard.ts` import，不复制真源。
+- **测试计划 `docs/test-plans/v6.80.0-player-flow-state.md`**（qa-test-planner 产出）与 **GLOSSARY「球员在途」词条**（判级命名真源）随本版入库。
+
+**Changed**
+
+- **海捞速查端点改吃批量裁定**（`src/worker/routes/market.ts` `/api/market/sea-lookup`）：端内五条批量查询快照副本退役，候选捞取（fc_id 点查 / LIKE 前 8 条）保留、资格判定交给 `seaVerdicts`——开窗批内恰 5 条查询与改前持平（cpuIds/挂牌/单据/会话/禁签各 1），未开窗零查询、每行拦在 window 关；响应逐格不变（`eligible = verdict.ok`，reason 七关文案）。
+- **`bypass.ts` 迁出收口**：`findInFlight` / `ensureNotInFlight` / `checkSeaSignEligible` / `SeaSignVerdict` / `SeaSignStage` 整体迁出且**不留转发导出**；「两处口径必须同步改」注释协议消灭；`createFreeAgent` 与 `inspectForcedAuction` 改吃新模块；消费方全部改 import——`sea-sealed.ts`（明标提交 + 暗标开标）、`routes/players.ts`（详情 seaSign）、`promotion.ts`（上调/下放前置）、`tests/listing-closeout.test.ts`；`cpuClubIds` / `findNegotiationInFlight` 在 bypass 与 market 的残留 import 随迁出清理。
+- **跨实现一致性锁退役**：`tests/market-intel.test.ts` 的 TC-LOOKUP-05（跨实现强锁）改写为 TC-LK-01 单实现端点金样、TC-LOOKUP-06 退役（由模块级 TC-SV-01 替代）、`playerSeaSign` / `NO_WINDOW` 死代码清理；TC-LOOKUP-01/02/03/04/07 零改动保留。
+
+**测试**
+
+- 新增 `tests/player-flow-state.test.ts` 21 例：flowState 三 kind / listings 四态金丝雀 / 会话四形状 / 混合与查无此人 / 197 人三分片跨片合并量化锁（语句 ≤3×⌈n/98⌉、绑定 ≤98）；seaVerdicts 十二人七关矩阵逐字（toStrictEqual）、未开窗全拦、逐级拆关顺序锁、CPU 例外四件套、禁签参数四件套、errCode 形状、signing 残留兜底、批内查询计数锁（=5，无 bind 的 cpuIds 也计入）；ensureNotInFlight 三档文案 / 优先序 / 双谓词行为锁（signing 单 × active 会话放行、completed × active 拦）；TC-RET-01/02/03 源码锁（bypass 无转发导出、协议注释清零、全 src/tests import 收口 + `ACTIVE_SESSION_SQL` 无字面赋值）。变异验证四处全命中（加回转发导出 / 加回协议注释 / 字面复制真源 / 计数器漏计无 bind 查询，各恰好 1 例红）。
+- 验收：typecheck 三份全清；`npm test` 205 文件 / 3189 例全绿。零迁移、零 UI；第二批消费点（`market.ts:265` 挂牌 dup 四态统一、激活上调锁、demand-ops 排除集）本版不动，另立增量。
+
 ## [v6.79.1] · D1 绑定参数越限专项修复（2026-11-07）
 
 **Fixed**

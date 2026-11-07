@@ -124,6 +124,25 @@
 
 ---
 
+## v6.80.0 · 球员在途状态读模型（2026-11-08，本地提交未推送）
+
+**状态**：**本地全绿，未 push 未部署**（feat/squad-numbers 分支：feat 提交 `1f9f68a` + 评审修复第 1 轮）。判级 **minor**（新增读模型模块与海捞速查端点数据源切换；`/api/market/sea-lookup` 响应逐格不变、`ensureNotInFlight` 三档文案逐字不变）。**零迁移、零 UI、零生产写**。
+
+**背景与裁决**：「这名球员现在能不能动」的判定此前散落多处（bypass.ts 的 `findInFlight`/`ensureNotInFlight`/`checkSeaSignEligible` + market.ts sea-lookup 批量快照副本），靠「跨实现一致性测试锁 + 『两处口径必须同步改』注释协议」维持。grilling 九条裁决（2026-11-07，计划文件在用户级记忆目录 `plan-v6.80.0-player-flow-state.md`）：①只收读，「球员状态还原」5 份写实现划给将来挂牌收口模块；②首批 = 在途三查单点化 + `checkSeaSignEligible` 搬入 + sea-lookup 副本退役，挂牌 dup / 激活上调锁 / demand 排除集是第二批**另立增量**；③接口两层：`flowState` 批量一等（98/批分片，v6.79.1 惯例）+ `seaVerdicts` / `ensureNotInFlight` 建在其上；④落点 `src/worker/player-flow-state.ts`；⑤性能验收 = flowState 每分片 ≤3 条 IN 查询、sea-lookup 读量不回退；⑥bypass **不留转发导出**，消费方与测试直接改 import；⑦`negotiation-guard.ts` 不并，`ACTIVE_SESSION_SQL` 只 import 不复制；⑧signing 谓词双形态并存——步骤 0 只读核查「signing 单 × active 会话」存量本地 1 / 生产 0，宁可带兜底不可破坏判级。GLOSSARY「球员在途」词条为命名与口径真源。
+
+**交付**：
+- 新模块 `src/worker/player-flow-state.ts`：`flowState`（批量三查，每人 `{listing, pendingReview, signing}` 三布尔，查无此人三 false、空数组零查询）/ `seaVerdicts`（七关链批量裁定，cpuIds 与本窗解约禁签查询随迁）/ `ensureNotInFlight`（三档文案逐字）/ `SeaSignVerdict` + `SeaSignStage`。**三谓词并存并在模块头注释写明依据**：①海捞口径 signing = 任意 active 会话（`s.player_id` 直查）；②`ensureNotInFlight` 的 negotiation 档 = 旧连接谓词（active 会话 JOIN transfers 且 `t.status <> 'signing'`）；③seaVerdicts 的 signing 关在 ① 之外保 `transfers.status='signing'` 单据残留兜底（market-intel 矩阵 610 形状仍拦，TC-SV-07 钉死）。transfers 一条查询同时取 `pending_review` 与 `signing`（后者只进残留集），使 seaVerdicts 开窗批内**恰 5 条**查询与改前端点副本持平。
+- `bypass.ts`：四者迁出且无转发导出，「两处口径必须同步改」注释消灭；`createFreeAgent` / `inspectForcedAuction` 改吃新模块。
+- 消费方改 import：`sea-sealed.ts`（明标提交 + 暗标开标两处）、`routes/players.ts`（详情 seaSign）、`promotion.ts`（上调/下放前置）、`tests/listing-closeout.test.ts`。
+- `routes/market.ts` sea-lookup：端内五条批量查询副本退役，候选捞取（fc_id 点查 / LIKE 前 8 条）保留，资格判定 = `seaVerdicts`（win=null 零查询、每行 window reason）；`cpuClubIds` / `ACTIVE_SESSION_SQL` 残留 import 随副本清理。
+- 测试计划 `docs/test-plans/v6.80.0-player-flow-state.md`（qa-test-planner）+ GLOSSARY「球员在途」词条入库。
+
+**验收**：typecheck 三份全清；`npm test` 205 文件 / **3189 例全绿**（`tests/player-flow-state.test.ts` 21 例 = flowState 三 kind 四态金丝雀会话四形状 197 人三分片量化锁 + seaVerdicts 七关矩阵逐字顺序锁 CPU 例外禁签参数 errCode 形状 signing 残留 TC-LK-02 计数锁 + ensureNotInFlight 三档优先序双谓词行为锁 + TC-RET-01/02/03 源码锁）；**变异验证四处全命中**（bypass 加回转发导出 → TC-RET-01 恰 1 红 / market.ts 加回协议注释 → TC-RET-02 恰 1 红 / player-flow-state.ts 字面复制 `ACTIVE_SESSION_SQL` → TC-RET-03 恰 1 红 / 计数器漏计无 bind 查询 → TC-LK-02 恰 1 红）；TC-LOOKUP-05 跨实现强锁改写为 TC-LK-01 单实现端点金样、TC-LOOKUP-06 由 TC-SV-01 替代、TC-LOOKUP-01/02/03/04/07 零改动保留；commit `1f9f68a`（feat）+ 评审修复第 1 轮提交。
+
+**第二批（另立增量，本版不动）**：`routes/market.ts:265` 挂牌 dup 三态与四态统一（须先实证 matched_pending 时 `players.status` 必为 listed 保证行为中性）、激活上调锁（activations.ts:75-76）、demand-ops 排除集 ②③。
+
+**已知不改**：`src/worker/transfers.ts` 的注释订正（findInFlight → 在途三查）留在工作区未提交——该文件夹带其它会话的未提交改动，整文件 add 会夹带，注释性改动不影响提交树编译；signing 双谓词并存是裁决 8 的刻意保留，不是待办。
+
 ## v6.78.0 · PlayStyle 来源覆盖 + 训练营 XP 自动整季/半季（2026-11-07，已上线 Version 947eeb96）
 
 **状态**：**已上线（2026-11-07）**，生产 Version `947eeb96-988b-44e2-8304-5992b967b6aa`；迁移 `0094` 已 apply，数据 SQL 已写生产（70 growth + 7 shop 标记、27 条补发、2 回退、Liberali 34→6），`cache:epoch:public` 3171→3172。判级 **minor**（新增读路径来源口径；计数/筛选/导出不变）。
