@@ -660,6 +660,29 @@ function parseSortKey(c: Context<{ Bindings: Env }>): string {
   return sortRaw;
 }
 
+// 最近成交（v6.79.0 身价页）：withLastDeal=1 时子查询回的 json_object 串在这里解析成对象。
+// 全 NULL 的 json_object 也会给出 '{"fee":null,...}'（有成交但字段缺失），无成交才是 SQL NULL——
+// 两者都归一成 {fee,season,windowSeq}（非数值字段归 null）或 null；串损坏按无成交处理。
+interface LastDealInfo {
+  fee: number | null;
+  season: number | null;
+  windowSeq: number | null;
+}
+
+function parseLastDeal(raw: string | null | undefined): LastDealInfo | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      fee: typeof v.fee === 'number' ? v.fee : null,
+      season: typeof v.season === 'number' ? v.season : null,
+      windowSeq: typeof v.windowSeq === 'number' ? v.windowSeq : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function listPlayers(
   c: Context<{ Bindings: Env }>,
   shortlistClubId: number | null = null,
@@ -714,11 +737,29 @@ async function listPlayers(
 
   const where = filters.length + cursorConds.length > 0 ? `WHERE ${[...filters, ...cursorConds].join(' AND ')}` : '';
   const needSortKey = sortRaw !== 'id';
+  // withLastDeal（v6.79.0 身价页）：opt-in 最近成交相关子查询——只认 status='completed' 且
+  // type ∈ {transfer, activation, forced_auction}（与插件「真实成交」口径一致），按 id DESC 取最新一笔
+  // （走 0095 的 idx_transfers_player(player_id, id) 反向扫到第一条即停）。
+  // opt-in 语义：不带参数时 select 不追加列、payload 不出 lastDeal 键，与旧版完全一致；
+  // 缓存键按 canonicalQuery 自动区分两形态，互不串。
+  const withLastDealRaw = c.req.query('withLastDeal');
+  // 非法值即 400，与同文件布尔参数惯例一致（growable / has_contract / release_fee_none 同款）；
+  // opt-in 开关传错也该报出来，静默当未传会让调用方误以为带了 lastDeal 列
+  if (withLastDealRaw !== undefined && withLastDealRaw !== '1') throw new HttpError(400, 'withLastDeal 只能是 1');
+  const withLastDeal = withLastDealRaw === '1';
+  const lastDealSelect = withLastDeal
+    ? `,
+            (SELECT json_object('fee', t.fee, 'season', t.season, 'windowSeq', t.window_seq)
+             FROM transfers t
+             WHERE t.player_id = players.id AND t.status = 'completed'
+               AND t.type IN ('transfer', 'activation', 'forced_auction')
+             ORDER BY t.id DESC LIMIT 1) AS last_deal`
+    : '';
   const rows = await c.env.DB.prepare(
     `SELECT players.id, players.uid, players.name, players.display_name, players.number, players.club_id, players.position, players.age, players.foot,
             ${caExpr} AS ca, ${paExpr} AS pa, players.ca AS cur_ca, players.pa AS cur_pa,
             players.base_ca, players.fc_id,
-            players.prestige, players.market_value, players.status,
+            players.prestige, players.market_value, players.model_value, players.status,
             players.growth_tier, players.growable, players.is_future_star, players.china_plan, players.agent_tier,
             players.badges_silver, players.badges_gold,
             players.transfer_listed, players.not_for_sale, players.list_price,
@@ -734,7 +775,7 @@ async function listPlayers(
             ct.source AS ct_source, ct.player_id AS ct_player_id,
             ct.service_ticks AS ct_service_ticks, ct.protection_ticks AS ct_protection_ticks,
             ${CURRENT_TICKS_SQL} AS current_ticks,
-            cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${sortExpr} AS sort_key` : ''}
+            cc.name AS club_name${attrValueExpr ? `, ${attrValueExpr} AS attr_value` : ''}${psSlotSelects}${needSortKey ? `, ${sortExpr} AS sort_key` : ''}${lastDealSelect}
      FROM players
      LEFT JOIN clubs cc ON cc.id = players.club_id
      LEFT JOIN contracts ct ON ct.player_id = players.id AND ct.is_active = 1
@@ -759,6 +800,8 @@ async function listPlayers(
       fc_id: number | null;
       prestige: number | null;
       market_value: number | null;
+      /** 模型参考价（0095）：bot 离线脚本写入，管理端只读展示，不是规则输入 */
+      model_value: number | null;
       status: string;
       growth_tier: number;
       growable: number;
@@ -802,6 +845,8 @@ async function listPlayers(
       ps14?: number | null;
       ps15?: number | null;
       sort_key?: number | string | null;
+      /** v6.79.0：withLastDeal=1 时的最近成交 json_object 串；不带参数不出该列 */
+      last_deal?: string | null;
     }>();
 
   // 队徽（v6.39.3）：真源在比赛系统 `team.logo_key`（本平台 clubs.logo_key 无人写，见 club-logos.ts）。
@@ -889,6 +934,10 @@ async function listPlayers(
     prestige: r.prestige,
     influence: influenceOf(coefs, r.cur_ca, r.cur_pa, r.growable === 1, r.prestige),
     marketValue: r.market_value,
+    // 模型参考价（v6.79.0）：公开带出——bot 在群里本就公开报估价，无新增泄露；管理端「身价」页只读展示
+    modelValue: r.model_value,
+    // 最近成交（v6.79.0 身价页）：opt-in——不带参数时连键都不出，payload 与旧版完全一致
+    ...(withLastDeal ? { lastDeal: parseLastDeal(r.last_deal) } : {}),
     status: r.status,
     // 转会设置（v6.30.0；v6.33.0 起两线分家）：列表行只给布尔摘要——min_offer_price（私密底线）与
     // list_price（公开标价）的数值都不下发；「已标价」图标只反映公开标价，设没设私密线不再外泄事实位

@@ -1744,3 +1744,124 @@ describe('属性成长加成（v6.61.0）：显示属性 = min(99, 初始 + max(
   });
 });
 
+// ---- v6.79.0：模型参考价 modelValue（公开只读）+ opt-in 最近成交 withLastDeal（身价页） ----
+//
+// 口径（docs/superpowers/specs/2026-11-07-market-value-admin-design.md §3.2）：
+// - model_value（0095）随公开 /api/players 恒带出——bot 在群里本就公开报估价，无新增泄露；
+// - 最近成交只认 status='completed' 且 type ∈ {transfer, activation, forced_auction}
+//   （与插件「真实成交」口径一致），按 id DESC 取最新一笔；
+// - opt-in 语义：不带参数时 select 不加子查询、payload 不出 lastDeal 键（与旧版完全一致）。
+describe('模型参考价与最近成交（v6.79.0）', () => {
+  // 71 有参考价无成交；72 无参考价一条干净 transfer；73 口径内外混铺；74 候选全被口径挡掉
+  function seedModelValue(sqlite: DatabaseSync): void {
+    sqlite.exec(`
+      INSERT INTO players (id, uid, name, status, model_value, market_value) VALUES
+        (71, 'mv1', '有参考',   'normal', 43.5, 40),
+        (72, 'mv2', '无参考',   'normal', NULL, NULL),
+        (73, 'mv3', '只看成交', 'normal', NULL, NULL),
+        (74, 'mv4', '口径外',   'normal', NULL, NULL);
+      -- 73：1(completed transfer) 5(completed activation) 是合法候选，其余三条类型不对、三条状态不对
+      INSERT INTO transfers (id, type, player_id, fee, status, season, window_seq) VALUES
+        (1, 'transfer', 73, 40,   'completed',      8, 2),
+        (2, 'transfer', 73, 55,   'pending_review', 9, 1),
+        (3, 'free_agent', 73, NULL, 'completed',    9, 1),
+        (4, 'match', 73, 3,       'completed',      9, 1),
+        (5, 'activation', 73, 12.5, 'completed',    9, 1),
+        (6, 'forced_auction', 73, 60, 'rejected',   9, 2),
+        (7, 'transfer', 73, 50,   'cancelled',      9, 2);
+      INSERT INTO transfers (id, type, player_id, fee, status, season, window_seq) VALUES
+        (8, 'transfer', 72, 45, 'completed', 9, 2);
+      -- 74：termination / rc_change 类型不对，forced_auction 没走完——三种候选全被口径挡掉
+      INSERT INTO transfers (id, type, player_id, fee, status, season, window_seq) VALUES
+        (9, 'termination', 74, 0, 'completed', 9, 2),
+        (10, 'rc_change', 74, 20, 'completed', 9, 2),
+        (11, 'forced_auction', 74, 88, 'pending_review', 9, 2);
+    `);
+  }
+
+  interface MvListBody {
+    players: {
+      id: number;
+      modelValue: number | null;
+      lastDeal?: { fee: number | null; season: number | null; windowSeq: number | null } | null;
+    }[];
+    nextCursor: string | null;
+  }
+
+  const bodyOf = async (path: string, env: Env): Promise<MvListBody> =>
+    (await (await get(path, env)).json()) as MvListBody;
+
+  it('modelValue 随公开列表恒带出：数值原样、未写入为 null', async () => {
+    const fx = freshEnv();
+    seedModelValue(fx.sqlite);
+    const body = await bodyOf('/api/players?sort=id&order=asc&limit=100', fx.env);
+    const byId = new Map(body.players.map((p) => [p.id, p]));
+    expect(byId.get(71)!.modelValue).toBe(43.5);
+    expect(byId.get(72)!.modelValue).toBeNull();
+  });
+
+  it('withLastDeal 两形态：不带参数 payload 无 lastDeal 键；=1 时逐行出对象或 null', async () => {
+    const fx = freshEnv();
+    seedModelValue(fx.sqlite);
+
+    // 无参数：连 lastDeal 键都不出（modelValue 是本增量新增的公开字段）
+    const plain = await bodyOf('/api/players?sort=id&order=asc&limit=100', fx.env);
+    expect(plain.players.map((p) => p.id)).toEqual([71, 72, 73, 74]);
+    for (const p of plain.players) expect('lastDeal' in p).toBe(false);
+    expect(JSON.stringify(plain)).not.toContain('lastDeal');
+
+    // withLastDeal=1：71 无成交 null；72 命中 8 号 transfer；73 只命中 5 号 activation
+    const withDeals = await bodyOf('/api/players?sort=id&order=asc&limit=100&withLastDeal=1', fx.env);
+    const byId = new Map(withDeals.players.map((p) => [p.id, p]));
+    expect(byId.get(71)!.lastDeal).toBeNull();
+    expect(byId.get(72)!.lastDeal).toEqual({ fee: 45, season: 9, windowSeq: 2 });
+    expect(byId.get(73)!.lastDeal).toEqual({ fee: 12.5, season: 9, windowSeq: 1 });
+    // opt-in 只加列：筛选/排序/玩家清单与无参形态一致
+    expect(withDeals.players.map((p) => p.id)).toEqual(plain.players.map((p) => p.id));
+
+    // 非法取值 400（v6.79.0 评审：与 growable / has_contract / release_fee_none 惯例一致，不静默当未传）
+    expect((await get('/api/players?sort=id&withLastDeal=true', fx.env)).status).toBe(400);
+    expect((await get('/api/players?sort=id&withLastDeal=0', fx.env)).status).toBe(400);
+  });
+
+  it('成交筛选口径：completed × transfer/activation/forced_auction 之外一律不算「最近成交」', async () => {
+    const fx = freshEnv();
+    seedModelValue(fx.sqlite);
+    const byId = new Map(
+      (await bodyOf('/api/players?sort=id&order=asc&limit=100&withLastDeal=1', fx.env)).players.map((p) => [p.id, p]),
+    );
+    // 73 的合法候选里 id 最大的是 5 号 activation：completed transfer(1) 更旧、free_agent(3)/match(4) 类型不对
+    expect(byId.get(73)!.lastDeal).toEqual({ fee: 12.5, season: 9, windowSeq: 1 });
+    // 74：termination / rc_change 类型不对、forced_auction 未完成——把口径砍掉任何一半这条都会红
+    expect(byId.get(74)!.lastDeal).toBeNull();
+  });
+
+  it('最近成交按 id DESC 取最新一笔：同球员多笔合法成交只出最大 id 那笔', async () => {
+    const fx = freshEnv();
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, status) VALUES (75, 'mv5', '多笔成交', 'normal');
+      INSERT INTO transfers (id, type, player_id, fee, status, season, window_seq) VALUES
+        (21, 'transfer', 75, 30, 'completed', 7, 1),
+        (22, 'activation', 75, 15, 'completed', 8, 1),
+        (23, 'transfer', 75, 77, 'completed', 9, 2);
+    `);
+    const byId = new Map((await bodyOf('/api/players?withLastDeal=1', fx.env)).players.map((p) => [p.id, p]));
+    expect(byId.get(75)!.lastDeal).toEqual({ fee: 77, season: 9, windowSeq: 2 });
+  });
+
+  it('缓存键区分两形态（TTL>0）：无参先入缓存后带参仍拿到 lastDeal，反向不串', async () => {
+    const fx = freshEnv();
+    seedModelValue(fx.sqlite);
+    fx.env.PUBLIC_CACHE_TTL_MS = '30000';
+
+    const plain1 = await bodyOf('/api/players?limit=100', fx.env);
+    expect(plain1.players.some((p) => 'lastDeal' in p)).toBe(false);
+    // 键不同（canonicalQuery 带 withLastDeal=1）⇒ 不会把无参缓存体顶给带参请求
+    const withDeals = await bodyOf('/api/players?limit=100&withLastDeal=1', fx.env);
+    expect(withDeals.players.find((p) => p.id === 73)!.lastDeal).toEqual({ fee: 12.5, season: 9, windowSeq: 1 });
+    // 反向：带参体已入缓存，再打无参 URL 仍回无 lastDeal 的形状
+    const plain2 = await bodyOf('/api/players?limit=100', fx.env);
+    expect(plain2.players.some((p) => 'lastDeal' in p)).toBe(false);
+  });
+});
+
