@@ -6,7 +6,7 @@ import { app } from '../src/worker/index.ts';
 import type { Env } from '../src/worker/env.ts';
 import { createTestD1, applyMigrations, sqlGet, sqlAll } from './d1.ts';
 import { resetConfigCache } from '../src/core/config.ts';
-import { xpForEvent, milestoneThresholds, milestoneXp, isCpuTeam } from '../src/worker/growth.ts';
+import { xpForEvent, milestoneThresholds, milestoneXp, isCpuTeam, traineeSeasonTier } from '../src/worker/growth.ts';
 
 interface Fixture {
   env: Env;
@@ -383,6 +383,48 @@ describe('赛季结算（§10.1）：训练营/中国计划/里程碑', () => {
     expect(xpOf(fx, 12)).toBe(40);
     expect(xpOf(fx, 22)).toBe(20);
     expect(xpOf(fx, 30)).toBe(4);
+  });
+
+  it('v6.78.0 整季/半季按签入时点自动判定：窗 1 前 40、窗 2 才签入 15，重放不重复', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec(`
+      UPDATE contracts SET signed_season = 3, signed_window_seq = 1 WHERE player_id = 12;
+      INSERT INTO players (id, uid, name, club_id, position, status, growth_tier, growth_xp, china_plan, ca) VALUES
+        (24, 'p24', '半季', 1, 'CM', 'trainee', 1, 0, 0, 60);
+      INSERT INTO contracts (player_id, club_id, contract_type, signed_season, signed_window_seq, is_active) VALUES
+        (24, 1, 'trainee', 3, 2, 1);
+      INSERT INTO season_windows (season, window_seq, status, opened_at) VALUES (3, 2, 'open', '2026-07-01T00:00:00Z');
+    `);
+
+    const run1 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    expect(run1.status).toBe(200);
+    const s1 = (await run1.json()) as {
+      traineeCount: number;
+      traineeFullCount: number;
+      traineeHalfCount: number;
+      traineeCredited: number;
+      traineeXpGranted: number;
+      traineeXp: number;
+      traineeHalfXp: number;
+    };
+    expect(s1).toMatchObject({
+      traineeCount: 2,
+      traineeFullCount: 1,
+      traineeHalfCount: 1,
+      traineeCredited: 2,
+      traineeXpGranted: 55,
+      traineeXp: 40,
+      traineeHalfXp: 15,
+    });
+    expect(xpOf(fx, 12)).toBe(40);
+    expect(xpOf(fx, 24)).toBe(15);
+
+    const run2 = await post('/api/admin/growth/settlement/run', { season: 3 }, 'tok-admin', fx.env);
+    const s2 = (await run2.json()) as typeof s1;
+    expect(s2).toMatchObject({ traineeCount: 2, traineeCredited: 0, traineeXpGranted: 0 });
+    expect(xpOf(fx, 12)).toBe(40);
+    expect(xpOf(fx, 24)).toBe(15);
   });
 
   it('里程碑只算成长期内的进+攻：解约划断后重新累计、可再次补发', async () => {
@@ -933,5 +975,25 @@ describe('成长期（用户规则 2026-09-18）：里程碑只算当期，宣�
 
     const coach = await post('/api/admin/growth/periods', {}, 'tok-coach', fx.env);
     expect(coach.status).toBe(403);
+  });
+});
+
+describe('traineeSeasonTier：训练营整季/半季判定（v6.78.0）', () => {
+  const mid = '2026-07-01T00:00:00Z';
+
+  it('signed_season 优先：早于本季=整季、晚于本季=不给、本季窗 1=整季、窗 2=半季', () => {
+    expect(traineeSeasonTier({ signed_season: 2, signed_window_seq: 2, signed_at: null }, 3, mid)).toBe('full');
+    expect(traineeSeasonTier({ signed_season: 4, signed_window_seq: 1, signed_at: null }, 3, mid)).toBe('none');
+    expect(traineeSeasonTier({ signed_season: 3, signed_window_seq: 1, signed_at: null }, 3, mid)).toBe('full');
+    expect(traineeSeasonTier({ signed_season: 3, signed_window_seq: 2, signed_at: null }, 3, mid)).toBe('half');
+    // 旧合同窗口号缺失按窗 1 处理
+    expect(traineeSeasonTier({ signed_season: 3, signed_window_seq: null, signed_at: null }, 3, mid)).toBe('full');
+  });
+
+  it('signed_season 缺失：按 signed_at 与窗 2 开窗时刻比较；缺时刻则保守给整季', () => {
+    expect(traineeSeasonTier({ signed_season: null, signed_window_seq: null, signed_at: '2026-06-30T23:59:59Z' }, 3, mid)).toBe('full');
+    expect(traineeSeasonTier({ signed_season: null, signed_window_seq: null, signed_at: '2026-07-01T00:00:01Z' }, 3, mid)).toBe('half');
+    expect(traineeSeasonTier({ signed_season: null, signed_window_seq: null, signed_at: null }, 3, mid)).toBe('full');
+    expect(traineeSeasonTier({ signed_season: null, signed_window_seq: null, signed_at: '2026-07-02T00:00:00Z' }, 3, null)).toBe('full');
   });
 });

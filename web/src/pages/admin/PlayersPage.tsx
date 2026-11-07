@@ -353,7 +353,6 @@ function GrowthSection() {
   const { dateTime, date } = useTimeFmt();
   const queryClient = useQueryClient();
   const [settleSeason, setSettleSeason] = useState('');
-  const [half, setHalf] = useState(false);
   const [summary, setSummary] = useState<GrowthSettlementResult | null>(null);
   const [tierPlayerId, setTierPlayerId] = useState('');
   const [tier, setTier] = useState('1');
@@ -405,11 +404,14 @@ function GrowthSection() {
     try {
       const r = await apiPost<GrowthSettlementResult>('/api/admin/growth/settlement/run', {
         season: Number(settleSeason),
-        half,
       });
       setSummary(r);
+      const traineeDetail =
+        r.traineeCount === 0
+          ? '训练营 0 人'
+          : `训练营 ${r.traineeCount} 人（整季 ${r.traineeFullCount} 人 ×${r.traineeXp}、半季 ${r.traineeHalfCount} 人 ×${r.traineeHalfXp}；本次入账 ${r.traineeCredited} 人 +${r.traineeXpGranted} XP）`;
       show(
-        `结算完成（成长期 ${r.growthPeriodId === 0 ? '未宣告' : `第 ${r.growthPeriodId} 期`}）：训练营 ${r.traineeCount} 人 ×${r.traineeXp} XP，中国计划 ${r.chinaCount} 人，里程碑补发 ${r.milestonesGranted} 条。`,
+        `结算完成（成长期 ${r.growthPeriodId === 0 ? '未宣告' : `第 ${r.growthPeriodId} 期`}）：${traineeDetail}；中国计划 ${r.chinaCount} 人（本次 ${r.chinaCredited} 人），里程碑补发 ${r.milestonesGranted} 条。`,
       );
     } catch (err) {
       show(err instanceof Error ? err.message : '结算失败', true);
@@ -525,22 +527,18 @@ function GrowthSection() {
       )}
 
       <h3>赛季结算</h3>
-      <p className="hint">按 §10.1 结算：训练营球员固定经验、中国计划加成、进+攻里程碑补发（只算当前成长期内）；重放安全，重复运行不会重复入账。升级在球员卡成长页选方案。</p>
+      <p className="hint">按 §10.1 结算：训练营球员固定经验（整季 40 / 半季 15，按合同在本季窗 1 前还是窗 2 才签入自动判定）、中国计划加成、进+攻里程碑补发（只算当前成长期内）；重放安全，重复运行不会重复入账。中期上调在成约时已按半季 15 补发。升级在球员卡成长页选方案。</p>
       <div className="inline-form">
         <label className="field">
           赛季编号
           <input value={settleSeason} onChange={(e) => setSettleSeason(e.target.value)} placeholder="4" />
-        </label>
-        <label className="field field-check">
-          <input type="checkbox" checked={half} onChange={(e) => setHalf(e.target.checked)} />
-          半赛季训练营（15 XP，整赛季 40）
         </label>
         <ConfirmButton
           label="运行结算"
           confirmLabel="确认结算（再点一次）"
           busy={busy}
           disabled={!settleValid}
-          disarmKey={`${settleSeason}|${half}`}
+          disarmKey={settleSeason}
           onConfirm={runSettlement}
         />
       </div>

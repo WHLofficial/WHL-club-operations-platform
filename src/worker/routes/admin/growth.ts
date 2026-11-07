@@ -192,8 +192,8 @@ app.post('/growth/events', async (c) => {
 
 app.post('/growth/settlement/run', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
-  const body = (await readJson(c)) as { season?: unknown; half?: unknown } | null;
-  const summary = await runGrowthSettlement(c.env, user.id, body?.season, body?.half);
+  const body = (await readJson(c)) as { season?: unknown } | null;
+  const summary = await runGrowthSettlement(c.env, user.id, body?.season);
   return c.json({ ok: true, ...summary });
 });
 

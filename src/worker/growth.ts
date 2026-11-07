@@ -312,22 +312,60 @@ export async function cpuClubIds(db: D1Database): Promise<Set<number>> {
 
 export interface SettlementSummary {
   season: number;
-  half: boolean;
   growthPeriodId: number; // 本次结算所依据的成长期（0 = 还没宣告过，全生涯口径）
+  /** 整季训练营固定 XP（默认 40） */
   traineeXp: number;
+  /** 半季训练营固定 XP（默认 15） */
+  traineeHalfXp: number;
+  /** 参与结算的训练营人数（= 整季 + 半季；晚于目标赛季签入的不计） */
   traineeCount: number;
+  traineeFullCount: number;
+  traineeHalfCount: number;
+  /** 本次实际新入账的人数 / XP（重放时都是 0） */
+  traineeCredited: number;
+  traineeXpGranted: number;
   chinaCount: number;
+  chinaCredited: number;
   milestonesGranted: number;
   pendingLevelUps: { playerId: number; name: string; growthTier: number; pending: number }[];
 }
 
-export async function runGrowthSettlement(env: Env, actor: number, seasonInput: unknown, halfInput: unknown): Promise<SettlementSummary> {
+type TraineeTenureRow = {
+  signed_season: number | null;
+  signed_window_seq: number | null;
+  signed_at: string | null;
+};
+
+/**
+ * 训练营在营时长判定（v6.78.0）：
+ * - 本季窗 1 前已在营（或更早赛季签入）= 整季；
+ * - 本季窗 2 才签入 = 半季；
+ * - 晚于目标赛季才签入 = none（迟到结算不给历史赛季补 XP）。
+ * signed_season 可能是 NULL（v6.68.0 前的旧合同），回落到 signed_at 与本季窗 2 开窗时刻比较。
+ */
+export function traineeSeasonTier(
+  row: TraineeTenureRow,
+  season: number,
+  midWindowOpenedAt: string | null,
+): 'full' | 'half' | 'none' {
+  if (row.signed_season !== null && row.signed_season !== undefined) {
+    if (row.signed_season > season) return 'none';
+    if (row.signed_season < season) return 'full';
+    return (row.signed_window_seq ?? 1) <= 1 ? 'full' : 'half';
+  }
+  if (row.signed_at !== null && row.signed_at !== undefined && midWindowOpenedAt !== null) {
+    return row.signed_at < midWindowOpenedAt ? 'full' : 'half';
+  }
+  return 'full';
+}
+
+export async function runGrowthSettlement(env: Env, actor: number, seasonInput: unknown): Promise<SettlementSummary> {
   const db = env.DB;
   const season = Number(seasonInput);
   if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
-  const half = halfInput === true;
   const config = createConfigService(db);
-  const traineeXp = (await config.getNumber(half ? 'trainee_xp_half' : 'trainee_xp_full')) ?? (half ? 15 : 40);
+  const traineeFullXp = (await config.getNumber('trainee_xp_full')) ?? 40;
+  const traineeHalfXp = (await config.getNumber('trainee_xp_half')) ?? 15;
   const chinaXp = (await config.getNumber('china_xp_bonus')) ?? 20;
   const xpPerLevel = (await config.getNumber('xp_per_level')) ?? 10;
 
@@ -336,28 +374,49 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
   // 训练营球员的赛季结算那份固定 XP（§10.1）；锚在 season 上天然幂等。
   // v6.45.0 起这份与逐场 XP 并行累加（训练营球员按场次照记出场/评分/进球/助攻/零封）
   // v6.52.0：非成长球员不产生这类纯 XP 合成事件（查询层过滤，连事件行都不写）
-  const trainees = await scanRows<{ id: number }>(
+  // v6.78.0：整季/半季按合同在营时点自动判定，不再由管理端勾选——本季窗 1 前已在营 = 整季，
+  // 本季窗 2 才签入 = 半季。旧合同 signed_season 为 NULL 时用 signed_at 与窗 2 开窗时刻比较。
+  const midWindow = await db
+    .prepare(`SELECT opened_at FROM season_windows WHERE season = ? AND window_seq = 2`)
+    .bind(season)
+    .first<{ opened_at: string | null }>();
+  const midOpenedAt = midWindow?.opened_at ?? null;
+  const trainees = await scanRows<{
+    id: number;
+    signed_season: number | null;
+    signed_window_seq: number | null;
+    signed_at: string | null;
+  }>(
     db,
-    `SELECT t.id FROM players t JOIN contracts c ON c.player_id = t.id AND c.is_active = 1
+    `SELECT t.id AS id, c.signed_season AS signed_season, c.signed_window_seq AS signed_window_seq, c.signed_at AS signed_at
+     FROM players t JOIN contracts c ON c.player_id = t.id AND c.is_active = 1
      WHERE c.contract_type = 'trainee'
        AND COALESCE(t.growable, 0) = 1`,
     't.id',
     [],
   );
+  const traineeInserts: { index: number; xp: number }[] = [];
+  let traineeFullCount = 0;
+  let traineeHalfCount = 0;
   for (const t of trainees) {
-    statements.push(
-      ...recordGrowthEventStatements(db, {
-        playerId: t.id,
-        matchRef: `trainee:${season}`,
-        season,
-        windowSeq: null,
-        eventType: 'trainee_season',
-        value: 1,
-        xp: traineeXp,
-        source: 'auto',
-        recordedBy: actor,
-      }),
-    );
+    const tier = traineeSeasonTier(t, season, midOpenedAt);
+    if (tier === 'none') continue;
+    const xp = tier === 'full' ? traineeFullXp : traineeHalfXp;
+    if (tier === 'full') traineeFullCount++;
+    else traineeHalfCount++;
+    const eventStatements = recordGrowthEventStatements(db, {
+      playerId: t.id,
+      matchRef: `trainee:${season}`,
+      season,
+      windowSeq: null,
+      eventType: 'trainee_season',
+      value: 1,
+      xp,
+      source: 'auto',
+      recordedBy: actor,
+    });
+    traineeInserts.push({ index: statements.length + 1, xp });
+    statements.push(...eventStatements);
   }
 
   // 中国球员计划：每赛季额外 XP（china_plan=1）
@@ -372,20 +431,21 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
     't.id',
     [],
   );
+  const chinaInserts: number[] = [];
   for (const p of china) {
-    statements.push(
-      ...recordGrowthEventStatements(db, {
-        playerId: p.id,
-        matchRef: `china:${season}`,
-        season,
-        windowSeq: null,
-        eventType: 'china_plan',
-        value: 1,
-        xp: chinaXp,
-        source: 'auto',
-        recordedBy: actor,
-      }),
-    );
+    const eventStatements = recordGrowthEventStatements(db, {
+      playerId: p.id,
+      matchRef: `china:${season}`,
+      season,
+      windowSeq: null,
+      eventType: 'china_plan',
+      value: 1,
+      xp: chinaXp,
+      source: 'auto',
+      recordedBy: actor,
+    });
+    chinaInserts.push(statements.length + 1);
+    statements.push(...eventStatements);
   }
 
   // 里程碑：只累计当前成长期内的进+攻（进球/助攻事件 value 合计），结算时补发已到达而未发的档。
@@ -442,12 +502,22 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
   }
   // 先入事件，再按实际插入数汇总（changes 判定，重放不重复计 XP）
   const firstBatch = [...statements, ...milestoneStatements];
-  if (firstBatch.length > 0) {
-    const results = await db.batch(firstBatch);
-    // 每条事件两条语句（先 UPDATE 后 INSERT），奇数位 changes=1 表示新入账
-    for (let i = 0; i < milestoneStatements.length; i += 2) {
-      if ((results[statements.length + i + 1]?.meta.changes ?? 0) === 1) milestonesGranted++;
+  const results: D1Result<unknown>[] = firstBatch.length > 0 ? await db.batch(firstBatch) : [];
+  // 每条事件两条语句（先 UPDATE 后 INSERT），奇数位 changes=1 表示新入账
+  for (let i = 0; i < milestoneStatements.length; i += 2) {
+    if ((results[statements.length + i + 1]?.meta.changes ?? 0) === 1) milestonesGranted++;
+  }
+  let traineeCredited = 0;
+  let traineeXpGranted = 0;
+  for (const t of traineeInserts) {
+    if ((results[t.index]?.meta.changes ?? 0) === 1) {
+      traineeCredited++;
+      traineeXpGranted += t.xp;
     }
+  }
+  let chinaCredited = 0;
+  for (const idx of chinaInserts) {
+    if ((results[idx]?.meta.changes ?? 0) === 1) chinaCredited++;
   }
 
   // 升级待办清单（待办数 = floor(xp/10) − 已消费；发放走 /api/growth/levelup/:playerId）
@@ -471,16 +541,31 @@ export async function runGrowthSettlement(env: Env, actor: number, seasonInput: 
     targetType: 'season',
     targetId: season,
     origin: 'user',
-    after: { half, growthPeriodId: period.id, traineeCount: trainees.length, chinaCount: china.length, milestonesGranted },
+    after: {
+      growthPeriodId: period.id,
+      traineeCount: traineeFullCount + traineeHalfCount,
+      traineeFullCount,
+      traineeHalfCount,
+      traineeCredited,
+      traineeXpGranted,
+      chinaCount: china.length,
+      chinaCredited,
+      milestonesGranted,
+    },
   });
 
   return {
     season,
-    half,
     growthPeriodId: period.id,
-    traineeXp,
-    traineeCount: trainees.length,
+    traineeXp: traineeFullXp,
+    traineeHalfXp,
+    traineeCount: traineeFullCount + traineeHalfCount,
+    traineeFullCount,
+    traineeHalfCount,
+    traineeCredited,
+    traineeXpGranted,
     chinaCount: china.length,
+    chinaCredited,
     milestonesGranted,
     pendingLevelUps: pending.results.map((r) => ({ playerId: r.id, name: rowDisplayName(r), growthTier: r.growth_tier, pending: r.pending })),
   };

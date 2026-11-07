@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.78.0] · PlayStyle 来源覆盖：S8→S9 继承 + 消费所得（2026-11-07，本地完成，未上线）
+## [v6.78.0] · PlayStyle 来源覆盖 + 训练营 XP 自动整季/半季（2026-11-07，本地完成，未上线）
 
 **Added**
 
@@ -12,12 +12,13 @@
 - **合并清单来源覆盖**（`src/core/playstyle-rules.ts`）：`mergedPlaystyleList(fc, granted, origins = [])` 新增第三参；FC 项命中 `(kind, 基础 psid)` 时把 `source` 覆盖为标记的 `source`（growth 显示「成长」、shop 显示「商店」），槽位、psid、条数、金压银逻辑全部不变；发放明细保留原 `source`（china/shop 不误标）。
 - **列表/详情查询**（`src/worker/routes/players.ts`）：列表页内一次 `SELECT DISTINCT player_id, kind, psid, source FROM player_playstyle_origin WHERE player_id IN (...) AND season = ?`；详情按 `player_id` 查；列表与详情统一取 `getVisibleSeason`，旧赛季标记不会覆盖当前赛季同基础徽章；`meta` 端点仍只回 psid 数组，不查来源表。
 - **测试**：`tests/playstyles.test.ts` 新增 6 例（银/金命中、shop 命中、段不同不误伤、抑制与计数不变、发放来源不被覆盖）；`tests/players-library.test.ts` 新增 1 例验证「只取当前赛季标记，旧赛季不覆盖」；`tests/d1.ts` 登记迁移 0094。
+- **训练营 XP 自动整季/半季**（`src/worker/growth.ts`）：`runGrowthSettlement` 去掉 `half` 入参，改由 `traineeSeasonTier` 按合同签入时点判定——早于本季或本季窗 1 签入=整季（默认 40 XP）、本季窗 2 签入=半季（默认 15 XP）、晚于目标赛季签入=none（不给历史赛季补）；旧合同 `signed_season` 为 NULL 时用 `signed_at` 与窗 2 开窗时刻比较。结算摘要新增 `traineeFullCount`/`traineeHalfCount`/`traineeCredited`/`traineeXpGranted`/`chinaCredited`；管理端删「半赛季训练营」勾选，改为按整季/半季人数与本次实际入账展示。测试新增 3 例（结算整季/半季+重放、`traineeSeasonTier` 两组边界）。
 
 **Notes**
 
 - 计数/筛选/导出不变：来源标记只改「来源角标」，`fullCountSql`、筛选子查询、raw FC 槽都不动；70 枚绿底的 41 枚 FC 已有项因此与成长徽章同口径显示；Diogo Costa 52/53/56、Penders 52/53/54/55 这 7 枚门将银徽显示「商店」，仍计入原有 FC 银徽数。
 - 上线顺序（未执行）：先 apply `0094`，再执行备份 → 回退（Endrick/Pavlović）→ 27 条 growth 补发 → 70 条继承标记 → 7 条消费标记 → Liberali FC 槽 34→6 → recount → verify → purge 公开缓存，最后再 push/部署；代码先于数据部署会因新表不存在 500，数据先于代码部署则角标暂不生效（可接受）。
-- 本地验证：typecheck 三份清、`npm test` 202 文件 / 3,148 例全绿、`npm run build` 通过；数据 SQL 在 node:sqlite 合成库验证 growth=70、shop=7、27 条补发、15 人台账 0 mismatch、Liberali psid1=6，rollback 可回到 30 条发放 / 882 ca84 / 442 ca85 / Liberali psid1=34。
+- 本地验证：typecheck 三份清、`npm test` 202 文件 / 3,150 例全绿、`npm run build` 通过；数据 SQL 在 node:sqlite 合成库验证 growth=70、shop=7、27 条补发、15 人台账 0 mismatch、Liberali psid1=6，rollback 可回到 30 条发放 / 882 ca84 / 442 ca85 / Liberali psid1=34。
 - 未 push、未部署、未写生产。
 
 ## [v6.77.0] · 机器通道：Bot 批量身份查询端点（2026-11-05）

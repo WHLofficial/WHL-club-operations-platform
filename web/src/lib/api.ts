@@ -2610,12 +2610,20 @@ export interface LevelUpResult {
 export interface GrowthSettlementResult {
   ok: boolean;
   season: number;
-  half: boolean;
   /** 本次结算依据的成长期（0 = 还没宣告过，全生涯口径） */
   growthPeriodId: number;
+  /** 整季训练营固定 XP（默认 40） */
   traineeXp: number;
+  /** 半季训练营固定 XP（默认 15） */
+  traineeHalfXp: number;
   traineeCount: number;
+  traineeFullCount: number;
+  traineeHalfCount: number;
+  /** 本次实际新入账的人数 / XP（重放时都是 0） */
+  traineeCredited: number;
+  traineeXpGranted: number;
   chinaCount: number;
+  chinaCredited: number;
   milestonesGranted: number;
   pendingLevelUps: { playerId: number; name: string; growthTier: number; pending: number }[];
 }
