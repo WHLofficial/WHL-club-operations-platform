@@ -813,13 +813,19 @@ app.get('/market/activatable', async (c) => {
   // 本窗口已被激活过的标记（4.4.2.1 一窗一次；失效激活也占额）
   const win = await getOpenWindow(c.env.DB);
   const activated = new Set<number>();
-  if (win) {
-    const used = await c.env.DB.prepare(
-      `SELECT player_id FROM listings WHERE type = 'activation' AND season = ? AND window_seq = ? AND player_id IN (${rows.results.map(() => '?').join(', ') || 'NULL'})`,
-    )
-      .bind(win.season, win.windowSeq, ...rows.results.map((r) => r.id))
-      .all<{ player_id: number }>();
-    for (const r of used.results) activated.add(r.player_id);
+  if (win && rows.results.length > 0) {
+    // D1 每查询绑定参数上限 100：页最多 100 人 + season/windowSeq 两参 = 102 会越限。
+    // 可激活名单是外队全体（CA 降序），联赛人数一过 98 这里就整页 500——这就是
+    // 「转会中心-激活」长期打不开的根因。按 98/批分片点查。
+    for (let i = 0; i < rows.results.length; i += 98) {
+      const chunk = rows.results.slice(i, i + 98).map((r) => r.id);
+      const used = await c.env.DB.prepare(
+        `SELECT player_id FROM listings WHERE type = 'activation' AND season = ? AND window_seq = ? AND player_id IN (${chunk.map(() => '?').join(', ')})`,
+      )
+        .bind(win.season, win.windowSeq, ...chunk)
+        .all<{ player_id: number }>();
+      for (const r of used.results) activated.add(r.player_id);
+    }
   }
 
   return c.json({
