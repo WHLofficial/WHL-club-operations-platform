@@ -126,7 +126,7 @@
 
 ## v6.80.0 · 球员在途状态读模型（2026-11-08，本地提交未推送）
 
-**状态**：**本地全绿，未 push 未部署**（feat/squad-numbers 分支：feat 提交 `1f9f68a` + 评审修复第 1 轮 `937f093` + docs `28d6f66` + **第二批 `4fad549`**，2026-11-08 并入、不 bump）。判级 **minor**（新增读模型模块与海捞速查端点数据源切换；`/api/market/sea-lookup` 响应逐格不变、`ensureNotInFlight` 三档文案逐字不变）。**零迁移、零 UI**；第二批唯一行为变化 = 挂牌 dup 对 matched_pending 脏行收紧（生产交叉行 = 0，见下）。
+**状态**：**已上线（2026-11-08）**，push `5c1f75d..72097d6`（7 枚：1eb0cfe / 1f9f68a / 937f093 / 28d6f66 / af30f07 / 4fad549 / 72097d6，含并行会话两枚 scripts 工件）触发 CF Workers Builds 自动部署，生产 Version **`3679aca4-2d8e-4ba5-bfbf-2791b07eff6a`** @2026-11-08T07:33:42Z；上线回读 `/api/health`、`/api/players?limit=1`、`/api/market/listings`、`/api/clubs`、`/api/squads` 全 200，线上入口资产 `index-B02Gm9xR.js` 与本地 dist 逐字同名。判级 **minor**（新增读模型模块与海捞速查端点数据源切换；`/api/market/sea-lookup` 响应逐格不变、`ensureNotInFlight` 三档文案逐字不变）。**零迁移、零 UI**；第二批唯一行为变化 = 挂牌 dup 对 matched_pending 脏行收紧（生产交叉行 = 0，见下）。
 
 **背景与裁决**：「这名球员现在能不能动」的判定此前散落多处（bypass.ts 的 `findInFlight`/`ensureNotInFlight`/`checkSeaSignEligible` + market.ts sea-lookup 批量快照副本），靠「跨实现一致性测试锁 + 『两处口径必须同步改』注释协议」维持。grilling 九条裁决（2026-11-07，计划文件在用户级记忆目录 `plan-v6.80.0-player-flow-state.md`）：①只收读，「球员状态还原」5 份写实现划给将来挂牌收口模块；②首批 = 在途三查单点化 + `checkSeaSignEligible` 搬入 + sea-lookup 副本退役，挂牌 dup / 激活上调锁 / demand 排除集是第二批**另立增量**；③接口两层：`flowState` 批量一等（98/批分片，v6.79.1 惯例）+ `seaVerdicts` / `ensureNotInFlight` 建在其上；④落点 `src/worker/player-flow-state.ts`；⑤性能验收 = flowState 每分片 ≤3 条 IN 查询、sea-lookup 读量不回退；⑥bypass **不留转发导出**，消费方与测试直接改 import；⑦`negotiation-guard.ts` 不并，`ACTIVE_SESSION_SQL` 只 import 不复制；⑧signing 谓词双形态并存——步骤 0 只读核查「signing 单 × active 会话」存量本地 1 / 生产 0，宁可带兜底不可破坏判级。GLOSSARY「球员在途」词条为命名与口径真源。
 
