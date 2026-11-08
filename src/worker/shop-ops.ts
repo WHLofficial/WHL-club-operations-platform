@@ -16,6 +16,9 @@
 //   防重复退、防「审批/拒绝并发时给已生效的单退款」。
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
+// 契约锚点（v6.82.0 第 3 批）：工单 DTO / 表单状态行 / 目录形状以 src/contract/batch3.ts 为唯一真源，
+// 装配函数 return 标注契约类型——写侧产出与契约漂移时 typecheck 即红（写侧编译期锁）。
+import type { ShopCatalog, ShopOrderDto, ShopOrderStatus, ShopSquadStatePlayer } from '../contract/batch3.ts';
 import { getOpenWindow } from './seasons.ts';
 import { CONFIG_DEFAULTS, createConfigService } from '../core/config.ts';
 import {
@@ -88,15 +91,13 @@ function shopBadgeMessage(code: PlaystylePickFailureCode, fallback: string, kind
   }
 }
 
-export interface ShopSettings {
-  prices: ShopPrices;
-  paCap: number;
-  hpremiumClubIds: number[];
-}
+/** 目录形状真源 = 契约 ShopCatalog（prices/paCap/hpremiumClubIds）：GET /shop/catalog 透传本函数返回值，
+ *  原 ShopSettings 接口已并入契约单源（v6.82.0 第 3 批）。 */
+export type ShopSettings = ShopCatalog;
 
 const DEFAULT_PRICES = JSON.parse(CONFIG_DEFAULTS.shop_prices ?? '{}') as ShopPrices;
 
-export async function loadShopSettings(db: D1Database): Promise<ShopSettings> {
+export async function loadShopSettings(db: D1Database): Promise<ShopCatalog> {
   const config = createConfigService(db);
   const pricesRaw = await config.getJson<Partial<ShopPrices>>('shop_prices');
   const prices = { ...DEFAULT_PRICES, ...pricesRaw };
@@ -226,31 +227,12 @@ function roleSlotsOf(row: PlayerCoreRow): (number | null)[] {
 
 // ---------------------------------------------------------------------------
 // 表单状态下发（GET /api/shop/squad-state）：前端下拉按规则过滤，非法选项根本不下发
-
-export interface SquadStatePlayer {
-  id: number;
-  name: string;
-  number: number | null;
-  growable: boolean;
-  /** 名单桶（normal / listed / trainee…）：仅作前端分组，不参与任何资格判断 */
-  status: string;
-  pa: number | null;
-  position: string | null;
-  /** 热区，定长 4 位（下标 = 槽号 - 1，主位在前，空槽 null） */
-  zones: (string | null)[];
-  roles: { slot: number; roleId: number }[];
-  /** 已拥有的徽章（基础 ID，FC 源 + 发放明细合并去重） */
-  ownedSilver: number[];
-  ownedGold: number[];
-  /** 各段已占槽位数（决定还能不能买） */
-  silverUsed: number;
-  goldUsed: number;
-}
+// 行形状真源 = 契约 ShopSquadStatePlayer（原内部接口 SquadStatePlayer 已并入契约单源）。
 
 export function squadStateOf(
   row: { id: number; display_name: string | null; name: string; number: number | null; growable: number; status: string; pa: number | null; position: string | null; game_attrs: string | null },
   grantedRows: { slot: number; kind: PlaystyleKind; psid: number }[],
-): SquadStatePlayer {
+): ShopSquadStatePlayer {
   const core = { ...row, club_id: null } as unknown as PlayerCoreRow;
   const zones = hotZonesOf(core);
   const roles = roleSlotsOf(core);
@@ -594,7 +576,8 @@ export interface ShopOrderRow {
   amount: number | null;
   /** 券抵额（v6.58.0）：实付现金 = amount − voucher_used；老单默认 0 */
   voucher_used: number;
-  status: 'pending' | 'approved' | 'rejected';
+  /** 三态真源 = 契约 ShopOrderStatus（status 列取值域，审批流转写值） */
+  status: ShopOrderStatus;
   note: string | null;
   reviewed_by: number | null;
   reviewed_at: string | null;
@@ -602,7 +585,7 @@ export interface ShopOrderRow {
   created_at: string;
 }
 
-export function orderDto(row: ShopOrderRow, playerName?: string | null) {
+export function orderDto(row: ShopOrderRow, playerName?: string | null): ShopOrderDto {
   let payload: ShopPayload | null = null;
   try {
     payload = JSON.parse(row.payload_json) as ShopPayload;
@@ -616,7 +599,10 @@ export function orderDto(row: ShopOrderRow, playerName?: string | null) {
     orderedBy: row.ordered_by,
     category: row.category,
     categoryLabel: SHOP_CATEGORY_LABELS[row.category] ?? row.category,
-    payload,
+    // payload 是服务端校验后的结构化对象（ShopPayload 联合）；契约以透传 Record<string, unknown>
+    // 表达（web 只 JSON.stringify 展示）。interface 联合无隐式 index signature，此处纯类型断言、
+    // 运行时零变化。
+    payload: payload as unknown as Record<string, unknown> | null,
     summary: payload ? shopOrderSummary(row.category, payload, playerName) : '（参数无法解析）',
     amount: row.amount,
     voucherUsed: row.voucher_used,

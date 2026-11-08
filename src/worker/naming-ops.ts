@@ -21,6 +21,20 @@ import { createAuditStatement, writeAudit } from '../lib/audit.ts';
 // tourTeamIdsByClub 用于把 club_id 映射到赛事队 id（本窗已排主场场次/强度分位的取数入口）。
 import { seededUnit } from './venue-ops.ts';
 import { tourTeamIdsByClub } from './prizes.ts';
+// 契约锚点（v6.82.0 第 3 批）：套餐 / 报价 / 对赌条款 / 解约回执形状以 src/contract/batch3.ts 为
+// 唯一真源——同名内部接口（NamingPackage / BetTermsItem / BetTerms）删除定义改 import 契约，
+// buildPackages / parseBetTerms / terminateNaming 的 return 标注契约类型；契约与写侧产出漂移时
+// typecheck 即红（写侧编译期锁）。对赌联合（BET_METRICS / BetGuard / BET_P_BY_STRENGTH）的真源
+// 运行时常量仍在本文件，契约侧复制了同一组字面量并注明出处。
+import type {
+  BetTerms,
+  BetTermsItem,
+  BrandQuote,
+  NamingPackage,
+  NamingTerminateResult,
+} from '../contract/batch3.ts';
+
+export type { BetTerms, BetTermsItem, NamingPackage };
 
 export interface BrandPoolRow {
   id: number;
@@ -93,16 +107,6 @@ function round3(n: number): number {
 /** 底价/窗口 = (基准 + 容量系数×容量万 + 死忠系数×死忠万) × 热度（formula.py naming_fee:462） */
 export function namingBaseFee(p: NamingParams, capacity: number, fans: number, heat: number): number {
   return round3((p.base + p.perCapacityWan * (capacity / 10000) + p.perFansWan * (fans / 10000)) * heat);
-}
-
-export interface NamingPackage {
-  packageNo: number;
-  pkgName: string;
-  windows: number;
-  feePerWindow: number;
-  bonusAmount: number;
-  betAttend: number | null;
-  betFans: number | null;
 }
 
 /** 三套餐费用条款（brand_service.py build_packages 口径）：金额=底价×factor，对赌奖金=保底×bonusRate。 */
@@ -186,31 +190,6 @@ export type BetStrength = keyof typeof BET_P_BY_STRENGTH;
 
 /** 护栏标记（G5）：'' = 反解值直接可用；floor/ceil = 精确落界；pool_default = 无历史走池默认基线 */
 export type BetGuard = '' | 'floor' | 'ceil' | 'pool_default';
-
-export interface BetTermsItem {
-  m: BetMetric;
-  /** 达线阈值：比率型为比率（0.612），计数型为整数场次/次数（7） */
-  threshold: number;
-  /** 阈值反解所用基线（比率型 = 窗均值；计数型 = 每场均值） */
-  baseline: number;
-  /** 阈值反解所用样本口径的场次数（计数型 = 本窗同尺度场次期望：sellout 取主场尺度、points/goals/cleansheet 取全窗口径） */
-  nBase: number;
-  /** 反解时的目标达线概率（回测纠偏后的 p） */
-  pTarget: number;
-  guard: BetGuard;
-}
-
-/** 条款快照（naming_contracts.bet_terms，JSON v2；空串/旧格式 ⇒ 结算回落旧绝对线） */
-export interface BetTerms {
-  v: 2;
-  seed: number[];
-  p: number;
-  strength: BetStrength;
-  backtest: { hitRate: number | null; windows: number };
-  /** G1b 被剔除的指标（含不适用与触界），按指标库固定序 */
-  dropped: BetMetric[];
-  items: BetTermsItem[];
-}
 
 /** 窗级历史样本（基线/回测用）：近 3 窗按 (season, window_seq) 降序 */
 export interface BetHistorySample {
@@ -903,16 +882,10 @@ export async function getActiveNaming(db: Env['DB'], clubId: number): Promise<Na
     .first<NamingContractRow>();
 }
 
-export interface NamingQuote {
-  brand: string;
-  heat: number;
-  industry: string;
-  tier: string;
-  baseFee: number;
-  packages: NamingPackage[];
-  /** 签下将命名的球场名（v6.51.0 批 1）：无球场名回 null */
-  venueName: string | null;
-}
+/** 品牌报价（quoteBrands 逐品牌产出，GET /club/naming/quote 的 renewal 与 C3 前直签列表共用）：
+ *  形状真源 = 契约 BrandQuote（v6.82.0 第 3 批并源，原 NamingQuote 接口删除——字段全同，
+ *  api 手抄的 quotaLeft 是 web 单方面多抄，甄别 FieldDiff 处置 C 已删）。 */
+export type NamingQuote = BrandQuote;
 
 /** 品牌池在池品牌（adopted），按 id 稳定序。 */
 export async function loadAdoptedBrands(db: Env['DB']): Promise<BrandPoolRow[]> {
@@ -1048,7 +1021,7 @@ export async function terminateNaming(
   env: Env,
   clubId: number,
   actor: number | null,
-): Promise<{ brand: string; penalty: number; windowsRemaining: number }> {
+): Promise<NamingTerminateResult> {
   const win = await getOpenWindow(env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，退约也办不了');
   // v6.49.0 运营时刻表：冠名退约属消费中心（退约是收口动作，但仍在消费中心的口径里）

@@ -5,6 +5,7 @@ import { HttpError } from '../../lib/http.ts';
 import { requireCoach, requireUser } from '../../lib/session.ts';
 import { getBoundClub } from '../binding.ts';
 import { SHOP_CATEGORIES, type ShopCategory } from '../../core/shop.ts';
+import type { ShopCatalog, ShopOrderMutationResult, ShopOrdersResponse, ShopSquadStateResponse } from '../../contract/batch3.ts';
 import { getOpenWindow } from '../seasons.ts';
 import { assertOpOpen } from '../ops-schedule.ts';
 import {
@@ -21,7 +22,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.get('/shop/catalog', async (c) => {
   await requireUser(c.env, c.req.raw);
   const settings = await loadShopSettings(c.env.DB);
-  return c.json({
+  return c.json<ShopCatalog>({
     prices: settings.prices,
     paCap: settings.paCap,
     hpremiumClubIds: settings.hpremiumClubIds,
@@ -67,7 +68,7 @@ app.get('/shop/squad-state', async (c) => {
       granted.set(r.player_id, list);
     }
   }
-  return c.json({
+  return c.json<ShopSquadStateResponse>({
     clubId: club.id,
     players: players.results.map((p) => squadStateOf(p, granted.get(p.id) ?? [])),
   });
@@ -86,7 +87,7 @@ app.get('/shop/orders', async (c) => {
     )
     .bind(club.id)
     .all<ShopOrderRow & { player_display_name: string | null; player_name: string | null }>();
-  return c.json({
+  return c.json<ShopOrdersResponse>({
     clubId: club.id,
     orders: rows.results.map((r) => orderDto(r, r.player_display_name ?? r.player_name)),
   });
@@ -112,7 +113,7 @@ app.post('/shop/orders', async (c) => {
     payload: body.payload,
     note,
   });
-  return c.json({ order: orderDto(order, null), summary }, 201);
+  return c.json<ShopOrderMutationResult>({ order: orderDto(order, null), summary }, 201);
 });
 
 export default app;

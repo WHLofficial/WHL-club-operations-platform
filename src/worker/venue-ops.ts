@@ -36,6 +36,7 @@ import type {
   VenuePricing,
   VenueQuote,
 } from '../core/venue.ts';
+import type { VenueFigureBlock } from '../contract/batch3.ts';
 
 export const SLOT_MIN = 1;
 /** 每窗档位硬上限（与 core 同源，避免两处数字漂移）。 */
@@ -287,6 +288,11 @@ export function activityQuote(
 ): VenueQuote {
   return venueQuote(def, ctx, satMult, rolls);
 }
+
+// 契约锚点（v6.82.0 第 3 批，编译期结构锁）：core VenueQuote（含 damage/net 八数）的六数子集
+// 必须逐字段覆盖契约 VenueFigureBlock——公式侧改数名/删数而契约未跟时此行红。本文件是纯写侧
+// 引擎（无 HTTP 装配点），用类型级断言把 core 公式输出与契约形状钉在一起。
+export type VenueQuoteContractLock = VenueQuote extends VenueFigureBlock ? true : never;
 
 /** 单档位的结算流水（收入 + 草皮损坏 + 运营成本，三条），未知活动类型返回空。
  *  satMult 由 windowActivityStatements 按「同类活动在本窗的序位」算出后传入（不是 slot_no 序位）。
