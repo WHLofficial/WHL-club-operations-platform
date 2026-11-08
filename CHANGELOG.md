@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.81.0] · FC 金槽抑制 FC 银槽（2026-11-08，本地完成未部署）
+
+**Fixed**
+
+- **`src/core/playstyle-rules.ts` 两处**：FC 存档原生「金银共存」时银不被抑制的缺口（2026-11-08 巡检发现 Rodrygo 105 银搓射+金搓射、Diogo Costa 136 银远抛+金远抛）。① `mergedPlaystyleList`：FC 银条目跳过条件追加「FC 金槽同基础 ID」（fcGoldBaseIds 自 fc 参数派生）；② `fullCountSql('silver')`：每槽条件追加三金槽比较（`COALESCE(金槽,0) − 100 ≠ 本槽值`；COALESCE 防 json_extract NULL 把整槽误杀）。存量两处已按 a 案先行清理（`scratch/fc-silver-clear-105-136.sql`，台账银 6→5 / 5→4）；公式修后 FC 源刷新再遇金银共存自动抑制，无需再动数据。
+
+**Changed**
+
+- **`tests/playstyles.test.ts`**：新增 FC 金抑制行为用例（Rodrygo 场景：清单消失/计数/不同基础不干扰）；「空明细 = FC 槽数」用例输入恰含共存、预期按新语义更新；**0086 同源锁降级为历史形态锁**（迁移已 apply 保持 v6.63.0 形态，silver 展开与运行时公式有意漂移、gold 仍逐字一致），新增运行时公式 COALESCE 文本锁。变异验证 M1（删清单抑制）2 红 / M2（删 SQL 抑制段）1 红，恢复全绿。
+
+**Verification**
+
+- typecheck 三份清；vitest **205 文件 / 3197 例全绿**（v6.80.0 基线 3194，净 +3）；测试计划 `docs/test-plans/v6.81.0-fc-gold-suppress.md`（qa-test-planner 口径，8 TC）。零迁移、零生产写（代码生效待部署；台账实时重算走运行时公式）。
+
 ## [v6.80.0] · 球员在途状态读模型（2026-11-08，已上线 Version `3679aca4`）
 
 **Added**

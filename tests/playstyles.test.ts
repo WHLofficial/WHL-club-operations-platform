@@ -169,6 +169,21 @@ describe('mergedPlaystyleList：合并清单（抑制 + 来源）', () => {
     expect(mergedPlaystyleList(fcSlots, [])).toEqual([{ slot: 1, psid: 1, gold: false, source: 'fc' }]);
   });
 
+  it('v6.81.0：FC 金槽同基础 ID 的 FC 银槽被抑制；不同基础互不干扰（Rodrygo 场景）', () => {
+    // FC 银 1(搓射 slot1) + FC 金 101(金搓射) —— 金覆盖银，银条目四口径消失
+    const both = [fc(1, 1, false), fc(2, 4, false), fc(13, 101, true)];
+    expect(mergedPlaystyleList(both, [])).toEqual([
+      { slot: 2, psid: 4, gold: false, source: 'fc' },
+      { slot: 13, psid: 101, gold: true, source: 'fc' },
+    ]);
+    expect(fullPlaystyleCounts(both, [])).toEqual({ silver: 1, gold: 1 });
+    // FC 金 105(别的基础)不抑制 FC 银 1
+    expect(mergedPlaystyleList([fc(1, 1, false), fc(13, 105, true)], [])).toEqual([
+      { slot: 1, psid: 1, gold: false, source: 'fc' },
+      { slot: 13, psid: 105, gold: true, source: 'fc' },
+    ]);
+  });
+
   it('发放银不抑制 FC 银（只抑制银的是同基础发放金）；被抑制只看发放金', () => {
     const merged = mergedPlaystyleList([fc(1, 5, false)], [gr(2, 'silver', 7, 'china')]);
     expect(merged).toEqual([
@@ -254,12 +269,12 @@ describe('mergedPlaystyleList：PlayStyle 来源覆盖（v6.78.0）', () => {
 });
 
 describe('fullPlaystyleCounts：全量计数（台账口径）', () => {
-  it('空明细 = FC 槽数；发放各行照加', () => {
+  it('空明细 = FC 槽数；发放各行照加（v6.81.0：FC 金 103 抑制 FC 银 3）', () => {
     const fcSlots = [fc(1, 3, false), fc(2, 5, false), fc(13, 103, true)];
-    expect(fullPlaystyleCounts(fcSlots, [])).toEqual({ silver: 2, gold: 1 });
+    expect(fullPlaystyleCounts(fcSlots, [])).toEqual({ silver: 1, gold: 1 });
     expect(
       fullPlaystyleCounts(fcSlots, [gr(3, 'silver', 7, 'china'), gr(14, 'gold', 7, 'shop')]),
-    ).toEqual({ silver: 3, gold: 2 });
+    ).toEqual({ silver: 2, gold: 2 });
   });
 
   it('发放金顶掉 FC 银：银减 1、金加 1；金行消失后回归（557 场景）', () => {
@@ -469,18 +484,38 @@ describe('planPlaystylePicks 跨段规则（v6.63.0）', () => {
   });
 });
 
-// ---- 迁移 0086 同源锁（v6.63.0）：台账 backfill 的 SQL 与 core 表达式逐字一致 ----
-// 台账公式只此一处定义（fullCountSql），迁移文件是它的展开副本 —— 副本漂了，backfill 就和
-// 运行时重算各说各话。清洗（247 删银保金 / 557 零变更）与退役对象也在锁内。
+// ---- 迁移 0086 同源锁（v6.63.0；v6.81.0 起降级为历史形态锁）----
+// 台账公式只此一处定义（fullCountSql），0086 是它的 v6.63.0 展开副本 —— 已 apply 到生产，
+// 按「迁移一旦 apply 不得再改」纪律保持历史形态。v6.81.0 起运行时公式演进（FC 金槽抑制 FC 银槽），
+// silver 展开与 0086 有意漂移；gold 公式未变仍逐字一致。0086 只跑过一次 backfill，台账实时重算
+// 走运行时公式，漂移不影响任何运行路径 —— 本 describe 锁的是「历史工件不被无意篡改」。
 describe('迁移 0086 与 core 同源锁', () => {
   const migrationSql = readFileSync(
     fileURLToPath(new URL('../src/db/migrations/0086_playstyle_full_count.sql', import.meta.url).href),
     'utf8',
   );
 
-  it('backfill 两条 UPDATE 表达式 = fullCountSql 逐字展开', () => {
-    expect(migrationSql).toContain(`badges_silver = ${fullCountSql('silver')}`);
+  it('0086 保持 v6.63.0 历史形态：silver 含明细抑制、不含 FC 金槽抑制段', () => {
+    expect(migrationSql).toContain(
+      `AND pp.kind = 'gold' AND pp.psid = CAST(json_extract(players.game_attrs, '$.PSID12') AS INTEGER)`,
+    );
+    expect(migrationSql).not.toContain(`- ${PS_GOLD_BASE} <>`);
+  });
+
+  it('backfill gold 表达式 = fullCountSql 逐字展开（gold 公式 v6.81.0 未变）', () => {
     expect(migrationSql).toContain(`badges_gold = ${fullCountSql('gold')}`);
+  });
+
+  it('v6.81.0 运行时公式：silver 逐槽带 FC 三金槽抑制（文本锁；COALESCE 防 NULL 误杀）', () => {
+    for (const slot of [1, 6, 12]) {
+      expect(fullCountSql('silver')).toContain(
+        `AND COALESCE(CAST(json_extract(players.game_attrs, '$.PSID13') AS INTEGER), 0) - ${PS_GOLD_BASE} <> CAST(json_extract(players.game_attrs, '$.PSID${slot}') AS INTEGER)`,
+      );
+      expect(fullCountSql('silver')).toContain(
+        `AND COALESCE(CAST(json_extract(players.game_attrs, '$.PSID15') AS INTEGER), 0) - ${PS_GOLD_BASE} <> CAST(json_extract(players.game_attrs, '$.PSID${slot}') AS INTEGER)`,
+      );
+    }
+    expect(fullCountSql('gold')).not.toContain('COALESCE(CAST(json_extract');
   });
 
   it('清洗行：247 删发放银 24（557 零变更，不出现 557 的任何写语句）', () => {

@@ -66,8 +66,9 @@ export interface PlaystyleOriginRow {
 }
 
 /**
- * 合并清单（v6.63.0 全口径；v6.78.0 加来源覆盖）。
+ * 合并清单（v6.63.0 全口径；v6.78.0 加来源覆盖；v6.81.0 加 FC 金槽抑制 FC 银槽）。
  *   · 被发放金抑制的 FC 银槽不产出（Q11：筛选也不命中 —— 消费方都从这份清单出发）
+ *   · FC 金槽同基础 ID 的 FC 银槽同样不产出（v6.81.0：编辑器/进化可写入金银共存，金覆盖银）
  *   · 同 (段, 基础 ID) 撞车以 FC 源为准（大换版折算残余；正常流程发放判重挡了，防御式兜底）
  *   · 来源标记只把 FC 源角标改成标记的 source，不改槽位/psid/条数，也不触发抑制；明细行保留自身 source
  *   · 按 slot 升序
@@ -78,12 +79,13 @@ export function mergedPlaystyleList(
   origins: readonly PlaystyleOriginRow[] = [],
 ): MergedPlaystyleItem[] {
   const suppressed = suppressedBaseIds(granted);
+  const fcGoldBaseIds = new Set(fc.filter((s) => s.gold).map((s) => basePlaystyleId(s.psid)));
   const originSources = new Map(origins.map((o) => [`${o.kind}:${o.psid}`, o.source]));
   const out: MergedPlaystyleItem[] = [];
   const seen = new Set<string>();
   for (const s of fc) {
     const base = basePlaystyleId(s.psid);
-    if (!s.gold && suppressed.has(base)) continue; // 被发放金顶掉的 FC 银：四口径消失
+    if (!s.gold && (suppressed.has(base) || fcGoldBaseIds.has(base))) continue; // 被发放金或 FC 金槽顶掉的 FC 银：四口径消失
     const key = `${s.gold ? 'gold' : 'silver'}:${base}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -290,10 +292,19 @@ export function fullCountSql(kind: PlaystyleKind): string {
   const slotTerms: string[] = [];
   for (let slot = min; slot <= max; slot += 1) {
     const ex = `CAST(json_extract(players.game_attrs, '$.PSID${slot}') AS INTEGER)`;
+    // v6.81.0：FC 金槽（值 > 100，基础 ID = 值 − 100）抑制同基础 ID 的 FC 银槽。
+    // 金槽值 ≤ 100（空/残留）时 g − 100 ≤ 0，与银槽值（≥ 1）恒不等，天然安全。
+    // 键不存在时 json_extract 给 NULL，NULL 参与比较即 UNKNOWN 会把整槽误杀 —— 三金槽一律 COALESCE 0。
+    const fcGoldSuppress =
+      kind === 'silver'
+        ? ` AND COALESCE(CAST(json_extract(players.game_attrs, '$.PSID13') AS INTEGER), 0) - ${PS_GOLD_BASE} <> ${ex}` +
+          ` AND COALESCE(CAST(json_extract(players.game_attrs, '$.PSID14') AS INTEGER), 0) - ${PS_GOLD_BASE} <> ${ex}` +
+          ` AND COALESCE(CAST(json_extract(players.game_attrs, '$.PSID15') AS INTEGER), 0) - ${PS_GOLD_BASE} <> ${ex}`
+        : '';
     const cond =
       kind === 'gold'
         ? `${ex} > ${PS_GOLD_BASE}`
-        : `${ex} > 0 AND NOT EXISTS (SELECT 1 FROM player_playstyles pp WHERE pp.player_id = players.id AND pp.kind = 'gold' AND pp.psid = ${ex})`;
+        : `${ex} > 0 AND NOT EXISTS (SELECT 1 FROM player_playstyles pp WHERE pp.player_id = players.id AND pp.kind = 'gold' AND pp.psid = ${ex})${fcGoldSuppress}`;
     slotTerms.push(`CASE WHEN ${cond} THEN 1 ELSE 0 END`);
   }
   return `(${slotTerms.join(' + ')} + (SELECT COUNT(*) FROM player_playstyles pp WHERE pp.player_id = players.id AND pp.kind = '${kind}'))`;
