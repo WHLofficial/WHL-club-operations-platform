@@ -7,9 +7,9 @@
 | 动作 | 行数 | 说明 |
 |---|---|---|
 | `players` UPDATE | 29 行(签 24 + 释 5) | 每行带守卫,重跑零改行 |
-| `contracts` INSERT | 24 行 | source='import',幂等守卫 |
 | `growth_events` INSERT | ≤5 行 | 解约 reset 划断事件,OR IGNORE |
 | `audit_log` INSERT | 29 行 | origin='backchannel',actor NULL |
+| `contracts` | **零** | CPU 队球员全员无合同(口径见下),不落任何合同行 |
 | **钱路** | **零** | 不写 `ledger_*`,不建账本行 |
 | 迁移 | 零 | 纯 DML |
 
@@ -17,10 +17,10 @@
 
 ## 口径声明(与平台路径的差异,均为有意为之)
 
-1. **不收海捞签入费/签字费**:平台路径按「新违约金 × 30%」收费且校验可用资金,但两队无 `ledger_accounts` 行(余额口径不成立)。本批为 CPU 队直写豁免;若要补收,需先建账本注资,另行授权。
-2. **工资/违约金为拟议值**(基准:全联盟现行合同 CA85+ 均 3.19 m、CA80+ 均 1.69 m/半赛季):米兰 14 人合计 **31.5 m**(帽 68,占 46%),曼城 10 人合计 **22.9 m**(帽 58,占 39%)。执行前可改 `02/03` 文件里的数值,改后同步 `04-verify` 的预期。
+1. **CPU 队球员全员无合同**(2026-11-08 生产实测:曼城 10 / AC米兰 131681 现行合同 0 份,18 支真人队 22–37 份):新签 24 人同样**不落 `contracts` 行**,与 CPU 队既有状态一致。工资帽、违约金、海捞签入费均不适用(帽校验与关窗扣款都挂在 `contracts` 上,CPU 队本就不在其管辖);若未来把 CPU 队纳入合同/工资体系,另行增量。
+2. **不收海捞签入费/签字费**:平台路径按「新违约金 × 30%」收费且校验可用资金,但两队无 `ledger_accounts` 行(余额口径不成立)。本批为 CPU 队直写豁免;若要补收,需先建账本注资,另行授权。
 3. **解约按规则 4.4.4 全口径**(`src/worker/transfers.ts:1236`):CA 回 `COALESCE(base_ca,ca)`、成长清零、挂牌设置清空、`player_playstyles` 删明细、补 reset 划断事件。5 人 `growth_xp=0 / levels_applied=0 / playstyles=0 / growth_events=0 / 合同=0`(已实测),故实际只有 players 主行变化;其中 4 人 `ca > base_ca`(Hu Hetao 68→62、Liberali 69→65,为 FC 源口径差),回滚是平台解约语义,明细见 00-precheck 输出。
-4. **不写 `transfers` 行**:导入类直写批先例(source='import' 无 transfers 行);transfers 挂审核状态机,半写会污染在途单检查。
+4. **不写 `transfers` 行**:导入类直写批先例;transfers 挂审核状态机,半写会污染在途单检查。
 5. **审计**:`audit_log` 每动作一行,`action = cpu_squad_fill_release / cpu_squad_fill_sign`,`origin='backchannel'`、`actor=NULL`(v6.3.2 契约:机器行为人留空)。
 6. **号码留 NULL**:后续用 `POST /api/club/players/:id/number` 或管理端分配。
 7. 球员 231747(fc_id,内部 id 2)按计划排除,不在任何清单。
@@ -61,7 +61,7 @@ npx wrangler kv key put "cache:epoch:public" "<+1后的值>" --namespace-id 87e2
 
 ## 回滚(须另行授权,不随本批执行)
 
-- 签 24 人:`UPDATE players SET club_id=NULL, status='free' WHERE id IN (24 ids)` + `UPDATE contracts SET is_active=0 WHERE player_id IN (24 ids) AND source='import' AND club_id IN (10,131681)`。
+- 签 24 人:`UPDATE players SET club_id=NULL, status='free' WHERE id IN (24 ids)`(无合同行,无需清理 contracts)。
 - 释 5 人:恢复原 club_id/status/number/CA,SQL 需按 00-precheck 的 before 快照手写。
 - 审计行保留不删(账本只增铁律)。
 

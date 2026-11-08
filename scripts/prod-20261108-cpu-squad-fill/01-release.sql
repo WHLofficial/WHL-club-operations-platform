@@ -1,5 +1,7 @@
 -- 01-release.sql · 解约 5 人(规则 4.4.4 全口径,src/worker/transfers.ts:1236 同源)
 -- Hu Hetao 13232(131681)/ Liberali 9443(131681)/ Müller 1791(10)/ Alleyne 9390(10)/ Skov Olsen 1238(10)
+-- 口径:CPU 队球员全员无合同(实测 2026-11-08),故无 contracts 步骤;5 人实测 growth_xp=0/levels_applied=0/
+--       playstyles=0/growth_events=0,解约实际只动 players 主行 + reset 划断事件 + 审计。
 -- 幂等:players 带归属+状态守卫,重跑 changes=0;growth_events OR IGNORE;audit NOT EXISTS。
 
 -- ===== Hu Hetao 13232(131681 → free,CA 68 回 base_ca 62)=====
@@ -9,7 +11,6 @@ UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE
   not_for_sale = 0, transfer_listed_at = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = 13232 AND club_id = 131681 AND status IN ('normal','listed');
-UPDATE contracts SET is_active = 0 WHERE player_id = 13232 AND is_active = 1;
 DELETE FROM player_playstyles WHERE player_id = 13232;
 INSERT OR IGNORE INTO growth_events (player_id, match_ref, season, window_seq, event_type, value, xp, source, recorded_by, created_at)
 VALUES (13232, 'termination:cpu-squad-fill-20261108', 9, 2, 'reset', 0, 0, 'auto', NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -27,7 +28,6 @@ UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE
   not_for_sale = 0, transfer_listed_at = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = 9443 AND club_id = 131681 AND status IN ('normal','listed');
-UPDATE contracts SET is_active = 0 WHERE player_id = 9443 AND is_active = 1;
 DELETE FROM player_playstyles WHERE player_id = 9443;
 INSERT OR IGNORE INTO growth_events (player_id, match_ref, season, window_seq, event_type, value, xp, source, recorded_by, created_at)
 VALUES (9443, 'termination:cpu-squad-fill-20261108', 9, 2, 'reset', 0, 0, 'auto', NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -45,7 +45,6 @@ UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE
   not_for_sale = 0, transfer_listed_at = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = 1791 AND club_id = 10 AND status IN ('normal','listed');
-UPDATE contracts SET is_active = 0 WHERE player_id = 1791 AND is_active = 1;
 DELETE FROM player_playstyles WHERE player_id = 1791;
 INSERT OR IGNORE INTO growth_events (player_id, match_ref, season, window_seq, event_type, value, xp, source, recorded_by, created_at)
 VALUES (1791, 'termination:cpu-squad-fill-20261108', 9, 2, 'reset', 0, 0, 'auto', NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -63,7 +62,6 @@ UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE
   not_for_sale = 0, transfer_listed_at = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = 9390 AND club_id = 10 AND status IN ('normal','listed');
-UPDATE contracts SET is_active = 0 WHERE player_id = 9390 AND is_active = 1;
 DELETE FROM player_playstyles WHERE player_id = 9390;
 INSERT OR IGNORE INTO growth_events (player_id, match_ref, season, window_seq, event_type, value, xp, source, recorded_by, created_at)
 VALUES (9390, 'termination:cpu-squad-fill-20261108', 9, 2, 'reset', 0, 0, 'auto', NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -81,7 +79,6 @@ UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE
   not_for_sale = 0, transfer_listed_at = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = 1238 AND club_id = 10 AND status IN ('normal','listed');
-UPDATE contracts SET is_active = 0 WHERE player_id = 1238 AND is_active = 1;
 DELETE FROM player_playstyles WHERE player_id = 1238;
 INSERT OR IGNORE INTO growth_events (player_id, match_ref, season, window_seq, event_type, value, xp, source, recorded_by, created_at)
 VALUES (1238, 'termination:cpu-squad-fill-20261108', 9, 2, 'reset', 0, 0, 'auto', NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
