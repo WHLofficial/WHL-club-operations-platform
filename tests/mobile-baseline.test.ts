@@ -1008,7 +1008,9 @@ describe('v6.39.3 球员库队徽（TC-CREST-01）', () => {
     const clubs = read('src/worker/routes/clubs.ts');
     expect(clubs, '/api/clubs 应从 club-logos.ts 取映射').toContain("from '../club-logos.ts'");
     expect(clubs, 'clubs.ts 不该再有本地 loadClubTourTeams 副本').not.toMatch(/async function loadClubTourTeams/);
-    expect(read(`${WEB_SRC}/lib/api.ts`), 'PlayerLibraryRow 应有 clubLogoKey 字段').toMatch(
+    // v6.82.0 契约迁移第 2 批：PlayerLibraryRow 手抄体从 web/src/lib/api.ts 搬进契约真源
+    // src/contract/batch2.ts（api.ts 只 re-export），本文本锁断言目标随迁，锁的字段语义不变。
+    expect(read('src/contract/batch2.ts'), 'PlayerLibraryRow 应有 clubLogoKey 字段').toMatch(
       /clubLogoKey: string \| null;/,
     );
   });

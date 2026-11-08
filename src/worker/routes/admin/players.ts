@@ -9,6 +9,10 @@ import { confirmImport, previewImport } from '../../players-import.ts';
 import { confirmContractsImport, previewContractsImport } from '../../contracts-import.ts';
 import { hookTierRecompute } from '../../growth-tier.ts';
 import { nowSql, readJson } from './shared.ts';
+// 契约类型锚点（v6.82.0 第 2 批）：导入管线两段式的 c.json 泛型以 src/contract/batch2.ts 为真源——
+// previewImport / confirmImport 等装配函数在 players-import.ts / contracts-import.ts（白名单外），
+// 传导检查在这里落地。
+import type { ContractImportConfirm, ContractImportPreview, ImportConfirm, ImportPreview } from '../../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -241,18 +245,18 @@ app.post('/players/import/preview', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.players.import');
   const body = await readJson(c);
   if ((body as { channel?: unknown } | null)?.channel === 'C') {
-    return c.json(await previewContractsImport(c.env, body));
+    return c.json<ContractImportPreview>(await previewContractsImport(c.env, body));
   }
-  return c.json(await previewImport(c.env, body));
+  return c.json<ImportPreview>(await previewImport(c.env, body));
 });
 
 app.post('/players/import/confirm', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.players.import');
   const body = await readJson(c);
   if ((body as { channel?: unknown } | null)?.channel === 'C') {
-    return c.json(await confirmContractsImport(c.env, user.id, body));
+    return c.json<ContractImportConfirm>(await confirmContractsImport(c.env, user.id, body));
   }
-  return c.json(await confirmImport(c.env, user.id, body));
+  return c.json<ImportConfirm>(await confirmImport(c.env, user.id, body));
 });
 
 export default app;

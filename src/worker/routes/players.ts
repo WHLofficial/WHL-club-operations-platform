@@ -26,6 +26,15 @@ import { createConfigService } from '../../core/config.ts';
 // 34 项细分属性白名单 ATTR_KEYS 也从这里来（v6.61.0 收口单一来源：列表/筛选/排序/详情/meta/导出同一份）
 import { ATTR_KEYS, attrBonusEnabled, attrValueSql, buffedAttrs, growthDelta, growthDeltaSql } from '../../core/growth-attrs.ts';
 import { influenceCoefs, influenceOf } from '../influence.ts';
+// 契约类型锚点（v6.82.0 第 2 批）：响应装配点以 src/contract/batch2.ts 为真源标注——
+// 装配函数 return / c.json 泛型是写侧编译期锁，载荷形状漂移时 typecheck 先红。
+import type {
+  ContractDto,
+  PlayerDetail,
+  PlayerMatchesResponse,
+  PlayerTransfersResponse,
+  PlayersLibraryResponse,
+} from '../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -222,8 +231,8 @@ app.get('/players', async (c) => {
   if (c.req.query('shortlist') === '1') {
     const user = await requireUser(c.env, c.req.raw);
     const club = await getBoundClub(c.env, user.id, c.req.raw);
-    if (!club) return c.json({ players: [], nextCursor: null });
-    return c.json(await listPlayers(c, club.id));
+    if (!club) return c.json<PlayersLibraryResponse>({ players: [], nextCursor: null });
+    return c.json<PlayersLibraryResponse>(await listPlayers(c, club.id));
   }
   // v6.61.0：attr 取值/筛选/排序随 growth_attr_bonus 开关变 ⇒ 开关值必须进缓存键（':b1'/':b0'），
   // 否则关掉开关后 TTL 内还吐加成值（列表「没变、详情变了」）。这次读同时传进 listPlayers，
@@ -236,7 +245,7 @@ app.get('/players', async (c) => {
     () => listPlayers(c, null, attrBonus),
     { scope: 'players', env: c.env, ctx: waitUntilOf(c) },
   );
-  return c.json(data);
+  return c.json<PlayersLibraryResponse>(data);
 });
 
 // 等值筛选的写法（v6.3.1 筛选侧同源）：筛选键就是排序键时写裸列，否则写与索引同源的 COALESCE 形式。
@@ -687,10 +696,7 @@ async function listPlayers(
   c: Context<{ Bindings: Env }>,
   shortlistClubId: number | null = null,
   attrBonus?: boolean,
-): Promise<{
-  players: unknown[];
-  nextCursor: string | null;
-}> {
+): Promise<PlayersLibraryResponse> {
   const exprs = await buildViewExprs(c, attrBonus);
   const { caExpr, paExpr, inflExpr, coefs, deltaSql } = exprs;
   const sortExprs = buildSortExprs({ caExpr, paExpr, inflExpr });
@@ -1419,7 +1425,28 @@ app.get('/players/:id', async (c) => {
     .bind(id, originSeason ?? 0)
     .all<{ kind: 'silver' | 'gold'; psid: number; source: GrantedRowSource }>();
 
-  return c.json({
+  // 现行合同卷宗（契约 ContractDto 锚点，v6.82.0 第 2 批）：装配体以契约类型为类型位置的
+  // 编译期锁——字段漂移时这里先红；装配体逐字未动，运行时零变化。
+  const contractDto: ContractDto | null = contract
+    ? {
+        id: contract.id,
+        clubId: contract.club_id,
+        releaseFee: contract.release_fee,
+        wage: contract.wage,
+        contractType: contract.contract_type,
+        source: contract.source,
+        signedAt: contract.signed_at,
+        effectiveFrom: contract.effective_from,
+        serviceSeasons: serviceSeasons(contract.service_ticks ?? 0, currentTicks),
+        protected: contract.protection_ticks !== null && currentTicks < contract.protection_ticks,
+        // 保护期绝对刻度（v6.54.0 步骤 7）：双版本合同要写「至第 N 窗」，不能只给布尔
+        protectionTicks: contract.protection_ticks,
+        signedSeason: contract.signed_season,
+        signedWindowSeq: contract.signed_window_seq,
+      }
+    : null;
+
+  return c.json<PlayerDetail>({
     player: {
       id: p.id,
       fcId: p.fc_id,
@@ -1464,24 +1491,7 @@ app.get('/players/:id', async (c) => {
       updatedAt: p.updated_at,
     },
     club,
-    contract: contract
-      ? {
-          id: contract.id,
-          clubId: contract.club_id,
-          releaseFee: contract.release_fee,
-          wage: contract.wage,
-          contractType: contract.contract_type,
-          source: contract.source,
-          signedAt: contract.signed_at,
-          effectiveFrom: contract.effective_from,
-          serviceSeasons: serviceSeasons(contract.service_ticks ?? 0, currentTicks),
-          protected: contract.protection_ticks !== null && currentTicks < contract.protection_ticks,
-          // 保护期绝对刻度（v6.54.0 步骤 7）：双版本合同要写「至第 N 窗」，不能只给布尔
-          protectionTicks: contract.protection_ticks,
-          signedSeason: contract.signed_season,
-          signedWindowSeq: contract.signed_window_seq,
-        }
-        : null,
+    contract: contractDto,
     // 双版本合同（v6.54.0 步骤 7）：三项只在本队教练视角下非空，其余一律 null（§10.4 权限）
     contractPending: contractState?.pending ?? null,
     contractApplied: contractState?.applied ?? null,
@@ -1535,7 +1545,7 @@ app.get('/players/:id/transfers', async (c) => {
       to_club_name: string | null;
     }>();
 
-  return c.json({
+  return c.json<PlayerTransfersResponse>({
     transfers: rows.results.map((r) => ({
       id: r.id,
       type: r.type,
@@ -1561,7 +1571,7 @@ app.get('/players/:id/matches', async (c) => {
   if (!Number.isInteger(ref)) throw new HttpError(400, '球员 ID 不对');
   const payload = await loadPlayerMatches(c.env, ref);
   if (!payload) throw new HttpError(404, '球员不存在');
-  return c.json({ player: payload.player, seasons: payload.result.seasons, matches: payload.result.matches });
+  return c.json<PlayerMatchesResponse>({ player: payload.player, seasons: payload.result.seasons, matches: payload.result.matches });
 });
 
 export default app;

@@ -1153,7 +1153,7 @@ function EntryPanel({
 
       {noXp && (
         <p className="hint">
-          本场不计成长 XP（{COMPETITION_TYPE_LABEL[data.match.competitionType] ?? data.match.competitionType} ·{' '}
+          本场不计成长 XP（{COMPETITION_TYPE_LABEL[data.match.competitionType ?? ''] ?? data.match.competitionType} ·{' '}
           {data.match.stageName || '—'}）：只能录出场与评分 —— 评分与出场照常入库（球员比赛记录的出场与均分要用），
           本场 XP 恒为 0；零封 / 夺回球权 / 扑救是纯 XP 计数器，本场不开放。
         </p>

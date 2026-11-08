@@ -24,6 +24,18 @@ import { sha256Hex } from '../../../lib/crypto.ts';
 import { suspendedPlayersAtMatch, suspensionLabel } from '../../tour-suspension.ts';
 import { loadTournamentNames, tournamentNameOf } from '../../tournament-names.ts';
 import { nowSql, readJson } from './shared.ts';
+// 契约类型锚点（v6.82.0 第 2 批）：结算 / 成长期 / 录入台三端点 / OCR 的响应装配以
+// src/contract/batch2.ts 为真源标注；MatchEntryInput 是录入批量的请求侧 DTO（body 断言位锚）。
+import type {
+  GrowthPeriodsResponse,
+  GrowthSettlementResult,
+  MatchEntryInput,
+  MatchEntryListItem,
+  MatchEntryListResponse,
+  MatchEntryPanel,
+  MatchEntrySubmitResult,
+  MatchOcrResult,
+} from '../../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -194,7 +206,7 @@ app.post('/growth/settlement/run', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const body = (await readJson(c)) as { season?: unknown } | null;
   const summary = await runGrowthSettlement(c.env, user.id, body?.season);
-  return c.json({ ok: true, ...summary });
+  return c.json<GrowthSettlementResult>({ ok: true, ...summary });
 });
 
 // 成长期宣告（用户规则 2026-09-18）：里程碑只累计当前成长期内的进+攻。
@@ -202,7 +214,7 @@ app.post('/growth/settlement/run', async (c) => {
 // 宣告只是画一条线（界 = 当前事件序号），不改任何球员数据，因此可反复宣告、可连续宣告。
 app.get('/growth/periods', async (c) => {
   await requireAdmin(c.env, c.req.raw);
-  return c.json(await listGrowthPeriods(c.env.DB));
+  return c.json<GrowthPeriodsResponse>(await listGrowthPeriods(c.env.DB));
 });
 
 app.post('/growth/periods', async (c) => {
@@ -335,7 +347,8 @@ function entrySideOf(teamName: string | null, clubIds: Map<string, number>): Ent
 
 // 列表行与面板 match 块共用同一份 DTO（面板就是列表行 + 两侧花名册 + 已录事件）
 // v6.45.0：tournamentName 供录入台按赛事分组（名字在赛事库，第二趟查，见 loadTournamentNames）
-function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, recorded: number, tournamentName: string | null) {
+// return 标注契约 MatchEntryListItem（v6.82.0 第 2 批锚点——列表与面板两个装配点同锁）。
+function entryMatchItem(row: MatchEntryRow, home: EntrySide, away: EntrySide, recorded: number, tournamentName: string | null): MatchEntryListItem {
   return {
     matchId: row.match_id,
     season: row.season,
@@ -391,7 +404,7 @@ app.get('/growth/match-entry', async (c) => {
       tournamentNameOf(names, row.tournament_id),
     ),
   );
-  return c.json({ matches });
+  return c.json<MatchEntryListResponse>({ matches });
 });
 
 // 单场面板：两侧花名册（在册口径 = normal/listed/trainee；free 已离队不出）+ 该场已录事件预填
@@ -452,7 +465,7 @@ app.get('/growth/match-entry/:matchId', async (c) => {
   const withTotals = <T extends { id: number }>(players: T[]) =>
     players.map((p) => ({ ...p, duelsTotal: totals.get(`${p.id}|duels_won`) ?? 0, savesTotal: totals.get(`${p.id}|saves`) ?? 0 }));
 
-  return c.json({
+  return c.json<MatchEntryPanel>({
     match: entryMatchItem(row, home, away, recorded.results.length, tournamentNameOf(names, row.tournament_id)),
     sides: {
       home: { clubId: home.clubId, isCpu: home.isCpu, players: withTotals(homePlayers) },
@@ -628,7 +641,7 @@ app.post('/growth/match-entry/:matchId/ocr', async (c) => {
   const warnings = [...errors, ...built.warnings, ...crossWarnings];
   if (typeof parsed.notes === 'string' && parsed.notes.trim() !== '') warnings.push(`模型备注：${parsed.notes.trim()}`);
 
-  return c.json({
+  return c.json<MatchOcrResult>({
     team: ocr.team,
     side,
     kind,
@@ -651,7 +664,7 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   const row = Number.isInteger(matchId) && matchId > 0 ? await loadEntryMatch(c.env.DB, matchId) : null;
   if (!row) throw new HttpError(404, '这场比赛不在可补录名单里（未确认或弃权场次）');
 
-  const body = (await readJson(c)) as { entries?: unknown } | null;
+  const body = (await readJson(c)) as { entries?: MatchEntryInput[] } | null;
   const entries = body?.entries;
   if (!Array.isArray(entries) || entries.length === 0) throw new HttpError(400, 'entries 要是非空数组');
   // 上限 50 行（一侧花名册 ~25 人绰绰有余）：既保 IN 点查绑参数量在 D1 每查 100 参数之内，
@@ -665,9 +678,11 @@ app.post('/growth/match-entry/:matchId', async (c) => {
   if (clubIds.length === 0) throw new HttpError(400, '这场比赛两队都没在平台建档，先建档再补录');
 
   // ---- 全量校验（任何一条不过整批 400，零写入零审计）----
+  // entry 直接用契约请求侧 DTO MatchEntryInput（v6.82.0 第 2 批锚点）：类型只换编译层视角，
+  // 逐字段运行时校验链（400 文案与判定顺序）一字未动，非法值仍走原路径。
   const parsed = entries.map((raw) => {
     if (typeof raw !== 'object' || raw === null) throw new HttpError(400, '每一行要是对象');
-    const entry = raw as Record<string, unknown>;
+    const entry = raw;
     if (!BATCH_ENTRY_FIELDS.some((f) => entry[f] !== undefined && entry[f] !== null)) throw new HttpError(400, '每一行至少要填一项');
     const playerId = Number(entry.playerId);
     if (!Number.isInteger(playerId) || playerId <= 0) throw new HttpError(400, '球员 ID 不对');
@@ -885,7 +900,7 @@ app.post('/growth/match-entry/:matchId', async (c) => {
     }
     perPlayerMap.set(e.playerId, bucket);
   });
-  return c.json(
+  return c.json<MatchEntrySubmitResult>(
     { ok: true, written, updated, duplicates, totalXp, perPlayer: [...perPlayerMap.values()] },
     written > 0 || updated > 0 ? 201 : 200,
   );

@@ -808,7 +808,9 @@ describe('NG-09 消费方：球员比赛 tab 与成长史仍读得到非成长�
 describe('NG-10 前端：非成长行徽标 / 行 XP 归零 / 输入可用', () => {
   const page = readFileSync(`${WEB_SRC}pages/admin/GrowthEntryPage.tsx`, 'utf8');
   const seasons = readFileSync(`${WEB_SRC}pages/admin/SeasonsPage.tsx`, 'utf8');
-  const api = readFileSync(`${WEB_SRC}lib/api.ts`, 'utf8');
+  // v6.82.0 契约迁移第 2 批：MatchEntryPlayer 手抄体从 web/src/lib/api.ts 搬进契约真源
+  // src/contract/batch2.ts（api.ts 只 re-export），下方文本锁断言目标随迁，锁的字段语义不变。
+  const api = readFileSync(fileURLToPath(new URL('../src/contract/batch2.ts', import.meta.url).href), 'utf8');
 
   it('TC-NG-10a 面板 DTO 映射、rowXp 先归零再算 extraXp、合计走 rowXp', () => {
     // 漏字段/老后端按非成长处理（与 SQL 侧 COALESCE 同向，只会少报不会虚报）

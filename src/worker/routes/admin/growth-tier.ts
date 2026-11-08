@@ -27,6 +27,9 @@ import {
 import { nationName } from '../../../core/nations.ts';
 import { clubsWithoutCountry, hookTierRecompute, recomputeGrowthTiers, type TierScope } from '../../growth-tier.ts';
 import { nowSql, readJson } from './shared.ts';
+// 契约类型锚点（v6.82.0 第 2 批）：档位四端点的响应装配以 src/contract/batch2.ts 为真源标注；
+// TierDiffRow 的形状真源在 worker/growth-tier.ts（白名单外），经这里的 c.json 泛型传导检查。
+import type { TierChangeEntry, TierClubWithoutCountry, TierPlayerDetail, TierRecomputeSummary } from '../../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -51,8 +54,9 @@ interface TierDetailRow {
   miss_c2: number;
 }
 
-/** 明细行 → 端点响应（条件三态：命中 / 数据缺失 / 未命中） */
-function detailOf(row: TierDetailRow) {
+/** 明细行 → 端点响应（条件三态：命中 / 数据缺失 / 未命中；return 标注契约 TierPlayerDetail，
+ *  v6.82.0 第 2 批锚点） */
+function detailOf(row: TierDetailRow): TierPlayerDetail {
   const hits: Record<GrowthTierConditionKey, boolean> = {
     c1: row.c1 === 1,
     c2: row.c2 === 1,
@@ -81,11 +85,13 @@ async function loadTierDetail(db: D1Database, playerId: number): Promise<TierDet
 
 // ---- 批量：预览 / 落库 / 清单 / 未设国家 ----
 
-// 预览：不写库，计数 + 明细前 200 行（前端计数条与明细表一次拿全）
+// 预览：不写库，计数 + 明细前 200 行（前端计数条与明细表一次拿全）。
+// conditions 展开一次是为了把 readonly 常量表收成可变数组（契约 TierRecomputeSummary.conditions
+// 沿 api 手抄的可变数组口径，web TierPage.tsx:68 直接标注 TierConditionMeta[]）——JSON 输出逐字不变。
 app.get('/growth/tier-recompute', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const summary = await recomputeGrowthTiers(c.env.DB, { kind: 'all' }, { apply: false, actor: user.id, origin: 'user' });
-  return c.json({ ok: true, ...summary, conditions: GROWTH_TIER_CONDITIONS });
+  return c.json<TierRecomputeSummary>({ ok: true, ...summary, conditions: [...GROWTH_TIER_CONDITIONS] });
 });
 
 // 落库：默认全量；body { clubId } 收窄到该队（换壳/改国家后的收尾重算，rekey README 的检查清单用）
@@ -99,7 +105,7 @@ app.post('/growth/tier-recompute', async (c) => {
     scope = { kind: 'clubs', clubIds: [clubId] };
   }
   const summary = await recomputeGrowthTiers(c.env.DB, scope, { apply: true, actor: user.id, origin: 'user' });
-  return c.json({ ok: true, ...summary });
+  return c.json<TierRecomputeSummary>({ ok: true, ...summary });
 });
 
 // 变更清单：读审计（自动核定与人工核定共用 action 'growth_tier_set'，after.auto 区分来源；
@@ -124,26 +130,27 @@ app.get('/growth/tier-changes', async (c) => {
       after: string | null;
       at: string;
     }>();
-  return c.json({
-    entries: rows.results.map((r) => ({
-      id: r.id,
-      actor: r.actor,
-      action: r.action,
-      targetType: r.target_type,
-      targetId: r.target_id,
-      origin: r.origin,
-      before: r.before === null ? null : (JSON.parse(r.before) as unknown),
-      after: r.after === null ? null : (JSON.parse(r.after) as unknown),
-      at: r.at,
-    })),
-  });
+  // entries 以契约 TierChangeEntry 为类型位置的锚点（v6.82.0 第 2 批）；before/after 的
+  // JSON.parse 断言从 unknown 收窄为 Record<string, unknown>（纯类型层，运行时零变化）。
+  const entries: TierChangeEntry[] = rows.results.map((r) => ({
+    id: r.id,
+    actor: r.actor,
+    action: r.action,
+    targetType: r.target_type,
+    targetId: r.target_id,
+    origin: r.origin,
+    before: r.before === null ? null : (JSON.parse(r.before) as Record<string, unknown>),
+    after: r.after === null ? null : (JSON.parse(r.after) as Record<string, unknown>),
+    at: r.at,
+  }));
+  return c.json({ entries });
 });
 
 // 未设国家的队：这些队里所有球员的 c2 一律记假（缺数据不猜），提示管理组补录
 app.get('/growth/tier-clubs-without-country', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const clubs = await clubsWithoutCountry(c.env.DB);
-  return c.json({ clubs: clubs.map((club) => ({ ...club, countryName: null })) });
+  return c.json<{ clubs: TierClubWithoutCountry[] }>({ clubs: clubs.map((club) => ({ ...club, countryName: null })) });
 });
 
 // ---- 单人：明细 / 核定（置锁）/ 解除锁定 ----

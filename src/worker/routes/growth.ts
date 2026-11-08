@@ -16,6 +16,8 @@ import {
 } from '../../core/growth-tier.ts';
 import { nationName } from '../../core/nations.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
+// 契约类型锚点（v6.82.0 第 2 批）：成长史与升级消费的 c.json 泛型以 src/contract/batch2.ts 为真源。
+import type { GrowthDetail, LevelUpResult } from '../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -104,7 +106,7 @@ app.get('/players/:id/growth', async (c) => {
       created_at: string;
     }>();
 
-  return c.json({
+  return c.json<GrowthDetail>({
     player: {
       id: player.id,
       name: rowDisplayName(player),
@@ -168,7 +170,7 @@ app.post('/growth/levelup/:playerId', async (c) => {
     throw new HttpError(403, '只有球员所属俱乐部的教练能选升级方案');
   }
   const out = await applyLevelUp(c.env, user.id, playerId, body?.planIndex, body?.picks);
-  return c.json(out);
+  return c.json<LevelUpResult>(out);
 });
 
 // 中国球员计划自选银徽章（§10）：球员所属俱乐部的教练，名额 = config.china_badges − 已发数

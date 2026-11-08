@@ -36,11 +36,14 @@ export interface OcrMergeOutcome<R extends OcrMergeRow> {
   cleanSheetSide: boolean;
 }
 
-/** 本侧失球数：主队失球 = 客队得分（比分是零封的权威，OCR 失球对不上时服务端已出警告） */
+/** 本侧失球数：主队失球 = 客队得分（比分是零封的权威，OCR 失球对不上时服务端已出警告）。
+ *  返回 number | null（v6.82.0 契约层 R-WEB 防线）：契约 MatchEntryListItem 的比分收为
+ *  number | null（result_confirmations 列可空，worker 原样透传）——比分缺失时返回 null，
+ *  消费侧 `=== 0` 恒 false（比分拿不到就不联动零封，语义安全），运行时行为零变化。 */
 export function sideConcededOf(
   match: Pick<MatchEntryListItem, 'scoreHome' | 'scoreAway'>,
   side: 'home' | 'away',
-): number {
+): number | null {
   return side === 'home' ? match.scoreAway : match.scoreHome;
 }
 
@@ -59,7 +62,7 @@ export function sideConcededOf(
 export function mergeOcrEntries<R extends OcrMergeRow>(
   rows: R[],
   entries: MatchOcrEntry[],
-  conceded: number,
+  conceded: number | null,
   allowCounters = true,
 ): OcrMergeOutcome<R> {
   const next = rows.map((r) => ({ ...r }));

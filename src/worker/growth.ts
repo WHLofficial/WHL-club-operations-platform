@@ -23,6 +23,9 @@ import { queueClubNotification } from './notify.ts';
 import { autoOpenPromotionAtTraineeMax } from './promotion.ts';
 import { rowDisplayName } from '../core/player-name.ts';
 import type { Env } from './env.ts';
+// 契约类型锚点（v6.82.0 第 2 批）：applyLevelUp / listGrowthPeriods 的 return 以
+// src/contract/batch2.ts 为真源标注——装配形状漂移时 typecheck 先红。
+import type { GrowthPeriodsResponse, LevelUpResult } from '../contract/batch2.ts';
 
 // §10.1 事件类型（growth_events.event_type）
 export const GROWTH_EVENT_TYPES = [
@@ -227,8 +230,9 @@ export interface GrowthPeriodRow {
   declaredAt: string | null;
 }
 
-/** 成长期列表（倒序）+ 当前期；管理端面板与结算提示用 */
-export async function listGrowthPeriods(db: D1Database, limit = 20): Promise<{ current: GrowthPeriodRow | null; periods: GrowthPeriodRow[] }> {
+/** 成长期列表（倒序）+ 当前期；管理端面板与结算提示用（return 标注契约 GrowthPeriodsResponse，
+ *  v6.82.0 第 2 批锚点；worker 内部名 GrowthPeriodRow 与契约同名同形） */
+export async function listGrowthPeriods(db: D1Database, limit = 20): Promise<GrowthPeriodsResponse> {
   const rows = await db
     .prepare(
       `SELECT id, season, start_event_id, source, note, declared_by, declared_at
@@ -711,13 +715,7 @@ export async function applyLevelUp(
   playerId: number,
   planIndexInput: unknown,
   picksInput?: unknown,
-): Promise<{
-  ok: true;
-  plan: UpgradePlan;
-  levelsApplied: number;
-  pendingLeft: number;
-  playstyles: PlaystyleSlot[];
-}> {
+): Promise<LevelUpResult> {
   const db = env.DB;
   const player = await db
     .prepare(
