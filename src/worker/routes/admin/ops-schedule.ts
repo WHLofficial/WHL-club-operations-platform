@@ -1,6 +1,8 @@
 // 运营时刻表管理端（v6.49.0）：读全表 + 逐项设时段（锚 = 随窗 / 具体时间 / 不限制）。
 // 与窗口开关同级（requireAdmin 不带 perm）——它决定所有转会操作与消费中心的可用性。
+// 契约类型锚点（v6.82.0 第 4 批）：读视图与保存回执的 c.json 泛型以 src/contract/batch4.ts 为真源。
 import { Hono } from 'hono';
+import type { OpsSaveResult, OpsScheduleView } from '../../../contract/batch4.ts';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -13,7 +15,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.get('/ops-schedule', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const view = await opsScheduleView(c.env.DB);
-  return c.json(view);
+  return c.json<OpsScheduleView>(view);
 });
 
 // PUT /api/admin/ops-schedule：body { key, startAnchor, startAt?, endAnchor, endAt?, requiresWindow, closeInflight?, note? }
@@ -35,7 +37,7 @@ app.put('/ops-schedule', async (c) => {
     note: typeof body.note === 'string' ? body.note : '',
   };
   const row = await saveOpsRow(c.env, key, input, user.id ?? null);
-  return c.json({ ok: true, row });
+  return c.json<OpsSaveResult>({ ok: true, row });
 });
 
 // 具体时间只在这一处解析：ISO 字符串（带时区）→ 规范化 ISO；空值/非绝对锚一律 null。

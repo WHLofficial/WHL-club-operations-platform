@@ -1,5 +1,19 @@
 // 管理端 · 赛季管理与赛果确认（附录 A〔6〕，§11；原 admin.ts 赛季域，v2.1.0 拆分，行为零变化）
+// 契约类型锚点（v6.82.0 第 4 批）：赛季列表 / 绑定 / 结算三件套的 c.json 泛型以
+// src/contract/batch4.ts 为真源——装配形状漂移时 typecheck 先红（SeasonRow 不含 ageCap：
+// 端点只 SELECT season,status，甄别 FieldDiff workerMissing 删字段的处置见契约型注）。
 import { Hono } from 'hono';
+import type {
+  BindTournamentResult,
+  ConfirmResultResult,
+  ResultsQueue,
+  SeasonBindingsResponse,
+  SeasonsResponse,
+  SeasonSettleResult,
+  SettleCheckResult,
+  StageSettleResult,
+  TournamentRow,
+} from '../../../contract/batch4.ts';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -42,7 +56,7 @@ app.get('/seasons/:id/settle-check', async (c) => {
   if (!Number.isInteger(season) || season <= 0) throw new HttpError(400, 'season 应为正整数');
   if (!(await c.env.DB.prepare('SELECT season FROM seasons WHERE season = ?').bind(season).first())) throw new HttpError(404, '赛季不存在');
   const check = await checkSeasonSettle(c.env, season);
-  return c.json({ ok: true, season, ...check });
+  return c.json<SettleCheckResult>({ ok: true, season, ...check });
 });
 
 // 赛季结算（v1.4.0）：手动按钮——growable 重判 → seasons.status='settled'（忠诚支出自 v3.0.0 起改在赛季中期窗关窗批扣，不在此处）。
@@ -50,13 +64,13 @@ app.get('/seasons/:id/settle-check', async (c) => {
 app.post('/seasons/:id/settle-season', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const body = (await readJson(c)) as { acknowledged?: unknown } | null;
-  return c.json(await settleSeason(c.env, user.id, c.req.param('id'), body?.acknowledged === true));
+  return c.json<SeasonSettleResult>(await settleSeason(c.env, user.id, c.req.param('id'), body?.acknowledged === true));
 });
 
 // 赛事完结结算（v1.4.0）：入场奖金/资格赛保底/小组赛剩余池一次性发放，stage_settled_at 幂等
 app.post('/season-bindings/:id/stage-settle', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
-  return c.json(await settleTournamentStage(c.env, user.id, c.req.param('id')));
+  return c.json<StageSettleResult>(await settleTournamentStage(c.env, user.id, c.req.param('id')));
 });
 
 app.get('/seasons', async (c) => {
@@ -65,7 +79,7 @@ app.get('/seasons', async (c) => {
     season: number;
     status: string;
   }>();
-  return c.json({ seasons: rows.results });
+  return c.json<SeasonsResponse>({ seasons: rows.results });
 });
 
 // 绑定赛事到赛季（v0.7.1 层级修订：赛季是上级，赛事与窗口并列——赛事绑赛季、窗口只管转会准入）。
@@ -110,7 +124,7 @@ app.post('/seasons/:id/bind-tournament', async (c) => {
     if (String(err).includes('UNIQUE')) throw new HttpError(409, '这座赛事已经绑过赛季了（一座赛事只进一个赛季）');
     throw err;
   }
-  return c.json({ ok: true, tournament: { id: tournament.id, name: tournament.name } });
+  return c.json<BindTournamentResult>({ ok: true, tournament: { id: tournament.id, name: tournament.name } });
 });
 
 // 某赛季的赛事绑定列表（管理端「赛季与赛事绑定」用；赛事名前端经 /tournaments 下拉映射）
@@ -123,7 +137,7 @@ app.get('/seasons/:id/tournaments', async (c) => {
   )
     .bind(season)
     .all<{ id: number; tournament_id: number; competition_type: string | null; stage_settled_at: string | null }>();
-  return c.json({
+  return c.json<SeasonBindingsResponse>({
     bindings: rows.results.map((r) => ({ id: r.id, tournamentId: r.tournament_id, competitionType: r.competition_type, stageSettledAt: r.stage_settled_at })),
   });
 });
@@ -169,18 +183,18 @@ app.get('/tournaments', async (c) => {
     name: string;
     status: string;
   }>();
-  return c.json({ tournaments: rows.results });
+  return c.json<{ tournaments: TournamentRow[] }>({ tournaments: rows.results });
 });
 
 app.get('/results/queue', async (c) => {
   await requireAdmin(c.env, c.req.raw);
-  return c.json(await queueResults(c.env));
+  return c.json<ResultsQueue>(await queueResults(c.env));
 });
 
 app.post('/results/:id/confirm', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const { result, xp } = await confirmResult(c.env, user.id, c.req.param('id'), 'user');
-  return c.json({ ok: true, result, xp }, 201);
+  return c.json<ConfirmResultResult>({ ok: true, result, xp }, 201);
 });
 
 // 重放已确认场次的三钩子（v2.7.0，幂等）：钩子失败/标了人工复核的场，修完数据后从这里补账

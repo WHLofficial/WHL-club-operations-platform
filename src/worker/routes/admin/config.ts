@@ -1,6 +1,10 @@
 // 管理端 · 系统域（v2.1.0）：config 查看/超管写入口 + 审计日志查询
 // （原 admin.ts config 域；超管全开与审计日志为v2.1.0 commit 6 新增）
+// 契约类型锚点（v6.82.0 第 4 批）：平台参数行 / 参数响应 / 审计行 / 审计响应的 c.json 泛型以
+// src/contract/batch4.ts 为真源——装配形状漂移时 typecheck 先红（ConfigRow 行形与
+// core/config.ts listMasked/listRaw 的 return 内联形状逐字段同形）。
 import { Hono } from 'hono';
+import type { AuditEntryRow, AuditLogResponse, ConfigResponse } from '../../../contract/batch4.ts';
 import type { Env } from '../../env.ts';
 import { requireAdmin, requireSuperAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
@@ -21,7 +25,7 @@ app.get('/config', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
   const service = createConfigService(c.env.DB);
   const isSuper = user.permissions.includes('club.config.manage.super');
-  return c.json({
+  return c.json<ConfigResponse>({
     config: isSuper ? await service.listRaw() : await service.listMasked(),
     editable: isSuper,
   });
@@ -87,8 +91,8 @@ app.get('/audit-log', async (c) => {
     .bind(...binds)
     .all<{ id: number; actor: number | null; action: string; target_type: string; target_id: number | null; origin: string | null; before: string | null; after: string | null; at: string }>();
 
-  return c.json({
-    entries: rows.results.map((r) => {
+  return c.json<AuditLogResponse>({
+    entries: rows.results.map((r): AuditEntryRow => {
       const maskSecret = (raw: string | null): string | null => {
         if (isSuper || !raw || r.action !== 'config_set') return raw;
         try {

@@ -5,6 +5,10 @@
 // 招商轮（v6.14.0 C3）：当前轮与报价流水只读 + 手动「清盘+开轮」恢复按钮（幂等语义：每次执行
 // 都会清掉当前 open 轮未签报价并重开一轮，重复执行得到新轮，审计留痕）。
 import { Hono } from 'hono';
+// 契约类型锚点（v6.82.0 第 4 批）：招商轮视图 / 手动重开的 c.json 泛型以 src/contract/batch3.ts
+// 为真源（第 3 批登记的「MarketRound* 四件套 ← routes/admin/brands.ts」锚点缺口在本批兑现；
+// 轮行 status 的 D1 泛型是宽 string，DB 值域恒 'open'|'settled'，装配点断言收窄不改变运行时）。
+import type { MarketOfferRow, MarketRoundReopenResult, MarketRoundResponse } from '../../../contract/batch3.ts';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -317,10 +321,13 @@ app.get('/brands/market-round', async (c) => {
              WHERE o.round_id = ? ORDER BY o.id`,
           )
           .bind(round.id)
-          .all()
+          .all<MarketOfferRow>()
       ).results
     : [];
-  return c.json({ round, offers });
+  return c.json<MarketRoundResponse>({
+    round: round === null ? null : { ...round, status: round.status as 'open' | 'settled' },
+    offers,
+  });
 });
 
 // 手动「清盘+开轮」：自动链路的恢复路径。语义 = 清掉当前 open 轮（未签 pending 作废 + 无人签品牌
@@ -343,7 +350,7 @@ app.post('/brands/market-round/reopen', async (c) => {
     }),
   );
   await c.env.DB.batch(statements);
-  return c.json({
+  return c.json<MarketRoundReopenResult>({
     ok: true,
     hadOpenRound: build.hadOpenRound,
     offerCount: build.offerCount,

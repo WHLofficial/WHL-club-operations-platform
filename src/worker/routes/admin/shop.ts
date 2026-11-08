@@ -1,5 +1,9 @@
 // 消费中心管理端（v6.26.0）：待审工单 / 外部增益代录 / 通过（重校验后自动生效）/ 拒绝（必填理由，club 单自动退款）。
 import { Hono } from 'hono';
+// 契约类型锚点（v6.82.0 第 4 批）：管理端工单列表 / 代录 / 审批 / 拒绝的 c.json 泛型以
+// src/contract/batch3.ts 为真源（第 3 批登记的「AdminShopOrderRow / AdminShopOrdersResponse
+// ← routes/admin/shop.ts」锚点缺口在本批兑现——本文件在批 4 白名单内）。
+import type { AdminShopOrdersResponse, ShopOrderMutationResult } from '../../../contract/batch3.ts';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -49,7 +53,7 @@ app.get('/shop/orders', async (c) => {
     )
     .bind(...params)
     .all<ShopOrderRow & { player_display_name: string | null; player_name: string | null; club_name: string | null }>();
-  return c.json({
+  return c.json<AdminShopOrdersResponse>({
     orders: rows.results.map((r) => {
       const dto = orderDto(r, r.player_display_name ?? r.player_name);
       return { ...dto, clubName: r.club_name ?? null };
@@ -72,7 +76,7 @@ app.post('/shop/orders', async (c) => {
     payload: body.payload,
     note,
   });
-  return c.json({ order: orderDto(order, null), summary }, 201);
+  return c.json<ShopOrderMutationResult>({ order: orderDto(order, null), summary }, 201);
 });
 
 app.post('/shop/orders/:id/approve', async (c) => {
@@ -82,7 +86,7 @@ app.post('/shop/orders/:id/approve', async (c) => {
   const body = (await c.req.raw.json().catch(() => ({}))) as { note?: unknown } | null;
   const note = body && typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null;
   const { order, summary } = await approveShopOrder(c.env, { orderId: id, reviewerId: user.id, note });
-  return c.json({ order: orderDto(order, null), summary });
+  return c.json<ShopOrderMutationResult>({ order: orderDto(order, null), summary });
 });
 
 app.post('/shop/orders/:id/reject', async (c) => {
@@ -94,7 +98,7 @@ app.post('/shop/orders/:id/reject', async (c) => {
     throw new HttpError(400, '拒绝理由必填（会连同退款一起通知教练）');
   }
   const { order, summary } = await rejectShopOrder(c.env, { orderId: id, reviewerId: user.id, reason: body.reason });
-  return c.json({ order: orderDto(order, null), summary });
+  return c.json<ShopOrderMutationResult>({ order: orderDto(order, null), summary });
 });
 
 export default app;

@@ -1,5 +1,8 @@
 // 赛季公开端点（附录 A〔6〕，🌐 无需登录）：当前赛季 + 最新窗口 + 本赛季绑定赛事（v0.7.1：赛事绑赛季）
+// 契约类型锚点（v6.82.0 第 4 批）：GET /seasons/current 的 c.json 泛型以 src/contract/batch4.ts
+// 为真源（SeasonsCurrent / SeasonCurrent 同载荷两名的甄别命名处置见契约型注）。
 import { Hono } from 'hono';
+import type { SeasonsCurrent } from '../../contract/batch4.ts';
 import type { Env } from '../env.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -31,7 +34,7 @@ app.get('/seasons/current', async (c) => {
         .bind(season.season)
         .all<{ id: number; tournament_id: number; competition_type: string | null }>()
     : { results: [] as { id: number; tournament_id: number; competition_type: string | null }[] };
-  return c.json({
+  return c.json<SeasonsCurrent>({
     season: season ? { season: season.season, status: season.status } : null,
     window: win
       ? {

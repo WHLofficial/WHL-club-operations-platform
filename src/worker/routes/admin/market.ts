@@ -7,6 +7,9 @@ import { writeAudit } from '../../../lib/audit.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { createConfigService } from '../../../core/config.ts';
 import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminRevertDeal, requireReason } from '../../market-intervene.ts';
+// 契约类型锚点（v6.82.0 第 4 批）：窗口三端点与看板的 c.json 泛型以 src/contract/batch4.ts 为真源
+// （开/关窗回执由 window-machine 的 return 标注互锁，这里泛型是第二道编译期锁）。
+import type { CloseWindowResult, OpenWindowResult, WindowOverviewRow, WindowsResponse } from '../../../contract/batch4.ts';
 import { listWindows, openWindow, closeWindow } from '../../window-machine.ts';
 import { loadWindowOverview } from '../../squad-audit.ts';
 import { createForcedAuction, cancelForcedAuction, inspectForcedAuction } from '../../bypass.ts';
@@ -120,7 +123,7 @@ for (const [suffix, paused] of [
 // GET /api/admin/windows —— 赛季与窗口列表
 app.get('/windows', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
-  return c.json(await listWindows(c.env.DB));
+  return c.json<WindowsResponse>(await listWindows(c.env.DB));
 });
 
 // POST /api/admin/windows/open —— 开新窗（前置：无在开窗口；全球员经纪人性格重掷）
@@ -131,20 +134,20 @@ app.post('/windows/open', async (c) => {
   const body = (await readJson(c)) as
     | { season?: unknown; windowSeq?: unknown; declareGrowthPeriod?: unknown; temporary?: unknown }
     | null;
-  return c.json(await openWindow(c.env, user.id, body?.season, body?.windowSeq, body?.declareGrowthPeriod, body?.temporary), 201);
+  return c.json<OpenWindowResult>(await openWindow(c.env, user.id, body?.season, body?.windowSeq, body?.declareGrowthPeriod, body?.temporary), 201);
 });
 
 // GET /api/admin/windows/overview —— 关窗页实时看板（v6.69.0 期三）：逐队名单/工资/体检，CPU 也列
 app.get('/windows/overview', async (c) => {
   await requireAdmin(c.env, c.req.raw);
-  return c.json({ clubs: await loadWindowOverview(c.env) });
+  return c.json<{ clubs: WindowOverviewRow[] }>({ clubs: await loadWindowOverview(c.env) });
 });
 
 // POST /api/admin/windows/close —— 关窗（前置校验；force 需 window_force_settle=true）
 app.post('/windows/close', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
   const body = (await readJson(c)) as { force?: unknown } | null;
-  return c.json(await closeWindow(c.env, user.id, body?.force));
+  return c.json<CloseWindowResult>(await closeWindow(c.env, user.id, body?.force));
 });
 
 // ---- 强制拍卖（规则 4.4.5，附录 A〔5〕；v6.51.0 起人选不限——前六仅作参考值） ----

@@ -11,7 +11,19 @@ import { requireAdmin } from '../../../lib/session.ts';
 import { writeAudit } from '../../../lib/audit.ts';
 import { llmChat, llmChatJson, llmConfigured } from '../../../lib/llm.ts';
 import { getOpenWindow, getVisibleSeason } from '../../seasons.ts';
-import { clampEventDraft, loadEventById, loadEventClamps, loadEventSignals, loadWeatherKeys, triggerEventBatch, type EventDraftStruct } from '../../event-ops.ts';
+import { clampEventDraft, loadEventById, loadEventClamps, loadEventSignals, loadWeatherKeys, triggerEventBatch } from '../../event-ops.ts';
+// 契约类型锚点（v6.82.0 第 4 批）：事件管理端点的 c.json 泛型以 src/contract/batch4.ts 为真源——
+// 装配形状漂移时 typecheck 先红（EventDraftStruct 真源同在契约，clampEventDraft 仍走 event-ops）。
+import type {
+  AdminEventDraft,
+  AdminEventOccurrence,
+  AdminEventPoolRow,
+  AdminEventTriggerResult,
+  EventDraftAdoptResult,
+  EventDraftStruct,
+  LlmDraftResult,
+  LlmStatus,
+} from '../../../contract/batch4.ts';
 import { readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -21,8 +33,8 @@ const POOL_COLUMNS = `id, event_id, name, category, weight, event_type, conditio
 
 app.get('/events/pool', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
-  const rows = (await c.env.DB.prepare(`SELECT ${POOL_COLUMNS} FROM event_pool ORDER BY id`).all()).results;
-  return c.json({ events: rows });
+  const rows = (await c.env.DB.prepare(`SELECT ${POOL_COLUMNS} FROM event_pool ORDER BY id`).all<AdminEventPoolRow>()).results;
+  return c.json<{ events: AdminEventPoolRow[] }>({ events: rows });
 });
 
 // 只允许启停（池内容随版本走，管理端不改 JSON）
@@ -84,7 +96,7 @@ app.post('/events/trigger', async (c) => {
   }
 
   const result = await triggerEventBatch(c.env, { season, windowSeq, actor: user.id, origin: 'user', clubIds, eventId });
-  return c.json({ season, windowSeq, ...result });
+  return c.json<AdminEventTriggerResult>({ season, windowSeq, ...result });
 });
 
 app.get('/events/occurrences', async (c) => {
@@ -102,7 +114,7 @@ app.get('/events/occurrences', async (c) => {
   const limitParam = c.req.query('limit');
   const limitNum = limitParam === undefined || limitParam === '' ? 50 : Number(limitParam);
   const limit = Number.isInteger(limitNum) ? Math.min(200, Math.max(1, limitNum)) : 50;
-  if (season === null) return c.json({ season: null, occurrences: [] });
+  if (season === null) return c.json<{ season: number | null; occurrences: AdminEventOccurrence[] }>({ season: null, occurrences: [] });
   const rows = (
     await c.env.DB
       .prepare(
@@ -112,9 +124,9 @@ app.get('/events/occurrences', async (c) => {
          WHERE o.season = ? ORDER BY o.id DESC LIMIT ?`,
       )
       .bind(season, limit)
-      .all()
+      .all<AdminEventOccurrence>()
   ).results;
-  return c.json({ season, occurrences: rows });
+  return c.json<{ season: number | null; occurrences: AdminEventOccurrence[] }>({ season, occurrences: rows });
 });
 
 // ---- LLM 草稿工坊（v6.12.0，D3；管理端 only）----
@@ -131,7 +143,7 @@ interface DraftRow {
   updated_at: string;
 }
 
-function draftView(row: DraftRow) {
+function draftView(row: DraftRow): AdminEventDraft {
   return { ...row, payload: JSON.parse(row.payload_json) as unknown };
 }
 
@@ -161,7 +173,7 @@ app.post('/events/llm-draft', async (c) => {
       )
       .bind(JSON.stringify(payload), event.event_id, hint, user.id)
       .run();
-    return c.json({ id: Number(res.meta.last_row_id ?? 0), kind: 'text', payload, adjustments: [] }, 201);
+    return c.json<LlmDraftResult>({ id: Number(res.meta.last_row_id ?? 0), kind: 'text', payload, adjustments: [] }, 201);
   }
 
   // struct：让模型按 schema 出 JSON，再过 clampEventDraft 钳制（LLM 的数字不可信，钳完才算数）
@@ -191,7 +203,7 @@ app.post('/events/llm-draft', async (c) => {
     )
     .bind(JSON.stringify(payload), noteParts, user.id)
     .run();
-  return c.json({ id: Number(res.meta.last_row_id ?? 0), kind: 'struct', payload, adjustments: clamped.adjustments }, 201);
+  return c.json<LlmDraftResult>({ id: Number(res.meta.last_row_id ?? 0), kind: 'struct', payload, adjustments: clamped.adjustments }, 201);
 });
 
 app.get('/events/drafts', async (c) => {
@@ -207,7 +219,7 @@ app.get('/events/drafts', async (c) => {
       .bind(...(status !== null ? [status] : []))
       .all<DraftRow>()
   ).results;
-  return c.json({ drafts: rows.map(draftView) });
+  return c.json<{ drafts: AdminEventDraft[] }>({ drafts: rows.map(draftView) });
 });
 
 /** 草稿修订（采纳前）：text 改 template、struct 重过 clampEventDraft 再入库。 */
@@ -320,7 +332,7 @@ app.post('/events/drafts/:id/adopt', async (c) => {
     origin: 'user',
     after: { kind: row.kind, target: targetId },
   });
-  return c.json({ id, kind: row.kind, target: targetId });
+  return c.json<EventDraftAdoptResult>({ id, kind: row.kind, target: targetId });
 });
 
 app.post('/events/drafts/:id/discard', async (c) => {
@@ -345,7 +357,7 @@ app.post('/events/drafts/:id/discard', async (c) => {
 /** 生成入口的可用性探针：前端用它决定「生成」按钮是可点还是置灰提示。 */
 app.get('/events/llm-status', async (c) => {
   await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
-  return c.json({ configured: llmConfigured(c.env) });
+  return c.json<LlmStatus>({ configured: llmConfigured(c.env) });
 });
 
 export default app;

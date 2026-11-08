@@ -4,7 +4,10 @@
 // （isolate 级这层 60s 挡不住多 isolate，边缘缓存才是真正的护栏；写路径 purge 保证新鲜度）。
 // v6.28.0：补两个待办计数（待审消费工单 / 待选事件），与既有计数同批同缓存返回。
 // ⚠️ ?fresh=1 只绕过上面这层 isolate 缓存，players 数字仍由两级缓存供（要强制重算就等 purge）。
+// 契约类型锚点（v6.82.0 第 4 批）：总览轻计数的形状以 src/contract/batch4.ts 为唯一真源——
+// 本地同名 AdminOverview 接口删除改 import 契约（isolate 缓存的泛型也锁在同一份上）。
 import { Hono } from 'hono';
+import type { AdminOverview } from '../../../contract/batch4.ts';
 import type { Env } from '../../env.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { queueResults } from '../../results.ts';
@@ -13,22 +16,6 @@ import { countAllPlayers } from '../players.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 const OVERVIEW_TTL_MS = 60_000;
-
-export interface AdminOverview {
-  openReviews: number;
-  resultQueue: number;
-  activeListings: number;
-  clubs: number;
-  // v6.27.0：CPU 队计数（接管向导入口的角标）
-  cpuClubs: number;
-  players: number;
-  // v6.28.0 待办两卡：口径与各自列表页同一真源，别处不许另算
-  /** 待审消费工单 = shop_orders.status='pending'（AdminShopPage 默认筛选「待审核」；admin/shop.ts 的 o.status = ?） */
-  pendingShopOrders: number;
-  /** 待选事件 = event_occurrences 里 status='pending' AND event_type='choice'（教练端待选列表/触发侧 maxPending 同形） */
-  pendingEvents: number;
-  at: string;
-}
 
 // module 级 = isolate 级；resetOverviewCache 供测试隔离
 let cache: { at: number; data: AdminOverview } | null = null;
@@ -68,7 +55,7 @@ app.get('/overview', async (c) => {
       },
     };
   }
-  return c.json(cache.data);
+  return c.json<AdminOverview>(cache.data);
 });
 
 export default app;

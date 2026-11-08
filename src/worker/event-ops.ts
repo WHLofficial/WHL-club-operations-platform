@@ -16,8 +16,22 @@
 // v6.12.0（D3）起 14 键里 13 键真落库：satisfaction → naming_contracts.satisfaction（0051，钳 [0,2]）；
 // signals → 效果值按 event_signals 清洗后入 effects_json，关窗批三消费点（home.ts：fan_mood 死忠、
 // upkeep 维护费、fee_mod 冠名费）；offer_spawn 真落库（v6.14.0 C3：往当前开放招商轮塞上门报价，market-ops.spawnVisitOffer）。
+// 契约锚点（v6.82.0 第 4 批）：玩家侧事件视图 / 触发回执 / 草稿结构以 src/contract/batch4.ts 为
+// 唯一真源——本地同名接口删除定义改 import 契约，worker 内部名（EventOption / EventOutcome /
+// TriggeredEvent / TriggerResult）保留作本地别名，对应关系见契约型注（甄别 naming）。
+import type {
+  AdminEventTriggeredRow,
+  AdminEventTriggerResult,
+  ClubEventOption,
+  ClubEventOptionOutcome,
+  ClubEventPending,
+  ClubEventRecent,
+  EventDraftStruct,
+} from '../contract/batch4.ts';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
+// routes/admin/events.ts 经本模块转引 EventDraftStruct，re-export 保旧 import 路径零改动。
+export type { EventDraftStruct };
 import { createConfigService } from '../core/config.ts';
 import { walkoverLoser } from '../core/walkover.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
@@ -533,19 +547,12 @@ export function renderEventText(event: EventRow, ctx: EventClubContext): string 
 
 // ---- 选择型（v6.11.0，D2）：选项 / 结果 / 广播文案 ----
 
-/** 选项里的一条结果分支：权重 w + 效果表（插件 options_json 同形） */
-export interface EventOutcome {
-  w: number;
-  effects: Record<string, unknown>;
-}
+/** 选项里的一条结果分支：权重 w + 效果表（插件 options_json 同形）。
+ *  形状真源 = 契约 ClubEventOptionOutcome（v6.82.0 第 4 批并源，本地接口删除改 import），旧名保留作内部别名。 */
+export type EventOutcome = ClubEventOptionOutcome;
 
-/** 选择型事件的一个选项 */
-export interface EventOption {
-  no: number;
-  name: string;
-  desc: string;
-  outcomes: EventOutcome[];
-}
+/** 选择型事件的一个选项。形状真源 = 契约 ClubEventOption（第 4 批并源），旧名保留作内部别名。 */
+export type EventOption = ClubEventOption;
 
 /**
  * 解析 options_json（宽容：坏条目整条剔除，缺失权重按 1——插件 `max(1, int(o.get('w', 1)))` 同口径）。
@@ -1104,28 +1111,13 @@ export interface TriggerInput {
   rng?: () => number;
 }
 
-export interface TriggeredEvent {
-  occurrenceId: number;
-  clubId: number;
-  clubName: string;
-  eventId: string;
-  eventName: string;
-  /** instant=当刻结算 / choice=进待定等玩家选（v6.11.0 开放） */
-  eventType: string;
-  /** 选择型的截止时刻（instant 与「不设时限」都是 null） */
-  deadlineAt: string | null;
-  text: string;
-  notes: string[];
-  effects: Record<string, unknown>;
-}
+/** 触发批的单事件行。形状真源 = 契约 AdminEventTriggeredRow（第 4 批并源：eventType/deadlineAt
+ *  恒发，api 手抄的可选按 workerReality 去掉），旧名保留作内部别名。 */
+export type TriggeredEvent = AdminEventTriggeredRow;
 
-export interface TriggerResult {
-  clubs: number;
-  triggered: number;
-  /** 掷中但没有可用候选（都被条件挡了或已达 maxOccurrences）的队数 */
-  capped: number;
-  events: TriggeredEvent[];
-}
+/** 触发回执主体（路由再包 season/windowSeq 成顶层形状）。真源 = 契约 AdminEventTriggerResult 的
+ *  同名子集——契约顶层另有 season/windowSeq 两键，本别名只覆盖 triggerEventBatch 的 return。 */
+export type TriggerResult = Omit<AdminEventTriggerResult, 'season' | 'windowSeq'>;
 
 /**
  * 触发一批随机事件：每队独立掷 hitProbability，命中后加权单抽一条即发型事件并当刻结算。
@@ -1601,31 +1593,8 @@ export async function expirePendingEvents(env: Env, nowIso?: string): Promise<Ev
   return { expired, reminded, skipped };
 }
 
-export interface ClubEventPending {
-  id: number;
-  eventId: string;
-  eventName: string;
-  deadlineAt: string | null;
-  text: string;
-  options: EventOption[];
-}
-
-export interface ClubEventRecent {
-  id: number;
-  eventId: string;
-  eventName: string;
-  eventType: string;
-  choiceNo: number | null;
-  optionName: string;
-  auto: boolean;
-  skipped: boolean;
-  effects: Record<string, unknown>;
-  notes: string[];
-  text: string;
-  resolvedBy: string;
-  resolvedAt: string | null;
-  createdAt: string;
-}
+// ClubEventPending / ClubEventRecent 已并源契约 batch4.ts（v6.82.0 第 4 批，文件头 import）：
+// listClubEvents 的两个列表行直接引用契约真源，本地定义删除。
 
 export interface ClubEventsView {
   pending: ClubEventPending[];
@@ -1823,17 +1792,8 @@ const DRAFT_CONDITION_NUM_RANGE: Record<string, [number, number]> = {
   max_balance: [0, 10_000],
 };
 
-export interface EventDraftStruct {
-  event_id: string;
-  name: string;
-  category: string;
-  weight: number;
-  event_type: 'instant' | 'choice';
-  conditions: Record<string, unknown>;
-  effects: Record<string, unknown>;
-  options: { no: number; name: string; desc: string; outcomes: { w: number; effects: Record<string, unknown> }[] }[];
-  template: string;
-}
+// EventDraftStruct 已并源契约 batch4.ts（v6.82.0 第 4 批，文件头 import；routes/admin/events.ts
+// 经本模块转引的名字不变）。
 
 /**
  * LLM 生成的事件结构草稿过钳制闸（插件 design_events 的 `_clamp_event` 同思路）：

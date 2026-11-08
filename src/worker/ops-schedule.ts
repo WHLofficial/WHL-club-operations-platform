@@ -1,6 +1,10 @@
 // 运营时刻表读库 + 闸门 + 保存（v6.49.0）。设计见 memory/design-ops-schedule-expiry.md。
 // 60s 内存缓存（与 src/core/config.ts 同口径：管理端改后 ≤60s 生效）；保存后本 isolate 立即失效。
 // 闸门是「同步」的一半：写路径进来先问一句「这个操作现在开着吗」；另一半是到期引擎（expiry-ops.ts）。
+// 契约类型锚点（v6.82.0 第 4 批）：读接口行 / 视图 / 保存回执的形状以 src/contract/batch4.ts 为
+// 唯一真源——本地 OpsStatusRow / OpsScheduleView 接口删除改 import 契约（锚/状态三联合的真源
+// 本就在 core/ops-schedule.ts，契约按口径 7② 从 core 转发，此处仍从 core import 原名）。
+import type { OpsScheduleView, OpsStatusRow } from '../contract/batch4.ts';
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement } from '../lib/audit.ts';
@@ -16,7 +20,6 @@ import {
   type OpsInput,
   type OpsRow,
   type OpsStartAnchor,
-  type OpsState,
   type OpsWindowRef,
 } from '../core/ops-schedule.ts';
 
@@ -127,31 +130,7 @@ export async function assertOpOpen(db: D1Database, opKey: string): Promise<void>
 }
 
 // ---- 读接口（教练侧 + 管理端共用）----
-
-export interface OpsStatusRow {
-  key: string;
-  label: string;
-  group: string;
-  desc: string;
-  startAnchor: OpsStartAnchor;
-  startAt: string | null;
-  endAnchor: OpsEndAnchor;
-  endAt: string | null;
-  requiresWindow: boolean;
-  closeInflight: boolean;
-  note: string;
-  state: OpsState;
-  stateLabel: string;
-  resolvedStartAt: string | null;
-  resolvedEndAt: string | null;
-  endIsWindowClose: boolean;
-}
-
-export interface OpsScheduleView {
-  now: string;
-  window: OpsWindowRef | null;
-  rows: OpsStatusRow[];
-}
+// OpsStatusRow / OpsScheduleView 已并源契约 batch4.ts（v6.82.0 第 4 批，文件头 import）：本地接口删除。
 
 export async function opsScheduleView(db: D1Database, nowIso?: string): Promise<OpsScheduleView> {
   const rows = await loadOpsRows(db);

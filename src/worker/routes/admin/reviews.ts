@@ -1,6 +1,10 @@
 // 管理端 · 注册快照与准入体检（附录 A〔2〕）+ 成交审核队列（附录 A〔3〕：转会成交确认，关键节点人工审）
 // （原 admin.ts 注册/审核域，v2.1.0 拆分，行为零变化）
+// 契约类型锚点（v6.82.0 第 4 批）：名单报表 / 审核队列 / 批量回执的 c.json 泛型以
+// src/contract/batch4.ts 为真源——AdminRegistrations 的 source/isCpu/unsigned 三处 workerExtra
+// 补抄与分支差异（season=null 早退无 source、archive 分支无 unsigned）见契约型注。
 import { Hono } from 'hono';
+import type { AdminRegistrations, AdminReviewBatchResult, AdminReviewRow, AdminReviews } from '../../../contract/batch4.ts';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -41,7 +45,7 @@ app.get('/registrations', async (c) => {
     const latest = await c.env.DB.prepare('SELECT MAX(season) AS s FROM registrations').first<{ s: number | null }>();
     season = latest?.s ?? null;
   }
-  if (season === null) return c.json({ season: null, clubs: [] });
+  if (season === null) return c.json<AdminRegistrations>({ season: null, clubs: [] });
 
   // 历史赛季：读存档快照（合同与名单都已过期，重算没有意义）
   if (season !== current) {
@@ -99,7 +103,7 @@ app.get('/registrations', async (c) => {
       wageTotal: Math.round(club.wageTotal * 100) / 100,
       players: club.players,
     }));
-    return c.json({ season, source: 'archive', clubs });
+    return c.json<AdminRegistrations>({ season, source: 'archive', clubs });
   }
 
   // 当前赛季：现算（名单随合同自动更新，没有"提交过才有名字"这回事）
@@ -131,7 +135,7 @@ app.get('/registrations', async (c) => {
       };
     }),
   );
-  return c.json({ season, source: 'live', clubs });
+  return c.json<AdminRegistrations>({ season, source: 'live', clubs });
 });
 
 // GET /api/admin/compliance?season= —— 准入体检报告（P1 首版：只报告，不触发强制拍卖）
@@ -341,8 +345,8 @@ app.get('/reviews', async (c) => {
   )
     .bind(...(status === 'all' ? [] : [status]))
     .all<ReviewTaskRow>();
-  return c.json({
-    reviews: rows.results.map((r) => ({
+  return c.json<AdminReviews>({
+    reviews: rows.results.map((r): AdminReviewRow => ({
       id: r.id,
       kind: r.type,
       status: r.status,
@@ -533,7 +537,7 @@ app.post('/reviews/batch', async (c) => {
     origin: 'user',
     after: { action, ids, ok: okCount, failed: results.length - okCount, note },
   });
-  return c.json({ ok: true, results });
+  return c.json<AdminReviewBatchResult>({ ok: true, results });
 });
 
 export default app;

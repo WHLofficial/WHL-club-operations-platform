@@ -3,8 +3,13 @@
 // 重掷经纪人性格（§6.8）；关窗：先跑惰性结算（截止判定/激活失效/匹配到期），再校验
 // ——活跃谈判会话（force 且 window_force_settle=true 时按 E 强制成约）、匹配等待单、
 // 待审队列全空——然后落 closed 并做窗尾收口（无人出价下架收费、竞价转待审）。
+// 契约类型锚点（v6.82.0 第 4 批）：窗口列表 / 开关窗回执的形状以 src/contract/batch4.ts 为唯一
+// 真源——本地 WindowRow 接口删除改 import 契约（全仓无外部 import，无需 re-export），开/关窗
+// return 的内联类型改契约引用（venueReset/venueNotified/demandsCreated/payroll/home 四处
+// workerExtra 补抄的处置见契约型注；payroll/home 的形状真源仍 PayrollSummary / HomeWindowSummary，
+// 与契约内部辅助型逐字段同形，typecheck 互锁）。
+import type { CloseWindowResult, OpenWindowResult, WindowsResponse } from '../contract/batch4.ts';
 import type { Env } from './env.ts';
-import type { PayrollSummary } from './window-payroll.ts';
 import { HttpError } from '../lib/http.ts';
 import { createConfigService } from '../core/config.ts';
 import { createAuditStatement } from '../lib/audit.ts';
@@ -14,7 +19,7 @@ import { forceSettleAtExpected } from './negotiations.ts';
 import { windowPayrollStatements } from './window-payroll.ts';
 import { loyaltyMovements } from './season-settle.ts';
 import { growthPeriodStatements } from './growth.ts';
-import { windowHomeStatements, type HomeWindowSummary } from './home.ts';
+import { windowHomeStatements } from './home.ts';
 import { queueClubNotification } from './notify.ts';
 import { SQUAD_RULE_LABEL, squadAuditStatements } from './squad-audit.ts';
 import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
@@ -33,16 +38,9 @@ function defaultRng(): number {
   return new DataView(buf.buffer).getUint32(0) / 2 ** 32;
 }
 
-export interface WindowRow {
-  season: number;
-  windowSeq: number;
-  status: string;
-  isTemporary: boolean;
-  openedAt: string | null;
-  closedAt: string | null;
-}
+// WindowRow / WindowsResponse 已并源契约 batch4.ts（v6.82.0 第 4 批，文件头 import）：本地接口删除。
 
-export async function listWindows(db: D1Database): Promise<{ seasons: { season: number; status: string }[]; windows: WindowRow[] }> {
+export async function listWindows(db: D1Database): Promise<WindowsResponse> {
   const seasons = await db
     .prepare('SELECT season, status FROM seasons ORDER BY season DESC LIMIT 50')
     .all<{ season: number; status: string }>();
@@ -79,18 +77,7 @@ export async function openWindow(
   windowSeqInput: unknown,
   declareGrowthPeriodInput?: unknown,
   temporaryInput?: unknown,
-): Promise<{
-  ok: true;
-  season: number;
-  windowSeq: number;
-  rerolled: number;
-  growthPeriodDeclared: boolean;
-  isTemporary: boolean;
-  venueReset: boolean;
-  venueNotified: number;
-  /** 本窗新生成的球员涨薪要求条数（v6.54.0 §8；生成失败时保持 0，靠 cron 幂等补跑） */
-  demandsCreated: number;
-}> {
+): Promise<OpenWindowResult> {
   const db = env.DB;
   const config = createConfigService(db);
 
@@ -401,17 +388,7 @@ export async function closeWindow(
   env: Env,
   actor: number,
   forceInput: unknown,
-): Promise<{
-  ok: true;
-  season: number;
-  windowSeq: number;
-  isTemporary: boolean;
-  forceSettled: number;
-  payroll: PayrollSummary;
-  home: HomeWindowSummary;
-  /** 忠诚支出（v6.47.0 起为俱乐部扣款）：count = 人次数、total = 扣款金额绝对值（正数） */
-  loyalty: { count: number; total: number };
-}> {
+): Promise<CloseWindowResult> {
   const db = env.DB;
   const win = await currentWindow(db);
   if (!win) throw new HttpError(409, '当前没有开着的窗口');

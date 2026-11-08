@@ -1,5 +1,38 @@
 // 教练侧：凭认证码绑定俱乐部 + 我的球队概览（附录 A〔1〕，§3.2 照比赛系统 coach/bind 模式）
+// 契约类型锚点（v6.82.0 第 4 批）：本文件全部响应装配点的 c.json 泛型以 src/contract/batch4.ts
+// 与 batch3.ts 为真源——第 4 批承载 club / season / window / event / cpu 各型，第 3 批缺口
+// （LedgerPage / VoucherLedgerResponse / FinanceSummaryResponse / HomeMatchesResponse /
+// StadiumBuildInfo / BuildPaymentResult / Shortlist* / Naming* 装配 / BookingRow 挂 Venue*Response /
+// ClubOffer）在此一并兑现。⚠️ 两处 MyClubOverview 未绑定分支 return（:665/:673 一带）不标泛型：
+// worker 不发 home 键（甄别 FieldDiff workerMissing，登记见契约型注），标了会编译红，运行时零变化。
 import { Hono } from 'hono';
+import type {
+  ClubBalance,
+  ClubDetail,
+  ClubEventChooseResult,
+  ClubEventsResponse,
+  ClubStanding,
+  ClubSummary,
+  MyClubOverview,
+} from '../../contract/batch4.ts';
+import type {
+  BuildPaymentResult,
+  ClubOffer,
+  FinanceSummaryResponse,
+  HomeMatchesResponse,
+  LedgerPage,
+  NamingOfferAcceptResult,
+  NamingQuoteResponse,
+  NamingRenewResult,
+  NamingTerminateResult,
+  ShortlistIdsResponse,
+  ShortlistResponse,
+  StadiumBuildInfo,
+  VenuePlanResponse,
+  VenuePreviewResponse,
+  VenueSaveResponse,
+  VoucherLedgerResponse,
+} from '../../contract/batch3.ts';
 import type { Env } from '../env.ts';
 import { HttpError } from '../../lib/http.ts';
 import { requireCoach, requireUser } from '../../lib/session.ts';
@@ -58,7 +91,10 @@ app.get('/clubs/directory', async (c) => {
     },
     { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
   );
-  return c.json(data);
+  // ⚠️ 甄别 FieldDiff naming（登记见契约 ClubDirectoryRow 型注）：本端点 SQL 原样透传
+  // league_tier（snake_case），契约随 api 手抄保留 camel——装配点以内联如实形锁三键存在，
+  // 不引契约型（引了会编译红，运行时又不能补键）。
+  return c.json<{ clubs: { id: number; name: string; league_tier: string }[] }>(data);
 });
 
 // 球队页列表（🌐 公开，v3.4.0）：全平台 active 俱乐部的四项指标 + 分级 + 队徽。
@@ -149,7 +185,7 @@ app.get('/clubs', async (c) => {
     },
     { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
   );
-  return c.json(data);
+  return c.json<{ clubs: ClubSummary[] }>(data);
 });
 
 // ---- 球队详情（v3.4.0，🔒 需登录）----
@@ -471,7 +507,7 @@ app.get('/clubs/:id', async (c) => {
     },
     { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
   );
-  return c.json(data);
+  return c.json<ClubDetail>(data);
 });
 
 // 排名代理（🔒 需登录）：比赛系统公开积分榜 GET /api/public/tournaments/:id/standings 自带边缘缓存
@@ -598,7 +634,7 @@ app.get('/clubs/:id/standing', async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '球队 ID 不对');
   // 未配比赛系统基址：排名区块整体降级，一个库都不查（前端显示「排名暂不可用」）
-  if (!c.env.TOUR_API_BASE) return c.json({ standing: null, note: '排名暂不可用' });
+  if (!c.env.TOUR_API_BASE) return c.json<ClubStanding>({ standing: null, note: '排名暂不可用' });
 
   try {
     const data = await cachedJson(
@@ -607,10 +643,10 @@ app.get('/clubs/:id/standing', async (c) => {
       () => loadStanding(c.env, id),
       { scope: 'clubs', env: c.env, ctx: waitUntilOf(c) },
     );
-    return c.json(data);
+    return c.json<ClubStanding>(data);
   } catch (e) {
     // 取不到就不缓存（cachedJson 里 loader 抛错不会落缓存），前端照常渲染其余区块
-    if (e instanceof StandingUnavailable) return c.json({ standing: null, note: e.message });
+    if (e instanceof StandingUnavailable) return c.json<ClubStanding>({ standing: null, note: e.message });
     throw e;
   }
 });
@@ -734,7 +770,9 @@ app.get('/me/club', async (c) => {
       facilities: facilities.results.map((f) => ({ key: f.facility_key, level: f.level })),
     };
   }
-  return c.json({
+  // 主分支标契约 MyClubOverview（home 恒发，绑定后必有本键）；上面两个未绑定分支不标：
+  // worker 不发 home 键（甄别 FieldDiff workerMissing，处置登记见契约型注），运行时零变化。
+  return c.json<MyClubOverview>({
     club: {
       id: club.id,
       name: club.name,
@@ -764,10 +802,10 @@ app.get('/club/balance', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) {
-    return c.json({ club: null, balance: null, held: null, available: null, expectedIncome: null, creditLine: null, activationIncome: null, activationCredit: null });
+    return c.json<ClubBalance>({ club: null, balance: null, held: null, available: null, expectedIncome: null, creditLine: null, activationIncome: null, activationCredit: null });
   }
   const snapshot = await balanceSnapshot(c.env.DB, club.id);
-  return c.json({ club: { id: club.id, name: club.name }, ...snapshot });
+  return c.json<ClubBalance>({ club: { id: club.id, name: club.name }, ...snapshot });
 });
 
 // 流水账（附录 A〔6〕）：新→旧倒序翻页，cursor=上一页最后一条的 id；hard LIMIT+1 探下一页
@@ -776,7 +814,7 @@ const LEDGER_PAGE_SIZE = 30;
 app.get('/club/ledger', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (!club) return c.json({ club: null, entries: [], nextCursor: null });
+  if (!club) return c.json<LedgerPage>({ club: null, entries: [], nextCursor: null });
 
   const conditions = ['club_id = ?'];
   const args: unknown[] = [club.id];
@@ -812,7 +850,7 @@ app.get('/club/ledger', async (c) => {
     }>();
   const hasMore = rows.results.length > LEDGER_PAGE_SIZE;
   const page = hasMore ? rows.results.slice(0, LEDGER_PAGE_SIZE) : rows.results;
-  return c.json({
+  return c.json<LedgerPage>({
     club: { id: club.id, name: club.name },
     entries: page.map((r) => ({
       id: r.id,
@@ -832,7 +870,7 @@ app.get('/club/ledger', async (c) => {
 app.get('/club/vouchers', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (!club) return c.json({ club: null, entries: [], nextCursor: null });
+  if (!club) return c.json<VoucherLedgerResponse>({ club: null, entries: [], nextCursor: null });
   const conditions = ['club_id = ?'];
   const args: unknown[] = [club.id];
   const kind = c.req.query('kind');
@@ -865,7 +903,7 @@ app.get('/club/vouchers', async (c) => {
     }>();
   const hasMore = rows.results.length > LEDGER_PAGE_SIZE;
   const page = hasMore ? rows.results.slice(0, LEDGER_PAGE_SIZE) : rows.results;
-  return c.json({
+  return c.json<VoucherLedgerResponse>({
     club: { id: club.id, name: club.name },
     balance: await voucherBalance(c.env.DB, club.id),
     entries: page.map((r) => ({
@@ -931,7 +969,7 @@ app.get('/club/shortlist', async (c) => {
       fc_id: number | null;
       club_name: string | null;
     }>();
-  return c.json({
+  return c.json<ShortlistResponse>({
     clubId: club.id,
     cap,
     items: rows.results.map((r) => ({
@@ -961,7 +999,7 @@ app.get('/club/shortlist/ids', async (c) => {
   const rows = await c.env.DB.prepare('SELECT id, player_id FROM player_shortlist WHERE club_id = ? ORDER BY id DESC')
     .bind(club.id)
     .all<{ id: number; player_id: number }>();
-  return c.json({
+  return c.json<ShortlistIdsResponse>({
     clubId: club.id,
     playerIds: rows.results.map((r) => r.player_id),
     // 行 id 供球员页「移出」直接 DELETE /club/shortlist/:id（v6.58.0）
@@ -1035,7 +1073,7 @@ const HOME_MATCHES_LIMIT = 10;
 app.get('/club/home-matches', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (!club) return c.json({ club: null, matches: [] });
+  if (!club) return c.json<HomeMatchesResponse>({ club: null, matches: [] });
 
   const rows = await c.env.DB.prepare(
     `SELECT a.match_id, a.season, a.window_seq, a.weather, a.attendance, a.ticket, a.commercial, a.broadcast,
@@ -1099,7 +1137,7 @@ app.get('/club/home-matches', async (c) => {
       result,
     };
   });
-  return c.json({ club: { id: club.id, name: club.name }, matches });
+  return c.json<HomeMatchesResponse>({ club: { id: club.id, name: club.name }, matches });
 });
 
 // 窗口财务汇总（v6.7.0，B2）：账本 ledger_entries 没有窗口列，归窗口径分三层——
@@ -1112,7 +1150,7 @@ app.get('/club/home-matches', async (c) => {
 app.get('/club/finance-summary', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (!club) return c.json({ club: null, season: null, windows: [], outside: null, totals: null });
+  if (!club) return c.json<FinanceSummaryResponse>({ club: null, season: null, windows: [], outside: null, totals: null });
 
   const seasonParam = c.req.query('season');
   let season: number;
@@ -1122,7 +1160,7 @@ app.get('/club/finance-summary', async (c) => {
     season = n;
   } else {
     const visible = await getVisibleSeason(c.env.DB);
-    if (visible === null) return c.json({ club: { id: club.id, name: club.name }, season: null, windows: [], outside: null, totals: null });
+    if (visible === null) return c.json<FinanceSummaryResponse>({ club: { id: club.id, name: club.name }, season: null, windows: [], outside: null, totals: null });
     season = visible;
   }
 
@@ -1228,7 +1266,7 @@ app.get('/club/finance-summary', async (c) => {
         closingBalance: seasonClosing,
       }
     : null;
-  return c.json({
+  return c.json<FinanceSummaryResponse>({
     club: { id: club.id, name: club.name },
     season,
     windows,
@@ -1267,7 +1305,7 @@ app.get('/club/stadium/build-info', async (c) => {
   // v6.65.3：球场卡与守卫同口径展示可支配（现金不够时靠授信仍可施工）
   const available = await availableBalance(c.env.DB, club.id);
   const win = await getOpenWindow(c.env.DB);
-  return c.json({
+  return c.json<StadiumBuildInfo>({
     // v6.58.0：券余额升格为俱乐部级（建设返 25% + 管理组发放），字段名从 credit 改为 voucherBalance
     voucherBalance: vouchers,
     balance,
@@ -1311,7 +1349,7 @@ app.post('/club/stadium/expand', async (c) => {
   // v6.30.0 开窗闸在 expandStadium 内：参数校验优先，避免关窗把参数错误也报成 409
   const body = (await c.req.raw.json().catch(() => null)) as { seats?: unknown } | null;
   const out = await expandStadium(c.env, club.id, Number(body?.seats), user.id);
-  return c.json(out, 201);
+  return c.json<BuildPaymentResult>(out, 201);
 });
 
 app.post('/club/stadium/upgrade', async (c) => {
@@ -1320,7 +1358,7 @@ app.post('/club/stadium/upgrade', async (c) => {
   if (!club) throw new HttpError(403, '先绑定俱乐部再经营设施');
   // v6.30.0 开窗闸在 upgradeStadiumTier 内：档位/容量校验优先
   const out = await upgradeStadiumTier(c.env, club.id, user.id);
-  return c.json(out, 201);
+  return c.json<BuildPaymentResult>(out, 201);
 });
 
 app.post('/club/facilities/upgrade', async (c) => {
@@ -1330,7 +1368,7 @@ app.post('/club/facilities/upgrade', async (c) => {
   const body = (await c.req.raw.json().catch(() => null)) as { key?: unknown } | null;
   if (typeof body?.key !== 'string') throw new HttpError(400, '缺设施类型');
   const out = await upgradeFacilityLevel(c.env, club.id, body.key, user.id);
-  return c.json(out, 201);
+  return c.json<BuildPaymentResult>(out, 201);
 });
 
 // 冠名市场（v2.6.0；v6.14.0 C3 起签约只走招商轮报价——「收到的报价」取代品牌直签列表）
@@ -1397,7 +1435,11 @@ function namingContractDto(
   };
 }
 
-function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]) {
+// offerDto 形状真源 = 契约 ClubOffer（batch3.ts，v6.82.0 第 3 批迁出；批 3 缺口在本文件兑现）。
+// status 产出点按契约收窄字面：listClubOffers 的 WHERE 恒只取
+// `(status='pending' AND round open) OR status='queued'`（market-ops.ts:119），行类型标宽是
+// D1 泛型的保守写法，这里断言不改变任何运行时行为。
+function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]): ClubOffer {
   return {
     id: row.id,
     brand: row.brand,
@@ -1406,7 +1448,7 @@ function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]) {
     packageNo: row.package_no,
     amount: row.amount,
     windows: row.windows,
-    status: row.status,
+    status: row.status as 'pending' | 'queued',
     expireAt: row.expire_at,
     // v6.51.0 批 1：签下将命名为「品牌·球场名」（无球场名时空串，前端不加行）
     venueName: composeVenueName(row.brand, row.stadium_name),
@@ -1452,7 +1494,7 @@ app.get('/club/naming/quote', async (c) => {
           (b) => b.brand === contract.brand,
         ) ?? null
       : null;
-    return c.json({
+    return c.json<NamingQuoteResponse>({
       contract: {
         ...namingContractDto(contract, brandProfile),
         tier: brandTier,
@@ -1464,7 +1506,7 @@ app.get('/club/naming/quote', async (c) => {
       offers,
     });
   }
-  return c.json({ offers });
+  return c.json<NamingQuoteResponse>({ offers });
 });
 
 app.post('/club/naming/offers/:id/accept', async (c) => {
@@ -1476,7 +1518,7 @@ app.post('/club/naming/offers/:id/accept', async (c) => {
   const body = (await c.req.raw.json().catch(() => null)) as { mode?: unknown } | null;
   const out = await acceptOffer(c.env, offerId, club.id, body?.mode, user.id);
   const profile = out.contract ? await loadBrandProfile(c.env.DB, out.contract.brand) : null;
-  return c.json(
+  return c.json<NamingOfferAcceptResult>(
     { result: out.result, penalty: out.penalty, contract: out.contract ? namingContractDto(out.contract, profile) : null },
     201,
   );
@@ -1488,7 +1530,7 @@ app.post('/club/naming/renew', async (c) => {
   if (!club) throw new HttpError(403, '先绑定俱乐部再谈冠名');
   const body = (await c.req.raw.json().catch(() => null)) as { packageNo?: unknown } | null;
   const contract = await renewNaming(c.env, club.id, Number(body?.packageNo), user.id);
-  return c.json({ contract: namingContractDto(contract, await loadBrandProfile(c.env.DB, contract.brand)) }, 201);
+  return c.json<NamingRenewResult>({ contract: namingContractDto(contract, await loadBrandProfile(c.env.DB, contract.brand)) }, 201);
 });
 
 app.post('/club/naming/terminate', async (c) => {
@@ -1520,7 +1562,7 @@ app.post('/club/naming/terminate', async (c) => {
       }
     }
   }
-  return c.json(out, 201);
+  return c.json<NamingTerminateResult>(out, 201);
 });
 
 // 球场档期（v6.9.0）：每窗非比赛日档位的活动预订；收益与草皮损坏在窗末随关窗批结算
@@ -1791,6 +1833,8 @@ app.get('/club/venue-plan', async (c) => {
   }
 
   const existing = picks.filter((p): p is { slotNo: number; activity: string } => typeof p.activity === 'string' && p.activity !== 'idle');
+  // Object.fromEntries 推不出键集，但 VENUE_POLICIES 恒三值（core VenuePolicy 联合）⇒
+  // 断言收窄到契约 Record<VenuePolicyChoice,…>（batch3），纯类型、零运行时。
   const recommendations = Object.fromEntries(
     VENUE_POLICIES.map((policy) => [
       policy,
@@ -1806,9 +1850,9 @@ app.get('/club/venue-plan', async (c) => {
         existing,
       }),
     ]),
-  );
+  ) as VenuePlanResponse['recommendations'];
 
-  return c.json({
+  return c.json<VenuePlanResponse>({
     clubId: club.id,
     window: state.window,
     capacity: state.capacity,
@@ -1871,7 +1915,7 @@ app.post('/club/venue-plan/preview', async (c) => {
     const reason = activityUnlockReason(def, state.facilities, state.reputation);
     if (reason !== null) unlockReasons[quote.slotNo] = reason;
   }
-  return c.json({ slots: plan.quotes, totals: plan.totals, unlockReasons });
+  return c.json<VenuePreviewResponse>({ slots: plan.quotes, totals: plan.totals, unlockReasons });
 });
 
 app.put('/club/venue-plan', async (c) => {
@@ -1962,9 +2006,11 @@ app.put('/club/venue-plan', async (c) => {
     .map(([slotNo, activity]) => ({ slotNo, activity }));
   const plan = quotePicks(state, picks);
 
-  return c.json({
+  return c.json<VenueSaveResponse>({
     slots: plan.quotes,
-    policy: policyChange === undefined ? state.policy : policyChange === '' ? null : policyChange,
+    // policyChange 非 undefined 时已被 VENUE_POLICIES.includes 收成三值之一（:1924 校验分支），
+    // '' 映射 null ⇒ 断言收窄到契约 VenuePolicyChoice | null，纯类型、零运行时。
+    policy: (policyChange === undefined ? state.policy : policyChange === '' ? null : policyChange) as VenueSaveResponse['policy'],
     totals: plan.totals,
   });
 });
@@ -1976,7 +2022,7 @@ app.get('/club/events', async (c) => {
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   if (!club) throw new HttpError(403, '先绑定俱乐部再看事件');
   const view = await listClubEvents(c.env, club.id);
-  return c.json({ clubId: club.id, ...view });
+  return c.json<ClubEventsResponse>({ clubId: club.id, ...view });
 });
 
 // GET /api/club/players/:id/requests —— 本队球员的在途单据（v6.64.4 自助取消的数据源）：
@@ -2040,7 +2086,7 @@ app.post('/club/events/:id/choose', async (c) => {
   if (!options.some((o) => o.no === choiceNo)) throw new HttpError(400, `没有「${choiceNo}」号选项`);
   // 过了时限但 cron 还没跑到也能选（时限只驱动自动兜底，不锁玩家）
   const resolved = await resolveEvent(c.env, { occurrenceId: id, choiceNo, actor: user.id, origin: 'user' });
-  return c.json({
+  return c.json<ClubEventChooseResult>({
     event: {
       id: resolved.occurrenceId,
       eventId: resolved.eventId,

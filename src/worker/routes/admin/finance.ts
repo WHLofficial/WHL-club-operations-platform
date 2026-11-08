@@ -1,6 +1,10 @@
 // 管理端 · 财政域：期初余额导入（§14.1）/ 手动记账兜底（§7.1、§9.1）/ M0 货币监控
 // （原 admin.ts 财政域，v2.1.0 拆分，行为零变化）
 import { Hono } from 'hono';
+// 契约类型锚点（v6.82.0）：第 3 批缺口 ManualLedgerResult / M0Report 与第 4 批 OpeningImportResult
+// 的 c.json 泛型以 src/contract/batch3.ts / batch4.ts 为真源——装配形状漂移时 typecheck 先红。
+import type { M0Report, ManualLedgerResult } from '../../../contract/batch3.ts';
+import type { OpeningImportResult } from '../../../contract/batch4.ts';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -82,7 +86,7 @@ app.post('/ledger/opening-import', async (c) => {
     );
     await c.env.DB.batch(statements); // 流水 + 余额 + 审计一个 batch 提交（§7.4-1）
   }
-  return c.json({ written: todo.length, skipped: parsed.length - todo.length });
+  return c.json<OpeningImportResult>({ written: todo.length, skipped: parsed.length - todo.length });
 });
 
 // ---- 手动记账兜底（§7.1 manual_adjust / prize_*，P0 奖金模板入口；§9.1） ----
@@ -132,7 +136,7 @@ app.post('/ledger/manual', async (c) => {
   const acct = await c.env.DB.prepare('SELECT balance FROM ledger_accounts WHERE club_id = ?')
     .bind(clubId)
     .first<{ balance: number }>();
-  return c.json({ ok: true, balance: acct?.balance ?? 0 }, 201);
+  return c.json<ManualLedgerResult>({ ok: true, balance: acct?.balance ?? 0 }, 201);
 });
 
 // ---- M0 货币监控（PRD：M0 = Σ俱乐部余额报表，观察通胀；附录 A〔6〕🛡） ----
@@ -153,7 +157,7 @@ app.get('/m0', async (c) => {
        ORDER BY a.balance DESC, c.id LIMIT 200`,
     ).all<{ id: number; name: string; balance: number }>(),
   ]);
-  return c.json({
+  return c.json<M0Report>({
     m0: m0?.m0 ?? 0,
     held: held?.held ?? 0,
     available: (m0?.m0 ?? 0) - (held?.held ?? 0),

@@ -1,5 +1,15 @@
 // 管理端 · 建队与认证码（§3.2；原 admin.ts 建队域，v2.1.0 拆分，行为零变化）
+// 契约类型锚点（v6.82.0 第 4 批）：俱乐部列表 / 球场档案 / CPU 接管向导四回执的 c.json 泛型以
+// src/contract/batch4.ts 为真源——transferBanned 按 workerReality 去可选等处置见契约型注。
 import { Hono } from 'hono';
+import type {
+  AdminClubRow,
+  CpuConvertState,
+  CpuRenameLocalResult,
+  CpuRenameTourResult,
+  CpuSeedOpsResult,
+  StadiumAdmin,
+} from '../../../contract/batch4.ts';
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
@@ -233,7 +243,7 @@ app.get('/clubs', async (c) => {
   // v1.2.0：级别改报名派生（按当前可见赛季），休眠列不再回显
   const season = await getVisibleSeason(c.env.DB);
   const cache = tierCache();
-  return c.json({
+  return c.json<{ clubs: AdminClubRow[] }>({
       clubs: await Promise.all(
         clubs.results.map(async (r) => ({
           id: r.id,
@@ -335,7 +345,7 @@ app.get('/clubs/:id/stadium', async (c) => {
     .bind(clubId)
     .all<{ facility_key: string; level: number }>();
   const tierTable = await loadTierTable(c.env.DB);
-  return c.json({
+  return c.json<StadiumAdmin>({
     stadium: {
       clubId,
       name: stadium.name,
@@ -457,7 +467,7 @@ app.get('/clubs/:id/cpu-convert', async (c) => {
   // v6.28.0 A 段：预览与 seed-ops 用同一套系数——级别按报名派生（CPU 队未报名定级赛事 → null → 1.0），
   // 不拿向导预填的 preset.leagueTier：那份只是给人填表看的建议值，运行时（上座/关窗）也按派生级别算。
   const tierCoef = influenceTierCoef(await loadInfluenceTierCoefs(c.env.DB), await deriveClubTier(c.env, await getVisibleSeason(c.env.DB), clubId));
-  return c.json({
+  return c.json<CpuConvertState>({
     club: { id: club.id, name: club.name, isCpu: club.is_cpu === 1, leagueTier: club.league_tier, status: club.status },
     tour: tourTeam ? { id: tourTeam.id, name: tourTeam.name } : null,
     infra: { stadium: !!stadium, ledger: !!ledger, facilities: facilities?.n ?? 0 },
@@ -503,7 +513,7 @@ app.post('/clubs/:id/rename-tour', async (c) => {
     origin: 'user',
     after: { name },
   });
-  return c.json({ ok: true, renamed: push.renamed, name: push.name ?? name });
+  return c.json<CpuRenameTourResult>({ ok: true, renamed: push.renamed, name: push.name ?? name });
 });
 
 // ③ 改本仓队名并摘掉 CPU 标记：幂等（重放返回 changed:false），撞 clubs.name UNIQUE 给 409
@@ -530,7 +540,7 @@ app.post('/clubs/:id/rename-local', async (c) => {
     }
     throw e;
   }
-  if (!changed) return c.json({ ok: true, changed: false });
+  if (!changed) return c.json<CpuRenameLocalResult>({ ok: true, changed: false });
   await writeAudit(c.env.DB, {
     actor: user.id,
     action: 'club_cpu_rename_local',
@@ -539,7 +549,7 @@ app.post('/clubs/:id/rename-local', async (c) => {
     origin: 'user',
     after: { name },
   });
-  return c.json({ ok: true, changed: true, name });
+  return c.json<CpuRenameLocalResult>({ ok: true, changed: true, name });
 });
 
 // ④ 铺主场基建：球场 + 账本 + 五类设施 + 联赛级别，一次 batch 全幂等。
@@ -608,7 +618,7 @@ app.post('/clubs/:id/seed-ops', async (c) => {
     // 联赛级别那条是无条件 UPDATE，永远生效。
     after: { shellInfluence, bonusPoints, leagueTier, fans, stadiumCreated: created.stadium },
   });
-  return c.json({ ok: true, created, leagueTier });
+  return c.json<CpuSeedOpsResult>({ ok: true, created, leagueTier });
 });
 
 app.post('/clubs/:id/bindcode', async (c) => {

@@ -5,6 +5,8 @@
 // ocrMatchEntry 的返回类型需要本地绑定，其余类型仅 re-export、不进本文件作用域
 // （第 1 批 batch1.ts 的本地绑定随 PlayerDetail 手抄删除一并撤销，只走 re-export）。
 import type { MatchOcrResult, NumberConflict, SquadIssue } from '../../../src/contract/batch2.ts';
+// （批 4 的 MatchPhase / MatchDecisionResult 按测试计划 §6.0 归属表让渡给 B6 / B5，
+// api 手抄原地保留，见 MatchPhase 定义处注。）
 
 // ---- 契约 re-export 区（真源 src/contract/，web 只转发不手抄）----
 // 第 1 批（v6.82.0）：workbench + demand（转会台聚合 + 球员要求收件箱），23 型 + P2 补抄
@@ -165,6 +167,90 @@ export type {
   WeatherForecastSkippedRow,
   WeatherForecastTriggerResult,
 } from '../../../src/contract/batch3.ts';
+// 第 4 批（v6.82.0）：club / season / window / match / event / ops / admin 杂项（audit / config /
+// import / cpu）——球队页全域、我的球队概览与余额、管理端俱乐部与 CPU 接管向导、赛季与结算三件套、
+// 窗口状态机与关窗看板、随机事件玩家侧 + 管理端 + LLM 草稿工坊、运营时刻表、总览 / 名单报表 /
+// 审核工作台 / 审计 / 平台参数 / 期初导入。字段跟随 worker c.json 载荷现实，甄别与 FieldDiff
+// 处置见契约型注（MyClubOverview.home 必填原状登记 / SeasonRow.ageCap 删 / SeasonSettleResult.champion
+// 等四处 workerExtra 补抄 / OpenWindowResult·CloseWindowResult 五键补抄 / ClubBalance 两键保留可选登记 /
+// AdminEventTriggeredRow 两键去可选 / AdminRegistrations 三键补抄 / ClubDirectoryRow.leagueTier
+// naming 保留原状登记 / ResultQueueRow.windowSeq 去必填登记）。甄别清单机械清点 88 型，其中
+// Import* / MatchEntry* / MatchOcr* 已在第 2 批、AdminShop* / ClubOffer / StadiumBuildInfo /
+// HomeMatch* 已在第 3 批迁出、MatchPhase / MatchDecisionResult 按 §6.0 归属表让渡 B6 / B5，
+// 均不重复转发；另有测试计划 §6.8 漏审补录六型（TournamentRow / BindTournamentResult /
+// ResultQueueRow / ConfirmedResultRow / ResultsQueue / ConfirmResultResult）随本批迁入。
+export type {
+  AdminClubRow,
+  AdminEventDraft,
+  AdminEventOccurrence,
+  AdminEventPoolRow,
+  AdminEventTriggerResult,
+  AdminEventTriggeredRow,
+  AdminOverview,
+  AdminRegistrations,
+  AdminReviewBatchResult,
+  AdminReviewRow,
+  AdminReviews,
+  AuditEntryRow,
+  AuditLogResponse,
+  ClubBalance,
+  ClubBand,
+  ClubContractStructure,
+  ClubDetail,
+  ClubDirectoryRow,
+  ClubEventChooseResult,
+  ClubEventOption,
+  ClubEventOptionOutcome,
+  ClubEventPending,
+  ClubEventRecent,
+  ClubEventsResponse,
+  ClubFormRow,
+  ClubPositionGroup,
+  ClubStanding,
+  ClubSummary,
+  ClubTransferRow,
+  ClubSquadStructure,
+  CloseWindowResult,
+  ConfigResponse,
+  ConfigRow,
+  CpuConvertState,
+  CpuRenameLocalResult,
+  CpuRenameTourResult,
+  CpuSeedOpsResult,
+  EventDraftAdoptResult,
+  EventDraftStruct,
+  LlmDraftResult,
+  LlmStatus,
+  BindTournamentResult,
+  ConfirmedResultRow,
+  ConfirmResultResult,
+  MyClubOverview,
+  OpeningImportResult,
+  OpsEndAnchor,
+  OpsSaveResult,
+  OpsScheduleView,
+  OpsStartAnchor,
+  OpsState,
+  OpsStatusRow,
+  OpenWindowResult,
+  SeasonBinding,
+  SeasonCurrent,
+  SeasonRow,
+  SeasonSettleResult,
+  SeasonBindingsResponse,
+  SeasonsCurrent,
+  SeasonsResponse,
+  SettleCheckResult,
+  StageSettleResult,
+  TournamentRow,
+  ResultQueueRow,
+  ResultsQueue,
+  StadiumAdmin,
+  StadiumInfo,
+  WindowOverviewRow,
+  WindowRow,
+  WindowsResponse,
+} from '../../../src/contract/batch4.ts';
 
 export interface MeUser {
   id: number;
@@ -260,188 +346,19 @@ export async function apiUpload<T>(path: string, contentType: string, body: Blob
 // 指向它等于给用户一个连不上的按钮（TopBar / RequireUser / Home / AdminLayout 五处外链都用这个常量）。
 export const TOUR_SITE_URL = 'https://tour.whleague.win/';
 
-/** 当前赛季与窗口（GET /api/seasons/current，公开）。球员页窗门控只消费 window.status */
-export interface SeasonsCurrent {
-  season: { season: number; status: string } | null;
-  window: { season: number; windowSeq: number; status: string; openedAt: string | null; closedAt: string | null } | null;
-  tournaments: { id: number; tournamentId: number; competitionType: string | null }[];
-}
+// SeasonsCurrent / MyClubOverview / StadiumInfo / StadiumAdmin / ClubSummary / ClubBand /
+// ClubPositionGroup / ClubSquadStructure / ClubContractStructure / ClubTransferRow /
+// ClubFormRow / ClubDetail / ClubStanding 已迁 src/contract/batch4.ts（v6.82.0 第 4 批；
+// MyClubOverview.home 的 workerMissing 登记与 funds 半旧容忍保留可选等处置见契约型注），
+// 本文件只 re-export。
 
 // ---- v0.2.0 DTO（附录 A〔1〕）----
-
-export interface MyClubOverview {
-  club: { id: number; name: string; leagueTier: string | null; logoKey: string | null; status: string; transferBanned?: boolean } | null;
-  balance: number | null;
-  // v6.65.3：可支配拆解（消费中心顶部条用），与消费守卫同口径；半旧响应无此字段
-  funds?: { available: number; balance: number; held: number; creditLine: number; vouchers: number } | null;
-  squadCount: number | null;
-  window: { season: number; windowSeq: number } | null;
-  // v1.5.0：主场档案（球场/设施/影响力构成）；无球场行 = null
-  home: StadiumInfo | null;
-}
-
-export interface StadiumInfo {
-  name: string | null;
-  namingBrand: string | null;
-  /** 冠名落点名（v6.51.0）：「品牌·球场名」；老合同为空快照时按现球场名现拼；无冠名 null */
-  namingVenueName: string | null;
-  capacity: number;
-  tier: number;
-  tierName: string | null;
-  fans: number;
-  influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
-  facilities: { key: string; level: number }[];
-}
-
-// v1.5.0：管理端球场档案（GET /clubs/:id/stadium）
-export interface StadiumAdmin {
-  stadium: { clubId: number; name: string | null; capacity: number; tier: number; shellInfluence: number; bonusPoints: number; fans: number };
-  tier: { name: string; min_seats: number; max_seats: number; base_maintenance: number; per_10k_rate: number; attend_coef: number; upgrade_cost: number } | null;
-  facilities: { key: string; level: number }[];
-  influence: { players: number; shell: number; bonus: number; tierCoef: number; total: number };
-}
 
 // ---- 球队页（v3.4.0）----
 
 /** R2 媒体对象 key → 公开读取地址（服务端 GET /api/media/* 只读代理，不碰 D1） */
 export function mediaUrl(key: string | null | undefined): string | null {
   return key ? `/api/media/${key}` : null;
-}
-
-/**
- * 球队列表条目（GET /api/clubs）。tier 由平台按当季定级赛事报名派生：
- * 未登记目录 / 本季未报名 ⇒ null（列表归「未定级」段）。
- */
-export interface ClubSummary {
-  id: number;
-  name: string;
-  isCpu: boolean;
-  tier: 'premier' | 'second' | null;
-  /** 比赛系统 team.logo_key；本平台自己的 clubs.logo_key 是休眠列，全仓不写不读 */
-  logoKey: string | null;
-  /** 阵容人数：senior = 一线队，trainee = 训练营（players.status = 'trainee'） */
-  squad: { senior: number; trainee: number };
-  /** 平均 CA，保留 1 位小数；全队无人时为 null */
-  avgCa: number | null;
-  /**
-   * 全队身价合计。`players.market_value` 是运营列（导入不写、只有 admin PATCH 会写），
-   * 一个人都没录过时服务端给 null ⇒ 前端显示「—」而不是 0.00m
-   */
-  totalValue: number | null;
-  totalWage: number;
-}
-
-/** 分档统计的一档（年龄 / CA / 效力），服务端给什么档就渲染什么档，前端不重算边界 */
-export interface ClubBand {
-  key: string;
-  label: string;
-  count: number;
-}
-
-/** 位置四档之一（门将/后卫/中场/前锋，另加「未知」兜底档） */
-export interface ClubPositionGroup {
-  key: string;
-  label: string;
-  count: number;
-  /** 档内细位明细，形如「RB 1 · CB 2」；无细位数据时为空串 */
-  detail: string;
-}
-
-export interface ClubSquadStructure {
-  size: number;
-  senior: number;
-  trainee: number;
-  avgCa: number | null;
-  maxCa: number | null;
-  avgPa: number | null;
-  /** 平均成长空间（pa − ca），只统计还有空间的人；全员到顶时为 null */
-  avgGrowth: number | null;
-  /** 同 ClubSummary.totalValue：全队都没录身价时为 null */
-  totalValue: number | null;
-  totalWage: number;
-  avgWage: number | null;
-  badgesSilver: number;
-  badgesGold: number;
-  /** 位置分布：四档恒出（含 0 人档），末尾可能多一项「未知」 */
-  byPosition: ClubPositionGroup[];
-  byAge: ClubBand[];
-  byCa: ClubBand[];
-}
-
-/** 合同结构：合同无固定到期日，只有保护期与效力赛季数，所以不叫「合同到期」 */
-export interface ClubContractStructure {
-  signed: number;
-  unprotected: number;
-  protectedCount: number;
-  /** 平均效力（赛季），0.5 的整数倍 */
-  avgYears: number | null;
-  byYears: ClubBand[];
-}
-
-export interface ClubTransferRow {
-  id: number;
-  type: string;
-  /** transfers.player_id 无 NOT NULL ⇒ 可能为空，为 null 时页面只出球员名不链档案 */
-  playerId: number | null;
-  /** 球员档案链接用的 FC26 ID（v4.0.0）；为空时回落 playerId */
-  playerFcId: number | null;
-  playerName: string | null;
-  fromClubId: number | null;
-  fromClubName: string | null;
-  toClubId: number | null;
-  toClubName: string | null;
-  fee: number | null;
-  extraFee: number | null;
-  season: number | null;
-  windowSeq: number | null;
-  completedAt: string | null;
-}
-
-export interface ClubFormRow {
-  matchId: number;
-  season: number;
-  competitionType: string | null;
-  stageName: string | null;
-  /** result_confirmations.round 是 INTEGER（迁移 0009），不是轮次名 */
-  round: number | null;
-  homeTeam: string | null;
-  awayTeam: string | null;
-  scoreHome: number | null;
-  scoreAway: number | null;
-  penHome: number | null;
-  penAway: number | null;
-  /** 90 分钟口径：点球大战不改判定；双弃权双方都记负。拿不到本方队 id 时为 null */
-  result: 'win' | 'draw' | 'loss' | null;
-  finishedAt: string | null;
-}
-
-/** 球队详情（GET /api/clubs/:id，需登录）。阵容名单不在这里——前端复用 GET /api/players?club_id=N */
-export interface ClubDetail {
-  club: { id: number; name: string; isCpu: boolean; tier: 'premier' | 'second' | null; logoKey: string | null };
-  squad: ClubSquadStructure;
-  contracts: ClubContractStructure;
-  transfers: { incoming: ClubTransferRow[]; outgoing: ClubTransferRow[] };
-  form: { recent: ClubFormRow[]; wins: number; draws: number; losses: number };
-}
-
-/** 当季联赛排名（GET /api/clubs/:id/standing）。取不到时 standing 为 null、note 给原因 */
-export interface ClubStanding {
-  standing: {
-    tournamentId: number;
-    stageName: string | null;
-    groupName: string | null;
-    /** 名次按积分榜已排好的行序取下标（比赛系统 DTO 的 rank 字段恒为 0） */
-    position: number;
-    played: number | null;
-    won: number | null;
-    drawn: number | null;
-    lost: number | null;
-    goalsFor: number | null;
-    goalsAgainst: number | null;
-    pts: number | null;
-    pointsDeducted: number | null;
-  } | null;
-  note: string | null;
 }
 
 // PlayerListItem / PlayerListItemPlaystyle / PlayerLibraryRow / LastDealInfo /
@@ -499,139 +416,27 @@ export interface SeaComps {
 // ---- v0.7.1 d8：球员库（公开 /api/players，keyset 游标分页）----
 // PlayerLibraryRow / LastDealInfo / PlayersLibraryResponse 已迁 src/contract/batch2.ts。
 
-// 俱乐部目录（公开，球员库筛选下拉用）
-export interface ClubDirectoryRow {
-  id: number;
-  name: string;
-  leagueTier: string;
-}
-
-export interface AdminClubRow {
-  id: number;
-  name: string;
-  /** CPU 队标记（v6.27.0）：true = 电脑队，可从俱乐部管理进入接管向导 */
-  isCpu: boolean;
-  leagueTier: string;
-  status: string;
-  transferBanned?: boolean;
-  /** 队壳国家（v6.48.0 §10.3，FC 国家编号）：成长档位 c2 的比对基准；null = 未设，管理端提示补录 */
-  country: number | null;
-  countryName: string | null;
-  createdAt: string;
-  bindings: { userId: number; userName: string | null; boundAt: string }[];
-  latestCode: { expiresAt: string | null; usedBy: number | null; usedAt: string | null; createdAt: string } | null;
-}
-
-// ---- CPU 接管向导（v6.27.0）：把电脑队转成真人可接管的俱乐部，五步一条线 ----
-
-/** GET /api/admin/clubs/:id/cpu-convert 的接管状态（五步向导整页吃这一份） */
-export interface CpuConvertState {
-  club: { id: number; name: string; isCpu: boolean; leagueTier: string | null; status: string };
-  /** 赛事系统对手方；查无此队时为 null（步骤 1 可跳过） */
-  tour: { id: number; name: string } | null;
-  /** 运营基建现状：是否有球场行 / 是否有账本 / 设施行数 */
-  infra: { stadium: boolean; ledger: boolean; facilities: number };
-  binding: { bound: boolean; userId: number | null; userName: string | null; boundAt: string | null };
-  /** 建议值：新队名 / 队壳影响力 / 奖励分 / 定级 / 初始球迷目标 */
-  suggest: { newName: string; shellInfluence: number; bonusPoints: number; leagueTier: 'premier' | 'second' | null; diehardTarget: number };
-}
-
-/** POST /api/admin/clubs/:id/rename-tour：renamed=false 表示对手方队名本就一致（幂等） */
-export interface CpuRenameTourResult {
-  ok: boolean;
-  renamed: boolean;
-  name: string;
-}
-
-/** POST /api/admin/clubs/:id/rename-local：changed=false 表示此前已摘 CPU 标（幂等，不回 name）；撞名走 409 */
-export interface CpuRenameLocalResult {
-  ok: boolean;
-  changed: boolean;
-  name?: string;
-}
-
-/** POST /api/admin/clubs/:id/seed-ops：created 是本次实际新建的部件（已存在的为 false / 0） */
-export interface CpuSeedOpsResult {
-  ok: boolean;
-  created: { stadium: boolean; ledger: boolean; facilities: number };
-  leagueTier: 'premier' | 'second';
-}
+// 俱乐部目录 / 管理端俱乐部列表 / CPU 接管向导六型（ClubDirectoryRow / AdminClubRow /
+// CpuConvertState / CpuRenameTourResult / CpuRenameLocalResult / CpuSeedOpsResult）已迁
+// src/contract/batch4.ts（v6.82.0 第 4 批；ClubDirectoryRow.leagueTier 的 naming 登记与
+// AdminClubRow.transferBanned 去可选等处置见契约型注），本文件只 re-export。
 
 // ImportPreview / ImportConfirm 已迁 src/contract/batch2.ts（ImportConfirm.replayed 按
 // workerExtra 处置补抄）。
 
-export interface OpeningImportResult {
-  written: number;
-  skipped: number;
-}
-
-export interface ConfigRow {
-  key: string;
-  value: string | null;
-  secret: boolean;
-}
-
-export interface ConfigResponse {
-  config: ConfigRow[];
-  /** 超管=true：明文 + 可编辑（PUT /api/admin/config） */
-  editable: boolean;
-}
-
-export interface AdminOverview {
-  openReviews: number;
-  resultQueue: number;
-  activeListings: number;
-  clubs: number;
-  /** 待接管的电脑队数（v6.27.0） */
-  cpuClubs: number;
-  players: number;
-  /** 待审消费工单数（v6.28.0，shop_orders.status='pending'） */
-  pendingShopOrders: number;
-  /** 待选事件数（v6.28.0，选择型 pending 的 event_occurrences） */
-  pendingEvents: number;
-  at: string;
-}
-
-export interface AuditEntryRow {
-  id: number;
-  actor: number | null;
-  action: string;
-  targetType: string;
-  targetId: number | null;
-  // 触发通道（v6.3.2）：'user'/'cron_tick'/'lazy_settle'/'backchannel'/'machine'；历史行为 null
-  origin: string | null;
-  before: string | null;
-  after: string | null;
-  at: string;
-}
-
-export interface AuditLogResponse {
-  entries: AuditEntryRow[];
-}
+// OpeningImportResult / ConfigRow / ConfigResponse / AdminOverview / AuditEntryRow /
+// AuditLogResponse 已迁 src/contract/batch4.ts（v6.82.0 第 4 批；ConfigRow 行形与
+// core/config.ts listMasked/listRaw 逐字段同形、AdminOverview 是 worker 同名接口并源，
+// 处置见契约型注），本文件只 re-export。
 
 // ---- v0.3.0 DTO（附录 A〔2〕：注册与体检；通道 C 合同导入）----
 // SquadRules / SquadIssue / SquadCompliance / SquadPlayerRow / WindowOverviewRow 原生于此节；
 // 前四者已迁 src/contract/batch2.ts（v6.82.0 第 2 批），WindowOverviewRow 归批 4。
 
-/** GET /api/admin/windows/overview（v6.69.0 期三）：关窗页实时看板逐队一行 */
-export interface WindowOverviewRow {
-  clubId: number;
-  name: string;
-  isCpu: boolean;
-  tier: string | null;
-  firstTeam: number;
-  trainee: number;
-  unsigned: number;
-  wageNow: number;
-  /** 关窗后工资（v6.72.3）：现行合同 + 本窗到期落地的续约/涨薪 */
-  wageAfter: number;
-  wageCap: number | null;
-  overspend: number;
-  pass: boolean;
-  issues: { rule: string; message: string }[];
-  pendingTransfers: number;
-  activeSessions: number;
-}
+// WindowOverviewRow（v6.69.0 期三，GET /api/admin/windows/overview）与 AdminRegistrations
+// （v6.67.0 期一名单报表）已迁 src/contract/batch4.ts（v6.82.0 第 4 批；WindowOverviewRow 的
+// worker 内部名 SquadAuditRow、AdminRegistrations 的 source/isCpu/unsigned 三处 workerExtra
+// 补抄与分支差异处置见契约型注），本文件只 re-export。
 
 // SquadNumbersResponse / SquadOverview / ContractImportPreview / ContractImportConfirm
 // 已迁 src/contract/batch2.ts（v6.82.0 第 2 批）。
@@ -639,24 +444,14 @@ export interface WindowOverviewRow {
 /** GET /api/club/pending-contracts（v6.54.0 步骤 7）：球队页阵容小字的数据源。
  *  PendingContractsResponse 已迁 src/contract/batch1.ts（v6.82.0 第 1 批）。 */
 
-export interface AdminRegistrations {
-  season: number | null;
-  clubs: {
-    clubId: number;
-    clubName: string;
-    leagueTier: string | null;
-    firstTeam: number;
-    trainee: number;
-    wageTotal: number;
-    players: { playerId: number; name: string; squad: string }[];
-  }[];
-}
-
 // ComplianceReport 已迁 src/contract/batch2.ts（v6.82.0 第 2 批，§6.8 补录）。
 
 // ---- v0.4.0 DTO（附录 A〔3〕：转会市场挂牌竞价链）----
 
 export type ListingStatus = 'listed' | 'bidding' | 'matched_pending' | 'pending_review' | 'delisted';
+
+// MatchPhase 未随第 4 批迁移：测试计划 §6.0 归属表固定归 B6（真源 routes/market.ts:200-207，
+// 批 1 TransferPanelListing.matchPhase 内联联合同轮改引用），手抄原地保留。
 
 export type MatchPhase = 'first_bid' | 'matching' | null;
 
@@ -737,39 +532,8 @@ export interface MyBidRow {
 /** 转会台待办汇总（v6.73.0 期 B）：导航角标 / 桌内待办条共用；未绑队全 0。
  *  DeskSummary 已迁 src/contract/batch1.ts（v6.82.0 第 1 批）。 */
 
-export interface AdminReviewRow {
-  id: number;
-  kind: string;
-  status: string;
-  payload: Record<string, unknown> | null;
-  note: string | null;
-  decidedAt: string | null;
-  // 激活举报核查任务（v6.4.0 改动 4）；transfer_confirm 行为 null
-  report: { listingId: number | null; listingStatus: string | null; askPrice: number | null; proofKey: string | null; activatorClubName: string | null; activatorClubId: number | null } | null;
-  transfer: {
-    id: number;
-    type: string;
-    status: string;
-    fee: number | null;
-    tax: number | null;
-    extraFee: number | null;
-    player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null };
-    fromClubName: string | null;
-    toClubName: string | null;
-    fromClubId: number | null;
-    toClubId: number | null;
-  };
-}
-
-export interface AdminReviews {
-  reviews: AdminReviewRow[];
-}
-
-/** 批量批准 / 驳回的逐条结果（v6.68.0 期 B）：一条失败不影响其它。 */
-export interface AdminReviewBatchResult {
-  ok: boolean;
-  results: { id: number; ok: boolean; error?: string }[];
-}
+// AdminReviewRow / AdminReviews / AdminReviewBatchResult 已迁 src/contract/batch4.ts
+// （v6.82.0 第 4 批；批量回执 ok 恒 true 收窄见契约型注），本文件只 re-export。
 
 // ---- 审核工作台（v6.68.2 期 C） ----
 // 五张在途表一次取全：Workbench* 九型已迁 src/contract/batch1.ts（v6.82.0 第 1 批，
@@ -998,48 +762,16 @@ export interface FreeAgentResult {
   signFee: number;
 }
 
+// MatchDecisionResult 未随第 4 批迁移：测试计划 §6.0 归属表固定归 B5（真源 activations.ts:185-190，
+// ok: true 收窄也随 B5 落），手抄原地保留。WindowRow / WindowsResponse / OpenWindowResult /
+// CloseWindowResult 已迁 src/contract/batch4.ts（v6.82.0 第 4 批；Open/Close 五处 workerExtra
+// 补抄的处置见契约型注），本文件只 re-export。
+
 export interface MatchDecisionResult {
   ok: boolean;
   decision: 'match' | 'pass';
   newReleaseFee?: number;
   diff?: number;
-}
-
-export interface WindowRow {
-  season: number;
-  windowSeq: number;
-  status: string;
-  /** v3.0.0：临时窗（效力与工资不推进、不收冠名费；维护费按本窗主场数照收） */
-  isTemporary: boolean;
-  openedAt: string | null;
-  closedAt: string | null;
-}
-
-export interface WindowsResponse {
-  seasons: { season: number; status: string }[];
-  windows: WindowRow[];
-}
-
-export interface OpenWindowResult {
-  ok: boolean;
-  season: number;
-  windowSeq: number;
-  /** v3.0.0：本次开的是临时窗 */
-  isTemporary: boolean;
-  rerolled: number;
-  /** 开窗时勾选了「同时宣告新成长期」 */
-  growthPeriodDeclared: boolean;
-}
-
-export interface CloseWindowResult {
-  ok: boolean;
-  season: number;
-  windowSeq: number;
-  /** v3.0.0：本次关的是临时窗 */
-  isTemporary: boolean;
-  /** 忠诚支出（v6.47.0 起为俱乐部扣款）：count = 人次数、total = 扣款金额绝对值（正数） */
-  loyalty: { count: number; total: number };
-  forceSettled: number;
 }
 
 /** 强制拍卖人选参考值（v6.51.0：队内非门将 CA 前六只作参考，不再强制） */
@@ -1085,20 +817,8 @@ export interface ForcedAuctionResult {
 
 // ---- v0.7.0 DTO（附录 A〔6〕：财政/赛季/赛果/成长/通知/监管）----
 
-export interface ClubBalance {
-  club: { id: number; name: string } | null;
-  balance: number | null;
-  held: number | null;
-  available: number | null;
-  /** 在途卖人收入（税后净额，未乘 k；v6.57.0 起随余额端点下发） */
-  expectedIncome: number | null;
-  /** 预期收入额度 = expectedIncome × k（已含在 available 里，展示拆解用） */
-  creditLine: number | null;
-  /** v6.64.0：被激活挂牌在途税后净额（未乘 k，expectedIncome 的组成部分） */
-  activationIncome?: number | null;
-  /** v6.64.0：activationIncome × k（「其中被激活挂牌」展示口径，与 creditLine 同层真部分和） */
-  activationCredit?: number | null;
-}
+// ClubBalance 已迁 src/contract/batch4.ts（v6.82.0 第 4 批；activationIncome/activationCredit
+// 按 workerReality 收窄必填——worker 两分支恒发，处置见契约型注）。
 
 // 账本 / 券流水 / 财务汇总 / M0 / 主场战报 / 收件篮 / 候选名单 / 球场建设 / 冠名市场 / 招商轮 /
 // 场馆经营 / 天气预报 / 消费中心各型已迁 src/contract/batch3.ts（v6.82.0 第 3 批，见顶部 re-export 区；
@@ -1106,181 +826,15 @@ export interface ClubBalance {
 // 下拉常量）按口径 7① 留守本文件；NotifyRef / NotifyCategoryId 是共享 core 单源
 // （core/notify-meta.ts），本文件已无本地引用，契约 batch3.ts 按名 import 同源（口径 7②）。
 
-/** 随机事件（v6.10.0，D 块）：池只读启停 + 管理端触发 + 流水 */
-export interface AdminEventPoolRow {
-  id: number;
-  event_id: string;
-  name: string;
-  category: string;
-  weight: number;
-  /** instant = 触发即结算；choice = 选项型（v6.11.0 开放） */
-  event_type: string;
-  conditions_json: string;
-  effects_json: string;
-  options_json: string | null;
-  soft_conditions: number;
-  template: string;
-  source: string;
-  /** adopted | discarded */
-  status: string;
-  created_at: string;
-}
+// 管理端随机事件 / LLM 草稿工坊九型（AdminEventPoolRow / AdminEventOccurrence /
+// AdminEventTriggeredRow / AdminEventTriggerResult / LlmStatus / EventDraftStruct /
+// AdminEventDraft / LlmDraftResult / EventDraftAdoptResult）已迁 src/contract/batch4.ts
+// （v6.82.0 第 4 批；AdminEventTriggeredRow 的 eventType/deadlineAt 按 typeMismatch 去可选，
+// 处置见契约型注），本文件只 re-export。
 
-export interface AdminEventOccurrence {
-  id: number;
-  club_id: number;
-  club_name: string | null;
-  season: number;
-  window_seq: number;
-  event_id: string;
-  event_name: string;
-  event_type: string;
-  /** pending | resolved */
-  status: string;
-  effects_json: string;
-  notes_json: string | null;
-  choice_no: number | null;
-  deadline_at: string | null;
-  resolved_by: string | null;
-  resolved_at: string | null;
-  text: string | null;
-  created_at: string;
-}
-
-export interface AdminEventTriggeredRow {
-  occurrenceId: number;
-  clubId: number;
-  clubName: string;
-  eventId: string;
-  eventName: string;
-  /** instant | choice（v6.11.0 起选择型也可点名触发） */
-  eventType?: string;
-  /** 选择型的选定时限（ISO；不设时限为 null） */
-  deadlineAt?: string | null;
-  text: string;
-  notes: string[];
-  effects: Record<string, unknown>;
-}
-
-export interface AdminEventTriggerResult {
-  season: number;
-  windowSeq: number;
-  /** 参与掷点的队数 */
-  clubs: number;
-  /** 实际触发条数 */
-  triggered: number;
-  /** 掷中但没有候选可用（条件全挡、已达单事件上限或待选事件已满）的队数 */
-  capped: number;
-  events: AdminEventTriggeredRow[];
-}
-
-/** LLM 草稿工坊（v6.12.0，D3）：生成 → 审校修订 → 采纳进池 / 废弃 */
-export interface LlmStatus {
-  configured: boolean;
-}
-
-/** struct 草稿 / 自定义事件的规范化结构（数值已过 clampEventDraft 钳制） */
-export interface EventDraftStruct {
-  event_id: string;
-  name: string;
-  category: string;
-  weight: number;
-  event_type: 'instant' | 'choice';
-  conditions: Record<string, unknown>;
-  effects: Record<string, unknown>;
-  options: { no: number; name: string; desc: string; outcomes: { w: number; effects: Record<string, unknown> }[] }[];
-  template: string;
-}
-
-export interface AdminEventDraft {
-  id: number;
-  /** text = 改写现有事件文案；struct = 新事件结构草稿 */
-  kind: string;
-  payload_json: string;
-  payload: unknown;
-  source_event_id: string | null;
-  note: string;
-  /** draft | adopted | discarded */
-  status: string;
-  created_by: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface LlmDraftResult {
-  id: number;
-  kind: string;
-  payload: unknown;
-  adjustments: string[];
-}
-
-export interface EventDraftAdoptResult {
-  id: number;
-  kind: string;
-  /** text = 被改写的事件 event_id；struct = 新入池事件的 event_id */
-  target: string;
-}
-
-/** 玩家侧随机事件（v6.11.0，D2）：待选 + 近期已结算 */
-export interface ClubEventOptionOutcome {
-  w: number;
-  effects: Record<string, unknown>;
-}
-
-export interface ClubEventOption {
-  no: number;
-  name: string;
-  desc: string;
-  outcomes: ClubEventOptionOutcome[];
-}
-
-export interface ClubEventPending {
-  id: number;
-  eventId: string;
-  eventName: string;
-  /** 选定时限（ISO；null = 不设时限、不会自动兜底） */
-  deadlineAt: string | null;
-  text: string;
-  options: ClubEventOption[];
-}
-
-export interface ClubEventRecent {
-  id: number;
-  eventId: string;
-  eventName: string;
-  eventType: string;
-  choiceNo: number | null;
-  optionName: string;
-  /** true = 超时/无效选项号按最差结果兜底 */
-  auto: boolean;
-  skipped: boolean;
-  effects: Record<string, unknown>;
-  notes: string[];
-  text: string;
-  resolvedBy: string;
-  resolvedAt: string | null;
-  createdAt: string;
-}
-
-export interface ClubEventsResponse {
-  clubId: number;
-  pending: ClubEventPending[];
-  recent: ClubEventRecent[];
-}
-
-export interface ClubEventChooseResult {
-  event: {
-    id: number;
-    eventId: string;
-    eventName: string;
-    optionNo: number | null;
-    optionName: string;
-    auto: boolean;
-    effects: Record<string, unknown>;
-    notes: string[];
-    text: string;
-  };
-}
+// 玩家侧随机事件七型（ClubEventOptionOutcome / ClubEventOption / ClubEventPending /
+// ClubEventRecent / ClubEventsResponse / ClubEventChooseResult）已迁 src/contract/batch4.ts
+// （v6.82.0 第 4 批；worker 内部名 EventOption / EventOutcome 对应见契约型注），本文件只 re-export。
 
 /** 流水 kind → 中文短标签（prize_* 之外的全量枚举见 §7.1；未收录的原样显示 kind） */
 export const LEDGER_KIND_LABELS: Record<string, string> = {
@@ -1350,118 +904,19 @@ export const MANUAL_LEDGER_KINDS: ManualLedgerKind[] = [
   { value: 'prize_super_loss', label: '超级杯 · 负', reference: 2.0 },
 ];
 
-export interface SeasonBinding {
-  id: number;
-  tournamentId: number;
-  competitionType: string | null;
-  stageSettledAt?: string | null;
-}
+// SeasonBinding / SeasonCurrent / SeasonRow / SeasonsResponse / SeasonBindingsResponse 已迁
+// src/contract/batch4.ts（v6.82.0 第 4 批；SeasonRow.ageCap 按 workerMissing 删、SeasonCurrent 与
+// SeasonsCurrent 同载荷两名的甄别命名处置见契约型注），本文件只 re-export。
 
-export interface SeasonCurrent {
-  season: { season: number; status: string } | null;
-  window: {
-    season: number;
-    windowSeq: number;
-    status: string;
-    openedAt: string | null;
-    closedAt: string | null;
-  } | null;
-  tournaments: SeasonBinding[];
-}
+// TournamentRow / BindTournamentResult 已迁 src/contract/batch4.ts（v6.82.0 第 4 批，
+// 测试计划 §6.8 漏审补录；BindTournamentResult.ok 收窄 true 见契约型注）。
 
-export interface SeasonRow {
-  season: number;
-  status: string;
-  ageCap?: number | null;
-}
+// SettleCheckResult / SeasonSettleResult / StageSettleResult 已迁 src/contract/batch4.ts
+// （v6.82.0 第 4 批；SeasonSettleResult.champion 按 workerExtra 补抄，ok 恒 true 收窄见契约型注）。
 
-export interface SeasonsResponse {
-  seasons: SeasonRow[];
-}
-
-export interface SeasonBindingsResponse {
-  bindings: SeasonBinding[];
-}
-
-export interface TournamentRow {
-  id: number;
-  name: string;
-  status: string;
-}
-
-export interface BindTournamentResult {
-  ok: boolean;
-  tournament: { id: number; name: string };
-}
-
-export interface SettleCheckResult {
-  ok: boolean;
-  season: number;
-  blockers: string[];
-  warnings: string[];
-}
-
-export interface SeasonSettleResult {
-  ok: boolean;
-  growable: number;
-  warnings: string[];
-}
-
-export interface StageSettleResult {
-  ok: boolean;
-  items: number;
-}
-
-export interface ResultQueueRow {
-  matchId: number;
-  season: number;
-  windowSeq: number;
-  competitionType: string | null;
-  stageName: string | null;
-  round: number | null;
-  homeTeam: string | null;
-  awayTeam: string | null;
-  scoreHome: number | null;
-  scoreAway: number | null;
-  penHome: number | null;
-  penAway: number | null;
-  walkoverSide: string | null;
-  winnerTeam: string | null;
-  finishedAt: string | null;
-}
-
-export interface ConfirmedResultRow {
-  id: number;
-  matchId: number;
-  season: number;
-  windowSeq: number;
-  competitionType: string | null;
-  stageName: string | null;
-  round: number | null;
-  homeTeam: string | null;
-  awayTeam: string | null;
-  scoreHome: number | null;
-  scoreAway: number | null;
-  winnerTeam: string | null;
-  confirmedAt: string;
-  needsReview: boolean;
-  reviewNote: string | null;
-}
-
-export interface ResultsQueue {
-  queue: ResultQueueRow[];
-  confirmed: ConfirmedResultRow[];
-}
-
-export interface ConfirmResultResult {
-  ok: boolean;
-  result: ConfirmedResultRow;
-  /**
-   * 确认钩子自动记的成长事件（v6.52.0 起非成长球员的事件照记但 XP 为 0 ⇒ granted 只代表
-   * 「新入账的成长事件条数」，不再宣称 XP 条数）；unresolved=没匹配上的俱乐部/球员名（补录用）
-   */
-  xp: { granted: number; unresolved: string[] };
-}
+// ResultQueueRow / ConfirmedResultRow / ResultsQueue / ConfirmResultResult 已迁 src/contract/batch4.ts
+// （v6.82.0 第 4 批，§6.8 补录；ResultQueueRow.windowSeq 的 workerMissing 登记与 ConfirmResultResult.ok
+// 收窄 true 见契约型注；worker 内部名 ResultQueueItem / ConfirmedResultItem 对应见契约型注）。
 
 // ---- 场次天气预报（v6.15.0）：管理员按 (赛事, 轮次) 预览 / 触发本轮主场预报 ----
 
@@ -1574,42 +1029,9 @@ export interface OfferDetailResponse {
 }
 
 /* ---------- 运营时刻表（v6.49.0） ---------- */
-
-export type OpsStartAnchor = 'none' | 'window_open' | 'absolute';
-export type OpsEndAnchor = 'none' | 'window_close' | 'absolute';
-export type OpsState = 'unrestricted' | 'not_started' | 'open' | 'closed';
-
-export interface OpsStatusRow {
-  key: string;
-  label: string;
-  group: string;
-  desc: string;
-  startAnchor: OpsStartAnchor;
-  startAt: string | null;
-  endAnchor: OpsEndAnchor;
-  endAt: string | null;
-  requiresWindow: boolean;
-  closeInflight: boolean;
-  note: string;
-  state: OpsState;
-  stateLabel: string;
-  /** 解析后的起点（随窗锚 = 窗口 openedAt）；没开窗时为 null */
-  resolvedStartAt: string | null;
-  /** 解析后的终点；endIsWindowClose=true 时为 null（动态边界，关窗即止） */
-  resolvedEndAt: string | null;
-  endIsWindowClose: boolean;
-}
-
-export interface OpsScheduleView {
-  now: string;
-  window: { openedAt: string; closedAt: string | null } | null;
-  rows: OpsStatusRow[];
-}
-
-export interface OpsSaveResult {
-  ok: true;
-  row: OpsStatusRow;
-}
+// OpsStartAnchor / OpsEndAnchor / OpsState / OpsStatusRow / OpsScheduleView / OpsSaveResult
+// 已迁 src/contract/batch4.ts（v6.82.0 第 4 批），本文件只 re-export。
+// 锚/状态三联合的真源在 core/ops-schedule.ts，契约按口径 7② 从 core 转发。
 
 /* ---------- 海捞两阶段·暗标段（v6.50.0） ---------- */
 
